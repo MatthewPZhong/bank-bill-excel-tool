@@ -70,9 +70,12 @@ const {
 } = require('../../../src/main-process/background-execution/position-import-adapter-policy');
 const {
   createBackgroundExecutionRuntime: createBackgroundExecutionRuntimeRaw,
-  createBackgroundExecutionRuntimeManager,
+  createBackgroundExecutionRuntimeManager
+} = require('../../../src/main-process/execution-descriptors/composition');
+const {
+  BACKGROUND_EXECUTION_POLICIES,
   isBackgroundExecutionProductionEnabled
-} = require('../../../src/main-process/background-execution/runtime');
+} = require('../../../src/main-process/execution-descriptors/policy-catalog');
 const { mergeToolboxFilesToXlsx } = require('../../../src/main-process/toolbox-merge-io');
 const { writeToolboxRows } = require('../../../src/main-process/toolbox-output-writer');
 
@@ -238,7 +241,7 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
     systemReserveBytes: 1024 ** 3
   });
   const snapshot = runtime.resourceGovernor.snapshot();
-  assert.deepEqual(runtime.policyRegistry.list().map((policy) => policy.actionKey), [
+  const expectedActionKeys = [
     'biz-op-v327:import-candidate',
     'biz-op-v327:run-candidate',
     'biz-op-v327:delete-plan',
@@ -288,7 +291,11 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
     ACQUIRING_ADAPTER_ACTIONS.RUN_NEW_ELIGIBLE,
     ACQUIRING_ADAPTER_ACTIONS.RUN_SINGLE_OR_RESUME,
     POSITION_IMPORT_ADAPTER_ACTION
-  ]);
+  ];
+  // catalog 保留原清单次序；registry 按领域装配，预算覆盖只依赖完整 action 集合。
+  assert.deepEqual(BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.actionKey), expectedActionKeys);
+  assert.deepEqual(runtime.policyRegistry.list().map((policy) => policy.actionKey).sort(),
+    [...expectedActionKeys].sort());
   for (const policy of runtime.policyRegistry.list()) {
     assert.equal(policy.production.enabled, policy.actionKey.startsWith('biz-op-v327:') || policy.actionKey === 'toolbox:split-rows');
   }

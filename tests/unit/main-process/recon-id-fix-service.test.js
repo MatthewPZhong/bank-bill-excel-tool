@@ -40,9 +40,11 @@ const {
   canonicalSha256
 } = require('../../../src/main-process/background-execution/canonical-json-v1');
 const {
-  createBackgroundExecutionRuntime,
+  createBackgroundExecutionRuntime
+} = require('../../../src/main-process/execution-descriptors/composition');
+const {
   isBackgroundExecutionProductionEnabled
-} = require('../../../src/main-process/background-execution/runtime');
+} = require('../../../src/main-process/execution-descriptors/policy-catalog');
 const { readReconIdFixFile } = require('../../../src/main-process/recon-id-fix-io');
 const { runReconIdFix } = require('../../../src/main-process/recon-id-fix-engine');
 const {

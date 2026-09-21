@@ -1,0 +1,62 @@
+{
+  "result": "No new findings; prior R1 P2 and R2 P3 closed",
+  "head": "8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05",
+  "snapshot": "/private/tmp/execution-descriptors-review-20260921-r2",
+  "changedCodeTestScriptFiles": [
+    "scripts/check-background-execution-manifest.js",
+    "src/main-process/background-execution/approved-execution-baseline.js",
+    "src/main-process/background-execution/approved-execution-baseline.json",
+    "src/main-process/background-execution/runtime.js",
+    "src/main-process/background-execution/supervisor.js",
+    "src/main-process/execution-descriptors/composition.js",
+    "src/main-process/execution-descriptors/contract.js",
+    "tests/unit/main-process/execution-descriptor-dispatch-compatibility.test.js",
+    "tests/unit/main-process/execution-descriptor-production-baseline.test.js"
+  ],
+  "currentRun": {
+    "unit": {
+      "files": 11,
+      "tests": 206,
+      "passed": 206,
+      "failed": 0,
+      "skipped": 0,
+      "durationMs": 69179.448084
+    },
+    "carrierIntegration": {
+      "passed": 4,
+      "total": 4
+    },
+    "manifest": {
+      "result": "PASS",
+      "surfaces": 402,
+      "pairs": 74,
+      "productionEnabled": 13
+    },
+    "gitDiffCheck": "PASS"
+  },
+  "independentProbes": {
+    "approvedBaselineProvenance": "PASS from git archive of fixed HEAD, current descriptor/catalog not loaded",
+    "R1NegativeRegistration": "three former accepted error scenarios now rejected",
+    "R2Lifecycle": "3 probes pass; per-action production gate, captured hook cancellation, nonproduction compatibility"
+  },
+  "existingGateEvidence": {
+    "sourceFiles": 133,
+    "sourceMismatches": 0,
+    "sourceSnapshotAndLogHashMatched": true,
+    "releaseCheckRerunThisReview": false
+  },
+  "sourceFinalCheck": {
+    "headUnchanged": true,
+    "statusUnchanged": true,
+    "capturedFileCount": 3558,
+    "changedFiles": []
+  },
+  "notExecuted": [
+    "full release-check rerun",
+    "G8 configuration activation",
+    "Windows packaged carrier",
+    "Electron GUI",
+    "Excel/WPS",
+    "installer/manual real user recovery"
+  ]
+}

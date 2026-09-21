@@ -1,0 +1,24 @@
+{
+  "recordedAt": "2026-09-20T16:37:34.175333+00:00",
+  "worktree": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors",
+  "branch": "codex/v3.2.10-execution-descriptors",
+  "head": "8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05",
+  "fixedDependencies": {
+    "base": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+    "g1Feature": "856c9dce8ae4c381229e37b5b236e2e2f776921d",
+    "g1Release": "5ccbf3f022488026f725a5111be00422a04ce221",
+    "g2Feature": "3e203858ea49fc2935f5ab847de8af7f793d356a",
+    "fixedRelease": "8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05"
+  },
+  "ancestorChecks": {
+    "base": true,
+    "g1Feature": true,
+    "g1Release": true,
+    "g2Feature": true,
+    "fixedRelease": true
+  },
+  "adoption": "git merge --ff-only fixedRelease; no new commit created",
+  "scope": "固定 release 同时包含已集成 G4/G5/G6；本次未合入功能到 release，未提交",
+  "backup": "tmp/g7-pre-dependency-20260921/collision-manifest.json",
+  "historicalEvidence": "preparation-* 与 dependency-verification.json 为依赖前证据，不是最终结果；preparation-delivery-snapshot.json 的 refs 更新与旧状态文字发生时间交错，不作为 G2 当前状态依据"
+}

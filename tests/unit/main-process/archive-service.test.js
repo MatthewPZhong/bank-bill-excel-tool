@@ -41,9 +41,11 @@ const {
   createBusinessFlowResolver
 } = require('../../../src/main-process/archive-center/business-flow-resolver');
 const {
-  createBankStatementRunFlowIdentity,
+  createBankStatementRunFlowIdentity
+} = require('../../../src/main-process/fund-recon-worker/archive-task-policies');
+const {
   createTaskPolicyRegistry
-} = require('../../../src/main-process/archive-center/task-policy-registry');
+} = require('../../../src/main-process/execution-descriptors/composition');
 
 function createFixture(options = {}) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-service-'));

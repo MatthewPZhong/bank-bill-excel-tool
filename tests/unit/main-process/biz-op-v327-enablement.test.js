@@ -6,7 +6,9 @@ const { ACTIONS } = require('../../../src/main-process/biz-op-v327/contracts');
 const { RELEASE_GATES, REQUIRED_GATES, evaluateReleaseGates } = require('../../../src/main-process/biz-op-v327/release-gates');
 const { BIZ_OP_V327_POLICIES, buildBizOpPolicies } = require('../../../src/main-process/biz-op-v327/policies');
 const { passedGates } = require('../../helpers/biz-op-v327-upgrade');
-const { isBackgroundExecutionProductionEnabled } = require('../../../src/main-process/background-execution/runtime');
+const {
+  isBackgroundExecutionProductionEnabled
+} = require('../../../src/main-process/execution-descriptors/policy-catalog');
 
 test('十二项动作逐项授权启用，未执行验收不显示为 release-pass 或 benchmark 证明', () => {
   const decision = evaluateReleaseGates();

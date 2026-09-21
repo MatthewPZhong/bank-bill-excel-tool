@@ -12,7 +12,7 @@ const { createWorkerThreadAdapter } = require(
   '../../../../src/main-process/background-execution/adapters/worker-thread-adapter');
 const { createResourceGovernor } = require('../../../../src/main-process/background-execution/resource-governor');
 const { createBackgroundExecutionRuntimeManager } = require(
-  '../../../../src/main-process/background-execution/runtime');
+  '../../../../src/main-process/execution-descriptors/composition');
 const canary = require('../../../../src/main-process/background-execution/canary');
 
 const ACTION = 'background-execution:carrier-observation-test';

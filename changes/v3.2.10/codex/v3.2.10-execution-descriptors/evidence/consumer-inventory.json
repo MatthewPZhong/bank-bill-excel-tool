@@ -1,0 +1,2057 @@
+{
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "generatedAt": "2026-09-20T16:10:10.181174+00:00",
+  "scope": "src/scripts/tests 已跟踪文件；含定义/导出和字符串匹配，角色须按 registry-inventory.md 分类；不把命中数当真实调用数。",
+  "matches": [
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "scripts/validate-v3-2-3-release-evidence.js",
+      "line": 927,
+      "text": "  const { BACKGROUND_EXECUTION_POLICIES } ="
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "scripts/validate-v3-2-3-release-evidence.js",
+      "line": 936,
+      "text": "    BACKGROUND_EXECUTION_POLICIES,"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "scripts/validate-v3-2-3-release-evidence.js",
+      "line": 1096,
+      "text": "    BACKGROUND_EXECUTION_POLICIES,"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "scripts/validate-v3-2-3-release-evidence.js",
+      "line": 1125,
+      "text": "  const runtimeByAction = new Map(BACKGROUND_EXECUTION_POLICIES.map((policy) =>"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "scripts/validate-v3-2-2-release-evidence.js",
+      "line": 11,
+      "text": "  BACKGROUND_EXECUTION_POLICIES"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "scripts/validate-v3-2-2-release-evidence.js",
+      "line": 875,
+      "text": "    BACKGROUND_EXECUTION_POLICIES.map((policy) => [policy.actionKey, policy])"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "scripts/validate-v3-2-2-release-evidence.js",
+      "line": 877,
+      "text": "  const actualCommonKeys = BACKGROUND_EXECUTION_POLICIES"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "scripts/validate-v3-2-4-release-evidence.js",
+      "line": 906,
+      "text": "  const { BACKGROUND_EXECUTION_POLICIES } ="
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "scripts/validate-v3-2-4-release-evidence.js",
+      "line": 915,
+      "text": "    BACKGROUND_EXECUTION_POLICIES,"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "scripts/validate-v3-2-4-release-evidence.js",
+      "line": 1071,
+      "text": "    BACKGROUND_EXECUTION_POLICIES,"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "scripts/validate-v3-2-4-release-evidence.js",
+      "line": 1093,
+      "text": "  const runtimeByAction = new Map(BACKGROUND_EXECUTION_POLICIES.map((policy) => [policy.actionKey, policy]));"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "scripts/check-background-execution-manifest.js",
+      "line": 27,
+      "text": "  BACKGROUND_EXECUTION_POLICIES"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "scripts/check-background-execution-manifest.js",
+      "line": 69,
+      "text": "  const policies = BACKGROUND_EXECUTION_POLICIES;"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "tests/unit/main-process/background-execution/manifest-coverage-e13-g.test.js",
+      "line": 32,
+      "text": "  BACKGROUND_EXECUTION_POLICIES"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "tests/unit/main-process/background-execution/manifest-coverage-e13-g.test.js",
+      "line": 37,
+      "text": "  const policies = overrides.policies || BACKGROUND_EXECUTION_POLICIES;"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "tests/unit/main-process/background-execution/manifest-coverage-e13-g.test.js",
+      "line": 342,
+      "text": "    () => createActionManifest({ bindings, policies: BACKGROUND_EXECUTION_POLICIES }),"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "tests/unit/main-process/biz-op-v327-upgrade.test.js",
+      "line": 243,
+      "text": "  const { BACKGROUND_EXECUTION_POLICIES } = require('../../../src/main-process/background-execution/runtime');"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "tests/unit/main-process/biz-op-v327-upgrade.test.js",
+      "line": 247,
+      "text": "  const policies = BACKGROUND_EXECUTION_POLICIES.filter((p) => !changed.has(p.actionKey)).concat(buildBizOpPolicies(passedGates()));"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "tests/unit/main-process/biz-op-v327-upgrade.test.js",
+      "line": 248,
+      "text": "  const staticKeys = Object.fromEntries(STATIC_REFERENCE_PATHS.map(([field, bucket]) => [bucket, BACKGROUND_EXECUTION_POLICIES"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "tests/unit/main-process/background-execution/position-import-adapter-e13-f.test.js",
+      "line": 25,
+      "text": "  BACKGROUND_EXECUTION_POLICIES,"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "tests/unit/main-process/background-execution/position-import-adapter-e13-f.test.js",
+      "line": 129,
+      "text": "    BACKGROUND_EXECUTION_POLICIES.find("
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "tests/unit/main-process/background-execution/pending-bizop-adapters-e13-d.test.js",
+      "line": 15,
+      "text": "  BACKGROUND_EXECUTION_POLICIES,"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "tests/unit/main-process/background-execution/pending-bizop-adapters-e13-d.test.js",
+      "line": 140,
+      "text": "  const runtimePolicies = new Map(BACKGROUND_EXECUTION_POLICIES.map((policy) => [policy.actionKey, policy]));"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "tests/unit/main-process/background-execution/acquiring-adapters-e13-e.test.js",
+      "line": 21,
+      "text": "  BACKGROUND_EXECUTION_POLICIES,"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "tests/unit/main-process/background-execution/acquiring-adapters-e13-e.test.js",
+      "line": 170,
+      "text": "  const policies = new Map(BACKGROUND_EXECUTION_POLICIES.map((policy) => [policy.actionKey, policy]));"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "tests/unit/main-process/acquiring-read-only-export-e13-c.test.js",
+      "line": 41,
+      "text": "  BACKGROUND_EXECUTION_POLICIES,"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "tests/unit/main-process/acquiring-read-only-export-e13-c.test.js",
+      "line": 163,
+      "text": "    BACKGROUND_EXECUTION_POLICIES.filter((policy) => ("
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 153,
+      "text": "const BACKGROUND_EXECUTION_POLICIES = Object.freeze(["
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 177,
+      "text": "  const policy = BACKGROUND_EXECUTION_POLICIES.find((item) => item.actionKey === actionKey);"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 377,
+      "text": "    BACKGROUND_EXECUTION_POLICIES.filter((policy) => policy.entryKey !== null).map((policy) => ["
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 393,
+      "text": "  for (const policy of BACKGROUND_EXECUTION_POLICIES) {"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 472,
+      "text": "    BACKGROUND_EXECUTION_POLICIES"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 494,
+      "text": "    resourceProfileKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.resources.profile),"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 495,
+      "text": "    topologyKeys: BACKGROUND_EXECUTION_POLICIES"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 498,
+      "text": "    inspectorKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.commit.inspectorKey),"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 499,
+      "text": "    conflictScopeResolverKeys: BACKGROUND_EXECUTION_POLICIES.map("
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 502,
+      "text": "    settlementKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.commit.settlementKey),"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 503,
+      "text": "    publisherKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.artifacts.publisherKey),"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 531,
+      "text": "    policies: BACKGROUND_EXECUTION_POLICIES,"
+    },
+    {
+      "symbol": "BACKGROUND_EXECUTION_POLICIES",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 1036,
+      "text": "  BACKGROUND_EXECUTION_POLICIES,"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "scripts/verify-toolbox-row-split-capacity.js",
+      "line": 10,
+      "text": "const { createBackgroundExecutionRuntime } = require('../src/main-process/background-execution/runtime');"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "scripts/verify-toolbox-row-split-capacity.js",
+      "line": 18,
+      "text": "  const runtime = createBackgroundExecutionRuntime({ availableParallelism: 4,"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "scripts/perf/new-account-e10-a-readback-cancellation.js",
+      "line": 28,
+      "text": "  createBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "scripts/perf/new-account-e10-a-readback-cancellation.js",
+      "line": 127,
+      "text": "  return createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "scripts/benchmark-recon-fix-service.js",
+      "line": 21,
+      "text": "  createBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "scripts/benchmark-recon-fix-service.js",
+      "line": 182,
+      "text": "    runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "scripts/integration/toolbox-row-split-admission.js",
+      "line": 12,
+      "text": "const { createBackgroundExecutionRuntime } = require('../../src/main-process/background-execution/runtime');"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "scripts/integration/toolbox-row-split-admission.js",
+      "line": 58,
+      "text": "  const runtime = createBackgroundExecutionRuntime({ availableParallelism: 4, freeMemoryBytes: 8 * 1024 ** 3,"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "scripts/integration/toolbox-row-split-archive-delete.js",
+      "line": 20,
+      "text": "const { createBackgroundExecutionRuntime } = require('../../src/main-process/background-execution/runtime');"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "scripts/integration/toolbox-row-split-archive-delete.js",
+      "line": 70,
+      "text": "  const runtime = createBackgroundExecutionRuntime({ availableParallelism: 4,"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 887,
+      "text": "function createBackgroundExecutionRuntime(options = {}) {"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 909,
+      "text": "    return createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 1037,
+      "text": "  createBackgroundExecutionRuntime,"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-read-only-export-e13-b.test.js",
+      "line": 46,
+      "text": "  createBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-read-only-export-e13-b.test.js",
+      "line": 464,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-generation-e10-a.test.js",
+      "line": 21,
+      "text": "  createBackgroundExecutionRuntime,"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-generation-e10-a.test.js",
+      "line": 401,
+      "text": "  return createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-generation-e10-a.test.js",
+      "line": 881,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-generation-e10-a.test.js",
+      "line": 937,
+      "text": "    const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-generation-e10-a.test.js",
+      "line": 986,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-generation-e10-a.test.js",
+      "line": 1100,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-generation-e10-a.test.js",
+      "line": 1325,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-generation-e10-a.test.js",
+      "line": 1364,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-generation-e10-a.test.js",
+      "line": 1523,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/toolbox-background-route-db.test.js",
+      "line": 24,
+      "text": "  createBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/toolbox-background-route-db.test.js",
+      "line": 67,
+      "text": "  return createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/acquiring-read-only-export-e13-c.test.js",
+      "line": 42,
+      "text": "  createBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/acquiring-read-only-export-e13-c.test.js",
+      "line": 299,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/biz-op-read-only-export-e13-a.test.js",
+      "line": 34,
+      "text": "  createBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/biz-op-read-only-export-e13-a.test.js",
+      "line": 478,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/recon-id-fix-service.test.js",
+      "line": 43,
+      "text": "  createBackgroundExecutionRuntime,"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/recon-id-fix-service.test.js",
+      "line": 339,
+      "text": "  runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/recon-id-fix-service.test.js",
+      "line": 653,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/recon-id-fix-service.test.js",
+      "line": 696,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/recon-id-fix-service.test.js",
+      "line": 735,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-save-as-e10-b.test.js",
+      "line": 13,
+      "text": "  createBackgroundExecutionRuntime,"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-save-as-e10-b.test.js",
+      "line": 316,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-save-as-e10-b.test.js",
+      "line": 769,
+      "text": "        const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-save-as-e10-b.test.js",
+      "line": 800,
+      "text": "        const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-save-as-e10-b.test.js",
+      "line": 895,
+      "text": "      const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-save-as-e10-b.test.js",
+      "line": 931,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-save-as-e10-b.test.js",
+      "line": 959,
+      "text": "  const rejectedRuntime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-save-as-e10-b.test.js",
+      "line": 1011,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-save-as-e10-b.test.js",
+      "line": 1070,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-save-as-e10-b.test.js",
+      "line": 1110,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-save-as-e10-b.test.js",
+      "line": 1182,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-save-as-e10-b.test.js",
+      "line": 1308,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-save-as-e10-b.test.js",
+      "line": 1351,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/new-account-save-as-e10-b.test.js",
+      "line": 1401,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/recon-id-fix-export-e11-c.test.js",
+      "line": 38,
+      "text": "  createBackgroundExecutionRuntime,"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/recon-id-fix-export-e11-c.test.js",
+      "line": 272,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/recon-id-fix-export-e11-c.test.js",
+      "line": 529,
+      "text": "    retryRuntime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/recon-id-fix-export-e11-c.test.js",
+      "line": 634,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/recon-id-fix-export-e11-c.test.js",
+      "line": 869,
+      "text": "  const otherRuntime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/fund-recon-worker-policies.test.js",
+      "line": 8,
+      "text": "  createBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/fund-recon-worker-policies.test.js",
+      "line": 26,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js",
+      "line": 71,
+      "text": "  createBackgroundExecutionRuntime,"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js",
+      "line": 427,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js",
+      "line": 1184,
+      "text": "  const secondRuntime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/vcc-financial-op-read-only-export-e13-b.test.js",
+      "line": 47,
+      "text": "  createBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/vcc-financial-op-read-only-export-e13-b.test.js",
+      "line": 216,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pending-read-only-export-e13-a.test.js",
+      "line": 34,
+      "text": "  createBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pending-read-only-export-e13-a.test.js",
+      "line": 365,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/vcc-financial-op-dual-writer-e12-c.test.js",
+      "line": 33,
+      "text": "  createBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/vcc-financial-op-dual-writer-e12-c.test.js",
+      "line": 411,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/toolbox-background-generation.test.js",
+      "line": 72,
+      "text": "  createBackgroundExecutionRuntime: createBackgroundExecutionRuntimeRaw,"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/toolbox-background-generation.test.js",
+      "line": 81,
+      "text": "function createBackgroundExecutionRuntime(options = {}) {"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/toolbox-background-generation.test.js",
+      "line": 233,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/toolbox-background-generation.test.js",
+      "line": 601,
+      "text": "  const realRuntime = createBackgroundExecutionRuntime({ shutdownTimeoutMs: 10000 });"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/toolbox-background-generation.test.js",
+      "line": 651,
+      "text": "  const runtime = createBackgroundExecutionRuntime({ shutdownTimeoutMs: 10000 });"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/toolbox-background-generation.test.js",
+      "line": 720,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/toolbox-background-generation.test.js",
+      "line": 770,
+      "text": "  const runtime = createBackgroundExecutionRuntime({ shutdownTimeoutMs: 10000 });"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/position-read-only-export-e13-b.test.js",
+      "line": 60,
+      "text": "  createBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/position-read-only-export-e13-b.test.js",
+      "line": 343,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/toolbox-row-split.test.js",
+      "line": 16,
+      "text": "const { createBackgroundExecutionRuntime } = require('../../../src/main-process/background-execution/runtime');"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/toolbox-row-split.test.js",
+      "line": 199,
+      "text": "  const runtime = createBackgroundExecutionRuntime({ availableParallelism: 4, freeMemoryBytes: 8 * 1024 ** 3, totalMemoryBytes: 16 * 1024 ** 3 });"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/toolbox-row-split.test.js",
+      "line": 306,
+      "text": "  const runtime = createBackgroundExecutionRuntime({ availableParallelism: 4, freeMemoryBytes: 8 * 1024 ** 3, totalMemoryBytes: 16 * 1024 ** 3 });"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/toolbox-row-split.test.js",
+      "line": 387,
+      "text": "  runtime = createBackgroundExecutionRuntime({ availableParallelism: 4, freeMemoryBytes: 8 * 1024 ** 3, totalMemoryBytes: 16 * 1024 ** 3 });"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/duplicate-inbound-match/policies.test.js",
+      "line": 7,
+      "text": "const { createBackgroundExecutionRuntime } = require("
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/duplicate-inbound-match/policies.test.js",
+      "line": 28,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js",
+      "line": 13,
+      "text": "  createBackgroundExecutionRuntime: createBackgroundExecutionRuntimeRaw,"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js",
+      "line": 51,
+      "text": "function createBackgroundExecutionRuntime(options = {}) {"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js",
+      "line": 1047,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js",
+      "line": 1688,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js",
+      "line": 1741,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js",
+      "line": 2021,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js",
+      "line": 2088,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js",
+      "line": 2167,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js",
+      "line": 2216,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js",
+      "line": 2290,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js",
+      "line": 2345,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js",
+      "line": 2386,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/duplicate-inbound-match/paired-parser-e07-c.test.js",
+      "line": 20,
+      "text": "  createBackgroundExecutionRuntime,"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/duplicate-inbound-match/paired-parser-e07-c.test.js",
+      "line": 171,
+      "text": "  return createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/duplicate-inbound-match/runtime.test.js",
+      "line": 20,
+      "text": "  createBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/duplicate-inbound-match/runtime.test.js",
+      "line": 117,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/duplicate-inbound-match/runtime.test.js",
+      "line": 210,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/duplicate-inbound-match/runtime.test.js",
+      "line": 257,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-c.test.js",
+      "line": 17,
+      "text": "  createBackgroundExecutionRuntime,"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-c.test.js",
+      "line": 213,
+      "text": "  assert.throws(() => createBackgroundExecutionRuntime({ resourceGovernor: {} }), {"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-c.test.js",
+      "line": 344,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-c.test.js",
+      "line": 569,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-c.test.js",
+      "line": 647,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-c.test.js",
+      "line": 721,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-c.test.js",
+      "line": 827,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/fund-recon-worker-runtime.test.js",
+      "line": 16,
+      "text": "  createBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/fund-recon-worker-runtime.test.js",
+      "line": 58,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/vcc-financial-op-single-writer-e12-a.test.js",
+      "line": 27,
+      "text": "  createBackgroundExecutionRuntime,"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/vcc-financial-op-single-writer-e12-a.test.js",
+      "line": 190,
+      "text": "  const runtime = createBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntimeManager",
+      "path": "src/main.js",
+      "line": 513,
+      "text": "  createBackgroundExecutionRuntimeManager"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntimeManager",
+      "path": "src/main.js",
+      "line": 832,
+      "text": "const backgroundExecutionRuntimeManager = createBackgroundExecutionRuntimeManager({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntimeManager",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 904,
+      "text": "function createBackgroundExecutionRuntimeManager(options = {}) {"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntimeManager",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 1038,
+      "text": "  createBackgroundExecutionRuntimeManager,"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntimeManager",
+      "path": "tests/unit/main-process/background-execution/carrier-observation.test.js",
+      "line": 14,
+      "text": "const { createBackgroundExecutionRuntimeManager } = require("
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntimeManager",
+      "path": "tests/unit/main-process/background-execution/carrier-observation.test.js",
+      "line": 340,
+      "text": "  const manager = createBackgroundExecutionRuntimeManager({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntimeManager",
+      "path": "tests/unit/main-process/toolbox-background-generation.test.js",
+      "line": 73,
+      "text": "  createBackgroundExecutionRuntimeManager,"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntimeManager",
+      "path": "tests/unit/main-process/toolbox-background-generation.test.js",
+      "line": 804,
+      "text": "  const manager = createBackgroundExecutionRuntimeManager({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntimeManager",
+      "path": "tests/unit/main-process/toolbox-background-generation.test.js",
+      "line": 851,
+      "text": "  const manager = createBackgroundExecutionRuntimeManager({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntimeManager",
+      "path": "tests/unit/main-process/toolbox-background-generation.test.js",
+      "line": 885,
+      "text": "  const manager = createBackgroundExecutionRuntimeManager({"
+    },
+    {
+      "symbol": "createBackgroundExecutionRuntimeManager",
+      "path": "tests/unit/main-process/toolbox-background-generation.test.js",
+      "line": 906,
+      "text": "  const manager = createBackgroundExecutionRuntimeManager({"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/helpers/biz-op-v327-host.js",
+      "line": 14,
+      "text": "const { createNonProductionBackgroundExecutionRuntime } = require('../../src/main-process/background-execution/runtime');"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/helpers/biz-op-v327-host.js",
+      "line": 47,
+      "text": "  runtime = createNonProductionBackgroundExecutionRuntime({ bizOpV327: module.runtimeBindings,"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/fixtures/biz-op-v327-crash.cjs",
+      "line": 13,
+      "text": "const { createNonProductionBackgroundExecutionRuntime } = source('background-execution/runtime');"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/fixtures/biz-op-v327-crash.cjs",
+      "line": 34,
+      "text": "  const runtime = createNonProductionBackgroundExecutionRuntime({ bizOpV327: module.runtimeBindings,"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "scripts/benchmark-prefund-parser-pool.js",
+      "line": 10,
+      "text": "  createNonProductionBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "scripts/benchmark-prefund-parser-pool.js",
+      "line": 161,
+      "text": "  const runtime = createNonProductionBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/biz-op-v327.test.js",
+      "line": 20,
+      "text": "const { createNonProductionBackgroundExecutionRuntime } = require('../../../src/main-process/background-execution/runtime');"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/biz-op-v327.test.js",
+      "line": 190,
+      "text": "  const runtime = createNonProductionBackgroundExecutionRuntime({ bizOpV327: module.runtimeBindings,"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/biz-op-v327.test.js",
+      "line": 768,
+      "text": "  const runtime = createNonProductionBackgroundExecutionRuntime({ bizOpV327: f.module.runtimeBindings,"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 896,
+      "text": "function createNonProductionBackgroundExecutionRuntime(options = {}) {"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 1039,
+      "text": "  createNonProductionBackgroundExecutionRuntime,"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/background-execution/pending-bizop-adapters-e13-d.test.js",
+      "line": 16,
+      "text": "  createNonProductionBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/background-execution/pending-bizop-adapters-e13-d.test.js",
+      "line": 124,
+      "text": "  const runtime = createNonProductionBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/background-execution/pending-bizop-adapters-e13-d.test.js",
+      "line": 229,
+      "text": "  const runtime = createNonProductionBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/background-execution/acquiring-adapters-e13-e.test.js",
+      "line": 22,
+      "text": "  createNonProductionBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/background-execution/acquiring-adapters-e13-e.test.js",
+      "line": 155,
+      "text": "  const runtime = createNonProductionBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/background-execution/acquiring-adapters-e13-e.test.js",
+      "line": 316,
+      "text": "  const runtime = createNonProductionBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/background-execution/position-import-adapter-e13-f.test.js",
+      "line": 26,
+      "text": "  createNonProductionBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/background-execution/position-import-adapter-e13-f.test.js",
+      "line": 686,
+      "text": "  const runtime = createNonProductionBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/background-execution/position-import-adapter-e13-f.test.js",
+      "line": 754,
+      "text": "  const runtime = createNonProductionBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js",
+      "line": 14,
+      "text": "  createNonProductionBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js",
+      "line": 1818,
+      "text": "  const runtime = createNonProductionBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js",
+      "line": 1933,
+      "text": "  const runtime = createNonProductionBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-c.test.js",
+      "line": 18,
+      "text": "  createNonProductionBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-c.test.js",
+      "line": 218,
+      "text": "    'createNonProductionBackgroundExecutionRuntime'"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-c.test.js",
+      "line": 222,
+      "text": "    /createNonProductionBackgroundExecutionRuntime/"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-c.test.js",
+      "line": 380,
+      "text": "  const runtime = createNonProductionBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-c.test.js",
+      "line": 780,
+      "text": "  const nativeRuntime = createNonProductionBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-c.test.js",
+      "line": 1209,
+      "text": "  const runtime = createNonProductionBackgroundExecutionRuntime({"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/duplicate-inbound-match/paired-parser-e07-c.test.js",
+      "line": 21,
+      "text": "  createNonProductionBackgroundExecutionRuntime"
+    },
+    {
+      "symbol": "createNonProductionBackgroundExecutionRuntime",
+      "path": "tests/unit/main-process/duplicate-inbound-match/paired-parser-e07-c.test.js",
+      "line": 167,
+      "text": "  return createNonProductionBackgroundExecutionRuntime(runtimeOptions);"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/recon-id-fix-export-e11-c.test.js",
+      "line": 39,
+      "text": "  isBackgroundExecutionProductionEnabled"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/recon-id-fix-export-e11-c.test.js",
+      "line": 438,
+      "text": "  assert.equal(isBackgroundExecutionProductionEnabled(RECON_FIX_EXPORT_ACTION), false);"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/biz-op-v327-enablement.test.js",
+      "line": 9,
+      "text": "const { isBackgroundExecutionProductionEnabled } = require('../../../src/main-process/background-execution/runtime');"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/biz-op-v327-enablement.test.js",
+      "line": 24,
+      "text": "    assert.equal(isBackgroundExecutionProductionEnabled(policy.actionKey), true);"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/new-account-generation-e10-a.test.js",
+      "line": 22,
+      "text": "  isBackgroundExecutionProductionEnabled"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/new-account-generation-e10-a.test.js",
+      "line": 481,
+      "text": "  assert.equal(isBackgroundExecutionProductionEnabled(NEW_ACCOUNT_GENERATION_ACTION), false);"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/recon-id-fix-service.test.js",
+      "line": 44,
+      "text": "  isBackgroundExecutionProductionEnabled"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/recon-id-fix-service.test.js",
+      "line": 412,
+      "text": "  assert.equal(isBackgroundExecutionProductionEnabled(RECON_FIX_IMPORT_ACTION), false);"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/recon-id-fix-service.test.js",
+      "line": 413,
+      "text": "  assert.equal(isBackgroundExecutionProductionEnabled(RECON_FIX_RUN_READONLY_ACTION), false);"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/new-account-save-as-e10-b.test.js",
+      "line": 14,
+      "text": "  isBackgroundExecutionProductionEnabled"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/new-account-save-as-e10-b.test.js",
+      "line": 288,
+      "text": "  assert.equal(isBackgroundExecutionProductionEnabled(NEW_ACCOUNT_SAVE_AS_ACTION), false);"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/toolbox-background-generation.test.js",
+      "line": 74,
+      "text": "  isBackgroundExecutionProductionEnabled"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/toolbox-background-generation.test.js",
+      "line": 201,
+      "text": "    assert.equal(isBackgroundExecutionProductionEnabled(policy.actionKey), false);"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js",
+      "line": 72,
+      "text": "  isBackgroundExecutionProductionEnabled"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js",
+      "line": 860,
+      "text": "  assert.equal(isBackgroundExecutionProductionEnabled(RECON_FIX_RUN_JPM_ACTION), false);"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js",
+      "line": 1422,
+      "text": "    assert.equal(isBackgroundExecutionProductionEnabled(RECON_FIX_EXPORT_ACTION), false);"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/vcc-financial-op-single-writer-e12-a.test.js",
+      "line": 28,
+      "text": "  isBackgroundExecutionProductionEnabled"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/vcc-financial-op-single-writer-e12-a.test.js",
+      "line": 704,
+      "text": "  assert.equal(isBackgroundExecutionProductionEnabled(VCC_EXPORT_SINGLE_ACTION), false);"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "tests/unit/main-process/vcc-financial-op-single-writer-e12-a.test.js",
+      "line": 705,
+      "text": "  assert.equal(isBackgroundExecutionProductionEnabled(VCC_EXPORT_SUBJECTS_ACTION), false);"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 176,
+      "text": "function isBackgroundExecutionProductionEnabled(actionKey) {"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 955,
+      "text": "      return isBackgroundExecutionProductionEnabled(actionKey);"
+    },
+    {
+      "symbol": "isBackgroundExecutionProductionEnabled",
+      "path": "src/main-process/background-execution/runtime.js",
+      "line": 1040,
+      "text": "  isBackgroundExecutionProductionEnabled"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "src/main.js",
+      "line": 119,
+      "text": "  createTaskPolicyRegistry"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "src/main.js",
+      "line": 1285,
+      "text": "const taskPolicyRegistry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/fixtures/archive-permanent-delete-owner-recovery.js",
+      "line": 14,
+      "text": "const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/fixtures/archive-permanent-delete-owner-recovery.js",
+      "line": 37,
+      "text": "  const policy = createTaskPolicyRegistry().require('template:import');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/fixtures/archive-permanent-delete-readonly-owner.js",
+      "line": 187,
+      "text": "    const { createTaskPolicyRegistry } = require(path.join(sourceRoot, 'src/main-process/archive-center/task-policy-registry'));"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/fixtures/archive-permanent-delete-readonly-owner.js",
+      "line": 191,
+      "text": "    const policy = createTaskPolicyRegistry().require('template:import');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/fixtures/archive-permanent-delete-publication-child.js",
+      "line": 15,
+      "text": "const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/fixtures/archive-permanent-delete-publication-child.js",
+      "line": 58,
+      "text": "  const policy = createTaskPolicyRegistry().require(channel);"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/fixtures/archive-permanent-delete-position-fileplan.js",
+      "line": 18,
+      "text": "const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/fixtures/archive-permanent-delete-position-fileplan.js",
+      "line": 109,
+      "text": "    const policy = createTaskPolicyRegistry().require(channel);"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/fixtures/archive-permanent-delete-hardlink-republish.js",
+      "line": 13,
+      "text": "const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/fixtures/archive-permanent-delete-hardlink-republish.js",
+      "line": 43,
+      "text": "    const policy = createTaskPolicyRegistry().require('template:import');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "scripts/integration/archive-center-module-retention.js",
+      "line": 44,
+      "text": "  createTaskPolicyRegistry"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "scripts/integration/archive-center-module-retention.js",
+      "line": 176,
+      "text": "  const policy = createTaskPolicyRegistry().require(channel);"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "scripts/integration/archive-center-module-retention.js",
+      "line": 378,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "scripts/integration/background-execution-recovery-control.js",
+      "line": 34,
+      "text": "  createTaskPolicyRegistry"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "scripts/integration/background-execution-recovery-control.js",
+      "line": 62,
+      "text": "  const taskPolicyRegistry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "scripts/integration/toolbox-row-split-archive-delete.js",
+      "line": 16,
+      "text": "const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "scripts/integration/toolbox-row-split-archive-delete.js",
+      "line": 114,
+      "text": "    const policy = createTaskPolicyRegistry().require('toolbox:split:export');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "src/main-process/biz-op-v327/delete-main.js",
+      "line": 4,
+      "text": "const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "src/main-process/biz-op-v327/delete-main.js",
+      "line": 25,
+      "text": "        const result = await taskLifecycle.runOperationOnly({ policy: createTaskPolicyRegistry().require('bizOpReconV327:delete'),"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "src/main-process/biz-op-v327/upgrade-main.js",
+      "line": 7,
+      "text": "const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "src/main-process/biz-op-v327/upgrade-main.js",
+      "line": 250,
+      "text": "        return await host.getTaskLifecycle().runOperationOnly({ policy: createTaskPolicyRegistry().require(TASK),"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "src/main-process/biz-op-v327/export-main.js",
+      "line": 5,
+      "text": "const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "src/main-process/biz-op-v327/export-main.js",
+      "line": 20,
+      "text": "    const policy = createTaskPolicyRegistry().require(`bizOpReconV327:export:${suffix}`);"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "src/main-process/biz-op-v327/import-main.js",
+      "line": 5,
+      "text": "const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "src/main-process/biz-op-v327/import-main.js",
+      "line": 54,
+      "text": "          policy: createTaskPolicyRegistry().require('bizOpReconV327:import'),"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "src/main-process/biz-op-v327/module.js",
+      "line": 4,
+      "text": "const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "src/main-process/biz-op-v327/module.js",
+      "line": 137,
+      "text": "        policy: createTaskPolicyRegistry().require('bizOpReconV327:import'),"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "src/main-process/biz-op-v327/compute-main.js",
+      "line": 4,
+      "text": "const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "src/main-process/biz-op-v327/compute-main.js",
+      "line": 30,
+      "text": "        const result = await taskLifecycle.runOperationOnly({ policy: createTaskPolicyRegistry().require('bizOpReconV327:run'),"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "src/main-process/archive-center/operation-tracker.js",
+      "line": 7,
+      "text": "const { createTaskPolicyRegistry } = require('./task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "src/main-process/archive-center/operation-tracker.js",
+      "line": 36,
+      "text": "  createTaskPolicyRegistry().list()"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "src/main-process/archive-center/task-policy-registry.js",
+      "line": 983,
+      "text": "function createTaskPolicyRegistry() {"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "src/main-process/archive-center/task-policy-registry.js",
+      "line": 1001,
+      "text": "  createTaskPolicyRegistry,"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 18,
+      "text": "  createTaskPolicyRegistry,"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 107,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 159,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 190,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 206,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 230,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 283,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 291,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 322,
+      "text": "  const classifier = createTaskPolicyRegistry().require('pending:import:start').resultClassifier;"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 330,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 347,
+      "text": "  const controlled = createTaskPolicyRegistry().list()"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 352,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 362,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 406,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 437,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 469,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 557,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 760,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-position-fileplan-delete.test.js",
+      "line": 13,
+      "text": "const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-position-fileplan-delete.test.js",
+      "line": 65,
+      "text": "      const policy = createTaskPolicyRegistry().require(channel);"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/vcc-financial-op-archive-integration.test.js",
+      "line": 19,
+      "text": "  createTaskPolicyRegistry"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/vcc-financial-op-archive-integration.test.js",
+      "line": 249,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/vcc-financial-op-archive-integration.test.js",
+      "line": 346,
+      "text": "  const policy = createTaskPolicyRegistry().require('vccFinancialOp:run:archive');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/vcc-financial-op-archive-integration.test.js",
+      "line": 448,
+      "text": "  const policy = createTaskPolicyRegistry().require('vccFinancialOp:run:archive');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/vcc-financial-op-archive-integration.test.js",
+      "line": 553,
+      "text": "  const policy = createTaskPolicyRegistry().require('vccFinancialOp:import:apply');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-lifecycle.test.js",
+      "line": 22,
+      "text": "  createTaskPolicyRegistry"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-lifecycle.test.js",
+      "line": 922,
+      "text": "  const policy = createTaskPolicyRegistry().require('vccOpCalc:run:save');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-lifecycle.test.js",
+      "line": 970,
+      "text": "  const policy = createTaskPolicyRegistry().require('vccOpCalc:run:save');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-lifecycle.test.js",
+      "line": 1211,
+      "text": "  const toolboxPolicy = createTaskPolicyRegistry().require('toolbox:split:export');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-lifecycle.test.js",
+      "line": 1236,
+      "text": "  const toolboxPolicy = createTaskPolicyRegistry().require('toolbox:split:export');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-task-lifecycle.test.js",
+      "line": 1713,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-service.test.js",
+      "line": 45,
+      "text": "  createTaskPolicyRegistry"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-service.test.js",
+      "line": 232,
+      "text": "    const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-position-report-evidence.test.js",
+      "line": 13,
+      "text": "const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-position-report-evidence.test.js",
+      "line": 69,
+      "text": "      const operation = lifecycle.runFileTask({ policy: createTaskPolicyRegistry().require(channel), meta: { channel },"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/background-execution/recovery-control-repository.test.js",
+      "line": 45,
+      "text": "  createTaskPolicyRegistry"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/background-execution/recovery-control-repository.test.js",
+      "line": 845,
+      "text": "  const taskPolicies = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/background-execution/action-task-binding-registry.test.js",
+      "line": 22,
+      "text": "  createTaskPolicyRegistry"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/background-execution/action-task-binding-registry.test.js",
+      "line": 26,
+      "text": "  return createTaskPolicyRegistry().list().map((policy) => ({ ...policy }));"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/background-execution/action-task-binding-registry.test.js",
+      "line": 39,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/background-execution/action-task-binding-registry.test.js",
+      "line": 88,
+      "text": "  const taskPolicyRegistry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/background-execution/action-task-binding-registry.test.js",
+      "line": 616,
+      "text": "  const policyCall = directCall('taskPolicyRegistry', 'createTaskPolicyRegistry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/background-execution/action-task-binding-registry.test.js",
+      "line": 653,
+      "text": "  if (calls('createTaskPolicyRegistry').length !== 1"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/background-execution/action-task-binding-registry.test.js",
+      "line": 912,
+      "text": "  const realRegistry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/acquiring-bill-currency-run-data.test.js",
+      "line": 41,
+      "text": "  createTaskPolicyRegistry"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/acquiring-bill-currency-run-data.test.js",
+      "line": 693,
+      "text": "    const policy = createTaskPolicyRegistry().require('acquiringBillCurrency:run:resume');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/acquiring-bill-currency-run-data.test.js",
+      "line": 927,
+      "text": "    const policy = createTaskPolicyRegistry().require('acquiringBillCurrency:run:resume');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-delete-owner-completion.test.js",
+      "line": 399,
+      "text": "  const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-delete-owner-completion.test.js",
+      "line": 400,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-delete-owner-completion.test.js",
+      "line": 419,
+      "text": "  const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-delete-owner-completion.test.js",
+      "line": 446,
+      "text": "      const policy = createTaskPolicyRegistry().require(channel);"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-file-owner-recovery.test.js",
+      "line": 13,
+      "text": "const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/archive-file-owner-recovery.test.js",
+      "line": 44,
+      "text": "  const policy = createTaskPolicyRegistry().require(channel);"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/biz-op-v327-upgrade.test.js",
+      "line": 16,
+      "text": "const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/biz-op-v327-upgrade.test.js",
+      "line": 93,
+      "text": "  const outcome = await f.lifecycle.runOperationOnly({ policy: createTaskPolicyRegistry().require('bizOpRecon:run'),"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/biz-op-v327-compute-main.test.js",
+      "line": 259,
+      "text": "  const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/biz-op-v327-compute-main.test.js",
+      "line": 263,
+      "text": "    const result = await f.lifecycle.runOperationOnly({ policy: createTaskPolicyRegistry().require('bizOpReconV327:delete'),"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-mixed-lifecycle-e05-p0.test.js",
+      "line": 10,
+      "text": "  createTaskPolicyRegistry"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-mixed-lifecycle-e05-p0.test.js",
+      "line": 98,
+      "text": "  const policy = createTaskPolicyRegistry().require('pre-fund-reconciliation:import-mpt');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/biz-op-v327-ipc.test.js",
+      "line": 12,
+      "text": "const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');"
+    },
+    {
+      "symbol": "createTaskPolicyRegistry",
+      "path": "tests/unit/main-process/biz-op-v327-ipc.test.js",
+      "line": 92,
+      "text": "  const registry = createTaskPolicyRegistry();"
+    },
+    {
+      "symbol": "ARCHIVE_TASK_POLICIES",
+      "path": "src/main-process/archive-center/task-policy-registry.js",
+      "line": 981,
+      "text": "const ARCHIVE_TASK_POLICIES = buildPolicies();"
+    },
+    {
+      "symbol": "ARCHIVE_TASK_POLICIES",
+      "path": "src/main-process/archive-center/task-policy-registry.js",
+      "line": 984,
+      "text": "  return new TaskPolicyRegistry(ARCHIVE_TASK_POLICIES);"
+    },
+    {
+      "symbol": "ARCHIVE_TASK_POLICIES",
+      "path": "src/main-process/archive-center/task-policy-registry.js",
+      "line": 988,
+      "text": "  ARCHIVE_TASK_POLICIES,"
+    },
+    {
+      "symbol": "createBankStatementRunFlowIdentity",
+      "path": "src/main.js",
+      "line": 118,
+      "text": "  createBankStatementRunFlowIdentity,"
+    },
+    {
+      "symbol": "createBankStatementRunFlowIdentity",
+      "path": "src/main.js",
+      "line": 5888,
+      "text": "      const flowIdentity = createBankStatementRunFlowIdentity();"
+    },
+    {
+      "symbol": "createBankStatementRunFlowIdentity",
+      "path": "tests/unit/main-process/archive-task-lifecycle.test.js",
+      "line": 21,
+      "text": "  createBankStatementRunFlowIdentity,"
+    },
+    {
+      "symbol": "createBankStatementRunFlowIdentity",
+      "path": "tests/unit/main-process/archive-task-lifecycle.test.js",
+      "line": 1716,
+      "text": "  const firstIdentity = createBankStatementRunFlowIdentity(() => 'run-1');"
+    },
+    {
+      "symbol": "createBankStatementRunFlowIdentity",
+      "path": "tests/unit/main-process/archive-task-lifecycle.test.js",
+      "line": 1749,
+      "text": "  const secondIdentity = createBankStatementRunFlowIdentity(() => 'run-2');"
+    },
+    {
+      "symbol": "createBankStatementRunFlowIdentity",
+      "path": "tests/unit/main-process/archive-service.test.js",
+      "line": 44,
+      "text": "  createBankStatementRunFlowIdentity,"
+    },
+    {
+      "symbol": "createBankStatementRunFlowIdentity",
+      "path": "tests/unit/main-process/archive-service.test.js",
+      "line": 235,
+      "text": "    const firstIdentity = createBankStatementRunFlowIdentity(() => 'durable-run-1');"
+    },
+    {
+      "symbol": "createBankStatementRunFlowIdentity",
+      "path": "tests/unit/main-process/archive-service.test.js",
+      "line": 266,
+      "text": "    const secondIdentity = createBankStatementRunFlowIdentity(() => 'durable-run-2');"
+    },
+    {
+      "symbol": "createBankStatementRunFlowIdentity",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 17,
+      "text": "  createBankStatementRunFlowIdentity,"
+    },
+    {
+      "symbol": "createBankStatementRunFlowIdentity",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 576,
+      "text": "  const first = createBankStatementRunFlowIdentity(() => 'ephemeral-run-1');"
+    },
+    {
+      "symbol": "createBankStatementRunFlowIdentity",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 577,
+      "text": "  const rerun = createBankStatementRunFlowIdentity(() => 'ephemeral-run-2');"
+    },
+    {
+      "symbol": "createBankStatementRunFlowIdentity",
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "line": 613,
+      "text": "  assert.match(source, /const flowIdentity = createBankStatementRunFlowIdentity\\(\\)/);"
+    },
+    {
+      "symbol": "createBankStatementRunFlowIdentity",
+      "path": "src/main-process/archive-center/task-policy-registry.js",
+      "line": 703,
+      "text": "function createBankStatementRunFlowIdentity(createId = randomUUID) {"
+    },
+    {
+      "symbol": "createBankStatementRunFlowIdentity",
+      "path": "src/main-process/archive-center/task-policy-registry.js",
+      "line": 998,
+      "text": "  createBankStatementRunFlowIdentity,"
+    },
+    {
+      "symbol": "invocationBusinessRunIdentity",
+      "path": "src/main-process/archive-center/task-policy-registry.js",
+      "line": 800,
+      "text": "function invocationBusinessRunIdentity(invocation = {}) {"
+    },
+    {
+      "symbol": "invocationBusinessRunIdentity",
+      "path": "src/main-process/archive-center/task-policy-registry.js",
+      "line": 877,
+      "text": "          ? invocationBusinessRunIdentity"
+    },
+    {
+      "symbol": "invocationBusinessRunIdentity",
+      "path": "src/main-process/archive-center/task-policy-registry.js",
+      "line": 999,
+      "text": "  invocationBusinessRunIdentity,"
+    }
+  ],
+  "sourceSha256": {
+    "scripts/benchmark-prefund-parser-pool.js": "d1b2bb627b2aad90dd773aa31cae5301d15fbfb3b0ce75516f6a59aac9e1e908",
+    "scripts/benchmark-recon-fix-service.js": "31cb2870533d8169c54017ab1123529e5c0783cd70b079447c7997f46bf4b452",
+    "scripts/check-background-execution-manifest.js": "2e23562e537d30eff4b034c2c3f3db29cf1efe0c4557d4ac7b48a480ec608ec1",
+    "scripts/integration/archive-center-module-retention.js": "0969e447b29b92a57dde0fcea1dd3e152adaeba0328b59e1672297feccaa26b0",
+    "scripts/integration/background-execution-recovery-control.js": "cb3622036e460f6d1021a1a592d01f136e1dc7f4ccb0e4c6fe9f10815c59f544",
+    "scripts/integration/toolbox-row-split-admission.js": "d248f2aa1d713e3b2d6d246eba8ce02dac8e364a9c152f0235b38e621be71053",
+    "scripts/integration/toolbox-row-split-archive-delete.js": "c3d54ff12f70781afc403e4eb92e393a6677138ab0667ae5cebc2cf45ba1cb34",
+    "scripts/perf/new-account-e10-a-readback-cancellation.js": "69dbc288e7c1e6eae7b756f36f8c9db533bfb8f022fe7ffda56d7398d230a9cb",
+    "scripts/validate-v3-2-2-release-evidence.js": "83ca2c8b6f83771863bbc5e026dc51cb66f8df8b27ae699acb1bee4cd005d2b4",
+    "scripts/validate-v3-2-3-release-evidence.js": "8481bdf573f3765df05fb5c3239039421af9bee8717cdb3b4e3ac7ed83cf5180",
+    "scripts/validate-v3-2-4-release-evidence.js": "9bfb00132656d93e60f3d2c6069492ac8cc1c703a79393eb2152294308cffd55",
+    "scripts/verify-toolbox-row-split-capacity.js": "2b12916c7d05bafd6fedbd3bac54c9be2e468f6a4cc6dd62e42358190f9bf76e",
+    "src/main-process/archive-center/operation-tracker.js": "4887d71cc020b25d95c1a8880a1cefa17668c5d935c6fe23c3c72f343896f546",
+    "src/main-process/archive-center/task-policy-registry.js": "52b94f6acddaf775427136b95b9c0f46957b11a0f6124e1473a4562d1a1ecdb0",
+    "src/main-process/background-execution/runtime.js": "7f540302f104975aadf67e6536a8573455e64c324db417fd85f1b256cc3493d2",
+    "src/main-process/biz-op-v327/compute-main.js": "515810a2ea43ab5744f8dedff9f25f5d76e96c01d10fa12bacde57ffda4803c6",
+    "src/main-process/biz-op-v327/delete-main.js": "37378ff1d67a6286ef2e11ce07b49029983374203035655cf36da3d0848cdf1b",
+    "src/main-process/biz-op-v327/export-main.js": "9c4400c8b94bb7ce64090e841ce81188d7e7873b43c20a7d32054d2586700bc2",
+    "src/main-process/biz-op-v327/import-main.js": "600e87d7b8095b65d7b9769476c1ce02f476d632692d1016ecd60e91cd8bf2c1",
+    "src/main-process/biz-op-v327/module.js": "fbe0f5cf58298dcc17b8ab985b101b51a260401bb3ba135d2b483d1af9f701ce",
+    "src/main-process/biz-op-v327/upgrade-main.js": "60a02fe6f600e0b923818bb9f5340740ad5de60e750787965dbcd273d02ce040",
+    "src/main.js": "9599755bf4d548dea1ba5a676926af12ea153f19960e8406115aabd7e3011a3f",
+    "tests/fixtures/archive-permanent-delete-hardlink-republish.js": "ca1837b874dee88a65e9c67d225e0be572e8bb0e864d96de827b70a19635a1b1",
+    "tests/fixtures/archive-permanent-delete-owner-recovery.js": "6588e534a84484a7de2b54b14d3dcfd8b5c9789258428f1b01f864dc8b52e24c",
+    "tests/fixtures/archive-permanent-delete-position-fileplan.js": "c8a1bc550c3a998f288bf04a8e39f5b926d31d4163b2f1472f8d518b38b90532",
+    "tests/fixtures/archive-permanent-delete-publication-child.js": "57c5ad91ba3c4208b9acd72ede6dace47c3441eab6310fcd45e3d5a81ba5736f",
+    "tests/fixtures/archive-permanent-delete-readonly-owner.js": "8bf5b765efae9f32a4436fb6633053df87fc3d5df5999e8ac0518d9d84ea9b99",
+    "tests/fixtures/biz-op-v327-crash.cjs": "b2809fa21767572931a78ecc6657d3c05e75db520133b24816ea4a2b61742c29",
+    "tests/helpers/biz-op-v327-host.js": "17b43efa1ab929d03539400399e119ebecafd24af42544c26ba5e745425f91c6",
+    "tests/unit/main-process/acquiring-bill-currency-run-data.test.js": "8001e36d120e11c20a3428fbb617175452b4c52fde9a338b9274c35033f3d993",
+    "tests/unit/main-process/acquiring-read-only-export-e13-c.test.js": "2db18a45ad88db2ffd2fb572e7b28f09e7096713410cc55b66a83908e82bd8fd",
+    "tests/unit/main-process/archive-delete-owner-completion.test.js": "fbb4902d8324891ac1015bff98035dec91e3ebb44ec77c81317bb35e3dcd7bcd",
+    "tests/unit/main-process/archive-file-owner-recovery.test.js": "7064e9f2c354f883cc1095ce14a1ca69c9f4e0eaa225535c124f737c94569146",
+    "tests/unit/main-process/archive-position-fileplan-delete.test.js": "88c866267b4bca5e41cd03028b765eba9bfc11d1da5dec8b0948211fb1e552d7",
+    "tests/unit/main-process/archive-position-report-evidence.test.js": "f887b8a99d99d1a243f0f7ad2a7e730df0e4d7e3271100e406f4e02cf5e739a6",
+    "tests/unit/main-process/archive-service.test.js": "b21e0ee23c49c64acdca81c00658fef28b28099cfc0227df00fa4749bbd8545b",
+    "tests/unit/main-process/archive-task-lifecycle.test.js": "c77b879ce5e369fa842d5720f422796dd3e8438ecd82acf073245457639d260e",
+    "tests/unit/main-process/archive-task-policy-registry.test.js": "a301b897d27f87bf367d99fa1af1a781e677b8ad165f84e619e308d315bb7063",
+    "tests/unit/main-process/background-execution/acquiring-adapters-e13-e.test.js": "aa153275dc29e4065c1146815ae9a90eb370683916fbebcaa05a9f238ef69a62",
+    "tests/unit/main-process/background-execution/action-task-binding-registry.test.js": "64a3f2b0255174cb55a103b1dad3b6fc33128a18a6d134c23912e076a67f9443",
+    "tests/unit/main-process/background-execution/carrier-observation.test.js": "6a042c94a2ecb1ed7031a2a57104736a020fed42752db197344fee161e825e05",
+    "tests/unit/main-process/background-execution/manifest-coverage-e13-g.test.js": "5ebffd94ef27d3a468042c82abeee4e523d9e1bbe3b201e8838389c3d8815b25",
+    "tests/unit/main-process/background-execution/pending-bizop-adapters-e13-d.test.js": "8c8483540f686bfee062d92be94ac006a3bb7f72446100ef8220d3f0e15f23bb",
+    "tests/unit/main-process/background-execution/position-import-adapter-e13-f.test.js": "c0c80a98108dae69603f4c2075b9c7721c2726a20aaca0f10d6f1fc165ca7044",
+    "tests/unit/main-process/background-execution/recovery-control-repository.test.js": "711fb622459e808cb6d10a4855e1a2fdf45b73a46199b06fc0962ebc0ef6e9a8",
+    "tests/unit/main-process/biz-op-read-only-export-e13-a.test.js": "6f1e333806f430978fa36bec4aa20ce77cc7a1e92c69a2809bdbbcc23264b3b1",
+    "tests/unit/main-process/biz-op-v327-compute-main.test.js": "295e036449622cd4eeb2757632f195a9b59dcd0d574d1f7c60d569c3781b378a",
+    "tests/unit/main-process/biz-op-v327-enablement.test.js": "7a3dc3e1b348920bdfc5225ebedf17cc0494a2240608c7152c551daf798672ba",
+    "tests/unit/main-process/biz-op-v327-ipc.test.js": "6b873a90560ad5356afe8df2f0ad07d5d4c4519764aa33f45f932291a382d9f2",
+    "tests/unit/main-process/biz-op-v327-upgrade.test.js": "0e3dcb9f5f565be6a597079571f11e28c90addb3c7be92ca938865f9b8b8f724",
+    "tests/unit/main-process/biz-op-v327.test.js": "bbc22ebcd87c0356a12613493ae3287bb9a99b449245abc376f1f8276ca6c96c",
+    "tests/unit/main-process/duplicate-inbound-match/paired-parser-e07-c.test.js": "585ae4759a4bc0d6f27a6a40003b6973c95f319797495a754394eaaff083eaba",
+    "tests/unit/main-process/duplicate-inbound-match/policies.test.js": "ae89cd2b9214cffab6d6759e58b8f081fcbe9a86e93660f6a5feaada32d3a695",
+    "tests/unit/main-process/duplicate-inbound-match/runtime.test.js": "76fe40e21b8370572d8764b2372e15e98bbae38e6c34bc3f15f9a3ffa22f2050",
+    "tests/unit/main-process/fund-recon-worker-policies.test.js": "4da130d6cef0ab5152ac25b2061ed2ca8e3633cdf7bf357ab99cfc672066c4b1",
+    "tests/unit/main-process/fund-recon-worker-runtime.test.js": "2d9866f4642b8603864db99afd783bd93e9f0ff60dc1912e86c39c62f1a9d89d",
+    "tests/unit/main-process/new-account-generation-e10-a.test.js": "9cd8110c8bafbf0c6e5cb04b416712cc310567307eb269d98a8ed5bcf90037ab",
+    "tests/unit/main-process/new-account-save-as-e10-b.test.js": "f58403f3ae917d941ffa6bcfabb8ea28e3b0cfb8d9af4b9796928814bc50286d",
+    "tests/unit/main-process/pending-read-only-export-e13-a.test.js": "2041c2db689f79c0dcc3ec7baa3a2710fed78062308367d91e32b81cf02082a5",
+    "tests/unit/main-process/position-read-only-export-e13-b.test.js": "de8ef12cf0ea72a576d67b3f6097868d28cb9a144459285d5a63ce2bce0957a5",
+    "tests/unit/main-process/pre-fund-read-only-export-e13-b.test.js": "54eee1113932a7ef448c7e9bcfe576d4198c6aecbe3ff485101616c28e7769c9",
+    "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js": "6a827ae9e664d83c1cb97b16651b65c18f9cf8e39d27e70f18c216aeee26ac14",
+    "tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-c.test.js": "ab572bff3c1295cfb459dfa6d387e6d94060e54e22f55d107df242454e1766b4",
+    "tests/unit/main-process/pre-fund-reconciliation/mpt-mixed-lifecycle-e05-p0.test.js": "a3dcb1a5844fe9aa861a347449e72391e069aba8d44efa36402185032b15aa5e",
+    "tests/unit/main-process/recon-id-fix-export-e11-c.test.js": "cf34867bc80ff10d22f80590a15878da3ace8bedbd28c58b815f9309c88c8979",
+    "tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js": "0351b4ff9ba5ad96fba367aba0a4195685efef1e7fca632219851971ac8d2bcc",
+    "tests/unit/main-process/recon-id-fix-service.test.js": "d42cd7b8e1bcc3b3ada9329ac2d91b353f2986730ee1c9182bf70eb3f72898b6",
+    "tests/unit/main-process/toolbox-background-generation.test.js": "5f325b8a93dc2a68167f4567e0b1cb6c28a6f4f4ce78b3c1fd051ed978a57c32",
+    "tests/unit/main-process/toolbox-background-route-db.test.js": "30a316c0d55a50d31529d67d45c648b8eda3cfd1364c11048d79dcbc2a9db2b5",
+    "tests/unit/main-process/toolbox-row-split.test.js": "c442588e3c75f6f758644a82713749bfb2e95d5c24a4cf0cf82354207c2a5dc8",
+    "tests/unit/main-process/vcc-financial-op-archive-integration.test.js": "fe50c40bd02f06c11b011b5fb328cb85f81d70022215899eb9187e3f4b074486",
+    "tests/unit/main-process/vcc-financial-op-dual-writer-e12-c.test.js": "6db74f17288cb026d625c12db322899ef96ba676a480b19af16a59660cd4a571",
+    "tests/unit/main-process/vcc-financial-op-read-only-export-e13-b.test.js": "0fe901eddf2bda2b29ea7b09c5fb5e9897578ac2cc5791ced30009db56a1cbd7",
+    "tests/unit/main-process/vcc-financial-op-single-writer-e12-a.test.js": "87f1d73693202094825f069a37d1e6e126a70a9d3a12ffd7323ae3f4a45ce2e2"
+  }
+}

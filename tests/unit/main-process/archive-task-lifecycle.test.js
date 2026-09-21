@@ -18,9 +18,11 @@ const {
   prepareIpcTaskInvocation
 } = require('../../../src/main-process/archive-center/ipc-task-contract');
 const {
-  createBankStatementRunFlowIdentity,
+  createBankStatementRunFlowIdentity
+} = require('../../../src/main-process/fund-recon-worker/archive-task-policies');
+const {
   createTaskPolicyRegistry
-} = require('../../../src/main-process/archive-center/task-policy-registry');
+} = require('../../../src/main-process/execution-descriptors/composition');
 const {
   VCC_OP_SAVE_RUN_ACTION_KEY,
   VccOpSaveRunContractError

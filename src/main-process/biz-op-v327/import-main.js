@@ -2,7 +2,9 @@
 
 const fs = require('node:fs');
 const { randomUUID } = require('node:crypto');
-const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../execution-descriptors/composition');
 const { CELL_CONTRACT_VERSION, RULE_VERSION } = require('./import-adapter');
 const { readVerifiedManifest } = require('./payload-store');
 const { hash, fail, count } = require('./contracts');

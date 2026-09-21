@@ -8,7 +8,7 @@ const test = require('node:test');
 
 const {
   createTaskPolicyRegistry
-} = require('../../../../src/main-process/archive-center/task-policy-registry');
+} = require('../../../../src/main-process/execution-descriptors/composition');
 const {
   taskResultStatus
 } = require('../../../../src/main-process/archive-center/task-lifecycle');

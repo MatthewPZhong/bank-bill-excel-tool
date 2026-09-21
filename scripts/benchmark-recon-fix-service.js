@@ -19,7 +19,7 @@ const {
 } = require('../src/constants/recon-id-fix-fields');
 const {
   createBackgroundExecutionRuntime
-} = require('../src/main-process/background-execution/runtime');
+} = require('../src/main-process/execution-descriptors/composition');
 const {
   RECON_FIX_IMPORT_ACTION,
   RECON_FIX_RUN_READONLY_ACTION,

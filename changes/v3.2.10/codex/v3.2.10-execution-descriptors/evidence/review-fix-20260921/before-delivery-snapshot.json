@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-09-20T16:54:40.454840+00:00",
+  "branch": "codex/v3.2.10-execution-descriptors",
+  "head": "8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05",
+  "status": "G7 implemented and local final gate passed; uncommitted and not integrated",
+  "dependencyEvidence": "dependency-integration.json",
+  "codeDiff": "code.diff",
+  "sourceSnapshot": "source-snapshot.json",
+  "validation": "validation-final.json",
+  "implementationRecord": "../implementation-notes.md",
+  "review": "../final-review.md",
+  "g8": "not integrated; current local graph regression passed; activation belongs to joint integration",
+  "gitOperations": "Only branch/worktree creation and fixed dependency fast-forward. No G7 commit, push, PR, feature merge, version bump or release."
+}

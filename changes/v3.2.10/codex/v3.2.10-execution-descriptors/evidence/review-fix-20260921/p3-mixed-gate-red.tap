@@ -1,0 +1,64 @@
+✖ 新模块绑定不能替另一个模块满足关闭观察的 Main 持久绑定 (276.62875ms)
+✔ P3：非生产关闭观察未配置派发 hook 时保持到达 adapter 的旧行为 (53.78ms)
+✔ P3：实际已启用的生产 action 缺少派发 hook 仍在 adapter 前拒绝 (33.790417ms)
+▶ P3：已有 BizOP Main 授权时，其他模块仍须自己的关闭观察派发绑定
+  ✖ 非生产 action 保留原混合门禁拒绝 (34.053625ms)
+  ✔ 生产已启用 action 仍在 adapter 前拒绝 (32.813458ms)
+✖ P3：已有 BizOP Main 授权时，其他模块仍须自己的关闭观察派发绑定 (67.104917ms)
+▶ P3：生产与非生产已配置 hook 均先调用 hook 再进入 adapter
+  ✔ production=false (32.634958ms)
+  ✔ production=true (31.32225ms)
+✔ P3：生产与非生产已配置 hook 均先调用 hook 再进入 adapter (64.179792ms)
+✔ P3：真实 hook 抛出缺授权错误时不能被非生产兼容路径吞掉 (30.666708ms)
+✔ P3：非生产兼容路径保留 BizOP 本域派发授权，通用 hook 不能代替 (31.412125ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 8
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 557.290917
+
+✖ failing tests:
+
+test at tests/unit/main-process/biz-op-v327.test.js:772:1
+✖ 新模块绑定不能替另一个模块满足关闭观察的 Main 持久绑定 (276.62875ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'TOOLBOX_GENERATION_CONTRACT_INVALID'
+  - 'CARRIER_DISPATCH_BINDING_REQUIRED'
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors/tests/unit/main-process/biz-op-v327.test.js:782:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'TOOLBOX_GENERATION_CONTRACT_INVALID',
+    expected: 'CARRIER_DISPATCH_BINDING_REQUIRED',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/execution-descriptor-dispatch-compatibility.test.js:67:11
+✖ 非生产 action 保留原混合门禁拒绝 (34.053625ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'PROBE_REACHED_ADAPTER'
+  - 'CARRIER_DISPATCH_BINDING_REQUIRED'
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors/tests/unit/main-process/execution-descriptor-dispatch-compatibility.test.js:69:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors/tests/unit/main-process/execution-descriptor-dispatch-compatibility.test.js:67:3)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'PROBE_REACHED_ADAPTER',
+    expected: 'CARRIER_DISPATCH_BINDING_REQUIRED',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

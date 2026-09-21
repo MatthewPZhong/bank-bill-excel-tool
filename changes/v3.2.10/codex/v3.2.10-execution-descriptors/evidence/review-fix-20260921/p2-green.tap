@@ -1,0 +1,17 @@
+✔ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：missing (33.528209ms)
+✔ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：enable (25.83875ms)
+✔ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：legacy-production (21.055042ms)
+✔ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：legacy-disabled (20.817042ms)
+✔ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：swap (20.287625ms)
+✔ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：disable (21.662625ms)
+✔ catalog 与 descriptor 同时漂移也不能成为彼此的批准基线 (276.319375ms)
+✔ 只改 catalog 同样在正式装配时拒绝，不能留下查询/实际 runtime 分叉 (285.879417ms)
+✔ manifest --write 在写任何产物之前拒绝错误 catalog，不重生成批准期望 (126.964416ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1086.689417

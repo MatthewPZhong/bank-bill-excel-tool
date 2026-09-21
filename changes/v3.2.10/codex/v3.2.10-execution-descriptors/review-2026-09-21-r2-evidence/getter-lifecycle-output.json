@@ -1,0 +1,41 @@
+{
+  "status": "PASS",
+  "evidence": [
+    {
+      "probe": "mixed-production-null-hook",
+      "rejected": "CARRIER_DISPATCH_BINDING_REQUIRED",
+      "attempts": 0,
+      "lookups": [
+        "toolbox:split-rows"
+      ],
+      "activeLeases": 0
+    },
+    {
+      "probe": "getter-snapshot-cancel-pending-hook",
+      "getterCount": 1,
+      "invoked": [
+        "original"
+      ],
+      "pendingDisposition": "UNKNOWN",
+      "finalDisposition": "NOT_CREATED",
+      "outcome": "cancelled",
+      "starts": 0,
+      "activeLeases": 0,
+      "report": {
+        "closedServices": [],
+        "cancelledJobs": [],
+        "protectedJobs": [],
+        "interruptedTasks": [],
+        "activeHolds": [],
+        "leakedTransports": [],
+        "errors": []
+      }
+    },
+    {
+      "probe": "r1-p3-replay",
+      "adapterStarts": 1,
+      "error": "PROBE_ADAPTER",
+      "activeLeases": 0
+    }
+  ]
+}

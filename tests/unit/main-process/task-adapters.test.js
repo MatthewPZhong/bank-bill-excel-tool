@@ -4,7 +4,9 @@
 // deferred/legacy Position 是兼容能力夹具，不代表当前存在这些生产 taskKey。
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../../../src/main-process/execution-descriptors/composition');
 const { createArchiveAwareOperationHarness } = require('../../helpers/archive-aware-operation-harness');
 
 const positionFile = createTaskPolicyRegistry().require('position-reconciliation:bank:export');

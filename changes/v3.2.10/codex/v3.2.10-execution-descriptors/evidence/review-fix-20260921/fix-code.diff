@@ -1,0 +1,2324 @@
+--- a/src/main-process/background-execution/approved-execution-baseline.js
++++ b/src/main-process/background-execution/approved-execution-baseline.js
+@@ -0,0 +1,25 @@
++'use strict';
++
++const { canonicalJsonSnapshot } = require('./protocol-validator');
++const { createActionManifest } = require('./action-manifest');
++const { createCapabilityInventory, validateCapabilityInventory } = require('./capability-inventory');
++const {
++  createEffectiveProductionStrategySnapshot,
++  validateEffectiveProductionStrategySnapshot
++} = require('./production-strategy-snapshot');
++
++// 私有批准快照来自固定 release 的旧 runtime，独立于候选 descriptor/catalog。
++// 不接受调用方 override，也不随 manifest --write 重建；更新须单独记录批准来源及语义差量。
++const approved = canonicalJsonSnapshot(require('./approved-execution-baseline.json'));
++
++function validateApprovedExecutionPolicies(policies, { bindings }) {
++  const manifest = createActionManifest({ bindings, policies });
++  const capabilityInventory = createCapabilityInventory({ manifest, policies });
++  // 一侧是固定批准数据，另一侧才由 candidate 推导，不能用 candidate 同时生成两侧。
++  validateCapabilityInventory(approved.capabilityInventory, { manifest, policies });
++  const productionStrategy = createEffectiveProductionStrategySnapshot({ capabilityInventory, policies });
++  validateEffectiveProductionStrategySnapshot(approved.productionStrategy, { capabilityInventory, policies });
++  return Object.freeze({ manifest, capabilityInventory, productionStrategy });
++}
++
++module.exports = { validateApprovedExecutionPolicies };
+--- a/src/main-process/background-execution/approved-execution-baseline.json
++++ b/src/main-process/background-execution/approved-execution-baseline.json
+@@ -0,0 +1,1835 @@
++{
++  "baselineVersion": 1,
++  "sourceCommit": "8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05",
++  "approval": "G7 Spec §2 / §3.8：继承固定 release 的能力与生产策略；更新须有独立批准，不由 manifest --write 生成。",
++  "capabilityInventory": {
++    "inventoryVersion": 1,
++    "actions": [
++      {
++        "actionKey": "acquiring:copy-existing-diff",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "inline-async",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.acquiring:copy-existing-diff",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "acquiring:export-diff-workbook",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.acquiring:export-diff-workbook",
++        "handlerRoute": "none",
++        "runtimeRegistered": true,
++        "legacyAvailable": false
++      },
++      {
++        "actionKey": "acquiring:import",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-pool",
++        "adapterKind": "existing-dispatch",
++        "commitKind": "existing-critical-protocol",
++        "artifactKind": "none",
++        "resourceProfile": "resource.acquiring:import",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "acquiring:run-new-eligible",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-pool",
++        "adapterKind": "existing-dispatch",
++        "commitKind": "existing-critical-protocol",
++        "artifactKind": "none",
++        "resourceProfile": "resource.acquiring:run-new-eligible",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "acquiring:run-single-or-resume",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "existing-dispatch",
++        "commitKind": "existing-critical-protocol",
++        "artifactKind": "none",
++        "resourceProfile": "resource.acquiring:run-single-or-resume",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "background-execution:canary",
++        "capabilityStatus": "platform-canary",
++        "disposition": "blocked",
++        "capabilityMode": "platform-canary",
++        "adapterKind": "native",
++        "commitKind": "not-registered",
++        "artifactKind": "not-registered",
++        "resourceProfile": null,
++        "handlerRoute": "none",
++        "runtimeRegistered": false,
++        "legacyAvailable": false
++      },
++      {
++        "actionKey": "background-execution:pure-compute-canary",
++        "capabilityStatus": "platform-canary",
++        "disposition": "blocked",
++        "capabilityMode": "platform-canary",
++        "adapterKind": "native",
++        "commitKind": "not-registered",
++        "artifactKind": "not-registered",
++        "resourceProfile": null,
++        "handlerRoute": "none",
++        "runtimeRegistered": false,
++        "legacyAvailable": false
++      },
++      {
++        "actionKey": "bank-bu:export-aggregate",
++        "capabilityStatus": "legacy-only",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "adapterKind": "legacy-main",
++        "commitKind": "legacy-task-policy",
++        "artifactKind": "legacy-task-policy",
++        "resourceProfile": null,
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": false,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "bank-bu:export-single",
++        "capabilityStatus": "legacy-only",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "adapterKind": "legacy-main",
++        "commitKind": "legacy-task-policy",
++        "artifactKind": "legacy-task-policy",
++        "resourceProfile": null,
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": false,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "bank-bu:import-month",
++        "capabilityStatus": "legacy-only",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "adapterKind": "legacy-main",
++        "commitKind": "legacy-task-policy",
++        "artifactKind": "legacy-task-policy",
++        "resourceProfile": null,
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": false,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "bank-bu:run",
++        "capabilityStatus": "legacy-only",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "adapterKind": "legacy-main",
++        "commitKind": "legacy-task-policy",
++        "artifactKind": "legacy-task-policy",
++        "resourceProfile": null,
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": false,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:delete-plan",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "none",
++        "artifactKind": "none",
++        "resourceProfile": "resource.biz-op-v327:delete-plan",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:export-errors",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.biz-op-v327:export-errors",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:export-flow-check",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.biz-op-v327:export-flow-check",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:export-flow-raw",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.biz-op-v327:export-flow-raw",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:export-op-check",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.biz-op-v327:export-op-check",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:export-op-raw",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.biz-op-v327:export-op-raw",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:export-result-diff",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.biz-op-v327:export-result-diff",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:export-result-full",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.biz-op-v327:export-result-full",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:import-candidate",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "none",
++        "artifactKind": "none",
++        "resourceProfile": "resource.biz-op-v327:import-candidate",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:reclaim",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "none",
++        "artifactKind": "none",
++        "resourceProfile": "resource.biz-op-v327:reclaim",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:run-candidate",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "none",
++        "artifactKind": "none",
++        "resourceProfile": "resource.biz-op-v327:run-candidate",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:upgrade-preflight",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "none",
++        "artifactKind": "none",
++        "resourceProfile": "resource.biz-op-v327:upgrade-preflight",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op:export-day",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.biz-op:export-day",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op:export-range",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.biz-op:export-range",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op:import-flow",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-pool",
++        "adapterKind": "existing-dispatch",
++        "commitKind": "existing-critical-protocol",
++        "artifactKind": "none",
++        "resourceProfile": "resource.biz-op:import-flow",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "duplicate:export",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.duplicate:export",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "duplicate:import",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-pool",
++        "adapterKind": "native",
++        "commitKind": "worker-durable",
++        "artifactKind": "none",
++        "resourceProfile": "resource.duplicate:import",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "duplicate:run",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "worker-durable",
++        "artifactKind": "none",
++        "resourceProfile": "resource.duplicate:run",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "fund-recon:export",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.fund-recon:export",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "fund-recon:import",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "none",
++        "artifactKind": "none",
++        "resourceProfile": "resource.fund-recon:import",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "fund-recon:run",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "none",
++        "artifactKind": "none",
++        "resourceProfile": "resource.fund-recon:run",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "new-account:generate",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.new-account:generate",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "new-account:save-as",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "inline-async",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.new-account:save-as",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pending:export-diff",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.pending:export-diff",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pending:export-errors",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.pending:export-errors",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pending:export-summary",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.pending:export-summary",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pending:import",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-pool",
++        "adapterKind": "existing-dispatch",
++        "commitKind": "existing-critical-protocol",
++        "artifactKind": "none",
++        "resourceProfile": "resource.pending:import",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "position:export-run",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.position:export-run",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "position:import",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "utility-process",
++        "adapterKind": "existing-dispatch",
++        "commitKind": "existing-critical-protocol",
++        "artifactKind": "none",
++        "resourceProfile": "resource.position:import",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pre-fund:bank-import",
++        "capabilityStatus": "legacy-only",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "adapterKind": "legacy-main",
++        "commitKind": "legacy-task-policy",
++        "artifactKind": "legacy-task-policy",
++        "resourceProfile": null,
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": false,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pre-fund:export-audit",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.pre-fund:export-audit",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pre-fund:export-channel",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.pre-fund:export-channel",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pre-fund:mpt-import",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-pool",
++        "adapterKind": "native",
++        "commitKind": "worker-durable",
++        "artifactKind": "none",
++        "resourceProfile": "resource.pre-fund:mpt-import",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pre-fund:mpt-repair-import",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "worker-durable",
++        "artifactKind": "none",
++        "resourceProfile": "resource.pre-fund:mpt-repair-import",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pre-fund:run",
++        "capabilityStatus": "legacy-only",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "adapterKind": "legacy-main",
++        "commitKind": "legacy-task-policy",
++        "artifactKind": "legacy-task-policy",
++        "resourceProfile": null,
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": false,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "recon-fix:export",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "all-or-none",
++        "resourceProfile": "resource.recon-fix:export",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "recon-fix:import",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "none",
++        "artifactKind": "none",
++        "resourceProfile": "resource.recon-fix:import",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "recon-fix:run-jpm",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "worker-durable",
++        "artifactKind": "none",
++        "resourceProfile": "resource.recon-fix:run-jpm",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "recon-fix:run-readonly",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "none",
++        "artifactKind": "none",
++        "resourceProfile": "resource.recon-fix:run-readonly",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "statement:generate-all",
++        "capabilityStatus": "legacy-only",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "adapterKind": "legacy-main",
++        "commitKind": "legacy-task-policy",
++        "artifactKind": "legacy-task-policy",
++        "resourceProfile": null,
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": false,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "statement:generate-current",
++        "capabilityStatus": "legacy-only",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "adapterKind": "legacy-main",
++        "commitKind": "legacy-task-policy",
++        "artifactKind": "legacy-task-policy",
++        "resourceProfile": null,
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": false,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "statement:import",
++        "capabilityStatus": "legacy-only",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "adapterKind": "legacy-main",
++        "commitKind": "legacy-task-policy",
++        "artifactKind": "legacy-task-policy",
++        "resourceProfile": null,
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": false,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "statement:resolve-big-account",
++        "capabilityStatus": "legacy-only",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "adapterKind": "legacy-main",
++        "commitKind": "legacy-task-policy",
++        "artifactKind": "legacy-task-policy",
++        "resourceProfile": null,
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": false,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "statement:resolve-manual-balance",
++        "capabilityStatus": "legacy-only",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "adapterKind": "legacy-main",
++        "commitKind": "legacy-task-policy",
++        "artifactKind": "legacy-task-policy",
++        "resourceProfile": null,
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": false,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "toolbox:merge",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.toolbox:merge",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "toolbox:publish",
++        "capabilityStatus": "legacy-only",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "adapterKind": "legacy-main",
++        "commitKind": "legacy-task-policy",
++        "artifactKind": "legacy-task-policy",
++        "resourceProfile": null,
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": false,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "toolbox:split-large",
++        "capabilityStatus": "legacy-only",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "adapterKind": "legacy-main",
++        "commitKind": "legacy-task-policy",
++        "artifactKind": "legacy-task-policy",
++        "resourceProfile": null,
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": false,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "toolbox:split-multi-output",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-pool",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "all-or-none",
++        "resourceProfile": "resource.toolbox:split-multi-output",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "toolbox:split-rows",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "all-or-none",
++        "resourceProfile": "resource.toolbox:split-rows",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "toolbox:split-single",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "all-or-none",
++        "resourceProfile": "resource.toolbox:split-single",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "vcc-financial-op:export-audit",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.vcc-financial-op:export-audit",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "vcc-financial-op:export-single",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "single",
++        "resourceProfile": "resource.vcc-financial-op:export-single",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "vcc-financial-op:export-subjects",
++        "capabilityStatus": "implemented",
++        "disposition": "managed",
++        "capabilityMode": "thread-pool",
++        "adapterKind": "native",
++        "commitKind": "main-settlement",
++        "artifactKind": "all-or-none",
++        "resourceProfile": "resource.vcc-financial-op:export-subjects",
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": true,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "vcc-op:compute-amounts",
++        "capabilityStatus": "legacy-only",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "adapterKind": "legacy-main",
++        "commitKind": "legacy-task-policy",
++        "artifactKind": "legacy-task-policy",
++        "resourceProfile": null,
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": false,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "vcc-op:save-run",
++        "capabilityStatus": "legacy-only",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "adapterKind": "legacy-main",
++        "commitKind": "legacy-task-policy",
++        "artifactKind": "legacy-task-policy",
++        "resourceProfile": null,
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": false,
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "vcc-op:scan-and-compute",
++        "capabilityStatus": "legacy-only",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "adapterKind": "legacy-main",
++        "commitKind": "legacy-task-policy",
++        "artifactKind": "legacy-task-policy",
++        "resourceProfile": null,
++        "handlerRoute": "legacy-main",
++        "runtimeRegistered": false,
++        "legacyAvailable": true
++      }
++    ],
++    "counts": {
++      "actionCount": 67,
++      "implementedCount": 49,
++      "legacyOnlyCount": 16,
++      "platformCanaryCount": 2
++    }
++  },
++  "productionStrategy": {
++    "snapshotVersion": 1,
++    "actions": [
++      {
++        "actionKey": "acquiring:copy-existing-diff",
++        "disposition": "managed",
++        "capabilityMode": "inline-async",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "acquiring:export-diff-workbook",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": false
++      },
++      {
++        "actionKey": "acquiring:import",
++        "disposition": "managed",
++        "capabilityMode": "thread-pool",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "existing-dispatch",
++        "eligibilityThreshold": null,
++        "downgradeReason": "PENDING_HUMAN_REVIEW",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "acquiring:run-new-eligible",
++        "disposition": "managed",
++        "capabilityMode": "thread-pool",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "existing-dispatch",
++        "eligibilityThreshold": null,
++        "downgradeReason": "PENDING_HUMAN_REVIEW",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "acquiring:run-single-or-resume",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "existing-dispatch",
++        "eligibilityThreshold": null,
++        "downgradeReason": "PENDING_HUMAN_REVIEW",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "background-execution:canary",
++        "disposition": "blocked",
++        "capabilityMode": "platform-canary",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "platform-canary-not-in-app-runtime",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": false
++      },
++      {
++        "actionKey": "background-execution:pure-compute-canary",
++        "disposition": "blocked",
++        "capabilityMode": "platform-canary",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "platform-canary-not-in-app-runtime",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": false
++      },
++      {
++        "actionKey": "bank-bu:export-aggregate",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "legacy-main",
++        "eligibilityThreshold": null,
++        "downgradeReason": "no-runtime-policy",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "bank-bu:export-single",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "legacy-main",
++        "eligibilityThreshold": null,
++        "downgradeReason": "no-runtime-policy",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "bank-bu:import-month",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "legacy-main",
++        "eligibilityThreshold": null,
++        "downgradeReason": "no-runtime-policy",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "bank-bu:run",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "legacy-main",
++        "eligibilityThreshold": null,
++        "downgradeReason": "no-runtime-policy",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:delete-plan",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "thread-single",
++        "effectiveWorkerCount": 1,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": null,
++        "featureFlag": true,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:export-errors",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "thread-single",
++        "effectiveWorkerCount": 1,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": null,
++        "featureFlag": true,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:export-flow-check",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "thread-single",
++        "effectiveWorkerCount": 1,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": null,
++        "featureFlag": true,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:export-flow-raw",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "thread-single",
++        "effectiveWorkerCount": 1,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": null,
++        "featureFlag": true,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:export-op-check",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "thread-single",
++        "effectiveWorkerCount": 1,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": null,
++        "featureFlag": true,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:export-op-raw",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "thread-single",
++        "effectiveWorkerCount": 1,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": null,
++        "featureFlag": true,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:export-result-diff",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "thread-single",
++        "effectiveWorkerCount": 1,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": null,
++        "featureFlag": true,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:export-result-full",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "thread-single",
++        "effectiveWorkerCount": 1,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": null,
++        "featureFlag": true,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:import-candidate",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "thread-single",
++        "effectiveWorkerCount": 1,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": null,
++        "featureFlag": true,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:reclaim",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "thread-single",
++        "effectiveWorkerCount": 1,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": null,
++        "featureFlag": true,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:run-candidate",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "thread-single",
++        "effectiveWorkerCount": 1,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": null,
++        "featureFlag": true,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op-v327:upgrade-preflight",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "thread-single",
++        "effectiveWorkerCount": 1,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": null,
++        "featureFlag": true,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op:export-day",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op:export-range",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "biz-op:import-flow",
++        "disposition": "managed",
++        "capabilityMode": "thread-pool",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "existing-dispatch",
++        "eligibilityThreshold": null,
++        "downgradeReason": "PENDING_HUMAN_REVIEW",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "duplicate:export",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "duplicate:import",
++        "disposition": "managed",
++        "capabilityMode": "thread-pool",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "duplicate:run",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "fund-recon:export",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "fund-recon:import",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "fund-recon:run",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "new-account:generate",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "E10-B Publisher and R3.2.3 Windows/manual gates not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "new-account:save-as",
++        "disposition": "managed",
++        "capabilityMode": "inline-async",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pending:export-diff",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pending:export-errors",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pending:export-summary",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pending:import",
++        "disposition": "managed",
++        "capabilityMode": "thread-pool",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "existing-dispatch",
++        "eligibilityThreshold": null,
++        "downgradeReason": "PENDING_HUMAN_REVIEW",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "position:export-run",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "position:import",
++        "disposition": "managed",
++        "capabilityMode": "utility-process",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "existing-dispatch",
++        "eligibilityThreshold": null,
++        "downgradeReason": "PENDING_HUMAN_REVIEW",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pre-fund:bank-import",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "legacy-main",
++        "eligibilityThreshold": null,
++        "downgradeReason": "no-runtime-policy",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pre-fund:export-audit",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pre-fund:export-channel",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pre-fund:mpt-import",
++        "disposition": "managed",
++        "capabilityMode": "thread-pool",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pre-fund:mpt-repair-import",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "pre-fund:run",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "legacy-main",
++        "eligibilityThreshold": null,
++        "downgradeReason": "no-runtime-policy",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "recon-fix:export",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "recon-fix:import",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "recon-fix:run-jpm",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "recon-fix:run-readonly",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "statement:generate-all",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "legacy-main",
++        "eligibilityThreshold": null,
++        "downgradeReason": "no-runtime-policy",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "statement:generate-current",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "legacy-main",
++        "eligibilityThreshold": null,
++        "downgradeReason": "no-runtime-policy",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "statement:import",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "legacy-main",
++        "eligibilityThreshold": null,
++        "downgradeReason": "no-runtime-policy",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "statement:resolve-big-account",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "legacy-main",
++        "eligibilityThreshold": null,
++        "downgradeReason": "no-runtime-policy",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "statement:resolve-manual-balance",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "legacy-main",
++        "eligibilityThreshold": null,
++        "downgradeReason": "no-runtime-policy",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "toolbox:merge",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "toolbox:publish",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "legacy-main",
++        "eligibilityThreshold": null,
++        "downgradeReason": "no-runtime-policy",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "toolbox:split-large",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "legacy-main",
++        "eligibilityThreshold": null,
++        "downgradeReason": "no-runtime-policy",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "toolbox:split-multi-output",
++        "disposition": "managed",
++        "capabilityMode": "thread-pool",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "Windows durability and production performance gates not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "toolbox:split-rows",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "thread-single",
++        "effectiveWorkerCount": 1,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": null,
++        "featureFlag": true,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "toolbox:split-single",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "vcc-financial-op:export-audit",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "vcc-financial-op:export-single",
++        "disposition": "managed",
++        "capabilityMode": "thread-single",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "vcc-financial-op:export-subjects",
++        "disposition": "managed",
++        "capabilityMode": "thread-pool",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "native",
++        "eligibilityThreshold": null,
++        "downgradeReason": "production gate not yet passed",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "probe",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "vcc-op:compute-amounts",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "legacy-main",
++        "eligibilityThreshold": null,
++        "downgradeReason": "no-runtime-policy",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "vcc-op:save-run",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "legacy-main",
++        "eligibilityThreshold": null,
++        "downgradeReason": "no-runtime-policy",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      },
++      {
++        "actionKey": "vcc-op:scan-and-compute",
++        "disposition": "legacy-preserved",
++        "capabilityMode": "legacy",
++        "effectiveMode": "legacy",
++        "effectiveWorkerCount": 0,
++        "adapterKind": "legacy-main",
++        "eligibilityThreshold": null,
++        "downgradeReason": "no-runtime-policy",
++        "featureFlag": false,
++        "benchmarkEvidenceId": null,
++        "recoveryStatus": "not-applicable",
++        "legacyAvailable": true
++      }
++    ],
++    "counts": {
++      "actionCount": 67,
++      "productionEnabledCount": 13,
++      "legacyEffectiveCount": 54
++    }
++  }
++}
+--- a/src/main-process/background-execution/runtime.js
++++ b/src/main-process/background-execution/runtime.js
+@@ -39,6 +39,7 @@
+       !executionDescriptors.policyRegistry.isFrozen() ||
+       typeof executionDescriptors.bindInputForAction !== 'function' ||
+       typeof executionDescriptors.beforeCarrierDispatch !== 'function' ||
++      typeof executionDescriptors.getBeforeCarrierDispatchForAction !== 'function' ||
+       typeof executionDescriptors.defaultUnitsForAction !== 'function') {
+     throw Object.assign(new Error('后台执行 runtime 需要 Main 提供已冻结的 execution descriptors'), {
+       code: 'EXECUTION_DESCRIPTOR_REQUIRED'
+@@ -74,7 +75,7 @@
+     shutdownTimeoutMs: supervisorShutdownTimeoutMs,
+     workerDurableCoordinator: options.workerDurableCoordinator,
+     carrierClosureActionKeys: options.carrierClosureActionKeys || [],
+-    beforeCarrierDispatch: executionDescriptors.beforeCarrierDispatch,
++    getBeforeCarrierDispatchForAction: executionDescriptors.getBeforeCarrierDispatchForAction,
+     bindInputForAction: executionDescriptors.bindInputForAction,
+     defaultUnitsForAction: executionDescriptors.defaultUnitsForAction,
+     ...(options.workerThreadAdapter ? { workerThreadAdapter: options.workerThreadAdapter } : {})
+--- a/src/main-process/background-execution/supervisor.js
++++ b/src/main-process/background-execution/supervisor.js
+@@ -211,6 +211,10 @@
+   }
+   if (options.beforeCarrierDispatch !== undefined && typeof options.beforeCarrierDispatch !== 'function') {
+     throw new TypeError('beforeCarrierDispatch 必须是 Main 函数');
++  }
++  if (options.getBeforeCarrierDispatchForAction !== undefined &&
++      typeof options.getBeforeCarrierDispatchForAction !== 'function') {
++    throw new TypeError('getBeforeCarrierDispatchForAction 必须是 Main 函数');
+   }
+   const carrierClosureActions = new Set(closureKeys);
+   const runtimeInstanceId = makeId('runtime');
+@@ -312,6 +316,15 @@
+       : request.context;
+     if (!context) throw new SupervisorError('CONTEXT_REQUIRED', 'Execute request requires policy context');
+     const observeCarrierClosure = carrierClosureActions.has(actionKey);
++    // 在本次任务开始时取该 action 的真实 hook；null 保留原非生产无 hook 的执行路径。
++    // 不用聚合包装函数伪装 hook，也不以其他 action 的 hook 代替当前 action 授权。
++    const beforeCarrierDispatch = observeCarrierClosure && options.getBeforeCarrierDispatchForAction
++      ? options.getBeforeCarrierDispatchForAction(actionKey)
++      : options.beforeCarrierDispatch;
++    if (beforeCarrierDispatch !== undefined && beforeCarrierDispatch !== null &&
++        typeof beforeCarrierDispatch !== 'function') {
++      throw new TypeError('getBeforeCarrierDispatchForAction 必须返回 Main 函数或 null');
++    }
+     if (observeCarrierClosure && (policy.adapterKind !== 'native' || policy.mode !== 'thread-single' ||
+         policy.lifetime !== 'job' || policy.resources.compound || !resourceGovernor)) {
+       throw new SupervisorError('CARRIER_OBSERVATION_UNSUPPORTED', '关闭观察仅支持受 Governor 管理的独立 native thread job');
+@@ -320,7 +333,7 @@
+         !context.value || context.value.operationKey !== operationKey)) {
+       throw new SupervisorError('CARRIER_TASK_IDENTITY_REQUIRED', '关闭观察要求匹配的真实任务上下文');
+     }
+-    if (observeCarrierClosure && request.production === true && !options.beforeCarrierDispatch) {
++    if (observeCarrierClosure && request.production === true && !beforeCarrierDispatch) {
+       throw new SupervisorError('CARRIER_DISPATCH_BINDING_REQUIRED', '生产关闭观察要求 Main 派发前持久绑定');
+     }
+     const taskRunId = ['operation', 'file-batch'].includes(context.kind)
+@@ -1674,8 +1687,8 @@
+       let candidate = null;
+       try {
+         if (record.terminal) return;
+-        if (observeCarrierClosure && options.beforeCarrierDispatch) {
+-          await options.beforeCarrierDispatch(carrierIdentity);
++        if (observeCarrierClosure && beforeCarrierDispatch) {
++          await beforeCarrierDispatch(carrierIdentity);
+           if (record.terminal) return;
+         }
+         record.state = 'admitting';
+--- a/src/main-process/execution-descriptors/contract.js
++++ b/src/main-process/execution-descriptors/contract.js
+@@ -297,6 +297,7 @@
+     policies: policyRegistry.list(), ...registries, staticKeys, policyRegistry,
+     moduleIds: Object.freeze([...modules.keys()]),
+     bindInputForAction(identity) { return bindingFor(identity.actionKey).bindInput(identity); },
++    getBeforeCarrierDispatchForAction(actionKey) { return bindingFor(actionKey).beforeDispatch; },
+     beforeCarrierDispatch(identity) {
+       const binding = bindingFor(identity.actionKey);
+       if (!binding.beforeDispatch) {
+--- a/src/main-process/execution-descriptors/composition.js
++++ b/src/main-process/execution-descriptors/composition.js
+@@ -3,14 +3,12 @@
+ const os = require('node:os');
+ const { compileExecutionDescriptors } = require('./contract');
+ const { createDescriptor } = require('./descriptor-builder');
+-const { isBackgroundExecutionProductionEnabled } = require('./policy-catalog');
++const { BACKGROUND_EXECUTION_POLICIES, isBackgroundExecutionProductionEnabled } = require('./policy-catalog');
+ const runtime = require('../background-execution/runtime');
+ const { createTaskPolicyRegistry: createArchiveRegistry } = require('../archive-center/task-policy-registry');
+ const { createActionTaskBindingRegistry } = require('../background-execution/action-task-binding-registry');
+-const { createActionManifest } = require('../background-execution/action-manifest');
++const { validateApprovedExecutionPolicies } = require('../background-execution/approved-execution-baseline');
+ const { validateActionCoverage } = require('../background-execution/coverage-check');
+-const { createCapabilityInventory, validateCapabilityInventory } = require('../background-execution/capability-inventory');
+-const { createEffectiveProductionStrategySnapshot, validateEffectiveProductionStrategySnapshot } = require('../background-execution/production-strategy-snapshot');
+ const { createBusinessTaskAdapterRegistrations } = require('../task-adapter-composition');
+ const { createTaskAdapterRegistry } = require('../task-adapters/registry');
+ const { createTerminalRouteRegistry } = require('../archive-center/terminal-route-registry');
+@@ -116,12 +114,10 @@
+   }
+   const actionTaskBindingRegistry = createActionTaskBindingRegistry({ taskPolicyRegistry: Object.freeze({ list: () => taskPolicyRegistry.list() }) });
+   const bindings = require('../background-execution/action-task-binding-registry').bindingSnapshot();
+-  const manifest = createActionManifest({ bindings, policies: compiled.policies });
++  const { manifest } = validateApprovedExecutionPolicies(compiled.policies, { bindings });
+   validateActionCoverage(manifest, { bindings, policies: compiled.policies });
+-  const capabilityInventory = createCapabilityInventory({ manifest, policies: compiled.policies });
+-  validateCapabilityInventory(capabilityInventory, { manifest, policies: compiled.policies });
+-  const strategy = createEffectiveProductionStrategySnapshot({ capabilityInventory, policies: compiled.policies });
+-  validateEffectiveProductionStrategySnapshot(strategy, { capabilityInventory, policies: compiled.policies });
++  // catalog 不是候选描述符的期望来源；两者分别对固定批准基线校验，防止同步漂移自证。
++  validateApprovedExecutionPolicies(BACKGROUND_EXECUTION_POLICIES, { bindings });
+   return { taskPolicyRegistry, actionTaskBindingRegistry };
+ }
+ 
+@@ -150,10 +146,19 @@
+     }),
+     createDescriptor({ moduleId: 'legacy-task-policies', policies: [], mainBindings: [], archivePolicies: legacy.archivePolicies, registration: registration('legacy-task-policies') })
+   ];
+-  const withDispatch = options.beforeCarrierDispatch === undefined ? descriptors : descriptors.map((descriptor) => ({
++  // 旧 Main 注入 BizOP 授权后，其他域即使非生产也必须提供自身派发 hook。
++  // 用显式拒绝保留该门禁；完全没有 Main 派发授权时仍为 null，保留原非生产观察路径。
++  const fallbackDispatch = options.beforeCarrierDispatch == null && options.bizOpV327
++    ? function rejectMissingMainDispatch() {
++      throw Object.assign(new Error('关闭观察缺少该模块自己的 Main 派发绑定'), {
++        code: 'CARRIER_DISPATCH_BINDING_REQUIRED'
++      });
++    }
++    : options.beforeCarrierDispatch;
++  const withDispatch = fallbackDispatch === undefined ? descriptors : descriptors.map((descriptor) => ({
+     ...descriptor,
+     mainBindings: descriptor.mainBindings.map((binding) => ({
+-      ...binding, beforeDispatch: binding.beforeDispatch === null ? options.beforeCarrierDispatch : binding.beforeDispatch
++      ...binding, beforeDispatch: binding.beforeDispatch === null ? fallbackDispatch : binding.beforeDispatch
+     }))
+   }));
+   const compiled = compileExecutionDescriptors(withDispatch, { generatedAt: '2026-08-25T00:00:00+08:00' });
+--- a/scripts/check-background-execution-manifest.js
++++ b/scripts/check-background-execution-manifest.js
+@@ -9,18 +9,14 @@
+ const {
+   bindingSnapshot
+ } = require('../src/main-process/background-execution/action-task-binding-registry');
+-const {
+-  createActionManifest
+-} = require('../src/main-process/background-execution/action-manifest');
++const { validateApprovedExecutionPolicies } = require('../src/main-process/background-execution/approved-execution-baseline');
+ const {
+   validateActionCoverage
+ } = require('../src/main-process/background-execution/coverage-check');
+ const {
+-  createCapabilityInventory,
+   validateCapabilityInventory
+ } = require('../src/main-process/background-execution/capability-inventory');
+ const {
+-  createEffectiveProductionStrategySnapshot,
+   validateEffectiveProductionStrategySnapshot
+ } = require('../src/main-process/background-execution/production-strategy-snapshot');
+ const {
+@@ -45,6 +41,9 @@
+   'src/main-process/background-execution/coverage-check.js',
+   'src/main-process/background-execution/production-strategy-snapshot.js',
+   'src/main-process/background-execution/runtime.js',
++  'src/main-process/background-execution/supervisor.js',
++  'src/main-process/background-execution/approved-execution-baseline.js',
++  'src/main-process/background-execution/approved-execution-baseline.json',
+   'src/main-process/archive-center/task-policy-common.js',
+   'src/main-process/application-recovery/composition.js',
+   'src/main-process/task-adapter-composition.js',
+@@ -97,14 +96,10 @@
+   const authority = readJson(AUTHORITY_PATH);
+   const bindings = bindingSnapshot();
+   const policies = BACKGROUND_EXECUTION_POLICIES;
+-  const manifest = createActionManifest({ bindings, policies });
++  // 先查独立批准基线，再允许任何 --write 产物写入；批准 JSON 从不在输出列表中。
++  const { manifest, capabilityInventory, productionStrategy } = validateApprovedExecutionPolicies(policies, { bindings });
+   const coverage = validateActionCoverage(manifest, { bindings, policies });
+-  const capabilityInventory = createCapabilityInventory({ manifest, policies });
+   const capabilityValidation = validateCapabilityInventory(capabilityInventory, { manifest, policies });
+-  const productionStrategy = createEffectiveProductionStrategySnapshot({
+-    capabilityInventory,
+-    policies
+-  });
+   const strategyValidation = validateEffectiveProductionStrategySnapshot(productionStrategy, {
+     capabilityInventory,
+     policies
+--- a/tests/unit/main-process/execution-descriptor-production-baseline.test.js
++++ b/tests/unit/main-process/execution-descriptor-production-baseline.test.js
+@@ -0,0 +1,141 @@
++'use strict';
++
++const assert = require('node:assert/strict');
++const path = require('node:path');
++const { spawnSync } = require('node:child_process');
++const test = require('node:test');
++const composition = require('../../../src/main-process/execution-descriptors/composition');
++const toolbox = require('../../../src/main-process/toolbox-background/execution-descriptor');
++const catalog = require('../../../src/main-process/execution-descriptors/policy-catalog');
++const { bindingSnapshot } = require('../../../src/main-process/background-execution/action-task-binding-registry');
++const root = path.resolve(__dirname, '../../..');
++
++test('固定批准基线接受当前49个runtime与13个production，catalog与私有authority保持一致', () => {
++  const compiled = composition.composeExecutionDescriptors({ availableParallelism: 4 });
++  assert.equal(compiled.policies.length, 49);
++  assert.equal(compiled.policies.filter(policy => policy.production.enabled).length, 13);
++  assert.deepEqual(compiled.policies.map(policy => policy.actionKey).sort(),
++    catalog.BACKGROUND_EXECUTION_POLICIES.map(policy => policy.actionKey).sort());
++});
++
++function drift(descriptor, scenario) {
++  const policies = structuredClone(descriptor.policies);
++  const merge = policies.find((policy) => policy.actionKey === 'toolbox:merge');
++  if (scenario === 'missing') return { ...descriptor,
++    policies: policies.filter((policy) => policy.actionKey !== merge.actionKey),
++    mainBindings: descriptor.mainBindings.filter((binding) => binding.actionKey !== merge.actionKey)
++  };
++  if (scenario === 'enable') {
++    merge.production = { ...merge.production, enabled: true, effectiveMode: 'thread-single',
++      effectiveWorkerCount: 1, downgradeReason: null };
++    return { ...descriptor, policies };
++  }
++  if (scenario === 'disable') {
++    const rows = policies.find((policy) => policy.actionKey === 'toolbox:split-rows');
++    rows.production = { ...rows.production, enabled: false, effectiveMode: 'legacy',
++      effectiveWorkerCount: 0, downgradeReason: 'unapproved-change' };
++    return { ...descriptor, policies };
++  }
++  const extra = { ...merge, actionKey: 'toolbox:split-large' };
++  if (scenario === 'legacy-production') extra.production = { ...merge.production, enabled: true,
++    effectiveMode: 'thread-single', effectiveWorkerCount: 1, downgradeReason: null };
++  return { ...descriptor,
++    policies: [...policies.filter((policy) => scenario !== 'swap' || policy.actionKey !== merge.actionKey), extra],
++    mainBindings: [
++      ...descriptor.mainBindings.filter((binding) => scenario !== 'swap' || binding.actionKey !== merge.actionKey),
++      { ...descriptor.mainBindings.find((binding) => binding.actionKey === merge.actionKey), actionKey: extra.actionKey }
++    ]
++  };
++}
++
++for (const [scenario, code] of [
++  ['missing', 'CAPABILITY_INVENTORY_SNAPSHOT_MISMATCH'],
++  ['enable', 'PRODUCTION_STRATEGY_SNAPSHOT_MISMATCH'],
++  ['legacy-production', 'CAPABILITY_INVENTORY_SNAPSHOT_MISMATCH'],
++  ['legacy-disabled', 'CAPABILITY_INVENTORY_SNAPSHOT_MISMATCH'],
++  ['swap', 'CAPABILITY_INVENTORY_SNAPSHOT_MISMATCH'],
++  ['disable', 'PRODUCTION_STRATEGY_SNAPSHOT_MISMATCH']
++]) {
++  test(`正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：${scenario}`, () => {
++    const original = toolbox.createModuleExecutionDescriptor;
++    const authorityBefore = bindingSnapshot();
++    let sideEffects = 0;
++    toolbox.createModuleExecutionDescriptor = (context) => drift(original(context), scenario);
++    try {
++      assert.throws(() => composition.createBackgroundExecutionRuntime({
++        availableParallelism: 4,
++        diagnostics: () => { sideEffects += 1; },
++        workerThreadAdapter: { start() { sideEffects += 1; throw new Error('不应创建载体'); } }
++      }), (error) => error.code === code);
++      assert.equal(sideEffects, 0);
++      assert.deepEqual(bindingSnapshot(), authorityBefore);
++      assert.equal(catalog.isBackgroundExecutionProductionEnabled('toolbox:merge'), false);
++    } finally {
++      toolbox.createModuleExecutionDescriptor = original;
++    }
++  });
++}
++
++function isolated(body) {
++  const result = spawnSync(process.execPath, ['-e', body], { cwd: root, encoding: 'utf8' });
++  assert.equal(result.status, 0, result.stderr || result.stdout);
++  return JSON.parse(result.stdout);
++}
++const changedCatalog = `
++  const catalogPath = require.resolve('./src/main-process/execution-descriptors/policy-catalog');
++  const catalog = require(catalogPath);
++  const policies = structuredClone(catalog.BACKGROUND_EXECUTION_POLICIES);
++  const merge = policies.find(p => p.actionKey === 'toolbox:merge');
++  merge.production = { ...merge.production, enabled: true, effectiveMode: 'thread-single',
++    effectiveWorkerCount: 1, downgradeReason: null };
++  require.cache[catalogPath].exports = { ...catalog, BACKGROUND_EXECUTION_POLICIES: policies };
++`;
++
++test('catalog 与 descriptor 同时漂移也不能成为彼此的批准基线', () => {
++  const result = isolated(`${changedCatalog}
++    const toolbox = require('./src/main-process/toolbox-background/execution-descriptor');
++    const original = toolbox.createModuleExecutionDescriptor;
++    toolbox.createModuleExecutionDescriptor = context => {
++      const d = original(context);
++      return { ...d, policies: d.policies.map(p => p.actionKey === merge.actionKey ? merge : p) };
++    };
++    try {
++      require('./src/main-process/execution-descriptors/composition').composeExecutionDescriptors();
++      console.log(JSON.stringify({ accepted: true }));
++    } catch (error) { console.log(JSON.stringify({ code: error.code })); }
++  `);
++  assert.equal(result.code, 'PRODUCTION_STRATEGY_SNAPSHOT_MISMATCH');
++});
++
++test('只改 catalog 同样在正式装配时拒绝，不能留下查询/实际 runtime 分叉', () => {
++  const result = isolated(`${changedCatalog}
++    try {
++      require('./src/main-process/execution-descriptors/composition').composeExecutionDescriptors();
++      console.log(JSON.stringify({ accepted: true }));
++    } catch (error) { console.log(JSON.stringify({ code: error.code })); }
++  `);
++  assert.equal(result.code, 'PRODUCTION_STRATEGY_SNAPSHOT_MISMATCH');
++});
++
++test('manifest --write 在写任何产物之前拒绝错误 catalog，不重生成批准期望', () => {
++  const result = isolated(`${changedCatalog}
++    const fs = require('node:fs');
++    const path = require('node:path');
++    const crypto = require('node:crypto');
++    const dir = 'changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/manifest-current';
++    const files = [...fs.readdirSync(dir).filter(name => name.endsWith('.json')).map(name => path.join(dir, name)),
++      'src/main-process/background-execution/approved-execution-baseline.json'];
++    const hashes = () => files.map(file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'));
++    const before = hashes();
++    let writes = 0;
++    let mkdirs = 0;
++    fs.writeFileSync = () => { writes += 1; };
++    fs.mkdirSync = () => { mkdirs += 1; };
++    process.argv = [process.execPath, 'manifest', '--write'];
++    let code;
++    try { require('./scripts/check-background-execution-manifest'); }
++    catch (error) { code = error.code; }
++    console.log(JSON.stringify({ code, writes, mkdirs, unchanged: JSON.stringify(before) === JSON.stringify(hashes()) }));
++  `);
++  assert.deepEqual(result, { code: 'PRODUCTION_STRATEGY_SNAPSHOT_MISMATCH', writes: 0, mkdirs: 0, unchanged: true });
++});
+--- a/tests/unit/main-process/execution-descriptor-dispatch-compatibility.test.js
++++ b/tests/unit/main-process/execution-descriptor-dispatch-compatibility.test.js
+@@ -0,0 +1,127 @@
++'use strict';
++
++const assert = require('node:assert/strict');
++const test = require('node:test');
++const { createBackgroundExecutionRuntime } = require('../../../src/main-process/execution-descriptors/composition');
++const { baselineRuntimeOptions } = require('../../helpers/execution-descriptor-runtime-baseline');
++
++// 只观察到达 adapter 的边界；替身不创建真实 worker，不读写业务文件。
++async function probeDispatch({ actionKey = 'toolbox:merge', production = false,
++  beforeCarrierDispatch, bizOpV327 } = {}) {
++  const events = [];
++  const runtime = createBackgroundExecutionRuntime(baselineRuntimeOptions({
++    carrierClosureActionKeys: [actionKey],
++    ...(beforeCarrierDispatch ? { beforeCarrierDispatch: (identity) => {
++      events.push('hook');
++      return beforeCarrierDispatch(identity);
++    } } : {}),
++    ...(bizOpV327 ? { bizOpV327 } : {}),
++    workerThreadAdapter: {
++      start() {
++        events.push('adapter');
++        return {
++          carrierKind: 'thread-single',
++          ready: Promise.reject(Object.assign(new Error('测试已到达 adapter'), { code: 'PROBE_REACHED_ADAPTER' })),
++          send() {}, close() {}, terminate() { return Promise.resolve(0); }
++        };
++      }
++    }
++  }));
++  const policy = runtime.policyRegistry.get(actionKey);
++  const operationKey = 'dispatch-compatibility-operation';
++  let result;
++  try {
++    result = await runtime.execute({ actionKey, operationKey, production, input: {},
++      context: { kind: 'operation', value: {
++        taskRunId: 'dispatch-compatibility-task', taskKey: actionKey,
++        moduleId: policy.moduleId, parentRunId: 'dispatch-compatibility-parent', operationKey
++      } }
++    }).then((outcome) => ({ errorCode: outcome.error && outcome.error.code }),
++      (error) => ({ errorCode: error.code }));
++    return { ...result, events, productionEnabled: policy.production.enabled };
++  } finally {
++    await runtime.shutdown();
++  }
++}
++
++test('P3：非生产关闭观察未配置派发 hook 时保持到达 adapter 的旧行为', async () => {
++  const observed = await probeDispatch();
++  assert.equal(observed.productionEnabled, false);
++  assert.equal(observed.errorCode, 'PROBE_REACHED_ADAPTER');
++  assert.deepEqual(observed.events, ['adapter']);
++});
++
++test('P3：实际已启用的生产 action 缺少派发 hook 仍在 adapter 前拒绝', async () => {
++  const observed = await probeDispatch({ actionKey: 'toolbox:split-rows', production: true });
++  assert.equal(observed.productionEnabled, true, '本例不能被 production-disabled 提前拒绝遮挡');
++  assert.equal(observed.errorCode, 'CARRIER_DISPATCH_BINDING_REQUIRED');
++  assert.deepEqual(observed.events, []);
++});
++
++test('P3：已有 BizOP Main 授权时，其他模块仍须自己的关闭观察派发绑定', async (t) => {
++  const bizOpV327 = {
++    actionKeys: ['biz-op-v327:import-candidate'],
++    bindInput({ input }) { return input; },
++    beforeDispatch() { assert.fail('不得调用其他 action 的派发 hook'); }
++  };
++  await t.test('非生产 action 保留原混合门禁拒绝', async () => {
++    const observed = await probeDispatch({ bizOpV327 });
++    assert.equal(observed.errorCode, 'CARRIER_DISPATCH_BINDING_REQUIRED');
++    assert.deepEqual(observed.events, []);
++  });
++  await t.test('生产已启用 action 仍在 adapter 前拒绝', async () => {
++    const observed = await probeDispatch({ actionKey: 'toolbox:split-rows', production: true, bizOpV327 });
++    assert.equal(observed.productionEnabled, true);
++    assert.equal(observed.errorCode, 'CARRIER_DISPATCH_BINDING_REQUIRED');
++    assert.deepEqual(observed.events, []);
++  });
++  await t.test('提供本模块通用 hook 后先执行 hook，再进入 adapter', async () => {
++    const observed = await probeDispatch({ bizOpV327,
++      beforeCarrierDispatch(identity) { assert.equal(identity.actionKey, 'toolbox:merge'); }
++    });
++    assert.equal(observed.errorCode, 'PROBE_REACHED_ADAPTER');
++    assert.deepEqual(observed.events, ['hook', 'adapter']);
++  });
++});
++
++test('P3：生产与非生产已配置 hook 均先调用 hook 再进入 adapter', async (t) => {
++  for (const production of [false, true]) {
++    await t.test(`production=${production}`, async () => {
++      const observed = await probeDispatch({ actionKey: 'toolbox:split-rows', production,
++        beforeCarrierDispatch(identity) {
++          assert.equal(identity.actionKey, 'toolbox:split-rows');
++          assert.equal(identity.operationKey, 'dispatch-compatibility-operation');
++        }
++      });
++      assert.equal(observed.errorCode, 'PROBE_REACHED_ADAPTER');
++      assert.deepEqual(observed.events, ['hook', 'adapter']);
++    });
++  }
++});
++
++test('P3：真实 hook 抛出缺授权错误时不能被非生产兼容路径吞掉', async () => {
++  const observed = await probeDispatch({ beforeCarrierDispatch() {
++    throw Object.assign(new Error('本域拒绝派发'), { code: 'CARRIER_DISPATCH_BINDING_REQUIRED' });
++  } });
++  assert.equal(observed.errorCode, 'CARRIER_DISPATCH_BINDING_REQUIRED');
++  assert.deepEqual(observed.events, ['hook']);
++});
++
++test('P3：非生产兼容路径保留 BizOP 本域派发授权，通用 hook 不能代替', async () => {
++  let dispatchCalls = 0;
++  const observed = await probeDispatch({ actionKey: 'biz-op-v327:import-candidate',
++    beforeCarrierDispatch() { assert.fail('不得回退到通用 hook'); },
++    bizOpV327: {
++      actionKeys: ['biz-op-v327:import-candidate'],
++      bindInput({ input }) { return input; },
++      beforeDispatch() {
++        dispatchCalls += 1;
++        throw Object.assign(new Error('BizOP 本域缺少授权'), { code: 'BIZOP_RUNTIME_AUTHORITY_REQUIRED' });
++      }
++    }
++  });
++  assert.equal(observed.productionEnabled, true);
++  assert.equal(dispatchCalls, 1);
++  assert.equal(observed.errorCode, 'BIZOP_RUNTIME_AUTHORITY_REQUIRED');
++  assert.deepEqual(observed.events, []);
++});

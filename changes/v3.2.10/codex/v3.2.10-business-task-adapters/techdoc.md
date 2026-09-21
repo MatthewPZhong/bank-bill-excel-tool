@@ -179,3 +179,7 @@ G1 拥有恢复阶段与 participant；本分支只注册领域 terminal 能力�
 沿用本稿既有阶段及任务 ID，按[切片完成标准](../../README.md#slice-completion)逐项交付。优先复用本功能目录已有的 `implementation-notes.md` / `verification.md`；首次实施且没有适用记录时建立 `implementation-notes.md`，使用[实施记录与状态要求](../../README.md#slice-record)中的最小字段，避免同一事实多处维护。设计 AC 和测试计划与实际迁移状态、执行结果分别记录，本次不建立实施记录占位文件。
 
 按[各治理项现行规则入口映射](../../README.md#current-rule-entrypoints)同步本切片影响的规则正文和入口链接。只有职责已在实际生产调用路径落地的模块才能记为现行入口，尚未实现的模块继续标为拟新增；不影响规则时，在切片记录中写明无需更新及原因。本次为文档要求补充，不表示生产实现、边界激活或验证已经完成。
+
+## G7 消费的注册快照入口（实施补充）
+
+`task-adapter-composition.js` 导出 `createBusinessTaskAdapterRegistrations(context)`，返回冻结 `adapters` / `taskBindings`，原 `createBusinessTaskAdapterRegistry` 复用该函数调用同一 registry。G7 可将快照按领域归入 descriptor 后重新聚合，再消费 `createTaskAdapterRegistry`；adapter 行为、scope、prepared 资源交接和终态状态机不变。这里没有新的执行/settle/cleanup hook，也没有 fallback authority。

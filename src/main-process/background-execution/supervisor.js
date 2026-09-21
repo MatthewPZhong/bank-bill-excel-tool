@@ -212,6 +212,10 @@ function createExecutionSupervisor(options = {}) {
   if (options.beforeCarrierDispatch !== undefined && typeof options.beforeCarrierDispatch !== 'function') {
     throw new TypeError('beforeCarrierDispatch 必须是 Main 函数');
   }
+  if (options.getBeforeCarrierDispatchForAction !== undefined &&
+      typeof options.getBeforeCarrierDispatchForAction !== 'function') {
+    throw new TypeError('getBeforeCarrierDispatchForAction 必须是 Main 函数');
+  }
   const carrierClosureActions = new Set(closureKeys);
   const runtimeInstanceId = makeId('runtime');
   const now = options.now || Date.now;
@@ -312,6 +316,15 @@ function createExecutionSupervisor(options = {}) {
       : request.context;
     if (!context) throw new SupervisorError('CONTEXT_REQUIRED', 'Execute request requires policy context');
     const observeCarrierClosure = carrierClosureActions.has(actionKey);
+    // 在本次任务开始时取该 action 的真实 hook；null 保留原非生产无 hook 的执行路径。
+    // 不用聚合包装函数伪装 hook，也不以其他 action 的 hook 代替当前 action 授权。
+    const beforeCarrierDispatch = observeCarrierClosure && options.getBeforeCarrierDispatchForAction
+      ? options.getBeforeCarrierDispatchForAction(actionKey)
+      : options.beforeCarrierDispatch;
+    if (beforeCarrierDispatch !== undefined && beforeCarrierDispatch !== null &&
+        typeof beforeCarrierDispatch !== 'function') {
+      throw new TypeError('getBeforeCarrierDispatchForAction 必须返回 Main 函数或 null');
+    }
     if (observeCarrierClosure && (policy.adapterKind !== 'native' || policy.mode !== 'thread-single' ||
         policy.lifetime !== 'job' || policy.resources.compound || !resourceGovernor)) {
       throw new SupervisorError('CARRIER_OBSERVATION_UNSUPPORTED', '关闭观察仅支持受 Governor 管理的独立 native thread job');
@@ -320,7 +333,7 @@ function createExecutionSupervisor(options = {}) {
         !context.value || context.value.operationKey !== operationKey)) {
       throw new SupervisorError('CARRIER_TASK_IDENTITY_REQUIRED', '关闭观察要求匹配的真实任务上下文');
     }
-    if (observeCarrierClosure && request.production === true && !options.beforeCarrierDispatch) {
+    if (observeCarrierClosure && request.production === true && !beforeCarrierDispatch) {
       throw new SupervisorError('CARRIER_DISPATCH_BINDING_REQUIRED', '生产关闭观察要求 Main 派发前持久绑定');
     }
     const taskRunId = ['operation', 'file-batch'].includes(context.kind)
@@ -1674,8 +1687,8 @@ function createExecutionSupervisor(options = {}) {
       let candidate = null;
       try {
         if (record.terminal) return;
-        if (observeCarrierClosure && options.beforeCarrierDispatch) {
-          await options.beforeCarrierDispatch(carrierIdentity);
+        if (observeCarrierClosure && beforeCarrierDispatch) {
+          await beforeCarrierDispatch(carrierIdentity);
           if (record.terminal) return;
         }
         record.state = 'admitting';

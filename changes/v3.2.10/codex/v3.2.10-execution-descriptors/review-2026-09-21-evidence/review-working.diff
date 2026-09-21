@@ -1,0 +1,3193 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index 2a8788bb..9a663bb2 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -74,3 +74,5 @@
+ - [应用恢复与共享发布恢复](src/main-process/application-recovery/README.md)：应用阶段、平台扫描事实、participant/owner 接口、授权与调用边界。
+ - [VCC 纯 hash 与映射血缘合同](src/backend/vcc-financial-op/README.md)：纯函数依赖、旧导出兼容与验证入口。
+ - [Acquiring 仓储与多 worker 执行边界](src/backend/acquiring-bill-currency-db/README.md)：repository/service/executor 职责、真实退出屏障、partial/resume 与受管 part 合同。
++
++- G7 执行与归档静态装配：[execution-descriptors/README.md](src/main-process/execution-descriptors/README.md)。
+diff --git a/changes/v3.2.10/README.md b/changes/v3.2.10/README.md
+index d16afcb4..5aeb41e2 100644
+--- a/changes/v3.2.10/README.md
++++ b/changes/v3.2.10/README.md
+@@ -6,16 +6,16 @@
+ | 文档日期 | 2026-09-20 |
+ | 用户已确认 | G1–G8 每项独立 Spec / TechDoc；按 v3.2.9 的功能分支目录组织；写清具体模块、接口、职责、迁移与验收 |
+ | 设计及源码基线 | `main@11086a3cbf632a30adbcfa796e4cd81810c5aef9`；本地附注标签 `v3.2.9` 指向同一提交 |
+-| 集成分支 | `release/v3.2.10`；本轮 G1/G4/G5/G6 组合源码提交为 `49ac95a80bf884a0bfdc2f53ecbfdb4dd982819e`，后续记录提交及验证见 [本地集成记录](release.md) |
+-| 功能分支状态 | G1、G4、G5、G6 已逐项合入；G2/G3/G7/G8 未纳入本次集成，下表保留计划名称 |
++| 集成分支 | `release/v3.2.10`；本 G7 功能分支纳入固定依赖 `8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05`（G1/G2/G4/G5/G6），[固定依赖证据](codex/v3.2.10-execution-descriptors/evidence/dependency-integration.json)；release 自身记录见 [release.md](release.md) |
++| 功能分支状态 | 上述固定依赖已含 G1/G2/G4/G5/G6；G7 在本功能分支实施、未集成，见 [实施记录](codex/v3.2.10-execution-descriptors/implementation-notes.md)；G3/G8 未纳入此固定依赖 |
+ | 交付状态 | 设计审查、模块实施与 release 组合验证分开记录；本次本地集成不代表正式发布或平台人工验收通过 |
+ | 独立审查修订 | R1–R9 及 G8 历史损坏配置恢复建议均在设计层关闭，无已知待修必改项；处置、验收映射和三轮依据见 [修订记录](review-response.md)，独立报告保持原状 |
+ | 依据 | [模块耦合审查](../architecture-coupling/2026-09-20/review.md)及该目录的静态扫描、局部探针证据 |
+ | 格式参考 | [v3.2.9 按行拆分 Spec](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/spec.md)、[TechDoc](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/techdoc.md)的元数据、行为合同、分阶段实施和验收结构 |
+ 
+-已纳入模块的实施记录：[G1](codex/v3.2.10-application-recovery/implementation-notes.md)、[G4](codex/v3.2.10-shared-xlsx-infrastructure/implementation-notes.md)、[G5](codex/v3.2.10-bizop-query-boundaries/implementation-notes.md)、[G6](codex/v3.2.10-storage-execution-separation/implementation-notes.md)。这些材料保留各功能实施时点的记录；当前集成 SHA、冲突处理与组合验证以 [release.md](release.md) 为准。下文第三轮设计审查状态保留为原设计基线。
++已纳入模块的实施记录：[G1](codex/v3.2.10-application-recovery/implementation-notes.md)、[G2](codex/v3.2.10-business-task-adapters/implementation-notes.md)、[G4](codex/v3.2.10-shared-xlsx-infrastructure/implementation-notes.md)、[G5](codex/v3.2.10-bizop-query-boundaries/implementation-notes.md)、[G6](codex/v3.2.10-storage-execution-separation/implementation-notes.md)。这些材料保留各功能实施时点的记录；当前集成 SHA、冲突处理与组合验证以 [release.md](release.md) 为准。下文第三轮设计审查状态保留为原设计基线。
+ 
+-本工作树已带入 G1/G4/G5/G6 及各自审查材料；G2/G3/G7/G8 的设计仍从[主工作区总索引](/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/README.md)读取。下列未集成功能的相对链接待各功能文档集成后在本树可用，不表示这些项已实施。
++本 G7 工作树采用上述已集成依赖的材料；G7 及必要引用设计从用户指定的[主工作区总索引](/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/README.md)读取并带入。G7 当前事实见本功能实施记录，G3/G8 的设计副本不表示实现已集成。下文 §2.1 与设计审查段落保留原调查/设计时点，当前固定 SHA 以上表为准。
+ 
+ ## 1. 功能分支与交付文件
+ 
+@@ -169,7 +169,7 @@ G8 尚未集成时，相关切片仍须完成自己的行为验证，并按原
+ 
+ 当前既有项目入口是根 [AGENTS.md](../../AGENTS.md) 的架构摘要/资料入口及 [CODEX.md](../../CODEX.md) 的工作流/资料索引；长期专项约束继续以对应 `rules/` 正文为准，例如 [run 级存储约定](../../rules/run-scoped-data-policy.md)。版本 Spec/TechDoc 保存设计合同，切片记录保存实施证据，模块现行说明保存已经落地的职责与使用方式，三者互相链接。
+ 
+-下表是实施时的默认落点；本 release 已建立 G1、G2、G4、G5、G6 入口，G3/G7/G8 模块 README 仍为拟新增，不能作为已存在的规则入口。首个涉及该模块实际职责的切片建立说明；若届时已有覆盖同一职责的权威说明，则复用该说明，并在本表和切片记录中更新准确路径，避免两份正文。记录模块实际入口、状态/副作用归属、允许/禁止依赖、当前兼容接口及代表性测试链接即可，不复制完整版本设计。
++下表是实施时的默认落点；本 release 已建立 G1、G2、G4、G5、G6 入口，G7 在功能分支已建立说明，G3/G8 模块 README 仍为拟新增，不能作为已存在的规则入口。首个涉及该模块实际职责的切片建立说明；若届时已有覆盖同一职责的权威说明，则复用该说明，并在本表和切片记录中更新准确路径，避免两份正文。记录模块实际入口、状态/副作用归属、允许/禁止依赖、当前兼容接口及代表性测试链接即可，不复制完整版本设计。
+ 
+ | 治理项 / 维护者 | 默认人读现行说明入口（实施时建立或复用） | 切片应同步的内容 |
+ | --- | --- | --- |
+@@ -179,7 +179,7 @@ G8 尚未集成时，相关切片仍须完成自己的行为验证，并按原
+ | G4 XLSX 切片 | [src/backend/xlsx/README.md](../../src/backend/xlsx/README.md)（已集成） | 两类 reader 的适用入口和能力差异、预算/关闭/临时资源所有权、旧 shim 现状；不把目录提取写成性能升级。 |
+ | G5 BizOP 查询切片 | [src/main-process/biz-op-v327/README.md](../../src/main-process/biz-op-v327/README.md)（已集成） | queries 与 commands 的边界、catalog.db 合法保留者、Archive 查询入口及准入/预算归属；仅补本项涉及的实际内容。 |
+ | G6 VCC / Acquiring 切片 | [VCC](../../src/backend/vcc-financial-op/README.md)、[Acquiring](../../src/backend/acquiring-bill-currency-db/README.md)（已集成） | 分别记录纯 hash/lineage 合同，以及 repository/service/executor 的实际入口、B0 退出屏障、partial/resume/清理顺序；已有存储专项约束只引用，语义未变时不机械改写。 |
+-| G7 描述符切片 | `src/main-process/execution-descriptors/README.md` | 静态装配、独立 authority、各 registry 所有权和新增 action 的真实步骤；引用 G1/G2 说明，不另定义生命周期。 |
++| G7 描述符切片 | [src/main-process/execution-descriptors/README.md](../../src/main-process/execution-descriptors/README.md)（功能分支已建立，未集成） | 静态装配、独立 authority、各 registry 所有权和新增 action 的真实步骤；引用 G1/G2 说明，不另定义生命周期。 |
+ | G8 检查器切片 | `architecture/README.md` | 检查命令、配置入口、覆盖盲区、激活/例外/退役规则及消费者维护方式；机器正文仍在 `boundaries.json`、`legacy-allowlist.json`，人读说明只解释与链接。 |
+ 
+ 每份说明首次落地时，在根 `AGENTS.md` 的资料入口增加链接或更新其已有导读位置；只添加导航，不重复模块规则正文。后续修改职责/接口/兼容或验证入口的切片，更新对应模块说明；更名或移动时同步导读和消费者引用。已有合适上层模块索引时可通过该索引承接，并在切片记录留下从根入口到该说明的路径。
+diff --git a/changes/v3.2.10/codex/v3.2.10-application-recovery/techdoc.md b/changes/v3.2.10/codex/v3.2.10-application-recovery/techdoc.md
+index 6f951364..921708ea 100644
+--- a/changes/v3.2.10/codex/v3.2.10-application-recovery/techdoc.md
++++ b/changes/v3.2.10/codex/v3.2.10-application-recovery/techdoc.md
+@@ -255,3 +255,7 @@ G7 只能引用本稿 participant/coordinator 接口并汇总注册，不改变
+ 沿用本稿既有阶段及任务 ID，按[切片完成标准](../../README.md#slice-completion)逐项交付。优先复用本功能目录已有的 `implementation-notes.md` / `verification.md`；首次实施且没有适用记录时建立 `implementation-notes.md`，使用[实施记录与状态要求](../../README.md#slice-record)中的最小字段，避免同一事实多处维护。设计 AC 和测试计划与实际迁移状态、执行结果分别记录，本次不建立实施记录占位文件。
+ 
+ 按[各治理项现行规则入口映射](../../README.md#current-rule-entrypoints)同步本切片影响的规则正文和入口链接。只有职责已在实际生产调用路径落地的模块才能记为现行入口，尚未实现的模块继续标为拟新增；不影响规则时，在切片记录中写明无需更新及原因。本次为文档要求补充，不表示生产实现、边界激活或验证已经完成。
++
++## G7 消费的注册快照入口（实施补充）
++
++`application-recovery/composition.js` 导出 `createApplicationRecoveryParticipants(context)` 和固定 `RECOVERY_PARTICIPANT_ORDER`，供 G7 聚合已有注册项；`createApplicationRecoveryComposition` 可消费显式 `participants`，必须与原固定顺序完整一致，否则在创建 coordinator 前拒绝。默认调用仍使用同一注册快照工厂。此补充只提取既有 registrations，恢复执行、phase、owner proof、publication 授权和副作用仍归 G1 原 coordinator，不引入第二套恢复路径。G7 拆分/重新聚合后须按该 G1 顺序传回，不能由 descriptor 枚举顺序决定启动次序。
+diff --git a/changes/v3.2.10/codex/v3.2.10-business-task-adapters/techdoc.md b/changes/v3.2.10/codex/v3.2.10-business-task-adapters/techdoc.md
+index d9865e4c..fa2cecb8 100644
+--- a/changes/v3.2.10/codex/v3.2.10-business-task-adapters/techdoc.md
++++ b/changes/v3.2.10/codex/v3.2.10-business-task-adapters/techdoc.md
+@@ -179,3 +179,7 @@ G1 拥有恢复阶段与 participant；本分支只注册领域 terminal 能力
+ 沿用本稿既有阶段及任务 ID，按[切片完成标准](../../README.md#slice-completion)逐项交付。优先复用本功能目录已有的 `implementation-notes.md` / `verification.md`；首次实施且没有适用记录时建立 `implementation-notes.md`，使用[实施记录与状态要求](../../README.md#slice-record)中的最小字段，避免同一事实多处维护。设计 AC 和测试计划与实际迁移状态、执行结果分别记录，本次不建立实施记录占位文件。
+ 
+ 按[各治理项现行规则入口映射](../../README.md#current-rule-entrypoints)同步本切片影响的规则正文和入口链接。只有职责已在实际生产调用路径落地的模块才能记为现行入口，尚未实现的模块继续标为拟新增；不影响规则时，在切片记录中写明无需更新及原因。本次为文档要求补充，不表示生产实现、边界激活或验证已经完成。
++
++## G7 消费的注册快照入口（实施补充）
++
++`task-adapter-composition.js` 导出 `createBusinessTaskAdapterRegistrations(context)`，返回冻结 `adapters` / `taskBindings`，原 `createBusinessTaskAdapterRegistry` 复用该函数调用同一 registry。G7 可将快照按领域归入 descriptor 后重新聚合，再消费 `createTaskAdapterRegistry`；adapter 行为、scope、prepared 资源交接和终态状态机不变。这里没有新的执行/settle/cleanup hook，也没有 fallback authority。
+diff --git a/rules/integration-test-policy.md b/rules/integration-test-policy.md
+index 5412fd82..6be50333 100644
+--- a/rules/integration-test-policy.md
++++ b/rules/integration-test-policy.md
+@@ -125,76 +125,79 @@ run().catch((e) => { console.error('FATAL', e); process.exit(1); });
+ 
+ ## 七、当前集成测试清单（自动同步）
+ 
+-<!-- auto-generated by scripts/integration-runner.js, last-updated: 2026-09-20T22:25:08+08:00 -->
++<!-- auto-generated by scripts/integration-runner.js, last-updated: 2026-09-21T00:53:10+08:00 -->
+ <!-- DO NOT EDIT MANUALLY — modify scripts/integration/*.js then re-run `npm run test:integration` -->
+ 
+ | 脚本 | 用例数 | 断言数 | 耗时 (ms) |
+ |---|---|---|---|
+-| `acquiring-bill-currency-idle-cleanup.js` | 38 | 38 | 977 |
+-| `acquiring-bill-currency-n4-migration.js` | 128 | 128 | 669 |
+-| `acquiring-engine-migration.js` | 45 | 45 | 5235 |
+-| `acquiring-index-slim-v2.js` | 22 | 22 | 214 |
+-| `acquiring-side-db-parity.js` | 19 | 19 | 604 |
+-| `acquiring-worker-boundary.js` | 14 | 14 | 595 |
+-| `application-recovery-governance.js` | 4 | 4 | 798 |
+-| `archive-biz-op-auto-report-retention.js` | 6 | 6 | 9443 |
+-| `archive-center-module-retention.js` | 11 | 11 | 1450 |
+-| `archive-center-permanent-delete.js` | 52 | 52 | 33762 |
+-| `background-execution-pure-compute-canary.js` | 9 | 9 | 112 |
+-| `background-execution-recovery-canary.js` | 9 | 9 | 126 |
+-| `background-execution-recovery-control.js` | 27 | 27 | 101 |
+-| `bank-bu-background-dual-parser.js` | 9 | 9 | 272 |
+-| `bank-bu-background-single-jobs.js` | 21 | 21 | 539 |
+-| `bank-bu-recon-side-db-parity.js` | 17 | 17 | 338 |
+-| `bank-statement-hit-scenario-report.js` | 49 | 49 | 224 |
+-| `bank-statement-many-to-many-review-sheet.js` | 33 | 33 | 232 |
+-| `bank-statement-universal-import-routing.js` | 20 | 20 | 326 |
+-| `big-table-import-engine.js` | 19 | 19 | 7666 |
+-| `biz-op-auto-error-report.js` | 12 | 12 | 10761 |
+-| `biz-op-query-boundary.js` | 9 | 9 | 7978 |
+-| `biz-op-recon-side-db-parity.js` | 16 | 16 | 331 |
+-| `bizop-flow-engine-migration.js` | 73 | 73 | 5334 |
+-| `dark-mode-schedule-settings.js` | 6 | 6 | 203 |
+-| `duplicate-inbound-match-end-to-end.js` | 31 | 31 | 352 |
+-| `fund-transfer-recon-account-mapping.js` | 19 | 19 | 187 |
+-| `gateway-channel-filter-equivalence.js` | 23 | 23 | 190 |
+-| `linked-fx-open7-stale-hit-e2e.js` | 27 | 27 | 185 |
+-| `linked-table-delete-by-range-tablekey.js` | 73 | 73 | 192 |
+-| `new-account-balance-statement.js` | 36 | 36 | 239 |
+-| `pending-data-reconciliation.js` | 33 | 33 | 51 |
+-| `pending-engine-migration.js` | 57 | 57 | 5342 |
+-| `pending-removal-reconcile.js` | 62 | 62 | 212 |
+-| `position-reconciliation-side-db-parity.js` | 38 | 38 | 279 |
+-| `pre-fund-reconciliation-output-contract.js` | 15 | 15 | 286 |
+-| `pre-fund-reconciliation-side-db-parity.js` | 69 | 69 | 344 |
+-| `refund-backfill-yellow-fill-e2e.js` | 258 | 258 | 212 |
+-| `shared-xlsx-boundary.js` | 51 | 51 | 3269 |
+-| `statement-generation-pipeline.js` | 45 | 45 | 247 |
+-| `toolbox-large-file-stream.js` | 50 | 50 | 143216 |
+-| `toolbox-large-split-multi-sheet.js` | 31 | 31 | 273562 |
+-| `toolbox-multi-sheet-merge.js` | 16 | 16 | 15288 |
+-| `toolbox-multi-split-roundtrip.js` | 17 | 17 | 546 |
+-| `toolbox-roundtrip.js` | 30 | 30 | 185 |
+-| `toolbox-row-split-admission.js` | 2 | 2 | 833 |
+-| `toolbox-row-split-archive-delete.js` | 2 | 2 | 1066 |
+-| `v2.1.10-a3-phase1.js` | 40 | 40 | 2945 |
+-| `v2.1.10-a3-phase2.js` | 56 | 56 | 2089 |
+-| `v2.1.10-a4-phase3.js` | 75 | 75 | 15380 |
+-| `v2.1.10-n4-cont-1-phase4.js` | 33 | 33 | 904 |
+-| `v2.1.10-n4-cont-2-phase5.js` | 43 | 43 | 609 |
+-| `v2.1.12-beta-multiworker-nested.js` | - | - | 2921 |
+-| `v2.1.9-n5-end-to-end.js` | 68 | 68 | 263 |
+-| `v2.1.9-n5-migration.js` | 67 | 67 | 258 |
+-| `v2.1.9-sr-fix-1-coverage.js` | 148 | 148 | 345 |
+-| `v2.1.9-sr-log-1.js` | 33 | 33 | 217 |
+-| `v3.0.0-linked-streaming-import.js` | 19 | 19 | 251 |
+-| `v3.0.1-linked-gateway-upsert.js` | 40 | 40 | 239 |
+-| `v3.0.4-boc-dispatch-order-fix.js` | 31 | 31 | 277 |
+-| `vcc-financial-op-adjustment-archive-chain.js` | 226 | 226 | 1354 |
+-| `vcc-financial-op-destructive-state-chain.js` | 77 | 77 | 1542 |
+-| `vcc-financial-op-effective-result.js` | 19 | 19 | 144 |
+-| `vcc-financial-op-historical-template-export.js` | 29 | 29 | 1152 |
+-| **合计** | **2657** | **2657** | **565463** |
++| `acquiring-bill-currency-idle-cleanup.js` | 38 | 38 | 967 |
++| `acquiring-bill-currency-n4-migration.js` | 128 | 128 | 609 |
++| `acquiring-engine-migration.js` | 45 | 45 | 4953 |
++| `acquiring-index-slim-v2.js` | 22 | 22 | 204 |
++| `acquiring-side-db-parity.js` | 19 | 19 | 577 |
++| `acquiring-worker-boundary.js` | 14 | 14 | 591 |
++| `application-recovery-governance.js` | 4 | 4 | 819 |
++| `archive-biz-op-auto-report-retention.js` | 6 | 6 | 7581 |
++| `archive-center-module-retention.js` | 11 | 11 | 1569 |
++| `archive-center-permanent-delete.js` | 52 | 52 | 31061 |
++| `background-execution-pure-compute-canary.js` | 9 | 9 | 108 |
++| `background-execution-recovery-canary.js` | 9 | 9 | 114 |
++| `background-execution-recovery-control.js` | 27 | 27 | 298 |
++| `bank-bu-background-dual-parser.js` | 9 | 9 | 264 |
++| `bank-bu-background-single-jobs.js` | 21 | 21 | 519 |
++| `bank-bu-recon-side-db-parity.js` | 17 | 17 | 321 |
++| `bank-statement-hit-scenario-report.js` | 49 | 49 | 216 |
++| `bank-statement-many-to-many-review-sheet.js` | 33 | 33 | 218 |
++| `bank-statement-universal-import-routing.js` | 20 | 20 | 293 |
++| `big-table-import-engine.js` | 19 | 19 | 7517 |
++| `biz-op-auto-error-report.js` | 12 | 12 | 10088 |
++| `biz-op-query-boundary.js` | 9 | 9 | 7750 |
++| `biz-op-recon-side-db-parity.js` | 16 | 16 | 332 |
++| `bizop-flow-engine-migration.js` | 73 | 73 | 5179 |
++| `dark-mode-schedule-settings.js` | 6 | 6 | 212 |
++| `duplicate-inbound-match-end-to-end.js` | 31 | 31 | 366 |
++| `execution-descriptor-governance.js` | 4 | 4 | 876 |
++| `fund-transfer-recon-account-mapping.js` | 19 | 19 | 201 |
++| `gateway-channel-filter-equivalence.js` | 23 | 23 | 207 |
++| `linked-fx-open7-stale-hit-e2e.js` | 27 | 27 | 194 |
++| `linked-table-delete-by-range-tablekey.js` | 73 | 73 | 197 |
++| `new-account-balance-statement.js` | 36 | 36 | 236 |
++| `pending-data-reconciliation.js` | 33 | 33 | 52 |
++| `pending-engine-migration.js` | 57 | 57 | 5174 |
++| `pending-removal-reconcile.js` | 62 | 62 | 196 |
++| `position-reconciliation-side-db-parity.js` | 38 | 38 | 263 |
++| `position-startup-task-recovery.js` | 3 | 3 | 2269 |
++| `pre-fund-reconciliation-output-contract.js` | 15 | 15 | 272 |
++| `pre-fund-reconciliation-side-db-parity.js` | 69 | 69 | 329 |
++| `refund-backfill-yellow-fill-e2e.js` | 258 | 258 | 197 |
++| `shared-xlsx-boundary.js` | 51 | 51 | 3191 |
++| `statement-generation-pipeline.js` | 45 | 45 | 232 |
++| `task-adapter-recovery.js` | 4 | 4 | 543 |
++| `toolbox-large-file-stream.js` | 50 | 50 | 134480 |
++| `toolbox-large-split-multi-sheet.js` | 31 | 31 | 74176 |
++| `toolbox-multi-sheet-merge.js` | 16 | 16 | 14663 |
++| `toolbox-multi-split-roundtrip.js` | 17 | 17 | 540 |
++| `toolbox-roundtrip.js` | 30 | 30 | 181 |
++| `toolbox-row-split-admission.js` | 2 | 2 | 862 |
++| `toolbox-row-split-archive-delete.js` | 2 | 2 | 1045 |
++| `v2.1.10-a3-phase1.js` | 40 | 40 | 2838 |
++| `v2.1.10-a3-phase2.js` | 56 | 56 | 2085 |
++| `v2.1.10-a4-phase3.js` | 75 | 75 | 14633 |
++| `v2.1.10-n4-cont-1-phase4.js` | 33 | 33 | 841 |
++| `v2.1.10-n4-cont-2-phase5.js` | 43 | 43 | 553 |
++| `v2.1.12-beta-multiworker-nested.js` | - | - | 2876 |
++| `v2.1.9-n5-end-to-end.js` | 68 | 68 | 229 |
++| `v2.1.9-n5-migration.js` | 67 | 67 | 216 |
++| `v2.1.9-sr-fix-1-coverage.js` | 148 | 148 | 260 |
++| `v2.1.9-sr-log-1.js` | 33 | 33 | 153 |
++| `v3.0.0-linked-streaming-import.js` | 19 | 19 | 230 |
++| `v3.0.1-linked-gateway-upsert.js` | 40 | 40 | 234 |
++| `v3.0.4-boc-dispatch-order-fix.js` | 31 | 31 | 263 |
++| `vcc-financial-op-adjustment-archive-chain.js` | 226 | 226 | 1274 |
++| `vcc-financial-op-destructive-state-chain.js` | 77 | 77 | 1456 |
++| `vcc-financial-op-effective-result.js` | 19 | 19 | 137 |
++| `vcc-financial-op-historical-template-export.js` | 29 | 29 | 1081 |
++| **合计** | **2668** | **2668** | **352661** |
+ 
+ > 同步策略：runner 末尾全 PASS 时 in-place 替换本章节；任一脚本 FAIL → 本章节不更新（避免被损坏数据覆盖）。
+ 
+diff --git a/scripts/benchmark-prefund-parser-pool.js b/scripts/benchmark-prefund-parser-pool.js
+index 673dab58..a6823a57 100644
+--- a/scripts/benchmark-prefund-parser-pool.js
++++ b/scripts/benchmark-prefund-parser-pool.js
+@@ -8,7 +8,7 @@ const path = require('node:path');
+ 
+ const {
+   createNonProductionBackgroundExecutionRuntime
+-} = require('../src/main-process/background-execution/runtime');
++} = require('../src/main-process/execution-descriptors/composition');
+ const {
+   createResourceGovernor
+ } = require('../src/main-process/background-execution/resource-governor');
+diff --git a/scripts/benchmark-recon-fix-service.js b/scripts/benchmark-recon-fix-service.js
+index 85265d56..a81f0fe4 100644
+--- a/scripts/benchmark-recon-fix-service.js
++++ b/scripts/benchmark-recon-fix-service.js
+@@ -19,7 +19,7 @@ const {
+ } = require('../src/constants/recon-id-fix-fields');
+ const {
+   createBackgroundExecutionRuntime
+-} = require('../src/main-process/background-execution/runtime');
++} = require('../src/main-process/execution-descriptors/composition');
+ const {
+   RECON_FIX_IMPORT_ACTION,
+   RECON_FIX_RUN_READONLY_ACTION,
+diff --git a/scripts/check-background-execution-manifest.js b/scripts/check-background-execution-manifest.js
+index 7be9a357..2b2385db 100644
+--- a/scripts/check-background-execution-manifest.js
++++ b/scripts/check-background-execution-manifest.js
+@@ -25,15 +25,15 @@ const {
+ } = require('../src/main-process/background-execution/production-strategy-snapshot');
+ const {
+   BACKGROUND_EXECUTION_POLICIES
+-} = require('../src/main-process/background-execution/runtime');
++} = require('../src/main-process/execution-descriptors/policy-catalog');
+ 
+ const REPOSITORY_ROOT = path.resolve(__dirname, '..');
+ const AUTHORITY_PATH = 'changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/recovery-contract-authority.v1.json';
+ const OUTPUT_PATHS = Object.freeze({
+-  manifest: 'changes/3.2.5/e13-g-action-manifest.json',
+-  capabilityInventory: 'changes/3.2.5/e13-g-capability-inventory.json',
+-  productionStrategy: 'changes/3.2.5/e13-g-production-strategy-snapshot.json',
+-  coverageReport: 'changes/3.2.5/e13-g-coverage-report.json'
++  manifest: 'changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/manifest-current/e13-g-action-manifest.json',
++  capabilityInventory: 'changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/manifest-current/e13-g-capability-inventory.json',
++  productionStrategy: 'changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/manifest-current/e13-g-production-strategy-snapshot.json',
++  coverageReport: 'changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/manifest-current/e13-g-coverage-report.json'
+ });
+ const SOURCE_PATHS = Object.freeze([
+   'scripts/check-background-execution-manifest.js',
+@@ -44,7 +44,37 @@ const SOURCE_PATHS = Object.freeze([
+   'src/main-process/background-execution/capability-inventory.js',
+   'src/main-process/background-execution/coverage-check.js',
+   'src/main-process/background-execution/production-strategy-snapshot.js',
+-  'src/main-process/background-execution/runtime.js'
++  'src/main-process/background-execution/runtime.js',
++  'src/main-process/archive-center/task-policy-common.js',
++  'src/main-process/application-recovery/composition.js',
++  'src/main-process/task-adapter-composition.js',
++  'src/main-process/execution-descriptors/composition.js',
++  'src/main-process/execution-descriptors/contract.js',
++  'src/main-process/execution-descriptors/descriptor-builder.js',
++  'src/main-process/execution-descriptors/legacy-task-policies.js',
++  'src/main-process/execution-descriptors/mature-adapters.js',
++  'src/main-process/execution-descriptors/policy-catalog.js',
++  'src/main-process/biz-op-v327/execution-descriptor.js',
++  'src/main-process/duplicate-inbound-match/execution-descriptor.js',
++  'src/main-process/fund-recon-worker/execution-descriptor.js',
++  'src/main-process/new-account/execution-descriptor.js',
++  'src/main-process/new-account/generation-contract.js',
++  'src/main-process/new-account/policies.js',
++  'src/main-process/new-account/artifact-copy.js',
++  'src/main-process/position-reconciliation/execution-descriptor.js',
++  'src/main-process/pre-fund-reconciliation/execution-descriptor.js',
++  'src/main-process/recon-id-fix-service/execution-descriptor.js',
++  'src/main-process/toolbox-background/execution-descriptor.js',
++  'src/main-process/vcc-financial-op-output/execution-descriptor.js',
++  'src/main-process/biz-op-v327/archive-task-policies.js',
++  'src/main-process/duplicate-inbound-match/archive-task-policies.js',
++  'src/main-process/fund-recon-worker/archive-task-policies.js',
++  'src/main-process/new-account/archive-task-policies.js',
++  'src/main-process/position-reconciliation/archive-task-policies.js',
++  'src/main-process/pre-fund-reconciliation/archive-task-policies.js',
++  'src/main-process/recon-id-fix-service/archive-task-policies.js',
++  'src/main-process/toolbox-background/archive-task-policies.js',
++  'src/main-process/vcc-financial-op-output/archive-task-policies.js'
+ ]);
+ 
+ function absolute(relativePath) {
+@@ -81,8 +111,8 @@ function buildArtifacts() {
+   });
+   const coverageReport = {
+     reportVersion: 1,
+-    release: 'v3.2.5',
+-    workItem: 'E13-G',
++    release: 'v3.2.10',
++    workItem: 'G7',
+     contractAuthority: {
+       contractVersion: authority.contractVersion,
+       revision: authority.revision,
+@@ -103,6 +133,7 @@ function buildArtifacts() {
+ }
+ 
+ function writeJson(relativePath, value) {
++  fs.mkdirSync(path.dirname(absolute(relativePath)), { recursive: true });
+   fs.writeFileSync(absolute(relativePath), `${JSON.stringify(value, null, 2)}\n`);
+ }
+ 
+diff --git a/scripts/integration/archive-center-module-retention.js b/scripts/integration/archive-center-module-retention.js
+index 66288f9b..4c9e5a1c 100644
+--- a/scripts/integration/archive-center-module-retention.js
++++ b/scripts/integration/archive-center-module-retention.js
+@@ -42,7 +42,7 @@ const {
+ } = require('../../src/main-process/archive-center/operation-tracker');
+ const {
+   createTaskPolicyRegistry
+-} = require('../../src/main-process/archive-center/task-policy-registry');
++} = require('../../src/main-process/execution-descriptors/composition');
+ const {
+   createBusinessOperationRegistry
+ } = require('../../src/main-process/business-operation-registry');
+diff --git a/scripts/integration/background-execution-recovery-control.js b/scripts/integration/background-execution-recovery-control.js
+index f59751fe..3e0a6b68 100644
+--- a/scripts/integration/background-execution-recovery-control.js
++++ b/scripts/integration/background-execution-recovery-control.js
+@@ -32,7 +32,7 @@ const {
+ } = require('../../src/main-process/background-execution/task-lifecycle-adapter');
+ const {
+   createTaskPolicyRegistry
+-} = require('../../src/main-process/archive-center/task-policy-registry');
++} = require('../../src/main-process/execution-descriptors/composition');
+ 
+ let passed = 0;
+ let failed = 0;
+diff --git a/scripts/integration/position-startup-task-recovery.js b/scripts/integration/position-startup-task-recovery.js
+index 8a4b5207..094948c5 100644
+--- a/scripts/integration/position-startup-task-recovery.js
++++ b/scripts/integration/position-startup-task-recovery.js
+@@ -15,7 +15,9 @@ const { createArchiveService } = require('../../src/main-process/archive-center/
+ const { createArchiveCenterController } = require('../../src/main-process/archive-center/controller');
+ const { createArchiveOutboxStore } = require('../../src/main-process/archive-center/outbox-store');
+ const { createTerminalRouteRegistry } = require('../../src/main-process/archive-center/terminal-route-registry');
+-const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../../src/main-process/execution-descriptors/composition');
+ const { normalizeFilePlanV1, artifactManifestFromFilePlan } = require('../../src/main-process/archive-center/file-plan');
+ const { createIpcTaskContext } = require('../../src/main-process/archive-center/ipc-task-contract');
+ const { createPositionTaskOwner } = require('../../src/main-process/position-reconciliation/task-owner');
+diff --git a/scripts/integration/task-adapter-recovery.js b/scripts/integration/task-adapter-recovery.js
+index b0761409..7b64d3e6 100644
+--- a/scripts/integration/task-adapter-recovery.js
++++ b/scripts/integration/task-adapter-recovery.js
+@@ -15,7 +15,9 @@ const { createArchiveCenterController } = require('../../src/main-process/archiv
+ const { createArchiveOutboxStore } = require('../../src/main-process/archive-center/outbox-store');
+ const { createTerminalRouteRegistry } = require('../../src/main-process/archive-center/terminal-route-registry');
+ const { createTaskLifecycle } = require('../../src/main-process/archive-center/task-lifecycle');
+-const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../../src/main-process/execution-descriptors/composition');
+ const { createBusinessFlowResolver } = require('../../src/main-process/archive-center/business-flow-resolver');
+ const { createArchiveOperationTracker } = require('../../src/main-process/archive-center/operation-tracker');
+ const { createIpcTaskContext } = require('../../src/main-process/archive-center/ipc-task-contract');
+diff --git a/scripts/integration/toolbox-row-split-admission.js b/scripts/integration/toolbox-row-split-admission.js
+index 752e709e..8fe31b5c 100644
+--- a/scripts/integration/toolbox-row-split-admission.js
++++ b/scripts/integration/toolbox-row-split-admission.js
+@@ -9,7 +9,9 @@ const os = require('node:os');
+ const path = require('node:path');
+ const { randomUUID, createHash } = require('node:crypto');
+ const ExcelJS = require('exceljs');
+-const { createBackgroundExecutionRuntime } = require('../../src/main-process/background-execution/runtime');
++const {
++  createBackgroundExecutionRuntime
++} = require('../../src/main-process/execution-descriptors/composition');
+ const { scanToolboxSplitFields } = require('../../src/main-process/toolbox-format-operations');
+ const { prepareRows, generateValidateAndPublishRows } = require('../../src/main-process/toolbox-row-split/service');
+ const { publicResult, buildRowTargets, planRowCounts } = require('../../src/main-process/toolbox-row-split/contracts');
+diff --git a/scripts/integration/toolbox-row-split-archive-delete.js b/scripts/integration/toolbox-row-split-archive-delete.js
+index d620354b..0b148df4 100644
+--- a/scripts/integration/toolbox-row-split-archive-delete.js
++++ b/scripts/integration/toolbox-row-split-archive-delete.js
+@@ -13,11 +13,15 @@ const { createArchiveService } = require('../../src/main-process/archive-center/
+ const { createArchiveCenterController } = require('../../src/main-process/archive-center/controller');
+ const { createArchiveOutboxStore } = require('../../src/main-process/archive-center/outbox-store');
+ const { createTaskLifecycle } = require('../../src/main-process/archive-center/task-lifecycle');
+-const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../../src/main-process/execution-descriptors/composition');
+ const { prepareIpcTaskInvocation, createIpcTaskContext } = require('../../src/main-process/archive-center/ipc-task-contract');
+ const { sourceSnapshotFromStat, sourceSnapshotMatchesStat } = require('../../src/main-process/archive-center/source-snapshot');
+ const { pathsAlias } = require('../../src/main-process/toolbox-target-identity');
+-const { createBackgroundExecutionRuntime } = require('../../src/main-process/background-execution/runtime');
++const {
++  createBackgroundExecutionRuntime
++} = require('../../src/main-process/execution-descriptors/composition');
+ const { scanToolboxSplitFields } = require('../../src/main-process/toolbox-format-operations');
+ const { prepareRows, generateValidateAndPublishRows } = require('../../src/main-process/toolbox-row-split/service');
+ const { publicResult } = require('../../src/main-process/toolbox-row-split/contracts');
+diff --git a/scripts/perf/new-account-e10-a-readback-cancellation.js b/scripts/perf/new-account-e10-a-readback-cancellation.js
+index d674a1f1..9bd35a88 100644
+--- a/scripts/perf/new-account-e10-a-readback-cancellation.js
++++ b/scripts/perf/new-account-e10-a-readback-cancellation.js
+@@ -26,7 +26,7 @@ const {
+ } = require('../../src/main-process/background-execution/canonical-json-v1');
+ const {
+   createBackgroundExecutionRuntime
+-} = require('../../src/main-process/background-execution/runtime');
++} = require('../../src/main-process/execution-descriptors/composition');
+ const {
+   MAX_RECORDS,
+   NEW_ACCOUNT_GENERATION_ACTION
+diff --git a/scripts/validate-v3-2-2-release-evidence.js b/scripts/validate-v3-2-2-release-evidence.js
+index cb343603..3f1b7ba6 100644
+--- a/scripts/validate-v3-2-2-release-evidence.js
++++ b/scripts/validate-v3-2-2-release-evidence.js
+@@ -9,7 +9,7 @@ const { isDeepStrictEqual } = require('node:util');
+ 
+ const {
+   BACKGROUND_EXECUTION_POLICIES
+-} = require('../src/main-process/background-execution/runtime');
++} = require('../src/main-process/execution-descriptors/policy-catalog');
+ const {
+   FUND_RECON_POLICIES
+ } = require('../src/main-process/fund-recon-worker/policies');
+diff --git a/scripts/validate-v3-2-3-release-evidence.js b/scripts/validate-v3-2-3-release-evidence.js
+index e4ce327f..824d7131 100644
+--- a/scripts/validate-v3-2-3-release-evidence.js
++++ b/scripts/validate-v3-2-3-release-evidence.js
+@@ -925,7 +925,7 @@ function requireExactTrackedModule(relativePath) {
+ function loadPolicyAuthorities() {
+   if (policyAuthorities) return policyAuthorities;
+   const { BACKGROUND_EXECUTION_POLICIES } =
+-    requireExactTrackedModule('src/main-process/background-execution/runtime.js');
++    requireExactTrackedModule('src/main-process/execution-descriptors/policy-catalog.js');
+   const {
+     NEW_ACCOUNT_GENERATION_POLICY,
+     NEW_ACCOUNT_SAVE_AS_POLICY
+diff --git a/scripts/validate-v3-2-4-release-evidence.js b/scripts/validate-v3-2-4-release-evidence.js
+index 4a05a7e9..c75265e3 100644
+--- a/scripts/validate-v3-2-4-release-evidence.js
++++ b/scripts/validate-v3-2-4-release-evidence.js
+@@ -904,7 +904,7 @@ function requireExactTrackedModule(relativePath) {
+ function loadPolicyAuthorities() {
+   if (policyAuthorities) return policyAuthorities;
+   const { BACKGROUND_EXECUTION_POLICIES } =
+-    requireExactTrackedModule('src/main-process/background-execution/runtime.js');
++    requireExactTrackedModule('src/main-process/execution-descriptors/policy-catalog.js');
+   const { RECON_FIX_POLICIES } =
+     requireExactTrackedModule('src/main-process/recon-id-fix-service/policies.js');
+   const {
+diff --git a/scripts/verify-toolbox-row-split-capacity.js b/scripts/verify-toolbox-row-split-capacity.js
+index 4ea8a53a..13204a90 100644
+--- a/scripts/verify-toolbox-row-split-capacity.js
++++ b/scripts/verify-toolbox-row-split-capacity.js
+@@ -7,7 +7,9 @@ const os = require('node:os');
+ const path = require('node:path');
+ const ExcelJS = require('exceljs');
+ const { normalizeFilePlanV1 } = require('../src/main-process/archive-center/file-plan');
+-const { createBackgroundExecutionRuntime } = require('../src/main-process/background-execution/runtime');
++const {
++  createBackgroundExecutionRuntime
++} = require('../src/main-process/execution-descriptors/composition');
+ const { createTestPublicationHarness } = require('../tests/helpers/publication-authority');
+ const { scanToolboxSplitFields } = require('../src/main-process/toolbox-format-operations');
+ const { planRowCounts, buildRowTargets, publicResult } = require('../src/main-process/toolbox-row-split/contracts');
+diff --git a/src/main-process/application-recovery/README.md b/src/main-process/application-recovery/README.md
+index f4126de6..ce0e4b4e 100644
+--- a/src/main-process/application-recovery/README.md
++++ b/src/main-process/application-recovery/README.md
+@@ -14,7 +14,7 @@
+ 
+ `participants` 是冻结有序数组，字段为 `id`、`ownerName`、可选日志名 `hookName`，以及 `preflight`、`recoverOwner`、`postOutbox` 三个函数或 `null`。非法/重复注册在副作用前拒绝。成功 hook 同轮不重复；失败 hook 可显式重试；ready 后不重跑。
+ 
+-[composition.js](composition.js) 导出 `createApplicationRecoveryComposition`。Main 提供 platform、bizOpModule 和原 owner/lineage 回调。固定 owner 顺序为 BizOP → Pending → legacy BizOP → Pre-fund → Position → Toolbox/VCC publication → VCC import terminal；post-outbox 为 BizOP activation → VCC lineage。G7 可以汇总静态注册，不能另建恢复阶段或改预算。G2 继续向同一 Controller 提供终态/owner 合同，不能用 task adapter 的 ready 代替应用 ready。
++[composition.js](composition.js) 导出 `createApplicationRecoveryParticipants`、固定 `RECOVERY_PARTICIPANT_ORDER` 和 `createApplicationRecoveryComposition`。G7 从同一工厂取得 registrations、汇总后按固定顺序传回；显式 participants 缺失、重复或乱序在 coordinator 创建前拒绝。默认调用仍复用原工厂。Main 提供 platform、bizOpModule 和原 owner/lineage 回调。固定 owner 顺序为 BizOP → Pending → legacy BizOP → Pre-fund → Position → Toolbox/VCC publication → VCC import terminal；post-outbox 为 BizOP activation → VCC lineage。G7 可以汇总静态注册，不能另建恢复阶段或改预算。G2 继续向同一 Controller 提供终态/owner 合同，不能用 task adapter 的 ready 代替应用 ready。
+ 
+ ## publication owner 与权限
+ 
+diff --git a/src/main-process/application-recovery/composition.js b/src/main-process/application-recovery/composition.js
+index ca271cfd..d0f0c337 100644
+--- a/src/main-process/application-recovery/composition.js
++++ b/src/main-process/application-recovery/composition.js
+@@ -3,7 +3,12 @@
+ const { createApplicationRecoveryCoordinator } = require('./coordinator');
+ const { createBizOpRecoveryParticipant } = require('../biz-op-v327/recovery-participant');
+ 
+-function createApplicationRecoveryComposition({ platform, bizOpModule, recoverPendingRuns,
++const RECOVERY_PARTICIPANT_ORDER = Object.freeze([
++  'biz-op-v327', 'pending-runs', 'legacy-biz-op-runs', 'pre-fund-runs',
++  'position', 'toolbox-vcc-publications', 'vcc-import-terminal', 'vcc-import-lineage'
++]);
++
++function createApplicationRecoveryParticipants({ bizOpModule, recoverPendingRuns,
+   recoverLegacyBizOpRuns, recoverPreFundRuns, recoverPosition, recoverToolboxVccPublications,
+   recoverVccImportTerminal, reconcileVccImportLineage, onBizOpRecovery }) {
+   // 顺序是启动合同，不由模块加载或对象枚举顺序推断。
+@@ -15,17 +20,30 @@ function createApplicationRecoveryComposition({ platform, bizOpModule, recoverPe
+     ['toolbox-vcc-publications', 'Toolbox/VCC output publications', recoverToolboxVccPublications],
+     ['vcc-import-terminal', 'VCC import terminal', recoverVccImportTerminal]
+   ];
+-  const coordinator = createApplicationRecoveryCoordinator({
+-    platform,
+-    participants: [
++  return Object.freeze([
+       createBizOpRecoveryParticipant({ module: bizOpModule, onRecovery: onBizOpRecovery }),
+       ...owners.map(([id, ownerName, recoverOwner]) => ({ id, ownerName, recoverOwner, preflight: null, postOutbox: null })),
+       { id: 'vcc-import-lineage', ownerName: 'VCC import lineage/hold reconcile',
+         preflight: null, recoverOwner: null, postOutbox: reconcileVccImportLineage }
+-    ]
+-  });
++  ].map(Object.freeze));
++}
++
++function createApplicationRecoveryComposition(options) {
++  const { platform, bizOpModule } = options;
++  const participants = options.participants || createApplicationRecoveryParticipants(options);
++  if (!Array.isArray(participants) || participants.length !== RECOVERY_PARTICIPANT_ORDER.length
++      || participants.some((entry, index) => entry.id !== RECOVERY_PARTICIPANT_ORDER[index])) {
++    throw Object.assign(new TypeError('应用恢复参与者必须保持既定顺序与完整覆盖'), {
++      code: 'APPLICATION_RECOVERY_PARTICIPANT_INVALID'
++    });
++  }
++  const coordinator = createApplicationRecoveryCoordinator({ platform, participants });
+   bizOpModule.recovery.bindPlatform(coordinator.platformFacade);
+   return coordinator;
+ }
+ 
+-module.exports = { createApplicationRecoveryComposition };
++module.exports = {
++  RECOVERY_PARTICIPANT_ORDER,
++  createApplicationRecoveryParticipants,
++  createApplicationRecoveryComposition
++};
+diff --git a/src/main-process/archive-center/operation-tracker.js b/src/main-process/archive-center/operation-tracker.js
+index b27fa494..fd168a79 100644
+--- a/src/main-process/archive-center/operation-tracker.js
++++ b/src/main-process/archive-center/operation-tracker.js
+@@ -4,7 +4,9 @@ const path = require('node:path');
+ 
+ const { resolveArchiveScope } = require('./module-scope-registry');
+ const { sourceSnapshotForPath } = require('./source-snapshot');
+-const { createTaskPolicyRegistry } = require('./task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../execution-descriptors/composition');
+ 
+ function moduleDescriptor(scopeKey) {
+   const scope = resolveArchiveScope(scopeKey);
+diff --git a/src/main-process/archive-center/task-policy-registry.js b/src/main-process/archive-center/task-policy-registry.js
+index 860b2bda..bded2de6 100644
+--- a/src/main-process/archive-center/task-policy-registry.js
++++ b/src/main-process/archive-center/task-policy-registry.js
+@@ -1,12 +1,8 @@
+ 'use strict';
+ 
+-const { randomUUID } = require('node:crypto');
+-
++const { types: { isProxy } } = require('node:util');
++const { TASK_FILE_PLAN_DEFINITIONS } = require('./task-file-plan-registry');
+ const { resolveArchiveScope } = require('./module-scope-registry');
+-const {
+-  TASK_FILE_PLAN_DEFINITIONS,
+-  getTaskFilePlanDefinition
+-} = require('./task-file-plan-registry');
+ 
+ const EXCLUDE_REASONS = Object.freeze([
+   'read-only-query',
+@@ -17,7 +13,6 @@ const EXCLUDE_REASONS = Object.freeze([
+   'archive-center-maintenance',
+   'ui-navigation'
+ ]);
+-const EXCLUDE_REASON_SET = new Set(EXCLUDE_REASONS);
+ 
+ const SUPPORT_ACTION_POLICIES = Object.freeze([
+   Object.freeze({
+@@ -104,29 +99,6 @@ const NO_FILE_ACTION_CHANNELS = Object.freeze([
+   'bank-statement:run',
+   'template:save-mappings'
+ ]);
+-const NO_FILE_ACTION_SET = new Set(NO_FILE_ACTION_CHANNELS);
+-const OPERATION_WORKER_ACTIONS = new Set([
+-  'bizOpReconV327:run',
+-  'bizOpReconV327:delete',
+-  'bizOpReconV327:maintenance:upgrade',
+-  'bizOpReconV327:maintenance:reclaim',
+-
+-  'acquiringBillCurrency:clearMonth',
+-  'position-reconciliation:bank:delete',
+-  'position-reconciliation:mappings:save',
+-  'position-reconciliation:run',
+-  'position-reconciliation:run:confirm',
+-  'position-reconciliation:source:delete',
+-  'vccOpCalc:run:compute-amounts',
+-  'vccOpCalc:run:save',
+-  'vccFinancialOp:data-manager:delete',
+-  'vccFinancialOp:opening:initialize',
+-  'vccFinancialOp:run:adjustment-add',
+-  'vccFinancialOp:run:archive',
+-  'vccFinancialOp:run:calculate',
+-  'vccFinancialOp:run:unarchive'
+-]);
+-
+ const RESERVE_CHANNELS_BY_SCOPE = Object.freeze({
+   STATEMENT: Object.freeze([
+     'account-mapping:distribute-migration',
+@@ -450,524 +422,120 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
+   ])
+ });
+ 
+-const STANDARD_SUCCESS_STATUSES = new Set([
+-  'completed_with_errors',
+-  'ok',
+-  'ready',
+-  'success',
+-  'warning'
+-]);
+-const STANDARD_FAILURE_STATUSES = new Set([
+-  'ambiguous',
+-  'busy',
+-  'conflict',
+-  'disabled',
+-  'empty',
+-  'error',
+-  'failed',
+-  'invalid',
+-  'manual-balance-invalid',
+-  'not-active',
+-  'not-cancellable',
+-  'overwrite-required',
+-  'partial',
+-  'read-error',
+-  'rejected',
+-  'stopping',
+-  'unrecognized',
+-  'unsupported',
+-  'write-error'
+-]);
+-
+-function classifyKnownStatus(result, extraSuccessStatuses = []) {
+-  const status = String(result && result.status || '').trim().toLowerCase();
+-  if (status === 'cancelled' || status === 'canceled') return 'cancelled';
+-  if (!status || STANDARD_SUCCESS_STATUSES.has(status) || extraSuccessStatuses.includes(status)) {
+-    return 'succeeded';
+-  }
+-  if (STANDARD_FAILURE_STATUSES.has(status)) return 'failed';
+-  throw new TypeError(`未审计的业务结果 status：${status}`);
+-}
+-
+-function standardResultClassifier(result) {
+-  return classifyKnownStatus(result);
+-}
+ 
+-function vccOpSaveRunResultClassifier(result) {
+-  // E03-B unknown 已由 Main exact owner seam 先 CAS 为 interrupted；这里仍分类为
+-  // failure，使 TaskLifecycle 的通用 terminal 路径执行并以状态冲突保留 interrupted。
+-  if (String(result && result.status || '').trim().toLowerCase() === 'recovery-required') {
+-    return 'failed';
++const RECOVERABLE_POLICY_KEYS = Object.freeze([
++  'channel', 'scopeId', 'moduleCode', 'moduleName', 'taskKey', 'batchPolicy',
++  'taskKind', 'allocation', 'filePlanSourceKind', 'filePlanResolver',
++  'promotionManifestResolver', 'workerContext', 'startsNewFlow',
++  'flowIdentityResolver', 'flowPlanResolver', 'resultClassifier',
++  'bindResultFlowIdentitiesOnFailure', 'resultMetadataResolver', 'resultFlowIdentities'
++].sort());
++const EXCLUDE_POLICY_KEYS = Object.freeze([
++  'channel', 'batchPolicy', 'taskKind', 'workerContext', 'excludeReason'
++].sort());
++
++// 独立 inventory 只审核显式注入的注册项，不装配或选择任何领域 hook。
++function validatePolicies(policies) {
++  if (!Array.isArray(policies) || isProxy(policies)) {
++    throw new TypeError('TaskPolicyRegistry 必须显式传入 policy 数组');
+   }
+-  return standardResultClassifier(result);
+-}
+-
+-function standardResultMetadataResolver(result) {
+-  const status = String(result && result.status || '').trim().toLowerCase();
+-  if (!status) return {};
+-  return {
+-    resultStatus: status,
+-    ...(status === 'completed_with_errors' ? { completedWithErrors: true } : {})
+-  };
+-}
+-
+-function statementResultClassifier(result) {
+-  // 大账号选择、记住顺序不匹配与导出范围选择均已在 prepare 阶段以
+-  // proceed:false 返回，不能再被 execute 分类器静默接受为成功批次。
+-  return classifyKnownStatus(result, ['manual-balance-required']);
+-}
+-
+-function positionResultClassifier(result) {
+-  return classifyKnownStatus(result, ['needs-confirmation']);
+-}
+-
+-function vccFinancialOpResultClassifier(result) {
+-  const status = String(result && result.status || '').trim().toLowerCase();
+-  if (status === 'blocked') return 'failed';
+-  return classifyKnownStatus(result, ['calculated', 'initialized', 'all_skipped', 'archived']);
+-}
+-
+-function vccFlowIdentity(kind, value) {
+-  const normalized = String(value == null ? '' : value).trim();
+-  if (!normalized) {
+-    const error = new TypeError(`VCC ${kind} 稳定业务身份缺失`);
+-    error.code = 'ARCHIVE_FLOW_IDENTITY_REQUIRED';
+-    throw error;
+-  }
+-  return {
+-    type: `vcc-financial-op-${kind}`,
+-    value: normalized
+-  };
+-}
+-
+-function vccInvocationPayload(invocation = {}) {
+-  const args = Array.isArray(invocation.args) ? invocation.args : [];
+-  return args[0] && typeof args[0] === 'object' ? args[0] : {};
+-}
+-
+-function vccRunFlowIdentity(invocation = {}) {
+-  const prepared = invocation.prepared && typeof invocation.prepared === 'object'
+-    ? invocation.prepared
+-    : {};
+-  const payload = vccInvocationPayload(invocation);
+-  return vccFlowIdentity('run', prepared.runId ?? payload.runId);
+-}
+-
+-function vccImportRecordFlowIdentity(invocation = {}) {
+-  return vccFlowIdentity('import-record', vccInvocationPayload(invocation).recordId);
+-}
+-
+-function vccDeleteFlowPlan(invocation = {}) {
+-  const prepared = invocation.prepared && typeof invocation.prepared === 'object'
+-    ? invocation.prepared
+-    : {};
+-  const runIds = Array.isArray(prepared.runIds) ? prepared.runIds : [];
+-  if (prepared.targetType === 'result' && runIds.length === 1) {
+-    return { startsNewFlow: false, flowIdentity: vccFlowIdentity('run', runIds[0]) };
+-  }
+-  return { startsNewFlow: true, flowIdentity: null };
+-}
+-
+-function vccImportResultFlowIdentities(result) {
+-  if (!result || typeof result !== 'object') return [];
+-  const identities = [];
+-  if (String(result.batchId || '').trim()) {
+-    identities.push(vccFlowIdentity('import-batch', result.batchId));
+-  }
+-  for (const record of Array.isArray(result.records) ? result.records : []) {
+-    if (record && String(record.recordId || '').trim()) {
+-      identities.push(vccFlowIdentity('import-record', record.recordId));
++  const expectedKinds = new Map([
++    ...FILE_ACTION_CHANNELS.map((channel) => [channel, 'file']),
++    ...NO_FILE_ACTION_CHANNELS.map((channel) => [channel, 'no-file'])
++  ]);
++  const excludedReasons = new Map(Object.entries(EXCLUDED_CHANNELS_BY_REASON)
++    .flatMap(([reason, channels]) => channels.map((channel) => [channel, reason])));
++  const expectedScopes = new Map(Object.entries(RESERVE_CHANNELS_BY_SCOPE)
++    .flatMap(([scopeKey, channels]) => channels.map((channel) => [channel, resolveArchiveScope(scopeKey)])));
++  const byChannel = new Map();
++  for (const policy of policies) {
++    if (!policy || typeof policy !== 'object' || isProxy(policy)
++        || ![Object.prototype, null].includes(Object.getPrototypeOf(policy))) {
++      throw new TypeError('TaskPolicy 必须是非 Proxy plain data object');
+     }
+-  }
+-  return identities;
+-}
+-
+-function vccResultFlowIdentities(channel, result) {
+-  if (channel === 'vccFinancialOp:import:apply') {
+-    return vccImportResultFlowIdentities(result);
+-  }
+-  if (!result || typeof result !== 'object' || !String(result.runId || '').trim()) return [];
+-  return [vccFlowIdentity('run', result.runId)];
+-}
+-
+-function vccFinancialOpResultMetadata(result) {
+-  const source = result && typeof result === 'object' ? result : {};
+-  const metadata = standardResultMetadataResolver(source);
+-  for (const key of [
+-    'runId',
+-    'targetMonth',
+-    'resultRevision',
+-    'batchId',
+-    'recordId',
+-    'auditId',
+-    'deletionId',
+-    'deletedRunCount',
+-    'deletedDataCount'
+-  ]) {
+-    const value = source[key];
+-    if (value !== undefined && value !== null) metadata[key] = value;
+-  }
+-  if (source.adjustment && source.adjustment.id !== undefined) {
+-    metadata.adjustmentId = source.adjustment.id;
+-  }
+-  if (Array.isArray(source.initializedSubjects)) {
+-    metadata.initializedSubjectCount = source.initializedSubjects.length;
+-  }
+-  if (Array.isArray(source.filePaths)) metadata.outputFileCount = source.filePaths.length;
+-  if (source.filePath) metadata.outputFileCount = 1;
+-  return metadata;
+-}
+-
+-function resultBusinessRunIdentities(result) {
+-  if (!result || typeof result !== 'object') return [];
+-  for (const key of ['runId', 'mirrorId', 'operationToken', 'ranAt']) {
+-    const value = String(result[key] == null ? '' : result[key]).trim();
+-    if (value) return [{ type: key === 'operationToken' ? 'operation-token' : 'business-run-id', value }];
+-  }
+-  return [];
+-}
+-
+-function acquiringRunResultFlowIdentities(result, _context, invocation = {}, isResume = false) {
+-  if (!result || typeof result !== 'object') return [];
+-  const runId = String(result.runId == null ? '' : result.runId).trim();
+-  if (!runId) return [];
+-
+-  const args = Array.isArray(invocation.args) ? invocation.args : [];
+-  const payload = args[0] && typeof args[0] === 'object' ? args[0] : {};
+-  const prepared = invocation.prepared && typeof invocation.prepared === 'object'
+-    ? invocation.prepared
+-    : {};
+-  const resumePlan = prepared.resumePlan && typeof prepared.resumePlan === 'object'
+-    ? prepared.resumePlan
+-    : null;
+-  if (isResume && !resumePlan) return [];
+-
+-  const payloadMonthKey = String(payload.monthKey == null ? '' : payload.monthKey).trim();
+-  const preparedMonthKey = String(
+-    (isResume ? resumePlan.monthKey : prepared.monthKey) == null
+-      ? ''
+-      : (isResume ? resumePlan.monthKey : prepared.monthKey)
+-  ).trim();
+-  if (payloadMonthKey && preparedMonthKey && payloadMonthKey !== preparedMonthKey) return [];
+-  const monthKey = preparedMonthKey || payloadMonthKey;
+-  if (!/^\d{4}-\d{2}$/.test(monthKey)) return [];
+-
+-  const source = isResume ? String(resumePlan.source || '').trim() : 'side';
+-  if (source !== 'side' && source !== 'main') return [];
+-  if (isResume && resumePlan.runId != null && String(resumePlan.runId).trim() !== runId) return [];
+-  const taskRunId = String(_context && _context.taskRunId || '').trim();
+-  return [{
+-    type: 'business-run-id',
+-    value: taskRunId
+-      ? `acquiring-task:${taskRunId}`
+-      : `acquiring-run:${source}:${monthKey}:${runId}`
+-  }];
+-}
+-
+-function acquiringExportPlan(invocation = {}) {
+-  const prepared = invocation.prepared && typeof invocation.prepared === 'object'
+-    ? invocation.prepared
+-    : {};
+-  const plan = prepared.exportPlan && typeof prepared.exportPlan === 'object'
+-    ? prepared.exportPlan
+-    : null;
+-  if (!plan) return null;
+-  const source = String(plan.source || '').trim();
+-  const monthKey = String(plan.monthKey || '').trim();
+-  const runId = String(plan.runId == null ? '' : plan.runId).trim();
+-  if (!['side', 'main'].includes(source) || !/^\d{4}-\d{2}$/.test(monthKey) || !runId) {
+-    return null;
+-  }
+-  const flowIdentity = plan.flowIdentity;
+-  const identityValue = String(flowIdentity && flowIdentity.value || '').trim();
+-  const legacyValue = `acquiring-run:${source}:${monthKey}:${runId}`;
+-  if (!flowIdentity
+-      || flowIdentity.type !== 'business-run-id'
+-      || (identityValue !== legacyValue && !identityValue.startsWith('acquiring-task:'))) {
+-    return null;
+-  }
+-  return { ...plan, flowIdentity };
+-}
+-
+-function bankStatementFlowIdentity(value) {
+-  const identity = value && typeof value === 'object' ? value : null;
+-  const identityValue = String(identity && identity.value || '').trim();
+-  if (!identity
+-      || identity.type !== 'business-run-id'
+-      || !identityValue.startsWith('bank-statement-run:')) {
+-    return null;
+-  }
+-  return { type: 'business-run-id', value: identityValue };
+-}
+-
+-function createBankStatementRunFlowIdentity(createId = randomUUID) {
+-  if (typeof createId !== 'function') throw new TypeError('createId 必须是函数');
+-  const value = String(createId() || '').trim();
+-  if (!value) throw new TypeError('银行对账 run 身份不能为空');
+-  return Object.freeze({
+-    type: 'business-run-id',
+-    value: `bank-statement-run:${value}`
+-  });
+-}
+-
+-function bankStatementExportFlowPlan(invocation = {}) {
+-  const prepared = invocation.prepared && typeof invocation.prepared === 'object'
+-    ? invocation.prepared
+-    : {};
+-  const processingResult = prepared.inspected && prepared.inspected.processingResult;
+-  const flowIdentity = bankStatementFlowIdentity(
+-    processingResult && processingResult.archiveFlowIdentity
+-  );
+-  if (!flowIdentity) {
+-    const error = new TypeError('银行对账导出缺少本轮运行的稳定流程证据');
+-    error.code = 'ARCHIVE_FLOW_IDENTITY_REQUIRED';
+-    throw error;
+-  }
+-  return { startsNewFlow: false, flowIdentity };
+-}
+-
+-function bankStatementExportResultFlowIdentities(result, _context, invocation = {}) {
+-  if (!result || String(result.status || '') !== 'ok') return [];
+-  try {
+-    return [bankStatementExportFlowPlan(invocation).flowIdentity];
+-  } catch (_error) {
+-    return [];
+-  }
+-}
+-
+-function acquiringExportFlowPlan(invocation = {}) {
+-  const plan = acquiringExportPlan(invocation);
+-  if (!plan) {
+-    const error = new TypeError('收单导出缺少已选 run 的稳定流程证据');
+-    error.code = 'ARCHIVE_FLOW_IDENTITY_REQUIRED';
+-    throw error;
+-  }
+-  return { startsNewFlow: false, flowIdentity: plan.flowIdentity };
+-}
+-
+-function acquiringExportResultFlowIdentities(result, _context, invocation = {}) {
+-  const plan = acquiringExportPlan(invocation);
+-  if (!plan || !result || typeof result !== 'object') return [];
+-  if (String(result.runId == null ? '' : result.runId).trim() !== String(plan.runId)
+-      || String(result.monthKey || '').trim() !== plan.monthKey
+-      || String(result.source || '').trim() !== plan.source) {
+-    return [];
+-  }
+-  return [plan.flowIdentity];
+-}
+-
+-async function resolveBankBuImportEvidence(invocation = {}) {
+-  if (typeof invocation.resolveFlowEvidence !== 'function') return null;
+-  const evidence = await invocation.resolveFlowEvidence('bank-bu-import-bundle');
+-  if (!evidence || !evidence.identity) return null;
+-  const type = String(evidence.identity.type || evidence.identity.identityType || '').trim();
+-  const value = String(evidence.identity.value || evidence.identity.identityValue || '').trim();
+-  if (type !== 'bank-bu-import-bundle' || !value) return null;
+-  return {
+-    identity: { type, value },
+-    hasRun: evidence.hasRun === true
+-  };
+-}
+-
+-// 首次 run 可由当前持久导入行主键证明续接；已有 run 时本次点击就是显式重跑，必须新建 parent。
+-// 证据不可读或不存在时宁可新建流程，绝不按月份/最新批次猜测继承。
+-async function bankBuRunFlowPlan(invocation = {}) {
+-  const evidence = await resolveBankBuImportEvidence(invocation);
+-  if (!evidence || evidence.hasRun) {
+-    return { startsNewFlow: true, flowIdentity: null };
+-  }
+-  return {
+-    startsNewFlow: false,
+-    flowIdentity: evidence.identity
+-  };
+-}
+-
+-async function bankBuImportResultFlowIdentities(_result, _context, invocation = {}) {
+-  const evidence = await resolveBankBuImportEvidence(invocation);
+-  return evidence ? [evidence.identity] : [];
+-}
+-
+-const CONTINUATION_CHANNELS = new Set([
+-  'bankBuRecon:export:single',
+-  'bizOpRecon:export:date',
+-  'pending:diff:export-single',
+-  'position-reconciliation:run:confirm',
+-  'position-reconciliation:run:export',
+-  'position-reconciliation:run:export-filtered',
+-  'position-reconciliation:run:import-result'
+-]);
+-
+-function invocationBusinessRunIdentity(invocation = {}) {
+-  const args = Array.isArray(invocation.args) ? invocation.args : [];
+-  const payload = args[0] && typeof args[0] === 'object' ? args[0] : {};
+-  const candidate = payload.runId ?? (
+-    typeof args[0] === 'string' || typeof args[0] === 'number' ? args[0] : null
+-  );
+-  const value = String(candidate == null ? '' : candidate).trim();
+-  if (!value) {
+-    const error = new TypeError('续接任务缺少稳定 runId');
+-    error.code = 'ARCHIVE_FLOW_IDENTITY_REQUIRED';
+-    throw error;
+-  }
+-  return { type: 'business-run-id', value };
+-}
+-
+-function resultClassifierForChannel(channel) {
+-  if (channel.startsWith('file:') || channel.startsWith('monthly-balance:')) {
+-    return statementResultClassifier;
+-  }
+-  if (channel.startsWith('position-reconciliation:')) return positionResultClassifier;
+-  if (channel.startsWith('vccFinancialOp:')) return vccFinancialOpResultClassifier;
+-  if (channel === 'vccOpCalc:run:save') return vccOpSaveRunResultClassifier;
+-  return standardResultClassifier;
+-}
+-
+-function createReservePolicy(channel, scopeKey) {
+-  const scope = resolveArchiveScope(scopeKey);
+-  if (!scope) throw new Error(`未知 archive scope：${scopeKey}`);
+-  const isBankBuImport = channel === 'bankBuRecon:import:run';
+-  const isBankBuRun = channel === 'bankBuRecon:run';
+-  const isAcquiringRun = channel === 'acquiringBillCurrency:run';
+-  const isAcquiringResume = channel === 'acquiringBillCurrency:run:resume';
+-  const isAcquiringExport = channel === 'acquiringBillCurrency:export';
+-  const isBankStatementExport = channel === 'bank-statement:export';
+-  const isVcc = channel.startsWith('vccFinancialOp:');
+-  const isVccRunContinuation = [
+-    'vccFinancialOp:export:result',
+-    'vccFinancialOp:run:adjustment-add',
+-    'vccFinancialOp:run:archive',
+-    'vccFinancialOp:run:unarchive'
+-  ].includes(channel);
+-  const isVccImportContinuation = channel === 'vccFinancialOp:export:import-audit';
+-  const isVccDelete = channel === 'vccFinancialOp:data-manager:delete';
+-  const fileDefinition = getTaskFilePlanDefinition(channel);
+-  const isNoFileAction = NO_FILE_ACTION_SET.has(channel);
+-  if (Boolean(fileDefinition) === isNoFileAction) {
+-    throw new TypeError(`mutation action 必须且只能登记一种 task kind：${channel}`);
+-  }
+-  const taskKind = fileDefinition ? 'file' : 'no-file';
+-  return Object.freeze({
+-    channel,
+-    scopeId: scope.id,
+-    moduleCode: scope.storageCode,
+-    moduleName: scope.name,
+-    taskKey: channel,
+-    batchPolicy: taskKind === 'file' ? 'reserve' : 'no-file',
+-    taskKind,
+-    allocation: fileDefinition ? fileDefinition.allocation : 'none',
+-    filePlanSourceKind: fileDefinition ? fileDefinition.sourceKind : null,
+-    filePlanResolver: fileDefinition ? fileDefinition.filePlanResolver : null,
+-    promotionManifestResolver: fileDefinition
+-      ? fileDefinition.promotionManifestResolver
+-      : null,
+-    workerContext: fileDefinition
+-      ? fileDefinition.workerContext
+-      : OPERATION_WORKER_ACTIONS.has(channel)
+-        ? 'operation'
+-        : 'none',
+-    startsNewFlow: (isAcquiringExport || isBankStatementExport
+-      || isVccRunContinuation || isVccImportContinuation)
+-      ? false
+-      : !CONTINUATION_CHANNELS.has(channel),
+-    flowIdentityResolver: isVccRunContinuation
+-      ? vccRunFlowIdentity
+-      : isVccImportContinuation
+-        ? vccImportRecordFlowIdentity
+-        : CONTINUATION_CHANNELS.has(channel)
+-          ? invocationBusinessRunIdentity
+-          : null,
+-    flowPlanResolver: isBankBuRun
+-      ? bankBuRunFlowPlan
+-      : isAcquiringExport
+-        ? acquiringExportFlowPlan
+-        : isBankStatementExport
+-          ? bankStatementExportFlowPlan
+-        : isVccDelete
+-          ? vccDeleteFlowPlan
+-          : null,
+-    resultClassifier: resultClassifierForChannel(channel),
+-    bindResultFlowIdentitiesOnFailure: channel === 'vccFinancialOp:import:apply',
+-    resultMetadataResolver: isVcc
+-      ? vccFinancialOpResultMetadata
+-      : standardResultMetadataResolver,
+-    resultFlowIdentities: isVcc
+-      ? (result) => vccResultFlowIdentities(channel, result)
+-      : isBankBuImport
+-      ? bankBuImportResultFlowIdentities
+-      : isAcquiringExport
+-        ? acquiringExportResultFlowIdentities
+-      : isBankStatementExport
+-        ? bankStatementExportResultFlowIdentities
+-      : (isAcquiringRun || isAcquiringResume)
+-        ? (result, context, invocation) => acquiringRunResultFlowIdentities(
+-            result,
+-            context,
+-            invocation,
+-            isAcquiringResume
+-          )
+-        : resultBusinessRunIdentities
+-  });
+-}
+-
+-function createExcludePolicy(channel, excludeReason) {
+-  if (!EXCLUDE_REASON_SET.has(excludeReason)) {
+-    throw new TypeError(`不支持的 excludeReason：${excludeReason}`);
+-  }
+-  return Object.freeze({
+-    channel,
+-    batchPolicy: 'exclude',
+-    taskKind: 'exclude',
+-    workerContext: 'none',
+-    excludeReason
+-  });
+-}
+-
+-function buildPolicies() {
+-  const policies = new Map();
+-  const add = (policy) => {
+-    if (policies.has(policy.channel)) throw new Error(`Task policy 重复：${policy.channel}`);
+-    policies.set(policy.channel, policy);
+-  };
+-  for (const [scopeKey, channels] of Object.entries(RESERVE_CHANNELS_BY_SCOPE)) {
+-    for (const channel of channels) add(createReservePolicy(channel, scopeKey));
+-  }
+-  for (const [reason, channels] of Object.entries(EXCLUDED_CHANNELS_BY_REASON)) {
+-    for (const channel of channels) {
+-      add(createExcludePolicy(channel, reason));
++    const descriptors = Object.getOwnPropertyDescriptors(policy);
++    if (Reflect.ownKeys(descriptors).some((key) => typeof key !== 'string'
++        || !Object.hasOwn(descriptors[key], 'value') || !descriptors[key].enumerable)) {
++      throw new TypeError('TaskPolicy 必须只包含 enumerable own data property');
++    }
++    const snapshot = Object.fromEntries(Object.entries(descriptors)
++      .map(([key, descriptor]) => [key, descriptor.value]));
++    if (typeof snapshot.channel !== 'string' || byChannel.has(snapshot.channel)) {
++      throw new TypeError('TaskPolicy channel 缺失或重复：' + String(snapshot.channel));
++    }
++    const expectedKind = expectedKinds.get(snapshot.channel);
++    const expectedKeys = expectedKind ? RECOVERABLE_POLICY_KEYS : EXCLUDE_POLICY_KEYS;
++    const actualKeys = Object.keys(snapshot).sort();
++    if (actualKeys.length !== expectedKeys.length
++        || actualKeys.some((key, index) => key !== expectedKeys[index])) {
++      throw new TypeError('TaskPolicy exact key inventory 漂移：' + snapshot.channel);
++    }
++    if (expectedKind) {
++      if (snapshot.taskKind !== expectedKind || snapshot.taskKey !== snapshot.channel
++          || snapshot.batchPolicy !== (expectedKind === 'file' ? 'reserve' : 'no-file')) {
++        throw new TypeError('TaskPolicy file/no-file 身份漂移：' + snapshot.channel);
++      }
++      const scope = expectedScopes.get(snapshot.channel);
++      if (!scope || snapshot.scopeId !== scope.id || snapshot.moduleCode !== scope.storageCode
++          || snapshot.moduleName !== scope.name
++          || typeof snapshot.startsNewFlow !== 'boolean'
++          || typeof snapshot.bindResultFlowIdentitiesOnFailure !== 'boolean'
++          || !['none', 'batch', 'operation'].includes(snapshot.workerContext)
++          || ['resultClassifier', 'resultMetadataResolver', 'resultFlowIdentities']
++            .some((key) => typeof snapshot[key] !== 'function')
++          || ['flowIdentityResolver', 'flowPlanResolver']
++            .some((key) => snapshot[key] !== null && typeof snapshot[key] !== 'function')) {
++        throw new TypeError('TaskPolicy module 或 lifecycle hook 非法：' + snapshot.channel);
++      }
++      const definition = TASK_FILE_PLAN_DEFINITIONS[snapshot.channel];
++      if (definition
++        ? snapshot.allocation !== definition.allocation
++          || snapshot.filePlanSourceKind !== definition.sourceKind
++          || snapshot.workerContext !== definition.workerContext
++          || typeof snapshot.filePlanResolver !== 'function'
++          || (definition.promotionManifestResolver === null
++            ? snapshot.promotionManifestResolver !== null
++            : typeof snapshot.promotionManifestResolver !== 'function')
++        : snapshot.allocation !== 'none' || snapshot.filePlanSourceKind !== null
++          || snapshot.filePlanResolver !== null || snapshot.promotionManifestResolver !== null) {
++        throw new TypeError('TaskPolicy FilePlan 注册非法：' + snapshot.channel);
++      }
++    } else if (!excludedReasons.has(snapshot.channel)
++        || snapshot.taskKind !== 'exclude' || snapshot.batchPolicy !== 'exclude'
++        || snapshot.workerContext !== 'none'
++        || snapshot.excludeReason !== excludedReasons.get(snapshot.channel)) {
++      throw new TypeError('TaskPolicy 未登记或 exclude 分类漂移：' + snapshot.channel);
+     }
++    byChannel.set(snapshot.channel, Object.freeze(snapshot));
+   }
+-  const classifiedChannels = new Set([
+-    ...FILE_ACTION_CHANNELS,
+-    ...NO_FILE_ACTION_CHANNELS
+-  ]);
+-  const registeredMutationChannels = [...policies.values()]
+-    .filter((policy) => policy.taskKind === 'file' || policy.taskKind === 'no-file')
+-    .map((policy) => policy.channel);
+-  if (classifiedChannels.size !== FILE_ACTION_CHANNELS.length + NO_FILE_ACTION_CHANNELS.length
+-      || registeredMutationChannels.length !== classifiedChannels.size
+-      || registeredMutationChannels.some((channel) => !classifiedChannels.has(channel))) {
+-    throw new TypeError('mutation action 的 file/no-file literal inventory 未精确闭合');
++  const expectedChannels = [...expectedKinds.keys(), ...excludedReasons.keys()];
++  if (byChannel.size !== expectedChannels.length
++      || expectedChannels.some((channel) => !byChannel.has(channel))) {
++    throw new TypeError('TaskPolicy file/no-file/exclude literal inventory 未精确闭合');
+   }
+-  return policies;
++  return byChannel;
+ }
+ 
+ class TaskPolicyRegistry {
+-  constructor(policies = buildPolicies()) {
+-    this.policies = new Map(policies);
++  #policies;
++
++  constructor(policies) {
++    this.#policies = validatePolicies(policies);
++    Object.freeze(this);
+   }
+ 
+   get(channel) {
+-    return this.policies.get(String(channel || '')) || null;
++    return this.#policies.get(String(channel || '')) || null;
+   }
+ 
+   require(channel) {
+     const policy = this.get(channel);
+-    if (!policy) throw new Error(`未登记 task policy：${String(channel || '')}`);
++    if (!policy) throw new Error('未登记 task policy：' + String(channel || ''));
+     return policy;
+   }
+ 
+   list() {
+-    return [...this.policies.values()];
++    return [...this.#policies.values()];
+   }
+ 
+   channels(batchPolicy = '') {
+@@ -978,14 +546,11 @@ class TaskPolicyRegistry {
+   }
+ }
+ 
+-const ARCHIVE_TASK_POLICIES = buildPolicies();
+-
+-function createTaskPolicyRegistry() {
+-  return new TaskPolicyRegistry(ARCHIVE_TASK_POLICIES);
++function createTaskPolicyRegistry(policies) {
++  return new TaskPolicyRegistry(policies);
+ }
+ 
+ module.exports = {
+-  ARCHIVE_TASK_POLICIES,
+   EXCLUDED_CHANNELS_BY_REASON,
+   EXCLUDE_REASONS,
+   FILE_ACTION_CHANNELS,
+@@ -993,19 +558,5 @@ module.exports = {
+   RESERVE_CHANNELS_BY_SCOPE,
+   SUPPORT_ACTION_POLICIES,
+   TaskPolicyRegistry,
+-  bankBuImportResultFlowIdentities,
+-  bankBuRunFlowPlan,
+-  createBankStatementRunFlowIdentity,
+-  invocationBusinessRunIdentity,
+-  positionResultClassifier,
+-  createTaskPolicyRegistry,
+-  resultBusinessRunIdentities,
+-  standardResultMetadataResolver,
+-  statementResultClassifier,
+-  standardResultClassifier,
+-  vccOpSaveRunResultClassifier,
+-  vccDeleteFlowPlan,
+-  vccFinancialOpResultClassifier,
+-  vccImportResultFlowIdentities,
+-  vccRunFlowIdentity
++  createTaskPolicyRegistry
+ };
+diff --git a/src/main-process/background-execution/runtime.js b/src/main-process/background-execution/runtime.js
+index 0a3f0f28..096c21d2 100644
+--- a/src/main-process/background-execution/runtime.js
++++ b/src/main-process/background-execution/runtime.js
+@@ -1,182 +1,10 @@
+ 'use strict';
+ 
+ const os = require('node:os');
+-const { ROWS_POLICY } = require('../toolbox-row-split/policy');
+-const { ROWS_ACTION, validateRowsResult } = require('../toolbox-row-split/contracts');
+-const path = require('node:path');
+-
+-const {
+-  createExecutionPolicyRegistry,
+-  createStaticRegistry
+-} = require('./execution-policy-registry');
+ const { createPlatformResourceBudgets } = require('./resource-budget');
+ const { createResourceGovernor } = require('./resource-governor');
+ const { createExecutionSupervisor } = require('./supervisor');
+-const {
+-  TOOLBOX_GENERATION_ACTIONS,
+-  validateToolboxGenerationResult,
+-  validateToolboxMultiGenerationResult
+-} = require('../toolbox-background/generation-contract');
+-const {
+-  TOOLBOX_GENERATION_POLICIES
+-} = require('../toolbox-background/policies');
+-const {
+-  PRE_FUND_MPT_POLICIES,
+-  PRE_FUND_MPT_IMPORT_ACTION,
+-  PRE_FUND_MPT_REPAIR_ACTION,
+-  validatePreFundMptImportResult,
+-  validatePreFundMptRepairResult
+-} = require('../pre-fund-reconciliation/mpt-import/policies');
+-const {
+-  createPreFundMptTopologyPlanner
+-} = require('../pre-fund-reconciliation/mpt-import/topology');
+-const {
+-  validateNewAccountGenerationResult
+-} = require('../new-account/generation-contract');
+-const {
+-  NEW_ACCOUNT_GENERATION_POLICY,
+-  NEW_ACCOUNT_SAVE_AS_POLICY
+-} = require('../new-account/policies');
+-const {
+-  NEW_ACCOUNT_SAVE_AS_ACTION,
+-  runNewAccountArtifactCopyInline,
+-  validateNewAccountSaveAsResult
+-} = require('../new-account/artifact-copy');
+-const {
+-  estimateNewAccountGenerationPhaseResources
+-} = require('../new-account/resource-estimator');
+-const {
+-  FUND_RECON_POLICIES,
+-  FUND_RECON_SERVICE_KEY,
+-  validateFundReconExportResult,
+-  validateFundReconImportResult,
+-  validateFundReconRunResult
+-} = require('../fund-recon-worker/policies');
+-const {
+-  DUPLICATE_ACTIONS,
+-  DUPLICATE_POLICIES,
+-  DUPLICATE_SERVICE_KEY,
+-  validateDuplicateExportResult,
+-  validateDuplicateImportResult,
+-  validateDuplicateRunResult
+-} = require('../duplicate-inbound-match/policies');
+-const {
+-  normalizeDuplicateStartupGateDescriptor
+-} = require('../duplicate-inbound-match/startup-gate');
+-const {
+-  createDuplicatePairedTopologyPlanner
+-} = require('../duplicate-inbound-match/topology');
+-const {
+-  beginExternalParserShutdown,
+-  waitForExternalParserShutdownPhase
+-} = require('./external-parser-finalization');
+-const {
+-  RECON_FIX_EXPORT_ACTION,
+-  RECON_FIX_JPM_UNIT_ID,
+-  RECON_FIX_POLICIES,
+-  RECON_FIX_RUN_JPM_ACTION,
+-  RECON_FIX_SERVICE_KEY,
+-  validateReconFixExportResult,
+-  validateReconFixJpmResult,
+-  validateReconFixServiceResult
+-} = require('../recon-id-fix-service/policies');
+-const {
+-  createReconFixJpmDatabaseAuthority
+-} = require('../recon-id-fix-service/jpm-database-authority');
+-const {
+-  createReconFixEvidenceSettlementAdmission
+-} = require('../recon-id-fix-service/evidence-settlement-admission');
+-const {
+-  VCC_EXPORT_SINGLE_ACTION,
+-  VCC_EXPORT_SINGLE_POLICY,
+-  VCC_EXPORT_SUBJECTS_ACTION,
+-  VCC_EXPORT_SUBJECTS_POLICY,
+-  validateVccExportSingleResult,
+-  validateVccExportSubjectsResult
+-} = require('../vcc-financial-op-output/policies');
+-const {
+-  createVccExportTopologyPlanner
+-} = require('../vcc-financial-op-output/topology');
+-const {
+-  PENDING_READ_ONLY_ACTIONS,
+-  PENDING_READ_ONLY_POLICIES,
+-  validatePendingReadOnlyExportResult
+-} = require('../read-only-exports/pending/policies');
+-const {
+-  BIZ_OP_READ_ONLY_ACTION_SET,
+-  BIZ_OP_READ_ONLY_POLICIES,
+-  validateBizOpReadOnlyExportResult
+-} = require('../read-only-exports/biz-op/policies');
+-const {
+-  PRE_FUND_READ_ONLY_POLICIES,
+-  validatePreFundReadOnlyExportResult
+-} = require('../read-only-exports/pre-fund/policies');
+-const {
+-  POSITION_READ_ONLY_POLICY,
+-  validatePositionReadOnlyExportResult
+-} = require('../read-only-exports/position/policies');
+-const {
+-  VCC_FINANCIAL_OP_READ_ONLY_POLICY,
+-  validateVccFinancialOpReadOnlyExportResult
+-} = require('../read-only-exports/vcc-financial-op/policies');
+-const {
+-  ACQUIRING_EXPORT_ACTIONS,
+-  ACQUIRING_EXPORT_ACTION_SET,
+-  ACQUIRING_EXPORT_POLICIES,
+-  validateAcquiringExportResult
+-} = require('../read-only-exports/acquiring/policies');
+-const {
+-  runAcquiringExistingDiffCopyInline
+-} = require('../read-only-exports/acquiring/executor');
+-const {
+-  PENDING_BIZOP_ADAPTER_ACTION_SET,
+-  PENDING_BIZOP_ADAPTER_POLICIES,
+-  validatePendingBizOpAdapterResult
+-} = require('./pending-bizop-adapter-policies');
+-const {
+-  ACQUIRING_ADAPTER_ACTIONS,
+-  ACQUIRING_ADAPTER_ACTION_SET,
+-  ACQUIRING_ADAPTER_POLICIES,
+-  validateAcquiringImportAdapterResult,
+-  validateAcquiringRunAdapterResult
+-} = require('./acquiring-adapter-policies');
+-const {
+-  POSITION_IMPORT_ADAPTER_ACTION,
+-  POSITION_IMPORT_ADAPTER_POLICY,
+-  validatePositionImportAdapterResult
+-} = require('./position-import-adapter-policy');
+-const {
+-  createMatureActionAdapterBindings
+-} = require('./mature-action-adapters');
+-const { BIZ_OP_V327_POLICIES, validateBizOpCandidateResult, validateBizOpExportResult } = require('../biz-op-v327/policies');
+-
+-const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
+-  ...BIZ_OP_V327_POLICIES,
+-  ...TOOLBOX_GENERATION_POLICIES,
+-  ROWS_POLICY,
+-  ...PRE_FUND_MPT_POLICIES,
+-  NEW_ACCOUNT_GENERATION_POLICY,
+-  NEW_ACCOUNT_SAVE_AS_POLICY,
+-  ...FUND_RECON_POLICIES,
+-  ...DUPLICATE_POLICIES,
+-  ...RECON_FIX_POLICIES,
+-  VCC_EXPORT_SINGLE_POLICY,
+-  VCC_EXPORT_SUBJECTS_POLICY,
+-  ...PENDING_READ_ONLY_POLICIES,
+-  ...BIZ_OP_READ_ONLY_POLICIES,
+-  ...PRE_FUND_READ_ONLY_POLICIES,
+-  POSITION_READ_ONLY_POLICY,
+-  VCC_FINANCIAL_OP_READ_ONLY_POLICY,
+-  ...ACQUIRING_EXPORT_POLICIES,
+-  ...PENDING_BIZOP_ADAPTER_POLICIES,
+-  ...ACQUIRING_ADAPTER_POLICIES,
+-  POSITION_IMPORT_ADAPTER_POLICY
+-]);
+-
+-function isBackgroundExecutionProductionEnabled(actionKey) {
+-  const policy = BACKGROUND_EXECUTION_POLICIES.find((item) => item.actionKey === actionKey);
+-  return Boolean(policy && policy.production.enabled === true);
+-}
++const { beginExternalParserShutdown, waitForExternalParserShutdownPhase } = require('./external-parser-finalization');
+ 
+ function deadlineAfter(timeoutMs) {
+   const timestamp = Date.now();
+@@ -205,144 +33,18 @@ function mergeShutdownReports(report, ...pairedReports) {
+   });
+ }
+ 
+-function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
+-  if (policy.actionKey === ROWS_ACTION) {
+-    return Object.freeze({
+-      path: path.resolve(__dirname, '..', 'toolbox-row-split', 'worker-entry.js'),
+-      resourceLimits: Object.freeze({ maxOldGenerationSizeMb: 640, maxYoungGenerationSizeMb: 32 }),
+-      cancellationTerminalErrorCodes: Object.freeze(['TOOLBOX_GENERATION_CANCELLED'])
+-    });
+-  }
+-  if (policy.moduleId === 'biz-op-v327') return path.resolve(__dirname, '..', 'biz-op-v327', 'worker-entry.js');
+-  if (policy.actionKey === NEW_ACCOUNT_SAVE_AS_ACTION) {
+-    return runNewAccountArtifactCopyInline;
+-  }
+-  if (policy.actionKey === ACQUIRING_EXPORT_ACTIONS.COPY) {
+-    return runAcquiringExistingDiffCopyInline;
+-  }
+-  if (policy.actionKey === ACQUIRING_EXPORT_ACTIONS.REGENERATE) {
+-    return Object.freeze({
+-      path: path.resolve(
+-        __dirname,
+-        '..',
+-        'read-only-exports',
+-        'acquiring',
+-        'worker-entry.js'
+-      ),
+-      cancellationTerminalErrorCodes: Object.freeze(['ACQUIRING_EXPORT_CANCELLED'])
+-    });
+-  }
+-  if (policy.moduleId === 'duplicate') {
+-    return Object.freeze({
+-      path: path.resolve(__dirname, '..', 'duplicate-inbound-match', 'worker-entry.js'),
+-      cancellationTerminalErrorCodes: Object.freeze(['DUPLICATE_SHUTDOWN']),
+-      workerData: Object.freeze({ startupGate: duplicateStartupGate })
+-    });
+-  }
+-  if (policy.moduleId === 'fund-recon') {
+-    return Object.freeze({
+-      path: path.resolve(__dirname, '..', 'fund-recon-worker', 'worker-entry.js'),
+-      cancellationTerminalErrorCodes: Object.freeze(['FUND_RECON_SHUTDOWN'])
+-    });
+-  }
+-  if (policy.moduleId === 'new-account') {
+-    return Object.freeze({
+-      path: path.resolve(__dirname, '..', 'new-account', 'worker-entry.js'),
+-      cancellationTerminalErrorCodes: Object.freeze(['NEW_ACCOUNT_GENERATION_CANCELLED'])
+-    });
+-  }
+-  if (policy.moduleId === 'recon-fix') {
+-    return Object.freeze({
+-      path: path.resolve(__dirname, '..', 'recon-id-fix-service', 'worker-entry.js'),
+-      cancellationTerminalErrorCodes: Object.freeze(['RECON_FIX_CANCELLED'])
+-    });
+-  }
+-  if (policy.moduleId === 'pending-read-only-export') {
+-    return Object.freeze({
+-      path: path.resolve(__dirname, '..', 'read-only-exports', 'pending', 'worker-entry.js'),
+-      cancellationTerminalErrorCodes: Object.freeze(['PENDING_EXPORT_CANCELLED'])
+-    });
+-  }
+-  if (policy.moduleId === 'biz-op-read-only-export') {
+-    return Object.freeze({
+-      path: path.resolve(__dirname, '..', 'read-only-exports', 'biz-op', 'worker-entry.js'),
+-      cancellationTerminalErrorCodes: Object.freeze(['BIZ_OP_EXPORT_CANCELLED'])
+-    });
+-  }
+-  if (policy.moduleId === 'pre-fund-read-only-export') {
+-    return Object.freeze({
+-      path: path.resolve(__dirname, '..', 'read-only-exports', 'pre-fund', 'worker-entry.js'),
+-      cancellationTerminalErrorCodes: Object.freeze(['PRE_FUND_EXPORT_CANCELLED'])
+-    });
+-  }
+-  if (policy.moduleId === 'position-read-only-export') {
+-    return Object.freeze({
+-      path: path.resolve(__dirname, '..', 'read-only-exports', 'position', 'worker-entry.js'),
+-      cancellationTerminalErrorCodes: Object.freeze(['POSITION_EXPORT_CANCELLED'])
+-    });
+-  }
+-  if (policy.moduleId === 'vcc-financial-op-read-only-export') {
+-    return Object.freeze({
+-      path: path.resolve(
+-        __dirname,
+-        '..',
+-        'read-only-exports',
+-        'vcc-financial-op',
+-        'worker-entry.js'
+-      ),
+-      cancellationTerminalErrorCodes: Object.freeze([
+-        'VCC_FINANCIAL_OP_EXPORT_CANCELLED'
+-      ])
+-    });
+-  }
+-  if (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION) {
+-    return Object.freeze({
+-      path: path.resolve(
+-        __dirname,
+-        '..',
+-        'vcc-financial-op-output',
+-        'writer-worker-entry.js'
+-      ),
+-      cancellationTerminalErrorCodes: Object.freeze(['VCC_EXPORT_CANCELLED']),
+-      admittedTopologyWorkerData: true
+-    });
+-  }
+-  if (policy.actionKey === VCC_EXPORT_SINGLE_ACTION) {
+-    return Object.freeze({
+-      path: path.resolve(
+-        __dirname,
+-        '..',
+-        'vcc-financial-op-output',
+-        'single-writer-worker-entry.js'
+-      ),
+-      cancellationTerminalErrorCodes: Object.freeze(['VCC_EXPORT_CANCELLED'])
++function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverride = null) {
++  const executionDescriptors = options.executionDescriptors;
++  if (!executionDescriptors || !executionDescriptors.policyRegistry ||
++      !executionDescriptors.policyRegistry.isFrozen() ||
++      typeof executionDescriptors.bindInputForAction !== 'function' ||
++      typeof executionDescriptors.beforeCarrierDispatch !== 'function' ||
++      typeof executionDescriptors.defaultUnitsForAction !== 'function') {
++    throw Object.assign(new Error('后台执行 runtime 需要 Main 提供已冻结的 execution descriptors'), {
++      code: 'EXECUTION_DESCRIPTOR_REQUIRED'
+     });
+   }
+-  const preFund = policy.moduleId === 'pre-fund';
+-  return Object.freeze({
+-    path: path.join(
+-      preFund
+-        ? path.resolve(__dirname, '..', 'pre-fund-reconciliation', 'mpt-import')
+-        : workerRoot,
+-      preFund
+-        ? 'writer-worker-entry.js'
+-        : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.MERGE
+-            ? 'merge-worker-entry.js'
+-            : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+-                ? 'route-scanner-worker-entry.js'
+-                : 'split-worker-entry.js'))
+-    ),
+-    cancellationTerminalErrorCodes: Object.freeze(preFund
+-      ? ['PREFUND_WRITER_CANCELLED']
+-      : ['TOOLBOX_GENERATION_CANCELLED'])
+-  });
+-}
+-
+-function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverride = null) {
+-  const reconFixJpmDatabaseAuthority = options.reconFixJpmDatabasePath === undefined ||
+-    options.reconFixJpmDatabasePath === null
+-    ? null
+-    : createReconFixJpmDatabaseAuthority(options.reconFixJpmDatabasePath);
++  const policyRegistry = executionDescriptors.policyRegistry;
+   const availableParallelism = options.availableParallelism === undefined
+     ? (typeof os.availableParallelism === 'function'
+         ? os.availableParallelism()
+@@ -359,188 +61,6 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
+       ? {}
+       : { systemReserveBytes: options.systemReserveBytes })
+   });
+-  const workerRoot = path.resolve(__dirname, '..', 'toolbox-background');
+-  const duplicateStartupGate = normalizeDuplicateStartupGateDescriptor(
+-    options.duplicateStartupGate
+-  );
+-  const matureActionBindings = createMatureActionAdapterBindings({
+-    toolboxPublication: options.toolboxPublication,
+-    acquiring: {
+-      userDataDir: options.userDataDir,
+-      mainDb: options.acquiringMainDb,
+-      mainDbProvider: options.acquiringMainDbProvider,
+-      mainDatabasePath: options.mainDatabasePath,
+-      onLog: options.acquiringLog
+-    },
+-    position: options.positionImport || {}
+-  });
+-  const entryRegistry = createStaticRegistry(Object.fromEntries(
+-    BACKGROUND_EXECUTION_POLICIES.filter((policy) => policy.entryKey !== null).map((policy) => [
+-      policy.entryKey,
+-      entryBindingForPolicy(policy, workerRoot, duplicateStartupGate)
+-    ])
+-  ));
+-  const adapterRegistry = createStaticRegistry(Object.fromEntries(
+-    [
+-      ...PENDING_BIZOP_ADAPTER_POLICIES,
+-      ...ACQUIRING_ADAPTER_POLICIES,
+-      POSITION_IMPORT_ADAPTER_POLICY
+-    ].map((policy) => [
+-      policy.adapterKey,
+-      matureActionBindings[policy.actionKey]
+-    ])
+-  ));
+-  const validatorEntries = {};
+-  for (const policy of BACKGROUND_EXECUTION_POLICIES) {
+-    let resultValidator;
+-    if (policy.moduleId === 'biz-op-v327') {
+-      resultValidator = policy.commit.kind === 'none' ? validateBizOpCandidateResult : validateBizOpExportResult;
+-    } else if (policy.actionKey === POSITION_IMPORT_ADAPTER_ACTION) {
+-      resultValidator = validatePositionImportAdapterResult;
+-    } else if (PENDING_BIZOP_ADAPTER_ACTION_SET.has(policy.actionKey)) {
+-      resultValidator = validatePendingBizOpAdapterResult;
+-    } else if (ACQUIRING_ADAPTER_ACTION_SET.has(policy.actionKey)) {
+-      resultValidator = policy.actionKey === ACQUIRING_ADAPTER_ACTIONS.IMPORT
+-        ? validateAcquiringImportAdapterResult
+-        : validateAcquiringRunAdapterResult;
+-    } else if (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION) {
+-      resultValidator = validateVccExportSubjectsResult;
+-    } else if (policy.actionKey === VCC_EXPORT_SINGLE_ACTION) {
+-      resultValidator = validateVccExportSingleResult;
+-    } else if (ACQUIRING_EXPORT_ACTION_SET.has(policy.actionKey)) {
+-      resultValidator = validateAcquiringExportResult;
+-    } else if (policy.moduleId === 'pending-read-only-export') {
+-      resultValidator = validatePendingReadOnlyExportResult;
+-    } else if (policy.moduleId === 'biz-op-read-only-export') {
+-      resultValidator = validateBizOpReadOnlyExportResult;
+-    } else if (policy.moduleId === 'pre-fund-read-only-export') {
+-      resultValidator = validatePreFundReadOnlyExportResult;
+-    } else if (policy.moduleId === 'position-read-only-export') {
+-      resultValidator = validatePositionReadOnlyExportResult;
+-    } else if (policy.moduleId === 'vcc-financial-op-read-only-export') {
+-      resultValidator = validateVccFinancialOpReadOnlyExportResult;
+-    } else if (policy.moduleId === 'recon-fix') {
+-      resultValidator = policy.actionKey === RECON_FIX_EXPORT_ACTION
+-        ? validateReconFixExportResult
+-        : (policy.actionKey === RECON_FIX_RUN_JPM_ACTION
+-            ? validateReconFixJpmResult
+-            : validateReconFixServiceResult);
+-    } else if (policy.moduleId === 'duplicate') {
+-      resultValidator = policy.actionKey === DUPLICATE_ACTIONS.IMPORT
+-        ? validateDuplicateImportResult
+-        : (policy.actionKey === DUPLICATE_ACTIONS.RUN
+-            ? validateDuplicateRunResult
+-            : validateDuplicateExportResult);
+-    } else if (policy.moduleId === 'fund-recon') {
+-      resultValidator = policy.actionKey === 'fund-recon:import'
+-        ? validateFundReconImportResult
+-        : (policy.actionKey === 'fund-recon:run'
+-            ? validateFundReconRunResult
+-            : validateFundReconExportResult);
+-    } else if (policy.moduleId === 'pre-fund') {
+-      resultValidator = policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
+-        ? validatePreFundMptRepairResult
+-        : validatePreFundMptImportResult;
+-    } else if (policy.moduleId === 'new-account') {
+-      resultValidator = policy.actionKey === NEW_ACCOUNT_SAVE_AS_ACTION
+-        ? validateNewAccountSaveAsResult
+-        : validateNewAccountGenerationResult;
+-    } else if (policy.actionKey === ROWS_ACTION) {
+-      resultValidator = validateRowsResult;
+-    } else {
+-      resultValidator = policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+-        ? validateToolboxMultiGenerationResult
+-        : (value) => validateToolboxGenerationResult(value, policy.actionKey);
+-    }
+-    validatorEntries[policy.result.validatorKey] = resultValidator;
+-    // Main explicitly executes the asynchronous technical/business validators before Publisher.
+-    // Registry bindings remain synchronous capability declarations for static contract coverage.
+-    if (policy.artifacts.technicalValidatorKey !== null) {
+-      validatorEntries[policy.artifacts.technicalValidatorKey] = resultValidator;
+-    }
+-    if (policy.artifacts.businessValidatorKey !== null) {
+-      validatorEntries[policy.artifacts.businessValidatorKey] = resultValidator;
+-    }
+-  }
+-  const validatorRegistry = createStaticRegistry(validatorEntries);
+-  const resourceProfileRegistry = createStaticRegistry({
+-    [NEW_ACCOUNT_GENERATION_POLICY.resources.profile]: estimateNewAccountGenerationPhaseResources
+-  });
+-  const preFundTopologyPlanner = createPreFundMptTopologyPlanner({ availableParallelism });
+-  const duplicateTopologyPlanner = createDuplicatePairedTopologyPlanner({ availableParallelism });
+-  const vccExportTopologyPlanner = createVccExportTopologyPlanner();
+-  const topologyRegistry = createStaticRegistry(Object.fromEntries(
+-    BACKGROUND_EXECUTION_POLICIES
+-      .filter((policy) => policy.resources.compound)
+-      .map((policy) => [policy.resources.compound.topologyKey,
+-        policy.actionKey === PRE_FUND_MPT_IMPORT_ACTION || policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
+-          ? preFundTopologyPlanner
+-          : (policy.actionKey === DUPLICATE_ACTIONS.IMPORT
+-              ? duplicateTopologyPlanner
+-              : (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION
+-                  ? vccExportTopologyPlanner
+-                  : (PENDING_BIZOP_ADAPTER_ACTION_SET.has(policy.actionKey) ||
+-                      ACQUIRING_ADAPTER_ACTION_SET.has(policy.actionKey) ||
+-                      policy.actionKey === POSITION_IMPORT_ADAPTER_ACTION
+-                      ? matureActionBindings[policy.actionKey].inspectTopology
+-                      : () => Object.freeze({ effectiveChildCount: 1 }))))])
+-  ));
+-  entryRegistry.freeze();
+-  adapterRegistry.freeze();
+-  validatorRegistry.freeze();
+-  resourceProfileRegistry.freeze();
+-  topologyRegistry.freeze();
+-
+-  const staticKeys = {
+-    resourceProfileKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.resources.profile),
+-    topologyKeys: BACKGROUND_EXECUTION_POLICIES
+-      .map((policy) => policy.resources.compound && policy.resources.compound.topologyKey)
+-      .filter(Boolean),
+-    inspectorKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.commit.inspectorKey),
+-    conflictScopeResolverKeys: BACKGROUND_EXECUTION_POLICIES.map(
+-      (policy) => policy.commit.conflictScopeResolverKey
+-    ),
+-    settlementKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.commit.settlementKey),
+-    publisherKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.artifacts.publisherKey),
+-    serviceKeys: [FUND_RECON_SERVICE_KEY, DUPLICATE_SERVICE_KEY, RECON_FIX_SERVICE_KEY],
+-    plannerKeys: [
+-      'planner.pre-fund:mpt-import',
+-      'planner.duplicate:import',
+-      'planner.vcc-financial-op:export-subjects',
+-      ...[
+-        ...PENDING_BIZOP_ADAPTER_POLICIES,
+-        ...ACQUIRING_ADAPTER_POLICIES,
+-        POSITION_IMPORT_ADAPTER_POLICY
+-      ]
+-        .filter((policy) => policy.workUnits)
+-        .map((policy) => policy.workUnits.plannerKey)
+-    ],
+-    reducerKeys: [
+-      'reducer.pre-fund:mpt-import',
+-      'reducer.duplicate:import',
+-      'reducer.vcc-financial-op:export-subjects',
+-      ...[
+-        ...PENDING_BIZOP_ADAPTER_POLICIES,
+-        ...ACQUIRING_ADAPTER_POLICIES,
+-        POSITION_IMPORT_ADAPTER_POLICY
+-      ]
+-        .filter((policy) => policy.workUnits)
+-        .map((policy) => policy.workUnits.reducerKey)
+-    ]
+-  };
+-  const policyRegistry = createExecutionPolicyRegistry({
+-    policies: BACKGROUND_EXECUTION_POLICIES,
+-    entryRegistry,
+-    adapterRegistry,
+-    validatorRegistry,
+-    resourceProfileRegistry,
+-    topologyRegistry,
+-    staticKeys,
+-    generatedAt: '2026-08-25T00:00:00+08:00'
+-  });
+-  policyRegistry.freeze();
+-  // PreFund topology可以请求false-gated Pool，但不得扩大全局E00预算；
+-  // Governor是native admission的唯一资源权威。
+   const resourceGovernor = resourceGovernorOverride || createResourceGovernor({
+     budgets: platformBudgets,
+     diagnostics: options.diagnostics
+@@ -553,106 +73,16 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
+     executionTimeoutMs: options.executionTimeoutMs,
+     shutdownTimeoutMs: supervisorShutdownTimeoutMs,
+     workerDurableCoordinator: options.workerDurableCoordinator,
+-    carrierClosureActionKeys: [...new Set([...(options.carrierClosureActionKeys || []),
+-      ...(options.bizOpV327 ? options.bizOpV327.actionKeys : [])])],
+-    beforeCarrierDispatch: options.bizOpV327 || options.beforeCarrierDispatch ? function beforeCarrierDispatch(identity) {
+-      if (identity.actionKey.startsWith('biz-op-v327:')) {
+-        if (!options.bizOpV327) throw Object.assign(new Error('业务 OP 缺少 Main 运行授权'), { code: 'BIZOP_RUNTIME_AUTHORITY_REQUIRED' });
+-        return options.bizOpV327.beforeDispatch(identity);
+-      }
+-      if (!options.beforeCarrierDispatch) {
+-        throw Object.assign(new Error('关闭观察缺少该模块自己的 Main 派发绑定'), { code: 'CARRIER_DISPATCH_BINDING_REQUIRED' });
+-      }
+-      return options.beforeCarrierDispatch(identity);
+-    } : undefined,
+-    bindInputForAction({ actionKey, operationKey, input }) {
+-      if (actionKey.startsWith('biz-op-v327:')) {
+-        if (!options.bizOpV327) throw Object.assign(new Error('业务 OP 缺少 Main 输入授权'), { code: 'BIZOP_RUNTIME_AUTHORITY_REQUIRED' });
+-        return options.bizOpV327.bindInput({ actionKey, operationKey, input });
+-      }
+-      if ([PENDING_READ_ONLY_ACTIONS.DIFF, PENDING_READ_ONLY_ACTIONS.SUMMARY]
+-        .includes(actionKey)) {
+-        if (!options.pendingDatabasePath) {
+-          const error = new Error('Pending export runtime 缺少 Main database authority');
+-          error.code = 'PENDING_EXPORT_RUNTIME_AUTHORITY_UNAVAILABLE';
+-          throw error;
+-        }
+-        if (Object.hasOwn(input, 'dbPathOrManagedSource')) {
+-          const error = new Error('Pending export database authority 不接受 caller override');
+-          error.code = 'PENDING_EXPORT_RUNTIME_AUTHORITY_OVERRIDE_FORBIDDEN';
+-          throw error;
+-        }
+-        return Object.freeze({
+-          ...input,
+-          dbPathOrManagedSource: Object.freeze({
+-            kind: 'sqlite',
+-            databasePath: path.resolve(options.pendingDatabasePath)
+-          })
+-        });
+-      }
+-      if (BIZ_OP_READ_ONLY_ACTION_SET.has(actionKey)) {
+-        if (!options.mainDatabasePath || !options.userDataDir) {
+-          const error = new Error('BizOP export runtime 缺少 Main database/userData authority');
+-          error.code = 'BIZ_OP_EXPORT_RUNTIME_AUTHORITY_UNAVAILABLE';
+-          throw error;
+-        }
+-        if (Object.hasOwn(input, 'dbPathOrManagedSource')) {
+-          const error = new Error('BizOP export database authority 不接受 caller override');
+-          error.code = 'BIZ_OP_EXPORT_RUNTIME_AUTHORITY_OVERRIDE_FORBIDDEN';
+-          throw error;
+-        }
+-        return Object.freeze({
+-          ...input,
+-          dbPathOrManagedSource: Object.freeze({
+-            kind: 'biz-op-sqlite',
+-            mainDatabasePath: path.resolve(options.mainDatabasePath),
+-            userDataDir: path.resolve(options.userDataDir)
+-          })
+-        });
+-      }
+-      if ([VCC_EXPORT_SINGLE_ACTION, VCC_EXPORT_SUBJECTS_ACTION].includes(actionKey)) {
+-        if (!options.vccFinancialOpDatabasePath || !options.vccFinancialOpAssetsDir) {
+-          const error = new Error('VCC export runtime generation 缺少 Main database/assets authority');
+-          error.code = 'VCC_EXPORT_RUNTIME_AUTHORITY_UNAVAILABLE';
+-          throw error;
+-        }
+-        if (Object.hasOwn(input, 'databasePath') || Object.hasOwn(input, 'assetsDir')) {
+-          const error = new Error('VCC export database/assets authority 不接受 caller override');
+-          error.code = 'VCC_EXPORT_RUNTIME_AUTHORITY_OVERRIDE_FORBIDDEN';
+-          throw error;
+-        }
+-        return Object.freeze({
+-          ...input,
+-          databasePath: path.resolve(options.vccFinancialOpDatabasePath),
+-          assetsDir: path.resolve(options.vccFinancialOpAssetsDir)
+-        });
+-      }
+-      if (actionKey !== RECON_FIX_RUN_JPM_ACTION) return input;
+-      if (!reconFixJpmDatabaseAuthority) {
+-        const error = new Error('ReconFix JPM runtime generation 缺少 Main database authority');
+-        error.code = 'RECON_FIX_JPM_DATABASE_AUTHORITY_UNAVAILABLE';
+-        throw error;
+-      }
+-      if (Object.hasOwn(input, 'databasePath') || Object.hasOwn(input, 'databaseIdentity')) {
+-        const error = new Error('ReconFix JPM database authority 不接受 caller override');
+-        error.code = 'RECON_FIX_JPM_DATABASE_AUTHORITY_OVERRIDE_FORBIDDEN';
+-        throw error;
+-      }
+-      return Object.freeze({
+-        ...input,
+-        databasePath: reconFixJpmDatabaseAuthority.databasePath
+-      });
+-    },
+-    defaultUnitsForAction(actionKey) {
+-      return actionKey === RECON_FIX_RUN_JPM_ACTION
+-        ? Object.freeze([Object.freeze({ unitId: RECON_FIX_JPM_UNIT_ID, input: Object.freeze({}) })])
+-        : Object.freeze([]);
+-    },
++    carrierClosureActionKeys: options.carrierClosureActionKeys || [],
++    beforeCarrierDispatch: executionDescriptors.beforeCarrierDispatch,
++    bindInputForAction: executionDescriptors.bindInputForAction,
++    defaultUnitsForAction: executionDescriptors.defaultUnitsForAction,
+     ...(options.workerThreadAdapter ? { workerThreadAdapter: options.workerThreadAdapter } : {})
+   });
+   const activeServiceOperations = new Map();
+   const serviceOperationReservations = new Map();
+-  const reconFixEvidenceSettlementAdmission = createReconFixEvidenceSettlementAdmission();
++  const reconFixEvidenceSettlementAdmission = typeof options.createEvidenceSettlementAdmission === 'function'
++    ? options.createEvidenceSettlementAdmission({ resourceGovernor }) : null;
+ 
+   function serviceOperationError(code, message) {
+     const error = new Error(message);
+@@ -904,28 +334,19 @@ function createNonProductionBackgroundExecutionRuntime(options = {}) {
+ 
+ function createBackgroundExecutionRuntimeManager(options = {}) {
+   const runtimeFactory = options.runtimeFactory || (() => {
+-    const duplicateStartupGate = typeof options.duplicateStartupGateProvider === 'function'
+-      ? options.duplicateStartupGateProvider()
+-      : options.duplicateStartupGate;
+-    return createBackgroundExecutionRuntime({
++    if (typeof options.createExecutionDescriptors !== 'function') {
++      throw Object.assign(new Error('runtime manager 需要每代装配 execution descriptors 的 Main 工厂'), {
++        code: 'EXECUTION_DESCRIPTOR_FACTORY_REQUIRED'
++      });
++    }
++    const runtimeOptions = {
+       ...options,
+-      bizOpV327: typeof options.bizOpV327Provider === 'function' ? options.bizOpV327Provider() : options.bizOpV327,
+-      duplicateStartupGate,
+       workerDurableCoordinator: typeof options.workerDurableCoordinatorProvider === 'function'
+-        ? options.workerDurableCoordinatorProvider()
+-        : options.workerDurableCoordinator,
+-      reconFixJpmDatabasePath: typeof options.reconFixJpmDatabasePathProvider === 'function'
+-        ? options.reconFixJpmDatabasePathProvider()
+-        : options.reconFixJpmDatabasePath,
+-      pendingDatabasePath: typeof options.pendingDatabasePathProvider === 'function'
+-        ? options.pendingDatabasePathProvider()
+-        : options.pendingDatabasePath,
+-      mainDatabasePath: typeof options.mainDatabasePathProvider === 'function'
+-        ? options.mainDatabasePathProvider()
+-        : options.mainDatabasePath,
+-      userDataDir: typeof options.userDataDirProvider === 'function'
+-        ? options.userDataDirProvider()
+-        : options.userDataDir
++        ? options.workerDurableCoordinatorProvider() : options.workerDurableCoordinator
++    };
++    return createBackgroundExecutionRuntime({
++      ...runtimeOptions,
++      executionDescriptors: options.createExecutionDescriptors(runtimeOptions)
+     });
+   });
+   let runtime = null;
+@@ -953,7 +374,9 @@ function createBackgroundExecutionRuntimeManager(options = {}) {
+       return runtime;
+     },
+     isProductionEnabled(actionKey) {
+-      return isBackgroundExecutionProductionEnabled(actionKey);
++      if (typeof options.isProductionEnabled === 'function') return options.isProductionEnabled(actionKey);
++      const policy = runtime && runtime.policyRegistry && runtime.policyRegistry.get(actionKey);
++      return Boolean(policy && policy.production.enabled === true);
+     },
+     peek() {
+       return runtime;
+@@ -1034,9 +457,7 @@ function createBackgroundExecutionRuntimeManager(options = {}) {
+ }
+ 
+ module.exports = {
+-  BACKGROUND_EXECUTION_POLICIES,
+   createBackgroundExecutionRuntime,
+   createBackgroundExecutionRuntimeManager,
+-  createNonProductionBackgroundExecutionRuntime,
+-  isBackgroundExecutionProductionEnabled
++  createNonProductionBackgroundExecutionRuntime
+ };
+diff --git a/src/main-process/biz-op-v327/compute-main.js b/src/main-process/biz-op-v327/compute-main.js
+index 0edaba92..70c443af 100644
+--- a/src/main-process/biz-op-v327/compute-main.js
++++ b/src/main-process/biz-op-v327/compute-main.js
+@@ -1,7 +1,9 @@
+ 'use strict';
+ 
+ const { randomUUID } = require('node:crypto');
+-const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../execution-descriptors/composition');
+ const { collectInputs, persistInputs } = require('./compute-inputs');
+ const { readVerifiedManifest } = require('./payload-store');
+ const { CELL_CONTRACT_VERSION, RULE_VERSION } = require('./import-adapter');
+diff --git a/src/main-process/biz-op-v327/delete-main.js b/src/main-process/biz-op-v327/delete-main.js
+index 2deaf197..cc71ecdb 100644
+--- a/src/main-process/biz-op-v327/delete-main.js
++++ b/src/main-process/biz-op-v327/delete-main.js
+@@ -1,7 +1,9 @@
+ 'use strict';
+ 
+ const { randomUUID } = require('node:crypto');
+-const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../execution-descriptors/composition');
+ const { fail, hash } = require('./contracts');
+ 
+ function createBizOpDeleteCoordinator({ userDataDir, catalog, payloadStore, protection, admission, sources,
+diff --git a/src/main-process/biz-op-v327/export-main.js b/src/main-process/biz-op-v327/export-main.js
+index 8f99d810..630c04e9 100644
+--- a/src/main-process/biz-op-v327/export-main.js
++++ b/src/main-process/biz-op-v327/export-main.js
+@@ -2,7 +2,9 @@
+ 
+ const fs = require('node:fs');
+ const { randomUUID } = require('node:crypto');
+-const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../execution-descriptors/composition');
+ const { freezeExportSource } = require('./export-inputs');
+ const { EXPORT_IO_RESOURCES } = require('./export-publication');
+ const { acquireBizOpPhaseLease } = require('./phase-admission');
+diff --git a/src/main-process/biz-op-v327/import-main.js b/src/main-process/biz-op-v327/import-main.js
+index de4b65c2..bb628914 100644
+--- a/src/main-process/biz-op-v327/import-main.js
++++ b/src/main-process/biz-op-v327/import-main.js
+@@ -2,7 +2,9 @@
+ 
+ const fs = require('node:fs');
+ const { randomUUID } = require('node:crypto');
+-const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../execution-descriptors/composition');
+ const { CELL_CONTRACT_VERSION, RULE_VERSION } = require('./import-adapter');
+ const { readVerifiedManifest } = require('./payload-store');
+ const { hash, fail, count } = require('./contracts');
+diff --git a/src/main-process/biz-op-v327/module.js b/src/main-process/biz-op-v327/module.js
+index 9d2edcb4..c85149b8 100644
+--- a/src/main-process/biz-op-v327/module.js
++++ b/src/main-process/biz-op-v327/module.js
+@@ -1,7 +1,9 @@
+ 'use strict';
+ 
+ const { randomUUID } = require('node:crypto');
+-const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../execution-descriptors/composition');
+ const { createBizOpCatalog } = require('./catalog');
+ const { createBizOpPayloadStore } = require('./payload-store');
+ const { createBizOpAdmission } = require('./admission');
+diff --git a/src/main-process/biz-op-v327/upgrade-main.js b/src/main-process/biz-op-v327/upgrade-main.js
+index 5b49f786..c9eb3c51 100644
+--- a/src/main-process/biz-op-v327/upgrade-main.js
++++ b/src/main-process/biz-op-v327/upgrade-main.js
+@@ -4,7 +4,9 @@ const { randomUUID } = require('node:crypto');
+ const fs = require('node:fs');
+ const path = require('node:path');
+ const { EXPORT_IO_RESOURCES } = require('./export-publication');
+-const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../execution-descriptors/composition');
+ const { withLegacyRecovery, assertLegacyRecoveryClosed } = require('../../backend/biz-op-legacy-guard');
+ const { TABLES, BASE, enumerate, validateSchema } = require('./upgrade-legacy');
+ const { fail, hash, snapshot } = require('./contracts');
+diff --git a/src/main-process/new-account/artifact-copy.js b/src/main-process/new-account/artifact-copy.js
+index 0fdaeb11..77bc424d 100644
+--- a/src/main-process/new-account/artifact-copy.js
++++ b/src/main-process/new-account/artifact-copy.js
+@@ -31,6 +31,7 @@ const {
+   publishDurableArtifactAsync
+ } = require('../toolbox-output-publication-dispatch');
+ const {
++  NEW_ACCOUNT_SAVE_AS_ACTION,
+   validateNewAccountGenerationResult
+ } = require('./generation-contract');
+ const {
+@@ -40,7 +41,6 @@ const {
+   assertNewAccountExpectedArtifactAuthority
+ } = require('./generation-validator');
+ 
+-const NEW_ACCOUNT_SAVE_AS_ACTION = 'new-account:save-as';
+ const NEW_ACCOUNT_SAVE_AS_SCHEMA_VERSION = 1;
+ const MAX_COPY_CONTRACT_BYTES = 256 * 1024;
+ const MAX_COPY_ARTIFACT_BYTES = 256 * 1024 * 1024;
+diff --git a/src/main-process/new-account/generation-contract.js b/src/main-process/new-account/generation-contract.js
+index 7b2823a7..efd1818c 100644
+--- a/src/main-process/new-account/generation-contract.js
++++ b/src/main-process/new-account/generation-contract.js
+@@ -7,6 +7,7 @@ const { canonicalJsonSnapshot } = require('../background-execution/canonical-jso
+ const { isValidTaskStagingResourceId, resolveTaskStagingResource } = require('../statement-worker/staging-ownership');
+ 
+ const NEW_ACCOUNT_GENERATION_ACTION = 'new-account:generate';
++const NEW_ACCOUNT_SAVE_AS_ACTION = 'new-account:save-as';
+ const NEW_ACCOUNT_GENERATION_SCHEMA_VERSION = 1;
+ const MAX_INPUT_BYTES = 256 * 1024;
+ const MAX_RESULT_BYTES = 256 * 1024;
+@@ -443,6 +444,7 @@ module.exports = {
+   MAX_RECORDS,
+   MAX_RESULT_BYTES,
+   NEW_ACCOUNT_GENERATION_ACTION,
++  NEW_ACCOUNT_SAVE_AS_ACTION,
+   NEW_ACCOUNT_GENERATION_SCHEMA_VERSION,
+   NEW_ACCOUNT_GENERATION_SHAPE_LIMITS,
+   NewAccountGenerationContractError,
+diff --git a/src/main-process/new-account/policies.js b/src/main-process/new-account/policies.js
+index e60fc571..d35ac537 100644
+--- a/src/main-process/new-account/policies.js
++++ b/src/main-process/new-account/policies.js
+@@ -1,7 +1,6 @@
+ 'use strict';
+ 
+-const { NEW_ACCOUNT_GENERATION_ACTION } = require('./generation-contract');
+-const { NEW_ACCOUNT_SAVE_AS_ACTION } = require('./artifact-copy');
++const { NEW_ACCOUNT_GENERATION_ACTION, NEW_ACCOUNT_SAVE_AS_ACTION } = require('./generation-contract');
+ const { MIN_NEW_ACCOUNT_GENERATION_MEMORY_BYTES } = require('./resource-estimator');
+ 
+ const ZERO_RESOURCES = Object.freeze({
+diff --git a/src/main-process/task-adapter-composition.js b/src/main-process/task-adapter-composition.js
+index 40f5e5d6..40287fd9 100644
+--- a/src/main-process/task-adapter-composition.js
++++ b/src/main-process/task-adapter-composition.js
+@@ -8,7 +8,7 @@ const { createVccOutputTaskAdapter } = require('./vcc-financial-op-output/task-a
+ 
+ // 只在 Main 启动期消费既有 policy 清单，生成每个 taskKey 的显式绑定。
+ // 领域依赖仅存在于此装配入口，通用 registry / scope / executor 不认识领域状态。
+-function createBusinessTaskAdapterRegistry({ policies, positionOwner, acknowledgeReceipts, reportArchiveFailure }) {
++function createBusinessTaskAdapterRegistrations({ policies, positionOwner, acknowledgeReceipts, reportArchiveFailure }) {
+   const scopeAdapters = Object.freeze({
+     'position-reconciliation-process': 'position-reconciliation',
+     toolbox: 'toolbox',
+@@ -18,15 +18,19 @@ function createBusinessTaskAdapterRegistry({ policies, positionOwner, acknowledg
+     taskKey: policy.taskKey,
+     adapterId: scopeAdapters[policy.scopeId] || 'passthrough'
+   }));
+-  return createTaskAdapterRegistry({
+-    adapters: [
++  return Object.freeze({
++    adapters: Object.freeze([
+       createPassthroughTaskAdapter(),
+       createPositionTaskAdapter({ owner: positionOwner, reportArchiveFailure }),
+       createToolboxTaskAdapter({ acknowledgeReceipts }),
+       createVccOutputTaskAdapter({ acknowledgeReceipts })
+-    ],
+-    taskBindings
++    ]),
++    taskBindings: Object.freeze(taskBindings.map(Object.freeze))
+   });
+ }
+ 
+-module.exports = { createBusinessTaskAdapterRegistry };
++function createBusinessTaskAdapterRegistry(options) {
++  return createTaskAdapterRegistry(createBusinessTaskAdapterRegistrations(options));
++}
++
++module.exports = { createBusinessTaskAdapterRegistry, createBusinessTaskAdapterRegistrations };
+diff --git a/src/main-process/task-adapters/README.md b/src/main-process/task-adapters/README.md
+index 18917de7..fc33e157 100644
+--- a/src/main-process/task-adapters/README.md
++++ b/src/main-process/task-adapters/README.md
+@@ -7,7 +7,7 @@
+ | 入口 | 职责与调用方 |
+ | --- | --- |
+ | [registry.js](registry.js) | `createTaskAdapterRegistry({ adapters, taskBindings })` 冻结注册表及注册项；只按显式 taskKey 查找。重复或缺失注册失败；未知受控任务返回 `TASK_ADAPTER_UNBOUND`，无默认 fallback。 |
+-| [task-adapter-composition.js](../task-adapter-composition.js) | Main 启动时静态装配四种 adapter，并从既有 policy 清单生成全部受控 taskKey 的显式绑定；exclude 不绑定。领域依赖只允许在该装配层和领域模块。新增受控任务必须核对其 scope、适配行为和 binding 测试。 |
++| [task-adapter-composition.js](../task-adapter-composition.js) | 提供 `createBusinessTaskAdapterRegistrations` 冻结快照，原 registry 工厂复用该入口。Main 经 [G7 composition](../execution-descriptors/composition.js) 聚合四种 adapter，并从既有 policy 清单生成全部受控 taskKey 的显式绑定；exclude 不绑定。领域依赖只允许在该装配层和领域模块。新增受控任务必须核对其 scope、适配行为和 binding 测试。 |
+ | [passthrough.js](passthrough.js) | 透传 prepared 身份、hook、intent；在真实业务闭包执行前标记接管。没有显式身份仍由 TaskLifecycle 生成。 |
+ | [prepared-resources.js](prepared-resources.js) | prepare 返回 `proceed:true` 后立即建立唯一 scope；只调用 prepared 原有 `onAbandon`，不推测文件路径、不替代领域清理。 |
+ | [Position owner](../position-reconciliation/task-owner.js) / [adapter](../position-reconciliation/task-adapter.js) | owner 持有 operation context/active state、pending/checkpoint、恢复意图和受管暂存清理；adapter 持有 invocation token 并组合 admission、业务、settlement、终态。设置与服务访问由 Main 注入，数据位置不变。 |
+diff --git a/src/main.js b/src/main.js
+index 56488c1a..3d10c637 100644
+--- a/src/main.js
++++ b/src/main.js
+@@ -23,7 +23,7 @@ const {
+ const {
+   createStartupRecoveryCoordinator
+ } = require('./main-process/background-execution/startup-recovery-coordinator');
+-const { createApplicationRecoveryComposition } = require('./main-process/application-recovery/composition');
++const { createApplicationRecoveryComposition } = require('./main-process/execution-descriptors/composition');
+ const {
+   createRecoveryHoldGate
+ } = require('./main-process/background-execution/recovery-hold-gate');
+@@ -114,10 +114,14 @@ const {
+   selectSuccessfulPathsByResultIndex
+ } = require('./main-process/archive-center/operation-tracker');
+ const {
+-  SUPPORT_ACTION_POLICIES,
+-  createBankStatementRunFlowIdentity,
+-  createTaskPolicyRegistry
++  SUPPORT_ACTION_POLICIES
+ } = require('./main-process/archive-center/task-policy-registry');
++const {
++  createBankStatementRunFlowIdentity
++} = require('./main-process/fund-recon-worker/archive-task-policies');
++const {
++  createTaskPolicyRegistry
++} = require('./main-process/execution-descriptors/composition');
+ const { createBusinessFlowResolver } = require('./main-process/archive-center/business-flow-resolver');
+ const {
+   createTaskLifecycle
+@@ -258,8 +262,7 @@ const {
+   PositionReconciliationError
+ } = require('./main-process/position-reconciliation/common');
+ const { createPositionTaskOwner } = require('./main-process/position-reconciliation/task-owner');
+-const { createTerminalRouteRegistry } = require('./main-process/archive-center/terminal-route-registry');
+-const { createBusinessTaskAdapterRegistry } = require('./main-process/task-adapter-composition');
++const { createExecutionTaskComposition } = require('./main-process/execution-descriptors/composition');
+ const { createPreparedResourceScope } = require('./main-process/task-adapters/prepared-resources');
+ const {
+   createPositionRunTaskContract,
+@@ -493,7 +496,7 @@ const {
+ } = require('./main-process/toolbox-multi-split');
+ const {
+   createBackgroundExecutionRuntimeManager
+-} = require('./main-process/background-execution/runtime');
++} = require('./main-process/execution-descriptors/composition');
+ const {
+   PENDING_READ_ONLY_ACTIONS
+ } = require('./main-process/read-only-exports/pending/policies');
+@@ -1288,7 +1291,7 @@ const positionTaskOwner = createPositionTaskOwner({
+     archiveOperationTracker && archiveOperationTracker.supportsChannel(channel)
+   )
+ });
+-const terminalRouteRegistry = createTerminalRouteRegistry([
++const terminalRouteRegistrations = [
+   positionTaskOwner.terminalRegistration,
+   createPendingTerminalRouteRegistration({ getDb: () => pendingDb }),
+   bizOpReconRunData.createBizOpRunTerminalRouteRegistration({
+@@ -1302,15 +1305,16 @@ const terminalRouteRegistry = createTerminalRouteRegistry([
+     withLegacyRecovery
+   }),
+   createPreFundTerminalRouteRegistration({ getService: getPreFundReconciliationService })
+-]);
++];
+ const businessOperationRegistry = createBusinessOperationRegistry();
+ const taskPolicyRegistry = createTaskPolicyRegistry();
+-const taskAdapterRegistry = createBusinessTaskAdapterRegistry({
+-  policies: taskPolicyRegistry.list(),
++const executionTaskComposition = createExecutionTaskComposition({
++  terminalRoutes: terminalRouteRegistrations,
+   positionOwner: positionTaskOwner,
+   acknowledgeReceipts: acknowledgeToolboxPublicationReceipts,
+   reportArchiveFailure
+ });
++const { taskAdapterRegistry, terminalRouteRegistry } = executionTaskComposition;
+ // Recovery adapter 只能消费这个启动期 frozen exact host。先一次性冻结 binding authority，
+ // 再允许 initializeApplication 建 DB，之后才注册 IPC；任一 authority 漂移在基础设施前失败。
+ const taskPolicyBindingHost = Object.freeze({
+diff --git a/tests/fixtures/archive-permanent-delete-hardlink-republish.js b/tests/fixtures/archive-permanent-delete-hardlink-republish.js
+index 3e711093..d1418503 100644
+--- a/tests/fixtures/archive-permanent-delete-hardlink-republish.js
++++ b/tests/fixtures/archive-permanent-delete-hardlink-republish.js
+@@ -10,7 +10,9 @@ const { createArchiveService } = require('../../src/main-process/archive-center/
+ const { createArchiveCenterController } = require('../../src/main-process/archive-center/controller');
+ const { createArchiveOutboxStore } = require('../../src/main-process/archive-center/outbox-store');
+ const { createTaskLifecycle } = require('../../src/main-process/archive-center/task-lifecycle');
+-const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../../src/main-process/execution-descriptors/composition');
+ const { normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
+ 
+ async function verifyHardlinkRepublishRemainder(parentDirectory, restart = false) {
+diff --git a/tests/fixtures/archive-permanent-delete-owner-recovery.js b/tests/fixtures/archive-permanent-delete-owner-recovery.js
+index 43b734fa..b4c7bbde 100644
+--- a/tests/fixtures/archive-permanent-delete-owner-recovery.js
++++ b/tests/fixtures/archive-permanent-delete-owner-recovery.js
+@@ -11,7 +11,9 @@ const { createArchiveService } = require('../../src/main-process/archive-center/
+ const { createArchiveCenterController } = require('../../src/main-process/archive-center/controller');
+ const { createArchiveOutboxStore } = require('../../src/main-process/archive-center/outbox-store');
+ const { createTaskLifecycle } = require('../../src/main-process/archive-center/task-lifecycle');
+-const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../../src/main-process/execution-descriptors/composition');
+ const { normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
+ const EXIT_CODES = { running: 82, 'after-terminal': 81, 'anonymous-after-terminal': 84, 'reserve-transaction': 83 };
+ 
+diff --git a/tests/fixtures/archive-permanent-delete-position-fileplan.js b/tests/fixtures/archive-permanent-delete-position-fileplan.js
+index 7c2cc454..d6ef7b9b 100644
+--- a/tests/fixtures/archive-permanent-delete-position-fileplan.js
++++ b/tests/fixtures/archive-permanent-delete-position-fileplan.js
+@@ -15,7 +15,9 @@ const { createArchiveService } = require('../../src/main-process/archive-center/
+ const { createArchiveCenterController } = require('../../src/main-process/archive-center/controller');
+ const { createArchiveOutboxStore } = require('../../src/main-process/archive-center/outbox-store');
+ const { createTaskLifecycle } = require('../../src/main-process/archive-center/task-lifecycle');
+-const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../../src/main-process/execution-descriptors/composition');
+ const { normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
+ const { createPositionOwnedDeleteSourceResolver, positionDeleteSourceReferences } = require('../../src/main-process/archive-center/position-owned-delete-sources');
+ 
+diff --git a/tests/fixtures/archive-permanent-delete-publication-child.js b/tests/fixtures/archive-permanent-delete-publication-child.js
+index 29cfce74..e9fe711d 100644
+--- a/tests/fixtures/archive-permanent-delete-publication-child.js
++++ b/tests/fixtures/archive-permanent-delete-publication-child.js
+@@ -12,7 +12,9 @@ const { createArchiveService } = require('../../src/main-process/archive-center/
+ const { createArchiveCenterController } = require('../../src/main-process/archive-center/controller');
+ const { createArchiveOutboxStore } = require('../../src/main-process/archive-center/outbox-store');
+ const { createTaskLifecycle } = require('../../src/main-process/archive-center/task-lifecycle');
+-const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../../src/main-process/execution-descriptors/composition');
+ const { normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
+ const { createTestPublicationHarness } = require('../helpers/publication-authority');
+ const { createArchivePublicationOwner } = require('../../src/main-process/publication-recovery/archive-owner');
+diff --git a/tests/fixtures/archive-permanent-delete-readonly-owner.js b/tests/fixtures/archive-permanent-delete-readonly-owner.js
+index dda69aeb..59afac16 100644
+--- a/tests/fixtures/archive-permanent-delete-readonly-owner.js
++++ b/tests/fixtures/archive-permanent-delete-readonly-owner.js
+@@ -184,7 +184,7 @@ async function verifyReadonlyOwnerIdentity(parentDirectory, options = {}) {
+     runtime = openRuntime(directory, sourceRoot, fsImpl);
+     assert.equal((await runtime.service.initialize({ deferStartupRecovery: true, startBackgroundMaterialization: false })).ok, true);
+     const { createTaskLifecycle } = require(path.join(sourceRoot, 'src/main-process/archive-center/task-lifecycle'));
+-    const { createTaskPolicyRegistry } = require(path.join(sourceRoot, 'src/main-process/archive-center/task-policy-registry'));
++    const { createTaskPolicyRegistry } = require(path.join(sourceRoot, 'src/main-process/execution-descriptors/composition'));
+     const { normalizeFilePlanV1 } = require(path.join(sourceRoot, 'src/main-process/archive-center/file-plan'));
+     const externalPath = path.join(directory, 'template.csv');
+     fs.writeFileSync(externalPath, SOURCE_BYTES);
+diff --git a/tests/fixtures/biz-op-v327-crash.cjs b/tests/fixtures/biz-op-v327-crash.cjs
+index c50c40e5..bdc60194 100644
+--- a/tests/fixtures/biz-op-v327-crash.cjs
++++ b/tests/fixtures/biz-op-v327-crash.cjs
+@@ -10,7 +10,7 @@ const { createTaskLifecycle } = source('archive-center/task-lifecycle');
+ const { createBusinessFlowResolver } = source('archive-center/business-flow-resolver');
+ const { createBusinessOperationRegistry } = source('business-operation-registry');
+ const { normalizeFilePlanV1 } = source('archive-center/file-plan');
+-const { createNonProductionBackgroundExecutionRuntime } = source('background-execution/runtime');
++const { createNonProductionBackgroundExecutionRuntime } = source('execution-descriptors/composition');
+ const { createResourceGovernor } = source('background-execution/resource-governor');
+ const { createRecoveryControlReadRepository } = source('background-execution/critical/recovery-control-read-repository');
+ const { createRecoveryRequestOwnerRepository, createRecoveryObservationAttemptRepository } = source('background-execution/critical/recovery-request-owner-repository');
+diff --git a/tests/helpers/archive-aware-operation-harness.js b/tests/helpers/archive-aware-operation-harness.js
+index 5c5baa91..6503fb3f 100644
+--- a/tests/helpers/archive-aware-operation-harness.js
++++ b/tests/helpers/archive-aware-operation-harness.js
+@@ -6,7 +6,9 @@ const fs = require('node:fs');
+ const path = require('node:path');
+ const vm = require('node:vm');
+ const ipcTaskContract = require('../../src/main-process/archive-center/ipc-task-contract');
+-const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../../src/main-process/execution-descriptors/composition');
+ 
+ const { createPreparedResourceScope } = require('../../src/main-process/task-adapters/prepared-resources');
+ const { createTaskAdapterRegistry } = require('../../src/main-process/task-adapters/registry');
+diff --git a/tests/helpers/biz-op-v327-host.js b/tests/helpers/biz-op-v327-host.js
+index c76fe31c..8ded7f23 100644
+--- a/tests/helpers/biz-op-v327-host.js
++++ b/tests/helpers/biz-op-v327-host.js
+@@ -14,7 +14,9 @@ const { createTaskLifecycle } = require('../../src/main-process/archive-center/t
+ const { createBusinessFlowResolver } = require('../../src/main-process/archive-center/business-flow-resolver');
+ const { createBusinessOperationRegistry } = require('../../src/main-process/business-operation-registry');
+ const { normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
+-const { createNonProductionBackgroundExecutionRuntime } = require('../../src/main-process/background-execution/runtime');
++const {
++  createNonProductionBackgroundExecutionRuntime
++} = require('../../src/main-process/execution-descriptors/composition');
+ const { createResourceGovernor } = require('../../src/main-process/background-execution/resource-governor');
+ const { createInspectorRegistry } = require('../../src/main-process/background-execution/inspector-registry');
+ const { createSettlementRecoveryProviderRegistry } = require('../../src/main-process/background-execution/settlement-recovery-provider-registry');
+diff --git a/tests/unit/main-process/acquiring-bill-currency-run-data.test.js b/tests/unit/main-process/acquiring-bill-currency-run-data.test.js
+index 118d6f17..6987e4c9 100644
+--- a/tests/unit/main-process/acquiring-bill-currency-run-data.test.js
++++ b/tests/unit/main-process/acquiring-bill-currency-run-data.test.js
+@@ -39,7 +39,7 @@ const {
+ } = require('../../../src/main-process/archive-center/file-plan');
+ const {
+   createTaskPolicyRegistry
+-} = require('../../../src/main-process/archive-center/task-policy-registry');
++} = require('../../../src/main-process/execution-descriptors/composition');
+ const acquiringRunData = require('../../../src/main-process/acquiring-bill-currency-run-data');
+ const acquiringSession = require('../../../src/main-process/acquiring-bill-currency-session');
+ 
+diff --git a/tests/unit/main-process/acquiring-read-only-export-e13-c.test.js b/tests/unit/main-process/acquiring-read-only-export-e13-c.test.js
+index 3f16426a..e5aed2fc 100644
+--- a/tests/unit/main-process/acquiring-read-only-export-e13-c.test.js
++++ b/tests/unit/main-process/acquiring-read-only-export-e13-c.test.js
+@@ -38,9 +38,11 @@ const {
+   bindingSnapshot
+ } = require('../../../src/main-process/background-execution/action-task-binding-registry');
+ const {
+-  BACKGROUND_EXECUTION_POLICIES,
++  BACKGROUND_EXECUTION_POLICIES
++} = require('../../../src/main-process/execution-descriptors/policy-catalog');
++const {
+   createBackgroundExecutionRuntime
+-} = require('../../../src/main-process/background-execution/runtime');
++} = require('../../../src/main-process/execution-descriptors/composition');
+ 
+ function createGenerationPlan(root, name) {
+   return Object.freeze({
+diff --git a/tests/unit/main-process/archive-delete-owner-completion.test.js b/tests/unit/main-process/archive-delete-owner-completion.test.js
+index 9e857230..50102b58 100644
+--- a/tests/unit/main-process/archive-delete-owner-completion.test.js
++++ b/tests/unit/main-process/archive-delete-owner-completion.test.js
+@@ -397,7 +397,9 @@ test('工具箱真实发布恢复在清理完成后记录 owner 凭证，凭证
+ 
+ test('publication owner 仅匹配 Main 登记的精确 taskKey/moduleId，不认未知共享 Publisher 入口', () => {
+   const { isPublicationOnlyFileTask } = require('../../../src/main-process/toolbox-archive-recovery');
+-  const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
++  const {
++  createTaskPolicyRegistry
++} = require('../../../src/main-process/execution-descriptors/composition');
+   const registry = createTaskPolicyRegistry();
+   for (const channel of ['toolbox:merge', 'toolbox:split:export', 'vccFinancialOp:data-manager:export',
+     'vccFinancialOp:export:import-audit', 'vccFinancialOp:export:result',
+@@ -417,7 +419,9 @@ test('VCC 与只读导出真实 policy 的临时归档失败由原 publication 
+   const crypto = require('node:crypto');
+   const { createArchiveService } = require('../../../src/main-process/archive-center/archive-service');
+   const { createTaskLifecycle } = require('../../../src/main-process/archive-center/task-lifecycle');
+-  const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
++  const {
++  createTaskPolicyRegistry
++} = require('../../../src/main-process/execution-descriptors/composition');
+   const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
+   const { JOURNAL_INDEX_NAME, prepareToolboxPublication, publishPreparedToolboxPublication } = require('../../helpers/publication-authority');
+   const { acknowledgeToolboxPublicationReceipts, recoverToolboxPublicationsIntoArchive } = require('../../../src/main-process/toolbox-archive-recovery');
+diff --git a/tests/unit/main-process/archive-file-owner-recovery.test.js b/tests/unit/main-process/archive-file-owner-recovery.test.js
+index ee2e19b6..0dea44a7 100644
+--- a/tests/unit/main-process/archive-file-owner-recovery.test.js
++++ b/tests/unit/main-process/archive-file-owner-recovery.test.js
+@@ -10,7 +10,9 @@ const { createArchiveService } = require('../../../src/main-process/archive-cent
+ const { createArchiveControllerWithRoutes: createArchiveCenterController } = require('../../helpers/archive-terminal-routes');
+ const { createArchiveOutboxStore } = require('../../../src/main-process/archive-center/outbox-store');
+ const { createTaskLifecycle } = require('../../../src/main-process/archive-center/task-lifecycle');
+-const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../../../src/main-process/execution-descriptors/composition');
+ const { normalizeFilePlanV1, artifactManifestFromFilePlan } = require('../../../src/main-process/archive-center/file-plan');
+ const { createArchiveRepository } = require('../../../src/backend/database/archive-repository');
+ const runDataStore = require('../../../src/backend/run-data-store');
+diff --git a/tests/unit/main-process/archive-position-fileplan-delete.test.js b/tests/unit/main-process/archive-position-fileplan-delete.test.js
+index 41061f02..9041dfca 100644
+--- a/tests/unit/main-process/archive-position-fileplan-delete.test.js
++++ b/tests/unit/main-process/archive-position-fileplan-delete.test.js
+@@ -10,7 +10,9 @@ const { createArchiveService } = require('../../../src/main-process/archive-cent
+ const { createArchiveCenterController } = require('../../../src/main-process/archive-center/controller');
+ const { createArchiveOutboxStore } = require('../../../src/main-process/archive-center/outbox-store');
+ const { createTaskLifecycle } = require('../../../src/main-process/archive-center/task-lifecycle');
+-const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../../../src/main-process/execution-descriptors/composition');
+ const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
+ const { stageInputFiles } = require('../../../src/main-process/position-reconciliation/input-staging');
+ const { positionInputFilePlanEvidence, positionFilePlanSettlementFiles } = require('../../../src/main-process/position-reconciliation/archive-file-plan-evidence');
+diff --git a/tests/unit/main-process/archive-position-report-evidence.test.js b/tests/unit/main-process/archive-position-report-evidence.test.js
+index 812e4a52..0574ef35 100644
+--- a/tests/unit/main-process/archive-position-report-evidence.test.js
++++ b/tests/unit/main-process/archive-position-report-evidence.test.js
+@@ -10,7 +10,9 @@ const { createArchiveService } = require('../../../src/main-process/archive-cent
+ const { createArchiveCenterController } = require('../../../src/main-process/archive-center/controller');
+ const { createArchiveOutboxStore } = require('../../../src/main-process/archive-center/outbox-store');
+ const { createTaskLifecycle } = require('../../../src/main-process/archive-center/task-lifecycle');
+-const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../../../src/main-process/execution-descriptors/composition');
+ const { normalizeFilePlanV1, artifactManifestFromFilePlan } = require('../../../src/main-process/archive-center/file-plan');
+ const { captureStagedInputEvidenceAsync } = require('../../../src/main-process/position-reconciliation/input-staging');
+ const { createPositionReconciliationStore } = require('../../../src/main-process/position-reconciliation/store');
+diff --git a/tests/unit/main-process/archive-service.test.js b/tests/unit/main-process/archive-service.test.js
+index 90cfa0b0..d7f23289 100644
+--- a/tests/unit/main-process/archive-service.test.js
++++ b/tests/unit/main-process/archive-service.test.js
+@@ -41,9 +41,11 @@ const {
+   createBusinessFlowResolver
+ } = require('../../../src/main-process/archive-center/business-flow-resolver');
+ const {
+-  createBankStatementRunFlowIdentity,
++  createBankStatementRunFlowIdentity
++} = require('../../../src/main-process/fund-recon-worker/archive-task-policies');
++const {
+   createTaskPolicyRegistry
+-} = require('../../../src/main-process/archive-center/task-policy-registry');
++} = require('../../../src/main-process/execution-descriptors/composition');
+ 
+ function createFixture(options = {}) {
+   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-service-'));
+diff --git a/tests/unit/main-process/archive-task-lifecycle.test.js b/tests/unit/main-process/archive-task-lifecycle.test.js
+index b57316f8..c190e08f 100644
+--- a/tests/unit/main-process/archive-task-lifecycle.test.js
++++ b/tests/unit/main-process/archive-task-lifecycle.test.js
+@@ -18,9 +18,11 @@ const {
+   prepareIpcTaskInvocation
+ } = require('../../../src/main-process/archive-center/ipc-task-contract');
+ const {
+-  createBankStatementRunFlowIdentity,
++  createBankStatementRunFlowIdentity
++} = require('../../../src/main-process/fund-recon-worker/archive-task-policies');
++const {
+   createTaskPolicyRegistry
+-} = require('../../../src/main-process/archive-center/task-policy-registry');
++} = require('../../../src/main-process/execution-descriptors/composition');
+ const {
+   VCC_OP_SAVE_RUN_ACTION_KEY,
+   VccOpSaveRunContractError
+diff --git a/tests/unit/main-process/archive-task-policy-registry.test.js b/tests/unit/main-process/archive-task-policy-registry.test.js
+index 5e40c984..833ba4c5 100644
+--- a/tests/unit/main-process/archive-task-policy-registry.test.js
++++ b/tests/unit/main-process/archive-task-policy-registry.test.js
+@@ -12,13 +12,19 @@ const {
+   EXCLUDE_REASONS,
+   FILE_ACTION_CHANNELS,
+   NO_FILE_ACTION_CHANNELS,
+-  SUPPORT_ACTION_POLICIES,
++  SUPPORT_ACTION_POLICIES
++} = require('../../../src/main-process/archive-center/task-policy-registry');
++const {
+   bankBuImportResultFlowIdentities,
+   bankBuRunFlowPlan,
+-  createBankStatementRunFlowIdentity,
+-  createTaskPolicyRegistry,
+   statementResultClassifier
+-} = require('../../../src/main-process/archive-center/task-policy-registry');
++} = require('../../../src/main-process/execution-descriptors/legacy-task-policies');
++const {
++  createBankStatementRunFlowIdentity
++} = require('../../../src/main-process/fund-recon-worker/archive-task-policies');
++const {
++  createTaskPolicyRegistry
++} = require('../../../src/main-process/execution-descriptors/composition');
+ const {
+   FILE_CHANNELS
+ } = require('../../../src/main-process/archive-center/operation-tracker');
+diff --git a/tests/unit/main-process/background-execution/acquiring-adapters-e13-e.test.js b/tests/unit/main-process/background-execution/acquiring-adapters-e13-e.test.js
+index c8f3ca2e..595ff95a 100644
+--- a/tests/unit/main-process/background-execution/acquiring-adapters-e13-e.test.js
++++ b/tests/unit/main-process/background-execution/acquiring-adapters-e13-e.test.js
+@@ -18,9 +18,11 @@ const {
+   createAcquiringRunMatureBindings
+ } = require('../../../../src/main-process/background-execution/adapters/acquiring-adapter');
+ const {
+-  BACKGROUND_EXECUTION_POLICIES,
++  BACKGROUND_EXECUTION_POLICIES
++} = require('../../../../src/main-process/execution-descriptors/policy-catalog');
++const {
+   createNonProductionBackgroundExecutionRuntime
+-} = require('../../../../src/main-process/background-execution/runtime');
++} = require('../../../../src/main-process/execution-descriptors/composition');
+ const {
+   createResourceGovernor
+ } = require('../../../../src/main-process/background-execution/resource-governor');
+diff --git a/tests/unit/main-process/background-execution/action-task-binding-registry.test.js b/tests/unit/main-process/background-execution/action-task-binding-registry.test.js
+index 2e1befd6..3299dae9 100644
+--- a/tests/unit/main-process/background-execution/action-task-binding-registry.test.js
++++ b/tests/unit/main-process/background-execution/action-task-binding-registry.test.js
+@@ -20,7 +20,7 @@ const {
+ const backgroundExecution = require('../../../../src/main-process/background-execution');
+ const {
+   createTaskPolicyRegistry
+-} = require('../../../../src/main-process/archive-center/task-policy-registry');
++} = require('../../../../src/main-process/execution-descriptors/composition');
+ 
+ function mutableTaskPolicies() {
+   return createTaskPolicyRegistry().list().map((policy) => ({ ...policy }));
+diff --git a/tests/unit/main-process/background-execution/carrier-observation.test.js b/tests/unit/main-process/background-execution/carrier-observation.test.js
+index 0b70f053..01ef13c3 100644
+--- a/tests/unit/main-process/background-execution/carrier-observation.test.js
++++ b/tests/unit/main-process/background-execution/carrier-observation.test.js
+@@ -12,7 +12,7 @@ const { createWorkerThreadAdapter } = require(
+   '../../../../src/main-process/background-execution/adapters/worker-thread-adapter');
+ const { createResourceGovernor } = require('../../../../src/main-process/background-execution/resource-governor');
+ const { createBackgroundExecutionRuntimeManager } = require(
+-  '../../../../src/main-process/background-execution/runtime');
++  '../../../../src/main-process/execution-descriptors/composition');
+ const canary = require('../../../../src/main-process/background-execution/canary');
+ 
+ const ACTION = 'background-execution:carrier-observation-test';
+diff --git a/tests/unit/main-process/background-execution/manifest-coverage-e13-g.test.js b/tests/unit/main-process/background-execution/manifest-coverage-e13-g.test.js
+index 606eabca..b67c5574 100644
+--- a/tests/unit/main-process/background-execution/manifest-coverage-e13-g.test.js
++++ b/tests/unit/main-process/background-execution/manifest-coverage-e13-g.test.js
+@@ -30,7 +30,7 @@ const {
+ } = require('../../../../src/main-process/background-execution/production-strategy-snapshot');
+ const {
+   BACKGROUND_EXECUTION_POLICIES
+-} = require('../../../../src/main-process/background-execution/runtime');
++} = require('../../../../src/main-process/execution-descriptors/policy-catalog');
+ 
+ function harness(overrides = {}) {
+   const bindings = overrides.bindings || bindingSnapshot();
+diff --git a/tests/unit/main-process/background-execution/pending-bizop-adapters-e13-d.test.js b/tests/unit/main-process/background-execution/pending-bizop-adapters-e13-d.test.js
+index a52288eb..86dc50d6 100644
+--- a/tests/unit/main-process/background-execution/pending-bizop-adapters-e13-d.test.js
++++ b/tests/unit/main-process/background-execution/pending-bizop-adapters-e13-d.test.js
+@@ -12,9 +12,11 @@ const {
+   validatePendingBizOpAdapterResult
+ } = require('../../../../src/main-process/background-execution/pending-bizop-adapter-policies');
+ const {
+-  BACKGROUND_EXECUTION_POLICIES,
++  BACKGROUND_EXECUTION_POLICIES
++} = require('../../../../src/main-process/execution-descriptors/policy-catalog');
++const {
+   createNonProductionBackgroundExecutionRuntime
+-} = require('../../../../src/main-process/background-execution/runtime');
++} = require('../../../../src/main-process/execution-descriptors/composition');
+ const {
+   createResourceGovernor
+ } = require('../../../../src/main-process/background-execution/resource-governor');
+diff --git a/tests/unit/main-process/background-execution/position-import-adapter-e13-f.test.js b/tests/unit/main-process/background-execution/position-import-adapter-e13-f.test.js
+index ad703fc0..c302573a 100644
+--- a/tests/unit/main-process/background-execution/position-import-adapter-e13-f.test.js
++++ b/tests/unit/main-process/background-execution/position-import-adapter-e13-f.test.js
+@@ -22,9 +22,11 @@ const {
+   '../../../../src/main-process/background-execution/adapters/position-import-adapter'
+ );
+ const {
+-  BACKGROUND_EXECUTION_POLICIES,
++  BACKGROUND_EXECUTION_POLICIES
++} = require('../../../../src/main-process/execution-descriptors/policy-catalog');
++const {
+   createNonProductionBackgroundExecutionRuntime
+-} = require('../../../../src/main-process/background-execution/runtime');
++} = require('../../../../src/main-process/execution-descriptors/composition');
+ const {
+   createResourceGovernor
+ } = require('../../../../src/main-process/background-execution/resource-governor');
+diff --git a/tests/unit/main-process/background-execution/recovery-contract-c2.test.js b/tests/unit/main-process/background-execution/recovery-contract-c2.test.js
+index f892f6c0..2ac3b07e 100644
+--- a/tests/unit/main-process/background-execution/recovery-contract-c2.test.js
++++ b/tests/unit/main-process/background-execution/recovery-contract-c2.test.js
+@@ -8,7 +8,9 @@ const path = require('node:path');
+ const test = require('node:test');
+ const { DatabaseSync } = require('node:sqlite');
+ const { createArchiveAwareOperationHarness } = require('../../../helpers/archive-aware-operation-harness');
+-const { createTaskPolicyRegistry } = require('../../../../src/main-process/archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../../../../src/main-process/execution-descriptors/composition');
+ 
+ const {
+   ensureArchiveMetadataSupport
+diff --git a/tests/unit/main-process/background-execution/recovery-control-repository.test.js b/tests/unit/main-process/background-execution/recovery-control-repository.test.js
+index 9699a363..de463962 100644
+--- a/tests/unit/main-process/background-execution/recovery-control-repository.test.js
++++ b/tests/unit/main-process/background-execution/recovery-control-repository.test.js
+@@ -43,7 +43,7 @@ const {
+ } = require('../../../../src/main-process/background-execution/task-lifecycle-adapter');
+ const {
+   createTaskPolicyRegistry
+-} = require('../../../../src/main-process/archive-center/task-policy-registry');
++} = require('../../../../src/main-process/execution-descriptors/composition');
+ 
+ const ROOT = path.resolve(__dirname, '../../../..');
+ const CONTRACT_DIR = path.join(
+diff --git a/tests/unit/main-process/biz-op-read-only-export-e13-a.test.js b/tests/unit/main-process/biz-op-read-only-export-e13-a.test.js
+index 422d84cb..ea51f476 100644
+--- a/tests/unit/main-process/biz-op-read-only-export-e13-a.test.js
++++ b/tests/unit/main-process/biz-op-read-only-export-e13-a.test.js
+@@ -32,7 +32,7 @@ const {
+ } = require('../../../src/main-process/read-only-exports/biz-op/writer');
+ const {
+   createBackgroundExecutionRuntime
+-} = require('../../../src/main-process/background-execution/runtime');
++} = require('../../../src/main-process/execution-descriptors/composition');
+ const shared = require('../../../scripts/integration/fixtures/biz-op-recon-side-db-parity/_shared');
+ 
+ const MODULE = runDataStore.MODULE_BIZ_OP;
+diff --git a/tests/unit/main-process/biz-op-v327-compute-main.test.js b/tests/unit/main-process/biz-op-v327-compute-main.test.js
+index 2ac9debf..92bf8bc3 100644
+--- a/tests/unit/main-process/biz-op-v327-compute-main.test.js
++++ b/tests/unit/main-process/biz-op-v327-compute-main.test.js
+@@ -256,7 +256,9 @@ test('BU、账户大小写/零位和不同币种不串键；高精度金额不
+ test('结果删除后旧 receipt 不复活它，新 Task 同输入产生递增版本；成功结果不因重复请求升版', async (t) => {
+   const f = await createHost(t); await seed(f);
+   const first = await compute(f); assert.equal(first.status, 'ok');
+-  const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
++  const {
++  createTaskPolicyRegistry
++} = require('../../../src/main-process/execution-descriptors/composition');
+   await f.module.admission.exclusive(async () => {
+     const intent = f.module.catalog.deleteIntent({ datasetIds: [], runIds: [first.runId], deleteMode: 'DELETE_ASSOCIATED',
+       expectedGeneration: f.module.catalog.control().generation });
+diff --git a/tests/unit/main-process/biz-op-v327-enablement.test.js b/tests/unit/main-process/biz-op-v327-enablement.test.js
+index 64ef626d..38217e38 100644
+--- a/tests/unit/main-process/biz-op-v327-enablement.test.js
++++ b/tests/unit/main-process/biz-op-v327-enablement.test.js
+@@ -6,7 +6,9 @@ const { ACTIONS } = require('../../../src/main-process/biz-op-v327/contracts');
+ const { RELEASE_GATES, REQUIRED_GATES, evaluateReleaseGates } = require('../../../src/main-process/biz-op-v327/release-gates');
+ const { BIZ_OP_V327_POLICIES, buildBizOpPolicies } = require('../../../src/main-process/biz-op-v327/policies');
+ const { passedGates } = require('../../helpers/biz-op-v327-upgrade');
+-const { isBackgroundExecutionProductionEnabled } = require('../../../src/main-process/background-execution/runtime');
++const {
++  isBackgroundExecutionProductionEnabled
++} = require('../../../src/main-process/execution-descriptors/policy-catalog');
+ 
+ test('十二项动作逐项授权启用，未执行验收不显示为 release-pass 或 benchmark 证明', () => {
+   const decision = evaluateReleaseGates();
+diff --git a/tests/unit/main-process/biz-op-v327-ipc.test.js b/tests/unit/main-process/biz-op-v327-ipc.test.js
+index de582ebb..661dc8d4 100644
+--- a/tests/unit/main-process/biz-op-v327-ipc.test.js
++++ b/tests/unit/main-process/biz-op-v327-ipc.test.js
+@@ -9,7 +9,9 @@ const { seed, compute } = require('../../helpers/biz-op-v327-compute');
+ const { writeXlsx, flowRow, opRow } = require('../../helpers/biz-op-v327-xlsx');
+ const { registerBizOpV327Handlers } = require('../../../src/main-process/biz-op-v327/ipc');
+ const { createBusinessOperationRegistry } = require('../../../src/main-process/business-operation-registry');
+-const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../../../src/main-process/execution-descriptors/composition');
+ 
+ function wire(f, options = {}) {
+   const handlers = new Map(); const sender = Object.assign(new EventEmitter(), { id: 1, mainFrame: {} });
+diff --git a/tests/unit/main-process/biz-op-v327-upgrade.test.js b/tests/unit/main-process/biz-op-v327-upgrade.test.js
+index e629e2a4..e2656fc6 100644
+--- a/tests/unit/main-process/biz-op-v327-upgrade.test.js
++++ b/tests/unit/main-process/biz-op-v327-upgrade.test.js
+@@ -13,7 +13,9 @@ const { TABLES } = require('../../../src/main-process/biz-op-v327/upgrade-legacy
+ const { ensureBizOpReconTablesSupport } = require('../../../src/backend/biz-op-recon-db/migrations');
+ const runDataStore = require('../../../src/backend/run-data-store');
+ const { registerWithLegacyGuard } = require('../../../src/main-process/biz-op-v327/legacy-ipc');
+-const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../../../src/main-process/execution-descriptors/composition');
+ const pendingTask = (f) => f.db.prepare("SELECT * FROM archive_task_runs WHERE task_key='bizOpReconV327:maintenance:upgrade'").get();
+ 
+ plainTest('显式禁用或缺少任一总门禁、单个 action 证据均不创建 Task、不清旧、不放行生产 dispatch', async (t) => {
+@@ -240,7 +242,9 @@ test('旧防写约束被替换或移除不能借 ACTIVE 标志开放新版业务
+ });
+ plainTest('批准门禁后的策略仍通过现有平台 schema 与语义检查，不新增 commit 类型', () => {
+   const { validatePolicyDocument, STATIC_REFERENCE_PATHS } = require('../../../src/main-process/background-execution/execution-policy-registry');
+-  const { BACKGROUND_EXECUTION_POLICIES } = require('../../../src/main-process/background-execution/runtime');
++  const {
++  BACKGROUND_EXECUTION_POLICIES
++} = require('../../../src/main-process/execution-descriptors/policy-catalog');
+   const { BIZ_OP_V327_POLICIES } = require('../../../src/main-process/biz-op-v327/policies');
+   const { ACTIONS } = require('../../../src/main-process/biz-op-v327/contracts');
+   const changed = new Set(BIZ_OP_V327_POLICIES.map((p) => p.actionKey));
+diff --git a/tests/unit/main-process/biz-op-v327.test.js b/tests/unit/main-process/biz-op-v327.test.js
+index 129c8560..8451a5f3 100644
+--- a/tests/unit/main-process/biz-op-v327.test.js
++++ b/tests/unit/main-process/biz-op-v327.test.js
+@@ -18,7 +18,9 @@ const { createTaskLifecycle } = require('../../../src/main-process/archive-cente
+ const { createBusinessFlowResolver } = require('../../../src/main-process/archive-center/business-flow-resolver');
+ const { createBusinessOperationRegistry } = require('../../../src/main-process/business-operation-registry');
+ const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
+-const { createNonProductionBackgroundExecutionRuntime } = require('../../../src/main-process/background-execution/runtime');
++const {
++  createNonProductionBackgroundExecutionRuntime
++} = require('../../../src/main-process/execution-descriptors/composition');
+ const { createResourceGovernor } = require('../../../src/main-process/background-execution/resource-governor');
+ const { createInspectorRegistry } = require('../../../src/main-process/background-execution/inspector-registry');
+ const { createSettlementRecoveryProviderRegistry } = require('../../../src/main-process/background-execution/settlement-recovery-provider-registry');
+diff --git a/tests/unit/main-process/duplicate-inbound-match/paired-parser-e07-c.test.js b/tests/unit/main-process/duplicate-inbound-match/paired-parser-e07-c.test.js
+index 32b4049c..cb6f906e 100644
+--- a/tests/unit/main-process/duplicate-inbound-match/paired-parser-e07-c.test.js
++++ b/tests/unit/main-process/duplicate-inbound-match/paired-parser-e07-c.test.js
+@@ -19,7 +19,7 @@ const {
+ const {
+   createBackgroundExecutionRuntime,
+   createNonProductionBackgroundExecutionRuntime
+-} = require('../../../../src/main-process/background-execution/runtime');
++} = require('../../../../src/main-process/execution-descriptors/composition');
+ const {
+   createResourceGovernor
+ } = require('../../../../src/main-process/background-execution/resource-governor');
+diff --git a/tests/unit/main-process/duplicate-inbound-match/policies.test.js b/tests/unit/main-process/duplicate-inbound-match/policies.test.js
+index 180a38fc..3f930d73 100644
+--- a/tests/unit/main-process/duplicate-inbound-match/policies.test.js
++++ b/tests/unit/main-process/duplicate-inbound-match/policies.test.js
+@@ -5,7 +5,7 @@ const path = require('node:path');
+ const test = require('node:test');
+ 
+ const { createBackgroundExecutionRuntime } = require(
+-  '../../../../src/main-process/background-execution/runtime'
++  '../../../../src/main-process/execution-descriptors/composition'
+ );
+ const {
+   DUPLICATE_POLICIES,
+diff --git a/tests/unit/main-process/duplicate-inbound-match/runtime.test.js b/tests/unit/main-process/duplicate-inbound-match/runtime.test.js
+index c3073c7e..33a43e23 100644
+--- a/tests/unit/main-process/duplicate-inbound-match/runtime.test.js
++++ b/tests/unit/main-process/duplicate-inbound-match/runtime.test.js
+@@ -18,7 +18,7 @@ const {
+ } = require('../../../../src/backend/database/background-execution-schema');
+ const {
+   createBackgroundExecutionRuntime
+-} = require('../../../../src/main-process/background-execution/runtime');
++} = require('../../../../src/main-process/execution-descriptors/composition');
+ const {
+   createWorkerThreadAdapter
+ } = require('../../../../src/main-process/background-execution/adapters/worker-thread-adapter');
+diff --git a/tests/unit/main-process/fund-recon-worker-policies.test.js b/tests/unit/main-process/fund-recon-worker-policies.test.js
+index ae2458c2..e6d61cfa 100644
+--- a/tests/unit/main-process/fund-recon-worker-policies.test.js
++++ b/tests/unit/main-process/fund-recon-worker-policies.test.js
+@@ -6,7 +6,7 @@ const test = require('node:test');
+ 
+ const {
+   createBackgroundExecutionRuntime
+-} = require('../../../src/main-process/background-execution/runtime');
++} = require('../../../src/main-process/execution-descriptors/composition');
+ const {
+   FUND_RECON_POLICIES
+ } = require('../../../src/main-process/fund-recon-worker/policies');
+diff --git a/tests/unit/main-process/fund-recon-worker-runtime.test.js b/tests/unit/main-process/fund-recon-worker-runtime.test.js
+index e6a266d3..8323c15c 100644
+--- a/tests/unit/main-process/fund-recon-worker-runtime.test.js
++++ b/tests/unit/main-process/fund-recon-worker-runtime.test.js
+@@ -14,7 +14,7 @@ const {
+ } = require('../../../src/main-process/bank-statement-io');
+ const {
+   createBackgroundExecutionRuntime
+-} = require('../../../src/main-process/background-execution/runtime');
++} = require('../../../src/main-process/execution-descriptors/composition');
+ const {
+   FUND_RECON_ACTIONS,
+   validateFundReconImportResult
+diff --git a/tests/unit/main-process/new-account-generation-e10-a.test.js b/tests/unit/main-process/new-account-generation-e10-a.test.js
+index e84a833b..e7b8a138 100644
+--- a/tests/unit/main-process/new-account-generation-e10-a.test.js
++++ b/tests/unit/main-process/new-account-generation-e10-a.test.js
+@@ -18,9 +18,11 @@ const {
+ } = require('../../../src/backend/file-service/normalizers');
+ const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
+ const {
+-  createBackgroundExecutionRuntime,
++  createBackgroundExecutionRuntime
++} = require('../../../src/main-process/execution-descriptors/composition');
++const {
+   isBackgroundExecutionProductionEnabled
+-} = require('../../../src/main-process/background-execution/runtime');
++} = require('../../../src/main-process/execution-descriptors/policy-catalog');
+ const {
+   createCanonicalEventEmitter
+ } = require('../../../src/main-process/background-execution/adapters/canonical-event-emitter');
+diff --git a/tests/unit/main-process/new-account-save-as-e10-b.test.js b/tests/unit/main-process/new-account-save-as-e10-b.test.js
+index e04957d6..5a1d6297 100644
+--- a/tests/unit/main-process/new-account-save-as-e10-b.test.js
++++ b/tests/unit/main-process/new-account-save-as-e10-b.test.js
+@@ -10,9 +10,11 @@ const XLSX = require('xlsx');
+ 
+ const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
+ const {
+-  createBackgroundExecutionRuntime,
++  createBackgroundExecutionRuntime
++} = require('../../../src/main-process/execution-descriptors/composition');
++const {
+   isBackgroundExecutionProductionEnabled
+-} = require('../../../src/main-process/background-execution/runtime');
++} = require('../../../src/main-process/execution-descriptors/policy-catalog');
+ const {
+   createJobEnvelope
+ } = require('../../../src/main-process/background-execution/protocol');
+diff --git a/tests/unit/main-process/pending-read-only-export-e13-a.test.js b/tests/unit/main-process/pending-read-only-export-e13-a.test.js
+index c4194306..354b97db 100644
+--- a/tests/unit/main-process/pending-read-only-export-e13-a.test.js
++++ b/tests/unit/main-process/pending-read-only-export-e13-a.test.js
+@@ -32,7 +32,7 @@ const {
+ } = require('../../../src/main-process/read-only-exports/pending/writer');
+ const {
+   createBackgroundExecutionRuntime
+-} = require('../../../src/main-process/background-execution/runtime');
++} = require('../../../src/main-process/execution-descriptors/composition');
+ const {
+   createPendingSession
+ } = require('../../../src/main-process/pending-session');
+diff --git a/tests/unit/main-process/position-read-only-export-e13-b.test.js b/tests/unit/main-process/position-read-only-export-e13-b.test.js
+index 635fc73e..3a91c961 100644
+--- a/tests/unit/main-process/position-read-only-export-e13-b.test.js
++++ b/tests/unit/main-process/position-read-only-export-e13-b.test.js
+@@ -58,7 +58,7 @@ const {
+ } = require('../../../src/main-process/read-only-exports/common/workbook-evidence');
+ const {
+   createBackgroundExecutionRuntime
+-} = require('../../../src/main-process/background-execution/runtime');
++} = require('../../../src/main-process/execution-descriptors/composition');
+ 
+ const TEMPLATE_PATH = path.resolve(__dirname, '../../../assets/平盘银行对账单.xlsx');
+ 
+diff --git a/tests/unit/main-process/pre-fund-read-only-export-e13-b.test.js b/tests/unit/main-process/pre-fund-read-only-export-e13-b.test.js
+index 8aaa4562..848add16 100644
+--- a/tests/unit/main-process/pre-fund-read-only-export-e13-b.test.js
++++ b/tests/unit/main-process/pre-fund-read-only-export-e13-b.test.js
+@@ -44,7 +44,7 @@ const {
+ } = require('../../../src/main-process/read-only-exports/common/workbook-evidence');
+ const {
+   createBackgroundExecutionRuntime
+-} = require('../../../src/main-process/background-execution/runtime');
++} = require('../../../src/main-process/execution-descriptors/composition');
+ 
+ const TEMPLATE_PATH = path.resolve(__dirname, '../../../assets/资金对账导出不平.xlsx');
+ 
+diff --git a/tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js b/tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js
+index 402991ea..6363150b 100644
+--- a/tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js
++++ b/tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-b.test.js
+@@ -12,7 +12,7 @@ const { Worker } = require('node:worker_threads');
+ const {
+   createBackgroundExecutionRuntime: createBackgroundExecutionRuntimeRaw,
+   createNonProductionBackgroundExecutionRuntime
+-} = require('../../../../src/main-process/background-execution/runtime');
++} = require('../../../../src/main-process/execution-descriptors/composition');
+ const {
+   createResourceGovernor
+ } = require('../../../../src/main-process/background-execution/resource-governor');
+diff --git a/tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-c.test.js b/tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-c.test.js
+index 74f974b6..749a01de 100644
+--- a/tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-c.test.js
++++ b/tests/unit/main-process/pre-fund-reconciliation/mpt-import-e05-c.test.js
+@@ -16,7 +16,7 @@ const { createJobEnvelope } = require('../../../../src/main-process/background-e
+ const {
+   createBackgroundExecutionRuntime,
+   createNonProductionBackgroundExecutionRuntime
+-} = require('../../../../src/main-process/background-execution/runtime');
++} = require('../../../../src/main-process/execution-descriptors/composition');
+ const {
+   createPlatformResourceBudgets
+ } = require('../../../../src/main-process/background-execution/resource-budget');
+diff --git a/tests/unit/main-process/pre-fund-reconciliation/mpt-mixed-lifecycle-e05-p0.test.js b/tests/unit/main-process/pre-fund-reconciliation/mpt-mixed-lifecycle-e05-p0.test.js
+index dcc74fb0..760cf794 100644
+--- a/tests/unit/main-process/pre-fund-reconciliation/mpt-mixed-lifecycle-e05-p0.test.js
++++ b/tests/unit/main-process/pre-fund-reconciliation/mpt-mixed-lifecycle-e05-p0.test.js
+@@ -8,7 +8,7 @@ const test = require('node:test');
+ 
+ const {
+   createTaskPolicyRegistry
+-} = require('../../../../src/main-process/archive-center/task-policy-registry');
++} = require('../../../../src/main-process/execution-descriptors/composition');
+ const {
+   taskResultStatus
+ } = require('../../../../src/main-process/archive-center/task-lifecycle');
+diff --git a/tests/unit/main-process/recon-id-fix-export-e11-c.test.js b/tests/unit/main-process/recon-id-fix-export-e11-c.test.js
+index ccb1b8ad..be992830 100644
+--- a/tests/unit/main-process/recon-id-fix-export-e11-c.test.js
++++ b/tests/unit/main-process/recon-id-fix-export-e11-c.test.js
+@@ -35,9 +35,11 @@ const {
+   normalizeFilePlanV1
+ } = require('../../../src/main-process/archive-center/file-plan');
+ const {
+-  createBackgroundExecutionRuntime,
++  createBackgroundExecutionRuntime
++} = require('../../../src/main-process/execution-descriptors/composition');
++const {
+   isBackgroundExecutionProductionEnabled
+-} = require('../../../src/main-process/background-execution/runtime');
++} = require('../../../src/main-process/execution-descriptors/policy-catalog');
+ const { createTestPublicationHarness } = require('../../helpers/publication-authority');
+ const {
+   createReconFixExportInput,
+diff --git a/tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js b/tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js
+index 07913977..9a690ce5 100644
+--- a/tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js
++++ b/tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js
+@@ -68,9 +68,11 @@ const {
+   createRecoveryHoldGate
+ } = require('../../../src/main-process/background-execution/recovery-hold-gate');
+ const {
+-  createBackgroundExecutionRuntime,
++  createBackgroundExecutionRuntime
++} = require('../../../src/main-process/execution-descriptors/composition');
++const {
+   isBackgroundExecutionProductionEnabled
+-} = require('../../../src/main-process/background-execution/runtime');
++} = require('../../../src/main-process/execution-descriptors/policy-catalog');
+ const {
+   createSettlementRecoveryProviderRegistry
+ } = require('../../../src/main-process/background-execution/settlement-recovery-provider-registry');
+diff --git a/tests/unit/main-process/recon-id-fix-service.test.js b/tests/unit/main-process/recon-id-fix-service.test.js
+index cf9e31dd..73b23347 100644
+--- a/tests/unit/main-process/recon-id-fix-service.test.js
++++ b/tests/unit/main-process/recon-id-fix-service.test.js
+@@ -40,9 +40,11 @@ const {
+   canonicalSha256
+ } = require('../../../src/main-process/background-execution/canonical-json-v1');
+ const {
+-  createBackgroundExecutionRuntime,
++  createBackgroundExecutionRuntime
++} = require('../../../src/main-process/execution-descriptors/composition');
++const {
+   isBackgroundExecutionProductionEnabled
+-} = require('../../../src/main-process/background-execution/runtime');
++} = require('../../../src/main-process/execution-descriptors/policy-catalog');
+ const { readReconIdFixFile } = require('../../../src/main-process/recon-id-fix-io');
+ const { runReconIdFix } = require('../../../src/main-process/recon-id-fix-engine');
+ const {
+diff --git a/tests/unit/main-process/run-check-worker-pool.test.js b/tests/unit/main-process/run-check-worker-pool.test.js
+index 43f9b0ca..9df1c4d7 100644
+--- a/tests/unit/main-process/run-check-worker-pool.test.js
++++ b/tests/unit/main-process/run-check-worker-pool.test.js
+@@ -194,7 +194,9 @@ test.describe('run-check-worker-pool', () => {
+     assert.match(wrapperSource, /operationKey:\s*adapterInvocation\.identity\.operationKey/);
+     assert.match(wrapperSource, /flowPlanResolver:\s*prepared\.flowPlan/);
+     const { createBusinessTaskAdapterRegistry } = require('../../../src/main-process/task-adapter-composition');
+-    const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
++    const {
++  createTaskPolicyRegistry
++} = require('../../../src/main-process/execution-descriptors/composition');
+     const resumePolicy = createTaskPolicyRegistry().require('acquiringBillCurrency:run:resume');
+     const adapters = createBusinessTaskAdapterRegistry({ policies: [resumePolicy], positionOwner: {},
+       acknowledgeReceipts() {}, reportArchiveFailure() {} });
+diff --git a/tests/unit/main-process/task-adapter-composition.test.js b/tests/unit/main-process/task-adapter-composition.test.js
+index cf78f504..f6e8e94b 100644
+--- a/tests/unit/main-process/task-adapter-composition.test.js
++++ b/tests/unit/main-process/task-adapter-composition.test.js
+@@ -6,7 +6,9 @@ const path = require('node:path');
+ const test = require('node:test');
+ const acorn = require('acorn');
+ const { createBusinessTaskAdapterRegistry } = require('../../../src/main-process/task-adapter-composition');
+-const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../../../src/main-process/execution-descriptors/composition');
+ 
+ const sourceRoot = path.resolve(__dirname, '../../../src');
+ 
+diff --git a/tests/unit/main-process/task-adapters.test.js b/tests/unit/main-process/task-adapters.test.js
+index b06a0c79..61a32b90 100644
+--- a/tests/unit/main-process/task-adapters.test.js
++++ b/tests/unit/main-process/task-adapters.test.js
+@@ -4,7 +4,9 @@
+ // deferred/legacy Position 是兼容能力夹具，不代表当前存在这些生产 taskKey。
+ const assert = require('node:assert/strict');
+ const test = require('node:test');
+-const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
++const {
++  createTaskPolicyRegistry
++} = require('../../../src/main-process/execution-descriptors/composition');
+ const { createArchiveAwareOperationHarness } = require('../../helpers/archive-aware-operation-harness');
+ 
+ const positionFile = createTaskPolicyRegistry().require('position-reconciliation:bank:export');
+diff --git a/tests/unit/main-process/toolbox-background-generation.test.js b/tests/unit/main-process/toolbox-background-generation.test.js
+index 5e0c8032..615094fb 100644
+--- a/tests/unit/main-process/toolbox-background-generation.test.js
++++ b/tests/unit/main-process/toolbox-background-generation.test.js
+@@ -70,9 +70,12 @@ const {
+ } = require('../../../src/main-process/background-execution/position-import-adapter-policy');
+ const {
+   createBackgroundExecutionRuntime: createBackgroundExecutionRuntimeRaw,
+-  createBackgroundExecutionRuntimeManager,
++  createBackgroundExecutionRuntimeManager
++} = require('../../../src/main-process/execution-descriptors/composition');
++const {
++  BACKGROUND_EXECUTION_POLICIES,
+   isBackgroundExecutionProductionEnabled
+-} = require('../../../src/main-process/background-execution/runtime');
++} = require('../../../src/main-process/execution-descriptors/policy-catalog');
+ const { mergeToolboxFilesToXlsx } = require('../../../src/main-process/toolbox-merge-io');
+ const { writeToolboxRows } = require('../../../src/main-process/toolbox-output-writer');
+ 
+@@ -238,7 +241,7 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
+     systemReserveBytes: 1024 ** 3
+   });
+   const snapshot = runtime.resourceGovernor.snapshot();
+-  assert.deepEqual(runtime.policyRegistry.list().map((policy) => policy.actionKey), [
++  const expectedActionKeys = [
+     'biz-op-v327:import-candidate',
+     'biz-op-v327:run-candidate',
+     'biz-op-v327:delete-plan',
+@@ -288,7 +291,11 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
+     ACQUIRING_ADAPTER_ACTIONS.RUN_NEW_ELIGIBLE,
+     ACQUIRING_ADAPTER_ACTIONS.RUN_SINGLE_OR_RESUME,
+     POSITION_IMPORT_ADAPTER_ACTION
+-  ]);
++  ];
++  // catalog 保留原清单次序；registry 按领域装配，预算覆盖只依赖完整 action 集合。
++  assert.deepEqual(BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.actionKey), expectedActionKeys);
++  assert.deepEqual(runtime.policyRegistry.list().map((policy) => policy.actionKey).sort(),
++    [...expectedActionKeys].sort());
+   for (const policy of runtime.policyRegistry.list()) {
+     assert.equal(policy.production.enabled, policy.actionKey.startsWith('biz-op-v327:') || policy.actionKey === 'toolbox:split-rows');
+   }
+diff --git a/tests/unit/main-process/toolbox-background-route-db.test.js b/tests/unit/main-process/toolbox-background-route-db.test.js
+index 95773fc8..9aa7e732 100644
+--- a/tests/unit/main-process/toolbox-background-route-db.test.js
++++ b/tests/unit/main-process/toolbox-background-route-db.test.js
+@@ -22,7 +22,7 @@ const { normalizeStaticStyle } = require('../../../src/backend/xlsx/style-regist
+ const { exportToolboxMultiFilters } = require('../../../src/main-process/toolbox-format-operations');
+ const {
+   createBackgroundExecutionRuntime
+-} = require('../../../src/main-process/background-execution/runtime');
++} = require('../../../src/main-process/execution-descriptors/composition');
+ const {
+   createWorkerThreadAdapter
+ } = require('../../../src/main-process/background-execution/adapters/worker-thread-adapter');
+diff --git a/tests/unit/main-process/toolbox-row-split.test.js b/tests/unit/main-process/toolbox-row-split.test.js
+index 5993619a..6a1e0a6c 100644
+--- a/tests/unit/main-process/toolbox-row-split.test.js
++++ b/tests/unit/main-process/toolbox-row-split.test.js
+@@ -13,7 +13,9 @@ const { sourceSnapshotFromStat } = require('../../../src/main-process/archive-ce
+ const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
+ const { scanToolboxSplitFields } = require('../../../src/main-process/toolbox-format-operations');
+ const { createToolboxOutputWriter } = require('../../../src/main-process/toolbox-output-writer');
+-const { createBackgroundExecutionRuntime } = require('../../../src/main-process/background-execution/runtime');
++const {
++  createBackgroundExecutionRuntime
++} = require('../../../src/main-process/execution-descriptors/composition');
+ const { ROWS_BUDGETS, planRowCounts, buildRowTargets, validatePlan, writePrivateJson, readPrivateJson, sha256 } = require('../../../src/main-process/toolbox-row-split/contracts');
+ const { prepareRows, generateValidateAndPublishRows } = require('../../../src/main-process/toolbox-row-split/service');
+ const { executeRowsGeneration } = require('../../../src/main-process/toolbox-row-split/executor');
+diff --git a/tests/unit/main-process/vcc-financial-op-archive-integration.test.js b/tests/unit/main-process/vcc-financial-op-archive-integration.test.js
+index db66e53c..e91486ca 100644
+--- a/tests/unit/main-process/vcc-financial-op-archive-integration.test.js
++++ b/tests/unit/main-process/vcc-financial-op-archive-integration.test.js
+@@ -18,7 +18,7 @@ const {
+ } = require('../../../src/main-process/archive-center/task-lifecycle');
+ const {
+   createTaskPolicyRegistry
+-} = require('../../../src/main-process/archive-center/task-policy-registry');
++} = require('../../../src/main-process/execution-descriptors/composition');
+ const {
+   createVccFinancialOpService
+ } = require('../../../src/main-process/vcc-financial-op-service');
+diff --git a/tests/unit/main-process/vcc-financial-op-dual-writer-e12-c.test.js b/tests/unit/main-process/vcc-financial-op-dual-writer-e12-c.test.js
+index 9c7878cd..929ff4d8 100644
+--- a/tests/unit/main-process/vcc-financial-op-dual-writer-e12-c.test.js
++++ b/tests/unit/main-process/vcc-financial-op-dual-writer-e12-c.test.js
+@@ -31,7 +31,7 @@ const {
+ } = require('../../../src/main-process/background-execution/error-codec');
+ const {
+   createBackgroundExecutionRuntime
+-} = require('../../../src/main-process/background-execution/runtime');
++} = require('../../../src/main-process/execution-descriptors/composition');
+ const {
+   normalizeFilePlanV1
+ } = require('../../../src/main-process/archive-center/file-plan');
+diff --git a/tests/unit/main-process/vcc-financial-op-read-only-export-e13-b.test.js b/tests/unit/main-process/vcc-financial-op-read-only-export-e13-b.test.js
+index 70f4bd92..cfc50a26 100644
+--- a/tests/unit/main-process/vcc-financial-op-read-only-export-e13-b.test.js
++++ b/tests/unit/main-process/vcc-financial-op-read-only-export-e13-b.test.js
+@@ -45,7 +45,7 @@ const {
+ } = require('../../../src/main-process/read-only-exports/common/workbook-evidence');
+ const {
+   createBackgroundExecutionRuntime
+-} = require('../../../src/main-process/background-execution/runtime');
++} = require('../../../src/main-process/execution-descriptors/composition');
+ const {
+   createVccFinancialOpService
+ } = require('../../../src/main-process/vcc-financial-op-service');
+diff --git a/tests/unit/main-process/vcc-financial-op-single-writer-e12-a.test.js b/tests/unit/main-process/vcc-financial-op-single-writer-e12-a.test.js
+index 8ca44be5..96793db0 100644
+--- a/tests/unit/main-process/vcc-financial-op-single-writer-e12-a.test.js
++++ b/tests/unit/main-process/vcc-financial-op-single-writer-e12-a.test.js
+@@ -24,9 +24,11 @@ const {
+   normalizeFilePlanV1
+ } = require('../../../src/main-process/archive-center/file-plan');
+ const {
+-  createBackgroundExecutionRuntime,
++  createBackgroundExecutionRuntime
++} = require('../../../src/main-process/execution-descriptors/composition');
++const {
+   isBackgroundExecutionProductionEnabled
+-} = require('../../../src/main-process/background-execution/runtime');
++} = require('../../../src/main-process/execution-descriptors/policy-catalog');
+ const {
+   canonicalSha256
+ } = require('../../../src/main-process/background-execution/canonical-json-v1');
+diff --git a/tests/unit/renderer-position-reconciliation.test.js b/tests/unit/renderer-position-reconciliation.test.js
+index 8c9e9251..91ddecf1 100644
+--- a/tests/unit/renderer-position-reconciliation.test.js
++++ b/tests/unit/renderer-position-reconciliation.test.js
+@@ -557,7 +557,8 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
+       positionTaskOwner,
+       /writeSetting\(POSITION_SIDE_DB_CHECKPOINT_SETTING, JSON\.stringify\(checkpoint\)\)/
+     );
+-    assert.match(mainProcess, /createBusinessTaskAdapterRegistry\(\{[\s\S]*?positionOwner: positionTaskOwner/);
++    assert.match(mainProcess, /const executionTaskComposition = createExecutionTaskComposition\(\{[\s\S]*?positionOwner: positionTaskOwner/);
++    assert.match(mainProcess, /const \{ taskAdapterRegistry, terminalRouteRegistry \} = executionTaskComposition/);
+     assert.match(taskAdapterComposition, /'position-reconciliation-process': 'position-reconciliation'/);
+     assert.match(taskAdapterComposition, /createPositionTaskAdapter\(\{ owner: positionOwner,/);
+     const entryStart = mainProcess.indexOf('async function runArchiveAwareOperation(');

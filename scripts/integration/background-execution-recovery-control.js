@@ -32,7 +32,7 @@ const {
 } = require('../../src/main-process/background-execution/task-lifecycle-adapter');
 const {
   createTaskPolicyRegistry
-} = require('../../src/main-process/archive-center/task-policy-registry');
+} = require('../../src/main-process/execution-descriptors/composition');
 
 let passed = 0;
 let failed = 0;

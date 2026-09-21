@@ -1,0 +1,70 @@
+{
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "createdAt": "2026-09-20T16:07:24.401Z",
+  "sourceChanges": "",
+  "historicalCounts": {
+    "actionCount": 54,
+    "legacyPairCount": 61,
+    "runtimePolicyCount": 36,
+    "legacyOnlyCount": 16,
+    "platformCanaryCount": 2
+  },
+  "currentCounts": {
+    "actionCount": 67,
+    "legacyPairCount": 74,
+    "runtimePolicyCount": 49,
+    "legacyOnlyCount": 16,
+    "platformCanaryCount": 2
+  },
+  "historicalProduction": {
+    "actionCount": 54,
+    "productionEnabledCount": 0,
+    "legacyEffectiveCount": 54
+  },
+  "currentProduction": {
+    "actionCount": 67,
+    "productionEnabledCount": 13,
+    "legacyEffectiveCount": 54
+  },
+  "addedActions": [
+    "biz-op-v327:delete-plan",
+    "biz-op-v327:export-errors",
+    "biz-op-v327:export-flow-check",
+    "biz-op-v327:export-flow-raw",
+    "biz-op-v327:export-op-check",
+    "biz-op-v327:export-op-raw",
+    "biz-op-v327:export-result-diff",
+    "biz-op-v327:export-result-full",
+    "biz-op-v327:import-candidate",
+    "biz-op-v327:reclaim",
+    "biz-op-v327:run-candidate",
+    "biz-op-v327:upgrade-preflight",
+    "toolbox:split-rows"
+  ],
+  "removedActions": [],
+  "bindingDigest": "48747e02020f01959a37c1758adb9c337c8c69143603aa34544d2735347d073f",
+  "coverage": {
+    "valid": true,
+    "actionCount": 67,
+    "legacyPairCount": 74,
+    "runtimePolicyCount": 49,
+    "surfaceCount": 6,
+    "coveredActionSurfaceCount": 402,
+    "expectedActionSurfaceCount": 402,
+    "coveragePercent": 100
+  },
+  "capabilityValidation": {
+    "valid": true,
+    "actionCount": 67,
+    "implementedCount": 49,
+    "legacyOnlyCount": 16,
+    "platformCanaryCount": 2
+  },
+  "productionValidation": {
+    "valid": true,
+    "actionCount": 67,
+    "productionEnabledCount": 13,
+    "legacyEffectiveCount": 54
+  },
+  "decision": "当前生成模型自洽，但既有门禁读取的历史文件与 11086a3c 不匹配。保留失败、不修改 authority/历史快照；最终 G7-T5 在固定依赖基础按既有生成流程处理当前证据。"
+}

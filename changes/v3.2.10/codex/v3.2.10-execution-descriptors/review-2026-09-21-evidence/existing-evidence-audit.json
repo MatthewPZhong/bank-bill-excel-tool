@@ -1,0 +1,71 @@
+{
+  "sourceFiles": 128,
+  "sourceMismatches": [],
+  "sourceSnapshotHashMatches": true,
+  "releaseCheckLogHashMatches": true,
+  "recordedResults": {
+    "recordedAt": "2026-09-20T16:54:40.454840+00:00",
+    "base": "8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05",
+    "branch": "codex/v3.2.10-execution-descriptors",
+    "sourceSnapshot": "source-snapshot.json",
+    "sourceSnapshotSha256": "5fd13420a88d89ab4316cea81b2a4c3d4eb87fc8fb82eeb3402c9a2245cf21e0",
+    "environment": {
+      "platform": "macOS-15.7.4-arm64-arm-64bit-Mach-O",
+      "node": "v25.8.0",
+      "dependencies": "existing main-workspace node_modules symlink; no installation"
+    },
+    "releaseCheck": {
+      "command": "UNIT_TEST_CONCURRENCY=4 npm run release-check",
+      "workdir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors",
+      "exitCode": 0,
+      "lint": "PASS",
+      "smoke": "PASS",
+      "unit": {
+        "files": 536,
+        "tests": 8512,
+        "passed": 8508,
+        "failed": 0,
+        "skipped": 4,
+        "elapsedMs": 431407
+      },
+      "integration": {
+        "scripts": 67,
+        "passedScripts": 67,
+        "checks": 2668,
+        "passedChecks": 2668,
+        "elapsedMs": 352661
+      },
+      "log": "release-check-final.txt",
+      "logSha256": "0fa48b76171147cdd141cfac9f9f3469fb65d35b453853c00518cee757e59672"
+    },
+    "focused": {
+      "descriptorSuite": {
+        "tests": 73,
+        "passed": 73,
+        "failed": 0,
+        "skipped": 0,
+        "log": "descriptor-suite-final.tap"
+      },
+      "carrierIntegration": {
+        "cases": 4,
+        "passed": 4,
+        "log": "carrier-integration-final.txt"
+      },
+      "manifest": {
+        "command": "npm run check:background-execution-manifest",
+        "exitCode": 0,
+        "surfaces": 402,
+        "pairs": 74,
+        "productionEnabled": 13,
+        "log": "manifest-current.txt"
+      }
+    },
+    "historicalFailure": "unit-implementation.txt: initial incomplete migration 8377/8417,36 failed,4 skipped; fixed consumers/assertions and stable final gate above",
+    "notExecuted": [
+      "G8 configuration activation (dependency not integrated)",
+      "Windows PowerShell/CIM and packaged carriers",
+      "Electron GUI, Excel/WPS, installer manual acceptance"
+    ],
+    "independentReview": "../final-review.md"
+  }
+}

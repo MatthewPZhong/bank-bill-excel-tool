@@ -1,7 +1,9 @@
 'use strict';
 
 const { randomUUID } = require('node:crypto');
-const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../execution-descriptors/composition');
 const { fail, hash } = require('./contracts');
 
 function createBizOpDeleteCoordinator({ userDataDir, catalog, payloadStore, protection, admission, sources,

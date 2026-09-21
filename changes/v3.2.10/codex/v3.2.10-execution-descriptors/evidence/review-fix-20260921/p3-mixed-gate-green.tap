@@ -1,0 +1,22 @@
+✔ 新模块绑定不能替另一个模块满足关闭观察的 Main 持久绑定 (125.814625ms)
+✔ P3：非生产关闭观察未配置派发 hook 时保持到达 adapter 的旧行为 (51.473917ms)
+✔ P3：实际已启用的生产 action 缺少派发 hook 仍在 adapter 前拒绝 (34.020875ms)
+▶ P3：已有 BizOP Main 授权时，其他模块仍须自己的关闭观察派发绑定
+  ✔ 非生产 action 保留原混合门禁拒绝 (32.994ms)
+  ✔ 生产已启用 action 仍在 adapter 前拒绝 (33.020541ms)
+  ✔ 提供本模块通用 hook 后先执行 hook，再进入 adapter (31.927125ms)
+✔ P3：已有 BizOP Main 授权时，其他模块仍须自己的关闭观察派发绑定 (98.262875ms)
+▶ P3：生产与非生产已配置 hook 均先调用 hook 再进入 adapter
+  ✔ production=false (31.232791ms)
+  ✔ production=true (30.421208ms)
+✔ P3：生产与非生产已配置 hook 均先调用 hook 再进入 adapter (61.862542ms)
+✔ P3：真实 hook 抛出缺授权错误时不能被非生产兼容路径吞掉 (29.494584ms)
+✔ P3：非生产兼容路径保留 BizOP 本域派发授权，通用 hook 不能代替 (30.225208ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 601.489875

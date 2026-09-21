@@ -13,7 +13,9 @@ const { TABLES } = require('../../../src/main-process/biz-op-v327/upgrade-legacy
 const { ensureBizOpReconTablesSupport } = require('../../../src/backend/biz-op-recon-db/migrations');
 const runDataStore = require('../../../src/backend/run-data-store');
 const { registerWithLegacyGuard } = require('../../../src/main-process/biz-op-v327/legacy-ipc');
-const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../../../src/main-process/execution-descriptors/composition');
 const pendingTask = (f) => f.db.prepare("SELECT * FROM archive_task_runs WHERE task_key='bizOpReconV327:maintenance:upgrade'").get();
 
 plainTest('显式禁用或缺少任一总门禁、单个 action 证据均不创建 Task、不清旧、不放行生产 dispatch', async (t) => {
@@ -240,7 +242,9 @@ test('旧防写约束被替换或移除不能借 ACTIVE 标志开放新版业务
 });
 plainTest('批准门禁后的策略仍通过现有平台 schema 与语义检查，不新增 commit 类型', () => {
   const { validatePolicyDocument, STATIC_REFERENCE_PATHS } = require('../../../src/main-process/background-execution/execution-policy-registry');
-  const { BACKGROUND_EXECUTION_POLICIES } = require('../../../src/main-process/background-execution/runtime');
+  const {
+  BACKGROUND_EXECUTION_POLICIES
+} = require('../../../src/main-process/execution-descriptors/policy-catalog');
   const { BIZ_OP_V327_POLICIES } = require('../../../src/main-process/biz-op-v327/policies');
   const { ACTIONS } = require('../../../src/main-process/biz-op-v327/contracts');
   const changed = new Set(BIZ_OP_V327_POLICIES.map((p) => p.actionKey));

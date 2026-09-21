@@ -1,7 +1,9 @@
 'use strict';
 
 const { randomUUID } = require('node:crypto');
-const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../execution-descriptors/composition');
 const { createBizOpCatalog } = require('./catalog');
 const { createBizOpPayloadStore } = require('./payload-store');
 const { createBizOpAdmission } = require('./admission');

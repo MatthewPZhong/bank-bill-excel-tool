@@ -12,13 +12,19 @@ const {
   EXCLUDE_REASONS,
   FILE_ACTION_CHANNELS,
   NO_FILE_ACTION_CHANNELS,
-  SUPPORT_ACTION_POLICIES,
+  SUPPORT_ACTION_POLICIES
+} = require('../../../src/main-process/archive-center/task-policy-registry');
+const {
   bankBuImportResultFlowIdentities,
   bankBuRunFlowPlan,
-  createBankStatementRunFlowIdentity,
-  createTaskPolicyRegistry,
   statementResultClassifier
-} = require('../../../src/main-process/archive-center/task-policy-registry');
+} = require('../../../src/main-process/execution-descriptors/legacy-task-policies');
+const {
+  createBankStatementRunFlowIdentity
+} = require('../../../src/main-process/fund-recon-worker/archive-task-policies');
+const {
+  createTaskPolicyRegistry
+} = require('../../../src/main-process/execution-descriptors/composition');
 const {
   FILE_CHANNELS
 } = require('../../../src/main-process/archive-center/operation-tracker');

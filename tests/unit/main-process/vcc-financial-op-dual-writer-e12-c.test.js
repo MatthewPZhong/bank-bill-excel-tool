@@ -31,7 +31,7 @@ const {
 } = require('../../../src/main-process/background-execution/error-codec');
 const {
   createBackgroundExecutionRuntime
-} = require('../../../src/main-process/background-execution/runtime');
+} = require('../../../src/main-process/execution-descriptors/composition');
 const {
   normalizeFilePlanV1
 } = require('../../../src/main-process/archive-center/file-plan');

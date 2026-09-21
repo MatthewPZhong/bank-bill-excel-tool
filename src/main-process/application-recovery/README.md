@@ -14,7 +14,7 @@
 
 `participants` 是冻结有序数组，字段为 `id`、`ownerName`、可选日志名 `hookName`，以及 `preflight`、`recoverOwner`、`postOutbox` 三个函数或 `null`。非法/重复注册在副作用前拒绝。成功 hook 同轮不重复；失败 hook 可显式重试；ready 后不重跑。
 
-[composition.js](composition.js) 导出 `createApplicationRecoveryComposition`。Main 提供 platform、bizOpModule 和原 owner/lineage 回调。固定 owner 顺序为 BizOP → Pending → legacy BizOP → Pre-fund → Position → Toolbox/VCC publication → VCC import terminal；post-outbox 为 BizOP activation → VCC lineage。G7 可以汇总静态注册，不能另建恢复阶段或改预算。G2 继续向同一 Controller 提供终态/owner 合同，不能用 task adapter 的 ready 代替应用 ready。
+[composition.js](composition.js) 导出 `createApplicationRecoveryParticipants`、固定 `RECOVERY_PARTICIPANT_ORDER` 和 `createApplicationRecoveryComposition`。G7 从同一工厂取得 registrations、汇总后按固定顺序传回；显式 participants 缺失、重复或乱序在 coordinator 创建前拒绝。默认调用仍复用原工厂。Main 提供 platform、bizOpModule 和原 owner/lineage 回调。固定 owner 顺序为 BizOP → Pending → legacy BizOP → Pre-fund → Position → Toolbox/VCC publication → VCC import terminal；post-outbox 为 BizOP activation → VCC lineage。G7 可以汇总静态注册，不能另建恢复阶段或改预算。G2 继续向同一 Controller 提供终态/owner 合同，不能用 task adapter 的 ready 代替应用 ready。
 
 ## publication owner 与权限
 

@@ -1,0 +1,30 @@
+✔ P3：非生产关闭观察未配置派发 hook 时保持到达 adapter 的旧行为 (53.915208ms)
+✔ P3：实际已启用的生产 action 缺少派发 hook 仍在 adapter 前拒绝 (33.915334ms)
+▶ P3：混合关闭观察列表中另一 action 的 hook 不改变当前 action 的缺 hook 语义
+  ✔ 非生产 action 仍可进入 adapter (34.157333ms)
+  ✔ 生产已启用 action 仍在 adapter 前拒绝 (33.345916ms)
+✔ P3：混合关闭观察列表中另一 action 的 hook 不改变当前 action 的缺 hook 语义 (67.72ms)
+▶ P3：生产与非生产已配置 hook 均先调用 hook 再进入 adapter
+  ✔ production=false (32.819584ms)
+  ✔ production=true (31.315083ms)
+✔ P3：生产与非生产已配置 hook 均先调用 hook 再进入 adapter (64.333875ms)
+✔ P3：真实 hook 抛出缺授权错误时不能被非生产兼容路径吞掉 (30.784125ms)
+✔ P3：非生产兼容路径保留 BizOP 本域派发授权，通用 hook 不能代替 (31.571125ms)
+✔ 固定批准基线接受当前49个runtime与13个production，catalog与私有authority保持一致 (48.322292ms)
+✔ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：missing (22.564208ms)
+✔ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：enable (24.128958ms)
+✔ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：legacy-production (22.130542ms)
+✔ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：legacy-disabled (21.342292ms)
+✔ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：swap (19.716625ms)
+✔ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：disable (21.712416ms)
+✔ catalog 与 descriptor 同时漂移也不能成为彼此的批准基线 (289.410542ms)
+✔ 只改 catalog 同样在正式装配时拒绝，不能留下查询/实际 runtime 分叉 (293.613166ms)
+✔ manifest --write 在写任何产物之前拒绝错误 catalog，不重生成批准期望 (132.950875ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1222.334333

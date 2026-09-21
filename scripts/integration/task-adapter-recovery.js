@@ -15,7 +15,9 @@ const { createArchiveCenterController } = require('../../src/main-process/archiv
 const { createArchiveOutboxStore } = require('../../src/main-process/archive-center/outbox-store');
 const { createTerminalRouteRegistry } = require('../../src/main-process/archive-center/terminal-route-registry');
 const { createTaskLifecycle } = require('../../src/main-process/archive-center/task-lifecycle');
-const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../../src/main-process/execution-descriptors/composition');
 const { createBusinessFlowResolver } = require('../../src/main-process/archive-center/business-flow-resolver');
 const { createArchiveOperationTracker } = require('../../src/main-process/archive-center/operation-tracker');
 const { createIpcTaskContext } = require('../../src/main-process/archive-center/ipc-task-contract');

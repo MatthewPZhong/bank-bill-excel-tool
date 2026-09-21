@@ -31,6 +31,7 @@ const {
   publishDurableArtifactAsync
 } = require('../toolbox-output-publication-dispatch');
 const {
+  NEW_ACCOUNT_SAVE_AS_ACTION,
   validateNewAccountGenerationResult
 } = require('./generation-contract');
 const {
@@ -40,7 +41,6 @@ const {
   assertNewAccountExpectedArtifactAuthority
 } = require('./generation-validator');
 
-const NEW_ACCOUNT_SAVE_AS_ACTION = 'new-account:save-as';
 const NEW_ACCOUNT_SAVE_AS_SCHEMA_VERSION = 1;
 const MAX_COPY_CONTRACT_BYTES = 256 * 1024;
 const MAX_COPY_ARTIFACT_BYTES = 256 * 1024 * 1024;

@@ -32,7 +32,7 @@ const {
 } = require('../../../src/main-process/read-only-exports/biz-op/writer');
 const {
   createBackgroundExecutionRuntime
-} = require('../../../src/main-process/background-execution/runtime');
+} = require('../../../src/main-process/execution-descriptors/composition');
 const shared = require('../../../scripts/integration/fixtures/biz-op-recon-side-db-parity/_shared');
 
 const MODULE = runDataStore.MODULE_BIZ_OP;

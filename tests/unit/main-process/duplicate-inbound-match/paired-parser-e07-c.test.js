@@ -19,7 +19,7 @@ const {
 const {
   createBackgroundExecutionRuntime,
   createNonProductionBackgroundExecutionRuntime
-} = require('../../../../src/main-process/background-execution/runtime');
+} = require('../../../../src/main-process/execution-descriptors/composition');
 const {
   createResourceGovernor
 } = require('../../../../src/main-process/background-execution/resource-governor');

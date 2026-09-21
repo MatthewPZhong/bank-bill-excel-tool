@@ -1,0 +1,13 @@
+工作目录：/private/tmp/execution-descriptors-review-20260921
+node --test tests/unit/main-process/execution-descriptor-{composition,equivalence,archive-baseline,resource-profiles,contract,extension}.test.js
+node scripts/integration/execution-descriptor-governance.js
+npm run check:background-execution-manifest
+node --test tests/unit/main-process/execution-descriptor-archive-baseline.test.js tests/unit/main-process/execution-descriptor-composition.test.js tests/unit/main-process/task-adapter-composition.test.js tests/unit/main-process/application-recovery.test.js tests/unit/main-process/archive-task-policy-registry.test.js
+
+独立探针：
+node authority-drift.cjs /private/tmp/execution-descriptors-review-20260921
+node archive-equivalence.cjs
+node runtime-diff.cjs
+
+原分支只读检查：git diff --check HEAD
+完整 release-check 未在本次重新运行；已有记录的128个source hash、snapshot hash与完整日志hash已核对。

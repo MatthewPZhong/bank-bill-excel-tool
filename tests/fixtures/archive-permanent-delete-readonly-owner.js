@@ -184,7 +184,7 @@ async function verifyReadonlyOwnerIdentity(parentDirectory, options = {}) {
     runtime = openRuntime(directory, sourceRoot, fsImpl);
     assert.equal((await runtime.service.initialize({ deferStartupRecovery: true, startBackgroundMaterialization: false })).ok, true);
     const { createTaskLifecycle } = require(path.join(sourceRoot, 'src/main-process/archive-center/task-lifecycle'));
-    const { createTaskPolicyRegistry } = require(path.join(sourceRoot, 'src/main-process/archive-center/task-policy-registry'));
+    const { createTaskPolicyRegistry } = require(path.join(sourceRoot, 'src/main-process/execution-descriptors/composition'));
     const { normalizeFilePlanV1 } = require(path.join(sourceRoot, 'src/main-process/archive-center/file-plan'));
     const externalPath = path.join(directory, 'template.csv');
     fs.writeFileSync(externalPath, SOURCE_BYTES);

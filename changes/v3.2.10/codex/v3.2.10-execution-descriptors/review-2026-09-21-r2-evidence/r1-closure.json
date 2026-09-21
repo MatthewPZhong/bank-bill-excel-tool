@@ -1,0 +1,32 @@
+{
+  "authorityUnchanged": true,
+  "results": [
+    {
+      "scenario": "baseline",
+      "status": "ACCEPTED",
+      "runtimeCount": 49,
+      "productionCount": 13,
+      "target": "toolbox:merge",
+      "targetProduction": false,
+      "catalogProduction": false
+    },
+    {
+      "scenario": "drop-runtime-policy",
+      "status": "REJECTED",
+      "code": "CAPABILITY_INVENTORY_SNAPSHOT_MISMATCH",
+      "message": "capability inventory snapshot 与当前 authority 漂移"
+    },
+    {
+      "scenario": "enable-production",
+      "status": "REJECTED",
+      "code": "PRODUCTION_STRATEGY_SNAPSHOT_MISMATCH",
+      "message": "production strategy snapshot 与当前 authority 漂移"
+    },
+    {
+      "scenario": "register-legacy-production",
+      "status": "REJECTED",
+      "code": "CAPABILITY_INVENTORY_SNAPSHOT_MISMATCH",
+      "message": "capability inventory snapshot 与当前 authority 漂移"
+    }
+  ]
+}

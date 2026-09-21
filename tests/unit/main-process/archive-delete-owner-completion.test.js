@@ -397,7 +397,9 @@ test('工具箱真实发布恢复在清理完成后记录 owner 凭证，凭证�
 
 test('publication owner 仅匹配 Main 登记的精确 taskKey/moduleId，不认未知共享 Publisher 入口', () => {
   const { isPublicationOnlyFileTask } = require('../../../src/main-process/toolbox-archive-recovery');
-  const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
+  const {
+  createTaskPolicyRegistry
+} = require('../../../src/main-process/execution-descriptors/composition');
   const registry = createTaskPolicyRegistry();
   for (const channel of ['toolbox:merge', 'toolbox:split:export', 'vccFinancialOp:data-manager:export',
     'vccFinancialOp:export:import-audit', 'vccFinancialOp:export:result',
@@ -417,7 +419,9 @@ test('VCC 与只读导出真实 policy 的临时归档失败由原 publication �
   const crypto = require('node:crypto');
   const { createArchiveService } = require('../../../src/main-process/archive-center/archive-service');
   const { createTaskLifecycle } = require('../../../src/main-process/archive-center/task-lifecycle');
-  const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
+  const {
+  createTaskPolicyRegistry
+} = require('../../../src/main-process/execution-descriptors/composition');
   const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
   const { JOURNAL_INDEX_NAME, prepareToolboxPublication, publishPreparedToolboxPublication } = require('../../helpers/publication-authority');
   const { acknowledgeToolboxPublicationReceipts, recoverToolboxPublicationsIntoArchive } = require('../../../src/main-process/toolbox-archive-recovery');

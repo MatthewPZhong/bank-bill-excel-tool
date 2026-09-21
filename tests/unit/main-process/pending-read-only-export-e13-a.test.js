@@ -32,7 +32,7 @@ const {
 } = require('../../../src/main-process/read-only-exports/pending/writer');
 const {
   createBackgroundExecutionRuntime
-} = require('../../../src/main-process/background-execution/runtime');
+} = require('../../../src/main-process/execution-descriptors/composition');
 const {
   createPendingSession
 } = require('../../../src/main-process/pending-session');

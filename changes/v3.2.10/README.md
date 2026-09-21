@@ -169,17 +169,17 @@ G8 尚未集成时，相关切片仍须完成自己的行为验证，并按原�
 
 当前既有项目入口是根 [AGENTS.md](../../AGENTS.md) 的架构摘要/资料入口及 [CODEX.md](../../CODEX.md) 的工作流/资料索引；长期专项约束继续以对应 `rules/` 正文为准，例如 [run 级存储约定](../../rules/run-scoped-data-policy.md)。版本 Spec/TechDoc 保存设计合同，切片记录保存实施证据，模块现行说明保存已经落地的职责与使用方式，三者互相链接。
 
-下表是实施时的默认落点；本 release 已建立 G1、G2、G4、G5、G6 入口，G3/G7/G8 模块 README 仍为拟新增，不能作为已存在的规则入口。首个涉及该模块实际职责的切片建立说明；若届时已有覆盖同一职责的权威说明，则复用该说明，并在本表和切片记录中更新准确路径，避免两份正文。记录模块实际入口、状态/副作用归属、允许/禁止依赖、当前兼容接口及代表性测试链接即可，不复制完整版本设计。
+下表是实施时的默认落点；本 release 已建立 G1—G7 入口，G8 模块 README 仍为拟新增，不能作为已存在的规则入口。首个涉及该模块实际职责的切片建立说明；若届时已有覆盖同一职责的权威说明，则复用该说明，并在本表和切片记录中更新准确路径，避免两份正文。记录模块实际入口、状态/副作用归属、允许/禁止依赖、当前兼容接口及代表性测试链接即可，不复制完整版本设计。
 
 | 治理项 / 维护者 | 默认人读现行说明入口（实施时建立或复用） | 切片应同步的内容 |
 | --- | --- | --- |
 | G1 恢复协调切片 | [src/main-process/application-recovery/README.md](../../src/main-process/application-recovery/README.md)（已集成） | 应用/平台/业务恢复事实归属、participant 顺序、publication owner 调用入口与失败边界；跨 publication-recovery 的说明由此链接其实际代码。 |
 | G2 任务适配切片 | [src/main-process/task-adapters/README.md](../../src/main-process/task-adapters/README.md)（已集成） | registry、领域 task-owner、prepared 资源、live/replay terminal routes 的职责和调用关系；引用实际 Position/Archive 入口。 |
-| G3 Renderer 切片 | `src/renderer/README.md` | shell/controller/modalHost 各自写权限、脚本装配、导航/销毁协议；只把完成的 R 切片写为现状，保留剩余旧域说明。 |
+| G3 Renderer 切片 | [src/renderer/README.md](../../src/renderer/README.md)（已集成） | shell/controller/modalHost 各自写权限、脚本装配、导航/销毁协议；只把完成的 R 切片写为现状，保留剩余旧域说明。 |
 | G4 XLSX 切片 | [src/backend/xlsx/README.md](../../src/backend/xlsx/README.md)（已集成） | 两类 reader 的适用入口和能力差异、预算/关闭/临时资源所有权、旧 shim 现状；不把目录提取写成性能升级。 |
 | G5 BizOP 查询切片 | [src/main-process/biz-op-v327/README.md](../../src/main-process/biz-op-v327/README.md)（已集成） | queries 与 commands 的边界、catalog.db 合法保留者、Archive 查询入口及准入/预算归属；仅补本项涉及的实际内容。 |
 | G6 VCC / Acquiring 切片 | [VCC](../../src/backend/vcc-financial-op/README.md)、[Acquiring](../../src/backend/acquiring-bill-currency-db/README.md)（已集成） | 分别记录纯 hash/lineage 合同，以及 repository/service/executor 的实际入口、B0 退出屏障、partial/resume/清理顺序；已有存储专项约束只引用，语义未变时不机械改写。 |
-| G7 描述符切片 | `src/main-process/execution-descriptors/README.md` | 静态装配、独立 authority、各 registry 所有权和新增 action 的真实步骤；引用 G1/G2 说明，不另定义生命周期。 |
+| G7 描述符切片 | [src/main-process/execution-descriptors/README.md](../../src/main-process/execution-descriptors/README.md)（已集成） | 静态装配、独立 authority、各 registry 所有权和新增 action 的真实步骤；引用 G1/G2 说明，不另定义生命周期。 |
 | G8 检查器切片 | `architecture/README.md` | 检查命令、配置入口、覆盖盲区、激活/例外/退役规则及消费者维护方式；机器正文仍在 `boundaries.json`、`legacy-allowlist.json`，人读说明只解释与链接。 |
 
 每份说明首次落地时，在根 `AGENTS.md` 的资料入口增加链接或更新其已有导读位置；只添加导航，不重复模块规则正文。后续修改职责/接口/兼容或验证入口的切片，更新对应模块说明；更名或移动时同步导读和消费者引用。已有合适上层模块索引时可通过该索引承接，并在切片记录留下从根入口到该说明的路径。
