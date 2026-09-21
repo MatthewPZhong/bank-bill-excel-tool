@@ -1,6 +1,6 @@
 # v3.2.10 本地集成记录
 
-当前已纳入 G1 应用恢复、G2 业务任务适配器、G3 Renderer 边界、G4 共用 XLSX、G5 BizOP 查询边界、G6 存储与执行分离、G7 执行描述符。下方分批保留各次集成证据；最新组合见「G3 Renderer / G7 execution-descriptors 合入」。G8 尚未纳入本次集成。
+当前 G1–G8 均已本地合入。最新组合见「G8 architecture-guardrails 合入」：Git 合并完成，但最终候选的 release-check 在架构检查阶段失败，领域边界仍待对齐与激活，当前不具备发布门禁通过结论。下方 G1–G7 的 PASS 保留原候选意义，不适用于新增 G8 后的完整门禁。
 
 ## application-recovery 合入
 
@@ -175,3 +175,55 @@ G3 早先完整门禁因磁盘风险被自动审批拒绝。本次先确认无�
 - 隔离 Electron 工厂使用受控 API，不等于产品 Main 两阶段写入、模板库同步、Task/日志的完整端到端验收；Windows/Excel/WPS/安装包及真实用户数据故障恢复人工验收未执行。G3 第四轮额外三项独立探针因执行器异常未完成的记录保留，不计为通过。
 - G8 未集成；`ARCH-TASK-ADAPTER`、`ARCH-DESCRIPTOR-COMPOSITION` 等机器规则的激活及联合验收仍待后续。当前自动测试不代替规则激活。
 - 原各模块文档中的“未提交/未集成”和分轮验证保留其原时点含义；当前 Git 集成与组合验证以本节为准。G7 当前 manifest 检查独立通过，早期 manifest 历史差异记录不追溯改写。
+
+
+## G8 architecture-guardrails 合入
+
+本次按用户要求将 `codex/v3.2.10-architecture-guardrails` 合入现有 `release/v3.2.10`。**本地 Git 合并完成；组合门禁失败；G8 领域激活未完成。** 没有把 source 分支上的检查器测试通过当作 G1–G8 组合通过，也没有通过修改配置、扩大例外或跳过架构步骤掩盖失败。
+
+| 项目 | 实际记录 |
+| --- | --- |
+| 合并前 release | `e0d6e51b9d07896ac333e5e68900261202935808` |
+| 来源分支 | `codex/v3.2.10-architecture-guardrails` |
+| 本次冻结的功能提交 | `9a1d8aee5ac8cfb27c816167a8cf3d6a4baff802` |
+| 合并提交 / 验证候选 | `f8fd640586f9119b091148151e1beb48f9552c5d` |
+| 合并方式 | `--no-ff`；唯一冲突为 AGENTS.md 的追加导航，保留双方内容 |
+| 来源范围 | 137 项源码、配置、CI、测试、设计和历史证据；18 项最新受验代码指纹一致 |
+| 业务源码 | 相对合并前 release，`src/` 与 `index.html` 无变化 |
+| 版本及发布 | 仅本地合并；未推送、未开 PR、未合入 main、未升版、未打标签或发布 |
+
+来源分支原来仍指向 v3.2.9，G8 实现和第五轮修复在未提交工作区。本次先冻结其实际内容并提交；其他治理项设计、架构审查副本等未纳入。原始日志和历史 patch 按字节保留，其已有空白不改写；实际代码、配置和文档通过空白检查。来源的各轮「未提交／未集成」保留当时含义，当前集成状态以本节为准。
+
+### 验证结果
+
+执行环境为 macOS arm64 / Node v25.8.0；所有命令以 release worktree 为 cwd，仅使用检查器及合成测试数据。时间、退出码和完整命令见 [verification.json](evidence/merge-g8/verification.json)。
+
+| 检查 | 本次实际结果 |
+| --- | --- |
+| `UNIT_TEST_CONCURRENCY=1 npm run release-check` | **FAIL，exit 1**；lint 通过，在 check:architecture 阶段停止 |
+| smoke / 全量 unit / integration | 本轮 release-check 因前序失败未执行；不引用旧候选 PASS 代替 |
+| G8 架构专项套件 | **143/143 PASS**，0 fail / 0 skip，包含真实 Git 历史、CLI 及各轮修复回归 |
+| 候选架构 CLI | **FAIL，exit 1**；765/765 文件可解析，2195 条静态诊断 |
+| 规则状态 | active 2、pending 0、partial 29；111 条 stale 历史例外待审计清理 |
+
+日志：[release-check](evidence/merge-g8/release-check.log)、[143 项专项](evidence/merge-g8/architecture-tests.log)、[架构检查](evidence/merge-g8/architecture-check.log)；机器报告：[architecture-check.json](evidence/merge-g8/architecture-check.json)、[分类摘要](evidence/merge-g8/diagnostic-summary.json)。后续记录提交只修改文档和证据，受验代码对象见 [validated-input-objects.json](evidence/merge-g8/validated-input-objects.json)。
+
+### 尚未闭合的组合边界
+
+2195 条诊断按规则为：ARCH-BIZOP-QUERY 1485、ARCH-STATIC-COVERAGE 542、ARCH-RENDERER-SCOPE 109、ARCH-DESCRIPTOR-COMPOSITION 38、ARCH-TASK-ADAPTER 19、ARCH-PUBLICATION-RECOVERY-ENTRY 2。**这些是检查器输出，不能等同于相同数量的已确认业务缺陷。**
+
+已确认需进一步归因和对齐的内容：
+
+- BizOP Q3 保护整份 import-main.js / delete-preview.js，检查器沿模块依赖扩展；现有 import-main 的公共 policy 装配会进一步到达其他领域仓储，出现大量跨领域 DB 诊断。需要区分实际读取调用与静态整模块依赖，不能直接把这些仓储都加入例外。
+- Renderer 的机器登记仍包含早期工厂 global、参数和 API 清单；当前实现使用的 scoped namespace、ui 对象及实际工厂装配与登记不一致。需按 G3 合同逐项核验，不以放开完整 API 代替修复。
+- G7 的实际 composition / policy / archivePolicies 装配与早期登记不一致；G1 授权恢复入口和 G2 通用编排的相关诊断也待逐项判定。
+- 三个配置内引用的测试路径在当前树不存在：publication-recovery-entrypoints.test.js、controller-contract.test.js、modal-host-integration.test.js。需与实际领域测试建立对应；文件存在本身不等于行为验收通过。
+
+本次只做已授权分支合并及验证，未对上述跨 G1–G7 的机器契约和生产装配另行改写。下一阶段应在固定集成候选上逐项归因，按各领域合同修正配置／检查器／实际违规、补充必要反例、清理失效例外，再完成激活与完整 release-check。G8 第五轮修复后的独立复审也仍未执行。
+
+### 工作区保护与验收边界
+
+- 主工作区仍为 `main@11086a3c`；本次开始时记录的 865 个 dirty 文件哈希全部保持。
+- 来源 137 项冻结文件全部保持，未纳入提交的其他来源材料保持；release 中仅 AGENTS.md 和 integration-test-policy.md 因保留既有集成内容与来源不同，其余 135 项一致。
+- G1–G8 的来源提交均为合并候选祖先。清单及保护报告见 [input-manifest.json](evidence/merge-g8/input-manifest.json)、[source-commit.json](evidence/merge-g8/source-commit.json)、[workspace-preservation.json](evidence/merge-g8/workspace-preservation.json)。
+- G3 资金人工复核、真实产品 Main 端到端、Windows workflow／安装包、Excel/WPS 和实际数据故障恢复验收仍未完成；本次检查器测试不能替代这些验收。

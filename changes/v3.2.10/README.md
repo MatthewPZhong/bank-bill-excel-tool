@@ -6,16 +6,16 @@
 | 文档日期 | 2026-09-20 |
 | 用户已确认 | G1–G8 每项独立 Spec / TechDoc；按 v3.2.9 的功能分支目录组织；写清具体模块、接口、职责、迁移与验收 |
 | 设计及源码基线 | `main@11086a3cbf632a30adbcfa796e4cd81810c5aef9`；本地附注标签 `v3.2.9` 指向同一提交 |
-| 集成分支 | `release/v3.2.10`；本轮 G1—G7 组合源码提交为 `9602a1fa482203e11bfde8cd6a73b8f552243d95`，后续记录提交及验证见 [本地集成记录](release.md) |
-| 功能分支状态 | G1—G7 已逐项合入；G8 未纳入本次集成，下表保留计划名称 |
-| 交付状态 | 设计审查、模块实施与 release 组合验证分开记录；本次本地集成不代表正式发布或平台人工验收通过 |
+| 集成分支 | `release/v3.2.10`；本轮 G1–G8 合并提交为 `f8fd640586f9119b091148151e1beb48f9552c5d`；当前架构门禁失败，后续记录及验证见 [本地集成记录](release.md) |
+| 功能分支状态 | G1–G8 已逐项本地合入；G8 领域边界对齐与激活未完成，下表保留计划名称 |
+| 交付状态 | 设计审查、模块实施与 release 组合验证分开记录；最新候选在 check:architecture 阶段失败，不代表完整门禁、正式发布或平台人工验收通过 |
 | 独立审查修订 | R1–R9 及 G8 历史损坏配置恢复建议均在设计层关闭，无已知待修必改项；处置、验收映射和三轮依据见 [修订记录](review-response.md)，独立报告保持原状 |
 | 依据 | [模块耦合审查](../architecture-coupling/2026-09-20/review.md)及该目录的静态扫描、局部探针证据 |
 | 格式参考 | [v3.2.9 按行拆分 Spec](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/spec.md)、[TechDoc](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/techdoc.md)的元数据、行为合同、分阶段实施和验收结构 |
 
-已纳入模块的实施记录：[G1](codex/v3.2.10-application-recovery/implementation-notes.md)、[G2](codex/v3.2.10-business-task-adapters/implementation-notes.md)、[G3](codex/v3.2.10-renderer-boundaries/implementation-notes.md)、[G4](codex/v3.2.10-shared-xlsx-infrastructure/implementation-notes.md)、[G5](codex/v3.2.10-bizop-query-boundaries/implementation-notes.md)、[G6](codex/v3.2.10-storage-execution-separation/implementation-notes.md)、[G7](codex/v3.2.10-execution-descriptors/implementation-notes.md)。这些材料保留各功能实施时点的记录；当前集成 SHA、冲突处理与组合验证以 [release.md](release.md) 为准。下文第三轮设计审查状态保留为原设计基线。
+已纳入模块的实施记录：[G1](codex/v3.2.10-application-recovery/implementation-notes.md)、[G2](codex/v3.2.10-business-task-adapters/implementation-notes.md)、[G3](codex/v3.2.10-renderer-boundaries/implementation-notes.md)、[G4](codex/v3.2.10-shared-xlsx-infrastructure/implementation-notes.md)、[G5](codex/v3.2.10-bizop-query-boundaries/implementation-notes.md)、[G6](codex/v3.2.10-storage-execution-separation/implementation-notes.md)、[G7](codex/v3.2.10-execution-descriptors/implementation-notes.md)、[G8](codex/v3.2.10-architecture-guardrails/implementation-notes.md)。这些材料保留各功能实施时点的记录；当前集成 SHA、冲突处理与组合验证以 [release.md](release.md) 为准。下文第三轮设计审查状态保留为原设计基线。
 
-本工作树已带入 G1—G7 及各自审查材料；G8 的设计仍从[主工作区总索引](/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/README.md)读取。下列未集成功能的相对链接待各功能文档集成后在本树可用，不表示这些项已实施。
+本工作树已带入 G1–G8 及各自实施／审查材料。G8 检查器已进入 release-check，但当前组合尚有架构诊断，不能将设计完成、检查器专项通过或 Git 合并完成写成领域边界全部验收通过。
 
 ## 1. 功能分支与交付文件
 
