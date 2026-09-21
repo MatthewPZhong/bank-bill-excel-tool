@@ -1,0 +1,100 @@
+{
+  "files": [
+    {
+      "path": "review-2026-09-20-r3-evidence/README.md",
+      "sha256": "0fdf9202eced541a75c15c4516f970a3bd7e7a0459dff0e90012ce3e9fb2fd69"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/artifact-validation.json",
+      "sha256": "d80a0e6c7004c0c880f93d0166ebd77c4b3cf926c6614511f18416f2559dfeaa"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/checks-command.json",
+      "sha256": "9b3f6ce5f74e9fd858ffaa880792fcb37a73c2382a649831a511307203d7e933"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/electron-lifecycle-command.json",
+      "sha256": "55d9a67031d0cbeeefc0f0a423c1405d761023510806c9b77e1ae19b89285e52"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/electron-lifecycle.log",
+      "sha256": "32988b9967c9f1baf455522e703f8f99fd566124d47f28796a632e8f4f88d118"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/focused-unit-command.json",
+      "sha256": "be69784a1b289c8093c7096a9318c3a3881d38e61db9edd5722c5ac2ddace312"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/focused-unit.log",
+      "sha256": "ddea445c19b38e29c9e4624c027c9d82830b3d974adcf147e561ce60a447567e"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/lint.log",
+      "sha256": "c396d49d3be1db82282d6b91bc9412269ecdb1f1a25a6777cb572d10d240e182"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/mapping/mapping.cjs.js",
+      "sha256": "93af9f73b0a34e5c53c00dd4923ec5ad98cf1c07ef8900c6c56894bff22ff151"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/mapping/output.log",
+      "sha256": "d2e0d298cff5caa253464a263951d27a9cb1c51c8c3e9ee7a6cae843f1bed824"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/mapping/runner.cjs",
+      "sha256": "71e0bea1ece5d662718d924539c1f4b9c72aaff70b316ede475dfe1c6bd42e01"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/renderer-boundaries-r3-scenario-review.log",
+      "sha256": "d9e439a643579590e1b3d53b652e2fd4bb288271131cea790fa845a9a4b9d782"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/renderer-boundaries-r3-scenario-review.test.js",
+      "sha256": "150490291d7b315f2cfdffa34a50f685d0b7502ee09311bd0bb1c9dd858df338"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/repository-partial-write.cjs",
+      "sha256": "409dfb20f8c49d738c389dc8e75074f970465942d765e7a7f18e113dfb308f62"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/repository-partial-write.log",
+      "sha256": "45c7ccc6df3c389a88a819fab95b4ce17515f43154a9b0836b3243901f3aed10"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/review-modal-r3-before-output.log",
+      "sha256": "bc1ae48e244a56610138a105b4dae90dcc0acea2b3909a3ade3cd61e94ba88dd"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/review-modal-r3-partial-compare.cjs",
+      "sha256": "85d6507fccd32aeac51c3df94c057afa558a79a2ad4d8b0f013657a700384310"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/review-modal-r3-probe-output.log",
+      "sha256": "3c499103721fb9e9fa97d1ac08b0fa4ad6111b8074bf3c6f6cc3af24319e0f70"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/review-modal-r3-probe.cjs",
+      "sha256": "908c9ed9ceaa55c01c8cb61a42c2bf912f4be43b4905f5b71d178fd686091621"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/review-r2-r3.diff",
+      "sha256": "ccb53cf9705b738942108ad865656de2b57a3dd44a423283f23598152b29d200"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/review-snapshot.json",
+      "sha256": "0c2d014322af9b5d274e32dcaedf4d42dc19600566d931e340477a0ab13950df"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/smoke.log",
+      "sha256": "083c10f58d03319638c860d0a8d556ddcddc042e44a0df1b464420ab23c35465"
+    },
+    {
+      "path": "review-2026-09-20-r3-evidence/source-validation.json",
+      "sha256": "cdc79c32532cb2d2c260488395e6d5ad3d16dab943099d81e461022add305245"
+    },
+    {
+      "path": "review-2026-09-20-r3.md",
+      "sha256": "3ad845bc1b982cb7d7de2dcce64b1616017641fb07c4fd9c5599a5572b90b852"
+    }
+  ]
+}

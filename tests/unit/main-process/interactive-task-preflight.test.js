@@ -734,6 +734,8 @@ test('renderer 确认请求只生成 contextId + confirm flag', () => {
     'utf8'
   );
   const dialogsContext = { window: {} };
+  const configurationSource = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'src', 'renderer', 'dialogs', 'configuration.js'), 'utf8');
+  vm.runInNewContext(configurationSource, dialogsContext);
   vm.runInNewContext(
     dialogsSource,
     dialogsContext
@@ -745,29 +747,23 @@ test('renderer 确认请求只生成 contextId + confirm flag', () => {
     confirmOverwrite: true
   });
   assert.match(
-    dialogsSource,
+    configurationSource,
     /saveBalanceSeedWithFeedback\(\s*buildBalanceSeedConfirmationRequest\(result\.contextId\)\s*\)/,
     'active manual balance dialog 必须只提交 opaque context builder 的结果'
   );
   assert.match(
-    dialogsSource,
-    /async function saveBalanceSeedWithFeedback[\s\S]*?try\s*\{[\s\S]*?desktopApi\.files\.saveBalanceSeed[\s\S]*?catch\s*\(error\)/,
+    configurationSource,
+    /async function saveBalanceSeedWithFeedback[\s\S]*?try\s*\{[\s\S]*?api\.files\.saveBalanceSeed[\s\S]*?catch\s*\(error\)/,
     'active manual balance dialog 必须把 IPC rejection 转成可见反馈'
   );
-  assert.match(dialogsSource, /余额补录失败：/);
+  assert.match(configurationSource, /余额补录失败：/);
 
   const rendererSource = fs.readFileSync(
     path.join(__dirname, '..', '..', '..', 'src', 'renderer.js'),
     'utf8'
   );
-  assert.match(
-    rendererSource,
-    /saveBalanceSeedWithFeedback\(\s*window\.__rendererDialogs\.buildBalanceSeedConfirmationRequest\(result\.contextId\)\s*\)/,
-    'legacy active manual balance dialog 也必须只提交 opaque context builder 的结果'
-  );
-  assert.match(
-    rendererSource,
-    /async function saveBalanceSeedWithFeedback[\s\S]*?try\s*\{[\s\S]*?window\.desktopApi\.files\.saveBalanceSeed[\s\S]*?catch\s*\(error\)/,
-    'legacy manual balance dialog 必须把 IPC rejection 转成可见反馈'
-  );
+  assert.doesNotMatch(rendererSource, /function createManualBalanceSeedDialog/);
+  assert.match(rendererSource, /createManualBalanceSeedDialog/);
+  assert.match(dialogsSource, /ConfigurationDialogs\.createConfigurationDialogs/);
+
 });

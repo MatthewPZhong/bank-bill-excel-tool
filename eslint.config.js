@@ -5,7 +5,7 @@
 //
 // 刻意只开 no-undef（不开 no-unused-vars / 风格规则），避免海量历史噪音淹没真正的红线信号。
 // globals 取 node ∪ browser：主进程/preload/backend 是 CommonJS（require/module/Buffer/structuredClone…），
-//   覆盖全部平台全局；本配置只覆盖 CommonJS 模块层（no-undef 高信号区，main.js handler 事故即在此层）。
+//   覆盖全部平台全局；本配置覆盖 Main、Preload、Backend 与使用显式依赖的 Renderer 工厂。
 const globals = require('globals');
 
 // 旧 ESLint 配置（已移除）遗留的内联注释 `// eslint-disable-next-line global-require, import/no-dynamic-require`
@@ -14,19 +14,7 @@ const globals = require('globals');
 const noopRule = { meta: { schema: [] }, create: () => ({}) };
 
 module.exports = [
-  {
-    // renderer 四件套是浏览器 <script>（index.html 顺序加载、共享同一全局作用域、跨文件互调函数）。
-    //   ESLint 按文件孤立解析 → createOverlay / formatBigAccountCurrencySummary / updateReconIdFixPanelVisibility
-    //   等「别的 renderer-*.js 里定义的全局」会被误报 no-undef（非真 bug）。要消除须枚举数十个共享全局，过脆。
-    //   no-undef 的真信号在 CommonJS 模块层，故浏览器脚本四件套整体排除（其 run 进度接缝另由
-    //   renderer-bank-statement-run-progress.test.js 源码契约护栏覆盖）。
-    ignores: [
-      'src/renderer.js',
-      'src/renderer-dialogs.js',
-      'src/renderer-previews.js',
-      'src/renderer-pending.js',
-    ],
-  },
+  // G3 已将浏览器脚本的隐式跨文件函数引用收口为显式工厂注入，全部 Renderer 纳入 no-undef。
   {
     files: ['src/**/*.js'],
     plugins: { import: { rules: { 'no-dynamic-require': noopRule } } },

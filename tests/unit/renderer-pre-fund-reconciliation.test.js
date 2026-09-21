@@ -8,6 +8,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '../..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const renderer = fs.readFileSync(path.join(root, 'src/renderer.js'), 'utf8');
+const controller = fs.readFileSync(path.join(root, 'src/renderer/controllers/pre-fund.js'), 'utf8');
 const rendererPreviews = fs.readFileSync(path.join(root, 'src/renderer-previews.js'), 'utf8');
 const dialogs = fs.readFileSync(path.join(root, 'src/renderer-dialogs.js'), 'utf8');
 const preload = fs.readFileSync(path.join(root, 'src/preload.js'), 'utf8');
@@ -69,9 +70,9 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
       'handlePreFundImportMpt',
       'handlePreFundRun',
       'handlePreFundExport',
-      'applyPreFundReconciliationPanelPreviewState'
+      'applyPreview'
     ]) {
-      assert.ok(renderer.includes(`function ${functionName}(`), `缺少 ${functionName}`);
+      assert.ok(controller.includes(`function ${functionName}(`), `缺少 ${functionName}`);
     }
     assert.ok(renderer.includes("info.previewModal === 'pre-fund-reconciliation-panel'"));
     assert.ok(renderer.includes("info.previewModal === 'pre-fund-temp-manager'"));
@@ -79,11 +80,15 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
     assert.ok(rendererPreviews.includes('function applyPreFundTempManagerPreviewState('));
     assert.ok(rendererPreviews.includes('function applyPreFundTempImportFailurePreviewState('));
     assert.ok(rendererPreviews.includes('function applyPreFundTempDeleteRangePreviewState('));
-    assert.ok(renderer.includes("if (typeof unsubscribe === 'function') unsubscribe();"));
-    assert.match(renderer, /showPreFundFailure[\s\S]*escapeHtml\(message\)/);
-    const uiStart = renderer.indexOf('function updatePreFundReconciliationUi(');
-    const uiEnd = renderer.indexOf('async function refreshPreFundReconciliationStatus(', uiStart);
-    const updateUi = renderer.slice(uiStart, uiEnd);
+    assert.match(renderer, /createPreFundController\(\{ api: window\.desktopApi\.preFundReconciliation,[\s\S]*?panel: elements\.preFundReconciliationModulePanel/);
+    assert.match(renderer, /entry\(MODULES\.preFundReconciliation, elements\.preFundReconciliationModulePanel,[\s\S]*?domainControllers\.preFund\)/);
+    assert.match(renderer, /domainControllers\.preFund\.commands\.preview\(\)/);
+    assert.ok(html.includes('src/renderer/controllers/pre-fund.js'));
+    assert.ok(controller.includes("if (typeof unsubscribe === 'function') unsubscribe();"));
+    assert.match(controller, /showPreFundFailure[\s\S]*escapeHtml\(message\)/);
+    const uiStart = controller.indexOf('function updatePreFundReconciliationUi(');
+    const uiEnd = controller.indexOf('async function refreshPreFundReconciliationStatus(', uiStart);
+    const updateUi = controller.slice(uiStart, uiEnd);
     assert.match(updateUi, /let text = '欢迎使用小助手'/);
     assert.match(updateUi, /if \(run\.unavailable\)[\s\S]*unavailableMessage/);
     assert.match(updateUi, /bankRuleUnmappedRows[\s\S]*bankRuleDirectionMismatchRows[\s\S]*bankRuleNoGatewayTradeTypeRows/);
@@ -231,7 +236,7 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
   });
 
   test('临时链接表按钮把既有 MPT 导入处理传入管理弹窗', () => {
-    assert.match(renderer, /createPreFundTempManagerDialog\(\{[\s\S]*onImport:\s*handlePreFundImportMpt[\s\S]*\}\)/);
-    assert.match(renderer, /handlePreFundImportMpt\(\{ showFailures = true \} = \{\}\)/);
+    assert.match(controller, /createPreFundTempManagerDialog\(\{[\s\S]*onImport:\s*handlePreFundImportMpt[\s\S]*\}\)/);
+    assert.match(controller, /handlePreFundImportMpt\(\{ showFailures = true \} = \{\}\)/);
   });
 });

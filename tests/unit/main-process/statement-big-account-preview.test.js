@@ -22,7 +22,7 @@ const {
 
 const ROOT = path.join(__dirname, '..', '..', '..');
 const MAIN_PATH = path.join(ROOT, 'src', 'main.js');
-const RENDERER_DIALOGS_PATH = path.join(ROOT, 'src', 'renderer-dialogs.js');
+const RENDERER_DIALOGS_PATH = path.join(ROOT, 'src', 'renderer', 'dialogs', 'configuration.js');
 const mainSource = fs.readFileSync(MAIN_PATH, 'utf8');
 const mainAst = acorn.parse(mainSource, {
   ecmaVersion: 'latest',

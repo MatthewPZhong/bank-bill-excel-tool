@@ -40,7 +40,7 @@ function harness(initial) {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../src/renderer-biz-op-v327.js'), 'utf8'), { window });
   const controller = window.createBizOpV327Controller({
     api: { status: async () => state, retryRecovery: () => { retries += 1; return retryWork(); } },
-    panel, legacyPanel, restoreLegacy() {}, document: doc
+    panel, legacyPanel, modalHost: { getTop: () => null, closeOwner: () => ({ status: 'closed' }) }, restoreLegacy() {}, document: doc
   });
   const buttons = panel.querySelectorAll('button');
   const retry = buttons.find((button) => button.textContent === '重试恢复');

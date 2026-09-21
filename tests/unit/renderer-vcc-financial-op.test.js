@@ -28,7 +28,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
   test('模块注册、脚本加载顺序和主面板四个动作完整', () => {
     const panel = panelSource();
     assert.match(renderer, /vccFinancialOp:\s*\{\s*id:\s*'vcc-financial-op',\s*name:\s*'VCC财务OP校验'/);
-    assert.match(renderer, /vccFinancialOpModulePanel\.hidden\s*=\s*moduleId\s*!==\s*MODULES\.vccFinancialOp\.id/);
+    assert.match(renderer, /entry\(MODULES\.vccFinancialOp,\s*elements\.vccFinancialOpModulePanel,/);
     assert.ok(
       html.indexOf('./src/renderer-vcc-financial-op.js') < html.indexOf('./src/renderer.js'),
       '模块控制器必须先于 renderer.js 加载'
@@ -278,7 +278,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.ok(handleImportSource.indexOf('api.onImportProgress') < handleImportSource.indexOf('api.pickFiles()'), '预检之前必须订阅进度');
     assert.match(
       handleImportSource,
-      /api\.onImportProgress\(\(progress\) => \{\s*const progressStatus = buildImportProgressStatus\(progress, state\.cancelRequested\);\s*if \(progressStatus\) setStatus\(progressStatus\.message, progressStatus\.tone\);\s*\}\)/
+      /subscribeImportProgress\(\(progress\) => \{\s*const progressStatus = buildImportProgressStatus\(progress, state\.cancelRequested\);\s*if \(progressStatus\) setStatus\(progressStatus\.message, progressStatus\.tone\);\s*\}\)/
     );
   });
 
@@ -407,7 +407,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.doesNotMatch(moduleRenderer, /vcc-fin-op-manager-heading/);
     assert.match(styles, /\.vcc-fin-op-manager-toolbar\s*\{[\s\S]*align-items:\s*center;[\s\S]*justify-content:\s*space-between;/);
     assert.match(moduleRenderer, /const currentVersion = \+\+renderVersion;/);
-    assert.match(moduleRenderer, /if \(currentVersion !== renderVersion\) return;/);
+    assert.match(moduleRenderer, /if \([^\n]*currentVersion !== renderVersion[^\n]*\) return;/);
     assert.match(moduleRenderer, /row\.generatedAt \|\| row\.createdAt \|\| row\.archivedAt/);
     assert.match(sharedStyles, /\.position-manager-layout\s*\{[\s\S]*grid-template-columns:\s*156px minmax\(0, 1fr\);/);
     assert.match(sharedStyles, /\.position-manager-nav\s*\{[\s\S]*padding:\s*12px 8px;[\s\S]*background:\s*var\(--bg-soft, #f8f9fa\);/);
@@ -452,7 +452,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(moduleRenderer, /api\.deleteDataTarget\(\{[\s\S]*expectedPreviewToken: latestPreview\.previewToken,[\s\S]*taskGeneration: latestPreview\.taskGeneration/);
     assert.doesNotMatch(moduleRenderer, /<option[^>]*disabled[^>]*>[^<]*(首月期初初始化数据|财务OP校验结果表)/);
     assert.match(moduleRenderer, /const currentVersion = \+\+previewVersion;/);
-    assert.match(moduleRenderer, /if \(currentVersion !== previewVersion\) return;/);
+    assert.match(moduleRenderer, /if \([^\n]*currentVersion !== previewVersion[^\n]*\) return;/);
     assert.match(moduleRenderer, /canClose: \(\) => !deleting/);
     assert.match(moduleRenderer, /setBusy\(true, 'delete'\)/);
     assert.match(moduleRenderer, /cancelButton\.disabled = true/);
@@ -470,7 +470,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.doesNotMatch(moduleRenderer, /async function openDataManager/);
     const managerSource = moduleRenderer.slice(
       moduleRenderer.indexOf('function openDataManager('),
-      moduleRenderer.indexOf('async function initialize()')
+      moduleRenderer.indexOf('async function enter()')
     );
     const initialShellSource = managerSource.slice(
       managerSource.indexOf('const modal = mountDialog('),
@@ -478,7 +478,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     );
     assert.doesNotMatch(initialShellSource, /vcc-fin-op-manager-skeleton/);
     assert.match(managerSource, /const managerSkeletonDelayMs = 150;/);
-    assert.match(managerSource, /onClose: clearManagerSkeletonTimer/);
+    assert.match(managerSource, /onDispose: clearManagerSkeletonTimer/);
     assert.match(
       managerSource,
       /managerSkeletonTimer = setTimeout\(\(\) => \{[\s\S]*currentLoadVersion !== loadVersion[\s\S]*!loadingManagerData[\s\S]*!content\.isConnected[\s\S]*renderManagerSkeleton\(\);[\s\S]*\}, managerSkeletonDelayMs\);/
@@ -589,14 +589,14 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     const helperEnd = moduleRenderer.indexOf('function createArchivedMonthPickerDialog(', helperStart);
     assert.ok(helperStart >= 0 && helperEnd > helperStart);
     const settleCompletion = Function(
-      `'use strict'; ${moduleRenderer.slice(helperStart, helperEnd)}; return settleArchivedPickerCompletion;`
+      `'use strict'; const renderGeneration=0; const live=()=>true; let needsRefresh=false; ${moduleRenderer.slice(helperStart, helperEnd)}; return settleArchivedPickerCompletion;`
     )();
     const entry = { targetMonth: '2026-06' };
     const result = { status: 'success' };
     assert.equal(await settleCompletion(null, result, entry), null);
     let received = null;
     assert.equal(await settleCompletion(async (...args) => { received = args; }, result, entry), null);
-    assert.deepEqual(received, [result, entry]);
+    assert.deepEqual(received, [result, entry, null]);
     const refreshError = new Error('刷新异常');
     assert.equal(await settleCompletion(async () => { throw refreshError; }, result, entry), refreshError);
 
@@ -606,7 +606,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     const handler = moduleRenderer.slice(handlerStart, handlerEnd);
     assert.match(handler, /const execution = await runArchivedPickerExecution/);
     assert.match(handler, /execution\.outcome === 'cancelled'[\s\S]*execution\.outcome === 'error'/);
-    assert.match(handler, /const completionError = await settleArchivedPickerCompletion[\s\S]*modal\.close\(\);[\s\S]*操作已成功但刷新失败/);
+    assert.match(handler, /modal\.close\(\{ status: 'submitted',[\s\S]*const completionError = await settleArchivedPickerCompletion[\s\S]*操作已成功但刷新失败/);
     const committedPath = handler.slice(handler.indexOf('const completionError'));
     assert.doesNotMatch(committedPath, /refreshPreview\(\)|setExecutionLocked\(false\)/);
   });
@@ -619,7 +619,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.ok(responseHelperStart >= 0 && responseHelperEnd > responseHelperStart);
     assert.ok(helperStart >= 0 && helperEnd > helperStart);
     const helpers = Function(
-      `'use strict'; ${moduleRenderer.slice(responseHelperStart, responseHelperEnd)} ${moduleRenderer.slice(helperStart, helperEnd)}; return { normalizeArchivedPickerEntries, responseFailure, runArchivedPickerExecution, archivedPickerExecutionErrorMessage };`
+      `'use strict'; const renderGeneration=0; const live=()=>true; let needsRefresh=false; ${moduleRenderer.slice(responseHelperStart, responseHelperEnd)} ${moduleRenderer.slice(helperStart, helperEnd)}; return { normalizeArchivedPickerEntries, responseFailure, runArchivedPickerExecution, archivedPickerExecutionErrorMessage };`
     )();
     assert.equal(helpers.normalizeArchivedPickerEntries([]).length, 0);
     assert.deepEqual(
@@ -880,7 +880,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       'SOURCE_LABELS',
       'CURRENCIES',
       'differenceApi',
-      'window',
+      'reviewProjection',
       `'use strict'; ${moduleRenderer.slice(start, end)}; return resultReviewHtml;`
     )(
       (value) => String(value == null ? '' : value),
@@ -888,7 +888,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       { recharge_refund: 'VCC充值清退明细' },
       ['AUD', 'CAD', 'CNY', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'],
       require('../../src/shared/vcc-financial-op-difference'),
-      { __vccReviewProjection: require('../../src/shared/vcc-review-projection') }
+      require('../../src/shared/vcc-review-projection')
     );
     const currencies = ['AUD', 'CAD', 'CNY', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'];
     const amounts = (usd, eur = '0') => Object.fromEntries(
@@ -944,7 +944,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       moduleRenderer.indexOf('function resultReviewHtml('),
       moduleRenderer.indexOf('async function requestRunAdjustment(')
     );
-    assert.match(resultFunction, /validateResultReview\(result\);[\s\S]*window\.__vccReviewProjection\.projectReview\(result\.review\)/);
+    assert.match(resultFunction, /validateResultReview\(result\);[\s\S]*reviewProjection\.projectReview\(result\.review\)/);
     assert.doesNotMatch(resultFunction, /CURRENCIES\.map/);
     assert.doesNotMatch(resultFunction, /parseFloat|parseInt|Number\(/);
   });
@@ -954,7 +954,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     const end = moduleRenderer.indexOf('function statusTone(', start);
     const exportSource = moduleRenderer.slice(start, end);
     assert.ok(start >= 0 && end > start);
-    assert.match(exportSource, /months = await loadArchivedResultMonths\(\)/);
+    assert.match(exportSource, /await readDialogValue\('读取可导出月份', loadArchivedResultMonths\)/);
     assert.match(exportSource, /createArchivedMonthPickerDialog\(\{/);
     assert.match(exportSource, /actionLabel: '导出'/);
     assert.match(exportSource, /previewSelection: async \(entry\) =>/);
@@ -997,7 +997,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     const applyState = Function(
       'state',
       'elements',
-      `'use strict'; ${moduleRenderer.slice(start, end)}; return applyArchivedMonthsState;`
+      `'use strict'; const live=()=>true; let needsRefresh=false; ${moduleRenderer.slice(start, end)}; return applyArchivedMonthsState;`
     )(state, elements);
 
     applyState([]);
@@ -1018,7 +1018,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     applyState([]);
     assert.equal(elements.exportBtn.disabled, true);
     assert.equal(elements.exportBtn.title, '暂无已归档财务OP校验结果');
-    assert.match(moduleRenderer, /async function initialize\(\)[\s\S]*await refreshArchivedState\(\);\s*setStatus\('欢迎使用小助手', 'info'\)/);
+    assert.match(moduleRenderer, /async function enter\(\)[\s\S]*await refreshArchivedState\(\);[\s\S]*setStatus\('欢迎使用小助手', 'info'\)/);
   });
 
   test('修改结果固定四级无默认级联，保存锁窗并在成功或 stale 后强制 refetch 清核对', () => {

@@ -12,7 +12,7 @@ function read(relativePath) {
 }
 
 test.describe('v3.1.13 设置与存档中心静态契约', () => {
-  const renderer = read('src/renderer.js');
+  const renderer = read('src/renderer.js') + '\n' + read('src/renderer/dialogs/app-settings.js');
   const preload = read('src/preload.js');
   const styles = read('src/styles-gemini-extra.css');
   const main = read('src/main.js');
@@ -199,8 +199,8 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
     ]) {
       assert.ok(renderer.includes(`data-role="${selector}"`), `${selector} 应保留`);
     }
-    assert.match(renderer, /window\.desktopApi\.appUpdate\.setEnabled\(toggle\.checked\)/);
-    assert.match(renderer, /window\.desktopApi\.appUpdate\.checkNow\(\)/);
+    assert.match(renderer, /api\.appUpdate\.setEnabled\(toggle\.checked\)/);
+    assert.match(renderer, /api\.appUpdate\.checkNow\(\)/);
     assert.match(renderer, /restartAndInstallAppUpdate\(\{ inline: true \}\)/);
   });
 
@@ -428,7 +428,7 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
     assert.match(renderer, /const busy = archiveState\.settingsLoading \|\| archiveState\.retentionSaving/);
     assert.match(renderer, /returnButton\.disabled = busy/);
     assert.match(renderer, /closeDialogButton\.disabled = busy/);
-    assert.match(renderer, /if \(archiveState\.settingsLoading \|\| archiveState\.retentionSaving\) return false/);
+    assert.match(renderer, /canClose: canCloseSettingsDialog/); // 关闭锁的行为由 Electron app-settings fixture 覆盖。
     assert.match(renderer, /retentionSelect\.disabled = archiveState\.settingsLoading/);
   });
 
@@ -711,7 +711,7 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
 
 
 test('永久删除确认先只读预检，完整结果和待完成删除入口覆盖所有模块', () => {
-  const renderer = read('src/renderer.js');
+  const renderer = read('src/renderer.js') + '\n' + read('src/renderer/dialogs/app-settings.js');
   const start = renderer.indexOf('async function confirmArchiveBatchDelete');
   const end = renderer.indexOf('function closeSettingsDialog', start);
   const flow = renderer.slice(start, end);

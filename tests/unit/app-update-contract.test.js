@@ -72,7 +72,7 @@ test.describe('v3.0.18 在线升级静态契约', () => {
     assert.ok(positions.every((position) => position >= 0));
     assert.deepEqual([...positions].sort((a, b) => a - b), positions);
     assert.match(html, /id="settingsBtn"[\s\S]*?id="appUpdateStatusDot"/);
-    const renderer = read('src/renderer.js');
+    const renderer = read('src/renderer.js') + '\n' + read('src/renderer/dialogs/app-settings.js');
     assert.match(renderer, /data-role="last-checked"/);
     assert.match(renderer, /function formatAppUpdateVersion\(value\)/);
     assert.match(renderer, /function setupAppUpdatePromptObserver\(\)/);

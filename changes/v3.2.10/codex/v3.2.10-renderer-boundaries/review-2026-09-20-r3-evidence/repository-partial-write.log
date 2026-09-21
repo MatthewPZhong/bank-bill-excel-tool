@@ -1,0 +1,21 @@
+{
+  "evidence": "actual repository with in-memory SQLite; injected second-write failure",
+  "before": [
+    {
+      "targetField": "Credit",
+      "conditionField": "类型",
+      "conditionValue": "入金",
+      "mappedField": "发生额",
+      "rowIndex": 0
+    }
+  ],
+  "after": [],
+  "meta": {
+    "signedAmountSourceField": "",
+    "signedAmountTargetSeqNos": [],
+    "byFieldAmountTargetSeqNos": [
+      1
+    ]
+  },
+  "failure": "injected metadata write failure"
+}

@@ -1,0 +1,4 @@
+ROW_DELETE_BUSY {"inflight":{"calls":[{"templateId":7,"seqNo":1},{"templateId":7,"seqNo":1}],"buttonDisabled":false,"parentClose":"closed"},"count":1,"errors":[]}
+ROW_DELETE_LATE_PREVIEW {"oldOpen":false,"deleteCallsAfterClose":[{"templateId":7,"seqNo":1}],"newTop":true,"errors":[]}
+ROW_COUNT_EXISTING_DRAFT {"before":"Amount","after":"","selectors":[{"className":"mapping-select bill-split-currency-select","value":"Currency"},{"className":"mapping-select bill-split-credit-select","value":""},{"className":"mapping-select bill-split-debit-select","value":""}],"parentTop":true,"errors":[]}
+2/2 remaining delete-path defects reproduced; row-count draft behavior recorded

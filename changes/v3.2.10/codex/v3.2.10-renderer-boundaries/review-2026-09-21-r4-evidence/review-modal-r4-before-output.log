@@ -1,0 +1,2 @@
+MATRIX {"mode":"byField","case":"original-second-failed","state":{"ruleCount":0,"storedMeta":{"signedAmountSourceField":"","signedAmountTargetSeqNos":[],"byFieldAmountTargetSeqNos":[]},"manageHidden":false,"byField":"","signed":"","signedDisabled":true,"byFieldDisabled":false},"calls":["rules","meta"],"errorShown":true,"editorValues":["入金","出金"]}
+0/1 PASS

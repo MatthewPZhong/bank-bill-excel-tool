@@ -86,7 +86,7 @@ test('真实service任意per-file transport异常形成mixed结果并继续，�
 
 test('真实policy/TaskLifecycle执行与handler/Renderer源码seam冻结partial terminal', () => {
   const main = fs.readFileSync(path.join(root, 'src/main.js'), 'utf8');
-  const renderer = fs.readFileSync(path.join(root, 'src/renderer.js'), 'utf8');
+  const renderer = fs.readFileSync(path.join(root, 'src/renderer/controllers/pre-fund.js'), 'utf8');
   const handler = main.slice(
     main.indexOf("trackedIpcHandle('pre-fund-reconciliation:import-mpt'"),
     main.indexOf("trackedIpcHandle('pre-fund-reconciliation:mpt-errors:export'")

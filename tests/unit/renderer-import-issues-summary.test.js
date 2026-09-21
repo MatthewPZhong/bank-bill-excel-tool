@@ -13,14 +13,14 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const RENDERER_PATH = path.join(__dirname, '..', '..', 'src', 'renderer.js');
+const RENDERER_PATH = path.join(__dirname, '..', '..', 'src', 'renderer', 'controllers', 'bank-statement.js');
 const source = fs.readFileSync(RENDERER_PATH, 'utf8');
 
 // 从源码切出 `function buildImportIssuesSummary(results) { ... }` 整段（花括号配对）
 function extractFunctionSource(src, fnName) {
   const signature = `function ${fnName}(`;
   const start = src.indexOf(signature);
-  if (start === -1) throw new Error(`未在 renderer.js 找到 ${fnName} 定义`);
+  if (start === -1) throw new Error(`未在 bank-statement controller 找到 ${fnName} 定义`);
   // 从签名后第一个 '{' 起做花括号配对
   const braceStart = src.indexOf('{', start);
   let depth = 0;
@@ -39,7 +39,6 @@ function extractFunctionSource(src, fnName) {
 // 实例化：new Function 返回该纯函数（注入到一个返回它的工厂里）
 function loadFn(fnName) {
   const fnSource = extractFunctionSource(source, fnName);
-  // eslint-disable-next-line no-new-func
   const factory = new Function(`${fnSource}\nreturn ${fnName};`);
   return factory();
 }
@@ -169,9 +168,9 @@ describe('updateBankStatementUi — issues 追加护栏（v3.0.0 需求2a）', (
   });
 
   test('退款/C3 副作用迁移到 handleBankStatementBatchImport 成功路径（仍保留触发）', () => {
-    assert.ok(source.includes('const refundPrompted = await maybePromptRefundOrderImport(results);'),
+    assert.ok(source.includes('const refundPrompted = await maybePromptRefundOrderImport(results, generation);'),
       '退款提醒触发应保留（迁移到成功路径末尾）');
-    assert.ok(source.includes('if (!refundPrompted) maybePromptGatewayReconImport();'),
+    assert.ok(source.includes('if (live(generation) && !refundPrompted) await maybePromptGatewayReconImport(generation);'),
       'C3 提醒与退款互斥触发应保留');
   });
 });
@@ -230,6 +229,30 @@ describe('buildLinkedImportSummary — 行为（v3.0.7 需求2d）', () => {
   });
 });
 
+// 直接构造当前控制器，验证导入后的摘要、tone、Main 重读与旧导出失效。
+async function loadImportController(t, results) {
+  const { createBankStatementController } = require('../../src/renderer/controllers/bank-statement');
+  const controls = {};
+  let hasResult = true;
+  let statusReads = 0;
+  const controller = createBankStatementController({
+    panel: { querySelector(selector) { return controls[selector] ||= { textContent: '', dataset: {}, disabled: false, addEventListener() {}, removeEventListener() {} }; } },
+    api: {
+      async sessionStatus() { statusReads += 1; return { status: 'ok', hasBankStatement: true, bankStatementFileName: '银行.xlsx', hasProcessingResult: hasResult }; },
+      async batchImport() { hasResult = false; return { status: 'ok', results }; },
+      async export() { return { status: 'ok', mainFileName: '旧导出.xlsx' }; }
+    },
+    config: { scenarios: { list: async () => ({ status: 'ok', scenarios: [] }) } },
+    sharedReconSession: { sessionStatus: async () => ({ status: 'ok', hasFile: false, hasResult: false }), subscribe: () => () => {} },
+    ui: { status(element, text, tone) { element.textContent = text; element.dataset.tone = tone; } }
+  });
+  t.after(() => controller.dispose());
+  await controller.enter();
+  await controller.commands.export();
+  assert.match(controls['#bankStatementStatusBox'].textContent, /旧导出.xlsx/);
+  return { controller, controls, get statusReads() { return statusReads; } };
+}
+
 // 源码护栏：handleBankStatementBatchImport 把 linked 汇总并入状态框 issues（不改 hasFailed/tone）
 describe('buildLinkedImportSummary — 状态框合并护栏（v3.0.7 需求2d）', () => {
   test('linked 汇总只在 status===ok && outcome===linked 时计入', () => {
@@ -237,11 +260,15 @@ describe('buildLinkedImportSummary — 状态框合并护栏（v3.0.7 需求2d�
       'buildLinkedImportSummary 应仅汇总 status===ok && outcome===linked');
   });
 
-  test('linked 汇总以 \\n 合并进 issues.text（追加在失败/跳过段之后）', () => {
-    assert.ok(source.includes('const linkedSummary = buildLinkedImportSummary(results);'),
-      'handleBankStatementBatchImport 应调用 buildLinkedImportSummary(results)');
-    assert.ok(source.includes('issues.text = issues.text ? `${issues.text}\\n${linkedSummary}` : linkedSummary;'),
-      'linked 汇总应以 \\n 合并进 issues.text（空 issues 时直接用 linkedSummary）');
+  test('linked 汇总以 \n 合并进 issues.text（追加在失败/跳过段之后）', async (t) => {
+    const harness = await loadImportController(t, [
+      { status: 'disabled', fileName: 'skip.xlsx' },
+      { status: 'read-error', fileName: 'broken.xlsx' },
+      { status: 'ok', outcome: 'linked', tableKey: 'gateway-bill', fileName: '网关.xlsx', rowCount: 7 }
+    ]);
+    await harness.controller.commands.import();
+    const text = harness.controls['#bankStatementStatusBox'].textContent;
+    assert.match(text, /跳过 1 个: skip.xlsx\n失败 1 个: broken.xlsx: 文件读取失败\n已存入链接表 1 个:\n网关.xlsx → 网关对账单表库（7 行）/);
   });
 });
 
@@ -275,22 +302,26 @@ describe('buildAlsoLinkedFailureSummary — 副作用落库失败可见（v3.0.7
     assert.strictEqual(buildAlsoLinkedFailureSummary(null), '');
   });
 
-  test('集成护栏：handler 调用本函数并把失败折进 issues + 置 hasFailed=true（转 error tone）', () => {
-    assert.ok(source.includes('const alsoLinkedFailText = buildAlsoLinkedFailureSummary(results);'),
-      'handleBankStatementBatchImport 应调用 buildAlsoLinkedFailureSummary(results)');
-    assert.ok(source.includes('issues.hasFailed = true;'),
-      '落库失败应置 issues.hasFailed = true');
+  test('集成护栏：handler 调用本函数并把失败折进 issues + 置 hasFailed=true（转 error tone）', async (t) => {
+    const harness = await loadImportController(t, [{ status: 'ok', outcome: 'processed', fileName: 'JPMUS.xlsx', alsoLinked: { error: 'DB write failed' } }]);
+    await harness.controller.commands.import();
+    const status = harness.controls['#bankStatementStatusBox'];
+    assert.match(status.textContent, /JPMUS.xlsx/);
+    assert.match(status.textContent, /DB write failed/);
+    assert.match(status.textContent, /请重新导入/);
+    assert.equal(status.dataset.tone, 'error');
   });
 });
 
 // v3.0.7 F2（codex review）：纯 linked 成功后须 refresh（清 main 已清空的 processingResult 残留）源码护栏
 describe('linked-only 导入后状态刷新护栏（v3.0.7 F2）', () => {
-  test('handler 含「纯 linked 成功」分支，且分支内 refresh + 清 export', () => {
-    const anchor = "} else if (results.some((r) => r && r.status === 'ok' && r.outcome === 'linked')) {";
-    const idx = source.indexOf(anchor);
-    assert.ok(idx !== -1, 'handler 应有纯 linked 成功分支');
-    const branch = source.slice(idx, idx + 700);
-    assert.ok(branch.includes('state.bankStatementExport = null;'), 'linked 分支应清 export 缓存');
-    assert.ok(branch.includes('await refreshBankStatementStatus();'), 'linked 分支应 refresh 状态（清 processingResult 残留）');
+  test('handler 含「纯 linked 成功」分支，且分支内 refresh + 清 export', async (t) => {
+    const harness = await loadImportController(t, [{ status: 'ok', outcome: 'linked', tableKey: 'gateway-bill', fileName: '网关.xlsx', rowCount: 7 }]);
+    const before = harness.statusReads;
+    await harness.controller.commands.import();
+    assert.equal(harness.statusReads, before + 1, '纯 linked 成功必须重读 Main session');
+    assert.equal(harness.controls['#bankStatementExportBtn'].disabled, true, 'Main 结果失效后导出不可用');
+    assert.doesNotMatch(harness.controls['#bankStatementStatusBox'].textContent, /旧导出.xlsx|已处理/);
+    assert.match(harness.controls['#bankStatementStatusBox'].textContent, /已存入链接表 1 个/);
   });
 });

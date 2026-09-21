@@ -2,6 +2,9 @@
   function createRendererPreviews(deps) {
     const {
       state,
+      configurationPreview,
+      newAccountPreview,
+      applyScenarioPreviewDraft,
       elements,
       MODULES,
       ADVANCED_MAPPING_FIELDS,
@@ -10,7 +13,7 @@
       SIGNED_AMOUNT_MAPPING_FIELD,
       AMOUNT_BASED_NAME_MAPPING_FIELD,
       AMOUNT_BASED_ACCOUNT_MAPPING_FIELD,
-      setCurrentModule,
+      setCurrentModule: navigateToModule,
       syncNewAccountCurrencyMode,
       updateNewAccountGenerateAvailability,
       setNewAccountExportAvailability,
@@ -19,7 +22,7 @@
       setStatus,
       getNewAccountStatusTitle,
       setNewAccountOpenDateValue,
-      openModal,
+      openModal: openProductionModal,
       createTemplateManagerDialog,
       createMappingDialog,
       createTemplateRenameDialog,
@@ -68,16 +71,74 @@
       createGatewayReconScenarioPickerDialog
     } = deps;
 
+    const modalHost = deps.modalHost;
+    let previewGeneration = 0;
+    let previewSession = null;
+
+    function disposePreviewTimers() {
+      if (!previewSession) return;
+      for (const cancel of [...previewSession.timers]) cancel();
+      previewSession = null;
+    }
+
+    function setCurrentModule(moduleId) {
+      disposePreviewTimers();
+      previewSession = { generation: ++previewGeneration, moduleId, handles: new Set(), timers: new Set(), blocked: false };
+      return navigateToModule(moduleId);
+    }
+
+    async function navigatePreviewReady(moduleId) {
+      const route = setCurrentModule(moduleId);
+      const session = previewSession;
+      await route?.ready;
+      return route?.status !== 'blocked' && session === previewSession && state.currentModule === moduleId;
+    }
+
+    function openModal(source, options) {
+      const result = openProductionModal(source, options);
+      if (previewSession) {
+        if (result?.status === 'opened') previewSession.handles.add(result.handle);
+        else previewSession.blocked = true;
+      }
+      return result;
+    }
+
+    function overlayForHandle(handle) {
+      if (!handle) return null;
+      return Array.from(elements.modalRoot?.children || []).find((element) => modalHost.getHandle(element) === handle) || null;
+    }
+
+    // 每个延迟动作绑定调度时的预览会话与句柄，不能查询后来出现的任意生产弹窗。
+    function setTimeout(callback, delay) {
+      const session = previewSession;
+      const expected = modalHost?.getTop() || null;
+      const previewRoot = overlayForHandle(expected);
+      if (!session || session.blocked) return null;
+      let timer;
+      const cancel = () => {
+        global.clearTimeout(timer);
+        session.timers.delete(cancel);
+        expected?.signal.removeEventListener('abort', cancel);
+      };
+      timer = global.setTimeout(() => {
+        cancel();
+        if (previewSession !== session || previewGeneration !== session.generation || session.blocked) return;
+        if (typeof state.currentModule === 'string' && state.currentModule !== session.moduleId) return;
+        if ((modalHost?.getTop() || null) !== expected) return;
+        if (expected && (!expected.isOpen() || !expected.isTop() || !session.handles.has(expected))) return;
+        callback(previewRoot);
+        // 同步点击生产入口建立的下一层属于当前预览；异步晚到打开不推测其归属。
+        const next = modalHost?.getTop();
+        if (next && next !== expected && next.isOpen()) session.handles.add(next);
+      }, delay);
+      session.timers.add(cancel);
+      expected?.signal.addEventListener('abort', cancel, { once: true });
+      return timer;
+    }
+
     function applyNewAccountPreviewState() {
       setCurrentModule(MODULES.newAccountGenerator.id);
-      elements.newAccountMultiCurrencyCheckbox.checked = false;
-      state.selectedNewAccountCurrencies = [];
-      syncNewAccountCurrencyMode();
-      elements.newAccountBankNameInput.value = '中国银行';
-      elements.newAccountLocationInput.value = '香港';
-      elements.newAccountCurrencyInput.value = 'USD';
-      elements.newAccountBankAccountInput.value = '6222000000000001';
-      setNewAccountOpenDateValue('2026-01-01');
+      newAccountPreview.applyRows([{ bankName:'中国银行',location:'香港',currency:'USD',bankAccount:'6222000000000001',openingDate:'2026-01-01',isMultiCurrency:false,currencies:[] }]);
       updateNewAccountGenerateAvailability();
       setNewAccountExportAvailability(true);
       setNewAccountStatus('新开账户余额账单可导出', 'success', {
@@ -88,7 +149,7 @@
 
     function applyTemplateManagerPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      state.templates = [
+      configurationPreview.templates([
         {
           id: 'preview-template-1',
           name: 'LusoBank-MO',
@@ -109,8 +170,8 @@
           name: 'HSBC-SG',
           bigAccountSummary: '3个'
         }
-      ];
-      openModal(createTemplateManagerDialog());
+      ]);
+      openModal(() => createTemplateManagerDialog());
     }
 
     function buildPreviewMappingPayload() {
@@ -179,13 +240,13 @@
 
     function applyMappingDialogPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      state.currencyOptions = ['USD', 'HKD', 'CNY', 'EUR', 'JPY'];
-      openModal(createMappingDialog(buildPreviewMappingPayload()));
+      configurationPreview.currencies(['USD', 'HKD', 'CNY', 'EUR', 'JPY']);
+      openModal(() => createMappingDialog(buildPreviewMappingPayload()));
     }
 
     function applyTemplateRenamePreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      openModal(createTemplateRenameDialog({
+      openModal(() => createTemplateRenameDialog({
         id: 'preview-template-2',
         name: 'BankABC-HK'
       }));
@@ -193,8 +254,8 @@
 
     function applyBigAccountManagerPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      state.currencyOptions = ['USD', 'HKD', 'CNY', 'EUR', 'JPY'];
-      openModal(createBigAccountManagerDialog({
+      configurationPreview.currencies(['USD', 'HKD', 'CNY', 'EUR', 'JPY']);
+      openModal(() => createBigAccountManagerDialog({
         bigAccounts: [
           {
             merchantId: '6222000000000001',
@@ -216,10 +277,10 @@
         onCancel: closeModal
       }));
 
-      setTimeout(() => {
-        const addButton = elements.modalRoot.querySelector('.big-account-card [data-action="add"]');
+      setTimeout((previewRoot) => {
+        const addButton = previewRoot.querySelector('.big-account-card [data-action="add"]');
         addButton?.click();
-        const rows = Array.from(elements.modalRoot.querySelectorAll('tr[data-big-account-row]'));
+        const rows = Array.from(previewRoot.querySelectorAll('tr[data-big-account-row]'));
         const lastRow = rows[rows.length - 1];
         if (!lastRow) {
           return;
@@ -241,8 +302,8 @@
     function applyBigAccountManagerDropdownPreviewState() {
       applyBigAccountManagerPreviewState();
 
-      setTimeout(() => {
-        const rows = Array.from(elements.modalRoot.querySelectorAll('tr[data-big-account-row]'));
+      setTimeout((previewRoot) => {
+        const rows = Array.from(previewRoot.querySelectorAll('tr[data-big-account-row]'));
         const targetRow = rows[1];
 
         if (!targetRow) {
@@ -256,7 +317,7 @@
 
     function applyBigAccountSelectionPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      openModal(createBigAccountSelectionDialog([
+      openModal(() => createBigAccountSelectionDialog([
         {
           label: '6222000000000001 / USD',
           merchantId: '6222000000000001',
@@ -274,8 +335,8 @@
         }
       ]));
 
-      setTimeout(() => {
-        const firstOption = elements.modalRoot.querySelector('.big-account-selection-list input[type="radio"]');
+      setTimeout((previewRoot) => {
+        const firstOption = previewRoot.querySelector('.big-account-selection-list input[type="radio"]');
         if (firstOption) {
           firstOption.checked = true;
         }
@@ -288,13 +349,13 @@
     function applyMonthlyBalanceExportDialogPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
       // 准备模板下拉数据（实模板列表，下拉显示）
-      state.templates = [
+      configurationPreview.templates([
         { id: 'preview-template-1', name: 'LusoBank-MO', isParent: false, parentTemplateId: null, bigAccountSummary: '来自账单' },
         { id: 'preview-template-2', name: 'BankABC-HK', isParent: false, parentTemplateId: null, bigAccountSummary: '未设置' },
         { id: 'preview-template-3', name: 'PingPong-US', isParent: false, parentTemplateId: null, bigAccountSummary: '62220000000000012345' },
         { id: 'preview-template-4', name: 'HSBC-SG', isParent: false, parentTemplateId: null, bigAccountSummary: '3个' }
-      ];
-      openModal(createMonthlyBalanceExportDialog({ onAssembleReady: () => {} }));
+      ]);
+      openModal(() => createMonthlyBalanceExportDialog({ onAssembleReady: () => {} }));
     }
 
     // 2. 余额种子人工录入对话框（v1.5.x，资金链路）
@@ -307,13 +368,13 @@
         queueIndex: 1,
         queueTotal: 3
       };
-      openModal(createManualBalanceSeedDialog(prompt, { billDate: '2026-03-31', endBalance: '12345.67' }));
+      openModal(() => createManualBalanceSeedDialog(prompt, { billDate: '2026-03-31', endBalance: '12345.67' }));
     }
 
     // 3. 余额管理（addon manager）对话框（v1.5.x，资金链路）
     function applyBalanceAddonManagerPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      openModal(createBalanceAddonManagerDialog({
+      openModal(() => createBalanceAddonManagerDialog({
         templateName: 'HSBC-SG',
         bigAccounts: [
           { merchantId: '6222000000000001', currencies: ['USD'], isMultiCurrency: false },
@@ -327,13 +388,13 @@
     // 4. 导出范围选择对话框（v1.4.x）
     function applyExportScopeDialogPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      openModal(createExportScopeDialog('detail'));
+      openModal(() => createExportScopeDialog('detail'));
     }
 
     // 5. 发生额规则管理对话框（v1.4.9）
     function applyAmountSplitRulesDialogPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      openModal(createAmountSplitRulesDialog({
+      openModal(() => createAmountSplitRulesDialog({
         template: {
           id: 'preview-template-4',
           name: 'HSBC-SG',
@@ -352,7 +413,7 @@
     // 6. 账单拆分行配置对话框（v1.4.9）
     function applyBillSplitRowsDialogPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      openModal(createBillSplitRowsDialog({
+      openModal(() => createBillSplitRowsDialog({
         template: {
           id: 'preview-template-4',
           name: 'HSBC-SG',
@@ -393,7 +454,7 @@
     // 7. 账单拆分映射关系对话框（v1.4.9）
     function applyBillSplitMappingsDialogPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      openModal(createBillSplitMappingsDialog({
+      openModal(() => createBillSplitMappingsDialog({
         template: {
           id: 'preview-template-4',
           name: 'HSBC-SG',
@@ -421,7 +482,7 @@
     // 8. 大账号顺序不匹配提示对话框（v1.5.0）
     function applyRememberOrderMismatchDialogPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      openModal(createRememberOrderMismatchDialog({
+      openModal(() => createRememberOrderMismatchDialog({
         message: '已记住的大账号顺序与当前导入文件不匹配（A.xlsx：账户号 6222...01 vs 已记 9558...08），请选择处理方式。',
         bigAccountResult: {
           accounts: [
@@ -435,7 +496,7 @@
     // 9. 账户映射迁移对话框（v1.5.1）
     function applyAccountMappingMigrationDialogPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      openModal(createAccountMappingMigrationDialog({
+      openModal(() => createAccountMappingMigrationDialog({
         rows: [
           { bankAccountId: '6222000000000001', clearingAccountId: 'CLEAR_001', currency: 'USD' },
           { bankAccountId: '9558800000000008', clearingAccountId: 'CLEAR_002', currency: 'HKD' },
@@ -478,28 +539,24 @@
     ];
 
     // 10. Pending 主面板（对账完成态）
-    function applyPendingPanelPreviewState() {
-      setCurrentModule(MODULES.pendingReconciliation.id);
-      state.pending.rule = PENDING_PREVIEW_RULE;
-      state.pending.months = PENDING_PREVIEW_MONTHS.slice();
-      state.pending.latestRunId = 2;
-      state.pending.latestRunResult =
-        '对账完成：2026-03 vs 2026-02 找出 10 条差异（5 新增 / 3 消失 / 2 变更），可点击"导出差异"另存。';
-      rendererPending.refreshPendingUi();
+    async function applyPendingPanelPreviewState() {
+      if (!await navigatePreviewReady(MODULES.pendingReconciliation.id)) return;
+
+      rendererPending.applyPreviewState({ rule: PENDING_PREVIEW_RULE, months: PENDING_PREVIEW_MONTHS.slice(), latestRunId: 2, latestRunResult: '对账完成：2026-03 vs 2026-02 找出 10 条差异（5 新增 / 3 消失 / 2 变更），可点击"导出差异"另存。' });
     }
 
     // 11. 规则管理对话框
-    function applyPendingRuleDialogPreviewState() {
-      setCurrentModule(MODULES.pendingReconciliation.id);
-      openModal(rendererPending.buildRuleDialogNode({
+    async function applyPendingRuleDialogPreviewState() {
+      if (!await navigatePreviewReady(MODULES.pendingReconciliation.id)) return;
+      openModal(() => rendererPending.buildRuleDialogNode({
         columns: PENDING_PREVIEW_COLUMNS,
         currentRule: PENDING_PREVIEW_RULE
       }));
     }
 
     // 12. 规则确认对话框
-    function applyPendingRuleConfirmPreviewState() {
-      setCurrentModule(MODULES.pendingReconciliation.id);
+    async function applyPendingRuleConfirmPreviewState() {
+      if (!await navigatePreviewReady(MODULES.pendingReconciliation.id)) return;
       const matchFields = PENDING_PREVIEW_RULE.matchFields;
       const compareFields = PENDING_PREVIEW_RULE.compareFields;
       const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -507,7 +564,7 @@
         '<strong>请确认筛选的字段：</strong><br><br>' +
         `<div>对账字段 (${matchFields.length}): ${matchFields.map(esc).join('、')}</div>` +
         `<div>对账内容 (${compareFields.length}): ${compareFields.map(esc).join('、')}</div>`;
-      openModal(createConfirmDialog({
+      openModal(() => createConfirmDialog({
         message,
         confirmText: '确认',
         cancelText: '取消',
@@ -516,18 +573,18 @@
     }
 
     // 13. 导入月份选择
-    function applyPendingImportMonthPreviewState() {
-      setCurrentModule(MODULES.pendingReconciliation.id);
-      openModal(rendererPending.buildImportMonthDialog({
+    async function applyPendingImportMonthPreviewState() {
+      if (!await navigatePreviewReady(MODULES.pendingReconciliation.id)) return;
+      openModal(() => rendererPending.buildImportMonthDialog({
         onConfirm: () => {},
         onCancel: () => {}
       }));
     }
 
     // 14. 对账月份选择（开始运行）
-    function applyPendingReconcilePreviewState() {
-      setCurrentModule(MODULES.pendingReconciliation.id);
-      openModal(rendererPending.buildReconcileDialog({
+    async function applyPendingReconcilePreviewState() {
+      if (!await navigatePreviewReady(MODULES.pendingReconciliation.id)) return;
+      openModal(() => rendererPending.buildReconcileDialog({
         months: PENDING_PREVIEW_MONTHS,
         defaultUpper: '2026-02',
         defaultLower: '2026-03',
@@ -537,9 +594,9 @@
     }
 
     // 15. 导出差异 run 选择
-    function applyPendingExportRunsPreviewState() {
-      setCurrentModule(MODULES.pendingReconciliation.id);
-      openModal(rendererPending.buildExportDialog({
+    async function applyPendingExportRunsPreviewState() {
+      if (!await navigatePreviewReady(MODULES.pendingReconciliation.id)) return;
+      openModal(() => rendererPending.buildExportDialog({
         allRuns: PENDING_PREVIEW_RUNS,
         onConfirm: () => {},
         onCancel: () => {}
@@ -549,33 +606,24 @@
     // ========== 2026-04-24 补：9 张历史遗漏 preview ==========
 
     // 16. Pending 主面板 · 初始态（未设规则 / 未导入）
-    function applyPendingPanelInitialPreviewState() {
-      setCurrentModule(MODULES.pendingReconciliation.id);
-      state.pending.rule = null;
-      state.pending.months = [];
-      state.pending.latestRunResult = null;
-      state.pending.latestRunId = null;
-      rendererPending.refreshPendingUi();
+    async function applyPendingPanelInitialPreviewState() {
+      if (!await navigatePreviewReady(MODULES.pendingReconciliation.id)) return;
+
+      rendererPending.applyPreviewState({ rule: null, months: [], latestRunResult: null, latestRunId: null });
     }
 
     // 17. Pending 主面板 · 导入中
-    function applyPendingPanelImportingPreviewState() {
-      setCurrentModule(MODULES.pendingReconciliation.id);
-      state.pending.rule = PENDING_PREVIEW_RULE;
-      state.pending.months = ['2026-01', '2026-02'];
-      state.pending.importing = true;
-      state.pending.currentYearMonth = '2026-03';
-      state.pending.importingText = '正在导入 2026-03：pending-account-2026-03.xlsx（已处理 123456 行）';
-      rendererPending.refreshPendingUi();
+    async function applyPendingPanelImportingPreviewState() {
+      if (!await navigatePreviewReady(MODULES.pendingReconciliation.id)) return;
+
+      rendererPending.applyPreviewState({ rule: PENDING_PREVIEW_RULE, months: ['2026-01', '2026-02'], importing: true, currentYearMonth: '2026-03', importingText: '正在导入 2026-03：pending-account-2026-03.xlsx（已处理 123456 行）' });
     }
 
     // 18. Pending 主面板 · 报错态（点击导出报错文件）
-    function applyPendingPanelErrorPreviewState() {
-      setCurrentModule(MODULES.pendingReconciliation.id);
-      state.pending.rule = PENDING_PREVIEW_RULE;
-      state.pending.errorReportAvailable = true;
-      state.pending.errorMessage = '表头字段不一致，请检查并重新导入';
-      rendererPending.refreshPendingUi();
+    async function applyPendingPanelErrorPreviewState() {
+      if (!await navigatePreviewReady(MODULES.pendingReconciliation.id)) return;
+
+      rendererPending.applyPreviewState({ rule: PENDING_PREVIEW_RULE, errorReportAvailable: true, errorMessage: '表头字段不一致，请检查并重新导入' });
     }
 
     // 19. 顶部模块切换菜单展开态
@@ -587,12 +635,12 @@
     // 20. 新开账户 · 多行模式
     function applyNewAccountMultiPreviewState() {
       applyNewAccountPreviewState();
-      setTimeout(() => {
+      setTimeout((previewRoot) => {
         if (!elements.newAccountAddRowBtn) return;
         elements.newAccountAddRowBtn.click();
-        setTimeout(() => {
+        setTimeout((previewRoot) => {
           elements.newAccountAddRowBtn.click();
-          setTimeout(() => {
+          setTimeout((previewRoot) => {
             // 填第 2 行数据以便视觉区分
             const rows = elements.newAccountRows
               ? Array.from(elements.newAccountRows.querySelectorAll('[data-new-account-row="true"]'))
@@ -627,7 +675,7 @@
     // 21. 新开账户 · 币种下拉展开态
     function applyNewAccountCurrencyDropdownPreviewState() {
       applyNewAccountPreviewState();
-      setTimeout(() => {
+      setTimeout((previewRoot) => {
         const dropdownBtn = elements.newAccountCurrencyDropdownBtn;
         if (dropdownBtn) dropdownBtn.click();
       }, 80);
@@ -636,7 +684,7 @@
     // 22. 多文件大账号选择对话框（split 双栏模式）
     function applyBigAccountSelectionMultiPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      state.currencyOptions = ['USD', 'HKD', 'CNY', 'EUR', 'JPY', 'SGD'];
+      configurationPreview.currencies(['USD', 'HKD', 'CNY', 'EUR', 'JPY', 'SGD']);
       const rows = [
         { index: 0, fileIndex: 0, fileName: 'HSBC-SG-2026-03.xlsx', sourceRowNumber: 1 },
         { index: 1, fileIndex: 1, fileName: 'HSBC-SG-2026-03-block2.xlsx', sourceRowNumber: 1 },
@@ -644,7 +692,7 @@
         { index: 3, fileIndex: 3, fileName: 'PingPong-US-2026-03.xlsx', sourceRowNumber: 1 },
         { index: 4, fileIndex: 4, fileName: 'LusoBank-MO-2026-03-verylongfilename-extra.xlsx', sourceRowNumber: 1 }
       ];
-      openModal(createBigAccountSelectionDialog({
+      openModal(() => createBigAccountSelectionDialog({
         rows,
         rowsWithEmptyBlocks: rows,
         expandedBigAccountOptions: [
@@ -668,7 +716,7 @@
     //   若 R6c B3 之后仍发现 ≥20 文件 无滚动条，dev 阶段在此 preview 上 DevTools 调试
     function applyBigAccountSelectionMultiLargePreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      state.currencyOptions = ['USD', 'HKD', 'CNY', 'EUR', 'JPY', 'SGD'];
+      configurationPreview.currencies(['USD', 'HKD', 'CNY', 'EUR', 'JPY', 'SGD']);
       const rows = [];
       for (let i = 0; i < 20; i++) {
         rows.push({
@@ -678,7 +726,7 @@
           sourceRowNumber: 1
         });
       }
-      openModal(createBigAccountSelectionDialog({
+      openModal(() => createBigAccountSelectionDialog({
         rows,
         rowsWithEmptyBlocks: rows,
         expandedBigAccountOptions: [
@@ -783,12 +831,12 @@
     // 24. 账户映射对话框 · 编辑行态
     function applyAccountMappingEditingPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      state.currencyOptions = ['USD', 'HKD', 'CNY', 'EUR'];
-      state.templates = [
+      configurationPreview.currencies(['USD', 'HKD', 'CNY', 'EUR']);
+      configurationPreview.templates([
         { id: 'preview-template-4', name: 'HSBC-SG', isParent: false, parentTemplateId: null, bigAccountSummary: '3个' }
-      ];
-      openModal(createAccountMappingDialog({
-        templates: state.templates,
+      ]);
+      openModal(() => createAccountMappingDialog({
+        templates: configurationPreview.getTemplates(),
         selectedTemplateId: 'preview-template-4',
         mappings: [
           { bankAccountId: '6222000000000001', clearingAccountId: 'CLEAR_001', currency: 'USD', noCurrency: false },
@@ -798,18 +846,18 @@
         onDone: () => {},
         onCancel: closeModal
       }));
-      setTimeout(() => {
-        const editBtn = elements.modalRoot.querySelector('.account-mapping-action-cell .text-action');
+      setTimeout((previewRoot) => {
+        const editBtn = previewRoot.querySelector('.account-mapping-action-cell .text-action');
         if (editBtn) editBtn.click();
       }, 120);
     }
 
     // v3.0.12 功能2（批A）：账户映射管理弹窗 preview（「链接表管理」左下角入口打开的全局对照表弹窗）。
-    //   弹窗自管 overlay（createOverlay 返回 .modal-overlay）；openModal 先清 modalRoot 再挂这层 overlay = 单层无双壳。
-    //   打开即异步拉列表（preview 临时库为空 → 渲染空表 + 末行「新增」+ 三列表头「中台调拨单账户号/清结算系统银行账号/执行操作」）。
+    //   由同一 modalHost 挂载；列表读取在 onMount 开始，关闭后的读取不会改动新窗口。
+    //   打开后异步拉列表（preview 临时库为空 → 渲染空表 + 末行「新增」+ 三列表头「中台调拨单账户号/清结算系统银行账号/执行操作」）。
     function applyFundTransferAccountMappingPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
-      openModal(createFundTransferAccountMappingDialog());
+      return openModal(() => createFundTransferAccountMappingDialog());
     }
 
     // v2.0.0-beta.3：银行对账单处理模块主面板
@@ -821,7 +869,7 @@
     // v3.0.8 需求2（W6）：默认打开即两组三角折叠收纳态（▶ 资金性质校验 / ▶ 中台订单数据处理）+ C3 已退役不显示。
     function applyScenariosManagerPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
-      setTimeout(() => {
+      setTimeout((previewRoot) => {
         if (elements.bankStatementScenarioBtn) {
           elements.bankStatementScenarioBtn.click();
         }
@@ -833,12 +881,12 @@
     //   依赖：迁移 seed 的 builtin-fixed 场景（migrations.js 启动幂等 seed），preview 临时库也会有该行。
     function applyBuiltinFixedChannelManagePreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
-      setTimeout(() => {
+      setTimeout((previewRoot) => {
         if (!elements.bankStatementScenarioBtn) return;
         elements.bankStatementScenarioBtn.click();
-        setTimeout(() => {
-          const manageBtn = elements.modalRoot
-            ? elements.modalRoot.querySelector('tr[data-category="builtin-fixed"] [data-row-action="manage"]')
+        setTimeout((previewRoot) => {
+          const manageBtn = previewRoot
+            ? previewRoot.querySelector('tr[data-category="builtin-fixed"] [data-row-action="manage"]')
             : null;
           if (manageBtn) manageBtn.click();
         }, 240);
@@ -851,11 +899,11 @@
     //   依赖：migrations.js seed 的 R5s2 builtin-fixed 场景（preview 临时库幂等 seed 也会有该行）。
     function applyBuiltinFixedChannelManagePaymentPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
-      setTimeout(() => {
+      setTimeout((previewRoot) => {
         if (!elements.bankStatementScenarioBtn) return;
         elements.bankStatementScenarioBtn.click();
-        setTimeout(() => {
-          const root = elements.modalRoot;
+        setTimeout((previewRoot) => {
+          const root = previewRoot;
           if (!root) return;
           // 按场景名称列定位「中台调拨订单对账ID回填」行（builtin-fixed + fund-transfer-backfill）
           let targetManageBtn = null;
@@ -868,8 +916,8 @@
           if (!targetManageBtn) return;
           targetManageBtn.click();
           // 弹窗加载 config 是异步（scenarios.get）→ 等加载完成（payment 行 gating 显示）后再勾选 + 填值
-          setTimeout(() => {
-            const dialogRoot = elements.modalRoot;
+          setTimeout((previewRoot) => {
+            const dialogRoot = previewRoot;
             if (!dialogRoot) return;
             const check = dialogRoot.querySelector('input[data-field="payment-offline-enabled"]');
             if (check && !check.checked) {
@@ -890,11 +938,11 @@
     // v3.0.17：中台退款订单回填管理页，展示银行打款流水号模糊匹配开关。
     function applyBuiltinFixedChannelManageRefundPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
-      setTimeout(() => {
+      setTimeout((previewRoot) => {
         if (!elements.bankStatementScenarioBtn) return;
         elements.bankStatementScenarioBtn.click();
-        setTimeout(() => {
-          const root = elements.modalRoot;
+        setTimeout((previewRoot) => {
+          const root = previewRoot;
           if (!root) return;
           let targetManageBtn = null;
           root.querySelectorAll('tr[data-category="builtin-fixed"]').forEach((tr) => {
@@ -905,9 +953,9 @@
           });
           if (!targetManageBtn) return;
           targetManageBtn.click();
-          setTimeout(() => {
-            const check = elements.modalRoot
-              ? elements.modalRoot.querySelector('input[data-field="bank-payment-serial-fuzzy-enabled"]')
+          setTimeout((previewRoot) => {
+            const check = previewRoot
+              ? previewRoot.querySelector('input[data-field="bank-payment-serial-fuzzy-enabled"]')
               : null;
             if (check) check.checked = true;
           }, 360);
@@ -918,7 +966,7 @@
     // v2.1.14 C：链接表管理弹窗 preview（切到资金对账数据处理模块 → 点「链接表管理」按钮打开弹窗）
     function applyLinkedTableManagerPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
-      setTimeout(() => {
+      setTimeout((previewRoot) => {
         if (elements.bankStatementLinkedTableBtn) {
           elements.bankStatementLinkedTableBtn.click();
         }
@@ -928,11 +976,11 @@
     // v3.0.14：临时链接表管理首页 preview。复用正式入口，并填入稳定样例日期避免依赖本机临时库。
     function applyPreFundTempManagerPreviewState() {
       setCurrentModule(MODULES.preFundReconciliation.id);
-      setTimeout(() => {
+      setTimeout((previewRoot) => {
         if (!elements.preFundReconciliationTempManagerBtn) return;
         elements.preFundReconciliationTempManagerBtn.click();
-        setTimeout(() => {
-          const root = elements.modalRoot;
+        setTimeout((previewRoot) => {
+          const root = previewRoot;
           if (!root) return;
           const rows = root.querySelectorAll('tbody tr[data-source-type]');
           const previewValues = [
@@ -954,8 +1002,8 @@
     // v3.0.16：临时 MPT 明细错误失败页 preview，验证三操作按钮及长文案布局。
     function applyPreFundTempImportFailurePreviewState() {
       setCurrentModule(MODULES.preFundReconciliation.id);
-      setTimeout(() => {
-        openModal(createConfirmDialog({
+      setTimeout((previewRoot) => {
+        openModal(() => createConfirmDialog({
           message: '成功导入 <b>1</b> 张，失败 <b>2</b> 张<br/><br/>'
             + '失败：<br/>• MPT_INBOUND_GATEWAY_20260708_001.gz：包含 3 条可定位明细错误<br/>'
             + '• MPT_OUTBOUND_GATEWAY_20260708_002.gz：包含 1 条可定位明细错误<br/><br/>'
@@ -970,15 +1018,15 @@
     // v3.0.14：临时链接表按日期删除框 preview，使用与既有链接表删除框相同的已填日期状态。
     function applyPreFundTempDeleteRangePreviewState() {
       setCurrentModule(MODULES.preFundReconciliation.id);
-      setTimeout(() => {
+      setTimeout((previewRoot) => {
         if (!elements.preFundReconciliationTempManagerBtn) return;
         elements.preFundReconciliationTempManagerBtn.click();
-        setTimeout(() => {
-          const deleteBtn = elements.modalRoot && elements.modalRoot.querySelector('[data-action="delete"]');
+        setTimeout((previewRoot) => {
+          const deleteBtn = previewRoot && previewRoot.querySelector('[data-action="delete"]');
           if (!deleteBtn) return;
           deleteBtn.click();
-          setTimeout(() => {
-            const root = elements.modalRoot;
+          setTimeout((previewRoot) => {
+            const root = previewRoot;
             if (!root) return;
             const startInput = root.querySelector('[data-role="start"]');
             const endInput = root.querySelector('[data-role="end"]');
@@ -997,10 +1045,10 @@
     //   preview 直接写 DOM 置删除按钮可用态（contextBridge 暴露的 desktopApi 已冻结，无法 mock 计数接口）。
     function applyLinkedTableDeleteRangePreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
-      setTimeout(() => {
-        openModal(createLinkedTableDeleteRangeDialog());
-        setTimeout(() => {
-          const root = elements.modalRoot;
+      setTimeout((previewRoot) => {
+        openModal(() => createLinkedTableDeleteRangeDialog());
+        setTimeout((previewRoot) => {
+          const root = previewRoot;
           if (!root) return;
           const startInput = root.querySelector('[data-role="start"]');
           const endInput = root.querySelector('[data-role="end"]');
@@ -1016,8 +1064,8 @@
     // v3.0.1 需求3：网关对账单修复场景单选框 preview（多场景示例，便于截图体现单选样式）。
     function applyGatewayReconScenarioPickerPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
-      setTimeout(() => {
-        openModal(createGatewayReconScenarioPickerDialog({
+      setTimeout((previewRoot) => {
+        openModal(() => createGatewayReconScenarioPickerDialog({
           scenarios: [
             { id: 1, name: '场景示例 A' },
             { id: 2, name: '场景示例 B' },
@@ -1031,12 +1079,12 @@
     // v2.0.0-beta.3：类别选择弹窗
     function applyScenarioCategorySelectPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
-      setTimeout(() => {
+      setTimeout((previewRoot) => {
         if (elements.bankStatementScenarioBtn) {
           elements.bankStatementScenarioBtn.click();
-          setTimeout(() => {
-            const addBtn = elements.modalRoot
-              ? elements.modalRoot.querySelector('[data-action="add-scenario"]')
+          setTimeout((previewRoot) => {
+            const addBtn = previewRoot
+              ? previewRoot.querySelector('[data-action="add-scenario"]')
               : null;
             if (addBtn) addBtn.click();
           }, 240);
@@ -1048,7 +1096,7 @@
     // v2.1.7 F1：默认无 conditionsLogic 字段 → dialog 渲染 OR radio 默认选中（fallback 行为 baseline）
     function applyScenarioConfigC1PreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
-      state.scenarioDraft = {
+      applyScenarioPreviewDraft({
         mode: 'create',
         category: 'extract-recon-id',
         scenarioId: null,
@@ -1068,16 +1116,16 @@
           },
           extractByOtherField: null
         }
-      };
-      setTimeout(() => {
-        openModal(createScenarioConfigDialogC1());
+      });
+      setTimeout((previewRoot) => {
+        openModal(() => createScenarioConfigDialogC1());
       }, 120);
     }
 
     // v2.1.7 F1：C1 dialog AND 模式 preview（conditionsLogic='AND' 显式注入，截图验证 AND radio 选中）
     function applyScenarioConfigC1AndPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
-      state.scenarioDraft = {
+      applyScenarioPreviewDraft({
         mode: 'create',
         category: 'extract-recon-id',
         scenarioId: null,
@@ -1098,9 +1146,9 @@
           },
           extractByOtherField: null
         }
-      };
-      setTimeout(() => {
-        openModal(createScenarioConfigDialogC1());
+      });
+      setTimeout((previewRoot) => {
+        openModal(() => createScenarioConfigDialogC1());
       }, 120);
     }
 
@@ -1109,7 +1157,7 @@
       // v2.1.11 T3（spec §4.1 D-T3-1a=AND）：billTypes 改多条件 conditions 结构
       //   类型 #1 演示「多条件 AND」（FundType=outbound Fail 且 Currency=USD），类型 #2 单条件
       //   FundType 字段值在弹窗内会渲染为严格枚举下拉（来自 assets/FundType枚举值.xlsx，经 IPC 拉取）
-      state.scenarioDraft = {
+      applyScenarioPreviewDraft({
         mode: 'create',
         category: 'offset-bill-mark',
         scenarioId: null,
@@ -1131,15 +1179,15 @@
           ],
           markValue: { type: 2, field: 'FundType', value: 'outbound Fail' }
         }
-      };
-      setTimeout(() => {
-        openModal(createScenarioConfigDialogC2());
+      });
+      setTimeout((previewRoot) => {
+        openModal(() => createScenarioConfigDialogC2());
       }, 120);
     }
 
     function applyScenarioConfigC3PreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
-      state.scenarioDraft = {
+      applyScenarioPreviewDraft({
         mode: 'create',
         category: 'gateway-recon-join',
         scenarioId: null,
@@ -1161,9 +1209,9 @@
           ],
           assign: { gwField: 'reconciliationId', bankField: 'ReconciliationId' }
         }
-      };
-      setTimeout(() => {
-        openModal(createScenarioConfigDialogC3());
+      });
+      setTimeout((previewRoot) => {
+        openModal(() => createScenarioConfigDialogC3());
       }, 120);
     }
 
@@ -1171,7 +1219,7 @@
     //   gwField='__CUSTOM__' + customValue 静态字符串 → assign-gw 右侧 input 显示
     function applyScenarioConfigC3CustomPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
-      state.scenarioDraft = {
+      applyScenarioPreviewDraft({
         mode: 'create',
         category: 'gateway-recon-join',
         scenarioId: null,
@@ -1192,16 +1240,16 @@
             customValue: 'AUTO-GEN-RECON-20260526'
           }
         }
-      };
-      setTimeout(() => {
-        openModal(createScenarioConfigDialogC3());
+      });
+      setTimeout((previewRoot) => {
+        openModal(() => createScenarioConfigDialogC3());
       }, 120);
     }
 
     function applyScenarioConfirmDetailPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
       // 预填 C1 配置然后进入确认详情
-      state.scenarioDraft = {
+      applyScenarioPreviewDraft({
         mode: 'create',
         category: 'extract-recon-id',
         scenarioId: null,
@@ -1221,9 +1269,9 @@
           },
           extractByOtherField: null
         }
-      };
-      setTimeout(() => {
-        openModal(createScenarioConfirmDetailDialog());
+      });
+      setTimeout((previewRoot) => {
+        openModal(() => createScenarioConfirmDetailDialog());
       }, 120);
     }
 
@@ -1238,33 +1286,21 @@
     }
 
     // v2.1.0-beta.3 T11：主面板 preview — 账单类别选定 gateway（行 2 wrapper 显示）
-    function applyReconIdFixPanelGatewayPreviewState() {
-      setCurrentModule(MODULES.reconIdFix.id);
-      state.reconIdFixBillCategory = 'gateway';
-      if (elements.reconIdFixBillCategorySelect) {
-        elements.reconIdFixBillCategorySelect.value = 'gateway';
-      }
-      if (typeof updateReconIdFixPanelVisibility === 'function') {
-        updateReconIdFixPanelVisibility();
-      }
+    async function applyReconIdFixPanelGatewayPreviewState() {
+      if (!await navigatePreviewReady(MODULES.reconIdFix.id)) return;
+      deps.reconIdFixPreview.applyCategory('gateway');
     }
 
     // v2.1.0-beta.3 T11：主面板 preview — 账单类别选定 business（行 2 wrapper 显示）
-    function applyReconIdFixPanelBusinessPreviewState() {
-      setCurrentModule(MODULES.reconIdFix.id);
-      state.reconIdFixBillCategory = 'business';
-      if (elements.reconIdFixBillCategorySelect) {
-        elements.reconIdFixBillCategorySelect.value = 'business';
-      }
-      if (typeof updateReconIdFixPanelVisibility === 'function') {
-        updateReconIdFixPanelVisibility();
-      }
+    async function applyReconIdFixPanelBusinessPreviewState() {
+      if (!await navigatePreviewReady(MODULES.reconIdFix.id)) return;
+      deps.reconIdFixPreview.applyCategory('business');
     }
 
     // task A7：C4 配置弹窗 preview — create 模式（默认 1 主 1 从两类）
     function applyScenarioConfigC4PreviewState() {
       setCurrentModule(MODULES.reconIdFix.id);
-      state.scenarioDraft = {
+      applyScenarioPreviewDraft({
         mode: 'create',
         category: 'recon-id-fix',
         scenarioId: null,
@@ -1286,17 +1322,17 @@
             subBizType: { mode: 'auto', mainValue: '', oppValue: '' }
           }
         }
-      };
-      setTimeout(() => {
-        openModal(createScenarioConfigDialogC4());
+      });
+      setTimeout((previewRoot) => {
+        openModal(() => createScenarioConfigDialogC4());
       }, 120);
     }
 
     // v2.1.0-beta.3 T11：C4 dialog preview — gateway 子模式 默认态
     function applyScenarioConfigC4GatewayPreviewState() {
       setCurrentModule(MODULES.reconIdFix.id);
-      state.reconIdFixBillCategory = 'gateway';
-      state.scenarioDraft = {
+      void 0;
+      applyScenarioPreviewDraft({
         mode: 'create',
         category: 'gateway-recon-id-fix',
         scenarioId: null,
@@ -1323,17 +1359,17 @@
             subBizType: { mode: 'auto', mainValue: '', oppValue: '' }
           }
         }
-      };
-      setTimeout(() => {
-        openModal(createScenarioConfigDialogC4());
+      });
+      setTimeout((previewRoot) => {
+        openModal(() => createScenarioConfigDialogC4());
       }, 120);
     }
 
     // v2.1.0-beta.3 T11：C4 dialog preview — gateway 子模式 勾选 1v多 → "网关账单" radio 禁用
     function applyScenarioConfigC4Gateway1vNPreviewState() {
       setCurrentModule(MODULES.reconIdFix.id);
-      state.reconIdFixBillCategory = 'gateway';
-      state.scenarioDraft = {
+      void 0;
+      applyScenarioPreviewDraft({
         mode: 'create',
         category: 'gateway-recon-id-fix',
         scenarioId: null,
@@ -1361,16 +1397,16 @@
             subBizType: { mode: 'auto', mainValue: '', oppValue: '' }
           }
         }
-      };
-      setTimeout(() => {
-        openModal(createScenarioConfigDialogC4());
+      });
+      setTimeout((previewRoot) => {
+        openModal(() => createScenarioConfigDialogC4());
       }, 120);
     }
 
     // task A7：C4 配置弹窗 preview — 主从都修复 + commonId 拼接
     function applyScenarioConfigC4BothPreviewState() {
       setCurrentModule(MODULES.reconIdFix.id);
-      state.scenarioDraft = {
+      applyScenarioPreviewDraft({
         mode: 'create',
         category: 'recon-id-fix',
         scenarioId: null,
@@ -1392,9 +1428,9 @@
             subBizType: { mode: 'auto', mainValue: '', oppValue: '' }
           }
         }
-      };
-      setTimeout(() => {
-        openModal(createScenarioConfigDialogC4());
+      });
+      setTimeout((previewRoot) => {
+        openModal(() => createScenarioConfigDialogC4());
       }, 120);
     }
 
@@ -1402,8 +1438,8 @@
     // round 1 self-review M2：原注释 "name.length 升序" stale（Fix1.5 已改视觉宽度），更新口径
     function applyModuleCabinetPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      setTimeout(() => {
-        openModal(createModuleCabinetDialog({
+      setTimeout((previewRoot) => {
+        openModal(() => createModuleCabinetDialog({
           enabledModules: ['statement-generator', 'bank-statement-process', 'recon-id-fix'],
           allModules: Object.values(MODULES),
           onCommit: async () => true  // preview 不真正落库
@@ -1414,8 +1450,8 @@
     // v3.0.8 需求1：工具箱🧰 主弹框 preview（合并表格行 + 拆分表格行；拆分行 [导出文件] 默认禁用）
     function applyToolboxPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      setTimeout(() => {
-        openModal(createToolboxDialog());
+      setTimeout((previewRoot) => {
+        openModal(() => createToolboxDialog());
       }, 120);
     }
 
@@ -1423,8 +1459,8 @@
     //   onComplete/onCancel preview 不真正回流（仅截图）。
     function applyToolboxSplitFieldPickerPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      setTimeout(() => {
-        openModal(createSplitFieldPickerDialog({
+      setTimeout((previewRoot) => {
+        openModal(() => createSplitFieldPickerDialog({
           headers: ['交易日期', '币种', '对手账号', '摘要'],
           valuesByField: {
             交易日期: ['2026-06-01', '2026-06-02', '2026-06-03'],
@@ -1440,8 +1476,8 @@
 
     function applyToolboxSplitFieldPickerMultiplePreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      setTimeout(() => {
-        const overlay = createMultipleSplitFieldPickerDialog({
+      setTimeout((previewRoot) => {
+        openModal(() => createMultipleSplitFieldPickerDialog({
           headers: ['交易日期', '币种', '对手账号', '摘要'],
           valuesByField: {
             交易日期: ['2026-06-01', '2026-06-02', '2026-06-03'],
@@ -1452,17 +1488,17 @@
           initialGroup: { field: '币种', values: ['USD'] },
           onComplete: () => {},
           onCancel: () => {}
-        });
-        openModal(overlay);
-        setTimeout(() => {
-          const addButton = overlay.querySelector('[data-action="add-group"]');
+        }));
+        setTimeout((previewRoot) => {
+          const addButton = previewRoot.querySelector('[data-action="add-group"]');
           for (let index = 1; index < 8; index += 1) addButton?.click();
-          overlay.querySelector('.toolbox-split-values-dropdown-btn')?.click();
+          previewRoot.querySelector('.toolbox-split-values-dropdown-btn')?.click();
         }, 80);
       }, 120);
     }
 
     return {
+      dispose: disposePreviewTimers,
       applyNewAccountPreviewState,
       applyTemplateManagerPreviewState,
       buildPreviewMappingPayload,
