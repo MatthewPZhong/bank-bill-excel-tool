@@ -19,7 +19,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const RENDERER_PATH = path.join(__dirname, '..', '..', 'src', 'renderer.js');
+const RENDERER_PATH = path.join(__dirname, '..', '..', 'src', 'renderer', 'controllers', 'bank-statement.js');
 const PRELOAD_PATH = path.join(__dirname, '..', '..', 'src', 'preload.js');
 const MAIN_PATH = path.join(__dirname, '..', '..', 'src', 'main.js');
 
@@ -130,7 +130,7 @@ describe('退款导入后提醒：createAlertDialog 单按钮 → createConfirmD
   const importFn = extractFunctionSource(source, 'maybePromptRefundOrderImport');
 
   test('① 改用 createConfirmDialog（导入文件 / 稍后再说），不再用 createAlertDialog 单按钮', () => {
-    assert.ok(importFn.includes('createConfirmDialog'),
+    assert.ok(importFn.includes('return confirm({'),
       'maybePromptRefundOrderImport 应改用 createConfirmDialog');
     const code = stripLineComments(importFn);
     assert.ok(!code.includes('createAlertDialog'),
@@ -142,7 +142,7 @@ describe('退款导入后提醒：createAlertDialog 单按钮 → createConfirmD
   test('① 候选预检门控：本批无退款候选则不弹（refundCandidateCount > 0 才弹）', () => {
     assert.ok(importFn.includes('refundCandidateCount()'),
       'maybePromptRefundOrderImport 应调 refundCandidateCount() 做候选预检');
-    assert.ok(/!\(rc\.candidateCount\s*>\s*0\)\)\s*return false/.test(importFn),
+    assert.ok(/!\(result\.candidateCount\s*>\s*0\)\)\s*return false/.test(importFn),
       '候选预检应在 candidateCount<=0 时 return false（不弹）');
   });
 
@@ -150,7 +150,7 @@ describe('退款导入后提醒：createAlertDialog 单按钮 → createConfirmD
     const idx = importFn.indexOf('onConfirm');
     assert.ok(idx !== -1, 'createConfirmDialog 应带 onConfirm');
     const after = importFn.slice(idx);
-    assert.ok(/closeModal\(\);\s*await\s+handleBankStatementBatchImport\(\);/.test(after),
+    assert.ok(/closeModal\(\);\s*return\s+handleBankStatementBatchImport\(\);/.test(after),
       'onConfirm 应 closeModal() 后调 handleBankStatementBatchImport()（不续跑）');
   });
 });
@@ -170,7 +170,7 @@ describe('退款运行点判据 shouldPromptRefundAtRun（v3.0.0 需求3：仿 s
     const code = stripLineComments(fn);
     assert.ok(!code.includes('state.refundOrderSession'),
       '🔴 PR-4 bug 修订：shouldPromptRefundAtRun 不得再用前端缓存 state.refundOrderSession 作就绪门控（会滞后误判）');
-    assert.ok(fn.includes("s.name === '中台退款订单回填'"),
+    assert.ok(fn.includes("scenario.name === '中台退款订单回填'"),
       '应判退款场景 enabled（name=中台退款订单回填）');
     assert.ok(fn.includes('refundCandidateCount()') && /candidateCount\s*>\s*0/.test(fn),
       '应做退款候选预检（refundCandidateCount > 0）');
@@ -185,7 +185,7 @@ describe('proceedToGwCheck 抽出（v3.0.0 需求3：承载原 C3 dialog#2 逻�
 
   test('⑤ proceedToGwCheck 内承载 C3 运行点逻辑（shouldPromptGatewayReconAtRun + 无提醒则 runBankStatementInternal）', () => {
     const fn = extractFunctionSource(source, 'proceedToGwCheck');
-    assert.ok(fn.includes('shouldPromptGatewayReconAtRun()'),
+    assert.ok(fn.includes('shouldPromptGatewayReconAtRun(generation)'),
       'proceedToGwCheck 应调 shouldPromptGatewayReconAtRun()');
     assert.ok(fn.includes('runBankStatementInternal()'),
       'proceedToGwCheck 无 C3 提醒分支应调 runBankStatementInternal()');
@@ -196,8 +196,8 @@ describe('🔴🔴 运行点链式编排：退款先于 C3、互不吞（v3.0.0 
   const runFn = extractFunctionSource(source, 'handleBankStatementRun');
 
   test('③ handleBankStatementRun 中 shouldPromptRefundAtRun 早于 proceedToGwCheck（退款先于 C3）', () => {
-    const idxRefund = runFn.indexOf('shouldPromptRefundAtRun()');
-    const idxGw = runFn.indexOf('proceedToGwCheck()');
+    const idxRefund = runFn.indexOf('shouldPromptRefundAtRun(generation)');
+    const idxGw = runFn.indexOf('proceedToGwCheck(generation)');
     assert.ok(idxRefund !== -1, 'handleBankStatementRun 应调 shouldPromptRefundAtRun()');
     assert.ok(idxGw !== -1, 'handleBankStatementRun 应调 proceedToGwCheck()');
     assert.ok(idxRefund < idxGw,
@@ -211,8 +211,8 @@ describe('🔴🔴 运行点链式编排：退款先于 C3、互不吞（v3.0.0 
     const onMiddleIdx = runFn.indexOf('onMiddle', refundDialogStart);
     assert.ok(onMiddleIdx !== -1, '退款三选一框应带 onMiddle（直接运行）');
     // onMiddle 回调体到下一个属性/闭合前
-    const onMiddleBody = runFn.slice(onMiddleIdx, runFn.indexOf('}));', onMiddleIdx));
-    assert.ok(onMiddleBody.includes('proceedToGwCheck()'),
+    const onMiddleBody = runFn.slice(onMiddleIdx, runFn.indexOf('}, generation);', onMiddleIdx));
+    assert.ok(onMiddleBody.includes('proceedToGwCheck(generation)'),
       '🔴 退款「直接运行」onMiddle 必须调 proceedToGwCheck()（只跳退款、继续查 C3）');
     assert.ok(!onMiddleBody.includes('runBankStatementInternal()'),
       '🔴 退款「直接运行」onMiddle 不得直接调 runBankStatementInternal()（否则 C3 缺数据被静默跳过 = 漏对账）');
@@ -230,7 +230,7 @@ describe('🔴🔴 运行点链式编排：退款先于 C3、互不吞（v3.0.0 
 
   test('③ 无退款提醒分支：handleBankStatementRun 末尾直接 await proceedToGwCheck()', () => {
     const code = stripLineComments(runFn);
-    assert.ok(/await\s+proceedToGwCheck\(\);/.test(code),
+    assert.ok(/if \(live\(generation\)\) return proceedToGwCheck\(generation\);/.test(code),
       'handleBankStatementRun 无退款提醒时应直接 await proceedToGwCheck()');
   });
 });

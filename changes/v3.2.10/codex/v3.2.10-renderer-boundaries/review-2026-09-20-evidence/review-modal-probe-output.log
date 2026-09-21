@@ -1,0 +1,4 @@
+BILL_SPLIT_PROBE {"inflight":{"calls":2,"buttonDisabled":false,"rootClose":"closed"},"count":0,"errors":[]}
+CABINET_PROBE {"opened":"opened","originalOpen":false,"otherOpen":false,"count":0,"errors":[]}
+ARCHIVE_DEFAULT_PROBE {"default":{"calls":0,"feedback":"批次列表加载失败：Cannot access 'api' before initialization"},"override":{"calls":1,"feedback":""},"errors":[]}
+3/3 defect reproductions confirmed

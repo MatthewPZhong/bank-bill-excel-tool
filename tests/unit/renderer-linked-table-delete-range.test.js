@@ -20,7 +20,7 @@ function extractFunction(startName, endName) {
 test.describe('资金对账链接表删除框标题', () => {
   const linkedDelete = extractFunction(
     'createLinkedTableDeleteRangeDialog',
-    'createScenariosManagerDialog'
+    'createModuleCabinetDialog'
   );
   const preFundDelete = extractFunction(
     'createPreFundTempDeleteRangeDialog',

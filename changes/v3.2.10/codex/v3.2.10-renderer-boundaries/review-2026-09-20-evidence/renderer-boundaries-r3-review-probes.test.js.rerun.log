@@ -1,0 +1,82 @@
+(node:8182) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+select after export true
+bank {
+  main: { bank: false, recon: false },
+  disabled: true,
+  text: '已导出：bank-output.xlsx'
+}
+recon {
+  main: { bank: false, recon: false },
+  disabled: true,
+  text: '已导出 — 主文件 recon-output.xlsx'
+}
+✖ 审查探针：Recon 一次导出后场景选择须恢复 (6.644708ms)
+✖ 审查探针：bank 隐藏期间批删场景，返回清除旧导出反馈 (2.814ms)
+✖ 审查探针：recon 隐藏期间批删场景，返回清除旧导出反馈 (2.023084ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 0
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 114.777875
+
+✖ failing tests:
+
+test at changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/renderer-boundaries-r3-review-probes.test.js:81:1
+✖ 审查探针：Recon 一次导出后场景选择须恢复 (6.644708ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  true !== false
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/renderer-boundaries-r3-review-probes.test.js:87:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/renderer-boundaries-r3-review-probes.test.js:91:3
+✖ 审查探针：bank 隐藏期间批删场景，返回清除旧导出反馈 (2.814ms)
+  AssertionError [ERR_ASSERTION]: 银行已导出反馈按 scope 保留/清除
+  
+  true !== false
+  
+      at assertState (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/renderer-boundaries-r3-review-probes.test.js:77:10)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/renderer-boundaries-r3-review-probes.test.js:102:5)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/renderer-boundaries-r3-review-probes.test.js:91:3
+✖ 审查探针：recon 隐藏期间批删场景，返回清除旧导出反馈 (2.023084ms)
+  AssertionError [ERR_ASSERTION]: Recon 已导出反馈按 scope 保留/清除
+  
+  true !== false
+  
+      at assertState (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/renderer-boundaries-r3-review-probes.test.js:78:10)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/renderer-boundaries-r3-review-probes.test.js:102:5)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

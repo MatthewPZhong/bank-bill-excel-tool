@@ -50,6 +50,7 @@ async function verify() {
     const fixturePath = path.join(process.env.BIZOP_RENDERER_VERIFY_PROFILE, 'renderer-fixture.html');
     fs.writeFileSync(fixturePath, `<!doctype html><html lang="zh-CN"><meta charset="utf-8">${links}<style>body { margin: 24px; } #bizOpV327ModulePanel { max-width: 900px; margin: 0 auto; }</style><body data-style="clear"></body></html>`);
     await win.loadFile(fixturePath);
+    await win.webContents.executeJavaScript(fs.readFileSync(path.join(ROOT, 'src/renderer/modal-host.js'), 'utf8'));
     await win.webContents.executeJavaScript(fs.readFileSync(path.join(ROOT, 'src/renderer-biz-op-v327.js'), 'utf8'));
     const allResults = []; const visualResults = [];
     for (const theme of ['light', 'dark']) {
@@ -123,7 +124,7 @@ async function verify() {
       await win.webContents.executeJavaScript('window.preview.close();');
     }
     const outputDir = process.argv[2] && path.resolve(process.argv[2]);
-    const sourceFiles = ['index.html', 'src/renderer-biz-op-v327.js', 'tests/unit/main-process/biz-op-v329-renderer.test.js', 'scripts/verify-biz-op-v329-renderer-dom.js', ...stylePaths.map((file) => file.replace(/^\.\//, ''))];
+    const sourceFiles = ['index.html', 'src/renderer/modal-host.js', 'src/renderer-biz-op-v327.js', 'tests/unit/main-process/biz-op-v329-renderer.test.js', 'scripts/verify-biz-op-v329-renderer-dom.js', ...stylePaths.map((file) => file.replace(/^\.\//, ''))];
     const viewport = await win.webContents.executeJavaScript('({ width: innerWidth, height: innerHeight, devicePixelRatio })');
     const evidence = { generatedAt: new Date().toISOString(), scope: '隔离 Electron 真实 DOM 与 Controller，API fixture；未启动 Main、未接触业务数据', windowSize: win.getSize(), viewport, webZoom: win.webContents.getZoomFactor(),
       sourceFiles: sourceFiles.map((file) => ({ path: file, sha256: createHash('sha256').update(fs.readFileSync(path.join(ROOT, file))).digest('hex') })), rendererCases: allResults, visualChecks: visualResults };

@@ -1,7 +1,7 @@
 // v2.1.7 round 2 R5 — F1 默认 AND（仅新建）+ 资金红线三层护栏 smoke
 //   spec §8.6 / PRD §十三-R5
 //
-// 不能直接 require src/renderer-dialogs.js（IIFE 闭包；createDefaultScenarioConfig + pickConditionsLogicChecked 都是模块内部）
+// 不能直接 require src/renderer/dialogs/scenarios.js（IIFE 闭包；createDefaultScenarioConfig + pickConditionsLogicChecked 都是模块内部）
 // 改用 spec §8.6.2 / §8.6.4 锁定的等价规则单测 + 源码 grep 防 wiring 漏改
 //
 // 三层护栏（spec §8.6.5，缺一不可）：
@@ -37,7 +37,7 @@ function assertTrue(cond, label) {
   }
 }
 
-// spec §8.6.4 等价实现（与 src/renderer-dialogs.js pickConditionsLogicChecked 完全等价）
+// spec §8.6.4 等价实现（与 src/renderer/dialogs/scenarios.js pickConditionsLogicChecked 完全等价）
 function pickConditionsLogicChecked(draft) {
   const mode = draft && draft.mode;
   const cfg = (draft && draft.config) || {};
@@ -52,7 +52,7 @@ function pickConditionsLogicChecked(draft) {
 //   通过 grep 源码字符串验证（IIFE 闭包不能 require）
 // =====================================================================
 function caseR5A_defaultConfigAnd() {
-  const dialogsSrc = fs.readFileSync(path.join(__dirname, '../../src/renderer-dialogs.js'), 'utf-8');
+  const dialogsSrc = fs.readFileSync(path.join(__dirname, '../../src/renderer/dialogs/scenarios.js'), 'utf-8');
   // 在 createDefaultScenarioConfig 'extract-recon-id' 分支中含 conditionsLogic: 'AND'
   const extractBranch = dialogsSrc.match(/if \(category === 'extract-recon-id'\) \{[\s\S]+?return \{[\s\S]+?\};\s*\}/);
   assertTrue(extractBranch !== null, 'R5-A 找到 createDefaultScenarioConfig extract-recon-id 分支');
@@ -183,7 +183,7 @@ function caseR5E_engineFallbackOr() {
 // R5-WIRING：源码 wiring 防漏改断言（三层护栏验证）
 // =====================================================================
 function caseR5_wiringGrep() {
-  const dialogsSrc = fs.readFileSync(path.join(__dirname, '../../src/renderer-dialogs.js'), 'utf-8');
+  const dialogsSrc = fs.readFileSync(path.join(__dirname, '../../src/renderer/dialogs/scenarios.js'), 'utf-8');
   const engineSrc = fs.readFileSync(path.join(__dirname, '../../src/main-process/scenario-engines/c1-extract-recon-id.js'), 'utf-8');
 
   // 1. dialog 含 pickConditionsLogicChecked 函数定义

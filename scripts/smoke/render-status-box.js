@@ -7,6 +7,22 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const acorn = require('acorn');
+
+const readSource = (relative) => fs.readFileSync(path.join(__dirname, '../../src', relative), 'utf-8');
+function findFunction(source, name) {
+  let found = null;
+  function visit(node) {
+    if (!node || typeof node !== 'object' || found) return;
+    if (node.type === 'FunctionDeclaration' && node.id.name === name) { found = source.slice(node.start, node.end); return; }
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) value.forEach(visit);
+      else if (value && typeof value === 'object') visit(value);
+    }
+  }
+  visit(acorn.parse(source, { ecmaVersion: 'latest' }));
+  return found;
+}
 
 let passed = 0;
 let failed = 0;
@@ -119,9 +135,9 @@ function caseR3_wiringGrep() {
     'R3-7-2b styles-gemini-extra.css .status-box-text { white-space: pre-wrap }（实际生效路径）');
   // 3. setBizOpReconStatus hack 已删（不再含 innerHTML = formatBizOpReconStatusHtml）
   //   函数内已不应有 textEl.innerHTML 调用
-  const setBizOpFnMatch = rendererSrc.match(/function setBizOpReconStatus[\s\S]+?^}/m);
-  assertTrue(setBizOpFnMatch && !/innerHTML\s*=\s*formatBizOpReconStatusHtml/.test(setBizOpFnMatch[0]),
-    'R3-7-3 setBizOpReconStatus 函数内 hack 已删');
+  const bizRender = findFunction(readSource('renderer/controllers/biz-op-legacy.js'), 'render');
+  assertTrue(bizRender && !/innerHTML\s*=\s*formatBizOpReconStatusHtml/.test(bizRender),
+    'R3-7-3 BizOP 当前 render 内旧状态框 HTML hack 已删');
   // 4. formatBizOpReconStatusHtml 函数定义仍在（renderer-dialogs.js preview 内部用）
   assertTrue(/function formatBizOpReconStatusHtml\(/.test(dialogsSrc),
     'R3-7-4 formatBizOpReconStatusHtml 函数定义保留（preview 仍用）');
@@ -186,17 +202,34 @@ function caseB5_wiringAudit() {
   // 5. spec §9.6.1 验证 3 个 'setXxxStatus' / 'updateXxxUi' 全部走 updateStatusBox
   //   grep 函数体内必须含 'updateStatusBox(' 调用
   const targetFns = [
-    { name: 'setBizOpReconStatus', label: 'B5-4 setBizOpReconStatus' },
-    { name: 'setAcquiringBillCurrencyStatus', label: 'B5-4 setAcquiringBillCurrencyStatus' },
-    { name: 'updateBankStatementUi', label: 'B5-4 updateBankStatementUi' },
-    { name: 'updateReconIdFixUi', label: 'B5-4 updateReconIdFixUi' }
+    { file: 'biz-op-legacy.js', name: 'render', call: /ui\.status\(/, label: '业务 OP 状态投影' },
+    { file: 'acquiring.js', name: 'render', call: /ui\.status\(/, label: '收单币种状态投影' },
+    { file: 'bank-statement.js', name: 'updateBankStatementUi', call: /updateStatusBox\(/, label: '银行对账状态投影' },
+    { file: 'recon-id-fix.js', name: 'updateReconIdFixUi', call: /updateStatusBox\(/, label: 'ReconID 状态投影' }
   ];
-  for (const tf of targetFns) {
-    const reFn = new RegExp(`function ${tf.name}\\([\\s\\S]+?^}`, 'm');
-    const m = rendererSrc.match(reFn);
-    assertTrue(m && /updateStatusBox\(/.test(m[0]),
-      `${tf.label} 函数体内调用 updateStatusBox（防 B5 漏接回归）`);
+  for (const target of targetFns) {
+    const controller = readSource(`renderer/controllers/${target.file}`);
+    const body = findFunction(controller, target.name);
+    const projection = target.name === 'render' ? body : findFunction(controller, 'updateStatusBox');
+    const writer = target.name === 'render' ? body : findFunction(controller, 'writeStatusBox');
+    // RR02 将临时读取错误与业务反馈分开保存，二者最终仍透传同一格式化入口。
+    const reachesFormatter = target.name === 'render'
+      ? /ui\.status\(/.test(projection || '')
+      : /writeStatusBox\(element, text, tone\)/.test(projection || '')
+        && /ui\.status\(element, text, tone\)/.test(writer || '');
+    assertTrue(body && target.call.test(body) && reachesFormatter,
+      `B5-4 ${target.label} 经注入的 ui.status 保持全局格式化`);
   }
+  // G3 移植后控制器持有局部 UI 方法，根 composition 必须仍注入同一格式化入口。
+  assertTrue(/const ui = \{ modalHost: domainModalHost, status: updateStatusBox/.test(rendererSrc)
+    && /createBankStatementController\([\s\S]*?sharedReconSession, ui/.test(rendererSrc)
+    && /createReconIdFixController\([\s\S]*?sharedReconSession, ui/.test(rendererSrc),
+  'B5-5 Bank/Recon 两域的 ui.status 注入全局 updateStatusBox');
+  assertTrue(/const domainUi = \{ modalHost, modalBridge, status: updateStatusBox/.test(rendererSrc)
+    && /createBizOpLegacyController\([\s\S]*?ui: \{ \.\.\.domainUi/.test(rendererSrc)
+    && /createAcquiringController\([\s\S]*?ui: \{ \.\.\.domainUi/.test(rendererSrc),
+  'B5-6 BizOP/收单两域的 ui.status 注入全局 updateStatusBox');
+
 }
 
 function runRenderStatusBoxSmokeTests() {

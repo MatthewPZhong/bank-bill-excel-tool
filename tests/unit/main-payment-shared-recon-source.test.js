@@ -7,7 +7,7 @@ const path = require('node:path');
 
 const mainPath = path.join(__dirname, '..', '..', 'src', 'main.js');
 const source = fs.readFileSync(mainPath, 'utf8');
-const rendererPath = path.join(__dirname, '..', '..', 'src', 'renderer.js');
+const rendererPath = path.join(__dirname, '..', '..', 'src', 'renderer', 'controllers', 'bank-statement.js');
 const rendererSource = fs.readFileSync(rendererPath, 'utf8');
 
 function runBlock() {
@@ -43,10 +43,10 @@ test('Payment 开启时派生失败必须阻断，不能读取陈旧持久表降
 test('Payment 预检阻断的 code 和明细从 main 透传并在运行弹框显示', () => {
   assert.ok(block.includes("code: error && error.code ? String(error.code) : undefined"));
   assert.ok(block.includes('detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : []'));
-  assert.ok(rendererSource.includes("detailLines.slice(0, 20).map((line) => escapeHtml(line)).join('<br/>')"));
+  assert.ok(rendererSource.includes("detailLines.slice(0, 20).map(escapeHtml).join('<br/>')"));
   assert.match(
     rendererSource,
-    /if \(!result \|\| result\.status !== 'ok'\) \{[\s\S]*?await refreshBankStatementStatus\(\);[\s\S]*?openModal/
+    /if \(result\?\.status !== 'ok'\) \{[\s\S]*?await refreshBankStatementStatus\(\);[\s\S]*?alert\(`/
   );
 });
 

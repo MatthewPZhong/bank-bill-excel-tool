@@ -57,20 +57,38 @@
 
   function createPositionReconciliationUI({
     api,
-    openModal,
-    closeModal,
+    panel,
     createAlertDialog,
     createConfirmDialog,
-    modalRoot = document.getElementById('modalRoot')
+    modalHost,
+    modalBridge
   }) {
+    if (!panel || !modalHost || !modalBridge) throw new TypeError('平盘控制器缺少面板或弹窗宿主');
+    const document = panel.ownerDocument;
+    const queryPanel = (id) => panel.querySelector('#' + id);
+    let active = false;
+    let entered = false;
+    let disposed = false;
+    let renderGeneration = 0;
+    let statusGeneration = 0;
+    let needsRefresh = true;
+    const modalHandles = new Set();
+    const listeners = [];
+    const live = (generation = renderGeneration) => active && !disposed && generation === renderGeneration;
+    function listen(element, type, handler) {
+      if (!element) return;
+      const listener = (...args) => { if (live()) return handler(...args); };
+      element.addEventListener(type, listener);
+      listeners.push(() => element.removeEventListener(type, listener));
+    }
     const elements = {
-      functionSelect: document.getElementById('positionReconciliationFunctionSelect'),
-      runBtn: document.getElementById('positionReconciliationRunBtn'),
-      dataManagerBtn: document.getElementById('positionReconciliationTableManagerBtn'),
-      linkedManagerBtn: document.getElementById('positionReconciliationLinkedTableManagerBtn'),
-      configBtn: document.getElementById('positionReconciliationConfigBtn'),
-      exportBtn: document.getElementById('positionReconciliationExportBtn'),
-      statusBox: document.getElementById('positionReconciliationStatusBox')
+      functionSelect: queryPanel('positionReconciliationFunctionSelect'),
+      runBtn: queryPanel('positionReconciliationRunBtn'),
+      dataManagerBtn: queryPanel('positionReconciliationTableManagerBtn'),
+      linkedManagerBtn: queryPanel('positionReconciliationLinkedTableManagerBtn'),
+      configBtn: queryPanel('positionReconciliationConfigBtn'),
+      exportBtn: queryPanel('positionReconciliationExportBtn'),
+      statusBox: queryPanel('positionReconciliationStatusBox')
     };
     const state = {
       status: null,
@@ -78,46 +96,92 @@
       bound: false
     };
 
+    const owner = 'position-reconciliation-process';
+    const bridge = () => modalBridge;
+    const host = () => modalHost;
+
+    function openModal(source, { root = false, replace = null } = {}) {
+      if (!live()) return { status: 'stale' };
+      const service = bridge();
+      if (replace) {
+        if (!replace.isOpen() || !replace.isTop()) return { status: 'blocked' };
+        const opened = service.replaceModal(replace, source);
+        if (opened?.handle) modalHandles.add(opened.handle);
+        return opened;
+      }
+      const parent = host().getTop();
+      const opened = !root && parent && parent.owner === owner
+        ? service.pushModal(parent, source)
+        : service.openModal(source, { owner });
+      if (opened?.handle) modalHandles.add(opened.handle);
+      return opened;
+    }
+
+    function closeModal(target, outcome) {
+      return bridge().closeModal(target, outcome);
+    }
+
+    function dialogAlive(shell) {
+      return Boolean(host()?.getHandle(shell.overlay)?.isOpen());
+    }
+
+    // 先接受挂载，再开始读取；关闭/替换期间的迟到响应不创建下一层。
+    async function readDialogData(title, read, { root = false } = {}) {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
+      const opened = openModal(() => {
+        const shell = createDialogShell(title, 'position-loading-dialog');
+        shell.content.textContent = '正在读取…';
+        return shell.overlay;
+      }, { root });
+      if (opened?.status !== 'opened') return null;
+      const handle = opened.handle;
+      try {
+        const value = await read();
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
+        if (!handle.isOpen() || !handle.isTop()) return null;
+        return { value, handle };
+      } catch (error) {
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
+
+        if (!handle.isOpen() || !handle.isTop()) return null;
+        handle.close();
+        showAlert(error?.message || '读取失败');
+        return null;
+      }
+    }
+
     function statusTextElement() {
       return elements.statusBox && elements.statusBox.querySelector('.status-box-text');
     }
 
     function setStatus(message, tone = 'info') {
+      if (!live()) return;
       const text = statusTextElement();
       if (text) text.textContent = String(message || '欢迎使用小助手');
       if (elements.statusBox) elements.statusBox.dataset.tone = tone;
     }
 
     function showAlert(message, { info = false, html = false } = {}) {
-      openModal(createAlertDialog(html ? message : escapeHtml(message), info
+      openModal(() => createAlertDialog(html ? message : escapeHtml(message), info
         ? { skipLogReport: true }
         : { logDomain: 'position-reconciliation' }));
     }
 
     function showArchiveUnavailable() {
-      const overlay = createAlertDialog(escapeHtml('当前没有符合业务归档条件的数据'), {
-        skipLogReport: true,
-        confirmText: '返回',
-        confirmSecondary: true,
-        closeOnConfirm: false
-      });
-      if (modalRoot) modalRoot.appendChild(overlay);
-      else openModal(overlay);
+      return openModal(() => createAlertDialog(escapeHtml('当前没有符合业务归档条件的数据'), {
+        skipLogReport: true, confirmText: '返回', confirmSecondary: true
+      }));
     }
 
     function confirmAction(message, confirmText = '确认') {
-      return new Promise((resolve) => {
-        openModal(createConfirmDialog({
-          message: escapeHtml(message),
-          confirmText,
-          cancelText: '取消',
-          onConfirm: () => {
-            closeModal();
-            resolve(true);
-          },
-          onCancel: () => resolve(false)
-        }));
-      });
+      const opened = openModal(() => createConfirmDialog({
+        message: escapeHtml(message), confirmText, cancelText: '取消',
+        onConfirm: () => opened.handle.close({ status: 'submitted', value: true })
+      }));
+      if (opened?.status !== 'opened') return Promise.resolve(false);
+      return opened.handle.closed.then((outcome) => outcome.status === 'submitted' && outcome.value === true);
     }
 
     function ensureAvailable() {
@@ -146,6 +210,7 @@
     }
 
     function updateControls() {
+      if (!live()) return;
       const current = state.status || {};
       const supported = isFundNatureSelected();
       if (elements.runBtn) {
@@ -165,11 +230,19 @@
 
     // updateStatus=false 只静默成功摘要；真实读取失败始终写入状态框。
     async function refresh({ updateStatus = true } = {}) {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
       if (!api) return null;
+      const statusRequest = ++statusGeneration;
       let result;
       try {
         result = await api.status();
+        if (statusRequest !== statusGeneration) return null;
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
       } catch (error) {
+        if (!live(actionGeneration) || statusRequest !== statusGeneration) { needsRefresh = true; return null; }
+
         console.error('refresh position reconciliation status failed:', error);
         state.status = null;
         const detail = error && error.message ? String(error.message).trim() : '';
@@ -184,7 +257,7 @@
         state.status = null;
         setStatus(failureDetailsText(result, '平盘对账状态读取失败'), 'error');
         updateControls();
-        return result;
+        return result || { status: 'failed' };
       }
       state.status = result;
       if (updateStatus) {
@@ -198,6 +271,9 @@
     }
 
     async function withInflight(message, task) {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
       if (state.inflight) return null;
       state.inflight = true;
       setStatus(message, 'info');
@@ -206,7 +282,9 @@
         return await task();
       } finally {
         state.inflight = false;
-        await refresh().catch(() => {});
+        needsRefresh = true;
+        if (live()) await refresh().catch(() => {});
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
       }
     }
 
@@ -225,7 +303,7 @@
       closeButton.type = 'button';
       closeButton.setAttribute('aria-label', '关闭');
       closeButton.textContent = '×';
-      closeButton.addEventListener('click', onClose);
+      closeButton.addEventListener('click', () => onClose === closeModal ? closeModal(overlay) : onClose());
       header.append(heading, closeButton);
       const content = document.createElement('div');
       content.className = 'position-dialog-content';
@@ -233,6 +311,7 @@
       footer.className = 'dialog-actions split';
       card.append(header, content, footer);
       overlay.appendChild(card);
+      bridge()?.registerModal(overlay, { dialog: card, canClose: () => !state.inflight });
       return { overlay, card, content, footer, closeButton };
     }
 
@@ -273,9 +352,10 @@
     }
 
     async function withImportProgress(title, task, previewProgress = null) {
-      if (!api || typeof api.onImportProgress !== 'function') {
-        return task();
-      }
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
+      if (!api) return { status: 'cancelled' };
       const shell = createDialogShell(
         title,
         'position-import-progress-dialog',
@@ -310,7 +390,7 @@
       let jobId = '';
       let stopping = false;
       const updateProgress = (progress) => {
-        if (!progress || typeof progress !== 'object') return;
+        if (disposed || !progress || typeof progress !== 'object') return;
         if (jobId && progress.jobId && progress.jobId !== jobId) return;
         if (progress.jobId) jobId = progress.jobId;
         const stage = String(progress.stage || '');
@@ -334,14 +414,21 @@
           cancel.textContent = '正在停止…';
         }
       };
-      const unsubscribe = api.onImportProgress(updateProgress);
+      let unsubscribe;
+      let disposed = false;
+      let running = true;
+      const stopProgress = () => { if (disposed) return; disposed = true; if (typeof unsubscribe === 'function') unsubscribe(); };
       cancel.addEventListener('click', async () => {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         if (stopping || cancel.disabled || !jobId) return;
         stopping = true;
         cancel.disabled = true;
         cancel.textContent = '正在停止…';
         nodes.stage.textContent = '正在停止…';
         const result = await api.cancelActiveImport(jobId);
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
         if (result && result.status === 'not-cancellable') {
           nodes.stage.textContent = '正在提交，无法取消';
           cancel.textContent = '正在提交，无法取消';
@@ -352,13 +439,17 @@
           cancel.textContent = '任务已结束';
         }
       });
-      openModal(shell.overlay);
-      if (previewProgress) updateProgress(previewProgress);
+      bridge()?.registerModal(shell.overlay, { canClose: () => !running, onDispose: stopProgress });
+      const opened = openModal(() => shell.overlay);
+      if (opened?.status !== 'opened') return { status: 'cancelled' };
       try {
+        unsubscribe = typeof api.onImportProgress === 'function' ? api.onImportProgress(updateProgress) : null;
+        if (previewProgress) updateProgress(previewProgress);
         return await task();
       } finally {
-        if (typeof unsubscribe === 'function') unsubscribe();
-        shell.overlay.remove();
+        running = false;
+        stopProgress();
+        opened.handle.close();
       }
     }
 
@@ -449,6 +540,9 @@
         });
       });
       confirm.addEventListener('click', async () => {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         const selectedChannels = [...shell.content.querySelectorAll('input[name="position-channel"]:checked')]
           .map((item) => item.value);
         const selectedMonths = [...shell.content.querySelectorAll('input[name="position-month"]:checked')]
@@ -460,6 +554,7 @@
         confirm.disabled = true;
         try {
           await onConfirm({ channels: selectedChannels, months: selectedMonths });
+          if (!live(actionGeneration)) { needsRefresh = true; return null; }
         } finally {
           confirm.disabled = false;
         }
@@ -468,6 +563,9 @@
     }
 
     async function handleBankImport() {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
       if (!ensureAvailable()) return;
       const result = await withInflight(
         '正在读取平盘银行对账单…',
@@ -476,6 +574,7 @@
           () => api.prepareBankImport()
         )
       );
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
       if (!result || isImportCancelledResult(result)) return;
       if (result.status !== 'needs-confirmation') {
         showAlert(failureDetailsHtml(result, '平盘银行对账单导入失败'), { html: true });
@@ -489,8 +588,10 @@
         `确认导入 ${result.fileCount} 个文件、${result.rowCount} 行${replacement}？`,
         '确认导入'
       );
-      if (!confirmed) {
+      // 确认被导航关闭时，清理仍属于旧业务请求；不能被 UI 代次守卫跳过。
+      if (!confirmed || !live(actionGeneration)) {
         await api.cancelBankImport();
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
         return;
       }
       const applied = await withInflight(
@@ -500,6 +601,7 @@
           () => api.applyBankImport(result.token)
         )
       );
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
       if (isImportCancelledResult(applied)) return;
       if (!applied || applied.status !== 'ok') {
         showAlert(failureDetailsHtml(applied, '平盘银行对账单写入失败'), { html: true });
@@ -583,10 +685,14 @@
         );
         right.append(exportButton);
         exportButton.addEventListener('click', async () => {
+          const actionGeneration = renderGeneration;
+          if (!live(actionGeneration)) return null;
+
           const exported = await withInflight(
             '正在导出异常数据…',
             () => api.exportSourceAnomaly(report.reportKey)
           );
+          if (!live(actionGeneration)) { needsRefresh = true; return null; }
           if (!exported || exported.status === 'cancelled') return;
           if (exported.status !== 'ok') {
             showAlert(failureDetailsHtml(exported, '异常数据导出失败'), { html: true });
@@ -598,13 +704,20 @@
       right.append(confirmButton);
       shell.footer.append(right);
       confirmButton.addEventListener('click', async () => {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         closeModal();
         if (typeof afterClose === 'function') await afterClose();
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
       });
       openModal(shell.overlay);
     }
 
     async function handleSourceImport(afterChanged = null, afterCompletionClose = null) {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
       if (!ensureAvailable()) return;
       const result = await withInflight(
         '正在识别链接原始表…',
@@ -613,6 +726,7 @@
           () => api.prepareSourceImport()
         )
       );
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
       if (!result || isImportCancelledResult(result)) return;
       if (result.status !== 'ok') {
         const summary = sourceImportSummary(result);
@@ -622,57 +736,82 @@
         return;
       }
       const confirmations = (result.results || []).filter((item) => item.status === 'needs-confirmation');
-      for (const item of confirmations) {
-        const confirmed = await confirmAction(
-          `清结算银行账户表将全量替换：${Number(item.oldValidCount) || 0} 行 → ${Number(item.newValidCount) || 0} 行，是否继续？`,
-          '确认替换'
-        );
-        if (!confirmed) {
-          await api.cancelSourceImport(item.token);
-          item.status = 'cancelled';
-          item.message = '已取消替换';
-          continue;
+      const pendingTokens = new Set(confirmations.map((item) => item.token));
+      try {
+        for (const item of confirmations) {
+          const confirmed = await confirmAction(
+            `清结算银行账户表将全量替换：${Number(item.oldValidCount) || 0} 行 → ${Number(item.newValidCount) || 0} 行，是否继续？`,
+            '确认替换'
+          );
+          if (!live(actionGeneration)) { needsRefresh = true; return null; }
+          if (!confirmed) {
+            await api.cancelSourceImport(item.token);
+            pendingTokens.delete(item.token);
+            if (!live(actionGeneration)) { needsRefresh = true; return null; }
+            item.status = 'cancelled';
+            item.message = '已取消替换';
+            continue;
+          }
+          pendingTokens.delete(item.token);
+          const applied = await withInflight(
+            '正在替换清结算银行账户表…',
+            () => withImportProgress(
+              '替换清结算银行账户表',
+              () => api.applySourceImport(item.token)
+            )
+          );
+          if (!live(actionGeneration)) { needsRefresh = true; return null; }
+          if (isImportCancelledResult(applied)) {
+            item.status = 'cancelled';
+            item.message = '已取消替换';
+          } else if (!applied || applied.status !== 'ok') {
+            item.status = 'failed';
+            item.message = applied && applied.message ? applied.message : '清结算银行账户表写入失败';
+            item.detailLines = applied && Array.isArray(applied.detailLines)
+              ? applied.detailLines
+              : [];
+            showAlert(failureDetailsHtml(applied, item.message), { html: true });
+          } else {
+            item.status = 'ok';
+            item.rowCount = applied.rowCount;
+            item.sourceName = applied.sourceName || item.sourceName;
+          }
         }
-        const applied = await withInflight(
-          '正在替换清结算银行账户表…',
-          () => withImportProgress(
-            '替换清结算银行账户表',
-            () => api.applySourceImport(item.token)
-          )
-        );
-        if (isImportCancelledResult(applied)) {
-          item.status = 'cancelled';
-          item.message = '已取消替换';
-        } else if (!applied || applied.status !== 'ok') {
-          item.status = 'failed';
-          item.message = applied && applied.message ? applied.message : '清结算银行账户表写入失败';
-          item.detailLines = applied && Array.isArray(applied.detailLines)
-            ? applied.detailLines
-            : [];
-          showAlert(failureDetailsHtml(applied, item.message), { html: true });
-        } else {
-          item.status = 'ok';
-          item.rowCount = applied.rowCount;
-          item.sourceName = applied.sourceName || item.sourceName;
+      } finally {
+        if (!live(actionGeneration)) {
+          // 整批准备可能产生多个待确认 token；已提交的 token 已从集合移除。
+          const cleanup = await Promise.allSettled([...pendingTokens].map((token) => api.cancelSourceImport(token)));
+          for (const outcome of cleanup) {
+            if (outcome.status === 'rejected') console.error('cancel prepared position source import failed:', outcome.reason);
+          }
         }
       }
       if (typeof afterChanged === 'function') await afterChanged();
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
       showSourceImportCompletion(result, afterCompletionClose);
     }
 
     async function openRunScopeDialog() {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
       if (!ensureAvailable()) return;
       if (!isFundNatureSelected()) {
         showAlert('当前功能将在后续版本开放', { info: true });
         return;
       }
-      const data = await api.dataManager();
+      const admission = await readDialogData('选择平盘资金性质校验范围', () => api.dataManager(), { root: true });
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
+      if (!admission) return;
+      const data = admission.value;
       if (!data || data.status !== 'ok') {
+        admission.handle.close();
         showAlert(failureDetailsHtml(data, '无法读取待运行范围'), { html: true });
         return;
       }
       const scopes = (data.scopes || []).filter((row) => row.status === '未处理');
       if (scopes.length === 0) {
+        admission.handle.close();
         showAlert('没有状态为“未处理”的平盘银行对账单', { info: true });
         return;
       }
@@ -681,15 +820,21 @@
         scopes,
         confirmText: '开始运行',
         onConfirm: async (selection) => {
+          const actionGeneration = renderGeneration;
+          if (!live(actionGeneration)) return null;
+
           closeModal();
           let result = await withInflight('正在执行平盘资金性质校验…', () => api.run(selection));
+          if (!live(actionGeneration)) { needsRefresh = true; return null; }
           if (result && result.status === 'needs-replace-confirmation') {
             const replace = await confirmAction(result.message, '使旧结果失效并运行');
+            if (!live(actionGeneration)) { needsRefresh = true; return null; }
             if (!replace) return;
             result = await withInflight(
               '正在重新执行平盘资金性质校验…',
               () => api.run(buildRunReplaceConfirmationRequest(result.contextId))
             );
+            if (!live(actionGeneration)) { needsRefresh = true; return null; }
           }
           if (!result || result.status !== 'ok') {
             showAlert(failureDetailsHtml(result, '平盘资金性质校验失败'), { html: true });
@@ -697,10 +842,14 @@
           }
           openResultDialog(result.runId);
         }
-      }));
+      }), { replace: admission.handle });
     }
 
     async function exportRun(runId, differencesOnly = false, differenceFilter = null) {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
+      const active = host()?.getTop();
       const result = await withInflight(
         differencesOnly ? '正在导出差异数据…' : '正在导出平盘资金性质校验结果…',
         () => api.exportRun({
@@ -709,6 +858,8 @@
           ...(differenceFilter || {})
         })
       );
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
+      if (active && !active.isOpen()) return false;
       if (!result || result.status === 'cancelled') return false;
       if (result.status !== 'ok') {
         showAlert(failureDetailsHtml(result, '结果导出失败'), { html: true });
@@ -719,7 +870,13 @@
     }
 
     async function importRunResult(runId) {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
+      const active = host()?.getTop();
       const result = await withInflight('正在校验修改后的结果文件…', () => api.importRunResult(runId));
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
+      if (active && !active.isOpen()) return false;
       if (!result || result.status === 'cancelled') return false;
       if (result.status !== 'ok') {
         const details = Array.isArray(result.detailLines) && result.detailLines.length
@@ -733,10 +890,16 @@
     }
 
     async function exportRunFiltered(runId) {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
+      const active = host()?.getTop();
       const result = await withInflight(
         '正在导出本次运行的过滤数据…',
         () => api.exportRunFiltered(runId)
       );
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
+      if (active && !active.isOpen()) return false;
       if (!result || result.status === 'cancelled') return false;
       if (result.status !== 'ok') {
         showAlert(failureDetailsHtml(result, '过滤数据导出失败'), { html: true });
@@ -747,12 +910,19 @@
     }
 
     async function confirmRun(runId) {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
+      const active = host()?.getTop();
       const accepted = await confirmAction(
         '确认结果后将更新系统表库中的 FundType 和审计信息，并把对应银行数据状态改为“已校验性质”。未解决差异只保留人工结论，不会认领或消费链接来源。',
         '确认结果'
       );
-      if (!accepted) return false;
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
+      if (!accepted || (active && !active.isOpen())) return false;
       const result = await withInflight('正在确认平盘资金性质校验结果…', () => api.confirmRun(runId));
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
+      if (active && !active.isOpen()) return false;
       if (!result || result.status !== 'ok') {
         showAlert(failureDetailsHtml(result, '结果确认失败'), { html: true });
         return false;
@@ -763,12 +933,19 @@
     }
 
     async function openResultDialog(runId = null, previewPending = null) {
-      const current = previewPending
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
+      const admission = await readDialogData('平盘资金性质校验结果确认', () => previewPending
         ? { pendingRun: previewPending }
-        : await refresh();
+        : refresh());
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
+      if (!admission) return;
+      const current = admission.value;
       const pending = current && current.pendingRun;
       const targetRunId = Number(runId || (pending && pending.id));
       if (!targetRunId || !pending || pending.stale) {
+        admission.handle.close();
         showAlert(pending && pending.stale ? '当前结果已失效，请重新运行' : '没有待确认的运行结果');
         return;
       }
@@ -805,20 +982,30 @@
       shell.footer.append(left, right);
       closeButton.addEventListener('click', closeModal);
       exportButton.addEventListener('click', async () => {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         if (await exportRun(targetRunId)) confirmButton.disabled = false;
       });
       importButton.addEventListener('click', async () => {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         if (await importRunResult(targetRunId)) {
           closeModal();
           await openResultDialog(targetRunId);
+          if (!live(actionGeneration)) { needsRefresh = true; return null; }
         }
       });
       filteredButton.addEventListener('click', () => exportRunFiltered(targetRunId));
       confirmButton.addEventListener('click', () => confirmRun(targetRunId));
-      openModal(shell.overlay);
+      return openModal(shell.overlay, { replace: admission.handle });
     }
 
     async function openBankScopeAction(action, data, rerender) {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
       const scopes = Array.isArray(data.scopes) ? data.scopes : [];
       if (scopes.length === 0) {
         showAlert('平盘银行对账单表库暂无数据', { info: true });
@@ -829,8 +1016,12 @@
         scopes,
         confirmText: action === 'export' ? '导出' : '删除',
         onConfirm: async (selection) => {
+          const actionGeneration = renderGeneration;
+          if (!live(actionGeneration)) return null;
+
           if (action === 'export') {
             const result = await withInflight('正在导出平盘银行对账单…', () => api.exportBank(selection));
+            if (!live(actionGeneration)) { needsRefresh = true; return null; }
             if (!result || result.status === 'cancelled') return;
             if (result.status !== 'ok') {
               showAlert(failureDetailsHtml(result, '导出失败'), { html: true });
@@ -841,23 +1032,33 @@
             return;
           }
           const accepted = await confirmAction('确认删除所选银行渠道和月份的数据？', '确认删除');
+          if (!live(actionGeneration)) { needsRefresh = true; return null; }
           if (!accepted) return;
           const result = await withInflight('正在删除平盘银行对账单…', () => api.deleteBank(selection));
+          if (!live(actionGeneration)) { needsRefresh = true; return null; }
           if (!result || result.status !== 'ok') {
             showAlert(failureDetailsHtml(result, '删除失败'), { html: true });
             return;
           }
           closeModal();
           if (typeof rerender === 'function') await rerender();
+          if (!live(actionGeneration)) { needsRefresh = true; return null; }
           setStatus(result.message, 'success');
         }
       }));
     }
 
     async function openDataManager(previewData = null, initialTab = 'unarchived') {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
       if (!ensureAvailable()) return;
-      const result = previewData || await api.dataManager();
+      const admission = await readDialogData('对账数据管理', () => previewData || api.dataManager(), { root: true });
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
+      if (!admission) return;
+      const result = admission.value;
       if (!result || result.status !== 'ok') {
+        admission.handle.close();
         showAlert(failureDetailsHtml(result, '对账数据管理读取失败'), { html: true });
         return;
       }
@@ -879,7 +1080,12 @@
       let differenceMonth = '';
 
       async function reload() {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         const next = await api.dataManager();
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
+        if (!dialogAlive(shell)) return;
         if (next && next.status === 'ok') Object.assign(result, next);
         renderPane();
       }
@@ -961,10 +1167,10 @@
                 ${months.length === 0 ? 'disabled' : ''}
               >
                 ${months.length > 0
-                  ? months.map((month) => `
+    ? months.map((month) => `
                     <option value="${escapeHtml(month)}" ${month === differenceMonth ? 'selected' : ''}>${escapeHtml(month)}</option>
                   `).join('')
-                  : '<option value="">暂无月份</option>'}
+    : '<option value="">暂无月份</option>'}
               </select>
             </label>
           </div>
@@ -1021,30 +1227,34 @@
       shell.footer.append(left, right);
       archive.addEventListener('click', showArchiveUnavailable);
       importButton.addEventListener('click', async () => {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         closeModal();
         await handleBankImport();
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
       });
       back.addEventListener('click', closeModal);
       renderPane();
-      openModal(shell.overlay);
+      return openModal(shell.overlay, { replace: admission.handle });
     }
 
     async function openMappingsDialog(onChanged = null, previewResult = null) {
-      let result = previewResult;
-      if (!result) {
-        try {
-          result = await api.listMappings();
-        } catch (error) {
-          showAlert(error && error.message ? error.message : '账户映射读取失败');
-          return;
-        }
-      }
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
+      const admission = await readDialogData('账户映射管理', () => previewResult || api.listMappings());
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
+      if (!admission) return;
+      const result = admission.value;
       if (!result || result.status !== 'ok') {
+        admission.handle.close();
         showAlert(failureDetailsHtml(result, '账户映射读取失败'), { html: true });
         return;
       }
+      let saving = false;
       let shell;
-      const closeSelf = () => shell && shell.overlay.remove();
+      const closeSelf = () => shell && closeModal(shell.overlay);
       shell = createDialogShell('账户映射管理', 'position-mapping-dialog manager-card account-card', closeSelf);
       shell.content.innerHTML = `
         <div class="table-wrapper position-mapping-table">
@@ -1063,6 +1273,7 @@
       const tbody = shell.content.querySelector('tbody');
 
       function showNestedAlert(message) {
+        if (!dialogAlive(shell) || !host().getHandle(shell.overlay).isTop()) return;
         const alertOverlay = document.createElement('div');
         alertOverlay.className = 'modal-overlay';
         const card = document.createElement('section');
@@ -1075,13 +1286,12 @@
         const actions = document.createElement('div');
         actions.className = 'dialog-actions center';
         const acknowledge = makeButton('确认', { primary: true });
-        acknowledge.addEventListener('click', () => alertOverlay.remove());
+        acknowledge.addEventListener('click', () => closeModal(alertOverlay));
         body.appendChild(textNode);
         actions.appendChild(acknowledge);
         card.append(body, actions);
         alertOverlay.appendChild(card);
-        if (modalRoot) modalRoot.appendChild(alertOverlay);
-        else openModal(alertOverlay);
+        openModal(alertOverlay);
       }
 
       function createReadOnlyRow(midAccountId, clearingAccountId) {
@@ -1196,31 +1406,42 @@
       shell.footer.className = 'dialog-actions right';
       shell.footer.appendChild(right);
       save.addEventListener('click', async () => {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         const mappings = [...tbody.querySelectorAll('[data-position-mapping-row="true"]')]
           .map((row) => ({
             midAccountId: row.__mapping.midAccountId(),
             clearingAccountId: row.__mapping.clearingAccountId()
           }));
+        if (saving || !dialogAlive(shell)) return;
+        saving = true;
         save.disabled = true;
         let saved;
         try {
           saved = await withInflight('正在保存平盘账户映射…', () => api.saveMappings(mappings));
+          if (!live(actionGeneration)) { needsRefresh = true; return null; }
         } catch (error) {
+          if (!live(actionGeneration)) { needsRefresh = true; return null; }
+
           showNestedAlert(error && error.message ? error.message : '账户映射保存失败');
           return;
         } finally {
-          save.disabled = false;
+          saving = false;
+          if (dialogAlive(shell)) save.disabled = false;
         }
+        if (!dialogAlive(shell)) return;
         if (!saved || saved.status !== 'ok') {
           showNestedAlert(saved && saved.message ? saved.message : '账户映射保存失败');
           return;
         }
         closeSelf();
         if (typeof onChanged === 'function') await onChanged();
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
         setStatus(saved.message, 'success');
       });
-      if (modalRoot) modalRoot.appendChild(shell.overlay);
-      else openModal(shell.overlay);
+      bridge()?.registerModal(shell.overlay, { canClose: () => !saving && !state.inflight });
+      return openModal(shell.overlay, { replace: admission.handle });
     }
 
     function openRawExportDialog(rows) {
@@ -1230,7 +1451,7 @@
         return;
       }
       let shell;
-      const closeSelf = () => shell && shell.overlay.remove();
+      const closeSelf = () => shell && closeModal(shell.overlay);
       shell = createDialogShell(
         '导出链接原始表',
         'position-raw-export-dialog position-delete-source-dialog',
@@ -1255,6 +1476,9 @@
       shell.footer.append(document.createElement('span'), right);
       cancel.addEventListener('click', closeSelf);
       exportButton.addEventListener('click', async () => {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         const selected = options[Number(select.value)];
         if (!selected) {
           showAlert('请选择需要导出的链接原始表');
@@ -1263,6 +1487,8 @@
         const exported = await withInflight('正在导出链接原始表…', () => (
           api.exportRaw(selected.sourceType, selected.tableName)
         ));
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
+        if (!dialogAlive(shell)) return;
         if (!exported || exported.status === 'cancelled') return;
         if (exported.status !== 'ok') {
           showAlert(failureDetailsHtml(exported, '导出失败'), { html: true });
@@ -1271,13 +1497,19 @@
         closeSelf();
         setStatus(`已导出 ${Number(exported.rowCount) || 0} 行${selected.tableName}`, 'success');
       });
-      if (modalRoot) modalRoot.appendChild(shell.overlay);
-      else openModal(shell.overlay);
+      openModal(shell.overlay);
     }
 
     async function openRawSourceDialog(previewData = null) {
-      const result = previewData || await api.linkedManager();
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
+      const admission = await readDialogData('链接原始表', () => previewData || api.linkedManager());
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
+      if (!admission) return;
+      const result = admission.value;
       if (!result || result.status !== 'ok') {
+        admission.handle.close();
         showAlert(failureDetailsHtml(result, '链接原始表读取失败'), { html: true });
         return;
       }
@@ -1311,15 +1543,15 @@
       right.append(exportButton, back);
       shell.footer.append(document.createElement('span'), right);
       exportButton.addEventListener('click', () => openRawExportDialog(result.raw));
-      back.addEventListener('click', async () => {
-        closeModal();
-        await openLinkedManager();
-      });
+      back.addEventListener('click', () => closeModal(shell.overlay));
       render();
-      openModal(shell.overlay);
+      return openModal(shell.overlay, { replace: admission.handle });
     }
 
     async function openSourceDeleteDialog(data, reload) {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
       const rows = (data.raw || []).filter((row) => (
         Number(row.rowCount) > 0 || Number(row.filteredRowCount) > 0
       ));
@@ -1361,6 +1593,9 @@
       shell.footer.append(document.createElement('span'), right);
       cancel.addEventListener('click', closeModal);
       remove.addEventListener('click', async () => {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         const sourceType = sourceSelect.value;
         const selectedMonths = [...monthSelect.selectedOptions].map((option) => option.value);
         const wholeTable = sourceType === SOURCE_ACCOUNT;
@@ -1374,18 +1609,21 @@
             : '确认删除所选月份的链接原始表、派生链接及活动过滤记录？',
           wholeTable ? '确认整表删除' : '确认删除'
         );
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
         if (!accepted) return;
         const deleted = await withInflight('正在删除链接表数据…', () => api.deleteSource({
           sourceType,
           months: selectedMonths,
           wholeTable
         }));
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
         if (!deleted || deleted.status !== 'ok') {
           showAlert(failureDetailsHtml(deleted, '删除失败'), { html: true });
           return;
         }
         closeModal();
         if (typeof reload === 'function') await reload();
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
         setStatus(deleted.message, 'success');
       });
       openModal(shell.overlay);
@@ -1398,7 +1636,7 @@
         return;
       }
       let shell;
-      const closeSelf = () => shell && shell.overlay.remove();
+      const closeSelf = () => shell && closeModal(shell.overlay);
       shell = createDialogShell(
         '导出链接对账表',
         'position-linked-export-dialog position-delete-source-dialog',
@@ -1423,6 +1661,9 @@
       shell.footer.append(document.createElement('span'), right);
       cancel.addEventListener('click', closeSelf);
       exportButton.addEventListener('click', async () => {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         const selected = options[Number(select.value)];
         if (!selected) {
           showAlert('请选择需要导出的链接对账表');
@@ -1431,6 +1672,8 @@
         const exported = await withInflight('正在导出链接对账表…', () => (
           api.exportLinked(selected.sourceType, selected.tableName)
         ));
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
+        if (!dialogAlive(shell)) return;
         if (!exported || exported.status === 'cancelled') return;
         if (exported.status !== 'ok') {
           showAlert(failureDetailsHtml(exported, '导出失败'), { html: true });
@@ -1439,20 +1682,31 @@
         closeSelf();
         setStatus(`已导出 ${Number(exported.rowCount) || 0} 行${selected.tableName}`, 'success');
       });
-      if (modalRoot) modalRoot.appendChild(shell.overlay);
-      else openModal(shell.overlay);
+      openModal(shell.overlay);
     }
 
     async function openLinkedManager(previewData = null) {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
       if (!ensureAvailable()) return;
-      const result = previewData || await api.linkedManager();
+      const admission = await readDialogData('链接表管理', () => previewData || api.linkedManager(), { root: true });
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
+      if (!admission) return;
+      const result = admission.value;
       if (!result || result.status !== 'ok') {
+        admission.handle.close();
         showAlert(failureDetailsHtml(result, '链接表管理读取失败'), { html: true });
         return;
       }
       const shell = createDialogShell('链接表管理', 'position-manager-dialog');
       async function reload() {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         const next = await api.linkedManager();
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
+        if (!dialogAlive(shell)) return;
         if (next && next.status === 'ok') Object.assign(result, next);
         render();
       }
@@ -1491,55 +1745,62 @@
       const back = makeButton('返回');
       right.append(remove, importButton, exportButton, back);
       shell.footer.append(left, right);
-      raw.addEventListener('click', async () => {
-        closeModal();
-        await openRawSourceDialog();
-      });
+      raw.addEventListener('click', () => openRawSourceDialog());
       mappings.addEventListener('click', () => openMappingsDialog(reload));
       remove.addEventListener('click', () => openSourceDeleteDialog(result, reload));
       importButton.addEventListener('click', async () => {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         closeModal();
         await handleSourceImport(null, openLinkedManager);
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
       });
       exportButton.addEventListener('click', () => openLinkedExportDialog(result.linked));
       back.addEventListener('click', closeModal);
       render();
-      openModal(shell.overlay);
+      return openModal(shell.overlay, { replace: admission.handle });
     }
 
     function bindEvents() {
-      if (state.bound) return;
+      if (state.bound || disposed) return;
       state.bound = true;
-      if (elements.runBtn) elements.runBtn.addEventListener('click', openRunScopeDialog);
-      if (elements.dataManagerBtn) {
-        elements.dataManagerBtn.addEventListener('click', () => openDataManager());
-      }
-      if (elements.linkedManagerBtn) {
-        elements.linkedManagerBtn.addEventListener('click', () => openLinkedManager());
-      }
-      if (elements.configBtn) {
-        elements.configBtn.addEventListener('click', () => {
-          showAlert('对账配置管理将在后续版本开放', { info: true });
-        });
-      }
-      if (elements.exportBtn) elements.exportBtn.addEventListener('click', () => openResultDialog());
-      if (elements.functionSelect) {
-        elements.functionSelect.addEventListener('change', () => {
-          if (!isFundNatureSelected()) {
-            setStatus('当前功能将在后续版本开放', 'info');
-          } else {
-            setStatus(statusSummary(state.status), 'info');
-          }
-          updateControls();
-        });
-      }
+      listen(elements.runBtn, 'click', openRunScopeDialog);
+      listen(elements.dataManagerBtn, 'click', () => openDataManager());
+      listen(elements.linkedManagerBtn, 'click', () => openLinkedManager());
+      listen(elements.configBtn, 'click', () => showAlert('对账配置管理将在后续版本开放', { info: true }));
+      listen(elements.exportBtn, 'click', () => openResultDialog());
+      listen(elements.functionSelect, 'change', () => {
+        setStatus(isFundNatureSelected() ? statusSummary(state.status) : '当前功能将在后续版本开放', 'info');
+        updateControls();
+      });
     }
-
-    async function initialize() {
+    async function enter() {
+      if (disposed) return { status: 'stale' };
+      active = true;
+      const generation = ++renderGeneration;
       bindEvents();
       const result = await refresh({ updateStatus: false });
-      // 仅成功初始化后落欢迎文案，不能用欢迎文案覆盖真实读取失败。
-      if (result && result.status === 'ok') setStatus('欢迎使用小助手', 'info');
+      if (!live(generation) || !result) return { status: 'stale' };
+      needsRefresh = !result || result.status !== 'ok';
+      if (!needsRefresh && !entered) setStatus('欢迎使用小助手', 'info');
+      entered = true;
+      return { status: needsRefresh ? 'error' : 'ready' };
+    }
+    const initialize = enter;
+    function leave() {
+      const closed = host()?.closeOwner(owner, 'navigation');
+      if (closed?.status === 'blocked') return { status: 'blocked' };
+      active = false; ++renderGeneration; ++statusGeneration; needsRefresh = true;
+      return { status: 'left' };
+    }
+    function invalidate() { needsRefresh = true; return live() ? refresh() : Promise.resolve(null); }
+    function dispose() {
+      if (disposed) return;
+      active = false; disposed = true; ++renderGeneration; ++statusGeneration;
+      for (const handle of modalHandles) if (handle.isOpen()) handle.dispose();
+      modalHandles.clear();
+      for (const remove of listeners.splice(0)) remove();
     }
 
     function previewDataManager(initialTab = 'unarchived') {
@@ -1681,7 +1942,10 @@
           { channel: 'BOC', monthKey: '2026-06', status: '未处理', rowCount: 320 }
         ],
         confirmText: '开始运行',
-        onConfirm: async () => {}
+        onConfirm: async () => {
+          const actionGeneration = renderGeneration;
+          if (!live(actionGeneration)) return null;
+        }
       }));
     }
 
@@ -1703,7 +1967,8 @@
       );
     }
 
-    return {
+    return Object.freeze({
+      enter, leave, invalidate, dispose,
       initialize,
       refresh,
       bindEvents,
@@ -1721,7 +1986,7 @@
       previewResultDialog,
       previewMappingDialog,
       previewImportProgress
-    };
+    });
   }
 
   global.__positionReconciliation = {

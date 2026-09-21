@@ -1,0 +1,68 @@
+(node:80459) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+select after export false
+bank {
+  main: { bank: false, recon: false },
+  disabled: true,
+  text: '已导入：bank.xlsx（0 行）'
+}
+recon {
+  main: { bank: false, recon: false },
+  disabled: true,
+  text: '已导入 recon.xlsx（0 行业务账单 / 0 行对手账单）；请点击"开始运行"'
+}
+recovered bank 资金对账状态读取失败：暂时无法读取
+recovered recon 对账单修复状态读取失败：暂时无法读取
+✔ 审查探针：Recon 一次导出后场景选择须恢复 (6.87475ms)
+✔ 审查探针：bank 隐藏期间批删场景，返回清除旧导出反馈 (2.892958ms)
+✔ 审查探针：recon 隐藏期间批删场景，返回清除旧导出反馈 (2.010625ms)
+✔ 再审 R03 busy/list 交错 list-first (1.605833ms)
+✔ 再审 R03 busy/list 交错 action-first (1.467708ms)
+✖ 再审 active bank 失效重读失败后重入须结束错误提示 (2.75225ms)
+✖ 再审 active recon 失效重读失败后重入须结束错误提示 (1.876417ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 5
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 131.856125
+
+✖ failing tests:
+
+test at ../../../Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/renderer-boundaries-r2-scenario-review.test.js:125:3
+✖ 再审 active bank 失效重读失败后重入须结束错误提示 (2.75225ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /暂时无法读取/. Input:
+  
+  '资金对账状态读取失败：暂时无法读取'
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/renderer-boundaries-r2-scenario-review.test.js:136:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '资金对账状态读取失败：暂时无法读取',
+    expected: /暂时无法读取/,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }
+
+test at ../../../Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/renderer-boundaries-r2-scenario-review.test.js:125:3
+✖ 再审 active recon 失效重读失败后重入须结束错误提示 (1.876417ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /暂时无法读取/. Input:
+  
+  '对账单修复状态读取失败：暂时无法读取'
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/renderer-boundaries-r2-scenario-review.test.js:136:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '对账单修复状态读取失败：暂时无法读取',
+    expected: /暂时无法读取/,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }

@@ -1,7 +1,8 @@
 // v2.0.0 Pending 模块渲染层
 // T1-T6 范围：DB / 顶部下拉 / 骨架 / 规则 / import worker / 导入入口 UI + 覆盖留底 + 进度 + 报错链路
 
-window.__rendererPending = (function () {
+(function installPendingRenderer(root) {
+root.__rendererPending = (function () {
   'use strict';
 
   function buildPendingImportConfirmationRequest(contextId) {
@@ -9,17 +10,83 @@ window.__rendererPending = (function () {
   }
 
   function createRendererPending(deps) {
-    const {
-      state,
-      elements,
-      desktopApi,
-      openModal,
-      closeModal,
-      createAlertDialog,
-      createConfirmDialog
-    } = deps;
-
+    const scoped = !!deps.panel;
+    const ui = deps.ui || {};
+    const panel = deps.panel;
+    const document = panel?.ownerDocument || root.document;
+    const state = scoped ? { pending: {
+      rule: null, months: [], latestRunResult: null, latestRunId: null,
+      importing: false, importingText: null, currentYearMonth: null,
+      running: false, runningText: null, errorReportAvailable: false,
+      errorMessage: null, lastImportSummary: null, errorReportPath: null
+    } } : deps.state;
+    const elements = scoped ? Object.fromEntries(['pendingRuleBtn', 'pendingImportBtn', 'pendingRunBtn',
+      'pendingExportBtn', 'pendingStatusBox'].map((id) => [id, panel.querySelector(`#${id}`)])) : deps.elements;
+    const desktopApi = scoped ? { pending: deps.api } : deps.desktopApi;
+    const createAlertDialog = ui.createAlertDialog || deps.createAlertDialog;
+    const createConfirmDialog = ui.createConfirmDialog || deps.createConfirmDialog;
+    const owner = 'pending-reconciliation';
+    const host = ui.modalHost;
+    const bridge = ui.modalBridge;
     let columnsCache = null;
+    let active = !scoped;
+    let disposed = false;
+    let renderGeneration = 0;
+    let ruleRequest = 0;
+    let columnsRequest = 0;
+    let monthsRequest = 0;
+    let runsRequest = 0;
+    let needsRefresh = true;
+    let bound = false;
+    let resyncQueued = false;
+    const removers = [];
+    const modalHandles = new Set();
+    const live = (generation = renderGeneration) => !disposed && active && generation === renderGeneration;
+    const reportError = (error) => { if (ui.reportError) ui.reportError(error); else console.error('[pending]', error); };
+    const openModal = (source) => {
+      if (!live()) return { status: 'stale' };
+      const result = scoped ? bridge.openModal(source, { owner }) : deps.openModal(source);
+      if (result?.status === 'opened') {
+        modalHandles.add(result.handle);
+        result.handle.closed.then(() => modalHandles.delete(result.handle));
+      }
+      return result;
+    };
+    const closeModal = (target, outcome) => scoped ? bridge.closeModal(target, outcome) : deps.closeModal(target, outcome);
+    function captureView() {
+      const generation = renderGeneration;
+      let handle = host?.getTop() || null;
+      const canPresent = () => live(generation) && (!scoped || !host.getTop() || host.getTop() === handle);
+      return {
+        isCurrent: () => live(generation),
+        openModal(source) {
+          if (!canPresent()) return { status: 'stale' };
+          const opened = openModal(source);
+          if (opened?.status === 'opened') handle = opened.handle;
+          return opened;
+        },
+        pushModal(parent, source) {
+          if (!live(generation)) return { status: 'stale' };
+          const result = scoped ? bridge.pushModal(parent, source) : openModal(source);
+          if (result?.status === 'opened') { handle = result.handle; modalHandles.add(handle); }
+          return result;
+        },
+        closeModal(target, outcome) {
+          if (!live(generation)) return { status: 'stale' };
+          return closeModal(scoped ? (target || handle) : undefined, outcome);
+        },
+        refreshPendingUi() {
+          if (live(generation)) refreshPendingUi();
+          else {
+            needsRefresh = true;
+            if (live() && !resyncQueued) {
+              resyncQueued = true;
+              Promise.resolve().then(() => { resyncQueued = false; if (live()) return initialize(); }).catch(reportError);
+            }
+          }
+        }
+      };
+    }
 
     function isAdjacentMonths(upper, lower) {
       if (typeof upper !== 'string' || typeof lower !== 'string') return false;
@@ -51,6 +118,7 @@ window.__rendererPending = (function () {
     }
 
     function setPendingStatus(text) {
+      if (!live()) return;
       if (!elements.pendingStatusBox) return;
       // v3.1.13：只更新 .status-box-text 子节点，保持状态框结构与布局不变
       const textEl = elements.pendingStatusBox.querySelector('.status-box-text');
@@ -58,6 +126,7 @@ window.__rendererPending = (function () {
     }
 
     function refreshPendingUi() {
+      if (!live()) { needsRefresh = true; return; }
       setPendingStatus(computePendingStatusText());
       const box = elements.pendingStatusBox;
       if (box) {
@@ -80,45 +149,48 @@ window.__rendererPending = (function () {
     }
 
     async function loadRule() {
-      if (!desktopApi || !desktopApi.pending || typeof desktopApi.pending.getRule !== 'function') {
-        state.pending.rule = null;
-        return;
-      }
+      const generation = renderGeneration;
+      const request = ++ruleRequest;
       try {
-        state.pending.rule = (await desktopApi.pending.getRule()) || null;
-      } catch (err) {
-        console.error('[pending] loadRule failed:', err);
+        const rule = await desktopApi?.pending?.getRule?.();
+        if (!live(generation) || request !== ruleRequest) return false;
+        state.pending.rule = rule || null;
+        return true;
+      } catch (error) {
+        if (!live(generation) || request !== ruleRequest) return false;
         state.pending.rule = null;
+        reportError(error);
+        return false;
       }
     }
-
     async function loadColumns() {
       if (columnsCache) return columnsCache;
-      if (!desktopApi || !desktopApi.pending || typeof desktopApi.pending.getColumns !== 'function') {
-        columnsCache = [];
-        return columnsCache;
-      }
+      const generation = renderGeneration;
+      const request = ++columnsRequest;
       try {
-        const cols = await desktopApi.pending.getColumns();
-        columnsCache = Array.isArray(cols) ? cols.slice() : [];
-      } catch (err) {
-        console.error('[pending] loadColumns failed:', err);
+        const columns = await desktopApi?.pending?.getColumns?.();
+        if (!live(generation) || request !== columnsRequest) return [];
+        columnsCache = Array.isArray(columns) ? columns.slice() : [];
+      } catch (error) {
+        if (!live(generation) || request !== columnsRequest) return [];
+        reportError(error);
         columnsCache = [];
       }
       return columnsCache;
     }
-
     async function loadMonths() {
-      if (!desktopApi || !desktopApi.pending || typeof desktopApi.pending.listMonths !== 'function') {
-        state.pending.months = [];
-        return;
-      }
+      const generation = renderGeneration;
+      const request = ++monthsRequest;
       try {
-        const months = await desktopApi.pending.listMonths();
+        const months = await desktopApi?.pending?.listMonths?.();
+        if (!live(generation) || request !== monthsRequest) return false;
         state.pending.months = Array.isArray(months) ? months : [];
-      } catch (err) {
-        console.error('[pending] loadMonths failed:', err);
+        return true;
+      } catch (error) {
+        if (!live(generation) || request !== monthsRequest) return false;
         state.pending.months = [];
+        reportError(error);
+        return false;
       }
     }
 
@@ -254,7 +326,7 @@ window.__rendererPending = (function () {
       cancelBtn.className = 'secondary-btn small';
       cancelBtn.type = 'button';
       cancelBtn.textContent = '取消';
-      cancelBtn.addEventListener('click', () => closeModal());
+      cancelBtn.addEventListener('click', () => closeModal(overlay));
       const saveBtn = document.createElement('button');
       saveBtn.className = 'primary-btn small';
       saveBtn.type = 'button';
@@ -263,10 +335,11 @@ window.__rendererPending = (function () {
         const matchFields = matchCol.collectValues();
         const compareFields = compareCol.collectValues();
         if (matchFields.length === 0) {
-          openModal(createAlertDialog('请至少选择一个"对账字段"（匹配 key）'));
+          if (scoped) bridge.pushModal(overlay, () => createAlertDialog('请至少选择一个"对账字段"（匹配 key）'));
+          else openModal(() => createAlertDialog('请至少选择一个"对账字段"（匹配 key）'));
           return;
         }
-        handleRuleConfirm({ matchFields, compareFields });
+        handleRuleConfirm({ matchFields, compareFields, parent: overlay });
       });
       actions.appendChild(saveBtn);
       actions.appendChild(cancelBtn);
@@ -274,7 +347,9 @@ window.__rendererPending = (function () {
       return overlay;
     }
 
-    function handleRuleConfirm({ matchFields, compareFields }) {
+    function handleRuleConfirm({ matchFields, compareFields, parent }) {
+      const view = captureView();
+      const { openModal, closeModal, refreshPendingUi } = view;
       // createConfirmDialog 内部用 innerHTML 塞 message，支持 HTML 标签
       // 31 列表头为受控预定义值（无 HTML 特殊字符），防御性对字段名做 HTML escape
       const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -284,30 +359,40 @@ window.__rendererPending = (function () {
         '<strong>请确认筛选的字段：</strong><br><br>' +
         `<div>对账字段 (${matchFields.length}): ${matchText}</div>` +
         `<div>对账内容 (${compareFields.length}): ${compareText}</div>`;
-      openModal(createConfirmDialog({
+      let saving = false;
+      const openConfirm = scoped && parent ? (source) => view.pushModal(parent, source) : openModal;
+      openConfirm(() => createConfirmDialog({
         message,
         confirmText: '确认',
         cancelText: '取消',
         onConfirm: async () => {
+          if (saving || !view.isCurrent()) return;
+          saving = true;
           try {
             const saved = await desktopApi.pending.saveRule({ matchFields, compareFields });
+            ++ruleRequest;
             state.pending.rule = saved;
-            closeModal();
+            closeModal(undefined, { status: 'submitted', value: true });
+            if (scoped && parent) closeModal(parent, { status: 'submitted', value: true });
             refreshPendingUi();
           } catch (err) {
-            openModal(createAlertDialog('保存规则失败：' + (err && err.message ? err.message : String(err))));
+            saving = false;
+            openModal(() => createAlertDialog('保存规则失败：' + (err && err.message ? err.message : String(err))));
           }
         }
       }));
     }
 
     async function handlePendingRuleClick() {
+      const view = captureView();
+      const { openModal, closeModal, refreshPendingUi } = view;
       const columns = await loadColumns();
+      if (!view.isCurrent()) return;
       if (!columns || columns.length === 0) {
-        openModal(createAlertDialog('无法加载 Pending 模板表头，请检查 assets/Pending.xlsx 或 Pending DB 初始化。'));
+        openModal(() => createAlertDialog('无法加载 Pending 模板表头，请检查 assets/Pending.xlsx 或 Pending DB 初始化。'));
         return;
       }
-      openModal(buildRuleDialogNode({ columns, currentRule: state.pending.rule }));
+      openModal(() => buildRuleDialogNode({ columns, currentRule: state.pending.rule }));
     }
 
     // ========== 年月选择对话框 ==========
@@ -376,20 +461,24 @@ window.__rendererPending = (function () {
     // ========== 导入主流程 ==========
 
     async function handlePendingImportClick() {
+      const view = captureView();
+      const { openModal, closeModal, refreshPendingUi } = view;
       let pickResult;
       try {
         pickResult = await desktopApi.pending.pickFiles();
       } catch (err) {
-        openModal(createAlertDialog('打开文件选择对话框失败：' + (err && err.message ? err.message : String(err))));
+        openModal(() => createAlertDialog('打开文件选择对话框失败：' + (err && err.message ? err.message : String(err))));
         return;
       }
       if (!pickResult || pickResult.cancelled || !Array.isArray(pickResult.files) || pickResult.files.length === 0) {
         return;
       }
+      if (!view.isCurrent()) return;
       const files = pickResult.files.slice();
-      openModal(buildImportMonthDialog({
+      openModal(() => buildImportMonthDialog({
         onConfirm: (yearMonth) => {
-          closeModal();
+          const closed = closeModal(undefined, { status: 'submitted', value: true });
+          if (scoped && closed.status !== 'closed') return;
           startImport(
             { files, yearMonth },
             { yearMonth, fileCount: files.length }
@@ -402,6 +491,8 @@ window.__rendererPending = (function () {
     }
 
     async function startImport(request, displayContext) {
+      const view = captureView();
+      const { openModal, closeModal, refreshPendingUi } = view;
       const yearMonth = displayContext.yearMonth;
       const fileCount = displayContext.fileCount;
       state.pending.importing = true;
@@ -418,12 +509,13 @@ window.__rendererPending = (function () {
           state.pending.importing = false;
           state.pending.currentYearMonth = null;
           refreshPendingUi();
-          openModal(createConfirmDialog({
+          openModal(() => createConfirmDialog({
             message: `${yearMonth} 已有 ${result.existingRowCount} 行 Pending 数据${result.existingImportedAt ? `（导入时间 ${result.existingImportedAt}）` : ''}。\n\n继续将留底旧数据到 pending-archives/ 并覆盖。`,
             confirmText: '确认覆盖',
             cancelText: '取消',
             onConfirm: () => {
-              closeModal();
+              const closed = closeModal(undefined, { status: 'submitted', value: true });
+              if (scoped && closed.status !== 'closed') return;
               startImport(
                 buildPendingImportConfirmationRequest(result.contextId),
                 displayContext
@@ -441,12 +533,12 @@ window.__rendererPending = (function () {
           state.pending.lastImportSummary =
             `${yearMonth} 数据已导入（${result.rowCount} 行）。` +
             (result.archivePath ? '旧数据已留底。' : '');
-          await loadMonths();
+          if (view.isCurrent()) await loadMonths();
           refreshPendingUi();
           // v2.1.11 T2（spec §3.3 / D-T2-1）：导入成功后弹"是否核对移除pending数据？"
           //   选否 → 现状不变；选是 → 选移除归档 xlsx → 解析入库（关联本次导入月份 yearMonth，
           //   它将作为后续对账的 upperMonth；对账后自动匹配 missing↔移除）。
-          promptRemovalReconcile(yearMonth);
+          if (view.isCurrent()) promptRemovalReconcile(yearMonth);
           return;
         }
 
@@ -464,18 +556,20 @@ window.__rendererPending = (function () {
         state.pending.errorReportAvailable = false;
         state.pending.errorMessage = null;
         refreshPendingUi();
-        openModal(createAlertDialog('导入调用失败：' + (err && err.message ? err.message : String(err))));
+        openModal(() => createAlertDialog('导入调用失败：' + (err && err.message ? err.message : String(err))));
       }
     }
 
     // v2.1.11 T2：导入成功后的"是否核对移除pending数据？"提醒 + 移除文件导入入库
     function promptRemovalReconcile(yearMonth) {
+      const view = captureView();
+      const { openModal, closeModal, refreshPendingUi } = view;
       // 防御：旧 preload 无 removed api → 静默跳过（不影响导入主流程）
       if (!desktopApi || !desktopApi.pending || !desktopApi.pending.removed
           || typeof desktopApi.pending.removed.pickFiles !== 'function') {
         return;
       }
-      openModal(createConfirmDialog({
+      openModal(() => createConfirmDialog({
         message:
           `${yearMonth} 数据已导入。<br><br>` +
           '是否核对<strong>移除pending数据</strong>？',
@@ -490,22 +584,25 @@ window.__rendererPending = (function () {
     }
 
     async function importRemovedFile(yearMonth) {
+      const view = captureView();
+      const { openModal, closeModal, refreshPendingUi } = view;
       let pickResult;
       try {
         pickResult = await desktopApi.pending.removed.pickFiles();
       } catch (err) {
-        openModal(createAlertDialog('打开文件选择对话框失败：' + (err && err.message ? err.message : String(err))));
+        openModal(() => createAlertDialog('打开文件选择对话框失败：' + (err && err.message ? err.message : String(err))));
         return;
       }
       if (!pickResult || pickResult.cancelled
           || !Array.isArray(pickResult.files) || pickResult.files.length === 0) {
         return; // 用户取消选文件 = 不导入（现状不变）
       }
+      if (!view.isCurrent()) return;
       try {
         const result = await desktopApi.pending.removed.import({ yearMonth, files: pickResult.files });
         if (!result || result.status === 'cancelled') return;
         if (result.status === 'success') {
-          openModal(createAlertDialog(
+          openModal(() => createAlertDialog(
             `移除归档数据已入库：${yearMonth} 共 ${result.inserted} 行` +
             (result.deleted > 0 ? `（覆盖旧 ${result.deleted} 行）` : '') +
             '。<br>对账后将自动标记 missing 行的移除核对状态。'
@@ -514,10 +611,10 @@ window.__rendererPending = (function () {
           const detail = Array.isArray(result.detailLines) && result.detailLines.length > 0
             ? '<br><span style="font-size:12px;color:var(--muted);">' + result.detailLines.join('<br>') + '</span>'
             : '';
-          openModal(createAlertDialog('移除文件导入失败：' + (result.message || '未知错误') + detail));
+          openModal(() => createAlertDialog('移除文件导入失败：' + (result.message || '未知错误') + detail));
         }
       } catch (err) {
-        openModal(createAlertDialog('移除文件导入异常：' + (err && err.message ? err.message : String(err))));
+        openModal(() => createAlertDialog('移除文件导入异常：' + (err && err.message ? err.message : String(err))));
       }
     }
 
@@ -542,19 +639,21 @@ window.__rendererPending = (function () {
     }
 
     async function handleStatusBoxClick() {
+      const view = captureView();
+      const { openModal, closeModal, refreshPendingUi } = view;
       if (!state.pending.errorReportAvailable) return;
       try {
         const result = await desktopApi.pending.exportErrorReport();
         if (!result) return;
         if (result.status === 'success') {
-          openModal(createAlertDialog(`报错文件已导出：${result.path}（${result.errorCount} 条错误）`));
+          openModal(() => createAlertDialog(`报错文件已导出：${result.path}（${result.errorCount} 条错误）`));
         } else if (result.status === 'cancelled') {
           // 无动作
         } else if (result.status === 'error') {
-          openModal(createAlertDialog('导出报错文件失败：' + (result.message || '未知错误')));
+          openModal(() => createAlertDialog('导出报错文件失败：' + (result.message || '未知错误')));
         }
       } catch (err) {
-        openModal(createAlertDialog('导出报错文件异常：' + (err && err.message ? err.message : String(err))));
+        openModal(() => createAlertDialog('导出报错文件异常：' + (err && err.message ? err.message : String(err))));
       }
     }
 
@@ -624,44 +723,44 @@ window.__rendererPending = (function () {
     }
 
     async function handlePendingRunClick() {
+      const view = captureView();
+      const { openModal, closeModal, refreshPendingUi } = view;
       await loadMonths();
+      if (!view.isCurrent()) return;
       const months = state.pending.months.slice();
       if (months.length < 2) {
-        openModal(createAlertDialog(`至少需要 2 个月的 Pending 数据才能对账（当前 ${months.length} 个月）。`));
+        openModal(() => createAlertDialog(`至少需要 2 个月的 Pending 数据才能对账（当前 ${months.length} 个月）。`));
         return;
       }
 
       const openDialog = (defaultUpper, defaultLower) => {
-        openModal(buildReconcileDialog({
-          months,
-          defaultUpper,
-          defaultLower,
-          onConfirm: ({ upper, lower }) => {
-            // 第一步确认：开始运行？
-            openModal(createConfirmDialog({
-              message: `确认以 "<strong>${upper}</strong>" vs "<strong>${lower}</strong>" 进行对账？`,
-              confirmText: '确认',
-              cancelText: '取消',
-              onConfirm: () => {
-                // 第二步：校验相邻
-                closeModal();
-                if (!isAdjacentMonths(upper, lower)) {
-                  openModal(createAlertDialog(
-                    `选取的月份不是相邻月份（上上月=${upper}，上月=${lower}），请重新选择。`,
-                    { onConfirm: () => { openDialog(upper, lower); } }
-                  ));
-                  return;
+        let picker;
+        openModal(() => {
+          picker = buildReconcileDialog({
+            months, defaultUpper, defaultLower,
+            onConfirm: ({ upper, lower }) => {
+              view.pushModal(picker, () => createConfirmDialog({
+                message: `确认以 "<strong>${upper}</strong>" vs "<strong>${lower}</strong>" 进行对账？`,
+                confirmText: '确认', cancelText: '取消',
+                onConfirm: () => {
+                  const closed = closeModal(undefined, { status: 'submitted', value: true });
+                  if (scoped && closed.status !== 'closed') return;
+                  if (!isAdjacentMonths(upper, lower)) {
+                    const message = `选取的月份不是相邻月份（上上月=${upper}，上月=${lower}），请重新选择。`;
+                    if (scoped) view.pushModal(picker, () => createAlertDialog(message));
+                    else openModal(() => createAlertDialog(message, { onConfirm: () => openDialog(upper, lower) }));
+                    return;
+                  }
+                  if (scoped) closeModal(picker, { status: 'submitted', value: true });
+                  runReconciliation(upper, lower).catch(reportError);
                 }
-                runReconciliation(upper, lower).catch((err) => {
-                  console.error('[pending] runReconciliation error:', err);
-                });
-              }
-            }));
-          },
-          onCancel: () => closeModal()
-        }));
+              }));
+            },
+            onCancel: () => closeModal(picker)
+          });
+          return picker;
+        });
       };
-
       openDialog(months[1], months[0]);
     }
 
@@ -688,6 +787,8 @@ window.__rendererPending = (function () {
     }
 
     async function runReconciliation(upperMonth, lowerMonth) {
+      const view = captureView();
+      const { openModal, closeModal, refreshPendingUi } = view;
       state.pending.running = true;
       state.pending.latestRunResult = null;
       state.pending.runningText = `正在对账 ${lowerMonth} vs ${upperMonth}...`;
@@ -847,7 +948,8 @@ window.__rendererPending = (function () {
         if (radioSingle.checked) {
           const runId = Number(runSelect.value);
           if (!runId) {
-            openModal(createAlertDialog('请选择一个 run'));
+            if (scoped) bridge.pushModal(overlay, () => createAlertDialog('请选择一个 run'));
+            else openModal(() => createAlertDialog('请选择一个 run'));
             return;
           }
           const chosenMonth = monthSelect.value;
@@ -865,22 +967,25 @@ window.__rendererPending = (function () {
     }
 
     async function handlePendingExportClick() {
+      const view = captureView();
+      const { openModal, closeModal, refreshPendingUi } = view;
       let allRuns = [];
       try {
         allRuns = await desktopApi.pending.diff.listAllRuns();
       } catch (err) {
-        openModal(createAlertDialog('读取运算记录失败：' + (err && err.message ? err.message : String(err))));
+        openModal(() => createAlertDialog('读取运算记录失败：' + (err && err.message ? err.message : String(err))));
         return;
       }
       if (!Array.isArray(allRuns) || allRuns.length === 0) {
-        openModal(createAlertDialog('暂无运算记录，请先点击"开始运行"生成差异。'));
+        openModal(() => createAlertDialog('暂无运算记录，请先点击"开始运行"生成差异。'));
         return;
       }
 
-      openModal(buildExportDialog({
+      openModal(() => buildExportDialog({
         allRuns,
         onConfirm: async (choice) => {
-          closeModal();
+          const closed = closeModal(undefined, { status: 'submitted', value: true });
+          if (scoped && closed.status !== 'closed') return;
           try {
             let result;
             if (choice.scope === 'single') {
@@ -899,12 +1004,12 @@ window.__rendererPending = (function () {
               if (choice.scope === 'aggregate' && result.removalDataOmitted) {
                 successMsg += '<br>注意：聚合导出不含移除核对 sheet，请用"导出指定月份"查看移除核对结果。';
               }
-              openModal(createAlertDialog(successMsg));
+              openModal(() => createAlertDialog(successMsg));
             } else {
-              openModal(createAlertDialog('导出失败：' + (result.message || '未知错误')));
+              openModal(() => createAlertDialog('导出失败：' + (result.message || '未知错误')));
             }
           } catch (err) {
-            openModal(createAlertDialog('导出异常：' + (err && err.message ? err.message : String(err))));
+            openModal(() => createAlertDialog('导出异常：' + (err && err.message ? err.message : String(err))));
           }
         },
         onCancel: () => closeModal()
@@ -914,61 +1019,86 @@ window.__rendererPending = (function () {
     // ========== 初始化 + 事件绑定 ==========
 
     async function initialize() {
-      await loadRule();
-      await loadMonths();
-      // 从 DB 拿最新 run 恢复 latestRunId —— 让"导出差异"按钮在历史 run 存在时保持可用
-      // （latestRunId 之前只在本会话对账完成时赋值，重开模块或重启后会丢）
+      const generation = renderGeneration;
+      const request = ++runsRequest;
+      const [ruleOk, monthsOk] = await Promise.all([loadRule(), loadMonths()]);
+      if (!live(generation)) return { status: 'stale' };
+      let runsOk = true;
       try {
-        if (desktopApi && desktopApi.pending && desktopApi.pending.diff
-            && typeof desktopApi.pending.diff.listAllRuns === 'function') {
+        if (typeof desktopApi?.pending?.diff?.listAllRuns === 'function') {
           const allRuns = await desktopApi.pending.diff.listAllRuns();
-          if (Array.isArray(allRuns) && allRuns.length > 0) {
-            state.pending.latestRunId = allRuns[0].id;
-          }
+          if (!live(generation) || request !== runsRequest) return { status: 'stale' };
+          state.pending.latestRunId = Array.isArray(allRuns) && allRuns.length ? allRuns[0].id : null;
         }
-      } catch (err) {
-        console.warn('[pending] listAllRuns at init failed:', err);
+      } catch (error) { runsOk = false; reportError(error); }
+      if (!live(generation)) return { status: 'stale' };
+      needsRefresh = !(ruleOk && monthsOk && runsOk);
+      refreshPendingUi();
+      if (needsRefresh) setPendingStatus('Pending 状态读取失败，请重新进入模块重试。');
+      return { status: needsRefresh ? 'error' : 'ready' };
+    }
+    function bindEvents() {
+      if (bound || disposed) return;
+      bound = true;
+      for (const [id, handler] of [['pendingRuleBtn', handlePendingRuleClick], ['pendingImportBtn', handlePendingImportClick],
+        ['pendingRunBtn', handlePendingRunClick], ['pendingExportBtn', handlePendingExportClick], ['pendingStatusBox', handleStatusBoxClick]]) {
+        const element = elements[id];
+        const listener = () => { if (live()) Promise.resolve(handler()).catch(reportError); };
+        element?.addEventListener('click', listener);
+        removers.push(() => element?.removeEventListener('click', listener));
+      }
+      if (typeof desktopApi?.pending?.onImportProgress === 'function') {
+        const unsubscribe = desktopApi.pending.onImportProgress((event) => {
+          if (disposed || !event || event.type !== 'progress' || !state.pending.importing) return;
+          const ym = state.pending.currentYearMonth || '';
+          state.pending.importingText = `正在导入 ${ym}：${event.file || ''}（已处理 ${event.rowsProcessed || 0} 行）`;
+          // 在后台进行的任务只更新本域状态；重新进入时读取事实后展示。
+          if (live()) refreshPendingUi(); else needsRefresh = true;
+        });
+        if (typeof unsubscribe === 'function') removers.push(unsubscribe);
+      }
+    }
+    function enter() {
+      if (disposed) return Promise.resolve({ status: 'stale' });
+      active = true;
+      ++renderGeneration;
+      bindEvents();
+      refreshPendingUi();
+      return initialize();
+    }
+    function leave({ reason = 'navigation' } = {}) {
+      if (host?.closeOwner(owner, reason).status === 'blocked') return { status: 'blocked' };
+      active = false;
+      ++renderGeneration;
+      return { status: 'left' };
+    }
+    function dispose() {
+      if (disposed) return;
+      disposed = true;
+      active = false;
+      ++renderGeneration;
+      [...modalHandles].forEach((handle) => handle.dispose());
+      for (const remove of removers.splice(0)) { try { remove(); } catch (error) { reportError(error); } }
+    }
+    function invalidate() {
+      needsRefresh = true;
+      columnsCache = null;
+      ++ruleRequest; ++columnsRequest; ++monthsRequest; ++runsRequest;
+    }
+    function applyPreviewState(value = {}) {
+      // 预览只接受声明过的 Pending 字段副本，不暴露生产 state。
+      for (const key of Object.keys(state.pending)) {
+        if (Object.hasOwn(value, key)) state.pending[key] = value[key] && typeof value[key] === 'object'
+          ? JSON.parse(JSON.stringify(value[key])) : value[key];
       }
       refreshPendingUi();
     }
 
-    function bindEvents() {
-      if (elements.pendingRuleBtn) {
-        elements.pendingRuleBtn.addEventListener('click', () => {
-          handlePendingRuleClick().catch((err) => console.error('[pending] rule click error:', err));
-        });
-      }
-      if (elements.pendingImportBtn) {
-        elements.pendingImportBtn.addEventListener('click', () => {
-          handlePendingImportClick().catch((err) => console.error('[pending] import click error:', err));
-        });
-      }
-      if (elements.pendingRunBtn) {
-        elements.pendingRunBtn.addEventListener('click', () => {
-          handlePendingRunClick().catch((err) => console.error('[pending] run click error:', err));
-        });
-      }
-      if (elements.pendingExportBtn) {
-        elements.pendingExportBtn.addEventListener('click', () => {
-          handlePendingExportClick().catch((err) => console.error('[pending] export click error:', err));
-        });
-      }
-      if (elements.pendingStatusBox) {
-        elements.pendingStatusBox.addEventListener('click', handleStatusBoxClick);
-      }
-      if (desktopApi && desktopApi.pending && typeof desktopApi.pending.onImportProgress === 'function') {
-        desktopApi.pending.onImportProgress((ev) => {
-          if (!ev || ev.type !== 'progress') return;
-          if (!state.pending.importing) return;
-          const ym = state.pending.currentYearMonth || '';
-          state.pending.importingText =
-            `正在导入 ${ym}：${ev.file || ''}（已处理 ${ev.rowsProcessed || 0} 行）`;
-          refreshPendingUi();
-        });
-      }
-    }
-
     return {
+      enter, leave, dispose, invalidate, applyPreviewState,
+      importFiles: handlePendingImportClick, run: handlePendingRunClick,
+      export: handlePendingExportClick, editRule: handlePendingRuleClick,
+      getSnapshot: () => JSON.parse(JSON.stringify({ ...state.pending, needsRefresh })),
       initialize,
       refreshPendingUi,
       setPendingStatus,
@@ -982,5 +1112,12 @@ window.__rendererPending = (function () {
     };
   }
 
-  return { buildPendingImportConfirmationRequest, createRendererPending };
+  function createPendingController(deps) {
+    if (!deps?.panel || !deps.ui?.modalHost || !deps.ui?.modalBridge) throw new TypeError('Pending 控制器缺少领域依赖');
+    return Object.freeze(createRendererPending(deps));
+  }
+  return { buildPendingImportConfirmationRequest, createRendererPending, createPendingController };
 })();
+
+if (typeof module !== "undefined" && module.exports) module.exports = root.__rendererPending;
+})(typeof window !== "undefined" ? window : globalThis);

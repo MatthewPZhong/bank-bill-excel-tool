@@ -13,6 +13,7 @@ const {
 const root = path.resolve(__dirname, '../..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const renderer = fs.readFileSync(path.join(root, 'src/renderer.js'), 'utf8');
+const controller = fs.readFileSync(path.join(root, 'src/renderer/controllers/duplicate-inbound.js'), 'utf8');
 const preload = fs.readFileSync(path.join(root, 'src/preload.js'), 'utf8');
 const main = fs.readFileSync(path.join(root, 'src/main.js'), 'utf8');
 
@@ -134,38 +135,42 @@ test.describe('重复入金匹配 UI / preload / IPC 接线', () => {
       'handleDuplicateInboundMatchImport',
       'handleDuplicateInboundMatchRun',
       'handleDuplicateInboundMatchExport',
-      'applyDuplicateInboundMatchPanelPreviewState'
+      'applyPreview'
     ]) {
-      assert.ok(renderer.includes(`function ${functionName}(`), `缺少 ${functionName}`);
+      assert.ok(controller.includes(`function ${functionName}(`), `缺少 ${functionName}`);
     }
     assert.ok(renderer.includes("info.previewModal === 'duplicate-inbound-match-panel'"));
-    assert.match(renderer, /setDuplicateInboundMatchStatus[\s\S]*updateStatusBox\(/);
-    assert.match(renderer, /duplicateInboundMatchState\.busy \|\| !status\.canRun/);
-    assert.match(renderer, /duplicateInboundMatchState\.busy \|\| !status\.canExport/);
-    assert.match(renderer, /MPT 异常：零候选/);
-    assert.ok(renderer.includes('duplicate-inbound-mpt-candidate-count-multiple'));
-    assert.ok(renderer.includes('duplicate-inbound-mpt-candidate-reused-across-groups'));
-    assert.ok(renderer.includes('duplicate-inbound-mpt-opp-bu-conflict'));
-    assert.ok(renderer.includes('duplicate-inbound-mpt-order-id-empty'));
-    assert.ok(renderer.includes('duplicate-inbound-document-candidate-count-zero'));
-    assert.ok(renderer.includes('duplicate-inbound-document-identity-fields-conflict'));
-    assert.ok(renderer.includes('duplicate-inbound-document-business-department-mismatch'));
-    assert.ok(renderer.includes('window.desktopApi.duplicateInboundMatch.importFiles()'));
-    assert.match(renderer, /function formatDuplicateInboundMatchFailure\(/);
-    assert.match(renderer, /Array\.isArray\(value\.detailLines\)/);
-    assert.match(renderer, /\.\.\.detailLines\]\.join\('\\n'\)/);
+    assert.match(renderer, /createDuplicateInboundController\(\{ api: window\.desktopApi\.duplicateInboundMatch,[\s\S]*?panel: elements\.duplicateInboundMatchModulePanel/);
+    assert.match(renderer, /entry\(MODULES\.duplicateInboundMatch, elements\.duplicateInboundMatchModulePanel,[\s\S]*?domainControllers\.duplicateInbound\)/);
+    assert.match(renderer, /domainControllers\.duplicateInbound\.commands\.preview\(\)/);
+    assert.ok(html.includes('src/renderer/controllers/duplicate-inbound.js'));
+    assert.match(controller, /setDuplicateInboundMatchStatus[\s\S]*updateStatusBox\(/);
+    assert.match(controller, /duplicateInboundMatchState\.busy \|\| !status\.canRun/);
+    assert.match(controller, /duplicateInboundMatchState\.busy \|\| !status\.canExport/);
+    assert.match(controller, /MPT 异常：零候选/);
+    assert.ok(controller.includes('duplicate-inbound-mpt-candidate-count-multiple'));
+    assert.ok(controller.includes('duplicate-inbound-mpt-candidate-reused-across-groups'));
+    assert.ok(controller.includes('duplicate-inbound-mpt-opp-bu-conflict'));
+    assert.ok(controller.includes('duplicate-inbound-mpt-order-id-empty'));
+    assert.ok(controller.includes('duplicate-inbound-document-candidate-count-zero'));
+    assert.ok(controller.includes('duplicate-inbound-document-identity-fields-conflict'));
+    assert.ok(controller.includes('duplicate-inbound-document-business-department-mismatch'));
+    assert.ok(controller.includes('domainApi.importFiles()'));
+    assert.match(controller, /function formatDuplicateInboundMatchFailure\(/);
+    assert.match(controller, /Array\.isArray\(value\.detailLines\)/);
+    assert.match(controller, /\.\.\.detailLines\]\.join\('\\n'\)/);
     assert.equal(
-      (renderer.match(/formatDuplicateInboundMatchFailure\('(导入|运行|导出)失败'/g) || []).length,
+      (controller.match(/formatDuplicateInboundMatchFailure\('(导入|运行|导出)失败'/g) || []).length,
       6,
       '导入、运行、导出的返回错误与抛错都必须展示 detailLines'
     );
     assert.match(
-      renderer,
+      controller,
       /formatDuplicateInboundMatchFailure\('状态读取失败', status\)/,
       '启动回收或侧库状态读取失败必须对用户可见'
     );
     const formatExportSuccess = new Function(
-      `${extractFunction(renderer, 'formatDuplicateInboundMatchExportSuccess')}; return formatDuplicateInboundMatchExportSuccess;`
+      `${extractFunction(controller, 'formatDuplicateInboundMatchExportSuccess')}; return formatDuplicateInboundMatchExportSuccess;`
     )();
     assert.deepEqual(
       formatExportSuccess({ filePath: '/tmp/result.xlsx', warnings: ['旧备份未删除'] }),

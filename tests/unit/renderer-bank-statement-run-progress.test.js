@@ -19,7 +19,7 @@ const path = require('node:path');
 const SRC_DIR = path.join(__dirname, '..', '..', 'src');
 // 读源 + 剥 NUL（main.js 含 NUL 字节，见 memory reference_mainjs_nul_grep；其余文件剥除无副作用）。
 const readSrc = (rel) => fs.readFileSync(path.join(SRC_DIR, rel), 'utf8').replace(/\u0000/g, '');
-const rendererSrc = readSrc('renderer.js');
+const rendererSrc = readSrc('renderer/controllers/bank-statement.js');
 const preloadSrc = readSrc('preload.js');
 const mainSrc = readSrc('main.js');
 const orchSrc = readSrc(path.join('main-process', 'reconciliation-orchestrator.js'));
@@ -108,7 +108,8 @@ describe('需求3 进度契约：run:progress 通道名三处一致（main send 
   });
 
   test('renderer 经 desktopApi.bankStatement.onRunProgress 订阅并喂给格式化器', () => {
-    assert.ok(rendererSrc.includes('api.onRunProgress((ev) =>'), 'renderer 必须订阅 onRunProgress');
-    assert.ok(rendererSrc.includes('const text = formatBankStatementRunProgress(ev);'), 'renderer 订阅回调必须把事件喂给 formatBankStatementRunProgress');
+    assert.ok(rendererSrc.includes("}, 'onRunProgress', formatBankStatementRunProgress);"), '运行 action 必须注册 onRunProgress 并传入格式化器');
+    assert.ok(rendererSrc.includes('remove = api[method]((event) =>'), 'controller 必须通过 scoped API 订阅');
+    assert.ok(rendererSrc.includes('const text = formatter(event);'), 'renderer 订阅回调必须把事件喂给 formatBankStatementRunProgress');
   });
 });

@@ -8,10 +8,13 @@ const source = fs.readFileSync(path.resolve(__dirname, '../../../src/renderer-bi
 
 // 默认单测无需图形环境；同一组交互场景另由隔离 Electron 脚本验证真实 DOM 行为。
 function createDocument() {
-  const doc = { activeElement: null, createElement: (tag) => new Element(tag) };
+  const events = new EventTarget();
+  const doc = { activeElement: null, createElement: (tag) => new Element(tag),
+    addEventListener: events.addEventListener.bind(events), removeEventListener: events.removeEventListener.bind(events),
+    defaultView: { AbortController, getComputedStyle: (element) => element.style } };
   class Element extends EventTarget {
     constructor(tag) {
-      super(); this.tagName = tag.toUpperCase(); this.nodeType = 1; this.children = []; this.parentNode = null;
+      super(); this.ownerDocument = doc; this.style = {}; this.inert = false; this.tagName = tag.toUpperCase(); this.nodeType = 1; this.children = []; this.parentNode = null;
       this.dataset = {}; this.attributes = {}; this.disabled = false; this.hidden = false; this.open = false; this.className = '';
       this.classList = {
         contains: (name) => this.className.split(/\s+/).includes(name),
@@ -25,9 +28,15 @@ function createDocument() {
     set innerHTML(_value) { throw new Error('本控制器应使用 textContent 创建用户文本'); }
     set value(value) { this.selectedValue = String(value); }
     get value() { return this.selectedValue ?? (this.tagName === 'SELECT' ? this.children[0]?.value || '' : ''); }
+    get parentElement() { return this.parentNode; }
+    appendChild(item) { this.append(item); return item; }
+    contains(item) { return item === this || this.children.some((child) => child.contains(item)); }
+    hasAttribute(name) { return Object.hasOwn(this.attributes, name); }
+    removeAttribute(name) { delete this.attributes[name]; if (name === 'open') this.open = false; }
+    getClientRects() { return this.isConnected && !this.hidden ? [{}] : []; }
     get firstChild() { return this.children[0] || null; }
     get isConnected() { return this === doc.body || Boolean(this.parentNode?.isConnected); }
-    setAttribute(name, value) { this.attributes[name] = String(value); }
+    setAttribute(name, value) { this.attributes[name] = String(value); if (name === 'open') this.open = true; }
     getAttribute(name) { return this.attributes[name] ?? (name.startsWith('data-') ? this.dataset[name.slice(5)] : this[name]) ?? null; }
     append(...items) { for (const item of items) { item.remove(); item.parentNode = this; this.children.push(item); } }
     remove() { if (this.parentNode) this.parentNode.children = this.parentNode.children.filter((item) => item !== this); this.parentNode = null; }
@@ -80,13 +89,16 @@ function createHarness(window) {
     currentInput: { status: 'ok', objectId: 'input-1' },
     deletePreview: { status: 'ok', previewId: 'delete-1', datasets: [], runs: [], selection: { runIds: ['run-1'] }, references: { protectedAfterKeep: 1, protectedAfterDelete: 0, userLockedOriginals: 0, sharedBlobOriginals: 0 } },
     deleteData: { status: 'ok' },
+    retryRecovery: { ready: true },
     cancel: { status: 'ok' }
   };
   const reply = { ...defaults };
   for (const name of Object.keys(defaults)) api[name] = async (...args) => { calls.push({ name, args }); return typeof reply[name] === 'function' ? reply[name](...args) : reply[name]; };
   const panel = doc.createElement('section'); panel.id = 'bizOpV327ModulePanel'; panel.className = 'control-board module-panel';
   const legacyPanel = doc.createElement('section'); doc.body.append(panel, legacyPanel);
-  const controller = window.createBizOpV327Controller({ api, panel, legacyPanel, document: doc, restoreLegacy: () => calls.push({ name: 'restoreLegacy' }) });
+  const modalRoot = doc.createElement('div'); doc.body.append(modalRoot);
+  const modalHost = window.__modalHost.createModalHost({ root: modalRoot, document: doc });
+  const controller = window.createBizOpV327Controller({ api, panel, legacyPanel, modalHost, document: doc, restoreLegacy: () => calls.push({ name: 'restoreLegacy' }) });
   const find = (text, scope = doc) => [...scope.querySelectorAll('button')].find((item) => item.textContent === text);
   const flush = async () => {
     for (let i = 0; i < 30; i += 1) await Promise.resolve();
@@ -97,9 +109,9 @@ function createHarness(window) {
   const click = async (text, scope = doc) => { const item = find(text, scope); if (!item) throw new Error(`未找到按钮：${text}`); item.click(); await flush(); return item; };
   const count = (name) => calls.filter((call) => call.name === name).length;
   const deferred = () => { let resolve; let reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
-  return { window, doc, panel, legacyPanel, controller, calls, reply, find, click, flush, count, deferred,
+  return { window, doc, panel, legacyPanel, controller, modalHost, calls, reply, find, click, flush, count, deferred,
     status: () => panel.querySelector('.bizop-status'), text: () => panel.querySelector('.status-box-text').textContent,
-    close: () => { for (const dialog of [...doc.querySelectorAll('dialog')]) { dialog.close(); dialog.remove(); } panel.remove(); legacyPanel.remove(); } };
+    close: () => { controller.dispose(); modalHost.dispose(); modalRoot.remove(); panel.remove(); legacyPanel.remove(); } };
 }
 
 function rendererCases(test, assert, environment) {
@@ -109,6 +121,75 @@ function rendererCases(test, assert, environment) {
     assert.equal(h.count('cancel'), 0);
   }
   async function setup() { const h = await environment(); await h.controller.setSelected(true); return h; }
+  for (const [name, result, expected, tone] of [
+    ['成功', { status: 'ok', summary: { scannedDataRows: 3, acceptedRows: 3 } }, '导入文件完成\n扫描 3 行，接受 3 行', 'success'],
+    ['失败', { status: 'error', message: '导入失败，文件没有保存', errorReport: { status: 'saved', relativePath: 'error-reports/test.xlsx' } }, '导入失败，文件没有保存\n错误报告已保存：error-reports/test.xlsx', 'error'],
+    ['取消', { status: 'cancelled' }, '操作已取消', 'info'],
+    ['连接异常', new Error('后台连接中断'), '后台连接中断', 'error']
+  ]) {
+    for (const reenterBeforeSettlement of [false, true]) {
+      test(`导入离页后${name}结算，${reenterBeforeSettlement ? '先返回再结算' : '先结算再返回'}保留最终反馈及一次调用`, async () => {
+        const h = await setup();
+        try {
+          const pending = h.deferred(); h.reply.importFiles = () => pending.promise;
+          await h.click('导入文件');
+          const waiting = h.text(); assert.equal(h.controller.busy, true);
+          assert.equal(h.controller.leave().status, 'left');
+          if (reenterBeforeSettlement) {
+            await h.controller.enter(); assert.equal(h.find('导入文件').disabled, true);
+          }
+          if (result instanceof Error) pending.reject(result); else pending.resolve(result);
+          await h.flush();
+          assert.equal(h.controller.busy, false);
+          if (!reenterBeforeSettlement) {
+            assert.equal(h.text(), waiting, '隐藏页面不渲染旧访问的结果');
+            await h.controller.enter();
+          }
+          assert.equal(h.text(), expected); assert.equal(h.status().dataset.tone, tone);
+          assert.equal(h.panel.getAttribute('aria-busy'), 'false');
+          assert.equal(h.find('导入文件').disabled, false); assert.equal(h.count('importFiles'), 1);
+          await h.controller.setSelected(false); await h.controller.setSelected(true);
+          assert.equal(h.text(), expected, '重新读可用状态不能抹掉后台任务结算');
+          h.reply.importFiles = { status: 'ok' }; await h.click('导入文件');
+          assert.equal(h.count('importFiles'), 2); assert.equal(h.text(), '导入文件完成');
+        } finally { h.close(); }
+      });
+    }
+  }
+  for (const selection of [{ status: 'ok', selectionRef: 'late-input' }, { status: 'cancelled' }, new Error('旧选择读取失败')]) {
+    test(`未提交的旧导入选择${selection.status || '异常'}在离页后废弃，保留此前任务反馈`, async () => {
+      const h = await setup();
+      try {
+        await h.click('导入文件'); const previous = h.text();
+        const pending = h.deferred(); h.reply.pickFiles = () => pending.promise;
+        await h.click('导入文件'); h.controller.leave(); await h.controller.enter();
+        if (selection instanceof Error) pending.reject(selection); else pending.resolve(selection);
+        await h.flush();
+        assert.equal(h.count('importFiles'), 1, '旧选择不能续发导入');
+        assert.equal(h.text(), previous); assert.equal(h.status().dataset.tone, 'success');
+        assert.equal(h.controller.busy, false); assert.equal(h.find('导入文件').disabled, false);
+        assert.equal(h.doc.querySelectorAll('dialog').length, 0);
+      } finally { h.close(); }
+    });
+  }
+  for (const ready of [true, false]) {
+    test(`恢复检查离页后的真实 ready=${ready}结算不被旧页面代次改写`, async () => {
+      const h = await environment();
+      try {
+        h.reply.status = { mode: 'ACTIVE', recoveryReady: false };
+        await h.controller.enter();
+        const pending = h.deferred(); h.reply.retryRecovery = () => pending.promise;
+        await h.click('重试恢复'); assert.equal(h.count('retryRecovery'), 1);
+        h.controller.leave(); await h.controller.enter();
+        h.reply.status = { mode: 'ACTIVE', recoveryReady: ready };
+        pending.resolve({ ready }); await h.flush();
+        assert.equal(h.text(), ready ? '恢复检查完成' : '仍有未决任务或文件，请查看任务详情后重试');
+        assert.equal(h.status().dataset.tone, ready ? 'success' : 'error');
+        assert.equal(h.find('导入文件').disabled, !ready);
+        assert.equal(h.count('retryRecovery'), 1); assert.equal(h.controller.busy, false);
+      } finally { h.close(); }
+    });
+  }
   test('初始和重新进入 ACTIVE 页面无手动报告或任务取消节点，保留模式路由', async () => {
     const h = await setup();
     try {
@@ -225,7 +306,7 @@ function rendererCases(test, assert, environment) {
       assert.equal(run.disabled, true); await h.click('检查所需数据', dialog); assert.equal(run.disabled, false);
       const pending = h.deferred(); h.reply.run = () => pending.promise; run.focus(); await h.click('确认运行', dialog); noTaskButtons(h);
       assert.equal(h.controller.busy, true); assert.equal(dialog.getAttribute('aria-busy'), 'true'); assert.equal(h.doc.activeElement, dialog.feedback);
-      const cancel = new h.window.Event('cancel', { cancelable: true }); assert.equal(dialog.dispatchEvent(cancel), false); assert.equal(dialog.open, true);
+      assert.equal(h.modalHost.closeTop().status, 'blocked'); assert.equal(dialog.open, true);
       assert.ok([...dialog.querySelectorAll('button,input,select')].every((item) => item.disabled));
       pending.resolve({ status: 'cancelled' }); await h.flush();
       assert.equal(h.controller.busy, false); assert.equal(h.text(), '操作已取消'); assert.equal(h.status().dataset.tone, 'info'); assert.equal(run.disabled, true);
@@ -259,7 +340,7 @@ function rendererCases(test, assert, environment) {
       await h.click('删除', manager); const confirmation = h.doc.querySelector('.bizop-delete-dialog'); await h.click('取消', confirmation); await h.flush(); assert.equal(h.count('deleteData'), 0);
       await h.click('删除', manager); const executing = h.doc.querySelector('.bizop-delete-dialog'); const pending = h.deferred(); h.reply.deleteData = () => pending.promise;
       await h.click('删除', executing); noTaskButtons(h); assert.equal(h.find('取消', executing).disabled, true);
-      assert.equal(executing.dispatchEvent(new h.window.Event('cancel', { cancelable: true })), false);
+      assert.equal(h.modalHost.closeTop().status, 'blocked');
       pending.resolve({ status: 'error', message: '删除未完成' }); await h.flush();
       assert.equal(h.find('取消', executing).disabled, false); assert.equal(h.controller.busy, false); assert.ok(executing.feedback.textContent.includes('删除未完成'), `删除反馈：${executing.feedback.textContent}`);
       await h.click('取消', executing); await h.flush(); assert.equal(h.count('deleteData'), 1);
@@ -281,7 +362,7 @@ function rendererCases(test, assert, environment) {
 }
 
 function virtualEnvironment() {
-  const window = { document: createDocument(), crypto: { randomUUID }, Event };
+  const window = { document: createDocument(), crypto: { randomUUID }, Event, __modalHost: require('../../../src/renderer/modal-host') };
   vm.runInNewContext(source, { window }); return createHarness(window);
 }
 if (require.main === module) rendererCases(require('node:test'), require('node:assert/strict'), virtualEnvironment);

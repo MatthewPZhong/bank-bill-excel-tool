@@ -5,7 +5,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const acorn = require('acorn');
-const source = fs.readFileSync(path.join(__dirname, '../../src/renderer-dialogs.js'), 'utf8');
+const { createModalDom } = require('../helpers/modal-dom');
+const { createModalHost } = require('../../src/renderer/modal-host');
+const { createModalBridge } = require('../../src/renderer/modal-bridge');
+// 移动后的实际函数仍执行原安全/业务断言，宿主行为使用真实 modalHost。
+const source = ['renderer/dialogs/configuration.js', 'renderer/dialogs/scenarios.js', 'renderer-dialogs.js']
+  .map(file => fs.readFileSync(path.join(__dirname, '../../src', file), 'utf8')).join('\n');
 const ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'script' });
 
 function nodes(root) {
@@ -42,35 +47,57 @@ function harness({ extraction, cancellation, completion } = {}) {
     assert.ok(call, objectName);
     return text(call.arguments[1]);
   }
+  const dom = createModalDom();
+  const modalHost = createModalHost(dom);
+  const modalBridge = createModalBridge({ host: modalHost });
+  const descriptor = dom.createDialog();
   const h = {
-    dialog: {}, extractOrderBtn: {}, doneBtn: {},
-    payload: { contextId: 'current-context' }, overlay: { name: 'selection' },
+    dialog: descriptor.dialog, extractOrderBtn: {}, doneBtn: {},
+    payload: { contextId: 'current-context' }, overlay: descriptor.overlay,
     currentFileRows: [{ index: 0 }], checkedOrder: [{ merchantId: 'M001', currency: 'USD' }],
-    rememberCheckbox: { checked: false }, calls: [], statuses: [], current: null,
-    desktopApi: { files: {
+    rememberCheckbox: { checked: false }, calls: [], statuses: [],
+    api: { files: {
       extractBigAccountOrder: async (payload) => { h.calls.push(['extract', payload]); return extraction(); },
       cancelBigAccountSelection: async (contextId) => { h.calls.push(['cancel', contextId]); return cancellation(); },
       completeBigAccountSelection: async (payload) => { h.calls.push(['complete', payload]); return completion(); }
     } },
     escapeHtml,
     createAlertDialog: (message, options = {}) => {
-      const button = { classList: { add() {} } };
-      return { message, options, querySelector: () => button };
+      const created = dom.createDialog();
+      const alert = created.overlay;
+      alert.message = message;
+      created.first.classList = { add() {} };
+      alert.querySelector = () => created.first;
+      modalBridge.registerModal(alert, { dialog: created.dialog });
+      alert.options = { ...options, onConfirm: () => {
+        const closed = modalBridge.closeModal(alert, { status: 'submitted', value: true });
+        if (closed.status === 'closed') return options.onConfirm?.();
+      } };
+      return alert;
     },
-    openModal: (overlay) => { h.current = overlay; },
-    closeModal: () => { h.current = null; },
+    modalBridge,
+    openModal: modalBridge.openModal,
+    closeModal: modalBridge.closeModal,
+    pushModal: modalBridge.pushModal,
+    replaceModal: modalBridge.replaceModal,
+    returnToModal: modalBridge.returnToModal,
+    pushAlert: (_parent, factory) => modalBridge.pushModal(modalHost.getTop(), factory),
     setStatus: (...args) => h.statuses.push(args),
     applyStatementResult: (result) => h.calls.push(['apply', result]),
     elements: { modalRoot: { contains: (overlay) => h.current === overlay } }
   };
+  Object.defineProperty(h, 'current', { get: () => dom.root.lastChild });
+  let actions;
+  modalBridge.registerModal(h.overlay, { ...descriptor, canClose: () => actions ? actions.canClose() : true });
+  modalBridge.openModal(h.overlay);
   const helpers = ['syncSelectionActionButtons', 'showUnmaintainedBigAccountAlert', 'cancelUnmaintainedImport']
     .map((name) => text(fn(name, scope))).join('\n');
-  const actions = Function('h', `
+  actions = Function('h', `
     const { ${Object.keys(h).join(', ')} } = h;
     let selectionBusy = false, selectionTerminating = false, selectionClosed = false;
     let multiMode = false, multiEditing = false, currentMode = 'unfixed';
     ${helpers}
-    return { extract: ${eventHandler('extractOrderBtn')}, done: ${eventHandler('doneBtn')} };
+    return { canClose: () => !selectionBusy && !selectionTerminating, extract: ${eventHandler('extractOrderBtn')}, done: ${eventHandler('doneBtn')} };
   `)(h);
   return { h, ...actions };
 }

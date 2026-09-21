@@ -148,7 +148,7 @@ test('VCC 合成 preview hook 只在 preload 确认 capture 模式时挂载', ()
   assert.match(preload, /previewCapture:\s*Boolean\(process\.env\.APP_CAPTURE_PATH\)/);
   assert.match(
     moduleRenderer,
-    /const previewHooks = window\.desktopApi\.previewCapture === true \? \{[\s\S]*\} : null;/
+    /const previewHooks = previewEnabled === true \? \{[\s\S]*\} : null;/
   );
   assert.doesNotMatch(moduleRenderer, /window\.__vccFinancialOpPreview\s*=/);
   assert.match(moduleRenderer, /exposePreviewHooks\(previewHooks\);/);
@@ -157,7 +157,7 @@ test('VCC 合成 preview hook 只在 preload 确认 capture 模式时挂载', ()
   const helperEnd = moduleRenderer.indexOf('const PREVIEW_ARCHIVED_MONTHS', helperStart);
   const fakeWindow = {};
   const expose = Function(
-    'window',
+    'global',
     `'use strict'; ${moduleRenderer.slice(helperStart, helperEnd)}; return exposePreviewHooks;`
   )(fakeWindow);
   assert.equal(expose(null), false);
@@ -312,7 +312,7 @@ test('delete-first-month readiness 等 selector 异步刷新按钮与文案稳�
   const waitStart = moduleRenderer.indexOf('async function waitForArchivedPickerPreview(');
   const waitEnd = moduleRenderer.indexOf('function createUnarchivePreviewDialog(', waitStart);
   const helpers = Function(
-    `'use strict'; ${moduleRenderer.slice(trackerStart, trackerEnd)} ${moduleRenderer.slice(waitStart, waitEnd)}; return { attachPreviewStateTracker, selectPreviewControl };`
+    `'use strict'; const renderGeneration = 0; const live = () => true; let needsRefresh = false; ${moduleRenderer.slice(trackerStart, trackerEnd)} ${moduleRenderer.slice(waitStart, waitEnd)}; return { attachPreviewStateTracker, selectPreviewControl };`
   )();
 
   let confirmDisabled = true;
@@ -332,6 +332,8 @@ test('delete-first-month readiness 等 selector 异步刷新按钮与文案稳�
     }
   };
   const modal = {
+    handle: { isOpen: () => true },
+    onDispose() {},
     dialog: {
       isConnected: true,
       classList: { contains: () => false },
@@ -372,7 +374,7 @@ test('年份切换、非尾月与执行中预览等待异步状态后读取真�
   const helperEnd = moduleRenderer.indexOf('function createUnarchivePreviewDialog(', helperStart);
   assert.ok(helperStart >= 0 && helperEnd > helperStart);
   const helpers = Function(
-    `'use strict'; ${moduleRenderer.slice(helperStart, helperEnd)}; return { waitForArchivedPickerPreview, selectPreviewControl };`
+    `'use strict'; const renderGeneration = 0; const live = () => true; let needsRefresh = false; ${moduleRenderer.slice(helperStart, helperEnd)}; return { waitForArchivedPickerPreview, selectPreviewControl };`
   )();
 
   function createFakePicker() {
@@ -410,6 +412,8 @@ test('年份切换、非尾月与执行中预览等待异步状态后读取真�
     };
     return {
       modal: {
+        handle: { isOpen: () => true },
+        onDispose() {},
         dialog,
         async waitForPreviewState() {
           await pending;

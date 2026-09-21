@@ -1,0 +1,16 @@
+{
+  "before": {
+    "text": "导入文件，正在等待后台处理…",
+    "busy": true,
+    "imports": 1
+  },
+  "leave": {
+    "status": "left"
+  },
+  "after": {
+    "text": "导入文件，正在等待后台处理…",
+    "busy": false,
+    "imports": 1,
+    "disabled": false
+  }
+}

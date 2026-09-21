@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const source = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'renderer-dialogs.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'renderer', 'dialogs', 'scenarios.js'), 'utf8');
 const start = source.indexOf('function createBuiltinFixedChannelManageDialog(scenarioId)');
 const end = source.indexOf('function createCopyScenarioDialog(', start);
 assert.ok(start >= 0 && end > start, '应能定位自带场景管理弹窗');

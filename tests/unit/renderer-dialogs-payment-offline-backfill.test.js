@@ -16,7 +16,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const DIALOGS_PATH = path.join(__dirname, '..', '..', 'src', 'renderer-dialogs.js');
+const DIALOGS_PATH = path.join(__dirname, '..', '..', 'src', 'renderer', 'dialogs', 'scenarios.js');
 const source = fs.readFileSync(DIALOGS_PATH, 'utf8');
 
 // 把弹窗工厂函数体单独切出来，避免断言误命中文件其他位置的同名片段。

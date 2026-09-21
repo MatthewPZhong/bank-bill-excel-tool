@@ -1,0 +1,10 @@
+{
+  "command": [
+    "node",
+    "scripts/test-renderer-lifecycle.js"
+  ],
+  "cwd": "/private/tmp/renderer-boundaries-r3-qu7nz33r",
+  "exitCode": 0,
+  "elapsedSeconds": 15.897,
+  "log": "electron-lifecycle.log"
+}

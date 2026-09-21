@@ -17,7 +17,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const RENDERER_PATH = path.join(__dirname, '..', '..', 'src', 'renderer.js');
+const RENDERER_PATH = path.join(__dirname, '..', '..', 'src', 'renderer', 'controllers', 'bank-statement.js');
 
 const source = fs.readFileSync(RENDERER_PATH, 'utf8');
 
@@ -26,7 +26,7 @@ const source = fs.readFileSync(RENDERER_PATH, 'utf8');
 function extractFunctionSource(src, fnName) {
   const signature = `function ${fnName}(`;
   let start = src.indexOf(signature);
-  if (start === -1) throw new Error(`未在 renderer.js 找到 ${fnName} 定义`);
+  if (start === -1) throw new Error(`未在 bank-statement controller 找到 ${fnName} 定义`);
   const asyncPrefix = 'async ';
   if (src.slice(start - asyncPrefix.length, start) === asyncPrefix) {
     start -= asyncPrefix.length;
@@ -57,20 +57,10 @@ function stripLineComments(src) {
 function loadIsRefundOrderReady(sessionStatusImpl) {
   const fnSource = extractFunctionSource(source, 'isRefundOrderReady');
   let callCount = 0;
-  const win = {
-    desktopApi: {
-      bankStatement: {
-        sessionStatus: async () => {
-          callCount += 1;
-          return sessionStatusImpl();
-        }
-      }
-    }
-  };
-  const consoleStub = { warn() {}, error() {}, log() {} };
-  // eslint-disable-next-line no-new-func
-  const factory = new Function('window', 'console', `${fnSource}\nreturn isRefundOrderReady;`);
-  return { fn: factory(win, consoleStub), getCallCount: () => callCount };
+  const api = { sessionStatus: async () => { callCount += 1; return sessionStatusImpl(); } };
+  const reportError = () => {};
+  const factory = new Function('api', 'reportError', `${fnSource}\nreturn isRefundOrderReady;`);
+  return { fn: factory(api, reportError), getCallCount: () => callCount };
 }
 
 describe('isRefundOrderReady — 行为（PR-4 bug 修订：实时查 session-status hasRefundOrder）', () => {
@@ -124,13 +114,13 @@ describe('isRefundOrderReady — 源码护栏（实时查 / catch 兜底 / 运�
   test('① isRefundOrderReady 存在且实时查 session-status', () => {
     assert.ok(/async\s+function\s+isRefundOrderReady\s*\(/.test(source),
       '应存在 async function isRefundOrderReady');
-    assert.ok(source.includes('window.desktopApi.bankStatement.sessionStatus()'),
-      'isRefundOrderReady 应实时查 window.desktopApi.bankStatement.sessionStatus()');
+    assert.ok(source.includes('api.sessionStatus()'),
+      'isRefundOrderReady 应实时查 api.sessionStatus()');
   });
 
   test('② 判据：status===ok && hasRefundOrder', () => {
     const fn = extractFunctionSource(source, 'isRefundOrderReady');
-    assert.ok(/status\.status\s*===\s*'ok'\s*&&\s*status\.hasRefundOrder/.test(fn),
+    assert.ok(/result\?\.status\s*===\s*'ok'\s*&&\s*result\.hasRefundOrder/.test(fn),
       '就绪判据应为 status.status===ok && status.hasRefundOrder');
   });
 
@@ -155,7 +145,7 @@ describe('isRefundOrderReady — 源码护栏（实时查 / catch 兜底 / 运�
     const code = stripLineComments(fn);
     assert.ok(!code.includes('state.refundOrderSession'),
       'maybePromptRefundOrderImport 不应依赖 state.refundOrderSession（判据是本批 results 的 hasRefundOk）');
-    assert.ok(fn.includes("r.tableKey === 'zhongtai-refund-order'"),
+    assert.ok(fn.includes("item.tableKey === 'zhongtai-refund-order'"),
       '导入后提醒判据应基于本批 results 的 zhongtai-refund-order ok');
   });
 });

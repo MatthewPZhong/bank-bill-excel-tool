@@ -11,112 +11,86 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const RENDERER_PATH = path.join(__dirname, '..', '..', 'src', 'renderer.js');
-// GitHub Windows runner 会把 checkout 转为 CRLF；源码截取统一按 LF 处理，避免平台换行影响测试边界。
-const source = fs.readFileSync(RENDERER_PATH, 'utf8').replace(/\r\n?/g, '\n');
+const readSource = (name) => fs.readFileSync(path.join(__dirname, '..', '..', 'src', name), 'utf8').replace(/\r\n?/g, '\n');
+const source = readSource('renderer/controllers/bank-statement.js');
+const reconSource = readSource('renderer/controllers/recon-id-fix.js');
+const rootSource = readSource('renderer.js');
+const { createReconIdFixController } = require('../../src/renderer/controllers/recon-id-fix');
 
-function loadReconStatusRefresh({ sessionStatus }) {
-  const start = source.indexOf('async function refreshReconIdFixStatus(');
-  const endMarker = '\n}\n\n// 主面板"场景"下拉刷新';
-  const end = source.indexOf(endMarker, start);
-  assert.ok(start >= 0 && end > start, '应能提取 refreshReconIdFixStatus');
-  const functionSource = source.slice(start, end + 2);
+// 测实际控制器公开生命周期和面板行为；私有会话不再泄露给根 Renderer。
+function loadReconStatusRefresh({ sessionStatus, scenarios = async () => ({ status: 'ok', scenarios: [{ id: 1, name: '修复场景', category: 'gateway-recon-id-fix' }] }) }) {
+  const controls = {};
   const statusWrites = [];
-  const uiUpdates = [];
-  const context = {
-    window: { desktopApi: { reconIdFix: { sessionStatus } } },
-    state: {
-      reconIdFixSession: { fileName: 'old.xlsx' },
-      reconIdFixResult: { fixedRowCount: 9 }
-    },
-    elements: { reconIdFixStatusBox: {} },
-    updateReconIdFixUi(options) {
-      uiUpdates.push(options);
-    },
-    updateStatusBox(_element, message, tone) {
-      statusWrites.push({ message, tone });
-    },
-    console: { error() {} }
-  };
-  require('node:vm').runInNewContext(
-    `${functionSource}\nthis.refreshReconIdFixStatusForTest = refreshReconIdFixStatus;`,
-    context
-  );
-  return {
-    refresh: context.refreshReconIdFixStatusForTest,
-    state: context.state,
-    statusWrites,
-    uiUpdates
-  };
+  let currentStatus = sessionStatus;
+  const panel = { querySelector(selector) {
+    return controls[selector] ||= { textContent: '欢迎使用小助手', value: '', innerHTML: '', disabled: false, dataset: {}, addEventListener() {}, removeEventListener() {} };
+  } };
+  const controller = createReconIdFixController({
+    panel, api: {}, config: { scenarios: { list: scenarios } },
+    sharedReconSession: { sessionStatus: () => currentStatus(), subscribe: () => () => {}, import: async () => ({ status: 'ok' }) },
+    ui: { status(element, message, tone) { element.textContent = message; statusWrites.push({ message, tone }); }, reportError() {} }
+  });
+  return { controller, statusWrites, controls, refresh: controller.refreshStatus, setStatus(value) { currentStatus = value; } };
 }
 
 describe('模块初始化状态框保持欢迎文案', () => {
-  test('对账单修复自动同步固定静默成功文案，用户动作仍使用默认更新', () => {
-    assert.match(
-      source,
-      /reloadReconIdFixScenarios\(\{[\s\S]*?scenariosChanged: false,[\s\S]*?updateStatus: false[\s\S]*?\}\)/
-    );
-    assert.match(source, /async function refreshReconIdFixStatus\(\{ updateStatus = true \} = \{\}\)/);
-    assert.match(source, /function updateReconIdFixUi\(\{ updateStatus = true \} = \{\}\)/);
-    assert.match(source, /if \(updateStatus\) updateStatusBox\(elements\.reconIdFixStatusBox, text, tone\)/);
-    assert.match(source, /await refreshReconIdFixStatus\(\);/);
-    assert.doesNotMatch(source, /updateStatus: enteringModule/);
+  test('对账单修复自动同步固定静默成功文案，用户动作仍使用默认更新', async (t) => {
+    const harness = loadReconStatusRefresh({ sessionStatus: async () => ({ status: 'ok', hasFile: true, fileName: '账单.xlsx', hasResult: false }) });
+    t.after(() => harness.controller.dispose());
+    assert.equal((await harness.controller.enter()).status, 'ready');
+    assert.deepEqual(harness.statusWrites, [], 'enter 仅同步按钮，不把欢迎文案覆盖成已导入');
+    await harness.controller.commands.import();
+    assert.match(harness.statusWrites.at(-1).message, /已导入 账单.xlsx/);
+    assert.match(reconSource, /async function refreshReconIdFixStatus\(\{ updateStatus = true \} = \{\}\)/);
+    assert.match(reconSource, /if \(updateStatus\) updateStatusBox\(elements\.reconIdFixStatusBox, text, tone\)/);
   });
 
-  test('对账单修复静默成功会同步 session 和按钮，但不直接写状态框', async () => {
-    const harness = loadReconStatusRefresh({
-      sessionStatus: async () => ({
-        status: 'ok',
-        hasFile: true,
-        fileName: '账单.xlsx',
-        sheetCounts: { business: 7, opp: 6 },
-        hasResult: false
-      })
-    });
-
+  test('对账单修复静默成功会同步 session 和按钮，但不直接写状态框', async (t) => {
+    const harness = loadReconStatusRefresh({ sessionStatus: async () => ({ status: 'ok', hasFile: true, fileName: '账单.xlsx', sheetCounts: { business: 7, opp: 6 }, hasResult: false }) });
+    t.after(() => harness.controller.dispose());
+    await harness.controller.enter();
     assert.equal(await harness.refresh({ updateStatus: false }), true);
-    assert.equal(harness.state.reconIdFixSession.fileName, '账单.xlsx');
-    assert.deepEqual(harness.uiUpdates, [{ updateStatus: false }]);
+    assert.equal(harness.controls['#reconIdFixRunBtn'].disabled, false, '成功读取 session 后可运行');
+    assert.equal(harness.controls['#reconIdFixExportBtn'].disabled, true, '没有 Main 结果不可导出');
     assert.deepEqual(harness.statusWrites, []);
+    await harness.refresh();
+    assert.match(harness.statusWrites.at(-1).message, /账单.xlsx（7 行业务账单 \/ 6 行对手账单）/);
   });
 
-  test('对账单修复失败结果和 Promise reject 均越过静默模式显示错误', async () => {
-    const failed = loadReconStatusRefresh({
-      sessionStatus: async () => ({ status: 'failed', message: '数据库忙' })
-    });
-    assert.equal(await failed.refresh({ updateStatus: false }), false);
-    assert.equal(failed.state.reconIdFixSession, null);
-    assert.equal(failed.state.reconIdFixResult, null);
-    assert.deepEqual(failed.uiUpdates, [{ updateStatus: false }]);
-    assert.deepEqual(failed.statusWrites, [{
-      message: '对账单修复状态读取失败：数据库忙',
-      tone: 'error'
-    }]);
-
-    const empty = loadReconStatusRefresh({
-      sessionStatus: async () => null
-    });
-    assert.equal(await empty.refresh({ updateStatus: false }), false);
-    assert.deepEqual(empty.statusWrites, [{
-      message: '对账单修复状态读取失败',
-      tone: 'error'
-    }]);
-
-    const rejected = loadReconStatusRefresh({
-      sessionStatus: async () => { throw new Error('IPC 中断'); }
-    });
-    assert.equal(await rejected.refresh({ updateStatus: false }), false);
-    assert.deepEqual(rejected.statusWrites, [{
-      message: '对账单修复状态读取失败：IPC 中断',
-      tone: 'error'
-    }]);
+  test('对账单修复失败结果和 Promise reject 均越过静默模式显示错误并禁用旧结果', async (t) => {
+    const ready = async () => ({ status: 'ok', hasFile: true, fileName: 'old.xlsx', hasResult: true, resultStats: { fixedRowCount: 9 } });
+    for (const [response, expected] of [
+      [async () => ({ status: 'failed', message: '数据库忙' }), '对账单修复状态读取失败：数据库忙'],
+      [async () => null, '对账单修复状态读取失败'],
+      [async () => { throw new Error('IPC 中断'); }, '对账单修复状态读取失败：IPC 中断']
+    ]) {
+      const harness = loadReconStatusRefresh({ sessionStatus: ready });
+      t.after(() => harness.controller.dispose());
+      await harness.controller.enter();
+      assert.equal(harness.controls['#reconIdFixExportBtn'].disabled, false);
+      harness.statusWrites.length = 0;
+      harness.setStatus(response);
+      assert.equal(await harness.refresh({ updateStatus: false }), false);
+      assert.equal(harness.controls['#reconIdFixRunBtn'].disabled, true);
+      assert.equal(harness.controls['#reconIdFixExportBtn'].disabled, true);
+      assert.deepEqual(harness.controller.commands.export(), { status: 'blocked' });
+      assert.deepEqual(harness.statusWrites, [{ message: expected, tone: 'error' }]);
+      // R9：失败读取不构成 Main 清结果证据；恢复后重新按实际 Main 结果允许导出。
+      harness.setStatus(ready);
+      assert.equal(await harness.refresh(), true);
+      assert.equal(harness.controls['#reconIdFixExportBtn'].disabled, false);
+    }
   });
 
-  test('场景读取失败也有独立错误投影，不会被静默 session 同步吞掉', () => {
-    assert.match(source, /let scenarioReadFailed = false;/);
-    assert.match(source, /scenarioReadFailed = true;[\s\S]*?scenarioReadFailure = result;/);
-    assert.match(source, /if \(scenarioReadFailed && elements\.reconIdFixStatusBox\)/);
-    assert.match(source, /对账单修复场景读取失败/);
+  test('场景读取失败也有独立错误投影，不会被静默 session 同步吞掉', async (t) => {
+    for (const scenarios of [async () => ({ status: 'failed', message: '场景数据库忙' }), async () => { throw new Error('场景IPC中断'); }]) {
+      const harness = loadReconStatusRefresh({ sessionStatus: async () => ({ status: 'ok', hasFile: false, hasResult: false }), scenarios });
+      t.after(() => harness.controller.dispose());
+      assert.equal((await harness.controller.enter()).status, 'error');
+      assert.match(harness.statusWrites.at(-1).message, /对账单修复场景读取失败/);
+      assert.equal(harness.statusWrites.at(-1).tone, 'error');
+      assert.equal(harness.controls['#reconIdFixScenarioSelect'].disabled, true);
+    }
   });
 });
 
@@ -164,7 +138,7 @@ describe('updateBankStatementUi — N6 状态框换行修复 (v2.1.9 T31)', () =
 
   test('updateStatusBox 内层 `String(message).replace(/：/g, "：\\n")` 设计保留（v2.1.7 R3 不动）', () => {
     // 内层处理冒号→换行的逻辑必须仍在文件里（否则单换行依赖会失效）
-    assert.ok(source.includes("String(message).replace(/：/g, '：\\n')"),
+    assert.ok(rootSource.includes("String(message).replace(/：/g, '：\\n')"),
       'updateStatusBox 内层 replace `：` → `：\\n` 必须保留（v2.1.7 round 2 R3 §8.4.2 设计）');
   });
 });
@@ -255,11 +229,11 @@ describe('需求2a — 网关按钮清理护栏（v3.0.7 C2）', () => {
   });
 
   test('🔴 保留项：handleReconIdFixExport / handleBankStatementGatewayReconRun 仍定义', () => {
-    assert.ok(source.includes('async function handleReconIdFixExport()'),
+    assert.ok(reconSource.includes('function handleReconIdFixExport()'),
       'handleReconIdFixExport 必须保留（ReconID 修复面板共用）');
-    assert.ok(source.includes('async function handleBankStatementGatewayReconRun()'),
+    assert.ok(source.includes('function handleBankStatementGatewayReconRun()'),
       'handleBankStatementGatewayReconRun 必须保留（row1 mode 路由仍引用，非本契约删除项）');
-    assert.ok(source.includes('elements.reconIdFixExportBtn.addEventListener'),
+    assert.ok(reconSource.includes("bind('reconIdFixExportBtn', 'click', handleReconIdFixExport);"),
       'reconIdFixExportBtn → handleReconIdFixExport 绑定必须保留');
   });
 });
