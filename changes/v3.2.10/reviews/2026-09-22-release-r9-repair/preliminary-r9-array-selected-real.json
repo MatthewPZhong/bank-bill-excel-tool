@@ -1,0 +1,289 @@
+{
+  "mode": "real",
+  "boundaryCount": 20,
+  "boundaries": [
+    {
+      "id": "renderer-modal-owner",
+      "state": "active"
+    },
+    {
+      "id": "renderer-bank-statement",
+      "state": "active"
+    },
+    {
+      "id": "renderer-recon-id-fix",
+      "state": "active"
+    },
+    {
+      "id": "renderer-pre-fund",
+      "state": "active"
+    },
+    {
+      "id": "renderer-bank-bu",
+      "state": "active"
+    },
+    {
+      "id": "renderer-duplicate-inbound",
+      "state": "active"
+    },
+    {
+      "id": "renderer-acquiring",
+      "state": "active"
+    },
+    {
+      "id": "renderer-vcc-op-calc",
+      "state": "active"
+    },
+    {
+      "id": "renderer-biz-op-legacy",
+      "state": "active"
+    },
+    {
+      "id": "renderer-statement",
+      "state": "active"
+    },
+    {
+      "id": "renderer-new-account",
+      "state": "active"
+    },
+    {
+      "id": "renderer-pending",
+      "state": "active"
+    },
+    {
+      "id": "renderer-position",
+      "state": "active"
+    },
+    {
+      "id": "renderer-vcc-financial-op",
+      "state": "active"
+    },
+    {
+      "id": "renderer-biz-op-v327",
+      "state": "active"
+    },
+    {
+      "id": "renderer-dialog-scenarios",
+      "state": "active"
+    },
+    {
+      "id": "renderer-dialog-configuration",
+      "state": "active"
+    },
+    {
+      "id": "renderer-services",
+      "state": "active"
+    },
+    {
+      "id": "renderer-dialog-app-settings",
+      "state": "active"
+    },
+    {
+      "id": "renderer-dialog-toolbox",
+      "state": "active"
+    }
+  ],
+  "baseline": {
+    "violations": [
+      {
+        "rule": "ARCH-STATIC-COVERAGE",
+        "boundaryId": "renderer-position",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 679,
+        "column": 4,
+        "message": "scoped api 未提供可解释方法集合",
+        "evidenceId": "d928340ddf340996fc078bb9ba181d62078da4b99cf0addad1c9377814e2681a",
+        "functionPath": null
+      }
+    ],
+    "coverage": {
+      "scannedFiles": 765,
+      "parsedFiles": 765,
+      "literalEdges": 2405,
+      "workerEdges": 64,
+      "globalEdges": 59,
+      "unresolved": 2,
+      "dynamicSites": 33,
+      "parseErrors": 0
+    }
+  },
+  "results": [
+    {
+      "name": "push-direct-control",
+      "safe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();const list=[];list.push(clean);const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/renderer.js",
+          "to": null,
+          "line": 2319,
+          "column": 190,
+          "message": "scoped api 未授权字段 outsideScope",
+          "functionPath": null
+        },
+        {
+          "rule": "ARCH-STATIC-COVERAGE",
+          "boundaryId": "renderer-position",
+          "from": "src/renderer.js",
+          "to": null,
+          "line": 679,
+          "column": 4,
+          "message": "scoped api 未提供可解释方法集合",
+          "evidenceId": "d928340ddf340996fc078bb9ba181d62078da4b99cf0addad1c9377814e2681a",
+          "functionPath": null
+        }
+      ],
+      "coverage": {
+        "scannedFiles": 765,
+        "parsedFiles": 765,
+        "literalEdges": 2405,
+        "workerEdges": 64,
+        "globalEdges": 59,
+        "unresolved": 2,
+        "dynamicSites": 33,
+        "parseErrors": 0
+      }
+    },
+    {
+      "name": "push-static-spread",
+      "safe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();const list=[];list.push(...[clean]);const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/renderer.js",
+          "to": null,
+          "line": 2319,
+          "column": 195,
+          "message": "scoped api 未授权字段 outsideScope",
+          "functionPath": null
+        },
+        {
+          "rule": "ARCH-STATIC-COVERAGE",
+          "boundaryId": "renderer-position",
+          "from": "src/renderer.js",
+          "to": null,
+          "line": 679,
+          "column": 4,
+          "message": "scoped api 未提供可解释方法集合",
+          "evidenceId": "d928340ddf340996fc078bb9ba181d62078da4b99cf0addad1c9377814e2681a",
+          "functionPath": null
+        }
+      ],
+      "coverage": {
+        "scannedFiles": 765,
+        "parsedFiles": 765,
+        "literalEdges": 2405,
+        "workerEdges": 64,
+        "globalEdges": 59,
+        "unresolved": 2,
+        "dynamicSites": 33,
+        "parseErrors": 0
+      }
+    },
+    {
+      "name": "splice-static-spread",
+      "safe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();const list=[old];list.splice(...[0,1,clean]);const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/renderer.js",
+          "to": null,
+          "line": 2319,
+          "column": 204,
+          "message": "scoped api 未授权字段 outsideScope",
+          "functionPath": null
+        },
+        {
+          "rule": "ARCH-STATIC-COVERAGE",
+          "boundaryId": "renderer-position",
+          "from": "src/renderer.js",
+          "to": null,
+          "line": 679,
+          "column": 4,
+          "message": "scoped api 未提供可解释方法集合",
+          "evidenceId": "d928340ddf340996fc078bb9ba181d62078da4b99cf0addad1c9377814e2681a",
+          "functionPath": null
+        }
+      ],
+      "coverage": {
+        "scannedFiles": 765,
+        "parsedFiles": 765,
+        "literalEdges": 2405,
+        "workerEdges": 64,
+        "globalEdges": 59,
+        "unresolved": 2,
+        "dynamicSites": 33,
+        "parseErrors": 0
+      }
+    },
+    {
+      "name": "spread-before-replace-safe",
+      "safe": true,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();const list=[old];const copy=[...list];list[0]=clean;const alias=copy[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run"
+        ],
+        "extraCallable": false,
+        "same": false
+      },
+      "violations": [
+        {
+          "rule": "ARCH-STATIC-COVERAGE",
+          "boundaryId": "renderer-position",
+          "from": "src/renderer.js",
+          "to": null,
+          "line": 679,
+          "column": 4,
+          "message": "scoped api 未提供可解释方法集合",
+          "evidenceId": "d928340ddf340996fc078bb9ba181d62078da4b99cf0addad1c9377814e2681a",
+          "functionPath": null
+        }
+      ],
+      "coverage": {
+        "scannedFiles": 765,
+        "parsedFiles": 765,
+        "literalEdges": 2405,
+        "workerEdges": 64,
+        "globalEdges": 59,
+        "unresolved": 2,
+        "dynamicSites": 33,
+        "parseErrors": 0
+      }
+    }
+  ]
+}

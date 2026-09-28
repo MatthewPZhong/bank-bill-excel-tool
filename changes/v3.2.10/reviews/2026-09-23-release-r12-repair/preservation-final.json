@@ -1,0 +1,17 @@
+{
+  "frozenExisting": 4966,
+  "plannedChanged": [
+    "architecture/README.md",
+    "changes/v3.2.10/README.md",
+    "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md",
+    "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md",
+    "changes/v3.2.10/release.md",
+    "rules/integration-test-policy.md",
+    "scripts/architecture/renderer-contracts.js"
+  ],
+  "unchangedExisting": 4959,
+  "productionFilesUnchanged": 792,
+  "historicalReviewFilesUnchanged": 986,
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "gateInputs": 1709
+}

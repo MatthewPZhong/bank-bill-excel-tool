@@ -23,7 +23,10 @@ function fixture(t, files, boundaries = []) {
   return {root, scanned, result:evaluateRules(scanned, config, {schemaVersion:1, factBaseline:policy.factBaseline, exceptions:[]}, {root})};
 }
 function task(t, source) {
-  return fixture(t, {'src/main.js':source, [positionPath]:'exports.settle=()=>{};'}, policy.boundaries.filter(b => b.id === 'business-task-adapters'));
+  const boundary = structuredClone(policy.boundaries.find(b => b.id === 'business-task-adapters'));
+  // 此处验证最小调用图，规则仍执行；生产入口与消费者的激活闭合另由真实 release 验证。
+  boundary.state = 'pending';
+  return fixture(t, {'src/main.js':source, [positionPath]:'exports.settle=()=>{};'}, [boundary]);
 }
 const denied = (result, rule) => assert.ok(result.violations.some(v => v.rule === rule), JSON.stringify(result.violations));
 const clean = result => assert.deepEqual(result.violations, []);

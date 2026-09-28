@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "checkedAt": "2026-09-22T20:00:33.830360+08:00",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "branch": "release/v3.2.10",
+  "gateInputs": 1706,
+  "gitDiffCheck": "PASS",
+  "reversePatchCheck": "PASS",
+  "localLinks": 29,
+  "missingLinks": [],
+  "executionContext": "outside filesystem sandbox"
+}

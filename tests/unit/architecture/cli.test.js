@@ -73,7 +73,8 @@ test('现有 CI 使用同一完整门禁且全量获取历史，tag/main guard �
 function cliRepository(t) {
   const { createPolicyRepository } = require('./fixtures/policy-repository');
   const f = createPolicyRepository(t);
-  const production = JSON.parse(fs.readFileSync(path.join(root, 'architecture/boundaries.json'), 'utf8'));
+  // 复用合成仓库的激活状态；生产 release 的激活证据不属于这个最小 Git fixture。
+  const production = structuredClone(f.config);
   production.factBaseline = f.baseline;
   production.bootstrap.factBaseline = f.baseline;
   production.dynamicLoads = [];
@@ -84,7 +85,6 @@ function cliRepository(t) {
     for (const entry of b.entrypoints) f.write(entry, 'module.exports = {};\n');
     for (const evidence of b.activationEvidence) f.write(evidence, '// fixture行为入口\n');
   }
-  production.boundaries.push(structuredClone(f.boundary));
   f.config = production;
   f.save();
   f.run = (args = [], env = {}) => command(['--root', f.root, ...args], env);

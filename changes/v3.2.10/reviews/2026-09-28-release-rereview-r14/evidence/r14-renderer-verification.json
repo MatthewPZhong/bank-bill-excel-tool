@@ -1,0 +1,104 @@
+{
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "commands": [
+    {
+      "purpose": "RR13原4例",
+      "cmd": "node changes/v3.2.10/reviews/2026-09-28-release-rereview-r13/evidence/r13-renderer-probes.cjs > /tmp/r14-renderer-original-probes.jsonl",
+      "exitCode": 0,
+      "cases": 4,
+      "violations": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "scanErrorCount": 0
+    },
+    {
+      "purpose": "RR13原actual20正反2例",
+      "cmd": "node changes/v3.2.10/reviews/2026-09-28-release-rereview-r13/evidence/r13-renderer-conditional-realconfig.cjs > /tmp/r14-renderer-original-realconfig.json 2> /tmp/r14-renderer-original-realconfig-progress.log",
+      "exitCode": 0,
+      "cases": 2,
+      "boundaries": 20,
+      "baseViolations": 0,
+      "probeViolations": [
+        1,
+        0
+      ],
+      "scanErrorCount": 0
+    },
+    {
+      "purpose": "6个邻近循环例current",
+      "cmd": "node /tmp/r14-renderer-probes.cjs > /tmp/r14-renderer-probes-current.jsonl",
+      "exitCode": 0,
+      "cases": 6,
+      "violations": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        1
+      ],
+      "scanErrorCount": 0
+    },
+    {
+      "purpose": "准确R13repair before自举及同6例",
+      "cmd": "renderer_before_root=\"$(node /tmp/r14-renderer-before-bootstrap.cjs)\"\nRENDERER_SCANNER_ROOT=\"$renderer_before_root\" node /tmp/r14-renderer-probes.cjs > /tmp/r14-renderer-probes-before.jsonl",
+      "exitCode": 0,
+      "cases": 6,
+      "violations": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "scanErrorCount": 0
+    },
+    {
+      "purpose": "新actual20 current违规与安全",
+      "cmd": "node /tmp/r14-renderer-do-realconfig.cjs > /tmp/r14-renderer-do-realconfig-current.json 2> /tmp/r14-renderer-do-realconfig-current-progress.log",
+      "exitCode": 0,
+      "cases": 2,
+      "boundaries": 20,
+      "baseViolations": 0,
+      "probeViolations": [
+        0,
+        0
+      ],
+      "scanErrorCount": 0
+    },
+    {
+      "purpose": "新actual20 before相同源码",
+      "cmd": "renderer_before_root=\"$(python3 -c 'import json;print(json.load(open(\"/tmp/r14-renderer-before-inputs.json\"))[\"root\"])')\"\nRENDERER_SCANNER_ROOT=\"$renderer_before_root\" node /tmp/r14-renderer-do-realconfig.cjs > /tmp/r14-renderer-do-realconfig-before.json 2> /tmp/r14-renderer-do-realconfig-before-progress.log",
+      "exitCode": 0,
+      "cases": 2,
+      "boundaries": 20,
+      "baseViolations": 0,
+      "probeViolations": [
+        1,
+        1
+      ],
+      "scanErrorCount": 0
+    },
+    {
+      "purpose": "6份源码分别执行true/false VM",
+      "cmd": "node /tmp/r14-renderer-branch-vm.cjs > /tmp/r14-renderer-branch-vm.json",
+      "exitCode": 0,
+      "cases": 12,
+      "assertions": "same and capability match per branch"
+    },
+    {
+      "purpose": "代表2source使用现有src/renderer.js ESLint配置",
+      "cmd": "node /tmp/r14-renderer-lint.cjs > /tmp/r14-renderer-lint.json",
+      "exitCode": 0,
+      "cases": 2,
+      "errors": 0,
+      "warnings": 0,
+      "limitation": "existing config only no-undef; does not prove control-flow coverage"
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+{
+  "status": "PASS",
+  "beforeManifest": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-23-release-r12-repair/input-manifest.json",
+  "currentManifest": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r13/evidence/input-manifest.json",
+  "groups": {
+    "shared-probes": {
+      "count": 20,
+      "outputSha256": "f753ecefc1650e44d3a8d58cd85ca8af1452b59c8b1c4da700c8d3a5998b10cf",
+      "scriptSha256": "387b855ce4fd9edd6eb46dca1311cbf6707ac268e081d2c40911c2a5ae74d5e6"
+    },
+    "destructure-probes": {
+      "count": 8,
+      "outputSha256": "c7b7adc5563189d4c9b551839bc85893691b92b0d6ea81c16a9ec9583fc8dea8",
+      "scriptSha256": "553929216eda31dbccd6fd63f2d6a0785b0f438e1fba3d36aaa7526af3b942e6"
+    },
+    "localenv-probes": {
+      "count": 10,
+      "outputSha256": "c46b41ff7c1633efc597c4dc3a5161e767f6707bced98c9d57880fb72e429d7f",
+      "scriptSha256": "1050197ab3d164541d5615f065325c75bac38f9741f2ffad04bdfbe49219288e"
+    },
+    "default-combinations": {
+      "count": 6,
+      "outputSha256": "39fea9ff78b193fc5c7894cd75f6bbdcc2db058c068a280d73cecfc0cc90f416",
+      "scriptSha256": "6f77d9cc41422b523f6259e3f07b789ef302a3cb0574357824b3b2a9180c1496"
+    },
+    "async-array-combinations": {
+      "count": 6,
+      "outputSha256": "9dd69cdc6e87dcf7138ca599ebda85f285ce90a6ae9d270643f7ea058802f8e1",
+      "scriptSha256": "155f3400e13e91ee64a81c8384fa3999bd0453e07ff83c031cc7b8e2473bddf8"
+    },
+    "logical-combinations": {
+      "count": 6,
+      "outputSha256": "1660585b8f569e6248250c3477a720eac3e0eedac6d40a1f8999f62cbb45b67f",
+      "scriptSha256": "cc20b279a94c9c5aab539c596095bf1ea17f3d2a2d13257f4ba112be24584c5e"
+    }
+  },
+  "renderer": 38,
+  "query": 18,
+  "executedSqlFixtures": 10,
+  "sharedDiagnosticChanges": [],
+  "knownConservativeLimitations": [
+    {
+      "name": "conditional-distinct-pure-values",
+      "note": "both branches are pure strings but current and prior reject ambiguous value"
+    }
+  ],
+  "asyncIpcCorrectionPreserved": true,
+  "sharedTotalFixtures": 56,
+  "bindings": {
+    "totalFixtures": 6,
+    "cases": [
+      {
+        "name": "shared-helper-independent-safe",
+        "unsafe": false,
+        "beforeDiagnostics": 0,
+        "currentDiagnostics": 0,
+        "vmAgrees": true
+      },
+      {
+        "name": "shared-helper-independent-unsafe",
+        "unsafe": true,
+        "beforeDiagnostics": 1,
+        "currentDiagnostics": 1,
+        "vmAgrees": true
+      },
+      {
+        "name": "lexical-capture-shadow-safe",
+        "unsafe": false,
+        "beforeDiagnostics": 0,
+        "currentDiagnostics": 0,
+        "vmAgrees": true
+      },
+      {
+        "name": "lexical-capture-shadow-unsafe",
+        "unsafe": true,
+        "beforeDiagnostics": 1,
+        "currentDiagnostics": 1,
+        "vmAgrees": true
+      },
+      {
+        "name": "sibling-factory-local-helper-safe",
+        "unsafe": false,
+        "beforeDiagnostics": 0,
+        "currentDiagnostics": 0,
+        "vmAgrees": true
+      },
+      {
+        "name": "sibling-factory-local-helper-unsafe",
+        "unsafe": true,
+        "beforeDiagnostics": 1,
+        "currentDiagnostics": 1,
+        "vmAgrees": true
+      }
+    ],
+    "scriptSha256": "c6e3a8518e83acbeb20aa6a6151fe24ed480b708a0c43f0e02fe9b1347cf7b3f",
+    "outputSha256": "09d84ef927a693a1f4e62fdd432483acd378b79f3161125e8ac89d23dbfc909a"
+  },
+  "totalFixtures": 62,
+  "scannerStableFixtures": 62,
+  "currentRendererSha256": "f288b9b66558e1fee0ca9697c493aed3b60c5999fac6c0366b81041a46c4f082",
+  "beforeRendererSha256": "6b57b228b5fb576bbd3ea40d42ff010c5414c1a6a96fb7efdc6aba92fd2c2bec",
+  "newFindings": [],
+  "scope": "56 shared cases and 6 exact R12 review parameter-binding/capture cases; no full repository scan or architecture suite."
+}

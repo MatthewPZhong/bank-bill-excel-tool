@@ -1,0 +1,10 @@
+{
+  "result": "PASS",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "gateInputs": 1710,
+  "checkerSha256": "adc6b47bb07c2c66f0d41b09d42e6195ffa404587bf8b3faceda662ec1767072",
+  "reversePatchCheck": "PASS",
+  "gitDiffCheck": "PASS",
+  "localLinks": 24,
+  "missingLinks": []
+}

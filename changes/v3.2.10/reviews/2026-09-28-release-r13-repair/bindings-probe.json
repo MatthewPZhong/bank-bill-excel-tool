@@ -1,0 +1,479 @@
+{
+  "beforeInputHashes": [
+    {
+      "path": "scripts/architecture/scan.js",
+      "sha256": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/contracts.js",
+      "sha256": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/rules.js",
+      "sha256": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/renderer-contracts.js",
+      "sha256": "6b57b228b5fb576bbd3ea40d42ff010c5414c1a6a96fb7efdc6aba92fd2c2bec",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "sha256": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "match": true
+    }
+  ],
+  "currentInputHashes": [
+    {
+      "path": "scripts/architecture/scan.js",
+      "sha256": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be"
+    },
+    {
+      "path": "scripts/architecture/contracts.js",
+      "sha256": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f"
+    },
+    {
+      "path": "scripts/architecture/rules.js",
+      "sha256": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa"
+    },
+    {
+      "path": "scripts/architecture/renderer-contracts.js",
+      "sha256": "adc6b47bb07c2c66f0d41b09d42e6195ffa404587bf8b3faceda662ec1767072"
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "sha256": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316"
+    }
+  ],
+  "total": 6,
+  "rows": [
+    {
+      "name": "shared-helper-independent-safe",
+      "unsafe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const current=provide();function put(target,value){target.push(value);}function make(value){const args=[];put(args,value);return args;}const first=make(old);const second=make(current);const list=[...first];const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:current.api});({sameCurrent:alias===current.api,sameOld:alias===old.api});",
+      "runtime": {
+        "sameCurrent": false,
+        "sameOld": true,
+        "injectedKeys": [
+          "run"
+        ],
+        "outsideScope": false,
+        "outsideScopeResult": null
+      },
+      "scanner": {
+        "beforeR12": {
+          "digest": "7eee5d07be7b700e10880b107c3550ea520627512d4df0ff8f8e3b4174eceebb",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "059932c3db32623ad92593d3f9411373acd92bcda25e6c2e410e1d876b3a584b",
+            "b771209dd86684778f67d799b0aa2be6355d9e8ca55bc728874733aec659a028",
+            "483a22b760e7517bcbe995f99281ff2d78d9a3f67675d8b4080930e6de362205",
+            "8c9bcd5e860453b1e67e9371d931fb2cfdc400a1bd77b7e38ea4512d0541f465",
+            "47de44ca4dcf4f1bb0335ede2283d7f14141cb80c67f0049e9e9b64cd4908466",
+            "ee7bb5387185fbef0b58bb1250cf1b2e4d4559786baf67f209ddc5c4ef61fd7a",
+            "46d61feed2678589623f87f40218385c2acbfae5a24d5c3fb4d5c9ebe79b3c67",
+            "7527bd9a171795341083fc5a623fe629677ff655c0118e942dde91f51ac3b9e2",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+            "ee5eea5e44883f0e7365e1a0422f11aad6cb05d53ca53f90262ba5f89a4fd850",
+            "f7718b91e54474516787804569f1656e051cddeb90b63be3bb50362cb560e439",
+            "62049c34462e5959214a67bfa2ff0f4af2ef8beefc5a25725dc6cc514b9e0ecd"
+          ]
+        },
+        "current": {
+          "digest": "7eee5d07be7b700e10880b107c3550ea520627512d4df0ff8f8e3b4174eceebb",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "059932c3db32623ad92593d3f9411373acd92bcda25e6c2e410e1d876b3a584b",
+            "b771209dd86684778f67d799b0aa2be6355d9e8ca55bc728874733aec659a028",
+            "483a22b760e7517bcbe995f99281ff2d78d9a3f67675d8b4080930e6de362205",
+            "8c9bcd5e860453b1e67e9371d931fb2cfdc400a1bd77b7e38ea4512d0541f465",
+            "47de44ca4dcf4f1bb0335ede2283d7f14141cb80c67f0049e9e9b64cd4908466",
+            "ee7bb5387185fbef0b58bb1250cf1b2e4d4559786baf67f209ddc5c4ef61fd7a",
+            "46d61feed2678589623f87f40218385c2acbfae5a24d5c3fb4d5c9ebe79b3c67",
+            "7527bd9a171795341083fc5a623fe629677ff655c0118e942dde91f51ac3b9e2",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+            "ee5eea5e44883f0e7365e1a0422f11aad6cb05d53ca53f90262ba5f89a4fd850",
+            "f7718b91e54474516787804569f1656e051cddeb90b63be3bb50362cb560e439",
+            "62049c34462e5959214a67bfa2ff0f4af2ef8beefc5a25725dc6cc514b9e0ecd"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR12": [],
+      "current": []
+    },
+    {
+      "name": "shared-helper-independent-unsafe",
+      "unsafe": true,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const current=provide();function put(target,value){target.push(value);}function make(value){const args=[];put(args,value);return args;}const first=make(old);const second=make(current);const list=[...second];const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:current.api});({sameCurrent:alias===current.api,sameOld:alias===old.api});",
+      "runtime": {
+        "sameCurrent": true,
+        "sameOld": false,
+        "injectedKeys": [
+          "run",
+          "outsideScope"
+        ],
+        "outsideScope": true,
+        "outsideScopeResult": true
+      },
+      "scanner": {
+        "beforeR12": {
+          "digest": "32099dea37a29b82aae5f44f6a68980bfd32add9a48a5c50242f007a03afb513",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "059932c3db32623ad92593d3f9411373acd92bcda25e6c2e410e1d876b3a584b",
+            "b771209dd86684778f67d799b0aa2be6355d9e8ca55bc728874733aec659a028",
+            "483a22b760e7517bcbe995f99281ff2d78d9a3f67675d8b4080930e6de362205",
+            "8c9bcd5e860453b1e67e9371d931fb2cfdc400a1bd77b7e38ea4512d0541f465",
+            "47de44ca4dcf4f1bb0335ede2283d7f14141cb80c67f0049e9e9b64cd4908466",
+            "ee7bb5387185fbef0b58bb1250cf1b2e4d4559786baf67f209ddc5c4ef61fd7a",
+            "46d61feed2678589623f87f40218385c2acbfae5a24d5c3fb4d5c9ebe79b3c67",
+            "7527bd9a171795341083fc5a623fe629677ff655c0118e942dde91f51ac3b9e2",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+            "ee5eea5e44883f0e7365e1a0422f11aad6cb05d53ca53f90262ba5f89a4fd850",
+            "f7718b91e54474516787804569f1656e051cddeb90b63be3bb50362cb560e439",
+            "62049c34462e5959214a67bfa2ff0f4af2ef8beefc5a25725dc6cc514b9e0ecd"
+          ]
+        },
+        "current": {
+          "digest": "32099dea37a29b82aae5f44f6a68980bfd32add9a48a5c50242f007a03afb513",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "059932c3db32623ad92593d3f9411373acd92bcda25e6c2e410e1d876b3a584b",
+            "b771209dd86684778f67d799b0aa2be6355d9e8ca55bc728874733aec659a028",
+            "483a22b760e7517bcbe995f99281ff2d78d9a3f67675d8b4080930e6de362205",
+            "8c9bcd5e860453b1e67e9371d931fb2cfdc400a1bd77b7e38ea4512d0541f465",
+            "47de44ca4dcf4f1bb0335ede2283d7f14141cb80c67f0049e9e9b64cd4908466",
+            "ee7bb5387185fbef0b58bb1250cf1b2e4d4559786baf67f209ddc5c4ef61fd7a",
+            "46d61feed2678589623f87f40218385c2acbfae5a24d5c3fb4d5c9ebe79b3c67",
+            "7527bd9a171795341083fc5a623fe629677ff655c0118e942dde91f51ac3b9e2",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+            "ee5eea5e44883f0e7365e1a0422f11aad6cb05d53ca53f90262ba5f89a4fd850",
+            "f7718b91e54474516787804569f1656e051cddeb90b63be3bb50362cb560e439",
+            "62049c34462e5959214a67bfa2ff0f4af2ef8beefc5a25725dc6cc514b9e0ecd"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR12": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 344,
+          "message": "scoped api 未授权字段 outsideScope",
+          "evidenceId": "ee5eea5e44883f0e7365e1a0422f11aad6cb05d53ca53f90262ba5f89a4fd850",
+          "functionPath": null
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 344,
+          "message": "scoped api 未授权字段 outsideScope",
+          "evidenceId": "ee5eea5e44883f0e7365e1a0422f11aad6cb05d53ca53f90262ba5f89a4fd850",
+          "functionPath": null
+        }
+      ]
+    },
+    {
+      "name": "lexical-capture-shadow-safe",
+      "unsafe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const current=provide();function make(value){function retain(){return value;}function helper(value){return retain();}const args=[];args.push(helper(current));return args;}const list=[...make(old)];const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:current.api});({sameCurrent:alias===current.api,sameOld:alias===old.api});",
+      "runtime": {
+        "sameCurrent": false,
+        "sameOld": true,
+        "injectedKeys": [
+          "run"
+        ],
+        "outsideScope": false,
+        "outsideScopeResult": null
+      },
+      "scanner": {
+        "beforeR12": {
+          "digest": "921bf274d19df6745ceea92bf5fe04bba1a2f66b44f58070c623d4e5f7a53fc6",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "059932c3db32623ad92593d3f9411373acd92bcda25e6c2e410e1d876b3a584b",
+            "b771209dd86684778f67d799b0aa2be6355d9e8ca55bc728874733aec659a028",
+            "a483817a5abce037efa1633f314591465235108655328d3d95c693906a45126c",
+            "03d1e9468834ffa5260b9edc276e294e0ed17f3f34b5c0f6856abf57656c79e1",
+            "2708559fb8e90753bba3f105396cc95b3533331474c4084e1a9afd98408baacd",
+            "47de44ca4dcf4f1bb0335ede2283d7f14141cb80c67f0049e9e9b64cd4908466",
+            "46d61feed2678589623f87f40218385c2acbfae5a24d5c3fb4d5c9ebe79b3c67",
+            "7527bd9a171795341083fc5a623fe629677ff655c0118e942dde91f51ac3b9e2",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+            "ee5eea5e44883f0e7365e1a0422f11aad6cb05d53ca53f90262ba5f89a4fd850",
+            "f7718b91e54474516787804569f1656e051cddeb90b63be3bb50362cb560e439",
+            "62049c34462e5959214a67bfa2ff0f4af2ef8beefc5a25725dc6cc514b9e0ecd"
+          ]
+        },
+        "current": {
+          "digest": "921bf274d19df6745ceea92bf5fe04bba1a2f66b44f58070c623d4e5f7a53fc6",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "059932c3db32623ad92593d3f9411373acd92bcda25e6c2e410e1d876b3a584b",
+            "b771209dd86684778f67d799b0aa2be6355d9e8ca55bc728874733aec659a028",
+            "a483817a5abce037efa1633f314591465235108655328d3d95c693906a45126c",
+            "03d1e9468834ffa5260b9edc276e294e0ed17f3f34b5c0f6856abf57656c79e1",
+            "2708559fb8e90753bba3f105396cc95b3533331474c4084e1a9afd98408baacd",
+            "47de44ca4dcf4f1bb0335ede2283d7f14141cb80c67f0049e9e9b64cd4908466",
+            "46d61feed2678589623f87f40218385c2acbfae5a24d5c3fb4d5c9ebe79b3c67",
+            "7527bd9a171795341083fc5a623fe629677ff655c0118e942dde91f51ac3b9e2",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+            "ee5eea5e44883f0e7365e1a0422f11aad6cb05d53ca53f90262ba5f89a4fd850",
+            "f7718b91e54474516787804569f1656e051cddeb90b63be3bb50362cb560e439",
+            "62049c34462e5959214a67bfa2ff0f4af2ef8beefc5a25725dc6cc514b9e0ecd"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR12": [],
+      "current": []
+    },
+    {
+      "name": "lexical-capture-shadow-unsafe",
+      "unsafe": true,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const current=provide();function make(value){function retain(){return value;}function helper(value){return retain();}const args=[];args.push(helper(old));return args;}const list=[...make(current)];const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:current.api});({sameCurrent:alias===current.api,sameOld:alias===old.api});",
+      "runtime": {
+        "sameCurrent": true,
+        "sameOld": false,
+        "injectedKeys": [
+          "run",
+          "outsideScope"
+        ],
+        "outsideScope": true,
+        "outsideScopeResult": true
+      },
+      "scanner": {
+        "beforeR12": {
+          "digest": "003c90d391b5724efc1b9a54e4968afc36b194758ed1923af96d6eb9dd79c2d4",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "059932c3db32623ad92593d3f9411373acd92bcda25e6c2e410e1d876b3a584b",
+            "b771209dd86684778f67d799b0aa2be6355d9e8ca55bc728874733aec659a028",
+            "a483817a5abce037efa1633f314591465235108655328d3d95c693906a45126c",
+            "722d1d0567d21b7155e24ca247815e527379684a3f43b2ea384936b53cac2288",
+            "98eb7d9db939a5bcf2a2000ce8f06afa16955a7cec91272aec8f624b2af79010",
+            "ee7bb5387185fbef0b58bb1250cf1b2e4d4559786baf67f209ddc5c4ef61fd7a",
+            "46d61feed2678589623f87f40218385c2acbfae5a24d5c3fb4d5c9ebe79b3c67",
+            "7527bd9a171795341083fc5a623fe629677ff655c0118e942dde91f51ac3b9e2",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+            "ee5eea5e44883f0e7365e1a0422f11aad6cb05d53ca53f90262ba5f89a4fd850",
+            "f7718b91e54474516787804569f1656e051cddeb90b63be3bb50362cb560e439",
+            "62049c34462e5959214a67bfa2ff0f4af2ef8beefc5a25725dc6cc514b9e0ecd"
+          ]
+        },
+        "current": {
+          "digest": "003c90d391b5724efc1b9a54e4968afc36b194758ed1923af96d6eb9dd79c2d4",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "059932c3db32623ad92593d3f9411373acd92bcda25e6c2e410e1d876b3a584b",
+            "b771209dd86684778f67d799b0aa2be6355d9e8ca55bc728874733aec659a028",
+            "a483817a5abce037efa1633f314591465235108655328d3d95c693906a45126c",
+            "722d1d0567d21b7155e24ca247815e527379684a3f43b2ea384936b53cac2288",
+            "98eb7d9db939a5bcf2a2000ce8f06afa16955a7cec91272aec8f624b2af79010",
+            "ee7bb5387185fbef0b58bb1250cf1b2e4d4559786baf67f209ddc5c4ef61fd7a",
+            "46d61feed2678589623f87f40218385c2acbfae5a24d5c3fb4d5c9ebe79b3c67",
+            "7527bd9a171795341083fc5a623fe629677ff655c0118e942dde91f51ac3b9e2",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+            "ee5eea5e44883f0e7365e1a0422f11aad6cb05d53ca53f90262ba5f89a4fd850",
+            "f7718b91e54474516787804569f1656e051cddeb90b63be3bb50362cb560e439",
+            "62049c34462e5959214a67bfa2ff0f4af2ef8beefc5a25725dc6cc514b9e0ecd"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR12": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 334,
+          "message": "scoped api 未授权字段 outsideScope",
+          "evidenceId": "ee5eea5e44883f0e7365e1a0422f11aad6cb05d53ca53f90262ba5f89a4fd850",
+          "functionPath": null
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 334,
+          "message": "scoped api 未授权字段 outsideScope",
+          "evidenceId": "ee5eea5e44883f0e7365e1a0422f11aad6cb05d53ca53f90262ba5f89a4fd850",
+          "functionPath": null
+        }
+      ]
+    },
+    {
+      "name": "sibling-factory-local-helper-safe",
+      "unsafe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const current=provide();function first(value){function put(target,value){target[0]=value;}const args=[];put(args,value);return args;}function second(value){function put(target,value){target.push(value);}const args=[];put(args,value);return args;}const one=first(old);const two=second(current);const list=[...one];const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:current.api});({sameCurrent:alias===current.api,sameOld:alias===old.api});",
+      "runtime": {
+        "sameCurrent": false,
+        "sameOld": true,
+        "injectedKeys": [
+          "run"
+        ],
+        "outsideScope": false,
+        "outsideScopeResult": null
+      },
+      "scanner": {
+        "beforeR12": {
+          "digest": "3285e4565218a4dea4804ff24cbd79395cd981871f25660eb79e521c8213cc36",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "059932c3db32623ad92593d3f9411373acd92bcda25e6c2e410e1d876b3a584b",
+            "b771209dd86684778f67d799b0aa2be6355d9e8ca55bc728874733aec659a028",
+            "f493b7c7b281bb7b9096eed7712e8b2b05a7b3b7a068894c2e882459bf75d116",
+            "8c9bcd5e860453b1e67e9371d931fb2cfdc400a1bd77b7e38ea4512d0541f465",
+            "483a22b760e7517bcbe995f99281ff2d78d9a3f67675d8b4080930e6de362205",
+            "8c9bcd5e860453b1e67e9371d931fb2cfdc400a1bd77b7e38ea4512d0541f465",
+            "4121b35d23ac617badf9e08c0eae17bd4ee95be3d4115dd06a83b705ea25883d",
+            "96eec0b23ca381d00ad642a861473854193fa02efde881b46d10130fbcad00e7",
+            "46d61feed2678589623f87f40218385c2acbfae5a24d5c3fb4d5c9ebe79b3c67",
+            "7527bd9a171795341083fc5a623fe629677ff655c0118e942dde91f51ac3b9e2",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+            "ee5eea5e44883f0e7365e1a0422f11aad6cb05d53ca53f90262ba5f89a4fd850",
+            "f7718b91e54474516787804569f1656e051cddeb90b63be3bb50362cb560e439",
+            "62049c34462e5959214a67bfa2ff0f4af2ef8beefc5a25725dc6cc514b9e0ecd"
+          ]
+        },
+        "current": {
+          "digest": "3285e4565218a4dea4804ff24cbd79395cd981871f25660eb79e521c8213cc36",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "059932c3db32623ad92593d3f9411373acd92bcda25e6c2e410e1d876b3a584b",
+            "b771209dd86684778f67d799b0aa2be6355d9e8ca55bc728874733aec659a028",
+            "f493b7c7b281bb7b9096eed7712e8b2b05a7b3b7a068894c2e882459bf75d116",
+            "8c9bcd5e860453b1e67e9371d931fb2cfdc400a1bd77b7e38ea4512d0541f465",
+            "483a22b760e7517bcbe995f99281ff2d78d9a3f67675d8b4080930e6de362205",
+            "8c9bcd5e860453b1e67e9371d931fb2cfdc400a1bd77b7e38ea4512d0541f465",
+            "4121b35d23ac617badf9e08c0eae17bd4ee95be3d4115dd06a83b705ea25883d",
+            "96eec0b23ca381d00ad642a861473854193fa02efde881b46d10130fbcad00e7",
+            "46d61feed2678589623f87f40218385c2acbfae5a24d5c3fb4d5c9ebe79b3c67",
+            "7527bd9a171795341083fc5a623fe629677ff655c0118e942dde91f51ac3b9e2",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+            "ee5eea5e44883f0e7365e1a0422f11aad6cb05d53ca53f90262ba5f89a4fd850",
+            "f7718b91e54474516787804569f1656e051cddeb90b63be3bb50362cb560e439",
+            "62049c34462e5959214a67bfa2ff0f4af2ef8beefc5a25725dc6cc514b9e0ecd"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR12": [],
+      "current": []
+    },
+    {
+      "name": "sibling-factory-local-helper-unsafe",
+      "unsafe": true,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const current=provide();function first(value){function put(target,value){target[0]=value;}const args=[];put(args,value);return args;}function second(value){function put(target,value){target.push(value);}const args=[];put(args,value);return args;}const one=first(old);const two=second(current);const list=[...two];const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:current.api});({sameCurrent:alias===current.api,sameOld:alias===old.api});",
+      "runtime": {
+        "sameCurrent": true,
+        "sameOld": false,
+        "injectedKeys": [
+          "run",
+          "outsideScope"
+        ],
+        "outsideScope": true,
+        "outsideScopeResult": true
+      },
+      "scanner": {
+        "beforeR12": {
+          "digest": "3285e4565218a4dea4804ff24cbd79395cd981871f25660eb79e521c8213cc36",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "059932c3db32623ad92593d3f9411373acd92bcda25e6c2e410e1d876b3a584b",
+            "b771209dd86684778f67d799b0aa2be6355d9e8ca55bc728874733aec659a028",
+            "f493b7c7b281bb7b9096eed7712e8b2b05a7b3b7a068894c2e882459bf75d116",
+            "8c9bcd5e860453b1e67e9371d931fb2cfdc400a1bd77b7e38ea4512d0541f465",
+            "483a22b760e7517bcbe995f99281ff2d78d9a3f67675d8b4080930e6de362205",
+            "8c9bcd5e860453b1e67e9371d931fb2cfdc400a1bd77b7e38ea4512d0541f465",
+            "4121b35d23ac617badf9e08c0eae17bd4ee95be3d4115dd06a83b705ea25883d",
+            "96eec0b23ca381d00ad642a861473854193fa02efde881b46d10130fbcad00e7",
+            "46d61feed2678589623f87f40218385c2acbfae5a24d5c3fb4d5c9ebe79b3c67",
+            "7527bd9a171795341083fc5a623fe629677ff655c0118e942dde91f51ac3b9e2",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+            "ee5eea5e44883f0e7365e1a0422f11aad6cb05d53ca53f90262ba5f89a4fd850",
+            "f7718b91e54474516787804569f1656e051cddeb90b63be3bb50362cb560e439",
+            "62049c34462e5959214a67bfa2ff0f4af2ef8beefc5a25725dc6cc514b9e0ecd"
+          ]
+        },
+        "current": {
+          "digest": "3285e4565218a4dea4804ff24cbd79395cd981871f25660eb79e521c8213cc36",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "059932c3db32623ad92593d3f9411373acd92bcda25e6c2e410e1d876b3a584b",
+            "b771209dd86684778f67d799b0aa2be6355d9e8ca55bc728874733aec659a028",
+            "f493b7c7b281bb7b9096eed7712e8b2b05a7b3b7a068894c2e882459bf75d116",
+            "8c9bcd5e860453b1e67e9371d931fb2cfdc400a1bd77b7e38ea4512d0541f465",
+            "483a22b760e7517bcbe995f99281ff2d78d9a3f67675d8b4080930e6de362205",
+            "8c9bcd5e860453b1e67e9371d931fb2cfdc400a1bd77b7e38ea4512d0541f465",
+            "4121b35d23ac617badf9e08c0eae17bd4ee95be3d4115dd06a83b705ea25883d",
+            "96eec0b23ca381d00ad642a861473854193fa02efde881b46d10130fbcad00e7",
+            "46d61feed2678589623f87f40218385c2acbfae5a24d5c3fb4d5c9ebe79b3c67",
+            "7527bd9a171795341083fc5a623fe629677ff655c0118e942dde91f51ac3b9e2",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+            "ee5eea5e44883f0e7365e1a0422f11aad6cb05d53ca53f90262ba5f89a4fd850",
+            "f7718b91e54474516787804569f1656e051cddeb90b63be3bb50362cb560e439",
+            "62049c34462e5959214a67bfa2ff0f4af2ef8beefc5a25725dc6cc514b9e0ecd"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR12": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 450,
+          "message": "scoped api 未授权字段 outsideScope",
+          "evidenceId": "ee5eea5e44883f0e7365e1a0422f11aad6cb05d53ca53f90262ba5f89a4fd850",
+          "functionPath": null
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 450,
+          "message": "scoped api 未授权字段 outsideScope",
+          "evidenceId": "ee5eea5e44883f0e7365e1a0422f11aad6cb05d53ca53f90262ba5f89a4fd850",
+          "functionPath": null
+        }
+      ]
+    }
+  ]
+}

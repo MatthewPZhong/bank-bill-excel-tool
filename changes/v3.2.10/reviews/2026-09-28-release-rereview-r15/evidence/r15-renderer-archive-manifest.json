@@ -1,0 +1,135 @@
+{
+  "files": [
+    {
+      "file": "r15-renderer-before-bootstrap.cjs",
+      "bytes": 1335,
+      "sha256": "fc3d40c49365253781b7eb207f465a536123874dba511705761a0b2c5f27c324"
+    },
+    {
+      "file": "r15-renderer-before-inputs.json",
+      "bytes": 1890,
+      "sha256": "e9dcf08176d4dd04b8552f2035f5b4bbd3ad3e83e6fc89d09f1a1614a20a89aa"
+    },
+    {
+      "file": "r15-renderer-branch-vm.cjs",
+      "bytes": 1218,
+      "sha256": "219ae7928f2804d76cc133f6aa64b980dfd9e418428d43978044018fabaa4601"
+    },
+    {
+      "file": "r15-renderer-branch-vm.json",
+      "bytes": 7165,
+      "sha256": "6987e0aa621caf08df707f6cd33a71993a88dbbc7b3805aa12a20b95da2b0e8e"
+    },
+    {
+      "file": "r15-renderer-code.txt",
+      "bytes": 5781,
+      "sha256": "25667ec2cf98fa0e5c937d9a321fd5905dbc9c00337adeb63d029950191830b1"
+    },
+    {
+      "file": "r15-renderer-contract.txt",
+      "bytes": 1981,
+      "sha256": "b1e8eca2c9a6d92cfb05c58c8e65e7bf04fa45545d17bb7b70827cf24ded71cd"
+    },
+    {
+      "file": "r15-renderer-current-inputs.json",
+      "bytes": 1878,
+      "sha256": "c676457e509f81f6f906d1773fded0a3b12e7595b23e43bad7657d05abbd7984"
+    },
+    {
+      "file": "r15-renderer-forof-realconfig-before-progress.log",
+      "bytes": 235,
+      "sha256": "6d725a6c069309a01046bdd892a82e16fdb872c0b01b998e58259bb262748465"
+    },
+    {
+      "file": "r15-renderer-forof-realconfig-before.json",
+      "bytes": 1852,
+      "sha256": "3478fb383943e6738921d89be8fb9ba5c843a430aff3eee81d6c7bd3ab4183c8"
+    },
+    {
+      "file": "r15-renderer-forof-realconfig-current-progress.log",
+      "bytes": 235,
+      "sha256": "2b456483a9f5899e1c48a11c08b4f37f430fb02f2bd4ac26de271ba0a5db959f"
+    },
+    {
+      "file": "r15-renderer-forof-realconfig-current.json",
+      "bytes": 2478,
+      "sha256": "5715a37b0fa7a8c0d7d857a60bfe70daf989196a25eab52e53381a1ffae8ff8d"
+    },
+    {
+      "file": "r15-renderer-forof-realconfig.cjs",
+      "bytes": 4362,
+      "sha256": "da487c5a0068d16350d6a8d0bc94489a62a33e1d26d61e657b1ca6948299cd4e"
+    },
+    {
+      "file": "r15-renderer-original-probes-before.jsonl",
+      "bytes": 3896,
+      "sha256": "5d65411d87139ebdc381dddbdb26637969a7021a0d8d34fddad6172da6a5be75"
+    },
+    {
+      "file": "r15-renderer-original-probes.jsonl",
+      "bytes": 4724,
+      "sha256": "c20b3df9ef02c8f823b172ebb3ce5b12e9f3a4184519cf4ac6737d9ceb75aa6c"
+    },
+    {
+      "file": "r15-renderer-original-realconfig-progress.log",
+      "bytes": 221,
+      "sha256": "2e80a62fcb27f99478cfb1f0966c7f04b64a61bda9aaa08695a1ccbe843f2d3f"
+    },
+    {
+      "file": "r15-renderer-original-realconfig.json",
+      "bytes": 2078,
+      "sha256": "37a68c09406f664454025c28d29bd4098ad2a17997224ddbd531873c13496f6f"
+    },
+    {
+      "file": "r15-renderer-preliminary-renamed-method-before-progress.log",
+      "bytes": 235,
+      "sha256": "52b92b6fd043aa3b910eb28e790867ba76dcffb60965e169cec134c1caf3fe4e"
+    },
+    {
+      "file": "r15-renderer-preliminary-renamed-method-before.json",
+      "bytes": 2576,
+      "sha256": "c2cdd1174319c8e346204c065861be58648a0d857cdb08228ff6cdfb94bb3098"
+    },
+    {
+      "file": "r15-renderer-preliminary-renamed-method-current-progress.log",
+      "bytes": 235,
+      "sha256": "b01ca249d104b55922f9813c1e59f4297705368ba0afe47b094a7b2e79ec4e3f"
+    },
+    {
+      "file": "r15-renderer-preliminary-renamed-method-current.json",
+      "bytes": 3194,
+      "sha256": "6fbee29c2f4dc0627d2271557ae7eb473b5aafdec8adcf878768407aac8a1bcc"
+    },
+    {
+      "file": "r15-renderer-probes-before.jsonl",
+      "bytes": 3887,
+      "sha256": "c5330cae7956011c2f529b820964ed44f8657de470c5253a9abe2eea37d766dc"
+    },
+    {
+      "file": "r15-renderer-probes-current.jsonl",
+      "bytes": 4991,
+      "sha256": "2946387bc7816cfd5a7746629fbee2c2dc67ed467449762e198b6c7236eea619"
+    },
+    {
+      "file": "r15-renderer-probes.cjs",
+      "bytes": 5495,
+      "sha256": "72d40bde68b8a3d8d997fa009c4326d89f521299d1ca39f3ae8275e95c55a82c"
+    },
+    {
+      "file": "r15-renderer-review.md",
+      "bytes": 6142,
+      "sha256": "2e59415757825eaf5549342ac33466629f180c80698ace6b4bc2c66b2e36e941"
+    },
+    {
+      "file": "r15-renderer-verification.json",
+      "bytes": 105750,
+      "sha256": "022a8e108a08750508406610898dfbfbea147ec2a122855217703acc8cd0a0a8"
+    },
+    {
+      "file": "r15-renderer-verify.py",
+      "bytes": 3752,
+      "sha256": "e7aa8d0ff9dff117c3d25948dfcf84e676ddce37436874619c6c1f08f6c17293"
+    }
+  ],
+  "count": 26
+}

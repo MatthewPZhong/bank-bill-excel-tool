@@ -1,0 +1,16 @@
+{
+  "status": "PASS",
+  "beforeVersion": "RR9 repair start; 5 checker files verified against input-manifest.json",
+  "rendererCases": 32,
+  "queryCases": 18,
+  "actualInMemoryQueries": 10,
+  "beforeCurrentDiagnosticsEqual": true,
+  "scannerJsonBeforeCurrentEqual": true,
+  "repeatedScanJsonEqual": true,
+  "scannerUnchangedAfterRules": true,
+  "siteEvidenceIdsUnchanged": true,
+  "policyFilesUnchanged": true,
+  "historicalExpectedCorrectionPreserved": "single-mount-category-explicit-ipc: invoke returns Promise; missing await triggers other default",
+  "knownConservativeRejection": "awaited-category-other-default-conservative: IPC field presence is not proved",
+  "scope": "50 small fixtures, async VM and in-memory SQLite only"
+}

@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "rendererBoundaryCount": 20,
+  "rendererOriginalBad": 1,
+  "rendererOriginalSafe": 0,
+  "g1RealIncludes": 0,
+  "g1RealReduce": 1,
+  "g1RealParsedFiles": 765,
+  "sharedProbes": 20,
+  "sharedResultsMatchHistorical": true
+}

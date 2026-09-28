@@ -1,0 +1,29 @@
+{
+  "scope": "R13 repair gate reused, not rerun in R14",
+  "gate": {
+    "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+    "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+    "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+    "startedAt": "2026-09-28T16:33:19.646795+08:00",
+    "minimumFreeBytes": 18269052928,
+    "abortBelowFreeBytes": 2147483648,
+    "inputFiles": 1710,
+    "pid": 34048,
+    "exitCode": 0,
+    "finishedAt": "2026-09-28T16:50:50.044266+08:00",
+    "changedInputs": [],
+    "headAfter": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10"
+  },
+  "unitSummaryMatchesLog": {
+    "tests": 9399,
+    "pass": 9395,
+    "fail": 0,
+    "skipped": 4
+  },
+  "integrationScriptCount": 68,
+  "logSha256": "214e055c8359b4956a17d4e47329543c5e0dad3a838e6ee52b71bae92de20356",
+  "versions": {
+    "node": "v25.8.0",
+    "npm": "11.11.0"
+  }
+}

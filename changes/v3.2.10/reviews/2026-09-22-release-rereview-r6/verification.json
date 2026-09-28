@@ -1,0 +1,131 @@
+{
+  "reviewRound": 6,
+  "mode": "read-only incremental review",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "candidate": "HEAD plus existing R5 dirty repairs",
+  "frozenFiles": 4306,
+  "originalR5Closure": {
+    "RR5-01": "Original full Renderer config negative rejected; detached safe control accepted.",
+    "RR5-02": "Original real-source includes accepted without callback; reduce still rejected at prepare."
+  },
+  "findings": [
+    {
+      "id": "RR6-01",
+      "priority": "P2",
+      "kind": "new R5 false negative",
+      "title": "Destructured parameter selects pre-replacement identity instead of call-time member",
+      "location": "scripts/architecture/renderer-contracts.js:156-157",
+      "before": "ARCH-STATIC-COVERAGE",
+      "current": "no diagnostic",
+      "actualRendererBoundaries": 20,
+      "runtimeExtraCapability": true,
+      "evidence": "evidence/r6-renderer-parameter-realconfig.json"
+    },
+    {
+      "id": "RR6-02",
+      "priority": "P2",
+      "kind": "new R5 false negative",
+      "title": "Projected helper mutations invalidate native array method assumption but are ignored",
+      "location": "scripts/architecture/contracts.js:280-284",
+      "beforeViolations": 1,
+      "currentViolations": 0,
+      "runtimeRecoveryStubCalls": 1,
+      "actualG1SourceMutantViolations": 0,
+      "evidence": "evidence/r6-g1-before-current.json"
+    }
+  ],
+  "executed": [
+    {
+      "command": "node --test --test-concurrency=1 tests/unit/architecture/*.test.js",
+      "exitCode": 0,
+      "tests": 316,
+      "pass": 316,
+      "fail": 0,
+      "skip": 0,
+      "log": "evidence/architecture-tests.log"
+    },
+    {
+      "command": "node scripts/check-architecture.js --json /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r6/evidence/architecture-check.json",
+      "exitCode": 0,
+      "active": 31,
+      "violations": 0,
+      "staleExceptions": 0,
+      "scannedFiles": 765,
+      "parsedFiles": 765,
+      "json": "evidence/architecture-check.json"
+    },
+    {
+      "command": "node --test --test-name-pattern='RR5-01' tests/unit/architecture/release-rereview-r5.test.js",
+      "exitCode": 0,
+      "pass": 26,
+      "log": "evidence/r6-renderer-targeted-tests.log"
+    },
+    {
+      "command": "node --test --test-name-pattern='RR5-02' tests/unit/architecture/release-rereview-r5.test.js",
+      "exitCode": 0,
+      "pass": 20,
+      "log": "evidence/r6-g1-rr5-02-tests.tap"
+    },
+    {
+      "command": "python3 changes/v3.2.10/reviews/2026-09-22-release-rereview-r6/evidence/verify-probes.py",
+      "exitCode": 0,
+      "result": "evidence/probe-verification.json"
+    }
+  ],
+  "fullGateEvidence": {
+    "rerunThisReview": false,
+    "source": "../2026-09-22-release-r5-repair/verification.json",
+    "gate": {
+      "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+      "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+      "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+      "startedAt": "2026-09-22T14:01:31.412161+08:00",
+      "minimumFreeBytes": 4921520128,
+      "abortBelowFreeBytes": 2147483648,
+      "inputFiles": 1702,
+      "pid": 32553,
+      "exitCode": 0,
+      "finishedAt": "2026-09-22T14:19:51.835802+08:00",
+      "changedInputs": [],
+      "headAfter": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10"
+    },
+    "unit": {
+      "tests": 9094,
+      "suites": 828,
+      "pass": 9090,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 4,
+      "todo": 0
+    },
+    "integration": {
+      "scripts": 68,
+      "countedPassed": 2901,
+      "countedTotal": 2901,
+      "withoutCount": [
+        "v2.1.12-beta-multiworker-nested"
+      ]
+    },
+    "rendererLifecycle": {
+      "passed": 233,
+      "total": 233
+    },
+    "inputMatch": "evidence/gate-evidence-comparison.json"
+  },
+  "limits": [
+    "Incremental review of latest repair and bounded adjacent contracts; not a new whole-product review.",
+    "No source, scanner, test, config or prior evidence edits.",
+    "No real product Main/GUI/Windows/Excel/WPS/manual financial acceptance.",
+    "No commit/push/PR/main merge/version/tag/publication."
+  ],
+  "additionalExecutedProbes": {
+    "renderer": "Original 2 cases and adjacent actual 2 cases; 8 neighbors before/current; 5 historical tool hashes matched.",
+    "g1": "Original includes/reduce actual G1 cases; 8 neighbors before/current; 7 historical inputs matched; actual source projected-override case.",
+    "sharedParser": "28 fixtures x 2 versions; complete scan JSON and evidenceId unchanged; 4 isolated member-read descriptors; 7 in-memory SQLite queries rejected.",
+    "commands": "evidence/README.md",
+    "allExitCodes": 0,
+    "scope": "G1 real-source mutants evaluate only active G1, not all 31 mutant rules; recovery only runs as VM memory stub."
+  },
+  "countsNote": "26 Renderer and 20 G1 are subsets of 316. Probe exit 0 means collection completed, not that illegal examples passed their contracts."
+}

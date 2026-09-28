@@ -1,0 +1,97 @@
+{
+  "boundaryState": "active",
+  "outputs": [
+    {
+      "name": "bound_return_override",
+      "writes": 1,
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 201,
+          "message": "受保护 prepare/worker 经静态容器、helper 或回调入口执行了受限恢复能力",
+          "evidenceId": "c348f1f68087117b239cfbbfabbb7687358bbb46d0713bbe2f11b02ef1394222",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "returned_container_override",
+      "writes": 1,
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 180,
+          "message": "受保护 prepare/worker 经静态容器、helper 或回调入口执行了受限恢复能力",
+          "evidenceId": "c348f1f68087117b239cfbbfabbb7687358bbb46d0713bbe2f11b02ef1394222",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "returned_container_compare",
+      "value": true,
+      "writes": 0,
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "returned_prototype_override",
+      "writes": 1,
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 141,
+          "message": "受保护 prepare/worker 经静态容器、helper 或回调入口执行了受限恢复能力",
+          "evidenceId": "398c800b9b4084715e54099e6c21565fe5b183ff3cac072c6f8ce1204bab5c3a",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "fixed_key_projection",
+      "writes": 1,
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 171,
+          "message": "受保护 prepare/worker 经静态容器、helper 或回调入口执行了受限恢复能力",
+          "evidenceId": "c348f1f68087117b239cfbbfabbb7687358bbb46d0713bbe2f11b02ef1394222",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "extracted_native_compare",
+      "value": true,
+      "writes": 0,
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    }
+  ]
+}

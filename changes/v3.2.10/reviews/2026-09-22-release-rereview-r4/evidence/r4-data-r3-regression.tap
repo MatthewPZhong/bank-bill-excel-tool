@@ -1,0 +1,21 @@
+✔ RR3-03 特殊自有键或真实 prototype setter 不得隐藏能力 {["__proto__"]:window.desktopApi} (15.33225ms)
+✔ RR3-03 特殊自有键或真实 prototype setter 不得隐藏能力 {nested:{["__proto__"]:window.desktopApi}} (1.805917ms)
+✔ RR3-03 特殊自有键或真实 prototype setter 不得隐藏能力 {...{["__proto__"]:window.desktopApi}} (1.585166ms)
+✔ RR3-03 特殊自有键或真实 prototype setter 不得隐藏能力 {__proto__:window.desktopApi} (1.442042ms)
+✔ RR3-03 特殊自有键或真实 prototype setter 不得隐藏能力 {nested:{__proto__:window.desktopApi}} (1.519458ms)
+✔ RR3-03 computed __proto__ 在真实 VM 中为自有属性，纯数据特殊键仍合法 (5.143542ms)
+✔ RR3-03 scoped 方法集合不得吞掉名为 __proto__ 的未授权自有方法 (1.519584ms)
+✔ RR3-04 真实 config.initialBillCategory 拒绝非数据或非指定 IPC ()=>window.desktopApi (1.948417ms)
+✔ RR3-04 真实 config.initialBillCategory 拒绝非数据或非指定 IPC {nested:()=>window.desktopApi} (2.1585ms)
+✔ RR3-04 真实 config.initialBillCategory 拒绝非数据或非指定 IPC window.desktopApi (1.213625ms)
+✔ RR3-04 真实 config.initialBillCategory 拒绝非数据或非指定 IPC ipcRenderer.invoke('archive-center:get-settings') (1.057708ms)
+✔ RR3-04 真实 config.initialBillCategory 拒绝非数据或非指定 IPC ipcRenderer.invoke('other').reconIdFixBillCategory (1.28325ms)
+✔ RR3-04 真实 ReconID 配置允许分类数据与 app:get-info 字段 (2.25425ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 118.672083

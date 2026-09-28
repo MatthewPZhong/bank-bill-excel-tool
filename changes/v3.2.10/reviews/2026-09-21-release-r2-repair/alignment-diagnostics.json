@@ -1,0 +1,207 @@
+{
+  "violations": [
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "to": null,
+      "line": 1907,
+      "column": 11,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "d3359118d9b5296f40e63216a98b2f0b5d655f5073bd6966bdb03f01f05c68fc",
+      "functionPath": "recoverOneJournal"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "to": null,
+      "line": 1910,
+      "column": 11,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "d9ee5947fed2c2494f0227d9dcb4170adf5c84a58c3e0a40fcd5ee88466f4c66",
+      "functionPath": "recoverOneJournal"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "to": null,
+      "line": 1916,
+      "column": 11,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "23ff24a04ecb3593f36244c2a1c8ef4743d87c44d6377e1484230d488514ffea",
+      "functionPath": "recoverOneJournal"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "to": null,
+      "line": 1923,
+      "column": 11,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "1a832603801cd7c0eaab8609e839055ca4370e37c23256fe393b8779167edceb",
+      "functionPath": "recoverOneJournal"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "to": null,
+      "line": 1939,
+      "column": 13,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "c5b63f1acce3e3ebc22a002939121dbe0920768a3689bc7e651e36ac22f1b72f",
+      "functionPath": "recoverOneJournal"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "to": null,
+      "line": 2139,
+      "column": 21,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "df3aee65058c90c8fef713c3a623309b3e4d6a9f958506095d8267e65b069d09",
+      "functionPath": "recoverPendingToolboxPublications.<anonymous:1>"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "bizop-query-q2",
+      "from": "src/main-process/background-execution/canonical-json-v1.js",
+      "to": null,
+      "line": 28,
+      "column": 17,
+      "message": "读取 helper 的动态执行目标无法完整解释",
+      "evidenceId": "becb7d3f545fc3a211d12443c9d2d30666e5c8083be0af0cd20d3fe7de48172b",
+      "functionPath": "assertUnicodeScalarString"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "bizop-query-q2",
+      "from": "src/main-process/background-execution/canonical-json-v1.js",
+      "to": null,
+      "line": 30,
+      "column": 19,
+      "message": "读取 helper 的动态执行目标无法完整解释",
+      "evidenceId": "9f14798f7396014c23088bcd6b44281d50599da4c075437735758167ef39e56e",
+      "functionPath": "assertUnicodeScalarString"
+    }
+  ],
+  "matchedExceptions": [
+    {
+      "rule": "ARCH-CYCLE",
+      "boundaryId": null,
+      "from": "src/backend/biz-op-recon-import/import-worker.js",
+      "to": "src/main-process/biz-op-recon-session.js",
+      "line": 49,
+      "column": 4,
+      "message": "生产依赖形成循环：src/backend/biz-op-recon-import/import-worker.js → src/main-process/biz-op-recon-session.js → src/backend/biz-op-recon-import/import-worker.js",
+      "dependencyPath": [
+        "src/backend/biz-op-recon-import/import-worker.js",
+        "src/main-process/biz-op-recon-session.js",
+        "src/backend/biz-op-recon-import/import-worker.js"
+      ],
+      "evidenceId": "a6247d7e51da79199b73635f3ec09a02c7fdc204edbce418b0a14b7e44162ecc",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "addOneDay",
+        "assertBizOpMonthEndAdmission",
+        "assertNoPendingMonthEndCopy",
+        "normalizeBu",
+        "recordMonthEndCopyIntent"
+      ],
+      "cycleEdges": [
+        {
+          "from": "src/backend/biz-op-recon-import/import-worker.js",
+          "to": "src/main-process/biz-op-recon-session.js",
+          "kind": "require"
+        },
+        {
+          "from": "src/main-process/biz-op-recon-session.js",
+          "to": "src/backend/biz-op-recon-import/import-worker.js",
+          "kind": "worker"
+        }
+      ],
+      "edgeKinds": [
+        "require",
+        "worker"
+      ],
+      "literalCycle": false,
+      "exceptionId": "baseline-cycle-001"
+    },
+    {
+      "rule": "ARCH-CYCLE",
+      "boundaryId": null,
+      "from": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+      "to": "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+      "line": 98,
+      "column": 21,
+      "message": "生产依赖形成循环：src/main-process/background-execution/adapters/worker-thread-adapter.js → src/main-process/vcc-financial-op-output/writer-worker-entry.js → src/main-process/background-execution/adapters/worker-thread-adapter.js",
+      "dependencyPath": [
+        "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+        "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+        "src/main-process/background-execution/adapters/worker-thread-adapter.js"
+      ],
+      "evidenceId": "69a3dcf14692fc4e083e6341f4366b184b6fe550ee8c13f3c541167c93e87e8c",
+      "functionPath": "createWorkerThreadAdapter.start",
+      "kind": "worker",
+      "cycleEdges": [
+        {
+          "from": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+          "to": "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+          "kind": "worker"
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+          "to": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+          "kind": "require"
+        }
+      ],
+      "edgeKinds": [
+        "require",
+        "worker"
+      ],
+      "literalCycle": false,
+      "exceptionId": "baseline-cycle-002"
+    }
+  ],
+  "staleExceptions": [],
+  "activeBoundaries": [
+    "bizop-query-q1",
+    "bizop-query-q2",
+    "bizop-query-q3",
+    "bizop-recovery-private",
+    "business-task-adapters",
+    "descriptor-composition",
+    "platform-core",
+    "production-graph",
+    "publication-recovery-entry",
+    "renderer-acquiring",
+    "renderer-bank-bu",
+    "renderer-bank-statement",
+    "renderer-biz-op-legacy",
+    "renderer-biz-op-v327",
+    "renderer-dialog-app-settings",
+    "renderer-dialog-configuration",
+    "renderer-dialog-scenarios",
+    "renderer-dialog-toolbox",
+    "renderer-duplicate-inbound",
+    "renderer-modal-owner",
+    "renderer-new-account",
+    "renderer-pending",
+    "renderer-position",
+    "renderer-pre-fund",
+    "renderer-recon-id-fix",
+    "renderer-services",
+    "renderer-statement",
+    "renderer-vcc-financial-op",
+    "renderer-vcc-op-calc",
+    "shared-xlsx",
+    "vcc-mapped-lineage"
+  ],
+  "pendingBoundaries": [],
+  "partialBoundaries": []
+}

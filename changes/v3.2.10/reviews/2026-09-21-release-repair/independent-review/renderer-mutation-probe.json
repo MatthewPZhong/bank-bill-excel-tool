@@ -1,0 +1,121 @@
+{
+  "before": {
+    "scripts/architecture/scan.js": "5f50ac5367347b551dd543ec517cd21c0a52e5f5fb7aa58f43558c1685d452f5",
+    "scripts/architecture/rules.js": "d7981268f31d2f15fae08c8f970dfba111acb06594844fe93fe19f5b9cf1df6d",
+    "scripts/architecture/contracts.js": "b0e15a2a25621ff8edf17498ae47da7e30e4b07cc36baf8f77780ab793e359a6",
+    "scripts/architecture/renderer-contracts.js": "693464dd4cb430947d758a22ed9611ad362f3d7ff60834b4d63e4df17d0a20cf"
+  },
+  "after": {
+    "scripts/architecture/scan.js": "5f50ac5367347b551dd543ec517cd21c0a52e5f5fb7aa58f43558c1685d452f5",
+    "scripts/architecture/rules.js": "d7981268f31d2f15fae08c8f970dfba111acb06594844fe93fe19f5b9cf1df6d",
+    "scripts/architecture/contracts.js": "b0e15a2a25621ff8edf17498ae47da7e30e4b07cc36baf8f77780ab793e359a6",
+    "scripts/architecture/renderer-contracts.js": "693464dd4cb430947d758a22ed9611ad362f3d7ff60834b4d63e4df17d0a20cf"
+  },
+  "stable": true,
+  "results": [
+    {
+      "name": "full-spread",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "function provide(){return {...window.desktopApi};}createProbe({api:provide()});"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-STATIC-COVERAGE",
+          "from": "src/app.js",
+          "line": 1,
+          "message": "scoped api 未提供可解释方法集合"
+        }
+      ],
+      "edges": [],
+      "runtime": {
+        "wholeApi": false,
+        "wholeApiAsRead": false,
+        "outsideScopeViaRead": false,
+        "outsideScopeDirect": true
+      }
+    },
+    {
+      "name": "assign-returned-api",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "function provide(){const api={read:window.desktopApi.read};Object.assign(api,window.desktopApi);return api;}createProbe({api:provide()});"
+      },
+      "violations": [],
+      "edges": [],
+      "runtime": {
+        "wholeApi": false,
+        "wholeApiAsRead": false,
+        "outsideScopeViaRead": false,
+        "outsideScopeDirect": true
+      }
+    },
+    {
+      "name": "define-property-returned-api",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "function provide(){const api={read:window.desktopApi.read};Object.defineProperty(api,'outsideScope',{value:window.desktopApi.outsideScope});return api;}createProbe({api:provide()});"
+      },
+      "violations": [],
+      "edges": [],
+      "runtime": {
+        "wholeApi": false,
+        "wholeApiAsRead": false,
+        "outsideScopeViaRead": false,
+        "outsideScopeDirect": true
+      }
+    },
+    {
+      "name": "umd-full",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "(function(root){root.Provider={provide(){return root.desktopApi;}};})(window);createProbe({api:Provider.provide()});"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "from": "src/app.js",
+          "line": 1,
+          "message": "scoped api 未提供可解释方法集合"
+        }
+      ],
+      "edges": [],
+      "runtime": {
+        "wholeApi": true,
+        "wholeApiAsRead": false,
+        "outsideScopeViaRead": false,
+        "outsideScopeDirect": true
+      }
+    },
+    {
+      "name": "umd-scoped",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "(function(root){root.Provider={provide(){return {read:root.desktopApi.read};}};})(window);createProbe({api:Provider.provide()});"
+      },
+      "violations": [],
+      "edges": [],
+      "runtime": {
+        "wholeApi": false,
+        "wholeApiAsRead": false,
+        "outsideScopeViaRead": false,
+        "outsideScopeDirect": false
+      }
+    },
+    {
+      "name": "provider-late-write",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "window.Provider={provide(){return window.desktopApi;}};createProbe({api:Provider.provide()});window.Provider={provide(){return {read:window.desktopApi.read};}};"
+      },
+      "violations": [],
+      "edges": [],
+      "runtime": {
+        "wholeApi": true,
+        "wholeApiAsRead": false,
+        "outsideScopeViaRead": false,
+        "outsideScopeDirect": true
+      }
+    }
+  ]
+}

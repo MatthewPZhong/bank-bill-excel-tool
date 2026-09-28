@@ -1,0 +1,21 @@
+{
+  "status": "PASS",
+  "meaning": "Archived observations and stated counterexamples are internally consistent; this is not a defect-free candidate verdict.",
+  "rendererNeighborCases": 8,
+  "arrayNeighborCases": 7,
+  "sharedPriorCases": 50,
+  "sharedNewLogicalCases": 6,
+  "sharedQueryCases": 18,
+  "priorOriginalClosures": [
+    "RR9-01 original actual-config cases",
+    "RR9-02 original actual-config cases"
+  ],
+  "confirmedFindings": [
+    "RR10-01 new false-positive regression",
+    "RR10-02 pre-existing source-loss gap"
+  ],
+  "formalArchitectureTests": 482,
+  "activeBoundaries": 31,
+  "formalArchitectureDiagnostics": 0,
+  "reusedGateInputsMatched": 1706
+}

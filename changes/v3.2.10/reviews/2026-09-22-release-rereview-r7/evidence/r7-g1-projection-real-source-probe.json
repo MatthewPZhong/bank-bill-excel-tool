@@ -1,0 +1,58 @@
+{
+  "boundaryState": "active",
+  "injected": "  function change(box) { box.handlers.includes = fn => fn(options.runtime, options.entry); } const handlers = []; change({handlers}); handlers.includes(recoverPreparingIntent);",
+  "coverage": {
+    "scannedFiles": 765,
+    "parsedFiles": 765,
+    "literalEdges": 2405,
+    "workerEdges": 64,
+    "globalEdges": 59,
+    "unresolved": 2,
+    "dynamicSites": 33,
+    "parseErrors": 0
+  },
+  "violations": [
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "to": null,
+      "line": 2512,
+      "column": 134,
+      "message": "受保护 prepare/worker 经静态容器、helper 或回调入口执行了受限恢复能力",
+      "evidenceId": "c348f1f68087117b239cfbbfabbb7687358bbb46d0713bbe2f11b02ef1394222",
+      "functionPath": "prepareToolboxPublication"
+    }
+  ],
+  "activeBoundaries": [
+    "publication-recovery-entry"
+  ],
+  "callbackCall": {
+    "line": 2512,
+    "column": 134,
+    "callee": "",
+    "method": "includes",
+    "callbackTargets": [
+      {
+        "path": "src/main-process/toolbox-output-publication.js",
+        "functionPath": "recoverPreparingIntent"
+      }
+    ],
+    "targets": []
+  },
+  "recoveryScopeReached": [
+    {
+      "path": "src/main-process/toolbox-output-publication.js",
+      "functionPath": "recoverPreparingIntent",
+      "mode": "exact",
+      "thread": "main"
+    },
+    {
+      "path": "src/main-process/toolbox-output-publication.js",
+      "functionPath": "recoverPreparingIntent",
+      "mode": "exact",
+      "thread": "worker"
+    }
+  ],
+  "nestedAllowedSites": []
+}

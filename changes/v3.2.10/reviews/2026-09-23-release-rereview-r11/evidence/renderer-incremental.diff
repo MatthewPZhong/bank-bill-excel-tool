@@ -1,0 +1,216 @@
+--- r10-repair-before
++++ r11-current
+@@ -32,12 +32,15 @@
+   const identity = Symbol('renderer-object-identity');
+   const origin = Symbol('renderer-object-origin');
+   const truthiness = Symbol('renderer-known-truthiness');
++  const nonNullish = Symbol('renderer-known-non-nullish');
++  const uncertainElements = Symbol('renderer-uncertain-array-elements');
+   const deferred = Symbol('renderer-deferred-identity');
+   const defer = read => {
+     let value;
+     return { kind: 'deferred-identity', [deferred]: () => (value ||= read()) };
+   };
+   const frames = Symbol('renderer-call-frames');
++  const parameterBindings = Symbol('renderer-parameter-bindings');
+   const emptyEnv = new Map();
+   const callNodes = new Map([...analyses].map(([file, analysis]) => [file,
+     new Map(analysis.nodes.filter(node => ['CallExpression', 'NewExpression'].includes(node.type)).map(node => [node.start, node]))]));
+@@ -70,6 +73,7 @@
+   const arrayMutators = new Set(['copyWithin', 'fill', 'pop', 'push', 'reverse', 'shift', 'sort', 'splice', 'unshift']);
+   const unsupportedArrayMutation = (object, analysis, env, read = null) => {
+     const identities = identitiesOf(object);
++    const writeEnv = object[origin]?.analysis === analysis ? object[origin].env : env;
+     const mutations = [];
+     if (!identities.length) return mutations;
+     for (const node of analysis.nodes) {
+@@ -83,7 +87,7 @@
+         if (key.kind !== 'literal' || key.value === 'length' || node.operator !== '=') member = node.left;
+       }
+       if ((node.type === 'UpdateExpression' || (node.type === 'UnaryExpression' && node.operator === 'delete')) && node.argument.type === 'MemberExpression') member = node.argument;
+-      if (member && (!read || writtenBefore(node, read, analysis, env, env) !== false) && sameObject(analysis.describe(member.object), identities, analysis, env)) mutations.push(node);
++      if (member && (!read || writtenBefore(node, read, analysis, writeEnv, env) !== false) && sameObject(analysis.describe(member.object), identities, analysis, writeEnv)) mutations.push(node);
+     }
+     return mutations;
+   };
+@@ -116,14 +120,15 @@
+       const elements = value => {
+         if (value.kind === 'identity-candidates') return value.values.flatMap(elements);
+         if (value.kind !== 'array') return [value];
++        const writeEnv = value[origin]?.analysis === analysis ? value[origin].env : env;
+         const keys = new Set(value.elements.map((_, index) => String(index)));
+         // 初始空数组也可能已被 mutator 填入对象，不能因为没有初始槽位就跳过来源快照。
+-        if (unsupportedArrayMutation(value, analysis, env, node).length) keys.add('0');
++        if (value[uncertainElements] || unsupportedArrayMutation(value, analysis, env, node).length) keys.add('0');
+         // 此处只收集可能插入的来源，不推断 mutator 执行后的槽位；扩容写入也不能丢失。
+         for (const write of analysis.nodes) {
+-          if (write.type !== 'AssignmentExpression' || write.left.type !== 'MemberExpression' || writtenBefore(write, node, analysis, env, env) === false) continue;
++          if (write.type !== 'AssignmentExpression' || write.left.type !== 'MemberExpression' || writtenBefore(write, node, analysis, writeEnv, env) === false) continue;
+           const key = write.left.computed ? analysis.describe(write.left.property) : { kind: 'literal', value: write.left.property.name };
+-          if (key.kind === 'literal' && /^(0|[1-9][0-9]*)$/.test(String(key.value)) && sameObject(analysis.describe(write.left.object), identitiesOf(value), analysis, env)) keys.add(String(key.value));
++          if (key.kind === 'literal' && /^(0|[1-9][0-9]*)$/.test(String(key.value)) && sameObject(analysis.describe(write.left.object), identitiesOf(value), analysis, writeEnv)) keys.add(String(key.value));
+         }
+         return [...keys].map(property => snapshotMember(value, { property, node }, analysis, env, depth + 1, visited));
+       };
+@@ -176,11 +181,16 @@
+     return { kind: 'identity-candidates', values: [selected, missing, unknown('unsupported-renderer-array-mutation'),
+       ...object.elements.map((_, index) => select(object, [String(index)])),
+       ...mutations.flatMap(node => mutationSources(node.type === 'CallExpression' ? node.arguments : node.type === 'AssignmentExpression' ? [node.right] : [],
+-        analysis, env, depth + 1, visited))] };
++        analysis, writeEnv, depth + 1, visited))] };
+   };
+   const mergeIdentities = values => {
+-    const first = values[0];
+-    if (first[deferred]) return defer(() => mergeIdentities(values.map(value => value[deferred]())));
++    const initial = values[0];
++    if (initial[deferred]) return defer(() => mergeIdentities(values.map(value => value[deferred]())));
++    // 结构相同不代表分支事实相同：来源取并集，排除默认值的证明只能取交集。
++    const first = { ...initial,
++      [truthiness]: values.every(value => value[truthiness] === initial[truthiness]) ? initial[truthiness] : undefined,
++      [nonNullish]: values.every(value => value[nonNullish] === true || value[truthiness] === true) };
++    if (values.some(value => value[uncertainElements])) first[uncertainElements] = values.flatMap(value => value[uncertainElements] || []);
+     if (first.kind === 'object') return { ...first,
+       [identity]: [...new Set(values.flatMap(value => value[identity] || []))],
+       properties: Object.fromEntries(Object.keys(first.properties).map(key =>
+@@ -209,6 +219,8 @@
+       if (value?.kind === 'identity-candidates') return { ...value, values: value.values.map(item => select(item, chain.slice(index))) };
+       if (value?.kind === 'ipc-data') { value = { ...value, fields: [...(value.fields || []), part] }; continue; }
+       if (value?.kind === 'array' && !value.opaque && /^(0|[1-9][0-9]*)$/.test(part)) {
++        if (value[uncertainElements]) return select({ kind: 'identity-candidates', values: [unknown('uncertain-renderer-array-index'),
++          ...value.elements.map(item => item[deferred] ? item[deferred]() : item), ...value[uncertainElements]] }, chain.slice(index + 1));
+         value = value.elements[Number(part)] || missing;
+         if (value[deferred]) value = value[deferred]();
+         if (value.kind === 'unknown' && value.reason === 'missing') value = missing;
+@@ -230,13 +242,24 @@
+         if (item?.kind === 'identity-candidates') return { ...item, values: item.values.map(choose) };
+         if (item === missing || (item?.kind === 'literal' && item.value === undefined) ||
+           (item?.kind === 'reference' && item.rootFree && pathOf(item).join('.') === 'undefined')) return fallback();
++        // OR/nullish 选中的左值已排除 undefined，不能在默认参数处重新引入被排除的分支。
++        if (item?.[nonNullish] || item?.[truthiness] === true) return item;
+         if (['object', 'array', 'literal', 'function', 'native-function', 'regexp', 'panel-node'].includes(item?.kind)) return item;
+         // IPC 来源标签不证明字段存在；未知实参都必须保留可能触发的默认来源。
+         return { kind: 'identity-candidates', values: [item || unknown('unresolved-renderer-argument'), fallback()] };
+       };
+       return bindPattern(pattern.left, choose(value), env, read);
+     }
+-    if (pattern.type === 'Identifier') { env.set(pattern.name, value); return; }
++    if (pattern.type === 'Identifier') {
++      env.set(pattern.name, value);
++      if (read) {
++        // 闭包保留声明函数的参数身份，不能被调用栈中其他函数的同名参数覆盖。
++        const bindings = new Map(env.get(parameterBindings) || []);
++        bindings.set(`${read.source.from}:${read.functionStart}:${pattern.name}`, value);
++        env.set(parameterBindings, bindings);
++      }
++      return;
++    }
+     // 解构与普通成员访问共用调用时点快照；参数绑定保留身份，使用处再检查能力。
+     const member = key => read && ['object', 'array', 'identity-candidates'].includes(value?.kind)
+       ? snapshotMember(value, { property: key, node: read.node }, read.analysis, read.env, read.depth, read.visited)
+@@ -250,9 +273,10 @@
+   }
+   function parameterValue(value, analysis, env, depth, visited) {
+     const chain = pathOf(value);
+-    if (env.has(chain[0])) return { value: selectOrSelf(env.get(chain[0]), chain.slice(1)) };
+     const fn = analysis.functionNodesByStart.get(value.bindingFunctionStart) || analysis.functionNodes.get(value.bindingFunctionPath);
+     if (!fn) return null;
++    const bindings = env.get(parameterBindings); const key = `${analysis.from}:${fn.start}:${chain[0]}`;
++    if (bindings?.has(key)) return { value: selectOrSelf(bindings.get(key), chain.slice(1)) };
+     if (!parameterCalls.has(analysis)) parameterCalls.set(analysis, new Map());
+     const callCache = parameterCalls.get(analysis);
+     if (!callCache.has(value.bindingFunctionPath)) callCache.set(value.bindingFunctionPath, scan.sites.filter(site => site.type === 'call' &&
+@@ -260,13 +284,13 @@
+         (site.reference?.rootFree && site.reference?.chain?.at(-1) === value.bindingFunctionPath.split('.').at(-1)))));
+     const calls = callCache.get(value.bindingFunctionPath);
+     if (calls.length !== 1) return null;
+-    const context = new Map(); const caller = analyses.get(calls[0].from);
++    const context = new Map(env); const caller = analyses.get(calls[0].from);
+     const call = [...callNodes.get(caller.from).values()].find(node => node.loc.start.line === calls[0].line && node.loc.start.column === calls[0].column);
+     if (!call) return null;
+-    context.set(frames, new Map([[`${analysis.from}:${fn.start}`, JSON.stringify([caller.from, call.start, ''])]]));
+-    const read = { analysis: caller, source: analysis, env: emptyEnv, node: call, depth, visited };
++    context.set(frames, new Map([...(env.get(frames) || []), [`${analysis.from}:${fn.start}`, JSON.stringify([caller.from, call.start, frameAt(caller, call, env)])]]));
++    const read = { analysis: caller, source: analysis, functionStart: fn.start, env, node: call, depth, visited };
+     fn.params.forEach((param, index) => bindPattern(param, calls[0].args[index]
+-      ? resolve(calls[0].args[index], caller, emptyEnv, depth + 1, visited, false) : missing, context, read));
++      ? resolve(calls[0].args[index], caller, env, depth + 1, visited, false) : missing, context, read));
+     return context.has(chain[0]) ? { value: selectOrSelf(context.get(chain[0]), chain.slice(1)) } : null;
+   }
+   function resolve(value, analysis, env = emptyEnv, depth = 0, visited = new Set(), inspectMutations = true) {
+@@ -305,20 +329,37 @@
+         : unknown('unresolved-bound-function');
+     }
+     if (value.kind === 'array') {
+-      if (value.opaque) return unknown(value.reason);
+-      const array = { ...value, elements: [], [identity]: value[identity] || objectIdentity(value, analysis, env), [origin]: { value, analysis, env } };
++      const literal = arrayNodes.get(analysis.from)?.get(value.elements);
++      if (value.opaque && !literal) return unknown(value.reason);
++      const array = { ...value, opaque: false, elements: [], [identity]: value[identity] || objectIdentity(value, analysis, env), [origin]: { value, analysis, env } };
+       const memberValue = item => inspectMutations ? recurse(item) : defer(() => recurse(item));
+-      const literal = arrayNodes.get(analysis.from)?.get(value.elements);
+       if (literal) for (const node of literal.elements) {
+         if (node?.type !== 'SpreadElement') { array.elements.push(memberValue(analysis.describe(node))); continue; }
+         const expanded = resolve(analysis.describe(node.argument), analysis, env, depth + 1, next, false);
+-        if (expanded.kind !== 'array' || unsupportedArrayMutation(expanded, analysis, env, node).length) return unknown('opaque-renderer-array-spread');
++        const uncertain = reason => {
++          if (inspectMutations) return unknown(reason);
++          // 不能定位索引时仍保留展开时可见的对象来源，避免别名写入绕过最终 API 检查。
++          (array[uncertainElements] ||= []).push(...mutationSources([node], analysis, env, depth + 1, next));
++          return null;
++        };
++        if (expanded.kind !== 'array' || expanded[uncertainElements] || unsupportedArrayMutation(expanded, analysis, env, node).length) {
++          const result = uncertain('opaque-renderer-array-spread');
++          if (result) return result;
++          continue;
++        }
+         // spread 在复制时读取槽位；复制后源数组的替换不能改写已捕获的元素。
+         const count = expanded.elements.length;
++        const writeEnv = expanded[origin]?.analysis === analysis ? expanded[origin].env : env;
++        let resized = false;
+         for (const write of analysis.nodes) {
+-          if (write.type !== 'AssignmentExpression' || write.left.type !== 'MemberExpression' || writtenBefore(write, node, analysis, env, env) === false) continue;
++          if (write.type !== 'AssignmentExpression' || write.left.type !== 'MemberExpression' || writtenBefore(write, node, analysis, writeEnv, env) === false) continue;
+           const key = write.left.computed ? analysis.describe(write.left.property) : { kind: 'literal', value: write.left.property.name };
+-          if (key.kind === 'literal' && /^(0|[1-9][0-9]*)$/.test(String(key.value)) && Number(key.value) >= count && sameObject(analysis.describe(write.left.object), identitiesOf(expanded), analysis, env)) return unknown('resized-renderer-array-spread');
++          if (key.kind === 'literal' && /^(0|[1-9][0-9]*)$/.test(String(key.value)) && Number(key.value) >= count && sameObject(analysis.describe(write.left.object), identitiesOf(expanded), analysis, writeEnv)) resized = true;
++        }
++        if (resized) {
++          const result = uncertain('resized-renderer-array-spread');
++          if (result) return result;
++          continue;
+         }
+         for (let index = 0; index < count; index++) {
+           const selected = snapshotMember(expanded, { property: String(index), node }, analysis, env, depth, next);
+@@ -408,14 +449,20 @@
+     }
+     if (value.kind === 'candidates' || value.alternatives) {
+       const choices = value.values || value.alternatives;
+-      if (value.operator === '&&') {
++      if (['&&', '||', '??'].includes(value.operator)) {
+         const choose = left => {
+           if (left.kind === 'identity-candidates') return left.values.flatMap(choose);
+           const absent = left === missing || (left.kind === 'reference' && left.rootFree && pathOf(left).join('.') === 'undefined');
+           const truthy = left[truthiness] ?? (absent ? false : left.kind === 'literal' ? Boolean(left.value)
+             : ['object', 'array', 'function', 'native-function', 'regexp', 'panel-node'].includes(left.kind) ? true : null);
+-          // && 返回短路左值；未知 IPC 字段可能为 undefined，后续默认参数仍须保留其来源。
+-          return truthy === false ? [left] : truthy === true ? [recurse(choices.at(-1))] : [left, recurse(choices.at(-1))];
++          const nullish = absent ? true : left.kind === 'literal' ? left.value == null : left[nonNullish] || truthy === true ? false : null;
++          const takeRight = value.operator === '&&' ? truthy : value.operator === '||' ? (truthy === null ? null : !truthy) : nullish;
++          if (takeRight === true) return [recurse(choices.at(-1))];
++          if (takeRight === false) return [left];
++          // 未知值保留两个分支，但给返回的左值保留该分支的真值/非空约束。
++          const selected = value.operator === '&&' ? { ...left, [truthiness]: false }
++            : { ...left, [nonNullish]: true, ...(value.operator === '||' ? { [truthiness]: true } : {}) };
++          return [selected, recurse(choices.at(-1))];
+         };
+         const resolved = choose(recurse(choices[0]));
+         if (resolved.length === 1) return resolved[0];
+@@ -487,7 +534,7 @@
+       if (!call) return unknown('missing-renderer-call-identity');
+       calls.set(`${source.from}:${fn.start}`, JSON.stringify([analysis.from, value.callStart, frameAt(analysis, call, env)]));
+       context.set(frames, calls);
+-      const read = { analysis, source, env, node: call, depth, visited: next };
++      const read = { analysis, source, functionStart: fn.start, env, node: call, depth, visited: next };
+       fn.params.forEach((param, index) => bindPattern(param, args[index] || missing, context, read));
+       const returns = returnedValues(callee, source);
+       if (returns.length !== 1) return unknown('nonliteral-renderer-factory-return');

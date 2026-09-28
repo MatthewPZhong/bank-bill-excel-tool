@@ -1,0 +1,653 @@
+{
+  "beforeInputHashes": [
+    {
+      "path": "scripts/architecture/scan.js",
+      "sha256": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/contracts.js",
+      "sha256": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/rules.js",
+      "sha256": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/renderer-contracts.js",
+      "sha256": "6b57b228b5fb576bbd3ea40d42ff010c5414c1a6a96fb7efdc6aba92fd2c2bec",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "sha256": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "match": true
+    }
+  ],
+  "currentInputHashes": [
+    {
+      "path": "scripts/architecture/scan.js",
+      "sha256": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be"
+    },
+    {
+      "path": "scripts/architecture/contracts.js",
+      "sha256": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f"
+    },
+    {
+      "path": "scripts/architecture/rules.js",
+      "sha256": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa"
+    },
+    {
+      "path": "scripts/architecture/renderer-contracts.js",
+      "sha256": "f288b9b66558e1fee0ca9697c493aed3b60c5999fac6c0366b81041a46c4f082"
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "sha256": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316"
+    }
+  ],
+  "policy": [
+    {
+      "path": "architecture/boundaries.json",
+      "before": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+      "current": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+      "same": true
+    },
+    {
+      "path": "architecture/legacy-allowlist.json",
+      "before": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3",
+      "current": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3",
+      "same": true
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "before": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "current": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "same": true
+    },
+    {
+      "path": "scripts/architecture/policy-history.js",
+      "before": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+      "current": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+      "same": true
+    }
+  ],
+  "renderer": [
+    {
+      "name": "multiple-call-data-independent",
+      "expectedClean": true,
+      "source": "function select({info}){return info;}const unused=select({info:window.desktopApi});window.StatementController.createStatementController({initialInfo:select({info:{name:\"bank\"}})});",
+      "scanner": {
+        "beforeR12": {
+          "digest": "a1c961543da4c6fdc14a5a878316379c818a005de3ad23b95545462ad01426ef",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "780037c402dfd3f19a97c02ffe05d67587c993e22bac79c581e483c7be30c790",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+            "7198e4be1c7206c9944b0de4349f6e308dee26ebbdf57ab2ad6a6c0df39e3649",
+            "43cce229ffdc418fba35c7e80937ad2a0e6093470680375bb34f66ee2b4b509b",
+            "cc98daf918379e08cdaa56a559e4939ef260d4900d63db8495ae0358720c73a3",
+            "5f079da25340bba1ca7f39d03654295e939b2be1fe8a9cbc35340db084aad187"
+          ]
+        },
+        "current": {
+          "digest": "a1c961543da4c6fdc14a5a878316379c818a005de3ad23b95545462ad01426ef",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "780037c402dfd3f19a97c02ffe05d67587c993e22bac79c581e483c7be30c790",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+            "7198e4be1c7206c9944b0de4349f6e308dee26ebbdf57ab2ad6a6c0df39e3649",
+            "43cce229ffdc418fba35c7e80937ad2a0e6093470680375bb34f66ee2b4b509b",
+            "cc98daf918379e08cdaa56a559e4939ef260d4900d63db8495ae0358720c73a3",
+            "5f079da25340bba1ca7f39d03654295e939b2be1fe8a9cbc35340db084aad187"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR12": [],
+      "current": []
+    },
+    {
+      "name": "multiple-call-api-still-denied",
+      "expectedClean": false,
+      "source": "function select({info}){return info;}const unused=select({info:{name:\"bank\"}});window.StatementController.createStatementController({initialInfo:select({info:window.desktopApi})});",
+      "scanner": {
+        "beforeR12": {
+          "digest": "976ed3f483a44a478271fcc6934bce9ff4901fc586d1e979ee00ecd9271eb08f",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "5f079da25340bba1ca7f39d03654295e939b2be1fe8a9cbc35340db084aad187",
+            "0aec51bb0e073f732bf30491dfcf8d63e077b6fa22c62dfe595aab304e378205",
+            "43cce229ffdc418fba35c7e80937ad2a0e6093470680375bb34f66ee2b4b509b",
+            "cc98daf918379e08cdaa56a559e4939ef260d4900d63db8495ae0358720c73a3",
+            "780037c402dfd3f19a97c02ffe05d67587c993e22bac79c581e483c7be30c790",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271"
+          ]
+        },
+        "current": {
+          "digest": "976ed3f483a44a478271fcc6934bce9ff4901fc586d1e979ee00ecd9271eb08f",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "5f079da25340bba1ca7f39d03654295e939b2be1fe8a9cbc35340db084aad187",
+            "0aec51bb0e073f732bf30491dfcf8d63e077b6fa22c62dfe595aab304e378205",
+            "43cce229ffdc418fba35c7e80937ad2a0e6093470680375bb34f66ee2b4b509b",
+            "cc98daf918379e08cdaa56a559e4939ef260d4900d63db8495ae0358720c73a3",
+            "780037c402dfd3f19a97c02ffe05d67587c993e22bac79c581e483c7be30c790",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR12": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 79,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "0aec51bb0e073f732bf30491dfcf8d63e077b6fa22c62dfe595aab304e378205",
+          "functionPath": null
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 79,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "0aec51bb0e073f732bf30491dfcf8d63e077b6fa22c62dfe595aab304e378205",
+          "functionPath": null
+        }
+      ]
+    },
+    {
+      "name": "multiple-call-ipc-independent",
+      "expectedClean": true,
+      "source": "const {ipcRenderer}=require('electron');function select({info}){return info;}const unused=select({info:ipcRenderer.invoke('other')});window.ReconIdFixController.createReconIdFixController({config:{initialBillCategory:select({info:ipcRenderer.invoke('app:get-info').reconIdFixBillCategory})}});",
+      "scanner": {
+        "beforeR12": {
+          "digest": "49a4430a4e7bcbf910b85f877a71c37b6b157e92b25579b6ccd37b8bdc48c7f5",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "1fcfd4a1f1271ead6973cbde707120d4ccfad6307c18917ee5a12522c6a1a995",
+            "1efa3d5dcd84c4b5f0a05b550d70e9f4be3614bb8c784ce2570e33d89b9cc713",
+            "7be6d0baf68d1fc4785fe1d941a1038ccb1e1e0681d0b1f356452f43510d5144",
+            "3bc405a471742438b2443c2774fab41350eca59253a4dca3c5658af2f4c51c5d",
+            "616a414d13ea35f52408c10e8722609177a949c628c953a8e9e4d154d17471f4",
+            "9daaead24783dfc949af0fed056d286ddf129fdbb6c171d7679bd2a270c426f9",
+            "190e7f50fa5c4c5c0f54d2e51481488f3335e99aa07c4bcf09aa6c911cded676",
+            "51f8aec527637114bd3713648b4e4b7f61b9c16f9bf2d1dfdc2c4749fa602094"
+          ]
+        },
+        "current": {
+          "digest": "49a4430a4e7bcbf910b85f877a71c37b6b157e92b25579b6ccd37b8bdc48c7f5",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "1fcfd4a1f1271ead6973cbde707120d4ccfad6307c18917ee5a12522c6a1a995",
+            "1efa3d5dcd84c4b5f0a05b550d70e9f4be3614bb8c784ce2570e33d89b9cc713",
+            "7be6d0baf68d1fc4785fe1d941a1038ccb1e1e0681d0b1f356452f43510d5144",
+            "3bc405a471742438b2443c2774fab41350eca59253a4dca3c5658af2f4c51c5d",
+            "616a414d13ea35f52408c10e8722609177a949c628c953a8e9e4d154d17471f4",
+            "9daaead24783dfc949af0fed056d286ddf129fdbb6c171d7679bd2a270c426f9",
+            "190e7f50fa5c4c5c0f54d2e51481488f3335e99aa07c4bcf09aa6c911cded676",
+            "51f8aec527637114bd3713648b4e4b7f61b9c16f9bf2d1dfdc2c4749fa602094"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR12": [],
+      "current": []
+    },
+    {
+      "name": "multiple-call-other-ipc-still-denied",
+      "expectedClean": false,
+      "source": "const {ipcRenderer}=require('electron');function select({info}){return info;}const unused=select({info:ipcRenderer.invoke('app:get-info')});window.ReconIdFixController.createReconIdFixController({config:{initialBillCategory:select({info:ipcRenderer.invoke('other').reconIdFixBillCategory})}});",
+      "scanner": {
+        "beforeR12": {
+          "digest": "a02bb3912c5d0cb4d94987f71cefa7dba07edac90d1a6feba6ec5aa9703ebfed",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "1fcfd4a1f1271ead6973cbde707120d4ccfad6307c18917ee5a12522c6a1a995",
+            "399187de005579b2bdb21927f1918ebc7a63a5edda20d3d35d163cef5c6c3a1f",
+            "51f8aec527637114bd3713648b4e4b7f61b9c16f9bf2d1dfdc2c4749fa602094",
+            "da771c47b26eaf1a2241c3d06feed3397f474882af378bed599b6f733559b908",
+            "616a414d13ea35f52408c10e8722609177a949c628c953a8e9e4d154d17471f4",
+            "9daaead24783dfc949af0fed056d286ddf129fdbb6c171d7679bd2a270c426f9",
+            "e9af3eaf1cbda2cf147cb8c8e052e25e072cb641d7b6a7de84bbf6b1f93937a8",
+            "7be6d0baf68d1fc4785fe1d941a1038ccb1e1e0681d0b1f356452f43510d5144"
+          ]
+        },
+        "current": {
+          "digest": "a02bb3912c5d0cb4d94987f71cefa7dba07edac90d1a6feba6ec5aa9703ebfed",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "1fcfd4a1f1271ead6973cbde707120d4ccfad6307c18917ee5a12522c6a1a995",
+            "399187de005579b2bdb21927f1918ebc7a63a5edda20d3d35d163cef5c6c3a1f",
+            "51f8aec527637114bd3713648b4e4b7f61b9c16f9bf2d1dfdc2c4749fa602094",
+            "da771c47b26eaf1a2241c3d06feed3397f474882af378bed599b6f733559b908",
+            "616a414d13ea35f52408c10e8722609177a949c628c953a8e9e4d154d17471f4",
+            "9daaead24783dfc949af0fed056d286ddf129fdbb6c171d7679bd2a270c426f9",
+            "e9af3eaf1cbda2cf147cb8c8e052e25e072cb641d7b6a7de84bbf6b1f93937a8",
+            "7be6d0baf68d1fc4785fe1d941a1038ccb1e1e0681d0b1f356452f43510d5144"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR12": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-recon-id-fix",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 140,
+          "message": "工厂字段 config.initialBillCategory 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "da771c47b26eaf1a2241c3d06feed3397f474882af378bed599b6f733559b908",
+          "functionPath": null
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-recon-id-fix",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 140,
+          "message": "工厂字段 config.initialBillCategory 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "da771c47b26eaf1a2241c3d06feed3397f474882af378bed599b6f733559b908",
+          "functionPath": null
+        }
+      ]
+    }
+  ],
+  "query": [
+    {
+      "name": "local-return-data",
+      "expectedClean": true,
+      "source": "const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];function identity(x){return x;}exports.read=c=>identity([safe]).includes(query);",
+      "sql": [],
+      "actual": false,
+      "scanner": {
+        "beforeR12": {
+          "digest": "099509fa6a2df2b3fd87a5bcc6d4b3ec58ebbc61c9a3b1a3862d5fdc44b94ac6",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "94c2b08a1fcf7685bd4fb64e7737f1ba88e99f86fdd952174b734f6b9f87aadb",
+            "4c7c353b3f8505aa4eab3c045513567ae74cfcf12131766051a95ede483c69a5",
+            "2276293d277fcb22048f4211ab65805fe5859b9b9c72e07fba24d4e6921a80d9",
+            "13d316aeb9099eeb68ce668133dcf264effe14dcfed5b7ebc16bfb1eaed54991",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "c560662fb1b7179f194ebd2321c640637e8c6a7d721d2c77feffe5183e9f48bc",
+            "910ee00c2865c522cf84339cec486d1a27424aaa78272d3b6a95acdb1f7156d1",
+            "f77132ece0ffb7ca6ad282119b74ab8b75a9729418f050b6cac91926231eefd3"
+          ]
+        },
+        "current": {
+          "digest": "099509fa6a2df2b3fd87a5bcc6d4b3ec58ebbc61c9a3b1a3862d5fdc44b94ac6",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "94c2b08a1fcf7685bd4fb64e7737f1ba88e99f86fdd952174b734f6b9f87aadb",
+            "4c7c353b3f8505aa4eab3c045513567ae74cfcf12131766051a95ede483c69a5",
+            "2276293d277fcb22048f4211ab65805fe5859b9b9c72e07fba24d4e6921a80d9",
+            "13d316aeb9099eeb68ce668133dcf264effe14dcfed5b7ebc16bfb1eaed54991",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "c560662fb1b7179f194ebd2321c640637e8c6a7d721d2c77feffe5183e9f48bc",
+            "910ee00c2865c522cf84339cec486d1a27424aaa78272d3b6a95acdb1f7156d1",
+            "f77132ece0ffb7ca6ad282119b74ab8b75a9729418f050b6cac91926231eefd3"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR12": [],
+      "current": []
+    },
+    {
+      "name": "local-return-unreached-call",
+      "expectedClean": true,
+      "source": "const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];function identity(x){return x;}function ignored(c){return identity(query)(c);}exports.read=c=>identity([safe]).includes(query);",
+      "sql": [],
+      "actual": false,
+      "scanner": {
+        "beforeR12": {
+          "digest": "01f735de4929ad686b2b315b8fea107bb8c5d512e20d916cf12936c867142000",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "94c2b08a1fcf7685bd4fb64e7737f1ba88e99f86fdd952174b734f6b9f87aadb",
+            "4c7c353b3f8505aa4eab3c045513567ae74cfcf12131766051a95ede483c69a5",
+            "2276293d277fcb22048f4211ab65805fe5859b9b9c72e07fba24d4e6921a80d9",
+            "13d316aeb9099eeb68ce668133dcf264effe14dcfed5b7ebc16bfb1eaed54991",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "d4d1dbacc0a6a92ab0266f35093b324c3e97e324016c4f419755d5cd4898c258",
+            "a8bfecf7d2f8ad15d95a29ac004cd860a1c0253c788ecf155880e666ffcc2f6a",
+            "c560662fb1b7179f194ebd2321c640637e8c6a7d721d2c77feffe5183e9f48bc",
+            "910ee00c2865c522cf84339cec486d1a27424aaa78272d3b6a95acdb1f7156d1",
+            "f77132ece0ffb7ca6ad282119b74ab8b75a9729418f050b6cac91926231eefd3"
+          ]
+        },
+        "current": {
+          "digest": "01f735de4929ad686b2b315b8fea107bb8c5d512e20d916cf12936c867142000",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "94c2b08a1fcf7685bd4fb64e7737f1ba88e99f86fdd952174b734f6b9f87aadb",
+            "4c7c353b3f8505aa4eab3c045513567ae74cfcf12131766051a95ede483c69a5",
+            "2276293d277fcb22048f4211ab65805fe5859b9b9c72e07fba24d4e6921a80d9",
+            "13d316aeb9099eeb68ce668133dcf264effe14dcfed5b7ebc16bfb1eaed54991",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "d4d1dbacc0a6a92ab0266f35093b324c3e97e324016c4f419755d5cd4898c258",
+            "a8bfecf7d2f8ad15d95a29ac004cd860a1c0253c788ecf155880e666ffcc2f6a",
+            "c560662fb1b7179f194ebd2321c640637e8c6a7d721d2c77feffe5183e9f48bc",
+            "910ee00c2865c522cf84339cec486d1a27424aaa78272d3b6a95acdb1f7156d1",
+            "f77132ece0ffb7ca6ad282119b74ab8b75a9729418f050b6cac91926231eefd3"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR12": [],
+      "current": []
+    },
+    {
+      "name": "projected-return-unreached-call",
+      "expectedClean": true,
+      "source": "const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];function project({handlers}){return handlers;}function ignored(c){return project({handlers:[query]})[0](c);}exports.read=c=>project({handlers:[safe]}).includes(query);",
+      "sql": [],
+      "actual": false,
+      "scanner": {
+        "beforeR12": {
+          "digest": "ab6b391d48efda252d2fdfc3714f15015d239d10614aff2f492d349de85b71ee",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "94c2b08a1fcf7685bd4fb64e7737f1ba88e99f86fdd952174b734f6b9f87aadb",
+            "4c7c353b3f8505aa4eab3c045513567ae74cfcf12131766051a95ede483c69a5",
+            "2276293d277fcb22048f4211ab65805fe5859b9b9c72e07fba24d4e6921a80d9",
+            "13d316aeb9099eeb68ce668133dcf264effe14dcfed5b7ebc16bfb1eaed54991",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "b5a31c14105f13ad148de0b264f9a2e8851ce617df552b3a128618d665e2c927",
+            "8e365133c63c141536eb7c6e364a62c38967ef384b31315759962a72dc8e4001",
+            "19d2664b5bb44288a193326fc6a3552c7af0dc9089e1927cd4626f3c03363635",
+            "e89f77fd60019d1eecb11a065cfc27a463dea33177790943062f744ba3c8069b",
+            "95eb01a7868a5d35e809c78282b17a47cef1a69a3c984740327ce43f9d9fc165"
+          ]
+        },
+        "current": {
+          "digest": "ab6b391d48efda252d2fdfc3714f15015d239d10614aff2f492d349de85b71ee",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "94c2b08a1fcf7685bd4fb64e7737f1ba88e99f86fdd952174b734f6b9f87aadb",
+            "4c7c353b3f8505aa4eab3c045513567ae74cfcf12131766051a95ede483c69a5",
+            "2276293d277fcb22048f4211ab65805fe5859b9b9c72e07fba24d4e6921a80d9",
+            "13d316aeb9099eeb68ce668133dcf264effe14dcfed5b7ebc16bfb1eaed54991",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "b5a31c14105f13ad148de0b264f9a2e8851ce617df552b3a128618d665e2c927",
+            "8e365133c63c141536eb7c6e364a62c38967ef384b31315759962a72dc8e4001",
+            "19d2664b5bb44288a193326fc6a3552c7af0dc9089e1927cd4626f3c03363635",
+            "e89f77fd60019d1eecb11a065cfc27a463dea33177790943062f744ba3c8069b",
+            "95eb01a7868a5d35e809c78282b17a47cef1a69a3c984740327ce43f9d9fc165"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR12": [],
+      "current": []
+    },
+    {
+      "name": "compare-then-real-query",
+      "expectedClean": false,
+      "source": "const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];function project({handlers}){return handlers;}exports.read=c=>{project({handlers:[safe]}).includes(query);return project({handlers:[query]})[0](c);};",
+      "sql": [
+        "SELECT 1 AS value"
+      ],
+      "actual": [
+        {
+          "value": 1
+        }
+      ],
+      "scanner": {
+        "beforeR12": {
+          "digest": "5333c79450cf735aebe91d9e760b07b21b50c24c43697b592d1cce2d306c6f36",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "94c2b08a1fcf7685bd4fb64e7737f1ba88e99f86fdd952174b734f6b9f87aadb",
+            "4c7c353b3f8505aa4eab3c045513567ae74cfcf12131766051a95ede483c69a5",
+            "2276293d277fcb22048f4211ab65805fe5859b9b9c72e07fba24d4e6921a80d9",
+            "13d316aeb9099eeb68ce668133dcf264effe14dcfed5b7ebc16bfb1eaed54991",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "08b08ba14b0b789a39f205cd934d5f714d5668c4ee7029272c7e1af701c204df",
+            "e89f77fd60019d1eecb11a065cfc27a463dea33177790943062f744ba3c8069b",
+            "95eb01a7868a5d35e809c78282b17a47cef1a69a3c984740327ce43f9d9fc165",
+            "b5a31c14105f13ad148de0b264f9a2e8851ce617df552b3a128618d665e2c927",
+            "8e365133c63c141536eb7c6e364a62c38967ef384b31315759962a72dc8e4001"
+          ]
+        },
+        "current": {
+          "digest": "5333c79450cf735aebe91d9e760b07b21b50c24c43697b592d1cce2d306c6f36",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "94c2b08a1fcf7685bd4fb64e7737f1ba88e99f86fdd952174b734f6b9f87aadb",
+            "4c7c353b3f8505aa4eab3c045513567ae74cfcf12131766051a95ede483c69a5",
+            "2276293d277fcb22048f4211ab65805fe5859b9b9c72e07fba24d4e6921a80d9",
+            "13d316aeb9099eeb68ce668133dcf264effe14dcfed5b7ebc16bfb1eaed54991",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "08b08ba14b0b789a39f205cd934d5f714d5668c4ee7029272c7e1af701c204df",
+            "e89f77fd60019d1eecb11a065cfc27a463dea33177790943062f744ba3c8069b",
+            "95eb01a7868a5d35e809c78282b17a47cef1a69a3c984740327ce43f9d9fc165",
+            "b5a31c14105f13ad148de0b264f9a2e8851ce617df552b3a128618d665e2c927",
+            "8e365133c63c141536eb7c6e364a62c38967ef384b31315759962a72dc8e4001"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR12": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "boundaryId": "bizop-query-q3",
+          "from": "src/main-process/biz-op-v327/r5-query.js",
+          "to": null,
+          "line": 1,
+          "column": 15,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "evidenceId": "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+          "functionPath": "query"
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "boundaryId": "bizop-query-q3",
+          "from": "src/main-process/biz-op-v327/r5-query.js",
+          "to": null,
+          "line": 1,
+          "column": 15,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "evidenceId": "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+          "functionPath": "query"
+        }
+      ]
+    },
+    {
+      "name": "real-query-then-compare",
+      "expectedClean": false,
+      "source": "const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];function project({handlers}){return handlers;}exports.read=c=>{const rows=project({handlers:[query]})[0](c);project({handlers:[safe]}).includes(query);return rows;};",
+      "sql": [
+        "SELECT 1 AS value"
+      ],
+      "actual": [
+        {
+          "value": 1
+        }
+      ],
+      "scanner": {
+        "beforeR12": {
+          "digest": "9585a455fc4fa3eb9245738be86ad47757c9b37a99e3d36d8a8cf1c27b54c348",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "94c2b08a1fcf7685bd4fb64e7737f1ba88e99f86fdd952174b734f6b9f87aadb",
+            "4c7c353b3f8505aa4eab3c045513567ae74cfcf12131766051a95ede483c69a5",
+            "2276293d277fcb22048f4211ab65805fe5859b9b9c72e07fba24d4e6921a80d9",
+            "13d316aeb9099eeb68ce668133dcf264effe14dcfed5b7ebc16bfb1eaed54991",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "c11eda8c7958e89544ff2618dfec643c235fb05f07a26782dd702db8a0605e5d",
+            "b5a31c14105f13ad148de0b264f9a2e8851ce617df552b3a128618d665e2c927",
+            "8e365133c63c141536eb7c6e364a62c38967ef384b31315759962a72dc8e4001",
+            "e89f77fd60019d1eecb11a065cfc27a463dea33177790943062f744ba3c8069b",
+            "95eb01a7868a5d35e809c78282b17a47cef1a69a3c984740327ce43f9d9fc165"
+          ]
+        },
+        "current": {
+          "digest": "9585a455fc4fa3eb9245738be86ad47757c9b37a99e3d36d8a8cf1c27b54c348",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "94c2b08a1fcf7685bd4fb64e7737f1ba88e99f86fdd952174b734f6b9f87aadb",
+            "4c7c353b3f8505aa4eab3c045513567ae74cfcf12131766051a95ede483c69a5",
+            "2276293d277fcb22048f4211ab65805fe5859b9b9c72e07fba24d4e6921a80d9",
+            "13d316aeb9099eeb68ce668133dcf264effe14dcfed5b7ebc16bfb1eaed54991",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "c11eda8c7958e89544ff2618dfec643c235fb05f07a26782dd702db8a0605e5d",
+            "b5a31c14105f13ad148de0b264f9a2e8851ce617df552b3a128618d665e2c927",
+            "8e365133c63c141536eb7c6e364a62c38967ef384b31315759962a72dc8e4001",
+            "e89f77fd60019d1eecb11a065cfc27a463dea33177790943062f744ba3c8069b",
+            "95eb01a7868a5d35e809c78282b17a47cef1a69a3c984740327ce43f9d9fc165"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR12": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "boundaryId": "bizop-query-q3",
+          "from": "src/main-process/biz-op-v327/r5-query.js",
+          "to": null,
+          "line": 1,
+          "column": 15,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "evidenceId": "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+          "functionPath": "query"
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "boundaryId": "bizop-query-q3",
+          "from": "src/main-process/biz-op-v327/r5-query.js",
+          "to": null,
+          "line": 1,
+          "column": 15,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "evidenceId": "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+          "functionPath": "query"
+        }
+      ]
+    },
+    {
+      "name": "multiple-call-index-parameters",
+      "expectedClean": false,
+      "source": "const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];function dispatch({handlers},index,c){return handlers[index](c);}exports.read=c=>{dispatch({handlers:[safe,query]},0,c);return dispatch({handlers:[safe,query]},1,c);};",
+      "sql": [
+        "SELECT 1 AS value"
+      ],
+      "actual": [
+        {
+          "value": 1
+        }
+      ],
+      "scanner": {
+        "beforeR12": {
+          "digest": "e440251532dbb0bdd1cad36ec2d34c2bfd53e505ebb03c63127d7517640ed33e",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "94c2b08a1fcf7685bd4fb64e7737f1ba88e99f86fdd952174b734f6b9f87aadb",
+            "4c7c353b3f8505aa4eab3c045513567ae74cfcf12131766051a95ede483c69a5",
+            "2276293d277fcb22048f4211ab65805fe5859b9b9c72e07fba24d4e6921a80d9",
+            "13d316aeb9099eeb68ce668133dcf264effe14dcfed5b7ebc16bfb1eaed54991",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "39990c105ec09f003103b7ca81ecbd5a6d9a1e9549f806df790a92052b16ac06",
+            "e5357c5c083d26f9b4d9e8dad3919607e7bb2f9986d265873d269c8d07dfd00a",
+            "609a58f9752ae4ec22e28a3f8334d1012b3f629deb925339a2d4c4521bdcfce3",
+            "50221848df9c404ffe3976f6afe4eaa2e70d279c2ce443671c46b055758e082b"
+          ]
+        },
+        "current": {
+          "digest": "e440251532dbb0bdd1cad36ec2d34c2bfd53e505ebb03c63127d7517640ed33e",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "94c2b08a1fcf7685bd4fb64e7737f1ba88e99f86fdd952174b734f6b9f87aadb",
+            "4c7c353b3f8505aa4eab3c045513567ae74cfcf12131766051a95ede483c69a5",
+            "2276293d277fcb22048f4211ab65805fe5859b9b9c72e07fba24d4e6921a80d9",
+            "13d316aeb9099eeb68ce668133dcf264effe14dcfed5b7ebc16bfb1eaed54991",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+            "39990c105ec09f003103b7ca81ecbd5a6d9a1e9549f806df790a92052b16ac06",
+            "e5357c5c083d26f9b4d9e8dad3919607e7bb2f9986d265873d269c8d07dfd00a",
+            "609a58f9752ae4ec22e28a3f8334d1012b3f629deb925339a2d4c4521bdcfce3",
+            "50221848df9c404ffe3976f6afe4eaa2e70d279c2ce443671c46b055758e082b"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR12": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "boundaryId": "bizop-query-q3",
+          "from": "src/main-process/biz-op-v327/r5-query.js",
+          "to": null,
+          "line": 1,
+          "column": 15,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "evidenceId": "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+          "functionPath": "query"
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "boundaryId": "bizop-query-q3",
+          "from": "src/main-process/biz-op-v327/r5-query.js",
+          "to": null,
+          "line": 1,
+          "column": 15,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "evidenceId": "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+          "functionPath": "query"
+        }
+      ]
+    }
+  ]
+}

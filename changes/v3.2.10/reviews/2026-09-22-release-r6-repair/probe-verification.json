@@ -1,0 +1,18 @@
+{
+  "result": "PASS",
+  "rendererBoundaries": 20,
+  "rendererCases": 2,
+  "g1NeighborCases": 8,
+  "g1ProductionSourceCases": 3,
+  "sharedCases": 28,
+  "descriptorIsolation": "PASS",
+  "checkerAndPolicySha256": {
+    "scripts/architecture/scan.js": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be",
+    "scripts/architecture/contracts.js": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f",
+    "scripts/architecture/renderer-contracts.js": "a9662367697a1da6e260bcd3d71425b2b987ac00da80736dde4998af530499a4",
+    "scripts/architecture/rules.js": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa",
+    "architecture/boundaries.json": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+    "architecture/legacy-allowlist.json": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3"
+  },
+  "limits": "G1 生产源码副本只按实际 active G1 边界静态扫描；VM 仅执行恢复 stub，没有恢复 IO。共享 beforeR5 是历史 R5 修复起点，当前 R6 起点另由 run-baseline.py 验证。"
+}

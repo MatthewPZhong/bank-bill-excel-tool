@@ -1,0 +1,31 @@
+{
+  "productionFilesCompared": 792,
+  "changedProductionFiles": [],
+  "policyAndScannerFiles": [
+    {
+      "path": "architecture/boundaries.json",
+      "sameAsRepairInput": true,
+      "sha256": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3"
+    },
+    {
+      "path": "architecture/legacy-allowlist.json",
+      "sameAsRepairInput": true,
+      "sha256": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3"
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "sameAsRepairInput": true,
+      "sha256": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316"
+    },
+    {
+      "path": "scripts/architecture/policy-history.js",
+      "sameAsRepairInput": true,
+      "sha256": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2"
+    },
+    {
+      "path": "scripts/architecture/scan.js",
+      "sameAsRepairInput": true,
+      "sha256": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be"
+    }
+  ]
+}

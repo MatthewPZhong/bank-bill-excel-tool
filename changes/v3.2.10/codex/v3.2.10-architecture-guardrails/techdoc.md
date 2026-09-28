@@ -101,9 +101,37 @@ G3 保护代码禁用 eval、Function constructor、非字面量全局成员访�
 
 控制器本地 `const state`、本地 `const elements` 是正常私有状态，不因变量同名误报。配置服务和 ui 对象有明示方法清单，禁止扩展为任意对象袋。工厂参数 alias/对象 spread 无法确定来源时，在新保护代码报 coverage 失败；不做静默放行。
 
+release 的精确登记按 G3 实际装配补齐 modalHost、modalBridge、services、subscriptions、legacyController、differenceApi、reviewProjection 等具名参数；仍使用 `allowedApiFields` 的逐键历史强度比较。准确 Preload namespace 的方法集合、命名工厂返回、显式参数转发、静态对象 spread 和单领域面板别名由 AST 解析，整对象、未解释能力、对象被修改 helper 接管、global provider 重复赋值失败关闭。支持形式、保守拒绝形式及真实 VM 反例见 [Renderer 对齐说明](../../reviews/2026-09-21-release-repair/renderer-policy/mapping.md)。
+
+第二轮 release 审查补齐 RR2-01～05：调用闭包选择静态数组/解构回调，Renderer 工厂保留多层 bind 的前置参数，以同文件对象 AST 身份核验别名变更并按顺序解释 spread；initialInfo / initialBillCategory 递归限制为纯数据或明确的 app:get-info IPC 数据。G1 内部恢复能力按当前函数绑定登记，合法链路逐调用指纹许可。具体支持与保守拒绝边界以 [architecture README](../../../../architecture/README.md#覆盖与验证边界) 为准，回归和验证见 [RR2 修复报告](../../reviews/2026-09-21-release-r2-repair/repair.md)。这是现有防倒退合同的检查器修正，不改变业务恢复、金额、匹配或导出合同。
+
+第三轮 RR3-01～05 继续修正同一合同：未知长度数组 spread 不再伪造后续索引，嵌套对象身份不因无 chain 跳过检查，属性描述字典保留特殊自有键并单独处理 prototype setter；初始分类合同落在真实 config.initialBillCategory。G1 通过实际调用闭包保存经静态容器、helper 实参/返回值及跨文件转发的最终恢复能力身份，准确授权调用仍为停止点。当前能力与保守拒绝形式见上述 architecture README；证据见 [RR3 修复报告](../../reviews/2026-09-22-release-r3-repair/repair.md)。
+
+第四轮 RR4-01～03：Renderer 能力求值与身份传播使用同一静态解析，分配位置叠加调用上下文区分新实例，外部共享对象保持原身份；bind、返回后成员选择及条件别名均保留可能来源。G1 将已进入闭包的隐式回调作为对应调用位置的受限能力入边检查。完整支持边界及保守限制仍见 architecture README；原反例、多实例与共享对象对照见 [RR4 修复记录](../../reviews/2026-09-22-release-r4-repair/repair.md)。未改变机器配置或业务合同。
+
+第五轮 RR5-01～02：用不影响扫描结果/指纹的私有旁表保留成员读取时点；Renderer 在已知调用上下文内按执行顺序解析成员替换、解构与浅拷贝的对象身份，旧别名不迁移到新实例。函数值比较仅在未改写且未逃逸的静态数组 includes/indexOf/lastIndexOf 上排除回调执行，已解释 helper 和实际恢复回调继续按最终函数身份检查。详见 [RR5 修复记录](../../reviews/2026-09-22-release-r5-repair/repair.md)；业务合同、机器边界与授权例外未变。
+
+第六轮 RR6-01～02：Renderer 参数绑定先保留对象身份，解构按调用时点复用成员快照，实际使用时再核验能力；静态数组比较的排除证明保留对象/解构/原型参数来源及有限 helper 返回投影。已知可能改写与未知来源不能共同被解释为“没有改写”；旧别名、独立实例和原生比较仍有正例。实现及验证见 [RR6 修复记录](../../reviews/2026-09-22-release-r6-repair/repair.md)。不改变生产业务合同或机器授权。
+
+第七轮 RR7-01：AssignmentPattern 绑定按确定缺失/undefined 选择默认表达式；已提供值保留原身份，不确定值保留可能默认来源。默认表达式在被调用函数的词法环境和本次调用帧中解释，省略、成员缺失、显式 undefined、前序参数和新默认实例均有回归对照。见 [RR7 修复记录](../../reviews/2026-09-22-release-r7-repair/repair.md)。机器合同、G1/G5 解析和生产业务未改；既有数组元素替换观察仍保留，不作为本项关闭范围。
+
+第八轮 RR8-01/02：IPC 数据来源不证明字段存在，默认参数保留默认对象候选，纯数据候选递归核验；不新增字段存在性白名单。数组在 Renderer 私有映射中获得分配及调用身份，固定槽位读取/解构/spread 采用成员快照，旧别名和独立实例保持。整体数据数组检查可见写入候选；未精确解释的数组变更保留不确定性与已知来源，不静默以初始元素代替。见 [RR8 修复记录](../../reviews/2026-09-22-release-r8-repair/repair.md)和 architecture README 的有限支持范围。前轮固定槽位观察在本轮补齐；共享扫描器、G1/G5、机器配置和业务合同不变。
+
 宿主拥有 `modalRoot` 节点。扫描已知 `getElementById('modalRoot')`、`querySelector('#modalRoot')`、`elements.modalRoot` 及同作用域 const alias 的写入/append/remove/replaceChildren/innerHTML/textContent，宿主外违反。`overlay.remove()` 只在该 overlay 可追溯为宿主记录或 legacy modal 工厂返回时受规则约束，普通表格行/其他 DOM 移除不误报。难以追溯的已迁移域直接 DOM 外部移除由禁止全局 root 访问和 modal integration 测试补充，报告保留此边界。
 
 初始 legacy 写入例外精确覆盖实际现存路径；G3 R1 激活要求这些例外全部移除、宿主被 script 加载、两份公共 open/close 转发以及 VCC/Position/账户映射场景测试齐备。静态 scanner 不尝试执行这些 GUI 测试。
+
+第九轮 RR9-01/02：`&&` 的结果包含可能的假值左侧，不能无条件替换为右侧；只有静态确定真值（包括登记为对象的 Preload provider）才能取右值。完整 API 的可证明真值与可注入权限分别判断。mutator 的 spread 实参按展开时点保留元素对象来源，未知数组操作继续以不确定结果及可见来源检查，不承诺精确执行。旧别名、独立实例和真值安全对照纳入回归。见 [RR9 修复记录](../../reviews/2026-09-22-release-r9-repair/repair.md)；不修改共享扫描器、G1/G5、机器授权或生产业务。
+
+第十轮 RR10-01/02：三个逻辑运算符按真值/空值选择返回分支，未知左支保留该分支成立时的非空或真值约束，防止默认参数重新引入不可能的对象；候选合并时来源取并集、分支证明取交集。工厂数组的内部写入使用 origin 调用环境，外部读取保留独立时点；静态 helper 参数继承正确调用帧。普通 spread 的未知长度仍保留可见来源而不伪造索引，能力对象别名写入继续检查。见 [RR10 修复记录](../../reviews/2026-09-23-release-r10-repair/repair.md)；机器授权、共享 scanner、业务输出合同保持。
+
+第十一轮 RR11-01/02：对象自身的真值/非空证明不递归证明 IPC 子成员存在，成员投影时清除父证明，允许成员表达式重新建立自己的分支事实。数组发生 reverse、shift、splice 等重排时，静态检查保留重排前其他固定槽位的可见写入来源；读后写入和独立数组不计入。该保守集合用于识别后续别名能力写入，不声明精确模拟数组索引。见 [RR11 修复记录](../../reviews/2026-09-23-release-r11-repair/repair.md)。
+
+release 第十二轮 RR12-01 将数组分配身份与内容求值分开：仅比较接收者身份时不展开元素，真正读取元素时保留原调用环境及递归深度/访问链。普通 helper 的唯一调用位置同时用于参数绑定与读写顺序核对，避免内部数组重排被错误排到外层写入之后。仍按既有合同保守收集重排来源，不精确模拟全部数组方法。见 [RR12 修复记录](../../reviews/2026-09-23-release-r12-repair/repair.md)。
+
+第十三轮 RR13-01：唯一 helper 调用位置只证明执行顺序，不证明写入必定发生。成员快照沿写入到读取的调用链检查条件分支、短路、可零次执行的循环及 catch，保留未执行路径的旧成员来源。读写共有的已进入分支、控制表达式的必执行位置和可证明选中的字面量分支不因此变为条件写入。后续无条件写入只有在可证明晚于先前写入时才清除旧候选；无法证明先后关系时继续保守合并。本轮不扩展为完整 JavaScript 控制流解释器。见 [RR13 修复记录](../../reviews/2026-09-28-release-r13-repair/repair.md)。
+
+第十四轮 RR14-01：进入 do 首轮不证明能到达具体写入。成员快照按同一函数中的静态 break/continue 目标及写入前后位置判断跳过路径，并沿 helper 调用位置传递；可能跳过写入而仍到达读取时保留旧来源。break 越过目标结构，continue 只越过目标循环剩余 body，do 条件测试仍会执行；内层循环/switch/label 的跳转不扩大到无关外层写入。跳转前已经完成的写入、跳转必经的 finally 写入，以及同时跳过写入和读取的安全路径保持精度；可证明不可达的字面量分支不引入跳过来源。这里不推断任意循环次数、异常传播或全部 JavaScript 控制流。见 [RR14 修复记录](../../reviews/2026-09-28-release-r14-repair/repair.md)。
 
 ### 4.5 ARCH-XLSX-INFRA（G4）
 
@@ -142,6 +170,8 @@ G4 计划目录 `/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/
 
 禁止这些公共模块的闭包加载 Position `interactive-task-preflight.js`、拟新增 `task-owner.js`、`task-adapter.js` 等业务状态机；禁止通用函数继续直接调用迁出的 Position pending、settlement、cleanup 私有函数。Main 同一文件中的显式组装/IPC handler 可引用领域 adapter，因此对 Main 采用具名函数作用域及其直接 callee 绑定规则，不能按整个 Main import 一票否决。可追溯 const/function alias 纳入；保护作用域里的未解释调用别名不能静默忽略。
 
+组合实现中，具名编排沿真实调用目标扩展到 helper、被选中的工厂返回成员及可解释的 callback 实参，保留模块顶层初始化。注册对象的未调用方法不自动视为执行；公共机制的整文件反向依赖约束继续存在。未知动态执行目标失败关闭。精确数据调用 allowedSites 绑定包括回调在内的 AST，修改回调不能继承原许可。
+
 允许 Main 注入 adapter invocation；允许领域 adapter→本域 task-owner/service、publication adapter→G1 owner gateway；通用层调用合同中的 execute/afterTerminal/onAbandon 合法。初始只对固定基线的 Position import/调用位置列例外，新的迁移模块无例外；G2 最后一个真实 task caller、live/replay terminal 路由迁移并删除兼容转发后 active。正反例验证公共 executor→helper→Position 失败、adapter 的同域调用和 Main composition 通过。二次 gate 的资源收口、executeStarted 交接和一次终态由 G2 行为测试负责。
 
 ### 4.9 G5：ARCH-BIZOP-QUERY
@@ -154,11 +184,15 @@ G4 计划目录 `/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/
 
 scanner 识别保护作用域内句柄来源和支持的静态 alias/SQL 字面量；新不透明 DB alias 或动态 SQL 在该范围失败，不能宣称静态分析理解任意 SQL 语义。合法 query 的业务过滤、顺序、LIMIT、iterator 和 readonly 要靠 G5 真库测试；G8 负例覆盖 raw 查询绕回、正例覆盖 facade、Archive API 以及全部预览自有命令/附属读取。
 
+跨模块读取 helper 使用与 G2 一致的执行目标追踪：导入成员、返回函数、call/apply/bind 和对象实参中的实际被调能力不能隐藏 raw DB。真实消费者登记反映 `module → catalog → catalog-queries` 的装配注入以及 compute/export/import/preview 的实际调用链，不伪造不存在的直接 require 边。仅为公共 policy 汇总而可达的其他领域未调用仓储不视为查询执行。
+
 ### 4.10 G7：ARCH-DESCRIPTOR-COMPOSITION
 
 保护 `src/main-process/background-execution/runtime.js`、`background-execution/execution-policy-registry.js`、`archive-center/task-policy-registry.js`、拟新增 `archive-center/task-policy-common.js` 和 `execution-descriptors/contract.js` 的公共机制。它们不能直接或通过本地 helper 加载具体领域实现，也不能反向加载以下装配入口。
 
 明确允许 `src/main-process/execution-descriptors/composition.js`、`policy-catalog.js`、`mature-adapters.js`、`legacy-task-policies.js` 装配 [G7 TechDoc](../v3.2.10-execution-descriptors/techdoc.md)列明的各域 `execution-descriptor.js`、既有工厂/规则。Main 是调用这些装配入口并把冻结聚合结果交给 runtime 的 composition root。允许项是逐文件/具名导出，不允许整个领域目录的任意装配；policy-catalog 只汇总纯 policy 常量，不执行持有 Main authority 的工厂。
+
+同一装配源文件可有多项准确目标/导出登记，每条边须完整匹配其中一项；不能把各项许可交叉拼接。namespace 引用仅在所有用途都为可解释具名成员时按实际导出检查，整对象透传、动态成员、突变或未授权成员继续拒绝。
 
 迁移期 runtime 的原 `BACKGROUND_EXECUTION_POLICIES` 兼容导出若暂经 policy-catalog 转发，作为准确历史桥接登记并保持 pending/partial；真实调用方迁到 catalog 且 runtime 删除反向转发后，才可 active。旧常量名称和值保持不代表公共 runtime 必须永久兼任装配。正例为 composition→domain descriptor→同域实现、Main→冻结汇总→runtime；反例为 runtime/registry/contract→领域或→catalog/composition。G7 的 registry key、静态 profile fallback、重复键和 authority 保持由 G7 测试负责。
 

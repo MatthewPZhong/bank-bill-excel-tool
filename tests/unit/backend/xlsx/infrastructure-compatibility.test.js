@@ -71,6 +71,16 @@ test('公共 metadata 解析错误仍可通过旧业务 constructor 判断', () 
   });
 });
 
+test('Toolbox 聚合入口改用中性 helper 后保留全部公开导出及引用身份', () => {
+  const previous = Object.assign({}, ...[
+    'excel-text', 'model', 'number-date', 'style-registry', 'xlsx-pass',
+    'xlsx-sheet-scanner', 'biff8-overlay', 'biff8-pass', 'csv-pass'
+  ].map(name => require(path.join(backendRoot, 'toolbox-format', name))));
+  const current = require(path.join(backendRoot, 'toolbox-format'));
+  assert.deepEqual(Object.keys(current).sort(), Object.keys(previous).sort());
+  for (const name of Object.keys(previous)) assert.strictEqual(current[name], previous[name], name);
+});
+
 test('公共叶子、ZIP 与 workbook-parts 的运行时依赖闭包不载入业务源码', () => {
   const sourceRoot = path.resolve(backendRoot, '..') + path.sep;
   const commonPrefix = commonRoot + path.sep;

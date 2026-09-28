@@ -1,0 +1,18 @@
+✔ RR4-03 reduce 执行的受限回调入口必须授权 (15.691042ms)
+✔ RR4-03 reduceRight 执行的受限回调入口必须授权 (2.780917ms)
+✔ RR4-03 map 执行的受限回调入口必须授权 (2.635167ms)
+✔ RR4-03 forEach 执行的受限回调入口必须授权 (2.295708ms)
+✔ RR4-03 bound callback 执行的受限回调入口必须授权 (2.75675ms)
+✔ RR4-03 static callback container 执行的受限回调入口必须授权 (2.793125ms)
+✔ RR4-03 returned callback 执行的受限回调入口必须授权 (2.483167ms)
+✔ RR4-03 helper forwarded callback 执行的受限回调入口必须授权 (1.807959ms)
+✔ RR4-03 未执行参数、普通同名函数、未选成员和正常迭代回调保持合法 (7.833792ms)
+✔ RR4-03 准确回调授权位置生效，其他调用位置不能借用 (3.607ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 125.117042

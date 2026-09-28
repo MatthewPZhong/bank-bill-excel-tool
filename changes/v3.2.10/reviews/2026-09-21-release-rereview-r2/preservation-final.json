@@ -1,0 +1,351 @@
+{
+  "finishedAt": "2026-09-21T23:22:31.412414+08:00",
+  "headBefore": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "headAfter": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "headUnchanged": true,
+  "frozenExistingFiles": 3958,
+  "changedExistingFiles": [],
+  "newFilesOutsideReview": [],
+  "gitStatusBefore": " M architecture/README.md\n M architecture/boundaries.json\n M architecture/legacy-allowlist.json\n M changes/v3.2.10/README.md\n M changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md\n M changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md\n M changes/v3.2.10/release.md\n M rules/integration-test-policy.md\n M scripts/architecture/contracts.js\n M scripts/architecture/rules.js\n M scripts/architecture/scan.js\n M scripts/architecture/schema.js\n M src/backend/toolbox-format/index.js\n M src/renderer/controllers/bank-statement.js\n M tests/unit/architecture/cli.test.js\n M tests/unit/architecture/review-round3.test.js\n M tests/unit/architecture/review-round4.test.js\n M tests/unit/architecture/review-round5.test.js\n M tests/unit/backend/xlsx/infrastructure-compatibility.test.js\n M tests/unit/renderer-refund-prompt-orchestration.test.js\n M tests/unit/renderer/scenario-change-routing.test.js\n?? changes/v3.2.10/reviews/\n?? scripts/architecture/renderer-contracts.js\n?? scripts/renderer-lifecycle/fixtures/bank-statement-confirmation.js\n?? tests/unit/architecture/release-closure-regressions.test.js\n?? tests/unit/architecture/release-policy-alignment.test.js\n?? tests/unit/architecture/release-renderer-policy.test.js\n",
+  "gitStatusAfter": " M architecture/README.md\n M architecture/boundaries.json\n M architecture/legacy-allowlist.json\n M changes/v3.2.10/README.md\n M changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md\n M changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md\n M changes/v3.2.10/release.md\n M rules/integration-test-policy.md\n M scripts/architecture/contracts.js\n M scripts/architecture/rules.js\n M scripts/architecture/scan.js\n M scripts/architecture/schema.js\n M src/backend/toolbox-format/index.js\n M src/renderer/controllers/bank-statement.js\n M tests/unit/architecture/cli.test.js\n M tests/unit/architecture/review-round3.test.js\n M tests/unit/architecture/review-round4.test.js\n M tests/unit/architecture/review-round5.test.js\n M tests/unit/backend/xlsx/infrastructure-compatibility.test.js\n M tests/unit/renderer-refund-prompt-orchestration.test.js\n M tests/unit/renderer/scenario-change-routing.test.js\n?? changes/v3.2.10/reviews/\n?? scripts/architecture/renderer-contracts.js\n?? scripts/renderer-lifecycle/fixtures/bank-statement-confirmation.js\n?? tests/unit/architecture/release-closure-regressions.test.js\n?? tests/unit/architecture/release-policy-alignment.test.js\n?? tests/unit/architecture/release-renderer-policy.test.js\n",
+  "trackedDiffUnchanged": true,
+  "onlyWrites": "New rereview artifact directory and temporary isolated probes.",
+  "additionalTrackedFilesVerifiedAgainstUnchangedHead": [
+    {
+      "path": "COMMON枚举.xlsx",
+      "sha256": "7f029e277729e73426e0f49a75b2c220cf25c25e67008c0efe36ff2f83e2529c",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/FundType枚举值.xlsx",
+      "sha256": "5a2a6027c1ea6bc924374b6d753ba94179524b5e1184fcef7ed76647945461d3",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/Pending数据管理.xlsx",
+      "sha256": "9d8584c9668fc447f4090127e4d3cf87ee109a1ff1d9a658e11701149cec0f7a",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/VCC财务OP校验/VCC_移除归档Pending账单.xlsx",
+      "sha256": "f7967d46f2c95a87d53b99f15622d6e5480e77f67c3d345daa1c250e7b6ca9fc",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/VCC财务OP校验/VCC充值清退明细.xlsx",
+      "sha256": "fb5bc82880adf5c8da07130de477b52e377136fc7dc4e2fac01a6ca5a65ce270",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/VCC财务OP校验/VCC财务OP校验结果表_模板.xlsx",
+      "sha256": "48c8161484128e63a6e3e60724336f2433a8f23687695d980720c59a9dec2053",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/VCC财务OP校验/VCC费用及换汇明细.xlsx",
+      "sha256": "19f356b0fca8217307e2169c670650fb001af8e7cba0db72458d36d956b8b0bc",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/VCC财务OP校验/VCC通道明细.xlsx",
+      "sha256": "48359a379a6421cb62156675516a2a9e33fa79349d47a3a77b8c830446c0332a",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/VCC财务OP校验/移除归档Pending发生额计算表.xlsx",
+      "sha256": "120ccff2bd1fcad3d47a7455983311818abea1403fd3801bd58e374ca959448b",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/VCC财务OP校验/系统财务OP.xlsx",
+      "sha256": "9be47b449a176fea93c01e09b81251dbf2a05b8807c65552c08ebe67358cfe01",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/VCC财务OP校验/财务OP校验结果表.xlsx",
+      "sha256": "0059936952b73b2499bd21c95114307da7d7b01ce8a3043f0e3cd0c6305678ac",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/业务OP账单.xlsx",
+      "sha256": "39f2f3130cff6d3f2236b7b3379451e4937c3250326e61b327d874da86820385",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/中台加款单剔除模板.xlsx",
+      "sha256": "8aee4f18e9a5f2aa001c0c98f865b95abd6d01fb5381772f041d10a47efa21df",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/中台测试付款全量信息表.xlsx",
+      "sha256": "5a7db5a1f4c95e46b9af8a0ab5761da65a7f394ebbfdee950854bb73a42d324b",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/中台测试付款对账单.xlsx",
+      "sha256": "ea8ac355762d86a81cc99813535184197bd4e42d11337a8b440a081671cbcbbd",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/中台网关入账对账单.xlsx",
+      "sha256": "0f29e847b4ccf42429c1e7a90593d1d27ee62e619db19454a81b39714f7fc2e4",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/中台网关出账对账单.xlsx",
+      "sha256": "a62ec0ba18a0ea175bb325a996aa7d2ea705ae923bf92751ddd98d7f34639673",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/中台网关原始入账订单.xlsx",
+      "sha256": "dbe25f610e08fd354bd6752d3428217f61fdbe20515b560c4a07d450829d8311",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/中台网关原始出账订单.xlsx",
+      "sha256": "110471ca20f556dc06049ecb1aee5486704c27a91edc0763532d2165d3c9eac6",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/中台调拨平盘对账单.xlsx",
+      "sha256": "8c9fac35a3642e3192fc10c2d9e415c8f1aaaf608d63aef2e99c3f9ffd9675df",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/中台调拨订单.xlsx",
+      "sha256": "b06cc16e04beab53754eddd1152703da208e237a3cdca9be7c6c0627c4eb5e01",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/中台调拨订单表.xlsx",
+      "sha256": "98e9ff4d449d4efe13f4b89f9783a52f951953d37e62ccc0c024e11fa490f4aa",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/中台退款订单.xls",
+      "sha256": "7209fe3f4dffbcb3bdd1ab69b7330a176db5a87236786c048be859ea48b17e64",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/中台退款订单回填模板.xlsx",
+      "sha256": "30672b83903cf474ab0e2bd4e1c27e3fcd3267c15f545e94a2bbea1ccd1a7969",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/余额账单模版.xlsx",
+      "sha256": "0097e0fa615a7c31759563158d7ab5c27bdf2452a7b27171d57c714d0b8ffbc7",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/入账原始订单.xlsx",
+      "sha256": "77507ffbf7efab02fb8dbcdb1296511e4982e17eb25c24a1f0f684e5a0dcbed0",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/单据对账导出不平-对平例子.xlsx",
+      "sha256": "353fa99affd5a9a1383905d69bb47f36bf63fb4c890351a3472e8d691e2c78c0",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/单据对账导出不平.xlsx",
+      "sha256": "8f242f68e5700b000d499943fed94f692ebc469d5b7856eddb98cfd27433e08b",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/外汇交割表.xls",
+      "sha256": "9ed47783b62ae837430c0b2e94429744f8a0858a34bdc950b9f74bc93d91ccf9",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/外汇期权表.xlsx",
+      "sha256": "e35a4cef0365a682af3d56aab8ec1a8ea3aa7dcc8f037e63cdd8921609aa8579",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/外汇期权订单.xlsx",
+      "sha256": "e35a4cef0365a682af3d56aab8ec1a8ea3aa7dcc8f037e63cdd8921609aa8579",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/币种映射表.xlsx",
+      "sha256": "708973cae92c1eae80c95e7338457475f041efb7c369613ce20d2b5af7d11b3d",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/平盘银行对账单.xlsx",
+      "sha256": "d4a9bae676a85568dc0beda2c23f780974d3c6ad87ba07b04918a2b9ad13820c",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/收单币种校验导出差异表模版.xlsx",
+      "sha256": "6c15058f035ae6a8586977e280618486ee829100213d4f567a83031bb84718fc",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/流水对账单.xlsx",
+      "sha256": "404e41b2ed7bcf6593909538dfcc72d3a9b2c3666bb77af78d943eebcfdd2761",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/清结算银行账户表.xlsx",
+      "sha256": "c83226e363b16e6c2668e42d57e1ada22d57710787f570a04218ac0b99309f06",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/移除归档Pending账单.xlsx",
+      "sha256": "26d7af0d3bb2e7d9562fdad3e4d56dc16ffe4a3857c00bfe97abe8d125555317",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/网关对账单.xlsx",
+      "sha256": "f5faf8ce8026948759f2fa2fb36fc8a9aa75281fe07139175c6de90c2e7c5a5a",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/资金对账导出不平.xlsx",
+      "sha256": "a5bce3efbb95401beeba57600af3cb135c6dd8064167d3a56491f83e95fed910",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/重复入金召回邮件模板.xlsx",
+      "sha256": "23aefbcc178ce18c1b36a71968db62677a144f4834434ce4b0c77c65df57bc65",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "assets/银行对账单.xlsx",
+      "sha256": "fa27a8f690af19817e8b45ad565c9a94e67b1a212e8ce2efee01ad16698e469f",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "changes/v3.1.8/erratum/VCC财务OP-3.1.8卡顿与旧归档兼容纠错Spec-v2.md",
+      "sha256": "89906e2991341aec70883170225c7f57cdebdccbd3c0835d09de1fe1a50469b0",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "changes/v3.1.8/erratum/VCC财务OP-3.1.8卡顿与旧归档兼容纠错TechDoc-v1.1.md",
+      "sha256": "5970faae090ab891e0cdd55001e6cbb701822266177c67ec1da60341865f4c67",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-vcc-fin-op-multisheet-review-export/evidence/review-2026-09-18/electron/乙-正式结果.xlsx",
+      "sha256": "76256b0c38cbb63fb0bc1a4c7e8f45f14ce1b7fe216840f72cb6a89c55b06939",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-vcc-fin-op-multisheet-review-export/evidence/review-2026-09-18/electron/待确认表.xlsx",
+      "sha256": "5a492467f6f50b984bc2d554bc6e7f23d23547ef3edf3b8d006c44ce21283f5b",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-vcc-fin-op-multisheet-review-export/evidence/review-2026-09-18/electron/甲-正式结果.xlsx",
+      "sha256": "bda2f708527ab036f9d5d85a89b94460376c085f23341f4d68d4cd0f918d5ad3",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-vcc-fin-op-multisheet-review-export/evidence/乙-正式结果.xlsx",
+      "sha256": "2dc91999a5090cb9ee6e1f5196731fbcb04380bc113ae1e1744eaf8b91a8fdc0",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-vcc-fin-op-multisheet-review-export/evidence/待确认表.xlsx",
+      "sha256": "27b92d68c69bc59b56ef43f5588b7994a970824735238965c76c866bcc89a912",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-vcc-fin-op-multisheet-review-export/evidence/甲-正式结果.xlsx",
+      "sha256": "6fd58ddeb82cf03efac469155eaad3595aeef8a3d4712a77e0545459c83a3c3a",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "docs/iterations/v2.1.16-beta.3/PRD-中台退款订单回填-v2.1.16-beta.3.md",
+      "sha256": "1e10db1ffaf77772d617a7da2c9081fd82c28cf42ceda7382ea7ca6e75dfe4a3",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "docs/iterations/v2.1.16-beta.3/TECH_DESIGN-中台退款订单回填-v2.1.16-beta.3.md",
+      "sha256": "e60ce531bf05c8bba95fe460c8168b9a188dcd80685400a8ca58d2d5307a1d3e",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "docs/iterations/v2.1.16-beta.5/PRD-JPM调拨订单修复-v2.1.16-beta.5.md",
+      "sha256": "9b574660b52ed51a3c0c4c1b848a7590edab1e673b7ec33ffe4d4d9066bb5b1d",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "docs/iterations/v2.1.16-beta.5/TECH_DESIGN-JPM调拨订单修复-v2.1.16-beta.5.md",
+      "sha256": "09f1af9f0599faaa5cfba01d4a8829a097f6acaca1d3718ce7a23c74c3b74439",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "docs/iterations/v2.1.16-beta.6/退款回填规则原文与GAP核对-v2.1.16-beta.6.md",
+      "sha256": "a56b91777e0caedb36a76f1740ff5df76aef2517fe145e799d5c453ec9963711",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "docs/iterations/v3.0.5/PRD-中台退款订单回填规则增强-v3.0.5.md",
+      "sha256": "e8a4ce42b459120032966afe4be3ef6d4224a9da64f9c70750bb1be12dd1b367",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "docs/iterations/v3.0.5/PRD-外汇交割表与入金表合并累加-v3.0.5.md",
+      "sha256": "b85daf91c641c195cdce7105161599cd47d7939e3e5ef3ac102743d302f60401",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "docs/iterations/v3.0.5/TECH_DESIGN-中台退款订单回填规则增强-v3.0.5.md",
+      "sha256": "5ca6baff7dba7ca1c65a789f7ae16fb327521c9493a3e6a22f27d62433d683aa",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "docs/iterations/v3.0.5/TECH_DESIGN-外汇交割表与入金表合并累加-v3.0.5.md",
+      "sha256": "dc104e2c4b956bcb6b502e64eed370d3fb247c4e36ebbcab317362097a47687c",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "docs/prs/待merge-PR #72.md",
+      "sha256": "0973eb52edfe33bf3b62ac8c7e7b3fec8903bf3429152733dde604f6095dcb02",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "samples/单据对账导出不平-对平例子.xlsx",
+      "sha256": "353fa99affd5a9a1383905d69bb47f36bf63fb4c890351a3472e8d691e2c78c0",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "samples/单据对账导出不平.xlsx",
+      "sha256": "8f242f68e5700b000d499943fed94f692ebc469d5b7856eddb98cfd27433e08b",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "scripts/fixtures/v1.5.2/中行-通用.xlsx",
+      "sha256": "a5de7b671cea2cb7f4796203926471780e6b0a0e1fe8b1d05b49a17a82b96ab7",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "scripts/fixtures/v1.5.2/中行001-余额-20260101.xlsx",
+      "sha256": "5f39d0465e354f2cfbe3d9778028a1a937b770c7c60aac84f1f42ed69d3c7306",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "scripts/fixtures/v1.5.2/中行001-明细-20260101.xlsx",
+      "sha256": "4dd73e830760e4a995cbf6cf89b3543b76615db45678edb6f62f3260501180e9",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "scripts/fixtures/v1.5.2/中行001-错误表头.xlsx",
+      "sha256": "6102eb1a40a3e526ab2638fb77d880c3cad0c58b8fe2438438977c9f41a62e9d",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "scripts/fixtures/v1.5.2/工行002-明细-20260101.xlsx",
+      "sha256": "e709cbc7aa5d2ed97752987ac3d4253ed9a7df985f79b9b138d42fadcf68ad95",
+      "matchesHeadBlob": true
+    },
+    {
+      "path": "scripts/fixtures/v1.5.2/无匹配-test.xlsx",
+      "sha256": "c42e8cf5fe28cc07beb130fb5c595b1595a465b1a6b413fc6233ea8bbde7988f",
+      "matchesHeadBlob": true
+    }
+  ],
+  "enumerationNote": "The initial manifest used Git quoted paths and omitted non-ASCII tracked filenames. Final NUL-delimited enumeration identified these files; each matches the unchanged HEAD blob. Initial and final git status are identical, and the frozen tracked diff is unchanged."
+}

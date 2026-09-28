@@ -1,0 +1,33 @@
+{
+  "initial": {
+    "files": 4710,
+    "changed": [
+      "architecture/README.md",
+      "changes/v3.2.10/README.md",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md",
+      "changes/v3.2.10/release.md",
+      "rules/integration-test-policy.md",
+      "scripts/architecture/renderer-contracts.js"
+    ]
+  },
+  "production": {
+    "files": 792,
+    "changed": []
+  },
+  "historicalReviews": {
+    "files": 732,
+    "changed": []
+  },
+  "architectureConfig": {
+    "files": 2,
+    "changed": []
+  },
+  "primaryDirty": {
+    "files": 865,
+    "changed": []
+  },
+  "primaryHead": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "releaseHead": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "unexpectedChanges": []
+}

@@ -1,6 +1,209 @@
-# v3.2.10 本地集成记录
+# v3.2.10 发布与集成记录
 
-当前 G1–G8 均已本地合入。最新组合见「G8 architecture-guardrails 合入」：Git 合并完成，但最终候选的 release-check 在架构检查阶段失败，领域边界仍待对齐与激活，当前不具备发布门禁通过结论。下方 G1–G7 的 PASS 保留原候选意义，不适用于新增 G8 后的完整门禁。
+G1–G8 已合入，本轮从 `9a38b96b1b8006c5851535d0c1e586bbaeb63f10` 加已有审查修复接手正式发布。第 15 轮复审未发现新增可确认必改项，RR14-01 在列明范围内关闭；R15-O1 保留为精度观察。下方历史记录保留各自时点的提交、验证和未完成状态，不用后来结果改写历史审查。
+
+## 2026-09-28 正式发布执行
+
+用户在核实 v3.2.9 的 PR、main 检查、附注标签和发布审批流程后要求“执行”，授权本轮升版、提交、推送 release、创建并合并 PR、正式标签及对外发布。针对本轮真实账单/资金结果、Windows 安装包及 Excel/WPS 人工验收，用户明确回复“已人工验收”；记录为用户确认，不冒充本 Agent 独立执行。
+
+| 项目 | 当前证据 / 状态 |
+| --- | --- |
+| 正式基线 | `v3.2.9` → `11086a3cbf632a30adbcfa796e4cd81810c5aef9`；接手时远端 main 仍为该提交，已包含于 release 历史 |
+| 发布范围 | G1–G8 原选定源提交及 R1–R14 审查修复；R15 无新增必改项，不扩修 R15-O1 |
+| 版本文档 | `package.json` / `package-lock.json` 升为 `3.2.10`，同步 CHANGELOG、版本功能历史和使用手册 |
+| 人工验收 | USER_CONFIRMED：用户确认本轮真实账单/资金结果、Windows 安装包及 Excel/WPS 已人工验收 |
+| 自动验证 | 升版前已有 9429 单测 PASS、4 项 Windows 条件跳过、68/68 集成；正式候选将重新运行完整门禁，旧结果不代替最终提交检查 |
+| 远端流程 | 推送同名 release 并创建 PR 到 main；要求 smoke-test/build 通过，合并后复核最终 main，再创建附注标签并审批 production-release |
+| 最终发布证据 | 候选提交、PR、main 合并提交、标签、工作流及资产的结果随执行另行归档于 [本轮发布目录](publication/2026-09-28/)，未执行阶段不预填通过 |
+
+原工作区 5,331 个既有文件及主工作区 865 个 dirty 文件已记录内容指纹，见 [接手快照](publication/2026-09-28/start-manifest.json)。已集成源分支、依赖和合并提交见下方集成记录；正式发布前逐项验证祖先及当前内容。发版后结果保存在本轮独立记录和 PR/Release，不为补勾选改写已发布提交或移动标签。
+
+## 2026-09-28 第 15 轮复审结论同步（文档变更）
+
+依据[第 15 轮审查](reviews/2026-09-28-release-rereview-r15/review.md)：本轮未发现新增可确认的必改问题。RR14-01 在原始 6 个案例、真实 20 个 Renderer 边界代表及新增 8 个 finally/helper 路径的范围内关闭；不将该结论扩展为所有 JavaScript 语义或 G8 合同的完备证明。
+
+R15-O1 按已知保守精度观察保留：字面量空数组 `for…of []` 内的外层标签跳转不会执行，但当前分析仍保留该路径，导致两个合法 scoped API 样例被拒绝。此行为已经确认；现有契约未明确承诺空迭代次数精度，当前生产 Renderer 未发现对应结构，因此本轮不列为必改项，也不计作安全样例正确通过。本次不扩修或变更分析精度契约。
+
+审查方本轮新执行架构单测 655/655 PASS、正式 CLI 31 active、0 pending/partial、0 违规、0 stale；旧数组 14 例、覆盖顺序 8 例及共享/绑定 62 例保持预期，已有保守拒绝单列。完整 `release-check` 在第 15 轮未重跑：核对 1,711 个输入集合、SHA-256 及 HEAD 完全匹配后，复用 R14 修复于 2026-09-28 17:19:43–17:39:54 +08:00 的结果（9429 单测 PASS、0 FAIL、4 项 Windows 条件跳过，68/68 集成脚本 PASS）。
+
+本次接收结论时再次核对当前候选与上述门禁输入完全一致，仅更新版本索引、本记录及 G8 实施记录；源码、测试、机器配置和历史审查材料保持。未重新执行测试，未提交、推送或发布。Electron GUI、真实 Main 全流程、Windows/安装包、Excel/WPS 和资金人工验收仍待实际验证。[本次核对](reviews/2026-09-28-release-r15-closeout/verification.json)。
+
+## 2026-09-28 第十四轮独立审查修复（未提交）
+
+RR14-01：区分进入 do 首轮与到达具体写入。按 break/continue 的目标和执行顺序保留可能跳过写入时的旧来源，沿 helper 调用点传播；写入前后、body/test、内层跳转、label、finally 和共同读取路径都有安全对照。
+
+新增 34 项 VM/静态回归，准确修复起点 15 FAIL / 19 PASS，最终全部通过；架构 655/655 PASS，正式 CLI 31 active、0 pending/partial、0 诊断、0 stale。实际 20 个 Renderer 边界原反例产生 scope 诊断，安全对照零诊断。原始 6 例/12 次 VM、覆盖顺序 8 例、RR12 数组 14 例和共享/绑定 62 例保持预期，已有保守拒绝单列。
+
+`UNIT_TEST_CONCURRENCY=2 npm run release-check` 重跑 PASS：9429 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过。1711 个输入及 HEAD 未漂移；开始 2026-09-28T17:19:43.887250+08:00，结束 2026-09-28T17:39:54.344494+08:00。
+
+[修复报告](reviews/2026-09-28-release-r14-repair/repair.md)、[验证汇总](reviews/2026-09-28-release-r14-repair/verification.json)、[增量补丁](reviews/2026-09-28-release-r14-repair/incremental.patch)。生产业务源码保持，未提交、推送或发布；没有进行平台及真实业务人工验收。
+
+## 2026-09-28 第十三轮独立审查修复（未提交）
+
+RR13-01：唯一 helper 调用时点不证明必执行。成员快照沿调用链保留分支未进入时的旧来源；可证明晚于先前写入的后续确定覆盖才能清除旧候选。控制语句的必执行位置、共同分支、捕获旧别名及无条件替换均有安全对照。
+
+新增 32 项回归，准确修复起点 16 FAIL / 16 PASS，最终 32 PASS；架构 621/621 PASS，正式 CLI 31 active、0 诊断、0 stale。实际 20 个 Renderer 边界配置下，原条件反例 1 条 scope 诊断，安全对照零诊断。RR12 的 14 个数组样例与 62 个共享/绑定用例保持原结果。
+
+`UNIT_TEST_CONCURRENCY=2 npm run release-check` 重跑 PASS：9395 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过。1710 个输入及 HEAD 未漂移。开始 2026-09-28T16:33:19.646795+08:00，结束 2026-09-28T16:50:50.044266+08:00。
+
+[修复报告](reviews/2026-09-28-release-r13-repair/repair.md)、[验证汇总](reviews/2026-09-28-release-r13-repair/verification.json)、[增量补丁](reviews/2026-09-28-release-r13-repair/incremental.patch)。本轮未修改生产业务源码，未提交、推送或发布；平台及人工验收不在此结论内。
+
+## 2026-09-23 第十二轮独立审查修复（未提交）
+
+RR12-01：数组身份比较不再提前展开内容；元素读取保留原求值链。普通 helper 使用唯一调用位置核对写入与重排顺序。原违规和安全样例均可正常分析。
+
+新增 12 项回归，准确修复起点 10 FAIL（RangeError）/ 2 PASS，最终 12 PASS；架构 589/589 PASS，正式 CLI 31 active、0 诊断、0 stale。保留实际 20 个 Renderer 边界的 8 个数组样例全部无异常：7 项符合正反预期、1 项既有保守拒绝继续单列。62 个共享解析和绑定用例保持原结果。
+
+`UNIT_TEST_CONCURRENCY=2 npm run release-check` 重跑 PASS：9363 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过。1709 个输入及 HEAD 未漂移。开始 2026-09-23T14:44:29.241195+08:00，结束 2026-09-23T15:05:10.069504+08:00。
+
+[修复报告](reviews/2026-09-23-release-r12-repair/repair.md)、[验证汇总](reviews/2026-09-23-release-r12-repair/verification.json)、[增量补丁](reviews/2026-09-23-release-r12-repair/incremental.patch)。本轮未修改生产业务源码，未提交、推送或发布；平台及人工验收不在此结论内。
+
+## 2026-09-23 第十一轮独立审查修复（未提交）
+
+RR11-01/02 已修复父对象的非空证明误传给 IPC 子成员，以及数组重排遗漏其他固定槽位已知写入来源。新增 11 项回归，修复起点 5 FAIL / 6 PASS，最终全部通过。
+
+| 验证 | 当前候选结果 |
+| --- | --- |
+| 完整门禁 | `UNIT_TEST_CONCURRENCY=2 npm run release-check`：PASS，2026-09-23 10:32:54–10:50:35（Asia/Shanghai） |
+| 架构专项 / CLI | 577/577 PASS；31 active、0 pending/partial、0 诊断、0 stale |
+| 全量单测 / 集成 | 9351 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过 |
+| 实际配置 | 20 个 Renderer 边界配置下的父成员及数组重排正反例符合预期 |
+| 输入 | 1708 个门禁输入及 HEAD 未漂移 |
+
+[修复报告](reviews/2026-09-23-release-r11-repair/repair.md)、[验证汇总](reviews/2026-09-23-release-r11-repair/verification.json)、[增量补丁](reviews/2026-09-23-release-r11-repair/incremental.patch)。本轮修复仅涉及 G8 Renderer 检查器、测试与说明；生产源码、机器配置、历史材料保持。没有提交、推送或发布。
+
+## 2026-09-23 第十轮独立审查修复（未提交）
+
+RR10-01/02 已修复嵌套 AND/OR/nullish 的合法注入误报，以及工厂内部扩容数组经 spread 后的对象来源漏报。未知分支保留来源，参数按声明函数与参数名绑定；合并候选时来源取并集、真值/非空证明取交集。新增 84 项回归，准确起点 38 FAIL / 46 PASS，最终全部通过。
+
+| 验证 | 本轮候选结果 |
+| --- | --- |
+| 完整门禁 | `UNIT_TEST_CONCURRENCY=2 npm run release-check`：PASS，2026-09-23 02:53:40–03:14:31（Asia/Shanghai）；沙箱外隔离测试环境 |
+| 架构专项 / CLI | 566/566 PASS；31 active、0 pending/partial、0 诊断、0 stale |
+| 全量单测 | 9340 PASS、0 FAIL、4 项 Windows 条件跳过 |
+| 全量集成 | 68/68 脚本 PASS；Renderer lifecycle 233/233 |
+| 实际配置 / 共享探针 | 保留 20 个 Renderer boundary 的 6 个真实 AST 场景符合预期；56 项共享正反例保持 |
+| 相邻独立复核 | 同一组 6 例在最终源码上符合预期，已纳入新增 84 项回归 |
+| 输入 | 1707 个门禁输入及 HEAD 未漂移 |
+
+[修复报告](reviews/2026-09-23-release-r10-repair/repair.md)、[验证汇总](reviews/2026-09-23-release-r10-repair/verification.json)、[相邻复核](reviews/2026-09-23-release-r10-repair/r10-adjacent-review/review.md)、[增量补丁](reviews/2026-09-23-release-r10-repair/incremental.patch)。初版门禁为继续修复已确认问题而主动停止，不作为 PASS；上表来自最终冻结候选的完整重跑。生产源码、共享 checker、机器配置和历史材料保持。本轮仅关闭列明反例，不代表全部 G8 合同、产品或平台验收完成；所有修复未提交。
+
+## 2026-09-22 第九轮独立审查修复（未提交）
+
+RR9-01/02 已修复 AND 短路产生 undefined 的默认来源，以及数组 mutator 静态 spread 的插入来源。保留确定真值、旧别名和独立实例安全对照；Preload 对象的真值证明不扩大完整 API 的注入权限。新增 50 项回归，起点 27 FAIL / 23 PASS，修复后全部通过。
+
+| 验证 | 本轮候选结果 |
+| --- | --- |
+| 完整门禁 | `UNIT_TEST_CONCURRENCY=2 npm run release-check`：PASS，2026-09-22 19:41:10–20:00:20（Asia/Shanghai）；沙箱外隔离测试环境 |
+| 架构专项 / CLI | 482/482 PASS；31 active、0 pending/partial、0 诊断、0 stale |
+| 全量单测 | 9256 PASS、0 FAIL、4 项 Windows 条件跳过 |
+| 全量集成 | 68/68 脚本 PASS；Renderer lifecycle 233/233 |
+| 实际配置 / 共享探针 | 20 个 Renderer 边界下 6 个原始及对照场景符合预期；50 项共享正反例保持 |
+| 输入 | 1706 个门禁输入及 HEAD 未漂移 |
+
+[修复报告](reviews/2026-09-22-release-r9-repair/repair.md)、[验证汇总](reviews/2026-09-22-release-r9-repair/verification.json)、[增量补丁](reviews/2026-09-22-release-r9-repair/incremental.patch)。只修正 Renderer 检查器，生产业务、共享 scanner、机器配置和历史材料保持。本轮为修复自检，不扩展为任意动态语义或全部 G8 合同已闭环；未执行修复后独立复审、产品/平台人工验收或发布。
+
+## 2026-09-22 第八轮独立审查修复（未提交）
+
+RR8-01/02 已修复 IPC 默认来源和固定数组槽位身份漏报。IPC 字段不能仅凭来源标签排除 undefined；数组以分配位置及调用帧区分实例，按读取时点选择槽位，旧别名和浅复制保持分离。新增 46 项回归，起点 34 FAIL / 12 PASS，修复后全部通过。前轮固定槽位观察已纳入本轮关闭范围。
+
+| 验证 | 本轮候选结果 |
+| --- | --- |
+| 完整门禁 | `UNIT_TEST_CONCURRENCY=2 npm run release-check`：PASS，2026-09-22 18:06:12–18:27:32（Asia/Shanghai）；沙箱外隔离测试环境 |
+| 架构专项 / CLI | 432/432 PASS；31 active、0 pending/partial、0 诊断、0 stale |
+| 全量单测 | 9206 PASS、0 FAIL、4 项 Windows 条件跳过 |
+| 全量集成 | 68/68 脚本 PASS，Renderer lifecycle 233/233 |
+| 输入与保护 | 1705 个门禁输入及 HEAD 未漂移；792 个生产源码、542 个历史证据和主工作区 865 个 dirty 文件保持 |
+
+IPC 形状未声明时，即使 VM stub 恰好提供某字段，默认候选仍保守保留。共享 44 例中一个旧合法预期的同步 invoke stub 与 Electron Promise 合同不符，异步对照确认会触发其他频道默认值，当前拒绝有证据；详见[修复报告](reviews/2026-09-22-release-r8-repair/repair.md)。[验证汇总](reviews/2026-09-22-release-r8-repair/verification.json)、[增量补丁](reviews/2026-09-22-release-r8-repair/incremental.patch)。本轮为修复自检，未执行修复后独立复审或产品/平台人工验收，未提交或发布。
+
+## 2026-09-22 第七轮独立审查修复（未提交）
+
+RR7-01 已修复触发默认参数时丢失默认对象来源的问题。省略、缺失成员或 undefined 正确启用默认表达式，显式提供的其他对象保持独立；默认表达式在被调用函数环境及本次调用身份下求值。新增 30 项回归，在起点检查器上 18 FAIL / 12 PASS，修复后全部通过。R7 留存的数组元素替换观察仍未关闭，不纳入默认参数问题的关闭结论。
+
+| 验证 | 本轮候选结果 |
+| --- | --- |
+| 完整门禁 | `UNIT_TEST_CONCURRENCY=2 npm run release-check`：PASS，2026-09-22 16:37:31–16:56:01（Asia/Shanghai）；在沙箱外使用隔离测试环境 |
+| 架构专项 / CLI | 386/386 PASS；31 active、0 pending/partial、0 诊断、0 stale |
+| 全量单测 | 9160 PASS、0 FAIL、4 项 Windows 条件跳过 |
+| 全量集成 | 68/68 脚本 PASS，Renderer lifecycle 233/233 |
+| 输入与保护 | 1704 个门禁输入及 HEAD 未漂移；792 个生产源码、462 个历史证据和主工作区 865 个 dirty 文件保持 |
+
+[修复报告](reviews/2026-09-22-release-r7-repair/repair.md)、[验证汇总](reviews/2026-09-22-release-r7-repair/verification.json)、[增量补丁](reviews/2026-09-22-release-r7-repair/incremental.patch)。本轮为修复自检；修复后独立复审、真实产品 Main、Windows/安装包、Excel/WPS 和资金人工验收未执行。未提交或发布。
+
+## 2026-09-22 第六轮独立审查修复（未提交）
+
+RR6-01/02 已修复参数解构不按调用时点读取替换成员，以及数组/原型经 helper 参数改写后仍被视为原生比较的两项漏报。参数身份与能力检查分阶段求值，原生比较证明保留成员 selector 及有限返回来源；旧别名、不同实例和合法函数值比较保持。新增 40 项回归，在起点检查器上 23 FAIL / 17 PASS，修复后全部通过。
+
+| 验证 | 本轮候选结果 |
+| --- | --- |
+| 完整门禁 | UNIT_TEST_CONCURRENCY=2 npm run release-check：PASS，2026-09-22 15:19:39–15:38:20（Asia/Shanghai） |
+| 架构专项 / CLI | 356/356 PASS；31 active、0 pending/partial、0 诊断、0 stale |
+| 全量单测 | 9130 PASS、0 FAIL、4 项 Windows 条件跳过 |
+| 全量集成 | 68/68 脚本 PASS，Renderer lifecycle 233/233 |
+| 输入与保护 | 1703 个门禁输入及 HEAD 未漂移；792 个生产源码、374 个历史证据和主工作区 865 个 dirty 文件保持 |
+
+[修复报告](reviews/2026-09-22-release-r6-repair/repair.md)、[验证汇总](reviews/2026-09-22-release-r6-repair/verification.json)、[增量补丁](reviews/2026-09-22-release-r6-repair/incremental.patch)。本轮为修复自检；修复后独立复审、真实产品 Main、Windows/安装包、Excel/WPS 和资金人工验收未执行。未提交或发布。
+
+## 2026-09-22 第五轮独立审查修复（未提交）
+
+RR5-01/02 已修复静态成员替换后的别名身份漏报，以及原生 includes/indexOf 的函数值比较误报。对象身份按读取和已知调用时序解析；旧别名、不同实例与原生比较保持合法，自定义同名方法、改写数组和真实恢复回调仍检查。新增 46 项回归，在起点检查器上 23 FAIL / 23 PASS，修复后全部通过。
+
+| 验证 | 本轮候选结果 |
+| --- | --- |
+| 完整门禁 | UNIT_TEST_CONCURRENCY=2 npm run release-check：PASS，2026-09-22 14:01:31–14:19:51（Asia/Shanghai） |
+| 架构专项 / CLI | 316/316 PASS；31 active、0 pending/partial、0 诊断、0 stale |
+| 全量单测 | 9090 PASS、0 FAIL、4 项 Windows 条件跳过 |
+| 全量集成 | 68/68 脚本 PASS，Renderer lifecycle 233/233 |
+| 输入与保护 | 1702 个门禁输入及 HEAD 未漂移；792 个生产源码、295 个历史证据和主工作区 865 个 dirty 文件保持 |
+
+[修复报告](reviews/2026-09-22-release-r5-repair/repair.md)、[验证汇总](reviews/2026-09-22-release-r5-repair/verification.json)、[增量补丁](reviews/2026-09-22-release-r5-repair/incremental.patch)。本轮为修复自检，独立复审、真实产品 Main、Windows/安装包、Excel/WPS 及资金人工验收未执行。未提交或发布。
+
+## 2026-09-22 第四轮独立审查修复（未提交）
+
+RR4-01～03 已补齐工厂组合身份、不同静态调用实例区分和 G1 已解释回调入口授权检查；真实共享对象继续追踪，未放宽机器授权配置。新增 33 项回归在起点工具上 21 FAIL / 12 PASS，修复后全部通过。原三个 Renderer 越权反例各报一条诊断，安全对照与独立多实例例均无诊断；真实源码副本中的 reduce 在 prepare 入口被拒绝，未执行真实恢复 IO。
+
+| 验证 | 当前修复候选结果 |
+| --- | --- |
+| 完整门禁 | UNIT_TEST_CONCURRENCY=2 npm run release-check：PASS，2026-09-22 11:43:25–12:00:05（Asia/Shanghai） |
+| 架构专项 / CLI | 270/270 PASS；31 active、0 pending/partial、0 诊断、0 stale |
+| 全量单测 | 9044 PASS、0 FAIL、4 项 Windows 条件跳过（9048 total、828 suites） |
+| 全量集成 | 68/68 脚本 PASS；有计数用例 2901/2901，另 1 个脚本无用例计数 |
+| 保护 | 1701 个门禁输入及 HEAD 无漂移；792 个 src、216 个历史证据、主工作区 865 个 dirty 文件保持 |
+
+[修复报告](reviews/2026-09-22-release-r4-repair/repair.md)、[验证汇总](reviews/2026-09-22-release-r4-repair/verification.json)、[本轮增量](reviews/2026-09-22-release-r4-repair/incremental.patch)。本轮是修复自检，独立复审及真实产品 Main、Windows/安装包、Excel/WPS、资金人工验收未执行；未提交或发布。
+
+## 2026-09-22 第三轮独立审查修复（未提交）
+
+RR3-01～05 的反例及本地工厂返回后的别名写入已关闭；业务生产文件和机器授权配置未变化。新增 33 项回归在修复前版本上 26 FAIL / 7 PASS，修复后全部通过。完整实际配置的原始探针分别拒绝违规路径并保留安全对照。
+
+| 验证 | 当前修复候选结果 |
+| --- | --- |
+| 完整门禁 | UNIT_TEST_CONCURRENCY=1 npm run release-check：PASS，2026-09-22 01:45:20–02:09:31（Asia/Shanghai） |
+| 架构专项 / CLI | 237/237 PASS；31 active、0 pending/partial、0 诊断、0 stale |
+| 全量单测 | 9011 PASS、0 FAIL、4 项 Windows 条件跳过（9015 total，828 suites） |
+| 全量集成 | 68/68 脚本 PASS；计数用例 2901/2901，另 1 个脚本无用例计数 |
+| 输入与保护 | 1700 个门禁输入、HEAD 未漂移；792 个 src/、135 个原审查/修复证据、主工作区 865 个 dirty 文件保持 |
+
+[完整证据与修复边界](reviews/2026-09-22-release-r3-repair/repair.md)、[验证汇总](reviews/2026-09-22-release-r3-repair/verification.json)、[本轮增量](reviews/2026-09-22-release-r3-repair/incremental.patch)。本轮为修复自检，尚未独立复审；真实产品 Main、Windows/安装包、Excel/WPS 和资金人工验收未执行。没有提交、推送或正式发布。
+
+## 2026-09-21—22 第二轮独立审查修复（未提交）
+
+- RR2-01～05：补齐静态数组回调传播、bound factory 预绑定参数、对象别名写入、initialInfo 递归数据合同，以及 G1 当前内部恢复入口。仅改变检查器/配置/测试，保留上轮生产修复。
+- 新增 34 项回归，架构专项 204/204 PASS；原审查的确认反例原样重跑均产生违规诊断。真实 CLI 为 31 active、0 pending/partial、0 诊断、0 stale。
+- `UNIT_TEST_CONCURRENCY=1 npm run release-check`：2026-09-21 23:59:32—2026-09-22 00:19:13（Asia/Shanghai），exit 0；8978 项单测通过、0 失败、4 项 Windows 条件跳过；68/68 集成脚本通过，有计数合计 2901/2901；Renderer 生命周期 233/233。
+- 1699 个冻结门禁输入及 HEAD 未漂移；792 个 src/ 文件、79 个既有证据文件、主工作区 865 个 dirty 文件全部保持。集成策略清单由成功 runner 自动刷新。
+
+[修复报告](reviews/2026-09-21-release-r2-repair/repair.md)、[验证摘要](reviews/2026-09-21-release-r2-repair/verification.json)、[完整日志](reviews/2026-09-21-release-r2-repair/release-check.log)。本轮五项反例已关闭，仍保留报告列明的静态覆盖限制；修复后独立复审、真实 Main、Windows/安装包、Excel/WPS 和资金人工验收未完成。未提交、推送或发布。
+
+## 2026-09-21 第一轮独立审查修复（历史验证，未提交）
+
+- R1：退款／C3 确认使用具体 modal handle 的 `submitted` 结果关闭，只有关闭成功且句柄／控制器仍有效才继续业务；真实 Electron 组合回归覆盖四条按钮路径与关闭被拒情况。
+- R2：对齐实际 G1–G8 入口、消费者和能力；G5 按真实调用追踪，G7 按目标与具名导出装配，Renderer 按准确 API／面板／服务登记。补齐独立探针发现的回调与能力转发漏报。诊断从 2195 归零，31 active、0 pending/partial、0 stale；只保留两条固定基线扩展 worker SCC 例外。
+- 最终 `UNIT_TEST_CONCURRENCY=1 npm run release-check`：2026-09-21 22:21:50—22:45:10（Asia/Shanghai），exit 0；lint／架构／smoke PASS；单测 8944 通过、0 失败、4 项 Windows 条件跳过；集成 68/68 脚本通过，有计数合计 2901/2901。Renderer 生命周期 233/233，架构专项 170/170。
+- 1698 个受验代码／配置／测试输入及 HEAD 均保持；原审查 24 文件、主工作区 865 个既有 dirty 文件 SHA-256 均保持。`rules/integration-test-policy.md` 由成功 runner 自动同步。
+
+证据：[完整日志](reviews/2026-09-21-release-repair/release-check.log)、[验证摘要](reviews/2026-09-21-release-repair/verification.json)、[激活映射](reviews/2026-09-21-release-repair/activation-ledger.json)、[独立增量复核](reviews/2026-09-21-release-repair/independent-review/review.md)。本次没有提交、推送、升版、标签或发布；真实产品 Main 全流程、Windows／安装包、Excel／WPS 及既有 G3 资金人工复核仍未完成。
 
 ## application-recovery 合入
 

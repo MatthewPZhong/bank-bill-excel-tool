@@ -1,0 +1,37 @@
+{
+  "status": "PASS",
+  "reusedThisRound": true,
+  "rerunThisRound": false,
+  "gate": {
+    "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+    "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+    "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+    "startedAt": "2026-09-23T10:32:54.586010+08:00",
+    "minimumFreeBytes": 10538991616,
+    "abortBelowFreeBytes": 2147483648,
+    "inputFiles": 1708,
+    "pid": 23846,
+    "exitCode": 0,
+    "finishedAt": "2026-09-23T10:50:35.144066+08:00",
+    "changedInputs": [],
+    "headAfter": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10"
+  },
+  "unit": {
+    "tests": 9355,
+    "pass": 9351,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 4,
+    "todo": 0
+  },
+  "integration": {
+    "scripts": 68,
+    "countedPassed": 2901,
+    "countedTotal": 2901,
+    "withoutCount": [
+      "v2.1.12-beta-multiworker-nested"
+    ]
+  },
+  "inputsCompared": 1708,
+  "releaseCheckLogSha256": "bcfccc84912ba488461427ceb46921869e1a599e4530bb3bd5155fd1fd12af19"
+}

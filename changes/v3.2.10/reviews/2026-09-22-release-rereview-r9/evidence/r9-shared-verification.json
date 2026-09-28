@@ -1,0 +1,51 @@
+{
+  "status": "PASS",
+  "beforeVersion": "R8 repair start: renderer-contracts.js from before/ plus 4 unchanged current checker files; all 5 manifest-verified",
+  "reusedCases": 44,
+  "historicalExpectedCorrection": {
+    "name": "single-mount-category-explicit-ipc",
+    "oldExpectedClean": true,
+    "correctExpectedClean": false,
+    "reason": "invoke returns Promise; member is undefined; other default actually runs"
+  },
+  "newArrayCases": 4,
+  "newAsyncControls": 2,
+  "rendererCases": 32,
+  "queryCases": 18,
+  "versionsPerCase": 2,
+  "changedOutcomes": [
+    {
+      "name": "single-mount-category-explicit-ipc",
+      "beforeViolations": 0,
+      "currentViolations": 1
+    },
+    {
+      "name": "whole-array-capability-write",
+      "beforeViolations": 0,
+      "currentViolations": 1
+    },
+    {
+      "name": "awaited-ipc-capability-array-default",
+      "beforeViolations": 0,
+      "currentViolations": 1
+    },
+    {
+      "name": "awaited-category-other-default-conservative",
+      "beforeViolations": 0,
+      "currentViolations": 1
+    }
+  ],
+  "actualInMemoryQueries": 10,
+  "asyncContractReferences": [
+    "node_modules/electron/electron.d.ts:8847",
+    "src/preload.js:84",
+    "src/renderer.js:1642"
+  ],
+  "knownConservativeRejection": "awaited-category-other-default-conservative: VM business data present, but no static field existence contract; both IPC and dangerous default remain candidates",
+  "scannerJsonBeforeCurrentEqual": true,
+  "repeatedScanJsonEqual": true,
+  "scannerUnchangedAfterRules": true,
+  "siteEvidenceIdsUnchanged": true,
+  "policyFilesUnchanged": true,
+  "scope": "small fixtures and async VM only; no full scan, Electron launch, or source writes"
+}

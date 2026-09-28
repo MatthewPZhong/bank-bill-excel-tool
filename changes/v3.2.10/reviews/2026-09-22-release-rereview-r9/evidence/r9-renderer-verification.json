@@ -1,0 +1,45 @@
+{
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "commands": [
+    {
+      "purpose": "原样复跑 R8 实际20 Renderer 配置",
+      "cmd": "node changes/v3.2.10/reviews/2026-09-22-release-rereview-r8/evidence/r8-renderer-ipc-realconfig.cjs > /tmp/r9-renderer-original-realconfig.json 2> /tmp/r9-renderer-original-realconfig-progress.log",
+      "exitCode": 0,
+      "result": "2 cases; missing field 1 scope violation; backgroundConfig 1 conservative violation"
+    },
+    {
+      "purpose": "RR8-01 定向回归",
+      "cmd": "node --test --test-name-pattern='RR8-01' tests/unit/architecture/release-rereview-r8.test.js > /tmp/r9-renderer-targeted-tests.log 2>&1",
+      "exitCode": 0,
+      "tests": 13,
+      "pass": 13,
+      "fail": 0
+    },
+    {
+      "purpose": "6个有界邻近例 current",
+      "cmd": "node /tmp/r9-renderer-probes.cjs > /tmp/r9-renderer-probes-current.jsonl",
+      "exitCode": 0,
+      "cases": 6
+    },
+    {
+      "purpose": "R8 repair 起点 hash 自举和6个相同邻近例 before",
+      "cmd": "renderer_before_root=\"$(node /tmp/r9-renderer-before-bootstrap.cjs)\"\nRENDERER_SCANNER_ROOT=\"$renderer_before_root\" node /tmp/r9-renderer-probes.cjs > /tmp/r9-renderer-probes-before.jsonl",
+      "exitCode": 0,
+      "cases": 6,
+      "hashMatches": 5
+    },
+    {
+      "purpose": "&&反例及确定安全对照实际20配置",
+      "cmd": "node /tmp/r9-renderer-logical-realconfig.cjs > /tmp/r9-renderer-logical-realconfig.json 2> /tmp/r9-renderer-logical-realconfig-progress.log",
+      "exitCode": 0,
+      "cases": 2,
+      "boundaries": 20,
+      "baseViolations": 0,
+      "probeViolations": [
+        0,
+        0
+      ]
+    }
+  ]
+}

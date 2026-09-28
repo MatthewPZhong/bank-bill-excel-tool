@@ -191,7 +191,7 @@ function createAnalysis(ast, from, root) {
       current = { type: 'function', parent: scope, bindings: new Map(), functionPath };
       functions.set(node, functionPath);
       if (node.id) declare(node.id, current, { kind: 'function', init: node });
-      for (const param of node.params) declare(param, current, { kind: 'parameter', init: null });
+      node.params.forEach((param, parameterIndex) => declare(param, current, { kind: 'parameter', init: null, functionNode: node, parameterIndex }));
     } else if (node.type === 'StaticBlock' || node.type === 'BlockStatement' || node.type === 'CatchClause' || node.type === 'ForStatement' || node.type === 'ForOfStatement' || node.type === 'ForInStatement' || node.type === 'SwitchStatement') {
       current = { type: node.type === 'StaticBlock' ? 'static-block' : node.type === 'CatchClause' ? 'catch' : 'block', parent: scope, bindings: new Map(), functionPath: scope.functionPath };
       if (node.type === 'CatchClause') declare(node.param, current, { kind: 'parameter', init: null });
@@ -203,7 +203,7 @@ function createAnalysis(ast, from, root) {
       if (node.kind === 'var') while (target.parent && !['function', 'program', 'static-block'].includes(target.type)) target = target.parent;
       for (const declaration of node.declarations) declare(declaration.id, target, { kind: node.kind, init: declaration.init });
     }
-    if (node.type === 'ClassDeclaration' && node.id) declare(node.id, current, { kind: 'class', init: null });
+    if (node.type === 'ClassDeclaration' && node.id) declare(node.id, current, { kind: 'class', init: node });
     if (node.type === 'ImportDeclaration') {
       for (const specifier of node.specifiers) declare(specifier.local, current, {
         kind: 'import', imported: propertyName(specifier.imported) || (specifier.type === 'ImportNamespaceSpecifier' ? '*' : 'default'), specifier: node.source.value
@@ -233,19 +233,33 @@ function createAnalysis(ast, from, root) {
   };
   const unknown = (reason) => ({ kind: 'unknown', reason });
   const descriptionCache = new WeakMap();
+  // 保留成员读取的时点和接收者；普通调用解析仍消费原描述，Renderer 可据此还原替换后的身份。
+  // 私有旁表不改变扫描结果、JSON 指纹或能力字段。
+  const memberReads = new WeakMap();
+  const withMemberRead = (value, access) => {
+    const result = { ...value };
+    memberReads.set(result, access);
+    return result;
+  };
   const describe = (node, seen = new Set()) => {
     if (!node) return { kind: 'unknown', reason: 'missing' };
     if (descriptionCache.has(node)) return descriptionCache.get(node);
-    const value = describeValue(node, seen);
+    let value = describeValue(node, seen);
+    if (node.type === 'MemberExpression') {
+      const property = node.computed ? describe(node.property, seen) : { kind: 'literal', value: propertyName(node.property) };
+      if (property.kind === 'literal') value = withMemberRead(value, { object: describe(node.object, seen), property: String(property.value), node });
+    }
     descriptionCache.set(node, value);
     return value;
   };
-  const selectBindingValue = (initial, selector) => {
+  const selectBindingValue = (initial, selector, node) => {
     let value = initial;
     for (const segment of selector) {
+      const object = value;
       if (value.kind === 'object') value = value.properties[segment] || unknown('missing-property');
       else if (value.kind === 'reference') value = { ...value, chain: [...value.chain, segment], importedNames: value.module ? [value.chain[0] || segment] : value.importedNames };
       else value = { kind: 'unknown', reason: 'member-base', object: value, property: segment };
+      value = withMemberRead(value, { object, property: segment, node });
     }
     return value;
   };
@@ -253,23 +267,38 @@ function createAnalysis(ast, from, root) {
   const describeBinding = (binding, seen = new Set()) => {
     if (!binding) return unknown('missing-binding');
     const reference = { kind: 'reference', chain: [binding.name], rootFree: false, bindingScope: binding.scope.type,
-      bindingFunctionPath: binding.scope.functionPath, bindingKind: binding.kind };
+      bindingFunctionPath: binding.scope.functionPath, bindingFunctionStart: binding.functionNode?.start, bindingKind: binding.kind };
     if (binding.kind === 'import') return moduleDescription(binding.specifier, binding.imported === '*' ? [] : [binding.imported]);
+    if (binding.kind === 'parameter' && !binding.mutated && binding.functionNode) {
+      const invocation = parents.get(binding.functionNode);
+      if (invocation?.type === 'CallExpression' && invocation.callee === binding.functionNode) {
+        const input = describe(invocation.arguments[binding.parameterIndex], new Set([...seen, binding]));
+        if (input.kind === 'function' && !binding.selector.length) return input;
+        const choices = input.values || [input];
+        const globals = choices.filter(value => value.kind === 'reference' && value.rootFree && value.chain?.length === 1 && ['window', 'globalThis'].includes(value.chain[0]));
+        if (globals.length && choices.every(value => globals.includes(value) || (value.kind === 'literal' && value.value === null))) return { ...globals[0], chain: ['window'] };
+      }
+    }
+
     if (seen.has(binding) || binding.opaque) return { ...reference, opaque: true };
     if (binding.mutated || binding.kind === 'let' || binding.kind === 'var' || binding.defaultInit) {
       const next = new Set([...seen, binding]);
-      const initial = binding.init ? [selectBindingValue(describe(binding.init, next), binding.selector)] : [];
+      const initial = binding.init ? [selectBindingValue(describe(binding.init, next), binding.selector, binding.init)] : [];
       return { ...reference, opaque: true, alternatives: [...initial,
         ...[binding.defaultInit, ...(binding.assignments || [])].filter(Boolean).map(value => describe(value, next))] };
     }
     if (binding.kind === 'const' && binding.init) {
       const next = new Set([...seen, binding]);
-      const value = selectBindingValue(describe(binding.init, next), binding.selector);
-      if (value.kind === 'object') return { ...value, ...reference, kind: 'object', properties: value.properties, spreads: value.spreads };
+      const value = selectBindingValue(describe(binding.init, next), binding.selector, binding.init);
+      if (value.kind === 'object') {
+        const result = { ...value, ...reference, kind: 'object', properties: value.properties, spreads: value.spreads };
+        return memberReads.has(value) ? withMemberRead(result, memberReads.get(value)) : result;
+      }
       // 本地工厂结果的成员虽未在此展开，仍须为后续来源追踪保留对象和属性。
       if (value.kind !== 'unknown' || value.reason === 'member-base') return value;
       return { ...reference, opaque: true, reason: value.reason };
     }
+    if (binding.kind === 'class' && binding.init) return { ...reference, kind: 'class', classStart: binding.init.start };
     if (binding.kind === 'function') return { ...reference, functionPath: functions.get(binding.init), functionStart: binding.init.start };
     return reference;
   };
@@ -296,7 +325,7 @@ function createAnalysis(ast, from, root) {
     if (node.type === 'MemberExpression') {
       const object = describe(node.object, seen);
       const prop = node.computed ? describe(node.property, seen) : { kind: 'literal', value: propertyName(node.property) };
-      if (prop.kind !== 'literal' || !['string', 'number'].includes(typeof prop.value)) return { kind: 'unknown', reason: 'computed-member', object };
+      if (prop.kind !== 'literal' || !['string', 'number'].includes(typeof prop.value)) return { kind: 'unknown', reason: 'computed-member', object, propertyValue: prop };
       const key = String(prop.value);
       const alternatives = object.alternatives || (object.kind === 'candidates' ? object.values : null);
       if (alternatives) return { kind: 'candidates', values: alternatives.map((value) => value.kind === 'reference' ? { ...value, chain: [...value.chain, key], importedNames: value.module ? [value.chain[0] || key] : value.importedNames } : { kind: 'unknown', reason: 'member-base', object: value, property: key }) };
@@ -308,18 +337,39 @@ function createAnalysis(ast, from, root) {
       return { kind: 'unknown', reason: 'member-base', object, property: key };
     }
     if (node.type === 'ObjectExpression') {
-      const properties = {};
+      const properties = Object.create(null);
       const spreads = [];
       for (const property of node.properties) {
-        if (property.type === 'SpreadElement') { spreads.push(describe(property.argument, seen)); continue; }
+        if (property.type === 'SpreadElement') {
+        const spread = describe(property.argument, seen);
+        if (spread.kind === 'object' && !spread.opaque && !(spread.spreads || []).length) Object.assign(properties, spread.properties);
+        else spreads.push(spread);
+        continue;
+      }
         const key = property.computed ? describe(property.key, seen) : { kind: 'literal', value: propertyName(property.key) };
         if (key.kind !== 'literal' || property.kind !== 'init') { spreads.push(unknown('computed-or-accessor')); continue; }
+        if (!property.computed && !property.method && !property.shorthand && key.value === '__proto__') {
+          const prototype = describe(property.value, seen);
+          if (prototype.kind !== 'literal' || prototype.value !== null) spreads.push(unknown('object-prototype-setter'));
+          continue;
+        }
         properties[key.value] = describe(property.value, seen);
       }
-      return { kind: 'object', properties, spreads };
+      return { kind: 'object', properties, spreads, objectStart: node.start };
     }
-    if (node.type === 'ArrayExpression') return { kind: 'array', elements: node.elements.map((item) => describe(item, seen)) };
+    if (node.type === 'ArrayExpression') {
+      const elements = [];
+      for (const item of node.elements) {
+        if (item?.type !== 'SpreadElement') { elements.push(describe(item, seen)); continue; }
+        const source = describe(item.argument, seen);
+        // 长度未知会改变后续所有索引；不能用单个 unknown 槽位代替。
+        if (source.kind !== 'array' || source.opaque) return { kind: 'array', elements: [], opaque: true, reason: 'opaque-array-spread' };
+        elements.push(...source.elements);
+      }
+      return { kind: 'array', elements };
+    }
     if (FUNCTION_TYPES.has(node.type)) return { kind: 'function', functionPath: functions.get(node), functionStart: node.start };
+    if (node.type === 'ClassDeclaration' || node.type === 'ClassExpression') return { kind: 'class', classStart: node.start };
     if (node.type === 'MetaProperty' && node.meta.name === 'import' && node.property.name === 'meta') {
       return { kind: 'reference', chain: ['import', 'meta'], rootFree: true };
     }
@@ -342,10 +392,19 @@ function createAnalysis(ast, from, root) {
         return { kind: 'bound-function', target, receiver: args[0], args: args.slice(1),
           method: target.chain?.at(-1) || target.property || null };
       }
-      return { kind: 'call-result', callee, args };
+      return { kind: 'call-result', callee, args, callStart: node.start };
     }
-    if (node.type === 'LogicalExpression') return { kind: 'candidates', values: [describe(node.left, seen), describe(node.right, seen)] };
-    if (node.type === 'ConditionalExpression') return { kind: 'candidates', values: [describe(node.consequent, seen), describe(node.alternate, seen)] };
+    if (node.type === 'LogicalExpression') return { kind: 'candidates', operator: node.operator, values: [describe(node.left, seen), describe(node.right, seen)] };
+    if (node.type === 'ConditionalExpression') {
+      const test = node.test;
+      // 支持目标运行时中 globalThis 恒存在；局部同名绑定不继承该结论。
+      if (test.type === 'BinaryExpression' && ['!==', '!=', '===', '=='].includes(test.operator) &&
+          test.left.type === 'UnaryExpression' && test.left.operator === 'typeof' && test.right.type === 'Literal' && test.right.value === 'undefined') {
+        const global = describe(test.left.argument, seen);
+        if (global.rootFree && global.chain?.join('.') === 'globalThis') return describe(['!==', '!='].includes(test.operator) ? node.consequent : node.alternate, seen);
+      }
+      return { kind: 'candidates', values: [describe(node.consequent, seen), describe(node.alternate, seen)] };
+    }
     if (node.type === 'BinaryExpression' && node.operator === '+') {
       const left = describe(node.left, seen); const right = describe(node.right, seen);
       if (left.kind === 'literal' && right.kind === 'literal') return { kind: 'literal', value: left.value + right.value };
@@ -370,6 +429,7 @@ function createAnalysis(ast, from, root) {
   const functionNodes = new Map(nodes.filter((node) => FUNCTION_TYPES.has(node.type)).map((node) => [functions.get(node), node]));
   const functionNodesByStart = new Map(nodes.filter((node) => FUNCTION_TYPES.has(node.type)).map(node => [node.start, node]));
   return { from, ast, parents, scopeFor, bindingsFor, functionNodes, functionNodesByStart, nodes, describe, describeBinding, resolve: describe, site,
+    memberRead: value => value && memberReads.get(value),
     functionPath: (node) => scopeFor.get(node)?.functionPath || null,
     lookup: (name, node) => lookup(name, scopeFor.get(node)), walk: (visitor) => nodes.forEach(visitor) };
 }
@@ -528,13 +588,13 @@ function scan(root, config = {}) {
         const args = node.arguments.map((argument) => describe(argument));
         const chain = callee.chain || [];
         const operation = args[0]?.kind === 'literal' ? args[0].value : args.find((arg) => arg.kind === 'object' && arg.properties.operation)?.properties.operation?.value;
-        const call = { ...location, type: node.type === 'NewExpression' ? 'new' : 'call', callee: chain.join('.'), chain, method: node.callee.type === 'MemberExpression' ? propertyName(node.callee.property) : null, args, operation, reference: callee,
+        const call = { ...location, type: node.type === 'NewExpression' ? 'new' : 'call', dynamicCallee: node.callee.type === 'MemberExpression' && node.callee.computed && describe(node.callee.property).kind !== 'literal', callee: chain.join('.'), chain, method: node.callee.type === 'MemberExpression' ? propertyName(node.callee.property) : null, args, operation, reference: callee,
           binding: callee.module ? { from: callee.module, importedNames: callee.importedNames } : null };
         const syntaxMethod = node.callee.type === 'MemberExpression' && (!node.callee.computed || node.callee.property.type === 'Literal') ? propertyName(node.callee.property) : null;
         const indirect = ['call', 'apply'].includes(syntaxMethod);
         const target = indirect ? describe(node.callee.object) : callee;
         const effectiveArgs = !indirect ? args : syntaxMethod === 'call' ? args.slice(1) :
-          args[1]?.kind === 'array' ? args[1].elements : [{ kind: 'unknown', reason: 'opaque-apply-arguments' }];
+          args[1]?.kind === 'array' && !args[1].opaque ? args[1].elements : [{ kind: 'unknown', reason: 'opaque-apply-arguments' }];
         if (indirect || callee.kind === 'bound-function' || (callee.values || callee.alternatives || []).some(value => value.kind === 'bound-function')) {
           call.invocations = callTargets(target, effectiveArgs, indirect ? null : call.method).map(invocation => ({ ...invocation,
             chain: invocation.reference.chain || [], callee: (invocation.reference.chain || []).join('.'),
@@ -545,6 +605,25 @@ function scan(root, config = {}) {
           let importedNames = null;
           if (parent?.type === 'VariableDeclarator' && parent.id.type === 'ObjectPattern') importedNames = parent.id.properties.filter((item) => item.type === 'Property').map((item) => propertyName(item.key)).sort();
           else if (parent?.type === 'MemberExpression' && parent.object === node && (!parent.computed || parent.property.type === 'Literal')) importedNames = [propertyName(parent.property)];
+          else if (parent?.type === 'VariableDeclarator' && parent.id.type === 'Identifier' && analysis.parents.get(parent)?.kind === 'const') {
+            const binding = analysis.lookup(parent.id.name, parent); const members = new Set(); let opaque = false;
+            for (const use of analysis.nodes) {
+              if (use.type !== 'Identifier' || use.name !== parent.id.name || use === parent.id || analysis.lookup(use.name, use) !== binding) continue;
+              const owner = analysis.parents.get(use);
+              if (owner?.type === 'MemberExpression' && owner.object === use) {
+                const property = owner.computed ? describe(owner.property) : { kind: 'literal', value: propertyName(owner.property) };
+                const operation = analysis.parents.get(owner);
+                if ((operation?.type === 'AssignmentExpression' && operation.left === owner) || operation?.type === 'UpdateExpression' ||
+                    (operation?.type === 'UnaryExpression' && operation.operator === 'delete')) opaque = true;
+                if (property.kind !== 'literal' || typeof property.value !== 'string') opaque = true;
+                else members.add(property.value);
+              } else if ((owner?.type === 'Property' && owner.key === use && !owner.shorthand && !owner.computed) ||
+                (owner?.type === 'MemberExpression' && owner.property === use && !owner.computed)) continue;
+              else opaque = true;
+            }
+            if (!opaque && members.size) importedNames = [...members].sort();
+          }
+
           if (args[0]?.kind === 'literal' && typeof args[0].value === 'string') addEdge(from, args[0].value, 'require', node, analysis, { importedNames, literal: node.callee.type === 'Identifier' && node.callee.name === 'require' && node.arguments[0]?.type === 'Literal' });
           else result.dynamicSites.push({ ...location, kind: 'require', callee: 'require', candidates: args[0]?.kind === 'candidates' ? args[0].values : [], reason: 'unresolved-dynamic-loader' });
         }

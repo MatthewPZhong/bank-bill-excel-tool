@@ -1,0 +1,66 @@
+[
+  {
+    "scanner": "WORKTREE",
+    "name": "ipc_missing_field",
+    "source": "const reviewShared={run(){}};function selectReviewApi(api=reviewShared){return api;}async function runReviewScenario(){const reviewInfo=await window.desktopApi.app.getInfo();const reviewOther=selectReviewApi(reviewInfo.api);reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewShared});return reviewShared===reviewOther;}runReviewScenario();",
+    "baseViolations": 0,
+    "probeViolations": [
+      {
+        "rule": "ARCH-RENDERER-SCOPE",
+        "boundaryId": "renderer-bank-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 280,
+        "message": "scoped api 未授权字段 outsideScope",
+        "functionPath": "runReviewScenario"
+      }
+    ],
+    "boundaryCount": 20,
+    "runtime": {
+      "ipcReads": 1,
+      "same": true,
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run",
+        "outsideScope"
+      ],
+      "whole": false,
+      "extraCallable": true,
+      "extraResult": true
+    }
+  },
+  {
+    "scanner": "WORKTREE",
+    "name": "ipc_provided_field_safe",
+    "source": "const reviewShared={run(){}};function selectReviewApi(api=reviewShared){return api;}async function runReviewScenario(){const reviewInfo=await window.desktopApi.app.getInfo();const reviewOther=selectReviewApi(reviewInfo.backgroundConfig);reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewShared});return reviewShared===reviewOther;}runReviewScenario();",
+    "baseViolations": 0,
+    "probeViolations": [
+      {
+        "rule": "ARCH-RENDERER-SCOPE",
+        "boundaryId": "renderer-bank-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 293,
+        "message": "scoped api 未授权字段 outsideScope",
+        "functionPath": "runReviewScenario"
+      }
+    ],
+    "boundaryCount": 20,
+    "runtime": {
+      "ipcReads": 1,
+      "same": false,
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run"
+      ],
+      "whole": false,
+      "extraCallable": false
+    }
+  }
+]

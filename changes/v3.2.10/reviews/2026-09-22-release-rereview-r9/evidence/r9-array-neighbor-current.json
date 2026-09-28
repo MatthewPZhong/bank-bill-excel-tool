@@ -1,0 +1,266 @@
+{
+  "mode": "minimal",
+  "boundaryCount": 1,
+  "boundaries": [],
+  "baseline": null,
+  "results": [
+    {
+      "name": "push-direct-control",
+      "safe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();const list=[];list.push(clean);const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 190,
+          "message": "scoped api 未授权字段 outsideScope",
+          "evidenceId": "f85d3b8bcc5965c720fab7693054d227050e65528d81cde4c056d15690a964bd",
+          "functionPath": null
+        }
+      ],
+      "coverage": {
+        "scannedFiles": 1,
+        "parsedFiles": 1,
+        "literalEdges": 0,
+        "workerEdges": 0,
+        "globalEdges": 2,
+        "unresolved": 0,
+        "dynamicSites": 0,
+        "parseErrors": 0
+      }
+    },
+    {
+      "name": "push-static-spread",
+      "safe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();const list=[];list.push(...[clean]);const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      },
+      "violations": [],
+      "coverage": {
+        "scannedFiles": 1,
+        "parsedFiles": 1,
+        "literalEdges": 0,
+        "workerEdges": 0,
+        "globalEdges": 2,
+        "unresolved": 0,
+        "dynamicSites": 0,
+        "parseErrors": 0
+      }
+    },
+    {
+      "name": "splice-static-spread",
+      "safe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();const list=[old];list.splice(...[0,1,clean]);const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      },
+      "violations": [],
+      "coverage": {
+        "scannedFiles": 1,
+        "parsedFiles": 1,
+        "literalEdges": 0,
+        "workerEdges": 0,
+        "globalEdges": 2,
+        "unresolved": 0,
+        "dynamicSites": 0,
+        "parseErrors": 0
+      }
+    },
+    {
+      "name": "helper-push",
+      "safe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();const list=[];function append(value){value.push(clean);}append(list);const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 228,
+          "message": "scoped api 未授权字段 outsideScope",
+          "evidenceId": "f85d3b8bcc5965c720fab7693054d227050e65528d81cde4c056d15690a964bd",
+          "functionPath": null
+        }
+      ],
+      "coverage": {
+        "scannedFiles": 1,
+        "parsedFiles": 1,
+        "literalEdges": 0,
+        "workerEdges": 0,
+        "globalEdges": 2,
+        "unresolved": 0,
+        "dynamicSites": 0,
+        "parseErrors": 0
+      }
+    },
+    {
+      "name": "default-after-slot-replace",
+      "safe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();const list=[old];list[0]=clean;function select(value=list[0]){return value.api;}const alias=select();alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 236,
+          "message": "scoped api 未授权字段 outsideScope",
+          "evidenceId": "f85d3b8bcc5965c720fab7693054d227050e65528d81cde4c056d15690a964bd",
+          "functionPath": null
+        }
+      ],
+      "coverage": {
+        "scannedFiles": 1,
+        "parsedFiles": 1,
+        "literalEdges": 0,
+        "workerEdges": 0,
+        "globalEdges": 2,
+        "unresolved": 0,
+        "dynamicSites": 0,
+        "parseErrors": 0
+      }
+    },
+    {
+      "name": "spread-before-replace-safe",
+      "safe": true,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();const list=[old];const copy=[...list];list[0]=clean;const alias=copy[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run"
+        ],
+        "extraCallable": false,
+        "same": false
+      },
+      "violations": [],
+      "coverage": {
+        "scannedFiles": 1,
+        "parsedFiles": 1,
+        "literalEdges": 0,
+        "workerEdges": 0,
+        "globalEdges": 2,
+        "unresolved": 0,
+        "dynamicSites": 0,
+        "parseErrors": 0
+      }
+    },
+    {
+      "name": "delete-slot-default",
+      "safe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();const list=[old];delete list[0];function select([value=clean]){return value.api;}const alias=select(list);alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 241,
+          "message": "scoped api 未授权字段 outsideScope",
+          "evidenceId": "f85d3b8bcc5965c720fab7693054d227050e65528d81cde4c056d15690a964bd",
+          "functionPath": null
+        }
+      ],
+      "coverage": {
+        "scannedFiles": 1,
+        "parsedFiles": 1,
+        "literalEdges": 0,
+        "workerEdges": 0,
+        "globalEdges": 2,
+        "unresolved": 0,
+        "dynamicSites": 0,
+        "parseErrors": 0
+      }
+    },
+    {
+      "name": "length-zero-default",
+      "safe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();const list=[old];list.length=0;function select([value=clean]){return value.api;}const alias=select(list);alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 240,
+          "message": "scoped api 未授权字段 outsideScope",
+          "evidenceId": "f85d3b8bcc5965c720fab7693054d227050e65528d81cde4c056d15690a964bd",
+          "functionPath": null
+        }
+      ],
+      "coverage": {
+        "scannedFiles": 1,
+        "parsedFiles": 1,
+        "literalEdges": 0,
+        "workerEdges": 0,
+        "globalEdges": 2,
+        "unresolved": 0,
+        "dynamicSites": 0,
+        "parseErrors": 0
+      }
+    }
+  ]
+}

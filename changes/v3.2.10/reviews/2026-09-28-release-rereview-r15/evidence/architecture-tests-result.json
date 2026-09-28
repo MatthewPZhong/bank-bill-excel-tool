@@ -1,0 +1,12 @@
+{
+  "command": "node --test tests/unit/architecture/*.test.js",
+  "exitCode": 0,
+  "counts": {
+    "tests": 655,
+    "pass": 655,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  }
+}

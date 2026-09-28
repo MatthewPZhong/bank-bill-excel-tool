@@ -1,0 +1,126 @@
+{
+  "reviewRound": 7,
+  "result": "FINDINGS",
+  "readOnlyReview": true,
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "frozenExistingFiles": 4391,
+  "newFindings": [
+    {
+      "id": "RR7-01",
+      "priority": 2,
+      "file": "scripts/architecture/renderer-contracts.js",
+      "start": 174,
+      "end": 178,
+      "title": "触发默认参数时丢失默认对象来源，越权 API 写入零诊断放行"
+    }
+  ],
+  "closedPriorFindings": [
+    "RR6-01",
+    "RR6-02"
+  ],
+  "executedThisRound": {
+    "architectureUnit": {
+      "command": "node --test --test-concurrency=1 tests/unit/architecture/*.test.js",
+      "tests": 356,
+      "pass": 356,
+      "fail": 0,
+      "skipped": 0
+    },
+    "targeted": {
+      "renderer": 21,
+      "g1": 19,
+      "includedInArchitectureUnit": true
+    },
+    "architectureCli": {
+      "command": "node scripts/check-architecture.js --json /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r7/evidence/architecture-check.json",
+      "active": 31,
+      "pending": 0,
+      "partial": 0,
+      "violations": 0,
+      "stale": 0,
+      "scanned": 765,
+      "parsed": 765,
+      "parseErrors": 0,
+      "knownGeneratedUnresolved": 2,
+      "dynamicSites": 33
+    },
+    "probeEvidence": {
+      "status": "PASS",
+      "meaning": "Archived evidence assertions passed; RR7-01 remains a confirmed checker defect.",
+      "newFindings": [
+        "RR7-01"
+      ],
+      "newRegressionVariants": [
+        "default-missing-member",
+        "default-undefined-member",
+        "default-missing-parameter"
+      ],
+      "closedPriorFindings": [
+        "RR6-01",
+        "RR6-02"
+      ],
+      "rendererActualBoundaries": 20,
+      "g1DeniedExecutingCases": 9,
+      "g1AcceptedSafeCases": 5,
+      "sharedParserCases": {
+        "renderer": 20,
+        "query": 18
+      },
+      "actualInMemoryQueries": 10,
+      "correctedQueryFalsePositives": 3,
+      "architectureTestsPassed": 356,
+      "activeBoundaries": 31,
+      "fullGateReusedMatchingInputs": 1703,
+      "existingArrayElementGap": "Observed before/current unchanged in small fixture; not closed, not expanded to full actual configuration."
+    }
+  },
+  "reusedFullGate": {
+    "rerunThisRound": false,
+    "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-r6-repair/verification.json",
+    "matchingInputFiles": 1703,
+    "headMatches": true,
+    "changedInputs": [],
+    "gate": {
+      "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+      "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+      "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+      "startedAt": "2026-09-22T15:19:39.988237+08:00",
+      "minimumFreeBytes": 5615837184,
+      "abortBelowFreeBytes": 2147483648,
+      "inputFiles": 1703,
+      "pid": 80435,
+      "exitCode": 0,
+      "finishedAt": "2026-09-22T15:38:20.381757+08:00",
+      "changedInputs": [],
+      "headAfter": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10"
+    },
+    "unit": {
+      "tests": 9134,
+      "suites": 828,
+      "pass": 9130,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 4,
+      "todo": 0
+    },
+    "integration": {
+      "scripts": 68,
+      "countedPassed": 2901,
+      "countedTotal": 2901,
+      "withoutCount": [
+        "v2.1.12-beta-multiworker-nested"
+      ]
+    },
+    "rendererLifecycle": {
+      "pass": 233,
+      "total": 233
+    }
+  },
+  "limits": [
+    "本轮仅复核 R6 增量与有限相邻组合；未重新审查未变化业务模块。",
+    "静态数组元素替换最小夹具前后均漏报，未完成实际配置扩展验证，不计新增回归，亦未关闭。",
+    "未重跑 Windows、GUI、Excel/WPS 或发布验收。"
+  ],
+  "preservationEvidence": "evidence/preservation-final.json"
+}

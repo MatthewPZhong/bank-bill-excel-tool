@@ -1,0 +1,74 @@
+{
+  "result": "PASS",
+  "sha256": {
+    "scripts/architecture/policy-history.js": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+    "scripts/architecture/renderer-contracts.js": "a9662367697a1da6e260bcd3d71425b2b987ac00da80736dde4998af530499a4",
+    "scripts/architecture/rules.js": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa",
+    "scripts/architecture/ci-policy-base.js": "4c4bf7555e331f2e65694b24478dbf950fc43ef909002e107cfa05522840a463",
+    "scripts/architecture/schema.js": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+    "scripts/architecture/scan.js": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be",
+    "scripts/architecture/contracts.js": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f"
+  },
+  "steps": [
+    {
+      "name": "architecture-cli",
+      "exitCode": 0,
+      "seconds": 186.80711112497374
+    },
+    {
+      "name": "renderer-realconfig",
+      "exitCode": 0,
+      "seconds": 20.446894417051226
+    },
+    {
+      "name": "g1-neighbors",
+      "exitCode": 0,
+      "seconds": 0.09785050014033914
+    },
+    {
+      "name": "g1-projection-source",
+      "exitCode": 0,
+      "seconds": 83.5733592081815
+    },
+    {
+      "name": "g1-native-source",
+      "exitCode": 0,
+      "seconds": 97.8473967500031
+    },
+    {
+      "name": "g1-reduce-source",
+      "exitCode": 0,
+      "seconds": 84.47037062514573
+    },
+    {
+      "name": "shared-data-query",
+      "exitCode": 0,
+      "seconds": 0.18008387507870793
+    },
+    {
+      "name": "shared-destructure",
+      "exitCode": 0,
+      "seconds": 0.12767879199236631
+    },
+    {
+      "name": "descriptor-isolation",
+      "exitCode": 0,
+      "seconds": 0.061268375255167484
+    },
+    {
+      "name": "probe-verification",
+      "exitCode": 0,
+      "seconds": 0.03231854224577546
+    },
+    {
+      "name": "architecture-tests",
+      "exitCode": 0,
+      "seconds": 34.165980875026435
+    },
+    {
+      "name": "tool-lint",
+      "exitCode": 0,
+      "seconds": 0.3142467923462391
+    }
+  ]
+}

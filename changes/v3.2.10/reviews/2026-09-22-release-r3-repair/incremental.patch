@@ -1,0 +1,590 @@
+--- a/architecture/README.md
++++ b/architecture/README.md
+@@ -90,6 +90,14 @@
+ 
+ 上述检查仅证明列明静态形式，不能视为完整 JavaScript 执行语义、任意 this 分派或运行时授权的证明。
+ 
++release 第三轮的相邻缺口与回归见 [RR3 测试](../tests/unit/architecture/release-rereview-r3.test.js)和[修复证据](../changes/v3.2.10/reviews/2026-09-22-release-r3-repair/repair.md)。未知长度的数组 spread 将整个数组标为位置不确定，不能按一个槽位展开；索引调用、解构回调或 apply 依赖这种位置时报告 coverage，当前不猜测参数或工厂返回的 spread 长度。完全静态 spread 的索引继续精确解析。
++
++Renderer 对有 AST 身份但没有名称链的嵌套对象仍核查写入与 helper 逃逸；字面量在调用实参位置的直接构造不等同于已构造对象经别名逃逸。所有 AST 属性描述字典使用无原型对象，computed 自有 `["__proto__"]` 保留普通键语义；真实 prototype setter 仅接受明确的 `__proto__: null`，其他来源失败关闭。初始分类数据按真实 `config.initialBillCategory` 路径应用纯数据／app:get-info 合同，不能沿通用 config 方法授权放行函数或其他 IPC 数据。
++
++同文件命名工厂返回的可解释对象也沿返回表达式保留 AST 身份，返回后再经别名写入或 Object.assign 扩展不能遗漏；分析不会执行工厂、getter 或 helper。无法解释的运行时对象身份仍不属于完整语义证明。
++
++G1 的 prepare/worker 检查复用实际执行闭包，代入有限静态数组、helper 参数与返回值，跨文件仍以最终函数 AST 身份判断受限恢复能力。准确 allowedSites 继续作为调用闭包的停止点；未调用的危险成员和同名普通函数不会因此变成恢复执行。本轮没有扩大配置允许集合或新增例外。
++
+ 早期收紧对应 [R1–R10 回归](../tests/unit/architecture/review-regressions.test.js)，当时登记变化和原始基线核对见[历史修复复核](../changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-repair/repair-review.md)。
+ 
+ 第二轮的绑定调用、工厂闭包、DOM/scoped API 兼容、公开导出、脚本执行次序和 fork cwd 回归见 [R2 测试](../tests/unit/architecture/review-round2.test.js) 与[第二轮修复自检](../changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r2-repair/repair-review.md)。本轮没有增加或修改 allowedSites、历史例外、schema 或激活状态。
+--- a/changes/v3.2.10/README.md
++++ b/changes/v3.2.10/README.md
+@@ -6,9 +6,9 @@
+ | 文档日期 | 2026-09-20 |
+ | 用户已确认 | G1–G8 每项独立 Spec / TechDoc；按 v3.2.9 的功能分支目录组织；写清具体模块、接口、职责、迁移与验收 |
+ | 设计及源码基线 | `main@11086a3cbf632a30adbcfa796e4cd81810c5aef9`；本地附注标签 `v3.2.9` 指向同一提交 |
+-| 集成分支 | `release/v3.2.10`；G1–G8 已本地合入，当前为 `9a38b96b` 加未提交审查修复；第二轮修复完整门禁 PASS，见 [本地集成记录](release.md) |
++| 集成分支 | `release/v3.2.10`；G1–G8 已本地合入，当前为 `9a38b96b` 加未提交审查修复；第三轮修复完整门禁 PASS，见 [本地集成记录](release.md) |
+ | 功能分支状态 | G1–G8 已逐项本地合入；当前修复候选 31 个机器边界 active、0 pending/partial，下表保留计划名称 |
+-| 交付状态 | 第二轮五项 P2 已修复，架构 204/204 PASS；完整 release-check PASS（8978 单测通过、68/68 集成脚本通过）。修复尚未提交，真实产品与平台人工验收及正式发布未完成，见 [修复报告](reviews/2026-09-21-release-r2-repair/repair.md) |
++| 交付状态 | 第三轮五项 P2 及相邻工厂返回别名已修复，架构 237/237 PASS；完整 release-check 在 1700 个冻结输入上重跑 PASS（9011 项单测通过、4 项 Windows 条件跳过、68/68 集成脚本通过）。修复尚未提交，真实产品与平台人工验收及正式发布未完成，见 [修复报告](reviews/2026-09-22-release-r3-repair/repair.md) |
+ | 独立审查修订 | R1–R9 及 G8 历史损坏配置恢复建议均在设计层关闭，无已知待修必改项；处置、验收映射和三轮依据见 [修订记录](review-response.md)，独立报告保持原状 |
+ | 依据 | [模块耦合审查](../architecture-coupling/2026-09-20/review.md)及该目录的静态扫描、局部探针证据 |
+ | 格式参考 | [v3.2.9 按行拆分 Spec](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/spec.md)、[TechDoc](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/techdoc.md)的元数据、行为合同、分阶段实施和验收结构 |
+--- a/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md
++++ b/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md
+@@ -2,7 +2,11 @@
+ 
+ 本文件是本功能唯一切片索引。设计合同：[Spec](spec.md)、[TechDoc](techdoc.md)；切片完成标准见[总索引 §6.2–§6.4](../../README.md#slice-completion)。设计审查通过不代表以下实现已验证。
+ 
+-## 最新状态：2026-09-21—22 release 第二轮审查修复
++## 最新状态：2026-09-22 release 第三轮审查修复
++
++RR3-01～05 已补齐未知数组 spread 位置、嵌套对象变更、自有特殊键、真实 config.initialBillCategory 以及 G1 helper 能力转发；原探针发现的本地工厂返回对象后别名遗漏也已补齐。新增 33 项回归，架构专项 237/237 PASS，配置允许集合和例外未变化。完整 release-check 于 01:45:20–02:09:31 在 1700 个冻结输入上重跑 PASS：9011 项单测通过、4 项 Windows 条件跳过，68/68 集成脚本通过；输入及 HEAD 未漂移。证据、保守拒绝边界和剩余验收见[第三轮修复报告](../../reviews/2026-09-22-release-r3-repair/repair.md)。所有修复未提交，修复后的独立复审未执行。
++
++## 历史状态：2026-09-21—22 release 第二轮审查修复
+ 
+ RR2-01～05 已补齐静态数组回调、bound factory 参数顺序、对象别名写入、初始数据递归合同和当前 G1 内部恢复入口。新增 34 项回归；全部架构 204/204 PASS，真实配置 31 active、0 诊断/失效例外。完整 release-check 在本轮冻结的 1699 个输入上 PASS：8978 单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过。输入及 HEAD 未漂移，792 个生产目录文件保持上一轮修复状态。变更、原样探针和验收限制见[第二轮修复报告](../../reviews/2026-09-21-release-r2-repair/repair.md)。未提交，未进行本轮修复后的独立复审。
+ 
+--- a/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md
++++ b/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md
+@@ -104,6 +104,8 @@
+ release 的精确登记按 G3 实际装配补齐 modalHost、modalBridge、services、subscriptions、legacyController、differenceApi、reviewProjection 等具名参数；仍使用 `allowedApiFields` 的逐键历史强度比较。准确 Preload namespace 的方法集合、命名工厂返回、显式参数转发、静态对象 spread 和单领域面板别名由 AST 解析，整对象、未解释能力、对象被修改 helper 接管、global provider 重复赋值失败关闭。支持形式、保守拒绝形式及真实 VM 反例见 [Renderer 对齐说明](../../reviews/2026-09-21-release-repair/renderer-policy/mapping.md)。
+ 
+ 第二轮 release 审查补齐 RR2-01～05：调用闭包选择静态数组/解构回调，Renderer 工厂保留多层 bind 的前置参数，以同文件对象 AST 身份核验别名变更并按顺序解释 spread；initialInfo / initialBillCategory 递归限制为纯数据或明确的 app:get-info IPC 数据。G1 内部恢复能力按当前函数绑定登记，合法链路逐调用指纹许可。具体支持与保守拒绝边界以 [architecture README](../../../../architecture/README.md#覆盖与验证边界) 为准，回归和验证见 [RR2 修复报告](../../reviews/2026-09-21-release-r2-repair/repair.md)。这是现有防倒退合同的检查器修正，不改变业务恢复、金额、匹配或导出合同。
++
++第三轮 RR3-01～05 继续修正同一合同：未知长度数组 spread 不再伪造后续索引，嵌套对象身份不因无 chain 跳过检查，属性描述字典保留特殊自有键并单独处理 prototype setter；初始分类合同落在真实 config.initialBillCategory。G1 通过实际调用闭包保存经静态容器、helper 实参/返回值及跨文件转发的最终恢复能力身份，准确授权调用仍为停止点。当前能力与保守拒绝形式见上述 architecture README；证据见 [RR3 修复报告](../../reviews/2026-09-22-release-r3-repair/repair.md)。
+ 
+ 宿主拥有 `modalRoot` 节点。扫描已知 `getElementById('modalRoot')`、`querySelector('#modalRoot')`、`elements.modalRoot` 及同作用域 const alias 的写入/append/remove/replaceChildren/innerHTML/textContent，宿主外违反。`overlay.remove()` 只在该 overlay 可追溯为宿主记录或 legacy modal 工厂返回时受规则约束，普通表格行/其他 DOM 移除不误报。难以追溯的已迁移域直接 DOM 外部移除由禁止全局 root 访问和 modal integration 测试补充，报告保留此边界。
+ 
+--- a/changes/v3.2.10/release.md
++++ b/changes/v3.2.10/release.md
+@@ -1,6 +1,20 @@
+ # v3.2.10 本地集成记录
+ 
+-当前 G1–G8 均已本地合入，HEAD 为 `9a38b96b1b8006c5851535d0c1e586bbaeb63f10`。上轮 P1 修复保留；第二轮五项 G8 P2 漏报已修复，架构专项 204/204 PASS，当前完整门禁已在冻结输入上 PASS。所有修复尚未提交，详见[第二轮修复报告](reviews/2026-09-21-release-r2-repair/repair.md)。下方既往 PASS／FAIL 保留原候选意义。
++当前 G1–G8 均已本地合入，HEAD 为 `9a38b96b1b8006c5851535d0c1e586bbaeb63f10`。前两轮修复保留；第三轮 RR3-01～05 及本地工厂返回对象的相邻别名遗漏已修复，新增 33 项回归，架构专项 237/237 PASS。当前完整门禁已在 1700 个冻结输入上重跑 PASS。所有修复尚未提交，见[第三轮修复报告](reviews/2026-09-22-release-r3-repair/repair.md)。下方历史 PASS／FAIL 保留原候选意义。
++
++## 2026-09-22 第三轮独立审查修复（未提交）
++
++RR3-01～05 的反例及本地工厂返回后的别名写入已关闭；业务生产文件和机器授权配置未变化。新增 33 项回归在修复前版本上 26 FAIL / 7 PASS，修复后全部通过。完整实际配置的原始探针分别拒绝违规路径并保留安全对照。
++
++| 验证 | 当前修复候选结果 |
++| --- | --- |
++| 完整门禁 | UNIT_TEST_CONCURRENCY=1 npm run release-check：PASS，2026-09-22 01:45:20–02:09:31（Asia/Shanghai） |
++| 架构专项 / CLI | 237/237 PASS；31 active、0 pending/partial、0 诊断、0 stale |
++| 全量单测 | 9011 PASS、0 FAIL、4 项 Windows 条件跳过（9015 total，828 suites） |
++| 全量集成 | 68/68 脚本 PASS；计数用例 2901/2901，另 1 个脚本无用例计数 |
++| 输入与保护 | 1700 个门禁输入、HEAD 未漂移；792 个 src/、135 个原审查/修复证据、主工作区 865 个 dirty 文件保持 |
++
++[完整证据与修复边界](reviews/2026-09-22-release-r3-repair/repair.md)、[验证汇总](reviews/2026-09-22-release-r3-repair/verification.json)、[本轮增量](reviews/2026-09-22-release-r3-repair/incremental.patch)。本轮为修复自检，尚未独立复审；真实产品 Main、Windows/安装包、Excel/WPS 和资金人工验收未执行。没有提交、推送或正式发布。
+ 
+ ## 2026-09-21—22 第二轮独立审查修复（未提交）
+ 
+--- a/rules/integration-test-policy.md
++++ b/rules/integration-test-policy.md
+@@ -125,80 +125,80 @@
+ 
+ ## 七、当前集成测试清单（自动同步）
+ 
+-<!-- auto-generated by scripts/integration-runner.js, last-updated: 2026-09-22T00:19:11+08:00 -->
++<!-- auto-generated by scripts/integration-runner.js, last-updated: 2026-09-22T02:09:27+08:00 -->
+ <!-- DO NOT EDIT MANUALLY — modify scripts/integration/*.js then re-run `npm run test:integration` -->
+ 
+ | 脚本 | 用例数 | 断言数 | 耗时 (ms) |
+ |---|---|---|---|
+-| `acquiring-bill-currency-idle-cleanup.js` | 38 | 38 | 880 |
+-| `acquiring-bill-currency-n4-migration.js` | 128 | 128 | 557 |
+-| `acquiring-engine-migration.js` | 45 | 45 | 4768 |
+-| `acquiring-index-slim-v2.js` | 22 | 22 | 202 |
+-| `acquiring-side-db-parity.js` | 19 | 19 | 583 |
+-| `acquiring-worker-boundary.js` | 14 | 14 | 556 |
+-| `application-recovery-governance.js` | 4 | 4 | 773 |
+-| `archive-biz-op-auto-report-retention.js` | 6 | 6 | 7300 |
+-| `archive-center-module-retention.js` | 11 | 11 | 1510 |
+-| `archive-center-permanent-delete.js` | 52 | 52 | 30190 |
+-| `background-execution-pure-compute-canary.js` | 9 | 9 | 106 |
+-| `background-execution-recovery-canary.js` | 9 | 9 | 113 |
+-| `background-execution-recovery-control.js` | 27 | 27 | 285 |
+-| `bank-bu-background-dual-parser.js` | 9 | 9 | 256 |
+-| `bank-bu-background-single-jobs.js` | 21 | 21 | 502 |
+-| `bank-bu-recon-side-db-parity.js` | 17 | 17 | 316 |
+-| `bank-statement-hit-scenario-report.js` | 49 | 49 | 209 |
+-| `bank-statement-many-to-many-review-sheet.js` | 33 | 33 | 206 |
+-| `bank-statement-universal-import-routing.js` | 20 | 20 | 285 |
+-| `big-table-import-engine.js` | 19 | 19 | 7467 |
+-| `biz-op-auto-error-report.js` | 12 | 12 | 10036 |
+-| `biz-op-query-boundary.js` | 9 | 9 | 7706 |
+-| `biz-op-recon-side-db-parity.js` | 16 | 16 | 352 |
+-| `bizop-flow-engine-migration.js` | 73 | 73 | 5166 |
+-| `dark-mode-schedule-settings.js` | 6 | 6 | 207 |
+-| `duplicate-inbound-match-end-to-end.js` | 31 | 31 | 359 |
+-| `execution-descriptor-governance.js` | 4 | 4 | 873 |
+-| `fund-transfer-recon-account-mapping.js` | 19 | 19 | 194 |
+-| `gateway-channel-filter-equivalence.js` | 23 | 23 | 204 |
+-| `linked-fx-open7-stale-hit-e2e.js` | 27 | 27 | 192 |
+-| `linked-table-delete-by-range-tablekey.js` | 73 | 73 | 195 |
+-| `new-account-balance-statement.js` | 36 | 36 | 227 |
+-| `pending-data-reconciliation.js` | 33 | 33 | 49 |
+-| `pending-engine-migration.js` | 57 | 57 | 5072 |
+-| `pending-removal-reconcile.js` | 62 | 62 | 199 |
+-| `position-reconciliation-side-db-parity.js` | 38 | 38 | 257 |
+-| `position-startup-task-recovery.js` | 3 | 3 | 2227 |
+-| `pre-fund-reconciliation-output-contract.js` | 15 | 15 | 264 |
+-| `pre-fund-reconciliation-side-db-parity.js` | 69 | 69 | 318 |
+-| `refund-backfill-yellow-fill-e2e.js` | 258 | 258 | 197 |
+-| `renderer-lifecycle.js` | 233 | 233 | 20315 |
+-| `shared-xlsx-boundary.js` | 51 | 51 | 3223 |
+-| `statement-generation-pipeline.js` | 45 | 45 | 265 |
+-| `task-adapter-recovery.js` | 4 | 4 | 537 |
+-| `toolbox-large-file-stream.js` | 50 | 50 | 132574 |
+-| `toolbox-large-split-multi-sheet.js` | 31 | 31 | 72543 |
+-| `toolbox-multi-sheet-merge.js` | 16 | 16 | 14727 |
+-| `toolbox-multi-split-roundtrip.js` | 17 | 17 | 520 |
+-| `toolbox-roundtrip.js` | 30 | 30 | 173 |
+-| `toolbox-row-split-admission.js` | 2 | 2 | 825 |
+-| `toolbox-row-split-archive-delete.js` | 2 | 2 | 1046 |
+-| `v2.1.10-a3-phase1.js` | 40 | 40 | 2774 |
+-| `v2.1.10-a3-phase2.js` | 56 | 56 | 1998 |
+-| `v2.1.10-a4-phase3.js` | 75 | 75 | 14596 |
+-| `v2.1.10-n4-cont-1-phase4.js` | 33 | 33 | 832 |
+-| `v2.1.10-n4-cont-2-phase5.js` | 43 | 43 | 542 |
+-| `v2.1.12-beta-multiworker-nested.js` | - | - | 2830 |
+-| `v2.1.9-n5-end-to-end.js` | 68 | 68 | 231 |
+-| `v2.1.9-n5-migration.js` | 67 | 67 | 216 |
+-| `v2.1.9-sr-fix-1-coverage.js` | 148 | 148 | 256 |
+-| `v2.1.9-sr-log-1.js` | 33 | 33 | 150 |
+-| `v3.0.0-linked-streaming-import.js` | 19 | 19 | 227 |
+-| `v3.0.1-linked-gateway-upsert.js` | 40 | 40 | 242 |
+-| `v3.0.4-boc-dispatch-order-fix.js` | 31 | 31 | 271 |
+-| `vcc-financial-op-adjustment-archive-chain.js` | 226 | 226 | 1257 |
+-| `vcc-financial-op-destructive-state-chain.js` | 77 | 77 | 1484 |
+-| `vcc-financial-op-effective-result.js` | 19 | 19 | 138 |
+-| `vcc-financial-op-historical-template-export.js` | 29 | 29 | 1062 |
+-| **合计** | **2901** | **2901** | **367212** |
++| `acquiring-bill-currency-idle-cleanup.js` | 38 | 38 | 938 |
++| `acquiring-bill-currency-n4-migration.js` | 128 | 128 | 593 |
++| `acquiring-engine-migration.js` | 45 | 45 | 4966 |
++| `acquiring-index-slim-v2.js` | 22 | 22 | 213 |
++| `acquiring-side-db-parity.js` | 19 | 19 | 599 |
++| `acquiring-worker-boundary.js` | 14 | 14 | 563 |
++| `application-recovery-governance.js` | 4 | 4 | 782 |
++| `archive-biz-op-auto-report-retention.js` | 6 | 6 | 7509 |
++| `archive-center-module-retention.js` | 11 | 11 | 1569 |
++| `archive-center-permanent-delete.js` | 52 | 52 | 31277 |
++| `background-execution-pure-compute-canary.js` | 9 | 9 | 107 |
++| `background-execution-recovery-canary.js` | 9 | 9 | 119 |
++| `background-execution-recovery-control.js` | 27 | 27 | 298 |
++| `bank-bu-background-dual-parser.js` | 9 | 9 | 257 |
++| `bank-bu-background-single-jobs.js` | 21 | 21 | 520 |
++| `bank-bu-recon-side-db-parity.js` | 17 | 17 | 327 |
++| `bank-statement-hit-scenario-report.js` | 49 | 49 | 217 |
++| `bank-statement-many-to-many-review-sheet.js` | 33 | 33 | 211 |
++| `bank-statement-universal-import-routing.js` | 20 | 20 | 297 |
++| `big-table-import-engine.js` | 19 | 19 | 7607 |
++| `biz-op-auto-error-report.js` | 12 | 12 | 10402 |
++| `biz-op-query-boundary.js` | 9 | 9 | 7714 |
++| `biz-op-recon-side-db-parity.js` | 16 | 16 | 351 |
++| `bizop-flow-engine-migration.js` | 73 | 73 | 5304 |
++| `dark-mode-schedule-settings.js` | 6 | 6 | 216 |
++| `duplicate-inbound-match-end-to-end.js` | 31 | 31 | 376 |
++| `execution-descriptor-governance.js` | 4 | 4 | 922 |
++| `fund-transfer-recon-account-mapping.js` | 19 | 19 | 205 |
++| `gateway-channel-filter-equivalence.js` | 23 | 23 | 211 |
++| `linked-fx-open7-stale-hit-e2e.js` | 27 | 27 | 203 |
++| `linked-table-delete-by-range-tablekey.js` | 73 | 73 | 206 |
++| `new-account-balance-statement.js` | 36 | 36 | 249 |
++| `pending-data-reconciliation.js` | 33 | 33 | 53 |
++| `pending-engine-migration.js` | 57 | 57 | 5257 |
++| `pending-removal-reconcile.js` | 62 | 62 | 204 |
++| `position-reconciliation-side-db-parity.js` | 38 | 38 | 264 |
++| `position-startup-task-recovery.js` | 3 | 3 | 2351 |
++| `pre-fund-reconciliation-output-contract.js` | 15 | 15 | 277 |
++| `pre-fund-reconciliation-side-db-parity.js` | 69 | 69 | 329 |
++| `refund-backfill-yellow-fill-e2e.js` | 258 | 258 | 203 |
++| `renderer-lifecycle.js` | 233 | 233 | 20865 |
++| `shared-xlsx-boundary.js` | 51 | 51 | 3285 |
++| `statement-generation-pipeline.js` | 45 | 45 | 276 |
++| `task-adapter-recovery.js` | 4 | 4 | 557 |
++| `toolbox-large-file-stream.js` | 50 | 50 | 139533 |
++| `toolbox-large-split-multi-sheet.js` | 31 | 31 | 256824 |
++| `toolbox-multi-sheet-merge.js` | 16 | 16 | 14742 |
++| `toolbox-multi-split-roundtrip.js` | 17 | 17 | 532 |
++| `toolbox-roundtrip.js` | 30 | 30 | 183 |
++| `toolbox-row-split-admission.js` | 2 | 2 | 870 |
++| `toolbox-row-split-archive-delete.js` | 2 | 2 | 1073 |
++| `v2.1.10-a3-phase1.js` | 40 | 40 | 2896 |
++| `v2.1.10-a3-phase2.js` | 56 | 56 | 2092 |
++| `v2.1.10-a4-phase3.js` | 75 | 75 | 15041 |
++| `v2.1.10-n4-cont-1-phase4.js` | 33 | 33 | 926 |
++| `v2.1.10-n4-cont-2-phase5.js` | 43 | 43 | 614 |
++| `v2.1.12-beta-multiworker-nested.js` | - | - | 2860 |
++| `v2.1.9-n5-end-to-end.js` | 68 | 68 | 238 |
++| `v2.1.9-n5-migration.js` | 67 | 67 | 235 |
++| `v2.1.9-sr-fix-1-coverage.js` | 148 | 148 | 264 |
++| `v2.1.9-sr-log-1.js` | 33 | 33 | 208 |
++| `v3.0.0-linked-streaming-import.js` | 19 | 19 | 266 |
++| `v3.0.1-linked-gateway-upsert.js` | 40 | 40 | 261 |
++| `v3.0.4-boc-dispatch-order-fix.js` | 31 | 31 | 290 |
++| `vcc-financial-op-adjustment-archive-chain.js` | 226 | 226 | 1293 |
++| `vcc-financial-op-destructive-state-chain.js` | 77 | 77 | 1491 |
++| `vcc-financial-op-effective-result.js` | 19 | 19 | 139 |
++| `vcc-financial-op-historical-template-export.js` | 29 | 29 | 1078 |
++| **合计** | **2901** | **2901** | **563198** |
+ 
+ > 同步策略：runner 末尾全 PASS 时 in-place 替换本章节；任一脚本 FAIL → 本章节不更新（避免被损坏数据覆盖）。
+ 
+--- a/scripts/architecture/contracts.js
++++ b/scripts/architecture/contracts.js
+@@ -149,7 +149,7 @@
+     : (site.functionPath ?? null) === scope.functionPath);
+   function exportValue(analysis) {
+     if (exportsCache.has(analysis.from)) return exportsCache.get(analysis.from);
+-    let value = { kind: 'object', properties: {}, spreads: [] };
++    let value = { kind: 'object', properties: Object.create(null), spreads: [] };
+     for (const node of analysis.nodes) {
+       if (analysis.functionPath(node) !== null) continue;
+       if (node.type === 'AssignmentExpression' && node.operator === '=') {
+@@ -157,7 +157,7 @@
+         if (!target.rootFree) continue;
+         if (chain.join('.') === 'module.exports') value = analysis.describe(node.right);
+         else if ((chain[0] === 'exports' && chain.length === 2) || (chain[0] === 'module' && chain[1] === 'exports' && chain.length === 3)) {
+-          if (value.kind !== 'object') value = { kind: 'object', properties: {}, spreads: [value] };
++          if (value.kind !== 'object') value = { kind: 'object', properties: Object.create(null), spreads: [value] };
+           value.properties[chain.at(-1)] = analysis.describe(node.right);
+         }
+       }
+@@ -236,6 +236,7 @@
+     }
+     if (value.kind === 'array') {
+       if (!members.length || !/^(0|[1-9][0-9]*)$/.test(members[0])) return [];
++      if (value.opaque) { coverage.unresolvedArray = true; return []; }
+       const targets = resolve(value.elements[Number(members[0])], analysis, members.slice(1), next, coverage);
+       // 只有被当作函数调用的数组元素需要能力证明；数据元素上的原生方法另按既有规则解释。
+       if (!targets.length && members.length === 1) coverage.unresolvedArray = true;
+@@ -300,7 +301,7 @@
+   const unresolvedCalls = reachedSites.filter(site => {
+     if (!['call', 'new'].includes(site.type)) return false;
+     const coverage = {}; calledTargets(site, coverage);
+-    return coverage.unresolvedArray || (site.dynamicCallee &&
++    return coverage.unresolvedArray || site.args?.some(arg => arg.reason === 'opaque-apply-arguments') || (site.dynamicCallee &&
+       valueCandidates(site.reference).some(value => value.reason === 'computed-member' && value.property === undefined &&
+         constantKeys(value.propertyValue, scan.analyses.get(site.from)).includes(null)));
+   });
+--- a/scripts/architecture/renderer-contracts.js
++++ b/scripts/architecture/renderer-contracts.js
+@@ -11,9 +11,25 @@
+   const unknown = reason => ({ kind: 'unknown', reason });
+   const pathOf = value => value?.chain || [];
+   const directName = node => node?.type === 'MemberExpression' && !node.computed ? node.property.name : null;
+-  const sameObject = (actual, value) => {
++  const functionReturns = new WeakMap();
++  const returnedValues = (callee, analysis) => {
++    if (!functionReturns.has(analysis)) functionReturns.set(analysis, new Map());
++    const cache = functionReturns.get(analysis); const key = callee.functionStart ?? callee.functionPath;
++    if (cache.has(key)) return cache.get(key);
++    const fn = analysis.functionNodesByStart.get(callee.functionStart) || analysis.functionNodes.get(callee.functionPath);
++    const returns = !fn ? [] : fn.body.type !== 'BlockStatement' ? [fn.body] : analysis.nodes.filter(node =>
++      node.type === 'ReturnStatement' && node.start >= fn.start && node.end <= fn.end &&
++      analysis.functionPath(node) === callee.functionPath).map(node => node.argument);
++    const values = returns.map(node => analysis.describe(node)); cache.set(key, values); return values;
++  };
++  const sameObject = (actual, value, analysis, seen = new Set()) => {
++    if (!actual || seen.has(actual)) return false;
++    const next = new Set([...seen, actual]);
+     if (value.objectStart !== undefined && actual?.objectStart === value.objectStart) return true;
+-    if ((actual?.alternatives || actual?.values || []).some(item => sameObject(item, value))) return true;
++    if ((actual.alternatives || actual.values || []).some(item => sameObject(item, value, analysis, next))) return true;
++    if (actual.kind === 'call-result' && actual.callee.functionPath) {
++      if (returnedValues(actual.callee, analysis).some(item => sameObject(item, value, analysis, next))) return true;
++    }
+     return value.objectStart === undefined && value.chain?.length &&
+       actual?.chain?.join('.') === value.chain.join('.') && actual.bindingFunctionPath === value.bindingFunctionPath;
+   };
+@@ -59,9 +75,9 @@
+         ? { ...target, boundArgs: [...(target.boundArgs || []), ...value.args.map(item => recurse(item))] }
+         : unknown('unresolved-bound-function');
+     }
+-    if (value.kind === 'array') return { ...value, elements: value.elements.map(item => recurse(item)) };
++    if (value.kind === 'array') return value.opaque ? unknown(value.reason) : { ...value, elements: value.elements.map(item => recurse(item)) };
+     if (value.kind === 'object') {
+-      const properties = {};
++      const properties = Object.create(null);
+       // 重新解释原始顺序，避免通用扫描器展开 spread 时丢失来源身份或覆盖顺序。
+       const literal = objectNodes.get(analysis.from)?.get(value.objectStart);
+       if (literal) {
+@@ -74,6 +90,11 @@
+             const key = property.computed ? recurse(analysis.describe(property.key))
+               : { kind: 'literal', value: property.key.name ?? property.key.value };
+             if (key.kind !== 'literal' || property.kind !== 'init') return unknown('computed-or-accessor');
++            if (!property.computed && !property.method && !property.shorthand && key.value === '__proto__') {
++              const prototype = recurse(analysis.describe(property.value));
++              if (prototype.kind !== 'literal' || prototype.value !== null) return unknown('object-prototype-setter');
++              continue;
++            }
+             properties[key.value] = recurse(analysis.describe(property.value));
+           }
+         }
+@@ -86,20 +107,22 @@
+         for (const [key, member] of Object.entries(value.properties)) properties[key] = recurse(member);
+       }
+       // 向未知 helper 传出能力对象可能改变其成员；不执行或猜测这些写入。
+-      if (value.chain?.length) for (const node of analysis.nodes) {
++      if (value.objectStart !== undefined || value.chain?.length) for (const node of analysis.nodes) {
+         if (node.type !== 'CallExpression') continue;
+         const escaped = node.arguments.some(argument => {
++          // 字面量在此创建并交给调用方；之后经成员/别名传出的同一对象仍须检查。
++          if (argument.type === 'ObjectExpression' && argument.start === value.objectStart) return false;
+           const actual = analysis.describe(argument);
+-          return sameObject(actual, value);
++          return sameObject(actual, value, analysis);
+         });
+         const callee = analysis.describe(node.callee);
+         if (escaped && !(callee.rootFree && ['Object.freeze', 'Object.seal', 'Object.keys', 'Object.values', 'Object.entries'].includes(pathOf(callee).join('.')))) return unknown('escaped-renderer-object');
+       }
+       // 对象声明后的静态写入属于同一能力集合，不能只看初始字面量。
+-      if (value.chain?.length) for (const node of analysis.nodes) {
++      if (value.objectStart !== undefined || value.chain?.length) for (const node of analysis.nodes) {
+         if (node.type !== 'AssignmentExpression' || node.left.type !== 'MemberExpression') continue;
+         const base = analysis.describe(node.left.object);
+-        if (!sameObject(base, value)) continue;
++        if (!sameObject(base, value, analysis)) continue;
+         let keys = !node.left.computed ? [{ kind: 'literal', value: node.left.property.name }] : [recurse(analysis.describe(node.left.property))];
+         if (keys.some(key => key.kind !== 'literal')) {
+           const keyReference = analysis.describe(node.left.property);
+@@ -198,7 +221,7 @@
+ function rendererDataLiteral(value, ipcChannel = null) {
+   const data = item => rendererDataLiteral(item, ipcChannel);
+   return value?.kind === 'literal' || (ipcChannel !== null && value?.kind === 'ipc-data' && value.channel === ipcChannel) ||
+-    (value?.kind === 'array' && value.elements.every(data)) || (value?.kind === 'object' && Object.values(value.properties).every(data));
++    (value?.kind === 'array' && !value.opaque && value.elements.every(data)) || (value?.kind === 'object' && !value.opaque && Object.values(value.properties).every(data));
+ }
+ 
+ module.exports = { createRendererContracts, rendererDataLiteral };
+--- a/scripts/architecture/rules.js
++++ b/scripts/architecture/rules.js
+@@ -244,6 +244,18 @@
+           { from: api.path }, `受限恢复操作 ${operation} 的配置绑定无法完整解释`);
+         return { path: api.path, operation, targets: origins?.targets || [], hasBinding: Boolean(binding) };
+       }));
++      const reached = executionScopes(scan, boundary.protectedScopes, {
++        skipSite: site => siteAllowed(boundary, 'ARCH-PUBLICATION-RECOVERY-ENTRY', site)
++      });
++      for (const site of reached.unresolvedCalls) if (!siteAllowed(boundary, 'ARCH-PUBLICATION-RECOVERY-ENTRY', site))
++        emit('ARCH-STATIC-COVERAGE', boundary, site, '受保护恢复 helper 的执行目标或实参无法完整解释');
++      for (const site of reached.sites.filter(s => ['call', 'new'].includes(s.type))) {
++        if (siteAllowed(boundary, 'ARCH-PUBLICATION-RECOVERY-ENTRY', site)) continue;
++        const targets = reached.calledTargets(site);
++        if (targets.some(target => target.node && localOperations.some(api => api.targets.includes(
++          JSON.stringify(['local', target.analysis.from, target.node.start])))))
++          emit('ARCH-PUBLICATION-RECOVERY-ENTRY', boundary, site, '受保护 prepare/worker 经静态容器或 helper 执行了受限恢复能力');
++      }
+       // 恢复命令随真实 worker 合同登记；旧命令与新授权命令均不能从旁路发起。
+       const recoveryOperations = new Set(['recover', ...boundary.restrictedApis.flatMap(api => api.operations)]);
+       for (const edge of edges) {
+@@ -344,6 +356,10 @@
+                 const field = prefix ? `${prefix}.${key}` : key;
+                 if (allowed.some(method => method.startsWith(`${field}.`))) inspect(member, field);
+                 else if (!allowed.includes(field)) emit('ARCH-RENDERER-SCOPE', boundary, site, `scoped ${name} 未授权字段 ${field}`);
++                else if (name === 'config' && field === 'initialBillCategory') {
++                  if (!rendererDataLiteral(member, 'app:get-info')) emit('ARCH-RENDERER-SCOPE', boundary, site,
++                    '工厂字段 config.initialBillCategory 必须是递归纯数据或明确的 app:get-info IPC 数据');
++                }
+                 else if (!['function', 'native-function', 'literal'].includes(member.kind) && !rendererDataLiteral(member) && !(name === 'config' && member.kind === 'ipc-data') && !(member.kind === 'reference' && member.rootFree &&
+                   ((['window', 'globalThis'].includes(member.chain?.[0]) && member.chain[1] === 'desktopApi' && member.chain.length >= field.split('.').length + 2) ||
+                     (member.chain?.[0] === 'desktopApi' && member.chain.length >= field.split('.').length + 1)) &&
+--- a/scripts/architecture/scan.js
++++ b/scripts/architecture/scan.js
+@@ -320,7 +320,7 @@
+       return { kind: 'unknown', reason: 'member-base', object, property: key };
+     }
+     if (node.type === 'ObjectExpression') {
+-      const properties = {};
++      const properties = Object.create(null);
+       const spreads = [];
+       for (const property of node.properties) {
+         if (property.type === 'SpreadElement') {
+@@ -331,15 +331,26 @@
+       }
+         const key = property.computed ? describe(property.key, seen) : { kind: 'literal', value: propertyName(property.key) };
+         if (key.kind !== 'literal' || property.kind !== 'init') { spreads.push(unknown('computed-or-accessor')); continue; }
++        if (!property.computed && !property.method && !property.shorthand && key.value === '__proto__') {
++          const prototype = describe(property.value, seen);
++          if (prototype.kind !== 'literal' || prototype.value !== null) spreads.push(unknown('object-prototype-setter'));
++          continue;
++        }
+         properties[key.value] = describe(property.value, seen);
+       }
+       return { kind: 'object', properties, spreads, objectStart: node.start };
+     }
+-    if (node.type === 'ArrayExpression') return { kind: 'array', elements: node.elements.flatMap(item => {
+-      if (item?.type !== 'SpreadElement') return [describe(item, seen)];
+-      const source = describe(item.argument, seen);
+-      return source.kind === 'array' ? source.elements : [unknown('opaque-array-spread')];
+-    }) };
++    if (node.type === 'ArrayExpression') {
++      const elements = [];
++      for (const item of node.elements) {
++        if (item?.type !== 'SpreadElement') { elements.push(describe(item, seen)); continue; }
++        const source = describe(item.argument, seen);
++        // 长度未知会改变后续所有索引；不能用单个 unknown 槽位代替。
++        if (source.kind !== 'array' || source.opaque) return { kind: 'array', elements: [], opaque: true, reason: 'opaque-array-spread' };
++        elements.push(...source.elements);
++      }
++      return { kind: 'array', elements };
++    }
+     if (FUNCTION_TYPES.has(node.type)) return { kind: 'function', functionPath: functions.get(node), functionStart: node.start };
+     if (node.type === 'ClassDeclaration' || node.type === 'ClassExpression') return { kind: 'class', classStart: node.start };
+     if (node.type === 'MetaProperty' && node.meta.name === 'import' && node.property.name === 'meta') {
+@@ -565,7 +576,7 @@
+         const indirect = ['call', 'apply'].includes(syntaxMethod);
+         const target = indirect ? describe(node.callee.object) : callee;
+         const effectiveArgs = !indirect ? args : syntaxMethod === 'call' ? args.slice(1) :
+-          args[1]?.kind === 'array' ? args[1].elements : [{ kind: 'unknown', reason: 'opaque-apply-arguments' }];
++          args[1]?.kind === 'array' && !args[1].opaque ? args[1].elements : [{ kind: 'unknown', reason: 'opaque-apply-arguments' }];
+         if (indirect || callee.kind === 'bound-function' || (callee.values || callee.alternatives || []).some(value => value.kind === 'bound-function')) {
+           call.invocations = callTargets(target, effectiveArgs, indirect ? null : call.method).map(invocation => ({ ...invocation,
+             chain: invocation.reference.chain || [], callee: (invocation.reference.chain || []).join('.'),
+--- /dev/null
++++ b/tests/unit/architecture/release-rereview-r3.test.js
+@@ -0,0 +1,142 @@
++'use strict';
++const assert = require('node:assert/strict');
++const test = require('node:test');
++const fs = require('node:fs');
++const os = require('node:os');
++const path = require('node:path');
++const vm = require('node:vm');
++const { DatabaseSync } = require('node:sqlite');
++const { scan } = require('../../../scripts/architecture/scan');
++const { evaluateRules } = require('../../../scripts/architecture/rules');
++const actual = require('../../../architecture/boundaries.json');
++function boundary(rule, extra = {}) {
++  return { id: 'rereview-r3', governance: 'G8', owner: 'fixture', state: 'pending', rules: [rule], entrypoints: [],
++    allowedLocal: [], allowedExternal: [], requiredConsumers: [], activationEvidence: [], protectedScopes: [],
++    restrictedApis: [], allowedSites: [], compositionEntrypoints: [], globals: [], factory: null, allowedApiFields: {},
++    deprecatedEntrypoints: [], directory: null, ...extra };
++}
++function fixture(t, files, b) {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'g8-rereview-r3-'));
++  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
++  for (const [name, source] of Object.entries(files)) {
++    fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true }); fs.writeFileSync(path.join(root, name), source);
++  }
++  const config = { schemaVersion: 1, factBaseline: '1'.repeat(40), bootstrap: { factBaseline: '1'.repeat(40), mode: 'first-introduction' },
++    boundaries: [b], generatedModules: [], dynamicLoads: [], policyChanges: [] };
++  return evaluateRules(scan(root, config), config, { schemaVersion: 1, factBaseline: config.factBaseline, exceptions: [] }, { root });
++}
++const clean = result => assert.deepEqual(result.violations, []);
++const denied = result => assert.ok(result.violations.some(v => ['ARCH-STATIC-COVERAGE', 'ARCH-RENDERER-SCOPE',
++  'ARCH-BIZOP-QUERY', 'ARCH-PUBLICATION-RECOVERY-ENTRY'].includes(v.rule)), JSON.stringify(result.violations));
++const queryBoundary = boundary('ARCH-BIZOP-QUERY', { protectedScopes: [{ path: 'src/read.js', functionPath: null }] });
++function query(t, body) {
++  return fixture(t, { 'src/read.js': "const h=require('./helper');exports.read=c=>h.read(c);",
++    'src/helper.js': "const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];" + body }, queryBoundary);
++}
++const spreadCases = [
++  ['parameter', 'function invoke(values,c){const handlers=[...values,safe];return handlers[1](c);}exports.read=c=>invoke([safe,query],c);'],
++  ['factory', 'function get(){return [safe,query];}const handlers=[...get(),safe];exports.read=c=>handlers[1](c);'],
++  ['nested spread', 'function invoke(values,c){const first=[...values];const handlers=[...first,safe];return handlers[1](c);}exports.read=c=>invoke([safe,query],c);'],
++  ['destructured', 'function invoke(values,c){const [,run]=[...values,safe];return run(c);}exports.read=c=>invoke([safe,query],c);'],
++  ['apply argument spread', 'function invoke(fn,c){return fn(c);}function run(values,c){return invoke.apply(null,[...values,safe,c]);}exports.read=c=>run([query,c],c);']
++];
++for (const [name, body] of spreadCases) test(`RR3-01 ${name} 不得将未知 spread 长度当作一个槽位`, t => {
++  const db = new DatabaseSync(':memory:'); t.after(() => db.close());
++  const exports = {}; vm.runInNewContext("const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];" + body, { exports });
++  assert.equal(exports.read({ db })[0].value, 1); denied(query(t, body));
++});
++test('RR3-01 完全静态数组保留正确位置，安全与危险选择分别判断', t => {
++  clean(query(t, 'const handlers=[...[query,safe],query];exports.read=c=>handlers[1](c);'));
++  denied(query(t, 'const handlers=[...[safe,query],safe];exports.read=c=>handlers[1](c);'));
++});
++
++const rendererBoundary = id => ({ ...actual.boundaries.find(b => b.id === id), state: 'pending' });
++const bank = rendererBoundary('renderer-bank-statement');
++const statement = rendererBoundary('renderer-statement');
++const recon = rendererBoundary('renderer-recon-id-fix');
++const mountBank = expression => `window.BankStatementController.createBankStatementController({api:${expression}});`;
++function renderer(t, source, b = bank) { return fixture(t, { 'src/shell.js': source }, b); }
++function received(source) {
++  let input; const accept = value => { input = value; };
++  const desktopApi = { run() {}, outsideScope() { return true; } };
++  const window = { desktopApi, BankStatementController: { createBankStatementController: accept },
++    StatementController: { createStatementController: accept }, ReconIdFixController: { createReconIdFixController: accept } };
++  vm.runInNewContext(source, { window }); return { input, desktopApi };
++}
++const nestedCases = [
++  ['member write', 'envelope.api.outsideScope=window.desktopApi.outsideScope;', 'envelope.api'],
++  ['alias write', 'const alias=envelope.api;alias.outsideScope=window.desktopApi.outsideScope;', 'envelope.api'],
++  ['spread', 'const alias=envelope.api;alias.outsideScope=window.desktopApi.outsideScope;', '{...envelope.api}'],
++  ['Object.assign', 'Object.assign(envelope.api,window.desktopApi);', 'envelope.api'],
++  ['helper escape', 'function mutate(api){api.outsideScope=window.desktopApi.outsideScope;}mutate(envelope.api);', 'envelope.api']
++];
++for (const [name, mutate, expression] of nestedCases) test(`RR3-02 嵌套对象 ${name} 实际带入额外方法并被拒绝`, t => {
++  const source = 'const envelope={api:{run(){}}};' + mutate + mountBank(expression);
++  assert.equal(received(source).input.api.outsideScope(), true); denied(renderer(t, source));
++});
++test('RR3-02 新建工厂输入、无变更嵌套对象和纯观察调用保持合法', t => {
++  for (const source of [mountBank('{run(){}}'), 'const envelope={api:{run(){}}};' + mountBank('envelope.api'),
++    'const envelope={api:{run(){}}};Object.freeze(envelope.api);Object.keys(envelope.api);' + mountBank('{...envelope.api}')]) clean(renderer(t, source));
++});
++test('RR3-02 本地工厂返回对象后的别名写入和 helper 逃逸也不能遗漏', t => {
++  for (const mutate of ['alias.outsideScope=window.desktopApi.outsideScope;', 'Object.assign(alias,window.desktopApi);']) {
++    const source = 'function provide(){return {run(){}};}const api=provide();const alias=api;' + mutate + mountBank('api');
++    assert.equal(received(source).input.api.outsideScope(), true); denied(renderer(t, source));
++  }
++  clean(renderer(t, 'function provide(){return {run(){}};}const api=provide();' + mountBank('api')));
++});
++
++for (const expression of ['{["__proto__"]:window.desktopApi}', '{nested:{["__proto__"]:window.desktopApi}}',
++  '{...{["__proto__"]:window.desktopApi}}', '{__proto__:window.desktopApi}', '{nested:{__proto__:window.desktopApi}}']) {
++  test(`RR3-03 特殊自有键或真实 prototype setter 不得隐藏能力 ${expression}`, t => {
++    const source = `window.StatementController.createStatementController({initialInfo:${expression}});`;
++    denied(renderer(t, source, statement));
++  });
++}
++test('RR3-03 computed __proto__ 在真实 VM 中为自有属性，纯数据特殊键仍合法', t => {
++  const { input, desktopApi } = received('window.StatementController.createStatementController({initialInfo:{["__proto__"]:window.desktopApi}});');
++  assert.equal(Object.hasOwn(input.initialInfo, '__proto__'), true); assert.equal(input.initialInfo.__proto__, desktopApi);
++  assert.equal(input.initialInfo.outsideScope, undefined); assert.equal(input.initialInfo.__proto__.outsideScope(), true);
++  for (const literal of ['{["__proto__"]:{name:"bank"}}', '{__proto__:null,name:"bank"}', '{constructor:"bank",toString:"text",hasOwnProperty:true}'])
++    clean(renderer(t, `window.StatementController.createStatementController({initialInfo:${literal}});`, statement));
++});
++test('RR3-03 scoped 方法集合不得吞掉名为 __proto__ 的未授权自有方法', t => {
++  denied(renderer(t, mountBank('{run(){},["__proto__"](){return true;}}')));
++});
++
++for (const value of ['()=>window.desktopApi', '{nested:()=>window.desktopApi}', 'window.desktopApi',
++  "ipcRenderer.invoke('archive-center:get-settings')", "ipcRenderer.invoke('other').reconIdFixBillCategory"]) {
++  test(`RR3-04 真实 config.initialBillCategory 拒绝非数据或非指定 IPC ${value}`, t => {
++    denied(renderer(t, `const {ipcRenderer}=require('electron');window.ReconIdFixController.createReconIdFixController({config:{initialBillCategory:${value}}});`, recon));
++  });
++}
++test('RR3-04 真实 ReconID 配置允许分类数据与 app:get-info 字段', t => {
++  for (const value of ['"business"', "ipcRenderer.invoke('app:get-info').reconIdFixBillCategory"]) {
++    clean(renderer(t, `const {ipcRenderer}=require('electron');window.ReconIdFixController.createReconIdFixController({config:{initialBillCategory:${value}}});`, recon));
++  }
++});
++
++const recovery = { ...actual.boundaries.find(b => b.id === 'publication-recovery-entry'), state: 'pending' };
++const raw = 'src/main-process/toolbox-output-publication.js';
++const recoveryCases = [
++  ['array', 'const list=[recoverOneJournal];return list[0](runtime,entry,{});'],
++  ['destructure', 'const [run]=[recoverOneJournal];return run(runtime,entry,{});'],
++  ['parameter', 'function invoke(fn,r,e){return fn(r,e,{});}return invoke(recoverOneJournal,runtime,entry);'],
++  ['identity', 'function identity(fn){return fn;}return identity(recoverOneJournal)(runtime,entry,{});'],
++  ['external helper', "const {invoke}=require('./invoke-helper');return invoke(recoverOneJournal,runtime,entry);"],
++  ['nested forwarding', "const {invoke}=require('./invoke-helper');function forward(o,r,e){return invoke(o.run,r,e);}return forward({run:recoverOneJournal},runtime,entry);"]
++];
++for (const [name, body] of recoveryCases) test(`RR3-05 受限恢复经 ${name} 仍保留能力身份`, t => {
++  const source = `function recoverOneJournal(runtime,entry){return runtime.remove(entry);}function prepareToolboxPublication(runtime,entry){${body}}module.exports={prepareToolboxPublication};`;
++  let writes = 0; const module = { exports: {} };
++  vm.runInNewContext(source, { module, require: () => ({ invoke: (fn, r, e) => fn(r, e, {}) }) });
++  module.exports.prepareToolboxPublication({ remove() { writes += 1; } }, {}); assert.equal(writes, 1);
++  denied(fixture(t, { [raw]: source, 'src/main-process/invoke-helper.js': 'exports.invoke=(fn,r,e)=>fn(r,e,{});' }, recovery));
++});
++test('RR3-05 传递但不执行的受限成员与同名普通函数不扩大成恢复调用', t => {
++  for (const body of [
++    'function choose(o){return o.safe();}return choose({restricted:recoverOneJournal,safe(){return 1;}});',
++    'function invoke(fn){return fn();}return invoke(function recoverOneJournal(){return 1;});',
++    'const list=[recoverOneJournal,()=>1];return list[1]();'
++  ]) clean(fixture(t, { [raw]: `function recoverOneJournal(){}function prepareToolboxPublication(){${body}}` }, recovery));
++});

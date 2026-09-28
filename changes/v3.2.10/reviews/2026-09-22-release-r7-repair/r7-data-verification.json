@@ -1,0 +1,32 @@
+{
+  "status": "PASS",
+  "beforeVersion": "R6 repair start: 2 modified checker files from before/ plus 3 unchanged current checker files; all 5 manifest-verified",
+  "rendererCases": 20,
+  "queryCases": 18,
+  "versionsPerCase": 2,
+  "unchangedExpectedOutcomes": 35,
+  "correctedFalsePositives": [
+    {
+      "name": "local-return-data",
+      "beforeViolations": 1,
+      "currentViolations": 0
+    },
+    {
+      "name": "local-return-unreached-call",
+      "beforeViolations": 1,
+      "currentViolations": 0
+    },
+    {
+      "name": "projected-return-unreached-call",
+      "beforeViolations": 1,
+      "currentViolations": 0
+    }
+  ],
+  "actualInMemoryQueries": 10,
+  "scannerJsonBeforeCurrentEqual": true,
+  "repeatedScanJsonEqual": true,
+  "scannerUnchangedAfterRules": true,
+  "siteEvidenceIdsUnchanged": true,
+  "policyFilesUnchanged": true,
+  "scope": "small fixtures only; no full scan or source writes"
+}

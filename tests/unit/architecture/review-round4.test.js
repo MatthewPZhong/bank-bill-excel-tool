@@ -18,6 +18,8 @@ function fixture(t, source, configure = () => {}, file = 'src/main.js', extraFil
     fs.mkdirSync(path.dirname(path.join(root,name)), {recursive:true});fs.writeFileSync(path.join(root,name),text);
   }
   const boundary=structuredClone(policy.boundaries.find(b=>b.id==='business-task-adapters'));
+  // 最小调用图 fixture 仍执行规则，不继承真实 release 的整套入口激活证据。
+  boundary.state='pending';
   const config={...policy,boundaries:[boundary],generatedModules:[],dynamicLoads:[],policyChanges:[]};
   configure(boundary);
   const scanned=scan(root,config);

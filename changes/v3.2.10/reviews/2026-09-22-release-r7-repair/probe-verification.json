@@ -1,0 +1,55 @@
+{
+  "result": "PASS",
+  "rendererBoundaries": 20,
+  "realConfigCases": 2,
+  "neighborCasesClosedOrLegal": 7,
+  "remainingObservations": [
+    {
+      "name": "array-replaced-element",
+      "status": "OPEN_OBSERVATION",
+      "runtimeExtraCallable": true,
+      "diagnostics": 0
+    }
+  ],
+  "shared": {
+    "status": "PASS",
+    "beforeVersion": "R6 repair start: 2 modified checker files from before/ plus 3 unchanged current checker files; all 5 manifest-verified",
+    "rendererCases": 20,
+    "queryCases": 18,
+    "versionsPerCase": 2,
+    "unchangedExpectedOutcomes": 35,
+    "correctedFalsePositives": [
+      {
+        "name": "local-return-data",
+        "beforeViolations": 1,
+        "currentViolations": 0
+      },
+      {
+        "name": "local-return-unreached-call",
+        "beforeViolations": 1,
+        "currentViolations": 0
+      },
+      {
+        "name": "projected-return-unreached-call",
+        "beforeViolations": 1,
+        "currentViolations": 0
+      }
+    ],
+    "actualInMemoryQueries": 10,
+    "scannerJsonBeforeCurrentEqual": true,
+    "repeatedScanJsonEqual": true,
+    "scannerUnchangedAfterRules": true,
+    "siteEvidenceIdsUnchanged": true,
+    "policyFilesUnchanged": true,
+    "scope": "small fixtures only; no full scan or source writes"
+  },
+  "unchangedSharedCheckerAndPolicySha256": {
+    "scripts/architecture/contracts.js": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f",
+    "scripts/architecture/rules.js": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa",
+    "scripts/architecture/scan.js": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be",
+    "scripts/architecture/schema.js": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+    "architecture/boundaries.json": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+    "architecture/legacy-allowlist.json": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3"
+  },
+  "g1Evidence": "Reused R7 review static/VM probe results for unchanged G1 checker inputs; full architecture tests were rerun."
+}

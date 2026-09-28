@@ -1,0 +1,68 @@
+{
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "workdir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "policyPreservedSinceR3RepairStart": [
+    {
+      "path": "architecture/boundaries.json",
+      "before": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+      "current": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+      "same": true
+    },
+    {
+      "path": "architecture/legacy-allowlist.json",
+      "before": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3",
+      "current": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3",
+      "same": true
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "before": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "current": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "same": true
+    },
+    {
+      "path": "scripts/architecture/policy-history.js",
+      "before": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+      "current": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+      "same": true
+    }
+  ],
+  "baselineViolations": [],
+  "oldProbeComparison": [
+    {
+      "name": "old_nested_api",
+      "beforeViolations": 1,
+      "currentViolations": 1
+    },
+    {
+      "name": "prototype_computed",
+      "beforeViolations": 0,
+      "currentViolations": 1
+    },
+    {
+      "name": "prototype_literal",
+      "beforeViolations": 0,
+      "currentViolations": 1
+    },
+    {
+      "name": "category_callable",
+      "beforeViolations": 0,
+      "currentViolations": 1
+    },
+    {
+      "name": "category_other_ipc",
+      "beforeViolations": 0,
+      "currentViolations": 1
+    },
+    {
+      "name": "category_app_info",
+      "beforeViolations": 0,
+      "currentViolations": 0
+    },
+    {
+      "name": "initial_app_info",
+      "beforeViolations": 0,
+      "currentViolations": 0
+    }
+  ]
+}

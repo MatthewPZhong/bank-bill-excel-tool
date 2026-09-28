@@ -1,0 +1,43 @@
+{
+  "status": "PASS",
+  "beforeVersion": "R5 repair start: manifest-verified 5 checker files",
+  "rendererCases": 16,
+  "queryCases": 12,
+  "versionsPerCase": 2,
+  "actualInMemoryQueries": 7,
+  "scannerJsonBeforeCurrentEqual": true,
+  "repeatedScanJsonEqual": true,
+  "scannerUnchangedAfterRules": true,
+  "siteEvidenceIdsUnchanged": true,
+  "descriptorIsolation": {
+    "status": "PASS",
+    "distinctSelectedDescriptors": 4,
+    "crossAnalysisLookupAbsent": true,
+    "selectionProperties": [
+      {
+        "name": "one",
+        "property": "p",
+        "readStart": 75
+      },
+      {
+        "name": "two",
+        "property": "q",
+        "readStart": 89
+      },
+      {
+        "name": "three",
+        "property": "p",
+        "readStart": 109
+      },
+      {
+        "name": "four",
+        "property": "q",
+        "readStart": 126
+      }
+    ],
+    "forwardReverseDescriptionOrderEqual": true,
+    "descriptionDigest": "0c23f948323b55b038e7c57a2c8dacaf1d4e6478dea32a8e72019b2aa25dfd70"
+  },
+  "policyFilesUnchanged": true,
+  "scope": "small fixtures only; no full scan or source writes"
+}

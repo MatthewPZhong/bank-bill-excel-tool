@@ -1,0 +1,89 @@
+--- before/renderer-contracts.js
++++ current/renderer-contracts.js
+@@ -91,12 +91,35 @@
+     }
+     return mutations;
+   };
++  const parameterCall = (analysis, fn) => {
++    if (!parameterCalls.has(analysis)) parameterCalls.set(analysis, new Map());
++    const byFunction = parameterCalls.get(analysis);
++    if (!byFunction.has(fn)) {
++      const functionPath = analysis.functionPath(fn.body);
++      const calls = scan.sites.filter(site => site.type === 'call' &&
++        ((site.from === analysis.from && site.reference?.functionPath === functionPath) ||
++          (site.reference?.rootFree && site.reference?.chain?.at(-1) === functionPath?.split('.').at(-1))));
++      const caller = calls.length === 1 && analyses.get(calls[0].from);
++      const call = caller && [...callNodes.get(caller.from).values()].find(node =>
++        node.loc.start.line === calls[0].line && node.loc.start.column === calls[0].column);
++      byFunction.set(fn, call ? { caller, call, args: calls[0].args } : null);
++    }
++    return byFunction.get(fn);
++  };
+   const executionPositions = (node, analysis, env) => {
+     const positions = []; const seen = new Set();
+     for (let current = node; current && !seen.has(current);) {
+       positions.push(current); seen.add(current);
+       const frame = frameAt(analysis, current, env);
+-      if (!frame) break;
++      if (!frame) {
++        // 数组来自外层时，其来源环境没有 helper 帧；用同一唯一调用恢复执行时点。
++        let fn = current;
++        while (fn && analysis.functionNodesByStart.get(fn.start) !== fn) fn = analysis.parents.get(fn);
++        const site = fn && parameterCall(analysis, fn);
++        if (!site || site.caller !== analysis) break;
++        current = site.call;
++        continue;
++      }
+       const [file, start] = JSON.parse(frame);
+       if (file !== analysis.from) break;
+       current = callNodes.get(file)?.get(start);
+@@ -300,23 +323,17 @@
+     if (!fn) return null;
+     const bindings = env.get(parameterBindings); const key = `${analysis.from}:${fn.start}:${chain[0]}`;
+     if (bindings?.has(key)) return { value: selectOrSelf(bindings.get(key), chain.slice(1)) };
+-    if (!parameterCalls.has(analysis)) parameterCalls.set(analysis, new Map());
+-    const callCache = parameterCalls.get(analysis);
+-    if (!callCache.has(value.bindingFunctionPath)) callCache.set(value.bindingFunctionPath, scan.sites.filter(site => site.type === 'call' &&
+-      ((site.from === analysis.from && site.reference?.functionPath === value.bindingFunctionPath) ||
+-        (site.reference?.rootFree && site.reference?.chain?.at(-1) === value.bindingFunctionPath.split('.').at(-1)))));
+-    const calls = callCache.get(value.bindingFunctionPath);
+-    if (calls.length !== 1) return null;
+-    const context = new Map(env); const caller = analyses.get(calls[0].from);
+-    const call = [...callNodes.get(caller.from).values()].find(node => node.loc.start.line === calls[0].line && node.loc.start.column === calls[0].column);
+-    if (!call) return null;
++    const site = parameterCall(analysis, fn);
++    if (!site) return null;
++    const { caller, call, args } = site;
++    const context = new Map(env);
+     context.set(frames, new Map([...(env.get(frames) || []), [`${analysis.from}:${fn.start}`, JSON.stringify([caller.from, call.start, frameAt(caller, call, env)])]]));
+     const read = { analysis: caller, source: analysis, functionStart: fn.start, env, node: call, depth, visited };
+-    fn.params.forEach((param, index) => bindPattern(param, calls[0].args[index]
+-      ? resolve(calls[0].args[index], caller, env, depth + 1, visited, false) : missing, context, read));
++    fn.params.forEach((param, index) => bindPattern(param, args[index]
++      ? resolve(args[index], caller, env, depth + 1, visited, false) : missing, context, read));
+     return context.has(chain[0]) ? { value: selectOrSelf(context.get(chain[0]), chain.slice(1)) } : null;
+   }
+-  function resolve(value, analysis, env = emptyEnv, depth = 0, visited = new Set(), inspectMutations = true) {
++  function resolve(value, analysis, env = emptyEnv, depth = 0, visited = new Set(), inspectMutations = true, expandArray = false) {
+     if (!value || depth > 35 || visited.has(value)) return unknown('recursive-renderer-value');
+     const next = new Set([...visited, value]);
+     const recurse = (item, source = analysis, context = env) => resolve(item, source, context, depth + 1, next, inspectMutations);
+@@ -354,6 +371,18 @@
+     if (value.kind === 'array') {
+       const literal = arrayNodes.get(analysis.from)?.get(value.elements);
+       if (value.opaque && !literal) return unknown(value.reason);
++      // 接收者身份不依赖数组元素；延后展开，避免 helper 参数反查再次展开同一数组。
++      if (!inspectMutations && !expandArray) {
++        let expanded;
++        const read = () => (expanded ||= resolve(value, analysis, env, depth, visited, false, true));
++        return {
++          ...value, opaque: false,
++          [identity]: value[identity] || objectIdentity(value, analysis, env),
++          [origin]: { value, analysis, env },
++          get elements() { return read().elements; },
++          get [uncertainElements]() { return read()[uncertainElements]; },
++        };
++      }
+       const array = { ...value, opaque: false, elements: [], [identity]: value[identity] || objectIdentity(value, analysis, env), [origin]: { value, analysis, env } };
+       const memberValue = item => inspectMutations ? recurse(item) : defer(() => recurse(item));
+       if (literal) for (const node of literal.elements) {

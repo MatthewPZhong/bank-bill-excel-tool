@@ -1,0 +1,11 @@
+{
+  "status": "PASS",
+  "rendererCases": 12,
+  "queryCases": 8,
+  "versionsPerCase": 2,
+  "actualQueryExecutions": 5,
+  "beforeAndCurrentDiagnosticsMatch": true,
+  "policyFilesUnchanged": true,
+  "beforeInputsHashMatched": true,
+  "scope": "small fixtures, no full scan; no source writes"
+}

@@ -18,6 +18,9 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+const { createModalDom } = require('../helpers/modal-dom');
+const { createModalHost } = require('../../src/renderer/modal-host');
+const { createBankStatementController } = require('../../src/renderer/controllers/bank-statement');
 
 const RENDERER_PATH = path.join(__dirname, '..', '..', 'src', 'renderer', 'controllers', 'bank-statement.js');
 const PRELOAD_PATH = path.join(__dirname, '..', '..', 'src', 'preload.js');
@@ -146,12 +149,48 @@ describe('退款导入后提醒：createAlertDialog 单按钮 → createConfirmD
       '候选预检应在 candidateCount<=0 时 return false（不弹）');
   });
 
-  test('① 「导入文件」onConfirm → closeModal() + handleBankStatementBatchImport()（不续跑）', () => {
-    const idx = importFn.indexOf('onConfirm');
-    assert.ok(idx !== -1, 'createConfirmDialog 应带 onConfirm');
-    const after = importFn.slice(idx);
-    assert.ok(/closeModal\(\);\s*return\s+handleBankStatementBatchImport\(\);/.test(after),
-      'onConfirm 应 closeModal() 后调 handleBankStatementBatchImport()（不续跑）');
+  test('① 导入后提醒只在真实宿主成功提交关闭后补充导入，不续跑或重复导入', async (t) => {
+    const dom = createModalDom();
+    const host = createModalHost(dom);
+    let confirmation;
+    let imports = 0;
+    let runs = 0;
+    let allowClose = true;
+    let handle;
+    const controller = createBankStatementController({
+      panel: { querySelector: () => ({ dataset: {}, addEventListener() {}, removeEventListener() {} }) },
+      api: {
+        sessionStatus: async () => ({ status: 'ok', hasBankStatement: true, hasRefundOrder: false }),
+        refundCandidateCount: async () => ({ status: 'ok', candidateCount: 1 }),
+        batchImport: async () => {
+          imports++;
+          if (imports === 1) return { status: 'ok', results: [{ status: 'ok', tableKey: 'bank-statement' }] };
+          assert.strictEqual(handle.isOpen(), false, '业务导入之前须结束对应确认框');
+          return { status: 'cancelled' };
+        },
+        run: async () => { runs++; return { status: 'ok' }; }
+      },
+      config: { scenarios: { list: async () => ({ status: 'ok', scenarios: [{ name: '中台退款订单回填', enabled: true }] }) } },
+      sharedReconSession: { sessionStatus: async () => ({ status: 'ok', hasFile: false }), subscribe: () => () => {} },
+      ui: { modalHost: host, confirm(options) { confirmation = options; return dom.createDialog({ canClose: () => allowClose }); } }
+    });
+    t.after(() => { host.getTop()?.dispose(); controller.dispose(); host.dispose(); });
+    await controller.enter();
+    await controller.commands.import();
+    handle = host.getTop();
+    assert.ok(handle?.isOpen());
+    assert.strictEqual(imports, 1);
+    allowClose = false;
+    await confirmation.onConfirm();
+    assert.strictEqual(imports, 1, '宿主拒绝关闭不能开始补充导入');
+    assert.strictEqual(handle.isOpen(), true);
+    allowClose = true;
+    await confirmation.onConfirm();
+    assert.strictEqual((await handle.closed).status, 'submitted');
+    assert.strictEqual(imports, 2);
+    await confirmation.onConfirm();
+    assert.strictEqual(imports, 2, '结束后的旧回调不能再次导入');
+    assert.strictEqual(runs, 0, '补充导入不自动续跑');
   });
 });
 

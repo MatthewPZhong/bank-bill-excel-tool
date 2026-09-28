@@ -1,0 +1,29 @@
+{
+  "status": "PASS",
+  "meaning": "Archived evidence assertions passed; RR7-01 remains a confirmed checker defect.",
+  "newFindings": [
+    "RR7-01"
+  ],
+  "newRegressionVariants": [
+    "default-missing-member",
+    "default-undefined-member",
+    "default-missing-parameter"
+  ],
+  "closedPriorFindings": [
+    "RR6-01",
+    "RR6-02"
+  ],
+  "rendererActualBoundaries": 20,
+  "g1DeniedExecutingCases": 9,
+  "g1AcceptedSafeCases": 5,
+  "sharedParserCases": {
+    "renderer": 20,
+    "query": 18
+  },
+  "actualInMemoryQueries": 10,
+  "correctedQueryFalsePositives": 3,
+  "architectureTestsPassed": 356,
+  "activeBoundaries": 31,
+  "fullGateReusedMatchingInputs": 1703,
+  "existingArrayElementGap": "Observed before/current unchanged in small fixture; not closed, not expanded to full actual configuration."
+}

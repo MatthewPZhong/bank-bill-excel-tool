@@ -1,0 +1,46 @@
+[
+  {
+    "scanner": "WORKTREE",
+    "name": "do-break-before-write",
+    "source": "const reviewOld={run(){}};const reviewClean={run(){}};const reviewBox={api:reviewOld};async function runReviewScenario(){const reviewInfo=await window.desktopApi.app.getInfo();do{if(reviewInfo.hasEnum)break;reviewBox.api=reviewClean;}while(false);const reviewOther=reviewBox.api;reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewOld});return reviewOther===reviewOld;}runReviewScenario();",
+    "baseViolations": 0,
+    "scanError": null,
+    "probeViolations": [],
+    "boundaryCount": 20,
+    "runtime": {
+      "ipcReads": 1,
+      "same": true,
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run",
+        "outsideScope"
+      ],
+      "whole": false,
+      "extraCallable": true,
+      "extraResult": true
+    }
+  },
+  {
+    "scanner": "WORKTREE",
+    "name": "do-write-before-break-safe",
+    "source": "const reviewOld={run(){}};const reviewClean={run(){}};const reviewBox={api:reviewOld};async function runReviewScenario(){const reviewInfo=await window.desktopApi.app.getInfo();do{reviewBox.api=reviewClean;if(reviewInfo.hasEnum)break;}while(false);const reviewOther=reviewBox.api;reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewOld});return reviewOther===reviewOld;}runReviewScenario();",
+    "baseViolations": 0,
+    "scanError": null,
+    "probeViolations": [],
+    "boundaryCount": 20,
+    "runtime": {
+      "ipcReads": 1,
+      "same": false,
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run"
+      ],
+      "whole": false,
+      "extraCallable": false
+    }
+  }
+]

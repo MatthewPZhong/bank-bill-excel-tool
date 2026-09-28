@@ -1,0 +1,19 @@
+{
+  "status": "PASS",
+  "meaning": "证据支持本轮观察；两项既有漏报仍开放。",
+  "confirmedOpenFindings": [
+    "RR8-01",
+    "RR8-02"
+  ],
+  "newlyIntroducedRegressionsConfirmed": 0,
+  "RR7OriginalThreeCounterexamplesClosed": true,
+  "allDefaultSemanticsClosed": false,
+  "rendererMinimalCases": 10,
+  "arrayMinimalCases": 5,
+  "sharedSmallFixtures": 44,
+  "actualRendererConfigBoundaryCount": 20,
+  "actualRendererFactoryProbed": "BankStatement",
+  "architecturePass": 386,
+  "RR7TargetedPassIncluded": 30,
+  "fullGateReusedInputCount": 1704
+}

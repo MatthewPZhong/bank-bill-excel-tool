@@ -1,0 +1,44 @@
+[
+  {
+    "scanner": "WORKTREE",
+    "name": "or-parent-member-default",
+    "source": "const reviewShared={run(){}};const reviewProvided={run(){}};const reviewFallback={api:reviewProvided};function selectReviewApi(api=reviewShared){return api;}async function runReviewScenario(){const reviewInfo=await window.desktopApi.app.getInfo();const reviewOther=selectReviewApi((reviewInfo || reviewFallback).api);reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewShared});return reviewOther===reviewShared;}runReviewScenario();",
+    "baseViolations": 0,
+    "probeViolations": [],
+    "boundaryCount": 20,
+    "runtime": {
+      "ipcReads": 1,
+      "same": true,
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run",
+        "outsideScope"
+      ],
+      "whole": false,
+      "extraCallable": true,
+      "extraResult": true
+    }
+  },
+  {
+    "scanner": "WORKTREE",
+    "name": "or-member-fallback-safe",
+    "source": "const reviewShared={run(){}};const reviewProvided={run(){}};const reviewFallback={api:reviewProvided};function selectReviewApi(api=reviewShared){return api;}async function runReviewScenario(){const reviewInfo=await window.desktopApi.app.getInfo();const reviewOther=selectReviewApi(reviewInfo.api || reviewProvided);reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewShared});return reviewOther===reviewShared;}runReviewScenario();",
+    "baseViolations": 0,
+    "probeViolations": [],
+    "boundaryCount": 20,
+    "runtime": {
+      "ipcReads": 1,
+      "same": false,
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run"
+      ],
+      "whole": false,
+      "extraCallable": false
+    }
+  }
+]

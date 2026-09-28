@@ -81,7 +81,7 @@ function boundary(value, at) {
     path(value.factory.path, `${at}.factory.path`); string(value.factory.name, `${at}.factory.name`);
     strings(value.factory.parameters, `${at}.factory.parameters`);
   }
-  object(value.allowedApiFields, ['api', 'panel', 'ui', 'config', 'sharedReconSession', 'scenarioCommands'], `${at}.allowedApiFields`);
+  object(value.allowedApiFields, ['api', 'panel', 'ui', 'config', 'sharedReconSession', 'scenarioCommands', 'modalHost', 'modalBridge', 'services', 'subscriptions', 'legacyController', 'differenceApi', 'reviewProjection'], `${at}.allowedApiFields`);
   for (const [key, fields] of Object.entries(value.allowedApiFields)) strings(fields, `${at}.allowedApiFields.${key}`);
   array(value.deprecatedEntrypoints, `${at}.deprecatedEntrypoints`, deprecated);
   if (value.directory !== null) path(value.directory, `${at}.directory`);

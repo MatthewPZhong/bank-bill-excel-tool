@@ -1,0 +1,183 @@
+{
+  "scope": "第三轮只读增量审查：HEAD 加当前未提交的两轮修复",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "findings": [
+    {
+      "id": "RR3-01",
+      "priority": 2,
+      "status": "confirmed"
+    },
+    {
+      "id": "RR3-02",
+      "priority": 2,
+      "status": "confirmed"
+    },
+    {
+      "id": "RR3-03",
+      "priority": 2,
+      "status": "confirmed"
+    },
+    {
+      "id": "RR3-04",
+      "priority": 2,
+      "status": "confirmed"
+    },
+    {
+      "id": "RR3-05",
+      "priority": 2,
+      "status": "confirmed"
+    }
+  ],
+  "originalR2Reproductions": "全部原确认反例均已被拒绝；本轮新确认相邻守卫缺口，不统一认定为最近修复首次引入。",
+  "currentChecks": [
+    {
+      "name": "architecture-unit",
+      "command": "node --test --test-concurrency=1 tests/unit/architecture/*.test.js",
+      "exitCode": 0,
+      "pass": 204,
+      "fail": 0,
+      "skip": 0,
+      "evidence": "evidence/architecture-tests.log"
+    },
+    {
+      "name": "architecture-cli",
+      "command": "node scripts/check-architecture.js --json /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r3/evidence/architecture-check.json",
+      "exitCode": 0,
+      "evidence": "evidence/architecture-check.json",
+      "active": 31,
+      "violations": 0
+    },
+    {
+      "name": "original-query",
+      "command": "node --no-warnings changes/v3.2.10/reviews/2026-09-21-release-rereview-r2/evidence/query-execution-probe.cjs",
+      "exitCode": 0,
+      "evidence": "evidence/r2-query-probe-recheck.json"
+    },
+    {
+      "name": "original-renderer",
+      "command": "node changes/v3.2.10/reviews/2026-09-21-release-rereview-r2/evidence/renderer-realconfig.cjs",
+      "exitCode": 0,
+      "evidence": "evidence/r3-renderer-original-realconfig.json"
+    },
+    {
+      "name": "renderer-bind-alias-regressions",
+      "command": "node --test --test-name-pattern='RR2-0[23]' tests/unit/architecture/release-rereview-r2.test.js",
+      "exitCode": 0,
+      "pass": 8,
+      "evidence": "evidence/r3-renderer-targeted-tests.log"
+    },
+    {
+      "name": "renderer-data-regressions",
+      "command": "node --test --test-name-pattern=RR2-04 tests/unit/architecture/release-rereview-r2.test.js",
+      "exitCode": 0,
+      "pass": 7,
+      "evidence": "evidence/r3-data-r2-regression.tap"
+    },
+    {
+      "name": "g1-regressions",
+      "command": "node --test --test-name-pattern=RR2-05 tests/unit/architecture/release-rereview-r2.test.js",
+      "exitCode": 0,
+      "pass": 9,
+      "evidence": "evidence/r3-g1-rr2-05-tests.tap"
+    },
+    {
+      "name": "r3-query-probes.cjs",
+      "command": "node --no-warnings changes/v3.2.10/reviews/2026-09-22-release-rereview-r3/evidence/r3-query-probes.cjs",
+      "executedScriptLocation": "/tmp/r3-query-probes.cjs",
+      "exitCode": 0,
+      "evidence": "evidence/r3-query-probes.json",
+      "note": "归档的是同一已执行脚本；exit 0 仅表示取证完成，违规反例需检查诊断内容。"
+    },
+    {
+      "name": "r3-query-realconfig.cjs",
+      "command": "node --no-warnings changes/v3.2.10/reviews/2026-09-22-release-rereview-r3/evidence/r3-query-realconfig.cjs",
+      "executedScriptLocation": "/tmp/r3-query-realconfig.cjs",
+      "exitCode": 0,
+      "evidence": "evidence/r3-query-realconfig.json",
+      "note": "归档的是同一已执行脚本；exit 0 仅表示取证完成，违规反例需检查诊断内容。"
+    },
+    {
+      "name": "r3-renderer-realconfig.cjs",
+      "command": "node --no-warnings changes/v3.2.10/reviews/2026-09-22-release-rereview-r3/evidence/r3-renderer-realconfig.cjs",
+      "executedScriptLocation": "/tmp/r3-renderer-realconfig.cjs",
+      "exitCode": 0,
+      "evidence": "evidence/r3-renderer-realconfig.json",
+      "note": "归档的是同一已执行脚本；exit 0 仅表示取证完成，违规反例需检查诊断内容。"
+    },
+    {
+      "name": "r3-renderer-independent.cjs",
+      "command": "node --no-warnings changes/v3.2.10/reviews/2026-09-22-release-rereview-r3/evidence/r3-renderer-independent.cjs",
+      "executedScriptLocation": "/tmp/r3-renderer-independent.cjs",
+      "exitCode": 0,
+      "evidence": "evidence/r3-renderer-independent.jsonl",
+      "note": "归档的是同一已执行脚本；exit 0 仅表示取证完成，违规反例需检查诊断内容。"
+    },
+    {
+      "name": "r3-data-probes.cjs",
+      "command": "node --no-warnings changes/v3.2.10/reviews/2026-09-22-release-rereview-r3/evidence/r3-data-probes.cjs",
+      "executedScriptLocation": "/tmp/r3-data-probes.cjs",
+      "exitCode": 0,
+      "evidence": "evidence/r3-data-probes.jsonl",
+      "note": "归档的是同一已执行脚本；exit 0 仅表示取证完成，违规反例需检查诊断内容。"
+    },
+    {
+      "name": "r3-data-realconfig.cjs",
+      "command": "node --no-warnings changes/v3.2.10/reviews/2026-09-22-release-rereview-r3/evidence/r3-data-realconfig.cjs",
+      "executedScriptLocation": "/tmp/r3-data-realconfig.cjs",
+      "exitCode": 0,
+      "evidence": "evidence/r3-data-realconfig.json",
+      "note": "归档的是同一已执行脚本；exit 0 仅表示取证完成，违规反例需检查诊断内容。"
+    },
+    {
+      "name": "r3-g1-original-probe.cjs",
+      "command": "node --no-warnings changes/v3.2.10/reviews/2026-09-22-release-rereview-r3/evidence/r3-g1-original-probe.cjs",
+      "executedScriptLocation": "/tmp/r3-g1-original-probe.cjs",
+      "exitCode": 0,
+      "evidence": "evidence/r3-g1-original-probe.json",
+      "note": "归档的是同一已执行脚本；exit 0 仅表示取证完成，违规反例需检查诊断内容。"
+    },
+    {
+      "name": "r3-g1-callback-probe.cjs",
+      "command": "node --no-warnings changes/v3.2.10/reviews/2026-09-22-release-rereview-r3/evidence/r3-g1-callback-probe.cjs",
+      "executedScriptLocation": "/tmp/r3-g1-callback-probe.cjs",
+      "exitCode": 0,
+      "evidence": "evidence/r3-g1-callback-probe.json",
+      "note": "归档的是同一已执行脚本；exit 0 仅表示取证完成，违规反例需检查诊断内容。"
+    }
+  ],
+  "targetedCountsOverlapFullArchitectureSuite": true,
+  "historicalFullGate": {
+    "executedThisReview": false,
+    "source": "../2026-09-21-release-r2-repair/release-check-result.json",
+    "comparison": "evidence/gate-evidence-comparison.json",
+    "matchedInputs": 1699,
+    "changedInputs": 0,
+    "headMatches": true,
+    "command": "UNIT_TEST_CONCURRENCY=1 npm run release-check",
+    "startedAt": "2026-09-21T23:59:32.814300+08:00",
+    "finishedAt": "2026-09-22T00:19:13.514261+08:00",
+    "exitCode": 0,
+    "unit": {
+      "total": 8982,
+      "pass": 8978,
+      "fail": 0,
+      "skip": 4
+    },
+    "integration": {
+      "scripts": 68,
+      "pass": 68,
+      "countedPass": 2901,
+      "countedTotal": 2901,
+      "oneUncountedSuccessfulScript": true
+    },
+    "rendererLifecycle": 233
+  },
+  "notExecuted": [
+    "真实产品 Main 端到端",
+    "Windows 与安装包验收",
+    "Excel/WPS 验收",
+    "资金人工验收"
+  ],
+  "preservation": "preservation-final.json"
+}

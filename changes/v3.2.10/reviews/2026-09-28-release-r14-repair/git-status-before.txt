@@ -1,0 +1,39 @@
+ M architecture/README.md
+ M architecture/boundaries.json
+ M architecture/legacy-allowlist.json
+ M changes/v3.2.10/README.md
+ M changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md
+ M changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md
+ M changes/v3.2.10/release.md
+ M rules/integration-test-policy.md
+ M scripts/architecture/contracts.js
+ M scripts/architecture/rules.js
+ M scripts/architecture/scan.js
+ M scripts/architecture/schema.js
+ M src/backend/toolbox-format/index.js
+ M src/renderer/controllers/bank-statement.js
+ M tests/unit/architecture/cli.test.js
+ M tests/unit/architecture/review-round3.test.js
+ M tests/unit/architecture/review-round4.test.js
+ M tests/unit/architecture/review-round5.test.js
+ M tests/unit/backend/xlsx/infrastructure-compatibility.test.js
+ M tests/unit/renderer-refund-prompt-orchestration.test.js
+ M tests/unit/renderer/scenario-change-routing.test.js
+?? changes/v3.2.10/reviews/
+?? scripts/architecture/renderer-contracts.js
+?? scripts/renderer-lifecycle/fixtures/bank-statement-confirmation.js
+?? tests/unit/architecture/release-closure-regressions.test.js
+?? tests/unit/architecture/release-policy-alignment.test.js
+?? tests/unit/architecture/release-renderer-policy.test.js
+?? tests/unit/architecture/release-rereview-r10.test.js
+?? tests/unit/architecture/release-rereview-r11.test.js
+?? tests/unit/architecture/release-rereview-r12.test.js
+?? tests/unit/architecture/release-rereview-r13.test.js
+?? tests/unit/architecture/release-rereview-r2.test.js
+?? tests/unit/architecture/release-rereview-r3.test.js
+?? tests/unit/architecture/release-rereview-r4.test.js
+?? tests/unit/architecture/release-rereview-r5.test.js
+?? tests/unit/architecture/release-rereview-r6.test.js
+?? tests/unit/architecture/release-rereview-r7.test.js
+?? tests/unit/architecture/release-rereview-r8.test.js
+?? tests/unit/architecture/release-rereview-r9.test.js

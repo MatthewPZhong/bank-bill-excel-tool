@@ -1,0 +1,48 @@
+{
+  "boundaryState": "active",
+  "outputs": [
+    {
+      "name": "native_includes",
+      "value": true,
+      "writes": 0,
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "native_indexof",
+      "value": 0,
+      "writes": 0,
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "source_helper_compare",
+      "value": true,
+      "writes": 0,
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "reduce_execution",
+      "writes": 1,
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 57,
+          "message": "受保护 prepare/worker 经静态容器、helper 或回调入口执行了受限恢复能力",
+          "evidenceId": "f9058610fe573a24a0d5aeb25e6307c278880157e3e9dfd466275a2fbe95b782",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    }
+  ]
+}

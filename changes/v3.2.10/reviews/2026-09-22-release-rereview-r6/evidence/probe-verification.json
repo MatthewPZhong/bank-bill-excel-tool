@@ -1,0 +1,11 @@
+{
+  "status": "PASS",
+  "meaning": "Evidence consistency assertions passed; two newly confirmed violating examples remain false negatives, not product PASS.",
+  "originalR5ExamplesClosed": true,
+  "rendererNewRegression": true,
+  "g1NewRegression": true,
+  "beforeHashesMatched": true,
+  "dataFixtures": 28,
+  "rendererActualBoundaries": 20,
+  "g1ActualParsedFiles": 765
+}

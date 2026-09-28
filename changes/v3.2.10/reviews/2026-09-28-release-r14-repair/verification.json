@@ -1,0 +1,596 @@
+{
+  "result": "PASS",
+  "scope": "RR14-01 and listed controls; not all JavaScript or release acceptance",
+  "gate": {
+    "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+    "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+    "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+    "startedAt": "2026-09-28T17:19:43.887250+08:00",
+    "minimumFreeBytes": 17950265344,
+    "abortBelowFreeBytes": 2147483648,
+    "inputFiles": 1711,
+    "pid": 29578,
+    "exitCode": 0,
+    "finishedAt": "2026-09-28T17:39:54.344494+08:00",
+    "changedInputs": [],
+    "headAfter": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10"
+  },
+  "newRegressions": {
+    "pass": 34,
+    "includedIn": "architecture-tests-final.log"
+  },
+  "beforeRegressions": {
+    "tests": 34,
+    "pass": 19,
+    "fail": 15,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "architectureTests": {
+    "tests": 655,
+    "pass": 655,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "architecture": {
+    "source": "release-check.log / check:architecture",
+    "active": 31,
+    "pending": 0,
+    "partial": 0,
+    "violations": 0,
+    "stale": 0
+  },
+  "unit": {
+    "tests": 9433,
+    "pass": 9429,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 4,
+    "todo": 0
+  },
+  "integration": [
+    {
+      "name": "acquiring-bill-currency-idle-cleanup",
+      "passed": 38,
+      "total": 38,
+      "durationMs": 768
+    },
+    {
+      "name": "acquiring-bill-currency-n4-migration",
+      "passed": 128,
+      "total": 128,
+      "durationMs": 494
+    },
+    {
+      "name": "acquiring-engine-migration",
+      "passed": 45,
+      "total": 45,
+      "durationMs": 4365
+    },
+    {
+      "name": "acquiring-index-slim-v2",
+      "passed": 22,
+      "total": 22,
+      "durationMs": 178
+    },
+    {
+      "name": "acquiring-side-db-parity",
+      "passed": 19,
+      "total": 19,
+      "durationMs": 528
+    },
+    {
+      "name": "acquiring-worker-boundary",
+      "passed": 14,
+      "total": 14,
+      "durationMs": 516
+    },
+    {
+      "name": "application-recovery-governance",
+      "passed": 4,
+      "total": 4,
+      "durationMs": 809
+    },
+    {
+      "name": "archive-biz-op-auto-report-retention",
+      "passed": 6,
+      "total": 6,
+      "durationMs": 7441
+    },
+    {
+      "name": "archive-center-module-retention",
+      "passed": 11,
+      "total": 11,
+      "durationMs": 1506
+    },
+    {
+      "name": "archive-center-permanent-delete",
+      "passed": 52,
+      "total": 52,
+      "durationMs": 28657
+    },
+    {
+      "name": "background-execution-pure-compute-canary",
+      "passed": 9,
+      "total": 9,
+      "durationMs": 98
+    },
+    {
+      "name": "background-execution-recovery-canary",
+      "passed": 9,
+      "total": 9,
+      "durationMs": 111
+    },
+    {
+      "name": "background-execution-recovery-control",
+      "passed": 27,
+      "total": 27,
+      "durationMs": 278
+    },
+    {
+      "name": "bank-bu-background-dual-parser",
+      "passed": 9,
+      "total": 9,
+      "durationMs": 255
+    },
+    {
+      "name": "bank-bu-background-single-jobs",
+      "passed": 21,
+      "total": 21,
+      "durationMs": 476
+    },
+    {
+      "name": "bank-bu-recon-side-db-parity",
+      "passed": 17,
+      "total": 17,
+      "durationMs": 281
+    },
+    {
+      "name": "bank-statement-hit-scenario-report",
+      "passed": 49,
+      "total": 49,
+      "durationMs": 198
+    },
+    {
+      "name": "bank-statement-many-to-many-review-sheet",
+      "passed": 33,
+      "total": 33,
+      "durationMs": 195
+    },
+    {
+      "name": "bank-statement-universal-import-routing",
+      "passed": 20,
+      "total": 20,
+      "durationMs": 302
+    },
+    {
+      "name": "big-table-import-engine",
+      "passed": 19,
+      "total": 19,
+      "durationMs": 7618
+    },
+    {
+      "name": "biz-op-auto-error-report",
+      "passed": 12,
+      "total": 12,
+      "durationMs": 10382
+    },
+    {
+      "name": "biz-op-query-boundary",
+      "passed": 9,
+      "total": 9,
+      "durationMs": 7962
+    },
+    {
+      "name": "biz-op-recon-side-db-parity",
+      "passed": 16,
+      "total": 16,
+      "durationMs": 311
+    },
+    {
+      "name": "bizop-flow-engine-migration",
+      "passed": 73,
+      "total": 73,
+      "durationMs": 4967
+    },
+    {
+      "name": "dark-mode-schedule-settings",
+      "passed": 6,
+      "total": 6,
+      "durationMs": 189
+    },
+    {
+      "name": "duplicate-inbound-match-end-to-end",
+      "passed": 31,
+      "total": 31,
+      "durationMs": 339
+    },
+    {
+      "name": "execution-descriptor-governance",
+      "passed": 4,
+      "total": 4,
+      "durationMs": 885
+    },
+    {
+      "name": "fund-transfer-recon-account-mapping",
+      "passed": 19,
+      "total": 19,
+      "durationMs": 176
+    },
+    {
+      "name": "gateway-channel-filter-equivalence",
+      "passed": 23,
+      "total": 23,
+      "durationMs": 184
+    },
+    {
+      "name": "linked-fx-open7-stale-hit-e2e",
+      "passed": 27,
+      "total": 27,
+      "durationMs": 182
+    },
+    {
+      "name": "linked-table-delete-by-range-tablekey",
+      "passed": 73,
+      "total": 73,
+      "durationMs": 181
+    },
+    {
+      "name": "new-account-balance-statement",
+      "passed": 36,
+      "total": 36,
+      "durationMs": 226
+    },
+    {
+      "name": "pending-data-reconciliation",
+      "passed": 33,
+      "total": 33,
+      "durationMs": 51
+    },
+    {
+      "name": "pending-engine-migration",
+      "passed": 57,
+      "total": 57,
+      "durationMs": 4929
+    },
+    {
+      "name": "pending-removal-reconcile",
+      "passed": 62,
+      "total": 62,
+      "durationMs": 191
+    },
+    {
+      "name": "position-reconciliation-side-db-parity",
+      "passed": 38,
+      "total": 38,
+      "durationMs": 249
+    },
+    {
+      "name": "position-startup-task-recovery",
+      "passed": 3,
+      "total": 3,
+      "durationMs": 2204
+    },
+    {
+      "name": "pre-fund-reconciliation-output-contract",
+      "passed": 15,
+      "total": 15,
+      "durationMs": 254
+    },
+    {
+      "name": "pre-fund-reconciliation-side-db-parity",
+      "passed": 69,
+      "total": 69,
+      "durationMs": 305
+    },
+    {
+      "name": "refund-backfill-yellow-fill-e2e",
+      "passed": 258,
+      "total": 258,
+      "durationMs": 188
+    },
+    {
+      "name": "renderer-lifecycle",
+      "passed": 233,
+      "total": 233,
+      "durationMs": 19778
+    },
+    {
+      "name": "shared-xlsx-boundary",
+      "passed": 51,
+      "total": 51,
+      "durationMs": 3090
+    },
+    {
+      "name": "statement-generation-pipeline",
+      "passed": 45,
+      "total": 45,
+      "durationMs": 226
+    },
+    {
+      "name": "task-adapter-recovery",
+      "passed": 4,
+      "total": 4,
+      "durationMs": 543
+    },
+    {
+      "name": "toolbox-large-file-stream",
+      "passed": 50,
+      "total": 50,
+      "durationMs": 133818
+    },
+    {
+      "name": "toolbox-large-split-multi-sheet",
+      "passed": 31,
+      "total": 31,
+      "durationMs": 255019
+    },
+    {
+      "name": "toolbox-multi-sheet-merge",
+      "passed": 16,
+      "total": 16,
+      "durationMs": 14084
+    },
+    {
+      "name": "toolbox-multi-split-roundtrip",
+      "passed": 17,
+      "total": 17,
+      "durationMs": 450
+    },
+    {
+      "name": "toolbox-roundtrip",
+      "passed": 30,
+      "total": 30,
+      "durationMs": 166
+    },
+    {
+      "name": "toolbox-row-split-admission",
+      "passed": 2,
+      "total": 2,
+      "durationMs": 829
+    },
+    {
+      "name": "toolbox-row-split-archive-delete",
+      "passed": 2,
+      "total": 2,
+      "durationMs": 1039
+    },
+    {
+      "name": "v2.1.10-a3-phase1",
+      "passed": 40,
+      "total": 40,
+      "durationMs": 2518
+    },
+    {
+      "name": "v2.1.10-a3-phase2",
+      "passed": 56,
+      "total": 56,
+      "durationMs": 1835
+    },
+    {
+      "name": "v2.1.10-a4-phase3",
+      "passed": 75,
+      "total": 75,
+      "durationMs": 14193
+    },
+    {
+      "name": "v2.1.10-n4-cont-1-phase4",
+      "passed": 33,
+      "total": 33,
+      "durationMs": 689
+    },
+    {
+      "name": "v2.1.10-n4-cont-2-phase5",
+      "passed": 43,
+      "total": 43,
+      "durationMs": 471
+    },
+    {
+      "name": "v2.1.12-beta-multiworker-nested",
+      "passed": null,
+      "total": null,
+      "durationMs": 2773
+    },
+    {
+      "name": "v2.1.9-n5-end-to-end",
+      "passed": 68,
+      "total": 68,
+      "durationMs": 223
+    },
+    {
+      "name": "v2.1.9-n5-migration",
+      "passed": 67,
+      "total": 67,
+      "durationMs": 195
+    },
+    {
+      "name": "v2.1.9-sr-fix-1-coverage",
+      "passed": 148,
+      "total": 148,
+      "durationMs": 261
+    },
+    {
+      "name": "v2.1.9-sr-log-1",
+      "passed": 33,
+      "total": 33,
+      "durationMs": 141
+    },
+    {
+      "name": "v3.0.0-linked-streaming-import",
+      "passed": 19,
+      "total": 19,
+      "durationMs": 209
+    },
+    {
+      "name": "v3.0.1-linked-gateway-upsert",
+      "passed": 40,
+      "total": 40,
+      "durationMs": 214
+    },
+    {
+      "name": "v3.0.4-boc-dispatch-order-fix",
+      "passed": 31,
+      "total": 31,
+      "durationMs": 253
+    },
+    {
+      "name": "vcc-financial-op-adjustment-archive-chain",
+      "passed": 226,
+      "total": 226,
+      "durationMs": 1229
+    },
+    {
+      "name": "vcc-financial-op-destructive-state-chain",
+      "passed": 77,
+      "total": 77,
+      "durationMs": 1445
+    },
+    {
+      "name": "vcc-financial-op-effective-result",
+      "passed": 19,
+      "total": 19,
+      "durationMs": 139
+    },
+    {
+      "name": "vcc-financial-op-historical-template-export",
+      "passed": 29,
+      "total": 29,
+      "durationMs": 1057
+    }
+  ],
+  "windowsSkips": [
+    "﹣ Windows CI 真实 PowerShell snapshot→token cleanup 语义 (0.067125ms) # SKIP",
+    "﹣ Windows PowerShell 采集器使用原始 CIM 枚举并完整遍历真实文件祖先 (0.232458ms) # 需要 Windows PowerShell；受控 Storage 对象不代替真实 CIM 查询",
+    "﹣ Windows packaged canary 对报告前已退出进程快速返回专用 safe code (0.046584ms) # SKIP",
+    "﹣ Windows packaged canary 的 Setup 失败诊断仅返回固定退出/落地/身份枚举 (0.031083ms) # SKIP"
+  ],
+  "actualConfig": {
+    "boundaries": 20,
+    "cases": 2,
+    "scanErrors": 0
+  },
+  "probes": {
+    "status": "PASS",
+    "originalCases": 6,
+    "vmBranches": 12,
+    "ordering": {
+      "cases": 8,
+      "safe": 5,
+      "unsafe": 3
+    },
+    "rr12Arrays": {
+      "cases": 14,
+      "safePass": 6,
+      "unsafeRejected": 7,
+      "knownConservative": [
+        "overwritten-before-reorder-safe"
+      ]
+    },
+    "bindings": {
+      "cases": 6,
+      "diagnosticAndScannerChanges": []
+    },
+    "commands": [
+      {
+        "command": [
+          "node",
+          "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r14/evidence/r14-renderer-probes.cjs"
+        ],
+        "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+        "output": "renderer-before.jsonl",
+        "exitCode": 0
+      },
+      {
+        "command": [
+          "node",
+          "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r14/evidence/r14-renderer-probes.cjs"
+        ],
+        "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+        "output": "renderer-after.jsonl",
+        "exitCode": 0
+      },
+      {
+        "command": [
+          "node",
+          "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r14/evidence/r14-renderer-branch-vm.cjs",
+          "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-r14-repair/renderer-after.jsonl"
+        ],
+        "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+        "output": "renderer-vm.json",
+        "exitCode": 0
+      },
+      {
+        "command": [
+          "node",
+          "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r14/evidence/r14-order-probe.cjs"
+        ],
+        "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+        "output": "order.json",
+        "exitCode": 0
+      },
+      {
+        "command": [
+          "node",
+          "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r14/evidence/r14-array-original-probe.cjs"
+        ],
+        "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+        "output": "array-original.json",
+        "exitCode": 0
+      },
+      {
+        "command": [
+          "node",
+          "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r14/evidence/r14-array-finite-probe.cjs"
+        ],
+        "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+        "output": "array-finite.json",
+        "exitCode": 0
+      },
+      {
+        "command": [
+          "node",
+          "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r14/evidence/r14-shared-bindings-probes.cjs"
+        ],
+        "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+        "output": "bindings-probe.json",
+        "exitCode": 0
+      }
+    ]
+  },
+  "sharedReplay": {
+    "status": "PASS",
+    "groups": {
+      "shared-probes": 20,
+      "destructure-probes": 8,
+      "localenv-probes": 10,
+      "default-combinations": 6,
+      "async-array-combinations": 6,
+      "logical-combinations": 6
+    },
+    "fixtures": 56,
+    "renderer": 38,
+    "query": 18,
+    "diagnosticChanges": [],
+    "scannerChanges": []
+  },
+  "preservation": {
+    "frozenExisting": 5190,
+    "plannedChanged": [
+      "architecture/README.md",
+      "changes/v3.2.10/README.md",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md",
+      "changes/v3.2.10/release.md",
+      "rules/integration-test-policy.md",
+      "scripts/architecture/renderer-contracts.js"
+    ],
+    "unchangedExisting": 5183,
+    "productionFilesUnchanged": 792,
+    "historicalReviewFilesUnchanged": 1208,
+    "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+    "gateInputs": 1711
+  }
+}

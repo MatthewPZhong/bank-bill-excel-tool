@@ -1,0 +1,49 @@
+{
+  "status": "PASS",
+  "before": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-r9-repair/input-manifest.json",
+  "groups": {
+    "shared-probes": {
+      "count": 20,
+      "sha256": "3ef1ee12e5a08d2ffd5448416360e4410054a41182fc1f69e9a2b07b30eac562"
+    },
+    "destructure-probes": {
+      "count": 8,
+      "sha256": "1396848aa3e766b563acfb79cd660ab9db1f77c8b00e6075ee2f3330a1cb4291"
+    },
+    "localenv-probes": {
+      "count": 10,
+      "sha256": "f30e729873e39b18bcc2b617d04960fe85add40d7e9aac4e89440cdfac458897"
+    },
+    "default-combinations": {
+      "count": 6,
+      "sha256": "363f2b6f83ac29bf81362c8d4ae2a6b6f565b0ed52b23839bfe31e65205d5064"
+    },
+    "async-array-combinations": {
+      "count": 6,
+      "sha256": "4848a4bdd3f6496e15cfd41ed6bd81df0286da7a850edd9320a9842cc5d5579d"
+    },
+    "logical-combinations": {
+      "count": 6,
+      "sha256": "73a33f6d15b02955c87ce06a11b3f41ede6988cbc1379b409efd28e2fb8f033e"
+    }
+  },
+  "renderer": 38,
+  "query": 18,
+  "executedSqlFixtures": 10,
+  "changes": [
+    {
+      "name": "category-falsy-and-api",
+      "before": 1,
+      "current": 0
+    }
+  ],
+  "knownConservativeLimitations": [
+    {
+      "name": "conditional-distinct-pure-values",
+      "note": "both branches are pure strings but current and prior reject ambiguous value"
+    }
+  ],
+  "totalFixtures": 56,
+  "newFindings": [],
+  "scope": "50 reused fixtures plus 6 new logical data-contract probes; one existing conservative rejection is recorded separately, not counted as a newly correct legal acceptance."
+}

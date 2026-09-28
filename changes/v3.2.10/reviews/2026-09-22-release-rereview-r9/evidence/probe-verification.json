@@ -1,0 +1,24 @@
+{
+  "status": "PASS",
+  "meaning": "归档支持两项既有剩余漏报与原始反例关闭；并非检查器全部通过。",
+  "confirmedOpenFindings": [
+    "RR9-01",
+    "RR9-02"
+  ],
+  "newlyIntroducedRegressionsConfirmed": 0,
+  "priorOriginalCounterexamplesClosed": [
+    "RR8-01",
+    "RR8-02"
+  ],
+  "allDefaultOrArraySemanticsClosed": false,
+  "rendererNeighbors": 6,
+  "arrayNeighbors": 8,
+  "arrayOriginalCases": 5,
+  "sharedCases": 50,
+  "actualRendererBoundaryCount": 20,
+  "actualFactoryProbed": "BankStatement",
+  "architecturePass": 432,
+  "RR8IpcTargetedPassIncluded": 13,
+  "fullGateReusedInputCount": 1705,
+  "priorSharedSafeAssumptionCorrected": "single-mount-category-explicit-ipc uses a Promise without await and triggers other default"
+}

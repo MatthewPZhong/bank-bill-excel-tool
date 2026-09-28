@@ -1,0 +1,10 @@
+{
+  "readOnlyProcessInspection": "沙箱内 ps 被系统拒绝，已使用获批只读检查；未访问业务数据。",
+  "intermediateRuns": "初稿两次全仓/真实源码扫描超过合理耗时后停止，仅停止本轮进程；不计为 PASS，最终实现重新验证。",
+  "stoppedGate": {
+    "result": "STOPPED",
+    "evidence": "intermediate-performance/release-check-result.json",
+    "reason": "初稿全仓分析仍存在返回节点重复遍历和局部参数环境重复求值，停止本轮独立进程组后修正缓存。该轮未完成门禁，输入已变化，不计作最终证据。"
+  },
+  "nonMutatingLookupErrors": "一次读取尚未生成的 runtime JSON 和一次未命中的 shell glob，均为只读命令，未改业务或源码。"
+}

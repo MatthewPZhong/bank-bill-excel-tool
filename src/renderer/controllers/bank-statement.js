@@ -52,14 +52,24 @@
     function confirm(options, generation = renderGeneration) {
       if (!live(generation) || !ui.confirm || !ui.modalHost) return false;
       const wrapped = { ...options };
-      // 回调绑定创建弹窗时的页面代次；离页后旧回调不能重新启动业务。
-      for (const key of ['onConfirm', 'onMiddle', 'onCancel']) {
-        if (typeof options[key] === 'function') wrapped[key] = (...args) => live(generation) ? options[key](...args) : undefined;
+      let handle;
+      // 提交绑定本次弹窗句柄；关闭被拒或旧按钮晚到时不能继续业务、关闭新弹窗。
+      for (const key of ['onConfirm', 'onMiddle']) {
+        if (typeof options[key] === 'function') wrapped[key] = (...args) => {
+          if (!submitModal(handle, generation)) return;
+          return options[key](...args);
+        };
       }
+      // 确认框工厂已用 cancelled 结果关闭取消按钮，不能再次按 submitted 关闭。
+      if (typeof options.onCancel === 'function') wrapped.onCancel = (...args) => live(generation) ? options.onCancel(...args) : undefined;
       const result = ui.modalHost.openRoot(() => ui.confirm(wrapped), { owner });
-      return result?.status !== 'blocked';
+      handle = result?.handle;
+      return result?.status === 'opened';
     }
-    function closeModal() { return ui.modalHost?.closeOwner(owner, 'completed'); }
+    function submitModal(handle, generation, value) {
+      if (!live(generation) || !handle?.isOpen() || !handle.isTop()) return false;
+      return handle.close({ status: 'submitted', value }).status === 'closed';
+    }
     function render(updateStatus = true) {
       if (!live()) return;
       updateBankStatementUi({ updateStatus });
@@ -256,7 +266,6 @@
     }
     function importLinked(generation) {
       if (!live(generation)) return;
-      closeModal();
       return action('导入', async (current) => {
         const result = await config.linkedTable.import();
         if (!live(current)) return result;
@@ -275,7 +284,7 @@
         return confirm({
           message: '已启用「中台退款订单回填」场景，但本次未导入「中台退款订单表」。<br>继续运行将跳过退款回填。',
           confirmText: '导入文件', cancelText: '稍后再说',
-          onConfirm: () => { closeModal(); return handleBankStatementBatchImport(); }
+          onConfirm: () => handleBankStatementBatchImport()
         }, generation);
       } catch (error) { reportError(error); return false; }
     }
@@ -301,7 +310,7 @@
           message: '已启用「资金对账不平」类场景但未导入网关对账单（链接表）。<br>继续运行将跳过该类场景。',
           confirmText: '导入文件', middleText: '直接运行', cancelText: '取消',
           onConfirm: () => importLinked(generation),
-          onMiddle: () => { closeModal(); return runBankStatementInternal(); }
+          onMiddle: () => runBankStatementInternal()
         }, generation);
         return;
       }
@@ -316,8 +325,8 @@
         confirm({
           message: '已启用「中台退款订单回填」场景但未导入「中台退款订单表」。<br>继续运行将跳过退款回填。',
           confirmText: '导入文件', middleText: '直接运行', cancelText: '取消',
-          onConfirm: () => { closeModal(); return handleBankStatementBatchImport(); },
-          onMiddle: () => { closeModal(); return proceedToGwCheck(generation); }
+          onConfirm: () => handleBankStatementBatchImport(),
+          onMiddle: () => proceedToGwCheck(generation)
         }, generation);
         return;
       }
@@ -383,9 +392,16 @@
       const choices = scenarios.filter((scenario) => scenario.category === 'gateway-recon-id-fix' && enabled(scenario));
       if (!choices.length) { alert('请先在网关对账单修复-场景管理启用场景'); return; }
       if (choices.length === 1) return runGatewayReconScenario(choices[0].id);
-      if (ui.gatewayScenarioPicker && ui.modalHost) ui.modalHost.openRoot(() => ui.gatewayScenarioPicker({
-        scenarios: choices, onPick: (id) => { if (!live(generation)) return; closeModal(); return runGatewayReconScenario(id); }
-      }), { owner });
+      if (ui.gatewayScenarioPicker && ui.modalHost) {
+        let handle;
+        const result = ui.modalHost.openRoot(() => ui.gatewayScenarioPicker({
+          scenarios: choices, onPick: (id) => {
+            if (!submitModal(handle, generation, id)) return;
+            return runGatewayReconScenario(id);
+          }
+        }), { owner });
+        handle = result?.handle;
+      }
     }
     function runGatewayReconScenario(scenarioId) {
       return action('运行', async (generation) => {

@@ -1,0 +1,107 @@
+{
+  "status": "PASS",
+  "fixtures": 14,
+  "scanErrors": 0,
+  "diagnosticChanges": 0,
+  "knownConservativeRejections": 1,
+  "rows": [
+    {
+      "name": "receiver-alias-reorder",
+      "safe": false,
+      "conservative": false,
+      "before": 1,
+      "current": 1
+    },
+    {
+      "name": "helper-reorder-after-write",
+      "safe": false,
+      "conservative": false,
+      "before": 1,
+      "current": 1
+    },
+    {
+      "name": "helper-write-and-reorder",
+      "safe": false,
+      "conservative": false,
+      "before": 1,
+      "current": 1
+    },
+    {
+      "name": "helper-reorder-before-write-safe",
+      "safe": true,
+      "conservative": false,
+      "before": 0,
+      "current": 0
+    },
+    {
+      "name": "overwritten-before-reorder-safe",
+      "safe": true,
+      "conservative": true,
+      "before": 1,
+      "current": 1
+    },
+    {
+      "name": "last-write-before-reorder",
+      "safe": false,
+      "conservative": false,
+      "before": 1,
+      "current": 1
+    },
+    {
+      "name": "helper-write-after-reorder-safe",
+      "safe": true,
+      "conservative": false,
+      "before": 0,
+      "current": 0
+    },
+    {
+      "name": "captured-before-later-reorder-safe",
+      "safe": true,
+      "conservative": false,
+      "before": 0,
+      "current": 0
+    },
+    {
+      "name": "object-parameter-write-then-reorder",
+      "safe": false,
+      "conservative": false,
+      "before": 1,
+      "current": 1
+    },
+    {
+      "name": "object-parameter-reorder-then-write",
+      "safe": true,
+      "conservative": false,
+      "before": 0,
+      "current": 0
+    },
+    {
+      "name": "destructured-parameter-write-then-reorder",
+      "safe": false,
+      "conservative": false,
+      "before": 1,
+      "current": 1
+    },
+    {
+      "name": "destructured-parameter-reorder-then-write",
+      "safe": true,
+      "conservative": false,
+      "before": 0,
+      "current": 0
+    },
+    {
+      "name": "single-nested-helper-write-then-reorder",
+      "safe": false,
+      "conservative": false,
+      "before": 1,
+      "current": 1
+    },
+    {
+      "name": "single-nested-helper-reorder-then-write",
+      "safe": true,
+      "conservative": false,
+      "before": 0,
+      "current": 0
+    }
+  ]
+}

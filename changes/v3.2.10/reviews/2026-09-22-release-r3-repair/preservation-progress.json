@@ -1,0 +1,18 @@
+{
+  "production": {
+    "files": 792,
+    "changed": []
+  },
+  "historicalReviews": {
+    "files": 135,
+    "changed": []
+  },
+  "architectureConfig": {
+    "files": 2,
+    "changed": []
+  },
+  "primaryDirty": {
+    "files": 865,
+    "changed": []
+  }
+}

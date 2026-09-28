@@ -1,0 +1,55 @@
+{
+  "sourceHead": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "results": [
+    {
+      "kind": "refund",
+      "choice": "onConfirm",
+      "error": {
+        "code": "MODAL_OUTCOME_INVALID",
+        "message": "弹窗结果需要明确的提交或取消原因"
+      },
+      "calls": [],
+      "modalStillOpen": true
+    },
+    {
+      "kind": "refund",
+      "choice": "onMiddle",
+      "error": {
+        "code": "MODAL_OUTCOME_INVALID",
+        "message": "弹窗结果需要明确的提交或取消原因"
+      },
+      "calls": [],
+      "modalStillOpen": true
+    },
+    {
+      "kind": "c3",
+      "choice": "onConfirm",
+      "error": {
+        "code": "MODAL_OUTCOME_INVALID",
+        "message": "弹窗结果需要明确的提交或取消原因"
+      },
+      "calls": [],
+      "modalStillOpen": true
+    },
+    {
+      "kind": "c3",
+      "choice": "onMiddle",
+      "error": {
+        "code": "MODAL_OUTCOME_INVALID",
+        "message": "弹窗结果需要明确的提交或取消原因"
+      },
+      "calls": [],
+      "modalStillOpen": true
+    },
+    {
+      "kind": "gateway",
+      "choice": "onPick",
+      "error": {
+        "code": "MODAL_OUTCOME_INVALID",
+        "message": "弹窗结果需要明确的提交或取消原因"
+      },
+      "calls": [],
+      "modalStillOpen": true
+    }
+  ]
+}

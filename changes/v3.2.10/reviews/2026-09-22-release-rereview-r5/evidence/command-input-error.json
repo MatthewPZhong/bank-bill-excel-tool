@@ -1,0 +1,7 @@
+{
+  "command": "node scripts/check-architecture.js --json changes/v3.2.10/reviews/2026-09-22-release-rereview-r5/evidence/architecture-check.json",
+  "exitCode": 2,
+  "error": "--json 必须使用绝对路径",
+  "classification": "review command input error; corrected to absolute path and rerun",
+  "sourceChanged": false
+}

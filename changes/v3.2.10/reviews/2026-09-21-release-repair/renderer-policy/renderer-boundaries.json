@@ -1,0 +1,2111 @@
+[
+  {
+    "id": "renderer-modal-owner",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-MODAL-OWNER"
+    ],
+    "entrypoints": [
+      "src/renderer/modal-host.js"
+    ],
+    "allowedLocal": [
+      "src/renderer/modal-host.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/modal-host.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "__modalHost"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "tests/unit/renderer/modal-host.test.js",
+      "tests/unit/renderer/toolbox-modal.test.js",
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer/modal-host.js",
+        "exportsGlobal": [
+          "__modalHost"
+        ],
+        "consumesGlobals": []
+      }
+    ],
+    "factory": null,
+    "allowedApiFields": {},
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-bank-statement",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer/controllers/bank-statement.js"
+    ],
+    "allowedLocal": [
+      "src/renderer/controllers/bank-statement.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/controllers/bank-statement.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "BankStatementController"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "tests/unit/renderer/scenario-change-routing.test.js",
+      "tests/unit/renderer/scenario-controller-feedback.test.js",
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer/controllers/bank-statement.js",
+        "exportsGlobal": [
+          "BankStatementController"
+        ],
+        "consumesGlobals": []
+      }
+    ],
+    "factory": {
+      "path": "src/renderer/controllers/bank-statement.js",
+      "name": "createBankStatementController",
+      "parameters": [
+        "api",
+        "panel",
+        "config",
+        "sharedReconSession",
+        "ui"
+      ]
+    },
+    "allowedApiFields": {
+      "api": [
+        "batchImport",
+        "c3CandidateCount",
+        "export",
+        "import",
+        "importGatewayRecon",
+        "onImportProgress",
+        "onRunProgress",
+        "refundCandidateCount",
+        "run",
+        "sessionStatus"
+      ],
+      "config": [
+        "linkedTable.import",
+        "linkedTable.rowCount",
+        "scenarios.list"
+      ],
+      "sharedReconSession": [
+        "clearSession",
+        "dispose",
+        "export",
+        "import",
+        "run",
+        "sessionStatus",
+        "subscribe"
+      ],
+      "ui": [
+        "alert",
+        "confirm",
+        "gatewayScenarioPicker",
+        "modalHost.closeOwner",
+        "modalHost.closeTop",
+        "modalHost.getHandle",
+        "modalHost.getTop",
+        "modalHost.openRoot",
+        "modalHost.push",
+        "modalHost.replace",
+        "openLinkedTables",
+        "openScenarios",
+        "reportError",
+        "status"
+      ]
+    },
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-recon-id-fix",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer/controllers/recon-id-fix.js"
+    ],
+    "allowedLocal": [
+      "src/renderer/controllers/recon-id-fix.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/controllers/recon-id-fix.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "ReconIdFixController"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "tests/unit/renderer/scenario-change-routing.test.js",
+      "tests/unit/renderer/scenario-controller-feedback.test.js",
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer/controllers/recon-id-fix.js",
+        "exportsGlobal": [
+          "ReconIdFixController"
+        ],
+        "consumesGlobals": []
+      }
+    ],
+    "factory": {
+      "path": "src/renderer/controllers/recon-id-fix.js",
+      "name": "createReconIdFixController",
+      "parameters": [
+        "api",
+        "panel",
+        "config",
+        "sharedReconSession",
+        "ui"
+      ]
+    },
+    "allowedApiFields": {
+      "api": [
+        "setReconIdFixBillCategory"
+      ],
+      "config": [
+        "initialBillCategory",
+        "scenarios.list"
+      ],
+      "sharedReconSession": [
+        "clearSession",
+        "dispose",
+        "export",
+        "import",
+        "run",
+        "sessionStatus",
+        "subscribe"
+      ],
+      "ui": [
+        "alert",
+        "confirm",
+        "gatewayScenarioPicker",
+        "modalHost.closeOwner",
+        "modalHost.closeTop",
+        "modalHost.getHandle",
+        "modalHost.getTop",
+        "modalHost.openRoot",
+        "modalHost.push",
+        "modalHost.replace",
+        "openLinkedTables",
+        "openScenarios",
+        "reportError",
+        "status"
+      ]
+    },
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-pre-fund",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer/controllers/pre-fund.js"
+    ],
+    "allowedLocal": [
+      "src/renderer/controllers/pre-fund.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/controllers/pre-fund.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "__preFundController"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "tests/unit/renderer/r4-controllers.test.js",
+      "tests/unit/renderer/r4-domain-controllers.test.js",
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer/controllers/pre-fund.js",
+        "exportsGlobal": [
+          "__preFundController"
+        ],
+        "consumesGlobals": []
+      }
+    ],
+    "factory": {
+      "path": "src/renderer/controllers/pre-fund.js",
+      "name": "createPreFundController",
+      "parameters": [
+        "api",
+        "panel",
+        "ui"
+      ]
+    },
+    "allowedApiFields": {
+      "api": [
+        "clearTemp",
+        "countTempByDateRange",
+        "deleteTempBatch",
+        "deleteTempByDateRange",
+        "export",
+        "exportMptErrors",
+        "importBank",
+        "importMpt",
+        "listTempBatches",
+        "onExportProgress",
+        "onImportProgress",
+        "onRunProgress",
+        "repairMptErrors",
+        "run",
+        "sessionStatus"
+      ],
+      "ui": [
+        "alert",
+        "createPreFundTempManagerDialog",
+        "escapeHtml",
+        "modalBridge.closeModal",
+        "modalBridge.host.closeOwner",
+        "modalBridge.host.closeTop",
+        "modalBridge.host.dispose",
+        "modalBridge.host.getHandle",
+        "modalBridge.host.getTop",
+        "modalBridge.host.openRoot",
+        "modalBridge.host.push",
+        "modalBridge.host.replace",
+        "modalBridge.openModal",
+        "modalBridge.pushModal",
+        "modalBridge.registerModal",
+        "modalBridge.replaceModal",
+        "modalBridge.returnToModal",
+        "modalHost.closeOwner",
+        "modalHost.closeTop",
+        "modalHost.dispose",
+        "modalHost.getHandle",
+        "modalHost.getTop",
+        "modalHost.openRoot",
+        "modalHost.push",
+        "modalHost.replace",
+        "reportError",
+        "status"
+      ]
+    },
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-bank-bu",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer/controllers/bank-bu.js"
+    ],
+    "allowedLocal": [
+      "src/renderer/controllers/bank-bu.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/controllers/bank-bu.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "__bankBuController"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "tests/unit/renderer/r4-controllers.test.js",
+      "tests/unit/renderer/r4-domain-controllers.test.js",
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer/controllers/bank-bu.js",
+        "exportsGlobal": [
+          "__bankBuController"
+        ],
+        "consumesGlobals": []
+      }
+    ],
+    "factory": {
+      "path": "src/renderer/controllers/bank-bu.js",
+      "name": "createBankBuController",
+      "parameters": [
+        "api",
+        "panel",
+        "ui"
+      ]
+    },
+    "allowedApiFields": {
+      "api": [
+        "exportAggregate",
+        "exportSingle",
+        "listMonths",
+        "listReadyMonths",
+        "listRuns",
+        "listSuccessMonths",
+        "pickBankFile",
+        "pickPendingFile",
+        "pickSavePath",
+        "run",
+        "runImport",
+        "status"
+      ],
+      "ui": [
+        "alert",
+        "createBankBuReconExportDialog",
+        "createBankBuReconFileImportPromptDialog",
+        "createBankBuReconMonthPickerDialog",
+        "createBankBuReconReconcileDialog",
+        "escapeHtml",
+        "modalBridge.closeModal",
+        "modalBridge.host.closeOwner",
+        "modalBridge.host.closeTop",
+        "modalBridge.host.dispose",
+        "modalBridge.host.getHandle",
+        "modalBridge.host.getTop",
+        "modalBridge.host.openRoot",
+        "modalBridge.host.push",
+        "modalBridge.host.replace",
+        "modalBridge.openModal",
+        "modalBridge.pushModal",
+        "modalBridge.registerModal",
+        "modalBridge.replaceModal",
+        "modalBridge.returnToModal",
+        "modalHost.closeOwner",
+        "modalHost.closeTop",
+        "modalHost.dispose",
+        "modalHost.getHandle",
+        "modalHost.getTop",
+        "modalHost.openRoot",
+        "modalHost.push",
+        "modalHost.replace",
+        "reportError",
+        "status"
+      ]
+    },
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-duplicate-inbound",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer/controllers/duplicate-inbound.js"
+    ],
+    "allowedLocal": [
+      "src/renderer/controllers/duplicate-inbound.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/controllers/duplicate-inbound.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "__duplicateInboundController"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "tests/unit/renderer/r4-controllers.test.js",
+      "tests/unit/renderer/r4-domain-controllers.test.js",
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer/controllers/duplicate-inbound.js",
+        "exportsGlobal": [
+          "__duplicateInboundController"
+        ],
+        "consumesGlobals": []
+      }
+    ],
+    "factory": {
+      "path": "src/renderer/controllers/duplicate-inbound.js",
+      "name": "createDuplicateInboundController",
+      "parameters": [
+        "api",
+        "panel",
+        "ui"
+      ]
+    },
+    "allowedApiFields": {
+      "api": [
+        "export",
+        "importFiles",
+        "onExportProgress",
+        "onImportProgress",
+        "onRunProgress",
+        "run",
+        "sessionStatus"
+      ],
+      "ui": [
+        "alert",
+        "escapeHtml",
+        "modalBridge.closeModal",
+        "modalBridge.host.closeOwner",
+        "modalBridge.host.closeTop",
+        "modalBridge.host.dispose",
+        "modalBridge.host.getHandle",
+        "modalBridge.host.getTop",
+        "modalBridge.host.openRoot",
+        "modalBridge.host.push",
+        "modalBridge.host.replace",
+        "modalBridge.openModal",
+        "modalBridge.pushModal",
+        "modalBridge.registerModal",
+        "modalBridge.replaceModal",
+        "modalBridge.returnToModal",
+        "modalHost.closeOwner",
+        "modalHost.closeTop",
+        "modalHost.dispose",
+        "modalHost.getHandle",
+        "modalHost.getTop",
+        "modalHost.openRoot",
+        "modalHost.push",
+        "modalHost.replace",
+        "reportError",
+        "status"
+      ]
+    },
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-acquiring",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer/controllers/acquiring.js"
+    ],
+    "allowedLocal": [
+      "src/renderer/controllers/acquiring.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/controllers/acquiring.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "__acquiringController"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "tests/unit/renderer/r4-controllers.test.js",
+      "tests/unit/renderer/r4-domain-controllers.test.js",
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer/controllers/acquiring.js",
+        "exportsGlobal": [
+          "__acquiringController"
+        ],
+        "consumesGlobals": []
+      }
+    ],
+    "factory": {
+      "path": "src/renderer/controllers/acquiring.js",
+      "name": "createAcquiringController",
+      "parameters": [
+        "api",
+        "panel",
+        "ui"
+      ]
+    },
+    "allowedApiFields": {
+      "api": [
+        "clearMonth",
+        "export",
+        "importBill",
+        "importFlow",
+        "listMonths",
+        "onCleanupBackgroundToast",
+        "onImportProgress",
+        "onRunProgress",
+        "run",
+        "runCancel",
+        "runResume",
+        "sessionStatus"
+      ],
+      "ui": [
+        "alert",
+        "confirmNative",
+        "createAcquiringBillCurrencyMonthPickerDialog",
+        "escapeHtml",
+        "modalBridge.closeModal",
+        "modalBridge.host.closeOwner",
+        "modalBridge.host.closeTop",
+        "modalBridge.host.dispose",
+        "modalBridge.host.getHandle",
+        "modalBridge.host.getTop",
+        "modalBridge.host.openRoot",
+        "modalBridge.host.push",
+        "modalBridge.host.replace",
+        "modalBridge.openModal",
+        "modalBridge.pushModal",
+        "modalBridge.registerModal",
+        "modalBridge.replaceModal",
+        "modalBridge.returnToModal",
+        "modalHost.closeOwner",
+        "modalHost.closeTop",
+        "modalHost.dispose",
+        "modalHost.getHandle",
+        "modalHost.getTop",
+        "modalHost.openRoot",
+        "modalHost.push",
+        "modalHost.replace",
+        "reportError",
+        "status"
+      ]
+    },
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-vcc-op-calc",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer/controllers/vcc-op-calc.js"
+    ],
+    "allowedLocal": [
+      "src/renderer/controllers/vcc-op-calc.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/controllers/vcc-op-calc.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "__vccOpCalcController"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "tests/unit/renderer/vcc-op-calc-source-binding.test.js",
+      "tests/unit/renderer/r4-domain-controllers.test.js",
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer/controllers/vcc-op-calc.js",
+        "exportsGlobal": [
+          "__vccOpCalcController"
+        ],
+        "consumesGlobals": []
+      }
+    ],
+    "factory": {
+      "path": "src/renderer/controllers/vcc-op-calc.js",
+      "name": "createVccOpCalcController",
+      "parameters": [
+        "api",
+        "panel",
+        "ui"
+      ]
+    },
+    "allowedApiFields": {
+      "api": [
+        "computeAmounts",
+        "getBalance",
+        "listBalanceMonths",
+        "onScanProgress",
+        "pickFiles",
+        "save",
+        "scan"
+      ],
+      "ui": [
+        "alert",
+        "createVccOpCalcComputeDialog",
+        "createVccOpCalcConfirmDialog",
+        "createVccOpCalcShowBalanceDialog",
+        "escapeHtml",
+        "modalBridge.closeModal",
+        "modalBridge.host.closeOwner",
+        "modalBridge.host.closeTop",
+        "modalBridge.host.dispose",
+        "modalBridge.host.getHandle",
+        "modalBridge.host.getTop",
+        "modalBridge.host.openRoot",
+        "modalBridge.host.push",
+        "modalBridge.host.replace",
+        "modalBridge.openModal",
+        "modalBridge.pushModal",
+        "modalBridge.registerModal",
+        "modalBridge.replaceModal",
+        "modalBridge.returnToModal",
+        "modalHost.closeOwner",
+        "modalHost.closeTop",
+        "modalHost.dispose",
+        "modalHost.getHandle",
+        "modalHost.getTop",
+        "modalHost.openRoot",
+        "modalHost.push",
+        "modalHost.replace",
+        "reportError",
+        "status"
+      ]
+    },
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-biz-op-legacy",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer/controllers/biz-op-legacy.js"
+    ],
+    "allowedLocal": [
+      "src/renderer/controllers/biz-op-legacy.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/controllers/biz-op-legacy.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "__bizOpLegacyController"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "tests/unit/renderer/r4-controllers.test.js",
+      "tests/unit/renderer/r4-domain-controllers.test.js",
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer/controllers/biz-op-legacy.js",
+        "exportsGlobal": [
+          "__bizOpLegacyController"
+        ],
+        "consumesGlobals": []
+      }
+    ],
+    "factory": {
+      "path": "src/renderer/controllers/biz-op-legacy.js",
+      "name": "createBizOpLegacyController",
+      "parameters": [
+        "api",
+        "panel",
+        "ui"
+      ]
+    },
+    "allowedApiFields": {
+      "api": [
+        "checkSingleDay",
+        "exportDate",
+        "exportDateRange",
+        "listBu",
+        "listReadyDates",
+        "listSuccessDates",
+        "openErrorReportFolder",
+        "pickBizOpFile",
+        "pickFlowFile",
+        "pickSavePath",
+        "run",
+        "runBizOpImport",
+        "runFlowImport",
+        "runHistory",
+        "status"
+      ],
+      "ui": [
+        "alert",
+        "createAlertDialog",
+        "createBizOpReconDatePickerDialog",
+        "createBizOpReconExportDialog",
+        "createBizOpReconReconcileDialog",
+        "createBizOpReconSecondImportPromptDialog",
+        "escapeHtml",
+        "getBizOpReconDefaultDate",
+        "modalBridge.closeModal",
+        "modalBridge.host.closeOwner",
+        "modalBridge.host.closeTop",
+        "modalBridge.host.dispose",
+        "modalBridge.host.getHandle",
+        "modalBridge.host.getTop",
+        "modalBridge.host.openRoot",
+        "modalBridge.host.push",
+        "modalBridge.host.replace",
+        "modalBridge.openModal",
+        "modalBridge.pushModal",
+        "modalBridge.registerModal",
+        "modalBridge.replaceModal",
+        "modalBridge.returnToModal",
+        "modalHost.closeOwner",
+        "modalHost.closeTop",
+        "modalHost.dispose",
+        "modalHost.getHandle",
+        "modalHost.getTop",
+        "modalHost.openRoot",
+        "modalHost.push",
+        "modalHost.replace",
+        "reportError",
+        "status"
+      ]
+    },
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-statement",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer/controllers/statement.js"
+    ],
+    "allowedLocal": [
+      "src/renderer/controllers/statement.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/controllers/statement.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "StatementController"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "tests/unit/renderer/configuration-services.test.js",
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer/controllers/statement.js",
+        "exportsGlobal": [
+          "StatementController"
+        ],
+        "consumesGlobals": []
+      }
+    ],
+    "factory": {
+      "path": "src/renderer/controllers/statement.js",
+      "name": "createStatementController",
+      "parameters": [
+        "api",
+        "panel",
+        "config",
+        "ui",
+        "initialInfo"
+      ]
+    },
+    "allowedApiFields": {
+      "api": [
+        "accountMappings.checkMigrationPending",
+        "accountMappings.distributeMigration",
+        "accountMappings.getMigrationData",
+        "accountMappings.list",
+        "accountMappings.save",
+        "errors.exportLast",
+        "files.cancelBigAccountSelection",
+        "files.completeBigAccountSelection",
+        "files.exportBalance",
+        "files.exportDetail",
+        "files.extractBigAccountOrder",
+        "files.importFile",
+        "files.saveBalanceSeed",
+        "monthlyBalance.assemble",
+        "monthlyBalance.export",
+        "templates.importTemplate"
+      ],
+      "config": [
+        "getAccountMappingCount",
+        "getCurrencyOptions",
+        "getTemplates",
+        "refreshTemplates",
+        "subscribe"
+      ],
+      "ui": [
+        "alertNative",
+        "createAccountMappingDialog",
+        "createAccountMappingMigrationDialog",
+        "createAlertDialog",
+        "createBigAccountSelectionDialog",
+        "createExportScopeDialog",
+        "createManualBalanceSeedDialog",
+        "createMonthlyBalanceExportDialog",
+        "createRememberOrderMismatchDialog",
+        "createTemplateManagerDialog",
+        "modalBridge.closeModal",
+        "modalBridge.host.closeOwner",
+        "modalBridge.host.closeTop",
+        "modalBridge.host.dispose",
+        "modalBridge.host.getHandle",
+        "modalBridge.host.getTop",
+        "modalBridge.host.openRoot",
+        "modalBridge.host.push",
+        "modalBridge.host.replace",
+        "modalBridge.openModal",
+        "modalBridge.pushModal",
+        "modalBridge.registerModal",
+        "modalBridge.replaceModal",
+        "modalBridge.returnToModal",
+        "modalHost.closeOwner",
+        "modalHost.closeTop",
+        "modalHost.dispose",
+        "modalHost.getHandle",
+        "modalHost.getTop",
+        "modalHost.openRoot",
+        "modalHost.push",
+        "modalHost.replace",
+        "reportError",
+        "status"
+      ]
+    },
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-new-account",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer/controllers/new-account.js"
+    ],
+    "allowedLocal": [
+      "src/renderer/controllers/new-account.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/controllers/new-account.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "__newAccountController"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "tests/unit/renderer/configuration-services.test.js",
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer/controllers/new-account.js",
+        "exportsGlobal": [
+          "__newAccountController"
+        ],
+        "consumesGlobals": []
+      }
+    ],
+    "factory": {
+      "path": "src/renderer/controllers/new-account.js",
+      "name": "createNewAccountController",
+      "parameters": [
+        "api",
+        "panel",
+        "config",
+        "ui"
+      ]
+    },
+    "allowedApiFields": {
+      "api": [
+        "exportFile",
+        "exportLastError",
+        "generate"
+      ],
+      "config": [
+        "getCurrencyOptions",
+        "subscribe"
+      ],
+      "ui": [
+        "alert",
+        "escapeHtml",
+        "modalBridge.closeModal",
+        "modalBridge.host.closeOwner",
+        "modalBridge.host.closeTop",
+        "modalBridge.host.dispose",
+        "modalBridge.host.getHandle",
+        "modalBridge.host.getTop",
+        "modalBridge.host.openRoot",
+        "modalBridge.host.push",
+        "modalBridge.host.replace",
+        "modalBridge.openModal",
+        "modalBridge.pushModal",
+        "modalBridge.registerModal",
+        "modalBridge.replaceModal",
+        "modalBridge.returnToModal",
+        "modalHost.closeOwner",
+        "modalHost.closeTop",
+        "modalHost.dispose",
+        "modalHost.getHandle",
+        "modalHost.getTop",
+        "modalHost.openRoot",
+        "modalHost.push",
+        "modalHost.replace",
+        "reportError",
+        "status"
+      ]
+    },
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-pending",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer-pending.js",
+      "src/renderer/controllers/pending.js"
+    ],
+    "allowedLocal": [
+      "src/renderer-pending.js",
+      "src/renderer/controllers/pending.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer/controllers/pending.js",
+        "to": "src/renderer-pending.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "__rendererPending"
+        ]
+      },
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/controllers/pending.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "__pendingController"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "tests/unit/renderer/r4-controllers.test.js",
+      "tests/unit/renderer/r4-domain-controllers.test.js",
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer-pending.js",
+        "exportsGlobal": [
+          "__rendererPending"
+        ],
+        "consumesGlobals": []
+      },
+      {
+        "path": "src/renderer/controllers/pending.js",
+        "exportsGlobal": [
+          "__pendingController"
+        ],
+        "consumesGlobals": [
+          "__rendererPending"
+        ]
+      }
+    ],
+    "factory": {
+      "path": "src/renderer-pending.js",
+      "name": "createPendingController",
+      "parameters": [
+        "api",
+        "panel",
+        "ui"
+      ]
+    },
+    "allowedApiFields": {
+      "api": [
+        "diff.exportAggregate",
+        "diff.exportSingle",
+        "diff.getLatestRunForMonthPair",
+        "diff.listAllRuns",
+        "diff.listRunsForMonthPair",
+        "exportErrorReport",
+        "getColumns",
+        "getRule",
+        "listMonths",
+        "onImportProgress",
+        "pickFiles",
+        "reconcile.run",
+        "removed.import",
+        "removed.pickFiles",
+        "saveRule",
+        "startImport"
+      ],
+      "ui": [
+        "createAlertDialog",
+        "createConfirmDialog",
+        "modalBridge.closeModal",
+        "modalBridge.host.closeOwner",
+        "modalBridge.host.closeTop",
+        "modalBridge.host.dispose",
+        "modalBridge.host.getHandle",
+        "modalBridge.host.getTop",
+        "modalBridge.host.openRoot",
+        "modalBridge.host.push",
+        "modalBridge.host.replace",
+        "modalBridge.openModal",
+        "modalBridge.pushModal",
+        "modalBridge.registerModal",
+        "modalBridge.replaceModal",
+        "modalBridge.returnToModal",
+        "modalHost.closeOwner",
+        "modalHost.closeTop",
+        "modalHost.dispose",
+        "modalHost.getHandle",
+        "modalHost.getTop",
+        "modalHost.openRoot",
+        "modalHost.push",
+        "modalHost.replace",
+        "reportError"
+      ]
+    },
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-position",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer-position-reconciliation.js"
+    ],
+    "allowedLocal": [
+      "src/renderer-position-reconciliation.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer-position-reconciliation.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "__positionReconciliation"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer-position-reconciliation.js",
+        "exportsGlobal": [
+          "__positionReconciliation"
+        ],
+        "consumesGlobals": []
+      }
+    ],
+    "factory": {
+      "path": "src/renderer-position-reconciliation.js",
+      "name": "createPositionReconciliationUI",
+      "parameters": [
+        "api",
+        "panel",
+        "openModal",
+        "closeModal",
+        "createAlertDialog",
+        "createConfirmDialog",
+        "modalHost",
+        "modalBridge"
+      ]
+    },
+    "allowedApiFields": {
+      "api": [
+        "applyBankImport",
+        "applySourceImport",
+        "cancelActiveImport",
+        "cancelBankImport",
+        "cancelSourceImport",
+        "confirmRun",
+        "dataManager",
+        "deleteBank",
+        "deleteSource",
+        "exportBank",
+        "exportLinked",
+        "exportRaw",
+        "exportRun",
+        "exportRunFiltered",
+        "exportSourceAnomaly",
+        "importRunResult",
+        "linkedManager",
+        "listMappings",
+        "onImportProgress",
+        "prepareBankImport",
+        "prepareSourceImport",
+        "run",
+        "saveMappings",
+        "status"
+      ],
+      "modalHost": [
+        "closeOwner",
+        "closeTop",
+        "dispose",
+        "getHandle",
+        "getTop",
+        "openRoot",
+        "push",
+        "replace"
+      ],
+      "modalBridge": [
+        "closeModal",
+        "host.closeOwner",
+        "host.closeTop",
+        "host.dispose",
+        "host.getHandle",
+        "host.getTop",
+        "host.openRoot",
+        "host.push",
+        "host.replace",
+        "openModal",
+        "pushModal",
+        "registerModal",
+        "replaceModal",
+        "returnToModal"
+      ]
+    },
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-vcc-financial-op",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer-vcc-financial-op.js"
+    ],
+    "allowedLocal": [
+      "src/renderer-vcc-financial-op.js",
+      "src/shared/vcc-financial-op-difference.js",
+      "src/shared/vcc-review-projection.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer-vcc-financial-op.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "__vccFinancialOpController"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer-vcc-financial-op.js",
+        "exportsGlobal": [
+          "__vccFinancialOpController"
+        ],
+        "consumesGlobals": []
+      }
+    ],
+    "factory": {
+      "path": "src/renderer-vcc-financial-op.js",
+      "name": "createVccFinancialOpController",
+      "parameters": [
+        "api",
+        "panel",
+        "modalHost",
+        "differenceApi",
+        "reviewProjection",
+        "previewEnabled"
+      ]
+    },
+    "allowedApiFields": {
+      "api": [
+        "addRunAdjustment",
+        "archive",
+        "calculate",
+        "cancelTask",
+        "dataManagerOverview",
+        "deleteDataTarget",
+        "deleteDataset",
+        "exportDataset",
+        "exportImportAudit",
+        "exportResult",
+        "exportReviewTable",
+        "getRun",
+        "importFiles",
+        "initializeOpening",
+        "latestArchivedRun",
+        "listAdjustmentOptions",
+        "listArchivedResultMonths",
+        "listDeleteTargets",
+        "listImportMonths",
+        "listImportRecords",
+        "onImportProgress",
+        "onOperationProgress",
+        "pickFiles",
+        "preflightRun",
+        "previewDataTargetDeletion",
+        "previewDatasetDeletion",
+        "previewDatasetExport",
+        "previewUnarchive",
+        "unarchiveMonth"
+      ],
+      "modalHost": [
+        "closeOwner",
+        "closeTop",
+        "dispose",
+        "getHandle",
+        "getTop",
+        "openRoot",
+        "push",
+        "replace"
+      ],
+      "differenceApi": [
+        "assertCanonicalDifference",
+        "isEffectiveDifferenceZero"
+      ],
+      "reviewProjection": [
+        "CURRENCIES",
+        "HEADERS",
+        "SUMMARIES",
+        "formatAmount",
+        "projectReview"
+      ]
+    },
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-biz-op-v327",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer-biz-op-v327.js"
+    ],
+    "allowedLocal": [
+      "src/renderer-biz-op-v327.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer-biz-op-v327.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "createBizOpV327Controller"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "tests/unit/main-process/biz-op-v329-renderer.test.js",
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer-biz-op-v327.js",
+        "exportsGlobal": [
+          "createBizOpV327Controller"
+        ],
+        "consumesGlobals": []
+      }
+    ],
+    "factory": {
+      "path": "src/renderer-biz-op-v327.js",
+      "name": "createBizOpV327Controller",
+      "parameters": [
+        "api",
+        "panel",
+        "legacyPanel",
+        "legacyController",
+        "modalHost"
+      ]
+    },
+    "allowedApiFields": {
+      "api": [
+        "cancel",
+        "currentInput",
+        "deleteData",
+        "deletePreview",
+        "exportWorkbook",
+        "importFiles",
+        "list",
+        "months",
+        "pickExport",
+        "pickFiles",
+        "preflight",
+        "retryRecovery",
+        "run",
+        "runCalendar",
+        "status"
+      ],
+      "modalHost": [
+        "closeOwner",
+        "closeTop",
+        "dispose",
+        "getHandle",
+        "getTop",
+        "openRoot",
+        "push",
+        "replace"
+      ],
+      "legacyController": [
+        "applyPreviewState",
+        "dispose",
+        "enter",
+        "export",
+        "getSnapshot",
+        "importFiles",
+        "invalidate",
+        "leave",
+        "run",
+        "selectBu"
+      ]
+    },
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-dialog-scenarios",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer/dialogs/scenarios.js"
+    ],
+    "allowedLocal": [
+      "src/renderer/dialogs/scenarios.js",
+      "src/shared/payment-big-accounts.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer-dialogs.js",
+        "to": "src/renderer/dialogs/scenarios.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "ScenarioDialogs"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "tests/unit/renderer/scenario-change-routing.test.js",
+      "tests/unit/renderer/scenario-write-boundary.test.js",
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer/dialogs/scenarios.js",
+        "exportsGlobal": [
+          "ScenarioDialogs"
+        ],
+        "consumesGlobals": [
+          "__paymentBigAccounts"
+        ]
+      }
+    ],
+    "factory": {
+      "path": "src/renderer/dialogs/scenarios.js",
+      "name": "createScenarioDialogs",
+      "parameters": [
+        "scenarioCommands",
+        "subscriptions",
+        "appConstants",
+        "modalBridge",
+        "ui"
+      ]
+    },
+    "allowedApiFields": {
+      "scenarioCommands": [
+        "channels.create",
+        "channels.deleteOne",
+        "channels.list",
+        "channels.update",
+        "closed",
+        "dispose",
+        "scenarios.applyImport",
+        "scenarios.batchDelete",
+        "scenarios.create",
+        "scenarios.deleteOne",
+        "scenarios.exportBundle",
+        "scenarios.get",
+        "scenarios.getApplicableChannels",
+        "scenarios.getFundTypeEnum",
+        "scenarios.getGatewayReconHeaders",
+        "scenarios.importBundle",
+        "scenarios.list",
+        "scenarios.setApplicableChannels",
+        "scenarios.toggleEnabled",
+        "scenarios.transfer",
+        "scenarios.update"
+      ],
+      "subscriptions": [
+        "subscribeChannels",
+        "subscribeScenarios"
+      ],
+      "modalBridge": [
+        "closeModal",
+        "host.closeOwner",
+        "host.closeTop",
+        "host.dispose",
+        "host.getHandle",
+        "host.getTop",
+        "host.openRoot",
+        "host.push",
+        "host.replace",
+        "openModal",
+        "pushModal",
+        "registerModal",
+        "replaceModal",
+        "returnToModal"
+      ],
+      "ui": [
+        "createAlertDialog",
+        "createConfirmDialog",
+        "createOverlay",
+        "escapeHtml",
+        "pushAlert"
+      ]
+    },
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-dialog-configuration",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer/dialogs/configuration.js"
+    ],
+    "allowedLocal": [
+      "src/renderer/dialogs/configuration.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer-dialogs.js",
+        "to": "src/renderer/dialogs/configuration.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "ConfigurationDialogs"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "tests/unit/renderer/configuration-services.test.js",
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer/dialogs/configuration.js",
+        "exportsGlobal": [
+          "ConfigurationDialogs"
+        ],
+        "consumesGlobals": []
+      }
+    ],
+    "factory": {
+      "path": "src/renderer/dialogs/configuration.js",
+      "name": "createConfigurationDialogs",
+      "parameters": [
+        "services",
+        "api",
+        "modalBridge",
+        "ui",
+        "constants"
+      ]
+    },
+    "allowedApiFields": {
+      "services": [
+        "acceptAccountMappingCount",
+        "acceptBootstrap",
+        "applyPreviewTemplates",
+        "dispose",
+        "getAccountMappingCount",
+        "getCurrencyOptions",
+        "getTemplates",
+        "refreshTemplates",
+        "subscribe"
+      ],
+      "api": [
+        "accountMappings.checkMigrationPending",
+        "accountMappings.distributeMigration",
+        "accountMappings.getMigrationData",
+        "accountMappings.list",
+        "accountMappings.save",
+        "app.getInfo",
+        "balanceAdjustment.list",
+        "balanceAdjustment.save",
+        "bigAccount.getWithOwn",
+        "bigAccount.importBankInfo",
+        "bigAccount.loadMode",
+        "bigAccount.loadOrder",
+        "bigAccount.saveMode",
+        "bigAccount.saveOrder",
+        "bigAccount.saveOwnAccounts",
+        "files.cancelBigAccountSelection",
+        "files.completeBigAccountSelection",
+        "files.exportBalance",
+        "files.exportDetail",
+        "files.extractBigAccountOrder",
+        "files.importFile",
+        "files.saveBalanceSeed",
+        "monthlyBalance.assemble",
+        "monthlyBalance.export",
+        "templates.clearBillSplitMergeGroups",
+        "templates.deleteBillSplitRow",
+        "templates.deleteTemplate",
+        "templates.exportBundle",
+        "templates.getAmountSplitRules",
+        "templates.getBillSplitConfig",
+        "templates.getMappings",
+        "templates.importBundle",
+        "templates.importTemplate",
+        "templates.list",
+        "templates.listChildren",
+        "templates.previewDeleteBillSplitRow",
+        "templates.rename",
+        "templates.saveAmountSplitRules",
+        "templates.saveBillSplitAmountRules",
+        "templates.saveBillSplitMappings",
+        "templates.saveBillSplitMergeGroup",
+        "templates.saveBillSplitMeta",
+        "templates.saveBillSplitRow",
+        "templates.saveBillSplitRowCount",
+        "templates.saveFilenameFixedField",
+        "templates.saveMappings",
+        "templates.setChildParent",
+        "templates.setParentStatus"
+      ],
+      "modalBridge": [
+        "closeModal",
+        "host.closeOwner",
+        "host.closeTop",
+        "host.dispose",
+        "host.getHandle",
+        "host.getTop",
+        "host.openRoot",
+        "host.push",
+        "host.replace",
+        "openModal",
+        "pushModal",
+        "registerModal",
+        "replaceModal",
+        "returnToModal"
+      ],
+      "ui": [
+        "applyManualBalancePromptStatus",
+        "applyStatementResult",
+        "createAlertDialog",
+        "createConfirmDialog",
+        "createFeedbackScope",
+        "createOverlay",
+        "escapeHtml",
+        "pushAlert",
+        "setStatus"
+      ]
+    },
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-services",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer/module-router.js",
+      "src/renderer/scenario-command-service.js",
+      "src/renderer/scenario-change-router.js",
+      "src/renderer/shared-recon-session.js",
+      "src/renderer/configuration-services.js",
+      "src/renderer/modal-bridge.js"
+    ],
+    "allowedLocal": [
+      "src/renderer/module-router.js",
+      "src/renderer/scenario-command-service.js",
+      "src/renderer/scenario-change-router.js",
+      "src/renderer/shared-recon-session.js",
+      "src/renderer/configuration-services.js",
+      "src/renderer/modal-bridge.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/module-router.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "ModuleRouter"
+        ]
+      },
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/scenario-command-service.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "ScenarioCommandService"
+        ]
+      },
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/scenario-change-router.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "ScenarioChangeRouter"
+        ]
+      },
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/shared-recon-session.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "SharedReconSession"
+        ]
+      },
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/configuration-services.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "ConfigurationServices"
+        ]
+      },
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/modal-bridge.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "__modalBridge"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "tests/unit/renderer/module-router.test.js",
+      "tests/unit/renderer/scenario-command-service.test.js",
+      "tests/unit/renderer/scenario-change-routing.test.js",
+      "tests/unit/renderer/configuration-services.test.js",
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer/module-router.js",
+        "exportsGlobal": [
+          "ModuleRouter"
+        ],
+        "consumesGlobals": []
+      },
+      {
+        "path": "src/renderer/scenario-command-service.js",
+        "exportsGlobal": [
+          "ScenarioCommandService"
+        ],
+        "consumesGlobals": []
+      },
+      {
+        "path": "src/renderer/scenario-change-router.js",
+        "exportsGlobal": [
+          "ScenarioChangeRouter"
+        ],
+        "consumesGlobals": []
+      },
+      {
+        "path": "src/renderer/shared-recon-session.js",
+        "exportsGlobal": [
+          "SharedReconSession"
+        ],
+        "consumesGlobals": []
+      },
+      {
+        "path": "src/renderer/configuration-services.js",
+        "exportsGlobal": [
+          "ConfigurationServices"
+        ],
+        "consumesGlobals": []
+      },
+      {
+        "path": "src/renderer/modal-bridge.js",
+        "exportsGlobal": [
+          "__modalBridge"
+        ],
+        "consumesGlobals": []
+      },
+      {
+        "path": "src/shared/payment-big-accounts.js",
+        "exportsGlobal": [
+          "__paymentBigAccounts"
+        ],
+        "consumesGlobals": []
+      },
+      {
+        "path": "src/shared/vcc-financial-op-difference.js",
+        "exportsGlobal": [
+          "__vccFinancialOpDifference"
+        ],
+        "consumesGlobals": []
+      },
+      {
+        "path": "src/shared/vcc-review-projection.js",
+        "exportsGlobal": [
+          "__vccReviewProjection"
+        ],
+        "consumesGlobals": [
+          "__vccFinancialOpDifference"
+        ]
+      }
+    ],
+    "factory": null,
+    "allowedApiFields": {},
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-dialog-app-settings",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer/dialogs/app-settings.js"
+    ],
+    "allowedLocal": [
+      "src/renderer/dialogs/app-settings.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer.js",
+        "to": "src/renderer/dialogs/app-settings.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "__appSettingsDialogs"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer/dialogs/app-settings.js",
+        "exportsGlobal": [
+          "__appSettingsDialogs"
+        ],
+        "consumesGlobals": []
+      }
+    ],
+    "factory": {
+      "path": "src/renderer/dialogs/app-settings.js",
+      "name": "createAppSettingsDialogs",
+      "parameters": [
+        "api",
+        "modalBridge",
+        "modules",
+        "ui"
+      ]
+    },
+    "allowedApiFields": {
+      "api": [
+        "appUpdate.checkNow",
+        "appUpdate.getStatus",
+        "appUpdate.onStatusChanged",
+        "appUpdate.restartAndInstall",
+        "appUpdate.setEnabled",
+        "archiveCenter.changeStorageLocation",
+        "archiveCenter.deleteBatch",
+        "archiveCenter.getBatch",
+        "archiveCenter.getSettings",
+        "archiveCenter.getStats",
+        "archiveCenter.listBatches",
+        "archiveCenter.listDeleteCleanupJobs",
+        "archiveCenter.onEntryMaintenanceCompleted",
+        "archiveCenter.onEntryMaintenanceFailed",
+        "archiveCenter.onEntryMaintenanceProgress",
+        "archiveCenter.onStorageMigrationProgress",
+        "archiveCenter.openFile",
+        "archiveCenter.prepareDeleteBatch",
+        "archiveCenter.retryBatch",
+        "archiveCenter.retryDeleteCleanupJob",
+        "archiveCenter.saveAs",
+        "archiveCenter.selectRetrySources",
+        "archiveCenter.setLocked",
+        "archiveCenter.setModuleRetentionDays",
+        "archiveCenter.setRetentionDays",
+        "archiveCenter.startEntryMaintenance"
+      ],
+      "modalBridge": [
+        "closeModal",
+        "host.closeOwner",
+        "host.closeTop",
+        "host.dispose",
+        "host.getHandle",
+        "host.getTop",
+        "host.openRoot",
+        "host.push",
+        "host.replace",
+        "openModal",
+        "pushModal",
+        "registerModal",
+        "replaceModal",
+        "returnToModal"
+      ],
+      "ui": [
+        "applyAppUpdateActionResult",
+        "applyAppUpdateStatus",
+        "createConfirmDialog",
+        "escapeHtml",
+        "getAppUpdateStatus",
+        "getDarkModeController",
+        "mountAppearanceSettings",
+        "refreshOpenAppUpdateDialog",
+        "restartAndInstallAppUpdate"
+      ]
+    },
+    "deprecatedEntrypoints": [],
+    "directory": null
+  },
+  {
+    "id": "renderer-dialog-toolbox",
+    "governance": "G3",
+    "owner": "codex/v3.2.10-renderer-boundaries",
+    "state": "active",
+    "rules": [
+      "ARCH-RENDERER-SCOPE"
+    ],
+    "entrypoints": [
+      "src/renderer/dialogs/toolbox.js"
+    ],
+    "allowedLocal": [
+      "src/renderer/dialogs/toolbox.js"
+    ],
+    "allowedExternal": [],
+    "requiredConsumers": [
+      {
+        "from": "src/renderer-dialogs.js",
+        "to": "src/renderer/dialogs/toolbox.js",
+        "kind": "classic-global",
+        "importedNames": [
+          "__toolboxDialogs"
+        ]
+      }
+    ],
+    "activationEvidence": [
+      "tests/unit/renderer/toolbox-modal.test.js",
+      "scripts/test-renderer-lifecycle.js"
+    ],
+    "protectedScopes": [],
+    "restrictedApis": [],
+    "allowedSites": [],
+    "compositionEntrypoints": [],
+    "globals": [
+      {
+        "path": "src/renderer/dialogs/toolbox.js",
+        "exportsGlobal": [
+          "__toolboxDialogs"
+        ],
+        "consumesGlobals": []
+      }
+    ],
+    "factory": {
+      "path": "src/renderer/dialogs/toolbox.js",
+      "name": "createToolboxDialogs",
+      "parameters": [
+        "api",
+        "modalBridge",
+        "ui"
+      ]
+    },
+    "allowedApiFields": {
+      "api": [
+        "merge",
+        "splitExport",
+        "splitRead"
+      ],
+      "modalBridge": [
+        "closeModal",
+        "host.closeOwner",
+        "host.closeTop",
+        "host.dispose",
+        "host.getHandle",
+        "host.getTop",
+        "host.openRoot",
+        "host.push",
+        "host.replace",
+        "openModal",
+        "pushModal",
+        "registerModal",
+        "replaceModal",
+        "returnToModal"
+      ],
+      "ui": [
+        "createAlertDialog",
+        "escapeHtml"
+      ]
+    },
+    "deprecatedEntrypoints": [],
+    "directory": null
+  }
+]

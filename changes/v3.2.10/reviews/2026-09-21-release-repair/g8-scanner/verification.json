@@ -1,0 +1,40 @@
+{
+  "recordedAt": "2026-09-21T14:22:33.524831+00:00",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "commands": [
+    {
+      "command": "./node_modules/.bin/eslint scripts/architecture/contracts.js scripts/architecture/scan.js scripts/architecture/rules.js tests/unit/architecture/release-closure-regressions.test.js",
+      "exitCode": 0,
+      "log": "lint.log"
+    },
+    {
+      "command": "node --test tests/unit/architecture/*.test.js",
+      "exitCode": 0,
+      "tests": 170,
+      "passed": 170,
+      "failed": 0,
+      "skipped": 0,
+      "log": "architecture-tests.log"
+    },
+    {
+      "command": "node scripts/check-architecture.js --json <absolute g8-scanner/architecture-check.json>",
+      "exitCode": 0,
+      "diagnostics": 0,
+      "activeBoundaries": 31,
+      "staleExceptions": 0,
+      "log": "architecture-check.log"
+    }
+  ],
+  "fileSha256": {
+    "scripts/architecture/ci-policy-base.js": "4c4bf7555e331f2e65694b24478dbf950fc43ef909002e107cfa05522840a463",
+    "scripts/architecture/contracts.js": "b594d0c8f18f0c43276e56c88efbb55cce6ded12302b5b9a88d5dd3c662ab453",
+    "scripts/architecture/policy-history.js": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+    "scripts/architecture/renderer-contracts.js": "bb4cb2ca821fd639fc12b04d5606d14ac36828f93dfc5f3bfc0660f3dc72022c",
+    "scripts/architecture/rules.js": "5a25880507fce22c3b066b084975a2b773afc2a1b3eef14fa2a7b7a41f8de143",
+    "scripts/architecture/scan.js": "8f18138d5a0cc2c51188831b0cdffb752c2300212ccfe2f0349f06ac52850615",
+    "scripts/architecture/schema.js": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+    "architecture/boundaries.json": "10377e49efe16d8946294e2188c84a9b0ceaa693eca4a3e5e5272716bf33c583",
+    "architecture/legacy-allowlist.json": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3",
+    "tests/unit/architecture/release-closure-regressions.test.js": "1b668bd106de879ec6ac821bcaa1e3f00fc8dc642e115502c3c86e2b9b785423"
+  }
+}

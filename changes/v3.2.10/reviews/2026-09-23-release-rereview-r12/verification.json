@@ -1,0 +1,68 @@
+{
+  "round": 12,
+  "result": "CHANGES_REQUESTED",
+  "scope": "Frozen release dirty candidate; R11 repair delta and bounded neighboring scenarios",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "frozenFiles": 4902,
+  "findings": [
+    {
+      "id": "RR12-01",
+      "priority": "P2",
+      "classification": "pre-existing-defect",
+      "file": "scripts/architecture/renderer-contracts.js",
+      "start": 65,
+      "end": 68,
+      "summary": "Finite array helper calls can cause recursive identity evaluation to overflow the checker stack"
+    }
+  ],
+  "observations": [
+    {
+      "case": "overwritten-before-reorder-safe",
+      "beforeDiagnostics": 0,
+      "currentDiagnostics": 1,
+      "classification": "conservative precision boundary, not counted as a confirmed defect"
+    }
+  ],
+  "previousOriginalCasesClosed": [
+    "RR11-01",
+    "RR11-02"
+  ],
+  "architectureTests": {
+    "executedThisRound": true,
+    "exitCode": 0,
+    "tests": 577,
+    "pass": 577,
+    "fail": 0,
+    "skipped": 0
+  },
+  "architectureCLI": {
+    "executedThisRound": true,
+    "exitCode": 0,
+    "active": 31,
+    "diagnostics": 0,
+    "staleExceptions": 0,
+    "parsed": 765,
+    "scanned": 765
+  },
+  "fullGate": {
+    "executedThisRound": false,
+    "reusedFrom": "changes/v3.2.10/reviews/2026-09-23-release-r11-repair/verification.json",
+    "matchedInputs": 1708,
+    "unitPass": 9351,
+    "unitFail": 0,
+    "windowsSkips": 4,
+    "integrationScriptsPassed": 68,
+    "countedIntegrationChecks": 2901
+  },
+  "probeEvidence": "evidence/probe-verification.json",
+  "preservation": "evidence/preservation-final.json",
+  "notVerified": [
+    "real Main business lifecycle",
+    "GUI",
+    "Windows real machine and installed package",
+    "Excel/WPS",
+    "release readiness"
+  ],
+  "sourceChangesThisRound": false
+}

@@ -1,0 +1,48 @@
+[
+  {
+    "name": "conditional-call-skipped",
+    "hasEnum": false,
+    "source": "const reviewOld={run(){}};const reviewClean={run(){}};const reviewBox={api:reviewOld};function replaceReviewApi(){reviewBox.api=reviewClean;}async function runReviewScenario(){const reviewInfo=await window.desktopApi.app.getInfo();if(reviewInfo.hasEnum)replaceReviewApi();const reviewOther=reviewBox.api;reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewOld});return reviewOther===reviewOld;}runReviewScenario();",
+    "ipcReads": 1,
+    "same": true,
+    "apiKeys": [
+      "run",
+      "outsideScope"
+    ],
+    "extraCallable": true,
+    "extraResult": true
+  },
+  {
+    "name": "conditional-call-skipped",
+    "hasEnum": true,
+    "source": "const reviewOld={run(){}};const reviewClean={run(){}};const reviewBox={api:reviewOld};function replaceReviewApi(){reviewBox.api=reviewClean;}async function runReviewScenario(){const reviewInfo=await window.desktopApi.app.getInfo();if(reviewInfo.hasEnum)replaceReviewApi();const reviewOther=reviewBox.api;reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewOld});return reviewOther===reviewOld;}runReviewScenario();",
+    "ipcReads": 1,
+    "same": false,
+    "apiKeys": [
+      "run"
+    ],
+    "extraCallable": false
+  },
+  {
+    "name": "direct-call-before-old-safe",
+    "hasEnum": false,
+    "source": "const reviewOld={run(){}};const reviewClean={run(){}};const reviewBox={api:reviewOld};function replaceReviewApi(){reviewBox.api=reviewClean;}async function runReviewScenario(){const reviewInfo=await window.desktopApi.app.getInfo();replaceReviewApi();const reviewOther=reviewBox.api;reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewOld});return reviewOther===reviewOld;}runReviewScenario();",
+    "ipcReads": 1,
+    "same": false,
+    "apiKeys": [
+      "run"
+    ],
+    "extraCallable": false
+  },
+  {
+    "name": "direct-call-before-old-safe",
+    "hasEnum": true,
+    "source": "const reviewOld={run(){}};const reviewClean={run(){}};const reviewBox={api:reviewOld};function replaceReviewApi(){reviewBox.api=reviewClean;}async function runReviewScenario(){const reviewInfo=await window.desktopApi.app.getInfo();replaceReviewApi();const reviewOther=reviewBox.api;reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewOld});return reviewOther===reviewOld;}runReviewScenario();",
+    "ipcReads": 1,
+    "same": false,
+    "apiKeys": [
+      "run"
+    ],
+    "extraCallable": false
+  }
+]

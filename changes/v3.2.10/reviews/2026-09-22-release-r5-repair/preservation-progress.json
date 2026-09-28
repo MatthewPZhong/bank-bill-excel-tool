@@ -1,0 +1,16 @@
+{
+  "initialFiles": 4268,
+  "changed": [
+    "architecture/README.md",
+    "changes/v3.2.10/README.md",
+    "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md",
+    "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md",
+    "changes/v3.2.10/release.md",
+    "scripts/architecture/contracts.js",
+    "scripts/architecture/renderer-contracts.js",
+    "scripts/architecture/scan.js"
+  ],
+  "productionFiles": 792,
+  "historicalReviewFiles": 295,
+  "protectedChanged": []
+}

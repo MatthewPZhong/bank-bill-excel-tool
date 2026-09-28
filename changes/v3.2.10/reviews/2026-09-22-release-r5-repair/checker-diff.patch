@@ -1,0 +1,266 @@
+--- a/scripts/architecture/scan.js
++++ b/scripts/architecture/scan.js
+@@ -233,19 +233,33 @@
+   };
+   const unknown = (reason) => ({ kind: 'unknown', reason });
+   const descriptionCache = new WeakMap();
++  // 保留成员读取的时点和接收者；普通调用解析仍消费原描述，Renderer 可据此还原替换后的身份。
++  // 私有旁表不改变扫描结果、JSON 指纹或能力字段。
++  const memberReads = new WeakMap();
++  const withMemberRead = (value, access) => {
++    const result = { ...value };
++    memberReads.set(result, access);
++    return result;
++  };
+   const describe = (node, seen = new Set()) => {
+     if (!node) return { kind: 'unknown', reason: 'missing' };
+     if (descriptionCache.has(node)) return descriptionCache.get(node);
+-    const value = describeValue(node, seen);
++    let value = describeValue(node, seen);
++    if (node.type === 'MemberExpression') {
++      const property = node.computed ? describe(node.property, seen) : { kind: 'literal', value: propertyName(node.property) };
++      if (property.kind === 'literal') value = withMemberRead(value, { object: describe(node.object, seen), property: String(property.value), node });
++    }
+     descriptionCache.set(node, value);
+     return value;
+   };
+-  const selectBindingValue = (initial, selector) => {
++  const selectBindingValue = (initial, selector, node) => {
+     let value = initial;
+     for (const segment of selector) {
++      const object = value;
+       if (value.kind === 'object') value = value.properties[segment] || unknown('missing-property');
+       else if (value.kind === 'reference') value = { ...value, chain: [...value.chain, segment], importedNames: value.module ? [value.chain[0] || segment] : value.importedNames };
+       else value = { kind: 'unknown', reason: 'member-base', object: value, property: segment };
++      value = withMemberRead(value, { object, property: segment, node });
+     }
+     return value;
+   };
+@@ -269,14 +283,17 @@
+     if (seen.has(binding) || binding.opaque) return { ...reference, opaque: true };
+     if (binding.mutated || binding.kind === 'let' || binding.kind === 'var' || binding.defaultInit) {
+       const next = new Set([...seen, binding]);
+-      const initial = binding.init ? [selectBindingValue(describe(binding.init, next), binding.selector)] : [];
++      const initial = binding.init ? [selectBindingValue(describe(binding.init, next), binding.selector, binding.init)] : [];
+       return { ...reference, opaque: true, alternatives: [...initial,
+         ...[binding.defaultInit, ...(binding.assignments || [])].filter(Boolean).map(value => describe(value, next))] };
+     }
+     if (binding.kind === 'const' && binding.init) {
+       const next = new Set([...seen, binding]);
+-      const value = selectBindingValue(describe(binding.init, next), binding.selector);
+-      if (value.kind === 'object') return { ...value, ...reference, kind: 'object', properties: value.properties, spreads: value.spreads };
++      const value = selectBindingValue(describe(binding.init, next), binding.selector, binding.init);
++      if (value.kind === 'object') {
++        const result = { ...value, ...reference, kind: 'object', properties: value.properties, spreads: value.spreads };
++        return memberReads.has(value) ? withMemberRead(result, memberReads.get(value)) : result;
++      }
+       // 本地工厂结果的成员虽未在此展开，仍须为后续来源追踪保留对象和属性。
+       if (value.kind !== 'unknown' || value.reason === 'member-base') return value;
+       return { ...reference, opaque: true, reason: value.reason };
+@@ -412,6 +429,7 @@
+   const functionNodes = new Map(nodes.filter((node) => FUNCTION_TYPES.has(node.type)).map((node) => [functions.get(node), node]));
+   const functionNodesByStart = new Map(nodes.filter((node) => FUNCTION_TYPES.has(node.type)).map(node => [node.start, node]));
+   return { from, ast, parents, scopeFor, bindingsFor, functionNodes, functionNodesByStart, nodes, describe, describeBinding, resolve: describe, site,
++    memberRead: value => value && memberReads.get(value),
+     functionPath: (node) => scopeFor.get(node)?.functionPath || null,
+     lookup: (name, node) => lookup(name, scopeFor.get(node)), walk: (visitor) => nodes.forEach(visitor) };
+ }
+--- a/scripts/architecture/renderer-contracts.js
++++ b/scripts/architecture/renderer-contracts.js
+@@ -26,6 +26,7 @@
+   };
+   // 身份附在求值结果上，与 bound/member/return 共用解析；符号不参与能力字段或结构比较。
+   const identity = Symbol('renderer-object-identity');
++  const origin = Symbol('renderer-object-origin');
+   const deferred = Symbol('renderer-deferred-identity');
+   const defer = read => {
+     let value;
+@@ -54,6 +55,65 @@
+     if (!values.has(actual)) values.set(actual, resolve(actual, analysis, env, 0, new Set(), false));
+     return identitiesOf(values.get(actual)).some(key => identities.includes(key));
+   };
++  const assignments = new WeakMap();
++  const executionPositions = (node, analysis, env) => {
++    const positions = []; const seen = new Set();
++    for (let current = node; current && !seen.has(current);) {
++      positions.push(current); seen.add(current);
++      const frame = frameAt(analysis, current, env);
++      if (!frame) break;
++      const [file, start] = JSON.parse(frame);
++      if (file !== analysis.from) break;
++      current = callNodes.get(file)?.get(start);
++    }
++    return positions;
++  };
++  const writtenBefore = (write, read, analysis, writeEnv, readEnv) => {
++    for (const atWrite of executionPositions(write, analysis, writeEnv)) for (const atRead of executionPositions(read, analysis, readEnv)) {
++      if (analysis.functionPath(atWrite) !== analysis.functionPath(atRead)) continue;
++      // 工厂调用作为成员表达式的接收者时，先完成工厂内部写入，再读取返回值成员。
++      if (atWrite !== write && atWrite.start >= atRead.start && atWrite.end <= atRead.end) return true;
++      return atWrite.end <= atRead.start;
++    }
++    return null;
++  };
++  const snapshotMember = (object, access, analysis, env, depth, visited) => {
++    if (object.kind === 'identity-candidates') return { kind: 'identity-candidates', values: object.values.map(item =>
++      snapshotMember(item, access, analysis, env, depth, visited)) };
++    const identities = identitiesOf(object);
++    let selected = select(object, [access.property]);
++    if (!identities.length) return selected;
++    const writeEnv = object[origin]?.analysis === analysis ? object[origin].env : env;
++    if (!assignments.has(analysis)) assignments.set(analysis, analysis.nodes.filter(node =>
++      node.type === 'AssignmentExpression' && node.left.type === 'MemberExpression'));
++    const writes = [];
++    for (const node of assignments.get(analysis)) {
++      const before = writtenBefore(node, access.node, analysis, writeEnv, env);
++      if (before === false) continue;
++      const key = node.left.computed ? analysis.describe(node.left.property) : { kind: 'literal', value: node.left.property.name };
++      if (key.kind === 'literal' && String(key.value) !== access.property) continue;
++      if (!sameObject(analysis.describe(node.left.object), identities, analysis, writeEnv)) continue;
++      if (key.kind !== 'literal' || node.operator !== '=') return unknown('unordered-renderer-member-write');
++      let conditional = before === null || identities.length > 1;
++      // 只给有确定顺序的静态替换建立新身份；分支/循环不能用源码最后一项冒充实际结果。
++      for (let parent = analysis.parents.get(node); parent && !analysis.functionNodesByStart.has(parent.start); parent = analysis.parents.get(parent)) {
++        if (['IfStatement', 'ConditionalExpression', 'SwitchStatement', 'ForStatement', 'ForOfStatement', 'ForInStatement', 'WhileStatement', 'DoWhileStatement'].includes(parent.type)) conditional = true;
++      }
++      writes.push({ node, conditional, order: executionPositions(node, analysis, writeEnv).reverse().map(item => item.start) });
++    }
++    // 函数声明的文本位置不是执行顺序；工厂内写入必须排在调用返回后的外层替换之前。
++    writes.sort((a, b) => {
++      for (let index = 0; index < Math.min(a.order.length, b.order.length); index += 1) if (a.order[index] !== b.order[index]) return a.order[index] - b.order[index];
++      return a.order.length - b.order.length;
++    });
++    let uncertain = false;
++    for (const { node, conditional } of writes) {
++      uncertain ||= conditional;
++      const assigned = resolve(analysis.describe(node.right), analysis, writeEnv, depth + 1, visited, false);
++      selected = uncertain ? { kind: 'identity-candidates', values: [selected, assigned] } : assigned;
++    }
++    return selected;
++  };
+   const mergeIdentities = values => {
+     const first = values[0];
+     if (first[deferred]) return defer(() => mergeIdentities(values.map(value => value[deferred]())));
+@@ -101,6 +161,21 @@
+     if (!value || depth > 35 || visited.has(value)) return unknown('recursive-renderer-value');
+     const next = new Set([...visited, value]);
+     const recurse = (item, source = analysis, context = env) => resolve(item, source, context, depth + 1, next, inspectMutations);
++    const hydrate = item => inspectMutations && item?.[origin]
++      ? resolve(item[origin].value, item[origin].analysis, item[origin].env, depth + 1, next, true) : item;
++    const access = analysis.memberRead(value);
++    if (access) {
++      const object = resolve(access.object, analysis, env, depth + 1, next, false);
++      if (['object', 'identity-candidates'].includes(object.kind)) {
++        const selected = snapshotMember(object, access, analysis, env, depth, next);
++        if (!inspectMutations) return selected;
++        if (selected.kind === 'identity-candidates') {
++          const choices = selected.values.map(hydrate);
++          return choices.every(item => JSON.stringify(item) === JSON.stringify(choices[0])) ? mergeIdentities(choices) : unknown('ambiguous-renderer-member');
++        }
++        return hydrate(selected);
++      }
++    }
+     if (value.kind === 'literal' || value.kind === 'regexp') return value;
+     if (value.functionPath) return { ...value, kind: 'function', sourceFile: analysis.from, sourceEnv: env };
+     if (value.kind === 'bound-function') {
+@@ -122,7 +197,9 @@
+           if (property.type === 'SpreadElement') {
+             const expanded = recurse(analysis.describe(property.argument));
+             if (expanded.kind !== 'object') return unknown('opaque-renderer-spread');
+-            Object.assign(properties, expanded.properties);
++            if (inspectMutations) Object.assign(properties, expanded.properties);
++            else for (const key of Object.keys(expanded.properties)) properties[key] = defer(() =>
++              snapshotMember(expanded, { property: key, node: property }, analysis, env, depth, next));
+           } else {
+             const key = property.computed ? recurse(analysis.describe(property.key))
+               : { kind: 'literal', value: property.key.name ?? property.key.value };
+@@ -173,7 +250,7 @@
+         if (!keys.length || keys.some(key => key.kind !== 'literal' || typeof key.value !== 'string')) return unknown('dynamic-renderer-member-write');
+         for (const key of keys) properties[key.value] = recurse(analysis.describe(node.right));
+       }
+-      return { kind: 'object', properties, [identity]: identities };
++      return { kind: 'object', properties, [identity]: identities, [origin]: { value, analysis, env } };
+     }
+     if (value.kind === 'candidates' || value.alternatives) {
+       // && 左值只用于短路守卫，不能把 || 的完整 API 当成同类守卫。
+@@ -193,7 +270,7 @@
+     if (value.kind === 'reference') {
+       const chain = pathOf(value);
+       if (value.bindingKind === 'parameter') {
+-        if (env.has(chain[0])) return selectOrSelf(env.get(chain[0]), chain.slice(1));
++        if (env.has(chain[0])) return hydrate(selectOrSelf(env.get(chain[0]), chain.slice(1)));
+         const fn = analysis.functionNodes.get(value.bindingFunctionPath);
+         if (fn) {
+           if (!parameterCalls.has(analysis)) parameterCalls.set(analysis, new Map());
+@@ -205,7 +282,7 @@
+           if (calls.length === 1) {
+             const context = new Map();
+             fn.params.forEach((param, index) => bindPattern(param, resolve(calls[0].args[index], analyses.get(calls[0].from), emptyEnv, depth + 1, next, inspectMutations), context));
+-            if (context.has(chain[0])) return selectOrSelf(context.get(chain[0]), chain.slice(1));
++            if (context.has(chain[0])) return hydrate(selectOrSelf(context.get(chain[0]), chain.slice(1)));
+           }
+         }
+         return { ...value, kind: 'parameter-value' };
+--- a/scripts/architecture/contracts.js
++++ b/scripts/architecture/contracts.js
+@@ -273,8 +273,58 @@
+     return [];
+   }
+   const calledTargets = (site, coverage) => resolve(site.reference, scan.analyses.get(site.from), [], new Set(), coverage);
+-  const callbackTargets = site => calledTargets(site).length ? [] : (site.args || []).flatMap(arg =>
+-    resolve(arg, scan.analyses.get(site.from)));
++  const arrayValueMethods = new Set(['includes', 'indexOf', 'lastIndexOf']);
++  function arraySources(value, analysis, seen = new Set()) {
++    if (!value || seen.has(value)) return null;
++    const next = new Set([...seen, value]);
++    const inputs = parameterArguments(value, analysis);
++    const choices = inputs.length ? inputs.map(item => item.selection.length ? null : arraySources(item.value, item.analysis, next))
++      : (value.alternatives || value.values)?.map(item => arraySources(item, analysis, next));
++    if (choices) return choices.length && choices.every(Boolean) ? choices.flat() : null;
++    return value.kind === 'array' && !value.opaque ? [{ value, analysis }] : null;
++  }
++  let nativeArrayRevision = -1; let nativeArrayCache = new WeakMap();
++  function unchangedArrayMethod(source, method) {
++    if (nativeArrayRevision !== parameterRevision) { nativeArrayRevision = parameterRevision; nativeArrayCache = new WeakMap(); }
++    const key = source.value.elements;
++    if (!nativeArrayCache.has(key)) nativeArrayCache.set(key, new Map());
++    const methods = nativeArrayCache.get(key);
++    if (methods.has(method)) return methods.get(method);
++    const sameArray = (value, analysis) => arraySources(value, analysis)?.some(item => item.value.elements === key);
++    // 自有成员改写、原型改写或向未知 helper 逃逸后，不能再使用原生参数语义。
++    for (const analysis of scan.analyses.values()) for (const node of analysis.nodes) {
++      const left = node.type === 'AssignmentExpression' ? node.left : node.type === 'UpdateExpression' ||
++        (node.type === 'UnaryExpression' && node.operator === 'delete') ? node.argument : null;
++      if (left?.type === 'MemberExpression') {
++        const receiver = analysis.describe(left.object);
++        const property = left.computed ? analysis.describe(left.property) : { kind: 'literal', value: left.property.name };
++        if ((sameArray(receiver, analysis) || (receiver.rootFree && receiver.chain?.join('.') === 'Array.prototype')) &&
++          (property.kind !== 'literal' || [method, '__proto__'].includes(String(property.value)))) { methods.set(method, false); return false; }
++      }
++    }
++    for (const site of allSites) if (site.type === 'call') {
++      const analysis = scan.analyses.get(site.from);
++      const escaped = (site.args || []).some(arg => sameArray(arg, analysis) || (arg.rootFree && arg.chain?.join('.') === 'Array.prototype'));
++      if (escaped && !calledTargets(site).length && !(site.reference.rootFree &&
++        ['Object.freeze', 'Object.seal', 'Object.keys', 'Object.values', 'Object.entries'].includes(site.reference.chain?.join('.')))) {
++        methods.set(method, false); return false;
++      }
++    }
++    methods.set(method, true); return true;
++  }
++  const callbackTargets = site => {
++    if (calledTargets(site).length) return [];
++    const analysis = scan.analyses.get(site.from);
++    const access = analysis.memberRead(site.reference);
++    let args = site.args || [];
++    if (access && arrayValueMethods.has(access.property)) {
++      const sources = arraySources(access.object, analysis);
++      if (sources?.length && sources.every(source => unchangedArrayMethod(source, access.property))) {
++        args = [];
++      }
++    }
++    return args.flatMap(arg => resolve(arg, analysis));
++  };
+   for (const scope of roots) add(scope.path, scope.functionPath, 'subtree');
+   let checkedRevision = -1;
+   while (checkedRevision !== parameterRevision) {

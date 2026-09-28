@@ -1,0 +1,577 @@
+{
+  "result": "PASS",
+  "scope": "RR8-01/02 repair with conservative IPC default handling; not all dynamic JavaScript",
+  "executionContext": "outside filesystem sandbox",
+  "gate": {
+    "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+    "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+    "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+    "startedAt": "2026-09-22T18:06:12.023602+08:00",
+    "minimumFreeBytes": 5711200256,
+    "abortBelowFreeBytes": 2147483648,
+    "inputFiles": 1705,
+    "pid": 21948,
+    "exitCode": 0,
+    "finishedAt": "2026-09-22T18:27:32.682754+08:00",
+    "changedInputs": [],
+    "headAfter": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10"
+  },
+  "unit": {
+    "tests": 9210,
+    "suites": 828,
+    "pass": 9206,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 4,
+    "todo": 0
+  },
+  "architectureTests": {
+    "tests": 432,
+    "suites": 0,
+    "pass": 432,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "architecture": {
+    "active": 31,
+    "diagnostics": 0,
+    "stale": 0
+  },
+  "newRegressions": 46,
+  "windowsSkips": [
+    "﹣ Windows CI 真实 PowerShell snapshot→token cleanup 语义 (0.05725ms) # SKIP",
+    "﹣ Windows PowerShell 采集器使用原始 CIM 枚举并完整遍历真实文件祖先 (0.230125ms) # 需要 Windows PowerShell；受控 Storage 对象不代替真实 CIM 查询",
+    "﹣ Windows packaged canary 对报告前已退出进程快速返回专用 safe code (0.049542ms) # SKIP",
+    "﹣ Windows packaged canary 的 Setup 失败诊断仅返回固定退出/落地/身份枚举 (0.036125ms) # SKIP"
+  ],
+  "regressionsBefore": {
+    "tests": 46,
+    "suites": 0,
+    "pass": 12,
+    "fail": 34,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "regressionsRR2toRR8": {
+    "tests": 262,
+    "suites": 0,
+    "pass": 262,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "integration": {
+    "scripts": 68,
+    "countedPassed": 2901,
+    "countedTotal": 2901,
+    "withoutCount": [
+      "v2.1.12-beta-multiworker-nested"
+    ],
+    "results": [
+      {
+        "name": "acquiring-bill-currency-idle-cleanup",
+        "passed": 38,
+        "total": 38,
+        "durationMs": 975
+      },
+      {
+        "name": "acquiring-bill-currency-n4-migration",
+        "passed": 128,
+        "total": 128,
+        "durationMs": 621
+      },
+      {
+        "name": "acquiring-engine-migration",
+        "passed": 45,
+        "total": 45,
+        "durationMs": 5035
+      },
+      {
+        "name": "acquiring-index-slim-v2",
+        "passed": 22,
+        "total": 22,
+        "durationMs": 244
+      },
+      {
+        "name": "acquiring-side-db-parity",
+        "passed": 19,
+        "total": 19,
+        "durationMs": 592
+      },
+      {
+        "name": "acquiring-worker-boundary",
+        "passed": 14,
+        "total": 14,
+        "durationMs": 580
+      },
+      {
+        "name": "application-recovery-governance",
+        "passed": 4,
+        "total": 4,
+        "durationMs": 896
+      },
+      {
+        "name": "archive-biz-op-auto-report-retention",
+        "passed": 6,
+        "total": 6,
+        "durationMs": 7627
+      },
+      {
+        "name": "archive-center-module-retention",
+        "passed": 11,
+        "total": 11,
+        "durationMs": 1678
+      },
+      {
+        "name": "archive-center-permanent-delete",
+        "passed": 52,
+        "total": 52,
+        "durationMs": 31144
+      },
+      {
+        "name": "background-execution-pure-compute-canary",
+        "passed": 9,
+        "total": 9,
+        "durationMs": 107
+      },
+      {
+        "name": "background-execution-recovery-canary",
+        "passed": 9,
+        "total": 9,
+        "durationMs": 116
+      },
+      {
+        "name": "background-execution-recovery-control",
+        "passed": 27,
+        "total": 27,
+        "durationMs": 292
+      },
+      {
+        "name": "bank-bu-background-dual-parser",
+        "passed": 9,
+        "total": 9,
+        "durationMs": 266
+      },
+      {
+        "name": "bank-bu-background-single-jobs",
+        "passed": 21,
+        "total": 21,
+        "durationMs": 517
+      },
+      {
+        "name": "bank-bu-recon-side-db-parity",
+        "passed": 17,
+        "total": 17,
+        "durationMs": 326
+      },
+      {
+        "name": "bank-statement-hit-scenario-report",
+        "passed": 49,
+        "total": 49,
+        "durationMs": 212
+      },
+      {
+        "name": "bank-statement-many-to-many-review-sheet",
+        "passed": 33,
+        "total": 33,
+        "durationMs": 211
+      },
+      {
+        "name": "bank-statement-universal-import-routing",
+        "passed": 20,
+        "total": 20,
+        "durationMs": 297
+      },
+      {
+        "name": "big-table-import-engine",
+        "passed": 19,
+        "total": 19,
+        "durationMs": 7533
+      },
+      {
+        "name": "biz-op-auto-error-report",
+        "passed": 12,
+        "total": 12,
+        "durationMs": 10653
+      },
+      {
+        "name": "biz-op-query-boundary",
+        "passed": 9,
+        "total": 9,
+        "durationMs": 7818
+      },
+      {
+        "name": "biz-op-recon-side-db-parity",
+        "passed": 16,
+        "total": 16,
+        "durationMs": 354
+      },
+      {
+        "name": "bizop-flow-engine-migration",
+        "passed": 73,
+        "total": 73,
+        "durationMs": 5280
+      },
+      {
+        "name": "dark-mode-schedule-settings",
+        "passed": 6,
+        "total": 6,
+        "durationMs": 219
+      },
+      {
+        "name": "duplicate-inbound-match-end-to-end",
+        "passed": 31,
+        "total": 31,
+        "durationMs": 383
+      },
+      {
+        "name": "execution-descriptor-governance",
+        "passed": 4,
+        "total": 4,
+        "durationMs": 933
+      },
+      {
+        "name": "fund-transfer-recon-account-mapping",
+        "passed": 19,
+        "total": 19,
+        "durationMs": 209
+      },
+      {
+        "name": "gateway-channel-filter-equivalence",
+        "passed": 23,
+        "total": 23,
+        "durationMs": 213
+      },
+      {
+        "name": "linked-fx-open7-stale-hit-e2e",
+        "passed": 27,
+        "total": 27,
+        "durationMs": 214
+      },
+      {
+        "name": "linked-table-delete-by-range-tablekey",
+        "passed": 73,
+        "total": 73,
+        "durationMs": 215
+      },
+      {
+        "name": "new-account-balance-statement",
+        "passed": 36,
+        "total": 36,
+        "durationMs": 235
+      },
+      {
+        "name": "pending-data-reconciliation",
+        "passed": 33,
+        "total": 33,
+        "durationMs": 51
+      },
+      {
+        "name": "pending-engine-migration",
+        "passed": 57,
+        "total": 57,
+        "durationMs": 5239
+      },
+      {
+        "name": "pending-removal-reconcile",
+        "passed": 62,
+        "total": 62,
+        "durationMs": 202
+      },
+      {
+        "name": "position-reconciliation-side-db-parity",
+        "passed": 38,
+        "total": 38,
+        "durationMs": 262
+      },
+      {
+        "name": "position-startup-task-recovery",
+        "passed": 3,
+        "total": 3,
+        "durationMs": 2317
+      },
+      {
+        "name": "pre-fund-reconciliation-output-contract",
+        "passed": 15,
+        "total": 15,
+        "durationMs": 292
+      },
+      {
+        "name": "pre-fund-reconciliation-side-db-parity",
+        "passed": 69,
+        "total": 69,
+        "durationMs": 349
+      },
+      {
+        "name": "refund-backfill-yellow-fill-e2e",
+        "passed": 258,
+        "total": 258,
+        "durationMs": 203
+      },
+      {
+        "name": "renderer-lifecycle",
+        "passed": 233,
+        "total": 233,
+        "durationMs": 20605
+      },
+      {
+        "name": "shared-xlsx-boundary",
+        "passed": 51,
+        "total": 51,
+        "durationMs": 3285
+      },
+      {
+        "name": "statement-generation-pipeline",
+        "passed": 45,
+        "total": 45,
+        "durationMs": 240
+      },
+      {
+        "name": "task-adapter-recovery",
+        "passed": 4,
+        "total": 4,
+        "durationMs": 559
+      },
+      {
+        "name": "toolbox-large-file-stream",
+        "passed": 50,
+        "total": 50,
+        "durationMs": 134481
+      },
+      {
+        "name": "toolbox-large-split-multi-sheet",
+        "passed": 31,
+        "total": 31,
+        "durationMs": 257476
+      },
+      {
+        "name": "toolbox-multi-sheet-merge",
+        "passed": 16,
+        "total": 16,
+        "durationMs": 15008
+      },
+      {
+        "name": "toolbox-multi-split-roundtrip",
+        "passed": 17,
+        "total": 17,
+        "durationMs": 532
+      },
+      {
+        "name": "toolbox-roundtrip",
+        "passed": 30,
+        "total": 30,
+        "durationMs": 181
+      },
+      {
+        "name": "toolbox-row-split-admission",
+        "passed": 2,
+        "total": 2,
+        "durationMs": 891
+      },
+      {
+        "name": "toolbox-row-split-archive-delete",
+        "passed": 2,
+        "total": 2,
+        "durationMs": 1067
+      },
+      {
+        "name": "v2.1.10-a3-phase1",
+        "passed": 40,
+        "total": 40,
+        "durationMs": 3059
+      },
+      {
+        "name": "v2.1.10-a3-phase2",
+        "passed": 56,
+        "total": 56,
+        "durationMs": 2222
+      },
+      {
+        "name": "v2.1.10-a4-phase3",
+        "passed": 75,
+        "total": 75,
+        "durationMs": 15243
+      },
+      {
+        "name": "v2.1.10-n4-cont-1-phase4",
+        "passed": 33,
+        "total": 33,
+        "durationMs": 1093
+      },
+      {
+        "name": "v2.1.10-n4-cont-2-phase5",
+        "passed": 43,
+        "total": 43,
+        "durationMs": 628
+      },
+      {
+        "name": "v2.1.12-beta-multiworker-nested",
+        "passed": null,
+        "total": null,
+        "durationMs": 2874
+      },
+      {
+        "name": "v2.1.9-n5-end-to-end",
+        "passed": 68,
+        "total": 68,
+        "durationMs": 236
+      },
+      {
+        "name": "v2.1.9-n5-migration",
+        "passed": 67,
+        "total": 67,
+        "durationMs": 229
+      },
+      {
+        "name": "v2.1.9-sr-fix-1-coverage",
+        "passed": 148,
+        "total": 148,
+        "durationMs": 267
+      },
+      {
+        "name": "v2.1.9-sr-log-1",
+        "passed": 33,
+        "total": 33,
+        "durationMs": 202
+      },
+      {
+        "name": "v3.0.0-linked-streaming-import",
+        "passed": 19,
+        "total": 19,
+        "durationMs": 241
+      },
+      {
+        "name": "v3.0.1-linked-gateway-upsert",
+        "passed": 40,
+        "total": 40,
+        "durationMs": 253
+      },
+      {
+        "name": "v3.0.4-boc-dispatch-order-fix",
+        "passed": 31,
+        "total": 31,
+        "durationMs": 273
+      },
+      {
+        "name": "vcc-financial-op-adjustment-archive-chain",
+        "passed": 226,
+        "total": 226,
+        "durationMs": 1303
+      },
+      {
+        "name": "vcc-financial-op-destructive-state-chain",
+        "passed": 77,
+        "total": 77,
+        "durationMs": 1508
+      },
+      {
+        "name": "vcc-financial-op-effective-result",
+        "passed": 19,
+        "total": 19,
+        "durationMs": 142
+      },
+      {
+        "name": "vcc-financial-op-historical-template-export",
+        "passed": 29,
+        "total": 29,
+        "durationMs": 1108
+      }
+    ]
+  },
+  "probes": {
+    "result": "PASS",
+    "rendererBoundaries": 20,
+    "arrayCases": 5,
+    "ipcMissingField": "1 diagnostic; VM confirms injected outsideScope",
+    "ipcProvidedField": "1 conservative diagnostic: channel/fields does not prove presence; VM confirms this stub is safe",
+    "ipcProvablyProvidedObject": "Accepted by unit regression; no default identity contamination",
+    "shared": {
+      "status": "PASS",
+      "beforeVersion": "R7 repair start: renderer-contracts.js from before/ plus 4 unchanged current checker files; all 5 manifest-verified",
+      "reusedCases": 38,
+      "newDefaultCombinationCases": 6,
+      "rendererCases": 26,
+      "queryCases": 18,
+      "versionsPerCase": 2,
+      "unchangedExpectedOutcomes": 42,
+      "correctedFalsePositives": [
+        {
+          "name": "single-mount-explicit-data-over-state",
+          "beforeViolations": 1,
+          "currentViolations": 0
+        }
+      ],
+      "correctedPriorProbeAssumptions": [
+        {
+          "name": "single-mount-category-explicit-ipc",
+          "priorReviewDiagnostics": 0,
+          "currentDiagnostics": 1,
+          "reason": "IPC source has no field existence guarantee; original VM used synchronous invoke, while Electron invoke returns Promise. Async VM replay confirms other channel default executes."
+        }
+      ],
+      "denialReclassification": [
+        {
+          "name": "distinct-call-api-over-scoped-default",
+          "beforeRule": "ARCH-RENDERER-SCOPE",
+          "currentRule": "ARCH-STATIC-COVERAGE",
+          "deniedInBoth": true
+        }
+      ],
+      "actualInMemoryQueries": 10,
+      "newCombinationVmAssertions": "6 original VM observations matched; the invoke fixture interpretation is corrected by shared-ipc-async-verification.json",
+      "scannerJsonBeforeCurrentEqual": true,
+      "repeatedScanJsonEqual": true,
+      "scannerUnchangedAfterRules": true,
+      "siteEvidenceIdsUnchanged": true,
+      "policyFilesUnchanged": true,
+      "scope": "small fixtures only; no full scan or source writes"
+    },
+    "unchangedSharedCheckerAndPolicySha256": {
+      "scripts/architecture/contracts.js": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f",
+      "scripts/architecture/rules.js": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa",
+      "scripts/architecture/scan.js": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be",
+      "scripts/architecture/schema.js": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "scripts/architecture/policy-history.js": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+      "architecture/boundaries.json": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+      "architecture/legacy-allowlist.json": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3"
+    },
+    "scope": "Renderer real AST and VM stubs; no product Main or recovery IO; no claim that each of the 20 factories was individually mutated"
+  },
+  "preservation": {
+    "initial": {
+      "files": 4518,
+      "changed": [
+        "architecture/README.md",
+        "changes/v3.2.10/README.md",
+        "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md",
+        "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md",
+        "changes/v3.2.10/release.md",
+        "rules/integration-test-policy.md",
+        "scripts/architecture/renderer-contracts.js"
+      ]
+    },
+    "production": {
+      "files": 792,
+      "changed": []
+    },
+    "historicalReviews": {
+      "files": 542,
+      "changed": []
+    },
+    "architectureConfig": {
+      "files": 2,
+      "changed": []
+    },
+    "primaryDirty": {
+      "files": 865,
+      "changed": []
+    },
+    "primaryHead": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+    "releaseHead": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+    "unexpectedChanges": []
+  }
+}

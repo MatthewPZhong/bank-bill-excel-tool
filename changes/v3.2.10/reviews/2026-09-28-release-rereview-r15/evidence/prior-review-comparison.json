@@ -1,0 +1,17 @@
+{
+  "previousFrozenFiles": 5118,
+  "currentFrozenFiles": 5245,
+  "changedPriorFiles": [
+    "architecture/README.md",
+    "changes/v3.2.10/README.md",
+    "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md",
+    "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md",
+    "changes/v3.2.10/release.md",
+    "rules/integration-test-policy.md",
+    "scripts/architecture/renderer-contracts.js"
+  ],
+  "newOutsideReviews": [
+    "tests/unit/architecture/release-rereview-r14.test.js"
+  ],
+  "newReviewFiles": 126
+}

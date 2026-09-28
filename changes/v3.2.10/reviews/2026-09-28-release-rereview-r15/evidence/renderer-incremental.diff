@@ -1,0 +1,72 @@
+--- before/renderer-contracts.js
++++ current/renderer-contracts.js
+@@ -135,11 +135,59 @@
+     }
+     return null;
+   };
++  const contains = (outer, inner) => outer && inner && outer.start <= inner.start && inner.end <= outer.end;
++  const loopTypes = new Set(['DoWhileStatement', 'WhileStatement', 'ForStatement', 'ForOfStatement', 'ForInStatement']);
++  const jumpsByAnalysis = new WeakMap();
++  const bypassJumps = analysis => {
++    if (jumpsByAnalysis.has(analysis)) return jumpsByAnalysis.get(analysis);
++    const jumps = [];
++    for (const node of analysis.nodes) {
++      if (!['BreakStatement', 'ContinueStatement'].includes(node.type)) continue;
++      let target; let reachable = true;
++      for (let child = node, parent = analysis.parents.get(child);
++        parent && !analysis.functionNodesByStart.has(parent.start); child = parent, parent = analysis.parents.get(parent)) {
++        if (!target) {
++          if (node.label) {
++            if (parent.type === 'LabeledStatement' && parent.label.name === node.label.name) {
++              target = parent;
++              if (node.type === 'ContinueStatement') while (target.type === 'LabeledStatement') target = target.body;
++            }
++          } else if (loopTypes.has(parent.type) || (node.type === 'BreakStatement' && parent.type === 'SwitchStatement')) target = parent;
++        }
++        if (parent.type === 'IfStatement') {
++          const test = analysis.describe(parent.test);
++          if (test.kind === 'literal' && child !== (test.value ? parent.consequent : parent.alternate)) reachable = false;
++        } else if (['WhileStatement', 'ForStatement'].includes(parent.type) && child === parent.body && parent.test) {
++          const test = analysis.describe(parent.test);
++          if (test.kind === 'literal' && !test.value) reachable = false;
++        }
++      }
++      // break 越过整个目标；continue 只跳过目标循环的剩余 body，do 的 test 仍会执行。
++      if (target && reachable) jumps.push({ node, scope: node.type === 'ContinueStatement' ? target.body : target });
++    }
++    jumpsByAnalysis.set(analysis, jumps);
++    return jumps;
++  };
++  const skippedByJump = (write, read, analysis) => {
++    const skips = (jump, node) => {
++      if (!contains(jump.scope, node)) return false;
++      // 离开 try/catch 的跳转仍先执行 finally；finally 自身的跳转则能跳过其中后续语句。
++      for (let parent = analysis.parents.get(node); parent; parent = analysis.parents.get(parent)) {
++        if (analysis.functionNodesByStart.has(parent.start)) break;
++        if (parent.type === 'TryStatement' && contains(parent.finalizer, node) &&
++            contains(parent, jump.node) && !contains(parent.finalizer, jump.node)) return false;
++      }
++      return true;
++    };
++    return bypassJumps(analysis).some(jump => jump.node.end <= write.start &&
++      analysis.functionPath(jump.node) === analysis.functionPath(write) && skips(jump, write) && !skips(jump, read));
++  };
+   const conditionalWrite = (write, read, analysis, writeEnv, readEnv) => {
+     const reads = executionPositions(read, analysis, readEnv);
+     // 唯一调用位置只提供顺序，不证明执行。沿实际帧及静态 helper 调用逐层保留条件性。
+     for (const atWrite of executionPositions(write, analysis, writeEnv)) {
+       const atRead = reads.find(node => analysis.functionPath(node) === analysis.functionPath(atWrite));
++      if (skippedByJump(atWrite, atRead, analysis)) return true;
+       for (let child = atWrite, parent = analysis.parents.get(child);
+         parent && !analysis.functionNodesByStart.has(parent.start); child = parent, parent = analysis.parents.get(parent)) {
+         let conditional = false;
+@@ -157,7 +205,8 @@
+         else if (parent.type === 'ForOfStatement' || parent.type === 'ForInStatement') conditional = child !== parent.right;
+         else if (parent.type === 'WhileStatement') conditional = child === parent.body;
+         else if (parent.type === 'CatchClause') conditional = true;
+-        // 初始化、条件测试、可迭代值、do 首轮及已证明选中的字面量分支不因外壳而变成可跳过。
++        // 进入 do 首轮只证明进入 body；上方另行核对能否到达具体写入或调用位置。
++        // 初始化、条件测试、可迭代值及已证明选中的字面量分支不因外壳而变成可跳过。
+         // 若读写处于同一已进入分支，外层是否执行不影响本次读取时的覆盖事实。
+         if (conditional && !(atRead && child.start <= atRead.start && child.end >= atRead.end)) return true;
+       }

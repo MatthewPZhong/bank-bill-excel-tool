@@ -1,0 +1,155 @@
+{
+  "reviewRound": 4,
+  "mode": "read-only incremental review",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "candidate": "HEAD plus pre-existing dirty repairs",
+  "originalR3Findings": {
+    "RR3-01": "original counterexamples independently closed",
+    "RR3-02": "original counterexamples independently closed",
+    "RR3-03": "original counterexamples independently closed",
+    "RR3-04": "original counterexamples independently closed",
+    "RR3-05": "original counterexamples independently closed"
+  },
+  "findings": [
+    {
+      "id": "RR4-01",
+      "priority": "P2",
+      "kind": "surviving adjacent false negative",
+      "title": "bound/member factory result identity lost",
+      "evidence": [
+        "evidence/r4-renderer-realconfig.json",
+        "evidence/r4-renderer-independent-before.jsonl"
+      ]
+    },
+    {
+      "id": "RR4-02",
+      "priority": "P2",
+      "kind": "new regression false positive",
+      "title": "distinct factory instances conflated",
+      "beforeViolations": 0,
+      "currentViolations": 1,
+      "injectedExtraCapability": false,
+      "evidence": [
+        "evidence/distinct-instances-comparison.json"
+      ]
+    },
+    {
+      "id": "RR4-03",
+      "priority": "P2",
+      "kind": "surviving callback-entry false negative",
+      "title": "native iterator restricted callback entry not checked",
+      "evidence": [
+        "evidence/r4-g1-preparing-neighbor-probe.json",
+        "evidence/r4-g1-preparing-real-source-probe.json"
+      ]
+    }
+  ],
+  "executed": [
+    {
+      "command": "node --test --test-concurrency=1 tests/unit/architecture/*.test.js",
+      "exitCode": 0,
+      "tests": 237,
+      "pass": 237,
+      "fail": 0,
+      "skip": 0,
+      "log": "evidence/architecture-tests.log"
+    },
+    {
+      "command": "node scripts/check-architecture.js --json /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r4/evidence/architecture-check.json",
+      "exitCode": 0,
+      "active": 31,
+      "pending": 0,
+      "partial": 0,
+      "violations": 0,
+      "staleExceptions": 0,
+      "parsedFiles": 765,
+      "scannedFiles": 765,
+      "unresolvedGeneratedModules": 2,
+      "dynamicSites": 33,
+      "result": "evidence/architecture-check.json"
+    },
+    {
+      "command": "node --no-warnings changes/v3.2.10/reviews/2026-09-22-release-rereview-r3/evidence/r3-query-realconfig.cjs",
+      "exitCode": 0,
+      "result": "evidence/r3-query-realconfig-recheck.json"
+    },
+    {
+      "command": "node --test --test-name-pattern=RR3-02 tests/unit/architecture/release-rereview-r3.test.js",
+      "exitCode": 0,
+      "pass": 7,
+      "result": "evidence/r4-renderer-targeted-tests.log"
+    },
+    {
+      "command": "node --test --test-name-pattern='RR3-03|RR3-04' tests/unit/architecture/release-rereview-r3.test.js",
+      "exitCode": 0,
+      "pass": 13,
+      "result": "evidence/r4-data-r3-regression.tap"
+    },
+    {
+      "command": "node --test --test-name-pattern=RR3-05 tests/unit/architecture/release-rereview-r3.test.js",
+      "exitCode": 0,
+      "pass": 7,
+      "result": "evidence/r4-g1-rr3-05-tests.tap"
+    },
+    {
+      "command": "node changes/v3.2.10/reviews/2026-09-22-release-rereview-r4/evidence/compare-distinct-instances.cjs",
+      "exitCode": 0,
+      "beforeToolFilesHashMatched": 5,
+      "result": "evidence/distinct-instances-comparison.json"
+    },
+    {
+      "command": "node /tmp/r4-g1-preparing-neighbor-probe.cjs",
+      "exitCode": 0,
+      "result": "evidence/r4-g1-preparing-neighbor-probe.json",
+      "archivedScript": "evidence/r4-g1-preparing-neighbor-probe.cjs"
+    },
+    {
+      "command": "node /tmp/r4-g1-preparing-real-source-probe.cjs",
+      "exitCode": 0,
+      "result": "evidence/r4-g1-preparing-real-source-probe.json",
+      "archivedScript": "evidence/r4-g1-preparing-real-source-probe.cjs"
+    }
+  ],
+  "additionalExecutedProbes": "See evidence/README.md for original/adjacent renderer, data, and G1 probe commands and archived outputs; all completed with exit 0. A probe exit code is not a product PASS.",
+  "testCountNote": "7/13/7 targeted tests are subsets of 237 architecture tests; do not add counts.",
+  "fullGateEvidence": {
+    "rerunThisReview": false,
+    "source": "../2026-09-22-release-r3-repair/release-check-result.json",
+    "command": "UNIT_TEST_CONCURRENCY=1 npm run release-check",
+    "startedAt": "2026-09-22T01:45:20.363299+08:00",
+    "finishedAt": "2026-09-22T02:09:31.249506+08:00",
+    "exitCode": 0,
+    "headMatches": true,
+    "inputFilesCompared": 1700,
+    "changedInputs": [],
+    "unit": {
+      "tests": 9015,
+      "pass": 9011,
+      "fail": 0,
+      "windowsConditionalSkip": 4,
+      "suites": 828
+    },
+    "integration": {
+      "scriptsPassed": 68,
+      "scriptsTotal": 68,
+      "countedTestsPassed": 2901,
+      "countedTestsTotal": 2901,
+      "scriptsWithoutTestCount": [
+        "v2.1.12-beta-multiworker-nested"
+      ]
+    },
+    "rendererLifecycle": {
+      "pass": 233,
+      "total": 233
+    },
+    "comparison": "evidence/gate-evidence-comparison.json"
+  },
+  "limits": [
+    "Incremental review of R3 repair; not a new whole-product review.",
+    "G1 real-source mutant evaluates active G1 boundary over full source scan, not all 31 mutant boundaries.",
+    "Recovery VM uses in-memory stubs; production recovery functions are scanned only.",
+    "No product GUI, Windows, packaging, Excel/WPS, or manual financial acceptance performed.",
+    "No source/test/config repair, commit, push, PR, main integration, version/tag or publication."
+  ]
+}

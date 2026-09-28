@@ -1,0 +1,38 @@
+{
+  "status": "PASS",
+  "scope": "R15 review receipt and documentation only",
+  "checkedAt": "2026-09-28T18:02:03.670678+08:00",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "branch": "release/v3.2.10",
+  "frozenExistingFiles": 5325,
+  "changedExistingFiles": [
+    "changes/v3.2.10/README.md",
+    "changes/v3.2.10/release.md",
+    "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md"
+  ],
+  "unchangedExistingFiles": 5322,
+  "gateInputs": 1711,
+  "gateInputSetAndHashesMatch": true,
+  "reviewArtifactsHashesMatch": 88,
+  "sourceTestsConfigUnchanged": true,
+  "testsRerun": false,
+  "reviewOutcome": "NO_NEW_CONFIRMED_MANDATORY_FINDINGS",
+  "closure": "RR14-01 within R15 review scope",
+  "retainedObservation": "R15-O1 conservative precision rejection for empty for-of",
+  "reversePatchCheck": "PASS",
+  "gitDiffCheck": "PASS",
+  "changes": {
+    "changes/v3.2.10/README.md": {
+      "before": "d0e6ddec62f6ce9342071c162446531fac8ed5892f0a0e1f652f0c4c58e3a496",
+      "after": "8f05dacfbd801d25d2dcde8d83f72074601166513ea8e3f73100faa8c498a777"
+    },
+    "changes/v3.2.10/release.md": {
+      "before": "e15b9b4cd246f30b2260963c5b5adf60b86acec8daf817630e32156b4c6c6c9e",
+      "after": "03866171fb0daeb428b9e99ef058a308a7ade3b66279e10eb8c1a645e72e8af4"
+    },
+    "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md": {
+      "before": "b9e73a52a80ca9a8a0e35e09d52e336982bd44d703c7c89dcb4961362af9b20f",
+      "after": "e03b6e3fdb741e99f977595ab34c7a683633356f777a731f4ae3a2387891ea41"
+    }
+  }
+}

@@ -1,0 +1,196 @@
+{
+  "mode": "real",
+  "boundaryCount": 20,
+  "boundaries": [
+    {
+      "id": "renderer-modal-owner",
+      "state": "active"
+    },
+    {
+      "id": "renderer-bank-statement",
+      "state": "active"
+    },
+    {
+      "id": "renderer-recon-id-fix",
+      "state": "active"
+    },
+    {
+      "id": "renderer-pre-fund",
+      "state": "active"
+    },
+    {
+      "id": "renderer-bank-bu",
+      "state": "active"
+    },
+    {
+      "id": "renderer-duplicate-inbound",
+      "state": "active"
+    },
+    {
+      "id": "renderer-acquiring",
+      "state": "active"
+    },
+    {
+      "id": "renderer-vcc-op-calc",
+      "state": "active"
+    },
+    {
+      "id": "renderer-biz-op-legacy",
+      "state": "active"
+    },
+    {
+      "id": "renderer-statement",
+      "state": "active"
+    },
+    {
+      "id": "renderer-new-account",
+      "state": "active"
+    },
+    {
+      "id": "renderer-pending",
+      "state": "active"
+    },
+    {
+      "id": "renderer-position",
+      "state": "active"
+    },
+    {
+      "id": "renderer-vcc-financial-op",
+      "state": "active"
+    },
+    {
+      "id": "renderer-biz-op-v327",
+      "state": "active"
+    },
+    {
+      "id": "renderer-dialog-scenarios",
+      "state": "active"
+    },
+    {
+      "id": "renderer-dialog-configuration",
+      "state": "active"
+    },
+    {
+      "id": "renderer-services",
+      "state": "active"
+    },
+    {
+      "id": "renderer-dialog-app-settings",
+      "state": "active"
+    },
+    {
+      "id": "renderer-dialog-toolbox",
+      "state": "active"
+    }
+  ],
+  "baseline": {
+    "violations": [],
+    "coverage": {
+      "scannedFiles": 765,
+      "parsedFiles": 765,
+      "literalEdges": 2405,
+      "workerEdges": 64,
+      "globalEdges": 59,
+      "unresolved": 2,
+      "dynamicSites": 33,
+      "parseErrors": 0
+    }
+  },
+  "results": [
+    {
+      "name": "uncertain-copy-fixed-slot",
+      "safe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();function make(value){const args=[];args.push(value);return args;}const list=[...make(old)];list[1]=clean;const alias=list[1].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/renderer.js",
+          "to": null,
+          "line": 2319,
+          "column": 264,
+          "message": "scoped api 未授权字段 outsideScope",
+          "functionPath": null
+        }
+      ],
+      "coverage": {
+        "scannedFiles": 765,
+        "parsedFiles": 765,
+        "literalEdges": 2405,
+        "workerEdges": 64,
+        "globalEdges": 59,
+        "unresolved": 2,
+        "dynamicSites": 33,
+        "parseErrors": 0
+      }
+    },
+    {
+      "name": "uncertain-copy-slot-reverse",
+      "safe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();function make(value){const args=[];args.push(value);return args;}const list=[...make(old)];list[1]=clean;list.reverse();const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/renderer.js",
+          "to": null,
+          "line": 2319,
+          "column": 279,
+          "message": "scoped api 未授权字段 outsideScope",
+          "functionPath": null
+        }
+      ],
+      "coverage": {
+        "scannedFiles": 765,
+        "parsedFiles": 765,
+        "literalEdges": 2405,
+        "workerEdges": 64,
+        "globalEdges": 59,
+        "unresolved": 2,
+        "dynamicSites": 33,
+        "parseErrors": 0
+      }
+    },
+    {
+      "name": "uncertain-copy-independent-safe",
+      "safe": true,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();function make(value){const args=[];args.push(value);return args;}const list=[...make(old)];const other=[...make(clean)];list[1]=old;list.reverse();const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run"
+        ],
+        "extraCallable": false,
+        "same": false
+      },
+      "violations": [],
+      "coverage": {
+        "scannedFiles": 765,
+        "parsedFiles": 765,
+        "literalEdges": 2405,
+        "workerEdges": 64,
+        "globalEdges": 59,
+        "unresolved": 2,
+        "dynamicSites": 33,
+        "parseErrors": 0
+      }
+    }
+  ]
+}

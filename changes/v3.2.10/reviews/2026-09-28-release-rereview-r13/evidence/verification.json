@@ -1,0 +1,70 @@
+{
+  "evidenceAssertions": "PASS",
+  "reviewOutcome": "ONE_NEW_P2",
+  "findings": [
+    {
+      "id": "RR13-01",
+      "priority": 2,
+      "title": "条件 helper 的唯一调用点被视为必执行",
+      "beforeMinimal": 1,
+      "currentMinimal": 0,
+      "beforeActualRenderer": 1,
+      "currentActualRenderer": 0,
+      "runtimeConditionalFalse": "injected API has callable outsideScope",
+      "runtimeConditionalTrue": "injected API only run"
+    }
+  ],
+  "priorFindingClosure": {
+    "id": "RR12-01",
+    "scope": "14 named existing array/helper fixtures",
+    "beforeScanErrors": 10,
+    "currentScanErrors": 0,
+    "unsafeRejected": 7,
+    "safeAllowed": 6,
+    "knownConservativeRejection": 1
+  },
+  "rendererNeighborCases": 4,
+  "actualRendererRepresentativeCases": 2,
+  "actualRendererBoundaryCount": 20,
+  "branchVmRuns": 4,
+  "sharedAndBindingCases": 62,
+  "architecture": {
+    "tests": 589,
+    "pass": 589,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "officialCli": {
+    "command": "node scripts/check-architecture.js --json /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r13/evidence/architecture-check.json",
+    "exitCode": 0,
+    "active": 31,
+    "pending": 0,
+    "partial": 0,
+    "violations": 0,
+    "stale": 0,
+    "coverage": {
+      "scannedFiles": 765,
+      "parsedFiles": 765,
+      "literalEdges": 2405,
+      "workerEdges": 64,
+      "globalEdges": 59,
+      "unresolved": 2,
+      "dynamicSites": 33,
+      "parseErrors": 0,
+      "pendingBoundaries": [],
+      "partialBoundaries": []
+    },
+    "historyCommits": 21
+  },
+  "fullGateRerun": false,
+  "fullGateInputMatch": {
+    "headMatches": true,
+    "gateInputCount": 1709,
+    "changedGateInputs": [],
+    "currentGateInputCount": 1709,
+    "inputSetMatches": true
+  },
+  "limitations": "PASS means archived evidence assertions hold, not that the current checker is defect-free or the release accepted."
+}

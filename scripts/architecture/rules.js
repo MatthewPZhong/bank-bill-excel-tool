@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const path = require('node:path');
-const { scopeContains, valueCandidates, factoryCalls, factoryPresent, callableOrigins } = require('./contracts');
+const { scopeContains, valueCandidates, factoryCalls, factoryPresent, callableOrigins, executionScopes } = require('./contracts');
 const { RULES, validateBoundaries, validateAllowlist } = require('./schema');
 const PURE_FORBIDDEN = /(?:^node:(?:fs(?:\/promises)?|sqlite|worker_threads|child_process)|^(?:electron|xlsx|exceljs)(?:\/|$)|(?:^|\/)(?:[^/]*writer[^/]*|row-mapper)\.[cm]?js$)/;
 const DOMAIN = /(?:^src\/backend\/(?!file-service\/common\.js)|^src\/main-process\/(?:biz-op|position|acquiring|vcc|pending|bank-bu|new-account|pre-fund|recon-id|toolbox-|fund-recon|duplicate-inbound|read-only-exports))/;
@@ -177,8 +177,10 @@ function evaluateRules(scan, config, allowlist, { root = process.cwd() } = {}) {
         if (!edge.external && forbidden(edge.to)) emit('ARCH-DESCRIPTOR-COMPOSITION', boundary, edge, '公共机制不能反向装配领域或 catalog', route);
         return undefined;
       }, forbidden);
-      for (const composition of boundary.compositionEntrypoints) for (const edge of byFrom.get(composition.path) || []) {
-        if (!edge.external && DOMAIN.test(edge.to) && (!composition.allowedTargets.includes(edge.to) || !(edge.importedNames || []).length || !edge.importedNames.every(n => composition.importedNames.includes(n)))) emit('ARCH-DESCRIPTOR-COMPOSITION', boundary, edge, '显式装配只能加载登记的领域入口及具名导出');
+      for (const from of new Set(boundary.compositionEntrypoints.map(entry => entry.path))) for (const edge of byFrom.get(from) || []) {
+        const contracts = boundary.compositionEntrypoints.filter(entry => entry.path === from && entry.allowedTargets.includes(edge.to));
+        const allowed = contracts.some(entry => (edge.importedNames || []).length && edge.importedNames.every(name => entry.importedNames.includes(name)));
+        if (!edge.external && DOMAIN.test(edge.to) && !allowed) emit('ARCH-DESCRIPTOR-COMPOSITION', boundary, edge, '显式装配只能加载登记的领域入口及具名导出');
       }
     }
     if (rules.includes('ARCH-TASK-ADAPTER')) {
@@ -194,24 +196,19 @@ function evaluateRules(scan, config, allowlist, { root = process.cwd() } = {}) {
         return { path: api.path, operation, targets: resolved?.targets || [], hasBinding: Boolean(binding) };
       }));
       const full = boundary.protectedScopes.filter(s => s.functionPath === null && files.has(s.path)).map(s => s.path);
-      const denied = e => boundary.restrictedApis.some(a => a.path === e.to);
+      const denied = e => boundary.restrictedApis.some(a => a.path === e.to && (a.exportNames === null || a.exportNames.length));
       closure(full, (edge, route) => { if (denied(edge)) emit('ARCH-TASK-ADAPTER', boundary, edge, '通用任务机制不能依赖 Position 私有状态机', route); });
-      const reachableScopes = boundary.protectedScopes.map(s => ({ ...s }));
-      for (let i = 0; i < reachableScopes.length; i += 1) {
-        for (const site of sites.filter(s => ['call', 'new'].includes(s.type) && scopeMatches(s, reachableScopes[i]))) {
-          const origins = callableOrigins(site.reference, scan.analyses.get(site.from));
-          for (const localFunction of origins.functions) {
-            if (localFunction && !reachableScopes.some(s => s.path === site.from && s.functionPath === localFunction)) reachableScopes.push({ path: site.from, functionPath: localFunction });
-          }
-        }
-      }
-      for (const site of sites.filter(s => ['call', 'new'].includes(s.type) && reachableScopes.some(p => scopeMatches(s, p)))) {
+      const reached = executionScopes(scan, boundary.protectedScopes, {
+        skipSite: site => siteAllowed(boundary, 'ARCH-TASK-ADAPTER', site)
+      });
+      for (const site of reached.unresolvedCalls) if (!siteAllowed(boundary, 'ARCH-TASK-ADAPTER', site)) emit('ARCH-STATIC-COVERAGE', boundary, site, '通用编排 helper 的动态执行目标无法完整解释');
+      for (const site of reached.sites.filter(s => ['call', 'new'].includes(s.type))) {
         if (siteAllowed(boundary, 'ARCH-TASK-ADAPTER', site)) continue;
         const candidates = valueCandidates(site.reference);
         const origins = callableOrigins(site.reference, scan.analyses.get(site.from));
-        for (const module of new Set([...origins.modules, ...candidates.map(value => value.module).filter(Boolean)])) {
-          closure([module], (edge, route) => { if (denied(edge)) emit('ARCH-TASK-ADAPTER', boundary, site, '通用具名编排经 helper/工厂加载 Position 私有状态机', [site.from, ...route]); });
-          if (denied({ to: module })) emit('ARCH-TASK-ADAPTER', boundary, site, '通用具名编排直接调用 Position 私有能力', [site.from, module]);
+        for (const target of reached.calledTargets(site)) {
+          if (denied({ to: target.analysis.from })) emit('ARCH-TASK-ADAPTER', boundary, site,
+            '通用具名编排经实际调用取得 Position 私有能力', [site.from, target.analysis.from]);
         }
         const restrictedOperation = localOperations.some(api => api.path === site.from &&
           (api.targets.some(target => origins.targets.includes(target)) || (!api.hasBinding && candidates.some(value =>
@@ -239,6 +236,28 @@ function evaluateRules(scan, config, allowlist, { root = process.cwd() } = {}) {
       }
     }
     if (rules.includes('ARCH-PUBLICATION-RECOVERY-ENTRY')) {
+      const localOperations = boundary.restrictedApis.flatMap(api => api.operations.map(operation => {
+        const analysis = scan.analyses.get(api.path);
+        const binding = analysis?.lookup(operation, analysis.ast);
+        const origins = binding && callableOrigins(analysis.describeBinding(binding), analysis);
+        if (binding && (!origins.known || !origins.targets.length)) emit('ARCH-STATIC-COVERAGE', boundary,
+          { from: api.path }, `受限恢复操作 ${operation} 的配置绑定无法完整解释`);
+        return { path: api.path, operation, targets: origins?.targets || [], hasBinding: Boolean(binding) };
+      }));
+      const reached = executionScopes(scan, boundary.protectedScopes, {
+        skipSite: site => siteAllowed(boundary, 'ARCH-PUBLICATION-RECOVERY-ENTRY', site)
+      });
+      for (const site of reached.unresolvedCalls) if (!siteAllowed(boundary, 'ARCH-PUBLICATION-RECOVERY-ENTRY', site))
+        emit('ARCH-STATIC-COVERAGE', boundary, site, '受保护恢复 helper 的执行目标或实参无法完整解释');
+      for (const site of reached.sites.filter(s => ['call', 'new'].includes(s.type))) {
+        if (siteAllowed(boundary, 'ARCH-PUBLICATION-RECOVERY-ENTRY', site)) continue;
+        const targets = [...reached.calledTargets(site), ...reached.callbackTargets(site)];
+        if (targets.some(target => target.node && localOperations.some(api => api.targets.includes(
+          JSON.stringify(['local', target.analysis.from, target.node.start])))))
+          emit('ARCH-PUBLICATION-RECOVERY-ENTRY', boundary, site, '受保护 prepare/worker 经静态容器、helper 或回调入口执行了受限恢复能力');
+      }
+      // 恢复命令随真实 worker 合同登记；旧命令与新授权命令均不能从旁路发起。
+      const recoveryOperations = new Set(['recover', ...boundary.restrictedApis.flatMap(api => api.operations)]);
       for (const edge of edges) {
         const api = boundary.restrictedApis.find(a => a.path === edge.to && a.exportNames !== null && (!(edge.importedNames || []).length || edge.importedNames.some(n => a.exportNames.includes(n))));
         if (api && !siteAllowed(boundary, 'ARCH-PUBLICATION-RECOVERY-ENTRY', { ...edge, callee: edge.kind })) emit('ARCH-PUBLICATION-RECOVERY-ENTRY', boundary, edge, '受限恢复 API 的引入/透传必须登记准确授权装配位置');
@@ -246,7 +265,11 @@ function evaluateRules(scan, config, allowlist, { root = process.cwd() } = {}) {
       for (const site of sites.filter(s => s.type === 'call' || s.type === 'new')) {
         const module = site.binding && site.binding.from; const names = site.binding && site.binding.importedNames || [];
         const restricted = boundary.restrictedApis.find(a => a.path === module && (a.exportNames === null || names.some(n => a.exportNames.includes(n))));
-        const internal = boundary.restrictedApis.find(a => a.path === site.from && a.operations.includes(site.callee));
+        const origins = callableOrigins(site.reference, scan.analyses.get(site.from));
+        const internal = localOperations.some(api => api.path === site.from &&
+          (api.targets.some(target => origins.targets.includes(target)) || (!api.hasBinding &&
+            valueCandidates(site.reference).some(value => !value.functionPath && value.bindingKind !== 'parameter' &&
+              (value.chain || []).join('.') === api.operation))));
         const method = site.method || (site.chain || []).at(-1);
         const governed = boundary.protectedScopes.some(s => scopeMatches(site, s));
         const messageCall = ['postMessage', 'dispatch'].includes(method);
@@ -262,14 +285,14 @@ function evaluateRules(scan, config, allowlist, { root = process.cwd() } = {}) {
         if (governed || messageCall) {
           for (const arg of site.args || []) {
             if (arg.kind === 'object') inspectMessage(arg);
-            if (arg.kind === 'literal' || (arg.kind === 'candidates' && valueCandidates(arg).some(value => value.kind === 'literal' && value.value === 'recover'))) operations.push(arg);
+            if (arg.kind === 'literal' || (arg.kind === 'candidates' && valueCandidates(arg).some(value => value.kind === 'literal' && recoveryOperations.has(value.value)))) operations.push(arg);
           }
           if (messageCall) inspectMessage(site.args?.[0]);
           if (method === 'runWorkerJob') operations.push(site.args?.[1]);
         }
         const values = operations.flatMap(value => valueCandidates(value));
         if (operations.some(value => !value) || values.some(value => value.opaque || !['literal', 'candidates'].includes(value.kind))) unknownOperation = true;
-        const workerRecover = values.some(value => value.kind === 'literal' && value.value === 'recover');
+        const workerRecover = values.some(value => value.kind === 'literal' && recoveryOperations.has(value.value));
         if (siteAllowed(boundary, 'ARCH-PUBLICATION-RECOVERY-ENTRY', site)) continue;
         if (unknownOperation && governed) emit('ARCH-STATIC-COVERAGE', boundary, site, '受保护 worker operation 无法完整解释，须登记准确授权调用或使用可解析操作');
         if (!restricted && !internal && !workerRecover) continue;
@@ -277,12 +300,9 @@ function evaluateRules(scan, config, allowlist, { root = process.cwd() } = {}) {
       }
     }
     if (rules.includes('ARCH-BIZOP-QUERY')) {
-      const scopeFiles = [...new Set(boundary.protectedScopes.map(s => s.path).filter(p => files.has(p)))];
-      const helpers = closure(scopeFiles, () => {}, to => boundary.allowedLocal.includes(to));
-      for (const site of sites) {
-        const direct = boundary.protectedScopes.some(s => scopeMatches(site, s));
-        const helper = helpers.has(site.from) && !scopeFiles.includes(site.from) && !boundary.allowedLocal.includes(site.from);
-        if (!direct && !helper) continue;
+      const reached = executionScopes(scan, boundary.protectedScopes, { stop: target => boundary.allowedLocal.includes(target) });
+      for (const site of reached.unresolvedCalls) if (!siteAllowed(boundary, 'ARCH-BIZOP-QUERY', site)) emit('ARCH-STATIC-COVERAGE', boundary, site, '读取 helper 的动态执行目标无法完整解释');
+      for (const site of reached.sites) {
         if (siteAllowed(boundary, 'ARCH-BIZOP-QUERY', site)) continue;
         if (site.type === 'call' && ['prepare', 'exec'].includes(site.method || (site.chain || []).at(-1)) && !(site.method === 'exec' && site.reference?.object?.kind === 'regexp') && valueCandidates(site.reference).some(value => value.opaque || ['unknown', 'call-result'].includes(value.kind))) emit('ARCH-STATIC-COVERAGE', boundary, site, '受保护读取作用域的 DB alias 来源无法解释');
         if (site.type === 'db-operation') {
@@ -307,45 +327,53 @@ function evaluateRules(scan, config, allowlist, { root = process.cwd() } = {}) {
         if (site.type === 'global-read' && (site.chain || []).includes('desktopApi')) emit('ARCH-RENDERER-SCOPE', boundary, site, '控制器只能消费显式 scoped API，不能读取完整 desktopApi');
       }
       checkClosure('ARCH-RENDERER-SCOPE', edge => edge.external === false && (boundary.allowedLocal.includes(edge.to) || starts.includes(edge.to)));
-      const isPanelNode = value => {
-        if (value.kind !== 'call-result' || !value.callee.rootFree) return false;
-        const method = (value.callee.chain || []).join('.'); const selector = value.args[0];
-        if (selector?.kind !== 'literal' || typeof selector.value !== 'string' || value.args.length !== 1) return false;
-        const id = method === 'document.getElementById' ? selector.value : method === 'document.querySelector' && selector.value.startsWith('#') ? selector.value.slice(1) : null;
-        return id !== null && /^[A-Za-z_][\w:-]*$/.test(id) && !['modalRoot', 'body', 'html'].includes(id);
-      };
-      const isPickedApiMethod = (value, field) => {
-        const chain = value.chain || []; const root = ['window', 'globalThis'].includes(chain[0]) ? 1 : 0;
-        return value.kind === 'reference' && value.rootFree && chain[root] === 'desktopApi' &&
-          chain.length > root + field.split('.').length && chain.slice(-field.split('.').length).join('.') === field;
-      };
-      if (boundary.factory) for (const site of factoryCalls(scan, boundary.factory)) {
-        const input = site.args && site.args[0];
-        if (!input || input.kind !== 'object') { emit('ARCH-STATIC-COVERAGE', boundary, site, '工厂入参必须是可解释的具名依赖对象'); continue; }
-        if ((input.spreads || []).length) emit('ARCH-STATIC-COVERAGE', boundary, site, '工厂依赖对象 spread 不能确定字段与来源');
-        const properties = Array.isArray(input.properties) ? input.properties : Object.entries(input.properties || {}).map(([name, value]) => ({ name, value }));
-        for (const property of properties) {
-          const name = property.name || property.key; let value = property.value || property;
-          if (value.kind === 'call-result' && (value.callee.chain || []).join('.') === 'Object.freeze' && value.args.length === 1) value = value.args[0];
-          if (!boundary.factory.parameters.includes(name) || ['state', 'elements', 'desktopApi'].includes(name)) emit('ARCH-RENDERER-SCOPE', boundary, site, `工厂注入了未授权字段 ${name}`);
-          if (name === 'panel' && boundary.factory.parameters.includes(name) && isPanelNode(value)) continue;
-          if (['unknown', 'call-result', 'candidates'].includes(value.kind) || (boundary.allowedApiFields[name] && value.kind !== 'object') || value.opaque || (value.spreads || []).length || (value.chain || []).some(n => ['state', 'elements', 'desktopApi'].includes(n))) emit('ARCH-RENDERER-SCOPE', boundary, site, `工厂字段 ${name} 不能注入完整可变对象或不透明 alias`);
-          if (boundary.allowedApiFields[name] && value.kind === 'reference' && value.bindingScope === 'program') emit('ARCH-STATIC-COVERAGE', boundary, site, `scoped ${name} 的引用未提供可解释方法集合`);
-          if (boundary.allowedApiFields[name] && value.kind === 'object') {
-            const allowed = boundary.allowedApiFields[name];
-            const inspectFields = (object, prefix = '') => {
-              if (object.kind !== 'object' || (object.spreads || []).length) {
-                emit('ARCH-STATIC-COVERAGE', boundary, site, `scoped ${name}${prefix ? '.' + prefix : ''} 未提供可解释方法集合`); return;
+      const { createRendererContracts, rendererDataLiteral } = require('./renderer-contracts');
+      const contracts = createRendererContracts(scan);
+      for (const site of boundary.factory ? factoryCalls(scan, boundary.factory) : []) {
+        const analysis = scan.analyses.get(site.from);
+        const input = contracts.resolve(site.args && site.args[0], analysis);
+        if (input.kind !== 'object') { emit('ARCH-STATIC-COVERAGE', boundary, site, '工厂入参必须是可解释的具名依赖对象'); continue; }
+        for (const [name, value] of Object.entries(input.properties)) {
+          if (!boundary.factory.parameters.includes(name) || ['state', 'elements', 'desktopApi'].includes(name)) {
+            emit('ARCH-RENDERER-SCOPE', boundary, site, `工厂注入了未授权字段 ${name}`); continue;
+          }
+          if (['panel', 'legacyPanel'].includes(name)) {
+            if (value.kind !== 'panel-node') emit('ARCH-RENDERER-SCOPE', boundary, site, `工厂字段 ${name} 必须是明确的领域面板节点`);
+            continue;
+          }
+          if (['initialInfo', 'initialBillCategory'].includes(name)) {
+            if (!rendererDataLiteral(value, 'app:get-info')) emit('ARCH-RENDERER-SCOPE', boundary, site,
+              `工厂字段 ${name} 必须是递归纯数据或明确的 app:get-info IPC 数据`);
+            continue;
+          }
+          const allowed = boundary.allowedApiFields[name];
+          if (allowed) {
+            const inspect = (object, prefix = '') => {
+              if (object.kind !== 'object') {
+                emit(['whole-desktop-api', 'whole-application-state'].includes(object.reason) ? 'ARCH-RENDERER-SCOPE' : 'ARCH-STATIC-COVERAGE', boundary, site, `scoped ${name}${prefix ? '.' + prefix : ''} 未提供可解释方法集合`); return;
               }
               for (const [key, member] of Object.entries(object.properties)) {
                 const field = prefix ? `${prefix}.${key}` : key;
-                if (allowed.some(method => method.startsWith(`${field}.`))) inspectFields(member, field);
+                if (allowed.some(method => method.startsWith(`${field}.`))) inspect(member, field);
                 else if (!allowed.includes(field)) emit('ARCH-RENDERER-SCOPE', boundary, site, `scoped ${name} 未授权字段 ${field}`);
-                else if (member.opaque || ['unknown', 'call-result', 'candidates', 'object'].includes(member.kind) ||
-                  ((member.chain || []).some(part => ['state', 'elements', 'desktopApi'].includes(part)) && !isPickedApiMethod(member, field))) emit('ARCH-STATIC-COVERAGE', boundary, site, `scoped ${name}.${field} 的方法来源无法解释`);
+                else if (name === 'config' && field === 'initialBillCategory') {
+                  if (!rendererDataLiteral(member, 'app:get-info')) emit('ARCH-RENDERER-SCOPE', boundary, site,
+                    '工厂字段 config.initialBillCategory 必须是递归纯数据或明确的 app:get-info IPC 数据');
+                }
+                else if (!['function', 'native-function', 'literal'].includes(member.kind) && !rendererDataLiteral(member) && !(name === 'config' && member.kind === 'ipc-data') && !(member.kind === 'reference' && member.rootFree &&
+                  ((['window', 'globalThis'].includes(member.chain?.[0]) && member.chain[1] === 'desktopApi' && member.chain.length >= field.split('.').length + 2) ||
+                    (member.chain?.[0] === 'desktopApi' && member.chain.length >= field.split('.').length + 1)) &&
+                  member.chain.slice(-field.split('.').length).join('.') === field)) {
+                  emit('ARCH-STATIC-COVERAGE', boundary, site, `scoped ${name}.${field} 的方法来源无法解释`);
+                }
               }
             };
-            inspectFields(value);
+            inspect(value);
+          } else if (['unknown', 'call-result', 'candidates'].includes(value.kind) || value.opaque ||
+            (value.chain || []).some(part => ['state', 'elements', 'desktopApi'].includes(part))) {
+            // 普通布尔比较是值配置，不承载 API/应用状态引用。
+            if (value.kind === 'unknown' && value.reason === 'BinaryExpression') continue;
+            emit('ARCH-RENDERER-SCOPE', boundary, site, `工厂字段 ${name} 不能注入完整可变对象或不透明 alias`);
           }
         }
       }

@@ -7,6 +7,8 @@ const { createScenarioChangeRouter } = require('../../../src/renderer/scenario-c
 const { createSharedReconSession } = require('../../../src/renderer/shared-recon-session');
 const { createBankStatementController } = require('../../../src/renderer/controllers/bank-statement');
 const { createReconIdFixController } = require('../../../src/renderer/controllers/recon-id-fix');
+const { createModalDom } = require('../../helpers/modal-dom');
+const { createModalHost } = require('../../../src/renderer/modal-host');
 
 class Control {
   constructor() { this.textContent = '欢迎使用小助手'; this.value = ''; this.innerHTML = ''; this.disabled = false; this.dataset = {}; this.listeners = new Map(); }
@@ -36,6 +38,8 @@ function fixture(t, { trusted = true } = {}) {
   const errors = [];
   const closeCalls = [];
   let blocked = false;
+  const modalDom = createModalDom();
+  const modalHost = createModalHost({ ...modalDom, reportError: (error) => errors.push(error) });
   let router;
   const publish = (event) => { events.push(event); router?.route(event); };
   const commandOptions = { scenariosApi: main.scenariosApi, channelsApi: main.channelsApi, publish, writerBoundaryTrusted: trusted };
@@ -44,11 +48,11 @@ function fixture(t, { trusted = true } = {}) {
   const ui = {
     status(element, text, tone) { element.textContent = text; element.dataset.tone = tone; },
     reportError(error) { errors.push(error); },
-    alert(message, options) { alerts.push({ message, options }); return {}; },
-    confirm(options) { confirmations.push(options); return {}; },
+    alert(message, options) { alerts.push({ message, options }); return modalDom.createDialog({ canClose: () => !blocked }); },
+    confirm(options) { confirmations.push(options); return modalDom.createDialog({ canClose: () => !blocked }); },
     modalHost: {
-      openRoot(factory) { if (blocked) return { status: 'blocked' }; factory(); return { status: 'opened' }; },
-      closeOwner(owner, reason) { closeCalls.push({ owner, reason }); return { status: blocked ? 'blocked' : 'closed' }; }
+      openRoot(factory, options) { return blocked ? { status: 'blocked' } : modalHost.openRoot(factory, options); },
+      closeOwner(owner, reason) { closeCalls.push({ owner, reason }); return blocked ? { status: 'blocked' } : modalHost.closeOwner(owner, reason); }
     }
   };
   const config = { scenarios: service.scenarios, linkedTable: { rowCount: async () => ({ status: 'ok', rowCount: 0 }), import: async () => ({ status: 'cancelled' }) } };
@@ -66,7 +70,7 @@ function fixture(t, { trusted = true } = {}) {
       assertState(f, true, true);
     }
   };
-  t.after(() => { bank.dispose(); recon.dispose(); router.dispose(); service.dispose(); shared.dispose(); main.dispose(); });
+  t.after(() => { modalHost.getTop()?.dispose(); bank.dispose(); recon.dispose(); modalHost.dispose(); router.dispose(); service.dispose(); shared.dispose(); main.dispose(); });
   return f;
 }
 function assertState(f, bank, recon) {

@@ -1,0 +1,116 @@
+[
+  {
+    "version": "before",
+    "script": "r10-renderer-probes.cjs",
+    "args": [],
+    "output": "r10-renderer-probes-before.jsonl",
+    "exitCode": 0,
+    "reusedFreshBefore": true,
+    "executionRecord": "r10-probe-executions-preliminary-2.json"
+  },
+  {
+    "version": "before",
+    "script": "r10-array-real-neighbor-probe.cjs",
+    "args": [
+      "minimal"
+    ],
+    "output": "r10-array-neighbor-before.json",
+    "exitCode": 0,
+    "reusedFreshBefore": true,
+    "executionRecord": "r10-probe-executions-preliminary-2.json"
+  },
+  {
+    "version": "before",
+    "script": "r10-renderer-nested-realconfig.cjs",
+    "args": [],
+    "output": "r10-renderer-nested-realconfig-before.json",
+    "exitCode": 0,
+    "reusedFreshBefore": true,
+    "executionRecord": "r10-probe-executions-preliminary-2.json"
+  },
+  {
+    "version": "before",
+    "script": "r10-array-real-neighbor-probe.cjs",
+    "args": [
+      "real"
+    ],
+    "output": "r10-array-real-neighbor-before.json",
+    "exitCode": 0,
+    "reusedFreshBefore": true,
+    "executionRecord": "r10-probe-executions-preliminary-2.json"
+  },
+  {
+    "version": "beforeR10/current",
+    "script": "r10-shared-async-array-combinations.cjs",
+    "args": [],
+    "output": "r10-shared-async-array-combinations.json",
+    "exitCode": 0
+  },
+  {
+    "version": "beforeR10/current",
+    "script": "r10-shared-default-combinations.cjs",
+    "args": [],
+    "output": "r10-shared-default-combinations.json",
+    "exitCode": 0
+  },
+  {
+    "version": "beforeR10/current",
+    "script": "r10-shared-destructure-probes.cjs",
+    "args": [],
+    "output": "r10-shared-destructure-probes.json",
+    "exitCode": 0
+  },
+  {
+    "version": "beforeR10/current",
+    "script": "r10-shared-localenv-probes.cjs",
+    "args": [],
+    "output": "r10-shared-localenv-probes.json",
+    "exitCode": 0
+  },
+  {
+    "version": "beforeR10/current",
+    "script": "r10-shared-logical-combinations.cjs",
+    "args": [],
+    "output": "r10-shared-logical-combinations.json",
+    "exitCode": 0
+  },
+  {
+    "version": "beforeR10/current",
+    "script": "r10-shared-shared-probes.cjs",
+    "args": [],
+    "output": "r10-shared-shared-probes.json",
+    "exitCode": 0
+  },
+  {
+    "version": "current",
+    "script": "r10-renderer-probes.cjs",
+    "args": [],
+    "output": "r10-renderer-probes-current.jsonl",
+    "exitCode": 0
+  },
+  {
+    "version": "current",
+    "script": "r10-array-real-neighbor-probe.cjs",
+    "args": [
+      "minimal"
+    ],
+    "output": "r10-array-neighbor-current.json",
+    "exitCode": 0
+  },
+  {
+    "version": "current",
+    "script": "r10-renderer-nested-realconfig.cjs",
+    "args": [],
+    "output": "r10-renderer-nested-realconfig-current.json",
+    "exitCode": 0
+  },
+  {
+    "version": "current",
+    "script": "r10-array-real-neighbor-probe.cjs",
+    "args": [
+      "real"
+    ],
+    "output": "r10-array-real-neighbor-current.json",
+    "exitCode": 0
+  }
+]

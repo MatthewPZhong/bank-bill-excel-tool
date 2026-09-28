@@ -1,0 +1,22 @@
+{
+  "source": "const envelope={api:{run(){}}};const alias=envelope.api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:envelope.api});",
+  "selected": {
+    "kind": "object",
+    "chain": null,
+    "objectStart": 20,
+    "keys": [
+      "run"
+    ]
+  },
+  "writeBase": {
+    "kind": "object",
+    "chain": [
+      "alias"
+    ],
+    "objectStart": 20,
+    "keys": [
+      "run"
+    ]
+  },
+  "identityMatches": true
+}

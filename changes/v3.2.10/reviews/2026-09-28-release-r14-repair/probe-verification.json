@@ -1,0 +1,88 @@
+{
+  "status": "PASS",
+  "originalCases": 6,
+  "vmBranches": 12,
+  "ordering": {
+    "cases": 8,
+    "safe": 5,
+    "unsafe": 3
+  },
+  "rr12Arrays": {
+    "cases": 14,
+    "safePass": 6,
+    "unsafeRejected": 7,
+    "knownConservative": [
+      "overwritten-before-reorder-safe"
+    ]
+  },
+  "bindings": {
+    "cases": 6,
+    "diagnosticAndScannerChanges": []
+  },
+  "commands": [
+    {
+      "command": [
+        "node",
+        "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r14/evidence/r14-renderer-probes.cjs"
+      ],
+      "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+      "output": "renderer-before.jsonl",
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r14/evidence/r14-renderer-probes.cjs"
+      ],
+      "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+      "output": "renderer-after.jsonl",
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r14/evidence/r14-renderer-branch-vm.cjs",
+        "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-r14-repair/renderer-after.jsonl"
+      ],
+      "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+      "output": "renderer-vm.json",
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r14/evidence/r14-order-probe.cjs"
+      ],
+      "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+      "output": "order.json",
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r14/evidence/r14-array-original-probe.cjs"
+      ],
+      "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+      "output": "array-original.json",
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r14/evidence/r14-array-finite-probe.cjs"
+      ],
+      "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+      "output": "array-finite.json",
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r14/evidence/r14-shared-bindings-probes.cjs"
+      ],
+      "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+      "output": "bindings-probe.json",
+      "exitCode": 0
+    }
+  ]
+}

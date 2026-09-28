@@ -1,0 +1,11 @@
+{
+  "cmd": [
+    "/opt/homebrew/Cellar/node/25.8.0/bin/node",
+    "/private/tmp/r13-array-raw-helper-probe.cjs",
+    "minimal"
+  ],
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "status": 0,
+  "signal": null,
+  "elapsedMs": 77
+}

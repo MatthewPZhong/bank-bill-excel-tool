@@ -1,0 +1,36 @@
+{
+  "boundaryState": "active",
+  "outputs": [
+    {
+      "name": "native_includes",
+      "value": true,
+      "writes": 0,
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "native_indexof",
+      "value": 0,
+      "writes": 0,
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "source_helper_compare",
+      "value": true,
+      "writes": 0,
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "reduce_execution",
+      "writes": 1,
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "outsideSandboxAttempts": [
+    {
+      "result": "NOT_STARTED",
+      "reason": "automatic approval review timed out"
+    },
+    {
+      "result": "NOT_STARTED",
+      "reason": "single permitted retry also timed out"
+    }
+  ],
+  "fallback": "Default sandbox run failed only at Electron startup (SIGABRT); the isolated Electron test passed outside the sandbox, followed by a complete release-check rerun outside the sandbox.",
+  "testFixtureCorrection": "Initial shadowed-undefined fixture tried an illegal global const binding; replaced with a valid function parameter, then reran the byte-matched baseline and regression suite.",
+  "defaultSandboxResult": {
+    "result": "FAIL",
+    "unitPassed": 9160,
+    "windowsSkips": 4,
+    "integrationPassed": 67,
+    "integrationFailed": [
+      "renderer-lifecycle"
+    ],
+    "reason": "Electron startup SIGABRT",
+    "inputsUnchanged": 1704
+  },
+  "outsideIsolatedElectronResult": {
+    "result": "PASS",
+    "passed": 233,
+    "total": 233
+  }
+}

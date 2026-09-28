@@ -1,0 +1,47 @@
+{
+  "root": "/tmp/r5-g1-before-checker-1yau5rtp",
+  "files": [
+    {
+      "path": "scripts/architecture/contracts.js",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-r4-repair/before/scripts/architecture/contracts.js",
+      "sha256": "e7d196124f0091ea757bd85bed04110f4499f16b91afc1ed5a2598515a8d9cbc",
+      "matchesInputManifest": true
+    },
+    {
+      "path": "scripts/architecture/rules.js",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-r4-repair/before/scripts/architecture/rules.js",
+      "sha256": "89f21aa323513fd9ea76259d06afef2345165d2a5c90ca00903a669b12947541",
+      "matchesInputManifest": true
+    },
+    {
+      "path": "scripts/architecture/renderer-contracts.js",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-r4-repair/before/scripts/architecture/renderer-contracts.js",
+      "sha256": "cf917317275b0bf2204da09566975f531f114ddf449a7c0aafe6e879a8ca83ab",
+      "matchesInputManifest": true
+    },
+    {
+      "path": "scripts/architecture/scan.js",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-r4-repair/before/scripts/architecture/scan.js",
+      "sha256": "91709776481ac49e2b9f80178a5ac7887ad21c33709c5580aaca0335ae8daaef",
+      "matchesInputManifest": true
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/scripts/architecture/schema.js",
+      "sha256": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "matchesInputManifest": true
+    },
+    {
+      "path": "architecture/boundaries.json",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/architecture/boundaries.json",
+      "sha256": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+      "matchesInputManifest": true
+    },
+    {
+      "path": "architecture/legacy-allowlist.json",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/architecture/legacy-allowlist.json",
+      "sha256": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3",
+      "matchesInputManifest": true
+    }
+  ]
+}

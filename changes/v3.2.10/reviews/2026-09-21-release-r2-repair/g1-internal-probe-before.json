@@ -1,0 +1,70 @@
+{
+  "boundaryState": "active",
+  "configurationRestrictedApis": [
+    {
+      "path": "src/main-process/toolbox-output-publication.js",
+      "exportNames": [
+        "recoverPendingToolboxPublications"
+      ],
+      "operations": [
+        "recoverPendingInternal"
+      ]
+    },
+    {
+      "path": "src/main-process/toolbox-output-publication-worker.js",
+      "exportNames": null,
+      "operations": [
+        "recover",
+        "execute-recovery"
+      ]
+    },
+    {
+      "path": "src/main-process/toolbox-output-publication-dispatch.js",
+      "exportNames": [
+        "recoverToolboxPublicationsAsync"
+      ],
+      "operations": [
+        "recover",
+        "execute-recovery"
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "callee": "recoverPendingInternal",
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 60,
+          "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+          "evidenceId": "7fbbdb0380190f8feb83dd83a8faf13bd656672a36b7de27885855e980fcc78d",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "callee": "recoverOneJournal",
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "callee": "recoverPreparingIntent",
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "callee": "recoverFinalizingIntent",
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    }
+  ]
+}

@@ -24,6 +24,8 @@ function fixture(t, source, configure = () => {}, extraFiles = {}) {
     fs.writeFileSync(path.join(root, name), content);
   }
   const boundary = structuredClone(policy.boundaries.find(b => b.id === 'business-task-adapters'));
+  // 最小调用图 fixture 仍执行规则，不继承真实 release 的整套入口激活证据。
+  boundary.state = 'pending';
   configure(boundary);
   const config = { ...policy, boundaries: [boundary], generatedModules: [], dynamicLoads: [], policyChanges: [] };
   const scanned = scan(root, config);

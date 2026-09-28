@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "command": "node scripts/integration/renderer-lifecycle.js",
+  "context": "outside filesystem sandbox",
+  "exitCode": 0,
+  "passed": 233,
+  "total": 233,
+  "evidence": "renderer-lifecycle-unsandboxed.log",
+  "inference": "同一脚本在沙箱外通过，首轮原生 AppKit/HIServices 启动崩溃与执行环境有关；未改动源码或跳过断言。",
+  "checkedAt": "2026-09-22T11:39:01.932608+08:00"
+}

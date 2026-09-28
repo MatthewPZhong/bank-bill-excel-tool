@@ -1,0 +1,8 @@
+{"phase":"nested-definite-overwrite-safe","at":"2026-09-28T09:18:15.127Z","violations":0}
+{"phase":"nested-definite-overwrite-unsafe","at":"2026-09-28T09:18:15.131Z","violations":1}
+{"phase":"conditional-write-after-definite","at":"2026-09-28T09:18:15.133Z","violations":1}
+{"phase":"factory-conditional-then-overwrite-safe","at":"2026-09-28T09:18:15.135Z","violations":0}
+{"phase":"array-fixed-slot-definite-overwrite-safe","at":"2026-09-28T09:18:15.138Z","violations":0}
+{"phase":"unordered-repeated-helper-retains-origin","at":"2026-09-28T09:18:15.139Z","violations":1}
+{"phase":"declarations-reversed-call-order-safe","at":"2026-09-28T09:18:15.141Z","violations":0}
+{"phase":"captured-before-nested-overwrite-safe","at":"2026-09-28T09:18:15.143Z","violations":0}

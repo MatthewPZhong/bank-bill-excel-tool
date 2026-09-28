@@ -1,0 +1,14 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),crypto=require('node:crypto');
+const repo=process.argv[2]||'/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10';
+const out=fs.mkdtempSync(path.join(os.tmpdir(),'r5-renderer-before-tools-'));
+const rel='scripts/architecture';
+const saved=path.join(repo,'changes/v3.2.10/reviews/2026-09-22-release-r4-repair/before',rel);
+fs.mkdirSync(path.join(out,rel),{recursive:true});
+for(const f of ['scan.js','rules.js','contracts.js','renderer-contracts.js'])fs.copyFileSync(path.join(saved,f),path.join(out,rel,f));
+fs.copyFileSync(path.join(repo,rel,'schema.js'),path.join(out,rel,'schema.js'));
+fs.symlinkSync(path.join(repo,'node_modules'),path.join(out,'node_modules'),'dir');
+const manifest=JSON.parse(fs.readFileSync(path.join(repo,'changes/v3.2.10/reviews/2026-09-22-release-r4-repair/input-manifest.json')));
+const proof={root:out,files:Object.fromEntries(['scan.js','rules.js','contracts.js','renderer-contracts.js','schema.js'].map(f=>{const digest=crypto.createHash('sha256').update(fs.readFileSync(path.join(out,rel,f))).digest('hex');return [f,{sha256:digest,expected:manifest.sha256[path.join(rel,f)],match:digest===manifest.sha256[path.join(rel,f)]}]}))};
+fs.writeFileSync('/tmp/r5-renderer-before-inputs.json',JSON.stringify(proof,null,2));
+process.stdout.write(out+'\n');

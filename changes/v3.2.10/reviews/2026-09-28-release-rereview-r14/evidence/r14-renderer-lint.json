@@ -1,0 +1,58 @@
+[
+  {
+    "name": "do-break-before-write",
+    "command": [
+      "/opt/homebrew/Cellar/node/25.8.0/bin/node",
+      "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/node_modules/eslint/bin/eslint.js",
+      "--stdin",
+      "--stdin-filename",
+      "src/renderer.js",
+      "--format",
+      "json"
+    ],
+    "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+    "status": 0,
+    "stderr": "",
+    "output": [
+      {
+        "filePath": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/src/renderer.js",
+        "messages": [],
+        "suppressedMessages": [],
+        "errorCount": 0,
+        "fatalErrorCount": 0,
+        "warningCount": 0,
+        "fixableErrorCount": 0,
+        "fixableWarningCount": 0,
+        "usedDeprecatedRules": []
+      }
+    ]
+  },
+  {
+    "name": "do-write-before-break-safe",
+    "command": [
+      "/opt/homebrew/Cellar/node/25.8.0/bin/node",
+      "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/node_modules/eslint/bin/eslint.js",
+      "--stdin",
+      "--stdin-filename",
+      "src/renderer.js",
+      "--format",
+      "json"
+    ],
+    "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+    "status": 0,
+    "stderr": "",
+    "output": [
+      {
+        "filePath": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/src/renderer.js",
+        "messages": [],
+        "suppressedMessages": [],
+        "errorCount": 0,
+        "fatalErrorCount": 0,
+        "warningCount": 0,
+        "fixableErrorCount": 0,
+        "fixableWarningCount": 0,
+        "usedDeprecatedRules": []
+      }
+    ]
+  }
+]

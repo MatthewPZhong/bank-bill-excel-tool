@@ -1,0 +1,1 @@
+{"name":"separate-factory-instances","source":"function provide(){return {read(){}};}const clean=provide();const other=provide();other.outsideScope=window.desktopApi.outsideScope;window.createController({api:clean});","runtime":{"keys":["api"],"apiKeys":["read"],"uiKeys":[],"whole":false,"aliasReach":false},"violations":[]}

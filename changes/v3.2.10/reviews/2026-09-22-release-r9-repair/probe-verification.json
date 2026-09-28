@@ -1,0 +1,121 @@
+{
+  "result": "PASS",
+  "rendererBoundaries": 20,
+  "realAstCases": 6,
+  "baselineViolations": 0,
+  "priorReviewCheckersAndPolicyMatchRepairStart": true,
+  "logicalCases": [
+    {
+      "name": "logical-and-missing",
+      "violations": 1,
+      "runtime": {
+        "ipcReads": 1,
+        "same": true,
+        "keys": [
+          "api"
+        ],
+        "apiKeys": [
+          "run",
+          "outsideScope"
+        ],
+        "whole": false,
+        "extraCallable": true,
+        "extraResult": true
+      }
+    },
+    {
+      "name": "logical-and-provided-safe",
+      "violations": 0,
+      "runtime": {
+        "ipcReads": 1,
+        "same": false,
+        "keys": [
+          "api"
+        ],
+        "apiKeys": [
+          "run"
+        ],
+        "whole": false,
+        "extraCallable": false
+      }
+    }
+  ],
+  "arrayCases": [
+    {
+      "name": "push-direct-control",
+      "violations": 1,
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      }
+    },
+    {
+      "name": "push-static-spread",
+      "violations": 1,
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      }
+    },
+    {
+      "name": "splice-static-spread",
+      "violations": 1,
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      }
+    },
+    {
+      "name": "spread-before-replace-safe",
+      "violations": 0,
+      "runtime": {
+        "keys": [
+          "run"
+        ],
+        "extraCallable": false,
+        "same": false
+      }
+    }
+  ],
+  "shared": {
+    "status": "PASS",
+    "beforeVersion": "RR9 repair start; 5 checker files verified against input-manifest.json",
+    "rendererCases": 32,
+    "queryCases": 18,
+    "actualInMemoryQueries": 10,
+    "beforeCurrentDiagnosticsEqual": true,
+    "scannerJsonBeforeCurrentEqual": true,
+    "repeatedScanJsonEqual": true,
+    "scannerUnchangedAfterRules": true,
+    "siteEvidenceIdsUnchanged": true,
+    "policyFilesUnchanged": true,
+    "historicalExpectedCorrectionPreserved": "single-mount-category-explicit-ipc: invoke returns Promise; missing await triggers other default",
+    "knownConservativeRejection": "awaited-category-other-default-conservative: IPC field presence is not proved",
+    "scope": "50 small fixtures, async VM and in-memory SQLite only"
+  },
+  "unchangedSharedCheckerAndPolicySha256": {
+    "scripts/architecture/scan.js": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be",
+    "scripts/architecture/contracts.js": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f",
+    "scripts/architecture/rules.js": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa",
+    "scripts/architecture/schema.js": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+    "scripts/architecture/policy-history.js": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+    "architecture/boundaries.json": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+    "architecture/legacy-allowlist.json": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3"
+  },
+  "scope": "BankStatement examples appended to real Renderer AST with all 20 active Renderer configurations; not 20 separate factory executions"
+}

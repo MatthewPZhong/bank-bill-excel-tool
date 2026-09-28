@@ -1,0 +1,14 @@
+{
+  "gateInputsUnchanged": 1709,
+  "changedExisting": [
+    "architecture/README.md",
+    "changes/v3.2.10/README.md",
+    "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md",
+    "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md",
+    "changes/v3.2.10/release.md",
+    "scripts/architecture/renderer-contracts.js"
+  ],
+  "baselineStackOverflows": 10,
+  "sourceSha256": "f288b9b66558e1fee0ca9697c493aed3b60c5999fac6c0366b81041a46c4f082",
+  "testSha256": "2a47a8c2823814a78aeda1797388c7fee90d7e8430bb3c9d0ea0c0010d9a4ebc"
+}
