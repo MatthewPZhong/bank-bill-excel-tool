@@ -1,0 +1,26 @@
+{
+  "baseCandidate": "7a7368f10f2448c6c464d44fc4adc9bf76557a2f",
+  "targetedTests": {
+    "passed": 112,
+    "failed": 0,
+    "skipped": 0,
+    "log": "windows-compatibility-regressions.log"
+  },
+  "directoryIdentityProbe": {
+    "sameDirectoryDifferentCase": {
+      "before": "ARCHITECTURE_HISTORY_INPUT",
+      "after": "0 violations"
+    },
+    "childDirectory": {
+      "before": "ARCHITECTURE_HISTORY_INPUT",
+      "after": "ARCHITECTURE_HISTORY_INPUT"
+    }
+  },
+  "changes": [
+    "Git root 以 bigint dev/ino 比较物理目录身份",
+    "冷加载允许集和 consumer 路径断言使用本机路径分隔符",
+    "SST 非 strict 关闭测试确定性覆盖清理成功和拒绝两条路径"
+  ],
+  "productionBusinessSourceChanged": false,
+  "windowsVerification": "等待新提交真实 CI；不以本地结果代替"
+}

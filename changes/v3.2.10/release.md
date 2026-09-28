@@ -32,6 +32,16 @@ G1–G8 已合入，本轮从 `9a38b96b1b8006c5851535d0c1e586bbaeb63f10` 加已�
 
 旧候选本地集成在 Windows 失败明确后中止，完整门禁未计为通过；新候选重新运行本地及 Windows 全量门禁。[旧候选记录](publication/2026-09-28/preliminary-bfd396d7/reason.json)。
 
+### Windows 路径身份与测试平台假设修复
+
+`7a7368f1` 的完整本地门禁为 9432 PASS、4 项 Windows 条件跳过、68/68 集成 PASS，1712 个输入未漂移；[该候选结果](publication/2026-09-28/candidate-7a7368f1/local-final-verification.json)独立保留。Windows run `36440891592` 已真正启动单测，实时日志确认了临时目录身份、路径分隔符和文件删除共享模式相关失败，尚未结束的运行不计为 PASS。
+
+- 架构历史守卫原先按 `realpathSync` 返回字符串比较仓库根；同一目录的大小写/短路径拼写可能不同。改用文件系统返回的 `bigint dev/ino` 判断目录身份，继续拒绝借用父仓库的子目录。真实大小写别名探针对照：修复前输入错误，修复后通过；子目录对照前后均拒绝。目录别名、active 防降级及真实临时 Git 历史回归保留。
+- 纯合同冷加载允许集改用 `path.join`；XLSX 消费方观测按 `path.basename`/本机分隔符核对来源，不放宽允许依赖、SST 预算或私有目录约束。
+- 非 strict SST 测试不再假定 Windows 一定拒绝删除打开文件。通过确定性注入分别验证清理成功和清理拒绝，strict 分支继续要求关闭未确认时报错并保留文件；生产 provider 未改。
+
+受影响的 8 个测试文件集合共 112 项全部通过、0 跳过。新候选仍须通过完整本地及 Windows 门禁，业务源码和架构边界配置不变。[专项证据](publication/2026-09-28/windows-compatibility-verification.json)。
+
 ## 2026-09-28 第 15 轮复审结论同步（文档变更）
 
 依据[第 15 轮审查](reviews/2026-09-28-release-rereview-r15/review.md)：本轮未发现新增可确认的必改问题。RR14-01 在原始 6 个案例、真实 20 个 Renderer 边界代表及新增 8 个 finally/helper 路径的范围内关闭；不将该结论扩展为所有 JavaScript 语义或 G8 合同的完备证明。

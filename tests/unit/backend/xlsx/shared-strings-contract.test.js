@@ -123,12 +123,42 @@ for (const strictClose of [false, true]) test(`句柄关闭失败 strictClose=${
     assert.equal(fs.existsSync(provider.binPath), true);
     await assert.rejects(provider.close(), (error) => error === failure);
   } else {
-    // 非 strict 分支仍尝试身份清理；POSIX 可删除打开文件，Windows 的占用错误另行验收。
-    if (process.platform === 'win32') await assert.rejects(provider.close());
-    else {
-      await provider.close();
-      assert.equal(fs.existsSync(tempRoot), false);
-    }
+    // 非 strict 分支仍尝试身份清理；释放真实句柄，使成功路径不依赖平台删除共享模式。
+    const unlink = fs.promises.unlink.bind(fs.promises);
+    let cleanupAttempted = false;
+    t.mock.method(fs.promises, 'unlink', async (file, ...args) => {
+      if (file === provider.binPath) {
+        cleanupAttempted = true;
+        original(binFd); unclosed = false;
+      }
+      return unlink(file, ...args);
+    });
+    await provider.close();
+    assert.equal(cleanupAttempted, true);
+    assert.equal(fs.existsSync(tempRoot), false);
   }
-  original(binFd); unclosed = false;
+  if (unclosed) { original(binFd); unclosed = false; }
+});
+
+test('非 strict 关闭失败后，清理被拒绝时保留文件并重复报告清理错误', async (t) => {
+  const provider = new current.AdaptiveSharedStringsProvider({ tempRoot: fixture(t), memoryBudgetBytes: 1 });
+  provider.append('溢出');
+  const binFd = provider.binFd;
+  const originalClose = fs.closeSync.bind(fs);
+  const originalUnlink = fs.promises.unlink.bind(fs.promises);
+  const closeFailure = Object.assign(new Error('测试关闭失败'), { code: 'EIO' });
+  const cleanupFailure = Object.assign(new Error('测试文件占用'), { code: 'EPERM' });
+  t.mock.method(fs, 'closeSync', (fd) => {
+    if (fd === binFd) throw closeFailure;
+    return originalClose(fd);
+  });
+  t.mock.method(fs.promises, 'unlink', async (file, ...args) => {
+    if (file === provider.binPath) throw cleanupFailure;
+    return originalUnlink(file, ...args);
+  });
+  try {
+    await assert.rejects(provider.close(), (error) => error === cleanupFailure);
+    await assert.rejects(provider.close(), (error) => error === cleanupFailure);
+    assert.equal(fs.existsSync(provider.binPath), true);
+  } finally { originalClose(binFd); }
 });

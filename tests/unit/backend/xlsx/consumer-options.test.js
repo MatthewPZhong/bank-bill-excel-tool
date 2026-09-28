@@ -186,7 +186,8 @@ test('消费方有效预算、覆盖规则和 R3/R4 差异保持固定基线合�
       assertEffective(observed.effective, { memoryBudgetBytes: variant.memory, cacheMaxBytes: variant.cache,
         lruMaxEntries: variant.lru, strictClose: true, preserveOnClose: false });
       assert.equal(observed.options.cancelToken, cancelToken);
-      assert.match(observed.effective.tempRoot, new RegExp(`${candidateRef}/sst-0$`));
+      assert.equal(path.basename(path.dirname(observed.effective.tempRoot)), candidateRef);
+      assert.equal(path.basename(observed.effective.tempRoot), 'sst-0');
       assert.equal(observed.provider.closed, true);
     }
   });
@@ -227,8 +228,8 @@ test('消费方有效预算、覆盖规则和 R3/R4 差异保持固定基线合�
         assert.equal(entry.options.cancelToken, cancelToken);
         assert.equal(entry.provider.closed, true);
       }
-      const raw = richCalls.findLast((entry) => entry.caller.includes('/biz-op-v327/export-source.js'));
-      const actual = richCalls.findLast((entry) => entry.caller.includes('/biz-op-v327/export-validator.js'));
+      const raw = richCalls.findLast((entry) => entry.caller.includes(path.join('biz-op-v327', 'export-source.js')));
+      const actual = richCalls.findLast((entry) => entry.caller.includes(path.join('biz-op-v327', 'export-validator.js')));
       assert.equal(raw.key, 'openSingleSheetRichWorkbook');
       assert.equal(actual.key, 'openRichWorkbook');
       assert.equal(actual.options.maxSheets, expected.pages.length);

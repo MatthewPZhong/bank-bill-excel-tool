@@ -1,0 +1,8 @@
+{
+  "candidate": "7a7368f10f2448c6c464d44fc4adc9bf76557a2f",
+  "localReleaseCheck": "PASS",
+  "windowsRun": 36440891592,
+  "windowsStatus": "in_progress_with_confirmed_unit_failures",
+  "observedNotOkRecords": 42,
+  "note": "包括父子测试重复记录；不是最终失败计数。远端仍执行，完整结果待归档。"
+}

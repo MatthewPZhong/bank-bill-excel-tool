@@ -34,6 +34,28 @@ test('首次无配置 bootstrap 可用，当前配置和 Git 历史保持只读�
   assert.equal(fixture.git('status', '--porcelain'), before);
 });
 
+test('同一仓库的目录别名可读取历史，仍保留真实 active 约束', (t) => {
+  const fixture = createPolicyRepository(t);
+  fixture.commit('S1 active');
+  fixture.boundary.state = 'pending';
+  fixture.save();
+  const alias = `${fixture.root}-alias`;
+  fs.symlinkSync(fixture.root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  t.after(() => fs.rmSync(alias, { recursive: true, force: true }));
+  const result = checkPolicyHistory({ root: alias, config: fixture.config, allowlist: fixture.allowlist });
+  hasViolation(result, 'state');
+});
+
+test('不区分大小写的文件系统按目录身份接受同一 root 的不同拼写', (t) => {
+  const fixture = createPolicyRepository(t);
+  const alternate = path.join(path.dirname(fixture.root), path.basename(fixture.root).toUpperCase());
+  if (!fs.existsSync(alternate)) { t.skip('当前文件系统区分大小写'); return; }
+  assert.notEqual(alternate, fixture.root);
+  const result = checkPolicyHistory({ root: alternate, config: fixture.config, allowlist: fixture.allowlist });
+  assert.deepEqual(result.violations, []);
+  assert.equal(result.policyComparedWith, fixture.baseline);
+});
+
 test('S0 → S1 active → S2 pending 的所有事件基线均保留真实 HEAD 历史', (t) => {
   const fixture = createPolicyRepository(t);
   const s1 = fixture.commit('S1 active');

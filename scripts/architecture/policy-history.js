@@ -135,7 +135,10 @@ function checkPolicyHistory({ root, config, allowlist, against = 'HEAD', scan: s
     if (!file) throw inputError(`当前缺少必需架构配置：${relative}`);
     if (!same(schema(parse(file.bytes, relative), relative, relative), provided)) throw inputError(`当前配置与调用方读取的数据不一致，请重新读取：${relative}`);
   }
-  if (fs.realpathSync(git(['rev-parse', '--show-toplevel']).trim()) !== fs.realpathSync(repository)) throw inputError('扫描 root 必须是独立 Git 仓库或 worktree 的根，不能借用父仓库历史');
+  // Windows 的短路径、大小写拼写可能不同，根目录约束比较物理身份。
+  const gitRoot = fs.statSync(git(['rev-parse', '--show-toplevel']).trim(), { bigint: true });
+  const scanRoot = fs.statSync(repository, { bigint: true });
+  if (!gitRoot.isDirectory() || !scanRoot.isDirectory() || gitRoot.dev !== scanRoot.dev || gitRoot.ino !== scanRoot.ino) throw inputError('扫描 root 必须是独立 Git 仓库或 worktree 的根，不能借用父仓库历史');
   if (git(['rev-parse', '--is-shallow-repository']).trim() !== 'false') throw inputError('架构历史检查要求完整 Git 历史，shallow 仓库不能作为 bootstrap');
   const head = commit('HEAD');
   const policyComparedWith = commit(against);

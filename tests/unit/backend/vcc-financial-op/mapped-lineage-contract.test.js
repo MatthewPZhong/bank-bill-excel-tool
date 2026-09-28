@@ -108,8 +108,9 @@ test('纯合同的冷加载闭包只允许 node:crypto 和两个合同及 defini
   const script = `
     const Module = require('node:module');
     const assert = require('node:assert/strict');
+    const path = require('node:path');
     const root = ${JSON.stringify(root)};
-    const allowed = new Set(['node:crypto', ...['definitions', 'content-hash-contract', 'mapped-lineage-contract'].map(name => root + '/' + name + '.js')]);
+    const allowed = new Set(['node:crypto', ...['definitions', 'content-hash-contract', 'mapped-lineage-contract'].map(name => path.join(root, name + '.js'))]);
     const loaded = new Set();
     const original = Module._load;
     Module._load = function(request, parent, isMain) {
