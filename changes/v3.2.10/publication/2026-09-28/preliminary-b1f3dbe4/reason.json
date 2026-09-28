@@ -1,0 +1,11 @@
+{
+  "reason": "上一候选完整 Windows 日志发现两项场景边界相对路径断言错误；本轮门禁在集成阶段由本 Agent 中止，补齐后固定新提交重跑。",
+  "localUnit": {
+    "pass": 9435,
+    "fail": 0,
+    "skip": 4
+  },
+  "integration": "已执行部分通过；未完成全套，不记为完整 PASS",
+  "windowsRun": 36448433548,
+  "windowsStatus": "cancel_requested_superseded"
+}

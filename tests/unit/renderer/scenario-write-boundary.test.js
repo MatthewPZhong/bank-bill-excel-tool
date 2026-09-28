@@ -93,7 +93,7 @@ function analyze(source) {
   }
   return { rawUses, rawCalls, serviceCalls, constructions };
 }
-const analyzed = filesIn(path.join(root, 'src')).map((filename) => ({ filename: path.relative(root, filename), result: analyze(fs.readFileSync(filename, 'utf8')) }));
+const analyzed = filesIn(path.join(root, 'src')).map((filename) => ({ filename: path.relative(root, filename).split(path.sep).join('/'), result: analyze(fs.readFileSync(filename, 'utf8')) }));
 test('全生产 JS 的原始场景/渠道 API 只在 root 各注入同一 service 一次，无直接或别名写旁路', () => {
   const calls = analyzed.flatMap(({ filename, result }) => result.rawCalls.map((call) => ({ filename, ...call })));
   assert.deepEqual(calls, []);

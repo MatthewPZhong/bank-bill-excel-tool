@@ -40,7 +40,7 @@ G1–G8 已合入，本轮从 `9a38b96b1b8006c5851535d0c1e586bbaeb63f10` 加已�
 - 纯合同冷加载允许集改用 `path.join`；XLSX 消费方观测按 `path.basename`/本机分隔符核对来源，不放宽允许依赖、SST 预算或私有目录约束。
 - 非 strict SST 测试不再假定 Windows 一定拒绝删除打开文件。通过确定性注入分别验证清理成功和清理拒绝，strict 分支继续要求关闭未确认时报错并保留文件；生产 provider 未改。
 
-受影响的 8 个测试文件集合共 112 项全部通过、0 跳过。新候选仍须通过完整本地及 Windows 门禁，业务源码和架构边界配置不变。[专项证据](publication/2026-09-28/windows-compatibility-verification.json)。
+受影响的 8 个测试文件集合共 112 项全部通过、0 跳过。旧运行的完整 Windows 日志最终为 9388 PASS、44 FAIL、4 SKIP；最后两项失败属于场景边界测试的相对路径分隔符断言，现统一为仓库 `/` 格式，原有 3 项回归全部通过。中间候选 `b1f3dbe4` 本地单测 9435 PASS、0 FAIL、4 SKIP；为补齐最后一处断言而中止集成和对应 Windows CI，未记为完整通过。新候选仍须通过完整本地及 Windows 门禁，业务源码和架构边界配置不变。[专项证据](publication/2026-09-28/windows-compatibility-verification.json)。
 
 ## 2026-09-28 第 15 轮复审结论同步（文档变更）
 
