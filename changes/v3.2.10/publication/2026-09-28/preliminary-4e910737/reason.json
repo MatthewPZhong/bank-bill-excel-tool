@@ -1,0 +1,6 @@
+{
+  "status": "FAILED_AND_ABORTED",
+  "observedFailedTests": 3,
+  "reason": "临时 Git fixture 继承外层 ARCHITECTURE_BASE_REF，真实提交在合成仓库中不存在。已保留 3 个反例单独复现；本轮不能作为完整门禁通过证据。",
+  "remoteRun": 36437354076
+}

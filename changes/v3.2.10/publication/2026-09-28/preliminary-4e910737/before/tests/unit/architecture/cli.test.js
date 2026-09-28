@@ -11,7 +11,7 @@ const root = path.resolve(__dirname, '../../..');
 const cli = path.join(root, 'scripts/check-architecture.js');
 
 function command(args, env = {}) {
-  return spawnSync(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, ARCHITECTURE_BASE_REF: '', ARCHITECTURE_EXPECTED_HEAD: '', ...env } });
+  return spawnSync(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, ARCHITECTURE_BASE_REF: '', ...env } });
 }
 
 test('显式 root 或离线克隆仍不能把项目已知事实基线换成后来的空配置提交', t => {

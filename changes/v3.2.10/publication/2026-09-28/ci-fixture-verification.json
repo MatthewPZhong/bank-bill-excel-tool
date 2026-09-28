@@ -1,0 +1,22 @@
+{
+  "status": "PASS",
+  "before": {
+    "tests": 3,
+    "passed": 0,
+    "failed": 3,
+    "log": "ci-fixture-repro.log"
+  },
+  "after": {
+    "tests": 37,
+    "passed": 37,
+    "failed": 0,
+    "skipped": 0,
+    "log": "ci-fixture-after.log",
+    "environment": {
+      "ARCHITECTURE_BASE_REF": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+      "ARCHITECTURE_EXPECTED_HEAD": "4e91073756ea73b19093c60a930ecb32215b94f5"
+    }
+  },
+  "lint": "PASS",
+  "scope": "只隔离合成 Git 仓库的默认环境，保留显式测试输入及生产检查器"
+}

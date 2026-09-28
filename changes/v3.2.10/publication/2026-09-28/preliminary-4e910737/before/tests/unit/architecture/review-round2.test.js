@@ -33,9 +33,7 @@ function fixture(t, files, boundaries, configure = () => {}) {
 const clean = result => assert.deepEqual(result.violations, []);
 const denied = (result, rule) => assert.ok(result.violations.some(v => v.rule === rule), JSON.stringify(result.violations));
 function cli(f) {
-  // 合成 Git 仓库使用自己的 HEAD，不继承真实 CI 仓库的比较与 checkout 身份。
-  const env = { ...process.env, ARCHITECTURE_BASE_REF: '', ARCHITECTURE_EXPECTED_HEAD: '' };
-  const run = spawnSync(process.execPath, [cliPath, '--root', f.root], { cwd: f.root, encoding: 'utf8', env });
+  const run = spawnSync(process.execPath, [cliPath, '--root', f.root], { cwd: f.root, encoding: 'utf8' });
   assert.ifError(run.error); return run;
 }
 

@@ -1,0 +1,14 @@
+{
+  "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "head": "4e91073756ea73b19093c60a930ecb32215b94f5",
+  "startedAt": "2026-09-28T22:38:13.885160+08:00",
+  "minimumFreeBytes": 18262913024,
+  "abortBelowFreeBytes": 2147483648,
+  "inputFiles": 1711,
+  "pid": 90345,
+  "exitCode": -15,
+  "finishedAt": "2026-09-28T22:44:44.007596+08:00",
+  "changedInputs": [],
+  "headAfter": "4e91073756ea73b19093c60a930ecb32215b94f5"
+}

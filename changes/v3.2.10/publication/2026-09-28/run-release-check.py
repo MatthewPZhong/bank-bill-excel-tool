@@ -40,6 +40,7 @@ if __name__ == "__main__":
     free = shutil.disk_usage(ROOT).free
     result = {"command": f"UNIT_TEST_CONCURRENCY={concurrency} npm run release-check", "cwd": str(ROOT),
               "head": head, "startedAt": started, "minimumFreeBytes": free,
+              "architectureBaseRef": os.environ.get("ARCHITECTURE_BASE_REF", "HEAD"),
               "abortBelowFreeBytes": 2 * 1024 ** 3, "inputFiles": len(before)}
     assert free > result["abortBelowFreeBytes"], "磁盘余量不足，未启动门禁"
     with (EVIDENCE / "release-check.log").open("w") as log:
