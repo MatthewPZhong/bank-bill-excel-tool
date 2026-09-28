@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "tests": 14,
+  "failed": 0,
+  "skipped": 0,
+  "lint": "PASS",
+  "scope": [
+    "真实子进程发现 root/嵌套/中文与空格路径，只执行 .test.js",
+    "失败退出码及汇总继续传播",
+    "覆盖率模式保留同一集合",
+    "旧 summary 与显式路径参数回归保持"
+  ],
+  "nodeDocumentation": "https://github.com/nodejs/node/blob/v22.23.2/doc/api/test.md#running-tests-from-the-command-line"
+}

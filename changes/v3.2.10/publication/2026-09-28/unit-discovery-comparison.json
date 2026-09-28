@@ -1,0 +1,8 @@
+{
+  "originalCount": 578,
+  "globCount": 578,
+  "identical": true,
+  "originalArgumentCharacters": 34700,
+  "pattern": "tests/unit/**/*.test.js",
+  "node": "v25.8.0"
+}

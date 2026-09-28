@@ -1,6 +1,6 @@
 // 跨平台 unit test runner — 替代 package.json `node --test $(find tests/unit -name '*.test.js')`
 //   原 shell 命令替换在 Windows cmd.exe 不工作（self-review PR #52 Finding 2）
-//   递归枚举 tests/unit/**/*.test.js 统计文件数，由 Node 原生 glob 执行同一范围，避免 Windows 命令行超长
+//   本脚本用 Node 递归枚举 tests/unit/**/*.test.js → spawn `node --test <files>`，三平台共用
 //
 // v2.1.11 T1：在原"仅透传退出码"基础上增强 —
 //   ① 捕获 node --test stdout/stderr（同时实时回显到终端，不影响用户看进度）
@@ -115,10 +115,8 @@ function main() {
 
   const coverage = process.argv.includes('--coverage');
   const configuredConcurrency = process.env.UNIT_TEST_CONCURRENCY;
-  const args = buildNodeTestArgs([], { coverage,
+  const args = buildNodeTestArgs(files, { coverage,
     concurrency: configuredConcurrency === undefined ? undefined : Number(configuredConcurrency) });
-  // 直接交给 Node 匹配，不经 shell 展开；文件数量增长不会撑大 CreateProcess 的命令行。
-  args.push('tests/unit/**/*.test.js');
 
   const startedAt = new Date();
   const start = Date.now();

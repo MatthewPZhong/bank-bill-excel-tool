@@ -24,6 +24,14 @@ G1–G8 已合入，本轮从 `9a38b96b1b8006c5851535d0c1e586bbaeb63f10` 加已�
 
 已独立复现三项失败，只补齐三个测试文件的子进程环境隔离：临时仓库默认使用自身 HEAD，显式测试传入的比较/checkout 身份继续生效。生产检查器、CI 对真实提交的校验、全部正反例断言和业务源码保持。旧完整门禁在确认失败后中止，旧远端 run `36437354076` 取消，均不计为 PASS；修复后的新提交重新执行完整门禁及远端检查。[失败记录](publication/2026-09-28/preliminary-4e910737/reason.json)。
 
+### Windows 全量单测启动器修复
+
+`bfd396d7` 本地单测为 9429 PASS、0 FAIL、4 项 Windows 条件跳过；Windows run `36438526098` 的 lint、架构检查和 smoke 通过，随后启动单测时抛出 `spawn ENAMETOOLONG`。577 个测试路径形成 34,656 字符参数，超过 Windows 进程启动上限。远端单测尚未运行、build 未执行，不能把此 run 计为业务测试通过。
+
+启动器改为把 `tests/unit/**/*.test.js` 原样传给 Node 原生匹配，继续使用原并发/覆盖率参数、子进程隔离、日志汇总和退出码。新旧发现方式在修复点均匹配同一组 577 文件，新增回归后均为 578 文件；真实子进程验证包含嵌套及中文路径、排除辅助文件、失败退出码和覆盖率。新增 3 项加原 11 项全部通过，lint 通过；生产业务源码未改。[验证](publication/2026-09-28/unit-discovery-verification.json)、[集合对照](publication/2026-09-28/unit-discovery-comparison.json)、[Node 22 原生匹配文档](https://github.com/nodejs/node/blob/v22.23.2/doc/api/test.md#running-tests-from-the-command-line)。
+
+旧候选本地集成在 Windows 失败明确后中止，完整门禁未计为通过；新候选重新运行本地及 Windows 全量门禁。[旧候选记录](publication/2026-09-28/preliminary-bfd396d7/reason.json)。
+
 ## 2026-09-28 第 15 轮复审结论同步（文档变更）
 
 依据[第 15 轮审查](reviews/2026-09-28-release-rereview-r15/review.md)：本轮未发现新增可确认的必改问题。RR14-01 在原始 6 个案例、真实 20 个 Renderer 边界代表及新增 8 个 finally/helper 路径的范围内关闭；不将该结论扩展为所有 JavaScript 语义或 G8 合同的完备证明。
