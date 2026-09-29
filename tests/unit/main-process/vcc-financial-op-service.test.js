@@ -1477,7 +1477,7 @@ test('无调整的历史归档仍可导出，且直接结果导出持有同一�
   const service = createVccFinancialOpService({
     database: { db, dbPath },
     assetsDir: '',
-    writeRunWorkbooksFn: (args) => {
+    writeResultWorkbookFn: (args) => {
       writerArgs = args;
       writerStarted();
       return new Promise((resolve) => { releaseWriter = resolve; });
@@ -1587,7 +1587,7 @@ test('VCC 结果导出在 durable publication 确认后才触发提前附件结�
   const service = createVccFinancialOpService({
     database: { db, dbPath },
     assetsDir: '',
-    writeRunWorkbooksFn: async () => ({
+    writeResultWorkbookFn: async () => ({
       runId,
       targetMonth: '2026-06',
       subjects: ['PPHK'],
@@ -1600,6 +1600,7 @@ test('VCC 结果导出在 durable publication 确认后才触发提前附件结�
         { taskId: 'receipt-1' },
         [{ sha256: 'a'.repeat(64), byteSize: 12 }]
       );
+      return { pendingArchiveHandoff: true, warnings: ['文件已保存，接管待重试'], filePaths: ['/wrong-path'] };
     }
   });
   t.after(() => {
@@ -1625,4 +1626,6 @@ test('VCC 结果导出在 durable publication 确认后才触发提前附件结�
   assert.equal(settlementResult.evidence[0].byteSize, 12);
   assert.equal(result.generationFilePaths, undefined);
   assert.deepEqual(result.filePaths, ['/tmp/final-vcc-result.xlsx']);
+  assert.equal(result.pendingArchiveHandoff, true);
+  assert.deepEqual(result.warnings, ['文件已保存，接管待重试']);
 });

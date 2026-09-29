@@ -13,6 +13,7 @@ const preload = fs.readFileSync(path.join(ROOT, 'src/preload.js'), 'utf8');
 const main = fs.readFileSync(path.join(ROOT, 'src/main.js'), 'utf8');
 const projectionSource = fs.readFileSync(path.join(ROOT, 'src/shared/vcc-review-projection.js'), 'utf8');
 const vccService = fs.readFileSync(path.join(ROOT, 'src/main-process/vcc-financial-op-service.js'), 'utf8');
+const resultExportIpc = fs.readFileSync(path.join(ROOT, 'src/main-process/vcc-financial-op-result-export-ipc.js'), 'utf8');
 const styles = fs.readFileSync(path.join(ROOT, 'src/styles-vcc-financial-op.css'), 'utf8');
 const sharedStyles = fs.readFileSync(path.join(ROOT, 'src/styles-gemini-extra.css'), 'utf8');
 
@@ -329,7 +330,8 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       'listDeleteTargets', 'previewDataTargetDeletion', 'latestArchivedRun',
       'getArchivedRunByMonth'
     ]) {
-      assert.match(main, new RegExp(`await [^\\n]*${serviceCall}\\(`));
+      assert.match(serviceCall === 'getArchivedRunByMonth' ? resultExportIpc : main,
+        new RegExp(`await [^\\n]*${serviceCall}\\(`));
     }
     assert.match(vccService, /readWorkerFactory = \(filename, options\) => new Worker\(filename, options\)/);
     assert.match(vccService, /taskGeneration !== capturedGeneration \|\| activeTask !== capturedTask/);
@@ -370,9 +372,13 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     const resultExportHandler = main.slice(resultExportStart, resultExportEnd);
     assert.match(
       resultExportHandler,
-      /catch \(error\) \{\s*return vccFinancialOpErrorResult\(error\);\s*\}/,
-      '结果导出 IPC 必须返回临时 fail-closed 闸的稳定 code 和上下文'
+      /createResultExportHandlers\(/,
+      '结果导出 IPC 必须使用实际结果导出 handler'
     );
+    assert.match(resultExportIpc, /response = vccFinancialOpErrorResult\(error\)/,
+      '结果导出执行失败仍须保留稳定 code 和上下文');
+    assert.match(resultExportIpc, /proceed: false, result: vccFinancialOpErrorResult\(error\)/,
+      '结果导出准备失败仍须保留稳定 code 和上下文');
     for (const [channel, nextChannel] of [
       ['vccFinancialOp:data-manager:export', 'vccFinancialOp:run:get'],
       ['vccFinancialOp:export:result', 'vccFinancialOp:export:import-audit']
@@ -380,7 +386,8 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       const handlerStart = main.indexOf(`trackedIpcHandle('${channel}'`);
       const handlerEnd = main.indexOf(`trackedIpcHandle('${nextChannel}'`, handlerStart);
       const handler = main.slice(handlerStart, handlerEnd);
-      assert.match(handler, /prepare: async[\s\S]*?proceed: false[\s\S]*?execute: async/);
+      assert.match(channel === 'vccFinancialOp:export:result' ? resultExportIpc : handler,
+        /prepare: async[\s\S]*?proceed: false[\s\S]*?execute: async/);
     }
     const auditExportStart = main.indexOf("trackedIpcHandle('vccFinancialOp:export:import-audit'");
     const auditExportEnd = main.indexOf('// v2.1.16 阶段一 A4', auditExportStart);
@@ -970,10 +977,12 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     const mainStart = main.indexOf("trackedIpcHandle('vccFinancialOp:export:result'");
     const mainEnd = main.indexOf("trackedIpcHandle('vccFinancialOp:export:import-audit'", mainStart);
     const mainExportSource = main.slice(mainStart, mainEnd);
-    assert.match(mainExportSource, /getArchivedRunByMonth\(payload\.targetMonth\)/);
-    assert.match(mainExportSource, /exportRun\(\{[\s\S]*targetMonth: prepared\.targetMonth/);
-    assert.match(mainExportSource, /prepare: async[\s\S]*?showSaveDialog[\s\S]*?proceed: false[\s\S]*?execute: async/);
-    assert.doesNotMatch(mainExportSource, /payload\.runId/);
+    assert.match(mainExportSource, /createResultExportHandlers\(\{[\s\S]*getService: getVccFinancialOpService/);
+    assert.match(main, /require\('\.\/main-process\/vcc-financial-op-result-export-ipc'\)/);
+    assert.match(resultExportIpc, /getArchivedRunByMonth\(payload\.targetMonth\)/);
+    assert.match(resultExportIpc, /exportRun\(\{[\s\S]*targetMonth: prepared\.targetMonth/);
+    assert.match(resultExportIpc, /prepare: async[\s\S]*?showSaveDialog[\s\S]*?proceed: false[\s\S]*?execute: async/);
+    assert.doesNotMatch(mainExportSource + resultExportIpc, /payload\.runId/);
     assert.match(styles, /vcc-fin-op-full-result-table thead th\.balanced/);
     assert.match(styles, /vcc-fin-op-full-result-table thead th\.unbalanced/);
     assert.doesNotMatch(styles, /difference-row td\.(?:balanced|unbalanced)/);
@@ -1183,5 +1192,88 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     const narrowStyles = styles.slice(narrowStart);
     assert.match(narrowStyles, /\.vcc-fin-op-adjustment-form\s*\{\s*grid-template-columns:\s*1fr;/);
     assert.match(narrowStyles, /\.vcc-fin-op-adjustment-reason-field\s*\{\s*grid-column:\s*auto;/);
+  });
+});
+
+test.describe('VCC 正式结果导出完成反馈', () => {
+  const start = moduleRenderer.indexOf('function buildResultExportCompletionStatus(');
+  const end = moduleRenderer.indexOf('async function handleExport()', start);
+  assert.ok(start >= 0 && end > start);
+  const completionStatus = Function(
+    `'use strict'; ${moduleRenderer.slice(start, end)}; return buildResultExportCompletionStatus;`
+  )();
+
+  test('多主体工作簿以实际文件清单显示一个文件', () => {
+    assert.deepEqual(completionStatus({ filePaths: ['/synthetic/2026-06.xlsx'], subjectCount: 2 }, '2026-06'), {
+      message: '2026-06 校验结果已导出（1 个文件）', tone: 'success'
+    });
+  });
+
+  test('文件已提交但接管待重试时保留保存成功事实与可见警告', () => {
+    const result = completionStatus({
+      filePaths: ['/synthetic/2026-06.xlsx'], pendingArchiveHandoff: true,
+      warnings: ['已保留恢复凭据供启动时重试。']
+    }, '2026-06');
+    assert.equal(result.tone, 'warning');
+    assert.equal(result.message, '2026-06 校验结果已保存（1 个文件）；存档接管待重试；已保留恢复凭据供启动时重试。');
+    assert.doesNotMatch(result.message, /导出失败/);
+  });
+
+  test('没有接管标记的发布告警也不能丢失或变成成功提示', () => {
+    assert.deepEqual(completionStatus({
+      filePaths: ['/synthetic/2026-06.xlsx'], warnings: [' 后续处理待重试 ', '', '后续处理待重试', { message: '恢复凭据已保留' }]
+    }, '2026-06'), {
+      message: '2026-06 校验结果已导出（1 个文件）；后续处理待重试；恢复凭据已保留', tone: 'warning'
+    });
+  });
+});
+
+test.describe('VCC 正式结果提交状态未知反馈', () => {
+  const responseStart = moduleRenderer.indexOf('function normalizeResponseDetailLines(');
+  const responseEnd = moduleRenderer.indexOf('function resultOperationProgressMessage(', responseStart);
+  const start = moduleRenderer.indexOf('function isResultPublicationUncertain(');
+  const end = moduleRenderer.indexOf('function createArchivedMonthPickerDialog(', start);
+  assert.ok(responseStart >= 0 && responseEnd > responseStart && start >= 0 && end > start);
+  const { isResultPublicationUncertain, archivedPickerExecutionErrorMessage } = Function(
+    `'use strict'; ${moduleRenderer.slice(responseStart, responseEnd)} ${moduleRenderer.slice(start, end)};
+      return { isResultPublicationUncertain, archivedPickerExecutionErrorMessage };`
+  )();
+  const format = (error, options = {}) => archivedPickerExecutionErrorMessage({
+    entry: { targetMonth: '2026-06' }, actionLabel: '导出', presentation: 'result-export',
+    error, currentMonth: '2026-06', ...options
+  });
+
+  test('明确 code 保留完整恢复说明且不猜测文件提交结果', () => {
+    const error = Object.assign(new Error('已保留文件与恢复凭据，请完成恢复后重试。'), {
+      code: 'VCC_RESULT_PUBLICATION_RECOVERY_REQUIRED', detailLines: ['请保持恢复凭据不变。']
+    });
+    assert.equal(isResultPublicationUncertain(error), true);
+    const message = format(error);
+    assert.equal(message, '2026-06 提交状态待确认：已保留文件与恢复凭据，请完成恢复后重试。；请保持恢复凭据不变。');
+    assert.doesNotMatch(message, /导出失败|已导出|已保存/);
+  });
+
+  test('无 code 的 Electron IPC rejection 在月份漂移后仍保留原始恢复说明', () => {
+    const error = new Error("Error invoking remote method 'vccFinancialOp:export:result': Error: 结果文件的提交状态尚未确认，已保留文件与恢复凭据，请完成恢复后重试。");
+    assert.equal(error.code, undefined);
+    assert.equal(isResultPublicationUncertain(error), true);
+    const message = format(error, { currentMonth: '2026-05', refreshError: new Error('后续读取暂不可用') });
+    assert.ok(message.includes('结果文件的提交状态尚未确认，已保留文件与恢复凭据，请完成恢复后重试。'));
+    assert.doesNotMatch(message, /Error invoking|vccFinancialOp:export:result/);
+    assert.match(message, /^2026-06 提交状态待确认：结果文件的提交状态尚未确认/);
+    assert.match(message, /切至 2026-05，请先完成恢复后再操作/);
+    assert.match(message, /月份刷新失败：后续读取暂不可用/);
+    assert.doesNotMatch(message, /导出失败|已导出|已保存|请确认后重试/);
+  });
+
+  test('普通结果失败与共享解归档保留原错误语义', () => {
+    const normal = new Error('OS 保存失败');
+    assert.equal(isResultPublicationUncertain(normal), false);
+    assert.equal(format(normal, { currentMonth: '2026-05' }),
+      '2026-06 导出失败：OS 保存失败；月份列表已刷新并切至 2026-05，请确认后重试');
+    const unarchive = format(new Error('结果文件的提交状态尚未确认'), {
+      presentation: 'default', actionLabel: '解归档', currentMonth: '2026-05'
+    });
+    assert.equal(unarchive, '2026-06 解归档失败：结果文件的提交状态尚未确认；月份列表已刷新并切至 2026-05，请确认后重试');
   });
 });

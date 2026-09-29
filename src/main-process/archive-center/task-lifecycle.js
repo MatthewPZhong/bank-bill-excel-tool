@@ -535,9 +535,19 @@ class TaskLifecycle {
       if (typeof payload.beforeTerminalSettlement === 'function') {
         await payload.beforeTerminalSettlement({ context, businessResult, businessError });
       }
-      const settled = await settleArtifacts({
-        files: filePlan.inputs.map((item) => ({ artifactKey: item.artifactKey }))
-      });
+      let settled;
+      try {
+        settled = await settleArtifacts({
+          files: filePlan.inputs.map((item) => ({ artifactKey: item.artifactKey }))
+        });
+      } catch (error) {
+        if (businessError || terminalStatus !== 'succeeded') throw error;
+        // 业务已成功时，缓存的接管 rejection 与非耐久结果走同一恢复意图路径。
+        // 保留首次结算证据；不得重试、提前终结任务或执行 receipt ACK。
+        settled = { ok: false, durable: false,
+          code: error && error.code || 'ARCHIVE_TASK_SETTLE_FAILED',
+          message: error && error.message || 'manifest artifact 未全部完成归档' };
+      }
       if (!settled || settled.ok === false) {
         this._warn({
           channel: policy.channel,
