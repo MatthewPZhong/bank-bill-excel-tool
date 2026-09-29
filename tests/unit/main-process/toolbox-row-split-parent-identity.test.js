@@ -40,6 +40,14 @@ for (const stage of ['before-generation', 'before-publication', 'unchanged']) {
     const output = path.join(directory, 'chosen');
     const moved = path.join(directory, 'chosen-moved');
     const userDataDir = path.join(directory, 'user-data');
+    const openReadStreams = new Set();
+    const createReadStream = fs.createReadStream;
+    t.mock.method(fs, 'createReadStream', function (...args) {
+      const stream = createReadStream.apply(this, args);
+      openReadStreams.add(stream);
+      stream.once('close', () => openReadStreams.delete(stream));
+      return stream;
+    });
     fs.mkdirSync(output); fs.mkdirSync(userDataDir);
     const { dispatcher } = createTestPublicationHarness(userDataDir);
     fs.writeFileSync(path.join(output, 'original.txt'), 'keep-original');
@@ -48,7 +56,22 @@ for (const stage of ['before-generation', 'before-publication', 'unchanged']) {
     const payload = { sourceFilePath: source, splitReadToken: 't', mode: 'rows', rowsPerFile: 1 };
     let contract, filePlan, publicationOptions, publicationError;
     let generationCalls = 0, publicationCalls = 0, settleCalls = 0;
-    const replaceParent = () => {
+    const replaceParent = async () => {
+      // 校验读取的 end 早于文件句柄 close；先等真实关闭，再注入目录身份变化。
+      // Windows 上未关闭的读取句柄可能使重命名提前失败，尚未到达 Publisher 身份检查。
+      const reads = [...openReadStreams].filter((stream) => !stream.closed &&
+        String(stream.path).startsWith(output + path.sep));
+      await Promise.all(reads.map((stream) => {
+        assert.equal(stream.readableEnded, true, '替换目录前产物读取应已结束');
+        return new Promise((resolve, reject) => {
+          const onClose = () => { clearTimeout(timeout); resolve(); };
+          const timeout = setTimeout(() => {
+            stream.removeListener('close', onClose);
+            reject(new Error(`产物读取句柄未及时关闭：${path.basename(String(stream.path))}`));
+          }, 5000);
+          stream.once('close', onClose);
+        });
+      }));
       fs.renameSync(output, moved);
       fs.mkdirSync(output);
       fs.writeFileSync(path.join(output, 'new-owner.txt'), 'keep-new-owner');
@@ -69,7 +92,7 @@ for (const stage of ['before-generation', 'before-publication', 'unchanged']) {
         publicationOptions = options;
         // 全部产物已校验、Main wrapper 已组装请求，尚未进入 Worker 发布。
         // 连同原生产布局下的 generation 目录一起重命名，不迁移临时产物来绕过检查。
-        if (stage === 'before-publication') replaceParent();
+        if (stage === 'before-publication') await replaceParent();
         try { return await dispatcher.publish({ ...options, requireArchiveHandoff: true, requireValidatedArtifacts: true }); }
         catch (error) { publicationError = error; throw error; }
       },
@@ -86,7 +109,7 @@ for (const stage of ['before-generation', 'before-publication', 'unchanged']) {
     assert.equal(prepared.proceed, true);
     filePlan = prepared.filePlan;
     assertFilePlanFresh(filePlan);
-    if (stage === 'before-generation') replaceParent();
+    if (stage === 'before-generation') await replaceParent();
     const result = await contract.execute({}, prepared, { batchContext,
       fileEvidence: { filePlan, inputFiles: filePlan.inputs, targetSnapshots: filePlan.outputs.map((item) => item.targetSnapshot) },
       settleArtifacts: async () => { settleCalls += 1; return { durable: true }; } });
@@ -113,7 +136,10 @@ for (const stage of ['before-generation', 'before-publication', 'unchanged']) {
       assert.equal(fs.readFileSync(path.join(output, 'original.txt'), 'utf8'), 'keep-original');
     } else {
       assert.equal(result.status, 'failed');
-      assert.equal(publicationError && publicationError.code, 'TOOLBOX_PUBLICATION_TARGET_PARENT_CHANGED');
+      assert.equal(publicationError && publicationError.code, 'TOOLBOX_PUBLICATION_TARGET_PARENT_CHANGED',
+        JSON.stringify({ result, publicationError: publicationError && {
+          code: publicationError.code, message: publicationError.message
+        } }));
       assert.equal(settleCalls, 0);
       assert.deepEqual(fs.readdirSync(output), ['new-owner.txt']);
       assert.equal(fs.readFileSync(path.join(output, 'new-owner.txt'), 'utf8'), 'keep-new-owner');

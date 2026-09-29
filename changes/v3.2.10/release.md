@@ -42,6 +42,12 @@ G1–G8 已合入，本轮从 `9a38b96b1b8006c5851535d0c1e586bbaeb63f10` 加已�
 
 受影响的 8 个测试文件集合共 112 项全部通过、0 跳过。旧运行的完整 Windows 日志最终为 9388 PASS、44 FAIL、4 SKIP；最后两项失败属于场景边界测试的相对路径分隔符断言，现统一为仓库 `/` 格式，原有 3 项回归全部通过。中间候选 `b1f3dbe4` 本地单测 9435 PASS、0 FAIL、4 SKIP；为补齐最后一处断言而中止集成和对应 Windows CI，未记为完整通过。新候选仍须通过完整本地及 Windows 门禁，业务源码和架构边界配置不变。[专项证据](publication/2026-09-28/windows-compatibility-verification.json)。
 
+### Windows 父目录身份测试的句柄关闭时点修复
+
+候选 `6dca7868` 宿主完整门禁为 9435 PASS、4 SKIP、68/68 集成 PASS；[该候选证据](publication/2026-09-28/candidate-6dca7868/local-final-verification.json)保留。Windows run `36450343306` 为 9434 PASS、1 FAIL、4 SKIP；此前 44 个平台兼容失败均已消除，剩余失败位于 rows 父目录身份的 before-publication 测试，未获得预期 Publisher 拒绝码。相同测试在上一 Windows 候选通过，远端日志没有记录原始重命名错误码。
+
+本地真实链路探针确认：执行目录替换时，最后一个产物 SHA-256 读取流已经 end，但文件句柄尚未 close。模拟 Windows 对此时重命名的拒绝，可稳定复现相同断言失败（2 PASS / 1 FAIL）。仅调整测试，在受控故障注入前等待已读完的产物流真实 close，上限 5 秒；不主动销毁流、不弱化身份/原文件/禁止输出断言，并补充失败诊断。修复后探针及正常测试均为 3/3 PASS，lint 和差异检查通过。生产业务源码未改，新提交仍须完成本地及真实 Windows 完整门禁。[专项证据](publication/2026-09-28/rows-parent-handle-verification.json)。
+
 ## 2026-09-28 第 15 轮复审结论同步（文档变更）
 
 依据[第 15 轮审查](reviews/2026-09-28-release-rereview-r15/review.md)：本轮未发现新增可确认的必改问题。RR14-01 在原始 6 个案例、真实 20 个 Renderer 边界代表及新增 8 个 finally/helper 路径的范围内关闭；不将该结论扩展为所有 JavaScript 语义或 G8 合同的完备证明。

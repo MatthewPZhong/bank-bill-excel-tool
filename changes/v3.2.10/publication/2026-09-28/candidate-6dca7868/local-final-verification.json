@@ -1,0 +1,45 @@
+{
+  "status": "PASS",
+  "candidate": "6dca78683f2587a0f028b260b94a4204da3ccaff",
+  "base": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "command": "UNIT_TEST_CONCURRENCY=2 ARCHITECTURE_BASE_REF=11086a3cbf632a30adbcfa796e4cd81810c5aef9 npm run release-check",
+  "execution": "宿主；允许隔离 Electron GUI 初始化",
+  "startedAt": "2026-09-29T00:43:55.466062+08:00",
+  "finishedAt": "2026-09-29T01:00:46.186657+08:00",
+  "unit": {
+    "tests": 9439,
+    "passed": 9435,
+    "failed": 0,
+    "skipped": 4,
+    "files": 578
+  },
+  "integration": {
+    "scriptsPassed": 68,
+    "scriptsTotal": 68,
+    "countedTests": 2901,
+    "rendererLifecycle": {
+      "passed": 233,
+      "total": 233
+    }
+  },
+  "architecture": {
+    "active": 31,
+    "pending": 0,
+    "partial": 0,
+    "violations": 0,
+    "stale": 0
+  },
+  "inputs": {
+    "count": 1712,
+    "changed": []
+  },
+  "primaryDirtyFilesPreserved": 865,
+  "businessSourceFilesPreserved": 792,
+  "policyGeneratedEvidence": "仅本次生成的动态时耗单独归档后还原，规则正文未改。",
+  "manualAcceptance": {
+    "status": "USER_CONFIRMED",
+    "reply": "已人工验收",
+    "scope": "本轮真实账单/资金结果、Windows 安装包及 Excel/WPS 人工验收；用户确认，非本 Agent 独立执行。"
+  },
+  "priorFailedAttempt": "sandbox-6dca7868/reason.json"
+}
