@@ -1,0 +1,889 @@
+{
+  "base": "18b82b4328cf5e00c1b2549d373a5b2f2677215c",
+  "method": "acorn CallExpression; named public factories and ui.alert/ui.confirm; alias origins and wrappers verified manually",
+  "files": [
+    {
+      "file": "src/main.js",
+      "sha256": "591c957b1e31a3a0efaea1ec73b2b5597440970441069d9fcac6ab12570a93e1",
+      "calls": []
+    },
+    {
+      "file": "src/preload.js",
+      "sha256": "605d382a9a77f389e8658b4d32ac9b11c703944d4029fe9c5e14b96df28894ae",
+      "calls": []
+    },
+    {
+      "file": "src/renderer/controllers/acquiring.js",
+      "sha256": "43abf83361a08d705dbdfddf88f66026d48f6ccb7a16f1bcb31a40059e73a50f",
+      "calls": []
+    },
+    {
+      "file": "src/renderer/controllers/bank-bu.js",
+      "sha256": "f05f449137c0c5fbf9e528b7e8f4c84f3f288fea728188468076bc25e19c0ba6",
+      "calls": [
+        {
+          "line": 39,
+          "callee": "ui.alert"
+        },
+        {
+          "line": 220,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 262,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 307,
+          "callee": "createAlertDialog"
+        }
+      ]
+    },
+    {
+      "file": "src/renderer/controllers/bank-statement.js",
+      "sha256": "78e372fabe16427b952c2c6da4edac23f6ee7570e55599469efca0bfe531a738",
+      "calls": [
+        {
+          "line": 50,
+          "callee": "ui.alert"
+        },
+        {
+          "line": 65,
+          "callee": "ui.confirm"
+        }
+      ]
+    },
+    {
+      "file": "src/renderer/controllers/biz-op-legacy.js",
+      "sha256": "511b1ef90132f03b944992e38d7c3ceb014a30d70a8093388dbe06020d29230f",
+      "calls": [
+        {
+          "line": 45,
+          "callee": "ui.createAlertDialog"
+        }
+      ]
+    },
+    {
+      "file": "src/renderer/controllers/pre-fund.js",
+      "sha256": "6844a919eb6c7b4cd53bbdfee78fa0231c0720cbf3d03a1979a26ceb3a8b38ec",
+      "calls": [
+        {
+          "line": 53,
+          "callee": "ui.alert"
+        },
+        {
+          "line": 177,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 240,
+          "callee": "createAlertDialog"
+        }
+      ]
+    },
+    {
+      "file": "src/renderer/controllers/recon-id-fix.js",
+      "sha256": "932c3c417722d25461c235f96907bc536301a1a3e5f19701ac54f7e65e1280a9",
+      "calls": [
+        {
+          "line": 48,
+          "callee": "ui.alert"
+        }
+      ]
+    },
+    {
+      "file": "src/renderer/controllers/statement.js",
+      "sha256": "517746b500cc022ee89bc37c70a4c30a5844a773399b03f829bcd9cb3bfcf746",
+      "calls": [
+        {
+          "line": 201,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 228,
+          "callee": "createAlertDialog"
+        }
+      ]
+    },
+    {
+      "file": "src/renderer/controllers/vcc-op-calc.js",
+      "sha256": "f6c0333766e8fb0d13e1e3b8770e3657c05a68444d8b32d0323c78c74b794de3",
+      "calls": [
+        {
+          "line": 58,
+          "callee": "ui.alert"
+        },
+        {
+          "line": 332,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 397,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 429,
+          "callee": "createAlertDialog"
+        }
+      ]
+    },
+    {
+      "file": "src/renderer/dialogs/app-settings.js",
+      "sha256": "ebd2be60360ebe0a8ce41370be22030411c35367bf6ef07fa8768fdb2758716b",
+      "calls": [
+        {
+          "line": 1423,
+          "callee": "createConfirmDialog"
+        }
+      ]
+    },
+    {
+      "file": "src/renderer/dialogs/configuration.js",
+      "sha256": "4f14103f3062c6405ff5e18a7b286d06d075aeb87d56f20907c34b370deb1ec9",
+      "calls": [
+        {
+          "line": 226,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 233,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 240,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 262,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 282,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 289,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 378,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 429,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 445,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 681,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 747,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 856,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 871,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1645,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1781,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1808,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 1829,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1836,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1930,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2256,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2535,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2548,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 2559,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2683,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 3188,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 3412,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 3477,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 3488,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 3626,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 3646,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 3883,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 3922,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 4001,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 4351,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 4385,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 4400,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 4448,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 4461,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 4563,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 4708,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 5192,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 5217,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 5347,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 5376,
+          "callee": "createAlertDialog"
+        }
+      ]
+    },
+    {
+      "file": "src/renderer/dialogs/scenarios.js",
+      "sha256": "81b66d37c15b3e47eb0b82839e97a688a42b08648fa152ce66c02410460096c4",
+      "calls": [
+        {
+          "line": 351,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 465,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 469,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 477,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 487,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 495,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 550,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 554,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 559,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 604,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 610,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 693,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 701,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 708,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 740,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 753,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 768,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 776,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 841,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 849,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 876,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 883,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1301,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1306,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1387,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1423,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 1434,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1479,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1529,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1554,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1560,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 1571,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1598,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1609,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1621,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 1633,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1643,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1663,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1672,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1706,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2063,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2080,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2100,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2125,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2182,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2206,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2223,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2293,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2316,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2326,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2334,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2838,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 3159,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 3194,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 3548,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 3564,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 3947,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 3976,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 4777,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 4794,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 4916,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 4995,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 5006,
+          "callee": "createAlertDialog"
+        }
+      ]
+    },
+    {
+      "file": "src/renderer/dialogs/toolbox.js",
+      "sha256": "a5fccc2f2d5f3c4870ea16aa90178102fb37c22277e693563a5334d0049a9459",
+      "calls": [
+        {
+          "line": 161,
+          "callee": "createAlertDialog"
+        }
+      ]
+    },
+    {
+      "file": "src/renderer-dialogs.js",
+      "sha256": "5d2c86a29360cc3922300a7b016a6be410349875b4dfbd57a1f1da25ab400f96",
+      "calls": [
+        {
+          "line": 212,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 670,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 683,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 697,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 720,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 738,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 747,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 775,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 886,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 892,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1096,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1106,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1126,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1137,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 1146,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1157,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1163,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1305,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1318,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1328,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1351,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1358,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1365,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2285,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2874,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2883,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 2887,
+          "callee": "createAlertDialog"
+        }
+      ]
+    },
+    {
+      "file": "src/renderer-pending.js",
+      "sha256": "7dfca236d0597df83884c224423f983b4599842379dd1748359d58bf7ce026d1",
+      "calls": [
+        {
+          "line": 338,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 339,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 364,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 380,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 392,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 470,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 512,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 559,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 572,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 593,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 605,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 614,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 617,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 649,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 653,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 656,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 732,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 742,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 750,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 751,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 951,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 952,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 976,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 980,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1007,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1009,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1012,
+          "callee": "createAlertDialog"
+        }
+      ]
+    },
+    {
+      "file": "src/renderer-position-reconciliation.js",
+      "sha256": "85d16ae50b88e85b25fe8bd5d9ab08bf114bc31fcdca42c6c1ce418447ffcabe",
+      "calls": [
+        {
+          "line": 167,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 173,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 179,
+          "callee": "createConfirmDialog"
+        }
+      ]
+    },
+    {
+      "file": "src/renderer-previews.js",
+      "sha256": "cd30ca07ac57ded208be68c7bf947f5d42a9705464f46e4bf6d910153122546c",
+      "calls": [
+        {
+          "line": 567,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 1006,
+          "callee": "createConfirmDialog"
+        }
+      ]
+    },
+    {
+      "file": "src/renderer.js",
+      "sha256": "3f2166f359a6fdf40c8985df682b661b48c85f3792be8aed9202b6f2b525c4ec",
+      "calls": [
+        {
+          "line": 1296,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1323,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1335,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 1348,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1516,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1534,
+          "callee": "createAlertDialog"
+        },
+        {
+          "line": 1558,
+          "callee": "createConfirmDialog"
+        },
+        {
+          "line": 1624,
+          "callee": "createAlertDialog"
+        }
+      ]
+    }
+  ]
+}

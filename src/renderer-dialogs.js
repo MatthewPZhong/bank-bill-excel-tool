@@ -60,6 +60,26 @@
         .replaceAll('"', '&quot;');
     }
 
+    // createRendererDialogs() 内部工具，不新增公开工厂参数。
+    function applyCommonFeedbackLayout(overlay, card) {
+      const body = card.querySelector('.alert-body');
+      if (!body) throw new Error('公共反馈弹窗缺少正文容器');
+
+      card.classList.add('feedback-dialog-card');
+      body.setAttribute('role', 'region');
+      body.setAttribute('aria-label', '弹窗内容');
+
+      // 当前 host 先安排首次初始焦点，再调用描述符 onMount。
+      // 此时增加正文 Tab 入口，不额外 focus()，避免抢占原按钮／输入焦点。
+      registerModal(overlay, {
+        onMount(handle) {
+          if (!handle.isOpen()) return;
+          if (!body.hasAttribute('tabindex')) body.tabIndex = 0;
+        }
+      });
+      return overlay;
+    }
+
     function createAlertDialog(message, options = {}) {
       const {
         onConfirm = null,
@@ -111,7 +131,7 @@
       }
       } });
       overlay.appendChild(dialog);
-      return overlay;
+      return applyCommonFeedbackLayout(overlay, dialog);
     }
 
     function createConfirmDialog({ message, confirmText, cancelText, onConfirm, onCancel, middleText, onMiddle }) {
@@ -148,7 +168,7 @@
         if (closed.status === 'closed' && onCancel) onCancel();
       });
       overlay.appendChild(dialog);
-      return overlay;
+      return applyCommonFeedbackLayout(overlay, dialog);
     }
 
     function createFundTransferAccountMappingDialog() {

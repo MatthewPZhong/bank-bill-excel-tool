@@ -1,0 +1,114 @@
+{
+  "environment": {
+    "platform": "darwin",
+    "versions": {
+      "electron": "36.9.5",
+      "chrome": "136.0.7103.177"
+    },
+    "displayScaleFactor": 2,
+    "minimumSize": [
+      0,
+      0
+    ],
+    "frame": false,
+    "windowBounds": {
+      "x": 324,
+      "y": 103,
+      "width": 800,
+      "height": 480
+    },
+    "contentBounds": {
+      "x": 324,
+      "y": 103,
+      "width": 800,
+      "height": 480
+    },
+    "zoom": 1,
+    "page": {
+      "width": 800,
+      "height": 480,
+      "devicePixelRatio": 2,
+      "theme": "light"
+    }
+  },
+  "screenshotPixels": {
+    "width": 1600,
+    "height": 960
+  },
+  "geometry": {
+    "viewport": {
+      "width": 800,
+      "height": 480
+    },
+    "card": {
+      "x": 190,
+      "y": 28,
+      "width": 420,
+      "height": 424,
+      "right": 610,
+      "bottom": 452
+    },
+    "body": {
+      "x": 191,
+      "y": 29,
+      "width": 418,
+      "height": 255,
+      "right": 609,
+      "bottom": 284
+    },
+    "footer": {
+      "x": 191,
+      "y": 284,
+      "width": 418,
+      "height": 167,
+      "right": 609,
+      "bottom": 451
+    },
+    "bodyHeight": 255,
+    "bodyScroll": 16307,
+    "bodyWidth": 418,
+    "bodyScrollWidth": 418,
+    "cardHeight": 422,
+    "cardScroll": 422,
+    "overflow": "auto",
+    "buttons": [
+      {
+        "x": 285.5,
+        "y": 301,
+        "width": 229,
+        "height": 36,
+        "right": 514.5,
+        "bottom": 337,
+        "text": "删除错误数据并重新处理这些文件",
+        "hit": true
+      },
+      {
+        "x": 292,
+        "y": 347,
+        "width": 216,
+        "height": 36,
+        "right": 508,
+        "bottom": 383,
+        "text": "导出所选文件中的全部错误数据",
+        "hit": true
+      },
+      {
+        "x": 331,
+        "y": 393,
+        "width": 138,
+        "height": 36,
+        "right": 469,
+        "bottom": 429,
+        "text": "关闭当前反馈窗口",
+        "hit": true
+      }
+    ],
+    "focus": "danger-btn small",
+    "errors": []
+  },
+  "input": {
+    "mouseConfirm": 1,
+    "mouseMiddle": 1,
+    "wheelScrolled": true
+  }
+}
