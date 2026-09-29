@@ -19,12 +19,12 @@ const path = require('node:path');
 const DIALOGS_PATH = path.join(__dirname, '..', '..', 'src', 'renderer-dialogs.js');
 const source = fs.readFileSync(DIALOGS_PATH, 'utf8');
 
-// 切出 createFundTransferAccountMappingDialog 工厂体（到下一个工厂 createRememberOrderMismatchDialog 前），
+// 切出 createFundTransferAccountMappingDialog 工厂体（到下一个工厂 createPreFundTempManagerDialog 前），
 // 避免断言误命中文件其他位置的同名片段。
 function extractDialogBody() {
   const start = source.indexOf('function createFundTransferAccountMappingDialog()');
   assert.ok(start >= 0, '应能定位 createFundTransferAccountMappingDialog 工厂');
-  const end = source.indexOf('function createRememberOrderMismatchDialog(', start);
+  const end = source.indexOf('function createPreFundTempManagerDialog(', start);
   assert.ok(end > start, '应能定位 createFundTransferAccountMappingDialog 工厂结束位置');
   return source.slice(start, end);
 }

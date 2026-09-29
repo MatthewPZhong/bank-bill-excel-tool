@@ -1,0 +1,22 @@
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: runId 必填且为 number (1.482083ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: runId 必填且为 number (0.097375ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: runId 必填且为 number (0.057167ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: runId 必填且为 number (0.0915ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: monthKey 必填 (0.080791ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: chunkSize 必须为正整数，收到：0 (0.067417ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: chunkSize 必须为正整数，收到：1.5 (0.08725ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: dbPath 必填（worker 各自 open 只读 connection） (0.06375ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: dbPath 必填（worker 各自 open 只读 connection） (0.065875ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: workerCount 必须 ≥1 整数，收到："2" (0.102667ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: workerCount 必须 ≥1 整数，收到：0 (0.410875ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: tempDir 必填 (0.043166ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: tempDir 必填 (0.039708ms)
+✔ 兼容数值字符串 chunkSize、truthy number runId/monthKey 与未 trim 路径，空表摘要不变 (0.448333ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 73.992375

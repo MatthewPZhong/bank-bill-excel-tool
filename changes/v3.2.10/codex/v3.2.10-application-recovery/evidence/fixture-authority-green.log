@@ -1,0 +1,34 @@
+✔ canonical export policy byte-for-byte、strict bounded manifest与production false (1.868792ms)
+✔ standard main+unmatched按FilePlan顺序回读并只调用一次Publisher (243.452042ms)
+✔ export generation完成后的取消由单一cleanup owner清零且同staging可重试 (533.544125ms)
+✔ standard真实数据驱动覆盖main-only/unmatched-only/main+unmatched output-set (584.345667ms)
+✔ BOC export成功回读gateway业务；linked evidence变化时Publisher=0新增调用 (200.71975ms)
+✔ artifact set/collision/target alias/symlink staging均在Publisher前拒绝 (185.06025ms)
+✔ batchContext是唯一authority：A runtime context/B journal batch在Worker前拒绝 (170.078208ms)
+✔ export必须使用当前runtime owner的唯一evidence admission (175.445875ms)
+✔ Main-owned kind/artifactKey/target binding拒绝反序 targets且Publisher=0 (170.830792ms)
+✔ tamper、stale identity/revision/scenario/linked、order与lineage全部Publisher=0 (1837.757708ms)
+✔ sheet/headers/records/style业务篡改即使同步伪造size/hash仍Publisher=0 (809.786208ms)
+✔ 业务cell/新增行与自洽Worker manifest/summary仍必须对generation前authority失败 (412.30175ms)
+✔ 真实 journal Publisher 一次提交 main+unmatched 且保留原批次 recovery receipt (444.366834ms)
+✔ Publisher failure/uncertain只调用一次且不猜成功、不自动重发 (402.403833ms)
+✔ 双artifact Publisher kill后沿用journal recovery：未提交回滚、已提交按原批次恢复 (1026.526459ms)
+✔ 覆盖确认期间 create 目标，Main 在任务前拒绝且保留全部文件 (21.459708ms)
+✔ Main prepare 返回后 create 目标，IPC 不能重新采集并接受新快照 (20.934291ms)
+✔ 覆盖确认期间 replace 目标，Main 在任务前拒绝且保留全部文件 (16.450416ms)
+✔ Main prepare 返回后 replace 目标，IPC 不能重新采集并接受新快照 (19.106875ms)
+✔ 取消覆盖确认不创建 File Task 或输出文件 (10.810042ms)
+✔ 确认快照传至真实 Publisher：生成后 none 目标 (431.233958ms)
+✔ 确认快照传至真实 Publisher：生成后 create 目标 (166.750459ms)
+✔ 确认快照传至真实 Publisher：生成后 replace 目标 (140.89325ms)
+✔ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：before-generation (193.62275ms)
+✔ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：before-publication (150.065208ms)
+✔ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：unchanged (379.052625ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7609.359833

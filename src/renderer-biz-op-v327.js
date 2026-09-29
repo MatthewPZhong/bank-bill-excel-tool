@@ -1,27 +1,48 @@
 /* 业务 OP 区间页面：仅由 Main 返回的版本化 mode 决定显示；页面不持有内部文件路径或业务行。 */
 (function initBizOpV327Page(root) {
   'use strict';
-  function createController({ api, panel, legacyPanel, restoreLegacy, document: doc = root.document }) {
+  function createController({ api, panel, legacyPanel, legacyController, restoreLegacy = () => legacyController?.enter(), modalHost, document: doc = panel?.ownerDocument || root.document }) {
+    if (!modalHost) throw new TypeError('业务 OP 控制器缺少弹窗宿主');
+    let disposed = false; let renderGeneration = 0; let statusGeneration = 0; let needsRefresh = true;
+    let usingLegacy = false;
+    const handles = new Map(); const buttonListeners = new WeakMap();
+    const live = (generation = renderGeneration) => selected && !disposed && generation === renderGeneration;
+    const owner = 'biz-op-recon';
     let selected = false; let routeVersion = 0; let busy = false; let hasTaskFeedback = false;
     let recoveryReady = false; let enabled = false; const dialogs = new Set();
     let taskDialog = null; let taskFocus = null; let showDialogProgress = true;
     let feedback = { text: '欢迎使用小助手', tone: 'info' }; let statusReadError = '';
+    const abandonedSelection = Symbol('abandoned-selection');
     const oldDisabled = new Map();
     function node(tag, text, className) { const item = doc.createElement(tag); if (text !== undefined) item.textContent = text;
       if (className) item.className = className; return item; }
     function button(text, work, className = 'secondary-btn') { const item = node('button', text, className); item.type = 'button';
-      item.addEventListener('click', () => { if (busy) return; Promise.resolve().then(work).catch(showError); }); return item; }
+      const listener = () => {
+        if (busy || !live() || !item.isConnected) return;
+        const generation = renderGeneration;
+        const dialog = [...dialogs].find((candidate) => candidate.contains(item));
+        const current = () => live(generation) && item.isConnected && (!dialog || handles.get(dialog)?.isTop());
+        Promise.resolve().then(() => current() ? work() : null).catch((error) => { if (current()) showError(error); });
+      };
+      item.addEventListener('click', listener); buttonListeners.set(item, listener); return item; }
     function field(label, control) { const wrap = node('label', undefined, 'bizop-field vcc-fin-op-field'); wrap.append(node('span', label), control); return wrap; }
     function select(options) { const item = node('select', undefined, 'vcc-fin-op-input'); for (const [value, text] of options) { const option = node('option', text); option.value = value; item.append(option); } return item; }
     function dateField() { const item = node('input', undefined, 'vcc-fin-op-input'); item.type = 'date'; return item; }
     function renderFeedback(dialog = showDialogProgress ? taskDialog : null) {
+      if (!live()) return;
       const text = [feedback.text, statusReadError].filter(Boolean).join('\n');
       const tone = statusReadError ? 'error' : feedback.tone;
       statusText.textContent = text; status.dataset.tone = tone;
       if (dialog) { dialog.feedback.textContent = text; dialog.feedback.dataset.tone = tone; }
     }
+    // 已提交任务的结算属于控制器；页面代次只限制渲染和弹窗续接。
+    function rememberFeedback(text, tone = 'info', dialog = null) {
+      if (disposed) return;
+      feedback = { text, tone }; statusReadError = ''; renderFeedback(dialog);
+    }
     function message(text, tone = 'info') {
-      feedback = { text, tone }; statusReadError = ''; renderFeedback();
+      if (!live()) return;
+      rememberFeedback(text, tone, showDialogProgress ? taskDialog : null);
     }
     function updateFooter() { footer.hidden = ![...footer.children].some((item) => !item.hidden); }
     function checked(result) {
@@ -31,6 +52,16 @@
         error.result = result; throw error;
       }
       return result;
+    }
+    // 选择阶段还没有提交业务写；过期的选择及其错误不能被当成后台任务结算。
+    async function readSelection(pick, current) {
+      try {
+        const result = await pick();
+        return current() ? checked(result) : abandonedSelection;
+      } catch (error) {
+        if (!current()) return abandonedSelection;
+        throw error;
+      }
     }
     function reportFeedback(report) {
       if (!report) return '';
@@ -49,11 +80,12 @@
       return [text, counts, reportFeedback(result?.errorReport), result?.cleanupPending ? '仍有收尾未决，请重试恢复。' : ''].filter(Boolean).join('\n');
     }
     function showError(error) {
+      if (!live()) return;
       const text = resultFeedback(error?.message || '操作未完成，请重试', error?.result); message(text, 'error');
       const dialog = [...dialogs].at(-1); if (dialog) { dialog.feedback.textContent = text; dialog.feedback.dataset.tone = 'error'; }
     }
     function setBusy(value) {
-      busy = value; panel.setAttribute('aria-busy', String(value));
+      busy = value; if (!live()) { needsRefresh = true; return; } panel.setAttribute('aria-busy', String(value));
       if (value) {
         taskDialog = [...dialogs].filter((dialog) => dialog.open).at(-1) || null;
         taskFocus = doc.activeElement;
@@ -72,31 +104,61 @@
       updateFooter();
     }
     async function perform(label, work, { dialogProgress = true } = {}) {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
       if (busy) return null;
+      const previousFeedback = feedback; const previousHasTaskFeedback = hasTaskFeedback;
       showDialogProgress = dialogProgress; hasTaskFeedback = true;
       const requestId = `ui-${root.crypto.randomUUID()}`;
+      const originatingHandle = modalHost.getTop();
+      const taskCurrent = () => live(actionGeneration) && (!originatingHandle || originatingHandle.isOpen());
       setBusy(true); message(`${label}，正在等待后台处理…`);
       ((showDialogProgress ? taskDialog?.feedback : taskDialog) || status).focus();
       try {
-        const result = checked(await work(requestId));
+        const response = await work(requestId);
+        if (response === abandonedSelection) {
+          hasTaskFeedback = previousHasTaskFeedback;
+          rememberFeedback(previousFeedback.text, previousFeedback.tone);
+          return null;
+        }
+        const result = checked(response);
+        const current = taskCurrent();
         const warning = result.cleanupPending || (result.errorReport && (result.errorReport.status !== 'saved' || result.errorReport.pendingArchiveHandoff));
-        message(resultFeedback(result.status === 'cancelled' ? '操作已取消' : `${label}完成${result.reused ? '，使用已存在的相同结果' : ''}`, result),
-          warning ? 'warning' : result.status === 'cancelled' ? 'info' : 'success');
+        rememberFeedback(resultFeedback(result.status === 'cancelled' ? '操作已取消' : `${label}完成${result.reused ? '，使用已存在的相同结果' : ''}`, result),
+          warning ? 'warning' : result.status === 'cancelled' ? 'info' : 'success', current && showDialogProgress ? taskDialog : null);
+        if (!current) { needsRefresh = true; return null; }
         return result;
-      } catch (error) { showError(error); return null; }
-      finally { setBusy(false); await refreshStatus(false); }
+      } catch (error) {
+        rememberFeedback(resultFeedback(error?.message || '操作未完成，请重试', error?.result), 'error');
+        if (!taskCurrent()) { needsRefresh = true; return null; }
+        showError(error); return null; }
+      finally { setBusy(false); if (live()) await refreshStatus(false);
+        if (!live(actionGeneration)) { needsRefresh = true; return null; } }
     }
     function modal(title, className = '') {
-      const dialog = node('dialog', undefined, `bizop-v327-dialog vcc-fin-op-dialog ${className}`.trim());
-      dialog.setAttribute('aria-label', title); dialog.tabIndex = -1;
-      const header = node('div', undefined, 'dialog-header'); const heading = node('h2', title, 'dialog-title');
-      const dismiss = button('×', () => dialog.close(), 'icon-close'); dismiss.setAttribute('aria-label', '关闭'); header.append(heading, dismiss);
-      const body = node('div', undefined, 'bizop-modal-body vcc-fin-op-dialog-body'); const feedback = node('p', '', 'bizop-feedback'); feedback.setAttribute('role', 'status'); feedback.tabIndex = -1;
-      const footer = node('div', undefined, 'bizop-modal-footer dialog-actions right'); const close = button('关闭', () => dialog.close(), 'secondary-btn small');
-      footer.append(close); dialog.append(header, body, feedback, footer); dialog.feedback = feedback; dialog.body = body; dialog.footer = footer;
-      dialog.addEventListener('cancel', (event) => { if (busy) event.preventDefault(); });
-      dialog.addEventListener('close', () => { dialogs.delete(dialog); dialog.remove(); }); dialogs.add(dialog);
-      doc.body.append(dialog); dialog.showModal(); return dialog;
+      if (!live()) return null;
+      let dialog;
+      const factory = (scope) => {
+        const overlay = node('div', undefined, 'modal-overlay vcc-fin-op-overlay');
+        dialog = node('dialog', undefined, ('modal-card bizop-v327-dialog vcc-fin-op-dialog ' + className).trim());
+        dialog.setAttribute('open', ''); dialog.setAttribute('role', 'dialog');
+        dialog.setAttribute('aria-label', title); dialog.tabIndex = -1;
+        const header = node('div', undefined, 'dialog-header'); const heading = node('h2', title, 'dialog-title');
+        const dismiss = button('×', () => dialog.close(), 'icon-close'); dismiss.setAttribute('aria-label', '关闭'); header.append(heading, dismiss);
+        const body = node('div', undefined, 'bizop-modal-body vcc-fin-op-dialog-body'); const feedback = node('p', '', 'bizop-feedback'); feedback.setAttribute('role', 'status'); feedback.tabIndex = -1;
+        const footer = node('div', undefined, 'bizop-modal-footer dialog-actions right'); const close = button('关闭', () => dialog.close(), 'secondary-btn small');
+        footer.append(close); dialog.append(header, body, feedback, footer); dialog.feedback = feedback; dialog.body = body; dialog.footer = footer;
+        overlay.append(dialog);
+        scope.onDispose(() => { dialog.removeAttribute('open'); dialogs.delete(dialog); handles.delete(dialog); });
+        return { overlay, dialog, canClose: () => !busy, onMount(handle) {
+          handles.set(dialog, handle); dialogs.add(dialog);
+          dialog.close = () => handle.close();
+        } };
+      };
+      const parent = modalHost.getTop();
+      const result = parent?.owner === owner ? modalHost.push(parent, factory) : modalHost.openRoot(factory, { owner });
+      return result.status === 'opened' ? dialog : null;
     }
     function table(headers, rows, className = '') {
       const scroll = node('div', undefined, 'bizop-table-scroll vcc-fin-op-table-wrap'); const table = node('table', undefined, `vcc-fin-op-table ${className}`.trim()); const thead = node('thead'); const tr = node('tr');
@@ -105,15 +167,27 @@
       if (!rows.length) { const row = node('tr'); const cell = node('td', '该操作月份没有可用数据'); cell.colSpan = headers.length; row.append(cell); tbody.append(row); }
       table.append(thead, tbody); scroll.append(table); return scroll;
     }
-    async function exportObject(outputKind, objectId) {
+    async function exportObject(outputKind, objectId, closeOnSuccess = null) {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
+      const originatingHandle = modalHost.getTop();
       const result = await perform('导出文件', async (requestId) => {
-        const picked = checked(await api.pickExport({ outputKind, objectId }));
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
+        const picked = await readSelection(() => api.pickExport({ outputKind, objectId }),
+          () => live(actionGeneration) && (!originatingHandle || originatingHandle.isOpen()));
+        if (picked === abandonedSelection) return picked;
         if (picked.status === 'cancelled') return { status: 'cancelled' };
         return checked(await api.exportWorkbook(outputKind, { requestId, selectionRef: picked.selectionRef }));
       }, { dialogProgress: outputKind !== 'RESULT_FULL' });
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
+      if (originatingHandle && !originatingHandle.isOpen()) return result;
+      if (result?.status === 'ok' && closeOnSuccess) closeOnSuccess.close();
       const originalNames = { RESULT_FULL: '结果原表', OP_RAW: 'OP 校验原表', FLOW_RAW: '流水校验原表' };
       if (result?.status === 'ok' && originalNames[outputKind]) {
-        const notice = modal('导出成功', 'vcc-fin-op-message-dialog bizop-export-success-dialog');
+        const notice = modal('导出成功', 'vcc-fin-op-message-dialog bizop-export-success-dialog'); if (!notice) return null;
         notice.body.append(node('p', `${originalNames[outputKind]}导出成功。`));
         if (result.pendingArchiveHandoff || result.cleanupPending) notice.body.append(node('p', '文件已导出，仍有归档或收尾待完成，请查看任务记录。'));
         notice.footer.firstChild.textContent = '确定'; notice.footer.firstChild.focus();
@@ -121,22 +195,37 @@
       return result;
     }
     async function importFiles() {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
       await perform('导入文件', async (requestId) => {
-        const picked = checked(await api.pickFiles());
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
+        const picked = await readSelection(() => api.pickFiles(), () => live(actionGeneration));
+        if (picked === abandonedSelection) return picked;
         if (picked.status === 'cancelled') return { status: 'cancelled' };
         return await api.importFiles({ requestId, selectionRef: picked.selectionRef });
       });
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
     }
     function openRun() {
-      const dialog = modal('开始运行', 'bizop-run-dialog'); const start = dateField(); const end = dateField();
+      const dialog = modal('开始运行', 'bizop-run-dialog'); if (!dialog) return null; const start = dateField(); const end = dateField();
       const fields = node('div', undefined, 'bizop-run-fields'); fields.append(field('起始日期', start), field('终止日期', end));
       async function openCalendar(input, label) {
-        const picker = modal(`选择${label}`, 'bizop-calendar-dialog'); picker.footer.firstChild.textContent = '取消';
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
+        const picker = modal(`选择${label}`, 'bizop-calendar-dialog'); if (!picker) return null; picker.footer.firstChild.textContent = '取消';
         let version = 0;
         async function load(selectedMonth) {
+          const actionGeneration = renderGeneration;
+          if (!live(actionGeneration)) return null;
+
           const ownVersion = ++version; picker.body.replaceChildren(node('p', '正在读取可选日期…'));
           try {
             const data = checked(await api.runCalendar(selectedMonth ? { month: selectedMonth } : {}));
+            if (!live(actionGeneration)) { needsRefresh = true; return null; }
             if (!picker.open || version !== ownVersion) return;
             picker.feedback.textContent = '';
             if (!data.month) { picker.body.replaceChildren(node('p', '暂无可用 OP 数据，请先导入文件。')); return; }
@@ -162,11 +251,14 @@
             picker.body.replaceChildren(nav, grid);
             grid.querySelector('button[aria-pressed="true"]:not(:disabled),button:not(:disabled)')?.focus();
           } catch (error) {
+            if (!live(actionGeneration)) { needsRefresh = true; return null; }
+
             if (!picker.open || version !== ownVersion) return;
             picker.body.replaceChildren(button('重新读取日期', () => load(selectedMonth), 'secondary-btn small')); showError(error);
           }
         }
         await load();
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
       }
       for (const [input, label] of [[start, '起始日期'], [end, '终止日期']]) {
         input.readOnly = true; input.setAttribute('aria-label', label); input.setAttribute('aria-haspopup', 'dialog');
@@ -176,17 +268,25 @@
         });
       }
       const details = node('div'); const run = button('确认运行', async () => {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         const result = await perform('区间核对', (requestId) => api.run({ requestId, selectionRef: preflight.selectionRef }));
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
         if (result?.status === 'ok') dialog.close(); else { preflight = null; run.disabled = true; precheck.focus(); }
       }, 'primary-btn small'); let preflight = null; let preflightVersion = 0; run.disabled = true;
       const precheck = button('检查所需数据', async () => {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         preflight = null; run.disabled = true; details.replaceChildren(); precheck.disabled = true; const version = ++preflightVersion;
         try {
           const result = checked(await api.preflight({ startDate: start.value, endDate: end.value }));
-          if (version !== preflightVersion) return; preflight = result;
+          if (!live(actionGeneration)) { needsRefresh = true; return null; }
+          if (!dialog.open || version !== preflightVersion) return; preflight = result;
           details.append(table(['所需校验表', '账期', '当前版本', '来源文件'], preflight.inputs.map((item) => [item.role === 'FLOW' ? '流水校验表' : 'OP 校验表', item.dataDate, `v${item.version}`, item.originals.join('、')])));
           dialog.feedback.textContent = ''; run.disabled = false;
-        } finally { precheck.disabled = false; }
+        } finally { if (dialog.open && live(actionGeneration)) precheck.disabled = false; }
       }, 'secondary-btn small');
       for (const item of [start, end]) item.addEventListener('change', () => { preflightVersion += 1; preflight = null; run.disabled = true; details.replaceChildren(); });
       dialog.body.append(fields, details);
@@ -194,18 +294,34 @@
       const checks = node('div', undefined, 'bizop-modal-actions'); checks.append(precheck);
       dialog.footer.replaceChildren(checks, actions);
     }
-    async function latestMonth() { const result = checked(await api.months({ limit: 1 })); return result.months[0] || new Date().toISOString().slice(0, 7); }
+    async function latestMonth() {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+      const result = checked(await api.months({ limit: 1 }));
+      if (!live(actionGeneration)) { needsRefresh = true; return null; } return result.months[0] || new Date().toISOString().slice(0, 7); }
     async function openResults() {
-      const dialog = modal('导出校验结果表', 'vcc-fin-op-export-dialog bizop-results-dialog'); const month = node('input', undefined, 'vcc-fin-op-input'); month.type = 'month'; month.value = await latestMonth();
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
+      const dialog = modal('导出校验结果表', 'vcc-fin-op-export-dialog bizop-results-dialog'); if (!dialog) return null; const month = node('input', undefined, 'vcc-fin-op-input'); month.type = 'month'; month.value = await latestMonth();
+      if (!dialog.open) return null;
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
       const choice = select([['', '请选择结果表']]); const next = button('下一页', () => load(cursor), 'secondary-btn small'); let cursor = null; let generation; let loadVersion = 0;
-      const exportBtn = button('导出', async () => { if (!choice.value) throw new Error('请先选择结果表');
+      const exportBtn = button('导出', async () => {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+        if (!choice.value) throw new Error('请先选择结果表');
         if ((await exportObject('RESULT_DIFF', choice.value))?.status === 'ok') dialog.close(); }, 'primary-btn small');
       async function load(after = null) {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         const version = ++loadVersion;
         choice.replaceChildren(); exportBtn.disabled = true; next.disabled = true;
         const data = checked(await api.list({ view: 'RESULT', operationMonth: month.value, limit: 200,
           ...(after ? { cursor: after, generation } : {}) }));
-        if (version !== loadVersion) return;
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
+        if (!dialog.open || version !== loadVersion) return;
         choice.replaceChildren(); choice.append(Object.assign(node('option', data.rows.length ? '请选择结果表' : '该月份没有结果表'), { value: '' }));
         for (const row of data.rows) choice.append(Object.assign(node('option', row.tableName), { value: row.objectId }));
         generation = data.generation; cursor = data.nextCursor; next.hidden = !cursor; next.disabled = !cursor; exportBtn.disabled = !data.rows.length;
@@ -214,21 +330,35 @@
       const fields = node('div', undefined, 'bizop-result-fields'); fields.append(field('操作月份', month), field('结果表表名', choice));
       const actions = node('div', undefined, 'bizop-modal-actions'); actions.append(exportBtn, dialog.footer.firstChild);
       dialog.body.append(fields, next); dialog.footer.replaceChildren(actions); await load();
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
     }
     function openInputExport({ initialKind = 'OP_RAW' } = {}) {
-      const dialog = modal('导出数据', 'vcc-fin-op-export-dialog bizop-results-dialog bizop-input-export-dialog'); const kind = select([['OP_RAW', 'OP 原表'], ['OP_CHECK', 'OP 校验表'], ['FLOW_RAW', '流水原表'], ['FLOW_CHECK', '流水校验表']]);
+      const dialog = modal('导出数据', 'vcc-fin-op-export-dialog bizop-results-dialog bizop-input-export-dialog'); if (!dialog) return null; const kind = select([['OP_RAW', 'OP 原表'], ['OP_CHECK', 'OP 校验表'], ['FLOW_RAW', '流水原表'], ['FLOW_CHECK', '流水校验表']]);
       kind.value = initialKind;
       const date = dateField(); const fields = node('div', undefined, 'bizop-result-fields bizop-input-export-fields'); fields.append(field('账期', date), field('导出目标', kind));
       dialog.body.append(fields);
       const back = dialog.footer.firstChild; back.textContent = '返回';
       const actions = node('div', undefined, 'bizop-modal-actions'); actions.append(button('导出', async () => {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         const current = checked(await api.currentInput({ kind: kind.value.split('_')[0], dataDate: date.value }));
-        if ((await exportObject(kind.value, current.objectId))?.status === 'ok') dialog.close();
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
+        if (!handles.get(dialog)?.isTop()) return null;
+        await exportObject(kind.value, current.objectId, dialog);
       }, 'primary-btn small'), back);
       dialog.footer.replaceChildren(actions);
     }
     async function showDelete(selection, refresh) {
-      const preview = checked(await api.deletePreview(selection)); const dialog = modal('确认删除影响', 'bizop-delete-dialog');
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
+      const parent = modalHost.getTop();
+      if (!parent || parent.owner !== owner || !parent.isTop()) return null;
+      const preview = checked(await api.deletePreview(selection));
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
+      if (!parent.isTop()) return null;
+      const dialog = modal('确认删除影响', 'bizop-delete-dialog'); if (!dialog) return null;
       dialog.body.append(node('p', `将处理 ${preview.datasets.length} 个当前输入版本；关联 ${preview.runs.length} 对历史结果（全量表与差异表一起处理）。`));
       if (preview.datasets.length) dialog.body.append(table(['输入类型', '账期', '版本', '来源文件'], preview.datasets.map((item) => [item.kind, item.dataDate, `v${item.version}`, item.originals.map((file) => file.originalName).join('、')])));
       if (preview.runs.length) dialog.body.append(table(['操作月份', '起始日期', '终止日期', '关联结果表', '原件引用'], preview.runs.map((item) => {
@@ -241,15 +371,25 @@
       dialog.body.append(node('p', '删除输入会同时删除该类型、该账期的原表与校验表，不恢复旧版本。其他输入、用户原文件和已另存的结果不受影响。归档原件继续按存档中心的引用、锁和保留期处理。'));
       dialog.footer.replaceChildren();
       async function confirm(mode) {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         const result = await perform('删除数据', (requestId) => api.deleteData({ requestId, previewId: preview.previewId, mode }));
-        if (result?.status === 'ok') { dialog.close(); await refresh(); }
+        if (!live(actionGeneration)) { needsRefresh = true; return null; }
+        if (result?.status === 'ok') { dialog.close(); await refresh();
+          if (!live(actionGeneration)) { needsRefresh = true; return null; } }
       }
       if (!preview.selection.runIds.length) dialog.footer.append(button('删除但保留结果表', () => confirm('KEEP_RESULTS'), 'secondary-btn small'));
       dialog.footer.append(button('删除', () => confirm('DELETE_ASSOCIATED'), 'primary-btn bizop-danger small'), button('取消', () => dialog.close(), 'secondary-btn small'));
     }
     async function openManager() {
-      const dialog = modal('数据管理', 'vcc-fin-op-manager-dialog bizop-manager-dialog');
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
+      const dialog = modal('数据管理', 'vcc-fin-op-manager-dialog bizop-manager-dialog'); if (!dialog) return null;
       const month = node('input', undefined, 'vcc-fin-op-input'); month.type = 'month'; month.value = await latestMonth();
+      if (!dialog.open) return null;
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
       let view = 'RESULT'; const titles = { RESULT: '结果表', CHECK: '校验表', RAW: '校验原表' };
       const kind = select([['OP', 'OP'], ['FLOW', '流水']]);
       const layout = node('div', undefined, 'position-manager-layout vcc-fin-op-manager-layout');
@@ -295,6 +435,9 @@
         del.disabled = !selection.size;
       }
       async function load(pageIndex = null) {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+
         const version = ++loadVersion;
         if (pageIndex === null) { pageCursors = [null]; currentPage = 0; generation = undefined; }
         const requestedPage = pageIndex ?? 0;
@@ -302,17 +445,21 @@
         try {
           const data = checked(await api.list({ view, kind: kind.value, operationMonth: month.value, limit: 200,
             ...(pageIndex !== null ? { cursor: pageCursors[requestedPage], generation } : {}) }));
-          if (version !== loadVersion) return;
+          if (!live(actionGeneration)) { needsRefresh = true; return null; }
+          if (!dialog.open || version !== loadVersion) return;
           rows = data.rows; generation = data.generation; currentPage = requestedPage;
           if (data.nextCursor) pageCursors[requestedPage + 1] = data.nextCursor;
           else pageCursors.length = requestedPage + 1;
         } catch (error) {
-          if (version !== loadVersion) return;
+          if (!live(actionGeneration)) { needsRefresh = true; return null; }
+
+          if (!dialog.open || version !== loadVersion) return;
           if (pageIndex !== null && error.result?.code === 'BIZOP_GENERATION_CHANGED') {
-            await load(); dialog.feedback.textContent = '数据已变化，已重新载入第一页，请重新选取。'; return;
+            await load();
+            if (!live(actionGeneration)) { needsRefresh = true; return null; } dialog.feedback.textContent = '数据已变化，已重新载入第一页，请重新选取。'; return;
           }
           throw error;
-        } finally { if (version === loadVersion) { loading = false; render(); } }
+        } finally { if (dialog.open && live(actionGeneration) && version === loadVersion) { loading = false; render(); } }
       }
       for (const item of [month, kind]) item.addEventListener('change', () => load().catch(showError));
       pane.append(toolbar, content); layout.append(nav, pane); dialog.body.append(layout);
@@ -321,6 +468,7 @@
       actions.append(choose, del, button('导出', () => openInputExport({ initialKind: view === 'RESULT' ? 'OP_RAW' : `${kind.value}_${view}` }), 'secondary-btn small'), button('返回', () => dialog.close(), 'secondary-btn small'));
       dialog.footer.classList.add('vcc-fin-op-manager-footer'); dialog.footer.replaceChildren(paging, actions);
       await load();
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
     }
     panel.classList.remove('pending-board'); panel.classList.add('acquiring-bill-currency-board', 'bizop-v327-board');
     const status = node('div', undefined, 'status-box bizop-status'); status.setAttribute('role', 'status'); status.tabIndex = -1;
@@ -328,8 +476,17 @@
     const importButton = button('导入文件', importFiles); const runButton = button('开始运行', openRun, 'primary-btn');
     const resultButton = button('导出校验结果表', openResults); const managerButton = button('数据管理', openManager);
     const retry = button('重试恢复', async () => {
-      const result = await perform(recoveryReady ? '存档检查' : '恢复检查', async () => { const state = await api.retryRecovery(); return { status: state.ready ? 'ok' : 'error', message: state.ready ? '本次检查已完成' : '仍有未决任务或文件，请查看任务详情后重试' }; });
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
+      const result = await perform(recoveryReady ? '存档检查' : '恢复检查', async () => {
+        const actionGeneration = renderGeneration;
+        if (!live(actionGeneration)) return null;
+        const state = await api.retryRecovery();
+        return { status: state.ready ? 'ok' : 'error', message: state.ready ? '本次检查已完成' : '仍有未决任务或文件，请查看任务详情后重试' }; });
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
       if (result?.status === 'ok') await refreshStatus(true);
+      if (!live(actionGeneration)) { needsRefresh = true; return null; }
     });
     const actionPair = node('div', undefined, 'pending-action-pair'); actionPair.append(importButton, runButton);
     for (const [left, right] of [[actionPair, resultButton], [status, managerButton]]) {
@@ -339,9 +496,15 @@
     const footer = node('div', undefined, 'bizop-toolbar bizop-secondary'); footer.append(retry);
     panel.append(footer);
     async function refreshStatus(show = true) {
+      const actionGeneration = renderGeneration;
+      if (!live(actionGeneration)) return null;
+
       if (!api) return;
+      const readVersion = ++statusGeneration;
       try {
-        const info = await api.status(); enabled = info.mode === 'ACTIVE'; recoveryReady = info.recoveryReady === true;
+        const info = await api.status();
+        if (readVersion !== statusGeneration) return null;
+        if (!live(actionGeneration)) { needsRefresh = true; return null; } enabled = info.mode === 'ACTIVE'; recoveryReady = info.recoveryReady === true;
         if (!busy) for (const btn of [importButton, runButton, resultButton, managerButton]) btn.disabled = !enabled || !recoveryReady;
         const archiveCheckPending = info.archiveOwnerBackfillPending === true;
         retry.hidden = recoveryReady && !archiveCheckPending; retry.disabled = !enabled || busy;
@@ -354,22 +517,50 @@
         else if (show && !hasTaskFeedback) message('欢迎使用小助手');
         return info;
       } catch (error) {
+        if (!live(actionGeneration) || readVersion !== statusGeneration) { needsRefresh = true; return null; }
+
         enabled = false; for (const btn of [importButton, runButton, resultButton, managerButton, retry]) btn.disabled = true;
         // 状态故障独立于原任务反馈，重试时替换故障提示，恢复后还原原任务结果。
         statusReadError = `模块状态读取失败：${error?.message || '无法取得当前状态'}；请重新进入本模块重试。`;
         renderFeedback([...dialogs].at(-1)); return null;
       }
     }
-    async function setSelected(value) {
-      selected = value; const version = ++routeVersion; panel.hidden = true;
-      if (!value) { for (const dialog of dialogs) if (!busy) dialog.close(); return; }
-      legacyPanel.hidden = true;
-      if (!api) { legacyPanel.hidden = false; restoreLegacy(); return; }
-      const info = await refreshStatus(); if (version !== routeVersion || !selected) return;
-      if (info?.mode === 'DISABLED') { legacyPanel.hidden = false; restoreLegacy(); }
+    async function enter() {
+      if (disposed) return { status: 'stale' };
+      selected = true; const version = ++routeVersion; ++renderGeneration;
+      panel.hidden = true; legacyPanel.hidden = true;
+      setBusy(busy); renderFeedback(null);
+      if (!api) { usingLegacy = true; legacyPanel.hidden = false; await restoreLegacy(); return { status: 'ready' }; }
+      const info = await refreshStatus();
+      if (version !== routeVersion || !selected || disposed) return { status: 'stale' };
+      usingLegacy = info?.mode === 'DISABLED';
+      if (usingLegacy) { legacyPanel.hidden = false; await restoreLegacy(); }
       else panel.hidden = false;
+      needsRefresh = !info;
+      return { status: needsRefresh ? 'error' : 'ready' };
     }
-    return { setSelected, openRun, openManager, openResults, openInputExport, get busy() { return busy; } };
+    function leave() {
+      const closed = modalHost.closeOwner(owner, 'navigation');
+      if (closed.status === 'blocked') return { status: 'blocked' };
+      if (usingLegacy && legacyController?.leave().status === 'blocked') return { status: 'blocked' };
+      selected = false; ++routeVersion; ++renderGeneration; ++statusGeneration; needsRefresh = true;
+      return { status: 'left' };
+    }
+    function invalidate(change) {
+      needsRefresh = true;
+      return usingLegacy ? legacyController?.invalidate(change) : live() ? refreshStatus(false) : Promise.resolve(null);
+    }
+    function dispose() {
+      if (disposed) return;
+      selected = false; disposed = true; ++routeVersion; ++renderGeneration; ++statusGeneration;
+      for (const handle of [...handles.values()]) if (handle.isOpen()) handle.dispose();
+      for (const element of [importButton, runButton, resultButton, managerButton, retry]) {
+        element.removeEventListener('click', buttonListeners.get(element));
+      }
+      legacyController?.dispose();
+    }
+    function setSelected(value) { return value ? enter() : leave(); }
+    return { enter, leave, invalidate, dispose, setSelected, openRun, openManager, openResults, openInputExport, get busy() { return busy; } };
   }
   root.createBizOpV327Controller = createController;
 })(typeof window === 'object' ? window : globalThis);

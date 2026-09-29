@@ -1,0 +1,70 @@
+--- before/renderer-contracts.js
++++ current/renderer-contracts.js
+@@ -135,6 +135,36 @@
+     }
+     return null;
+   };
++  const conditionalWrite = (write, read, analysis, writeEnv, readEnv) => {
++    const reads = executionPositions(read, analysis, readEnv);
++    // 唯一调用位置只提供顺序，不证明执行。沿实际帧及静态 helper 调用逐层保留条件性。
++    for (const atWrite of executionPositions(write, analysis, writeEnv)) {
++      const atRead = reads.find(node => analysis.functionPath(node) === analysis.functionPath(atWrite));
++      for (let child = atWrite, parent = analysis.parents.get(child);
++        parent && !analysis.functionNodesByStart.has(parent.start); child = parent, parent = analysis.parents.get(parent)) {
++        let conditional = false;
++        if (parent.type === 'IfStatement' || parent.type === 'ConditionalExpression') {
++          const test = analysis.describe(parent.test);
++          conditional = child !== parent.test && !(test.kind === 'literal' &&
++            child === (test.value ? parent.consequent : parent.alternate));
++        } else if (parent.type === 'LogicalExpression' && child === parent.right) {
++          const left = analysis.describe(parent.left);
++          const selected = left.kind === 'literal' && (parent.operator === '&&' ? Boolean(left.value)
++            : parent.operator === '||' ? !left.value : left.value == null);
++          conditional = !selected;
++        } else if (parent.type === 'SwitchStatement') conditional = child !== parent.discriminant;
++        else if (parent.type === 'ForStatement') conditional = child === parent.body || child === parent.update;
++        else if (parent.type === 'ForOfStatement' || parent.type === 'ForInStatement') conditional = child !== parent.right;
++        else if (parent.type === 'WhileStatement') conditional = child === parent.body;
++        else if (parent.type === 'CatchClause') conditional = true;
++        // 初始化、条件测试、可迭代值、do 首轮及已证明选中的字面量分支不因外壳而变成可跳过。
++        // 若读写处于同一已进入分支，外层是否执行不影响本次读取时的覆盖事实。
++        if (conditional && !(atRead && child.start <= atRead.start && child.end >= atRead.end)) return true;
++      }
++      if (atRead) return false;
++    }
++    return true;
++  };
+   const mutationSources = (items, analysis, env, depth, visited) => {
+     if (depth > 35) return [unknown('recursive-renderer-mutation-source')];
+     return items.flatMap(node => {
+@@ -181,11 +211,8 @@
+         if (object.kind === 'array') continue; // 下方保留不确定数组改写的来源候选。
+         return unknown('unordered-renderer-member-write');
+       }
+-      let conditional = before === null || identities.length > 1;
+-      // 只给有确定顺序的静态替换建立新身份；分支/循环不能用源码最后一项冒充实际结果。
+-      for (let parent = analysis.parents.get(node); parent && !analysis.functionNodesByStart.has(parent.start); parent = analysis.parents.get(parent)) {
+-        if (['IfStatement', 'ConditionalExpression', 'SwitchStatement', 'ForStatement', 'ForOfStatement', 'ForInStatement', 'WhileStatement', 'DoWhileStatement'].includes(parent.type)) conditional = true;
+-      }
++      const conditional = before === null || identities.length > 1 ||
++        conditionalWrite(node, access.node, analysis, writeEnv, env);
+       writes.push({ node, conditional, order: executionPositions(node, analysis, writeEnv).reverse().map(item => item.start) });
+     }
+     // 函数声明的文本位置不是执行顺序；工厂内写入必须排在调用返回后的外层替换之前。
+@@ -193,11 +220,12 @@
+       for (let index = 0; index < Math.min(a.order.length, b.order.length); index += 1) if (a.order[index] !== b.order[index]) return a.order[index] - b.order[index];
+       return a.order.length - b.order.length;
+     });
+-    let uncertain = false;
+-    for (const { node, conditional } of writes) {
+-      uncertain ||= conditional;
++    for (const [index, { node, conditional }] of writes.entries()) {
++      // 确定的后续覆盖可清除旧候选；无法证明先后关系的写入仍须保留。
++      const unordered = writes.slice(0, index).some(previous =>
++        writtenBefore(previous.node, node, analysis, writeEnv, writeEnv) !== true);
+       const assigned = resolve(analysis.describe(node.right), analysis, writeEnv, depth + 1, visited, false);
+-      selected = uncertain ? { kind: 'identity-candidates', values: [selected, assigned] } : assigned;
++      selected = conditional || unordered ? { kind: 'identity-candidates', values: [selected, assigned] } : assigned;
+     }
+     if (!mutations.length) return selected;
+     const reorders = mutations.filter(node => {

@@ -17,12 +17,12 @@ const {
   createToolboxCell,
   createToolboxRow,
   createToolboxSheetMeta
-} = require('../../../src/backend/toolbox-format/model');
-const { normalizeStaticStyle } = require('../../../src/backend/toolbox-format/style-registry');
+} = require('../../../src/backend/xlsx/model');
+const { normalizeStaticStyle } = require('../../../src/backend/xlsx/style-registry');
 const { exportToolboxMultiFilters } = require('../../../src/main-process/toolbox-format-operations');
 const {
   createBackgroundExecutionRuntime
-} = require('../../../src/main-process/background-execution/runtime');
+} = require('../../../src/main-process/execution-descriptors/composition');
 const {
   createWorkerThreadAdapter
 } = require('../../../src/main-process/background-execution/adapters/worker-thread-adapter');

@@ -100,7 +100,7 @@ test('提交后异常保留 running Task；旧启动 owner 不抢接管，BizOP 
   const legacy = await recoverToolboxPublicationsIntoArchive({ userDataDir: f.root,
     archiveCenter: { service: f.service, persistAppendIntent() { assert.fail('旧 owner 不得接管 BizOP'); },
       flushOutbox() { assert.fail('本次没有旧 owner 的待接管结果'); } },
-    recoverPublications: f.module.publication.recoverOtherOwners });
+    recoverPublications: f.publicationRecovery.forOwner('archive-publication').recover });
   assert.equal(legacy.recovered.length, 0);
   assert.equal(f.module.catalog.task(taskId).status, 'running');
   assert.equal((await f.module.recovery.run()).ready, true);

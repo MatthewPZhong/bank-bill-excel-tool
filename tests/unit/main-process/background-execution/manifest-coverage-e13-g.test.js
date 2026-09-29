@@ -30,7 +30,7 @@ const {
 } = require('../../../../src/main-process/background-execution/production-strategy-snapshot');
 const {
   BACKGROUND_EXECUTION_POLICIES
-} = require('../../../../src/main-process/background-execution/runtime');
+} = require('../../../../src/main-process/execution-descriptors/policy-catalog');
 
 function harness(overrides = {}) {
   const bindings = overrides.bindings || bindingSnapshot();

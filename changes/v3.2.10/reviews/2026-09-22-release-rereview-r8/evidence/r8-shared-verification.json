@@ -1,0 +1,38 @@
+{
+  "status": "PASS",
+  "beforeVersion": "R7 repair start: renderer-contracts.js from before/ plus 4 unchanged current checker files; all 5 manifest-verified",
+  "reusedCases": 38,
+  "newDefaultCombinationCases": 6,
+  "rendererCases": 26,
+  "queryCases": 18,
+  "versionsPerCase": 2,
+  "unchangedExpectedOutcomes": 42,
+  "correctedFalsePositives": [
+    {
+      "name": "single-mount-category-explicit-ipc",
+      "beforeViolations": 1,
+      "currentViolations": 0
+    },
+    {
+      "name": "single-mount-explicit-data-over-state",
+      "beforeViolations": 1,
+      "currentViolations": 0
+    }
+  ],
+  "denialReclassification": [
+    {
+      "name": "distinct-call-api-over-scoped-default",
+      "beforeRule": "ARCH-RENDERER-SCOPE",
+      "currentRule": "ARCH-STATIC-COVERAGE",
+      "deniedInBoth": true
+    }
+  ],
+  "actualInMemoryQueries": 10,
+  "newCombinationVmAssertions": "6/6 passed",
+  "scannerJsonBeforeCurrentEqual": true,
+  "repeatedScanJsonEqual": true,
+  "scannerUnchangedAfterRules": true,
+  "siteEvidenceIdsUnchanged": true,
+  "policyFilesUnchanged": true,
+  "scope": "small fixtures only; no full scan or source writes"
+}

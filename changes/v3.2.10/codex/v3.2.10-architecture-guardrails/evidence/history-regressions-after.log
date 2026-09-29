@@ -1,0 +1,11 @@
+✔ 保护字段完整比较：scope、operation、规则、消费者、证据、全局及装配不能放宽 (3295.858625ms)
+✔ 未全域激活时退役入口仍保留成员、替代入口和证据约束 (714.701625ms)
+✔ active 保护函数更名却不更新登记时不能静默失去扫描范围 (19.142834ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4089.817916

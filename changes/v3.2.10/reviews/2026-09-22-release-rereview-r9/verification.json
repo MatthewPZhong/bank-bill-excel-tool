@@ -1,0 +1,141 @@
+{
+  "reviewRound": 9,
+  "result": "FINDINGS",
+  "readOnlyReview": true,
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "frozenExistingFiles": 4555,
+  "newlyIntroducedRegressionsConfirmed": 0,
+  "findings": [
+    {
+      "id": "RR9-01",
+      "priority": 2,
+      "file": "scripts/architecture/renderer-contracts.js",
+      "start": 387,
+      "end": 387,
+      "classification": "existing_logical_short_circuit_gap",
+      "title": "AND短路undefined来源丢失导致默认对象漏报"
+    },
+    {
+      "id": "RR9-02",
+      "priority": 2,
+      "file": "scripts/architecture/renderer-contracts.js",
+      "start": 153,
+      "end": 154,
+      "classification": "existing_static_spread_mutator_gap",
+      "title": "静态spread实参丢失数组插入对象身份"
+    }
+  ],
+  "closedOriginalCounterexamples": [
+    "RR8-01",
+    "RR8-02"
+  ],
+  "allDefaultOrArraySemanticsClosed": false,
+  "historicalSharedCorrection": {
+    "name": "single-mount-category-explicit-ipc",
+    "oldExpectedClean": true,
+    "correctExpectedClean": false,
+    "reason": "invoke returns Promise; member is undefined; other default actually runs"
+  },
+  "executedThisRound": {
+    "architectureTests": {
+      "tests": 432,
+      "pass": 432,
+      "fail": 0,
+      "skipped": 0,
+      "exitCode": 0
+    },
+    "RR8IpcTargeted": {
+      "tests": 13,
+      "pass": 13,
+      "includedInArchitectureTests": true
+    },
+    "architectureCli": {
+      "command": "node scripts/check-architecture.js --json /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r9/evidence/architecture-check.json",
+      "exitCode": 0,
+      "active": 31,
+      "pending": 0,
+      "partial": 0,
+      "violations": 0,
+      "stale": 0,
+      "parsedFiles": 765,
+      "scannedFiles": 765,
+      "parseErrors": 0,
+      "knownGeneratedUnresolved": 2,
+      "dynamicSites": 33
+    },
+    "probes": {
+      "status": "PASS",
+      "meaning": "归档支持两项既有剩余漏报与原始反例关闭；并非检查器全部通过。",
+      "confirmedOpenFindings": [
+        "RR9-01",
+        "RR9-02"
+      ],
+      "newlyIntroducedRegressionsConfirmed": 0,
+      "priorOriginalCounterexamplesClosed": [
+        "RR8-01",
+        "RR8-02"
+      ],
+      "allDefaultOrArraySemanticsClosed": false,
+      "rendererNeighbors": 6,
+      "arrayNeighbors": 8,
+      "arrayOriginalCases": 5,
+      "sharedCases": 50,
+      "actualRendererBoundaryCount": 20,
+      "actualFactoryProbed": "BankStatement",
+      "architecturePass": 432,
+      "RR8IpcTargetedPassIncluded": 13,
+      "fullGateReusedInputCount": 1705,
+      "priorSharedSafeAssumptionCorrected": "single-mount-category-explicit-ipc uses a Promise without await and triggers other default"
+    }
+  },
+  "reusedFullGate": {
+    "rerunThisRound": false,
+    "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-r8-repair/verification.json",
+    "matchingInputs": 1705,
+    "headMatches": true,
+    "changedInputs": [],
+    "gate": {
+      "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+      "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+      "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+      "startedAt": "2026-09-22T18:06:12.023602+08:00",
+      "minimumFreeBytes": 5711200256,
+      "abortBelowFreeBytes": 2147483648,
+      "inputFiles": 1705,
+      "pid": 21948,
+      "exitCode": 0,
+      "finishedAt": "2026-09-22T18:27:32.682754+08:00",
+      "changedInputs": [],
+      "headAfter": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10"
+    },
+    "unit": {
+      "tests": 9210,
+      "suites": 828,
+      "pass": 9206,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 4,
+      "todo": 0
+    },
+    "integration": {
+      "scripts": 68,
+      "countedPassed": 2901,
+      "countedTotal": 2901,
+      "withoutCount": [
+        "v2.1.12-beta-multiworker-nested"
+      ]
+    },
+    "rendererLifecycle": {
+      "pass": 233,
+      "total": 233
+    }
+  },
+  "limits": [
+    "仅R8增量与有限相邻组合，未重新审查未变化业务模块。",
+    "实际Renderer探针保留20边界，具体追加BankStatement装配，不表示逐个测试20工厂。",
+    "VM仅本地stub，不代表真实IPC或业务恢复。",
+    "没有Windows、GUI、Excel/WPS或发布验收。"
+  ],
+  "preservationEvidence": "evidence/preservation-final.json"
+}

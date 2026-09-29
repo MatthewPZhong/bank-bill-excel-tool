@@ -1,0 +1,471 @@
+{
+  "purpose": "归档 G3 历史工作区证据；原文件逐字节复制，原日志、补丁和运行记录未改写。仅更新模块文档中的证据链接。",
+  "files": [
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/final-unit-command.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/final-unit-command.json",
+      "sha256": "51cd31bcde14c605b334ceaf4c537b30343ce0b7f8f878caa6ade7db3dfc1741",
+      "bytes": 2727
+    },
+    {
+      "originalPath": "tmp/g3-review-r3-fixes/review-r3-fixes.patch",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/review-r3-fixes.patch",
+      "sha256": "a9120ea2fd95fdaf324a2299b803d5d100b10ceab22f36ad9c7825f91a728214",
+      "bytes": 40586
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/vcc/after-focused.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/vcc/after-focused.log",
+      "sha256": "76bd02ee4659f4f50072509ab3e3b9f4c7b4d93bfa214a43f751d1bb8d7c1d21",
+      "bytes": 6381
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/final-unit.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/final-unit.log",
+      "sha256": "3ccb408180c480151a157636a0b8df40e606a565cb06afdcdab7620e84eabdfa",
+      "bytes": 73660
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/deletion/write-entry-audit.md",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/deletion/write-entry-audit.md",
+      "sha256": "c4b91055b6987617920e714a2e311b318ede7b7cb03f4b97f53fd2f31795225f",
+      "bytes": 19383
+    },
+    {
+      "originalPath": "tmp/g3-delivery/diff-stat.txt",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/diff-stat.txt",
+      "sha256": "5bae81bc4a5fc90bbaa226d05760c3485698b7cb950071714ef4ad79115def7b",
+      "bytes": 6201
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/scenarios/after-probes.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/scenarios/after-probes.log",
+      "sha256": "adcbba918440d07907cbc1e1b15353099345edf8d0adefba9affaf3d2e528629",
+      "bytes": 1068
+    },
+    {
+      "originalPath": "tmp/g3-review-r3-fixes/review/stage-acceptance-audit.md",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/review/stage-acceptance-audit.md",
+      "sha256": "f1b46fb9341edfef5ba088c2a971a658b07e93143b07c8083e147134c4a4e287",
+      "bytes": 12295
+    },
+    {
+      "originalPath": "tmp/g3-review-r3-fixes/review-r3-fixes-stat.txt",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/review-r3-fixes-stat.txt",
+      "sha256": "9eea556e90ba5d3d569eaf6e92c77d29cda0edc09a6dffeeac8d25d1ed026c07",
+      "bytes": 395
+    },
+    {
+      "originalPath": "tmp/g3-delivery/logs/g3-release-check-smoke-before.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/logs/g3-release-check-smoke-before.log",
+      "sha256": "4249d3aa5667f9312b6fce8476c22c0adfd6093cfbf5e30e8a7a5af401bb0bf6",
+      "bytes": 3412
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/final-manifest.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/final-manifest.json",
+      "sha256": "de487a70f5c4ed32d24acc7a206cd3f662894179c5a6f4a112475b483dfa3826",
+      "bytes": 28631
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/scenarios/results.md",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/scenarios/results.md",
+      "sha256": "4a2d793f26c1d40760f530f1a6e4307bc3be7c4e670bc7a0bc8c29fda8e97dfc",
+      "bytes": 2649
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/review-fixes-stat.txt",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/review-fixes-stat.txt",
+      "sha256": "77fcbab9a88443ea6e4c6c54f5c33343cabc6faf690522ab88e090a3464c8efe",
+      "bytes": 1269
+    },
+    {
+      "originalPath": "tmp/g3-delivery/logs/comment-cleanup-lint.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/logs/comment-cleanup-lint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/frozen-code.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/frozen-code.json",
+      "sha256": "972d41516cc119fb15288e5f4889009d3c02724a8d3f6f17a99210e79210b3e6",
+      "bytes": 15199
+    },
+    {
+      "originalPath": "tmp/g3-review-r3-fixes/final-checks.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/final-checks.log",
+      "sha256": "719efcc098fa3e4d304ba87e2c8e642d517d65f047e1f148fbecd054205ddd1a",
+      "bytes": 389
+    },
+    {
+      "originalPath": "tmp/g3-review-r3-fixes/tests/before.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/tests/before.log",
+      "sha256": "9e11d82528a24d2e3e6669abb676b9a7004ad538973a4954e27fdf997862e71c",
+      "bytes": 20338
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/final-lint.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/final-lint.log",
+      "sha256": "c396d49d3be1db82282d6b91bc9412269ecdb1f1a25a6777cb572d10d240e182",
+      "bytes": 50
+    },
+    {
+      "originalPath": "tmp/g3-review-r3-fixes/tests/result.md",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/tests/result.md",
+      "sha256": "7af1aed174b6e3c69f4a2700855daf4b5e466795a8a559afbe75c9e0baee9189",
+      "bytes": 5769
+    },
+    {
+      "originalPath": "tmp/g3-review-r3-fixes/before-manifest.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/before-manifest.json",
+      "sha256": "dec95a5b43ba4f512833cbc12ca5ca95ba99b73a68560c6adb88932bc8be716a",
+      "bytes": 38538
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/final-smoke.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/final-smoke.log",
+      "sha256": "083c10f58d03319638c860d0a8d556ddcddc042e44a0df1b464420ab23c35465",
+      "bytes": 2385
+    },
+    {
+      "originalPath": "tmp/g3-review-r3-fixes/final-manifest.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/final-manifest.json",
+      "sha256": "c6fbb5e7cb2761c1f0e3bb11d941e456f9bc2240667c80a5abeeb0ba736911a5",
+      "bytes": 70911
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/modals/README.md",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/modals/README.md",
+      "sha256": "a5f8bd31b5bea3088e890b281753878f77a7bf33c8aaa7b5b9859c975d053cd2",
+      "bytes": 10494
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/before-manifest.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/before-manifest.json",
+      "sha256": "cd742e704e002b9bcdf560a27bebc49fbd4b518ed445a61c5e26c9cd2071a52b",
+      "bytes": 20800
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/bizop/before-review-probe.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/bizop/before-review-probe.log",
+      "sha256": "55056fadfe6dc5198b819c38c3e6bf1ac0ce56fa9283fd2bd3e29f6ee9a9849b",
+      "bytes": 289
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/review-r2-fixes-stat.txt",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/review-r2-fixes-stat.txt",
+      "sha256": "bd964382cadc4277901fb3ea2eb02e6291adcaa54e31241a71391677ed66155b",
+      "bytes": 632
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/before-manifest.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/before-manifest.json",
+      "sha256": "708ac3fb783dbc2d353a80712f3d03eed6ee126dc25cb7835fbf17ecbad47afc",
+      "bytes": 17921
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/final-unit.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/final-unit.log",
+      "sha256": "e4d7c440feff8654088358965193beed7b91f4ad3328c505611d660e602da491",
+      "bytes": 70919
+    },
+    {
+      "originalPath": "tmp/g3-delivery/delivery-manifest.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/delivery-manifest.json",
+      "sha256": "c6d8439b073870625d7d0476f559446535e8fb544ccc5b98bfea0c2c4e910822",
+      "bytes": 19910
+    },
+    {
+      "originalPath": "tmp/g3-delivery/verified-code-sha256.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/verified-code-sha256.json",
+      "sha256": "939d142d7cfb6af81111bc748a576a4d09efec9c121844615a8fdf44c55a1ad0",
+      "bytes": 14910
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/renderer-boundaries-current.patch",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/renderer-boundaries-current.patch",
+      "sha256": "d51bf26a9f6d89ca9f0e1836d501da36331c3c9cf82c916179d26aac496dee0e",
+      "bytes": 3883141
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/final-electron.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/final-electron.log",
+      "sha256": "8ffa214ad29d94daa85386fc00d4cb997cc8b4022859f98d4960a137edbc5eab",
+      "bytes": 16153
+    },
+    {
+      "originalPath": "tmp/g3-review-r4-record/checks.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r4-record/checks.json",
+      "sha256": "0c5ca6454d4f2a72d0dbbcb96de70aaedf47f2b75d23e21e8d9179b869f80386",
+      "bytes": 874
+    },
+    {
+      "originalPath": "tmp/g3-review-r3-fixes/final-unit-command.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/final-unit-command.json",
+      "sha256": "fe5b89a452ec960554cd5b73a11af701a72f9c00d06eb6727e736a8273514315",
+      "bytes": 2727
+    },
+    {
+      "originalPath": "tmp/g3-delivery/logs/g3-unit-filtered-final.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/logs/g3-unit-filtered-final.log",
+      "sha256": "b1f65b795df4cb3108d77ce16226927efc5adae20a5173537f880e8cf1baf25b",
+      "bytes": 858521
+    },
+    {
+      "originalPath": "tmp/g3-review-r3-fixes/final-unit.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/final-unit.log",
+      "sha256": "cc45b32e18317144ee82fbc48b39a8f40c5495bc20bee28b0b33a039da2b8bc3",
+      "bytes": 73618
+    },
+    {
+      "originalPath": "tmp/g3-review-r3-fixes/final-lint.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/final-lint.log",
+      "sha256": "c396d49d3be1db82282d6b91bc9412269ecdb1f1a25a6777cb572d10d240e182",
+      "bytes": 50
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/final-checks.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/final-checks.log",
+      "sha256": "4d9183522d56d745b8dadc3a180b2b4787f0039235339a78aa63e9525e696c31",
+      "bytes": 389
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/final-electron-command.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/final-electron-command.json",
+      "sha256": "af9fc8aa5d6718cd8b25c1ccffd567409dd97643cf678bbf6c7630e70b584ca4",
+      "bytes": 255
+    },
+    {
+      "originalPath": "tmp/g3-delivery/logs/g3-ac-audit.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/logs/g3-ac-audit.log",
+      "sha256": "7fabab2e3004e598bf50372d2bd4170d6f2b3c5a1326af126f78880ce9a34b9f",
+      "bytes": 21242
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/deletion/result.md",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/deletion/result.md",
+      "sha256": "e1b858d9b8572ce9f2245519e4c65699dc522be28a99324b46d7d9246f6eecbb",
+      "bytes": 10085
+    },
+    {
+      "originalPath": "tmp/g3-delivery/logs/modal-root-inventory.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/logs/modal-root-inventory.log",
+      "sha256": "e35b43f9c7d15ebf72751744732984dea2dcfd56083579ea219897002449ed5c",
+      "bytes": 1489
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/review-r2-fixes.patch",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/review-r2-fixes.patch",
+      "sha256": "5ce4fe13ff4187f6080d2139326dd2d9be66b069044dda1d89673b6c5c5192a5",
+      "bytes": 101410
+    },
+    {
+      "originalPath": "tmp/g3-review-r3-fixes/tests/verification.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/tests/verification.json",
+      "sha256": "1dfa8893ae7adfb7270dae5c9353d3a839870e6889492be2a05df8cfeef15bd2",
+      "bytes": 1127
+    },
+    {
+      "originalPath": "tmp/g3-review-r3-fixes/renderer-boundaries-current.patch",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/renderer-boundaries-current.patch",
+      "sha256": "68139716979ec5205eb418797aeccc0feffe161d0c495bdb8b2615b8566cb0ad",
+      "bytes": 4682007
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/final-unit-command.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/final-unit-command.json",
+      "sha256": "218497cca3547822b90e18752e09e6f6f147fcd9a77db197567b2514a7173ca7",
+      "bytes": 2673
+    },
+    {
+      "originalPath": "tmp/g3-review-r3-fixes/frozen-code.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/frozen-code.json",
+      "sha256": "6f67e5285138bbb79bdbc308189c3278fda90001d5ef57e4cef0d8f76ef690b1",
+      "bytes": 15199
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/vcc/README.md",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/vcc/README.md",
+      "sha256": "d663f12557a92581cbcebc99efcaa55b0d77c4956b311f598b42ed3942206a80",
+      "bytes": 8988
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/frozen-code.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/frozen-code.json",
+      "sha256": "58f0fbaf90f6543d53aedc167a472e583ab0b31b4c65d9716a8f15432d3c397e",
+      "bytes": 15199
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/final-checks.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/final-checks.log",
+      "sha256": "79d3e435d171103c7c40ecd93b53eaeacfb975a74dc2d73f4e936332ac89b230",
+      "bytes": 650
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/caller-inventory.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/caller-inventory.log",
+      "sha256": "d9eb2b023d3207c17500e2ea2934c753b44b968acbccb74eb3994ea02b5d04cd",
+      "bytes": 3813
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/final-smoke.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/final-smoke.log",
+      "sha256": "083c10f58d03319638c860d0a8d556ddcddc042e44a0df1b464420ab23c35465",
+      "bytes": 2385
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/renderer-boundaries-current.patch",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/renderer-boundaries-current.patch",
+      "sha256": "289cd74080758186eceb5aa5f5a873c8413d66a8543f62be85372608f8f7a166",
+      "bytes": 3388253
+    },
+    {
+      "originalPath": "tmp/g3-delivery/logs/g3-smoke-final.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/logs/g3-smoke-final.log",
+      "sha256": "083c10f58d03319638c860d0a8d556ddcddc042e44a0df1b464420ab23c35465",
+      "bytes": 2385
+    },
+    {
+      "originalPath": "tmp/g3-review-r3-fixes/final-electron.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/final-electron.log",
+      "sha256": "804eb387cd0ac3e63d23daf50a8325ddbea73d5d41f1e731ccb6fddb6355c1cc",
+      "bytes": 17832
+    },
+    {
+      "originalPath": "tmp/g3-delivery/logs/g3-integration-final.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/logs/g3-integration-final.log",
+      "sha256": "ed86e651741ad558b51253b2d1e653c6873b05b691daa2fc1965b473a1e8ca68",
+      "bytes": 11767
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/status/results.md",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/status/results.md",
+      "sha256": "c1e271b2e44042d841210298a9892ec31a5d721a2974c50db8a92e3c5ba7458b",
+      "bytes": 5838
+    },
+    {
+      "originalPath": "tmp/g3-delivery/comment-whitespace-proof.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/comment-whitespace-proof.json",
+      "sha256": "765aac869f2c8b1787f6fc4c45f299ffd5fb705e4990419f09d263d72aec6501",
+      "bytes": 1035
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/final-lint.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/final-lint.log",
+      "sha256": "c396d49d3be1db82282d6b91bc9412269ecdb1f1a25a6777cb572d10d240e182",
+      "bytes": 50
+    },
+    {
+      "originalPath": "tmp/g3-review-r3-fixes/tests/after.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/tests/after.log",
+      "sha256": "264e7036f95aeec5568300a8c327c6cc0fd194ba118009fbcddd0670fb2c9ccf",
+      "bytes": 7606
+    },
+    {
+      "originalPath": "tmp/g3-delivery/renderer-boundaries.patch",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/renderer-boundaries.patch",
+      "sha256": "12ac09eedfc70e74696659559374531487428ce4a2adfdc6bb35c1eed912901f",
+      "bytes": 3220870
+    },
+    {
+      "originalPath": "tmp/g3-review-r3-fixes/final-electron-command.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/final-electron-command.json",
+      "sha256": "3c34bae6251849e8ce1cc333046b96a95ea66b31f748571b0b33974bdac45f42",
+      "bytes": 255
+    },
+    {
+      "originalPath": "tmp/g3-review-r3-fixes/final-smoke.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/final-smoke.log",
+      "sha256": "083c10f58d03319638c860d0a8d556ddcddc042e44a0df1b464420ab23c35465",
+      "bytes": 2385
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/final-manifest.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/final-manifest.json",
+      "sha256": "fc241f20ba12476e610bb0a1777e841e2a9009cc6b8471a51d7bc7a17c0bc0d3",
+      "bytes": 50931
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/final-electron.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/final-electron.log",
+      "sha256": "87ea24e02dbcbc88b709de753a8b105388d57d234aa6f9490a17309001995f0e",
+      "bytes": 12937
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/review-fixes.patch",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/review-fixes.patch",
+      "sha256": "06a506565cdab0d1ca2effab91723a18162287c498f3548d465cb7baf9d4101c",
+      "bytes": 146633
+    },
+    {
+      "originalPath": "tmp/g3-review-fixes/bizop/after-review-probe.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/bizop/after-review-probe.log",
+      "sha256": "681636010ec3cfa6c8cfcb769494a488bd197077ae5cf9f5dc9ddded08071019",
+      "bytes": 286
+    },
+    {
+      "originalPath": "tmp/g3-delivery/logs/g3-lint-final.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/logs/g3-lint-final.log",
+      "sha256": "c396d49d3be1db82282d6b91bc9412269ecdb1f1a25a6777cb572d10d240e182",
+      "bytes": 50
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/pre-final-adjustments/final-electron-command.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/pre-final-adjustments/final-electron-command.json",
+      "sha256": "d6ed8392b3c37058bbceff9995844e06b5f86c41b5f00015c409172581ada118",
+      "bytes": 255
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/pre-final-adjustments/final-electron.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/pre-final-adjustments/final-electron.log",
+      "sha256": "cd9899106f099b9ba538aeebf293d4885cb38513e8613153c61b8c306424d962",
+      "bytes": 15765
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/pre-final-adjustments/final-lint-command.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/pre-final-adjustments/final-lint-command.json",
+      "sha256": "a7d2514fe533b2bcf1e88579b560081335bc5146465c76f5977a614a0b1660d1",
+      "bytes": 230
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/pre-final-adjustments/final-lint.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/pre-final-adjustments/final-lint.log",
+      "sha256": "c396d49d3be1db82282d6b91bc9412269ecdb1f1a25a6777cb572d10d240e182",
+      "bytes": 50
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/pre-final-adjustments/final-smoke-command.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/pre-final-adjustments/final-smoke-command.json",
+      "sha256": "c90c4844926d5944e31908da23676184e43c62d1739eafe7fd2fed151c976bfa",
+      "bytes": 232
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/pre-final-adjustments/final-smoke.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/pre-final-adjustments/final-smoke.log",
+      "sha256": "6df14708cf36a7a3455c1ad9155826b5818566f422c55fe95037c656bdd190e5",
+      "bytes": 2885
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/pre-final-adjustments/final-unit-command.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/pre-final-adjustments/final-unit-command.json",
+      "sha256": "377443b0ecd372b162c34d82b33852d93da666f67dd9cfd5bd492cc9384ee417",
+      "bytes": 2727
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/pre-final-adjustments/final-unit.log",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/pre-final-adjustments/final-unit.log",
+      "sha256": "5dfec29b0b6579734452c64c3824c4c151f36e858513ba65c16d82d4d452251c",
+      "bytes": 73613
+    },
+    {
+      "originalPath": "tmp/g3-review-r2-fixes/pre-final-adjustments/frozen-code.json",
+      "archivePath": "changes/v3.2.10/evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/pre-final-adjustments/frozen-code.json",
+      "sha256": "c459fa0a8fce52004a005b792902a703d8959c6ebfba2c60b0358d44eafd7be0",
+      "bytes": 15199
+    }
+  ],
+  "updatedDocuments": [
+    "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/implementation-notes.md"
+  ],
+  "relocatedLinks": 77
+}

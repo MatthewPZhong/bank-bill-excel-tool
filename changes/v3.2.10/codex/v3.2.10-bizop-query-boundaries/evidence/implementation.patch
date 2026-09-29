@@ -1,0 +1,1590 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index 77280797..a2b4b4dc 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -23,6 +23,9 @@
+ `CLAUDE.md` 不作为 Codex 的独立必读来源。同层级旧文档/Skill 与本版的读取、委派或触发安排冲突时，说明并以本版为准；专项业务约束不因此免除。
+ 
+ ## 项目与架构摘要
++
++模块现行说明：[BizOP catalog 查询与命令边界](src/main-process/biz-op-v327/README.md)。
++
+ 网银账单生成小助手：导入 Excel/CSV 账单，按模板映射列，导出标准化明细与余额 Excel。技术栈：Electron 36、原生 JavaScript、SQLite（`node:sqlite` 的 `DatabaseSync`）、SheetJS/XLSX；依赖版本以 `package.json` 为准。
+ 
+ - Renderer（`index.html`、`src/renderer.js`、`src/renderer-dialogs.js`）经 `src/preload.js` 的 `window.desktopApi` 连接 `src/main.js` 的 IPC 与业务编排。修改跨模块大文件时读相关逻辑与调用方，不强制通读全文件。
+diff --git a/src/backend/database/archive-repository.js b/src/backend/database/archive-repository.js
+index 09d7a8fc..2f2fb609 100644
+--- a/src/backend/database/archive-repository.js
++++ b/src/backend/database/archive-repository.js
+@@ -2488,6 +2488,12 @@ class ArchiveRepository {
+     `).all(Number(blobId)).map(mapArtifact);
+   }
+ 
++  hasOtherArtifactForBlob(blobId, artifactId) {
++    return Boolean(this.db.prepare(
++      'SELECT 1 FROM archive_artifacts WHERE blob_id=? AND id!=? LIMIT 1'
++    ).get(blobId, artifactId));
++  }
++
+   listUnresolvedArtifactSourcePaths(options = {}) {
+     const excludeBatchId = options.excludeBatchId === undefined ? null : Number(options.excludeBatchId);
+     if (excludeBatchId !== null && (!Number.isSafeInteger(excludeBatchId) || excludeBatchId < 1)) {
+diff --git a/src/main-process/biz-op-v327/catalog.js b/src/main-process/biz-op-v327/catalog.js
+index 5278ef76..a7a93fd8 100644
+--- a/src/main-process/biz-op-v327/catalog.js
++++ b/src/main-process/biz-op-v327/catalog.js
+@@ -7,6 +7,7 @@ const { createArchiveRepository, withWriteTransaction } = require('../../backend
+ const { ACTIONS, MODULE_ID, fail, opaque, digest, count, hash, snapshot } = require('./contracts');
+ const { readVerifiedManifest } = require('./payload-store');
+ const { intervalInputs } = require('./compute-inputs');
++const { createBizOpCatalogQueries } = require('./catalog-queries');
+ 
+ function createBizOpCatalog(db, { assertCommitReady }) {
+   const archive = createArchiveRepository(db);
+@@ -15,6 +16,7 @@ function createBizOpCatalog(db, { assertCommitReady }) {
+   if (db.prepare('SELECT schema_version FROM biz_op_v327_control WHERE singleton=1').get().schema_version !== 1) {
+     fail('BIZOP_SCHEMA_UNSUPPORTED');
+   }
++  const queries = createBizOpCatalogQueries({ db });
+   const transaction = (fn) => withWriteTransaction(db, fn);
+   const now = () => new Date().toISOString();
+   const control = () => db.prepare('SELECT * FROM biz_op_v327_control WHERE singleton=1').get();
+@@ -384,7 +386,7 @@ function createBizOpCatalog(db, { assertCommitReady }) {
+       return receipt;
+     });
+   }
+-  return Object.freeze({ db, archive, transaction, now, control, operation, task, assertTask, prepare,
++  return Object.freeze({ db, archive, queries, transaction, now, control, operation, task, assertTask, prepare,
+     receipt, receiptState, readyHold, original, releaseOwnedHolds, version, enqueueReclaim, commitImport,
+     commitRun, deleteIntent, commitDelete, commitActivation });
+ }
+diff --git a/src/main-process/biz-op-v327/compute-inputs.js b/src/main-process/biz-op-v327/compute-inputs.js
+index acab514f..407a5725 100644
+--- a/src/main-process/biz-op-v327/compute-inputs.js
++++ b/src/main-process/biz-op-v327/compute-inputs.js
+@@ -30,34 +30,33 @@ function collectInputs({ catalog, payloadStore, startDate, endDate }) {
+   let metadataCount = required.length;
+   const selected = [];
+   for (const item of required) {
+-    const dataset = catalog.db.prepare(`SELECT d.* FROM biz_op_v327_input_heads h JOIN biz_op_v327_datasets d USING(dataset_id)
+-      WHERE h.kind=? AND h.data_date=? AND d.state='ACTIVE'`).get(item.kind, item.dataDate);
++    const dataset = catalog.queries.readActiveDataset(item.kind, item.dataDate);
+     if (!dataset) { missing.push(item); continue; }
+     selected.push({ item, dataset });
+   }
+   if (missing.length) throw Object.assign(new Error('所选区间缺少必需的校验表，未开始核对'), { code: 'BIZOP_RUN_INPUT_MISSING', missing: snapshot(missing) });
+   for (const { item, dataset } of selected) {
+-    const reference = { role: item.role, dataDate: item.dataDate, datasetId: dataset.dataset_id,
+-      inputVersion: dataset.public_version, sourceManifestDigest: dataset.source_manifest_digest };
++    const reference = { role: item.role, dataDate: item.dataDate, datasetId: dataset.datasetId,
++      inputVersion: dataset.publicVersion, sourceManifestDigest: dataset.sourceManifestDigest };
+     const sources = [];
+-    for (const source of catalog.db.prepare('SELECT * FROM biz_op_v327_dataset_sources WHERE dataset_id=? ORDER BY source_file_order').iterate(dataset.dataset_id)) {
++    for (const source of catalog.queries.iterateDatasetSources(dataset.datasetId)) {
+       if (++metadataCount > 4096) fail('BIZOP_RUN_INPUT_BUDGET');
+-      const artifact = catalog.archive.getArtifact(source.artifact_id);
+-      if (!artifact || artifact.status !== 'ready' || artifact.blob?.sha256 !== source.source_sha256) fail('BIZOP_RUN_ORIGINAL_UNAVAILABLE');
+-      const hold = catalog.archive.listArtifactHolds(source.artifact_id).some((value) => value.ownerModule === 'biz-op-recon'
+-        && value.ownerType === 'v327-input' && value.ownerId === dataset.dataset_id);
++      const artifact = catalog.archive.getArtifact(source.artifactId);
++      if (!artifact || artifact.status !== 'ready' || artifact.blob?.sha256 !== source.sha256) fail('BIZOP_RUN_ORIGINAL_UNAVAILABLE');
++      const hold = catalog.archive.listArtifactHolds(source.artifactId).some((value) => value.ownerModule === 'biz-op-recon'
++        && value.ownerType === 'v327-input' && value.ownerId === dataset.datasetId);
+       if (!hold) fail('BIZOP_RUN_ORIGINAL_UNPROTECTED');
+-      bus.add(source.normalized_bu); originals.set(source.artifact_id, source.source_sha256);
+-      sources.push({ artifactId: source.artifact_id, sha256: source.source_sha256, originalName: source.source_file_name,
+-        order: source.source_file_order, sheetName: source.source_sheet_name, bu: source.normalized_bu, rowCount: source.row_count });
++      bus.add(source.bu); originals.set(source.artifactId, source.sha256);
++      sources.push({ artifactId: source.artifactId, sha256: source.sha256, originalName: source.originalName,
++        order: source.order, sheetName: source.sheetName, bu: source.bu, rowCount: source.rowCount });
+     }
+-    if (!sources.length || sources.reduce((sum, source) => sum + count(source.rowCount), 0) !== dataset.row_count) fail('BIZOP_RUN_SOURCE_COUNT_MISMATCH');
+-    const manifest = payloadStore.readDocument(dataset.payload_manifest_rel_path, dataset.payload_manifest_digest).value;
+-    if (manifest.objectId !== dataset.dataset_id || manifest.objectKind !== 'DATASET' || manifest.rowCount !== dataset.row_count
+-        || manifest.catalog.sourceManifestDigest !== dataset.source_manifest_digest
++    if (!sources.length || sources.reduce((sum, source) => sum + count(source.rowCount), 0) !== dataset.rowCount) fail('BIZOP_RUN_SOURCE_COUNT_MISMATCH');
++    const manifest = payloadStore.readDocument(dataset.manifestRelativePath, dataset.manifestDigest).value;
++    if (manifest.objectId !== dataset.datasetId || manifest.objectKind !== 'DATASET' || manifest.rowCount !== dataset.rowCount
++        || manifest.catalog.sourceManifestDigest !== dataset.sourceManifestDigest
+         || manifest.catalog.cellContractVersion !== CELL_CONTRACT_VERSION || manifest.catalog.ruleVersion !== RULE_VERSION) fail('BIZOP_RUN_INPUT_CONTRACT_MISMATCH');
+-    documents.push({ ...reference, kind: item.kind, rowCount: dataset.row_count, sources,
+-      manifestRelativePath: dataset.payload_manifest_rel_path, manifestDigest: dataset.payload_manifest_digest });
++    documents.push({ ...reference, kind: item.kind, rowCount: dataset.rowCount, sources,
++      manifestRelativePath: dataset.manifestRelativePath, manifestDigest: dataset.manifestDigest });
+   }
+   const inputs = documents.map(({ role, dataDate, datasetId, inputVersion, sourceManifestDigest }) => ({ role, dataDate, datasetId, inputVersion, sourceManifestDigest }));
+   const actualBus = [...bus].sort(compareText);
+diff --git a/src/main-process/biz-op-v327/delete-preview.js b/src/main-process/biz-op-v327/delete-preview.js
+index d7267103..36d6fbf6 100644
+--- a/src/main-process/biz-op-v327/delete-preview.js
++++ b/src/main-process/biz-op-v327/delete-preview.js
+@@ -10,7 +10,7 @@ function normalizeSelection({ datasetIds = [], runIds = [] } = {}) {
+   return { datasetIds: [...new Set(datasetIds.map((id) => opaque(id)))].sort(), runIds: [...new Set(runIds.map((id) => opaque(id)))].sort() };
+ }
+ function createBizOpDeletePreview({ catalog, admission }) {
+-  const { db, now } = catalog;
++  const { db, now, queries } = catalog;
+   function collect(input) {
+     const selection = normalizeSelection(input); const generation = catalog.control().generation;
+     const runIds = new Set(selection.runIds); const artifacts = new Set(); let bytes = 0; let evaluated = 0;
+@@ -20,29 +20,28 @@ function createBizOpDeletePreview({ catalog, admission }) {
+       return value;
+     };
+     const datasets = selection.datasetIds.map((id) => {
+-      const row = db.prepare("SELECT * FROM biz_op_v327_datasets WHERE dataset_id=? AND state='ACTIVE'").get(id);
++      const row = queries.readActiveDatasetForDelete(id);
+       if (!row) fail('BIZOP_DELETE_SELECTION_CHANGED', '选取的数据已被覆盖或删除，请重新选取');
+       const originals = [];
+-      for (const item of db.prepare('SELECT artifact_id,source_file_name,source_sha256 FROM biz_op_v327_dataset_sources WHERE dataset_id=? ORDER BY source_file_order').iterate(id)) {
+-        artifacts.add(item.artifact_id); originals.push(charge({ artifactId: item.artifact_id, originalName: item.source_file_name, sha256: item.source_sha256 }));
++      for (const item of queries.iterateDatasetSources(id)) {
++        artifacts.add(item.artifactId); originals.push(charge({ artifactId: item.artifactId, originalName: item.originalName, sha256: item.sha256 }));
+       }
+-      for (const related of db.prepare(`SELECT DISTINCT r.run_id FROM biz_op_v327_runs r JOIN biz_op_v327_run_inputs i USING(run_id)
+-        WHERE i.dataset_id=? AND r.state='PUBLISHED'`).iterate(id)) {
+-        runIds.add(related.run_id); if (runIds.size > 4096) fail('BIZOP_DELETE_PREVIEW_LIMIT');
++      for (const related of queries.iteratePublishedRunIdsUsingDataset(id)) {
++        runIds.add(related); if (runIds.size > 4096) fail('BIZOP_DELETE_PREVIEW_LIMIT');
+       }
+-      return charge({ objectId: id, kind: row.kind, dataDate: row.data_date, version: row.public_version,
+-        operationMonth: row.activated_at.slice(0, 7), originals });
++      return charge({ objectId: id, kind: row.kind, dataDate: row.dataDate, version: row.publicVersion,
++        operationMonth: row.activatedAt.slice(0, 7), originals });
+     });
+     const runs = [...runIds].sort().map((id) => {
+-      const row = db.prepare("SELECT * FROM biz_op_v327_runs WHERE run_id=? AND state='PUBLISHED'").get(id);
++      const row = queries.readPublishedRunForDelete(id);
+       if (!row) fail('BIZOP_DELETE_SELECTION_CHANGED', '选取的结果表已被删除，请重新选取');
+       const originals = [];
+-      for (const item of db.prepare('SELECT * FROM biz_op_v327_run_artifacts WHERE run_id=? ORDER BY artifact_id').iterate(id)) {
+-        artifacts.add(item.artifact_id); originals.push(charge({ artifactId: item.artifact_id, originalName: item.source_file_name, sha256: item.source_sha256 }));
++      for (const item of queries.iterateRunArtifacts(id)) {
++        artifacts.add(item.artifactId); originals.push(charge({ artifactId: item.artifactId, originalName: item.originalName, sha256: item.sha256 }));
+       }
+-      return charge({ objectId: id, startDate: row.start_date, endDate: row.end_date, version: row.result_version,
+-        manifestDigest: row.payload_manifest_digest,
+-        operationMonth: row.operation_month, tableName: outputName('RESULT_DIFF', { startDate: row.start_date, endDate: row.end_date, version: row.result_version }),
++      return charge({ objectId: id, startDate: row.startDate, endDate: row.endDate, version: row.resultVersion,
++        manifestDigest: row.manifestDigest,
++        operationMonth: row.operationMonth, tableName: outputName('RESULT_DIFF', { startDate: row.startDate, endDate: row.endDate, version: row.resultVersion }),
+         directlySelected: selection.runIds.includes(id), originals });
+     });
+     const inputOwners = new Set(selection.datasetIds);
+@@ -51,7 +50,7 @@ function createBizOpDeletePreview({ catalog, admission }) {
+       const artifact = catalog.archive.getArtifact(id); if (!artifact) fail('BIZOP_DELETE_ORIGINAL_CHANGED');
+       const locked = catalog.archive.getBatch(artifact.batchId).locked;
+       // 当前 artifact 的业务保护与相同 blob 的其他归档引用分别计数；本模块从不删除归档文件。
+-      if (artifact.blobId && db.prepare('SELECT 1 FROM archive_artifacts WHERE blob_id=? AND id!=? LIMIT 1').get(artifact.blobId, id)) references.sharedBlobOriginals += 1;
++      if (artifact.blobId && catalog.archive.hasOtherArtifactForBlob(artifact.blobId, id)) references.sharedBlobOriginals += 1;
+       if (locked) references.userLockedOriginals += 1;
+       let keep = locked; let remove = locked;
+       for (const hold of catalog.archive.listArtifactHolds(id)) {
+diff --git a/src/main-process/biz-op-v327/export-inputs.js b/src/main-process/biz-op-v327/export-inputs.js
+index 79180129..517184b6 100644
+--- a/src/main-process/biz-op-v327/export-inputs.js
++++ b/src/main-process/biz-op-v327/export-inputs.js
+@@ -6,40 +6,19 @@ const { fail, opaque, snapshot } = require('./contracts');
+ 
+ async function freezeExportSource({ catalog, payloadStore, getArchiveService, outputKind, objectId, columnSchemaVersion }) {
+   schemaFor(outputKind, columnSchemaVersion); opaque(objectId);
+-  let row; let source;
+-  if (outputKind.startsWith('RESULT_')) {
+-    row = catalog.db.prepare("SELECT * FROM biz_op_v327_runs WHERE run_id=? AND state='PUBLISHED'").get(objectId);
+-    if (row) source = { objectKind: 'RESULT', metadata: { version: row.result_version,
+-      startDate: row.start_date, endDate: row.end_date, inputFingerprint: row.input_fingerprint, publishedAt: row.published_at } };
+-    if (source) {
+-      const endpoints = catalog.db.prepare("SELECT role,input_version FROM biz_op_v327_run_inputs WHERE run_id=? AND role IN ('START_OP','END_OP')").all(objectId);
+-      if (endpoints.length !== 2) fail('BIZOP_EXPORT_INPUT_METADATA_MISSING');
+-      source.metadata.startInputVersion = endpoints.find((item) => item.role === 'START_OP')?.input_version;
+-      source.metadata.endInputVersion = endpoints.find((item) => item.role === 'END_OP')?.input_version;
+-      if (!source.metadata.startInputVersion || !source.metadata.endInputVersion) fail('BIZOP_EXPORT_INPUT_METADATA_MISSING');
+-    }
+-  } else if (outputKind === 'ERRORS') {
+-    row = catalog.db.prepare(`SELECT d.*,l.sealed_manifest_rel_path AS payload_manifest_rel_path,d.manifest_digest AS payload_manifest_digest
+-      FROM biz_op_v327_diagnostic_reports d JOIN biz_op_v327_diagnostic_lifecycle l USING(report_ref)
+-      WHERE report_ref=? AND state='READY'`).get(objectId);
+-    if (row) source = { objectKind: 'DIAGNOSTIC', metadata: { producerTaskRunId: row.task_run_id,
+-      scanComplete: Boolean(row.scan_complete), errorCountExact: Boolean(row.error_count_exact), sampleCount: row.sample_count } };
+-  } else {
+-    row = catalog.db.prepare("SELECT * FROM biz_op_v327_datasets WHERE dataset_id=? AND state='ACTIVE' AND kind=?")
+-      .get(objectId, outputKind.split('_')[0]);
+-    if (row) source = { objectKind: 'DATASET', metadata: { version: row.public_version, dataDate: row.data_date,
+-      sourceManifestDigest: row.source_manifest_digest, activatedAt: row.activated_at } };
+-  }
+-  if (!row || !source) fail('BIZOP_EXPORT_SOURCE_UNAVAILABLE');
++  const object = catalog.queries.readExportObject(outputKind, objectId);
++  if (!object) fail('BIZOP_EXPORT_SOURCE_UNAVAILABLE');
++  // 按原位置装配快照字段，避免查询的内部字段透传到导出合同。
++  const source = { objectKind: object.objectKind, metadata: object.metadata };
+   if (source.objectKind === 'RESULT') {
+-    const manifest = payloadStore.readDocument(row.payload_manifest_rel_path, row.payload_manifest_digest).value;
++    const manifest = payloadStore.readDocument(object.manifestRelativePath, object.manifestDigest).value;
+     if (manifest.objectId !== objectId || manifest.objectKind !== 'RESULT') fail('BIZOP_EXPORT_OWNER_MISMATCH');
+     const contract = resultContractFor(manifest.catalog);
+     if (columnSchemaVersion !== undefined && columnSchemaVersion !== contract.columnSchemaVersion) fail('BIZOP_EXPORT_CONTRACT_MISMATCH');
+     columnSchemaVersion = contract.columnSchemaVersion;
+   } else if (columnSchemaVersion === undefined) columnSchemaVersion = 1;
+   Object.assign(source, { outputKind, columnSchemaVersion, objectId,
+-    manifestRelativePath: row.payload_manifest_rel_path, manifestDigest: row.payload_manifest_digest });
++    manifestRelativePath: object.manifestRelativePath, manifestDigest: object.manifestDigest });
+   if (outputKind.endsWith('_RAW')) {
+     const manifest = payloadStore.readDocument(source.manifestRelativePath, source.manifestDigest).value;
+     source.originals = [];
+diff --git a/src/main-process/biz-op-v327/import-main.js b/src/main-process/biz-op-v327/import-main.js
+index 9bec2fae..de4b65c2 100644
+--- a/src/main-process/biz-op-v327/import-main.js
++++ b/src/main-process/biz-op-v327/import-main.js
+@@ -23,11 +23,10 @@ function createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, prot
+     if (typeof manifest.catalog.scanComplete !== 'boolean' || typeof manifest.catalog.errorCountExact !== 'boolean'
+         || count(manifest.catalog.collectedSamples) > 1000 || count(manifest.catalog.sampleBytes) > 8388608
+         || manifest.parts.length !== 1 || manifest.parts[0].byteSize !== manifest.catalog.sampleBytes) fail('BIZOP_REPORT_SUMMARY_MISMATCH');
+-    const carriers = catalog.db.prepare('SELECT * FROM biz_op_v327_dispatches WHERE task_run_id=? AND plan_digest=?')
+-      .all(taskRunId, manifest.catalog.producerPlanDigest);
++    const carriers = catalog.queries.readDispatchesForPlan(taskRunId, manifest.catalog.producerPlanDigest);
+     if (carriers.length !== 1) fail('BIZOP_REPORT_OWNER_MISMATCH');
+     const carrier = carriers[0];
+-    const existing = catalog.db.prepare('SELECT * FROM biz_op_v327_diagnostic_reports WHERE report_ref=?').get(intent.reportRef);
++    const existing = catalog.queries.readDiagnosticByRef(intent.reportRef);
+     if (existing) {
+       if (existing.task_run_id !== taskRunId || existing.manifest_digest !== document.digest
+           || existing.producer_job_id !== carrier.job_id || existing.producer_session_id !== carrier.session_id) fail('BIZOP_REPORT_OWNER_MISMATCH');
+@@ -109,7 +108,7 @@ function createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, prot
+                 || count(imported.scannedDataRows) !== count(imported.acceptedRows) + count(imported.rowErrorCount)
+                 || count(imported.collectedSamples) > 1000 || count(imported.sampleBytes) > 8388608) fail('BIZOP_IMPORT_RESULT_MISMATCH');
+             count(imported.fileErrorCount);
+-            const registeredReport = catalog.db.prepare('SELECT manifest_digest FROM biz_op_v327_diagnostic_reports WHERE report_ref=?').get(reportRef);
++            const registeredReport = catalog.queries.readDiagnosticByRef(reportRef);
+             if (!registeredReport || registeredReport.manifest_digest !== imported.reportManifestDigest) fail('BIZOP_REPORT_SUMMARY_MISMATCH');
+             const summary = summaryOf(imported);
+             if (imported.cancelled || imported.batchRejected || !imported.scanComplete || !imported.errorCountExact || imported.rowErrorCount || imported.fileErrorCount) {
+@@ -141,7 +140,7 @@ function createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, prot
+         if (taskRunId && catalog.receipt(taskRunId)) {
+           sources.syncCompletion(sources.operationSource(taskRunId));
+           // 成功批次的空诊断通过既有真实维护 Task 回收，不留下无主文件。
+-          const report = catalog.db.prepare('SELECT * FROM biz_op_v327_diagnostic_reports WHERE report_ref=?').get(reportRef);
++          const report = catalog.queries.readDiagnosticByRef(reportRef);
+           if (report && report.sample_count === 0) protection.retireDiagnostic(reportRef, taskRunId);
+         } else if (taskRunId) admission.requireRecovery();
+         return result;
+diff --git a/tests/unit/main-process/biz-op-v327-export-rule-version.test.js b/tests/unit/main-process/biz-op-v327-export-rule-version.test.js
+index 15404313..23fe749b 100644
+--- a/tests/unit/main-process/biz-op-v327-export-rule-version.test.js
++++ b/tests/unit/main-process/biz-op-v327-export-rule-version.test.js
+@@ -1,5 +1,7 @@
+ 'use strict';
+ 
++const { createBizOpCatalogQueries } = require('../../../src/main-process/biz-op-v327/catalog-queries');
++
+ const test = require('node:test');
+ const { durableDirectoryTest } = require('../../helpers/durable-directory-tests');
+ const assert = require('node:assert/strict');
+@@ -74,7 +76,7 @@ async function sealedResult(t, version, { partRuleVersion, catalogPatch = {} } =
+   db.prepare('INSERT INTO biz_op_v327_runs VALUES (?,?,?,?,?,?,?,?,?)')
+     .run(objectId, 'PUBLISHED', 1, '2026-08-08', '2026-08-10', '2'.repeat(64), '2026-09-07T00:00:00Z', manifest.relativePath, manifest.digest);
+   for (const input of inputs) db.prepare('INSERT INTO biz_op_v327_run_inputs VALUES (?,?,?)').run(objectId, input.role, input.inputVersion);
+-  return { root, objectId, manifest, values, payloadStore, catalog: { db } };
++  return { root, objectId, manifest, values, payloadStore, catalog: { db, queries: createBizOpCatalogQueries({ db }) } };
+ }
+ 
+ function recordingSpool() {
+diff --git a/tests/unit/main-process/biz-op-v329-auto-report.test.js b/tests/unit/main-process/biz-op-v329-auto-report.test.js
+index d2a59750..633ab3d1 100644
+--- a/tests/unit/main-process/biz-op-v329-auto-report.test.js
++++ b/tests/unit/main-process/biz-op-v329-auto-report.test.js
+@@ -323,7 +323,7 @@ test('导出 beforeStart 来源冻结失败前交付真实 Task 身份，无需
+   const identities = []; const order = [];
+   const coordinator = createBizOpExportCoordinator({ admission: { readTask: (_id, work) => work({ bindTask(id) {
+     assert.equal(id, 'real-export-task'); order.push('bind'); } }) },
+-  catalog: { db: { prepare() { throw new Error('source unavailable'); } } } });
++  catalog: { queries: { readExportObject() { throw new Error('source unavailable'); } } } });
+   await assert.rejects(coordinator.runExport({ outputKind: 'ERRORS', objectId: 'report-one',
+     filePlan: { inputs: [], outputs: [{}] }, runtime: { start() { assert.fail('来源未验证不可启动 worker'); } },
+     taskLifecycle: { runFileTask: ({ beforeStart }) => beforeStart({ taskRunId: 'real-export-task' }, {}) },
+diff --git a/scripts/integration/biz-op-query-boundary.js b/scripts/integration/biz-op-query-boundary.js
+new file mode 100644
+index 00000000..fdffc073
+--- /dev/null
++++ b/scripts/integration/biz-op-query-boundary.js
+@@ -0,0 +1,423 @@
++// BizOP 查询边界集成回归：真实临时 SQLite、归档、payload、XLSX 和 worker。
++// 覆盖导入→计算→七类导出、完整冻结 JSON/错误与 11086a3c 基线等价、删除保护与确认，
++// 以及来源 iterator 提前关闭、4096 条、49152/65536 字节的精确边界。
++// 冻结协调器仅是测试 oracle；按原文件位置解析未变更依赖，不启用生产双读。
++// 所有 fixture 自建并清理，不访问用户库；用法：node scripts/integration/biz-op-query-boundary.js
++'use strict';
++
++const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const os = require('node:os');
++const path = require('node:path');
++const Module = require('node:module');
++const { createHash } = require('node:crypto');
++const { DatabaseSync } = require('node:sqlite');
++const XLSX = require('xlsx');
++const { createExportHost, request } = require('../../tests/helpers/biz-op-v327-export');
++const { seed, compute } = require('../../tests/helpers/biz-op-v327-compute');
++const { writeXlsx, flowRow } = require('../../tests/helpers/biz-op-v327-xlsx');
++const { createBizOpCatalog } = require('../../src/main-process/biz-op-v327/catalog');
++const { createBizOpPayloadStore } = require('../../src/main-process/biz-op-v327/payload-store');
++const { createBizOpAdmission } = require('../../src/main-process/biz-op-v327/admission');
++const { createBizOpCatalogQueries } = require('../../src/main-process/biz-op-v327/catalog-queries');
++const { collectInputs } = require('../../src/main-process/biz-op-v327/compute-inputs');
++const { freezeExportSource } = require('../../src/main-process/biz-op-v327/export-inputs');
++const { createBizOpDeletePreview, normalizeSelection } = require('../../src/main-process/biz-op-v327/delete-preview');
++const { CELL_CONTRACT_VERSION, RULE_VERSION } = require('../../src/main-process/biz-op-v327/import-adapter');
++const { hash } = require('../../src/main-process/biz-op-v327/contracts');
++const { fsyncDirectory } = require('../../src/main-process/background-execution/durable-file');
++
++function baseline(name) {
++  const filename = path.resolve(__dirname, '../../src/main-process/biz-op-v327', name);
++  const oracle = new Module(filename, module);
++  oracle.filename = filename;
++  oracle.paths = Module._nodeModulePaths(path.dirname(filename));
++  oracle._compile(fs.readFileSync(path.resolve(__dirname,
++    '../../tests/fixtures/biz-op-query-boundary/11086a3c', name), 'utf8'), filename);
++  return oracle.exports;
++}
++const oldCompute = baseline('compute-inputs.js');
++const oldExport = baseline('export-inputs.js');
++const oldDelete = baseline('delete-preview.js');
++const cases = [];
++const scenario = (name, run) => cases.push({ name, run, requiresDurability: false });
++const durableScenario = (name, run) => cases.push({ name, run, requiresDurability: true });
++// 与 durable-directory-tests 相同，探测宿主真实能力，不模拟持久化成功。
++const directoryDurabilityCapability = fsyncDirectory(os.tmpdir());
++const bytes = (value) => Buffer.byteLength(JSON.stringify(value));
++const errorValue = (error) => ({ name: error.name, message: error.message, ...error });
++async function outcome(work) {
++  try { return { value: await work() }; } catch (error) { return { error: errorValue(error) }; }
++}
++async function equivalent(current, previous, code) {
++  const actual = await outcome(current); const expected = await outcome(previous);
++  assert.deepEqual(actual, expected, '比较全部 JSON 字段、顺序与错误内容');
++  assert.equal(JSON.stringify(actual), JSON.stringify(expected), '完整 JSON 序列化结果及键、数组顺序相同');
++  if (code) assert.equal(actual.error?.code, code);
++  else assert.equal(actual.error, undefined, JSON.stringify(actual.error));
++  return actual.value;
++}
++async function withHost(work) {
++  const cleanup = [];
++  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'bizop-query-host-'));
++  const root = path.join(temporary, 'user-data'); const outputRoot = path.join(temporary, 'outputs');
++  try {
++    fs.mkdirSync(root); fs.mkdirSync(outputRoot);
++    await work(await createExportHost({ after(fn) { cleanup.push(fn); } }, { root, outputRoot, keep: true }));
++  }
++  finally {
++    const errors = [];
++    for (const fn of cleanup) { try { await fn(); } catch (error) { errors.push(error); } }
++    // helper 若在注册关闭回调之前失败，仍尝试回收本脚本拥有的目录；开放句柄阻塞清理会明确报错。
++    try { fs.rmSync(temporary, { recursive: true, force: true }); } catch (error) { errors.push(error); }
++    if (errors.length) throw new AggregateError(errors, '集成夹具资源清理失败');
++  }
++}
++async function withCatalog(work) {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bizop-query-boundary-'));
++  const db = new DatabaseSync(path.join(root, 'catalog.sqlite'));
++  db.exec('PRAGMA foreign_keys=ON');
++  try {
++    const catalog = createBizOpCatalog(db, { assertCommitReady() { assert.fail('只读边界夹具不得提交业务'); } });
++    const admission = createBizOpAdmission();
++    await admission.exclusive(() => admission.markRecovered(), { recovery: true });
++    const payloadStore = createBizOpPayloadStore({ userDataDir: root }); payloadStore.initialize();
++    const previews = createBizOpDeletePreview({ catalog, admission });
++    const previous = oldDelete.createBizOpDeletePreview({ catalog, admission });
++    await work({ root, db, catalog, admission, payloadStore, previews, previous });
++  } finally { db.close(); fs.rmSync(root, { recursive: true, force: true }); }
++}
++async function rollback(db, work) {
++  db.exec('SAVEPOINT query_boundary_fixture');
++  try { return await work(); }
++  finally { db.exec('ROLLBACK TO query_boundary_fixture'); db.exec('RELEASE query_boundary_fixture'); }
++}
++function insertDataset(f, { id, kind = 'OP', date = '2026-09-01', version = 1, rows = 0, manifest }) {
++  f.db.prepare(`INSERT INTO biz_op_v327_datasets(dataset_id,kind,data_date,public_version,state,
++    input_fingerprint,source_manifest_digest,payload_manifest_rel_path,payload_manifest_digest,row_count,producer_task_id,activated_at)
++    VALUES (?,?,?,?,'ACTIVE',?,?,?,?,?,'fixture-task','2026-09-20T00:00:00.000Z')`)
++    .run(id, kind, date, version, 'a'.repeat(64), 'b'.repeat(64), manifest?.relativePath || null, manifest?.digest || null, rows);
++}
++function computeArgs(f, extra = {}) {
++  return { catalog: f.module?.catalog || f.catalog, payloadStore: f.module?.payloadStore || f.payloadStore,
++    startDate: '2026-09-01', endDate: '2026-09-03', ...extra };
++}
++function exportArgs(f, outputKind, objectId) {
++  return { catalog: f.module.catalog, payloadStore: f.module.payloadStore,
++    getArchiveService: () => f.service, outputKind, objectId };
++}
++function compareExport(f, kind, id, code) {
++  const args = exportArgs(f, kind, id);
++  return equivalent(() => freezeExportSource(args), () => oldExport.freezeExportSource(args), code);
++}
++
++durableScenario('真实导入、计算与六类导出的完整快照和删除闭包等价，文件可完整读回', () => withHost(async (f) => {
++  const imported = await seed(f); assert.equal(imported.status, 'ok');
++  const args = computeArgs(f);
++  const frozen = await f.module.admission.exclusive(() => equivalent(() => collectInputs(args), () => oldCompute.collectInputs(args)));
++  assert.equal(frozen.documents.length, 4);
++  assert.equal(frozen.inputs.length, 4);
++  assert.equal(frozen.inputFingerprint, oldCompute.fingerprintOf(frozen));
++  const result = await compute(f); assert.equal(result.status, 'ok', JSON.stringify(result));
++  const datasets = f.db.prepare('SELECT * FROM biz_op_v327_datasets ORDER BY kind,data_date').all();
++  const op = datasets.find((row) => row.kind === 'OP'); const flow = datasets.find((row) => row.kind === 'FLOW');
++  for (const [kind, id] of [['OP_RAW', op.dataset_id], ['OP_CHECK', op.dataset_id], ['FLOW_RAW', flow.dataset_id],
++    ['FLOW_CHECK', flow.dataset_id], ['RESULT_FULL', result.runId], ['RESULT_DIFF', result.runId]]) {
++    const source = await compareExport(f, kind, id);
++    assert.equal(source.objectId, id);
++    const exported = await request(f, kind, id); assert.equal(exported.status, 'ok', JSON.stringify(exported));
++    const file = path.join(f.outputRoot, `${kind.toLowerCase().replace('_', '-')}.xlsx`);
++    const book = XLSX.readFile(file); assert.ok(book.SheetNames.length > 0);
++    for (const name of book.SheetNames) assert.ok(XLSX.utils.sheet_to_json(book.Sheets[name], { header: 1 }).length > 0);
++  }
++  const previous = oldDelete.createBizOpDeletePreview({ catalog: f.module.catalog, admission: f.module.admission });
++  const selection = { datasetIds: datasets.map((row) => row.dataset_id).reverse(), runIds: [result.runId] };
++  const closure = await equivalent(() => f.module.previews.collect(selection), () => previous.collect(selection));
++  assert.equal(closure.datasets.length, 4); assert.equal(closure.runs.length, 1);
++  const preview = f.module.previews.create(selection);
++  assert.deepEqual(f.module.previews.get(preview.previewId).closure, closure);
++  assert.equal(f.module.previews.get(preview.previewId).row.closure_digest, hash(closure));
++  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM biz_op_v327_read_pins').get().n, 0);
++  assert.equal(f.runtime.resourceGovernor.snapshot().activeLeaseCount, 0);
++}));
++
++durableScenario('真实异常导入后 READY 诊断完整导出等价，成功导入的空诊断走原维护回收', () => withHost(async (f) => {
++  const imported = await seed(f);
++  const empty = f.db.prepare('SELECT * FROM biz_op_v327_diagnostic_reports WHERE task_run_id=?').get(imported.receipt.taskRunId);
++  assert.ok(empty); assert.equal(empty.sample_count, 0); assert.equal(empty.state, 'RETIRED');
++  const queued = f.db.prepare("SELECT * FROM biz_op_v327_reclaim_queue WHERE payload_kind='DIAGNOSTIC' AND object_id=?").get(empty.report_ref);
++  assert.ok(queued); assert.equal(queued.state, 'PENDING');
++  const maintenance = f.module.catalog.task(queued.owner_task_run_id);
++  assert.equal(maintenance.taskKey, 'bizOpReconV327:maintenance:reclaim');
++  assert.notEqual(maintenance.taskRunId, imported.receipt.taskRunId);
++  const diagnosticDirectory = f.module.payloadStore.resolve(`diagnostics/${empty.report_ref}`);
++  assert.ok(fs.existsSync(diagnosticDirectory));
++  assert.equal((await f.module.recovery.run()).ready, true);
++  assert.equal(f.db.prepare('SELECT state FROM biz_op_v327_reclaim_queue WHERE reclaim_id=?').get(queued.reclaim_id).state, 'DONE');
++  assert.equal(f.module.catalog.task(queued.owner_task_run_id).status, 'succeeded');
++  assert.equal(f.module.catalog.queries.readDiagnosticByRef(empty.report_ref).state, 'DELETED');
++  assert.equal(fs.existsSync(diagnosticDirectory), false);
++  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM biz_op_v327_diagnostic_reports WHERE state='READY' AND sample_count=0").get().n, 0);
++  const file = path.join(f.root, 'invalid-flow.xlsx');
++  await writeXlsx(file, { rowCount: 3, row: () => flowRow({ direction: '错误方向' }) });
++  const rejected = await f.run([file]); assert.equal(rejected.code, 'BIZOP_IMPORT_REJECTED');
++  assert.equal((await f.module.recovery.run()).ready, true);
++  const source = await compareExport(f, 'ERRORS', rejected.reportRef);
++  assert.equal(source.metadata.sampleCount, 3);
++  assert.equal(source.metadata.scanComplete, true);
++  assert.equal((await request(f, 'ERRORS', rejected.reportRef)).status, 'ok');
++  const book = XLSX.readFile(path.join(f.outputRoot, 'errors.xlsx'));
++  assert.equal(XLSX.utils.sheet_to_json(book.Sheets['导入错误报告']).length, 3);
++  const diagnostic = f.module.catalog.queries.readDiagnosticByRef(rejected.reportRef);
++  const manifest = f.module.payloadStore.readDocument(source.manifestRelativePath, source.manifestDigest).value;
++  const dispatches = f.module.catalog.queries.readDispatchesForPlan(diagnostic.task_run_id, manifest.catalog.producerPlanDigest);
++  assert.deepEqual(dispatches, f.db.prepare('SELECT * FROM biz_op_v327_dispatches WHERE task_run_id=? AND plan_digest=?')
++    .all(diagnostic.task_run_id, manifest.catalog.producerPlanDigest));
++  assert.equal(dispatches.length, 1);
++  assert.deepEqual(diagnostic, f.db.prepare('SELECT * FROM biz_op_v327_diagnostic_reports WHERE report_ref=?').get(rejected.reportRef));
++}));
++
++durableScenario('缺失、状态、hold、hash、行数、manifest 与 RESULT 端点错误完整等价', () => withHost(async (f) => {
++  await seed(f); const result = await compute(f); assert.equal(result.status, 'ok');
++  const dataset = f.db.prepare("SELECT * FROM biz_op_v327_datasets WHERE kind='OP' ORDER BY data_date LIMIT 1").get();
++  const source = f.db.prepare('SELECT * FROM biz_op_v327_dataset_sources WHERE dataset_id=?').get(dataset.dataset_id);
++  const args = computeArgs(f);
++  const negatives = [
++    ['BIZOP_RUN_INPUT_MISSING', () => f.db.prepare('DELETE FROM biz_op_v327_input_heads').run()],
++    ['BIZOP_RUN_INPUT_MISSING', () => f.db.prepare("UPDATE biz_op_v327_datasets SET state='RETIRED' WHERE dataset_id=?").run(dataset.dataset_id)],
++    ['BIZOP_RUN_ORIGINAL_UNAVAILABLE', () => f.db.prepare("UPDATE archive_artifacts SET status='failed' WHERE id=?").run(source.artifact_id)],
++    ['BIZOP_RUN_ORIGINAL_UNAVAILABLE', () => f.db.prepare('UPDATE biz_op_v327_dataset_sources SET source_sha256=? WHERE dataset_id=?').run('0'.repeat(64), dataset.dataset_id)],
++    ['BIZOP_RUN_ORIGINAL_UNPROTECTED', () => f.db.prepare("DELETE FROM archive_artifact_holds WHERE owner_type='v327-input' AND owner_id=?").run(dataset.dataset_id)],
++    ['BIZOP_RUN_SOURCE_COUNT_MISMATCH', () => f.db.prepare('UPDATE biz_op_v327_datasets SET row_count=row_count+1 WHERE dataset_id=?').run(dataset.dataset_id)],
++    ['BIZOP_MANIFEST_DIGEST_MISMATCH', () => f.db.prepare('UPDATE biz_op_v327_datasets SET payload_manifest_digest=? WHERE dataset_id=?').run('0'.repeat(64), dataset.dataset_id)],
++    ['BIZOP_RUN_INPUT_CONTRACT_MISMATCH', () => f.db.prepare('UPDATE biz_op_v327_datasets SET source_manifest_digest=? WHERE dataset_id=?').run('0'.repeat(64), dataset.dataset_id)]
++  ];
++  for (const [code, mutate] of negatives) await rollback(f.db, async () => {
++    mutate(); await equivalent(() => collectInputs(args), () => oldCompute.collectInputs(args), code);
++  });
++  await rollback(f.db, async () => {
++    f.db.prepare("DELETE FROM biz_op_v327_run_inputs WHERE run_id=? AND role='END_OP'").run(result.runId);
++    await compareExport(f, 'RESULT_FULL', result.runId, 'BIZOP_EXPORT_INPUT_METADATA_MISSING');
++  });
++  await rollback(f.db, async () => {
++    f.db.prepare("UPDATE biz_op_v327_runs SET state='DELETED' WHERE run_id=?").run(result.runId);
++    await compareExport(f, 'RESULT_FULL', result.runId, 'BIZOP_EXPORT_SOURCE_UNAVAILABLE');
++  });
++  const mismatchedVersion = { ...exportArgs(f, 'RESULT_FULL', result.runId), columnSchemaVersion: 1 };
++  await equivalent(() => freezeExportSource(mismatchedVersion), () => oldExport.freezeExportSource(mismatchedVersion),
++    'BIZOP_EXPORT_CONTRACT_MISMATCH');
++  await rollback(f.db, async () => {
++    f.db.prepare('UPDATE biz_op_v327_runs SET payload_manifest_rel_path=?,payload_manifest_digest=? WHERE run_id=?')
++      .run(dataset.payload_manifest_rel_path, dataset.payload_manifest_digest, result.runId);
++    await compareExport(f, 'RESULT_FULL', result.runId, 'BIZOP_EXPORT_OWNER_MISMATCH');
++  });
++  await compareExport(f, 'FLOW_CHECK', dataset.dataset_id, 'BIZOP_EXPORT_SOURCE_UNAVAILABLE');
++  await rollback(f.db, async () => {
++    f.db.prepare("DELETE FROM archive_artifact_holds WHERE owner_type='v327-input' AND owner_id=?").run(dataset.dataset_id);
++    await compareExport(f, 'OP_RAW', dataset.dataset_id, 'BIZOP_EXPORT_ORIGINAL_UNPROTECTED');
++  });
++}));
++
++durableScenario('RAW 真实目录副本按原规则修复，目录与 canonical Blob 均损坏时拒绝且错误等价', () => withHost(async (f) => {
++  await seed(f);
++  const datasetId = f.db.prepare("SELECT dataset_id FROM biz_op_v327_datasets WHERE kind='OP' ORDER BY data_date LIMIT 1").get().dataset_id;
++  const before = await compareExport(f, 'OP_RAW', datasetId);
++  assert.equal(before.originals.length, 1);
++  const artifact = f.module.catalog.archive.getArtifact(before.originals[0].artifactId);
++  const files = [...new Set([before.originals[0].filePath, path.join(f.root, 'archive', artifact.blob.relativePath)])]
++    .map((filePath) => ({ filePath, data: fs.readFileSync(filePath), mode: fs.statSync(filePath).mode & 0o777 }));
++  const replaceFixtureFile = (file, data) => {
++    fs.mkdirSync(path.dirname(file.filePath), { recursive: true });
++    if (fs.existsSync(file.filePath)) { fs.chmodSync(file.filePath, 0o600); fs.unlinkSync(file.filePath); }
++    fs.writeFileSync(file.filePath, data); fs.chmodSync(file.filePath, file.mode);
++  };
++  const corruptAndFreeze = async (freeze, corruptCanonical) => {
++    try {
++      // 两个 oracle 均先恢复相同健康字节，再施加相同故障；替换目录副本不污染潜在 hardlink 的 Blob。
++      for (const file of files) replaceFixtureFile(file, file.data);
++      for (const file of corruptCanonical ? files : files.slice(0, 1)) {
++        replaceFixtureFile(file, Buffer.concat([file.data, Buffer.from('changed')]));
++        assert.notDeepEqual(fs.readFileSync(file.filePath), file.data);
++      }
++      return await rollback(f.db, async () => {
++        const result = await freeze(exportArgs(f, 'OP_RAW', datasetId));
++        if (!corruptCanonical) {
++          assert.equal(result.originals[0].sha256, before.originals[0].sha256);
++          assert.deepEqual(fs.readFileSync(result.originals[0].filePath), files[0].data, '真实目录副本必须恢复为完整原始字节');
++          assert.deepEqual(fs.readFileSync(files[1].filePath), files[1].data, 'canonical Blob 保持原始字节');
++        }
++        return result;
++      });
++    } finally {
++      for (const file of files) replaceFixtureFile(file, file.data);
++    }
++  };
++  await equivalent(() => corruptAndFreeze(freezeExportSource, false), () => corruptAndFreeze(oldExport.freezeExportSource, false));
++  await equivalent(() => corruptAndFreeze(freezeExportSource, true), () => corruptAndFreeze(oldExport.freezeExportSource, true),
++    'BIZOP_EXPORT_ORIGINAL_CHANGED');
++}));
++
++durableScenario('锁、其他 owner 与任意状态共享 blob 改变完整删除闭包；确认过期、复用及 generation 继续生效', () => withHost(async (f) => {
++  await seed(f); const computed = await compute(f); assert.equal(computed.status, 'ok');
++  const datasetId = f.db.prepare("SELECT dataset_id FROM biz_op_v327_datasets WHERE kind='OP' ORDER BY data_date LIMIT 1").get().dataset_id;
++  const artifactId = f.db.prepare('SELECT artifact_id FROM biz_op_v327_dataset_sources WHERE dataset_id=?').get(datasetId).artifact_id;
++  const archive = f.module.catalog.archive; const artifact = archive.getArtifact(artifactId);
++  const previous = oldDelete.createBizOpDeletePreview({ catalog: f.module.catalog, admission: f.module.admission });
++  const selection = { datasetIds: [datasetId] };
++  const original = f.module.previews.collect(selection);
++  for (const status of ['pending', 'failed', 'ready']) await rollback(f.db, async () => {
++    const preview = f.module.previews.create(selection);
++    f.db.prepare(`INSERT INTO archive_artifacts(batch_id,artifact_key,direction,role,original_name,source_path,status,blob_id,created_at,updated_at)
++      VALUES (?,'shared-fixture','input','input','shared.xlsx','fixture',?,?,?,?)`).run(artifact.batchId, status, artifact.blobId,
++      f.module.catalog.now(), f.module.catalog.now());
++    const closure = await equivalent(() => f.module.previews.collect(selection), () => previous.collect(selection));
++    assert.equal(closure.references.sharedBlobOriginals, original.references.sharedBlobOriginals + 1);
++    await equivalent(() => f.module.previews.validate(preview.previewId, 'KEEP_RESULTS'),
++      () => previous.validate(preview.previewId, 'KEEP_RESULTS'), 'BIZOP_DELETE_PREVIEW_STALE');
++  });
++  for (const mutate of [() => archive.setLocked(artifact.batchId, true),
++    () => archive.addArtifactHold(artifactId, { ownerModule: 'other-module', ownerType: 'fixture', ownerId: 'other-owner', reason: '集成保护' }),
++    () => f.db.prepare('UPDATE biz_op_v327_control SET generation=generation+1 WHERE singleton=1').run()]) {
++    await rollback(f.db, async () => {
++      const preview = f.module.previews.create(selection); mutate();
++      await equivalent(() => f.module.previews.collect(selection), () => previous.collect(selection));
++      await equivalent(() => f.module.previews.validate(preview.previewId, 'KEEP_RESULTS'),
++        () => previous.validate(preview.previewId, 'KEEP_RESULTS'), 'BIZOP_DELETE_PREVIEW_STALE');
++    });
++  }
++  const expired = f.module.previews.create(selection);
++  f.db.prepare('UPDATE biz_op_v327_delete_previews SET expires_at=? WHERE preview_id=?').run('2000-01-01T00:00:00.000Z', expired.previewId);
++  await equivalent(() => f.module.previews.validate(expired.previewId, 'KEEP_RESULTS'),
++    () => previous.validate(expired.previewId, 'KEEP_RESULTS'), 'BIZOP_DELETE_PREVIEW_EXPIRED');
++  const preview = f.module.previews.create(selection); const taskId = computed.receipt.taskRunId;
++  assert.throws(() => f.module.previews.bind(preview.previewId, 'KEEP_RESULTS', taskId), { code: 'BIZOP_EXCLUSIVE_ADMISSION_REQUIRED' });
++  await f.module.admission.exclusive(() => {
++    f.module.previews.bind(preview.previewId, 'KEEP_RESULTS', taskId);
++    assert.throws(() => f.module.previews.bind(preview.previewId, 'KEEP_RESULTS', taskId), { code: 'BIZOP_DELETE_PREVIEW_USED' });
++  });
++  await equivalent(() => f.module.previews.validate(preview.previewId, 'KEEP_RESULTS'), () => previous.validate(preview.previewId, 'KEEP_RESULTS'));
++  await equivalent(() => f.module.previews.validate(preview.previewId, 'DELETE_ASSOCIATED'),
++    () => previous.validate(preview.previewId, 'DELETE_ASSOCIATED'), 'BIZOP_DELETE_MODE_CONFLICT');
++  assert.ok(fs.existsSync(path.join(f.root, 'start.xlsx')));
++}));
++
++scenario('选择上限 4096（去重前）、空选择与非法引用维持同一错误', async () => {
++  await equivalent(() => normalizeSelection({ datasetIds: Array(4096).fill('same') }),
++    () => oldDelete.normalizeSelection({ datasetIds: Array(4096).fill('same') }));
++  for (const selection of [{ datasetIds: Array(4097).fill('same') }, {}]) {
++    await equivalent(() => normalizeSelection(selection), () => oldDelete.normalizeSelection(selection), 'BIZOP_DELETE_SELECTION_INVALID');
++  }
++  await equivalent(() => normalizeSelection({ datasetIds: ['../bad'] }),
++    () => oldDelete.normalizeSelection({ datasetIds: ['../bad'] }), 'BIZOP_REFERENCE_INVALID');
++});
++
++scenario('删除 charge 字节 49152 通过、49153 拒绝，完整结果与基线一致', () => withCatalog(async (f) => {
++  insertDataset(f, { id: 'byte-limit' });
++  const selection = { datasetIds: ['byte-limit'] };
++  const initial = f.previews.collect(selection); const baseBytes = bytes(initial.datasets[0]);
++  const date = '2026-09-01' + 'x'.repeat(49152 - baseBytes);
++  f.db.prepare('UPDATE biz_op_v327_datasets SET data_date=? WHERE dataset_id=?').run(date, 'byte-limit');
++  const boundary = await equivalent(() => f.previews.collect(selection), () => f.previous.collect(selection));
++  assert.equal(bytes(boundary.datasets[0]), 49152);
++  f.db.prepare('UPDATE biz_op_v327_datasets SET data_date=? WHERE dataset_id=?').run(`${date}x`, 'byte-limit');
++  await equivalent(() => f.previews.collect(selection), () => f.previous.collect(selection), 'BIZOP_DELETE_PREVIEW_LIMIT');
++}));
++
++scenario('删除闭包精确 65536 字节通过、65537 拒绝，预览响应和 64 个上限保留', () => withCatalog(async (f) => {
++  const ids = Array.from({ length: 140 }, (_, index) => `d${String(index).padStart(3, '0')}${'x'.repeat(156)}`);
++  ids.forEach((id, index) => insertDataset(f, { id, version: index + 1 }));
++  const selection = { datasetIds: ids };
++  const initial = f.previews.collect(selection); assert.ok(bytes(initial) < 65536);
++  const date = '2026-09-01' + 'x'.repeat(65536 - bytes(initial));
++  f.db.prepare('UPDATE biz_op_v327_datasets SET data_date=? WHERE dataset_id=?').run(date, ids[0]);
++  const boundary = await equivalent(() => f.previews.collect(selection), () => f.previous.collect(selection));
++  assert.equal(bytes(boundary), 65536);
++  assert.ok(boundary.datasets.reduce((total, row) => total + bytes(row), 0) <= 49152);
++  const preview = f.previews.create(selection); assert.ok(bytes(preview) <= 131072);
++  assert.deepEqual(f.previews.get(preview.previewId).closure, boundary);
++  f.db.prepare('UPDATE biz_op_v327_datasets SET data_date=? WHERE dataset_id=?').run(`${date}x`, ids[0]);
++  await equivalent(() => f.previews.collect(selection), () => f.previous.collect(selection), 'CANONICAL_JSON_TOO_LARGE');
++  f.db.prepare('UPDATE biz_op_v327_datasets SET data_date=? WHERE dataset_id=?').run('2026-09-01', ids[0]);
++  for (let index = 1; index < 64; index += 1) f.previews.create({ datasetIds: [ids[0]] });
++  await equivalent(() => f.previews.create({ datasetIds: [ids[0]] }),
++    () => f.previous.create({ datasetIds: [ids[0]] }), 'BIZOP_DELETE_PREVIEW_BUSY');
++}));
++
++scenario('真实 SQLite 来源迭代恰好 4096 元数据通过；第 4097 条停止且关闭 iterator', () => withCatalog(async (f) => {
++  const batch = f.catalog.archive.createBatch({ moduleId: 'biz-op-recon', moduleCode: 'BOP', localDate: '2026-09-20' }).batch;
++  const sha256 = 'd'.repeat(64); const timestamp = f.catalog.now();
++  const blobId = Number(f.db.prepare('INSERT INTO archive_blobs(sha256,size_bytes,relative_path,created_at,last_verified_at) VALUES (?,0,?,?,?)')
++    .run(sha256, 'fixtures/original', timestamp, timestamp).lastInsertRowid);
++  const definitions = [{ id: 'budget-start', kind: 'OP', date: '2026-09-01', count: 4091 },
++    { id: 'budget-end', kind: 'OP', date: '2026-09-02', count: 1 }, { id: 'budget-flow', kind: 'FLOW', date: '2026-09-02', count: 1 }];
++  for (const definition of definitions) {
++    // 此场景只测查询读取：直接生成静态 fixture，不调用生产提交，也不伪造目录持久化成功。
++    const content = Buffer.from(JSON.stringify({ objectId: definition.id,
++      objectKind: 'DATASET', rowCount: definition.count, catalog: { sourceManifestDigest: 'b'.repeat(64),
++        cellContractVersion: CELL_CONTRACT_VERSION, ruleVersion: RULE_VERSION } }));
++    const relativePath = `inputs/${definition.id}/manifest.json`;
++    const target = f.payloadStore.resolve(relativePath, { mustExist: false });
++    fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, content);
++    const manifest = { relativePath, digest: createHash('sha256').update(content).digest('hex') };
++    insertDataset(f, { ...definition, rows: definition.count, manifest });
++    f.db.prepare('INSERT INTO biz_op_v327_input_heads(kind,data_date,dataset_id,published_generation) VALUES (?,?,?,1)')
++      .run(definition.kind, definition.date, definition.id);
++  }
++  const insertArtifact = f.db.prepare(`INSERT INTO archive_artifacts(batch_id,artifact_key,direction,role,original_name,source_path,status,blob_id,created_at,updated_at)
++    VALUES (?,?,'input','input','fixture.xlsx','fixture','ready',?,?,?)`);
++  const insertSource = f.db.prepare(`INSERT INTO biz_op_v327_dataset_sources(dataset_id,artifact_id,source_sha256,source_file_name,
++    source_file_order,source_sheet_name,slice_date,normalized_bu,row_count) VALUES (?,?,?,'fixture.xlsx',?,'Sheet1',?,'Alpha',1)`);
++  const insertHold = f.db.prepare(`INSERT INTO archive_artifact_holds(artifact_id,owner_module,owner_type,owner_id,reason,created_at)
++    VALUES (?,'biz-op-recon','v327-input',?,'集成边界',?)`);
++  let nextArtifact = 0;
++  const add = (definition, order) => {
++    const id = Number(insertArtifact.run(batch.id, `fixture-${++nextArtifact}`, blobId, timestamp, timestamp).lastInsertRowid);
++    insertSource.run(definition.id, id, sha256, order, definition.date); insertHold.run(id, definition.id, timestamp);
++  };
++  f.catalog.transaction(() => definitions.forEach((definition) => {
++    for (let index = 0; index < definition.count; index += 1) add(definition, index);
++  }));
++  const args = computeArgs(f, { endDate: '2026-09-02' });
++  const frozen = await equivalent(() => collectInputs(args), () => oldCompute.collectInputs(args));
++  assert.equal(frozen.documents.reduce((total, document) => total + document.sources.length, frozen.inputs.length), 4096);
++  // 让第一份来源远超预算；消费第四千零九十四条时已失败，后续来源不能被预取成数组。
++  f.catalog.transaction(() => { for (let index = 4091; index < 4110; index += 1) add(definitions[0], index); });
++  let consumed = 0; let closed = 0;
++  const queryDb = { prepare(sql) {
++    const statement = f.db.prepare(sql);
++    return new Proxy(statement, { get(target, key) {
++      if (key === 'all' && sql.includes('biz_op_v327_dataset_sources')) return () => assert.fail('来源不允许先 all 再预算检查');
++      if (key === 'iterate' && sql.includes('biz_op_v327_dataset_sources')) return (...params) => {
++        const iterator = target.iterate(...params);
++        return { [Symbol.iterator]() { return this; }, next() { const value = iterator.next(); if (!value.done) consumed += 1; return value; },
++          return() { closed += 1; return iterator.return(); } };
++      };
++      const value = Reflect.get(target, key); return typeof value === 'function' ? value.bind(target) : value;
++    } });
++  } };
++  const guarded = { ...f.catalog, queries: createBizOpCatalogQueries({ db: queryDb }) };
++  await equivalent(() => collectInputs({ ...args, catalog: guarded }), () => oldCompute.collectInputs(args), 'BIZOP_RUN_INPUT_BUDGET');
++  assert.equal(consumed, 4094); assert.equal(closed, 1);
++  f.db.prepare('UPDATE biz_op_v327_datasets SET row_count=row_count WHERE dataset_id=?').run(definitions[0].id);
++}));
++
++async function run() {
++  let passed = 0; let skipped = 0; const failures = [];
++  console.log(`宿主真实目录 fsync 能力：${directoryDurabilityCapability.capability}${directoryDurabilityCapability.errorCode ? ` (${directoryDurabilityCapability.errorCode})` : ''}`);
++  for (const item of cases) {
++    if (item.requiresDurability && directoryDurabilityCapability.capability !== 'supported') {
++      skipped += 1;
++      console.log(`SKIP ${item.name}: 宿主目录 fsync 不支持 (${directoryDurabilityCapability.errorCode || 'unknown'})；生产仍拒绝提交，成功路径需具备真实目录屏障的宿主验证`);
++      continue;
++    }
++    try { await item.run(); passed += 1; console.log(`PASS ${item.name}`); }
++    catch (error) { failures.push({ name: item.name, error }); console.error(`FAIL ${item.name}: ${error.stack}`); }
++  }
++  console.log(`\n==== ${passed}/${cases.length - skipped} PASS ====`);
++  console.log(`SKIP ${skipped}/${cases.length}；跳过项不计入 PASS，未执行的平台成功路径不属于本轮验证结果。`);
++  if (failures.length) {
++    console.error('FAILURES'); failures.forEach(({ name, error }) => console.error(`  - ${name}: ${error.message}`));
++    process.exitCode = 1;
++  }
++}
++run().catch((error) => { console.error('FATAL', error); process.exitCode = 1; });
+diff --git a/src/main-process/biz-op-v327/README.md b/src/main-process/biz-op-v327/README.md
+new file mode 100644
+index 00000000..b077210a
+--- /dev/null
++++ b/src/main-process/biz-op-v327/README.md
+@@ -0,0 +1,63 @@
++# BizOP catalog 查询与命令边界
++
++本页说明已经落地的 G5 查询入口。设计合同见 [G5 Spec](../../../changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/spec.md)，切片状态、命令与证据见[实施记录](../../../changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/implementation-notes.md)。本页不改变存储、回收、升级或恢复合同；存储约束继续以 [run-scoped-data-policy](../../../rules/run-scoped-data-policy.md) 为准。
++
++## 已落地入口与所有权
++
++`createBizOpCatalog(db, ...)` 在原连接上建立并公开冻结的 `catalog.queries`。实现位于 [catalog-queries.js](catalog-queries.js)，每次同步读取，不缓存、不写库、不打开连接、不开始事务、不申请准入、不读文件，也不返回 DB、statement 或 transaction 句柄。
++
++| 调用方 | 查询入口 | 仍由调用方负责 |
++| --- | --- | --- |
++| [compute-inputs.js](compute-inputs.js) `collectInputs` | `readActiveDataset`、`iterateDatasetSources` | missing 完整清单、4096 元数据预算、ready/hash/hold、行数与 manifest 校验、BU/digest 排序、fingerprint、generation 和快照 |
++| [export-inputs.js](export-inputs.js) `freezeExportSource` | `readExportObject` | schema/引用参数验证、RESULT manifest 与历史规则、RAW 文件与 hold/hash 检查、65536 字节快照 |
++| [delete-preview.js](delete-preview.js) `collect` | `readActiveDatasetForDelete`、`iterateDatasetSources`、`iteratePublishedRunIdsUsingDataset`、`readPublishedRunForDelete`、`iterateRunArtifacts` | selection/闭包、顺序、charge 与字节预算、用户锁及 hold 保护、digest；只使用原预览字段 |
++| [import-main.js](import-main.js) `restoreDiagnostic` / `runImport` | `readDispatchesForPlan`、`readDiagnosticByRef` | 唯一 producer、owner/digest、关闭证明、真实样本校验、注册诊断与原维护动作回收 |
++
++归档 Blob 引用由 [ArchiveRepository.hasOtherArtifactForBlob](../../backend/database/archive-repository.js) 解释归档表。它用 `LIMIT 1` 排除当前 artifact，计入其他任意状态、任意 owner 的引用。调用方只在 `blobId` 存在时调用；结果不赋予删除资格。不得以全量 `listArtifactsByBlob` 或 hash 引用计数替代该语义。
++
++三个 `iterate*` 返回同步 iterator，必须在既有 admission 回调中同步消费，不跨 `await`、事务或 Renderer 边界。使用 `for...of` 提前退出或显式 `return()` 释放底层 statement；不得先收集全量再检查预算。`readDispatchesForPlan` 沿用原数组语义。
++
++计算的 `admission.exclusive`、导出的整个 `admission.readTask`、预览的同步 `admission.read` 及 import 原 exclusive/关闭链保持不变。查询成功不代表文件验证、删除资格或任务准入已通过。
++
++## catalog.db 的合法保留者
++
++G5 只迁移上表中的读取作用域。`catalog.db` 保留给以下既有本域实现；这不是新增跨域公共 API。未来迁移须整体移动其合同与测试后才能移除对应能力，不以禁止全部 SQL 的方式破坏命令或恢复。
++
++| 文件 / 作用域 | 合法责任与保留原因 |
++| --- | --- |
++| [catalog.js](catalog.js) | schema 初始化、control/operation/task/receipt、导入/计算/删除提交、版本、hold 与回收命令；原事务层级及附属读取保留 |
++| [catalog-queries.js](catalog-queries.js) | 本页规定的只读投影，原 catalog 连接由构造器注入 |
++| [delete-preview.js](delete-preview.js) `get/create/bind` | 自有 `biz_op_v327_delete_previews` 的五处 SQL：读取、过期删除、未确认计数、插入、绑定更新；`validate` 经 get 与 collect 重新核验，`bind` 必须 exclusive |
++| [compute-main.js](compute-main.js) `runCompute` | 按 inputFingerprint 查询已发布运行，保持重复请求处理；不在 collectInputs 迁移范围 |
++| [metadata.js](metadata.js) | 当前输入、月份、日历与分页清单，属于未迁移的同域查询 |
++| [ipc.js](ipc.js) 导出预检 | 导出命名所需元数据预检；实际冻结仍进入 export query |
++| [auto-error-report.js](auto-error-report.js) | 独立诊断及 producer 读取，原自动报告编排保留 |
++| [read-protection.js](read-protection.js) | dispatch、read pin、关闭证据、诊断登记/退役及附属读取 |
++| [delete-preservation.js](delete-preservation.js) | KEEP_RESULTS 在删除/恢复期间核验历史结果、收据、预览绑定及原件保留 |
++| [reclaim.js](reclaim.js) | 回收授权、pin/对象状态核验、队列命令及删除事实；未改变回收资格 |
++| [export-publication.js](export-publication.js) | publication intent、提交/关闭事实、结算与 ACK 持久状态 |
++| [recovery-driver.js](recovery-driver.js) | 原启动/任务恢复编排与 control 的读取、更新 |
++| [recovery-sources.js](recovery-sources.js) | 原恢复 discovery、followup、finalization、结算事实 |
++| [recovery-plan.js](recovery-plan.js) | task、batch、overlay 与终结事实的恢复决策输入 |
++| [recovery-alignment.js](recovery-alignment.js) | task/batch/outbox 的恢复一致性检查 |
++| [archive-owner-completion.js](archive-owner-completion.js) | 归档 owner 完成证明、同连接校验与补偿收口 |
++| [archive-owner-backfill.js](archive-owner-backfill.js) | 历史归档 owner 的分页补录、游标与失败记录 |
++| [upgrade-main.js](upgrade-main.js) | 原升级/激活命令、状态和恢复事实 |
++| [module.js](module.js) | 接收并装配原连接；`protectedTasks` 清点升级前后需要保护的任务与批次 |
++
++`candidate-router`、`compute-pipeline`、`result-sink`、`worker-entry`、`export-source`、`export-spool`、`import-adapter`、`upgrade-legacy` 的本地 SQLite 操作属于候选/工作/封存 part/导出 spool/旧库职责，不是上表的 catalog 事实读取。逐 SQL 位置及具名函数见[扫描证据](../../../changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/evidence/query-boundary-inventory.json)，该证据是当前快照，不是长期规则正文。
++
++## 边界检查与兼容
++
++- compute-inputs、export-inputs、import-main 的事实读取与 delete `collect` 禁止重新取得 raw DB 或在消费者拼 SQL；只能消费上述 query / Archive 方法。
++- delete `get/create/bind` 的五处预览 SQL 是现行命令职责，不是待清零的历史例外。
++- 未更改 IPC、schema、持久化版本、状态/删除模式、输出字段、准入和资源预算。ArchiveRepository 仅增加窄方法，构造与装配未改；G2 合并时保留其成果并按方法合并。
++- G8 检查器及机器配置尚未集成。本分支 AST 清点和动态测试不代表 `ARCH-BIZOP-QUERY` 已 active。G8 集成者须分别登记 Q1 Archive、Q2 compute/export、Q3 collect/import，使用真实消费者和测试入口，并允许上面的五处合法命令；静态别名/闭包正反例由 G8 实施。
++
++## 代表性验证入口
++
++- [query 真库单测](../../../tests/unit/main-process/biz-op-v327-catalog-queries.test.js)：状态、投影、顺序、错误、readonly 与迭代器关闭。
++- [归档引用单测](../../../tests/unit/backend/archive-blob-reference-query.test.js)：任意状态/owner、自身排除、20,000 引用及 LIMIT 1。
++- [导入诊断负向测试](../../../tests/unit/main-process/biz-op-v327-import-query.test.js)：producer/digest/关闭顺序、query 后样本损坏、raw DB 拒绝。
++- [完整基线等价集成](../../../scripts/integration/biz-op-query-boundary.js)：真实临时库、worker 和文件，比较完整快照/错误与预算边界。
++- compute-main、export-main、export-rule-version、delete-main、import-main、phase-admission 既有单测继续覆盖原安全合同；实际结果、环境与未执行项以实施记录为准。
+diff --git a/src/main-process/biz-op-v327/catalog-queries.js b/src/main-process/biz-op-v327/catalog-queries.js
+new file mode 100644
+index 00000000..6e963ec4
+--- /dev/null
++++ b/src/main-process/biz-op-v327/catalog-queries.js
+@@ -0,0 +1,76 @@
++'use strict';
++
++const { fail } = require('./contracts');
++
++// 仅投影同一 catalog 连接的即时读取；准入、预算和文件验证由调用方保持。
++function createBizOpCatalogQueries({ db }) {
++  function readActiveDataset(kind, dataDate) {
++    const row = db.prepare(`SELECT d.* FROM biz_op_v327_input_heads h JOIN biz_op_v327_datasets d USING(dataset_id)
++      WHERE h.kind=? AND h.data_date=? AND d.state='ACTIVE'`).get(kind, dataDate);
++    return row ? { datasetId: row.dataset_id, kind: row.kind, dataDate: row.data_date,
++      publicVersion: row.public_version, rowCount: row.row_count, sourceManifestDigest: row.source_manifest_digest,
++      manifestRelativePath: row.payload_manifest_rel_path, manifestDigest: row.payload_manifest_digest } : null;
++  }
++  function* iterateDatasetSources(datasetId) {
++    for (const row of db.prepare('SELECT * FROM biz_op_v327_dataset_sources WHERE dataset_id=? ORDER BY source_file_order').iterate(datasetId)) {
++      yield { artifactId: row.artifact_id, sha256: row.source_sha256, originalName: row.source_file_name,
++        order: row.source_file_order, sheetName: row.source_sheet_name, bu: row.normalized_bu, rowCount: row.row_count };
++    }
++  }
++  function readExportObject(outputKind, objectId) {
++    let row; let source;
++    if (outputKind.startsWith('RESULT_')) {
++      row = db.prepare("SELECT * FROM biz_op_v327_runs WHERE run_id=? AND state='PUBLISHED'").get(objectId);
++      if (row) source = { objectKind: 'RESULT', metadata: { version: row.result_version,
++        startDate: row.start_date, endDate: row.end_date, inputFingerprint: row.input_fingerprint, publishedAt: row.published_at } };
++      if (source) {
++        const endpoints = db.prepare("SELECT role,input_version FROM biz_op_v327_run_inputs WHERE run_id=? AND role IN ('START_OP','END_OP')").all(objectId);
++        if (endpoints.length !== 2) fail('BIZOP_EXPORT_INPUT_METADATA_MISSING');
++        source.metadata.startInputVersion = endpoints.find((item) => item.role === 'START_OP')?.input_version;
++        source.metadata.endInputVersion = endpoints.find((item) => item.role === 'END_OP')?.input_version;
++        if (!source.metadata.startInputVersion || !source.metadata.endInputVersion) fail('BIZOP_EXPORT_INPUT_METADATA_MISSING');
++      }
++    } else if (outputKind === 'ERRORS') {
++      row = db.prepare(`SELECT d.*,l.sealed_manifest_rel_path AS payload_manifest_rel_path,d.manifest_digest AS payload_manifest_digest
++        FROM biz_op_v327_diagnostic_reports d JOIN biz_op_v327_diagnostic_lifecycle l USING(report_ref)
++        WHERE report_ref=? AND state='READY'`).get(objectId);
++      if (row) source = { objectKind: 'DIAGNOSTIC', metadata: { producerTaskRunId: row.task_run_id,
++        scanComplete: Boolean(row.scan_complete), errorCountExact: Boolean(row.error_count_exact), sampleCount: row.sample_count } };
++    } else {
++      row = db.prepare("SELECT * FROM biz_op_v327_datasets WHERE dataset_id=? AND state='ACTIVE' AND kind=?")
++        .get(objectId, outputKind.split('_')[0]);
++      if (row) source = { objectKind: 'DATASET', metadata: { version: row.public_version, dataDate: row.data_date,
++        sourceManifestDigest: row.source_manifest_digest, activatedAt: row.activated_at } };
++    }
++    return source ? { ...source, manifestRelativePath: row.payload_manifest_rel_path, manifestDigest: row.payload_manifest_digest } : null;
++  }
++  function readActiveDatasetForDelete(datasetId) {
++    const row = db.prepare("SELECT * FROM biz_op_v327_datasets WHERE dataset_id=? AND state='ACTIVE'").get(datasetId);
++    return row ? { datasetId: row.dataset_id, kind: row.kind, dataDate: row.data_date,
++      publicVersion: row.public_version, activatedAt: row.activated_at } : null;
++  }
++  function* iteratePublishedRunIdsUsingDataset(datasetId) {
++    for (const row of db.prepare(`SELECT DISTINCT r.run_id FROM biz_op_v327_runs r JOIN biz_op_v327_run_inputs i USING(run_id)
++      WHERE i.dataset_id=? AND r.state='PUBLISHED'`).iterate(datasetId)) yield row.run_id;
++  }
++  function readPublishedRunForDelete(runId) {
++    const row = db.prepare("SELECT * FROM biz_op_v327_runs WHERE run_id=? AND state='PUBLISHED'").get(runId);
++    return row ? { runId: row.run_id, startDate: row.start_date, endDate: row.end_date, resultVersion: row.result_version,
++      manifestDigest: row.payload_manifest_digest, operationMonth: row.operation_month } : null;
++  }
++  function* iterateRunArtifacts(runId) {
++    for (const row of db.prepare('SELECT * FROM biz_op_v327_run_artifacts WHERE run_id=? ORDER BY artifact_id').iterate(runId)) {
++      yield { artifactId: row.artifact_id, originalName: row.source_file_name, sha256: row.source_sha256 };
++    }
++  }
++  function readDispatchesForPlan(taskRunId, planDigest) {
++    return db.prepare('SELECT * FROM biz_op_v327_dispatches WHERE task_run_id=? AND plan_digest=?').all(taskRunId, planDigest);
++  }
++  function readDiagnosticByRef(reportRef) {
++    return db.prepare('SELECT * FROM biz_op_v327_diagnostic_reports WHERE report_ref=?').get(reportRef) || null;
++  }
++  return Object.freeze({ readActiveDataset, iterateDatasetSources, readExportObject, readActiveDatasetForDelete,
++    iteratePublishedRunIdsUsingDataset, readPublishedRunForDelete, iterateRunArtifacts, readDispatchesForPlan, readDiagnosticByRef });
++}
++
++module.exports = { createBizOpCatalogQueries };
+diff --git a/tests/fixtures/biz-op-query-boundary/11086a3c/compute-inputs.js b/tests/fixtures/biz-op-query-boundary/11086a3c/compute-inputs.js
+new file mode 100644
+index 00000000..acab514f
+--- /dev/null
++++ b/tests/fixtures/biz-op-query-boundary/11086a3c/compute-inputs.js
+@@ -0,0 +1,97 @@
++'use strict';
++
++const { fail, hash, snapshot, count } = require('./contracts');
++const { CELL_CONTRACT_VERSION, RULE_VERSION } = require('./import-adapter');
++const { compareText } = require('./compute-group');
++const { COMPUTE_RULE_VERSION } = require('./result-schema');
++
++function intervalInputs(startDate, endDate) {
++  function timestamp(value) {
++    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) fail('BIZOP_INTERVAL_INVALID', '起止日期须为有效公历日期');
++    const time = Date.parse(`${value}T00:00:00Z`);
++    if (!Number.isFinite(time) || new Date(time).toISOString().slice(0, 10) !== value) fail('BIZOP_INTERVAL_INVALID');
++    return time;
++  }
++  const start = timestamp(startDate); const end = timestamp(endDate);
++  if (start >= end) fail('BIZOP_INTERVAL_INVALID', '起始日期须早于终止日期');
++  if ((end - start) / 86400000 + 2 > 4096) fail('BIZOP_RUN_INPUT_BUDGET', '区间清单超出当前元数据预算');
++  const required = [{ role: 'START_OP', kind: 'OP', dataDate: startDate }, { role: 'END_OP', kind: 'OP', dataDate: endDate }];
++  for (let date = start + 86400000; date <= end; date += 86400000) required.push({ role: 'FLOW', kind: 'FLOW', dataDate: new Date(date).toISOString().slice(0, 10) });
++  return required;
++}
++function fingerprintOf({ startDate, endDate, inputs, bus, originalDigests }) {
++  return hash({ fingerprintVersion: 2, startDate, endDate, bus, inputs,
++    originalsDigest: hash(originalDigests), cellContractVersion: CELL_CONTRACT_VERSION, ruleVersion: RULE_VERSION,
++    computeRuleVersion: COMPUTE_RULE_VERSION });
++}
++function collectInputs({ catalog, payloadStore, startDate, endDate }) {
++  const required = intervalInputs(startDate, endDate);
++  const documents = []; const missing = []; const bus = new Set(); const originals = new Map();
++  let metadataCount = required.length;
++  const selected = [];
++  for (const item of required) {
++    const dataset = catalog.db.prepare(`SELECT d.* FROM biz_op_v327_input_heads h JOIN biz_op_v327_datasets d USING(dataset_id)
++      WHERE h.kind=? AND h.data_date=? AND d.state='ACTIVE'`).get(item.kind, item.dataDate);
++    if (!dataset) { missing.push(item); continue; }
++    selected.push({ item, dataset });
++  }
++  if (missing.length) throw Object.assign(new Error('所选区间缺少必需的校验表，未开始核对'), { code: 'BIZOP_RUN_INPUT_MISSING', missing: snapshot(missing) });
++  for (const { item, dataset } of selected) {
++    const reference = { role: item.role, dataDate: item.dataDate, datasetId: dataset.dataset_id,
++      inputVersion: dataset.public_version, sourceManifestDigest: dataset.source_manifest_digest };
++    const sources = [];
++    for (const source of catalog.db.prepare('SELECT * FROM biz_op_v327_dataset_sources WHERE dataset_id=? ORDER BY source_file_order').iterate(dataset.dataset_id)) {
++      if (++metadataCount > 4096) fail('BIZOP_RUN_INPUT_BUDGET');
++      const artifact = catalog.archive.getArtifact(source.artifact_id);
++      if (!artifact || artifact.status !== 'ready' || artifact.blob?.sha256 !== source.source_sha256) fail('BIZOP_RUN_ORIGINAL_UNAVAILABLE');
++      const hold = catalog.archive.listArtifactHolds(source.artifact_id).some((value) => value.ownerModule === 'biz-op-recon'
++        && value.ownerType === 'v327-input' && value.ownerId === dataset.dataset_id);
++      if (!hold) fail('BIZOP_RUN_ORIGINAL_UNPROTECTED');
++      bus.add(source.normalized_bu); originals.set(source.artifact_id, source.source_sha256);
++      sources.push({ artifactId: source.artifact_id, sha256: source.source_sha256, originalName: source.source_file_name,
++        order: source.source_file_order, sheetName: source.source_sheet_name, bu: source.normalized_bu, rowCount: source.row_count });
++    }
++    if (!sources.length || sources.reduce((sum, source) => sum + count(source.rowCount), 0) !== dataset.row_count) fail('BIZOP_RUN_SOURCE_COUNT_MISMATCH');
++    const manifest = payloadStore.readDocument(dataset.payload_manifest_rel_path, dataset.payload_manifest_digest).value;
++    if (manifest.objectId !== dataset.dataset_id || manifest.objectKind !== 'DATASET' || manifest.rowCount !== dataset.row_count
++        || manifest.catalog.sourceManifestDigest !== dataset.source_manifest_digest
++        || manifest.catalog.cellContractVersion !== CELL_CONTRACT_VERSION || manifest.catalog.ruleVersion !== RULE_VERSION) fail('BIZOP_RUN_INPUT_CONTRACT_MISMATCH');
++    documents.push({ ...reference, kind: item.kind, rowCount: dataset.row_count, sources,
++      manifestRelativePath: dataset.payload_manifest_rel_path, manifestDigest: dataset.payload_manifest_digest });
++  }
++  const inputs = documents.map(({ role, dataDate, datasetId, inputVersion, sourceManifestDigest }) => ({ role, dataDate, datasetId, inputVersion, sourceManifestDigest }));
++  const actualBus = [...bus].sort(compareText);
++  const originalDigests = [...new Set(originals.values())].sort(compareText);
++  const inputFingerprint = fingerprintOf({ startDate, endDate, inputs, bus: actualBus, originalDigests });
++  // 先证明完整快照可编码，再创建 Task/计划；超限不能以清单前缀继续。
++  snapshot({ startDate, endDate, inputs, bus: actualBus, originalDigests }, { maxBytes: 65536 });
++  return { startDate, endDate, documents, inputs, bus: actualBus, originalDigests, inputFingerprint,
++    expectedGeneration: catalog.control().generation };
++}
++async function persistInputs({ frozen, payloadStore, getArchiveService, taskRunId }) {
++  const references = []; const files = new Map();
++  for (let index = 0; index < frozen.documents.length; index += 1) {
++    const document = frozen.documents[index];
++    const sources = [];
++    for (const source of document.sources) {
++      let verified = files.get(source.artifactId);
++      if (!verified) {
++        verified = await getArchiveService().resolveVerifiedArtifact(source.artifactId);
++        if (!verified.ok || verified.sha256 !== source.sha256) fail('BIZOP_RUN_ORIGINAL_UNAVAILABLE');
++        files.set(source.artifactId, verified);
++      }
++      sources.push({ ...source, filePath: verified.filePath, sizeBytes: verified.sizeBytes });
++    }
++    const relativePath = `operations/${taskRunId}/input-${index + 1}.json`;
++    const written = payloadStore.writeDocument(relativePath, { ...document, sources });
++    references.push({ relativePath, digest: written.digest });
++  }
++  const root = { schemaVersion: 1, taskRunId, startDate: frozen.startDate, endDate: frozen.endDate,
++    inputs: frozen.inputs, bus: frozen.bus, originalDigests: frozen.originalDigests, inputFingerprint: frozen.inputFingerprint,
++    cellContractVersion: CELL_CONTRACT_VERSION, ruleVersion: RULE_VERSION, computeRuleVersion: COMPUTE_RULE_VERSION, references };
++  const relativePath = `operations/${taskRunId}/compute-inputs.json`;
++  const written = payloadStore.writeDocument(relativePath, root);
++  return { relativePath, digest: written.digest };
++}
++
++module.exports = { intervalInputs, fingerprintOf, collectInputs, persistInputs };
+diff --git a/tests/fixtures/biz-op-query-boundary/11086a3c/delete-preview.js b/tests/fixtures/biz-op-query-boundary/11086a3c/delete-preview.js
+new file mode 100644
+index 00000000..d7267103
+--- /dev/null
++++ b/tests/fixtures/biz-op-query-boundary/11086a3c/delete-preview.js
+@@ -0,0 +1,112 @@
++'use strict';
++
++const { randomUUID } = require('node:crypto');
++const { fail, opaque, hash, snapshot } = require('./contracts');
++const { outputName } = require('./export-cells');
++
++function normalizeSelection({ datasetIds = [], runIds = [] } = {}) {
++  if (!Array.isArray(datasetIds) || !Array.isArray(runIds) || !datasetIds.length && !runIds.length
++      || datasetIds.length + runIds.length > 4096) fail('BIZOP_DELETE_SELECTION_INVALID', '请先选取要删除的数据');
++  return { datasetIds: [...new Set(datasetIds.map((id) => opaque(id)))].sort(), runIds: [...new Set(runIds.map((id) => opaque(id)))].sort() };
++}
++function createBizOpDeletePreview({ catalog, admission }) {
++  const { db, now } = catalog;
++  function collect(input) {
++    const selection = normalizeSelection(input); const generation = catalog.control().generation;
++    const runIds = new Set(selection.runIds); const artifacts = new Set(); let bytes = 0; let evaluated = 0;
++    const charge = (value) => {
++      bytes += Buffer.byteLength(JSON.stringify(value)); evaluated += 1;
++      if (bytes > 49152 || evaluated > 4096) fail('BIZOP_DELETE_PREVIEW_LIMIT', '完整删除影响超过当前预览预算，请缩小选取范围或先选取结果表分批处理');
++      return value;
++    };
++    const datasets = selection.datasetIds.map((id) => {
++      const row = db.prepare("SELECT * FROM biz_op_v327_datasets WHERE dataset_id=? AND state='ACTIVE'").get(id);
++      if (!row) fail('BIZOP_DELETE_SELECTION_CHANGED', '选取的数据已被覆盖或删除，请重新选取');
++      const originals = [];
++      for (const item of db.prepare('SELECT artifact_id,source_file_name,source_sha256 FROM biz_op_v327_dataset_sources WHERE dataset_id=? ORDER BY source_file_order').iterate(id)) {
++        artifacts.add(item.artifact_id); originals.push(charge({ artifactId: item.artifact_id, originalName: item.source_file_name, sha256: item.source_sha256 }));
++      }
++      for (const related of db.prepare(`SELECT DISTINCT r.run_id FROM biz_op_v327_runs r JOIN biz_op_v327_run_inputs i USING(run_id)
++        WHERE i.dataset_id=? AND r.state='PUBLISHED'`).iterate(id)) {
++        runIds.add(related.run_id); if (runIds.size > 4096) fail('BIZOP_DELETE_PREVIEW_LIMIT');
++      }
++      return charge({ objectId: id, kind: row.kind, dataDate: row.data_date, version: row.public_version,
++        operationMonth: row.activated_at.slice(0, 7), originals });
++    });
++    const runs = [...runIds].sort().map((id) => {
++      const row = db.prepare("SELECT * FROM biz_op_v327_runs WHERE run_id=? AND state='PUBLISHED'").get(id);
++      if (!row) fail('BIZOP_DELETE_SELECTION_CHANGED', '选取的结果表已被删除，请重新选取');
++      const originals = [];
++      for (const item of db.prepare('SELECT * FROM biz_op_v327_run_artifacts WHERE run_id=? ORDER BY artifact_id').iterate(id)) {
++        artifacts.add(item.artifact_id); originals.push(charge({ artifactId: item.artifact_id, originalName: item.source_file_name, sha256: item.source_sha256 }));
++      }
++      return charge({ objectId: id, startDate: row.start_date, endDate: row.end_date, version: row.result_version,
++        manifestDigest: row.payload_manifest_digest,
++        operationMonth: row.operation_month, tableName: outputName('RESULT_DIFF', { startDate: row.start_date, endDate: row.end_date, version: row.result_version }),
++        directlySelected: selection.runIds.includes(id), originals });
++    });
++    const inputOwners = new Set(selection.datasetIds);
++    const references = { originalCount: artifacts.size, protectedAfterKeep: 0, protectedAfterDelete: 0, userLockedOriginals: 0, sharedBlobOriginals: 0 };
++    for (const id of artifacts) {
++      const artifact = catalog.archive.getArtifact(id); if (!artifact) fail('BIZOP_DELETE_ORIGINAL_CHANGED');
++      const locked = catalog.archive.getBatch(artifact.batchId).locked;
++      // 当前 artifact 的业务保护与相同 blob 的其他归档引用分别计数；本模块从不删除归档文件。
++      if (artifact.blobId && db.prepare('SELECT 1 FROM archive_artifacts WHERE blob_id=? AND id!=? LIMIT 1').get(artifact.blobId, id)) references.sharedBlobOriginals += 1;
++      if (locked) references.userLockedOriginals += 1;
++      let keep = locked; let remove = locked;
++      for (const hold of catalog.archive.listArtifactHolds(id)) {
++        charge({ artifactId: id, ownerModule: hold.ownerModule, ownerType: hold.ownerType, ownerId: hold.ownerId });
++        const inputRemoved = hold.ownerModule === 'biz-op-recon' && hold.ownerType === 'v327-input' && inputOwners.has(hold.ownerId);
++        const resultRemoved = hold.ownerModule === 'biz-op-recon' && hold.ownerType === 'v327-result' && runIds.has(hold.ownerId);
++        if (!inputRemoved) keep = true;
++        if (!inputRemoved && !resultRemoved) remove = true;
++      }
++      if (keep) references.protectedAfterKeep += 1;
++      if (remove) references.protectedAfterDelete += 1;
++    }
++    return snapshot({ schemaVersion: 1, generation, selection, datasets, runs, references }, { maxBytes: 65536 });
++  }
++  function get(previewId) {
++    opaque(previewId);
++    const row = db.prepare('SELECT * FROM biz_op_v327_delete_previews WHERE preview_id=?').get(previewId);
++    if (!row) fail('BIZOP_DELETE_PREVIEW_EXPIRED', '删除预览已失效，请重新预览');
++    const closure = JSON.parse(row.closure_json);
++    if (hash(closure) !== row.closure_digest || closure.generation !== row.generation) fail('BIZOP_DELETE_PREVIEW_CHANGED');
++    return { row, closure };
++  }
++  function create(selection) {
++    return admission.read(() => {
++      const closure = collect(selection); const previewId = `preview-${randomUUID()}`; const createdAt = now();
++      const expiresAt = new Date(Date.parse(createdAt) + 10 * 60000).toISOString();
++      catalog.transaction(() => {
++        db.prepare('DELETE FROM biz_op_v327_delete_previews WHERE expires_at<? AND confirmed_task_id IS NULL').run(createdAt);
++        if (db.prepare('SELECT COUNT(*) AS n FROM biz_op_v327_delete_previews WHERE confirmed_task_id IS NULL').get().n >= 64) {
++          fail('BIZOP_DELETE_PREVIEW_BUSY', '待确认的删除预览过多，请稍后重试');
++        }
++        db.prepare('INSERT INTO biz_op_v327_delete_previews(preview_id,generation,closure_json,closure_digest,created_at,expires_at) VALUES (?,?,?,?,?,?)')
++          .run(previewId, closure.generation, JSON.stringify(closure), hash(closure), createdAt, expiresAt);
++      });
++      return snapshot({ previewId, expiresAt, ...closure }, { maxBytes: 131072 });
++    });
++  }
++  function validate(previewId, mode) {
++    const value = get(previewId); const { row, closure } = value;
++    if (!['KEEP_RESULTS', 'DELETE_ASSOCIATED'].includes(mode) || mode === 'KEEP_RESULTS' && closure.selection.runIds.length) fail('BIZOP_DELETE_MODE_INVALID');
++    if (row.confirmed_mode && row.confirmed_mode !== mode) fail('BIZOP_DELETE_MODE_CONFLICT');
++    if (row.confirmed_task_id) return value;
++    if (row.expires_at <= now()) fail('BIZOP_DELETE_PREVIEW_EXPIRED', '删除预览已过期，请重新预览');
++    if (catalog.control().generation !== row.generation || hash(collect(closure.selection)) !== row.closure_digest) {
++      fail('BIZOP_DELETE_PREVIEW_STALE', '数据或保护状态已变化，请重新查看删除影响并确认');
++    }
++    return value;
++  }
++  function bind(previewId, mode, taskRunId) {
++    admission.assertExclusive();
++    const value = validate(previewId, mode);
++    if (value.row.confirmed_task_id) fail('BIZOP_DELETE_PREVIEW_USED');
++    if (db.prepare('UPDATE biz_op_v327_delete_previews SET confirmed_task_id=?,confirmed_mode=? WHERE preview_id=? AND confirmed_task_id IS NULL')
++      .run(taskRunId, mode, previewId).changes !== 1) fail('BIZOP_DELETE_PREVIEW_USED');
++  }
++  return { create, get, collect, validate, bind };
++}
++module.exports = { createBizOpDeletePreview, normalizeSelection };
+diff --git a/tests/fixtures/biz-op-query-boundary/11086a3c/export-inputs.js b/tests/fixtures/biz-op-query-boundary/11086a3c/export-inputs.js
+new file mode 100644
+index 00000000..79180129
+--- /dev/null
++++ b/tests/fixtures/biz-op-query-boundary/11086a3c/export-inputs.js
+@@ -0,0 +1,58 @@
++'use strict';
++
++const { schemaFor } = require('./export-cells');
++const { resultContractFor } = require('./result-schema');
++const { fail, opaque, snapshot } = require('./contracts');
++
++async function freezeExportSource({ catalog, payloadStore, getArchiveService, outputKind, objectId, columnSchemaVersion }) {
++  schemaFor(outputKind, columnSchemaVersion); opaque(objectId);
++  let row; let source;
++  if (outputKind.startsWith('RESULT_')) {
++    row = catalog.db.prepare("SELECT * FROM biz_op_v327_runs WHERE run_id=? AND state='PUBLISHED'").get(objectId);
++    if (row) source = { objectKind: 'RESULT', metadata: { version: row.result_version,
++      startDate: row.start_date, endDate: row.end_date, inputFingerprint: row.input_fingerprint, publishedAt: row.published_at } };
++    if (source) {
++      const endpoints = catalog.db.prepare("SELECT role,input_version FROM biz_op_v327_run_inputs WHERE run_id=? AND role IN ('START_OP','END_OP')").all(objectId);
++      if (endpoints.length !== 2) fail('BIZOP_EXPORT_INPUT_METADATA_MISSING');
++      source.metadata.startInputVersion = endpoints.find((item) => item.role === 'START_OP')?.input_version;
++      source.metadata.endInputVersion = endpoints.find((item) => item.role === 'END_OP')?.input_version;
++      if (!source.metadata.startInputVersion || !source.metadata.endInputVersion) fail('BIZOP_EXPORT_INPUT_METADATA_MISSING');
++    }
++  } else if (outputKind === 'ERRORS') {
++    row = catalog.db.prepare(`SELECT d.*,l.sealed_manifest_rel_path AS payload_manifest_rel_path,d.manifest_digest AS payload_manifest_digest
++      FROM biz_op_v327_diagnostic_reports d JOIN biz_op_v327_diagnostic_lifecycle l USING(report_ref)
++      WHERE report_ref=? AND state='READY'`).get(objectId);
++    if (row) source = { objectKind: 'DIAGNOSTIC', metadata: { producerTaskRunId: row.task_run_id,
++      scanComplete: Boolean(row.scan_complete), errorCountExact: Boolean(row.error_count_exact), sampleCount: row.sample_count } };
++  } else {
++    row = catalog.db.prepare("SELECT * FROM biz_op_v327_datasets WHERE dataset_id=? AND state='ACTIVE' AND kind=?")
++      .get(objectId, outputKind.split('_')[0]);
++    if (row) source = { objectKind: 'DATASET', metadata: { version: row.public_version, dataDate: row.data_date,
++      sourceManifestDigest: row.source_manifest_digest, activatedAt: row.activated_at } };
++  }
++  if (!row || !source) fail('BIZOP_EXPORT_SOURCE_UNAVAILABLE');
++  if (source.objectKind === 'RESULT') {
++    const manifest = payloadStore.readDocument(row.payload_manifest_rel_path, row.payload_manifest_digest).value;
++    if (manifest.objectId !== objectId || manifest.objectKind !== 'RESULT') fail('BIZOP_EXPORT_OWNER_MISMATCH');
++    const contract = resultContractFor(manifest.catalog);
++    if (columnSchemaVersion !== undefined && columnSchemaVersion !== contract.columnSchemaVersion) fail('BIZOP_EXPORT_CONTRACT_MISMATCH');
++    columnSchemaVersion = contract.columnSchemaVersion;
++  } else if (columnSchemaVersion === undefined) columnSchemaVersion = 1;
++  Object.assign(source, { outputKind, columnSchemaVersion, objectId,
++    manifestRelativePath: row.payload_manifest_rel_path, manifestDigest: row.payload_manifest_digest });
++  if (outputKind.endsWith('_RAW')) {
++    const manifest = payloadStore.readDocument(source.manifestRelativePath, source.manifestDigest).value;
++    source.originals = [];
++    for (const original of manifest.catalog.sources) {
++      const artifact = catalog.archive.getArtifact(original.artifactId);
++      if (!artifact || artifact.status !== 'ready' || artifact.blob.sha256 !== original.sha256
++          || !catalog.archive.listArtifactHolds(original.artifactId).some((hold) => hold.ownerType === 'v327-input'
++            && hold.ownerModule === 'biz-op-recon' && hold.ownerId === objectId)) fail('BIZOP_EXPORT_ORIGINAL_UNPROTECTED');
++      const file = await getArchiveService().resolveVerifiedArtifact(original.artifactId);
++      if (!file.ok || file.sha256 !== original.sha256) fail('BIZOP_EXPORT_ORIGINAL_CHANGED');
++      source.originals.push({ ...original, filePath: file.filePath, sizeBytes: file.sizeBytes, originalName: artifact.fileName || artifact.originalName || '' });
++    }
++  }
++  return snapshot(source, { maxBytes: 65536 });
++}
++module.exports = { freezeExportSource };
+diff --git a/tests/unit/backend/archive-blob-reference-query.test.js b/tests/unit/backend/archive-blob-reference-query.test.js
+new file mode 100644
+index 00000000..dbb105e6
+--- /dev/null
++++ b/tests/unit/backend/archive-blob-reference-query.test.js
+@@ -0,0 +1,100 @@
++'use strict';
++
++const test = require('node:test');
++const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const os = require('node:os');
++const path = require('node:path');
++const { DatabaseSync } = require('node:sqlite');
++const { createArchiveRepository } = require('../../../src/backend/database/archive-repository');
++
++function fixture(t) {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-blob-reference-query-'));
++  const db = new DatabaseSync(path.join(root, 'archive.sqlite'));
++  t.after(() => {
++    db.close();
++    fs.rmSync(root, { recursive: true, force: true });
++  });
++  db.exec('PRAGMA foreign_keys = ON');
++  const repository = createArchiveRepository(db);
++  repository.ensureSchema();
++  let sequence = 0;
++  function addArtifact({ moduleId = 'biz-op', status = 'ready', sha256 = 'a'.repeat(64) } = {}) {
++    sequence += 1;
++    const { batch } = repository.createBatch({
++      moduleId, moduleCode: moduleId === 'biz-op' ? 'BIZOP' : 'OTHER', moduleName: '测试归档',
++      operationKey: `operation-${sequence}`, localDate: '2026-09-20'
++    });
++    const artifact = repository.addArtifact(batch.id, {
++      artifactKey: `artifact-${sequence}`, direction: 'input', role: 'source-file',
++      originalName: 'source.xlsx', sourcePath: path.join(root, 'source.xlsx')
++    });
++    const completed = repository.completeArtifact(artifact.id, {
++      sha256, sizeBytes: 4, relativePath: `blobs/sha256/${sha256}`,
++      fingerprint: { sizeBytes: 4, mtimeMs: 1, ctimeMs: 1, ino: '1' }
++    });
++    // 直接设定历史状态，覆盖 blob 已关联但 artifact 尚非 ready 的引用。
++    db.prepare('UPDATE archive_artifacts SET status=? WHERE id=?').run(status, artifact.id);
++    return completed.artifact;
++  }
++  return { db, repository, addArtifact };
++}
++
++test('归档 Blob 存在性查询排除自身、无 Blob 和不存在的引用', (t) => {
++  const { db, repository, addArtifact } = fixture(t);
++  const selected = addArtifact();
++  addArtifact({ sha256: 'b'.repeat(64) });
++  assert.equal(repository.hasOtherArtifactForBlob(selected.blobId, selected.id), false);
++  assert.equal(repository.hasOtherArtifactForBlob(null, selected.id), false);
++  assert.equal(repository.hasOtherArtifactForBlob(999999, selected.id), false);
++  // 查询不会把错误伪装成无引用。
++  db.exec('DROP TABLE archive_artifacts');
++  assert.throws(() => repository.hasOtherArtifactForBlob(selected.blobId, selected.id), /no such table/);
++});
++
++for (const status of ['ready', 'pending', 'failed']) {
++  test(`归档 Blob 的其他 ${status} 引用跨 owner 保持原删除保护语义`, (t) => {
++    const { db, repository, addArtifact } = fixture(t);
++    const selected = addArtifact();
++    const other = addArtifact({ moduleId: 'other-owner', status });
++    const baseline = db.prepare('SELECT 1 FROM archive_artifacts WHERE blob_id=? AND id!=? LIMIT 1');
++    for (const current of [selected, other]) {
++      const actual = repository.hasOtherArtifactForBlob(current.blobId, current.id);
++      assert.equal(typeof actual, 'boolean');
++      assert.equal(actual, Boolean(baseline.get(current.blobId, current.id)));
++      assert.equal(actual, true);
++    }
++    db.prepare('DELETE FROM archive_artifacts WHERE id=?').run(other.id);
++    assert.equal(repository.hasOtherArtifactForBlob(selected.blobId, selected.id), false);
++  });
++}
++
++test('大量 Blob 引用只进行 LIMIT 1 标量读取，不分配全量列表或开启事务', (t) => {
++  const { db, addArtifact } = fixture(t);
++  const selected = addArtifact();
++  db.prepare(`
++    WITH RECURSIVE refs(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM refs WHERE n<20000)
++    INSERT INTO archive_artifacts (
++      batch_id, artifact_key, direction, role, original_name, source_path, status, blob_id,
++      created_at, updated_at
++    ) SELECT ?, 'reference-' || n, 'input', 'source-file', 'source.xlsx', '/test/source.xlsx',
++      'pending', ?, '2026-09-20', '2026-09-20' FROM refs
++  `).run(selected.batchId, selected.blobId);
++  const calls = [];
++  const repository = createArchiveRepository({
++    exec() { assert.fail('存在性查询不能执行写入或开启事务'); },
++    prepare(sql) {
++      const statement = db.prepare(sql);
++      calls.push(sql.replace(/\s+/g, ' ').trim());
++      return {
++        get(...args) { return statement.get(...args); },
++        all() { assert.fail('存在性查询不能物化完整引用列表'); },
++        iterate() { assert.fail('存在性查询不能向调用方泄露引用迭代器'); },
++        run() { assert.fail('存在性查询不能写入'); }
++      };
++    }
++  });
++  assert.equal(repository.hasOtherArtifactForBlob(selected.blobId, selected.id), true);
++  assert.deepEqual(calls, ['SELECT 1 FROM archive_artifacts WHERE blob_id=? AND id!=? LIMIT 1']);
++  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM archive_artifacts').get().count, 20001);
++});
+diff --git a/tests/unit/main-process/biz-op-v327-catalog-queries.test.js b/tests/unit/main-process/biz-op-v327-catalog-queries.test.js
+new file mode 100644
+index 00000000..d9ef7ce7
+--- /dev/null
++++ b/tests/unit/main-process/biz-op-v327-catalog-queries.test.js
+@@ -0,0 +1,236 @@
++'use strict';
++
++const test = require('node:test');
++const assert = require('node:assert/strict');
++const { DatabaseSync } = require('node:sqlite');
++const { createBizOpCatalog } = require('../../../src/main-process/biz-op-v327/catalog');
++const { createBizOpCatalogQueries } = require('../../../src/main-process/biz-op-v327/catalog-queries');
++const { collectInputs } = require('../../../src/main-process/biz-op-v327/compute-inputs');
++const { freezeExportSource } = require('../../../src/main-process/biz-op-v327/export-inputs');
++const { RULE_VERSION } = require('../../../src/main-process/biz-op-v327/import-adapter');
++const { LEGACY_RESULT_SCHEMA_VERSION } = require('../../../src/main-process/biz-op-v327/result-schema');
++
++function fixture(t) {
++  const db = new DatabaseSync(':memory:');
++  t.after(() => db.close());
++  // 查询投影使用真实 SQLite；简化约束允许构造损坏端点及缺失关联的负向样本。
++  db.exec(`CREATE TABLE biz_op_v327_datasets(dataset_id TEXT,kind TEXT,data_date TEXT,public_version INTEGER,
++      row_count INTEGER,source_manifest_digest TEXT,payload_manifest_rel_path TEXT,payload_manifest_digest TEXT,state TEXT,activated_at TEXT);
++    CREATE TABLE biz_op_v327_input_heads(kind TEXT,data_date TEXT,dataset_id TEXT);
++    CREATE TABLE biz_op_v327_dataset_sources(dataset_id TEXT,artifact_id INTEGER,source_sha256 TEXT,source_file_name TEXT,
++      source_file_order INTEGER,source_sheet_name TEXT,normalized_bu TEXT,row_count INTEGER);
++    CREATE TABLE biz_op_v327_runs(run_id TEXT,result_version INTEGER,start_date TEXT,end_date TEXT,input_fingerprint TEXT,
++      published_at TEXT,payload_manifest_rel_path TEXT,payload_manifest_digest TEXT,state TEXT,operation_month TEXT);
++    CREATE TABLE biz_op_v327_run_inputs(run_id TEXT,role TEXT,input_version INTEGER,dataset_id TEXT);
++    CREATE TABLE biz_op_v327_run_artifacts(run_id TEXT,artifact_id INTEGER,source_file_name TEXT,source_sha256 TEXT);
++    CREATE TABLE biz_op_v327_diagnostic_reports(report_ref TEXT,task_run_id TEXT,scan_complete INTEGER,error_count_exact INTEGER,
++      sample_count INTEGER,manifest_digest TEXT,state TEXT,producer_job_id TEXT,producer_session_id TEXT);
++    CREATE TABLE biz_op_v327_diagnostic_lifecycle(report_ref TEXT,sealed_manifest_rel_path TEXT);
++    CREATE TABLE biz_op_v327_dispatches(task_run_id TEXT,plan_digest TEXT,job_id TEXT,session_id TEXT,state TEXT);`);
++  const queries = createBizOpCatalogQueries({ db });
++  function dataset(id, { state = 'ACTIVE', kind = 'OP', date = '2026-09-01', head = true } = {}) {
++    db.prepare('INSERT INTO biz_op_v327_datasets VALUES (?,?,?,?,?,?,?,?,?,?)')
++      .run(id, kind, date, 3, 2, 'source-digest', `inputs/${id}/manifest.json`, 'manifest-digest', state, '2026-09-20T00:00:00Z');
++    if (head) db.prepare('INSERT INTO biz_op_v327_input_heads VALUES (?,?,?)').run(kind, date, id);
++  }
++  function run(id, { state = 'PUBLISHED', endpoints = [['END_OP', 9], ['FLOW', 5], ['START_OP', 3]] } = {}) {
++    db.prepare('INSERT INTO biz_op_v327_runs VALUES (?,?,?,?,?,?,?,?,?,?)')
++      .run(id, 2, '2026-09-01', '2026-09-03', 'fingerprint', '2026-09-20T00:00:00Z', `results/${id}/manifest.json`, 'run-digest', state, '2026-09');
++    for (const [role, version] of endpoints) db.prepare('INSERT INTO biz_op_v327_run_inputs VALUES (?,?,?,?)').run(id, role, version, 'data');
++  }
++  return { db, queries, dataset, run };
++}
++
++test('catalog 公开冻结查询集合，同连接即时读取且保留合法命令能力', (t) => {
++  const db = new DatabaseSync(':memory:'); t.after(() => db.close());
++  const catalog = createBizOpCatalog(db, { assertCommitReady() {} });
++  assert.equal(catalog.db, db);
++  assert.equal(Object.isFrozen(catalog.queries), true);
++  assert.deepEqual(Object.keys(catalog.queries).sort(), ['iterateDatasetSources', 'iteratePublishedRunIdsUsingDataset',
++    'iterateRunArtifacts', 'readActiveDataset', 'readActiveDatasetForDelete', 'readDiagnosticByRef', 'readDispatchesForPlan',
++    'readExportObject', 'readPublishedRunForDelete']);
++  assert.equal(catalog.queries.readActiveDataset('OP', '2026-09-01'), null);
++  assert.equal(typeof catalog.transaction, 'function');
++  assert.equal(typeof catalog.commitImport, 'function');
++  assert.equal(typeof catalog.commitDelete, 'function');
++});
++
++test('ACTIVE 读取保留 head、kind 过滤、精确字段和新对象，不缓存旧状态', (t) => {
++  const { db, queries, dataset } = fixture(t);
++  dataset('data'); dataset('retired', { state: 'RETIRED', date: '2026-09-02' });
++  dataset('without-head', { head: false, date: '2026-09-03' });
++  dataset('flow', { kind: 'FLOW', date: '2026-09-04' });
++  assert.deepEqual(queries.readActiveDataset('OP', '2026-09-01'), { datasetId: 'data', kind: 'OP', dataDate: '2026-09-01',
++    publicVersion: 3, rowCount: 2, sourceManifestDigest: 'source-digest', manifestRelativePath: 'inputs/data/manifest.json', manifestDigest: 'manifest-digest' });
++  for (const date of ['2026-09-02', '2026-09-03', '2026-09-04']) assert.equal(queries.readActiveDataset('OP', date), null);
++  assert.equal(queries.readActiveDatasetForDelete('retired'), null);
++  assert.deepEqual(queries.readActiveDatasetForDelete('without-head'), { datasetId: 'without-head', kind: 'OP', dataDate: '2026-09-03',
++    publicVersion: 3, activatedAt: '2026-09-20T00:00:00Z' });
++  const first = queries.readActiveDataset('OP', '2026-09-01'); first.publicVersion = 100;
++  assert.equal(queries.readActiveDataset('OP', '2026-09-01').publicVersion, 3);
++  db.prepare("UPDATE biz_op_v327_datasets SET state='RETIRED' WHERE dataset_id='data'").run();
++  assert.equal(queries.readActiveDataset('OP', '2026-09-01'), null);
++});
++
++test('来源和结果原件按既有顺序逐行投影，关联结果保持 DISTINCT 查询的顺序', (t) => {
++  const { db, queries, run } = fixture(t);
++  for (const [id, order] of [[8, 2], [9, 0], [7, 1]]) {
++    db.prepare('INSERT INTO biz_op_v327_dataset_sources VALUES (?,?,?,?,?,?,?,?)')
++      .run('data', id, `hash-${id}`, `${id}.xlsx`, order, 'Sheet1', 'BU', 1);
++    db.prepare('INSERT INTO biz_op_v327_run_artifacts VALUES (?,?,?,?)').run('result-z', id, `${id}.xlsx`, `hash-${id}`);
++  }
++  assert.deepEqual([...queries.iterateDatasetSources('data')], [9, 7, 8].map((id, order) => ({ artifactId: id,
++    sha256: `hash-${id}`, originalName: `${id}.xlsx`, order, sheetName: 'Sheet1', bu: 'BU', rowCount: 1 })));
++  assert.deepEqual([...queries.iterateRunArtifacts('result-z')], [7, 8, 9].map((id) => ({ artifactId: id, originalName: `${id}.xlsx`, sha256: `hash-${id}` })));
++  run('result-z'); run('result-a'); run('deleted', { state: 'DELETED' });
++  const priorOrder = db.prepare(`SELECT DISTINCT r.run_id FROM biz_op_v327_runs r JOIN biz_op_v327_run_inputs i USING(run_id)
++    WHERE i.dataset_id=? AND r.state='PUBLISHED'`).all('data').map((row) => row.run_id);
++  assert.deepEqual([...queries.iteratePublishedRunIdsUsingDataset('data')], priorOrder);
++  assert.deepEqual(queries.readPublishedRunForDelete('result-z'), { runId: 'result-z', startDate: '2026-09-01', endDate: '2026-09-03',
++    resultVersion: 2, manifestDigest: 'run-digest', operationMonth: '2026-09' });
++  assert.equal(queries.readPublishedRunForDelete('deleted'), null);
++  assert.deepEqual([...queries.iterateDatasetSources('missing')], []);
++  assert.deepEqual([...queries.iterateRunArtifacts('missing')], []);
++});
++
++test('所有 iterator 支持同步提前退出和显式 return，不提前拉取或 all 分配', () => {
++  for (const method of ['iterateDatasetSources', 'iteratePublishedRunIdsUsingDataset', 'iterateRunArtifacts']) {
++    for (const exit of ['break', 'return', 'throw']) {
++      let pulled = 0; let closed = 0; let prepared = 0;
++      const row = { artifact_id: 8, source_sha256: 'hash', source_file_name: 'original.xlsx', source_file_order: 0,
++        source_sheet_name: 'Sheet', normalized_bu: 'BU', row_count: 1, run_id: 'result' };
++      const queries = createBizOpCatalogQueries({ db: { prepare(sql) {
++        prepared += 1; assert.match(sql, /^SELECT /);
++        return { iterate(id) {
++          assert.equal(id, 'id');
++          return { [Symbol.iterator]() { return this; }, next() { pulled += 1; return { value: row, done: false }; },
++            return() { closed += 1; return { done: true }; } };
++        }, all() { assert.fail('流式读取不能先收集全部行'); } };
++      } } });
++      const iterator = queries[method]('id');
++      assert.equal(typeof iterator.then, 'undefined');
++      if (exit === 'break') { for (const value of iterator) { assert.ok(value); break; } }
++      if (exit === 'return') { assert.equal(iterator.next().done, false); iterator.return(); }
++      if (exit === 'throw') assert.throws(() => { for (const value of iterator) { assert.ok(value); throw new Error('budget'); } }, /budget/);
++      assert.equal(prepared, 1); assert.equal(pulled, 1); assert.equal(closed, 1);
++      assert.equal(iterator.next().done, true);
++    }
++  }
++});
++
++test('SQLite 来源 iterator 提前退出释放 statement，可立即进行原连接维护', (t) => {
++  const { db, queries } = fixture(t);
++  db.exec("INSERT INTO biz_op_v327_dataset_sources VALUES ('data',1,'hash','a.xlsx',0,'Sheet','BU',1),('data',2,'hash','b.xlsx',1,'Sheet','BU',1)");
++  for (const source of queries.iterateDatasetSources('data')) { assert.equal(source.artifactId, 1); break; }
++  db.exec('DROP TABLE biz_op_v327_dataset_sources');
++});
++
++test('三类导出保留 ACTIVE/PUBLISHED/READY 过滤和完整 metadata 投影', (t) => {
++  const { db, queries, dataset, run } = fixture(t);
++  dataset('data'); dataset('retired', { state: 'RETIRED', head: false });
++  run('result'); run('staged', { state: 'STAGED' });
++  assert.deepEqual(queries.readExportObject('RESULT_FULL', 'result'), { objectKind: 'RESULT', metadata: { version: 2,
++    startDate: '2026-09-01', endDate: '2026-09-03', inputFingerprint: 'fingerprint', publishedAt: '2026-09-20T00:00:00Z',
++    startInputVersion: 3, endInputVersion: 9 }, manifestRelativePath: 'results/result/manifest.json', manifestDigest: 'run-digest' });
++  assert.deepEqual(queries.readExportObject('OP_CHECK', 'data'), { objectKind: 'DATASET', metadata: { version: 3,
++    dataDate: '2026-09-01', sourceManifestDigest: 'source-digest', activatedAt: '2026-09-20T00:00:00Z' },
++  manifestRelativePath: 'inputs/data/manifest.json', manifestDigest: 'manifest-digest' });
++  assert.equal(queries.readExportObject('FLOW_CHECK', 'data'), null);
++  assert.equal(queries.readExportObject('OP_RAW', 'retired'), null);
++  assert.equal(queries.readExportObject('RESULT_FULL', 'staged'), null);
++  for (const [id, state, sealed] of [['report', 'READY', true], ['retired-report', 'RETIRED', true], ['unsealed-report', 'READY', false]]) {
++    db.prepare('INSERT INTO biz_op_v327_diagnostic_reports VALUES (?,?,?,?,?,?,?,?,?)').run(id, 'task', 1, 0, 4, 'diag-digest', state, 'job', 'session');
++    if (sealed) db.prepare('INSERT INTO biz_op_v327_diagnostic_lifecycle VALUES (?,?)').run(id, `diagnostics/${id}/manifest.json`);
++  }
++  assert.deepEqual(queries.readExportObject('ERRORS', 'report'), { objectKind: 'DIAGNOSTIC', metadata: { producerTaskRunId: 'task',
++    scanComplete: true, errorCountExact: false, sampleCount: 4 }, manifestRelativePath: 'diagnostics/report/manifest.json', manifestDigest: 'diag-digest' });
++  for (const id of ['retired-report', 'unsealed-report', 'missing']) assert.equal(queries.readExportObject('ERRORS', id), null);
++});
++
++test('RESULT 端点必须恰好两条且有起止版本，保持 metadata missing 错误', (t) => {
++  const { queries, run } = fixture(t);
++  for (const [index, endpoints] of [[], [['START_OP', 1]], [['START_OP', 1], ['START_OP', 2]],
++    [['START_OP', 1], ['END_OP', null]], [['START_OP', 1], ['END_OP', 0]], [['START_OP', 1], ['END_OP', 2], ['END_OP', 3]]].entries()) {
++    const id = `broken-${index}`; run(id, { endpoints });
++    assert.throws(() => queries.readExportObject('RESULT_FULL', id), { code: 'BIZOP_EXPORT_INPUT_METADATA_MISSING' });
++  }
++  assert.equal(queries.readExportObject('RESULT_FULL', 'missing'), null);
++});
++
++test('诊断和 dispatch 保留原字段与数字类型，重复 carrier 不在 query 中隐藏', (t) => {
++  const { db, queries } = fixture(t);
++  for (const [task, digest, job] of [['task', 'plan', 'job1'], ['task', 'plan', 'job2'], ['other', 'plan', 'job3'], ['task', 'other', 'job4']]) {
++    db.prepare('INSERT INTO biz_op_v327_dispatches VALUES (?,?,?,?,?)').run(task, digest, job, 'session', 'CLOSED');
++  }
++  const dispatches = queries.readDispatchesForPlan('task', 'plan');
++  assert.equal(dispatches.length, 2);
++  assert.deepEqual(dispatches, db.prepare('SELECT * FROM biz_op_v327_dispatches WHERE task_run_id=? AND plan_digest=?').all('task', 'plan'));
++  dispatches[0].state = 'CHANGED'; assert.equal(queries.readDispatchesForPlan('task', 'plan')[0].state, 'CLOSED');
++  db.prepare('INSERT INTO biz_op_v327_diagnostic_reports VALUES (?,?,?,?,?,?,?,?,?)').run('report', 'task', 1, 0, 0, 'digest', 'READY', 'job1', 'session');
++  const report = queries.readDiagnosticByRef('report');
++  assert.deepEqual(report, db.prepare('SELECT * FROM biz_op_v327_diagnostic_reports WHERE report_ref=?').get('report'));
++  assert.equal(typeof report.scan_complete, 'number'); assert.equal(report.error_count_exact, 0);
++  assert.equal(queries.readDiagnosticByRef('missing'), null); assert.deepEqual(queries.readDispatchesForPlan('missing', 'plan'), []);
++});
++
++test('所有查询可在 SQLite query_only 内执行，无写入或事务且 SQL 错误不转为空', (t) => {
++  const { db, queries, dataset, run } = fixture(t); dataset('data'); run('result');
++  db.exec('PRAGMA query_only=ON');
++  const changes = db.prepare('SELECT total_changes() AS n').get().n;
++  assert.ok(queries.readActiveDataset('OP', '2026-09-01'));
++  assert.ok(queries.readActiveDatasetForDelete('data')); assert.ok(queries.readPublishedRunForDelete('result'));
++  for (const kind of ['OP_CHECK', 'RESULT_FULL', 'ERRORS']) queries.readExportObject(kind, kind === 'OP_CHECK' ? 'data' : 'result');
++  [...queries.iterateDatasetSources('data')]; [...queries.iteratePublishedRunIdsUsingDataset('data')]; [...queries.iterateRunArtifacts('result')];
++  queries.readDispatchesForPlan('task', 'plan'); queries.readDiagnosticByRef('report');
++  assert.equal(db.prepare('SELECT total_changes() AS n').get().n, changes);
++  assert.equal(db.isTransaction, false);
++  const failure = new Error('sqlite failed');
++  const broken = createBizOpCatalogQueries({ db: { prepare() { throw failure; } } });
++  assert.throws(() => broken.readActiveDataset('OP', 'date'), (error) => error === failure);
++  assert.throws(() => broken.iterateDatasetSources('data').next(), (error) => error === failure);
++});
++
++test('计算完整 missing 清单先于来源检查；4096 预算退出会关闭来源 iterator', () => {
++  const missingCatalog = { get db() { assert.fail('协调器不能绕回原始连接'); }, queries: { readActiveDataset() { return null; },
++    iterateDatasetSources() { assert.fail('缺少输入时不能提前验证来源'); } } };
++  assert.throws(() => collectInputs({ catalog: missingCatalog, startDate: '2026-09-01', endDate: '2026-09-03' }), (error) => {
++    assert.equal(error.code, 'BIZOP_RUN_INPUT_MISSING');
++    assert.deepEqual(error.missing.map(({ role, dataDate }) => [role, dataDate]), [['START_OP', '2026-09-01'], ['END_OP', '2026-09-03'],
++      ['FLOW', '2026-09-02'], ['FLOW', '2026-09-03']]); return true;
++  });
++  let pulled = 0; let closed = false; let checked = 0;
++  const catalog = { get db() { assert.fail('协调器不能绕回原始连接'); }, queries: {
++    readActiveDataset() { return { datasetId: 'data' }; }, *iterateDatasetSources() {
++      try { while (true) { pulled += 1; yield { artifactId: pulled, sha256: 'hash', bu: 'BU' }; } } finally { closed = true; }
++    }
++  }, archive: { getArtifact() { checked += 1; return { status: 'ready', blob: { sha256: 'hash' } }; },
++    listArtifactHolds() { return [{ ownerModule: 'biz-op-recon', ownerType: 'v327-input', ownerId: 'data' }]; } } };
++  assert.throws(() => collectInputs({ catalog, startDate: '2026-09-01', endDate: '2026-09-03' }), { code: 'BIZOP_RUN_INPUT_BUDGET' });
++  assert.equal(pulled, 4093); assert.equal(checked, 4092); assert.equal(closed, true);
++});
++
++test('导出冻结 JSON 保留字段顺序，manifest 判断及错误优先级由协调器维持', async (t) => {
++  const { queries, run, dataset } = fixture(t); run('result'); dataset('data');
++  const catalog = { queries, get db() { assert.fail('协调器不能绕回原始连接'); } };
++  let reads = 0;
++  const payloadStore = { readDocument(relativePath, digest) {
++    reads += 1; assert.equal(relativePath, 'results/result/manifest.json'); assert.equal(digest, 'run-digest');
++    return { value: { objectId: 'result', objectKind: 'RESULT', catalog: { ruleVersion: RULE_VERSION, resultSchemaVersion: LEGACY_RESULT_SCHEMA_VERSION } } };
++  } };
++  const result = await freezeExportSource({ catalog, payloadStore, objectId: 'result', outputKind: 'RESULT_FULL' });
++  assert.equal(JSON.stringify(result), JSON.stringify({ columnSchemaVersion: 1, manifestDigest: 'run-digest',
++    manifestRelativePath: 'results/result/manifest.json', metadata: { endDate: '2026-09-03', endInputVersion: 9,
++      inputFingerprint: 'fingerprint', publishedAt: '2026-09-20T00:00:00Z', startDate: '2026-09-01', startInputVersion: 3, version: 2 },
++    objectId: 'result', objectKind: 'RESULT', outputKind: 'RESULT_FULL' }));
++  assert.equal(reads, 1);
++  const source = await freezeExportSource({ catalog, payloadStore, objectId: 'data', outputKind: 'OP_CHECK' });
++  assert.deepEqual(Object.keys(source), ['columnSchemaVersion', 'manifestDigest', 'manifestRelativePath', 'metadata', 'objectId', 'objectKind', 'outputKind']);
++  assert.equal(reads, 1);
++  await assert.rejects(freezeExportSource({ catalog, payloadStore, objectId: 'result', outputKind: 'RESULT_FULL', columnSchemaVersion: 2 }),
++    { code: 'BIZOP_EXPORT_CONTRACT_MISMATCH' });
++  run('broken', { endpoints: [] });
++  await assert.rejects(freezeExportSource({ catalog, payloadStore, objectId: 'broken', outputKind: 'RESULT_FULL' }), { code: 'BIZOP_EXPORT_INPUT_METADATA_MISSING' });
++  await assert.rejects(freezeExportSource({ catalog, payloadStore, objectId: 'missing', outputKind: 'RESULT_FULL' }), { code: 'BIZOP_EXPORT_SOURCE_UNAVAILABLE' });
++  await assert.rejects(freezeExportSource({ catalog, payloadStore, objectId: 'missing', outputKind: 'UNKNOWN' }), { code: 'BIZOP_OUTPUT_SCHEMA_UNKNOWN' });
++  assert.equal(reads, 2, '元数据或源不存在时不读 manifest');
++});
+diff --git a/tests/unit/main-process/biz-op-v327-import-query.test.js b/tests/unit/main-process/biz-op-v327-import-query.test.js
+new file mode 100644
+index 00000000..c8ddb061
+--- /dev/null
++++ b/tests/unit/main-process/biz-op-v327-import-query.test.js
+@@ -0,0 +1,69 @@
++'use strict';
++
++const { durableDirectoryTest: test } = require('../../helpers/durable-directory-tests');
++const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const path = require('node:path');
++const { createHost } = require('../../helpers/biz-op-v327-host');
++const { writeXlsx, flowRow } = require('../../helpers/biz-op-v327-xlsx');
++const { createBizOpImportCoordinator } = require('../../../src/main-process/biz-op-v327/import-main');
++
++async function diagnosticFixture(t) {
++  const host = await createHost(t);
++  const file = path.join(host.root, 'invalid.xlsx');
++  await writeXlsx(file, { rowCount: 1, row: () => flowRow({ direction: '非法方向' }) });
++  const result = await host.run([file]);
++  assert.equal(result.status, 'error');
++  const report = host.module.catalog.queries.readDiagnosticByRef(result.reportRef);
++  assert.equal(report.state, 'READY');
++  return { ...host, report };
++}
++
++function reader(host, { queries = host.module.catalog.queries, protection = host.module.protection } = {}) {
++  // 协调器不能索取句柄；闭包中的 catalog 命令仍使用原连接。
++  const catalog = { ...host.module.catalog, queries };
++  Object.defineProperty(catalog, 'db', { get() { throw new Error('诊断读取绕过 query'); } });
++  return createBizOpImportCoordinator({ catalog, payloadStore: host.module.payloadStore, protection });
++}
++
++test('诊断恢复经 query 重读现有 producer 与 digest，不透传 raw DB 或缓存旧验证', async (t) => {
++  const f = await diagnosticFixture(t);
++  const coordinator = reader(f);
++  assert.equal(await coordinator.restoreDiagnostic(f.report.task_run_id), f.report.report_ref);
++  for (const field of ['producer_job_id', 'producer_session_id', 'manifest_digest']) {
++    // 列名来自本测试固定列表，值使用绑定参数；故障仅在临时库内注入。
++    f.db.prepare(`UPDATE biz_op_v327_diagnostic_reports SET ${field}=? WHERE report_ref=?`).run('changed', f.report.report_ref);
++    await assert.rejects(coordinator.restoreDiagnostic(f.report.task_run_id), { code: 'BIZOP_REPORT_OWNER_MISMATCH' });
++    f.db.prepare(`UPDATE biz_op_v327_diagnostic_reports SET ${field}=? WHERE report_ref=?`).run(f.report[field], f.report.report_ref);
++    assert.equal(await coordinator.restoreDiagnostic(f.report.task_run_id), f.report.report_ref);
++  }
++});
++
++test('诊断关闭屏障先于 query，producer 缺失时先于现有报告读取拒绝', async (t) => {
++  const f = await diagnosticFixture(t);
++  let reads = 0;
++  const queries = { ...f.module.catalog.queries,
++    readDispatchesForPlan(...args) { reads += 1; return f.module.catalog.queries.readDispatchesForPlan(...args); },
++    readDiagnosticByRef() { throw new Error('缺 producer 时不应读取报告'); } };
++  const closedPending = reader(f, { queries, protection: { ...f.module.protection, closed: () => false } });
++  await assert.rejects(closedPending.restoreDiagnostic(f.report.task_run_id), { code: 'BIZOP_CARRIER_CLOSURE_PENDING' });
++  assert.equal(reads, 0);
++  f.db.prepare('UPDATE biz_op_v327_dispatches SET plan_digest=? WHERE task_run_id=?').run('0'.repeat(64), f.report.task_run_id);
++  await assert.rejects(reader(f, { queries }).restoreDiagnostic(f.report.task_run_id), { code: 'BIZOP_REPORT_OWNER_MISMATCH' });
++  assert.equal(reads, 1);
++});
++
++test('尚未登记的诊断在 query 后仍核验真实样本文件，损坏时不注册', async (t) => {
++  const f = await diagnosticFixture(t);
++  const relative = `diagnostics/${f.report.report_ref}/manifest.json`;
++  const manifest = f.module.payloadStore.readDocument(relative).value;
++  const sample = f.module.payloadStore.resolve(`diagnostics/${f.report.report_ref}/${manifest.parts[0].name}`);
++  fs.appendFileSync(sample, 'corrupted');
++  let registered = 0;
++  const coordinator = reader(f, {
++    queries: { ...f.module.catalog.queries, readDiagnosticByRef: () => null },
++    protection: { ...f.module.protection, registerDiagnostic() { registered += 1; throw new Error('不应注册损坏样本'); } }
++  });
++  await assert.rejects(coordinator.restoreDiagnostic(f.report.task_run_id), { code: 'BIZOP_PART_MISMATCH' });
++  assert.equal(registered, 0);
++});

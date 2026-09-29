@@ -1,0 +1,7 @@
+{
+  "baseline": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "method": "git archive 固定基线到临时只读源快照，运行原检查器；未包含 G5 差异",
+  "exitCode": 1,
+  "error": "AssertionError [ERR_ASSERTION]: E13-G Action Manifest drift",
+  "sourceSnapshotRemoved": true
+}

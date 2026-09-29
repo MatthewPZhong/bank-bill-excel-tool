@@ -11,7 +11,7 @@ const {
 } = require('./common');
 // 自研流式 xlsx 读取器（JSZip + nodeStream 增量解码，内存恒定）。
 //   仅用于 readMeaningfulRowsHead 的「只读文件头部前 N 行」场景，规避 SheetJS 全量读大文件 OOM。
-const { readXlsxStreamed } = require('../pending-import/streaming-xlsx-reader');
+const { readXlsxStreamed } = require('../xlsx/legacy/streaming-xlsx-reader');
 
 function ensureSupportedFile(filePath) {
   const extension = path.extname(filePath).toLowerCase();

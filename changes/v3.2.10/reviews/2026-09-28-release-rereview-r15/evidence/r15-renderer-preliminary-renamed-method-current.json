@@ -1,0 +1,88 @@
+[
+  {
+    "scanner": "WORKTREE",
+    "name": "empty-forof-label-break-safe",
+    "source": "const reviewOld={runReviewScenario(){}};const reviewClean={runReviewScenario(){}};const reviewBox={api:reviewOld};async function runReviewScenario(){const reviewInfo=await window.desktopApi.app.getInfo();outer:do{for(const item of []){if(reviewInfo.hasEnum)break outer;}reviewBox.api=reviewClean;}while(false);const reviewOther=reviewBox.api;reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewOld});return reviewOther===reviewOld;}runReviewScenario();",
+    "baseViolations": 0,
+    "scanError": null,
+    "probeViolations": [
+      {
+        "rule": "ARCH-RENDERER-SCOPE",
+        "boundaryId": "renderer-bank-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 398,
+        "message": "scoped api 未授权字段 outsideScope",
+        "functionPath": "runReviewScenario"
+      },
+      {
+        "rule": "ARCH-RENDERER-SCOPE",
+        "boundaryId": "renderer-bank-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 398,
+        "message": "scoped api 未授权字段 runReviewScenario",
+        "functionPath": "runReviewScenario"
+      }
+    ],
+    "boundaryCount": 20,
+    "runtime": {
+      "ipcReads": 1,
+      "same": false,
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "runReviewScenario"
+      ],
+      "whole": false,
+      "extraCallable": false
+    }
+  },
+  {
+    "scanner": "WORKTREE",
+    "name": "nonempty-forof-label-break-unsafe",
+    "source": "const reviewOld={runReviewScenario(){}};const reviewClean={runReviewScenario(){}};const reviewBox={api:reviewOld};async function runReviewScenario(){const reviewInfo=await window.desktopApi.app.getInfo();outer:do{for(const item of [0]){if(reviewInfo.hasEnum)break outer;}reviewBox.api=reviewClean;}while(false);const reviewOther=reviewBox.api;reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewOld});return reviewOther===reviewOld;}runReviewScenario();",
+    "baseViolations": 0,
+    "scanError": null,
+    "probeViolations": [
+      {
+        "rule": "ARCH-RENDERER-SCOPE",
+        "boundaryId": "renderer-bank-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 399,
+        "message": "scoped api 未授权字段 outsideScope",
+        "functionPath": "runReviewScenario"
+      },
+      {
+        "rule": "ARCH-RENDERER-SCOPE",
+        "boundaryId": "renderer-bank-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 399,
+        "message": "scoped api 未授权字段 runReviewScenario",
+        "functionPath": "runReviewScenario"
+      }
+    ],
+    "boundaryCount": 20,
+    "runtime": {
+      "ipcReads": 1,
+      "same": true,
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "runReviewScenario",
+        "outsideScope"
+      ],
+      "whole": false,
+      "extraCallable": true,
+      "extraResult": true
+    }
+  }
+]

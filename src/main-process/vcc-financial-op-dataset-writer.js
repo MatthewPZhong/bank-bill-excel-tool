@@ -14,16 +14,13 @@ const {
 } = require('../backend/vcc-financial-op/definitions');
 const { canonicalizeVccAmount } = require('../backend/vcc-financial-op/amount-rules');
 const {
-  HASH_VERSION,
-  PENDING_HASH_VERSION,
   mapDetailRow,
   normalizeYearMonth,
-  contentHash,
-  pendingCanonicalValues,
-  pendingContentHash
+  pendingCanonicalValues
 } = require('../backend/vcc-financial-op/row-mapper');
+const { assertMappedLineage } = require('../backend/vcc-financial-op/mapped-lineage-contract');
 const { streamStoredDetailRows, openWorkbookSheets } = require('../backend/vcc-financial-op/workbook-reader');
-const { openRichWorkbook } = require('../backend/xlsx-rich-reader');
+const { openRichWorkbook } = require('../backend/xlsx/rich-workbook');
 const { hashSourceFile } = require('../backend/vcc-financial-op/source-lineage');
 const { createArchiveRepository } = require('../backend/database/archive-repository');
 const { assertArtifactMember } = require('../backend/vcc-financial-op/import-handoff');
@@ -34,8 +31,6 @@ const { writeXlsxAtomically } = require('./vcc-financial-op-output-publication')
 
 const MAX_DATA_ROWS_PER_SHEET = 1048575;
 const WORKBOOK_ABORT_TIMEOUT_MS = 2000;
-const LEGACY_DETAIL_HASH_VERSION = 1;
-const LEGACY_PENDING_HASH_VERSION = 2;
 const EXPORT_KINDS = Object.freeze({ RAW: 'raw', CHECK: 'check' });
 const ALLOWED_SOURCE_TYPES = new Set(Object.values(SOURCE_TYPES));
 
@@ -663,43 +658,6 @@ function detailRowValuesFromRaw(expected, rawValues, scope) {
     : detailCheckValues(expected, rawValues);
 }
 
-function mappedContentHashForStoredVersion(expected, mapped) {
-  const storedVersion = Number(expected.hash_version);
-  if (expected.source_type === SOURCE_TYPES.PENDING) {
-    if (storedVersion === PENDING_HASH_VERSION) return mapped.contentHash;
-    if (storedVersion === LEGACY_PENDING_HASH_VERSION) {
-      return pendingContentHash(mapped.values, mapped.rawContractVersion);
-    }
-  } else {
-    if (storedVersion === HASH_VERSION) return mapped.contentHash;
-    if (storedVersion === LEGACY_DETAIL_HASH_VERSION) {
-      return contentHash(
-        expected.source_type,
-        JSON.stringify(mapped.values),
-        expected.subject
-      );
-    }
-  }
-  throw exportError(
-    'archive-row-integrity-failure',
-    `导入记录 ${expected.import_record_id} 原表第 ${expected.source_row} 行使用未知内容哈希版本 ${expected.hash_version}`
-  );
-}
-
-function assertMappedLineage(expected, mapped) {
-  const reconstructedContentHash = mapped.disposition
-    ? null
-    : mappedContentHashForStoredVersion(expected, mapped);
-  if (mapped.disposition
-      || mapped.idempotencyKey !== expected.idempotency_key
-      || reconstructedContentHash !== expected.content_hash) {
-    throw exportError(
-      'archive-row-integrity-failure',
-      `导入记录 ${expected.import_record_id} 原表第 ${expected.source_row} 行与当前有效数据的幂等键或内容哈希不一致`
-    );
-  }
-}
-
 function mapStoredRaw(expected, rawJson) {
   const rawValues = parseJson(rawJson, null);
   if (!Array.isArray(rawValues)) {
@@ -950,7 +908,7 @@ async function emitReconstructedSystemRows(db, scope, archiveSources, emit) {
       const member = storedSourceMember(db, sourceId);
       const names = db.prepare('SELECT DISTINCT sheet_name FROM vcc_fin_op_system_snapshots WHERE target_month = ? AND import_source_id = ?')
         .all(scope.targetMonth, sourceId).map((row) => row.sheet_name);
-      const workbook = await openRichWorkbook(source.filePath, { memoryBudgetBytes: 64 * 1024 * 1024 });
+      const workbook = await openRichWorkbook(source.filePath, { memoryBudgetBytes: 64 * 1024 * 1024, lruMaxEntries: 8192 });
       try {
         for (const name of names) {
           const sheetIndex = workbook.sheets.findIndex((sheet) => sheet.name === name);

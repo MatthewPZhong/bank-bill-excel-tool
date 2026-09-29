@@ -28,10 +28,10 @@ const {
   validateTaskOwnedStagingPath
 } = require('../statement-worker/staging-ownership');
 const {
-  publishDurableArtifactAsync,
-  recoverToolboxPublicationsAsync
+  publishDurableArtifactAsync
 } = require('../toolbox-output-publication-dispatch');
 const {
+  NEW_ACCOUNT_SAVE_AS_ACTION,
   validateNewAccountGenerationResult
 } = require('./generation-contract');
 const {
@@ -41,7 +41,6 @@ const {
   assertNewAccountExpectedArtifactAuthority
 } = require('./generation-validator');
 
-const NEW_ACCOUNT_SAVE_AS_ACTION = 'new-account:save-as';
 const NEW_ACCOUNT_SAVE_AS_SCHEMA_VERSION = 1;
 const MAX_COPY_CONTRACT_BYTES = 256 * 1024;
 const MAX_COPY_ARTIFACT_BYTES = 256 * 1024 * 1024;
@@ -778,15 +777,23 @@ async function acknowledgeNewAccountSaveAsPublication(options = {}) {
     );
   }
   const taskId = boundedText(options.taskId, 'taskId', 512);
-  const recovered = await (options.recoverPublications || recoverToolboxPublicationsAsync)({
-    userDataDir: absolutePath(options.userDataDir, 'userDataDir'),
-    deferCommittedRecovery: true,
+  if (typeof options.recoverPublications !== 'function') {
+    const error = new Error('NewAccount receipt 确认需要受限 Archive recovery facade');
+    error.code = 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED';
+    error.preserveTemporaryFiles = true;
+    throw error;
+  }
+  const recovered = await options.recoverPublications({
+    reason: 'receipt-ack',
+    taskIds: [taskId],
     acknowledgedCommittedTaskIds: [taskId]
   });
   const finalized = Array.isArray(recovered && recovered.recovered)
     ? recovered.recovered.find((item) => item && String(item.taskId) === taskId)
     : null;
-  if (!finalized || finalized.action !== 'commit-cleanup') {
+  if (!finalized || finalized.action !== 'commit-cleanup'
+      || (recovered.deferred || []).some((item) => item.taskId === taskId)
+      || (recovered.skippedActive || []).includes(taskId)) {
     fail(
       'NEW_ACCOUNT_SAVE_AS_RECEIPT_ACK_FAILED',
       'NewAccount publication receipt未完成Task终态确认清理'

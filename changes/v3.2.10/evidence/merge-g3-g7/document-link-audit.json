@@ -1,0 +1,11 @@
+{
+  "checkedModuleDocumentLinks": 449,
+  "missing": [],
+  "relocationDocumentSemantics": {
+    "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/implementation-notes.md": "Only Markdown link targets changed",
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/techdoc.md": "Only Markdown link targets changed"
+  },
+  "finalReleaseAndChangedDocumentsLinksChecked": 184,
+  "finalMissing": [],
+  "archivedEvidenceHashesMatched": 77
+}

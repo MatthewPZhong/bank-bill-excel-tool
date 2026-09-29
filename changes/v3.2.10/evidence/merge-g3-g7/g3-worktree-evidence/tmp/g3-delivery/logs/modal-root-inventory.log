@@ -1,0 +1,17 @@
+src/renderer-previews.js:108:      return Array.from(elements.modalRoot?.children || []).find((element) => modalHost.getHandle(element) === handle) || null;
+src/renderer.js:317:  modalRoot: document.getElementById('modalRoot'),
+src/renderer.js:427:  root: elements.modalRoot,
+src/renderer.js:1453:  const dialog = elements.modalRoot?.querySelector('.app-update-settings-card');
+src/renderer.js:1546:  const activeModal = elements.modalRoot?.firstElementChild;
+src/renderer.js:1572:  if (state.appUpdatePromptObserver || !elements.modalRoot || typeof MutationObserver !== 'function') return;
+src/renderer.js:1574:    if (!state.appUpdatePromptPending || elements.modalRoot.childElementCount > 0) return;
+src/renderer.js:1581:  state.appUpdatePromptObserver.observe(elements.modalRoot, { childList: true });
+src/renderer.js:1853:        elements.modalRoot.contains(event.target)
+src/renderer.js:1935:        const archiveTab = elements.modalRoot
+src/renderer.js:1939:          elements.modalRoot
+src/renderer.js:1949:        elements.modalRoot
+src/renderer/modal-host.js:247:          try { record.overlay.remove(); } catch (error) { report(error, 'remove', record); }
+7:    if (!root || !document || typeof root.appendChild !== 'function') {
+247:          try { record.overlay.remove(); } catch (error) { report(error, 'remove', record); }
+264:      record.scope.public.onDispose(() => record.overlay.removeEventListener('click', onBackdrop));
+266:        root.appendChild(record.overlay);

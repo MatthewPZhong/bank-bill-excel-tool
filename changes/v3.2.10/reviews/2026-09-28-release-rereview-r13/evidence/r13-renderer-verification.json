@@ -1,0 +1,65 @@
+{
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "commands": [
+    {
+      "purpose": "4个相邻时序例current",
+      "cmd": "node /tmp/r13-renderer-probes.cjs > /tmp/r13-renderer-probes-current.jsonl",
+      "exitCode": 0,
+      "cases": 4,
+      "violations": [
+        0,
+        1,
+        0,
+        0
+      ],
+      "scanErrorCount": 0
+    },
+    {
+      "purpose": "R12repair before自举并运行相同4例",
+      "cmd": "renderer_before_root=\"$(node /tmp/r13-renderer-before-bootstrap.cjs)\"\nRENDERER_SCANNER_ROOT=\"$renderer_before_root\" node /tmp/r13-renderer-probes.cjs > /tmp/r13-renderer-probes-before.jsonl",
+      "exitCode": 0,
+      "cases": 4,
+      "violations": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "scanErrorCount": 0
+    },
+    {
+      "purpose": "actual20 current 条件调用违规与无条件调用安全",
+      "cmd": "node /tmp/r13-renderer-conditional-realconfig.cjs > /tmp/r13-renderer-conditional-realconfig.json 2> /tmp/r13-renderer-conditional-realconfig-progress.log",
+      "exitCode": 0,
+      "cases": 2,
+      "boundaries": 20,
+      "baseViolations": 0,
+      "probeViolations": [
+        0,
+        0
+      ],
+      "scanErrorCount": 0
+    },
+    {
+      "purpose": "actual20 before 相同源码",
+      "cmd": "renderer_before_root=\"$(python3 -c 'import json;print(json.load(open(\"/tmp/r13-renderer-before-inputs.json\"))[\"root\"])')\"\nRENDERER_SCANNER_ROOT=\"$renderer_before_root\" node /tmp/r13-renderer-conditional-realconfig-replay.cjs > /tmp/r13-renderer-conditional-realconfig-before.json 2> /tmp/r13-renderer-conditional-realconfig-before-progress.log",
+      "exitCode": 0,
+      "cases": 2,
+      "boundaries": 20,
+      "baseViolations": 0,
+      "probeViolations": [
+        1,
+        1
+      ],
+      "scanErrorCount": 0
+    },
+    {
+      "purpose": "两份实际配置源码各执行条件true/false的VM",
+      "cmd": "node /tmp/r13-renderer-branch-vm.cjs > /tmp/r13-renderer-branch-vm.json",
+      "exitCode": 0,
+      "cases": 4,
+      "assertions": "same and capability match conditional false only"
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "configuration": "Complete current 31 boundaries and allowlist, copied production src and index; only temporary helper and entry added",
+  "baseline": {
+    "coverage": {
+      "files": 765,
+      "parseErrors": 0,
+      "unresolved": 2
+    },
+    "violations": []
+  },
+  "results": [
+    {
+      "name": "opaque-parameter-spread",
+      "source": "const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];function invoke(values,c){const handlers=[...values,safe];return handlers[1](c);}exports.read=c=>invoke([safe,query],c);",
+      "sql": [
+        "SELECT 1 AS value"
+      ],
+      "runtimeResult": [
+        {
+          "value": 1
+        }
+      ],
+      "coverage": {
+        "files": 766,
+        "parseErrors": 0,
+        "unresolved": 2
+      },
+      "violations": [
+        {
+          "rule": "ARCH-STATIC-COVERAGE",
+          "boundaryId": "bizop-query-q2",
+          "from": "src/main-process/biz-op-v327/r3-query-helper.js",
+          "to": null,
+          "line": 1,
+          "column": 138,
+          "message": "读取 helper 的动态执行目标无法完整解释",
+          "evidenceId": "75a876059ec733df5eb482570e0a839295e624e0be97cf57c0bd30b166a46ed9",
+          "functionPath": "invoke"
+        }
+      ]
+    },
+    {
+      "name": "known-static-spread",
+      "source": "const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];const handlers=[...[safe,query],safe];exports.read=c=>handlers[1](c);",
+      "sql": [
+        "SELECT 1 AS value"
+      ],
+      "runtimeResult": [
+        {
+          "value": 1
+        }
+      ],
+      "coverage": {
+        "files": 766,
+        "parseErrors": 0,
+        "unresolved": 2
+      },
+      "violations": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "boundaryId": "bizop-query-q2",
+          "from": "src/main-process/biz-op-v327/r3-query-helper.js",
+          "to": null,
+          "line": 1,
+          "column": 15,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "evidenceId": "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+          "functionPath": "query"
+        }
+      ]
+    },
+    {
+      "name": "safe",
+      "source": "const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];const handlers=[query,safe];exports.read=c=>handlers[1](c);",
+      "sql": [],
+      "runtimeResult": [],
+      "coverage": {
+        "files": 766,
+        "parseErrors": 0,
+        "unresolved": 2
+      },
+      "violations": []
+    }
+  ]
+}

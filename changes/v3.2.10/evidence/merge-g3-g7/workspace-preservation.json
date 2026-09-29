@@ -1,0 +1,22 @@
+{
+  "checkedAt": "2026-09-21T03:15:04.095488+00:00",
+  "main": {
+    "originalFiles": 130,
+    "mismatches": [],
+    "headUnchanged": true
+  },
+  "sources": {
+    "G3": {
+      "selectedFiles": 188,
+      "selectedMismatches": [],
+      "excludedFiles": 2,
+      "excludedMismatches": []
+    },
+    "G7": {
+      "selectedFiles": 243,
+      "selectedMismatches": [],
+      "excludedFiles": 6,
+      "excludedMismatches": []
+    }
+  }
+}

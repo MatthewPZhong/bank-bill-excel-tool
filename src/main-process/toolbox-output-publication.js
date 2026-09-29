@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { digest, recoveryError, verify } = require('./publication-recovery/worker-authority');
 const fs = require('node:fs');
 const path = require('node:path');
 const {
@@ -23,7 +24,7 @@ const {
 const JOURNAL_INDEX_NAME = 'toolbox-publish-journal-index.json';
 const JOURNAL_VERSION = 1;
 const COPY_BUFFER_SIZE = 1024 * 1024;
-const PREPARED_RUNTIME = Symbol('toolboxPublicationRuntime');
+const preparedAuthorities = new WeakMap();
 const INDEX_DISCOVERY_PREPARING = 'preparing';
 const INDEX_DISCOVERY_PREPARED = 'prepared';
 const INDEX_DISCOVERY_CANCELLING = 'cancelling';
@@ -1795,7 +1796,7 @@ function committedRecoveryAccepted(options, recovered) {
   if (!recovered.batchContext
       || !Array.isArray(recovered.files)
       || recovered.files.length === 0) {
-    return true;
+    return false;
   }
   const acknowledged = new Set(
     Array.isArray(options.acknowledgedCommittedTaskIds)
@@ -1803,7 +1804,7 @@ function committedRecoveryAccepted(options, recovered) {
       : []
   );
   if (acknowledged.has(String(recovered.taskId))) return true;
-  return options.deferCommittedRecovery !== true;
+  return false;
 }
 
 function recoverFinalizingIntent(runtime, indexEntry, options = {}) {
@@ -1851,7 +1852,7 @@ function recoverFinalizingIntent(runtime, indexEntry, options = {}) {
     warnings: [],
     ...lineage
   };
-  if (!committedRecoveryAccepted(options, recovered)) {
+  if (recoveredAction === 'commit-cleanup' && !committedRecoveryAccepted(options, recovered)) {
     return { ...recovered, action: 'commit-handoff-pending' };
   }
   if (recoveredAction === 'commit-cleanup' && options.deferCommittedFinalization === true) {
@@ -2009,33 +2010,143 @@ function recoverOneJournal(runtime, indexEntry, options = {}) {
   return { taskId: journal.taskId, action: 'rolled-back', warnings: [] };
 }
 
-function recoverPendingInternal(runtime, userDataDir, options = {}) {
-  const resolvedUserDataDir = path.resolve(userDataDir);
-  const { value } = readIndex(runtime, resolvedUserDataDir);
-  const recovered = [];
-  const skippedActive = [];
-  for (const entry of value.entries.slice()) {
-    if (activeTaskIds.has(entry.taskId)) {
-      skippedActive.push(entry.taskId);
-      continue;
+function recoveryPathsForRecord(record) {
+  const entry = record.indexEntry;
+  return [record.journalPath, ...(entry.stagedAbsolutePaths || []),
+    ...(entry.backupAbsolutePaths || []), ...(entry.targetAbsolutePaths || [])];
+}
+
+function discoveryFileEvidence(runtime, filePath) {
+  const stat = lstatOrNull(runtime.fsImpl, filePath);
+  if (!stat) return { path: filePath, missing: true };
+  return { path: filePath, mode: Number(stat.mode), dev: String(stat.dev), ino: String(stat.ino),
+    size: Number(stat.size), mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs,
+    sha256: stat.isFile() ? hashFileSync(runtime.fsImpl, filePath) : null };
+}
+
+// 全根发现严格只读；连 manual-recovery 标记也不能在 owner 决策之前写入。
+function discoverRecoveryInternal(runtime, userDataDir) {
+  const root = path.resolve(userDataDir);
+  const { indexPath, value } = readIndex(runtime, root);
+  const indexText = lstatOrNull(runtime.fsImpl, indexPath)
+    ? runtime.fsImpl.readFileSync(indexPath, 'utf8') : null;
+  const records = value.entries.map((source) => {
+    const entry = { ...source, userDataDir: root };
+    if (entry.discoveryState === undefined) throwLegacyIndexManualRecovery(runtime, entry);
+    assertIndexTargetParentsOrManual(runtime, entry);
+    const journalStat = lstatOrNull(runtime.fsImpl, entry.journalAbsolutePath);
+    const journalOptional = [INDEX_DISCOVERY_PREPARING, INDEX_DISCOVERY_CANCELLING,
+      INDEX_DISCOVERY_FINALIZING, INDEX_DISCOVERY_ROLLBACK_FINALIZING].includes(entry.discoveryState);
+    const journal = journalStat || !journalOptional
+      ? readJournal(runtime, entry.journalAbsolutePath, entry.taskId) : null;
+    if (journal && !discoverableAnchorsMatchJournal(runtime, entry, journal)) {
+      throwDiscoverableAnchorMismatch(runtime, entry);
     }
-    recovered.push(recoverOneJournal(runtime, {
-      ...entry,
-      userDataDir: resolvedUserDataDir
-    }, options));
-  }
-  return { recovered, skippedActive };
+    if (journal) {
+      assertJournalTargetParentsOrManual(runtime, journal);
+      if (journal.status === 'manual-recovery') {
+        throw new ToolboxPublicationManualRecoveryError(`工具箱发布任务 ${entry.taskId} 仍需人工恢复`, {
+          recoveryPaths: collectRecoveryPaths(journal), detailLines: journal.manualRecoveryIssues || []
+        });
+      }
+    }
+    // 捕获整个 journal 原文及路径别名；不只依靠 taskId 或过滤后的列表。
+    const journalText = journal ? runtime.fsImpl.readFileSync(entry.journalAbsolutePath, 'utf8') : null;
+    const record = { taskId: entry.taskId, journalPath: entry.journalAbsolutePath,
+      discoveryState: entry.discoveryState, journalStatus: journal ? journal.status : null,
+      indexEntry: entry, journal };
+    record.recordDigest = digest({ entry, journalText, materials: [entry.journalAbsolutePath, ...entry.stagedAbsolutePaths, ...entry.backupAbsolutePaths, ...entry.targetAbsolutePaths].map((filePath) => discoveryFileEvidence(runtime, filePath)), journalPathKey: targetPathAliasKey(runtime.fsImpl, entry.journalAbsolutePath),
+      parentKeys: entry.targetAbsolutePaths.map((target) => {
+        const parent = path.dirname(target);
+        const stat = runtime.fsImpl.statSync(parent);
+        return { key: directoryPathAliasKey(runtime.fsImpl, parent), dev: String(stat.dev), ino: String(stat.ino), birthtimeMs: stat.birthtimeMs };
+      }) });
+    return record;
+  });
+  return { root, indexDigest: digest({ indexText, indexEvidence: discoveryFileEvidence(runtime, indexPath), records: records.map((record) => record.recordDigest) }), records,
+    skippedActive: records.filter((record) => activeTaskIds.has(record.taskId)).map((record) => record.taskId) };
+}
+
+function discoverToolboxPublicationRecovery(options = {}) {
+  if (!options.userDataDir) throw recoveryError('TOOLBOX_PUBLICATION_INVALID_INPUT', null, '缺少 userDataDir');
+  return withLifecycleMutex('发现恢复材料', () => {
+    try { return discoverRecoveryInternal(createRuntime(options), options.userDataDir); } catch (error) {
+      error.preserveTemporaryFiles = true;
+      error.recoveryPaths = [...new Set([getIndexPath(options.userDataDir), ...(error.recoveryPaths || [])])];
+      throw error;
+    }
+  });
+}
+
+function recordIsCommitted(record) {
+  return record.discoveryState === INDEX_DISCOVERY_FINALIZING
+    || ['committed', 'committed-cleanup-pending'].includes(record.journalStatus);
 }
 
 function recoverPendingToolboxPublications(options = {}) {
+  // 验证 authority 在读取或 mkdir 前发生；无授权的旧 raw 入口始终失败关闭。
+  const grants = verify(options.workerAuthority, options.authorization, 'recovery', options.userDataDir, true);
   return withLifecycleMutex('执行恢复', () => {
-    if (!options.userDataDir) {
-      throw new ToolboxPublicationError(
-        'TOOLBOX_PUBLICATION_INVALID_INPUT',
-        '缺少 userDataDir，无法恢复工具箱发布任务'
-      );
+    const runtime = createRuntime(options);
+    let snapshot;
+    try { snapshot = discoverRecoveryInternal(runtime, options.userDataDir); } catch (cause) {
+      const error = recoveryError('PUBLICATION_RECOVERY_SNAPSHOT_CHANGED', options.userDataDir,
+        '恢复材料在授权后无法通过完整重验', cause.recoveryPaths || []);
+      error.cause = cause;
+      throw error;
     }
-    return recoverPendingInternal(createRuntime(options), options.userDataDir, options);
+    const paths = snapshot.records.flatMap(recoveryPathsForRecord);
+    if (grants.root !== snapshot.root || grants.indexDigest !== snapshot.indexDigest) {
+      throw recoveryError('PUBLICATION_RECOVERY_SNAPSHOT_CHANGED', snapshot.root, '恢复材料在授权后发生变化', paths);
+    }
+    const entries = Array.isArray(grants.entries) ? grants.entries : [];
+    const byTask = new Map(entries.map((entry) => [entry.taskId, entry]));
+    if (byTask.size !== entries.length || entries.length !== snapshot.records.length) {
+      throw recoveryError('PUBLICATION_RECOVERY_GRANT_INVALID', snapshot.root, '恢复授权未完整覆盖全根 snapshot', paths);
+    }
+    // 先检查所有记录，绝不能先执行前面的合法记录再遇到缺失 grant。
+    for (const record of snapshot.records) {
+      const grant = byTask.get(record.taskId);
+      const committed = recordIsCommitted(record);
+      const identity = grant && grant.identity;
+      const context = record.journal && record.journal.batchContext || record.indexEntry.batchContext;
+      const identityMatches = identity && typeof identity.proofDigest === 'string' && identity.proofDigest.length > 0
+        && typeof identity.taskRunId === 'string' && identity.taskRunId.length > 0
+        && typeof identity.operationKey === 'string' && identity.operationKey.length > 0
+        && Number.isSafeInteger(identity.batchId) && identity.batchId > 0 && (!context || ['taskRunId', 'batchId', 'operationKey'].every((key) => identity[key] === context[key]));
+      const permissionValid = grant && (grant.disposition === 'defer'
+        ? grant.permission === null
+        : grant.disposition === 'allow' && (committed
+          ? ['observe-committed', 'ack-stage', 'ack-finalize'].includes(grant.permission)
+          : grant.permission === 'recover-uncommitted'));
+      if (!grant || grant.recordDigest !== record.recordDigest || !grant.ownerId
+          || !identityMatches || identity.ownerId !== grant.ownerId || identity.publisherTaskId !== record.taskId
+          || !permissionValid || (['ack-stage', 'ack-finalize'].includes(grant.permission) && grant.acknowledged !== true)
+          || Boolean(grant.active) !== snapshot.skippedActive.includes(record.taskId)) {
+        throw recoveryError('PUBLICATION_RECOVERY_GRANT_INVALID', snapshot.root, '恢复记录与 owner/permission 授权不匹配', paths);
+      }
+    }
+    const recovered = [];
+    const deferred = [];
+    for (const record of snapshot.records) {
+      const grant = byTask.get(record.taskId);
+      if (grant.active) continue;
+      if (grant.disposition === 'defer') {
+        deferred.push({ taskId: record.taskId, ownerId: grant.ownerId, code: grant.code || 'PUBLICATION_RECOVERY_DEFERRED',
+          recoveryPaths: [getIndexPath(snapshot.root), ...recoveryPathsForRecord(record)] });
+        continue;
+      }
+      const result = recoverOneJournal(runtime, record.indexEntry, {
+        deferCommittedRecovery: true,
+        deferCommittedFinalization: grant.permission === 'ack-stage',
+        acknowledgedCommittedTaskIds: ['ack-stage', 'ack-finalize'].includes(grant.permission) && grant.acknowledged ? [record.taskId] : []
+      });
+      recovered.push({ ...result, ownerId: grant.ownerId });
+    }
+    // 此摘要只用于本队列项的 prepare 证明；不授予下一次恢复许可。
+    const after = discoverRecoveryInternal(runtime, snapshot.root);
+    return { recovered, deferred, skippedActive: snapshot.skippedActive,
+      indexDigest: snapshot.indexDigest, resultingIndexDigest: after.indexDigest };
   });
 }
 
@@ -2408,24 +2519,15 @@ function prepareToolboxPublication(options = {}) {
       );
     }
     const resolvedUserDataDir = path.resolve(options.userDataDir);
-    runtime.fsImpl.mkdirSync(resolvedUserDataDir, { recursive: true });
-    const startupRecovery = recoverPendingInternal(runtime, resolvedUserDataDir, {
-      deferCommittedRecovery: true
-    });
-    const pendingArchiveHandoffs = startupRecovery.recovered.filter(
-      (item) => item && item.action === 'commit-handoff-pending'
-    );
-    if (pendingArchiveHandoffs.length > 0) {
-      throw new ToolboxPublicationManualRecoveryError(
-        '已有工具箱输出等待存档中心耐久接管，已阻止新的发布任务',
-        {
-          detailLines: pendingArchiveHandoffs.map(
-            (item) => `待接管发布：${item.taskId}`
-          ),
-          recoveryPaths: [getIndexPath(resolvedUserDataDir)]
-        }
-      );
+    const preflight = verify(options.workerAuthority, options.preflight, 'preflight', resolvedUserDataDir, true);
+    if (preflight.root !== resolvedUserDataDir || preflight.taskId !== taskId) {
+      throw recoveryError('PUBLICATION_RECOVERY_GRANT_INVALID', resolvedUserDataDir, '发布预检 scope 不匹配');
     }
+    const snapshot = discoverRecoveryInternal(runtime, resolvedUserDataDir);
+    if (preflight.indexDigest !== snapshot.indexDigest) {
+      throw recoveryError('PUBLICATION_RECOVERY_SNAPSHOT_CHANGED', resolvedUserDataDir, '发布预检后恢复根发生变化', snapshot.records.flatMap(recoveryPathsForRecord));
+    }
+    runtime.fsImpl.mkdirSync(resolvedUserDataDir, { recursive: true });
     if (activeTaskIds.has(taskId)) {
       throw new ToolboxPublicationError(
         'TOOLBOX_PUBLICATION_DUPLICATE_TASK',
@@ -2639,12 +2741,8 @@ function prepareToolboxPublication(options = {}) {
           ...entry.metadata
         }))
       };
-      Object.defineProperty(prepared, PREPARED_RUNTIME, {
-        value: runtime,
-        enumerable: false,
-        configurable: false,
-        writable: false
-      });
+      preparedAuthorities.set(prepared, { runtime, taskId, userDataDir: journal.userDataDir,
+        journalPath: journal.journalPath, reservationKeys: reservationKeys.slice() });
       return prepared;
     } catch (error) {
       if (isCrashError(error)) {
@@ -2849,10 +2947,21 @@ function publishPreparedToolboxPublication(prepared) {
         '发布参数不是有效的 prepared 工具箱任务'
       );
     }
-    const runtime = prepared[PREPARED_RUNTIME] || createRuntime();
-    const reservationKeys = Array.isArray(prepared.reservationKeys)
-      ? prepared.reservationKeys
-      : [];
+    // 仅本次成功且已授权 prepare 的返回对象可发布一次。不能用 plain 对象
+    // 重新提交历史 prepared journal，绕过该记录的恢复 owner 决策。
+    const preparedAuthority = preparedAuthorities.get(prepared);
+    if (!preparedAuthority) {
+      throw recoveryError('PUBLICATION_RECOVERY_AUTHORITY_REQUIRED', prepared.userDataDir,
+        '发布缺少本次 prepare 的私有授权', [prepared.journalPath]);
+    }
+    preparedAuthorities.delete(prepared);
+    const { runtime, reservationKeys } = preparedAuthority;
+    if (prepared.taskId !== preparedAuthority.taskId || prepared.userDataDir !== preparedAuthority.userDataDir
+        || prepared.journalPath !== preparedAuthority.journalPath) {
+      releaseReservations(preparedAuthority.taskId, reservationKeys);
+      throw recoveryError('PUBLICATION_RECOVERY_GRANT_INVALID', preparedAuthority.userDataDir,
+        'prepared 发布身份与原授权不匹配', [preparedAuthority.journalPath, prepared.journalPath]);
+    }
     const preparedUserDataDir = path.resolve(prepared.userDataDir);
     const journalPathKey = targetReservationKey(runtime.fsImpl, prepared.journalPath);
     let indexedEntry;
@@ -3155,6 +3264,7 @@ module.exports = {
   ToolboxPublicationError,
   ToolboxPublicationManualRecoveryError,
   disposeToolboxGeneration,
+  discoverToolboxPublicationRecovery,
   prepareToolboxPublication,
   publishPreparedToolboxPublication,
   recoverPendingToolboxPublications

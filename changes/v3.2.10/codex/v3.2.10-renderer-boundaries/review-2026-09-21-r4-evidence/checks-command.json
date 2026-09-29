@@ -1,0 +1,25 @@
+{
+  "cwd": "/private/tmp/renderer-boundaries-r4-2qr0rwdp",
+  "checks": [
+    {
+      "name": "lint",
+      "command": [
+        "npm",
+        "run",
+        "lint"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.712
+    },
+    {
+      "name": "smoke",
+      "command": [
+        "npm",
+        "run",
+        "smoke"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 26.671
+    }
+  ]
+}

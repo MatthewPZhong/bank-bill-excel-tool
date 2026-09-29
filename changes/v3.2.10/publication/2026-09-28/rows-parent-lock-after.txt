@@ -1,0 +1,13 @@
+PARENT_RENAME_OPEN_READS []
+✔ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：before-generation (150.858583ms)
+PARENT_RENAME_OPEN_READS []
+✔ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：before-publication (86.583ms)
+✔ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：unchanged (246.473958ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 488.694459

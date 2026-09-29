@@ -1,0 +1,22 @@
+[
+  {
+    "file": "src/main-process/application-recovery/README.md",
+    "missingLinks": []
+  },
+  {
+    "file": "changes/v3.2.10/codex/v3.2.10-application-recovery/implementation-notes.md",
+    "missingLinks": []
+  },
+  {
+    "file": "changes/v3.2.10/codex/v3.2.10-application-recovery/implementation-review.md",
+    "missingLinks": []
+  },
+  {
+    "file": "changes/v3.2.10/codex/v3.2.10-application-recovery/spec.md",
+    "missingLinks": []
+  },
+  {
+    "file": "changes/v3.2.10/codex/v3.2.10-application-recovery/techdoc.md",
+    "missingLinks": []
+  }
+]

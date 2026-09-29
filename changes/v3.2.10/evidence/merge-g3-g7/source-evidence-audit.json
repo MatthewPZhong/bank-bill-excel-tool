@@ -1,0 +1,14 @@
+{
+  "G3": {
+    "checkedSnapshotFiles": 3100,
+    "mismatches": [
+      "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/implementation-notes.md"
+    ],
+    "implementationMismatches": []
+  },
+  "G7": {
+    "checkedSnapshotFiles": 133,
+    "mismatches": [],
+    "implementationMismatches": []
+  }
+}

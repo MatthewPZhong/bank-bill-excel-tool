@@ -1,0 +1,22 @@
+{
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "branch": "codex/v3.2.10-renderer-boundaries",
+  "changedOriginalFiles": [
+    "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/implementation-notes.md"
+  ],
+  "originalSnapshotFiles": 3100,
+  "unchangedCodeFiles": 96,
+  "protectedReviewAndRuleFiles": 90,
+  "beforeNotesSha256": "8233b259514599050636a12cdf7c7f2c54e365ba9878ab3a0cef0b207ac69c8c",
+  "afterNotesSha256": "913f7dfa18b7f29fd20d1bf57df6e6c1c4a9e8937228b81f172269845ef389cb",
+  "patch": "record-update.patch",
+  "testExecution": "未重跑；只读核对第四轮原日志与记录",
+  "gitDiffCheck": true,
+  "patchReverseCheck": true,
+  "committed": false,
+  "pushed": false,
+  "prCreated": false,
+  "integrated": false,
+  "localLinksValid": 136
+}

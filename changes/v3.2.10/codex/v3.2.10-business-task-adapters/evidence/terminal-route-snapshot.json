@@ -1,0 +1,62 @@
+{
+  "files": [
+    {
+      "path": "src/main-process/archive-center/terminal-route-registry.js",
+      "sha256": "7458381a02ac457f5067d22c10185b391251132311dca43ee02fd0e3aab40446"
+    },
+    {
+      "path": "src/main-process/archive-center/controller.js",
+      "sha256": "ea51c106a4c876dddffea2e958e1e96be33096bc3ea7b120cc73d893ee3e839b"
+    },
+    {
+      "path": "src/main-process/pending-archive-lineage.js",
+      "sha256": "3b4e31f27899e9e05e746d211d332ea831f7598d5d09fc0d031bd41833b6a184"
+    },
+    {
+      "path": "src/main-process/pre-fund-archive-lineage.js",
+      "sha256": "12e4568f199dcbea38b255b0dcee1b7ee08a115decb2f392c703a96adb91cd24"
+    },
+    {
+      "path": "src/main-process/biz-op-recon-run-data.js",
+      "sha256": "9fbf74a6032b98d47eeefa4dc8a2309bc3c07f026294e88b9ae9abc15bb28c0b"
+    },
+    {
+      "path": "tests/helpers/archive-terminal-routes.js",
+      "sha256": "012041c548d1779feb2e76a6fc9ab286993c84e1ede43e4650b69c4bb7dca512"
+    },
+    {
+      "path": "tests/unit/main-process/archive-terminal-route-registry.test.js",
+      "sha256": "7b08d7f8dea777f9ba3e31d192d85bb38a288c21b31fcb2c9490a5adf6bea07f"
+    },
+    {
+      "path": "tests/unit/main-process/archive-center-controller.test.js",
+      "sha256": "7ade987477adc2543a1775c2b0973866beabeabc1629a10879782808067e9cef"
+    },
+    {
+      "path": "tests/unit/main-process/archive-file-owner-recovery.test.js",
+      "sha256": "24243a2fabb8484ab3ea620a7b7bf7daf927746da4b0376ab3553cf7d0621faf"
+    },
+    {
+      "path": "tests/unit/main-process/archive-delete-owner-completion.test.js",
+      "sha256": "fef24a5260b370faa3e95c5e76ca8c233ecc319ba5a4d54b30943b3fef8a1c19"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-archive-lineage.test.js",
+      "sha256": "228856a8aca6792340cdb1d525251bcaa6617205a5c1241d56347ca8cd6da17c"
+    },
+    {
+      "path": "tests/unit/main-process/pending-archive-lineage.test.js",
+      "sha256": "283676458cde44386b553a18d60e23b3e8adb5a0bad253b960248bf54124a9ff"
+    }
+  ],
+  "unitTests": {
+    "total": 182,
+    "pass": 182,
+    "fail": 0
+  },
+  "lint": {
+    "exitCode": 0,
+    "scope": "five terminal registry/controller/domain production files"
+  },
+  "runtime": "v25.8.0"
+}

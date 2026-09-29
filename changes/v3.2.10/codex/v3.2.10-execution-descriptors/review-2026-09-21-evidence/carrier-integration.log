@@ -1,0 +1,5 @@
+PASS thread：真实 Toolbox Worker 生成并回读 XLSX，保留 production gate 和退出释放
+PASS inline：真实 NewAccount copy 保持源/暂存件 SHA256 与 workbook 内容
+PASS service：真实 FundRecon Worker 连续导入保留 stateRevision，shutdown 释放租约
+PASS adapter：既有导入引擎写 SQLite，G2/TaskLifecycle 留下成功 TaskRun 与归档输入
+==== 4/4 PASS ====

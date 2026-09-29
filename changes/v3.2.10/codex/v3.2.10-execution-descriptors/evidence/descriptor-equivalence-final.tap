@@ -1,0 +1,48 @@
+✔ Archive 固定基线逐 channel 保留全部 268 项、模块身份、file/no-file/exclude 和 hook 注册 (8.043709ms)
+✔ 私有 authority、独立 manifest 与固定 67-action/74-pair/134-task 清单双向闭合 (2.107917ms)
+✔ 保持数量但篡改 TaskPolicy 身份仍被独立 authority 拒绝 (1.087041ms)
+✔ 行为样例覆盖每个可恢复 channel 的分类/metadata/lineage，及全部已登记可选 hook (0.395ms)
+✔ Archive 固定行为：recoverable / resultClassifier (11.656166ms)
+✔ Archive 固定行为：standardClassifier / resultClassifier (4.782875ms)
+✔ Archive 固定行为：statementClassifier / resultClassifier (0.355459ms)
+✔ Archive 固定行为：positionClassifier / resultClassifier (0.752833ms)
+✔ Archive 固定行为：vccClassifier / resultClassifier (0.414666ms)
+✔ Archive 固定行为：vccOpSaveClassifier / resultClassifier (0.128416ms)
+✔ Archive 固定行为：standardMetadata / resultMetadataResolver (1.649916ms)
+✔ Archive 固定行为：vccMetadata / resultMetadataResolver (0.266833ms)
+✔ Archive 固定行为：genericLineage / resultFlowIdentities (2.252792ms)
+✔ Archive 固定行为：vccRunLineage / resultFlowIdentities (0.189958ms)
+✔ Archive 固定行为：vccFinancialOp:import:apply / resultFlowIdentities (0.061708ms)
+✔ Archive 固定行为：continuationIdentity / flowIdentityResolver (0.254834ms)
+✔ Archive 固定行为：vccRunIdentity / flowIdentityResolver (0.142584ms)
+✔ Archive 固定行为：vccFinancialOp:export:import-audit / flowIdentityResolver (0.036208ms)
+✔ Archive 固定行为：vccFinancialOp:data-manager:delete / flowPlanResolver (0.05675ms)
+✔ Archive 固定行为：bankBuRecon:run / flowPlanResolver (0.118958ms)
+✔ Archive 固定行为：bankBuRecon:import:run / resultFlowIdentities (0.059375ms)
+✔ Archive 固定行为：bank-statement:export / flowPlanResolver (0.072125ms)
+✔ Archive 固定行为：bank-statement:export / resultFlowIdentities (0.0475ms)
+✔ Archive 固定行为：acquiringBillCurrency:export / flowPlanResolver (0.138583ms)
+✔ Archive 固定行为：acquiringBillCurrency:export / resultFlowIdentities (0.064666ms)
+✔ Archive 固定行为：acquiringBillCurrency:run / resultFlowIdentities (0.08925ms)
+✔ Archive 固定行为：acquiringBillCurrency:run:resume / resultFlowIdentities (0.061125ms)
+✔ Archive 固定行为：selectedFilePlan / filePlanResolver (1.06275ms)
+✔ Archive 固定行为：workerFilePlan / filePlanResolver (0.19175ms)
+✔ Archive 固定行为：acquiringBillCurrency:run:resume / filePlanResolver (0.097291ms)
+✔ Archive 固定行为：deferredPromotion / promotionManifestResolver (0.067ms)
+✔ 探针可识别相同 callable 形状下的分类和 lineage 行为漂移 (0.15075ms)
+✔ 公共 Archive registry 必须显式装配并在返回可用 registry 前拒绝漂移 (8.970292ms)
+✔ 公共 Archive registry 冻结自己的快照并隐藏可变 Map (0.938541ms)
+✔ 公共 Archive registry/common 的依赖闭包只含公共机制，没有领域或 composition 回边 (0.143667ms)
+✔ Main 最终装配入口保持原 49 action 的完整冻结 runtime 映射且 catalog 只读 (52.166625ms)
+✔ 全部 Main binder 保留输入、注入本代 authority，BizOP 只委派本域授权与 beforeDispatch (28.152042ms)
+✔ 路径与 Duplicate startup gate 冻结在本代，后续 composition 不改变旧代 authority (52.60725ms)
+✔ 原 Main 派发回调仅填充无本域回调的 action，不能替代 BizOP authority (24.752667ms)
+✔ runtime manager 经真实 Supervisor 派发本代 binder，drain/resume 后重新读取 provider (56.607167ms)
+ℹ tests 40
+ℹ suites 0
+ℹ pass 40
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 504.866833

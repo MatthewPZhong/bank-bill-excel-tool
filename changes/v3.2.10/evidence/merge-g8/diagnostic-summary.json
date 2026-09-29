@@ -1,0 +1,49 @@
+{
+  "diagnosticCount": 2195,
+  "byRule": {
+    "ARCH-BIZOP-QUERY": 1485,
+    "ARCH-DESCRIPTOR-COMPOSITION": 38,
+    "ARCH-PUBLICATION-RECOVERY-ENTRY": 2,
+    "ARCH-RENDERER-SCOPE": 109,
+    "ARCH-STATIC-COVERAGE": 542,
+    "ARCH-TASK-ADAPTER": 19
+  },
+  "active": [
+    "platform-core",
+    "production-graph"
+  ],
+  "pending": [],
+  "partial": [
+    "bizop-query-q1",
+    "bizop-query-q2",
+    "bizop-query-q3",
+    "bizop-recovery-private",
+    "business-task-adapters",
+    "descriptor-composition",
+    "publication-recovery-entry",
+    "renderer-acquiring",
+    "renderer-bank-bu",
+    "renderer-bank-statement",
+    "renderer-biz-op-legacy",
+    "renderer-biz-op-v327",
+    "renderer-dialog-app-settings",
+    "renderer-dialog-configuration",
+    "renderer-dialog-scenarios",
+    "renderer-dialog-toolbox",
+    "renderer-duplicate-inbound",
+    "renderer-modal-owner",
+    "renderer-new-account",
+    "renderer-pending",
+    "renderer-position",
+    "renderer-pre-fund",
+    "renderer-recon-id-fix",
+    "renderer-services",
+    "renderer-statement",
+    "renderer-vcc-financial-op",
+    "renderer-vcc-op-calc",
+    "shared-xlsx",
+    "vcc-mapped-lineage"
+  ],
+  "staleExceptionCount": 111,
+  "interpretation": "静态诊断数量不等于已确认业务缺陷数；配置、静态模型与真实边界待逐项归因。未改变机器配置或新增例外。"
+}

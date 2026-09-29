@@ -1,0 +1,31 @@
+✔ 真实 Supervisor/ServiceHost/Worker 以token+revision+evidence生成current/all并写SQLite审计回读 (415.087292ms)
+▶ 真实Supervisor/ServiceHost/Worker在current/all与detail/both safepoint取消后先ack再error且清空staging
+  ✔ statement:generate-current/detail (401.293291ms)
+  ✔ statement:generate-all/detail (433.82825ms)
+  ✔ statement:generate-current/both (390.251417ms)
+  ✔ statement:generate-all/both (397.28ms)
+✔ 真实Supervisor/ServiceHost/Worker在current/all与detail/both safepoint取消后先ack再error且清空staging (1623.218333ms)
+✔ 真实Supervisor/ServiceHost/Worker在generation早期shutdown时保持canonical取消且无staging残留 (396.411959ms)
+✔ final generation safepoint后来源漂移在manifest handoff前fail closed并清空staging (39.292208ms)
+✔ 已登记success completion但release-ack未到时shutdown cancel仍权威胜出并撤销未发布generation (288.088209ms)
+✔ filename parent session按child template digest生成混合明细与余额golden且不退化到owner配置 (326.908334ms)
+✔ Main在全部technical/business readback前Publisher=0，tamper与multi artifact失败不发布 (34.56625ms)
+✔ 现有journal Publisher对current/all多artifact执行全有或全无并在失败后清理generation (708.530584ms)
+✔ task-owned staging逐级拒绝ancestor symlink，technical/default Publisher/restart cleanup均不越界 (58.094708ms)
+✔ invalid/outside/schema/hash manifest不取得删除权限且保留原始错误 (45.885583ms)
+✔ Worker写前与Main技术校验拒绝dot/case/Unicode/hardlink artifact alias集合 (53.192ms)
+✔ Main-owned descriptor拒绝manifest自洽但sheet/header/kind/record/formula/type/style/lineage错误的workbook (727.7785ms)
+✔ all scope全量0输出以rowCounts+warning可观测并通过相同Publisher边界发布header-only workbook (535.29775ms)
+✔ E09-C generation复用四金额mapped rows并保持warning/行序，混合币种余额业务等价 (159.384458ms)
+✔ kill/restart后Main按已知resource清理未发布staging且拒绝越界/symlink (11.617ms)
+✔ 空scope、越界resource与partial writer failure均在Publisher前失败并清理全部staging (48.364ms)
+✔ generation request/manifest严格限制artifact顺序、相对resource与bounded warning summary (1.311375ms)
+✔ disabled Statement Publisher seam 缺 authority 时保留 staging 且不创建 journal (0.414ms)
+ℹ tests 22
+ℹ suites 0
+ℹ pass 22
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5730.539917

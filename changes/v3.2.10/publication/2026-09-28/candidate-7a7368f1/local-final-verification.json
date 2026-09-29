@@ -1,0 +1,38 @@
+{
+  "status": "PASS",
+  "candidate": "7a7368f10f2448c6c464d44fc4adc9bf76557a2f",
+  "base": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+  "startedAt": "2026-09-28T23:05:28.807807+08:00",
+  "finishedAt": "2026-09-28T23:26:09.294015+08:00",
+  "unit": {
+    "tests": 9436,
+    "passed": 9432,
+    "failed": 0,
+    "skipped": 4,
+    "files": 578
+  },
+  "integration": {
+    "scriptsPassed": 68,
+    "scriptsTotal": 68,
+    "countedTests": 2901
+  },
+  "architecture": {
+    "active": 31,
+    "pending": 0,
+    "partial": 0,
+    "violations": 0,
+    "stale": 0
+  },
+  "inputs": {
+    "count": 1712,
+    "changed": []
+  },
+  "primaryDirtyFilesPreserved": 865,
+  "policyGeneratedEvidence": "本次集成自动同步的 §七 时耗清单已单独保存；仅还原本轮生成的动态时耗到已冻结候选，规则正文保持。",
+  "manualAcceptance": {
+    "status": "USER_CONFIRMED",
+    "reply": "已人工验收",
+    "scope": "本轮真实账单/资金结果、Windows 安装包及 Excel/WPS 人工验收；用户确认，非本 Agent 独立执行。"
+  }
+}

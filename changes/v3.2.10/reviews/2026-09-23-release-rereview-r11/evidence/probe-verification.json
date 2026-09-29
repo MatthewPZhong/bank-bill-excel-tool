@@ -1,0 +1,23 @@
+{
+  "status": "PASS",
+  "meaning": "Archived observations and confirmed defects are consistent; this is not a defect-free candidate verdict.",
+  "originalRendererCases": 8,
+  "originalArrayCases": 7,
+  "rendererNeighborCases": 6,
+  "arrayNeighborCases": 8,
+  "sharedCases": 56,
+  "parameterBindingCases": 6,
+  "scannerStableCases": 62,
+  "closedOriginalFindings": [
+    "RR10-01",
+    "RR10-02"
+  ],
+  "confirmedFindings": [
+    "RR11-01 new member-proof propagation regression",
+    "RR11-02 pre-existing moved-array-source gap"
+  ],
+  "architectureTests": 566,
+  "activeBoundaries": 31,
+  "architectureDiagnostics": 0,
+  "reusedGateInputsMatched": 1707
+}

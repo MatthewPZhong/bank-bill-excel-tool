@@ -1,0 +1,48 @@
+recovered bank 资金对账状态读取失败：暂时无法读取
+recovered recon 对账单修复状态读取失败：暂时无法读取
+✖ 再审 active bank 失效重读失败后重入须结束错误提示 (9.023583ms)
+✖ 再审 active recon 失效重读失败后重入须结束错误提示 (2.566ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 180.014041
+
+✖ failing tests:
+
+test at ../renderer-boundaries-r1-scenario-recovery-check.test.js:124:3
+✖ 再审 active bank 失效重读失败后重入须结束错误提示 (9.023583ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /暂时无法读取/. Input:
+  
+  '资金对账状态读取失败：暂时无法读取'
+  
+      at TestContext.<anonymous> (/private/tmp/renderer-boundaries-r1-scenario-recovery-check.test.js:135:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '资金对账状态读取失败：暂时无法读取',
+    expected: /暂时无法读取/,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }
+
+test at ../renderer-boundaries-r1-scenario-recovery-check.test.js:124:3
+✖ 再审 active recon 失效重读失败后重入须结束错误提示 (2.566ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /暂时无法读取/. Input:
+  
+  '对账单修复状态读取失败：暂时无法读取'
+  
+      at TestContext.<anonymous> (/private/tmp/renderer-boundaries-r1-scenario-recovery-check.test.js:135:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '对账单修复状态读取失败：暂时无法读取',
+    expected: /暂时无法读取/,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }

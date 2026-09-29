@@ -1,0 +1,20 @@
+scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:204:    await js(`cfg.parentHandle=cfg.bridge.openModal(()=>cfg.dialogs.createBillSplitRowsDialog({template:{id:1,headers:['Currency','Amount']},initialAmountRules:cfg.rules})).handle;
+scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:261:      cfg.parent=cfg.other();cfg.handle=cfg.bridge.pushModal(cfg.parent,()=>cfg.dialogs.createBillSplitRowsDialog({template:{id:7,name:'模板',headers:['Currency']},initialRows:cfg.rows})).handle;
+scripts/renderer-lifecycle/fixtures/legacy-dialogs.js:39:      legacy.openRows=()=>legacy.open(()=>legacy.dialogs.createBillSplitRowsDialog({
+src/renderer-dialogs.js:36:    const { looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createAccountMappingMigrationDialog } = global.ConfigurationDialogs.createConfigurationDialogs({
+src/renderer-dialogs.js:1729:      createBillSplitRowsDialog,
+src/renderer.js:492:  bankStatementController = window.BankStatementController.createBankStatementController({
+src/renderer.js:498:  reconIdFixController = window.ReconIdFixController.createReconIdFixController({
+src/renderer.js:576:  createBillSplitRowsDialog,
+src/renderer.js:728:  createBillSplitRowsDialog,
+scripts/smoke/render-status-box.js:219:    && /createBankStatementController\([\s\S]*?sharedReconSession, ui/.test(rendererSrc)
+scripts/smoke/render-status-box.js:220:    && /createReconIdFixController\([\s\S]*?sharedReconSession, ui/.test(rendererSrc),
+src/renderer/dialogs/configuration.js:3169:        pushModal(overlay, () => createBillSplitRowsDialog({
+src/renderer/dialogs/configuration.js:3914:    function createBillSplitRowsDialog({
+src/renderer/dialogs/configuration.js:5393:    return Object.freeze({ looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createAccountMappingMigrationDialog });
+src/renderer-previews.js:37:      createBillSplitRowsDialog,
+src/renderer-previews.js:416:      openModal(() => createBillSplitRowsDialog({
+src/renderer/controllers/recon-id-fix.js:5:  function createReconIdFixController({ api = {}, panel, config = {}, sharedReconSession, ui = {} } = {}) {
+src/renderer/controllers/recon-id-fix.js:403:  const exported = Object.freeze({ createReconIdFixController });
+src/renderer/controllers/bank-statement.js:4:  function createBankStatementController({ api, panel, config = {}, sharedReconSession, ui = {} } = {}) {
+src/renderer/controllers/bank-statement.js:725:  const exported = Object.freeze({ createBankStatementController });

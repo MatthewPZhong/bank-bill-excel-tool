@@ -1,0 +1,8 @@
+PASS: 19 个整改文件的修前/修后新增行 whitespace 检查
+PASS: git diff --check
+PASS: 整改补丁与完整功能补丁均通过 git apply --reverse --check
+PASS: 冻结的 96 个代码/脚本/测试文件 SHA256 全部匹配
+PASS: 原审查报告及 8 个证据文件、G3 Spec 的 SHA256 均未改变
+PASS: Main/main-process/backend/package/lock 相对 HEAD 无变更；Preload 相对审查快照无变更
+PASS: branch=codex/v3.2.10-renderer-boundaries；HEAD=11086a3cbf632a30adbcfa796e4cd81810c5aef9
+PASS: 当前实施记录/TechDoc/Renderer README/专项说明的 182 个本地文件链接存在（不将存在性视为测试通过）

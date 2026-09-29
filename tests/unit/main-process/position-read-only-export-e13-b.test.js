@@ -58,7 +58,7 @@ const {
 } = require('../../../src/main-process/read-only-exports/common/workbook-evidence');
 const {
   createBackgroundExecutionRuntime
-} = require('../../../src/main-process/background-execution/runtime');
+} = require('../../../src/main-process/execution-descriptors/composition');
 
 const TEMPLATE_PATH = path.resolve(__dirname, '../../../assets/平盘银行对账单.xlsx');
 

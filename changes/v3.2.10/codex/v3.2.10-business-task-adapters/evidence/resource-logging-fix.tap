@@ -1,0 +1,274 @@
+TAP version 13
+# Subtest: 真实入口：首次 Hold gate 拒绝发生在 prepare 之前
+ok 1 - 真实入口：首次 Hold gate 拒绝发生在 prepare 之前
+  ---
+  duration_ms: 1.83
+  type: 'test'
+  ...
+# Subtest: 真实入口：prepare 取消原样返回，prepare 自身释放资源且不进入 lifecycle
+ok 2 - 真实入口：prepare 取消原样返回，prepare 自身释放资源且不进入 lifecycle
+  ---
+  duration_ms: 0.406834
+  type: 'test'
+  ...
+# Subtest: 真实入口：prepare 抛错保留原异常，资源仍由 prepare 自身收口
+ok 3 - 真实入口：prepare 抛错保留原异常，资源仍由 prepare 自身收口
+  ---
+  duration_ms: 0.34575
+  type: 'test'
+  ...
+# Subtest: 目标：prepare 成功后 second-gate 失败须 abandon 一次并保留原异常
+ok 4 - 目标：prepare 成功后 second-gate 失败须 abandon 一次并保留原异常
+  ---
+  duration_ms: 0.713584
+  type: 'test'
+  ...
+# Subtest: 目标：second-gate 与 cleanup 双异常时保留前置原异常且不重试清理
+ok 5 - 目标：second-gate 与 cleanup 双异常时保留前置原异常且不重试清理
+  ---
+  duration_ms: 0.554167
+  type: 'test'
+  ...
+# Subtest: 目标：prepare 成功后 archive-initialize 失败须 abandon 一次并保留原异常
+ok 6 - 目标：prepare 成功后 archive-initialize 失败须 abandon 一次并保留原异常
+  ---
+  duration_ms: 0.379458
+  type: 'test'
+  ...
+# Subtest: 目标：archive-initialize 与 cleanup 双异常时保留前置原异常且不重试清理
+ok 7 - 目标：archive-initialize 与 cleanup 双异常时保留前置原异常且不重试清理
+  ---
+  duration_ms: 0.323917
+  type: 'test'
+  ...
+# Subtest: 真实入口：lifecycle 不可用沿用失败结果并 abandon 一次
+ok 8 - 真实入口：lifecycle 不可用沿用失败结果并 abandon 一次
+  ---
+  duration_ms: 0.298333
+  type: 'test'
+  ...
+# Subtest: 真实入口：lifecycle 不可用且清理抛错时沿用 cleanup error 优先级
+ok 9 - 真实入口：lifecycle 不可用且清理抛错时沿用 cleanup error 优先级
+  ---
+  duration_ms: 0.320708
+  type: 'test'
+  ...
+# Subtest: 真实入口：第三次 Hold gate 拒绝先于 prepared.beforeStart，abandon 一次
+ok 10 - 真实入口：第三次 Hold gate 拒绝先于 prepared.beforeStart，abandon 一次
+  ---
+  duration_ms: 0.511042
+  type: 'test'
+  ...
+# Subtest: 真实入口：prepared.beforeStart 拒绝尚未接管执行，abandon 一次
+ok 11 - 真实入口：prepared.beforeStart 拒绝尚未接管执行，abandon 一次
+  ---
+  duration_ms: 0.330541
+  type: 'test'
+  ...
+# Subtest: 真实入口：已进入 lifecycle 的 beforeStart 与 cleanup 双异常沿用 cleanup 优先级
+ok 12 - 真实入口：已进入 lifecycle 的 beforeStart 与 cleanup 双异常沿用 cleanup 优先级
+  ---
+  duration_ms: 0.352667
+  type: 'test'
+  ...
+# Subtest: 真实入口：lifecycle 提前返回 busy 时不接管资源，abandon 一次
+ok 13 - 真实入口：lifecycle 提前返回 busy 时不接管资源，abandon 一次
+  ---
+  duration_ms: 0.326583
+  type: 'test'
+  ...
+# Subtest: 真实入口：Position admission 拒绝尚未接管资源，也不做业务 settlement
+ok 14 - 真实入口：Position admission 拒绝尚未接管资源，也不做业务 settlement
+  ---
+  duration_ms: 0.554959
+  type: 'test'
+  ...
+# Subtest: 真实入口：template:rename 执行接管后成功不再 abandon
+ok 15 - 真实入口：template:rename 执行接管后成功不再 abandon
+  ---
+  duration_ms: 0.340125
+  type: 'test'
+  ...
+# Subtest: 真实入口：template:rename 执行接管后抛错不再 abandon
+ok 16 - 真实入口：template:rename 执行接管后抛错不再 abandon
+  ---
+  duration_ms: 0.504125
+  type: 'test'
+  ...
+# Subtest: 真实入口：position-reconciliation:run 执行接管后成功不再 abandon
+ok 17 - 真实入口：position-reconciliation:run 执行接管后成功不再 abandon
+  ---
+  duration_ms: 0.485167
+  type: 'test'
+  ...
+# Subtest: 真实入口：position-reconciliation:run 执行接管后抛错不再 abandon
+ok 18 - 真实入口：position-reconciliation:run 执行接管后抛错不再 abandon
+  ---
+  duration_ms: 0.39475
+  type: 'test'
+  ...
+# Subtest: 真实入口：lifecycle 拒绝后的延迟 abandon 纳入 archiveOperationTail
+ok 19 - 真实入口：lifecycle 拒绝后的延迟 abandon 纳入 archiveOperationTail
+  ---
+  duration_ms: 3.685708
+  type: 'test'
+  ...
+# Subtest: 目标：lifecycle 不可用路径的延迟 abandon 也须纳入 archiveOperationTail
+ok 20 - 目标：lifecycle 不可用路径的延迟 abandon 也须纳入 archiveOperationTail
+  ---
+  duration_ms: 0.596541
+  type: 'test'
+  ...
+# Subtest: 目标：真实入口同步调用 lifecycle 抛错也须 abandon 一次
+ok 21 - 目标：真实入口同步调用 lifecycle 抛错也须 abandon 一次
+  ---
+  duration_ms: 0.495542
+  type: 'test'
+  ...
+# Subtest: 真实入口：adapter 构建失败且 cleanupFails=false 收口一次并保留主错误
+ok 22 - 真实入口：adapter 构建失败且 cleanupFails=false 收口一次并保留主错误
+  ---
+  duration_ms: 0.410208
+  type: 'test'
+  ...
+# Subtest: 真实入口：adapter 构建失败且 cleanupFails=true 收口一次并保留主错误
+ok 23 - 真实入口：adapter 构建失败且 cleanupFails=true 收口一次并保留主错误
+  ---
+  duration_ms: 0.314833
+  type: 'test'
+  ...
+# Subtest: 真实入口：第二 gate 失败后的延迟 cleanup 仍阻止退出 tail 结算
+ok 24 - 真实入口：第二 gate 失败后的延迟 cleanup 仍阻止退出 tail 结算
+  ---
+  duration_ms: 0.664291
+  type: 'test'
+  ...
+# Subtest: 同步 work 抛错会 abandon 一次并保留同一原错误
+ok 25 - 同步 work 抛错会 abandon 一次并保留同一原错误
+  ---
+  duration_ms: 1.289583
+  type: 'test'
+  ...
+# Subtest: 异步 work 抛错会 abandon 一次并保留同一原错误
+ok 26 - 异步 work 抛错会 abandon 一次并保留同一原错误
+  ---
+  duration_ms: 0.112375
+  type: 'test'
+  ...
+# Subtest: 进入生命周期前 双异常按既定优先级并保留两份诊断
+ok 27 - 进入生命周期前 双异常按既定优先级并保留两份诊断
+  ---
+  duration_ms: 0.141542
+  type: 'test'
+  ...
+# Subtest: 生命周期内 双异常按既定优先级并保留两份诊断
+ok 28 - 生命周期内 双异常按既定优先级并保留两份诊断
+  ---
+  duration_ms: 0.091542
+  type: 'test'
+  ...
+# Subtest: lifecycle 不可用返回时清理后返回原结果
+ok 29 - lifecycle 不可用返回时清理后返回原结果
+  ---
+  duration_ms: 0.085833
+  type: 'test'
+  ...
+# Subtest: lifecycle 不可用返回时传播清理异常
+ok 30 - lifecycle 不可用返回时传播清理异常
+  ---
+  duration_ms: 0.065042
+  type: 'test'
+  ...
+# Subtest: 准入拒绝返回时清理后返回原结果
+ok 31 - 准入拒绝返回时清理后返回原结果
+  ---
+  duration_ms: 0.053375
+  type: 'test'
+  ...
+# Subtest: 准入拒绝返回时传播清理异常
+ok 32 - 准入拒绝返回时传播清理异常
+  ---
+  duration_ms: 0.502041
+  type: 'test'
+  ...
+# Subtest: run 并发和完成后复用同一个 Promise，work 与 abandon 均仅执行一次
+ok 33 - run 并发和完成后复用同一个 Promise，work 与 abandon 均仅执行一次
+  ---
+  duration_ms: 0.166042
+  type: 'test'
+  ...
+# Subtest: 接管前异步失败等待延迟 abandon，整个 run 结算前不能再次移交
+ok 34 - 接管前异步失败等待延迟 abandon，整个 run 结算前不能再次移交
+  ---
+  duration_ms: 0.192792
+  type: 'test'
+  ...
+# Subtest: execution 接管后成功均不调用通用 abandon，重复标记幂等
+ok 35 - execution 接管后成功均不调用通用 abandon，重复标记幂等
+  ---
+  duration_ms: 0.10475
+  type: 'test'
+  ...
+# Subtest: execution 接管后失败均不调用通用 abandon，重复标记幂等
+ok 36 - execution 接管后失败均不调用通用 abandon，重复标记幂等
+  ---
+  duration_ms: 0.074791
+  type: 'test'
+  ...
+# Subtest: scope 和 snapshot 冻结，快照独立于后续状态；无 callback 只结算自身义务
+ok 37 - scope 和 snapshot 冻结，快照独立于后续状态；无 callback 只结算自身义务
+  ---
+  duration_ms: 0.111458
+  type: 'test'
+  ...
+# Subtest: 清理回调保留 prepared receiver，资源入口不会在 scope 内猜测文件路径
+ok 38 - 清理回调保留 prepared receiver，资源入口不会在 scope 内猜测文件路径
+  ---
+  duration_ms: 0.06725
+  type: 'test'
+  ...
+# Subtest: 新的前置路径连非 Error 拒绝原因也保持原值，不被 cleanup 失败覆盖
+ok 39 - 新的前置路径连非 Error 拒绝原因也保持原值，不被 cleanup 失败覆盖
+  ---
+  duration_ms: 0.082833
+  type: 'test'
+  ...
+# Subtest: 清理诊断写入也是退出等待的一部分
+ok 40 - 清理诊断写入也是退出等待的一部分
+  ---
+  duration_ms: 0.078958
+  type: 'test'
+  ...
+# Subtest: 诊断 callback 失败不改变双异常优先级，并转交兜底内部日志
+ok 41 - 诊断 callback 失败不改变双异常优先级，并转交兜底内部日志
+  ---
+  duration_ms: 0.387709
+  type: 'test'
+  ...
+# Subtest: 默认清理诊断使用已配置模块日志并保留原错误与清理错误
+ok 42 - 默认清理诊断使用已配置模块日志并保留原错误与清理错误
+  ---
+  duration_ms: 3.000375
+  type: 'test'
+  ...
+# Subtest: 启动装配显式覆盖全部 134 个受控任务并排除 exclude，不接受未绑定任务
+ok 43 - 启动装配显式覆盖全部 134 个受控任务并排除 exclude，不接受未绑定任务
+  ---
+  duration_ms: 1.637458
+  type: 'test'
+  ...
+# Subtest: 公共执行器不再持有领域分派，task-adapters 中立模块无领域或存储依赖
+ok 44 - 公共执行器不再持有领域分派，task-adapters 中立模块无领域或存储依赖
+  ---
+  duration_ms: 39.269042
+  type: 'test'
+  ...
+1..44
+# tests 44
+# suites 0
+# pass 44
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 169.262458

@@ -15,7 +15,7 @@ const {
   prepareToolboxPublication,
   publishPreparedToolboxPublication,
   recoverPendingToolboxPublications
-} = require('../../src/main-process/toolbox-output-publication');
+} = require('../helpers/publication-authority');
 const {
   normalizeFilePlanV1
 } = require('../../src/main-process/archive-center/file-plan');
@@ -85,7 +85,7 @@ function taskFiles(ctx) {
 }
 
 function recoverInFreshProcess(userDataDir, options = {}) {
-  const modulePath = require.resolve('../../src/main-process/toolbox-output-publication');
+  const modulePath = require.resolve('../helpers/publication-authority');
   const recoveryOptions = { ...options, userDataDir };
   const script = [
     `const publication = require(${JSON.stringify(modulePath)});`,
@@ -1996,7 +1996,7 @@ test.describe('toolbox output publication', () => {
   });
 
   test('owner 可在 finalizing 耐久阶段登记收口凭证，重启仅保留 journal/index 收尾责任', async () => {
-    const { recoverToolboxPublicationsAsync } = require('../../src/main-process/toolbox-output-publication-dispatch');
+    const { createTestPublicationHarness } = require('../helpers/publication-authority');
     const ctx = makeContext();
     const source = writeFile(path.join(ctx.generationDir, 'source.xlsx'), 'new');
     const target = writeFile(path.join(ctx.outputDir, 'target.xlsx'), 'old');
@@ -2010,7 +2010,8 @@ test.describe('toolbox output publication', () => {
     assert.throws(() => publishPreparedToolboxPublication(prepared), ToolboxPublicationCrashError);
     const options = { userDataDir: ctx.userDataDir, deferCommittedRecovery: true,
       acknowledgedCommittedTaskIds: ['commit-owner-finalizing'], deferCommittedFinalization: true };
-    const staged = await recoverToolboxPublicationsAsync(options);
+    const harness = createTestPublicationHarness(ctx.userDataDir);
+    const staged = await harness.recovery.recover({ ...options, reason: 'receipt-ack', taskIds: options.acknowledgedCommittedTaskIds });
     assert.deepEqual(staged.recovered.map((item) => item.action), ['commit-finalization-pending']);
     assert.equal(indexValue(ctx).entries[0].discoveryState, 'finalizing');
     assert.ok(fs.existsSync(prepared.journalPath));

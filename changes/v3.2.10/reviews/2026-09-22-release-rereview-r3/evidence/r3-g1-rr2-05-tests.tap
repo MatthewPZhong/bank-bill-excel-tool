@@ -1,0 +1,17 @@
+✔ RR2-05 当前恢复入口 recoverOneJournal 在 prepare 中通过 recoverOneJournal(runtime,entry,{}) 仍被拒绝 (15.0965ms)
+✔ RR2-05 当前恢复入口 recoverOneJournal 在 prepare 中通过 alias(runtime,entry,{}) 仍被拒绝 (2.0485ms)
+✔ RR2-05 当前恢复入口 recoverOneJournal 在 prepare 中通过 bound(runtime,entry,{}) 仍被拒绝 (2.132584ms)
+✔ RR2-05 当前恢复入口 recoverPreparingIntent 在 prepare 中通过 recoverPreparingIntent(runtime,entry,{}) 仍被拒绝 (1.73725ms)
+✔ RR2-05 当前恢复入口 recoverPreparingIntent 在 prepare 中通过 alias(runtime,entry,{}) 仍被拒绝 (2.303834ms)
+✔ RR2-05 当前恢复入口 recoverPreparingIntent 在 prepare 中通过 bound(runtime,entry,{}) 仍被拒绝 (1.652708ms)
+✔ RR2-05 当前恢复入口 recoverFinalizingIntent 在 prepare 中通过 recoverFinalizingIntent(runtime,entry,{}) 仍被拒绝 (1.426625ms)
+✔ RR2-05 当前恢复入口 recoverFinalizingIntent 在 prepare 中通过 alias(runtime,entry,{}) 仍被拒绝 (1.319083ms)
+✔ RR2-05 当前恢复入口 recoverFinalizingIntent 在 prepare 中通过 bound(runtime,entry,{}) 仍被拒绝 (1.951041ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 107.809125

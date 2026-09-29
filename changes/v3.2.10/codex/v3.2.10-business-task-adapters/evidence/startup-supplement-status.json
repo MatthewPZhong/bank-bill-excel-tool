@@ -1,0 +1,51 @@
+{
+  "startedAt": "2026-09-20T15:44:26.823897+00:00",
+  "status": "PASS for requested startup evidence supplement; G8 joint acceptance remains pending",
+  "reviewSource": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-business-task-adapters/review-2026-09-20.md",
+  "reviewSha256": "0a2ab950a88eef3dbacd700be251c692a137ec6c7e389fde74c85f6a153a7e96",
+  "scope": "production Position startup recovery integration and explicit T5 joint acceptance status",
+  "productionChanges": false,
+  "historicalReleaseCheck": "release-check.log",
+  "g8": "pending future integration; no config changes",
+  "targeted": {
+    "command": "node scripts/integration/position-startup-task-recovery.js",
+    "exitCode": 0,
+    "scenarios": 3,
+    "passed": 3,
+    "evidence": "position-startup-recovery.log"
+  },
+  "lint": {
+    "command": "./node_modules/.bin/eslint --no-ignore scripts/integration/position-startup-task-recovery.js tests/helpers/position-startup-recovery-harness.js",
+    "exitCode": 0,
+    "evidence": "startup-supplement-lint.log"
+  },
+  "sourceSnapshot": "startup-supplement-source-snapshot.json",
+  "fullIntegration": {
+    "command": "npm run test:integration",
+    "exitCode": 0,
+    "status": "PASS",
+    "scripts": 63,
+    "passed": 63,
+    "failed": 0,
+    "reportedAssertions": 2590,
+    "durationMs": 518395,
+    "evidence": "startup-supplement-integration.log",
+    "countBoundary": "one historical nested-worker script has no numeric assertion count"
+  },
+  "fullReleaseCheckRerun": false,
+  "fullReleaseCheckBoundary": "prior release-check remains historical; production JS and existing tests unchanged; supplement validates the new test and current integration suite",
+  "completedAt": "2026-09-20T16:01:25.952189+00:00",
+  "mutations": {
+    "baseline": "3/3 PASS",
+    "killedByExpectedBehaviorAssertions": 2,
+    "total": 2,
+    "sourceUnchanged": true,
+    "evidence": "startup-mutation-results.json"
+  },
+  "sourceSnapshotMatches": true,
+  "reviewResponse": {
+    "A1": "recorded as pending G8 joint acceptance under total index section 6.2; no G8 config activated",
+    "V1": "addressed with production Position startup functions, real side DB and zero-outbox recovery scenarios"
+  },
+  "diffCheck": "PASS"
+}

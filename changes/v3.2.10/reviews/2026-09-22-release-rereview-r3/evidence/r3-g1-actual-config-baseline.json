@@ -1,0 +1,102 @@
+{
+  "coverage": {
+    "scannedFiles": 765,
+    "parsedFiles": 765,
+    "literalEdges": 2405,
+    "workerEdges": 64,
+    "globalEdges": 59,
+    "unresolved": 2,
+    "dynamicSites": 33,
+    "parseErrors": 0
+  },
+  "violations": [],
+  "activeBoundaries": [
+    "publication-recovery-entry"
+  ],
+  "rawAllowedSites": [
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "functionPath": "recoverOneJournal",
+      "callee": "recoverPreparingIntent",
+      "evidenceId": "d3359118d9b5296f40e63216a98b2f0b5d655f5073bd6966bdb03f01f05c68fc",
+      "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。",
+      "match": [
+        {
+          "line": 1907,
+          "column": 11
+        }
+      ]
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "functionPath": "recoverOneJournal",
+      "callee": "recoverPreparingIntent",
+      "evidenceId": "d9ee5947fed2c2494f0227d9dcb4170adf5c84a58c3e0a40fcd5ee88466f4c66",
+      "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。",
+      "match": [
+        {
+          "line": 1910,
+          "column": 11
+        }
+      ]
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "functionPath": "recoverOneJournal",
+      "callee": "recoverFinalizingIntent",
+      "evidenceId": "23ff24a04ecb3593f36244c2a1c8ef4743d87c44d6377e1484230d488514ffea",
+      "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。",
+      "match": [
+        {
+          "line": 1916,
+          "column": 11
+        }
+      ]
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "functionPath": "recoverOneJournal",
+      "callee": "recoverFinalizingIntent",
+      "evidenceId": "1a832603801cd7c0eaab8609e839055ca4370e37c23256fe393b8779167edceb",
+      "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。",
+      "match": [
+        {
+          "line": 1923,
+          "column": 11
+        }
+      ]
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "functionPath": "recoverOneJournal",
+      "callee": "recoverPreparingIntent",
+      "evidenceId": "c5b63f1acce3e3ebc22a002939121dbe0920768a3689bc7e651e36ac22f1b72f",
+      "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。",
+      "match": [
+        {
+          "line": 1939,
+          "column": 13
+        }
+      ]
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "functionPath": "recoverPendingToolboxPublications.<anonymous:1>",
+      "callee": "recoverOneJournal",
+      "evidenceId": "df3aee65058c90c8fef713c3a623309b3e4d6a9f958506095d8267e65b069d09",
+      "reason": "raw 恢复入口先验证 workerAuthority/authorization，再逐项验证完整 grant 与 snapshot；仅此互斥事务中的调用可以进入内部恢复。",
+      "match": [
+        {
+          "line": 2139,
+          "column": 21
+        }
+      ]
+    }
+  ]
+}

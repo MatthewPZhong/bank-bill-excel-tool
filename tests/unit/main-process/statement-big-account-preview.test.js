@@ -22,7 +22,7 @@ const {
 
 const ROOT = path.join(__dirname, '..', '..', '..');
 const MAIN_PATH = path.join(ROOT, 'src', 'main.js');
-const RENDERER_DIALOGS_PATH = path.join(ROOT, 'src', 'renderer-dialogs.js');
+const RENDERER_DIALOGS_PATH = path.join(ROOT, 'src', 'renderer', 'dialogs', 'configuration.js');
 const mainSource = fs.readFileSync(MAIN_PATH, 'utf8');
 const mainAst = acorn.parse(mainSource, {
   ecmaVersion: 'latest',
@@ -998,7 +998,7 @@ test('public freshness 通过后稳定替换 v2，reader 起点仍绑定 confirm
   );
   assert.match(
     functionSource('runArchiveAwareOperation'),
-    /const executeBusiness = \(taskContext\) => runWithStatementConfirmedSourceSnapshots\(/
+    /executeBusiness:\s*\(\) => runWithStatementConfirmedSourceSnapshots\(\s*meta\.channel, taskContext,\s*\(\) => executeIpcTaskInvocation\(contract, event, prepared, effectiveArgs, taskContext\)/
   );
 });
 

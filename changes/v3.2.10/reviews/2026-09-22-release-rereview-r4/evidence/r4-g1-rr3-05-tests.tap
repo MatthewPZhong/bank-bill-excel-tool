@@ -1,0 +1,15 @@
+✔ RR3-05 受限恢复经 array 仍保留能力身份 (17.143875ms)
+✔ RR3-05 受限恢复经 destructure 仍保留能力身份 (2.774542ms)
+✔ RR3-05 受限恢复经 parameter 仍保留能力身份 (2.406583ms)
+✔ RR3-05 受限恢复经 identity 仍保留能力身份 (2.13525ms)
+✔ RR3-05 受限恢复经 external helper 仍保留能力身份 (3.559167ms)
+✔ RR3-05 受限恢复经 nested forwarding 仍保留能力身份 (2.882792ms)
+✔ RR3-05 传递但不执行的受限成员与同名普通函数不扩大成恢复调用 (4.855959ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 116.187375

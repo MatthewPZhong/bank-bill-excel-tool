@@ -1,0 +1,32 @@
+{
+  "primary": {
+    "headBefore": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+    "headAfter": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+    "recordedFiles": 865,
+    "changedOrMissing": []
+  },
+  "source": {
+    "headAfter": "9a1d8aee5ac8cfb27c816167a8cf3d6a4baff802",
+    "recordedFiles": 137,
+    "changedOrMissing": [],
+    "unrelatedChangedOrMissing": []
+  },
+  "candidate": {
+    "head": "f8fd640586f9119b091148151e1beb48f9552c5d",
+    "sourceFileDifferences": [
+      "AGENTS.md",
+      "rules/integration-test-policy.md"
+    ],
+    "productionSourceUnchanged": true,
+    "allEarlierSourceAncestors": {
+      "codex/v3.2.10-application-recovery": true,
+      "codex/v3.2.10-business-task-adapters": true,
+      "codex/v3.2.10-renderer-boundaries": true,
+      "codex/v3.2.10-shared-xlsx-infrastructure": true,
+      "codex/v3.2.10-bizop-query-boundaries": true,
+      "codex/v3.2.10-storage-execution-separation": true,
+      "codex/v3.2.10-execution-descriptors": true,
+      "codex/v3.2.10-architecture-guardrails": true
+    }
+  }
+}

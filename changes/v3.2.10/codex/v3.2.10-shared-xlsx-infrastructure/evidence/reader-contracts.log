@@ -1,0 +1,39 @@
+G4 reader 合同测试证据（2026-09-20）
+
+工作目录：/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-shared-xlsx-infrastructure
+Node：v25.8.0
+基线：11086a3cbf632a30adbcfa796e4cd81810c5aef9
+
+第一次：X0 固定基线特征，20 / 20 PASS
+从 git archive 11086a3cbf632a30adbcfa796e4cd81810c5aef9 src 提取独立临时源码树；
+将现场 fixture helper 与当时的两个新测试文件复制到相同 tests 层级，依赖指向本机现有 node_modules。
+当时测试导入旧 pending-import/streaming-xlsx-reader、xlsx-rich-reader，尚无 shim identity 用例。
+命令：node --test "$taskBaseline/tests/unit/backend/xlsx/legacy-compatibility.test.js" "$taskBaseline/tests/unit/backend/xlsx/rich-workbook-contract.test.js"
+实际结果：tests 20, pass 20, fail 0, cancelled 0, skipped 0, todo 0。
+这次执行直接针对提交 11086a3c 的实现，不因同时进行的公共模块迁移而使用被替换的旧路径 shim。
+
+第二次：新公共入口与旧 shim identity，22 / 22 PASS
+测试导入切为 xlsx/legacy/streaming-xlsx-reader 与 xlsx/rich-workbook；
+添加 legacy / preflight / rich 旧入口与新入口对象及函数 identity 断言。
+命令：node --test tests/unit/backend/xlsx/legacy-compatibility.test.js tests/unit/backend/xlsx/rich-workbook-contract.test.js
+实际结果：tests 22, pass 22, fail 0, cancelled 0, skipped 0, todo 0。
+
+第三次：补足关系 Id、预算、既有 onSheetMeta 合同和取消收口，26 / 26 PASS
+命令：node --test tests/unit/backend/xlsx/legacy-compatibility.test.js tests/unit/backend/xlsx/rich-workbook-contract.test.js
+实际结果：tests 26, pass 26, fail 0, cancelled 0, skipped 0, todo 0。
+
+最终覆盖：
+- legacy 固定列宽/缺省31列、行序与连续一基回调行号、空单元格、inline/escape、空 SST 返回 null、sharedStrings 数组。
+- maxRows 仅正整数生效；undefined/null/0/负数/小数/字符串/NaN/Infinity 不截断；等于实际行数仍 truncated=true。
+- legacy callback 的未完成 Promise/thenable 被忽略，rich 对应 callback 必须同步。
+- 同一文件数字 001.2300 / 1e3 的 legacy 值为 1.23 / 1000，rich 保持 lexical；legacy/rich 行号差异明确冻结。
+- rich 单页入口计入隐藏页并早于 styles/SST 拒绝；多页声明顺序、veryHidden、date1904、lexical 原始 body。
+- 重复目标/外部关系/缺失关系/缺失 sheet 保留 RICH_XLSX_WORKBOOK_INVALID；重复关系 Id 保留 ToolboxXlsxFormatError constructor/name/code。
+- maxSheets 1..4096 安全整数校验；样式引用必须归属当前 workbook。
+- 并发 scan、非法索引、close 后 scan 拒绝；close 返回 cached Promise。
+- onRow/onCellLexical/onSheetMeta 的 thenable 按原 TypeError 拒绝，失败后可重新顺序扫描。
+- SST 构建失败清理 spill；扫描中取消保留 ToolboxXlsxCancelledError，caller await close 后目录消失。
+- 注入资源获取边界的故障执行实际 rich close/catch：先关 SST 再关 ZIP，两处失败都进入 AggregateError，拒绝 Promise 缓存，构建错误及关闭错误/cause 均保留。
+
+边界：以上为本机 Node 合同/资源回归，不包含 Windows 文件占用、worker 强制 terminate、Excel/WPS 人工验收或 release-check。
+仅新增测试/helper/本证据；未修改生产实现、未提交、未推送。

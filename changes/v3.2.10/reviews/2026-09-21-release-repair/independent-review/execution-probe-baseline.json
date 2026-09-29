@@ -1,0 +1,133 @@
+{
+  "before": {
+    "scripts/architecture/contracts.js": "b5a9e3d5cee943783d0405bcabaddd6341ed0a399c40053222fd59b412454572",
+    "scripts/architecture/rules.js": "a43f466da3ab8a87488c62ba5ba5959e45282b7f98c51e36fa5b1d4cb11889b7",
+    "scripts/architecture/scan.js": "5c343dbb1864b34efa76e58f88a16262f9f9e7d275039fed21f7d5350da26df8"
+  },
+  "after": {
+    "scripts/architecture/contracts.js": "b5a9e3d5cee943783d0405bcabaddd6341ed0a399c40053222fd59b412454572",
+    "scripts/architecture/rules.js": "a43f466da3ab8a87488c62ba5ba5959e45282b7f98c51e36fa5b1d4cb11889b7",
+    "scripts/architecture/scan.js": "5c343dbb1864b34efa76e58f88a16262f9f9e7d275039fed21f7d5350da26df8"
+  },
+  "stable": true,
+  "results": [
+    {
+      "name": "direct",
+      "source": "function read(catalog){return catalog.db.prepare('SELECT 1').all();}module.exports={read};",
+      "extra": {},
+      "runtimeSql": [
+        "SELECT 1"
+      ],
+      "violations": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "from": "src/query.js",
+          "line": 1,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "functionPath": "read"
+        }
+      ],
+      "dynamicSites": []
+    },
+    {
+      "name": "helper",
+      "source": "const {query}=require('./helper');function read(catalog){return query(catalog);}module.exports={read};",
+      "extra": {
+        "src/helper.js": "exports.query=catalog=>catalog.db.prepare('SELECT 1').all();"
+      },
+      "runtimeSql": [
+        "SELECT 1"
+      ],
+      "violations": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "from": "src/helper.js",
+          "line": 1,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "functionPath": "query"
+        }
+      ],
+      "dynamicSites": []
+    },
+    {
+      "name": "factory-member",
+      "source": "const {create}=require('./helper');function read(catalog){return create(catalog).query();}module.exports={read};",
+      "extra": {
+        "src/helper.js": "exports.create=catalog=>({query(){return catalog.db.prepare('SELECT 1').all();}});"
+      },
+      "runtimeSql": [
+        "SELECT 1"
+      ],
+      "violations": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "from": "src/helper.js",
+          "line": 1,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "functionPath": "create.query"
+        }
+      ],
+      "dynamicSites": []
+    },
+    {
+      "name": "local-callback",
+      "source": "function invoke(fn,catalog){return fn(catalog);}function query(catalog){return catalog.db.prepare('SELECT 1').all();}function read(catalog){return invoke(query,catalog);}module.exports={read};",
+      "extra": {},
+      "runtimeSql": [
+        "SELECT 1"
+      ],
+      "violations": [],
+      "dynamicSites": []
+    },
+    {
+      "name": "imported-callback",
+      "source": "const {query}=require('./helper');function invoke(fn,catalog){return fn(catalog);}function read(catalog){return invoke(query,catalog);}module.exports={read};",
+      "extra": {
+        "src/helper.js": "exports.query=catalog=>catalog.db.prepare('SELECT 1').all();"
+      },
+      "runtimeSql": [
+        "SELECT 1"
+      ],
+      "violations": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "from": "src/helper.js",
+          "line": 1,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "functionPath": "query"
+        }
+      ],
+      "dynamicSites": []
+    },
+    {
+      "name": "object-callback",
+      "source": "function invoke(service,catalog){return service.query(catalog);}function query(catalog){return catalog.db.prepare('SELECT 1').all();}function read(catalog){return invoke({query},catalog);}module.exports={read};",
+      "extra": {},
+      "runtimeSql": [
+        "SELECT 1"
+      ],
+      "violations": [],
+      "dynamicSites": []
+    },
+    {
+      "name": "returned-callback",
+      "source": "const {create}=require('./helper');function invoke(fn,catalog){return fn(catalog);}function read(catalog){return invoke(create(),catalog);}module.exports={read};",
+      "extra": {
+        "src/helper.js": "exports.create=()=>catalog=>catalog.db.prepare('SELECT 1').all();"
+      },
+      "runtimeSql": [
+        "SELECT 1"
+      ],
+      "violations": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "from": "src/helper.js",
+          "line": 1,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "functionPath": "create.<anonymous:1>"
+        }
+      ],
+      "dynamicSites": []
+    }
+  ]
+}

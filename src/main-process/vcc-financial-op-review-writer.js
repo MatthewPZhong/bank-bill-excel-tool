@@ -2,7 +2,7 @@
 const { DatabaseSync } = require('node:sqlite');
 const path = require('node:path');
 const { withBoundedWorkbook } = require('./bounded-xlsx-writer');
-const { encodeExcelStXstring } = require('../backend/toolbox-format/excel-text');
+const { encodeExcelStXstring } = require('../backend/xlsx/excel-text');
 const { loadResultTemplateContract, RESULT_TEMPLATE_FILE_NAME } = require('../backend/vcc-financial-op/result-template-contract');
 const { encodeAdjustmentLineageName } = require('../backend/vcc-financial-op/adjustment-lineage');
 const { adjustmentReasonRowHeight } = require('./vcc-financial-op-writer');

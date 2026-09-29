@@ -1,0 +1,10 @@
+{
+  "checked": 271,
+  "missing": [
+    {
+      "file": "changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/techdoc.md",
+      "target": "../v3.2.10-architecture-guardrails/techdoc.md",
+      "reason": "G8 设计位于主工作区，G8 模块尚未集成"
+    }
+  ]
+}

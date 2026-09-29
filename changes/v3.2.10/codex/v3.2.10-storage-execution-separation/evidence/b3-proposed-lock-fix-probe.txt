@@ -1,0 +1,83 @@
+{
+  "recordedAt": "2026-09-20T12:18:01.211Z",
+  "state": "待批准方案实验；生产 Main 未修改；不作为已实施 B3 验收",
+  "node": "v25.8.0",
+  "platform": "darwin/arm64",
+  "worktree": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-storage-execution-separation",
+  "currentMainSha256": "9599755bf4d548dea1ba5a676926af12ea153f19960e8406115aabd7e3011a3f",
+  "proposedMainSha256": "8e189ff35f1a5d79447a94881f5896958c5c89870e725c0a0fba27d95bd7bd56",
+  "proposedDiffSha256": "f463234d3380b67837387f52ebd97aaa2c0b7b3990c1a9828a6b7eb984a92ecf",
+  "current": {
+    "label": "current",
+    "sourceSha256": "9599755bf4d548dea1ba5a676926af12ea153f19960e8406115aabd7e3011a3f",
+    "extraction": {
+      "lockSha256": "7f9160205b217df5e4f1bb38806294ab1bfc0f4613e894d79f6581e18d1189f1",
+      "prepareLockAndReleaseSha256": "f21b00a78504424a6fba3960130f7c393d1c69e2feaf12288a87a76f9f6b18c3",
+      "failureListenerSha256": "0a2c694935907add5e9fb620ec68b08584972de16ea5901ff7783784fd90209e"
+    },
+    "workerBeforeFailure": {
+      "workerAlive": true,
+      "busy": false
+    },
+    "failure": {
+      "source": "exit",
+      "hadActiveJob": false
+    },
+    "firstPrepare": {
+      "proceed": true
+    },
+    "afterIdleFailure": {
+      "inFlight": false,
+      "operation": null,
+      "monthKey": null
+    },
+    "secondPrepare": {
+      "proceed": true
+    },
+    "activityLogRecorded": true,
+    "currentDefectReproduced": true
+  },
+  "proposed": {
+    "label": "proposed",
+    "sourceSha256": "8e189ff35f1a5d79447a94881f5896958c5c89870e725c0a0fba27d95bd7bd56",
+    "extraction": {
+      "lockSha256": "7f9160205b217df5e4f1bb38806294ab1bfc0f4613e894d79f6581e18d1189f1",
+      "prepareLockAndReleaseSha256": "f21b00a78504424a6fba3960130f7c393d1c69e2feaf12288a87a76f9f6b18c3",
+      "failureListenerSha256": "4bfd2b911f386051e10beb757dfd927af44849b7d1408d2b6c4695b95fdc9bf2"
+    },
+    "workerBeforeFailure": {
+      "workerAlive": true,
+      "busy": false
+    },
+    "failure": {
+      "source": "exit",
+      "hadActiveJob": false
+    },
+    "firstPrepare": {
+      "proceed": true
+    },
+    "afterIdleFailure": {
+      "inFlight": true,
+      "operation": "run",
+      "monthKey": "2026-04"
+    },
+    "secondPrepare": {
+      "proceed": false,
+      "result": {
+        "status": "busy",
+        "message": "当前有对账任务在执行，请等待完成后再试"
+      }
+    },
+    "activityLogRecorded": true,
+    "ownerReleaseThenNextPrepare": {
+      "nextProceed": true,
+      "oldOwnerSecondReleaseKeptNewLock": true,
+      "thirdStatus": "busy",
+      "nextOnAbandonReleased": true
+    },
+    "proposedInvariantHeld": true
+  },
+  "productionMainUnchanged": true,
+  "proposedExperimentPassed": true,
+  "boundary": "实际 pool/worker idle crash + Main 原锁函数/prepare锁与release闭包/failure listener的VM装配；仅source字符串应用diff。未覆盖完整IPC prepare/execute、active job失败、取消、Windows/Electron或两个真实MW共享目录；等待用户批准后才能实施并取得相称回归证据。"
+}

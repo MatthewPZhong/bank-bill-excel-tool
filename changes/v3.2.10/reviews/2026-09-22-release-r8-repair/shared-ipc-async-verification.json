@@ -1,0 +1,37 @@
+{
+  "result": "PASS",
+  "source": "const {ipcRenderer}=require('electron');function mount(category=ipcRenderer.invoke('other')){window.ReconIdFixController.createReconIdFixController({config:{initialBillCategory:category}});}mount(ipcRenderer.invoke('app:get-info').reconIdFixBillCategory);",
+  "priorSynchronousVm": {
+    "calledIpc": [
+      "app:get-info"
+    ],
+    "category": "business",
+    "initialNestedIsState": false,
+    "apiIsWhole": false,
+    "apiKeys": []
+  },
+  "asynchronousVm": {
+    "calls": [
+      "app:get-info",
+      "other"
+    ],
+    "initialBillCategory": {
+      "sourceChannel": "other",
+      "reconIdFixBillCategory": "business"
+    }
+  },
+  "currentDiagnostics": [
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-recon-id-fix",
+      "from": "src/shell.js",
+      "to": null,
+      "line": 1,
+      "column": 93,
+      "message": "工厂字段 config.initialBillCategory 必须是递归纯数据或明确的 app:get-info IPC 数据",
+      "evidenceId": "1901839eb301f8de8607bfdc10ff71e116ca87fd1957a76d72b55792f53f640a",
+      "functionPath": "mount"
+    }
+  ],
+  "localElectronContract": "node_modules/electron/electron.d.ts:8847 invoke returns Promise<any>"
+}

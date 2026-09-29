@@ -1,0 +1,94 @@
+{
+  "reviewedAt": "2026-09-20T13:46:37.684222+00:00",
+  "branch": "codex/v3.2.10-bizop-query-boundaries",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "reviewBoundary": "HEAD plus uncommitted tracked and untracked implementation; no branch commits beyond main",
+  "platform": "macOS-15.7.4-arm64-arm-64bit-Mach-O",
+  "node": "v24.13.0",
+  "sourceEndCheck": {
+    "matched": 63,
+    "mismatches": []
+  },
+  "oracleByteEquality": {
+    "compute-inputs.js": true,
+    "export-inputs.js": true,
+    "delete-preview.js": true
+  },
+  "unit": {
+    "pass": 153,
+    "total": 153,
+    "fail": 0,
+    "skipped": 0,
+    "exitCode": 0,
+    "fileCount": 11
+  },
+  "integration": {
+    "pass": 9,
+    "total": 9,
+    "fail": 0,
+    "skipped": 0,
+    "exitCode": 0,
+    "directoryFsync": "supported"
+  },
+  "lintExitCode": 0,
+  "diffCheckExitCode": 0,
+  "inventory": {
+    "protectedRawAccesses": 0,
+    "previewCommandSites": 5,
+    "inventorySites": 243,
+    "isG8Guard": false
+  },
+  "manifest": {
+    "current": {
+      "exitCode": 1,
+      "cwd": "/private/tmp/bizop-query-review-20260920-7uphg1r9"
+    },
+    "baseline": {
+      "exitCode": 1,
+      "cwd": "/private/tmp/bizop-query-base-20260920-8d6veonb"
+    },
+    "allExpectedArtifactsEqual": true,
+    "artifactEquality": {
+      "manifest": true,
+      "capabilityInventory": true,
+      "productionStrategy": true,
+      "coverageReport": true
+    },
+    "expectedActionCount": null
+  },
+  "releaseCheckExecuted": false,
+  "findings": [],
+  "notVerified": [
+    "G2/G7/G8/release integration",
+    "Windows/Excel/WPS/install-package/Electron GUI",
+    "4096 XLSX performance",
+    "old-new exported workbook cell-by-cell golden equality"
+  ],
+  "reviewedArchiveFiles": [
+    "AGENTS.md",
+    "CODEX.md",
+    "changes/v3.2.10/README.md",
+    "changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/implementation-notes.md",
+    "changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/spec.md",
+    "changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/techdoc.md",
+    "package-lock.json",
+    "package.json",
+    "scripts/integration/biz-op-query-boundary.js",
+    "src/backend/database/archive-repository.js",
+    "src/main-process/biz-op-v327/README.md",
+    "src/main-process/biz-op-v327/catalog-queries.js",
+    "src/main-process/biz-op-v327/catalog.js",
+    "src/main-process/biz-op-v327/compute-inputs.js",
+    "src/main-process/biz-op-v327/delete-preview.js",
+    "src/main-process/biz-op-v327/export-inputs.js",
+    "src/main-process/biz-op-v327/import-main.js",
+    "tests/fixtures/biz-op-query-boundary/11086a3c/compute-inputs.js",
+    "tests/fixtures/biz-op-query-boundary/11086a3c/delete-preview.js",
+    "tests/fixtures/biz-op-query-boundary/11086a3c/export-inputs.js",
+    "tests/unit/backend/archive-blob-reference-query.test.js",
+    "tests/unit/main-process/biz-op-v327-catalog-queries.test.js",
+    "tests/unit/main-process/biz-op-v327-export-rule-version.test.js",
+    "tests/unit/main-process/biz-op-v327-import-query.test.js",
+    "tests/unit/main-process/biz-op-v329-auto-report.test.js"
+  ]
+}

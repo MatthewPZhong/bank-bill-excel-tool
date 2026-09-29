@@ -1,0 +1,20 @@
+{
+  "files": {
+    "validated-input-objects.json": "47ddebe58738c1f3758be0b61654cbc813d075e07685c18940c19b370b06d961",
+    "diagnostic-summary.json": "1168fe5b23fc0468bec22c7fc1269a0914dcd20b879a8a1ae65a05d4585b21ac",
+    "initial-architecture-check.log": "981c43ae05b2b591f1ebadcec0f6cf0e8d5557e0a0c7df5a526869208795224f",
+    "input-manifest.json": "bf5c99a7e24faa4b85a75b72c5f4f5e668d5229cbc5c02d8fa4e63378a759344",
+    "workspace-preservation.json": "01ecda7ce5fd9bb27d0a3c784b23e64963ecd9f30e42c446b8f8654d1aa7d80c",
+    "initial-architecture-check.json": "312e24be4495447db43c4e03f4985fabc40f22e113f8528ac25884ec59495155",
+    "release-check.log": "47d51cd33a3447d2c795ba6962c49d8cc3b782ebfcd8ce78abd9223d9e47f88a",
+    "architecture-check.log": "7af20a287a5c477f5b0d468ea63d86e909680aac84bd1db8efd851d0b5d148e5",
+    "verification.json": "c0ecad6dea7777f886194631fc6798ec8ce8135db167d8ad55b62b5f1768fb76",
+    "architecture-check.json": "bf055dd2fb65a3800fd333196fcbd1e8f1627acc09afc65129ae858d97bfad7a",
+    "source-commit.json": "9bb9678159e99ad3f77e1eb8cb33ed63f7fd88eb945dd26ad22fe939201a271f",
+    "architecture-tests.log": "59a566afebbeb106e31b5d39808fd79f5c31c8a8b8970289ff0a6123bfe8a081"
+  },
+  "sourceAndPrimaryUnchanged": true,
+  "newReleaseSectionLinks": 10,
+  "missingLinks": [],
+  "testedCodeWorkingTreeUnchanged": true
+}

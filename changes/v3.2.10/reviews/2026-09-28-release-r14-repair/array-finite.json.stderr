@@ -1,0 +1,6 @@
+{"phase":"object-parameter-write-then-reorder","at":"2026-09-28T09:18:15.297Z","violations":1}
+{"phase":"object-parameter-reorder-then-write","at":"2026-09-28T09:18:15.300Z","violations":0}
+{"phase":"destructured-parameter-write-then-reorder","at":"2026-09-28T09:18:15.301Z","violations":1}
+{"phase":"destructured-parameter-reorder-then-write","at":"2026-09-28T09:18:15.303Z","violations":0}
+{"phase":"single-nested-helper-write-then-reorder","at":"2026-09-28T09:18:15.305Z","violations":1}
+{"phase":"single-nested-helper-reorder-then-write","at":"2026-09-28T09:18:15.307Z","violations":0}

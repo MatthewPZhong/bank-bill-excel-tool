@@ -1,0 +1,57 @@
+{
+  "checkedAt": "2026-09-20T13:43:43.267796+00:00",
+  "sourceFileCount": 92,
+  "sourceDrift": [],
+  "logCount": 5,
+  "logDrift": [],
+  "codeDiffMatches": true,
+  "policyMatches": true,
+  "recordedGate": {
+    "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+    "startedAt": "2026-09-20T12:34:46.118875+00:00",
+    "workdir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-shared-xlsx-infrastructure",
+    "diskFreeBytesBefore": 2056044544,
+    "loadAverageBefore": [
+      4.66162109375,
+      5.53173828125,
+      6.89453125
+    ],
+    "status": "passed",
+    "processId": 10501,
+    "exitCode": 0,
+    "finishedAt": "2026-09-20T12:55:51.795972+00:00",
+    "diskFreeBytesAfter": 12058546176,
+    "loadAverageAfter": [
+      8.68798828125,
+      7.9541015625,
+      7.5537109375
+    ]
+  },
+  "logs": [
+    {
+      "path": "retry-unit-cases.log",
+      "expected": "a1cf8b40d5c7f7b40ad02389b0e5690df273eacd42734d9ab195cf8acd2b11a4",
+      "actual": "a1cf8b40d5c7f7b40ad02389b0e5690df273eacd42734d9ab195cf8acd2b11a4"
+    },
+    {
+      "path": "retry-archive-center-permanent-delete.log",
+      "expected": "ee3fadc585fd500fcdaa623841b0d5e78c6525fdf0efcf07940b482dd8e8559d",
+      "actual": "ee3fadc585fd500fcdaa623841b0d5e78c6525fdf0efcf07940b482dd8e8559d"
+    },
+    {
+      "path": "retry-toolbox-large-split-multi-sheet.log",
+      "expected": "1bd5cb81e92984f99ee63bdf240e9d79bb9a7b84de7635a336e5857238b26cf6",
+      "actual": "1bd5cb81e92984f99ee63bdf240e9d79bb9a7b84de7635a336e5857238b26cf6"
+    },
+    {
+      "path": "retry-toolbox-baseline.log",
+      "expected": "32af8239202221aa20e27f0f2a90100dd319af69aa8d4ea7269edbd35f2346ff",
+      "actual": "32af8239202221aa20e27f0f2a90100dd319af69aa8d4ea7269edbd35f2346ff"
+    },
+    {
+      "path": "retry-release-check.log",
+      "expected": "da68c216f5554fd6050642630f1717cb004703cb0229a7d97826a853bbcb352c",
+      "actual": "da68c216f5554fd6050642630f1717cb004703cb0229a7d97826a853bbcb352c"
+    }
+  ]
+}

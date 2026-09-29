@@ -256,7 +256,9 @@ test('BU、账户大小写/零位和不同币种不串键；高精度金额不�
 test('结果删除后旧 receipt 不复活它，新 Task 同输入产生递增版本；成功结果不因重复请求升版', async (t) => {
   const f = await createHost(t); await seed(f);
   const first = await compute(f); assert.equal(first.status, 'ok');
-  const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
+  const {
+  createTaskPolicyRegistry
+} = require('../../../src/main-process/execution-descriptors/composition');
   await f.module.admission.exclusive(async () => {
     const intent = f.module.catalog.deleteIntent({ datasetIds: [], runIds: [first.runId], deleteMode: 'DELETE_ASSOCIATED',
       expectedGeneration: f.module.catalog.control().generation });

@@ -1,0 +1,64 @@
+{
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "scope": "R1 confirmation submission only; synthetic API; actual controller/dialog factories/bridge/host and isolated Electron DOM",
+  "checks": [
+    {
+      "command": "node changes/v3.2.10/reviews/2026-09-21-release-review/evidence/g3-bank-close-probe.cjs",
+      "exitCode": 0,
+      "phase": "before repair",
+      "meaning": "all 5 defect assertions reproduced, including refund/C3 4 production paths",
+      "log": "before-probe.json"
+    },
+    {
+      "command": "node --test tests/unit/renderer/scenario-change-routing.test.js",
+      "exitCode": 0,
+      "tests": 31,
+      "pass": 31,
+      "log": "scenario-change-routing.log"
+    },
+    {
+      "command": "node scripts/test-renderer-lifecycle.js bank-statement-confirmation",
+      "exitCode": 1,
+      "meaning": "sandbox Electron launch SIGABRT",
+      "log": "renderer-confirmation.log"
+    },
+    {
+      "command": "node scripts/test-renderer-lifecycle.js bank-statement-confirmation",
+      "exitCode": 0,
+      "tests": 27,
+      "pass": 27,
+      "environment": "approved unsandboxed, isolated userData/Documents",
+      "log": "renderer-confirmation-unsandboxed.log"
+    },
+    {
+      "command": "node --test tests/unit/renderer-refund-prompt-orchestration.test.js tests/unit/renderer-refund-ready-guard.test.js tests/unit/renderer/scenario-controller-feedback.test.js",
+      "exitCode": 1,
+      "tests": 94,
+      "pass": 93,
+      "fail": 1,
+      "meaning": "obsolete source-shape assertion; replaced with real controller/host regression",
+      "log": "refund-feedback-tests.log"
+    },
+    {
+      "command": "node --test tests/unit/renderer-refund-prompt-orchestration.test.js tests/unit/renderer-refund-ready-guard.test.js tests/unit/renderer/scenario-controller-feedback.test.js",
+      "exitCode": 0,
+      "tests": 94,
+      "pass": 94,
+      "log": "refund-feedback-tests-fixed.log"
+    }
+  ],
+  "sha256": {
+    "src/renderer/controllers/bank-statement.js": "78e372fabe16427b952c2c6da4edac23f6ee7570e55599469efca0bfe531a738",
+    "tests/unit/renderer/scenario-change-routing.test.js": "08e3cf2fe233de0f9b00224702b76a996525b9de22e477c16dbbc8b54dfd2acc",
+    "tests/unit/renderer-refund-prompt-orchestration.test.js": "0dbb51aec3b3ca959114afa71cb0d65628bb5dee9e78e8f5ddffcb6a77ca189f",
+    "scripts/renderer-lifecycle/fixtures/bank-statement-confirmation.js": "ee812d7e30b24f2684cd7d67b28a1fb96896e06c0856c7564d05a9331fa68e4f"
+  },
+  "evidenceSha256": {
+    "refund-feedback-tests-fixed.log": "259fce0d1c6a65c5c7ed953f3bdc0e88825dfe29b43ab10bbcd15297adbe2b5d",
+    "refund-feedback-tests.log": "b042666b8ae27cf5a82847b7e9df718143914211db0fedbb0448975762f533d9",
+    "renderer-confirmation-unsandboxed.log": "bee1ffe664fd781c97832a47460121efa061d10659fe7313f1bb077c413ead53",
+    "before-probe.json": "e4521cac629348a53931c550f3339b66b5baee31bf2d45f74620e51582d16a64",
+    "renderer-confirmation.log": "5f44ffa0bb4c6a286b0d322b1200b410e393821b9de3e4913acdadd48bc96de6",
+    "scenario-change-routing.log": "eeca8ab746fb8fab73f101ea53e750cee7190dcd803950009ba3e458eb674a5e"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "capturedAt": "2026-09-23T02:52:44.865835+08:00",
+  "beforeVersion": "2026-09-23-release-r10-repair/input-manifest.json",
+  "before": {
+    "scripts/architecture/scan.js": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be",
+    "scripts/architecture/contracts.js": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f",
+    "scripts/architecture/rules.js": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa",
+    "scripts/architecture/renderer-contracts.js": "a375dd2d18307907a158ae04f86197f0630657e64d81de2e60fd0f4e4ecfe3fb",
+    "scripts/architecture/schema.js": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316"
+  },
+  "current": {
+    "scripts/architecture/scan.js": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be",
+    "scripts/architecture/contracts.js": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f",
+    "scripts/architecture/rules.js": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa",
+    "scripts/architecture/renderer-contracts.js": "dd34f594f57d0d5d6f33944bed80802d50b4712077e9f4dba1f205d93b19dbb7",
+    "scripts/architecture/schema.js": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316"
+  },
+  "unchangedSharedCheckerAndPolicySha256": {
+    "scripts/architecture/scan.js": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be",
+    "scripts/architecture/contracts.js": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f",
+    "scripts/architecture/rules.js": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa",
+    "scripts/architecture/schema.js": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+    "scripts/architecture/policy-history.js": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+    "architecture/boundaries.json": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+    "architecture/legacy-allowlist.json": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3"
+  },
+  "reusedFreshBeforeArtifacts": {
+    "r10-renderer-probes-before.jsonl": "55b642a1d06839148ec39e184ad81336d7f7467c3cb7a9a285e3a1b48d67c34f",
+    "r10-array-neighbor-before.json": "9c442f93a03d0f5a95d2385ab98be7a65a29bad522048f23300b611cb75656de",
+    "r10-renderer-nested-realconfig-before.json": "e41c2576c9601c534459f58bec398d2074f2954a7d02ddcd7ef16eb5f8d49ce7",
+    "r10-array-real-neighbor-before.json": "5c2e39270d331d079b71a4b9dd416051c28a851ecca40d03938a6725a31da170"
+  }
+}

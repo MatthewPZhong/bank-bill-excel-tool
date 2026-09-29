@@ -1,0 +1,57 @@
+[
+  {
+    "scanner": "WORKTREE",
+    "name": "conditional-call-skipped",
+    "source": "const reviewOld={run(){}};const reviewClean={run(){}};const reviewBox={api:reviewOld};function replaceReviewApi(){reviewBox.api=reviewClean;}async function runReviewScenario(){const reviewInfo=await window.desktopApi.app.getInfo();if(reviewInfo.hasEnum)replaceReviewApi();const reviewOther=reviewBox.api;reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewOld});return reviewOther===reviewOld;}runReviewScenario();",
+    "baseViolations": 0,
+    "scanError": null,
+    "probeViolations": [
+      {
+        "rule": "ARCH-RENDERER-SCOPE",
+        "boundaryId": "renderer-bank-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 360,
+        "message": "scoped api 未授权字段 outsideScope",
+        "functionPath": "runReviewScenario"
+      }
+    ],
+    "boundaryCount": 20,
+    "runtime": {
+      "ipcReads": 1,
+      "same": true,
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run",
+        "outsideScope"
+      ],
+      "whole": false,
+      "extraCallable": true,
+      "extraResult": true
+    }
+  },
+  {
+    "scanner": "WORKTREE",
+    "name": "direct-call-before-old-safe",
+    "source": "const reviewOld={run(){}};const reviewClean={run(){}};const reviewBox={api:reviewOld};function replaceReviewApi(){reviewBox.api=reviewClean;}async function runReviewScenario(){const reviewInfo=await window.desktopApi.app.getInfo();replaceReviewApi();const reviewOther=reviewBox.api;reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewOld});return reviewOther===reviewOld;}runReviewScenario();",
+    "baseViolations": 0,
+    "scanError": null,
+    "probeViolations": [],
+    "boundaryCount": 20,
+    "runtime": {
+      "ipcReads": 1,
+      "same": false,
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run"
+      ],
+      "whole": false,
+      "extraCallable": false
+    }
+  }
+]

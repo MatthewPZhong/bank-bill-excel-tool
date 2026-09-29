@@ -1,0 +1,8 @@
+{
+  "policyCount": 49,
+  "bindingDifferences": []
+}
+{"label":"old","production":false,"spawned":1,"outcome":"transport-lost","error":{"code":"PROBE_REACHED_ADAPTER","message":"reached adapter","stage":"spawn","detailLines":[]}}
+{"label":"new","production":false,"spawned":0,"outcome":"transport-lost","error":{"code":"CARRIER_DISPATCH_BINDING_REQUIRED","message":"关闭观察缺少该模块自己的 Main 派发绑定","stage":"spawn","detailLines":[]}}
+{"label":"old","production":true,"spawned":0,"thrown":{"code":"POLICY_PRODUCTION_DISABLED","message":"Execution policy is not enabled in production: toolbox:merge"}}
+{"label":"new","production":true,"spawned":0,"thrown":{"code":"POLICY_PRODUCTION_DISABLED","message":"Execution policy is not enabled in production: toolbox:merge"}}

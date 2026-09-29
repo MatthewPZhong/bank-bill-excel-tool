@@ -1,0 +1,11 @@
+✔ position-reconciliation:run:export 的真实 manifest 支持 stage/finalize，错角色/来源/hash/终态保留 (318.752625ms)
+✔ position-reconciliation:run:export-filtered 的真实 manifest 支持 stage/finalize，错角色/来源/hash/终态保留 (196.180666ms)
+✔ new-account:export 的真实 manifest 支持 stage/finalize，错角色/来源/hash/终态保留 (320.326084ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 952.421125

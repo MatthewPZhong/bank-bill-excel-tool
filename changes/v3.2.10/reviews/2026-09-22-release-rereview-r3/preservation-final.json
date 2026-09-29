@@ -1,0 +1,11 @@
+{
+  "finishedAt": "2026-09-22T01:27:48.173920+08:00",
+  "headBefore": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "headAfter": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "frozenFiles": 4071,
+  "changedExistingFiles": [],
+  "newFilesOutsideReview": [],
+  "trackedDiffUnchanged": true,
+  "gitStatusUnchanged": true,
+  "gitStatus": " M architecture/README.md\n M architecture/boundaries.json\n M architecture/legacy-allowlist.json\n M changes/v3.2.10/README.md\n M changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md\n M changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md\n M changes/v3.2.10/release.md\n M rules/integration-test-policy.md\n M scripts/architecture/contracts.js\n M scripts/architecture/rules.js\n M scripts/architecture/scan.js\n M scripts/architecture/schema.js\n M src/backend/toolbox-format/index.js\n M src/renderer/controllers/bank-statement.js\n M tests/unit/architecture/cli.test.js\n M tests/unit/architecture/review-round3.test.js\n M tests/unit/architecture/review-round4.test.js\n M tests/unit/architecture/review-round5.test.js\n M tests/unit/backend/xlsx/infrastructure-compatibility.test.js\n M tests/unit/renderer-refund-prompt-orchestration.test.js\n M tests/unit/renderer/scenario-change-routing.test.js\n?? changes/v3.2.10/reviews/\n?? scripts/architecture/renderer-contracts.js\n?? scripts/renderer-lifecycle/fixtures/bank-statement-confirmation.js\n?? tests/unit/architecture/release-closure-regressions.test.js\n?? tests/unit/architecture/release-policy-alignment.test.js\n?? tests/unit/architecture/release-renderer-policy.test.js\n?? tests/unit/architecture/release-rereview-r2.test.js\n"
+}

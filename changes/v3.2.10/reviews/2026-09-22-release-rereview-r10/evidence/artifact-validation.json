@@ -1,0 +1,164 @@
+{
+  "status": "PASS",
+  "markdownLinksChecked": 39,
+  "jsonFilesParsed": 27,
+  "jsonlRowsParsed": 16,
+  "links": [
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/input-manifest.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/prior-review-comparison.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/policy-production-comparison.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/spec.md"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/architecture/README.md"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/scripts/architecture/renderer-contracts.js"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/r10-renderer-probes.cjs"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/r10-renderer-probes-before.jsonl"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/r10-renderer-probes-current.jsonl"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/r10-renderer-nested-realconfig.cjs"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/r10-renderer-nested-realconfig.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/r10-renderer-before-inputs.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/scripts/architecture/renderer-contracts.js"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/r10-array-neighbor-before-current.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/r10-array-real-neighbor-before-current.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/r10-array-real-neighbor-probe.cjs"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/r10-array-compare.cjs"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/shared-archive-verification.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/r10-renderer-original-realconfig.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/r10-array-original-real.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/r10-shared-shared-probes.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/r10-shared-async-array-combinations.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/r10-shared-default-combinations.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/r10-shared-logical-combinations.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/architecture-tests.log"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/architecture-check.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/architecture-check.log"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/verify-probes.py"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/probe-verification.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-r9-repair/verification.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-r9-repair/release-check-result.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-r9-repair/gate-input-manifest.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/gate-evidence-comparison.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/preservation-final.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/artifact-validation.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/artifact-sha256.json"
+    },
+    {
+      "file": "review.md",
+      "target": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r10/evidence/README.md"
+    }
+  ]
+}

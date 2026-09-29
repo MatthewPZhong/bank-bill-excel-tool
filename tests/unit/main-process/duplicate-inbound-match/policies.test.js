@@ -5,7 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { createBackgroundExecutionRuntime } = require(
-  '../../../../src/main-process/background-execution/runtime'
+  '../../../../src/main-process/execution-descriptors/composition'
 );
 const {
   DUPLICATE_POLICIES,

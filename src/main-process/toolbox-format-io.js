@@ -4,12 +4,12 @@ const path = require('node:path');
 const {
   TOOLBOX_PROJECTION_PROFILES,
   normalizeCell,
-  openToolboxBiff8Pass,
-  openToolboxCsvPass,
-  openToolboxXlsxPass,
   projectToolboxRowValues,
   toMatchValue
-} = require('../backend/toolbox-format');
+} = require('../backend/xlsx/model');
+const { openToolboxBiff8Pass } = require('../backend/toolbox-format/biff8-pass');
+const { openToolboxCsvPass } = require('../backend/toolbox-format/csv-pass');
+const { openToolboxXlsxPass } = require('../backend/toolbox-format/xlsx-pass');
 const { FileValidationError } = require('../backend/file-service/common');
 const { ToolboxHeaderMismatchError } = require('./toolbox');
 const { detectToolboxInputKind } = require('./toolbox-input-kind');

@@ -9,9 +9,9 @@ const { DatabaseSync } = require('node:sqlite');
 
 const {
   ARCHIVE_RETENTION_SETTING_KEY,
-  ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY,
-  createArchiveCenterController
+  ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY
 } = require('../../../src/main-process/archive-center/controller');
+const { createArchiveControllerWithRoutes: createArchiveCenterController } = require('../../helpers/archive-terminal-routes');
 const {
   createArchiveOutboxStore
 } = require('../../../src/main-process/archive-center/outbox-store');

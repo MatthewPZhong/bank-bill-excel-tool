@@ -1,0 +1,40 @@
+{
+  "candidate": "8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05",
+  "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+  "startedAt": "2026-09-20T16:07:51.508688+00:00",
+  "platform": "macOS-15.7.4-arm64-arm-64bit-Mach-O",
+  "node": "v25.8.0",
+  "workdir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "completedAt": "2026-09-20T16:26:03.058534+00:00",
+  "exitCode": 0,
+  "durationSeconds": 1091.61,
+  "lint": "PASS",
+  "smoke": "PASS",
+  "unit": {
+    "tests": 8439,
+    "suites": 831,
+    "pass": 8435,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 4,
+    "todo": 0,
+    "duration_ms": 543080.18,
+    "fileCount": 530,
+    "skippedCases": [
+      "﹣ Windows CI 真实 PowerShell snapshot→token cleanup 语义 (0.071ms) # SKIP",
+      "﹣ Windows PowerShell 采集器使用原始 CIM 枚举并完整遍历真实文件祖先 (0.22925ms) # 需要 Windows PowerShell；受控 Storage 对象不代替真实 CIM 查询",
+      "﹣ Windows packaged canary 对报告前已退出进程快速返回专用 safe code (0.051292ms) # SKIP",
+      "﹣ Windows packaged canary 的 Setup 失败诊断仅返回固定退出/落地/身份枚举 (0.031708ms) # SKIP"
+    ]
+  },
+  "integration": {
+    "scripts": 66,
+    "passed": 66,
+    "failed": 0,
+    "reportedAssertions": 2664,
+    "reportedPassedAssertions": 2664,
+    "durationMs": 538502,
+    "countBoundary": "One historical nested-worker script has no numeric assertion count; all scripts exit 0"
+  },
+  "logSha256": "bd436d89bf8f870186aef2fadf9ecf5811286afa64d4e997a2f5a4ac53dcf1a8"
+}

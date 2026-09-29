@@ -1,0 +1,10 @@
+✔ 1024 个真实 Task 来源使用两次全量扫描及 3N 次 Inspector (139620.50125ms)
+ℹ {"ready":true,"sourceCount":0,"activeHoldCount":0,"fullScans":2,"enumerations":2,"evaluations":5120,"inspector":3072,"provider":0,"main":1024,"normalized":1024,"stopReason":null,"elapsedMs":0,"completedSources":1024,"blockedScopeCount":0,"reason":null,"archiveOwnerBackfill":{"processed":0,"completed":0,"deferred":0,"pageSize":64,"errorCode":null},"wallElapsedMs":95105,"observationAttempts":3072,"legacySourceCount":0,"rssStart":241811456,"rssEnd":465371136,"rssPeak":465371136}
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 139921.042334

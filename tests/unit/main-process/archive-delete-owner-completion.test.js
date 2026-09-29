@@ -5,9 +5,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { createTestPublicationHarness } = require('../../helpers/publication-authority');
 const { DatabaseSync } = require('node:sqlite');
 const { createArchiveRepository } = require('../../../src/backend/database/archive-repository');
-const { createArchiveCenterController } = require('../../../src/main-process/archive-center/controller');
+const { createArchiveControllerWithRoutes: createArchiveCenterController } = require('../../helpers/archive-terminal-routes');
 const { createArchiveOutboxStore } = require('../../../src/main-process/archive-center/outbox-store');
 
 const owner = {
@@ -275,8 +276,7 @@ test('工具箱真实发布恢复在清理完成后记录 owner 凭证，凭证�
   const crypto = require('node:crypto');
   const { createArchiveService } = require('../../../src/main-process/archive-center/archive-service');
   const { normalizeFilePlanV1, artifactManifestFromFilePlan } = require('../../../src/main-process/archive-center/file-plan');
-  const { JOURNAL_INDEX_NAME, prepareToolboxPublication, publishPreparedToolboxPublication,
-    recoverPendingToolboxPublications } = require('../../../src/main-process/toolbox-output-publication');
+  const { JOURNAL_INDEX_NAME, prepareToolboxPublication, publishPreparedToolboxPublication } = require('../../helpers/publication-authority');
   const { recoverToolboxPublicationsIntoArchive } = require('../../../src/main-process/toolbox-archive-recovery');
   for (const interruption of ['none', 'before-cleanup', 'before-proof', 'after-proof', 'routed-outbox', 'routed-proof', 'unknown-owner']) {
     await t.test(interruption, async (t) => {
@@ -304,6 +304,7 @@ test('工具箱真实发布恢复在清理完成后记录 owner 凭证，凭证�
       };
       t.after(() => { db.close(); fs.rmSync(directory, { recursive: true, force: true }); });
       await openArchive();
+      const publicationRecovery = createTestPublicationHarness(userDataDir, { ownerOptions: { id: 'archive-publication' } }).recovery;
       const channel = interruption === 'unknown-owner' ? 'toolbox:unknown-owner' : 'toolbox:merge';
       const plan = normalizeFilePlanV1({ version: 1, allocation: 'eager',
         inputs: [{ filePath: inputPath, role: 'input', sourceOperation: channel }],
@@ -349,7 +350,7 @@ test('工具箱真实发布恢复在清理完成后记录 owner 凭证，凭证�
             interruption === 'before-cleanup' && options.deferCommittedFinalization
             || interruption === 'after-proof' && !options.deferCommittedFinalization
           )) throw new Error('发布恢复进程退出');
-          return recoverPendingToolboxPublications(options);
+          return publicationRecovery.recover(options);
         } });
       if (!interruption.startsWith('before-') && interruption !== 'after-proof') {
         await runRecovery();
@@ -366,7 +367,7 @@ test('工具箱真实发布恢复在清理完成后记录 owner 凭证，凭证�
         service.recordFileTaskOwnerCompletion = originalRecord;
         db.close();
         await openArchive();
-        await recoverToolboxPublicationsIntoArchive({ userDataDir, archiveCenter: controller });
+        await recoverToolboxPublicationsIntoArchive({ userDataDir, archiveCenter: controller, recoverPublications: publicationRecovery.recover });
       }
       if (interruption === 'routed-outbox') {
         assert.equal(service.repository.getOwnerTerminalCompletion(fullOwner), null, 'publication 不能认证其他原 owner 的路由已完成');
@@ -396,7 +397,9 @@ test('工具箱真实发布恢复在清理完成后记录 owner 凭证，凭证�
 
 test('publication owner 仅匹配 Main 登记的精确 taskKey/moduleId，不认未知共享 Publisher 入口', () => {
   const { isPublicationOnlyFileTask } = require('../../../src/main-process/toolbox-archive-recovery');
-  const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
+  const {
+  createTaskPolicyRegistry
+} = require('../../../src/main-process/execution-descriptors/composition');
   const registry = createTaskPolicyRegistry();
   for (const channel of ['toolbox:merge', 'toolbox:split:export', 'vccFinancialOp:data-manager:export',
     'vccFinancialOp:export:import-audit', 'vccFinancialOp:export:result',
@@ -416,9 +419,11 @@ test('VCC 与只读导出真实 policy 的临时归档失败由原 publication �
   const crypto = require('node:crypto');
   const { createArchiveService } = require('../../../src/main-process/archive-center/archive-service');
   const { createTaskLifecycle } = require('../../../src/main-process/archive-center/task-lifecycle');
-  const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
+  const {
+  createTaskPolicyRegistry
+} = require('../../../src/main-process/execution-descriptors/composition');
   const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
-  const { JOURNAL_INDEX_NAME, prepareToolboxPublication, publishPreparedToolboxPublication } = require('../../../src/main-process/toolbox-output-publication');
+  const { JOURNAL_INDEX_NAME, prepareToolboxPublication, publishPreparedToolboxPublication } = require('../../helpers/publication-authority');
   const { acknowledgeToolboxPublicationReceipts, recoverToolboxPublicationsIntoArchive } = require('../../../src/main-process/toolbox-archive-recovery');
   for (const channel of ['vccFinancialOp:data-manager:export', 'vccFinancialOp:export:import-audit', 'vccFinancialOp:export:result',
     'pending:error:export-report', 'pending:diff:export-single', 'pending:diff:export-aggregate',
@@ -442,6 +447,7 @@ test('VCC 与只读导出真实 policy 的临时归档失败由原 publication �
           outboxStore: createArchiveOutboxStore(path.join(directory, 'outbox')) });
       };
       await openArchive();
+      const publicationRecovery = createTestPublicationHarness(userDataDir, { ownerOptions: { id: 'archive-publication' } }).recovery;
       t.after(() => { db.close(); fs.rmSync(directory, { recursive: true, force: true }); });
       const policy = createTaskPolicyRegistry().require(channel);
       const plan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [],
@@ -468,7 +474,7 @@ test('VCC 与只读导出真实 policy 的临时归档失败由原 publication �
         },
         afterTerminal: async () => {
           normalCallbackCalls += 1;
-          return acknowledgeToolboxPublicationReceipts({ userDataDir, archiveCenter: controller, taskIds: ['vcc-publication'] });
+          return acknowledgeToolboxPublicationReceipts({ userDataDir, archiveCenter: controller, recoverPublications: publicationRecovery.recover, taskIds: ['vcc-publication'] });
         }
       });
       assert.equal(result.status, 'success');
@@ -478,7 +484,7 @@ test('VCC 与只读导出真实 policy 的临时归档失败由原 publication �
       assert.equal(pending[0].payload.terminalOutcome.metadata._archiveAfterTerminalPending, true);
       db.close();
       await openArchive();
-      const recovery = await recoverToolboxPublicationsIntoArchive({ userDataDir, archiveCenter: controller });
+      const recovery = await recoverToolboxPublicationsIntoArchive({ userDataDir, archiveCenter: controller, recoverPublications: publicationRecovery.recover });
       assert.deepEqual(recovery.recovered.map((row) => row.action), ['commit-cleanup']);
       const fullOwner = { version: 1, kind: 'file-batch', batchContext };
       const proof = service.repository.getOwnerTerminalCompletion(fullOwner);
@@ -491,7 +497,7 @@ test('VCC 与只读导出真实 policy 的临时归档失败由原 publication �
       assert.equal(preparation.ok, true, JSON.stringify(preparation));
       assert.equal((await controller.deleteBatch(batchContext.batchId, preparation.confirmationToken)).fullyDeleted, true);
       assert.equal(fs.readFileSync(outputPath, 'utf8'), 'vcc-validated-output');
-      assert.equal((await recoverToolboxPublicationsIntoArchive({ userDataDir, archiveCenter: controller })).recovered.length, 0);
+      assert.equal((await recoverToolboxPublicationsIntoArchive({ userDataDir, archiveCenter: controller, recoverPublications: publicationRecovery.recover })).recovered.length, 0);
     });
   }
 });

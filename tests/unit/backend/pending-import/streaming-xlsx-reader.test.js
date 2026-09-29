@@ -6,7 +6,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { parseRowXml } = require('../../../../src/backend/pending-import/streaming-xlsx-reader');
+const { parseRowXml } = require('../../../../src/backend/xlsx/legacy/streaming-xlsx-reader');
 
 test('parseRowXml: r 为第一个属性（基线，不回归）', () => {
   const cells = parseRowXml('<row r="1"><c r="A1"><v>10</v></c><c r="B1"><v>20.5</v></c></row>', 28, null);

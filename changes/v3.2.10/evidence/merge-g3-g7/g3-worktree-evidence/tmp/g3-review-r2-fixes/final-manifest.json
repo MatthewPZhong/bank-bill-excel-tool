@@ -1,0 +1,1202 @@
+{
+  "createdAt": "2026-09-20T15:30:01.039030+00:00",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "branch": "codex/v3.2.10-renderer-boundaries",
+  "repairBaseline": "before-manifest.json：第二轮复审后的未提交快照",
+  "frozenCode": {
+    "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+    "files": [
+      {
+        "path": "eslint.config.js",
+        "sha256": "b9d504df5dd8df489985dac4ca0b15a174b4913dbe7ea1c2ea7bbb0785ff5b1d"
+      },
+      {
+        "path": "index.html",
+        "sha256": "9c28d7461ffa5a60dfbf732a357225bdb41d768931fb3730abdcb495d39df7cd"
+      },
+      {
+        "path": "scripts/integration/renderer-lifecycle.js",
+        "sha256": "03dac553c7246ef086f131d83900b5981f8931adfe3e1600f9054f6a89cf0ed0"
+      },
+      {
+        "path": "scripts/renderer-lifecycle/electron-main.cjs",
+        "sha256": "26ab95c03ef00360428d35a26e2b6c914294028c8def94d427c181ba9e911716"
+      },
+      {
+        "path": "scripts/renderer-lifecycle/fixtures/app-settings.js",
+        "sha256": "8588cb1f6fa9d25905a858727a5a5d67747761131c0ccb1c1a519700fb80ed58"
+      },
+      {
+        "path": "scripts/renderer-lifecycle/fixtures/application-shell.js",
+        "sha256": "44b803af474338b6c726772af16074d1129072f881188b1d9025603b0a3ea235"
+      },
+      {
+        "path": "scripts/renderer-lifecycle/fixtures/configuration-dialogs.js",
+        "sha256": "d827576e1b0f42941c2335f3a07bb2604e67e490aee6c8fb9efb36db687422b8"
+      },
+      {
+        "path": "scripts/renderer-lifecycle/fixtures/existing-controllers.js",
+        "sha256": "daf6c4649f0e16da90f1395e41ed409a71ce83db6ea6fa39d85629d2cb87ea65"
+      },
+      {
+        "path": "scripts/renderer-lifecycle/fixtures/legacy-dialogs.js",
+        "sha256": "6a8608c378ad8cb650b05e16c3dd61265d05a045a014c7ab88925192b4aa6cda"
+      },
+      {
+        "path": "scripts/renderer-lifecycle/fixtures/new-account-controller.js",
+        "sha256": "6b259efc2087dd14fc7d835f5e76b787c85ff841d6aede4c4b4fbb53ba0e1805"
+      },
+      {
+        "path": "scripts/renderer-lifecycle/fixtures/pending-controller.js",
+        "sha256": "15146fe3b42df997635c88f7006acb008e158a42edc2c55b0a1a8ffa20257169"
+      },
+      {
+        "path": "scripts/renderer-lifecycle/fixtures/previews.js",
+        "sha256": "94199151524d5f99c03e6ebfaaa918a93ed934b336cc343bcd397b6b46f3a110"
+      },
+      {
+        "path": "scripts/renderer-lifecycle/fixtures/scenarios.js",
+        "sha256": "536318a78e26e787001feae3df807c1a164785c9ce088f5308cab649db8d87bb"
+      },
+      {
+        "path": "scripts/renderer-lifecycle/fixtures/shared-dialogs.js",
+        "sha256": "90ef5daf08c225faab73f3362d3a0e43600838fe0896e59e0c49cdf526f7fba7"
+      },
+      {
+        "path": "scripts/renderer-lifecycle/fixtures/statement-controller.js",
+        "sha256": "5c6850ff99f3a277dfa94ffc657b938c6cbc26c14c84269e2140b7933fc9d0dd"
+      },
+      {
+        "path": "scripts/renderer-lifecycle/fixtures/toolbox.js",
+        "sha256": "1298b14b963bfeeec96c402e4985664ebd7452c95f8ae5941bf3cb23ea6e97f5"
+      },
+      {
+        "path": "scripts/renderer-lifecycle/fixtures/vcc-position.js",
+        "sha256": "24999824f2c0c6f0fd66d32c8d768b101ecdb17cb5d5b678be51c9cd0401fc68"
+      },
+      {
+        "path": "scripts/smoke/render-status-box.js",
+        "sha256": "44429f4fed624bdadbd5b3963f779b41452ca9ac45986d9cef82152aef6930ad"
+      },
+      {
+        "path": "scripts/smoke/scenario-c1-defaults.js",
+        "sha256": "07df4861aaee1fed0093b83609a2408bc1c440a5335bfc31c6079e7f93e2822c"
+      },
+      {
+        "path": "scripts/test-renderer-lifecycle.js",
+        "sha256": "a39f9ba29fe2a285976fd900dfc2a3c101fe665249784655e60848a422c199f4"
+      },
+      {
+        "path": "scripts/verify-biz-op-v329-renderer-dom.js",
+        "sha256": "66acfa74c8a429af8a975591219f2d4543e7dee1767459135d9e984fe5ba7224"
+      },
+      {
+        "path": "src/preload.js",
+        "sha256": "605d382a9a77f389e8658b4d32ac9b11c703944d4029fe9c5e14b96df28894ae"
+      },
+      {
+        "path": "src/renderer-biz-op-v327.js",
+        "sha256": "ee139aaee6fad9ede2ffa04377c90abaf4d1f0c74838d299632f0cbdfc0bfd0e"
+      },
+      {
+        "path": "src/renderer-dialogs.js",
+        "sha256": "c9f187c2a1ffc9d7612526e178dbb702e7e0a79731f3714b81033f04043c0764"
+      },
+      {
+        "path": "src/renderer-pending.js",
+        "sha256": "7dfca236d0597df83884c224423f983b4599842379dd1748359d58bf7ce026d1"
+      },
+      {
+        "path": "src/renderer-position-reconciliation.js",
+        "sha256": "85d16ae50b88e85b25fe8bd5d9ab08bf114bc31fcdca42c6c1ce418447ffcabe"
+      },
+      {
+        "path": "src/renderer-previews.js",
+        "sha256": "cd30ca07ac57ded208be68c7bf947f5d42a9705464f46e4bf6d910153122546c"
+      },
+      {
+        "path": "src/renderer-vcc-financial-op.js",
+        "sha256": "bf4658ef434d675e347af7a2d81d6fef9152df204ab89d5be58da5dab79ba4e0"
+      },
+      {
+        "path": "src/renderer.js",
+        "sha256": "3f2166f359a6fdf40c8985df682b661b48c85f3792be8aed9202b6f2b525c4ec"
+      },
+      {
+        "path": "src/renderer/README.md",
+        "sha256": "4bee9f7a877dec33d8caa157ff55e4f10bbb7e4ae078e30b7b0eafbc1fc4f08b"
+      },
+      {
+        "path": "src/renderer/configuration-services.js",
+        "sha256": "d4161756c835086959d0d025d67ef796f3929af1d3831433020fd7f3ccd8bef7"
+      },
+      {
+        "path": "src/renderer/controllers/acquiring.js",
+        "sha256": "43abf83361a08d705dbdfddf88f66026d48f6ccb7a16f1bcb31a40059e73a50f"
+      },
+      {
+        "path": "src/renderer/controllers/bank-bu.js",
+        "sha256": "f05f449137c0c5fbf9e528b7e8f4c84f3f288fea728188468076bc25e19c0ba6"
+      },
+      {
+        "path": "src/renderer/controllers/bank-statement.js",
+        "sha256": "9514f9f522c3147d875e912620b22171ad56caac255ce98a20d13ddce7e6e2aa"
+      },
+      {
+        "path": "src/renderer/controllers/biz-op-legacy.js",
+        "sha256": "511b1ef90132f03b944992e38d7c3ceb014a30d70a8093388dbe06020d29230f"
+      },
+      {
+        "path": "src/renderer/controllers/duplicate-inbound.js",
+        "sha256": "990f4de60e13bafb01f17c6404e5e53a0564f725ddfc04a0d368a346c1d6807a"
+      },
+      {
+        "path": "src/renderer/controllers/new-account.js",
+        "sha256": "e995dcee0a8fc31bbe4d32504edf896151917f35f194a34c16af12f69c54505c"
+      },
+      {
+        "path": "src/renderer/controllers/pending.js",
+        "sha256": "c31a0b262e544b0f9f10524de8a9b9fb2d5b6418c6d2525f4482603fdba7ff59"
+      },
+      {
+        "path": "src/renderer/controllers/pre-fund.js",
+        "sha256": "6844a919eb6c7b4cd53bbdfee78fa0231c0720cbf3d03a1979a26ceb3a8b38ec"
+      },
+      {
+        "path": "src/renderer/controllers/recon-id-fix.js",
+        "sha256": "932c3c417722d25461c235f96907bc536301a1a3e5f19701ac54f7e65e1280a9"
+      },
+      {
+        "path": "src/renderer/controllers/statement.js",
+        "sha256": "517746b500cc022ee89bc37c70a4c30a5844a773399b03f829bcd9cb3bfcf746"
+      },
+      {
+        "path": "src/renderer/controllers/vcc-op-calc.js",
+        "sha256": "f6c0333766e8fb0d13e1e3b8770e3657c05a68444d8b32d0323c78c74b794de3"
+      },
+      {
+        "path": "src/renderer/dialogs/app-settings.js",
+        "sha256": "ebd2be60360ebe0a8ce41370be22030411c35367bf6ef07fa8768fdb2758716b"
+      },
+      {
+        "path": "src/renderer/dialogs/configuration.js",
+        "sha256": "4c34f8367ef140661ed0301c08ec5edcf4df222eb9185cdb8d844f4170a3933b"
+      },
+      {
+        "path": "src/renderer/dialogs/scenarios.js",
+        "sha256": "81b66d37c15b3e47eb0b82839e97a688a42b08648fa152ce66c02410460096c4"
+      },
+      {
+        "path": "src/renderer/dialogs/toolbox.js",
+        "sha256": "a5fccc2f2d5f3c4870ea16aa90178102fb37c22277e693563a5334d0049a9459"
+      },
+      {
+        "path": "src/renderer/modal-bridge.js",
+        "sha256": "5c458a3a7683a6afeaa497bfc2c8363f7ef3ddf33bf06df012b77dfca841efbe"
+      },
+      {
+        "path": "src/renderer/modal-host.js",
+        "sha256": "1c3b26093359dd574c454704bda8e2efed12b80a403935bdc7e02fe8eedb8575"
+      },
+      {
+        "path": "src/renderer/module-router.js",
+        "sha256": "5fac59a58102254bb2580cb5c015055f5c0eb2266d105d939f68472f47380478"
+      },
+      {
+        "path": "src/renderer/scenario-change-router.js",
+        "sha256": "ddc119d48283ae40ac2254c93ad0543dadcd3502138e1141f77d5bed2fa0cec1"
+      },
+      {
+        "path": "src/renderer/scenario-command-service.js",
+        "sha256": "f962c4c28d18bea5ba27953f9efe6190c5889e5559ae6aae60e8908be26168f3"
+      },
+      {
+        "path": "src/renderer/shared-recon-session.js",
+        "sha256": "a863b9fa34b6999cee689f4debfba0533b7938842ec37c81bf79f38fa4706837"
+      },
+      {
+        "path": "tests/helpers/modal-dom.js",
+        "sha256": "57ca1d8e15634080936dc27e3a31dd3fae9840ab6786a435c1131b87cb9eacd3"
+      },
+      {
+        "path": "tests/helpers/scenario-main-harness.js",
+        "sha256": "e39be6eb5d070b31390f3f97975f2869e4a161e659cfd10f44d173bf1fdc0d2b"
+      },
+      {
+        "path": "tests/unit/app-update-contract.test.js",
+        "sha256": "6a9d0b0af30418c492697befd782d7c1d943c33a77ce7eae0ea054ee3eadc1ee"
+      },
+      {
+        "path": "tests/unit/archive-center-ui-contract.test.js",
+        "sha256": "922d64eb4be37bc089d07fda2c0085d0722af8ff088534f63007e44f75b06a42"
+      },
+      {
+        "path": "tests/unit/archive-delete-dialog-lifecycle.test.js",
+        "sha256": "e40ff28f182342a95ae92c6210df142b1f63d2f8a3c3dd9955244f0b04e5467a"
+      },
+      {
+        "path": "tests/unit/duplicate-inbound-match-wiring.test.js",
+        "sha256": "45a743708a9b84c4dc9cf9a41aaf73e7d197d131733a17a7d883a7bd4f7597c0"
+      },
+      {
+        "path": "tests/unit/main-payment-shared-recon-source.test.js",
+        "sha256": "7495f5ba4c3f1fb3940f4ed88d15fd40a74e757c2bac5b0b55b4740573e84868"
+      },
+      {
+        "path": "tests/unit/main-process/biz-op-v329-renderer.test.js",
+        "sha256": "891c613b440595f4d7f921c8e1ca97e771d5f5555327b39f28f4e279f29d1fc8"
+      },
+      {
+        "path": "tests/unit/main-process/interactive-task-preflight.test.js",
+        "sha256": "80dbcf2b3b2c482fecbbc18c6602fa7b7ed2bee16604e8ed25e2d2d8107b1f0f"
+      },
+      {
+        "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-mixed-lifecycle-e05-p0.test.js",
+        "sha256": "ba8899c451c53e0d58eeaf12375975718a2dc95013301c7861f3fc6961916296"
+      },
+      {
+        "path": "tests/unit/main-process/statement-big-account-preview.test.js",
+        "sha256": "5963cb841a748f53dcc384ea16843e08b9e3fef64652c2b04e8e07ede5274624"
+      },
+      {
+        "path": "tests/unit/renderer-bank-statement-run-progress.test.js",
+        "sha256": "791414dd641a31039eab32b6bc6f036299429afe2a6fbbc2192de133e2d67e8c"
+      },
+      {
+        "path": "tests/unit/renderer-biz-op-recovery.test.js",
+        "sha256": "76154e63990bf2b8f4473e90abd769d68646a4ac8a64c2251a2c068562671fda"
+      },
+      {
+        "path": "tests/unit/renderer-c3-gateway-ready-guard.test.js",
+        "sha256": "8afc449153fc9abc7f941dd07b5b401e8e5ab8d1508cb35fd9d11319e141a1c1"
+      },
+      {
+        "path": "tests/unit/renderer-dialogs-fund-transfer-account-mapping-load-guard.test.js",
+        "sha256": "5cf8f2b68d3417ea1c70e71152def212a77b3777f30a88027818674720abb6c9"
+      },
+      {
+        "path": "tests/unit/renderer-dialogs-fund-transfer-date-policy.test.js",
+        "sha256": "be9f57edb650edc5919b9af470032322dcc48528c51a4144c872b4bf2d766f95"
+      },
+      {
+        "path": "tests/unit/renderer-dialogs-payment-offline-backfill.test.js",
+        "sha256": "46972a6fa693640838baecf8ef7750aea457113d2851a82c429c25d90049cd0f"
+      },
+      {
+        "path": "tests/unit/renderer-dialogs-refund-fuzzy.test.js",
+        "sha256": "d22c4e23ff81e4c2344b270bd66ed5e7bef0b18e9eda6fabd2037ea00135d961"
+      },
+      {
+        "path": "tests/unit/renderer-dialogs-scenario-channel.test.js",
+        "sha256": "c5bd68b53afdae9443ea8c30a3a878ff3be604c460a3ae4b589985af117c7949"
+      },
+      {
+        "path": "tests/unit/renderer-dialogs-scenario-group-collapse.test.js",
+        "sha256": "853a1c7b74a11d03eef802c97d98161a2f8d21247e749cf91aa0d499cdd99b87"
+      },
+      {
+        "path": "tests/unit/renderer-dialogs-toolbox.test.js",
+        "sha256": "4ae6c82e3e3bab4a6b0c175dfc967cdf28f1fe3f2fe029ab1d3da3145e8bad93"
+      },
+      {
+        "path": "tests/unit/renderer-dialogs-v3-2-6.test.js",
+        "sha256": "9946e6ac4a97b5703fbe2d24f407b9959fe83c443e22d27ad4e4335fcde74611"
+      },
+      {
+        "path": "tests/unit/renderer-import-issues-summary.test.js",
+        "sha256": "54a58714fc1f0fc89d70c94e48df1a213c42277bbcffa637737784ab4d9e14f0"
+      },
+      {
+        "path": "tests/unit/renderer-linked-table-delete-range.test.js",
+        "sha256": "e877eaab4ccca38ced28b31e27503164f9c64b10584a5019c11bc98c2e5157fc"
+      },
+      {
+        "path": "tests/unit/renderer-position-reconciliation.test.js",
+        "sha256": "07e3ee3c4cc454411132198178d7917f1427d9c4ac5b70926536556f8a6c216c"
+      },
+      {
+        "path": "tests/unit/renderer-pre-fund-reconciliation.test.js",
+        "sha256": "111900c425421f8c2e981455dca3907d01799161f8c0914280ff24092552f738"
+      },
+      {
+        "path": "tests/unit/renderer-refund-prompt-orchestration.test.js",
+        "sha256": "5f4e81ea692da15940d7015b8455dd530ba3dbd244b2e817cd18191138306c81"
+      },
+      {
+        "path": "tests/unit/renderer-refund-ready-guard.test.js",
+        "sha256": "9d2c49bc7dff9acaab4f1c38070278a19075b9745da74e71ea2569f557dd39ea"
+      },
+      {
+        "path": "tests/unit/renderer-status-box-text.test.js",
+        "sha256": "f0696e4ad7cac1c69133f96dbc465d23f3ac3b9f530f07ac3c51b517068979e6"
+      },
+      {
+        "path": "tests/unit/renderer-vcc-financial-op.test.js",
+        "sha256": "4ef6495523c41a09af5c4f479f5764ffb03dcde398601d7c6cc9c2acb5332c94"
+      },
+      {
+        "path": "tests/unit/renderer/configuration-services.test.js",
+        "sha256": "61bea6add872fc128c9606ddf2a8cbed1dccd5340d4fbf625c66015c68c937a1"
+      },
+      {
+        "path": "tests/unit/renderer/modal-host.test.js",
+        "sha256": "dd59aedc5744562067f74885deb1aaa1642257617f3d1e213e2e2e69163d6c83"
+      },
+      {
+        "path": "tests/unit/renderer/module-router.test.js",
+        "sha256": "6b1ca7b9f8fa93b199c7714ae29b2571789fdea6c4b17ae2c3867f99d6efb4ab"
+      },
+      {
+        "path": "tests/unit/renderer/preload-subscriptions.test.js",
+        "sha256": "c6699f0060368117f3d13408d2772ef5dcf63f4673c465a3d4c9597b5c99b57d"
+      },
+      {
+        "path": "tests/unit/renderer/previews-modal-scope.test.js",
+        "sha256": "29067475bc0ecf6b1ba61036323a312c6eaca58bdcd40d08216f061385c16f1f"
+      },
+      {
+        "path": "tests/unit/renderer/r4-controllers.test.js",
+        "sha256": "cce4289f04f3edc0029e772667bb464d9af768e8c66e6bca8353d96b095ec53f"
+      },
+      {
+        "path": "tests/unit/renderer/r4-domain-controllers.test.js",
+        "sha256": "6b0e13a979e0ebeffb21edf4c49fd1d21ff3777d2c656b9dad39ed0283ffaa95"
+      },
+      {
+        "path": "tests/unit/renderer/scenario-change-routing.test.js",
+        "sha256": "9cdae47e67439716c6484f97f91872e69e0a16137c62d90c1599cf2dc34d73ff"
+      },
+      {
+        "path": "tests/unit/renderer/scenario-command-service.test.js",
+        "sha256": "97c270c403b7f591254edfa06e43d54982cd6a7d35ded1c35a6cbbf9a8af40f0"
+      },
+      {
+        "path": "tests/unit/renderer/scenario-controller-feedback.test.js",
+        "sha256": "cb5c20c26ea4257cafaf256978a55220dbe260879f0b22b776d3d3f5b12c7403"
+      },
+      {
+        "path": "tests/unit/renderer/scenario-write-boundary.test.js",
+        "sha256": "eeac3ea687f64cc6aa9105628bcbdeb606b6d18301d10e59c2975f784e8c2238"
+      },
+      {
+        "path": "tests/unit/renderer/toolbox-modal.test.js",
+        "sha256": "1652b34df3138c736de13398859754945ddb822303f0d143b9baf41641c69c1e"
+      },
+      {
+        "path": "tests/unit/renderer/vcc-op-calc-source-binding.test.js",
+        "sha256": "b8bb5449925324519347ed6c38adc5cad83956bcda25d2be0031d45231df0633"
+      },
+      {
+        "path": "tests/unit/vcc-financial-op-preview-contract.test.js",
+        "sha256": "d1280cf9fbd6a4370c0ef4b820604db53f3a834791bf953024f5fb98c1bef6c2"
+      }
+    ]
+  },
+  "repairFiles": [
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/implementation-notes.md",
+      "beforeSha256": "ea6152842a3d9bd0edcd29df07ef4ca9ec7589a182922d84d1819e9a8bd04dd2",
+      "sha256": "527a62333adf8a941661434cc34a7dab9516482a2f9df4e4d3f316f4d1a4ccf3"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/techdoc.md",
+      "beforeSha256": "2ff746da6e722b66368ed3e5d6df5a6edf2a4cf5d889ad387268f82446c10e0b",
+      "sha256": "57da52128f0393d1cad0fc2ea4b1207c2842ce2ac79223c82f72934b88bd4dc3"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/fixtures/configuration-dialogs.js",
+      "beforeSha256": "0cb068adbcc14d3ab2cac196625132e223f9b8311eecef10ca51703655a1db35",
+      "sha256": "d827576e1b0f42941c2335f3a07bb2604e67e490aee6c8fb9efb36db687422b8"
+    },
+    {
+      "path": "scripts/smoke/render-status-box.js",
+      "beforeSha256": "ad352751e21a48beee8b858c972161bf27ecc0b1ef347fe63e5633eef14833b3",
+      "sha256": "44429f4fed624bdadbd5b3963f779b41452ca9ac45986d9cef82152aef6930ad"
+    },
+    {
+      "path": "src/renderer/README.md",
+      "beforeSha256": "83586549263d3f5ca55c83af612c066f1b22826afd3bab4c447ffb60aa80d7b3",
+      "sha256": "4bee9f7a877dec33d8caa157ff55e4f10bbb7e4ae078e30b7b0eafbc1fc4f08b"
+    },
+    {
+      "path": "src/renderer/controllers/bank-statement.js",
+      "beforeSha256": "a0525c5864caebd457b30af41980bf7187759ca76b1bd971c68fbbf915748ddb",
+      "sha256": "9514f9f522c3147d875e912620b22171ad56caac255ce98a20d13ddce7e6e2aa"
+    },
+    {
+      "path": "src/renderer/controllers/recon-id-fix.js",
+      "beforeSha256": "239952699946545907d40a29b3e656486a40e4010489cfa91d2177e74e92b513",
+      "sha256": "932c3c417722d25461c235f96907bc536301a1a3e5f19701ac54f7e65e1280a9"
+    },
+    {
+      "path": "src/renderer/dialogs/configuration.js",
+      "beforeSha256": "751a1d3618d7bab925dcccf2dd8cd5e986ae192f2cd9d43899700230658e6bd9",
+      "sha256": "4c34f8367ef140661ed0301c08ec5edcf4df222eb9185cdb8d844f4170a3933b"
+    },
+    {
+      "path": "tests/unit/renderer/scenario-controller-feedback.test.js",
+      "beforeSha256": "1f94e9d7058a4bfe836a8de76f071e6f4ee5468e349435318b65fec17f21cfd5",
+      "sha256": "cb5c20c26ea4257cafaf256978a55220dbe260879f0b22b776d3d3f5b12c7403"
+    }
+  ],
+  "currentFeatureFiles": [
+    {
+      "path": "AGENTS.md",
+      "sha256": "c46a7e673c3db8dd0e54f13e1f144b6fb1653d249955cdd27b9001fb2bbd078b"
+    },
+    {
+      "path": "changes/v3.2.10/README.md",
+      "sha256": "c712664d03ee5592edd9cc2ff49f7f811d115a55cef307d091d4f7746be7e72b"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/implementation-notes.md",
+      "sha256": "527a62333adf8a941661434cc34a7dab9516482a2f9df4e4d3f316f4d1a4ccf3"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/artifact-validation.json",
+      "sha256": "c4bda429cbdf5eb132421de62635976da73aab246dddf5e093fbb76e192c9e49"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/renderer-boundaries-r3-review-probes.test.js",
+      "sha256": "eed8c03b7c054cdfa3a765eaa305cc6e8662a8092f90a579cc74f6f5fda9c022"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/review-bizop-background-feedback-output.json",
+      "sha256": "55056fadfe6dc5198b819c38c3e6bf1ac0ce56fa9283fd2bd3e29f6ee9a9849b"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/review-bizop-background-feedback.cjs",
+      "sha256": "f0c4f2bfb4c6e557c322afdb605b1aeb7cf0c294b4f941d43fa559a65841fa28"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/review-modal-probe.cjs",
+      "sha256": "6a53b410fa81fa1d576b49e7a37f9ad25be698d8b12430bc9d3920673d8f0395"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/review-snapshot.json",
+      "sha256": "61b04bc95a4797c60fc9278348b8bd008ebecbec8b6f872396f9bf2cb4d292b2"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/review-vcc-stale-cache-real-output.json",
+      "sha256": "602f77d0b83d5b5a1a2d1ccbcab47f3f41582a16600c1f8c34c9bd2893be0027"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/review-vcc-stale-cache-real.cjs",
+      "sha256": "ca14ec4e406393e3fbd59f5217cecfc18d443c8fab2d17467fa1c7129b1acc1f"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/artifact-validation.json",
+      "sha256": "4c2b1f3af03518176283ebfc4225ac1b9e09e1ab7d39e0317881f03d55caeaf6"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/focused-unit-command.json",
+      "sha256": "c4724d8c2bd835cd83a774f0387e3287d5331981799ce3d56278ba618ce9e692"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/renderer-boundaries-r2-scenario-review.test.js",
+      "sha256": "6f0b6ce9b45d5b5423416e9e5f9932deb8b0cb29a7bb5dd3e863554fb481b6cb"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/review-modal-r2-probe.cjs",
+      "sha256": "61003be2fcda89a32c2e669ee69a2bb2bfda82ef55517a98ffb348ee05fafcd4"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/review-r1-r2.diff",
+      "sha256": "c86a1d3afaa65c08bd7b246549b398cfc5c72d58852e69a9d67eeea16f8c9ead"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/review-r2-bizop-background-feedback-output.json",
+      "sha256": "681636010ec3cfa6c8cfcb769494a488bd197077ae5cf9f5dc9ddded08071019"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/review-r2-bizop-background-feedback.cjs",
+      "sha256": "f0c4f2bfb4c6e557c322afdb605b1aeb7cf0c294b4f941d43fa559a65841fa28"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/review-r2-vcc-source-probe-output.json",
+      "sha256": "a2a58700e6737978fb7da3adff94375184a71ea6f347dd10cc360851d345b7e5"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/review-r2-vcc-source-probe.cjs",
+      "sha256": "7c3995c525381e1267bd272f378e854454fd3d2a2586fef1b14c684b0cd081d0"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/review-snapshot.json",
+      "sha256": "a7b865b6e767175b74cd9f5e7a1e176c88d76ee046d5039854ba3e228adb16a0"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2.md",
+      "sha256": "11048d415c50bdb3620c95926b7059abe83fa6d2c5dd2f61c8db6f76f109c3d2"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20.md",
+      "sha256": "e0dd1ae35e74e843477707e269cbdb14ef02210005f239fbb4602ecdbc1fe396"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/spec.md",
+      "sha256": "070c53195b9fb228f36aa5ed0d1ed488c430e097f1242c8f1756779a7563269c"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/techdoc.md",
+      "sha256": "57da52128f0393d1cad0fc2ea4b1207c2842ce2ac79223c82f72934b88bd4dc3"
+    },
+    {
+      "path": "changes/v3.2.10/review-response.md",
+      "sha256": "424cb57a22cc023eef41f8d868b2a78fbd718769338d2ac6ee5aee716d9bbbf6"
+    },
+    {
+      "path": "eslint.config.js",
+      "sha256": "b9d504df5dd8df489985dac4ca0b15a174b4913dbe7ea1c2ea7bbb0785ff5b1d"
+    },
+    {
+      "path": "index.html",
+      "sha256": "9c28d7461ffa5a60dfbf732a357225bdb41d768931fb3730abdcb495d39df7cd"
+    },
+    {
+      "path": "rules/integration-test-policy.md",
+      "sha256": "a46c8ccb060c22b0ce19832f37471b95e2f5026703bdfadc9ef0e422192438ca"
+    },
+    {
+      "path": "scripts/integration/renderer-lifecycle.js",
+      "sha256": "03dac553c7246ef086f131d83900b5981f8931adfe3e1600f9054f6a89cf0ed0"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/electron-main.cjs",
+      "sha256": "26ab95c03ef00360428d35a26e2b6c914294028c8def94d427c181ba9e911716"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/fixtures/app-settings.js",
+      "sha256": "8588cb1f6fa9d25905a858727a5a5d67747761131c0ccb1c1a519700fb80ed58"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/fixtures/application-shell.js",
+      "sha256": "44b803af474338b6c726772af16074d1129072f881188b1d9025603b0a3ea235"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/fixtures/configuration-dialogs.js",
+      "sha256": "d827576e1b0f42941c2335f3a07bb2604e67e490aee6c8fb9efb36db687422b8"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/fixtures/existing-controllers.js",
+      "sha256": "daf6c4649f0e16da90f1395e41ed409a71ce83db6ea6fa39d85629d2cb87ea65"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/fixtures/legacy-dialogs.js",
+      "sha256": "6a8608c378ad8cb650b05e16c3dd61265d05a045a014c7ab88925192b4aa6cda"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/fixtures/new-account-controller.js",
+      "sha256": "6b259efc2087dd14fc7d835f5e76b787c85ff841d6aede4c4b4fbb53ba0e1805"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/fixtures/pending-controller.js",
+      "sha256": "15146fe3b42df997635c88f7006acb008e158a42edc2c55b0a1a8ffa20257169"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/fixtures/previews.js",
+      "sha256": "94199151524d5f99c03e6ebfaaa918a93ed934b336cc343bcd397b6b46f3a110"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/fixtures/scenarios.js",
+      "sha256": "536318a78e26e787001feae3df807c1a164785c9ce088f5308cab649db8d87bb"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/fixtures/shared-dialogs.js",
+      "sha256": "90ef5daf08c225faab73f3362d3a0e43600838fe0896e59e0c49cdf526f7fba7"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/fixtures/statement-controller.js",
+      "sha256": "5c6850ff99f3a277dfa94ffc657b938c6cbc26c14c84269e2140b7933fc9d0dd"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/fixtures/toolbox.js",
+      "sha256": "1298b14b963bfeeec96c402e4985664ebd7452c95f8ae5941bf3cb23ea6e97f5"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/fixtures/vcc-position.js",
+      "sha256": "24999824f2c0c6f0fd66d32c8d768b101ecdb17cb5d5b678be51c9cd0401fc68"
+    },
+    {
+      "path": "scripts/smoke/render-status-box.js",
+      "sha256": "44429f4fed624bdadbd5b3963f779b41452ca9ac45986d9cef82152aef6930ad"
+    },
+    {
+      "path": "scripts/smoke/scenario-c1-defaults.js",
+      "sha256": "07df4861aaee1fed0093b83609a2408bc1c440a5335bfc31c6079e7f93e2822c"
+    },
+    {
+      "path": "scripts/test-renderer-lifecycle.js",
+      "sha256": "a39f9ba29fe2a285976fd900dfc2a3c101fe665249784655e60848a422c199f4"
+    },
+    {
+      "path": "scripts/verify-biz-op-v329-renderer-dom.js",
+      "sha256": "66acfa74c8a429af8a975591219f2d4543e7dee1767459135d9e984fe5ba7224"
+    },
+    {
+      "path": "src/preload.js",
+      "sha256": "605d382a9a77f389e8658b4d32ac9b11c703944d4029fe9c5e14b96df28894ae"
+    },
+    {
+      "path": "src/renderer-biz-op-v327.js",
+      "sha256": "ee139aaee6fad9ede2ffa04377c90abaf4d1f0c74838d299632f0cbdfc0bfd0e"
+    },
+    {
+      "path": "src/renderer-dialogs.js",
+      "sha256": "c9f187c2a1ffc9d7612526e178dbb702e7e0a79731f3714b81033f04043c0764"
+    },
+    {
+      "path": "src/renderer-pending.js",
+      "sha256": "7dfca236d0597df83884c224423f983b4599842379dd1748359d58bf7ce026d1"
+    },
+    {
+      "path": "src/renderer-position-reconciliation.js",
+      "sha256": "85d16ae50b88e85b25fe8bd5d9ab08bf114bc31fcdca42c6c1ce418447ffcabe"
+    },
+    {
+      "path": "src/renderer-previews.js",
+      "sha256": "cd30ca07ac57ded208be68c7bf947f5d42a9705464f46e4bf6d910153122546c"
+    },
+    {
+      "path": "src/renderer-vcc-financial-op.js",
+      "sha256": "bf4658ef434d675e347af7a2d81d6fef9152df204ab89d5be58da5dab79ba4e0"
+    },
+    {
+      "path": "src/renderer.js",
+      "sha256": "3f2166f359a6fdf40c8985df682b661b48c85f3792be8aed9202b6f2b525c4ec"
+    },
+    {
+      "path": "src/renderer/README.md",
+      "sha256": "4bee9f7a877dec33d8caa157ff55e4f10bbb7e4ae078e30b7b0eafbc1fc4f08b"
+    },
+    {
+      "path": "src/renderer/configuration-services.js",
+      "sha256": "d4161756c835086959d0d025d67ef796f3929af1d3831433020fd7f3ccd8bef7"
+    },
+    {
+      "path": "src/renderer/controllers/acquiring.js",
+      "sha256": "43abf83361a08d705dbdfddf88f66026d48f6ccb7a16f1bcb31a40059e73a50f"
+    },
+    {
+      "path": "src/renderer/controllers/bank-bu.js",
+      "sha256": "f05f449137c0c5fbf9e528b7e8f4c84f3f288fea728188468076bc25e19c0ba6"
+    },
+    {
+      "path": "src/renderer/controllers/bank-statement.js",
+      "sha256": "9514f9f522c3147d875e912620b22171ad56caac255ce98a20d13ddce7e6e2aa"
+    },
+    {
+      "path": "src/renderer/controllers/biz-op-legacy.js",
+      "sha256": "511b1ef90132f03b944992e38d7c3ceb014a30d70a8093388dbe06020d29230f"
+    },
+    {
+      "path": "src/renderer/controllers/duplicate-inbound.js",
+      "sha256": "990f4de60e13bafb01f17c6404e5e53a0564f725ddfc04a0d368a346c1d6807a"
+    },
+    {
+      "path": "src/renderer/controllers/new-account.js",
+      "sha256": "e995dcee0a8fc31bbe4d32504edf896151917f35f194a34c16af12f69c54505c"
+    },
+    {
+      "path": "src/renderer/controllers/pending.js",
+      "sha256": "c31a0b262e544b0f9f10524de8a9b9fb2d5b6418c6d2525f4482603fdba7ff59"
+    },
+    {
+      "path": "src/renderer/controllers/pre-fund.js",
+      "sha256": "6844a919eb6c7b4cd53bbdfee78fa0231c0720cbf3d03a1979a26ceb3a8b38ec"
+    },
+    {
+      "path": "src/renderer/controllers/recon-id-fix.js",
+      "sha256": "932c3c417722d25461c235f96907bc536301a1a3e5f19701ac54f7e65e1280a9"
+    },
+    {
+      "path": "src/renderer/controllers/statement.js",
+      "sha256": "517746b500cc022ee89bc37c70a4c30a5844a773399b03f829bcd9cb3bfcf746"
+    },
+    {
+      "path": "src/renderer/controllers/vcc-op-calc.js",
+      "sha256": "f6c0333766e8fb0d13e1e3b8770e3657c05a68444d8b32d0323c78c74b794de3"
+    },
+    {
+      "path": "src/renderer/dialogs/app-settings.js",
+      "sha256": "ebd2be60360ebe0a8ce41370be22030411c35367bf6ef07fa8768fdb2758716b"
+    },
+    {
+      "path": "src/renderer/dialogs/configuration.js",
+      "sha256": "4c34f8367ef140661ed0301c08ec5edcf4df222eb9185cdb8d844f4170a3933b"
+    },
+    {
+      "path": "src/renderer/dialogs/scenarios.js",
+      "sha256": "81b66d37c15b3e47eb0b82839e97a688a42b08648fa152ce66c02410460096c4"
+    },
+    {
+      "path": "src/renderer/dialogs/toolbox.js",
+      "sha256": "a5fccc2f2d5f3c4870ea16aa90178102fb37c22277e693563a5334d0049a9459"
+    },
+    {
+      "path": "src/renderer/modal-bridge.js",
+      "sha256": "5c458a3a7683a6afeaa497bfc2c8363f7ef3ddf33bf06df012b77dfca841efbe"
+    },
+    {
+      "path": "src/renderer/modal-host.js",
+      "sha256": "1c3b26093359dd574c454704bda8e2efed12b80a403935bdc7e02fe8eedb8575"
+    },
+    {
+      "path": "src/renderer/module-router.js",
+      "sha256": "5fac59a58102254bb2580cb5c015055f5c0eb2266d105d939f68472f47380478"
+    },
+    {
+      "path": "src/renderer/scenario-change-router.js",
+      "sha256": "ddc119d48283ae40ac2254c93ad0543dadcd3502138e1141f77d5bed2fa0cec1"
+    },
+    {
+      "path": "src/renderer/scenario-command-service.js",
+      "sha256": "f962c4c28d18bea5ba27953f9efe6190c5889e5559ae6aae60e8908be26168f3"
+    },
+    {
+      "path": "src/renderer/shared-recon-session.js",
+      "sha256": "a863b9fa34b6999cee689f4debfba0533b7938842ec37c81bf79f38fa4706837"
+    },
+    {
+      "path": "tests/helpers/modal-dom.js",
+      "sha256": "57ca1d8e15634080936dc27e3a31dd3fae9840ab6786a435c1131b87cb9eacd3"
+    },
+    {
+      "path": "tests/helpers/scenario-main-harness.js",
+      "sha256": "e39be6eb5d070b31390f3f97975f2869e4a161e659cfd10f44d173bf1fdc0d2b"
+    },
+    {
+      "path": "tests/unit/app-update-contract.test.js",
+      "sha256": "6a9d0b0af30418c492697befd782d7c1d943c33a77ce7eae0ea054ee3eadc1ee"
+    },
+    {
+      "path": "tests/unit/archive-center-ui-contract.test.js",
+      "sha256": "922d64eb4be37bc089d07fda2c0085d0722af8ff088534f63007e44f75b06a42"
+    },
+    {
+      "path": "tests/unit/archive-delete-dialog-lifecycle.test.js",
+      "sha256": "e40ff28f182342a95ae92c6210df142b1f63d2f8a3c3dd9955244f0b04e5467a"
+    },
+    {
+      "path": "tests/unit/duplicate-inbound-match-wiring.test.js",
+      "sha256": "45a743708a9b84c4dc9cf9a41aaf73e7d197d131733a17a7d883a7bd4f7597c0"
+    },
+    {
+      "path": "tests/unit/main-payment-shared-recon-source.test.js",
+      "sha256": "7495f5ba4c3f1fb3940f4ed88d15fd40a74e757c2bac5b0b55b4740573e84868"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v329-renderer.test.js",
+      "sha256": "891c613b440595f4d7f921c8e1ca97e771d5f5555327b39f28f4e279f29d1fc8"
+    },
+    {
+      "path": "tests/unit/main-process/interactive-task-preflight.test.js",
+      "sha256": "80dbcf2b3b2c482fecbbc18c6602fa7b7ed2bee16604e8ed25e2d2d8107b1f0f"
+    },
+    {
+      "path": "tests/unit/main-process/pre-fund-reconciliation/mpt-mixed-lifecycle-e05-p0.test.js",
+      "sha256": "ba8899c451c53e0d58eeaf12375975718a2dc95013301c7861f3fc6961916296"
+    },
+    {
+      "path": "tests/unit/main-process/statement-big-account-preview.test.js",
+      "sha256": "5963cb841a748f53dcc384ea16843e08b9e3fef64652c2b04e8e07ede5274624"
+    },
+    {
+      "path": "tests/unit/renderer-bank-statement-run-progress.test.js",
+      "sha256": "791414dd641a31039eab32b6bc6f036299429afe2a6fbbc2192de133e2d67e8c"
+    },
+    {
+      "path": "tests/unit/renderer-biz-op-recovery.test.js",
+      "sha256": "76154e63990bf2b8f4473e90abd769d68646a4ac8a64c2251a2c068562671fda"
+    },
+    {
+      "path": "tests/unit/renderer-c3-gateway-ready-guard.test.js",
+      "sha256": "8afc449153fc9abc7f941dd07b5b401e8e5ab8d1508cb35fd9d11319e141a1c1"
+    },
+    {
+      "path": "tests/unit/renderer-dialogs-fund-transfer-account-mapping-load-guard.test.js",
+      "sha256": "5cf8f2b68d3417ea1c70e71152def212a77b3777f30a88027818674720abb6c9"
+    },
+    {
+      "path": "tests/unit/renderer-dialogs-fund-transfer-date-policy.test.js",
+      "sha256": "be9f57edb650edc5919b9af470032322dcc48528c51a4144c872b4bf2d766f95"
+    },
+    {
+      "path": "tests/unit/renderer-dialogs-payment-offline-backfill.test.js",
+      "sha256": "46972a6fa693640838baecf8ef7750aea457113d2851a82c429c25d90049cd0f"
+    },
+    {
+      "path": "tests/unit/renderer-dialogs-refund-fuzzy.test.js",
+      "sha256": "d22c4e23ff81e4c2344b270bd66ed5e7bef0b18e9eda6fabd2037ea00135d961"
+    },
+    {
+      "path": "tests/unit/renderer-dialogs-scenario-channel.test.js",
+      "sha256": "c5bd68b53afdae9443ea8c30a3a878ff3be604c460a3ae4b589985af117c7949"
+    },
+    {
+      "path": "tests/unit/renderer-dialogs-scenario-group-collapse.test.js",
+      "sha256": "853a1c7b74a11d03eef802c97d98161a2f8d21247e749cf91aa0d499cdd99b87"
+    },
+    {
+      "path": "tests/unit/renderer-dialogs-toolbox.test.js",
+      "sha256": "4ae6c82e3e3bab4a6b0c175dfc967cdf28f1fe3f2fe029ab1d3da3145e8bad93"
+    },
+    {
+      "path": "tests/unit/renderer-dialogs-v3-2-6.test.js",
+      "sha256": "9946e6ac4a97b5703fbe2d24f407b9959fe83c443e22d27ad4e4335fcde74611"
+    },
+    {
+      "path": "tests/unit/renderer-import-issues-summary.test.js",
+      "sha256": "54a58714fc1f0fc89d70c94e48df1a213c42277bbcffa637737784ab4d9e14f0"
+    },
+    {
+      "path": "tests/unit/renderer-linked-table-delete-range.test.js",
+      "sha256": "e877eaab4ccca38ced28b31e27503164f9c64b10584a5019c11bc98c2e5157fc"
+    },
+    {
+      "path": "tests/unit/renderer-position-reconciliation.test.js",
+      "sha256": "07e3ee3c4cc454411132198178d7917f1427d9c4ac5b70926536556f8a6c216c"
+    },
+    {
+      "path": "tests/unit/renderer-pre-fund-reconciliation.test.js",
+      "sha256": "111900c425421f8c2e981455dca3907d01799161f8c0914280ff24092552f738"
+    },
+    {
+      "path": "tests/unit/renderer-refund-prompt-orchestration.test.js",
+      "sha256": "5f4e81ea692da15940d7015b8455dd530ba3dbd244b2e817cd18191138306c81"
+    },
+    {
+      "path": "tests/unit/renderer-refund-ready-guard.test.js",
+      "sha256": "9d2c49bc7dff9acaab4f1c38070278a19075b9745da74e71ea2569f557dd39ea"
+    },
+    {
+      "path": "tests/unit/renderer-status-box-text.test.js",
+      "sha256": "f0696e4ad7cac1c69133f96dbc465d23f3ac3b9f530f07ac3c51b517068979e6"
+    },
+    {
+      "path": "tests/unit/renderer-vcc-financial-op.test.js",
+      "sha256": "4ef6495523c41a09af5c4f479f5764ffb03dcde398601d7c6cc9c2acb5332c94"
+    },
+    {
+      "path": "tests/unit/renderer/configuration-services.test.js",
+      "sha256": "61bea6add872fc128c9606ddf2a8cbed1dccd5340d4fbf625c66015c68c937a1"
+    },
+    {
+      "path": "tests/unit/renderer/modal-host.test.js",
+      "sha256": "dd59aedc5744562067f74885deb1aaa1642257617f3d1e213e2e2e69163d6c83"
+    },
+    {
+      "path": "tests/unit/renderer/module-router.test.js",
+      "sha256": "6b1ca7b9f8fa93b199c7714ae29b2571789fdea6c4b17ae2c3867f99d6efb4ab"
+    },
+    {
+      "path": "tests/unit/renderer/preload-subscriptions.test.js",
+      "sha256": "c6699f0060368117f3d13408d2772ef5dcf63f4673c465a3d4c9597b5c99b57d"
+    },
+    {
+      "path": "tests/unit/renderer/previews-modal-scope.test.js",
+      "sha256": "29067475bc0ecf6b1ba61036323a312c6eaca58bdcd40d08216f061385c16f1f"
+    },
+    {
+      "path": "tests/unit/renderer/r4-controllers.test.js",
+      "sha256": "cce4289f04f3edc0029e772667bb464d9af768e8c66e6bca8353d96b095ec53f"
+    },
+    {
+      "path": "tests/unit/renderer/r4-domain-controllers.test.js",
+      "sha256": "6b0e13a979e0ebeffb21edf4c49fd1d21ff3777d2c656b9dad39ed0283ffaa95"
+    },
+    {
+      "path": "tests/unit/renderer/scenario-change-routing.test.js",
+      "sha256": "9cdae47e67439716c6484f97f91872e69e0a16137c62d90c1599cf2dc34d73ff"
+    },
+    {
+      "path": "tests/unit/renderer/scenario-command-service.test.js",
+      "sha256": "97c270c403b7f591254edfa06e43d54982cd6a7d35ded1c35a6cbbf9a8af40f0"
+    },
+    {
+      "path": "tests/unit/renderer/scenario-controller-feedback.test.js",
+      "sha256": "cb5c20c26ea4257cafaf256978a55220dbe260879f0b22b776d3d3f5b12c7403"
+    },
+    {
+      "path": "tests/unit/renderer/scenario-write-boundary.test.js",
+      "sha256": "eeac3ea687f64cc6aa9105628bcbdeb606b6d18301d10e59c2975f784e8c2238"
+    },
+    {
+      "path": "tests/unit/renderer/toolbox-modal.test.js",
+      "sha256": "1652b34df3138c736de13398859754945ddb822303f0d143b9baf41641c69c1e"
+    },
+    {
+      "path": "tests/unit/renderer/vcc-op-calc-source-binding.test.js",
+      "sha256": "b8bb5449925324519347ed6c38adc5cad83956bcda25d2be0031d45231df0633"
+    },
+    {
+      "path": "tests/unit/vcc-financial-op-preview-contract.test.js",
+      "sha256": "d1280cf9fbd6a4370c0ef4b820604db53f3a834791bf953024f5fb98c1bef6c2"
+    }
+  ],
+  "protectedUnchanged": [
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/artifact-validation.json",
+      "sha256": "c4bda429cbdf5eb132421de62635976da73aab246dddf5e093fbb76e192c9e49"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/renderer-boundaries-r3-review-probes.test.js",
+      "sha256": "eed8c03b7c054cdfa3a765eaa305cc6e8662a8092f90a579cc74f6f5fda9c022"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/review-bizop-background-feedback-output.json",
+      "sha256": "55056fadfe6dc5198b819c38c3e6bf1ac0ce56fa9283fd2bd3e29f6ee9a9849b"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/review-bizop-background-feedback.cjs",
+      "sha256": "f0c4f2bfb4c6e557c322afdb605b1aeb7cf0c294b4f941d43fa559a65841fa28"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/review-modal-probe.cjs",
+      "sha256": "6a53b410fa81fa1d576b49e7a37f9ad25be698d8b12430bc9d3920673d8f0395"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/review-snapshot.json",
+      "sha256": "61b04bc95a4797c60fc9278348b8bd008ebecbec8b6f872396f9bf2cb4d292b2"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/review-vcc-stale-cache-real-output.json",
+      "sha256": "602f77d0b83d5b5a1a2d1ccbcab47f3f41582a16600c1f8c34c9bd2893be0027"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-evidence/review-vcc-stale-cache-real.cjs",
+      "sha256": "ca14ec4e406393e3fbd59f5217cecfc18d443c8fab2d17467fa1c7129b1acc1f"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/artifact-validation.json",
+      "sha256": "4c2b1f3af03518176283ebfc4225ac1b9e09e1ab7d39e0317881f03d55caeaf6"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/focused-unit-command.json",
+      "sha256": "c4724d8c2bd835cd83a774f0387e3287d5331981799ce3d56278ba618ce9e692"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/renderer-boundaries-r2-scenario-review.test.js",
+      "sha256": "6f0b6ce9b45d5b5423416e9e5f9932deb8b0cb29a7bb5dd3e863554fb481b6cb"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/review-modal-r2-probe.cjs",
+      "sha256": "61003be2fcda89a32c2e669ee69a2bb2bfda82ef55517a98ffb348ee05fafcd4"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/review-r1-r2.diff",
+      "sha256": "c86a1d3afaa65c08bd7b246549b398cfc5c72d58852e69a9d67eeea16f8c9ead"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/review-r2-bizop-background-feedback-output.json",
+      "sha256": "681636010ec3cfa6c8cfcb769494a488bd197077ae5cf9f5dc9ddded08071019"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/review-r2-bizop-background-feedback.cjs",
+      "sha256": "f0c4f2bfb4c6e557c322afdb605b1aeb7cf0c294b4f941d43fa559a65841fa28"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/review-r2-vcc-source-probe-output.json",
+      "sha256": "a2a58700e6737978fb7da3adff94375184a71ea6f347dd10cc360851d345b7e5"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/review-r2-vcc-source-probe.cjs",
+      "sha256": "7c3995c525381e1267bd272f378e854454fd3d2a2586fef1b14c684b0cd081d0"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2-evidence/review-snapshot.json",
+      "sha256": "a7b865b6e767175b74cd9f5e7a1e176c88d76ee046d5039854ba3e228adb16a0"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r2.md",
+      "sha256": "11048d415c50bdb3620c95926b7059abe83fa6d2c5dd2f61c8db6f76f109c3d2"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20.md",
+      "sha256": "e0dd1ae35e74e843477707e269cbdb14ef02210005f239fbb4602ecdbc1fe396"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/spec.md",
+      "sha256": "070c53195b9fb228f36aa5ed0d1ed488c430e097f1242c8f1756779a7563269c"
+    }
+  ],
+  "verification": {
+    "unit": {
+      "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries",
+      "command": [
+        "node",
+        "--test",
+        "--test-concurrency=2",
+        "tests/unit/app-update-contract.test.js",
+        "tests/unit/archive-center-ui-contract.test.js",
+        "tests/unit/archive-delete-dialog-lifecycle.test.js",
+        "tests/unit/duplicate-inbound-match-wiring.test.js",
+        "tests/unit/main-payment-shared-recon-source.test.js",
+        "tests/unit/main-process/biz-op-v329-renderer.test.js",
+        "tests/unit/main-process/interactive-task-preflight.test.js",
+        "tests/unit/main-process/pre-fund-reconciliation/mpt-mixed-lifecycle-e05-p0.test.js",
+        "tests/unit/main-process/statement-big-account-preview.test.js",
+        "tests/unit/renderer-bank-statement-run-progress.test.js",
+        "tests/unit/renderer-biz-op-recovery.test.js",
+        "tests/unit/renderer-c3-gateway-ready-guard.test.js",
+        "tests/unit/renderer-dialogs-fund-transfer-account-mapping-load-guard.test.js",
+        "tests/unit/renderer-dialogs-fund-transfer-date-policy.test.js",
+        "tests/unit/renderer-dialogs-payment-offline-backfill.test.js",
+        "tests/unit/renderer-dialogs-refund-fuzzy.test.js",
+        "tests/unit/renderer-dialogs-scenario-channel.test.js",
+        "tests/unit/renderer-dialogs-scenario-group-collapse.test.js",
+        "tests/unit/renderer-dialogs-toolbox.test.js",
+        "tests/unit/renderer-dialogs-v3-2-6.test.js",
+        "tests/unit/renderer-import-issues-summary.test.js",
+        "tests/unit/renderer-linked-table-delete-range.test.js",
+        "tests/unit/renderer-position-reconciliation.test.js",
+        "tests/unit/renderer-pre-fund-reconciliation.test.js",
+        "tests/unit/renderer-refund-prompt-orchestration.test.js",
+        "tests/unit/renderer-refund-ready-guard.test.js",
+        "tests/unit/renderer-status-box-text.test.js",
+        "tests/unit/renderer-vcc-financial-op.test.js",
+        "tests/unit/renderer/configuration-services.test.js",
+        "tests/unit/renderer/modal-host.test.js",
+        "tests/unit/renderer/module-router.test.js",
+        "tests/unit/renderer/preload-subscriptions.test.js",
+        "tests/unit/renderer/previews-modal-scope.test.js",
+        "tests/unit/renderer/r4-controllers.test.js",
+        "tests/unit/renderer/r4-domain-controllers.test.js",
+        "tests/unit/renderer/scenario-change-routing.test.js",
+        "tests/unit/renderer/scenario-command-service.test.js",
+        "tests/unit/renderer/scenario-controller-feedback.test.js",
+        "tests/unit/renderer/scenario-write-boundary.test.js",
+        "tests/unit/renderer/toolbox-modal.test.js",
+        "tests/unit/renderer/vcc-op-calc-source-binding.test.js",
+        "tests/unit/vcc-financial-op-preview-contract.test.js"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.118,
+      "log": "final-unit.log",
+      "counts": {
+        "tests": 649,
+        "pass": 649,
+        "fail": 0,
+        "skipped": 0
+      }
+    },
+    "electron": {
+      "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries",
+      "command": [
+        "node",
+        "scripts/test-renderer-lifecycle.js"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 16.085,
+      "log": "final-electron.log",
+      "pass": 187,
+      "tests": 187,
+      "boundary": "真实 Renderer 工厂/DOM/index/Preload、受控API、隔离userData/Documents；不加载产品Main"
+    },
+    "lint": {
+      "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries",
+      "command": [
+        "npm",
+        "run",
+        "lint"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.318,
+      "log": "final-lint.log"
+    },
+    "smoke": {
+      "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries",
+      "command": [
+        "npm",
+        "run",
+        "smoke"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 6.801,
+      "log": "final-smoke.log"
+    }
+  },
+  "checks": [
+    "PASS: 当前HEAD和分支保持原值",
+    "PASS: 96个冻结实现/验证相关文件哈希匹配",
+    "PASS: 21个原审查报告/证据/Spec文件未变",
+    "PASS: Main/backend/package/lock相对HEAD无变更，Preload相对第二轮审查无变更",
+    "PASS: git diff --check及全部整改新增行空白检查",
+    "PASS: 两份补丁git apply --reverse --check",
+    "PASS: 当前文档206个本地文件链接存在"
+  ],
+  "notCompleted": [
+    "完整release-check及两项历史高占用单测复验",
+    "本轮全仓unit和完整integration-runner",
+    "真实产品Main端到端及Task/活动日志",
+    "Windows/Excel/WPS/安装包",
+    "资金人工复核",
+    "release和跨治理集成"
+  ],
+  "operations": {
+    "committed": false,
+    "pushed": false,
+    "prCreated": false,
+    "merged": false,
+    "versionBumped": false,
+    "released": false
+  },
+  "artifacts": {
+    "caller-inventory.log": {
+      "sha256": "d9eb2b023d3207c17500e2ea2934c753b44b968acbccb74eb3994ea02b5d04cd",
+      "bytes": 3813
+    },
+    "final-checks.log": {
+      "sha256": "4d9183522d56d745b8dadc3a180b2b4787f0039235339a78aa63e9525e696c31",
+      "bytes": 389
+    },
+    "final-electron-command.json": {
+      "sha256": "af9fc8aa5d6718cd8b25c1ccffd567409dd97643cf678bbf6c7630e70b584ca4",
+      "bytes": 255
+    },
+    "final-electron.log": {
+      "sha256": "8ffa214ad29d94daa85386fc00d4cb997cc8b4022859f98d4960a137edbc5eab",
+      "bytes": 16153
+    },
+    "final-lint-command.json": {
+      "sha256": "3ba3c76a35280087e68672ba321c14555dac62df084363ee43bec91972b435ad",
+      "bytes": 230
+    },
+    "final-lint.log": {
+      "sha256": "c396d49d3be1db82282d6b91bc9412269ecdb1f1a25a6777cb572d10d240e182",
+      "bytes": 50
+    },
+    "final-smoke-command.json": {
+      "sha256": "13b1640810aa63a6bbff39dc3f984efd09d7c9aae770558d2517977ee72af535",
+      "bytes": 232
+    },
+    "final-smoke.log": {
+      "sha256": "083c10f58d03319638c860d0a8d556ddcddc042e44a0df1b464420ab23c35465",
+      "bytes": 2385
+    },
+    "final-unit-command.json": {
+      "sha256": "51cd31bcde14c605b334ceaf4c537b30343ce0b7f8f878caa6ade7db3dfc1741",
+      "bytes": 2727
+    },
+    "final-unit.log": {
+      "sha256": "3ccb408180c480151a157636a0b8df40e606a565cb06afdcdab7620e84eabdfa",
+      "bytes": 73660
+    },
+    "renderer-boundaries-current-stat.txt": {
+      "sha256": "c7d391e4a6fd66506de3ba2301e7a7a5aca86b60b562d24495283a7a2a7168bc",
+      "bytes": 7536
+    },
+    "renderer-boundaries-current.patch": {
+      "sha256": "d51bf26a9f6d89ca9f0e1836d501da36331c3c9cf82c916179d26aac496dee0e",
+      "bytes": 3883141
+    },
+    "review-r2-fixes-stat.txt": {
+      "sha256": "bd964382cadc4277901fb3ea2eb02e6291adcaa54e31241a71391677ed66155b",
+      "bytes": 632
+    },
+    "review-r2-fixes.patch": {
+      "sha256": "5ce4fe13ff4187f6080d2139326dd2d9be66b069044dda1d89673b6c5c5192a5",
+      "bytes": 101410
+    }
+  }
+}

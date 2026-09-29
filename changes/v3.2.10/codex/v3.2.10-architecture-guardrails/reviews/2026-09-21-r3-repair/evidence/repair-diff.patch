@@ -1,0 +1,288 @@
+--- a/scripts/architecture/contracts.js
++++ b/scripts/architecture/contracts.js
+@@ -41,29 +41,40 @@
+ }
+ 
+ // 参数代表显式注入合同；本地返回值只读取 AST，不执行 helper 或 getter。
+-function callableOrigins(value, analysis, seen = new Set()) {
++function callableOrigins(value, analysis, seen = new Set(), members = []) {
+   const unknown = () => ({ known: false, modules: [], functions: [] });
+   const combine = origins => ({ known: origins.length > 0 && origins.every(item => item.known),
+-    modules: origins.flatMap(item => item.modules), functions: origins.flatMap(item => item.functions) });
++    modules: origins.flatMap(item => item.modules), functions: origins.flatMap(item => item.functions),
++    unresolvedReturn: origins.some(item => item.unresolvedReturn) });
+   if (!value || seen.has(value)) return unknown();
+   const next = new Set([...seen, value]);
+   const choices = value.alternatives || value.values;
+-  if (choices) return combine(choices.map(item => callableOrigins(item, analysis, next)));
+-  if (value.reason === 'member-base') return callableOrigins(value.object, analysis, next);
+-  if (value.kind === 'bound-function') return callableOrigins(value.target, analysis, next);
++  if (choices) return combine(choices.map(item => callableOrigins(item, analysis, next, members)));
++  // service.group.settle 在本地工厂返回值上逐层选择，不能丢掉具体成员。
++  if (['member-base', 'computed-member'].includes(value.reason)) return callableOrigins(value.object, analysis, next, [value.property, ...members]);
++  if (value.kind === 'object') {
++    if (!members.length || value.opaque || (value.spreads || []).length || !Object.hasOwn(value.properties, members[0])) return unknown();
++    return callableOrigins(value.properties[members[0]], analysis, next, members.slice(1));
++  }
++  if (value.kind === 'bound-function') return members.length ? unknown() : callableOrigins(value.target, analysis, next);
+   if (value.kind === 'call-result') {
++    // 无 reviver 的原生 JSON.parse 只产生数据；其数组读取方法不携带领域函数。
++    if (value.callee?.rootFree && value.callee.chain?.join('.') === 'JSON.parse' && value.args.length === 1 &&
++      ['map', 'slice'].includes(members.at(-1))) return { known: true, modules: [], functions: [] };
+     if (value.callee?.module) return { known: true, modules: [value.callee.module], functions: [] };
+     const name = value.callee?.functionPath; const fn = analysis?.functionNodes.get(name);
+-    if (!fn || next.has(fn)) return unknown();
++    if (!fn) return unknown();
++    if (next.has(fn)) return { ...unknown(), unresolvedReturn: true };
+     next.add(fn);
+     const returns = fn.type === 'ArrowFunctionExpression' && fn.body.type !== 'BlockStatement' ? [fn.body] :
+       analysis.nodes.filter(node => node.type === 'ReturnStatement' && analysis.functionPath(node) === name).map(node => node.argument);
+-    const result = combine(returns.map(node => callableOrigins(analysis.describe(node), analysis, next)));
++    const result = combine(returns.map(node => callableOrigins(analysis.describe(node), analysis, next, members)));
++    result.unresolvedReturn ||= !result.known;
+     result.functions.push(name); return result;
+   }
+   if (value.module) return { known: true, modules: [value.module], functions: [] };
+-  return { known: Boolean(value.functionPath || value.bindingKind === 'parameter' || value.kind === 'literal' || value.kind === 'regexp'),
+-    modules: [], functions: value.functionPath ? [value.functionPath] : [] };
++  return { known: Boolean((!members.length && value.functionPath) || value.bindingKind === 'parameter' || value.kind === 'literal' || value.kind === 'regexp'),
++    modules: [], functions: !members.length && value.functionPath ? [value.functionPath] : [] };
+ }
+ 
+ // bind 创建函数不执行目标；调用时合并预绑定实参。call/apply 在 scanner 入口去除 thisArg。
+--- a/scripts/architecture/scan.js
++++ b/scripts/architecture/scan.js
+@@ -275,7 +275,8 @@
+           else value = unknown('destructuring');
+         }
+         if (value.kind === 'object') return { ...value, ...reference, kind: 'object', properties: value.properties, spreads: value.spreads };
+-        if (value.kind !== 'unknown') return value;
++        // 本地工厂结果的成员虽未在此展开，仍须为后续来源追踪保留对象和属性。
++        if (value.kind !== 'unknown' || value.reason === 'member-base') return value;
+         return { ...reference, opaque: true, reason: value.reason };
+       }
+       if (binding.kind === 'function') return { ...reference, functionPath: functions.get(binding.init) };
+@@ -563,8 +564,15 @@
+             const targets = alternatives(args[0]);
+             let directories = [root]; let reason = 'unresolved-worker-path';
+             if (workerReference.chain.at(-1) === 'fork' && targets.some(target => typeof target?.value !== 'string' || !path.isAbsolute(target.value))) {
+-              const options = args[1]?.kind === 'array' ? args[2] : args[1];
+-              const optionCandidates = alternatives(options);
++              // argv 的内容可以动态；但必须区分数组位置与覆盖第三参数的 options 对象重载。
++              const optionCandidates = alternatives(args[1]).flatMap(argv => {
++                if (argv?.kind === 'object') return [argv];
++                const absent = !argv || (argv.kind === 'literal' && argv.value === null) || (argv.rootFree && argv.chain?.join('.') === 'undefined');
++                const nativeArray = argv?.kind === 'call-result' && argv.callee?.rootFree &&
++                  ['process.argv.slice', 'process.execArgv.slice', 'Array.from', 'Array.of'].includes(argv.callee.chain?.join('.'));
++                if (absent || argv.kind === 'array' || nativeArray) return alternatives(args[2]);
++                return [{ kind: 'unknown', reason: 'ambiguous-fork-overload' }];
++              });
+               directories = optionCandidates.flatMap(option => {
+                 if (!option || (option.kind === 'literal' && option.value === null) || (option.rootFree && option.chain?.join('.') === 'undefined')) return [root];
+                 if (option.kind !== 'object' || option.opaque || option.spreads.length) return [null];
+--- a/scripts/architecture/rules.js
++++ b/scripts/architecture/rules.js
+@@ -205,7 +205,7 @@
+         for (const value of candidates) {
+           if (boundary.restrictedApis.some(a => a.path === site.from && a.operations.includes((value.chain || []).join('.')))) emit('ARCH-TASK-ADAPTER', boundary, site, '通用编排不得直接调用本文件 Position 私有状态操作');
+         }
+-        if (!origins.known && candidates.some(value => value.opaque || ['call-result', 'bound-function'].includes(value.kind))) emit('ARCH-STATIC-COVERAGE', boundary, site, '受保护编排的调用别名无法完整解释');
++        if (!origins.known && (origins.unresolvedReturn || candidates.some(value => value.opaque || ['call-result', 'bound-function'].includes(value.kind)))) emit('ARCH-STATIC-COVERAGE', boundary, site, '受保护编排的调用别名无法完整解释');
+       }
+     }
+     if (rules.includes('ARCH-BIZOP-RECOVERY-PRIVATE')) {
+--- /dev/null
++++ b/tests/unit/architecture/review-round3.test.js
+@@ -0,0 +1,136 @@
++'use strict';
++const assert = require('node:assert/strict');
++const test = require('node:test');
++const fs = require('node:fs');
++const path = require('node:path');
++const os = require('node:os');
++const vm = require('node:vm');
++const { spawnSync } = require('node:child_process');
++const { scan } = require('../../../scripts/architecture/scan');
++const { evaluateRules } = require('../../../scripts/architecture/rules');
++const policy = require('../../../architecture/boundaries.json');
++const positionPath = 'src/main-process/position-reconciliation/task-owner.js';
++const positionImport = "const position=require('./main-process/position-reconciliation/task-owner');";
++function fixture(t, files, boundaries = []) {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'g8-r3-regression-'));
++  t.after(() => fs.rmSync(root, {recursive:true,force:true}));
++  for (const [file, source] of Object.entries(files)) {
++    fs.mkdirSync(path.dirname(path.join(root, file)), {recursive:true});
++    fs.writeFileSync(path.join(root, file), source);
++  }
++  const config = {...policy, boundaries, generatedModules:[], dynamicLoads:[], policyChanges:[]};
++  const scanned = scan(root, config);
++  return {root, scanned, result:evaluateRules(scanned, config, {schemaVersion:1, factBaseline:policy.factBaseline, exceptions:[]}, {root})};
++}
++function task(t, source) {
++  return fixture(t, {'src/main.js':source, [positionPath]:'exports.settle=()=>{};'}, policy.boundaries.filter(b => b.id === 'business-task-adapters'));
++}
++const denied = (result, rule) => assert.ok(result.violations.some(v => v.rule === rule), JSON.stringify(result.violations));
++const clean = result => assert.deepEqual(result.violations, []);
++function forkFixture(t, call) {
++  return fixture(t, {'src/launcher.cjs':"const {fork}=require('node:child_process');const path=require('node:path');"+call,
++    'src/worker.cjs':"console.log('wrong-worker');", 'src/jobs/src/worker.cjs':"console.log('expected-worker');"});
++}
++function forkRuntime(f) {
++  const result = spawnSync(process.execPath, ['src/launcher.cjs', '--example'], {cwd:f.root,encoding:'utf8',timeout:10000});
++  assert.ifError(result.error);assert.equal(result.status,0,result.stderr);assert.equal(result.stdout.trim(),'expected-worker');
++}
++function correctWorker(f) {
++  clean(f.result);assert.deepEqual(f.scanned.dynamicSites, []);
++  assert.deepEqual(f.scanned.edges.filter(e => e.kind === 'worker').map(e => e.to), ['src/jobs/src/worker.cjs']);
++}
++
++test('R3-01 本地服务返回 Position 方法引用，与包装调用一致拒绝', t => {
++  for (const returned of ['{settle:position.settle}', '{settle(){return position.settle();}}']) {
++    const source=positionImport+`function createService(){return ${returned};}const service=createService();function runArchiveAwareOperation(){return service.settle();}`;
++    const calls=[];vm.runInNewContext(source+';runArchiveAwareOperation();',{require:()=>({settle:()=>calls.push('Position.settle')})});
++    assert.deepEqual(calls,['Position.settle']);
++    const f=task(t,source);denied(f.result,'ARCH-TASK-ADAPTER');
++    assert.ok(f.result.violations.some(v=>v.dependencyPath?.includes(positionPath)),JSON.stringify(f.result.violations));
++  }
++});
++
++for (const [name, argv] of [['运行时数组','process.argv.slice(2)'],['undefined','undefined']]) {
++  test(`R3-02 fork 三参数 ${name} 保留明确 cwd，与真实子进程一致`, t => {
++    const f=forkFixture(t,`const argv=${argv};fork('./src/worker.cjs',argv,{cwd:path.join(__dirname,'jobs')});`);
++    forkRuntime(f);correctWorker(f);
++  });
++}
++
++test('R3-01 成员路径穿过嵌套返回、const 别名、候选和绑定，仍定位受限模块', t => {
++  const cases = [
++    ["function createService(){return {group:{settle:position.settle}};}const service=createService();", 'service.group.settle()'],
++    ["const build=()=>({settle:position.settle});function createService(){return build();}const service=createService();", 'service.settle()'],
++    ["function createService(){const picked=position.settle;return Object.freeze({settle:picked});}const service=createService();", 'service.settle()'],
++    ["function createService(flag){return flag?{settle:position.settle}:{settle(){return 1;}};}const service=createService(flag);", 'service.settle()'],
++    ["function createService(){return {settle:position.settle};}let service=createService();", 'service.settle()'],
++    ["function createService(){return {settle:position.settle};}const service=createService();const invoke=service.settle;", 'invoke()'],
++    ["function createService(){return {settle:position.settle};}const service=createService();", 'service["settle"]()'],
++    ["function createService(){return {settle:position.settle};}const service=createService();const invoke=service.settle.bind(service);", 'invoke()'],
++    ["function createService(){return {settle:position.settle.bind(position)};}const service=createService();", 'service.settle()']
++  ];
++  for (const [setup, invoke] of cases) {
++    const result=task(t,positionImport+setup+`function runArchiveAwareOperation(){${invoke};}`).result;
++    assert.ok(result.violations.some(v=>v.rule==='ARCH-TASK-ADAPTER'),setup+invoke+JSON.stringify(result.violations));
++  }
++});
++
++test('R3-01 无法解释的返回成员失败关闭，不能退回零诊断', t => {
++  for (const returned of ['{settle:externalFactory()}', '{...methods}', '{get settle(){return position.settle;}}', '{}', 'unknownService', 'createService()']) {
++    denied(task(t,positionImport+`function createService(){return ${returned};}const service=createService();function runArchiveAwareOperation(){service.settle();}`).result,'ARCH-STATIC-COVERAGE');
++  }
++  denied(task(t,positionImport+'function createService(){return {settle:position.settle};}const service=createService();function runArchiveAwareOperation(key){service[key]();}').result,'ARCH-STATIC-COVERAGE');
++});
++
++test('R3-01 纯服务和显式 adapter 注入允许，不按整个 Main import 拒绝', t => {
++  for (const source of [
++    'function createService(){return {execute(){return 1;}};}const service=createService();function runArchiveAwareOperation(){return service.execute();}',
++    'const execute=()=>1;function createService(){return {execute};}const service=createService();function runArchiveAwareOperation(){return service.execute();}',
++    'function createService(){return {execute(){return 1;},settle:position.settle};}const service=createService();function runArchiveAwareOperation(){return service.execute();}',
++    'function runArchiveAwareOperation(adapter){return adapter.execute();}function compose(){return position.settle();}',
++    'function runArchiveAwareOperation(adapter){const {execute}=adapter;return execute();}',
++    'function createService(adapter){return {execute:adapter.execute};}function runArchiveAwareOperation(adapter){return createService(adapter).execute();}'
++  ]) clean(task(t,positionImport+source).result);
++});
++
++test('R3-02 argv 类型与已知 options 分离，null 和间接调用保持真实 cwd', t => {
++  for (const call of [
++    "fork('./src/worker.cjs',null,{cwd:path.join(__dirname,'jobs')});",
++    "const start=fork.bind(null,'./src/worker.cjs',process.argv.slice(2),{cwd:path.join(__dirname,'jobs')});start();",
++    "fork.call(null,'./src/worker.cjs',undefined,{cwd:path.join(__dirname,'jobs')});",
++    "fork.apply(null,['./src/worker.cjs',process.argv.slice(2),{cwd:path.join(__dirname,'jobs')}]);",
++    "fork('./src/worker.cjs',{cwd:path.join(__dirname,'jobs')},{cwd:__dirname});"
++  ]) { const f=forkFixture(t,call);forkRuntime(f);correctWorker(f); }
++});
++
++test('R3-02 options 候选准确解析；未知或被对象重载覆盖的 cwd 仍报覆盖错误', t => {
++  const f=forkFixture(t,"fork('./src/worker.cjs',flag?[]:{cwd:path.join(__dirname,'jobs')},{cwd:path.join(__dirname,'jobs')});");
++  correctWorker(f);
++  for (const call of [
++    "fork('./src/worker.cjs',process.argv.slice(2),{cwd:unknown});",
++    "fork('./src/worker.cjs',undefined,options);",
++    "fork('./src/worker.cjs',{cwd:unknown},{cwd:path.join(__dirname,'jobs')});",
++    "fork('./src/worker.cjs',unknown);"
++  ]) {
++    const current=forkFixture(t,call);denied(current.result,'ARCH-STATIC-COVERAGE');
++    assert.ok(current.scanned.dynamicSites.some(s=>s.reason==='unresolved-fork-cwd'));
++    assert.deepEqual(current.scanned.edges.filter(e=>e.kind==='worker'),[]);
++  }
++});
++
++
++test('R3-01 本地 JSON 数据读取保持合法，reviver 或遮蔽来源不能冒充原生数据', t => {
++  clean(task(t,`function read(){return JSON.parse('[]');}function runArchiveAwareOperation(){return read().slice();}`).result);
++  clean(task(t,`function read(){let value;value=JSON.parse('{"files":[]}');return value;}function runArchiveAwareOperation(){return read().files.map(item=>item);}`).result);
++  for (const source of [
++    positionImport+`function read(){return JSON.parse('{}',()=>({slice:position.settle}));}function runArchiveAwareOperation(){read().slice();}`,
++    `const JSON=externalFactory();function read(){return JSON.parse('{}');}function runArchiveAwareOperation(){read().slice();}`
++  ]) assert.ok(task(t,source).result.violations.length);
++});
++
++test('R3-02 未知第二参数可能是 options 对象，不得静默只扫描第三参数 cwd', t => {
++  const f=forkFixture(t,"function getArgs(){return {cwd:path.join(__dirname,'jobs')};}fork('./src/worker.cjs',getArgs(),{cwd:'.'});");
++  forkRuntime(f);
++  denied(f.result,'ARCH-STATIC-COVERAGE');
++  assert.deepEqual(f.scanned.edges.filter(e=>e.kind==='worker'),[]);
++});
+--- a/architecture/README.md
++++ b/architecture/README.md
+@@ -68,9 +68,9 @@
+ 当前支持与失败关闭的边界：
+ 
+ - `StaticBlock` 同时建立词法作用域和 var 边界；块内同名 require 不遮蔽块外 Node require。
+-- Worker/fork 默认相对路径按仓库根运行 cwd 解析；fork 的 `(path, options)` 与 `(path, args, options)` 都读取显式 cwd，可解析的有限候选逐一生成目标，未知 options/cwd 报 coverage。绝对目标不依赖 cwd；`path.resolve` 的相对参数以扫描根为准，`__dirname` 和 `new URL(..., import.meta.url)` 保持模块目录语义。本工具不推断进程启动后的任意 chdir；此类调用须提供准确目标合同。
++- Worker/fork 默认相对路径按仓库根运行 cwd 解析；fork 的 `(path, options)` 与 `(path, args, options)` 都读取显式 cwd；三参数形式不要求 argv 内容静态可知：已知数组、原生 process.argv/process.execArgv 的 slice、Array.from/of，以及 undefined/null 均使用第三参数。第二参数连数组/options 重载身份也无法解释时，报 coverage，不猜测第三参数生效。第二参数已知是对象时，按 Node 重载以该对象作为 options；有限候选逐一解析，未知 options/cwd 报 coverage。绝对目标不依赖 cwd；`path.resolve` 的相对参数以扫描根为准，`__dirname` 和 `new URL(..., import.meta.url)` 保持模块目录语义。本工具不推断进程启动后的任意 chdir；此类调用须提供准确目标合同。
+ - 受保护 worker operation 遍历条件候选，含 recover 的候选受授权位置限制；无法解释的 operation 报 coverage。历史 transport 的两个动态转发位置保留准确 v3.2.9 AST 例外，G1 激活前清理，不代表已证明授权。
+-- 通用任务按别名来源候选检查模块传递闭包及本地 helper/返回函数；工厂返回的服务不能绕过 Position 依赖检查。const/let 的不透明工厂结果一并报 coverage，不靠变量名判断。显式注入参数仍按其合同检查；任意运行时回调内容不由此静态证明。
++- 通用任务按别名来源候选检查模块传递闭包及本地 helper/返回函数；对本地工厂返回对象保留并逐层选择实际调用的成员路径，方法引用、包装函数、const 成员别名和绑定均不能绕过 Position 依赖检查。const/let 的不透明工厂结果一并报 coverage；本地返回链中缺失成员、动态成员、spread/getter 或递归未解释结果明确失败，不靠变量名判断。无 reviver 的原生 JSON.parse 数据上的 map/slice 保持数据读取语义，reviver 或被遮蔽的 JSON 不适用此识别。显式注入参数仍按其合同检查；任意运行时回调内容不由此静态证明。
+ - bind 创建函数不视为执行；后续调用保留目标方法、别名候选与预绑定实参，多次 bind、call/apply 使用同一归一化。postMessage 的未知恢复消息和 getter 后 prepare/exec 的未知 DB 来源仍报 coverage；明确的原始 DB 操作按查询规则拒绝，RegExp.exec 属于文本解析。apply 的不透明实参不被当作空消息。
+ - 工厂的 API 字段必须提供可解释方法集合；允许显式对象逐项挑选与授权叶路径对应的 desktopApi 方法，包括 Object.freeze 和静态 const 别名。不透明 helper 返回值/候选对象拒绝；allowedApiFields 的点分名称按嵌套叶路径检查，额外方法、嵌套 spread、getter 和完整 desktopApi/namespace 均不能借层级藏入。静态路径检查不执行 preload 验证实际方法类型。
+ - 工厂 panel 参数允许可解析的单根 `document.getElementById(静态 id)` 或 `document.querySelector(静态 #id)`，不允许 document/body/html/modalRoot、动态 selector 或不透明 helper 代替。它只识别节点取得方式；节点真实存在、所属领域与生命周期仍由 G3 行为测试验证。
+@@ -80,6 +80,8 @@
+ 
+ 第二轮的绑定调用、工厂闭包、DOM/scoped API 兼容、公开导出、脚本执行次序和 fork cwd 回归见 [R2 测试](../tests/unit/architecture/review-round2.test.js) 与[第二轮修复自检](../changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r2-repair/repair-review.md)。本轮没有增加或修改 allowedSites、历史例外、schema 或激活状态。
+ 
++第三轮的本地返回成员与 fork 完整重载补充见 [R3 测试](../tests/unit/architecture/review-round3.test.js) 和[第三轮修复自检](../changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r3-repair/repair-review.md)。本次修正返回链追踪，不将所有 this/动态对象调用扩大为新禁令；未解释位置与任意运行时注入仍受下述静态边界限制。机器配置及例外没有变化。
++
+ IPC、任意 callback 注入、任意数据流／反射、共享对象内部写入、SQL 的业务过滤含义、资源真实退出、恢复授权时序及 GUI 生命周期不由 AST 完整证明。未解释的受保护结构失败关闭；报告中的盲区不能写成零风险。相关业务验收由 G1–G7 自己的真实测试负责；Windows／Excel／WPS／安装包验收按实际影响另外记录。
+ 
+ 代表性自动验证入口：[scanner](../tests/unit/architecture/scan.test.js)、[rules](../tests/unit/architecture/rules.test.js)、[policy-history](../tests/unit/architecture/policy-history.test.js)、[CLI 与 CI](../tests/unit/architecture/cli.test.js)。实际运行结果及未完成项只在本轮实施记录登记。
+--- a/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md
++++ b/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md
+@@ -2,11 +2,11 @@
+ 
+ 本文件是本功能唯一切片索引。设计合同：[Spec](spec.md)、[TechDoc](techdoc.md)；切片完成标准见[总索引 §6.2–§6.4](../../README.md#slice-completion)。设计审查通过不代表以下实现已验证。
+ 
+-## 最新状态：2026-09-21 第二轮审查修复
++## 最新状态：2026-09-21 第三轮审查修复
+ 
+-独立第二轮复审确认原 R1–R10 最小反例已修复，同时确认新的 8 项 P2 与 1 项 P3。本轮已按 R2-01～09 修复，新增 14 组正反回归，最终架构套件 **114/114**、固定基线 CLI 均通过；实现者自检已完成，**本轮修复后的独立复审尚未执行，不能认定 G8 全部验收完成**。详细变更、验证边界和可复核差异见[第二轮修复自检](reviews/2026-09-21-r2-repair/repair-review.md)。下方 A～E 保留各时点的历史结果，旧完整 release-check 不覆盖当前代码。
++第三轮独立审查确认第二轮九个原始复现均已修复，另确认 R3-01 本地服务返回方法引用、R3-02 fork 三参数重载两项 P2。本轮已完成这两项修复，新增 10 组回归，最终架构套件 **124/124**、固定基线 CLI 均通过；**本轮修复后的独立复审未执行，不能认定 G8 全部验收完成**。详细差异与证据见[第三轮修复自检](reviews/2026-09-21-r3-repair/repair-review.md)。下方 A～F 保留各时点结果，旧完整 release-check 不覆盖当前代码。
+ 
+-本轮没有调整机器配置、allowedSites、历史例外或激活状态。G8 仍未集成；原 D 的 release@9602a1fa 只是历史固定候选。此次修复不借用浮动 release 的激活证据，不合并 G1–G7；需在后续明确授权的集成候选上完成各域规则对齐与激活。
++本轮未改机器配置、allowedSites、历史例外、激活状态。G8 未集成，报告仍 active 2 / pending 21 / partial 8。原 D 的 release@9602a1fa 仅为历史固定候选；本轮不合并或借用浮动 release 的激活证据，后续需在明确授权的固定集成候选完成领域规则对齐与激活。
+ 
+ ## 工作区与输入
+ 
+@@ -118,3 +118,15 @@
+ - **验证证据**：首批对应 9 个问题的回归在修复前 9/9 失败；最终新增 14 组全部通过，完整架构套件 114/114，0 fail/skip。真实 VM/stub 验证敏感能力确实执行、panel 传入同一节点、API 仅挑选一个方法；真实 Git CLI 验证公开工厂兼容；真实子进程验证 fork 两种 options 重载的准确目标。固定基线 CLI exit 0：685/685 文件、2254 字面量本地边、64 worker、5 global、0 违规、114 条例外全部命中（142 条诊断匹配）、0 stale；未解析 2、动态位置 33 仍由既有合同/例外登记，未宣称全解析。15 个工具/测试文件 no-undef 通过，git diff --check 通过。日志见[证据说明](reviews/2026-09-21-r2-repair/evidence/README.md)。
+ - **当前规则入口**：根 AGENTS → `architecture/README.md` 已更新上述来源、别名、DOM/API、公开导出、脚本和 cwd 语义；机器正文仍仅为两个 JSON，字节未变。原 Spec/TechDoc 没有改写；原第二轮报告保持只读，准确副本存为本次 source-review.md。
+ - **剩余 / 回退**：待独立复审；G1–G7 不在本分支，仍 active 2 / pending 21 / partial 8。节点实际归属和生命周期、API 运行时类型与 HTML 浏览器执行不由这些合成测试证明。按 CODEX 风险验证，本轮未跑完整 release-check，旧日志不作为当前全量 PASS；正式集成/PR-ready 前须覆盖最终合并候选。未跑 Electron GUI、Windows workflow/安装包、Excel/WPS。无提交、推送、合并、PR、升版或发布。回退使用本轮差异和归档，仅恢复 F 的工具/测试/说明，保留此前实现与历史证据。
++
++
++## 切片 G：R3-01 / R3-02 返回成员与 fork 重载修复（2026-09-21）
++
++- **范围 / 代码状态**：父切片 F；同一 G8 worktree，HEAD 11086a3c + dirty。修复前归档 `/private/tmp/g8-r3-fixes-before/tooling.tar.gz`，本轮只修改 contracts/scan/rules、新增 review-round3.test.js，并同步规则说明与本记录。[增量差异](reviews/2026-09-21-r3-repair/evidence/repair-diff.patch)、[最终清单](reviews/2026-09-21-r3-repair/evidence/verified-manifest.json)固定本轮内容。
++- **实现状态：已实现；验证状态：必要专项通过，修复后独立复审未执行；集成状态：未集成。**
++- **职责与边界**：contracts 保留工厂返回成员路径，逐层选择对象字段并返回来源与未解释返回状态；scan 保留 const 成员别名的基对象/属性，按实际 fork 重载选择 options；rules 消费来源并拒绝未解释的本地返回链。没有将整个 Main 的 import 作为拒绝依据，不执行业务源码，不修改生产入口或副作用所有者。
++- **调用方与兼容**：CLI/npm/CI、schema、配置字段和退出码保持。静态/嵌套/候选/绑定的服务方法引用与方法包装统一检查；纯本地服务、显式 adapter 注入和独立领域组装保持合法。三参数 fork 的运行时 argv/undefined/null 使用明确第三参数，已知第二参数对象仍按 Node 重载优先；argv 内容可动态，但无法区分数组/options 重载的第二参数也必须报 coverage，不能静默忽略潜在 options；未知 options/cwd 保持 coverage。机器配置和 114 条历史例外字节未变，未添加 allowedSites。
++- **业务行为 / 决策**：R3-01 对应 TechDoc §4.8 / AC17，R3-02 对应 §3.2 / AC08。新增失败关闭限定在本地工厂返回链；最初一并拒绝所有未知成员引发既有 this/注入对象误报，已经撤回该扩大范围的判断。无 reviver 原生 JSON.parse 的数据 map/slice 做有限来源识别，保留现有数据读取；reviver、JSON 遮蔽或未知服务返回均不得借用。未改 Spec、业务数据或领域合同。
++- **验证证据**：最初 3 个回归（两项问题，fork 两种 argv）修复前 3/3 失败；最终新增 10 组通过，完整架构套件 124/124、0 fail/skip，含 AC22 真实 Git 历史恢复及五类事件 CLI。VM 验证返回方法实际调用 Position；真实 Node 子进程核验 fork 目标及重载优先级。固定基线 CLI exit 0：685/685、2254 字面量本地边、64 worker、5 global、0 违规、114 例外全部命中（142 条匹配）、0 stale；未解析 2、动态位置 33 保持登记口径。16 个工具/测试文件 no-undef、git diff --check、文档链接与工作区保护检查通过。原始失败、中间基线误报和最终结果分别保留在[证据目录](reviews/2026-09-21-r3-repair/evidence/README.md)。
++- **当前规则入口**：根 AGENTS → `architecture/README.md` 覆盖章节更新返回成员/未知链条、JSON 数据、fork argv/options 语义与测试链接。两个机器 JSON 无需修改：本轮修正解析与执行，没有新增边界、授权位置或状态变化。主工作区 Spec/TechDoc、审查原件与其他功能文档保持只读。
++- **剩余 / 回退**：待独立复审；G1–G7 未落地到本分支的边界保持 pending/partial，正式集成/PR-ready 前在最终候选重跑完整 release-check 并逐域激活。此次依据 CODEX 与总索引 §6.2 按风险跑必要专项，没有重跑全量业务门禁；旧全量日志不代表当前 PASS。未跑 Electron/真实浏览器、Windows/安装包、Excel/WPS。未提交、推送、合并、PR、升版或发布。回退依据本轮增量和工具归档，仅撤回 G 的修改，保留此前实现与证据。

@@ -1,0 +1,147 @@
+{
+  "reviewRound": 5,
+  "mode": "read-only incremental review",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "candidate": "HEAD plus pre-existing R4 dirty repair",
+  "frozenFiles": 4229,
+  "originalR4Closure": {
+    "RR4-01": "original actual Renderer configuration negatives rejected and safe control accepted",
+    "RR4-02": "original distinct-instance probe has no diagnostic; clean contains read only",
+    "RR4-03": "original callback negatives rejected, safe controls accepted; real-source reduce diagnosed at prepare"
+  },
+  "findings": [
+    {
+      "id": "RR5-01",
+      "priority": "P2",
+      "kind": "surviving adjacent false negative",
+      "title": "Static member replacement loses subsequent alias writes",
+      "location": "scripts/architecture/renderer-contracts.js:54-55",
+      "beforeAndCurrent": "both miss same minimal mutation",
+      "actualRendererBoundaryCount": 20,
+      "baselineViolations": 0,
+      "illegalProbeViolations": 0,
+      "runtimeExtraCapability": true,
+      "safeControlViolations": 0,
+      "result": "evidence/r5-renderer-replacement-realconfig.json"
+    },
+    {
+      "id": "RR5-02",
+      "priority": "P2",
+      "kind": "new R4 false positive",
+      "title": "Native function-value comparisons treated as restricted callback execution",
+      "location": "scripts/architecture/contracts.js:276-277",
+      "beforeViolations": 0,
+      "currentViolations": 1,
+      "runtimeCallbackCalls": 0,
+      "actualG1SourceMutantViolations": 1,
+      "result": "evidence/native-function-values-comparison.json"
+    }
+  ],
+  "executed": [
+    {
+      "command": "node --test --test-concurrency=1 tests/unit/architecture/*.test.js",
+      "exitCode": 0,
+      "tests": 270,
+      "pass": 270,
+      "fail": 0,
+      "skip": 0,
+      "log": "evidence/architecture-tests.log"
+    },
+    {
+      "command": "node scripts/check-architecture.js --json /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r5/evidence/architecture-check.json",
+      "exitCode": 0,
+      "active": 31,
+      "violations": 0,
+      "staleExceptions": 0,
+      "scannedFiles": 765,
+      "parsedFiles": 765,
+      "log": "evidence/architecture-check.log",
+      "json": "evidence/architecture-check.json"
+    },
+    {
+      "command": "node --test --test-name-pattern='RR4-01/02|RR4-02' tests/unit/architecture/release-rereview-r4.test.js",
+      "exitCode": 0,
+      "pass": 23,
+      "log": "evidence/r5-renderer-targeted-tests.log"
+    },
+    {
+      "command": "node --test --test-name-pattern=RR4-03 tests/unit/architecture/release-rereview-r4.test.js",
+      "exitCode": 0,
+      "pass": 10,
+      "log": "evidence/r5-g1-rr4-03-tests.tap"
+    },
+    {
+      "command": "node changes/v3.2.10/reviews/2026-09-22-release-rereview-r5/evidence/compare-native-function-values.cjs",
+      "exitCode": 0,
+      "hashMatchedFiles": 7,
+      "result": "evidence/native-function-values-comparison.json"
+    },
+    {
+      "command": "node /tmp/r5-data-shared-probes.cjs",
+      "exitCode": 0,
+      "cases": 20,
+      "versionsPerCase": 2,
+      "result": "evidence/r5-data-shared-probes.json",
+      "assertionResult": "evidence/r5-data-verification.json"
+    }
+  ],
+  "commandInputError": "evidence/command-input-error.json",
+  "fullGateEvidence": {
+    "rerunThisReview": false,
+    "source": "../2026-09-22-release-r4-repair/verification.json",
+    "gate": {
+      "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+      "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+      "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+      "startedAt": "2026-09-22T11:43:25.369135+08:00",
+      "minimumFreeBytes": 5250990080,
+      "abortBelowFreeBytes": 2147483648,
+      "inputFiles": 1701,
+      "pid": 13070,
+      "exitCode": 0,
+      "finishedAt": "2026-09-22T12:00:05.840082+08:00",
+      "changedInputs": [],
+      "headAfter": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10"
+    },
+    "unit": {
+      "tests": 9048,
+      "suites": 828,
+      "pass": 9044,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 4,
+      "todo": 0
+    },
+    "integration": {
+      "scripts": 68,
+      "countedPassed": 2901,
+      "countedTotal": 2901,
+      "withoutCount": [
+        "v2.1.12-beta-multiworker-nested"
+      ]
+    },
+    "rendererLifecycle": {
+      "passed": 233,
+      "total": 233
+    },
+    "inputMatch": "evidence/gate-evidence-comparison.json"
+  },
+  "limits": [
+    "No full product re-review; scope is latest repair and bounded adjacent contracts.",
+    "No production source, tests, scanner or configuration edited.",
+    "No product GUI/Windows/Excel/WPS/manual financial acceptance.",
+    "No commit/push/PR/main merge/version/tag/publication."
+  ],
+  "countsNote": "23 Renderer and 10 G1 targeted tests are subsets of 270, not additional tests.",
+  "additionalExecutedProbes": {
+    "rendererOriginal": "evidence/r5-renderer-original-realconfig.json",
+    "rendererOriginalDistinctInstances": "evidence/r5-renderer-original-separate-instances.jsonl",
+    "rendererNeighbors": "8 cases per version; before hashes matched; outputs include known conservative coverage, not all pass",
+    "rendererActualReplacement": "2 cases, 20 actual Renderer boundaries; both zero diagnostics but illegal runtime carries extra capability",
+    "g1Original": "4 executing paths denied and 3 safe controls accepted",
+    "g1Source": "765 scanned, only active G1 evaluated; real recovery never executed",
+    "g1Baseline": "0 diagnostics, 12 allowedSites each matched once",
+    "exitCodes": "all completed with exit 0; actual commands and scopes in evidence/README.md"
+  }
+}

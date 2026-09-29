@@ -1,0 +1,2380 @@
+{
+  "schemaVersion": 1,
+  "factBaseline": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "policyComparedWith": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "policyHistory": {
+    "roots": [
+      "9a38b96b1b8006c5851535d0c1e586bbaeb63f10"
+    ],
+    "commitsExamined": 21,
+    "distinctPolicyBlobs": 1,
+    "bootstrapCommit": "9a1d8aee5ac8cfb27c816167a8cf3d6a4baff802",
+    "historicalActiveIds": [
+      "platform-core",
+      "production-graph"
+    ],
+    "historicalRetiredEntrypoints": [],
+    "appliedPolicyChanges": [],
+    "historyRepairsApplied": [],
+    "diagnostics": []
+  },
+  "coverage": {
+    "scannedFiles": 765,
+    "parsedFiles": 765,
+    "literalEdges": 2404,
+    "workerEdges": 62,
+    "globalEdges": 14,
+    "unresolved": 2,
+    "dynamicSites": 33,
+    "parseErrors": 0,
+    "pendingBoundaries": [],
+    "partialBoundaries": [
+      "renderer-acquiring",
+      "renderer-bank-bu",
+      "renderer-bank-statement",
+      "renderer-biz-op-legacy",
+      "renderer-biz-op-v327",
+      "renderer-dialog-app-settings",
+      "renderer-dialog-configuration",
+      "renderer-dialog-scenarios",
+      "renderer-dialog-toolbox",
+      "renderer-duplicate-inbound",
+      "renderer-modal-owner",
+      "renderer-new-account",
+      "renderer-pending",
+      "renderer-position",
+      "renderer-pre-fund",
+      "renderer-recon-id-fix",
+      "renderer-services",
+      "renderer-statement",
+      "renderer-vcc-financial-op",
+      "renderer-vcc-op-calc"
+    ]
+  },
+  "violations": [
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/biz-op-v327/archive-task-policies.js",
+      "line": 42,
+      "column": 5,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "8b8a3e17a5ba42de9d00a721c77bd913d304c2beccac6bba502f2f5238a90771",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "archivePolicies"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/biz-op-v327/execution-descriptor.js",
+      "line": 29,
+      "column": 14,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "34f197525c8844d895aea1869f654b80d17110e09fc24f10e121144c565e78e9",
+      "functionPath": null,
+      "kind": "require"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/duplicate-inbound-match/archive-task-policies.js",
+      "line": 38,
+      "column": 5,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "c2db12c461379454488c85ee47411c17228b801e61efbb7eee5d97e14535d8ff",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "archivePolicies"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/duplicate-inbound-match/execution-descriptor.js",
+      "line": 25,
+      "column": 18,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "c3818964635f6c97a70689c7f61c29996ba977b57fd4ca409221421aa64a380b",
+      "functionPath": null,
+      "kind": "require"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/fund-recon-worker/archive-task-policies.js",
+      "line": 37,
+      "column": 5,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "8ce6aee4df0fdece4e329b43f9423117ebdf42e795e25adec47cb0e68cf5f236",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "archivePolicies"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/fund-recon-worker/execution-descriptor.js",
+      "line": 24,
+      "column": 18,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "e22a8c1f53c825bf83c4d90250834f4923718e5e1b66a4bc02eb4fc2a834d8a0",
+      "functionPath": null,
+      "kind": "require"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/new-account/archive-task-policies.js",
+      "line": 35,
+      "column": 5,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "cb4682dce5867047f5bc41cf48c54634735a5c4b3a49c931fd2c03438f79948d",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "archivePolicies"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/new-account/execution-descriptor.js",
+      "line": 22,
+      "column": 19,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "e199383b778e08c5333fd67b15c9f1a5e6ce8fe590e891d6deced587f5d3ef47",
+      "functionPath": null,
+      "kind": "require"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/position-reconciliation/archive-task-policies.js",
+      "line": 41,
+      "column": 5,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "c52ceb8d6d60ab7ab423eef50d67b353d992531750a65368a6fb45d7f59c7c46",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "archivePolicies"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/position-reconciliation/execution-descriptor.js",
+      "line": 28,
+      "column": 17,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "a6ce3fdba48e7520852cb47094c3ef534776d30787c2eacf9d6aa4a750c4d827",
+      "functionPath": null,
+      "kind": "require"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/pre-fund-reconciliation/archive-task-policies.js",
+      "line": 36,
+      "column": 5,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "0556a2d693e02d1e8e061749de153cf6abb42bb1cac932f742440c06b62b815c",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "archivePolicies"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/pre-fund-reconciliation/execution-descriptor.js",
+      "line": 23,
+      "column": 16,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "53477d17cc6539c4b0e827c2137deb0b70a11f99dce578fcf562cd2097bea4dd",
+      "functionPath": null,
+      "kind": "require"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/recon-id-fix-service/archive-task-policies.js",
+      "line": 39,
+      "column": 5,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "199c9df862233200526cd28414ccde7fc3d9d5a0fb4bd3123813c14d529a00dc",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "archivePolicies"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/recon-id-fix-service/evidence-settlement-admission.js",
+      "line": 20,
+      "column": 54,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "560f43f7df1427341fc9a6b2f37882da1201e3ed0ec5304c8ec0e730f25d3fa8",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "createReconFixEvidenceSettlementAdmission"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/recon-id-fix-service/execution-descriptor.js",
+      "line": 26,
+      "column": 17,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "befeba56f8635326510b9c99e76602fa8ecde6557c907d8ce4555f127fd09e91",
+      "functionPath": null,
+      "kind": "require"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/toolbox-background/archive-task-policies.js",
+      "line": 34,
+      "column": 5,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "d1a1e9ee50b9ef1eb32415be3cfbfea9aae5f55c5478a14672e2417e8664856a",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "archivePolicies"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/toolbox-background/execution-descriptor.js",
+      "line": 21,
+      "column": 16,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "999fc53b10c68bf30b86a7568f9d2fc0aa5c6d0be539ee19016e7a113e67e6f8",
+      "functionPath": null,
+      "kind": "require"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/vcc-financial-op-output/archive-task-policies.js",
+      "line": 40,
+      "column": 5,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "02a694e3755844cffbc6ddd5c14a2cbb468361ced4f3de15a5927688de931d36",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "archivePolicies"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/composition.js",
+      "to": "src/main-process/vcc-financial-op-output/execution-descriptor.js",
+      "line": 27,
+      "column": 12,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "6704d639c669297deee92ddbb7fe3c507daa27a4a68076546701030197a33fa6",
+      "functionPath": null,
+      "kind": "require"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/mature-adapters.js",
+      "to": "src/main-process/read-only-exports/acquiring/executor.js",
+      "line": 10,
+      "column": 47,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "6405a6fb0e006bac3f925dd6a7a84f258a07dc3398a304ebff0b0da9bf75d804",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "runAcquiringExistingDiffCopyInline"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/mature-adapters.js",
+      "to": "src/main-process/read-only-exports/acquiring/policies.js",
+      "line": 9,
+      "column": 65,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "998cb73625995d36794e2195053af165852cb3b223590bf1be07750b77c4148e",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "ACQUIRING_EXPORT_ACTIONS",
+        "ACQUIRING_EXPORT_ACTION_SET",
+        "ACQUIRING_EXPORT_POLICIES",
+        "validateAcquiringExportResult"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/mature-adapters.js",
+      "to": "src/main-process/read-only-exports/biz-op/policies.js",
+      "line": 7,
+      "column": 40,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "2e697cf37252e53ec12c236d5d31720344263c83f30b1f40d9280b77023e5e3d",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "BIZ_OP_READ_ONLY_ACTION_SET",
+        "BIZ_OP_READ_ONLY_POLICIES",
+        "validateBizOpReadOnlyExportResult"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/mature-adapters.js",
+      "to": "src/main-process/read-only-exports/pending/policies.js",
+      "line": 5,
+      "column": 42,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "2e6d8f26883d76195584957e381a75dcea5bdcc1c72304c7b16732e5b3b0122d",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "PENDING_READ_ONLY_ACTIONS",
+        "PENDING_READ_ONLY_POLICIES",
+        "validatePendingReadOnlyExportResult"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/policy-catalog.js",
+      "to": "src/main-process/biz-op-v327/policies.js",
+      "line": 4,
+      "column": 33,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "4a95f813316bd7faf251baa93b1220bd42eda9bfe36dcdb8b55a8988cefcb4cc",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "BIZ_OP_V327_POLICIES"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/policy-catalog.js",
+      "to": "src/main-process/duplicate-inbound-match/policies.js",
+      "line": 10,
+      "column": 31,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "8a21bae375b8bb00a3f88e9f8d6a398b3185f9c614ab39c31d2a4af3ec5cee12",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "DUPLICATE_POLICIES"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/policy-catalog.js",
+      "to": "src/main-process/fund-recon-worker/policies.js",
+      "line": 9,
+      "column": 32,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "1febba07a1baa37381141901c0e2ac2a9e99f8f647ff964ed00b8e641ddf71b0",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "FUND_RECON_POLICIES"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/policy-catalog.js",
+      "to": "src/main-process/new-account/policies.js",
+      "line": 8,
+      "column": 70,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "33c953ea743fd8776bb492366cbe9fc43095a9f288ba37ed4e528a94dbaf6541",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "NEW_ACCOUNT_GENERATION_POLICY",
+        "NEW_ACCOUNT_SAVE_AS_POLICY"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/policy-catalog.js",
+      "to": "src/main-process/pre-fund-reconciliation/mpt-import/policies.js",
+      "line": 7,
+      "column": 34,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "7d30aa8c68be25053f6836810e93bd4f30b11dbcb61be8a0e43864d5593cd9ba",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "PRE_FUND_MPT_POLICIES"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/policy-catalog.js",
+      "to": "src/main-process/read-only-exports/acquiring/policies.js",
+      "line": 18,
+      "column": 38,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "998cb73625995d36794e2195053af165852cb3b223590bf1be07750b77c4148e",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "ACQUIRING_EXPORT_POLICIES"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/policy-catalog.js",
+      "to": "src/main-process/read-only-exports/biz-op/policies.js",
+      "line": 14,
+      "column": 38,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "2e697cf37252e53ec12c236d5d31720344263c83f30b1f40d9280b77023e5e3d",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "BIZ_OP_READ_ONLY_POLICIES"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/policy-catalog.js",
+      "to": "src/main-process/read-only-exports/pending/policies.js",
+      "line": 13,
+      "column": 39,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "2e6d8f26883d76195584957e381a75dcea5bdcc1c72304c7b16732e5b3b0122d",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "PENDING_READ_ONLY_POLICIES"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/policy-catalog.js",
+      "to": "src/main-process/read-only-exports/position/policies.js",
+      "line": 16,
+      "column": 38,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "3bb033dc700acc150d87fbfef75634d705e8e7797259b6f081784824304ab7d7",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "POSITION_READ_ONLY_POLICY"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/policy-catalog.js",
+      "to": "src/main-process/read-only-exports/pre-fund/policies.js",
+      "line": 15,
+      "column": 40,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "2ff724feb6544aa6c5581d8515c2c2317ca91aab924379eced5459247cea478a",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "PRE_FUND_READ_ONLY_POLICIES"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/policy-catalog.js",
+      "to": "src/main-process/read-only-exports/vcc-financial-op/policies.js",
+      "line": 17,
+      "column": 46,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "d412fdbb8e6aec94fecadee79d0386d91dd2803d5b801a8aadad5cffbec90b4d",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "VCC_FINANCIAL_OP_READ_ONLY_POLICY"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/policy-catalog.js",
+      "to": "src/main-process/recon-id-fix-service/policies.js",
+      "line": 11,
+      "column": 31,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "ba1c10af8a03e22134ad7b7490c9930e03315949b33942a9326a43899bf3eb00",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "RECON_FIX_POLICIES"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/policy-catalog.js",
+      "to": "src/main-process/toolbox-background/policies.js",
+      "line": 5,
+      "column": 40,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "60cc6fac01abe7e0ff085d740f8a1440805d4465c321c2e95036d4e1161832e1",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "TOOLBOX_GENERATION_POLICIES"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/policy-catalog.js",
+      "to": "src/main-process/toolbox-row-split/policy.js",
+      "line": 6,
+      "column": 24,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "b367f21794f990bedff15558baaffa098be17a69263755f90166e920f7058f28",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "ROWS_POLICY"
+      ]
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/execution-descriptors/policy-catalog.js",
+      "to": "src/main-process/vcc-financial-op-output/policies.js",
+      "line": 12,
+      "column": 65,
+      "message": "显式装配只能加载登记的领域入口及具名导出",
+      "evidenceId": "19e71aec4231a5fd93f46c88a959b7b67b038afbd0e2dc4188ee10e21c20cd82",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "VCC_EXPORT_SINGLE_POLICY",
+        "VCC_EXPORT_SUBJECTS_POLICY"
+      ]
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-acquiring",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 524,
+      "column": 32,
+      "message": "scoped ui 未授权字段 confirmNative",
+      "evidenceId": "981cd794cf48353aeaca88ffd30071d9f5175c40258f74a9cbd14408f03c2f79",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-acquiring",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 524,
+      "column": 32,
+      "message": "scoped ui 未授权字段 createAcquiringBillCurrencyMonthPickerDialog",
+      "evidenceId": "981cd794cf48353aeaca88ffd30071d9f5175c40258f74a9cbd14408f03c2f79",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-acquiring",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 524,
+      "column": 32,
+      "message": "scoped ui 未授权字段 escapeHtml",
+      "evidenceId": "981cd794cf48353aeaca88ffd30071d9f5175c40258f74a9cbd14408f03c2f79",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-acquiring",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 524,
+      "column": 32,
+      "message": "scoped ui 未授权字段 modalBridge",
+      "evidenceId": "981cd794cf48353aeaca88ffd30071d9f5175c40258f74a9cbd14408f03c2f79",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-bank-bu",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 517,
+      "column": 29,
+      "message": "scoped ui 未授权字段 createBankBuReconExportDialog",
+      "evidenceId": "b97e8521c326eb59ba16dd0ba64f0760956a71a01d9d9b938818a18ae1b018eb",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-bank-bu",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 517,
+      "column": 29,
+      "message": "scoped ui 未授权字段 createBankBuReconFileImportPromptDialog",
+      "evidenceId": "b97e8521c326eb59ba16dd0ba64f0760956a71a01d9d9b938818a18ae1b018eb",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-bank-bu",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 517,
+      "column": 29,
+      "message": "scoped ui 未授权字段 createBankBuReconMonthPickerDialog",
+      "evidenceId": "b97e8521c326eb59ba16dd0ba64f0760956a71a01d9d9b938818a18ae1b018eb",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-bank-bu",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 517,
+      "column": 29,
+      "message": "scoped ui 未授权字段 createBankBuReconReconcileDialog",
+      "evidenceId": "b97e8521c326eb59ba16dd0ba64f0760956a71a01d9d9b938818a18ae1b018eb",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-bank-bu",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 517,
+      "column": 29,
+      "message": "scoped ui 未授权字段 escapeHtml",
+      "evidenceId": "b97e8521c326eb59ba16dd0ba64f0760956a71a01d9d9b938818a18ae1b018eb",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-bank-bu",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 517,
+      "column": 29,
+      "message": "scoped ui 未授权字段 modalBridge",
+      "evidenceId": "b97e8521c326eb59ba16dd0ba64f0760956a71a01d9d9b938818a18ae1b018eb",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-bank-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 492,
+      "column": 28,
+      "message": "scoped config 未授权字段 linkedTable",
+      "evidenceId": "d77acc94795ddc88b4d600363cbb5f14c6d6840c46509a1a61c2e45039133390",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-bank-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 492,
+      "column": 28,
+      "message": "scoped config 未授权字段 scenarios",
+      "evidenceId": "d77acc94795ddc88b4d600363cbb5f14c6d6840c46509a1a61c2e45039133390",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-bank-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 492,
+      "column": 28,
+      "message": "scoped ui 未授权字段 gatewayScenarioPicker",
+      "evidenceId": "d77acc94795ddc88b4d600363cbb5f14c6d6840c46509a1a61c2e45039133390",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-bank-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 492,
+      "column": 28,
+      "message": "scoped ui 未授权字段 openLinkedTables",
+      "evidenceId": "d77acc94795ddc88b4d600363cbb5f14c6d6840c46509a1a61c2e45039133390",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-bank-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 492,
+      "column": 28,
+      "message": "scoped ui 未授权字段 openScenarios",
+      "evidenceId": "d77acc94795ddc88b4d600363cbb5f14c6d6840c46509a1a61c2e45039133390",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-bank-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 492,
+      "column": 28,
+      "message": "工厂字段 sharedReconSession 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "d77acc94795ddc88b4d600363cbb5f14c6d6840c46509a1a61c2e45039133390",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-legacy",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 527,
+      "column": 32,
+      "message": "scoped ui 未授权字段 createAlertDialog",
+      "evidenceId": "09438d4b941bc379474e7f8fbbc17f053367365108ca8225579fd88ce315ede0",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-legacy",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 527,
+      "column": 32,
+      "message": "scoped ui 未授权字段 createBizOpReconDatePickerDialog",
+      "evidenceId": "09438d4b941bc379474e7f8fbbc17f053367365108ca8225579fd88ce315ede0",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-legacy",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 527,
+      "column": 32,
+      "message": "scoped ui 未授权字段 createBizOpReconExportDialog",
+      "evidenceId": "09438d4b941bc379474e7f8fbbc17f053367365108ca8225579fd88ce315ede0",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-legacy",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 527,
+      "column": 32,
+      "message": "scoped ui 未授权字段 createBizOpReconReconcileDialog",
+      "evidenceId": "09438d4b941bc379474e7f8fbbc17f053367365108ca8225579fd88ce315ede0",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-legacy",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 527,
+      "column": 32,
+      "message": "scoped ui 未授权字段 createBizOpReconSecondImportPromptDialog",
+      "evidenceId": "09438d4b941bc379474e7f8fbbc17f053367365108ca8225579fd88ce315ede0",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-legacy",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 527,
+      "column": 32,
+      "message": "scoped ui 未授权字段 escapeHtml",
+      "evidenceId": "09438d4b941bc379474e7f8fbbc17f053367365108ca8225579fd88ce315ede0",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-legacy",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 527,
+      "column": 32,
+      "message": "scoped ui 未授权字段 getBizOpReconDefaultDate",
+      "evidenceId": "09438d4b941bc379474e7f8fbbc17f053367365108ca8225579fd88ce315ede0",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-legacy",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 527,
+      "column": 32,
+      "message": "scoped ui 未授权字段 modalBridge",
+      "evidenceId": "09438d4b941bc379474e7f8fbbc17f053367365108ca8225579fd88ce315ede0",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-v327",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 540,
+      "column": 24,
+      "message": "工厂注入了未授权字段 legacyController",
+      "evidenceId": "23b8ff3d1dc8dd75e63c3eb6cd0e972f7f4f319b98772edcf47962f73b796e68",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-v327",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 540,
+      "column": 24,
+      "message": "工厂注入了未授权字段 legacyPanel",
+      "evidenceId": "23b8ff3d1dc8dd75e63c3eb6cd0e972f7f4f319b98772edcf47962f73b796e68",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-v327",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 540,
+      "column": 24,
+      "message": "工厂注入了未授权字段 modalHost",
+      "evidenceId": "23b8ff3d1dc8dd75e63c3eb6cd0e972f7f4f319b98772edcf47962f73b796e68",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-app-settings",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 662,
+      "column": 73,
+      "message": "scoped api 未授权字段 appUpdate",
+      "evidenceId": "f6456e2164ad8ddfaa3e1599eda64dc2a97ecbf30a07fa6b2b5a00bd95518ef3",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-app-settings",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 662,
+      "column": 73,
+      "message": "scoped api 未授权字段 archiveCenter",
+      "evidenceId": "f6456e2164ad8ddfaa3e1599eda64dc2a97ecbf30a07fa6b2b5a00bd95518ef3",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-app-settings",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 662,
+      "column": 73,
+      "message": "scoped ui 未授权字段 applyAppUpdateActionResult",
+      "evidenceId": "f6456e2164ad8ddfaa3e1599eda64dc2a97ecbf30a07fa6b2b5a00bd95518ef3",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-app-settings",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 662,
+      "column": 73,
+      "message": "scoped ui 未授权字段 applyAppUpdateStatus",
+      "evidenceId": "f6456e2164ad8ddfaa3e1599eda64dc2a97ecbf30a07fa6b2b5a00bd95518ef3",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-app-settings",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 662,
+      "column": 73,
+      "message": "scoped ui 未授权字段 createConfirmDialog",
+      "evidenceId": "f6456e2164ad8ddfaa3e1599eda64dc2a97ecbf30a07fa6b2b5a00bd95518ef3",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-app-settings",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 662,
+      "column": 73,
+      "message": "scoped ui 未授权字段 escapeHtml",
+      "evidenceId": "f6456e2164ad8ddfaa3e1599eda64dc2a97ecbf30a07fa6b2b5a00bd95518ef3",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-app-settings",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 662,
+      "column": 73,
+      "message": "scoped ui 未授权字段 getAppUpdateStatus",
+      "evidenceId": "f6456e2164ad8ddfaa3e1599eda64dc2a97ecbf30a07fa6b2b5a00bd95518ef3",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-app-settings",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 662,
+      "column": 73,
+      "message": "scoped ui 未授权字段 getDarkModeController",
+      "evidenceId": "f6456e2164ad8ddfaa3e1599eda64dc2a97ecbf30a07fa6b2b5a00bd95518ef3",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-app-settings",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 662,
+      "column": 73,
+      "message": "scoped ui 未授权字段 mountAppearanceSettings",
+      "evidenceId": "f6456e2164ad8ddfaa3e1599eda64dc2a97ecbf30a07fa6b2b5a00bd95518ef3",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-app-settings",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 662,
+      "column": 73,
+      "message": "scoped ui 未授权字段 refreshOpenAppUpdateDialog",
+      "evidenceId": "f6456e2164ad8ddfaa3e1599eda64dc2a97ecbf30a07fa6b2b5a00bd95518ef3",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-app-settings",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 662,
+      "column": 73,
+      "message": "scoped ui 未授权字段 restartAndInstallAppUpdate",
+      "evidenceId": "f6456e2164ad8ddfaa3e1599eda64dc2a97ecbf30a07fa6b2b5a00bd95518ef3",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-app-settings",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 662,
+      "column": 73,
+      "message": "工厂注入了未授权字段 modalBridge",
+      "evidenceId": "f6456e2164ad8ddfaa3e1599eda64dc2a97ecbf30a07fa6b2b5a00bd95518ef3",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-app-settings",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 662,
+      "column": 73,
+      "message": "工厂注入了未授权字段 modules",
+      "evidenceId": "f6456e2164ad8ddfaa3e1599eda64dc2a97ecbf30a07fa6b2b5a00bd95518ef3",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "scoped api 未授权字段 app",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "scoped api 未授权字段 files",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "scoped ui 未授权字段 applyManualBalancePromptStatus",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "scoped ui 未授权字段 applyStatementResult",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "scoped ui 未授权字段 createAlertDialog",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "scoped ui 未授权字段 createConfirmDialog",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "scoped ui 未授权字段 createFeedbackScope",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "scoped ui 未授权字段 createOverlay",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "scoped ui 未授权字段 escapeHtml",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "scoped ui 未授权字段 pushAlert",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "scoped ui 未授权字段 setStatus",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "工厂注入了未授权字段 constants",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "工厂注入了未授权字段 modalBridge",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "工厂注入了未授权字段 services",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-toolbox",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 1663,
+      "column": 6,
+      "message": "scoped ui 未授权字段 createAlertDialog",
+      "evidenceId": "d51b2d4469af46c084958185087666ca705dae526ed7f1558e9e4fb90fddb375",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-toolbox",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 1663,
+      "column": 6,
+      "message": "scoped ui 未授权字段 escapeHtml",
+      "evidenceId": "d51b2d4469af46c084958185087666ca705dae526ed7f1558e9e4fb90fddb375",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-dialog-toolbox",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 1663,
+      "column": 6,
+      "message": "工厂注入了未授权字段 modalBridge",
+      "evidenceId": "d51b2d4469af46c084958185087666ca705dae526ed7f1558e9e4fb90fddb375",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-duplicate-inbound",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 520,
+      "column": 39,
+      "message": "scoped ui 未授权字段 escapeHtml",
+      "evidenceId": "0d9688ce689c8a58ac11a3e7d7d26d3484b94894294bc39857ea364437160959",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-duplicate-inbound",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 520,
+      "column": 39,
+      "message": "scoped ui 未授权字段 modalBridge",
+      "evidenceId": "0d9688ce689c8a58ac11a3e7d7d26d3484b94894294bc39857ea364437160959",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-new-account",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 530,
+      "column": 33,
+      "message": "scoped api 未授权字段 exportLastError",
+      "evidenceId": "0c1e00e902aa9f4bf3d0af2199875dc9235b806643d2826eed0b1a15d98b4bb9",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-new-account",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 530,
+      "column": 33,
+      "message": "scoped config 未授权字段 getCurrencyOptions",
+      "evidenceId": "0c1e00e902aa9f4bf3d0af2199875dc9235b806643d2826eed0b1a15d98b4bb9",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-new-account",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 530,
+      "column": 33,
+      "message": "scoped ui 未授权字段 escapeHtml",
+      "evidenceId": "0c1e00e902aa9f4bf3d0af2199875dc9235b806643d2826eed0b1a15d98b4bb9",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-new-account",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 530,
+      "column": 33,
+      "message": "scoped ui 未授权字段 modalBridge",
+      "evidenceId": "0c1e00e902aa9f4bf3d0af2199875dc9235b806643d2826eed0b1a15d98b4bb9",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer-pending.js",
+      "to": null,
+      "line": 1117,
+      "column": 25,
+      "message": "scoped ui 未授权字段 createAlertDialog",
+      "evidenceId": "2695472cc24a1ecf43f12cf17221a9568bc788d180d44939e5267aac91297931",
+      "functionPath": "installPendingRenderer.<anonymous:1>.createPendingController"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer-pending.js",
+      "to": null,
+      "line": 1117,
+      "column": 25,
+      "message": "scoped ui 未授权字段 createConfirmDialog",
+      "evidenceId": "2695472cc24a1ecf43f12cf17221a9568bc788d180d44939e5267aac91297931",
+      "functionPath": "installPendingRenderer.<anonymous:1>.createPendingController"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer-pending.js",
+      "to": null,
+      "line": 1117,
+      "column": 25,
+      "message": "scoped ui 未授权字段 modalBridge",
+      "evidenceId": "2695472cc24a1ecf43f12cf17221a9568bc788d180d44939e5267aac91297931",
+      "functionPath": "installPendingRenderer.<anonymous:1>.createPendingController"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 679,
+      "column": 4,
+      "message": "工厂注入了未授权字段 closeModal",
+      "evidenceId": "d928340ddf340996fc078bb9ba181d62078da4b99cf0addad1c9377814e2681a",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 679,
+      "column": 4,
+      "message": "工厂注入了未授权字段 createAlertDialog",
+      "evidenceId": "d928340ddf340996fc078bb9ba181d62078da4b99cf0addad1c9377814e2681a",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 679,
+      "column": 4,
+      "message": "工厂注入了未授权字段 createConfirmDialog",
+      "evidenceId": "d928340ddf340996fc078bb9ba181d62078da4b99cf0addad1c9377814e2681a",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 679,
+      "column": 4,
+      "message": "工厂注入了未授权字段 modalBridge",
+      "evidenceId": "d928340ddf340996fc078bb9ba181d62078da4b99cf0addad1c9377814e2681a",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 679,
+      "column": 4,
+      "message": "工厂注入了未授权字段 modalHost",
+      "evidenceId": "d928340ddf340996fc078bb9ba181d62078da4b99cf0addad1c9377814e2681a",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 679,
+      "column": 4,
+      "message": "工厂注入了未授权字段 openModal",
+      "evidenceId": "d928340ddf340996fc078bb9ba181d62078da4b99cf0addad1c9377814e2681a",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pre-fund",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 515,
+      "column": 30,
+      "message": "scoped ui 未授权字段 createPreFundTempManagerDialog",
+      "evidenceId": "64db6872ecac52d0bf7178e259df9610a19ad90b763138e16c7860168f087dc8",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pre-fund",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 515,
+      "column": 30,
+      "message": "scoped ui 未授权字段 escapeHtml",
+      "evidenceId": "64db6872ecac52d0bf7178e259df9610a19ad90b763138e16c7860168f087dc8",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pre-fund",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 515,
+      "column": 30,
+      "message": "scoped ui 未授权字段 modalBridge",
+      "evidenceId": "64db6872ecac52d0bf7178e259df9610a19ad90b763138e16c7860168f087dc8",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-recon-id-fix",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 498,
+      "column": 25,
+      "message": "scoped api 未授权字段 setReconIdFixBillCategory",
+      "evidenceId": "790f64b36e1d02eeaa3becf349d05dcb5927d3bf4a2cc041f31e96b06df76737",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-recon-id-fix",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 498,
+      "column": 25,
+      "message": "scoped config 未授权字段 initialBillCategory",
+      "evidenceId": "790f64b36e1d02eeaa3becf349d05dcb5927d3bf4a2cc041f31e96b06df76737",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-recon-id-fix",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 498,
+      "column": 25,
+      "message": "scoped config 未授权字段 scenarios",
+      "evidenceId": "790f64b36e1d02eeaa3becf349d05dcb5927d3bf4a2cc041f31e96b06df76737",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-recon-id-fix",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 498,
+      "column": 25,
+      "message": "scoped ui 未授权字段 gatewayScenarioPicker",
+      "evidenceId": "790f64b36e1d02eeaa3becf349d05dcb5927d3bf4a2cc041f31e96b06df76737",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-recon-id-fix",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 498,
+      "column": 25,
+      "message": "scoped ui 未授权字段 openLinkedTables",
+      "evidenceId": "790f64b36e1d02eeaa3becf349d05dcb5927d3bf4a2cc041f31e96b06df76737",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-recon-id-fix",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 498,
+      "column": 25,
+      "message": "scoped ui 未授权字段 openScenarios",
+      "evidenceId": "790f64b36e1d02eeaa3becf349d05dcb5927d3bf4a2cc041f31e96b06df76737",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-recon-id-fix",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 498,
+      "column": 25,
+      "message": "工厂字段 sharedReconSession 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "790f64b36e1d02eeaa3becf349d05dcb5927d3bf4a2cc041f31e96b06df76737",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped api 未授权字段 accountMappings",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped api 未授权字段 errors",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped api 未授权字段 files",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped api 未授权字段 monthlyBalance",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped api 未授权字段 templates",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped config 未授权字段 getAccountMappingCount",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped config 未授权字段 getCurrencyOptions",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped config 未授权字段 getTemplates",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped config 未授权字段 refreshTemplates",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped ui 未授权字段 alertNative",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped ui 未授权字段 createAccountMappingDialog",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped ui 未授权字段 createAccountMappingMigrationDialog",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped ui 未授权字段 createAlertDialog",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped ui 未授权字段 createBigAccountSelectionDialog",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped ui 未授权字段 createExportScopeDialog",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped ui 未授权字段 createManualBalanceSeedDialog",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped ui 未授权字段 createMonthlyBalanceExportDialog",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped ui 未授权字段 createRememberOrderMismatchDialog",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped ui 未授权字段 createTemplateManagerDialog",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped ui 未授权字段 modalBridge",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "工厂注入了未授权字段 initialInfo",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-financial-op",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 535,
+      "column": 37,
+      "message": "工厂注入了未授权字段 differenceApi",
+      "evidenceId": "6ab10ddbd4311fa5e38033f4547df4838c8d8c6680dd55b9e6161a7f55a66a2d",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-financial-op",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 535,
+      "column": 37,
+      "message": "工厂注入了未授权字段 modalHost",
+      "evidenceId": "6ab10ddbd4311fa5e38033f4547df4838c8d8c6680dd55b9e6161a7f55a66a2d",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-financial-op",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 535,
+      "column": 37,
+      "message": "工厂注入了未授权字段 previewEnabled",
+      "evidenceId": "6ab10ddbd4311fa5e38033f4547df4838c8d8c6680dd55b9e6161a7f55a66a2d",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-financial-op",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 535,
+      "column": 37,
+      "message": "工厂注入了未授权字段 reviewProjection",
+      "evidenceId": "6ab10ddbd4311fa5e38033f4547df4838c8d8c6680dd55b9e6161a7f55a66a2d",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-op-calc",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 522,
+      "column": 32,
+      "message": "scoped ui 未授权字段 createVccOpCalcComputeDialog",
+      "evidenceId": "93eaca04223d6306d59700e17af7ba83040022024d3f23836957fbebd5c9bd46",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-op-calc",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 522,
+      "column": 32,
+      "message": "scoped ui 未授权字段 createVccOpCalcConfirmDialog",
+      "evidenceId": "93eaca04223d6306d59700e17af7ba83040022024d3f23836957fbebd5c9bd46",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-op-calc",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 522,
+      "column": 32,
+      "message": "scoped ui 未授权字段 createVccOpCalcShowBalanceDialog",
+      "evidenceId": "93eaca04223d6306d59700e17af7ba83040022024d3f23836957fbebd5c9bd46",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-op-calc",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 522,
+      "column": 32,
+      "message": "scoped ui 未授权字段 escapeHtml",
+      "evidenceId": "93eaca04223d6306d59700e17af7ba83040022024d3f23836957fbebd5c9bd46",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-op-calc",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 522,
+      "column": 32,
+      "message": "scoped ui 未授权字段 modalBridge",
+      "evidenceId": "93eaca04223d6306d59700e17af7ba83040022024d3f23836957fbebd5c9bd46",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/operation-tracker.js",
+      "to": null,
+      "line": 257,
+      "column": 26,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "e052858b4e447f4883e99aa881b0e003cf0f3dcd1599f6a69955d0a5b99980d3",
+      "functionPath": "resolveOperationInputPaths"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/toolbox-target-identity.js",
+      "to": null,
+      "line": 112,
+      "column": 22,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "516de9cd3e4aef9740961448bf7c3afec36b732cf16cb29aa2434ab5fd5382bd",
+      "functionPath": "targetPathAliasKey"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "to": null,
+      "line": 131,
+      "column": 11,
+      "message": "受保护 worker operation 无法完整解释，须登记准确授权调用或使用可解析操作",
+      "evidenceId": "b3c138f57ab28a504aaef8de905c81b3588fff6762d49720beaf5238d7751ce1",
+      "functionPath": "createToolboxPublicationDispatcher.worker"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-acquiring",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 524,
+      "column": 32,
+      "message": "scoped ui.modalHost 的方法来源无法解释",
+      "evidenceId": "981cd794cf48353aeaca88ffd30071d9f5175c40258f74a9cbd14408f03c2f79",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-acquiring",
+      "from": "src/renderer/controllers/acquiring.js",
+      "to": null,
+      "line": 0,
+      "column": 0,
+      "message": "登记的全局工厂 __acquiringBillCurrencyController 没有实际导出",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-bank-bu",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 517,
+      "column": 29,
+      "message": "scoped ui.modalHost 的方法来源无法解释",
+      "evidenceId": "b97e8521c326eb59ba16dd0ba64f0760956a71a01d9d9b938818a18ae1b018eb",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-bank-bu",
+      "from": "src/renderer/controllers/bank-bu.js",
+      "to": null,
+      "line": 0,
+      "column": 0,
+      "message": "登记的全局工厂 __bankBuReconController 没有实际导出",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-bank-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 492,
+      "column": 28,
+      "message": "scoped ui.modalHost 的方法来源无法解释",
+      "evidenceId": "d77acc94795ddc88b4d600363cbb5f14c6d6840c46509a1a61c2e45039133390",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-bank-statement",
+      "from": "src/renderer/controllers/bank-statement.js",
+      "to": null,
+      "line": 0,
+      "column": 0,
+      "message": "登记的全局工厂 __bankStatementController 没有实际导出",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-biz-op-legacy",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 527,
+      "column": 32,
+      "message": "scoped ui.modalHost 的方法来源无法解释",
+      "evidenceId": "09438d4b941bc379474e7f8fbbc17f053367365108ca8225579fd88ce315ede0",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-biz-op-legacy",
+      "from": "src/renderer/controllers/biz-op-legacy.js",
+      "to": null,
+      "line": 0,
+      "column": 0,
+      "message": "登记的全局工厂 __bizOpReconController 没有实际导出",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "scoped api.accountMappings 的方法来源无法解释",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "scoped api.balanceAdjustment 的方法来源无法解释",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "scoped api.bigAccount 的方法来源无法解释",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "scoped api.monthlyBalance 的方法来源无法解释",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 36,
+      "column": 768,
+      "message": "scoped api.templates 的方法来源无法解释",
+      "evidenceId": "11d5132c7ffbb0eb1237e6a67b8f23e8a7e33ec1adae4e0b3ee7637c7d6ffad2",
+      "functionPath": "initRendererDialogs.createRendererDialogs"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-dialog-configuration",
+      "from": "src/renderer/dialogs/configuration.js",
+      "to": null,
+      "line": 0,
+      "column": 0,
+      "message": "登记的全局工厂 __configurationDialogs 没有实际导出",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-dialog-scenarios",
+      "from": "src/renderer/dialogs/scenarios.js",
+      "to": null,
+      "line": 0,
+      "column": 0,
+      "message": "登记的全局工厂 __scenariosDialogs 没有实际导出",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-duplicate-inbound",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 520,
+      "column": 39,
+      "message": "scoped ui.modalHost 的方法来源无法解释",
+      "evidenceId": "0d9688ce689c8a58ac11a3e7d7d26d3484b94894294bc39857ea364437160959",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-duplicate-inbound",
+      "from": "src/renderer/controllers/duplicate-inbound.js",
+      "to": null,
+      "line": 0,
+      "column": 0,
+      "message": "登记的全局工厂 __duplicateInboundMatchController 没有实际导出",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-new-account",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 530,
+      "column": 33,
+      "message": "scoped config.subscribe 的方法来源无法解释",
+      "evidenceId": "0c1e00e902aa9f4bf3d0af2199875dc9235b806643d2826eed0b1a15d98b4bb9",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-new-account",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 530,
+      "column": 33,
+      "message": "scoped ui.modalHost 的方法来源无法解释",
+      "evidenceId": "0c1e00e902aa9f4bf3d0af2199875dc9235b806643d2826eed0b1a15d98b4bb9",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer-pending.js",
+      "to": null,
+      "line": 1117,
+      "column": 25,
+      "message": "scoped api.diff 的方法来源无法解释",
+      "evidenceId": "2695472cc24a1ecf43f12cf17221a9568bc788d180d44939e5267aac91297931",
+      "functionPath": "installPendingRenderer.<anonymous:1>.createPendingController"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer-pending.js",
+      "to": null,
+      "line": 1117,
+      "column": 25,
+      "message": "scoped api.reconcile 的方法来源无法解释",
+      "evidenceId": "2695472cc24a1ecf43f12cf17221a9568bc788d180d44939e5267aac91297931",
+      "functionPath": "installPendingRenderer.<anonymous:1>.createPendingController"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer-pending.js",
+      "to": null,
+      "line": 1117,
+      "column": 25,
+      "message": "scoped api.removed 的方法来源无法解释",
+      "evidenceId": "2695472cc24a1ecf43f12cf17221a9568bc788d180d44939e5267aac91297931",
+      "functionPath": "installPendingRenderer.<anonymous:1>.createPendingController"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer-pending.js",
+      "to": null,
+      "line": 1117,
+      "column": 25,
+      "message": "scoped ui.modalHost 的方法来源无法解释",
+      "evidenceId": "2695472cc24a1ecf43f12cf17221a9568bc788d180d44939e5267aac91297931",
+      "functionPath": "installPendingRenderer.<anonymous:1>.createPendingController"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-pre-fund",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 515,
+      "column": 30,
+      "message": "scoped ui.modalHost 的方法来源无法解释",
+      "evidenceId": "64db6872ecac52d0bf7178e259df9610a19ad90b763138e16c7860168f087dc8",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-pre-fund",
+      "from": "src/renderer/controllers/pre-fund.js",
+      "to": null,
+      "line": 0,
+      "column": 0,
+      "message": "登记的全局工厂 __preFundReconciliationController 没有实际导出",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-recon-id-fix",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 498,
+      "column": 25,
+      "message": "scoped ui.modalHost 的方法来源无法解释",
+      "evidenceId": "790f64b36e1d02eeaa3becf349d05dcb5927d3bf4a2cc041f31e96b06df76737",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-recon-id-fix",
+      "from": "src/renderer/controllers/recon-id-fix.js",
+      "to": null,
+      "line": 0,
+      "column": 0,
+      "message": "登记的全局工厂 __reconIdFixController 没有实际导出",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped config.subscribe 的方法来源无法解释",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 502,
+      "column": 24,
+      "message": "scoped ui.modalHost 的方法来源无法解释",
+      "evidenceId": "2da7ad2b69fe4ac6b62144d38fd3b5cc72202dda61a3696b225a07369ce9e86c",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-statement",
+      "from": "src/renderer/controllers/statement.js",
+      "to": null,
+      "line": 0,
+      "column": 0,
+      "message": "登记的全局工厂 __statementController 没有实际导出",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "renderer-vcc-op-calc",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 522,
+      "column": 32,
+      "message": "scoped ui.modalHost 的方法来源无法解释",
+      "evidenceId": "93eaca04223d6306d59700e17af7ba83040022024d3f23836957fbebd5c9bd46",
+      "functionPath": "initializeDomainControllers"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "shared-xlsx",
+      "from": "src/backend/toolbox-format/index.js",
+      "to": "src/backend/xlsx/workbook-parts.js",
+      "line": 0,
+      "column": 0,
+      "message": "已激活边界缺少约定生产消费者",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "shared-xlsx",
+      "from": "src/backend/toolbox-format/xlsx-pass.js",
+      "to": "src/backend/xlsx/excel-text.js",
+      "line": 0,
+      "column": 0,
+      "message": "已激活边界缺少约定生产消费者",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "shared-xlsx",
+      "from": "src/backend/toolbox-format/xlsx-pass.js",
+      "to": "src/backend/xlsx/ooxml-namespaces.js",
+      "line": 0,
+      "column": 0,
+      "message": "已激活边界缺少约定生产消费者",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": null,
+      "from": "src/main-process/run-check-multiworker.js",
+      "to": null,
+      "line": 125,
+      "column": 35,
+      "message": "动态加载未登记准确 AST 指纹及完整目标集合",
+      "evidenceId": "ff92d9b23731f8dd4f8ff730bd0ffd2290b9c0a2e75c588734fbe7d2ab54e565",
+      "functionPath": "startWorker",
+      "kind": "worker"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": null,
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "to": null,
+      "line": 71,
+      "column": 15,
+      "message": "动态加载未登记准确 AST 指纹及完整目标集合",
+      "evidenceId": "24e6df1332be8ec12f46b93b64da06ce65f3fa9f3edf9c7514254f3bdfec8bc1",
+      "functionPath": "runWorkerJob.<anonymous:1>",
+      "kind": "worker"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": null,
+      "from": "src/renderer/controllers/pending.js",
+      "to": null,
+      "line": 0,
+      "column": 0,
+      "message": "新控制器或领域弹窗必须登记稳定子边界及注入合同",
+      "functionPath": null
+    },
+    {
+      "rule": "ARCH-XLSX-INFRA",
+      "boundaryId": "shared-xlsx",
+      "from": "src/backend/toolbox-format/index.js",
+      "to": "src/backend/toolbox-format/xlsx-pass.js",
+      "line": 8,
+      "column": 5,
+      "message": "生产消费者须迁往中性 XLSX 入口，旧 API 不得增加消费方",
+      "evidenceId": "f5989753a1b0f912385336c0e210fc016656e52d46d60ff269f347e672274fd4",
+      "functionPath": null,
+      "kind": "require"
+    }
+  ],
+  "matchedExceptions": [
+    {
+      "rule": "ARCH-CYCLE",
+      "boundaryId": null,
+      "from": "src/backend/biz-op-recon-import/import-worker.js",
+      "to": "src/main-process/biz-op-recon-session.js",
+      "line": 49,
+      "column": 4,
+      "message": "生产依赖形成循环：src/backend/biz-op-recon-import/import-worker.js → src/main-process/biz-op-recon-session.js → src/backend/biz-op-recon-import/import-worker.js",
+      "dependencyPath": [
+        "src/backend/biz-op-recon-import/import-worker.js",
+        "src/main-process/biz-op-recon-session.js",
+        "src/backend/biz-op-recon-import/import-worker.js"
+      ],
+      "evidenceId": "a6247d7e51da79199b73635f3ec09a02c7fdc204edbce418b0a14b7e44162ecc",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "addOneDay",
+        "assertBizOpMonthEndAdmission",
+        "assertNoPendingMonthEndCopy",
+        "normalizeBu",
+        "recordMonthEndCopyIntent"
+      ],
+      "cycleEdges": [
+        {
+          "from": "src/backend/biz-op-recon-import/import-worker.js",
+          "to": "src/main-process/biz-op-recon-session.js",
+          "kind": "require"
+        },
+        {
+          "from": "src/main-process/biz-op-recon-session.js",
+          "to": "src/backend/biz-op-recon-import/import-worker.js",
+          "kind": "worker"
+        }
+      ],
+      "edgeKinds": [
+        "require",
+        "worker"
+      ],
+      "literalCycle": false,
+      "exceptionId": "baseline-cycle-001"
+    },
+    {
+      "rule": "ARCH-CYCLE",
+      "boundaryId": null,
+      "from": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+      "to": "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+      "line": 98,
+      "column": 21,
+      "message": "生产依赖形成循环：src/main-process/background-execution/adapters/worker-thread-adapter.js → src/main-process/vcc-financial-op-output/writer-worker-entry.js → src/main-process/background-execution/adapters/worker-thread-adapter.js",
+      "dependencyPath": [
+        "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+        "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+        "src/main-process/background-execution/adapters/worker-thread-adapter.js"
+      ],
+      "evidenceId": "69a3dcf14692fc4e083e6341f4366b184b6fe550ee8c13f3c541167c93e87e8c",
+      "functionPath": "createWorkerThreadAdapter.start",
+      "kind": "worker",
+      "cycleEdges": [
+        {
+          "from": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+          "to": "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+          "kind": "worker"
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+          "to": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+          "kind": "require"
+        }
+      ],
+      "edgeKinds": [
+        "require",
+        "worker"
+      ],
+      "literalCycle": false,
+      "exceptionId": "baseline-cycle-002"
+    }
+  ],
+  "staleExceptions": [],
+  "activeBoundaries": [
+    "bizop-query-q1",
+    "bizop-query-q2",
+    "bizop-query-q3",
+    "bizop-recovery-private",
+    "business-task-adapters",
+    "descriptor-composition",
+    "platform-core",
+    "production-graph",
+    "publication-recovery-entry",
+    "shared-xlsx",
+    "vcc-mapped-lineage"
+  ],
+  "limitations": [
+    "静态依赖图不完整证明运行时 IPC、callback 注入、任意别名/反射、共享对象内部写入或数据库业务语义。",
+    "动态加载仅覆盖静态可解析目标及准确登记的目标集；未解释位置必须诊断。",
+    "Classic global 仅覆盖已登记工厂、支持的全局读取与脚本顺序；普通 DOM 和宿主之外的对象生命期须由行为测试证明。",
+    "pending/partial 边界和 activationEvidence 文件存在不代表对应治理已通过行为、GUI 或平台验收。",
+    "历史修复只核对 Git 身份、内容 hash、schema 和审查材料存在；最小语法修复的语义保持仍须人工 review。"
+  ]
+}

@@ -1,0 +1,27 @@
+✔ RR6-02 object parameter 不能冒充原生比较 (17.366667ms)
+✔ RR6-02 destructured parameter 不能冒充原生比较 (2.693916ms)
+✔ RR6-02 nested parameter 不能冒充原生比较 (2.992625ms)
+✔ RR6-02 array parameter 不能冒充原生比较 (2.174125ms)
+✔ RR6-02 prototype parameter 不能冒充原生比较 (2.412458ms)
+✔ RR6-02 prototype nested parameter 不能冒充原生比较 (2.1635ms)
+✔ RR6-02 forwarded parameter 不能冒充原生比较 (2.148959ms)
+✔ RR6-02 returned parameter 不能冒充原生比较 (1.956375ms)
+✔ RR6-02 bound parameter 不能冒充原生比较 (2.1815ms)
+✔ RR6-02 projected unknown escape 不能冒充原生比较 (2.370875ms)
+✔ RR6-02 returned container unknown escape 不能冒充原生比较 (1.748083ms)
+✔ RR6-02 prototype unknown escape 不能冒充原生比较 (1.569167ms)
+✔ RR6-02 real reduce 不能冒充原生比较 (1.701709ms)
+✔ RR6-02 native includes 保持合法 (2.238791ms)
+✔ RR6-02 projected compare 保持合法 (1.78ms)
+✔ RR6-02 destructured compare 保持合法 (1.656291ms)
+✔ RR6-02 different array mutated 保持合法 (1.39ms)
+✔ RR6-02 different object prototype 保持合法 (1.469208ms)
+✔ RR6-02 comparison helper without writes 保持合法 (1.811834ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 138.646875

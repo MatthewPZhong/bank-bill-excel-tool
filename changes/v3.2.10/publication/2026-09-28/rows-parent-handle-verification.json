@@ -1,0 +1,45 @@
+{
+  "baseCandidate": "6dca78683f2587a0f028b260b94a4204da3ccaff",
+  "windowsRun": 36450343306,
+  "windowsResult": {
+    "passed": 9434,
+    "failed": 1,
+    "skipped": 4,
+    "previous44FailuresResolved": true
+  },
+  "failure": "before-publication 的 publicationError.code 为 undefined，测试未获得预期 Publisher 身份拒绝码。远端日志未记录原始重命名错误码。",
+  "mechanism": "真实 Main 产物 SHA-256 读取已 end，但最后一个读取流未 close；Windows 目录替换可能与句柄释放竞争。相同测试在上一 Windows 候选通过。",
+  "fix": "仅测试等待已读完的产物流真实 close（上限 5 秒），再注入父目录替换；保留所有原有 Publisher、原文件和禁止输出断言，并增强失败诊断。",
+  "probe": {
+    "commandBefore": "node changes/v3.2.10/publication/2026-09-28/probe-parent-open-streams.cjs baseline",
+    "before": {
+      "passed": 2,
+      "failed": 1,
+      "exitCode": 1
+    },
+    "commandAfter": "node changes/v3.2.10/publication/2026-09-28/probe-parent-open-streams.cjs",
+    "after": {
+      "passed": 3,
+      "failed": 0,
+      "exitCode": 0
+    }
+  },
+  "normalTargetedTest": {
+    "passed": 3,
+    "failed": 0,
+    "skipped": 0,
+    "exitCode": 0
+  },
+  "lint": "PASS",
+  "diffCheck": "PASS",
+  "productionBusinessSourceChanged": false,
+  "newFullGate": "待新提交完整本地与 Windows 验证",
+  "rows-parent-lock-before.log": {
+    "evidence": "rows-parent-lock-before.txt",
+    "sha256": "ef095ed946abfca17d005693f870e4834feda12195dfe28b06bfa99ddc9255f0"
+  },
+  "rows-parent-lock-after.log": {
+    "evidence": "rows-parent-lock-after.txt",
+    "sha256": "5481a5f91e56e38db86311e2738c23efe9529cbdd9547622113a93f10ba979c6"
+  }
+}

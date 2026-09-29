@@ -1,0 +1,28 @@
+✖ R3-02 未知第二参数可能是 options 对象，不得静默只扫描第三参数 cwd (106.4705ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 178.02175
+
+✖ failing tests:
+
+test at tests/unit/architecture/review-round3.test.js:131:1
+✖ R3-02 未知第二参数可能是 options 对象，不得静默只扫描第三参数 cwd (106.4705ms)
+  AssertionError [ERR_ASSERTION]: []
+      at denied (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round3.test.js:28:41)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round3.test.js:134:3)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.start (node:internal/test_runner/test:1096:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:385:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

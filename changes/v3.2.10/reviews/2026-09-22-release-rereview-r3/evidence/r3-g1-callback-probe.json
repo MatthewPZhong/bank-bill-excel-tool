@@ -1,0 +1,196 @@
+{
+  "boundaryState": "active",
+  "outputs": [
+    {
+      "name": "direct",
+      "writes": 1,
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 57,
+          "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+          "evidenceId": "a06f2c6e95854747873f500a02198a9c3fd9d21abcfafcd277accd37bdf03335",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "alias",
+      "writes": 1,
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 86,
+          "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+          "evidenceId": "59a6b256306b5aea20eef57ec56538ee0448f7b5c5af38ead4ea4c3cb8fcaac2",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "bind",
+      "writes": 1,
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 114,
+          "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+          "evidenceId": "edd9aaa1c6a9478c7d2410cd12a5404646cdcce3a625073feb72cc419ed00700",
+          "functionPath": "prepareToolboxPublication"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 60,
+          "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+          "evidenceId": "90465c586ff3d67deabac9e0b8792e9f0a05115bd4430563e4668165f48694fe",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "call",
+      "writes": 1,
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 57,
+          "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+          "evidenceId": "81d90691bf22f017fe82362991e911824db07ec883aa3101ea39bdce9f415f91",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "apply",
+      "writes": 1,
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 57,
+          "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+          "evidenceId": "b07c13418b81c02b5b4f61a557d746275d6a41017c3c5aac5c6202a9530f16b9",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "object",
+      "writes": 1,
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 90,
+          "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+          "evidenceId": "8379efbfb086f29d04de17dd3785504baac2393b5ccf16f71c01a35f053c347a",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "array",
+      "writes": 1,
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "helper_direct",
+      "writes": 1,
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 75,
+          "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+          "evidenceId": "a06f2c6e95854747873f500a02198a9c3fd9d21abcfafcd277accd37bdf03335",
+          "functionPath": "prepareToolboxPublication.helper"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "helper_parameter",
+      "writes": 1,
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "identity_return",
+      "writes": 1,
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "static_factory",
+      "writes": 1,
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 103,
+          "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+          "evidenceId": "c22e31608b3fccbff756576b8f1861c72b04d817dd7680c6011140333abe85c3",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "external_helper",
+      "writes": 1,
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    }
+  ]
+}

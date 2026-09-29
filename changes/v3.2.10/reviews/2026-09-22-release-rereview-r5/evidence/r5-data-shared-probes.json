@@ -1,0 +1,515 @@
+{
+  "beforeInputHashes": [
+    {
+      "path": "scripts/architecture/scan.js",
+      "sha256": "91709776481ac49e2b9f80178a5ac7887ad21c33709c5580aaca0335ae8daaef",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/contracts.js",
+      "sha256": "e7d196124f0091ea757bd85bed04110f4499f16b91afc1ed5a2598515a8d9cbc",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/rules.js",
+      "sha256": "89f21aa323513fd9ea76259d06afef2345165d2a5c90ca00903a669b12947541",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/renderer-contracts.js",
+      "sha256": "cf917317275b0bf2204da09566975f531f114ddf449a7c0aafe6e879a8ca83ab",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "sha256": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "match": true
+    }
+  ],
+  "policy": [
+    {
+      "path": "architecture/boundaries.json",
+      "before": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+      "current": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+      "same": true
+    },
+    {
+      "path": "architecture/legacy-allowlist.json",
+      "before": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3",
+      "current": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3",
+      "same": true
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "before": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "current": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "same": true
+    },
+    {
+      "path": "scripts/architecture/policy-history.js",
+      "before": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+      "current": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+      "same": true
+    }
+  ],
+  "renderer": [
+    {
+      "name": "return-data",
+      "expectedClean": true,
+      "source": "function provide(value){return {nested:value};}window.StatementController.createStatementController({initialInfo:provide(\"bank\")});",
+      "beforeR4": [],
+      "current": []
+    },
+    {
+      "name": "return-api",
+      "expectedClean": false,
+      "source": "function provide(value){return {nested:value};}window.StatementController.createStatementController({initialInfo:provide(window.desktopApi)});",
+      "beforeR4": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 47,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "2584a440e433cef07829443aad1536148cc8476d6fa2937b293ccd4b29b42563",
+          "functionPath": null
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 47,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "2584a440e433cef07829443aad1536148cc8476d6fa2937b293ccd4b29b42563",
+          "functionPath": null
+        }
+      ]
+    },
+    {
+      "name": "bound-return-data",
+      "expectedClean": true,
+      "source": "function provide(value){return {nested:value};}const fn=provide.bind(null,\"bank\");window.StatementController.createStatementController({initialInfo:fn()});",
+      "beforeR4": [],
+      "current": []
+    },
+    {
+      "name": "bound-return-api",
+      "expectedClean": false,
+      "source": "function provide(value){return {nested:value};}const fn=provide.bind(null,window.desktopApi);window.StatementController.createStatementController({initialInfo:fn()});",
+      "beforeR4": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 93,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "de5d3cb9ba2318d3e42b085fdcd1441870fe50a8b53d95af9bd6ab89c0029db3",
+          "functionPath": null
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 93,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "de5d3cb9ba2318d3e42b085fdcd1441870fe50a8b53d95af9bd6ab89c0029db3",
+          "functionPath": null
+        }
+      ]
+    },
+    {
+      "name": "closure-data",
+      "expectedClean": true,
+      "source": "function outer(value){return ()=>({nested:value});}window.StatementController.createStatementController({initialInfo:outer(\"bank\")()});",
+      "beforeR4": [],
+      "current": []
+    },
+    {
+      "name": "closure-api",
+      "expectedClean": false,
+      "source": "function outer(value){return ()=>({nested:value});}window.StatementController.createStatementController({initialInfo:outer(window.desktopApi)()});",
+      "beforeR4": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 51,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "342d324f66009b31893005acabeea64602d59018e5b7ebf160b103abe43cd401",
+          "functionPath": null
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 51,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "342d324f66009b31893005acabeea64602d59018e5b7ebf160b103abe43cd401",
+          "functionPath": null
+        }
+      ]
+    },
+    {
+      "name": "special-conditional-data",
+      "expectedClean": true,
+      "source": "window.StatementController.createStatementController({initialInfo:true?{[\"__proto__\"]:\"bank\"}:{[\"__proto__\"]:\"bank\"}});",
+      "beforeR4": [],
+      "current": []
+    },
+    {
+      "name": "special-conditional-api",
+      "expectedClean": false,
+      "source": "window.StatementController.createStatementController({initialInfo:true?{[\"__proto__\"]:window.desktopApi}:{[\"__proto__\"]:window.desktopApi}});",
+      "beforeR4": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 0,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "febe410b5e182082bc0c13fe247dbecdaf14144f6cea88446bb3f10bcb93bb06",
+          "functionPath": null
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 0,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "febe410b5e182082bc0c13fe247dbecdaf14144f6cea88446bb3f10bcb93bb06",
+          "functionPath": null
+        }
+      ]
+    },
+    {
+      "name": "category-return-allowed-ipc",
+      "expectedClean": true,
+      "source": "const {ipcRenderer}=require('electron');function provide(){return ipcRenderer.invoke('app:get-info').reconIdFixBillCategory;}window.ReconIdFixController.createReconIdFixController({config:{initialBillCategory:provide()}});",
+      "beforeR4": [],
+      "current": []
+    },
+    {
+      "name": "category-return-other-ipc",
+      "expectedClean": false,
+      "source": "const {ipcRenderer}=require('electron');function provide(){return ipcRenderer.invoke('other').reconIdFixBillCategory;}window.ReconIdFixController.createReconIdFixController({config:{initialBillCategory:provide()}});",
+      "beforeR4": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-recon-id-fix",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 118,
+          "message": "工厂字段 config.initialBillCategory 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "120ab2251c6ef0ac0f46e0c3fa7bbc94fbe0f9dacf27e359d882dbde4903ff19",
+          "functionPath": null
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-recon-id-fix",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 118,
+          "message": "工厂字段 config.initialBillCategory 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "120ab2251c6ef0ac0f46e0c3fa7bbc94fbe0f9dacf27e359d882dbde4903ff19",
+          "functionPath": null
+        }
+      ]
+    },
+    {
+      "name": "mount-parameter-allowed-ipc",
+      "expectedClean": true,
+      "source": "const {ipcRenderer}=require('electron');function mount(info){window.StatementController.createStatementController({initialInfo:info});}mount(ipcRenderer.invoke('app:get-info'));",
+      "beforeR4": [],
+      "current": []
+    },
+    {
+      "name": "mount-parameter-other-ipc",
+      "expectedClean": false,
+      "source": "const {ipcRenderer}=require('electron');function mount(info){window.StatementController.createStatementController({initialInfo:info});}mount(ipcRenderer.invoke('other'));",
+      "beforeR4": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 61,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "ada4afbe27d1f4bc0b41b1ecd03f1a0e332969d231c034198e58cebda2a076b8",
+          "functionPath": "mount"
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 61,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "ada4afbe27d1f4bc0b41b1ecd03f1a0e332969d231c034198e58cebda2a076b8",
+          "functionPath": "mount"
+        }
+      ]
+    }
+  ],
+  "query": [
+    {
+      "name": "direct-callback",
+      "expectedClean": false,
+      "source": "const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];exports.read=c=>[c].map(query);",
+      "sql": [
+        "SELECT 1 AS value"
+      ],
+      "actual": [
+        [
+          {
+            "value": 1
+          }
+        ]
+      ],
+      "beforeR4": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "boundaryId": "bizop-query-q3",
+          "from": "src/main-process/biz-op-v327/r5-query.js",
+          "to": null,
+          "line": 1,
+          "column": 15,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "evidenceId": "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+          "functionPath": "query"
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "boundaryId": "bizop-query-q3",
+          "from": "src/main-process/biz-op-v327/r5-query.js",
+          "to": null,
+          "line": 1,
+          "column": 15,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "evidenceId": "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+          "functionPath": "query"
+        }
+      ]
+    },
+    {
+      "name": "returned-callback",
+      "expectedClean": false,
+      "source": "const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];function identity(fn){return fn;}exports.read=c=>[c].map(identity(query));",
+      "sql": [
+        "SELECT 1 AS value"
+      ],
+      "actual": [
+        [
+          {
+            "value": 1
+          }
+        ]
+      ],
+      "beforeR4": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "boundaryId": "bizop-query-q3",
+          "from": "src/main-process/biz-op-v327/r5-query.js",
+          "to": null,
+          "line": 1,
+          "column": 15,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "evidenceId": "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+          "functionPath": "query"
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "boundaryId": "bizop-query-q3",
+          "from": "src/main-process/biz-op-v327/r5-query.js",
+          "to": null,
+          "line": 1,
+          "column": 15,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "evidenceId": "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+          "functionPath": "query"
+        }
+      ]
+    },
+    {
+      "name": "helper-param-callback",
+      "expectedClean": false,
+      "source": "const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];function apply(fn,c){return [c].map(fn);}exports.read=c=>apply(query,c);",
+      "sql": [
+        "SELECT 1 AS value"
+      ],
+      "actual": [
+        [
+          {
+            "value": 1
+          }
+        ]
+      ],
+      "beforeR4": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "boundaryId": "bizop-query-q3",
+          "from": "src/main-process/biz-op-v327/r5-query.js",
+          "to": null,
+          "line": 1,
+          "column": 15,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "evidenceId": "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+          "functionPath": "query"
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "boundaryId": "bizop-query-q3",
+          "from": "src/main-process/biz-op-v327/r5-query.js",
+          "to": null,
+          "line": 1,
+          "column": 15,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "evidenceId": "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+          "functionPath": "query"
+        }
+      ]
+    },
+    {
+      "name": "unused-helper-param",
+      "expectedClean": true,
+      "source": "const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];function ignore(fn,c){return [];}exports.read=c=>ignore(query,c);",
+      "sql": [],
+      "actual": [],
+      "beforeR4": [],
+      "current": []
+    },
+    {
+      "name": "selected-safe-return",
+      "expectedClean": true,
+      "source": "const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];function provider(){return {read:safe,unused:query};}exports.read=c=>provider().read(c);",
+      "sql": [],
+      "actual": [],
+      "beforeR4": [],
+      "current": []
+    },
+    {
+      "name": "selected-query-return",
+      "expectedClean": false,
+      "source": "const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];function provider(){return {read:query,unused:safe};}exports.read=c=>provider().read(c);",
+      "sql": [
+        "SELECT 1 AS value"
+      ],
+      "actual": [
+        {
+          "value": 1
+        }
+      ],
+      "beforeR4": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "boundaryId": "bizop-query-q3",
+          "from": "src/main-process/biz-op-v327/r5-query.js",
+          "to": null,
+          "line": 1,
+          "column": 15,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "evidenceId": "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+          "functionPath": "query"
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "boundaryId": "bizop-query-q3",
+          "from": "src/main-process/biz-op-v327/r5-query.js",
+          "to": null,
+          "line": 1,
+          "column": 15,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "evidenceId": "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+          "functionPath": "query"
+        }
+      ]
+    },
+    {
+      "name": "array-parameter-query",
+      "expectedClean": false,
+      "source": "const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];function dispatch(list,index,c){return list[index](c);}exports.read=c=>dispatch([safe,query],1,c);",
+      "sql": [
+        "SELECT 1 AS value"
+      ],
+      "actual": [
+        {
+          "value": 1
+        }
+      ],
+      "beforeR4": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "boundaryId": "bizop-query-q3",
+          "from": "src/main-process/biz-op-v327/r5-query.js",
+          "to": null,
+          "line": 1,
+          "column": 15,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "evidenceId": "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+          "functionPath": "query"
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "boundaryId": "bizop-query-q3",
+          "from": "src/main-process/biz-op-v327/r5-query.js",
+          "to": null,
+          "line": 1,
+          "column": 15,
+          "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+          "evidenceId": "1d18eb178f8e498b50b074aed58e2b1f18d63a2f657e0a8dc2ea57b2e1749dfe",
+          "functionPath": "query"
+        }
+      ]
+    },
+    {
+      "name": "array-parameter-safe",
+      "expectedClean": true,
+      "source": "const query=c=>c.db.prepare('SELECT 1 AS value').all();const safe=()=>[];function dispatch(list,index,c){return list[index](c);}exports.read=c=>dispatch([safe,query],0,c);",
+      "sql": [],
+      "actual": [],
+      "beforeR4": [],
+      "current": []
+    }
+  ]
+}

@@ -11,7 +11,9 @@ const { createArchiveService } = require('../../src/main-process/archive-center/
 const { createArchiveCenterController } = require('../../src/main-process/archive-center/controller');
 const { createArchiveOutboxStore } = require('../../src/main-process/archive-center/outbox-store');
 const { createTaskLifecycle } = require('../../src/main-process/archive-center/task-lifecycle');
-const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../../src/main-process/execution-descriptors/composition');
 const { normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
 const EXIT_CODES = { running: 82, 'after-terminal': 81, 'anonymous-after-terminal': 84, 'reserve-transaction': 83 };
 

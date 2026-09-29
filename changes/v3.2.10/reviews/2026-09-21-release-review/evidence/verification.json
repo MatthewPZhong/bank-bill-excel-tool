@@ -1,0 +1,149 @@
+{
+  "reviewedHead": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "workdir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "recordedAt": "2026-09-21T21:37:05.862630+08:00",
+  "checks": [
+    {
+      "id": "release-check",
+      "command": "UNIT_TEST_CONCURRENCY=1 npm run release-check",
+      "exitCode": 1,
+      "result": "lint PASS; architecture FAIL; smoke/unit/integration not reached",
+      "log": "release-check.log"
+    },
+    {
+      "id": "architecture-cli",
+      "command": "node scripts/check-architecture.js --json /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-21-release-review/evidence/architecture-check.json",
+      "exitCode": 1,
+      "result": "765/765 parsed; 2195 violations; active 2, partial 29, stale 111",
+      "log": "architecture-check.log"
+    },
+    {
+      "id": "architecture-unit",
+      "command": "node --test --test-concurrency=1 tests/unit/architecture/*.test.js",
+      "exitCode": 0,
+      "result": "143/143 PASS, 0 skipped",
+      "log": "architecture-tests.log"
+    },
+    {
+      "id": "descriptor-unit",
+      "command": "node --test --test-concurrency=1 tests/unit/main-process/execution-descriptor-*.test.js",
+      "exitCode": 0,
+      "result": "94/94 PASS, 0 skipped",
+      "log": "descriptor-tests.log"
+    },
+    {
+      "id": "descriptor-manifest",
+      "command": "npm run check:background-execution-manifest",
+      "exitCode": 0,
+      "result": "402/402 surfaces; 74 legacy pairs; 13 production enabled",
+      "log": "execution-manifest.log"
+    },
+    {
+      "id": "descriptor-integration",
+      "command": "node scripts/integration/execution-descriptor-governance.js",
+      "exitCode": 0,
+      "result": "4/4 PASS",
+      "log": "descriptor-integration.log"
+    },
+    {
+      "id": "g1-g2-unit",
+      "command": "node --test --test-concurrency=2 tests/unit/main-process/application-recovery.test.js tests/unit/main-process/publication-recovery-owner.test.js tests/unit/main-process/publication-recovery-archive-owner.test.js tests/unit/main-process/publication-recovery-producer-contracts.test.js tests/unit/main-process/prepared-resource-scope.test.js tests/unit/main-process/archive-aware-prepared-resource-entry.test.js tests/unit/main-process/position-task-adapter.test.js tests/unit/main-process/archive-terminal-route-registry.test.js tests/unit/main-process/task-adapter-composition.test.js",
+      "exitCode": null,
+      "result": "126/126 PASS, 0 skipped; direct test exit not separately captured: original shell tailed log after test",
+      "log": "g1-g2-tests.log"
+    },
+    {
+      "id": "g1-g2-entry-unit",
+      "command": "node --test --test-concurrency=2 tests/unit/main-process/biz-op-v327-publication-owner.test.js tests/unit/main-process/toolbox-output-publication-dispatch.test.js tests/unit/main-process/toolbox-archive-integration.test.js tests/unit/main-process/vcc-financial-op-output-recovery.test.js tests/unit/main-process/position-startup-task-recovery.test.js",
+      "exitCode": null,
+      "result": "40/40 PASS, 0 skipped; direct test exit not separately captured: original shell tailed log after test",
+      "log": "g1-g2-entry-tests.log"
+    },
+    {
+      "id": "g1-integration",
+      "command": "node scripts/integration/application-recovery-governance.js",
+      "exitCode": 0,
+      "result": "4/4 PASS",
+      "log": "g1-integration.log"
+    },
+    {
+      "id": "g2-integration",
+      "command": "node scripts/integration/task-adapter-recovery.js",
+      "exitCode": 0,
+      "result": "4/4 PASS",
+      "log": "g2-integration.log"
+    },
+    {
+      "id": "g5-integration",
+      "command": "node scripts/integration/biz-op-query-boundary.js",
+      "exitCode": 0,
+      "result": "9/9 PASS",
+      "log": "g5-integration.log"
+    },
+    {
+      "id": "g6-integration",
+      "command": "node scripts/integration/acquiring-worker-boundary.js",
+      "exitCode": 0,
+      "result": "14/14 PASS",
+      "log": "g6-integration.log"
+    },
+    {
+      "id": "g4-g5-g6-unit",
+      "command": "node --test --test-concurrency=2 tests/unit/backend/xlsx/*.test.js tests/unit/backend/archive-blob-reference-query.test.js tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js tests/unit/main-process/biz-op-v327-catalog-queries.test.js tests/unit/main-process/acquiring-multiworker-service.test.js tests/unit/main-process/acquiring-main-lock-ownership.test.js tests/unit/main-process/run-check-multiworker.test.js",
+      "exitCode": 0,
+      "result": "145/145 PASS, 0 skipped",
+      "log": "g4-g5-g6-tests.log"
+    },
+    {
+      "id": "g3-regression-probe",
+      "command": "node /tmp/release-g3-bank-close-probe.cjs",
+      "exitCode": 0,
+      "result": "Defect-confirming probe: 5/5 reproduce MODAL_OUTCOME_INVALID; 4 production-reachable refund/C3 cases, gateway command excluded from principal finding",
+      "log": "g3-bank-close-probe.json"
+    },
+    {
+      "id": "g3-electron-probe",
+      "command": "env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron /tmp/release-g3-bank-real-click.cjs",
+      "exitCode": 0,
+      "result": "Defect confirmed by real Electron DOM/controller/confirm factory/bridge/host click; business API controlled; no product Main or real data",
+      "log": "g3-bank-real-click.log"
+    },
+    {
+      "id": "g3-existing-tests",
+      "command": "node --test tests/unit/renderer-refund-prompt-orchestration.test.js tests/unit/renderer-refund-ready-guard.test.js",
+      "exitCode": 0,
+      "result": "33/33 PASS; existing tests miss R1",
+      "log": "g3-refund-existing-tests.log"
+    }
+  ],
+  "limits": [
+    "Full release-check stopped at architecture; no current full unit/integration PASS",
+    "Electron sandbox launch initially SIGABRT; final authorized escalated isolated launch completed; intermediate probe import issue corrected",
+    "G1/G2 dispatch test included existing 256 MiB hash/target-drift case",
+    "No Windows, installer, Excel/WPS, real financial-data acceptance or complete product Main GUI validation"
+  ],
+  "evidenceSha256": {
+    "architecture-check.json": "b93ddb2350cebe94539f5e31102369d68dc22d1887ad5ff96e7ef42c79c2be2e",
+    "architecture-check.log": "6df695485cad9f2050838cca2beed16159471c96ea12c62cdb9c5e3b7bb738fc",
+    "architecture-summary.json": "53da1cc3e559e452851c6782b2f9308cc7d4b9c3ff9cf9ffb6ab25bfcc437d91",
+    "architecture-tests.log": "252d4f07329c362f1620014f14cbe1129c7cac894e4de21bd76d480a4f4c555f",
+    "descriptor-integration.log": "4e48d65ae09ac002feafb965e5674d769cf47daa9ea423723ca36deeabc4fa09",
+    "descriptor-tests.log": "955fb1f13dc3276dcf864c8faabb5a43c5a2ef4569f348eba997f8577a0c6f1b",
+    "execution-manifest.log": "e69bd022e5a337f618fac1593cbcb793a5c7b4566ecbaebc096fce4dc6e6589b",
+    "g1-g2-entry-tests.log": "5343fa663c4c2112aef1400f027135bf7737a0a0ef686401c57c4d7aeba96391",
+    "g1-g2-tests.log": "a96a5e012c87dfa34c1182665f7fb081971806527b6efed6c85c36f10359c1bf",
+    "g1-integration.log": "b524f5847be1a0761464a53115d4926054dea618754d4511dc33749c3f56c4a6",
+    "g2-integration.log": "9d90f6fbc1a685aada1307198962722b22cdfd4606ea9c2770bfc51b5ebcb566",
+    "g3-bank-close-probe.cjs": "ca4c65249da087c85c81d4734f3487196778425c0437c5e7863620dab076e278",
+    "g3-bank-close-probe.json": "e4521cac629348a53931c550f3339b66b5baee31bf2d45f74620e51582d16a64",
+    "g3-bank-real-click.cjs": "b043d86e1a9207d9c0b3810290d2e7c7eb3b70e9a82042e1ab37260ebd4f6500",
+    "g3-bank-real-click.log": "4be9a23e51a1b0e48604938aed6372d1c745db40a0bf166dfd77598036d5374e",
+    "g3-refund-existing-tests.log": "4eed01bd858b19f5ad6b693a86e4e242bef3ca5836076b349e52fefeacfc915d",
+    "g4-g5-g6-tests.log": "c4f28244e011f51f9705dd265f7930386917f7d6899056275e4b5c335efdbc86",
+    "g5-integration.log": "f6ffb6e79e95f4bc4fc6b27da520ec8533f82434ed470ca45427977e6aad36bf",
+    "g6-integration.log": "1cce39de41ef2766b1c7af9411557507f0f0905b7af698001bf95c06fe8fd2fa",
+    "input-manifest.json": "96427633cf2d820ca98aa0d95386c035b93e4805ae752cfe8fd6ba82ef219fe3",
+    "preservation.json": "45b9f199b54947ed0139830d463096e95904f6a38cf42417399cdb30b51a3470",
+    "release-check.log": "ef339e33943e434307137ed03f4281b7de8e56ebdc305d9d9b4437e5be75e1c1"
+  }
+}

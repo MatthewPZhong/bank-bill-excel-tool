@@ -1,0 +1,46 @@
+✔ parseRowXml: r 为第一个属性（基线，不回归） (0.842042ms)
+✔ parseRowXml: 🔴 s 在 r 之前的 styled cell — 金额不漏读（Critical 回归） (0.05775ms)
+✔ parseRowXml: t 在 r 之前的 shared string cell — 类型正确解析 (0.048167ms)
+✔ parseRowXml: 多属性任意顺序(s,t,r) + 大额金额精确（资金红线） (0.045583ms)
+✔ parseRowXml: 自闭合空 cell <c r=".."/> 不影响相邻列 (0.049792ms)
+✔ parseRowXml: 自闭合 cell 属性顺序无关 <c s=.. r=../> (0.036917ms)
+✔ parseRowXml: <v xml:space="preserve"> 含空格字符串不丢（BUG3 回归） (0.051209ms)
+✔ parseRowXml: <v> 带属性的数字单元格不漏读（资金红线，<v> 属性容忍） (0.029167ms)
+✔ 正常文件：所有 entry 在限内 → 不抛 (8.82ms)
+✔ ≥2^31：中央目录 uncompressedSize 改成 2^31 → 抛 FileValidationError 含中文指引 (2.364875ms)
+✔ 损坏 zip：非合法 zip → fail-open 放行（不抛） (0.889166ms)
+✔ zip64：32 位字段 0xffffffff + zip64 extra field 真值 ≥2^31 → 抛（走 64 位无符号正解） (2.378458ms)
+✔ 多 sheet：目标 sheet 小 + 其他 sheet 超限 + sheetEntryNames 只含目标 sheet → 放行（不误伤） (2.155333ms)
+✔ 多 sheet：目标 sheet 本身超限 + sheetEntryNames 含目标 sheet → 仍拦 (1.394875ms)
+✔ sharedStrings 恒检：sst 超限 + sheetEntryNames 只含某 sheet → 仍拦（三个调用方都 inflate sst） (0.956417ms)
+▶ 缺省/空 SST 目录不能回退到 cwd，溢出时拒绝并保留无关文件
+  ✔ undefined (69.391333ms)
+  ✔ null (58.57525ms)
+  ✔ '' (59.265292ms)
+  ✔ ' ' (61.274333ms)
+✔ 缺省/空 SST 目录不能回退到 cwd，溢出时拒绝并保留无关文件 (249.184792ms)
+✔ 共享 Rich Reader 缺省目录逐任务独立，关闭一个不破坏另一个或 cwd (83.651333ms)
+✔ 已存在的显式 SST 目录及 VCC Reader 失败清理均不得覆盖/删除用户文件 (15.75625ms)
+✔ 同一路径第二个读取任务拒绝接管，首个 SST 仍能读取和清理 (8.048833ms)
+✔ 部分 spill 创建失败也关闭已打开句柄并清理本次目录 (2.6845ms)
+▶ SST 解析失败和取消在溢出后清理私有目录
+  ✔ parse (7.78075ms)
+  ✔ cancel (12.129416ms)
+✔ SST 解析失败和取消在溢出后清理私有目录 (20.137083ms)
+✔ SST 目录出现无关文件时不递归删除，清理失败重复 close 仍报错 (2.066916ms)
+✔ SST 目录被替换时停止清理，显式保留模式仍保留自己的缓存 (2.984667ms)
+✔ OP_RAW 两份真实大 SST 原件连续读取并经 Publisher 发布，缓存清理不删除候选 (7138.466ms)
+✔ FLOW_RAW 两份真实大 SST 原件连续读取并经 Publisher 发布，缓存清理不删除候选 (7055.058667ms)
+✔ RAW 磁盘 SST 扫描期间 cancel，只关闭自有缓存并保留打开的 spool (1494.50225ms)
+✔ RAW 磁盘 SST 扫描期间 failure，只关闭自有缓存并保留打开的 spool (1568.889458ms)
+✔ 实际输出回读大 SST success，输出文件与 spool 均不属于缓存清理范围 (1073.982375ms)
+✔ 实际输出回读大 SST cancel，输出文件与 spool 均不属于缓存清理范围 (1095.665875ms)
+✔ 实际输出回读大 SST mismatch，输出文件与 spool 均不属于缓存清理范围 (1079.68325ms)
+ℹ tests 36
+ℹ suites 0
+ℹ pass 36
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 20815.575

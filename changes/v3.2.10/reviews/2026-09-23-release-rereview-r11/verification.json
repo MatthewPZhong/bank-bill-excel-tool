@@ -1,0 +1,69 @@
+{
+  "round": 11,
+  "result": "CHANGES_REQUESTED",
+  "scope": "Frozen release dirty candidate, R10 repair delta and bounded adjacent scenarios",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "frozenFiles": 4805,
+  "findings": [
+    {
+      "id": "RR11-01",
+      "priority": "P2",
+      "classification": "new-regression",
+      "file": "scripts/architecture/renderer-contracts.js",
+      "start": 220,
+      "end": 220,
+      "summary": "IPC parent branch proofs leak to members and suppress a possible default object"
+    },
+    {
+      "id": "RR11-02",
+      "priority": "P2",
+      "classification": "pre-existing-gap",
+      "file": "scripts/architecture/renderer-contracts.js",
+      "start": 181,
+      "end": 184,
+      "summary": "Array reordering drops visible writes to other fixed slots from source candidates"
+    }
+  ],
+  "previousOriginalCasesClosed": [
+    "RR10-01",
+    "RR10-02"
+  ],
+  "architectureTests": {
+    "executedThisRound": true,
+    "exitCode": 0,
+    "tests": 566,
+    "pass": 566,
+    "fail": 0,
+    "skipped": 0
+  },
+  "architectureCLI": {
+    "executedThisRound": true,
+    "exitCode": 0,
+    "active": 31,
+    "diagnostics": 0,
+    "staleExceptions": 0,
+    "parsed": 765,
+    "scanned": 765
+  },
+  "fullGate": {
+    "executedThisRound": false,
+    "reusedFrom": "changes/v3.2.10/reviews/2026-09-23-release-r10-repair/verification.json",
+    "matchedInputs": 1707,
+    "unitPass": 9340,
+    "unitFail": 0,
+    "windowsSkips": 4,
+    "integrationScriptsPassed": 68,
+    "countedIntegrationChecks": 2901
+  },
+  "probeEvidence": "evidence/probe-verification.json",
+  "preservation": "evidence/preservation-final.json",
+  "notVerified": [
+    "GUI",
+    "real Main business lifecycle",
+    "Windows real machine and installed package",
+    "Excel/WPS",
+    "release readiness"
+  ],
+  "sourceChangesThisRound": false
+}

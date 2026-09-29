@@ -4,13 +4,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { setImmediate: yieldToMessages } = require('node:timers/promises');
-const { openSingleSheetRichWorkbook } = require('../../backend/xlsx-rich-reader');
+const { openSingleSheetRichWorkbook } = require('../../backend/xlsx/rich-workbook');
 const { createCandidateRouter } = require('./candidate-router');
 const { detectHeader, createImportAdapter, cellText, CELL_CONTRACT_VERSION, RULE_VERSION } = require('./import-adapter');
 const { fail } = require('./contracts');
 
 const SST_MEMORY_BUDGET = 32 * 1024 * 1024;
 const SST_CACHE_MAX_BYTES = 32 * 1024 * 1024;
+const SST_LRU_MAX_ENTRIES = 8192;
 const ERROR_SAMPLE_ROWS = 1000;
 const ERROR_SAMPLE_BYTES = 8 * 1024 * 1024;
 
@@ -95,7 +96,7 @@ async function runImportPipeline({ payloadStore, taskRunId, intentDigest, candid
           sstTempRoot: path.join(payloadStore.prepareCandidate(taskRunId, candidateRef).directory, `sst-${file.order}`),
           memoryBudgetBytes: options.sstMemoryBudgetBytes ?? SST_MEMORY_BUDGET,
           cacheMaxBytes: options.sstCacheMaxBytes ?? SST_CACHE_MAX_BYTES,
-          lruMaxEntries: options.sstLruMaxEntries, cancelToken
+          lruMaxEntries: options.sstLruMaxEntries === undefined ? SST_LRU_MAX_ENTRIES : options.sstLruMaxEntries, cancelToken
         });
         await workbook.scan((row) => {
           safePoint();

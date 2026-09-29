@@ -1,0 +1,463 @@
+{
+  "beforeInputHashes": [
+    {
+      "path": "scripts/architecture/scan.js",
+      "sha256": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/contracts.js",
+      "sha256": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/rules.js",
+      "sha256": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/renderer-contracts.js",
+      "sha256": "f288b9b66558e1fee0ca9697c493aed3b60c5999fac6c0366b81041a46c4f082",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "sha256": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "match": true
+    }
+  ],
+  "currentInputHashes": [
+    {
+      "path": "scripts/architecture/scan.js",
+      "sha256": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be"
+    },
+    {
+      "path": "scripts/architecture/contracts.js",
+      "sha256": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f"
+    },
+    {
+      "path": "scripts/architecture/rules.js",
+      "sha256": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa"
+    },
+    {
+      "path": "scripts/architecture/renderer-contracts.js",
+      "sha256": "adc6b47bb07c2c66f0d41b09d42e6195ffa404587bf8b3faceda662ec1767072"
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "sha256": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316"
+    }
+  ],
+  "policy": [
+    {
+      "path": "architecture/boundaries.json",
+      "before": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+      "current": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+      "same": true
+    },
+    {
+      "path": "architecture/legacy-allowlist.json",
+      "before": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3",
+      "current": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3",
+      "same": true
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "before": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "current": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "same": true
+    },
+    {
+      "path": "scripts/architecture/policy-history.js",
+      "before": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+      "current": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+      "same": true
+    }
+  ],
+  "renderer": [
+    {
+      "name": "ipc-and-pure-data",
+      "expectedClean": true,
+      "source": "(async()=>{const {ipcRenderer}=require('electron');const info=await ipcRenderer.invoke('app:get-info');window.StatementController.createStatementController({initialInfo:info.enabled && [\"bank\",1]});})();",
+      "knownConservative": null,
+      "runtime": [
+        {
+          "flag": false,
+          "calledIpc": [
+            "app:get-info"
+          ],
+          "value": false,
+          "valueType": "boolean",
+          "isWholeApi": false
+        },
+        {
+          "flag": true,
+          "calledIpc": [
+            "app:get-info"
+          ],
+          "value": [
+            "bank",
+            1
+          ],
+          "valueType": "object",
+          "isWholeApi": false
+        }
+      ],
+      "scanner": {
+        "beforeR13": {
+          "digest": "0b36ec2d5d1510ee8a87c6f5da1056126719596f42bfdec5f816d3c21cdff715",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "9d36d294b385f2fdad319ce0e80e0952a7f10559e0c5b0989c078a1af07a5e0a",
+            "1fcfd4a1f1271ead6973cbde707120d4ccfad6307c18917ee5a12522c6a1a995",
+            "51f8aec527637114bd3713648b4e4b7f61b9c16f9bf2d1dfdc2c4749fa602094",
+            "1558fc985fc51ee885838b63272af4eff29ac229ff59b447b7d26e4fcbe42ff3",
+            "43cce229ffdc418fba35c7e80937ad2a0e6093470680375bb34f66ee2b4b509b",
+            "cc98daf918379e08cdaa56a559e4939ef260d4900d63db8495ae0358720c73a3"
+          ]
+        },
+        "current": {
+          "digest": "0b36ec2d5d1510ee8a87c6f5da1056126719596f42bfdec5f816d3c21cdff715",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "9d36d294b385f2fdad319ce0e80e0952a7f10559e0c5b0989c078a1af07a5e0a",
+            "1fcfd4a1f1271ead6973cbde707120d4ccfad6307c18917ee5a12522c6a1a995",
+            "51f8aec527637114bd3713648b4e4b7f61b9c16f9bf2d1dfdc2c4749fa602094",
+            "1558fc985fc51ee885838b63272af4eff29ac229ff59b447b7d26e4fcbe42ff3",
+            "43cce229ffdc418fba35c7e80937ad2a0e6093470680375bb34f66ee2b4b509b",
+            "cc98daf918379e08cdaa56a559e4939ef260d4900d63db8495ae0358720c73a3"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR13": [],
+      "current": []
+    },
+    {
+      "name": "ipc-and-whole-api",
+      "expectedClean": false,
+      "source": "(async()=>{const {ipcRenderer}=require('electron');const info=await ipcRenderer.invoke('app:get-info');window.StatementController.createStatementController({initialInfo:info.enabled && window.desktopApi});})();",
+      "knownConservative": null,
+      "runtime": [
+        {
+          "flag": false,
+          "calledIpc": [
+            "app:get-info"
+          ],
+          "value": false,
+          "valueType": "boolean",
+          "isWholeApi": false
+        },
+        {
+          "flag": true,
+          "calledIpc": [
+            "app:get-info"
+          ],
+          "value": {},
+          "valueType": "object",
+          "isWholeApi": true
+        }
+      ],
+      "scanner": {
+        "beforeR13": {
+          "digest": "2b398e8634a140328911626329a3abe75d8c5a592b4aa99fb5c76cd8821bc365",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "e6476921a657d75012f1e673bf6fa1a08e6953c9e43f0e64f4b6b167c93c4994",
+            "1fcfd4a1f1271ead6973cbde707120d4ccfad6307c18917ee5a12522c6a1a995",
+            "51f8aec527637114bd3713648b4e4b7f61b9c16f9bf2d1dfdc2c4749fa602094",
+            "d916cef65c5df648ca1d9c4851e84d8a1c43fd005dbcdee4fbaae6e037a98a5b",
+            "43cce229ffdc418fba35c7e80937ad2a0e6093470680375bb34f66ee2b4b509b",
+            "cc98daf918379e08cdaa56a559e4939ef260d4900d63db8495ae0358720c73a3",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271"
+          ]
+        },
+        "current": {
+          "digest": "2b398e8634a140328911626329a3abe75d8c5a592b4aa99fb5c76cd8821bc365",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "e6476921a657d75012f1e673bf6fa1a08e6953c9e43f0e64f4b6b167c93c4994",
+            "1fcfd4a1f1271ead6973cbde707120d4ccfad6307c18917ee5a12522c6a1a995",
+            "51f8aec527637114bd3713648b4e4b7f61b9c16f9bf2d1dfdc2c4749fa602094",
+            "d916cef65c5df648ca1d9c4851e84d8a1c43fd005dbcdee4fbaae6e037a98a5b",
+            "43cce229ffdc418fba35c7e80937ad2a0e6093470680375bb34f66ee2b4b509b",
+            "cc98daf918379e08cdaa56a559e4939ef260d4900d63db8495ae0358720c73a3",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR13": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 103,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "d916cef65c5df648ca1d9c4851e84d8a1c43fd005dbcdee4fbaae6e037a98a5b",
+          "functionPath": "<anonymous:1>"
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 103,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "d916cef65c5df648ca1d9c4851e84d8a1c43fd005dbcdee4fbaae6e037a98a5b",
+          "functionPath": "<anonymous:1>"
+        }
+      ]
+    },
+    {
+      "name": "category-falsy-and-api",
+      "expectedClean": true,
+      "source": "window.ReconIdFixController.createReconIdFixController({config:{initialBillCategory:0 && window.desktopApi}});",
+      "knownConservative": null,
+      "runtime": [
+        {
+          "flag": false,
+          "calledIpc": [],
+          "value": 0,
+          "valueType": "number",
+          "isWholeApi": false
+        },
+        {
+          "flag": true,
+          "calledIpc": [],
+          "value": 0,
+          "valueType": "number",
+          "isWholeApi": false
+        }
+      ],
+      "scanner": {
+        "beforeR13": {
+          "digest": "9e6636611cc9417323402f27bd48640f004634d43c428afba4699ce24858a41b",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "1ad9122d8f367a8c9d2a6c7fe39dd9cff05d4f853a806bc75ea18f7e8e6de323",
+            "616a414d13ea35f52408c10e8722609177a949c628c953a8e9e4d154d17471f4",
+            "9daaead24783dfc949af0fed056d286ddf129fdbb6c171d7679bd2a270c426f9",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271"
+          ]
+        },
+        "current": {
+          "digest": "9e6636611cc9417323402f27bd48640f004634d43c428afba4699ce24858a41b",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "1ad9122d8f367a8c9d2a6c7fe39dd9cff05d4f853a806bc75ea18f7e8e6de323",
+            "616a414d13ea35f52408c10e8722609177a949c628c953a8e9e4d154d17471f4",
+            "9daaead24783dfc949af0fed056d286ddf129fdbb6c171d7679bd2a270c426f9",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR13": [],
+      "current": []
+    },
+    {
+      "name": "category-truthy-and-data",
+      "expectedClean": true,
+      "source": "window.ReconIdFixController.createReconIdFixController({config:{initialBillCategory:({}) && \"business\"}});",
+      "knownConservative": null,
+      "runtime": [
+        {
+          "flag": false,
+          "calledIpc": [],
+          "value": "business",
+          "valueType": "string",
+          "isWholeApi": false
+        },
+        {
+          "flag": true,
+          "calledIpc": [],
+          "value": "business",
+          "valueType": "string",
+          "isWholeApi": false
+        }
+      ],
+      "scanner": {
+        "beforeR13": {
+          "digest": "eac94788b778883d3ea2f090c3174f6ebd5e50183e3c7b24a56730cdb2f3511a",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "7c35687428322ae73924cf5003d8dce5bbaf28009023c15179c60fe9519a2f54",
+            "616a414d13ea35f52408c10e8722609177a949c628c953a8e9e4d154d17471f4",
+            "9daaead24783dfc949af0fed056d286ddf129fdbb6c171d7679bd2a270c426f9"
+          ]
+        },
+        "current": {
+          "digest": "eac94788b778883d3ea2f090c3174f6ebd5e50183e3c7b24a56730cdb2f3511a",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "7c35687428322ae73924cf5003d8dce5bbaf28009023c15179c60fe9519a2f54",
+            "616a414d13ea35f52408c10e8722609177a949c628c953a8e9e4d154d17471f4",
+            "9daaead24783dfc949af0fed056d286ddf129fdbb6c171d7679bd2a270c426f9"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR13": [],
+      "current": []
+    },
+    {
+      "name": "conditional-distinct-pure-values",
+      "expectedClean": false,
+      "source": "window.ReconIdFixController.createReconIdFixController({config:{initialBillCategory:flag ? \"business\" : \"gateway\"}});",
+      "knownConservative": "both branches are pure strings but current and prior reject ambiguous value",
+      "runtime": [
+        {
+          "flag": false,
+          "calledIpc": [],
+          "value": "gateway",
+          "valueType": "string",
+          "isWholeApi": false
+        },
+        {
+          "flag": true,
+          "calledIpc": [],
+          "value": "business",
+          "valueType": "string",
+          "isWholeApi": false
+        }
+      ],
+      "scanner": {
+        "beforeR13": {
+          "digest": "449918a76b4e753f3ee77a9a8e172b714c66e438d7820bdf5173a3333d7caa48",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "c7c2eaaa858d11e64b5a352b349a8522151fafdcd019fc16eec3ba5e52b1df57",
+            "616a414d13ea35f52408c10e8722609177a949c628c953a8e9e4d154d17471f4",
+            "9daaead24783dfc949af0fed056d286ddf129fdbb6c171d7679bd2a270c426f9"
+          ]
+        },
+        "current": {
+          "digest": "449918a76b4e753f3ee77a9a8e172b714c66e438d7820bdf5173a3333d7caa48",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "c7c2eaaa858d11e64b5a352b349a8522151fafdcd019fc16eec3ba5e52b1df57",
+            "616a414d13ea35f52408c10e8722609177a949c628c953a8e9e4d154d17471f4",
+            "9daaead24783dfc949af0fed056d286ddf129fdbb6c171d7679bd2a270c426f9"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR13": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-recon-id-fix",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 0,
+          "message": "工厂字段 config.initialBillCategory 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "c7c2eaaa858d11e64b5a352b349a8522151fafdcd019fc16eec3ba5e52b1df57",
+          "functionPath": null
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-recon-id-fix",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 0,
+          "message": "工厂字段 config.initialBillCategory 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "c7c2eaaa858d11e64b5a352b349a8522151fafdcd019fc16eec3ba5e52b1df57",
+          "functionPath": null
+        }
+      ]
+    },
+    {
+      "name": "conditional-pure-or-api",
+      "expectedClean": false,
+      "source": "window.ReconIdFixController.createReconIdFixController({config:{initialBillCategory:flag ? \"business\" : window.desktopApi}});",
+      "knownConservative": null,
+      "runtime": [
+        {
+          "flag": false,
+          "calledIpc": [],
+          "value": {},
+          "valueType": "object",
+          "isWholeApi": true
+        },
+        {
+          "flag": true,
+          "calledIpc": [],
+          "value": "business",
+          "valueType": "string",
+          "isWholeApi": false
+        }
+      ],
+      "scanner": {
+        "beforeR13": {
+          "digest": "151a19823e5f2e393dd5808c29a1501c8b8d0895e6affc0c2155ad5497576762",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "542efdbd5b5d31ecadec90c36101ca3faa548e5e05d6b1b84a848a22c8c0ba34",
+            "616a414d13ea35f52408c10e8722609177a949c628c953a8e9e4d154d17471f4",
+            "9daaead24783dfc949af0fed056d286ddf129fdbb6c171d7679bd2a270c426f9",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271"
+          ]
+        },
+        "current": {
+          "digest": "151a19823e5f2e393dd5808c29a1501c8b8d0895e6affc0c2155ad5497576762",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "542efdbd5b5d31ecadec90c36101ca3faa548e5e05d6b1b84a848a22c8c0ba34",
+            "616a414d13ea35f52408c10e8722609177a949c628c953a8e9e4d154d17471f4",
+            "9daaead24783dfc949af0fed056d286ddf129fdbb6c171d7679bd2a270c426f9",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR13": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-recon-id-fix",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 0,
+          "message": "工厂字段 config.initialBillCategory 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "542efdbd5b5d31ecadec90c36101ca3faa548e5e05d6b1b84a848a22c8c0ba34",
+          "functionPath": null
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-recon-id-fix",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 0,
+          "message": "工厂字段 config.initialBillCategory 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "542efdbd5b5d31ecadec90c36101ca3faa548e5e05d6b1b84a848a22c8c0ba34",
+          "functionPath": null
+        }
+      ]
+    }
+  ],
+  "query": []
+}

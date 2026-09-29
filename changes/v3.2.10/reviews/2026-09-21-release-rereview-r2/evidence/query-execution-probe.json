@@ -1,0 +1,173 @@
+[
+  {
+    "name": "direct",
+    "read": "const h=require('./helper');exports.read=c=>h.query(c);",
+    "helper": "exports.query=c=>c.db.prepare('SELECT 1').all();",
+    "runtimeSql": [
+      "SELECT 1"
+    ],
+    "runtimeResult": [
+      {
+        "1": 1
+      }
+    ],
+    "before": [
+      {
+        "rule": "ARCH-BIZOP-QUERY",
+        "from": "src/helper.js",
+        "line": 1,
+        "functionPath": "query",
+        "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository"
+      }
+    ],
+    "current": [
+      {
+        "rule": "ARCH-BIZOP-QUERY",
+        "from": "src/helper.js",
+        "line": 1,
+        "functionPath": "query",
+        "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository"
+      }
+    ]
+  },
+  {
+    "name": "class-this",
+    "read": "const h=require('./helper');exports.read=c=>h.make().read(c);",
+    "helper": "class Reader{query(c){return c.db.prepare('SELECT 1').all();}read(c){return this.query(c);}}exports.make=()=>new Reader();",
+    "runtimeSql": [
+      "SELECT 1"
+    ],
+    "runtimeResult": [
+      {
+        "1": 1
+      }
+    ],
+    "before": [
+      {
+        "rule": "ARCH-BIZOP-QUERY",
+        "from": "src/helper.js",
+        "line": 1,
+        "functionPath": "query",
+        "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository"
+      }
+    ],
+    "current": []
+  },
+  {
+    "name": "object-this",
+    "read": "const h=require('./helper');exports.read=c=>h.make().read(c);",
+    "helper": "exports.make=()=>({query(c){return c.db.prepare('SELECT 1').all();},read(c){return this.query(c);}});",
+    "runtimeSql": [
+      "SELECT 1"
+    ],
+    "runtimeResult": [
+      {
+        "1": 1
+      }
+    ],
+    "before": [
+      {
+        "rule": "ARCH-BIZOP-QUERY",
+        "from": "src/helper.js",
+        "line": 1,
+        "functionPath": "make.query",
+        "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository"
+      }
+    ],
+    "current": []
+  },
+  {
+    "name": "static-array",
+    "read": "const h=require('./helper');exports.read=c=>h.read(c);",
+    "helper": "const query=c=>c.db.prepare('SELECT 1').all();const handlers=[query];exports.read=c=>handlers[0](c);",
+    "runtimeSql": [
+      "SELECT 1"
+    ],
+    "runtimeResult": [
+      {
+        "1": 1
+      }
+    ],
+    "before": [
+      {
+        "rule": "ARCH-BIZOP-QUERY",
+        "from": "src/helper.js",
+        "line": 1,
+        "functionPath": "query",
+        "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository"
+      }
+    ],
+    "current": []
+  },
+  {
+    "name": "array-destructuring",
+    "read": "const h=require('./helper');exports.read=c=>h.read(c);",
+    "helper": "const query=c=>c.db.prepare('SELECT 1').all();const [run]=[query];exports.read=c=>run(c);",
+    "runtimeSql": [
+      "SELECT 1"
+    ],
+    "runtimeResult": [
+      {
+        "1": 1
+      }
+    ],
+    "before": [
+      {
+        "rule": "ARCH-BIZOP-QUERY",
+        "from": "src/helper.js",
+        "line": 1,
+        "functionPath": "query",
+        "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository"
+      }
+    ],
+    "current": []
+  },
+  {
+    "name": "default-callback",
+    "read": "const h=require('./helper');exports.read=c=>h.read(c);",
+    "helper": "const query=c=>c.db.prepare('SELECT 1').all();exports.read=(c,fn=query)=>fn(c);",
+    "runtimeSql": [
+      "SELECT 1"
+    ],
+    "runtimeResult": [
+      {
+        "1": 1
+      }
+    ],
+    "before": [
+      {
+        "rule": "ARCH-BIZOP-QUERY",
+        "from": "src/helper.js",
+        "line": 1,
+        "functionPath": "query",
+        "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository"
+      }
+    ],
+    "current": [
+      {
+        "rule": "ARCH-BIZOP-QUERY",
+        "from": "src/helper.js",
+        "line": 1,
+        "functionPath": "query",
+        "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository"
+      }
+    ]
+  },
+  {
+    "name": "safe",
+    "read": "const h=require('./helper');exports.read=c=>h.safe(c);",
+    "helper": "exports.query=c=>c.db.prepare('SELECT 1').all();exports.safe=()=>[];",
+    "runtimeSql": [],
+    "runtimeResult": [],
+    "before": [
+      {
+        "rule": "ARCH-BIZOP-QUERY",
+        "from": "src/helper.js",
+        "line": 1,
+        "functionPath": "query",
+        "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository"
+      }
+    ],
+    "current": []
+  }
+]

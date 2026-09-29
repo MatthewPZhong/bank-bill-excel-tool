@@ -1,0 +1,6 @@
+ .../implementation-notes.md                        |   44 ++++++
+ .../codex/v3.2.10-renderer-boundaries/techdoc.md   |   13 ++
+ .../fixtures/configuration-dialogs.js              |  146 ++++++++++++++++++++
+ src/renderer/README.md                             |    1 
+ src/renderer/dialogs/configuration.js              |  104 +++++++++-----
+ 5 files changed, 267 insertions(+), 41 deletions(-)

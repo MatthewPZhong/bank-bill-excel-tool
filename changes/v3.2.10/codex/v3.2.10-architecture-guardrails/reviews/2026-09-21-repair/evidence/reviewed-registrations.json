@@ -1,0 +1,81 @@
+{
+  "base": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "entries": [
+    {
+      "classification": "合法准确职责",
+      "line": 19399,
+      "rule": "ARCH-TASK-ADAPTER",
+      "from": "src/main.js",
+      "functionPath": "finalizeRecoveredPositionPending",
+      "callee": "getBatch",
+      "evidenceId": "3ca09ca56e0ad2c69db30be9cfcce7b356ae16f4f91cb151f4fcb769e9abad6c",
+      "reason": "读取 Archive repository 批次状态用于终态收口；不是 Position 私有 pending/settlement API，准确位置保持既有公共协调职责。"
+    },
+    {
+      "classification": "合法准确职责",
+      "line": 19674,
+      "rule": "ARCH-TASK-ADAPTER",
+      "from": "src/main.js",
+      "functionPath": "getPositionReconciliationService",
+      "callee": "flushOutbox",
+      "evidenceId": "f07be0037f18623d8a5f95557f0d7bd699ccc0fb6804dd2f4a58768991c8db77",
+      "reason": "领域 service 构造时触发 Archive 公共 outbox 刷新；该准确公共调用不属于 Position 私有状态操作。"
+    },
+    {
+      "classification": "合法准确职责",
+      "line": 21737,
+      "rule": "ARCH-TASK-ADAPTER",
+      "from": "src/main.js",
+      "functionPath": "positionArchiveProtectedStagingPaths",
+      "callee": "protectedPaths.concat",
+      "evidenceId": "26691b6ae5b3b19a1c38c6055a92823ada270ce6ad8b6f38e2a85f397336502e",
+      "reason": "拼接持久保护路径数组与已用 Array.isArray 核对的活动路径；此处是数据拼接而非调用领域状态机。"
+    },
+    {
+      "classification": "合法准确职责",
+      "line": 22424,
+      "rule": "ARCH-TASK-ADAPTER",
+      "from": "src/main.js",
+      "functionPath": "assertTaskPolicyNotHeld",
+      "callee": "actionTaskBindingRegistry.allowedTaskKeys",
+      "evidenceId": "10256647bfc2b1371366ab741e088aeab85075b5c4547384f43eee2c8cd85d07",
+      "reason": "读取启动期 initializeActionTaskBindingStartup 返回的绑定注册表，属于公共 task policy 查询，不改变 Position 状态。"
+    },
+    {
+      "classification": "合法准确职责",
+      "line": 99,
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "functionPath": "runWorkerJob.<anonymous:1>.<anonymous:4>",
+      "callee": "onWorkerExit",
+      "evidenceId": "ab2f86aeb298c450cbd7c00111eda42c2674625ec54750a7dd852fdae0544f5b",
+      "reason": "worker exit 事件的通知回调仅报告 jobId/op/code；它不发送 worker operation，不执行恢复。"
+    },
+    {
+      "classification": "固定基线待迁移覆盖债务",
+      "line": 108,
+      "id": "baseline-recovery-dynamic-operation-108",
+      "rule": "ARCH-STATIC-COVERAGE",
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "originalCommit": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+      "reason": "v3.2.9 旧 worker transport 从参数转发 op，尚未拥有 G1 授权事务合同；新检查发现的固定基线覆盖债务。",
+      "governance": "G1",
+      "removeWhen": "G1 在固定 release 候选完成授权 dispatcher 迁移并验证该位置后删除；active 不允许沿用本例外。",
+      "evidenceId": "3420e9da5eca5d5ceaba4892b7f4b35ce02f1cac7bd0ae70071ebdefce14b5ad",
+      "functionPath": "runWorkerJob.<anonymous:1>"
+    },
+    {
+      "classification": "固定基线待迁移覆盖债务",
+      "line": 124,
+      "id": "baseline-recovery-dynamic-operation-124",
+      "rule": "ARCH-STATIC-COVERAGE",
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "originalCommit": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+      "reason": "v3.2.9 旧 execute 向 runWorkerJob 转发动态 op；G1 激活时须以实际授权事务或静态候选替代。",
+      "governance": "G1",
+      "removeWhen": "G1 在固定 release 候选完成授权 dispatcher 迁移并验证该位置后删除；active 不允许沿用本例外。",
+      "evidenceId": "950debb2b71c4842305e3692cc3d91c23c84e53c02a5a93e2e92d4d31d267228",
+      "functionPath": "createToolboxPublicationDispatcher.execute"
+    }
+  ]
+}

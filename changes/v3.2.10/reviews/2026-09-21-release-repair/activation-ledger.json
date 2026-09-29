@@ -1,0 +1,596 @@
+{
+  "result": "PASS: all 39 unique behavior evidence entries are covered by the completed full gate",
+  "boundaries": [
+    {
+      "boundaryId": "production-graph",
+      "state": "active",
+      "evidence": []
+    },
+    {
+      "boundaryId": "platform-core",
+      "state": "active",
+      "evidence": []
+    },
+    {
+      "boundaryId": "vcc-mapped-lineage",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/main-process/vcc-financial-op-dataset-writer.test.js",
+          "exists": true,
+          "runner": "unit"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-modal-owner",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/renderer/modal-host.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/renderer/toolbox-modal.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-bank-statement",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/renderer/scenario-change-routing.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/renderer/scenario-controller-feedback.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-recon-id-fix",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/renderer/scenario-change-routing.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/renderer/scenario-controller-feedback.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-pre-fund",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/renderer/r4-controllers.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/renderer/r4-domain-controllers.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-bank-bu",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/renderer/r4-controllers.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/renderer/r4-domain-controllers.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-duplicate-inbound",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/renderer/r4-controllers.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/renderer/r4-domain-controllers.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-acquiring",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/renderer/r4-controllers.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/renderer/r4-domain-controllers.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-vcc-op-calc",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/renderer/vcc-op-calc-source-binding.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/renderer/r4-domain-controllers.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-biz-op-legacy",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/renderer/r4-controllers.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/renderer/r4-domain-controllers.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-statement",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/renderer/configuration-services.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-new-account",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/renderer/configuration-services.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-pending",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/renderer/r4-controllers.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/renderer/r4-domain-controllers.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-position",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-vcc-financial-op",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-biz-op-v327",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/main-process/biz-op-v329-renderer.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-dialog-scenarios",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/renderer/scenario-change-routing.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/renderer/scenario-write-boundary.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-dialog-configuration",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/renderer/configuration-services.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-services",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/renderer/module-router.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/renderer/scenario-command-service.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/renderer/scenario-change-routing.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/renderer/configuration-services.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "shared-xlsx",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/backend/xlsx/legacy-compatibility.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/backend/xlsx/rich-workbook-contract.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/backend/xlsx/consumer-options.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/backend/xlsx/shared-strings-contract.test.js",
+          "exists": true,
+          "runner": "unit"
+        }
+      ]
+    },
+    {
+      "boundaryId": "publication-recovery-entry",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/main-process/publication-recovery-owner.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/main-process/publication-recovery-producer-contracts.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/main-process/application-recovery.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/architecture/release-policy-alignment.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "scripts/integration/application-recovery-governance.js",
+          "exists": true,
+          "runner": "integration"
+        }
+      ]
+    },
+    {
+      "boundaryId": "bizop-recovery-private",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/main-process/application-recovery.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/main-process/publication-recovery-owner.test.js",
+          "exists": true,
+          "runner": "unit"
+        }
+      ]
+    },
+    {
+      "boundaryId": "business-task-adapters",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/main-process/task-adapters.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/main-process/prepared-resource-scope.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/main-process/archive-aware-prepared-resource-entry.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/main-process/position-task-adapter.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/main-process/archive-terminal-route-registry.test.js",
+          "exists": true,
+          "runner": "unit"
+        }
+      ]
+    },
+    {
+      "boundaryId": "bizop-query-q1",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/main-process/biz-op-v327-delete-main.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/backend/archive-blob-reference-query.test.js",
+          "exists": true,
+          "runner": "unit"
+        }
+      ]
+    },
+    {
+      "boundaryId": "bizop-query-q2",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/main-process/biz-op-v327-catalog-queries.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/main-process/biz-op-v327-compute-main.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/main-process/biz-op-v327-export-main.test.js",
+          "exists": true,
+          "runner": "unit"
+        }
+      ]
+    },
+    {
+      "boundaryId": "bizop-query-q3",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/main-process/biz-op-v327-catalog-queries.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/main-process/biz-op-v327-delete-main.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/main-process/biz-op-v327-import-main.test.js",
+          "exists": true,
+          "runner": "unit"
+        }
+      ]
+    },
+    {
+      "boundaryId": "descriptor-composition",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/main-process/execution-descriptor-contract.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/main-process/execution-descriptor-equivalence.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/main-process/execution-descriptor-resource-profiles.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "tests/unit/main-process/execution-descriptor-extension.test.js",
+          "exists": true,
+          "runner": "unit"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-dialog-app-settings",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    },
+    {
+      "boundaryId": "renderer-dialog-toolbox",
+      "state": "active",
+      "evidence": [
+        {
+          "path": "tests/unit/renderer/toolbox-modal.test.js",
+          "exists": true,
+          "runner": "unit"
+        },
+        {
+          "path": "scripts/test-renderer-lifecycle.js",
+          "exists": true,
+          "runner": "renderer-lifecycle integration wrapper"
+        }
+      ]
+    }
+  ],
+  "verification": "verification.json",
+  "limitations": "自动执行与机器激活不替代真实产品及平台人工验收。"
+}

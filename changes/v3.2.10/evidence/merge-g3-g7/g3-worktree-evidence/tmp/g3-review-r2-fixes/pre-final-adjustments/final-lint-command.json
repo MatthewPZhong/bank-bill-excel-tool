@@ -1,0 +1,11 @@
+{
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries",
+  "command": [
+    "npm",
+    "run",
+    "lint"
+  ],
+  "exitCode": 0,
+  "elapsedSeconds": 3.363,
+  "log": "final-lint.log"
+}

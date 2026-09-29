@@ -9,8 +9,8 @@ const {
   createToolboxCell,
   createToolboxRow,
   createToolboxSheetMeta
-} = require('./model');
-const { SourceStyleRegistry } = require('./style-registry');
+} = require('../xlsx/model');
+const { SourceStyleRegistry } = require('../xlsx/style-registry');
 
 const CSV_SHEET_NAME = 'CSV';
 const FILE_READ_MESSAGE = '文件为空或不可读，请重新导入';

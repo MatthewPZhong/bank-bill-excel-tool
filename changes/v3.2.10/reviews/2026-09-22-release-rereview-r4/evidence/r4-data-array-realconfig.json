@@ -1,0 +1,37 @@
+{
+  "baselineViolations": [],
+  "results": [
+    {
+      "name": "array_parameter_api",
+      "source": "function r4Mount(values){window.StatementController.createStatementController({initialInfo:[...values]});}r4Mount([window.desktopApi]);",
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/renderer.js",
+          "to": null,
+          "line": 2318,
+          "column": 25,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "functionPath": "r4Mount"
+        }
+      ]
+    },
+    {
+      "name": "array_factory_api",
+      "source": "function r4Values(){return [window.desktopApi];}window.StatementController.createStatementController({initialInfo:[...r4Values()]});",
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/renderer.js",
+          "to": null,
+          "line": 2318,
+          "column": 48,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "functionPath": null
+        }
+      ]
+    }
+  ]
+}

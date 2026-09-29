@@ -1,0 +1,66 @@
+[
+  {
+    "scanner": "before",
+    "name": "and-or-provided",
+    "source": "const reviewShared={run(){}};const reviewProvided={run(){}};function selectReviewApi(api=reviewShared){return api;}function forwardReviewApi(api){return api;}async function runReviewScenario(){const reviewInfo=await window.desktopApi.app.getInfo();const reviewOther=selectReviewApi((undefined && reviewProvided) || reviewProvided);reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewShared});return reviewOther===reviewShared;}runReviewScenario();",
+    "baseViolations": 0,
+    "probeViolations": [
+      {
+        "rule": "ARCH-RENDERER-SCOPE",
+        "boundaryId": "renderer-bank-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 387,
+        "message": "scoped api 未授权字段 outsideScope",
+        "functionPath": "runReviewScenario"
+      }
+    ],
+    "boundaryCount": 20,
+    "runtime": {
+      "ipcReads": 1,
+      "same": false,
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run"
+      ],
+      "whole": false,
+      "extraCallable": false
+    }
+  },
+  {
+    "scanner": "before",
+    "name": "and-or-shared",
+    "source": "const reviewShared={run(){}};const reviewProvided={run(){}};function selectReviewApi(api=reviewShared){return api;}function forwardReviewApi(api){return api;}async function runReviewScenario(){const reviewInfo=await window.desktopApi.app.getInfo();const reviewOther=selectReviewApi((undefined && reviewProvided) || reviewShared);reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewShared});return reviewOther===reviewShared;}runReviewScenario();",
+    "baseViolations": 0,
+    "probeViolations": [
+      {
+        "rule": "ARCH-STATIC-COVERAGE",
+        "boundaryId": "renderer-bank-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 385,
+        "message": "scoped api 未提供可解释方法集合",
+        "functionPath": "runReviewScenario"
+      }
+    ],
+    "boundaryCount": 20,
+    "runtime": {
+      "ipcReads": 1,
+      "same": true,
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run",
+        "outsideScope"
+      ],
+      "whole": false,
+      "extraCallable": true,
+      "extraResult": true
+    }
+  }
+]

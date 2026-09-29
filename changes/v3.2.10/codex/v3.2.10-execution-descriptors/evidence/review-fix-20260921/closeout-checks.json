@@ -1,0 +1,11 @@
+{
+  "recordedAt": "2026-09-20T17:53:41.800130+00:00",
+  "head": "8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05",
+  "sourceFilesVerified": 133,
+  "fixFilesVerified": 9,
+  "manifestSourceHashesVerified": 42,
+  "fullGateExitCode": 0,
+  "validationSha256": "edd96233a96b1e54f86826e9ef72498a26468b47de288ad0bb8e8d93e729a010",
+  "deliverySha256": "99b66208567e6d21f8997ed1c28a645300a8d455b14d6b3c3b5ad7871435c397",
+  "finalLocalLinksVerified": 91
+}

@@ -1,0 +1,20 @@
+{
+  "sourceCommit": "8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05",
+  "historicalProjectionEqualsApproved": true,
+  "historicalRawPoliciesEqualFrozenFixture": true,
+  "provenanceHashesMatch": true,
+  "runtimePolicyCount": 49,
+  "capabilityCounts": {
+    "actionCount": 67,
+    "implementedCount": 49,
+    "legacyOnlyCount": 16,
+    "platformCanaryCount": 2
+  },
+  "productionCounts": {
+    "actionCount": 67,
+    "productionEnabledCount": 13,
+    "legacyEffectiveCount": 54
+  },
+  "currentDescriptorOrCatalogLoaded": false,
+  "result": "PASS"
+}

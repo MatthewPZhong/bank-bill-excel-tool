@@ -1,0 +1,77 @@
+{
+  "hashes": [
+    {
+      "path": "scripts/architecture/scan.js",
+      "sha256": "535d886315c1fadcd94f2812ca8376aaef3d698e68d4e0cdb8571d4985f2e01c",
+      "matchesPriorInput": true
+    },
+    {
+      "path": "scripts/architecture/rules.js",
+      "sha256": "a86a61a05494436163152ec4823f24d28768d8791e22f9cc1a3bbd38da5c2236",
+      "matchesPriorInput": true
+    },
+    {
+      "path": "scripts/architecture/contracts.js",
+      "sha256": "79d3259c3561c1357636ac37374e6d577b87d3de4500d96fb33e98a1884add66",
+      "matchesPriorInput": true
+    },
+    {
+      "path": "scripts/architecture/renderer-contracts.js",
+      "sha256": "62b385ab2e6ac3cded467fdf7da1e966de6ba27228baf7a606e99b475b2b1019",
+      "matchesPriorInput": true
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "sha256": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "matchesPriorInput": true
+    }
+  ],
+  "before": [
+    {
+      "name": "separate-factory-instances",
+      "source": "function provide(){return {read(){}};}const clean=provide();const other=provide();other.outsideScope=window.desktopApi.outsideScope;window.createController({api:clean});",
+      "runtime": {
+        "keys": [
+          "api"
+        ],
+        "apiKeys": [
+          "read"
+        ],
+        "uiKeys": [],
+        "whole": false,
+        "aliasReach": false
+      },
+      "violations": []
+    }
+  ],
+  "current": [
+    {
+      "name": "separate-factory-instances",
+      "source": "function provide(){return {read(){}};}const clean=provide();const other=provide();other.outsideScope=window.desktopApi.outsideScope;window.createController({api:clean});",
+      "runtime": {
+        "keys": [
+          "api"
+        ],
+        "apiKeys": [
+          "read"
+        ],
+        "uiKeys": [],
+        "whole": false,
+        "aliasReach": false
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-fixture",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 132,
+          "message": "scoped api 未授权字段 outsideScope",
+          "evidenceId": "73431a7895f3cdb7ac4e51dde4c6952ed4e4a11dfd0d92d3311571dbf6d99235",
+          "functionPath": null
+        }
+      ]
+    }
+  ]
+}

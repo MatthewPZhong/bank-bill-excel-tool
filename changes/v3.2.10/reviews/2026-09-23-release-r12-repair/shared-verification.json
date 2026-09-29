@@ -1,0 +1,16 @@
+{
+  "status": "PASS",
+  "groups": {
+    "shared-probes": 20,
+    "destructure-probes": 8,
+    "localenv-probes": 10,
+    "default-combinations": 6,
+    "async-array-combinations": 6,
+    "logical-combinations": 6
+  },
+  "fixtures": 56,
+  "renderer": 38,
+  "query": 18,
+  "diagnosticChanges": [],
+  "scannerChanges": []
+}

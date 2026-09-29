@@ -1,0 +1,102 @@
+ AGENTS.md                                          |    4 
+ eslint.config.js                                   |   16 
+ index.html                                         |   24 
+ rules/integration-test-policy.md                   |  125 
+ scripts/smoke/render-status-box.js                 |   51 
+ scripts/smoke/scenario-c1-defaults.js              |    8 
+ scripts/verify-biz-op-v329-renderer-dom.js         |    3 
+ src/preload.js                                     |    8 
+ src/renderer-biz-op-v327.js                        |  252 
+ src/renderer-dialogs.js                            |13238 ++------------------
+ src/renderer-pending.js                            |  417 -
+ src/renderer-position-reconciliation.js            |  565 +
+ src/renderer-previews.js                           |  454 -
+ src/renderer-vcc-financial-op.js                   | 6015 +++++----
+ src/renderer.js                                    | 8854 +------------
+ tests/unit/app-update-contract.test.js             |    2 
+ tests/unit/archive-center-ui-contract.test.js      |   10 
+ tests/unit/archive-delete-dialog-lifecycle.test.js |  143 
+ tests/unit/duplicate-inbound-match-wiring.test.js  |   45 
+ .../unit/main-payment-shared-recon-source.test.js  |    6 
+ .../unit/main-process/biz-op-v329-renderer.test.js |   29 
+ .../interactive-task-preflight.test.js             |   24 
+ .../mpt-mixed-lifecycle-e05-p0.test.js             |    2 
+ .../statement-big-account-preview.test.js          |    2 
+ .../renderer-bank-statement-run-progress.test.js   |    7 
+ tests/unit/renderer-biz-op-recovery.test.js        |    2 
+ tests/unit/renderer-c3-gateway-ready-guard.test.js |   53 
+ ...und-transfer-account-mapping-load-guard.test.js |    4 
+ ...derer-dialogs-fund-transfer-date-policy.test.js |    8 
+ ...nderer-dialogs-payment-offline-backfill.test.js |    2 
+ tests/unit/renderer-dialogs-refund-fuzzy.test.js   |    2 
+ .../unit/renderer-dialogs-scenario-channel.test.js |    9 
+ ...enderer-dialogs-scenario-group-collapse.test.js |   11 
+ tests/unit/renderer-dialogs-toolbox.test.js        |  285 
+ tests/unit/renderer-dialogs-v3-2-6.test.js         |   49 
+ tests/unit/renderer-import-issues-summary.test.js  |   75 
+ .../renderer-linked-table-delete-range.test.js     |    2 
+ .../unit/renderer-position-reconciliation.test.js  |   29 
+ .../unit/renderer-pre-fund-reconciliation.test.js  |   23 
+ .../renderer-refund-prompt-orchestration.test.js   |   22 
+ tests/unit/renderer-refund-ready-guard.test.js     |   30 
+ tests/unit/renderer-status-box-text.test.js        |  182 
+ tests/unit/renderer-vcc-financial-op.test.js       |   32 
+ .../unit/vcc-financial-op-preview-contract.test.js |   12 
+ changes/v3.2.10/README.md                          |  185 
+ .../implementation-notes.md                        |  151 
+ .../codex/v3.2.10-renderer-boundaries/spec.md      |  171 
+ .../codex/v3.2.10-renderer-boundaries/techdoc.md   |  351 +
+ changes/v3.2.10/review-response.md                 |   89 
+ scripts/integration/renderer-lifecycle.js          |    8 
+ scripts/renderer-lifecycle/electron-main.cjs       |   70 
+ .../renderer-lifecycle/fixtures/app-settings.js    |  103 
+ .../fixtures/application-shell.js                  |  214 
+ .../fixtures/configuration-dialogs.js              |  254 
+ .../fixtures/existing-controllers.js               |  191 
+ .../renderer-lifecycle/fixtures/legacy-dialogs.js  |  176 
+ .../fixtures/new-account-controller.js             |   89 
+ .../fixtures/pending-controller.js                 |   93 
+ scripts/renderer-lifecycle/fixtures/previews.js    |   72 
+ scripts/renderer-lifecycle/fixtures/scenarios.js   |  181 
+ .../renderer-lifecycle/fixtures/shared-dialogs.js  |   76 
+ .../fixtures/statement-controller.js               |  164 
+ scripts/renderer-lifecycle/fixtures/toolbox.js     |  315 
+ .../renderer-lifecycle/fixtures/vcc-position.js    |  334 +
+ scripts/test-renderer-lifecycle.js                 |   22 
+ src/renderer/README.md                             |   62 
+ src/renderer/configuration-services.js             |   60 
+ src/renderer/controllers/acquiring.js              |  244 
+ src/renderer/controllers/bank-bu.js                |  383 +
+ src/renderer/controllers/bank-statement.js         |  721 +
+ src/renderer/controllers/biz-op-legacy.js          |  295 
+ src/renderer/controllers/duplicate-inbound.js      |  374 +
+ src/renderer/controllers/new-account.js            |  847 +
+ src/renderer/controllers/pending.js                |    8 
+ src/renderer/controllers/pre-fund.js               |  462 +
+ src/renderer/controllers/recon-id-fix.js           |  397 +
+ src/renderer/controllers/statement.js              |  352 +
+ src/renderer/controllers/vcc-op-calc.js            |  361 +
+ src/renderer/dialogs/app-settings.js               | 1680 +++
+ src/renderer/dialogs/configuration.js              | 5379 ++++++++
+ src/renderer/dialogs/scenarios.js                  | 5035 ++++++++
+ src/renderer/dialogs/toolbox.js                    | 1052 ++
+ src/renderer/modal-bridge.js                       |   86 
+ src/renderer/modal-host.js                         |  393 +
+ src/renderer/module-router.js                      |  113 
+ src/renderer/scenario-change-router.js             |   60 
+ src/renderer/scenario-command-service.js           |  256 
+ src/renderer/shared-recon-session.js               |   54 
+ tests/helpers/modal-dom.js                         |  141 
+ tests/helpers/scenario-main-harness.js             |  150 
+ tests/unit/renderer/configuration-services.test.js |   75 
+ tests/unit/renderer/modal-host.test.js             |  373 +
+ tests/unit/renderer/module-router.test.js          |  178 
+ tests/unit/renderer/preload-subscriptions.test.js  |   40 
+ tests/unit/renderer/previews-modal-scope.test.js   |  141 
+ tests/unit/renderer/r4-controllers.test.js         |  169 
+ tests/unit/renderer/r4-domain-controllers.test.js  |  395 +
+ .../unit/renderer/scenario-change-routing.test.js  |  447 +
+ .../unit/renderer/scenario-command-service.test.js |  422 +
+ .../unit/renderer/scenario-write-boundary.test.js  |  125 
+ tests/unit/renderer/toolbox-modal.test.js          |   25 
+ 101 files changed, 31624 insertions(+), 24176 deletions(-)

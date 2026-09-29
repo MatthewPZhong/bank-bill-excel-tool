@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { createArchiveAwareOperationHarness, deferred } = require('../helpers/archive-aware-operation-harness');
 
 const ROOT = path.join(__dirname, '..', '..');
 
@@ -12,11 +13,13 @@ function read(relativePath) {
 }
 
 test.describe('v3.1.13 设置与存档中心静态契约', () => {
-  const renderer = read('src/renderer.js');
+  const renderer = read('src/renderer.js') + '\n' + read('src/renderer/dialogs/app-settings.js');
   const preload = read('src/preload.js');
   const styles = read('src/styles-gemini-extra.css');
   const main = read('src/main.js');
   const archiveController = read('src/main-process/archive-center/controller.js');
+  const positionTaskAdapter = read('src/main-process/position-reconciliation/task-adapter.js');
+  const positionTaskOwner = read('src/main-process/position-reconciliation/task-owner.js');
   const positionOperationLifecycle = read(
     'src/main-process/position-reconciliation/operation-lifecycle.js'
   );
@@ -34,13 +37,15 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
     assert.doesNotMatch(quitFlow, /Promise\.race\(\[\s*archiveOperationTail/);
   });
 
-  test('业务 IPC 返回成功前等待本次存档登记与处理，不只写入内存尾队列', () => {
+  test('业务 IPC 返回成功前等待本次存档登记与处理，不只写入内存尾队列', async () => {
     const start = main.indexOf('async function runArchiveAwareOperation');
     const end = main.indexOf('function runRegisteredBusinessOperation', start);
     const operationFlow = main.slice(start, end);
-    const artifactSettleIndex = operationFlow.indexOf('await controls.settleArtifacts');
-    const positionSettleIndex = operationFlow.indexOf('await settlePositionArchiveResult');
-    const returnIndex = operationFlow.indexOf('return settledResult');
+    assert.match(operationFlow, /trackArchiveOperationPromise\(resourceScope\.run\(async/);
+    assert.match(operationFlow, /return adapterInvocation\.execute\(/);
+    const artifactSettleIndex = positionTaskAdapter.indexOf('await controls.settleArtifacts');
+    const positionSettleIndex = positionTaskAdapter.indexOf('await settlePositionArchiveResult');
+    const returnIndex = positionTaskAdapter.indexOf('return settledResult');
     assert.ok(artifactSettleIndex >= 0, 'position execute 必须先等待 lifecycle artifact barrier');
     assert.ok(positionSettleIndex > artifactSettleIndex, 'position settle 必须位于 artifact barrier 之后');
     assert.ok(returnIndex > positionSettleIndex, '业务结果只能在 position settle 完成后返回');
@@ -57,6 +62,35 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
       settlementFlow.indexOf('await archiveTask') < settlementFlow.lastIndexOf('return result'),
       '存档任务应在返回业务结果前完成'
     );
+    for (const legacy of [false, true]) {
+      const entered = deferred();
+      const released = deferred();
+      const harness = createArchiveAwareOperationHarness({
+        channel: 'position-reconciliation:bank:export',
+        controls: {
+          fileEvidence: { filePlan: { inputs: [], outputs: [] } },
+          async settleArtifacts() { entered.resolve(); return released.promise; }
+        }
+      });
+      const result = { status: 'ok' };
+      let returned = false;
+      let tailSettled = false;
+      const operation = harness.run({
+        prepare: () => ({ proceed: true, ...(legacy ? { legacyExistingBatchRecovery: true } : {}) }),
+        execute: () => result
+      }).then((value) => { returned = true; return value; });
+      try {
+        await entered.promise;
+        const tail = harness.getTail().then(() => { tailSettled = true; });
+        await Promise.resolve();
+        assert.equal(returned, false, 'artifact barrier 前不能返回业务结果');
+        assert.equal(tailSettled, false, 'artifact barrier 前退出尾队列不能结算');
+        released.resolve(legacy ? { archiveResult: { archiveFailed: false }, runtime: {} } : { durable: true });
+        assert.equal(await operation, result);
+        await tail;
+        assert.equal(tailSettled, true);
+      } finally { released.resolve({ durable: true, archiveResult: {}, runtime: {} }); }
+    }
   });
 
   test('存档写操作纳入业务退出闸门，平盘失败源由存档状态驱动释放', () => {
@@ -79,37 +113,40 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
         `${channel} 应接入退出闸门`
       );
     }
-    assert.match(main, /onSourceReleased:\s*cleanupPositionArchiveSourcePaths/);
-    assert.match(main, /protectedStagingPaths:\s*positionArchivePersistentStagingPaths/);
+    assert.match(main, /onSourceReleased:\s*positionTaskOwner\.cleanupPositionArchiveSourcePaths/);
+    assert.match(main, /protectedStagingPaths:\s*positionTaskOwner\.positionArchivePersistentStagingPaths/);
     assert.match(
-      main,
-      /positionPersistentStagingProtectionPaths\(\s*archiveCenterService\.listUnresolvedSourcePaths\(\),\s*readPositionPendingOperation\(\)\s*\)/
+      positionTaskOwner,
+      /positionPersistentStagingProtectionPaths\(\s*getArchiveCenter\(\)\.listUnresolvedSourcePaths\(\),\s*readPositionPendingOperation\(\)\s*\)/
     );
     assert.match(
-      main,
+      positionTaskOwner,
       /protectedPaths\s*=\s*protectedPaths\.concat\(activePaths\)/
     );
-    assert.match(main, /filterStagingPathsWithoutProtectedSources\(targets,\s*protectedPaths\)/);
+    assert.match(positionTaskOwner, /filterStagingPathsWithoutProtectedSources\(targets,\s*protectedPaths\)/);
   });
 
   test('异常恢复按删除证据计算清理候选，并在清除 pending 后执行受保护目录清理', () => {
-    const persistenceStart = main.indexOf('function persistPositionArchiveIntentIfNeeded');
-    const persistenceEnd = main.indexOf('function recoverPositionArchiveIntent', persistenceStart);
-    const persistenceFlow = main.slice(persistenceStart, persistenceEnd);
-    const finalizeStart = main.indexOf('async function finalizeRecoveredPositionPending');
-    const finalizeEnd = main.indexOf('function positionOutboxTerminalIntent', finalizeStart);
-    const finalizeFlow = main.slice(finalizeStart, finalizeEnd);
+    const persistenceStart = positionTaskOwner.indexOf('function persistPositionArchiveIntentIfNeeded');
+    const persistenceEnd = positionTaskOwner.indexOf('function recoverPositionArchiveIntent', persistenceStart);
+    const persistenceFlow = positionTaskOwner.slice(persistenceStart, persistenceEnd);
+    const finalizeStart = positionTaskOwner.indexOf('const deletedArchiveResult',
+      positionTaskOwner.indexOf('async function finalizePositionOwnedPending'));
+    const finalizeEnd = positionTaskOwner.indexOf('function positionOutboxTerminalIntent', finalizeStart);
+    const finalizeFlow = positionTaskOwner.slice(finalizeStart, finalizeEnd);
+    assert.match(positionTaskOwner, /finalizeRecoveredPositionPending[\s\S]*?return finalizePositionOwnedPending\(operationToken,/);
+    assert.match(positionTaskOwner, /finalizePositionPendingAfterTaskTerminal[\s\S]*?return finalizePositionOwnedPending\(pending\.operationToken,/);
     const serviceStart = main.indexOf('function getPositionReconciliationService');
-    const serviceEnd = main.indexOf('function syncPositionReconciliationCheckpoint', serviceStart);
+    const serviceEnd = main.indexOf('async function withPositionReconciliationLock', serviceStart);
     const recoveryFlow = main.slice(serviceStart, serviceEnd);
-    assert.match(recoveryFlow, /const recovery = recoverPositionArchiveIntent\(/);
+    assert.match(recoveryFlow, /const recovery = positionTaskOwner\.recoverPositionArchiveIntent\(/);
     assert.match(
       persistenceFlow,
       /const archiveResult = readDeletedPositionArchiveResult\(pending\);[\s\S]*?positionRecoveryCleanupInputPaths\([\s\S]*?archiveResult/
     );
     assert.match(
       finalizeFlow,
-      /positionCommittedRecoveryArchiveFiles\(\s*current,\s*positionReconciliationService\.listCommittedOperationInputs\(operationToken\)\s*\)/
+      /positionCommittedRecoveryArchiveFiles\(\s*current,\s*getCurrentService\(\)\.listCommittedOperationInputs\(operationToken\)\s*\)/
     );
     assert.match(
       finalizeFlow,
@@ -122,7 +159,7 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
     const settleIndex = finalizeFlow.indexOf('await settlePositionRecoveredTask');
     const syncIndex = finalizeFlow.indexOf('syncPositionReconciliationCheckpoint()');
     const bootstrapClearIndex = finalizeFlow.indexOf(
-      "database.setSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, '')"
+      "writeSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, '')"
     );
     const pendingClearIndex = finalizeFlow.indexOf('clearPositionPendingOperation(operationToken)');
     const cleanupIndex = finalizeFlow.indexOf(
@@ -136,11 +173,11 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
         && cleanupIndex > pendingClearIndex,
       '未提交 staging 只能在原任务终态、checkpoint 与当前 pending 收口后清理'
     );
-    assert.match(recoveryFlow, /: finalizeRecoveredPositionPending\(operationToken,/);
-    const outboxStart = main.indexOf('async function finalizePositionTerminalIntent');
-    const outboxEnd = main.indexOf('function persistCurrentPositionArchiveIntentIfNeeded', outboxStart);
+    assert.match(recoveryFlow, /: positionTaskOwner\.finalizeRecoveredPositionPending\(operationToken,/);
+    const outboxStart = positionTaskOwner.indexOf('async function finalizePositionTerminalIntent');
+    const outboxEnd = positionTaskOwner.indexOf('function persistCurrentPositionArchiveIntentIfNeeded', outboxStart);
     assert.match(
-      main.slice(outboxStart, outboxEnd),
+      positionTaskOwner.slice(outboxStart, outboxEnd),
       /await finalizeRecoveredPositionPending\(operationToken,/
     );
   });
@@ -199,8 +236,8 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
     ]) {
       assert.ok(renderer.includes(`data-role="${selector}"`), `${selector} 应保留`);
     }
-    assert.match(renderer, /window\.desktopApi\.appUpdate\.setEnabled\(toggle\.checked\)/);
-    assert.match(renderer, /window\.desktopApi\.appUpdate\.checkNow\(\)/);
+    assert.match(renderer, /api\.appUpdate\.setEnabled\(toggle\.checked\)/);
+    assert.match(renderer, /api\.appUpdate\.checkNow\(\)/);
     assert.match(renderer, /restartAndInstallAppUpdate\(\{ inline: true \}\)/);
   });
 
@@ -428,7 +465,7 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
     assert.match(renderer, /const busy = archiveState\.settingsLoading \|\| archiveState\.retentionSaving/);
     assert.match(renderer, /returnButton\.disabled = busy/);
     assert.match(renderer, /closeDialogButton\.disabled = busy/);
-    assert.match(renderer, /if \(archiveState\.settingsLoading \|\| archiveState\.retentionSaving\) return false/);
+    assert.match(renderer, /canClose: canCloseSettingsDialog/); // 关闭锁的行为由 Electron app-settings fixture 覆盖。
     assert.match(renderer, /retentionSelect\.disabled = archiveState\.settingsLoading/);
   });
 
@@ -711,7 +748,7 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
 
 
 test('永久删除确认先只读预检，完整结果和待完成删除入口覆盖所有模块', () => {
-  const renderer = read('src/renderer.js');
+  const renderer = read('src/renderer.js') + '\n' + read('src/renderer/dialogs/app-settings.js');
   const start = renderer.indexOf('async function confirmArchiveBatchDelete');
   const end = renderer.indexOf('function closeSettingsDialog', start);
   const flow = renderer.slice(start, end);

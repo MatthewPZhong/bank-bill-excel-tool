@@ -1,0 +1,91 @@
+{
+  "result": "PASS",
+  "rendererActualBoundaries": 20,
+  "rendererCases": [
+    {
+      "name": "bound_factory_alias",
+      "baselineDiagnostics": 0,
+      "probeDiagnostics": 1,
+      "runtimeExtraCallable": true
+    },
+    {
+      "name": "factory_nested_alias",
+      "baselineDiagnostics": 0,
+      "probeDiagnostics": 1,
+      "runtimeExtraCallable": true
+    },
+    {
+      "name": "factory_nested_escape",
+      "baselineDiagnostics": 0,
+      "probeDiagnostics": 1,
+      "runtimeExtraCallable": true
+    },
+    {
+      "name": "safe_factory_nested",
+      "baselineDiagnostics": 0,
+      "probeDiagnostics": 0,
+      "runtimeExtraCallable": false
+    }
+  ],
+  "distinctInstances": {
+    "diagnostics": 0,
+    "actualApiKeys": [
+      "read"
+    ]
+  },
+  "g1NativeAndControls": [
+    {
+      "name": "native_for_each",
+      "stubWrites": 1,
+      "diagnostics": 1
+    },
+    {
+      "name": "native_map",
+      "stubWrites": 1,
+      "diagnostics": 1
+    },
+    {
+      "name": "native_reduce",
+      "stubWrites": 1,
+      "diagnostics": 1
+    },
+    {
+      "name": "known_helper",
+      "stubWrites": 1,
+      "diagnostics": 1
+    },
+    {
+      "name": "safe_unselected",
+      "stubWrites": 0,
+      "diagnostics": 0
+    },
+    {
+      "name": "safe_argument",
+      "stubWrites": 0,
+      "diagnostics": 0
+    },
+    {
+      "name": "safe_shadow",
+      "stubWrites": 0,
+      "diagnostics": 0
+    }
+  ],
+  "g1RealSource": {
+    "parsedFiles": 765,
+    "activeBoundary": "publication-recovery-entry",
+    "diagnostics": [
+      {
+        "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+        "boundaryId": "publication-recovery-entry",
+        "from": "src/main-process/toolbox-output-publication.js",
+        "to": null,
+        "line": 2512,
+        "column": 2,
+        "message": "受保护 prepare/worker 经静态容器、helper 或回调入口执行了受限恢复能力",
+        "evidenceId": "158b73bd0589f302425ac2875273f2641fbfee77af06f304057b74559416130c",
+        "functionPath": "prepareToolboxPublication"
+      }
+    ],
+    "realRecoveryExecuted": false
+  }
+}

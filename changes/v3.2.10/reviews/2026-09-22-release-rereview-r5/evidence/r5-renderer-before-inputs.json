@@ -1,0 +1,30 @@
+{
+  "root": "/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r5-renderer-before-tools-2vgspp",
+  "files": {
+    "scan.js": {
+      "sha256": "91709776481ac49e2b9f80178a5ac7887ad21c33709c5580aaca0335ae8daaef",
+      "expected": "91709776481ac49e2b9f80178a5ac7887ad21c33709c5580aaca0335ae8daaef",
+      "match": true
+    },
+    "rules.js": {
+      "sha256": "89f21aa323513fd9ea76259d06afef2345165d2a5c90ca00903a669b12947541",
+      "expected": "89f21aa323513fd9ea76259d06afef2345165d2a5c90ca00903a669b12947541",
+      "match": true
+    },
+    "contracts.js": {
+      "sha256": "e7d196124f0091ea757bd85bed04110f4499f16b91afc1ed5a2598515a8d9cbc",
+      "expected": "e7d196124f0091ea757bd85bed04110f4499f16b91afc1ed5a2598515a8d9cbc",
+      "match": true
+    },
+    "renderer-contracts.js": {
+      "sha256": "cf917317275b0bf2204da09566975f531f114ddf449a7c0aafe6e879a8ca83ab",
+      "expected": "cf917317275b0bf2204da09566975f531f114ddf449a7c0aafe6e879a8ca83ab",
+      "match": true
+    },
+    "schema.js": {
+      "sha256": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "expected": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "match": true
+    }
+  }
+}

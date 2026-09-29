@@ -1,0 +1,44 @@
+{
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries",
+  "current": {
+    "src/renderer/dialogs/configuration.js": "4f14103f3062c6405ff5e18a7b286d06d075aeb87d56f20907c34b370deb1ec9",
+    "scripts/renderer-lifecycle/fixtures/configuration-dialogs.js": "3e23890185f0be8d382474532717f9203724fc89680c68b6cf2a3cfeba1c505f"
+  },
+  "checks": {
+    "lint": {
+      "command": [
+        "node",
+        "../../../node_modules/eslint/bin/eslint.js",
+        "src/renderer/dialogs/configuration.js",
+        "scripts/renderer-lifecycle/fixtures/configuration-dialogs.js"
+      ],
+      "exitCode": 0
+    },
+    "fixture-syntax": {
+      "command": [
+        "node",
+        "--check",
+        "scripts/renderer-lifecycle/fixtures/configuration-dialogs.js"
+      ],
+      "exitCode": 0
+    },
+    "diff-check": {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0
+    }
+  },
+  "afterMatchesFinal": true,
+  "sameFixtureBeforeAndAfter": true,
+  "counts": {
+    "before": [
+      "67/80 PASS"
+    ],
+    "after": [
+      "80/80 PASS"
+    ]
+  }
+}

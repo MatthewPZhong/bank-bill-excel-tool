@@ -39,7 +39,7 @@ const {
 } = require('../../../src/main-process/archive-center/file-plan');
 const {
   createTaskPolicyRegistry
-} = require('../../../src/main-process/archive-center/task-policy-registry');
+} = require('../../../src/main-process/execution-descriptors/composition');
 const acquiringRunData = require('../../../src/main-process/acquiring-bill-currency-run-data');
 const acquiringSession = require('../../../src/main-process/acquiring-bill-currency-session');
 

@@ -1,0 +1,28 @@
+✔ RR5-02 indirect includes 不执行函数值 (16.997125ms)
+✔ RR5-02 helper does not execute value 不执行函数值 (2.752291ms)
+✔ RR5-02 includes 不执行函数值 (2.175625ms)
+✔ RR5-02 indexOf 不执行函数值 (2.1805ms)
+✔ RR5-02 lastIndexOf 不执行函数值 (2.111666ms)
+✔ RR5-02 computed includes 不执行函数值 (2.025792ms)
+✔ RR5-02 array alias 不执行函数值 (2.140458ms)
+✔ RR5-02 helper array parameter 不执行函数值 (2.076333ms)
+✔ RR5-02 source comparison helper 不执行函数值 (2.110958ms)
+✔ RR5-02 reduce invokes function accumulator 仍检查受限入口 (2.052791ms)
+✔ RR5-02 helper overrides array 仍检查受限入口 (2.268791ms)
+✔ RR5-02 prototype override 仍检查受限入口 (1.901042ms)
+✔ RR5-02 helper receives custom object 仍检查受限入口 (2.997458ms)
+✔ RR5-02 reduce 仍检查受限入口 (1.83675ms)
+✔ RR5-02 forEach 仍检查受限入口 (2.116625ms)
+✔ RR5-02 custom includes 仍检查受限入口 (1.954375ms)
+✔ RR5-02 array override 仍检查受限入口 (1.834667ms)
+✔ RR5-02 array alias override 仍检查受限入口 (2.395458ms)
+✔ RR5-02 array helper override 仍检查受限入口 (1.783583ms)
+✔ RR5-02 unknown receiver 仍检查受限入口 (1.917ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 139.786834

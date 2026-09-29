@@ -1,0 +1,414 @@
+--- a/architecture/README.md
++++ b/architecture/README.md
+@@ -143,3 +143,5 @@
+ release 第十二轮 RR12-01 将数组分配身份与内容求值分开：仅比较接收者身份时不展开元素，真正读取元素时保留原调用环境及递归深度/访问链。普通 helper 的唯一调用位置同时用于参数绑定与读写顺序核对，避免内部数组重排被错误排到外层写入之后。仍按既有合同保守收集重排来源，不精确模拟全部数组方法。见 [RR12 回归](../tests/unit/architecture/release-rereview-r12.test.js)及[修复记录](../changes/v3.2.10/reviews/2026-09-23-release-r12-repair/repair.md)。
+ 
+ 第十三轮 RR13-01：唯一 helper 调用位置只证明执行顺序，不证明写入必定发生。成员快照沿写入到读取的调用链检查条件分支、短路、可零次执行的循环及 catch，保留未执行路径的旧成员来源。读写共有的已进入分支、控制表达式的必执行位置和可证明选中的字面量分支不因此变为条件写入。后续无条件写入只有在可证明晚于先前写入时才清除旧候选；无法证明先后关系时继续保守合并。本轮不扩展为完整 JavaScript 控制流解释器。见 [RR13 回归](../tests/unit/architecture/release-rereview-r13.test.js)及[修复记录](../changes/v3.2.10/reviews/2026-09-28-release-r13-repair/repair.md)。
++
++第十四轮 RR14-01：进入 do 首轮不证明能到达具体写入。成员快照按同一函数中的静态 break/continue 目标及写入前后位置判断跳过路径，并沿 helper 调用位置传递；可能跳过写入而仍到达读取时保留旧来源。break 越过目标结构，continue 只越过目标循环剩余 body，do 条件测试仍会执行；内层循环/switch/label 的跳转不扩大到无关外层写入。跳转前已经完成的写入、跳转必经的 finally 写入，以及同时跳过写入和读取的安全路径保持精度；可证明不可达的字面量分支不引入跳过来源。这里不推断任意循环次数、异常传播或全部 JavaScript 控制流。见 [RR14 回归](../tests/unit/architecture/release-rereview-r14.test.js)及[修复记录](../changes/v3.2.10/reviews/2026-09-28-release-r14-repair/repair.md)。
+--- a/changes/v3.2.10/README.md
++++ b/changes/v3.2.10/README.md
+@@ -8,7 +8,7 @@
+ | 设计及源码基线 | `main@11086a3cbf632a30adbcfa796e4cd81810c5aef9`；本地附注标签 `v3.2.9` 指向同一提交 |
+ | 集成分支 | `release/v3.2.10`；G1–G8 已本地合入，当前为 `9a38b96b` 加未提交审查修复；第十一轮修复完整门禁 PASS，见 [本地集成记录](release.md) |
+ | 功能分支状态 | G1–G8 已逐项本地合入；当前修复候选 31 个机器边界 active、0 pending/partial，下表保留计划名称 |
+-| 交付状态 | 第十三轮 RR13-01 条件 helper 漏报已修复，新增 32/32 回归、架构 621/621 PASS；完整门禁重跑 PASS（9395 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过）。修复未提交，真实产品/平台验收未执行。见 [第十三轮修复报告](reviews/2026-09-28-release-r13-repair/repair.md) |
++| 交付状态 | 第十四轮 RR14-01 跳过写入漏报已修复，新增 34 项回归、架构 655/655 PASS；完整门禁重跑 PASS（9429 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过）。修复未提交，真实产品/平台验收未执行。见 [第十四轮修复报告](reviews/2026-09-28-release-r14-repair/repair.md) |
+ | 独立审查修订 | R1–R9 及 G8 历史损坏配置恢复建议均在设计层关闭，无已知待修必改项；处置、验收映射和三轮依据见 [修订记录](review-response.md)，独立报告保持原状 |
+ | 依据 | [模块耦合审查](../architecture-coupling/2026-09-20/review.md)及该目录的静态扫描、局部探针证据 |
+ | 格式参考 | [v3.2.9 按行拆分 Spec](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/spec.md)、[TechDoc](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/techdoc.md)的元数据、行为合同、分阶段实施和验收结构 |
+--- a/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md
++++ b/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md
+@@ -232,3 +232,9 @@
+ 第十三轮 RR13-01：唯一 helper 调用位置只证明执行顺序，不证明写入必定发生。成员快照沿写入到读取的调用链检查条件分支、短路、可零次执行的循环及 catch，保留未执行路径的旧成员来源。读写共有的已进入分支、控制表达式的必执行位置和可证明选中的字面量分支不因此变为条件写入。后续无条件写入只有在可证明晚于先前写入时才清除旧候选；无法证明先后关系时继续保守合并。本轮不扩展为完整 JavaScript 控制流解释器。
+ 
+ 新增 32 项回归，准确起点 16 FAIL / 16 PASS，修复后定向 32 PASS；最终架构 621/621 PASS，完整门禁在 1710 个冻结输入上重跑 PASS：9395 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过。详见 [修复记录](../../reviews/2026-09-28-release-r13-repair/repair.md)。
++
++## 2026-09-28 · 第十四轮 RR14-01
++
++第十四轮 RR14-01：进入 do 首轮不证明能到达具体写入。成员快照按同一函数中的静态 break/continue 目标及写入前后位置判断跳过路径，并沿 helper 调用位置传递；可能跳过写入而仍到达读取时保留旧来源。break 越过目标结构，continue 只越过目标循环剩余 body，do 条件测试仍会执行；内层循环/switch/label 的跳转不扩大到无关外层写入。跳转前已经完成的写入、跳转必经的 finally 写入，以及同时跳过写入和读取的安全路径保持精度；可证明不可达的字面量分支不引入跳过来源。这里不推断任意循环次数、异常传播或全部 JavaScript 控制流。
++
++新增 34 项回归，准确起点 15 FAIL / 19 PASS；最终架构 655/655 PASS。实际 20 边界原反例拒绝、安全对照通过；完整门禁在 1711 个冻结输入上重跑 PASS：9429 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过；输入及 HEAD 未漂移。见 [修复记录](../../reviews/2026-09-28-release-r14-repair/repair.md)。
+--- a/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md
++++ b/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md
+@@ -130,6 +130,8 @@
+ release 第十二轮 RR12-01 将数组分配身份与内容求值分开：仅比较接收者身份时不展开元素，真正读取元素时保留原调用环境及递归深度/访问链。普通 helper 的唯一调用位置同时用于参数绑定与读写顺序核对，避免内部数组重排被错误排到外层写入之后。仍按既有合同保守收集重排来源，不精确模拟全部数组方法。见 [RR12 修复记录](../../reviews/2026-09-23-release-r12-repair/repair.md)。
+ 
+ 第十三轮 RR13-01：唯一 helper 调用位置只证明执行顺序，不证明写入必定发生。成员快照沿写入到读取的调用链检查条件分支、短路、可零次执行的循环及 catch，保留未执行路径的旧成员来源。读写共有的已进入分支、控制表达式的必执行位置和可证明选中的字面量分支不因此变为条件写入。后续无条件写入只有在可证明晚于先前写入时才清除旧候选；无法证明先后关系时继续保守合并。本轮不扩展为完整 JavaScript 控制流解释器。见 [RR13 修复记录](../../reviews/2026-09-28-release-r13-repair/repair.md)。
++
++第十四轮 RR14-01：进入 do 首轮不证明能到达具体写入。成员快照按同一函数中的静态 break/continue 目标及写入前后位置判断跳过路径，并沿 helper 调用位置传递；可能跳过写入而仍到达读取时保留旧来源。break 越过目标结构，continue 只越过目标循环剩余 body，do 条件测试仍会执行；内层循环/switch/label 的跳转不扩大到无关外层写入。跳转前已经完成的写入、跳转必经的 finally 写入，以及同时跳过写入和读取的安全路径保持精度；可证明不可达的字面量分支不引入跳过来源。这里不推断任意循环次数、异常传播或全部 JavaScript 控制流。见 [RR14 修复记录](../../reviews/2026-09-28-release-r14-repair/repair.md)。
+ 
+ ### 4.5 ARCH-XLSX-INFRA（G4）
+ 
+--- a/changes/v3.2.10/release.md
++++ b/changes/v3.2.10/release.md
+@@ -1,6 +1,16 @@
+ # v3.2.10 本地集成记录
+ 
+-当前 G1–G8 已本地合入，HEAD 为 `9a38b96b1b8006c5851535d0c1e586bbaeb63f10`。前十二轮修复保留；第十三轮 RR13-01 条件 helper 漏报已实现修复，新增 32 项回归通过，完整门禁在 1710 个冻结输入上重跑 PASS。所有修复未提交，见[第十三轮修复报告](reviews/2026-09-28-release-r13-repair/repair.md)。下方历史记录保留各自候选意义。
++当前 G1–G8 已本地合入，HEAD 为 `9a38b96b1b8006c5851535d0c1e586bbaeb63f10`。前十三轮修复保留；第十四轮 RR14-01 跳过写入漏报已实现修复，新增 34 项回归通过。完整门禁在 1711 个冻结输入上重跑 PASS。所有修复未提交，见[第十四轮修复报告](reviews/2026-09-28-release-r14-repair/repair.md)。下方历史记录保留各自候选意义。
++
++## 2026-09-28 第十四轮独立审查修复（未提交）
++
++RR14-01：区分进入 do 首轮与到达具体写入。按 break/continue 的目标和执行顺序保留可能跳过写入时的旧来源，沿 helper 调用点传播；写入前后、body/test、内层跳转、label、finally 和共同读取路径都有安全对照。
++
++新增 34 项 VM/静态回归，准确修复起点 15 FAIL / 19 PASS，最终全部通过；架构 655/655 PASS，正式 CLI 31 active、0 pending/partial、0 诊断、0 stale。实际 20 个 Renderer 边界原反例产生 scope 诊断，安全对照零诊断。原始 6 例/12 次 VM、覆盖顺序 8 例、RR12 数组 14 例和共享/绑定 62 例保持预期，已有保守拒绝单列。
++
++`UNIT_TEST_CONCURRENCY=2 npm run release-check` 重跑 PASS：9429 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过。1711 个输入及 HEAD 未漂移；开始 2026-09-28T17:19:43.887250+08:00，结束 2026-09-28T17:39:54.344494+08:00。
++
++[修复报告](reviews/2026-09-28-release-r14-repair/repair.md)、[验证汇总](reviews/2026-09-28-release-r14-repair/verification.json)、[增量补丁](reviews/2026-09-28-release-r14-repair/incremental.patch)。生产业务源码保持，未提交、推送或发布；没有进行平台及真实业务人工验收。
+ 
+ ## 2026-09-28 第十三轮独立审查修复（未提交）
+ 
+--- a/rules/integration-test-policy.md
++++ b/rules/integration-test-policy.md
+@@ -125,80 +125,80 @@
+ 
+ ## 七、当前集成测试清单（自动同步）
+ 
+-<!-- auto-generated by scripts/integration-runner.js, last-updated: 2026-09-28T16:50:44+08:00 -->
++<!-- auto-generated by scripts/integration-runner.js, last-updated: 2026-09-28T17:39:46+08:00 -->
+ <!-- DO NOT EDIT MANUALLY — modify scripts/integration/*.js then re-run `npm run test:integration` -->
+ 
+ | 脚本 | 用例数 | 断言数 | 耗时 (ms) |
+ |---|---|---|---|
+-| `acquiring-bill-currency-idle-cleanup.js` | 38 | 38 | 776 |
+-| `acquiring-bill-currency-n4-migration.js` | 128 | 128 | 508 |
+-| `acquiring-engine-migration.js` | 45 | 45 | 4433 |
+-| `acquiring-index-slim-v2.js` | 22 | 22 | 182 |
++| `acquiring-bill-currency-idle-cleanup.js` | 38 | 38 | 768 |
++| `acquiring-bill-currency-n4-migration.js` | 128 | 128 | 494 |
++| `acquiring-engine-migration.js` | 45 | 45 | 4365 |
++| `acquiring-index-slim-v2.js` | 22 | 22 | 178 |
+ | `acquiring-side-db-parity.js` | 19 | 19 | 528 |
+-| `acquiring-worker-boundary.js` | 14 | 14 | 521 |
+-| `application-recovery-governance.js` | 4 | 4 | 833 |
+-| `archive-biz-op-auto-report-retention.js` | 6 | 6 | 7471 |
+-| `archive-center-module-retention.js` | 11 | 11 | 1568 |
+-| `archive-center-permanent-delete.js` | 52 | 52 | 29239 |
+-| `background-execution-pure-compute-canary.js` | 9 | 9 | 110 |
+-| `background-execution-recovery-canary.js` | 9 | 9 | 125 |
+-| `background-execution-recovery-control.js` | 27 | 27 | 290 |
++| `acquiring-worker-boundary.js` | 14 | 14 | 516 |
++| `application-recovery-governance.js` | 4 | 4 | 809 |
++| `archive-biz-op-auto-report-retention.js` | 6 | 6 | 7441 |
++| `archive-center-module-retention.js` | 11 | 11 | 1506 |
++| `archive-center-permanent-delete.js` | 52 | 52 | 28657 |
++| `background-execution-pure-compute-canary.js` | 9 | 9 | 98 |
++| `background-execution-recovery-canary.js` | 9 | 9 | 111 |
++| `background-execution-recovery-control.js` | 27 | 27 | 278 |
+ | `bank-bu-background-dual-parser.js` | 9 | 9 | 255 |
+-| `bank-bu-background-single-jobs.js` | 21 | 21 | 539 |
+-| `bank-bu-recon-side-db-parity.js` | 17 | 17 | 301 |
+-| `bank-statement-hit-scenario-report.js` | 49 | 49 | 204 |
+-| `bank-statement-many-to-many-review-sheet.js` | 33 | 33 | 208 |
+-| `bank-statement-universal-import-routing.js` | 20 | 20 | 270 |
+-| `big-table-import-engine.js` | 19 | 19 | 7529 |
+-| `biz-op-auto-error-report.js` | 12 | 12 | 10052 |
+-| `biz-op-query-boundary.js` | 9 | 9 | 7626 |
+-| `biz-op-recon-side-db-parity.js` | 16 | 16 | 301 |
+-| `bizop-flow-engine-migration.js` | 73 | 73 | 5027 |
+-| `dark-mode-schedule-settings.js` | 6 | 6 | 191 |
+-| `duplicate-inbound-match-end-to-end.js` | 31 | 31 | 335 |
+-| `execution-descriptor-governance.js` | 4 | 4 | 872 |
+-| `fund-transfer-recon-account-mapping.js` | 19 | 19 | 179 |
+-| `gateway-channel-filter-equivalence.js` | 23 | 23 | 180 |
+-| `linked-fx-open7-stale-hit-e2e.js` | 27 | 27 | 177 |
+-| `linked-table-delete-by-range-tablekey.js` | 73 | 73 | 185 |
+-| `new-account-balance-statement.js` | 36 | 36 | 237 |
+-| `pending-data-reconciliation.js` | 33 | 33 | 49 |
+-| `pending-engine-migration.js` | 57 | 57 | 4942 |
+-| `pending-removal-reconcile.js` | 62 | 62 | 192 |
+-| `position-reconciliation-side-db-parity.js` | 38 | 38 | 250 |
+-| `position-startup-task-recovery.js` | 3 | 3 | 2209 |
+-| `pre-fund-reconciliation-output-contract.js` | 15 | 15 | 256 |
+-| `pre-fund-reconciliation-side-db-parity.js` | 69 | 69 | 299 |
+-| `refund-backfill-yellow-fill-e2e.js` | 258 | 258 | 192 |
+-| `renderer-lifecycle.js` | 233 | 233 | 20290 |
+-| `shared-xlsx-boundary.js` | 51 | 51 | 3139 |
+-| `statement-generation-pipeline.js` | 45 | 45 | 235 |
+-| `task-adapter-recovery.js` | 4 | 4 | 536 |
+-| `toolbox-large-file-stream.js` | 50 | 50 | 131341 |
+-| `toolbox-large-split-multi-sheet.js` | 31 | 31 | 71968 |
+-| `toolbox-multi-sheet-merge.js` | 16 | 16 | 14738 |
+-| `toolbox-multi-split-roundtrip.js` | 17 | 17 | 441 |
+-| `toolbox-roundtrip.js` | 30 | 30 | 168 |
+-| `toolbox-row-split-admission.js` | 2 | 2 | 816 |
+-| `toolbox-row-split-archive-delete.js` | 2 | 2 | 1021 |
+-| `v2.1.10-a3-phase1.js` | 40 | 40 | 2453 |
+-| `v2.1.10-a3-phase2.js` | 56 | 56 | 1827 |
+-| `v2.1.10-a4-phase3.js` | 75 | 75 | 14116 |
+-| `v2.1.10-n4-cont-1-phase4.js` | 33 | 33 | 661 |
+-| `v2.1.10-n4-cont-2-phase5.js` | 43 | 43 | 448 |
+-| `v2.1.12-beta-multiworker-nested.js` | - | - | 2754 |
+-| `v2.1.9-n5-end-to-end.js` | 68 | 68 | 212 |
+-| `v2.1.9-n5-migration.js` | 67 | 67 | 186 |
+-| `v2.1.9-sr-fix-1-coverage.js` | 148 | 148 | 232 |
+-| `v2.1.9-sr-log-1.js` | 33 | 33 | 134 |
+-| `v3.0.0-linked-streaming-import.js` | 19 | 19 | 215 |
+-| `v3.0.1-linked-gateway-upsert.js` | 40 | 40 | 208 |
+-| `v3.0.4-boc-dispatch-order-fix.js` | 31 | 31 | 230 |
+-| `vcc-financial-op-adjustment-archive-chain.js` | 226 | 226 | 1181 |
+-| `vcc-financial-op-destructive-state-chain.js` | 77 | 77 | 1388 |
+-| `vcc-financial-op-effective-result.js` | 19 | 19 | 125 |
+-| `vcc-financial-op-historical-template-export.js` | 29 | 29 | 1009 |
+-| **合计** | **2901** | **2901** | **361713** |
++| `bank-bu-background-single-jobs.js` | 21 | 21 | 476 |
++| `bank-bu-recon-side-db-parity.js` | 17 | 17 | 281 |
++| `bank-statement-hit-scenario-report.js` | 49 | 49 | 198 |
++| `bank-statement-many-to-many-review-sheet.js` | 33 | 33 | 195 |
++| `bank-statement-universal-import-routing.js` | 20 | 20 | 302 |
++| `big-table-import-engine.js` | 19 | 19 | 7618 |
++| `biz-op-auto-error-report.js` | 12 | 12 | 10382 |
++| `biz-op-query-boundary.js` | 9 | 9 | 7962 |
++| `biz-op-recon-side-db-parity.js` | 16 | 16 | 311 |
++| `bizop-flow-engine-migration.js` | 73 | 73 | 4967 |
++| `dark-mode-schedule-settings.js` | 6 | 6 | 189 |
++| `duplicate-inbound-match-end-to-end.js` | 31 | 31 | 339 |
++| `execution-descriptor-governance.js` | 4 | 4 | 885 |
++| `fund-transfer-recon-account-mapping.js` | 19 | 19 | 176 |
++| `gateway-channel-filter-equivalence.js` | 23 | 23 | 184 |
++| `linked-fx-open7-stale-hit-e2e.js` | 27 | 27 | 182 |
++| `linked-table-delete-by-range-tablekey.js` | 73 | 73 | 181 |
++| `new-account-balance-statement.js` | 36 | 36 | 226 |
++| `pending-data-reconciliation.js` | 33 | 33 | 51 |
++| `pending-engine-migration.js` | 57 | 57 | 4929 |
++| `pending-removal-reconcile.js` | 62 | 62 | 191 |
++| `position-reconciliation-side-db-parity.js` | 38 | 38 | 249 |
++| `position-startup-task-recovery.js` | 3 | 3 | 2204 |
++| `pre-fund-reconciliation-output-contract.js` | 15 | 15 | 254 |
++| `pre-fund-reconciliation-side-db-parity.js` | 69 | 69 | 305 |
++| `refund-backfill-yellow-fill-e2e.js` | 258 | 258 | 188 |
++| `renderer-lifecycle.js` | 233 | 233 | 19778 |
++| `shared-xlsx-boundary.js` | 51 | 51 | 3090 |
++| `statement-generation-pipeline.js` | 45 | 45 | 226 |
++| `task-adapter-recovery.js` | 4 | 4 | 543 |
++| `toolbox-large-file-stream.js` | 50 | 50 | 133818 |
++| `toolbox-large-split-multi-sheet.js` | 31 | 31 | 255019 |
++| `toolbox-multi-sheet-merge.js` | 16 | 16 | 14084 |
++| `toolbox-multi-split-roundtrip.js` | 17 | 17 | 450 |
++| `toolbox-roundtrip.js` | 30 | 30 | 166 |
++| `toolbox-row-split-admission.js` | 2 | 2 | 829 |
++| `toolbox-row-split-archive-delete.js` | 2 | 2 | 1039 |
++| `v2.1.10-a3-phase1.js` | 40 | 40 | 2518 |
++| `v2.1.10-a3-phase2.js` | 56 | 56 | 1835 |
++| `v2.1.10-a4-phase3.js` | 75 | 75 | 14193 |
++| `v2.1.10-n4-cont-1-phase4.js` | 33 | 33 | 689 |
++| `v2.1.10-n4-cont-2-phase5.js` | 43 | 43 | 471 |
++| `v2.1.12-beta-multiworker-nested.js` | - | - | 2773 |
++| `v2.1.9-n5-end-to-end.js` | 68 | 68 | 223 |
++| `v2.1.9-n5-migration.js` | 67 | 67 | 195 |
++| `v2.1.9-sr-fix-1-coverage.js` | 148 | 148 | 261 |
++| `v2.1.9-sr-log-1.js` | 33 | 33 | 141 |
++| `v3.0.0-linked-streaming-import.js` | 19 | 19 | 209 |
++| `v3.0.1-linked-gateway-upsert.js` | 40 | 40 | 214 |
++| `v3.0.4-boc-dispatch-order-fix.js` | 31 | 31 | 253 |
++| `vcc-financial-op-adjustment-archive-chain.js` | 226 | 226 | 1229 |
++| `vcc-financial-op-destructive-state-chain.js` | 77 | 77 | 1445 |
++| `vcc-financial-op-effective-result.js` | 19 | 19 | 139 |
++| `vcc-financial-op-historical-template-export.js` | 29 | 29 | 1057 |
++| **合计** | **2901** | **2901** | **546316** |
+ 
+ > 同步策略：runner 末尾全 PASS 时 in-place 替换本章节；任一脚本 FAIL → 本章节不更新（避免被损坏数据覆盖）。
+ 
+--- a/scripts/architecture/renderer-contracts.js
++++ b/scripts/architecture/renderer-contracts.js
+@@ -135,11 +135,59 @@
+     }
+     return null;
+   };
++  const contains = (outer, inner) => outer && inner && outer.start <= inner.start && inner.end <= outer.end;
++  const loopTypes = new Set(['DoWhileStatement', 'WhileStatement', 'ForStatement', 'ForOfStatement', 'ForInStatement']);
++  const jumpsByAnalysis = new WeakMap();
++  const bypassJumps = analysis => {
++    if (jumpsByAnalysis.has(analysis)) return jumpsByAnalysis.get(analysis);
++    const jumps = [];
++    for (const node of analysis.nodes) {
++      if (!['BreakStatement', 'ContinueStatement'].includes(node.type)) continue;
++      let target; let reachable = true;
++      for (let child = node, parent = analysis.parents.get(child);
++        parent && !analysis.functionNodesByStart.has(parent.start); child = parent, parent = analysis.parents.get(parent)) {
++        if (!target) {
++          if (node.label) {
++            if (parent.type === 'LabeledStatement' && parent.label.name === node.label.name) {
++              target = parent;
++              if (node.type === 'ContinueStatement') while (target.type === 'LabeledStatement') target = target.body;
++            }
++          } else if (loopTypes.has(parent.type) || (node.type === 'BreakStatement' && parent.type === 'SwitchStatement')) target = parent;
++        }
++        if (parent.type === 'IfStatement') {
++          const test = analysis.describe(parent.test);
++          if (test.kind === 'literal' && child !== (test.value ? parent.consequent : parent.alternate)) reachable = false;
++        } else if (['WhileStatement', 'ForStatement'].includes(parent.type) && child === parent.body && parent.test) {
++          const test = analysis.describe(parent.test);
++          if (test.kind === 'literal' && !test.value) reachable = false;
++        }
++      }
++      // break 越过整个目标；continue 只跳过目标循环的剩余 body，do 的 test 仍会执行。
++      if (target && reachable) jumps.push({ node, scope: node.type === 'ContinueStatement' ? target.body : target });
++    }
++    jumpsByAnalysis.set(analysis, jumps);
++    return jumps;
++  };
++  const skippedByJump = (write, read, analysis) => {
++    const skips = (jump, node) => {
++      if (!contains(jump.scope, node)) return false;
++      // 离开 try/catch 的跳转仍先执行 finally；finally 自身的跳转则能跳过其中后续语句。
++      for (let parent = analysis.parents.get(node); parent; parent = analysis.parents.get(parent)) {
++        if (analysis.functionNodesByStart.has(parent.start)) break;
++        if (parent.type === 'TryStatement' && contains(parent.finalizer, node) &&
++            contains(parent, jump.node) && !contains(parent.finalizer, jump.node)) return false;
++      }
++      return true;
++    };
++    return bypassJumps(analysis).some(jump => jump.node.end <= write.start &&
++      analysis.functionPath(jump.node) === analysis.functionPath(write) && skips(jump, write) && !skips(jump, read));
++  };
+   const conditionalWrite = (write, read, analysis, writeEnv, readEnv) => {
+     const reads = executionPositions(read, analysis, readEnv);
+     // 唯一调用位置只提供顺序，不证明执行。沿实际帧及静态 helper 调用逐层保留条件性。
+     for (const atWrite of executionPositions(write, analysis, writeEnv)) {
+       const atRead = reads.find(node => analysis.functionPath(node) === analysis.functionPath(atWrite));
++      if (skippedByJump(atWrite, atRead, analysis)) return true;
+       for (let child = atWrite, parent = analysis.parents.get(child);
+         parent && !analysis.functionNodesByStart.has(parent.start); child = parent, parent = analysis.parents.get(parent)) {
+         let conditional = false;
+@@ -157,7 +205,8 @@
+         else if (parent.type === 'ForOfStatement' || parent.type === 'ForInStatement') conditional = child !== parent.right;
+         else if (parent.type === 'WhileStatement') conditional = child === parent.body;
+         else if (parent.type === 'CatchClause') conditional = true;
+-        // 初始化、条件测试、可迭代值、do 首轮及已证明选中的字面量分支不因外壳而变成可跳过。
++        // 进入 do 首轮只证明进入 body；上方另行核对能否到达具体写入或调用位置。
++        // 初始化、条件测试、可迭代值及已证明选中的字面量分支不因外壳而变成可跳过。
+         // 若读写处于同一已进入分支，外层是否执行不影响本次读取时的覆盖事实。
+         if (conditional && !(atRead && child.start <= atRead.start && child.end >= atRead.end)) return true;
+       }
+--- /dev/null
++++ b/tests/unit/architecture/release-rereview-r14.test.js
+@@ -0,0 +1,126 @@
++'use strict';
++const assert = require('node:assert/strict');
++const test = require('node:test');
++const fs = require('node:fs');
++const os = require('node:os');
++const path = require('node:path');
++const vm = require('node:vm');
++const { scan } = require('../../../scripts/architecture/scan');
++const { evaluateRules } = require('../../../scripts/architecture/rules');
++const actual = require('../../../architecture/boundaries.json');
++
++function evaluate(t, source) {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'g8-rereview-r14-'));
++  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
++  fs.mkdirSync(path.join(root, 'src'));
++  fs.writeFileSync(path.join(root, 'src/shell.js'), source);
++  fs.writeFileSync(path.join(root, 'src/preload.js'),
++    "const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('desktopApi',{app:{getInfo:()=>ipcRenderer.invoke('app:get-info')}});");
++  const config = {
++    schemaVersion: 1, factBaseline: '1'.repeat(40),
++    bootstrap: { factBaseline: '1'.repeat(40), mode: 'first-introduction' },
++    boundaries: [{ ...actual.boundaries.find(boundary => boundary.id === 'renderer-bank-statement'), state: 'pending' }],
++    generatedModules: [], dynamicLoads: [], policyChanges: [],
++  };
++  return evaluateRules(scan(root, config), config,
++    { schemaVersion: 1, factBaseline: config.factBaseline, exceptions: [] }, { root });
++}
++
++async function runtime(source, hasEnum) {
++  let input;
++  const window = {
++    desktopApi: { outsideScope() { return true; }, app: { async getInfo() { return { version: '3.2.10', hasEnum }; } } },
++    BankStatementController: { createBankStatementController(value) { input = value; } },
++  };
++  const same = await vm.runInNewContext(source, { window });
++  return { same, input };
++}
++
++function check(t, source, unsafe) {
++  const result = evaluate(t, source);
++  const violations = result.violations.filter(item => ['ARCH-RENDERER-SCOPE', 'ARCH-STATIC-COVERAGE'].includes(item.rule));
++  if (unsafe) assert.ok(violations.length > 0, JSON.stringify(result.violations));
++  else assert.deepEqual(result.violations, []);
++}
++
++const prefix = 'const old={run(){}},clean={run(){}},box={api:old};';
++const helper = 'function replace(){box.api=clean;}';
++const capture = 'const alias=box.api;alias.outsideScope=window.desktopApi.outsideScope;';
++const mount = 'window.BankStatementController.createBankStatementController({api:old});return alias===old;';
++const asyncBody = body => `async function run(){const info=await window.desktopApi.app.getInfo();${body}}run();`;
++
++for (const [name, body, oldFor] of [
++  ['break 跳过 body 写入', 'do{if(info.hasEnum)break;box.api=clean;}while(false);', [false,true]],
++  ['continue 跳过 body 写入', 'do{if(info.hasEnum)continue;box.api=clean;}while(false);', [false,true]],
++  ['break 跳过 test 写入', 'do{if(info.hasEnum)break;}while((box.api=clean,false));', [false,true]],
++  ['break 跳过 helper', 'do{if(info.hasEnum)break;replace();}while(false);', [false,true]],
++  ['continue 跳过 helper', 'do{if(info.hasEnum)continue;replace();}while(false);', [false,true]],
++  ['break 跳过 test helper', 'do{if(info.hasEnum)break;}while((replace(),false));', [false,true]],
++  ['写入在 break 前', 'do{box.api=clean;if(info.hasEnum)break;}while(false);', [false,false]],
++  ['写入在 continue 前', 'do{box.api=clean;if(info.hasEnum)continue;}while(false);', [false,false]],
++  ['helper 在 break 前', 'do{replace();if(info.hasEnum)break;}while(false);', [false,false]],
++  ['continue 仍执行 test 写入', 'do{if(info.hasEnum)continue;}while((box.api=clean,false));', [false,false]],
++  ['continue 仍执行 test helper', 'do{if(info.hasEnum)continue;}while((replace(),false));', [false,false]],
++  ['内层循环 break 不跳过外层写入', 'do{do{if(info.hasEnum)break;}while(false);box.api=clean;}while(false);', [false,false]],
++  ['内层循环 continue 不跳过外层写入', 'do{do{if(info.hasEnum)continue;}while(false);replace();}while(false);', [false,false]],
++  ['switch break 不跳过循环后续写入', 'do{switch(info.hasEnum){case true:break;}box.api=clean;}while(false);', [false,false]],
++  ['switch 内 continue 跳过循环写入', 'do{switch(info.hasEnum){case true:continue;}box.api=clean;}while(false);', [false,true]],
++  ['label break 跳过 test', 'outer:do{do{if(info.hasEnum)break outer;}while(false);}while((box.api=clean,false));', [false,true]],
++  ['外层 continue 跳过内层 test', 'outer:do{do{if(info.hasEnum)continue outer;}while((box.api=clean,false));}while(false);', [false,true]],
++  ['本层 label continue 仍执行 test', 'outer:do{if(info.hasEnum)continue outer;}while((box.api=clean,false));', [false,false]],
++  ['label block break 跳过写入', 'outer:{do{if(info.hasEnum)break outer;}while(false);box.api=clean;}', [false,true]],
++  ['内部 label break 不跳过后续写入', 'do{inner:{if(info.hasEnum)break inner;}box.api=clean;}while(false);', [false,false]],
++  ['字面量 false break 不可达', 'do{if(false)break;box.api=clean;}while(false);', [false,false]],
++  ['字面量 true 的 else break 不可达', 'do{if(true){}else break;box.api=clean;}while(false);', [false,false]],
++  ['零次内层循环的 label break 不可达', 'outer:do{while(false){break outer;}box.api=clean;}while(false);', [false,false]],
++  ['finally 写入在 break 离开前完成', 'do{try{if(info.hasEnum)break;}finally{box.api=clean;}}while(false);', [false,false]],
++  ['finally 内 continue 跳过后续写入', 'do{try{}finally{if(info.hasEnum)continue;box.api=clean;}}while(false);', [false,true]],
++  ['跳过写入后外层确定覆盖', 'do{if(info.hasEnum)break;box.api=clean;}while(false);box.api=clean;', [false,false]],
++  ['for 初始化保持必执行', 'for(box.api=clean;false;){}', [false,false]],
++  ['while 零次 body 保留旧来源', 'while(info.hasEnum){box.api=clean;break;}', [true,false]],
++]) test(`RR14-01 ${name}`, async t => {
++  const source = prefix + (body.includes('replace()') ? helper : '') + asyncBody(body + capture + mount);
++  for (const [index, flag] of [false,true].entries()) {
++    const observed = await runtime(source, flag);
++    assert.equal(observed.same, oldFor[index]);
++    assert.equal(typeof observed.input.api.outsideScope === 'function', oldFor[index]);
++    if (oldFor[index]) assert.equal(observed.input.api.outsideScope(), true);
++  }
++  check(t, source, oldFor.some(Boolean));
++});
++
++for (const [name, declarations, body, accessor] of [
++  ['helper 内部 do 跳过写入', 'function replace(flag){do{if(flag)break;box.api=clean;}while(false);}', 'replace(info.hasEnum);', 'box.api'],
++  ['嵌套 helper 调用位置跳过写入', 'function inner(){box.api=clean;}function replace(flag){do{if(flag)continue;inner();}while(false);}', 'replace(info.hasEnum);', 'box.api'],
++  ['数组槽位同样保留跳过来源', 'const list=[old];', 'do{if(info.hasEnum)break;list[0]=clean;}while(false);', 'list[0]'],
++]) test(`RR14-01 ${name}`, async t => {
++  const source = 'const old={run(){}},clean={run(){}},box={api:old};' + declarations +
++    asyncBody(body + `const alias=${accessor};alias.outsideScope=window.desktopApi.outsideScope;` + mount);
++  for (const flag of [false,true]) {
++    const observed = await runtime(source, flag);
++    assert.equal(observed.same, flag);
++    assert.equal(typeof observed.input.api.outsideScope === 'function', flag);
++  }
++  check(t, source, true);
++});
++
++for (const jump of ['break', 'continue']) test(`RR14-01 ${jump} 同时跳过写入和本轮读取时不污染安全装配`, async t => {
++  const source = prefix + helper + asyncBody(`do{if(info.hasEnum)${jump};replace();` + capture + mount +
++    '}while(false);window.BankStatementController.createBankStatementController({api:old});return false;');
++  for (const flag of [false,true]) {
++    const observed = await runtime(source, flag);
++    assert.equal(observed.same, false);
++    assert.equal(typeof observed.input.api.outsideScope, 'undefined');
++  }
++  check(t, source, false);
++});
++
++test('RR14-01 break 跳过写入但 finally 仍读取时保留旧来源', async t => {
++  const source = prefix + asyncBody('do{try{if(info.hasEnum)break;box.api=clean;}finally{' + capture + mount + '}}while(false);');
++  for (const flag of [false,true]) {
++    const observed = await runtime(source, flag);
++    assert.equal(observed.same, flag);
++    assert.equal(typeof observed.input.api.outsideScope === 'function', flag);
++  }
++  check(t, source, true);
++});

@@ -45,8 +45,8 @@ test.describe('toolbox:split:export 多文件 IPC 接线', () => {
       '合并、多拆、大文件单拆、普通单拆都必须等待发布 worker 完成'
     );
     assert.ok(mainSource.includes('publishToolboxPublicationAsync'));
-    assert.ok(mainSource.includes('recoverToolboxPublicationsAsync'));
-    assert.ok(mainSource.includes('await recoverToolboxPublicationsAtStartup()'));
+    assert.ok(mainSource.includes("publicationRecoveryCoordinator.forOwner('archive-publication').recover(options)"));
+    assert.ok(mainSource.includes('recoverToolboxVccPublications: recoverToolboxPublicationsAtStartup'));
     const recoveryHelper = mainSource.slice(
       mainSource.indexOf('async function recoverToolboxPublicationsAtStartup()'),
       mainSource.indexOf('function registerToolboxHandlers()')

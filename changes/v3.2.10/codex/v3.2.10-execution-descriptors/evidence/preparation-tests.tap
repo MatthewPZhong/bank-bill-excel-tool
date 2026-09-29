@@ -1,0 +1,52 @@
+✔ Archive 固定基线逐 channel 保留全部 268 项、模块身份、file/no-file/exclude 和 hook 注册 (7.722125ms)
+✔ 私有 authority、独立 manifest 与固定 67-action/74-pair/134-task 清单双向闭合 (2.411125ms)
+✔ 保持数量但篡改 TaskPolicy 身份仍被独立 authority 拒绝 (1.278ms)
+✔ 行为样例覆盖每个可恢复 channel 的分类/metadata/lineage，及全部已登记可选 hook (0.372625ms)
+✔ Archive 固定行为：recoverable / resultClassifier (12.307416ms)
+✔ Archive 固定行为：standardClassifier / resultClassifier (6.158042ms)
+✔ Archive 固定行为：statementClassifier / resultClassifier (0.288458ms)
+✔ Archive 固定行为：positionClassifier / resultClassifier (0.548917ms)
+✔ Archive 固定行为：vccClassifier / resultClassifier (0.392291ms)
+✔ Archive 固定行为：vccOpSaveClassifier / resultClassifier (0.152958ms)
+✔ Archive 固定行为：standardMetadata / resultMetadataResolver (1.578542ms)
+✔ Archive 固定行为：vccMetadata / resultMetadataResolver (0.248083ms)
+✔ Archive 固定行为：genericLineage / resultFlowIdentities (1.72ms)
+✔ Archive 固定行为：vccRunLineage / resultFlowIdentities (0.150625ms)
+✔ Archive 固定行为：vccFinancialOp:import:apply / resultFlowIdentities (0.053042ms)
+✔ Archive 固定行为：continuationIdentity / flowIdentityResolver (0.284625ms)
+✔ Archive 固定行为：vccRunIdentity / flowIdentityResolver (0.16125ms)
+✔ Archive 固定行为：vccFinancialOp:export:import-audit / flowIdentityResolver (0.037875ms)
+✔ Archive 固定行为：vccFinancialOp:data-manager:delete / flowPlanResolver (0.055584ms)
+✔ Archive 固定行为：bankBuRecon:run / flowPlanResolver (0.113917ms)
+✔ Archive 固定行为：bankBuRecon:import:run / resultFlowIdentities (0.0555ms)
+✔ Archive 固定行为：bank-statement:export / flowPlanResolver (0.064583ms)
+✔ Archive 固定行为：bank-statement:export / resultFlowIdentities (0.048417ms)
+✔ Archive 固定行为：acquiringBillCurrency:export / flowPlanResolver (0.152584ms)
+✔ Archive 固定行为：acquiringBillCurrency:export / resultFlowIdentities (0.073792ms)
+✔ Archive 固定行为：acquiringBillCurrency:run / resultFlowIdentities (0.09375ms)
+✔ Archive 固定行为：acquiringBillCurrency:run:resume / resultFlowIdentities (0.045417ms)
+✔ Archive 固定行为：selectedFilePlan / filePlanResolver (1.201208ms)
+✔ Archive 固定行为：workerFilePlan / filePlanResolver (0.09275ms)
+✔ Archive 固定行为：acquiringBillCurrency:run:resume / filePlanResolver (0.069792ms)
+✔ Archive 固定行为：deferredPromotion / promotionManifestResolver (0.046666ms)
+✔ 探针可识别相同 callable 形状下的分类和 lineage 行为漂移 (0.118083ms)
+✔ G7 基线保存全部 49 action 的原 policy、载体映射、冻结 binding 与生产策略 (10.156583ms)
+✔ 14 个精确 bucket 经原五 registry 重建和真实 freeze/getBinding 后仍保持逐 action 基线 (16.087042ms)
+✔ 静态 profile 必须使用 resourceProfileKeys；旧别名无法补偿缺失的静态能力 (32.538291ms)
+✔ 48 个静态 action 不补造 estimator；唯一动态 profile 归 NewAccount 所有 (0.19725ms)
+✔ 无动态 estimator 的 Toolbox 沿用静态 phase，保留 5 秒准入且不启动 worker (3.906625ms)
+✔ NewAccount 实际 estimator 在准入前根据合法输入提升 memory，保留原 carrier slots (1.560666ms)
+▶ NewAccount estimator 的 Promise 与 topology slot 漂移在任何准入/worker 前被原 Supervisor 拒绝
+  ✔ Promise (2.281375ms)
+  ✔ worker slots (1.948417ms)
+  ✔ utility slots (1.705833ms)
+✔ NewAccount estimator 的 Promise 与 topology slot 漂移在任何准入/worker 前被原 Supervisor 拒绝 (6.201375ms)
+✔ 真实 runtime binder 逐受保护 action 拒绝缺失 authority 与 payload override，且尚未创建载体 (10.891875ms)
+ℹ tests 43
+ℹ suites 0
+ℹ pass 43
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 380.342417

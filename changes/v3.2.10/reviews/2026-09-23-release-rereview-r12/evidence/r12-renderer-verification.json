@@ -1,0 +1,62 @@
+{
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "result": "RR11-01 closed in bounded scope; no new high-confidence finding",
+  "commands": [
+    {
+      "purpose": "原样复跑R11实际20 Renderer配置",
+      "cmd": "node changes/v3.2.10/reviews/2026-09-23-release-rereview-r11/evidence/r11-renderer-member-realconfig.cjs > /tmp/r12-renderer-original-realconfig.json 2> /tmp/r12-renderer-original-realconfig-progress.log",
+      "exitCode": 0,
+      "cases": 2,
+      "boundaries": 20,
+      "baseViolations": 0,
+      "probeViolations": [
+        1,
+        0
+      ]
+    },
+    {
+      "purpose": "原样复跑R11的6个成员来源例",
+      "cmd": "node changes/v3.2.10/reviews/2026-09-23-release-rereview-r11/evidence/r11-renderer-probes.cjs > /tmp/r12-renderer-original-probes.jsonl",
+      "exitCode": 0,
+      "cases": 6,
+      "violations": [
+        1,
+        1,
+        0,
+        0,
+        1,
+        1
+      ]
+    },
+    {
+      "purpose": "6个有限邻近例current",
+      "cmd": "node /tmp/r12-renderer-probes.cjs > /tmp/r12-renderer-probes-current.jsonl",
+      "exitCode": 0,
+      "cases": 6,
+      "violations": [
+        1,
+        1,
+        1,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "purpose": "R11repair起点自举及6个相同邻近例before",
+      "cmd": "renderer_before_root=\"$(node /tmp/r12-renderer-before-bootstrap.cjs)\"\nRENDERER_SCANNER_ROOT=\"$renderer_before_root\" node /tmp/r12-renderer-probes.cjs > /tmp/r12-renderer-probes-before.jsonl",
+      "exitCode": 0,
+      "cases": 6,
+      "violations": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        1
+      ],
+      "hashMatches": 5
+    }
+  ]
+}

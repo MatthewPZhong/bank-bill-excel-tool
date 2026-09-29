@@ -1,0 +1,65 @@
+{
+  "initialReleaseCheck": {
+    "status": "interrupted after known failures",
+    "exitCode": 130,
+    "failures": "5 layout/VM assertions plus historical-clone node_modules resolution; related assertions migrated, dependency symlink restored",
+    "evidence": "release-check-initial-interrupted.log"
+  },
+  "finalReleaseCheck": {
+    "command": "UNIT_TEST_CONCURRENCY=4 npm run release-check",
+    "status": "PASS",
+    "concurrencyReason": "48GiB host, bounded four files vs Node default14; no test filtering",
+    "exitCode": 0,
+    "completedAt": "2026-09-20T14:50:30.235828+00:00",
+    "evidence": "release-check.log",
+    "lint": "PASS",
+    "smoke": "PASS",
+    "unit": {
+      "tests": 8304,
+      "suites": 831,
+      "pass": 8300,
+      "fail": 0,
+      "cancelled": 0,
+      "skip": 4,
+      "todo": 0
+    },
+    "integration": {
+      "scripts": 62,
+      "passed": 62,
+      "failed": 0,
+      "reportedAssertions": 2587,
+      "durationMs": 526172,
+      "countBoundary": "one historical nested-worker script reports no numeric assertion count"
+    },
+    "sourceSnapshotMatches": true,
+    "sourceFileCount": 44
+  },
+  "sourceSnapshot": "source-snapshot.json",
+  "secondReleaseCheck": {
+    "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+    "status": "completed unit with four legacy Main layout failures; repaired in final test snapshot",
+    "exitCode": 1,
+    "evidence": "release-check-layout-regressions.log"
+  },
+  "thirdReleaseCheck": {
+    "command": "UNIT_TEST_CONCURRENCY=4 npm run release-check",
+    "exitCode": 1,
+    "unit": {
+      "tests": 8303,
+      "pass": 8299,
+      "fail": 0,
+      "skip": 4
+    },
+    "integration": {
+      "scripts": 62,
+      "passed": 61,
+      "failed": 1
+    },
+    "failure": "direct console.error in new scope fallback violates SR-log-1",
+    "evidence": "release-check-logging-regression.log"
+  },
+  "subsequentSupplement": {
+    "evidence": "startup-supplement-status.json",
+    "note": "Historical release-check records above retain their original source snapshot; subsequent test-only startup supplement has separate validation."
+  }
+}

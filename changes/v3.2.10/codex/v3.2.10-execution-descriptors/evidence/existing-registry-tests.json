@@ -1,0 +1,9 @@
+{
+  "command": "node --test tests/unit/main-process/background-execution/action-task-binding-registry.test.js tests/unit/main-process/background-execution/manifest-coverage-e13-g.test.js tests/unit/main-process/background-execution/policy-registry.test.js tests/unit/main-process/archive-task-policy-registry.test.js",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "finishedAt": "2026-09-20T16:06:04.953387+00:00",
+  "elapsedSeconds": 2.989,
+  "exitCode": 1,
+  "evidence": "existing-registry-tests.log"
+}

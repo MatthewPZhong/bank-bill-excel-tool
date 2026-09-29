@@ -10,19 +10,18 @@ const XLSX = require('xlsx');
 
 const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
 const {
-  createBackgroundExecutionRuntime,
+  createBackgroundExecutionRuntime
+} = require('../../../src/main-process/execution-descriptors/composition');
+const {
   isBackgroundExecutionProductionEnabled
-} = require('../../../src/main-process/background-execution/runtime');
+} = require('../../../src/main-process/execution-descriptors/policy-catalog');
 const {
   createJobEnvelope
 } = require('../../../src/main-process/background-execution/protocol');
 const {
   prepareToolboxPublication
-} = require('../../../src/main-process/toolbox-output-publication');
-const {
-  createToolboxPublicationDispatcher,
-  recoverToolboxPublicationsAsync
-} = require('../../../src/main-process/toolbox-output-publication-dispatch');
+} = require('../../helpers/publication-authority');
+const { createTestPublicationHarness } = require('../../helpers/publication-authority');
 const {
   createNewAccountExpectedArtifactAuthority,
   createNewAccountWorkerInput
@@ -55,6 +54,14 @@ const CRASH_RECOVER_PUBLISHER_WORKER = path.resolve(
   '__fixtures__/toolbox-publication-stub-crash-recover.js'
 );
 const roots = [];
+const publicationHarnesses = new Map();
+function publicationHarness(userDataDir) {
+  if (!publicationHarnesses.has(userDataDir)) publicationHarnesses.set(userDataDir, createTestPublicationHarness(userDataDir));
+  return publicationHarnesses.get(userDataDir);
+}
+function recoverTestPublications(options) {
+  return publicationHarness(options.userDataDir).recovery.recover({ reason: 'startup', ...options });
+}
 
 test.after(() => {
   for (const root of roots) fs.rmSync(root, { recursive: true, force: true });
@@ -193,6 +200,9 @@ function saveAsOptions(root, fixture, overrides = {}) {
     batchContext: batchContext(),
     taskId: 'new-account-e10-b-publish',
     userDataDir: path.join(root, 'user-data'),
+    publisher: (input) => publicationHarness(path.join(root, 'user-data')).dispatcher.publish({
+      ...input, requireArchiveHandoff: true, requireValidatedArtifacts: true
+    }),
     production: false,
     async settleArtifacts() {
       return { durable: true };
@@ -999,7 +1009,7 @@ test('真实 runtime 获取/释放 I/O lease，不占 CPU/Worker；预算拒绝�
   }
 });
 
-test('既有 singleton FIFO Publisher 实际发布一次，正式目标与 E10-A bytes/digests 完全一致', async () => {
+test('受控 FIFO Publisher 实际发布一次，正式目标与 E10-A bytes/digests 完全一致', async () => {
   const root = tempRoot('new-account-e10-b-real-publisher-');
   const fixture = await generatedFixture(root);
   const expectedBusinessEvidence = JSON.parse(JSON.stringify(
@@ -1036,7 +1046,8 @@ test('既有 singleton FIFO Publisher 实际发布一次，正式目标与 E10-A
   await acknowledgeNewAccountSaveAsPublication({
     taskId: options.taskId,
     userDataDir: options.userDataDir,
-    taskTerminalPersisted: true
+    taskTerminalPersisted: true,
+    recoverPublications: (request) => publicationHarness(options.userDataDir).recovery.recover(request)
   });
   assert.deepEqual(
     fs.readdirSync(path.dirname(options.targetPath)).filter((name) => name.startsWith('.toolbox-publish-')),
@@ -1102,8 +1113,8 @@ test('真实 Publisher committed-but-reply-lost 由同一 journal 恢复，settl
   const options = saveAsOptions(root, fixture, {
     taskId: 'committed-crash-recover-new-account-e10-b'
   });
-  const dispatcher = createToolboxPublicationDispatcher({
-    workerScriptPath: CRASH_RECOVER_PUBLISHER_WORKER
+  const { dispatcher, recovery } = createTestPublicationHarness(options.userDataDir, {
+    dispatcherOptions: { workerScriptPath: CRASH_RECOVER_PUBLISHER_WORKER }
   });
   let publishCalls = 0;
   let settleCalls = 0;
@@ -1140,11 +1151,11 @@ test('真实 Publisher committed-but-reply-lost 由同一 journal 恢复，settl
   assert.equal(settleCalls, 1);
   assert.equal(sha256File(options.targetPath), fixture.generationResult.artifact.sha256);
 
-  const firstRecovery = await dispatcher.recover({
+  const firstRecovery = await recovery.recover({
     userDataDir: options.userDataDir,
     deferCommittedRecovery: true
   });
-  const secondRecovery = await dispatcher.recover({
+  const secondRecovery = await recovery.recover({
     userDataDir: options.userDataDir,
     deferCommittedRecovery: true
   });
@@ -1161,9 +1172,9 @@ test('真实 Publisher committed-but-reply-lost 由同一 journal 恢复，settl
     taskId: options.taskId,
     userDataDir: options.userDataDir,
     taskTerminalPersisted: true,
-    recoverPublications: (request) => dispatcher.recover(request)
+    recoverPublications: (request) => recovery.recover(request)
   });
-  const afterAck = await dispatcher.recover({
+  const afterAck = await recovery.recover({
     userDataDir: options.userDataDir,
     deferCommittedRecovery: true
   });
@@ -1201,7 +1212,7 @@ test('Publisher committed 后 settlement failure 不回报可重试失败并保�
     pendingRecovery: true,
     code: 'ARCHIVE_TEMPORARILY_UNAVAILABLE'
   });
-  const pending = await recoverToolboxPublicationsAsync({
+  const pending = await recoverTestPublications({
     userDataDir: options.userDataDir,
     deferCommittedRecovery: true
   });
@@ -1235,7 +1246,7 @@ test('restart recovery 只取消 prepared journal，不 blind replay generation/
     allowEmptyArchiveInputs: true
   });
   assert.equal(fs.existsSync(options.targetPath), false);
-  const recovered = await recoverToolboxPublicationsAsync({ userDataDir: options.userDataDir });
+  const recovered = await recoverTestPublications({ userDataDir: options.userDataDir });
   assert.ok(recovered.recovered.some((entry) => (
     entry.taskId === options.taskId && entry.action === 'cancelled-prepared'
   )));
@@ -1463,4 +1474,23 @@ test('Windows missing-target case/Unicode identity fail closed，source/target e
     () => normalizeFilePlanV1(unsafePlan, { platform: 'win32' }),
     (error) => error.code === 'TARGET_IDENTITY_WINDOWS_CASE_MAPPING_UNSAFE'
   );
+});
+
+test('NewAccount ack 缺 facade/请求未决/缺明确 cleanup 证明均不确认 receipt', async () => {
+  await assert.rejects(acknowledgeNewAccountSaveAsPublication({
+    taskId: 'ack-pending-task', taskTerminalPersisted: true
+  }), { code: 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED', preserveTemporaryFiles: true });
+  for (const summary of [
+    { recovered: [], deferred: [], skippedActive: [] },
+    { recovered: [{ taskId: 'ack-pending-task', action: 'commit-cleanup' }], deferred: [{ taskId: 'ack-pending-task' }], skippedActive: [] },
+    { recovered: [{ taskId: 'ack-pending-task', action: 'commit-cleanup' }], deferred: [], skippedActive: ['ack-pending-task'] }
+  ]) {
+    await assert.rejects(acknowledgeNewAccountSaveAsPublication({
+      taskId: 'ack-pending-task', taskTerminalPersisted: true,
+      recoverPublications: async (request) => {
+        assert.deepEqual(request, { reason: 'receipt-ack', taskIds: ['ack-pending-task'], acknowledgedCommittedTaskIds: ['ack-pending-task'] });
+        return summary;
+      }
+    }), { code: 'NEW_ACCOUNT_SAVE_AS_RECEIPT_ACK_FAILED' });
+  }
 });

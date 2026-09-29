@@ -68,9 +68,11 @@ const {
   createRecoveryHoldGate
 } = require('../../../src/main-process/background-execution/recovery-hold-gate');
 const {
-  createBackgroundExecutionRuntime,
+  createBackgroundExecutionRuntime
+} = require('../../../src/main-process/execution-descriptors/composition');
+const {
   isBackgroundExecutionProductionEnabled
-} = require('../../../src/main-process/background-execution/runtime');
+} = require('../../../src/main-process/execution-descriptors/policy-catalog');
 const {
   createSettlementRecoveryProviderRegistry
 } = require('../../../src/main-process/background-execution/settlement-recovery-provider-registry');

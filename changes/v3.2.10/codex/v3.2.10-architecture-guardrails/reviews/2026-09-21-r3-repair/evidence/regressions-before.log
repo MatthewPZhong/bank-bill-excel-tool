@@ -1,0 +1,94 @@
+✖ R3-01 本地服务返回 Position 方法引用，与包装调用一致拒绝 (24.60925ms)
+✖ R3-02 fork 三参数 运行时数组 保留明确 cwd，与真实子进程一致 (96.897583ms)
+✖ R3-02 fork 三参数 undefined 保留明确 cwd，与真实子进程一致 (91.644208ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 0
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 294.672125
+
+✖ failing tests:
+
+test at tests/unit/architecture/review-round3.test.js:43:1
+✖ R3-01 本地服务返回 Position 方法引用，与包装调用一致拒绝 (24.60925ms)
+  AssertionError [ERR_ASSERTION]: []
+      at denied (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round3.test.js:28:41)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round3.test.js:48:28)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.start (node:internal/test_runner/test:1096:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:385:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests/unit/architecture/review-round3.test.js:54:3
+✖ R3-02 fork 三参数 运行时数组 保留明确 cwd，与真实子进程一致 (96.897583ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   {
+  +     boundaryId: null,
+  +     column: 108,
+  +     evidenceId: 'f70e80ffb2dd6dea57c6ef509cad8cd209ae2b9cbdce318ff65eedd71c82f6d0',
+  +     from: 'src/launcher.cjs',
+  +     functionPath: null,
+  +     kind: 'worker',
+  +     line: 1,
+  +     message: '动态加载未登记准确 AST 指纹及完整目标集合',
+  +     rule: 'ARCH-STATIC-COVERAGE',
+  +     to: null
+  +   }
+  + ]
+  - []
+  
+      at clean (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round3.test.js:29:32)
+      at correctWorker (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round3.test.js:39:3)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round3.test.js:56:20)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { rule: 'ARCH-STATIC-COVERAGE', boundaryId: null, from: 'src/launcher.cjs', to: null, line: 1, column: 108, message: '动态加载未登记准确 AST 指纹及完整目标集合', evidenceId: 'f70e80ffb2dd6dea57c6ef509cad8cd209ae2b9cbdce318ff65eedd71c82f6d0', functionPath: null, kind: 'worker' } ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/architecture/review-round3.test.js:54:3
+✖ R3-02 fork 三参数 undefined 保留明确 cwd，与真实子进程一致 (91.644208ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+  +   'src/worker.cjs'
+  -   'src/jobs/src/worker.cjs'
+    ]
+  
+      at correctWorker (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round3.test.js:40:10)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round3.test.js:56:20)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'src/worker.cjs' ],
+    expected: [ 'src/jobs/src/worker.cjs' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

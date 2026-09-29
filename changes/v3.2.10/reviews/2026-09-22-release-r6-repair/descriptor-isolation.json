@@ -1,0 +1,29 @@
+{
+  "status": "PASS",
+  "distinctSelectedDescriptors": 4,
+  "crossAnalysisLookupAbsent": true,
+  "selectionProperties": [
+    {
+      "name": "one",
+      "property": "p",
+      "readStart": 75
+    },
+    {
+      "name": "two",
+      "property": "q",
+      "readStart": 89
+    },
+    {
+      "name": "three",
+      "property": "p",
+      "readStart": 109
+    },
+    {
+      "name": "four",
+      "property": "q",
+      "readStart": 126
+    }
+  ],
+  "forwardReverseDescriptionOrderEqual": true,
+  "descriptionDigest": "0c23f948323b55b038e7c57a2c8dacaf1d4e6478dea32a8e72019b2aa25dfd70"
+}

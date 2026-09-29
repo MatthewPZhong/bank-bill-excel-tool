@@ -1,0 +1,22 @@
+{
+  "command": "node scripts/check-architecture.js --json /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r14/evidence/architecture-check.json",
+  "exitCode": 0,
+  "active": 31,
+  "pending": 0,
+  "partial": 0,
+  "violations": 0,
+  "stale": 0,
+  "coverage": {
+    "scannedFiles": 765,
+    "parsedFiles": 765,
+    "literalEdges": 2405,
+    "workerEdges": 64,
+    "globalEdges": 59,
+    "unresolved": 2,
+    "dynamicSites": 33,
+    "parseErrors": 0,
+    "pendingBoundaries": [],
+    "partialBoundaries": []
+  },
+  "historyCommits": 21
+}

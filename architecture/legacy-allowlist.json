@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "factBaseline": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "exceptions": [
+    {
+      "id": "baseline-cycle-001",
+      "rule": "ARCH-CYCLE",
+      "from": "src/backend/biz-op-recon-import/import-worker.js",
+      "originalCommit": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+      "reason": "固定 v3.2.9 扩展 worker 执行图存在此准确 SCC；原字面量图零环，边集合扩大或纯字面量循环不享有豁免",
+      "governance": "G8",
+      "removeWhen": "G8 对应生产迁移完成并取得行为验证；删除准确旧入口和本条记录",
+      "evidenceId": "a6247d7e51da79199b73635f3ec09a02c7fdc204edbce418b0a14b7e44162ecc",
+      "functionPath": null,
+      "cycleEdges": [
+        {
+          "from": "src/backend/biz-op-recon-import/import-worker.js",
+          "to": "src/main-process/biz-op-recon-session.js",
+          "kind": "require"
+        },
+        {
+          "from": "src/main-process/biz-op-recon-session.js",
+          "to": "src/backend/biz-op-recon-import/import-worker.js",
+          "kind": "worker"
+        }
+      ],
+      "edgeKinds": [
+        "require",
+        "worker"
+      ]
+    },
+    {
+      "id": "baseline-cycle-002",
+      "rule": "ARCH-CYCLE",
+      "from": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+      "originalCommit": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+      "reason": "固定 v3.2.9 扩展 worker 执行图存在此准确 SCC；原字面量图零环，边集合扩大或纯字面量循环不享有豁免",
+      "governance": "G8",
+      "removeWhen": "G8 对应生产迁移完成并取得行为验证；删除准确旧入口和本条记录",
+      "evidenceId": "69a3dcf14692fc4e083e6341f4366b184b6fe550ee8c13f3c541167c93e87e8c",
+      "functionPath": "createWorkerThreadAdapter.start",
+      "cycleEdges": [
+        {
+          "from": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+          "to": "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+          "kind": "worker"
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+          "to": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+          "kind": "require"
+        }
+      ],
+      "edgeKinds": [
+        "require",
+        "worker"
+      ]
+    }
+  ]
+}

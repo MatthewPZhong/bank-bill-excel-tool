@@ -13,6 +13,7 @@ const {
 const root = path.resolve(__dirname, '../..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const renderer = fs.readFileSync(path.join(root, 'src/renderer.js'), 'utf8');
+const controller = fs.readFileSync(path.join(root, 'src/renderer/controllers/duplicate-inbound.js'), 'utf8');
 const preload = fs.readFileSync(path.join(root, 'src/preload.js'), 'utf8');
 const main = fs.readFileSync(path.join(root, 'src/main.js'), 'utf8');
 
@@ -134,38 +135,42 @@ test.describe('重复入金匹配 UI / preload / IPC 接线', () => {
       'handleDuplicateInboundMatchImport',
       'handleDuplicateInboundMatchRun',
       'handleDuplicateInboundMatchExport',
-      'applyDuplicateInboundMatchPanelPreviewState'
+      'applyPreview'
     ]) {
-      assert.ok(renderer.includes(`function ${functionName}(`), `缺少 ${functionName}`);
+      assert.ok(controller.includes(`function ${functionName}(`), `缺少 ${functionName}`);
     }
     assert.ok(renderer.includes("info.previewModal === 'duplicate-inbound-match-panel'"));
-    assert.match(renderer, /setDuplicateInboundMatchStatus[\s\S]*updateStatusBox\(/);
-    assert.match(renderer, /duplicateInboundMatchState\.busy \|\| !status\.canRun/);
-    assert.match(renderer, /duplicateInboundMatchState\.busy \|\| !status\.canExport/);
-    assert.match(renderer, /MPT 异常：零候选/);
-    assert.ok(renderer.includes('duplicate-inbound-mpt-candidate-count-multiple'));
-    assert.ok(renderer.includes('duplicate-inbound-mpt-candidate-reused-across-groups'));
-    assert.ok(renderer.includes('duplicate-inbound-mpt-opp-bu-conflict'));
-    assert.ok(renderer.includes('duplicate-inbound-mpt-order-id-empty'));
-    assert.ok(renderer.includes('duplicate-inbound-document-candidate-count-zero'));
-    assert.ok(renderer.includes('duplicate-inbound-document-identity-fields-conflict'));
-    assert.ok(renderer.includes('duplicate-inbound-document-business-department-mismatch'));
-    assert.ok(renderer.includes('window.desktopApi.duplicateInboundMatch.importFiles()'));
-    assert.match(renderer, /function formatDuplicateInboundMatchFailure\(/);
-    assert.match(renderer, /Array\.isArray\(value\.detailLines\)/);
-    assert.match(renderer, /\.\.\.detailLines\]\.join\('\\n'\)/);
+    assert.match(renderer, /createDuplicateInboundController\(\{ api: window\.desktopApi\.duplicateInboundMatch,[\s\S]*?panel: elements\.duplicateInboundMatchModulePanel/);
+    assert.match(renderer, /entry\(MODULES\.duplicateInboundMatch, elements\.duplicateInboundMatchModulePanel,[\s\S]*?domainControllers\.duplicateInbound\)/);
+    assert.match(renderer, /domainControllers\.duplicateInbound\.commands\.preview\(\)/);
+    assert.ok(html.includes('src/renderer/controllers/duplicate-inbound.js'));
+    assert.match(controller, /setDuplicateInboundMatchStatus[\s\S]*updateStatusBox\(/);
+    assert.match(controller, /duplicateInboundMatchState\.busy \|\| !status\.canRun/);
+    assert.match(controller, /duplicateInboundMatchState\.busy \|\| !status\.canExport/);
+    assert.match(controller, /MPT 异常：零候选/);
+    assert.ok(controller.includes('duplicate-inbound-mpt-candidate-count-multiple'));
+    assert.ok(controller.includes('duplicate-inbound-mpt-candidate-reused-across-groups'));
+    assert.ok(controller.includes('duplicate-inbound-mpt-opp-bu-conflict'));
+    assert.ok(controller.includes('duplicate-inbound-mpt-order-id-empty'));
+    assert.ok(controller.includes('duplicate-inbound-document-candidate-count-zero'));
+    assert.ok(controller.includes('duplicate-inbound-document-identity-fields-conflict'));
+    assert.ok(controller.includes('duplicate-inbound-document-business-department-mismatch'));
+    assert.ok(controller.includes('domainApi.importFiles()'));
+    assert.match(controller, /function formatDuplicateInboundMatchFailure\(/);
+    assert.match(controller, /Array\.isArray\(value\.detailLines\)/);
+    assert.match(controller, /\.\.\.detailLines\]\.join\('\\n'\)/);
     assert.equal(
-      (renderer.match(/formatDuplicateInboundMatchFailure\('(导入|运行|导出)失败'/g) || []).length,
+      (controller.match(/formatDuplicateInboundMatchFailure\('(导入|运行|导出)失败'/g) || []).length,
       6,
       '导入、运行、导出的返回错误与抛错都必须展示 detailLines'
     );
     assert.match(
-      renderer,
+      controller,
       /formatDuplicateInboundMatchFailure\('状态读取失败', status\)/,
       '启动回收或侧库状态读取失败必须对用户可见'
     );
     const formatExportSuccess = new Function(
-      `${extractFunction(renderer, 'formatDuplicateInboundMatchExportSuccess')}; return formatDuplicateInboundMatchExportSuccess;`
+      `${extractFunction(controller, 'formatDuplicateInboundMatchExportSuccess')}; return formatDuplicateInboundMatchExportSuccess;`
     )();
     assert.deepEqual(
       formatExportSuccess({ filePath: '/tmp/result.xlsx', warnings: ['旧备份未删除'] }),
@@ -219,13 +224,12 @@ test.describe('重复入金匹配 UI / preload / IPC 接线', () => {
     );
     const inspectorFreezeAt = recovery.indexOf('inspectorRegistry.freeze()');
     const providerFreezeAt = recovery.indexOf('providerRegistry.freeze()');
-    const scanAt = recovery.indexOf('await bizOpV327Module.recovery.run({ initialPlatformOnly: true })');
-    const readyAt = recovery.lastIndexOf('duplicateStartupRecoveryReady = bizOpV327Module.recovery.hasCompletedPlatformScan()');
+    const scanAt = recovery.indexOf('await applicationRecoveryCoordinator.preflight()');
     assert.ok(registerManualInspectorAt >= 0 && registerManualInspectorAt < inspectorFreezeAt);
     assert.ok(registerDuplicateInspectorAt >= 0 && registerDuplicateInspectorAt < inspectorFreezeAt);
     assert.ok(registerManualProviderAt >= 0 && registerManualProviderAt < providerFreezeAt);
     assert.ok(registerDuplicateProviderAt >= 0 && registerDuplicateProviderAt < providerFreezeAt);
-    assert.ok(inspectorFreezeAt < scanAt && providerFreezeAt < scanAt && scanAt < readyAt);
+    assert.ok(inspectorFreezeAt < scanAt && providerFreezeAt < scanAt);
 
     const getter = extractFunction(main, 'getDuplicateInboundMatchService');
     assert.ok(
@@ -233,12 +237,30 @@ test.describe('重复入金匹配 UI / preload / IPC 接线', () => {
         getter.indexOf('createDuplicateInboundMatchService({')
     );
     const initialize = extractFunction(main, 'initializeApplication');
-    assert.match(initialize, /await archiveCenterInitializationPromise;[\s\S]*?hasCompletedPlatformScan\(\)[\s\S]*?BACKGROUND_RECOVERY_SCAN_PENDING/);
-    assert.match(extractFunction(main, 'initializeArchiveCenter'), /ownerName: 'biz-op-v327'[\s\S]*?await bizOpV327Module.recovery.run\(\)[\s\S]*?duplicateStartupRecoveryReady = bizOpV327Module.recovery.hasCompletedPlatformScan\(\)/);
+    assert.match(initialize, /await archiveCenterInitializationPromise;[\s\S]*?applicationRecoveryCoordinator\.completeArchiveInitialization\(initialized\)/);
+    assert.match(extractFunction(main, 'initializeArchiveCenter'), /recoverInterruptedTaskOwners: applicationRecoveryCoordinator\.archiveOwnerHooks\(\)/);
     assert.ok(
       initialize.indexOf('await initializeBackgroundExecutionRecovery()') <
         initialize.indexOf('schedulePreFundReconciliationStartupCleanup()')
     );
+  });
+
+
+  test('Duplicate 从应用 snapshot 读取扫描事实，活动 hold 始终阻断', () => {
+    const gate = new Function('applicationRecoveryCoordinator', 'recoveryHoldGate', 'DUPLICATE_STARTUP_CONFLICT_SCOPE_KEY',
+      `${extractFunction(main, 'assertDuplicateInboundMatchStartupAvailable')} return assertDuplicateInboundMatchStartupAvailable;`);
+    let completed = false; let held = false; let checks = 0;
+    const app = { snapshot: () => ({ platformScanCompleted: completed }) };
+    const assertReady = gate(app, { assertNoRecoveryHold({ conflictScopeKey }) {
+      assert.equal(conflictScopeKey, 'duplicate-scope'); checks += 1;
+      if (held) throw Object.assign(new Error('Hold active'), { code: 'RECOVERY_HOLD_ACTIVE' });
+    } }, 'duplicate-scope');
+    assert.throws(assertReady, { code: 'DUPLICATE_STARTUP_RECOVERY_UNAVAILABLE' });
+    assert.equal(checks, 0);
+    completed = true; held = true;
+    assert.throws(assertReady, { code: 'RECOVERY_HOLD_ACTIVE' });
+    held = false; assert.equal(assertReady(), true);
+    assert.equal(checks, 2);
   });
 
   test('main handlers 对取消、失败、进度和锁释放执行真实契约', async () => {

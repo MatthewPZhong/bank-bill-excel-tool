@@ -16,7 +16,7 @@ const { createJobEnvelope } = require('../../../../src/main-process/background-e
 const {
   createBackgroundExecutionRuntime,
   createNonProductionBackgroundExecutionRuntime
-} = require('../../../../src/main-process/background-execution/runtime');
+} = require('../../../../src/main-process/execution-descriptors/composition');
 const {
   createPlatformResourceBudgets
 } = require('../../../../src/main-process/background-execution/resource-budget');

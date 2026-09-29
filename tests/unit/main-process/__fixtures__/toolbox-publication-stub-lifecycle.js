@@ -28,7 +28,7 @@ if (!isMainThread && parentPort) {
     const { jobId, op, payload = {} } = message;
     const label = op === 'publish'
       ? String(payload.taskId || 'publish')
-      : String(payload.userDataDir || 'recover');
+      : `${op}:${payload.userDataDir}`;
     parentPort.postMessage({
       type: 'progress',
       jobId,
@@ -52,8 +52,9 @@ if (!isMainThread && parentPort) {
     parentPort.postMessage({
       type: 'done',
       jobId,
-      result: op === 'recover'
-        ? { recovered: [], label }
+      result: op === 'discover-recovery'
+        ? { root: payload.userDataDir, indexDigest: 'fixture-empty', records: [], skippedActive: [] }
+        : op === 'execute-recovery' ? { recovered: [], deferred: [], skippedActive: [], indexDigest: 'fixture-empty', resultingIndexDigest: 'fixture-empty' }
         : { committed: true, files: [], warnings: [] }
     });
   });

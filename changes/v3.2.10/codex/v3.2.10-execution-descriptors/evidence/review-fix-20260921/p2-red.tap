@@ -1,0 +1,192 @@
+✖ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：missing (39.2235ms)
+✖ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：enable (26.907ms)
+✖ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：legacy-production (25.84ms)
+✖ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：legacy-disabled (25.362167ms)
+✖ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：swap (24.551833ms)
+✖ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：disable (23.330583ms)
+✖ catalog 与 descriptor 同时漂移也不能成为彼此的批准基线 (282.395167ms)
+✖ 只改 catalog 同样在正式装配时拒绝，不能留下查询/实际 runtime 分叉 (280.007583ms)
+✖ manifest --write 在写任何产物之前拒绝错误 catalog，不重生成批准期望 (144.594417ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 0
+ℹ fail 9
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1194.100167
+
+✖ failing tests:
+
+test at tests/unit/main-process/execution-descriptor-production-baseline.test.js:51:3
+✖ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：missing (39.2235ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors/tests/unit/main-process/execution-descriptor-production-baseline.test.js:57:14)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.start (node:internal/test_runner/test:1096:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:385:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/execution-descriptor-production-baseline.test.js:51:3
+✖ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：enable (26.907ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors/tests/unit/main-process/execution-descriptor-production-baseline.test.js:57:14)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/execution-descriptor-production-baseline.test.js:51:3
+✖ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：legacy-production (25.84ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors/tests/unit/main-process/execution-descriptor-production-baseline.test.js:57:14)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/execution-descriptor-production-baseline.test.js:51:3
+✖ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：legacy-disabled (25.362167ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors/tests/unit/main-process/execution-descriptor-production-baseline.test.js:57:14)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/execution-descriptor-production-baseline.test.js:51:3
+✖ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：swap (24.551833ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors/tests/unit/main-process/execution-descriptor-production-baseline.test.js:57:14)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/execution-descriptor-production-baseline.test.js:51:3
+✖ 正式 runtime 装配在创建 Governor/worker 前拒绝已知 action 语义漂移：disable (23.330583ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors/tests/unit/main-process/execution-descriptor-production-baseline.test.js:57:14)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/execution-descriptor-production-baseline.test.js:86:1
+✖ catalog 与 descriptor 同时漂移也不能成为彼此的批准基线 (282.395167ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + undefined
+  - 'PRODUCTION_STRATEGY_SNAPSHOT_MISMATCH'
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors/tests/unit/main-process/execution-descriptor-production-baseline.test.js:99:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 'PRODUCTION_STRATEGY_SNAPSHOT_MISMATCH',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/execution-descriptor-production-baseline.test.js:102:1
+✖ 只改 catalog 同样在正式装配时拒绝，不能留下查询/实际 runtime 分叉 (280.007583ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + undefined
+  - 'PRODUCTION_STRATEGY_SNAPSHOT_MISMATCH'
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors/tests/unit/main-process/execution-descriptor-production-baseline.test.js:109:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 'PRODUCTION_STRATEGY_SNAPSHOT_MISMATCH',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/execution-descriptor-production-baseline.test.js:112:1
+✖ manifest --write 在写任何产物之前拒绝错误 catalog，不重生成批准期望 (144.594417ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  +   code: 'ERR_ASSERTION',
+  +   writes: 4
+  -   code: 'PRODUCTION_STRATEGY_SNAPSHOT_MISMATCH',
+  -   writes: 0
+    }
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors/tests/unit/main-process/execution-descriptor-production-baseline.test.js:123:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { code: 'ERR_ASSERTION', writes: 4 },
+    expected: { code: 'PRODUCTION_STRATEGY_SNAPSHOT_MISMATCH', writes: 0 },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

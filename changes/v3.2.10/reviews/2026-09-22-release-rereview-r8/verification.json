@@ -1,0 +1,130 @@
+{
+  "reviewRound": 8,
+  "result": "FINDINGS",
+  "readOnlyReview": true,
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "frozenExistingFiles": 4476,
+  "newlyIntroducedRegressionsConfirmed": 0,
+  "findings": [
+    {
+      "id": "RR8-01",
+      "priority": 2,
+      "file": "scripts/architecture/renderer-contracts.js",
+      "start": 168,
+      "end": 168,
+      "classification": "existing_default_parameter_gap_newly_confirmed",
+      "title": "IPC 缺失字段触发默认值但丢失默认对象来源"
+    },
+    {
+      "id": "RR8-02",
+      "priority": 2,
+      "file": "scripts/architecture/renderer-contracts.js",
+      "start": 176,
+      "end": 178,
+      "classification": "existing_observation_confirmed_with_actual_configuration",
+      "title": "固定数组槽位替换后的新对象身份漏报"
+    }
+  ],
+  "priorFindingStatus": {
+    "RR7-01": {
+      "originalThreeCounterexamplesClosed": true,
+      "allDefaultSemanticsClosed": false
+    }
+  },
+  "executedThisRound": {
+    "architectureTests": {
+      "tests": 386,
+      "pass": 386,
+      "fail": 0,
+      "skipped": 0
+    },
+    "RR7Targeted": {
+      "tests": 30,
+      "pass": 30,
+      "includedInArchitectureTests": true
+    },
+    "architectureCli": {
+      "command": "node scripts/check-architecture.js --json /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-rereview-r8/evidence/architecture-check.json",
+      "active": 31,
+      "pending": 0,
+      "partial": 0,
+      "violations": 0,
+      "stale": 0,
+      "parsedFiles": 765,
+      "scannedFiles": 765,
+      "parseErrors": 0,
+      "knownGeneratedUnresolved": 2,
+      "dynamicSites": 33
+    },
+    "probes": {
+      "status": "PASS",
+      "meaning": "证据支持本轮观察；两项既有漏报仍开放。",
+      "confirmedOpenFindings": [
+        "RR8-01",
+        "RR8-02"
+      ],
+      "newlyIntroducedRegressionsConfirmed": 0,
+      "RR7OriginalThreeCounterexamplesClosed": true,
+      "allDefaultSemanticsClosed": false,
+      "rendererMinimalCases": 10,
+      "arrayMinimalCases": 5,
+      "sharedSmallFixtures": 44,
+      "actualRendererConfigBoundaryCount": 20,
+      "actualRendererFactoryProbed": "BankStatement",
+      "architecturePass": 386,
+      "RR7TargetedPassIncluded": 30,
+      "fullGateReusedInputCount": 1704
+    }
+  },
+  "reusedFullGate": {
+    "rerunThisRound": false,
+    "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-22-release-r7-repair/verification.json",
+    "matchingInputs": 1704,
+    "headMatches": true,
+    "changedInputs": [],
+    "executionContext": "outside filesystem sandbox",
+    "gate": {
+      "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+      "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+      "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+      "startedAt": "2026-09-22T16:37:31.409702+08:00",
+      "minimumFreeBytes": 5661069312,
+      "abortBelowFreeBytes": 2147483648,
+      "inputFiles": 1704,
+      "pid": 6779,
+      "exitCode": 0,
+      "finishedAt": "2026-09-22T16:56:01.870886+08:00",
+      "changedInputs": [],
+      "headAfter": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10"
+    },
+    "unit": {
+      "tests": 9164,
+      "suites": 828,
+      "pass": 9160,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 4,
+      "todo": 0
+    },
+    "integration": {
+      "scripts": 68,
+      "countedPassed": 2901,
+      "countedTotal": 2901,
+      "withoutCount": [
+        "v2.1.12-beta-multiworker-nested"
+      ]
+    },
+    "rendererLifecycle": {
+      "pass": 233,
+      "total": 233
+    }
+  },
+  "limits": [
+    "增量复核，未重新审查未变化业务模块。",
+    "实际 Renderer 探针保留20边界，具体追加BankStatement装配，不表示逐个测试20工厂。",
+    "VM仅内存stub，未执行真实IPC或业务恢复IO。",
+    "未进行Windows、GUI、Excel/WPS或发布验收。"
+  ],
+  "preservationEvidence": "evidence/preservation-final.json"
+}

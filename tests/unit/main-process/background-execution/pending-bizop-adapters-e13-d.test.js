@@ -12,9 +12,11 @@ const {
   validatePendingBizOpAdapterResult
 } = require('../../../../src/main-process/background-execution/pending-bizop-adapter-policies');
 const {
-  BACKGROUND_EXECUTION_POLICIES,
+  BACKGROUND_EXECUTION_POLICIES
+} = require('../../../../src/main-process/execution-descriptors/policy-catalog');
+const {
   createNonProductionBackgroundExecutionRuntime
-} = require('../../../../src/main-process/background-execution/runtime');
+} = require('../../../../src/main-process/execution-descriptors/composition');
 const {
   createResourceGovernor
 } = require('../../../../src/main-process/background-execution/resource-governor');

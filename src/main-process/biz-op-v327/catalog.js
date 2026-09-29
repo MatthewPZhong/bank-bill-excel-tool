@@ -7,6 +7,7 @@ const { createArchiveRepository, withWriteTransaction } = require('../../backend
 const { ACTIONS, MODULE_ID, fail, opaque, digest, count, hash, snapshot } = require('./contracts');
 const { readVerifiedManifest } = require('./payload-store');
 const { intervalInputs } = require('./compute-inputs');
+const { createBizOpCatalogQueries } = require('./catalog-queries');
 
 function createBizOpCatalog(db, { assertCommitReady }) {
   const archive = createArchiveRepository(db);
@@ -15,6 +16,7 @@ function createBizOpCatalog(db, { assertCommitReady }) {
   if (db.prepare('SELECT schema_version FROM biz_op_v327_control WHERE singleton=1').get().schema_version !== 1) {
     fail('BIZOP_SCHEMA_UNSUPPORTED');
   }
+  const queries = createBizOpCatalogQueries({ db });
   const transaction = (fn) => withWriteTransaction(db, fn);
   const now = () => new Date().toISOString();
   const control = () => db.prepare('SELECT * FROM biz_op_v327_control WHERE singleton=1').get();
@@ -384,7 +386,7 @@ function createBizOpCatalog(db, { assertCommitReady }) {
       return receipt;
     });
   }
-  return Object.freeze({ db, archive, transaction, now, control, operation, task, assertTask, prepare,
+  return Object.freeze({ db, archive, queries, transaction, now, control, operation, task, assertTask, prepare,
     receipt, receiptState, readyHold, original, releaseOwnedHolds, version, enqueueReclaim, commitImport,
     commitRun, deleteIntent, commitDelete, commitActivation });
 }

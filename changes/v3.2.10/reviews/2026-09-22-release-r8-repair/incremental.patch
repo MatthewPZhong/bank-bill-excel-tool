@@ -1,0 +1,566 @@
+--- a/architecture/README.md
++++ b/architecture/README.md
+@@ -112,6 +112,10 @@
+ 
+ release 第七轮修正实际触发默认参数时的对象身份丢失，见 [RR7 回归](../tests/unit/architecture/release-rereview-r7.test.js)及[修复记录](../changes/v3.2.10/reviews/2026-09-22-release-r7-repair/repair.md)。AssignmentPattern 在参数绑定时区分省略、确定缺失成员/数组槽位、未遮蔽 undefined 与已提供值；只有前者选择默认表达式，null/false/0/空串不启用默认值。未知实参保留可能的默认来源，继承成员不冒充确定缺失。默认表达式使用被调用函数的词法环境与调用帧，前序参数、成员读取时点及不同调用的新默认对象身份继续保留；单调用装配 helper 与返回型 helper 共用参数解析。该修正不覆盖任意数组元素写入身份，R7 报告中的既有数组替换观察单独保留。
+ 
++release 第八轮补齐 IPC 默认来源和固定数组槽位替换，见 [RR8 回归](../tests/unit/architecture/release-rereview-r8.test.js)及[修复记录](../changes/v3.2.10/reviews/2026-09-22-release-r8-repair/repair.md)。IPC channel/fields 只证明数据来源，不证明值非 undefined；默认参数保留 IPC 值与默认表达式两种候选。所有候选满足同一纯数据合同才允许数据注入。即使测试 stub 恰好提供某字段，未登记的存在性仍不能当作静态证明；显式构造对象继续可证明已提供。
++
++数组以字面量分配位置和调用帧保留实例身份，固定数字槽位、静态字符串索引、局部/参数解构、bind、嵌套容器和 spread 复制复用成员读取快照。旧别名、复制后源数组替换、不同工厂实例继续分离。整体数组数据注入检查初始及可能写入值，不让后列未执行分支掩盖能力。已识别的 mutator、length、delete/update 或动态键改写保留覆盖缺口与可见来源候选；不声称精确执行这些操作。变长/未知 spread、超过有限分析范围的槽位及任意动态调用不属于精确解析承诺。私有数组身份映射仅在 Renderer 内建立，不改变 scanner JSON、evidenceId、G1/G5 或机器授权。R7 留存的固定槽位替换观察由 RR8-02 的原始及实际配置回归覆盖。
++
+ 早期收紧对应 [R1–R10 回归](../tests/unit/architecture/review-regressions.test.js)，当时登记变化和原始基线核对见[历史修复复核](../changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-repair/repair-review.md)。
+ 
+ 第二轮的绑定调用、工厂闭包、DOM/scoped API 兼容、公开导出、脚本执行次序和 fork cwd 回归见 [R2 测试](../tests/unit/architecture/review-round2.test.js) 与[第二轮修复自检](../changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r2-repair/repair-review.md)。本轮没有增加或修改 allowedSites、历史例外、schema 或激活状态。
+--- a/changes/v3.2.10/README.md
++++ b/changes/v3.2.10/README.md
+@@ -6,9 +6,9 @@
+ | 文档日期 | 2026-09-20 |
+ | 用户已确认 | G1–G8 每项独立 Spec / TechDoc；按 v3.2.9 的功能分支目录组织；写清具体模块、接口、职责、迁移与验收 |
+ | 设计及源码基线 | `main@11086a3cbf632a30adbcfa796e4cd81810c5aef9`；本地附注标签 `v3.2.9` 指向同一提交 |
+-| 集成分支 | `release/v3.2.10`；G1–G8 已本地合入，当前为 `9a38b96b` 加未提交审查修复；第七轮修复完整门禁 PASS，见 [本地集成记录](release.md) |
++| 集成分支 | `release/v3.2.10`；G1–G8 已本地合入，当前为 `9a38b96b` 加未提交审查修复；第八轮修复完整门禁 PASS，见 [本地集成记录](release.md) |
+ | 功能分支状态 | G1–G8 已逐项本地合入；当前修复候选 31 个机器边界 active、0 pending/partial，下表保留计划名称 |
+-| 交付状态 | 第七轮 1 项 P2 已实现修复，新增 30 项回归；架构 386/386 PASS，完整门禁重跑 PASS（9160 项单测通过、4 项 Windows 条件跳过、68/68 集成脚本通过）。既有数组替换观察保留；修复未提交，独立复审和真实产品/平台验收未执行。见 [第七轮修复报告](reviews/2026-09-22-release-r7-repair/repair.md) |
++| 交付状态 | 第八轮 RR8-01/02 已实现修复，新增 46 项回归；架构 432/432 PASS，完整门禁重跑 PASS（9206 项单测通过、4 项 Windows 条件跳过、68/68 集成脚本通过）。前轮固定数组槽位观察已纳入本轮；修复未提交，独立复审和真实产品/平台验收未执行。见 [第八轮修复报告](reviews/2026-09-22-release-r8-repair/repair.md) |
+ | 独立审查修订 | R1–R9 及 G8 历史损坏配置恢复建议均在设计层关闭，无已知待修必改项；处置、验收映射和三轮依据见 [修订记录](review-response.md)，独立报告保持原状 |
+ | 依据 | [模块耦合审查](../architecture-coupling/2026-09-20/review.md)及该目录的静态扫描、局部探针证据 |
+ | 格式参考 | [v3.2.9 按行拆分 Spec](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/spec.md)、[TechDoc](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/techdoc.md)的元数据、行为合同、分阶段实施和验收结构 |
+--- a/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md
++++ b/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md
+@@ -196,3 +196,9 @@
+ - RR7-01：参数绑定时按省略、确定缺失成员/槽位和 undefined 选择默认来源；已提供对象与 null/false/0/空串不被默认值替换，未知来源保留候选。默认表达式使用被调用函数词法环境与调用帧，单调用装配 helper 共用参数解释。
+ - 新增 30 项回归：起点 18 FAIL / 12 PASS，修复后全部通过；RR2–RR7 共 216/216 PASS。架构 386/386 PASS，实际配置正反例通过；完整门禁重跑 PASS：9160 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过。1704 个输入及 HEAD 未漂移。证据见 [本轮修复报告](../../reviews/2026-09-22-release-r7-repair/repair.md)。
+ - 本轮仅修改 renderer-contracts.js、测试和文档；生产源码、机器配置和 G1/G5 共享解析保持。既有数组元素替换观察继续保留，修复后的独立复审与平台人工验收未完成；未提交或发布。
++
++## 2026-09-22 第八轮 release 审查修复
++
++- RR8-01：IPC 的来源标签不作为非 undefined 证明；默认来源保留为候选，纯数据候选递归核验。未声明字段存在性时保守拒绝越权风险，显式对象和纯数据默认值有允许对照。
++- RR8-02：Renderer 私有数组身份按分配位置和调用帧建立，固定槽位、解构及 spread 按读取时点追踪；旧别名、独立实例保持，未知改写保留可见来源。
++- 新增 46 项回归：起点 34 FAIL / 12 PASS，修复后通过；RR2–RR8 共 262/262 PASS。架构 432/432 PASS，实际配置原反例拒绝；完整门禁重跑 PASS：9206 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过。1705 个输入及 HEAD 未漂移。证据见 [本轮修复报告](../../reviews/2026-09-22-release-r8-repair/repair.md)。
+--- a/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md
++++ b/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md
+@@ -114,6 +114,8 @@
+ 第六轮 RR6-01～02：Renderer 参数绑定先保留对象身份，解构按调用时点复用成员快照，实际使用时再核验能力；静态数组比较的排除证明保留对象/解构/原型参数来源及有限 helper 返回投影。已知可能改写与未知来源不能共同被解释为“没有改写”；旧别名、独立实例和原生比较仍有正例。实现及验证见 [RR6 修复记录](../../reviews/2026-09-22-release-r6-repair/repair.md)。不改变生产业务合同或机器授权。
+ 
+ 第七轮 RR7-01：AssignmentPattern 绑定按确定缺失/undefined 选择默认表达式；已提供值保留原身份，不确定值保留可能默认来源。默认表达式在被调用函数的词法环境和本次调用帧中解释，省略、成员缺失、显式 undefined、前序参数和新默认实例均有回归对照。见 [RR7 修复记录](../../reviews/2026-09-22-release-r7-repair/repair.md)。机器合同、G1/G5 解析和生产业务未改；既有数组元素替换观察仍保留，不作为本项关闭范围。
++
++第八轮 RR8-01/02：IPC 数据来源不证明字段存在，默认参数保留默认对象候选，纯数据候选递归核验；不新增字段存在性白名单。数组在 Renderer 私有映射中获得分配及调用身份，固定槽位读取/解构/spread 采用成员快照，旧别名和独立实例保持。整体数据数组检查可见写入候选；未精确解释的数组变更保留不确定性与已知来源，不静默以初始元素代替。见 [RR8 修复记录](../../reviews/2026-09-22-release-r8-repair/repair.md)和 architecture README 的有限支持范围。前轮固定槽位观察在本轮补齐；共享扫描器、G1/G5、机器配置和业务合同不变。
+ 
+ 宿主拥有 `modalRoot` 节点。扫描已知 `getElementById('modalRoot')`、`querySelector('#modalRoot')`、`elements.modalRoot` 及同作用域 const alias 的写入/append/remove/replaceChildren/innerHTML/textContent，宿主外违反。`overlay.remove()` 只在该 overlay 可追溯为宿主记录或 legacy modal 工厂返回时受规则约束，普通表格行/其他 DOM 移除不误报。难以追溯的已迁移域直接 DOM 外部移除由禁止全局 root 访问和 modal integration 测试补充，报告保留此边界。
+ 
+--- a/changes/v3.2.10/release.md
++++ b/changes/v3.2.10/release.md
+@@ -1,6 +1,20 @@
+ # v3.2.10 本地集成记录
+ 
+-当前 G1–G8 均已本地合入，HEAD 为 `9a38b96b1b8006c5851535d0c1e586bbaeb63f10`。前六轮修复保留；第七轮 RR7-01 默认参数来源问题已实现修复，新增 30 项回归，RR2–RR7 共 216/216 PASS。完整门禁已在 1704 个冻结输入上重跑 PASS，所有修复未提交，见[第七轮修复报告](reviews/2026-09-22-release-r7-repair/repair.md)。既有数组替换观察仍保留；下方历史记录保留原候选意义。
++当前 G1–G8 均已本地合入，HEAD 为 `9a38b96b1b8006c5851535d0c1e586bbaeb63f10`。前七轮修复保留；第八轮 RR8-01/02 IPC 默认来源和固定数组槽位替换已实现修复，新增 46 项回归。完整门禁已在 1705 个冻结输入上重跑 PASS，所有修复未提交，见[第八轮修复报告](reviews/2026-09-22-release-r8-repair/repair.md)。原固定槽位观察已纳入本轮；下方历史记录保留原候选意义。
++
++## 2026-09-22 第八轮独立审查修复（未提交）
++
++RR8-01/02 已修复 IPC 默认来源和固定数组槽位身份漏报。IPC 字段不能仅凭来源标签排除 undefined；数组以分配位置及调用帧区分实例，按读取时点选择槽位，旧别名和浅复制保持分离。新增 46 项回归，起点 34 FAIL / 12 PASS，修复后全部通过。前轮固定槽位观察已纳入本轮关闭范围。
++
++| 验证 | 本轮候选结果 |
++| --- | --- |
++| 完整门禁 | `UNIT_TEST_CONCURRENCY=2 npm run release-check`：PASS，2026-09-22 18:06:12–18:27:32（Asia/Shanghai）；沙箱外隔离测试环境 |
++| 架构专项 / CLI | 432/432 PASS；31 active、0 pending/partial、0 诊断、0 stale |
++| 全量单测 | 9206 PASS、0 FAIL、4 项 Windows 条件跳过 |
++| 全量集成 | 68/68 脚本 PASS，Renderer lifecycle 233/233 |
++| 输入与保护 | 1705 个门禁输入及 HEAD 未漂移；792 个生产源码、542 个历史证据和主工作区 865 个 dirty 文件保持 |
++
++IPC 形状未声明时，即使 VM stub 恰好提供某字段，默认候选仍保守保留。共享 44 例中一个旧合法预期的同步 invoke stub 与 Electron Promise 合同不符，异步对照确认会触发其他频道默认值，当前拒绝有证据；详见[修复报告](reviews/2026-09-22-release-r8-repair/repair.md)。[验证汇总](reviews/2026-09-22-release-r8-repair/verification.json)、[增量补丁](reviews/2026-09-22-release-r8-repair/incremental.patch)。本轮为修复自检，未执行修复后独立复审或产品/平台人工验收，未提交或发布。
+ 
+ ## 2026-09-22 第七轮独立审查修复（未提交）
+ 
+--- a/rules/integration-test-policy.md
++++ b/rules/integration-test-policy.md
+@@ -125,80 +125,80 @@
+ 
+ ## 七、当前集成测试清单（自动同步）
+ 
+-<!-- auto-generated by scripts/integration-runner.js, last-updated: 2026-09-22T16:55:55+08:00 -->
++<!-- auto-generated by scripts/integration-runner.js, last-updated: 2026-09-22T18:27:24+08:00 -->
+ <!-- DO NOT EDIT MANUALLY — modify scripts/integration/*.js then re-run `npm run test:integration` -->
+ 
+ | 脚本 | 用例数 | 断言数 | 耗时 (ms) |
+ |---|---|---|---|
+-| `acquiring-bill-currency-idle-cleanup.js` | 38 | 38 | 960 |
+-| `acquiring-bill-currency-n4-migration.js` | 128 | 128 | 625 |
+-| `acquiring-engine-migration.js` | 45 | 45 | 5206 |
+-| `acquiring-index-slim-v2.js` | 22 | 22 | 216 |
+-| `acquiring-side-db-parity.js` | 19 | 19 | 610 |
+-| `acquiring-worker-boundary.js` | 14 | 14 | 583 |
+-| `application-recovery-governance.js` | 4 | 4 | 842 |
+-| `archive-biz-op-auto-report-retention.js` | 6 | 6 | 7617 |
+-| `archive-center-module-retention.js` | 11 | 11 | 1627 |
+-| `archive-center-permanent-delete.js` | 52 | 52 | 31430 |
++| `acquiring-bill-currency-idle-cleanup.js` | 38 | 38 | 975 |
++| `acquiring-bill-currency-n4-migration.js` | 128 | 128 | 621 |
++| `acquiring-engine-migration.js` | 45 | 45 | 5035 |
++| `acquiring-index-slim-v2.js` | 22 | 22 | 244 |
++| `acquiring-side-db-parity.js` | 19 | 19 | 592 |
++| `acquiring-worker-boundary.js` | 14 | 14 | 580 |
++| `application-recovery-governance.js` | 4 | 4 | 896 |
++| `archive-biz-op-auto-report-retention.js` | 6 | 6 | 7627 |
++| `archive-center-module-retention.js` | 11 | 11 | 1678 |
++| `archive-center-permanent-delete.js` | 52 | 52 | 31144 |
+ | `background-execution-pure-compute-canary.js` | 9 | 9 | 107 |
+-| `background-execution-recovery-canary.js` | 9 | 9 | 120 |
+-| `background-execution-recovery-control.js` | 27 | 27 | 294 |
+-| `bank-bu-background-dual-parser.js` | 9 | 9 | 269 |
+-| `bank-bu-background-single-jobs.js` | 21 | 21 | 520 |
++| `background-execution-recovery-canary.js` | 9 | 9 | 116 |
++| `background-execution-recovery-control.js` | 27 | 27 | 292 |
++| `bank-bu-background-dual-parser.js` | 9 | 9 | 266 |
++| `bank-bu-background-single-jobs.js` | 21 | 21 | 517 |
+ | `bank-bu-recon-side-db-parity.js` | 17 | 17 | 326 |
+-| `bank-statement-hit-scenario-report.js` | 49 | 49 | 213 |
+-| `bank-statement-many-to-many-review-sheet.js` | 33 | 33 | 212 |
+-| `bank-statement-universal-import-routing.js` | 20 | 20 | 314 |
+-| `big-table-import-engine.js` | 19 | 19 | 7566 |
+-| `biz-op-auto-error-report.js` | 12 | 12 | 10244 |
+-| `biz-op-query-boundary.js` | 9 | 9 | 7756 |
+-| `biz-op-recon-side-db-parity.js` | 16 | 16 | 351 |
+-| `bizop-flow-engine-migration.js` | 73 | 73 | 5335 |
+-| `dark-mode-schedule-settings.js` | 6 | 6 | 236 |
+-| `duplicate-inbound-match-end-to-end.js` | 31 | 31 | 404 |
+-| `execution-descriptor-governance.js` | 4 | 4 | 913 |
++| `bank-statement-hit-scenario-report.js` | 49 | 49 | 212 |
++| `bank-statement-many-to-many-review-sheet.js` | 33 | 33 | 211 |
++| `bank-statement-universal-import-routing.js` | 20 | 20 | 297 |
++| `big-table-import-engine.js` | 19 | 19 | 7533 |
++| `biz-op-auto-error-report.js` | 12 | 12 | 10653 |
++| `biz-op-query-boundary.js` | 9 | 9 | 7818 |
++| `biz-op-recon-side-db-parity.js` | 16 | 16 | 354 |
++| `bizop-flow-engine-migration.js` | 73 | 73 | 5280 |
++| `dark-mode-schedule-settings.js` | 6 | 6 | 219 |
++| `duplicate-inbound-match-end-to-end.js` | 31 | 31 | 383 |
++| `execution-descriptor-governance.js` | 4 | 4 | 933 |
+ | `fund-transfer-recon-account-mapping.js` | 19 | 19 | 209 |
+-| `gateway-channel-filter-equivalence.js` | 23 | 23 | 217 |
+-| `linked-fx-open7-stale-hit-e2e.js` | 27 | 27 | 202 |
+-| `linked-table-delete-by-range-tablekey.js` | 73 | 73 | 209 |
+-| `new-account-balance-statement.js` | 36 | 36 | 241 |
++| `gateway-channel-filter-equivalence.js` | 23 | 23 | 213 |
++| `linked-fx-open7-stale-hit-e2e.js` | 27 | 27 | 214 |
++| `linked-table-delete-by-range-tablekey.js` | 73 | 73 | 215 |
++| `new-account-balance-statement.js` | 36 | 36 | 235 |
+ | `pending-data-reconciliation.js` | 33 | 33 | 51 |
+-| `pending-engine-migration.js` | 57 | 57 | 5286 |
+-| `pending-removal-reconcile.js` | 62 | 62 | 203 |
+-| `position-reconciliation-side-db-parity.js` | 38 | 38 | 261 |
+-| `position-startup-task-recovery.js` | 3 | 3 | 2286 |
+-| `pre-fund-reconciliation-output-contract.js` | 15 | 15 | 276 |
+-| `pre-fund-reconciliation-side-db-parity.js` | 69 | 69 | 335 |
+-| `refund-backfill-yellow-fill-e2e.js` | 258 | 258 | 200 |
+-| `renderer-lifecycle.js` | 233 | 233 | 20830 |
+-| `shared-xlsx-boundary.js` | 51 | 51 | 3367 |
+-| `statement-generation-pipeline.js` | 45 | 45 | 239 |
+-| `task-adapter-recovery.js` | 4 | 4 | 581 |
+-| `toolbox-large-file-stream.js` | 50 | 50 | 135355 |
+-| `toolbox-large-split-multi-sheet.js` | 31 | 31 | 75802 |
+-| `toolbox-multi-sheet-merge.js` | 16 | 16 | 14969 |
+-| `toolbox-multi-split-roundtrip.js` | 17 | 17 | 528 |
+-| `toolbox-roundtrip.js` | 30 | 30 | 180 |
+-| `toolbox-row-split-admission.js` | 2 | 2 | 843 |
+-| `toolbox-row-split-archive-delete.js` | 2 | 2 | 1070 |
+-| `v2.1.10-a3-phase1.js` | 40 | 40 | 3047 |
+-| `v2.1.10-a3-phase2.js` | 56 | 56 | 2141 |
+-| `v2.1.10-a4-phase3.js` | 75 | 75 | 15230 |
+-| `v2.1.10-n4-cont-1-phase4.js` | 33 | 33 | 856 |
+-| `v2.1.10-n4-cont-2-phase5.js` | 43 | 43 | 560 |
+-| `v2.1.12-beta-multiworker-nested.js` | - | - | 2865 |
+-| `v2.1.9-n5-end-to-end.js` | 68 | 68 | 228 |
+-| `v2.1.9-n5-migration.js` | 67 | 67 | 220 |
+-| `v2.1.9-sr-fix-1-coverage.js` | 148 | 148 | 255 |
+-| `v2.1.9-sr-log-1.js` | 33 | 33 | 161 |
+-| `v3.0.0-linked-streaming-import.js` | 19 | 19 | 244 |
+-| `v3.0.1-linked-gateway-upsert.js` | 40 | 40 | 257 |
+-| `v3.0.4-boc-dispatch-order-fix.js` | 31 | 31 | 298 |
+-| `vcc-financial-op-adjustment-archive-chain.js` | 226 | 226 | 1259 |
+-| `vcc-financial-op-destructive-state-chain.js` | 77 | 77 | 1497 |
+-| `vcc-financial-op-effective-result.js` | 19 | 19 | 140 |
+-| `vcc-financial-op-historical-template-export.js` | 29 | 29 | 1085 |
+-| **合计** | **2901** | **2901** | **378979** |
++| `pending-engine-migration.js` | 57 | 57 | 5239 |
++| `pending-removal-reconcile.js` | 62 | 62 | 202 |
++| `position-reconciliation-side-db-parity.js` | 38 | 38 | 262 |
++| `position-startup-task-recovery.js` | 3 | 3 | 2317 |
++| `pre-fund-reconciliation-output-contract.js` | 15 | 15 | 292 |
++| `pre-fund-reconciliation-side-db-parity.js` | 69 | 69 | 349 |
++| `refund-backfill-yellow-fill-e2e.js` | 258 | 258 | 203 |
++| `renderer-lifecycle.js` | 233 | 233 | 20605 |
++| `shared-xlsx-boundary.js` | 51 | 51 | 3285 |
++| `statement-generation-pipeline.js` | 45 | 45 | 240 |
++| `task-adapter-recovery.js` | 4 | 4 | 559 |
++| `toolbox-large-file-stream.js` | 50 | 50 | 134481 |
++| `toolbox-large-split-multi-sheet.js` | 31 | 31 | 257476 |
++| `toolbox-multi-sheet-merge.js` | 16 | 16 | 15008 |
++| `toolbox-multi-split-roundtrip.js` | 17 | 17 | 532 |
++| `toolbox-roundtrip.js` | 30 | 30 | 181 |
++| `toolbox-row-split-admission.js` | 2 | 2 | 891 |
++| `toolbox-row-split-archive-delete.js` | 2 | 2 | 1067 |
++| `v2.1.10-a3-phase1.js` | 40 | 40 | 3059 |
++| `v2.1.10-a3-phase2.js` | 56 | 56 | 2222 |
++| `v2.1.10-a4-phase3.js` | 75 | 75 | 15243 |
++| `v2.1.10-n4-cont-1-phase4.js` | 33 | 33 | 1093 |
++| `v2.1.10-n4-cont-2-phase5.js` | 43 | 43 | 628 |
++| `v2.1.12-beta-multiworker-nested.js` | - | - | 2874 |
++| `v2.1.9-n5-end-to-end.js` | 68 | 68 | 236 |
++| `v2.1.9-n5-migration.js` | 67 | 67 | 229 |
++| `v2.1.9-sr-fix-1-coverage.js` | 148 | 148 | 267 |
++| `v2.1.9-sr-log-1.js` | 33 | 33 | 202 |
++| `v3.0.0-linked-streaming-import.js` | 19 | 19 | 241 |
++| `v3.0.1-linked-gateway-upsert.js` | 40 | 40 | 253 |
++| `v3.0.4-boc-dispatch-order-fix.js` | 31 | 31 | 273 |
++| `vcc-financial-op-adjustment-archive-chain.js` | 226 | 226 | 1303 |
++| `vcc-financial-op-destructive-state-chain.js` | 77 | 77 | 1508 |
++| `vcc-financial-op-effective-result.js` | 19 | 19 | 142 |
++| `vcc-financial-op-historical-template-export.js` | 29 | 29 | 1108 |
++| **合计** | **2901** | **2901** | **560116** |
+ 
+ > 同步策略：runner 末尾全 PASS 时 in-place 替换本章节；任一脚本 FAIL → 本章节不更新（避免被损坏数据覆盖）。
+ 
+--- a/scripts/architecture/renderer-contracts.js
++++ b/scripts/architecture/renderer-contracts.js
+@@ -8,6 +8,9 @@
+   const globals = new Map();
+   const objectNodes = new Map([...analyses].map(([file, analysis]) =>
+     [file, new Map(analysis.nodes.filter(node => node.type === 'ObjectExpression').map(node => [node.start, node]))]));
++  // 数组描述的 elements 在别名投影中保持引用；私有映射避免改变共享扫描结果。
++  const arrayNodes = new Map([...analyses].map(([file, analysis]) =>
++    [file, new Map(analysis.nodes.filter(node => node.type === 'ArrayExpression').map(node => [analysis.describe(node).elements, node]))]));
+   const unknown = reason => ({ kind: 'unknown', reason });
+   const missing = { kind: 'missing-renderer-value' };
+   const pathOf = value => value?.chain || [];
+@@ -43,8 +46,10 @@
+     }
+     return '';
+   };
+-  const objectIdentity = (value, analysis, env) => value.objectStart === undefined ? [] :
+-    [JSON.stringify([analysis.from, value.objectStart, frameAt(analysis, objectNodes.get(analysis.from)?.get(value.objectStart), env)])];
++  const objectIdentity = (value, analysis, env) => {
++    const node = value.kind === 'array' ? arrayNodes.get(analysis.from)?.get(value.elements) : objectNodes.get(analysis.from)?.get(value.objectStart);
++    return node ? [JSON.stringify([analysis.from, node.start, frameAt(analysis, node, env)])] : [];
++  };
+   const identityCache = new WeakMap();
+   const identitiesOf = value => value?.[identity] || (value?.kind === 'identity-candidates' ? value.values.flatMap(identitiesOf) : []);
+   const sameObject = (actual, identities, analysis, env) => {
+@@ -53,10 +58,34 @@
+     const byAnalysis = identityCache.get(env);
+     if (!byAnalysis.has(analysis)) byAnalysis.set(analysis, new WeakMap());
+     const values = byAnalysis.get(analysis);
+-    if (!values.has(actual)) values.set(actual, resolve(actual, analysis, env, 0, new Set(), false));
++    if (!values.has(actual)) {
++      // 成员快照会反向核对写入接收者；同一身份正在求值时不能再次从深度零递归。
++      values.set(actual, unknown('recursive-renderer-identity'));
++      values.set(actual, resolve(actual, analysis, env, 0, new Set(), false));
++    }
+     return identitiesOf(values.get(actual)).some(key => identities.includes(key));
+   };
+   const assignments = new WeakMap();
++  const arrayMutators = new Set(['copyWithin', 'fill', 'pop', 'push', 'reverse', 'shift', 'sort', 'splice', 'unshift']);
++  const unsupportedArrayMutation = (object, analysis, env, read = null) => {
++    const identities = identitiesOf(object);
++    const mutations = [];
++    if (!identities.length) return mutations;
++    for (const node of analysis.nodes) {
++      let member;
++      if (node.type === 'CallExpression' && node.callee.type === 'MemberExpression') {
++        const name = node.callee.computed ? analysis.describe(node.callee.property).value : node.callee.property.name;
++        if (arrayMutators.has(name)) member = node.callee;
++      }
++      if (node.type === 'AssignmentExpression' && node.left.type === 'MemberExpression') {
++        const key = node.left.computed ? analysis.describe(node.left.property) : { kind: 'literal', value: node.left.property.name };
++        if (key.kind !== 'literal' || key.value === 'length' || node.operator !== '=') member = node.left;
++      }
++      if ((node.type === 'UpdateExpression' || (node.type === 'UnaryExpression' && node.operator === 'delete')) && node.argument.type === 'MemberExpression') member = node.argument;
++      if (member && (!read || writtenBefore(node, read, analysis, env, env) !== false) && sameObject(analysis.describe(member.object), identities, analysis, env)) mutations.push(node);
++    }
++    return mutations;
++  };
+   const executionPositions = (node, analysis, env) => {
+     const positions = []; const seen = new Set();
+     for (let current = node; current && !seen.has(current);) {
+@@ -81,6 +110,7 @@
+   const snapshotMember = (object, access, analysis, env, depth, visited) => {
+     if (object.kind === 'identity-candidates') return { kind: 'identity-candidates', values: object.values.map(item =>
+       snapshotMember(item, access, analysis, env, depth, visited)) };
++    const mutations = object.kind === 'array' ? unsupportedArrayMutation(object, analysis, env, access.node) : [];
+     const identities = identitiesOf(object);
+     let selected = select(object, [access.property]);
+     if (!identities.length) return selected;
+@@ -94,7 +124,10 @@
+       const key = node.left.computed ? analysis.describe(node.left.property) : { kind: 'literal', value: node.left.property.name };
+       if (key.kind === 'literal' && String(key.value) !== access.property) continue;
+       if (!sameObject(analysis.describe(node.left.object), identities, analysis, writeEnv)) continue;
+-      if (key.kind !== 'literal' || node.operator !== '=') return unknown('unordered-renderer-member-write');
++      if (key.kind !== 'literal' || node.operator !== '=') {
++        if (object.kind === 'array') continue; // 下方保留不确定数组改写的来源候选。
++        return unknown('unordered-renderer-member-write');
++      }
+       let conditional = before === null || identities.length > 1;
+       // 只给有确定顺序的静态替换建立新身份；分支/循环不能用源码最后一项冒充实际结果。
+       for (let parent = analysis.parents.get(node); parent && !analysis.functionNodesByStart.has(parent.start); parent = analysis.parents.get(parent)) {
+@@ -113,7 +146,12 @@
+       const assigned = resolve(analysis.describe(node.right), analysis, writeEnv, depth + 1, visited, false);
+       selected = uncertain ? { kind: 'identity-candidates', values: [selected, assigned] } : assigned;
+     }
+-    return selected;
++    if (!mutations.length) return selected;
++    // 不支持的数组操作不能抹去已知来源；既保留覆盖缺口，也保留可能被移动/插入的对象。
++    return { kind: 'identity-candidates', values: [selected, missing, unknown('unsupported-renderer-array-mutation'),
++      ...object.elements.map((_, index) => select(object, [String(index)])),
++      ...mutations.flatMap(node => (node.type === 'CallExpression' ? node.arguments : node.type === 'AssignmentExpression' ? [node.right] : [])
++        .map(item => resolve(analysis.describe(item), analysis, env, depth + 1, visited, false)))] };
+   };
+   const mergeIdentities = values => {
+     const first = values[0];
+@@ -122,7 +160,8 @@
+       [identity]: [...new Set(values.flatMap(value => value[identity] || []))],
+       properties: Object.fromEntries(Object.keys(first.properties).map(key =>
+         [key, mergeIdentities(values.map(value => value.properties[key]))])) };
+-    if (first.kind === 'array') return { ...first, elements: first.elements.map((_, index) => mergeIdentities(values.map(value => value.elements[index]))) };
++    if (first.kind === 'array') return { ...first, [identity]: [...new Set(values.flatMap(value => value[identity] || []))],
++      elements: first.elements.map((_, index) => mergeIdentities(values.map(value => value.elements[index]))) };
+     return first;
+   };
+   for (const [file, analysis] of analyses) for (const node of analysis.nodes) {
+@@ -146,6 +185,7 @@
+       if (value?.kind === 'ipc-data') { value = { ...value, fields: [...(value.fields || []), part] }; continue; }
+       if (value?.kind === 'array' && !value.opaque && /^(0|[1-9][0-9]*)$/.test(part)) {
+         value = value.elements[Number(part)] || missing;
++        if (value[deferred]) value = value[deferred]();
+         if (value.kind === 'unknown' && value.reason === 'missing') value = missing;
+         continue;
+       }
+@@ -165,15 +205,15 @@
+         if (item?.kind === 'identity-candidates') return { ...item, values: item.values.map(choose) };
+         if (item === missing || (item?.kind === 'literal' && item.value === undefined) ||
+           (item?.kind === 'reference' && item.rootFree && pathOf(item).join('.') === 'undefined')) return fallback();
+-        if (['object', 'array', 'literal', 'function', 'native-function', 'regexp', 'panel-node', 'ipc-data'].includes(item?.kind)) return item;
+-        // 未知实参可能触发默认值；不能抹去已知默认对象的身份。
++        if (['object', 'array', 'literal', 'function', 'native-function', 'regexp', 'panel-node'].includes(item?.kind)) return item;
++        // IPC 来源标签不证明字段存在；未知实参都必须保留可能触发的默认来源。
+         return { kind: 'identity-candidates', values: [item || unknown('unresolved-renderer-argument'), fallback()] };
+       };
+       return bindPattern(pattern.left, choose(value), env, read);
+     }
+     if (pattern.type === 'Identifier') { env.set(pattern.name, value); return; }
+     // 解构与普通成员访问共用调用时点快照；参数绑定保留身份，使用处再检查能力。
+-    const member = key => read && ['object', 'identity-candidates'].includes(value?.kind)
++    const member = key => read && ['object', 'array', 'identity-candidates'].includes(value?.kind)
+       ? snapshotMember(value, { property: key, node: read.node }, read.analysis, read.env, read.depth, read.visited)
+       : select(value, [key]);
+     if (pattern.type === 'ObjectPattern') for (const property of pattern.properties) {
+@@ -208,7 +248,8 @@
+     if (!value || depth > 35 || visited.has(value)) return unknown('recursive-renderer-value');
+     const next = new Set([...visited, value]);
+     const recurse = (item, source = analysis, context = env) => resolve(item, source, context, depth + 1, next, inspectMutations);
+-    const hydrate = item => inspectMutations && item?.[origin]
++    const hydrate = item => inspectMutations && item?.kind === 'identity-candidates'
++      ? { ...item, values: item.values.map(hydrate) } : inspectMutations && item?.[origin]
+       ? resolve(item[origin].value, item[origin].analysis, item[origin].env, depth + 1, next, true) : item;
+     if (value.bindingKind === 'parameter' && value.opaque) {
+       const fn = analysis.functionNodesByStart.get(value.bindingFunctionStart) || analysis.functionNodes.get(value.bindingFunctionPath);
+@@ -220,7 +261,7 @@
+     const access = analysis.memberRead(value);
+     if (access) {
+       const object = resolve(access.object, analysis, env, depth + 1, next, false);
+-      if (['object', 'identity-candidates'].includes(object.kind)) {
++      if (['object', 'array', 'identity-candidates'].includes(object.kind)) {
+         const selected = snapshotMember(object, access, analysis, env, depth, next);
+         if (!inspectMutations) return selected;
+         if (selected.kind === 'identity-candidates') {
+@@ -238,7 +279,41 @@
+         ? { ...target, boundArgs: [...(target.boundArgs || []), ...value.args.map(item => resolve(item, analysis, env, depth + 1, next, false))] }
+         : unknown('unresolved-bound-function');
+     }
+-    if (value.kind === 'array') return value.opaque ? unknown(value.reason) : { ...value, elements: value.elements.map(item => recurse(item)) };
++    if (value.kind === 'array') {
++      if (value.opaque) return unknown(value.reason);
++      const array = { ...value, elements: [], [identity]: value[identity] || objectIdentity(value, analysis, env), [origin]: { value, analysis, env } };
++      const memberValue = item => inspectMutations ? recurse(item) : defer(() => recurse(item));
++      const literal = arrayNodes.get(analysis.from)?.get(value.elements);
++      if (literal) for (const node of literal.elements) {
++        if (node?.type !== 'SpreadElement') { array.elements.push(memberValue(analysis.describe(node))); continue; }
++        const expanded = resolve(analysis.describe(node.argument), analysis, env, depth + 1, next, false);
++        if (expanded.kind !== 'array' || unsupportedArrayMutation(expanded, analysis, env, node).length) return unknown('opaque-renderer-array-spread');
++        // spread 在复制时读取槽位；复制后源数组的替换不能改写已捕获的元素。
++        const count = expanded.elements.length;
++        for (const write of analysis.nodes) {
++          if (write.type !== 'AssignmentExpression' || write.left.type !== 'MemberExpression' || writtenBefore(write, node, analysis, env, env) === false) continue;
++          const key = write.left.computed ? analysis.describe(write.left.property) : { kind: 'literal', value: write.left.property.name };
++          if (key.kind === 'literal' && /^(0|[1-9][0-9]*)$/.test(String(key.value)) && Number(key.value) >= count && sameObject(analysis.describe(write.left.object), identitiesOf(expanded), analysis, env)) return unknown('resized-renderer-array-spread');
++        }
++        for (let index = 0; index < count; index++) {
++          const selected = snapshotMember(expanded, { property: String(index), node }, analysis, env, depth, next);
++          array.elements.push(inspectMutations ? hydrate(selected) : selected);
++        }
++      } else array.elements = value.elements.map(memberValue);
++      if (inspectMutations) {
++        if (unsupportedArrayMutation(array, analysis, env).length) return unknown('unsupported-renderer-array-mutation');
++        for (const node of analysis.nodes) {
++          if (node.type !== 'AssignmentExpression' || node.left.type !== 'MemberExpression' || !sameObject(analysis.describe(node.left.object), identitiesOf(array), analysis, env)) continue;
++          const key = node.left.computed ? analysis.describe(node.left.property) : { kind: 'literal', value: node.left.property.name };
++          if (key.kind !== 'literal' || !/^(0|[1-9][0-9]*)$/.test(String(key.value)) || Number(key.value) > 10000) return unknown('unsupported-renderer-array-property');
++          const index = Number(key.value);
++          const assigned = recurse(analysis.describe(node.right));
++          // 整体数据注入没有单独槽位读取时点，检查全部可能写入，不能让后列分支掩盖能力。
++          array.elements[index] = index in array.elements ? { kind: 'identity-candidates', values: [array.elements[index], assigned] } : assigned;
++        }
++      }
++      return array;
++    }
+     if (value.kind === 'object') {
+       const identities = value[identity] || objectIdentity(value, analysis, env);
+       // 身份比较只沿选中的成员求值，避免为每个别名展开无关能力树。
+@@ -312,13 +387,13 @@
+       if (value.operator === '&&') return recurse(choices.at(-1));
+       const resolved = choices.map(item => recurse(item)).filter(item => !(item.kind === 'literal' && item.value == null));
+       if (resolved.length === 1) return resolved[0];
+-      if (!inspectMutations && resolved.some(item => ['object', 'identity-candidates'].includes(item.kind))) return { kind: 'identity-candidates', values: resolved };
++      if (!inspectMutations && resolved.some(item => ['object', 'array', 'identity-candidates'].includes(item.kind))) return { kind: 'identity-candidates', values: resolved };
+       if (resolved.length && resolved.every(item => JSON.stringify(item) === JSON.stringify(resolved[0]))) return mergeIdentities(resolved);
+       return unknown('ambiguous-renderer-value');
+     }
+     if (value.reason === 'member-base') {
+       const object = recurse(value.object);
+-      if (['object', 'ipc-data', 'identity-candidates'].includes(object.kind)) return select(object, [value.property]);
++      if (['object', 'array', 'ipc-data', 'identity-candidates'].includes(object.kind)) return select(object, [value.property]);
+       return unknown('unresolved-renderer-member');
+     }
+     if (value.kind === 'reference') {
+@@ -389,6 +464,7 @@
+ function rendererDataLiteral(value, ipcChannel = null) {
+   const data = item => rendererDataLiteral(item, ipcChannel);
+   return value?.kind === 'literal' || (ipcChannel !== null && value?.kind === 'ipc-data' && value.channel === ipcChannel) ||
++    (value?.kind === 'identity-candidates' && value.values.length > 0 && value.values.every(data)) ||
+     (value?.kind === 'array' && !value.opaque && value.elements.every(data)) || (value?.kind === 'object' && !value.opaque && Object.values(value.properties).every(data));
+ }
+ 
+--- /dev/null
++++ b/tests/unit/architecture/release-rereview-r8.test.js
+@@ -0,0 +1,122 @@
++'use strict';
++const assert = require('node:assert/strict');
++const test = require('node:test');
++const fs = require('node:fs');
++const os = require('node:os');
++const path = require('node:path');
++const vm = require('node:vm');
++const { scan } = require('../../../scripts/architecture/scan');
++const { evaluateRules } = require('../../../scripts/architecture/rules');
++const actual = require('../../../architecture/boundaries.json');
++function evaluate(t, source, id = 'renderer-bank-statement') {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'g8-rereview-r8-'));
++  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
++  fs.mkdirSync(path.join(root, 'src')); fs.writeFileSync(path.join(root, 'src/shell.js'), source);
++  fs.writeFileSync(path.join(root, 'src/preload.js'), "const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('desktopApi',{app:{getInfo:()=>ipcRenderer.invoke('app:get-info')}});");
++  const config = { schemaVersion: 1, factBaseline: '1'.repeat(40), bootstrap: { factBaseline: '1'.repeat(40), mode: 'first-introduction' },
++    boundaries: [{ ...actual.boundaries.find(b => b.id === id), state: 'pending' }], generatedModules: [], dynamicLoads: [], policyChanges: [] };
++  return evaluateRules(scan(root, config), config, { schemaVersion: 1, factBaseline: config.factBaseline, exceptions: [] }, { root });
++}
++async function received(source, ...responses) {
++  const info = responses.length ? responses[0] : { backgroundConfig: {} };
++  let input; let reads = 0;
++  const capture = value => { input = value; };
++  const window = { desktopApi: { outsideScope() { return true; }, app: { async getInfo() { reads++; return info; } } },
++    BankStatementController: { createBankStatementController: capture }, StatementController: { createStatementController: capture } };
++  await vm.runInNewContext(source, { window, flag: true }); return { input, reads };
++}
++const mount = api => `window.BankStatementController.createBankStatementController({api:${api}});`;
++const denied = result => assert.ok(result.violations.some(v => ['ARCH-RENDERER-SCOPE', 'ARCH-STATIC-COVERAGE'].includes(v.rule)), JSON.stringify(result.violations));
++const clean = result => assert.deepEqual(result.violations, []);
++const ipcCases = [
++  ['plain projected parameter', 'function select(api=shared){return api;}', 'select(info.api)'],
++  ['destructured IPC member', 'function select({api=shared}){return api;}', 'select(info)'],
++  ['projected member wrapper', 'function select({api=shared}){return api;}', 'select({api:info.api})'],
++  ['bound undefined projection', 'function select(api=shared){return api;}', 'select.bind(null,info.api)()'],
++  ['forwarded projection', 'function select(api=shared){return api;}function forward(value){return select(value);}', 'forward(info.api)'],
++  ['nested IPC projection', 'function select(api=shared){return api;}', 'select(info.backgroundConfig.api)'],
++];
++for (const [name, helper, call] of ipcCases) test(`RR8-01 ${name} 保留可能默认来源`, async t => {
++  const source = 'const shared={run(){}};' + helper + 'async function run(){const info=await window.desktopApi.app.getInfo();' +
++    `const alias=${call};alias.outsideScope=window.desktopApi.outsideScope;` + mount('shared') + '}run();';
++  const { input, reads } = await received(source);
++  assert.equal(reads, 1); assert.equal(input.api.outsideScope(), true); denied(evaluate(t, source));
++});
++test('RR8-01 IPC 根值也不能仅凭数据标签排除 undefined', async t => {
++  const source = 'const shared={run(){}};function select(api=shared){return api;}async function run(){const alias=select(await window.desktopApi.app.getInfo());alias.outsideScope=window.desktopApi.outsideScope;' + mount('shared') + '}run();';
++  assert.equal((await received(source, undefined)).input.api.outsideScope(), true); denied(evaluate(t, source));
++});
++test('RR8-01 未声明字段存在性时即使 stub 恰好提供值仍保留默认候选', async t => {
++  const source = 'const shared={run(){}};function select(api=shared){return api;}async function run(){const info=await window.desktopApi.app.getInfo();const alias=select(info.backgroundConfig);alias.outsideScope=window.desktopApi.outsideScope;' + mount('shared') + '}run();';
++  assert.deepEqual(Object.keys((await received(source)).input.api), ['run']); denied(evaluate(t, source));
++});
++test('RR8-01 显式构造的对象可证明已提供，内部 IPC 数据不污染默认对象', async t => {
++  const source = 'const shared={run(){}};function select(api=shared){return api;}async function run(){const info=await window.desktopApi.app.getInfo();const alias=select({data:info.backgroundConfig});alias.outsideScope=window.desktopApi.outsideScope;' + mount('shared') + '}run();';
++  assert.deepEqual(Object.keys((await received(source)).input.api), ['run']); clean(evaluate(t, source));
++});
++for (const unsafe of [false, true]) test(`RR8-01 IPC 与默认候选的数据合同：${unsafe ? '能力拒绝' : '纯数据允许'}`, async t => {
++  const source = `function select(info=${unsafe ? 'window.desktopApi' : '{label:"default"}'}){return info;}async function run(){const info=await window.desktopApi.app.getInfo();window.StatementController.createStatementController({initialInfo:select(info.missing)});}run();`;
++  const value = (await received(source)).input.initialInfo;
++  assert.equal(typeof value.outsideScope === 'function', unsafe);
++  const result = evaluate(t, source, 'renderer-statement'); if (unsafe) denied(result); else clean(result);
++});
++for (const explicit of [false, true]) test(`RR8-01 IPC Promise 的成员不会证明实参存在：${explicit ? '显式值允许' : '默认其他频道拒绝'}`, async t => {
++  const source = "const {ipcRenderer}=require('electron');function mount(category=ipcRenderer.invoke('other')){window.ReconIdFixController.createReconIdFixController({config:{initialBillCategory:category}});}mount(" +
++    (explicit ? "'business'" : "ipcRenderer.invoke('app:get-info').reconIdFixBillCategory") + ');';
++  const calls = []; let input;
++  vm.runInNewContext(source, { require() { return { ipcRenderer: { async invoke(channel) { calls.push(channel); return { channel, reconIdFixBillCategory: 'business' }; } } }; },
++    window: { ReconIdFixController: { createReconIdFixController(value) { input = value; } } } });
++  assert.deepEqual(calls, explicit ? [] : ['app:get-info', 'other']);
++  const result = await input.config.initialBillCategory;
++  assert.equal(explicit ? result : result.channel, explicit ? 'business' : 'other');
++  const evaluated = evaluate(t, source, 'renderer-recon-id-fix'); if (explicit) clean(evaluated); else denied(evaluated);
++});
++const provide = 'function provide(){return {api:{run(){}}};}const old=provide();const current=provide();';
++const arrayCases = [
++  ['parameter destructuring', 'const list=[old];list[0]=current;function select([{api}]){return api;}const alias=select(list);', 'current.api', false],
++  ['direct slot member', 'const list=[old];list[0]=current;const alias=list[0].api;', 'current.api', false],
++  ['local destructuring', 'const list=[old];list[0]=current;const [{api:alias}]=list;', 'current.api', false],
++  ['object pattern slot', 'const list=[old];list[0]=current;function select({0:{api}}){return api;}const alias=select(list);', 'current.api', false],
++  ['array alias writes', 'const list=[old];const holder=list;holder[0]=current;const alias=list[0].api;', 'current.api', false],
++  ['static string index', 'const list=[old];list["0"]=current;const alias=list["0"].api;', 'current.api', false],
++  ['nested array', 'const list=[[old]];list[0][0]=current;const alias=list[0][0].api;', 'current.api', false],
++  ['nested envelope', 'const envelope={list:[old]};envelope.list[0]=current;const alias=envelope.list[0].api;', 'current.api', false],
++  ['bound selector', 'const list=[old];function select([{api}]){return api;}const bound=select.bind(null,list);list[0]=current;const alias=bound();', 'current.api', false],
++  ['factory array result', 'function listFactory(){return [old];}const list=listFactory();list[0]=current;const alias=list[0].api;', 'current.api', false],
++  ['same factory instance', 'function listFactory(){return [old];}const list=listFactory();const holder=list;holder[0]=current;const alias=list[0].api;', 'current.api', false],
++  ['distinct factory instances', 'function listFactory(){return [old];}const list=listFactory();const other=listFactory();other[0]=current;const alias=list[0].api;', 'current.api', true],
++  ['captured before replacement', 'const list=[old];function select([{api}]){return api;}const alias=select(list);list[0]=current;', 'current.api', true],
++  ['direct alias before replacement', 'const list=[old];const alias=list[0].api;list[0]=current;', 'current.api', true],
++  ['unrelated slot', 'const list=[old,old];list[1]=current;const alias=list[0].api;', 'current.api', true],
++  ['overwritten former slot', 'const list=[old];const middle=provide();list[0]=middle;const alias=list[0].api;list[0]=current;', 'current.api', true],
++  ['last static replacement', 'const list=[old];list[0]=provide();list[0]=current;const alias=list[0].api;', 'current.api', false],
++  ['no replacement control', 'const list=[current];function select([{api}]){return api;}const alias=select(list);', 'current.api', false],
++  ['object key control', 'const list={0:old};list[0]=current;const alias=list[0].api;', 'current.api', false],
++  ['conditional write', 'const list=[old];if(flag)list[0]=current;const alias=list[0].api;', 'current.api', false],
++  ['spread after replacement', 'const list=[old];list[0]=current;const copy=[...list];const alias=copy[0].api;', 'current.api', false],
++  ['spread before replacement', 'const list=[old];const copy=[...list];list[0]=current;const alias=copy[0].api;', 'current.api', true],
++  ['empty array static slot', 'const list=[];list[0]=current;const alias=list[0].api;', 'current.api', false],
++  ['hole static slot', 'const list=[,];list[0]=current;const alias=list[0].api;', 'current.api', false],
++  ['helper fixed slot', 'const list=[old];function replace(value){value[0]=current;}replace(list);const alias=list[0].api;', 'current.api', false],
++  ['unknown index', 'window.slot=0;const list=[old];list[window.slot]=current;const alias=list[0].api;', 'current.api', false],
++];
++for (const [name, setup, api, safe] of arrayCases) test(`RR8-02 ${name} ${safe ? '保持隔离' : '拒绝越权'}`, async t => {
++  const source = provide + setup + 'alias.outsideScope=window.desktopApi.outsideScope;' + mount(api);
++  assert.equal(typeof (await received(source)).input.api.outsideScope === 'function', !safe);
++  const result = evaluate(t, source); if (safe) clean(result); else denied(result);
++});
++for (const operation of ['list.splice(0,1,current)', 'list.fill(current)', 'list.length=0;list.push(current)', 'delete list[0];list[0]=current']) {
++  test(`RR8-02 不支持的数组改写明确拒绝：${operation}`, async t => {
++    const source = provide + `const list=[old];${operation};const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;` + mount('current.api');
++    assert.equal((await received(source)).input.api.outsideScope(), true); denied(evaluate(t, source));
++  });
++}
++for (const unsafe of [false, true]) test(`RR8-02 数组槽位替换后的纯数据合同：${unsafe ? '能力拒绝' : '数据允许'}`, async t => {
++  const source = `const list=[{label:'old'}];list[0]=${unsafe ? 'window.desktopApi' : '{label:"new"}'};window.StatementController.createStatementController({initialInfo:list});`;
++  assert.equal(typeof (await received(source)).input.initialInfo[0].outsideScope === 'function', unsafe);
++  const result = evaluate(t, source, 'renderer-statement'); if (unsafe) denied(result); else clean(result);
++});
++test('RR8-02 整体数据注入不能让后列未执行分支掩盖能力', async t => {
++  const source = 'const list=[{}];if(flag)list[0]=window.desktopApi;if(!flag)list[0]={};window.StatementController.createStatementController({initialInfo:list});';
++  assert.equal((await received(source)).input.initialInfo[0].outsideScope(), true); denied(evaluate(t, source, 'renderer-statement'));
++});

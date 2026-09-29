@@ -1,0 +1,56 @@
+{
+  "leave": {
+    "status": "left"
+  },
+  "runEnabled": true,
+  "displayed": {
+    "yearMonth": "2026-07",
+    "totals": {
+      "currency": "CNY",
+      "totalAmount": "10.00",
+      "totalAmountCents": 1000,
+      "totalIn": "10.00",
+      "totalInCents": 1000,
+      "totalOut": "0.00",
+      "totalOutCents": 0
+    }
+  },
+  "mainCache": {
+    "perFile": [
+      {
+        "amount": "900.00",
+        "amountCents": 90000,
+        "amountIn": "900.00",
+        "amountInCents": 90000,
+        "amountOut": "0.00",
+        "amountOutCents": 0,
+        "fileName": "B.xlsx",
+        "rowCount": 1
+      }
+    ],
+    "totals": {
+      "currency": "CNY",
+      "totalAmount": "900.00",
+      "totalAmountCents": 90000,
+      "totalIn": "900.00",
+      "totalInCents": 90000,
+      "totalOut": "0.00",
+      "totalOutCents": 0
+    },
+    "yearMonth": "2026-08"
+  },
+  "saveResult": {
+    "status": "success",
+    "endOp": "1000.00"
+  },
+  "storedRows": [
+    {
+      "year_month": "2026-08",
+      "begin_op": "100.00",
+      "total_amount": "900.00",
+      "end_op": "1000.00"
+    }
+  ]
+}
+(node:8180) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)

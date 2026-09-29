@@ -1,0 +1,3 @@
+PASS 768 MiB 预算立即拒绝 1 GiB rows：28.5 ms，零 Worker/Publisher，原件和旧目标保留
+PASS 充足预算下真实 rows Worker 生成三份、真实 Publisher 发布、2/2/1 行独立回读
+2/2 PASS toolbox rows Main → Runtime → Governor admission

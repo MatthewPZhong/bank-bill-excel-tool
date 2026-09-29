@@ -1,0 +1,23 @@
+[
+  {
+    "path": "src/renderer-dialogs.js",
+    "beforeSha256": "ce29c53aae0122de234c2ed9aa772fc792c60d8b6d8ba44618e1dc733a71dd0d",
+    "afterSha256": "f7f7250e28b353b2cf5bda9f8c343e4746d7f78f5aa3a202cbf8049059bf72fa",
+    "astEquivalent": true,
+    "change": "仅校正过期注释或删除空行缩进，无可执行语义变化"
+  },
+  {
+    "path": "src/renderer/dialogs/configuration.js",
+    "beforeSha256": "28d3d91aa49b07874b47312a21a75ab4e6c279be210a2f3fa64162eae2feb1de",
+    "afterSha256": "675e274641b1f93cf3a9ffbd37ca3b8b43624128314e4a131ed4b4cb728aa75c",
+    "astEquivalent": true,
+    "change": "仅校正过期注释或删除空行缩进，无可执行语义变化"
+  },
+  {
+    "path": "src/renderer/dialogs/scenarios.js",
+    "beforeSha256": "bd08cab5158122ec4a7077b28e2e373f0c5088e40f063d50dda74f0652e449bf",
+    "afterSha256": "81b66d37c15b3e47eb0b82839e97a688a42b08648fa152ce66c02410460096c4",
+    "astEquivalent": true,
+    "change": "仅校正过期注释或删除空行缩进，无可执行语义变化"
+  }
+]

@@ -1,0 +1,124 @@
+{
+  "boundaryState": "active",
+  "outputs": [
+    {
+      "name": "safe_includes",
+      "value": true,
+      "writes": 0,
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "safe_last_indexof",
+      "value": 0,
+      "writes": 0,
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "direct_array_override",
+      "writes": 1,
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 115,
+          "message": "受保护 prepare/worker 经静态容器、helper 或回调入口执行了受限恢复能力",
+          "evidenceId": "c348f1f68087117b239cfbbfabbb7687358bbb46d0713bbe2f11b02ef1394222",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "projected_array_override",
+      "writes": 1,
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 160,
+          "message": "受保护 prepare/worker 经静态容器、helper 或回调入口执行了受限恢复能力",
+          "evidenceId": "c348f1f68087117b239cfbbfabbb7687358bbb46d0713bbe2f11b02ef1394222",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "destructured_array_override",
+      "writes": 1,
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 163,
+          "message": "受保护 prepare/worker 经静态容器、helper 或回调入口执行了受限恢复能力",
+          "evidenceId": "c348f1f68087117b239cfbbfabbb7687358bbb46d0713bbe2f11b02ef1394222",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "direct_prototype_override",
+      "writes": 1,
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 104,
+          "message": "受保护 prepare/worker 经静态容器、helper 或回调入口执行了受限恢复能力",
+          "evidenceId": "398c800b9b4084715e54099e6c21565fe5b183ff3cac072c6f8ce1204bab5c3a",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "parameter_prototype_override",
+      "writes": 1,
+      "violations": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "boundaryId": "publication-recovery-entry",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "to": null,
+          "line": 2,
+          "column": 142,
+          "message": "受保护 prepare/worker 经静态容器、helper 或回调入口执行了受限恢复能力",
+          "evidenceId": "398c800b9b4084715e54099e6c21565fe5b183ff3cac072c6f8ce1204bab5c3a",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "parseErrors": 0,
+      "unresolved": 0
+    },
+    {
+      "name": "projected_safe_compare",
+      "value": true,
+      "writes": 0,
+      "violations": [],
+      "parseErrors": 0,
+      "unresolved": 0
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "candidate": "7a7368f10f2448c6c464d44fc4adc9bf76557a2f",
+  "localReleaseCheck": "PASS",
+  "windowsRun": 36440891592,
+  "windowsStatus": "completed_failure",
+  "observedNotOkRecords": 42,
+  "note": "最终失败日志归档于 ../pr-ci-failed-7a7368f1.log；44 项为 Node 最终统计。后续两个场景边界失败均为路径分隔符断言。",
+  "unit": {
+    "tests": 9436,
+    "pass": 9388,
+    "fail": 44,
+    "skipped": 4
+  }
+}

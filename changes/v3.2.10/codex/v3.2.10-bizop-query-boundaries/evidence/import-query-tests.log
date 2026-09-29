@@ -1,0 +1,11 @@
+✔ 诊断恢复经 query 重读现有 producer 与 digest，不透传 raw DB 或缓存旧验证 (424.521209ms)
+✔ 诊断关闭屏障先于 query，producer 缺失时先于现有报告读取拒绝 (404.181208ms)
+✔ 尚未登记的诊断在 query 后仍核验真实样本文件，损坏时不注册 (376.164958ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1515.045292

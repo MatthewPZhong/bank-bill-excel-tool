@@ -1,0 +1,32 @@
+[
+  {
+    "path": "scripts/architecture/scan.js",
+    "added": 37,
+    "removed": 25
+  },
+  {
+    "path": "scripts/architecture/contracts.js",
+    "added": 12,
+    "removed": 7
+  },
+  {
+    "path": "scripts/architecture/rules.js",
+    "added": 9,
+    "removed": 6
+  },
+  {
+    "path": "tests/unit/architecture/review-round5.test.js",
+    "added": 198,
+    "removed": 0
+  },
+  {
+    "path": "architecture/README.md",
+    "added": 3,
+    "removed": 1
+  },
+  {
+    "path": "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md",
+    "added": 14,
+    "removed": 2
+  }
+]

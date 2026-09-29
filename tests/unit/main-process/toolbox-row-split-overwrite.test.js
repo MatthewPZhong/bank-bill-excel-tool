@@ -11,7 +11,7 @@ const { prepareIpcTaskInvocation } = require('../../../src/main-process/archive-
 const { prepareRows, generateValidateAndPublishRows } = require('../../../src/main-process/toolbox-row-split/service');
 const { executeRowsGeneration } = require('../../../src/main-process/toolbox-row-split/executor');
 const { buildRowTargets, planRowCounts } = require('../../../src/main-process/toolbox-row-split/contracts');
-const { publishToolboxPublicationAsync } = require('../../../src/main-process/toolbox-output-publication-dispatch');
+const { createTestPublicationHarness } = require('../../helpers/publication-authority');
 
 const mainSource = fs.readFileSync(path.join(__dirname, '../../../src/main.js'), 'utf8');
 const start = mainSource.indexOf("trackedIpcHandle('toolbox:split:export'");
@@ -101,6 +101,7 @@ test('取消覆盖确认不创建 File Task 或输出文件', async (t) => {
 for (const change of ['none', 'create', 'replace']) {
   test(`确认快照传至真实 Publisher：生成后 ${change} 目标`, async (t) => {
     const f = fixture(t);
+    const { dispatcher } = createTestPublicationHarness(f.userDataDir);
     const prepared = await prepareIpcTaskInvocation(f.contract, {}, [f.payload]);
     assert.equal(prepared.proceed, true);
     const { filePlan } = prepared;
@@ -118,7 +119,8 @@ for (const change of ['none', 'create', 'replace']) {
       } },
       publisher: (artifacts) => {
         publicationCalls += 1;
-        return publishToolboxPublicationAsync({ taskId: 'rows-overwrite-publication', artifacts,
+        return dispatcher.publish({ taskId: 'rows-overwrite-publication', artifacts,
+          requireArchiveHandoff: true, requireValidatedArtifacts: true,
           targets: filePlan.outputs.map((item) => ({ targetPath: item.filePath, expectedTargetSnapshot: item.targetSnapshot })),
           userDataDir: f.userDataDir, batchContext, archiveInputFiles: filePlan.inputs, protectedSourcePaths: [f.source] });
       } });

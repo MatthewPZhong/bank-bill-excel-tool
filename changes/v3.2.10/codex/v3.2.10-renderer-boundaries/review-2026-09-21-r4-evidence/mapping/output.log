@@ -1,0 +1,5 @@
+EVIDENCE mapping-reopen {"locked":{"fieldsDisabled":true,"closeEnabled":true,"writes":2},"reopened":{"rows":2,"nEnabled":true,"signedEnabled":true,"manageHidden":true,"errors":[]}}
+PASS INDEP 恢复重读失败锁写仍可正常返回实际mapping并重开获得新会话资格
+EVIDENCE recovery-late {"busy":{"rows":"blocked","parent":"blocked","replace":"blocked","reads":1},"after":{"newTop":true,"oldUnchanged":true,"newUnchanged":true,"writeEnabled":true,"writes":2,"errors":[]}}
+PASS INDEP 恢复读在途强制结束原子层并从同一mapping重开，旧读不锁新层或弹旧错误
+2/2 PASS

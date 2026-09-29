@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "evidenceKind": "observed-final-integration-run",
+  "capturedAt": "2026-09-20T12:08:38.466Z",
+  "captureTimeMeaning": "环境与文件摘要在已观察最终结果落盘时采集，不是测试开始或结束时间。",
+  "command": "node scripts/integration/biz-op-query-boundary.js",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-bizop-query-boundaries",
+  "result": {
+    "passed": 9,
+    "total": 9,
+    "skipped": 0,
+    "exitCode": 0,
+    "sessionId": 31955,
+    "finalChunkId": "1516c5",
+    "logPath": "integration-tests.log",
+    "rerunForEvidencePersistence": false
+  },
+  "environment": {
+    "node": "v25.8.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "osRelease": "24.6.0"
+  },
+  "directoryDurability": {
+    "observedCapability": "supported",
+    "probe": "fsyncDirectory(os.tmpdir())",
+    "unsupportedPolicy": "真实目录屏障不支持时跳过5组依赖生产持久化成功的场景，继续4组SQLite/预算场景；SKIP不计PASS。不模拟成功，不更改CI。",
+    "windowsCapabilityExecuted": false
+  },
+  "gitHead": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "workingTreeContainsUncommittedImplementation": true,
+  "digestScope": "仅覆盖已执行集成脚本与三份固定基线 fixture；生产源文件范围以主实施记录为准。",
+  "baseline": {
+    "commit": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+    "fixtureByteEqualityChecked": true,
+    "matchedFiles": 3,
+    "moduleResolution": "Module._compile 按原源文件位置解析未变更依赖；冻结 fixture 仅用于测试。"
+  },
+  "files": [
+    {
+      "path": "scripts/integration/biz-op-query-boundary.js",
+      "sha256": "35cdebab389c43e96c5d366f61cd32d227a982405dab192d41dab7c7d41448aa"
+    },
+    {
+      "path": "tests/fixtures/biz-op-query-boundary/11086a3c/compute-inputs.js",
+      "sha256": "b06df216c03ad67bcca7258c78d860e49b7b0d6117b79a92c1d76c266e790f78"
+    },
+    {
+      "path": "tests/fixtures/biz-op-query-boundary/11086a3c/export-inputs.js",
+      "sha256": "e7b2b2317b5258dd368933734f0f0eaa54663319d70315064a4864d63fafe1ad"
+    },
+    {
+      "path": "tests/fixtures/biz-op-query-boundary/11086a3c/delete-preview.js",
+      "sha256": "2cd0dc8dd6a5f457ad87eeb393a596251165cbd580297af6a588935154c7415b"
+    }
+  ],
+  "supersededEvidence": [
+    {
+      "passed": 9,
+      "total": 9,
+      "exitCode": 0,
+      "sessionId": 49208,
+      "finalChunkId": "a5c287",
+      "logPath": "integration-tests.log",
+      "rerunForEvidencePersistence": false,
+      "capturedAt": "2026-09-20T12:01:51.573Z",
+      "scriptSha256": "0f973dddcdbf6fb03069975a25cff96a812ff90f67a88ba6dd2ba0e8ddee54d7",
+      "note": "此前保存的9/9结果来源。该轮尚未包含JSON序列化完全相等、两个oracle独立copy故障初态、空诊断真实维护回收断言和真实能力SKIP分流；由本轮替代。历史8/8不是当前最终证据。"
+    }
+  ],
+  "fixtureCleanupBoundary": "脚本拥有临时userData及兄弟outputs并在finally清理。共有helper若在注册关闭回调前初始化失败，句柄不能由调用方取得；本脚本仍尝试删除，若被开放句柄阻塞则报清理失败，不宣称已完全清理。"
+}

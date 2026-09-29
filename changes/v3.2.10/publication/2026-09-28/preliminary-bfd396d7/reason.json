@@ -1,0 +1,17 @@
+{
+  "status": "SUPERSEDED_AFTER_WINDOWS_FAILURE",
+  "localUnit": {
+    "passed": 9429,
+    "failed": 0,
+    "skipped": 4
+  },
+  "localIntegration": "部分运行后中止，不能记为完整通过",
+  "remoteRun": 36438526098,
+  "remoteFailure": "Windows 在启动 node --test 时 spawn ENAMETOOLONG，未执行单测；577 个文件参数共 34656 字符。",
+  "discoveryComparison": {
+    "originalCount": 577,
+    "globCount": 577,
+    "identical": true,
+    "glob": "tests/unit/**/*.test.js"
+  }
+}

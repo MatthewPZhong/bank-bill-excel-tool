@@ -1,0 +1,129 @@
+{
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "scope": "Read-only incremental rereview of the existing uncommitted repair snapshot",
+  "findings": [
+    {
+      "id": "RR2-01",
+      "priority": 2
+    },
+    {
+      "id": "RR2-02",
+      "priority": 2
+    },
+    {
+      "id": "RR2-03",
+      "priority": 2
+    },
+    {
+      "id": "RR2-04",
+      "priority": 2
+    },
+    {
+      "id": "RR2-05",
+      "priority": 2
+    }
+  ],
+  "currentChecks": [
+    {
+      "name": "architecture-cli",
+      "command": "node scripts/check-architecture.js --json /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-21-release-rereview-r2/evidence/architecture-check.json",
+      "exitCode": 0,
+      "active": 31,
+      "violations": 0,
+      "log": "evidence/architecture-check.log"
+    },
+    {
+      "name": "architecture-unit",
+      "command": "node --test --test-concurrency=1 tests/unit/architecture/*.test.js",
+      "exitCode": 0,
+      "pass": 170,
+      "fail": 0,
+      "skip": 0,
+      "log": "evidence/architecture-tests.log"
+    },
+    {
+      "name": "g3-unit",
+      "command": "node --test tests/unit/renderer-refund-prompt-orchestration.test.js tests/unit/renderer-refund-ready-guard.test.js tests/unit/renderer/scenario-controller-feedback.test.js tests/unit/renderer/scenario-change-routing.test.js",
+      "exitCode": 0,
+      "pass": 125,
+      "fail": 0,
+      "skip": 0,
+      "log": "evidence/g3-unit.log"
+    },
+    {
+      "name": "g3-electron",
+      "command": "node scripts/test-renderer-lifecycle.js bank-statement-confirmation",
+      "exitCode": 0,
+      "pass": 27,
+      "log": "evidence/g3-electron.log",
+      "boundary": "Real Electron DOM and modal host, isolated runtime directories and stub business APIs."
+    },
+    {
+      "name": "g3-independent",
+      "command": "node changes/v3.2.10/reviews/2026-09-21-release-rereview-r2/evidence/g3-independent.cjs",
+      "exitCode": 0,
+      "paths": 5,
+      "checksPerPath": 6,
+      "result": "evidence/g3-independent.json"
+    },
+    {
+      "name": "configuration-xlsx",
+      "command": "node --test --test-concurrency=2 tests/unit/architecture/release-policy-alignment.test.js tests/unit/backend/xlsx/infrastructure-compatibility.test.js",
+      "exitCode": 0,
+      "pass": 15,
+      "fail": 0,
+      "skip": 0,
+      "log": "evidence/config-xlsx.log"
+    },
+    {
+      "name": "policy-history-targeted",
+      "command": "node --test --test-name-pattern='S0 → S1 active|merge 另一父链|保护字段完整比较' tests/unit/architecture/policy-history.test.js",
+      "exitCode": 0,
+      "pass": 3,
+      "fail": 0,
+      "skip": 0,
+      "log": "evidence/policy-history.log"
+    },
+    {
+      "name": "query-execution-probe.cjs",
+      "command": "node --no-warnings changes/v3.2.10/reviews/2026-09-21-release-rereview-r2/evidence/query-execution-probe.cjs",
+      "exitCode": 0,
+      "result": "evidence/query-execution-reproduced.json",
+      "originalAndReproducedJsonEqual": true,
+      "meaning": "取证完成，已复现预期漏报；不代表反例被正确拒绝。"
+    },
+    {
+      "name": "renderer-realconfig.cjs",
+      "command": "node --no-warnings changes/v3.2.10/reviews/2026-09-21-release-rereview-r2/evidence/renderer-realconfig.cjs",
+      "exitCode": 0,
+      "result": "evidence/renderer-realconfig-reproduced.json",
+      "originalAndReproducedJsonEqual": true,
+      "meaning": "取证完成，已复现预期漏报；不代表反例被正确拒绝。"
+    },
+    {
+      "name": "g1-internal-probe.cjs",
+      "command": "node --no-warnings changes/v3.2.10/reviews/2026-09-21-release-rereview-r2/evidence/g1-internal-probe.cjs",
+      "exitCode": 0,
+      "result": "evidence/g1-internal-reproduced.json",
+      "originalAndReproducedJsonEqual": true,
+      "meaning": "取证完成，已复现预期漏报；不代表反例被正确拒绝。"
+    }
+  ],
+  "testCountsMayOverlap": true,
+  "historicalFullGate": {
+    "rerunThisReview": false,
+    "command": "UNIT_TEST_CONCURRENCY=1 npm run release-check",
+    "source": "../2026-09-21-release-repair/release-check-result.json",
+    "inputComparison": "evidence/gate-evidence-comparison.json",
+    "matchedInputs": 1698,
+    "changedInputs": 0,
+    "exitCode": 0,
+    "unitPass": 8944,
+    "unitFail": 0,
+    "unitSkip": 4,
+    "integrationScriptsPass": 68,
+    "integrationScriptsTotal": 68
+  },
+  "preservation": "preservation-final.json"
+}

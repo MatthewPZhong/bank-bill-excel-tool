@@ -1,0 +1,381 @@
+{
+  "repo": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "hashes": [
+    {
+      "path": "scripts/architecture/scan.js",
+      "beforeSha256": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be",
+      "currentSha256": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be",
+      "beforeMatchesR12Input": true,
+      "currentMatchesR13Input": true
+    },
+    {
+      "path": "scripts/architecture/contracts.js",
+      "beforeSha256": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f",
+      "currentSha256": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f",
+      "beforeMatchesR12Input": true,
+      "currentMatchesR13Input": true
+    },
+    {
+      "path": "scripts/architecture/renderer-contracts.js",
+      "beforeSha256": "6b57b228b5fb576bbd3ea40d42ff010c5414c1a6a96fb7efdc6aba92fd2c2bec",
+      "currentSha256": "f288b9b66558e1fee0ca9697c493aed3b60c5999fac6c0366b81041a46c4f082",
+      "beforeMatchesR12Input": true,
+      "currentMatchesR13Input": true
+    },
+    {
+      "path": "scripts/architecture/rules.js",
+      "beforeSha256": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa",
+      "currentSha256": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa",
+      "beforeMatchesR12Input": true,
+      "currentMatchesR13Input": true
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "beforeSha256": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "currentSha256": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "beforeMatchesR12Input": true,
+      "currentMatchesR13Input": true
+    },
+    {
+      "path": "architecture/boundaries.json",
+      "sha256": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+      "beforeMatchesR12Input": true,
+      "currentMatchesR13Input": true
+    },
+    {
+      "path": "architecture/legacy-allowlist.json",
+      "sha256": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3",
+      "beforeMatchesR12Input": true,
+      "currentMatchesR13Input": true
+    }
+  ],
+  "sourceFileCount": 793,
+  "sourceMismatches": [],
+  "scripts": [
+    {
+      "name": "r13-array-compare.cjs",
+      "sha256": "f79f50faa09a2a43db537f53955f8dc560d8ee8b74a34c24b3f90e19cd942cf0"
+    },
+    {
+      "name": "r13-array-finite-cases.cjs",
+      "sha256": "48d1684576a61ddfdf7d74a6bbd00a0e96dff6966a15ae86d36716e4f5ebc48b"
+    },
+    {
+      "name": "r13-array-finite-probe.cjs",
+      "sha256": "50aca28dda2290f833044fbc30b808476ff5348d05b4e80f59ba733ac65708b3"
+    },
+    {
+      "name": "r13-array-original-cases.cjs",
+      "sha256": "b253012aa196716e99a8988e7c3e60b6fddd68dc63ef7b57a559eae2cbc79e97"
+    },
+    {
+      "name": "r13-array-original-probe.cjs",
+      "sha256": "926fd0b974da5d0cdc7e5ac6edafd8d83c35bcf9cb4f9adf40aefb8bf46fa29a"
+    }
+  ],
+  "before": {
+    "mode": "minimal",
+    "boundaryCount": 1,
+    "boundaries": [],
+    "baseline": null,
+    "results": [
+      {
+        "name": "object-parameter-write-then-reorder",
+        "safe": false,
+        "source": "function provide(){return {api:{run(){}}};}const old=provide(),clean=provide();function make(value){const args=[];args.push(value);return args;}const list=[...make(old)];function reorder(box){box.target.reverse();}list[1]=clean;reorder({target:list});const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+        "runtime": {
+          "keys": [
+            "run",
+            "outsideScope"
+          ],
+          "extraCallable": true,
+          "extraResult": true,
+          "same": true
+        },
+        "scanError": {
+          "name": "RangeError",
+          "message": "Maximum call stack size exceeded",
+          "stack": "RangeError: Maximum call stack size exceeded\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:319:19)\n    at /private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:316:9\n    at Array.forEach (<anonymous>)\n    at parameterValue (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:315:15)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:509:23)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:335:22)\n    at sameObject (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:68:26)\n    at unsupportedArrayMutation (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:90:96)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:368:73)\n    at recurse (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:322:65)"
+        }
+      },
+      {
+        "name": "object-parameter-reorder-then-write",
+        "safe": true,
+        "source": "function provide(){return {api:{run(){}}};}const old=provide(),clean=provide();function make(value){const args=[];args.push(value);return args;}const list=[...make(old)];function reorder(box){box.target.reverse();}reorder({target:list});list[1]=clean;const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+        "runtime": {
+          "keys": [
+            "run"
+          ],
+          "extraCallable": false,
+          "same": false
+        },
+        "scanError": {
+          "name": "RangeError",
+          "message": "Maximum call stack size exceeded",
+          "stack": "RangeError: Maximum call stack size exceeded\n    at Object.memberRead (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/scan.js:432:17)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:333:29)\n    at recurse (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:322:65)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:547:22)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:361:26)\n    at recurse (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:322:65)\n    at /private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:409:82\n    at [renderer-deferred-identity] (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:40:70)\n    at select (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:255:53)\n    at snapshotMember (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:145:20)"
+        }
+      },
+      {
+        "name": "destructured-parameter-write-then-reorder",
+        "safe": false,
+        "source": "function provide(){return {api:{run(){}}};}const old=provide(),clean=provide();function make(value){const args=[];args.push(value);return args;}const list=[...make(old)];function reorder({target}){target.reverse();}list[1]=clean;reorder({target:list});const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+        "runtime": {
+          "keys": [
+            "run",
+            "outsideScope"
+          ],
+          "extraCallable": true,
+          "extraResult": true,
+          "same": true
+        },
+        "scanError": {
+          "name": "RangeError",
+          "message": "Maximum call stack size exceeded",
+          "stack": "RangeError: Maximum call stack size exceeded\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:319:19)\n    at recurse (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:322:65)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:547:22)\n    at /private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:554:76\n    at Array.map (<anonymous>)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:554:64)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:361:26)\n    at recurse (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:322:65)\n    at /private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:409:82\n    at [renderer-deferred-identity] (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:40:70)"
+        }
+      },
+      {
+        "name": "destructured-parameter-reorder-then-write",
+        "safe": true,
+        "source": "function provide(){return {api:{run(){}}};}const old=provide(),clean=provide();function make(value){const args=[];args.push(value);return args;}const list=[...make(old)];function reorder({target}){target.reverse();}reorder({target:list});list[1]=clean;const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+        "runtime": {
+          "keys": [
+            "run"
+          ],
+          "extraCallable": false,
+          "same": false
+        },
+        "scanError": {
+          "name": "RangeError",
+          "message": "Maximum call stack size exceeded",
+          "stack": "RangeError: Maximum call stack size exceeded\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:319:19)\n    at recurse (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:322:65)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:547:22)\n    at /private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:554:76\n    at Array.map (<anonymous>)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:554:64)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:361:26)\n    at recurse (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:322:65)\n    at /private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:409:82\n    at [renderer-deferred-identity] (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:40:70)"
+        }
+      },
+      {
+        "name": "single-nested-helper-write-then-reorder",
+        "safe": false,
+        "source": "function provide(){return {api:{run(){}}};}const old=provide(),clean=provide();function make(value){const args=[];args.push(value);return args;}const list=[...make(old)];function inner(target){target.reverse();}function reorder(value){inner(value);}list[1]=clean;reorder(list);const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+        "runtime": {
+          "keys": [
+            "run",
+            "outsideScope"
+          ],
+          "extraCallable": true,
+          "extraResult": true,
+          "same": true
+        },
+        "scanError": {
+          "name": "RangeError",
+          "message": "Maximum call stack size exceeded",
+          "stack": "RangeError: Maximum call stack size exceeded\n    at Set.add (<anonymous>)\n    at new Set (<anonymous>)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:321:18)\n    at recurse (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:322:65)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:547:22)\n    at /private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:554:76\n    at Array.map (<anonymous>)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:554:64)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:361:26)\n    at /private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:316:9"
+        }
+      },
+      {
+        "name": "single-nested-helper-reorder-then-write",
+        "safe": true,
+        "source": "function provide(){return {api:{run(){}}};}const old=provide(),clean=provide();function make(value){const args=[];args.push(value);return args;}const list=[...make(old)];function inner(target){target.reverse();}function reorder(value){inner(value);}reorder(list);list[1]=clean;const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+        "runtime": {
+          "keys": [
+            "run"
+          ],
+          "extraCallable": false,
+          "same": false
+        },
+        "scanError": {
+          "name": "RangeError",
+          "message": "Maximum call stack size exceeded",
+          "stack": "RangeError: Maximum call stack size exceeded\n    at new Set (<anonymous>)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:321:18)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:361:26)\n    at /private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:316:9\n    at Array.forEach (<anonymous>)\n    at parameterValue (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:315:15)\n    at resolve (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:509:23)\n    at /private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:316:9\n    at Array.forEach (<anonymous>)\n    at parameterValue (/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r13-array-before-checker-7KHZVy/scripts/architecture/renderer-contracts.js:315:15)"
+        }
+      }
+    ]
+  },
+  "current": {
+    "mode": "minimal",
+    "boundaryCount": 1,
+    "boundaries": [],
+    "baseline": null,
+    "results": [
+      {
+        "name": "object-parameter-write-then-reorder",
+        "safe": false,
+        "source": "function provide(){return {api:{run(){}}};}const old=provide(),clean=provide();function make(value){const args=[];args.push(value);return args;}const list=[...make(old)];function reorder(box){box.target.reverse();}list[1]=clean;reorder({target:list});const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+        "runtime": {
+          "keys": [
+            "run",
+            "outsideScope"
+          ],
+          "extraCallable": true,
+          "extraResult": true,
+          "same": true
+        },
+        "violations": [
+          {
+            "rule": "ARCH-RENDERER-SCOPE",
+            "boundaryId": "renderer-bank-statement",
+            "from": "src/shell.js",
+            "to": null,
+            "line": 1,
+            "column": 325,
+            "message": "scoped api 未授权字段 outsideScope",
+            "evidenceId": "f85d3b8bcc5965c720fab7693054d227050e65528d81cde4c056d15690a964bd",
+            "functionPath": null
+          }
+        ],
+        "coverage": {
+          "scannedFiles": 1,
+          "parsedFiles": 1,
+          "literalEdges": 0,
+          "workerEdges": 0,
+          "globalEdges": 2,
+          "unresolved": 0,
+          "dynamicSites": 0,
+          "parseErrors": 0
+        }
+      },
+      {
+        "name": "object-parameter-reorder-then-write",
+        "safe": true,
+        "source": "function provide(){return {api:{run(){}}};}const old=provide(),clean=provide();function make(value){const args=[];args.push(value);return args;}const list=[...make(old)];function reorder(box){box.target.reverse();}reorder({target:list});list[1]=clean;const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+        "runtime": {
+          "keys": [
+            "run"
+          ],
+          "extraCallable": false,
+          "same": false
+        },
+        "violations": [],
+        "coverage": {
+          "scannedFiles": 1,
+          "parsedFiles": 1,
+          "literalEdges": 0,
+          "workerEdges": 0,
+          "globalEdges": 2,
+          "unresolved": 0,
+          "dynamicSites": 0,
+          "parseErrors": 0
+        }
+      },
+      {
+        "name": "destructured-parameter-write-then-reorder",
+        "safe": false,
+        "source": "function provide(){return {api:{run(){}}};}const old=provide(),clean=provide();function make(value){const args=[];args.push(value);return args;}const list=[...make(old)];function reorder({target}){target.reverse();}list[1]=clean;reorder({target:list});const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+        "runtime": {
+          "keys": [
+            "run",
+            "outsideScope"
+          ],
+          "extraCallable": true,
+          "extraResult": true,
+          "same": true
+        },
+        "violations": [
+          {
+            "rule": "ARCH-RENDERER-SCOPE",
+            "boundaryId": "renderer-bank-statement",
+            "from": "src/shell.js",
+            "to": null,
+            "line": 1,
+            "column": 326,
+            "message": "scoped api 未授权字段 outsideScope",
+            "evidenceId": "f85d3b8bcc5965c720fab7693054d227050e65528d81cde4c056d15690a964bd",
+            "functionPath": null
+          }
+        ],
+        "coverage": {
+          "scannedFiles": 1,
+          "parsedFiles": 1,
+          "literalEdges": 0,
+          "workerEdges": 0,
+          "globalEdges": 2,
+          "unresolved": 0,
+          "dynamicSites": 0,
+          "parseErrors": 0
+        }
+      },
+      {
+        "name": "destructured-parameter-reorder-then-write",
+        "safe": true,
+        "source": "function provide(){return {api:{run(){}}};}const old=provide(),clean=provide();function make(value){const args=[];args.push(value);return args;}const list=[...make(old)];function reorder({target}){target.reverse();}reorder({target:list});list[1]=clean;const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+        "runtime": {
+          "keys": [
+            "run"
+          ],
+          "extraCallable": false,
+          "same": false
+        },
+        "violations": [],
+        "coverage": {
+          "scannedFiles": 1,
+          "parsedFiles": 1,
+          "literalEdges": 0,
+          "workerEdges": 0,
+          "globalEdges": 2,
+          "unresolved": 0,
+          "dynamicSites": 0,
+          "parseErrors": 0
+        }
+      },
+      {
+        "name": "single-nested-helper-write-then-reorder",
+        "safe": false,
+        "source": "function provide(){return {api:{run(){}}};}const old=provide(),clean=provide();function make(value){const args=[];args.push(value);return args;}const list=[...make(old)];function inner(target){target.reverse();}function reorder(value){inner(value);}list[1]=clean;reorder(list);const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+        "runtime": {
+          "keys": [
+            "run",
+            "outsideScope"
+          ],
+          "extraCallable": true,
+          "extraResult": true,
+          "same": true
+        },
+        "violations": [
+          {
+            "rule": "ARCH-RENDERER-SCOPE",
+            "boundaryId": "renderer-bank-statement",
+            "from": "src/shell.js",
+            "to": null,
+            "line": 1,
+            "column": 351,
+            "message": "scoped api 未授权字段 outsideScope",
+            "evidenceId": "f85d3b8bcc5965c720fab7693054d227050e65528d81cde4c056d15690a964bd",
+            "functionPath": null
+          }
+        ],
+        "coverage": {
+          "scannedFiles": 1,
+          "parsedFiles": 1,
+          "literalEdges": 0,
+          "workerEdges": 0,
+          "globalEdges": 2,
+          "unresolved": 0,
+          "dynamicSites": 0,
+          "parseErrors": 0
+        }
+      },
+      {
+        "name": "single-nested-helper-reorder-then-write",
+        "safe": true,
+        "source": "function provide(){return {api:{run(){}}};}const old=provide(),clean=provide();function make(value){const args=[];args.push(value);return args;}const list=[...make(old)];function inner(target){target.reverse();}function reorder(value){inner(value);}reorder(list);list[1]=clean;const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+        "runtime": {
+          "keys": [
+            "run"
+          ],
+          "extraCallable": false,
+          "same": false
+        },
+        "violations": [],
+        "coverage": {
+          "scannedFiles": 1,
+          "parsedFiles": 1,
+          "literalEdges": 0,
+          "workerEdges": 0,
+          "globalEdges": 2,
+          "unresolved": 0,
+          "dynamicSites": 0,
+          "parseErrors": 0
+        }
+      }
+    ]
+  }
+}

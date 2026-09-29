@@ -12,7 +12,7 @@ const {
   projectOutputCell,
   projectToolboxRowValues,
   toMatchValue
-} = require('../../src/backend/toolbox-format/model');
+} = require('../../src/backend/xlsx/model');
 
 function makeCell(overrides = {}) {
   return createToolboxCell({

@@ -23,6 +23,7 @@ const {
 const {
   createStartupRecoveryCoordinator
 } = require('./main-process/background-execution/startup-recovery-coordinator');
+const { createApplicationRecoveryComposition } = require('./main-process/execution-descriptors/composition');
 const {
   createRecoveryHoldGate
 } = require('./main-process/background-execution/recovery-hold-gate');
@@ -85,8 +86,7 @@ const {
   readPendingMonthEvidence
 } = require('./main-process/pending-import-preflight');
 const {
-  acknowledgePendingRunByTaskRun,
-  finalizePendingTerminalIntent,
+  createPendingTerminalRouteRegistration,
   pendingAggregateRunSelection,
   pendingRunLineagePlan,
   pendingRunTerminalRoute,
@@ -95,7 +95,7 @@ const {
   runOutputLineageIntent
 } = require('./main-process/pending-archive-lineage');
 const {
-  finalizePreFundTerminalIntent,
+  createPreFundTerminalRouteRegistration,
   preFundRunTerminalRoute,
   preservePreFundRunOwnerAfterMirrorCompensationFailure,
   recoverPreFundRunReceipts
@@ -114,10 +114,14 @@ const {
   selectSuccessfulPathsByResultIndex
 } = require('./main-process/archive-center/operation-tracker');
 const {
-  SUPPORT_ACTION_POLICIES,
-  createBankStatementRunFlowIdentity,
-  createTaskPolicyRegistry
+  SUPPORT_ACTION_POLICIES
 } = require('./main-process/archive-center/task-policy-registry');
+const {
+  createBankStatementRunFlowIdentity
+} = require('./main-process/fund-recon-worker/archive-task-policies');
+const {
+  createTaskPolicyRegistry
+} = require('./main-process/execution-descriptors/composition');
 const { createBusinessFlowResolver } = require('./main-process/archive-center/business-flow-resolver');
 const {
   createTaskLifecycle
@@ -125,9 +129,6 @@ const {
 const {
   freezeWorkerBatchContext
 } = require('./main-process/archive-center/worker-batch-context');
-const {
-  freezePersistedTaskOwner
-} = require('./main-process/archive-center/worker-operation-context');
 const {
   createIpcTaskContext,
   executeIpcTaskInvocation,
@@ -161,8 +162,7 @@ const {
 } = require('./main-process/archive-center/position-owned-delete-sources');
 const { createPositionReportDeleteProtection } = require('./main-process/position-reconciliation/archive-report-delete-protection');
 const {
-  positionInputFilePlanEvidence,
-  positionFilePlanSettlementFiles
+  positionInputFilePlanEvidence
 } = require('./main-process/position-reconciliation/archive-file-plan-evidence');
 const {
   createArchiveStorageRootManager
@@ -261,42 +261,27 @@ const {
 const {
   PositionReconciliationError
 } = require('./main-process/position-reconciliation/common');
+const { createPositionTaskOwner } = require('./main-process/position-reconciliation/task-owner');
+const { createExecutionTaskComposition } = require('./main-process/execution-descriptors/composition');
+const { createPreparedResourceScope } = require('./main-process/task-adapters/prepared-resources');
 const {
   createPositionRunTaskContract,
-  createPositionSourceImportTaskContract,
-  executeAfterPositionAdmission,
-  runWithPreparedResourceCleanup
+  createPositionSourceImportTaskContract
 } = require('./main-process/position-reconciliation/interactive-task-preflight');
 const {
   dispatchPositionLargeImportSchemaMigration
 } = require('./main-process/position-reconciliation/import-dispatch');
 const {
-  assertStagedInputUnchanged,
-  filterStagingPathsWithoutProtectedSources,
   hashFileSha256Async
 } = require('./main-process/position-reconciliation/input-staging');
 const {
   POSITION_SIDE_DB_CHECKPOINT_SETTING,
-  POSITION_SIDE_DB_PENDING_SETTING,
   POSITION_SIDE_DB_BOOTSTRAP_SETTING
 } = require('./main-process/position-reconciliation/constants');
 const {
-  assertPositionRecoveryInputsUnchanged,
-  positionCommittedRecoveryArchiveFiles,
-  positionRecoveryCleanupInputPaths,
-  requirePositionPendingArchiveFiles,
-  positionRecoveryArchiveFiles,
-  positionArchiveIntentEvidence: evaluatePositionArchiveIntentEvidence,
   authorizePositionImportApply,
-  positionBusinessStateForResult,
-  positionTerminalOutcomeForResult,
   positionPersistentStagingProtectionPaths,
-  positionReconciliationFailureResult,
-  positionRecoveryTerminalOutcome,
-  positionCancellationAcceptedPending,
-  runPositionOperationLifecycle,
-  settlePositionRecoveredTask,
-  settlePositionArchiveResult
+  positionReconciliationFailureResult
 } = require('./main-process/position-reconciliation/operation-lifecycle');
 // v3.0.5 PR-4（Part B Phase 2）：biz-op / bank-bu per-月侧库编排层（import/run/status/导出/孤儿 路由侧库）
 const bizOpReconRunData = require('./main-process/biz-op-recon-run-data');
@@ -511,7 +496,7 @@ const {
 } = require('./main-process/toolbox-multi-split');
 const {
   createBackgroundExecutionRuntimeManager
-} = require('./main-process/background-execution/runtime');
+} = require('./main-process/execution-descriptors/composition');
 const {
   PENDING_READ_ONLY_ACTIONS
 } = require('./main-process/read-only-exports/pending/policies');
@@ -555,7 +540,6 @@ const {
   generateValidateAndPublishPositionExport
 } = require('./main-process/read-only-exports/position/managed-export');
 const {
-  composePositionTerminalSettlement,
   settlePositionPublishedMetadata
 } = require('./main-process/read-only-exports/position/settlement');
 const {
@@ -592,15 +576,16 @@ const { MAX_ROW_SPLIT_FILES, publicResult: toolboxRowsPublicResult } = require('
 const { prepareRows: prepareToolboxRows, generateValidateAndPublishRows } = require('./main-process/toolbox-row-split/service');
 const {
   publishToolboxPublicationAsync,
-  recoverToolboxPublicationsAsync
+  getDefaultToolboxPublicationDispatcher
 } = require('./main-process/toolbox-output-publication-dispatch');
+const { createPublicationRecoveryCoordinator } = require('./main-process/publication-recovery/coordinator');
+const { createArchivePublicationOwner } = require('./main-process/publication-recovery/archive-owner');
 const {
   JOURNAL_INDEX_NAME
 } = require('./main-process/toolbox-output-publication');
 const {
   recoverToolboxPublicationsIntoArchive,
   acknowledgeToolboxPublicationReceipts: acknowledgeToolboxPublicationReceiptsIntoArchive,
-  isPublicationOnlyFileTask,
   toolboxRecoveryOutputFiles: toolboxFinalOutputFiles
 } = require('./main-process/toolbox-archive-recovery');
 const {
@@ -797,6 +782,16 @@ let appUpdaterStartupScheduled = false;
 let appUpdateTransitionToken = null;
 let archiveCenterService = null;
 let bizOpV327Module = null;
+let publicationRecoveryCoordinator = null;
+
+function recoverArchivePublications(options) {
+  if (!publicationRecoveryCoordinator) {
+    throw Object.assign(new Error('发布恢复协调器尚未装配'), {
+      code: 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED', preserveTemporaryFiles: true
+    });
+  }
+  return publicationRecoveryCoordinator.forOwner('archive-publication').recover(options);
+}
 let archiveStorageRootManager = null;
 let archiveCenterInitializationPromise = null;
 let toolboxStartupRecoveryError = null;
@@ -806,7 +801,7 @@ let recoveryControlReadRepository = null;
 let recoveryHoldGate = null;
 let preFundMptHoldGate = null;
 let preFundMptWorkerDurableCoordinator = null;
-let duplicateStartupRecoveryReady = false;
+let applicationRecoveryCoordinator = null;
 let reconFixJpmHoldGate = null;
 let backgroundWorkerDurableCoordinator = null;
 
@@ -830,6 +825,7 @@ function runReconFixJpmAdmMutationBoundary(work) {
 
 let archiveOperationTail = Promise.resolve();
 const backgroundExecutionRuntimeManager = createBackgroundExecutionRuntimeManager({
+  toolboxPublication: { recover: recoverArchivePublications },
   bizOpV327Provider: () => bizOpV327Module && bizOpV327Module.runtimeBindings,
   workerDurableCoordinatorProvider: () => backgroundWorkerDurableCoordinator,
   reconFixJpmDatabasePathProvider: () => database && database.dbPath,
@@ -846,7 +842,7 @@ const backgroundExecutionRuntimeManager = createBackgroundExecutionRuntimeManage
     : null,
   duplicateStartupGateProvider: () => Object.freeze({
     contractVersion: DUPLICATE_STARTUP_GATE_CONTRACT_VERSION,
-    startupRecoveryReady: duplicateStartupRecoveryReady
+    startupRecoveryReady: applicationRecoveryCoordinator?.snapshot().platformScanCompleted === true
   })
 });
 
@@ -1179,6 +1175,7 @@ async function publishManagedVccFinancialOpArtifact(artifacts, prepared, taskCon
     throw new Error('VCC Financial OP read-only export 必须精确生成一个 artifact');
   }
   return publishVccFinancialOpOutputs({
+    recoverPublications: recoverArchivePublications,
     batchContext: taskContext.batchContext,
     generationFilePaths: [artifacts[0].generationPath],
     targetFilePaths: [outputs[0].filePath],
@@ -1278,11 +1275,46 @@ async function executeManagedVccFinancialOpReadOnlyExport(service, prepared, tas
   });
 }
 const archiveOperationContext = new AsyncLocalStorage();
-const positionReconciliationOperationContext = new AsyncLocalStorage();
 const statementSourceReadContext = new AsyncLocalStorage();
-let positionReconciliationOperationActive = null;
+const positionTaskOwner = createPositionTaskOwner({
+  readSetting: (key) => database.getSetting(key),
+  writeSetting: (key, value) => database.setSetting(key, value),
+  settingsAvailable: () => Boolean(database && database.db),
+  getDatabasePath: () => database && database.dbPath,
+  getCurrentService: () => positionReconciliationService,
+  getService: getPositionReconciliationService,
+  getArchiveCenter: () => archiveCenterService,
+  initializeArchiveCenter,
+  getTaskLifecycle: () => archiveTaskLifecycle,
+  getTaskPolicy: (channel) => taskPolicyRegistry.get(channel),
+  supportsArchiveChannel: (channel) => Boolean(
+    archiveOperationTracker && archiveOperationTracker.supportsChannel(channel)
+  )
+});
+const terminalRouteRegistrations = [
+  positionTaskOwner.terminalRegistration,
+  createPendingTerminalRouteRegistration({ getDb: () => pendingDb }),
+  bizOpReconRunData.createBizOpRunTerminalRouteRegistration({
+    getUserDataDir: () => path.dirname(database.dbPath),
+    getMainDb: () => database.db,
+    assertLegacyAvailable: () => {
+      const mode = legacyMode(database.db);
+      if (mode === 'ACTIVE' || ['LEGACY_DB_CLEARED', 'LEGACY_FILES_RECLAIMED']
+        .includes(bizOpV327Module?.activation.status().phase)) throw retiredError();
+    },
+    withLegacyRecovery
+  }),
+  createPreFundTerminalRouteRegistration({ getService: getPreFundReconciliationService })
+];
 const businessOperationRegistry = createBusinessOperationRegistry();
 const taskPolicyRegistry = createTaskPolicyRegistry();
+const executionTaskComposition = createExecutionTaskComposition({
+  terminalRoutes: terminalRouteRegistrations,
+  positionOwner: positionTaskOwner,
+  acknowledgeReceipts: acknowledgeToolboxPublicationReceipts,
+  reportArchiveFailure
+});
+const { taskAdapterRegistry, terminalRouteRegistry } = executionTaskComposition;
 // Recovery adapter 只能消费这个启动期 frozen exact host。先一次性冻结 binding authority，
 // 再允许 initializeApplication 建 DB，之后才注册 IPC；任一 authority 漂移在基础设施前失败。
 const taskPolicyBindingHost = Object.freeze({
@@ -1320,6 +1352,7 @@ function getVccFinancialOpService() {
       buildSha: buildInfo.commit,
       publishOutputFilesFn: (payload) => publishVccFinancialOpOutputs({
         ...payload,
+        recoverPublications: recoverArchivePublications,
         userDataDir: app.getPath('userData'),
         archiveCenter: archiveCenterService,
         onHandoffPending: (error) => {
@@ -4792,9 +4825,7 @@ function readToolboxRecoveryBatchIds(userDataDir) {
 }
 
 async function recoverPositionPendingBeforeInterruptedSweep() {
-  const raw = database && database.db
-    ? database.getSetting(POSITION_SIDE_DB_PENDING_SETTING)
-    : '';
+  const raw = positionTaskOwner.readPositionPendingRaw();
   if (!raw) return null;
   // Service 初始化会核 side-db checkpoint、persist append intent，并以同一 pending 原批次收口。
   try {
@@ -4879,12 +4910,9 @@ function protectedInterruptedTaskBatchIds() {
     }
   } catch (error) { return { batchIds: [], taskRunIds: [], sweepUnsafe: true, error }; }
   try {
-    const pending = readPositionPendingOperation();
-    if (pending) {
-      const owner = positionPendingOwner(pending);
-      if (owner.kind === 'file-batch') batchIds.add(owner.batchContext.batchId);
-      else taskRunIds.push(owner.operationContext.taskRunId);
-    }
+    const protection = positionTaskOwner.protectedInterruptedTasks();
+    protection.batchIds.forEach((id) => batchIds.add(id));
+    taskRunIds.push(...protection.taskRunIds);
   } catch (error) {
     return { batchIds: [...batchIds], taskRunIds, sweepUnsafe: true, error };
   }
@@ -4938,7 +4966,7 @@ function initializeArchiveCenter() {
       onArtifactReady: (completed, repository) => {
         if (bizOpV327Module) bizOpV327Module.readyHold(completed, repository);
       },
-      onSourceReleased: cleanupPositionArchiveSourcePaths
+      onSourceReleased: positionTaskOwner.cleanupPositionArchiveSourcePaths
     });
     service.runDeleteWithOwnerGuard = (batchId, operation, options) => (
       archiveCenterService.runDeleteWithOwnerGuard(batchId, operation, options)
@@ -4955,7 +4983,7 @@ function initializeArchiveCenter() {
         const references = positionDeleteSourceReferences(service.repository, batch.id, artifacts);
         const protectedPaths = positionPersistentStagingProtectionPaths(
           references.protectedPaths.concat(archiveOutbox.listSourcePaths()),
-          readPositionPendingOperation()
+          positionTaskOwner.readPositionPendingOperation()
         );
         if (!Array.isArray(protectedPaths)) throw new Error('平盘暂存保护清单不可验证');
         if (positionReconciliationService) {
@@ -5007,58 +5035,11 @@ function initializeArchiveCenter() {
     service: runtimeService,
     storageRootManager: archiveStorageRootManager,
     outboxStore: archiveOutbox,
-    onOutboxFlushed: cleanupPositionArchiveSourcePaths,
-    resolveOutboxTerminalIntent: resolvePositionOutboxTerminalIntent,
-    onTerminalIntentFlushed: finalizeArchiveTerminalIntent,
-    recoverInterruptedTaskOwners: [
-      {
-        ownerName: 'biz-op-v327',
-        async recover() {
-          if (bizOpV327Module?.activation.needed()) await bizOpV327Module.activation.run({ quiesceOnly: true });
-          if (bizOpV327Module && !bizOpV327Module.activation.needed() && bizOpV327Module.recovery.openObligations()) {
-            const result = await bizOpV327Module.recovery.run();
-            duplicateStartupRecoveryReady = bizOpV327Module.recovery.hasCompletedPlatformScan();
-            appendActivityLogEntry({ level: result.ready ? 'info' : 'warning', source: 'main',
-              domain: 'biz-op-v327-recovery', message: result.ready ? '业务 OP 恢复完成' : '业务 OP 保留恢复保护',
-              details: [JSON.stringify(result)] });
-          }
-        }
-      },
-      {
-        ownerName: 'Pending runs',
-        recover: recoverPendingRunsBeforeInterruptedSweep
-      },
-      {
-        ownerName: 'Biz OP runs',
-        recover: recoverBizOpRunsBeforeInterruptedSweep
-      },
-      {
-        ownerName: 'Pre-fund runs',
-        recover: recoverPreFundRunsBeforeInterruptedSweep
-      },
-      {
-        ownerName: 'Position',
-        recover: recoverPositionPendingBeforeInterruptedSweep
-      },
-      {
-        // Toolbox 与 VCC 正式输出共用同一 durable publication receipt 恢复根。
-        ownerName: 'Toolbox/VCC output publications',
-        recover: async () => {
-          await recoverToolboxPublicationsAtStartup();
-        }
-      },
-      {
-        ownerName: 'VCC import terminal',
-        recover: recoverVccImportBeforeInterruptedSweep
-      }
-    ],
-    postOutboxStartupHooks: [{
-      hookName: 'BizOP activation and recovery',
-      async run() { if (bizOpV327Module?.activation.needed()) return bizOpV327Module.retryRecovery(); }
-    }, {
-      hookName: 'VCC import lineage/hold reconcile',
-      run: reconcileVccImportArchiveBeforeRetentionCleanup
-    }],
+    onOutboxFlushed: positionTaskOwner.cleanupPositionArchiveSourcePaths,
+    resolveOutboxTerminalIntent: positionTaskOwner.resolvePositionOutboxTerminalIntent,
+    terminalRouteRegistry,
+    recoverInterruptedTaskOwners: applicationRecoveryCoordinator.archiveOwnerHooks(),
+    postOutboxStartupHooks: applicationRecoveryCoordinator.postOutboxHooks(),
     getProtectedInterruptedTaskBatchIds: protectedInterruptedTaskBatchIds,
     onStartupPhase: recordStartupPhase,
     onEntryMaintenanceEvent: (eventName, payload) => {
@@ -13999,9 +13980,7 @@ function registerNewAccountHandlers() {
         },
         lineageIntents: lineagePlan.lineageIntents,
         expectedDatasets: lineagePlan.expectedDatasets,
-        afterTerminal: ({ context, terminalStatus }) => terminalStatus === 'succeeded'
-          ? acknowledgePendingRunByTaskRun(pendingDb, context.taskRunId)
-          : null,
+        afterTerminal: terminalRouteRegistry.createAfterTerminal(pendingRunTerminalRoute(taskRunId)),
         afterTerminalIntent: pendingRunTerminalRoute(taskRunId)
       };
     },
@@ -14958,13 +14937,7 @@ function registerNewAccountHandlers() {
         buName,
         lineageIntents: plan.lineageIntents,
         expectedDatasets: plan.expectedDatasets,
-        afterTerminal: ({ terminalStatus }) => terminalStatus === 'succeeded'
-          ? bizOpReconRunData.acknowledgeRunByTaskRun({
-              userDataDir: path.dirname(database.dbPath),
-              mainDb: database.db,
-              taskRunId
-            })
-          : null,
+        afterTerminal: terminalRouteRegistry.createAfterTerminal(bizOpRunTerminalRoute(taskRunId)),
         afterTerminalIntent: bizOpRunTerminalRoute(taskRunId)
       };
     },
@@ -18490,9 +18463,7 @@ function registerPreFundReconciliationHandlers() {
         scenario: payload && payload.scenario,
         lineageIntents: plan.lineageIntents,
         expectedDatasets: plan.expectedDatasets,
-        afterTerminal: ({ terminalStatus }) => terminalStatus === 'succeeded'
-          ? service.acknowledgeRunByTaskRun(taskRunId)
-          : null,
+        afterTerminal: terminalRouteRegistry.createAfterTerminal(preFundRunTerminalRoute(taskRunId)),
         afterTerminalIntent: preFundRunTerminalRoute(taskRunId)
       };
     },
@@ -18760,7 +18731,7 @@ function registerPreFundReconciliationHandlers() {
 }
 
 function assertDuplicateInboundMatchStartupAvailable() {
-  if (!duplicateStartupRecoveryReady || !recoveryHoldGate) {
+  if (!applicationRecoveryCoordinator?.snapshot().platformScanCompleted || !recoveryHoldGate) {
     throw Object.assign(new Error('重复入金启动恢复门禁尚未完成'), {
       code: 'DUPLICATE_STARTUP_RECOVERY_UNAVAILABLE'
     });
@@ -18927,619 +18898,6 @@ function registerDuplicateInboundMatchHandlers() {
   });
 }
 
-function readPositionPendingOperation() {
-  const raw = database && database.db
-    ? database.getSetting(POSITION_SIDE_DB_PENDING_SETTING)
-    : '';
-  if (!raw) return null;
-  let pending;
-  try {
-    pending = JSON.parse(raw);
-  } catch (_error) {
-    throw new Error('主库中的平盘待完成操作记录损坏');
-  }
-  if (!pending || typeof pending !== 'object' || Array.isArray(pending)) {
-    throw new Error('主库中的平盘待完成操作记录格式非法');
-  }
-  return pending;
-}
-
-function positionPendingOwner(pending) {
-  if (pending && pending.owner) {
-    return freezePersistedTaskOwner(pending.owner, { required: true });
-  }
-  if (pending && pending.batchContext) {
-    return freezePersistedTaskOwner({
-      version: 1,
-      kind: 'file-batch',
-      batchContext: pending.batchContext
-    }, { required: true });
-  }
-  throw new Error('平盘 pending 缺少持久 owner');
-}
-
-function samePositionPendingOwner(left, right) {
-  if (!left || !right || left.kind !== right.kind) return false;
-  const leftContext = left.kind === 'operation'
-    ? left.operationContext
-    : left.batchContext;
-  const rightContext = right.kind === 'operation'
-    ? right.operationContext
-    : right.batchContext;
-  return Object.keys(leftContext).every((key) => leftContext[key] === rightContext[key]);
-}
-
-function writePositionPendingOperation(pending, operationToken) {
-  const current = readPositionPendingOperation();
-  if (!current || current.operationToken !== operationToken) {
-    throw new Error('平盘待完成操作所有权已变化');
-  }
-  database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, JSON.stringify(pending));
-}
-
-function capturePositionArchiveFileSnapshot(filePath) {
-  try {
-    return sourceSnapshotFromStat(fs.statSync(filePath, { bigint: true }));
-  } catch (_error) {
-    return null;
-  }
-}
-
-function recordPositionArchiveIntentFiles(filePaths, role, explicitOperationToken = '') {
-  const context = positionReconciliationOperationContext.getStore();
-  const operationToken = String(
-    explicitOperationToken || (context && context.operationToken) || ''
-  ).trim();
-  if (!operationToken || !Array.isArray(filePaths) || filePaths.length === 0) return;
-  const pending = readPositionPendingOperation();
-  if (!pending || pending.operationToken !== operationToken || !pending.archiveRequired) {
-    return;
-  }
-  const seen = new Set(
-    (Array.isArray(pending.archiveFiles) ? pending.archiveFiles : []).map(
-      (file) => `${file.role || ''}\u0000${file.filePath || ''}`
-    )
-  );
-  const archiveFiles = Array.isArray(pending.archiveFiles)
-    ? pending.archiveFiles.slice()
-    : [];
-  for (const value of filePaths) {
-    const descriptor = value && typeof value === 'object' && !Array.isArray(value)
-      ? value
-      : { filePath: value };
-    const rawPath = String(descriptor.filePath || '').trim();
-    if (!rawPath) continue;
-    const filePath = path.resolve(rawPath);
-    const key = `${role}\u0000${filePath}`;
-    if (seen.has(key)) continue;
-    const archiveFile = role === 'input'
-      ? {
-          filePath,
-          role,
-          sourceType: String(descriptor.sourceType || '').trim(),
-          sourceSnapshot: descriptor.sourceSnapshot,
-          sha256: descriptor.expectedSha256 || descriptor.sha256,
-          sizeBytes: descriptor.sizeBytes,
-          artifactKey: String(descriptor.artifactKey || '').trim(),
-          sourceOperation: String(descriptor.sourceOperation || '').trim(),
-          originalName: String(descriptor.originalName || path.basename(filePath))
-        }
-      : {
-          filePath,
-          role,
-          beforeSnapshot: Object.prototype.hasOwnProperty.call(descriptor, 'beforeSnapshot')
-            ? descriptor.beforeSnapshot
-            : capturePositionArchiveFileSnapshot(filePath),
-          ...(descriptor.sourceSnapshot ? {
-            sourceSnapshot: descriptor.sourceSnapshot,
-            sha256: descriptor.expectedSha256 || descriptor.sha256,
-            sizeBytes: descriptor.sizeBytes
-          } : {}),
-          artifactKey: String(descriptor.artifactKey || '').trim(),
-          sourceOperation: String(descriptor.sourceOperation || '').trim(),
-          originalName: String(descriptor.originalName || path.basename(filePath)),
-          requiredInputPaths: descriptor.requiredInputPaths,
-          metadata: descriptor.metadata && typeof descriptor.metadata === 'object'
-            ? descriptor.metadata
-            : {}
-        };
-    const normalized = requirePositionPendingArchiveFiles({
-      archiveFiles: [archiveFile]
-    })[0];
-    seen.add(key);
-    archiveFiles.push(normalized);
-  }
-  writePositionPendingOperation({
-    ...pending,
-    archiveState: archiveFiles.length > 0 ? 'intent-recorded' : pending.archiveState,
-    archiveFiles
-  }, operationToken);
-}
-
-function recordPositionFilePlanIntent(filePlan, evidence = {}) {
-  const inputEvidence = evidence.inputs || [];
-  const outputEvidence = evidence.outputs || [];
-  recordPositionArchiveIntentFiles(filePlan.inputs.map((item, index) => ({
-    ...inputEvidence[index],
-    filePath: item.filePath,
-    role: 'input',
-    sourceSnapshot: item.sourceSnapshot,
-    artifactKey: item.artifactKey,
-    sourceOperation: item.sourceOperation,
-    originalName: item.originalName
-  })), 'input');
-  recordPositionArchiveIntentFiles(filePlan.outputs.map((item, index) => ({
-    ...outputEvidence[index],
-    filePath: item.filePath,
-    role: 'output',
-    beforeSnapshot: item.targetSnapshot.exists ? item.targetSnapshot.snapshot : null,
-    artifactKey: item.artifactKey,
-    sourceOperation: item.sourceOperation,
-    originalName: item.originalName
-  })), 'output');
-}
-
-function markPositionBusinessOutcome(result, { terminalForCurrentTask = false } = {}) {
-  const context = positionReconciliationOperationContext.getStore();
-  if (!context) return;
-  const pending = readPositionPendingOperation();
-  if (!pending || pending.operationToken !== context.operationToken) return;
-  const terminalResult = terminalForCurrentTask && result && result.archiveDeferred === true
-    ? { ...result, archiveDeferred: false }
-    : result;
-  writePositionPendingOperation({
-    ...pending,
-    businessState: positionBusinessStateForResult(terminalResult, SUCCESS_STATUSES),
-    terminalOutcome: positionTerminalOutcomeForResult(terminalResult, SUCCESS_STATUSES)
-  }, context.operationToken);
-}
-
-function persistPositionCancellationAccepted(active) {
-  const operationToken = String(active && active.operationToken || '').trim();
-  const pending = readPositionPendingOperation();
-  if (!pending || pending.operationToken !== operationToken) {
-    throw new Error('平盘取消确认时待完成操作所有权已变化');
-  }
-  const cancellation = positionCancellationAcceptedPending(
-    pending,
-    '用户取消平盘对账导入任务'
-  );
-
-  // SQLite pending 是取消 ACK 的第一份耐久真相。即使随后主进程崩溃，
-  // startup recovery 也会按原 operation/file owner 收口为 cancelled，而不是 failed。
-  writePositionPendingOperation(cancellation, operationToken);
-
-  // 同时把 cancelled 终态写入既有 Archive outbox；直接 CAS 或后续业务
-  // promise 尚未来得及返回时，仍能在下一次启动重放到同一 Task Run。
-  const center = archiveCenterService || initializeArchiveCenter();
-  center.persistTaskTerminalIntent({
-    owner: positionPendingOwner(cancellation),
-    sourceOperation: String(cancellation.channel || active.channel || 'position-reconciliation'),
-    terminalOutcome: {
-      ...cancellation.terminalOutcome,
-      metadata: { positionCancellationAccepted: true },
-      afterTerminal: {
-        route: 'position-reconciliation',
-        operationToken
-      }
-    }
-  });
-
-  return archiveTaskLifecycle
-    ? archiveTaskLifecycle.cancelActive(
-        (context) => Boolean(
-          context.moduleId === 'position-reconciliation-process'
-          && context.taskRunId === operationToken
-        ),
-        cancellation.terminalOutcome.message
-      )
-    : null;
-}
-
-function markPositionArchiveDurable(archiveResult = {}) {
-  const context = positionReconciliationOperationContext.getStore();
-  if (!context) return;
-  const pending = readPositionPendingOperation();
-  if (!pending || pending.operationToken !== context.operationToken || !pending.archiveRequired) {
-    return;
-  }
-  writePositionPendingOperation({
-    ...pending,
-    archiveState: 'durable',
-    archiveReference: archiveResult.batchId || archiveResult.outboxId || ''
-  }, context.operationToken);
-}
-
-function markPositionArchiveIncomplete(archiveResult = {}) {
-  const context = positionReconciliationOperationContext.getStore();
-  if (!context) return;
-  const pending = readPositionPendingOperation();
-  if (!pending || pending.operationToken !== context.operationToken || !pending.archiveRequired) {
-    return;
-  }
-  writePositionPendingOperation({
-    ...pending,
-    archiveState: 'incomplete',
-    archiveWarning: archiveResult && archiveResult.warning
-      ? String(archiveResult.warning.message || '')
-      : '存档未形成持久重试记录'
-  }, context.operationToken);
-}
-
-function readDeletedPositionArchiveResult(pending) {
-  try {
-    const center = archiveCenterService || initializeArchiveCenter();
-    const repository = center && center.service && center.service.repository;
-    if (!repository) return null;
-    const policy = taskPolicyRegistry.get(String(pending.channel || ''));
-    const moduleId = policy && policy.scopeId;
-    if (!moduleId) return null;
-    const operationKey = `position:${pending.operationToken}:${pending.channel}`;
-    const issuance = repository.getOperationIssuance(moduleId, operationKey);
-    return issuance && issuance.deletedAt
-      ? {
-          batchId: issuance.batchId,
-          operationKey,
-          persisted: false,
-          operationStatus: 'deleted',
-          code: 'ARCHIVE_OPERATION_DELETED'
-        }
-      : null;
-  } catch (_error) {
-    return null;
-  }
-}
-
-function positionArchiveIntentEvidence(pending, currentCheckpoint) {
-  return evaluatePositionArchiveIntentEvidence(pending, currentCheckpoint, {
-    statSync: fs.statSync,
-    sourceSnapshotFromStat,
-    sourceSnapshotMatchesStat
-  });
-}
-
-function persistPositionArchiveIntentIfNeeded(
-  pending,
-  currentCheckpoint,
-  service = positionReconciliationService,
-  options = {}
-) {
-  if (!pending) return null;
-  const files = requirePositionPendingArchiveFiles(pending);
-  const archiveRequired = pending.archiveRequired === true
-    || (
-      pending.archiveRequired === undefined
-      && archiveOperationTracker
-      && archiveOperationTracker.supportsChannel(pending.channel)
-    );
-  if (!archiveRequired) return null;
-  if (pending.archiveState === 'durable') {
-    if (options.includeCleanupCandidates !== true
-        || !service
-        || typeof service.listCommittedOperationInputs !== 'function') {
-      return null;
-    }
-    const committedFiles = positionCommittedRecoveryArchiveFiles(
-      { ...pending, archiveFiles: files },
-      service.listCommittedOperationInputs(pending.operationToken)
-    );
-    const archiveResult = readDeletedPositionArchiveResult(pending);
-    return {
-      archiveResult,
-      cleanupInputPaths: positionRecoveryCleanupInputPaths(
-        { ...pending, archiveFiles: files },
-        committedFiles,
-        archiveResult
-      )
-    };
-  }
-  const evidence = positionArchiveIntentEvidence(pending, currentCheckpoint);
-  if (!evidence.requiresPersistence) {
-    return options.includeCleanupCandidates === true
-      ? {
-          archiveResult: null,
-          cleanupInputPaths: positionRecoveryCleanupInputPaths(
-            { ...pending, archiveFiles: files },
-            [],
-            null
-          )
-        }
-      : null;
-  }
-  if (!service || typeof service.listCommittedOperationInputs !== 'function') {
-    throw new Error('平盘业务已提交但无法读取文件级提交凭证，已停止恢复');
-  }
-  const owner = positionPendingOwner(pending);
-  const rawBatch = owner.kind === 'file-batch'
-    && archiveCenterService
-    && archiveCenterService.service
-    && archiveCenterService.service.repository.getBatch(owner.batchContext.batchId);
-  const manifestOwned = Boolean(
-    rawBatch && rawBatch.metadata && rawBatch.metadata._fileManifest
-  );
-  if (manifestOwned) {
-    const archiveResult = archiveCenterService.persistTaskTerminalIntent({
-      owner,
-      sourceOperation: String(pending.channel || ''),
-      settleFiles: files.map((file) => ({
-        artifactKey: file.artifactKey,
-        ...(file.sha256 ? {
-          expectedSha256: file.sha256,
-          expectedSizeBytes: file.sizeBytes
-        } : {})
-      })),
-      terminalOutcome: positionOutboxTerminalIntent(pending)
-    });
-    return options.includeCleanupCandidates === true
-      ? { archiveResult, cleanupInputPaths: [] }
-      : archiveResult;
-  }
-  const committedInputs = service.listCommittedOperationInputs(pending.operationToken);
-  const committedFiles = positionCommittedRecoveryArchiveFiles(
-    { ...pending, archiveFiles: files },
-    committedInputs
-  );
-  if (committedFiles.length === 0 || !archiveCenterService
-      || typeof archiveCenterService.persistAppendIntent !== 'function') {
-    throw new Error('平盘业务已提交但存档意图不完整，已停止恢复以避免审计文件丢失');
-  }
-  assertPositionRecoveryInputsUnchanged(
-    { archiveFiles: committedFiles },
-    assertStagedInputUnchanged
-  );
-  const recoveryFiles = positionRecoveryArchiveFiles(
-    { archiveFiles: committedFiles },
-    { captureOutputSnapshot: capturePositionArchiveFileSnapshot }
-  );
-  if (owner.kind !== 'file-batch') {
-    throw new Error('平盘业务已提交但缺少原任务 batchContext，禁止建立幽灵批次');
-  }
-  const archiveResult = archiveCenterService.persistAppendIntent({
-    batchContext: owner.batchContext,
-    sourceOperation: String(pending.channel || ''),
-    metadata: { positionOperationToken: pending.operationToken, recovered: true },
-    files: recoveryFiles,
-    terminalOutcome: positionOutboxTerminalIntent(pending)
-  });
-  return options.includeCleanupCandidates === true
-    ? {
-        archiveResult,
-        cleanupInputPaths: positionRecoveryCleanupInputPaths(
-          { ...pending, archiveFiles: files },
-          committedFiles,
-          archiveResult
-        )
-      }
-    : archiveResult;
-}
-
-function recoverPositionArchiveIntent(pending, currentCheckpoint, service) {
-  return persistPositionArchiveIntentIfNeeded(
-    pending,
-    currentCheckpoint,
-    service,
-    { includeCleanupCandidates: true }
-  );
-}
-
-function clearPositionPendingOperation(operationToken) {
-  const pending = readPositionPendingOperation();
-  if (!pending || pending.operationToken !== operationToken) {
-    throw new Error('平盘待完成操作所有权已变化，禁止清理其他操作记录');
-  }
-  database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
-}
-
-async function finalizePositionPendingAfterTaskTerminal({ context }) {
-  const pending = readPositionPendingOperation();
-  if (!pending) return;
-  const owner = positionPendingOwner(pending);
-  const ownerMatches = owner.kind === 'operation'
-    ? owner.operationContext.taskRunId === context.taskRunId
-    : owner.batchContext.taskRunId === context.taskRunId
-      && owner.batchContext.batchId === context.batchId;
-  if (pending.operationToken !== context.taskRunId || !ownerMatches) {
-    throw new Error('平盘任务终态后的 pending 所有权已变化');
-  }
-  if (pending.archiveRequired === true
-      && owner.kind === 'file-batch'
-      && pending.archiveState !== 'durable') {
-    writePositionPendingOperation({
-      ...pending,
-      archiveState: 'durable',
-      archiveReference: context.batchId
-    }, pending.operationToken);
-  }
-  const terminalPending = readPositionPendingOperation();
-  if (terminalPending.archiveRequired === true && terminalPending.archiveState !== 'durable') {
-    // 存档尚未完成时保留 pending；后续启动恢复只能追加原 batch。
-    return;
-  }
-  clearPositionPendingOperation(terminalPending.operationToken);
-}
-
-async function finalizeRecoveredPositionPending(operationToken, options = {}) {
-  const pending = readPositionPendingOperation();
-  if (!pending || pending.operationToken !== operationToken) {
-    throw new Error('平盘恢复 pending 所有权已变化');
-  }
-  if (options.archiveDurable === true && pending.archiveRequired === true
-      && pending.archiveState !== 'durable') {
-    writePositionPendingOperation({
-      ...pending,
-      archiveState: 'durable',
-      archiveReference: options.archiveReference || ''
-    }, operationToken);
-  }
-  const current = readPositionPendingOperation();
-  const deletedArchiveResult = options.archiveResult
-    && options.archiveResult.code === 'ARCHIVE_OPERATION_DELETED'
-      ? options.archiveResult
-      : readDeletedPositionArchiveResult(current);
-  if (current.archiveRequired === true && current.archiveState !== 'durable'
-      && !deletedArchiveResult) {
-    throw new Error('平盘恢复存档尚未完成，禁止终结原任务或清理 pending');
-  }
-  const center = archiveCenterService || initializeArchiveCenter();
-  if (!center || !center.service) throw new Error('平盘恢复缺少存档服务');
-  if (!deletedArchiveResult && options.terminalSettled !== true) {
-    await settlePositionRecoveredTask({
-      pending: current,
-      archiveService: center.service
-    });
-  }
-  if (!positionReconciliationService) {
-    throw new Error('平盘侧库尚未初始化，禁止提前清理恢复 pending');
-  }
-  if (typeof positionReconciliationService.listCommittedOperationInputs !== 'function') {
-    throw new Error('平盘侧库无法读取当前操作的文件级提交凭证，禁止清理恢复 pending');
-  }
-  const currentOwner = positionPendingOwner(current);
-  const currentBatch = currentOwner.kind === 'file-batch'
-    ? center.service.repository.getBatch(currentOwner.batchContext.batchId)
-    : null;
-  const cleanupInputPaths = currentBatch
-    && currentBatch.metadata
-    && currentBatch.metadata._fileManifest
-      ? []
-      : positionRecoveryCleanupInputPaths(
-          current,
-          positionCommittedRecoveryArchiveFiles(
-            current,
-            positionReconciliationService.listCommittedOperationInputs(operationToken)
-          ),
-          deletedArchiveResult
-        );
-  syncPositionReconciliationCheckpoint();
-  database.setSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, '');
-  clearPositionPendingOperation(operationToken);
-  try {
-    await cleanupPositionArchiveSourcePaths(cleanupInputPaths);
-  } catch (_error) {
-    // 原任务、checkpoint 与 pending 已完成收口；暂存清理失败留待后续启动回收。
-  }
-}
-
-function positionOutboxTerminalIntent(pending) {
-  const outcome = positionRecoveryTerminalOutcome(pending);
-  const operationToken = String(pending && pending.operationToken || '').trim();
-  return {
-    ...outcome,
-    metadata: {
-      recoveredPositionOperation: true,
-      positionOperationToken: operationToken,
-      positionTerminalOutcome: outcome.taskStatus
-    },
-    afterTerminal: {
-      route: 'position-reconciliation',
-      operationToken
-    }
-  };
-}
-
-function resolvePositionOutboxTerminalIntent(record) {
-  const payload = record && record.payload;
-  const targetBatchId = Number(payload && payload.targetBatchId);
-  const operationToken = String(
-    payload && payload.metadata && payload.metadata.positionOperationToken || ''
-  ).trim();
-  if (!Number.isSafeInteger(targetBatchId) || targetBatchId < 1 || !operationToken) return null;
-  const pending = readPositionPendingOperation();
-  if (!pending || pending.operationToken !== operationToken) return null;
-  const owner = positionPendingOwner(pending);
-  if (owner.kind !== 'file-batch' || Number(owner.batchContext.batchId) !== targetBatchId) {
-    throw new Error('平盘 outbox 目标批次与 pending 原任务不一致');
-  }
-  return positionOutboxTerminalIntent(pending);
-}
-
-async function finalizePositionTerminalIntent({ route, record, created }) {
-  if (!route || route.route !== 'position-reconciliation') {
-    throw new Error(`不支持的任务终态收口路由：${route && route.route || '<empty>'}`);
-  }
-  const payload = record && record.payload;
-  const targetBatchId = Number(payload && payload.targetBatchId);
-  const recordOwner = payload && payload.owner
-    ? freezePersistedTaskOwner(payload.owner, { required: true })
-    : null;
-  const operationToken = String(route.operationToken || '').trim();
-  const recordOperationToken = String(
-    payload && payload.metadata && payload.metadata.positionOperationToken || ''
-  ).trim();
-  if (!operationToken || recordOperationToken !== operationToken) {
-    throw new Error('平盘任务终态路由与 outbox 身份不一致');
-  }
-  const pending = readPositionPendingOperation();
-  if (!pending) return;
-  const pendingOwner = positionPendingOwner(pending);
-  if (pending.operationToken !== operationToken) {
-    throw new Error('平盘 outbox 目标批次与 pending 原任务不一致');
-  }
-  if (recordOwner) {
-    if (!samePositionPendingOwner(recordOwner, pendingOwner)
-        || (recordOwner.kind === 'operation'
-          ? recordOwner.operationContext.taskRunId !== operationToken
-          : recordOwner.batchContext.taskRunId !== operationToken
-            || recordOwner.batchContext.batchId !== targetBatchId)) {
-      throw new Error('平盘 outbox owner 与 pending 原任务不一致');
-    }
-  } else if (pendingOwner.kind !== 'file-batch'
-      || !Number.isSafeInteger(targetBatchId)
-      || targetBatchId < 1
-      || pendingOwner.batchContext.batchId !== targetBatchId) {
-    throw new Error('平盘 outbox 目标批次与 pending 原任务不一致');
-  }
-  await finalizeRecoveredPositionPending(operationToken, {
-    archiveDurable: true,
-    archiveReference: recordOwner && recordOwner.kind === 'operation'
-      ? recordOwner.operationContext.taskRunId
-      : created && created.batch && created.batch.id || targetBatchId,
-    terminalSettled: true
-  });
-}
-
-async function finalizeArchiveTerminalIntent(payload) {
-  if (payload && payload.route && payload.route.route === 'pending-run') {
-    return finalizePendingTerminalIntent({
-      ...payload,
-      db: pendingDb
-    });
-  }
-  if (payload && payload.route && payload.route.route === 'biz-op-run') {
-    const mode = legacyMode(database.db);
-    if (mode === 'ACTIVE' || ['LEGACY_DB_CLEARED', 'LEGACY_FILES_RECLAIMED'].includes(bizOpV327Module?.activation.status().phase)) throw retiredError();
-    return withLegacyRecovery(path.dirname(database.dbPath), () => bizOpReconRunData.finalizeRunTerminalIntent({
-      ...payload,
-      userDataDir: path.dirname(database.dbPath),
-      mainDb: database.db
-    }));
-  }
-  if (payload && payload.route && payload.route.route === 'pre-fund-run') {
-    return finalizePreFundTerminalIntent({
-      ...payload,
-      service: getPreFundReconciliationService()
-    });
-  }
-  return finalizePositionTerminalIntent(payload);
-}
-
-function persistCurrentPositionArchiveIntentIfNeeded() {
-  const context = positionReconciliationOperationContext.getStore();
-  if (!context) return null;
-  const pending = readPositionPendingOperation();
-  if (!pending || pending.operationToken !== context.operationToken) {
-    throw new Error('平盘待完成操作所有权已变化，无法登记存档恢复任务');
-  }
-  const currentCheckpoint = positionReconciliationService
-    ? positionReconciliationService.persistenceCheckpoint()
-    : pending.baseCheckpoint || {};
-  return persistPositionArchiveIntentIfNeeded(
-    pending,
-    currentCheckpoint,
-    positionReconciliationService
-  );
-}
-
 async function resolvePositionAnomalyReportReference(report = {}) {
   const stagedPath = String(report.reportFilePath || '').trim();
   if (stagedPath) {
@@ -19594,9 +18952,7 @@ function getPositionReconciliationService() {
     const expectedSideDbCheckpoint = database.getSetting(
       POSITION_SIDE_DB_CHECKPOINT_SETTING
     );
-    const pendingSideDbOperation = database.getSetting(
-      POSITION_SIDE_DB_PENDING_SETTING
-    );
+    const pendingSideDbOperation = positionTaskOwner.readPositionPendingRaw();
     let initialSideDbCheckpoint = null;
     if (!expectedSideDbCheckpoint) {
       initialSideDbCheckpoint = database.getSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING);
@@ -19619,13 +18975,12 @@ function getPositionReconciliationService() {
         expectedPendingOperation: pendingSideDbOperation,
         initialSideDbCheckpoint,
         operationTokenProvider: () => {
-          const operation = positionReconciliationOperationContext.getStore();
-          return operation && operation.operationToken;
+          return positionTaskOwner.currentOperationToken();
         },
         recordArchiveIntent: (filePaths, role) => {
-          recordPositionArchiveIntentFiles(filePaths, role);
+          positionTaskOwner.recordPositionArchiveIntentFiles(filePaths, role);
         },
-        protectedStagingPaths: positionArchivePersistentStagingPaths,
+        protectedStagingPaths: positionTaskOwner.positionArchivePersistentStagingPaths,
         positionImportEngine: 'streaming',
         resolveAnomalyReport: resolvePositionAnomalyReportReference,
         onImportProgress: (progress) => {
@@ -19652,27 +19007,27 @@ function getPositionReconciliationService() {
             preflightReady,
             currentCheckpoint: service.persistenceCheckpoint(),
             schemaFingerprint: schema.fingerprint,
-            readPending: readPositionPendingOperation,
-            writePending: writePositionPendingOperation,
-            recordArchiveIntentFiles: recordPositionArchiveIntentFiles
+            readPending: positionTaskOwner.readPositionPendingOperation,
+            writePending: positionTaskOwner.writePositionPendingOperation,
+            recordArchiveIntentFiles: positionTaskOwner.recordPositionArchiveIntentFiles
           });
         }
       });
       const checkpoint = service.persistenceCheckpoint();
-      const recovery = recoverPositionArchiveIntent(
-        pendingSideDbOperation ? readPositionPendingOperation() : null,
+      const recovery = positionTaskOwner.recoverPositionArchiveIntent(
+        pendingSideDbOperation ? positionTaskOwner.readPositionPendingOperation() : null,
         checkpoint,
         service
       );
       positionReconciliationService = service;
       if (pendingSideDbOperation) {
-        const pending = readPositionPendingOperation();
+        const pending = positionTaskOwner.readPositionPendingOperation();
         const operationToken = String(pending && pending.operationToken || '');
         const archiveResult = recovery && recovery.archiveResult;
         const recoveryTask = archiveResult
           && archiveResult.code !== 'ARCHIVE_OPERATION_DELETED'
           ? (archiveCenterService || initializeArchiveCenter()).flushOutbox()
-          : finalizeRecoveredPositionPending(operationToken, {
+          : positionTaskOwner.finalizeRecoveredPositionPending(operationToken, {
               archiveDurable: true,
               archiveReference: archiveResult && archiveResult.batchId
                 || pending && pending.archiveReference
@@ -19681,7 +19036,7 @@ function getPositionReconciliationService() {
             });
         positionPendingRecoveryPromise = Promise.resolve(recoveryTask)
           .then((result) => {
-            const unresolved = readPositionPendingOperation();
+            const unresolved = positionTaskOwner.readPositionPendingOperation();
             if (unresolved && unresolved.operationToken === operationToken) {
               throw new Error('平盘原任务恢复尚未完成，pending 已保留');
             }
@@ -19699,12 +19054,7 @@ function getPositionReconciliationService() {
           });
         trackArchiveOperationPromise(positionPendingRecoveryPromise);
       } else {
-        database.setSetting(
-          POSITION_SIDE_DB_CHECKPOINT_SETTING,
-          JSON.stringify(checkpoint)
-        );
-        database.setSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, '');
-        database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
+        positionTaskOwner.completePositionServiceInitialization(checkpoint);
       }
       const initializationResult = service.store
         && typeof service.store.initializationResult === 'function'
@@ -19734,79 +19084,6 @@ function getPositionReconciliationService() {
     }
   }
   return positionReconciliationService;
-}
-
-function syncPositionReconciliationCheckpoint() {
-  if (!database || !database.db || !positionReconciliationService) return;
-  database.setSetting(
-    POSITION_SIDE_DB_CHECKPOINT_SETTING,
-    JSON.stringify(positionReconciliationService.persistenceCheckpoint())
-  );
-}
-
-async function runPositionReconciliationOperation(channel, operation, options = {}) {
-  if (positionReconciliationOperationActive) {
-    return {
-      status: 'busy',
-      code: 'position-operation-busy',
-      message: '平盘对账正在完成上一项操作，请稍后重试'
-    };
-  }
-  let service;
-  let baseCheckpoint;
-  const operationToken = String(options.operationToken || randomUUID());
-  positionReconciliationOperationActive = { operationToken, channel };
-  try {
-    service = getPositionReconciliationService();
-    const unresolvedPending = database.getSetting(POSITION_SIDE_DB_PENDING_SETTING);
-    if (unresolvedPending) {
-      throw new Error('上一项平盘对账操作的 checkpoint 尚未完成同步，请重启软件恢复后再试');
-    }
-    baseCheckpoint = service.persistenceCheckpoint();
-    const archiveRequired = Boolean(
-      archiveOperationTracker && archiveOperationTracker.supportsChannel(channel)
-    );
-    return await runPositionOperationLifecycle({
-      operationToken,
-      pending: {
-        operationToken,
-        channel,
-        owner: options.operationContext
-          ? { version: 1, kind: 'operation', operationContext: options.operationContext }
-          : { version: 1, kind: 'file-batch', batchContext: options.batchContext },
-        baseCheckpoint,
-        archiveRequired,
-        archiveState: archiveRequired ? 'awaiting-intent' : 'not-required',
-        businessState: 'running',
-        terminalOutcome: null,
-        archiveFiles: []
-      },
-      writeInitialPending: (pending) => {
-        database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, JSON.stringify(pending));
-      },
-      runInContext: (task) => positionReconciliationOperationContext.run(
-        { operationToken },
-        task
-      ),
-      operation,
-      readPending: () => JSON.parse(
-        database.getSetting(POSITION_SIDE_DB_PENDING_SETTING) || 'null'
-      ),
-      syncCheckpoint: syncPositionReconciliationCheckpoint,
-      clearPending: () => {
-        database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
-      },
-      failureResult: positionReconciliationFailureResult,
-      deferPendingClear: true
-    });
-  } catch (error) {
-    return positionReconciliationFailureResult(error);
-  } finally {
-    if (positionReconciliationOperationActive
-        && positionReconciliationOperationActive.operationToken === operationToken) {
-      positionReconciliationOperationActive = null;
-    }
-  }
 }
 
 async function withPositionReconciliationLock(operation, task) {
@@ -20042,10 +19319,10 @@ function registerPositionReconciliationHandlers() {
 
   ipcMain.handle('position-reconciliation:import:cancel', async (_event, jobId) => {
     try {
-      const active = positionReconciliationOperationActive;
+      const active = positionTaskOwner.activeOperation();
       return getPositionReconciliationService().cancelActiveImport(
         jobId,
-        () => (active ? persistPositionCancellationAccepted(active) : null)
+        () => (active ? positionTaskOwner.persistPositionCancellationAccepted(active) : null)
       );
     } catch (error) {
       return positionReconciliationFailureResult(error);
@@ -20603,7 +19880,7 @@ async function publishToolboxArtifacts(
       await recoverToolboxPublicationsIntoArchive({
         userDataDir: app.getPath('userData'),
         archiveCenter: archiveCenterService,
-        recoverPublications: recoverToolboxPublicationsAsync,
+        recoverPublications: recoverArchivePublications,
         taskIds: [publication.taskId]
       });
     }
@@ -20635,7 +19912,7 @@ async function acknowledgeToolboxPublicationReceipts(taskIds) {
   return acknowledgeToolboxPublicationReceiptsIntoArchive({
     userDataDir: app.getPath('userData'),
     archiveCenter: archiveCenterService,
-    recoverPublications: recoverToolboxPublicationsAsync,
+    recoverPublications: recoverArchivePublications,
     taskIds
   });
 }
@@ -20771,7 +20048,7 @@ async function recoverToolboxPublicationsAtStartup() {
     const result = await recoverToolboxPublicationsIntoArchive({
       userDataDir: app.getPath('userData'),
       archiveCenter: archiveCenterService,
-      recoverPublications: (options) => bizOpV327Module.publication.recoverOtherOwners(options)
+      recoverPublications: recoverArchivePublications
     });
     const recovered = Array.isArray(result.recovered) ? result.recovered : [];
     if (recovered.length > 0) {
@@ -21674,112 +20951,6 @@ async function settleVccOutputPublication(prepared, taskContext, publication, ev
   }
 }
 
-function positionArchiveStagingRoot() {
-  if (!database || !database.dbPath) return '';
-  return path.resolve(
-    path.dirname(database.dbPath),
-    'run-data',
-    'position-reconciliation',
-    'import-staging'
-  );
-}
-
-async function cleanupPositionArchiveStagingDirectories(targets) {
-  if (!Array.isArray(targets) || targets.length === 0) return;
-  const root = positionArchiveStagingRoot();
-  if (!root) return;
-  for (const value of targets) {
-    const target = path.resolve(String(value || ''));
-    if (target === root || !target.startsWith(`${root}${path.sep}`)) continue;
-    try {
-      await fs.promises.rm(target, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 100
-      });
-      const batchRoot = path.dirname(target);
-      if (batchRoot !== root && batchRoot.startsWith(`${root}${path.sep}`)) {
-        const entries = await fs.promises.readdir(batchRoot);
-        if (entries.length === 0) {
-          await fs.promises.rmdir(batchRoot);
-        }
-      }
-    } catch (_error) {
-      // 成功存档后的临时副本清理失败留待下次启动回收。
-    }
-  }
-}
-
-function positionArchivePersistentStagingPaths() {
-  if (!archiveCenterService
-      || typeof archiveCenterService.listUnresolvedSourcePaths !== 'function') {
-    return null;
-  }
-  try {
-    return positionPersistentStagingProtectionPaths(
-      archiveCenterService.listUnresolvedSourcePaths(),
-      readPositionPendingOperation()
-    );
-  } catch (_error) {
-    return null;
-  }
-}
-
-function positionArchiveProtectedStagingPaths() {
-  let protectedPaths = positionArchivePersistentStagingPaths();
-  if (!protectedPaths) return null;
-  try {
-    if (positionReconciliationService
-        && typeof positionReconciliationService.activeImportStagingPaths === 'function') {
-      const activePaths = positionReconciliationService.activeImportStagingPaths();
-      if (!Array.isArray(activePaths)) return null;
-      protectedPaths = protectedPaths.concat(activePaths);
-    }
-  } catch (_error) {
-    return null;
-  }
-  return protectedPaths;
-}
-
-async function cleanupPositionArchiveSourcePaths(sourcePaths) {
-  const root = positionArchiveStagingRoot();
-  if (!root) return;
-  const directories = [];
-  const jobRoots = [];
-  for (const value of Array.isArray(sourcePaths) ? sourcePaths : []) {
-    const sourcePath = path.resolve(String(value || ''));
-    const relative = path.relative(root, sourcePath);
-    const parts = relative.split(path.sep).filter(Boolean);
-    if (relative === '..'
-        || relative.startsWith(`..${path.sep}`)
-        || path.isAbsolute(relative)
-        || parts.length < 3) {
-      continue;
-    }
-    directories.push(path.dirname(sourcePath));
-    jobRoots.push(path.join(root, parts[0]));
-  }
-  const protectedPaths = positionArchiveProtectedStagingPaths();
-  if (!protectedPaths) return;
-  await cleanupPositionArchiveStagingDirectories(
-    filterStagingPathsWithoutProtectedSources(
-      directories.concat(jobRoots),
-      protectedPaths
-    )
-  );
-}
-
-async function cleanupPositionArchiveStaging(runtime) {
-  const targets = runtime && Array.isArray(runtime.cleanupPaths) ? runtime.cleanupPaths : [];
-  if (targets.length === 0) return;
-  const protectedPaths = positionArchiveProtectedStagingPaths();
-  if (!protectedPaths) return;
-  await cleanupPositionArchiveStagingDirectories(
-    filterStagingPathsWithoutProtectedSources(targets, protectedPaths)
-  );
-}
-
 function reportArchiveFailure(warning) {
   const message = warning && warning.message ? warning.message : '存档副本写入失败';
   appendActivityLogEntry({
@@ -21840,6 +21011,18 @@ async function resolveTaskFlowPlan(policy, invocation) {
   };
 }
 
+function reportPreparedResourceCleanupFailure({ originalError, cleanupError, enteredLifecycle }) {
+  appendActivityLogEntry({
+    level: 'error', source: 'main', domain: 'archive',
+    message: '任务准备资源清理失败，保留资源等待诊断',
+    details: [
+      `已进入生命周期：${enteredLifecycle}`,
+      `原错误：${originalError && originalError.code || ''} ${originalError && originalError.message || ''}`,
+      `清理错误：${cleanupError && cleanupError.code || ''} ${cleanupError && cleanupError.message || ''}`
+    ]
+  });
+}
+
 function trackArchiveOperationPromise(promise) {
   const previous = archiveOperationTail;
   archiveOperationTail = Promise.allSettled([previous, promise]).then(() => undefined);
@@ -21851,281 +21034,118 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
   const dialogContext = { dialogSelections: [], batchContext: null, phase: 'prepare' };
   return archiveOperationContext.run(dialogContext, async () => {
     const policy = taskPolicyRegistry.get(meta.channel);
-    if (!policy) {
-      throw new Error(`未登记 task policy：${meta.channel}`);
-    }
+    if (!policy) throw new Error(`未登记 task policy：${meta.channel}`);
     if (policy.batchPolicy === 'exclude') {
       throw new Error(`受控业务 helper 不得执行 exclude policy：${meta.channel}`);
     }
     if (!['reserve', 'no-file'].includes(policy.batchPolicy)) {
       throw new Error(`不支持的 task batch policy：${meta.channel}`);
     }
-    // 第一次 gate 在 picker/preview/preparation 前执行，避免已知 Hold 下仍进入
-    // 任何可能持有资源的业务准备流程。
+    // 已知 Hold 在 picker/prepare 前拒绝；prepare 自身负责取消和失败时的资源。
     assertTaskPolicyNotHeld(policy, null);
-    // picker / preview / danger confirmation 必须全部在 BOR.begin 和 reserve 之前完成。
     const prepared = await prepareIpcTaskInvocation(contract, event, args);
-    dialogContext.phase = 'execute';
     if (!prepared.proceed) return prepared.result;
-
-    const effectiveArgs = prepared.args;
-    const executeBusiness = (taskContext) => runWithStatementConfirmedSourceSnapshots(
-      meta.channel,
-      taskContext,
-      () => executeIpcTaskInvocation(
-        contract,
-        event,
-        prepared,
-        effectiveArgs,
-        taskContext
-      )
-    );
-    // 第二次 gate 关闭 preparation 期间新建 Hold 的窗口。
-    assertTaskPolicyNotHeld(policy, prepared);
-
-    const center = archiveCenterService || initializeArchiveCenter();
-    if (!center || !archiveTaskLifecycle) {
-      if (typeof prepared.onAbandon === 'function') await prepared.onAbandon();
-      return {
-        status: 'failed',
-        code: 'ARCHIVE_TASK_LIFECYCLE_UNAVAILABLE',
-        message: '存档中心无法预留任务批次，业务未开始'
-      };
-    }
-
-    const invocation = {
-      args: effectiveArgs,
-      prepared,
-      resolveFlowEvidence: (kind) => resolveArchiveFlowEvidence(kind, effectiveArgs)
-    };
-    const isPositionOperation = meta.channel.startsWith('position-reconciliation:');
-    const positionOperationToken = isPositionOperation ? randomUUID() : '';
-
-    if (policy.batchPolicy === 'no-file') {
-      const operationPromise = runWithPreparedResourceCleanup(prepared, (markExecuteStarted) => (
-        archiveTaskLifecycle.runOperationOnly({
-          meta,
-          policy,
-          args: effectiveArgs,
-          prepared,
-          lineageIntents: prepared.lineageIntents,
-          flowPlanResolver: prepared.flowPlan
-            ? () => prepared.flowPlan
-            : () => resolveTaskFlowPlan(policy, invocation),
-          taskRunId: prepared.taskRunId || positionOperationToken || undefined,
-          operationKey: prepared.operationKey || (positionOperationToken
-            ? `position:${positionOperationToken}:${meta.channel}`
-            : undefined),
-          resultClassifier: policy.resultClassifier,
-          resultMetadataResolver: typeof policy.resultMetadataResolver === 'function'
-            ? (result, context, terminal) => policy.resultMetadataResolver(
-                result,
-                context,
-                { ...terminal, invocation }
-              )
-            : null,
-          resultFlowIdentities: typeof policy.resultFlowIdentities === 'function'
-            ? (result, context) => policy.resultFlowIdentities(result, context, invocation)
-            : null,
-          afterTerminal: isPositionOperation
-            ? composePositionTerminalSettlement(
-                finalizePositionPendingAfterTaskTerminal,
-                typeof prepared.afterTerminal === 'function' ? prepared.afterTerminal : null
-              )
-            : (typeof prepared.afterTerminal === 'function' ? prepared.afterTerminal : null),
-          afterTerminalIntent: isPositionOperation
-            ? { route: 'position-reconciliation', operationToken: positionOperationToken }
-            : (prepared.afterTerminalIntent || null),
-          beforeStart: async (operationContext) => {
-            assertTaskPolicyNotHeld(policy, prepared);
-            // 无模块 evidence 时仍需返回生命周期可合并的对象，不能用 null。
-            return typeof prepared.beforeStart === 'function'
-              ? prepared.beforeStart(operationContext)
-              : {};
-          },
-          execute: async (operationContext, controls) => {
-            const taskContext = createIpcTaskContext(operationContext, controls);
-            return executeAfterPositionAdmission({
-              isPositionOperation,
-              markExecuteStarted,
-              execute: () => executeBusiness(taskContext),
-              admitPosition: (operation) => runPositionReconciliationOperation(
-                meta.channel,
-                operation,
-                { operationToken: positionOperationToken, operationContext }
-              )
-            });
-          }
-        })
-      ));
-      return trackArchiveOperationPromise(operationPromise);
-    }
-
-    const useLegacyExistingBatchRecovery = prepared.legacyExistingBatchRecovery === true;
-    const runFileLifecycle = !useLegacyExistingBatchRecovery
-      ? (policy.allocation === 'deferred'
-          ? archiveTaskLifecycle.runDeferredFileTask.bind(archiveTaskLifecycle)
-          : archiveTaskLifecycle.runFileTask.bind(archiveTaskLifecycle))
-      : archiveTaskLifecycle.run.bind(archiveTaskLifecycle);
-    const operationPromise = runWithPreparedResourceCleanup(prepared, (markExecuteStarted) => (
-      runFileLifecycle({
-      meta,
-      policy,
-      args: effectiveArgs,
-      prepared,
-      lineageIntents: prepared.lineageIntents,
-      filePlanResolver: !useLegacyExistingBatchRecovery
-        ? ({ taskRun }) => policy.filePlanResolver({
-            channel: meta.channel,
-            args: effectiveArgs,
-            prepared,
-            taskRun
-          })
-        : null,
-      selectedPathsResolver: useLegacyExistingBatchRecovery ? () => [] : null,
-      recovery: prepared.recovery || undefined,
-      flowPlanResolver: prepared.flowPlan
-        ? () => prepared.flowPlan
-        : () => resolveTaskFlowPlan(policy, invocation),
-      taskRunId: prepared.taskRunId || positionOperationToken || undefined,
-      explicitParentRunId: prepared.explicitParentRunId || undefined,
-      operationKey: prepared.operationKey || (positionOperationToken
-        ? `position:${positionOperationToken}:${meta.channel}`
-        : undefined),
-      resultClassifier: policy.resultClassifier,
-      resultMetadataResolver: typeof policy.resultMetadataResolver === 'function'
-        ? (result, context, terminal) => policy.resultMetadataResolver(
-            result,
-            context,
-            { ...terminal, invocation }
-          )
-        : null,
-      resultFlowIdentities: typeof policy.resultFlowIdentities === 'function'
-        ? (result, context) => policy.resultFlowIdentities(result, context, invocation)
-        : null,
-      afterTerminal: isPositionOperation
-        ? composePositionTerminalSettlement(
-            finalizePositionPendingAfterTaskTerminal,
-            typeof prepared.afterTerminal === 'function' ? prepared.afterTerminal : null
-          )
-        : ['toolbox', 'vcc-financial-op'].includes(policy.scopeId)
-            && isPublicationOnlyFileTask({ taskKey: policy.taskKey, moduleId: policy.scopeId })
-            ? () => acknowledgeToolboxPublicationReceipts(
-                prepared.toolboxPublicationTaskIds || prepared.vccOutputPublicationTaskIds || []
-              )
-          : (typeof prepared.afterTerminal === 'function' ? prepared.afterTerminal : null),
-      afterTerminalIntent: isPositionOperation
-        ? { route: 'position-reconciliation', operationToken: positionOperationToken }
-        : (prepared.afterTerminalIntent || null),
-      beforeStart: async (batchContext, filePlanEvidence) => {
-        // lifecycle admission 后、任何模块 beforeStart 副作用前最终复核。
-        assertTaskPolicyNotHeld(policy, prepared);
-        const preparedEvidence = typeof prepared.beforeStart === 'function'
-          ? await prepared.beforeStart(batchContext, filePlanEvidence)
-          : null;
-        if (!useLegacyExistingBatchRecovery) return preparedEvidence || {};
+    const resourceScope = createPreparedResourceScope(prepared, {
+      reportCleanupFailure: reportPreparedResourceCleanupFailure
+    });
+    // 登记的 Promise 包含第二 gate、初始化、adapter 构造及最终 abandon。
+    return trackArchiveOperationPromise(resourceScope.run(async () => {
+      dialogContext.phase = 'execute';
+      assertTaskPolicyNotHeld(policy, prepared);
+      const center = archiveCenterService || initializeArchiveCenter();
+      if (!center || !archiveTaskLifecycle) {
         return {
-          ...(preparedEvidence || {}),
-          sourceSnapshots: captureArchiveSourceSnapshots({
-          args: [],
-          result: null,
-          selectedPaths: resolveOperationInputPaths({
-            channel: meta.channel,
-            args: effectiveArgs,
-            prepared,
-            selectedPaths: [],
-            runtime: { inputPaths: prepared.inputPaths }
-          }),
-            runtime: {}
-          })
+          status: 'failed',
+          code: 'ARCHIVE_TASK_LIFECYCLE_UNAVAILABLE',
+          message: '存档中心无法预留任务批次，业务未开始'
         };
-      },
-      runtimeResolver: null,
-      execute: async (batchContext, controls) => {
-        dialogContext.batchContext = batchContext;
-        const taskContext = createIpcTaskContext(batchContext, controls);
-        const executePositionBusiness = async () => {
-          if (!useLegacyExistingBatchRecovery) {
-            recordPositionFilePlanIntent(
-              taskContext.fileEvidence.filePlan,
-              prepared.positionArchiveEvidence
-            );
-            let result;
-            let operationError = null;
-            try {
-              result = await executeBusiness(taskContext);
-            } catch (error) {
-              operationError = error;
-            }
-            markPositionBusinessOutcome(
-              operationError ? positionReconciliationFailureResult(operationError) : result,
-              { terminalForCurrentTask: true }
-            );
-            const settled = await controls.settleArtifacts({
-              files: positionFilePlanSettlementFiles(taskContext.fileEvidence.filePlan)
-            });
-            if (settled && settled.durable === true) {
-              markPositionArchiveDurable({ batchId: batchContext.batchId });
-              await cleanupPositionArchiveStaging({
-                cleanupPaths: result && Array.isArray(result.cleanupPaths)
-                  ? result.cleanupPaths
-                  : []
-              });
-            } else {
-              markPositionArchiveIncomplete({
-                warning: {
-                  message: settled && settled.message
-                    ? settled.message
-                    : 'manifest artifact 尚未形成耐久结果'
-                }
-              });
-            }
-            if (operationError) throw operationError;
-            return result;
-          }
-          let result;
-          let operationError = null;
-          try {
-            result = await executeBusiness(taskContext);
-          } catch (error) {
-            operationError = error;
-          }
-          markPositionBusinessOutcome(operationError
-            ? positionReconciliationFailureResult(operationError)
-            : result);
-          const settled = await controls.settleArtifacts({
-            result,
-            error: operationError
-          });
-          const settledResult = await settlePositionArchiveResult({
-            result,
-            archiveTask: Promise.resolve(settled.archiveResult),
-            runtime: settled.runtime,
-            persistRecovery: persistCurrentPositionArchiveIntentIfNeeded,
-            markDurable: markPositionArchiveDurable,
-            markIncomplete: markPositionArchiveIncomplete,
-            cleanup: cleanupPositionArchiveStaging,
-            reportFailure: reportArchiveFailure
-          });
-          if (operationError) throw operationError;
-          return settledResult;
-        };
-        return executeAfterPositionAdmission({
-          isPositionOperation,
-          markExecuteStarted,
-          execute: isPositionOperation
-            ? executePositionBusiness
-            : () => executeBusiness(taskContext),
-          admitPosition: (operation) => runPositionReconciliationOperation(
-            meta.channel,
-            operation,
-            { operationToken: positionOperationToken, batchContext }
-          )
-        });
       }
-      })
-    ));
-    return trackArchiveOperationPromise(operationPromise);
+      const effectiveArgs = prepared.args;
+      const adapterInvocation = taskAdapterRegistry.resolve(policy.taskKey).createInvocation({
+        meta, policy, prepared, args: effectiveArgs
+      });
+      const invocation = {
+        args: effectiveArgs,
+        prepared,
+        resolveFlowEvidence: (kind) => resolveArchiveFlowEvidence(kind, effectiveArgs)
+      };
+      const isFileTask = policy.batchPolicy !== 'no-file';
+      const useLegacyExistingBatchRecovery = isFileTask && prepared.legacyExistingBatchRecovery === true;
+      const runLifecycle = !isFileTask
+        ? archiveTaskLifecycle.runOperationOnly.bind(archiveTaskLifecycle)
+        : useLegacyExistingBatchRecovery
+          ? archiveTaskLifecycle.run.bind(archiveTaskLifecycle)
+          : policy.allocation === 'deferred'
+            ? archiveTaskLifecycle.runDeferredFileTask.bind(archiveTaskLifecycle)
+            : archiveTaskLifecycle.runFileTask.bind(archiveTaskLifecycle);
+      const payload = {
+        meta, policy, args: effectiveArgs, prepared,
+        lineageIntents: prepared.lineageIntents,
+        taskRunId: adapterInvocation.identity.taskRunId,
+        operationKey: adapterInvocation.identity.operationKey,
+        flowPlanResolver: prepared.flowPlan
+          ? () => prepared.flowPlan
+          : () => resolveTaskFlowPlan(policy, invocation),
+        resultClassifier: policy.resultClassifier,
+        resultMetadataResolver: typeof policy.resultMetadataResolver === 'function'
+          ? (result, context, terminal) => policy.resultMetadataResolver(
+              result, context, { ...terminal, invocation }
+            )
+          : null,
+        resultFlowIdentities: typeof policy.resultFlowIdentities === 'function'
+          ? (result, context) => policy.resultFlowIdentities(result, context, invocation)
+          : null,
+        afterTerminal: adapterInvocation.afterTerminal,
+        afterTerminalIntent: adapterInvocation.afterTerminalIntent,
+        beforeStart: async (context, filePlanEvidence) => {
+          // 原第三 gate 必须先于任何领域 beforeStart 副作用。
+          assertTaskPolicyNotHeld(policy, prepared);
+          if (!isFileTask) {
+            return typeof prepared.beforeStart === 'function' ? prepared.beforeStart(context) : {};
+          }
+          const preparedEvidence = typeof prepared.beforeStart === 'function'
+            ? await prepared.beforeStart(context, filePlanEvidence)
+            : null;
+          if (!useLegacyExistingBatchRecovery) return preparedEvidence || {};
+          return {
+            ...(preparedEvidence || {}),
+            sourceSnapshots: captureArchiveSourceSnapshots({
+              args: [], result: null,
+              selectedPaths: resolveOperationInputPaths({
+                channel: meta.channel, args: effectiveArgs, prepared,
+                selectedPaths: [], runtime: { inputPaths: prepared.inputPaths }
+              }),
+              runtime: {}
+            })
+          };
+        },
+        execute: async (context, controls) => {
+          if (isFileTask) dialogContext.batchContext = context;
+          const taskContext = createIpcTaskContext(context, controls);
+          return adapterInvocation.execute({
+            taskContext, controls,
+            markExecuteStarted: resourceScope.markExecuteStarted,
+            executeBusiness: () => runWithStatementConfirmedSourceSnapshots(
+              meta.channel, taskContext,
+              () => executeIpcTaskInvocation(contract, event, prepared, effectiveArgs, taskContext)
+            )
+          });
+        }
+      };
+      if (isFileTask) Object.assign(payload, {
+        filePlanResolver: !useLegacyExistingBatchRecovery
+          ? ({ taskRun }) => policy.filePlanResolver({
+              channel: meta.channel, args: effectiveArgs, prepared, taskRun
+            })
+          : null,
+        selectedPathsResolver: useLegacyExistingBatchRecovery ? () => [] : null,
+        recovery: prepared.recovery || undefined,
+        explicitParentRunId: prepared.explicitParentRunId || undefined,
+        runtimeResolver: null
+      });
+      resourceScope.enterLifecycle();
+      return runLifecycle(payload);
+    }));
   });
 }
 
@@ -22238,7 +21258,6 @@ function registerAllIpcHandlers() {
 
 async function initializeBackgroundExecutionRecovery() {
   if (!database || !database.db) throw new Error('Recovery Coordinator 要求 Main control DB 已初始化');
-  duplicateStartupRecoveryReady = false;
   recoveryControlReadRepository = createRecoveryControlReadRepository(database.db);
   const inspectorRegistry = createInspectorRegistry();
   const providerRegistry = createSettlementRecoveryProviderRegistry();
@@ -22328,11 +21347,34 @@ async function initializeBackgroundExecutionRecovery() {
       ];
     }
   });
-  bizOpV327Module.recovery.bindPlatform(coordinator);
-  const summary = await bizOpV327Module.recovery.run({ initialPlatformOnly: true });
-  if (summary.reason && summary.reason !== 'ARCHIVE_OWNER_PHASE_REQUIRED') {
-    throw Object.assign(new Error('业务 OP 恢复预检未通过，已保留启动保护'), { code: summary.reason });
-  }
+  publicationRecoveryCoordinator = createPublicationRecoveryCoordinator({
+    userDataDir: path.dirname(database.dbPath),
+    dispatcher: getDefaultToolboxPublicationDispatcher(),
+    owners: [
+      bizOpV327Module.publication.publicationOwner,
+      createArchivePublicationOwner({ getArchiveCenter: () => archiveCenterService })
+    ]
+  });
+  publicationRecoveryCoordinator.bindDispatcherAuthority();
+  bizOpV327Module.publication.bindRecovery(publicationRecoveryCoordinator.forOwner('biz-op-v327'));
+  applicationRecoveryCoordinator = createApplicationRecoveryComposition({
+    platform: coordinator,
+    bizOpModule: bizOpV327Module,
+    recoverPendingRuns: recoverPendingRunsBeforeInterruptedSweep,
+    recoverLegacyBizOpRuns: recoverBizOpRunsBeforeInterruptedSweep,
+    recoverPreFundRuns: recoverPreFundRunsBeforeInterruptedSweep,
+    recoverPosition: recoverPositionPendingBeforeInterruptedSweep,
+    recoverToolboxVccPublications: recoverToolboxPublicationsAtStartup,
+    recoverVccImportTerminal: recoverVccImportBeforeInterruptedSweep,
+    reconcileVccImportLineage: reconcileVccImportArchiveBeforeRetentionCleanup,
+    onBizOpRecovery(result) {
+      appendActivityLogEntry({ level: result.ready ? 'info' : 'warning', source: 'main',
+        domain: 'biz-op-v327-recovery', message: result.ready ? '业务 OP 恢复完成' : '业务 OP 保留恢复保护',
+        details: [JSON.stringify(result)] });
+    }
+  });
+  const preflight = await applicationRecoveryCoordinator.preflight();
+  const summary = preflight.participantResults.find((entry) => entry.id === 'biz-op-v327').result;
   for (const hold of recoveryControlReadRepository.listActiveRecoveryHolds()) {
     const taskKeys = actionTaskBindingRegistry.allowedTaskKeys(hold.actionKey);
     if (!Array.isArray(taskKeys) || taskKeys.length === 0) {
@@ -22390,7 +21432,6 @@ async function initializeBackgroundExecutionRecovery() {
       `activeHolds=${summary.activeHoldCount}`
     ]
   });
-  duplicateStartupRecoveryReady = bizOpV327Module.recovery.hasCompletedPlatformScan();
   return summary;
 }
 
@@ -22459,7 +21500,12 @@ async function initializeApplication() {
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
     // Recovery Contract startup boundary：任何 Archive owner recovery、cleanup 或业务 IPC
     // 之前冻结注册器并预检；BizOP 未决时保留同一预算，在首个 Archive owner 阶段完成全量扫描。
-    await initializeBackgroundExecutionRecovery();
+    try {
+      await initializeBackgroundExecutionRecovery();
+    } catch (error) {
+      applicationRecoveryCoordinator?.failArchiveInitialization(error);
+      throw error;
+    }
     initializeAppUpdaterService();
     try {
       pendingDb = openPendingDb(app.getPath('userData'));
@@ -22476,13 +21522,14 @@ async function initializeApplication() {
       }
       throw pendingDbErr;
     }
-    initializeArchiveCenter();
-    // 存档 journal 必须先按 DB setting 收敛到唯一根，才允许 Position 等启动恢复消费者放行。
-    // 初始化抛错会由现有 startup failure 入口退出；不得把已切换 service 上的
-    // outbox/recovery 失败吞成 unavailable 后继续放行业务。
-    if (archiveCenterInitializationPromise) await archiveCenterInitializationPromise;
-    if (!bizOpV327Module.recovery.hasCompletedPlatformScan()) {
-      throw Object.assign(new Error('启动恢复尚未完成平台完整扫描'), { code: 'BACKGROUND_RECOVERY_SCAN_PENDING' });
+    try {
+      initializeArchiveCenter();
+      // 唯一 Archive 初始化 Promise 完成后，由应用层确认平台扫描事实。
+      const initialized = await archiveCenterInitializationPromise;
+      applicationRecoveryCoordinator.completeArchiveInitialization(initialized);
+    } catch (error) {
+      applicationRecoveryCoordinator.failArchiveInitialization(error);
+      throw error;
     }
     // Controller 会保留 owner 批次并继续扫尾其它孤儿；Toolbox 固定恢复根损坏
     // 仍沿用既有 fail-closed 启动合同，不能放行新的工具箱任务。
@@ -22829,10 +21876,9 @@ function runStartupPostSetup() {
 
     // v2.1.10 A3 Phase 2 T14：注册 worker pool failure listener
     //   - worker exit (code≠0) / error 事件 → pool 自动 reject activeJob + 调本回调
-    //   - 主进程职责：① 释放 op lock；② Notification 通知用户；③ activity log；④ 下次 dispatch cold-start（pool 自动 — workerInstance=null）
-    //   - hadActiveJob=true：有 job 正在跑挂掉 → 必须释放 op lock（caller IPC handler catch 也会 release，
-    //     但 failure 路径走 reject 后 caller catch 释放；此处兜底释放防 caller 异常路径漏释）
-    //   - 当 caller 已 release（reject 路径正常走完）则此处 release 是 no-op（lock.inFlight=false 时 release 幂等）
+    //   - 主进程职责：Notification 通知、activity log、hadActiveJob 时 partial 兜底；下次 dispatch 由 pool cold-start。
+    //   - operation lock 由取得该锁的 prepare 所返回的 releaseLock 在 execute finally / onAbandon 释放。
+    //   - failure listener 没有所属 prepare 身份；idle worker 失败不得释放另一轮已经取得的锁。
     try {
       runCheckWorkerPool.setFailureListener((info) => {
         try {
@@ -22848,8 +21894,6 @@ function runStartupPostSetup() {
             stack: info && info.cause && info.cause.stack ? info.cause.stack : undefined
           });
         } catch (_logErr) { /* swallow */ }
-        // 释放 op lock（防 caller catch 漏释；release 内部不抛错 — 状态置为 inFlight=false）
-        try { releaseAcquiringBillCurrencyOpLock(); } catch (_lockErr) { /* swallow */ }
         // v2.1.10 SR-FIX-1 round 2 P1-7：worker crash 时主进程兜底设 chunk_progress='partial'
         //   触发场景：worker 跑到 chunk M/N 突然 process.exit(1) / OOM / SIGKILL → catch 块（runCheckCore L367-394）不执行
         //     → chunk_progress 停留在 'in-progress'（onChunkDone 写的最后一次值）
@@ -23406,7 +22450,7 @@ async function prepareApplicationForQuit(options = {}) {
       throw new Error(`退出清理失败：${failures.length} 个运行数据未完成清理`);
     }
     if (positionReconciliationService) {
-      syncPositionReconciliationCheckpoint();
+      positionTaskOwner.syncPositionReconciliationCheckpoint();
       positionReconciliationService.close();
       positionReconciliationService = null;
     }

@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const source = fs.readFileSync(
-  path.join(__dirname, '..', '..', 'src', 'renderer-dialogs.js'),
+  path.join(__dirname, '..', '..', 'src', 'renderer', 'dialogs', 'scenarios.js'),
   'utf8'
 );
 const styles = fs.readFileSync(
@@ -35,7 +35,7 @@ describe('v3.1.1 canonical owner UI 身份与旧冲突处置', () => {
   test('UI canonical 谓词同时检查 category/isBuiltin/funcCategory/subCategory', () => {
     const helper = extract(
       'function hasFundTransferReservedSignatureUi(scenario)',
-      'async function loadScenariosOrAlert()'
+      'async function loadScenariosOrAlert('
     );
     assert.ok(helper.includes("scenario.category === 'builtin-fixed'"));
     assert.ok(helper.includes("config.funcCategory === 'platform-order'"));
@@ -53,7 +53,7 @@ describe('v3.1.1 canonical owner UI 身份与旧冲突处置', () => {
 
   test('列表渲染前会为全部 builtin-fixed 行补齐 config，冲突判定不依赖简表缺失字段', () => {
     assert.ok(
-      /scenarios[\s\S]*?\.filter\(\(s\)\s*=>\s*s\.category\s*===\s*'builtin-fixed'\)[\s\S]*?desktopApi\.scenarios\.get\(s\.id\)[\s\S]*?s\.config\s*=\s*detail\.scenario\.config/.test(managerBody),
+      /scenarios[\s\S]*?\.filter\(\(s\)\s*=>\s*s\.category\s*===\s*'builtin-fixed'\)[\s\S]*?scenarioCommands\.scenarios\.get\(s\.id\)[\s\S]*?s\.config\s*=\s*detail\.scenario\.config/.test(managerBody),
       'scenarios:list 仅返简表；renderRow 前必须通过 scenarios.get 补齐 config，才能识别旧保留签名冲突'
     );
   });
@@ -140,7 +140,7 @@ describe('v3.1.1 调拨回填功能管理', () => {
 
   test('canonical owner 保存不调用渠道写入；非 owner 才 setApplicableChannels', () => {
     assert.ok(
-      /if\s*\(!isCanonicalFundTransferOwner\)\s*\{[\s\S]*?desktopApi\.scenarios\.setApplicableChannels\(scenarioId,\s*ids\)/.test(dialogBody)
+      /if\s*\(!isCanonicalFundTransferOwner\)\s*\{[\s\S]*?scenarioCommands\.scenarios\.setApplicableChannels\(scenarioId,\s*ids\)/.test(dialogBody)
     );
   });
 });

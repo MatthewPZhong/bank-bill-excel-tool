@@ -1,0 +1,16 @@
+{
+  "commit": "f8fd640586f9119b091148151e1beb48f9552c5d",
+  "objects": {
+    "src": "dad44befb966f24eb53b9bde6475d645c610a809",
+    "scripts": "2b5a63e2f8ef14c8fc36edc692aa558fbb6d3c7d",
+    "tests": "57ebb8276f3d563eee0252812f056f4c17a4d6f0",
+    "index.html": "9369e12148a7982c8ed8b76415f282d7087a81f6",
+    "package.json": "dda4a4bad32e93ad32a5c92faa528e21aeb597bf",
+    "package-lock.json": "e6913cfc91292dc492bc31a8a8d378d2edd69bf9",
+    "eslint.config.js": "b75c27ae917e483e7e1f583b08ef8391029997ee",
+    ".github/workflows": "1d11810f3ff6553fd1d8fd4e05434a308acab19f",
+    "architecture": "14de50dd7eb73e65e358dc57591254308cdee5ba",
+    "CODEX.md": "313da7a106139fa92f753b25e03f548dc7c38759"
+  },
+  "note": "仅记录实际测试输入，不表示 release-check 通过；该命令在架构阶段 exit 1。"
+}

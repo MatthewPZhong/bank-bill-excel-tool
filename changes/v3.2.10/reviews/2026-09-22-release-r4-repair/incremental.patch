@@ -1,0 +1,626 @@
+--- a/architecture/README.md
++++ b/architecture/README.md
+@@ -98,6 +98,10 @@
+ 
+ G1 的 prepare/worker 检查复用实际执行闭包，代入有限静态数组、helper 参数与返回值，跨文件仍以最终函数 AST 身份判断受限恢复能力。准确 allowedSites 继续作为调用闭包的停止点；未调用的危险成员和同名普通函数不会因此变成恢复执行。本轮没有扩大配置允许集合或新增例外。
+ 
++release 第四轮修正工厂实例身份和受限回调入口，见 [RR4 回归](../tests/unit/architecture/release-rereview-r4.test.js)及[修复记录](../changes/v3.2.10/reviews/2026-09-22-release-r4-repair/repair.md)。对象身份与能力值共用 bind、成员选择、返回和参数解析；新对象由分配位置与可解释的调用上下文区分，不把同一返回字面量的所有调用视为同一个实例。外部共享返回对象保留原分配身份；条件候选保留可能身份，成员身份按需解析。缓存仅绑定当前 scan/analysis，不跨源码版本复用。
++
++G1 对执行闭包已纳入的原生／注入执行器回调，也在其调用位置核验最终受限函数身份；已解析 helper 仍只沿实际执行的参数传播，未使用的参数不扩大为调用。准确 allowedSites 是同一停止点，无新增授权或例外。该检查不证明任意 this、反射、同一调用点的任意动态重复实例或跨文件动态对象身份，也不替代运行时授权验证。
++
+ 早期收紧对应 [R1–R10 回归](../tests/unit/architecture/review-regressions.test.js)，当时登记变化和原始基线核对见[历史修复复核](../changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-repair/repair-review.md)。
+ 
+ 第二轮的绑定调用、工厂闭包、DOM/scoped API 兼容、公开导出、脚本执行次序和 fork cwd 回归见 [R2 测试](../tests/unit/architecture/review-round2.test.js) 与[第二轮修复自检](../changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r2-repair/repair-review.md)。本轮没有增加或修改 allowedSites、历史例外、schema 或激活状态。
+--- a/changes/v3.2.10/README.md
++++ b/changes/v3.2.10/README.md
+@@ -6,9 +6,9 @@
+ | 文档日期 | 2026-09-20 |
+ | 用户已确认 | G1–G8 每项独立 Spec / TechDoc；按 v3.2.9 的功能分支目录组织；写清具体模块、接口、职责、迁移与验收 |
+ | 设计及源码基线 | `main@11086a3cbf632a30adbcfa796e4cd81810c5aef9`；本地附注标签 `v3.2.9` 指向同一提交 |
+-| 集成分支 | `release/v3.2.10`；G1–G8 已本地合入，当前为 `9a38b96b` 加未提交审查修复；第三轮修复完整门禁 PASS，见 [本地集成记录](release.md) |
++| 集成分支 | `release/v3.2.10`；G1–G8 已本地合入，当前为 `9a38b96b` 加未提交审查修复；第四轮修复完整门禁 PASS，见 [本地集成记录](release.md) |
+ | 功能分支状态 | G1–G8 已逐项本地合入；当前修复候选 31 个机器边界 active、0 pending/partial，下表保留计划名称 |
+-| 交付状态 | 第三轮五项 P2 及相邻工厂返回别名已修复，架构 237/237 PASS；完整 release-check 在 1700 个冻结输入上重跑 PASS（9011 项单测通过、4 项 Windows 条件跳过、68/68 集成脚本通过）。修复尚未提交，真实产品与平台人工验收及正式发布未完成，见 [修复报告](reviews/2026-09-22-release-r3-repair/repair.md) |
++| 交付状态 | 第四轮 3 项 P2 已实现修复；新增 33 项回归，架构 270/270 PASS；完整门禁重跑 PASS（9044 项单测通过、4 项 Windows 条件跳过、68/68 集成脚本通过）。修复未提交，独立复审和真实产品/平台验收未执行。见 [第四轮修复报告](reviews/2026-09-22-release-r4-repair/repair.md) |
+ | 独立审查修订 | R1–R9 及 G8 历史损坏配置恢复建议均在设计层关闭，无已知待修必改项；处置、验收映射和三轮依据见 [修订记录](review-response.md)，独立报告保持原状 |
+ | 依据 | [模块耦合审查](../architecture-coupling/2026-09-20/review.md)及该目录的静态扫描、局部探针证据 |
+ | 格式参考 | [v3.2.9 按行拆分 Spec](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/spec.md)、[TechDoc](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/techdoc.md)的元数据、行为合同、分阶段实施和验收结构 |
+--- a/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md
++++ b/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md
+@@ -2,7 +2,11 @@
+ 
+ 本文件是本功能唯一切片索引。设计合同：[Spec](spec.md)、[TechDoc](techdoc.md)；切片完成标准见[总索引 §6.2–§6.4](../../README.md#slice-completion)。设计审查通过不代表以下实现已验证。
+ 
+-## 最新状态：2026-09-22 release 第三轮审查修复
++## 最新状态：2026-09-22 release 第四轮审查修复
++
++RR4-01～03 已实现工厂组合身份传播、调用实例区分和 G1 隐式回调入口检查；新增 33 项回归，修复前 21 FAIL / 12 PASS，修复后与 RR2/RR3 合计 100/100 PASS。全部架构 270/270 PASS，实际 CLI 31 active、0 诊断；完整 release-check 在 1701 个冻结输入上重跑 PASS：9044 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过。输入及 HEAD 未漂移。当前修复未提交，配置与生产 src 保持。见[第四轮修复报告](../../reviews/2026-09-22-release-r4-repair/repair.md)。
++
++## 历史状态：2026-09-22 release 第三轮审查修复
+ 
+ RR3-01～05 已补齐未知数组 spread 位置、嵌套对象变更、自有特殊键、真实 config.initialBillCategory 以及 G1 helper 能力转发；原探针发现的本地工厂返回对象后别名遗漏也已补齐。新增 33 项回归，架构专项 237/237 PASS，配置允许集合和例外未变化。完整 release-check 于 01:45:20–02:09:31 在 1700 个冻结输入上重跑 PASS：9011 项单测通过、4 项 Windows 条件跳过，68/68 集成脚本通过；输入及 HEAD 未漂移。证据、保守拒绝边界和剩余验收见[第三轮修复报告](../../reviews/2026-09-22-release-r3-repair/repair.md)。所有修复未提交，修复后的独立复审未执行。
+ 
+--- a/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md
++++ b/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md
+@@ -106,6 +106,8 @@
+ 第二轮 release 审查补齐 RR2-01～05：调用闭包选择静态数组/解构回调，Renderer 工厂保留多层 bind 的前置参数，以同文件对象 AST 身份核验别名变更并按顺序解释 spread；initialInfo / initialBillCategory 递归限制为纯数据或明确的 app:get-info IPC 数据。G1 内部恢复能力按当前函数绑定登记，合法链路逐调用指纹许可。具体支持与保守拒绝边界以 [architecture README](../../../../architecture/README.md#覆盖与验证边界) 为准，回归和验证见 [RR2 修复报告](../../reviews/2026-09-21-release-r2-repair/repair.md)。这是现有防倒退合同的检查器修正，不改变业务恢复、金额、匹配或导出合同。
+ 
+ 第三轮 RR3-01～05 继续修正同一合同：未知长度数组 spread 不再伪造后续索引，嵌套对象身份不因无 chain 跳过检查，属性描述字典保留特殊自有键并单独处理 prototype setter；初始分类合同落在真实 config.initialBillCategory。G1 通过实际调用闭包保存经静态容器、helper 实参/返回值及跨文件转发的最终恢复能力身份，准确授权调用仍为停止点。当前能力与保守拒绝形式见上述 architecture README；证据见 [RR3 修复报告](../../reviews/2026-09-22-release-r3-repair/repair.md)。
++
++第四轮 RR4-01～03：Renderer 能力求值与身份传播使用同一静态解析，分配位置叠加调用上下文区分新实例，外部共享对象保持原身份；bind、返回后成员选择及条件别名均保留可能来源。G1 将已进入闭包的隐式回调作为对应调用位置的受限能力入边检查。完整支持边界及保守限制仍见 architecture README；原反例、多实例与共享对象对照见 [RR4 修复记录](../../reviews/2026-09-22-release-r4-repair/repair.md)。未改变机器配置或业务合同。
+ 
+ 宿主拥有 `modalRoot` 节点。扫描已知 `getElementById('modalRoot')`、`querySelector('#modalRoot')`、`elements.modalRoot` 及同作用域 const alias 的写入/append/remove/replaceChildren/innerHTML/textContent，宿主外违反。`overlay.remove()` 只在该 overlay 可追溯为宿主记录或 legacy modal 工厂返回时受规则约束，普通表格行/其他 DOM 移除不误报。难以追溯的已迁移域直接 DOM 外部移除由禁止全局 root 访问和 modal integration 测试补充，报告保留此边界。
+ 
+--- a/changes/v3.2.10/release.md
++++ b/changes/v3.2.10/release.md
+@@ -1,6 +1,20 @@
+ # v3.2.10 本地集成记录
+ 
+-当前 G1–G8 均已本地合入，HEAD 为 `9a38b96b1b8006c5851535d0c1e586bbaeb63f10`。前两轮修复保留；第三轮 RR3-01～05 及本地工厂返回对象的相邻别名遗漏已修复，新增 33 项回归，架构专项 237/237 PASS。当前完整门禁已在 1700 个冻结输入上重跑 PASS。所有修复尚未提交，见[第三轮修复报告](reviews/2026-09-22-release-r3-repair/repair.md)。下方历史 PASS／FAIL 保留原候选意义。
++当前 G1–G8 均已本地合入，HEAD 为 `9a38b96b1b8006c5851535d0c1e586bbaeb63f10`。前三轮修复保留；第四轮 3 项 P2 已实现修复，新增 33 项回归，与 RR2/RR3 合计 100/100 PASS。完整门禁已在 1701 个冻结输入上重跑 PASS，所有修复未提交，见[第四轮修复报告](reviews/2026-09-22-release-r4-repair/repair.md)。下方历史 PASS／FAIL 保留原候选意义。
++
++## 2026-09-22 第四轮独立审查修复（未提交）
++
++RR4-01～03 已补齐工厂组合身份、不同静态调用实例区分和 G1 已解释回调入口授权检查；真实共享对象继续追踪，未放宽机器授权配置。新增 33 项回归在起点工具上 21 FAIL / 12 PASS，修复后全部通过。原三个 Renderer 越权反例各报一条诊断，安全对照与独立多实例例均无诊断；真实源码副本中的 reduce 在 prepare 入口被拒绝，未执行真实恢复 IO。
++
++| 验证 | 当前修复候选结果 |
++| --- | --- |
++| 完整门禁 | UNIT_TEST_CONCURRENCY=2 npm run release-check：PASS，2026-09-22 11:43:25–12:00:05（Asia/Shanghai） |
++| 架构专项 / CLI | 270/270 PASS；31 active、0 pending/partial、0 诊断、0 stale |
++| 全量单测 | 9044 PASS、0 FAIL、4 项 Windows 条件跳过（9048 total、828 suites） |
++| 全量集成 | 68/68 脚本 PASS；有计数用例 2901/2901，另 1 个脚本无用例计数 |
++| 保护 | 1701 个门禁输入及 HEAD 无漂移；792 个 src、216 个历史证据、主工作区 865 个 dirty 文件保持 |
++
++[修复报告](reviews/2026-09-22-release-r4-repair/repair.md)、[验证汇总](reviews/2026-09-22-release-r4-repair/verification.json)、[本轮增量](reviews/2026-09-22-release-r4-repair/incremental.patch)。本轮是修复自检，独立复审及真实产品 Main、Windows/安装包、Excel/WPS、资金人工验收未执行；未提交或发布。
+ 
+ ## 2026-09-22 第三轮独立审查修复（未提交）
+ 
+--- a/rules/integration-test-policy.md
++++ b/rules/integration-test-policy.md
+@@ -125,80 +125,80 @@
+ 
+ ## 七、当前集成测试清单（自动同步）
+ 
+-<!-- auto-generated by scripts/integration-runner.js, last-updated: 2026-09-22T02:09:27+08:00 -->
++<!-- auto-generated by scripts/integration-runner.js, last-updated: 2026-09-22T12:00:03+08:00 -->
+ <!-- DO NOT EDIT MANUALLY — modify scripts/integration/*.js then re-run `npm run test:integration` -->
+ 
+ | 脚本 | 用例数 | 断言数 | 耗时 (ms) |
+ |---|---|---|---|
+-| `acquiring-bill-currency-idle-cleanup.js` | 38 | 38 | 938 |
+-| `acquiring-bill-currency-n4-migration.js` | 128 | 128 | 593 |
+-| `acquiring-engine-migration.js` | 45 | 45 | 4966 |
+-| `acquiring-index-slim-v2.js` | 22 | 22 | 213 |
+-| `acquiring-side-db-parity.js` | 19 | 19 | 599 |
+-| `acquiring-worker-boundary.js` | 14 | 14 | 563 |
+-| `application-recovery-governance.js` | 4 | 4 | 782 |
+-| `archive-biz-op-auto-report-retention.js` | 6 | 6 | 7509 |
+-| `archive-center-module-retention.js` | 11 | 11 | 1569 |
+-| `archive-center-permanent-delete.js` | 52 | 52 | 31277 |
+-| `background-execution-pure-compute-canary.js` | 9 | 9 | 107 |
+-| `background-execution-recovery-canary.js` | 9 | 9 | 119 |
+-| `background-execution-recovery-control.js` | 27 | 27 | 298 |
+-| `bank-bu-background-dual-parser.js` | 9 | 9 | 257 |
+-| `bank-bu-background-single-jobs.js` | 21 | 21 | 520 |
+-| `bank-bu-recon-side-db-parity.js` | 17 | 17 | 327 |
+-| `bank-statement-hit-scenario-report.js` | 49 | 49 | 217 |
+-| `bank-statement-many-to-many-review-sheet.js` | 33 | 33 | 211 |
+-| `bank-statement-universal-import-routing.js` | 20 | 20 | 297 |
+-| `big-table-import-engine.js` | 19 | 19 | 7607 |
+-| `biz-op-auto-error-report.js` | 12 | 12 | 10402 |
+-| `biz-op-query-boundary.js` | 9 | 9 | 7714 |
+-| `biz-op-recon-side-db-parity.js` | 16 | 16 | 351 |
+-| `bizop-flow-engine-migration.js` | 73 | 73 | 5304 |
+-| `dark-mode-schedule-settings.js` | 6 | 6 | 216 |
+-| `duplicate-inbound-match-end-to-end.js` | 31 | 31 | 376 |
+-| `execution-descriptor-governance.js` | 4 | 4 | 922 |
+-| `fund-transfer-recon-account-mapping.js` | 19 | 19 | 205 |
+-| `gateway-channel-filter-equivalence.js` | 23 | 23 | 211 |
+-| `linked-fx-open7-stale-hit-e2e.js` | 27 | 27 | 203 |
+-| `linked-table-delete-by-range-tablekey.js` | 73 | 73 | 206 |
+-| `new-account-balance-statement.js` | 36 | 36 | 249 |
+-| `pending-data-reconciliation.js` | 33 | 33 | 53 |
+-| `pending-engine-migration.js` | 57 | 57 | 5257 |
+-| `pending-removal-reconcile.js` | 62 | 62 | 204 |
+-| `position-reconciliation-side-db-parity.js` | 38 | 38 | 264 |
+-| `position-startup-task-recovery.js` | 3 | 3 | 2351 |
+-| `pre-fund-reconciliation-output-contract.js` | 15 | 15 | 277 |
+-| `pre-fund-reconciliation-side-db-parity.js` | 69 | 69 | 329 |
+-| `refund-backfill-yellow-fill-e2e.js` | 258 | 258 | 203 |
+-| `renderer-lifecycle.js` | 233 | 233 | 20865 |
+-| `shared-xlsx-boundary.js` | 51 | 51 | 3285 |
+-| `statement-generation-pipeline.js` | 45 | 45 | 276 |
+-| `task-adapter-recovery.js` | 4 | 4 | 557 |
+-| `toolbox-large-file-stream.js` | 50 | 50 | 139533 |
+-| `toolbox-large-split-multi-sheet.js` | 31 | 31 | 256824 |
+-| `toolbox-multi-sheet-merge.js` | 16 | 16 | 14742 |
+-| `toolbox-multi-split-roundtrip.js` | 17 | 17 | 532 |
+-| `toolbox-roundtrip.js` | 30 | 30 | 183 |
+-| `toolbox-row-split-admission.js` | 2 | 2 | 870 |
+-| `toolbox-row-split-archive-delete.js` | 2 | 2 | 1073 |
+-| `v2.1.10-a3-phase1.js` | 40 | 40 | 2896 |
+-| `v2.1.10-a3-phase2.js` | 56 | 56 | 2092 |
+-| `v2.1.10-a4-phase3.js` | 75 | 75 | 15041 |
+-| `v2.1.10-n4-cont-1-phase4.js` | 33 | 33 | 926 |
+-| `v2.1.10-n4-cont-2-phase5.js` | 43 | 43 | 614 |
+-| `v2.1.12-beta-multiworker-nested.js` | - | - | 2860 |
+-| `v2.1.9-n5-end-to-end.js` | 68 | 68 | 238 |
+-| `v2.1.9-n5-migration.js` | 67 | 67 | 235 |
+-| `v2.1.9-sr-fix-1-coverage.js` | 148 | 148 | 264 |
+-| `v2.1.9-sr-log-1.js` | 33 | 33 | 208 |
+-| `v3.0.0-linked-streaming-import.js` | 19 | 19 | 266 |
+-| `v3.0.1-linked-gateway-upsert.js` | 40 | 40 | 261 |
+-| `v3.0.4-boc-dispatch-order-fix.js` | 31 | 31 | 290 |
+-| `vcc-financial-op-adjustment-archive-chain.js` | 226 | 226 | 1293 |
+-| `vcc-financial-op-destructive-state-chain.js` | 77 | 77 | 1491 |
+-| `vcc-financial-op-effective-result.js` | 19 | 19 | 139 |
+-| `vcc-financial-op-historical-template-export.js` | 29 | 29 | 1078 |
+-| **合计** | **2901** | **2901** | **563198** |
++| `acquiring-bill-currency-idle-cleanup.js` | 38 | 38 | 931 |
++| `acquiring-bill-currency-n4-migration.js` | 128 | 128 | 606 |
++| `acquiring-engine-migration.js` | 45 | 45 | 5054 |
++| `acquiring-index-slim-v2.js` | 22 | 22 | 210 |
++| `acquiring-side-db-parity.js` | 19 | 19 | 578 |
++| `acquiring-worker-boundary.js` | 14 | 14 | 586 |
++| `application-recovery-governance.js` | 4 | 4 | 773 |
++| `archive-biz-op-auto-report-retention.js` | 6 | 6 | 7443 |
++| `archive-center-module-retention.js` | 11 | 11 | 1550 |
++| `archive-center-permanent-delete.js` | 52 | 52 | 30873 |
++| `background-execution-pure-compute-canary.js` | 9 | 9 | 109 |
++| `background-execution-recovery-canary.js` | 9 | 9 | 118 |
++| `background-execution-recovery-control.js` | 27 | 27 | 300 |
++| `bank-bu-background-dual-parser.js` | 9 | 9 | 265 |
++| `bank-bu-background-single-jobs.js` | 21 | 21 | 524 |
++| `bank-bu-recon-side-db-parity.js` | 17 | 17 | 334 |
++| `bank-statement-hit-scenario-report.js` | 49 | 49 | 216 |
++| `bank-statement-many-to-many-review-sheet.js` | 33 | 33 | 212 |
++| `bank-statement-universal-import-routing.js` | 20 | 20 | 307 |
++| `big-table-import-engine.js` | 19 | 19 | 7617 |
++| `biz-op-auto-error-report.js` | 12 | 12 | 10345 |
++| `biz-op-query-boundary.js` | 9 | 9 | 7947 |
++| `biz-op-recon-side-db-parity.js` | 16 | 16 | 367 |
++| `bizop-flow-engine-migration.js` | 73 | 73 | 5366 |
++| `dark-mode-schedule-settings.js` | 6 | 6 | 220 |
++| `duplicate-inbound-match-end-to-end.js` | 31 | 31 | 386 |
++| `execution-descriptor-governance.js` | 4 | 4 | 913 |
++| `fund-transfer-recon-account-mapping.js` | 19 | 19 | 213 |
++| `gateway-channel-filter-equivalence.js` | 23 | 23 | 216 |
++| `linked-fx-open7-stale-hit-e2e.js` | 27 | 27 | 206 |
++| `linked-table-delete-by-range-tablekey.js` | 73 | 73 | 205 |
++| `new-account-balance-statement.js` | 36 | 36 | 239 |
++| `pending-data-reconciliation.js` | 33 | 33 | 51 |
++| `pending-engine-migration.js` | 57 | 57 | 5222 |
++| `pending-removal-reconcile.js` | 62 | 62 | 202 |
++| `position-reconciliation-side-db-parity.js` | 38 | 38 | 262 |
++| `position-startup-task-recovery.js` | 3 | 3 | 2321 |
++| `pre-fund-reconciliation-output-contract.js` | 15 | 15 | 279 |
++| `pre-fund-reconciliation-side-db-parity.js` | 69 | 69 | 332 |
++| `refund-backfill-yellow-fill-e2e.js` | 258 | 258 | 204 |
++| `renderer-lifecycle.js` | 233 | 233 | 20868 |
++| `shared-xlsx-boundary.js` | 51 | 51 | 3303 |
++| `statement-generation-pipeline.js` | 45 | 45 | 267 |
++| `task-adapter-recovery.js` | 4 | 4 | 550 |
++| `toolbox-large-file-stream.js` | 50 | 50 | 138771 |
++| `toolbox-large-split-multi-sheet.js` | 31 | 31 | 76985 |
++| `toolbox-multi-sheet-merge.js` | 16 | 16 | 14717 |
++| `toolbox-multi-split-roundtrip.js` | 17 | 17 | 499 |
++| `toolbox-roundtrip.js` | 30 | 30 | 182 |
++| `toolbox-row-split-admission.js` | 2 | 2 | 873 |
++| `toolbox-row-split-archive-delete.js` | 2 | 2 | 1063 |
++| `v2.1.10-a3-phase1.js` | 40 | 40 | 2920 |
++| `v2.1.10-a3-phase2.js` | 56 | 56 | 2133 |
++| `v2.1.10-a4-phase3.js` | 75 | 75 | 15155 |
++| `v2.1.10-n4-cont-1-phase4.js` | 33 | 33 | 862 |
++| `v2.1.10-n4-cont-2-phase5.js` | 43 | 43 | 586 |
++| `v2.1.12-beta-multiworker-nested.js` | - | - | 2881 |
++| `v2.1.9-n5-end-to-end.js` | 68 | 68 | 229 |
++| `v2.1.9-n5-migration.js` | 67 | 67 | 220 |
++| `v2.1.9-sr-fix-1-coverage.js` | 148 | 148 | 260 |
++| `v2.1.9-sr-log-1.js` | 33 | 33 | 155 |
++| `v3.0.0-linked-streaming-import.js` | 19 | 19 | 234 |
++| `v3.0.1-linked-gateway-upsert.js` | 40 | 40 | 237 |
++| `v3.0.4-boc-dispatch-order-fix.js` | 31 | 31 | 271 |
++| `vcc-financial-op-adjustment-archive-chain.js` | 226 | 226 | 1292 |
++| `vcc-financial-op-destructive-state-chain.js` | 77 | 77 | 1507 |
++| `vcc-financial-op-effective-result.js` | 19 | 19 | 141 |
++| `vcc-financial-op-historical-template-export.js` | 29 | 29 | 1082 |
++| **合计** | **2901** | **2901** | **382345** |
+ 
+ > 同步策略：runner 末尾全 PASS 时 in-place 替换本章节；任一脚本 FAIL → 本章节不更新（避免被损坏数据覆盖）。
+ 
+--- a/scripts/architecture/contracts.js
++++ b/scripts/architecture/contracts.js
+@@ -273,6 +273,8 @@
+     return [];
+   }
+   const calledTargets = (site, coverage) => resolve(site.reference, scan.analyses.get(site.from), [], new Set(), coverage);
++  const callbackTargets = site => calledTargets(site).length ? [] : (site.args || []).flatMap(arg =>
++    resolve(arg, scan.analyses.get(site.from)));
+   for (const scope of roots) add(scope.path, scope.functionPath, 'subtree');
+   let checkedRevision = -1;
+   while (checkedRevision !== parameterRevision) {
+@@ -291,7 +293,7 @@
+           add(target.analysis.from, target.all ? null : target.analysis.functionPath(target.node), target.all ? 'subtree' : 'exact', scope.thread);
+         }
+         // 可解析 helper 只沿实际调用的参数成员传播；原生/注入执行器的直接回调保守视为可能执行。
+-        if (!targets.length) for (const arg of site.args || []) for (const callback of resolve(arg, scan.analyses.get(site.from))) {
++        for (const callback of callbackTargets(site)) {
+           add(callback.analysis.from, callback.all ? null : callback.analysis.functionPath(callback.node), callback.all ? 'subtree' : 'exact', scope.thread);
+         }
+       }
+@@ -305,7 +307,7 @@
+       valueCandidates(site.reference).some(value => value.reason === 'computed-member' && value.property === undefined &&
+         constantKeys(value.propertyValue, scan.analyses.get(site.from)).includes(null)));
+   });
+-  return { scopes, sites: reachedSites, calledTargets, unresolvedCalls };
++  return { scopes, sites: reachedSites, calledTargets, callbackTargets, unresolvedCalls };
+ }
+ 
+ module.exports = { scopeContains, valueCandidates, factoryCalls, factoryPresent, callableOrigins, callTargets, executionScopes };
+--- a/scripts/architecture/renderer-contracts.js
++++ b/scripts/architecture/renderer-contracts.js
+@@ -12,6 +12,8 @@
+   const pathOf = value => value?.chain || [];
+   const directName = node => node?.type === 'MemberExpression' && !node.computed ? node.property.name : null;
+   const functionReturns = new WeakMap();
++  const parameterCalls = new WeakMap();
++  const memberWrites = new WeakMap();
+   const returnedValues = (callee, analysis) => {
+     if (!functionReturns.has(analysis)) functionReturns.set(analysis, new Map());
+     const cache = functionReturns.get(analysis); const key = callee.functionStart ?? callee.functionPath;
+@@ -22,16 +24,45 @@
+       analysis.functionPath(node) === callee.functionPath).map(node => node.argument);
+     const values = returns.map(node => analysis.describe(node)); cache.set(key, values); return values;
+   };
+-  const sameObject = (actual, value, analysis, seen = new Set()) => {
+-    if (!actual || seen.has(actual)) return false;
+-    const next = new Set([...seen, actual]);
+-    if (value.objectStart !== undefined && actual?.objectStart === value.objectStart) return true;
+-    if ((actual.alternatives || actual.values || []).some(item => sameObject(item, value, analysis, next))) return true;
+-    if (actual.kind === 'call-result' && actual.callee.functionPath) {
+-      if (returnedValues(actual.callee, analysis).some(item => sameObject(item, value, analysis, next))) return true;
+-    }
+-    return value.objectStart === undefined && value.chain?.length &&
+-      actual?.chain?.join('.') === value.chain.join('.') && actual.bindingFunctionPath === value.bindingFunctionPath;
++  // 身份附在求值结果上，与 bound/member/return 共用解析；符号不参与能力字段或结构比较。
++  const identity = Symbol('renderer-object-identity');
++  const deferred = Symbol('renderer-deferred-identity');
++  const defer = read => {
++    let value;
++    return { kind: 'deferred-identity', [deferred]: () => (value ||= read()) };
++  };
++  const frames = Symbol('renderer-call-frames');
++  const emptyEnv = new Map();
++  const callNodes = new Map([...analyses].map(([file, analysis]) => [file,
++    new Map(analysis.nodes.filter(node => ['CallExpression', 'NewExpression'].includes(node.type)).map(node => [node.start, node]))]));
++  const frameAt = (analysis, node, env) => {
++    for (let current = node; current; current = analysis.parents.get(current)) {
++      if (analysis.functionNodesByStart.get(current.start) === current) return env.get(frames)?.get(`${analysis.from}:${current.start}`) || '';
++    }
++    return '';
++  };
++  const objectIdentity = (value, analysis, env) => value.objectStart === undefined ? [] :
++    [JSON.stringify([analysis.from, value.objectStart, frameAt(analysis, objectNodes.get(analysis.from)?.get(value.objectStart), env)])];
++  const identityCache = new WeakMap();
++  const identitiesOf = value => value?.[identity] || (value?.kind === 'identity-candidates' ? value.values.flatMap(identitiesOf) : []);
++  const sameObject = (actual, identities, analysis, env) => {
++    if (!actual || !identities.length) return false;
++    if (!identityCache.has(env)) identityCache.set(env, new WeakMap());
++    const byAnalysis = identityCache.get(env);
++    if (!byAnalysis.has(analysis)) byAnalysis.set(analysis, new WeakMap());
++    const values = byAnalysis.get(analysis);
++    if (!values.has(actual)) values.set(actual, resolve(actual, analysis, env, 0, new Set(), false));
++    return identitiesOf(values.get(actual)).some(key => identities.includes(key));
++  };
++  const mergeIdentities = values => {
++    const first = values[0];
++    if (first[deferred]) return defer(() => mergeIdentities(values.map(value => value[deferred]())));
++    if (first.kind === 'object') return { ...first,
++      [identity]: [...new Set(values.flatMap(value => value[identity] || []))],
++      properties: Object.fromEntries(Object.keys(first.properties).map(key =>
++        [key, mergeIdentities(values.map(value => value.properties[key]))])) };
++    if (first.kind === 'array') return { ...first, elements: first.elements.map((_, index) => mergeIdentities(values.map(value => value.elements[index]))) };
++    return first;
+   };
+   for (const [file, analysis] of analyses) for (const node of analysis.nodes) {
+     if (node.type === 'AssignmentExpression') {
+@@ -48,10 +79,13 @@
+     }
+   }
+   const select = (value, chain) => {
+-    for (const part of chain) {
++    for (let index = 0; index < chain.length; index += 1) {
++      const part = chain[index];
++      if (value?.kind === 'identity-candidates') return { ...value, values: value.values.map(item => select(item, chain.slice(index))) };
+       if (value?.kind === 'ipc-data') { value = { ...value, fields: [...(value.fields || []), part] }; continue; }
+       if (value?.kind !== 'object' || !Object.hasOwn(value.properties, part)) return unknown('unresolved-static-member');
+       value = value.properties[part];
++      if (value?.[deferred]) value = value[deferred]();
+     }
+     return value;
+   };
+@@ -63,10 +97,10 @@
+       if (property.type === 'Property' && !property.computed) bindPattern(property.value, select(value, [property.key.name || property.key.value]), env);
+     }
+   }
+-  function resolve(value, analysis, env = new Map(), depth = 0, visited = new Set()) {
++  function resolve(value, analysis, env = emptyEnv, depth = 0, visited = new Set(), inspectMutations = true) {
+     if (!value || depth > 35 || visited.has(value)) return unknown('recursive-renderer-value');
+     const next = new Set([...visited, value]);
+-    const recurse = (item, source = analysis, context = env) => resolve(item, source, context, depth + 1, next);
++    const recurse = (item, source = analysis, context = env) => resolve(item, source, context, depth + 1, next, inspectMutations);
+     if (value.kind === 'literal' || value.kind === 'regexp') return value;
+     if (value.functionPath) return { ...value, kind: 'function', sourceFile: analysis.from, sourceEnv: env };
+     if (value.kind === 'bound-function') {
+@@ -77,6 +111,9 @@
+     }
+     if (value.kind === 'array') return value.opaque ? unknown(value.reason) : { ...value, elements: value.elements.map(item => recurse(item)) };
+     if (value.kind === 'object') {
++      const identities = value[identity] || objectIdentity(value, analysis, env);
++      // 身份比较只沿选中的成员求值，避免为每个别名展开无关能力树。
++      const memberValue = item => inspectMutations ? recurse(item) : defer(() => recurse(item));
+       const properties = Object.create(null);
+       // 重新解释原始顺序，避免通用扫描器展开 spread 时丢失来源身份或覆盖顺序。
+       const literal = objectNodes.get(analysis.from)?.get(value.objectStart);
+@@ -95,7 +132,7 @@
+               if (prototype.kind !== 'literal' || prototype.value !== null) return unknown('object-prototype-setter');
+               continue;
+             }
+-            properties[key.value] = recurse(analysis.describe(property.value));
++            properties[key.value] = memberValue(analysis.describe(property.value));
+           }
+         }
+       } else {
+@@ -104,25 +141,25 @@
+           if (expanded.kind !== 'object') return unknown('opaque-renderer-spread');
+           Object.assign(properties, expanded.properties);
+         }
+-        for (const [key, member] of Object.entries(value.properties)) properties[key] = recurse(member);
++        for (const [key, member] of Object.entries(value.properties)) properties[key] = memberValue(member);
+       }
+       // 向未知 helper 传出能力对象可能改变其成员；不执行或猜测这些写入。
+-      if (value.objectStart !== undefined || value.chain?.length) for (const node of analysis.nodes) {
++      if (inspectMutations && identities.length) for (const node of analysis.nodes) {
+         if (node.type !== 'CallExpression') continue;
+         const escaped = node.arguments.some(argument => {
+           // 字面量在此创建并交给调用方；之后经成员/别名传出的同一对象仍须检查。
+           if (argument.type === 'ObjectExpression' && argument.start === value.objectStart) return false;
+           const actual = analysis.describe(argument);
+-          return sameObject(actual, value, analysis);
++          return sameObject(actual, identities, analysis, env);
+         });
+         const callee = analysis.describe(node.callee);
+         if (escaped && !(callee.rootFree && ['Object.freeze', 'Object.seal', 'Object.keys', 'Object.values', 'Object.entries'].includes(pathOf(callee).join('.')))) return unknown('escaped-renderer-object');
+       }
+       // 对象声明后的静态写入属于同一能力集合，不能只看初始字面量。
+-      if (value.objectStart !== undefined || value.chain?.length) for (const node of analysis.nodes) {
++      if (inspectMutations && identities.length) for (const node of analysis.nodes) {
+         if (node.type !== 'AssignmentExpression' || node.left.type !== 'MemberExpression') continue;
+         const base = analysis.describe(node.left.object);
+-        if (!sameObject(base, value, analysis)) continue;
++        if (!sameObject(base, identities, analysis, env)) continue;
+         let keys = !node.left.computed ? [{ kind: 'literal', value: node.left.property.name }] : [recurse(analysis.describe(node.left.property))];
+         if (keys.some(key => key.kind !== 'literal')) {
+           const keyReference = analysis.describe(node.left.property);
+@@ -136,7 +173,7 @@
+         if (!keys.length || keys.some(key => key.kind !== 'literal' || typeof key.value !== 'string')) return unknown('dynamic-renderer-member-write');
+         for (const key of keys) properties[key.value] = recurse(analysis.describe(node.right));
+       }
+-      return { kind: 'object', properties };
++      return { kind: 'object', properties, [identity]: identities };
+     }
+     if (value.kind === 'candidates' || value.alternatives) {
+       // && 左值只用于短路守卫，不能把 || 的完整 API 当成同类守卫。
+@@ -144,12 +181,13 @@
+       if (value.operator === '&&') return recurse(choices.at(-1));
+       const resolved = choices.map(item => recurse(item)).filter(item => !(item.kind === 'literal' && item.value == null));
+       if (resolved.length === 1) return resolved[0];
+-      if (resolved.length && resolved.every(item => JSON.stringify(item) === JSON.stringify(resolved[0]))) return resolved[0];
++      if (!inspectMutations && resolved.some(item => ['object', 'identity-candidates'].includes(item.kind))) return { kind: 'identity-candidates', values: resolved };
++      if (resolved.length && resolved.every(item => JSON.stringify(item) === JSON.stringify(resolved[0]))) return mergeIdentities(resolved);
+       return unknown('ambiguous-renderer-value');
+     }
+     if (value.reason === 'member-base') {
+       const object = recurse(value.object);
+-      if (object.kind === 'object' || object.kind === 'ipc-data') return select(object, [value.property]);
++      if (['object', 'ipc-data', 'identity-candidates'].includes(object.kind)) return select(object, [value.property]);
+       return unknown('unresolved-renderer-member');
+     }
+     if (value.kind === 'reference') {
+@@ -158,12 +196,15 @@
+         if (env.has(chain[0])) return selectOrSelf(env.get(chain[0]), chain.slice(1));
+         const fn = analysis.functionNodes.get(value.bindingFunctionPath);
+         if (fn) {
+-          const calls = scan.sites.filter(site => site.type === 'call' &&
++          if (!parameterCalls.has(analysis)) parameterCalls.set(analysis, new Map());
++          const callCache = parameterCalls.get(analysis);
++          if (!callCache.has(value.bindingFunctionPath)) callCache.set(value.bindingFunctionPath, scan.sites.filter(site => site.type === 'call' &&
+             ((site.from === analysis.from && site.reference?.functionPath === value.bindingFunctionPath) ||
+-              (site.reference?.rootFree && site.reference?.chain?.at(-1) === value.bindingFunctionPath.split('.').at(-1))));
++              (site.reference?.rootFree && site.reference?.chain?.at(-1) === value.bindingFunctionPath.split('.').at(-1)))));
++          const calls = callCache.get(value.bindingFunctionPath);
+           if (calls.length === 1) {
+             const context = new Map();
+-            fn.params.forEach((param, index) => bindPattern(param, resolve(calls[0].args[index], analyses.get(calls[0].from), new Map(), depth + 1, next), context));
++            fn.params.forEach((param, index) => bindPattern(param, resolve(calls[0].args[index], analyses.get(calls[0].from), emptyEnv, depth + 1, next, inspectMutations), context));
+             if (context.has(chain[0])) return selectOrSelf(context.get(chain[0]), chain.slice(1));
+           }
+         }
+@@ -174,13 +215,16 @@
+         if (globalChain[0] === 'desktopApi' && globalChain.length === 1) return unknown('whole-desktop-api');
+         if (globalChain[0] === 'state' || globalChain[0] === 'elements') return unknown('whole-application-state');
+         const provider = globals.get(globalChain[0]);
+-        if (provider) return selectOrSelf(recurse(provider.value, provider.analysis, new Map()), globalChain.slice(1));
++        if (provider) return selectOrSelf(recurse(provider.value, provider.analysis, emptyEnv), globalChain.slice(1));
+         if (['alert', 'confirm'].includes(globalChain[0]) && globalChain.length === 1) return { kind: 'native-function' };
+       }
+       // 单一静态成员赋值仍可还原；多次赋值必须保留不透明诊断。
+       if (chain.length > 1 && !value.opaque) {
+-        const writes = analysis.nodes.filter(node => node.type === 'AssignmentExpression' && node.operator === '=' &&
+-          pathOf(analysis.describe(node.left)).join('.') === chain.join('.'));
++        if (!memberWrites.has(analysis)) memberWrites.set(analysis, new Map());
++        const writeCache = memberWrites.get(analysis); const name = chain.join('.');
++        if (!writeCache.has(name)) writeCache.set(name, analysis.nodes.filter(node => node.type === 'AssignmentExpression' && node.operator === '=' &&
++          pathOf(analysis.describe(node.left)).join('.') === name));
++        const writes = writeCache.get(name);
+         if (writes.length === 1) return recurse(analysis.describe(writes[0].right));
+       }
+       return value;
+@@ -205,10 +249,14 @@
+       const context = new Map(callee.sourceEnv || []);
+       const args = [...(callee.boundArgs || []), ...value.args.map(item => recurse(item))];
+       fn.params.forEach((param, index) => bindPattern(param, args[index] || unknown('missing-factory-argument'), context));
+-      const returns = fn.body.type !== 'BlockStatement' ? [fn.body] : source.nodes.filter(node => node.type === 'ReturnStatement' &&
+-        node.start >= fn.start && node.end <= fn.end && source.functionPath(node) === callee.functionPath).map(node => node.argument);
++      const calls = new Map(context.get(frames) || []);
++      const call = callNodes.get(analysis.from)?.get(value.callStart);
++      if (!call) return unknown('missing-renderer-call-identity');
++      calls.set(`${source.from}:${fn.start}`, JSON.stringify([analysis.from, value.callStart, frameAt(analysis, call, env)]));
++      context.set(frames, calls);
++      const returns = returnedValues(callee, source);
+       if (returns.length !== 1) return unknown('nonliteral-renderer-factory-return');
+-      return recurse(source.describe(returns[0]), source, context);
++      return recurse(returns[0], source, context);
+     }
+     return value;
+   }
+--- a/scripts/architecture/rules.js
++++ b/scripts/architecture/rules.js
+@@ -251,10 +251,10 @@
+         emit('ARCH-STATIC-COVERAGE', boundary, site, '受保护恢复 helper 的执行目标或实参无法完整解释');
+       for (const site of reached.sites.filter(s => ['call', 'new'].includes(s.type))) {
+         if (siteAllowed(boundary, 'ARCH-PUBLICATION-RECOVERY-ENTRY', site)) continue;
+-        const targets = reached.calledTargets(site);
++        const targets = [...reached.calledTargets(site), ...reached.callbackTargets(site)];
+         if (targets.some(target => target.node && localOperations.some(api => api.targets.includes(
+           JSON.stringify(['local', target.analysis.from, target.node.start])))))
+-          emit('ARCH-PUBLICATION-RECOVERY-ENTRY', boundary, site, '受保护 prepare/worker 经静态容器或 helper 执行了受限恢复能力');
++          emit('ARCH-PUBLICATION-RECOVERY-ENTRY', boundary, site, '受保护 prepare/worker 经静态容器、helper 或回调入口执行了受限恢复能力');
+       }
+       // 恢复命令随真实 worker 合同登记；旧命令与新授权命令均不能从旁路发起。
+       const recoveryOperations = new Set(['recover', ...boundary.restrictedApis.flatMap(api => api.operations)]);
+--- a/scripts/architecture/scan.js
++++ b/scripts/architecture/scan.js
+@@ -375,7 +375,7 @@
+         return { kind: 'bound-function', target, receiver: args[0], args: args.slice(1),
+           method: target.chain?.at(-1) || target.property || null };
+       }
+-      return { kind: 'call-result', callee, args };
++      return { kind: 'call-result', callee, args, callStart: node.start };
+     }
+     if (node.type === 'LogicalExpression') return { kind: 'candidates', operator: node.operator, values: [describe(node.left, seen), describe(node.right, seen)] };
+     if (node.type === 'ConditionalExpression') {
+--- /dev/null
++++ b/tests/unit/architecture/release-rereview-r4.test.js
+@@ -0,0 +1,111 @@
++'use strict';
++const assert = require('node:assert/strict');
++const test = require('node:test');
++const fs = require('node:fs');
++const os = require('node:os');
++const path = require('node:path');
++const vm = require('node:vm');
++const { scan } = require('../../../scripts/architecture/scan');
++const { evaluateRules } = require('../../../scripts/architecture/rules');
++const actual = require('../../../architecture/boundaries.json');
++function fixture(t, files, boundary, authorize = null) {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'g8-rereview-r4-'));
++  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
++  for (const [name, source] of Object.entries(files)) {
++    fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true }); fs.writeFileSync(path.join(root, name), source);
++  }
++  const config = { schemaVersion: 1, factBaseline: '1'.repeat(40), bootstrap: { factBaseline: '1'.repeat(40), mode: 'first-introduction' },
++    boundaries: [{ ...boundary, state: 'pending' }], generatedModules: [], dynamicLoads: [], policyChanges: [] };
++  const scanned = scan(root, config);
++  if (authorize) authorize(scanned, config.boundaries[0]);
++  return evaluateRules(scanned, config, { schemaVersion: 1, factBaseline: config.factBaseline, exceptions: [] }, { root });
++}
++const clean = result => assert.deepEqual(result.violations, []);
++const denied = (result, rule) => assert.ok(result.violations.some(v => v.rule === rule), JSON.stringify(result.violations));
++const bank = actual.boundaries.find(b => b.id === 'renderer-bank-statement');
++const mount = api => `window.BankStatementController.createBankStatementController({api:${api}});`;
++function renderer(t, source) { return fixture(t, { 'src/shell.js': source }, bank); }
++function received(source) {
++  let input;
++  const window = { desktopApi: { outsideScope() { return true; } }, BankStatementController: { createBankStatementController(value) { input = value; } } };
++  vm.runInNewContext(source, { window }); return input.api;
++}
++const illegal = [
++  ['conditional alias identities', 'function provide(){return {run(){}};}const clean=provide();const other={};const alias=true?clean:other;alias.outsideScope=window.desktopApi.outsideScope;', 'clean'],
++  ['conditional nested identities', 'function provide(){return {run(){}};}const clean=provide();const other={};const alias=true?{api:clean}:{api:other};alias.api.outsideScope=window.desktopApi.outsideScope;', 'clean'],
++  ['shared closure return', 'function make(){const shared={run(){}};return function provide(){return shared;};}const provide=make();const clean=provide();const other=provide();other.outsideScope=window.desktopApi.outsideScope;', 'clean'],
++  ['forwarded bound shared argument', 'const shared={run(){}};function provide(api){return api;}const bound=provide.bind(null,shared);const clean=bound();const other=bound();other.outsideScope=window.desktopApi.outsideScope;', 'clean'],
++  ['bound factory', 'function provide(){return {run(){}};}const bound=provide.bind(null);const api=bound();const alias=api;alias.outsideScope=window.desktopApi.outsideScope;', 'api'],
++  ['multiple bind', 'function provide(){return {run(){}};}const bound=provide.bind(null).bind(null);const api=bound();const alias=api;alias.outsideScope=window.desktopApi.outsideScope;', 'api'],
++  ['nested member alias', 'function provide(){return {api:{run(){}}};}const envelope=provide();const alias=envelope.api;alias.outsideScope=window.desktopApi.outsideScope;', 'envelope.api'],
++  ['nested member escape', 'function provide(){return {api:{run(){}}};}const envelope=provide();Object.assign(envelope.api,window.desktopApi);', 'envelope.api'],
++  ['bound nested destructuring', 'function provide(){return {nested:{api:{run(){}}}};}const bound=provide.bind(null);const envelope=bound();const {api}=envelope.nested;api.outsideScope=window.desktopApi.outsideScope;', 'envelope.nested.api'],
++  ['wrapper factory', 'function provide(){return {run(){}};}function wrapper(){return provide();}const api=wrapper();const alias=api;alias.outsideScope=window.desktopApi.outsideScope;', 'api'],
++  ['shared return', 'const shared={run(){}};function provide(){return shared;}const clean=provide();const other=provide();other.outsideScope=window.desktopApi.outsideScope;', 'clean'],
++  ['shared nested return', 'const shared={run(){}};function provide(){return {api:shared};}const clean=provide();const other=provide();other.api.outsideScope=window.desktopApi.outsideScope;', 'clean.api'],
++  ['shared bound return', 'const shared={run(){}};function provide(){return shared;}const bound=provide.bind(null);const clean=bound();const other=bound();Object.assign(other,window.desktopApi);', 'clean'],
++  ['same factory local write', 'function provide(){const api={run(){}};api.outsideScope=window.desktopApi.outsideScope;return api;}const api=provide();', 'api']
++];
++for (const [name, setup, api] of illegal) test(`RR4-01/02 ${name} 的真实越权对象必须拒绝`, t => {
++  const source = setup + mount(api); assert.equal(received(source).outsideScope(), true);
++  const result = renderer(t, source);
++  assert.ok(result.violations.some(v => ['ARCH-RENDERER-SCOPE', 'ARCH-STATIC-COVERAGE'].includes(v.rule)), JSON.stringify(result.violations));
++});
++const legal = [
++  ['distinct closure allocations', 'function make(){const shared={run(){}};return function provide(){return shared;};}const clean=make()();const other=make()();other.outsideScope=window.desktopApi.outsideScope;', 'clean'],
++  ['distinct direct calls', 'function provide(){return {run(){}};}const clean=provide();const other=provide();other.outsideScope=window.desktopApi.outsideScope;', 'clean'],
++  ['distinct bound calls', 'function provide(){return {run(){}};}const bound=provide.bind(null);const clean=bound();const other=bound();other.outsideScope=window.desktopApi.outsideScope;', 'clean'],
++  ['distinct nested members', 'function provide(){return {api:{run(){}}};}const clean=provide();const other=provide();other.api.outsideScope=window.desktopApi.outsideScope;', 'clean.api'],
++  ['distinct nested escapes', 'function provide(){return {api:{run(){}}};}const clean=provide();const other=provide();Object.assign(other.api,window.desktopApi);', 'clean.api'],
++  ['distinct wrapper calls', 'function provide(){return {run(){}};}function wrapper(){return provide();}const clean=wrapper();const other=wrapper();other.outsideScope=window.desktopApi.outsideScope;', 'clean'],
++  ['distinct local declarations', 'function provide(){const api={run(){}};return api;}const clean=provide();const other=provide();other.outsideScope=window.desktopApi.outsideScope;', 'clean'],
++  ['bound nested without writes', 'function provide(){return {api:{run(){}}};}const envelope=provide.bind(null)();', 'envelope.api'],
++  ['distinct spread copies', 'const shared={run(){}};function provide(){return {...shared};}const clean=provide();const other=provide();other.outsideScope=window.desktopApi.outsideScope;', 'clean']
++];
++for (const [name, setup, api] of legal) test(`RR4-02 ${name} 不得被其他实例污染`, t => {
++  const source = setup + mount(api); assert.deepEqual(Object.keys(received(source)), ['run']); clean(renderer(t, source));
++});
++
++const recovery = actual.boundaries.find(b => b.id === 'publication-recovery-entry');
++const raw = 'src/main-process/toolbox-output-publication.js';
++function recoverySource(body) {
++  return `function recoverPreparingIntent(runtime,entry){return runtime.remove(entry);}\nfunction prepareToolboxPublication(runtime,entry){${body}}\nmodule.exports={prepareToolboxPublication};`;
++}
++function writes(source) {
++  const module = { exports: {} }; let count = 0;
++  vm.runInNewContext(source, { module }); module.exports.prepareToolboxPublication({ remove() { count += 1; } }, {}); return count;
++}
++const callbacks = [
++  ['reduce', 'return [entry].reduce(recoverPreparingIntent,runtime);'],
++  ['reduceRight', 'return [entry].reduceRight(recoverPreparingIntent,runtime);'],
++  ['map', 'return [runtime].map(recoverPreparingIntent);'],
++  ['forEach', 'return [runtime].forEach(recoverPreparingIntent);'],
++  ['bound callback', 'return [entry].forEach(recoverPreparingIntent.bind(null,runtime));'],
++  ['static callback container', 'const callbacks=[recoverPreparingIntent];return [entry].reduce(callbacks[0],runtime);'],
++  ['returned callback', 'function identity(fn){return fn;}return [entry].reduce(identity(recoverPreparingIntent),runtime);'],
++  ['helper forwarded callback', 'function fold(fn,r,e){return [e].reduce(fn,r);}return fold(recoverPreparingIntent,runtime,entry);']
++];
++for (const [name, body] of callbacks) test(`RR4-03 ${name} 执行的受限回调入口必须授权`, t => {
++  const source = recoverySource(body); assert.equal(writes(source), 1);
++  const result = fixture(t, { [raw]: source }, recovery); denied(result, 'ARCH-PUBLICATION-RECOVERY-ENTRY');
++  assert.ok(result.violations.some(v => v.rule === 'ARCH-PUBLICATION-RECOVERY-ENTRY' &&
++    ['prepareToolboxPublication', 'prepareToolboxPublication.fold'].includes(v.functionPath)), '诊断应落在执行回调的调用方');
++});
++test('RR4-03 未执行参数、普通同名函数、未选成员和正常迭代回调保持合法', t => {
++  for (const body of [
++    'function ignore(fn){return 1;}return ignore(recoverPreparingIntent);',
++    'return [runtime].map(function recoverPreparingIntent(){return 1;});',
++    'const callbacks=[recoverPreparingIntent,()=>1];return [entry].map(callbacks[1]);',
++    'return [entry].reduce((r)=>r,runtime);'
++  ]) { const source = recoverySource(body); assert.equal(writes(source), 0); clean(fixture(t, { [raw]: source }, recovery)); }
++});
++test('RR4-03 准确回调授权位置生效，其他调用位置不能借用', t => {
++  const authorize = (scanned, boundary) => {
++    const site = scanned.sites.find(s => s.type === 'call' && s.functionPath === 'prepareToolboxPublication' && s.args?.[0]?.functionPath === 'recoverPreparingIntent');
++    assert.ok(site);
++    boundary.allowedSites = [...boundary.allowedSites, { rule: 'ARCH-PUBLICATION-RECOVERY-ENTRY', from: site.from,
++      functionPath: site.functionPath, callee: site.callee || site.method, evidenceId: site.evidenceId, reason: '仅用于验证精确授权位置的测试夹具' }];
++  };
++  clean(fixture(t, { [raw]: recoverySource('return [entry].reduce(recoverPreparingIntent,runtime);') }, recovery, authorize));
++  denied(fixture(t, { [raw]: recoverySource('[entry].reduce(recoverPreparingIntent,runtime);return [entry].reduceRight(recoverPreparingIntent,runtime);') }, recovery, authorize), 'ARCH-PUBLICATION-RECOVERY-ENTRY');
++});

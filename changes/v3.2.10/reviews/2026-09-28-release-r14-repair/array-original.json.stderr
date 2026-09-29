@@ -1,0 +1,8 @@
+{"phase":"receiver-alias-reorder","at":"2026-09-28T09:18:15.213Z","violations":1}
+{"phase":"helper-reorder-after-write","at":"2026-09-28T09:18:15.216Z","violations":1}
+{"phase":"helper-write-and-reorder","at":"2026-09-28T09:18:15.218Z","violations":1}
+{"phase":"helper-reorder-before-write-safe","at":"2026-09-28T09:18:15.220Z","violations":0}
+{"phase":"overwritten-before-reorder-safe","at":"2026-09-28T09:18:15.222Z","violations":1}
+{"phase":"last-write-before-reorder","at":"2026-09-28T09:18:15.224Z","violations":1}
+{"phase":"helper-write-after-reorder-safe","at":"2026-09-28T09:18:15.226Z","violations":0}
+{"phase":"captured-before-later-reorder-safe","at":"2026-09-28T09:18:15.227Z","violations":0}

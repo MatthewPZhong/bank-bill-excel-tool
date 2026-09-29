@@ -1,0 +1,24 @@
+command: /opt/homebrew/Cellar/node/25.8.0/bin/node --require /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/changes/v3.2.10/codex/v3.2.10-business-task-adapters/evidence/startup-mutation-preload.js scripts/integration/position-startup-task-recovery.js
+mode: no-recovery-intent
+startedAt: 2026-09-20T15:52:35.762Z
+exitCode: 1
+signal: null
+
+STDOUT
+
+STDERR
+STARTUP_MUTATION_APPLIED no-recovery-intent
+FAILURES AssertionError [ERR_ASSERTION]: 必须经生产 owner 恢复补建 intent
+
+0 !== 1
+
+    at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/scripts/integration/position-startup-task-recovery.js:243:14
+    at async check (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/scripts/integration/position-startup-task-recovery.js:226:36)
+    at async main (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/scripts/integration/position-startup-task-recovery.js:228:3) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 0,
+  expected: 1,
+  operator: 'strictEqual',
+  diff: 'simple'
+}

@@ -1,0 +1,28 @@
+✖ B0 部分 init 失败：全部已创建真实 worker 退出前 executor 不得结算 (25.423792ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 94.306334
+
+✖ failing tests:
+
+test at tests/unit/main-process/run-check-multiworker.test.js:725:1
+✖ B0 部分 init 失败：全部已创建真实 worker 退出前 executor 不得结算 (25.423792ms)
+  AssertionError [ERR_ASSERTION]: terminate 尚未完成且线程仍存活时不得返回
+  
+  true !== false
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-storage-execution-separation/tests/unit/main-process/run-check-multiworker.test.js:736:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

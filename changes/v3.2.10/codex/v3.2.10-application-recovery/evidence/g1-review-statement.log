@@ -1,0 +1,57 @@
+✖ 现有journal Publisher对current/all多artifact执行全有或全无并在失败后清理generation (66.296ms)
+✖ all scope全量0输出以rowCounts+warning可观测并通过相同Publisher边界发布header-only workbook (39.343709ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 364.280375
+
+✖ failing tests:
+
+test at tests/unit/main-process/statement-generation-e09-c.test.js:1112:1
+✖ 现有journal Publisher对current/all多artifact执行全有或全无并在失败后清理generation (66.296ms)
+  AssertionError [ERR_ASSERTION]: The validation function is expected to return "true". Received false
+  
+  Caught error:
+  
+  Error: 发布恢复缺少受信任 authority，恢复材料已保留
+      at async TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/statement-generation-e09-c.test.js:1183:3)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: Error: 发布恢复缺少受信任 authority，恢复材料已保留
+        at recoveryError (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/publication-recovery/worker-authority.js:18:17)
+        at verify (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/publication-recovery/worker-authority.js:40:11)
+        at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication.js:2519:23
+        at withLifecycleMutex (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication.js:91:12)
+        at prepareToolboxPublication (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication.js:2509:10)
+        at journalPublisher (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/statement-worker/publication.js:201:20)
+        at validateAndPublishStatementGeneration (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/statement-worker/publication.js:274:31)
+        at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/statement-generation-e09-c.test.js:1184:5)
+        at Test.runInAsyncScope (node:async_hooks:226:14)
+        at Test.run (node:internal/test_runner/test:1201:25),
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/statement-generation-e09-c.test.js:1880:1
+✖ all scope全量0输出以rowCounts+warning可观测并通过相同Publisher边界发布header-only workbook (39.343709ms)
+  Error: 发布恢复缺少受信任 authority，恢复材料已保留
+      at recoveryError (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/publication-recovery/worker-authority.js:18:17)
+      at verify (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/publication-recovery/worker-authority.js:40:11)
+      at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication.js:2519:23
+      at withLifecycleMutex (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication.js:91:12)
+      at prepareToolboxPublication (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication.js:2509:10)
+      at journalPublisher (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/statement-worker/publication.js:201:20)
+      at validateAndPublishStatementGeneration (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/statement-worker/publication.js:274:31)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/statement-generation-e09-c.test.js:1956:27)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25) {
+    code: 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED',
+    preserveTemporaryFiles: true,
+    recoveryPaths: [ '/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/statement-e09-c-he2mOc/user-data/toolbox-publish-journal-index.json' ]
+  }

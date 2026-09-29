@@ -1,0 +1,16 @@
+{
+  "result": "PASS",
+  "checkedAt": "2026-09-22T02:12:42.984434+08:00",
+  "branch": "release/v3.2.10",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "gateInputs": 1700,
+  "changedGateInputs": [],
+  "unchangedArchitectureConfig": [
+    "architecture/boundaries.json",
+    "architecture/legacy-allowlist.json"
+  ],
+  "reversePatchCheck": "PASS",
+  "gitDiffCheck": "PASS",
+  "verifiedLocalLinks": 33,
+  "missingLinks": []
+}

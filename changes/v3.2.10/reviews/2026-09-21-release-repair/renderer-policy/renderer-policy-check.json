@@ -1,0 +1,105 @@
+{
+  "violations": [],
+  "activeBoundaries": [
+    "renderer-acquiring",
+    "renderer-bank-bu",
+    "renderer-bank-statement",
+    "renderer-biz-op-legacy",
+    "renderer-biz-op-v327",
+    "renderer-dialog-app-settings",
+    "renderer-dialog-configuration",
+    "renderer-dialog-scenarios",
+    "renderer-dialog-toolbox",
+    "renderer-duplicate-inbound",
+    "renderer-modal-owner",
+    "renderer-new-account",
+    "renderer-pending",
+    "renderer-position",
+    "renderer-pre-fund",
+    "renderer-recon-id-fix",
+    "renderer-services",
+    "renderer-statement",
+    "renderer-vcc-financial-op",
+    "renderer-vcc-op-calc"
+  ],
+  "partialBoundaries": [],
+  "matchedExceptions": [
+    {
+      "rule": "ARCH-CYCLE",
+      "boundaryId": null,
+      "from": "src/backend/biz-op-recon-import/import-worker.js",
+      "to": "src/main-process/biz-op-recon-session.js",
+      "line": 49,
+      "column": 4,
+      "message": "生产依赖形成循环：src/backend/biz-op-recon-import/import-worker.js → src/main-process/biz-op-recon-session.js → src/backend/biz-op-recon-import/import-worker.js",
+      "dependencyPath": [
+        "src/backend/biz-op-recon-import/import-worker.js",
+        "src/main-process/biz-op-recon-session.js",
+        "src/backend/biz-op-recon-import/import-worker.js"
+      ],
+      "evidenceId": "a6247d7e51da79199b73635f3ec09a02c7fdc204edbce418b0a14b7e44162ecc",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "addOneDay",
+        "assertBizOpMonthEndAdmission",
+        "assertNoPendingMonthEndCopy",
+        "normalizeBu",
+        "recordMonthEndCopyIntent"
+      ],
+      "cycleEdges": [
+        {
+          "from": "src/backend/biz-op-recon-import/import-worker.js",
+          "to": "src/main-process/biz-op-recon-session.js",
+          "kind": "require"
+        },
+        {
+          "from": "src/main-process/biz-op-recon-session.js",
+          "to": "src/backend/biz-op-recon-import/import-worker.js",
+          "kind": "worker"
+        }
+      ],
+      "edgeKinds": [
+        "require",
+        "worker"
+      ],
+      "literalCycle": false,
+      "exceptionId": "baseline-cycle-001"
+    },
+    {
+      "rule": "ARCH-CYCLE",
+      "boundaryId": null,
+      "from": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+      "to": "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+      "line": 98,
+      "column": 21,
+      "message": "生产依赖形成循环：src/main-process/background-execution/adapters/worker-thread-adapter.js → src/main-process/vcc-financial-op-output/writer-worker-entry.js → src/main-process/background-execution/adapters/worker-thread-adapter.js",
+      "dependencyPath": [
+        "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+        "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+        "src/main-process/background-execution/adapters/worker-thread-adapter.js"
+      ],
+      "evidenceId": "69a3dcf14692fc4e083e6341f4366b184b6fe550ee8c13f3c541167c93e87e8c",
+      "functionPath": "createWorkerThreadAdapter.start",
+      "kind": "worker",
+      "cycleEdges": [
+        {
+          "from": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+          "to": "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+          "kind": "worker"
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+          "to": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+          "kind": "require"
+        }
+      ],
+      "edgeKinds": [
+        "require",
+        "worker"
+      ],
+      "literalCycle": false,
+      "exceptionId": "baseline-cycle-002"
+    }
+  ]
+}

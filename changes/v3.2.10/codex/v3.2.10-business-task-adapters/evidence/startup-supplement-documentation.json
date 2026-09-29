@@ -1,0 +1,17 @@
+{
+  "files": [
+    "AGENTS.md",
+    "changes/v3.2.10/README.md",
+    "src/main-process/task-adapters/README.md",
+    "rules/integration-test-policy.md",
+    "changes/v3.2.10/codex/v3.2.10-business-task-adapters/implementation-notes.md",
+    "changes/v3.2.10/codex/v3.2.10-business-task-adapters/implementation-review.md",
+    "changes/v3.2.10/codex/v3.2.10-business-task-adapters/spec.md",
+    "changes/v3.2.10/codex/v3.2.10-business-task-adapters/techdoc.md",
+    "changes/v3.2.10/codex/v3.2.10-business-task-adapters/evidence/startup-independent-review.md"
+  ],
+  "checkedLinks": 159,
+  "broken": [],
+  "boundary": "file existence only; Codex :line and fragment stripped",
+  "checkedAt": "2026-09-20T16:01:59.699023+00:00"
+}

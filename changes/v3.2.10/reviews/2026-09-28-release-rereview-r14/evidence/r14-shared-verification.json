@@ -1,0 +1,132 @@
+{
+  "status": "PASS",
+  "beforeManifest": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-r13-repair/input-manifest.json",
+  "currentManifest": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r14/evidence/input-manifest.json",
+  "groups": {
+    "shared-probes": {
+      "count": 20,
+      "outputSha256": "1c6c62f97c3e54ea9a5fb794c1d0c61ad948cccb912a6029ca2918646e3f0cf7",
+      "scriptSha256": "dd3b510dc9c65ffab189f8995693398700e18910b29ccd439a8e4f3401433ccf"
+    },
+    "destructure-probes": {
+      "count": 8,
+      "outputSha256": "eec673319eeb86df002ade6e4eda9970bb493d7ad5f5414d23ad26f0b8c72b7f",
+      "scriptSha256": "847ae1e2e6156d71cd4d4329623a12c6a8dfbf3a733a8f9768791f1c6ccb2ad9"
+    },
+    "localenv-probes": {
+      "count": 10,
+      "outputSha256": "2d1267da134c7a206528fd5653500204e3854157ad654c0402a027eca257af55",
+      "scriptSha256": "d70e4650b603fe9e208e84476bde8996b91cdc2fb55c25a6e1a95228fefa738a"
+    },
+    "default-combinations": {
+      "count": 6,
+      "outputSha256": "5e1129df91532536768ec81ccdd2236f57f70ea67c1e782153ddbbd688b18124",
+      "scriptSha256": "cfba6daa0b983a495fa8e9cb9e13cafc809bbadc7d7498e84bcf5e3ef682035a"
+    },
+    "async-array-combinations": {
+      "count": 6,
+      "outputSha256": "eeb15136524f3c3d81b07e98f2c8d5a7453c202d490eee4637e4ee0644ba159e",
+      "scriptSha256": "cb94e5c60c5d92ceb3887fbd29fd15ae365a1f0580f0b85c3fa7f3874ac8649f"
+    },
+    "logical-combinations": {
+      "count": 6,
+      "outputSha256": "39b85981452e75ae986daae0c07a27f0abb0ba5636daf89a332bbe88ccca597b",
+      "scriptSha256": "43a13f5102bfff97e167179a8ab95cdbfffefda72687d51286f82a99eeec9e17"
+    }
+  },
+  "renderer": 38,
+  "query": 18,
+  "executedSqlFixtures": 10,
+  "sharedDiagnosticChanges": [],
+  "knownConservativeLimitations": [
+    {
+      "name": "conditional-distinct-pure-values",
+      "note": "both branches are pure strings but current and prior reject ambiguous value"
+    }
+  ],
+  "asyncIpcCorrectionPreserved": true,
+  "sharedTotalFixtures": 56,
+  "bindings": {
+    "totalFixtures": 6,
+    "cases": [
+      {
+        "name": "shared-helper-independent-safe",
+        "unsafe": false,
+        "beforeDiagnostics": 0,
+        "currentDiagnostics": 0,
+        "vmAgrees": true
+      },
+      {
+        "name": "shared-helper-independent-unsafe",
+        "unsafe": true,
+        "beforeDiagnostics": 1,
+        "currentDiagnostics": 1,
+        "vmAgrees": true
+      },
+      {
+        "name": "lexical-capture-shadow-safe",
+        "unsafe": false,
+        "beforeDiagnostics": 0,
+        "currentDiagnostics": 0,
+        "vmAgrees": true
+      },
+      {
+        "name": "lexical-capture-shadow-unsafe",
+        "unsafe": true,
+        "beforeDiagnostics": 1,
+        "currentDiagnostics": 1,
+        "vmAgrees": true
+      },
+      {
+        "name": "sibling-factory-local-helper-safe",
+        "unsafe": false,
+        "beforeDiagnostics": 0,
+        "currentDiagnostics": 0,
+        "vmAgrees": true
+      },
+      {
+        "name": "sibling-factory-local-helper-unsafe",
+        "unsafe": true,
+        "beforeDiagnostics": 1,
+        "currentDiagnostics": 1,
+        "vmAgrees": true
+      }
+    ],
+    "scriptSha256": "fd110fed722ad76ccbeb856454c5e7becb8f7cab9c97cac9851d9d55c0d6b914",
+    "outputSha256": "6f5152ea2970465599c04bbb95130ab60d37b1e01cf984454516343d158c634a"
+  },
+  "totalFixtures": 62,
+  "scannerStableFixtures": 62,
+  "currentRendererSha256": "adc6b47bb07c2c66f0d41b09d42e6195ffa404587bf8b3faceda662ec1767072",
+  "beforeRendererSha256": "f288b9b66558e1fee0ca9697c493aed3b60c5999fac6c0366b81041a46c4f082",
+  "fixtureSourceComparison": {
+    "count": 62,
+    "matchesPrevious": true,
+    "currentSha256": "831e5c668d30e35ea16913faac3fce946e73820785afe4295efb145f076ed171",
+    "previousSha256": "831e5c668d30e35ea16913faac3fce946e73820785afe4295efb145f076ed171"
+  },
+  "policyHashes": {
+    "architecture/boundaries.json": {
+      "before": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+      "current": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+      "same": true
+    },
+    "architecture/legacy-allowlist.json": {
+      "before": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3",
+      "current": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3",
+      "same": true
+    },
+    "scripts/architecture/policy-history.js": {
+      "before": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+      "current": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+      "same": true
+    },
+    "scripts/architecture/schema.js": {
+      "before": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "current": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "same": true
+    }
+  },
+  "newFindings": [],
+  "scope": "56 shared cases and 6 exact R13 review parameter-binding/capture cases; no full repository scan or architecture suite."
+}

@@ -30,13 +30,13 @@ const {
 } = require('../shared/vcc-financial-op-difference');
 const {
   encodeExcelStXstring
-} = require('../backend/toolbox-format/excel-text');
+} = require('../backend/xlsx/excel-text');
 const {
   SPREADSHEETML_NAMESPACES,
   exactSaxLocalName,
   namespaceAllowed,
   normalizedSaxAttributes
-} = require('../backend/toolbox-format/ooxml-namespaces');
+} = require('../backend/xlsx/ooxml-namespaces');
 const { writeXlsxAtomically } = require('./vcc-financial-op-output-publication');
 const {
   buildVccSubjectAuthority,

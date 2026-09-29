@@ -1,0 +1,147 @@
+{
+  "before": {
+    "scripts/architecture/scan.js": "5c343dbb1864b34efa76e58f88a16262f9f9e7d275039fed21f7d5350da26df8",
+    "scripts/architecture/rules.js": "a43f466da3ab8a87488c62ba5ba5959e45282b7f98c51e36fa5b1d4cb11889b7",
+    "scripts/architecture/contracts.js": "b5a9e3d5cee943783d0405bcabaddd6341ed0a399c40053222fd59b412454572"
+  },
+  "after": {
+    "scripts/architecture/scan.js": "5c343dbb1864b34efa76e58f88a16262f9f9e7d275039fed21f7d5350da26df8",
+    "scripts/architecture/rules.js": "a43f466da3ab8a87488c62ba5ba5959e45282b7f98c51e36fa5b1d4cb11889b7",
+    "scripts/architecture/contracts.js": "b5a9e3d5cee943783d0405bcabaddd6341ed0a399c40053222fd59b412454572"
+  },
+  "stable": true,
+  "results": [
+    {
+      "name": "full-spread",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "function provide(){return {...window.desktopApi};}createProbe({api:provide()});"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "from": "src/app.js",
+          "line": 1,
+          "message": "工厂字段 api 不能注入完整可变对象或不透明 alias"
+        }
+      ],
+      "edges": [],
+      "runtime": {
+        "wholeApi": false,
+        "wholeApiAsRead": false,
+        "outsideScopeViaRead": false,
+        "outsideScopeDirect": true
+      }
+    },
+    {
+      "name": "assign-returned-api",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "function provide(){const api={read:window.desktopApi.read};Object.assign(api,window.desktopApi);return api;}createProbe({api:provide()});"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "from": "src/app.js",
+          "line": 1,
+          "message": "工厂字段 api 不能注入完整可变对象或不透明 alias"
+        }
+      ],
+      "edges": [],
+      "runtime": {
+        "wholeApi": false,
+        "wholeApiAsRead": false,
+        "outsideScopeViaRead": false,
+        "outsideScopeDirect": true
+      }
+    },
+    {
+      "name": "define-property-returned-api",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "function provide(){const api={read:window.desktopApi.read};Object.defineProperty(api,'outsideScope',{value:window.desktopApi.outsideScope});return api;}createProbe({api:provide()});"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "from": "src/app.js",
+          "line": 1,
+          "message": "工厂字段 api 不能注入完整可变对象或不透明 alias"
+        }
+      ],
+      "edges": [],
+      "runtime": {
+        "wholeApi": false,
+        "wholeApiAsRead": false,
+        "outsideScopeViaRead": false,
+        "outsideScopeDirect": true
+      }
+    },
+    {
+      "name": "umd-full",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "(function(root){root.Provider={provide(){return root.desktopApi;}};})(window);createProbe({api:Provider.provide()});"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "from": "src/app.js",
+          "line": 1,
+          "message": "工厂字段 api 不能注入完整可变对象或不透明 alias"
+        }
+      ],
+      "edges": [],
+      "runtime": {
+        "wholeApi": true,
+        "wholeApiAsRead": false,
+        "outsideScopeViaRead": false,
+        "outsideScopeDirect": true
+      }
+    },
+    {
+      "name": "umd-scoped",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "(function(root){root.Provider={provide(){return {read:root.desktopApi.read};}};})(window);createProbe({api:Provider.provide()});"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "from": "src/app.js",
+          "line": 1,
+          "message": "工厂字段 api 不能注入完整可变对象或不透明 alias"
+        }
+      ],
+      "edges": [],
+      "runtime": {
+        "wholeApi": false,
+        "wholeApiAsRead": false,
+        "outsideScopeViaRead": false,
+        "outsideScopeDirect": false
+      }
+    },
+    {
+      "name": "provider-late-write",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "window.Provider={provide(){return window.desktopApi;}};createProbe({api:Provider.provide()});window.Provider={provide(){return {read:window.desktopApi.read};}};"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "from": "src/app.js",
+          "line": 1,
+          "message": "工厂字段 api 不能注入完整可变对象或不透明 alias"
+        }
+      ],
+      "edges": [],
+      "runtime": {
+        "wholeApi": true,
+        "wholeApiAsRead": false,
+        "outsideScopeViaRead": false,
+        "outsideScopeDirect": true
+      }
+    }
+  ]
+}

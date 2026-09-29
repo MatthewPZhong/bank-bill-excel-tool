@@ -1,0 +1,8 @@
+{
+  "file": "rules/integration-test-policy.md",
+  "onlyGeneratedSectionChanged": true,
+  "section": "七",
+  "newIntegrationScript": "acquiring-worker-boundary.js",
+  "countedAssertions": 2593,
+  "scripts": 61
+}

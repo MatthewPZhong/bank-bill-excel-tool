@@ -1,0 +1,62 @@
+▶ 消费方有效预算、覆盖规则和 R3/R4 差异保持固定基线合同
+  ✔ L1 三个生产入口保留各自列宽与 maxRows，legacy 不接 adaptive (168.333042ms)
+  ✔ L2 helper 消费者保留原解析差异，T1 仍自行装配并完整加载 SST (22.318583ms)
+  ✔ Position 保留 undefined 默认、Number 转换、null 拒绝及本域关闭规则 (17.286875ms)
+  ✔ VCC S1 保留 undefined 默认、Number 转换、null 拒绝及本域关闭规则 (7.381208ms)
+  ✔ R1 BizOP import 在真实管线保留 ?? 与 undefined 的不同覆盖优先级 (339.852ms)
+  ✔ R2 BizOP RAW 单页读取和输出多页验证各自保持 32 MiB 与私有临时根 (420.589584ms)
+  ✔ R3 和 R4 四处 VCC 真实导入、原件导出、待确认导出保留不同 cache 和取消桥接 (192.462042ms)
+✔ 消费方有效预算、覆盖规则和 R3/R4 差异保持固定基线合同 (1178.861041ms)
+✔ excel-text 旧入口与公共入口共享同一导出对象 (1.334959ms)
+✔ ooxml-namespaces 旧入口与公共入口共享同一导出对象 (0.66625ms)
+✔ number-date 旧入口与公共入口共享同一导出对象 (0.652ms)
+✔ model 旧入口与公共入口共享同一导出对象 (0.369542ms)
+✔ style-registry 旧入口与公共入口共享同一导出对象 (2.214458ms)
+✔ xlsx-sheet-scanner 旧入口与公共入口共享同一导出对象 (0.681291ms)
+✔ ZIP 旧入口保留全部导出和 BigTableImportError constructor 身份 (2.517125ms)
+✔ Toolbox 装配转发既有 metadata/SST helper，公共模块不暴露业务装配 (4.488959ms)
+✔ 公共 metadata 解析错误仍可通过旧业务 constructor 判断 (0.30625ms)
+✔ 公共叶子、ZIP 与 workbook-parts 的运行时依赖闭包不载入业务源码 (0.262416ms)
+✔ legacy 兼容旧入口转发同一导出对象与函数 (0.848792ms)
+✔ legacy 冻结行顺序、连续一基回调行号、列宽和 inline/escape 行值 (14.096291ms)
+✔ legacy 空 SST 返回 null，存在的富文本 SST 保留字符串数组合同 (0.627542ms)
+✔ legacy 仅正整数 maxRows 启用截断，等于实际行数仍报告 truncated (9.420709ms)
+✔ legacy 同步逐行调用且忽略回调返回的 Promise/thenable (2.848917ms)
+✔ 同一 XLSX 的 legacy 数字投影与 rich lexical/稀疏行号有意不同 (9.4115ms)
+✔ rich 兼容旧入口转发同一导出对象与函数 (0.762417ms)
+✔ rich 单页入口将隐藏页计入声明页数，先于损坏 styles/SST 拒绝 (15.576167ms)
+✔ rich 保留声明 sheet 顺序、隐藏状态、1904 日期系统及原始数字 lexical (7.450417ms)
+▶ rich 拒绝重复目标、外部目标、缺失关系和缺失 worksheet
+  ✔ 重复目标 (2.98525ms)
+  ✔ 外部目标 (2.727667ms)
+  ✔ 缺失关系 (2.282875ms)
+  ✔ 缺失 worksheet (2.229666ms)
+✔ rich 拒绝重复目标、外部目标、缺失关系和缺失 worksheet (10.615375ms)
+✔ rich 重复 relationship Id 保留原解析错误类型和 code (2.388458ms)
+✔ rich maxSheets 保留 1..4096 安全整数预算校验 (5.548375ms)
+✔ rich 不接受其他 workbook 的样式引用 (3.154958ms)
+✔ rich 拒绝并发 scan、非法页和 close 后 scan，close 缓存同一 Promise (3.204292ms)
+▶ rich 各原有同步 callback 返回 thenable 按原 TypeError 拒绝且不等待
+  ✔ onRow (3.062083ms)
+  ✔ onCellLexical (2.833083ms)
+  ✔ onSheetMeta (2.198792ms)
+✔ rich 各原有同步 callback 返回 thenable 按原 TypeError 拒绝且不等待 (8.288875ms)
+✔ rich SST 构建失败清理已溢出的私有目录 (3.540459ms)
+✔ rich 扫描中取消保留原取消错误，并在 caller await close 后清理 spill (2.804667ms)
+✔ rich 关闭先 SST 后 ZIP，双失败汇总真实错误并缓存 rejected Promise (0.4595ms)
+✔ rich 构建失败仍关闭 ZIP，关闭再次失败保留原 cause 和 AggregateError (0.171167ms)
+✔ 旧入口的导出和错误 constructor 均指向唯一实现 (1.103125ms)
+✔ 缺 entry 不分配磁盘；Memory close 清空原数组 (1.482042ms)
+✔ 公共缺省预算保持 64 MiB/8192；覆盖的 Number 转换与 cache 校验保持 (0.204667ms)
+✔ 跨预算才独占落盘，缓存受 entry/字节预算约束，重复 close 保持成功 (3.862208ms)
+✔ 替换 spill 文件后只保留替换文件并持续报告原错误 (2.512042ms)
+✔ 句柄关闭失败 strictClose=false 保留原分支 (1.638042ms)
+✔ 句柄关闭失败 strictClose=true 保留原分支 (1.022541ms)
+ℹ tests 51
+ℹ suites 0
+ℹ pass 51
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1313.366958

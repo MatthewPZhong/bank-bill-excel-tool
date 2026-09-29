@@ -1,0 +1,24 @@
+✔ R1 StaticBlock 的 var/let 只遮蔽块内 require，块外真实 fs 仍受保护 (20.696542ms)
+✔ R2 factory 仅改配置、替代未使用和旧调用残留均不能迁移；真实迁移 CLI 通过 (1360.743875ms)
+✔ R2 active 工厂定义或生产调用消失要报告覆盖错误 (3.901208ms)
+✔ R3 worker operation 候选含 recover 被拒绝，未知值失败关闭，纯 publish 允许 (8.663833ms)
+✔ R4 具名任务作用域按来源检查 mutable alias 和本地 helper，不依赖 Position 变量名 (7.996208ms)
+✔ R5 getter 的 DB 句柄保留方法身份并失败关闭，query facade 允许 (2.729625ms)
+✔ R6 scoped API 不接受 helper 返回值、条件对象及嵌套 full API (5.69025ms)
+✔ R7 装配依据执行模式：defer/module/async 不能当作同步先行脚本 (10.0775ms)
+✔ R8 Worker 相对路径按仓库 cwd，与真实 Node Worker 结果一致而非 launcher 目录 (60.445ms)
+✔ R9 dotted API 白名单逐叶匹配，合法嵌套方法通过，额外方法/spread 失败 (5.229625ms)
+✔ R10 父函数扩大保护 CLI 通过，反向缩小和同前缀兄弟范围拒绝 (1183.858625ms)
+✔ R3 精确历史动态 op 不能复制到新函数或在 active 沿用，退出通知仅准确允许 (5.372459ms)
+✔ R4 未知 factory 可变别名失败关闭，明确的参数默认回调通过 (1.741ms)
+✔ R4 合法调用精确登记不能传给同函数的另一个 AST 位置 (1.473667ms)
+✔ R5 RegExp.exec 是合法文本解析，不与未知 handle.exec 混同 (1.701458ms)
+✔ R8 path.resolve 的相对参数使用扫描根目录，不受检查器进程 cwd 影响 (1.266083ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2761.045833

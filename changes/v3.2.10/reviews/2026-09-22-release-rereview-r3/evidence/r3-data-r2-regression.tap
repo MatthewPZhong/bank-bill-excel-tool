@@ -1,0 +1,15 @@
+✔ RR2-04 initialInfo 递归拒绝能力与未知数据 {api:window.desktopApi} (13.537417ms)
+✔ RR2-04 initialInfo 递归拒绝能力与未知数据 [{api:window.desktopApi}] (1.641041ms)
+✔ RR2-04 initialInfo 递归拒绝能力与未知数据 {nested:{run(){}}} (1.404583ms)
+✔ RR2-04 initialInfo 递归拒绝能力与未知数据 {nested:window.state} (1.226584ms)
+✔ RR2-04 initialInfo 递归拒绝能力与未知数据 {nested:window.elements} (1.318625ms)
+✔ RR2-04 initialInfo 递归拒绝能力与未知数据 {nested:unknown} (1.020792ms)
+✔ RR2-04 递归纯数据和真实 app:get-info IPC 数据保持合法 (6.001958ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 98.1165

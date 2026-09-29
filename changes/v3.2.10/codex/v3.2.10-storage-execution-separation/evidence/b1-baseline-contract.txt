@@ -1,0 +1,33 @@
+▶ β.1-T2 多 worker contract（Group A：repository 级 byte-for-byte）
+  ✔ A1.[~50 行 / chunkSize 10（5 chunks 跨边界）] M=2 🔴 多 worker == 单 worker 逐行一致 (28.152333ms)
+  ✔ A1.[~50 行 / chunkSize 10（5 chunks 跨边界）] M=4 🔴 多 worker == 单 worker 逐行一致 (23.763458ms)
+  ✔ A1.[500 行 / chunkSize 100（5 chunks 跨边界）] M=2 🔴 多 worker == 单 worker 逐行一致 (29.498667ms)
+  ✔ A1.[500 行 / chunkSize 100（5 chunks 跨边界）] M=4 🔴 多 worker == 单 worker 逐行一致 (28.887833ms)
+  ✔ A1.[500 行 / chunkSize 50（10 chunks 喂饱 M=4）] M=2 🔴 多 worker == 单 worker 逐行一致 (37.565625ms)
+  ✔ A1.[500 行 / chunkSize 50（10 chunks 喂饱 M=4）] M=4 🔴 多 worker == 单 worker 逐行一致 (34.589708ms)
+  ✔ A1.[5000 行 / chunkSize 500（10 chunks）] M=2 🔴 多 worker == 单 worker 逐行一致 (78.713041ms)
+  ✔ A1.[5000 行 / chunkSize 500（10 chunks）] M=4 🔴 多 worker == 单 worker 逐行一致 (89.293583ms)
+  ✔ A1.[5000 行 / chunkSize 137（非整除边界）] M=2 🔴 多 worker == 单 worker 逐行一致 (129.247834ms)
+  ✔ A1.[5000 行 / chunkSize 137（非整除边界）] M=4 🔴 多 worker == 单 worker 逐行一致 (117.65275ms)
+  ✔ A2. 单 chunk（chunkSize >= 总行数）🔴 byte-for-byte 一致 (19.9765ms)
+  ✔ A3. 0 diff（全匹配）→ 两路均 0 行 + totalChunks/lastCompletedChunkIndex 一致 (25.690709ms)
+  ✔ A4. 空表（0 bill 行）→ totalChunks=0 / lastCompletedChunkIndex=-1（与单 worker 一致，不起 worker） (2.074708ms)
+  ✔ A6. 🔴 worker crash（reader 阶段）→ reject + 本 run diff_rows 清空（不留半套数据） (17.95525ms)
+  ✔ A7. 🔴 失败清理范围：DELETE 仅清本 run（runId=2），不误伤 runId=1 的有效 diff (20.264625ms)
+  ✔ A5. 三方一致：单 worker vs M=2 vs M=4 同一份数据 diff_rows 逐行相等 (168.170625ms)
+✔ β.1-T2 多 worker contract（Group A：repository 级 byte-for-byte） (852.797ms)
+▶ β.1-T2 多 worker contract（Group B：runCheckCore 级 gate）
+  ✔ B1.[60 bill] 🔴 runCheckCore 多 worker(M=2) == 单 worker baseline 逐行一致 (676.680084ms)
+  ✔ B1.[600 bill] 🔴 runCheckCore 多 worker(M=2) == 单 worker baseline 逐行一致 (777.18975ms)
+  ✔ B4. 🔴 C2：resume(从 chunk 0)重跑前清本 run 残留 diff_rows（MW 崩/cancel mid-merge 不致翻倍） (254.456958ms)
+  ✔ B2. gate 回退：workerCount=4 但无 dbPath → 走单 worker（结果正确 + chunk_progress complete） (258.904875ms)
+  ✔ B3. default workerCount（不传）== 显式 workerCount=1（都单 worker，diff_rows 一致） (469.5545ms)
+✔ β.1-T2 多 worker contract（Group B：runCheckCore 级 gate） (2437.088417ms)
+ℹ tests 21
+ℹ suites 2
+ℹ pass 21
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3492.317084

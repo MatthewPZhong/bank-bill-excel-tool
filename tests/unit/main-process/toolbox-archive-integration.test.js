@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
+const { createPositionTaskOwner } = require('../../../src/main-process/position-reconciliation/task-owner');
 
 const {
   createArchiveCenterController
@@ -25,14 +26,31 @@ const {
   ToolboxPublicationCrashError,
   prepareToolboxPublication,
   publishPreparedToolboxPublication
-} = require('../../../src/main-process/toolbox-output-publication');
+} = require('../../helpers/publication-authority');
 const {
   recoverToolboxPublicationsIntoArchive
 } = require('../../../src/main-process/toolbox-archive-recovery');
-const {
-  publishToolboxPublicationAsync,
-  recoverToolboxPublicationsAsync
-} = require('../../../src/main-process/toolbox-output-publication-dispatch');
+const { createTestPublicationHarness } = require('../../helpers/publication-authority');
+const { createArchivePublicationOwner } = require('../../../src/main-process/publication-recovery/archive-owner');
+const publicationHosts = new Map();
+function publicationHost(userDataDir, archiveCenter) {
+  let host = publicationHosts.get(userDataDir);
+  if (!host) {
+    let center = archiveCenter;
+    const owner = createArchivePublicationOwner({ getArchiveCenter: () => center });
+    host = { ...createTestPublicationHarness(userDataDir, { owners: [owner] }),
+      setCenter(value) { center = value; } };
+    publicationHosts.set(userDataDir, host);
+  }
+  if (archiveCenter) host.setCenter(archiveCenter);
+  return host;
+}
+function publishToolboxPublicationAsync(options) {
+  return publicationHost(options.userDataDir).dispatcher.publish({ ...options, requireArchiveHandoff: true, requireValidatedArtifacts: true });
+}
+function archiveRecovery(userDataDir, archiveCenter) {
+  return (options) => publicationHost(userDataDir, archiveCenter).recovery.recover(options);
+}
 
 const {
   sourceSnapshotFromStat,
@@ -135,14 +153,15 @@ function buildPositionPendingRecoveryOwner({ database, getService, recoveryPromi
   assert.ok(start >= 0 && end > start, '应定位 Position pending owner recovery');
   const source = mainSource.slice(start, end);
   return Function(
-    'database',
-    'POSITION_SIDE_DB_PENDING_SETTING',
+    'positionTaskOwner',
     'getPositionReconciliationService',
     'positionPendingRecoveryPromise',
     `${source}\nreturn recoverPositionPendingBeforeInterruptedSweep;`
   )(
-    database,
-    'position_reconciliation_side_db_pending_v1',
+    createPositionTaskOwner({
+      settingsAvailable: () => Boolean(database && database.db),
+      readSetting: (key) => database.getSetting(key)
+    }),
     getService,
     recoveryPromise
   );
@@ -212,15 +231,18 @@ test('committed 恢复输出携 exact7 回原批次，output descriptor 显式�
   const initStart = mainSource.indexOf('function initializeArchiveCenter()');
   const initEnd = mainSource.indexOf('\nfunction registerAppHandlers()', initStart);
   const initSource = mainSource.slice(initStart, initEnd);
-  assert.match(
-    initSource,
-    /recoverInterruptedTaskOwners: \[/
-  );
-  assert.ok(
-    initSource.indexOf("ownerName: 'Position'")
-      < initSource.indexOf("ownerName: 'Toolbox/VCC output publications'"),
-    'Position 与 Toolbox/VCC 输出应作为独立 owner 按固定顺序 settle'
-  );
+  const { createApplicationRecoveryComposition } = require('../../../src/main-process/application-recovery/composition');
+  const composition = createApplicationRecoveryComposition({
+    platform: { scanAndRecover: async () => ({}), recoverSource: async () => ({}) },
+    bizOpModule: { recovery: { bindPlatform() {}, run: async () => ({}) },
+      activation: { needed: () => false } },
+    recoverPosition: async () => {}, recoverToolboxVccPublications: async () => {},
+    recoverPendingRuns: async () => {}, recoverLegacyBizOpRuns: async () => {},
+    recoverPreFundRuns: async () => {}, recoverVccImportTerminal: async () => {},
+    reconcileVccImportLineage: async () => {}
+  });
+  const ownerNames = composition.archiveOwnerHooks().map((hook) => hook.ownerName);
+  assert.ok(ownerNames.indexOf('Position') < ownerNames.indexOf('Toolbox/VCC output publications'));
   assert.match(
     initSource,
     /archiveCenterService\.initialize\(\)\.catch\(\(error\) => \{[\s\S]*?throw error;/,
@@ -389,7 +411,7 @@ test('after-committed 崩溃首次完整启动即归档 ready + task succeeded�
       recoverInterruptedTasks: () => recoverToolboxPublicationsIntoArchive({
         userDataDir,
         archiveCenter: controller,
-        recoverPublications: recoverToolboxPublicationsAsync
+        recoverPublications: archiveRecovery(userDataDir, controller)
       }),
       // owner recovery 成功后不应再依赖 protected-list 才避免误扫。
       getProtectedInterruptedTaskBatchIds: () => []
@@ -521,7 +543,7 @@ test('Position owner 失败仍完成 Toolbox 同次恢复，但统一阻断启�
         recover: () => recoverToolboxPublicationsIntoArchive({
           userDataDir,
           archiveCenter: controller,
-          recoverPublications: recoverToolboxPublicationsAsync
+          recoverPublications: archiveRecovery(userDataDir, controller)
         })
       }
     ],
@@ -693,7 +715,7 @@ test('损坏 outbox 不短路 Toolbox owner 且阻断新发布，修复后重启
           await recoverToolboxPublicationsIntoArchive({
             userDataDir,
             archiveCenter: controller,
-            recoverPublications: recoverToolboxPublicationsAsync
+            recoverPublications: archiveRecovery(userDataDir, controller)
           });
         }
       }],
@@ -900,7 +922,7 @@ test('正常 worker committed 后 receipt 保留 N 个输入与全部输出，�
         recover: () => recoverToolboxPublicationsIntoArchive({
           userDataDir,
           archiveCenter: controller,
-          recoverPublications: recoverToolboxPublicationsAsync
+          recoverPublications: archiveRecovery(userDataDir, controller)
         })
       }],
       getProtectedInterruptedTaskBatchIds: () => []
@@ -977,7 +999,7 @@ test('正常 worker committed 后 receipt 保留 N 个输入与全部输出，�
   await recoverToolboxPublicationsIntoArchive({
     userDataDir,
     archiveCenter: secondStartup.controller,
-    recoverPublications: recoverToolboxPublicationsAsync,
+    recoverPublications: archiveRecovery(userDataDir, secondStartup.controller),
     taskIds: [newPublication.taskId]
   });
   assert.equal(fs.readFileSync(targetPath, 'utf8'), 'NEW');
@@ -1010,7 +1032,8 @@ test('工具箱 publication cancel-wins 后迟到 success 不 ACK committed rece
         inputFiles: [],
         files: []
       }],
-      skippedActive: []
+      skippedActive: [], deferred: [],
+      observation: { complete: true, requestedTaskIds: [], absentTaskIds: [] }
     };
   };
   const archiveCenter = {
@@ -1162,7 +1185,7 @@ test('恢复索引首读 EIO 时 sweepUnsafe 阻止通用扫尾，二启完成�
       recover: () => recoverToolboxPublicationsIntoArchive({
         userDataDir,
         archiveCenter: secondController,
-        recoverPublications: recoverToolboxPublicationsAsync
+        recoverPublications: archiveRecovery(userDataDir, secondController)
       })
     }],
     getProtectedInterruptedTaskBatchIds: () => readRecoveryBatchIds(userDataDir)

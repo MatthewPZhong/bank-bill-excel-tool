@@ -1,0 +1,48 @@
+{
+  "reviewSnapshot": "/private/tmp/application-recovery-review-7pcbw8r1",
+  "snapshotCapturedAt": "2026-09-20T21:04:27.623420+08:00",
+  "baseHead": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "currentRun": {
+    "focusedUnit": {
+      "testFiles": 16,
+      "tests": 211,
+      "pass": 211,
+      "fail": 0,
+      "skipped": 0,
+      "exitCode": 0
+    },
+    "integration": {
+      "command": "node scripts/integration/application-recovery-governance.js",
+      "pass": 4,
+      "fail": 0,
+      "exitCode": 0
+    },
+    "lint": {
+      "command": "npm run lint",
+      "exitCode": 0
+    },
+    "diffCheck": {
+      "command": "git diff --check",
+      "exitCode": 0
+    }
+  },
+  "priorReleaseCheckVerified": {
+    "sourceSnapshotFiles": 63,
+    "hashMismatches": [],
+    "logPath": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/changes/v3.2.10/codex/v3.2.10-application-recovery/evidence/release-check-final.log",
+    "logSha256": "1558ae58418e94e3db39727df47b6ff2f5c6d9c8b752422b006bf1b22e29fb32",
+    "unitPassed": 8167,
+    "unitFailed": 0,
+    "unitSkipped": 4,
+    "integrationScriptsPassed": 61,
+    "rerunThisReview": false
+  },
+  "sourceChangedByReview": false,
+  "probeType": "deterministic synthetic external index writer; no ordinary production path confirmed",
+  "notRun": [
+    "real Electron isolated cold start",
+    "Windows file locks and packaged durability",
+    "Excel/WPS manual acceptance",
+    "1000-output capacity rerun"
+  ]
+}

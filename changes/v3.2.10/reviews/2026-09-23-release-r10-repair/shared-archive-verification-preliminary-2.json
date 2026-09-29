@@ -1,0 +1,71 @@
+{
+  "status": "PASS",
+  "beforeVersion": "2026-09-23-release-r10-repair/input-manifest.json",
+  "beforeExecution": "All suites freshly executed with archived renderer-contracts.js and four SHA256-matched shared checkers",
+  "suiteCount": 6,
+  "totalCases": 56,
+  "rendererCases": 38,
+  "queryCases": 18,
+  "queryCasesExecutingSql": 10,
+  "changedResults": [],
+  "changedResultCount": 0,
+  "allExpectedResultsMatched": true,
+  "scannerRepeatAndPostRulesStableCases": 56,
+  "conservativeRejections": [
+    {
+      "suite": "r10-shared-async-array-combinations.json",
+      "name": "awaited-category-other-default-conservative",
+      "reason": "IPC field presence remains unknown; fallback capability is conservatively retained"
+    },
+    {
+      "suite": "r10-shared-logical-combinations.json",
+      "name": "conditional-distinct-pure-values",
+      "reason": "both branches are pure strings but current and prior reject ambiguous value"
+    }
+  ],
+  "asyncIpcDefaultExpectationPreserved": true,
+  "suites": [
+    {
+      "file": "r10-shared-async-array-combinations.json",
+      "rendererCases": 6,
+      "queryCases": 0,
+      "outputSha256": "9c5fdd617f9c425495d570f87e236b01c0e38a2e97d3d70ed7c032e6473d3b27",
+      "scriptSha256": "798d94d14ce048c9997308dc1b75265d0ff252f20747f429730bbbb7ffe552d2"
+    },
+    {
+      "file": "r10-shared-default-combinations.json",
+      "rendererCases": 6,
+      "queryCases": 0,
+      "outputSha256": "216fa1e968acfd6b3471545dc4e29e38df1889d9e870f7e48dccbfc1efd71946",
+      "scriptSha256": "77f40f3b2c1e561b3119c73e92850b516205f13f3b20eebf87889de751e1d222"
+    },
+    {
+      "file": "r10-shared-destructure-probes.json",
+      "rendererCases": 4,
+      "queryCases": 4,
+      "outputSha256": "b0f6e492f5ef1dc1a93f5eb9ac5b652e10f73420a5ba5251063428b779dd9dd7",
+      "scriptSha256": "cd4f411714446f01ad9ede9f0357574525f1a03a26c9e9095cce2101751bc2ab"
+    },
+    {
+      "file": "r10-shared-localenv-probes.json",
+      "rendererCases": 4,
+      "queryCases": 6,
+      "outputSha256": "f906c7d2b2e62eac506d1485020229d2648c6db5ef6bf5f8092c6b67010333dd",
+      "scriptSha256": "c1ca627312328448aeae58a15927db0a6d6386654ea0c5bf566ffc3b35c6011b"
+    },
+    {
+      "file": "r10-shared-logical-combinations.json",
+      "rendererCases": 6,
+      "queryCases": 0,
+      "outputSha256": "9c3fb648063de39bde6972933ad5d298135ea5f69a1f9610672bee26b440f87c",
+      "scriptSha256": "413cd6d94d30f69de588f480bc28d3f85c43e6b54a6b1e0f8fa92da288d29ac8"
+    },
+    {
+      "file": "r10-shared-shared-probes.json",
+      "rendererCases": 12,
+      "queryCases": 8,
+      "outputSha256": "5337158034581713e134b4b071d33a73c7cbc66be2a803049483cb7df817bef1",
+      "scriptSha256": "52cd66a54717421ac6d3cf4552ecef6d92bbc9b0fa27ceedb78ea483373381fb"
+    }
+  ]
+}

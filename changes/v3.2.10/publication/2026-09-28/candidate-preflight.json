@@ -1,0 +1,54 @@
+{
+  "status": "PASS",
+  "sourceAncestry": {
+    "G1": {
+      "sha": "856c9dce8ae4c381229e37b5b236e2e2f776921d",
+      "isAncestor": true
+    },
+    "G2": {
+      "sha": "3e203858ea49fc2935f5ab847de8af7f793d356a",
+      "isAncestor": true
+    },
+    "G3": {
+      "sha": "611af431493668df02fff98bdcda0b47c4080f20",
+      "isAncestor": true
+    },
+    "G4": {
+      "sha": "a4d91d173945cc42fcd9593f56504060c98f9d47",
+      "isAncestor": true
+    },
+    "G5": {
+      "sha": "e4389aafb07fc3d40c74af106abb2875981d07eb",
+      "isAncestor": true
+    },
+    "G6": {
+      "sha": "ed1cb2d73418fe1279cac96acd91090492555be3",
+      "isAncestor": true
+    },
+    "G7": {
+      "sha": "6a7d23c4ea062f90021fc670e8a1654ad8d2ad26",
+      "isAncestor": true
+    },
+    "G8": {
+      "sha": "9a1d8aee5ac8cfb27c816167a8cf3d6a4baff802",
+      "isAncestor": true
+    }
+  },
+  "changedSinceStart": [
+    "CHANGELOG.md",
+    "changes/v3.2.10/README.md",
+    "changes/v3.2.10/release.md",
+    "docs/USER_GUIDE.md",
+    "docs/VERSION_FEATURE_HISTORY.md",
+    "package-lock.json",
+    "package.json"
+  ],
+  "unchangedExistingFiles": 5324,
+  "primaryDirtyFilesPreserved": 865,
+  "version": "3.2.10",
+  "manualAcceptance": {
+    "status": "USER_CONFIRMED",
+    "reply": "已人工验收",
+    "scope": "本轮真实账单/资金结果、Windows 安装包及 Excel/WPS 人工验收；用户确认，非本 Agent 独立执行。"
+  }
+}

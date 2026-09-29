@@ -1,0 +1,16 @@
+{
+  "candidate": "49ac95a80bf884a0bfdc2f53ecbfdb4dd982819e",
+  "objects": {
+    "src": "851f9aaf5c596891c2acc3044ca09283b7dc7746",
+    "scripts": "dbbe710dd3a0d2cfafe19df196f67755b98d702b",
+    "tests": "6407597bf5d183622409a2dfac502e93248f8461",
+    "package.json": "af229059d6493529bccfeebad78aefab352ecd0a",
+    "package-lock.json": "9ad124eae8b3cf04f4d327436e768185f4a649b6",
+    "CODEX.md": "313da7a106139fa92f753b25e03f548dc7c38759"
+  },
+  "runtime": {
+    "node": "v25.8.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  }
+}

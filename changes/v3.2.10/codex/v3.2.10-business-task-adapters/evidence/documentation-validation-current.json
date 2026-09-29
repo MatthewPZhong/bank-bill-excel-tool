@@ -1,0 +1,16 @@
+{
+  "checkedAt": "2026-09-20T14:51:08.143099+00:00",
+  "files": [
+    "AGENTS.md",
+    "changes/v3.2.10/README.md",
+    "src/main-process/task-adapters/README.md",
+    "rules/integration-test-policy.md",
+    "changes/v3.2.10/codex/v3.2.10-business-task-adapters/implementation-notes.md",
+    "changes/v3.2.10/codex/v3.2.10-business-task-adapters/implementation-review.md",
+    "changes/v3.2.10/codex/v3.2.10-business-task-adapters/spec.md",
+    "changes/v3.2.10/codex/v3.2.10-business-task-adapters/techdoc.md"
+  ],
+  "linkCount": 136,
+  "broken": [],
+  "note": "只验证本地文件存在；Codex :line 和 fragment 部分剥离，不验证 Markdown anchor 语义"
+}

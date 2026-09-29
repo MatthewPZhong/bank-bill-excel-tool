@@ -1,0 +1,373 @@
+--- a/architecture/README.md
++++ b/architecture/README.md
+@@ -139,3 +139,5 @@
+ 工厂返回数组的扩容接收者及 mutator 实参使用创建数组时的调用环境，读取时点仍使用调用方环境；单调用 helper 参数转发保留外围调用帧，参数绑定按声明函数和参数名区分，闭包保留外层捕获身份，不按同名参数直接串用环境。普通数组 spread 遇到不确定长度时保留可见对象来源候选，任意索引都不冒充确定位置，最终能力检查继续识别经别名的写入。独立实例、旧别名和复制后替换有安全对照。跨文件对象时序、任意动态索引/反射和精确 mutator 执行仍不属于本轮解释承诺；未解析对象逃逸等既有保守拒绝保持。
+ 
+ release 第十一轮 RR11-01/02 细化上述来源证明：IPC 父对象的真值、非空约束不能传给未声明存在的子成员；子成员自身经过逻辑表达式选中时才重新取得证明。数组发生可见重排时，将重排前同一数组其他固定槽位的已知写入也保留为可能来源，并按调用环境和读写时点排除无关对象及重排后的写入；不据此推断精确索引。见 [RR11 回归](../tests/unit/architecture/release-rereview-r11.test.js)及[修复记录](../changes/v3.2.10/reviews/2026-09-23-release-r11-repair/repair.md)。
++
++release 第十二轮 RR12-01 将数组分配身份与内容求值分开：仅比较接收者身份时不展开元素，真正读取元素时保留原调用环境及递归深度/访问链。普通 helper 的唯一调用位置同时用于参数绑定与读写顺序核对，避免内部数组重排被错误排到外层写入之后。仍按既有合同保守收集重排来源，不精确模拟全部数组方法。见 [RR12 回归](../tests/unit/architecture/release-rereview-r12.test.js)及[修复记录](../changes/v3.2.10/reviews/2026-09-23-release-r12-repair/repair.md)。
+--- a/changes/v3.2.10/README.md
++++ b/changes/v3.2.10/README.md
+@@ -8,7 +8,7 @@
+ | 设计及源码基线 | `main@11086a3cbf632a30adbcfa796e4cd81810c5aef9`；本地附注标签 `v3.2.9` 指向同一提交 |
+ | 集成分支 | `release/v3.2.10`；G1–G8 已本地合入，当前为 `9a38b96b` 加未提交审查修复；第十一轮修复完整门禁 PASS，见 [本地集成记录](release.md) |
+ | 功能分支状态 | G1–G8 已逐项本地合入；当前修复候选 31 个机器边界 active、0 pending/partial，下表保留计划名称 |
+-| 交付状态 | 第十一轮 RR11-01/02 已修复，新增 11/11 回归、架构 577/577 PASS；完整门禁重跑 PASS（9351 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过）。修复未提交，真实产品/平台验收未执行。见 [第十一轮修复报告](reviews/2026-09-23-release-r11-repair/repair.md) |
++| 交付状态 | 第十二轮 RR12-01 helper 递归溢出已修复，新增 12/12 回归、架构 589/589 PASS；完整门禁重跑 PASS（9363 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过）。修复未提交，真实产品/平台验收未执行。见 [第十二轮修复报告](reviews/2026-09-23-release-r12-repair/repair.md) |
+ | 独立审查修订 | R1–R9 及 G8 历史损坏配置恢复建议均在设计层关闭，无已知待修必改项；处置、验收映射和三轮依据见 [修订记录](review-response.md)，独立报告保持原状 |
+ | 依据 | [模块耦合审查](../architecture-coupling/2026-09-20/review.md)及该目录的静态扫描、局部探针证据 |
+ | 格式参考 | [v3.2.9 按行拆分 Spec](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/spec.md)、[TechDoc](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/techdoc.md)的元数据、行为合同、分阶段实施和验收结构 |
+--- a/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md
++++ b/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md
+@@ -220,3 +220,9 @@
+ - RR11-01：IPC 父对象的真值/非空证明在取子成员时清除，子成员自己的逻辑分支可以重新建立证明；缺失字段仍允许进入默认参数来源核对。
+ - RR11-02：可见数组重排保留同一数组其他固定槽位在重排前的写入来源，继续按调用环境和先后时点排除无关对象、读后写入。不精确解释所有数组方法的索引结果。
+ - 新增 11 项正反回归，修复起点 5 FAIL / 6 PASS，最终全部通过；架构 577/577 PASS，实际配置正反例通过；完整门禁在 1708 个冻结输入上重跑 PASS：9351 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过。HEAD 未漂移。证据见 [本轮修复报告](../../reviews/2026-09-23-release-r11-repair/repair.md)。
++
++## 2026-09-23 · 第十二轮 RR12-01
++
++release 第十二轮 RR12-01 将数组分配身份与内容求值分开：仅比较接收者身份时不展开元素，真正读取元素时保留原调用环境及递归深度/访问链。普通 helper 的唯一调用位置同时用于参数绑定与读写顺序核对，避免内部数组重排被错误排到外层写入之后。仍按既有合同保守收集重排来源，不精确模拟全部数组方法。
++
++新增 12 项回归，准确起点 10 FAIL / 2 PASS，修复后定向 12 PASS；最终架构 589/589 PASS，完整门禁在 1709 个冻结输入上重跑 PASS：9363 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过。详见 [修复记录](../../reviews/2026-09-23-release-r12-repair/repair.md)。
+--- a/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md
++++ b/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md
+@@ -126,6 +126,8 @@
+ 第十轮 RR10-01/02：三个逻辑运算符按真值/空值选择返回分支，未知左支保留该分支成立时的非空或真值约束，防止默认参数重新引入不可能的对象；候选合并时来源取并集、分支证明取交集。工厂数组的内部写入使用 origin 调用环境，外部读取保留独立时点；静态 helper 参数继承正确调用帧。普通 spread 的未知长度仍保留可见来源而不伪造索引，能力对象别名写入继续检查。见 [RR10 修复记录](../../reviews/2026-09-23-release-r10-repair/repair.md)；机器授权、共享 scanner、业务输出合同保持。
+ 
+ 第十一轮 RR11-01/02：对象自身的真值/非空证明不递归证明 IPC 子成员存在，成员投影时清除父证明，允许成员表达式重新建立自己的分支事实。数组发生 reverse、shift、splice 等重排时，静态检查保留重排前其他固定槽位的可见写入来源；读后写入和独立数组不计入。该保守集合用于识别后续别名能力写入，不声明精确模拟数组索引。见 [RR11 修复记录](../../reviews/2026-09-23-release-r11-repair/repair.md)。
++
++release 第十二轮 RR12-01 将数组分配身份与内容求值分开：仅比较接收者身份时不展开元素，真正读取元素时保留原调用环境及递归深度/访问链。普通 helper 的唯一调用位置同时用于参数绑定与读写顺序核对，避免内部数组重排被错误排到外层写入之后。仍按既有合同保守收集重排来源，不精确模拟全部数组方法。见 [RR12 修复记录](../../reviews/2026-09-23-release-r12-repair/repair.md)。
+ 
+ ### 4.5 ARCH-XLSX-INFRA（G4）
+ 
+--- a/changes/v3.2.10/release.md
++++ b/changes/v3.2.10/release.md
+@@ -1,6 +1,16 @@
+ # v3.2.10 本地集成记录
+ 
+-当前 G1–G8 均已本地合入，HEAD 为 `9a38b96b1b8006c5851535d0c1e586bbaeb63f10`。前十轮修复保留；第十一轮 RR11-01/02 的 IPC 成员证明和数组重排来源漏报已实现修复，新增 11 项回归，完整门禁已在 1708 个冻结输入上重跑 PASS。所有修复未提交，见[第十一轮修复报告](reviews/2026-09-23-release-r11-repair/repair.md)。下方历史记录保留各自候选意义。
++当前 G1–G8 已本地合入，HEAD 为 `9a38b96b1b8006c5851535d0c1e586bbaeb63f10`。前十一轮修复保留；第十二轮 RR12-01 helper 递归溢出已实现修复，新增 12 项回归通过，完整门禁在 1709 个冻结输入上重跑 PASS。所有修复未提交，见[第十二轮修复报告](reviews/2026-09-23-release-r12-repair/repair.md)。下方历史记录保留各自候选意义。
++
++## 2026-09-23 第十二轮独立审查修复（未提交）
++
++RR12-01：数组身份比较不再提前展开内容；元素读取保留原求值链。普通 helper 使用唯一调用位置核对写入与重排顺序。原违规和安全样例均可正常分析。
++
++新增 12 项回归，准确修复起点 10 FAIL（RangeError）/ 2 PASS，最终 12 PASS；架构 589/589 PASS，正式 CLI 31 active、0 诊断、0 stale。保留实际 20 个 Renderer 边界的 8 个数组样例全部无异常：7 项符合正反预期、1 项既有保守拒绝继续单列。62 个共享解析和绑定用例保持原结果。
++
++`UNIT_TEST_CONCURRENCY=2 npm run release-check` 重跑 PASS：9363 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过。1709 个输入及 HEAD 未漂移。开始 2026-09-23T14:44:29.241195+08:00，结束 2026-09-23T15:05:10.069504+08:00。
++
++[修复报告](reviews/2026-09-23-release-r12-repair/repair.md)、[验证汇总](reviews/2026-09-23-release-r12-repair/verification.json)、[增量补丁](reviews/2026-09-23-release-r12-repair/incremental.patch)。本轮未修改生产业务源码，未提交、推送或发布；平台及人工验收不在此结论内。
+ 
+ ## 2026-09-23 第十一轮独立审查修复（未提交）
+ 
+--- a/rules/integration-test-policy.md
++++ b/rules/integration-test-policy.md
+@@ -125,80 +125,80 @@
+ 
+ ## 七、当前集成测试清单（自动同步）
+ 
+-<!-- auto-generated by scripts/integration-runner.js, last-updated: 2026-09-23T10:50:32+08:00 -->
++<!-- auto-generated by scripts/integration-runner.js, last-updated: 2026-09-23T15:05:09+08:00 -->
+ <!-- DO NOT EDIT MANUALLY — modify scripts/integration/*.js then re-run `npm run test:integration` -->
+ 
+ | 脚本 | 用例数 | 断言数 | 耗时 (ms) |
+ |---|---|---|---|
+-| `acquiring-bill-currency-idle-cleanup.js` | 38 | 38 | 791 |
+-| `acquiring-bill-currency-n4-migration.js` | 128 | 128 | 532 |
+-| `acquiring-engine-migration.js` | 45 | 45 | 4572 |
+-| `acquiring-index-slim-v2.js` | 22 | 22 | 190 |
+-| `acquiring-side-db-parity.js` | 19 | 19 | 547 |
+-| `acquiring-worker-boundary.js` | 14 | 14 | 530 |
+-| `application-recovery-governance.js` | 4 | 4 | 727 |
+-| `archive-biz-op-auto-report-retention.js` | 6 | 6 | 7187 |
+-| `archive-center-module-retention.js` | 11 | 11 | 1474 |
+-| `archive-center-permanent-delete.js` | 52 | 52 | 29365 |
+-| `background-execution-pure-compute-canary.js` | 9 | 9 | 107 |
+-| `background-execution-recovery-canary.js` | 9 | 9 | 117 |
+-| `background-execution-recovery-control.js` | 27 | 27 | 292 |
+-| `bank-bu-background-dual-parser.js` | 9 | 9 | 270 |
+-| `bank-bu-background-single-jobs.js` | 21 | 21 | 505 |
+-| `bank-bu-recon-side-db-parity.js` | 17 | 17 | 308 |
+-| `bank-statement-hit-scenario-report.js` | 49 | 49 | 209 |
++| `acquiring-bill-currency-idle-cleanup.js` | 38 | 38 | 851 |
++| `acquiring-bill-currency-n4-migration.js` | 128 | 128 | 519 |
++| `acquiring-engine-migration.js` | 45 | 45 | 4576 |
++| `acquiring-index-slim-v2.js` | 22 | 22 | 187 |
++| `acquiring-side-db-parity.js` | 19 | 19 | 545 |
++| `acquiring-worker-boundary.js` | 14 | 14 | 538 |
++| `application-recovery-governance.js` | 4 | 4 | 797 |
++| `archive-biz-op-auto-report-retention.js` | 6 | 6 | 7364 |
++| `archive-center-module-retention.js` | 11 | 11 | 1513 |
++| `archive-center-permanent-delete.js` | 52 | 52 | 29859 |
++| `background-execution-pure-compute-canary.js` | 9 | 9 | 105 |
++| `background-execution-recovery-canary.js` | 9 | 9 | 119 |
++| `background-execution-recovery-control.js` | 27 | 27 | 286 |
++| `bank-bu-background-dual-parser.js` | 9 | 9 | 258 |
++| `bank-bu-background-single-jobs.js` | 21 | 21 | 500 |
++| `bank-bu-recon-side-db-parity.js` | 17 | 17 | 301 |
++| `bank-statement-hit-scenario-report.js` | 49 | 49 | 204 |
+ | `bank-statement-many-to-many-review-sheet.js` | 33 | 33 | 205 |
+-| `bank-statement-universal-import-routing.js` | 20 | 20 | 275 |
+-| `big-table-import-engine.js` | 19 | 19 | 7556 |
+-| `biz-op-auto-error-report.js` | 12 | 12 | 9762 |
+-| `biz-op-query-boundary.js` | 9 | 9 | 7452 |
+-| `biz-op-recon-side-db-parity.js` | 16 | 16 | 310 |
+-| `bizop-flow-engine-migration.js` | 73 | 73 | 5131 |
+-| `dark-mode-schedule-settings.js` | 6 | 6 | 202 |
+-| `duplicate-inbound-match-end-to-end.js` | 31 | 31 | 353 |
+-| `execution-descriptor-governance.js` | 4 | 4 | 881 |
+-| `fund-transfer-recon-account-mapping.js` | 19 | 19 | 181 |
+-| `gateway-channel-filter-equivalence.js` | 23 | 23 | 189 |
+-| `linked-fx-open7-stale-hit-e2e.js` | 27 | 27 | 185 |
+-| `linked-table-delete-by-range-tablekey.js` | 73 | 73 | 182 |
+-| `new-account-balance-statement.js` | 36 | 36 | 230 |
++| `bank-statement-universal-import-routing.js` | 20 | 20 | 273 |
++| `big-table-import-engine.js` | 19 | 19 | 7551 |
++| `biz-op-auto-error-report.js` | 12 | 12 | 10110 |
++| `biz-op-query-boundary.js` | 9 | 9 | 7640 |
++| `biz-op-recon-side-db-parity.js` | 16 | 16 | 309 |
++| `bizop-flow-engine-migration.js` | 73 | 73 | 5147 |
++| `dark-mode-schedule-settings.js` | 6 | 6 | 195 |
++| `duplicate-inbound-match-end-to-end.js` | 31 | 31 | 341 |
++| `execution-descriptor-governance.js` | 4 | 4 | 892 |
++| `fund-transfer-recon-account-mapping.js` | 19 | 19 | 182 |
++| `gateway-channel-filter-equivalence.js` | 23 | 23 | 188 |
++| `linked-fx-open7-stale-hit-e2e.js` | 27 | 27 | 180 |
++| `linked-table-delete-by-range-tablekey.js` | 73 | 73 | 183 |
++| `new-account-balance-statement.js` | 36 | 36 | 228 |
+ | `pending-data-reconciliation.js` | 33 | 33 | 49 |
+-| `pending-engine-migration.js` | 57 | 57 | 5053 |
+-| `pending-removal-reconcile.js` | 62 | 62 | 202 |
+-| `position-reconciliation-side-db-parity.js` | 38 | 38 | 254 |
+-| `position-startup-task-recovery.js` | 3 | 3 | 2223 |
+-| `pre-fund-reconciliation-output-contract.js` | 15 | 15 | 274 |
+-| `pre-fund-reconciliation-side-db-parity.js` | 69 | 69 | 316 |
+-| `refund-backfill-yellow-fill-e2e.js` | 258 | 258 | 194 |
+-| `renderer-lifecycle.js` | 233 | 233 | 20474 |
+-| `shared-xlsx-boundary.js` | 51 | 51 | 3193 |
+-| `statement-generation-pipeline.js` | 45 | 45 | 237 |
+-| `task-adapter-recovery.js` | 4 | 4 | 549 |
+-| `toolbox-large-file-stream.js` | 50 | 50 | 134259 |
+-| `toolbox-large-split-multi-sheet.js` | 31 | 31 | 74601 |
+-| `toolbox-multi-sheet-merge.js` | 16 | 16 | 15086 |
+-| `toolbox-multi-split-roundtrip.js` | 17 | 17 | 453 |
+-| `toolbox-roundtrip.js` | 30 | 30 | 176 |
+-| `toolbox-row-split-admission.js` | 2 | 2 | 820 |
+-| `toolbox-row-split-archive-delete.js` | 2 | 2 | 1014 |
+-| `v2.1.10-a3-phase1.js` | 40 | 40 | 2582 |
+-| `v2.1.10-a3-phase2.js` | 56 | 56 | 1910 |
+-| `v2.1.10-a4-phase3.js` | 75 | 75 | 14119 |
+-| `v2.1.10-n4-cont-1-phase4.js` | 33 | 33 | 693 |
+-| `v2.1.10-n4-cont-2-phase5.js` | 43 | 43 | 462 |
+-| `v2.1.12-beta-multiworker-nested.js` | - | - | 2792 |
+-| `v2.1.9-n5-end-to-end.js` | 68 | 68 | 215 |
+-| `v2.1.9-n5-migration.js` | 67 | 67 | 191 |
+-| `v2.1.9-sr-fix-1-coverage.js` | 148 | 148 | 250 |
+-| `v2.1.9-sr-log-1.js` | 33 | 33 | 146 |
+-| `v3.0.0-linked-streaming-import.js` | 19 | 19 | 221 |
+-| `v3.0.1-linked-gateway-upsert.js` | 40 | 40 | 216 |
+-| `v3.0.4-boc-dispatch-order-fix.js` | 31 | 31 | 246 |
+-| `vcc-financial-op-adjustment-archive-chain.js` | 226 | 226 | 1251 |
+-| `vcc-financial-op-destructive-state-chain.js` | 77 | 77 | 1451 |
+-| `vcc-financial-op-effective-result.js` | 19 | 19 | 129 |
+-| `vcc-financial-op-historical-template-export.js` | 29 | 29 | 1103 |
+-| **合计** | **2901** | **2901** | **368221** |
++| `pending-engine-migration.js` | 57 | 57 | 5064 |
++| `pending-removal-reconcile.js` | 62 | 62 | 197 |
++| `position-reconciliation-side-db-parity.js` | 38 | 38 | 252 |
++| `position-startup-task-recovery.js` | 3 | 3 | 2227 |
++| `pre-fund-reconciliation-output-contract.js` | 15 | 15 | 275 |
++| `pre-fund-reconciliation-side-db-parity.js` | 69 | 69 | 321 |
++| `refund-backfill-yellow-fill-e2e.js` | 258 | 258 | 197 |
++| `renderer-lifecycle.js` | 233 | 233 | 20533 |
++| `shared-xlsx-boundary.js` | 51 | 51 | 3265 |
++| `statement-generation-pipeline.js` | 45 | 45 | 231 |
++| `task-adapter-recovery.js` | 4 | 4 | 558 |
++| `toolbox-large-file-stream.js` | 50 | 50 | 137098 |
++| `toolbox-large-split-multi-sheet.js` | 31 | 31 | 263668 |
++| `toolbox-multi-sheet-merge.js` | 16 | 16 | 14587 |
++| `toolbox-multi-split-roundtrip.js` | 17 | 17 | 481 |
++| `toolbox-roundtrip.js` | 30 | 30 | 180 |
++| `toolbox-row-split-admission.js` | 2 | 2 | 832 |
++| `toolbox-row-split-archive-delete.js` | 2 | 2 | 1040 |
++| `v2.1.10-a3-phase1.js` | 40 | 40 | 2641 |
++| `v2.1.10-a3-phase2.js` | 56 | 56 | 1897 |
++| `v2.1.10-a4-phase3.js` | 75 | 75 | 14280 |
++| `v2.1.10-n4-cont-1-phase4.js` | 33 | 33 | 675 |
++| `v2.1.10-n4-cont-2-phase5.js` | 43 | 43 | 474 |
++| `v2.1.12-beta-multiworker-nested.js` | - | - | 2781 |
++| `v2.1.9-n5-end-to-end.js` | 68 | 68 | 226 |
++| `v2.1.9-n5-migration.js` | 67 | 67 | 193 |
++| `v2.1.9-sr-fix-1-coverage.js` | 148 | 148 | 247 |
++| `v2.1.9-sr-log-1.js` | 33 | 33 | 142 |
++| `v3.0.0-linked-streaming-import.js` | 19 | 19 | 212 |
++| `v3.0.1-linked-gateway-upsert.js` | 40 | 40 | 214 |
++| `v3.0.4-boc-dispatch-order-fix.js` | 31 | 31 | 242 |
++| `vcc-financial-op-adjustment-archive-chain.js` | 226 | 226 | 1224 |
++| `vcc-financial-op-destructive-state-chain.js` | 77 | 77 | 1452 |
++| `vcc-financial-op-effective-result.js` | 19 | 19 | 130 |
++| `vcc-financial-op-historical-template-export.js` | 29 | 29 | 1108 |
++| **合计** | **2901** | **2901** | **561339** |
+ 
+ > 同步策略：runner 末尾全 PASS 时 in-place 替换本章节；任一脚本 FAIL → 本章节不更新（避免被损坏数据覆盖）。
+ 
+--- a/scripts/architecture/renderer-contracts.js
++++ b/scripts/architecture/renderer-contracts.js
+@@ -91,12 +91,35 @@
+     }
+     return mutations;
+   };
++  const parameterCall = (analysis, fn) => {
++    if (!parameterCalls.has(analysis)) parameterCalls.set(analysis, new Map());
++    const byFunction = parameterCalls.get(analysis);
++    if (!byFunction.has(fn)) {
++      const functionPath = analysis.functionPath(fn.body);
++      const calls = scan.sites.filter(site => site.type === 'call' &&
++        ((site.from === analysis.from && site.reference?.functionPath === functionPath) ||
++          (site.reference?.rootFree && site.reference?.chain?.at(-1) === functionPath?.split('.').at(-1))));
++      const caller = calls.length === 1 && analyses.get(calls[0].from);
++      const call = caller && [...callNodes.get(caller.from).values()].find(node =>
++        node.loc.start.line === calls[0].line && node.loc.start.column === calls[0].column);
++      byFunction.set(fn, call ? { caller, call, args: calls[0].args } : null);
++    }
++    return byFunction.get(fn);
++  };
+   const executionPositions = (node, analysis, env) => {
+     const positions = []; const seen = new Set();
+     for (let current = node; current && !seen.has(current);) {
+       positions.push(current); seen.add(current);
+       const frame = frameAt(analysis, current, env);
+-      if (!frame) break;
++      if (!frame) {
++        // 数组来自外层时，其来源环境没有 helper 帧；用同一唯一调用恢复执行时点。
++        let fn = current;
++        while (fn && analysis.functionNodesByStart.get(fn.start) !== fn) fn = analysis.parents.get(fn);
++        const site = fn && parameterCall(analysis, fn);
++        if (!site || site.caller !== analysis) break;
++        current = site.call;
++        continue;
++      }
+       const [file, start] = JSON.parse(frame);
+       if (file !== analysis.from) break;
+       current = callNodes.get(file)?.get(start);
+@@ -300,23 +323,17 @@
+     if (!fn) return null;
+     const bindings = env.get(parameterBindings); const key = `${analysis.from}:${fn.start}:${chain[0]}`;
+     if (bindings?.has(key)) return { value: selectOrSelf(bindings.get(key), chain.slice(1)) };
+-    if (!parameterCalls.has(analysis)) parameterCalls.set(analysis, new Map());
+-    const callCache = parameterCalls.get(analysis);
+-    if (!callCache.has(value.bindingFunctionPath)) callCache.set(value.bindingFunctionPath, scan.sites.filter(site => site.type === 'call' &&
+-      ((site.from === analysis.from && site.reference?.functionPath === value.bindingFunctionPath) ||
+-        (site.reference?.rootFree && site.reference?.chain?.at(-1) === value.bindingFunctionPath.split('.').at(-1)))));
+-    const calls = callCache.get(value.bindingFunctionPath);
+-    if (calls.length !== 1) return null;
+-    const context = new Map(env); const caller = analyses.get(calls[0].from);
+-    const call = [...callNodes.get(caller.from).values()].find(node => node.loc.start.line === calls[0].line && node.loc.start.column === calls[0].column);
+-    if (!call) return null;
++    const site = parameterCall(analysis, fn);
++    if (!site) return null;
++    const { caller, call, args } = site;
++    const context = new Map(env);
+     context.set(frames, new Map([...(env.get(frames) || []), [`${analysis.from}:${fn.start}`, JSON.stringify([caller.from, call.start, frameAt(caller, call, env)])]]));
+     const read = { analysis: caller, source: analysis, functionStart: fn.start, env, node: call, depth, visited };
+-    fn.params.forEach((param, index) => bindPattern(param, calls[0].args[index]
+-      ? resolve(calls[0].args[index], caller, env, depth + 1, visited, false) : missing, context, read));
++    fn.params.forEach((param, index) => bindPattern(param, args[index]
++      ? resolve(args[index], caller, env, depth + 1, visited, false) : missing, context, read));
+     return context.has(chain[0]) ? { value: selectOrSelf(context.get(chain[0]), chain.slice(1)) } : null;
+   }
+-  function resolve(value, analysis, env = emptyEnv, depth = 0, visited = new Set(), inspectMutations = true) {
++  function resolve(value, analysis, env = emptyEnv, depth = 0, visited = new Set(), inspectMutations = true, expandArray = false) {
+     if (!value || depth > 35 || visited.has(value)) return unknown('recursive-renderer-value');
+     const next = new Set([...visited, value]);
+     const recurse = (item, source = analysis, context = env) => resolve(item, source, context, depth + 1, next, inspectMutations);
+@@ -354,6 +371,18 @@
+     if (value.kind === 'array') {
+       const literal = arrayNodes.get(analysis.from)?.get(value.elements);
+       if (value.opaque && !literal) return unknown(value.reason);
++      // 接收者身份不依赖数组元素；延后展开，避免 helper 参数反查再次展开同一数组。
++      if (!inspectMutations && !expandArray) {
++        let expanded;
++        const read = () => (expanded ||= resolve(value, analysis, env, depth, visited, false, true));
++        return {
++          ...value, opaque: false,
++          [identity]: value[identity] || objectIdentity(value, analysis, env),
++          [origin]: { value, analysis, env },
++          get elements() { return read().elements; },
++          get [uncertainElements]() { return read()[uncertainElements]; },
++        };
++      }
+       const array = { ...value, opaque: false, elements: [], [identity]: value[identity] || objectIdentity(value, analysis, env), [origin]: { value, analysis, env } };
+       const memberValue = item => inspectMutations ? recurse(item) : defer(() => recurse(item));
+       if (literal) for (const node of literal.elements) {
+--- /dev/null
++++ b/tests/unit/architecture/release-rereview-r12.test.js
+@@ -0,0 +1,68 @@
++'use strict';
++const assert = require('node:assert/strict');
++const test = require('node:test');
++const fs = require('node:fs');
++const os = require('node:os');
++const path = require('node:path');
++const vm = require('node:vm');
++const { scan } = require('../../../scripts/architecture/scan');
++const { evaluateRules } = require('../../../scripts/architecture/rules');
++const actual = require('../../../architecture/boundaries.json');
++
++function evaluate(t, source) {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'g8-rereview-r12-'));
++  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
++  fs.mkdirSync(path.join(root, 'src'));
++  fs.writeFileSync(path.join(root, 'src/shell.js'), source);
++  fs.writeFileSync(path.join(root, 'src/preload.js'),
++    "const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('desktopApi',{app:{getInfo:()=>ipcRenderer.invoke('app:get-info')}});");
++  const config = {
++    schemaVersion: 1, factBaseline: '1'.repeat(40),
++    bootstrap: { factBaseline: '1'.repeat(40), mode: 'first-introduction' },
++    boundaries: [{ ...actual.boundaries.find(boundary => boundary.id === 'renderer-bank-statement'), state: 'pending' }],
++    generatedModules: [], dynamicLoads: [], policyChanges: [],
++  };
++  return evaluateRules(scan(root, config), config,
++    { schemaVersion: 1, factBaseline: config.factBaseline, exceptions: [] }, { root });
++}
++
++async function runtime(source) {
++  let input;
++  const window = {
++    desktopApi: { outsideScope() { return true; }, app: { async getInfo() { return { version: '3.2.10' }; } } },
++    BankStatementController: { createBankStatementController(value) { input = value; } },
++  };
++  const same = await vm.runInNewContext(source, { window });
++  return { same, input };
++}
++
++function check(t, source, unsafe) {
++  const result = evaluate(t, source);
++  const violations = result.violations.filter(item => ['ARCH-RENDERER-SCOPE', 'ARCH-STATIC-COVERAGE'].includes(item.rule));
++  if (unsafe) assert.ok(violations.length > 0, JSON.stringify(result.violations));
++  else assert.deepEqual(result.violations, []);
++}
++
++const arrays = 'function provide(){return {api:{run(){}}};}const old=provide(),clean=provide();' +
++  'function make(value){const args=[];args.push(value);return args;}';
++for (const [name, setup, unsafe] of [
++  ['helper 重排写入后的数组', 'const list=[...make(old)];function reorder(target){target.reverse();}list[1]=clean;reorder(list);const alias=list[0].api;', true],
++  ['helper 写入并重排', 'const list=[...make(old)];function refill(target,value){target[1]=value;target.reverse();}refill(list,clean);const alias=list[0].api;', true],
++  ['helper 重排之后才写入其他槽位', 'const list=[...make(old)];function reorder(target){target.reverse();}reorder(list);list[1]=clean;const alias=list[0].api;', false],
++  ['helper 只写入已重排数组的其他槽位', 'const list=[...make(old)];function write(target,value){target[1]=value;}list.reverse();write(list,clean);const alias=list[0].api;', false],
++  ['直接重排仍保留写入来源', 'const list=[...make(old)];list[1]=clean;list.reverse();const alias=list[0].api;', true],
++  ['捕获别名后才重排', 'const list=[...make(old)];const alias=list[0].api;list[1]=clean;list.reverse();', false],
++  ['对象参数 先写后重排', 'const list=[...make(old)];function reorder(box){box.target.reverse();}list[1]=clean;reorder({target:list});const alias=list[0].api;', true],
++  ['对象参数 先重排后写', 'const list=[...make(old)];function reorder(box){box.target.reverse();}reorder({target:list});list[1]=clean;const alias=list[0].api;', false],
++  ['解构参数 先写后重排', 'const list=[...make(old)];function reorder({target}){target.reverse();}list[1]=clean;reorder({target:list});const alias=list[0].api;', true],
++  ['解构参数 先重排后写', 'const list=[...make(old)];function reorder({target}){target.reverse();}reorder({target:list});list[1]=clean;const alias=list[0].api;', false],
++  ['嵌套 helper 先写后重排', 'const list=[...make(old)];function inner(target){target.reverse();}function reorder(value){inner(value);}list[1]=clean;reorder(list);const alias=list[0].api;', true],
++  ['嵌套 helper 先重排后写', 'const list=[...make(old)];function inner(target){target.reverse();}function reorder(value){inner(value);}reorder(list);list[1]=clean;const alias=list[0].api;', false],
++]) test(`RR12-01 ${name}`, async t => {
++  const source = arrays + setup + 'alias.outsideScope=window.desktopApi.outsideScope;' +
++    'window.BankStatementController.createBankStatementController({api:clean.api});alias===clean.api;';
++  const observed = await runtime(source);
++  assert.equal(observed.same, unsafe);
++  assert.equal(typeof observed.input.api.outsideScope === 'function', unsafe);
++  check(t, source, unsafe);
++});

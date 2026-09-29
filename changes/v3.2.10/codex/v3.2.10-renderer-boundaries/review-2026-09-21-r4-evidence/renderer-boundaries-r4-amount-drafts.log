@@ -1,0 +1,17 @@
+runner-ready
+FAIL 恢复金额事实保留三个本地行，不用读取返回的server行覆盖草稿 Error: Script failed to execute, this normally means an error was thrown. Check the renderer console for the error.
+    at node:electron/js2c/sandbox_bundle:2:127868
+    at IpcRendererInternal.<anonymous> (node:electron/js2c/sandbox_bundle:2:122136)
+    at IpcRendererInternal.emit (node:electron/js2c/sandbox_bundle:2:45997)
+    at Object.onMessage (node:electron/js2c/sandbox_bundle:2:121195)
+FAIL 首步失败保留byField目标1和未选中行草稿，用户重试后控件解除旧互斥 Error: Script failed to execute, this normally means an error was thrown. Check the renderer console for the error.
+    at node:electron/js2c/sandbox_bundle:2:127868
+    at IpcRendererInternal.<anonymous> (node:electron/js2c/sandbox_bundle:2:122136)
+    at IpcRendererInternal.emit (node:electron/js2c/sandbox_bundle:2:45997)
+    at Object.onMessage (node:electron/js2c/sandbox_bundle:2:121195)
+FAIL 正常可交互signed主动重试清旧byField目标，仅目标2清金额，行1/3草稿可按原序号提交 Error: Script failed to execute, this normally means an error was thrown. Check the renderer console for the error.
+    at node:electron/js2c/sandbox_bundle:2:127868
+    at IpcRendererInternal.<anonymous> (node:electron/js2c/sandbox_bundle:2:122136)
+    at IpcRendererInternal.emit (node:electron/js2c/sandbox_bundle:2:45997)
+    at Object.onMessage (node:electron/js2c/sandbox_bundle:2:121195)
+0/3 PASS

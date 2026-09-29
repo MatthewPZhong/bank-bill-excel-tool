@@ -1,0 +1,14 @@
+{
+  "frozenExisting": 5190,
+  "changedBeforeIntegrationTimingRefresh": [
+    "architecture/README.md",
+    "changes/v3.2.10/README.md",
+    "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md",
+    "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md",
+    "changes/v3.2.10/release.md",
+    "scripts/architecture/renderer-contracts.js"
+  ],
+  "gateInputsUnchanged": 1711,
+  "productionFilesUnchanged": 792,
+  "historicalReviewFilesUnchanged": 1208
+}

@@ -1,0 +1,44 @@
+--- r11-repair-before
++++ r12-current
+@@ -177,9 +177,26 @@
+       selected = uncertain ? { kind: 'identity-candidates', values: [selected, assigned] } : assigned;
+     }
+     if (!mutations.length) return selected;
++    const reorders = mutations.filter(node => {
++      if (node.type !== 'CallExpression' || node.callee.type !== 'MemberExpression') return false;
++      const name = node.callee.computed ? analysis.describe(node.callee.property).value : node.callee.property.name;
++      return ['copyWithin', 'reverse', 'shift', 'sort', 'splice', 'unshift'].includes(name);
++    });
++    // 重排可能把其他固定槽位移到本次读取位置；保留重排前的已知写入来源。
++    const reorderedSources = reorders.length ? assignments.get(analysis).flatMap(node => {
++      const member = node.left;
++      if (member.type !== 'MemberExpression') return [];
++      const key = member.computed ? analysis.describe(member.property) : { kind: 'literal', value: member.property.name };
++      if (key.kind !== 'literal' || !/^(0|[1-9][0-9]*)$/.test(String(key.value)) ||
++          node.operator !== '=' || !sameObject(analysis.describe(member.object), identities, analysis, writeEnv) ||
++          writtenBefore(node, access.node, analysis, writeEnv, env) === false ||
++          !reorders.some(mutation => writtenBefore(node, mutation, analysis, writeEnv, writeEnv) !== false)) return [];
++      return [resolve(analysis.describe(node.right), analysis, writeEnv, depth + 1, visited, false)];
++    }) : [];
+     // 不支持的数组操作不能抹去已知来源；既保留覆盖缺口，也保留可能被移动/插入的对象。
+     return { kind: 'identity-candidates', values: [selected, missing, unknown('unsupported-renderer-array-mutation'),
+       ...object.elements.map((_, index) => select(object, [String(index)])),
++      ...reorderedSources,
+       ...mutations.flatMap(node => mutationSources(node.type === 'CallExpression' ? node.arguments : node.type === 'AssignmentExpression' ? [node.right] : [],
+         analysis, writeEnv, depth + 1, visited))] };
+   };
+@@ -217,7 +234,13 @@
+     for (let index = 0; index < chain.length; index += 1) {
+       const part = chain[index];
+       if (value?.kind === 'identity-candidates') return { ...value, values: value.values.map(item => select(item, chain.slice(index))) };
+-      if (value?.kind === 'ipc-data') { value = { ...value, fields: [...(value.fields || []), part] }; continue; }
++      if (value?.kind === 'ipc-data') {
++        value = { ...value, fields: [...(value.fields || []), part] };
++        // 父对象非空不保证子成员存在；成员须由自身的表达式重新建立证明。
++        delete value[truthiness];
++        delete value[nonNullish];
++        continue;
++      }
+       if (value?.kind === 'array' && !value.opaque && /^(0|[1-9][0-9]*)$/.test(part)) {
+         if (value[uncertainElements]) return select({ kind: 'identity-candidates', values: [unknown('uncertain-renderer-array-index'),
+           ...value.elements.map(item => item[deferred] ? item[deferred]() : item), ...value[uncertainElements]] }, chain.slice(index + 1));

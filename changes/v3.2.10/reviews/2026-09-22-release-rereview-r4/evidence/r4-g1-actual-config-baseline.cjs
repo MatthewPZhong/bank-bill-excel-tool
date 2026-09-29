@@ -1,0 +1,11 @@
+const fs=require('node:fs');const path=require('node:path');
+const repo=process.cwd();
+const {scan}=require(path.join(repo,'scripts/architecture/scan'));
+const {evaluateRules}=require(path.join(repo,'scripts/architecture/rules'));
+const config=JSON.parse(fs.readFileSync('architecture/boundaries.json'));
+const all=JSON.parse(fs.readFileSync('architecture/legacy-allowlist.json'));
+const scanned=scan(repo,config);
+const selected={...config,boundaries:config.boundaries.filter(b=>b.id==='publication-recovery-entry')};
+const result=evaluateRules(scanned,selected,all,{root:repo});
+const b=selected.boundaries[0];
+console.log(JSON.stringify({coverage:scanned.coverage,violations:result.violations,activeBoundaries:result.activeBoundaries,allowedSites:b.allowedSites.map(s=>({...s,match:scanned.sites.filter(v=>v.from===s.from&&v.functionPath===s.functionPath&&(v.callee||v.method)===s.callee&&v.evidenceId===s.evidenceId).map(v=>({line:v.line,column:v.column}))}))},null,2));

@@ -1,0 +1,28 @@
+{
+  "boundaryState": "active",
+  "injected": "  const handlers = [recoverPreparingIntent]; handlers.includes(recoverPreparingIntent);",
+  "coverage": {
+    "scannedFiles": 765,
+    "parsedFiles": 765,
+    "literalEdges": 2405,
+    "workerEdges": 64,
+    "globalEdges": 59,
+    "unresolved": 2,
+    "dynamicSites": 33,
+    "parseErrors": 0
+  },
+  "violations": [],
+  "activeBoundaries": [
+    "publication-recovery-entry"
+  ],
+  "callbackCall": {
+    "line": 2512,
+    "column": 45,
+    "callee": "",
+    "method": "includes",
+    "callbackTargets": [],
+    "targets": []
+  },
+  "recoveryScopeReached": [],
+  "nestedAllowedSites": []
+}

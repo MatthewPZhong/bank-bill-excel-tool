@@ -6,7 +6,7 @@ const test = require('node:test');
 
 const {
   createBackgroundExecutionRuntime
-} = require('../../../src/main-process/background-execution/runtime');
+} = require('../../../src/main-process/execution-descriptors/composition');
 const {
   FUND_RECON_POLICIES
 } = require('../../../src/main-process/fund-recon-worker/policies');

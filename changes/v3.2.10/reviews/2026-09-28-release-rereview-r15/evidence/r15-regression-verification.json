@@ -1,0 +1,155 @@
+{
+  "status": "PASS",
+  "array": {
+    "cases": 14,
+    "allowed": 6,
+    "rejected": 8,
+    "conservative": 1,
+    "scanErrors": 0,
+    "diagnosticChanges": 0,
+    "rows": [
+      {
+        "name": "receiver-alias-reorder",
+        "safe": false,
+        "conservative": false,
+        "diagnostics": 1
+      },
+      {
+        "name": "helper-reorder-after-write",
+        "safe": false,
+        "conservative": false,
+        "diagnostics": 1
+      },
+      {
+        "name": "helper-write-and-reorder",
+        "safe": false,
+        "conservative": false,
+        "diagnostics": 1
+      },
+      {
+        "name": "helper-reorder-before-write-safe",
+        "safe": true,
+        "conservative": false,
+        "diagnostics": 0
+      },
+      {
+        "name": "overwritten-before-reorder-safe",
+        "safe": true,
+        "conservative": true,
+        "diagnostics": 1
+      },
+      {
+        "name": "last-write-before-reorder",
+        "safe": false,
+        "conservative": false,
+        "diagnostics": 1
+      },
+      {
+        "name": "helper-write-after-reorder-safe",
+        "safe": true,
+        "conservative": false,
+        "diagnostics": 0
+      },
+      {
+        "name": "captured-before-later-reorder-safe",
+        "safe": true,
+        "conservative": false,
+        "diagnostics": 0
+      },
+      {
+        "name": "object-parameter-write-then-reorder",
+        "safe": false,
+        "conservative": false,
+        "diagnostics": 1
+      },
+      {
+        "name": "object-parameter-reorder-then-write",
+        "safe": true,
+        "conservative": false,
+        "diagnostics": 0
+      },
+      {
+        "name": "destructured-parameter-write-then-reorder",
+        "safe": false,
+        "conservative": false,
+        "diagnostics": 1
+      },
+      {
+        "name": "destructured-parameter-reorder-then-write",
+        "safe": true,
+        "conservative": false,
+        "diagnostics": 0
+      },
+      {
+        "name": "single-nested-helper-write-then-reorder",
+        "safe": false,
+        "conservative": false,
+        "diagnostics": 1
+      },
+      {
+        "name": "single-nested-helper-reorder-then-write",
+        "safe": true,
+        "conservative": false,
+        "diagnostics": 0
+      }
+    ]
+  },
+  "order": {
+    "cases": 8,
+    "allowed": 5,
+    "rejected": 3,
+    "conservative": 0,
+    "scanErrors": 0,
+    "diagnosticChanges": 0,
+    "rows": [
+      {
+        "name": "nested-definite-overwrite-safe",
+        "safe": true,
+        "conservative": false,
+        "diagnostics": 0
+      },
+      {
+        "name": "nested-definite-overwrite-unsafe",
+        "safe": false,
+        "conservative": false,
+        "diagnostics": 1
+      },
+      {
+        "name": "conditional-write-after-definite",
+        "safe": false,
+        "conservative": false,
+        "diagnostics": 1
+      },
+      {
+        "name": "factory-conditional-then-overwrite-safe",
+        "safe": true,
+        "conservative": false,
+        "diagnostics": 0
+      },
+      {
+        "name": "array-fixed-slot-definite-overwrite-safe",
+        "safe": true,
+        "conservative": false,
+        "diagnostics": 0
+      },
+      {
+        "name": "unordered-repeated-helper-retains-origin",
+        "safe": false,
+        "conservative": false,
+        "diagnostics": 1
+      },
+      {
+        "name": "declarations-reversed-call-order-safe",
+        "safe": true,
+        "conservative": false,
+        "diagnostics": 0
+      },
+      {
+        "name": "captured-before-nested-overwrite-safe",
+        "safe": true,
+        "conservative": false,
+        "diagnostics": 0
+      }
+    ]
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "sourceCommit": "3e203858ea49fc2935f5ab847de8af7f793d356a",
+  "releaseBefore": "320d20df68bdeb175060ed37513a2fe5f23436bc",
+  "conflicts": [
+    "AGENTS.md",
+    "rules/integration-test-policy.md"
+  ],
+  "mainAutoMergeExactG2PlusPriorG6": true,
+  "retainedG6Changes": [
+    {
+      "baseLines": [
+        22828,
+        22831
+      ],
+      "operation": "replace"
+    },
+    {
+      "baseLines": [
+        22847,
+        22848
+      ],
+      "operation": "delete"
+    }
+  ],
+  "policyRulePrefixIdentical": true,
+  "policyResolution": "retain prior release generated list until full integration runner refreshes",
+  "agentsResolution": "retain both module navigation links",
+  "readmeResolution": "retain G1/G4/G5/G6 navigation and add G2; update release state after validation",
+  "g2UnchangedOutsideComposition": {
+    "count": 110,
+    "mismatches": []
+  },
+  "priorReleaseFilesUnchangedOutsideOverlap": {
+    "count": 317,
+    "mismatches": []
+  },
+  "candidate": "8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05",
+  "sourceEvidenceComparison": {
+    "snapshotFiles": 46,
+    "mismatches": []
+  }
+}

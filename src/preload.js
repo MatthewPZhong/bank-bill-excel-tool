@@ -400,7 +400,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),
     close: () => ipcRenderer.invoke('window:close'),
     onMaximizedState: (listener) => {
-      ipcRenderer.on('window:maximized-state', (_event, value) => listener(value));
+      const wrapped = (_event, value) => listener(value);
+      ipcRenderer.on('window:maximized-state', wrapped);
+      return () => ipcRenderer.removeListener('window:maximized-state', wrapped);
     }
   },
   templates: {
@@ -470,7 +472,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     startImport: (payload) => ipcRenderer.invoke('pending:import:start', payload),
     exportErrorReport: () => ipcRenderer.invoke('pending:error:export-report'),
     onImportProgress: (listener) => {
-      ipcRenderer.on('pending:import:progress', (_event, ev) => listener(ev));
+      const wrapped = (_event, ev) => listener(ev);
+      ipcRenderer.on('pending:import:progress', wrapped);
+      return () => ipcRenderer.removeListener('pending:import:progress', wrapped);
     },
     reconcile: {
       run: (payload) => ipcRenderer.invoke('pending:reconcile:run', payload)

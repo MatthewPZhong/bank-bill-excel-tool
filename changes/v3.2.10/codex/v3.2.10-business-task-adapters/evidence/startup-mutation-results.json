@@ -1,0 +1,98 @@
+{
+  "timestamp": "2026-09-20T15:52:37.577Z",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters",
+  "node": "v25.8.0",
+  "method": "Node preload replaces exactly one fs.readFileSync(src/main.js) string in memory; production and test files are not edited",
+  "sourceBefore": {
+    "src/main.js": "0ed3e6a1a1b467b9e608d608c8017405fe5262f732de70ae8d4fb41dddd24635",
+    "scripts/integration/position-startup-task-recovery.js": "1e42aff6f90e386535e91b8c9e7c621e75af3c422064e5b35d8a8ae72a27619e",
+    "tests/helpers/position-startup-recovery-harness.js": "234f61830598e951673a49eb1ce4b612975bc846effe3047d5aae784f6435822",
+    "src/main-process/position-reconciliation/task-owner.js": "4a3341991c3fa2100fd2f2f5f2d66e1acbc29a58dcb990ac5941baedb0c969e3",
+    "src/main-process/position-reconciliation/service.js": "91b7c2bc834b655651406cd7cd9c8c379c22090e346d0ef849587eef075eee29",
+    "src/main-process/position-reconciliation/store.js": "4f2d0f4810a20b22c4e5deb9c957aa1c52571d0ec8423beba808f8e2df536681",
+    "src/main-process/archive-center/controller.js": "ea51c106a4c876dddffea2e958e1e96be33096bc3ea7b120cc73d893ee3e839b",
+    "src/main-process/application-recovery/composition.js": "6aca4c1509bd88307e7652584aa12175cb9a432e90df1ca08939f3ea4724b207"
+  },
+  "sourceAfter": {
+    "src/main.js": "0ed3e6a1a1b467b9e608d608c8017405fe5262f732de70ae8d4fb41dddd24635",
+    "scripts/integration/position-startup-task-recovery.js": "1e42aff6f90e386535e91b8c9e7c621e75af3c422064e5b35d8a8ae72a27619e",
+    "tests/helpers/position-startup-recovery-harness.js": "234f61830598e951673a49eb1ce4b612975bc846effe3047d5aae784f6435822",
+    "src/main-process/position-reconciliation/task-owner.js": "4a3341991c3fa2100fd2f2f5f2d66e1acbc29a58dcb990ac5941baedb0c969e3",
+    "src/main-process/position-reconciliation/service.js": "91b7c2bc834b655651406cd7cd9c8c379c22090e346d0ef849587eef075eee29",
+    "src/main-process/position-reconciliation/store.js": "4f2d0f4810a20b22c4e5deb9c957aa1c52571d0ec8423beba808f8e2df536681",
+    "src/main-process/archive-center/controller.js": "ea51c106a4c876dddffea2e958e1e96be33096bc3ea7b120cc73d893ee3e839b",
+    "src/main-process/application-recovery/composition.js": "6aca4c1509bd88307e7652584aa12175cb9a432e90df1ca08939f3ea4724b207"
+  },
+  "sourceUnchanged": true,
+  "runs": [
+    {
+      "mode": "baseline",
+      "command": [
+        "/opt/homebrew/Cellar/node/25.8.0/bin/node",
+        "scripts/integration/position-startup-task-recovery.js"
+      ],
+      "startedAt": "2026-09-20T15:52:33.501Z",
+      "finishedAt": "2026-09-20T15:52:35.762Z",
+      "exitCode": 0,
+      "signal": null,
+      "spawnError": null,
+      "log": "startup-mutation-baseline.log",
+      "mutationApplied": false,
+      "independentAssessment": "PASS: 3/3, exit 0"
+    },
+    {
+      "mode": "no-recovery-intent",
+      "command": [
+        "/opt/homebrew/Cellar/node/25.8.0/bin/node",
+        "--require",
+        "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/changes/v3.2.10/codex/v3.2.10-business-task-adapters/evidence/startup-mutation-preload.js",
+        "scripts/integration/position-startup-task-recovery.js"
+      ],
+      "startedAt": "2026-09-20T15:52:35.762Z",
+      "finishedAt": "2026-09-20T15:52:36.646Z",
+      "exitCode": 1,
+      "signal": null,
+      "spawnError": null,
+      "log": "startup-mutation-no-recovery-intent.log",
+      "mutationApplied": true,
+      "independentAssessment": "KILLED_BY_EXPECTED_BEHAVIOR_ASSERTION",
+      "expectedFailureAssertion": "必须经生产 owner 恢复补建 intent"
+    },
+    {
+      "mode": "discard-recovery-promise",
+      "command": [
+        "/opt/homebrew/Cellar/node/25.8.0/bin/node",
+        "--require",
+        "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/changes/v3.2.10/codex/v3.2.10-business-task-adapters/evidence/startup-mutation-preload.js",
+        "scripts/integration/position-startup-task-recovery.js"
+      ],
+      "startedAt": "2026-09-20T15:52:36.646Z",
+      "finishedAt": "2026-09-20T15:52:37.576Z",
+      "exitCode": 1,
+      "signal": null,
+      "spawnError": null,
+      "log": "startup-mutation-discard-recovery-promise.log",
+      "mutationApplied": true,
+      "independentAssessment": "KILLED_BY_EXPECTED_BEHAVIOR_ASSERTION",
+      "expectedFailureAssertion": "Main 必须等待原恢复 promise 才能让 Controller 完成启动"
+    }
+  ],
+  "note": "Expected behavior failures must be independently read from logs; timeout or syntax/loader failure is not a killed mutation.",
+  "independentReview": {
+    "reviewedAt": "2026-09-20T15:54:07.400598+00:00",
+    "conclusion": "PASS within the deterministic Node startup recovery integration scope; both requested mutations were killed by expected behavior assertions",
+    "mutationCount": 2,
+    "killedByExpectedBehaviorAssertion": 2,
+    "findingsRequiringChanges": [],
+    "boundaries": [
+      "Main recoverPositionPendingBeforeInterruptedSweep and getPositionReconciliationService are extracted intact with Acorn and execute in one lexical environment.",
+      "Production Position service and streaming bank import create real side DB checkpoint history and committed input receipts; the seed requires zero outbox records and zero intent persistence calls.",
+      "Production G1 composition and Position owner, Archive service/controller, terminal registry and durable outbox are used; other domain participants, platform scan, settings facade, and UI callbacks are scoped fixtures.",
+      "Baseline asserts original task/batch/artifact/hash, no repeated business checkpoint advance, pending convergence, two-startup idempotence, checkpoint mismatch fail-closed, and durable-then-pending-clear-failure replay.",
+      "The first flush barrier races startup settlement; firstFlushPending rejects subsequent flush until the first owner flush settles, avoiding disk timing dependency and shared-barrier masking.",
+      "ArchiveService.onSourceReleased and Controller.onOutboxFlushed both use the real owner cleanup capability; retained managed staging bytes are validated without increasing cleanup authority.",
+      "Each boot host is closed in finally; close waits for tracked recovery promises then closes production service/store and main DB; rejected store initialization closes its internal DB in the constructor catch.",
+      "No Electron GUI/process-kill, Windows file lock, installer, Excel/WPS acceptance or full gate was performed by this independent verification."
+    ]
+  }
+}

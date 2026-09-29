@@ -1,0 +1,850 @@
+{
+  "objective": "Compare actual current-policy generator output under HEAD Main vs current Main; historical repository JSON is read-only.",
+  "workdir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-storage-execution-separation",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "generator": {
+    "path": "scripts/check-background-execution-manifest.js",
+    "sha256": "2e23562e537d30eff4b034c2c3f3db29cf1efe0c4557d4ac7b48a480ec608ec1"
+  },
+  "main": {
+    "headSha256": "9599755bf4d548dea1ba5a676926af12ea153f19960e8406115aabd7e3011a3f",
+    "currentSha256": "8e189ff35f1a5d79447a94881f5896958c5c89870e725c0a0fba27d95bd7bd56"
+  },
+  "approvedDifference": "coverageReport.sourceHashes['src/main.js']",
+  "note": "Isolated generation/check PASS does not mean the historical repository snapshot gate passes.",
+  "directSourceInputDifferences": [
+    "src/main.js"
+  ],
+  "dependencySourceHashes": {
+    "changes/organization-map.json": "394801e8870f9d55cbe52bfb9615057ef3a625dfe9ebda93b7cd2d2b1f2df7f7",
+    "package.json": "fdf91400d5bcbc21f63a0c58710765b371ce4928588317b8b77a11afab7385d7",
+    "scripts/lib/changes-paths.js": "d9a004e22b92481a83a31a946e9d7b0c0a7b76f1e2f6e84c7f48d215abd81445",
+    "src/backend/acquiring-bill-currency-db/columns.js": "be92cb128ad131b6a5f6115c7ff7f0018aecc44262976a0544c10fb6ef25fc7e",
+    "src/backend/acquiring-bill-currency-db/import-repository.js": "54c0dd924f3c584f7465d3dfefc2134007318bc16e35ad88f28f544a958208ae",
+    "src/backend/acquiring-bill-currency-db/run-repository.js": "9b9e4335d6d7c8707b5fae738b1e57da5922cb7700ae0cdb373bdaf01860b0e2",
+    "src/backend/acquiring-bill-currency-import/reader-handrolled.js": "2dfbb022e2bd87126e88ce56d4aa92119d5efc1daea00196ee477f6333e1ff67",
+    "src/backend/acquiring-bill-currency-import/reader.js": "18f3eef9e7d941ec7e5d59175554100354219b3db11ecec36b7c5abe0a5bc79b",
+    "src/backend/acquiring-bill-currency-import/validator.js": "79916a9ab06947a3cc9699b0fa2c5efcf9f27c3d52b95d8ed42815249b60eb70",
+    "src/backend/big-table-import/pipeline.js": "ed2db78984e269316de8f31326a363b7082d4ba83eee6a81a9cde88090cb6a34",
+    "src/backend/big-table-import/zip-reader.js": "2b3d3bfb7f95867263fccd700257a852edaecad5153b89157d19b40e4cbd75b1",
+    "src/backend/biz-op-legacy-guard.js": "b3ce652cdbdc8beb1b372f458955f698a9fd83f3d714415c3bc8d290e3ffc6ce",
+    "src/backend/biz-op-recon-db/migrations.js": "8c741dc6adb225b8a374318757f7611e5beb9de4ad3cd4109d7bae61fc1771eb",
+    "src/backend/database/duplicate-inbound-match-run-repository.js": "08697279499761f99995de49dea66f01680c4085b027bcf716db90cf689a3197",
+    "src/backend/duplicate-inbound-match-result-digest.js": "aee8a3830fb71b14c8e1ecfd5bdadf55a1dde31023c2679762a6ec59165510a5",
+    "src/backend/duplicate-inbound-match-side-db-identity.js": "a8198ade050f68093e8237532e0f0af42e7596f89a5e35de5ab52019d463b07a",
+    "src/backend/file-service.js": "ecbb597345df02e34d7d6857eaade8b6fd01b7134420f46890c383e1dad9696c",
+    "src/backend/file-service/common.js": "054383092b727e5c3ceadfac5ba9db4881c2af5c6cc0c3a2c28781d8069b126c",
+    "src/backend/file-service/error-causes.js": "2a758de239d62d6cd2026b856733139cf6dc26cdbe08fef3c965ec46abd07705",
+    "src/backend/file-service/normalizers.js": "857ffb29226e44ba7c10798116cf56cb7cceac8241af7b5b7c86bb0c61fc1091",
+    "src/backend/file-service/readers.js": "f5b09d2cfb3279a49ab69e11fe70da93a2a031657b8d39f3d2ad8f99937699dd",
+    "src/backend/file-service/writers.js": "eceedf188ce614ada0f5f9928eba17b996034a8a4fbfe12d16831afd996bb48d",
+    "src/backend/logger.js": "81cbe2c057fbb2232a73d86ab8c4752ec9b589b6744f0061f576409aeb87dc99",
+    "src/backend/pending-import/streaming-xlsx-reader.js": "b3c60a42d351c1db1c4428cd5023719d381766275540977db1063cb8e176a4c6",
+    "src/backend/pending-import/xlsx-size-preflight.js": "f18498ba7f7b4cd1999947753604972933dcb4c44f711a0ca2c87572f043ebce",
+    "src/backend/position-reconciliation-import/constants.js": "f4b8a9e29712b770060c82ecb259d10588dd46ad2a3ec84b25161bf522a9bbbd",
+    "src/backend/position-report-source-identity.js": "374492b66b01fb34ad53ad89628e0cbc9dd141e9b2d7261d1016a7642cc63b09",
+    "src/backend/run-data-store.js": "4efc7afb93bf63dfe8e6888c80109ae35b952ccd12d6bc0a83c7d4212e551535",
+    "src/constants/bank-statement-fields.js": "2b068d974346f385ead1764404a7b6a1c3f7397f2f2a6350bec83eb493002db4",
+    "src/main-process/acquiring-bill-currency-multiworker-service.js": "de73507e249dfe9e5bc5f8fc40b3171553b302d2a23159372683603212d5e5be",
+    "src/main-process/acquiring-bill-currency-run-data.js": "8167aa09cab1265a6f23083a8de67f9c9914203d779387babb1024ad1ec3dca6",
+    "src/main-process/acquiring-bill-currency-session.js": "7d5f0a7c29e56b1f4b4a36f8b8128402bc5b15909987e3e7cdb93dc4b2db8f90",
+    "src/main-process/acquiring-bill-currency-writer.js": "50d6a7ba015b636dd8f03e773e12be1ec11dd51c1c79783f46762bd5794b2582",
+    "src/main-process/archive-center/file-plan.js": "5e8abdef740992e3e4c77752c551789d8e7c2e15161cb01a7e86a2f115b8263f",
+    "src/main-process/archive-center/filesystem-identity.js": "11707a11cae1ec7bbacfde5c728558a4a3c33dea21c7b3a6bdfd4932f166e156",
+    "src/main-process/archive-center/source-snapshot.js": "c6c17bbc961953f992b54284c6d7680fe4a4a76e3c243932943a1fc7e4028aaa",
+    "src/main-process/archive-center/target-parent-identity.js": "db3460373ac5d259fd3035bc8ae102d5f36f93f6bf26fd9ee7b9b9c234c6a26f",
+    "src/main-process/archive-center/worker-batch-context.js": "bb0f6609c05de0e461dfa7ebb54a7fdd2bd2f7b609b37b092adc0f4b1861a37a",
+    "src/main-process/archive-center/worker-operation-context.js": "0714d7b41a98aada25824c1f47a4eb96b748a00f0e03a2a49c4e62a4be0aedf0",
+    "src/main-process/background-execution/acquiring-adapter-policies.js": "41875eb9b4bb3882a26b1ed63d013e93277194b08ca663d31075fb8a7da21496",
+    "src/main-process/background-execution/action-manifest.js": "ac47bcbbdb47220007b1f53d8a53fd7f938bc5d10b870635d861389dde13ef4f",
+    "src/main-process/background-execution/action-task-binding-registry.js": "d00c70b534347cd9efbe71933f5ae7141cd60529ed104b9521aa9f388a5efc33",
+    "src/main-process/background-execution/adapters/acquiring-adapter.js": "d3d67066588f73347ce5365256fe2481ae3d2d55dffac8b3b73eef87b9256d88",
+    "src/main-process/background-execution/adapters/canonical-event-emitter.js": "7728bd10f3304ab928d786912547f21e5b4180b23632a85a26f4277a723a01f2",
+    "src/main-process/background-execution/adapters/existing-dispatch-adapter.js": "2b11681f64388a42dc1cf642ca1be8c08890385e0bb949f96ff4c8ef808b2ec4",
+    "src/main-process/background-execution/adapters/inline-async-adapter.js": "52e0a2754b3b2b21a2e78ab10742efd7b62d872b7b1bd7c68fa935c82581f576",
+    "src/main-process/background-execution/adapters/position-import-adapter.js": "49ba8001615aa5351ec6b6fc12b5ed2cf1cd5deeb50bbd6844d35ef09e038652",
+    "src/main-process/background-execution/adapters/utility-process-adapter.js": "e6624e122c4000c42408083d72e2037fbcb865796e18b36a0a7656baff1d2826",
+    "src/main-process/background-execution/adapters/worker-thread-adapter.js": "0402095e09015892a1d784f985f857d861a23499592060366181141da1f2f345",
+    "src/main-process/background-execution/admission-queue.js": "7f596fb1f734da609691a652f4ec1ea08d7ab6b531979277dcd858b29ab11f6e",
+    "src/main-process/background-execution/canonical-json-v1.js": "a839b6f26e656b9f24d7c87c2279c5a05e7bdcecec03970a6f0dd9d727c63291",
+    "src/main-process/background-execution/capability-inventory.js": "658f0857b3ab1fc3520cf3184522dfa1da62a44bfe61bde7d29811710d66fd9c",
+    "src/main-process/background-execution/carrier-observation.js": "54366a7b1bfe57fe2fdd8f6fcf4f0ff670bbc405ff0002aaa8eddbf9e872962a",
+    "src/main-process/background-execution/coverage-check.js": "9ba93ac7ae5bbad5a15a72586a8ad85ebdd2b2896974c5361f05e6f6fb9b7387",
+    "src/main-process/background-execution/critical/recovery-control-read-repository.js": "df4b4c8ab0c65f9055e1efd620b43483c415c694fafb4add485cd114dc5eb5a5",
+    "src/main-process/background-execution/error-codec.js": "0020eacd064026f42538a1e8f3b0e98d9be9a35a072c142c4162a32219881726",
+    "src/main-process/background-execution/execution-policy-registry.js": "6396807d215fb4a85cb9f5459c654924dcb83dff1a6e2b0301c105897e9efad2",
+    "src/main-process/background-execution/execution-result.js": "7b92480422013ecc3beddb902d5d5eb43c06802024fd761f39ca165dad5a1b23",
+    "src/main-process/background-execution/external-parser-finalization.js": "b055937e183f2ec5ef277a176c951511d315c157959714df27a5a4c5503ac6fc",
+    "src/main-process/background-execution/mature-action-adapters.js": "fa1c56f8fda7f12a9bc6ca262d41fa2ae1479b9584c83271246c71a15b369832",
+    "src/main-process/background-execution/pending-bizop-adapter-policies.js": "50a92c03b4ff43e199a96fcc13889bad2aa347bbaa04e0cd549f1126f3c196fb",
+    "src/main-process/background-execution/position-import-adapter-policy.js": "fa1a7685397000a1bf56c7348ed3999ec358c624468d34a7bab0bf3dd1b224a3",
+    "src/main-process/background-execution/production-strategy-snapshot.js": "da5ff1358221b0cd68c7a6e474d741fed9ecd688da71cc02b5e53aa93c3ab121",
+    "src/main-process/background-execution/protocol-validator.js": "4f852faccab6aa38206a8aebf0b56205cf038a4c02dd842c69e3bda59648c3ea",
+    "src/main-process/background-execution/protocol.js": "fcfe4aeaceb378605b876afa3ab6fa139af141256b8c041b391546f13125bdd9",
+    "src/main-process/background-execution/recovery-control-contract.js": "d5d49713c7a3317cf7613a987a34dc1aa97f5dda31ac23f467561b7e6fd10e5a",
+    "src/main-process/background-execution/recovery-hold-gate.js": "627653ef8b16482a17574183368a71f11ad01686070db57687bd3f5900882bed",
+    "src/main-process/background-execution/recovery-source.js": "028ece6410f4ab13494a84c4c4e11660c8df9a58242dd57ca8395491ea117f6f",
+    "src/main-process/background-execution/resource-budget.js": "1b13685361699859c40695411c90bef6f24b55c0bd0b6bc0b96b821a8e5c789d",
+    "src/main-process/background-execution/resource-governor.js": "a8409242a70e0950aa54b1660b996b937b05a948be5f002b122112df65cdc7db",
+    "src/main-process/background-execution/resource-lease.js": "4f45106c76ae50b2d4c821a54fad620465b963a2af4f8fc626ed6253437b699f",
+    "src/main-process/background-execution/runtime.js": "7f540302f104975aadf67e6536a8573455e64c324db417fd85f1b256cc3493d2",
+    "src/main-process/background-execution/schema-validator.js": "db693e5cbbc456db81e35ec2ac699426c88db3d18ea8d294523785461ab26c7c",
+    "src/main-process/background-execution/schemas/platform-contract-v1.schema.json": "e5a584903d8c88b1f6cce00cbe5e308796bed331ca476458833eb9c448f99ae8",
+    "src/main-process/background-execution/schemas/platform-protocol-v1.schema.json": "afcd372e783a827be44f39ca46128e3e762ff7c3b77a34b52f9fdc2d59aca93a",
+    "src/main-process/background-execution/schemas/platform-recovery-control-v1.schema.json": "f9642fdf08a0fc6d1dfe69f7454d560e5dd680d45dcf3d2aee0997c1885018ec",
+    "src/main-process/background-execution/schemas/platform-recovery-source-v1.schema.json": "eabe42ebbb974589a4f18e58d7680cdaa79d9bbbb30e05bd49b1c012e834b6b1",
+    "src/main-process/background-execution/sequence-tracker.js": "67f571d0e4c67cadf1cca2df08b9927937b1d18bb25c7b0345e7d172222a98d2",
+    "src/main-process/background-execution/service-host.js": "f70e0e80055c78357a310632f5e9a151d96ba438edd41ae36f36234ae4d0f500",
+    "src/main-process/background-execution/supervisor.js": "a45002a39fc613327d8f46e1f25ac83f91238ef1ca7b96774d440ec975314835",
+    "src/main-process/big-table-import-dispatch.js": "c6eaf4b2a9725997274290a3b2a298f7f3aee1bf4f384f21ea5ef97738690940",
+    "src/main-process/biz-op-v327/candidate-policy.json": "bb7240afa880279aa331b0a4f301592fe184f2e4eee8ab1059cd39ef194ddae0",
+    "src/main-process/biz-op-v327/contracts.js": "5a4c894036428e5e8a7bbf49ece8f0310aabba1766a267dd7703b4c4df6098c9",
+    "src/main-process/biz-op-v327/export-policy.json": "0ca37c60a4e7cf9825114730c86cd53804b5433b53d2e94d9a40018e721f60f2",
+    "src/main-process/biz-op-v327/policies.js": "88ec10f4e36a8ea40999b52b85b0a52b0f2dcd922d9c444821090db858190f23",
+    "src/main-process/biz-op-v327/release-gates.js": "395e1fc99588f3e0fdf754b7cc4e8dea391ee56bbd54aa5feb648a5cfac29d9b",
+    "src/main-process/duplicate-inbound-match/operation-receipt-repository.js": "cdae788e0a6097ca2ca527a68bd26e094cbea0045de906457450ebc22e052214",
+    "src/main-process/duplicate-inbound-match/policies.js": "61986f5f06efd0aef529debeae4e2bd6c2bab44070dc11ab9b29af6bef78543f",
+    "src/main-process/duplicate-inbound-match/spool-contract.js": "85c226cd43a63feca48371e23792e9916b0126d7a9068c490232dcc40d549457",
+    "src/main-process/duplicate-inbound-match/startup-gate.js": "4d9491303c9114f04df944a19788f358a3c5e92d20ed93839c2f4b4cdf13e564",
+    "src/main-process/duplicate-inbound-match/startup-recovery.js": "a5004e320a0508d1fb1ed148e9ac96147c7b359f2aed30145b6f9b460dd03d16",
+    "src/main-process/duplicate-inbound-match/topology.js": "26bb67cf9be16f9b7a68b2ea56d48c1274b314969b4e21c2f3f8c9a60e89c979",
+    "src/main-process/fund-recon-worker/policies.js": "133c3f9809458366e62b806b277a080ce3c8fc743a159aacfad7d4b88c6c435b",
+    "src/main-process/new-account/artifact-copy.js": "582e17a209ba459c7f375f029cfa0ee96295278c01b02750b8ed7d42ab28bc0d",
+    "src/main-process/new-account/generation-contract.js": "abacc14e3c9167af57507e0d484a6e555d811be4c02ffff4eb7cf4f823737945",
+    "src/main-process/new-account/generation-core.js": "310f1464599905f06747910adea33ab8ac32fac5a136a4aa1e14ea253a1a5c6e",
+    "src/main-process/new-account/generation-validator.js": "03550bca31bdd078db76612757ab333a5e290580d04a46edbbdac2a3ff98b709",
+    "src/main-process/new-account/policies.js": "0e53a582457d6c7e2bb95ce98978720ac11419acec54f9a1a03f8180439a6361",
+    "src/main-process/new-account/resource-estimator.js": "c79edef26712536019b8fb17b484c4079f17d93000f70b86c337b4753ee11e6f",
+    "src/main-process/new-account/strict-worksheet-readback.js": "6b2ed8fac18930ac83ac8fae593d9705cc29b284b0da17c78d89fb1f386b400d",
+    "src/main-process/position-reconciliation/common.js": "5d6064e3af4871ac120af45ef307ab94b9e77c6cc4e1239f98d2d919b9457c0d",
+    "src/main-process/position-reconciliation/constants.js": "cf7618f4d9db757cbbaa3066e38646b9768349f10ec26300dac8da70c102b00d",
+    "src/main-process/position-reconciliation/import-dispatch.js": "18127a643fd8d807fef24ad78e4710fd81d1918727cd8bbc83e3158107a0326e",
+    "src/main-process/position-reconciliation/import-recovery.js": "b264e1791a832d5cda2a001de3eedbc799bf1f3e2ceb4756b6fac4fa8cdffaf0",
+    "src/main-process/position-reconciliation/input-staging.js": "41b2e10ba3a02e79e76268d13f3205b4e75b3e1b48539e9f747cb0eb5e107c62",
+    "src/main-process/position-reconciliation/side-db-mutation.js": "89147318c8c1f66d5a7bd3a3c7dd0bfeef5f960b47c3c881ddeeacf5bfe8ede5",
+    "src/main-process/pre-fund-reconciliation/mpt-import/conflict-scope.js": "227ed87ee727ca78e8ab598f4d08f5a85ce2d407ad742000a3547a78c51aa3ab",
+    "src/main-process/pre-fund-reconciliation/mpt-import/file-result-safety.js": "8304070e3642781a561f10aaced67a99833c9e9705d5f5931e0f968179c93244",
+    "src/main-process/pre-fund-reconciliation/mpt-import/policies.js": "9bc2cd3375ebe9968dac98b7851d192184271f2ffcc4b8612a3b699bf5c7ce52",
+    "src/main-process/pre-fund-reconciliation/mpt-import/topology.js": "1d48cce334eba3a52915094c346148b2f176e3a53e0541ea7698afc66462675f",
+    "src/main-process/pre-fund-reconciliation/mpt-schema.js": "687e6821871c2ecbd758db10e5a45612e2ec0672433eabd2129a338a7408186e",
+    "src/main-process/read-only-exports/acquiring/actions.js": "c84e5295d60d2b20e04092f1dbad9dae157cac75abf2b3e3642591947ab0d0fe",
+    "src/main-process/read-only-exports/acquiring/executor.js": "cefab508bf175616b66c19be8ce3f158a88728ae03455825f5951fe168105c45",
+    "src/main-process/read-only-exports/acquiring/policies.js": "2d71f48d85f2a5ba02d1e6ed3bfd8ff1bca9a468257eb24213066fd94b4e1a44",
+    "src/main-process/read-only-exports/acquiring/query.js": "8445647e47b378f328089778cb89dddd9ce0eb60e0bc13d30eb65a09f690435a",
+    "src/main-process/read-only-exports/biz-op/policies.js": "903a3b22d6446bc1dbab77fd70e70e6bbed077a35d3140f93ab97a58188bef25",
+    "src/main-process/read-only-exports/common/artifact-evidence.js": "a5383ad19c0cab288469c645eb67e856243051239923e5b1cafdbb9307c8c2b6",
+    "src/main-process/read-only-exports/common/contract.js": "212ea3287eb6f47a4260d1515bb4e2340c0ca1a136b14566580c0736d2191b27",
+    "src/main-process/read-only-exports/common/workbook-evidence.js": "9710b5b232a7ac6b26d5eb785bd2cfb9efe5de3193ab651922557c8eb1efa4a8",
+    "src/main-process/read-only-exports/pending/policies.js": "2b47fd97749f36b09c1d40a8cb223eb971b71170417f70d22e165d87cf73d475",
+    "src/main-process/read-only-exports/position/policies.js": "91a46749c849fbdeab7579bf77624c88d525e3ec53a4ba3785a801a82c01e494",
+    "src/main-process/read-only-exports/pre-fund/policies.js": "7b7d415fdcede4e593ce75d873eb42cad0057bcdabf6c530a59ad5685d4a3afc",
+    "src/main-process/read-only-exports/vcc-financial-op/policies.js": "2c177a3e8b8bb6941397a5253feb1fb542af7bdd6cd9053133da63fbcfa44a31",
+    "src/main-process/recon-id-fix-service/evidence-settlement-admission.js": "ea8c36f55a6359fe26155c38ca19f851934d10be7675eaccc502180fb527736f",
+    "src/main-process/recon-id-fix-service/jpm-database-authority.js": "401787139592a3fe3e4c280b23a87632ee73206d09163b6bb224a7f4b47f8c08",
+    "src/main-process/recon-id-fix-service/policies.js": "0488cdd3f7f420e8615e8f95775fd8107b396264712a1c748f40d2ac2242aa18",
+    "src/main-process/run-check-multiworker-worker.js": "330e0be56a50460bb16dc37e214f5490c971cfa474ff3f95cc735bade2561a0f",
+    "src/main-process/run-check-multiworker.js": "883a642741f47aa16f1a5e608c8a83a41e3bb3b14e4b7043eabba5053efb1ad1",
+    "src/main-process/run-check-worker-pool.js": "0560ace07f044cb6f1121c7a05ab6cb2a697aec73c669ef5cb2b2de735dae0d9",
+    "src/main-process/serialize-error.js": "ddf898570a8e95158b3bf192ed4e979a6fe7d3b03786a2462884ece8027a75b1",
+    "src/main-process/statement-worker/staging-ownership.js": "42c608d5157f78039f444035c58e319f12ba4be4cca0363e778902abb7d9c05a",
+    "src/main-process/toolbox-background/generation-contract.js": "cf699934ab04210bca8cae578d5a7fe3836e631b1d6bccdec3f1ad008f9aee0f",
+    "src/main-process/toolbox-background/policies.js": "93af97c486b083180cfea1b1ec093f11a4534fd961182c9ddd8f88c71ce0d3ce",
+    "src/main-process/toolbox-input-kind.js": "203deee171705d4a36f3f7b35ccc97eaf0506159a048a14d153e7d5e0a3e1270",
+    "src/main-process/toolbox-large-split-dispatch.js": "a6a5c185a0634725e39bca836f3bb68f0257c4a141e8b5e47f4e20dec38e41c5",
+    "src/main-process/toolbox-multi-split.js": "55a485375f704abd2902ebd7e1262819c2a6094a87fdc1de5cbc0a92fd9ea899",
+    "src/main-process/toolbox-output-publication-dispatch.js": "6d8b70bde3bb41bb17d6ab7344387f7ce3f2e4d0b2875797ffeb6096f65a74b8",
+    "src/main-process/toolbox-output-publication.js": "c06e5638bf99f6a04b66629d10b8b1f29f1d2407e9523071c3cf3d18c273cda5",
+    "src/main-process/toolbox-row-split/contracts.js": "5bac1d09365d1f915d30be0d5d809f8ce14bb0edfb9270868d684144afbfbe5c",
+    "src/main-process/toolbox-row-split/policy.js": "bacb43da3f7eea9cd720717e1283705df887091b866bdb0f7460c904a9d63982",
+    "src/main-process/toolbox-target-identity.js": "e1bcd52b1c266e9c463dcd5b32a62c327701f1760f8f6213189c6c90bbc76f4a",
+    "src/main-process/toolbox.js": "2573c5cc60235a2af6545d287fc5b8afa52efae593a8d6f8dc3f66809ac00397",
+    "src/main-process/vcc-financial-op-output/policies.js": "3bf520ac9fc1ae131b4355e5a973c9f111fa6e2e0d4c36ab1f0478586b8c3b80",
+    "src/main-process/vcc-financial-op-output/topology.js": "4d4c1d4d7fc9898ce54d26d6593c6ef1a6044dd0eb552ca0fac72d01675c6f4a",
+    "src/main-process/workbook-watermark.js": "29f9779f35b162a95fe7981073cd82f3bac6a9fbed1142ea120d7ec5e271ec7d"
+  },
+  "sourceReadHashes": {
+    "baseline": {
+      "changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/recovery-contract-authority.v1.json": "2b8a1c6cea35a693f8f5b4c454ccf8422862e5c8a6b0186a620e260895be4242",
+      "scripts/check-background-execution-manifest.js": "2e23562e537d30eff4b034c2c3f3db29cf1efe0c4557d4ac7b48a480ec608ec1",
+      "src/main.js": "9599755bf4d548dea1ba5a676926af12ea153f19960e8406115aabd7e3011a3f",
+      "src/main-process/archive-center/task-policy-registry.js": "52b94f6acddaf775427136b95b9c0f46957b11a0f6124e1473a4562d1a1ecdb0",
+      "src/main-process/background-execution/action-task-binding-registry.js": "d00c70b534347cd9efbe71933f5ae7141cd60529ed104b9521aa9f388a5efc33",
+      "src/main-process/background-execution/action-manifest.js": "ac47bcbbdb47220007b1f53d8a53fd7f938bc5d10b870635d861389dde13ef4f",
+      "src/main-process/background-execution/capability-inventory.js": "658f0857b3ab1fc3520cf3184522dfa1da62a44bfe61bde7d29811710d66fd9c",
+      "src/main-process/background-execution/coverage-check.js": "9ba93ac7ae5bbad5a15a72586a8ad85ebdd2b2896974c5361f05e6f6fb9b7387",
+      "src/main-process/background-execution/production-strategy-snapshot.js": "da5ff1358221b0cd68c7a6e474d741fed9ecd688da71cc02b5e53aa93c3ab121",
+      "src/main-process/background-execution/runtime.js": "7f540302f104975aadf67e6536a8573455e64c324db417fd85f1b256cc3493d2"
+    },
+    "current": {
+      "changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/recovery-contract-authority.v1.json": "2b8a1c6cea35a693f8f5b4c454ccf8422862e5c8a6b0186a620e260895be4242",
+      "scripts/check-background-execution-manifest.js": "2e23562e537d30eff4b034c2c3f3db29cf1efe0c4557d4ac7b48a480ec608ec1",
+      "src/main.js": "8e189ff35f1a5d79447a94881f5896958c5c89870e725c0a0fba27d95bd7bd56",
+      "src/main-process/archive-center/task-policy-registry.js": "52b94f6acddaf775427136b95b9c0f46957b11a0f6124e1473a4562d1a1ecdb0",
+      "src/main-process/background-execution/action-task-binding-registry.js": "d00c70b534347cd9efbe71933f5ae7141cd60529ed104b9521aa9f388a5efc33",
+      "src/main-process/background-execution/action-manifest.js": "ac47bcbbdb47220007b1f53d8a53fd7f938bc5d10b870635d861389dde13ef4f",
+      "src/main-process/background-execution/capability-inventory.js": "658f0857b3ab1fc3520cf3184522dfa1da62a44bfe61bde7d29811710d66fd9c",
+      "src/main-process/background-execution/coverage-check.js": "9ba93ac7ae5bbad5a15a72586a8ad85ebdd2b2896974c5361f05e6f6fb9b7387",
+      "src/main-process/background-execution/production-strategy-snapshot.js": "da5ff1358221b0cd68c7a6e474d741fed9ecd688da71cc02b5e53aa93c3ab121",
+      "src/main-process/background-execution/runtime.js": "7f540302f104975aadf67e6536a8573455e64c324db417fd85f1b256cc3493d2"
+    }
+  },
+  "outputComparisons": [
+    {
+      "name": "e13-g-action-manifest.json",
+      "byteIdentical": true,
+      "semanticDifferences": [],
+      "baselineSha256": "3d6912488438bcaea1e6255bc4b9de77895f3309e27400a632c2603ff3ef3767",
+      "currentSha256": "3d6912488438bcaea1e6255bc4b9de77895f3309e27400a632c2603ff3ef3767"
+    },
+    {
+      "name": "e13-g-capability-inventory.json",
+      "byteIdentical": true,
+      "semanticDifferences": [],
+      "baselineSha256": "2e9b0691be841b07eca1dc79d431a843fc67b8a18377a1f179c3c4d2b42e504c",
+      "currentSha256": "2e9b0691be841b07eca1dc79d431a843fc67b8a18377a1f179c3c4d2b42e504c"
+    },
+    {
+      "name": "e13-g-production-strategy-snapshot.json",
+      "byteIdentical": true,
+      "semanticDifferences": [],
+      "baselineSha256": "42e21431cafad561dce5006bde7e3ec65fb1b837892d2853483fe2e55820e0aa",
+      "currentSha256": "42e21431cafad561dce5006bde7e3ec65fb1b837892d2853483fe2e55820e0aa"
+    },
+    {
+      "name": "e13-g-coverage-report.json",
+      "byteIdentical": false,
+      "semanticDifferences": [
+        "sourceHashes.src/main.js"
+      ],
+      "baselineSha256": "0bd92604f77e7df68218a7367b32e0a2c36f71e4fa6e28298788a1c85bb9ea16",
+      "currentSha256": "844012efab6297e0e1d8bf12c4a4c9965c830bbda6c84e8d40e5fd493aae31bc"
+    }
+  ],
+  "historicalRepositoryOutputs": [
+    {
+      "path": "changes/v3.2.5/e13-g-action-manifest.json",
+      "unchangedDuringAudit": true,
+      "matchesHead": true,
+      "sha256": "14106dd53b82640db9a5101f52ceeef99534f2b1b522250209d9f2906686890a"
+    },
+    {
+      "path": "changes/v3.2.5/e13-g-capability-inventory.json",
+      "unchangedDuringAudit": true,
+      "matchesHead": true,
+      "sha256": "c0f0c73cfb6c237fd4a1ad3570f246167d73a8103aaa13e889885add2a61da8d"
+    },
+    {
+      "path": "changes/v3.2.5/e13-g-production-strategy-snapshot.json",
+      "unchangedDuringAudit": true,
+      "matchesHead": true,
+      "sha256": "744aa1905a2daa4b0493bd3a32b380391d7d1608759ae34bafca38db47523a5d"
+    },
+    {
+      "path": "changes/v3.2.5/e13-g-coverage-report.json",
+      "unchangedDuringAudit": true,
+      "matchesHead": true,
+      "sha256": "5d1e2df304f82a449f84413602b1c24787a4103853e0898487a4cfa0289e19c4"
+    }
+  ],
+  "result": "PASS",
+  "runs": [
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "result": "PASS",
+      "writeCount": 4,
+      "stdout": "E13-G manifest gate PASS: 402/402 surfaces, 74 legacy pairs, 13 production enabled\n"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "result": "PASS",
+      "writeCount": 4,
+      "stdout": "E13-G manifest gate PASS: 402/402 surfaces, 74 legacy pairs, 13 production enabled\n"
+    },
+    {
+      "variant": "baseline",
+      "mode": "check",
+      "result": "PASS",
+      "writeCount": 0,
+      "stdout": "E13-G manifest gate PASS: 402/402 surfaces, 74 legacy pairs, 13 production enabled\n"
+    },
+    {
+      "variant": "current",
+      "mode": "check",
+      "result": "PASS",
+      "writeCount": 0,
+      "stdout": "E13-G manifest gate PASS: 402/402 surfaces, 74 legacy pairs, 13 production enabled\n"
+    }
+  ],
+  "operations": [
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/recovery-contract-authority.v1.json",
+      "actual": "changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/recovery-contract-authority.v1.json",
+      "virtualHeadMain": false,
+      "sha256": "2b8a1c6cea35a693f8f5b4c454ccf8422862e5c8a6b0186a620e260895be4242"
+    },
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "scripts/check-background-execution-manifest.js",
+      "actual": "scripts/check-background-execution-manifest.js",
+      "virtualHeadMain": false,
+      "sha256": "2e23562e537d30eff4b034c2c3f3db29cf1efe0c4557d4ac7b48a480ec608ec1"
+    },
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "src/main.js",
+      "actual": "src/main.js",
+      "virtualHeadMain": true,
+      "sha256": "9599755bf4d548dea1ba5a676926af12ea153f19960e8406115aabd7e3011a3f"
+    },
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "src/main-process/archive-center/task-policy-registry.js",
+      "actual": "src/main-process/archive-center/task-policy-registry.js",
+      "virtualHeadMain": false,
+      "sha256": "52b94f6acddaf775427136b95b9c0f46957b11a0f6124e1473a4562d1a1ecdb0"
+    },
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/action-task-binding-registry.js",
+      "actual": "src/main-process/background-execution/action-task-binding-registry.js",
+      "virtualHeadMain": false,
+      "sha256": "d00c70b534347cd9efbe71933f5ae7141cd60529ed104b9521aa9f388a5efc33"
+    },
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/action-manifest.js",
+      "actual": "src/main-process/background-execution/action-manifest.js",
+      "virtualHeadMain": false,
+      "sha256": "ac47bcbbdb47220007b1f53d8a53fd7f938bc5d10b870635d861389dde13ef4f"
+    },
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/capability-inventory.js",
+      "actual": "src/main-process/background-execution/capability-inventory.js",
+      "virtualHeadMain": false,
+      "sha256": "658f0857b3ab1fc3520cf3184522dfa1da62a44bfe61bde7d29811710d66fd9c"
+    },
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/coverage-check.js",
+      "actual": "src/main-process/background-execution/coverage-check.js",
+      "virtualHeadMain": false,
+      "sha256": "9ba93ac7ae5bbad5a15a72586a8ad85ebdd2b2896974c5361f05e6f6fb9b7387"
+    },
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/production-strategy-snapshot.js",
+      "actual": "src/main-process/background-execution/production-strategy-snapshot.js",
+      "virtualHeadMain": false,
+      "sha256": "da5ff1358221b0cd68c7a6e474d741fed9ecd688da71cc02b5e53aa93c3ab121"
+    },
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/runtime.js",
+      "actual": "src/main-process/background-execution/runtime.js",
+      "virtualHeadMain": false,
+      "sha256": "7f540302f104975aadf67e6536a8573455e64c324db417fd85f1b256cc3493d2"
+    },
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "operation": "write",
+      "requested": "changes/v3.2.5/e13-g-action-manifest.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/baseline/e13-g-action-manifest.json",
+      "sha256": "3d6912488438bcaea1e6255bc4b9de77895f3309e27400a632c2603ff3ef3767"
+    },
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "operation": "write",
+      "requested": "changes/v3.2.5/e13-g-capability-inventory.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/baseline/e13-g-capability-inventory.json",
+      "sha256": "2e9b0691be841b07eca1dc79d431a843fc67b8a18377a1f179c3c4d2b42e504c"
+    },
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "operation": "write",
+      "requested": "changes/v3.2.5/e13-g-production-strategy-snapshot.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/baseline/e13-g-production-strategy-snapshot.json",
+      "sha256": "42e21431cafad561dce5006bde7e3ec65fb1b837892d2853483fe2e55820e0aa"
+    },
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "operation": "write",
+      "requested": "changes/v3.2.5/e13-g-coverage-report.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/baseline/e13-g-coverage-report.json",
+      "sha256": "0bd92604f77e7df68218a7367b32e0a2c36f71e4fa6e28298788a1c85bb9ea16"
+    },
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "changes/v3.2.5/e13-g-action-manifest.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/baseline/e13-g-action-manifest.json",
+      "virtualHeadMain": false,
+      "sha256": "3d6912488438bcaea1e6255bc4b9de77895f3309e27400a632c2603ff3ef3767"
+    },
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "changes/v3.2.5/e13-g-capability-inventory.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/baseline/e13-g-capability-inventory.json",
+      "virtualHeadMain": false,
+      "sha256": "2e9b0691be841b07eca1dc79d431a843fc67b8a18377a1f179c3c4d2b42e504c"
+    },
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "changes/v3.2.5/e13-g-production-strategy-snapshot.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/baseline/e13-g-production-strategy-snapshot.json",
+      "virtualHeadMain": false,
+      "sha256": "42e21431cafad561dce5006bde7e3ec65fb1b837892d2853483fe2e55820e0aa"
+    },
+    {
+      "variant": "baseline",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "changes/v3.2.5/e13-g-coverage-report.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/baseline/e13-g-coverage-report.json",
+      "virtualHeadMain": false,
+      "sha256": "0bd92604f77e7df68218a7367b32e0a2c36f71e4fa6e28298788a1c85bb9ea16"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/recovery-contract-authority.v1.json",
+      "actual": "changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/recovery-contract-authority.v1.json",
+      "virtualHeadMain": false,
+      "sha256": "2b8a1c6cea35a693f8f5b4c454ccf8422862e5c8a6b0186a620e260895be4242"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "scripts/check-background-execution-manifest.js",
+      "actual": "scripts/check-background-execution-manifest.js",
+      "virtualHeadMain": false,
+      "sha256": "2e23562e537d30eff4b034c2c3f3db29cf1efe0c4557d4ac7b48a480ec608ec1"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "src/main.js",
+      "actual": "src/main.js",
+      "virtualHeadMain": false,
+      "sha256": "8e189ff35f1a5d79447a94881f5896958c5c89870e725c0a0fba27d95bd7bd56"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "src/main-process/archive-center/task-policy-registry.js",
+      "actual": "src/main-process/archive-center/task-policy-registry.js",
+      "virtualHeadMain": false,
+      "sha256": "52b94f6acddaf775427136b95b9c0f46957b11a0f6124e1473a4562d1a1ecdb0"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/action-task-binding-registry.js",
+      "actual": "src/main-process/background-execution/action-task-binding-registry.js",
+      "virtualHeadMain": false,
+      "sha256": "d00c70b534347cd9efbe71933f5ae7141cd60529ed104b9521aa9f388a5efc33"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/action-manifest.js",
+      "actual": "src/main-process/background-execution/action-manifest.js",
+      "virtualHeadMain": false,
+      "sha256": "ac47bcbbdb47220007b1f53d8a53fd7f938bc5d10b870635d861389dde13ef4f"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/capability-inventory.js",
+      "actual": "src/main-process/background-execution/capability-inventory.js",
+      "virtualHeadMain": false,
+      "sha256": "658f0857b3ab1fc3520cf3184522dfa1da62a44bfe61bde7d29811710d66fd9c"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/coverage-check.js",
+      "actual": "src/main-process/background-execution/coverage-check.js",
+      "virtualHeadMain": false,
+      "sha256": "9ba93ac7ae5bbad5a15a72586a8ad85ebdd2b2896974c5361f05e6f6fb9b7387"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/production-strategy-snapshot.js",
+      "actual": "src/main-process/background-execution/production-strategy-snapshot.js",
+      "virtualHeadMain": false,
+      "sha256": "da5ff1358221b0cd68c7a6e474d741fed9ecd688da71cc02b5e53aa93c3ab121"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/runtime.js",
+      "actual": "src/main-process/background-execution/runtime.js",
+      "virtualHeadMain": false,
+      "sha256": "7f540302f104975aadf67e6536a8573455e64c324db417fd85f1b256cc3493d2"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "operation": "write",
+      "requested": "changes/v3.2.5/e13-g-action-manifest.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/current/e13-g-action-manifest.json",
+      "sha256": "3d6912488438bcaea1e6255bc4b9de77895f3309e27400a632c2603ff3ef3767"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "operation": "write",
+      "requested": "changes/v3.2.5/e13-g-capability-inventory.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/current/e13-g-capability-inventory.json",
+      "sha256": "2e9b0691be841b07eca1dc79d431a843fc67b8a18377a1f179c3c4d2b42e504c"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "operation": "write",
+      "requested": "changes/v3.2.5/e13-g-production-strategy-snapshot.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/current/e13-g-production-strategy-snapshot.json",
+      "sha256": "42e21431cafad561dce5006bde7e3ec65fb1b837892d2853483fe2e55820e0aa"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "operation": "write",
+      "requested": "changes/v3.2.5/e13-g-coverage-report.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/current/e13-g-coverage-report.json",
+      "sha256": "844012efab6297e0e1d8bf12c4a4c9965c830bbda6c84e8d40e5fd493aae31bc"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "changes/v3.2.5/e13-g-action-manifest.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/current/e13-g-action-manifest.json",
+      "virtualHeadMain": false,
+      "sha256": "3d6912488438bcaea1e6255bc4b9de77895f3309e27400a632c2603ff3ef3767"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "changes/v3.2.5/e13-g-capability-inventory.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/current/e13-g-capability-inventory.json",
+      "virtualHeadMain": false,
+      "sha256": "2e9b0691be841b07eca1dc79d431a843fc67b8a18377a1f179c3c4d2b42e504c"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "changes/v3.2.5/e13-g-production-strategy-snapshot.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/current/e13-g-production-strategy-snapshot.json",
+      "virtualHeadMain": false,
+      "sha256": "42e21431cafad561dce5006bde7e3ec65fb1b837892d2853483fe2e55820e0aa"
+    },
+    {
+      "variant": "current",
+      "mode": "write-and-check",
+      "operation": "read",
+      "requested": "changes/v3.2.5/e13-g-coverage-report.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/current/e13-g-coverage-report.json",
+      "virtualHeadMain": false,
+      "sha256": "844012efab6297e0e1d8bf12c4a4c9965c830bbda6c84e8d40e5fd493aae31bc"
+    },
+    {
+      "variant": "baseline",
+      "mode": "check",
+      "operation": "read",
+      "requested": "changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/recovery-contract-authority.v1.json",
+      "actual": "changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/recovery-contract-authority.v1.json",
+      "virtualHeadMain": false,
+      "sha256": "2b8a1c6cea35a693f8f5b4c454ccf8422862e5c8a6b0186a620e260895be4242"
+    },
+    {
+      "variant": "baseline",
+      "mode": "check",
+      "operation": "read",
+      "requested": "scripts/check-background-execution-manifest.js",
+      "actual": "scripts/check-background-execution-manifest.js",
+      "virtualHeadMain": false,
+      "sha256": "2e23562e537d30eff4b034c2c3f3db29cf1efe0c4557d4ac7b48a480ec608ec1"
+    },
+    {
+      "variant": "baseline",
+      "mode": "check",
+      "operation": "read",
+      "requested": "src/main.js",
+      "actual": "src/main.js",
+      "virtualHeadMain": true,
+      "sha256": "9599755bf4d548dea1ba5a676926af12ea153f19960e8406115aabd7e3011a3f"
+    },
+    {
+      "variant": "baseline",
+      "mode": "check",
+      "operation": "read",
+      "requested": "src/main-process/archive-center/task-policy-registry.js",
+      "actual": "src/main-process/archive-center/task-policy-registry.js",
+      "virtualHeadMain": false,
+      "sha256": "52b94f6acddaf775427136b95b9c0f46957b11a0f6124e1473a4562d1a1ecdb0"
+    },
+    {
+      "variant": "baseline",
+      "mode": "check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/action-task-binding-registry.js",
+      "actual": "src/main-process/background-execution/action-task-binding-registry.js",
+      "virtualHeadMain": false,
+      "sha256": "d00c70b534347cd9efbe71933f5ae7141cd60529ed104b9521aa9f388a5efc33"
+    },
+    {
+      "variant": "baseline",
+      "mode": "check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/action-manifest.js",
+      "actual": "src/main-process/background-execution/action-manifest.js",
+      "virtualHeadMain": false,
+      "sha256": "ac47bcbbdb47220007b1f53d8a53fd7f938bc5d10b870635d861389dde13ef4f"
+    },
+    {
+      "variant": "baseline",
+      "mode": "check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/capability-inventory.js",
+      "actual": "src/main-process/background-execution/capability-inventory.js",
+      "virtualHeadMain": false,
+      "sha256": "658f0857b3ab1fc3520cf3184522dfa1da62a44bfe61bde7d29811710d66fd9c"
+    },
+    {
+      "variant": "baseline",
+      "mode": "check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/coverage-check.js",
+      "actual": "src/main-process/background-execution/coverage-check.js",
+      "virtualHeadMain": false,
+      "sha256": "9ba93ac7ae5bbad5a15a72586a8ad85ebdd2b2896974c5361f05e6f6fb9b7387"
+    },
+    {
+      "variant": "baseline",
+      "mode": "check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/production-strategy-snapshot.js",
+      "actual": "src/main-process/background-execution/production-strategy-snapshot.js",
+      "virtualHeadMain": false,
+      "sha256": "da5ff1358221b0cd68c7a6e474d741fed9ecd688da71cc02b5e53aa93c3ab121"
+    },
+    {
+      "variant": "baseline",
+      "mode": "check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/runtime.js",
+      "actual": "src/main-process/background-execution/runtime.js",
+      "virtualHeadMain": false,
+      "sha256": "7f540302f104975aadf67e6536a8573455e64c324db417fd85f1b256cc3493d2"
+    },
+    {
+      "variant": "baseline",
+      "mode": "check",
+      "operation": "read",
+      "requested": "changes/v3.2.5/e13-g-action-manifest.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/baseline/e13-g-action-manifest.json",
+      "virtualHeadMain": false,
+      "sha256": "3d6912488438bcaea1e6255bc4b9de77895f3309e27400a632c2603ff3ef3767"
+    },
+    {
+      "variant": "baseline",
+      "mode": "check",
+      "operation": "read",
+      "requested": "changes/v3.2.5/e13-g-capability-inventory.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/baseline/e13-g-capability-inventory.json",
+      "virtualHeadMain": false,
+      "sha256": "2e9b0691be841b07eca1dc79d431a843fc67b8a18377a1f179c3c4d2b42e504c"
+    },
+    {
+      "variant": "baseline",
+      "mode": "check",
+      "operation": "read",
+      "requested": "changes/v3.2.5/e13-g-production-strategy-snapshot.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/baseline/e13-g-production-strategy-snapshot.json",
+      "virtualHeadMain": false,
+      "sha256": "42e21431cafad561dce5006bde7e3ec65fb1b837892d2853483fe2e55820e0aa"
+    },
+    {
+      "variant": "baseline",
+      "mode": "check",
+      "operation": "read",
+      "requested": "changes/v3.2.5/e13-g-coverage-report.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/baseline/e13-g-coverage-report.json",
+      "virtualHeadMain": false,
+      "sha256": "0bd92604f77e7df68218a7367b32e0a2c36f71e4fa6e28298788a1c85bb9ea16"
+    },
+    {
+      "variant": "current",
+      "mode": "check",
+      "operation": "read",
+      "requested": "changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/recovery-contract-authority.v1.json",
+      "actual": "changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/recovery-contract-authority.v1.json",
+      "virtualHeadMain": false,
+      "sha256": "2b8a1c6cea35a693f8f5b4c454ccf8422862e5c8a6b0186a620e260895be4242"
+    },
+    {
+      "variant": "current",
+      "mode": "check",
+      "operation": "read",
+      "requested": "scripts/check-background-execution-manifest.js",
+      "actual": "scripts/check-background-execution-manifest.js",
+      "virtualHeadMain": false,
+      "sha256": "2e23562e537d30eff4b034c2c3f3db29cf1efe0c4557d4ac7b48a480ec608ec1"
+    },
+    {
+      "variant": "current",
+      "mode": "check",
+      "operation": "read",
+      "requested": "src/main.js",
+      "actual": "src/main.js",
+      "virtualHeadMain": false,
+      "sha256": "8e189ff35f1a5d79447a94881f5896958c5c89870e725c0a0fba27d95bd7bd56"
+    },
+    {
+      "variant": "current",
+      "mode": "check",
+      "operation": "read",
+      "requested": "src/main-process/archive-center/task-policy-registry.js",
+      "actual": "src/main-process/archive-center/task-policy-registry.js",
+      "virtualHeadMain": false,
+      "sha256": "52b94f6acddaf775427136b95b9c0f46957b11a0f6124e1473a4562d1a1ecdb0"
+    },
+    {
+      "variant": "current",
+      "mode": "check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/action-task-binding-registry.js",
+      "actual": "src/main-process/background-execution/action-task-binding-registry.js",
+      "virtualHeadMain": false,
+      "sha256": "d00c70b534347cd9efbe71933f5ae7141cd60529ed104b9521aa9f388a5efc33"
+    },
+    {
+      "variant": "current",
+      "mode": "check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/action-manifest.js",
+      "actual": "src/main-process/background-execution/action-manifest.js",
+      "virtualHeadMain": false,
+      "sha256": "ac47bcbbdb47220007b1f53d8a53fd7f938bc5d10b870635d861389dde13ef4f"
+    },
+    {
+      "variant": "current",
+      "mode": "check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/capability-inventory.js",
+      "actual": "src/main-process/background-execution/capability-inventory.js",
+      "virtualHeadMain": false,
+      "sha256": "658f0857b3ab1fc3520cf3184522dfa1da62a44bfe61bde7d29811710d66fd9c"
+    },
+    {
+      "variant": "current",
+      "mode": "check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/coverage-check.js",
+      "actual": "src/main-process/background-execution/coverage-check.js",
+      "virtualHeadMain": false,
+      "sha256": "9ba93ac7ae5bbad5a15a72586a8ad85ebdd2b2896974c5361f05e6f6fb9b7387"
+    },
+    {
+      "variant": "current",
+      "mode": "check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/production-strategy-snapshot.js",
+      "actual": "src/main-process/background-execution/production-strategy-snapshot.js",
+      "virtualHeadMain": false,
+      "sha256": "da5ff1358221b0cd68c7a6e474d741fed9ecd688da71cc02b5e53aa93c3ab121"
+    },
+    {
+      "variant": "current",
+      "mode": "check",
+      "operation": "read",
+      "requested": "src/main-process/background-execution/runtime.js",
+      "actual": "src/main-process/background-execution/runtime.js",
+      "virtualHeadMain": false,
+      "sha256": "7f540302f104975aadf67e6536a8573455e64c324db417fd85f1b256cc3493d2"
+    },
+    {
+      "variant": "current",
+      "mode": "check",
+      "operation": "read",
+      "requested": "changes/v3.2.5/e13-g-action-manifest.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/current/e13-g-action-manifest.json",
+      "virtualHeadMain": false,
+      "sha256": "3d6912488438bcaea1e6255bc4b9de77895f3309e27400a632c2603ff3ef3767"
+    },
+    {
+      "variant": "current",
+      "mode": "check",
+      "operation": "read",
+      "requested": "changes/v3.2.5/e13-g-capability-inventory.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/current/e13-g-capability-inventory.json",
+      "virtualHeadMain": false,
+      "sha256": "2e9b0691be841b07eca1dc79d431a843fc67b8a18377a1f179c3c4d2b42e504c"
+    },
+    {
+      "variant": "current",
+      "mode": "check",
+      "operation": "read",
+      "requested": "changes/v3.2.5/e13-g-production-strategy-snapshot.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/current/e13-g-production-strategy-snapshot.json",
+      "virtualHeadMain": false,
+      "sha256": "42e21431cafad561dce5006bde7e3ec65fb1b837892d2853483fe2e55820e0aa"
+    },
+    {
+      "variant": "current",
+      "mode": "check",
+      "operation": "read",
+      "requested": "changes/v3.2.5/e13-g-coverage-report.json",
+      "actual": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/evidence/manifest-main-differential/current/e13-g-coverage-report.json",
+      "virtualHeadMain": false,
+      "sha256": "844012efab6297e0e1d8bf12c4a4c9965c830bbda6c84e8d40e5fd493aae31bc"
+    }
+  ]
+}

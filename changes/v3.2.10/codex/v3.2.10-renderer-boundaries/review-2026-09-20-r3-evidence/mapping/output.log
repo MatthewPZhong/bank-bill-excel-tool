@@ -1,0 +1,7 @@
+EVIDENCE parent-write {"before":{"parent":"blocked","writes":1},"after":{"parent":"blocked","top":true,"writes":1}}
+PASS INDEP 旧onClose结算不释放后来父映射保存的busy锁
+EVIDENCE mapping-replaced {"oldOpen":false,"newTop":true,"unchanged":true,"rows":2,"errors":[]}
+PASS INDEP 同模板mapping被新实例替换后旧打开返回不能改动新行管理
+EVIDENCE return-read-error {"rows":3,"reads":2,"errors":[]}
+PASS INDEP 子层返回读异常仍可安全退出，下一次打开须重新读取Main
+3/3 PASS

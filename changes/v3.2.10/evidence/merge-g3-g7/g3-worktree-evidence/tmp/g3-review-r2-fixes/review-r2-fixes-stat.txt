@@ -1,0 +1,10 @@
+ .../implementation-notes.md                        |   60 ++
+ .../codex/v3.2.10-renderer-boundaries/techdoc.md   |   13 
+ .../fixtures/configuration-dialogs.js              |  203 ++++++++
+ scripts/smoke/render-status-box.js                 |    8 
+ src/renderer/README.md                             |    4 
+ src/renderer/controllers/bank-statement.js         |   22 +
+ src/renderer/controllers/recon-id-fix.js           |   22 +
+ src/renderer/dialogs/configuration.js              |  532 +++++++++-----------
+ .../renderer/scenario-controller-feedback.test.js  |  155 ++++++
+ 9 files changed, 727 insertions(+), 292 deletions(-)

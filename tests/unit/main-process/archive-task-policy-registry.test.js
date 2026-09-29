@@ -5,19 +5,26 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const acorn = require('acorn');
+const { createArchiveAwareOperationHarness } = require('../../helpers/archive-aware-operation-harness');
 
 const {
   EXCLUDED_CHANNELS_BY_REASON,
   EXCLUDE_REASONS,
   FILE_ACTION_CHANNELS,
   NO_FILE_ACTION_CHANNELS,
-  SUPPORT_ACTION_POLICIES,
+  SUPPORT_ACTION_POLICIES
+} = require('../../../src/main-process/archive-center/task-policy-registry');
+const {
   bankBuImportResultFlowIdentities,
   bankBuRunFlowPlan,
-  createBankStatementRunFlowIdentity,
-  createTaskPolicyRegistry,
   statementResultClassifier
-} = require('../../../src/main-process/archive-center/task-policy-registry');
+} = require('../../../src/main-process/execution-descriptors/legacy-task-policies');
+const {
+  createBankStatementRunFlowIdentity
+} = require('../../../src/main-process/fund-recon-worker/archive-task-policies');
+const {
+  createTaskPolicyRegistry
+} = require('../../../src/main-process/execution-descriptors/composition');
 const {
   FILE_CHANNELS
 } = require('../../../src/main-process/archive-center/operation-tracker');
@@ -260,7 +267,7 @@ test('dialog selection 显式区分 file/directory，正常 file policy 不再�
   const runnerEnd = source.indexOf('\nfunction trackedIpcHandle', runnerStart);
   const runner = source.slice(runnerStart, runnerEnd);
   assert.doesNotMatch(runner, /dialogSelections\.flatMap|selection\.kind === 'file'/);
-  assert.match(runner, /useLegacyExistingBatchRecovery = prepared\.legacyExistingBatchRecovery === true/);
+  assert.match(runner, /useLegacyExistingBatchRecovery = isFileTask && prepared\.legacyExistingBatchRecovery === true/);
   assert.match(runner, /selectedPathsResolver: useLegacyExistingBatchRecovery \? \(\) => \[\] : null/);
 });
 
@@ -607,7 +614,7 @@ test('no-file policy 经受控 helper 进入 operation-only lifecycle', () => {
   const start = source.indexOf('async function runArchiveAwareOperation');
   const end = source.indexOf('function runRegisteredBusinessOperation', start);
   const operationFlow = source.slice(start, end);
-  assert.match(operationFlow, /policy\.batchPolicy === 'no-file'/);
+  assert.match(operationFlow, /policy\.batchPolicy !== 'no-file'/);
   assert.match(operationFlow, /archiveTaskLifecycle\.runOperationOnly/);
   assert.doesNotMatch(operationFlow, /policy\.excludeReason !== 'no-archive-artifact'/);
   assert.match(source, /const flowIdentity = createBankStatementRunFlowIdentity\(\)/);
@@ -615,28 +622,19 @@ test('no-file policy 经受控 helper 进入 operation-only lifecycle', () => {
   assert.match(source, /archiveFlowIdentity:\s*prepared\.flowPlan\.flowIdentity/);
 });
 
-test('no-file 最终 Hold gate 在无模块 evidence 时返回合法空对象', () => {
-  const source = fs.readFileSync(MAIN_PATH, 'utf8');
-  const operationStart = source.indexOf('async function runArchiveAwareOperation');
-  const fileBranchStart = source.indexOf(
-    'const useLegacyExistingBatchRecovery',
-    operationStart
-  );
-  const noFileFlow = source.slice(operationStart, fileBranchStart);
-  const beforeStartStart = noFileFlow.indexOf(
-    'beforeStart: async (operationContext) => {'
-  );
-  const beforeStartEnd = noFileFlow.indexOf('\n          execute:', beforeStartStart);
-  const beforeStartFlow = noFileFlow.slice(beforeStartStart, beforeStartEnd);
-
-  assert.ok(beforeStartStart >= 0, 'no-file lifecycle 必须保留最终 beforeStart gate');
-  assert.ok(beforeStartEnd > beforeStartStart, '应能提取 no-file beforeStart 包装');
-  assert.match(beforeStartFlow, /assertTaskPolicyNotHeld\(policy, prepared\)/);
-  assert.match(
-    beforeStartFlow,
-    /return typeof prepared\.beforeStart === 'function'[\s\S]*:\s*\{\};/
-  );
-  assert.doesNotMatch(beforeStartFlow, /:\s*null;/);
+test('no-file 最终 Hold gate 在无模块 evidence 时返回合法空对象', async () => {
+  let evidence;
+  const harness = createArchiveAwareOperationHarness({
+    runLifecycle: async (input, { ownerContext, method }) => {
+      assert.equal(method, 'runOperationOnly');
+      evidence = await input.beforeStart(ownerContext);
+      return { status: 'busy' };
+    }
+  });
+  await harness.run({ prepare: () => ({ proceed: true }), execute: () => assert.fail('仅验证 gate') });
+  assert.equal(harness.counts.gate, 3);
+  assert.equal(evidence !== null && typeof evidence === 'object', true);
+  assert.deepEqual(Object.keys(evidence), []);
 });
 
 test('首批 simple eager file action 逐项接入 literal FilePlan 与显式 settle', () => {
@@ -732,7 +730,7 @@ test('首批 simple eager file action 逐项接入 literal FilePlan 与显式 se
     );
   }
   assert.doesNotMatch(source, /atomicFileLifecycleChannels/);
-  assert.match(source, /const runFileLifecycle = !useLegacyExistingBatchRecovery[\s\S]*?runDeferredFileTask[\s\S]*?runFileTask[\s\S]*?archiveTaskLifecycle\.run/);
+  // 生命周期分派（含 deferred/legacy）由 task-adapters.test.js 执行实际 Main 入口验证。
 });
 
 test('Bank BU 首次运行续接持久导入身份，显式重跑创建新 parent', async () => {

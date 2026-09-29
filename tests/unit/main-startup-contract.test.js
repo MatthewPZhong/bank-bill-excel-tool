@@ -6,6 +6,7 @@ const Module = require('node:module');
 const path = require('node:path');
 const test = require('node:test');
 const espree = require('espree');
+const { createApplicationRecoveryComposition } = require('../../src/main-process/application-recovery/composition');
 
 const root = path.resolve(__dirname, '../..');
 const main = fs.readFileSync(path.join(root, 'src/main.js'), 'utf8');
@@ -278,11 +279,36 @@ test('SQLite 使用 exact optimize 且产品数据库初始化无无参数 ANALY
   assert.doesNotMatch(database, /-wal['"`][\s\S]*?(unlink|rmSync|rm\()/);
 });
 
-test('主初始化不重复执行 VCC gate，Archive post-outbox hook 是唯一启动入口', () => {
+test('主初始化不重复执行 VCC gate，Archive post-outbox hook 是唯一启动入口', async () => {
   const initialization = main.slice(
     main.indexOf('async function initializeApplication()'),
     main.indexOf('if (hasSingleInstanceLock) app.whenReady()')
   );
   assert.doesNotMatch(initialization, /syncImportArchiveLineage\(/);
-  assert.equal((main.match(/postOutboxStartupHooks:\s*\[\{/g) || []).length, 1);
+  assert.doesNotMatch(initialization, /reconcileVccImportArchiveBeforeRetentionCleanup\(/);
+  assert.equal((main.match(/postOutboxStartupHooks:\s*applicationRecoveryCoordinator\.postOutboxHooks\(\)/g) || []).length, 1);
+  assert.equal((main.match(/reconcileVccImportLineage:\s*reconcileVccImportArchiveBeforeRetentionCleanup/g) || []).length, 1);
+
+  const calls = [];
+  const application = createApplicationRecoveryComposition({
+    platform: { scanAndRecover() {}, recoverSource() {} },
+    bizOpModule: {
+      recovery: { bindPlatform() {}, run: async () => ({}), openObligations: () => false },
+      activation: { needed: () => false }
+    },
+    recoverPendingRuns() {}, recoverLegacyBizOpRuns() {}, recoverPreFundRuns() {},
+    recoverPosition() {}, recoverToolboxVccPublications() {},
+    recoverVccImportTerminal: () => { calls.push('vcc-terminal'); },
+    reconcileVccImportLineage: () => { calls.push('vcc-lineage'); }
+  });
+  await application.preflight();
+  for (const owner of application.archiveOwnerHooks()) await owner.recover();
+  assert.deepEqual(calls, ['vcc-terminal'], 'owner 阶段不能提前执行 VCC lineage gate');
+  const hooks = application.postOutboxHooks();
+  assert.deepEqual(hooks.map((hook) => hook.hookName), [
+    'BizOP activation and recovery', 'VCC import lineage/hold reconcile'
+  ]);
+  for (const hook of hooks) await hook.run();
+  for (const hook of application.postOutboxHooks()) await hook.run();
+  assert.deepEqual(calls, ['vcc-terminal', 'vcc-lineage'], '成功 post-outbox gate 只执行一次');
 });

@@ -1,0 +1,147 @@
+{
+  "hashes": [
+    {
+      "path": "scripts/architecture/scan.js",
+      "sha256": "91709776481ac49e2b9f80178a5ac7887ad21c33709c5580aaca0335ae8daaef",
+      "matchesPriorInput": true
+    },
+    {
+      "path": "scripts/architecture/rules.js",
+      "sha256": "89f21aa323513fd9ea76259d06afef2345165d2a5c90ca00903a669b12947541",
+      "matchesPriorInput": true
+    },
+    {
+      "path": "scripts/architecture/contracts.js",
+      "sha256": "e7d196124f0091ea757bd85bed04110f4499f16b91afc1ed5a2598515a8d9cbc",
+      "matchesPriorInput": true
+    },
+    {
+      "path": "scripts/architecture/renderer-contracts.js",
+      "sha256": "cf917317275b0bf2204da09566975f531f114ddf449a7c0aafe6e879a8ca83ab",
+      "matchesPriorInput": true
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "sha256": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "matchesPriorInput": true
+    },
+    {
+      "path": "architecture/boundaries.json",
+      "sha256": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+      "matchesPriorInput": true
+    },
+    {
+      "path": "architecture/legacy-allowlist.json",
+      "sha256": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3",
+      "matchesPriorInput": true
+    }
+  ],
+  "before": {
+    "boundaryState": "active",
+    "outputs": [
+      {
+        "name": "native_includes",
+        "value": true,
+        "writes": 0,
+        "violations": [],
+        "parseErrors": 0,
+        "unresolved": 0
+      },
+      {
+        "name": "native_indexof",
+        "value": 0,
+        "writes": 0,
+        "violations": [],
+        "parseErrors": 0,
+        "unresolved": 0
+      },
+      {
+        "name": "source_helper_compare",
+        "value": true,
+        "writes": 0,
+        "violations": [],
+        "parseErrors": 0,
+        "unresolved": 0
+      },
+      {
+        "name": "reduce_execution",
+        "writes": 1,
+        "violations": [],
+        "parseErrors": 0,
+        "unresolved": 0
+      }
+    ]
+  },
+  "current": {
+    "boundaryState": "active",
+    "outputs": [
+      {
+        "name": "native_includes",
+        "value": true,
+        "writes": 0,
+        "violations": [
+          {
+            "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+            "boundaryId": "publication-recovery-entry",
+            "from": "src/main-process/toolbox-output-publication.js",
+            "to": null,
+            "line": 2,
+            "column": 97,
+            "message": "受保护 prepare/worker 经静态容器、helper 或回调入口执行了受限恢复能力",
+            "evidenceId": "c348f1f68087117b239cfbbfabbb7687358bbb46d0713bbe2f11b02ef1394222",
+            "functionPath": "prepareToolboxPublication"
+          }
+        ],
+        "parseErrors": 0,
+        "unresolved": 0
+      },
+      {
+        "name": "native_indexof",
+        "value": 0,
+        "writes": 0,
+        "violations": [
+          {
+            "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+            "boundaryId": "publication-recovery-entry",
+            "from": "src/main-process/toolbox-output-publication.js",
+            "to": null,
+            "line": 2,
+            "column": 97,
+            "message": "受保护 prepare/worker 经静态容器、helper 或回调入口执行了受限恢复能力",
+            "evidenceId": "4e60dc545c33a8ac5f9fabba05e3404a62d6213091011be6d2046f1e1e014877",
+            "functionPath": "prepareToolboxPublication"
+          }
+        ],
+        "parseErrors": 0,
+        "unresolved": 0
+      },
+      {
+        "name": "source_helper_compare",
+        "value": true,
+        "writes": 0,
+        "violations": [],
+        "parseErrors": 0,
+        "unresolved": 0
+      },
+      {
+        "name": "reduce_execution",
+        "writes": 1,
+        "violations": [
+          {
+            "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+            "boundaryId": "publication-recovery-entry",
+            "from": "src/main-process/toolbox-output-publication.js",
+            "to": null,
+            "line": 2,
+            "column": 57,
+            "message": "受保护 prepare/worker 经静态容器、helper 或回调入口执行了受限恢复能力",
+            "evidenceId": "f9058610fe573a24a0d5aeb25e6307c278880157e3e9dfd466275a2fbe95b782",
+            "functionPath": "prepareToolboxPublication"
+          }
+        ],
+        "parseErrors": 0,
+        "unresolved": 0
+      }
+    ]
+  }
+}

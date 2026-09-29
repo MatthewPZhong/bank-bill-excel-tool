@@ -1,0 +1,12 @@
+{
+  "command": "node scripts/integration/renderer-lifecycle.js",
+  "executionContext": "outside filesystem sandbox",
+  "exitCode": 0,
+  "result": "PASS",
+  "passed": 233,
+  "total": 233,
+  "checkedAt": "2026-09-22T16:35:13.108550+08:00",
+  "gateInputFiles": 1704,
+  "changedInputs": [],
+  "isolation": "temporary userData and Documents; fixture APIs; production Main not loaded"
+}

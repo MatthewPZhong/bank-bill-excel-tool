@@ -1,0 +1,17 @@
+{
+  "changedPriorFiles": [
+    "architecture/README.md",
+    "changes/v3.2.10/README.md",
+    "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md",
+    "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md",
+    "changes/v3.2.10/release.md",
+    "rules/integration-test-policy.md",
+    "scripts/architecture/contracts.js",
+    "scripts/architecture/renderer-contracts.js",
+    "scripts/architecture/rules.js",
+    "scripts/architecture/scan.js"
+  ],
+  "newOutsideReviews": [
+    "tests/unit/architecture/release-rereview-r4.test.js"
+  ]
+}

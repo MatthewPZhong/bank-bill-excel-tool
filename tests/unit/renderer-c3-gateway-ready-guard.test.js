@@ -6,7 +6,7 @@
 //
 // 取函数策略：renderer.js 顶层有 performance.now()/window 等浏览器副作用，整文件 require 会立即抛错；
 //   故从源码字符串按花括号配对切出 isGatewayBillReady 函数体，用 new Function 实例化并注入 mock
-//   window.desktopApi.linkedTable.rowCount，测真实源码行为（不触发顶层副作用）。
+//   config.linkedTable.rowCount，测真实源码行为（不触发顶层副作用）。
 //   配套：源码 grep 锁关键不变量（判据严格性 / catch 兜底 / 两处门控 / 文案改向 / 死链保留 / preload+main 链路）。
 //   参考 tests/unit/renderer-import-issues-summary.test.js 同款护栏范式。
 
@@ -15,7 +15,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const RENDERER_PATH = path.join(__dirname, '..', '..', 'src', 'renderer.js');
+const RENDERER_PATH = path.join(__dirname, '..', '..', 'src', 'renderer', 'controllers', 'bank-statement.js');
 const PRELOAD_PATH = path.join(__dirname, '..', '..', 'src', 'preload.js');
 const MAIN_PATH = path.join(__dirname, '..', '..', 'src', 'main.js');
 
@@ -29,7 +29,7 @@ const mainSource = fs.readFileSync(MAIN_PATH, 'latin1');
 function extractFunctionSource(src, fnName) {
   const signature = `function ${fnName}(`;
   let start = src.indexOf(signature);
-  if (start === -1) throw new Error(`未在 renderer.js 找到 ${fnName} 定义`);
+  if (start === -1) throw new Error(`未在 bank-statement controller 找到 ${fnName} 定义`);
   // 把紧邻在 `function` 前的 `async ` 关键字纳入切片
   const asyncPrefix = 'async ';
   if (src.slice(start - asyncPrefix.length, start) === asyncPrefix) {
@@ -63,20 +63,10 @@ function stripLineComments(src) {
 function loadIsGatewayBillReady(rowCountImpl) {
   const fnSource = extractFunctionSource(source, 'isGatewayBillReady');
   const calls = [];
-  const win = {
-    desktopApi: {
-      linkedTable: {
-        rowCount: async (tableKey) => {
-          calls.push(tableKey);
-          return rowCountImpl(tableKey);
-        }
-      }
-    }
-  };
-  const consoleStub = { warn() {}, error() {}, log() {} };
-  // eslint-disable-next-line no-new-func
-  const factory = new Function('window', 'console', `${fnSource}\nreturn isGatewayBillReady;`);
-  return { fn: factory(win, consoleStub), calls };
+  const config = { linkedTable: { rowCount: async (tableKey) => { calls.push(tableKey); return rowCountImpl(tableKey); } } };
+  const reportError = () => {};
+  const factory = new Function('config', 'reportError', `${fnSource}\nreturn isGatewayBillReady;`);
+  return { fn: factory(config, reportError), calls };
 }
 
 describe('isGatewayBillReady — 行为（v3.0.0 需求2b：判据改向链接表 gateway-bill rowCount）', () => {
@@ -135,12 +125,12 @@ describe('isGatewayBillReady — 源码护栏（判据严格性 / catch 兜底 /
   test('② isGatewayBillReady 存在且查链接表 gateway-bill', () => {
     assert.ok(/async\s+function\s+isGatewayBillReady\s*\(/.test(source),
       '应存在 async function isGatewayBillReady');
-    assert.ok(source.includes("window.desktopApi.linkedTable.rowCount('gateway-bill')"),
+    assert.ok(source.includes("config.linkedTable.rowCount('gateway-bill')"),
       'isGatewayBillReady 应查 linkedTable.rowCount("gateway-bill")');
   });
 
   test('③ 判据严格：status===ok && Number.isFinite(r.rowCount) && r.rowCount > 0', () => {
-    assert.ok(source.includes("r.status === 'ok' && Number.isFinite(r.rowCount) && r.rowCount > 0"),
+    assert.ok(source.includes("result.status === 'ok' && Number.isFinite(result.rowCount) && result.rowCount > 0"),
       '就绪判据应为 status===ok && Number.isFinite(r.rowCount) && r.rowCount > 0（严格 >0）');
   });
 
@@ -196,20 +186,13 @@ describe('C3 导入动作改调链接表（v3.0.0 需求2b：onConfirm 链路）
   // v3.0.0 需求3：运行点 C3 逻辑已抽到 proceedToGwCheck（详见上方文案断言块说明）。
   const runHandlerFn = extractFunctionSource(source, 'proceedToGwCheck');
 
-  test('⑧ 两处 onConfirm 均调 linkedTable.import()、消费返回值并其后 await refreshBankStatementStatus()', () => {
-    // v3.0.4 块 A · A2 #3：onConfirm 不再丢弃 import() 返回值——
-    //   存返回值 → notifyLinkedTableImportFailures(消费失败明细) → await refreshBankStatementStatus()。
+  test('⑧ 两处 onConfirm 均经 importLinked 调 linkedTable.import、消费失败并刷新状态', () => {
     for (const [label, fnSrc] of [['import 提醒', importFn], ['运行点提醒', runHandlerFn]]) {
-      const idxImport = fnSrc.indexOf('window.desktopApi.linkedTable.import()');
-      assert.ok(idxImport !== -1, `${label} onConfirm 应调 window.desktopApi.linkedTable.import()`);
-      const after = fnSrc.slice(idxImport);
-      // import() 返回值被存入变量并交给 notifyLinkedTableImportFailures 消费（A2 #3）。
-      assert.ok(/linkedTable\.import\(\);\s*notifyLinkedTableImportFailures\(/.test(after),
-        `${label}：linkedTable.import() 返回值应交给 notifyLinkedTableImportFailures 消费`);
-      // 失败明细消费后仍 await refreshBankStatementStatus()（刷新状态框语义不变）。
-      assert.ok(/notifyLinkedTableImportFailures\([^)]*\);\s*await\s+refreshBankStatementStatus\(\);/.test(after),
-        `${label}：消费失败明细后应紧跟 await refreshBankStatementStatus()`);
+      assert.ok(fnSrc.includes('onConfirm: () => importLinked(generation)'), `${label} 应调用共同导入动作并保留窗口 generation`);
     }
+    const operation = extractFunctionSource(source, 'importLinked');
+    assert.ok(operation.includes('const result = await config.linkedTable.import();'), '共同动作通过 scoped API 导入');
+    assert.match(operation, /notifyLinkedTableImportFailures\(result, current\);\s*await refreshBankStatementStatus\(\);/, '导入失败明细消费后仍刷新主状态');
   });
 
   test('⑧ onConfirm 不再调死链 handleBankStatementImportGatewayRecon（剥离注释后判，注释里提名不算）', () => {
@@ -223,10 +206,10 @@ describe('C3 导入动作改调链接表（v3.0.0 需求2b：onConfirm 链路）
   });
 });
 
-describe('死链保留（v3.0.0 需求2b：本次仅改判据/文案，死路径整体留待后续清理）', () => {
-  test('⑨ renderer.js 仍保留死函数 handleBankStatementImportGatewayRecon 定义', () => {
-    assert.ok(/async\s+function\s+handleBankStatementImportGatewayRecon\s*\(/.test(source),
-      'handleBankStatementImportGatewayRecon 定义应保留（死链，未删）');
+describe('Main 死链兼容保留，Renderer 移植后不再暴露无调用旧函数', () => {
+  test('⑨ Renderer 当前控制器不绑定废弃导入函数，Main 兼容入口继续保留', () => {
+    assert.ok(!source.includes('handleBankStatementImportGatewayRecon'), '当前控制器不得绕过 linkedTable 调旧 gateway-recon 导入');
+    assert.ok(!source.includes('gatewayRecon.import('), '当前控制器不得调用旧网关导入 API');
   });
 
   test('⑨ main.js 仍保留死链 gateway-recon:import handler 与 gatewayReconSession 变量', () => {

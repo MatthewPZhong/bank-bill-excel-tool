@@ -4,10 +4,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { createApplicationRecoveryComposition } = require('../../src/main-process/application-recovery/composition');
+const { createTerminalRouteRegistry } = require('../../src/main-process/archive-center/terminal-route-registry');
+const { createPreFundTerminalRouteRegistration, preFundRunTerminalRoute } = require('../../src/main-process/pre-fund-archive-lineage');
 
 const root = path.resolve(__dirname, '../..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const renderer = fs.readFileSync(path.join(root, 'src/renderer.js'), 'utf8');
+const controller = fs.readFileSync(path.join(root, 'src/renderer/controllers/pre-fund.js'), 'utf8');
 const rendererPreviews = fs.readFileSync(path.join(root, 'src/renderer-previews.js'), 'utf8');
 const dialogs = fs.readFileSync(path.join(root, 'src/renderer-dialogs.js'), 'utf8');
 const preload = fs.readFileSync(path.join(root, 'src/preload.js'), 'utf8');
@@ -69,9 +73,9 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
       'handlePreFundImportMpt',
       'handlePreFundRun',
       'handlePreFundExport',
-      'applyPreFundReconciliationPanelPreviewState'
+      'applyPreview'
     ]) {
-      assert.ok(renderer.includes(`function ${functionName}(`), `缺少 ${functionName}`);
+      assert.ok(controller.includes(`function ${functionName}(`), `缺少 ${functionName}`);
     }
     assert.ok(renderer.includes("info.previewModal === 'pre-fund-reconciliation-panel'"));
     assert.ok(renderer.includes("info.previewModal === 'pre-fund-temp-manager'"));
@@ -79,11 +83,15 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
     assert.ok(rendererPreviews.includes('function applyPreFundTempManagerPreviewState('));
     assert.ok(rendererPreviews.includes('function applyPreFundTempImportFailurePreviewState('));
     assert.ok(rendererPreviews.includes('function applyPreFundTempDeleteRangePreviewState('));
-    assert.ok(renderer.includes("if (typeof unsubscribe === 'function') unsubscribe();"));
-    assert.match(renderer, /showPreFundFailure[\s\S]*escapeHtml\(message\)/);
-    const uiStart = renderer.indexOf('function updatePreFundReconciliationUi(');
-    const uiEnd = renderer.indexOf('async function refreshPreFundReconciliationStatus(', uiStart);
-    const updateUi = renderer.slice(uiStart, uiEnd);
+    assert.match(renderer, /createPreFundController\(\{ api: window\.desktopApi\.preFundReconciliation,[\s\S]*?panel: elements\.preFundReconciliationModulePanel/);
+    assert.match(renderer, /entry\(MODULES\.preFundReconciliation, elements\.preFundReconciliationModulePanel,[\s\S]*?domainControllers\.preFund\)/);
+    assert.match(renderer, /domainControllers\.preFund\.commands\.preview\(\)/);
+    assert.ok(html.includes('src/renderer/controllers/pre-fund.js'));
+    assert.ok(controller.includes("if (typeof unsubscribe === 'function') unsubscribe();"));
+    assert.match(controller, /showPreFundFailure[\s\S]*escapeHtml\(message\)/);
+    const uiStart = controller.indexOf('function updatePreFundReconciliationUi(');
+    const uiEnd = controller.indexOf('async function refreshPreFundReconciliationStatus(', uiStart);
+    const updateUi = controller.slice(uiStart, uiEnd);
     assert.match(updateUi, /let text = '欢迎使用小助手'/);
     assert.match(updateUi, /if \(run\.unavailable\)[\s\S]*unavailableMessage/);
     assert.match(updateUi, /bankRuleUnmappedRows[\s\S]*bankRuleDirectionMismatchRows[\s\S]*bankRuleNoGatewayTradeTypeRows/);
@@ -139,7 +147,7 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
     }
   });
 
-  test('run/export 精确血缘与 startup owner 顺序在 main seam 闭合', () => {
+  test('run/export 精确血缘与 startup owner 顺序在 main seam 闭合', async () => {
     const runStart = main.indexOf("trackedIpcHandle('pre-fund-reconciliation:run'");
     const exportStart = main.indexOf("trackedIpcHandle('pre-fund-reconciliation:export'");
     const exportEnd = main.indexOf('\nfunction getDuplicateInboundMatchService()', exportStart);
@@ -151,7 +159,28 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
     assert.match(runHandler, /lineageIntents:\s*plan\.lineageIntents/);
     assert.match(runHandler, /expectedDatasets:\s*plan\.expectedDatasets/);
     assert.match(runHandler, /taskRunId:\s*taskContext\.operationContext\.taskRunId/);
-    assert.match(runHandler, /terminalStatus === 'succeeded'[\s\S]*acknowledgeRunByTaskRun/);
+    assert.match(runHandler, /afterTerminal:\s*terminalRouteRegistry\.createAfterTerminal\(preFundRunTerminalRoute\(taskRunId\)\)/);
+    assert.match(runHandler, /afterTerminalIntent:\s*preFundRunTerminalRoute\(taskRunId\)/);
+    assert.match(main, /createPreFundTerminalRouteRegistration\(\{\s*getService:\s*getPreFundReconciliationService\s*\}\)/);
+    const acknowledged = [];
+    const terminalRoutes = createTerminalRouteRegistry([createPreFundTerminalRouteRegistration({
+      getService: () => ({ acknowledgeRunByTaskRun: (taskRunId) => acknowledged.push(taskRunId) })
+    })]);
+    const context = {
+      taskRunId: 'pre-fund-run-fixture', taskKey: 'pre-fund-reconciliation:run',
+      moduleId: 'pre-fund-reconciliation', parentRunId: 'pre-fund-flow', operationKey: 'pre-fund-operation'
+    };
+    const afterTerminal = terminalRoutes.createAfterTerminal(preFundRunTerminalRoute(context.taskRunId));
+    for (const terminalStatus of ['failed', 'cancelled']) {
+      await afterTerminal({ context, terminalStatus });
+    }
+    assert.deepEqual(acknowledged, [], '未成功终态不得 ACK receipt');
+    await afterTerminal({ context, terminalStatus: 'succeeded' });
+    assert.deepEqual(acknowledged, [context.taskRunId]);
+    await assert.rejects(afterTerminal({
+      context: { ...context, taskRunId: 'other-task' }, terminalStatus: 'succeeded'
+    }), /owner/);
+    assert.deepEqual(acknowledged, [context.taskRunId], 'owner 冲突不得确认另一任务 receipt');
     assert.match(
       runHandler,
       /catch \(error\)[\s\S]*preservePreFundRunOwnerAfterMirrorCompensationFailure\([\s\S]*taskContext\.operationContext\.taskRunId[\s\S]*preFundFailureResult\(error\)/
@@ -170,14 +199,40 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
       'execute 不得按后来 lastRun/latest 重选业务 run'
     );
 
-    const pendingOwner = main.indexOf("ownerName: 'Pending runs'");
-    const bizOwner = main.indexOf("ownerName: 'Biz OP runs'");
-    const preFundOwner = main.indexOf("ownerName: 'Pre-fund runs'");
-    const positionOwner = main.indexOf("ownerName: 'Position'");
-    assert.ok(pendingOwner < bizOwner && bizOwner < preFundOwner && preFundOwner < positionOwner);
-    const archiveAwait = main.indexOf('if (archiveCenterInitializationPromise) await archiveCenterInitializationPromise;');
-    const cleanupSchedule = main.indexOf('schedulePreFundReconciliationStartupCleanup();', archiveAwait);
-    assert.ok(archiveAwait >= 0 && cleanupSchedule > archiveAwait);
+    const ownerCalls = [];
+    const application = createApplicationRecoveryComposition({
+      platform: { scanAndRecover() {}, recoverSource() {} },
+      bizOpModule: {
+        recovery: { bindPlatform() {}, run: async () => ({}), openObligations: () => false },
+        activation: { needed: () => false }
+      },
+      recoverPendingRuns: () => { ownerCalls.push('pending'); },
+      recoverLegacyBizOpRuns: () => { ownerCalls.push('legacy-biz'); },
+      recoverPreFundRuns: () => { ownerCalls.push('pre-fund'); },
+      recoverPosition: () => { ownerCalls.push('position'); },
+      recoverToolboxVccPublications() {}, recoverVccImportTerminal() {}, reconcileVccImportLineage() {}
+    });
+    assert.deepEqual(application.archiveOwnerHooks().map((owner) => owner.ownerName), [
+      'biz-op-v327', 'Pending runs', 'Biz OP runs', 'Pre-fund runs', 'Position',
+      'Toolbox/VCC output publications', 'VCC import terminal'
+    ]);
+    for (const owner of application.archiveOwnerHooks()) await owner.recover();
+    for (const owner of application.archiveOwnerHooks()) await owner.recover();
+    assert.deepEqual(ownerCalls, ['pending', 'legacy-biz', 'pre-fund', 'position']);
+    for (const [participant, recovery] of [
+      ['recoverPendingRuns', 'recoverPendingRunsBeforeInterruptedSweep'],
+      ['recoverLegacyBizOpRuns', 'recoverBizOpRunsBeforeInterruptedSweep'],
+      ['recoverPreFundRuns', 'recoverPreFundRunsBeforeInterruptedSweep'],
+      ['recoverPosition', 'recoverPositionPendingBeforeInterruptedSweep']
+    ]) {
+      assert.equal((main.match(new RegExp(`${participant}:\\s*${recovery}`, 'g')) || []).length, 1);
+    }
+    assert.match(main, /recoverInterruptedTaskOwners:\s*applicationRecoveryCoordinator\.archiveOwnerHooks\(\)/);
+    const initialization = main.slice(main.indexOf('async function initializeApplication()'));
+    const archiveAwait = initialization.indexOf('await archiveCenterInitializationPromise');
+    const completeRecovery = initialization.indexOf('applicationRecoveryCoordinator.completeArchiveInitialization(', archiveAwait);
+    const cleanupSchedule = initialization.indexOf('schedulePreFundReconciliationStartupCleanup();', archiveAwait);
+    assert.ok(archiveAwait >= 0 && completeRecovery > archiveAwait && cleanupSchedule > completeRecovery);
   });
 
   test('临时链接表首页复用标准链接表结构，且不提供账户映射', () => {
@@ -231,7 +286,7 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
   });
 
   test('临时链接表按钮把既有 MPT 导入处理传入管理弹窗', () => {
-    assert.match(renderer, /createPreFundTempManagerDialog\(\{[\s\S]*onImport:\s*handlePreFundImportMpt[\s\S]*\}\)/);
-    assert.match(renderer, /handlePreFundImportMpt\(\{ showFailures = true \} = \{\}\)/);
+    assert.match(controller, /createPreFundTempManagerDialog\(\{[\s\S]*onImport:\s*handlePreFundImportMpt[\s\S]*\}\)/);
+    assert.match(controller, /handlePreFundImportMpt\(\{ showFailures = true \} = \{\}\)/);
   });
 });

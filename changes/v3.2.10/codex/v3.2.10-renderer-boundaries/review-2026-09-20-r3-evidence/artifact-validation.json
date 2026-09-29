@@ -1,0 +1,41 @@
+{
+  "report": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/review-2026-09-20-r3.md",
+  "localLinksChecked": 32,
+  "missingLinks": [],
+  "probeSyntax": [
+    {
+      "path": "repository-partial-write.cjs",
+      "exitCode": 0,
+      "stderr": ""
+    },
+    {
+      "path": "review-modal-r3-partial-compare.cjs",
+      "exitCode": 0,
+      "stderr": ""
+    },
+    {
+      "path": "renderer-boundaries-r3-scenario-review.test.js",
+      "exitCode": 0,
+      "stderr": ""
+    },
+    {
+      "path": "review-modal-r3-probe.cjs",
+      "exitCode": 0,
+      "stderr": ""
+    },
+    {
+      "path": "mapping/mapping.cjs.js",
+      "exitCode": 0,
+      "stderr": ""
+    },
+    {
+      "path": "mapping/runner.cjs",
+      "exitCode": 0,
+      "stderr": ""
+    }
+  ],
+  "originalFilesChecked": 3084,
+  "changedOriginalFiles": [],
+  "reviewOnlyNewArtifacts": true,
+  "diffCheckExitCode": 0
+}

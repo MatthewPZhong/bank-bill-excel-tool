@@ -1,0 +1,4 @@
+ROW_DELETE_BUSY {"inflight":{"calls":[{"templateId":7,"seqNo":1}],"buttonDisabled":true,"parentClose":"blocked"},"count":2,"errors":[]}
+ROW_DELETE_LATE_PREVIEW {"oldOpen":false,"deleteCallsAfterClose":[],"newTop":true,"errors":[]}
+PARTIAL_RULES_WRITE {"before":{"rulesVisible":true,"signedDisabled":true},"busy":{"close":"blocked"},"alert":"\n        \n          \n            \n          \n          元信息保存失败\n        \n        \n          确认\n        \n      ","after":{"rulesVisible":true,"signedDisabled":true,"selected":"","storedRules":[]},"staleEditor":"入金","errors":[]}
+2/2 original deletion sequences fixed; partial metadata write recorded

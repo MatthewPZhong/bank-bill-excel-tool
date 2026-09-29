@@ -7,8 +7,10 @@ const os = require('node:os');
 const path = require('node:path');
 const ExcelJS = require('exceljs');
 const { normalizeFilePlanV1 } = require('../src/main-process/archive-center/file-plan');
-const { createBackgroundExecutionRuntime } = require('../src/main-process/background-execution/runtime');
-const { publishToolboxPublicationAsync, recoverToolboxPublicationsAsync } = require('../src/main-process/toolbox-output-publication-dispatch');
+const {
+  createBackgroundExecutionRuntime
+} = require('../src/main-process/execution-descriptors/composition');
+const { createTestPublicationHarness } = require('../tests/helpers/publication-authority');
 const { scanToolboxSplitFields } = require('../src/main-process/toolbox-format-operations');
 const { planRowCounts, buildRowTargets, publicResult } = require('../src/main-process/toolbox-row-split/contracts');
 const { generateValidateAndPublishRows } = require('../src/main-process/toolbox-row-split/service');
@@ -40,13 +42,15 @@ async function main() {
         process.stdout.write(JSON.stringify({ phase: 'planned', fileCount: count, planMs }) + '\n');
         const privateDirectory = fs.mkdtempSync(path.join(dir, '.generation-'));
         const userDataDir = path.join(dir, 'user-data'); fs.mkdirSync(userDataDir);
+        // 容量脚本不构造 Archive DB；只在本脚本隔离根使用合成测试 authority。
+        const host = createTestPublicationHarness(userDataDir);
         const batchContext = { batchId: count, batchNumber: 'ROWS-' + count, taskRunId: 'rows-run-' + count,
           taskKey: 'toolbox:split:export', moduleId: 'toolbox', parentRunId: 'rows-parent-' + count, operationKey: 'rows-operation-' + count };
         const result = await generateValidateAndPublishRows({ runtime, filePlan, batchContext,
           counts, privateDirectory, metadataDirectory: userDataDir,
           publisher: async (artifacts) => {
             process.stdout.write(JSON.stringify({ phase: 'generated', fileCount: artifacts.length, elapsedMs: Date.now() - started }) + '\n');
-            return publishToolboxPublicationAsync({
+            return host.dispatcher.publish({ requireArchiveHandoff: true, requireValidatedArtifacts: true,
               taskId: 'rows-publication-' + count, artifacts,
               targets: filePlan.outputs.map((output) => ({ targetPath: output.filePath, expectedTargetSnapshot: output.targetSnapshot })),
               protectedSourcePaths: [source], userDataDir, batchContext, archiveInputFiles: filePlan.inputs
@@ -61,8 +65,8 @@ async function main() {
           assert.equal(book.worksheets[0].getCell('B2').value, 'ID-' + String(index + 1).padStart(6, '0'));
         }
         assert.deepEqual(ids, Array.from({ length: count }, (_, index) => index + 1));
-        const recovery = await recoverToolboxPublicationsAsync({ userDataDir,
-          deferCommittedRecovery: true, acknowledgedCommittedTaskIds: [result.publication.taskId] });
+        const recovery = await host.recovery.recover({ reason: 'receipt-ack', taskIds: [result.publication.taskId],
+          acknowledgedCommittedTaskIds: [result.publication.taskId] });
         assert.ok(recovery.recovered.some((item) => item.taskId === result.publication.taskId && item.action === 'commit-cleanup'));
         process.stdout.write(JSON.stringify({ phase: 'verified', fileCount: count, planMs,
           elapsedMs: Date.now() - started, peakProcessRss, maxMainDelayMs,

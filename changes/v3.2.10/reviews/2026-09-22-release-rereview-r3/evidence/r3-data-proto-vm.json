@@ -1,0 +1,7 @@
+{
+  "source": "window.StatementController.createStatementController({initialInfo:{[\"__proto__\"]:window.desktopApi}});",
+  "ownSpecialKey": true,
+  "sameApi": true,
+  "extraCallable": true,
+  "prototypeHasOutsideScope": false
+}

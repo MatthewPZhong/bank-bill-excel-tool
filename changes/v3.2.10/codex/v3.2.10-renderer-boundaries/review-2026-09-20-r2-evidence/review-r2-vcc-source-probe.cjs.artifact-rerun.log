@@ -1,0 +1,91 @@
+{
+  "original": {
+    "leave": {
+      "status": "left"
+    },
+    "runDisabled": true,
+    "feedback": "2026-08 读取完成，尚未确认流水信息。请重新导入文件并确认。",
+    "mainMonth": "2026-08",
+    "saves": 0,
+    "rows": []
+  },
+  "continuous": [
+    {
+      "file": "B",
+      "beginOp": "100.00",
+      "displayed": {
+        "month": "2026-08",
+        "total": "900.00"
+      },
+      "saved": {
+        "status": "success",
+        "endOp": "1000.00"
+      },
+      "stored": {
+        "year_month": "2026-08",
+        "begin_op": "100.00",
+        "total_amount": "900.00",
+        "end_op": "1000.00"
+      }
+    },
+    {
+      "file": "A",
+      "beginOp": "20.00",
+      "displayed": {
+        "month": "2026-07",
+        "total": "10.00"
+      },
+      "saved": {
+        "status": "success",
+        "endOp": "30.00"
+      },
+      "stored": {
+        "year_month": "2026-07",
+        "begin_op": "20.00",
+        "total_amount": "10.00",
+        "end_op": "30.00"
+      }
+    },
+    {
+      "file": "B",
+      "beginOp": "-10.00",
+      "displayed": {
+        "month": "2026-08",
+        "total": "900.00"
+      },
+      "saved": {
+        "status": "success",
+        "endOp": "890.00"
+      },
+      "stored": {
+        "year_month": "2026-08",
+        "begin_op": "-10.00",
+        "total_amount": "900.00",
+        "end_op": "890.00"
+      }
+    }
+  ],
+  "saves": 3,
+  "rows": [
+    {
+      "year_month": "2026-08",
+      "begin_op": "100.00",
+      "total_amount": "900.00",
+      "end_op": "1000.00"
+    },
+    {
+      "year_month": "2026-07",
+      "begin_op": "20.00",
+      "total_amount": "10.00",
+      "end_op": "30.00"
+    },
+    {
+      "year_month": "2026-08",
+      "begin_op": "-10.00",
+      "total_amount": "900.00",
+      "end_op": "890.00"
+    }
+  ]
+}
+(node:80457) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)

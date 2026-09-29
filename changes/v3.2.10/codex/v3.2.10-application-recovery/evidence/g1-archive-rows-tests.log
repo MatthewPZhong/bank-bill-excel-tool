@@ -1,0 +1,43 @@
+✔ Archive 静态身份表只包含十六个真实 producer task/module 对 (0.682334ms)
+✔ 合法旧 exact-7 从真实 SQLite 证明归属并允许原取消路径 (247.661584ms)
+✔ 仅前缀、缺持久 batch 及未登记 producer 均无 owner (335.5335ms)
+✔ committed 可观察，但缺 terminal/artifact proof 的 ack 保留且不得拿调用前置作证明 (270.949792ms)
+✔ 三阶段聚合保留每次 observation 和 deferred，仅同 owner 的 commit-cleanup 撤销未决 (0.244833ms)
+✔ 启动和 live deferred 在 settlement 之前阻断且错误保存恢复材料 (0.508ms)
+✔ 未注入 facade 或旧过滤空结果不得执行 Archive recovery/ack (0.34675ms)
+▶ toolbox:split:export 多文件 IPC 接线
+  ✔ 四类正式发布与启动恢复均 await FIFO worker，不在 Electron 主线程直调同步核心 (1.489208ms)
+  ✔ 成功日志记录有界日期样例、样式预计/实际和发布前校验结果 (0.37225ms)
+  ✔ 发布进入人工恢复时，失败返回会把 recoveryPaths 追加为用户可见路径 (0.241541ms)
+  ✔ 临时目录保留策略只接受显式 preserveTemporaryFiles=true (0.1135ms)
+  ✔ 正式发布后的临时目录清理失败只记录告警，不抛错覆盖成功结果 (0.348ms)
+  ✔ 合并、多拆、大文件单拆和普通单拆统一保留人工恢复所需 generation 目录 (0.112584ms)
+  ✔ 单文件字段和值校验只约束单文件模式，且全部发生在 reserve 前 prepare (0.068709ms)
+  ✔ 只选择一次目录，冲突统一确认后才创建临时目录 (0.073375ms)
+  ✔ 同名冲突确认使用“返回 / 覆盖全部”，返回仍在 FilePlan 与临时目录前整批取消 (0.072083ms)
+  ✔ 大文件、普通文件和production-false Route DB能力均保持格式保真与单次可恢复发布 (0.088041ms)
+  ✔ 按 outputId 关联产物并返回 warning 契约，finally 清理本批临时目录 (0.109333ms)
+✔ toolbox:split:export 多文件 IPC 接线 (3.834708ms)
+✔ 严格行数和安全整数边界；1001 份在分配路径前拒绝 (1.206541ms)
+✔ prepare 使用主进程计数；空数据/超限/非法参数不调用目录选择器 (15.6805ms)
+✔ SPLIT 计数跨隐藏 Sheet；缓存回放保留行序、文本、日期、布尔、错误、样式和重复表头 (361.186459ms)
+✔ N 是文件行数；单文件超出 Sheet 容量会续页且不增加文件 (183.166125ms)
+✔ CSV 与 BIFF 共享 rows 核心，跨块文本编号保留 (314.183041ms)
+✔ 真实后台 action 返回小描述符，9 份全部校验后才调用一次 Publisher (564.756417ms)
+✔ 第 2 个 writer 失败、缓存损坏或取消均不触发 Publisher (407.174708ms)
+✔ 缓存即使重算摘要，缺失样式引用仍会被拒绝 (204.065ms)
+✔ 数字串摘要和 UUID 不被误判为业务账号，消息仍只有有界描述符 (0.310625ms)
+✔ 1000 份 FilePlan 的磁盘身份读取线性增长且仍拒绝输出间硬链接 (307.599375ms)
+✔ 磁盘预算失败以及旧导入快照均在任务前拒绝 (3.528875ms)
+✔ 物化读取预算在启动 CSV reader 和目录选择器之前拒绝 (6.209125ms)
+✔ 运行中的真实 rows Worker 响应 shutdown，退出后不产生正式输出 (367.461333ms)
+✔ rows 第 2 份发布时崩溃，现有 journal 在新 Worker 内恢复旧目标 (1548.929333ms)
+✔ 9 份真实 rows 输出只归属一个业务批次，原件和全部输出均归档 ready 后清理 receipt (4408.8165ms)
+ℹ tests 33
+ℹ suites 1
+ℹ pass 33
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9020.383209

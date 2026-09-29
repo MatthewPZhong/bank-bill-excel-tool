@@ -1,0 +1,562 @@
+--- a/scripts/architecture/contracts.js
++++ b/scripts/architecture/contracts.js
+@@ -19,23 +19,62 @@
+ 
+ function factoryPresent(scan, factory) {
+   const analysis = scan.analyses.get(factory.path);
+-  return Boolean(analysis && [...analysis.functionNodes.keys()].some(name => name.split('.').at(-1) === factory.name));
++  if (!analysis) return false;
++  const actualFunction = value => Boolean(value && !value.opaque && value.functionPath && analysis.functionNodes.has(value.functionPath));
++  const exportedMember = (value, name) => value?.kind === 'object' && !(value.spreads || []).length &&
++    Object.entries(value.properties).some(([key, member]) => (key === name && actualFunction(member)) || exportedMember(member, name));
++  return analysis.nodes.some(node => {
++    if (node.type === 'AssignmentExpression' && node.operator === '=') {
++      const target = analysis.describe(node.left); const chain = target.chain || [];
++      const publicTarget = target.rootFree && (['window', 'globalThis', 'exports'].includes(chain[0]) || chain.slice(0, 2).join('.') === 'module.exports');
++      if (!publicTarget) return false;
++      const value = analysis.describe(node.right);
++      return (chain.at(-1) === factory.name && actualFunction(value)) || exportedMember(value, factory.name);
++    }
++    if (node.type === 'ExportNamedDeclaration') {
++      if (node.declaration?.type === 'FunctionDeclaration') return node.declaration.id?.name === factory.name;
++      if (node.declaration?.type === 'VariableDeclaration') return node.declaration.declarations.some(item => item.id.name === factory.name && actualFunction(analysis.describe(item.init)));
++      return node.specifiers.some(item => item.exported.name === factory.name && actualFunction(analysis.describe(item.local)));
++    }
++    return false;
++  });
+ }
+ 
+-// 参数代表显式注入合同；工厂结果保留创建者来源，不能靠局部变量命名判断能力。
+-function callableOrigins(value, seen = new Set()) {
+-  if (!value || seen.has(value)) return { known: false, modules: [] };
++// 参数代表显式注入合同；本地返回值只读取 AST，不执行 helper 或 getter。
++function callableOrigins(value, analysis, seen = new Set()) {
++  const unknown = () => ({ known: false, modules: [], functions: [] });
++  const combine = origins => ({ known: origins.length > 0 && origins.every(item => item.known),
++    modules: origins.flatMap(item => item.modules), functions: origins.flatMap(item => item.functions) });
++  if (!value || seen.has(value)) return unknown();
+   const next = new Set([...seen, value]);
+   const choices = value.alternatives || value.values;
+-  if (choices) {
+-    const origins = choices.map(item => callableOrigins(item, next));
+-    return { known: choices.length > 0 && origins.every(item => item.known), modules: origins.flatMap(item => item.modules) };
++  if (choices) return combine(choices.map(item => callableOrigins(item, analysis, next)));
++  if (value.reason === 'member-base') return callableOrigins(value.object, analysis, next);
++  if (value.kind === 'bound-function') return callableOrigins(value.target, analysis, next);
++  if (value.kind === 'call-result') {
++    if (value.callee?.module) return { known: true, modules: [value.callee.module], functions: [] };
++    const name = value.callee?.functionPath; const fn = analysis?.functionNodes.get(name);
++    if (!fn || next.has(fn)) return unknown();
++    next.add(fn);
++    const returns = fn.type === 'ArrowFunctionExpression' && fn.body.type !== 'BlockStatement' ? [fn.body] :
++      analysis.nodes.filter(node => node.type === 'ReturnStatement' && analysis.functionPath(node) === name).map(node => node.argument);
++    const result = combine(returns.map(node => callableOrigins(analysis.describe(node), analysis, next)));
++    result.functions.push(name); return result;
+   }
+-  if (value.reason === 'member-base') return callableOrigins(value.object, next);
+-  if (value.kind === 'call-result') return value.callee?.module ? { known: true, modules: [value.callee.module] } : { known: false, modules: [] };
+-  if (value.module) return { known: true, modules: [value.module] };
+-  return { known: Boolean(value.functionPath || value.bindingKind === 'parameter' ||
+-    value.kind === 'literal' || value.kind === 'regexp'), modules: [] };
++  if (value.module) return { known: true, modules: [value.module], functions: [] };
++  return { known: Boolean(value.functionPath || value.bindingKind === 'parameter' || value.kind === 'literal' || value.kind === 'regexp'),
++    modules: [], functions: value.functionPath ? [value.functionPath] : [] };
+ }
+ 
+-module.exports = { scopeContains, valueCandidates, factoryCalls, factoryPresent, callableOrigins };
++// bind 创建函数不执行目标；调用时合并预绑定实参。call/apply 在 scanner 入口去除 thisArg。
++function callTargets(reference, args, method = null, seen = new Set()) {
++  if (!reference || seen.has(reference)) return [{ reference: { kind: 'unknown', reason: 'recursive-call' }, args, method }];
++  const next = new Set([...seen, reference]);
++  if (reference.kind === 'bound-function') return callTargets(reference.target, [...reference.args, ...args], reference.method, next);
++  if (reference.kind === 'candidates' || reference.alternatives) {
++    return (reference.values || reference.alternatives).flatMap(value => callTargets(value, args, method, next));
++  }
++  return [{ reference, args, method: reference.chain?.at(-1) || reference.property || method }];
++}
++
++module.exports = { scopeContains, valueCandidates, factoryCalls, factoryPresent, callableOrigins, callTargets };
+--- a/scripts/architecture/rules.js
++++ b/scripts/architecture/rules.js
+@@ -62,7 +62,7 @@
+   validateBoundaries(config); validateAllowlist(allowlist);
+   if (config.factBaseline !== allowlist.factBaseline) throw new Error('边界与历史例外的固定事实基线不一致');
+   const violations = []; const files = new Set(scan.files || []); const edges = [...(scan.edges || [])];
+-  const sites = scan.sites || []; const allBoundaries = config.boundaries;
++  const sites = (scan.sites || []).flatMap(site => site.invocations ? site.invocations.map(invocation => ({ ...site, ...invocation })) : [site]); const allBoundaries = config.boundaries;
+   const byFrom = new Map();
+   for (const e of edges) { if (!byFrom.has(e.from)) byFrom.set(e.from, []); byFrom.get(e.from).push(e); }
+   function emit(rule, boundary, value, message, dependencyPath) {
+@@ -188,8 +188,8 @@
+       const reachableScopes = boundary.protectedScopes.map(s => ({ ...s }));
+       for (let i = 0; i < reachableScopes.length; i += 1) {
+         for (const site of sites.filter(s => ['call', 'new'].includes(s.type) && scopeMatches(s, reachableScopes[i]))) {
+-          for (const value of valueCandidates(site.reference)) {
+-            const localFunction = value.functionPath;
++          const origins = callableOrigins(site.reference, scan.analyses.get(site.from));
++          for (const localFunction of origins.functions) {
+             if (localFunction && !reachableScopes.some(s => s.path === site.from && s.functionPath === localFunction)) reachableScopes.push({ path: site.from, functionPath: localFunction });
+           }
+         }
+@@ -197,15 +197,15 @@
+       for (const site of sites.filter(s => ['call', 'new'].includes(s.type) && reachableScopes.some(p => scopeMatches(s, p)))) {
+         if (siteAllowed(boundary, 'ARCH-TASK-ADAPTER', site)) continue;
+         const candidates = valueCandidates(site.reference);
+-        const origins = callableOrigins(site.reference);
+-        for (const module of new Set(origins.modules)) if (denied({ to: module })) emit('ARCH-TASK-ADAPTER', boundary, site, '通用具名编排经工厂取得受限私有能力', [site.from, module]);
++        const origins = callableOrigins(site.reference, scan.analyses.get(site.from));
++        for (const module of new Set([...origins.modules, ...candidates.map(value => value.module).filter(Boolean)])) {
++          closure([module], (edge, route) => { if (denied(edge)) emit('ARCH-TASK-ADAPTER', boundary, site, '通用具名编排经 helper/工厂加载 Position 私有状态机', [site.from, ...route]); });
++          if (denied({ to: module })) emit('ARCH-TASK-ADAPTER', boundary, site, '通用具名编排直接调用 Position 私有能力', [site.from, module]);
++        }
+         for (const value of candidates) {
+-          const module = value.module;
+-          if (module) closure([module], (edge, route) => { if (denied(edge)) emit('ARCH-TASK-ADAPTER', boundary, site, '通用具名编排经 helper 加载 Position 私有状态机', [site.from, ...route]); });
+-          if (module && denied({ to: module })) emit('ARCH-TASK-ADAPTER', boundary, site, '通用具名编排直接调用 Position 私有能力', [site.from, module]);
+           if (boundary.restrictedApis.some(a => a.path === site.from && a.operations.includes((value.chain || []).join('.')))) emit('ARCH-TASK-ADAPTER', boundary, site, '通用编排不得直接调用本文件 Position 私有状态操作');
+         }
+-        if (!origins.known && candidates.some(value => value.opaque)) emit('ARCH-STATIC-COVERAGE', boundary, site, '受保护编排的调用别名无法完整解释');
++        if (!origins.known && candidates.some(value => value.opaque || ['call-result', 'bound-function'].includes(value.kind))) emit('ARCH-STATIC-COVERAGE', boundary, site, '受保护编排的调用别名无法完整解释');
+       }
+     }
+     if (rules.includes('ARCH-BIZOP-RECOVERY-PRIVATE')) {
+@@ -295,6 +295,18 @@
+         if (site.type === 'global-read' && (site.chain || []).includes('desktopApi')) emit('ARCH-RENDERER-SCOPE', boundary, site, '控制器只能消费显式 scoped API，不能读取完整 desktopApi');
+       }
+       checkClosure('ARCH-RENDERER-SCOPE', edge => edge.external === false && (boundary.allowedLocal.includes(edge.to) || starts.includes(edge.to)));
++      const isPanelNode = value => {
++        if (value.kind !== 'call-result' || !value.callee.rootFree) return false;
++        const method = (value.callee.chain || []).join('.'); const selector = value.args[0];
++        if (selector?.kind !== 'literal' || typeof selector.value !== 'string' || value.args.length !== 1) return false;
++        const id = method === 'document.getElementById' ? selector.value : method === 'document.querySelector' && selector.value.startsWith('#') ? selector.value.slice(1) : null;
++        return id !== null && /^[A-Za-z_][\w:-]*$/.test(id) && !['modalRoot', 'body', 'html'].includes(id);
++      };
++      const isPickedApiMethod = (value, field) => {
++        const chain = value.chain || []; const root = ['window', 'globalThis'].includes(chain[0]) ? 1 : 0;
++        return value.kind === 'reference' && value.rootFree && chain[root] === 'desktopApi' &&
++          chain.length > root + field.split('.').length && chain.slice(-field.split('.').length).join('.') === field;
++      };
+       if (boundary.factory) for (const site of factoryCalls(scan, boundary.factory)) {
+         const input = site.args && site.args[0];
+         if (!input || input.kind !== 'object') { emit('ARCH-STATIC-COVERAGE', boundary, site, '工厂入参必须是可解释的具名依赖对象'); continue; }
+@@ -304,6 +316,7 @@
+           const name = property.name || property.key; let value = property.value || property;
+           if (value.kind === 'call-result' && (value.callee.chain || []).join('.') === 'Object.freeze' && value.args.length === 1) value = value.args[0];
+           if (!boundary.factory.parameters.includes(name) || ['state', 'elements', 'desktopApi'].includes(name)) emit('ARCH-RENDERER-SCOPE', boundary, site, `工厂注入了未授权字段 ${name}`);
++          if (name === 'panel' && boundary.factory.parameters.includes(name) && isPanelNode(value)) continue;
+           if (['unknown', 'call-result', 'candidates'].includes(value.kind) || (boundary.allowedApiFields[name] && value.kind !== 'object') || value.opaque || (value.spreads || []).length || (value.chain || []).some(n => ['state', 'elements', 'desktopApi'].includes(n))) emit('ARCH-RENDERER-SCOPE', boundary, site, `工厂字段 ${name} 不能注入完整可变对象或不透明 alias`);
+           if (boundary.allowedApiFields[name] && value.kind === 'reference' && value.bindingScope === 'program') emit('ARCH-STATIC-COVERAGE', boundary, site, `scoped ${name} 的引用未提供可解释方法集合`);
+           if (boundary.allowedApiFields[name] && value.kind === 'object') {
+@@ -317,7 +330,7 @@
+                 if (allowed.some(method => method.startsWith(`${field}.`))) inspectFields(member, field);
+                 else if (!allowed.includes(field)) emit('ARCH-RENDERER-SCOPE', boundary, site, `scoped ${name} 未授权字段 ${field}`);
+                 else if (member.opaque || ['unknown', 'call-result', 'candidates', 'object'].includes(member.kind) ||
+-                  (member.chain || []).some(part => ['state', 'elements', 'desktopApi'].includes(part))) emit('ARCH-STATIC-COVERAGE', boundary, site, `scoped ${name}.${field} 的方法来源无法解释`);
++                  ((member.chain || []).some(part => ['state', 'elements', 'desktopApi'].includes(part)) && !isPickedApiMethod(member, field))) emit('ARCH-STATIC-COVERAGE', boundary, site, `scoped ${name}.${field} 的方法来源无法解释`);
+               }
+             };
+             inspectFields(value);
+@@ -329,7 +342,8 @@
+     const loads = file => scripts.filter(script => script.path === file);
+     const guaranteedBefore = (provider, consumer) => {
+       // module 可能含顶层 await，async 没有可保证的先行关系。
+-      if (provider.async || consumer.async || provider.type === 'module') return false;
++      if (provider.async || provider.type === 'module') return false;
++      if (consumer.async) return !provider.defer && provider.order < consumer.order;
+       const consumerDeferred = consumer.defer || consumer.type === 'module';
+       if (!provider.defer && consumerDeferred) return true;
+       if (provider.defer && !consumerDeferred) return false;
+--- a/scripts/architecture/scan.js
++++ b/scripts/architecture/scan.js
+@@ -5,6 +5,7 @@
+ const crypto = require('node:crypto');
+ const { builtinModules } = require('node:module');
+ const acorn = require('acorn');
++const { callTargets } = require('./contracts');
+ 
+ const JS = /\.(?:js|cjs|mjs)$/;
+ const BUILTINS = new Set(builtinModules.map((name) => name.replace(/^node:/, '')));
+@@ -323,6 +324,12 @@
+       if (node.type === 'NewExpression' && callee.rootFree && callee.chain?.join('.') === 'URL' && args[0]?.kind === 'literal' && args[1]?.chain?.join('.') === 'import.meta.url') {
+         return { kind: 'literal', value: path.resolve(root, path.dirname(from), args[0].value), pathValue: true };
+       }
++      if (node.type === 'CallExpression' && node.callee.type === 'MemberExpression' &&
++        (!node.callee.computed || node.callee.property.type === 'Literal') && propertyName(node.callee.property) === 'bind') {
++        const target = describe(node.callee.object, seen);
++        return { kind: 'bound-function', target, receiver: args[0], args: args.slice(1),
++          method: target.chain?.at(-1) || target.property || null };
++      }
+       return { kind: 'call-result', callee, args };
+     }
+     if (node.type === 'LogicalExpression') return { kind: 'candidates', values: [describe(node.left, seen), describe(node.right, seen)] };
+@@ -378,6 +385,13 @@
+     index = end + 1;
+     if (/^\s*\/template\s*$/i.test(tag)) { templateDepth = Math.max(0, templateDepth - 1); continue; }
+     const name = /^\s*([a-zA-Z][\w:-]*)\b/.exec(tag);
++    if (name && ['textarea', 'title', 'style', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript'].includes(name[1].toLowerCase())) {
++      const closeText = new RegExp('</' + name[1] + '\\s*>', 'gi'); closeText.lastIndex = index;
++      const closingText = closeText.exec(html);
++      if (!closingText) throw new Error('HTML 文本元素未关闭：' + name[1]);
++      index = closingText.index + closingText[0].length; continue;
++    }
++    if (name?.[1].toLowerCase() === 'plaintext') break;
+     if (name?.[1].toLowerCase() === 'template') { templateDepth++; continue; }
+     if (!name || name[1].toLowerCase() !== 'script') continue;
+     const attrs = {}; let offset = name[0].length;
+@@ -503,6 +517,16 @@
+         const operation = args[0]?.kind === 'literal' ? args[0].value : args.find((arg) => arg.kind === 'object' && arg.properties.operation)?.properties.operation?.value;
+         const call = { ...location, type: node.type === 'NewExpression' ? 'new' : 'call', callee: chain.join('.'), chain, method: node.callee.type === 'MemberExpression' ? propertyName(node.callee.property) : null, args, operation, reference: callee,
+           binding: callee.module ? { from: callee.module, importedNames: callee.importedNames } : null };
++        const syntaxMethod = node.callee.type === 'MemberExpression' && (!node.callee.computed || node.callee.property.type === 'Literal') ? propertyName(node.callee.property) : null;
++        const indirect = ['call', 'apply'].includes(syntaxMethod);
++        const target = indirect ? describe(node.callee.object) : callee;
++        const effectiveArgs = !indirect ? args : syntaxMethod === 'call' ? args.slice(1) :
++          args[1]?.kind === 'array' ? args[1].elements : [{ kind: 'unknown', reason: 'opaque-apply-arguments' }];
++        if (indirect || callee.kind === 'bound-function' || (callee.values || callee.alternatives || []).some(value => value.kind === 'bound-function')) {
++          call.invocations = callTargets(target, effectiveArgs, indirect ? null : call.method).map(invocation => ({ ...invocation,
++            chain: invocation.reference.chain || [], callee: (invocation.reference.chain || []).join('.'),
++            binding: invocation.reference.module ? { from: invocation.reference.module, importedNames: invocation.reference.importedNames } : null }));
++        }
+         result.sites.push(call);
+         if (callee.kind === 'reference' && callee.rootFree && REQUIRE_CHAINS.has(chain.join('.'))) {
+           let importedNames = null;
+@@ -527,21 +551,43 @@
+           }
+           return choices;
+         };
+-        const workerCandidates = node.type === 'NewExpression' || chain.at(-1) === 'fork' || (node.callee.type === 'MemberExpression' && propertyName(node.callee.property) === 'fork') ? references(callee) : [callee];
+-        const workerReference = workerCandidates.find((value) => (value.module === 'node:worker_threads' && value.chain?.at(-1) === 'Worker') ||
+-          (value.module === 'node:child_process' && value.chain?.at(-1) === 'fork') ||
+-          (value.module === 'electron' && value.chain?.join('.') === 'utilityProcess.fork'));
+-        const isWorker = !!workerReference;
+-        if (isWorker) {
+-          const targets = args[0]?.kind === 'candidates' ? args[0].values : [args[0]];
+-          if (targets.length && targets.every((target) => target?.kind === 'literal' && typeof target.value === 'string')) {
+-            for (const target of targets) addEdge(from, target.value, 'worker', node, analysis, { operation });
+-          } else result.dynamicSites.push({ ...location, kind: 'worker', callee: [workerReference.module, ...workerReference.chain].join('.'), candidates: targets.filter(Boolean), reason: 'unresolved-worker-path' });
+-        }
+-        const loaderAlias = (callee.module === 'node:module' && chain.at(-1) === 'createRequire') || (callee.rootFree && (chain.join('.') === 'require.resolve' || (['bind', 'call', 'apply'].includes(chain.at(-1)) && REQUIRE_CHAINS.has(chain.slice(0, -1).join('.'))))); 
++        for (const invocation of call.invocations || [call]) {
++          const callee = invocation.reference; const chain = invocation.chain || []; const args = invocation.args;
++          const workerCandidates = node.type === 'NewExpression' || chain.at(-1) === 'fork' || (node.callee.type === 'MemberExpression' && propertyName(node.callee.property) === 'fork') ? references(callee) : [callee];
++          const workerReference = workerCandidates.find((value) => (value.module === 'node:worker_threads' && value.chain?.at(-1) === 'Worker') ||
++            (value.module === 'node:child_process' && value.chain?.at(-1) === 'fork') ||
++            (value.module === 'electron' && value.chain?.join('.') === 'utilityProcess.fork'));
++          const isWorker = !!workerReference;
++          if (isWorker) {
++            const alternatives = value => value?.kind === 'candidates' ? value.values.flatMap(alternatives) : [value];
++            const targets = alternatives(args[0]);
++            let directories = [root]; let reason = 'unresolved-worker-path';
++            if (workerReference.chain.at(-1) === 'fork' && targets.some(target => typeof target?.value !== 'string' || !path.isAbsolute(target.value))) {
++              const options = args[1]?.kind === 'array' ? args[2] : args[1];
++              const optionCandidates = alternatives(options);
++              directories = optionCandidates.flatMap(option => {
++                if (!option || (option.kind === 'literal' && option.value === null) || (option.rootFree && option.chain?.join('.') === 'undefined')) return [root];
++                if (option.kind !== 'object' || option.opaque || option.spreads.length) return [null];
++                const cwd = option.properties.cwd;
++                if (!cwd || (cwd.kind === 'literal' && cwd.value === null) || (cwd.rootFree && cwd.chain?.join('.') === 'undefined')) return [root];
++                return alternatives(cwd).map(value => value?.kind === 'literal' && typeof value.value === 'string' ? path.resolve(root, value.value) : null);
++              });
++              if (directories.some(directory => directory === null)) reason = 'unresolved-fork-cwd';
++            }
++            if (directories.every(Boolean) && targets.length && targets.every((target) => target?.kind === 'literal' && typeof target.value === 'string')) {
++              for (const target of targets) for (const directory of new Set(directories)) addEdge(from, path.resolve(directory, target.value), 'worker', node, analysis, { operation });
++            } else result.dynamicSites.push({ ...location, kind: 'worker', callee: [workerReference.module, ...workerReference.chain].join('.'), candidates: targets.filter(Boolean), reason });
++          }
++        }
++        const loaderAlias = (callee.module === 'node:module' && chain.at(-1) === 'createRequire') || (callee.rootFree && (chain.join('.') === 'require.resolve' || (['bind', 'call', 'apply'].includes(chain.at(-1)) && REQUIRE_CHAINS.has(chain.slice(0, -1).join('.')))));
+         if (loaderAlias) result.dynamicSites.push({ ...location, kind: 'loader-alias', callee: chain.join('.'), reason: 'loader-alias-requires-contract', candidates: [] });
+         if ((callee.rootFree && ['eval', 'Function'].includes(chain[0])) || (callee.rootFree && ['window', 'globalThis'].includes(chain[0]) && ['eval', 'Function'].includes(chain[1]))) result.sites.push({ ...call, type: 'reflection' });
+-        if (['prepare', 'exec', 'query', 'run'].includes(chain.at(-1)) && (chain.includes('db') || callee.module === 'node:sqlite')) result.sites.push({ ...call, type: 'db-operation', sql: args[0] });
++        for (const invocation of call.invocations || [call]) {
++          const callChain = invocation.chain || [];
++          if (['prepare', 'exec', 'query', 'run'].includes(invocation.method || callChain.at(-1)) && (callChain.includes('db') || invocation.reference.module === 'node:sqlite')) {
++            result.sites.push({ ...call, ...invocation, invocations: undefined, type: 'db-operation', sql: invocation.args[0] });
++          }
++        }
+         if (node.callee.type === 'MemberExpression') {
+           const method = propertyName(node.callee.property);
+           if ((modalRoot(node.callee.object) && ['append', 'appendChild', 'prepend', 'remove', 'removeChild', 'replaceChild', 'replaceChildren', 'insertBefore', 'insertAdjacentHTML', 'insertAdjacentElement'].includes(method)) || (method === 'remove' && isMounted(node.callee.object))) result.sites.push({ ...call, type: 'modal-write', operation: method });
+--- a/architecture/README.md
++++ b/architecture/README.md
+@@ -53,7 +53,7 @@
+ 
+ 必需入口／消费者、保护范围、受限 API／operation、工厂与全局合同、允许集合、允许调用／装配、激活证据和例外都参与历史强度比较。删除 `allowedApiFields.api` 会移除方法约束，不能当作收紧；禁止全部方法应保留 `api: []`。治理归属参与执行强度，active 后不能改归属绕过证据或例外限制。已退役入口的成员、消费者与证据约束在所属边界仍 pending 时也保持。active 的具名保护函数必须真实存在，更名须同步登记和迁移证据。
+ 
+-工厂 active 时核对 factory.path 内的具名定义与实际生产调用；工厂改名的迁移必须同时迁移旧调用，替代不存在或旧调用残留时，即使 policyChanges 结构正确也失败。保护范围从 `collect.inner` 扩大到 `collect` 按词法祖先关系视为收紧；执行匹配与历史比较共用同一函数，反向缩小仍失败。
++工厂 active 时核对 factory.path 内以配置名称公开导出的可解析函数及实际生产调用；具名函数表达式、const 别名、具名 ES 导出和显式 CommonJS/全局对象导出按公开键识别，不要求内部函数同名。仅有未导出的私有同名函数或不透明导出不算存在。工厂改名的迁移必须同时迁移旧调用，替代不存在或旧调用残留时，即使 policyChanges 结构正确也失败。保护范围从 `collect.inner` 扩大到 `collect` 按词法祖先关系视为收紧；执行匹配与历史比较共用同一函数，反向缩小仍失败。
+ 
+ 合法入口迁移使用精确 `policyChanges`，绑定 sourceCommit、sourcePolicyBlob、boundaryId、field、from、to、reason、designDoc。多次迁移须符合父链顺序，允许有准确版本证据的 A→B→A；不能借变更链豁免纯模块禁止能力或 active／retired 状态底线。
+ 
+@@ -68,14 +68,17 @@
+ 当前支持与失败关闭的边界：
+ 
+ - `StaticBlock` 同时建立词法作用域和 var 边界；块内同名 require 不遮蔽块外 Node require。
+-- Worker/fork 相对路径按仓库根运行 cwd 解析；`path.resolve` 的相对参数以扫描根为准，`__dirname` 和 `new URL(..., import.meta.url)` 保持模块目录语义。应用使用不同运行 cwd 时，应使用可解析绝对路径或准确动态目标合同；本工具不推断进程启动后的任意 chdir。
++- Worker/fork 默认相对路径按仓库根运行 cwd 解析；fork 的 `(path, options)` 与 `(path, args, options)` 都读取显式 cwd，可解析的有限候选逐一生成目标，未知 options/cwd 报 coverage。绝对目标不依赖 cwd；`path.resolve` 的相对参数以扫描根为准，`__dirname` 和 `new URL(..., import.meta.url)` 保持模块目录语义。本工具不推断进程启动后的任意 chdir；此类调用须提供准确目标合同。
+ - 受保护 worker operation 遍历条件候选，含 recover 的候选受授权位置限制；无法解释的 operation 报 coverage。历史 transport 的两个动态转发位置保留准确 v3.2.9 AST 例外，G1 激活前清理，不代表已证明授权。
+-- 通用任务按别名来源候选检查模块及本地 helper；可变别名的未解释来源报 coverage，不靠变量是否含 Position 判断。显式注入参数与已知工厂来源仍按其合同/受限入口检查；任意运行时回调内容不由此静态证明。
+-- DB getter 返回值无法解释时，保留 prepare/exec 的语法方法身份并报 coverage。明确的 RegExp.exec 属于文本解析，不作为 DB 查询。
+-- 工厂注入的 scoped 对象必须提供可解释方法集合；不透明 helper 返回值/候选对象拒绝。allowedApiFields 的点分名称按嵌套叶路径检查，额外方法、嵌套 spread、getter 和完整 desktopApi 均不能借层级藏入。
+-- script 装配区分同步与 defer：同步 provider 可以先于延迟 consumer，同组 defer 依文档顺序；async 或 module provider 不能据标签位置认定先行，module 顶层 await 等无法保证的关系拒绝。template 内脚本不计为已加载。
++- 通用任务按别名来源候选检查模块传递闭包及本地 helper/返回函数；工厂返回的服务不能绕过 Position 依赖检查。const/let 的不透明工厂结果一并报 coverage，不靠变量名判断。显式注入参数仍按其合同检查；任意运行时回调内容不由此静态证明。
++- bind 创建函数不视为执行；后续调用保留目标方法、别名候选与预绑定实参，多次 bind、call/apply 使用同一归一化。postMessage 的未知恢复消息和 getter 后 prepare/exec 的未知 DB 来源仍报 coverage；明确的原始 DB 操作按查询规则拒绝，RegExp.exec 属于文本解析。apply 的不透明实参不被当作空消息。
++- 工厂的 API 字段必须提供可解释方法集合；允许显式对象逐项挑选与授权叶路径对应的 desktopApi 方法，包括 Object.freeze 和静态 const 别名。不透明 helper 返回值/候选对象拒绝；allowedApiFields 的点分名称按嵌套叶路径检查，额外方法、嵌套 spread、getter 和完整 desktopApi/namespace 均不能借层级藏入。静态路径检查不执行 preload 验证实际方法类型。
++- 工厂 panel 参数允许可解析的单根 `document.getElementById(静态 id)` 或 `document.querySelector(静态 #id)`，不允许 document/body/html/modalRoot、动态 selector 或不透明 helper 代替。它只识别节点取得方式；节点真实存在、所属领域与生命周期仍由 G3 行为测试验证。
++- script 装配区分同步与 defer：同步 provider 可以先于延迟 consumer，也确定先于其后出现的 async consumer；同组 defer 依文档顺序。async 或 module provider 不能据标签位置认定先行，module 顶层 await 等无法保证的关系拒绝。template 内脚本不计为已加载；textarea/title 和支持的 raw-text 元素内容不参与标签计数，其中的伪 template 结束标记不能激活惰性脚本。
+ 
+ 上述收紧对应 [R1–R10 回归](../tests/unit/architecture/review-regressions.test.js)。五处准确合法调用使用 allowedSites 保留职责说明；两处 G1 历史动态操作使用 legacy-allowlist 保留移除条件，两者不可混用。登记变化和原始基线核对见[本轮修复复核](../changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-repair/repair-review.md)。
++
++第二轮的绑定调用、工厂闭包、DOM/scoped API 兼容、公开导出、脚本执行次序和 fork cwd 回归见 [R2 测试](../tests/unit/architecture/review-round2.test.js) 与[第二轮修复自检](../changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r2-repair/repair-review.md)。本轮没有增加或修改 allowedSites、历史例外、schema 或激活状态。
+ 
+ IPC、任意 callback 注入、任意数据流／反射、共享对象内部写入、SQL 的业务过滤含义、资源真实退出、恢复授权时序及 GUI 生命周期不由 AST 完整证明。未解释的受保护结构失败关闭；报告中的盲区不能写成零风险。相关业务验收由 G1–G7 自己的真实测试负责；Windows／Excel／WPS／安装包验收按实际影响另外记录。
+ 
+--- a/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md
++++ b/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md
+@@ -2,11 +2,11 @@
+ 
+ 本文件是本功能唯一切片索引。设计合同：[Spec](spec.md)、[TechDoc](techdoc.md)；切片完成标准见[总索引 §6.2–§6.4](../../README.md#slice-completion)。设计审查通过不代表以下实现已验证。
+ 
+-## 最新状态：2026-09-21 审查修复
++## 最新状态：2026-09-21 第二轮审查修复
+ 
+-独立审查确认 R1–R10 后，下面 A/B/C 的“通过”和 84 项测试仅保留为当时证据，**不能据此认定 G8 全部验收完成**。本轮已修复十项并新增 16 项对抗/合法对照，最终架构套件 100/100，通过固定基线扫描；实现自复核已完成，独立复审尚未执行，G8 仍未集成。详细结果与本轮差异见[修复复核文档](reviews/2026-09-21-repair/repair-review.md)。
++独立第二轮复审确认原 R1–R10 最小反例已修复，同时确认新的 8 项 P2 与 1 项 P3。本轮已按 R2-01～09 修复，新增 14 组正反回归，最终架构套件 **114/114**、固定基线 CLI 均通过；实现者自检已完成，**本轮修复后的独立复审尚未执行，不能认定 G8 全部验收完成**。详细变更、验证边界和可复核差异见[第二轮修复自检](reviews/2026-09-21-r2-repair/repair-review.md)。下方 A～E 保留各时点的历史结果，旧完整 release-check 不覆盖当前代码。
+ 
+-原 D 切片的 release@9602a1fa 仅为历史固定候选；用户本轮审查已指出 release 后续移动。此次修复不刷新或借用浮动 release 的激活证据，不合并 G1–G7，不改变其 pending 状态。
++本轮没有调整机器配置、allowedSites、历史例外或激活状态。G8 仍未集成；原 D 的 release@9602a1fa 只是历史固定候选。此次修复不借用浮动 release 的激活证据，不合并 G1–G7；需在后续明确授权的集成候选上完成各域规则对齐与激活。
+ 
+ ## 工作区与输入
+ 
+@@ -106,3 +106,15 @@
+ - **验证证据**：新增最小回归首次 11/11 失败，覆盖原十项；修复并补合法职责/不可搬迁对照后 16/16 通过；最终 `node --test tests/unit/architecture/*.test.js` 100/100，0 fail/skip；`node scripts/check-architecture.js --json <绝对路径>` exit 0，685/685、2254 字面量本地边、64 worker、5 global、0 违规、114 条例外命中、0 stale；14 个工具/测试文件 no-undef 通过，git diff --check 通过。原始日志均保留在本轮 evidence。真实 Node Worker 从 fixture 根运行、VM/stub 对照以及真实 Git CLI 均属于合成测试，不是产品 GUI 验收。
+ - **当前规则入口**：根 AGENTS → `architecture/README.md`，新增“当前支持与失败关闭的边界”、工厂迁移/父函数收紧说明及回归链接；机器正文保持在两个 JSON。新增 5 个准确合法调用 allowedSites，另补 2 个固定 v3.2.9 动态 operation 覆盖债务，分别附职责/移除条件；[逐项核对](reviews/2026-09-21-repair/evidence/reviewed-registrations.json)包含 AST 指纹，原源码与固定提交逐字节一致。没有目录级豁免或自动接受新位置；对照证明旧例外不能搬迁，active 时不生效。
+ - **剩余 / 回退**：待独立复审；G1–G7 未落地到本分支，继续保持配置 pending 29（报告 21 pending / 8 partial），只有两个 G8 基础边界 active。正式集成或 PR-ready 前在最终合并候选重新跑 release-check，并以固定 release 状态完成各域规则对齐与激活。本轮遵守风险验证，仅改检查器/配置，未重复全量业务套件；旧 8184 pass 的 release-check 不作为新源码的全量 PASS。未跑 Electron GUI、Windows workflow/安装包、Excel/WPS。无提交、推送、合并、PR、升版或发布。回退只还原本轮检查器/配置差异，保留接手前实现和证据。
++
++
++## 切片 F：R2-01～09 检查器修复与兼容复核（2026-09-21）
++
++- **范围 / 代码状态**：沿用原 G8 worktree 与分支，HEAD 为 11086a3c，基于第二轮审查的未提交实现继续修改。修复前工具归档为 `/private/tmp/g8-r2-fixes-before/tooling.tar.gz`。本轮只改 scan、rules、contracts，新增 review-round2.test.js，并更新现行规则说明与本记录；精确差异和最终指纹见[repair-diff.patch](reviews/2026-09-21-r2-repair/evidence/repair-diff.patch)、[verified-manifest.json](reviews/2026-09-21-r2-repair/evidence/verified-manifest.json)。
++- **实现状态：已实现；验证状态：本轮必要专项通过、独立复审待执行；集成状态：未集成，真实激活待后续集成。**
++- **职责与边界**：contracts 统一工厂公开导出、调用来源与绑定函数归一化；scan 记录 bind/call/apply 的目标与有效实参，按 fork 显式 cwd 解析 worker，并隔离 HTML 文本上下文；rules 对工厂来源做传递闭包，区别 DOM panel、显式 API 方法及完整对象，按确定先行关系核对脚本。生产 src、业务数据与主工作区设计原件均未改。
++- **调用方与兼容**：CLI/npm/CI 入口、返回码、配置 schema 保持。公开工厂允许内部函数不同名及 const 别名；合法单根 DOM panel、精确方法挑选、前序同步 provider 后的 async consumer 得到兼容。未知恢复消息、未知 DB getter/绑定别名、未知任务工厂和动态 fork cwd 继续失败关闭；默认 Worker 根目录合同保留。没有新增豁免或修改上轮已审计的 5 个 allowedSites / 2 个历史例外。
++- **业务行为**：R2-01→AC17，R2-02→AC16，R2-03→AC18，R2-04/05→AC05 与 G3 §4，R2-06→AC10/12（公开工厂核验同时用于历史 AC21），R2-07/09→AC10，R2-08→AC08。静态规则正确接受/拒绝源码，不改变生产查询、恢复或资金处理行为。AC22 的真实 Git 损坏配置恢复及 local/PR/push/tag/manual 端到端随全架构套件重跑。
++- **验证证据**：首批对应 9 个问题的回归在修复前 9/9 失败；最终新增 14 组全部通过，完整架构套件 114/114，0 fail/skip。真实 VM/stub 验证敏感能力确实执行、panel 传入同一节点、API 仅挑选一个方法；真实 Git CLI 验证公开工厂兼容；真实子进程验证 fork 两种 options 重载的准确目标。固定基线 CLI exit 0：685/685 文件、2254 字面量本地边、64 worker、5 global、0 违规、114 条例外全部命中（142 条诊断匹配）、0 stale；未解析 2、动态位置 33 仍由既有合同/例外登记，未宣称全解析。15 个工具/测试文件 no-undef 通过，git diff --check 通过。日志见[证据说明](reviews/2026-09-21-r2-repair/evidence/README.md)。
++- **当前规则入口**：根 AGENTS → `architecture/README.md` 已更新上述来源、别名、DOM/API、公开导出、脚本和 cwd 语义；机器正文仍仅为两个 JSON，字节未变。原 Spec/TechDoc 没有改写；原第二轮报告保持只读，准确副本存为本次 source-review.md。
++- **剩余 / 回退**：待独立复审；G1–G7 不在本分支，仍 active 2 / pending 21 / partial 8。节点实际归属和生命周期、API 运行时类型与 HTML 浏览器执行不由这些合成测试证明。按 CODEX 风险验证，本轮未跑完整 release-check，旧日志不作为当前全量 PASS；正式集成/PR-ready 前须覆盖最终合并候选。未跑 Electron GUI、Windows workflow/安装包、Excel/WPS。无提交、推送、合并、PR、升版或发布。回退使用本轮差异和归档，仅恢复 F 的工具/测试/说明，保留此前实现与历史证据。
+--- /dev/null
++++ b/tests/unit/architecture/review-round2.test.js
+@@ -0,0 +1,213 @@
++'use strict';
++const assert = require('node:assert/strict');
++const test = require('node:test');
++const fs = require('node:fs');
++const path = require('node:path');
++const os = require('node:os');
++const { spawnSync } = require('node:child_process');
++const vm = require('node:vm');
++const { scan } = require('../../../scripts/architecture/scan');
++const { evaluateRules } = require('../../../scripts/architecture/rules');
++const { createPolicyRepository } = require('./fixtures/policy-repository');
++const cliPath = path.resolve(__dirname, '../../../scripts/check-architecture.js');
++const baseline = '1'.repeat(40);
++function boundary(rule, overrides = {}) {
++  return { id: 'review', governance: 'G8', owner: 'fixture', state: 'pending', rules: [rule], entrypoints: [],
++    allowedLocal: [], allowedExternal: [], requiredConsumers: [], activationEvidence: [], protectedScopes: [],
++    restrictedApis: [], allowedSites: [], compositionEntrypoints: [], globals: [], factory: null,
++    allowedApiFields: {}, deprecatedEntrypoints: [], directory: null, ...overrides };
++}
++function fixture(t, files, boundaries, configure = () => {}) {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'g8-review-regression-'));
++  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
++  for (const [name, source] of Object.entries(files)) {
++    fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true }); fs.writeFileSync(path.join(root, name), source);
++  }
++  const config = { schemaVersion: 1, factBaseline: baseline, bootstrap: { factBaseline: baseline, mode: 'first-introduction' },
++    boundaries: [].concat(boundaries), generatedModules: [], dynamicLoads: [], policyChanges: [] };
++  const scanned = scan(root, config);
++  const allowlist = { schemaVersion: 1, factBaseline: baseline, exceptions: [] };
++  configure({config, allowlist, scanned, root});
++  return { root, scanned, result: evaluateRules(scanned, config, allowlist, { root }) };
++}
++const clean = result => assert.deepEqual(result.violations, []);
++const denied = (result, rule) => assert.ok(result.violations.some(v => v.rule === rule), JSON.stringify(result.violations));
++function cli(f) {
++  const run = spawnSync(process.execPath, [cliPath, '--root', f.root], { cwd: f.root, encoding: 'utf8' });
++  assert.ifError(run.error); return run;
++}
++
++const taskBoundary = () => boundary('ARCH-TASK-ADAPTER', { protectedScopes: [{path:'src/main.js',functionPath:'run'}], restrictedApis:[{path:'src/position.js',exportNames:['settle'],operations:[]}] });
++const recoveryBoundary = () => boundary('ARCH-PUBLICATION-RECOVERY-ENTRY', {protectedScopes:[{path:'src/dispatch.js',functionPath:null}]});
++const queryBoundary = () => boundary('ARCH-BIZOP-QUERY', {protectedScopes:[{path:'src/query.js',functionPath:'read'}]});
++const rendererBoundary = () => boundary('ARCH-RENDERER-SCOPE', {entrypoints:['src/controller.js'],factory:{path:'src/controller.js',name:'createProbe',parameters:['panel','api']},allowedApiFields:{panel:['querySelector','querySelectorAll'],api:['import','scenarios.list']}});
++function renderer(t, expression, setup = '') {
++  return fixture(t, {'src/controller.js':'window.createProbe = options => options;', 'src/shell.js': setup + `window.createProbe(${expression});`},rendererBoundary()).result;
++}
++
++test('R2-01 工厂来源检查传递闭包；局部 getter 的 const/let 返回值同样受保护', t => {
++  const cases = [
++    "const {create}=require('./task-factory'); const service=create(); function run(){service.settle();}",
++    "const position=require('./position'); function getSettle(){return position.settle;} const settle=getSettle(); function run(){settle();}",
++    "const position=require('./position'); function getSettle(){return position.settle;} let settle=getSettle(); function run(){settle();}"
++  ];
++  for(const source of cases) {
++    let calls=0;vm.runInNewContext(source+';run();',{require:name=> name==='./task-factory'?{create:()=>({settle:()=>calls++})}:{settle:()=>calls++}});assert.equal(calls,1);
++    const f=fixture(t,{'src/main.js':source,'src/task-factory.js':"exports.create=()=>require('./position');",'src/position.js':'exports.settle=()=>{};'},taskBoundary());
++    denied(f.result,'ARCH-TASK-ADAPTER');
++  }
++  clean(fixture(t,{'src/main.js':"const {create}=require('./task-factory'); const service=create();function run(){service.execute();}",'src/task-factory.js':'exports.create=()=>({execute(){}});'},taskBoundary()).result);
++});
++
++test('R2-02 bound postMessage 保留消息及部分实参；未知操作失败关闭', t => {
++  for(const code of [
++    'const send=worker.postMessage.bind(worker);send(message);',
++    'const send=worker.postMessage.bind(worker,message);send();',
++    'worker.postMessage.call(worker,message);',
++    'worker.postMessage.apply(worker,[message]);'
++  ]) {
++    const source=`function sendMessage(worker,message){${code}}`;
++    let op;vm.runInNewContext(source+';sendMessage(worker,{op:"recover"});',{worker:{postMessage:m=>op=m.op}});assert.equal(op,'recover');
++    denied(fixture(t,{'src/dispatch.js':source},recoveryBoundary()).result,'ARCH-STATIC-COVERAGE');
++  }
++  clean(fixture(t,{'src/dispatch.js':'function sendMessage(worker){const send=worker.postMessage.bind(worker);send({op:"publish"});}'},recoveryBoundary()).result);
++  denied(fixture(t,{'src/dispatch.js':'function sendMessage(worker){const send=worker.postMessage.bind(worker,{op:"recover"});send();}'},recoveryBoundary()).result,'ARCH-PUBLICATION-RECOVERY-ENTRY');
++});
++
++test('R2-03 bound prepare/exec 保留 DB 身份；getter 后的别名不能隐藏 SQL', t => {
++  for(const code of [
++    "const prepare=handle.prepare.bind(handle);return prepare('SELECT * FROM facts').all();",
++    "const prepare=handle.prepare.bind(handle,'SELECT * FROM facts');return prepare().all();",
++    "return handle.prepare.call(handle,'SELECT * FROM facts').all();",
++    "return handle.prepare.apply(handle,['SELECT * FROM facts']).all();"
++  ]) {
++    const source=`function getHandle(catalog){return catalog.db;}function read(catalog){const handle=getHandle(catalog);${code}}`;
++    const sql=[];vm.runInNewContext(source+';read(catalog);',{catalog:{db:{prepare:s=>{sql.push(s);return {all:()=>[]};}}}});assert.deepEqual(sql,['SELECT * FROM facts']);
++    denied(fixture(t,{'src/query.js':source},queryBoundary()).result,'ARCH-STATIC-COVERAGE');
++  }
++  clean(fixture(t,{'src/query.js':'function read(text){const pattern=/[0-9]+/;const exec=pattern.exec.bind(pattern);return exec(text);}'},queryBoundary()).result);
++});
++
++test('R2-04 单个 DOM panel 来源合法；document/全局根/动态节点/API 注入仍拒绝', t => {
++  const panel={nodeType:1};let received;vm.runInNewContext("window.createProbe({panel:document.getElementById('bank-statement-panel')});",{document:{getElementById:()=>panel},window:{createProbe:input=>received=input}});assert.equal(received.panel,panel);
++  for(const expression of ["document.getElementById('bank-statement-panel')", "document.querySelector('#bank-statement-panel')", "Object.freeze(document.getElementById('bank-statement-panel'))"]) {
++    clean(renderer(t,'{panel,api:{import(){}}}',`const panel=${expression};`));
++  }
++  for(const expression of ['document','document.body','window.desktopApi',"document.getElementById('modalRoot')",'document.getElementById(id)',"document.querySelector('body')",'getPanel()']) {
++    assert.ok(renderer(t,`{panel:${expression},api:{import(){}}}`).violations.length,expression);
++  }
++  assert.ok(renderer(t,"{api:document.getElementById('bank-statement-panel')}").violations.length);
++});
++
++test('R2-05 scoped API 可以精确挑选方法，不能夹带完整 API/namespace/未授权成员', t => {
++  let received,calls=0;vm.runInNewContext('window.createProbe({api:Object.freeze({import:window.desktopApi.bankStatement.import})});',{window:{desktopApi:{bankStatement:{import:()=>calls++,run(){}}},createProbe:input=>received=input}});received.api.import();assert.equal(calls,1);assert.deepEqual(Object.keys(received.api),['import']);
++  for(const expression of [
++    '{api:Object.freeze({import:window.desktopApi.bankStatement.import})}',
++    '{api:{import:desktopApi.bankStatement.import}}',
++    '{api:{scenarios:{list:window.desktopApi.scenarios.list}}}'
++  ]) clean(renderer(t,expression));
++  for(const expression of [
++    '{api:window.desktopApi}', '{api:window.desktopApi.bankStatement}',
++    '{api:{import:window.desktopApi}}', '{api:{import:window.desktopApi.bankStatement}}',
++    '{api:{run:window.desktopApi.bankStatement.run}}', '{api:{scenarios:window.desktopApi.scenarios}}',
++    '{api:{scenarios:{list:window.desktopApi.channels.list}}}'
++  ]) assert.ok(renderer(t,expression).violations.length,expression);
++});
++
++test('R2-06 active 工厂按公开导出解析具名表达式、const alias、对象导出；私有同名不算', t => {
++  const f=createPolicyRepository(t);f.boundary.rules=['ARCH-RENDERER-SCOPE'];
++  f.boundary.factory={path:'src/entry.js',name:'createProbe',parameters:['api']};f.boundary.allowedApiFields={api:['read']};
++  f.write('src/shell.js','window.createProbe({api:{read(){return 1;}}});');
++  for(const source of [
++    'window.createProbe=function buildController(options){return options;};',
++    'const buildController=options=>options;window.createProbe=buildController;',
++    'const buildController=options=>options;window.group=Object.freeze({createProbe:buildController});',
++    'function buildController(options){return options;}module.exports={createProbe:buildController};'
++  ]) { f.write('src/entry.js',source);f.write('src/shell.js',(source.includes('module.exports') ? "require('./entry').createProbe" : source.includes('window.group') ? 'window.group.createProbe' : 'window.createProbe') + '({api:{read(){return 1;}}});');f.save();const result=cli(f);assert.equal(result.status,0,result.stdout+result.stderr); }
++  f.write('src/entry.js','function createProbe(options){return options;}');f.save();assert.equal(cli(f).status,1);
++  f.write('src/entry.js','window.createProbe=unknown();');f.save();assert.equal(cli(f).status,1);
++});
++
++function scripts(t,html) {
++  return fixture(t,{'src/service.js':'window.service={read(){}};','src/controller.js':'window.service.read();','index.html':html},[
++    boundary('ARCH-RENDERER-SCOPE',{id:'service',entrypoints:['src/service.js'],globals:[{path:'src/service.js',exportsGlobal:['service'],consumesGlobals:[]}]}),
++    boundary('ARCH-RENDERER-SCOPE',{id:'consumer',entrypoints:['src/controller.js'],allowedLocal:['src/service.js'],globals:[{path:'src/controller.js',exportsGlobal:[],consumesGlobals:['service']}]})
++  ]);
++}
++test('R2-07 前序同步 provider 确定先于 async consumer，反向和异步 provider 不保证', t => {
++  clean(scripts(t,'<script src="src/service.js"></script><script async src="src/controller.js"></script>').result);
++  for(const html of [
++    '<script async src="src/controller.js"></script><script src="src/service.js"></script>',
++    '<script async src="src/service.js"></script><script src="src/controller.js"></script>',
++    '<script defer src="src/service.js"></script><script async src="src/controller.js"></script>'
++  ]) denied(scripts(t,html).result,'ARCH-RENDERER-SCOPE');
++});
++
++test('R2-08 fork 两种 options 重载尊重静态 cwd，与真实子进程一致', t => {
++  for(const call of [
++    "fork('./src/worker.cjs',{cwd:path.join(__dirname,'jobs')});",
++    "fork('./src/worker.cjs',[],{cwd:path.join(__dirname,'jobs')});"
++  ]) {
++    const f=fixture(t,{'src/launcher.cjs':"const {fork}=require('node:child_process');const path=require('node:path');"+call,
++      'src/worker.cjs':"throw Error('wrong root');",'src/src/worker.cjs':"throw Error('wrong module');",'src/jobs/src/worker.cjs':"console.log('expected-worker');"},boundary('ARCH-CYCLE'));
++    const runtime=spawnSync(process.execPath,['src/launcher.cjs'],{cwd:f.root,encoding:'utf8',timeout:10000});assert.equal(runtime.status,0,runtime.stderr);assert.match(runtime.stdout,/expected-worker/);
++    clean(f.result);assert.deepEqual(f.scanned.edges.filter(e=>e.kind==='worker').map(e=>e.to),['src/jobs/src/worker.cjs']);
++  }
++});
++
++test('R2-09 textarea/title/raw text 内的伪 template 结束标记不激活惰性脚本', t => {
++  for(const name of ['textarea','title','style','xmp','iframe','noembed','noframes','noscript']) {
++    const html=`<template><${name}></template></${name}><script src="src/service.js"></script></template><script src="src/controller.js"></script>`;
++    const f=scripts(t,html);assert.deepEqual(f.scanned.scripts.map(s=>s.path),['src/controller.js'],name);denied(f.result,'ARCH-STATIC-COVERAGE');
++  }
++});
++
++test('R2-01 未知 const/let 工厂结果失败关闭，已解析纯本地返回函数允许', t => {
++  for(const keyword of ['const','let']) denied(fixture(t,{'src/main.js':`${keyword} settle=externalFactory();function run(){settle();}`},taskBoundary()).result,'ARCH-STATIC-COVERAGE');
++  clean(fixture(t,{'src/main.js':'function getExecute(){return () => 1;}const execute=getExecute();function run(){execute();}'},taskBoundary()).result);
++  denied(fixture(t,{'src/main.js':'function getExecute(){return getExecute();}const execute=getExecute();function run(){execute();}'},taskBoundary()).result,'ARCH-STATIC-COVERAGE');
++});
++
++test('R2-02/03 多次绑定、解构和候选别名保持相同敏感能力', t => {
++  for(const body of [
++    'const {postMessage}=worker;const send=postMessage.bind(worker);send(message);',
++    'const once=worker.postMessage.bind(worker,message);const twice=once.bind(null);twice();',
++    'let send=worker.postMessage.bind(worker);send(message);',
++    'const send=flag?worker.postMessage.bind(worker):worker.postMessage.bind(worker);send(message);',
++    'worker.postMessage.bind(worker).call(null,message);',
++    'worker.postMessage.apply(worker,args);'
++  ]) denied(fixture(t,{'src/dispatch.js':`function sendMessage(worker,message,flag,args){${body}}`},recoveryBoundary()).result,'ARCH-STATIC-COVERAGE');
++  for(const method of ['prepare','exec']) {
++    denied(fixture(t,{'src/query.js':`function read(catalog){const invoke=catalog.db.${method}.bind(catalog.db);invoke('SELECT 1');}`},queryBoundary()).result,'ARCH-BIZOP-QUERY');
++  }
++});
++
++test('R2-04/05 DOM/API 原生对象的局部 const 别名合法，未知或全对象仍不能替代', t => {
++  clean(renderer(t,'{panel,api:{import:importFile}}',"const doc=document;const panel=doc.getElementById('bank-statement-panel');const {import:importFile}=window.desktopApi.bankStatement;"));
++  assert.ok(renderer(t,'{api:{import:root}}','const root=window.desktopApi;').violations.length);
++  assert.ok(renderer(t,'{panel:document.querySelector(selector)}').violations.length);
++});
++
++test('R2-08 动态 cwd/不可解释 options 失败关闭，静态候选和绝对目标保留准确集合', t => {
++  const files={'src/a/worker.cjs':'','src/b/worker.cjs':''};
++  for(const options of ['options','{cwd: supplied}', '{...options,cwd:"src/a"}']) {
++    const f=fixture(t,{...files,'src/launcher.cjs':`const {fork}=require('node:child_process');fork('./worker.cjs',${options});`},boundary('ARCH-CYCLE'));
++    denied(f.result,'ARCH-STATIC-COVERAGE');assert.ok(f.scanned.dynamicSites.some(s=>s.reason==='unresolved-fork-cwd'));
++  }
++  const f=fixture(t,{...files,'src/launcher.cjs':"const {fork}=require('node:child_process');fork('./worker.cjs',[],{cwd:flag?'src/a':'src/b'});"},boundary('ARCH-CYCLE'));
++  clean(f.result);assert.deepEqual(f.scanned.edges.filter(e=>e.kind==='worker').map(e=>e.to),['src/a/worker.cjs','src/b/worker.cjs']);
++  const absolute=fixture(t,{...files,'src/launcher.cjs':"const {fork}=require('node:child_process');const path=require('node:path');fork(path.join(__dirname,'a/worker.cjs'),unknownOptions);"},boundary('ARCH-CYCLE'));
++  clean(absolute.result);assert.deepEqual(absolute.scanned.edges.filter(e=>e.kind==='worker').map(e=>e.to),['src/a/worker.cjs']);
++  denied(fixture(t,{'src/launcher.js':"require('node:child_process').fork(99);"},boundary('ARCH-CYCLE')).result,'ARCH-STATIC-COVERAGE');
++});
++
++test('R2-08 fork 绑定与 call/apply 使用相同的路径/cwd 解析', t => {
++  for(const code of [
++    "const start=fork.bind(null,'./worker.cjs',[],{cwd:'src/jobs'});start();",
++    "fork.call(null,'./worker.cjs',{cwd:'src/jobs'});",
++    "fork.apply(null,['./worker.cjs',[],{cwd:'src/jobs'}]);"
++  ]) {
++    const f=fixture(t,{'src/launcher.cjs':"const {fork}=require('node:child_process');"+code,'src/jobs/worker.cjs':''},boundary('ARCH-CYCLE'));
++    clean(f.result);assert.deepEqual(f.scanned.edges.filter(e=>e.kind==='worker').map(e=>e.to),['src/jobs/worker.cjs']);
++  }
++});

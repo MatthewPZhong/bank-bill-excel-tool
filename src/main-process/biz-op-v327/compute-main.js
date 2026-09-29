@@ -1,7 +1,9 @@
 'use strict';
 
 const { randomUUID } = require('node:crypto');
-const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../execution-descriptors/composition');
 const { collectInputs, persistInputs } = require('./compute-inputs');
 const { readVerifiedManifest } = require('./payload-store');
 const { CELL_CONTRACT_VERSION, RULE_VERSION } = require('./import-adapter');

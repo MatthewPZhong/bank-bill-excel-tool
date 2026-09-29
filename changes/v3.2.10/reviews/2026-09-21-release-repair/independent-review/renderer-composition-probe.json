@@ -1,0 +1,365 @@
+{
+  "before": {
+    "scripts/architecture/scan.js": "5f50ac5367347b551dd543ec517cd21c0a52e5f5fb7aa58f43558c1685d452f5",
+    "scripts/architecture/rules.js": "b51974a43aa4a350d0017d67ac1e7a0e7f451c1b24b0e245dd3591a82770cfc5",
+    "scripts/architecture/contracts.js": "b0e15a2a25621ff8edf17498ae47da7e30e4b07cc36baf8f77780ab793e359a6",
+    "scripts/architecture/renderer-contracts.js": "efe1b2a345afe13bf848b06269b4ed516275e707663c5c7607455b72e2b4d7b7"
+  },
+  "after": {
+    "scripts/architecture/scan.js": "5f50ac5367347b551dd543ec517cd21c0a52e5f5fb7aa58f43558c1685d452f5",
+    "scripts/architecture/rules.js": "b51974a43aa4a350d0017d67ac1e7a0e7f451c1b24b0e245dd3591a82770cfc5",
+    "scripts/architecture/contracts.js": "b0e15a2a25621ff8edf17498ae47da7e30e4b07cc36baf8f77780ab793e359a6",
+    "scripts/architecture/renderer-contracts.js": "efe1b2a345afe13bf848b06269b4ed516275e707663c5c7607455b72e2b4d7b7"
+  },
+  "stable": true,
+  "results": [
+    {
+      "name": "full-direct",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "createProbe({api:window.desktopApi});"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "from": "src/app.js",
+          "line": 1,
+          "message": "scoped api 未提供可解释方法集合"
+        }
+      ],
+      "edges": [],
+      "runtime": {
+        "wholeApi": true,
+        "wholeApiAsRead": false,
+        "outsideScopeViaRead": false
+      }
+    },
+    {
+      "name": "full-helper",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "function forward(api){return api;}createProbe({api:forward(window.desktopApi)});"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "from": "src/app.js",
+          "line": 1,
+          "message": "scoped api 未提供可解释方法集合"
+        }
+      ],
+      "edges": [],
+      "runtime": {
+        "wholeApi": true,
+        "wholeApiAsRead": false,
+        "outsideScopeViaRead": false
+      }
+    },
+    {
+      "name": "full-helper-nested",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "function wrap(api){return {nested:api};}createProbe({api:wrap(window.desktopApi).nested});"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "from": "src/app.js",
+          "line": 1,
+          "message": "scoped api 未提供可解释方法集合"
+        }
+      ],
+      "edges": [],
+      "runtime": {
+        "wholeApi": true,
+        "wholeApiAsRead": false,
+        "outsideScopeViaRead": false
+      }
+    },
+    {
+      "name": "full-helper-return-member",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "function wrap(api){return {read:api};}createProbe({api:wrap(window.desktopApi)});"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-STATIC-COVERAGE",
+          "from": "src/app.js",
+          "line": 1,
+          "message": "scoped api.read 的方法来源无法解释"
+        }
+      ],
+      "edges": [],
+      "runtime": {
+        "wholeApi": false,
+        "wholeApiAsRead": true,
+        "outsideScopeViaRead": true
+      }
+    },
+    {
+      "name": "full-helper-argument",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "function mount(api){createProbe({api});}mount(window.desktopApi);"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-STATIC-COVERAGE",
+          "from": "src/app.js",
+          "line": 1,
+          "message": "scoped api 未提供可解释方法集合"
+        }
+      ],
+      "edges": [],
+      "runtime": {
+        "wholeApi": true,
+        "wholeApiAsRead": false,
+        "outsideScopeViaRead": false
+      }
+    },
+    {
+      "name": "full-as-method-argument",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "function mount(read){createProbe({api:{read}});}mount(window.desktopApi);"
+      },
+      "violations": [],
+      "edges": [],
+      "runtime": {
+        "wholeApi": false,
+        "wholeApiAsRead": true,
+        "outsideScopeViaRead": true
+      }
+    },
+    {
+      "name": "full-through-static-namespace",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "window.Helpers={forward(api){return api;}};createProbe({api:Helpers.forward(window.desktopApi)});"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "from": "src/app.js",
+          "line": 1,
+          "message": "scoped api 未提供可解释方法集合"
+        }
+      ],
+      "edges": [],
+      "runtime": {
+        "wholeApi": true,
+        "wholeApiAsRead": false,
+        "outsideScopeViaRead": false
+      }
+    },
+    {
+      "name": "full-through-wrapper-parameter",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "function forward(api){return {read:api};}function mount(api){createProbe({api:forward(api)});}mount(window.desktopApi);"
+      },
+      "violations": [],
+      "edges": [],
+      "runtime": {
+        "wholeApi": false,
+        "wholeApiAsRead": true,
+        "outsideScopeViaRead": true
+      }
+    },
+    {
+      "name": "scoped-helper",
+      "files": {
+        "src/controller.js": "function createProbe({api}) {return api;}window.createProbe=createProbe;",
+        "src/app.js": "function forward(api){return {read:api.read};}createProbe({api:forward(window.desktopApi)});"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-STATIC-COVERAGE",
+          "from": "src/app.js",
+          "line": 1,
+          "message": "scoped api.read 的方法来源无法解释"
+        }
+      ],
+      "edges": [],
+      "runtime": {
+        "wholeApi": false,
+        "wholeApiAsRead": false,
+        "outsideScopeViaRead": false
+      }
+    },
+    {
+      "name": "namespace-static",
+      "files": {
+        "src/composition.js": "const mod=require('./main-process/position/task-adapter');const adapter=mod.createAdapter();",
+        "src/main-process/position/task-adapter.js": "exports.createAdapter=()=>({});exports.forbidden=()=>({});"
+      },
+      "violations": [],
+      "edges": [
+        {
+          "from": "src/composition.js",
+          "line": 1,
+          "column": 10,
+          "source": {
+            "line": 1,
+            "column": 10
+          },
+          "functionPath": null,
+          "evidenceId": "5108f035c9064b3085724733469dbd3c060543df869b1a854c52ac4c2dab2a80",
+          "occurrence": 0,
+          "to": "src/main-process/position/task-adapter.js",
+          "external": false,
+          "kind": "require",
+          "specifier": "./main-process/position/task-adapter",
+          "importedNames": [
+            "createAdapter"
+          ],
+          "literal": true
+        }
+      ]
+    },
+    {
+      "name": "namespace-forward",
+      "files": {
+        "src/composition.js": "const mod=require('./main-process/position/task-adapter');function forward(value){return value;}forward(mod).createAdapter();",
+        "src/main-process/position/task-adapter.js": "exports.createAdapter=()=>({});exports.forbidden=()=>({});"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+          "from": "src/composition.js",
+          "line": 1,
+          "message": "显式装配只能加载登记的领域入口及具名导出"
+        }
+      ],
+      "edges": [
+        {
+          "from": "src/composition.js",
+          "line": 1,
+          "column": 10,
+          "source": {
+            "line": 1,
+            "column": 10
+          },
+          "functionPath": null,
+          "evidenceId": "5108f035c9064b3085724733469dbd3c060543df869b1a854c52ac4c2dab2a80",
+          "occurrence": 0,
+          "to": "src/main-process/position/task-adapter.js",
+          "external": false,
+          "kind": "require",
+          "specifier": "./main-process/position/task-adapter",
+          "importedNames": null,
+          "literal": true
+        }
+      ]
+    },
+    {
+      "name": "namespace-object-forward",
+      "files": {
+        "src/composition.js": "const mod=require('./main-process/position/task-adapter');function forward(value){return value.value;}forward({value:mod}).createAdapter();",
+        "src/main-process/position/task-adapter.js": "exports.createAdapter=()=>({});exports.forbidden=()=>({});"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+          "from": "src/composition.js",
+          "line": 1,
+          "message": "显式装配只能加载登记的领域入口及具名导出"
+        }
+      ],
+      "edges": [
+        {
+          "from": "src/composition.js",
+          "line": 1,
+          "column": 10,
+          "source": {
+            "line": 1,
+            "column": 10
+          },
+          "functionPath": null,
+          "evidenceId": "5108f035c9064b3085724733469dbd3c060543df869b1a854c52ac4c2dab2a80",
+          "occurrence": 0,
+          "to": "src/main-process/position/task-adapter.js",
+          "external": false,
+          "kind": "require",
+          "specifier": "./main-process/position/task-adapter",
+          "importedNames": null,
+          "literal": true
+        }
+      ]
+    },
+    {
+      "name": "namespace-dynamic",
+      "files": {
+        "src/composition.js": "const mod=require('./main-process/position/task-adapter');const name=process.env.METHOD;mod[name]();",
+        "src/main-process/position/task-adapter.js": "exports.createAdapter=()=>({});exports.forbidden=()=>({});"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+          "from": "src/composition.js",
+          "line": 1,
+          "message": "显式装配只能加载登记的领域入口及具名导出"
+        }
+      ],
+      "edges": [
+        {
+          "from": "src/composition.js",
+          "line": 1,
+          "column": 10,
+          "source": {
+            "line": 1,
+            "column": 10
+          },
+          "functionPath": null,
+          "evidenceId": "5108f035c9064b3085724733469dbd3c060543df869b1a854c52ac4c2dab2a80",
+          "occurrence": 0,
+          "to": "src/main-process/position/task-adapter.js",
+          "external": false,
+          "kind": "require",
+          "specifier": "./main-process/position/task-adapter",
+          "importedNames": null,
+          "literal": true
+        }
+      ]
+    },
+    {
+      "name": "namespace-extra-member",
+      "files": {
+        "src/composition.js": "const mod=require('./main-process/position/task-adapter');mod.createAdapter();mod.forbidden();",
+        "src/main-process/position/task-adapter.js": "exports.createAdapter=()=>({});exports.forbidden=()=>({});"
+      },
+      "violations": [
+        {
+          "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+          "from": "src/composition.js",
+          "line": 1,
+          "message": "显式装配只能加载登记的领域入口及具名导出"
+        }
+      ],
+      "edges": [
+        {
+          "from": "src/composition.js",
+          "line": 1,
+          "column": 10,
+          "source": {
+            "line": 1,
+            "column": 10
+          },
+          "functionPath": null,
+          "evidenceId": "5108f035c9064b3085724733469dbd3c060543df869b1a854c52ac4c2dab2a80",
+          "occurrence": 0,
+          "to": "src/main-process/position/task-adapter.js",
+          "external": false,
+          "kind": "require",
+          "specifier": "./main-process/position/task-adapter",
+          "importedNames": [
+            "createAdapter",
+            "forbidden"
+          ],
+          "literal": true
+        }
+      ]
+    }
+  ]
+}

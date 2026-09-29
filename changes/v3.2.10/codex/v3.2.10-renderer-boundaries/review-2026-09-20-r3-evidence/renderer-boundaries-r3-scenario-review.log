@@ -1,0 +1,32 @@
+select after export false
+bank {
+  main: { bank: false, recon: false },
+  disabled: true,
+  text: '已导入：bank.xlsx（0 行）'
+}
+recon {
+  main: { bank: false, recon: false },
+  disabled: true,
+  text: '已导入 recon.xlsx（0 行业务账单 / 0 行对手账单）；请点击"开始运行"'
+}
+recovered bank 已导入：bank.xlsx（0 行）
+recovered recon 已导入 recon.xlsx（0 行业务账单 / 0 行对手账单）；请点击"开始运行"
+newer-business-wins bank { text: '已导出：newer-completed.xlsx', exportDisabled: false }
+newer-business-wins recon { text: '已导出 — 主文件 newer-completed.xlsx', exportDisabled: false }
+✔ 审查探针：Recon 一次导出后场景选择须恢复 (7.0125ms)
+✔ 审查探针：bank 隐藏期间批删场景，返回清除旧导出反馈 (3.201792ms)
+✔ 审查探针：recon 隐藏期间批删场景，返回清除旧导出反馈 (2.516208ms)
+✔ 再审 R03 busy/list 交错 list-first (1.742166ms)
+✔ 再审 R03 busy/list 交错 action-first (1.534375ms)
+✔ 再审 active bank 失效重读失败后重入须结束错误提示 (1.792917ms)
+✔ 再审 active recon 失效重读失败后重入须结束错误提示 (1.74625ms)
+✔ RR02独立：bank恢复请求已发出，较新导出先结算不被恢复覆盖 (2.207667ms)
+✔ RR02独立：recon恢复请求已发出，较新导出先结算不被恢复覆盖 (2.100625ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 166.779833

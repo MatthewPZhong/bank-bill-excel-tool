@@ -925,7 +925,7 @@ function requireExactTrackedModule(relativePath) {
 function loadPolicyAuthorities() {
   if (policyAuthorities) return policyAuthorities;
   const { BACKGROUND_EXECUTION_POLICIES } =
-    requireExactTrackedModule('src/main-process/background-execution/runtime.js');
+    requireExactTrackedModule('src/main-process/execution-descriptors/policy-catalog.js');
   const {
     NEW_ACCOUNT_GENERATION_POLICY,
     NEW_ACCOUNT_SAVE_AS_POLICY

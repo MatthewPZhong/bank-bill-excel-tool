@@ -1,0 +1,142 @@
+[
+  {
+    "name": "do-break-before-write",
+    "hasEnum": false,
+    "source": "const old={run(){}};const clean={run(){}};const box={api:old};async function run(){const info=await window.desktopApi.app.getInfo();do{if(info.hasEnum)break;box.api=clean;}while(false);const alias=box.api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:old});return alias===old;}run();",
+    "ipcReads": 1,
+    "same": false,
+    "apiKeys": [
+      "run"
+    ],
+    "extraCallable": false
+  },
+  {
+    "name": "do-break-before-write",
+    "hasEnum": true,
+    "source": "const old={run(){}};const clean={run(){}};const box={api:old};async function run(){const info=await window.desktopApi.app.getInfo();do{if(info.hasEnum)break;box.api=clean;}while(false);const alias=box.api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:old});return alias===old;}run();",
+    "ipcReads": 1,
+    "same": true,
+    "apiKeys": [
+      "run",
+      "outsideScope"
+    ],
+    "extraCallable": true,
+    "extraResult": true
+  },
+  {
+    "name": "do-write-before-break-safe",
+    "hasEnum": false,
+    "source": "const old={run(){}};const clean={run(){}};const box={api:old};async function run(){const info=await window.desktopApi.app.getInfo();do{box.api=clean;if(info.hasEnum)break;}while(false);const alias=box.api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:old});return alias===old;}run();",
+    "ipcReads": 1,
+    "same": false,
+    "apiKeys": [
+      "run"
+    ],
+    "extraCallable": false
+  },
+  {
+    "name": "do-write-before-break-safe",
+    "hasEnum": true,
+    "source": "const old={run(){}};const clean={run(){}};const box={api:old};async function run(){const info=await window.desktopApi.app.getInfo();do{box.api=clean;if(info.hasEnum)break;}while(false);const alias=box.api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:old});return alias===old;}run();",
+    "ipcReads": 1,
+    "same": false,
+    "apiKeys": [
+      "run"
+    ],
+    "extraCallable": false
+  },
+  {
+    "name": "do-continue-before-write",
+    "hasEnum": false,
+    "source": "const old={run(){}};const clean={run(){}};const box={api:old};async function run(){const info=await window.desktopApi.app.getInfo();do{if(info.hasEnum)continue;box.api=clean;}while(false);const alias=box.api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:old});return alias===old;}run();",
+    "ipcReads": 1,
+    "same": false,
+    "apiKeys": [
+      "run"
+    ],
+    "extraCallable": false
+  },
+  {
+    "name": "do-continue-before-write",
+    "hasEnum": true,
+    "source": "const old={run(){}};const clean={run(){}};const box={api:old};async function run(){const info=await window.desktopApi.app.getInfo();do{if(info.hasEnum)continue;box.api=clean;}while(false);const alias=box.api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:old});return alias===old;}run();",
+    "ipcReads": 1,
+    "same": true,
+    "apiKeys": [
+      "run",
+      "outsideScope"
+    ],
+    "extraCallable": true,
+    "extraResult": true
+  },
+  {
+    "name": "do-break-skips-test",
+    "hasEnum": false,
+    "source": "const old={run(){}};const clean={run(){}};const box={api:old};async function run(){const info=await window.desktopApi.app.getInfo();do{if(info.hasEnum)break;}while((box.api=clean,false));const alias=box.api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:old});return alias===old;}run();",
+    "ipcReads": 1,
+    "same": false,
+    "apiKeys": [
+      "run"
+    ],
+    "extraCallable": false
+  },
+  {
+    "name": "do-break-skips-test",
+    "hasEnum": true,
+    "source": "const old={run(){}};const clean={run(){}};const box={api:old};async function run(){const info=await window.desktopApi.app.getInfo();do{if(info.hasEnum)break;}while((box.api=clean,false));const alias=box.api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:old});return alias===old;}run();",
+    "ipcReads": 1,
+    "same": true,
+    "apiKeys": [
+      "run",
+      "outsideScope"
+    ],
+    "extraCallable": true,
+    "extraResult": true
+  },
+  {
+    "name": "for-init-write-safe",
+    "hasEnum": false,
+    "source": "const old={run(){}};const clean={run(){}};const box={api:old};async function run(){const info=await window.desktopApi.app.getInfo();for(box.api=clean;false;){}const alias=box.api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:old});return alias===old;}run();",
+    "ipcReads": 1,
+    "same": false,
+    "apiKeys": [
+      "run"
+    ],
+    "extraCallable": false
+  },
+  {
+    "name": "for-init-write-safe",
+    "hasEnum": true,
+    "source": "const old={run(){}};const clean={run(){}};const box={api:old};async function run(){const info=await window.desktopApi.app.getInfo();for(box.api=clean;false;){}const alias=box.api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:old});return alias===old;}run();",
+    "ipcReads": 1,
+    "same": false,
+    "apiKeys": [
+      "run"
+    ],
+    "extraCallable": false
+  },
+  {
+    "name": "while-zero-body",
+    "hasEnum": false,
+    "source": "const old={run(){}};const clean={run(){}};const box={api:old};async function run(){const info=await window.desktopApi.app.getInfo();while(info.hasEnum){box.api=clean;break;}const alias=box.api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:old});return alias===old;}run();",
+    "ipcReads": 1,
+    "same": true,
+    "apiKeys": [
+      "run",
+      "outsideScope"
+    ],
+    "extraCallable": true,
+    "extraResult": true
+  },
+  {
+    "name": "while-zero-body",
+    "hasEnum": true,
+    "source": "const old={run(){}};const clean={run(){}};const box={api:old};async function run(){const info=await window.desktopApi.app.getInfo();while(info.hasEnum){box.api=clean;break;}const alias=box.api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:old});return alias===old;}run();",
+    "ipcReads": 1,
+    "same": false,
+    "apiKeys": [
+      "run"
+    ],
+    "extraCallable": false
+  }
+]

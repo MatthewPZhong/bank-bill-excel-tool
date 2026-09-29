@@ -9,12 +9,12 @@ const {
   locateSheets,
   readEntryAsString,
   WORKBOOK_ENTRY_NAME
-} = require('../big-table-import/zip-reader');
+} = require('../xlsx/zip-reader');
 const { scanSheetRows } = require('../big-table-import/row-scanner');
 const {
   loadSharedStringsProvider
-} = require('../position-reconciliation-import/shared-strings-provider');
-const { parseWorkbookXml } = require('../toolbox-format/xlsx-pass');
+} = require('../xlsx/shared-strings-provider');
+const { parseWorkbookXml } = require('../xlsx/workbook-parts');
 const {
   SOURCE_TYPES,
   SYSTEM_OP_HEADERS,
@@ -31,6 +31,8 @@ const {
   pendingHeaderMismatchDetails
 } = require('./pending-template-contract');
 
+const SST_MEMORY_BUDGET_BYTES = 64 * 1024 * 1024;
+const SST_LRU_MAX_ENTRIES = 8192;
 const PREVIEW_COLUMN_COUNT = 64;
 const PREVIEW_MEANINGFUL_ROWS = 220;
 
@@ -80,8 +82,10 @@ async function openWorkbookSheets(filePath, options = {}) {
     sharedStrings = await loadSharedStringsProvider(opened.zip, sharedStringsEntry, {
       sourceFile,
       tempRoot: sstTempRoot,
-      memoryBudgetBytes: options.sstMemoryBudgetBytes,
-      lruMaxEntries: options.sstLruMaxEntries
+      memoryBudgetBytes: options.sstMemoryBudgetBytes === undefined
+        ? SST_MEMORY_BUDGET_BYTES : options.sstMemoryBudgetBytes,
+      lruMaxEntries: options.sstLruMaxEntries === undefined
+        ? SST_LRU_MAX_ENTRIES : options.sstLruMaxEntries
     });
     let closed = false;
     return {

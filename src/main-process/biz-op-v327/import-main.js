@@ -2,7 +2,9 @@
 
 const fs = require('node:fs');
 const { randomUUID } = require('node:crypto');
-const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../execution-descriptors/composition');
 const { CELL_CONTRACT_VERSION, RULE_VERSION } = require('./import-adapter');
 const { readVerifiedManifest } = require('./payload-store');
 const { hash, fail, count } = require('./contracts');
@@ -23,11 +25,10 @@ function createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, prot
     if (typeof manifest.catalog.scanComplete !== 'boolean' || typeof manifest.catalog.errorCountExact !== 'boolean'
         || count(manifest.catalog.collectedSamples) > 1000 || count(manifest.catalog.sampleBytes) > 8388608
         || manifest.parts.length !== 1 || manifest.parts[0].byteSize !== manifest.catalog.sampleBytes) fail('BIZOP_REPORT_SUMMARY_MISMATCH');
-    const carriers = catalog.db.prepare('SELECT * FROM biz_op_v327_dispatches WHERE task_run_id=? AND plan_digest=?')
-      .all(taskRunId, manifest.catalog.producerPlanDigest);
+    const carriers = catalog.queries.readDispatchesForPlan(taskRunId, manifest.catalog.producerPlanDigest);
     if (carriers.length !== 1) fail('BIZOP_REPORT_OWNER_MISMATCH');
     const carrier = carriers[0];
-    const existing = catalog.db.prepare('SELECT * FROM biz_op_v327_diagnostic_reports WHERE report_ref=?').get(intent.reportRef);
+    const existing = catalog.queries.readDiagnosticByRef(intent.reportRef);
     if (existing) {
       if (existing.task_run_id !== taskRunId || existing.manifest_digest !== document.digest
           || existing.producer_job_id !== carrier.job_id || existing.producer_session_id !== carrier.session_id) fail('BIZOP_REPORT_OWNER_MISMATCH');
@@ -109,7 +110,7 @@ function createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, prot
                 || count(imported.scannedDataRows) !== count(imported.acceptedRows) + count(imported.rowErrorCount)
                 || count(imported.collectedSamples) > 1000 || count(imported.sampleBytes) > 8388608) fail('BIZOP_IMPORT_RESULT_MISMATCH');
             count(imported.fileErrorCount);
-            const registeredReport = catalog.db.prepare('SELECT manifest_digest FROM biz_op_v327_diagnostic_reports WHERE report_ref=?').get(reportRef);
+            const registeredReport = catalog.queries.readDiagnosticByRef(reportRef);
             if (!registeredReport || registeredReport.manifest_digest !== imported.reportManifestDigest) fail('BIZOP_REPORT_SUMMARY_MISMATCH');
             const summary = summaryOf(imported);
             if (imported.cancelled || imported.batchRejected || !imported.scanComplete || !imported.errorCountExact || imported.rowErrorCount || imported.fileErrorCount) {
@@ -141,7 +142,7 @@ function createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, prot
         if (taskRunId && catalog.receipt(taskRunId)) {
           sources.syncCompletion(sources.operationSource(taskRunId));
           // 成功批次的空诊断通过既有真实维护 Task 回收，不留下无主文件。
-          const report = catalog.db.prepare('SELECT * FROM biz_op_v327_diagnostic_reports WHERE report_ref=?').get(reportRef);
+          const report = catalog.queries.readDiagnosticByRef(reportRef);
           if (report && report.sample_count === 0) protection.retireDiagnostic(reportRef, taskRunId);
         } else if (taskRunId) admission.requireRecovery();
         return result;

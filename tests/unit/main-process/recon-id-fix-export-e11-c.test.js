@@ -35,12 +35,12 @@ const {
   normalizeFilePlanV1
 } = require('../../../src/main-process/archive-center/file-plan');
 const {
-  createBackgroundExecutionRuntime,
-  isBackgroundExecutionProductionEnabled
-} = require('../../../src/main-process/background-execution/runtime');
+  createBackgroundExecutionRuntime
+} = require('../../../src/main-process/execution-descriptors/composition');
 const {
-  createToolboxPublicationDispatcher
-} = require('../../../src/main-process/toolbox-output-publication-dispatch');
+  isBackgroundExecutionProductionEnabled
+} = require('../../../src/main-process/execution-descriptors/policy-catalog');
+const { createTestPublicationHarness } = require('../../helpers/publication-authority');
 const {
   createReconFixExportInput,
   generateValidateAndPublishReconFixExport
@@ -1321,6 +1321,7 @@ test('真实 journal Publisher 一次提交 main+unmatched 且保留原批次 re
     const filePlan = planFor(harness.root, 2);
     const stagingDirectory = path.join(harness.root, 'staging-journal-success');
     const userDataDir = path.join(harness.root, 'user-data');
+    const { dispatcher } = createTestPublicationHarness(userDataDir);
     fs.mkdirSync(stagingDirectory);
     const result = await generateValidateAndPublishReconFixExport({
       runtime: harness.runtime,
@@ -1333,7 +1334,9 @@ test('真实 journal Publisher 一次提交 main+unmatched 且保留原批次 re
       operationKey: 'journal-success',
       context: operationContext('journal-success'),
       batchContext: batchContext('journal-success'),
-      readCurrentEvidence: async () => currentEvidence(harness.run)
+      readCurrentEvidence: async () => currentEvidence(harness.run),
+      publishPublication: (payload) => dispatcher.publish({ ...payload,
+        requireArchiveHandoff: true, requireValidatedArtifacts: true })
     });
     assert.equal(result.publication.committed, true);
     assert.equal(result.publication.pendingArchiveHandoff, true);
@@ -1403,8 +1406,8 @@ test('双artifact Publisher kill后沿用journal recovery：未提交回滚、�
       const userDataDir = path.join(harness.root, `${label}-user-data`);
       const publisherBatchContext = batchContext(label);
       fs.mkdirSync(stagingDirectory, { recursive: true });
-      const dispatcher = createToolboxPublicationDispatcher({
-        workerScriptPath: CRASH_RECOVER_PUBLISHER
+      const { dispatcher } = createTestPublicationHarness(userDataDir, {
+        dispatcherOptions: { workerScriptPath: CRASH_RECOVER_PUBLISHER }
       });
       const execute = () => generateValidateAndPublishReconFixExport({
         runtime: harness.runtime,
@@ -1436,7 +1439,7 @@ test('双artifact Publisher kill后沿用journal recovery：未提交回滚、�
       } else {
         await assert.rejects(execute, (error) => {
           assert.equal(error.code, 'TOOLBOX_PUBLICATION_WORKER_FAILED');
-          assert.ok(error.detailLines.some((line) => line.includes('已执行自动恢复')));
+          assert.ok(error.detailLines.some((line) => line.includes('已执行授权恢复')));
           return true;
         });
         assert.equal(filePlan.outputs.every((output) => !fs.existsSync(output.filePath)), true);

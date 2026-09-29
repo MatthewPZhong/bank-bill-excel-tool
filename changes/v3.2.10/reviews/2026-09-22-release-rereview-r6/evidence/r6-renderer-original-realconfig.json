@@ -1,0 +1,53 @@
+[
+  {
+    "scanner": "WORKTREE",
+    "name": "static_member_replacement",
+    "source": "function provideReviewEnvelope(){return {api:{run(){}}};}const reviewEnvelope=provideReviewEnvelope();const reviewClean={run(){}};reviewEnvelope.api=reviewClean;const reviewOther=reviewEnvelope.api;reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewEnvelope.api});",
+    "baseViolations": 0,
+    "probeViolations": [
+      {
+        "rule": "ARCH-RENDERER-SCOPE",
+        "boundaryId": "renderer-bank-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 254,
+        "message": "scoped api 未授权字段 outsideScope",
+        "functionPath": null
+      }
+    ],
+    "boundaryCount": 20,
+    "runtime": {
+      "same": true,
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run",
+        "outsideScope"
+      ],
+      "whole": false,
+      "extraCallable": true,
+      "extraResult": true
+    }
+  },
+  {
+    "scanner": "WORKTREE",
+    "name": "detached_alias_safe",
+    "source": "function provideReviewEnvelope(){return {api:{run(){}}};}const reviewEnvelope=provideReviewEnvelope();const reviewOther=reviewEnvelope.api;reviewEnvelope.api={run(){}};reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewEnvelope.api});",
+    "baseViolations": 0,
+    "probeViolations": [],
+    "boundaryCount": 20,
+    "runtime": {
+      "same": false,
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run"
+      ],
+      "whole": false,
+      "extraCallable": false
+    }
+  }
+]

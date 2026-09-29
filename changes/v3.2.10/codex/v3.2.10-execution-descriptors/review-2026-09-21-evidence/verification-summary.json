@@ -1,0 +1,52 @@
+{
+  "result": "1 P2 finding; 1 non-blocking P3 compatibility finding",
+  "snapshot": "/private/tmp/execution-descriptors-review-20260921",
+  "base": "8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05",
+  "currentRun": {
+    "descriptorSuite": {
+      "tests": 73,
+      "pass": 73
+    },
+    "archiveRecoveryAdapterSuite": {
+      "tests": 82,
+      "pass": 82,
+      "overlapWithDescriptorSuite": 44
+    },
+    "uniqueUnitTests": 111,
+    "carrierIntegration": {
+      "pass": 4,
+      "total": 4
+    },
+    "manifest": {
+      "status": "PASS",
+      "surfaces": 402,
+      "pairs": 74,
+      "productionEnabled": 13
+    },
+    "gitDiffCheck": "PASS"
+  },
+  "probes": {
+    "authorityDrift": "Confirmed missing-runtime, production enablement and legacy-runtime registration accepted without baseline changes",
+    "archiveEquivalence": {
+      "policies": 268,
+      "comparisons": 227207,
+      "result": "PASS"
+    },
+    "runtimeMapping": {
+      "policies": 49,
+      "bindingDifferences": 0
+    },
+    "nonProductionDispatchHook": "Confirmed old reached worker adapter; new rejected CARRIER_DISPATCH_BINDING_REQUIRED"
+  },
+  "existingGate": "Source hashes and log hashes verified, not rerun in this review",
+  "notExecuted": [
+    "full release-check rerun",
+    "G8 configuration activation",
+    "Windows packaged carrier",
+    "Electron GUI",
+    "Excel/WPS",
+    "installer manual acceptance",
+    "real user data recovery"
+  ],
+  "sourceModifiedByReview": false
+}

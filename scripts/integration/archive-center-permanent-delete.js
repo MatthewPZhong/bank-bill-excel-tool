@@ -19,6 +19,8 @@ const { createArchiveRepository } = require('../../src/backend/database/archive-
 const { createArchiveRuntimeDelegate } = require('../../src/main-process/archive-center/archive-runtime-delegate');
 const { createArchiveStorageRootManager } = require('../../src/main-process/archive-center/storage-root-manager');
 const { recoverToolboxPublicationsIntoArchive } = require('../../src/main-process/toolbox-archive-recovery');
+const { createTestPublicationHarness } = require('../../tests/helpers/publication-authority');
+const { createArchivePublicationOwner } = require('../../src/main-process/publication-recovery/archive-owner');
 const { JOURNAL_INDEX_NAME } = require('../../src/main-process/toolbox-output-publication');
 const { verifyMigrationDeleteOverlap, verifyMigrationTargetIdentity } = require('../../tests/fixtures/archive-permanent-delete-migration');
 const { createMigrationCloseMetadataFs } = require('../../tests/fixtures/archive-migration-close-metadata');
@@ -138,17 +140,19 @@ async function recoverPublicationAfterRestart(mode) {
   const isolatedController = createArchiveCenterController({
     database: { getSetting: () => null, setSetting() {} }, service: isolatedService, outboxStore: isolatedOutbox
   });
+  const publication = createTestPublicationHarness(userDataDir, {
+    owners: [createArchivePublicationOwner({ getArchiveCenter: () => isolatedController })], ownerId: 'archive-publication' });
   try {
     assert.equal(isolatedService.repository.getOwnerTerminalCompletion(owner), null);
     assert.equal(isolatedOutbox.list().length, mode === 'vcc-nondurable' ? 1 : 0);
-    const recovered = await recoverToolboxPublicationsIntoArchive({ userDataDir, archiveCenter: isolatedController });
+    const recovered = await recoverToolboxPublicationsIntoArchive({ userDataDir, archiveCenter: isolatedController, recoverPublications: publication.recovery.recover });
     assert.ok(recovered.recovered.some((item) => item.taskId === evidence.taskId && item.action === 'commit-cleanup'));
     assert.equal((await isolatedController.initialize()).ok, true);
     assert.equal(isolatedOutbox.list().length, 0);
     assert.equal(isolatedService.repository.getTaskRun(owner.batchContext.taskRunId).status, 'succeeded');
     assert.ok(isolatedService.repository.getOwnerTerminalCompletion(owner));
     assert.equal(JSON.parse(fs.readFileSync(indexPath, 'utf8')).entries.length, 0);
-    assert.deepEqual((await recoverToolboxPublicationsIntoArchive({ userDataDir, archiveCenter: isolatedController })).recovered, []);
+    assert.deepEqual((await recoverToolboxPublicationsIntoArchive({ userDataDir, archiveCenter: isolatedController, recoverPublications: publication.recovery.recover })).recovered, []);
     const stat = readIdentityStatSync(fs, evidence.outputPath, 'statSync');
     assert.equal(String(stat.ino), evidence.ino, '恢复不得重新发布正式输出');
     assert.equal(stat.mtimeMs, evidence.mtimeMs);
@@ -403,16 +407,18 @@ async function legacyBatchWithUnfingerprintedBlob(key) {
       let acknowledged = false;
       const item = { action: 'commit-handoff-pending', taskId: key, batchContext,
         inputFiles: [{ filePath: sourcePath }], files: [] };
+      const observedSummary = (recovered, options) => ({ recovered, deferred: [], skippedActive: [],
+        observation: { complete: true, requestedTaskIds: options.taskIds || [], absentTaskIds: [] } });
       const recovery = await recoverToolboxPublicationsIntoArchive({ userDataDir: directory,
         archiveCenter: controller, recoverPublications: async (options) => {
           if (options.acknowledgedCommittedTaskIds) {
             if (options.deferCommittedFinalization) {
-              return { recovered: [{ taskId: key, action: 'commit-finalization-pending' }] };
+              return observedSummary([{ taskId: key, action: 'commit-finalization-pending' }], options);
             }
             acknowledged = true;
-            return { recovered: [{ taskId: key, action: 'commit-cleanup' }] };
+            return observedSummary([{ taskId: key, action: 'commit-cleanup' }], options);
           }
-          return { recovered: acknowledged ? [] : [item] };
+          return observedSummary(acknowledged ? [] : [item], options);
         } });
       assert.equal(recovery.recovered[0].action, 'commit-cleanup');
       assert.equal(acknowledged, true);

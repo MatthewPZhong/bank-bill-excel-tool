@@ -1,0 +1,66 @@
+{
+  "boundaryState": "active",
+  "injected": "  [options.entry].reduce(recoverOneJournal, options.runtime);",
+  "coverage": {
+    "scannedFiles": 765,
+    "parsedFiles": 765,
+    "literalEdges": 2405,
+    "workerEdges": 64,
+    "globalEdges": 59,
+    "unresolved": 2,
+    "dynamicSites": 33,
+    "parseErrors": 0
+  },
+  "violations": [],
+  "activeBoundaries": [
+    "publication-recovery-entry"
+  ],
+  "callbackCall": {
+    "line": 2512,
+    "column": 2,
+    "callee": "",
+    "method": "reduce",
+    "targets": []
+  },
+  "recoveryScopeReached": [
+    {
+      "path": "src/main-process/toolbox-output-publication.js",
+      "functionPath": "recoverOneJournal",
+      "mode": "exact",
+      "thread": "main"
+    },
+    {
+      "path": "src/main-process/toolbox-output-publication.js",
+      "functionPath": "recoverOneJournal",
+      "mode": "exact",
+      "thread": "worker"
+    }
+  ],
+  "nestedAllowedSites": [
+    {
+      "callee": "recoverPreparingIntent",
+      "line": 1907,
+      "evidenceId": "d3359118d9b5296f40e63216a98b2f0b5d655f5073bd6966bdb03f01f05c68fc"
+    },
+    {
+      "callee": "recoverPreparingIntent",
+      "line": 1910,
+      "evidenceId": "d9ee5947fed2c2494f0227d9dcb4170adf5c84a58c3e0a40fcd5ee88466f4c66"
+    },
+    {
+      "callee": "recoverFinalizingIntent",
+      "line": 1916,
+      "evidenceId": "23ff24a04ecb3593f36244c2a1c8ef4743d87c44d6377e1484230d488514ffea"
+    },
+    {
+      "callee": "recoverFinalizingIntent",
+      "line": 1923,
+      "evidenceId": "1a832603801cd7c0eaab8609e839055ca4370e37c23256fe393b8779167edceb"
+    },
+    {
+      "callee": "recoverPreparingIntent",
+      "line": 1939,
+      "evidenceId": "c5b63f1acce3e3ebc22a002939121dbe0920768a3689bc7e651e36ac22f1b72f"
+    }
+  ]
+}

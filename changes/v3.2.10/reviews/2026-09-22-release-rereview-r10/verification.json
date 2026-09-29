@@ -1,0 +1,69 @@
+{
+  "round": 10,
+  "result": "CHANGES_REQUESTED",
+  "scope": "Frozen dirty release/v3.2.10; R9 repair delta and bounded nearby combinations",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "frozenFiles": 4656,
+  "findings": [
+    {
+      "id": "RR10-01",
+      "priority": "P2",
+      "classification": "new-regression",
+      "file": "scripts/architecture/renderer-contracts.js",
+      "start": 425,
+      "end": 427,
+      "summary": "AND followed by OR/nullish preserves impossible undefined and falsely aliases the default object"
+    },
+    {
+      "id": "RR10-02",
+      "priority": "P2",
+      "classification": "pre-existing-gap",
+      "file": "scripts/architecture/renderer-contracts.js",
+      "start": 119,
+      "end": 128,
+      "summary": "Empty factory array expansion loses visible inserted object identity"
+    }
+  ],
+  "previousOriginalCasesClosed": [
+    "RR9-01",
+    "RR9-02"
+  ],
+  "architectureTests": {
+    "executedThisRound": true,
+    "exitCode": 0,
+    "tests": 482,
+    "pass": 482,
+    "fail": 0,
+    "skipped": 0
+  },
+  "architectureCLI": {
+    "executedThisRound": true,
+    "exitCode": 0,
+    "active": 31,
+    "diagnostics": 0,
+    "staleExceptions": 0,
+    "parsed": 765,
+    "scanned": 765
+  },
+  "fullGate": {
+    "executedThisRound": false,
+    "reusedFrom": "changes/v3.2.10/reviews/2026-09-22-release-r9-repair/verification.json",
+    "matchedInputs": 1706,
+    "unitPass": 9256,
+    "unitFail": 0,
+    "windowsSkips": 4,
+    "integrationScriptsPassed": 68,
+    "countedIntegrationChecks": 2901
+  },
+  "probeEvidence": "evidence/probe-verification.json",
+  "preservation": "evidence/preservation-final.json",
+  "notVerified": [
+    "GUI",
+    "Windows real machine",
+    "Excel/WPS",
+    "installed package",
+    "release readiness"
+  ],
+  "sourceChangesThisRound": false
+}

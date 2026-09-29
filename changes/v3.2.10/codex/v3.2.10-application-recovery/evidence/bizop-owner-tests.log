@@ -1,0 +1,26 @@
+✔ 当前平台内存公式得到零预算，真实共享恢复入口立即拒绝且不开始 I/O (1.463708ms)
+✔ 非零但不足的固定预算和槽位不足都不能排入永远无法满足的队列 (1.098375ms)
+✔ 已有队列时永久不足仍立即拒绝，不改变原队列或资源持有者 (1.363542ms)
+✔ 暂时竞争在 5 秒内释放后继续；拿到 lease 后不因等待期限到达而提前释放 (2.126125ms)
+✔ 排队满 5 秒后明确失败并移除；后来释放容量不会迟到执行或泄露 lease (0.487625ms)
+✔ 取消和 shutdown 保留原错误，零预算不掩盖已关闭或已取消的请求 (0.444791ms)
+✔ 真实已提交 BizOP receipt deferred：ACK_PENDING 前零 acknowledgement 写入和零 staging cleanup (3025.972541ms)
+✔ 真实已提交 BizOP receipt skippedActive：ACK_PENDING 前零 acknowledgement 写入和零 staging cleanup (2240.30625ms)
+✔ 真实已提交 BizOP receipt no-observation：ACK_PENDING 前零 acknowledgement 写入和零 staging cleanup (2416.319292ms)
+✔ 真实已提交 BizOP receipt forged-absence：ACK_PENDING 前零 acknowledgement 写入和零 staging cleanup (1918.446083ms)
+✔ 真实已提交 BizOP receipt non-finalized：ACK_PENDING 前零 acknowledgement 写入和零 staging cleanup (1752.409625ms)
+✔ BizOP reconcile 的明确 rolled-back 不要求额外 absence 证明 (1400.1615ms)
+✔ BizOP reconcile 的明确 cancelled 不要求额外 absence 证明 (1569.360334ms)
+✔ BizOP reconcile 的明确 cancelled-preparing 不要求额外 absence 证明 (1865.657041ms)
+✔ BizOP reconcile 的明确 cancelled-prepared 不要求额外 absence 证明 (1762.776791ms)
+✔ BizOP reconcile 空结果缺可信 absence 或 task deferred 都保留 UNKNOWN，不能记 NOT_COMMITTED (1920.873625ms)
+✔ 借用 observation 绑定本次 task/nonce/kind 和进入前 closure，真实恢复与 ack 不自阻塞、不二次申请 (2423.350917ms)
+✔ BizOP owner 需持久 binding/intent/exact-7，领域 HOLD 只 defer，未知与冲突零修改 (2490.409291ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 25094.8925

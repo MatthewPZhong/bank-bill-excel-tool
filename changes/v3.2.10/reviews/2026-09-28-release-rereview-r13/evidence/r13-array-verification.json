@@ -1,0 +1,244 @@
+{
+  "status": "PASS",
+  "fixtureCount": 14,
+  "beforeScanErrors": 10,
+  "currentScanErrors": 0,
+  "currentRejected": 8,
+  "currentAllowed": 6,
+  "conservativeRejections": 1,
+  "raw": {
+    "cmd": [
+      "/opt/homebrew/Cellar/node/25.8.0/bin/node",
+      "/private/tmp/r13-array-raw-helper-probe.cjs",
+      "minimal"
+    ],
+    "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+    "status": 0,
+    "signal": null,
+    "elapsedMs": 77
+  },
+  "setups": [
+    {
+      "name": "object-parameter-write-then-reorder",
+      "exactSetupInExistingTest": true
+    },
+    {
+      "name": "object-parameter-reorder-then-write",
+      "exactSetupInExistingTest": true
+    },
+    {
+      "name": "destructured-parameter-write-then-reorder",
+      "exactSetupInExistingTest": true
+    },
+    {
+      "name": "destructured-parameter-reorder-then-write",
+      "exactSetupInExistingTest": true
+    },
+    {
+      "name": "single-nested-helper-write-then-reorder",
+      "exactSetupInExistingTest": true
+    },
+    {
+      "name": "single-nested-helper-reorder-then-write",
+      "exactSetupInExistingTest": true
+    }
+  ],
+  "rows": [
+    {
+      "group": "original",
+      "name": "receiver-alias-reorder",
+      "safe": false,
+      "conservative": false,
+      "before": {
+        "diagnostics": 1
+      },
+      "current": {
+        "diagnostics": 1,
+        "same": true,
+        "extraCallable": true
+      }
+    },
+    {
+      "group": "original",
+      "name": "helper-reorder-after-write",
+      "safe": false,
+      "conservative": false,
+      "before": {
+        "scanError": "RangeError"
+      },
+      "current": {
+        "diagnostics": 1,
+        "same": true,
+        "extraCallable": true
+      }
+    },
+    {
+      "group": "original",
+      "name": "helper-write-and-reorder",
+      "safe": false,
+      "conservative": false,
+      "before": {
+        "scanError": "RangeError"
+      },
+      "current": {
+        "diagnostics": 1,
+        "same": true,
+        "extraCallable": true
+      }
+    },
+    {
+      "group": "original",
+      "name": "helper-reorder-before-write-safe",
+      "safe": true,
+      "conservative": false,
+      "before": {
+        "scanError": "RangeError"
+      },
+      "current": {
+        "diagnostics": 0,
+        "same": false,
+        "extraCallable": false
+      }
+    },
+    {
+      "group": "original",
+      "name": "overwritten-before-reorder-safe",
+      "safe": true,
+      "conservative": true,
+      "before": {
+        "diagnostics": 1
+      },
+      "current": {
+        "diagnostics": 1,
+        "same": false,
+        "extraCallable": false
+      }
+    },
+    {
+      "group": "original",
+      "name": "last-write-before-reorder",
+      "safe": false,
+      "conservative": false,
+      "before": {
+        "diagnostics": 1
+      },
+      "current": {
+        "diagnostics": 1,
+        "same": true,
+        "extraCallable": true
+      }
+    },
+    {
+      "group": "original",
+      "name": "helper-write-after-reorder-safe",
+      "safe": true,
+      "conservative": false,
+      "before": {
+        "scanError": "RangeError"
+      },
+      "current": {
+        "diagnostics": 0,
+        "same": false,
+        "extraCallable": false
+      }
+    },
+    {
+      "group": "original",
+      "name": "captured-before-later-reorder-safe",
+      "safe": true,
+      "conservative": false,
+      "before": {
+        "diagnostics": 0
+      },
+      "current": {
+        "diagnostics": 0,
+        "same": false,
+        "extraCallable": false
+      }
+    },
+    {
+      "group": "finite",
+      "name": "object-parameter-write-then-reorder",
+      "safe": false,
+      "conservative": false,
+      "before": {
+        "scanError": "RangeError"
+      },
+      "current": {
+        "diagnostics": 1,
+        "same": true,
+        "extraCallable": true
+      }
+    },
+    {
+      "group": "finite",
+      "name": "object-parameter-reorder-then-write",
+      "safe": true,
+      "conservative": false,
+      "before": {
+        "scanError": "RangeError"
+      },
+      "current": {
+        "diagnostics": 0,
+        "same": false,
+        "extraCallable": false
+      }
+    },
+    {
+      "group": "finite",
+      "name": "destructured-parameter-write-then-reorder",
+      "safe": false,
+      "conservative": false,
+      "before": {
+        "scanError": "RangeError"
+      },
+      "current": {
+        "diagnostics": 1,
+        "same": true,
+        "extraCallable": true
+      }
+    },
+    {
+      "group": "finite",
+      "name": "destructured-parameter-reorder-then-write",
+      "safe": true,
+      "conservative": false,
+      "before": {
+        "scanError": "RangeError"
+      },
+      "current": {
+        "diagnostics": 0,
+        "same": false,
+        "extraCallable": false
+      }
+    },
+    {
+      "group": "finite",
+      "name": "single-nested-helper-write-then-reorder",
+      "safe": false,
+      "conservative": false,
+      "before": {
+        "scanError": "RangeError"
+      },
+      "current": {
+        "diagnostics": 1,
+        "same": true,
+        "extraCallable": true
+      }
+    },
+    {
+      "group": "finite",
+      "name": "single-nested-helper-reorder-then-write",
+      "safe": true,
+      "conservative": false,
+      "before": {
+        "scanError": "RangeError"
+      },
+      "current": {
+        "diagnostics": 0,
+        "same": false,
+        "extraCallable": false
+      }
+    }
+  ]
+}

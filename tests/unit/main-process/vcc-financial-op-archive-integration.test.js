@@ -8,6 +8,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
 const XLSX = require('xlsx');
+const { createArchiveAwareOperationHarness } = require('../../helpers/archive-aware-operation-harness');
 
 const {
   ensureVccFinancialOpTablesSupport
@@ -17,7 +18,7 @@ const {
 } = require('../../../src/main-process/archive-center/task-lifecycle');
 const {
   createTaskPolicyRegistry
-} = require('../../../src/main-process/archive-center/task-policy-registry');
+} = require('../../../src/main-process/execution-descriptors/composition');
 const {
   createVccFinancialOpService
 } = require('../../../src/main-process/vcc-financial-op-service');
@@ -202,7 +203,7 @@ test('main 用冻结 FilePlan settle exact artifact 后才把 artifactId handoff
   assert.doesNotMatch(handlerSource, /prepared\.(?:filePath|filePaths|inputPaths)/);
 });
 
-test('VCC 四个 file action 统一走 FilePlan authority，三类输出以 receipt 结算全部 keys', () => {
+test('VCC 四个 file action 统一走 FilePlan authority，三类输出以 receipt 结算全部 keys', async () => {
   const mainSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main.js'), 'utf8');
   for (const channel of [
     'vccFinancialOp:import:apply',
@@ -240,9 +241,66 @@ test('VCC 四个 file action 统一走 FilePlan authority，三类输出以 rece
   assert.match(resultHandler, /expectedSubjects:\s*prepared\.subjects/);
 
   assert.doesNotMatch(mainSource, /atomicFileLifecycleChannels/);
-  assert.match(mainSource, /const useLegacyExistingBatchRecovery = prepared\.legacyExistingBatchRecovery === true/);
-  assert.match(mainSource, /archiveTaskLifecycle\.runDeferredFileTask/);
-  assert.match(mainSource, /archiveTaskLifecycle\.runFileTask/);
+  const settlementStart = mainSource.indexOf('async function settleVccOutputPublication(');
+  const settlementEnd = mainSource.indexOf('\nfunction reportArchiveFailure(', settlementStart);
+  assert.ok(settlementStart >= 0 && settlementEnd > settlementStart);
+  const settlePublication = Function(
+    `${mainSource.slice(settlementStart, settlementEnd)}\nreturn settleVccOutputPublication;`
+  )();
+  const filePlan = { inputs: [], outputs: [{ artifactKey: 'output-first' }, { artifactKey: 'output-second' }] };
+  const evidence = [{ sha256: 'a'.repeat(64), byteSize: 3 }, { sha256: 'b'.repeat(64), byteSize: 9 }];
+  const policyRegistry = createTaskPolicyRegistry();
+  for (const channel of [
+    'vccFinancialOp:import:apply', 'vccFinancialOp:data-manager:export',
+    'vccFinancialOp:export:import-audit', 'vccFinancialOp:export:result'
+  ]) {
+    const policy = policyRegistry.require(channel);
+    const output = channel !== 'vccFinancialOp:import:apply';
+    // eager 是现行 VCC producer；deferred/legacy 用来验证公共入口仍保留原选择能力。
+    for (const mode of ['eager', 'deferred', 'legacy']) {
+      const publicationTaskId = `${channel}:${mode}:publication`;
+      const publicationIds = [];
+      const calls = [];
+      const harness = createArchiveAwareOperationHarness({
+        channel,
+        policy: mode === 'deferred' ? { ...policy, allocation: 'deferred' } : policy,
+        controls: {
+          fileEvidence: { filePlan },
+          async settleArtifacts(payload) { calls.push(['settle', payload]); return { durable: true }; }
+        },
+        bindings: { acknowledgeToolboxPublicationReceipts(ids) { calls.push(['ack', ids.slice()]); } }
+      });
+      const result = await harness.run({
+        prepare: () => ({ proceed: true, vccOutputPublicationTaskIds: publicationIds, inputPaths: [],
+          ...(mode === 'legacy' ? { legacyExistingBatchRecovery: true } : {}),
+          afterTerminal() { calls.push(['prepared-hook']); } }),
+        async execute(_event, prepared, taskContext) {
+          assert.equal(taskContext.fileEvidence.filePlan, filePlan);
+          if (output) await settlePublication(prepared, taskContext, { taskId: publicationTaskId }, evidence);
+          return { status: 'success' };
+        }
+      });
+      assert.equal(result.status, 'success');
+      assert.equal(harness.counts.business, 1);
+      assert.equal(harness.lifecycleOptions[0].method,
+        mode === 'legacy' ? 'run' : mode === 'deferred' ? 'runDeferredFileTask' : 'runFileTask');
+      assert.equal(harness.lifecycleOptions[0].input.filePlanResolver === null, mode === 'legacy');
+      if (output) {
+        assert.deepEqual(calls, [
+          ['settle', { files: [
+            { artifactKey: 'output-first', expectedSha256: evidence[0].sha256, expectedSizeBytes: 3 },
+            { artifactKey: 'output-second', expectedSha256: evidence[1].sha256, expectedSizeBytes: 9 }
+          ] }],
+          ['ack', [publicationTaskId]]
+        ], `${channel}/${mode} 必须结算全部 artifact keys 后才调用 receipt hook`);
+        assert.deepEqual(publicationIds, [publicationTaskId]);
+      } else {
+        assert.deepEqual(calls, [['prepared-hook']], 'import 不是 publication-only，必须透传原 hook');
+        assert.deepEqual(publicationIds, []);
+      }
+    }
+  }
+
 });
 
 test('VCC calculate Task Run 建立失败时零 worker，成功时 exact5 贯穿并绑定 run identity', async (t) => {

@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
-const { openRichWorkbook } = require('../../backend/xlsx-rich-reader');
+const { openRichWorkbook } = require('../../backend/xlsx/rich-workbook');
 const { canonicalizeDecimal } = require('../financial-decimal');
 const { createEvidence } = require('./export-spool');
 const { NULL_CELL, evidenceIdentity } = require('./export-cells');
@@ -36,7 +36,7 @@ async function validateExportWorkbook({ filePath, source, expected, tempDirector
   if (!before.isFile() || before.isSymbolicLink()) fail('BIZOP_OUTPUT_FILE_INVALID');
   // 实际输出回读与原件读取分别拥有 SST 子目录，均不拥有候选目录和 spool。
   const workbook = await openRichWorkbook(filePath, { sstTempRoot: path.join(tempDirectory, `sst-actual-${randomUUID()}`),
-    memoryBudgetBytes: 32 * 1024 * 1024, cacheMaxBytes: 32 * 1024 * 1024, cancelToken, maxSheets: expected.pages.length });
+    memoryBudgetBytes: 32 * 1024 * 1024, lruMaxEntries: 8192, cacheMaxBytes: 32 * 1024 * 1024, cancelToken, maxSheets: expected.pages.length });
   const evidence = createEvidence(expected.identity);
   let dataRowCount = 0; let noteRowCount = 0;
   try {

@@ -1,0 +1,484 @@
+{
+  "result": "PASS",
+  "gate": {
+    "command": "UNIT_TEST_CONCURRENCY=1 npm run release-check",
+    "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+    "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+    "startedAt": "2026-09-22T01:45:20.363299+08:00",
+    "minimumFreeBytes": 5367279616,
+    "abortBelowFreeBytes": 2147483648,
+    "inputFiles": 1700,
+    "pid": 59148,
+    "exitCode": 0,
+    "finishedAt": "2026-09-22T02:09:31.249506+08:00",
+    "changedInputs": [],
+    "headAfter": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10"
+  },
+  "unit": {
+    "tests": 9015,
+    "suites": 828,
+    "pass": 9011,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 4,
+    "todo": 0
+  },
+  "integration": {
+    "scripts": 68,
+    "countedPassed": 2901,
+    "countedTotal": 2901,
+    "withoutCount": [
+      "v2.1.12-beta-multiworker-nested"
+    ],
+    "results": [
+      {
+        "name": "acquiring-bill-currency-idle-cleanup",
+        "passed": 38,
+        "total": 38,
+        "durationMs": 938
+      },
+      {
+        "name": "acquiring-bill-currency-n4-migration",
+        "passed": 128,
+        "total": 128,
+        "durationMs": 593
+      },
+      {
+        "name": "acquiring-engine-migration",
+        "passed": 45,
+        "total": 45,
+        "durationMs": 4966
+      },
+      {
+        "name": "acquiring-index-slim-v2",
+        "passed": 22,
+        "total": 22,
+        "durationMs": 213
+      },
+      {
+        "name": "acquiring-side-db-parity",
+        "passed": 19,
+        "total": 19,
+        "durationMs": 599
+      },
+      {
+        "name": "acquiring-worker-boundary",
+        "passed": 14,
+        "total": 14,
+        "durationMs": 563
+      },
+      {
+        "name": "application-recovery-governance",
+        "passed": 4,
+        "total": 4,
+        "durationMs": 782
+      },
+      {
+        "name": "archive-biz-op-auto-report-retention",
+        "passed": 6,
+        "total": 6,
+        "durationMs": 7509
+      },
+      {
+        "name": "archive-center-module-retention",
+        "passed": 11,
+        "total": 11,
+        "durationMs": 1569
+      },
+      {
+        "name": "archive-center-permanent-delete",
+        "passed": 52,
+        "total": 52,
+        "durationMs": 31277
+      },
+      {
+        "name": "background-execution-pure-compute-canary",
+        "passed": 9,
+        "total": 9,
+        "durationMs": 107
+      },
+      {
+        "name": "background-execution-recovery-canary",
+        "passed": 9,
+        "total": 9,
+        "durationMs": 119
+      },
+      {
+        "name": "background-execution-recovery-control",
+        "passed": 27,
+        "total": 27,
+        "durationMs": 298
+      },
+      {
+        "name": "bank-bu-background-dual-parser",
+        "passed": 9,
+        "total": 9,
+        "durationMs": 257
+      },
+      {
+        "name": "bank-bu-background-single-jobs",
+        "passed": 21,
+        "total": 21,
+        "durationMs": 520
+      },
+      {
+        "name": "bank-bu-recon-side-db-parity",
+        "passed": 17,
+        "total": 17,
+        "durationMs": 327
+      },
+      {
+        "name": "bank-statement-hit-scenario-report",
+        "passed": 49,
+        "total": 49,
+        "durationMs": 217
+      },
+      {
+        "name": "bank-statement-many-to-many-review-sheet",
+        "passed": 33,
+        "total": 33,
+        "durationMs": 211
+      },
+      {
+        "name": "bank-statement-universal-import-routing",
+        "passed": 20,
+        "total": 20,
+        "durationMs": 297
+      },
+      {
+        "name": "big-table-import-engine",
+        "passed": 19,
+        "total": 19,
+        "durationMs": 7607
+      },
+      {
+        "name": "biz-op-auto-error-report",
+        "passed": 12,
+        "total": 12,
+        "durationMs": 10402
+      },
+      {
+        "name": "biz-op-query-boundary",
+        "passed": 9,
+        "total": 9,
+        "durationMs": 7714
+      },
+      {
+        "name": "biz-op-recon-side-db-parity",
+        "passed": 16,
+        "total": 16,
+        "durationMs": 351
+      },
+      {
+        "name": "bizop-flow-engine-migration",
+        "passed": 73,
+        "total": 73,
+        "durationMs": 5304
+      },
+      {
+        "name": "dark-mode-schedule-settings",
+        "passed": 6,
+        "total": 6,
+        "durationMs": 216
+      },
+      {
+        "name": "duplicate-inbound-match-end-to-end",
+        "passed": 31,
+        "total": 31,
+        "durationMs": 376
+      },
+      {
+        "name": "execution-descriptor-governance",
+        "passed": 4,
+        "total": 4,
+        "durationMs": 922
+      },
+      {
+        "name": "fund-transfer-recon-account-mapping",
+        "passed": 19,
+        "total": 19,
+        "durationMs": 205
+      },
+      {
+        "name": "gateway-channel-filter-equivalence",
+        "passed": 23,
+        "total": 23,
+        "durationMs": 211
+      },
+      {
+        "name": "linked-fx-open7-stale-hit-e2e",
+        "passed": 27,
+        "total": 27,
+        "durationMs": 203
+      },
+      {
+        "name": "linked-table-delete-by-range-tablekey",
+        "passed": 73,
+        "total": 73,
+        "durationMs": 206
+      },
+      {
+        "name": "new-account-balance-statement",
+        "passed": 36,
+        "total": 36,
+        "durationMs": 249
+      },
+      {
+        "name": "pending-data-reconciliation",
+        "passed": 33,
+        "total": 33,
+        "durationMs": 53
+      },
+      {
+        "name": "pending-engine-migration",
+        "passed": 57,
+        "total": 57,
+        "durationMs": 5257
+      },
+      {
+        "name": "pending-removal-reconcile",
+        "passed": 62,
+        "total": 62,
+        "durationMs": 204
+      },
+      {
+        "name": "position-reconciliation-side-db-parity",
+        "passed": 38,
+        "total": 38,
+        "durationMs": 264
+      },
+      {
+        "name": "position-startup-task-recovery",
+        "passed": 3,
+        "total": 3,
+        "durationMs": 2351
+      },
+      {
+        "name": "pre-fund-reconciliation-output-contract",
+        "passed": 15,
+        "total": 15,
+        "durationMs": 277
+      },
+      {
+        "name": "pre-fund-reconciliation-side-db-parity",
+        "passed": 69,
+        "total": 69,
+        "durationMs": 329
+      },
+      {
+        "name": "refund-backfill-yellow-fill-e2e",
+        "passed": 258,
+        "total": 258,
+        "durationMs": 203
+      },
+      {
+        "name": "renderer-lifecycle",
+        "passed": 233,
+        "total": 233,
+        "durationMs": 20865
+      },
+      {
+        "name": "shared-xlsx-boundary",
+        "passed": 51,
+        "total": 51,
+        "durationMs": 3285
+      },
+      {
+        "name": "statement-generation-pipeline",
+        "passed": 45,
+        "total": 45,
+        "durationMs": 276
+      },
+      {
+        "name": "task-adapter-recovery",
+        "passed": 4,
+        "total": 4,
+        "durationMs": 557
+      },
+      {
+        "name": "toolbox-large-file-stream",
+        "passed": 50,
+        "total": 50,
+        "durationMs": 139533
+      },
+      {
+        "name": "toolbox-large-split-multi-sheet",
+        "passed": 31,
+        "total": 31,
+        "durationMs": 256824
+      },
+      {
+        "name": "toolbox-multi-sheet-merge",
+        "passed": 16,
+        "total": 16,
+        "durationMs": 14742
+      },
+      {
+        "name": "toolbox-multi-split-roundtrip",
+        "passed": 17,
+        "total": 17,
+        "durationMs": 532
+      },
+      {
+        "name": "toolbox-roundtrip",
+        "passed": 30,
+        "total": 30,
+        "durationMs": 183
+      },
+      {
+        "name": "toolbox-row-split-admission",
+        "passed": 2,
+        "total": 2,
+        "durationMs": 870
+      },
+      {
+        "name": "toolbox-row-split-archive-delete",
+        "passed": 2,
+        "total": 2,
+        "durationMs": 1073
+      },
+      {
+        "name": "v2.1.10-a3-phase1",
+        "passed": 40,
+        "total": 40,
+        "durationMs": 2896
+      },
+      {
+        "name": "v2.1.10-a3-phase2",
+        "passed": 56,
+        "total": 56,
+        "durationMs": 2092
+      },
+      {
+        "name": "v2.1.10-a4-phase3",
+        "passed": 75,
+        "total": 75,
+        "durationMs": 15041
+      },
+      {
+        "name": "v2.1.10-n4-cont-1-phase4",
+        "passed": 33,
+        "total": 33,
+        "durationMs": 926
+      },
+      {
+        "name": "v2.1.10-n4-cont-2-phase5",
+        "passed": 43,
+        "total": 43,
+        "durationMs": 614
+      },
+      {
+        "name": "v2.1.12-beta-multiworker-nested",
+        "passed": null,
+        "total": null,
+        "durationMs": 2860
+      },
+      {
+        "name": "v2.1.9-n5-end-to-end",
+        "passed": 68,
+        "total": 68,
+        "durationMs": 238
+      },
+      {
+        "name": "v2.1.9-n5-migration",
+        "passed": 67,
+        "total": 67,
+        "durationMs": 235
+      },
+      {
+        "name": "v2.1.9-sr-fix-1-coverage",
+        "passed": 148,
+        "total": 148,
+        "durationMs": 264
+      },
+      {
+        "name": "v2.1.9-sr-log-1",
+        "passed": 33,
+        "total": 33,
+        "durationMs": 208
+      },
+      {
+        "name": "v3.0.0-linked-streaming-import",
+        "passed": 19,
+        "total": 19,
+        "durationMs": 266
+      },
+      {
+        "name": "v3.0.1-linked-gateway-upsert",
+        "passed": 40,
+        "total": 40,
+        "durationMs": 261
+      },
+      {
+        "name": "v3.0.4-boc-dispatch-order-fix",
+        "passed": 31,
+        "total": 31,
+        "durationMs": 290
+      },
+      {
+        "name": "vcc-financial-op-adjustment-archive-chain",
+        "passed": 226,
+        "total": 226,
+        "durationMs": 1293
+      },
+      {
+        "name": "vcc-financial-op-destructive-state-chain",
+        "passed": 77,
+        "total": 77,
+        "durationMs": 1491
+      },
+      {
+        "name": "vcc-financial-op-effective-result",
+        "passed": 19,
+        "total": 19,
+        "durationMs": 139
+      },
+      {
+        "name": "vcc-financial-op-historical-template-export",
+        "passed": 29,
+        "total": 29,
+        "durationMs": 1078
+      }
+    ]
+  },
+  "architecture": {
+    "testsPassed": 237,
+    "active": 31,
+    "diagnostics": 0,
+    "stale": 0,
+    "newRegressions": 33,
+    "parsedProductionFiles": 765
+  },
+  "preservation": {
+    "initial": {
+      "files": 4106,
+      "changed": [
+        "architecture/README.md",
+        "changes/v3.2.10/README.md",
+        "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md",
+        "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md",
+        "changes/v3.2.10/release.md",
+        "rules/integration-test-policy.md",
+        "scripts/architecture/contracts.js",
+        "scripts/architecture/renderer-contracts.js",
+        "scripts/architecture/rules.js",
+        "scripts/architecture/scan.js"
+      ]
+    },
+    "production": {
+      "files": 792,
+      "changed": []
+    },
+    "historicalReviews": {
+      "files": 135,
+      "changed": []
+    },
+    "primaryDirty": {
+      "files": 865,
+      "changed": []
+    },
+    "primaryHead": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+    "releaseHead": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+    "unexpectedChanges": []
+  }
+}

@@ -1,0 +1,78 @@
+   138	  const contains = (outer, inner) => outer && inner && outer.start <= inner.start && inner.end <= outer.end;
+   139	  const loopTypes = new Set(['DoWhileStatement', 'WhileStatement', 'ForStatement', 'ForOfStatement', 'ForInStatement']);
+   140	  const jumpsByAnalysis = new WeakMap();
+   141	  const bypassJumps = analysis => {
+   142	    if (jumpsByAnalysis.has(analysis)) return jumpsByAnalysis.get(analysis);
+   143	    const jumps = [];
+   144	    for (const node of analysis.nodes) {
+   145	      if (!['BreakStatement', 'ContinueStatement'].includes(node.type)) continue;
+   146	      let target; let reachable = true;
+   147	      for (let child = node, parent = analysis.parents.get(child);
+   148	        parent && !analysis.functionNodesByStart.has(parent.start); child = parent, parent = analysis.parents.get(parent)) {
+   149	        if (!target) {
+   150	          if (node.label) {
+   151	            if (parent.type === 'LabeledStatement' && parent.label.name === node.label.name) {
+   152	              target = parent;
+   153	              if (node.type === 'ContinueStatement') while (target.type === 'LabeledStatement') target = target.body;
+   154	            }
+   155	          } else if (loopTypes.has(parent.type) || (node.type === 'BreakStatement' && parent.type === 'SwitchStatement')) target = parent;
+   156	        }
+   157	        if (parent.type === 'IfStatement') {
+   158	          const test = analysis.describe(parent.test);
+   159	          if (test.kind === 'literal' && child !== (test.value ? parent.consequent : parent.alternate)) reachable = false;
+   160	        } else if (['WhileStatement', 'ForStatement'].includes(parent.type) && child === parent.body && parent.test) {
+   161	          const test = analysis.describe(parent.test);
+   162	          if (test.kind === 'literal' && !test.value) reachable = false;
+   163	        }
+   164	      }
+   165	      // break 越过整个目标；continue 只跳过目标循环的剩余 body，do 的 test 仍会执行。
+   166	      if (target && reachable) jumps.push({ node, scope: node.type === 'ContinueStatement' ? target.body : target });
+   167	    }
+   168	    jumpsByAnalysis.set(analysis, jumps);
+   169	    return jumps;
+   170	  };
+   171	  const skippedByJump = (write, read, analysis) => {
+   172	    const skips = (jump, node) => {
+   173	      if (!contains(jump.scope, node)) return false;
+   174	      // 离开 try/catch 的跳转仍先执行 finally；finally 自身的跳转则能跳过其中后续语句。
+   175	      for (let parent = analysis.parents.get(node); parent; parent = analysis.parents.get(parent)) {
+   176	        if (analysis.functionNodesByStart.has(parent.start)) break;
+   177	        if (parent.type === 'TryStatement' && contains(parent.finalizer, node) &&
+   178	            contains(parent, jump.node) && !contains(parent.finalizer, jump.node)) return false;
+   179	      }
+   180	      return true;
+   181	    };
+   182	    return bypassJumps(analysis).some(jump => jump.node.end <= write.start &&
+   183	      analysis.functionPath(jump.node) === analysis.functionPath(write) && skips(jump, write) && !skips(jump, read));
+   184	  };
+   185	  const conditionalWrite = (write, read, analysis, writeEnv, readEnv) => {
+   186	    const reads = executionPositions(read, analysis, readEnv);
+   187	    // 唯一调用位置只提供顺序，不证明执行。沿实际帧及静态 helper 调用逐层保留条件性。
+   188	    for (const atWrite of executionPositions(write, analysis, writeEnv)) {
+   189	      const atRead = reads.find(node => analysis.functionPath(node) === analysis.functionPath(atWrite));
+   190	      if (skippedByJump(atWrite, atRead, analysis)) return true;
+   191	      for (let child = atWrite, parent = analysis.parents.get(child);
+   192	        parent && !analysis.functionNodesByStart.has(parent.start); child = parent, parent = analysis.parents.get(parent)) {
+   193	        let conditional = false;
+   194	        if (parent.type === 'IfStatement' || parent.type === 'ConditionalExpression') {
+   195	          const test = analysis.describe(parent.test);
+   196	          conditional = child !== parent.test && !(test.kind === 'literal' &&
+   197	            child === (test.value ? parent.consequent : parent.alternate));
+   198	        } else if (parent.type === 'LogicalExpression' && child === parent.right) {
+   199	          const left = analysis.describe(parent.left);
+   200	          const selected = left.kind === 'literal' && (parent.operator === '&&' ? Boolean(left.value)
+   201	            : parent.operator === '||' ? !left.value : left.value == null);
+   202	          conditional = !selected;
+   203	        } else if (parent.type === 'SwitchStatement') conditional = child !== parent.discriminant;
+   204	        else if (parent.type === 'ForStatement') conditional = child === parent.body || child === parent.update;
+   205	        else if (parent.type === 'ForOfStatement' || parent.type === 'ForInStatement') conditional = child !== parent.right;
+   206	        else if (parent.type === 'WhileStatement') conditional = child === parent.body;
+   207	        else if (parent.type === 'CatchClause') conditional = true;
+   208	        // 进入 do 首轮只证明进入 body；上方另行核对能否到达具体写入或调用位置。
+   209	        // 初始化、条件测试、可迭代值及已证明选中的字面量分支不因外壳而变成可跳过。
+   210	        // 若读写处于同一已进入分支，外层是否执行不影响本次读取时的覆盖事实。
+   211	        if (conditional && !(atRead && child.start <= atRead.start && child.end >= atRead.end)) return true;
+   212	      }
+   213	      if (atRead) return false;
+   214	    }
+   215	    return true;

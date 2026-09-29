@@ -1,0 +1,821 @@
+{
+  "result": "PASS",
+  "scope": "RR10-01/02 and the listed adjacent regressions only; not arbitrary JavaScript, all G8 contracts, or release/platform acceptance",
+  "executionContext": "outside filesystem sandbox; isolated test fixtures",
+  "expectedCounts": {
+    "newRegressions": 84,
+    "beforePass": 46,
+    "beforeFail": 38,
+    "architectureTests": 566,
+    "unitPass": 9340,
+    "unitSkip": 4,
+    "gateInputs": 1707,
+    "integrationScripts": 68,
+    "rendererLifecycle": 233,
+    "existingFiles": 4710,
+    "primaryDirtyFiles": 865,
+    "plannedExistingChanges": 7
+  },
+  "gate": {
+    "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+    "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+    "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+    "startedAt": "2026-09-23T02:53:40.278451+08:00",
+    "minimumFreeBytes": 10861117440,
+    "abortBelowFreeBytes": 2147483648,
+    "inputFiles": 1707,
+    "pid": 40821,
+    "exitCode": 0,
+    "finishedAt": "2026-09-23T03:14:31.220091+08:00",
+    "changedInputs": [],
+    "headAfter": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10"
+  },
+  "supersededGate": {
+    "result": "INTERRUPTED",
+    "exitCode": -15,
+    "reason": "Stopped for a confirmed remaining merge-identity issue before freezing the final checker",
+    "evidence": "preliminary-release-check-result.json"
+  },
+  "unit": {
+    "tests": 9344,
+    "suites": 828,
+    "pass": 9340,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 4,
+    "todo": 0
+  },
+  "architectureTests": {
+    "tests": 566,
+    "suites": 0,
+    "pass": 566,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "architecture": {
+    "active": 31,
+    "diagnostics": 0,
+    "stale": 0,
+    "parsedFiles": 765,
+    "scannedFiles": 765
+  },
+  "newRegressions": {
+    "tests": 84,
+    "suites": 0,
+    "pass": 84,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "regressionsBefore": {
+    "tests": 84,
+    "suites": 0,
+    "pass": 46,
+    "fail": 38,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "windowsSkips": [
+    "﹣ Windows CI 真实 PowerShell snapshot→token cleanup 语义 (0.054459ms) # SKIP",
+    "﹣ Windows PowerShell 采集器使用原始 CIM 枚举并完整遍历真实文件祖先 (0.228833ms) # 需要 Windows PowerShell；受控 Storage 对象不代替真实 CIM 查询",
+    "﹣ Windows packaged canary 对报告前已退出进程快速返回专用 safe code (0.052125ms) # SKIP",
+    "﹣ Windows packaged canary 的 Setup 失败诊断仅返回固定退出/落地/身份枚举 (0.034417ms) # SKIP"
+  ],
+  "integration": {
+    "scripts": 68,
+    "countedPassed": 2901,
+    "countedTotal": 2901,
+    "withoutCount": [
+      "v2.1.12-beta-multiworker-nested"
+    ],
+    "results": [
+      {
+        "name": "acquiring-bill-currency-idle-cleanup",
+        "passed": 38,
+        "total": 38,
+        "durationMs": 800
+      },
+      {
+        "name": "acquiring-bill-currency-n4-migration",
+        "passed": 128,
+        "total": 128,
+        "durationMs": 532
+      },
+      {
+        "name": "acquiring-engine-migration",
+        "passed": 45,
+        "total": 45,
+        "durationMs": 4770
+      },
+      {
+        "name": "acquiring-index-slim-v2",
+        "passed": 22,
+        "total": 22,
+        "durationMs": 186
+      },
+      {
+        "name": "acquiring-side-db-parity",
+        "passed": 19,
+        "total": 19,
+        "durationMs": 552
+      },
+      {
+        "name": "acquiring-worker-boundary",
+        "passed": 14,
+        "total": 14,
+        "durationMs": 536
+      },
+      {
+        "name": "application-recovery-governance",
+        "passed": 4,
+        "total": 4,
+        "durationMs": 751
+      },
+      {
+        "name": "archive-biz-op-auto-report-retention",
+        "passed": 6,
+        "total": 6,
+        "durationMs": 7258
+      },
+      {
+        "name": "archive-center-module-retention",
+        "passed": 11,
+        "total": 11,
+        "durationMs": 1504
+      },
+      {
+        "name": "archive-center-permanent-delete",
+        "passed": 52,
+        "total": 52,
+        "durationMs": 29743
+      },
+      {
+        "name": "background-execution-pure-compute-canary",
+        "passed": 9,
+        "total": 9,
+        "durationMs": 109
+      },
+      {
+        "name": "background-execution-recovery-canary",
+        "passed": 9,
+        "total": 9,
+        "durationMs": 120
+      },
+      {
+        "name": "background-execution-recovery-control",
+        "passed": 27,
+        "total": 27,
+        "durationMs": 296
+      },
+      {
+        "name": "bank-bu-background-dual-parser",
+        "passed": 9,
+        "total": 9,
+        "durationMs": 264
+      },
+      {
+        "name": "bank-bu-background-single-jobs",
+        "passed": 21,
+        "total": 21,
+        "durationMs": 512
+      },
+      {
+        "name": "bank-bu-recon-side-db-parity",
+        "passed": 17,
+        "total": 17,
+        "durationMs": 301
+      },
+      {
+        "name": "bank-statement-hit-scenario-report",
+        "passed": 49,
+        "total": 49,
+        "durationMs": 207
+      },
+      {
+        "name": "bank-statement-many-to-many-review-sheet",
+        "passed": 33,
+        "total": 33,
+        "durationMs": 207
+      },
+      {
+        "name": "bank-statement-universal-import-routing",
+        "passed": 20,
+        "total": 20,
+        "durationMs": 276
+      },
+      {
+        "name": "big-table-import-engine",
+        "passed": 19,
+        "total": 19,
+        "durationMs": 7616
+      },
+      {
+        "name": "biz-op-auto-error-report",
+        "passed": 12,
+        "total": 12,
+        "durationMs": 10028
+      },
+      {
+        "name": "biz-op-query-boundary",
+        "passed": 9,
+        "total": 9,
+        "durationMs": 7642
+      },
+      {
+        "name": "biz-op-recon-side-db-parity",
+        "passed": 16,
+        "total": 16,
+        "durationMs": 310
+      },
+      {
+        "name": "bizop-flow-engine-migration",
+        "passed": 73,
+        "total": 73,
+        "durationMs": 5162
+      },
+      {
+        "name": "dark-mode-schedule-settings",
+        "passed": 6,
+        "total": 6,
+        "durationMs": 195
+      },
+      {
+        "name": "duplicate-inbound-match-end-to-end",
+        "passed": 31,
+        "total": 31,
+        "durationMs": 348
+      },
+      {
+        "name": "execution-descriptor-governance",
+        "passed": 4,
+        "total": 4,
+        "durationMs": 890
+      },
+      {
+        "name": "fund-transfer-recon-account-mapping",
+        "passed": 19,
+        "total": 19,
+        "durationMs": 181
+      },
+      {
+        "name": "gateway-channel-filter-equivalence",
+        "passed": 23,
+        "total": 23,
+        "durationMs": 188
+      },
+      {
+        "name": "linked-fx-open7-stale-hit-e2e",
+        "passed": 27,
+        "total": 27,
+        "durationMs": 182
+      },
+      {
+        "name": "linked-table-delete-by-range-tablekey",
+        "passed": 73,
+        "total": 73,
+        "durationMs": 183
+      },
+      {
+        "name": "new-account-balance-statement",
+        "passed": 36,
+        "total": 36,
+        "durationMs": 231
+      },
+      {
+        "name": "pending-data-reconciliation",
+        "passed": 33,
+        "total": 33,
+        "durationMs": 49
+      },
+      {
+        "name": "pending-engine-migration",
+        "passed": 57,
+        "total": 57,
+        "durationMs": 5127
+      },
+      {
+        "name": "pending-removal-reconcile",
+        "passed": 62,
+        "total": 62,
+        "durationMs": 202
+      },
+      {
+        "name": "position-reconciliation-side-db-parity",
+        "passed": 38,
+        "total": 38,
+        "durationMs": 257
+      },
+      {
+        "name": "position-startup-task-recovery",
+        "passed": 3,
+        "total": 3,
+        "durationMs": 2260
+      },
+      {
+        "name": "pre-fund-reconciliation-output-contract",
+        "passed": 15,
+        "total": 15,
+        "durationMs": 268
+      },
+      {
+        "name": "pre-fund-reconciliation-side-db-parity",
+        "passed": 69,
+        "total": 69,
+        "durationMs": 315
+      },
+      {
+        "name": "refund-backfill-yellow-fill-e2e",
+        "passed": 258,
+        "total": 258,
+        "durationMs": 195
+      },
+      {
+        "name": "renderer-lifecycle",
+        "passed": 233,
+        "total": 233,
+        "durationMs": 20640
+      },
+      {
+        "name": "shared-xlsx-boundary",
+        "passed": 51,
+        "total": 51,
+        "durationMs": 3212
+      },
+      {
+        "name": "statement-generation-pipeline",
+        "passed": 45,
+        "total": 45,
+        "durationMs": 236
+      },
+      {
+        "name": "task-adapter-recovery",
+        "passed": 4,
+        "total": 4,
+        "durationMs": 540
+      },
+      {
+        "name": "toolbox-large-file-stream",
+        "passed": 50,
+        "total": 50,
+        "durationMs": 135104
+      },
+      {
+        "name": "toolbox-large-split-multi-sheet",
+        "passed": 31,
+        "total": 31,
+        "durationMs": 255999
+      },
+      {
+        "name": "toolbox-multi-sheet-merge",
+        "passed": 16,
+        "total": 16,
+        "durationMs": 14977
+      },
+      {
+        "name": "toolbox-multi-split-roundtrip",
+        "passed": 17,
+        "total": 17,
+        "durationMs": 474
+      },
+      {
+        "name": "toolbox-roundtrip",
+        "passed": 30,
+        "total": 30,
+        "durationMs": 181
+      },
+      {
+        "name": "toolbox-row-split-admission",
+        "passed": 2,
+        "total": 2,
+        "durationMs": 833
+      },
+      {
+        "name": "toolbox-row-split-archive-delete",
+        "passed": 2,
+        "total": 2,
+        "durationMs": 1045
+      },
+      {
+        "name": "v2.1.10-a3-phase1",
+        "passed": 40,
+        "total": 40,
+        "durationMs": 2665
+      },
+      {
+        "name": "v2.1.10-a3-phase2",
+        "passed": 56,
+        "total": 56,
+        "durationMs": 1908
+      },
+      {
+        "name": "v2.1.10-a4-phase3",
+        "passed": 75,
+        "total": 75,
+        "durationMs": 14384
+      },
+      {
+        "name": "v2.1.10-n4-cont-1-phase4",
+        "passed": 33,
+        "total": 33,
+        "durationMs": 692
+      },
+      {
+        "name": "v2.1.10-n4-cont-2-phase5",
+        "passed": 43,
+        "total": 43,
+        "durationMs": 588
+      },
+      {
+        "name": "v2.1.12-beta-multiworker-nested",
+        "passed": null,
+        "total": null,
+        "durationMs": 2832
+      },
+      {
+        "name": "v2.1.9-n5-end-to-end",
+        "passed": 68,
+        "total": 68,
+        "durationMs": 222
+      },
+      {
+        "name": "v2.1.9-n5-migration",
+        "passed": 67,
+        "total": 67,
+        "durationMs": 197
+      },
+      {
+        "name": "v2.1.9-sr-fix-1-coverage",
+        "passed": 148,
+        "total": 148,
+        "durationMs": 273
+      },
+      {
+        "name": "v2.1.9-sr-log-1",
+        "passed": 33,
+        "total": 33,
+        "durationMs": 148
+      },
+      {
+        "name": "v3.0.0-linked-streaming-import",
+        "passed": 19,
+        "total": 19,
+        "durationMs": 225
+      },
+      {
+        "name": "v3.0.1-linked-gateway-upsert",
+        "passed": 40,
+        "total": 40,
+        "durationMs": 231
+      },
+      {
+        "name": "v3.0.4-boc-dispatch-order-fix",
+        "passed": 31,
+        "total": 31,
+        "durationMs": 256
+      },
+      {
+        "name": "vcc-financial-op-adjustment-archive-chain",
+        "passed": 226,
+        "total": 226,
+        "durationMs": 1286
+      },
+      {
+        "name": "vcc-financial-op-destructive-state-chain",
+        "passed": 77,
+        "total": 77,
+        "durationMs": 1467
+      },
+      {
+        "name": "vcc-financial-op-effective-result",
+        "passed": 19,
+        "total": 19,
+        "durationMs": 131
+      },
+      {
+        "name": "vcc-financial-op-historical-template-export",
+        "passed": 29,
+        "total": 29,
+        "durationMs": 1075
+      }
+    ]
+  },
+  "probes": {
+    "result": "PASS",
+    "beforeVersion": "2026-09-23-release-r10-repair/input-manifest.json",
+    "meaning": "RR10-01/02 bounded logical and factory-array probes meet their expected static diagnostics and VM identity checks; this does not establish arbitrary JavaScript coverage or product/platform acceptance.",
+    "rendererBoundaries": 20,
+    "realAstCases": 6,
+    "realAstLogicalCases": 2,
+    "realAstArrayCases": 4,
+    "realAstBaselineDiagnostics": 0,
+    "logicalCases": {
+      "count": 8,
+      "falsePositivesClosed": 2,
+      "cases": [
+        {
+          "name": "preload-alias-narrow",
+          "safe": true,
+          "beforeDiagnostics": 0,
+          "currentDiagnostics": 0,
+          "runtimeSameObject": false
+        },
+        {
+          "name": "preload-alias-whole",
+          "safe": false,
+          "beforeDiagnostics": 1,
+          "currentDiagnostics": 1,
+          "runtimeSameObject": true
+        },
+        {
+          "name": "preload-nested-ipc-and",
+          "safe": false,
+          "beforeDiagnostics": 1,
+          "currentDiagnostics": 1,
+          "runtimeSameObject": true
+        },
+        {
+          "name": "forwarded-ipc-and",
+          "safe": false,
+          "beforeDiagnostics": 1,
+          "currentDiagnostics": 1,
+          "runtimeSameObject": true
+        },
+        {
+          "name": "and-or-provided",
+          "safe": true,
+          "beforeDiagnostics": 1,
+          "currentDiagnostics": 0,
+          "runtimeSameObject": false
+        },
+        {
+          "name": "and-nullish-provided",
+          "safe": true,
+          "beforeDiagnostics": 1,
+          "currentDiagnostics": 0,
+          "runtimeSameObject": false
+        },
+        {
+          "name": "and-or-shared",
+          "safe": false,
+          "beforeDiagnostics": 1,
+          "currentDiagnostics": 1,
+          "runtimeSameObject": true
+        },
+        {
+          "name": "or-provided-control",
+          "safe": true,
+          "beforeDiagnostics": 0,
+          "currentDiagnostics": 0,
+          "runtimeSameObject": false
+        }
+      ]
+    },
+    "arrayCases": {
+      "count": 7,
+      "sourceLossCasesClosed": 2,
+      "cases": [
+        {
+          "name": "factory-empty-extended",
+          "safe": false,
+          "beforeDiagnostics": 0,
+          "currentDiagnostics": 1,
+          "runtimeSameObject": true
+        },
+        {
+          "name": "factory-initial-replaced",
+          "safe": false,
+          "beforeDiagnostics": 1,
+          "currentDiagnostics": 1,
+          "runtimeSameObject": true
+        },
+        {
+          "name": "factory-empty-pushed",
+          "safe": false,
+          "beforeDiagnostics": 0,
+          "currentDiagnostics": 1,
+          "runtimeSameObject": true
+        },
+        {
+          "name": "helper-source-extension",
+          "safe": false,
+          "beforeDiagnostics": 1,
+          "currentDiagnostics": 1,
+          "runtimeSameObject": true
+        },
+        {
+          "name": "independent-factory-safe",
+          "safe": true,
+          "beforeDiagnostics": 0,
+          "currentDiagnostics": 0,
+          "runtimeSameObject": false
+        },
+        {
+          "name": "factory-before-replacement-safe",
+          "safe": true,
+          "beforeDiagnostics": 0,
+          "currentDiagnostics": 0,
+          "runtimeSameObject": false
+        },
+        {
+          "name": "self-spread-source-mutator",
+          "safe": false,
+          "beforeDiagnostics": 1,
+          "currentDiagnostics": 1,
+          "runtimeSameObject": true
+        }
+      ]
+    },
+    "shared": {
+      "status": "PASS",
+      "totalCases": 56,
+      "rendererCases": 38,
+      "queryCases": 18,
+      "queryCasesExecutingSql": 10,
+      "changedResultCount": 0,
+      "scannerRepeatAndPostRulesStableCases": 56,
+      "conservativeRejections": [
+        {
+          "suite": "r10-shared-async-array-combinations.json",
+          "name": "awaited-category-other-default-conservative",
+          "reason": "IPC field presence remains unknown; fallback capability is conservatively retained"
+        },
+        {
+          "suite": "r10-shared-logical-combinations.json",
+          "name": "conditional-distinct-pure-values",
+          "reason": "both branches are pure strings but current and prior reject ambiguous value"
+        }
+      ]
+    },
+    "currentCheckerSha256": {
+      "scripts/architecture/scan.js": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be",
+      "scripts/architecture/contracts.js": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f",
+      "scripts/architecture/rules.js": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa",
+      "scripts/architecture/renderer-contracts.js": "dd34f594f57d0d5d6f33944bed80802d50b4712077e9f4dba1f205d93b19dbb7",
+      "scripts/architecture/schema.js": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316"
+    },
+    "reusedFreshBeforeArtifacts": {
+      "r10-renderer-probes-before.jsonl": "55b642a1d06839148ec39e184ad81336d7f7467c3cb7a9a285e3a1b48d67c34f",
+      "r10-array-neighbor-before.json": "9c442f93a03d0f5a95d2385ab98be7a65a29bad522048f23300b611cb75656de",
+      "r10-renderer-nested-realconfig-before.json": "e41c2576c9601c534459f58bec398d2074f2954a7d02ddcd7ef16eb5f8d49ce7",
+      "r10-array-real-neighbor-before.json": "5c2e39270d331d079b71a4b9dd416051c28a851ecca40d03938a6725a31da170"
+    },
+    "unchangedSharedCheckerAndPolicySha256": {
+      "scripts/architecture/scan.js": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be",
+      "scripts/architecture/contracts.js": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f",
+      "scripts/architecture/rules.js": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa",
+      "scripts/architecture/schema.js": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "scripts/architecture/policy-history.js": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+      "architecture/boundaries.json": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+      "architecture/legacy-allowlist.json": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3"
+    },
+    "artifactSha256": {
+      "r10-array-neighbor-before.json": "9c442f93a03d0f5a95d2385ab98be7a65a29bad522048f23300b611cb75656de",
+      "r10-array-neighbor-cases.cjs": "7fb040b6886568fdeb6b60acfd20d1f21b1601308ca1f572f59c2904d3f290aa",
+      "r10-array-neighbor-current.json": "c034abfa7f2be180ba98930dd31db3088491988b49541dea50e3eaab9e3f8b4b",
+      "r10-array-real-neighbor-before.json": "5c2e39270d331d079b71a4b9dd416051c28a851ecca40d03938a6725a31da170",
+      "r10-array-real-neighbor-cases.cjs": "e8c7c8b98d706ec22ffe37ff74009631348a5146db387baac11cccdf2e61315f",
+      "r10-array-real-neighbor-current.json": "faa0c8148616be1b3dc94588ae67e6ee92b11d61cfd2a6d3e854580789ce2f30",
+      "r10-array-real-neighbor-probe.cjs": "161bb9d2f251a2d3828100b9b3e071444f218bdeeb20e99f29a5d74f79cefbdf",
+      "r10-renderer-nested-realconfig-before.json": "e41c2576c9601c534459f58bec398d2074f2954a7d02ddcd7ef16eb5f8d49ce7",
+      "r10-renderer-nested-realconfig-current.json": "d0e3a8de9ba9a1eee7e421cfbd2e6f6fa8a4759b52f89e5167987676a8a82374",
+      "r10-renderer-nested-realconfig.cjs": "bf88b1c14fd93d748bf132a4c5291180666b06acf057aa341ee88387cd18e825",
+      "r10-renderer-probes-before.jsonl": "55b642a1d06839148ec39e184ad81336d7f7467c3cb7a9a285e3a1b48d67c34f",
+      "r10-renderer-probes-current.jsonl": "f51e5ecd697cea64de75e204305b18732cc950995607dd1c595f12cb8f070ffa",
+      "r10-renderer-probes.cjs": "ddc30eb352936fa76acd5900b34efb1d28eb1277605c7743cf80094ba48cf2ff",
+      "r10-shared-async-array-combinations.cjs": "798d94d14ce048c9997308dc1b75265d0ff252f20747f429730bbbb7ffe552d2",
+      "r10-shared-async-array-combinations.json": "6a0ef6b6b1c8e077c31f3ae44ac7840bc453dde8d88a5721fabcd67cfd6543b0",
+      "r10-shared-default-combinations.cjs": "77f40f3b2c1e561b3119c73e92850b516205f13f3b20eebf87889de751e1d222",
+      "r10-shared-default-combinations.json": "01acd969764ccc69bc34a3a198263f51f0c947692dbf8ce77f88e07824b5d551",
+      "r10-shared-destructure-probes.cjs": "cd4f411714446f01ad9ede9f0357574525f1a03a26c9e9095cce2101751bc2ab",
+      "r10-shared-destructure-probes.json": "b2710bcfa8956a75f76d0193222285dc5b3c843ad7acfda8d2f8b0ea181e5aa7",
+      "r10-shared-localenv-probes.cjs": "c1ca627312328448aeae58a15927db0a6d6386654ea0c5bf566ffc3b35c6011b",
+      "r10-shared-localenv-probes.json": "e27bea4833676b46364ebf72747c6d370d813b5ce8b91a77f93dcbfe607dc1d3",
+      "r10-shared-logical-combinations.cjs": "413cd6d94d30f69de588f480bc28d3f85c43e6b54a6b1e0f8fa92da288d29ac8",
+      "r10-shared-logical-combinations.json": "66bf32f6c0e81e242b2757ba3f73870f2132bed800cab2c2cf01731ff3fbd8c9",
+      "r10-shared-shared-probes.cjs": "52cd66a54717421ac6d3cf4552ecef6d92bbc9b0fa27ceedb78ea483373381fb",
+      "r10-shared-shared-probes.json": "b65e0709b9993b087aea4fa20870c2293f7d384571c5fe35d4828376caaf951c"
+    },
+    "supersededEvidence": "Files whose names contain preliminary are retained observations from before the final checker freeze and are excluded from these assertions."
+  },
+  "sharedProbes": {
+    "status": "PASS",
+    "beforeVersion": "2026-09-23-release-r10-repair/input-manifest.json",
+    "beforeExecution": "All suites freshly executed with archived renderer-contracts.js and four SHA256-matched shared checkers",
+    "suiteCount": 6,
+    "totalCases": 56,
+    "rendererCases": 38,
+    "queryCases": 18,
+    "queryCasesExecutingSql": 10,
+    "changedResults": [],
+    "changedResultCount": 0,
+    "allExpectedResultsMatched": true,
+    "scannerRepeatAndPostRulesStableCases": 56,
+    "conservativeRejections": [
+      {
+        "suite": "r10-shared-async-array-combinations.json",
+        "name": "awaited-category-other-default-conservative",
+        "reason": "IPC field presence remains unknown; fallback capability is conservatively retained"
+      },
+      {
+        "suite": "r10-shared-logical-combinations.json",
+        "name": "conditional-distinct-pure-values",
+        "reason": "both branches are pure strings but current and prior reject ambiguous value"
+      }
+    ],
+    "asyncIpcDefaultExpectationPreserved": true,
+    "suites": [
+      {
+        "file": "r10-shared-async-array-combinations.json",
+        "rendererCases": 6,
+        "queryCases": 0,
+        "outputSha256": "6a0ef6b6b1c8e077c31f3ae44ac7840bc453dde8d88a5721fabcd67cfd6543b0",
+        "scriptSha256": "798d94d14ce048c9997308dc1b75265d0ff252f20747f429730bbbb7ffe552d2"
+      },
+      {
+        "file": "r10-shared-default-combinations.json",
+        "rendererCases": 6,
+        "queryCases": 0,
+        "outputSha256": "01acd969764ccc69bc34a3a198263f51f0c947692dbf8ce77f88e07824b5d551",
+        "scriptSha256": "77f40f3b2c1e561b3119c73e92850b516205f13f3b20eebf87889de751e1d222"
+      },
+      {
+        "file": "r10-shared-destructure-probes.json",
+        "rendererCases": 4,
+        "queryCases": 4,
+        "outputSha256": "b2710bcfa8956a75f76d0193222285dc5b3c843ad7acfda8d2f8b0ea181e5aa7",
+        "scriptSha256": "cd4f411714446f01ad9ede9f0357574525f1a03a26c9e9095cce2101751bc2ab"
+      },
+      {
+        "file": "r10-shared-localenv-probes.json",
+        "rendererCases": 4,
+        "queryCases": 6,
+        "outputSha256": "e27bea4833676b46364ebf72747c6d370d813b5ce8b91a77f93dcbfe607dc1d3",
+        "scriptSha256": "c1ca627312328448aeae58a15927db0a6d6386654ea0c5bf566ffc3b35c6011b"
+      },
+      {
+        "file": "r10-shared-logical-combinations.json",
+        "rendererCases": 6,
+        "queryCases": 0,
+        "outputSha256": "66bf32f6c0e81e242b2757ba3f73870f2132bed800cab2c2cf01731ff3fbd8c9",
+        "scriptSha256": "413cd6d94d30f69de588f480bc28d3f85c43e6b54a6b1e0f8fa92da288d29ac8"
+      },
+      {
+        "file": "r10-shared-shared-probes.json",
+        "rendererCases": 12,
+        "queryCases": 8,
+        "outputSha256": "b65e0709b9993b087aea4fa20870c2293f7d384571c5fe35d4828376caaf951c",
+        "scriptSha256": "52cd66a54717421ac6d3cf4552ecef6d92bbc9b0fa27ceedb78ea483373381fb"
+      }
+    ]
+  },
+  "boundedIndependentAdjacentReview": {
+    "cases": 6,
+    "passed": 6,
+    "sourceSha256": "dd34f594f57d0d5d6f33944bed80802d50b4712077e9f4dba1f205d93b19dbb7",
+    "report": "r10-adjacent-review/review.md"
+  },
+  "intermediateCandidateMergeRegression": {
+    "cases": 1,
+    "beforePass": 0,
+    "finalPass": 1,
+    "before": "uncertainty-merge-before.json",
+    "after": "uncertainty-merge-after.json"
+  },
+  "preservation": {
+    "initial": {
+      "files": 4710,
+      "changed": [
+        "architecture/README.md",
+        "changes/v3.2.10/README.md",
+        "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md",
+        "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md",
+        "changes/v3.2.10/release.md",
+        "rules/integration-test-policy.md",
+        "scripts/architecture/renderer-contracts.js"
+      ]
+    },
+    "production": {
+      "files": 792,
+      "changed": []
+    },
+    "historicalReviews": {
+      "files": 732,
+      "changed": []
+    },
+    "architectureConfig": {
+      "files": 2,
+      "changed": []
+    },
+    "primaryDirty": {
+      "files": 865,
+      "changed": []
+    },
+    "primaryHead": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+    "releaseHead": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+    "unexpectedChanges": []
+  }
+}

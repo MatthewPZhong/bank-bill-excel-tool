@@ -1,0 +1,33 @@
+{
+  "verifiedAt": "2026-09-20T14:20:00.452465+00:00",
+  "workdir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters",
+  "base": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "g1Feature": "856c9dce8ae4c381229e37b5b236e2e2f776921d",
+  "fixedReleaseIntegration": "5ccbf3f022488026f725a5111be00422a04ce221",
+  "currentHead": "5ccbf3f022488026f725a5111be00422a04ce221",
+  "fixedCommit": "commit 5ccbf3f022488026f725a5111be00422a04ce221\nMerge: 11086a3c 856c9dce\nAuthor:     pzhong1212 <pzhong1212@gmail.com>\nAuthorDate: Sun Sep 20 21:30:29 2026 +0800\nCommit:     pzhong1212 <pzhong1212@gmail.com>\nCommitDate: Sun Sep 20 21:30:29 2026 +0800\n\n    merge: 将应用恢复治理合入 release/v3.2.10\n",
+  "ancestryChecks": [
+    {
+      "ancestor": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+      "descendant": "856c9dce8ae4c381229e37b5b236e2e2f776921d",
+      "exitCode": 0
+    },
+    {
+      "ancestor": "856c9dce8ae4c381229e37b5b236e2e2f776921d",
+      "descendant": "5ccbf3f022488026f725a5111be00422a04ce221",
+      "exitCode": 0
+    },
+    {
+      "ancestor": "5ccbf3f022488026f725a5111be00422a04ce221",
+      "descendant": "HEAD",
+      "exitCode": 0
+    }
+  ],
+  "method": "用户指定纳入固定集成依赖；工作分支fast-forward，无新增G2提交",
+  "g1PublicInterfacesUnchanged": {
+    "src/main-process/archive-center/task-lifecycle.js": true,
+    "src/main-process/archive-center/ipc-task-contract.js": true,
+    "src/main-process/publication-recovery/coordinator.js": true,
+    "src/main-process/application-recovery/coordinator.js": true
+  }
+}

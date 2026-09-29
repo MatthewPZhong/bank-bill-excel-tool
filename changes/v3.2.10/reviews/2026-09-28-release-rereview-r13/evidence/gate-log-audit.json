@@ -1,0 +1,28 @@
+{
+  "scope": "Previous gate log and process result verified against frozen current inputs; gate not rerun in R13",
+  "checks": {
+    "unitSummaryMatches": true,
+    "integrationFinalLine": true,
+    "integrationRows": 68,
+    "gateExitZero": true
+  },
+  "previousGateLogSha256": "8a09d308626c1eedc84b7c7e7835841b7c5880f5870c364a452e9a36f2f895ae",
+  "versions": {
+    "node": "v25.8.0",
+    "npm": "11.11.0"
+  },
+  "unitSummaryMatchesInLog": {
+    "tests": [
+      "9367"
+    ],
+    "pass": [
+      "9363"
+    ],
+    "fail": [
+      "0"
+    ],
+    "skipped": [
+      "4"
+    ]
+  }
+}

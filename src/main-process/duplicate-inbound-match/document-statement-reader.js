@@ -13,7 +13,7 @@ const {
 const {
   locateSheets,
   WORKBOOK_ENTRY_NAME
-} = require('../../backend/big-table-import/zip-reader');
+} = require('../../backend/xlsx/zip-reader');
 const {
   streamSheetRowsHandRolled
 } = require('../../backend/acquiring-bill-currency-import/reader-handrolled');

@@ -4,7 +4,9 @@ const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { EXPORT_IO_RESOURCES } = require('./export-publication');
-const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../execution-descriptors/composition');
 const { withLegacyRecovery, assertLegacyRecoveryClosed } = require('../../backend/biz-op-legacy-guard');
 const { TABLES, BASE, enumerate, validateSchema } = require('./upgrade-legacy');
 const { fail, hash, snapshot } = require('./contracts');

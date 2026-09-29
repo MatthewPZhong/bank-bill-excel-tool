@@ -3,7 +3,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const { randomUUID, createHash } = require('node:crypto');
-const { openRichWorkbook } = require('../xlsx-rich-reader');
+const { openRichWorkbook } = require('../xlsx/rich-workbook');
 const {
   SOURCE_TYPES, SOURCE_DEFINITIONS, SYSTEM_OP_HEADERS,
   PENDING_RAW_CONTRACT_V2, headersEqual, isLegacyPendingHeaders, normalizeHeaderRow
@@ -72,7 +72,7 @@ async function inspectWorkbook(filePath, { physicalFileId = randomUUID(), onProg
   const fileIdentity = inputFileIdentity(filePath);
   const before = await hashSourceFile(filePath);
   const workbook = await openRichWorkbook(before.filePath, {
-    memoryBudgetBytes: 64 * 1024 * 1024,
+    memoryBudgetBytes: 64 * 1024 * 1024, lruMaxEntries: 8192,
     cancelToken: { get cancelled() { return Boolean(shouldCancel && shouldCancel()); } }
   });
   const sources = [];

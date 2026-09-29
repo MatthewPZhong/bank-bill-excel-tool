@@ -1,10 +1,7 @@
 // v3.0.8 需求2（W6）：场景管理「退役 C3 + 分组三角折叠」前端源码断言
 //
-// renderer-dialogs.js 是 10000+ 行的浏览器 IIFE（依赖 DOM + deps 注入），无 jsdom 单测脚手架，
-// 故沿用本仓既有范式（renderer-dialogs-scenario-channel.test.js / renderer-dialogs-toolbox.test.js）：
-// 用源码字符串断言锁定关键交互/边界，防止后续重构无意回退。
-// 可视布局（默认两组收纳 + C3 消失）由 preview 截图 docs/previews/scenarios-manager.png 把关；
-// 展开/折叠端到端行为由手动测试把关（preview harness 同步 click 会扰动 modal 生命周期，无法稳定截图展开态）。
+// 场景工厂已迁至 src/renderer/dialogs/scenarios.js；本文件保留原业务源码合同。
+// 生命周期与父子窗口行为另由 scripts/renderer-lifecycle/fixtures/scenarios.js 的真实 Chromium 工厂测试覆盖。
 //
 // 锁定要点（对齐 PRD v3.0.8 §5.2 + AC2-1..AC2-3；团队 W6 决策：仅前端过滤隐藏，零 migration 改动）：
 //   A. 退役自带 C3：refreshTable 渲染前过滤「category==='gateway-recon-join' 且 isBuiltin」不显示。
@@ -19,7 +16,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const DIALOGS_PATH = path.join(__dirname, '..', '..', 'src', 'renderer-dialogs.js');
+const DIALOGS_PATH = path.join(__dirname, '..', '..', 'src', 'renderer', 'dialogs', 'scenarios.js');
 const source = fs.readFileSync(DIALOGS_PATH, 'utf8');
 
 // 截取 createScenariosManagerDialog 函数体（从其声明到下一个同缩进 4 空格顶层 function 之前），
@@ -53,7 +50,7 @@ describe('W6-A：退役自带 C3（仅前端过滤隐藏，零 migration 改动�
   test('过滤发生在补 config / 白名单 / 渠道过滤之前（用 scenariosRaw → scenarios 命名）', () => {
     // 先 load 到 scenariosRaw，过滤自带 C3 得到 scenarios，后续链路全部基于已剔除自带 C3 的 scenarios。
     assert.ok(
-      dialogSrc.includes('const scenariosRaw = await loadScenariosOrAlert();'),
+      dialogSrc.includes('const scenariosRaw = await loadScenariosOrAlert(overlay);'),
       'refreshTable 应先 load 到 scenariosRaw'
     );
     const filterIdx = dialogSrc.indexOf("s.category === 'gateway-recon-join' && s.isBuiltin");

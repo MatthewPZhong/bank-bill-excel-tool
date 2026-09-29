@@ -21,6 +21,15 @@ const rendererDialogs = fs.readFileSync(path.join(ROOT, 'src', 'renderer-dialogs
 const preload = fs.readFileSync(path.join(ROOT, 'src', 'preload.js'), 'utf8');
 const previews = fs.readFileSync(path.join(ROOT, 'src', 'renderer-previews.js'), 'utf8');
 const mainProcess = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
+const positionTaskOwner = fs.readFileSync(
+  path.join(ROOT, 'src/main-process/position-reconciliation/task-owner.js'), 'utf8'
+);
+const positionTaskAdapter = fs.readFileSync(
+  path.join(ROOT, 'src/main-process/position-reconciliation/task-adapter.js'), 'utf8'
+);
+const taskAdapterComposition = fs.readFileSync(
+  path.join(ROOT, 'src/main-process/task-adapter-composition.js'), 'utf8'
+);
 const operationLifecycle = fs.readFileSync(
   path.join(
     ROOT,
@@ -60,7 +69,7 @@ function createPositionStatusHarness(statusProvider) {
   const makeControl = (value = '') => ({
     value,
     disabled: false,
-    addEventListener() {}
+    addEventListener() {}, removeEventListener() {}
   });
   const elements = {
     positionReconciliationFunctionSelect: makeControl('position-fund-nature-check'),
@@ -84,8 +93,8 @@ function createPositionStatusHarness(statusProvider) {
   });
   const ui = window.__positionReconciliation.createPositionReconciliationUI({
     api: { status: () => statusProvider() },
-    openModal() {},
-    closeModal() {},
+    panel: { ownerDocument: document, querySelector: (selector) => elements[selector.slice(1)] || null },
+    modalHost: { closeOwner: () => ({ status: 'closed' }) }, modalBridge: {},
     createAlertDialog() {},
     createConfirmDialog() {},
     modalRoot: null
@@ -96,7 +105,7 @@ function createPositionStatusHarness(statusProvider) {
 test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
   test('模块 ID、显示名和面板显隐接线完整', () => {
     assert.match(renderer, /positionReconciliation:\s*\{\s*id:\s*'position-reconciliation-process',\s*name:\s*'平盘对账数据处理'/);
-    assert.match(renderer, /positionReconciliationModulePanel\.hidden\s*=\s*moduleId\s*!==\s*MODULES\.positionReconciliation\.id/);
+    assert.match(renderer, /entry\(MODULES\.positionReconciliation,\s*elements\.positionReconciliationModulePanel,/);
     assert.match(previews, /setCurrentModule\(MODULES\.positionReconciliation\.id\)/);
     assert.ok(renderer.includes("info.previewModal === 'position-reconciliation-panel'"));
     assert.ok(renderer.includes("info.previewModal === 'position-reconciliation-data-manager'"));
@@ -169,8 +178,9 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     assert.match(panel, /class="status-box-text">欢迎使用小助手<\/span>/);
     assert.match(positionRenderer, /async function refresh\(\{ updateStatus = true \} = \{\}\)/);
     assert.match(positionRenderer, /if \(updateStatus\) \{[\s\S]*?statusSummary\(result\)/);
-    assert.match(positionRenderer, /async function initialize\(\)[\s\S]*await refresh\(\{ updateStatus: false \}\)[\s\S]*?result\.status === 'ok'[\s\S]*?'欢迎使用小助手'/);
-    assert.match(renderer, /positionReconciliationUI\.refresh\(\{ updateStatus: false \}\)/);
+    assert.match(positionRenderer, /async function enter\(\)[\s\S]*await refresh\(\{ updateStatus: false \}\)[\s\S]*?'欢迎使用小助手'/);
+    assert.match(positionRenderer, /const initialize = enter/);
+    assert.match(positionRenderer, /if \(!needsRefresh && !entered\)/);
     assert.doesNotMatch(renderer, /positionReconciliationUI\.refresh\(\{[^}]*enteringModule/);
     assert.doesNotMatch(positionRenderer, /showSummary/);
   });
@@ -259,7 +269,7 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
       '平盘控制器必须先于 renderer.js 加载'
     );
     assert.match(renderer, /createPositionReconciliationUI\(\{/);
-    assert.match(renderer, /positionReconciliationUI\) await positionReconciliationUI\.initialize\(\)/);
+    assert.match(positionRenderer, /enter, leave, invalidate, dispose/);
     assert.match(positionRenderer, /api\.prepareBankImport\(\)/);
     assert.match(positionRenderer, /api\.prepareSourceImport\(\)/);
     assert.match(positionRenderer, /api\.run\(selection\)/);
@@ -275,7 +285,7 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
   test('主页面结果确认入口仅打开结果页，结果页仍保留独立导出文件操作', () => {
     assert.match(
       positionRenderer,
-      /exportBtn\.addEventListener\('click',\s*\(\)\s*=>\s*openResultDialog\(\)\)/
+      /listen\(elements\.exportBtn, 'click',\s*\(\)\s*=>\s*openResultDialog\(\)\)/
     );
     assert.match(positionRenderer, /const exportButton = makeButton\('导出文件'\)/);
     assert.match(positionRenderer, /<span>不适用<\/span><strong>\$\{Number\(summary\.notApplicableRows\) \|\| 0\}<\/strong>/);
@@ -320,11 +330,11 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
   test('管理按钮不得把 click 事件误当成 preview 数据', () => {
     assert.match(
       positionRenderer,
-      /dataManagerBtn\.addEventListener\('click',\s*\(\)\s*=>\s*openDataManager\(\)\)/
+      /listen\(elements\.dataManagerBtn, 'click',\s*\(\)\s*=>\s*openDataManager\(\)\)/
     );
     assert.match(
       positionRenderer,
-      /linkedManagerBtn\.addEventListener\('click',\s*\(\)\s*=>\s*openLinkedManager\(\)\)/
+      /listen\(elements\.linkedManagerBtn, 'click',\s*\(\)\s*=>\s*openLinkedManager\(\)\)/
     );
     assert.doesNotMatch(
       positionRenderer,
@@ -342,11 +352,9 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     assert.match(positionRenderer, /archive\.addEventListener\('click',\s*showArchiveUnavailable\)/);
     assert.match(
       positionRenderer,
-      /confirmText:\s*'返回',[\s\S]*?confirmSecondary:\s*true,[\s\S]*?closeOnConfirm:\s*false/
+      /confirmText:\s*'返回',[\s\S]*?confirmSecondary:\s*true/
     );
-    assert.match(positionRenderer, /modalRoot\.appendChild\(overlay\)/);
     assert.match(rendererDialogs, /confirmSecondary \? 'secondary-btn small' : 'primary-btn small'/);
-    assert.match(rendererDialogs, /if \(closeOnConfirm\) closeModal\(\);\s*else overlay\.remove\(\);/);
   });
 
   test('对账数据管理状态列只显示状态名称，不拼接条数', () => {
@@ -515,7 +523,7 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     assert.match(positionRenderer, /stage === 'stopping' \|\| stage === 'force-terminating'/);
     assert.match(
       positionRenderer,
-      /finally\s*\{[\s\S]*if \(typeof unsubscribe === 'function'\) unsubscribe\(\);[\s\S]*shell\.overlay\.remove\(\)/
+      /finally\s*\{[\s\S]*stopProgress\(\);[\s\S]*opened\.handle\.close\(\)/
     );
     assert.match(positionRenderer, /withImportProgress\(\s*'导入平盘银行对账单'/);
     assert.match(positionRenderer, /withImportProgress\(\s*'写入平盘银行对账单'/);
@@ -540,33 +548,43 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     assert.match(mainProcess, /expectedPendingOperation:\s*pendingSideDbOperation/);
     assert.match(mainProcess, /initialSideDbCheckpoint,/);
     assert.match(mainProcess, /POSITION_SIDE_DB_BOOTSTRAP_SETTING/);
-    assert.match(mainProcess, /POSITION_SIDE_DB_PENDING_SETTING/);
-    assert.match(mainProcess, /positionReconciliationOperationContext\.run/);
+    assert.match(mainProcess, /const pendingSideDbOperation = positionTaskOwner\.readPositionPendingRaw\(\)/);
+    assert.match(mainProcess, /positionTaskOwner\.completePositionServiceInitialization\(checkpoint\)/);
+    assert.match(positionTaskOwner, /POSITION_SIDE_DB_PENDING_SETTING/);
+    assert.match(positionTaskOwner, /positionReconciliationOperationContext\.run/);
     assert.match(
-      mainProcess,
-      /JSON\.stringify\(checkpoint\)/
+      positionTaskOwner,
+      /writeSetting\(POSITION_SIDE_DB_CHECKPOINT_SETTING, JSON\.stringify\(checkpoint\)\)/
     );
-    assert.match(mainProcess, /channel\.startsWith\('position-reconciliation:'\)/);
-    assert.match(mainProcess, /syncPositionReconciliationCheckpoint\(\)/);
+    assert.match(mainProcess, /const executionTaskComposition = createExecutionTaskComposition\(\{[\s\S]*?positionOwner: positionTaskOwner/);
+    assert.match(mainProcess, /const \{ taskAdapterRegistry, terminalRouteRegistry \} = executionTaskComposition/);
+    assert.match(taskAdapterComposition, /'position-reconciliation-process': 'position-reconciliation'/);
+    assert.match(taskAdapterComposition, /createPositionTaskAdapter\(\{ owner: positionOwner,/);
+    const entryStart = mainProcess.indexOf('async function runArchiveAwareOperation(');
+    const entryEnd = mainProcess.indexOf('function runRegisteredBusinessOperation(', entryStart);
+    const entry = mainProcess.slice(entryStart, entryEnd);
+    assert.match(entry, /taskAdapterRegistry\.resolve\(policy\.taskKey\)\.createInvocation\(/);
+    assert.doesNotMatch(entry, /startsWith\(['"]position-reconciliation:/);
+    assert.match(positionTaskOwner, /syncPositionReconciliationCheckpoint\(\)/);
   });
 
   test('平盘写操作独占执行，并在 checkpoint 同步前校验 token 与存档持久性', () => {
-    assert.match(mainProcess, /if \(positionReconciliationOperationActive\)/);
-    assert.match(mainProcess, /const unresolvedPending = database\.getSetting\(POSITION_SIDE_DB_PENDING_SETTING\)/);
-    assert.match(mainProcess, /runPositionOperationLifecycle\(\{/);
+    assert.match(positionTaskOwner, /if \(positionReconciliationOperationActive\)/);
+    assert.match(positionTaskOwner, /const unresolvedPending = readSetting\(POSITION_SIDE_DB_PENDING_SETTING\)/);
+    assert.match(positionTaskOwner, /runPositionOperationLifecycle\(\{/);
     assert.match(operationLifecycle, /persistedPending\.operationToken !== operationToken/);
     assert.match(operationLifecycle, /persistedPending\.archiveState !== 'durable'/);
     assert.match(operationLifecycle, /pendingBeforeClear\.operationToken !== operationToken/);
-    const recoveryStart = mainProcess.indexOf('function persistPositionArchiveIntentIfNeeded');
-    const recoveryEnd = mainProcess.indexOf('function recoverPositionArchiveIntent', recoveryStart);
-    const recoveryFlow = mainProcess.slice(recoveryStart, recoveryEnd);
+    const recoveryStart = positionTaskOwner.indexOf('function persistPositionArchiveIntentIfNeeded');
+    const recoveryEnd = positionTaskOwner.indexOf('function recoverPositionArchiveIntent', recoveryStart);
+    const recoveryFlow = positionTaskOwner.slice(recoveryStart, recoveryEnd);
     assert.match(
       recoveryFlow,
-      /const owner = positionPendingOwner\(pending\);[\s\S]*if \(manifestOwned\) \{[\s\S]*archiveCenterService\.persistTaskTerminalIntent\(\{[\s\S]*settleFiles: files\.map\(\(file\) => \(\{[\s\S]*artifactKey: file\.artifactKey/
+      /const owner = positionPendingOwner\(pending\);[\s\S]*if \(manifestOwned\) \{[\s\S]*getArchiveCenter\(\)\.persistTaskTerminalIntent\(\{[\s\S]*settleFiles: files\.map\(\(file\) => \(\{[\s\S]*artifactKey: file\.artifactKey/
     );
     assert.match(
       recoveryFlow,
-      /if \(owner\.kind !== 'file-batch'\)[\s\S]*archiveCenterService\.persistAppendIntent\(\{\s*batchContext: owner\.batchContext,/
+      /if \(owner\.kind !== 'file-batch'\)[\s\S]*getArchiveCenter\(\)\.persistAppendIntent\(\{\s*batchContext: owner\.batchContext,/
     );
     assert.match(recoveryFlow, /缺少原任务 batchContext，禁止建立幽灵批次/);
     assert.doesNotMatch(
@@ -575,17 +593,17 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
       '平盘恢复只能向 pending 原 batch 追加，不得建批或猜 latest'
     );
     assert.match(
-      mainProcess,
+      positionTaskOwner,
       /const files = requirePositionPendingArchiveFiles\(pending\);[\s\S]*const archiveRequired = pending\.archiveRequired[\s\S]*positionArchiveIntentEvidence\(pending, currentCheckpoint\)/
     );
     assert.match(operationLifecycle, /requirePositionPendingArchiveFiles\(persistedPending\);/);
-    assert.match(mainProcess, /businessState:\s*'running'/);
+    assert.match(positionTaskOwner, /businessState:\s*'running'/);
     assert.match(
-      mainProcess,
+      positionTaskOwner,
       /function markPositionBusinessOutcome\(result, \{ terminalForCurrentTask = false \} = \{\}\)/
     );
     assert.match(
-      mainProcess,
+      positionTaskOwner,
       /positionBusinessStateForResult\(terminalResult, SUCCESS_STATUSES\)/
     );
     assert.match(operationLifecycle, /result && result\.archiveDeferred === true/);
@@ -593,8 +611,10 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     assert.match(operationLifecycle, /const outputPublished = files\.some/);
     assert.match(operationLifecycle, /sourceSnapshotMatchesStat\(file\.beforeSnapshot, stat\)/);
     assert.match(operationLifecycle, /archiveResult && archiveResult\.handled === false/);
-    assert.match(mainProcess, /settlePositionArchiveResult\(\{/);
-    assert.match(mainProcess, /persistCurrentPositionArchiveIntentIfNeeded\(\)/);
+    assert.match(positionTaskAdapter, /settlePositionArchiveResult\(\{/);
+    assert.match(positionTaskAdapter, /persistRecovery: owner\.persistCurrentPositionArchiveIntentIfNeeded/);
+    assert.match(positionTaskOwner, /function persistCurrentPositionArchiveIntentIfNeeded\(\)/);
+    assert.match(positionTaskAdapter, /admitPosition:[\s\S]*?owner\.runPositionReconciliationOperation\(/);
     assert.match(operationLifecycle, /markDurable\(recoveryIntent \|\| archiveResult\)/);
     assert.match(
       operationLifecycle,
@@ -632,7 +652,7 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     assert.match(positionRenderer, /makeTextButton\('删除'/);
     assert.match(positionRenderer, /makeTextButton\('新增'/);
     assert.match(positionRenderer, /makeButton\('完成', \{ primary: true \}\)/);
-    assert.match(positionRenderer, /modalRoot\.appendChild\(shell\.overlay\)/);
+    assert.doesNotMatch(positionRenderer, /modalRoot\.appendChild|overlay\.remove\(/);
   });
 
   test('共享 Payment 解析脚本先于 renderer-dialogs 加载', () => {

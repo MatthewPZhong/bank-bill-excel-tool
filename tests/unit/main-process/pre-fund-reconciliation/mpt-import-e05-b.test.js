@@ -12,7 +12,7 @@ const { Worker } = require('node:worker_threads');
 const {
   createBackgroundExecutionRuntime: createBackgroundExecutionRuntimeRaw,
   createNonProductionBackgroundExecutionRuntime
-} = require('../../../../src/main-process/background-execution/runtime');
+} = require('../../../../src/main-process/execution-descriptors/composition');
 const {
   createResourceGovernor
 } = require('../../../../src/main-process/background-execution/resource-governor');

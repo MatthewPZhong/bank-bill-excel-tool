@@ -1,0 +1,21 @@
+{
+  "command": [
+    "node",
+    "--test",
+    "--test-concurrency=2",
+    "tests/unit/backend/archive-blob-reference-query.test.js",
+    "tests/unit/backend/database/archive-repository.test.js",
+    "tests/unit/main-process/biz-op-v327-catalog-queries.test.js",
+    "tests/unit/main-process/biz-op-v327-compute-main.test.js",
+    "tests/unit/main-process/biz-op-v327-export-main.test.js",
+    "tests/unit/main-process/biz-op-v327-export-rule-version.test.js",
+    "tests/unit/main-process/biz-op-v327-delete-main.test.js",
+    "tests/unit/main-process/biz-op-v327-import-main.test.js",
+    "tests/unit/main-process/biz-op-v327-phase-admission.test.js",
+    "tests/unit/main-process/biz-op-v327-import-query.test.js",
+    "tests/unit/main-process/biz-op-v329-auto-report.test.js"
+  ],
+  "exitCode": 0,
+  "elapsedSeconds": 86.3,
+  "log": "review-unit.log"
+}

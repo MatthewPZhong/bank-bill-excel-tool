@@ -45,7 +45,7 @@ const {
 } = require('../../../src/main-process/read-only-exports/common/workbook-evidence');
 const {
   createBackgroundExecutionRuntime
-} = require('../../../src/main-process/background-execution/runtime');
+} = require('../../../src/main-process/execution-descriptors/composition');
 const {
   createVccFinancialOpService
 } = require('../../../src/main-process/vcc-financial-op-service');

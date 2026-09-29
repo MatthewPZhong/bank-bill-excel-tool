@@ -647,3 +647,278 @@ test.describe('run-check-multiworker（plan-b write-splitting）', () => {
     }
   });
 });
+
+// B0 使用真实 Worker，在测试装配层控制构造/发送/terminate，生产入口无需注入后门。
+function createExitBarrierHarness(modes, { constructFailureAt = -1, initPostFailureAt = -1,
+  closePostFailure = false, chunkPostFailure = false, terminateReject = false, terminateThrow = false } = {}) {
+  const { Worker } = require('node:worker_threads');
+  const Module = require('node:module');
+  const scriptPath = path.join(__dirname, '__fixtures__', 'multiworker-exit-barrier-worker.js');
+  const workers = [];
+  let constructionCount = 0;
+  class ControlledWorker extends Worker {
+    constructor() {
+      const index = constructionCount++;
+      if (index === constructFailureAt) throw new Error('fixture constructor failure');
+      super(scriptPath, { workerData: { mode: modes[index] || 'ready' },
+        ...(modes[index] === 'chunk-oom' ? { resourceLimits: { maxOldGenerationSizeMb: 8 } } : {}) });
+      this.fixtureIndex = index;
+      this.closeCalls = 0;
+      this.terminateCalls = 0;
+      this.chunkCalls = 0;
+      this.fixtureExited = false;
+      this.fixtureEvents = [];
+      this.fixtureExit = new Promise((resolve) => this.once('exit', (code) => {
+        this.fixtureEvents.push({ type: 'exit', code });
+        this.fixtureExited = true;
+        resolve();
+      }));
+      // 基线丢失 worker 所有权时也由 fixture 保证最终回收。
+      this.on('error', (error) => this.fixtureEvents.push({ type: 'error', code: error.code, message: error.message }));
+      workers.push(this);
+    }
+    postMessage(message) {
+      if (message.type === 'init' && this.fixtureIndex === initPostFailureAt) throw new Error('fixture init post failure');
+      if (message.type === 'select-chunk-to-temp') {
+        this.chunkCalls++;
+        if (chunkPostFailure) throw new Error('fixture chunk post failure');
+      }
+      if (message.type === 'close') {
+        this.closeCalls++;
+        if (closePostFailure) throw new Error('fixture close post failure');
+      }
+      return super.postMessage(message);
+    }
+    terminate() {
+      this.terminateCalls++;
+      if (terminateThrow) throw new Error('fixture terminate thrown');
+      if (terminateReject) return Promise.reject(new Error('fixture terminate rejected'));
+      return this.fixtureExit.then(() => 0);
+    }
+    releaseExit() { if (!this.fixtureExited) super.postMessage({ type: 'test-exit' }); }
+    forceExit() { return Worker.prototype.terminate.call(this); }
+  }
+  const filename = require.resolve('../../../src/main-process/run-check-multiworker');
+  const loaded = new Module(filename, module);
+  loaded.filename = filename;
+  loaded.paths = Module._nodeModulePaths(path.dirname(filename));
+  const nativeRequire = loaded.require.bind(loaded);
+  loaded.require = (name) => name === 'node:worker_threads' ? { Worker: ControlledWorker } : nativeRequire(name);
+  loaded._compile(fs.readFileSync(filename, 'utf8'), filename);
+  return { executor: loaded.exports, workers,
+    release: () => workers.forEach((worker) => worker.releaseExit()),
+    cleanup: () => Promise.all(workers.map((worker) => worker.forceExit())) };
+}
+
+async function waitForBarrierCondition(predicate, label) {
+  const deadline = Date.now() + 4000;
+  while (!predicate()) {
+    if (Date.now() > deadline) assert.fail(`等待条件超时：${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+function barrierRun(harness, ctx, tempDir, extra = {}) {
+  return harness.executor.runWriteSplitChunks({
+    db: ctx.db, dbPath: ctx.dbPath, workerCount: 2,
+    chunks: buildChunks(200, 100), selectSql: SELECT_SQL,
+    partColumns: PART_COLUMNS, targetTable: DIFF_TABLE,
+    targetColumns: TARGET_COLUMNS, prefixValues: [2], tempDir,
+    initTimeoutMs: 1000, closeTimeoutMs: 20,
+    ...extra,
+  });
+}
+
+test('B0 部分 init 失败：全部已创建真实 worker 退出前 executor 不得结算', async () => {
+  const ctx = setupDb(200);
+  const tempDir = mw.makeTempDir();
+  const harness = createExitBarrierHarness(['ready', 'init-error']);
+  let settled = false;
+  const result = barrierRun(harness, ctx, tempDir).then(
+    (value) => { settled = true; return { value }; },
+    (error) => { settled = true; return { error }; }
+  );
+  try {
+    await waitForBarrierCondition(() => harness.workers.some((worker) => worker.terminateCalls), '触发 terminate');
+    assert.equal(settled, false, 'terminate 尚未完成且线程仍存活时不得返回');
+    assert.equal(harness.workers.length, 2);
+    assert.ok(harness.workers.every((worker) => !worker.fixtureExited));
+    assert.ok(harness.workers.every((worker) => worker.chunkCalls === 0));
+    harness.release();
+    const outcome = await result;
+    assert.match(outcome.error.message, /fixture init failure/);
+    assert.ok(harness.workers.every((worker) => worker.fixtureExited));
+    assert.ok(harness.workers.every((worker) => worker.closeCalls === 1));
+    assert.ok(harness.workers.every((worker) => worker.terminateCalls <= 1));
+  } finally {
+    await harness.cleanup();
+    await result;
+    mw.cleanupDir(tempDir);
+    ctx.cleanup();
+  }
+});
+
+
+for (const scenario of [
+  { name: '构造失败', modes: ['ready'], options: { constructFailureAt: 1 }, error: /constructor failure/ },
+  { name: 'init postMessage 抛错', modes: ['ready', 'ready'], options: { initPostFailureAt: 1 }, error: /init post failure/ },
+  { name: 'init timeout', modes: ['ready', 'init-timeout'], run: { initTimeoutMs: 60 }, error: /init 超时/ },
+  { name: 'init error 事件', modes: ['ready', 'init-crash'], error: /init 期 error.*fixture init crash/ },
+  { name: '晚到 init-done', modes: ['init-error', 'late-init'], error: /fixture init failure/ },
+]) {
+  test(`B0 ${scenario.name}：保留已创建线程，关闭幂等且退出前不结算`, async () => {
+    const ctx = setupDb(200);
+    const tempDir = mw.makeTempDir();
+    const harness = createExitBarrierHarness(scenario.modes, scenario.options);
+    let settled = false;
+    const result = barrierRun(harness, ctx, tempDir, scenario.run).then(
+      (value) => { settled = true; return { value }; },
+      (error) => { settled = true; return { error }; }
+    );
+    try {
+      await waitForBarrierCondition(() => harness.workers.some((worker) => worker.terminateCalls), '停止已创建线程');
+      if (scenario.name === '晚到 init-done') {
+        harness.workers[1].postMessage({ type: 'test-init-done' });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.equal(settled, false);
+      assert.ok(harness.workers.some((worker) => !worker.fixtureExited));
+      assert.ok(harness.workers.every((worker) => worker.chunkCalls === 0), '初始化未全部通过不得派发');
+      harness.release();
+      const outcome = await result;
+      assert.match(outcome.error.message, scenario.error);
+      assert.ok(harness.workers.every((worker) => worker.fixtureExited));
+      assert.ok(harness.workers.every((worker) => worker.closeCalls <= 1 && worker.terminateCalls <= 1));
+      assert.equal(countTempParts(tempDir), 0);
+    } finally {
+      await harness.cleanup();
+      await result;
+      mw.cleanupDir(tempDir);
+      ctx.cleanup();
+    }
+  });
+}
+
+for (const scenario of [
+  { name: 'close timeout 后 terminate 延迟', options: {} },
+  { name: 'close postMessage 抛错', options: { closePostFailure: true } },
+  { name: 'terminate reject 后迟到 exit', options: { terminateReject: true } },
+  { name: 'terminate 抛错后迟到 exit', options: { terminateThrow: true } },
+]) {
+  test(`B0 ${scenario.name}：真实退出前保持 part 和外层资源`, async (t) => {
+    const ctx = setupDb(200);
+    const tempDir = mw.makeTempDir();
+    const marker = path.join(tempDir, 'caller-marker.txt');
+    fs.writeFileSync(marker, 'caller-owned');
+    const harness = createExitBarrierHarness(['ready', 'ready'], scenario.options);
+    const warnings = [];
+    t.mock.method(process, 'emitWarning', (message, options) => warnings.push({ message, options }));
+    let settled = false;
+    let settlements = 0;
+    const result = barrierRun(harness, ctx, tempDir).then(
+      (value) => { settled = true; settlements++; return { value }; },
+      (error) => { settled = true; settlements++; return { error }; }
+    );
+    try {
+      await waitForBarrierCondition(() => harness.workers.every((worker) => worker.terminateCalls === 1), '所有 terminate 已调用');
+      assert.equal(settled, false, '上层 cleanup 在 await 返回后执行，当前必须仍被屏障挡住');
+      assert.ok(harness.workers.every((worker) => !worker.fixtureExited));
+      assert.ok(fs.existsSync(path.join(tempDir, 'part-0.sqlite')), '退出前不可结束清理 part-0');
+      assert.ok(fs.existsSync(path.join(tempDir, 'part-1.sqlite')), '退出前不可结束清理 part-1');
+      assert.equal(fs.readFileSync(marker, 'utf8'), 'caller-owned');
+      if (scenario.options.terminateReject || scenario.options.terminateThrow) {
+        assert.equal(warnings.length, 2);
+        assert.ok(warnings.every((warning) => /worker=\d+.*taskRunId=.*phase=terminate/.test(warning.message)));
+      }
+      harness.release();
+      const outcome = await result;
+      assert.equal(outcome.error, undefined);
+      assert.equal(outcome.value.insertedRows, 2);
+      assert.ok(harness.workers.every((worker) => worker.fixtureExited));
+      assert.ok(harness.workers.every((worker) => worker.closeCalls === 1 && worker.terminateCalls === 1));
+      assert.equal(settlements, 1);
+      assert.equal(countTempParts(tempDir), 0);
+      assert.equal(fs.readFileSync(marker, 'utf8'), 'caller-owned');
+    } finally {
+      await harness.cleanup();
+      await result;
+      mw.cleanupDir(tempDir);
+      ctx.cleanup();
+    }
+  });
+}
+
+test('B0 chunk postMessage 抛错：停止派发并等待所有真实线程退出', async () => {
+  const ctx = setupDb(200);
+  const tempDir = mw.makeTempDir();
+  const harness = createExitBarrierHarness(['ready', 'ready'], { chunkPostFailure: true });
+  let settled = false;
+  const result = barrierRun(harness, ctx, tempDir).catch((error) => { settled = true; return error; });
+  try {
+    await waitForBarrierCondition(() => harness.workers.every((worker) => worker.terminateCalls === 1), 'chunk 发送失败关闭');
+    assert.equal(settled, false);
+    harness.release();
+    assert.match((await result).message, /chunk post failure/);
+    assert.ok(harness.workers.every((worker) => worker.fixtureExited));
+    assert.equal(countTempParts(tempDir), 0);
+    assert.equal(dumpDiffRows(ctx.db, 2).length, 0);
+  } finally {
+    await harness.cleanup();
+    await result;
+    mw.cleanupDir(tempDir);
+    ctx.cleanup();
+  }
+});
+
+test('B0 chunk 途中 code=0 真实退出：拒绝未完成 chunk 并收口其他线程', async () => {
+  const ctx = setupDb(200);
+  const tempDir = mw.makeTempDir();
+  const harness = createExitBarrierHarness(['chunk-exit-zero', 'ready']);
+  let settled = false;
+  const result = barrierRun(harness, ctx, tempDir).catch((error) => { settled = true; return error; });
+  try {
+    await waitForBarrierCondition(() => harness.workers[1] && harness.workers[1].terminateCalls === 1, '另一线程关闭');
+    assert.equal(settled, false);
+    assert.equal(harness.workers[0].fixtureExited, true);
+    harness.release();
+    const error = await result;
+    assert.match(error.message, /worker 异常 exit.*code=0/);
+    assert.equal(error.workerFailureSource, 'exit');
+    assert.ok(harness.workers.every((worker) => worker.fixtureExited));
+    assert.equal(dumpDiffRows(ctx.db, 2).length, 0);
+    assert.equal(countTempParts(tempDir), 0);
+  } finally {
+    await harness.cleanup();
+    await result;
+    mw.cleanupDir(tempDir);
+    ctx.cleanup();
+  }
+});
+
+
+test('B0 真实内存受限 worker 同栈 error→exit：保留 chunk 原始 error 优先级', async () => {
+  const ctx = setupDb(100);
+  const tempDir = mw.makeTempDir();
+  const harness = createExitBarrierHarness(['chunk-oom']);
+  let outcome;
+  try {
+    outcome = await barrierRun(harness, ctx, tempDir, {
+      workerCount: 1, chunks: buildChunks(100, 100),
+    }).then((value) => ({ value }), (error) => ({ error }));
+    const worker = harness.workers[0];
+    assert.ok(worker.fixtureExited, '真实 OOM 退出已确认后才返回');
+    assert.deepEqual(worker.fixtureEvents.map((event) => event.type), ['error', 'exit']);
+    assert.equal(worker.fixtureEvents[0].code, 'ERR_WORKER_OUT_OF_MEMORY');
+    assert.equal(outcome.error.name, 'Error');
+    assert.equal(outcome.error.message, `multiworker chunk=0 worker error 事件：${worker.fixtureEvents[0].message}`,
+      '同栈 exit 不能抢在 await catch 前覆盖此前 error');
+    assert.equal(outcome.error.code, undefined, '保留基线包装 Error 的 code 合同，不添加新字段');
+    assert.equal(outcome.error.workerFailureSource, undefined, '不能被替换为 exit 错误');
+    assert.equal(dumpDiffRows(ctx.db, 2).length, 0);
+    assert.equal(countTempParts(tempDir), 0);
+  } finally {
+    await harness.cleanup();
+    mw.cleanupDir(tempDir);
+    ctx.cleanup();
+  }
+});

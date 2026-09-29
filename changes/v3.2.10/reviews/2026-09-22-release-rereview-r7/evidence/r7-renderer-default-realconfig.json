@@ -1,0 +1,42 @@
+[
+  {
+    "scanner": "WORKTREE",
+    "name": "missing_member_default",
+    "source": "const reviewShared={run(){}};function selectReviewApi({api=reviewShared}){return api;}const reviewOther=selectReviewApi({});reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewShared});",
+    "baseViolations": 0,
+    "probeViolations": [],
+    "boundaryCount": 20,
+    "runtime": {
+      "same": true,
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run",
+        "outsideScope"
+      ],
+      "whole": false,
+      "extraCallable": true,
+      "extraResult": true
+    }
+  },
+  {
+    "scanner": "WORKTREE",
+    "name": "provided_member_safe",
+    "source": "const reviewShared={run(){}};function selectReviewApi({api=reviewShared}){return api;}const reviewProvided={run(){}};const reviewOther=selectReviewApi({api:reviewProvided});reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewShared});",
+    "baseViolations": 0,
+    "probeViolations": [],
+    "boundaryCount": 20,
+    "runtime": {
+      "same": false,
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run"
+      ],
+      "whole": false,
+      "extraCallable": false
+    }
+  }
+]

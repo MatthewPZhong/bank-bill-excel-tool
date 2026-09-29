@@ -1,0 +1,27 @@
+{
+  "architectureTests": {
+    "exitCode": 0,
+    "tests": 100,
+    "pass": 100,
+    "fail": 0,
+    "skipped": 0
+  },
+  "reviewRegressions": {
+    "tests": 16,
+    "pass": 16
+  },
+  "architectureCli": {
+    "exitCode": 0,
+    "matchedExceptions": 114,
+    "stale": 0
+  },
+  "toolingLint": {
+    "files": 14,
+    "errors": 0
+  },
+  "releaseCheckThisRevision": "未运行，正式集成/PR-ready 前在最终候选执行",
+  "independentRereview": "未执行",
+  "integration": "未集成",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "manifest": "verified-manifest.json"
+}

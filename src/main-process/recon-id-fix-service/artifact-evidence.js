@@ -6,7 +6,7 @@ const XLSXStyle = require('xlsx-js-style');
 const {
   openZipWithEntries,
   readEntryAsString
-} = require('../../backend/big-table-import/zip-reader');
+} = require('../../backend/xlsx/zip-reader');
 const {
   getReconIdFixOutputContract,
   UNMATCHED_REPORT_HEADERS,

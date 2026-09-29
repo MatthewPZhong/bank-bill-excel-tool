@@ -7,7 +7,7 @@ const {
   openZipWithEntries,
   WORKBOOK_ENTRY_NAME,
   WORKBOOK_RELS_ENTRY_NAME
-} = require('../big-table-import/zip-reader');
+} = require('../xlsx/zip-reader');
 const { scanSheetRows } = require('../big-table-import/row-scanner');
 const {
   TOOLBOX_XLSX_METADATA_LIMITS,
@@ -15,17 +15,17 @@ const {
   parseWorkbookRelationships,
   parseWorkbookXml,
   readToolboxMetadataEntryAsString
-} = require('../toolbox-format/xlsx-pass');
+} = require('../xlsx/workbook-parts');
 const {
   ToolboxXlsxFormatError,
   scanXlsxSheet
-} = require('../toolbox-format/xlsx-sheet-scanner');
+} = require('../xlsx/xlsx-sheet-scanner');
 const {
   createSourceStyleRegistryFromOoxml
-} = require('../toolbox-format/style-registry');
+} = require('../xlsx/style-registry');
 const {
   classifyExcelNumberFormat
-} = require('../toolbox-format/number-date');
+} = require('../xlsx/number-date');
 const {
   BANK_SHEET_NAME,
   POSITION_BANK_HEADERS,
@@ -41,7 +41,11 @@ const {
 } = require('../../constants/bank-statement-fields');
 const {
   loadSharedStringsProvider
-} = require('./shared-strings-provider');
+} = require('../xlsx/shared-strings-provider');
+const {
+  POSITION_SST_MEMORY_BUDGET_BYTES,
+  POSITION_SST_LRU_MAX_ENTRIES
+} = require('./constants');
 
 const HEADER_SCAN_MAX_COLUMNS = 1024;
 const WORKSHEET_RELATIONSHIP_SUFFIX = '/worksheet';
@@ -208,8 +212,10 @@ async function openPositionWorkbook(filePath, options = {}) {
     sharedStrings = await loadSharedStringsProvider(zip, sharedStringsEntry, {
       sourceFile,
       tempRoot: options.sstTempRoot,
-      memoryBudgetBytes: options.sstMemoryBudgetBytes,
-      lruMaxEntries: options.sstLruMaxEntries,
+      memoryBudgetBytes: options.sstMemoryBudgetBytes === undefined
+        ? POSITION_SST_MEMORY_BUDGET_BYTES : options.sstMemoryBudgetBytes,
+      lruMaxEntries: options.sstLruMaxEntries === undefined
+        ? POSITION_SST_LRU_MAX_ENTRIES : options.sstLruMaxEntries,
       preserveOnClose: options.preserveSstOnClose,
       cancelToken: options.cancelToken
     });

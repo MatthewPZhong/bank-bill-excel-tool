@@ -1,0 +1,356 @@
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+const { TextDecoder } = require('node:util');
+
+const {
+  EXCEL_CELL_TEXT_MAX_UTF16_UNITS,
+  assertExcelCellTextLength
+} = require('./excel-text');
+const {
+  loadToolboxSharedStrings
+} = require('./workbook-parts');
+// 公共缺省值独立于业务域；业务 adapter 显式选择自己的有效预算。
+const DEFAULT_SST_MEMORY_BUDGET_BYTES = 64 * 1024 * 1024;
+const DEFAULT_SST_LRU_MAX_ENTRIES = 8192;
+
+const INDEX_RECORD_BYTES = 12;
+const LENGTH_PREFIX_BYTES = 4;
+const MAX_SST_PAYLOAD_BYTES = EXCEL_CELL_TEXT_MAX_UTF16_UNITS * 4;
+const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
+
+class PositionSharedStringsError extends Error {
+  constructor(message, detailLines = []) {
+    super(message);
+    this.name = 'PositionSharedStringsError';
+    this.code = 'position-import-parser-parity-unproven';
+    this.detailLines = Array.isArray(detailLines) ? detailLines.slice() : [];
+  }
+}
+
+class MemorySharedStringsProvider {
+  constructor(values = []) {
+    this.values = values;
+    this.mode = 'memory';
+    this.count = values.length;
+    this.closed = false;
+  }
+
+  get(index) {
+    if (this.closed) throw new PositionSharedStringsError('shared strings provider 已关闭');
+    return Number.isSafeInteger(index) && index >= 0 ? this.values[index] : undefined;
+  }
+
+  async close() {
+    this.closed = true;
+    this.values.length = 0;
+  }
+}
+
+class AdaptiveSharedStringsProvider {
+  constructor({
+    tempRoot,
+    memoryBudgetBytes = DEFAULT_SST_MEMORY_BUDGET_BYTES,
+    lruMaxEntries = DEFAULT_SST_LRU_MAX_ENTRIES,
+    preserveOnClose = false,
+    cacheMaxBytes,
+    strictClose = false
+  } = {}) {
+    const budget = Number(memoryBudgetBytes);
+    const lruSize = Number(lruMaxEntries);
+    if (!Number.isSafeInteger(budget) || budget < 1) {
+      throw new TypeError('SST memory budget 必须是正安全整数');
+    }
+    if (!Number.isSafeInteger(lruSize) || lruSize < 1) {
+      throw new TypeError('SST LRU 上限必须是正安全整数');
+    }
+    if (cacheMaxBytes !== undefined && (!Number.isSafeInteger(cacheMaxBytes) || cacheMaxBytes < 1)) {
+      throw new TypeError('SST 字节缓存上限必须是正安全整数');
+    }
+    // 缺省路径不能解析为 cwd；只有本实例独占创建的目录才能清理。
+    this.tempRoot = typeof tempRoot === 'string' && tempRoot.trim() ? path.resolve(tempRoot) : '';
+    this.tempRootIdentity = null;
+    this.ownedSpillFiles = [];
+    this.memoryBudgetBytes = budget;
+    this.lruMaxEntries = lruSize;
+    this.preserveOnClose = preserveOnClose === true;
+    this.cacheMaxBytes = cacheMaxBytes;
+    this.strictClose = strictClose === true;
+    this.cacheBytes = 0;
+    this.peakCacheBytes = 0;
+    this.peakMemoryBytes = 0;
+    this.cacheHits = 0;
+    this.cacheMisses = 0;
+    this.closeError = null;
+    this.mode = 'memory';
+    this.count = 0;
+    this.estimatedMemoryBytes = 0;
+    this.values = [];
+    this.binPath = '';
+    this.idxPath = '';
+    this.binFd = null;
+    this.idxFd = null;
+    this.binOffset = 0;
+    this.cache = new Map();
+    this.closed = false;
+  }
+
+  _assertOpen() {
+    if (this.closed) throw new PositionSharedStringsError('shared strings provider 已关闭');
+  }
+
+  _openDiskMode() {
+    if (this.mode === 'disk') return;
+    if (!this.tempRoot) {
+      throw new PositionSharedStringsError('SST 超过内存预算但未提供临时目录');
+    }
+    // 已存在的目录（包括 cwd、符号链接和另一读取任务的目录）一律不接管。
+    fs.mkdirSync(this.tempRoot, { mode: 0o700 });
+    this.tempRootIdentity = fs.lstatSync(this.tempRoot, { bigint: true });
+    this.binPath = path.join(this.tempRoot, 'sst.bin');
+    this.idxPath = path.join(this.tempRoot, 'sst.idx');
+    this.binFd = fs.openSync(this.binPath, 'wx+', 0o600);
+    this.ownedSpillFiles.push({ path: this.binPath, identity: fs.fstatSync(this.binFd, { bigint: true }) });
+    this.idxFd = fs.openSync(this.idxPath, 'wx+', 0o600);
+    this.ownedSpillFiles.push({ path: this.idxPath, identity: fs.fstatSync(this.idxFd, { bigint: true }) });
+    this.mode = 'disk';
+    const buffered = this.values;
+    this.values = [];
+    this.count = 0;
+    for (const value of buffered) this._appendDisk(value);
+    this.estimatedMemoryBytes = 0;
+  }
+
+  _appendDisk(value) {
+    const payload = Buffer.from(value, 'utf8');
+    if (payload.length > MAX_SST_PAYLOAD_BYTES) {
+      throw new PositionSharedStringsError('单个 shared string 超出索引长度上限');
+    }
+    if (!Number.isSafeInteger(this.binOffset + LENGTH_PREFIX_BYTES + payload.length)) {
+      throw new PositionSharedStringsError('SST spill 文件偏移超出安全范围');
+    }
+    const prefix = Buffer.allocUnsafe(LENGTH_PREFIX_BYTES);
+    prefix.writeUInt32LE(payload.length, 0);
+    const payloadOffset = this.binOffset + LENGTH_PREFIX_BYTES;
+    this._writeExact(this.binFd, prefix, this.binOffset, 'sst.bin length prefix');
+    if (payload.length > 0) {
+      this._writeExact(this.binFd, payload, payloadOffset, 'sst.bin payload');
+    }
+    const index = Buffer.allocUnsafe(INDEX_RECORD_BYTES);
+    index.writeBigUInt64LE(BigInt(payloadOffset), 0);
+    index.writeUInt32LE(payload.length, 8);
+    this._writeExact(
+      this.idxFd,
+      index,
+      this.count * INDEX_RECORD_BYTES,
+      'sst.idx'
+    );
+    this.binOffset = payloadOffset + payload.length;
+    this.count += 1;
+  }
+
+  append(value) {
+    this._assertOpen();
+    const normalized = String(value == null ? '' : value);
+    assertExcelCellTextLength(normalized);
+    if (this.mode === 'disk') {
+      this._appendDisk(normalized);
+      return;
+    }
+    const estimate = this.cacheMaxBytes === undefined
+      ? Buffer.byteLength(normalized, 'utf8') + 16 : this._charge(normalized);
+    if (this.estimatedMemoryBytes + estimate > this.memoryBudgetBytes) {
+      this._openDiskMode();
+      this._appendDisk(normalized);
+      return;
+    }
+    this.values.push(normalized);
+    this.estimatedMemoryBytes += estimate;
+    this.peakMemoryBytes = Math.max(this.peakMemoryBytes, this.estimatedMemoryBytes);
+    this.count = this.values.length;
+  }
+
+  _charge(value) {
+    return Math.max(Buffer.byteLength(value, 'utf8'), value.length * 2) + 64;
+  }
+
+  _forget(index) {
+    if (!this.cache.has(index)) return;
+    if (this.cacheMaxBytes !== undefined) this.cacheBytes -= this._charge(this.cache.get(index));
+    this.cache.delete(index);
+  }
+
+  _remember(index, value) {
+    this._forget(index);
+    const chargedBytes = this.cacheMaxBytes === undefined ? 0 : this._charge(value);
+    if (this.cacheMaxBytes !== undefined && chargedBytes > this.cacheMaxBytes) return;
+    this.cache.set(index, value);
+    this.cacheBytes += chargedBytes;
+    while (this.cache.size > this.lruMaxEntries || (this.cacheMaxBytes !== undefined && this.cacheBytes > this.cacheMaxBytes)) {
+      const oldest = this.cache.keys().next().value;
+      this._forget(oldest);
+    }
+    this.peakCacheBytes = Math.max(this.peakCacheBytes, this.cacheBytes);
+  }
+
+  _writeExact(fd, buffer, position, label) {
+    let offset = 0;
+    while (offset < buffer.length) {
+      const bytesWritten = fs.writeSync(
+        fd,
+        buffer,
+        offset,
+        buffer.length - offset,
+        position + offset
+      );
+      if (bytesWritten <= 0) {
+        throw new PositionSharedStringsError(`${label} 写入不完整`);
+      }
+      offset += bytesWritten;
+    }
+  }
+
+  _readExact(fd, buffer, position, label) {
+    let offset = 0;
+    while (offset < buffer.length) {
+      const bytesRead = fs.readSync(
+        fd,
+        buffer,
+        offset,
+        buffer.length - offset,
+        position + offset
+      );
+      if (bytesRead <= 0) {
+        throw new PositionSharedStringsError(`${label} 已截断`);
+      }
+      offset += bytesRead;
+    }
+  }
+
+  get(index) {
+    this._assertOpen();
+    if (!Number.isSafeInteger(index) || index < 0 || index >= this.count) return undefined;
+    if (this.mode === 'memory') return this.values[index];
+    if (this.cache.has(index)) {
+      this.cacheHits += 1;
+      const cached = this.cache.get(index);
+      this._remember(index, cached);
+      return cached;
+    }
+    this.cacheMisses += 1;
+
+    const record = Buffer.allocUnsafe(INDEX_RECORD_BYTES);
+    this._readExact(this.idxFd, record, index * INDEX_RECORD_BYTES, 'sst.idx');
+    const offsetBig = record.readBigUInt64LE(0);
+    const length = record.readUInt32LE(8);
+    if (offsetBig > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new PositionSharedStringsError('sst.idx offset 超出安全范围');
+    }
+    const offset = Number(offsetBig);
+    if (offset < LENGTH_PREFIX_BYTES) {
+      throw new PositionSharedStringsError('sst.idx offset 非法');
+    }
+    const prefix = Buffer.allocUnsafe(LENGTH_PREFIX_BYTES);
+    this._readExact(this.binFd, prefix, offset - LENGTH_PREFIX_BYTES, 'sst.bin length prefix');
+    if (prefix.readUInt32LE(0) !== length) {
+      throw new PositionSharedStringsError('sst.bin 与 sst.idx 长度不一致');
+    }
+    if (length > MAX_SST_PAYLOAD_BYTES) {
+      throw new PositionSharedStringsError('sst.idx 文本长度超出 Excel 单元格上限');
+    }
+    const payload = Buffer.allocUnsafe(length);
+    if (length > 0) this._readExact(this.binFd, payload, offset, 'sst.bin payload');
+    let value;
+    try {
+      value = UTF8_DECODER.decode(payload);
+      assertExcelCellTextLength(value);
+    } catch (error) {
+      throw new PositionSharedStringsError(
+        'sst.bin 包含无效 UTF-8 或超长文本',
+        [error && error.message ? error.message : String(error)]
+      );
+    }
+    this._remember(index, value);
+    return value;
+  }
+
+  async close() {
+    if (this.closeError) throw this.closeError;
+    if (this.closed) return;
+    this.closed = true;
+    const errors = [];
+    if (this.binFd !== null) {
+      try { fs.closeSync(this.binFd); } catch (error) { errors.push(error); }
+      this.binFd = null;
+    }
+    if (this.idxFd !== null) {
+      try { fs.closeSync(this.idxFd); } catch (error) { errors.push(error); }
+      this.idxFd = null;
+    }
+    this.values.length = 0;
+    this.cache.clear();
+    this.cacheBytes = 0;
+    this.estimatedMemoryBytes = 0;
+    if (errors.length && this.strictClose) {
+      this.closeError = new AggregateError(errors, 'SST 文件关闭未确认，保留临时文件');
+      throw this.closeError;
+    }
+    if (this.tempRootIdentity && !this.preserveOnClose) {
+      try {
+        const sameIdentity = (actual, owned) => actual.dev === owned.dev && actual.ino === owned.ino;
+        const root = await fs.promises.lstat(this.tempRoot, { bigint: true });
+        if (!root.isDirectory() || !sameIdentity(root, this.tempRootIdentity)) {
+          throw new PositionSharedStringsError('SST 临时目录身份已变化，停止清理');
+        }
+        for (const file of this.ownedSpillFiles) {
+          const actual = await fs.promises.lstat(file.path, { bigint: true });
+          if (!actual.isFile() || !sameIdentity(actual, file.identity)) {
+            throw new PositionSharedStringsError('SST 临时文件身份已变化，停止清理');
+          }
+          await fs.promises.unlink(file.path);
+        }
+        // 不递归删除；出现非本实例创建的文件时保留目录并报错。
+        await fs.promises.rmdir(this.tempRoot);
+      } catch (error) {
+        this.closeError = error;
+        throw error;
+      }
+    }
+  }
+}
+
+async function loadSharedStringsProvider(zip, entry, options = {}) {
+  if (!entry) return new MemorySharedStringsProvider();
+  const provider = new AdaptiveSharedStringsProvider(options);
+  const cancelToken = options.cancelToken && typeof options.cancelToken === 'object'
+    ? options.cancelToken
+    : null;
+
+  try {
+    await loadToolboxSharedStrings(zip, entry, options.sourceFile || '', {
+      skipDeclaredSizeLimit: true,
+      cancelToken,
+      onValue(value) {
+        provider.append(value);
+      }
+    });
+    return provider;
+  } catch (error) {
+    try { await provider.close(); }
+    catch (closeError) {
+      if (options.strictClose === true) throw new AggregateError([error, closeError], 'SST 读取失败且关闭未确认', { cause: error });
+      throw closeError;
+    }
+    throw error;
+  }
+}
+
+module.exports = {
+  INDEX_RECORD_BYTES,
+  LENGTH_PREFIX_BYTES,
+  PositionSharedStringsError,
+  MemorySharedStringsProvider,
+  AdaptiveSharedStringsProvider,
+  loadSharedStringsProvider
+};

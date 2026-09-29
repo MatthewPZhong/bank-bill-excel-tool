@@ -1,7 +1,9 @@
 'use strict';
 
 const { randomUUID } = require('node:crypto');
-const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../execution-descriptors/composition');
 const { createBizOpCatalog } = require('./catalog');
 const { createBizOpPayloadStore } = require('./payload-store');
 const { createBizOpAdmission } = require('./admission');
@@ -22,7 +24,7 @@ const { createBizOpUpgrade } = require('./upgrade-main');
 const { RELEASE_GATES, evaluateReleaseGates } = require('./release-gates');
 const { ACTIONS, fail, hash } = require('./contracts');
 
-function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveService, getRuntime, budgetOptions, releaseGates = RELEASE_GATES, productionRequests = false }) {
+function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveService, getRuntime, budgetOptions, releaseGates = RELEASE_GATES, productionRequests = false, publicationPublish }) {
   releaseGates = structuredClone(releaseGates);
   const releaseDecision = evaluateReleaseGates(releaseGates);
   const catalog = createBizOpCatalog(db, { assertCommitReady(op) {
@@ -97,7 +99,7 @@ function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveServ
   }
   const mainBindings = { userDataDir, catalog, payloadStore, protection, admission, sources,
     prepareOperation, prepareDispatch, getArchiveService, forgetDispatch };
-  const publication = createBizOpPublication({ ...mainBindings, getRuntime });
+  const publication = createBizOpPublication({ ...mainBindings, getRuntime, publishArtifact: publicationPublish });
   const exports = createBizOpExportCoordinator({ ...mainBindings, publication });
   const metadata = createBizOpMetadata({ catalog, admission });
   const previews = createBizOpDeletePreview({ catalog, admission });

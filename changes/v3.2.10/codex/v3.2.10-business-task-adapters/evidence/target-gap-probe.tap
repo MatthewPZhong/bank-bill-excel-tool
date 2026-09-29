@@ -1,0 +1,396 @@
+TAP version 13
+# Subtest: 真实入口：首次 Hold gate 拒绝发生在 prepare 之前
+ok 1 - 真实入口：首次 Hold gate 拒绝发生在 prepare 之前
+  ---
+  duration_ms: 1.897167
+  type: 'test'
+  ...
+# Subtest: 真实入口：prepare 取消原样返回，prepare 自身释放资源且不进入 lifecycle
+ok 2 - 真实入口：prepare 取消原样返回，prepare 自身释放资源且不进入 lifecycle
+  ---
+  duration_ms: 0.492791
+  type: 'test'
+  ...
+# Subtest: 真实入口：prepare 抛错保留原异常，资源仍由 prepare 自身收口
+ok 3 - 真实入口：prepare 抛错保留原异常，资源仍由 prepare 自身收口
+  ---
+  duration_ms: 0.360667
+  type: 'test'
+  ...
+# Subtest: 目标：prepare 成功后 second-gate 失败须 abandon 一次并保留原异常
+not ok 4 - 目标：prepare 成功后 second-gate 失败须 abandon 一次并保留原异常
+  ---
+  duration_ms: 0.995584
+  type: 'test'
+  location: '/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/unit/main-process/archive-aware-prepared-resource-entry.test.js:98:3'
+  failureType: 'testCodeFailure'
+  error: |-
+    prepare 成功后的资源须进入唯一收口范围
+    
+    0 !== 1
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 1
+  actual: 0
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/unit/main-process/archive-aware-prepared-resource-entry.test.js:107:12)
+    async Test.run (node:internal/test_runner/test:1208:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:831:7)
+  ...
+# Subtest: 目标：second-gate 与 cleanup 双异常时保留前置原异常且不重试清理
+not ok 5 - 目标：second-gate 与 cleanup 双异常时保留前置原异常且不重试清理
+  ---
+  duration_ms: 0.384666
+  type: 'test'
+  location: '/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/unit/main-process/archive-aware-prepared-resource-entry.test.js:110:3'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    0 !== 1
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 1
+  actual: 0
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/unit/main-process/archive-aware-prepared-resource-entry.test.js:121:12)
+    async Test.run (node:internal/test_runner/test:1208:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:831:7)
+  ...
+# Subtest: 目标：prepare 成功后 archive-initialize 失败须 abandon 一次并保留原异常
+not ok 6 - 目标：prepare 成功后 archive-initialize 失败须 abandon 一次并保留原异常
+  ---
+  duration_ms: 0.399667
+  type: 'test'
+  location: '/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/unit/main-process/archive-aware-prepared-resource-entry.test.js:98:3'
+  failureType: 'testCodeFailure'
+  error: |-
+    prepare 成功后的资源须进入唯一收口范围
+    
+    0 !== 1
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 1
+  actual: 0
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/unit/main-process/archive-aware-prepared-resource-entry.test.js:107:12)
+    async Test.run (node:internal/test_runner/test:1208:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:831:7)
+  ...
+# Subtest: 目标：archive-initialize 与 cleanup 双异常时保留前置原异常且不重试清理
+not ok 7 - 目标：archive-initialize 与 cleanup 双异常时保留前置原异常且不重试清理
+  ---
+  duration_ms: 0.323333
+  type: 'test'
+  location: '/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/unit/main-process/archive-aware-prepared-resource-entry.test.js:110:3'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    0 !== 1
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 1
+  actual: 0
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/unit/main-process/archive-aware-prepared-resource-entry.test.js:121:12)
+    async Test.run (node:internal/test_runner/test:1208:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:831:7)
+  ...
+# Subtest: 真实入口：lifecycle 不可用沿用失败结果并 abandon 一次
+ok 8 - 真实入口：lifecycle 不可用沿用失败结果并 abandon 一次
+  ---
+  duration_ms: 0.32375
+  type: 'test'
+  ...
+# Subtest: 真实入口：lifecycle 不可用且清理抛错时沿用 cleanup error 优先级
+ok 9 - 真实入口：lifecycle 不可用且清理抛错时沿用 cleanup error 优先级
+  ---
+  duration_ms: 0.340125
+  type: 'test'
+  ...
+# Subtest: 真实入口：第三次 Hold gate 拒绝先于 prepared.beforeStart，abandon 一次
+ok 10 - 真实入口：第三次 Hold gate 拒绝先于 prepared.beforeStart，abandon 一次
+  ---
+  duration_ms: 0.661209
+  type: 'test'
+  ...
+# Subtest: 真实入口：prepared.beforeStart 拒绝尚未接管执行，abandon 一次
+ok 11 - 真实入口：prepared.beforeStart 拒绝尚未接管执行，abandon 一次
+  ---
+  duration_ms: 0.465667
+  type: 'test'
+  ...
+# Subtest: 真实入口：已进入 lifecycle 的 beforeStart 与 cleanup 双异常沿用 cleanup 优先级
+ok 12 - 真实入口：已进入 lifecycle 的 beforeStart 与 cleanup 双异常沿用 cleanup 优先级
+  ---
+  duration_ms: 0.396
+  type: 'test'
+  ...
+# Subtest: 真实入口：lifecycle 提前返回 busy 时不接管资源，abandon 一次
+ok 13 - 真实入口：lifecycle 提前返回 busy 时不接管资源，abandon 一次
+  ---
+  duration_ms: 0.3265
+  type: 'test'
+  ...
+# Subtest: 真实入口：Position admission 拒绝尚未接管资源，也不做业务 settlement
+ok 14 - 真实入口：Position admission 拒绝尚未接管资源，也不做业务 settlement
+  ---
+  duration_ms: 0.450416
+  type: 'test'
+  ...
+# Subtest: 真实入口：template:rename 执行接管后成功不再 abandon
+ok 15 - 真实入口：template:rename 执行接管后成功不再 abandon
+  ---
+  duration_ms: 0.402625
+  type: 'test'
+  ...
+# Subtest: 真实入口：template:rename 执行接管后抛错不再 abandon
+ok 16 - 真实入口：template:rename 执行接管后抛错不再 abandon
+  ---
+  duration_ms: 0.347333
+  type: 'test'
+  ...
+# Subtest: 真实入口：position-reconciliation:run 执行接管后成功不再 abandon
+ok 17 - 真实入口：position-reconciliation:run 执行接管后成功不再 abandon
+  ---
+  duration_ms: 0.426834
+  type: 'test'
+  ...
+# Subtest: 真实入口：position-reconciliation:run 执行接管后抛错不再 abandon
+ok 18 - 真实入口：position-reconciliation:run 执行接管后抛错不再 abandon
+  ---
+  duration_ms: 0.450833
+  type: 'test'
+  ...
+# Subtest: 真实入口：lifecycle 拒绝后的延迟 abandon 纳入 archiveOperationTail
+ok 19 - 真实入口：lifecycle 拒绝后的延迟 abandon 纳入 archiveOperationTail
+  ---
+  duration_ms: 4.157417
+  type: 'test'
+  ...
+# Subtest: 目标：lifecycle 不可用路径的延迟 abandon 也须纳入 archiveOperationTail
+not ok 20 - 目标：lifecycle 不可用路径的延迟 abandon 也须纳入 archiveOperationTail
+  ---
+  duration_ms: 0.7125
+  type: 'test'
+  location: '/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/unit/main-process/archive-aware-prepared-resource-entry.test.js:251:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    退出等待须覆盖 prepare 成功后的全部资源收口
+    
+    true !== false
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: false
+  actual: true
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/unit/main-process/archive-aware-prepared-resource-entry.test.js:264:12)
+    async Test.run (node:internal/test_runner/test:1208:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:831:7)
+  ...
+# Subtest: 目标：真实入口同步调用 lifecycle 抛错也须 abandon 一次
+not ok 21 - 目标：真实入口同步调用 lifecycle 抛错也须 abandon 一次
+  ---
+  duration_ms: 0.589791
+  type: 'test'
+  location: '/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/unit/main-process/archive-aware-prepared-resource-entry.test.js:273:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    0 !== 1
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 1
+  actual: 0
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/unit/main-process/archive-aware-prepared-resource-entry.test.js:279:10)
+    async Test.run (node:internal/test_runner/test:1208:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:831:7)
+  ...
+# Subtest: G2-T2：adapter 构建失败须 abandon 一次；当前生产注册点不存在，待真实接线后补执行断言
+ok 22 - G2-T2：adapter 构建失败须 abandon 一次；当前生产注册点不存在，待真实接线后补执行断言 # TODO
+  ---
+  duration_ms: 0.029125
+  type: 'test'
+  ...
+# Subtest: 接管前异步失败会等待 abandon，成功清理后保留同一原错误
+ok 23 - 接管前异步失败会等待 abandon，成功清理后保留同一原错误
+  ---
+  duration_ms: 0.726958
+  type: 'test'
+  ...
+# Subtest: 已有 lifecycle finally 双异常继续以 cleanup error 为主，且不自动重试
+ok 24 - 已有 lifecycle finally 双异常继续以 cleanup error 为主，且不自动重试
+  ---
+  duration_ms: 0.223708
+  type: 'test'
+  ...
+# Subtest: 接管后业务失败不调用通用 abandon
+ok 25 - 接管后业务失败不调用通用 abandon
+  ---
+  duration_ms: 0.077917
+  type: 'test'
+  ...
+# Subtest: 目标：同步 work 抛错也必须 abandon 一次
+not ok 26 - 目标：同步 work 抛错也必须 abandon 一次
+  ---
+  duration_ms: 0.591792
+  type: 'test'
+  location: '/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/unit/main-process/prepared-resource-scope.test.js:72:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    0 !== 1
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 1
+  actual: 0
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/unit/main-process/prepared-resource-scope.test.js:86:10)
+    Test.runInAsyncScope (node:async_hooks:226:14)
+    Test.run (node:internal/test_runner/test:1201:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+    Test.postRun (node:internal/test_runner/test:1330:19)
+    Test.run (node:internal/test_runner/test:1258:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:831:7)
+  ...
+# Subtest: Position eager 保留 生成 token 身份优先级
+ok 27 - Position eager 保留 生成 token 身份优先级
+  ---
+  duration_ms: 1.859042
+  type: 'test'
+  ...
+# Subtest: Position eager 保留 显式 prepared 身份优先级
+ok 28 - Position eager 保留 显式 prepared 身份优先级
+  ---
+  duration_ms: 0.513
+  type: 'test'
+  ...
+# Subtest: Position deferred 兼容能力 保留 生成 token 身份优先级
+ok 29 - Position deferred 兼容能力 保留 生成 token 身份优先级
+  ---
+  duration_ms: 0.378791
+  type: 'test'
+  ...
+# Subtest: Position deferred 兼容能力 保留 显式 prepared 身份优先级
+ok 30 - Position deferred 兼容能力 保留 显式 prepared 身份优先级
+  ---
+  duration_ms: 0.345833
+  type: 'test'
+  ...
+# Subtest: Position no-file 保留 生成 token 身份优先级
+ok 31 - Position no-file 保留 生成 token 身份优先级
+  ---
+  duration_ms: 0.371
+  type: 'test'
+  ...
+# Subtest: Position no-file 保留 显式 prepared 身份优先级
+ok 32 - Position no-file 保留 显式 prepared 身份优先级
+  ---
+  duration_ms: 0.327708
+  type: 'test'
+  ...
+# Subtest: Position legacy 兼容能力 保留 生成 token 身份优先级
+ok 33 - Position legacy 兼容能力 保留 生成 token 身份优先级
+  ---
+  duration_ms: 0.335708
+  type: 'test'
+  ...
+# Subtest: Position legacy 兼容能力 保留 显式 prepared 身份优先级
+ok 34 - Position legacy 兼容能力 保留 显式 prepared 身份优先级
+  ---
+  duration_ms: 0.35275
+  type: 'test'
+  ...
+# Subtest: 普通任务直接透传 prepared hooks、身份和 args，不调用 Position admission
+ok 35 - 普通任务直接透传 prepared hooks、身份和 args，不调用 Position admission
+  ---
+  duration_ms: 0.478125
+  type: 'test'
+  ...
+# Subtest: Position finalizer 先执行，prepared afterTerminal 后执行；第一步失败不继续
+ok 36 - Position finalizer 先执行，prepared afterTerminal 后执行；第一步失败不继续
+  ---
+  duration_ms: 1.411167
+  type: 'test'
+  ...
+# Subtest: toolbox:merge receipt hook 优先于 prepared hook，并保留空 toolbox 数组优先级
+ok 37 - toolbox:merge receipt hook 优先于 prepared hook，并保留空 toolbox 数组优先级
+  ---
+  duration_ms: 0.435583
+  type: 'test'
+  ...
+# Subtest: toolbox:split:export receipt hook 优先于 prepared hook，并保留空 toolbox 数组优先级
+ok 38 - toolbox:split:export receipt hook 优先于 prepared hook，并保留空 toolbox 数组优先级
+  ---
+  duration_ms: 0.324167
+  type: 'test'
+  ...
+# Subtest: vccFinancialOp:data-manager:export receipt hook 优先于 prepared hook，并保留空 toolbox 数组优先级
+ok 39 - vccFinancialOp:data-manager:export receipt hook 优先于 prepared hook，并保留空 toolbox 数组优先级
+  ---
+  duration_ms: 0.403833
+  type: 'test'
+  ...
+# Subtest: vccFinancialOp:export:import-audit receipt hook 优先于 prepared hook，并保留空 toolbox 数组优先级
+ok 40 - vccFinancialOp:export:import-audit receipt hook 优先于 prepared hook，并保留空 toolbox 数组优先级
+  ---
+  duration_ms: 0.296625
+  type: 'test'
+  ...
+# Subtest: vccFinancialOp:export:result receipt hook 优先于 prepared hook，并保留空 toolbox 数组优先级
+ok 41 - vccFinancialOp:export:result receipt hook 优先于 prepared hook，并保留空 toolbox 数组优先级
+  ---
+  duration_ms: 0.297667
+  type: 'test'
+  ...
+# Subtest: 其他 publication-only 领域仍透传 prepared hook，不扩大公共 receipt 确认范围
+ok 42 - 其他 publication-only 领域仍透传 prepared hook，不扩大公共 receipt 确认范围
+  ---
+  duration_ms: 0.342208
+  type: 'test'
+  ...
+# Subtest: Position manifest durable=true 时保持结果及清理边界
+ok 43 - Position manifest durable=true 时保持结果及清理边界
+  ---
+  duration_ms: 0.5825
+  type: 'test'
+  ...
+# Subtest: Position manifest durable=false 时保持结果及清理边界
+ok 44 - Position manifest durable=false 时保持结果及清理边界
+  ---
+  duration_ms: 0.317416
+  type: 'test'
+  ...
+# Subtest: Position current wrapper 业务与 settlement 双异常保留 settlement 优先，通用 abandon 不接管
+ok 45 - Position current wrapper 业务与 settlement 双异常保留 settlement 优先，通用 abandon 不接管
+  ---
+  duration_ms: 0.405667
+  type: 'test'
+  ...
+1..45
+# tests 45
+# suites 0
+# pass 37
+# fail 7
+# cancelled 0
+# skipped 0
+# todo 1
+# duration_ms 144.079875

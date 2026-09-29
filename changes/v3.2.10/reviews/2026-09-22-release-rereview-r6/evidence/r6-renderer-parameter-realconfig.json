@@ -1,0 +1,42 @@
+[
+  {
+    "scanner": "WORKTREE",
+    "name": "destructured_parameter_after",
+    "source": "function provideReviewEnvelope(){return {api:{run(){}}};}const reviewEnvelope=provideReviewEnvelope();function selectReviewApi({api}){return api;}reviewEnvelope.api={run(){}};const reviewOther=selectReviewApi(reviewEnvelope);reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewEnvelope.api});",
+    "baseViolations": 0,
+    "probeViolations": [],
+    "boundaryCount": 20,
+    "runtime": {
+      "same": true,
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run",
+        "outsideScope"
+      ],
+      "whole": false,
+      "extraCallable": true,
+      "extraResult": true
+    }
+  },
+  {
+    "scanner": "WORKTREE",
+    "name": "destructured_parameter_before_safe",
+    "source": "function provideReviewEnvelope(){return {api:{run(){}}};}const reviewEnvelope=provideReviewEnvelope();function selectReviewApi({api}){return api;}const reviewOther=selectReviewApi(reviewEnvelope);reviewEnvelope.api={run(){}};reviewOther.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:reviewEnvelope.api});",
+    "baseViolations": 0,
+    "probeViolations": [],
+    "boundaryCount": 20,
+    "runtime": {
+      "same": false,
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run"
+      ],
+      "whole": false,
+      "extraCallable": false
+    }
+  }
+]

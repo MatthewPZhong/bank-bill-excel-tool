@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
-const vm = require('node:vm');
+const { createPositionTaskOwner } = require('../../src/main-process/position-reconciliation/task-owner');
 const XLSX = require('xlsx');
 const { createPositionReconciliationService } = require('../../src/main-process/position-reconciliation/service');
 const { SOURCE_DEFINITIONS, SOURCE_TYPES } = require('../../src/main-process/position-reconciliation/constants');
@@ -15,7 +15,9 @@ const { createArchiveService } = require('../../src/main-process/archive-center/
 const { createArchiveCenterController } = require('../../src/main-process/archive-center/controller');
 const { createArchiveOutboxStore } = require('../../src/main-process/archive-center/outbox-store');
 const { createTaskLifecycle } = require('../../src/main-process/archive-center/task-lifecycle');
-const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../../src/main-process/execution-descriptors/composition');
 const { normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
 const { createPositionOwnedDeleteSourceResolver, positionDeleteSourceReferences } = require('../../src/main-process/archive-center/position-owned-delete-sources');
 
@@ -31,19 +33,15 @@ function writeWorkbook(filePath, sheetName, headers, rows) {
   XLSX.writeFile(workbook, filePath);
 }
 
-async function cleanupThroughMain(controller, position, userDataDir, sourcePaths) {
-  const main = fs.readFileSync(path.join(PROJECT_ROOT, 'src/main.js'), 'utf8');
-  const start = main.indexOf('function positionArchiveStagingRoot()');
-  const end = main.indexOf('async function cleanupPositionArchiveStaging(runtime)', start);
-  assert.ok(start >= 0 && end > start);
-  const scope = { fs, path, database: { dbPath: path.join(userDataDir, 'tool-data.sqlite') },
-    archiveCenterService: controller, positionReconciliationService: position,
-    readPositionPendingOperation: () => null,
-    positionPersistentStagingProtectionPaths: require('../../src/main-process/position-reconciliation/operation-lifecycle').positionPersistentStagingProtectionPaths,
-    filterStagingPathsWithoutProtectedSources: require('../../src/main-process/position-reconciliation/input-staging').filterStagingPathsWithoutProtectedSources };
-  vm.createContext(scope);
-  vm.runInContext(main.slice(start, end), scope);
-  await scope.cleanupPositionArchiveSourcePaths(sourcePaths);
+async function cleanupThroughPositionOwner(controller, position, userDataDir, sourcePaths) {
+  const owner = createPositionTaskOwner({
+    settingsAvailable: () => true,
+    readSetting: () => '',
+    getDatabasePath: () => path.join(userDataDir, 'tool-data.sqlite'),
+    getArchiveCenter: () => controller,
+    getCurrentService: () => position
+  });
+  await owner.cleanupPositionArchiveSourcePaths(sourcePaths);
 }
 
 async function verifyPositionFilePlanDeletion(parentDirectory, options = {}) {
@@ -209,7 +207,7 @@ async function verifyPositionFilePlanDeletion(parentDirectory, options = {}) {
       assert.equal(deletion.deletedCount, 1);
       assert.equal(deletion.resolvedFilteredCount, 1);
       if (options.sourceMissing) {
-        await cleanupThroughMain(controller, position, userDataDir, preparePlan.inputs.map((file) => file.filePath));
+        await cleanupThroughPositionOwner(controller, position, userDataDir, preparePlan.inputs.map((file) => file.filePath));
         for (const report of reports) assert.equal(fs.existsSync(report.filePath), false);
       }
     }

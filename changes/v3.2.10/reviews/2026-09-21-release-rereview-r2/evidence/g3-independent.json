@@ -1,0 +1,81 @@
+{
+  "head": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
+  "candidate": "current uncommitted repair",
+  "results": [
+    {
+      "kind": "refund",
+      "choice": "onConfirm",
+      "passed": [
+        "blocked-close",
+        "mounted-non-top",
+        "submitted-once",
+        "repeat",
+        "new-window-preserved",
+        "navigation-stale"
+      ],
+      "calls": [
+        "batchImport"
+      ]
+    },
+    {
+      "kind": "refund",
+      "choice": "onMiddle",
+      "passed": [
+        "blocked-close",
+        "mounted-non-top",
+        "submitted-once",
+        "repeat",
+        "new-window-preserved",
+        "navigation-stale"
+      ],
+      "calls": [
+        "bankRun"
+      ]
+    },
+    {
+      "kind": "c3",
+      "choice": "onConfirm",
+      "passed": [
+        "blocked-close",
+        "mounted-non-top",
+        "submitted-once",
+        "repeat",
+        "new-window-preserved",
+        "navigation-stale"
+      ],
+      "calls": [
+        "linkedImport"
+      ]
+    },
+    {
+      "kind": "c3",
+      "choice": "onMiddle",
+      "passed": [
+        "blocked-close",
+        "mounted-non-top",
+        "submitted-once",
+        "repeat",
+        "new-window-preserved",
+        "navigation-stale"
+      ],
+      "calls": [
+        "bankRun"
+      ]
+    },
+    {
+      "kind": "gateway",
+      "choice": "onPick",
+      "passed": [
+        "blocked-close",
+        "mounted-non-top",
+        "submitted-once",
+        "repeat",
+        "new-window-preserved",
+        "navigation-stale"
+      ],
+      "calls": [
+        "gatewayRun:2"
+      ]
+    }
+  ]
+}

@@ -7,6 +7,7 @@ const { canonicalJsonSnapshot } = require('../background-execution/canonical-jso
 const { isValidTaskStagingResourceId, resolveTaskStagingResource } = require('../statement-worker/staging-ownership');
 
 const NEW_ACCOUNT_GENERATION_ACTION = 'new-account:generate';
+const NEW_ACCOUNT_SAVE_AS_ACTION = 'new-account:save-as';
 const NEW_ACCOUNT_GENERATION_SCHEMA_VERSION = 1;
 const MAX_INPUT_BYTES = 256 * 1024;
 const MAX_RESULT_BYTES = 256 * 1024;
@@ -443,6 +444,7 @@ module.exports = {
   MAX_RECORDS,
   MAX_RESULT_BYTES,
   NEW_ACCOUNT_GENERATION_ACTION,
+  NEW_ACCOUNT_SAVE_AS_ACTION,
   NEW_ACCOUNT_GENERATION_SCHEMA_VERSION,
   NEW_ACCOUNT_GENERATION_SHAPE_LIMITS,
   NewAccountGenerationContractError,

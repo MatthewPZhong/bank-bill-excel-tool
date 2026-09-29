@@ -1,0 +1,236 @@
+[
+  {
+    "scanner": "HEAD",
+    "name": "bound_factory",
+    "source": "function provideBoundReviewApi(api){return api;}const reviewBound=provideBoundReviewApi.bind(null,window.desktopApi);window.BankStatementController.createBankStatementController({api:reviewBound({run(){}})});",
+    "baseViolations": 146,
+    "probeViolations": [
+      {
+        "rule": "ARCH-RENDERER-SCOPE",
+        "boundaryId": "renderer-bank-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 117,
+        "message": "工厂字段 api 不能注入完整可变对象或不透明 alias",
+        "functionPath": null
+      }
+    ],
+    "runtime": {
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "outsideScope"
+      ],
+      "whole": false,
+      "extraCallable": true
+    }
+  },
+  {
+    "scanner": "HEAD",
+    "name": "factory_alias",
+    "source": "function provideReviewApi(){const api={run(){}};const alias=api;alias.outsideScope=window.desktopApi.outsideScope;return api;}window.BankStatementController.createBankStatementController({api:provideReviewApi()});",
+    "baseViolations": 146,
+    "probeViolations": [
+      {
+        "rule": "ARCH-RENDERER-SCOPE",
+        "boundaryId": "renderer-bank-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 126,
+        "message": "工厂字段 api 不能注入完整可变对象或不透明 alias",
+        "functionPath": null
+      }
+    ],
+    "runtime": {
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run",
+        "outsideScope"
+      ],
+      "whole": false,
+      "extraCallable": true
+    }
+  },
+  {
+    "scanner": "HEAD",
+    "name": "spread_alias",
+    "source": "const reviewApi={run(){}};const reviewAlias=reviewApi;reviewAlias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:{...reviewApi}});",
+    "baseViolations": 146,
+    "probeViolations": [
+      {
+        "rule": "ARCH-RENDERER-SCOPE",
+        "boundaryId": "renderer-bank-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 110,
+        "message": "工厂字段 api 不能注入完整可变对象或不透明 alias",
+        "functionPath": null
+      },
+      {
+        "rule": "ARCH-STATIC-COVERAGE",
+        "boundaryId": "renderer-bank-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 110,
+        "message": "scoped api 未提供可解释方法集合",
+        "functionPath": null
+      }
+    ],
+    "runtime": {
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run",
+        "outsideScope"
+      ],
+      "whole": false,
+      "extraCallable": true
+    }
+  },
+  {
+    "scanner": "HEAD",
+    "name": "initial_info_nested",
+    "source": "window.StatementController.createStatementController({initialInfo:{api:window.desktopApi}});",
+    "baseViolations": 146,
+    "probeViolations": [
+      {
+        "rule": "ARCH-RENDERER-SCOPE",
+        "boundaryId": "renderer-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 0,
+        "message": "工厂注入了未授权字段 initialInfo",
+        "functionPath": null
+      }
+    ],
+    "runtime": {
+      "keys": [
+        "initialInfo"
+      ],
+      "apiKeys": [],
+      "whole": true,
+      "extraCallable": false
+    }
+  },
+  {
+    "scanner": "WORKTREE",
+    "name": "bound_factory",
+    "source": "function provideBoundReviewApi(api){return api;}const reviewBound=provideBoundReviewApi.bind(null,window.desktopApi);window.BankStatementController.createBankStatementController({api:reviewBound({run(){}})});",
+    "baseViolations": 0,
+    "probeViolations": [
+      {
+        "rule": "ARCH-RENDERER-SCOPE",
+        "boundaryId": "renderer-bank-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 117,
+        "message": "scoped api 未提供可解释方法集合",
+        "functionPath": null
+      }
+    ],
+    "runtime": {
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "outsideScope"
+      ],
+      "whole": false,
+      "extraCallable": true
+    }
+  },
+  {
+    "scanner": "WORKTREE",
+    "name": "factory_alias",
+    "source": "function provideReviewApi(){const api={run(){}};const alias=api;alias.outsideScope=window.desktopApi.outsideScope;return api;}window.BankStatementController.createBankStatementController({api:provideReviewApi()});",
+    "baseViolations": 0,
+    "probeViolations": [
+      {
+        "rule": "ARCH-RENDERER-SCOPE",
+        "boundaryId": "renderer-bank-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 126,
+        "message": "scoped api 未授权字段 outsideScope",
+        "functionPath": null
+      }
+    ],
+    "runtime": {
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run",
+        "outsideScope"
+      ],
+      "whole": false,
+      "extraCallable": true
+    }
+  },
+  {
+    "scanner": "WORKTREE",
+    "name": "spread_alias",
+    "source": "const reviewApi={run(){}};const reviewAlias=reviewApi;reviewAlias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:{...reviewApi}});",
+    "baseViolations": 0,
+    "probeViolations": [
+      {
+        "rule": "ARCH-RENDERER-SCOPE",
+        "boundaryId": "renderer-bank-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 110,
+        "message": "scoped api 未授权字段 outsideScope",
+        "functionPath": null
+      }
+    ],
+    "runtime": {
+      "keys": [
+        "api"
+      ],
+      "apiKeys": [
+        "run",
+        "outsideScope"
+      ],
+      "whole": false,
+      "extraCallable": true
+    }
+  },
+  {
+    "scanner": "WORKTREE",
+    "name": "initial_info_nested",
+    "source": "window.StatementController.createStatementController({initialInfo:{api:window.desktopApi}});",
+    "baseViolations": 0,
+    "probeViolations": [
+      {
+        "rule": "ARCH-RENDERER-SCOPE",
+        "boundaryId": "renderer-statement",
+        "from": "src/renderer.js",
+        "to": null,
+        "line": 2318,
+        "column": 0,
+        "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+        "functionPath": null
+      }
+    ],
+    "runtime": {
+      "keys": [
+        "initialInfo"
+      ],
+      "apiKeys": [],
+      "whole": true,
+      "extraCallable": false
+    }
+  }
+]

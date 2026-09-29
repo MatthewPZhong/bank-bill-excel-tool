@@ -8,17 +8,17 @@ const sax = require('sax');
 const {
   openZipWithEntries,
   readEntryAsString
-} = require('../backend/big-table-import/zip-reader');
+} = require('../backend/xlsx/zip-reader');
 const {
   OFFICE_RELATIONSHIP_NAMESPACES,
   PACKAGE_RELATIONSHIP_NAMESPACES,
   SPREADSHEETML_NAMESPACES,
   namespaceAllowed,
   saxAttributeValue
-} = require('../backend/toolbox-format/ooxml-namespaces');
+} = require('../backend/xlsx/ooxml-namespaces');
 const {
   normalizeCell: normalizeOutputHeaderCell
-} = require('../backend/toolbox-format/model');
+} = require('../backend/xlsx/model');
 const {
   openToolboxXlsxPass
 } = require('../backend/toolbox-format/xlsx-pass');
@@ -26,7 +26,7 @@ const {
   ToolboxExcelTextError,
   assertExcelCellTextLength,
   encodeExcelStXstring
-} = require('../backend/toolbox-format/excel-text');
+} = require('../backend/xlsx/excel-text');
 const { WATERMARK_AUTHOR } = require('./workbook-watermark');
 
 const MAX_DATA_ROWS_PER_SHEET = 1048575;
@@ -284,7 +284,7 @@ function defaultProjectCell(cell, warningCollector = null) {
   try {
     // 正式统一模型负责十进制、日期系统和长 ID 输出决策。
     // eslint-disable-next-line global-require
-    const { projectOutputCell } = require('../backend/toolbox-format/model');
+    const { projectOutputCell } = require('../backend/xlsx/model');
     if (typeof projectOutputCell === 'function') return projectOutputCell(cell, warningCollector);
   } catch (_error) {
     // 增量接线时保留下方兼容投影。
@@ -515,7 +515,7 @@ function loadOutputRegistry(budgets) {
   try {
     // style-registry 是工具箱专用纯 Node 模块；在旧分支或隔离单测中不存在时使用本文件的保守实现。
     // eslint-disable-next-line global-require
-    const { OutputStyleRegistry } = require('../backend/toolbox-format/style-registry');
+    const { OutputStyleRegistry } = require('../backend/xlsx/style-registry');
     if (typeof OutputStyleRegistry === 'function') return new OutputStyleRegistry({ budgets });
   } catch (_error) {
     // Fallback 仅用于兼容增量接线；生产 3.1.2 会提供正式 registry。

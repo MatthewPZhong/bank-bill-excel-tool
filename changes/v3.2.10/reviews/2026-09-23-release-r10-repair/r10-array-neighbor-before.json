@@ -1,0 +1,215 @@
+{
+  "mode": "minimal",
+  "boundaryCount": 1,
+  "boundaries": [],
+  "baseline": null,
+  "results": [
+    {
+      "name": "factory-empty-extended",
+      "safe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();function make(value){const args=[];args[0]=value;return args;}const list=[];list.push(...make(clean));const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      },
+      "violations": [],
+      "coverage": {
+        "scannedFiles": 1,
+        "parsedFiles": 1,
+        "literalEdges": 0,
+        "workerEdges": 0,
+        "globalEdges": 2,
+        "unresolved": 0,
+        "dynamicSites": 0,
+        "parseErrors": 0
+      }
+    },
+    {
+      "name": "factory-initial-replaced",
+      "safe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();function make(value){const args=[old];args[0]=value;return args;}const list=[];list.push(...make(clean));const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 264,
+          "message": "scoped api 未授权字段 outsideScope",
+          "evidenceId": "f85d3b8bcc5965c720fab7693054d227050e65528d81cde4c056d15690a964bd",
+          "functionPath": null
+        }
+      ],
+      "coverage": {
+        "scannedFiles": 1,
+        "parsedFiles": 1,
+        "literalEdges": 0,
+        "workerEdges": 0,
+        "globalEdges": 2,
+        "unresolved": 0,
+        "dynamicSites": 0,
+        "parseErrors": 0
+      }
+    },
+    {
+      "name": "factory-empty-pushed",
+      "safe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();function make(value){const args=[];args.push(value);return args;}const list=[];list.push(...make(clean));const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      },
+      "violations": [],
+      "coverage": {
+        "scannedFiles": 1,
+        "parsedFiles": 1,
+        "literalEdges": 0,
+        "workerEdges": 0,
+        "globalEdges": 2,
+        "unresolved": 0,
+        "dynamicSites": 0,
+        "parseErrors": 0
+      }
+    },
+    {
+      "name": "helper-source-extension",
+      "safe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();const args=[];function extend(target,value){target[0]=value;}extend(args,clean);const list=[];list.push(...args);const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 272,
+          "message": "scoped api 未授权字段 outsideScope",
+          "evidenceId": "f85d3b8bcc5965c720fab7693054d227050e65528d81cde4c056d15690a964bd",
+          "functionPath": null
+        }
+      ],
+      "coverage": {
+        "scannedFiles": 1,
+        "parsedFiles": 1,
+        "literalEdges": 0,
+        "workerEdges": 0,
+        "globalEdges": 2,
+        "unresolved": 0,
+        "dynamicSites": 0,
+        "parseErrors": 0
+      }
+    },
+    {
+      "name": "independent-factory-safe",
+      "safe": true,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();function make(value){const args=[];args[0]=value;return args;}const first=make(old);const second=make(clean);const list=[];list.push(...first);const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run"
+        ],
+        "extraCallable": false,
+        "same": false
+      },
+      "violations": [],
+      "coverage": {
+        "scannedFiles": 1,
+        "parsedFiles": 1,
+        "literalEdges": 0,
+        "workerEdges": 0,
+        "globalEdges": 2,
+        "unresolved": 0,
+        "dynamicSites": 0,
+        "parseErrors": 0
+      }
+    },
+    {
+      "name": "factory-before-replacement-safe",
+      "safe": true,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();function make(){return [old];}const args=make();const list=[];list.push(...args);args[0]=clean;const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run"
+        ],
+        "extraCallable": false,
+        "same": false
+      },
+      "violations": [],
+      "coverage": {
+        "scannedFiles": 1,
+        "parsedFiles": 1,
+        "literalEdges": 0,
+        "workerEdges": 0,
+        "globalEdges": 2,
+        "unresolved": 0,
+        "dynamicSites": 0,
+        "parseErrors": 0
+      }
+    },
+    {
+      "name": "self-spread-source-mutator",
+      "safe": false,
+      "source": "function provide(){return {api:{run(){}}};}const old=provide();const clean=provide();const args=[clean];args.push(...args);const list=[];list.push(...args);const alias=list[0].api;alias.outsideScope=window.desktopApi.outsideScope;window.BankStatementController.createBankStatementController({api:clean.api});",
+      "runtime": {
+        "keys": [
+          "run",
+          "outsideScope"
+        ],
+        "extraCallable": true,
+        "extraResult": true,
+        "same": true
+      },
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-bank-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 230,
+          "message": "scoped api 未授权字段 outsideScope",
+          "evidenceId": "f85d3b8bcc5965c720fab7693054d227050e65528d81cde4c056d15690a964bd",
+          "functionPath": null
+        }
+      ],
+      "coverage": {
+        "scannedFiles": 1,
+        "parsedFiles": 1,
+        "literalEdges": 0,
+        "workerEdges": 0,
+        "globalEdges": 2,
+        "unresolved": 0,
+        "dynamicSites": 0,
+        "parseErrors": 0
+      }
+    }
+  ]
+}

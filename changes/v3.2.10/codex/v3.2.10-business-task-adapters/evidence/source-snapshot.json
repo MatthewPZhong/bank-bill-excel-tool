@@ -1,0 +1,205 @@
+{
+  "time": "2026-09-20T13:59:53.039314+00:00",
+  "workdir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters",
+  "branch": "codex/v3.2.10-business-task-adapters",
+  "head": "5ccbf3f022488026f725a5111be00422a04ce221",
+  "initialBase": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "fixedG1": "5ccbf3f022488026f725a5111be00422a04ce221",
+  "platform": "macOS-15.7.4-arm64-arm-64bit-Mach-O",
+  "node": "v25.8.0",
+  "files": [
+    {
+      "path": "scripts/integration/task-adapter-recovery.js",
+      "sha256": "d09e85166df4b4328b5f76232f933cf300c033db26bdbd059c667bbf296dd2e2"
+    },
+    {
+      "path": "src/main-process/archive-center/controller.js",
+      "sha256": "ea51c106a4c876dddffea2e958e1e96be33096bc3ea7b120cc73d893ee3e839b"
+    },
+    {
+      "path": "src/main-process/archive-center/terminal-route-registry.js",
+      "sha256": "7458381a02ac457f5067d22c10185b391251132311dca43ee02fd0e3aab40446"
+    },
+    {
+      "path": "src/main-process/biz-op-recon-run-data.js",
+      "sha256": "9fbf74a6032b98d47eeefa4dc8a2309bc3c07f026294e88b9ae9abc15bb28c0b"
+    },
+    {
+      "path": "src/main-process/pending-archive-lineage.js",
+      "sha256": "3b4e31f27899e9e05e746d211d332ea831f7598d5d09fc0d031bd41833b6a184"
+    },
+    {
+      "path": "src/main-process/position-reconciliation/interactive-task-preflight.js",
+      "sha256": "69a7415b96d611b416d9d0db28515ba4f1fb6a3a7b57ce64baf3836122866a85"
+    },
+    {
+      "path": "src/main-process/position-reconciliation/task-adapter.js",
+      "sha256": "e9ffbd792615d8dd8a768beec2a7af74c270d7ea4801e36bbad912653ebb0b44"
+    },
+    {
+      "path": "src/main-process/position-reconciliation/task-owner.js",
+      "sha256": "4a3341991c3fa2100fd2f2f5f2d66e1acbc29a58dcb990ac5941baedb0c969e3"
+    },
+    {
+      "path": "src/main-process/pre-fund-archive-lineage.js",
+      "sha256": "12e4568f199dcbea38b255b0dcee1b7ee08a115decb2f392c703a96adb91cd24"
+    },
+    {
+      "path": "src/main-process/task-adapter-composition.js",
+      "sha256": "17ddb9f3a25204766811c8fd73f4521f37af552da168c214cc705f0fe0fecee7"
+    },
+    {
+      "path": "src/main-process/task-adapters/README.md",
+      "sha256": "645519f8df0cf32bd171b08d00ab4a561736ca4d7f485723f04cd0dd78962c4f"
+    },
+    {
+      "path": "src/main-process/task-adapters/passthrough.js",
+      "sha256": "f508ed0418d6af9a50d1af7f547f706c1afa090bba9a42ec384557daa085245c"
+    },
+    {
+      "path": "src/main-process/task-adapters/prepared-resources.js",
+      "sha256": "0582024c6a7dceb7d3e279396158be13262f78f6e666edbf10bb4231a64b7f70"
+    },
+    {
+      "path": "src/main-process/task-adapters/registry.js",
+      "sha256": "63b29148c4c8e047f2bbf111d7e2eeb4407fd9618ec0982b07354dc16b7c702b"
+    },
+    {
+      "path": "src/main-process/toolbox-background/task-adapter.js",
+      "sha256": "b42be48a5793635086142544b8911a6f34e034f23d2ec75e520389b21a67d065"
+    },
+    {
+      "path": "src/main-process/vcc-financial-op-output/task-adapter.js",
+      "sha256": "057dc88ac22b89f138dc2d4555ba9e11de3e3bfffffb2c033395e8594e41c8ad"
+    },
+    {
+      "path": "src/main.js",
+      "sha256": "0ed3e6a1a1b467b9e608d608c8017405fe5262f732de70ae8d4fb41dddd24635"
+    },
+    {
+      "path": "tests/fixtures/archive-permanent-delete-position-fileplan.js",
+      "sha256": "f80b8dd811ce30fb3b377533985932f8a9389be958f8b6af9f17cee986c9ab2c"
+    },
+    {
+      "path": "tests/helpers/archive-aware-operation-harness.js",
+      "sha256": "4fefa7ea668780f80d686cc528ecaa7ba3a1295e677be416de3b252c54417d93"
+    },
+    {
+      "path": "tests/helpers/archive-terminal-routes.js",
+      "sha256": "012041c548d1779feb2e76a6fc9ab286993c84e1ede43e4650b69c4bb7dca512"
+    },
+    {
+      "path": "tests/unit/archive-center-ui-contract.test.js",
+      "sha256": "1926be73400981a56afc1edf83c825bc992c8d88baeb6115b7428ce56ae3149b"
+    },
+    {
+      "path": "tests/unit/main-process/archive-aware-prepared-resource-entry.test.js",
+      "sha256": "e3f79634b5a29273f425dea713545c5cd930f8744ca16bc0ef10fd9eaebeb09b"
+    },
+    {
+      "path": "tests/unit/main-process/archive-center-controller.test.js",
+      "sha256": "7ade987477adc2543a1775c2b0973866beabeabc1629a10879782808067e9cef"
+    },
+    {
+      "path": "tests/unit/main-process/archive-delete-owner-completion.test.js",
+      "sha256": "fef24a5260b370faa3e95c5e76ca8c233ecc319ba5a4d54b30943b3fef8a1c19"
+    },
+    {
+      "path": "tests/unit/main-process/archive-file-owner-recovery.test.js",
+      "sha256": "24243a2fabb8484ab3ea620a7b7bf7daf927746da4b0376ab3553cf7d0621faf"
+    },
+    {
+      "path": "tests/unit/main-process/archive-position-fileplan-delete.test.js",
+      "sha256": "f2ceed7bb8a3420c537a2d1f5d635a00f79e126b3f8b045d7232e4353f06448c"
+    },
+    {
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "sha256": "0d0ea37bbbbff70a491c533f505cc8de3cc58a608bd1c7fadda0aae9ec5de58e"
+    },
+    {
+      "path": "tests/unit/main-process/archive-terminal-route-registry.test.js",
+      "sha256": "7b08d7f8dea777f9ba3e31d192d85bb38a288c21b31fcb2c9490a5adf6bea07f"
+    },
+    {
+      "path": "tests/unit/main-process/background-execution/recovery-contract-c2.test.js",
+      "sha256": "967aca8db02f6a829df0c4df0a3d8b1dcea64bd6cddd13e8588f4284c359236d"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-archive-lineage.test.js",
+      "sha256": "228856a8aca6792340cdb1d525251bcaa6617205a5c1241d56347ca8cd6da17c"
+    },
+    {
+      "path": "tests/unit/main-process/pending-archive-lineage.test.js",
+      "sha256": "283676458cde44386b553a18d60e23b3e8adb5a0bad253b960248bf54124a9ff"
+    },
+    {
+      "path": "tests/unit/main-process/position-interactive-task-preflight.test.js",
+      "sha256": "7f5c7b23262210dbe958fc8f8a3a9bc2c9f8796e64db8afa4d78eee65a64799f"
+    },
+    {
+      "path": "tests/unit/main-process/position-reconciliation-operation-lifecycle.test.js",
+      "sha256": "f27d442f1573aa5f423ba7e67fd0cfcc8cd673944139c01527cb81d104b37268"
+    },
+    {
+      "path": "tests/unit/main-process/position-task-adapter.test.js",
+      "sha256": "de0b46612e75192659d5ca2ec12c8e21d1af7e0e9bc751e0474b8fa56e324cff"
+    },
+    {
+      "path": "tests/unit/main-process/prepared-resource-scope.test.js",
+      "sha256": "6494ddfb52f0edef536180a447388b8dd4d22fdb17b965d601bc928e9dcea80a"
+    },
+    {
+      "path": "tests/unit/main-process/run-check-worker-pool.test.js",
+      "sha256": "a35b30cf34cb9e87018740705cad373509bf369549d4af07c9e734f76e730619"
+    },
+    {
+      "path": "tests/unit/main-process/statement-big-account-preview.test.js",
+      "sha256": "08c7502e339330f469ca844e2077e01db732eb9bb05eb941b6deb012d1fbdc65"
+    },
+    {
+      "path": "tests/unit/main-process/task-adapter-composition.test.js",
+      "sha256": "9ced653102c968a093d0a057ded287d93d4fe9fcc83220244edb5c0ccac9b11e"
+    },
+    {
+      "path": "tests/unit/main-process/task-adapter-registry.test.js",
+      "sha256": "4a34cf5dea99cc687b53ca6324a162c51605d237f1d947380354db1aa1b6ccb0"
+    },
+    {
+      "path": "tests/unit/main-process/task-adapters.test.js",
+      "sha256": "0e2be21e6a0d9402faa7835e87ab6aaa2ff4f5766db2dd95d8ce04ad0de4fc9a"
+    },
+    {
+      "path": "tests/unit/main-process/toolbox-archive-integration.test.js",
+      "sha256": "a7c4f4352bded961299c4e8e832078b3861e86a955ce39b46f247c643ee58c80"
+    },
+    {
+      "path": "tests/unit/main-process/vcc-financial-op-archive-integration.test.js",
+      "sha256": "886ee961b732a2065ce0fac91a629447f374993bc787e4b3438a12763b43e2dd"
+    },
+    {
+      "path": "tests/unit/renderer-position-reconciliation.test.js",
+      "sha256": "4e8cd1056555d76151e23d32cc2f0aaadc64c4c5626e20ea4a730405d9ef6fec"
+    },
+    {
+      "path": "tests/unit/renderer-pre-fund-reconciliation.test.js",
+      "sha256": "828ed14814c659708842e4242602505974dcbaa60ad5c3f18e0899c65185ef53"
+    }
+  ],
+  "snapshotUpdatedAt": "2026-09-20T14:33:09.362001+00:00",
+  "duringValidationChanges": {
+    "paths": [
+      "tests/unit/renderer-position-reconciliation.test.js"
+    ],
+    "reason": "迁移遗留Renderer静态合同，在最终全量尚运行main-process测试、尚未加载该文件时修复；定向29/29PASS",
+    "productionDrift": false
+  },
+  "finalValidationCommand": "UNIT_TEST_CONCURRENCY=4 npm run release-check",
+  "changesForFinalValidation": {
+    "paths": [
+      "src/main-process/task-adapters/README.md",
+      "src/main-process/task-adapters/prepared-resources.js",
+      "tests/unit/main-process/prepared-resource-scope.test.js"
+    ],
+    "reason": "scope默认/兜底日志接入项目共享appendModuleLog，保留资源与错误优先级；新增真实临时日志回归"
+  }
+}

@@ -22,7 +22,9 @@ if (!isMainThread && parentPort) {
     parentPort.postMessage({
       type: 'done',
       jobId: message.jobId,
-      result: { recovered: [], label }
+      result: message.op === 'discover-recovery'
+        ? { root: message.payload.userDataDir, indexDigest: 'fixture-empty', records: [], skippedActive: [] }
+        : { recovered: [], deferred: [], skippedActive: [], indexDigest: 'fixture-empty', resultingIndexDigest: 'fixture-empty' }
     });
   });
 }

@@ -1,0 +1,15 @@
+{
+  "reason": "默认并发下完整unit输出超过5分钟未推进，停止仅本worktree已核实进程树后以UNIT_TEST_CONCURRENCY=2重跑",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-storage-execution-separation",
+  "rootPid": 87284,
+  "terminatedPids": [
+    87284,
+    87350,
+    50219,
+    61887,
+    3644,
+    3806,
+    86394
+  ],
+  "removedStoppedTestDirectory": "/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/r4-zYt2ej"
+}

@@ -1,0 +1,50 @@
+[
+  {
+    "path": "changes/v3.2.10/README.md",
+    "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/README.md",
+    "sourceSha256": "9d32565d6d969ff812c7c7dc96079148d9aeecffb53f2966b1e0d9e5eb56975a",
+    "copiedUnchanged": true
+  },
+  {
+    "path": "changes/v3.2.10/review-response.md",
+    "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/review-response.md",
+    "sourceSha256": "35c5ecd928ee37989e58737f43fb26fc5761187d2f9e7783cc836a68f6f2afdb",
+    "copiedUnchanged": true
+  },
+  {
+    "path": "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md",
+    "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md",
+    "sourceSha256": "a3f05ca08266bd374e83a5f7ffbea4d1993a8823fe53897b9eeefd38346f3527",
+    "copiedUnchanged": true
+  },
+  {
+    "path": "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/spec.md",
+    "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/spec.md",
+    "sourceSha256": "40cd1d7f7b60dc38cb0ec570f1e06d097a36755d19b6477799ccb8e656d08ed1",
+    "copiedUnchanged": true
+  },
+  {
+    "path": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/techdoc.md",
+    "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-storage-execution-separation/techdoc.md",
+    "sourceSha256": "683971ee22adc8fdc2f73840836d6ae5ff402dd83f8b23c716cdaac655127b3a",
+    "copiedUnchanged": true
+  },
+  {
+    "path": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/spec.md",
+    "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-storage-execution-separation/spec.md",
+    "sourceSha256": "046854b1c4573dda6f281ffc37caae184e264883ea35ea58a6810550e28ea7e8",
+    "copiedUnchanged": true
+  },
+  {
+    "path": "changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/techdoc.md",
+    "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/techdoc.md",
+    "sourceSha256": "7786bb05fd68c2431b8c4624a36f5672fe32ef2a10bd370bc87d19227883410c",
+    "copiedUnchanged": true
+  },
+  {
+    "path": "changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/spec.md",
+    "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/spec.md",
+    "sourceSha256": "6cb978388c50e35baf50fbaf2f082eca1b10f17808f111322ae3df2952505d91",
+    "copiedUnchanged": true
+  }
+]

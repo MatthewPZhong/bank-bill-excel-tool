@@ -7,10 +7,12 @@ const os = require('node:os');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const { createArchiveService } = require('../../../src/main-process/archive-center/archive-service');
-const { createArchiveCenterController } = require('../../../src/main-process/archive-center/controller');
+const { createArchiveControllerWithRoutes: createArchiveCenterController } = require('../../helpers/archive-terminal-routes');
 const { createArchiveOutboxStore } = require('../../../src/main-process/archive-center/outbox-store');
 const { createTaskLifecycle } = require('../../../src/main-process/archive-center/task-lifecycle');
-const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../../../src/main-process/execution-descriptors/composition');
 const { normalizeFilePlanV1, artifactManifestFromFilePlan } = require('../../../src/main-process/archive-center/file-plan');
 const { createArchiveRepository } = require('../../../src/backend/database/archive-repository');
 const runDataStore = require('../../../src/backend/run-data-store');

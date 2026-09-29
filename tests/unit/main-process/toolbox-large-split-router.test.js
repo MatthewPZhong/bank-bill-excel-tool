@@ -19,7 +19,7 @@ const XLSX = require('xlsx');
 const JSZip = require('jszip');
 
 // router 通过模块对象调用 sizePreflight.collectEntrySizes，故此处覆盖同一模块对象的属性即可拦截。
-const sizePreflight = require('../../../src/backend/pending-import/xlsx-size-preflight');
+const sizePreflight = require('../../../src/backend/xlsx/legacy/entry-size-preflight');
 const router = require('../../../src/main-process/toolbox-large-split-router');
 const { shouldUseLargeChannel, SINGLE_WORKSHEET_LARGE_BYTES } = router;
 

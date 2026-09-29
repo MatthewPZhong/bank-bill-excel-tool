@@ -1,0 +1,186 @@
+{
+  "coverage": {
+    "scannedFiles": 765,
+    "parsedFiles": 765,
+    "literalEdges": 2405,
+    "workerEdges": 64,
+    "globalEdges": 59,
+    "unresolved": 2,
+    "dynamicSites": 33,
+    "parseErrors": 0
+  },
+  "violations": [],
+  "activeBoundaries": [
+    "publication-recovery-entry"
+  ],
+  "allowedSites": [
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "functionPath": "runWorkerJob.<anonymous:1>.<anonymous:4>",
+      "callee": "onWorkerExit",
+      "evidenceId": "ab2f86aeb298c450cbd7c00111eda42c2674625ec54750a7dd852fdae0544f5b",
+      "reason": "worker exit 事件的通知回调仅报告 jobId/op/code；它不发送 worker operation，不执行恢复。",
+      "match": [
+        {
+          "line": 101,
+          "column": 14
+        }
+      ]
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication-worker.js",
+      "functionPath": null,
+      "callee": "require",
+      "evidenceId": "30bbe89cb848f9e356b9f721a92ac6ea3b811e15ac253a725bd485275c43c997",
+      "reason": "worker 的确切生产装配；恢复调用只在 execute-recovery 分支，并由 raw API 验证 workerAuthority 与授权凭证。",
+      "match": [
+        {
+          "line": 12,
+          "column": 4
+        }
+      ]
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication-worker.js",
+      "functionPath": "runPublicationOperation",
+      "callee": "recoverPendingToolboxPublications",
+      "evidenceId": "f42081c25415b384de94863067e36ff933f869e962ddc980afb54ecab0e7c22e",
+      "reason": "execute-recovery 分支向真实 API 传入 workerAuthority/authorization；旧 recover 明确拒绝，授权合同由 G1 owner/producer 测试证明。",
+      "match": [
+        {
+          "line": 42,
+          "column": 11
+        }
+      ]
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "functionPath": "createToolboxPublicationDispatcher.recoverWithinQueue",
+      "callee": "worker",
+      "evidenceId": "ae0bca254de2b6f4327a74aa8ea688c9697b5e1ecc831062cd511690e77b9cb8",
+      "reason": "持有 FIFO 和 lease 的授权事务：发现、owner 全根授权后 seal 授权凭证，再发送 execute-recovery；准确调用指纹不得移动复用。",
+      "match": [
+        {
+          "line": 143,
+          "column": 25
+        }
+      ]
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "functionPath": "runWorkerJob.<anonymous:1>",
+      "callee": "postMessage",
+      "evidenceId": "3420e9da5eca5d5ceaba4892b7f4b35ce02f1cac7bd0ae70071ebdefce14b5ad",
+      "reason": "仅传输内部 worker job；worker recovery 必须持有当前 workerKey 生成的凭证，调用位置不授予新恢复操作。G1 真 worker 授权和退出屏障测试覆盖该传输。",
+      "match": [
+        {
+          "line": 110,
+          "column": 6
+        }
+      ]
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "functionPath": "createToolboxPublicationDispatcher.worker",
+      "callee": "runWorkerJob",
+      "evidenceId": "b3c138f57ab28a504aaef8de905c81b3588fff6762d49720beaf5238d7751ce1",
+      "reason": "dispatcher 私有 transport 向固定 worker 传递 op/payload 与 workerKey；恢复命令在 recoverWithinQueue 内先授权封签，底层 API 再校验一次性凭证，精确调用之外不得复用。",
+      "match": [
+        {
+          "line": 131,
+          "column": 11
+        }
+      ]
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "functionPath": "recoverOneJournal",
+      "callee": "recoverPreparingIntent",
+      "evidenceId": "d3359118d9b5296f40e63216a98b2f0b5d655f5073bd6966bdb03f01f05c68fc",
+      "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。",
+      "match": [
+        {
+          "line": 1907,
+          "column": 11
+        }
+      ]
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "functionPath": "recoverOneJournal",
+      "callee": "recoverPreparingIntent",
+      "evidenceId": "d9ee5947fed2c2494f0227d9dcb4170adf5c84a58c3e0a40fcd5ee88466f4c66",
+      "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。",
+      "match": [
+        {
+          "line": 1910,
+          "column": 11
+        }
+      ]
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "functionPath": "recoverOneJournal",
+      "callee": "recoverFinalizingIntent",
+      "evidenceId": "23ff24a04ecb3593f36244c2a1c8ef4743d87c44d6377e1484230d488514ffea",
+      "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。",
+      "match": [
+        {
+          "line": 1916,
+          "column": 11
+        }
+      ]
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "functionPath": "recoverOneJournal",
+      "callee": "recoverFinalizingIntent",
+      "evidenceId": "1a832603801cd7c0eaab8609e839055ca4370e37c23256fe393b8779167edceb",
+      "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。",
+      "match": [
+        {
+          "line": 1923,
+          "column": 11
+        }
+      ]
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "functionPath": "recoverOneJournal",
+      "callee": "recoverPreparingIntent",
+      "evidenceId": "c5b63f1acce3e3ebc22a002939121dbe0920768a3689bc7e651e36ac22f1b72f",
+      "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。",
+      "match": [
+        {
+          "line": 1939,
+          "column": 13
+        }
+      ]
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "functionPath": "recoverPendingToolboxPublications.<anonymous:1>",
+      "callee": "recoverOneJournal",
+      "evidenceId": "df3aee65058c90c8fef713c3a623309b3e4d6a9f958506095d8267e65b069d09",
+      "reason": "raw 恢复入口先验证 workerAuthority/authorization，再逐项验证完整 grant 与 snapshot；仅此互斥事务中的调用可以进入内部恢复。",
+      "match": [
+        {
+          "line": 2139,
+          "column": 21
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,91 @@
+{
+  "evidenceAssertions": "PASS",
+  "reviewOutcome": "ONE_NEW_P2",
+  "findings": [
+    {
+      "id": "RR14-01",
+      "priority": 2,
+      "title": "do首轮不能证明其中写入及条件测试必执行",
+      "minimalReproductions": [
+        "do-break-before-write",
+        "do-continue-before-write",
+        "do-break-skips-test"
+      ],
+      "beforeDiagnostics": [
+        1,
+        1,
+        1
+      ],
+      "currentDiagnostics": [
+        0,
+        0,
+        0
+      ],
+      "actualMainCaseBefore": 1,
+      "actualMainCaseCurrent": 0,
+      "runtimeMainCaseTrue": "old retains callable outsideScope",
+      "runtimeMainCaseFalse": "old only has run"
+    }
+  ],
+  "priorFindingClosure": {
+    "id": "RR13-01",
+    "originalCases": 4,
+    "originalActualConfigurationCases": 2,
+    "currentDiagnostics": [
+      1,
+      1,
+      0,
+      0
+    ],
+    "actualDiagnostics": [
+      1,
+      0
+    ]
+  },
+  "neighborCases": 6,
+  "neighborBranchVmRuns": 12,
+  "actualRendererNewRepresentativeCases": 2,
+  "actualRendererBoundaryCount": 20,
+  "orderCases": 8,
+  "arrayRegressionCases": 14,
+  "sharedAndBindingCases": 62,
+  "architecture": {
+    "tests": 621,
+    "pass": 621,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "officialCli": {
+    "command": "node scripts/check-architecture.js --json /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/reviews/2026-09-28-release-rereview-r14/evidence/architecture-check.json",
+    "exitCode": 0,
+    "active": 31,
+    "pending": 0,
+    "partial": 0,
+    "violations": 0,
+    "stale": 0,
+    "coverage": {
+      "scannedFiles": 765,
+      "parsedFiles": 765,
+      "literalEdges": 2405,
+      "workerEdges": 64,
+      "globalEdges": 59,
+      "unresolved": 2,
+      "dynamicSites": 33,
+      "parseErrors": 0,
+      "pendingBoundaries": [],
+      "partialBoundaries": []
+    },
+    "historyCommits": 21
+  },
+  "fullGateRerun": false,
+  "fullGateInputMatch": {
+    "headMatches": true,
+    "gateInputCount": 1710,
+    "currentGateInputCount": 1710,
+    "inputSetMatches": true,
+    "changedGateInputs": []
+  },
+  "limitations": "PASS means archived evidence assertions hold, not checker correctness or release acceptance."
+}

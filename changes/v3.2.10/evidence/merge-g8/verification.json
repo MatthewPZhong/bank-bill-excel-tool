@@ -1,0 +1,58 @@
+[
+  {
+    "name": "release-check",
+    "command": [
+      "npm",
+      "run",
+      "release-check"
+    ],
+    "commit": "f8fd640586f9119b091148151e1beb48f9552c5d",
+    "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+    "startedAt": "2026-09-21T10:25:10.940103+00:00",
+    "finishedAt": "2026-09-21T10:25:22.209533+00:00",
+    "elapsedSeconds": 11.269,
+    "exitCode": 1,
+    "log": "release-check.log"
+  },
+  {
+    "name": "architecture-tests",
+    "command": [
+      "node",
+      "--test",
+      "--test-concurrency=1",
+      "tests/unit/architecture/adversarial.test.js",
+      "tests/unit/architecture/cli.test.js",
+      "tests/unit/architecture/policy-history.test.js",
+      "tests/unit/architecture/review-regressions.test.js",
+      "tests/unit/architecture/review-round2.test.js",
+      "tests/unit/architecture/review-round3.test.js",
+      "tests/unit/architecture/review-round4.test.js",
+      "tests/unit/architecture/review-round5.test.js",
+      "tests/unit/architecture/rules.test.js",
+      "tests/unit/architecture/scan.test.js"
+    ],
+    "commit": "f8fd640586f9119b091148151e1beb48f9552c5d",
+    "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+    "startedAt": "2026-09-21T10:25:22.209929+00:00",
+    "finishedAt": "2026-09-21T10:26:02.382192+00:00",
+    "elapsedSeconds": 40.172,
+    "exitCode": 0,
+    "log": "architecture-tests.log"
+  },
+  {
+    "name": "architecture-check",
+    "command": [
+      "node",
+      "scripts/check-architecture.js",
+      "--json",
+      "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10/changes/v3.2.10/evidence/merge-g8/architecture-check.json"
+    ],
+    "commit": "f8fd640586f9119b091148151e1beb48f9552c5d",
+    "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+    "startedAt": "2026-09-21T10:26:02.382666+00:00",
+    "finishedAt": "2026-09-21T10:26:10.292279+00:00",
+    "elapsedSeconds": 7.91,
+    "exitCode": 1,
+    "log": "architecture-check.log"
+  }
+]

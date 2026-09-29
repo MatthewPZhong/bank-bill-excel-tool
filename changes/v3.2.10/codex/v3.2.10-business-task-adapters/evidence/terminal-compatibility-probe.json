@@ -1,0 +1,2072 @@
+{
+  "generatedAt": "2026-09-20T14:01:20.483Z",
+  "worktree": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters",
+  "baseline": "5ccbf3f022488026f725a5111be00422a04ce221",
+  "head": "5ccbf3f022488026f725a5111be00422a04ce221",
+  "nodeVersion": "v25.8.0",
+  "command": "NODE_PATH=/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules node changes/v3.2.10/codex/v3.2.10-business-task-adapters/evidence/terminal-compatibility-probe.js",
+  "probeSha256": "02a0524804f42543c9f5923d9c8c35ec80486da96aeeeec6ac215ce994f04201",
+  "baselineControllerSha256": "0898ebfdb1d8270472883fe285e1788ff3f082e67e80c50318908ff2f03be59b",
+  "sources": [
+    {
+      "file": "src/main.js",
+      "sha256": "0ed3e6a1a1b467b9e608d608c8017405fe5262f732de70ae8d4fb41dddd24635"
+    },
+    {
+      "file": "src/main-process/archive-center/controller.js",
+      "sha256": "ea51c106a4c876dddffea2e958e1e96be33096bc3ea7b120cc73d893ee3e839b"
+    },
+    {
+      "file": "src/main-process/archive-center/terminal-route-registry.js",
+      "sha256": "7458381a02ac457f5067d22c10185b391251132311dca43ee02fd0e3aab40446"
+    },
+    {
+      "file": "src/main-process/archive-center/task-lifecycle.js",
+      "sha256": "b417f50bc3d8ae6b5889d391d8caa85a042956cb5ef3cd303fa2f512900eb330"
+    },
+    {
+      "file": "src/main-process/archive-center/worker-operation-context.js",
+      "sha256": "0714d7b41a98aada25824c1f47a4eb96b748a00f0e03a2a49c4e62a4be0aedf0"
+    },
+    {
+      "file": "src/main-process/position-reconciliation/task-owner.js",
+      "sha256": "4a3341991c3fa2100fd2f2f5f2d66e1acbc29a58dcb990ac5941baedb0c969e3"
+    },
+    {
+      "file": "src/main-process/position-reconciliation/task-adapter.js",
+      "sha256": "e9ffbd792615d8dd8a768beec2a7af74c270d7ea4801e36bbad912653ebb0b44"
+    },
+    {
+      "file": "src/main-process/pending-archive-lineage.js",
+      "sha256": "3b4e31f27899e9e05e746d211d332ea831f7598d5d09fc0d031bd41833b6a184"
+    },
+    {
+      "file": "src/main-process/pre-fund-archive-lineage.js",
+      "sha256": "12e4568f199dcbea38b255b0dcee1b7ee08a115decb2f392c703a96adb91cd24"
+    },
+    {
+      "file": "src/main-process/biz-op-recon-run-data.js",
+      "sha256": "9fbf74a6032b98d47eeefa4dc8a2309bc3c07f026294e88b9ae9abc15bb28c0b"
+    },
+    {
+      "file": "src/backend/biz-op-legacy-guard.js",
+      "sha256": "b3ce652cdbdc8beb1b372f458955f698a9fd83f3d714415c3bc8d290e3ffc6ce"
+    },
+    {
+      "file": "src/main-process/toolbox-background/task-adapter.js",
+      "sha256": "b42be48a5793635086142544b8911a6f34e034f23d2ec75e520389b21a67d065"
+    },
+    {
+      "file": "src/main-process/vcc-financial-op-output/task-adapter.js",
+      "sha256": "057dc88ac22b89f138dc2d4555ba9e11de3e3bfffffb2c033395e8594e41c8ad"
+    },
+    {
+      "file": "src/main-process/toolbox-archive-recovery.js",
+      "sha256": "b2f4a88a7596bb35d0d38e2a4688ac796f33773bf02a0ca99127b7e0d3c64bda"
+    }
+  ],
+  "sampleCount": 162,
+  "differences": [],
+  "status": "PASS",
+  "boundary": "真实领域 normalizer 和 registry；只比较普通持久数据的 normalizer 返回/异常，不代表数据库回放、GUI 或平台验收。",
+  "results": [
+    {
+      "sample": "afterTerminal=null",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true}}"
+      }
+    },
+    {
+      "sample": "afterTerminal=null",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true}}"
+      }
+    },
+    {
+      "sample": "afterTerminal=null",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true}}"
+      }
+    },
+    {
+      "sample": "afterTerminal=undefined",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true}}"
+      }
+    },
+    {
+      "sample": "afterTerminal=undefined",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true}}"
+      }
+    },
+    {
+      "sample": "afterTerminal=undefined",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true}}"
+      }
+    },
+    {
+      "sample": "afterTerminal=false",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      }
+    },
+    {
+      "sample": "afterTerminal=false",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      }
+    },
+    {
+      "sample": "afterTerminal=false",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      }
+    },
+    {
+      "sample": "afterTerminal=0",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      }
+    },
+    {
+      "sample": "afterTerminal=0",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      }
+    },
+    {
+      "sample": "afterTerminal=0",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      }
+    },
+    {
+      "sample": "afterTerminal=[]",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      }
+    },
+    {
+      "sample": "afterTerminal=[]",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      }
+    },
+    {
+      "sample": "afterTerminal=[]",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      }
+    },
+    {
+      "sample": "afterTerminal={}",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal.route 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal.route 为空"
+      }
+    },
+    {
+      "sample": "afterTerminal={}",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal.route 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal.route 为空"
+      }
+    },
+    {
+      "sample": "afterTerminal={}",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal.route 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal.route 为空"
+      }
+    },
+    {
+      "sample": "afterTerminal=\"\"",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      }
+    },
+    {
+      "sample": "afterTerminal=\"\"",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      }
+    },
+    {
+      "sample": "afterTerminal=\"\"",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      }
+    },
+    {
+      "sample": "afterTerminal=\"bad\"",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      }
+    },
+    {
+      "sample": "afterTerminal=\"bad\"",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      }
+    },
+    {
+      "sample": "afterTerminal=\"bad\"",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal 格式非法"
+      }
+    },
+    {
+      "sample": "afterTerminal={\"route\":\"unknown\"}",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "不支持的任务终态 afterTerminal route：unknown"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "不支持的任务终态 afterTerminal route：unknown"
+      }
+    },
+    {
+      "sample": "afterTerminal={\"route\":\"unknown\"}",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "不支持的任务终态 afterTerminal route：unknown"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "不支持的任务终态 afterTerminal route：unknown"
+      }
+    },
+    {
+      "sample": "afterTerminal={\"route\":\"unknown\"}",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "不支持的任务终态 afterTerminal route：unknown"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "不支持的任务终态 afterTerminal route：unknown"
+      }
+    },
+    {
+      "sample": "afterTerminal={\"route\":\"\"}",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal.route 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal.route 为空"
+      }
+    },
+    {
+      "sample": "afterTerminal={\"route\":\"\"}",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal.route 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal.route 为空"
+      }
+    },
+    {
+      "sample": "afterTerminal={\"route\":\"\"}",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal.route 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "任务终态意图 afterTerminal.route 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=undefined;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=undefined;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=undefined;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=null;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=null;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=null;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=\"\";route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=\"\";route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=\"\";route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=\"  \";route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=\"  \";route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=\"  \";route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=false;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=false;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=false;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=0;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=0;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=0;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=1;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"1\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"1\"}}"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=1;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"1\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"1\"}}"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=1;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"1\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"1\"}}"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=\" token \";route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=\" token \";route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=\" token \";route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=[];route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=[];route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=[];route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Position terminal route.operationToken 为空"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken={};route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"[object Object]\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"[object Object]\"}}"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken={};route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"[object Object]\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"[object Object]\"}}"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken={};route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"[object Object]\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"[object Object]\"}}"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=[\"token\"];route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=[\"token\"];route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "position-reconciliation.operationToken=[\"token\"];route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"position-reconciliation\",\"operationToken\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=undefined;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=undefined;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=undefined;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=null;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=null;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=null;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=\"\";route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=\"\";route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=\"\";route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=\"  \";route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=\"  \";route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=\"  \";route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=false;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=false;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=false;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=0;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=0;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=0;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=1;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"1\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"1\"}}"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=1;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"1\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"1\"}}"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=1;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"1\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"1\"}}"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=\" token \";route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=\" token \";route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=\" token \";route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=[];route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=[];route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=[];route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pending terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId={};route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"[object Object]\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"[object Object]\"}}"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId={};route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"[object Object]\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"[object Object]\"}}"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId={};route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"[object Object]\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"[object Object]\"}}"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=[\"token\"];route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=[\"token\"];route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "pending-run.taskRunId=[\"token\"];route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pending-run\",\"taskRunId\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=undefined;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=undefined;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=undefined;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=null;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=null;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=null;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=\"\";route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=\"\";route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=\"\";route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=\"  \";route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=\"  \";route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=\"  \";route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=false;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=false;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=false;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=0;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=0;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=0;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=1;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"1\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"1\"}}"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=1;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"1\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"1\"}}"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=1;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"1\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"1\"}}"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=\" token \";route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=\" token \";route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=\" token \";route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=[];route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=[];route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=[];route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Biz OP terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId={};route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"[object Object]\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"[object Object]\"}}"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId={};route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"[object Object]\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"[object Object]\"}}"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId={};route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"[object Object]\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"[object Object]\"}}"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=[\"token\"];route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=[\"token\"];route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "biz-op-run.taskRunId=[\"token\"];route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"biz-op-run\",\"taskRunId\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=undefined;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=undefined;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=undefined;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=null;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=null;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=null;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=\"\";route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=\"\";route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=\"\";route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=\"  \";route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=\"  \";route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=\"  \";route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=false;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=false;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=false;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=0;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=0;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=0;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=1;route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"1\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"1\"}}"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=1;route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"1\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"1\"}}"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=1;route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"1\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"1\"}}"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=\" token \";route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=\" token \";route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=\" token \";route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=[];route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=[];route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=[];route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      },
+      "current": {
+        "name": "TypeError",
+        "message": "Pre-fund terminal route.taskRunId 为空"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId={};route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"[object Object]\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"[object Object]\"}}"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId={};route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"[object Object]\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"[object Object]\"}}"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId={};route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"[object Object]\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"[object Object]\"}}"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=[\"token\"];route带空格;extra被裁剪",
+      "status": " succeeded ",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"succeeded\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=[\"token\"];route带空格;extra被裁剪",
+      "status": "cancelled",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"cancelled\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"token\"}}"
+      }
+    },
+    {
+      "sample": "pre-fund-run.taskRunId=[\"token\"];route带空格;extra被裁剪",
+      "status": "failed",
+      "equal": true,
+      "baseline": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"token\"}}"
+      },
+      "current": {
+        "value": "{\"taskStatus\":\"failed\",\"code\":\"\",\"message\":\"\",\"metadata\":{\"kept\":true},\"afterTerminal\":{\"route\":\"pre-fund-run\",\"taskRunId\":\"token\"}}"
+      }
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+--- a/changes/v3.2.10/README.md
++++ b/changes/v3.2.10/README.md
+@@ -6,9 +6,9 @@
+ | 文档日期 | 2026-09-20 |
+ | 用户已确认 | G1–G8 每项独立 Spec / TechDoc；按 v3.2.9 的功能分支目录组织；写清具体模块、接口、职责、迁移与验收 |
+ | 设计及源码基线 | `main@11086a3cbf632a30adbcfa796e4cd81810c5aef9`；本地附注标签 `v3.2.9` 指向同一提交 |
+-| 集成分支 | `release/v3.2.10`；G1–G8 已本地合入，当前为 `9a38b96b` 加未提交审查修复；第十一轮修复完整门禁 PASS，见 [本地集成记录](release.md) |
++| 集成分支 | `release/v3.2.10`；G1–G8 已本地合入，当前为 `9a38b96b` 加未提交审查修复；R14 修复完整门禁 PASS，第 15 轮复审未发现新增可确认必改项，见 [本地集成记录](release.md) |
+ | 功能分支状态 | G1–G8 已逐项本地合入；当前修复候选 31 个机器边界 active、0 pending/partial，下表保留计划名称 |
+-| 交付状态 | 第十四轮 RR14-01 跳过写入漏报已修复，新增 34 项回归、架构 655/655 PASS；完整门禁重跑 PASS（9429 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过）。修复未提交，真实产品/平台验收未执行。见 [第十四轮修复报告](reviews/2026-09-28-release-r14-repair/repair.md) |
++| 交付状态 | 第 15 轮复审在列明范围内关闭 RR14-01，保留 R15-O1 空迭代保守拒绝精度观察；架构 655/655 PASS、31 active/0 违规/0 stale。1,711 个输入与 R14 完整门禁匹配，复用 9429 PASS、4 项 Windows 跳过、68/68 集成结果。修复未提交，平台及真实业务人工验收未完成。见 [第 15 轮审查](reviews/2026-09-28-release-rereview-r15/review.md) |
+ | 独立审查修订 | R1–R9 及 G8 历史损坏配置恢复建议均在设计层关闭，无已知待修必改项；处置、验收映射和三轮依据见 [修订记录](review-response.md)，独立报告保持原状 |
+ | 依据 | [模块耦合审查](../architecture-coupling/2026-09-20/review.md)及该目录的静态扫描、局部探针证据 |
+ | 格式参考 | [v3.2.9 按行拆分 Spec](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/spec.md)、[TechDoc](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/techdoc.md)的元数据、行为合同、分阶段实施和验收结构 |
+--- a/changes/v3.2.10/release.md
++++ b/changes/v3.2.10/release.md
+@@ -1,6 +1,16 @@
+ # v3.2.10 本地集成记录
+ 
+-当前 G1–G8 已本地合入，HEAD 为 `9a38b96b1b8006c5851535d0c1e586bbaeb63f10`。前十三轮修复保留；第十四轮 RR14-01 跳过写入漏报已实现修复，新增 34 项回归通过。完整门禁在 1711 个冻结输入上重跑 PASS。所有修复未提交，见[第十四轮修复报告](reviews/2026-09-28-release-r14-repair/repair.md)。下方历史记录保留各自候选意义。
++当前 G1–G8 已本地合入，HEAD 为 `9a38b96b1b8006c5851535d0c1e586bbaeb63f10`，包含现有未提交修复。第 15 轮复审未发现新增可确认必改项，RR14-01 在本轮验证范围内关闭；R15-O1 保留为精度观察。1,711 个门禁输入与 R14 完整 PASS 候选一致；真实产品、平台及资金人工验收尚未完成。见[第 15 轮审查报告](reviews/2026-09-28-release-rereview-r15/review.md)。下方历史记录保留各自候选意义。
++
++## 2026-09-28 第 15 轮复审结论同步（文档变更）
++
++依据[第 15 轮审查](reviews/2026-09-28-release-rereview-r15/review.md)：本轮未发现新增可确认的必改问题。RR14-01 在原始 6 个案例、真实 20 个 Renderer 边界代表及新增 8 个 finally/helper 路径的范围内关闭；不将该结论扩展为所有 JavaScript 语义或 G8 合同的完备证明。
++
++R15-O1 按已知保守精度观察保留：字面量空数组 `for…of []` 内的外层标签跳转不会执行，但当前分析仍保留该路径，导致两个合法 scoped API 样例被拒绝。此行为已经确认；现有契约未明确承诺空迭代次数精度，当前生产 Renderer 未发现对应结构，因此本轮不列为必改项，也不计作安全样例正确通过。本次不扩修或变更分析精度契约。
++
++审查方本轮新执行架构单测 655/655 PASS、正式 CLI 31 active、0 pending/partial、0 违规、0 stale；旧数组 14 例、覆盖顺序 8 例及共享/绑定 62 例保持预期，已有保守拒绝单列。完整 `release-check` 在第 15 轮未重跑：核对 1,711 个输入集合、SHA-256 及 HEAD 完全匹配后，复用 R14 修复于 2026-09-28 17:19:43–17:39:54 +08:00 的结果（9429 单测 PASS、0 FAIL、4 项 Windows 条件跳过，68/68 集成脚本 PASS）。
++
++本次接收结论时再次核对当前候选与上述门禁输入完全一致，仅更新版本索引、本记录及 G8 实施记录；源码、测试、机器配置和历史审查材料保持。未重新执行测试，未提交、推送或发布。Electron GUI、真实 Main 全流程、Windows/安装包、Excel/WPS 和资金人工验收仍待实际验证。[本次核对](reviews/2026-09-28-release-r15-closeout/verification.json)。
+ 
+ ## 2026-09-28 第十四轮独立审查修复（未提交）
+ 
+--- a/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md
++++ b/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md
+@@ -2,7 +2,13 @@
+ 
+ 本文件是本功能唯一切片索引。设计合同：[Spec](spec.md)、[TechDoc](techdoc.md)；切片完成标准见[总索引 §6.2–§6.4](../../README.md#slice-completion)。设计审查通过不代表以下实现已验证。
+ 
+-## 最新状态：2026-09-22 release 第四轮审查修复
++## 最新状态：2026-09-28 release 第 15 轮复审
++
++[第 15 轮审查](../../reviews/2026-09-28-release-rereview-r15/review.md)未发现新增可确认必改项；RR14-01 在报告列明范围内关闭。R15-O1 空数组迭代内不可达跳转的保守拒绝作为精度观察保留，本次仅同步记录，不扩修或改变合同。
++
++审查方重跑架构 655/655 PASS、正式 CLI 31 active/0 违规/0 stale；1,711 个输入及 HEAD 与 R14 完整门禁一致，复用 9429 单测 PASS、4 项 Windows 跳过、68/68 集成结果。本次另行核对输入一致性，未重跑测试；修复未提交，平台及真实业务人工验收未完成。详见[本地集成记录](../../release.md)。
++
++## 历史状态：2026-09-22 release 第四轮审查修复
+ 
+ RR4-01～03 已实现工厂组合身份传播、调用实例区分和 G1 隐式回调入口检查；新增 33 项回归，修复前 21 FAIL / 12 PASS，修复后与 RR2/RR3 合计 100/100 PASS。全部架构 270/270 PASS，实际 CLI 31 active、0 诊断；完整 release-check 在 1701 个冻结输入上重跑 PASS：9044 项单测通过、0 失败、4 项 Windows 条件跳过，68/68 集成脚本通过。输入及 HEAD 未漂移。当前修复未提交，配置与生产 src 保持。见[第四轮修复报告](../../reviews/2026-09-22-release-r4-repair/repair.md)。
+ 

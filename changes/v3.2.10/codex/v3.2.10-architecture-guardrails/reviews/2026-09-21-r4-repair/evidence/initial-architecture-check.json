@@ -1,0 +1,2283 @@
+{
+  "schemaVersion": 1,
+  "factBaseline": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "policyComparedWith": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "policyHistory": {
+    "roots": [
+      "11086a3cbf632a30adbcfa796e4cd81810c5aef9"
+    ],
+    "commitsExamined": 1,
+    "distinctPolicyBlobs": 0,
+    "bootstrapCommit": null,
+    "historicalActiveIds": [],
+    "historicalRetiredEntrypoints": [],
+    "appliedPolicyChanges": [],
+    "historyRepairsApplied": [],
+    "diagnostics": []
+  },
+  "coverage": {
+    "scannedFiles": 685,
+    "parsedFiles": 685,
+    "literalEdges": 2254,
+    "workerEdges": 64,
+    "globalEdges": 5,
+    "unresolved": 2,
+    "dynamicSites": 33,
+    "parseErrors": 0,
+    "pendingBoundaries": [
+      "bizop-query-q2",
+      "bizop-query-q3",
+      "publication-recovery-entry",
+      "renderer-acquiring",
+      "renderer-bank-bu",
+      "renderer-bank-statement",
+      "renderer-biz-op-legacy",
+      "renderer-dialog-app-settings",
+      "renderer-dialog-configuration",
+      "renderer-dialog-scenarios",
+      "renderer-dialog-toolbox",
+      "renderer-duplicate-inbound",
+      "renderer-modal-owner",
+      "renderer-new-account",
+      "renderer-pre-fund",
+      "renderer-recon-id-fix",
+      "renderer-services",
+      "renderer-statement",
+      "renderer-vcc-op-calc",
+      "shared-xlsx",
+      "vcc-mapped-lineage"
+    ],
+    "partialBoundaries": [
+      "bizop-query-q1",
+      "bizop-recovery-private",
+      "business-task-adapters",
+      "descriptor-composition",
+      "renderer-biz-op-v327",
+      "renderer-pending",
+      "renderer-position",
+      "renderer-vcc-financial-op"
+    ]
+  },
+  "violations": [],
+  "matchedExceptions": [
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q1",
+      "from": "src/main-process/biz-op-v327/delete-preview.js",
+      "to": null,
+      "line": 54,
+      "column": 29,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "b2873c0fc07d3f0f5eb99684fedb3ea8695586a83b1e371e98a1268ac681e111",
+      "functionPath": "createBizOpDeletePreview.collect",
+      "exceptionId": "baseline-bizop-query-001"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q2",
+      "from": "src/main-process/biz-op-v327/compute-inputs.js",
+      "to": null,
+      "line": 33,
+      "column": 20,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "45a4b60fa642f7caf511fcd7cc2b7930ce5bc6a81c1183dbc4d1e34c3bed51aa",
+      "functionPath": "collectInputs",
+      "exceptionId": "baseline-bizop-query-002"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q2",
+      "from": "src/main-process/biz-op-v327/compute-inputs.js",
+      "to": null,
+      "line": 43,
+      "column": 25,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "b04f90690b853847040c1baa40a64a8a27a7e6252eed1149a3709a71729e0aef",
+      "functionPath": "collectInputs",
+      "exceptionId": "baseline-bizop-query-003"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q2",
+      "from": "src/main-process/biz-op-v327/export-inputs.js",
+      "to": null,
+      "line": 11,
+      "column": 10,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "c2c1543beab7f6f4bfd76ac6602d7d2a9c8d1c1ac27fe2392472f8f454aadc49",
+      "functionPath": "freezeExportSource",
+      "exceptionId": "baseline-bizop-query-004"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q2",
+      "from": "src/main-process/biz-op-v327/export-inputs.js",
+      "to": null,
+      "line": 15,
+      "column": 24,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "0f4b4a29d947034948c71dd1e83a788b7908fead27523d97163a7ce2ccabacf6",
+      "functionPath": "freezeExportSource",
+      "exceptionId": "baseline-bizop-query-005"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q2",
+      "from": "src/main-process/biz-op-v327/export-inputs.js",
+      "to": null,
+      "line": 22,
+      "column": 10,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "cef7c30c5d658479d348fd3ad1f1733ae754d8d352901e03c17f4d3c75b973f1",
+      "functionPath": "freezeExportSource",
+      "exceptionId": "baseline-bizop-query-006"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q2",
+      "from": "src/main-process/biz-op-v327/export-inputs.js",
+      "to": null,
+      "line": 28,
+      "column": 10,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "246f37044b7d1352c1817d35a69611c4e384a4300aa4d91ff1fe8fbe96c4e87b",
+      "functionPath": "freezeExportSource",
+      "exceptionId": "baseline-bizop-query-007"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/delete-preview.js",
+      "to": null,
+      "line": 23,
+      "column": 18,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "b346456c71d884fb63468ee7e04be84af1e920e5ae609535b3958be7087cf37a",
+      "functionPath": "createBizOpDeletePreview.collect.<anonymous:1>",
+      "exceptionId": "baseline-bizop-query-008"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/delete-preview.js",
+      "to": null,
+      "line": 26,
+      "column": 25,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "a6557e6585374f978ce6fb7015fedcf9400321c548557ce91a5afd17d4717483",
+      "functionPath": "createBizOpDeletePreview.collect.<anonymous:1>",
+      "exceptionId": "baseline-bizop-query-009"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/delete-preview.js",
+      "to": null,
+      "line": 29,
+      "column": 28,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "b4689ef4f25bb9feff4506ed95ac6658ed9fb35746439c066bb55509f054812c",
+      "functionPath": "createBizOpDeletePreview.collect.<anonymous:1>",
+      "exceptionId": "baseline-bizop-query-010"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/delete-preview.js",
+      "to": null,
+      "line": 37,
+      "column": 18,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "bdbf8ae6f250d7b7bc07c892809730de86a2231948e34d9f22f27c3876d4e5a2",
+      "functionPath": "createBizOpDeletePreview.collect.<anonymous:2>",
+      "exceptionId": "baseline-bizop-query-011"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/delete-preview.js",
+      "to": null,
+      "line": 40,
+      "column": 25,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "ba6332cf5f68f113dec3406d08f1a5b0cdd9fcb2902cc42f87167a3a550f3f5b",
+      "functionPath": "createBizOpDeletePreview.collect.<anonymous:2>",
+      "exceptionId": "baseline-bizop-query-012"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/delete-preview.js",
+      "to": null,
+      "line": 54,
+      "column": 29,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "b2873c0fc07d3f0f5eb99684fedb3ea8695586a83b1e371e98a1268ac681e111",
+      "functionPath": "createBizOpDeletePreview.collect",
+      "exceptionId": "baseline-bizop-query-001"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/import-main.js",
+      "to": null,
+      "line": 112,
+      "column": 37,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "f0771f9df92f43700ec9f2ff4b02002f7fac49830e44665f4bd173c0603d4f8c",
+      "functionPath": "createBizOpImportCoordinator.runImport.<anonymous:1>.execute",
+      "exceptionId": "baseline-bizop-query-013"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/import-main.js",
+      "to": null,
+      "line": 144,
+      "column": 25,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "454e6bbfa7cd8a2b6280061397a39b32946e13ad3e50050ffd888014c5f56711",
+      "functionPath": "createBizOpImportCoordinator.runImport.<anonymous:1>",
+      "exceptionId": "baseline-bizop-query-014"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/import-main.js",
+      "to": null,
+      "line": 26,
+      "column": 21,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "ace1f1dffe35cbff3d8f80a64ec069755bc07dbe304220b15a31c680b00698fc",
+      "functionPath": "createBizOpImportCoordinator.restoreDiagnostic",
+      "exceptionId": "baseline-bizop-query-015"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/import-main.js",
+      "to": null,
+      "line": 30,
+      "column": 21,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "454e6bbfa7cd8a2b6280061397a39b32946e13ad3e50050ffd888014c5f56711",
+      "functionPath": "createBizOpImportCoordinator.restoreDiagnostic",
+      "exceptionId": "baseline-bizop-query-016"
+    },
+    {
+      "rule": "ARCH-CYCLE",
+      "boundaryId": null,
+      "from": "src/backend/biz-op-recon-import/import-worker.js",
+      "to": "src/main-process/biz-op-recon-session.js",
+      "line": 49,
+      "column": 4,
+      "message": "生产依赖形成循环：src/backend/biz-op-recon-import/import-worker.js → src/main-process/biz-op-recon-session.js → src/backend/biz-op-recon-import/import-worker.js",
+      "dependencyPath": [
+        "src/backend/biz-op-recon-import/import-worker.js",
+        "src/main-process/biz-op-recon-session.js",
+        "src/backend/biz-op-recon-import/import-worker.js"
+      ],
+      "evidenceId": "a6247d7e51da79199b73635f3ec09a02c7fdc204edbce418b0a14b7e44162ecc",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "addOneDay",
+        "assertBizOpMonthEndAdmission",
+        "assertNoPendingMonthEndCopy",
+        "normalizeBu",
+        "recordMonthEndCopyIntent"
+      ],
+      "cycleEdges": [
+        {
+          "from": "src/backend/biz-op-recon-import/import-worker.js",
+          "to": "src/main-process/biz-op-recon-session.js",
+          "kind": "require"
+        },
+        {
+          "from": "src/main-process/biz-op-recon-session.js",
+          "to": "src/backend/biz-op-recon-import/import-worker.js",
+          "kind": "worker"
+        }
+      ],
+      "edgeKinds": [
+        "require",
+        "worker"
+      ],
+      "literalCycle": false,
+      "exceptionId": "baseline-cycle-001"
+    },
+    {
+      "rule": "ARCH-CYCLE",
+      "boundaryId": null,
+      "from": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+      "to": "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+      "line": 98,
+      "column": 21,
+      "message": "生产依赖形成循环：src/main-process/background-execution/adapters/worker-thread-adapter.js → src/main-process/vcc-financial-op-output/writer-worker-entry.js → src/main-process/background-execution/adapters/worker-thread-adapter.js",
+      "dependencyPath": [
+        "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+        "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+        "src/main-process/background-execution/adapters/worker-thread-adapter.js"
+      ],
+      "evidenceId": "69a3dcf14692fc4e083e6341f4366b184b6fe550ee8c13f3c541167c93e87e8c",
+      "functionPath": "createWorkerThreadAdapter.start",
+      "kind": "worker",
+      "cycleEdges": [
+        {
+          "from": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+          "to": "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+          "kind": "worker"
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+          "to": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+          "kind": "require"
+        }
+      ],
+      "edgeKinds": [
+        "require",
+        "worker"
+      ],
+      "literalCycle": false,
+      "exceptionId": "baseline-cycle-002"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/adapters/acquiring-adapter.js",
+      "to": "src/backend/acquiring-bill-currency-import/contract-bill.js",
+      "line": 32,
+      "column": 27,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/acquiring-adapter.js",
+        "src/backend/acquiring-bill-currency-import/contract-bill.js"
+      ],
+      "evidenceId": "05c58ae9aad227903f078eb4c849602c98525606b3aa6118b16f8f4c7f8f4a7b",
+      "functionPath": null,
+      "kind": "require",
+      "exceptionId": "baseline-descriptor-composition-001"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/adapters/acquiring-adapter.js",
+      "to": "src/backend/acquiring-bill-currency-import/contract-flow.js",
+      "line": 29,
+      "column": 27,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/acquiring-adapter.js",
+        "src/backend/acquiring-bill-currency-import/contract-flow.js"
+      ],
+      "evidenceId": "2689e4bb2443a253fdb3ecb929e0eb0e389a81ac9f2829b04977c24ef8baf32b",
+      "functionPath": null,
+      "kind": "require",
+      "exceptionId": "baseline-descriptor-composition-002"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/adapters/acquiring-adapter.js",
+      "to": "src/backend/run-data-store.js",
+      "line": 13,
+      "column": 21,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/acquiring-adapter.js",
+        "src/backend/run-data-store.js"
+      ],
+      "evidenceId": "6b4c26c2bbe6b7e0fb9b707bc277fddd2779f271566ba6b5a063eeee38af829c",
+      "functionPath": null,
+      "kind": "require",
+      "exceptionId": "baseline-descriptor-composition-003"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/adapters/acquiring-adapter.js",
+      "to": "src/main-process/acquiring-bill-currency-run-data.js",
+      "line": 11,
+      "column": 16,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/acquiring-adapter.js",
+        "src/main-process/acquiring-bill-currency-run-data.js"
+      ],
+      "evidenceId": "e54bc532507c390d405cc2c1fbe9eb246d87597b423534919fb97c3a47c4ccc6",
+      "functionPath": null,
+      "kind": "require",
+      "exceptionId": "baseline-descriptor-composition-004"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/adapters/acquiring-adapter.js",
+      "to": "src/main-process/acquiring-bill-currency-session.js",
+      "line": 16,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/acquiring-adapter.js",
+        "src/main-process/acquiring-bill-currency-session.js"
+      ],
+      "evidenceId": "bc9eca563f765a1e0851cde710b857aa0d85bbfbd20c1c4d4cfb9a05c663e9a8",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "shouldFallbackToSingleWorker"
+      ],
+      "exceptionId": "baseline-descriptor-composition-005"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/adapters/position-import-adapter.js",
+      "to": "src/backend/position-reconciliation-import/constants.js",
+      "line": 9,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/position-import-adapter.js",
+        "src/backend/position-reconciliation-import/constants.js"
+      ],
+      "evidenceId": "b45b3ba31cbd80a2e24e25131e2a247d24da19f99b4088c39bf8a28eb04568e1",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "POSITION_IMPORT_COMMANDS",
+        "POSITION_IMPORT_ENGINES",
+        "POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST"
+      ],
+      "exceptionId": "baseline-descriptor-composition-006"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/adapters/position-import-adapter.js",
+      "to": "src/main-process/position-reconciliation/import-dispatch.js",
+      "line": 13,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/position-import-adapter.js",
+        "src/main-process/position-reconciliation/import-dispatch.js"
+      ],
+      "evidenceId": "05f0a0aba48f7350cddf8c20073860a8801459a1ccf3d734bb7193ef179b2da2",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "dispatchPositionImportPreflight",
+        "dispatchPositionLargeImportSchemaMigration"
+      ],
+      "exceptionId": "baseline-descriptor-composition-007"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/adapters/position-import-adapter.js",
+      "to": "src/main-process/position-reconciliation/side-db-mutation.js",
+      "line": 17,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/position-import-adapter.js",
+        "src/main-process/position-reconciliation/side-db-mutation.js"
+      ],
+      "evidenceId": "d9f50fbb1d054900115abe15c81a387d7ee972f51b54e935b5fc11635c1d21ce",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "normalizePositionCheckpoint",
+        "positionCheckpointsEqual"
+      ],
+      "exceptionId": "baseline-descriptor-composition-008"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/mature-action-adapters.js",
+      "to": "src/main-process/toolbox-large-split-dispatch.js",
+      "line": 8,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/toolbox-large-split-dispatch.js"
+      ],
+      "evidenceId": "4ac21682142562c0e04593191ee2b12bde072d9d1ed34fa6af5c1479e46070d4",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "createToolboxLargeSplitMatureBinding"
+      ],
+      "exceptionId": "baseline-descriptor-composition-009"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/mature-action-adapters.js",
+      "to": "src/main-process/toolbox-output-publication-dispatch.js",
+      "line": 11,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/toolbox-output-publication-dispatch.js"
+      ],
+      "evidenceId": "ac7d73a61c6cabf3ac38a89bc3d89c9f090889f47f1a3d910d277d710072f15d",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "createToolboxPublicationMatureBinding"
+      ],
+      "exceptionId": "baseline-descriptor-composition-010"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/position-import-adapter-policy.js",
+      "to": "src/backend/position-reconciliation-import/constants.js",
+      "line": 5,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/position-import-adapter-policy.js",
+        "src/backend/position-reconciliation-import/constants.js"
+      ],
+      "evidenceId": "3e85014831cc1b2387b923d79f9fed9878b0406f00685f055a9b31dc3feb1b41",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "POSITION_IMPORT_COMMANDS"
+      ],
+      "exceptionId": "baseline-descriptor-composition-011"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/biz-op-v327/policies.js",
+      "line": 151,
+      "column": 90,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/biz-op-v327/policies.js"
+      ],
+      "evidenceId": "4a95f813316bd7faf251baa93b1220bd42eda9bfe36dcdb8b55a8988cefcb4cc",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "BIZ_OP_V327_POLICIES",
+        "validateBizOpCandidateResult",
+        "validateBizOpExportResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-012"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/duplicate-inbound-match/policies.js",
+      "line": 62,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/duplicate-inbound-match/policies.js"
+      ],
+      "evidenceId": "8a21bae375b8bb00a3f88e9f8d6a398b3185f9c614ab39c31d2a4af3ec5cee12",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "DUPLICATE_ACTIONS",
+        "DUPLICATE_POLICIES",
+        "DUPLICATE_SERVICE_KEY",
+        "validateDuplicateExportResult",
+        "validateDuplicateImportResult",
+        "validateDuplicateRunResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-013"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/duplicate-inbound-match/startup-gate.js",
+      "line": 65,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/duplicate-inbound-match/startup-gate.js"
+      ],
+      "evidenceId": "433aabad491e7650fe7c0ad4cb6e64db736c413bc35b16c6aa5f4636239c3dc9",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "normalizeDuplicateStartupGateDescriptor"
+      ],
+      "exceptionId": "baseline-descriptor-composition-014"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/duplicate-inbound-match/topology.js",
+      "line": 68,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/duplicate-inbound-match/topology.js"
+      ],
+      "evidenceId": "3ddb05566bc1791e53b27c669b5f1ae4e3994413506362aac008c6c8c2fabd36",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "createDuplicatePairedTopologyPlanner"
+      ],
+      "exceptionId": "baseline-descriptor-composition-015"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/fund-recon-worker/policies.js",
+      "line": 54,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/fund-recon-worker/policies.js"
+      ],
+      "evidenceId": "1febba07a1baa37381141901c0e2ac2a9e99f8f647ff964ed00b8e641ddf71b0",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "FUND_RECON_POLICIES",
+        "FUND_RECON_SERVICE_KEY",
+        "validateFundReconExportResult",
+        "validateFundReconImportResult",
+        "validateFundReconRunResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-016"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/new-account/artifact-copy.js",
+      "line": 44,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/new-account/artifact-copy.js"
+      ],
+      "evidenceId": "c7d03512c1b607bfb007ae7e5436d23ed48b87749848fa468bf4bca76b24cc80",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "NEW_ACCOUNT_SAVE_AS_ACTION",
+        "runNewAccountArtifactCopyInline",
+        "validateNewAccountSaveAsResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-017"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/new-account/generation-contract.js",
+      "line": 35,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/new-account/generation-contract.js"
+      ],
+      "evidenceId": "e2984a3b4759a4d281a603b58b90cc6bf91f8f27a8982d98b8e838447d937bca",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "validateNewAccountGenerationResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-018"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/new-account/policies.js",
+      "line": 39,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/new-account/policies.js"
+      ],
+      "evidenceId": "33c953ea743fd8776bb492366cbe9fc43095a9f288ba37ed4e528a94dbaf6541",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "NEW_ACCOUNT_GENERATION_POLICY",
+        "NEW_ACCOUNT_SAVE_AS_POLICY"
+      ],
+      "exceptionId": "baseline-descriptor-composition-019"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/new-account/resource-estimator.js",
+      "line": 47,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/new-account/resource-estimator.js"
+      ],
+      "evidenceId": "3bed6318001e92b34c1f8214862de32dbbf3ae35423b3b160bedc529f7c03749",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "estimateNewAccountGenerationPhaseResources"
+      ],
+      "exceptionId": "baseline-descriptor-composition-020"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/pre-fund-reconciliation/mpt-import/policies.js",
+      "line": 29,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/pre-fund-reconciliation/mpt-import/policies.js"
+      ],
+      "evidenceId": "7d30aa8c68be25053f6836810e93bd4f30b11dbcb61be8a0e43864d5593cd9ba",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "PRE_FUND_MPT_IMPORT_ACTION",
+        "PRE_FUND_MPT_POLICIES",
+        "PRE_FUND_MPT_REPAIR_ACTION",
+        "validatePreFundMptImportResult",
+        "validatePreFundMptRepairResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-021"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/pre-fund-reconciliation/mpt-import/topology.js",
+      "line": 32,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/pre-fund-reconciliation/mpt-import/topology.js"
+      ],
+      "evidenceId": "8c60b544f581b05e1552d8bee881668abed6f6a73639a8cbb5d8352088009a3e",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "createPreFundMptTopologyPlanner"
+      ],
+      "exceptionId": "baseline-descriptor-composition-022"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/read-only-exports/acquiring/executor.js",
+      "line": 130,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/read-only-exports/acquiring/executor.js"
+      ],
+      "evidenceId": "6405a6fb0e006bac3f925dd6a7a84f258a07dc3398a304ebff0b0da9bf75d804",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "runAcquiringExistingDiffCopyInline"
+      ],
+      "exceptionId": "baseline-descriptor-composition-023"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/read-only-exports/acquiring/policies.js",
+      "line": 127,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/read-only-exports/acquiring/policies.js"
+      ],
+      "evidenceId": "998cb73625995d36794e2195053af165852cb3b223590bf1be07750b77c4148e",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "ACQUIRING_EXPORT_ACTIONS",
+        "ACQUIRING_EXPORT_ACTION_SET",
+        "ACQUIRING_EXPORT_POLICIES",
+        "validateAcquiringExportResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-024"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/read-only-exports/biz-op/policies.js",
+      "line": 109,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/read-only-exports/biz-op/policies.js"
+      ],
+      "evidenceId": "2e697cf37252e53ec12c236d5d31720344263c83f30b1f40d9280b77023e5e3d",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "BIZ_OP_READ_ONLY_ACTION_SET",
+        "BIZ_OP_READ_ONLY_POLICIES",
+        "validateBizOpReadOnlyExportResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-025"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/read-only-exports/pending/policies.js",
+      "line": 104,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/read-only-exports/pending/policies.js"
+      ],
+      "evidenceId": "2e6d8f26883d76195584957e381a75dcea5bdcc1c72304c7b16732e5b3b0122d",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "PENDING_READ_ONLY_ACTIONS",
+        "PENDING_READ_ONLY_POLICIES",
+        "validatePendingReadOnlyExportResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-026"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/read-only-exports/position/policies.js",
+      "line": 117,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/read-only-exports/position/policies.js"
+      ],
+      "evidenceId": "3bb033dc700acc150d87fbfef75634d705e8e7797259b6f081784824304ab7d7",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "POSITION_READ_ONLY_POLICY",
+        "validatePositionReadOnlyExportResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-027"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/read-only-exports/pre-fund/policies.js",
+      "line": 113,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/read-only-exports/pre-fund/policies.js"
+      ],
+      "evidenceId": "2ff724feb6544aa6c5581d8515c2c2317ca91aab924379eced5459247cea478a",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "PRE_FUND_READ_ONLY_POLICIES",
+        "validatePreFundReadOnlyExportResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-028"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/read-only-exports/vcc-financial-op/policies.js",
+      "line": 121,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/read-only-exports/vcc-financial-op/policies.js"
+      ],
+      "evidenceId": "d412fdbb8e6aec94fecadee79d0386d91dd2803d5b801a8aadad5cffbec90b4d",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "VCC_FINANCIAL_OP_READ_ONLY_POLICY",
+        "validateVccFinancialOpReadOnlyExportResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-029"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/recon-id-fix-service/evidence-settlement-admission.js",
+      "line": 88,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/recon-id-fix-service/evidence-settlement-admission.js"
+      ],
+      "evidenceId": "560f43f7df1427341fc9a6b2f37882da1201e3ed0ec5304c8ec0e730f25d3fa8",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "createReconFixEvidenceSettlementAdmission"
+      ],
+      "exceptionId": "baseline-descriptor-composition-030"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/recon-id-fix-service/jpm-database-authority.js",
+      "line": 85,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/recon-id-fix-service/jpm-database-authority.js"
+      ],
+      "evidenceId": "ff8f59e3d09fe1827579619c0cd51161d74f6e094e51f0228b7f290f49eb0727",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "createReconFixJpmDatabaseAuthority"
+      ],
+      "exceptionId": "baseline-descriptor-composition-031"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/recon-id-fix-service/policies.js",
+      "line": 82,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/recon-id-fix-service/policies.js"
+      ],
+      "evidenceId": "ba1c10af8a03e22134ad7b7490c9930e03315949b33942a9326a43899bf3eb00",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "RECON_FIX_EXPORT_ACTION",
+        "RECON_FIX_JPM_UNIT_ID",
+        "RECON_FIX_POLICIES",
+        "RECON_FIX_RUN_JPM_ACTION",
+        "RECON_FIX_SERVICE_KEY",
+        "validateReconFixExportResult",
+        "validateReconFixJpmResult",
+        "validateReconFixServiceResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-032"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/toolbox-background/generation-contract.js",
+      "line": 19,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/toolbox-background/generation-contract.js"
+      ],
+      "evidenceId": "3bc7ebc9a6d4d5b4b2612f0237ba1907af66d81da9e731da8c915ec9697f03df",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "TOOLBOX_GENERATION_ACTIONS",
+        "validateToolboxGenerationResult",
+        "validateToolboxMultiGenerationResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-033"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/toolbox-background/policies.js",
+      "line": 22,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/toolbox-background/policies.js"
+      ],
+      "evidenceId": "60cc6fac01abe7e0ff085d740f8a1440805d4465c321c2e95036d4e1161832e1",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "TOOLBOX_GENERATION_POLICIES"
+      ],
+      "exceptionId": "baseline-descriptor-composition-034"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/toolbox-row-split/contracts.js",
+      "line": 5,
+      "column": 44,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/toolbox-row-split/contracts.js"
+      ],
+      "evidenceId": "ba4641d2badd9fede9cbbdfeb9a339eb0f09516ede6f92df56d659ac31843fc3",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "ROWS_ACTION",
+        "validateRowsResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-035"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/toolbox-row-split/policy.js",
+      "line": 4,
+      "column": 24,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/toolbox-row-split/policy.js"
+      ],
+      "evidenceId": "b367f21794f990bedff15558baaffa098be17a69263755f90166e920f7058f28",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "ROWS_POLICY"
+      ],
+      "exceptionId": "baseline-descriptor-composition-036"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/vcc-financial-op-output/policies.js",
+      "line": 96,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/vcc-financial-op-output/policies.js"
+      ],
+      "evidenceId": "19e71aec4231a5fd93f46c88a959b7b67b038afbd0e2dc4188ee10e21c20cd82",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "VCC_EXPORT_SINGLE_ACTION",
+        "VCC_EXPORT_SINGLE_POLICY",
+        "VCC_EXPORT_SUBJECTS_ACTION",
+        "VCC_EXPORT_SUBJECTS_POLICY",
+        "validateVccExportSingleResult",
+        "validateVccExportSubjectsResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-037"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/vcc-financial-op-output/topology.js",
+      "line": 99,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/vcc-financial-op-output/topology.js"
+      ],
+      "evidenceId": "04de1b24deff5f1395368d28659ca69788673f54c8850ba6f46fdf3d0906d403",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "createVccExportTopologyPlanner"
+      ],
+      "exceptionId": "baseline-descriptor-composition-038"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/big-table-import-dispatch.js",
+      "to": "src/backend/big-table-import/engine-worker-entry.js",
+      "line": 24,
+      "column": 28,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/big-table-import-dispatch.js",
+        "src/backend/big-table-import/engine-worker-entry.js"
+      ],
+      "evidenceId": "942b4e26ad17c002934f81d336009d780d68c972d555a62f50c9ebe519e5fd03",
+      "functionPath": null,
+      "kind": "require",
+      "exceptionId": "baseline-descriptor-composition-039"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/big-table-import-dispatch.js",
+      "to": "src/backend/big-table-import/engine-worker-entry.js",
+      "line": 78,
+      "column": 15,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/big-table-import-dispatch.js",
+        "src/backend/big-table-import/engine-worker-entry.js"
+      ],
+      "evidenceId": "34227fdeff96fb08de5f499d9da93cc50ece971976c665f76ab5739a0ca3848c",
+      "functionPath": "dispatchEngineImportHandle.<anonymous:1>",
+      "kind": "worker",
+      "exceptionId": "baseline-descriptor-composition-040"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/big-table-import-dispatch.js",
+      "to": "src/backend/big-table-import/pipeline.js",
+      "line": 17,
+      "column": 31,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/big-table-import-dispatch.js",
+        "src/backend/big-table-import/pipeline.js"
+      ],
+      "evidenceId": "9c55c9692a432806b7a2940a6fec752b277f446ada7da3946686113f61982886",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "computeMaxParallel"
+      ],
+      "exceptionId": "baseline-descriptor-composition-041"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/run-check-worker.js",
+      "to": "src/backend/logger.js",
+      "line": 147,
+      "column": 17,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/acquiring-adapter.js",
+        "src/main-process/run-check-worker-pool.js",
+        "src/main-process/run-check-worker.js",
+        "src/backend/logger.js"
+      ],
+      "evidenceId": "07b1eabf47676134ceac89e992650482397d2344cc80c02d24198848708b09b5",
+      "functionPath": null,
+      "kind": "require",
+      "exceptionId": "baseline-descriptor-composition-042"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/run-check-worker.js",
+      "to": "src/main-process/acquiring-bill-currency-session.js",
+      "line": 169,
+      "column": 20,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/acquiring-adapter.js",
+        "src/main-process/run-check-worker-pool.js",
+        "src/main-process/run-check-worker.js",
+        "src/main-process/acquiring-bill-currency-session.js"
+      ],
+      "evidenceId": "0bf48c944fc883d42f4227cee20d6132537db34c6ba66768044d849711cf96f7",
+      "functionPath": "runCheckInWorker",
+      "kind": "require",
+      "exceptionId": "baseline-descriptor-composition-043"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/run-check-worker.js",
+      "to": "src/main-process/acquiring-bill-currency-session.js",
+      "line": 242,
+      "column": 24,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/acquiring-adapter.js",
+        "src/main-process/run-check-worker-pool.js",
+        "src/main-process/run-check-worker.js",
+        "src/main-process/acquiring-bill-currency-session.js"
+      ],
+      "evidenceId": "0bf48c944fc883d42f4227cee20d6132537db34c6ba66768044d849711cf96f7",
+      "functionPath": "<anonymous:2>",
+      "kind": "require",
+      "exceptionId": "baseline-descriptor-composition-043"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 280,
+      "column": 6,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "e868dddd32e927d4793521143426eb7ad2dbac169b7ddc02cf8e73c34f518815",
+      "functionPath": "initRendererDialogs.createRendererDialogs.closeModal",
+      "exceptionId": "baseline-modal-owner-001"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 284,
+      "column": 6,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "e868dddd32e927d4793521143426eb7ad2dbac169b7ddc02cf8e73c34f518815",
+      "functionPath": "initRendererDialogs.createRendererDialogs.openModal",
+      "exceptionId": "baseline-modal-owner-002"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 285,
+      "column": 6,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "a41abed442d4dd62ec4eb9bf10f1018bbb6406d5c867c3dcab95bf64bb5e202c",
+      "functionPath": "initRendererDialogs.createRendererDialogs.openModal",
+      "exceptionId": "baseline-modal-owner-003"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 5656,
+      "column": 87,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "36d3e7b2411a228b493681c1a631275d99baa2465b4c3baedbb5f4a502145821",
+      "functionPath": "initRendererDialogs.createRendererDialogs.createFundTransferAccountMappingDialog.showNestedAlert.<anonymous:1>",
+      "exceptionId": "baseline-modal-owner-004"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 5658,
+      "column": 8,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "9889dc57335750c454b6e38f2b6b207484ecb48c89b4a7b830b6734ab9203119",
+      "functionPath": "initRendererDialogs.createRendererDialogs.createFundTransferAccountMappingDialog.showNestedAlert",
+      "exceptionId": "baseline-modal-owner-005"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 7232,
+      "column": 8,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "137f4e57351fdf16efac6408420f5b1226dc9bb8f69a356e5e67c1aa5d1ce3e3",
+      "functionPath": "initRendererDialogs.createRendererDialogs.createLinkedTableManagerDialog.<anonymous:1>",
+      "exceptionId": "baseline-modal-owner-006"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-position-reconciliation.js",
+      "to": null,
+      "line": 104,
+      "column": 21,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "875bfcd38f384acc6d6c1e8d065135cd18f22f87a61cdcc9e22dd74f92d705af",
+      "functionPath": "initPositionReconciliationRenderer.createPositionReconciliationUI.showArchiveUnavailable",
+      "exceptionId": "baseline-modal-owner-007"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-position-reconciliation.js",
+      "to": null,
+      "line": 1078,
+      "column": 52,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "36d3e7b2411a228b493681c1a631275d99baa2465b4c3baedbb5f4a502145821",
+      "functionPath": "initPositionReconciliationRenderer.createPositionReconciliationUI.openMappingsDialog.showNestedAlert.<anonymous:1>",
+      "exceptionId": "baseline-modal-owner-008"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-position-reconciliation.js",
+      "to": null,
+      "line": 1083,
+      "column": 23,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "58b5320bf7115642be2f50815e568e372cc1cdc2981681fa733f52225b291c18",
+      "functionPath": "initPositionReconciliationRenderer.createPositionReconciliationUI.openMappingsDialog.showNestedAlert",
+      "exceptionId": "baseline-modal-owner-009"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-position-reconciliation.js",
+      "to": null,
+      "line": 1222,
+      "column": 21,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "65f35c65a20e08e3db7b32c063d22472b7d2203345913dd063275ec5d92df05b",
+      "functionPath": "initPositionReconciliationRenderer.createPositionReconciliationUI.openMappingsDialog",
+      "exceptionId": "baseline-modal-owner-010"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-position-reconciliation.js",
+      "to": null,
+      "line": 1274,
+      "column": 21,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "65f35c65a20e08e3db7b32c063d22472b7d2203345913dd063275ec5d92df05b",
+      "functionPath": "initPositionReconciliationRenderer.createPositionReconciliationUI.openRawExportDialog",
+      "exceptionId": "baseline-modal-owner-011"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-position-reconciliation.js",
+      "to": null,
+      "line": 1442,
+      "column": 21,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "65f35c65a20e08e3db7b32c063d22472b7d2203345913dd063275ec5d92df05b",
+      "functionPath": "initPositionReconciliationRenderer.createPositionReconciliationUI.openLinkedExportDialog",
+      "exceptionId": "baseline-modal-owner-012"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-vcc-financial-op.js",
+      "to": null,
+      "line": 209,
+      "column": 4,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "ac0b48b310ccd33247083979eca0cbb25944da3ec697e09d9aff5de413596ee3",
+      "functionPath": "<anonymous:1>.mountDialog",
+      "exceptionId": "baseline-modal-owner-013"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-vcc-financial-op.js",
+      "to": null,
+      "line": 216,
+      "column": 6,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "34633392c1de136e29f043a71a36f079ba8e016fca94dc14d41ca30be37680ef",
+      "functionPath": "<anonymous:1>.mountDialog.close",
+      "exceptionId": "baseline-modal-owner-014"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 4029,
+      "column": 2,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "e868dddd32e927d4793521143426eb7ad2dbac169b7ddc02cf8e73c34f518815",
+      "functionPath": "legacyCloseModal",
+      "exceptionId": "baseline-modal-owner-015"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 4033,
+      "column": 2,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "e868dddd32e927d4793521143426eb7ad2dbac169b7ddc02cf8e73c34f518815",
+      "functionPath": "legacyOpenModal",
+      "exceptionId": "baseline-modal-owner-016"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 4034,
+      "column": 2,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "a41abed442d4dd62ec4eb9bf10f1018bbb6406d5c867c3dcab95bf64bb5e202c",
+      "functionPath": "legacyOpenModal",
+      "exceptionId": "baseline-modal-owner-017"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/biz-op-v327/export-publication.js",
+      "to": "src/main-process/toolbox-output-publication-dispatch.js",
+      "line": 6,
+      "column": 73,
+      "message": "受限恢复 API 的引入/透传必须登记准确授权装配位置",
+      "evidenceId": "ac7d73a61c6cabf3ac38a89bc3d89c9f090889f47f1a3d910d277d710072f15d",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "publishDurableArtifactAsync",
+        "recoverToolboxPublicationsAsync"
+      ],
+      "exceptionId": "baseline-publication-recovery-entry-001"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/biz-op-v327/export-publication.js",
+      "to": null,
+      "line": 165,
+      "column": 49,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "d8d38861e3e1975b893ab6aa67def1791397fc9d72de68f0e2fdf185c9349d29",
+      "functionPath": "createBizOpPublication.reconcile.<anonymous:1>",
+      "exceptionId": "baseline-publication-recovery-entry-002"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/biz-op-v327/export-publication.js",
+      "to": null,
+      "line": 205,
+      "column": 55,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "8010d95a58df5da7ec34019f6606d2d308ebd198691261a55e90cc9e5c26a009",
+      "functionPath": "createBizOpPublication.acknowledge.<anonymous:1>",
+      "exceptionId": "baseline-publication-recovery-entry-003"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/biz-op-v327/export-publication.js",
+      "to": null,
+      "line": 250,
+      "column": 27,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "d7dcb1dc75af8cb073223f7ef2038700260ae63e4496e945d9f8c635aa837f18",
+      "functionPath": "createBizOpPublication.recoverOtherOwners",
+      "exceptionId": "baseline-publication-recovery-entry-004"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/new-account/artifact-copy.js",
+      "to": "src/main-process/toolbox-output-publication-dispatch.js",
+      "line": 33,
+      "column": 4,
+      "message": "受限恢复 API 的引入/透传必须登记准确授权装配位置",
+      "evidenceId": "ac7d73a61c6cabf3ac38a89bc3d89c9f090889f47f1a3d910d277d710072f15d",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "publishDurableArtifactAsync",
+        "recoverToolboxPublicationsAsync"
+      ],
+      "exceptionId": "baseline-publication-recovery-entry-005"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-archive-recovery.js",
+      "to": "src/main-process/toolbox-output-publication.js",
+      "line": 7,
+      "column": 4,
+      "message": "受限恢复 API 的引入/透传必须登记准确授权装配位置",
+      "evidenceId": "30bbe89cb848f9e356b9f721a92ac6ea3b811e15ac253a725bd485275c43c997",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "recoverPendingToolboxPublications"
+      ],
+      "exceptionId": "baseline-publication-recovery-entry-006"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "to": null,
+      "line": 130,
+      "column": 33,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "b250ff24d989f08b8eefd452c265b60b1ab6fa12c2348302c8bf1eb854b803d7",
+      "functionPath": "createToolboxPublicationDispatcher.execute",
+      "exceptionId": "baseline-publication-recovery-entry-007"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "to": null,
+      "line": 227,
+      "column": 13,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "81bd5e54bf8caa785cce6ed7b5a1076b65cad9fbf177185e608da35f2cbe22db",
+      "functionPath": "createToolboxPublicationDispatcher.recover",
+      "exceptionId": "baseline-publication-recovery-entry-008"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication-worker.js",
+      "to": "src/main-process/toolbox-output-publication.js",
+      "line": 8,
+      "column": 4,
+      "message": "受限恢复 API 的引入/透传必须登记准确授权装配位置",
+      "evidenceId": "30bbe89cb848f9e356b9f721a92ac6ea3b811e15ac253a725bd485275c43c997",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "prepareToolboxPublication",
+        "publishPreparedToolboxPublication",
+        "recoverPendingToolboxPublications"
+      ],
+      "exceptionId": "baseline-publication-recovery-entry-009"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication-worker.js",
+      "to": null,
+      "line": 34,
+      "column": 11,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "1464925089e36a963ec4f1984bb65b6b1d8f0a451176657f0cea92ea3a9e43f5",
+      "functionPath": "runPublicationOperation",
+      "exceptionId": "baseline-publication-recovery-entry-010"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "to": null,
+      "line": 2412,
+      "column": 28,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "dea59e26b5fb56c2637f65df1f491cb1d1b120c40da2acaff0f22efc14b0efa3",
+      "functionPath": "prepareToolboxPublication.<anonymous:1>",
+      "exceptionId": "baseline-publication-recovery-entry-011"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/vcc-financial-op-output-recovery.js",
+      "to": "src/main-process/toolbox-output-publication-dispatch.js",
+      "line": 10,
+      "column": 4,
+      "message": "受限恢复 API 的引入/透传必须登记准确授权装配位置",
+      "evidenceId": "c2a002c4931b68e54dbe82c8449150f5d2efb4308e9acfb3b9d4026cb4feac06",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "publishToolboxPublicationAsync",
+        "recoverToolboxPublicationsAsync"
+      ],
+      "exceptionId": "baseline-publication-recovery-entry-012"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main.js",
+      "to": "src/main-process/toolbox-output-publication-dispatch.js",
+      "line": 596,
+      "column": 4,
+      "message": "受限恢复 API 的引入/透传必须登记准确授权装配位置",
+      "evidenceId": "cbbc6cc591636950cab0f6145c3575279a1c5e7c875698dd4247c5f5d48db9d6",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "publishToolboxPublicationAsync",
+        "recoverToolboxPublicationsAsync"
+      ],
+      "exceptionId": "baseline-publication-recovery-entry-013"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-v327",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 1652,
+      "column": 28,
+      "message": "工厂字段 api 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "1f4b6a360836ae71a9a372ca6813a15e821bff3eff71f6429bfb30f6f06fa10b",
+      "functionPath": "setCurrentModule",
+      "exceptionId": "baseline-renderer-scope-001"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-v327",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 1652,
+      "column": 28,
+      "message": "工厂字段 legacyPanel 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "1f4b6a360836ae71a9a372ca6813a15e821bff3eff71f6429bfb30f6f06fa10b",
+      "functionPath": "setCurrentModule",
+      "exceptionId": "baseline-renderer-scope-001"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-v327",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 1652,
+      "column": 28,
+      "message": "工厂注入了未授权字段 legacyPanel",
+      "evidenceId": "1f4b6a360836ae71a9a372ca6813a15e821bff3eff71f6429bfb30f6f06fa10b",
+      "functionPath": "setCurrentModule",
+      "exceptionId": "baseline-renderer-scope-001"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-v327",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 1652,
+      "column": 28,
+      "message": "工厂注入了未授权字段 restoreLegacy",
+      "evidenceId": "1f4b6a360836ae71a9a372ca6813a15e821bff3eff71f6429bfb30f6f06fa10b",
+      "functionPath": "setCurrentModule",
+      "exceptionId": "baseline-renderer-scope-001"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂字段 closeModal 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂字段 createAlertDialog 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂字段 createConfirmDialog 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂字段 desktopApi 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂字段 elements 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂字段 openModal 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂字段 state 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂注入了未授权字段 closeModal",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂注入了未授权字段 createAlertDialog",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂注入了未授权字段 createConfirmDialog",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂注入了未授权字段 desktopApi",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂注入了未授权字段 elements",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂注入了未授权字段 openModal",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂注入了未授权字段 state",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂字段 api 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂字段 closeModal 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂字段 createAlertDialog 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂字段 createConfirmDialog 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂字段 modalRoot 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂字段 openModal 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂注入了未授权字段 closeModal",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂注入了未授权字段 createAlertDialog",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂注入了未授权字段 createConfirmDialog",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂注入了未授权字段 modalRoot",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂注入了未授权字段 openModal",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-financial-op",
+      "from": "src/renderer-vcc-financial-op.js",
+      "to": null,
+      "line": 3023,
+      "column": 23,
+      "message": "控制器只能消费显式 scoped API，不能读取完整 desktopApi",
+      "evidenceId": "38ae1a75c9f1dd3a3d68c0abac07cdd9348c50578953c619d5c0bbc7e6c59dbf",
+      "functionPath": "<anonymous:1>",
+      "exceptionId": "baseline-renderer-scope-004"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-financial-op",
+      "from": "src/renderer-vcc-financial-op.js",
+      "to": null,
+      "line": 3023,
+      "column": 23,
+      "message": "控制器只能消费显式 scoped API，不能读取完整 desktopApi",
+      "evidenceId": "3f38aa7c230db5e94e5b5c2a19481440141a21c535782b1be1c21f6b9e4fa74f",
+      "functionPath": "<anonymous:1>",
+      "exceptionId": "baseline-renderer-scope-005"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-financial-op",
+      "from": "src/renderer-vcc-financial-op.js",
+      "to": null,
+      "line": 4,
+      "column": 14,
+      "message": "控制器只能消费显式 scoped API，不能读取完整 desktopApi",
+      "evidenceId": "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+      "functionPath": "<anonymous:1>",
+      "exceptionId": "baseline-renderer-scope-006"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-financial-op",
+      "from": "src/renderer-vcc-financial-op.js",
+      "to": null,
+      "line": 4,
+      "column": 35,
+      "message": "控制器只能消费显式 scoped API，不能读取完整 desktopApi",
+      "evidenceId": "8cada5240f6a3ee1f22d06109382d81204e7f6e29e33b135c9fbf435bf1734a8",
+      "functionPath": "<anonymous:1>",
+      "exceptionId": "baseline-renderer-scope-007"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-financial-op",
+      "from": "src/renderer-vcc-financial-op.js",
+      "to": null,
+      "line": 4,
+      "column": 35,
+      "message": "控制器只能消费显式 scoped API，不能读取完整 desktopApi",
+      "evidenceId": "d5095915439bab422141c91a5475ded01ac82d02ef19060e1cd99d5ec707e787",
+      "functionPath": "<anonymous:1>",
+      "exceptionId": "baseline-renderer-scope-008"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "to": null,
+      "line": 108,
+      "column": 6,
+      "message": "受保护 worker operation 无法完整解释，须登记准确授权调用或使用可解析操作",
+      "evidenceId": "3420e9da5eca5d5ceaba4892b7f4b35ce02f1cac7bd0ae70071ebdefce14b5ad",
+      "functionPath": "runWorkerJob.<anonymous:1>",
+      "exceptionId": "baseline-recovery-dynamic-operation-108"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "to": null,
+      "line": 124,
+      "column": 19,
+      "message": "受保护 worker operation 无法完整解释，须登记准确授权调用或使用可解析操作",
+      "evidenceId": "950debb2b71c4842305e3692cc3d91c23c84e53c02a5a93e2e92d4d31d267228",
+      "functionPath": "createToolboxPublicationDispatcher.execute",
+      "exceptionId": "baseline-recovery-dynamic-operation-124"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21905,
+      "column": 31,
+      "message": "通用具名编排直接调用 Position 私有能力",
+      "dependencyPath": [
+        "src/main.js",
+        "src/main-process/position-reconciliation/interactive-task-preflight.js"
+      ],
+      "evidenceId": "c7c2baf04fd55498f3c8aef713491d02c1c394b2dbeacd550d987d469f9ef873",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>",
+      "exceptionId": "baseline-task-adapter-001"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21948,
+      "column": 19,
+      "message": "通用具名编排直接调用 Position 私有能力",
+      "dependencyPath": [
+        "src/main.js",
+        "src/main-process/position-reconciliation/interactive-task-preflight.js"
+      ],
+      "evidenceId": "7f9a1d49111564db798022fc3a87f50afa77be3ccf09275256601e6ad51e2383",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:1>.execute",
+      "exceptionId": "baseline-task-adapter-002"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21952,
+      "column": 44,
+      "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+      "evidenceId": "134e92a37eeee514492390c7bf10d2030542d68a107ccc0bd2e685c774ade2e9",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:1>.execute.admitPosition",
+      "exceptionId": "baseline-task-adapter-003"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21970,
+      "column": 29,
+      "message": "通用具名编排直接调用 Position 私有能力",
+      "dependencyPath": [
+        "src/main.js",
+        "src/main-process/position-reconciliation/interactive-task-preflight.js"
+      ],
+      "evidenceId": "091ea592fa5712395938c4c00535735c4f51160b8b27957a53470e3fc5b3e2d5",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>",
+      "exceptionId": "baseline-task-adapter-004"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22049,
+      "column": 12,
+      "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+      "evidenceId": "0cc798dd0f5a361219b10fa6f5c84cba39a92bf0d4e6b7d0d050dd7b90df5018",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.execute.executePositionBusiness",
+      "exceptionId": "baseline-task-adapter-005"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22060,
+      "column": 12,
+      "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+      "evidenceId": "efbb70520e22c439925a980b5ca7222b9a1f7f1f28355c4690a6da25d9438e88",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.execute.executePositionBusiness",
+      "exceptionId": "baseline-task-adapter-006"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22068,
+      "column": 14,
+      "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+      "evidenceId": "c3886895bcbb1371afe2559663e469cc4e3f88668a3bb12c5e0949f5dadb4d97",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.execute.executePositionBusiness",
+      "exceptionId": "baseline-task-adapter-007"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22069,
+      "column": 20,
+      "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+      "evidenceId": "26202aa7b30b64f33a03c83f4720e713a5a230129a11f516151a995f49704130",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.execute.executePositionBusiness",
+      "exceptionId": "baseline-task-adapter-008"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22075,
+      "column": 14,
+      "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+      "evidenceId": "2243fb1e36f1fc4cf283d73642b0898adcb0da044dbcd6e5571b352c9979e2f1",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.execute.executePositionBusiness",
+      "exceptionId": "baseline-task-adapter-009"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22093,
+      "column": 10,
+      "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+      "evidenceId": "8d991db49bc06457a453f5e15c6fb9a4f04d1d825221e4760f152bb22a831255",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.execute.executePositionBusiness",
+      "exceptionId": "baseline-task-adapter-010"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22113,
+      "column": 15,
+      "message": "通用具名编排直接调用 Position 私有能力",
+      "dependencyPath": [
+        "src/main.js",
+        "src/main-process/position-reconciliation/interactive-task-preflight.js"
+      ],
+      "evidenceId": "08b7f2fc8b9b01d626d9b017a8678be27fc58074133c508c8c83dbb253a428c1",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.execute",
+      "exceptionId": "baseline-task-adapter-012"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22119,
+      "column": 40,
+      "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+      "evidenceId": "50ee41b9670d0d8d86e88e2e0416c72af34c1896b526c97152268ecf7636e265",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.execute.admitPosition",
+      "exceptionId": "baseline-task-adapter-013"
+    }
+  ],
+  "staleExceptions": [
+    {
+      "id": "baseline-task-adapter-011",
+      "rule": "ARCH-TASK-ADAPTER",
+      "from": "src/main.js",
+      "message": "旧位置已无匹配，请在同一治理变更删除例外"
+    }
+  ],
+  "activeBoundaries": [
+    "platform-core",
+    "production-graph"
+  ],
+  "limitations": [
+    "静态依赖图不完整证明运行时 IPC、callback 注入、任意别名/反射、共享对象内部写入或数据库业务语义。",
+    "动态加载仅覆盖静态可解析目标及准确登记的目标集；未解释位置必须诊断。",
+    "Classic global 仅覆盖已登记工厂、支持的全局读取与脚本顺序；普通 DOM 和宿主之外的对象生命期须由行为测试证明。",
+    "pending/partial 边界和 activationEvidence 文件存在不代表对应治理已通过行为、GUI 或平台验收。",
+    "历史修复只核对 Git 身份、内容 hash、schema 和审查材料存在；最小语法修复的语义保持仍须人工 review。"
+  ]
+}

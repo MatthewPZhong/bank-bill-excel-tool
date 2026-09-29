@@ -1,0 +1,6 @@
+baseline generate-and-check: E13-G manifest gate PASS: 402/402 surfaces, 74 legacy pairs, 13 production enabled
+current generate-and-check: E13-G manifest gate PASS: 402/402 surfaces, 74 legacy pairs, 13 production enabled
+baseline check-only: E13-G manifest gate PASS: 402/402 surfaces, 74 legacy pairs, 13 production enabled
+current check-only: E13-G manifest gate PASS: 402/402 surfaces, 74 legacy pairs, 13 production enabled
+Differential PASS: three outputs byte-identical; coverage changes only the exact Main source hash bytes.
+Historical repository JSON unchanged; this isolated PASS does not change the historical snapshot gate result.

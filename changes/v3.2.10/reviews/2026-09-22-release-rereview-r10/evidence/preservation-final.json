@@ -1,0 +1,12 @@
+{
+  "checkedAt": "2026-09-22T20:14:44.789290+08:00",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "frozenFilesCompared": 4656,
+  "changedFrozenFiles": [],
+  "newFilesOutsideReviewDirectory": [],
+  "headUnchanged": true,
+  "statusUnchanged": true,
+  "trackedDiffUnchanged": true,
+  "scope": "Git cached/untracked nonignored files; current R10 review artifact excluded from new-file check.",
+  "status": "PASS"
+}

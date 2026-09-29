@@ -1,0 +1,95 @@
+{
+  "baselineViolations": [],
+  "results": [
+    {
+      "name": "old_nested_api",
+      "source": "window.StatementController.createStatementController({initialInfo:{api:window.desktopApi}});",
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/renderer.js",
+          "to": null,
+          "line": 2318,
+          "column": 0,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "functionPath": null
+        }
+      ]
+    },
+    {
+      "name": "prototype_computed",
+      "source": "window.StatementController.createStatementController({initialInfo:{[\"__proto__\"]:window.desktopApi}});",
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/renderer.js",
+          "to": null,
+          "line": 2318,
+          "column": 0,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "functionPath": null
+        }
+      ]
+    },
+    {
+      "name": "prototype_literal",
+      "source": "window.StatementController.createStatementController({initialInfo:{__proto__:window.desktopApi}});",
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/renderer.js",
+          "to": null,
+          "line": 2318,
+          "column": 0,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "functionPath": null
+        }
+      ]
+    },
+    {
+      "name": "category_callable",
+      "source": "window.ReconIdFixController.createReconIdFixController({config:{initialBillCategory:()=>window.desktopApi}});",
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-recon-id-fix",
+          "from": "src/renderer.js",
+          "to": null,
+          "line": 2318,
+          "column": 0,
+          "message": "工厂字段 config.initialBillCategory 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "functionPath": null
+        }
+      ]
+    },
+    {
+      "name": "category_other_ipc",
+      "source": "window.ReconIdFixController.createReconIdFixController({config:{initialBillCategory:window.desktopApi.archiveCenter.getSettings()}});",
+      "violations": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-recon-id-fix",
+          "from": "src/renderer.js",
+          "to": null,
+          "line": 2318,
+          "column": 0,
+          "message": "工厂字段 config.initialBillCategory 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "functionPath": null
+        }
+      ]
+    },
+    {
+      "name": "category_app_info",
+      "source": "window.ReconIdFixController.createReconIdFixController({config:{initialBillCategory:window.desktopApi.app.getInfo().reconIdFixBillCategory}});",
+      "violations": []
+    },
+    {
+      "name": "initial_app_info",
+      "source": "window.StatementController.createStatementController({initialInfo:window.desktopApi.app.getInfo()});",
+      "violations": []
+    }
+  ]
+}

@@ -1,0 +1,454 @@
+{
+  "beforeInputHashes": [
+    {
+      "path": "scripts/architecture/scan.js",
+      "sha256": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/contracts.js",
+      "sha256": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/rules.js",
+      "sha256": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/renderer-contracts.js",
+      "sha256": "a375dd2d18307907a158ae04f86197f0630657e64d81de2e60fd0f4e4ecfe3fb",
+      "match": true
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "sha256": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "match": true
+    }
+  ],
+  "currentInputHashes": [
+    {
+      "path": "scripts/architecture/scan.js",
+      "sha256": "e4f11c8b283f2b85874b207fb15f7a6763fe984d2bf8a6254fc94049df1de7be"
+    },
+    {
+      "path": "scripts/architecture/contracts.js",
+      "sha256": "d6d1ce4e423f3ed727f14ca995c921fc205ddaf6a6e4b829a139e566781f4a0f"
+    },
+    {
+      "path": "scripts/architecture/rules.js",
+      "sha256": "0c19942ce9159be758ab53729ad4deaa0afbeb8e71ab74e25a1c816bd98d82fa"
+    },
+    {
+      "path": "scripts/architecture/renderer-contracts.js",
+      "sha256": "339cbc814a23f6eb2c3e8a57d77908a68126a195a9f4ceaf9e7a7b034e74c903"
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "sha256": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316"
+    }
+  ],
+  "policy": [
+    {
+      "path": "architecture/boundaries.json",
+      "before": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+      "current": "f8451d0b9cc76acb80c52b03a8dd1b2d100a4c88d3f13623faa36bf85a8652b3",
+      "same": true
+    },
+    {
+      "path": "architecture/legacy-allowlist.json",
+      "before": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3",
+      "current": "4f27c68c5cfd1c10af1402da117fea463016d3dd3341a3e1d200b4e2d9f2a1c3",
+      "same": true
+    },
+    {
+      "path": "scripts/architecture/schema.js",
+      "before": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "current": "29187fcde04c5f2c240f381a1ac938ebc8fe8f8eb135ccd3a8d488e64bc1b316",
+      "same": true
+    },
+    {
+      "path": "scripts/architecture/policy-history.js",
+      "before": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+      "current": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+      "same": true
+    }
+  ],
+  "renderer": [
+    {
+      "name": "whole-array-pure-write",
+      "expectedClean": true,
+      "historicalExpectedClean": true,
+      "source": "const data=[{name:\"bank\"}];data[0]={name:\"updated\"};window.StatementController.createStatementController({initialInfo:data});",
+      "runtime": {
+        "initialContainsWholeApi": false,
+        "calledIpc": [],
+        "categoryWasThenable": false,
+        "initialInfo": [
+          {
+            "name": "updated"
+          }
+        ],
+        "initialNestedIsState": false,
+        "apiIsWhole": false,
+        "apiKeys": []
+      },
+      "scanner": {
+        "beforeR10": {
+          "digest": "66bb6ab649d3dc15cde0950e11aeea6b71a701b592c82709d0eca7986224ed46",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "f06c32cb5480e17977cad7b83a646f08da604731c7709ade856be40047550a19",
+            "65ccf22c72349c701a763f76750a020db5c830ff4c307f54b6b884cee1e03d80",
+            "43cce229ffdc418fba35c7e80937ad2a0e6093470680375bb34f66ee2b4b509b",
+            "cc98daf918379e08cdaa56a559e4939ef260d4900d63db8495ae0358720c73a3"
+          ]
+        },
+        "current": {
+          "digest": "66bb6ab649d3dc15cde0950e11aeea6b71a701b592c82709d0eca7986224ed46",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "f06c32cb5480e17977cad7b83a646f08da604731c7709ade856be40047550a19",
+            "65ccf22c72349c701a763f76750a020db5c830ff4c307f54b6b884cee1e03d80",
+            "43cce229ffdc418fba35c7e80937ad2a0e6093470680375bb34f66ee2b4b509b",
+            "cc98daf918379e08cdaa56a559e4939ef260d4900d63db8495ae0358720c73a3"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR10": [],
+      "current": []
+    },
+    {
+      "name": "whole-array-capability-write",
+      "expectedClean": false,
+      "historicalExpectedClean": false,
+      "source": "const data=[{name:\"bank\"}];data[0]=window.desktopApi;window.StatementController.createStatementController({initialInfo:data});",
+      "runtime": {
+        "initialContainsWholeApi": true,
+        "calledIpc": [],
+        "categoryWasThenable": false,
+        "initialInfo": [
+          {}
+        ],
+        "initialNestedIsState": false,
+        "apiIsWhole": false,
+        "apiKeys": []
+      },
+      "scanner": {
+        "beforeR10": {
+          "digest": "15689af15d3b325f0b83986f16635577a217e9cf857cd2577463db0d65af19ea",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "2043958267346e6054b1e71b1b8c8f554f88080c04609a4ef039f27232d745f2",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+            "65ccf22c72349c701a763f76750a020db5c830ff4c307f54b6b884cee1e03d80",
+            "43cce229ffdc418fba35c7e80937ad2a0e6093470680375bb34f66ee2b4b509b",
+            "cc98daf918379e08cdaa56a559e4939ef260d4900d63db8495ae0358720c73a3"
+          ]
+        },
+        "current": {
+          "digest": "15689af15d3b325f0b83986f16635577a217e9cf857cd2577463db0d65af19ea",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "2043958267346e6054b1e71b1b8c8f554f88080c04609a4ef039f27232d745f2",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+            "65ccf22c72349c701a763f76750a020db5c830ff4c307f54b6b884cee1e03d80",
+            "43cce229ffdc418fba35c7e80937ad2a0e6093470680375bb34f66ee2b4b509b",
+            "cc98daf918379e08cdaa56a559e4939ef260d4900d63db8495ae0358720c73a3"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR10": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 53,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "65ccf22c72349c701a763f76750a020db5c830ff4c307f54b6b884cee1e03d80",
+          "functionPath": null
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 53,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "65ccf22c72349c701a763f76750a020db5c830ff4c307f54b6b884cee1e03d80",
+          "functionPath": null
+        }
+      ]
+    },
+    {
+      "name": "awaited-ipc-pure-array-default",
+      "expectedClean": true,
+      "historicalExpectedClean": true,
+      "source": "(async()=>{const {ipcRenderer}=require('electron');const info=await ipcRenderer.invoke('app:get-info');function select(value=[{name:'bank'}]){return value;}window.StatementController.createStatementController({initialInfo:select(info.missingList)});})();",
+      "runtime": {
+        "initialContainsWholeApi": false,
+        "calledIpc": [
+          "app:get-info"
+        ],
+        "categoryWasThenable": false,
+        "initialInfo": [
+          {
+            "name": "bank"
+          }
+        ],
+        "initialNestedIsState": false,
+        "apiIsWhole": false,
+        "apiKeys": []
+      },
+      "scanner": {
+        "beforeR10": {
+          "digest": "48df08601edbe271eca7b5f12ba1fc8893fd3b3bd5926042c6d8e51075041aa2",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "1aa3e491e2c4fe35d43de80bd9f3c7c9b4a1812433e0543c05c60abfa87d6feb",
+            "1fcfd4a1f1271ead6973cbde707120d4ccfad6307c18917ee5a12522c6a1a995",
+            "51f8aec527637114bd3713648b4e4b7f61b9c16f9bf2d1dfdc2c4749fa602094",
+            "bcab9841699b9088cfd690351b4063f8e7b73877bd447b98f6200cdabf3dd2b3",
+            "43cce229ffdc418fba35c7e80937ad2a0e6093470680375bb34f66ee2b4b509b",
+            "cc98daf918379e08cdaa56a559e4939ef260d4900d63db8495ae0358720c73a3",
+            "c85687f6bce90fd6fee281e9374990b852bd4d253376b66a440149553402890b"
+          ]
+        },
+        "current": {
+          "digest": "48df08601edbe271eca7b5f12ba1fc8893fd3b3bd5926042c6d8e51075041aa2",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "1aa3e491e2c4fe35d43de80bd9f3c7c9b4a1812433e0543c05c60abfa87d6feb",
+            "1fcfd4a1f1271ead6973cbde707120d4ccfad6307c18917ee5a12522c6a1a995",
+            "51f8aec527637114bd3713648b4e4b7f61b9c16f9bf2d1dfdc2c4749fa602094",
+            "bcab9841699b9088cfd690351b4063f8e7b73877bd447b98f6200cdabf3dd2b3",
+            "43cce229ffdc418fba35c7e80937ad2a0e6093470680375bb34f66ee2b4b509b",
+            "cc98daf918379e08cdaa56a559e4939ef260d4900d63db8495ae0358720c73a3",
+            "c85687f6bce90fd6fee281e9374990b852bd4d253376b66a440149553402890b"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR10": [],
+      "current": []
+    },
+    {
+      "name": "awaited-ipc-capability-array-default",
+      "expectedClean": false,
+      "historicalExpectedClean": false,
+      "source": "(async()=>{const {ipcRenderer}=require('electron');const info=await ipcRenderer.invoke('app:get-info');function select(value=[window.desktopApi]){return value;}window.StatementController.createStatementController({initialInfo:select(info.missingList)});})();",
+      "runtime": {
+        "initialContainsWholeApi": true,
+        "calledIpc": [
+          "app:get-info"
+        ],
+        "categoryWasThenable": false,
+        "initialInfo": [
+          {}
+        ],
+        "initialNestedIsState": false,
+        "apiIsWhole": false,
+        "apiKeys": []
+      },
+      "scanner": {
+        "beforeR10": {
+          "digest": "dc174ea6316bc3df02122af85b1d7afec4ce20c2fd97dddc8334988f99364367",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "93b8d5587bf8156b9afe6a0f51003b33cfa04daede866adc1d28f53ecef1bd7f",
+            "1fcfd4a1f1271ead6973cbde707120d4ccfad6307c18917ee5a12522c6a1a995",
+            "51f8aec527637114bd3713648b4e4b7f61b9c16f9bf2d1dfdc2c4749fa602094",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+            "bcab9841699b9088cfd690351b4063f8e7b73877bd447b98f6200cdabf3dd2b3",
+            "43cce229ffdc418fba35c7e80937ad2a0e6093470680375bb34f66ee2b4b509b",
+            "cc98daf918379e08cdaa56a559e4939ef260d4900d63db8495ae0358720c73a3",
+            "c85687f6bce90fd6fee281e9374990b852bd4d253376b66a440149553402890b"
+          ]
+        },
+        "current": {
+          "digest": "dc174ea6316bc3df02122af85b1d7afec4ce20c2fd97dddc8334988f99364367",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "93b8d5587bf8156b9afe6a0f51003b33cfa04daede866adc1d28f53ecef1bd7f",
+            "1fcfd4a1f1271ead6973cbde707120d4ccfad6307c18917ee5a12522c6a1a995",
+            "51f8aec527637114bd3713648b4e4b7f61b9c16f9bf2d1dfdc2c4749fa602094",
+            "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+            "bcab9841699b9088cfd690351b4063f8e7b73877bd447b98f6200cdabf3dd2b3",
+            "43cce229ffdc418fba35c7e80937ad2a0e6093470680375bb34f66ee2b4b509b",
+            "cc98daf918379e08cdaa56a559e4939ef260d4900d63db8495ae0358720c73a3",
+            "c85687f6bce90fd6fee281e9374990b852bd4d253376b66a440149553402890b"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR10": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 160,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "bcab9841699b9088cfd690351b4063f8e7b73877bd447b98f6200cdabf3dd2b3",
+          "functionPath": "<anonymous:1>"
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-statement",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 160,
+          "message": "工厂字段 initialInfo 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "bcab9841699b9088cfd690351b4063f8e7b73877bd447b98f6200cdabf3dd2b3",
+          "functionPath": "<anonymous:1>"
+        }
+      ]
+    },
+    {
+      "name": "awaited-category-other-default-conservative",
+      "expectedClean": false,
+      "historicalExpectedClean": false,
+      "source": "(async()=>{const {ipcRenderer}=require('electron');const info=await ipcRenderer.invoke('app:get-info');function mount(category=ipcRenderer.invoke('other')){window.ReconIdFixController.createReconIdFixController({config:{initialBillCategory:category}});}mount(info.reconIdFixBillCategory);})();",
+      "runtime": {
+        "initialContainsWholeApi": false,
+        "calledIpc": [
+          "app:get-info"
+        ],
+        "category": "business",
+        "categoryWasThenable": false,
+        "initialNestedIsState": false,
+        "apiIsWhole": false,
+        "apiKeys": []
+      },
+      "scanner": {
+        "beforeR10": {
+          "digest": "08fc45db97dcc29ffcbff99d1c1b399eba49089eb5ed85727b0520b529c6ef76",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "b6f2fc94c7cf6914eb5b19966325ea5d87c3f98392bcbb9a2a25999372e6f2c7",
+            "1fcfd4a1f1271ead6973cbde707120d4ccfad6307c18917ee5a12522c6a1a995",
+            "51f8aec527637114bd3713648b4e4b7f61b9c16f9bf2d1dfdc2c4749fa602094",
+            "7be6d0baf68d1fc4785fe1d941a1038ccb1e1e0681d0b1f356452f43510d5144",
+            "1901839eb301f8de8607bfdc10ff71e116ca87fd1957a76d72b55792f53f640a",
+            "616a414d13ea35f52408c10e8722609177a949c628c953a8e9e4d154d17471f4",
+            "9daaead24783dfc949af0fed056d286ddf129fdbb6c171d7679bd2a270c426f9",
+            "534049434b02a737857559dbc8f816de4f3e5fbb27743bab40a9fe06a0b2e757"
+          ]
+        },
+        "current": {
+          "digest": "08fc45db97dcc29ffcbff99d1c1b399eba49089eb5ed85727b0520b529c6ef76",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "b6f2fc94c7cf6914eb5b19966325ea5d87c3f98392bcbb9a2a25999372e6f2c7",
+            "1fcfd4a1f1271ead6973cbde707120d4ccfad6307c18917ee5a12522c6a1a995",
+            "51f8aec527637114bd3713648b4e4b7f61b9c16f9bf2d1dfdc2c4749fa602094",
+            "7be6d0baf68d1fc4785fe1d941a1038ccb1e1e0681d0b1f356452f43510d5144",
+            "1901839eb301f8de8607bfdc10ff71e116ca87fd1957a76d72b55792f53f640a",
+            "616a414d13ea35f52408c10e8722609177a949c628c953a8e9e4d154d17471f4",
+            "9daaead24783dfc949af0fed056d286ddf129fdbb6c171d7679bd2a270c426f9",
+            "534049434b02a737857559dbc8f816de4f3e5fbb27743bab40a9fe06a0b2e757"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR10": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-recon-id-fix",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 156,
+          "message": "工厂字段 config.initialBillCategory 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "1901839eb301f8de8607bfdc10ff71e116ca87fd1957a76d72b55792f53f640a",
+          "functionPath": "<anonymous:1>.mount"
+        }
+      ],
+      "current": [
+        {
+          "rule": "ARCH-RENDERER-SCOPE",
+          "boundaryId": "renderer-recon-id-fix",
+          "from": "src/shell.js",
+          "to": null,
+          "line": 1,
+          "column": 156,
+          "message": "工厂字段 config.initialBillCategory 必须是递归纯数据或明确的 app:get-info IPC 数据",
+          "evidenceId": "1901839eb301f8de8607bfdc10ff71e116ca87fd1957a76d72b55792f53f640a",
+          "functionPath": "<anonymous:1>.mount"
+        }
+      ]
+    },
+    {
+      "name": "awaited-category-data-default",
+      "expectedClean": true,
+      "historicalExpectedClean": true,
+      "source": "(async()=>{const {ipcRenderer}=require('electron');const info=await ipcRenderer.invoke('app:get-info');function mount(category='gateway'){window.ReconIdFixController.createReconIdFixController({config:{initialBillCategory:category}});}mount(info.reconIdFixBillCategory);})();",
+      "runtime": {
+        "initialContainsWholeApi": false,
+        "calledIpc": [
+          "app:get-info"
+        ],
+        "category": "business",
+        "categoryWasThenable": false,
+        "initialNestedIsState": false,
+        "apiIsWhole": false,
+        "apiKeys": []
+      },
+      "scanner": {
+        "beforeR10": {
+          "digest": "8586c633f572ddbb75baaa1f30565b3bcbd683aac6cc726bafb038adbb469964",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "d012e8f45c203b93d184f65cc7cf5c0a1af62ab1f5d6c0c332db9bf806518735",
+            "1fcfd4a1f1271ead6973cbde707120d4ccfad6307c18917ee5a12522c6a1a995",
+            "51f8aec527637114bd3713648b4e4b7f61b9c16f9bf2d1dfdc2c4749fa602094",
+            "1901839eb301f8de8607bfdc10ff71e116ca87fd1957a76d72b55792f53f640a",
+            "616a414d13ea35f52408c10e8722609177a949c628c953a8e9e4d154d17471f4",
+            "9daaead24783dfc949af0fed056d286ddf129fdbb6c171d7679bd2a270c426f9",
+            "534049434b02a737857559dbc8f816de4f3e5fbb27743bab40a9fe06a0b2e757"
+          ]
+        },
+        "current": {
+          "digest": "8586c633f572ddbb75baaa1f30565b3bcbd683aac6cc726bafb038adbb469964",
+          "repeatEqual": true,
+          "afterRulesEqual": true,
+          "siteEvidenceIds": [
+            "d012e8f45c203b93d184f65cc7cf5c0a1af62ab1f5d6c0c332db9bf806518735",
+            "1fcfd4a1f1271ead6973cbde707120d4ccfad6307c18917ee5a12522c6a1a995",
+            "51f8aec527637114bd3713648b4e4b7f61b9c16f9bf2d1dfdc2c4749fa602094",
+            "1901839eb301f8de8607bfdc10ff71e116ca87fd1957a76d72b55792f53f640a",
+            "616a414d13ea35f52408c10e8722609177a949c628c953a8e9e4d154d17471f4",
+            "9daaead24783dfc949af0fed056d286ddf129fdbb6c171d7679bd2a270c426f9",
+            "534049434b02a737857559dbc8f816de4f3e5fbb27743bab40a9fe06a0b2e757"
+          ]
+        },
+        "beforeCurrentEqual": true
+      },
+      "beforeR10": [],
+      "current": []
+    }
+  ],
+  "query": []
+}

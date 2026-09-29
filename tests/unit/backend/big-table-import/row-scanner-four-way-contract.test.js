@@ -35,7 +35,7 @@ const {
 } = require('../../../../src/backend/acquiring-bill-currency-import/reader');
 
 // 引擎被测对象
-const zipReader = require('../../../../src/backend/big-table-import/zip-reader');
+const zipReader = require('../../../../src/backend/xlsx/zip-reader');
 const rowScanner = require('../../../../src/backend/big-table-import/row-scanner');
 
 const fx = require('./_fixtures');

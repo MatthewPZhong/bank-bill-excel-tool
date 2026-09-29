@@ -1,0 +1,10 @@
+{
+  "result": "PASS",
+  "sourceSha256": "eb2aae187b91f9e204eeacf97234ae6a4ebb277a9a0e9ce642cef556153c0e4d",
+  "testSha256": "f56a025846cbdb9eaa405f2c7b1e81be8880c44394dab19ee0d6f0bbbd613f39",
+  "newRegressionTests": 34,
+  "newRegressionLog": "architecture-tests-final.log",
+  "architectureTests": 655,
+  "actualConfigCases": 2,
+  "actualRendererBoundaries": 20
+}

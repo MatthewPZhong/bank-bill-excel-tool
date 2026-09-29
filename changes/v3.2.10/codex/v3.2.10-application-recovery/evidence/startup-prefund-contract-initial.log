@@ -1,0 +1,69 @@
+✔ 真实 startup seam 完成 DB→IPC 后才建窗并等待 ready-to-show (158.61125ms)
+✔ binding exact require 是首个可执行 statement，真实 loader 执行完整允许前缀 (301.281458ms)
+✔ 失败销毁隐藏窗口后只走 native failure，activate/second-instance 不旁路屏障 (0.798875ms)
+✔ startup-total 覆盖 usage 尝试，但 usage 初始化仍 warning + default 非阻塞降级 (56.820792ms)
+✔ 两阶段 init API 与 loading 合同已从产品全链删除 (2.811291ms)
+✔ SQLite 使用 exact optimize 且产品数据库初始化无无参数 ANALYZE (0.134667ms)
+✖ 主初始化不重复执行 VCC gate，Archive post-outbox hook 是唯一启动入口 (1.156875ms)
+▶ 前置资金对账 UI / preload / IPC 接线
+  ✔ 页面包含完整控件、收敛 MPT 入口且 3.0.14 只展示缺网关账单 (0.834625ms)
+  ✔ 五槽位结构与资金对账数据处理一致，状态框保持原跨行尺寸 (0.506958ms)
+  ✔ renderer 注册模块、状态刷新、按钮处理和事件解绑 (0.892792ms)
+  ✔ preload 的 12 个 invoke 与 3 个进度通道和 main handler 对齐 (5.263709ms)
+  ✖ run/export 精确血缘与 startup owner 顺序在 main seam 闭合 (5.353583ms)
+  ✔ 临时链接表首页复用标准链接表结构，且不提供账户映射 (0.5375ms)
+  ✔ 临时删除框复用标准删除框结构，并改走临时表日期范围接口 (0.984958ms)
+  ✔ 临时链接表按钮把既有 MPT 导入处理传入管理弹窗 (0.2855ms)
+✖ 前置资金对账 UI / preload / IPC 接线 (15.350458ms)
+ℹ tests 15
+ℹ suites 1
+ℹ pass 13
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 608.088458
+
+✖ failing tests:
+
+test at tests/unit/main-startup-contract.test.js:281:1
+✖ 主初始化不重复执行 VCC gate，Archive post-outbox hook 是唯一启动入口 (1.156875ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-startup-contract.test.js:287:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/renderer-pre-fund-reconciliation.test.js:142:3
+✖ run/export 精确血缘与 startup owner 顺序在 main seam 闭合 (5.353583ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+  
+    assert.ok(pendingOwner < bizOwner && bizOwner < preFundOwner && preFundOwner < positionOwner)
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/renderer-pre-fund-reconciliation.test.js:177:12)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Suite.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

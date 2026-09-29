@@ -9,31 +9,27 @@ const { resolveChangesPath } = require('./lib/changes-paths');
 const {
   bindingSnapshot
 } = require('../src/main-process/background-execution/action-task-binding-registry');
-const {
-  createActionManifest
-} = require('../src/main-process/background-execution/action-manifest');
+const { validateApprovedExecutionPolicies } = require('../src/main-process/background-execution/approved-execution-baseline');
 const {
   validateActionCoverage
 } = require('../src/main-process/background-execution/coverage-check');
 const {
-  createCapabilityInventory,
   validateCapabilityInventory
 } = require('../src/main-process/background-execution/capability-inventory');
 const {
-  createEffectiveProductionStrategySnapshot,
   validateEffectiveProductionStrategySnapshot
 } = require('../src/main-process/background-execution/production-strategy-snapshot');
 const {
   BACKGROUND_EXECUTION_POLICIES
-} = require('../src/main-process/background-execution/runtime');
+} = require('../src/main-process/execution-descriptors/policy-catalog');
 
 const REPOSITORY_ROOT = path.resolve(__dirname, '..');
 const AUTHORITY_PATH = 'changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/recovery-contract-authority.v1.json';
 const OUTPUT_PATHS = Object.freeze({
-  manifest: 'changes/3.2.5/e13-g-action-manifest.json',
-  capabilityInventory: 'changes/3.2.5/e13-g-capability-inventory.json',
-  productionStrategy: 'changes/3.2.5/e13-g-production-strategy-snapshot.json',
-  coverageReport: 'changes/3.2.5/e13-g-coverage-report.json'
+  manifest: 'changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/manifest-current/e13-g-action-manifest.json',
+  capabilityInventory: 'changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/manifest-current/e13-g-capability-inventory.json',
+  productionStrategy: 'changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/manifest-current/e13-g-production-strategy-snapshot.json',
+  coverageReport: 'changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/manifest-current/e13-g-coverage-report.json'
 });
 const SOURCE_PATHS = Object.freeze([
   'scripts/check-background-execution-manifest.js',
@@ -44,7 +40,40 @@ const SOURCE_PATHS = Object.freeze([
   'src/main-process/background-execution/capability-inventory.js',
   'src/main-process/background-execution/coverage-check.js',
   'src/main-process/background-execution/production-strategy-snapshot.js',
-  'src/main-process/background-execution/runtime.js'
+  'src/main-process/background-execution/runtime.js',
+  'src/main-process/background-execution/supervisor.js',
+  'src/main-process/background-execution/approved-execution-baseline.js',
+  'src/main-process/background-execution/approved-execution-baseline.json',
+  'src/main-process/archive-center/task-policy-common.js',
+  'src/main-process/application-recovery/composition.js',
+  'src/main-process/task-adapter-composition.js',
+  'src/main-process/execution-descriptors/composition.js',
+  'src/main-process/execution-descriptors/contract.js',
+  'src/main-process/execution-descriptors/descriptor-builder.js',
+  'src/main-process/execution-descriptors/legacy-task-policies.js',
+  'src/main-process/execution-descriptors/mature-adapters.js',
+  'src/main-process/execution-descriptors/policy-catalog.js',
+  'src/main-process/biz-op-v327/execution-descriptor.js',
+  'src/main-process/duplicate-inbound-match/execution-descriptor.js',
+  'src/main-process/fund-recon-worker/execution-descriptor.js',
+  'src/main-process/new-account/execution-descriptor.js',
+  'src/main-process/new-account/generation-contract.js',
+  'src/main-process/new-account/policies.js',
+  'src/main-process/new-account/artifact-copy.js',
+  'src/main-process/position-reconciliation/execution-descriptor.js',
+  'src/main-process/pre-fund-reconciliation/execution-descriptor.js',
+  'src/main-process/recon-id-fix-service/execution-descriptor.js',
+  'src/main-process/toolbox-background/execution-descriptor.js',
+  'src/main-process/vcc-financial-op-output/execution-descriptor.js',
+  'src/main-process/biz-op-v327/archive-task-policies.js',
+  'src/main-process/duplicate-inbound-match/archive-task-policies.js',
+  'src/main-process/fund-recon-worker/archive-task-policies.js',
+  'src/main-process/new-account/archive-task-policies.js',
+  'src/main-process/position-reconciliation/archive-task-policies.js',
+  'src/main-process/pre-fund-reconciliation/archive-task-policies.js',
+  'src/main-process/recon-id-fix-service/archive-task-policies.js',
+  'src/main-process/toolbox-background/archive-task-policies.js',
+  'src/main-process/vcc-financial-op-output/archive-task-policies.js'
 ]);
 
 function absolute(relativePath) {
@@ -67,22 +96,18 @@ function buildArtifacts() {
   const authority = readJson(AUTHORITY_PATH);
   const bindings = bindingSnapshot();
   const policies = BACKGROUND_EXECUTION_POLICIES;
-  const manifest = createActionManifest({ bindings, policies });
+  // 先查独立批准基线，再允许任何 --write 产物写入；批准 JSON 从不在输出列表中。
+  const { manifest, capabilityInventory, productionStrategy } = validateApprovedExecutionPolicies(policies, { bindings });
   const coverage = validateActionCoverage(manifest, { bindings, policies });
-  const capabilityInventory = createCapabilityInventory({ manifest, policies });
   const capabilityValidation = validateCapabilityInventory(capabilityInventory, { manifest, policies });
-  const productionStrategy = createEffectiveProductionStrategySnapshot({
-    capabilityInventory,
-    policies
-  });
   const strategyValidation = validateEffectiveProductionStrategySnapshot(productionStrategy, {
     capabilityInventory,
     policies
   });
   const coverageReport = {
     reportVersion: 1,
-    release: 'v3.2.5',
-    workItem: 'E13-G',
+    release: 'v3.2.10',
+    workItem: 'G7',
     contractAuthority: {
       contractVersion: authority.contractVersion,
       revision: authority.revision,
@@ -103,6 +128,7 @@ function buildArtifacts() {
 }
 
 function writeJson(relativePath, value) {
+  fs.mkdirSync(path.dirname(absolute(relativePath)), { recursive: true });
   fs.writeFileSync(absolute(relativePath), `${JSON.stringify(value, null, 2)}\n`);
 }
 

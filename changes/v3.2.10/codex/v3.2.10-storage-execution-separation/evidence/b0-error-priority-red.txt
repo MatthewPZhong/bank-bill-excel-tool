@@ -1,0 +1,31 @@
+✖ B0 真实内存受限 worker 同栈 error→exit：保留 chunk 原始 error 优先级 (138.571083ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 218.110459
+
+✖ failing tests:
+
+test at tests/unit/main-process/run-check-multiworker.test.js:899:1
+✖ B0 真实内存受限 worker 同栈 error→exit：保留 chunk 原始 error 优先级 (138.571083ms)
+  AssertionError [ERR_ASSERTION]: 同栈 exit 不能抢在 await catch 前覆盖此前 error
+  + actual - expected
+  
+  + 'multiworker worker 意外 exit（code=1）'
+  - 'multiworker chunk=0 worker error 事件：Worker terminated due to reaching memory limit: JS heap out of memory'
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-storage-execution-separation/tests/unit/main-process/run-check-multiworker.test.js:913:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'multiworker worker 意外 exit（code=1）',
+    expected: 'multiworker chunk=0 worker error 事件：Worker terminated due to reaching memory limit: JS heap out of memory',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

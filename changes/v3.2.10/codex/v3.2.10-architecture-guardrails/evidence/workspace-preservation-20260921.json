@@ -1,0 +1,19 @@
+{
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "primaryCheckedFiles": 130,
+  "primaryModifiedFiles": [],
+  "inheritedBackup": "/private/tmp/g8-inherited-20260921.tar.gz",
+  "inheritedManifest": "/private/tmp/g8-start-manifest.json",
+  "inheritedFilesEditedThisTurn": [
+    "architecture/README.md",
+    "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md",
+    "scripts/architecture/policy-history.js",
+    "scripts/architecture/rules.js",
+    "scripts/architecture/scan.js",
+    "scripts/check-architecture.js",
+    "tests/unit/architecture/cli.test.js",
+    "tests/unit/architecture/policy-history.test.js",
+    "tests/unit/architecture/rules.test.js"
+  ],
+  "businessSourceDiff": []
+}
