@@ -18,13 +18,23 @@ const failures = [];
 
 (async () => {
   await app.whenReady();
-  const win = new BrowserWindow({ show: false, width: 1080, height: 800,
+  const createWindow = (layoutMode = false) => new BrowserWindow({ show: false, width: 1080, height: 800, frame: !layoutMode,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false }
   });
+  let win = createWindow();
+  let layoutMode = false;
+  const layout = require('./layout-driver.cjs')({ root, temporary, getWindow: () => win });
   const js = (source) => win.webContents.executeJavaScript(source, true);
   const load = (file) => js(fs.readFileSync(path.join(root, file), 'utf8') + '\n;void 0;');
-  const reset = async (html = '<div id="modalRoot"></div>') => {
-    await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent('<!doctype html><html><head><meta charset="utf-8"></head><body>' + html + '</body></html>')}`);
+  const reset = async (html = '<div id="modalRoot"></div>', options = {}) => {
+    if (Boolean(options.layout) !== layoutMode) {
+      layoutMode = Boolean(options.layout);
+      const previous = win;
+      win = createWindow(layoutMode);
+      previous.destroy();
+    }
+    if (layoutMode) await layout.prepare(html, options.layout);
+    else await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent('<!doctype html><html><head><meta charset="utf-8"></head><body>' + html + '</body></html>')}`);
     await load('src/renderer/modal-host.js');
     await load('src/renderer/modal-bridge.js');
     await load('src/renderer/scenario-command-service.js');
@@ -62,7 +72,7 @@ const failures = [];
   for (const name of files) {
     if (path.basename(name) !== name) throw new Error('fixture 名称不能包含路径');
     const fixture = require(path.join(fixturesDirectory, name));
-    await fixture({ js, load: loadFixture, reset, assert, test });
+    await fixture({ js, load: loadFixture, reset, assert, test, layout });
   }
   console.log(`${passed}/${total} PASS`);
   win.destroy();

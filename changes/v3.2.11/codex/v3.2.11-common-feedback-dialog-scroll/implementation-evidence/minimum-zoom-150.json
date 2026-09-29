@@ -1,0 +1,114 @@
+{
+  "environment": {
+    "platform": "darwin",
+    "versions": {
+      "electron": "36.9.5",
+      "chrome": "136.0.7103.177"
+    },
+    "displayScaleFactor": 2,
+    "minimumSize": [
+      1080,
+      760
+    ],
+    "frame": false,
+    "windowBounds": {
+      "x": 324,
+      "y": 103,
+      "width": 1080,
+      "height": 760
+    },
+    "contentBounds": {
+      "x": 324,
+      "y": 103,
+      "width": 1080,
+      "height": 760
+    },
+    "zoom": 1.5,
+    "page": {
+      "width": 720,
+      "height": 506,
+      "devicePixelRatio": 3,
+      "theme": "light"
+    }
+  },
+  "screenshotPixels": {
+    "width": 2160,
+    "height": 1520
+  },
+  "geometry": {
+    "viewport": {
+      "width": 720,
+      "height": 506
+    },
+    "card": {
+      "x": 150,
+      "y": 28,
+      "width": 420,
+      "height": 450.66668701171875,
+      "right": 570,
+      "bottom": 478.66668701171875
+    },
+    "body": {
+      "x": 151,
+      "y": 29,
+      "width": 418,
+      "height": 281.66668701171875,
+      "right": 569,
+      "bottom": 310.66668701171875
+    },
+    "footer": {
+      "x": 151,
+      "y": 310.66668701171875,
+      "width": 418,
+      "height": 167,
+      "right": 569,
+      "bottom": 477.66668701171875
+    },
+    "bodyHeight": 282,
+    "bodyScroll": 16307,
+    "bodyWidth": 418,
+    "bodyScrollWidth": 418,
+    "cardHeight": 449,
+    "cardScroll": 449,
+    "overflow": "auto",
+    "buttons": [
+      {
+        "x": 245.5,
+        "y": 327.66668701171875,
+        "width": 229,
+        "height": 36,
+        "right": 474.5,
+        "bottom": 363.66668701171875,
+        "text": "删除错误数据并重新处理这些文件",
+        "hit": true
+      },
+      {
+        "x": 252,
+        "y": 373.66668701171875,
+        "width": 216,
+        "height": 36,
+        "right": 468,
+        "bottom": 409.66668701171875,
+        "text": "导出所选文件中的全部错误数据",
+        "hit": true
+      },
+      {
+        "x": 291,
+        "y": 419.66668701171875,
+        "width": 138,
+        "height": 36,
+        "right": 429,
+        "bottom": 455.66668701171875,
+        "text": "关闭当前反馈窗口",
+        "hit": true
+      }
+    ],
+    "focus": "danger-btn small",
+    "errors": []
+  },
+  "input": {
+    "mouseConfirm": 1,
+    "mouseMiddle": 1,
+    "wheelScrolled": true
+  }
+}
