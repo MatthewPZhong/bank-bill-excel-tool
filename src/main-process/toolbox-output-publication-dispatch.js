@@ -40,6 +40,14 @@ function createRecoveryFailure(userDataDir, workerError, recoveryError) {
   return error;
 }
 
+// 只在本次 publish Worker 已派发后标记；旧 receipt 阻止 preflight 不属于本次提交未知。
+function markPublicationOutcomeUncertain(error, taskId) {
+  error.publicationOutcomeUncertain = true;
+  error.publicationTaskId = taskId;
+  error.preserveTemporaryFiles = true;
+  return error;
+}
+
 function runWorkerJob(workerScriptPath, op, payload, onProgress, onWorkerExit, workerData) {
   return new Promise((resolve, reject) => {
     let worker;
@@ -145,26 +153,36 @@ function createToolboxPublicationDispatcher(options = {}) {
     return authority.complete(snapshot, result, request);
   }
   async function publishWithinQueue(payload, request) {
-    const preflightRecovery = await recoverWithinQueue(request,
-      (snapshot) => authority.authorizeSnapshot(snapshot, request));
-    const pending = preflightRecovery.recovered.filter((item) =>
-      ['commit-handoff-pending', 'commit-finalization-pending'].includes(item.action));
-    if (pending.length || preflightRecovery.deferred.length) {
-      const error = recoveryError('TOOLBOX_PUBLICATION_MANUAL_RECOVERY', authority.root,
-        '已有输出等待存档中心耐久接管或 owner 放行，已阻止新的发布任务',
-        preflightRecovery.deferred.flatMap((item) => item.recoveryPaths));
-      error.deferred = preflightRecovery.deferred;
-      error.skippedActive = preflightRecovery.skippedActive;
-      error.detailLines = [...pending.map((item) => `待接管发布：${item.taskId}`),
-        ...preflightRecovery.deferred.map((item) => `待恢复发布：${item.taskId}（${item.code}）`)];
+    try {
+      const preflightRecovery = await recoverWithinQueue(request,
+        (snapshot) => authority.authorizeSnapshot(snapshot, request));
+      const pending = preflightRecovery.recovered.filter((item) =>
+        ['commit-handoff-pending', 'commit-finalization-pending'].includes(item.action));
+      if (pending.length || preflightRecovery.deferred.length) {
+        const error = recoveryError('TOOLBOX_PUBLICATION_MANUAL_RECOVERY', authority.root,
+          '已有输出等待存档中心耐久接管或 owner 放行，已阻止新的发布任务',
+          preflightRecovery.deferred.flatMap((item) => item.recoveryPaths));
+        error.deferred = preflightRecovery.deferred;
+        error.skippedActive = preflightRecovery.skippedActive;
+        error.detailLines = [...pending.map((item) => `待接管发布：${item.taskId}`),
+          ...preflightRecovery.deferred.map((item) => `待恢复发布：${item.taskId}（${item.code}）`)];
+        throw error;
+      }
+      payload.preflight = seal(workerKey, 'preflight', { root: authority.root, taskId: payload.taskId,
+        indexDigest: preflightRecovery.resultingIndexDigest, nonce: crypto.randomUUID() });
+    } catch (error) {
+      // 此时尚未派发本次 publish；旧 receipt 的保护不覆盖调用方新建的 generation。
+      error.publicationNotStarted = true;
+      error.publicationTaskId = payload.taskId;
       throw error;
     }
-    payload.preflight = seal(workerKey, 'preflight', { root: authority.root, taskId: payload.taskId,
-      indexDigest: preflightRecovery.resultingIndexDigest, nonce: crypto.randomUUID() });
     try {
       return await worker('publish', payload, request.onProgress);
     } catch (error) {
-      if (!error || error.isToolboxPublicationTransportError !== true) throw error;
+      if (!error || error.isToolboxPublicationTransportError !== true) {
+        if (error?.preserveTemporaryFiles) markPublicationOutcomeUncertain(error, payload.taskId);
+        throw error;
+      }
       // runWorkerJob 已跨过失败 worker 的真实 exit；复用当前租约和当前 FIFO。
       try {
         const recoveryRequest = authority.requestFor(null, { reason: 'transport-error', taskIds: [payload.taskId],
@@ -187,10 +205,16 @@ function createToolboxPublicationDispatcher(options = {}) {
           ...recovery.recovered.map((item) => `${item.taskId}：${item.action}`)];
         error.deferred = recovery.deferred;
         error.skippedActive = recovery.skippedActive;
+        if (recovery.deferred.some((item) => item.taskId === payload.taskId)
+            || recovery.skippedActive.includes(payload.taskId)) {
+          markPublicationOutcomeUncertain(error, payload.taskId);
+        }
         throw error;
       } catch (recoveryErrorValue) {
         if (recoveryErrorValue === error) throw error;
-        throw createRecoveryFailure(authority.root, error, recoveryErrorValue);
+        throw markPublicationOutcomeUncertain(
+          createRecoveryFailure(authority.root, error, recoveryErrorValue), payload.taskId
+        );
       }
     }
   }

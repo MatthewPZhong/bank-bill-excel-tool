@@ -134,7 +134,7 @@ test('B-11 结果导出初读和 runDirectTask 内二次重查都消费同一 B 
   const writerCalls = [];
   const { db, service } = createService({
     readWorkerFactory: workerFactory(readWorkers),
-    writeRunWorkbooksFn: async (args) => {
+    writeResultWorkbookFn: async (args) => {
       writerCalls.push(args);
       return { filePaths: ['/tmp/result.xlsx'] };
     }
@@ -151,6 +151,8 @@ test('B-11 结果导出初读和 runDirectTask 内二次重查都消费同一 B 
     subjects: ['PPHK'],
     archiveContract: 'legacy-v3.1.7-four-dataset'
   };
+
+  db.prepare("INSERT INTO vcc_fin_op_runs(id,target_month,status,result_revision,archived_at) VALUES (17,'2026-06','archived',0,?)").run(archive.archivedAt);
 
   const initialRead = service.getArchivedRunByMonth('2026-06');
   assert.equal(readWorkers.length, 1);

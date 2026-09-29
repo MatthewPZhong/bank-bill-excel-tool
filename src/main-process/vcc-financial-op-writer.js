@@ -352,8 +352,8 @@ function configurePrintLayout(sheet, lastCell) {
   };
 }
 
-function buildResultSheet(workbook, contract, plan) {
-  const sheet = workbook.addWorksheet(RESULT_SHEET_NAME, {
+function buildResultSheet(workbook, contract, plan, { sheetName = RESULT_SHEET_NAME } = {}) {
+  const sheet = workbook.addWorksheet(sheetName, {
     views: cloneStyle(contract.views),
     properties: cloneStyle(contract.properties),
     pageSetup: cloneStyle(contract.pageSetup),
@@ -434,8 +434,8 @@ function buildResultSheet(workbook, contract, plan) {
   return { sheet, renderedRows, lastRow };
 }
 
-function buildPendingSheet(workbook, templateSheet, subject, data) {
-  const sheet = workbook.addWorksheet(PENDING_SHEET_NAME, {
+function buildPendingSheet(workbook, templateSheet, subject, data, { sheetName = PENDING_SHEET_NAME } = {}) {
+  const sheet = workbook.addWorksheet(sheetName, {
     views: [{ state: 'frozen', ySplit: 1 }]
   });
   copyColumnLayout(templateSheet, sheet, 1, 11);
@@ -765,7 +765,7 @@ function rawResultPayloadError(reference, kind, plainText) {
     : `VCC 财务OP导出合并 follower 原始 payload 校验失败：${reference} 含 ${kind}`);
 }
 
-function validateResultWorksheetRawXml(xml, contract, renderedRows, lastRow) {
+function createResultWorksheetRawParser(contract, renderedRows, lastRow) {
   const mergeModels = resultMergeModels(renderedRows, contract, lastRow);
   const plainTextReferences = resultPlainTextReferences(renderedRows, contract);
   let depth = 0;
@@ -856,6 +856,11 @@ function validateResultWorksheetRawXml(xml, contract, renderedRows, lastRow) {
     }
     depth -= 1;
   };
+  return parser;
+}
+
+function validateResultWorksheetRawXml(xml, contract, renderedRows, lastRow) {
+  const parser = createResultWorksheetRawParser(contract, renderedRows, lastRow);
   try {
     parser.write(xml).close();
   } catch (error) {
@@ -1349,6 +1354,7 @@ module.exports = {
   canonicalMergeRanges,
   validateResultSheet,
   validateResultWorksheetRawPayload,
+  createResultWorksheetRawParser,
   validateStagedWorkbook,
   assertAdjustmentLineage,
   nextAvailableOutputPath,

@@ -407,9 +407,8 @@ const {
 } = require('./main-process/vcc-op-calc/save-run-lifecycle');
 // v3.1.6：VCC财务OP校验（四类明细幂等、逐币种计算、系统OP比较与归档）。
 const { createVccFinancialOpService } = require('./main-process/vcc-financial-op-service');
-const {
-  planRunWorkbookOutputPaths
-} = require('./main-process/vcc-financial-op-writer');
+const { createResultExportHandlers } = require('./main-process/vcc-financial-op-result-export-ipc');
+const { acquireResultExportLease } = require('./main-process/vcc-financial-op-result-workbook-runner');
 const {
   recoverVccStorageMigration
 } = require('./main-process/vcc-financial-op-storage-rebuild');
@@ -1350,6 +1349,9 @@ function getVccFinancialOpService() {
       assetsDir: path.join(__dirname, '../assets'),
       appVersion: pkg.version,
       buildSha: buildInfo.commit,
+      acquireResultExportLeaseFn: (operationKey) => acquireResultExportLease(
+        backgroundExecutionRuntimeManager.get().resourceGovernor, operationKey
+      ),
       publishOutputFilesFn: (payload) => publishVccFinancialOpOutputs({
         ...payload,
         recoverPublications: recoverArchivePublications,
@@ -15988,106 +15990,16 @@ function registerNewAccountHandlers() {
         path.dirname(database.dbPath)]
     }));
 
-  trackedIpcHandle('vccFinancialOp:export:result', 'VCC财务OP校验', '导出校验结果表', {
-    prepare: async (_event, payload = {}) => {
-      try {
-        const target = await getVccFinancialOpService().getArchivedRunByMonth(payload.targetMonth);
-        const subjects = target.subjects;
-        if (subjects.length === 1) {
-          const choice = await dialog.showSaveDialog(mainWindow, {
-            title: '导出 VCC 财务OP校验结果表',
-            defaultPath: path.join(
-              app.getPath('documents'),
-              `${target.targetMonth}_${sanitizeFileName(subjects[0]) || '未命名主体'}_VCC财务OP校验结果表.xlsx`
-            ),
-            filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-          });
-          if (choice.canceled || !choice.filePath) {
-            return { proceed: false, result: { status: 'cancelled' } };
-          }
-          const outputPaths = planRunWorkbookOutputPaths({
-            targetMonth: target.targetMonth,
-            subjects,
-            outputPath: choice.filePath
-          });
-          return {
-            proceed: true,
-            runId: target.runId,
-            targetMonth: target.targetMonth,
-            subjects: Object.freeze(subjects.slice()),
-            vccOutputPublicationTaskIds: [],
-            filePlan: {
-              version: 1,
-              allocation: 'eager',
-              inputs: [],
-              outputs: outputPaths.map((filePath) => ({
-                filePath,
-                role: 'output',
-                sourceOperation: 'vccFinancialOp:export:result'
-              }))
-            }
-          };
-        }
-        const choice = await showImportOpenDialog('vcc-financial-op-export-directory', {
-          title: '选择各主体校验结果表保存目录',
-          properties: ['openDirectory', 'createDirectory']
-        });
-        if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
-          return { proceed: false, result: { status: 'cancelled' } };
-        }
-        const outputPaths = planRunWorkbookOutputPaths({
-          targetMonth: target.targetMonth,
-          subjects,
-          outputDirectory: choice.filePaths[0]
-        });
-        return {
-          proceed: true,
-          runId: target.runId,
-          targetMonth: target.targetMonth,
-          subjects: Object.freeze(subjects.slice()),
-          vccOutputPublicationTaskIds: [],
-          filePlan: {
-            version: 1,
-            allocation: 'eager',
-            inputs: [],
-            outputs: outputPaths.map((filePath) => ({
-              filePath,
-              role: 'output',
-              sourceOperation: 'vccFinancialOp:export:result'
-            }))
-          }
-        };
-      } catch (error) {
-        return { proceed: false, result: vccFinancialOpErrorResult(error) };
-      }
-    },
-    execute: async (_event, prepared, taskContext) => {
-      const batchContext = taskContext.batchContext;
-      const publicationStagingDirectory = createVccOutputStagingDirectory(batchContext);
-      try {
-        const outputPaths = taskContext.fileEvidence.filePlan.outputs.map((item) => item.filePath);
-        const result = await getVccFinancialOpService().exportRun({
-          targetMonth: prepared.targetMonth,
-          expectedRunId: prepared.runId,
-          expectedSubjects: prepared.subjects,
-          outputPaths,
-          publicationStagingDirectory,
-          targetSnapshots: taskContext.fileEvidence.targetSnapshots,
-          onDurableHandoff: (publication, _exportResult, evidence) => (
-            settleVccOutputPublication(prepared, taskContext, publication, evidence)
-          )
-        }, batchContext);
-        return { status: 'success', ...result };
-      } catch (error) {
-        return vccFinancialOpErrorResult(error);
-      } finally {
-        if (!fs.existsSync(publicationStagingDirectory)
-            || !fs.readdirSync(publicationStagingDirectory).length) {
-          cleanupVccOutputStagingDirectory(publicationStagingDirectory);
-        }
-      }
-    }
-  });
+  trackedIpcHandle('vccFinancialOp:export:result', 'VCC财务OP校验', '导出校验结果表',
+    createResultExportHandlers({
+      getService: getVccFinancialOpService,
+      dialog,
+      getWindow: () => mainWindow,
+      documentsPath: app.getPath('documents'),
+      createStagingDirectory: createVccOutputStagingDirectory,
+      cleanupStagingDirectory: cleanupVccOutputStagingDirectory,
+      settlePublication: settleVccOutputPublication
+    }));
 
   trackedIpcHandle('vccFinancialOp:export:import-audit', 'VCC财务OP校验', '导出导入审计', {
     prepare: async (_event, payload = {}) => {
@@ -21095,6 +21007,7 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
         resultFlowIdentities: typeof policy.resultFlowIdentities === 'function'
           ? (result, context) => policy.resultFlowIdentities(result, context, invocation)
           : null,
+        beforeTerminalSettlement: adapterInvocation.beforeTerminalSettlement,
         afterTerminal: adapterInvocation.afterTerminal,
         afterTerminalIntent: adapterInvocation.afterTerminalIntent,
         beforeStart: async (context, filePlanEvidence) => {

@@ -221,7 +221,11 @@ test('E04-A/B policy 与 Main source selector 保持 production false，真实�
   assert.ok(activationStart > 0 && activationEnd > activationStart);
   const activationBinding = mainSource.slice(activationStart, activationEnd);
   assert.equal((activationBinding.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 1);
-  const legacySource = mainSource.replace(bizOpBinding, '').replace(bizOpIpcBinding, '').replace(activationBinding, '');
+  // VCC 正式结果沿用 direct task，只向现有 Governor 申请 phase lease，不激活旧 export-subjects canary。
+  const vccPhaseLeaseBinding = mainSource.match(/acquireResultExportLeaseFn:\s*\(operationKey\)\s*=>\s*acquireResultExportLease\(\s*backgroundExecutionRuntimeManager\.get\(\)\.resourceGovernor,\s*operationKey\s*\)/)?.[0];
+  assert.ok(vccPhaseLeaseBinding);
+  const legacySource = mainSource.replace(bizOpBinding, '').replace(bizOpIpcBinding, '')
+    .replace(activationBinding, '').replace(vccPhaseLeaseBinding, '');
   assert.equal((legacySource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 15);
   assert.equal((mainSource.match(/generateValidateAndPublishToolboxArtifact\(\{/g) || []).length, 2);
   assert.equal((mainSource.match(/generateValidateAndPublishMultiOutput\(\{/g) || []).length, 1);

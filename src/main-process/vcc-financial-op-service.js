@@ -34,7 +34,8 @@ const {
   STATE_CHANGED_MESSAGE,
   validateOperationConfirmation
 } = require('../backend/vcc-financial-op/operation-state');
-const { writeRunWorkbooks } = require('./vcc-financial-op-writer');
+const { runResultWorkbookWorker } = require('./vcc-financial-op-result-workbook-runner');
+const { archivedResultSnapshot, assertSameArchivedResult } = require('./vcc-financial-op-result-export-contract');
 const { writeImportAuditWorkbook } = require('./vcc-financial-op-audit-writer');
 const {
   CHECK_EXPORT_DEFINITIONS,
@@ -172,7 +173,8 @@ function createVccFinancialOpService({
   readWorkerFactory = (filename, options) => new Worker(filename, options),
   writeWorkerFactory = (filename, options) => new Worker(filename, options),
   reviewWorkerFactory = (filename, options) => new Worker(filename, options),
-  writeRunWorkbooksFn = writeRunWorkbooks,
+  writeResultWorkbookFn = runResultWorkbookWorker,
+  acquireResultExportLeaseFn = null,
   writeImportAuditWorkbookFn = writeImportAuditWorkbook,
   publishOutputFilesFn = null,
   archiveConsistencyLogger = null,
@@ -439,8 +441,8 @@ function createVccFinancialOpService({
     });
   }
 
-  function runReadWorker(action, payload = {}) {
-    if (closing) {
+  function runReadWorker(action, payload = {}, completingTask = null) {
+    if (closing && (!completingTask || completingTask !== activeTask)) {
       return Promise.reject(operationError(
         'service-closing',
         'VCC 财务OP服务正在关闭，不能开始新读取。'
@@ -721,8 +723,8 @@ function createVccFinancialOpService({
     return result.months;
   }
 
-  async function getArchivedRunByMonth(targetMonth) {
-    const result = await runReadWorker('list-archive-months', { targetMonth });
+  async function getArchivedRunByMonth(targetMonth, completingTask = null) {
+    const result = await runReadWorker('list-archive-months', { targetMonth }, completingTask);
     const target = result.months[0] || null;
     if (target) return target;
     const diagnostic = result.diagnostics[0] || null;
@@ -973,43 +975,92 @@ function createVccFinancialOpService({
     return latest ? getRunReview(latest.runId) : null;
   }
 
+  function cleanupResultGeneration(result) {
+    if (result.ownedGenerationDirectory) {
+      fs.rmSync(result.ownedGenerationDirectory, { recursive: true, force: true });
+    } else {
+      for (const filePath of result.generationFilePaths || []) fs.rmSync(filePath, { force: true });
+    }
+  }
+
   async function exportRun(payload, batchContext) {
     const {
       targetMonth,
       expectedRunId,
       expectedSubjects,
+      expectedResultRevision,
+      expectedArchivedAt,
       outputPaths,
       publicationStagingDirectory,
       targetSnapshots
     } = payload || {};
-    return runDirectTask('export-result', async () => {
+    return runDirectTask('export-result', async (task) => {
       // 对话框确认与真正写文件之间可能发生解归档，因此必须在拿到全局租约后重查。
-      const target = await getArchivedRunByMonth(targetMonth);
+      const target = await getArchivedRunByMonth(targetMonth, task);
       if (Number(target.runId) !== Number(expectedRunId)
-          || JSON.stringify(target.subjects) !== JSON.stringify(expectedSubjects)) {
+          || JSON.stringify(target.subjects) !== JSON.stringify(expectedSubjects)
+          || (expectedResultRevision !== undefined && target.resultRevision !== expectedResultRevision)
+          || (expectedArchivedAt !== undefined && target.archivedAt !== expectedArchivedAt)) {
         throw operationError('state-changed', '归档结果在导出确认后已变化，请重新选择');
       }
-      const result = await writeRunWorkbooksFn({
-        db: database.db,
+      if (!Array.isArray(outputPaths) || outputPaths.length !== 1) {
+        throw operationError('invalid-result-output', '结果表必须输出为一个整月工作簿');
+      }
+      if (publicationStagingDirectory && typeof publishOutputFilesFn !== 'function') {
+        throw operationError('result-publication-unavailable', '结果文件发布服务尚未就绪');
+      }
+      const expectedSnapshot = archivedResultSnapshot(database.db, target);
+      const result = await writeResultWorkbookFn({
+        dbPath: database.dbPath,
+        expectedSnapshot,
+        acquireLease: acquireResultExportLeaseFn,
+        operationKey: batchContext?.operationKey,
         runId: target.runId,
         outputPaths,
         assetsDir,
         publicationStagingDirectory
       });
       if (!result.generationFilePaths || typeof publishOutputFilesFn !== 'function') return result;
-      await publishOutputFilesFn({
-        batchContext,
-        generationFilePaths: result.generationFilePaths,
-        targetFilePaths: result.filePaths,
-        targetSnapshots,
-        settleManifestArtifacts: (publication, artifactEvidence) => (
-          typeof payload.onDurableHandoff === 'function'
-            ? payload.onDurableHandoff(publication, result, artifactEvidence)
-            : undefined
-        )
-      });
-      const { generationFilePaths: _generationFilePaths, ...publishedResult } = result;
-      return publishedResult;
+      try {
+        const latest = await getArchivedRunByMonth(targetMonth, task);
+        assertSameArchivedResult(archivedResultSnapshot(database.db, latest), expectedSnapshot);
+      } catch (error) {
+        // 仍未调用 publisher，生成文件只属于本次 Writer，可安全清理。
+        try { cleanupResultGeneration(result); } catch (_cleanupError) { /* 不覆盖资格检查错误 */ }
+        throw error;
+      }
+      let publication;
+      try {
+        publication = await publishOutputFilesFn({
+          batchContext,
+          generationFilePaths: result.generationFilePaths,
+          targetFilePaths: result.filePaths,
+          targetSnapshots,
+          ...(result.validation ? { expectedArtifacts: [{ byteSize: result.validation.byteSize, sha256: result.validation.sha256 }] } : {}),
+          settleManifestArtifacts: (publication, artifactEvidence) => (
+            typeof payload.onDurableHandoff === 'function'
+              ? payload.onDurableHandoff(publication, result, artifactEvidence)
+              : undefined
+          )
+        });
+      } catch (error) {
+        if (!error.preserveTemporaryFiles || (error.publicationNotStarted === true
+            && error.publicationOutcomeUncertain !== true)) {
+          // preflight 仅保护旧凭据；本次随机 generation 尚未交给 publisher。
+          try { cleanupResultGeneration(result); } catch (_cleanupError) {
+            error.detailLines = [...(error.detailLines || []), '本次导出临时资源清理未完成'];
+          }
+        }
+        throw error;
+      }
+      const warnings = [...(result.warnings || []), ...(Array.isArray(publication?.warnings) ? publication.warnings : [])];
+      try { cleanupResultGeneration(result); } catch (_cleanupError) {
+        warnings.push('结果文件已保存；本次导出临时资源清理未完成，可稍后重试。');
+      }
+      const { generationFilePaths: _generationFilePaths, ownedGenerationDirectory: _ownedDirectory, ...publishedResult } = result;
+      return { ...publishedResult,
+        ...(publication?.pendingArchiveHandoff === true ? { pendingArchiveHandoff: true } : {}),
+        ...(warnings.length ? { warnings } : {}) };
     });
   }
 

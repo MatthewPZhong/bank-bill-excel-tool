@@ -17,6 +17,11 @@ function createVccOutputTaskAdapter({ acknowledgeReceipts }) {
       }
       return Object.freeze({
         ...invocation,
+        ...(policy.taskKey === 'vccFinancialOp:export:result' ? {
+          beforeTerminalSettlement() {
+            if (prepared.vccResultPublicationRecoveryError) throw prepared.vccResultPublicationRecoveryError;
+          }
+        } : {}),
         afterTerminal: () => acknowledgeReceipts(
           prepared.toolboxPublicationTaskIds || prepared.vccOutputPublicationTaskIds || []
         )
