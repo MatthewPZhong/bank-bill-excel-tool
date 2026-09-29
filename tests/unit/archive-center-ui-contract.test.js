@@ -372,7 +372,7 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
     for (const value of ['30', '60', '90', '180', '365', 'permanent']) {
       assert.match(renderer, new RegExp(`<option value="${value}"(?: selected)?>`), `保留期 ${value} 应存在`);
     }
-    assert.match(renderer, /<option value="60" selected>60 天<\/option>/);
+    assert.match(renderer, /<option value="permanent" selected>永久<\/option>/);
     assert.match(renderer, /<option value="90">90 天<\/option>/);
     assert.match(renderer, /data-role="archive-retention-days"/);
     assert.match(renderer, /data-role="archive-retention-days" aria-label="保留期限"/);

@@ -9,6 +9,7 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
 const {
+  DEFAULT_RETENTION_DAYS,
   DEFAULT_STARTUP_MATERIALIZATION_BATCH_SIZE,
   ArchiveService,
   blobRelativePath,
@@ -435,7 +436,7 @@ test('File Batch 保留期由 service 统一应用默认、永久与显式天数
   try {
     await fixture.service.initialize();
     const cases = [
-      { label: 'default', retentionDays: undefined, expected: '2026-09-18' },
+      { label: 'default', retentionDays: undefined, expected: null },
       { label: 'permanent', retentionDays: 'permanent', expected: null },
       { label: 'seven-days', retentionDays: 7, expected: '2026-07-27' }
     ];
@@ -944,7 +945,7 @@ test('createBatch(files) 走原子 manifest，形成后拒绝 append 未登记 a
     assert.equal(created.attempted, 2);
     assert.equal(created.succeeded, 2);
     assert.equal(created.batch.archiveStatus, 'complete');
-    assert.equal(created.batch.retentionUntil, '2026-09-18');
+    assert.equal(created.batch.retentionUntil, null);
     assert.equal(created.batch.batchFormatVersion, 2);
     assert.equal(created.batch.taskStatus, 'succeeded');
     assert.equal(
@@ -1474,7 +1475,7 @@ test('task 批次服务保留预留幂等、状态更新、latest 与 parent 关
     assert.equal(reserved.status, 'reserved');
     assert.equal(reserved.batchNumber, '2026-07-20-001');
     assert.equal(reserved.taskStatus, 'reserved');
-    assert.equal(reserved.batch.retentionUntil, '2026-09-18');
+    assert.equal(reserved.batch.retentionUntil, null);
     assert.equal(replay.status, 'existing');
     assert.equal(replay.batchId, reserved.batchId);
 
@@ -1588,7 +1589,7 @@ test('task retentionUntil=undefined 按未提供处理，显式保留期与永�
       {
         name: 'undefined 使用默认值',
         input: { retentionUntil: undefined },
-        expected: '2026-09-18'
+        expected: null
       },
       {
         name: 'undefined 不覆盖 retentionDays',
@@ -1624,7 +1625,7 @@ test('task retentionUntil=undefined 按未提供处理，显式保留期与永�
 test('模块期限解析覆盖 task 与 legacy 创建，显式快照及已有批次不被新设置改写', async () => {
   let configuredDays = 30;
   const resolvedModules = [];
-  const fixture = createFixture({ resolveRetentionDays(moduleId) {
+  const fixture = createFixture({ defaultRetentionDays: 180, resolveRetentionDays(moduleId) {
     resolvedModules.push(moduleId);
     return configuredDays;
   } });
@@ -1673,7 +1674,7 @@ test('模块期限解析覆盖 task 与 legacy 创建，显式快照及已有批
 test('File Task 期限使用真实 taskRun 模块，显式期限优先且永久合法', async () => {
   let configuredDays = null;
   const resolvedModules = [];
-  const fixture = createFixture({ resolveRetentionDays(moduleId) {
+  const fixture = createFixture({ defaultRetentionDays: 180, resolveRetentionDays(moduleId) {
     resolvedModules.push(moduleId);
     return configuredDays;
   } });
@@ -3414,4 +3415,64 @@ test('数据库初始化不可用也只返回 unavailable，不向业务 Promise
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+
+test('服务构造默认永久，显式 null 和既有有限值转换兼容，非法值拒绝', async () => {
+  assert.equal(DEFAULT_RETENTION_DAYS, null);
+  const fixture = createFixture();
+  try {
+    assert.equal(fixture.service.defaultRetentionDays, null);
+    for (const [index, value] of [undefined, null, 1, 60, 36500, '60'].entries()) {
+      const service = createArchiveService({ database: fixture.db, rootDir: fixture.rootDir,
+        now: () => new Date(2026, 6, 20, 12), defaultRetentionDays: value });
+      assert.equal(service.defaultRetentionDays, value == null ? null : Number(value));
+      const result = await service.reserveTaskBatch({
+        ...batchPayload(`constructor-${index}`), taskKey: 'file:generate', taskRunId: `constructor-${index}`
+      });
+      assert.equal(result.ok, true);
+      const date = new Date(2026, 6, 20 + Number(value), 12);
+      const expected = value == null ? null : [date.getFullYear(),
+        String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
+      assert.equal(result.batch.retentionUntil, expected);
+    }
+    for (const value of [0, -1, 1.5, 36501, NaN, Infinity, 'invalid', 'permanent']) {
+      assert.throws(() => createArchiveService({
+        database: fixture.db, rootDir: fixture.rootDir, defaultRetentionDays: value
+      }), /defaultRetentionDays/);
+    }
+  } finally { fixture.close(); }
+});
+
+test('解析器非法值或抛错明确失败，显式批次期限和到期日仍优先', async () => {
+  let resolved;
+  let calls = 0;
+  const fixture = createFixture({ defaultRetentionDays: 60, resolveRetentionDays() {
+    calls += 1;
+    if (resolved instanceof Error) throw resolved;
+    return resolved;
+  } });
+  try {
+    for (const [index, value] of [undefined, 0, -1, 1.5, 36501, NaN, Infinity, '60', 'permanent', new Error('解析失败')].entries()) {
+      resolved = value;
+      const payload = { ...batchPayload(`resolver-invalid-${index}`),
+        taskKey: 'file:generate', taskRunId: `resolver-invalid-${index}` };
+      const failed = await fixture.service.reserveTaskBatch(payload);
+      assert.equal(failed.ok, false);
+      assert.equal(fixture.repository.getBatchByOperationKey(payload.moduleId, payload.operationKey), null);
+      const before = calls;
+      const explicit = await fixture.service.reserveTaskBatch({ ...payload, retentionDays: null });
+      assert.equal(explicit.ok, true);
+      assert.equal(explicit.batch.retentionUntil, null);
+      assert.equal(calls, before, '显式期限不调用失败解析器');
+    }
+    const before = calls;
+    const explicitUntil = await fixture.service.reserveTaskBatch({
+      ...batchPayload('explicit-until-priority'), taskKey: 'file:generate', taskRunId: 'explicit-until-priority',
+      retentionUntil: '2027-01-01', retentionDays: null
+    });
+    assert.equal(explicitUntil.ok, true);
+    assert.equal(explicitUntil.batch.retentionUntil, '2027-01-01');
+    assert.equal(calls, before);
+  } finally { fixture.close(); }
 });

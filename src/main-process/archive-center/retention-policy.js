@@ -4,7 +4,7 @@ const { getArchiveScope, listVisibleArchiveScopes } = require('./module-scope-re
 
 const ARCHIVE_RETENTION_SETTING_KEY = 'archive_center_retention_days';
 const ARCHIVE_MODULE_RETENTION_SETTING_KEY = 'archive_center_retention_days_by_module';
-const DEFAULT_RETENTION_DAYS = 60;
+const DEFAULT_RETENTION_DAYS = null;
 const ALLOWED_RETENTION_DAYS = new Set([30, 60, 90, 180, 365]);
 
 function parseRetentionDays(value) {

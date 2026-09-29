@@ -333,6 +333,7 @@ function createAppUpdateSettingsDialog(options = {}) {
     detailRequestId: 0,
     settingsRequestId: 0,
     settingsLoading: false,
+    settingsReady: false,
     selectedBatchId: '',
     batches: [],
     deleteCleanupJobs: [],
@@ -340,9 +341,9 @@ function createAppUpdateSettingsDialog(options = {}) {
     deleteRequestId: 0,
     detail: null,
     stats: null,
-    settings: { retentionDays: 60, retentionDaysByModule: {}, storageRoot: '', storageMigration: null },
+    settings: { retentionDays: null, retentionDaysByModule: {}, storageRoot: '', storageMigration: null },
     storageMigration: { status: 'idle', phase: '', processed: 0, total: 0 },
-    savedRetentionValue: '60',
+    savedRetentionValue: 'permanent',
     selectedRetentionModuleId: '',
     retentionIntentToken: 0,
     retentionPendingIntent: null,
@@ -488,20 +489,20 @@ function createAppUpdateSettingsDialog(options = {}) {
               <div class="archive-center-retention-fields">
                 <label class="archive-center-field archive-center-retention-module-field">
                   <span>适用模块</span>
-                  <select data-role="archive-retention-module" aria-label="保留期限适用模块">
+                  <select data-role="archive-retention-module" aria-label="保留期限适用模块" disabled>
                     <option value="">默认（未单独设置的模块）</option>
                   </select>
                 </label>
                 <label class="archive-center-field archive-center-retention-field">
                   <span>保留期限</span>
-                  <select data-role="archive-retention-days" aria-label="保留期限">
+                  <select data-role="archive-retention-days" aria-label="保留期限" disabled>
                     <option value="inherit" hidden disabled>跟随默认</option>
                     <option value="30">30 天</option>
-                    <option value="60" selected>60 天</option>
+                    <option value="60">60 天</option>
                     <option value="90">90 天</option>
                     <option value="180">180 天</option>
                     <option value="365">365 天</option>
-                    <option value="permanent">永久</option>
+                    <option value="permanent" selected>永久</option>
                   </select>
                 </label>
               </div>
@@ -827,9 +828,9 @@ function createAppUpdateSettingsDialog(options = {}) {
     const settings = archiveState.settings && typeof archiveState.settings === 'object'
       ? archiveState.settings
       : {};
-    const defaultRetentionDays = Object.prototype.hasOwnProperty.call(settings, 'retentionDays')
+    const defaultRetentionDays = (Object.prototype.hasOwnProperty.call(settings, 'retentionDays')
       ? settings.retentionDays
-      : settings.defaultRetentionDays;
+      : settings.defaultRetentionDays) ?? null;
     const moduleId = archiveState.selectedRetentionModuleId;
     const overrides = settings.retentionDaysByModule || {};
     const hasOverride = moduleId && Object.prototype.hasOwnProperty.call(overrides, moduleId);
@@ -838,7 +839,7 @@ function createAppUpdateSettingsDialog(options = {}) {
       ? 'inherit'
       : retentionDays === null || retentionDays === 'permanent'
       ? 'permanent'
-      : String(retentionDays ?? 60);
+      : String(retentionDays ?? 'permanent');
     const allowedRetentionValues = new Set(['30', '60', '90', '180', '365', 'permanent', 'inherit']);
     if (!archiveState.retentionSaving && !archiveState.retentionPendingIntent) {
       const modules = Array.isArray(settings.retentionModules)
@@ -854,12 +855,13 @@ function createAppUpdateSettingsDialog(options = {}) {
       inheritOption.disabled = !moduleId;
       const defaultLabel = defaultRetentionDays === null || defaultRetentionDays === 'permanent'
         ? '永久'
-        : `${defaultRetentionDays ?? 60} 天`;
+        : `${defaultRetentionDays} 天`;
       inheritOption.textContent = `跟随默认（${defaultLabel}）`;
-      archiveState.savedRetentionValue = allowedRetentionValues.has(retentionValue)
+      const displayedValue = allowedRetentionValues.has(retentionValue)
         ? retentionValue
-        : '60';
-      retentionSelect.value = archiveState.savedRetentionValue;
+        : 'permanent';
+      if (archiveState.settingsReady) archiveState.savedRetentionValue = displayedValue;
+      retentionSelect.value = displayedValue;
     }
     if (settings.storageMigration && typeof settings.storageMigration === 'object') {
       archiveState.storageMigration = { ...settings.storageMigration };
@@ -1033,7 +1035,6 @@ function createAppUpdateSettingsDialog(options = {}) {
   function setArchiveSettingsLoading(loading) {
     archiveState.settingsLoading = loading === true;
     archiveSettingsView.toggleAttribute('aria-busy', archiveState.settingsLoading);
-    retentionSelect.disabled = archiveState.settingsLoading;
     updateArchiveExitControls();
   }
 
@@ -1045,7 +1046,8 @@ function createAppUpdateSettingsDialog(options = {}) {
     const busy = archiveState.settingsLoading || archiveState.retentionSaving;
     returnButton.disabled = busy;
     closeDialogButton.disabled = busy;
-    retentionModuleSelect.disabled = busy;
+    retentionModuleSelect.disabled = busy || !archiveState.settingsReady;
+    retentionSelect.disabled = archiveState.settingsLoading || !archiveState.settingsReady;
   }
 
   function setRetentionSaving(saving) {
@@ -1125,7 +1127,7 @@ function createAppUpdateSettingsDialog(options = {}) {
   }
 
   function saveRetentionSelection() {
-    if (archiveState.settingsLoading || archiveState.destroyed) return;
+    if (!archiveState.settingsReady || archiveState.settingsLoading || archiveState.destroyed) return;
     const value = retentionSelect.value;
     if (!archiveState.retentionSaving && value === archiveState.savedRetentionValue) return;
     archiveState.retentionIntentToken += 1;
@@ -1142,6 +1144,7 @@ function createAppUpdateSettingsDialog(options = {}) {
 
   async function loadArchiveSettings() {
     const requestId = ++archiveState.settingsRequestId;
+    archiveState.settingsReady = false;
     showArchiveFeedback('', 'info');
     setArchiveSettingsLoading(true);
     try {
@@ -1158,12 +1161,17 @@ function createAppUpdateSettingsDialog(options = {}) {
       const failures = [];
       if (settingsResult.status === 'fulfilled') {
         try {
-          archiveState.settings = readArchiveCenterPayload(
+          const settings = readArchiveCenterPayload(
             settingsResult.value,
             'settings',
-            { retentionDays: 60 },
+            null,
             { allowDirectObject: true }
           );
+          if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+            throw new Error('存档中心未返回有效保留设置');
+          }
+          archiveState.settings = settings;
+          archiveState.settingsReady = true;
         } catch (error) {
           failures.push(`保留设置：${archiveCenterErrorText(error, '加载失败')}`);
         }
@@ -1574,7 +1582,7 @@ function createAppUpdateSettingsDialog(options = {}) {
   });
   retentionSelect.addEventListener('change', saveRetentionSelection);
   retentionModuleSelect.addEventListener('change', () => {
-    if (archiveState.settingsLoading || archiveState.retentionSaving) {
+    if (!archiveState.settingsReady || archiveState.settingsLoading || archiveState.retentionSaving) {
       retentionModuleSelect.value = archiveState.selectedRetentionModuleId;
       return;
     }
