@@ -1416,12 +1416,8 @@ function createAppUpdateSettingsDialog(options = {}) {
     const restoreSettingsDialog = () => {
       if (isCurrentRequest()) refreshOpenAppUpdateDialog();
     };
-    const fileCount = Number(prepared.summary?.fileCount);
-    const scopeSummary = Number.isSafeInteger(fileCount) && fileCount >= 0
-      ? `<br>本次涉及 ${fileCount} 个存档文件副本。`
-      : '';
     confirmOverlay = createConfirmDialog({
-      message: `确定永久删除批次 <strong>${escapeHtml(batchNumber)}</strong> 吗？<br>该批次信息及存档中心保存的原始文件将一并删除，删除后无法恢复。${scopeSummary}`,
+      message: `确定永久删除批次 <strong>${escapeHtml(batchNumber)}</strong> 吗？`,
       confirmText: '永久删除',
       cancelText: '取消',
       onCancel: restoreSettingsDialog,
