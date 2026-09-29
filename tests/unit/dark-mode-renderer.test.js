@@ -95,7 +95,7 @@ test('加载前与非法配置禁止保存，不发出 IPC', async () => {
   const h = harness();
   await assert.rejects(h.controller.save(enabled), /尚未加载/);
   h.emit(makeSnapshot(1));
-  await assert.rejects(h.controller.save({ ...enabled, endTime: '18:30' }), /不能相同/);
+  await assert.rejects(h.controller.save({ ...enabled, endTime: enabled.startTime }), /不能相同/);
   assert.equal(h.calls.length, 0);
   assert.equal(h.controller.getSnapshot().saving, false);
   h.controller.dispose();
@@ -166,12 +166,12 @@ test('编辑开始时间期间其他窗口关闭并修改结束时间，提交�
     nodes.start.focus();
     nodes.start.value = '19:30';
     nodes.start.dispatch('input');
-    const external = { enabled: false, startTime: '18:30', endTime: '07:00' };
+    const external = { enabled: false, startTime: '18:30', endTime: '08:00' };
     h.emit(makeSnapshot(2, 'light', external));
 
     assert.equal(nodes.start.value, '19:30', '保留当前正在编辑的开始时间');
     assert.equal(nodes.enabled.checked, false, '同步外部关闭操作');
-    assert.equal(nodes.end.value, '07:00', '同步外部修改且本地未编辑的结束时间');
+    assert.equal(nodes.end.value, '08:00', '同步外部修改且本地未编辑的结束时间');
     assert.equal(h.calls.length, 0, '外部通知不触发保存');
     assert.equal(h.document.documentElement.dataset.theme, 'light');
 
@@ -186,7 +186,7 @@ test('编辑开始时间期间其他窗口关闭并修改结束时间，提交�
     assert.equal(h.document.documentElement.dataset.theme, 'light', '保存时间不会意外重新启用深色');
     assert.equal(nodes.fields.disabled, false);
     assert.equal(nodes.enabled.checked, false);
-    assert.equal(nodes.end.value, '07:00');
+    assert.equal(nodes.end.value, '08:00');
   } finally {
     view.destroy();
     h.controller.dispose();
@@ -207,16 +207,16 @@ test('慢保存期间连续编辑两个时间，旧回包不覆盖草稿且后�
     start.dispatch('input');
     start.dispatch('change');
     end.focus();
-    end.value = '07:00';
+    end.value = '08:00';
     end.dispatch('input');
     end.dispatch('change');
     assert.equal(h.calls.length, 1, '在途请求期间不并发调用 IPC');
     h.pending[0].resolve({ status: 'ok', ...makeSnapshot(2, 'dark', h.calls[0]) });
     await new Promise(setImmediate);
     assert.equal(start.value, '19:30');
-    assert.equal(end.value, '07:00');
+    assert.equal(end.value, '08:00');
     assert.equal(h.document.activeElement, end, '旧请求结束不能抢回开始框焦点');
-    assert.deepEqual(h.calls[1], { enabled: true, startTime: '19:30', endTime: '07:00' });
+    assert.deepEqual(h.calls[1], { enabled: true, startTime: '19:30', endTime: '08:00' });
     assert.equal(h.controller.getSnapshot().saving, true, '队列完成之前保持关闭保护');
     h.pending[1].resolve({ status: 'ok', ...makeSnapshot(3, 'dark', h.calls[1]) });
     await saving;
@@ -244,7 +244,7 @@ test('保存失败不打断活动时间框，离开后回读已保存时段并�
     assert.deepEqual(h.controller.getSnapshot().darkModeSchedule, enabled);
     assert.equal(h.document.documentElement.dataset.theme, 'dark');
     start.dispatch('blur');
-    assert.equal(start.value, '18:30', '失败编辑离开后显示持久配置');
+    assert.equal(start.value, '17:30', '失败编辑离开后显示持久配置');
     start.value = '19:30';
     const retry = start.dispatch('change');
     h.pending[1].resolve({ status: 'ok', ...makeSnapshot(2, 'dark', h.calls[1]) });
@@ -273,7 +273,7 @@ test('保存回包不能清除更新的非法草稿，排队关闭仍使用已�
     start.value = '20:30';
     start.dispatch('input');
     // 先补齐草稿，发出一个待完成的时段保存。
-    end.value = '07:00';
+    end.value = '08:00';
     const pending = end.dispatch('change');
     h.nodes.enabled.checked = false;
     h.nodes.enabled.dispatch('change');
@@ -317,7 +317,7 @@ for (const closeSucceeds of [true, false]) {
     h.emit(makeSnapshot(1, 'dark', enabled));
     const { start, end, feedback } = h.nodes;
     try {
-      end.value = '07:00';
+      end.value = '08:00';
       const saving = end.dispatch('change');
       h.nodes.enabled.checked = false;
       h.nodes.enabled.dispatch('change');
@@ -328,12 +328,12 @@ for (const closeSucceeds of [true, false]) {
       assert.equal(h.calls.length, 1, '时间编辑发生在关闭请求排队期间');
       h.pending[0].resolve({ status: 'ok', ...makeSnapshot(2, 'dark', h.calls[0]) });
       await new Promise(setImmediate);
-      assert.deepEqual(h.calls[1], { enabled: false, startTime: '18:30', endTime: '07:00' }, '先用已保存时段关闭');
+      assert.deepEqual(h.calls[1], { enabled: false, startTime: '17:30', endTime: '08:00' }, '先用已保存时段关闭');
       h.pending[1].resolve(closeSucceeds
         ? { status: 'ok', ...makeSnapshot(3, 'light', h.calls[1]) }
         : { status: 'failed', message: '关闭设置写入失败' });
       await new Promise(setImmediate);
-      const expected = { enabled: !closeSucceeds, startTime: '20:30', endTime: '07:00' };
+      const expected = { enabled: !closeSucceeds, startTime: '20:30', endTime: '08:00' };
       assert.deepEqual(h.calls[2], expected, '关闭之后的编辑应有后续请求');
       assert.equal(h.controller.getSnapshot().saving, true, '后续编辑结算前继续阻止关闭弹窗');
       assert.equal(start.value, '20:30');
@@ -353,7 +353,7 @@ for (const closeSucceeds of [true, false]) {
     h.emit(makeSnapshot(1, 'dark', enabled));
     const { start, end, feedback } = h.nodes;
     try {
-      end.value = '07:00';
+      end.value = '08:00';
       const saving = end.dispatch('change');
       h.nodes.enabled.checked = false;
       h.nodes.enabled.dispatch('change');
@@ -363,7 +363,7 @@ for (const closeSucceeds of [true, false]) {
       start.dispatch('change');
       h.pending[0].resolve({ status: 'ok', ...makeSnapshot(2, 'dark', h.calls[0]) });
       await new Promise(setImmediate);
-      assert.deepEqual(h.calls[1], { enabled: false, startTime: '18:30', endTime: '07:00' });
+      assert.deepEqual(h.calls[1], { enabled: false, startTime: '17:30', endTime: '08:00' });
       h.pending[1].resolve(closeSucceeds
         ? { status: 'ok', ...makeSnapshot(3, 'light', h.calls[1]) }
         : { status: 'failed', message: '关闭设置写入失败' });
@@ -386,7 +386,7 @@ for (const closeSucceeds of [true, false]) {
   });
 }
 
-test('无效事件快照被拒绝，不能将默认关闭配置与深色状态拼接', () => {
+test('无效事件快照被拒绝，不能将关闭配置与深色状态拼接', () => {
   const h = harness();
   h.emit(makeSnapshot(1));
   const before = h.controller.getSnapshot();
@@ -396,7 +396,8 @@ test('无效事件快照被拒绝，不能将默认关闭配置与深色状态�
     { ...makeSnapshot(2), themeRevision: 1.5 },
     { ...makeSnapshot(2), effectiveTheme: 'system' },
     { themeRevision: 2, effectiveTheme: 'dark' },
-    { ...makeSnapshot(2, 'dark'), darkModeSchedule: { ...enabled, endTime: '18:30' } }
+    makeSnapshot(2, 'dark', { ...enabled, enabled: false }),
+    { ...makeSnapshot(2, 'dark'), darkModeSchedule: { ...enabled, endTime: enabled.startTime } }
   ]) {
     assert.equal(h.controller.accept(value), false);
     assert.deepEqual(h.controller.getSnapshot(), before);
@@ -427,8 +428,8 @@ test('销毁取消事件订阅和通知，正在保存的回包不再重绘；�
   const h = harness();
   h.emit(makeSnapshot(1));
   const copy = h.controller.getSnapshot();
-  copy.darkModeSchedule.enabled = true;
-  assert.equal(h.controller.getSnapshot().darkModeSchedule.enabled, false);
+  copy.darkModeSchedule.enabled = false;
+  assert.equal(h.controller.getSnapshot().darkModeSchedule.enabled, true);
   const observed = [];
   h.controller.subscribe((snapshot) => observed.push(snapshot));
   const operation = h.controller.save(enabled);

@@ -4,9 +4,9 @@
   else root.DarkModeSchedule = api;
 })(typeof globalThis === 'object' ? globalThis : this, function createDarkModeScheduleApi() {
   const DEFAULT_DARK_MODE_SCHEDULE = Object.freeze({
-    enabled: false,
-    startTime: '18:30',
-    endTime: '06:00'
+    enabled: true,
+    startTime: '17:30',
+    endTime: '07:00'
   });
   const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 

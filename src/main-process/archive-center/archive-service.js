@@ -36,7 +36,7 @@ const {
 const STAGING_DIR_NAME = '.staging';
 const READONLY_DIR_NAME = '.readonly';
 const BLOB_ROOT_PARTS = Object.freeze(['blobs', 'sha256']);
-const DEFAULT_RETENTION_DAYS = 60;
+const DEFAULT_RETENTION_DAYS = null;
 const DEFAULT_STARTUP_MATERIALIZATION_BATCH_SIZE = 64;
 const MAX_MATERIALIZATION_BATCH_SIZE = 5000;
 const SHA256_RE = /^[a-f0-9]{64}$/;
@@ -364,11 +364,13 @@ class ArchiveService {
 
     const defaultRetentionDays = options.defaultRetentionDays === undefined
       ? DEFAULT_RETENTION_DAYS
-      : Number(options.defaultRetentionDays);
-    if (!Number.isSafeInteger(defaultRetentionDays)
+      : options.defaultRetentionDays === null
+        ? null
+        : Number(options.defaultRetentionDays);
+    if (defaultRetentionDays !== null && (!Number.isSafeInteger(defaultRetentionDays)
         || defaultRetentionDays < 1
-        || defaultRetentionDays > 36500) {
-      throw new TypeError('defaultRetentionDays 必须是 1 到 36500 的安全整数');
+        || defaultRetentionDays > 36500)) {
+      throw new TypeError('defaultRetentionDays 必须是 null（永久）或 1 到 36500 的安全整数');
     }
     const startupMaterializationBatchSize = options.startupMaterializationBatchSize === undefined
       ? DEFAULT_STARTUP_MATERIALIZATION_BATCH_SIZE

@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
+  DEFAULT_RETENTION_DAYS,
   ARCHIVE_MODULE_RETENTION_SETTING_KEY,
   ARCHIVE_RETENTION_SETTING_KEY,
   readRetentionDaysByModule,
@@ -22,15 +23,18 @@ function fixture(entries = []) {
   };
 }
 
-test('模块未覆盖时兼容旧默认值，永久与无效设置分别解析', () => {
+test('模块未覆盖时默认永久，已保存旧值兼容且读取不写入', () => {
+  assert.equal(DEFAULT_RETENTION_DAYS, null);
   for (const [stored, expected] of [
-    [undefined, 60], ['', 60], ['30', 30], ['60', 60], ['90', 90],
-    ['180', 180], ['365', 365], ['permanent', null], ['45', 60], ['broken', 60]
+    [undefined, null], ['', null], ['30', 30], ['60', 60], ['90', 90],
+    ['180', 180], ['365', 365], ['permanent', null], ['45', null], ['broken', null]
   ]) {
-    const { database } = fixture([[ARCHIVE_RETENTION_SETTING_KEY, stored]]);
+    const { database, settings } = fixture([[ARCHIVE_RETENTION_SETTING_KEY, stored]]);
+    const before = [...settings];
     assert.equal(resolveRetentionDays(database, 'statement-generator'), expected);
     assert.equal(resolveRetentionDays(database, 'unknown-historical-module'), expected);
     assert.equal(resolveRetentionDays(database), expected);
+    assert.deepEqual([...settings], before);
   }
   assert.equal(resolveRetentionDays(fixture().database, 'toolbox', 90), 90);
 });

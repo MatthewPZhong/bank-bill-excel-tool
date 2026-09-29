@@ -372,7 +372,7 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
     for (const value of ['30', '60', '90', '180', '365', 'permanent']) {
       assert.match(renderer, new RegExp(`<option value="${value}"(?: selected)?>`), `保留期 ${value} 应存在`);
     }
-    assert.match(renderer, /<option value="60" selected>60 天<\/option>/);
+    assert.match(renderer, /<option value="permanent" selected>永久<\/option>/);
     assert.match(renderer, /<option value="90">90 天<\/option>/);
     assert.match(renderer, /data-role="archive-retention-days"/);
     assert.match(renderer, /data-role="archive-retention-days" aria-label="保留期限"/);
@@ -754,7 +754,7 @@ test('永久删除确认先只读预检，完整结果和待完成删除入口�
   const flow = renderer.slice(start, end);
   assert.ok(flow.indexOf('prepareDeleteBatch(batchId)') < flow.indexOf('createConfirmDialog({'));
   assert.ok(flow.indexOf('onConfirm: async') < flow.indexOf('deleteBatch(batchId, prepared.confirmationToken)'));
-  assert.match(flow, /该批次信息及存档中心保存的原始文件将一并删除，删除后无法恢复。/);
+  assert.doesNotMatch(flow, /该批次信息及存档中心保存的原始文件将一并删除，删除后无法恢复。/);
   assert.doesNotMatch(flow, /该操作不会删除原始文件和用户已另存的副本/);
   assert.match(flow, /result\?\.ok === true && metadataDeleted && result\?\.fullyDeleted === true/);
   assert.doesNotMatch(flow, /moduleId|toolbox/);
