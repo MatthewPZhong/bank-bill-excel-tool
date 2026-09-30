@@ -219,6 +219,8 @@ const archivePolicies = Object.freeze([
   createExcludePolicy('file:extract-big-account-order', 'preview-only'),
   createExcludePolicy('template:preview-delete-bill-split-row', 'preview-only'),
   createExcludePolicy('toolbox:split:read', 'preview-only'),
+  createExcludePolicy('toolbox:split:read-values', 'preview-only'),
+  createExcludePolicy('toolbox:split:cancel-read', 'cancel-active-task'),
   createExcludePolicy('vccFinancialOp:data-manager:delete-preview', 'preview-only'),
   createExcludePolicy('vccFinancialOp:data-manager:export-preview', 'preview-only'),
   createExcludePolicy('vccFinancialOp:run:preflight', 'preview-only'),

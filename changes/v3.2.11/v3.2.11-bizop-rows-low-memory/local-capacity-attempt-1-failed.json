@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-09-29T15:56:12.919Z",
+  "sourceIdentity": {
+    "sourceTreeSha256": "4929b727b26c3d10eaff5058ddf3ca9dbff04b50971c0a26c1df428ae4dae2c5",
+    "dependencyLockSha256": "6360f29a82d5f4c1d1003d9e61e6a4db678f398aab5043c23c46371e2f215e65",
+    "appVersion": "3.2.10",
+    "platform": "darwin",
+    "arch": "arm64",
+    "nodeVersion": "25.8.0",
+    "electronVersion": null
+  },
+  "productionEvidence": false,
+  "platformAcceptance": "pending",
+  "realSystem": false,
+  "requestedPressureBandMiB": null,
+  "pressureObserved": null,
+  "resultsEqual": false,
+  "passed": false,
+  "failure": {
+    "mode": "low",
+    "attempt": 1,
+    "message": "容量场景失败 code=1: Error: 工具箱输出样式预算超限：fills 预计 241，预算 240（来源：{\"cachedValue\":239,\"cellType\":\"number\",\"columnIndex\":0,\"decodedSemanticValue\":239,\"effectiveStyleRef\":{\"sourceRegistryId\":\"xlsx-ad096d56-249b-48d5-9c04-5698e8f6917d\",\"styleRef\":240},\"formulaLexical\":null,\"hasFormula\":false,\"isExplicitCell\":true,\"matchProjectionValue\":\"239\",\"rawLexicalValue\":\"239\",\"rowIndex\":240,\"sourceDateSystem\":1900,\"sourceFile\":\"/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/low-memory-complete-av14d8/synthetic.xlsx\",\"sourceFormat\":\"General\",\"sourceSheet\":\"合成样本\",\"sourceStyleId\":240}）\n    at fromProtocolError (/Users/pzhong/.codex/worktrees/v3211-bizop-rows-low-memory/bank-bill-excel-tool/src/main-process/background-execution/error-codec.js:366:17)\n    at generateValidateAndPublishRows (/Users/pzhong/.codex/worktrees/v3211-bizop-rows-low-memory/bank-bill-excel-tool/src/main-process/toolbox-row-split/service.js:163:64)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async measured (/Users/pzhong/.codex/worktrees/v3211-bizop-rows-low-memory/bank-bill-excel-tool/scripts/lib/low-memory-scenario.js:37:18)\n    at async runScenario (/Users/pzhong/.codex/worktrees/v3211-bizop-rows-low-memory/bank-bill-excel-tool/scripts/lib/low-memory-scenario.js:88:23)\n    at async child (/Users/pzhong/.codex/worktrees/v3211-bizop-rows-low-memory/bank-bill-excel-tool/scripts/verify-low-memory-capacity.js:11:18)\n"
+  },
+  "reports": [],
+  "limitations": [
+    "脚本使用明确的 non-production runtime 与合成数据，永不改写生产资格。",
+    "真实系统模式只读取 os.freemem；压力由测试机环境提供。注入数字模式不能证明低内存容量。",
+    "Windows 安装包、真实 Main/GUI、Excel/WPS 和代表性业务样本仍需独立验收。"
+  ]
+}

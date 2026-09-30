@@ -26,6 +26,7 @@
 // 单例导出：模块顶层维护 workerInstance / activeJob 状态，require 多次仍同 instance。
 
 'use strict';
+const { memoryCarrierAdmission } = require('./memory-activity');
 
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
@@ -69,7 +70,7 @@ function coldStartWorker(dbPath) {
   if (!dbPath || typeof dbPath !== 'string') {
     throw new Error('coldStartWorker：dbPath 必填');
   }
-  const worker = new Worker(resolveWorkerScript());
+  const worker = memoryCarrierAdmission(null).observe(new Worker(resolveWorkerScript()));
   workerDbPath = dbPath;
 
   // 'error' / 'exit' 事件 → crash recovery

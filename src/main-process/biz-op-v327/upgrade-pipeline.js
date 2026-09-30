@@ -1,13 +1,14 @@
 'use strict';
 
+const { checkExecutionMemory } = require('../background-execution/execution-memory-options');
 const { fail } = require('./contracts');
 const { inspectFiles, reclaimFiles } = require('./upgrade-legacy');
-async function runUpgradePipeline({ payloadStore, plan, cancelToken }) {
-  const safePoint = () => { if (cancelToken.cancelled) fail('BIZOP_CANCELLED'); };
+async function runUpgradePipeline({ payloadStore, plan, cancelToken, memoryConfig = null }) {
+  const safePoint = () => { checkExecutionMemory(memoryConfig); if (cancelToken.cancelled) fail('BIZOP_CANCELLED'); };
   safePoint();
   if (!['inspect', 'reclaim'].includes(plan.step)) fail('BIZOP_UPGRADE_PLAN_INVALID');
   const result = plan.step === 'inspect'
-    ? await inspectFiles(plan.userDataDir, plan.names, plan.quiescent === true, safePoint)
+    ? await inspectFiles(plan.userDataDir, plan.names, plan.quiescent === true, safePoint, memoryConfig)
     : await reclaimFiles(plan.userDataDir, plan.files, safePoint);
   const value = { schemaVersion: 1, taskRunId: plan.taskRunId, intentDigest: plan.intentDigest,
     candidateRef: plan.candidateRef, step: plan.step, result };

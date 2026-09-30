@@ -24,49 +24,62 @@ function ensureSupportedFile(filePath) {
 function parseCsvText(content, { blankrows = false } = {}) {
   const rows = [];
   let current = [];
-  let cell = '';
+  let parts = [];
+  let start = 0;
   let inQuotes = false;
   let i = 0;
+  // 保留原状态机的宽松引号规则；按连续文本片段拼接，避免每字符一个
+  // cons string 留存到整表结束。这里仍是既有整表 CSV reader。
+  const finishCell = () => {
+    parts.push(content.slice(start, i));
+    const value = parts.join('');
+    parts = [];
+    return value;
+  };
 
   while (i < content.length) {
     const ch = content[i];
 
     if (inQuotes) {
       if (ch === '"' && content[i + 1] === '"') {
-        cell += '"';
+        parts.push(content.slice(start, i), '"');
         i += 2;
+        start = i;
       } else if (ch === '"') {
+        parts.push(content.slice(start, i));
         inQuotes = false;
         i++;
+        start = i;
       } else {
-        cell += ch;
         i++;
       }
     } else if (ch === '"') {
+      parts.push(content.slice(start, i));
       inQuotes = true;
       i++;
+      start = i;
     } else if (ch === ',') {
-      current.push(cell);
-      cell = '';
+      current.push(finishCell());
       i++;
+      start = i;
     } else if (ch === '\r' && content[i + 1] === '\n') {
-      current.push(cell);
-      cell = '';
+      current.push(finishCell());
       rows.push(current);
       current = [];
       i += 2;
+      start = i;
     } else if (ch === '\n' || ch === '\r') {
-      current.push(cell);
-      cell = '';
+      current.push(finishCell());
       rows.push(current);
       current = [];
       i++;
+      start = i;
     } else {
-      cell += ch;
       i++;
     }
   }
 
+  const cell = finishCell();
   if (cell || current.length) {
     current.push(cell);
     rows.push(current);

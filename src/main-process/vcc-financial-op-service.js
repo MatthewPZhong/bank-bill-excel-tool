@@ -1,4 +1,5 @@
 'use strict';
+const { memoryCarrierAdmission } = require('./memory-activity');
 
 const path = require('node:path');
 const fs = require('node:fs');
@@ -168,10 +169,10 @@ function createVccFinancialOpService({
   assetsDir,
   appVersion = null,
   buildSha = null,
-  workerFactory = (filename, options) => new Worker(filename, options),
-  readWorkerFactory = (filename, options) => new Worker(filename, options),
-  writeWorkerFactory = (filename, options) => new Worker(filename, options),
-  reviewWorkerFactory = (filename, options) => new Worker(filename, options),
+  workerFactory = (filename, options) => memoryCarrierAdmission(null).observe(new Worker(filename, options)),
+  readWorkerFactory = (filename, options) => memoryCarrierAdmission(null).observe(new Worker(filename, options)),
+  writeWorkerFactory = (filename, options) => memoryCarrierAdmission(null).observe(new Worker(filename, options)),
+  reviewWorkerFactory = (filename, options) => memoryCarrierAdmission(null).observe(new Worker(filename, options)),
   writeRunWorkbooksFn = writeRunWorkbooks,
   writeImportAuditWorkbookFn = writeImportAuditWorkbook,
   publishOutputFilesFn = null,

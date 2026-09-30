@@ -1,4 +1,5 @@
 'use strict';
+const { memoryCarrierAdmission } = require('../memory-activity');
 
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
@@ -74,7 +75,7 @@ function runVccExportShardWorker(input, signal, options = {}) {
     : SHARD_CANCEL_TIMEOUT_MS;
   let worker;
   try {
-    worker = new WorkerClass(SHARD_WORKER_ENTRY, { workerData: { input } });
+    worker = memoryCarrierAdmission(null).observe(new WorkerClass(SHARD_WORKER_ENTRY, { workerData: { input } }));
   } catch (error) {
     return Promise.reject(error);
   }

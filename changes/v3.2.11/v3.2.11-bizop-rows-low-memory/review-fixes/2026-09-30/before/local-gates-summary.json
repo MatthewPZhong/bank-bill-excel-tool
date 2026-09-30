@@ -1,0 +1,594 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-29T17:03:27.029Z",
+  "branch": "v3.2.11-bizop-rows-low-memory",
+  "head": "18b82b4328cf5e00c1b2549d373a5b2f2677215c",
+  "scope": "local-implementation-and-automated-validation",
+  "sourceIdentity": {
+    "sourceTreeSha256": "b827ed57583c44a124a73d4f3108fd2f53bf2f64a57389184f1d9cff009633ea",
+    "dependencyLockSha256": "6360f29a82d5f4c1d1003d9e61e6a4db678f398aab5043c23c46371e2f215e65",
+    "appVersion": "3.2.10",
+    "platform": "darwin",
+    "arch": "arm64",
+    "nodeVersion": "25.8.0",
+    "electronVersion": null
+  },
+  "committed": false,
+  "checks": {
+    "releaseCheck": {
+      "command": "npm run release-check",
+      "exitCode": 0,
+      "status": "PASS",
+      "log": {
+        "path": "logs/low-memory/20260930-release-check-passed.log",
+        "bytes": 988557,
+        "sha256": "49e5a49cdff7c12ef33bfb813a1383c06f877a268037599da0ce6834d9d3b537"
+      }
+    },
+    "lint": {
+      "status": "PASS"
+    },
+    "architecture": {
+      "status": "PASS",
+      "parsedFiles": 779,
+      "totalFiles": 779,
+      "activeBoundaries": 31,
+      "unresolvedLocations": 2,
+      "dynamicLocations": 33,
+      "historyCommits": 28
+    },
+    "smoke": {
+      "status": "PASS"
+    },
+    "unit": {
+      "total": 9499,
+      "passed": 9495,
+      "failed": 0,
+      "skipped": 4,
+      "cancelled": 0,
+      "durationMs": 314779.433958,
+      "files": 589,
+      "skipReasons": [
+        "﹣ Windows CI 真实 PowerShell snapshot→token cleanup 语义 (0.0585ms) # SKIP",
+        "﹣ Windows PowerShell 采集器使用原始 CIM 枚举并完整遍历真实文件祖先 (0.22475ms) # 需要 Windows PowerShell；受控 Storage 对象不代替真实 CIM 查询",
+        "﹣ Windows packaged canary 对报告前已退出进程快速返回专用 safe code (0.054ms) # SKIP",
+        "﹣ Windows packaged canary 的 Setup 失败诊断仅返回固定退出/落地/身份枚举 (0.033375ms) # SKIP"
+      ]
+    },
+    "integration": {
+      "status": "PASS",
+      "scriptsPassed": 71,
+      "scriptsTotal": 71,
+      "reportedAssertionsPassed": 2916,
+      "reportedAssertionsTotal": 2916,
+      "scriptsWithoutCounts": [
+        "v2.1.12-beta-multiworker-nested"
+      ],
+      "elapsedMs": 553650,
+      "scripts": [
+        {
+          "name": "acquiring-bill-currency-idle-cleanup",
+          "passed": 38,
+          "total": 38,
+          "elapsedMs": 776
+        },
+        {
+          "name": "acquiring-bill-currency-n4-migration",
+          "passed": 128,
+          "total": 128,
+          "elapsedMs": 508
+        },
+        {
+          "name": "acquiring-engine-migration",
+          "passed": 45,
+          "total": 45,
+          "elapsedMs": 4442
+        },
+        {
+          "name": "acquiring-index-slim-v2",
+          "passed": 22,
+          "total": 22,
+          "elapsedMs": 189
+        },
+        {
+          "name": "acquiring-side-db-parity",
+          "passed": 19,
+          "total": 19,
+          "elapsedMs": 535
+        },
+        {
+          "name": "acquiring-worker-boundary",
+          "passed": 14,
+          "total": 14,
+          "elapsedMs": 529
+        },
+        {
+          "name": "application-recovery-governance",
+          "passed": 4,
+          "total": 4,
+          "elapsedMs": 826
+        },
+        {
+          "name": "archive-biz-op-auto-report-retention",
+          "passed": 6,
+          "total": 6,
+          "elapsedMs": 7322
+        },
+        {
+          "name": "archive-center-module-retention",
+          "passed": 11,
+          "total": 11,
+          "elapsedMs": 1538
+        },
+        {
+          "name": "archive-center-permanent-delete",
+          "passed": 52,
+          "total": 52,
+          "elapsedMs": 29217
+        },
+        {
+          "name": "background-execution-pure-compute-canary",
+          "passed": 9,
+          "total": 9,
+          "elapsedMs": 102
+        },
+        {
+          "name": "background-execution-recovery-canary",
+          "passed": 9,
+          "total": 9,
+          "elapsedMs": 114
+        },
+        {
+          "name": "background-execution-recovery-control",
+          "passed": 27,
+          "total": 27,
+          "elapsedMs": 277
+        },
+        {
+          "name": "bank-bu-background-dual-parser",
+          "passed": 9,
+          "total": 9,
+          "elapsedMs": 254
+        },
+        {
+          "name": "bank-bu-background-single-jobs",
+          "passed": 21,
+          "total": 21,
+          "elapsedMs": 493
+        },
+        {
+          "name": "bank-bu-recon-side-db-parity",
+          "passed": 17,
+          "total": 17,
+          "elapsedMs": 293
+        },
+        {
+          "name": "bank-statement-hit-scenario-report",
+          "passed": 49,
+          "total": 49,
+          "elapsedMs": 200
+        },
+        {
+          "name": "bank-statement-many-to-many-review-sheet",
+          "passed": 33,
+          "total": 33,
+          "elapsedMs": 199
+        },
+        {
+          "name": "bank-statement-universal-import-routing",
+          "passed": 20,
+          "total": 20,
+          "elapsedMs": 269
+        },
+        {
+          "name": "big-table-import-engine",
+          "passed": 19,
+          "total": 19,
+          "elapsedMs": 7582
+        },
+        {
+          "name": "biz-op-auto-error-report",
+          "passed": 12,
+          "total": 12,
+          "elapsedMs": 9842
+        },
+        {
+          "name": "biz-op-query-boundary",
+          "passed": 9,
+          "total": 9,
+          "elapsedMs": 7539
+        },
+        {
+          "name": "biz-op-recon-side-db-parity",
+          "passed": 16,
+          "total": 16,
+          "elapsedMs": 300
+        },
+        {
+          "name": "bizop-flow-engine-migration",
+          "passed": 73,
+          "total": 73,
+          "elapsedMs": 4975
+        },
+        {
+          "name": "dark-mode-schedule-settings",
+          "passed": 6,
+          "total": 6,
+          "elapsedMs": 188
+        },
+        {
+          "name": "duplicate-inbound-match-end-to-end",
+          "passed": 31,
+          "total": 31,
+          "elapsedMs": 331
+        },
+        {
+          "name": "execution-descriptor-governance",
+          "passed": 4,
+          "total": 4,
+          "elapsedMs": 868
+        },
+        {
+          "name": "fund-transfer-recon-account-mapping",
+          "passed": 19,
+          "total": 19,
+          "elapsedMs": 176
+        },
+        {
+          "name": "gateway-channel-filter-equivalence",
+          "passed": 23,
+          "total": 23,
+          "elapsedMs": 185
+        },
+        {
+          "name": "linked-fx-open7-stale-hit-e2e",
+          "passed": 27,
+          "total": 27,
+          "elapsedMs": 177
+        },
+        {
+          "name": "linked-table-delete-by-range-tablekey",
+          "passed": 73,
+          "total": 73,
+          "elapsedMs": 178
+        },
+        {
+          "name": "new-account-balance-statement",
+          "passed": 36,
+          "total": 36,
+          "elapsedMs": 223
+        },
+        {
+          "name": "pending-data-reconciliation",
+          "passed": 33,
+          "total": 33,
+          "elapsedMs": 49
+        },
+        {
+          "name": "pending-engine-migration",
+          "passed": 57,
+          "total": 57,
+          "elapsedMs": 4921
+        },
+        {
+          "name": "pending-removal-reconcile",
+          "passed": 62,
+          "total": 62,
+          "elapsedMs": 195
+        },
+        {
+          "name": "position-reconciliation-side-db-parity",
+          "passed": 38,
+          "total": 38,
+          "elapsedMs": 249
+        },
+        {
+          "name": "position-startup-task-recovery",
+          "passed": 3,
+          "total": 3,
+          "elapsedMs": 2166
+        },
+        {
+          "name": "pre-fund-reconciliation-output-contract",
+          "passed": 15,
+          "total": 15,
+          "elapsedMs": 256
+        },
+        {
+          "name": "pre-fund-reconciliation-side-db-parity",
+          "passed": 69,
+          "total": 69,
+          "elapsedMs": 303
+        },
+        {
+          "name": "refund-backfill-yellow-fill-e2e",
+          "passed": 258,
+          "total": 258,
+          "elapsedMs": 186
+        },
+        {
+          "name": "renderer-lifecycle",
+          "passed": 235,
+          "total": 235,
+          "elapsedMs": 20305
+        },
+        {
+          "name": "shared-xlsx-boundary",
+          "passed": 52,
+          "total": 52,
+          "elapsedMs": 3132
+        },
+        {
+          "name": "statement-generation-pipeline",
+          "passed": 45,
+          "total": 45,
+          "elapsedMs": 224
+        },
+        {
+          "name": "task-adapter-recovery",
+          "passed": 4,
+          "total": 4,
+          "elapsedMs": 524
+        },
+        {
+          "name": "toolbox-large-file-stream",
+          "passed": 50,
+          "total": 50,
+          "elapsedMs": 133934
+        },
+        {
+          "name": "toolbox-large-split-multi-sheet",
+          "passed": 31,
+          "total": 31,
+          "elapsedMs": 249685
+        },
+        {
+          "name": "toolbox-low-memory-complete",
+          "passed": 4,
+          "total": 4,
+          "elapsedMs": 12234
+        },
+        {
+          "name": "toolbox-low-memory-foundation",
+          "passed": 4,
+          "total": 4,
+          "elapsedMs": 757
+        },
+        {
+          "name": "toolbox-multi-sheet-merge",
+          "passed": 16,
+          "total": 16,
+          "elapsedMs": 13920
+        },
+        {
+          "name": "toolbox-multi-split-roundtrip",
+          "passed": 17,
+          "total": 17,
+          "elapsedMs": 435
+        },
+        {
+          "name": "toolbox-roundtrip",
+          "passed": 30,
+          "total": 30,
+          "elapsedMs": 164
+        },
+        {
+          "name": "toolbox-row-split-admission",
+          "passed": 2,
+          "total": 2,
+          "elapsedMs": 809
+        },
+        {
+          "name": "toolbox-row-split-archive-delete",
+          "passed": 2,
+          "total": 2,
+          "elapsedMs": 1026
+        },
+        {
+          "name": "toolbox-split-csv-scope",
+          "passed": 4,
+          "total": 4,
+          "elapsedMs": 799
+        },
+        {
+          "name": "v2.1.10-a3-phase1",
+          "passed": 40,
+          "total": 40,
+          "elapsedMs": 2443
+        },
+        {
+          "name": "v2.1.10-a3-phase2",
+          "passed": 56,
+          "total": 56,
+          "elapsedMs": 1777
+        },
+        {
+          "name": "v2.1.10-a4-phase3",
+          "passed": 75,
+          "total": 75,
+          "elapsedMs": 13626
+        },
+        {
+          "name": "v2.1.10-n4-cont-1-phase4",
+          "passed": 33,
+          "total": 33,
+          "elapsedMs": 662
+        },
+        {
+          "name": "v2.1.10-n4-cont-2-phase5",
+          "passed": 43,
+          "total": 43,
+          "elapsedMs": 451
+        },
+        {
+          "name": "v2.1.12-beta-multiworker-nested",
+          "passed": null,
+          "total": null,
+          "elapsedMs": 2750
+        },
+        {
+          "name": "v2.1.9-n5-end-to-end",
+          "passed": 68,
+          "total": 68,
+          "elapsedMs": 211
+        },
+        {
+          "name": "v2.1.9-n5-migration",
+          "passed": 67,
+          "total": 67,
+          "elapsedMs": 186
+        },
+        {
+          "name": "v2.1.9-sr-fix-1-coverage",
+          "passed": 148,
+          "total": 148,
+          "elapsedMs": 230
+        },
+        {
+          "name": "v2.1.9-sr-log-1",
+          "passed": 33,
+          "total": 33,
+          "elapsedMs": 134
+        },
+        {
+          "name": "v3.0.0-linked-streaming-import",
+          "passed": 19,
+          "total": 19,
+          "elapsedMs": 201
+        },
+        {
+          "name": "v3.0.1-linked-gateway-upsert",
+          "passed": 40,
+          "total": 40,
+          "elapsedMs": 204
+        },
+        {
+          "name": "v3.0.4-boc-dispatch-order-fix",
+          "passed": 31,
+          "total": 31,
+          "elapsedMs": 233
+        },
+        {
+          "name": "vcc-financial-op-adjustment-archive-chain",
+          "passed": 226,
+          "total": 226,
+          "elapsedMs": 1158
+        },
+        {
+          "name": "vcc-financial-op-destructive-state-chain",
+          "passed": 77,
+          "total": 77,
+          "elapsedMs": 1363
+        },
+        {
+          "name": "vcc-financial-op-effective-result",
+          "passed": 19,
+          "total": 19,
+          "elapsedMs": 124
+        },
+        {
+          "name": "vcc-financial-op-historical-template-export",
+          "passed": 29,
+          "total": 29,
+          "elapsedMs": 977
+        }
+      ]
+    },
+    "capacity": {
+      "path": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/local-capacity-probe.json",
+      "bytes": 1205959,
+      "sha256": "1aff2128ecd563a63900722b07d97b05e49e28bd8f8d7e651836bfae79ca14e5",
+      "status": "PASS",
+      "sourceIdentityMatches": true,
+      "resultsEqual": true,
+      "productionEvidence": false,
+      "injectedAvailableMemory": true,
+      "runs": [
+        {
+          "mode": "normal",
+          "rows": 20000,
+          "phases": 21,
+          "grants": 34
+        },
+        {
+          "mode": "low",
+          "rows": 20000,
+          "phases": 21,
+          "grants": 34
+        }
+      ]
+    },
+    "documents": {
+      "status": "PASS",
+      "documents": 7,
+      "relativeFileLinks": 81,
+      "internalAnchors": 39,
+      "tables": 39,
+      "acceptanceCriteria": 24,
+      "canonicalDocumentIdentities": 4
+    },
+    "diffWhitespace": {
+      "status": "PASS",
+      "command": "git diff --check"
+    }
+  },
+  "priorAttempts": [
+    {
+      "status": "FAIL",
+      "log": {
+        "path": "logs/low-memory/20260930-release-check-attempt-1.log",
+        "bytes": 1069529,
+        "sha256": "a766b177ede0fc140e9437793b496060a873ca5da44f5e7d5d4e0356ee21a89e"
+      },
+      "unit": {
+        "total": 9498,
+        "passed": 9488,
+        "failed": 6,
+        "skipped": 4
+      },
+      "reason": "公共依赖方向及新增精确接口/Worker 形态断言需修正；已修复并完成最终复验。"
+    },
+    {
+      "status": "FAIL",
+      "log": {
+        "path": "logs/low-memory/20260930-release-check-attempt-2.log",
+        "bytes": 985099,
+        "sha256": "3379f9f0b4d7910c1505eac7b5913ab683a6385a65a8261da686d04edd524ba4"
+      },
+      "unit": {
+        "total": 9499,
+        "passed": 9495,
+        "failed": 0,
+        "skipped": 4
+      },
+      "integration": {
+        "scriptsTotal": 71,
+        "scriptsPassed": 69,
+        "scriptsFailed": 2
+      },
+      "reason": "两个提取 Main 源码的集成宿主遗漏新增 owner 与窗口 sender；补齐后通过。生产源码未变化。"
+    }
+  ],
+  "repairedChecks": [
+    {
+      "path": "logs/low-memory/20260930-rows-admission-repaired.log",
+      "bytes": 267,
+      "sha256": "f4f91410dff821da2a7b959ef12d2a9495a7661925c02fe55774cefd812944e1"
+    },
+    {
+      "path": "logs/low-memory/20260930-rows-archive-repaired.log",
+      "bytes": 239,
+      "sha256": "00e84eddc79d1c036420f18773173b92ed2c1e6610dea657d0b43c49f0817615"
+    }
+  ],
+  "logsRepositoryIgnored": true,
+  "productionQualification": "pending",
+  "pendingAcceptance": [
+    "Windows 512/768 MiB 实际物理内存压力与普通环境对照",
+    "完整 Main/GUI 与最终 Windows 安装包",
+    "高样式、大样本、CSV/XLS 容量与性能阈值冻结",
+    "Windows 慢盘/文件锁/取消/强退及恢复",
+    "代表性业务样本和 Excel/WPS 人工验收",
+    "生产 profile 资格冻结和启用"
+  ]
+}

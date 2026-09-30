@@ -1,6 +1,10 @@
 'use strict';
 
 const { isMainThread, parentPort, workerData } = require('node:worker_threads');
+const { validateExecutionMemoryConfig } = require('./background-execution/execution-memory-config');
+const { checkExecutionMemory } = require('./background-execution/execution-memory-options');
+const memoryConfig = workerData?.backgroundExecutionMemoryConfig
+  ? validateExecutionMemoryConfig(workerData.backgroundExecutionMemoryConfig) : null;
 const { createWorkerAuthority, recoveryError } = require('./publication-recovery/worker-authority');
 const workerAuthority = workerData && workerData.publicationRecoveryKey
   ? createWorkerAuthority(workerData.publicationRecoveryKey) : null;
@@ -14,7 +18,11 @@ const { serializeError } = require('./serialize-error');
 const { freezeWorkerBatchContext } = require('./archive-center/worker-batch-context');
 
 function runPublicationOperation(op, payload = {}, onCheckpoint = null) {
-  const checkpoint = typeof onCheckpoint === 'function' ? onCheckpoint : null;
+  checkExecutionMemory(memoryConfig);
+  const checkpoint = (name, context) => {
+    checkExecutionMemory(memoryConfig);
+    if (typeof onCheckpoint === 'function') onCheckpoint(name, context);
+  };
   if (op === 'publish') {
     const batchContext = freezeWorkerBatchContext(payload.batchContext, { required: true });
     const prepared = prepareToolboxPublication({

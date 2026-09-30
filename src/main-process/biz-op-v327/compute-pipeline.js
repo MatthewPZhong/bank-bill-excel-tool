@@ -1,5 +1,7 @@
 'use strict';
 
+const { sqliteCacheKiB, candidateWriterBudgets, checkExecutionMemory } = require('../background-execution/execution-memory-options');
+
 const fs = require('node:fs');
 const path = require('node:path');
 const readline = require('node:readline');
@@ -24,10 +26,11 @@ const WORK_SCHEMA = `CREATE TABLE working_observations(observation_ordinal INTEG
   key_currency TEXT COLLATE BINARY NOT NULL,field_key TEXT NOT NULL,null_flag INTEGER NOT NULL,normalized_value TEXT COLLATE BINARY NOT NULL,
   in_start INTEGER NOT NULL,in_end INTEGER NOT NULL,
   PRIMARY KEY(key_bu,key_account,key_currency,field_key,null_flag,normalized_value)) WITHOUT ROWID`;
-function openReadonly(filename) {
+function openReadonly(filename, memoryConfig = null) {
   const uri = pathToFileURL(filename); uri.searchParams.set('mode', 'ro'); uri.searchParams.set('immutable', '1');
   const db = new DatabaseSync(uri.href, { readOnly: true });
   db.exec('PRAGMA temp_store=FILE; PRAGMA cache_size=-16384');
+  if (memoryConfig) db.exec(`PRAGMA cache_size=-${sqliteCacheKiB(memoryConfig, memoryConfig.maxOpenConnections)}`);
   return db;
 }
 function identity(stat) { return [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs].join(':'); }
@@ -42,12 +45,13 @@ async function verifyOriginal(source, safePoint) {
         || identity(before) !== identity(await fs.promises.stat(source.filePath))) fail('BIZOP_RUN_ORIGINAL_UNAVAILABLE');
   } finally { await handle.close(); }
 }
-async function runComputePipeline({ payloadStore, taskRunId, intentDigest, candidateRef, inputReference, cancelToken, options = {} }) {
+async function runComputePipeline({ payloadStore, taskRunId, intentDigest, candidateRef, inputReference, cancelToken, options = {}, memoryConfig = null }) {
   const started = Date.now();
   const metrics = { inputRows: 0, opRows: 0, flowRows: 0, resultRows: 0, noteRows: 0,
     peakRssBytes: process.memoryUsage().rss, peakInputConnections: 0, peakWorkConnections: 1, peakOutputConnections: 0,
     loadMs: 0, indexMs: 0, groupMs: 0, resultCopyMs: 0, sealMs: 0 };
   function safePoint() {
+    checkExecutionMemory(memoryConfig);
     if (cancelToken?.cancelled) fail('BIZOP_CANCELLED');
   }
   const root = payloadStore.readDocument(inputReference.relativePath, inputReference.digest).value;
@@ -65,7 +69,7 @@ async function runComputePipeline({ payloadStore, taskRunId, intentDigest, candi
   const db = new DatabaseSync(workFile);
   let dbClosed = false; let spoolFd = null; let inputWriter = null;
   const sink = createResultSink({ directory: candidate.directory, taskRunId, objectId: candidateRef, safePoint,
-    partTargetRows: options.partTargetRows, partTargetBytes: options.partTargetBytes });
+    partTargetRows: options.partTargetRows, partTargetBytes: options.partTargetBytes, memoryConfig });
   const inputById = new Map(); const verifiedOriginals = new Set();
   const reasonCounts = Object.fromEntries(REASONS.map(([code]) => [code, 0]));
   let diffCount = 0;
@@ -76,8 +80,8 @@ async function runComputePipeline({ payloadStore, taskRunId, intentDigest, candi
     if (stat.bavail * stat.bsize < 16 * 1024 * 1024) fail('BIZOP_DISK_SPACE_LOW', '临时目录可用空间不足，结果未发布');
   }
   try {
-    diskCheck(); configure(db); db.exec(WORK_SCHEMA);
-    inputWriter = createSynchronousCandidateWriter({ db, insertSql: `INSERT INTO working_observations VALUES (${Array(16).fill('?').join(',')})` });
+    diskCheck(); configure(db, memoryConfig); db.exec(WORK_SCHEMA);
+    inputWriter = createSynchronousCandidateWriter({ ...candidateWriterBudgets(memoryConfig), db, insertSql: `INSERT INTO working_observations VALUES (${Array(16).fill('?').join(',')})` });
     sink.note({ record_type: 'RUN_META', field_key: 'calculation', value_type: 'JSON', value_part: JSON.stringify({
       startDate: root.startDate, endDate: root.endDate, interval: '(S,E]', totalFlow: '入-出', reverseEnd: '终止期末-(入-出)',
       difference: '起始期末-(终止期末-(入-出))', tolerance: '0.01', inputFingerprint: root.inputFingerprint,
@@ -108,7 +112,7 @@ async function runComputePipeline({ payloadStore, taskRunId, intentDigest, candi
         const part = manifest.parts[partIndex];
         const filename = payloadStore.resolve(`${path.posix.dirname(input.manifestRelativePath)}/${part.name}`);
         const before = identity(fs.statSync(filename));
-        const reader = openReadonly(filename); metrics.peakInputConnections = 1;
+        const reader = openReadonly(filename, memoryConfig); metrics.peakInputConnections = 1;
         let partRows = 0;
         try {
           const meta = reader.prepare('SELECT * FROM part_meta WHERE singleton=1').get();

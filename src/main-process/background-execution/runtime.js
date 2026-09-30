@@ -1,7 +1,8 @@
 'use strict';
 
 const os = require('node:os');
-const { createPlatformResourceBudgets } = require('./resource-budget');
+const { registerMemoryGovernor } = require('./memory-activity');
+const { createPlatformResourceEnvelope } = require('./resource-budget');
 const { createResourceGovernor } = require('./resource-governor');
 const { createExecutionSupervisor } = require('./supervisor');
 const { beginExternalParserShutdown, waitForExternalParserShutdownPhase } = require('./external-parser-finalization');
@@ -51,7 +52,7 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
         ? os.availableParallelism()
         : Math.max(1, os.cpus().length))
     : options.availableParallelism;
-  const platformBudgets = createPlatformResourceBudgets({
+  const platformEnvelope = createPlatformResourceEnvelope({
     availableParallelism,
     ...(options.freeMemoryBytes === undefined ? {} : { freeMemoryBytes: options.freeMemoryBytes }),
     ...(options.totalMemoryBytes === undefined ? {} : { totalMemoryBytes: options.totalMemoryBytes }),
@@ -63,9 +64,14 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
       : { systemReserveBytes: options.systemReserveBytes })
   });
   const resourceGovernor = resourceGovernorOverride || createResourceGovernor({
-    budgets: platformBudgets,
+    budgets: typeof options.createMemoryAdmission === 'function' ? platformEnvelope.hardBudgets : platformEnvelope.compatibilityBudgets,
+    ...(typeof options.createMemoryAdmission === 'function' ? {
+      memoryAdmission: options.createMemoryAdmission({ compatibilityMemoryBytes: platformEnvelope.compatibilityBudgets.memoryBytes,
+        getGovernor: () => resourceGovernor })
+    } : {}),
     diagnostics: options.diagnostics
   });
+  const unregisterMemoryGovernor = registerMemoryGovernor(resourceGovernor);
   const supervisorShutdownTimeoutMs = options.shutdownTimeoutMs || 5000;
   const supervisor = createExecutionSupervisor({
     policyRegistry,
@@ -296,6 +302,7 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
         );
       }).finally(() => {
         shutdownPromise = null;
+        unregisterMemoryGovernor();
       });
       return shutdownPromise;
     },

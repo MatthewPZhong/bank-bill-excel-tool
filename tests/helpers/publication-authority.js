@@ -62,7 +62,7 @@ function prepareToolboxPublication(options = {}) {
 function createTestPublicationHarness(userDataDir, options = {}) {
   const dispatcher = options.dispatcher || createToolboxPublicationDispatcher(options.dispatcherOptions);
   const owners = options.owners || [createTestPublicationOwner(options.ownerOptions)];
-  const coordinator = createPublicationRecoveryCoordinator({ userDataDir, dispatcher, owners });
+  const coordinator = createPublicationRecoveryCoordinator({ userDataDir, dispatcher, owners, acquireMemory: options.acquireMemory });
   coordinator.bindDispatcherAuthority();
   return { dispatcher, coordinator, recovery: coordinator.forOwner(options.ownerId || owners[0].id) };
 }

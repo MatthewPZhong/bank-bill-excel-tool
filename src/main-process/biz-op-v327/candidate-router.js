@@ -1,5 +1,7 @@
 'use strict';
 
+const { sqliteCacheKiB } = require('../background-execution/execution-memory-options');
+
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
@@ -13,8 +15,9 @@ const PART_TARGET_ROWS = 250000;
 const PART_TARGET_BYTES = 256 * 1024 * 1024;
 const ROUTE_METADATA_LIMIT = 4096;
 
-function configure(db) {
+function configure(db, memoryConfig = null) {
   db.exec('PRAGMA foreign_keys=ON; PRAGMA encoding="UTF-8"; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA temp_store=FILE; PRAGMA cache_size=-16384');
+  if (memoryConfig) db.exec(`PRAGMA cache_size=-${sqliteCacheKiB(memoryConfig, 1)}`);
 }
 function tableFor(kind) { return kind === 'OP' ? 'op_check_rows' : 'flow_check_rows'; }
 function createPartSchema(db, route, part, taskRunId) {
@@ -32,7 +35,7 @@ function createPartSchema(db, route, part, taskRunId) {
 }
 
 function createCandidateRouter({ payloadStore, taskRunId, intentDigest, safePoint = () => {},
-  partTargetRows = PART_TARGET_ROWS, partTargetBytes = PART_TARGET_BYTES, writerOptions = {} }) {
+  partTargetRows = PART_TARGET_ROWS, partTargetBytes = PART_TARGET_BYTES, writerOptions = {}, memoryConfig = null }) {
   const routes = new Map();
   let current = null;
   let metadataEntries = 0;
@@ -75,7 +78,7 @@ function createCandidateRouter({ payloadStore, taskRunId, intentDigest, safePoin
     const exists = fs.existsSync(part.path);
     const db = new DatabaseSync(part.path);
     try {
-      configure(db);
+      configure(db, memoryConfig);
       if (!exists) createPartSchema(db, route, part, taskRunId);
       const count = (route.kind === 'OP' ? OP_COLUMNS : FLOW_COLUMNS).length + 8;
       const writer = createSynchronousCandidateWriter({ ...writerOptions, db,
@@ -137,7 +140,7 @@ function createCandidateRouter({ payloadStore, taskRunId, intentDigest, safePoin
           const started = Date.now();
           const db = new DatabaseSync(part.path);
           try {
-            configure(db);
+            configure(db, memoryConfig);
             const table = tableFor(route.kind);
             const prefix = route.kind === 'OP' ? 'op' : 'flow';
             db.exec(`CREATE INDEX ${prefix}_rows_key ON ${table}(key_bu,key_account,key_currency,row_ordinal);

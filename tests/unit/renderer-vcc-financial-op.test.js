@@ -331,7 +331,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     ]) {
       assert.match(main, new RegExp(`await [^\\n]*${serviceCall}\\(`));
     }
-    assert.match(vccService, /readWorkerFactory = \(filename, options\) => new Worker\(filename, options\)/);
+    assert.match(vccService, /readWorkerFactory = \(filename, options\) => memoryCarrierAdmission\(null\)\.observe\(new Worker\(filename, options\)\)/);
     assert.match(vccService, /taskGeneration !== capturedGeneration \|\| activeTask !== capturedTask/);
     assert.match(preload, /ipcRenderer\.on\('vccFinancialOp:operation:progress', listener\)/);
     assert.match(preload, /removeListener\('vccFinancialOp:operation:progress', listener\)/);

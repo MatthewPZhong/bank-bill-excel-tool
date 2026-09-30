@@ -46,7 +46,9 @@
       "allowedLocal": [
         "src/main-process/background-execution/resource-governor.js",
         "src/main-process/background-execution/resource-lease.js",
-        "src/main-process/background-execution/admission-queue.js"
+        "src/main-process/background-execution/admission-queue.js",
+        "src/main-process/background-execution/execution-memory-config.js",
+        "src/main-process/background-execution/memory-admission.js"
       ],
       "allowedExternal": [
         "node:crypto"
@@ -3687,7 +3689,7 @@
           "from": "src/main-process/toolbox-output-publication-dispatch.js",
           "functionPath": "createToolboxPublicationDispatcher.recoverWithinQueue",
           "callee": "worker",
-          "evidenceId": "ae0bca254de2b6f4327a74aa8ea688c9697b5e1ecc831062cd511690e77b9cb8",
+          "evidenceId": "f727c0b4d0a7a324c461f89f6ac4f5183e97f792c3a837e59f660a31e620e76e",
           "reason": "持有 FIFO 和 lease 的授权事务：发现、owner 全根授权后 seal 授权凭证，再发送 execute-recovery；准确调用指纹不得移动复用。"
         },
         {
@@ -3703,7 +3705,7 @@
           "from": "src/main-process/toolbox-output-publication-dispatch.js",
           "functionPath": "createToolboxPublicationDispatcher.worker",
           "callee": "runWorkerJob",
-          "evidenceId": "b3c138f57ab28a504aaef8de905c81b3588fff6762d49720beaf5238d7751ce1",
+          "evidenceId": "aee8b8ad15f8a3f7481631502b702e1f5ecdd726b301fb5ef96347109aab5fb6",
           "reason": "dispatcher 私有 transport 向固定 worker 传递 op/payload 与 workerKey；恢复命令在 recoverWithinQueue 内先授权封签，底层 API 再校验一次性凭证，精确调用之外不得复用。"
         },
         {
@@ -5017,7 +5019,9 @@
         "api": [
           "merge",
           "splitExport",
-          "splitRead"
+          "splitRead",
+          "splitReadValues",
+          "splitCancelRead"
         ],
         "modalBridge": [
           "closeModal",
@@ -5332,7 +5336,7 @@
     {
       "from": "src/main-process/toolbox-large-split-dispatch.js",
       "functionPath": "dispatchLargeSplit.<anonymous:1>",
-      "evidenceId": "fb3341122df5e40616f96e6c0a153cc008dc36b21c0187f5680f82312b3377cd",
+      "evidenceId": "c125b9fc46cc2257464a7e84506b78b03a7f0af78c7d71a074738b7fa6e995dd",
       "allowedTargets": [
         "src/backend/toolbox-xlsx-stream/large-split-worker.js"
       ],
@@ -5350,7 +5354,7 @@
     {
       "from": "src/main-process/toolbox-output-publication-dispatch.js",
       "functionPath": "runWorkerJob.<anonymous:1>",
-      "evidenceId": "24e6df1332be8ec12f46b93b64da06ce65f3fa9f3edf9c7514254f3bdfec8bc1",
+      "evidenceId": "432672b9bb152a81cfd1c8639c9064026e6dd286f60c72e243427df0ac3c009b",
       "allowedTargets": [
         "src/main-process/toolbox-output-publication-worker.js"
       ],
@@ -5403,6 +5407,26 @@
     }
   ],
   "policyChanges": [
+    {
+      "sourceCommit": "18b82b4328cf5e00c1b2549d373a5b2f2677215c",
+      "sourcePolicyBlob": "61c9a9d5bcb87927b847e01c5da3555e8b7c1719",
+      "boundaryId": "platform-core",
+      "field": "allowedLocal",
+      "from": [
+        "src/main-process/background-execution/resource-governor.js",
+        "src/main-process/background-execution/resource-lease.js",
+        "src/main-process/background-execution/admission-queue.js"
+      ],
+      "to": [
+        "src/main-process/background-execution/resource-governor.js",
+        "src/main-process/background-execution/resource-lease.js",
+        "src/main-process/background-execution/admission-queue.js",
+        "src/main-process/background-execution/execution-memory-config.js",
+        "src/main-process/background-execution/memory-admission.js"
+      ],
+      "reason": "低内存阶段准入新增精确配置校验和同步候选判定两个中性模块；os 采样由 Main provider 注入，保留核心对业务域、文件 IO 和系统传感器的依赖禁令。",
+      "designDoc": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/techdoc.md"
+    },
     {
       "sourceCommit": "9a38b96b1b8006c5851535d0c1e586bbaeb63f10",
       "sourcePolicyBlob": "bf3b2eba5acc15cd1d55f69d2d712ac96a718776",
@@ -6098,6 +6122,970 @@
       ],
       "reason": "G1 授权 workerData 和 G6 启动作用域已迁移；精确更新两处位置与 AST 指纹，加载登记数量及目标集均不增加。",
       "designDoc": "changes/v3.2.10/reviews/2026-09-21-release-repair/dynamic-load-migration.md"
+    },
+    {
+      "sourceCommit": "18b82b4328cf5e00c1b2549d373a5b2f2677215c",
+      "sourcePolicyBlob": "61c9a9d5bcb87927b847e01c5da3555e8b7c1719",
+      "boundaryId": "renderer-dialog-toolbox",
+      "field": "allowedApiFields",
+      "from": {
+        "api": [
+          "merge",
+          "splitExport",
+          "splitRead"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "createAlertDialog",
+          "escapeHtml"
+        ]
+      },
+      "to": {
+        "api": [
+          "merge",
+          "splitExport",
+          "splitRead",
+          "splitReadValues",
+          "splitCancelRead"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "createAlertDialog",
+          "escapeHtml"
+        ]
+      },
+      "reason": "拆分读取使用显式单字段补扫与取消窄 API，保持窗口 token 和请求代次边界。",
+      "designDoc": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/techdoc.md"
+    },
+    {
+      "sourceCommit": "18b82b4328cf5e00c1b2549d373a5b2f2677215c",
+      "sourcePolicyBlob": "61c9a9d5bcb87927b847e01c5da3555e8b7c1719",
+      "designDoc": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/techdoc.md",
+      "boundaryId": "$policy",
+      "field": "dynamicLoads",
+      "from": [
+        {
+          "from": "src/backend/big-table-import/engine.js",
+          "functionPath": "importFiles",
+          "evidenceId": "720e0351ce0ff50c20d70a1de687dc65bd893fa5876d889d495d300101e97988",
+          "allowedTargets": [
+            "src/backend/acquiring-bill-currency-import/contract-bill.js",
+            "src/backend/acquiring-bill-currency-import/contract-flow.js",
+            "src/backend/biz-op-recon-import/contract-flow.js",
+            "src/backend/pending-import/contract-pending.js"
+          ],
+          "reason": "固定基线 engine/import-worker 由 acquiring/pending/biz-op session 与 acquiring adapter 传入的四个业务契约；目标集合来自当前全部生产 contractModulePath 消费链。"
+        },
+        {
+          "from": "src/backend/big-table-import/import-worker.js",
+          "functionPath": "<anonymous:2>",
+          "evidenceId": "720e0351ce0ff50c20d70a1de687dc65bd893fa5876d889d495d300101e97988",
+          "allowedTargets": [
+            "src/backend/acquiring-bill-currency-import/contract-bill.js",
+            "src/backend/acquiring-bill-currency-import/contract-flow.js",
+            "src/backend/biz-op-recon-import/contract-flow.js",
+            "src/backend/pending-import/contract-pending.js"
+          ],
+          "reason": "固定基线 engine/import-worker 由 acquiring/pending/biz-op session 与 acquiring adapter 传入的四个业务契约；目标集合来自当前全部生产 contractModulePath 消费链。"
+        },
+        {
+          "from": "src/main-process/acquiring-bill-currency-session.js",
+          "functionPath": null,
+          "evidenceId": "d7692afb57a48f7c1e882fc4d1a63d861bce253c3f68cbb7893d3429d87ae01b",
+          "allowedTargets": [
+            "src/backend/acquiring-bill-currency-import/contract-flow.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/acquiring-bill-currency-session.js",
+          "functionPath": null,
+          "evidenceId": "d26ef436770f557c8d871b9d5ff4c9f65139cd3b6a54c596f444bd7282f84c8a",
+          "allowedTargets": [
+            "src/backend/acquiring-bill-currency-import/contract-bill.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/acquiring-bill-currency-session.js",
+          "functionPath": null,
+          "evidenceId": "942b4e26ad17c002934f81d336009d780d68c972d555a62f50c9ebe519e5fd03",
+          "allowedTargets": [
+            "src/backend/big-table-import/engine-worker-entry.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/acquiring-bill-currency-session.js",
+          "functionPath": "dispatchEngineImport.<anonymous:1>",
+          "evidenceId": "8a599d2b8ea2201a1fcd803751f93fab1bf474fca591eca81e3db360cefcd64e",
+          "allowedTargets": [
+            "src/backend/big-table-import/engine-worker-entry.js"
+          ],
+          "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+        },
+        {
+          "from": "src/main-process/acquiring-bill-currency-session.js",
+          "functionPath": "peekImportTarget",
+          "evidenceId": "867a2b13fd5adc06f87d9cabf9e85a04ac45eb47030b47d0b06e91c2245e2910",
+          "allowedTargets": [
+            "src/backend/acquiring-bill-currency-import/contract-bill.js",
+            "src/backend/acquiring-bill-currency-import/contract-flow.js"
+          ],
+          "reason": "固定基线 peekImportTarget 仅在 kind flow/bill 两个已知契约路径间选择。"
+        },
+        {
+          "from": "src/main-process/background-execution/adapters/acquiring-adapter.js",
+          "functionPath": null,
+          "evidenceId": "2689e4bb2443a253fdb3ecb929e0eb0e389a81ac9f2829b04977c24ef8baf32b",
+          "allowedTargets": [
+            "src/backend/acquiring-bill-currency-import/contract-flow.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/background-execution/adapters/acquiring-adapter.js",
+          "functionPath": null,
+          "evidenceId": "05c58ae9aad227903f078eb4c849602c98525606b3aa6118b16f8f4c7f8f4a7b",
+          "allowedTargets": [
+            "src/backend/acquiring-bill-currency-import/contract-bill.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/background-execution/adapters/utility-process-adapter.js",
+          "functionPath": "defaultUtilityFork",
+          "evidenceId": "3fb82f8495d7bceddb496330511ceaccfab5586a9197b991d70841464286a72e",
+          "allowedTargets": [
+            "src/main-process/background-execution/canary/durable-worker.js",
+            "src/main-process/background-execution/canary/pure-compute-worker.js",
+            "src/main-process/biz-op-v327/worker-entry.js",
+            "src/main-process/duplicate-inbound-match/worker-entry.js",
+            "src/main-process/fund-recon-worker/worker-entry.js",
+            "src/main-process/new-account/worker-entry.js",
+            "src/main-process/pre-fund-reconciliation/mpt-import/writer-worker-entry.js",
+            "src/main-process/read-only-exports/acquiring/worker-entry.js",
+            "src/main-process/read-only-exports/biz-op/worker-entry.js",
+            "src/main-process/read-only-exports/pending/worker-entry.js",
+            "src/main-process/read-only-exports/position/worker-entry.js",
+            "src/main-process/read-only-exports/pre-fund/worker-entry.js",
+            "src/main-process/read-only-exports/vcc-financial-op/worker-entry.js",
+            "src/main-process/recon-id-fix-service/worker-entry.js",
+            "src/main-process/toolbox-background/merge-worker-entry.js",
+            "src/main-process/toolbox-background/route-scanner-worker-entry.js",
+            "src/main-process/toolbox-background/split-worker-entry.js",
+            "src/main-process/toolbox-row-split/worker-entry.js",
+            "src/main-process/vcc-financial-op-output/single-writer-worker-entry.js",
+            "src/main-process/vcc-financial-op-output/writer-worker-entry.js"
+          ],
+          "reason": "固定基线 runtime.entryBindingForPolicy 与 packaged canary 注册的明确 worker 入口集合；平台 adapter 只传递登记的入口，新增装配必须同步此合同。"
+        },
+        {
+          "from": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+          "functionPath": "createWorkerThreadAdapter.start",
+          "evidenceId": "3008d867b786a78697f73245cff4afa4de5afee76d75053ba5961c0f2d0f4574",
+          "allowedTargets": [
+            "src/main-process/background-execution/canary/durable-worker.js",
+            "src/main-process/background-execution/canary/pure-compute-worker.js",
+            "src/main-process/biz-op-v327/worker-entry.js",
+            "src/main-process/duplicate-inbound-match/worker-entry.js",
+            "src/main-process/fund-recon-worker/worker-entry.js",
+            "src/main-process/new-account/worker-entry.js",
+            "src/main-process/pre-fund-reconciliation/mpt-import/writer-worker-entry.js",
+            "src/main-process/read-only-exports/acquiring/worker-entry.js",
+            "src/main-process/read-only-exports/biz-op/worker-entry.js",
+            "src/main-process/read-only-exports/pending/worker-entry.js",
+            "src/main-process/read-only-exports/position/worker-entry.js",
+            "src/main-process/read-only-exports/pre-fund/worker-entry.js",
+            "src/main-process/read-only-exports/vcc-financial-op/worker-entry.js",
+            "src/main-process/recon-id-fix-service/worker-entry.js",
+            "src/main-process/toolbox-background/merge-worker-entry.js",
+            "src/main-process/toolbox-background/route-scanner-worker-entry.js",
+            "src/main-process/toolbox-background/split-worker-entry.js",
+            "src/main-process/toolbox-row-split/worker-entry.js",
+            "src/main-process/vcc-financial-op-output/single-writer-worker-entry.js",
+            "src/main-process/vcc-financial-op-output/writer-worker-entry.js"
+          ],
+          "reason": "固定基线 runtime.entryBindingForPolicy 与 packaged canary 注册的明确 worker 入口集合；平台 adapter 只传递登记的入口，新增装配必须同步此合同。"
+        },
+        {
+          "from": "src/main-process/background-execution/canary/index.js",
+          "functionPath": null,
+          "evidenceId": "e16a09980c47cb2f3901fe622f749969497f10fad721f0e3828102f9cbd553e5",
+          "allowedTargets": [
+            "src/main-process/background-execution/canary/pure-compute-worker.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/background-execution/canary/packaged-runtime-runner.js",
+          "functionPath": null,
+          "evidenceId": "734f123c1f689fb31eed74c2afd63e815755ba6d6ac37449fa3f85686180ee72",
+          "allowedTargets": [
+            "src/main-process/background-execution/canary/canary-schema.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/background-execution/canary/packaged-runtime-runner.js",
+          "functionPath": null,
+          "evidenceId": "be6c1eca16cafc99cf09d6c53d8435405f3dfea53df66f6ac8fa72112e9ce005",
+          "allowedTargets": [
+            "src/main-process/background-execution/canary/durable-worker.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/big-table-import-dispatch.js",
+          "functionPath": null,
+          "evidenceId": "942b4e26ad17c002934f81d336009d780d68c972d555a62f50c9ebe519e5fd03",
+          "allowedTargets": [
+            "src/backend/big-table-import/engine-worker-entry.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/big-table-import-dispatch.js",
+          "functionPath": "dispatchEngineImportHandle.<anonymous:1>",
+          "evidenceId": "34227fdeff96fb08de5f499d9da93cc50ece971976c665f76ab5739a0ca3848c",
+          "allowedTargets": [
+            "src/backend/big-table-import/engine-worker-entry.js"
+          ],
+          "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+        },
+        {
+          "from": "src/main-process/biz-op-recon-session.js",
+          "functionPath": null,
+          "evidenceId": "2625a3783ded16bf6e682e03c46b69ee76365f7afb899b9c51430006da3218ba",
+          "allowedTargets": [
+            "src/backend/biz-op-recon-import/contract-flow.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/pending-session.js",
+          "functionPath": null,
+          "evidenceId": "f2654d32e2cdba86fe91312934c0437226f0f7d489d109e89f2e4973a51c6c7c",
+          "allowedTargets": [
+            "src/backend/pending-import/contract-pending.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/position-reconciliation/import-dispatch.js",
+          "functionPath": null,
+          "evidenceId": "6d55f45561e871a8cec3144648d1a5327d2004af5305bcf4e0d24bfc549fc7c2",
+          "allowedTargets": [
+            "src/backend/position-reconciliation-import/worker-entry.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/position-reconciliation/import-dispatch.js",
+          "functionPath": "dispatchPositionImportPreflight",
+          "evidenceId": "1c788c503f99844777e824808ad57946966527055ee1c8ebec1e0795066875be",
+          "allowedTargets": [
+            "src/backend/position-reconciliation-import/worker-entry.js"
+          ],
+          "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+        },
+        {
+          "from": "src/main-process/position-reconciliation/import-dispatch.js",
+          "functionPath": "dispatchPositionImportPreflight",
+          "evidenceId": "c4d1c12af9af512bfb4ae5da0665a73b52f062af9a6ef2802797fbcbe1c28dc1",
+          "allowedTargets": [
+            "src/backend/position-reconciliation-import/worker-entry.js"
+          ],
+          "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+        },
+        {
+          "from": "src/main-process/run-check-multiworker.js",
+          "functionPath": "startWorker",
+          "evidenceId": "ff92d9b23731f8dd4f8ff730bd0ffd2290b9c0a2e75c588734fbe7d2ab54e565",
+          "allowedTargets": [
+            "src/main-process/run-check-multiworker-worker.js"
+          ],
+          "reason": "G6 真实退出屏障迁移后的 startWorker 调用；resolveWorkerScript 始终返回原 run-check-multiworker-worker.js，目标集合保持不变。"
+        },
+        {
+          "from": "src/main-process/run-check-worker-pool.js",
+          "functionPath": "coldStartWorker",
+          "evidenceId": "ff92d9b23731f8dd4f8ff730bd0ffd2290b9c0a2e75c588734fbe7d2ab54e565",
+          "allowedTargets": [
+            "src/main-process/run-check-worker.js"
+          ],
+          "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+        },
+        {
+          "from": "src/main-process/toolbox-background/route-scanner-core.js",
+          "functionPath": "runOutputWriter.<anonymous:1>",
+          "evidenceId": "b4750256954d70374bb83a2d092ee4a780ce30d6177dbb7a389aea51ebba1a90",
+          "allowedTargets": [
+            "src/main-process/toolbox-background/output-writer-worker-entry.js"
+          ],
+          "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+        },
+        {
+          "from": "src/main-process/toolbox-large-split-dispatch.js",
+          "functionPath": null,
+          "evidenceId": "261f056a90e99b55737b47600b8481a73f0afba4a39236c9dbdd3efe4292a654",
+          "allowedTargets": [
+            "src/backend/toolbox-xlsx-stream/large-split-worker.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/toolbox-large-split-dispatch.js",
+          "functionPath": "dispatchLargeSplit.<anonymous:1>",
+          "evidenceId": "fb3341122df5e40616f96e6c0a153cc008dc36b21c0187f5680f82312b3377cd",
+          "allowedTargets": [
+            "src/backend/toolbox-xlsx-stream/large-split-worker.js"
+          ],
+          "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+        },
+        {
+          "from": "src/main-process/toolbox-output-publication-dispatch.js",
+          "functionPath": null,
+          "evidenceId": "65530a123558e57be009c0bf8acd5080c728e9fd44e528c44973fb50d2abacee",
+          "allowedTargets": [
+            "src/main-process/toolbox-output-publication-worker.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/toolbox-output-publication-dispatch.js",
+          "functionPath": "runWorkerJob.<anonymous:1>",
+          "evidenceId": "24e6df1332be8ec12f46b93b64da06ce65f3fa9f3edf9c7514254f3bdfec8bc1",
+          "allowedTargets": [
+            "src/main-process/toolbox-output-publication-worker.js"
+          ],
+          "reason": "G1 workerData 携带恢复授权密钥的准确 worker 构造；默认生产目标仍为 toolbox-output-publication-worker.js，测试路径注入不扩大生产目标。"
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-service.js",
+          "functionPath": "createVccFinancialOpService.<anonymous:1>",
+          "evidenceId": "337edca2e4b86094ad57c71b5b9aca23b43ed4065cf62ffc3344efb2c234f716",
+          "allowedTargets": [
+            "src/backend/vcc-financial-op/worker-entry.js"
+          ],
+          "reason": "固定基线 createVccFinancialOpService 默认 factory，仅由同文件 WORKER_PATH/READ_WORKER_PATH/RESULT_WRITE_WORKER_PATH/REVIEW_WORKER_PATH 对应生产调用传入；测试注入不纳入生产集合。"
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-service.js",
+          "functionPath": "createVccFinancialOpService.<anonymous:2>",
+          "evidenceId": "337edca2e4b86094ad57c71b5b9aca23b43ed4065cf62ffc3344efb2c234f716",
+          "allowedTargets": [
+            "src/main-process/vcc-financial-op-read-worker.js"
+          ],
+          "reason": "固定基线 createVccFinancialOpService 默认 factory，仅由同文件 WORKER_PATH/READ_WORKER_PATH/RESULT_WRITE_WORKER_PATH/REVIEW_WORKER_PATH 对应生产调用传入；测试注入不纳入生产集合。"
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-service.js",
+          "functionPath": "createVccFinancialOpService.<anonymous:3>",
+          "evidenceId": "337edca2e4b86094ad57c71b5b9aca23b43ed4065cf62ffc3344efb2c234f716",
+          "allowedTargets": [
+            "src/main-process/vcc-financial-op-write-worker.js"
+          ],
+          "reason": "固定基线 createVccFinancialOpService 默认 factory，仅由同文件 WORKER_PATH/READ_WORKER_PATH/RESULT_WRITE_WORKER_PATH/REVIEW_WORKER_PATH 对应生产调用传入；测试注入不纳入生产集合。"
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-service.js",
+          "functionPath": "createVccFinancialOpService.<anonymous:4>",
+          "evidenceId": "337edca2e4b86094ad57c71b5b9aca23b43ed4065cf62ffc3344efb2c234f716",
+          "allowedTargets": [
+            "src/main-process/vcc-financial-op-review-worker.js"
+          ],
+          "reason": "固定基线 createVccFinancialOpService 默认 factory，仅由同文件 WORKER_PATH/READ_WORKER_PATH/RESULT_WRITE_WORKER_PATH/REVIEW_WORKER_PATH 对应生产调用传入；测试注入不纳入生产集合。"
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-storage-migration.js",
+          "functionPath": "runMigrationWorker",
+          "evidenceId": "a4d363e9024350c7fd6ba115edc99c3566bd3efc067c9ff2d3648cfebb405b9d",
+          "allowedTargets": [
+            "src/main-process/vcc-financial-op-storage-migration-worker.js"
+          ],
+          "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+        }
+      ],
+      "to": [
+        {
+          "from": "src/backend/big-table-import/engine.js",
+          "functionPath": "importFiles",
+          "evidenceId": "720e0351ce0ff50c20d70a1de687dc65bd893fa5876d889d495d300101e97988",
+          "allowedTargets": [
+            "src/backend/acquiring-bill-currency-import/contract-bill.js",
+            "src/backend/acquiring-bill-currency-import/contract-flow.js",
+            "src/backend/biz-op-recon-import/contract-flow.js",
+            "src/backend/pending-import/contract-pending.js"
+          ],
+          "reason": "固定基线 engine/import-worker 由 acquiring/pending/biz-op session 与 acquiring adapter 传入的四个业务契约；目标集合来自当前全部生产 contractModulePath 消费链。"
+        },
+        {
+          "from": "src/backend/big-table-import/import-worker.js",
+          "functionPath": "<anonymous:2>",
+          "evidenceId": "720e0351ce0ff50c20d70a1de687dc65bd893fa5876d889d495d300101e97988",
+          "allowedTargets": [
+            "src/backend/acquiring-bill-currency-import/contract-bill.js",
+            "src/backend/acquiring-bill-currency-import/contract-flow.js",
+            "src/backend/biz-op-recon-import/contract-flow.js",
+            "src/backend/pending-import/contract-pending.js"
+          ],
+          "reason": "固定基线 engine/import-worker 由 acquiring/pending/biz-op session 与 acquiring adapter 传入的四个业务契约；目标集合来自当前全部生产 contractModulePath 消费链。"
+        },
+        {
+          "from": "src/main-process/acquiring-bill-currency-session.js",
+          "functionPath": null,
+          "evidenceId": "d7692afb57a48f7c1e882fc4d1a63d861bce253c3f68cbb7893d3429d87ae01b",
+          "allowedTargets": [
+            "src/backend/acquiring-bill-currency-import/contract-flow.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/acquiring-bill-currency-session.js",
+          "functionPath": null,
+          "evidenceId": "d26ef436770f557c8d871b9d5ff4c9f65139cd3b6a54c596f444bd7282f84c8a",
+          "allowedTargets": [
+            "src/backend/acquiring-bill-currency-import/contract-bill.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/acquiring-bill-currency-session.js",
+          "functionPath": null,
+          "evidenceId": "942b4e26ad17c002934f81d336009d780d68c972d555a62f50c9ebe519e5fd03",
+          "allowedTargets": [
+            "src/backend/big-table-import/engine-worker-entry.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/acquiring-bill-currency-session.js",
+          "functionPath": "dispatchEngineImport.<anonymous:1>",
+          "evidenceId": "8a599d2b8ea2201a1fcd803751f93fab1bf474fca591eca81e3db360cefcd64e",
+          "allowedTargets": [
+            "src/backend/big-table-import/engine-worker-entry.js"
+          ],
+          "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+        },
+        {
+          "from": "src/main-process/acquiring-bill-currency-session.js",
+          "functionPath": "peekImportTarget",
+          "evidenceId": "867a2b13fd5adc06f87d9cabf9e85a04ac45eb47030b47d0b06e91c2245e2910",
+          "allowedTargets": [
+            "src/backend/acquiring-bill-currency-import/contract-bill.js",
+            "src/backend/acquiring-bill-currency-import/contract-flow.js"
+          ],
+          "reason": "固定基线 peekImportTarget 仅在 kind flow/bill 两个已知契约路径间选择。"
+        },
+        {
+          "from": "src/main-process/background-execution/adapters/acquiring-adapter.js",
+          "functionPath": null,
+          "evidenceId": "2689e4bb2443a253fdb3ecb929e0eb0e389a81ac9f2829b04977c24ef8baf32b",
+          "allowedTargets": [
+            "src/backend/acquiring-bill-currency-import/contract-flow.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/background-execution/adapters/acquiring-adapter.js",
+          "functionPath": null,
+          "evidenceId": "05c58ae9aad227903f078eb4c849602c98525606b3aa6118b16f8f4c7f8f4a7b",
+          "allowedTargets": [
+            "src/backend/acquiring-bill-currency-import/contract-bill.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/background-execution/adapters/utility-process-adapter.js",
+          "functionPath": "defaultUtilityFork",
+          "evidenceId": "3fb82f8495d7bceddb496330511ceaccfab5586a9197b991d70841464286a72e",
+          "allowedTargets": [
+            "src/main-process/background-execution/canary/durable-worker.js",
+            "src/main-process/background-execution/canary/pure-compute-worker.js",
+            "src/main-process/biz-op-v327/worker-entry.js",
+            "src/main-process/duplicate-inbound-match/worker-entry.js",
+            "src/main-process/fund-recon-worker/worker-entry.js",
+            "src/main-process/new-account/worker-entry.js",
+            "src/main-process/pre-fund-reconciliation/mpt-import/writer-worker-entry.js",
+            "src/main-process/read-only-exports/acquiring/worker-entry.js",
+            "src/main-process/read-only-exports/biz-op/worker-entry.js",
+            "src/main-process/read-only-exports/pending/worker-entry.js",
+            "src/main-process/read-only-exports/position/worker-entry.js",
+            "src/main-process/read-only-exports/pre-fund/worker-entry.js",
+            "src/main-process/read-only-exports/vcc-financial-op/worker-entry.js",
+            "src/main-process/recon-id-fix-service/worker-entry.js",
+            "src/main-process/toolbox-background/merge-worker-entry.js",
+            "src/main-process/toolbox-background/route-scanner-worker-entry.js",
+            "src/main-process/toolbox-background/split-worker-entry.js",
+            "src/main-process/toolbox-row-split/worker-entry.js",
+            "src/main-process/vcc-financial-op-output/single-writer-worker-entry.js",
+            "src/main-process/vcc-financial-op-output/writer-worker-entry.js"
+          ],
+          "reason": "固定基线 runtime.entryBindingForPolicy 与 packaged canary 注册的明确 worker 入口集合；平台 adapter 只传递登记的入口，新增装配必须同步此合同。"
+        },
+        {
+          "from": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+          "functionPath": "createWorkerThreadAdapter.start",
+          "evidenceId": "3008d867b786a78697f73245cff4afa4de5afee76d75053ba5961c0f2d0f4574",
+          "allowedTargets": [
+            "src/main-process/background-execution/canary/durable-worker.js",
+            "src/main-process/background-execution/canary/pure-compute-worker.js",
+            "src/main-process/biz-op-v327/worker-entry.js",
+            "src/main-process/duplicate-inbound-match/worker-entry.js",
+            "src/main-process/fund-recon-worker/worker-entry.js",
+            "src/main-process/new-account/worker-entry.js",
+            "src/main-process/pre-fund-reconciliation/mpt-import/writer-worker-entry.js",
+            "src/main-process/read-only-exports/acquiring/worker-entry.js",
+            "src/main-process/read-only-exports/biz-op/worker-entry.js",
+            "src/main-process/read-only-exports/pending/worker-entry.js",
+            "src/main-process/read-only-exports/position/worker-entry.js",
+            "src/main-process/read-only-exports/pre-fund/worker-entry.js",
+            "src/main-process/read-only-exports/vcc-financial-op/worker-entry.js",
+            "src/main-process/recon-id-fix-service/worker-entry.js",
+            "src/main-process/toolbox-background/merge-worker-entry.js",
+            "src/main-process/toolbox-background/route-scanner-worker-entry.js",
+            "src/main-process/toolbox-background/split-worker-entry.js",
+            "src/main-process/toolbox-row-split/worker-entry.js",
+            "src/main-process/vcc-financial-op-output/single-writer-worker-entry.js",
+            "src/main-process/vcc-financial-op-output/writer-worker-entry.js"
+          ],
+          "reason": "固定基线 runtime.entryBindingForPolicy 与 packaged canary 注册的明确 worker 入口集合；平台 adapter 只传递登记的入口，新增装配必须同步此合同。"
+        },
+        {
+          "from": "src/main-process/background-execution/canary/index.js",
+          "functionPath": null,
+          "evidenceId": "e16a09980c47cb2f3901fe622f749969497f10fad721f0e3828102f9cbd553e5",
+          "allowedTargets": [
+            "src/main-process/background-execution/canary/pure-compute-worker.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/background-execution/canary/packaged-runtime-runner.js",
+          "functionPath": null,
+          "evidenceId": "734f123c1f689fb31eed74c2afd63e815755ba6d6ac37449fa3f85686180ee72",
+          "allowedTargets": [
+            "src/main-process/background-execution/canary/canary-schema.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/background-execution/canary/packaged-runtime-runner.js",
+          "functionPath": null,
+          "evidenceId": "be6c1eca16cafc99cf09d6c53d8435405f3dfea53df66f6ac8fa72112e9ce005",
+          "allowedTargets": [
+            "src/main-process/background-execution/canary/durable-worker.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/big-table-import-dispatch.js",
+          "functionPath": null,
+          "evidenceId": "942b4e26ad17c002934f81d336009d780d68c972d555a62f50c9ebe519e5fd03",
+          "allowedTargets": [
+            "src/backend/big-table-import/engine-worker-entry.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/big-table-import-dispatch.js",
+          "functionPath": "dispatchEngineImportHandle.<anonymous:1>",
+          "evidenceId": "34227fdeff96fb08de5f499d9da93cc50ece971976c665f76ab5739a0ca3848c",
+          "allowedTargets": [
+            "src/backend/big-table-import/engine-worker-entry.js"
+          ],
+          "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+        },
+        {
+          "from": "src/main-process/biz-op-recon-session.js",
+          "functionPath": null,
+          "evidenceId": "2625a3783ded16bf6e682e03c46b69ee76365f7afb899b9c51430006da3218ba",
+          "allowedTargets": [
+            "src/backend/biz-op-recon-import/contract-flow.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/pending-session.js",
+          "functionPath": null,
+          "evidenceId": "f2654d32e2cdba86fe91312934c0437226f0f7d489d109e89f2e4973a51c6c7c",
+          "allowedTargets": [
+            "src/backend/pending-import/contract-pending.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/position-reconciliation/import-dispatch.js",
+          "functionPath": null,
+          "evidenceId": "6d55f45561e871a8cec3144648d1a5327d2004af5305bcf4e0d24bfc549fc7c2",
+          "allowedTargets": [
+            "src/backend/position-reconciliation-import/worker-entry.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/position-reconciliation/import-dispatch.js",
+          "functionPath": "dispatchPositionImportPreflight",
+          "evidenceId": "1c788c503f99844777e824808ad57946966527055ee1c8ebec1e0795066875be",
+          "allowedTargets": [
+            "src/backend/position-reconciliation-import/worker-entry.js"
+          ],
+          "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+        },
+        {
+          "from": "src/main-process/position-reconciliation/import-dispatch.js",
+          "functionPath": "dispatchPositionImportPreflight",
+          "evidenceId": "c4d1c12af9af512bfb4ae5da0665a73b52f062af9a6ef2802797fbcbe1c28dc1",
+          "allowedTargets": [
+            "src/backend/position-reconciliation-import/worker-entry.js"
+          ],
+          "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+        },
+        {
+          "from": "src/main-process/run-check-multiworker.js",
+          "functionPath": "startWorker",
+          "evidenceId": "ff92d9b23731f8dd4f8ff730bd0ffd2290b9c0a2e75c588734fbe7d2ab54e565",
+          "allowedTargets": [
+            "src/main-process/run-check-multiworker-worker.js"
+          ],
+          "reason": "G6 真实退出屏障迁移后的 startWorker 调用；resolveWorkerScript 始终返回原 run-check-multiworker-worker.js，目标集合保持不变。"
+        },
+        {
+          "from": "src/main-process/run-check-worker-pool.js",
+          "functionPath": "coldStartWorker",
+          "evidenceId": "ff92d9b23731f8dd4f8ff730bd0ffd2290b9c0a2e75c588734fbe7d2ab54e565",
+          "allowedTargets": [
+            "src/main-process/run-check-worker.js"
+          ],
+          "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+        },
+        {
+          "from": "src/main-process/toolbox-background/route-scanner-core.js",
+          "functionPath": "runOutputWriter.<anonymous:1>",
+          "evidenceId": "b4750256954d70374bb83a2d092ee4a780ce30d6177dbb7a389aea51ebba1a90",
+          "allowedTargets": [
+            "src/main-process/toolbox-background/output-writer-worker-entry.js"
+          ],
+          "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+        },
+        {
+          "from": "src/main-process/toolbox-large-split-dispatch.js",
+          "functionPath": null,
+          "evidenceId": "261f056a90e99b55737b47600b8481a73f0afba4a39236c9dbdd3efe4292a654",
+          "allowedTargets": [
+            "src/backend/toolbox-xlsx-stream/large-split-worker.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/toolbox-large-split-dispatch.js",
+          "functionPath": "dispatchLargeSplit.<anonymous:1>",
+          "evidenceId": "c125b9fc46cc2257464a7e84506b78b03a7f0af78c7d71a074738b7fa6e995dd",
+          "allowedTargets": [
+            "src/backend/toolbox-xlsx-stream/large-split-worker.js"
+          ],
+          "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+        },
+        {
+          "from": "src/main-process/toolbox-output-publication-dispatch.js",
+          "functionPath": null,
+          "evidenceId": "65530a123558e57be009c0bf8acd5080c728e9fd44e528c44973fb50d2abacee",
+          "allowedTargets": [
+            "src/main-process/toolbox-output-publication-worker.js"
+          ],
+          "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+        },
+        {
+          "from": "src/main-process/toolbox-output-publication-dispatch.js",
+          "functionPath": "runWorkerJob.<anonymous:1>",
+          "evidenceId": "432672b9bb152a81cfd1c8639c9064026e6dd286f60c72e243427df0ac3c009b",
+          "allowedTargets": [
+            "src/main-process/toolbox-output-publication-worker.js"
+          ],
+          "reason": "G1 workerData 携带恢复授权密钥的准确 worker 构造；默认生产目标仍为 toolbox-output-publication-worker.js，测试路径注入不扩大生产目标。"
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-service.js",
+          "functionPath": "createVccFinancialOpService.<anonymous:1>",
+          "evidenceId": "337edca2e4b86094ad57c71b5b9aca23b43ed4065cf62ffc3344efb2c234f716",
+          "allowedTargets": [
+            "src/backend/vcc-financial-op/worker-entry.js"
+          ],
+          "reason": "固定基线 createVccFinancialOpService 默认 factory，仅由同文件 WORKER_PATH/READ_WORKER_PATH/RESULT_WRITE_WORKER_PATH/REVIEW_WORKER_PATH 对应生产调用传入；测试注入不纳入生产集合。"
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-service.js",
+          "functionPath": "createVccFinancialOpService.<anonymous:2>",
+          "evidenceId": "337edca2e4b86094ad57c71b5b9aca23b43ed4065cf62ffc3344efb2c234f716",
+          "allowedTargets": [
+            "src/main-process/vcc-financial-op-read-worker.js"
+          ],
+          "reason": "固定基线 createVccFinancialOpService 默认 factory，仅由同文件 WORKER_PATH/READ_WORKER_PATH/RESULT_WRITE_WORKER_PATH/REVIEW_WORKER_PATH 对应生产调用传入；测试注入不纳入生产集合。"
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-service.js",
+          "functionPath": "createVccFinancialOpService.<anonymous:3>",
+          "evidenceId": "337edca2e4b86094ad57c71b5b9aca23b43ed4065cf62ffc3344efb2c234f716",
+          "allowedTargets": [
+            "src/main-process/vcc-financial-op-write-worker.js"
+          ],
+          "reason": "固定基线 createVccFinancialOpService 默认 factory，仅由同文件 WORKER_PATH/READ_WORKER_PATH/RESULT_WRITE_WORKER_PATH/REVIEW_WORKER_PATH 对应生产调用传入；测试注入不纳入生产集合。"
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-service.js",
+          "functionPath": "createVccFinancialOpService.<anonymous:4>",
+          "evidenceId": "337edca2e4b86094ad57c71b5b9aca23b43ed4065cf62ffc3344efb2c234f716",
+          "allowedTargets": [
+            "src/main-process/vcc-financial-op-review-worker.js"
+          ],
+          "reason": "固定基线 createVccFinancialOpService 默认 factory，仅由同文件 WORKER_PATH/READ_WORKER_PATH/RESULT_WRITE_WORKER_PATH/REVIEW_WORKER_PATH 对应生产调用传入；测试注入不纳入生产集合。"
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-storage-migration.js",
+          "functionPath": "runMigrationWorker",
+          "evidenceId": "a4d363e9024350c7fd6ba115edc99c3566bd3efc067c9ff2d3648cfebb405b9d",
+          "allowedTargets": [
+            "src/main-process/vcc-financial-op-storage-migration-worker.js"
+          ],
+          "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+        }
+      ],
+      "reason": "准备与共享发布 Worker 增加可信执行配置和堆限制；准确迁移两处构造指纹，路径、数量及目标集合不增加。"
+    },
+    {
+      "sourceCommit": "18b82b4328cf5e00c1b2549d373a5b2f2677215c",
+      "sourcePolicyBlob": "61c9a9d5bcb87927b847e01c5da3555e8b7c1719",
+      "designDoc": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/techdoc.md",
+      "boundaryId": "publication-recovery-entry",
+      "field": "allowedSites",
+      "from": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication-dispatch.js",
+          "functionPath": "runWorkerJob.<anonymous:1>.<anonymous:4>",
+          "callee": "onWorkerExit",
+          "evidenceId": "ab2f86aeb298c450cbd7c00111eda42c2674625ec54750a7dd852fdae0544f5b",
+          "reason": "worker exit 事件的通知回调仅报告 jobId/op/code；它不发送 worker operation，不执行恢复。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication-worker.js",
+          "functionPath": null,
+          "callee": "require",
+          "evidenceId": "30bbe89cb848f9e356b9f721a92ac6ea3b811e15ac253a725bd485275c43c997",
+          "reason": "worker 的确切生产装配；恢复调用只在 execute-recovery 分支，并由 raw API 验证 workerAuthority 与授权凭证。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication-worker.js",
+          "functionPath": "runPublicationOperation",
+          "callee": "recoverPendingToolboxPublications",
+          "evidenceId": "f42081c25415b384de94863067e36ff933f869e962ddc980afb54ecab0e7c22e",
+          "reason": "execute-recovery 分支向真实 API 传入 workerAuthority/authorization；旧 recover 明确拒绝，授权合同由 G1 owner/producer 测试证明。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication-dispatch.js",
+          "functionPath": "createToolboxPublicationDispatcher.recoverWithinQueue",
+          "callee": "worker",
+          "evidenceId": "ae0bca254de2b6f4327a74aa8ea688c9697b5e1ecc831062cd511690e77b9cb8",
+          "reason": "持有 FIFO 和 lease 的授权事务：发现、owner 全根授权后 seal 授权凭证，再发送 execute-recovery；准确调用指纹不得移动复用。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication-dispatch.js",
+          "functionPath": "runWorkerJob.<anonymous:1>",
+          "callee": "postMessage",
+          "evidenceId": "3420e9da5eca5d5ceaba4892b7f4b35ce02f1cac7bd0ae70071ebdefce14b5ad",
+          "reason": "仅传输内部 worker job；worker recovery 必须持有当前 workerKey 生成的凭证，调用位置不授予新恢复操作。G1 真 worker 授权和退出屏障测试覆盖该传输。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication-dispatch.js",
+          "functionPath": "createToolboxPublicationDispatcher.worker",
+          "callee": "runWorkerJob",
+          "evidenceId": "b3c138f57ab28a504aaef8de905c81b3588fff6762d49720beaf5238d7751ce1",
+          "reason": "dispatcher 私有 transport 向固定 worker 传递 op/payload 与 workerKey；恢复命令在 recoverWithinQueue 内先授权封签，底层 API 再校验一次性凭证，精确调用之外不得复用。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "functionPath": "recoverOneJournal",
+          "callee": "recoverPreparingIntent",
+          "evidenceId": "d3359118d9b5296f40e63216a98b2f0b5d655f5073bd6966bdb03f01f05c68fc",
+          "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "functionPath": "recoverOneJournal",
+          "callee": "recoverPreparingIntent",
+          "evidenceId": "d9ee5947fed2c2494f0227d9dcb4170adf5c84a58c3e0a40fcd5ee88466f4c66",
+          "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "functionPath": "recoverOneJournal",
+          "callee": "recoverFinalizingIntent",
+          "evidenceId": "23ff24a04ecb3593f36244c2a1c8ef4743d87c44d6377e1484230d488514ffea",
+          "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "functionPath": "recoverOneJournal",
+          "callee": "recoverFinalizingIntent",
+          "evidenceId": "1a832603801cd7c0eaab8609e839055ca4370e37c23256fe393b8779167edceb",
+          "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "functionPath": "recoverOneJournal",
+          "callee": "recoverPreparingIntent",
+          "evidenceId": "c5b63f1acce3e3ebc22a002939121dbe0920768a3689bc7e651e36ac22f1b72f",
+          "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "functionPath": "recoverPendingToolboxPublications.<anonymous:1>",
+          "callee": "recoverOneJournal",
+          "evidenceId": "df3aee65058c90c8fef713c3a623309b3e4d6a9f958506095d8267e65b069d09",
+          "reason": "raw 恢复入口先验证 workerAuthority/authorization，再逐项验证完整 grant 与 snapshot；仅此互斥事务中的调用可以进入内部恢复。"
+        }
+      ],
+      "to": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication-dispatch.js",
+          "functionPath": "runWorkerJob.<anonymous:1>.<anonymous:4>",
+          "callee": "onWorkerExit",
+          "evidenceId": "ab2f86aeb298c450cbd7c00111eda42c2674625ec54750a7dd852fdae0544f5b",
+          "reason": "worker exit 事件的通知回调仅报告 jobId/op/code；它不发送 worker operation，不执行恢复。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication-worker.js",
+          "functionPath": null,
+          "callee": "require",
+          "evidenceId": "30bbe89cb848f9e356b9f721a92ac6ea3b811e15ac253a725bd485275c43c997",
+          "reason": "worker 的确切生产装配；恢复调用只在 execute-recovery 分支，并由 raw API 验证 workerAuthority 与授权凭证。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication-worker.js",
+          "functionPath": "runPublicationOperation",
+          "callee": "recoverPendingToolboxPublications",
+          "evidenceId": "f42081c25415b384de94863067e36ff933f869e962ddc980afb54ecab0e7c22e",
+          "reason": "execute-recovery 分支向真实 API 传入 workerAuthority/authorization；旧 recover 明确拒绝，授权合同由 G1 owner/producer 测试证明。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication-dispatch.js",
+          "functionPath": "createToolboxPublicationDispatcher.recoverWithinQueue",
+          "callee": "worker",
+          "evidenceId": "f727c0b4d0a7a324c461f89f6ac4f5183e97f792c3a837e59f660a31e620e76e",
+          "reason": "持有 FIFO 和 lease 的授权事务：发现、owner 全根授权后 seal 授权凭证，再发送 execute-recovery；准确调用指纹不得移动复用。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication-dispatch.js",
+          "functionPath": "runWorkerJob.<anonymous:1>",
+          "callee": "postMessage",
+          "evidenceId": "3420e9da5eca5d5ceaba4892b7f4b35ce02f1cac7bd0ae70071ebdefce14b5ad",
+          "reason": "仅传输内部 worker job；worker recovery 必须持有当前 workerKey 生成的凭证，调用位置不授予新恢复操作。G1 真 worker 授权和退出屏障测试覆盖该传输。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication-dispatch.js",
+          "functionPath": "createToolboxPublicationDispatcher.worker",
+          "callee": "runWorkerJob",
+          "evidenceId": "aee8b8ad15f8a3f7481631502b702e1f5ecdd726b301fb5ef96347109aab5fb6",
+          "reason": "dispatcher 私有 transport 向固定 worker 传递 op/payload 与 workerKey；恢复命令在 recoverWithinQueue 内先授权封签，底层 API 再校验一次性凭证，精确调用之外不得复用。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "functionPath": "recoverOneJournal",
+          "callee": "recoverPreparingIntent",
+          "evidenceId": "d3359118d9b5296f40e63216a98b2f0b5d655f5073bd6966bdb03f01f05c68fc",
+          "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "functionPath": "recoverOneJournal",
+          "callee": "recoverPreparingIntent",
+          "evidenceId": "d9ee5947fed2c2494f0227d9dcb4170adf5c84a58c3e0a40fcd5ee88466f4c66",
+          "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "functionPath": "recoverOneJournal",
+          "callee": "recoverFinalizingIntent",
+          "evidenceId": "23ff24a04ecb3593f36244c2a1c8ef4743d87c44d6377e1484230d488514ffea",
+          "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "functionPath": "recoverOneJournal",
+          "callee": "recoverFinalizingIntent",
+          "evidenceId": "1a832603801cd7c0eaab8609e839055ca4370e37c23256fe393b8779167edceb",
+          "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "functionPath": "recoverOneJournal",
+          "callee": "recoverPreparingIntent",
+          "evidenceId": "c5b63f1acce3e3ebc22a002939121dbe0920768a3689bc7e651e36ac22f1b72f",
+          "reason": "recoverOneJournal 中已核对 discovery/journal 状态后的内部阶段路由；外层入口仍须验证完整授权，新增或移动调用指纹必须重新核验。"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "functionPath": "recoverPendingToolboxPublications.<anonymous:1>",
+          "callee": "recoverOneJournal",
+          "evidenceId": "df3aee65058c90c8fef713c3a623309b3e4d6a9f958506095d8267e65b069d09",
+          "reason": "raw 恢复入口先验证 workerAuthority/authorization，再逐项验证完整 grant 与 snapshot；仅此互斥事务中的调用可以进入内部恢复。"
+        }
+      ],
+      "reason": "共享 Publisher 已有授权事务增加单独的技术内存配置实参；owner 授权、seal、journal 与真实退出责任不变，未增加恢复入口。"
     }
   ]
 }

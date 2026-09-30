@@ -1,5 +1,7 @@
 'use strict';
 
+const { sqliteCacheKiB, candidateWriterBudgets } = require('../background-execution/execution-memory-options');
+
 const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
@@ -9,11 +11,12 @@ const { CELL_CONTRACT_VERSION } = require('./import-adapter');
 const { RESULT_COLUMNS, NOTE_COLUMNS, RESULT_SCHEMA, NOTES_SCHEMA, PART_SCHEMA, COMPUTE_RULE_VERSION } = require('./result-schema');
 const { fail } = require('./contracts');
 
-function configure(db) {
+function configure(db, memoryConfig = null) {
   db.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA temp_store=FILE; PRAGMA cache_size=-16384');
+  if (memoryConfig) db.exec(`PRAGMA cache_size=-${sqliteCacheKiB(memoryConfig, memoryConfig.maxOpenConnections)}`);
 }
 function createResultSink({ directory, objectId, taskRunId, safePoint = () => {},
-  partTargetRows = PART_TARGET_ROWS, partTargetBytes = PART_TARGET_BYTES }) {
+  partTargetRows = PART_TARGET_ROWS, partTargetBytes = PART_TARGET_BYTES, memoryConfig = null }) {
   for (const limit of [partTargetRows, partTargetBytes]) if (!Number.isSafeInteger(limit) || limit < 1) fail('BIZOP_PART_TARGET_INVALID');
   const parts = []; let current = null; let noteCount = 0; let resultCount = 0;
   let transactions = 0;
@@ -45,12 +48,12 @@ function createResultSink({ directory, objectId, taskRunId, safePoint = () => {}
     const filename = path.join(directory, name);
     const db = new DatabaseSync(filename);
     try {
-      configure(db); db.exec(PART_SCHEMA); db.exec(partKind === 'RESULT' ? RESULT_SCHEMA : NOTES_SCHEMA);
+      configure(db, memoryConfig); db.exec(PART_SCHEMA); db.exec(partKind === 'RESULT' ? RESULT_SCHEMA : NOTES_SCHEMA);
       db.prepare('INSERT INTO part_meta VALUES (1,1,?,?,?,?,?,?,?,0)').run(objectId, partKind, number, taskRunId,
         CELL_CONTRACT_VERSION, COMPUTE_RULE_VERSION, 'STAGING');
       const table = partKind === 'RESULT' ? 'result_rows' : 'explanation_records';
       const fields = partKind === 'RESULT' ? RESULT_COLUMNS.length + 7 : NOTE_COLUMNS.length;
-      const writer = createSynchronousCandidateWriter({ db, insertSql: `INSERT INTO ${table} VALUES (${Array(fields).fill('?').join(',')})` });
+      const writer = createSynchronousCandidateWriter({ ...candidateWriterBudgets(memoryConfig), db, insertSql: `INSERT INTO ${table} VALUES (${Array(fields).fill('?').join(',')})` });
       const part = { name, rowCount: 0, partKind }; parts.push(part);
       current = { db, writer, part, filename };
     } catch (error) { db.close(); throw error; }

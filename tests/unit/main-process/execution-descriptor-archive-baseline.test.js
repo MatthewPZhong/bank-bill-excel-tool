@@ -41,12 +41,18 @@ const archivePolicies = createComposedTaskPolicyRegistry().list();
 const policies = archivePolicies;
 const policyByChannel = new Map(policies.map((policy) => [policy.channel, policy]));
 const baselineRecoverable = baseline.policies.filter((policy) => policy.taskKind !== 'exclude');
+const newPreparationPolicies = [
+  { batchPolicy: 'exclude', channel: 'toolbox:split:cancel-read', excludeReason: 'cancel-active-task', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'toolbox:split:read-values', excludeReason: 'preview-only', taskKind: 'exclude', workerContext: 'none' }
+];
 
 // 固定 fixture 与当前公开 API 分开读取；此测试不提供更新/重建 fixture 入口。
 test('Archive 固定基线逐 channel 保留全部 268 项、模块身份、file/no-file/exclude 和 hook 注册', () => {
   assert.equal(baseline.baselineCommit, '11086a3cbf632a30adbcfa796e4cd81810c5aef9');
   assert.equal(baseline.policies.length, 268);
-  assert.deepEqual(snapshotArchivePolicies(policies), baseline.policies);
+  const baselineChannels = new Set(baseline.policies.map((policy) => policy.channel));
+  assert.deepEqual(snapshotArchivePolicies(policies.filter((policy) => baselineChannels.has(policy.channel))), baseline.policies);
+  assert.deepEqual(snapshotArchivePolicies(policies.filter((policy) => !baselineChannels.has(policy.channel))), newPreparationPolicies);
   assert.deepEqual(SUPPORT_ACTION_POLICIES, baseline.supportActions);
   assert.deepEqual(
     sorted(FILE_ACTION_CHANNELS),
@@ -64,7 +70,7 @@ test('Archive 固定基线逐 channel 保留全部 268 项、模块身份、file
   );
   assert.deepEqual(
     sorted(Object.values(EXCLUDED_CHANNELS_BY_REASON).flat()),
-    sorted(baseline.policies.filter((policy) => policy.taskKind === 'exclude').map((policy) => policy.channel))
+    sorted([...baseline.policies.filter((policy) => policy.taskKind === 'exclude'), ...newPreparationPolicies].map((policy) => policy.channel))
   );
 });
 
@@ -211,7 +217,7 @@ test('公共 Archive registry 冻结自己的快照并隐藏可变 Map', () => {
   assert.equal(registry.policies, undefined);
   const copy = registry.list();
   copy.length = 0;
-  assert.equal(registry.list().length, 268);
+  assert.equal(registry.list().length, baseline.policies.length + newPreparationPolicies.length);
 });
 
 test('公共 Archive registry/common 的依赖闭包只含公共机制，没有领域或 composition 回边', () => {
