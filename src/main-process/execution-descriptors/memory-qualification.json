@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "status": "pending",
+  "inventoryComplete": false,
+  "platform": "win32",
+  "arch": "x64",
+  "electronVersion": null,
+  "profiles": [],
+  "reason": "Windows 512/768 MiB 真压力、完整应用载体覆盖与最终构建证据尚未验收"
+}

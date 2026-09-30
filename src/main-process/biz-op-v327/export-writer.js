@@ -4,8 +4,9 @@ const { withBoundedWorkbook } = require('../bounded-xlsx-writer');
 const { encodeExcelStXstring } = require('../../backend/xlsx/excel-text');
 const { fail } = require('./contracts');
 
-async function writeExportWorkbook({ filePath, spool, expected, safePoint }) {
+async function writeExportWorkbook({ filePath, spool, expected, safePoint, memoryConfig = null }) {
   return withBoundedWorkbook({ filePath, safePoint,
+    ...(memoryConfig ? { maxQueueBytes: memoryConfig.maxInFlightBytes, maxRowBytes: memoryConfig.maxSingleRecordBytes } : {}),
     compatibilityError: () => { fail('BIZOP_WRITER_COMPATIBILITY_REQUIRED'); } }, async (session) => {
     for (const page of expected.pages) {
       const sheet = session.addWorksheet(page.name);

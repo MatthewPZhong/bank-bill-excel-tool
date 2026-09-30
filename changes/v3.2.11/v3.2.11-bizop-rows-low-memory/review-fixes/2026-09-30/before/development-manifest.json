@@ -1,0 +1,641 @@
+{
+  "version": 2,
+  "date": "2026-09-30",
+  "recordedAt": "2026-09-29T17:05:34.630Z",
+  "branch": "v3.2.11-bizop-rows-low-memory",
+  "head": "18b82b4328cf5e00c1b2549d373a5b2f2677215c",
+  "committed": false,
+  "scope": "complete-local-implementation-and-validation; Windows acceptance and production qualification pending",
+  "sourceIdentity": {
+    "sourceTreeSha256": "b827ed57583c44a124a73d4f3108fd2f53bf2f64a57389184f1d9cff009633ea",
+    "dependencyLockSha256": "6360f29a82d5f4c1d1003d9e61e6a4db678f398aab5043c23c46371e2f215e65",
+    "appVersion": "3.2.10",
+    "platform": "darwin",
+    "arch": "arm64",
+    "nodeVersion": "25.8.0",
+    "electronVersion": null
+  },
+  "verificationSummary": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/local-gates-summary.json",
+  "productionQualification": "pending",
+  "fileCount": 123,
+  "manifestExcludedFromOwnDigest": true,
+  "aggregateMethod": "sha256 of UTF-8 JSON.stringify(files); files sorted by repository path",
+  "files": [
+    {
+      "path": "architecture/boundaries.json",
+      "bytes": 275758,
+      "sha256": "7d63e38cbbef132caf3ce69f6cc44fcd00cb221f96b3a4cba2a86c6916c709b6"
+    },
+    {
+      "path": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/baseline-evidence.md",
+      "bytes": 23558,
+      "sha256": "5ad8fde85e5868d8df0cdfcf442b71b86d4499352ad7d1fe4af186efd5906e27"
+    },
+    {
+      "path": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/carrier-inventory.json",
+      "bytes": 4600,
+      "sha256": "33d29aa2a1fff9b048a6ca9da77cdf74594021590aa76463a18a3d1e5b2cb8ca"
+    },
+    {
+      "path": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/implementation-notes.md",
+      "bytes": 27672,
+      "sha256": "add7dc882e658cff7555e7486620c84fc7fe7bf01144a66deda112832dce425c"
+    },
+    {
+      "path": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/local-capacity-attempt-1-failed.json",
+      "bytes": 2614,
+      "sha256": "0ddde6029a6b9dc1bdf242e0a22a2726bb5c2de90b9c78a4cfc53ccf9b1d67e0"
+    },
+    {
+      "path": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/local-capacity-attempt-2-failed.json",
+      "bytes": 171205,
+      "sha256": "42289e9f74f0e94458d3e3d63dd38046bf09933b6f0c6acd86682a8981057aec"
+    },
+    {
+      "path": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/local-capacity-attempt-3-passed.json",
+      "bytes": 1647777,
+      "sha256": "d3b88d052ad146eea341bfa8184533fc68d637a5b3bb965c44ef8a651cc0de01"
+    },
+    {
+      "path": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/local-capacity-attempt-4-passed.json",
+      "bytes": 607420,
+      "sha256": "748da660e5e5fbe8ca24b365985fdbcfa87b50ef11c93cdf386a5aa05bbb3af5"
+    },
+    {
+      "path": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/local-capacity-probe.json",
+      "bytes": 1205959,
+      "sha256": "1aff2128ecd563a63900722b07d97b05e49e28bd8f8d7e651836bfae79ca14e5"
+    },
+    {
+      "path": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/local-gates-summary.json",
+      "bytes": 15585,
+      "sha256": "379ce6eebee799597abb785cb4b6582bd04403844987c107b80dca7836063b37"
+    },
+    {
+      "path": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/local-verification.md",
+      "bytes": 10228,
+      "sha256": "a8310bc6b7965eac2d786667154e2030ce07364e40404de6e501ae0f47fcc9c9"
+    },
+    {
+      "path": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/prepare-scan-probe.json",
+      "bytes": 14546,
+      "sha256": "ec39a8f6801a1b1274435840feaf34e99f04ce0bed6e4ccaa99eac1e03a68d5d"
+    },
+    {
+      "path": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/resource-entry-inventory.md",
+      "bytes": 4918,
+      "sha256": "0a357fbb1f11722b34941c91fdafaeece9d51d05231c853c1c6250a0c2d41f82"
+    },
+    {
+      "path": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/spec.md",
+      "bytes": 21871,
+      "sha256": "658729293a6664570c8e65c8864a4e644cd16fe49ee7968786515df31cb738d4"
+    },
+    {
+      "path": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/techdoc.md",
+      "bytes": 62033,
+      "sha256": "d8b75e87e904b00a57b5a4f20e4dbb789b92d4fac4bf6402019f9dc6202f49c1"
+    },
+    {
+      "path": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/windows-acceptance.md",
+      "bytes": 5445,
+      "sha256": "ac2e0c0012f74bcdd85fcffd7c17ceaee9178fc4c3a831960e21e90b062b26e6"
+    },
+    {
+      "path": "package.json",
+      "bytes": 29030,
+      "sha256": "c1a7e06e493e383d119fd4c2c2ca0d6c6683dd706a1e7d397ef62618529442da"
+    },
+    {
+      "path": "rules/integration-test-policy.md",
+      "bytes": 10231,
+      "sha256": "9994fab72d24ba736d760071181000033e9e3be9c92c98e5b9573f1122da0ac6"
+    },
+    {
+      "path": "scripts/integration/toolbox-low-memory-complete.js",
+      "bytes": 896,
+      "sha256": "0ba75219ccc00e2e170c6f71b8f9477f9860e2dd92cb7890836965af9b4fbbdb"
+    },
+    {
+      "path": "scripts/integration/toolbox-low-memory-foundation.js",
+      "bytes": 7493,
+      "sha256": "18ebcb604cc5d7deb5d7b245e40b5aca631a0aa9f35a9f692493eb4fd0acc842"
+    },
+    {
+      "path": "scripts/integration/toolbox-row-split-admission.js",
+      "bytes": 11855,
+      "sha256": "2e78965b4fe847ba82446174c306aac6bf1444f402e87c073248496d71290a88"
+    },
+    {
+      "path": "scripts/integration/toolbox-row-split-archive-delete.js",
+      "bytes": 13895,
+      "sha256": "f070bdf8776ff13dbdcb99946da5827fca44ac5ab3f11b945a693d777025e1d5"
+    },
+    {
+      "path": "scripts/integration/toolbox-split-csv-scope.js",
+      "bytes": 2509,
+      "sha256": "977b84024a088713b050524f6ea001418b55c228a793b38b51667d2025bf2b47"
+    },
+    {
+      "path": "scripts/lib/low-memory-scenario.js",
+      "bytes": 11230,
+      "sha256": "0e55ce8c6e84a5be4a491b1b9ada46be70323eb3b805a3f49e9654efa0d9185d"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/fixtures/toolbox.js",
+      "bytes": 26484,
+      "sha256": "b4885102ce69f7933ae060f851af34d03b907d835d354e9185b9496debd51263"
+    },
+    {
+      "path": "scripts/verify-low-memory-capacity.js",
+      "bytes": 4541,
+      "sha256": "e199605c91a62bd29aab8a7c3491b3fce7050788feb04130b13434a0ff7f47e4"
+    },
+    {
+      "path": "scripts/verify-low-memory-workflows.js",
+      "bytes": 8333,
+      "sha256": "d35fedee7617309f5156083ee1b3d88396c5bbbd36541330dd8407fae1557096"
+    },
+    {
+      "path": "src/backend/big-table-import/pipeline.js",
+      "bytes": 13600,
+      "sha256": "f304078d1f7607d3dc85b8a605af77a6fdad8506ecb82ac294df60b8aec26d0e"
+    },
+    {
+      "path": "src/backend/file-service/readers.js",
+      "bytes": 20439,
+      "sha256": "1dd968a712f4a6a8e3aa542773ad8ddf2443f716937fc1d290e245228f44f761"
+    },
+    {
+      "path": "src/backend/toolbox-format/xlsx-pass.js",
+      "bytes": 12565,
+      "sha256": "170a5b4bdfe8b7be81605db9e1a53ae9db73f99f200e4c320ba70225532cf175"
+    },
+    {
+      "path": "src/backend/toolbox-xlsx-stream/large-split-worker.js",
+      "bytes": 13610,
+      "sha256": "52e4bf07f41523f227c63573fab24795d3f13b9b3b817c5ccee7e7c9264a0383"
+    },
+    {
+      "path": "src/backend/xlsx/rich-workbook.js",
+      "bytes": 6272,
+      "sha256": "942072469fc6c598b99f5ab8175fc3052431400fcf50f2ef990dbadc9609d1fb"
+    },
+    {
+      "path": "src/backend/xlsx/xlsx-sheet-scanner.js",
+      "bytes": 47162,
+      "sha256": "44262285fcb836a412bc1f9191e8bae684b644e5d02dfbd6d3a0a45d993eeffc"
+    },
+    {
+      "path": "src/backend/xlsx/zip-lifecycle.js",
+      "bytes": 608,
+      "sha256": "f05688642b8fe7995c5a148c4d4a9f27dca093879ba5e6f1148802aaade24fd6"
+    },
+    {
+      "path": "src/main-process/acquiring-bill-currency-session.js",
+      "bytes": 72418,
+      "sha256": "03524770c09dd04b64e33c2a2878e23b5553db55767de687fea9734bc2457b9d"
+    },
+    {
+      "path": "src/main-process/archive-center/task-policy-registry.js",
+      "bytes": 20099,
+      "sha256": "22350ce8edf83aa1596b3f7ff2467433844c93a4c5747d24f7a8e9c6d8e2e764"
+    },
+    {
+      "path": "src/main-process/background-execution/adapters/utility-process-adapter.js",
+      "bytes": 6277,
+      "sha256": "d8aaaced19ffb201678860409740be43f431b1eea163cc0fed29712129abad48"
+    },
+    {
+      "path": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+      "bytes": 11562,
+      "sha256": "eb771767a987c848b6cb584b195d0327ea392dae3a810939c607579734c68854"
+    },
+    {
+      "path": "src/main-process/background-execution/admission-only-owner.js",
+      "bytes": 5293,
+      "sha256": "fa9dcbb7e40a973abe4704064460533bda582a8a506b0a6c33414639c315f10f"
+    },
+    {
+      "path": "src/main-process/background-execution/canary/durable-recovery.js",
+      "bytes": 10029,
+      "sha256": "bd1a84cf3ee94ea6547a2f0640075c8547dde231baa1c8371cc2a527fd53d02e"
+    },
+    {
+      "path": "src/main-process/background-execution/execution-memory-config.js",
+      "bytes": 3833,
+      "sha256": "8d83f85d16642567e1f9baa9edf2bbc2d92e423d557441c6da43dc6a8b195bc0"
+    },
+    {
+      "path": "src/main-process/background-execution/execution-memory-options.js",
+      "bytes": 3212,
+      "sha256": "720c1c737af978978b0bd0db7b3c31556ccae4c1bd14cf664bccbd36c0c354f8"
+    },
+    {
+      "path": "src/main-process/background-execution/memory-activity.js",
+      "bytes": 3869,
+      "sha256": "4e6e29b740bf6fdb951542f3fe64cdc6c8674252882811b4518bca603828553d"
+    },
+    {
+      "path": "src/main-process/background-execution/memory-admission.js",
+      "bytes": 6606,
+      "sha256": "a3fed53d8981df988fb6a730a4eeec7c2ed46cb78a0649b9827a2b40e9f53ea7"
+    },
+    {
+      "path": "src/main-process/background-execution/memory-telemetry.js",
+      "bytes": 1314,
+      "sha256": "c96c49d6a6ba825d8f512ed8006439c0cf769f37b1d54a9cbc74f53f8380d9b4"
+    },
+    {
+      "path": "src/main-process/background-execution/resource-budget.js",
+      "bytes": 3021,
+      "sha256": "85df4b64fbe5c223af8521a19d0b006e793a11dcff0c40d7e032010cacf57972"
+    },
+    {
+      "path": "src/main-process/background-execution/resource-governor.js",
+      "bytes": 37046,
+      "sha256": "a72ee6b45eb73d8d033c074e8b6075f6581d200f769a3b695a13c6ea36d1c1a2"
+    },
+    {
+      "path": "src/main-process/background-execution/resource-lease.js",
+      "bytes": 7256,
+      "sha256": "1a66af339c4bb82d44850b52fdb0dacf10b42faf841b4f642f969852984cf802"
+    },
+    {
+      "path": "src/main-process/background-execution/runtime.js",
+      "bytes": 17710,
+      "sha256": "df0a3f34624c0abdfbfb3fcb4fb4e4623de45b8c27d90aab8cf729af172f1de6"
+    },
+    {
+      "path": "src/main-process/background-execution/supervisor.js",
+      "bytes": 92245,
+      "sha256": "f77247859b54643280450931caba50a24edee1bb9d437e9c5dfe6eb2377994e6"
+    },
+    {
+      "path": "src/main-process/bank-bu-worker/dual-parser-dispatch.js",
+      "bytes": 17097,
+      "sha256": "a543995ea26f96837b1be205f629f07f715dc4833aeae5718303d5937fe71da9"
+    },
+    {
+      "path": "src/main-process/big-table-import-dispatch.js",
+      "bytes": 10811,
+      "sha256": "ef02791171654362fef19d673bdc27656e7d792b20397e6ad79d50704a7dd5c4"
+    },
+    {
+      "path": "src/main-process/biz-op-recon-session.js",
+      "bytes": 57509,
+      "sha256": "dfd0310ef5b29c620309ad3d29cbbb7e5206c7df377b965c12d0622930eb3249"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/candidate-router.js",
+      "bytes": 9991,
+      "sha256": "ba2c2cefda2d48780c7400c09985bdb07bbc7a05b6a4186a64fcd2b80d9ac2eb"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/compute-pipeline.js",
+      "bytes": 18175,
+      "sha256": "caa3dd780786d0854b43e99d7fe0130f07e6e8296b33a0fbe0a9a807088008a7"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/delete-pipeline.js",
+      "bytes": 2037,
+      "sha256": "3e67f246dc27856eea7f7434660462a164f8950de5b8375813fc08ca32b581ea"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/export-pipeline.js",
+      "bytes": 2729,
+      "sha256": "a29a49be098c395b3e34283c0ad3d14f23dfe493d01c1949efd0764ae12c02d8"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/export-publication.js",
+      "bytes": 17692,
+      "sha256": "fe7403806b5359326dafab4dc2f802a484bd092b4b0101c671d84e5a4129e8bf"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/export-source.js",
+      "bytes": 10008,
+      "sha256": "bc9b7497d6a1b8b947a276c96bc392c2be4623142dfc80065aa47d42bec1aeb1"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/export-spool.js",
+      "bytes": 5524,
+      "sha256": "da12da83fb7e2eeee913f358d218f364e2edbf1f252ad07bd96860687c8b81c1"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/export-validator.js",
+      "bytes": 5016,
+      "sha256": "c5629216740a7456a25685917c40004e403a1e023ca26dd0383d86d8e828b83d"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/export-writer.js",
+      "bytes": 1421,
+      "sha256": "c58b9ea1b2bdfe3b1b58145c624f261bd0fe72097b5c7b77abd5532aa266090a"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/import-pipeline.js",
+      "bytes": 11535,
+      "sha256": "55a223b28db203382ad30f1889f875e7fc23cb904ea02769836c08421116e9b9"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/phase-admission.js",
+      "bytes": 2802,
+      "sha256": "e3e8e926cccbea041ee448cdd6216adf4ff346dac88dc425407e18d23ddfa331"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/publication-owner.js",
+      "bytes": 11049,
+      "sha256": "6b93be46e17134a1114d685aae0f43dfcf2c8ef3e9b2f4d972398ad13d535708"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/result-sink.js",
+      "bytes": 5752,
+      "sha256": "f9d11ad3debaeed4e8ca1cb82c84ca3e63b3c0b505312dd1af516b078eb5db96"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/upgrade-legacy.js",
+      "bytes": 7279,
+      "sha256": "e0a6c8ea80422d9992f1a479d4cf4267cd49b01b3e47c77fd53497aa217399db"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/upgrade-pipeline.js",
+      "bytes": 1171,
+      "sha256": "c944cd39e0b581e99ee119f9b4a6d710d4fee5c56aaea00f7bed76f48b9001a6"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/worker-entry.js",
+      "bytes": 7552,
+      "sha256": "6ee347e0aa53c1c14e2343c8361e5696207011f7baff5bea80b52ee598393505"
+    },
+    {
+      "path": "src/main-process/bounded-workbook-streams.js",
+      "bytes": 3192,
+      "sha256": "5dee18a58a6fb7c5a212f76683b090d64e3b49a4f9246ed6ac513925c73f94c0"
+    },
+    {
+      "path": "src/main-process/bounded-xlsx-writer.js",
+      "bytes": 7872,
+      "sha256": "463e4fe9aa598618db937d3c958dd069b7f05c66b67eaf238b5100962dc38f5d"
+    },
+    {
+      "path": "src/main-process/duplicate-inbound-match/paired-parser-dispatch.js",
+      "bytes": 17354,
+      "sha256": "d5a28e1933184e9c6b7667f5bdf13db7606c0d9ef63c05e37ae574878874d468"
+    },
+    {
+      "path": "src/main-process/execution-descriptors/composition.js",
+      "bytes": 13549,
+      "sha256": "d816d1348ad6fe6f61ab7028445a2f2cd41375badc1dea681541766522b1e5c3"
+    },
+    {
+      "path": "src/main-process/execution-descriptors/legacy-task-policies.js",
+      "bytes": 15928,
+      "sha256": "9703f8cc3e9d6f1f2d7962abd9f0ffd540ec4276e3718c2cf5f59c33e3279221"
+    },
+    {
+      "path": "src/main-process/execution-descriptors/memory-evidence.js",
+      "bytes": 3754,
+      "sha256": "c13c0ba8aa1c6cf318a25fdba7ea42cd72925a35ff001bd2025f602f8340c880"
+    },
+    {
+      "path": "src/main-process/execution-descriptors/memory-profiles.js",
+      "bytes": 6235,
+      "sha256": "85d30b79e6595a3b1fe34b296704c04dfce0756d4ed15e532f4d0b7e2625e766"
+    },
+    {
+      "path": "src/main-process/execution-descriptors/memory-qualification.json",
+      "bytes": 268,
+      "sha256": "e618f1721f0489449552a3d243787e164dd60d5699e86b1e6834d3ce0c807ae3"
+    },
+    {
+      "path": "src/main-process/execution-descriptors/publication-memory.js",
+      "bytes": 990,
+      "sha256": "e97899e9cbb28d620bed2b9e44036ce24875876130c12256eb80cf15b6753857"
+    },
+    {
+      "path": "src/main-process/memory-activity.js",
+      "bytes": 1767,
+      "sha256": "ce63673f074d52d3ea93737004a54f2137889624160972763f6c81a99bcaa0fd"
+    },
+    {
+      "path": "src/main-process/pending-session.js",
+      "bytes": 21383,
+      "sha256": "6e25e24e014d85ef025490d0908a2647e34ac4073fe9c21ccfeb63ac20df15dc"
+    },
+    {
+      "path": "src/main-process/position-reconciliation/import-dispatch.js",
+      "bytes": 14712,
+      "sha256": "fd4be5ec130cc18d4b2e665a9c2a1ec83aa696ce018e1b84463d7d9a10b96e91"
+    },
+    {
+      "path": "src/main-process/pre-fund-reconciliation/mpt-import/managed-import.js",
+      "bytes": 21056,
+      "sha256": "9a30233957f73bc7054f049a3f819cd810af7433bf5545c6a70501abbbd2e603"
+    },
+    {
+      "path": "src/main-process/publication-recovery/coordinator.js",
+      "bytes": 12154,
+      "sha256": "c0d9b05cf3856c0af848e192131d298fff9e8af434dfb879116da40b93ab98dd"
+    },
+    {
+      "path": "src/main-process/run-check-multiworker.js",
+      "bytes": 25676,
+      "sha256": "7f857e1b74a1efab65b62c55fcb9015f17c2df844f9dcc9eb4fb78af23f96437"
+    },
+    {
+      "path": "src/main-process/run-check-worker-pool.js",
+      "bytes": 26391,
+      "sha256": "e8cc8c5272e1e3cb993e12d43fa7ac149728dd5b0c54f1c2e704062654ccef48"
+    },
+    {
+      "path": "src/main-process/toolbox-background/route-scanner-core.js",
+      "bytes": 3259,
+      "sha256": "97b86cdd5070bb1ce58782402db3ac4ad239ca7efc9cf49da5b5433cc40baea1"
+    },
+    {
+      "path": "src/main-process/toolbox-background/worker-host.js",
+      "bytes": 3120,
+      "sha256": "c45803a0fa17b7fbb9c6d241120f34da42e62ed1bfd9575a061073eabaa19006"
+    },
+    {
+      "path": "src/main-process/toolbox-format-io.js",
+      "bytes": 11737,
+      "sha256": "91348b50a93b1e320714ac9c15b9670b250c4716f0d199c0a504f3642db2ec89"
+    },
+    {
+      "path": "src/main-process/toolbox-large-split-dispatch.js",
+      "bytes": 8788,
+      "sha256": "84652c6c707580744fb4f7f79b897b5e1c1e4e5f35c41fbee44e60392a4451a2"
+    },
+    {
+      "path": "src/main-process/toolbox-output-publication-dispatch.js",
+      "bytes": 15256,
+      "sha256": "217ffffb666cbeb693b53201150744960051014c2d13106c0d89d1a28c0a2239"
+    },
+    {
+      "path": "src/main-process/toolbox-output-publication-worker.js",
+      "bytes": 3885,
+      "sha256": "d5bcf9b0faab6e22da08ecb51eceb9bc8100e13fadc9e3d58536e38ab6af7f16"
+    },
+    {
+      "path": "src/main-process/toolbox-output-writer.js",
+      "bytes": 66339,
+      "sha256": "3c5767da7441c8d90d0175cd92c8ffb82f6a8caa30ac8a0b093723d13deca18b"
+    },
+    {
+      "path": "src/main-process/toolbox-row-split/cache.js",
+      "bytes": 12120,
+      "sha256": "b6194f7941772fa8b68d75d074a637cf86dea56871531f3f13e4766d183c3fa8"
+    },
+    {
+      "path": "src/main-process/toolbox-row-split/executor.js",
+      "bytes": 5726,
+      "sha256": "c94d0e8396105bc1176af19ab0889fc3c1df1ecdf8dcf4c225580b7a8338e736"
+    },
+    {
+      "path": "src/main-process/toolbox-row-split/service.js",
+      "bytes": 12431,
+      "sha256": "c26595135f4a4ca396a738ed1d0fbd99c5334b4960719471f941a0619d2b4213"
+    },
+    {
+      "path": "src/main-process/toolbox-split-read-owner.js",
+      "bytes": 9078,
+      "sha256": "6137050b065a8eb9b63df21253cbb49a81ae1c0956e4abce1bdf0439429a83b0"
+    },
+    {
+      "path": "src/main-process/toolbox-split-scan.js",
+      "bytes": 2656,
+      "sha256": "6f2ff946256080f6a342c4970e051bf2d46cc0d0af7dcfbbeac6dcbd31b61426"
+    },
+    {
+      "path": "src/main-process/vcc-financial-op-output/writer-coordinator.js",
+      "bytes": 11856,
+      "sha256": "ab1513f815da3162c0dc67682dca0ec9e9c0b99a99ff6ada72a175666caa6d40"
+    },
+    {
+      "path": "src/main-process/vcc-financial-op-service.js",
+      "bytes": 48692,
+      "sha256": "b7aa819883a2be0b5ad8212d44fa94cbbe269721cb26e07e31ba31335d690055"
+    },
+    {
+      "path": "src/main-process/vcc-financial-op-storage-migration.js",
+      "bytes": 12631,
+      "sha256": "527dbaa23c27bf8313ef76694d3eb1206921505ca3a974091e97219617d6a83a"
+    },
+    {
+      "path": "src/main-process/vcc-op-calc/parser-pipeline.js",
+      "bytes": 7211,
+      "sha256": "e35f21bf394bcdac6e04c2678d3ce4ebd8cd88c694edf4e00b1852c473be6a36"
+    },
+    {
+      "path": "src/main.js",
+      "bytes": 956710,
+      "sha256": "cd2862cdb00323a8c0583b571f952e96d26a37edfc0af6e56578296a80b83d95"
+    },
+    {
+      "path": "src/preload.js",
+      "bytes": 46876,
+      "sha256": "4b3c467c013573a940bcf6dadda041008e564c3965bf239f4567e160b793b898"
+    },
+    {
+      "path": "src/renderer/dialogs/toolbox.js",
+      "bytes": 55217,
+      "sha256": "071c4a6f3fade2ffd199a397d20a1f270ba8e0eb23ec562f8e3101f35dd87aae"
+    },
+    {
+      "path": "tests/helpers/biz-op-v327-host.js",
+      "bytes": 6579,
+      "sha256": "ed747f4c4a577c47d9d159cfaaa9cb696a2675a454c5e8bea41bb69c9996f4cb"
+    },
+    {
+      "path": "tests/helpers/publication-authority.js",
+      "bytes": 4859,
+      "sha256": "0abf52f789a864d972be1d04cfda633fb719ec7a8a7ab61a74ac70c729895392"
+    },
+    {
+      "path": "tests/unit/architecture/low-memory-core.test.js",
+      "bytes": 1969,
+      "sha256": "a0b7f69f052bd3257e9291803d22f6172fa6a9759799f8f83c574e63f89fd9b3"
+    },
+    {
+      "path": "tests/unit/architecture/memory-carriers.test.js",
+      "bytes": 2346,
+      "sha256": "56028734b02b406c795b497b9d4a6b3b103528836cf9a9a5a8f13fbac5c7df19"
+    },
+    {
+      "path": "tests/unit/backend/file-service/readers-csv-memory.test.js",
+      "bytes": 1366,
+      "sha256": "26294ebbb51b41dbf6140d3064f4a5033883cbcb95a8efc1b9764b907263a655"
+    },
+    {
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "bytes": 30972,
+      "sha256": "516fa5b8acaceab1be5da8f594895871444ca76e239cb7100ae0e528852e7db8"
+    },
+    {
+      "path": "tests/unit/main-process/background-execution/admission-only-owner.test.js",
+      "bytes": 5213,
+      "sha256": "d9bf04cbaf687d1147c22fa1aa7023daeaecf2be7278348989fa86c082438a9b"
+    },
+    {
+      "path": "tests/unit/main-process/background-execution/memory-admission.test.js",
+      "bytes": 14601,
+      "sha256": "8fbc7db5a81f99e40ef46aa94d257ce73425199994197dcbc43ff9868e74589a"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v327-low-memory.test.js",
+      "bytes": 6338,
+      "sha256": "76933a7c316aa6a86eb6bad2c3aa71bbbef32c317dc062f98d635719957a9f39"
+    },
+    {
+      "path": "tests/unit/main-process/bounded-workbook-streams.test.js",
+      "bytes": 2242,
+      "sha256": "f6c75c4c648821acf7a220c638ea0cd8b43dd5a69f250c9b2d643ccf5af9f595"
+    },
+    {
+      "path": "tests/unit/main-process/execution-descriptor-archive-baseline.test.js",
+      "bytes": 11858,
+      "sha256": "755b3c779ff41438ed3daa4fc90bed9c8e3dcfc1d9f35cc66bf706ce0bc99205"
+    },
+    {
+      "path": "tests/unit/main-process/memory-activity.test.js",
+      "bytes": 4989,
+      "sha256": "82072c4101aaeb64315045bdfd250f45f4e1226ef5098afee416f42e9b351136"
+    },
+    {
+      "path": "tests/unit/main-process/memory-evidence.test.js",
+      "bytes": 4773,
+      "sha256": "7e42b490d84b1e288869ce5ceae1ba1f0f069786fe2a800ca532913d50d96361"
+    },
+    {
+      "path": "tests/unit/main-process/toolbox-background-generation.test.js",
+      "bytes": 36493,
+      "sha256": "8e8dc728891d763431df31a5be6d693c0762f28a1cd66150a1cb3fc263fa8f85"
+    },
+    {
+      "path": "tests/unit/main-process/toolbox-large-split-dispatch.test.js",
+      "bytes": 15708,
+      "sha256": "5724e8eab7baeb840de77b750eae9cfa2d31290b5951937aef7e71a61feab178"
+    },
+    {
+      "path": "tests/unit/main-process/toolbox-low-memory-reader.test.js",
+      "bytes": 6674,
+      "sha256": "d45612d8d5fa5e2e5b2405baa2e3b2e3bc05cf04ca31bf9f573cdbfe80dbcd42"
+    },
+    {
+      "path": "tests/unit/main-process/toolbox-row-split.test.js",
+      "bytes": 27579,
+      "sha256": "f6440878120875c23cebcc5fb2c2ac987c9704e940c6f069c5a99e94351758f6"
+    },
+    {
+      "path": "tests/unit/main-process/toolbox-split-read-owner.test.js",
+      "bytes": 4821,
+      "sha256": "3bb27e460921ae8ff15542a56fae16648f6ca76ef200f617219bdf823de01b1c"
+    },
+    {
+      "path": "tests/unit/renderer-vcc-financial-op.test.js",
+      "bytes": 70632,
+      "sha256": "8c0461050f35aa223bee3a87ca8f7d72f0df10f6b72294448001f22ec98001a4"
+    }
+  ],
+  "aggregateSha256": "887af92f44c24693118e335251553c87e63ca4db9aec135ae7206264ffeadd4b"
+}

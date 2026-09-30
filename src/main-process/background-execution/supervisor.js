@@ -1567,7 +1567,16 @@ function createExecutionSupervisor(options = {}) {
       const required = includeBase
         ? checkedAdd(policy.resources.base, record.phaseResources, 'simple admission resources')
         : record.phaseResources;
-      if (!fitsWithin(required, governorSnapshot.budgets)) {
+      if (typeof resourceGovernor.assertSimpleJobFits === 'function') {
+        try {
+          resourceGovernor.assertSimpleJobFits(admissionRequest(record.phaseResources),
+            includeBase ? policy.resources.base : { cpuSlots: 0, workerThreadSlots: 0, utilityProcessSlots: 0, ioHeavySlots: 0, memoryBytes: 0 },
+            record.phaseResources);
+        } catch (error) {
+          throw describeAdmissionFailure(error, required, includeBase ? 'base-and-phase' : 'phase',
+            'total-budget-insufficient', governorSnapshot);
+        }
+      } else if (!fitsWithin(required, governorSnapshot.budgets)) {
         throw describeAdmissionFailure(new SupervisorError(
           'RESOURCE_BUDGET_UNAVAILABLE',
           `Resource budget cannot admit ${policy.resources.profile}`
@@ -1644,6 +1653,7 @@ function createExecutionSupervisor(options = {}) {
         required = record.phaseResources;
         requestedLease = 'phase';
         const phaseLease = await resourceGovernor.acquirePhaseLease(admissionRequest(required));
+        record.memoryConfig = phaseLease.memoryConfig || null;
         return retainGrantedLease(phaseLease);
       } catch (error) {
         if (error && ['ADMISSION_TIMEOUT', 'RESOURCE_BUDGET_UNAVAILABLE'].includes(error.code)) {
@@ -1773,6 +1783,7 @@ function createExecutionSupervisor(options = {}) {
           record.carrierCreationAttempted = true;
           candidate = resolved.adapter.start({
             entry: record.entry,
+            memoryConfig: record.memoryConfig || null,
             policy,
             topology: record.topology,
             ...callbacks

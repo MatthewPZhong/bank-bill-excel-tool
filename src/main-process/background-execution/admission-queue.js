@@ -51,23 +51,20 @@ function createAdmissionQueue(options = {}) {
     return Math.min(PRIORITIES.length - 1, entry.basePriority + promotions);
   }
 
-  function selectHead() {
+  function selectHead(deferred) {
     const timestamp = now();
-    let selected = null;
-    for (const entry of entries.values()) {
-      if (entry.state !== 'queued') continue;
-      if (!selected) {
-        selected = entry;
-        continue;
-      }
-      const candidatePriority = effectivePriority(entry, timestamp);
-      const selectedPriority = effectivePriority(selected, timestamp);
-      if (candidatePriority > selectedPriority ||
-          (candidatePriority === selectedPriority && entry.sequence < selected.sequence)) {
-        selected = entry;
-      }
-    }
-    return selected;
+    const ordered = [...entries.values()].filter((entry) => entry.state === 'queued')
+      .sort((left, right) => effectivePriority(right, timestamp) - effectivePriority(left, timestamp) ||
+        left.sequence - right.sequence);
+    return ordered.find((entry, index) => {
+      if (deferred.has(entry)) return false;
+      if (index === 0) return true;
+      // 仅允许解决队首依赖的 continuation 先执行。中间请求本就等待队首，
+      // 不能再让它们阻止解除依赖；普通请求仍不能越过队首。
+      if (!deferred.has(ordered[0]) || typeof options.canBypass !== 'function') return false;
+      try { return options.canBypass(entry.payload, ordered[0].payload) === true; }
+      catch (_error) { return false; }
+    });
   }
 
   function detach(entry) {
@@ -141,10 +138,11 @@ function createAdmissionQueue(options = {}) {
     expireDueEntries(now());
     if (typeof drainCallback !== 'function') return;
     draining = true;
+    const deferred = new Set();
     try {
       while (entries.size > 0) {
         expireDueEntries(now());
-        const entry = selectHead();
+        const entry = selectHead(deferred);
         if (!entry) break;
         if (entry.deadlineAt !== Infinity && now() >= entry.deadlineAt) continue;
         entry.state = 'executing';
@@ -181,9 +179,11 @@ function createAdmissionQueue(options = {}) {
             ));
             continue;
           }
-          break;
+          deferred.add(entry);
+          continue;
         }
         settle(entry, 'resolve', result);
+        deferred.clear();
       }
     } finally {
       draining = false;

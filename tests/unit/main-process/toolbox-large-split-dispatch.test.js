@@ -144,6 +144,39 @@ test.describe('T4 toolbox-large-split-dispatch（桩 worker 协议）', () => {
       /exact-7/
     );
   });
+
+  test('A8. 业务结果等待真实退出，closed 独立返回退出事实', async () => {
+    __test_only_set_worker_script__(STUB_DONE);
+    const job = dispatchLargeSplit({ op: 'scanFields', filePath: '/fake/x.xlsx' });
+    let exited = false;
+    job.closed.then(() => { exited = true; });
+    await job.promise;
+    assert.equal(exited, true);
+    const fact = await job.closed;
+    assert.equal(fact.spawned, true);
+    assert.ok(Number.isInteger(fact.exitCode));
+  });
+
+  test('A9. 消息复制失败也等待 worker 退出，不泄漏载体', async () => {
+    __test_only_set_worker_script__(STUB_DONE);
+    const job = dispatchLargeSplit({ op: 'scanFields', filePath: '/fake/x.xlsx', values: () => {} });
+    let exited = false;
+    job.closed.then(() => { exited = true; });
+    await assert.rejects(job.promise, { name: 'DataCloneError' });
+    assert.equal(exited, true);
+    assert.equal((await job.closed).spawned, true);
+  });
+
+  test('A10. 创建失败和异常 exit 均有可等待的关闭事实', async () => {
+    __test_only_set_worker_script__('invalid-relative-worker-entry');
+    const failed = dispatchLargeSplit({ op: 'scanFields', filePath: '/fake/x.xlsx' });
+    await assert.rejects(failed.promise, { code: 'ERR_WORKER_PATH' });
+    assert.deepEqual(await failed.closed, { spawned: false, exitCode: null });
+    __test_only_set_worker_script__(STUB_EXIT);
+    const crashed = dispatchLargeSplit({ op: 'scanFields', filePath: '/fake/x.xlsx' });
+    await assert.rejects(crashed.promise, /异常退出/);
+    assert.deepEqual(await crashed.closed, { spawned: true, exitCode: 1 });
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────

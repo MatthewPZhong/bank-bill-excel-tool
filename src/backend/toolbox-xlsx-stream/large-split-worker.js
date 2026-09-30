@@ -30,6 +30,9 @@
 'use strict';
 
 const { parentPort, isMainThread } = require('node:worker_threads');
+const { scanSplitMetadata, scanSplitFieldValues } = require('../../main-process/toolbox-split-scan');
+const { validateExecutionMemoryConfig } = require('../../main-process/background-execution/execution-memory-config');
+const { toolboxReaderOptions, checkExecutionMemory } = require('../../main-process/background-execution/execution-memory-options');
 const {
   freezeWorkerBatchContext
 } = require('../../main-process/archive-center/worker-batch-context');
@@ -181,7 +184,6 @@ if (!isMainThread && parentPort) {
     }
 
     if (msg.type !== 'run') return;
-    freezeWorkerBatchContext(msg.batchContext, { required: msg.op !== 'scanFields' });
 
     const { jobId, op, filePath, field, values, savePath, groups } = msg;
     activeJobId = jobId;
@@ -196,11 +198,24 @@ if (!isMainThread && parentPort) {
     });
 
     try {
+      const scanOnly = ['scanFields', 'scanMetadata', 'scanValues'].includes(op);
+      freezeWorkerBatchContext(msg.batchContext, { required: !scanOnly });
+      const memoryConfig = msg.executionMemoryConfig ? validateExecutionMemoryConfig(msg.executionMemoryConfig) : null;
       // 🔴 sharedStrings 护栏：在调拆分作业之前先查（超阈值不进解析）。
       await assertSharedStringsUnderLimit(filePath);
 
       let result;
-      if (op === 'scanFields') {
+      if (op === 'scanMetadata' || op === 'scanValues') {
+        const cancelToken = { get cancelled() {
+          checkExecutionMemory(memoryConfig);
+          return activeCancelToken.cancelled;
+        } };
+        const options = { cancelToken, readerOptions: toolboxReaderOptions(memoryConfig, msg.privateDirectory),
+          maxValues: msg.maxValues, maxValueBytes: msg.maxValueBytes };
+        result = op === 'scanMetadata'
+          ? await scanSplitMetadata(filePath, options)
+          : await scanSplitFieldValues(filePath, field, options);
+      } else if (op === 'scanFields') {
         result = await scanFields(filePath, activeCancelToken);
       } else if (op === 'exportFilter') {
         result = await exportFilter({

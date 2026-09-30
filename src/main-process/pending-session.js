@@ -1,3 +1,4 @@
+const { memoryCarrierAdmission } = require('./memory-activity');
 // Pending 模块 session 层：spawn worker + 事件路由 + 留底 + 报错缓存
 // 由 main.js 创建单例，注入 getPendingDb / getStorageRoot
 
@@ -172,14 +173,14 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
   function runArchiveInWorker({ dbPath, yearMonth, archivePath, batchContext }) {
     return new Promise((resolve, reject) => {
       const jobMeta = { dbPath, yearMonth, archivePath, batchContext };
-      const worker = electronUtilityProcess.fork(ARCHIVE_WORKER_SCRIPT, [JSON.stringify(jobMeta)], {
+      const worker = memoryCarrierAdmission(null).observe(electronUtilityProcess.fork(ARCHIVE_WORKER_SCRIPT, [JSON.stringify(jobMeta)], {
         execArgv: [`--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`],
         env: {
           ...process.env,
           NODE_OPTIONS: `--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`
         },
         stdio: 'pipe'
-      });
+      }));
       let stdoutBuf = '';
       let stderrBuf = '';
       const events = [];
@@ -401,24 +402,24 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
         // Electron 路径：utilityProcess.fork → 真正 Node.js 子进程
         // 同时传 execArgv（经 Node 启动行参）和 NODE_OPTIONS（运行时 env）双保险
         // 避免 Electron 某版本把其中一条路径过滤掉
-        const worker = electronUtilityProcess.fork(WORKER_SCRIPT, [JSON.stringify(jobMeta)], {
+        const worker = memoryCarrierAdmission(null).observe(electronUtilityProcess.fork(WORKER_SCRIPT, [JSON.stringify(jobMeta)], {
           execArgv: [`--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`],
           env: {
             ...process.env,
             NODE_OPTIONS: `--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`
           },
           stdio: 'pipe'
-        });
+        }));
         worker.stdout.on('data', onStdoutChunk);
         worker.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
         worker.on('exit', finalize);
       } else {
         // Node 直跑（测试脚本）：spawn 老路径
-        const worker = spawn(process.execPath, [
+        const worker = memoryCarrierAdmission(null).observe(spawn(process.execPath, [
           `--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`,
           WORKER_SCRIPT,
           JSON.stringify(jobMeta)
-        ], { stdio: ['ignore', 'pipe', 'pipe'] });
+        ], { stdio: ['ignore', 'pipe', 'pipe'] }));
         worker.stdout.on('data', onStdoutChunk);
         worker.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
         worker.on('error', (err) => {

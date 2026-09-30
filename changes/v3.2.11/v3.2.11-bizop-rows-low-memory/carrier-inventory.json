@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "rootCarrierOwnership": "Main observers retain all root carriers until exit; nested workers belong to the root carrier",
+  "entries": [
+    {
+      "file": "src/backend/big-table-import/pipeline.js",
+      "line": 278,
+      "carrier": "new Worker(WORKER_SCRIPT_PATH)"
+    },
+    {
+      "file": "src/main-process/acquiring-bill-currency-session.js",
+      "line": 89,
+      "carrier": "new Worker(ENGINE_WORKER_ENTRY)"
+    },
+    {
+      "file": "src/main-process/background-execution/adapters/utility-process-adapter.js",
+      "line": 9,
+      "carrier": "electron.utilityProcess.fork(filename, args, options)"
+    },
+    {
+      "file": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+      "line": 108,
+      "carrier": "new WorkerClass(normalized.filename, workerOptions)"
+    },
+    {
+      "file": "src/main-process/background-execution/canary/durable-recovery.js",
+      "line": 24,
+      "carrier": "new Worker(WORKER_PATH, { workerData: input })"
+    },
+    {
+      "file": "src/main-process/bank-bu-worker/dual-parser-dispatch.js",
+      "line": 78,
+      "carrier": "new WorkerClass(PARSER_ENTRY, { workerData: { spool } })"
+    },
+    {
+      "file": "src/main-process/big-table-import-dispatch.js",
+      "line": 79,
+      "carrier": "new WorkerClass(ENGINE_WORKER_ENTRY, workerOptions)"
+    },
+    {
+      "file": "src/main-process/biz-op-recon-session.js",
+      "line": 1004,
+      "carrier": "electronUtilityProcess.fork(WORKER_SCRIPT, [JSON.stringify(jobMeta)], {"
+    },
+    {
+      "file": "src/main-process/biz-op-recon-session.js",
+      "line": 1013,
+      "carrier": "spawn(process.execPath, ["
+    },
+    {
+      "file": "src/main-process/duplicate-inbound-match/paired-parser-dispatch.js",
+      "line": 87,
+      "carrier": "new WorkerClass(PARSER_ENTRY, { workerData: { spool } })"
+    },
+    {
+      "file": "src/main-process/pending-session.js",
+      "line": 176,
+      "carrier": "electronUtilityProcess.fork(ARCHIVE_WORKER_SCRIPT, [JSON.stringify(jobMeta)], {"
+    },
+    {
+      "file": "src/main-process/pending-session.js",
+      "line": 405,
+      "carrier": "electronUtilityProcess.fork(WORKER_SCRIPT, [JSON.stringify(jobMeta)], {"
+    },
+    {
+      "file": "src/main-process/pending-session.js",
+      "line": 418,
+      "carrier": "spawn(process.execPath, ["
+    },
+    {
+      "file": "src/main-process/position-reconciliation/import-dispatch.js",
+      "line": 151,
+      "carrier": "utilityProcess.fork(WORKER_ENTRY, [], {"
+    },
+    {
+      "file": "src/main-process/position-reconciliation/import-dispatch.js",
+      "line": 156,
+      "carrier": "forkChild(WORKER_ENTRY, [], {"
+    },
+    {
+      "file": "src/main-process/pre-fund-reconciliation/mpt-import/managed-import.js",
+      "line": 56,
+      "carrier": "new WorkerClass(PARSER_ENTRY, { workerData: { input } })"
+    },
+    {
+      "file": "src/main-process/run-check-multiworker.js",
+      "line": 126,
+      "carrier": "new Worker(resolveWorkerScript())"
+    },
+    {
+      "file": "src/main-process/run-check-worker-pool.js",
+      "line": 73,
+      "carrier": "new Worker(resolveWorkerScript())"
+    },
+    {
+      "file": "src/main-process/toolbox-background/route-scanner-core.js",
+      "line": 22,
+      "carrier": "new Worker(entryPath, workerOptions)"
+    },
+    {
+      "file": "src/main-process/toolbox-large-split-dispatch.js",
+      "line": 79,
+      "carrier": "new Worker(workerScriptPath, {"
+    },
+    {
+      "file": "src/main-process/toolbox-output-publication-dispatch.js",
+      "line": 82,
+      "carrier": "new Worker(workerScriptPath, { workerData,"
+    },
+    {
+      "file": "src/main-process/vcc-financial-op-output/writer-coordinator.js",
+      "line": 78,
+      "carrier": "new WorkerClass(SHARD_WORKER_ENTRY, { workerData: { input } })"
+    },
+    {
+      "file": "src/main-process/vcc-financial-op-result-workbook-runner.js",
+      "line": 43,
+      "carrier": "new Worker(WORKER_PATH, options)"
+    },
+    {
+      "file": "src/main-process/vcc-financial-op-service.js",
+      "line": 173,
+      "carrier": "new Worker(filename, options)"
+    },
+    {
+      "file": "src/main-process/vcc-financial-op-service.js",
+      "line": 174,
+      "carrier": "new Worker(filename, options)"
+    },
+    {
+      "file": "src/main-process/vcc-financial-op-service.js",
+      "line": 175,
+      "carrier": "new Worker(filename, options)"
+    },
+    {
+      "file": "src/main-process/vcc-financial-op-service.js",
+      "line": 176,
+      "carrier": "new Worker(filename, options)"
+    },
+    {
+      "file": "src/main-process/vcc-financial-op-storage-migration.js",
+      "line": 34,
+      "carrier": "new Worker(options.workerPath || DEFAULT_WORKER_PATH)"
+    },
+    {
+      "file": "src/main-process/vcc-op-calc/parser-pipeline.js",
+      "line": 85,
+      "carrier": "new WorkerClass(PARSER_WORKER_PATH, { workerData: input })"
+    }
+  ]
+}

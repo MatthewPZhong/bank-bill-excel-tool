@@ -1,5 +1,7 @@
 'use strict';
 
+const { richReaderBudgets } = require('../background-execution/execution-memory-options');
+
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
@@ -13,7 +15,7 @@ const { RESULT_COLUMNS, NOTE_COLUMNS, resultContractFor } = require('./result-sc
 const { schemaFor, cell, rawCell, outputName } = require('./export-cells');
 const { fail, hash } = require('./contracts');
 
-async function buildExportSource({ payloadStore, source, spool, tempDirectory, cancelToken, safePoint }) {
+async function buildExportSource({ payloadStore, source, spool, tempDirectory, cancelToken, safePoint, memoryConfig = null }) {
   const token = await payloadStore.verifyManifest(source.manifestRelativePath, source.manifestDigest);
   const manifest = readVerifiedManifest(token);
   if (manifest.objectId !== source.objectId || manifest.objectKind !== source.objectKind) fail('BIZOP_EXPORT_OWNER_MISMATCH');
@@ -55,7 +57,7 @@ async function buildExportSource({ payloadStore, source, spool, tempDirectory, c
       const before = await fs.promises.stat(original.filePath);
       // 每份原件只交付独立 SST 子目录；读取器仅清理身份匹配的登记文件和空目录。
       const workbook = await openSingleSheetRichWorkbook(original.filePath, { sstTempRoot: path.join(tempDirectory, `sst-raw-${randomUUID()}`),
-        memoryBudgetBytes: 32 * 1024 * 1024, lruMaxEntries: 8192, cacheMaxBytes: 32 * 1024 * 1024, cancelToken });
+        memoryBudgetBytes: 32 * 1024 * 1024, lruMaxEntries: 8192, cacheMaxBytes: 32 * 1024 * 1024, ...richReaderBudgets(memoryConfig), cancelToken });
       let selected = 0; const adapter = createImportAdapter(kind);
       try {
         if (workbook.sheet.name !== original.sheetName) fail('BIZOP_EXPORT_ORIGINAL_CHANGED');
@@ -99,7 +101,7 @@ async function buildExportSource({ payloadStore, source, spool, tempDirectory, c
     let seen = 0; let notesSeen = 0;
     for (const part of manifest.parts) {
       safePoint();
-      const db = openReadonly(payloadStore.resolve(path.posix.join(path.posix.dirname(source.manifestRelativePath), part.name)));
+      const db = openReadonly(payloadStore.resolve(path.posix.join(path.posix.dirname(source.manifestRelativePath), part.name)), memoryConfig);
       try {
         const meta = db.prepare('SELECT * FROM part_meta').get();
         if (meta.owner_id !== source.objectId || meta.state !== 'SEALED' || meta.row_count !== part.rowCount

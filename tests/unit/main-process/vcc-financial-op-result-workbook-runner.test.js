@@ -64,3 +64,39 @@ test('构造 Worker 失败也释放已获资源；共享 Governor 真实授予�
   }), /cannot spawn/);
   assert.equal(governor.snapshot().available.memoryBytes, RESULT_EXPORT_RESOURCES.memoryBytes);
 });
+
+
+test('其他低内存任务持有排他租约时，正式结果 Worker 在构造前拒绝并释放已获资源', async () => {
+  const { createExperimentalMemoryPolicy } = require('../../../src/main-process/execution-descriptors/memory-profiles');
+  const { registerMemoryGovernor, sealMemoryActivityInventory, inventoryForGovernor,
+    memoryActivitySnapshot } = require('../../../src/main-process/memory-activity');
+  const MiB = 1024 ** 2;
+  sealMemoryActivityInventory();
+  const governor = createResourceGovernor({
+    budgets: { cpuSlots: 4, workerThreadSlots: 4, utilityProcessSlots: 0, ioHeavySlots: 4, memoryBytes: 2048 * MiB },
+    memoryAdmission: createExperimentalMemoryPolicy({
+      sampleMemory: () => ({ availableBytes: 512 * MiB, sampledAt: Date.now() }),
+      inventory: () => inventoryForGovernor(() => governor)
+    })
+  });
+  const unregister = registerMemoryGovernor(governor);
+  let lease;
+  try {
+    lease = await governor.acquirePhaseLease({
+      ownerKey: 'toolbox-split-read', actionKey: 'toolbox:split:prepare', operationKey: 'scan',
+      resources: { cpuSlots: 1, workerThreadSlots: 1, utilityProcessSlots: 0, ioHeavySlots: 1, memoryBytes: 1024 * MiB },
+      timeoutMs: 50, lowMemoryBehavior: 'queue'
+    });
+    assert.equal(lease.memoryMode, 'low');
+    const releases = [];
+    await assert.rejects(runResultWorkbookWorker({
+      acquireLease: async () => ({ release: (reason) => releases.push(reason) })
+    }), { code: 'RESOURCE_MEMORY_ACTIVITY_BUSY' });
+    assert.deepEqual(releases, ['vcc-result-worker-exited']);
+    assert.equal(memoryActivitySnapshot().blockers.length, 0);
+    assert.equal(governor.snapshot().activeLeases.length, 1);
+  } finally {
+    lease?.release();
+    assert.equal(unregister(), true);
+  }
+});

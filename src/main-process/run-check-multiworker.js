@@ -34,6 +34,7 @@
 // 生产由 Acquiring 调用链装配；执行器只拥有本次 worker 组及派发 part，不推进 run 状态。
 
 'use strict';
+const { memoryCarrierAdmission } = require('./memory-activity');
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -122,7 +123,7 @@ function startWorker(group, dbPath, selectSql, partColumns, batchContext, initTi
   if (group.stopped) return Promise.reject(group.firstError);
   let record;
   try {
-    record = registerWorker(group, new Worker(resolveWorkerScript()));
+    record = registerWorker(group, memoryCarrierAdmission(null).observe(new Worker(resolveWorkerScript())));
   } catch (error) {
     group.fail(error);
     return Promise.reject(error);

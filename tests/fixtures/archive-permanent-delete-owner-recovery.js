@@ -20,7 +20,8 @@ const EXIT_CODES = { running: 82, 'after-terminal': 81, 'anonymous-after-termina
 function openRuntime(directory) {
   const db = new DatabaseSync(path.join(directory, 'archive.sqlite'));
   db.exec('PRAGMA foreign_keys = ON');
-  const service = createArchiveService({ database: db, rootDir: path.join(directory, 'archive') });
+  // 本夹具覆盖到期删除，显式使用 30 天；产品默认永久保留由独立集成测试覆盖。
+  const service = createArchiveService({ database: db, rootDir: path.join(directory, 'archive'), defaultRetentionDays: 30 });
   const outboxStore = createArchiveOutboxStore(path.join(directory, 'outbox'));
   const controller = createArchiveCenterController({
     database: { getSetting: () => null, setSetting() {} }, service, outboxStore

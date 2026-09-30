@@ -241,9 +241,13 @@ async function streamToolboxPassTables(pass, options = {}) {
         ...physicalSummary
       });
     }
-  } finally {
-    pass.close();
+  } catch (error) {
+    try { await pass.close(); } catch (closeError) {
+      throw new AggregateError([error, closeError], '工具箱扫描失败且资源关闭未确认', { cause: error });
+    }
+    throw error;
   }
+  await pass.close();
 
   if (!baseHeaderInfo) {
     const sourceFile = path.basename(pass.filePath);
@@ -277,7 +281,7 @@ async function streamToolboxPassTables(pass, options = {}) {
 }
 
 async function streamToolboxXlsxTables(filePath, options = {}) {
-  const pass = await openToolboxXlsxPass(filePath);
+  const pass = await openToolboxXlsxPass(filePath, { ...options.readerOptions, cancelToken: options.cancelToken });
   return streamToolboxPassTables(pass, {
     ...options,
     projectionProfile: options.projectionProfile || TOOLBOX_PROJECTION_PROFILES.XLSX_LEGACY

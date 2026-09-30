@@ -378,12 +378,14 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'file:extract-big-account-order',
     'template:preview-delete-bill-split-row',
     'toolbox:split:read',
+    'toolbox:split:read-values',
     'vccFinancialOp:data-manager:delete-preview',
     'vccFinancialOp:data-manager:export-preview',
     'vccFinancialOp:run:preflight',
     'vccFinancialOp:run:unarchive-preview'
   ]),
   'cancel-active-task': Object.freeze([
+    'toolbox:split:cancel-read',
     'bizOpReconV327:task:cancel',
     'acquiringBillCurrency:run:cancel',
     'file:cancel-big-account-selection',

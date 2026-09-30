@@ -74,7 +74,8 @@ function createBizOpPublication({ userDataDir, catalog, payloadStore, protection
     try {
       // 排队等容量时仍接受取消；准入后先复查，再登记或调用 Publisher。
       if (signal?.aborted) fail('BIZOP_CANCELLED');
-      borrowed = publicationOwner.issueBorrowedObservation({ taskRunId: id, attemptNonce: nonce, kind });
+      borrowed = publicationOwner.issueBorrowedObservation({ taskRunId: id, attemptNonce: nonce, kind,
+        memoryConfig: lease.memoryConfig || null });
       db.prepare(`UPDATE biz_op_v327_publications SET state='STARTED',attempt_nonce=?,owner_pid=?,owner_instance=?,
         closure_json=NULL,closure_digest=NULL,updated_at=? WHERE task_run_id=?`).run(nonce, process.pid, instance, now(), id);
       started = true;

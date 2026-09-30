@@ -1,0 +1,222 @@
+--- a/src/main-process/background-execution/admission-queue.js
++++ b/src/main-process/background-execution/admission-queue.js
+@@ -51,23 +51,20 @@
+     return Math.min(PRIORITIES.length - 1, entry.basePriority + promotions);
+   }
+ 
+-  function selectHead() {
++  function selectHead(deferred) {
+     const timestamp = now();
+-    let selected = null;
+-    for (const entry of entries.values()) {
+-      if (entry.state !== 'queued') continue;
+-      if (!selected) {
+-        selected = entry;
+-        continue;
+-      }
+-      const candidatePriority = effectivePriority(entry, timestamp);
+-      const selectedPriority = effectivePriority(selected, timestamp);
+-      if (candidatePriority > selectedPriority ||
+-          (candidatePriority === selectedPriority && entry.sequence < selected.sequence)) {
+-        selected = entry;
+-      }
+-    }
+-    return selected;
++    const ordered = [...entries.values()].filter((entry) => entry.state === 'queued')
++      .sort((left, right) => effectivePriority(right, timestamp) - effectivePriority(left, timestamp) ||
++        left.sequence - right.sequence);
++    return ordered.find((entry, index) => {
++      if (deferred.has(entry)) return false;
++      if (index === 0) return true;
++      // 仅允许解决队首依赖的 continuation 先执行。中间请求本就等待队首，
++      // 不能再让它们阻止解除依赖；普通请求仍不能越过队首。
++      if (!deferred.has(ordered[0]) || typeof options.canBypass !== 'function') return false;
++      try { return options.canBypass(entry.payload, ordered[0].payload) === true; }
++      catch (_error) { return false; }
++    });
+   }
+ 
+   function detach(entry) {
+@@ -141,10 +138,11 @@
+     expireDueEntries(now());
+     if (typeof drainCallback !== 'function') return;
+     draining = true;
++    const deferred = new Set();
+     try {
+       while (entries.size > 0) {
+         expireDueEntries(now());
+-        const entry = selectHead();
++        const entry = selectHead(deferred);
+         if (!entry) break;
+         if (entry.deadlineAt !== Infinity && now() >= entry.deadlineAt) continue;
+         entry.state = 'executing';
+@@ -181,9 +179,11 @@
+             ));
+             continue;
+           }
+-          break;
++          deferred.add(entry);
++          continue;
+         }
+         settle(entry, 'resolve', result);
++        deferred.clear();
+       }
+     } finally {
+       draining = false;
+--- a/src/main-process/background-execution/memory-activity.js
++++ b/src/main-process/background-execution/memory-activity.js
+@@ -8,6 +8,8 @@
+ // 建立一个看似空闲的全局表。表项仅存技术身份，不记录路径或业务数据。
+ const governors = new Set();
+ const activities = new Set();
++const continuationParents = new WeakMap();
++const snapshotSources = new WeakMap();
+ let entrypointsSealed = false;
+ 
+ function registerMemoryGovernor(governor) {
+@@ -64,9 +66,27 @@
+   try { return await activityContext.run(entry, work); } finally { activities.delete(entry); }
+ }
+ 
++// 能力仅绑定当前仍存活的 Main 活动。快照的来源身份保存在进程内，
++// Renderer 字段、复制的对象或已结束作用域都不能证明队列依赖。
++function captureLegacyMemoryContinuation() {
++  const parent = activityContext.getStore();
++  if (!activities.has(parent)) return null;
++  const capability = Object.freeze({});
++  continuationParents.set(capability, parent);
++  return capability;
++}
++function isLegacyMemoryContinuationBlocking(capability, inventory) {
++  const parent = continuationParents.get(capability);
++  return Boolean(parent && activities.has(parent) && inventory?.inventoryComplete === true &&
++    Array.isArray(inventory.blockers) && inventory.blockers.some((item) => snapshotSources.get(item) === parent));
++}
+ function memoryActivitySnapshot() {
+   return { inventoryComplete: entrypointsSealed,
+-    blockers: [...activities].map((entry) => ({ ...entry })) };
++    blockers: [...activities].map((entry) => {
++      const snapshot = { ...entry };
++      snapshotSources.set(snapshot, entry);
++      return snapshot;
++    }) };
+ }
+ 
+ // 独立 runtime 代次的存活租约也必须参与全局观察。当前 Governor 已在自身
+@@ -84,6 +104,6 @@
+ }
+ 
+ module.exports = { memoryCarrierAdmission, observeMemoryCarrier, registerMemoryGovernor, runMemoryActivity,
+-  memoryActivitySnapshot, inventoryForGovernor,
++  memoryActivitySnapshot, inventoryForGovernor, captureLegacyMemoryContinuation, isLegacyMemoryContinuationBlocking,
+   hasLegacyMemoryActivity: () => activities.has(activityContext.getStore()),
+   sealMemoryActivityInventory: () => { entrypointsSealed = true; } };
+--- a/src/main-process/background-execution/memory-admission.js
++++ b/src/main-process/background-execution/memory-admission.js
+@@ -21,13 +21,14 @@
+   resolveRequest = () => null,
+   isEvidenceValid = () => false,
+   externalPressure = () => ({ inventoryComplete: false, blockers: [] }),
++  isContinuationBlocking = () => false,
+   sampleMemory,
+   now = Date.now,
+   sampleMaxAgeMs = 1000
+ } = {}) {
+   checkedBytes(compatibilityMemoryBytes, 'compatibilityMemoryBytes');
+   checkedBytes(sampleMaxAgeMs, 'sampleMaxAgeMs');
+-  for (const fn of [resolveRequest, isEvidenceValid, externalPressure, sampleMemory, now]) {
++  for (const fn of [resolveRequest, isEvidenceValid, externalPressure, isContinuationBlocking, sampleMemory, now]) {
+     if (typeof fn !== 'function') throw error('RESOURCE_MEMORY_CONFIG_INVALID', '内存准入需要同步 Main provider');
+   }
+ 
+@@ -71,7 +72,7 @@
+           mode: candidate.mode
+         });
+       });
+-    return Object.freeze({ scope, candidates: Object.freeze(candidates) });
++    return Object.freeze({ scope, candidates: Object.freeze(candidates), continuation: resolved?.continuation || null });
+   }
+ 
+   function limit(scope, hardCeiling) {
+@@ -121,7 +122,16 @@
+     return Number.isSafeInteger(needed) && sample.availableBytes >= needed;
+   }
+ 
+-  const policy = Object.freeze({ prepare, limit, assertEvidence, evaluate });
++  function canBypass(continuation, predecessor) {
++    // 只打破“已登记的内部兼容观察 → 等待其父活动结束的获批 phase”环。
++    // 这里只证明顺序依赖；真正 grant 仍执行 evaluate 和所有资源检查。
++    if (!continuation?.continuation || continuation.scope.migrated ||
++        continuation.candidates.some((item) => item.config) ||
++        !predecessor?.candidates.every((item) => item.config)) return false;
++    return isContinuationBlocking(continuation.continuation, externalPressure()) === true;
++  }
++
++  const policy = Object.freeze({ prepare, limit, assertEvidence, evaluate, canBypass });
+   policies.add(policy);
+   return policy;
+ }
+--- a/src/main-process/background-execution/resource-governor.js
++++ b/src/main-process/background-execution/resource-governor.js
+@@ -109,7 +109,9 @@
+     now,
+     setTimer: options.setTimer,
+     clearTimer: options.clearTimer,
+-    agingMs: options.agingMs
++    agingMs: options.agingMs,
++    canBypass: (candidate, predecessor) => Boolean(memoryAdmission &&
++      memoryAdmission.canBypass(candidate.memory, predecessor.memory))
+   });
+   const leases = new Map();
+   const dependenciesByParent = new Map();
+@@ -431,6 +433,7 @@
+       signal: prepared.signal,
+       payload: Object.freeze({
+         attempt: guardedAttempt,
++        memory: admissionOptions.memory,
+         prepared,
+         rejectOnUnavailable: prepared.lowMemoryBehavior === 'reject'
+       }),
+@@ -473,7 +476,7 @@
+           memoryDetails(memory, candidate));
+       }
+       return DEFER_ADMISSION;
+-    }, { assertStable: () => assertStable(prepared, memory, candidates.map((item) => item.resources)) });
++    }, { memory, assertStable: () => assertStable(prepared, memory, candidates.map((item) => item.resources)) });
+   }
+ 
+   function acquireReplaceableReservation(kind, request) {
+--- a/src/main-process/execution-descriptors/memory-profiles.js
++++ b/src/main-process/execution-descriptors/memory-profiles.js
+@@ -6,7 +6,7 @@
+ const { createMemorySampler } = require('../background-execution/memory-telemetry');
+ const { ACTIONS } = require('../biz-op-v327/contracts');
+ const qualification = require('./memory-qualification.json');
+-const { inventoryForGovernor } = require('../memory-activity');
++const { inventoryForGovernor, captureLegacyMemoryContinuation, isLegacyMemoryContinuationBlocking } = require('../memory-activity');
+ const { sourceIdentity, qualifiedProfile } = require('./memory-evidence');
+ 
+ const MiB = 1024 ** 2;
+@@ -72,6 +72,12 @@
+   }
+   return createMemoryAdmissionPolicy({ compatibilityMemoryBytes, sampleMemory,
+     resolveRequest(request) {
++      if (request.kind === 'phase' && request.actionKey === 'publication:legacy-observation' &&
++          request.ownerKey === 'biz-op-v327:shared-publication-observation' &&
++          request.operationKey === 'biz-op-v327:shared-publication-observation') {
++        return { migrated: false, heavy: true, maxGrowthBytes: null,
++          continuation: captureLegacyMemoryContinuation() };
++      }
+       const phaseKey = phaseFor(request);
+       if (!phaseKey) return null;
+       // 目标 job 的零资源 base 尚未创建载体，不与自己的 phase 形成重型互斥。
+@@ -82,7 +88,8 @@
+         maxGrowthBytes: Math.max(...candidates.map((item) => item.config.phaseMemoryBytes)), candidates };
+     },
+     isEvidenceValid: (config) => evidence.has(`${config.profileId}:${config.policyDigest}:${config.validatedEvidenceId}`),
+-    externalPressure: inventory
++    externalPressure: inventory,
++    isContinuationBlocking: isLegacyMemoryContinuationBlocking
+   });
+ }
+ 

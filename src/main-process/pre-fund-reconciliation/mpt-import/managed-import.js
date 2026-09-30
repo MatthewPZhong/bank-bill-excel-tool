@@ -1,4 +1,5 @@
 'use strict';
+const { memoryCarrierAdmission } = require('../../memory-activity');
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -52,7 +53,7 @@ function captureSourceSnapshot(filePath) {
 function runParserWorker(input, options = {}) {
   const WorkerClass = options.WorkerClass || Worker;
   return new Promise((resolve, reject) => {
-    const worker = new WorkerClass(PARSER_ENTRY, { workerData: { input } });
+    const worker = memoryCarrierAdmission(null).observe(new WorkerClass(PARSER_ENTRY, { workerData: { input } }));
     const observeWorkerState = typeof options.onWorkerState === 'function'
       ? options.onWorkerState
       : null;

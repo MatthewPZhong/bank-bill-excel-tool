@@ -20,6 +20,8 @@ const { ROWS_BUDGETS, planRowCounts, buildRowTargets, validatePlan, writePrivate
 const { prepareRows, generateValidateAndPublishRows } = require('../../../src/main-process/toolbox-row-split/service');
 const { executeRowsGeneration } = require('../../../src/main-process/toolbox-row-split/executor');
 const { openCache } = require('../../../src/main-process/toolbox-row-split/cache');
+const { createSealedCache } = require('../../../src/main-process/toolbox-row-split/cache');
+const { profile } = require('../../../src/main-process/execution-descriptors/memory-profiles');
 const { assertFinanceSafeValue } = require('../../../src/main-process/background-execution/error-codec');
 const { validateRowsResult } = require('../../../src/main-process/toolbox-row-split/contracts');
 const { operationContextFromBatch } = require('../../../src/main-process/toolbox-background/generation-validator');
@@ -88,6 +90,29 @@ async function readOutput(filePath) {
   await book.xlsx.readFile(filePath);
   return book;
 }
+
+test('样式 LRU 多次淘汰后从 SQLite 重载保持一致，缓存始终受获批字节限制', async (t) => {
+  const directory = fixture(t); const source = path.join(directory, 'styles.xlsx');
+  const book = new ExcelJS.Workbook(); const sheet = book.addWorksheet('styles'); sheet.addRow(['序号']);
+  for (let i = 0; i < 80; i++) {
+    const row = sheet.addRow([i]);
+    row.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${i.toString(16).padStart(6, '0')}` } };
+  }
+  await book.xlsx.writeFile(source);
+  const { plan } = directInput(makePlan(directory, source, 80, 80));
+  const config = { ...profile('rows-generation', 'normal'), styleCacheBytes: 4096 };
+  const { seal } = await createSealedCache(plan, null, undefined, undefined, profile('rows-generation', 'normal'));
+  const reader = openCache(plan, seal, config);
+  try {
+    const first = [...reader.readRange(0, 80)];
+    const styles = [...reader.resolver.values()].map((registry) => Array.from({ length: registry.size }, (_, i) => registry.get(i)));
+    assert.deepEqual([...reader.readRange(0, 80)], first);
+    assert.deepEqual([...reader.resolver.values()].map((registry) => Array.from({ length: registry.size }, (_, i) => registry.get(i))), styles);
+    assert.ok(reader.styleCacheStats().styleEvictions > 80);
+    assert.ok(reader.styleCacheStats().peakStyleCacheBytes <= 4096);
+  } finally { reader.close(); }
+  assert.equal(reader.styleCacheStats().styleCacheBytes, 0);
+});
 
 test('严格行数和安全整数边界；1001 份在分配路径前拒绝', () => {
   for (const value of [0, -1, 1.2, '2', NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
@@ -356,7 +381,7 @@ test('rows 第 2 份发布时崩溃，现有 journal 在新 Worker 内恢复旧�
   assert.equal(fs.readFileSync(source, 'utf8'), 'A\n1\n2\n3\n4\n5\n6\n7\n8\n9\n');
 });
 
-test('9 份真实 rows 输出只归属一个业务批次，原件和全部输出均归档 ready 后清理 receipt', async (t) => {
+for (const availableMiB of [null, 512]) test(`9 份真实 rows 输出、发布、归档 ready 和恢复清理；注入内存=${availableMiB ?? '旧预算'}`, async (t) => {
   const { createArchiveService } = require('../../../src/main-process/archive-center/archive-service');
   const { createArchiveCenterController } = require('../../../src/main-process/archive-center/controller');
   const { createArchiveOutboxStore } = require('../../../src/main-process/archive-center/outbox-store');
@@ -378,7 +403,8 @@ test('9 份真实 rows 输出只归属一个业务批次，原件和全部输出
       setSetting: (key, value) => settings.set(key, value), listTemplates: () => [] } });
   await controller.initialize();
   const publicationHost = createTestPublicationHarness(userDataDir, {
-    owners: [createArchivePublicationOwner({ getArchiveCenter: () => controller })]
+    owners: [createArchivePublicationOwner({ getArchiveCenter: () => controller })],
+    acquireMemory: require('../../../src/main-process/execution-descriptors/publication-memory').createPublicationMemoryAdmission(() => runtime)
   });
   const publishToolboxPublicationAsync = (options) => publicationHost.dispatcher.publish({
     ...options, requireArchiveHandoff: true, requireValidatedArtifacts: true
@@ -392,7 +418,18 @@ test('9 份真实 rows 输出只归属一个业务批次，原件和全部输出
     taskKey: batch.taskKey, moduleId: batch.moduleId, parentRunId: batch.parentRunId, operationKey: batch.operationKey };
   const options = makePlan(dir, source, 9, 1);
   runtime = createBackgroundExecutionRuntime({ availableParallelism: 4, freeMemoryBytes: 8 * 1024 ** 3, totalMemoryBytes: 16 * 1024 ** 3 });
-  const generated = await generateValidateAndPublishRows({ ...options, runtime, batchContext,
+  if (availableMiB) {
+    await runtime.shutdown();
+    const { createResourceGovernor } = require('../../../src/main-process/background-execution/resource-governor');
+    const { createExperimentalMemoryPolicy } = require('../../../src/main-process/execution-descriptors/memory-profiles');
+    const resourceGovernor = createResourceGovernor({ budgets: { cpuSlots: 2, workerThreadSlots: 2, utilityProcessSlots: 1,
+      ioHeavySlots: 2, memoryBytes: 2048 * 1024 ** 2 }, memoryAdmission: createExperimentalMemoryPolicy({
+      sampleMemory: () => ({ availableBytes: availableMiB * 1024 ** 2, sampledAt: Date.now() }) }) });
+    runtime = require('../../../src/main-process/execution-descriptors/composition').createNonProductionBackgroundExecutionRuntime({ resourceGovernor });
+  }
+  const executionRuntime = availableMiB ? { resourceGovernor: runtime.resourceGovernor,
+    execute: (request) => runtime.execute({ ...request, production: false }) } : runtime;
+  const generated = await generateValidateAndPublishRows({ ...options, runtime: executionRuntime, batchContext,
     publisher: (artifacts) => publishToolboxPublicationAsync({ taskId: 'rows-archive-publication',
       artifacts, targets: options.filePlan.outputs.map((item) => ({ targetPath: item.filePath, expectedTargetSnapshot: item.targetSnapshot })),
       userDataDir, batchContext, archiveInputFiles: options.filePlan.inputs, protectedSourcePaths: [source] }) });

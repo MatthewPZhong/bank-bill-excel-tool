@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const { randomUUID } = require('node:crypto');
 const { Worker } = require('node:worker_threads');
 const { deserializeError } = require('./serialize-error');
+const { memoryCarrierAdmission } = require('./memory-activity');
 const { fitsWithin } = require('./background-execution/resource-lease');
 
 const WORKER_PATH = path.join(__dirname, 'vcc-financial-op-result-workbook-worker.js');
@@ -39,7 +40,7 @@ async function acquireResultExportLease(governor, operationKey) {
 
 async function runResultWorkbookWorker({ dbPath, runId, outputPaths, assetsDir,
   publicationStagingDirectory, expectedSnapshot, resourceLimits,
-  workerFactory = (_filename, options) => new Worker(WORKER_PATH, options),
+  workerFactory = (_filename, options) => memoryCarrierAdmission(null).observe(new Worker(WORKER_PATH, options)),
   acquireLease, operationKey }) {
   // 准入失败时不启动 Worker。业务互斥由 service 持有，不在此建立第二个任务。
   const lease = acquireLease ? await acquireLease(operationKey) : null;

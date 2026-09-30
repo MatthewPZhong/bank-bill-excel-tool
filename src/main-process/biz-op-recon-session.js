@@ -1,3 +1,4 @@
+const { memoryCarrierAdmission } = require('./memory-activity');
 // v2.1.3 T3 — 业务OP数据核对：session 层 + 4 步对账算法（资金红线 ⚠️）
 //
 // 关键 OPEN ISSUE 拍板固化点（spec §五 + PRD §6.1）：
@@ -1000,20 +1001,20 @@ function spawnImportWorker({
     }
 
     if (electronUtilityProcess) {
-      const worker = electronUtilityProcess.fork(WORKER_SCRIPT, [JSON.stringify(jobMeta)], {
+      const worker = memoryCarrierAdmission(null).observe(electronUtilityProcess.fork(WORKER_SCRIPT, [JSON.stringify(jobMeta)], {
         execArgv: [`--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`],
         env: { ...process.env, NODE_OPTIONS: `--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}` },
         stdio: 'pipe'
-      });
+      }));
       worker.stdout.on('data', onStdoutChunk);
       worker.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
       worker.on('exit', (code) => { finalize(code); });
     } else {
-      const worker = spawn(process.execPath, [
+      const worker = memoryCarrierAdmission(null).observe(spawn(process.execPath, [
         `--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`,
         WORKER_SCRIPT,
         JSON.stringify(jobMeta)
-      ], { stdio: ['ignore', 'pipe', 'pipe'] });
+      ], { stdio: ['ignore', 'pipe', 'pipe'] }));
       worker.stdout.on('data', onStdoutChunk);
       worker.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
       worker.on('error', (err) => {
