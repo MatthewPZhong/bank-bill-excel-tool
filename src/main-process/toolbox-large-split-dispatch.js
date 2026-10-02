@@ -61,6 +61,8 @@ function dispatchLargeSplit({
   maxValues,
   maxValueBytes,
   executionMemoryConfig,
+  sourceSnapshot,
+  inputKind,
   batchContext,
   onProgress,
   onLog
@@ -158,6 +160,8 @@ function dispatchLargeSplit({
         maxValues,
         maxValueBytes,
         executionMemoryConfig,
+        sourceSnapshot,
+        inputKind,
         batchContext
       });
     } catch (error) {

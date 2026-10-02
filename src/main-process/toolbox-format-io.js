@@ -297,7 +297,7 @@ async function streamToolboxBiff8Tables(filePath, options = {}) {
 }
 
 async function streamToolboxCsvTables(filePath, options = {}) {
-  const pass = await openToolboxCsvPass(filePath);
+  const pass = await openToolboxCsvPass(filePath, { ...options.readerOptions, cancelToken: options.cancelToken });
   return streamToolboxPassTables(pass, {
     ...options,
     projectionProfile: options.projectionProfile || TOOLBOX_PROJECTION_PROFILES.CSV_LEGACY
@@ -306,6 +306,9 @@ async function streamToolboxCsvTables(filePath, options = {}) {
 
 async function streamToolboxTables(filePath, options = {}) {
   const kind = detectToolboxInputKind(filePath);
+  if (options.readerOptions?.expectedInputKind && options.readerOptions.expectedInputKind !== kind) {
+    throw new FileValidationError('TOOLBOX_SPLIT_READ_CONTEXT_STALE', '拆分源文件类型已变化，请重新选择');
+  }
   if (kind === 'xlsx') return streamToolboxXlsxTables(filePath, options);
   if (kind === 'xls') return streamToolboxBiff8Tables(filePath, options);
   return streamToolboxCsvTables(filePath, options);

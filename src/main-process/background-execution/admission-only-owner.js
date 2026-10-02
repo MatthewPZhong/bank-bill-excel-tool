@@ -10,13 +10,14 @@ function failure(code, message, cause) {
 
 // Main 静态装配的准备阶段 owner；不注册可发布 action，不向调用者开放资源参数。
 // start 必须同步返回独立的 promise/closed/cancel，包括创建失败；closed 只能表示真实关闭。
-function createAdmissionOnlyOwner({ governor, descriptor, start, cleanup = async () => {} }) {
+function createAdmissionOnlyOwner({ governor, descriptor, start, cleanup = async () => {}, allowLowMemory = () => true }) {
   const keys = ['ownerKey', 'actionKey', 'resources', 'timeoutMs'];
   if (!descriptor || Object.keys(descriptor).length !== keys.length ||
       keys.some((key) => !Object.hasOwn(descriptor, key)) ||
       !['ownerKey', 'actionKey'].every((key) => typeof descriptor[key] === 'string' && descriptor[key].length > 0) ||
       !Number.isSafeInteger(descriptor.timeoutMs) || descriptor.timeoutMs < 1 ||
-      typeof governor?.acquirePhaseLease !== 'function' || typeof start !== 'function' || typeof cleanup !== 'function') {
+      typeof governor?.acquirePhaseLease !== 'function' || typeof start !== 'function' || typeof cleanup !== 'function' ||
+      typeof allowLowMemory !== 'function') {
     throw failure('RESOURCE_PREPARE_OWNER_INVALID', '准备阶段必须由 Main 提供完整静态描述');
   }
   const registration = Object.freeze({ ...descriptor, resources: validateResourceVector(descriptor.resources) });
@@ -57,7 +58,9 @@ function createAdmissionOnlyOwner({ governor, descriptor, start, cleanup = async
       let carrier = null;
       let cancelCarrier = null;
       try {
-        lease = await governor.acquirePhaseLease({ ...registration, operationKey,
+        const eligible = allowLowMemory(input);
+        if (typeof eligible !== 'boolean') throw failure('RESOURCE_PREPARE_OWNER_INVALID', '输入适用性必须由 Main 同步判断');
+        lease = await governor.acquirePhaseLease({ ...registration, operationKey, allowLowMemory: eligible,
           priority: 'interactive', signal: controller.signal });
         if (controller.signal.aborted) throw failure('ADMISSION_CANCELLED', '准备扫描已取消');
         record.state = 'running';

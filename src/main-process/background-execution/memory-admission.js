@@ -72,7 +72,10 @@ function createMemoryAdmissionPolicy({
           mode: candidate.mode
         });
       });
-    return Object.freeze({ scope, candidates: Object.freeze(candidates), continuation: resolved?.continuation || null });
+    // Main 的输入适用性只能收窄候选；不能增加资格、额度或绕过系统资源检查。
+    const eligible = common.allowLowMemory === false ? candidates.filter((candidate) => candidate.mode !== 'low') : candidates;
+    if (!eligible.length) throw error('RESOURCE_MEMORY_PROFILE_UNAVAILABLE', '当前输入没有可安全执行的内存档，请在普通档可用后重试');
+    return Object.freeze({ scope, candidates: Object.freeze(eligible), continuation: resolved?.continuation || null });
   }
 
   function limit(scope, hardCeiling) {

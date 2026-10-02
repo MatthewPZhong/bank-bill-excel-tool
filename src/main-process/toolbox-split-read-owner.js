@@ -9,6 +9,8 @@ const { dispatchLargeSplit } = require('./toolbox-large-split-dispatch');
 const { createToolboxScanResources } = require('./toolbox-scan-resources');
 const { sourceSnapshotFromStat, sourceSnapshotMatchesStat } = require('./archive-center/source-snapshot');
 const { MAX_ROW_SPLIT_FILES } = require('./toolbox-row-split/contracts');
+const { detectToolboxInputKind } = require('./toolbox-input-kind');
+const { LOW_MEMORY_CSV_MAX_BYTES } = require('../backend/toolbox-format/csv-capacity');
 
 const SCAN_ACTION = 'toolbox:split:prepare';
 // 公共扫描沿用原入口无独立内存预留的兼容合同；0 是账本预留值，不是工作集估计。
@@ -38,9 +40,11 @@ function createToolboxSplitReadOwner({ governor, dispatch = dispatchLargeSplit,
   let closing = null;
   const scans = createAdmissionOnlyOwner({
     governor,
+    allowLowMemory: (input) => input.inputKind !== 'csv' || input.sourceSnapshot.sizeBytes <= LOW_MEMORY_CSV_MAX_BYTES,
     descriptor: { ownerKey: 'toolbox-split-read', actionKey: SCAN_ACTION, resources: SCAN_RESOURCES, timeoutMs: 5000 },
     start(input, execution) {
       try {
+        assertScanSourceFresh(input);
         resources.create(input);
         const carrier = dispatch({ ...input, executionMemoryConfig: execution.memoryConfig });
         return { ...carrier, promise: carrier.promise.then((result) => ({ ...result, executionMode: execution.memoryMode })) };
@@ -53,8 +57,19 @@ function createToolboxSplitReadOwner({ governor, dispatch = dispatchLargeSplit,
     }
   });
 
+  function assertScanSourceFresh(input) {
+    let stat;
+    try { stat = fs.statSync(input.filePath, { bigint: true }); } catch (_error) { /* 统一失效 */ }
+    if (!stat || !sourceSnapshotMatchesStat(input.sourceSnapshot, stat)) {
+      throw failure('TOOLBOX_SPLIT_READ_CONTEXT_STALE', '拆分源文件已变化，请重新选择');
+    }
+  }
   async function runScan(input, options) {
-    try { return await scans.run(input, options); } catch (error) {
+    try {
+      input.inputKind = detectToolboxInputKind(input.filePath);
+      assertScanSourceFresh(input);
+      return await scans.run(input, options);
+    } catch (error) {
       const timeout = error.code === 'ADMISSION_TIMEOUT';
       if (!timeout && error.code !== 'RESOURCE_BUDGET_UNAVAILABLE') throw error;
       // 只在公共读取边界解释准入错误，保留原错误码、诊断与 cause 供定位。
@@ -117,7 +132,7 @@ function createToolboxSplitReadOwner({ governor, dispatch = dispatchLargeSplit,
       const sourceFilePath = path.resolve(selected);
       const snapshot = sourceSnapshotFromStat(fs.statSync(sourceFilePath, { bigint: true }));
       if (!snapshot) throw failure('TOOLBOX_SPLIT_READ_INVALID', '拆分源文件不可读');
-      const result = await runScan({ op: 'scanMetadata', filePath: sourceFilePath },
+      const result = await runScan({ op: 'scanMetadata', filePath: sourceFilePath, sourceSnapshot: Object.freeze(snapshot) },
         { operationKey: request.requestId, signal: record.controller.signal });
       const context = { token: randomUUID(), senderId: id, sourceFilePath, snapshot: Object.freeze(snapshot),
         dataRowCount: result.dataRowCount, headers: Object.freeze([...result.headers]), fields: new Map() };
@@ -147,7 +162,7 @@ function createToolboxSplitReadOwner({ governor, dispatch = dispatchLargeSplit,
         }
         field = { controller: new AbortController(), subscribers: new Set(), promise: null };
         context.fields.set(request.field, field);
-        field.promise = runScan({ op: 'scanValues', filePath: context.sourceFilePath, field: request.field,
+        field.promise = runScan({ op: 'scanValues', filePath: context.sourceFilePath, sourceSnapshot: context.snapshot, field: request.field,
           maxValues: 50000, maxValueBytes: VALUES_BYTES },
         { operationKey: `values-${randomUUID()}`, signal: field.controller.signal }).then((result) => {
           assertFresh(context);

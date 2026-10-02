@@ -374,3 +374,23 @@ Spec 的业务行为、金额／行／输出合同和 Windows 验收标准未改
 聚焦 owner 与真实扫描单测 16/16 PASS，连同 Main 启动／退出合同共 27/27 PASS；新故障集成 16/16 PASS，覆盖真实 Worker、首次及持续 EPERM/EACCES、部分删除、目录／文件替换、符号链接、未知内容、新进程恢复、Main 启动与退出、日志失败以及取消后的补偿。完整 `UNIT_TEST_CONCURRENCY=2 npm run release-check` 于 22:53:27—23:12:32 通过：lint、架构 787/787、smoke、单测 9577 PASS／0 FAIL／4 Windows SKIP、集成 79/79 脚本（3068 项计数检查）。冻结 1778 个输入，期间只有 runner 自动生成的集成清单变化。最终结果和完整发布门禁见 [本轮修复报告](../release/v3.2.11/review-fixes/2026-10-02-scan-cleanup/repair-report.md)。
 
 文件系统错误为隔离注入，真实 Worker 和重启子进程在本机运行；这些证据不扩大既有 Windows 人工验收结论，也不代表重新完成安装包、Excel/WPS 或各功能完整人工验收。
+
+
+## 17. 2026-10-03 release CSV 扫描档位适用性修复
+
+### 17.1 依据与决策
+
+基线 `release/v3.2.11@72c80bab465ca36fb098ac4271a8ea1de782c880`。独立复现的 13.73 MiB / 90 万行 CSV，在当前生产策略下获批低档后 Worker OOM，普通档正常。用户随后要求修复；本轮落实 Spec §4.3 的输入适用性要求，不更改业务合同或人工 qualified 清单。
+
+- Main 按格式与 source snapshot 将整表 CSV 的低档范围约束到 256 KiB，较大 CSV 仅参与普通档准入；普通档不足按原 Governor 等待/拒绝。布尔 allowLowMemory 只收窄当前 phase 候选，不增加任何资格或资源。Renderer 仍无此参数入口。
+- Worker 使用相同上限进行 fd 有界读取，stat 后增长仍最多读取上限加一个字节；解析前拒绝超限与格式变化。低档单行在创建格式化 cell 前按现有单对象预算检查，避免极宽行扩大对象工作集。
+- 获批后和 Worker 开读前复核源身份。metadata 与字段补扫共用同一判定；小 CSV 低档、实际 XLSX 的流式低档、pending 零预算兼容和 65 MiB 普通档字段路径保留。
+- 没有 OOM 后扩大堆重试；没有把 rows 的 64 MiB 上限用于公共入口；生产 qualified、profileId、policyDigest 和资源配置保持原值。
+
+### 17.2 验证记录
+
+聚焦单测 43/43 PASS；65 MiB 公共扫描/字段补扫与 rows 拒绝 4/4 PASS。生产 Main IPC/策略/Governor/真实 Worker 专项新增 17 项，最终结果、完整门禁及验证边界记录在 [本轮修复报告](../release/v3.2.11/review-fixes/2026-10-03-csv-admission/repair-report.md)。
+
+最终完整 `UNIT_TEST_CONCURRENCY=2 npm run release-check` 已通过，耗时 1331.4 秒：lint、架构 788/788、smoke、单测 9582 PASS / 0 FAIL / 4 Windows SKIP，以及 80/80 集成脚本（3085 项计数检查）。冻结 1780 个输入；仅 runner 自动生成的集成清单变化。源码在最终门禁后保持不变。
+
+低档容量边界的验证在 macOS / Node 执行，Windows/Electron 身份及可用内存为受控夹具。该证据不扩大既有人工验收范围。原始故障、专项与门禁日志位于主检出目录 `outputs/release-v3.2.11/2026-10-03-csv-admission-repair/`。

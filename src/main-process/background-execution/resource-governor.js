@@ -74,8 +74,12 @@ function validateRequest(request, kind) {
   if (request.signal && request.signal.aborted) {
     throw new ResourceGovernorError('ADMISSION_CANCELLED', 'Resource request was already cancelled');
   }
+  if (request.allowLowMemory !== undefined && (kind !== 'phase' || typeof request.allowLowMemory !== 'boolean')) {
+    throw new ResourceGovernorError('RESOURCE_REQUEST_INVALID', 'allowLowMemory 只能用于 phase 请求，且必须为布尔值');
+  }
   return Object.freeze({
     kind,
+    allowLowMemory: request.allowLowMemory !== false,
     ownerKey: assertNonEmptyString(request.ownerKey, 'ownerKey'),
     actionKey: assertNonEmptyString(request.actionKey, 'actionKey'),
     operationKey: request.operationKey === undefined || request.operationKey === null

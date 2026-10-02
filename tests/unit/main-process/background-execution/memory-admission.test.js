@@ -292,3 +292,30 @@ test('shutdown or cancellation during the final sample cannot publish a lease', 
     assert.equal(f.governor.snapshot().activeLeaseCount, 0);
   }
 });
+
+
+test('输入不适用低档时等待普通档，内存恢复后按同一 Governor 获批', async () => {
+  const { governor, state, clock } = fixture({ candidates: [
+    { mode: 'normal', config: config({ profileId: 'normal', phaseMemoryBytes: 768 * MiB }) },
+    { mode: 'low', config: config() }
+  ] });
+  const pending = governor.acquirePhaseLease(request('rows', { allowLowMemory: false }));
+  await Promise.resolve();
+  assert.equal(governor.snapshot().queued.size, 1);
+  assert.equal(governor.snapshot().activeLeaseCount, 0);
+  state.free = 1200 * MiB; clock.advance(1000);
+  const lease = await pending;
+  assert.equal(lease.memoryMode, 'normal');
+  lease.release(); closeResourceGovernor(governor);
+});
+
+test('没有适用候选时在排队前拒绝，不能把低档升成无资格普通档', async () => {
+  const { governor } = fixture();
+  await assert.rejects(governor.acquirePhaseLease(request('rows', { allowLowMemory: false })),
+    { code: 'RESOURCE_MEMORY_PROFILE_UNAVAILABLE' });
+  assert.equal(governor.snapshot().queued.size, 0);
+  assert.equal(governor.snapshot().activeLeaseCount, 0);
+  await assert.rejects(governor.acquirePhaseLease(request('rows', { allowLowMemory: 'false' })),
+    { code: 'RESOURCE_REQUEST_INVALID' });
+  closeResourceGovernor(governor);
+});

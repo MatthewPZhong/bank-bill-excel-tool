@@ -5,7 +5,7 @@
  target-version: v3.2.11
  branch: v3.2.11-bizop-rows-low-memory
  baseline: 18b82b4328cf5e00c1b2549d373a5b2f2677215c
- revision: R4
+ revision: R5
 -->
 
 | 项目 | 内容 |
@@ -13,7 +13,7 @@
 | 目标版本 | v3.2.11 |
 | 功能分支 | `v3.2.11-bizop-rows-low-memory` |
 | 基线 | `18b82b4328cf5e00c1b2549d373a5b2f2677215c`（初版已核验的远端 main／正式标签提交；R2 保持固定基线，不宣称重新核验当前 main） |
-| 日期／状态 | 2026-10-02／生产资格沿用人工确认清单；扫描清理补偿实现与验证见实施记录 §16 |
+| 日期／状态 | 2026-10-03／生产资格沿用人工确认清单；CSV 输入适用性修复与验证见实施记录 §17 |
 | 关联需求 | [Spec](spec.md)，P01—P06、AC01—AC24 |
 | 依赖 | 原资源 Governor／Supervisor、领域 owner、SQLite 保真缓存、公共 XLSX provider、Publisher／恢复体系 |
 | 模板来源 | `docs/templates/TechDoc-template.md`；将 PRD 字段替换为本分支 Spec，按本任务扩充需求章节。 |
@@ -245,6 +245,12 @@ T0／T7 的测量方法用于诊断容量、性能和失败恢复，建议保留
 固定基线中的 64 MiB 检查由 rows prepare／worker 消费，不是公共扫描或字段拆分的统一限制。[S05](baseline-evidence.md#s05) [S09](baseline-evidence.md#s09) 公共阶段可以用 stat 得到“rows 不适用”的只读提示；这只影响后续 rows 控件／提交，不阻断字段模式，也不能代替 Main 的最终复核。没有这种提示字段时，必须在 rows prepare 给出专属错误；不得为了提早反馈而拒绝整个文件。
 
 **65 MiB CSV 的决策例：** 公共检查通过、普通档能够在资源合同内安全运行时，允许完成基础扫描并进入字段拆分；选择 rows 则只拒绝 rows，切回字段后仍可按原规则继续。若普通档实际资源也不足，按该阶段资源原因拒绝／等待，不能给“所有拆分不支持超过 64 MiB”的错误。CSV/XLS 未验证组合不启用低档，也不能仅凭压缩／磁盘字节数认定内存安全；不自动转换源文件。
+
+**CSV 输入适用性实现（R5）：** Main 按真实 magic／扩展名合同识别格式，并将判定绑定已有 source snapshot。当前整表 CSV 的低档仅接受 `sizeBytes <= 256 * 1024` 的输入；这是与有界 reader 一起实施的低档容量范围，不是 CSV 的全局大小限制。每个 CSV 字节至多引入有界数量的分隔事件；上限同时约束原始 Buffer、解码文本、行/单元格数组及解析临时片段的总规模。密集短行、空行、转义引号、无效 UTF-8 与边界两侧通过真实 153/8 MiB Worker 回归；不以普通业务样本代替这些形状验证。Main 不扫描整份 CSV，不引入未获租约的重型预解析。
+
+Main 的 `allowLowMemory(input)` 为准备 owner 的静态同步判定。Governor 的 phase 请求仅允许布尔 `allowLowMemory`，`false` 只能删除 low 候选，不增加 normal 资格、不变更额度或绕过实时采样。大于此低档范围的 CSV 保留普通档候选：暂时不足继续有界等待；固定配额不容纳则立即拒绝；没有已获资格的适用候选则返回 `RESOURCE_MEMORY_PROFILE_UNAVAILABLE`。pending 兼容路径仍按原无独立内存预留合同执行。
+
+Worker 的 `split-prepare-low-v1` 将同一 CSV 上限传入 reader。reader 从同一 fd 最多读取上限加一个哨兵字节，超限在文本转换和整表解析前返回 `EXECUTION_INPUT_PROFILE_UNSUITABLE`；文件增长不能通过旧 stat 绕过。空表不重新进行无界读取，格式变化不回退到整表 Excel 解析。低档格式化单行前按结构及文本计入现有 `maxSingleRecordBytes`，超限在创建 cell 对象前受控拒绝。Main 获批后、Worker 开读前以及原有结果回收边界核验源身份；实际格式必须匹配 Main 的判断。普通档和旧兼容 CSV 的解析语义保留，rows 的 64 MiB 限制仍只作用于 rows。
 
 上述普通档候选与兼容资格按 §三登记；“保留机会”不表示绕过 Bcompat 或其他资源门禁。低档失败后不得在没有再次批准的情况下悄悄改用更大工作集。
 
