@@ -394,3 +394,23 @@ Spec 的业务行为、金额／行／输出合同和 Windows 验收标准未改
 最终完整 `UNIT_TEST_CONCURRENCY=2 npm run release-check` 已通过，耗时 1331.4 秒：lint、架构 788/788、smoke、单测 9582 PASS / 0 FAIL / 4 Windows SKIP，以及 80/80 集成脚本（3085 项计数检查）。冻结 1780 个输入；仅 runner 自动生成的集成清单变化。源码在最终门禁后保持不变。
 
 低档容量边界的验证在 macOS / Node 执行，Windows/Electron 身份及可用内存为受控夹具。该证据不扩大既有人工验收范围。原始故障、专项与门禁日志位于主检出目录 `outputs/release-v3.2.11/2026-10-03-csv-admission-repair/`。
+
+
+## 18. 2026-10-03 正式 rows CSV 生成阶段适用性补齐
+
+### 18.1 依据与实现
+
+用户提供基于 `87bdb924b58ceddc23a1c262dbddf57ae54cf55f` 的第三轮审查，要求补齐正式 rows 阶段。独立复现采用真实 Main metadata／rows 入口、当前生产策略、Supervisor 和真实 Worker：150 万行、24,000,016 字节 CSV 在普通档完成 metadata，同一 token 降到 768 MiB 可用内存后获批 rows 低档，发生 `ERR_WORKER_OUT_OF_MEMORY`。源文件和正式目标未改变，Main 原清理收口完成。
+
+- Main 在每次 rows 生成前依据 FilePlan 冻结快照及实际格式计算低档适用性。超过 256 KiB 的 CSV 保留普通档机会；静态总配额检查和 phase 申请均传递同一冻结布尔事实。
+- Supervisor 只接纳 simple job 的布尔限制，只传给 phase，不传给 base／compound／service。候选过滤复用现有机制；不改资格、预算、Worker limits、FIFO 或真实退出屏障。
+- Worker 缓存 reader 在源摘要计算后复核身份和实际格式，rows 低档明确传入有界 CSV 读取上限；复用文件增长与单对象防护，保留 SQLite 关闭及 Main 私有目录清理责任。
+- 前两轮预扫描和清理修复保留；现有人工 `qualified`、配置摘要、rows 64 MiB 专属源预算及普通档／pending 兼容合同保持原值。
+
+### 18.2 验证与证据
+
+聚焦单测 118/118 PASS，含 6 项新增回归；新增跨阶段专项 13/13 PASS。覆盖原始大样本受控超时、同一 token 等待恢复后的正式普通档输出、边界两侧、密集单列完整低档工作流、固定配额拒绝、排队源变化、关闭、Renderer 参数拒绝、真实 Worker 防御性读取、pending 兼容和 XLSX magic。
+
+最终完整 `UNIT_TEST_CONCURRENCY=2 npm run release-check` 已通过，耗时 1252.05 秒：lint、架构 788/788（41 个历史提交）、smoke、单测 9588 PASS / 0 FAIL / 4 Windows SKIP、81/81 集成脚本（3098 项计数检查）。冻结 1782 个输入；仅 runner 自动生成清单变化，最终源码保持不变。
+
+最终完整门禁及提交证据见 [本轮修复报告](../release/v3.2.11/review-fixes/2026-10-03-rows-csv-admission/repair-report.md)。本机 Node/文件 IO 证据与 Windows 平台、内存采样夹具分开记录；未重新执行 Windows 实机压力或 GUI 人工验收。

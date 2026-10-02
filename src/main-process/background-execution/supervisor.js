@@ -170,6 +170,9 @@ function snapshotExecuteRequest(request) {
   if (data.production !== undefined && typeof data.production !== 'boolean') {
     throw new SupervisorError('EXECUTE_REQUEST_FIELD_INVALID', 'Execute request production must be boolean');
   }
+  if (data.allowLowMemory !== undefined && typeof data.allowLowMemory !== 'boolean') {
+    throw new SupervisorError('EXECUTE_REQUEST_FIELD_INVALID', '执行请求 allowLowMemory 必须为布尔值');
+  }
   if (data.deferUnitStart !== undefined && typeof data.deferUnitStart !== 'boolean') {
     throw new SupervisorError('EXECUTE_REQUEST_FIELD_INVALID', 'Execute request deferUnitStart must be boolean');
   }
@@ -265,6 +268,9 @@ function createExecutionSupervisor(options = {}) {
     const onProgress = requestSnapshot.onProgress;
     const { actionKey, operationKey } = request;
     const policy = options.policyRegistry.assertRunnable(actionKey, { production: request.production === true });
+    if (request.allowLowMemory !== undefined && (policy.lifetime !== 'job' || policy.resources.compound)) {
+      throw new SupervisorError('EXECUTE_REQUEST_FIELD_INVALID', '输入档位限制只支持独立 job 的生成阶段');
+    }
     if (typeof options.bindInputForAction === 'function') {
       const boundInput = options.bindInputForAction(Object.freeze({
         actionKey,
@@ -1475,8 +1481,10 @@ function createExecutionSupervisor(options = {}) {
       return Object.freeze({ adapter, inspectTopology: null });
     }
 
-    function admissionRequest(resources) {
+    function admissionRequest(resources, phase = false) {
       return {
+        // Main 的冻结输入事实只收窄本次 phase；不传给 base、子任务或其他阶段。
+        ...(phase && request.allowLowMemory !== undefined ? { allowLowMemory: request.allowLowMemory } : {}),
         ownerKey: `job:${jobId}`,
         actionKey,
         operationKey,
@@ -1569,7 +1577,7 @@ function createExecutionSupervisor(options = {}) {
         : record.phaseResources;
       if (typeof resourceGovernor.assertSimpleJobFits === 'function') {
         try {
-          resourceGovernor.assertSimpleJobFits(admissionRequest(record.phaseResources),
+          resourceGovernor.assertSimpleJobFits(admissionRequest(record.phaseResources, true),
             includeBase ? policy.resources.base : { cpuSlots: 0, workerThreadSlots: 0, utilityProcessSlots: 0, ioHeavySlots: 0, memoryBytes: 0 },
             record.phaseResources);
         } catch (error) {
@@ -1652,7 +1660,7 @@ function createExecutionSupervisor(options = {}) {
         }
         required = record.phaseResources;
         requestedLease = 'phase';
-        const phaseLease = await resourceGovernor.acquirePhaseLease(admissionRequest(required));
+        const phaseLease = await resourceGovernor.acquirePhaseLease(admissionRequest(required, true));
         record.memoryConfig = phaseLease.memoryConfig || null;
         return retainGrantedLease(phaseLease);
       } catch (error) {

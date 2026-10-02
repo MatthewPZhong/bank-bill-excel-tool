@@ -9,6 +9,8 @@ const { createJobEnvelope } = require('../../../../src/main-process/background-e
 const { fromProtocolError, toProtocolError, validateSafeErrorV1 } = require('../../../../src/main-process/background-execution/error-codec');
 const canary = require('../../../../src/main-process/background-execution/canary');
 const { ROWS_POLICY } = require('../../../../src/main-process/toolbox-row-split/policy');
+const { createMemoryAdmissionPolicy } = require('../../../../src/main-process/background-execution/memory-admission');
+const { profile } = require('../../../../src/main-process/execution-descriptors/memory-profiles');
 
 const GiB = 1024 ** 3;
 const ZERO = { cpuSlots: 0, workerThreadSlots: 0, utilityProcessSlots: 0, ioHeavySlots: 0, memoryBytes: 0 };
@@ -36,9 +38,10 @@ function createClock() {
   };
 }
 
-function harness(t, { budgets = BUDGETS, base = ZERO, phase = ROWS_POLICY.resources.phase, mode = 'thread-single', behavior = 'queue', diagnosticsThrow = false } = {}) {
+function harness(t, { budgets = BUDGETS, base = ZERO, phase = ROWS_POLICY.resources.phase, mode = 'thread-single', behavior = 'queue', diagnosticsThrow = false, memoryAdmissionFactory = null } = {}) {
   const clock = createClock();
-  const governor = createResourceGovernor({ budgets, ...clock });
+  const governor = createResourceGovernor({ budgets, ...clock,
+    ...(memoryAdmissionFactory ? { memoryAdmission: memoryAdmissionFactory(clock) } : {}) });
   const policy = structuredClone(canary.pureComputePolicy);
   policy.mode = mode;
   policy.resources.base = { ...base };
@@ -50,10 +53,11 @@ function harness(t, { budgets = BUDGETS, base = ZERO, phase = ROWS_POLICY.resour
   const policyRegistry = createExecutionPolicyRegistry({ policies: [policy], entryRegistry, validatorRegistry,
     staticKeys: { resourceProfileKeys: [policy.resources.profile] }, generatedAt: '2026-09-19T00:00:00Z' });
   policyRegistry.freeze();
-  const state = { starts: 0, startedJobs: [], closes: 0, terminates: 0, admissionSnapshots: [] };
+  const state = { starts: 0, startedJobs: [], closes: 0, terminates: 0, admissionSnapshots: [], memoryConfigs: [] };
   const adapter = {
     start(callbacks) {
       state.starts += 1;
+      state.memoryConfigs.push(callbacks.memoryConfig);
       state.startedJobs.push(callbacks.jobId);
       state.admissionSnapshots.push(governor.snapshot());
       return {
@@ -75,9 +79,9 @@ function harness(t, { budgets = BUDGETS, base = ZERO, phase = ROWS_POLICY.resour
     workerThreadAdapter: adapter, utilityProcessAdapter: adapter, now: clock.now,
     diagnostics(entry) { if (diagnosticsThrow) throw new Error('诊断输出不可用'); diagnostics.push(entry); } });
   t.after(async () => { await supervisor.shutdown({ timeoutMs: 50 }); closeResourceGovernor(governor); });
-  function execute(id) {
+  function execute(id, extra = {}) {
     return supervisor.execute({ actionKey: policy.actionKey, operationKey: `operation-${id}`,
-      jobId: id, workerInstanceId: `worker-${id}`, input: { values: [1, 2], rounds: 2 } });
+      jobId: id, workerInstanceId: `worker-${id}`, input: { values: [1, 2], rounds: 2 }, ...extra });
   }
   async function block(resources, ownerKey = '/Users/private/business-file.xlsx') {
     return governor.acquirePhaseLease({ ownerKey, actionKey: 'test-blocker', operationKey: 'private-business-identifier', resources });
@@ -269,4 +273,47 @@ test('诊断输出回调失败不得阻止原始失败结算或资源清理', as
   assert.equal(result.error.code, 'RESOURCE_BUDGET_UNAVAILABLE');
   assert.equal(h.state.starts, 0);
   assertReleased(h);
+});
+
+
+function inputMemoryPolicy(state, clock) {
+  return createMemoryAdmissionPolicy({ compatibilityMemoryBytes: 2 * GiB, now: clock.now,
+    sampleMemory: () => ({ availableBytes: state.availableMiB * 1024 ** 2, sampledAt: clock.now() }),
+    isEvidenceValid: () => true, externalPressure: () => ({ inventoryComplete: true, blockers: [] }),
+    resolveRequest(common) { return common.kind === 'phase' ? { migrated: true, heavy: true,
+      candidates: ['normal', 'low'].map((mode) => ({ mode, config: profile('rows-generation', mode, 'unit-fixture') }))
+    } : { migrated: false, heavy: false, maxGrowthBytes: 0 }; }
+  });
+}
+
+test('输入不适用低档时总预算检查也过滤候选；允许低档时不向 base 传 phase 参数', async (t) => {
+  const state = { availableMiB: 2048 };
+  const h = harness(t, { budgets: { ...BUDGETS, memoryBytes: 512 * 1024 ** 2 },
+    memoryAdmissionFactory: (clock) => inputMemoryPolicy(state, clock) });
+  const failed = await h.execute('input-too-large', { allowLowMemory: false });
+  assert.equal(failed.error.code, 'RESOURCE_BUDGET_UNAVAILABLE'); assert.equal(h.state.starts, 0);
+  assertReleased(h);
+  const small = await h.execute('input-small', { allowLowMemory: true });
+  assert.equal(small.outcome, 'completed'); assert.equal(h.state.memoryConfigs[0].profileId, 'rows-generation-low-v1');
+  assertReleased(h);
+});
+
+test('等待期间调用方修改适用性不影响冻结请求；恢复内存后仅普通档启动', async (t) => {
+  const state = { availableMiB: 768 };
+  const h = harness(t, { memoryAdmissionFactory: (clock) => inputMemoryPolicy(state, clock) });
+  const request = { actionKey: h.policy.actionKey, operationKey: 'frozen-input', allowLowMemory: false,
+    input: { values: [1, 2], rounds: 2 } };
+  const pending = h.supervisor.execute(request); request.allowLowMemory = true;
+  await flush(); assert.equal(h.governor.snapshot().queued.size, 1); assert.equal(h.state.starts, 0);
+  state.availableMiB = 2048; h.clock.advance(1000); await flush();
+  assert.equal((await pending).outcome, 'completed');
+  assert.equal(h.state.memoryConfigs[0].profileId, 'rows-generation-normal-v1'); assertReleased(h);
+});
+
+test('适用性只接受布尔事实；非法输入在准入前拒绝', async (t) => {
+  const h = harness(t);
+  for (const allowLowMemory of ['false', 0, null, {}]) {
+    await assert.rejects(h.execute('invalid-input', { allowLowMemory }), { code: 'EXECUTE_REQUEST_FIELD_INVALID' });
+  }
+  assert.equal(h.state.starts, 0); assertReleased(h);
 });

@@ -9,6 +9,8 @@ const { normalizeWarningSummary } = require('../toolbox-background/generation-co
 const { sha256File } = require('../toolbox-output-writer');
 const { normalizeFilePlanV1, assertFilePlanFresh } = require('../archive-center/file-plan');
 const { sourceSnapshotMatchesStat } = require('../archive-center/source-snapshot');
+const { detectToolboxInputKind } = require('../toolbox-input-kind');
+const { LOW_MEMORY_CSV_MAX_BYTES } = require('../../backend/toolbox-format/csv-capacity');
 const {
   ROWS_ACTION, ROWS_BUDGETS, assert, exactKeys, rowsError, planRowCounts,
   buildRowTargets, assertResultBudget, assertSourceBudget, jsonBytes, assertDiskSpace, publicResult,
@@ -144,6 +146,11 @@ async function generateValidateAndPublishRows({
     filePlan.outputs.length === checked.fileCount, '按行拆分 FilePlan 非法');
   const context = operationContextFromBatch(batchContext);
   const source = filePlan.inputs[0];
+  // 每次正式生成独立判断适用性，不能沿用预扫描时的资源或扩展名假设。
+  const inputKind = detectToolboxInputKind(source.filePath);
+  assert(sourceSnapshotMatchesStat(source.sourceSnapshot, fs.statSync(source.filePath, { bigint: true })),
+    '拆分源文件在生成前已变化，请重新选择', 'TOOLBOX_SPLIT_READ_CONTEXT_STALE');
+  const allowLowMemory = inputKind !== 'csv' || source.sourceSnapshot.sizeBytes <= LOW_MEMORY_CSV_MAX_BYTES;
   const targets = buildRowTargets(source.filePath, path.dirname(filePlan.outputs[0].filePath), checked);
   const plan = validatePlan({ version: 1, action: ROWS_ACTION, attemptId: randomUUID(),
     taskRunId: context.taskRunId, source: { filePath: source.filePath, sourceSnapshot: source.sourceSnapshot },
@@ -159,7 +166,7 @@ async function generateValidateAndPublishRows({
   let execution;
   try {
     execution = await runtime.execute({ actionKey: ROWS_ACTION, operationKey: context.operationKey,
-      production: true, context: { kind: 'operation', value: context }, input });
+      production: true, allowLowMemory, context: { kind: 'operation', value: context }, input });
   } catch (error) { throw rowsAdmissionError(error); }
   if (!execution || execution.outcome !== 'completed' || execution.terminalSource !== 'job:done') {
     if (execution && execution.error) throw rowsAdmissionError(fromProtocolError(execution.error));

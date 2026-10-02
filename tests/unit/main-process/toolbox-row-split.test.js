@@ -444,3 +444,42 @@ for (const availableMiB of [null, 512]) test(`9 份真实 rows 输出、发布�
   assert.ok(detail.artifacts.every((item) => item.status === 'ready'));
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(userDataDir, JOURNAL_INDEX_NAME))).entries, []);
 });
+
+
+test('rows 低档缓存 reader 在整表分配前拒绝超限 CSV，关闭 SQLite', async (t) => {
+  const dir = fixture(t), source = path.join(dir, 'input.csv');
+  const { LOW_MEMORY_CSV_MAX_BYTES: limit } = require('../../../src/backend/toolbox-format/csv-capacity');
+  fs.writeFileSync(source, 'a\n' + 'x'.repeat(limit - 1));
+  const { plan } = directInput(makePlan(dir, source, 1, 1));
+  await assert.rejects(createSealedCache(plan, null, undefined, undefined, profile('rows-generation', 'low')),
+    { code: 'EXECUTION_INPUT_PROFILE_UNSUITABLE' });
+  assert.equal(fs.existsSync(path.join(plan.privateDirectory, 'cache-sealed.json')), false);
+  const db = new DatabaseSync(path.join(plan.privateDirectory, 'rows.sqlite'));
+  try { db.exec('BEGIN EXCLUSIVE; ROLLBACK'); assert.equal(db.prepare('SELECT COUNT(*) AS n FROM rows').get().n, 0); }
+  finally { db.close(); }
+});
+
+test('rows 低档实际读取期间增长仍受 fd 上限保护，不依赖旧 stat', async (t) => {
+  const dir = fixture(t), source = path.join(dir, 'input.csv'); fs.writeFileSync(source, 'a\n1\n');
+  const { LOW_MEMORY_CSV_MAX_BYTES: limit } = require('../../../src/backend/toolbox-format/csv-capacity');
+  const { plan } = directInput(makePlan(dir, source, 1, 1));
+  const original = fs.readSync; let injected = false;
+  fs.readSync = function(fd, buffer, ...args) {
+    if (!injected && buffer.length === limit + 1) { injected = true; fs.appendFileSync(source, 'x'.repeat(limit)); }
+    return original.call(this, fd, buffer, ...args);
+  };
+  try {
+    await assert.rejects(createSealedCache(plan, null, undefined, undefined, profile('rows-generation', 'low')),
+      { code: 'EXECUTION_INPUT_PROFILE_UNSUITABLE' });
+  } finally { fs.readSync = original; }
+  assert.equal(injected, true); assert.equal(fs.existsSync(path.join(plan.privateDirectory, 'cache-sealed.json')), false);
+});
+
+test('rows 低档对小文件极宽行按单对象预算受控拒绝', async (t) => {
+  const dir = fixture(t), source = path.join(dir, 'input.csv');
+  fs.writeFileSync(source, Array.from({ length: 5000 }, (_, n) => 'field' + n).join(',') + '\n' + Array(5000).fill('1').join(','));
+  const { plan } = directInput(makePlan(dir, source, 1, 1));
+  await assert.rejects(createSealedCache(plan, null, undefined, undefined, profile('rows-generation', 'low')),
+    { code: 'EXECUTION_INPUT_PROFILE_UNSUITABLE' });
+  assert.equal(fs.existsSync(path.join(plan.privateDirectory, 'cache-sealed.json')), false);
+});

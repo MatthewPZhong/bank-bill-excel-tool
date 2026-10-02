@@ -10,6 +10,8 @@ const { assertSourcesFresh } = require('../toolbox-background/generation-core');
 const { encodePayload, decodeHeaderPayload, decodeRowPayload, decodeStylePayload, sha256FileSync } = require('../toolbox-background/route-db-contract');
 const { ROWS_BUDGETS, assert, rowsError, assertDiskSpace, assertSourceBudget, writePrivateJson, readPrivateJson } = require('./contracts');
 const { toolboxReaderOptions, sqliteCacheKiB, checkExecutionMemory } = require('../background-execution/execution-memory-options');
+const { detectToolboxInputKind } = require('../toolbox-input-kind');
+const { LOW_MEMORY_CSV_MAX_BYTES } = require('../../backend/toolbox-format/csv-capacity');
 
 function checkCancelled(signal) {
   if (signal && signal.aborted) throw rowsError('TOOLBOX_GENERATION_CANCELLED', '按行拆分已取消');
@@ -38,6 +40,7 @@ async function createSealedCache(plan, signal, resourceObserver = () => {}, poll
   assert(!fs.existsSync(cachePath), '任务缓存已存在，不能覆盖');
   assertSourcesFresh([plan.source]);
   assertSourceBudget(plan.source.filePath);
+  const inputKind = detectToolboxInputKind(plan.source.filePath);
   const sourceSha256 = sha256FileSync(plan.source.filePath);
   observeResources();
   const db = new DatabaseSync(cachePath);
@@ -80,9 +83,11 @@ async function createSealedCache(plan, signal, resourceObserver = () => {}, poll
     };
     db.exec('BEGIN IMMEDIATE');
     transaction = true;
+    assertSourcesFresh([plan.source]);
     const summary = await streamToolboxTables(plan.source.filePath, {
       strategy: TOOLBOX_SHEET_STRATEGIES.SPLIT,
-      readerOptions: toolboxReaderOptions(memoryConfig, plan.privateDirectory),
+      readerOptions: { ...toolboxReaderOptions(memoryConfig, plan.privateDirectory), expectedInputKind: inputKind,
+        ...(memoryConfig?.profileId === 'rows-generation-low-v1' ? { csvMaxSourceBytes: LOW_MEMORY_CSV_MAX_BYTES } : {}) },
       sourceRegistryResolver: resolver,
       cancelToken: { get cancelled() { return Boolean(signal && signal.aborted); } },
       onHeader(info) {
