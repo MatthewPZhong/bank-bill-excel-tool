@@ -21,7 +21,21 @@ function createAdmissionOnlyOwner({ governor, descriptor, start, cleanup = async
   }
   const registration = Object.freeze({ ...descriptor, resources: validateResourceVector(descriptor.resources) });
   const records = new Set();
+  const cleanupRecords = new Set();
   let accepting = true;
+  let closing = null;
+
+  function retryCleanup(record) {
+    if (record.cleaning) return record.cleaning;
+    record.attempts++;
+    record.cleaning = Promise.resolve().then(() => cleanup(record.input)).then(() => {
+      cleanupRecords.delete(record);
+    }, (error) => {
+      record.lastError = error;
+      throw error;
+    }).finally(() => { record.cleaning = null; });
+    return record.cleaning;
+  }
 
   async function run(input, { operationKey, signal } = {}) {
     if (!accepting) throw failure('RESOURCE_PREPARE_OWNER_CLOSED', '准备阶段 owner 已关闭');
@@ -29,7 +43,8 @@ function createAdmissionOnlyOwner({ governor, descriptor, start, cleanup = async
       throw failure('RESOURCE_SIGNAL_INVALID', '准备阶段取消信号无效');
     }
     const controller = new AbortController();
-    const record = { controller, state: 'waiting', completion: null };
+    const record = { controller, input, operationKey, state: 'waiting', completion: null,
+      cleaning: null, attempts: 0, lastError: null };
     records.add(record);
     const cancel = () => controller.abort();
     if (signal) {
@@ -67,7 +82,12 @@ function createAdmissionOnlyOwner({ governor, descriptor, start, cleanup = async
         if (!closure.closed) throw failure('RESOURCE_PREPARE_CLOSE_UNCONFIRMED', '扫描载体关闭未确认，保留资源归属', closure.error);
         safeToRelease = true;
         record.state = 'cleanup';
-        try { await cleanup(input); } catch (error) {
+        // 载体已经退出，补偿删除不再占用执行配额；清理责任独立保留到成功。
+        cleanupRecords.add(record);
+        lease.release('prepare-closed');
+        lease = null;
+        records.delete(record);
+        try { await retryCleanup(record); } catch (error) {
           throw new AggregateError([...(result.error ? [result.error] : []), error], '扫描临时资源清理失败');
         }
         if (result.error) throw result.error;
@@ -90,16 +110,29 @@ function createAdmissionOnlyOwner({ governor, descriptor, start, cleanup = async
 
   return Object.freeze({
     run,
-    async close() {
+    close() {
       accepting = false;
-      const current = [...records];
-      for (const record of current) record.controller.abort();
-      await Promise.allSettled(current.map((record) => record.completion));
-      return Object.freeze({ closed: records.size === 0, unclosedCount: records.size });
+      if (closing) return closing;
+      closing = (async () => {
+        const current = [...records];
+        for (const record of new Set([...current, ...cleanupRecords])) record.controller.abort();
+        await Promise.allSettled(current.map((record) => record.completion));
+        // 先等待本轮正常清理结束，再对仍失败的记录重试一次；并发 close 共用该轮。
+        await Promise.allSettled([...cleanupRecords].map((record) => record.cleaning));
+        await Promise.allSettled([...cleanupRecords].map(retryCleanup));
+        return Object.freeze({ closed: records.size === 0 && cleanupRecords.size === 0,
+          unclosedCount: records.size, cleanupPendingCount: cleanupRecords.size });
+      })().finally(() => { closing = null; });
+      return closing;
     },
     snapshot() {
       return Object.freeze({ accepting, activeCount: records.size,
-        states: Object.freeze([...records].map((record) => record.state)) });
+        states: Object.freeze([...records].map((record) => record.state)),
+        cleanupPendingCount: cleanupRecords.size,
+        cleanupFailures: Object.freeze([...cleanupRecords].map((record) => Object.freeze({
+          operationKey: record.operationKey || null, attempts: record.attempts,
+          code: record.lastError?.code || null, message: record.lastError?.message || null
+        }))) });
     }
   });
 }

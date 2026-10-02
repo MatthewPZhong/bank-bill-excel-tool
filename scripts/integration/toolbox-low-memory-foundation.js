@@ -123,7 +123,7 @@ async function main() {
     assert.equal(earlyResults, 3);
     assert.equal(cleanups, 3);
     assert.deepEqual(fs.readFileSync(filePath), sourceBefore);
-    assert.deepEqual(await owner.close(), { closed: true, unclosedCount: 0 });
+    assert.deepEqual(await owner.close(), { closed: true, unclosedCount: 0, cleanupPendingCount: 0 });
     passed++;
     process.stdout.write(`${passed}/4 PASS：真实 Worker、获批配置、metadata/SST、退出屏障与清理；调度数值为注入夹具。\n`);
   } finally {

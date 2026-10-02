@@ -6,6 +6,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { createAdmissionOnlyOwner } = require('./background-execution/admission-only-owner');
 const { dispatchLargeSplit } = require('./toolbox-large-split-dispatch');
+const { createToolboxScanResources } = require('./toolbox-scan-resources');
 const { sourceSnapshotFromStat, sourceSnapshotMatchesStat } = require('./archive-center/source-snapshot');
 const { MAX_ROW_SPLIT_FILES } = require('./toolbox-row-split/contracts');
 
@@ -27,17 +28,20 @@ function validateRequest(request, keys) {
 }
 
 // Main 持有窗口、来源与私有目录；Renderer 只能持有 token 与请求号。
-function createToolboxSplitReadOwner({ governor, dispatch = dispatchLargeSplit, temporaryRoot = os.tmpdir() }) {
+function createToolboxSplitReadOwner({ governor, dispatch = dispatchLargeSplit,
+  temporaryRoot = path.join(os.tmpdir(), 'bank-bill-toolbox-scans'), fsImpl = fs }) {
+  const resources = createToolboxScanResources({ temporaryRoot, fsImpl });
   const sessions = new Map();
   const requests = new Map();
   const observedSenders = new WeakSet();
   let accepting = true;
+  let closing = null;
   const scans = createAdmissionOnlyOwner({
     governor,
     descriptor: { ownerKey: 'toolbox-split-read', actionKey: SCAN_ACTION, resources: SCAN_RESOURCES, timeoutMs: 5000 },
     start(input, execution) {
       try {
-        input.privateDirectory = fs.mkdtempSync(path.join(temporaryRoot, 'toolbox-scan-'));
+        resources.create(input);
         const carrier = dispatch({ ...input, executionMemoryConfig: execution.memoryConfig });
         return { ...carrier, promise: carrier.promise.then((result) => ({ ...result, executionMode: execution.memoryMode })) };
       } catch (error) {
@@ -45,7 +49,7 @@ function createToolboxSplitReadOwner({ governor, dispatch = dispatchLargeSplit, 
       }
     },
     cleanup(input) {
-      if (input.privateDirectory) fs.rmSync(input.privateDirectory, { recursive: true, force: true });
+      resources.cleanup(input);
     }
   });
 
@@ -181,13 +185,26 @@ function createToolboxSplitReadOwner({ governor, dispatch = dispatchLargeSplit, 
       requests.get(keyOf(senderId(sender), request.requestId))?.controller.abort();
       return { status: 'cancelled', version: 2, requestId: request.requestId };
     },
-    async close() {
+    close() {
       accepting = false;
-      for (const id of sessions.keys()) invalidate(id);
-      for (const request of requests.values()) request.controller.abort();
-      return scans.close();
+      if (closing) return closing;
+      closing = (async () => {
+        for (const id of sessions.keys()) invalidate(id);
+        for (const request of requests.values()) request.controller.abort();
+        const result = await scans.close();
+        const recovery = resources.retryRecovered();
+        const cleanupPendingCount = result.cleanupPendingCount + recovery.cleanupPendingCount;
+        return Object.freeze({ closed: result.unclosedCount === 0 && cleanupPendingCount === 0,
+          unclosedCount: result.unclosedCount, cleanupPendingCount });
+      })().finally(() => { closing = null; });
+      return closing;
     },
-    snapshot: scans.snapshot
+    snapshot() {
+      const current = scans.snapshot(), recovery = resources.snapshot();
+      return Object.freeze({ ...current, cleanupPendingCount: current.cleanupPendingCount + recovery.cleanupPendingCount,
+        cleanupUnpersistedCount: recovery.cleanupUnpersistedCount,
+        cleanupFailures: Object.freeze([...current.cleanupFailures, ...recovery.cleanupFailures]) });
+    }
   });
 }
 

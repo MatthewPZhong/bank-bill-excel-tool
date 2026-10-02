@@ -5,7 +5,7 @@
  target-version: v3.2.11
  branch: v3.2.11-bizop-rows-low-memory
  baseline: 18b82b4328cf5e00c1b2549d373a5b2f2677215c
- revision: R3
+ revision: R4
 -->
 
 | 项目 | 内容 |
@@ -13,7 +13,7 @@
 | 目标版本 | v3.2.11 |
 | 功能分支 | `v3.2.11-bizop-rows-low-memory` |
 | 基线 | `18b82b4328cf5e00c1b2549d373a5b2f2677215c`（初版已核验的远端 main／正式标签提交；R2 保持固定基线，不宣称重新核验当前 main） |
-| 日期／状态 | 2026-10-02／用户确认人工测试通过，生产资格改为人工确认清单；本轮实现与验证见实施记录 §15 |
+| 日期／状态 | 2026-10-02／生产资格沿用人工确认清单；扫描清理补偿实现与验证见实施记录 §16 |
 | 关联需求 | [Spec](spec.md)，P01—P06、AC01—AC24 |
 | 依赖 | 原资源 Governor／Supervisor、领域 owner、SQLite 保真缓存、公共 XLSX provider、Publisher／恢复体系 |
 | 模板来源 | `docs/templates/TechDoc-template.md`；将 PRD 字段替换为本分支 Spec，按本任务扩充需求章节。 |
@@ -254,11 +254,21 @@ Main 创建 `ScanSession`（拟新增）：随机内部身份、发起窗口、�
 
 准备扫描重型解析复用 `large-split-worker` 内部的格式 facade，增加 metadata 作业；进入该新路径需接受可信执行配置，不沿用 `shouldUseLargeChannel` 的大小判断决定是否在 Main 中重解析。[S05](baseline-evidence.md#s05) [S15](baseline-evidence.md#s15)
 
-旧 dispatcher `promise` 的完成不证明退出。实施时增加明确 `closed`／等价退出 Promise（拟新增，旧返回项保持兼容），在创建 Worker 后立即监听 exit；新准备 owner 只在业务结果和真实退出均得到处理后清理／释放。构造失败、postMessage 失败、done 后 exit 延迟、cancel 后不响应都要独立测试。不能只在 `finally` 中调用未等待的 terminate。
+旧 dispatcher `promise` 的完成不证明退出。实施时增加明确 `closed`／等价退出 Promise（拟新增，旧返回项保持兼容），在创建 Worker 后立即监听 exit；新准备 owner 在业务结果和真实退出均得到处理后释放执行配额，并独立完成临时资源清理。构造失败、postMessage 失败、done 后 exit 延迟、cancel 后不响应都要独立测试。不能只在 `finally` 中调用未等待的 terminate。
 
 临时 SST 使用独占会话目录，文件身份／权限／关闭方式复用公共 provider。正常 scan 返回前关闭大资源；只保留小元信息和读取 token。窗口销毁或切换后取消本会话，迟到结果不更新 DOM；新元数据结果不会保留上一会话的字符串／样式引用。
 
 崩溃残留的清理凭 Main 受控根、所属记录和文件身份进行；没有所有权证明就保留并报诊断，不递归扫删任意 temp 目录。该清理不读取归档的“永久保留”设置。
+
+**release/v3.2.11 清理补偿实现（2026-10-02）：**
+
+- `admission-only-owner` 将载体记录和待清理记录分开。确认真实退出即释放 CPU／Worker／IO／内存 lease；清理失败仍向调用方返回聚合错误，并保留清理输入、尝试次数和最后错误。`close()` 单飞执行，每轮对仍失败的清理重试一次；成功后才移除责任。
+- `close()` 返回 `closed`、`unclosedCount`、`cleanupPendingCount`。`closed` 仅在两种计数均为零时成立；待清理记录不充当活动 Worker，也不占用已释放的执行配额。
+- Main 固定扫描根为 `{userData}/toolbox-scan-temp/`。每次扫描使用独立随机目录及 `.toolbox-scan-owner-<UUID>.json` 责任记录；先登记 owner、根和目录身份，再启动 Worker。确认退出后，在删除前原子保存 `cleanup-pending` 和文件身份清单。文件数据先 `fsync`，记录通过同目录重命名替换；此处验证的是进程退出／重启恢复，不声明断电耐久性。
+- 身份包含无损设备号、inode 和创建时间；普通文件还核对大小、修改时间和状态变化时间。重试重新核验根、目录、记录文件及已登记子对象；允许已成功删除的对象缺失，拒绝替换、新增对象、符号链接或非法相对路径。按清单逐项 unlink/rmdir，不递归删除未登记内容。
+- Main 启动及 owner 关闭沿同一受控根读取责任记录，只补偿已记录关闭事实的 `cleanup-pending`。`running`、损坏记录、身份不符及旧版无记录的临时目录保留并诊断；不依据目录名前缀推断所有权，不将所属进程消失冒充原记录的关闭事实。
+- 退出时，Worker 未退出仍阻断关闭；已退出且补偿责任已持久保存时记录警告并继续关闭 runtime，下次启动重试。若清理责任尚未成功保存，退出明确失败并允许重试，避免丢失仅在内存中的责任。清理不读取或修改 Archive 保留设置、来源文件和导出产物。
+
 
 ## 五、需求 P03：XLSX provider、样式与完整关闭
 

@@ -19,7 +19,7 @@ test('completed scan holds quota and temporary ownership until real carrier clos
   const result = deferred(), closed = deferred();
   let cleaned = false;
   const { governor, owner } = setup(() => ({ promise: result.promise, closed: closed.promise, cancel() {} }),
-    () => { assert.equal(governor.snapshot().activeLeaseCount, 1); cleaned = true; });
+    () => { assert.equal(governor.snapshot().activeLeaseCount, 0); cleaned = true; });
   const pending = owner.run({});
   await flush();
   result.resolve({ headers: ['列'] });
@@ -75,7 +75,7 @@ test('missing or rejected closure proof keeps the lease visible and close report
     const { governor, owner } = setup(broken, () => { assert.fail('未确认退出不能清理'); });
     await assert.rejects(owner.run({}), /关闭承诺|关闭未确认/);
     assert.equal(governor.snapshot().activeLeaseCount, 1);
-    assert.deepEqual(await owner.close(), { closed: false, unclosedCount: 1 });
+    assert.deepEqual(await owner.close(), { closed: false, unclosedCount: 1, cleanupPendingCount: 0 });
     governor.release(governor.snapshot().activeLeases[0].leaseId, 'test-fixture-no-real-carrier');
   }
 });
@@ -93,8 +93,89 @@ test('owner shutdown cancels active scans and refuses new admissions', async () 
   const pending = owner.run({});
   const rejected = assert.rejects(pending, { code: 'ADMISSION_CANCELLED' });
   await flush();
-  assert.deepEqual(await owner.close(), { closed: true, unclosedCount: 0 });
+  assert.deepEqual(await owner.close(), { closed: true, unclosedCount: 0, cleanupPendingCount: 0 });
   await rejected;
   await assert.rejects(owner.run({}), { code: 'RESOURCE_PREPARE_OWNER_CLOSED' });
   assert.equal(governor.snapshot().activeLeaseCount, 0);
+});
+
+
+test('首次清理失败保留责任，close 重试成功后才移除待清理记录', async () => {
+  const input = { directory: 'owned-scan' };
+  let attempts = 0;
+  const denied = Object.assign(new Error('首次删除被拒绝'), { code: 'EPERM' });
+  const { governor, owner } = setup(() => ({ promise: Promise.resolve('value'), closed: Promise.resolve(), cancel() {} }),
+    (actual) => { assert.equal(actual, input); if (++attempts === 1) throw denied; });
+  await assert.rejects(owner.run(input), (error) => error instanceof AggregateError && error.errors.includes(denied));
+  assert.equal(governor.snapshot().activeLeaseCount, 0);
+  assert.equal(owner.snapshot().activeCount, 0);
+  assert.equal(owner.snapshot().cleanupPendingCount, 1);
+  assert.equal(owner.snapshot().cleanupFailures[0].code, 'EPERM');
+  assert.deepEqual(await owner.close(), { closed: true, unclosedCount: 0, cleanupPendingCount: 0 });
+  assert.equal(attempts, 2);
+});
+
+test('持续清理失败不再占用执行额度，关闭结果保留独立待清理计数', async () => {
+  let attempts = 0;
+  const { governor, owner } = setup(() => ({ promise: Promise.resolve(), closed: Promise.resolve(), cancel() {} }),
+    () => { attempts++; throw Object.assign(new Error('仍无删除权限'), { code: 'EACCES' }); });
+  await assert.rejects(owner.run({}), AggregateError);
+  for (let index = 0; index < 2; index++) {
+    assert.deepEqual(await owner.close(), { closed: false, unclosedCount: 0, cleanupPendingCount: 1 });
+    assert.equal(governor.snapshot().activeLeaseCount, 0);
+  }
+  assert.equal(attempts, 3);
+});
+
+test('清理仍在等待时已退出 Worker 的额度可供下一项扫描使用', async () => {
+  const cleanup = deferred();
+  let started = 0;
+  const { governor, owner } = setup(() => {
+    started++; return { promise: Promise.resolve(started), closed: Promise.resolve(), cancel() {} };
+  }, (input) => input.slow ? cleanup.promise : undefined);
+  const first = owner.run({ slow: true });
+  await flush();
+  assert.equal(governor.snapshot().activeLeaseCount, 0);
+  const second = owner.run({});
+  await flush();
+  assert.equal(started, 2);
+  cleanup.resolve();
+  assert.deepEqual(await Promise.all([first, second]), [1, 2]);
+  await owner.close();
+});
+
+test('关闭期间的清理失败会重试，并发 close 不重复执行同一补偿', async () => {
+  const carrierExit = deferred(), retry = deferred();
+  let attempts = 0;
+  const { governor, owner } = setup(() => ({ promise: Promise.resolve('late'), closed: carrierExit.promise,
+    cancel() { carrierExit.resolve(); } }), () => {
+    attempts++;
+    if (attempts === 1) throw Object.assign(new Error('首次清理失败'), { code: 'EPERM' });
+    return retry.promise;
+  });
+  const reading = owner.run({});
+  const rejected = assert.rejects(reading, AggregateError);
+  await flush();
+  const a = owner.close(), b = owner.close();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(attempts, 2);
+  assert.equal(governor.snapshot().activeLeaseCount, 0);
+  retry.resolve();
+  assert.deepEqual(await a, { closed: true, unclosedCount: 0, cleanupPendingCount: 0 });
+  assert.deepEqual(await b, { closed: true, unclosedCount: 0, cleanupPendingCount: 0 });
+  await rejected;
+});
+
+
+test('close 发生在载体退出后的清理等待期间，也抑制迟到成功结果', async () => {
+  const cleanup = deferred();
+  const { owner } = setup(() => ({ promise: Promise.resolve('late'), closed: Promise.resolve(), cancel() {} }),
+    () => cleanup.promise);
+  const reading = owner.run({});
+  const rejected = assert.rejects(reading, { code: 'ADMISSION_CANCELLED' });
+  await flush();
+  const closed = owner.close();
+  cleanup.resolve();
+  await rejected;
+  assert.equal((await closed).closed, true);
 });

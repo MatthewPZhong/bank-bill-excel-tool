@@ -604,6 +604,7 @@ const {
 const { shouldUseLargeChannel } = require('./main-process/toolbox-large-split-router');
 const { dispatchLargeSplit } = require('./main-process/toolbox-large-split-dispatch');
 const { createToolboxSplitReadOwner } = require('./main-process/toolbox-split-read-owner');
+const { recoverToolboxScanResources } = require('./main-process/toolbox-scan-resources');
 // v2.1.9 N5 T26（spec §5.4 🔴 对外契约破坏性变更）：场景命中行独立报表 writer
 //   v2.1.8 主输出 Sheet 3 撤除 → 改独立报表 命中场景行-{basename}-{ts}.xlsx
 //   v3.0.4 F2：落位由 error-reports/{date}/ 改为 bank-statement-process/{date}/（与错误报告目录互换）
@@ -19924,10 +19925,25 @@ function assertToolboxTargetsDoNotAliasSources(sourcePaths, targetPaths) {
 let toolboxSplitReadContext = null;
 const toolboxSplitReadOwners = new WeakMap();
 
+function recoverToolboxScansAtStartup() {
+  const report = recoverToolboxScanResources({
+    temporaryRoot: path.join(app.getPath('userData'), 'toolbox-scan-temp')
+  });
+  if (report.cleanupPendingCount > 0) {
+    try { appendActivityLogEntry({
+      level: 'warning', source: 'main', domain: 'toolbox',
+      message: '拆分扫描临时资源仍待清理，已保留责任记录和原内容',
+      details: report.cleanupFailures.map((item) => `${item.id || 'root'}: ${item.code} ${item.message}`)
+    }); } catch (error) { console.warn('扫描补偿诊断写入日志失败，责任记录继续保留', error); }
+  }
+  return report;
+}
+
 function getToolboxSplitReadOwner() {
   const runtime = backgroundExecutionRuntimeManager.get();
   if (!toolboxSplitReadOwners.has(runtime)) {
-    toolboxSplitReadOwners.set(runtime, createToolboxSplitReadOwner({ governor: runtime.resourceGovernor }));
+    toolboxSplitReadOwners.set(runtime, createToolboxSplitReadOwner({ governor: runtime.resourceGovernor,
+      temporaryRoot: path.join(app.getPath('userData'), 'toolbox-scan-temp') }));
   }
   return toolboxSplitReadOwners.get(runtime);
 }
@@ -21504,6 +21520,7 @@ async function initializeApplication() {
     // Toolbox committed publication 已作为 ArchiveCenter owner recovery 在通用
     // interrupted sweep 前写入“附件 + succeeded”耐久 outbox 并完成重放。
     // VCC lineage/hold 只由 Archive controller 的 post-outbox hook 执行一次。
+    recoverToolboxScansAtStartup();
     // 结果侧库只服务上一进程的最后一次 run；即使模块默认关闭，也要在本次启动后台立即回收。
     schedulePreFundReconciliationStartupCleanup();
 
@@ -22266,7 +22283,16 @@ async function shutdownBackgroundExecutionRuntimeGracefully() {
   const readOwner = runtime && toolboxSplitReadOwners.get(runtime);
   if (readOwner) {
     const closed = await readOwner.close();
-    if (!closed.closed) throw Object.assign(new Error('拆分准备扫描尚未关闭'), { code: 'TOOLBOX_SPLIT_READ_CLOSE_UNCONFIRMED' });
+    if (closed.unclosedCount > 0) throw Object.assign(new Error('拆分准备扫描尚未关闭'), { code: 'TOOLBOX_SPLIT_READ_CLOSE_UNCONFIRMED' });
+    if (closed.cleanupPendingCount > 0) {
+      const pending = readOwner.snapshot();
+      if (pending.cleanupUnpersistedCount > 0) throw Object.assign(new Error('拆分扫描清理责任尚未保存，请重试退出'),
+        { code: 'TOOLBOX_SPLIT_READ_CLEANUP_UNPERSISTED' });
+      try { appendActivityLogEntry({ level: 'warning', source: 'main', domain: 'toolbox',
+        message: '拆分扫描载体已退出，临时资源保留待下次启动重试清理',
+        details: pending.cleanupFailures.map((item) => `${item.code || 'PENDING'}: ${item.message || '清理待重试'}`) });
+      } catch (error) { console.warn('扫描补偿诊断写入日志失败，责任记录继续保留', error); }
+    }
   }
   const report = await backgroundExecutionRuntimeManager.shutdown({ timeoutMs: 5000 });
   const leakedTransports = Array.isArray(report && report.leakedTransports)

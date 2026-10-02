@@ -357,3 +357,20 @@ Spec 的业务行为、金额／行／输出合同和 Windows 验收标准未改
 本轮已按 package.json 的 release-check 五个阶段分别完成：lint、架构（786/786 文件、38 个历史提交）、smoke、全量单测（9572 PASS／0 FAIL／4 Windows SKIP）和集成（78/78 脚本、3052 项检查）。smoke／单测／集成执行时间为 15:35:20—15:53:59（Asia/Shanghai）；lint 和架构另行执行并通过。冻结 1769 个代码／测试／配置输入，期间只有 runner 自动生成的集成测试清单变化。
 
 用户人工验收按本会话确认记录 PASS。本轮自动验证的 Windows 平台事实和内存读数为注入夹具；真实 Worker、Electron 和 ASAR 在本机运行，不冒充再次执行了 Windows 实机压力或安装包人工验收。本轮记录与日志见主检出目录 outputs/release-v3.2.11/2026-10-02-manual-memory-activation/activation-report.md。尚未提交、推送、升版或发布。
+
+
+## 16. 2026-10-02 release 扫描临时资源补偿修复
+
+### 16.1 依据与决策
+
+复核基线 `release/v3.2.11@8cc9b2ddbc056c8a78d4a8f061083853815db019`。用户提供的 P2 指出：Worker 已退出，但临时目录删除抛错后，原 owner 的 finally 同时删除运行记录，后续 close 无法补偿。新增四项故障回归在旧实现均失败。
+
+- 载体退出与清理完成分别管理。真实退出即释放执行 lease；保留待清理输入与错误，close 每轮单飞重试，返回独立 `unclosedCount`／`cleanupPendingCount`。
+- Main 以 `{userData}/toolbox-scan-temp/` 固定根持有目录和 JSON 责任记录。删除前持久化关闭事实与对象身份清单；启动恢复、关闭重试和当前清理使用同一校验与删除路径。按登记对象逐项清理，文件／目录身份变化、未知内容和符号链接均保留。
+- 无关闭事实、损坏记录、旧版无记录目录只保留并诊断。持久补偿待处理不占 Worker／内存额度；无法持久保存的新责任仍使退出失败，可重试。生产 qualified 清单及已有内存准入规则沿用当前实现。
+
+### 16.2 验证与边界
+
+聚焦 owner 与真实扫描单测 16/16 PASS，连同 Main 启动／退出合同共 27/27 PASS；新故障集成 16/16 PASS，覆盖真实 Worker、首次及持续 EPERM/EACCES、部分删除、目录／文件替换、符号链接、未知内容、新进程恢复、Main 启动与退出、日志失败以及取消后的补偿。完整 `UNIT_TEST_CONCURRENCY=2 npm run release-check` 于 22:53:27—23:12:32 通过：lint、架构 787/787、smoke、单测 9577 PASS／0 FAIL／4 Windows SKIP、集成 79/79 脚本（3068 项计数检查）。冻结 1778 个输入，期间只有 runner 自动生成的集成清单变化。最终结果和完整发布门禁见 [本轮修复报告](../release/v3.2.11/review-fixes/2026-10-02-scan-cleanup/repair-report.md)。
+
+文件系统错误为隔离注入，真实 Worker 和重启子进程在本机运行；这些证据不扩大既有 Windows 人工验收结论，也不代表重新完成安装包、Excel/WPS 或各功能完整人工验收。
