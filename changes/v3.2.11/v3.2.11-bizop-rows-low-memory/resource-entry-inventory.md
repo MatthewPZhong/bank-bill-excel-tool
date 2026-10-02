@@ -39,4 +39,4 @@
 
 `memory-activity.test.js` 覆盖未知 Main 工作、未退出载体、反向 legacy 构造阻断、同配置已准入载体、旧 runtime 和默认新 IPC。原 Worker/utilityProcess/pool 的退出、故障及恢复测试参与完整单测。
 
-生产 `memory-qualification.json` 仍为 pending。Windows 专有分支、完整安装包中的活动覆盖及压力峰值尚未验收；资格清单中的 inventoryComplete 不因本表生成就自动改为 true。
+2026-10-02 用户确认人工测试通过，生产清单改为 v2 人工确认 qualified。每次准入仍检查真实 Main 入口注册是否 seal、跨 Governor 活动与未知增长；人工批准不会绕过运行时 inventoryComplete 检查。本表的源码清点与历史平台测量不改写为新测试结果。

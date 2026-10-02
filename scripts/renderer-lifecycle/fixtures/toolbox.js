@@ -486,11 +486,78 @@ async function runBrowserCase(caseIndex) {
     env.dispose(); passed.push('v2 模式交接后关闭取消共享请求且隔离迟到结果');
   }
 
+
+  if (caseIndex >= 20 && caseIndex <= 23) {
+    const labels = ['v2 迟到读取不覆盖其他分组缓存面板', 'v2 两组乱序返回只打开最近请求的面板',
+      'v2 旧请求先完成仍等待最近请求的面板', 'v2 关闭面板使迟到打开意图失效且缓存可复用'];
+    const loads = [];
+    const env = setup({
+      splitRead: async () => readResult({ version: 2, valuesState: 'not-requested', valuesByField: undefined }),
+      splitReadValues: (request) => { const pending = deferred(); loads.push({ request, pending }); return pending.promise; }
+    });
+    try {
+      click(query(env.parent, '[data-action="split-import"]')); await tick();
+      change(query(env.root.lastElementChild, '[data-field="multiple-files-enabled"]'), true);
+      const picker = env.root.lastElementChild;
+      click(query(picker, '[data-action="add-group"]'));
+      let groups = picker.querySelectorAll('.toolbox-split-group');
+      const accountField = query(groups[1], 'select');
+      accountField.value = '1'; accountField.dispatchEvent(new Event('change'));
+      groups = picker.querySelectorAll('.toolbox-split-group');
+      const currency = query(groups[0], '[data-role="values-button"]');
+      const account = query(groups[1], '[data-role="values-button"]');
+      const panel = query(picker, '.toolbox-split-values-floating-panel');
+      const resolveField = async (field, value) => {
+        const load = loads.find((item) => item.request.field === field);
+        assert(load, `没有 ${field} 请求`);
+        load.pending.resolve({ ...load.request, status: 'success', valuesState: 'complete', values: [value] });
+        await tick();
+      };
+      if (caseIndex === 20 || caseIndex === 23) {
+        account.click(); await tick();
+        await resolveField('Account', 'ACCOUNT_B');
+        account.click();
+      }
+      currency.click(); await tick();
+      account.focus(); account.click(); await tick();
+      if (caseIndex === 22) {
+        await resolveField('Currency', 'CURRENCY_A');
+        assert(panel.hidden, '旧请求先完成时不抢先打开面板');
+      }
+      if (caseIndex === 21 || caseIndex === 22) await resolveField('Account', 'ACCOUNT_B');
+      equal(panel.textContent, 'ACCOUNT_B', '用户最近打开的是 Account');
+      // 未缓存请求加载时按钮会禁用；返回后用户才能将焦点留在该按钮。
+      account.focus();
+      if (caseIndex === 23) { account.click(); assert(panel.hidden, '用户显式关闭面板'); }
+      if (caseIndex !== 22) await resolveField('Currency', 'CURRENCY_A');
+      if (caseIndex === 23) {
+        assert(panel.hidden, '迟到请求不复活已关闭面板');
+        account.click();
+      }
+      equal(panel.textContent, 'ACCOUNT_B', '迟到 Currency 不替换 Account 面板');
+      equal([currency, account].map((button) => button.getAttribute('aria-expanded')), ['false', 'true'], '展开归属仍是第二组');
+      equal(document.activeElement.closest('.toolbox-split-group').dataset.groupId, groups[1].dataset.groupId, '焦点仍属于第二组');
+      change(query(panel, 'input'), true);
+      equal([currency.textContent, account.textContent], [' ', '全部'], '当前选值只写入 Account 分组');
+      currency.click();
+      equal(panel.textContent, 'CURRENCY_A', '迟到结果已缓存，主动打开即可使用');
+      equal(loads.length, 2, '缓存重新打开不重复请求');
+      change(query(panel, 'input'), true);
+      input(query(groups[0], '.toolbox-split-file-name-input'), 'currency');
+      input(query(groups[1], '.toolbox-split-file-name-input'), 'account');
+      click(query(picker, '[data-action="complete"]')); await tick();
+      equal(env.calls.exports[0].groups.map((group) => [group.field, group.values]),
+        [['Currency', ['CURRENCY_A']], ['Account', ['ACCOUNT_B']]], '最终分组字段和值仍各自独立');
+      equal(env.errors, [], '没有宿主生命周期错误');
+      passed.push(labels[caseIndex - 20]);
+    } finally { env.dispose(); }
+  }
+
   return passed;
 }
 
 module.exports = async ({ js, load, reset, assert, test }) => {
-  const labels = ["读取锁、父子会话、单多模式替换、草稿转换、取消", "按行拆分、原 token、重复提交拒绝、busy、结果告警返回", "单字段选值导出与保存取消", "多文件合法命名、token 与重复提交拒绝", "按行计数与最大文件数校验", "强制销毁后的读取晚到无效", "强制销毁后的导出晚到无效", "Main stale 错误原样反馈、不重试旧 token", "空字段、空选、切字段重置不发导出", "多文件非法名、重复名、字段继承和一至八组边界", "缺读取身份先失败，预提交拒绝恢复可操作态", "合并成功取消失败、路径转义和二十条格式提示", "v2 默认首字段首次加载、失败重试、空列与 rows 独立", "v2 切列取消、迟到隔离、多组去重及独立选中项", "v2 单列加载中单文件切多文件", "v2 单列加载中多文件切单文件", "v2 双向切模式后失败可重试", "v2 删除共享请求发起组后其余组可选值提交", "v2 发起组改字段后其余组接纳原字段结果", "v2 模式交接后关闭取消共享请求且隔离迟到结果"];
+  const labels = ["读取锁、父子会话、单多模式替换、草稿转换、取消", "按行拆分、原 token、重复提交拒绝、busy、结果告警返回", "单字段选值导出与保存取消", "多文件合法命名、token 与重复提交拒绝", "按行计数与最大文件数校验", "强制销毁后的读取晚到无效", "强制销毁后的导出晚到无效", "Main stale 错误原样反馈、不重试旧 token", "空字段、空选、切字段重置不发导出", "多文件非法名、重复名、字段继承和一至八组边界", "缺读取身份先失败，预提交拒绝恢复可操作态", "合并成功取消失败、路径转义和二十条格式提示", "v2 默认首字段首次加载、失败重试、空列与 rows 独立", "v2 切列取消、迟到隔离、多组去重及独立选中项", "v2 单列加载中单文件切多文件", "v2 单列加载中多文件切单文件", "v2 双向切模式后失败可重试", "v2 删除共享请求发起组后其余组可选值提交", "v2 发起组改字段后其余组接纳原字段结果", "v2 模式交接后关闭取消共享请求且隔离迟到结果", "v2 迟到读取不覆盖其他分组缓存面板", "v2 两组乱序返回只打开最近请求的面板", "v2 旧请求先完成仍等待最近请求的面板", "v2 关闭面板使迟到打开意图失效且缓存可复用"];
   for (let index = 0; index < labels.length; index += 1) {
     await test(labels[index], async () => {
       await reset();

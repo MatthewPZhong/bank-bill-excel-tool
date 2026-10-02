@@ -199,7 +199,11 @@
     "files": [
       "index.html",
       "package.json",
-      "package-lock.json",
+      {
+        "from": ".",
+        "to": ".",
+        "filter": ["package-lock.json"]
+      },
       "COMMON枚举.xlsx",
       "src/**/*",
       "assets/**/*",

@@ -10,8 +10,10 @@ const { sourceSnapshotFromStat, sourceSnapshotMatchesStat } = require('./archive
 const { MAX_ROW_SPLIT_FILES } = require('./toolbox-row-split/contracts');
 
 const SCAN_ACTION = 'toolbox:split:prepare';
+// 公共扫描沿用原入口无独立内存预留的兼容合同；0 是账本预留值，不是工作集估计。
+// CPU/Worker/IO 与未知增长观察继续保护执行；获批阶段由 memory policy 替换内存配置。
 const SCAN_RESOURCES = Object.freeze({ cpuSlots: 1, workerThreadSlots: 1,
-  utilityProcessSlots: 0, ioHeavySlots: 1, memoryBytes: 1024 ** 3 });
+  utilityProcessSlots: 0, ioHeavySlots: 1, memoryBytes: 0 });
 const VALUES_BYTES = 4 * 1024 ** 2;
 const MAX_CACHED_FIELDS = 8;
 
@@ -46,6 +48,19 @@ function createToolboxSplitReadOwner({ governor, dispatch = dispatchLargeSplit, 
       if (input.privateDirectory) fs.rmSync(input.privateDirectory, { recursive: true, force: true });
     }
   });
+
+  async function runScan(input, options) {
+    try { return await scans.run(input, options); } catch (error) {
+      const timeout = error.code === 'ADMISSION_TIMEOUT';
+      if (!timeout && error.code !== 'RESOURCE_BUDGET_UNAVAILABLE') throw error;
+      // 只在公共读取边界解释准入错误，保留原错误码、诊断与 cause 供定位。
+      throw Object.assign(new Error(timeout ? '拆分文件读取等待后台资源超时' : '拆分文件读取所需的后台资源配额不足',
+        { cause: error }), { code: error.code, details: error.details,
+        detailLines: [...(Array.isArray(error.detailLines) ? error.detailLines : []), timeout
+          ? '已等待 5 秒，请等待其他任务完成后重试。'
+          : '扫描所需资源超过本次运行的固定配额，未进入等待队列。'] });
+    }
+  }
 
   function senderId(sender) {
     if (!accepting || !sender || !Number.isSafeInteger(sender.id) || sender.isDestroyed?.()) {
@@ -98,7 +113,7 @@ function createToolboxSplitReadOwner({ governor, dispatch = dispatchLargeSplit, 
       const sourceFilePath = path.resolve(selected);
       const snapshot = sourceSnapshotFromStat(fs.statSync(sourceFilePath, { bigint: true }));
       if (!snapshot) throw failure('TOOLBOX_SPLIT_READ_INVALID', '拆分源文件不可读');
-      const result = await scans.run({ op: 'scanMetadata', filePath: sourceFilePath },
+      const result = await runScan({ op: 'scanMetadata', filePath: sourceFilePath },
         { operationKey: request.requestId, signal: record.controller.signal });
       const context = { token: randomUUID(), senderId: id, sourceFilePath, snapshot: Object.freeze(snapshot),
         dataRowCount: result.dataRowCount, headers: Object.freeze([...result.headers]), fields: new Map() };
@@ -128,7 +143,7 @@ function createToolboxSplitReadOwner({ governor, dispatch = dispatchLargeSplit, 
         }
         field = { controller: new AbortController(), subscribers: new Set(), promise: null };
         context.fields.set(request.field, field);
-        field.promise = scans.run({ op: 'scanValues', filePath: context.sourceFilePath, field: request.field,
+        field.promise = runScan({ op: 'scanValues', filePath: context.sourceFilePath, field: request.field,
           maxValues: 50000, maxValueBytes: VALUES_BYTES },
         { operationKey: `values-${randomUUID()}`, signal: field.controller.signal }).then((result) => {
           assertFresh(context);

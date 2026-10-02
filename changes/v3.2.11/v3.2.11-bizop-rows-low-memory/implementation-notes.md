@@ -335,3 +335,25 @@ Spec 的业务行为、金额／行／输出合同和 Windows 验收标准未改
 
 
 第 14 节补充：首轮全量门禁在 ARCH-PLATFORM-CORE 拦下 core memory-admission 直接依赖 Main 活动模块（连带 async_hooks／worker_threads）的方向错误。已改为 Main 静态装配传入同步 isContinuationBlocking provider；核心层只消费事实，架构 allowlist 未放宽。该次失败日志和之前绑定旧源码的成功探针均保留；最终门禁／容量报告重新绑定调整后的源码。
+
+
+## 15. 2026-10-02 人工确认生产内存档
+
+### 15.1 决策与授权
+
+用户先明确“人工测试通过，从 pending 改出”，在说明现有摘要／压力报告资格规则后，又明确要求“调整”。据此将本版本启用依据改为静态人工验收确认；确认来源为本会话，日期 2026-10-02。目标分支 release/v3.2.11。原始 Windows 压力报告、安装包和逐项人工记录未提供，不填写实测次数、峰值或虚构摘要。
+
+### 15.2 实现
+
+- 随包 manifest 使用 schemaVersion 2、qualified、manual-acceptance PASS，明确列出 Windows x64 Electron 下的 18 个阶段配置。
+- 生产 v2 启用不再计算整棵源码身份，也不要求安装包／压力报告或精确运行时版本；profileId／policyDigest 仍绑定实际执行配置。配置变化、重复项或未确认状态保留兼容路径。
+- 实际活动覆盖、固定预算、实时采样与安全余量、低档互斥、Worker／缓存约束、取消和真实退出后的清理／释放继续执行。历史 v1 校验保留。
+- 扫描和共享恢复兼容测试使用显式 pending 清单夹具，避免要求生产清单永久 pending；新增生产资格测试使用当前 qualified 清单。
+
+### 15.3 本轮验证
+
+新单测在旧实现为 2/4 PASS、2 FAIL；人工资格实现后，新旧资格单测 7/7 PASS。当前生产清单与真实策略／Governor／完整 rows 和 BizOP 工作流集成 9/9 PASS；真实 builder／ASAR／Electron 回归 7/7 PASS；pending 扫描兼容 12/12 PASS；发布恢复与并发 18/18 PASS。
+
+本轮已按 package.json 的 release-check 五个阶段分别完成：lint、架构（786/786 文件、38 个历史提交）、smoke、全量单测（9572 PASS／0 FAIL／4 Windows SKIP）和集成（78/78 脚本、3052 项检查）。smoke／单测／集成执行时间为 15:35:20—15:53:59（Asia/Shanghai）；lint 和架构另行执行并通过。冻结 1769 个代码／测试／配置输入，期间只有 runner 自动生成的集成测试清单变化。
+
+用户人工验收按本会话确认记录 PASS。本轮自动验证的 Windows 平台事实和内存读数为注入夹具；真实 Worker、Electron 和 ASAR 在本机运行，不冒充再次执行了 Windows 实机压力或安装包人工验收。本轮记录与日志见主检出目录 outputs/release-v3.2.11/2026-10-02-manual-memory-activation/activation-report.md。尚未提交、推送、升版或发布。

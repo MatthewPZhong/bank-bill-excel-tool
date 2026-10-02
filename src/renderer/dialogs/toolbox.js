@@ -858,6 +858,8 @@
       let nextGroupId = 1;
       let panelGroupId = null;
       let panelOpen = false;
+      // 缓存可接纳迟到结果，共享面板只响应最近一次打开意图。
+      let panelIntentGeneration = 0;
       let busy = false;
       const initialValues = new Set(
         (initialGroup && Array.isArray(initialGroup.values) ? initialGroup.values : [])
@@ -919,6 +921,7 @@
       }
 
       function closeValuesPanel() {
+        panelIntentGeneration += 1;
         panelOpen = false;
         panelGroupId = null;
         valuesPanel.hidden = true;
@@ -1060,6 +1063,7 @@
             event.stopPropagation();
             if (!lifecycle.isActive() || busy) return;
             const field = fieldNameOf(group);
+            const openingGeneration = ++panelIntentGeneration;
             if (_session.fieldValues && fieldState(_session, safeValuesByField, field).state !== 'complete') {
               const generation = (group.valuesGeneration || 0) + 1;
               group.valuesGeneration = generation;
@@ -1067,7 +1071,8 @@
               groups.forEach(refreshGroupValuesButton);
               updateCompleteState();
               await pending;
-              if (!lifecycle.isActive() || !groups.includes(group) || group.valuesGeneration !== generation || fieldNameOf(group) !== field) return;
+              if (!lifecycle.isActive() || !groups.includes(group) || group.valuesGeneration !== generation
+                || fieldNameOf(group) !== field || openingGeneration !== panelIntentGeneration) return;
               groups.forEach(refreshGroupValuesButton);
               updateCompleteState();
               const loaded = fieldState(_session, safeValuesByField, field);

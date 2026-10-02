@@ -5,7 +5,7 @@
  target-version: v3.2.11
  branch: v3.2.11-bizop-rows-low-memory
  baseline: 18b82b4328cf5e00c1b2549d373a5b2f2677215c
- revision: R2
+ revision: R3
 -->
 
 | 项目 | 内容 |
@@ -13,7 +13,7 @@
 | 目标版本 | v3.2.11 |
 | 功能分支 | `v3.2.11-bizop-rows-low-memory` |
 | 基线 | `18b82b4328cf5e00c1b2549d373a5b2f2677215c`（初版已核验的远端 main／正式标签提交；R2 保持固定基线，不宣称重新核验当前 main） |
-| 日期／状态 | 2026-09-30／本地实现与完整自动门禁已通过；Windows 待验收与生产资格状态见实施记录 |
+| 日期／状态 | 2026-10-02／用户确认人工测试通过，生产资格改为人工确认清单；本轮实现与验证见实施记录 §15 |
 | 关联需求 | [Spec](spec.md)，P01—P06、AC01—AC24 |
 | 依赖 | 原资源 Governor／Supervisor、领域 owner、SQLite 保真缓存、公共 XLSX provider、Publisher／恢复体系 |
 | 模板来源 | `docs/templates/TechDoc-template.md`；将 PRD 字段替换为本分支 Spec，按本任务扩充需求章节。 |
@@ -159,7 +159,7 @@ U 只在固定账本扣一次；实时检查不再减整份 U。Q 不是缓存�
 | `sqliteAggregateCacheBytes`、`maxOpenConnections` | 全阶段同时打开连接的合计上限。 |
 | `maxInFlightBytes`、`maxSingleRecordBytes` | 生产／消费积压及不可拆对象边界；不能用行数代替字节数。 |
 | `workerLimits` | 只允许经验证的 V8 限制；不能从 Renderer 指定 `execArgv` 或堆大小。 |
-| `validatedEvidenceId` | 指向本次构建可验证的容量证据；实验 profile 没有生产资格。 |
+| `validatedEvidenceId` | v2 指向本版本人工验收确认编号；v1 历史清单仍指向构建容量证据。实验 profile 不自动获得生产资格。 |
 
 所有字段都是本次执行的技术配置，不改业务金额或行口径。Supervisor 经可信 grant 绑定配置，再送入 exact-key 校验后的 worker 参数；相应 DTO／schema／entry 必须一起变更。严禁只在请求中多放一个 `lowMemory:true` 绕过静态注册校验。
 
@@ -183,7 +183,7 @@ Main 保持本次执行链身份，实际重型独占资格按“正在执行的
 
 ### 3.5 实验参数与冻结规则（唯一数值来源）
 
-下表仅用于探索，不是生产默认值或硬件支持承诺。不要求所有阶段使用同一组合。
+下表保留首轮探索组合；当前批准配置见 §14.5。配置额度不构成硬件支持或任意文件容量承诺，不要求所有阶段使用同一组合。
 
 | 项目 | 首轮候选 |
 | --- | --- |
@@ -196,7 +196,7 @@ Main 保持本次执行链身份，实际重型独占资格按“正在执行的
 | 可等待生产链积压 | 1 MiB、4 MiB 起测，计入编码与压缩暂存；不是只设置 highWaterMark。 |
 | 监测采样 | 运行时建议 500 ms／阶段边界；测试可加密，记录额外开销。 |
 
-T0 建立基线；T7 用同一最终配置验证全流程。冻结记录至少包括 profile 摘要、构建 SHA、Windows／Electron／Node 版本、文件特征、总内存、实际内存压力、峰值、耗时／响应、失败恢复、实测次数和证据位置。缺一条必经路径不能把整个功能标为低档可用。
+T0／T7 的测量方法用于诊断容量、性能和失败恢复，建议保留构建、运行环境与压力详情。2026-10-02 按用户确认调整生产启用条件：静态记录人工验收 PASS 和 profile 摘要；构建 SHA、精确运行时版本、报告次数与报告摘要不再是运行时资格前提。实际准入和执行中的资源检查照常执行。
 
 ## 四、需求 P02：前置扫描与字段懒加载
 
@@ -465,13 +465,15 @@ OP 旧 `BIZOP_RESOURCE_BUDGET_INSUFFICIENT`／`BIZOP_RESOURCE_WAIT_TIMEOUT` 的�
 
 ### 10.3 Windows 真压力测试
 
+本节保留压力诊断与复测方法；当前生产启用依据按 §14.5 的人工确认清单执行，程序不再据报告文件和重复次数决定是否注册档位。
+
 必须记录启动前、选文件前、grant 时与整个执行区间的真实可用内存。设置约 512 MiB、768 MiB 两类压力场景，另设正常内存对照；报告实际最小／中位／最大值，而不是把一个设定值写成执行全程的事实。
 
 注入 `freeMemoryBytes` 仅用于 U 类逻辑测试。真实压力使用隔离测试机／虚拟机和明确的内存压力工具，记录页面文件状态、磁盘类型、Windows、CPU、总内存及应用构建。不能在用户正常工作的公司电脑上未经授权制造 OOM。
 
 样本矩阵覆盖真实用户文件特征的脱敏／合成数据。基础样本必须达到功能完成和一致性；极端样本可因明确资源边界拒绝，但需要证明拒绝发生在危险分配前且能清理／恢复，不能把所有样本拒绝当成低内存验收通过。
 
-建议每个代表性场景至少 3 次，记录成功率、完整耗时和各阶段耗时、缓存命中、读写字节、主线程事件循环延迟／GUI 可交互性、取消响应、峰值、残留文件及恢复结果。最终可接受耗时／响应阈值在基线建立后、验收开始前固定，不能观察结果后任意放宽。未定性能阈值或关键场景缺证据时，状态保持待验收。
+建议每个代表性场景至少 3 次，记录成功率、完整耗时和各阶段耗时、缓存命中、读写字节、主线程事件循环延迟／GUI 可交互性、取消响应、峰值、残留文件及恢复结果。最终可接受耗时／响应阈值在基线建立后、验收开始前固定，不能观察结果后任意放宽。没有对应测量时，不对外宣称具体性能阈值或硬件最低配置；这与人工确认清单的生产启用状态分别记录。
 
 ### 10.4 命令与完成门禁
 
@@ -500,6 +502,8 @@ OP 旧 `BIZOP_RESOURCE_BUDGET_INSUFFICIENT`／`BIZOP_RESOURCE_WAIT_TIMEOUT` 的�
 
 ## 十三、Open Technical Questions
 
+以下状态保留 2026-09-30 的测量记录。当前人工验收确认和生产启用见 §14.5 及实施记录 §15，不把用户确认改写成新的测量数据。
+
 | 编号 | 实验事项 | 关闭条件 | 当前结论 |
 | --- | --- | --- | --- |
 | OQ01 | 各 profile 的完整峰值和余量。 | 同构建、完整链路、正常／压力场景证据通过并冻结。 | Windows 待验收；候选参数未冻结。 |
@@ -513,7 +517,7 @@ OP 旧 `BIZOP_RESOURCE_BUDGET_INSUFFICIENT`／`BIZOP_RESOURCE_WAIT_TIMEOUT` 的�
 
 ## 十四、实际接口与装配
 
-本节记录本轮实现机制；验证状态与历史失败见 [实施记录 §12](implementation-notes.md#12-2026-09-30-完整本地实现) 和 [验收矩阵](local-verification.md)。候选参数未获 Windows 资格。
+本节记录本轮实现机制；验证状态与历史失败见 [实施记录 §12](implementation-notes.md#12-2026-09-30-完整本地实现) 和 [验收矩阵](local-verification.md)。2026-10-02 起按 §14.5 的人工确认清单启用当前配置。
 
 ### 14.1 资源核心与 Main
 
@@ -527,7 +531,13 @@ OP 旧 `BIZOP_RESOURCE_BUDGET_INSUFFICIENT`／`BIZOP_RESOURCE_WAIT_TIMEOUT` 的�
 
 `toolbox-split-read-owner` 使用 admission-only owner：grant → 同步创建 `{promise,closed,cancel}` → 真实 exit → 清理私有目录 → release。构造失败返回无载体事实；关闭未确认保留租约。v2 `toolbox:split:read` 返回 metadata/token/计数及实际读取模式，v2 `read-values` 只扫请求列，`cancel-read` 只取消当前窗口指定请求。源快照或窗口不匹配直接失效。
 
+公共 metadata 与单字段补扫在生产资格 pending 时沿用旧扫描无独立内存预留的兼容合同：账本 `memoryBytes: 0`，同时申请 CPU／Worker／IO 槽位，真实 Worker 继续作为增长未知的重型活动观察。这里的 0 不表示工作集为零，也不授予实验低内存配置；有界 reader、字段值／缓存上限、低档互斥、真实退出与私有目录清理仍生效。不得把 rows／OP 已有的 1 GiB 申请移植成公共选文件的新门槛。资格获批后仍由 `split-prepare` 候选替换为已验证的阶段预算。固定资源配额无法容纳和资源争用超时分别保留 `RESOURCE_BUDGET_UNAVAILABLE`／`ADMISSION_TIMEOUT`，公共读取 IPC 显示中文原因；等待超时提示稍后重试。
+
+兼容回归使用真实生产策略源码、显式 pending 清单夹具及注入的启动内存：总内存 8 GiB、启动空闲 512／2560／3584 MiB，对应 Bcompat 0／512／1536 MiB。测试脚本覆盖 CSV／XLSX 的 Main 读取 IPC、字段补扫、真实 Worker 按字段导出及回读，以及固定配额不足、IO 争用／超时、跨 Governor 低档互斥和实验获批配置替换。该合成验证不代表 Windows 真压力、完整应用界面、归档或安装包验收。
+
 Renderer 初次打开和字段 change 不扫描；显式激活“值”入口才加载。状态分 not-requested/loading/complete/failed；支持真正空列、重试、同列请求共享、多组独立选择和迟到隔离。已切到 rows 可取消不再需要的字段补扫，不使基础 token 失效。兼容 v1 API 保留。
+
+共享值面板另有独立的打开意图代次：每次激活值按钮（包括缓存命中）和关闭面板均推进代次。异步返回只有在分组、字段、视图和打开意图均仍有效时才弹出面板；迟到结果仍更新字段缓存及按钮状态。字段变更、增删组、取消和模式切换沿用关闭路径使旧打开意图失效。
 
 字段缓存由会话持有，每个 picker 订阅自己使用的字段集合。新视图先订阅，旧视图销毁时只移除自身订阅；仅在所有视图都不再使用某字段时取消其 pending 请求。缓存的 loading／complete／failed 变化通知所有仍使用该字段的视图；发起分组的 generation 和存活检查只约束其面板打开，不决定其他分组能否接收状态。
 
@@ -561,11 +571,17 @@ OP publication owner 自有或借用可信 phase；共享 Publisher 只有在无
 | bizop-io | 256 | 128 | 2 |
 | bizop-maintenance | 384 | 128 | 2 |
 
-这些是实验配置，不是最低内存保证。normal/low 系统余量分别 192/128 MiB；SQLite aggregate 24/12 MiB；样式 8 MiB；in-flight 4 MiB；单条 2 MiB；Worker 老生代为阶段额度的 60%，年轻代 8 MiB。V8 限制不涵盖 native/external，运行安全点和真实容量验证仍必要。
+这些配置已按本次人工验收确认批准，数值不构成最低内存保证。normal/low 系统余量分别 192/128 MiB；SQLite aggregate 24/12 MiB；样式 8 MiB；in-flight 4 MiB；单条 2 MiB；Worker 老生代为阶段额度的 60%，年轻代 8 MiB。V8 限制不涵盖 native/external，运行安全点和真实容量验证仍必要。
 
-资格 manifest 必须匹配源码、依赖锁、版本、平台／架构／Node／Electron、profile 和 policyDigest。每个要求档位 3 份不同的真实压力报告，报告同时绑定构建和源码。当前 phase 不细分格式，prepare 和 rows-generation 必须覆盖 xlsx/csv/xls；其余必须有 phase-complete 记录。资格缺失、过期、配置变更或构建材料损坏时保留兼容请求。`memory-qualification.json` 当前 pending，不能通过环境变量、Renderer 或普通 runtime options 放开。
+2026-10-02，用户确认人工测试通过，并明确授权调整为人工确认启用。`memory-qualification.json` 使用 schemaVersion 2、status qualified，approval 记录 manual-acceptance／PASS、确认编号、日期和归属版本；profiles 显式登记上述 9 阶段的 normal／low 共 18 个 profileId／policyDigest。
 
-`sourceIdentity()` 摘要包括 src（排除生成 build-info 和资格自身）、运行依赖、版本及 package-lock。打包显式包含 lock 文件；打包器删除开发脚本不改变该身份。
+v2 只在 Windows x64 Electron 运行环境中接受这些静态确认。启动时不再读取 sourceIdentity，也不要求源码／依赖锁／安装包摘要、精确 Node／Electron 版本、真实压力报告及重复次数。approval.releaseVersion 记录确认归属，不与尚未升版的 package.json 精确匹配；升版打包不会因此重新变成 pending。配置摘要变化、重复配置、缺少批准或 pending 状态仍保留对应兼容路径。新增／修改内存配置应重新验收并显式更新清单，不从当前代码自动补批生产配置。
+
+`validatedEvidenceId` 继续随可信租约传递，值为人工确认编号。实时 inventory 完整性、未知增长观察、固定硬预算、实时系统内存及安全余量、低档互斥、取消和真实退出／清理／释放均由原准入及执行路径检查。没有 Renderer、环境变量或普通 runtime options 的放行开关。
+
+schemaVersion 1 的历史构建证据校验保留原规则；人工确认不把旧报告补写为已实测，也不伪造包体／报告摘要。Windows 原始测量与安装包材料作为诊断资料单列记录。
+
+`sourceIdentity()` 摘要包括 src（排除生成 build-info 和资格自身）、运行依赖、版本及 package-lock。打包通过独立的根目录 FileSet（`from: "."`、`to: "."`、`filter: ["package-lock.json"]`）将 lock 放入 ASAR 根目录，避开默认 matcher 追加的 lock 排除规则；该身份仍供容量诊断及 v1 历史资格使用，v2 人工确认不依赖它。打包输入洁净度门禁同时识别此 FileSet，对未跟踪、修改或删除的 lock 继续拒绝；不支持的目录映射明确失败。真实 builder 文件收集／拷贝和 Electron ASAR 身份回归验证包前包后身份一致，缺失／变更的 lock 不得沿用原身份。打包器删除开发脚本不改变该身份。
 
 ### 14.6 诊断与可运行验收
 
@@ -574,3 +590,5 @@ OP publication owner 自有或借用可信 phase；共享 Publisher 只有在无
 - `verify-low-memory-workflows.js`：保留的准备扫描基线探针。
 - `verify-low-memory-capacity.js`：独立进程完整 metadata／单字段、rows 生成—验证—发布—恢复、OP 导入—计算—六类导出—恢复；支持真实系统采样或明确标注的注入模式，独立读回单独计时，输出排他创建。
 - 脚本始终 `productionEvidence:false`，不编辑资格 manifest。Windows 真实 Main、GUI、安装包、Excel/WPS 和代表性业务验收见 [操作说明](windows-acceptance.md)。
+
+本轮人工确认资格回归：`scripts/integration/production-memory-qualification.js` 使用当前随包清单及真实生产策略，覆盖 18 个配置、资源负例和完整 rows／BizOP 工作流；平台事实和内存读数为测试注入，结果不表述为重新执行了 Windows 实机验收。

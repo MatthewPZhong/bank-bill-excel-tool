@@ -37,7 +37,7 @@ function phaseFor(request) {
   return 'bizop-maintenance';
 }
 
-// 候选是技术实验配置。发布资格由独立 manifest 授予，不把实验数值当成实测最低配置。
+// 配置由静态 manifest 的验收确认授予生产资格；额度不是任意文件的最低配置承诺。
 function profile(phaseKey, mode, evidenceId = null) {
   if (!Object.hasOwn(PHASES, phaseKey) || !['normal', 'low'].includes(mode)) throw new TypeError('内存阶段无效');
   const [normal, low, connections] = PHASES[phaseKey];
@@ -94,11 +94,14 @@ function createRegisteredMemoryPolicy({ compatibilityMemoryBytes, sampleMemory, 
 }
 
 function createProductionMemoryPolicy({ compatibilityMemoryBytes, getGovernor }) {
-  // 未闭合的 inventory/Windows 容量记录不能激活生产。该文件由版本评审后冻结，
-  // 没有 Renderer、环境变量或 runtime options 的放行开关。
+  // 人工确认由随包静态清单授予，不提供 Renderer、环境变量或 runtime options 放行开关。
+  // v2 不依赖构建/压力报告摘要；v1 历史证据仍按原规则核验。活动覆盖在每次准入时检查。
   let identity = null;
-  try { if (qualification.status === 'qualified') identity = sourceIdentity(); }
-  catch (_error) { /* 缺少或损坏构建证据时保留兼容准入，不中断应用启动。 */ }
+  try {
+    if (qualification.status === 'qualified') identity = qualification.schemaVersion === 2
+      ? { platform: process.platform, arch: process.arch, electronVersion: process.versions.electron || null }
+      : sourceIdentity();
+  } catch (_error) { /* 历史构建身份不可读时保留兼容准入，不中断应用启动。 */ }
   return createRegisteredMemoryPolicy({ compatibilityMemoryBytes, sampleMemory: createMemorySampler(),
     evidenceFor(config) {
       return identity ? qualifiedProfile(qualification, config, identity) : null;

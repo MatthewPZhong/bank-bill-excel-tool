@@ -24,7 +24,7 @@ const { inventoryForGovernor, sealMemoryActivityInventory } = require('../../src
 const MiB = 1024 ** 2;
 const digest = (value) => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
-async function runScenario({ rows = 2000, availableMiB = 512, realSystem = false, mode = null, inspectExport = null } = {}) {
+async function runScenario({ rows = 2000, availableMiB = 512, realSystem = false, mode = null, inspectExport = null, memoryPolicyFactory = null } = {}) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'low-memory-complete-')));
   const cleanups = [];
   const t = { after: (fn) => cleanups.push(fn) };
@@ -38,12 +38,15 @@ async function runScenario({ rows = 2000, availableMiB = 512, realSystem = false
   }
   function governor() {
     sealMemoryActivityInventory();
-    const g = createResourceGovernor({ budgets: { cpuSlots: 2, workerThreadSlots: 2, utilityProcessSlots: 1,
-      ioHeavySlots: 2, memoryBytes: 2048 * MiB },
-    memoryAdmission: createExperimentalMemoryPolicy({
-      sampleMemory: () => realSystem ? sampler() : ({ availableBytes: availableMiB * MiB, sampledAt: Date.now() }),
-      inventory: () => inventoryForGovernor(() => g), modes: mode ? [mode] : ['normal', 'low']
-    }), diagnostics(event) {
+    let g;
+    const sampleMemory = () => realSystem ? sampler() : ({ availableBytes: availableMiB * MiB, sampledAt: Date.now() });
+    // 测试专用策略工厂可接入真实生产选档代码，生产 runtime 不消费此参数。
+    const memoryAdmission = memoryPolicyFactory
+      ? memoryPolicyFactory({ getGovernor: () => g, sampleMemory })
+      : createExperimentalMemoryPolicy({ sampleMemory, inventory: () => inventoryForGovernor(() => g),
+        modes: mode ? [mode] : ['normal', 'low'] });
+    g = createResourceGovernor({ budgets: { cpuSlots: 2, workerThreadSlots: 2, utilityProcessSlots: 1,
+      ioHeavySlots: 2, memoryBytes: 2048 * MiB }, memoryAdmission, diagnostics(event) {
       if (event.type === 'resource-granted' && event.memoryProfile) grants.push({ phase,
         profileId: event.memoryProfile, policyDigest: event.policyDigest, mode: event.memoryMode,
         memoryBytes: event.memoryBytes, actualAvailableBytes: sampler().availableBytes, at: event.at });

@@ -38,7 +38,23 @@ function sourceIdentity(root = ROOT) {
     electronVersion: process.versions.electron || null };
 }
 
+// 人工确认只授予清单列出的配置；实际准入仍检查资源、实时内存和活动覆盖。
+function manuallyQualifiedProfile(manifest, config, identity) {
+  const approval = manifest.approval;
+  if (manifest.status !== 'qualified' || manifest.platform !== 'win32' || manifest.arch !== 'x64' ||
+      identity?.platform !== manifest.platform || identity.arch !== manifest.arch || !identity.electronVersion ||
+      approval?.kind !== 'manual-acceptance' || approval.result !== 'PASS' ||
+      typeof approval.reference !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(approval.reference) ||
+      typeof approval.releaseVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(approval.releaseVersion) ||
+      typeof approval.confirmedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(approval.confirmedAt) ||
+      !Array.isArray(manifest.profiles)) return null;
+  const entries = manifest.profiles.filter((item) => item?.profileId === config.profileId);
+  if (entries.length !== 1 || entries[0].policyDigest !== config.policyDigest) return null;
+  return approval.reference;
+}
+
 function qualifiedProfile(manifest, config, identity) {
+  if (manifest?.schemaVersion === 2) return manuallyQualifiedProfile(manifest, config, identity);
   if (manifest?.schemaVersion !== 1 || manifest.status !== 'qualified' || manifest.inventoryComplete !== true ||
       identity.platform !== 'win32' || !identity.electronVersion ||
       !['sourceTreeSha256', 'dependencyLockSha256', 'appVersion', 'platform', 'arch', 'nodeVersion', 'electronVersion']

@@ -1,6 +1,6 @@
-# Windows 低内存待验收操作说明
+# Windows 低内存验收与人工确认启用
 
-用户已确认暂时没有 Windows 环境。本文件准备后续 T7 所需材料；当前不表示 Windows、正式安装包、真实业务或 Excel/WPS 已通过。
+2026-10-02 用户在本会话确认人工测试通过，并授权以人工确认启用生产档。当前清单已改为 qualified；原始 Windows 测量、安装包文件和逐项验收明细未提供，本次不会生成虚构记录。下面的命令与检查表保留为后续诊断／复测入口，历史 NOT RUN 仅描述 2026-09-30 的本地执行状态。
 
 ## 1. 当前可直接运行的完整组件脚本
 
@@ -38,11 +38,11 @@ Remove-Item Env:ELECTRON_RUN_AS_NODE
 
 业务链路：metadata → 显式单字段 → rows Worker → 输出验证 → Publisher → 恢复；OP 导入 → 计算 → 六类导出 → 各自发布／校验 → 恢复。普通／低档比较业务结果摘要；说明页只规范每次变化的 UUID、摘要、激活／发布时间。
 
-脚本始终标记 `productionEvidence:false`，因为它不是完整应用 Main/GUI，也没有包体安装、真实数据、Excel/WPS 人工检查。它不能自动生成合格生产 manifest。当前产品没有面向 Renderer 或环境变量的低档强制开关；真实 Main 的低档验证需在隔离验收装配中使用可信 non-production runtime，不能伪造正式 PASS 证据来绕过资格门禁。该平台装配及 GUI 运行纳入 T7。
+脚本始终标记 `productionEvidence:false`，因为它不是完整应用 Main/GUI，也没有包体安装、真实数据、Excel/WPS 人工检查。它不能自动生成合格生产 manifest。当前产品没有面向 Renderer 或环境变量的低档强制开关；真实 Main 的低档验证需在隔离验收装配中使用可信 non-production runtime，不能伪造正式 PASS 证据来绕过资格门禁。该平台装配及 GUI 运行用于人工验收／复测；当前生产启用按第 4 节的用户确认执行。
 
-## 3. T7 必须补齐的验收
+## 3. T7 检查表（保留 2026-09-30 的本地记录）
 
-| 项目 | 要求 | 当前状态 |
+| 项目 | 检查方法 | 历史本地状态 |
 | --- | --- | --- |
 | 最终构建 | 冻结源码、依赖锁、Electron/Node、应用版本、Windows 架构和包体 SHA-256；记录内存、CPU、磁盘和页面文件。 | NOT RUN |
 | 完整应用入口 | 从选文件开始，覆盖真实 Main、Preload、Renderer、归档和恢复；普通对照与 512／768 MiB 各至少 3 次。 | NOT RUN |
@@ -56,13 +56,14 @@ Remove-Item Env:ELECTRON_RUN_AS_NODE
 
 样本只用脱敏代表数据或明确合成数据；合成结果不能自动升级为真实业务验收。
 
-## 4. 生产资格冻结
+## 4. 人工确认启用
 
-`memory-qualification.json` 当前 `status:pending`，不发布实验阈值。通过上述验收后，按 `memory-evidence.js` 合同记录：
+用户于 2026-10-02 明确确认“人工测试通过”，并授权将启用依据调整为人工验收确认。随包 `memory-qualification.json` 已登记 schemaVersion 2、status qualified。
 
-- 最终 sourceTreeSha256、dependencyLockSha256、appVersion、platform、arch、nodeVersion、electronVersion 和 artifactSha256。
-- 每个准确 profileId/policyDigest 对应 evidenceId、PASS、非仅合成证据与完整 inventory 结论。
-- normal 至少 3 份独立报告；low 的 512／768 MiB 各至少 3 份。每条报告记录 reportSha256、源码／包体摘要和真实压力事实。
-- prepare／rows-generation 的每档报告必须完整覆盖 xlsx/csv/xls；其余 phase 的记录为 phase-complete。当前没有按格式部分放行机制。
+- approval 保存人工确认的 PASS、编号、日期和归属版本，不要求报告或安装包摘要。
+- profiles 列出当前 9 个阶段、普通／低内存共 18 个配置摘要。配置变化后必须重新确认；新增档位不自动获批。
+- 平台范围仍为 Windows x64 Electron，不绑定精确 Node／Electron 版本或整棵源码摘要；版本字段用于记录验收归属。
+- 实际运行继续检查活动覆盖、固定配额、实时系统内存、安全余量、未知增长与低档互斥，并等待真实退出后清理及释放。
+- 历史 v1 构建证据方式仍可读；本次没有填写虚构的包体、压力次数或报告摘要。
 
-任何源码、依赖、runtime、配置或支持格式变化都重新判断资格。更新资格后再核验最终打包内容；未提交开发状态不填写虚构 commit SHA。当前交付不包含资格启用、提交、推送、构建、合并或发布动作。
+本轮自动回归与用户人工确认分别记录在 [实施记录 §15](implementation-notes.md#15-2026-10-02-人工确认生产内存档)。没有提交、推送、升版或发布。

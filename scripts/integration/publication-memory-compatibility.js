@@ -7,7 +7,9 @@ const path = require('node:path');
 const { Worker } = require('node:worker_threads');
 const { createResourceGovernor } = require('../../src/main-process/background-execution/resource-governor');
 const { createPlatformResourceEnvelope } = require('../../src/main-process/background-execution/resource-budget');
-const { createProductionMemoryPolicy, createExperimentalMemoryPolicy } = require('../../src/main-process/execution-descriptors/memory-profiles');
+const { createExperimentalMemoryPolicy } = require('../../src/main-process/execution-descriptors/memory-profiles');
+const { loadProductionMemoryProfiles } = require('../../tests/helpers/production-memory-policy');
+const { createProductionMemoryPolicy } = loadProductionMemoryProfiles({ qualification: { schemaVersion: 2, status: 'pending' } });
 const { createPublicationMemoryAdmission } = require('../../src/main-process/execution-descriptors/publication-memory');
 const { createPublicationRecoveryCoordinator } = require('../../src/main-process/publication-recovery/coordinator');
 const { createToolboxPublicationDispatcher } = require('../../src/main-process/toolbox-output-publication-dispatch');
@@ -58,7 +60,7 @@ async function withHarness(options, run) {
   }
 }
 
-for (const freeMiB of [512, 2560]) test(`生产 pending：可用 ${freeMiB} MiB 时空启动恢复成功`, () => withHarness({ freeMiB }, async (h) => {
+for (const freeMiB of [512, 2560]) test(`生产策略配 pending 夹具：可用 ${freeMiB} MiB 时空启动恢复成功`, () => withHarness({ freeMiB }, async (h) => {
   assert.equal(h.envelope.compatibilityBudgets.memoryBytes / MiB, freeMiB === 512 ? 0 : 512);
   const result = await recoverToolboxPublicationsIntoArchive({ userDataDir: h.root, archiveCenter: h.archiveCenter,
     recoverPublications: h.recover });
