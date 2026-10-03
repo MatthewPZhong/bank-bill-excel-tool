@@ -432,3 +432,18 @@ Spec 的业务行为、金额／行／输出合同和 Windows 验收标准未改
 初步聚焦单测 36/36 PASS；新增真实错误返回链集成 3/3 PASS，覆盖普通档／双候选固定拒绝及明确的旧兼容预算不足。检查最终原因、数字、建议，且零 Worker、零 Publisher，原件与已有目标均保留。`UNIT_TEST_CONCURRENCY=2 npm run release-check` 于 2026-10-03T16:17:41.672671+08:00 开始；已完成 lint、架构 788/788（42 个历史提交）、smoke 和单测 9593 PASS / 0 FAIL / 4 Windows SKIP，集成阶段随会话中断，未取得这次完整命令的退出码。复核 1783 个冻结输入完全一致后，于 2026-10-03T16:43:33.002190+08:00 至 2026-10-03T16:54:31.217837+08:00 用正式 `npm run test:integration` 续跑整个集成阶段，耗时 658.22 秒，退出码 0，82/82 脚本（3101 项计数检查）通过。所有门禁检查项目已完成；保留原始中断日志及续跑日志，不将分段完成写成一次完整命令退出成功。期间仅 runner 自动生成的集成清单变化，规则正文与其余输入摘要一致。详情见 [本轮修复报告](../release/v3.2.11/review-fixes/2026-10-03-r4-admission-diagnostics/repair-report.md)。
 
 Windows/Electron 身份、内存和源计数为夹具，真实运行在本机 Node；不扩大 Windows 实机、安装包或 GUI 的人工验收结论。
+
+
+## 20. 2026-10-03 release BIFF8 档位适用性修复
+
+### 20.1 依据与决策
+
+审查基线为 `15e44b0ffaa304790f6821771791eacf085072b9`。相同 2,906,624 字节、20,000 行 × 8 列的合法 BIFF8，低档扫描发生 `ERR_WORKER_OUT_OF_MEMORY`，普通档扫描正确。文件扩展名为 `.csv`，实际由 magic 判为 XLS。本轮按 Spec P02／AC16 排除尚无完整分配预算的 BIFF8 低档候选，保留普通档准入与等待；人工 qualified 资格继续有效。
+
+- Main 的 metadata／字段补扫和 rows 生成独立复核来源，使用同一格式适用性判断；不以文件大小推断 BIFF8 低档安全性。
+- 低档 Worker 的 reader options 明确禁止 BIFF8，并保留 CSV 256 KiB 上限。BIFF8 pass 在 overlay／workbook／projection 创建前受控拒绝；不改变读取算法、额度或 SafeError 合同。
+- 新增真实 Worker 集成覆盖三入口、扩展名伪装、等待恢复、固定硬上限、关闭取消、来源变化、强制低档防御以及兼容路径。20,000 行普通档 rows 完成真实 SQLite 缓存、分块写出、产物验证、Publisher 和独立 ExcelJS 回读。
+
+### 20.2 验证与边界
+
+聚焦单测 35/35、新增 BIFF8 专项 15/15 PASS。完整 `UNIT_TEST_CONCURRENCY=2 npm run release-check` 于 2026-10-03T17:45:04.590243+08:00 至 2026-10-03T18:08:18.197122+08:00 执行，耗时 1393.61 秒，退出码 0。lint、架构 788/788 （43 个历史提交）、smoke、单测 9595 PASS / 0 FAIL / 4 Windows SKIP、集成 83/83 脚本（3116 项计数检查）全部通过。冻结 1784 个代码／测试／配置输入，期间只有 runner 自动更新集成清单，规则正文与其他输入摘要一致。详情及可复跑入口见 [本轮修复报告](../release/v3.2.11/review-fixes/2026-10-03-r5-biff8-admission/repair-report.md)。Main handler 与执行合同由当前源码装配；Windows/Electron 身份、内存采样、对话框和归档回执为隔离夹具。实际 Worker、文件 IO、缓存、写出与发布在 macOS 运行；未据此扩大 Windows 实机、安装包、Excel/WPS 或完整 GUI 人工验收结论。

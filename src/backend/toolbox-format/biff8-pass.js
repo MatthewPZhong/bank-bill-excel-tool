@@ -417,6 +417,12 @@ class ToolboxBiff8Pass {
 }
 
 async function openToolboxBiff8Pass(filePath, options = {}) {
+  // 必须先于 overlay、SheetJS workbook 和 projection 的整表分配。
+  if (options.allowBiff8 === false) {
+    throw new ToolboxBiff8PassError('EXECUTION_INPUT_PROFILE_UNSUITABLE',
+      'BIFF8 XLS 不适用当前低内存执行档',
+      ['本次未读取工作簿；该格式需要普通档资源。', '请释放其他程序占用后重试。']);
+  }
   const absolutePath = path.resolve(filePath);
   const overlay = await readBiff8Overlay(absolutePath);
   let workbook;

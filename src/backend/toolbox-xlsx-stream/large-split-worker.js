@@ -32,7 +32,6 @@
 const { parentPort, isMainThread } = require('node:worker_threads');
 const fs = require('node:fs');
 const { sourceSnapshotMatchesStat } = require('../../main-process/archive-center/source-snapshot');
-const { LOW_MEMORY_CSV_MAX_BYTES } = require('../toolbox-format/csv-capacity');
 const { scanSplitMetadata, scanSplitFieldValues } = require('../../main-process/toolbox-split-scan');
 const { validateExecutionMemoryConfig } = require('../../main-process/background-execution/execution-memory-config');
 const { toolboxReaderOptions, checkExecutionMemory } = require('../../main-process/background-execution/execution-memory-options');
@@ -217,8 +216,7 @@ if (!isMainThread && parentPort) {
           return activeCancelToken.cancelled;
         } };
         const options = { cancelToken, readerOptions: { ...toolboxReaderOptions(memoryConfig, msg.privateDirectory),
-          expectedInputKind: msg.inputKind,
-          ...(memoryConfig?.profileId === 'split-prepare-low-v1' ? { csvMaxSourceBytes: LOW_MEMORY_CSV_MAX_BYTES } : {}) },
+          expectedInputKind: msg.inputKind },
           maxValues: msg.maxValues, maxValueBytes: msg.maxValueBytes };
         result = op === 'scanMetadata'
           ? await scanSplitMetadata(filePath, options)

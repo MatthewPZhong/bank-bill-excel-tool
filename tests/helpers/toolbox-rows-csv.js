@@ -1,4 +1,4 @@
-// rows CSV 跨阶段回归装配：真实 Main 函数、生产策略、Supervisor、Worker 与 Publisher。
+// 工具箱输入跨阶段回归装配：真实 Main 函数、生产策略、Supervisor、Worker 与 Publisher。
 // 仅注入平台身份、内存采样、对话框及归档回执；不修改生产装配入口。
 'use strict';
 const assert = require('node:assert/strict');
@@ -13,6 +13,7 @@ const ExcelJS = require('exceljs');
 const { loadProductionMemoryProfiles } = require('./production-memory-policy');
 const { createTestPublicationHarness } = require('./publication-authority');
 const { createToolboxSplitReadOwner } = require('../../src/main-process/toolbox-split-read-owner');
+const { dispatchLargeSplit } = require('../../src/main-process/toolbox-large-split-dispatch');
 const { prepareRows, generateValidateAndPublishRows } = require('../../src/main-process/toolbox-row-split/service');
 const { publicResult } = require('../../src/main-process/toolbox-row-split/contracts');
 const { prepareIpcTaskInvocation, createIpcTaskContext } = require('../../src/main-process/archive-center/ipc-task-contract');
@@ -45,9 +46,9 @@ async function waitFor(check) {
 async function withRowsCsv(options, run) {
   sealMemoryActivityInventory();
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'rows-csv-admission-')));
-  const output = path.join(root, 'output'), userData = path.join(root, 'userdata'), source = path.join(root, 'input.csv');
+  const output = path.join(root, 'output'), userData = path.join(root, 'userdata'), source = path.join(root, options.sourceName || 'input.csv');
   let runtime, owner, observe;
-  const grants = [], starts = [], exits = [], workerLimits = [], cleanup = [], workers = [];
+  const grants = [], starts = [], scanStarts = [], exits = [], workerLimits = [], cleanup = [], workers = [];
   try {
     fs.mkdirSync(output); fs.mkdirSync(userData);
     if (options.createSource) await options.createSource(source);
@@ -86,7 +87,14 @@ async function withRowsCsv(options, run) {
       fs: { ...fs, rmSync(file, flags) {
         if (path.dirname(file) === output && path.basename(file).startsWith('.toolbox-rows-')) cleanup.push(fs.readdirSync(file).sort());
         return fs.rmSync(file, flags);
-      } }, path, randomUUID, pathsAlias, sourceSnapshotFromStat, sourceSnapshotMatchesStat, createToolboxSplitReadOwner, ipcMain,
+      } }, path, randomUUID, pathsAlias, sourceSnapshotFromStat, sourceSnapshotMatchesStat, ipcMain,
+      createToolboxSplitReadOwner(ownerOptions) {
+        return createToolboxSplitReadOwner({ ...ownerOptions, dispatch(input) {
+          if (options.forceScanLow) input = { ...input, executionMemoryConfig: profiles.profile('split-prepare', 'low', 'reader-guard-fixture') };
+          scanStarts.push({ op: input.op, memoryConfig: input.executionMemoryConfig });
+          return dispatchLargeSplit(input);
+        } });
+      },
       trackedIpcHandle(_channel, _scope, _label, value) { contract = value; }, app: { getPath: () => userData }, mainWindow: null,
       statementFileDialogFilters: () => [], showImportOpenDialog: async (key) => ({ canceled: false,
         filePaths: [key === 'toolbox-split-export-directory' ? output : source] }),
@@ -111,6 +119,8 @@ async function withRowsCsv(options, run) {
     };
     process.on('worker', observe);
     const scan = () => ipcHandlers.get('toolbox:split:read')(event, { version: 2, scanKind: 'metadata', requestId: 'rows-csv' });
+    const values = (metadata, field = 'a', requestId = 'values') => ipcHandlers.get('toolbox:split:read-values')(event,
+      { version: 2, splitReadToken: metadata.splitReadToken, field, requestId });
     async function prepare(metadata, rowsPerFile = Math.ceil(metadata.dataRowCount / 2), extra = {}) {
       const prepared = await prepareIpcTaskInvocation(contract, event, [{ sourceFilePath: source,
         splitReadToken: metadata.splitReadToken, mode: 'rows', rowsPerFile, ...extra }]);
@@ -123,8 +133,8 @@ async function withRowsCsv(options, run) {
       const context = createIpcTaskContext(batchContext, { fileEvidence, async settleArtifacts() { state.settled++; return { durable: true }; } });
       return { prepared, execute: () => contract.execute(event, prepared, context) };
     }
-    return await run({ root, source, output, userData, state, runtime, owner, grants, starts, exits, workerLimits,
-      cleanup, workers, scan, prepare, hash, publication, failureResult: helpers.toolboxFailureResult });
+    return await run({ root, source, output, userData, state, runtime, owner, grants, starts, scanStarts, exits, workerLimits,
+      cleanup, workers, scan, values, prepare, hash, publication, failureResult: helpers.toolboxFailureResult });
   } finally {
     if (observe) process.off('worker', observe);
     const [closed] = await Promise.allSettled([owner?.close()]);

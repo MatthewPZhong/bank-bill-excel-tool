@@ -11,7 +11,6 @@ const { encodePayload, decodeHeaderPayload, decodeRowPayload, decodeStylePayload
 const { ROWS_BUDGETS, assert, rowsError, assertDiskSpace, assertSourceBudget, writePrivateJson, readPrivateJson } = require('./contracts');
 const { toolboxReaderOptions, sqliteCacheKiB, checkExecutionMemory } = require('../background-execution/execution-memory-options');
 const { detectToolboxInputKind } = require('../toolbox-input-kind');
-const { LOW_MEMORY_CSV_MAX_BYTES } = require('../../backend/toolbox-format/csv-capacity');
 
 function checkCancelled(signal) {
   if (signal && signal.aborted) throw rowsError('TOOLBOX_GENERATION_CANCELLED', '按行拆分已取消');
@@ -86,8 +85,7 @@ async function createSealedCache(plan, signal, resourceObserver = () => {}, poll
     assertSourcesFresh([plan.source]);
     const summary = await streamToolboxTables(plan.source.filePath, {
       strategy: TOOLBOX_SHEET_STRATEGIES.SPLIT,
-      readerOptions: { ...toolboxReaderOptions(memoryConfig, plan.privateDirectory), expectedInputKind: inputKind,
-        ...(memoryConfig?.profileId === 'rows-generation-low-v1' ? { csvMaxSourceBytes: LOW_MEMORY_CSV_MAX_BYTES } : {}) },
+      readerOptions: { ...toolboxReaderOptions(memoryConfig, plan.privateDirectory), expectedInputKind: inputKind },
       sourceRegistryResolver: resolver,
       cancelToken: { get cancelled() { return Boolean(signal && signal.aborted); } },
       onHeader(info) {

@@ -3,11 +3,14 @@
 const path = require('node:path');
 const os = require('node:os');
 const { validateExecutionMemoryConfig } = require('./execution-memory-config');
+const { LOW_MEMORY_CSV_MAX_BYTES } = require('../../backend/toolbox-format/csv-capacity');
 
 function toolboxReaderOptions(config, privateDirectory) {
   const checked = config ? validateExecutionMemoryConfig(config) : null;
   if (!path.isAbsolute(privateDirectory || '')) throw new TypeError('低内存读取需要任务私有目录');
+  const lowMemoryInput = ['split-prepare-low-v1', 'rows-generation-low-v1'].includes(checked?.profileId);
   return {
+    ...(lowMemoryInput ? { allowBiff8: false, csvMaxSourceBytes: LOW_MEMORY_CSV_MAX_BYTES } : {}),
     sharedStringsMode: 'adaptive', sstTempRoot: path.join(privateDirectory, 'sst'),
     memoryBudgetBytes: checked ? checked.sstMemoryBytes : 8 * 1024 ** 2,
     cacheMaxBytes: checked ? checked.sstCacheBytes : 8 * 1024 ** 2,

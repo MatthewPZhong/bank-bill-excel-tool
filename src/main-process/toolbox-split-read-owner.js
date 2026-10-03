@@ -9,8 +9,7 @@ const { dispatchLargeSplit } = require('./toolbox-large-split-dispatch');
 const { createToolboxScanResources } = require('./toolbox-scan-resources');
 const { sourceSnapshotFromStat, sourceSnapshotMatchesStat } = require('./archive-center/source-snapshot');
 const { MAX_ROW_SPLIT_FILES } = require('./toolbox-row-split/contracts');
-const { detectToolboxInputKind } = require('./toolbox-input-kind');
-const { LOW_MEMORY_CSV_MAX_BYTES } = require('../backend/toolbox-format/csv-capacity');
+const { detectToolboxInputKind, supportsToolboxLowMemoryInput } = require('./toolbox-input-kind');
 
 const SCAN_ACTION = 'toolbox:split:prepare';
 // 公共扫描沿用原入口无独立内存预留的兼容合同；0 是账本预留值，不是工作集估计。
@@ -40,7 +39,7 @@ function createToolboxSplitReadOwner({ governor, dispatch = dispatchLargeSplit,
   let closing = null;
   const scans = createAdmissionOnlyOwner({
     governor,
-    allowLowMemory: (input) => input.inputKind !== 'csv' || input.sourceSnapshot.sizeBytes <= LOW_MEMORY_CSV_MAX_BYTES,
+    allowLowMemory: (input) => supportsToolboxLowMemoryInput(input.inputKind, input.sourceSnapshot.sizeBytes),
     descriptor: { ownerKey: 'toolbox-split-read', actionKey: SCAN_ACTION, resources: SCAN_RESOURCES, timeoutMs: 5000 },
     start(input, execution) {
       try {

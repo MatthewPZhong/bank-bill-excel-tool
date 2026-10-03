@@ -289,7 +289,7 @@ async function streamToolboxXlsxTables(filePath, options = {}) {
 }
 
 async function streamToolboxBiff8Tables(filePath, options = {}) {
-  const pass = await openToolboxBiff8Pass(filePath);
+  const pass = await openToolboxBiff8Pass(filePath, { ...options.readerOptions, cancelToken: options.cancelToken });
   return streamToolboxPassTables(pass, {
     ...options,
     projectionProfile: options.projectionProfile || TOOLBOX_PROJECTION_PROFILES.XLS_LEGACY
