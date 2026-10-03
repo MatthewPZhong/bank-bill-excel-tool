@@ -70,7 +70,7 @@ async function withRowsCsv(options, run) {
       (name) => name === './memory-profiles' ? profiles : localRequire(name), module, module.exports, filename, path.dirname(filename));
     const adapter = createWorkerThreadAdapter();
     runtime = module.exports.createBackgroundExecutionRuntime({ availableParallelism: 4,
-      freeMemoryBytes: 8 * 1024 ** 3, totalMemoryBytes: 16 * 1024 ** 3, memoryHardCeilingBytes: (options.hardMiB ?? 2048) * MiB,
+      freeMemoryBytes: (options.freeMiB ?? 8192) * MiB, totalMemoryBytes: 16 * 1024 ** 3, memoryHardCeilingBytes: (options.hardMiB ?? 2048) * MiB,
       diagnostics(entry) { if (entry.type === 'resource-granted' && entry.memoryProfile) grants.push(entry); },
       workerThreadAdapter: { start(args) {
         if (options.forceRowsLow) args = { ...args, memoryConfig: profiles.profile('rows-generation', 'low', 'reader-guard-fixture') };
@@ -101,7 +101,7 @@ async function withRowsCsv(options, run) {
     };
     let helpers;
     registerWithMemoryActivity(ipcMain, () => { helpers = Function(...Object.keys(scope), mainFunctions +
-      '\nreturn { getToolboxSplitReadOwner };')(...Object.values(scope)); });
+      '\nreturn { getToolboxSplitReadOwner, toolboxFailureResult };')(...Object.values(scope)); });
     owner = helpers.getToolboxSplitReadOwner();
     const sender = Object.assign(new EventEmitter(), { id: 1, isDestroyed: () => false }), event = { sender };
     observe = (worker) => {
@@ -124,7 +124,7 @@ async function withRowsCsv(options, run) {
       return { prepared, execute: () => contract.execute(event, prepared, context) };
     }
     return await run({ root, source, output, userData, state, runtime, owner, grants, starts, exits, workerLimits,
-      cleanup, workers, scan, prepare, hash, publication });
+      cleanup, workers, scan, prepare, hash, publication, failureResult: helpers.toolboxFailureResult });
   } finally {
     if (observe) process.off('worker', observe);
     const [closed] = await Promise.allSettled([owner?.close()]);

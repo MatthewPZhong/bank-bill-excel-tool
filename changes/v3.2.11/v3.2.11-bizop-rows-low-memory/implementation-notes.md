@@ -414,3 +414,21 @@ Spec 的业务行为、金额／行／输出合同和 Windows 验收标准未改
 最终完整 `UNIT_TEST_CONCURRENCY=2 npm run release-check` 已通过，耗时 1252.05 秒：lint、架构 788/788（41 个历史提交）、smoke、单测 9588 PASS / 0 FAIL / 4 Windows SKIP、81/81 集成脚本（3098 项计数检查）。冻结 1782 个输入；仅 runner 自动生成清单变化，最终源码保持不变。
 
 最终完整门禁及提交证据见 [本轮修复报告](../release/v3.2.11/review-fixes/2026-10-03-rows-csv-admission/repair-report.md)。本机 Node/文件 IO 证据与 Windows 平台、内存采样夹具分开记录；未重新执行 Windows 实机压力或 GUI 人工验收。
+
+
+## 19. 2026-10-03 第四轮准入诊断返回链修复
+
+### 19.1 依据与实现
+
+用户第四轮审查基线 `fb5d4bad55f9c41070ef6da9e3a302a13351a4a2`。本轮在实际生产策略、Governor、Supervisor、SafeError、rows service 和 Main 错误结果链中复现：适用普通档 768 MiB 超出固定 512 MiB 上限，最终却显示静态 1024 MiB，并建议释放内存后重启。
+
+- Governor 补齐 simple 预检的适用内存上限；Supervisor 白名单保留限制类型、候选额度、上限，在协议编码前生成原因及建议，静态向量明确标注为基线。
+- 沿用 SafeErrorV1 四字段和既有错误码；原因与额度通过 detailLines 展示，不依赖协议不支持的 Error.details，也不从文案猜测类型。
+- rows 对原因缺失、未知使用中性提示；已确认的兼容预算不足保留对应重启建议。固定 H 与启动 Bcompat 在回归中分别验证。
+- 诊断只保留技术枚举／数值，不复制 owner、路径、队列载荷；本轮不修改资源配置、生产 qualified 或前三轮的读取和清理修复。
+
+### 19.2 验证与边界
+
+初步聚焦单测 36/36 PASS；新增真实错误返回链集成 3/3 PASS，覆盖普通档／双候选固定拒绝及明确的旧兼容预算不足。检查最终原因、数字、建议，且零 Worker、零 Publisher，原件与已有目标均保留。`UNIT_TEST_CONCURRENCY=2 npm run release-check` 于 2026-10-03T16:17:41.672671+08:00 开始；已完成 lint、架构 788/788（42 个历史提交）、smoke 和单测 9593 PASS / 0 FAIL / 4 Windows SKIP，集成阶段随会话中断，未取得这次完整命令的退出码。复核 1783 个冻结输入完全一致后，于 2026-10-03T16:43:33.002190+08:00 至 2026-10-03T16:54:31.217837+08:00 用正式 `npm run test:integration` 续跑整个集成阶段，耗时 658.22 秒，退出码 0，82/82 脚本（3101 项计数检查）通过。所有门禁检查项目已完成；保留原始中断日志及续跑日志，不将分段完成写成一次完整命令退出成功。期间仅 runner 自动生成的集成清单变化，规则正文与其余输入摘要一致。详情见 [本轮修复报告](../release/v3.2.11/review-fixes/2026-10-03-r4-admission-diagnostics/repair-report.md)。
+
+Windows/Electron 身份、内存和源计数为夹具，真实运行在本机 Node；不扩大 Windows 实机、安装包或 GUI 的人工验收结论。

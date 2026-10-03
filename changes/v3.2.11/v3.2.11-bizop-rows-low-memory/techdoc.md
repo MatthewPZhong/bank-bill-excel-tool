@@ -5,7 +5,7 @@
  target-version: v3.2.11
  branch: v3.2.11-bizop-rows-low-memory
  baseline: 18b82b4328cf5e00c1b2549d373a5b2f2677215c
- revision: R6
+ revision: R7
 -->
 
 | 项目 | 内容 |
@@ -421,6 +421,8 @@ worker thread 的 RSS 属于整个进程，不能按 worker 求和；`arrayBuffe
 建议在既有错误族内区分：适用稳定上限不足（H 或 Bcompat）、当前配额被占用、实时物理内存不足、增长不明而等待、排队超时、采样失效、运行中压力、磁盘不足、配置缺失、恢复尚未就绪。固定不足不映射成等待超时；rows 专属 `TOOLBOX_ROWS_SOURCE_BUDGET` 不用于公共／字段路径。新错误码／字段需同步 error codec／schema；名称在实现时集中定义，不零散匹配字符串。
 
 OP 旧 `BIZOP_RESOURCE_BUDGET_INSUFFICIENT`／`BIZOP_RESOURCE_WAIT_TIMEOUT` 的映射要区分“稳定上限”与“当前环境”，移除要求重启应用才能刷预算的常规提示。rows 的 `rowsAdmissionError` 同改。每个阶段实际是否开始、是否有待恢复副作用应准确显示。
+
+**准入诊断返回链补齐（R7）：** Governor 的 simple job 预检同时返回适用内存上限，区分固定 H 与 Bcompat。Supervisor 仅保留 `hardware`／`compatibility` 枚举、候选额度和上限的非负安全整数；在编码前将原因、实际候选、适用上限写成中文 `detailLines`，将旧静态向量明确标成“静态资源基线”。`RESOURCE_BUDGET_UNAVAILABLE`／`ADMISSION_TIMEOUT` 以及 SafeErrorV1 的 `code/message/stage/detailLines` 四字段合同不变，协议不增加 `details`。下游展示这些诊断，不反向解析提示文字；原因缺失或未知时使用中性说明，仅已确认的兼容预算错误保留相应重启建议。普通／低档候选、实际额度、资格与准入决定均不受诊断修复影响。
 
 日志遵循 finance-safe：不放源行、字段值和账户金额。需要源身份时使用内部 token／摘要，不能将用户完整文件路径写入公共遥测。
 

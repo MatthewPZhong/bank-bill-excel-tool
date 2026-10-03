@@ -133,7 +133,7 @@ async function runCase(memoryBytes, shouldSucceed) {
       assert.ok(!/Admission timed out|Resource budget cannot admit/.test(result.message));
       assert.ok(Array.isArray(result.detailLines) && result.detailLines.length > 0);
       assert.ok(result.detailLines.every((line) => typeof line === 'string'));
-      assert.ok(result.detailLines.some((line) => line.startsWith('申请资源：') && line.includes('1,024.000 MiB')));
+      assert.ok(result.detailLines.some((line) => line.startsWith('静态资源基线：') && line.includes('1,024.000 MiB')));
       assert.ok(result.detailLines.some((line) => line.startsWith('总预算：') && line.includes('768.000 MiB')));
       assert.ok(result.detailLines.every((line) => !line.includes('[redacted')));
       const rejected = diagnostics.find((event) => event.type === 'resource-admission-failed');

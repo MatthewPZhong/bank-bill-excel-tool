@@ -62,7 +62,7 @@ for (const code of ['RESOURCE_BUDGET_UNAVAILABLE', 'ADMISSION_TIMEOUT']) {
       assert.match(result.message, code === 'ADMISSION_TIMEOUT' ? /按行拆分等待后台资源超时/ : /按行拆分暂时无法启动.*配额不足/);
       assert.equal(result.detailLines[0], '本次尚未开始生成拆分文件。');
       assert.deepEqual(result.detailLines.slice(1, -1), details);
-      assert.match(result.detailLines.at(-1), code === 'ADMISSION_TIMEOUT' ? /等待其他后台任务完成/ : /释放内存后重新启动应用/);
+      assert.match(result.detailLines.at(-1), code === 'ADMISSION_TIMEOUT' ? /等待其他后台任务完成/ : /请保留以上资源信息便于排查/);
       assert.equal(error.stage, 'admission');
     });
   }
@@ -84,4 +84,20 @@ test('Main 无错误码的旧异常返回形状不变，恢复路径仍完整且
     detailLines: ['恢复路径：/fixture/a', '恢复路径：/fixture/b'] });
   result.detailLines.push('额外信息');
   assert.deepEqual(error.detailLines, ['恢复路径：/fixture/a']);
+});
+
+for (const kind of ['hardware', 'compatibility', undefined, 'future-limit']) {
+  test(`直接准入错误 ${kind ?? '缺失原因'} 只在明确兼容预算时建议重启`, async (t) => {
+    const error = await failBeforeGeneration(t, { code: 'RESOURCE_BUDGET_UNAVAILABLE', message: 'rejected',
+      stage: 'admission', detailLines: [], details: { memoryLimitKind: kind } }, true);
+    const result = plain(failureResult(error));
+    if (kind === 'compatibility') assert.match(result.detailLines.join('\n'), /释放内存后重新启动应用/);
+    else assert.doesNotMatch(result.detailLines.join('\n'), /重启|重新启动|兼容预算/);
+  });
+}
+
+test('SafeError 原因缺失时不从提示文字猜兼容预算，也不追加重启建议', async (t) => {
+  const error = await failBeforeGeneration(t, { code: 'RESOURCE_BUDGET_UNAVAILABLE', message: 'rejected',
+    stage: 'admission', detailLines: ['上游说明：兼容预算；hardware；compatibility'] });
+  assert.doesNotMatch(plain(failureResult(error)).detailLines.join('\n'), /重启|重新启动/);
 });

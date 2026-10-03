@@ -121,7 +121,7 @@ async function validateRowsManifest(plan, input, result) {
 function rowsAdmissionError(error, stage = 'generation') {
   if (!error || !['RESOURCE_BUDGET_UNAVAILABLE', 'ADMISSION_TIMEOUT'].includes(error.code)) return error;
   const insufficient = error.code === 'RESOURCE_BUDGET_UNAVAILABLE';
-  const compatibility = insufficient && error.details?.memoryLimitKind !== 'hardware';
+  const compatibility = insufficient && error.details?.memoryLimitKind === 'compatibility';
   error.message = insufficient
     ? stage === 'validation' ? '按行拆分验证阶段无法启动：后台资源配额不足。' : '按行拆分暂时无法启动：后台资源配额不足。'
     : '按行拆分等待后台资源超时，请稍后重试。';
@@ -130,7 +130,7 @@ function rowsAdmissionError(error, stage = 'generation') {
     ...(Array.isArray(error.detailLines) ? error.detailLines : []),
     compatibility
       ? '后台总配额在应用启动时计算；若总配额低于所需值，请关闭暂不使用的程序，释放内存后重新启动应用。'
-      : insufficient ? '现有执行档均超过稳定资源上限；请保留以上资源信息便于排查。'
+      : insufficient ? '本次未能取得所需资源；请保留以上资源信息便于排查。'
         : '请等待其他后台任务完成或释放其他程序占用后直接重试，无需重启本软件。'
   ];
   return error;

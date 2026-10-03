@@ -216,7 +216,8 @@ function createResourceGovernor(options = {}) {
     if (!candidates.some((candidate) => fitsStable(memory, checkedAdd(fixedBase, candidate.resources)))) {
       throw unavailable({ ...common, resources: checkedAdd(fixedBase, fixedPhase) }, { reason: 'stable-limit',
         memoryLimitKind: memory?.scope.migrated ? 'hardware' : 'compatibility',
-        candidateMemoryBytes: candidates.map((candidate) => fixedBase.memoryBytes + candidate.resources.memoryBytes) });
+        candidateMemoryBytes: candidates.map((candidate) => fixedBase.memoryBytes + candidate.resources.memoryBytes),
+        memoryLimitBytes: memory ? memoryAdmission.limit(memory.scope, budgets.memoryBytes) : budgets.memoryBytes });
     }
   }
 
