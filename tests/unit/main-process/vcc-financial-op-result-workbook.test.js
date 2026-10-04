@@ -209,13 +209,17 @@ test('有汇总无明细及零差异主体仍保留主表与空 Pending 附表',
 test('快照内多轮读取不混入第二连接对 Pending 的并发更改', async (t) => {
   const data = fixture(t); data.db.exec('PRAGMA journal_mode=WAL');
   const other = new DatabaseSync(path.join(data.root, 'fixture.sqlite'));
-  t.after(() => other.close());
-  const result = await runWriter(data, { beforeSubjectWrite: ({ ordinal }) => {
-    if (ordinal === 1) other.prepare("UPDATE vcc_fin_op_pending_summary_rows SET flow_amount='999' WHERE run_id=? AND subject='B主体'").run(data.runId);
-  } });
-  const book = new ExcelJS.Workbook(); await book.xlsx.readFile(result.filePaths[0]);
-  assert.equal(book.worksheets[3].getCell('F2').value, 16);
-  assert.equal(other.prepare("SELECT flow_amount FROM vcc_fin_op_pending_summary_rows WHERE subject='B主体'").get().flow_amount, '999');
+  try {
+    const result = await runWriter(data, { beforeSubjectWrite: ({ ordinal }) => {
+      if (ordinal === 1) other.prepare("UPDATE vcc_fin_op_pending_summary_rows SET flow_amount='999' WHERE run_id=? AND subject='B主体'").run(data.runId);
+    } });
+    const book = new ExcelJS.Workbook(); await book.xlsx.readFile(result.filePaths[0]);
+    assert.equal(book.worksheets[3].getCell('F2').value, 16);
+    assert.equal(other.prepare("SELECT flow_amount FROM vcc_fin_op_pending_summary_rows WHERE subject='B主体'").get().flow_amount, '999');
+  } finally {
+    // 公共 fixture 的 after 会删除目录；第二连接须在交还清理责任前关闭。
+    other.close();
+  }
 });
 
 test('全 run revision、孤儿主体和 SST 预算异常均失败，不遗留本次临时字符串文件', async (t) => {

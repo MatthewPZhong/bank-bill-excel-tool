@@ -36,3 +36,11 @@
 ## 执行进度的记录约定
 
 准备时已确认五分支、基线与当前保护规则。PR、最终 main、附注标签、发布工作流、四项资产及本地同步只在取得实际结果后登记到 PR／Release 或独立结果文件。正式发布后不为更新本文件改写已发布提交、移动标签或覆盖资产。
+
+## 2026-10-04 Windows 候选检查：测试连接关闭顺序修复
+
+首个发布候选 `ec0bc211` 的本地完整门禁通过：9,595 单测 PASS、4 项 Windows SKIP，83/83 集成脚本与 3,116 项计数检查 PASS；5,554 个 tracked 输入核对一致。runner 只改写自动生成清单的日期和耗时，证据单独保存后恢复该文件，保持冻结候选。
+
+[PR #241 的首轮 Windows 检查](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/37172499007)为 9,594 单测 PASS、1 FAIL、4 SKIP。唯一失败发生在 VCC 正式结果并发快照用例的 after 清理：公共 fixture 先关闭主连接并删除目录，稍后注册的第二连接关闭回调尚未执行，Windows 因打开的 SQLite 连接拒绝删除 `fixture.sqlite`（EBUSY）。导出与快照隔离断言已通过；集成和 build 未执行，不能把此 run 计为发布通过。
+
+测试中第二连接改由 try/finally 在用例返回前关闭，再交给公共 fixture 清理；保留真实并发更新、结果单元格与第二连接数据断言，生产 Writer 和业务代码未改。基于真实失败用例注入 Windows 文件锁语义的本机探针修复前以同一 EBUSY 失败；修复后该探针 1/1 PASS，完整 VCC 工作簿测试文件 23/23 PASS。探针是在 macOS 注入文件锁语义的专项验证，最终本地／Windows 门禁须在新候选再次执行。原始日志与前后探针保存在独立 publication 证据中，后续结果写入 PR／Release。
