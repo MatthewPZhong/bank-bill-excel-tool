@@ -92,7 +92,8 @@ function manualApproval(root) {
     assert.notEqual(changedIdentity.identity.dependencyLockSha256, unpackedIdentity.identity.dependencyLockSha256);
     pass('lock 变化同时改变源码与依赖摘要，不能沿用原身份');
 
-    const qualificationPath = 'src/main-process/execution-descriptors/memory-qualification.json';
+    // ASAR 的文件查询按宿主 path.sep 分段；Windows 也须传入本机路径。
+    const qualificationPath = path.join('src', 'main-process', 'execution-descriptors', 'memory-qualification.json');
     assert.deepEqual(fs.readFileSync(path.join(source, qualificationPath)), fs.readFileSync(path.join(repo, qualificationPath)));
     assert.deepEqual(asar.extractFile(archive, qualificationPath), fs.readFileSync(path.join(repo, qualificationPath)));
     pass('资格清单字节保持原样，测试不授予生产资格');

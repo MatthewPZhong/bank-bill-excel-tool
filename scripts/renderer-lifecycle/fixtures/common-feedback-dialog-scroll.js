@@ -30,11 +30,25 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       return f.bridge.openModal(()=>f.overlay, {owner:'fixture'}).status;
     }; void 0;`);
   }
-  async function waitFor(expression) {
+  async function waitFor(expression, description = expression) {
     return js(`new Promise((resolve, reject) => {
       const until=Date.now()+3000;
       const check=()=>{try { if (${expression}) return resolve(true); } catch(error) {return reject(error);}
-        if(Date.now()>until)return reject(new Error('等待条件超时：'+${JSON.stringify(expression)})); setTimeout(check,20);}; check();
+        if(Date.now()>until)return reject(new Error('等待条件超时：'+${JSON.stringify(description)})); setTimeout(check,20);}; check();
+    })`);
+  }
+  async function waitForScrollIdle() {
+    await js(`new Promise((resolve,reject)=>{
+      const element=document.querySelector('${body}');
+      const deadline=Date.now()+3000;
+      let previous=element.scrollTop, stableSince=Date.now();
+      const check=()=>{
+        const now=Date.now(), current=element.scrollTop;
+        if(current!==previous){previous=current;stableSince=now;}
+        else if(now-stableSince>=150)return resolve();
+        if(now>=deadline)return reject(new Error('键盘滚动未结束'));
+        setTimeout(check,20);
+      };check();
     })`);
   }
   async function geometry(selector = card) {
@@ -127,10 +141,18 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.equal(await js(`document.activeElement===document.querySelector('${body}')`),true);
     assert.deepEqual(await js(`({role:document.activeElement.getAttribute('role'),label:document.activeElement.getAttribute('aria-label'),outline:getComputedStyle(document.activeElement).outlineStyle})`),{role:'region',label:'弹窗内容',outline:'solid'});
     await layout.key('PageDown');
-    await waitFor(`document.querySelector('${body}').scrollTop>0`);
-    await js(`document.querySelector('${body}').scrollTop=0;void 0`);
+    await waitFor(`document.querySelector('${body}').scrollTop>0`, 'PageDown 滚动正文');
+    // 等上一次原生动画结束，避免把 PageDown 的剩余滚动误算成 Space 生效。
+    await waitForScrollIdle();
+    await js(`document.querySelector('${body}').scrollTop=0;f.spacePresses=[];
+      document.querySelector('${body}').addEventListener('keypress',event=>{
+        if(event.key===' ')f.spacePresses.push({charCode:event.charCode,trusted:event.isTrusted});
+      });void 0`);
+    await layout.settle();
     await layout.key('Space');
-    await waitFor(`document.querySelector('${body}').scrollTop>0`);
+    await waitFor(`document.querySelector('${body}').scrollTop>0`, 'Space 滚动正文');
+    assert.deepEqual(await js('f.spacePresses'),[{charCode:32,trusted:true}], '真实空格 keypress 恰好触发一次');
+    await waitForScrollIdle();
     assert.deepEqual(await js('[f.calls.confirm,f.calls.middle,f.calls.cancel,f.calls.background]'),[0,0,0,0]);
     await layout.key('Tab');
     await layout.key('Enter');

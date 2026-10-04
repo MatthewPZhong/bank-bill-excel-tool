@@ -102,6 +102,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify memory package identity on Windows
+        run: node scripts/integration/packaged-memory-identity.js
+
+      - name: Verify common feedback keyboard and layout on Windows
+        run: node scripts/test-renderer-lifecycle.js common-feedback-dialog-scroll
+
       - name: Resolve architecture policy comparison
         id: architecture-policy
         env:

@@ -44,3 +44,14 @@
 [PR #241 的首轮 Windows 检查](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/37172499007)为 9,594 单测 PASS、1 FAIL、4 SKIP。唯一失败发生在 VCC 正式结果并发快照用例的 after 清理：公共 fixture 先关闭主连接并删除目录，稍后注册的第二连接关闭回调尚未执行，Windows 因打开的 SQLite 连接拒绝删除 `fixture.sqlite`（EBUSY）。导出与快照隔离断言已通过；集成和 build 未执行，不能把此 run 计为发布通过。
 
 测试中第二连接改由 try/finally 在用例返回前关闭，再交给公共 fixture 清理；保留真实并发更新、结果单元格与第二连接数据断言，生产 Writer 和业务代码未改。基于真实失败用例注入 Windows 文件锁语义的本机探针修复前以同一 EBUSY 失败；修复后该探针 1/1 PASS，完整 VCC 工作簿测试文件 23/23 PASS。探针是在 macOS 注入文件锁语义的专项验证，最终本地／Windows 门禁须在新候选再次执行。原始日志与前后探针保存在独立 publication 证据中，后续结果写入 PR／Release。
+
+## 2026-10-04 Windows 集成检查：ASAR 路径与键盘输入修复
+
+候选 `5b179cd0` 的本地完整门禁通过：9,595 单测 PASS、4 项平台 SKIP，83/83 集成脚本与 3,116 项计数检查 PASS；全部 5,554 个 tracked 输入核对一致。
+
+[第二轮 Windows 检查](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/37176003277)完成 9,595 单测 PASS、0 FAIL、4 SKIP，前一轮 SQLite 清理问题已通过。集成结果为 81/83 脚本通过，失败仅在以下测试装配：
+
+- `packaged-memory-identity`：`@electron/asar` 按宿主 `path.sep` 遍历目录，测试固定 `/` 路径在 Windows 无法定位嵌套资格文件。使用实际已安装库并注入 `path.win32` 已复现失败与本机路径对照；改为 `path.join`，保留真实 builder 拷贝、ASAR 字节及 Electron 包内身份断言。本机专项 7/7 PASS。
+- `renderer-lifecycle`：302/303 PASS，公共反馈键盘用例失败。隔离 Electron 探针确认旧输入驱动缺少 Space 的字符事件；补发该事件，显式聚焦测试窗口，并等待 PageDown 动画结束后再独立验证 Space，额外断言恰好一次可信空格 keypress。强化后的用例在旧驱动下 39/40、修复后 40/40；本机探针与 Windows 最终结果分别记录。输入语义参考 [Electron sendInputEvent 合同](https://www.electronjs.org/docs/latest/api/web-contents#contentssendinputeventinputevent)。
+
+Windows 构建 workflow 将上述两个专项放到完整门禁前，使平台失败尽早返回；完整 `release-check`、进程语义、打包和正式发布检查均保留。Windows workflow 合同专项本机 5 PASS、2 项真实 Windows 条件 SKIP。修复不修改业务代码或资格清单，也不跳过失败断言。新候选完整本地／Windows 结果取得后写入 PR、Release 与独立 publication 记录。

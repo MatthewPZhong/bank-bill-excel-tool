@@ -54,10 +54,14 @@ module.exports = function createLayoutDriver({ root, temporary, getWindow }) {
     await settle();
   };
   const key = async (keyCode, modifiers = []) => {
-    const contents = getWindow().webContents;
+    const win = getWindow();
+    const contents = win.webContents;
+    win.focus();
     contents.focus();
     contents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
-    if (keyCode === 'Enter') contents.sendInputEvent({ type: 'char', keyCode: '\r', modifiers });
+    // 可打印空格需要 char 事件，才能触发 keypress 及浏览器的原生滚动。
+    const character = keyCode === 'Enter' ? '\r' : keyCode === 'Space' ? ' ' : null;
+    if (character !== null) contents.sendInputEvent({ type: 'char', keyCode: character, modifiers });
     contents.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
     await settle();
   };
