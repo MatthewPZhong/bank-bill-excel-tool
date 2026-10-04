@@ -1,0 +1,9 @@
+{
+  "sourceTreeSha256": "73dfd5b36fa39ac8f03e64decebecdeb9a037e89eac701ab23534f32a39b2119",
+  "dependencyLockSha256": "6360f29a82d5f4c1d1003d9e61e6a4db678f398aab5043c23c46371e2f215e65",
+  "appVersion": "3.2.10",
+  "platform": "darwin",
+  "arch": "arm64",
+  "nodeVersion": "25.8.0",
+  "electronVersion": null
+}

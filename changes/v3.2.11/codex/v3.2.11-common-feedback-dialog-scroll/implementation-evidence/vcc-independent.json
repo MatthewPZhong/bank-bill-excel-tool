@@ -1,0 +1,39 @@
+{
+  "environment": {
+    "platform": "darwin",
+    "versions": {
+      "electron": "36.9.5",
+      "chrome": "136.0.7103.177"
+    },
+    "displayScaleFactor": 2,
+    "minimumSize": [
+      1080,
+      760
+    ],
+    "frame": false,
+    "windowBounds": {
+      "x": 324,
+      "y": 103,
+      "width": 1080,
+      "height": 760
+    },
+    "contentBounds": {
+      "x": 324,
+      "y": 103,
+      "width": 1080,
+      "height": 760
+    },
+    "zoom": 1,
+    "page": {
+      "width": 1080,
+      "height": 760,
+      "devicePixelRatio": 2,
+      "theme": "light"
+    }
+  },
+  "screenshotPixels": {
+    "width": 2160,
+    "height": 1520
+  },
+  "scope": "真实控制器的独立消息结构不受公共样式影响"
+}

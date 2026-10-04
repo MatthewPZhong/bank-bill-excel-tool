@@ -32,7 +32,7 @@ async function fixture(t, allocation = 'eager', options = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-file-owner-recovery-'));
   const db = new DatabaseSync(path.join(directory, 'archive.sqlite'));
   const rootDir = path.join(directory, 'archive');
-  const service = createArchiveService({ database: db, rootDir });
+  const service = createArchiveService({ database: db, rootDir, defaultRetentionDays: options.defaultRetentionDays });
   await service.initialize({ deferStartupRecovery: true, startBackgroundMaterialization: false });
   const outboxStore = createArchiveOutboxStore(path.join(directory, 'outbox'));
   let routeCalls = 0;
@@ -85,7 +85,7 @@ async function fixture(t, allocation = 'eager', options = {}) {
 for (const allocation of ['eager', 'deferred']) {
   for (const boundary of ['running', 'after-terminal']) {
     test(`${allocation} 新任务 ${boundary} 中断按原责任恢复，同一身份可删除或到期清理`, async (t) => {
-      const f = await fixture(t, allocation);
+      const f = await fixture(t, allocation, { defaultRetentionDays: 60 });
       await assert.rejects(f.run({ boundary }), { code: 'SIMULATED_CRASH' });
       const owner = f.owner();
       assert.equal(rowCount(f.db, 'archive_file_task_owner_recovery'), 1);

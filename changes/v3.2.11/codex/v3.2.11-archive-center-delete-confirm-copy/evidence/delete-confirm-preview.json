@@ -1,0 +1,51 @@
+{
+  "boundary": "真实 Electron DOM、生产确认工厂与产品 CSS；合成批次及受控 API，不包含产品 Main、真实文件删除或 Windows 验收。",
+  "captures": [
+    {
+      "theme": "light",
+      "file": "delete-confirm-light.png",
+      "text": "确定永久删除批次 2026-08-11-001 吗？",
+      "background": "rgb(255, 255, 255)",
+      "buttons": [
+        "永久删除",
+        "取消"
+      ]
+    },
+    {
+      "theme": "dark",
+      "file": "delete-confirm-dark.png",
+      "text": "确定永久删除批次 2026-08-11-001 吗？",
+      "background": "rgb(28, 32, 39)",
+      "buttons": [
+        "永久删除",
+        "取消"
+      ]
+    }
+  ],
+  "inputs": [
+    {
+      "file": "src/renderer/dialogs/app-settings.js",
+      "sha256": "90567bc54e178d659819957777242ce0f7801e6a830a12b8849de6c71c412c38"
+    },
+    {
+      "file": "src/renderer.js",
+      "sha256": "3f2166f359a6fdf40c8985df682b661b48c85f3792be8aed9202b6f2b525c4ec"
+    },
+    {
+      "file": "scripts/renderer-lifecycle/fixtures/app-settings.js",
+      "sha256": "a4acc758a35ed223f71ed3ff279807512b735de9b360969100a598d494f7acba"
+    },
+    {
+      "file": "src/styles-gemini.css",
+      "sha256": "5ec94ce0d82d61cca953c44ea3dd782179de6c6f3de858907a064520e88789bf"
+    },
+    {
+      "file": "src/styles-gemini-extra.css",
+      "sha256": "62fe0ab83339b0d548e5a51921082621108eec6d38c49c35c2e3242f15106253"
+    },
+    {
+      "file": "src/styles-dark-mode.css",
+      "sha256": "b45a9dead620b079da2b0024ef7f4a61b3a03f9a645477237b2335c2c02bee1b"
+    }
+  ]
+}

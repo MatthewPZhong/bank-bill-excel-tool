@@ -1,4 +1,5 @@
 'use strict';
+const { memoryCarrierAdmission } = require('./memory-activity');
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -30,7 +31,7 @@ function restoreWorkerError(payload) {
 function runMigrationWorker(options) {
   const worker = options.workerFactory
     ? options.workerFactory(options.workerPath || DEFAULT_WORKER_PATH)
-    : new Worker(options.workerPath || DEFAULT_WORKER_PATH);
+    : memoryCarrierAdmission(null).observe(new Worker(options.workerPath || DEFAULT_WORKER_PATH));
   return new Promise((resolve, reject) => {
     let settled = false;
     let readyHandled = false;

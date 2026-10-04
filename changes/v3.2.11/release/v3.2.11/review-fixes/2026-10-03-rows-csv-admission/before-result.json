@@ -1,0 +1,66 @@
+{
+  "head": "87bdb924b58ceddc23a1c262dbddf57ae54cf55f",
+  "runtime": "v25.8.0",
+  "platform": "darwin",
+  "inputBytes": 24000016,
+  "metadata": {
+    "status": "success",
+    "rows": 1500000,
+    "mode": "normal"
+  },
+  "generation": {
+    "status": "failed",
+    "message": "Worker terminated due to reaching memory limit: JS heap out of memory",
+    "detailLines": [],
+    "code": "ERR_WORKER_OUT_OF_MEMORY"
+  },
+  "starts": [
+    {
+      "memoryConfig": {
+        "version": 1,
+        "profileId": "rows-generation-low-v1",
+        "phaseKey": "rows-generation",
+        "phaseMemoryBytes": 402653184,
+        "systemReserveBytes": 134217728,
+        "sstMemoryBytes": 8388608,
+        "sstCacheBytes": 4194304,
+        "styleCacheBytes": 8388608,
+        "sqliteAggregateCacheBytes": 12582912,
+        "maxOpenConnections": 2,
+        "maxInFlightBytes": 4194304,
+        "maxSingleRecordBytes": 2097152,
+        "workerLimits": {
+          "maxOldGenerationSizeMb": 230,
+          "maxYoungGenerationSizeMb": 8
+        },
+        "validatedEvidenceId": "manual-v3.2.11-2026-10-02",
+        "policyDigest": "60976530251a05d06bb2cdf27a0e711d7264b035af66ea1dc9a848072e1888bd"
+      }
+    }
+  ],
+  "workerLimits": [
+    {
+      "maxYoungGenerationSizeMb": 8,
+      "maxOldGenerationSizeMb": 460,
+      "codeRangeSizeMb": 0,
+      "stackSizeMb": 4
+    },
+    {
+      "maxYoungGenerationSizeMb": 8,
+      "maxOldGenerationSizeMb": 230,
+      "codeRangeSizeMb": 0,
+      "stackSizeMb": 4
+    }
+  ],
+  "exits": [
+    1,
+    1
+  ],
+  "publisherCalls": 0,
+  "cleanup": [
+    [
+      "plan.json",
+      "rows.sqlite"
+    ]
+  ]
+}

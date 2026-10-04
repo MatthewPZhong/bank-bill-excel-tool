@@ -1,0 +1,85 @@
+{
+  "result": "PASS",
+  "baseline": "15e44b0ffaa304790f6821771791eacf085072b9",
+  "branch": "release/v3.2.11",
+  "commitStatusAtValidation": "uncommitted",
+  "gate": {
+    "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+    "head": "15e44b0ffaa304790f6821771791eacf085072b9",
+    "startedAt": "2026-10-03T17:45:04.590243+08:00",
+    "inputCount": 1784,
+    "runtime": {
+      "node": "v25.8.0",
+      "platform": "darwin",
+      "arch": "arm64"
+    },
+    "finishedAt": "2026-10-03T18:08:18.197122+08:00",
+    "elapsedSeconds": 1393.61,
+    "exitCode": 0,
+    "changedInputs": [
+      "rules/integration-test-policy.md"
+    ],
+    "policyPrefixUnchanged": true,
+    "headUnchanged": true
+  },
+  "unit": {
+    "tests": 9599,
+    "pass": 9595,
+    "fail": 0,
+    "skipped": 4
+  },
+  "integration": {
+    "scripts": 83,
+    "passedScripts": 83,
+    "countedChecks": 3116,
+    "newBiff8Cases": 15
+  },
+  "focusedUnit": {
+    "pass": 35,
+    "fail": 0,
+    "newCases": 2
+  },
+  "architectureFiles": 788,
+  "architectureHistoryCommits": 43,
+  "qualificationUnchanged": true,
+  "memoryProfileAmountsUnchanged": true,
+  "safeErrorSchemaUnchanged": true,
+  "limits": [
+    "专项与门禁实际执行环境 macOS / Node v25.8.0；前后同样本复现环境为 macOS / Node v24.13.0",
+    "Windows/Electron 身份、内存采样、对话框和归档回执为夹具；Main handler、真实 Worker、SQLite、写出和 Publisher 已执行",
+    "BIFF8 低档强制负例证明受控拒绝，不计作低档容量验收",
+    "未重跑 Windows 实机、安装包、Excel/WPS 或完整 GUI 人工验收"
+  ],
+  "fileSha256": {
+    "changes/v3.2.11/release/v3.2.11/review-fixes/2026-10-03-r5-biff8-admission/after-result.json": "5b8d05dfca6cdbdc1de94b56709cc7bb4602cff57644aba2fb45863c621a05f8",
+    "changes/v3.2.11/release/v3.2.11/review-fixes/2026-10-03-r5-biff8-admission/before-result.json": "056b6ea3c9826b3ceaef600fbad28b1b79b85de570636bbcef36d84001da7232",
+    "changes/v3.2.11/release/v3.2.11/review-fixes/2026-10-03-r5-biff8-admission/repair-report.md": "3017804b0392dabdf421a76a36f33be2354e27f2eaf5b3a76801b06c8db7a077",
+    "changes/v3.2.11/release/v3.2.11/review-fixes/2026-10-03-r5-biff8-admission/reproduce.cjs": "9d5366c2906447b356fb61035aaa3b877a382569b68cd558e0bb32412d03fc7c",
+    "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/implementation-notes.md": "a808f0f70b4d328a628c4f05e49582a7a37e8e10744a85888296c79f836de0ec",
+    "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/techdoc.md": "67b9e7572c08ce56ef337200dba05f1804d18693e68f042761030dd85017e547",
+    "rules/integration-test-policy.md": "66682e58b8ea856954814ecffec328c3ff53a145365ef4df2431f75a7eb75fea",
+    "scripts/integration/toolbox-biff8-admission.js": "9df00605edc7caf6cdcd6c6dfe2be1291f7f510a012fef70366bee2cf55e6491",
+    "src/backend/toolbox-format/biff8-pass.js": "e336ae2f1c9e5daa576deac7b1adce10fe89db18763a907875d5f00ecf200c00",
+    "src/backend/toolbox-xlsx-stream/large-split-worker.js": "76a36372af2c9af284c8b7c0e787d421caf05174b187fdfcf9c9b4f05269056f",
+    "src/main-process/background-execution/execution-memory-options.js": "88cf6aed7c70205fa0fde40021a5b6ea714a8f5ca1caef84bd8f903ae69937a4",
+    "src/main-process/toolbox-format-io.js": "b0304d995fc4791081091b08181f3e52cb37a49ea7a0e05981934d3902e8b23b",
+    "src/main-process/toolbox-input-kind.js": "e4bd131627a834421bf1cd24cf879975ba09ee48258e426be941f09dab66579e",
+    "src/main-process/toolbox-row-split/cache.js": "ea7f9c150d29763e2f31b4f25e9eb26fd17b9700e3aa6ab41ad29634240af3d3",
+    "src/main-process/toolbox-row-split/service.js": "79f3e7ae77dc73896d3f356b7b61df1151211c8717e980a43141ce1a792fd837",
+    "src/main-process/toolbox-split-read-owner.js": "6f7f10b0798a1a0df4bd76a4199fdf8ec13d42f73bb904224cdfd2c8e9042d67",
+    "tests/helpers/toolbox-rows-csv.js": "8396966d1c41fe828659b63e36c7b3f7b4920a293d803797403b5dd30e56dc4d",
+    "tests/unit/toolbox-format-biff8-pass.test.js": "fc765d994d4d746c25355f6f982cfad20a22f7cc9e76d02a089d58d559688760",
+    "tests/unit/toolbox-input-kind.test.js": "cb29d26b03b079e7e1275c2dafb089279b03258f683806cb42942f2959a3d498"
+  },
+  "evidenceSha256": {
+    "before-result.json": "056b6ea3c9826b3ceaef600fbad28b1b79b85de570636bbcef36d84001da7232",
+    "after-result.json": "5b8d05dfca6cdbdc1de94b56709cc7bb4602cff57644aba2fb45863c621a05f8",
+    "focused-unit.log": "ff091720b62c4ea051f0861e966f8044c0e2611c11b23fa3aeef7652c7d0b6d1",
+    "biff8-integration.log": "a46daf65231610640038630e1386bb4410a4c4ccb2ca0b6cbebe2056e21e5eeb",
+    "release-check.log": "dab53241ae279ec99528f8152d131f565c07f29115728b4e23c4bf9faccb3a4c",
+    "gate-inputs.json": "c18d945d456939d7b19a5ad211d7730d5a64eee6e0ad0e4a97ca5f782206160d",
+    "gate-start.json": "99b9cdb88b23ffd9950698681eee20b482546c28951898c4225d72ad18c40509",
+    "gate-result.json": "4990cdc19cc41f400c882f196d3a1b29d9a31a4c25fbddcc2b42341a128c1336"
+  },
+  "rawEvidenceDirectory": "outputs/release-v3.2.11/2026-10-03-r5-biff8-admission"
+}

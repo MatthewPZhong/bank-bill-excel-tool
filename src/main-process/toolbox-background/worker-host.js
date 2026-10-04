@@ -1,6 +1,7 @@
 'use strict';
 
-const { parentPort, receiveMessageOnPort } = require('node:worker_threads');
+const { parentPort, receiveMessageOnPort, workerData } = require('node:worker_threads');
+const { validateExecutionMemoryConfig } = require('../background-execution/execution-memory-config');
 
 const {
   createCanonicalEventEmitter
@@ -32,6 +33,8 @@ function startToolboxGenerationWorker(actionKey, executeGeneration) {
         emit = createCanonicalEventEmitter(startEnvelope, (event) => parentPort.postMessage(event));
         abortController = new AbortController();
         executeGeneration(envelope.payload.input, abortController.signal, {
+          memoryConfig: workerData?.backgroundExecutionMemoryConfig
+            ? validateExecutionMemoryConfig(workerData.backgroundExecutionMemoryConfig) : null,
           // 同步源回调不能 await；rows 可在安全点主动读取相同端口的取消命令。
           // 仍由同一 canonical envelope/sequence 校验入口处理，旧执行器不使用该能力。
           pollCommands() {

@@ -1655,13 +1655,25 @@
       }
     }
 
+    function isResultPublicationUncertain(error) {
+      return Boolean(error && (error.code === 'VCC_RESULT_PUBLICATION_RECOVERY_REQUIRED'
+        || String(error.message || '').includes('结果文件的提交状态尚未确认')));
+    }
+
+    function resultPublicationUncertainMessage(error) {
+      const message = responseFailureDisplayMessage(error);
+      const explanationStart = String(error && error.message || '').indexOf('结果文件的提交状态尚未确认');
+      return explanationStart < 0 ? message : message.slice(explanationStart);
+    }
+
     function archivedPickerExecutionErrorMessage({
       entry,
       actionLabel,
       error,
       refreshError,
       refreshResult,
-      currentMonth
+      currentMonth,
+      presentation = 'default'
     }) {
       const errorMessage = responseFailureDisplayMessage(error);
       const refreshSuffix = refreshError
@@ -1669,6 +1681,12 @@
         : (refreshResult && (refreshResult.empty || refreshResult.canExecute === false)
           ? `；刷新后${refreshResult.message || '当前月份不可操作'}`
           : '');
+      if (presentation === 'result-export' && isResultPublicationUncertain(error)) {
+        const selectionSuffix = currentMonth && currentMonth !== entry.targetMonth
+          ? `；月份列表已刷新并切至 ${currentMonth}，请先完成恢复后再操作`
+          : '';
+        return `${entry.targetMonth} 提交状态待确认：${resultPublicationUncertainMessage(error)}${selectionSuffix}${refreshSuffix}`;
+      }
       if (currentMonth && currentMonth !== entry.targetMonth) {
         return `${entry.targetMonth} ${actionLabel}失败：${errorMessage}；月份列表已刷新并切至 ${currentMonth}，请确认后重试${refreshSuffix}`;
       }
@@ -1678,6 +1696,7 @@
     function createArchivedMonthPickerDialog({
       months,
       actionLabel,
+      presentation = 'default',
       danger = false,
       previewSelection = null,
       executeSelection,
@@ -1712,16 +1731,16 @@
       let operationCancellable = false;
       const modal = mountDialog({
         title: actionLabel === '导出' ? '请选择要导出的月份' : '请选择月份',
-        className: 'vcc-fin-op-archive-picker-dialog',
+        className: `vcc-fin-op-archive-picker-dialog${presentation === 'result-export' ? ' vcc-fin-op-archive-picker-dialog--export' : ''}`,
         initialFocusSelector: '[data-field="archive-year"]',
         canClose: () => !executing,
         bodyHtml: `
         <div class="vcc-fin-op-archive-picker-fields">
           <span>月份</span>
-          <select class="vcc-fin-op-input" data-field="archive-year">
+          <select class="vcc-fin-op-input" data-field="archive-year" aria-label="年份">
             ${years.map((year) => `<option value="${escapeHtml(year)}">${escapeHtml(year)}年</option>`).join('')}
           </select>
-          <select class="vcc-fin-op-input" data-field="archive-month"></select>
+          <select class="vcc-fin-op-input" data-field="archive-month" aria-label="月份"></select>
         </div>
         <p class="vcc-fin-op-delete-state" data-role="archive-picker-state" data-tone="neutral"></p>
         ${confirmationLabel ? `
@@ -1748,10 +1767,13 @@
         return !confirmation || confirmation.checked === true;
       }
 
-      function setPickerState(message, tone = 'neutral') {
+      function setPickerState(message, tone = 'neutral', phase = 'feedback') {
         if (!modal.handle.isOpen()) return;
-        stateText.textContent = String(message || '');
+        const hideReady = presentation === 'result-export' && phase === 'ready';
+        stateText.hidden = hideReady;
+        stateText.textContent = hideReady ? '' : String(message || '');
         stateText.dataset.tone = tone;
+        stateText.dataset.phase = phase;
       }
 
       function selectedEntry() {
@@ -1798,7 +1820,7 @@
           return { ok: true, empty: true, message };
         }
         if (typeof previewSelection !== 'function') {
-          setPickerState(`${entry.targetMonth} 已归档，可导出`, 'success');
+          setPickerState(`${entry.targetMonth} 已归档，可导出`, 'success', 'ready');
           currentSelectionCanExecute = true;
           actionButton.disabled = !confirmationSatisfied();
           return { ok: true };
@@ -1846,9 +1868,9 @@
               ? `${entry.targetMonth} 已归档，可${actionLabel}`
               : `${entry.targetMonth} 可解归档；基础结果和调整记录将保留。`
           );
-          setPickerState(successMessage, result.tone || (
-            Object.hasOwn(result, 'canExecute') ? 'success' : 'warning'
-          ));
+          const tone = result.tone || (Object.hasOwn(result, 'canExecute') ? 'success' : 'warning');
+          const phase = Object.hasOwn(result, 'canExecute') && tone === 'success' ? 'ready' : 'feedback';
+          setPickerState(successMessage, tone, phase);
           currentSelectionCanExecute = true;
           actionButton.disabled = !confirmationSatisfied();
           return { ok: true, canExecute: true };
@@ -1893,6 +1915,7 @@
           previewPending,
           confirmDisabled: actionButton.disabled === true,
           stateMessage: stateText.textContent,
+          stateHidden: stateText.hidden,
           stateTone: stateText.dataset.tone || 'neutral'
         };
       }
@@ -2000,9 +2023,10 @@
               error: execution.error,
               refreshError: execution.refreshError,
               refreshResult: execution.refreshResult,
-              currentMonth: monthSelect.value
+              currentMonth: monthSelect.value,
+              presentation
             }),
-            'error'
+            presentation === 'result-export' && isResultPublicationUncertain(execution.error) ? 'warning' : 'error'
           );
           return;
         }
@@ -2097,6 +2121,19 @@
       }
     }
 
+    function buildResultExportCompletionStatus(result, targetMonth) {
+      const count = Array.isArray(result.filePaths) ? result.filePaths.length : 1;
+      const warnings = [...new Set((Array.isArray(result.warnings) ? result.warnings : [])
+        .map((warning) => typeof warning === 'string' ? warning.trim() : String(warning && warning.message || '').trim())
+        .filter(Boolean))];
+      const pending = result.pendingArchiveHandoff === true;
+      const saved = `${targetMonth} 校验结果${pending ? '已保存' : '已导出'}（${count} 个文件）`;
+      return {
+        message: [saved, ...(pending ? ['存档接管待重试'] : []), ...warnings].join('；'),
+        tone: pending || warnings.length ? 'warning' : 'success'
+      };
+    }
+
     async function handleExport() {
       const actionGeneration = renderGeneration;
       if (!live(actionGeneration)) return null;
@@ -2128,6 +2165,7 @@
       return createArchivedMonthPickerDialog({
         months,
         actionLabel: '导出',
+        presentation: 'result-export',
         previewSelection: async (entry) => {
           const actionGeneration = renderGeneration;
           if (!live(actionGeneration)) return null;
@@ -2164,7 +2202,11 @@
           } catch (error) {
             if (!live(actionGeneration)) { needsRefresh = true; return null; }
 
-            setStatus(`${entry.targetMonth} 导出失败：${responseFailureDisplayMessage(error)}`, 'error');
+            if (isResultPublicationUncertain(error)) {
+              setStatus(`${entry.targetMonth} 提交状态待确认：${resultPublicationUncertainMessage(error)}`, 'warning');
+            } else {
+              setStatus(`${entry.targetMonth} 导出失败：${responseFailureDisplayMessage(error)}`, 'error');
+            }
             throw error;
           } finally {
             setBusy(false, '', actionGeneration);
@@ -2174,8 +2216,8 @@
           const actionGeneration = renderGeneration;
           if (!live(actionGeneration)) return null;
 
-          const count = Array.isArray(result.filePaths) ? result.filePaths.length : 1;
-          setStatus(`${entry.targetMonth} 校验结果已导出（${count} 个文件）`, 'success');
+          const completion = buildResultExportCompletionStatus(result, entry.targetMonth);
+          setStatus(completion.message, completion.tone);
         }
       });
     }
@@ -3301,6 +3343,7 @@
       expectedYear,
       expectedMonth,
       expectedConfirmDisabled,
+      expectedStateHidden,
       stateMessageIncludes = ''
     } = {}) {
       const actionGeneration = renderGeneration;
@@ -3333,6 +3376,9 @@
         throw new Error(
           `归档月份预览按钮禁用状态不一致：${liveSnapshot.confirmDisabled} != ${expectedConfirmDisabled}`
         );
+      }
+      if (expectedStateHidden !== undefined && liveSnapshot.stateHidden !== expectedStateHidden) {
+        throw new Error(`归档月份预览提示显示状态不一致：${liveSnapshot.stateHidden} != ${expectedStateHidden}`);
       }
       if (stateMessageIncludes && !liveSnapshot.stateMessage.includes(stateMessageIncludes)) {
         throw new Error(`归档月份预览状态文案缺少：${stateMessageIncludes}`);
@@ -3638,6 +3684,7 @@
         const modal = createArchivedMonthPickerDialog({
           months: PREVIEW_ARCHIVED_MONTHS,
           actionLabel: '导出',
+          presentation: 'result-export',
           previewSelection: async (entry) => ({
             status: 'success',
             months: PREVIEW_ARCHIVED_MONTHS,
@@ -3651,7 +3698,7 @@
           expectedYear: '2026',
           expectedMonth: '2026-06',
           expectedConfirmDisabled: false,
-          stateMessageIncludes: '可导出'
+          expectedStateHidden: true
         });
       },
       openResultExportMonthEmpty() {

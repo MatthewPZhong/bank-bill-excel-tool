@@ -79,7 +79,10 @@ function bufferedBytes(writer, output) {
 }
 
 async function withBoundedWorkbook({ filePath, signal, safePoint = () => {}, compatibilityError,
+  maxQueueBytes = MAX_QUEUE_BYTES, maxRowBytes = MAX_ROW_BYTES,
   createOutput = (name) => fs.createWriteStream(name, { flags: 'wx', mode: 0o600 }) }, callback) {
+  if (![maxQueueBytes, maxRowBytes].every((value) => Number.isSafeInteger(value) && value > 0) ||
+      maxQueueBytes > MAX_QUEUE_BYTES || maxRowBytes > MAX_ROW_BYTES) throw new TypeError('XLSX 输出预算只能收紧');
   if (require('exceljs/package.json').version !== '4.4.0') {
     throw compatibilityError?.() || writerError('XLSX_WRITER_COMPATIBILITY_REQUIRED', 'ExcelJS 版本变化，需要重新验证流式 Writer');
   }
@@ -120,12 +123,12 @@ async function withBoundedWorkbook({ filePath, signal, safePoint = () => {}, com
         // Conservative encoded XML bound, including cells and entity expansion.
         const encoded = JSON.stringify(row.values).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[char]));
         const rowBytes = Buffer.byteLength(encoded, 'utf8') + row.values.length * 256;
-        if (rowBytes > MAX_ROW_BYTES) throw writerError('XLSX_ROW_RESOURCE_LIMIT', '单行超过 16 MiB 写入预算');
+        if (rowBytes > maxRowBytes) throw writerError('XLSX_ROW_RESOURCE_LIMIT', '单行超过本次写入预算');
         const stream = row.worksheet.stream;
         if (stream.destroyed) throw writerError('XLSX_STREAM_CLOSED', '工作表流已关闭');
         row.commit(); metrics.rowCount += 1; observe();
         if (stream.writableNeedDrain) { metrics.drainWaits += 1; await wait(waitForStream(stream, 'drain', { signal })); }
-        while (observe() > MAX_QUEUE_BYTES) { check(); await wait(delay(10, undefined, { signal })); }
+        while (observe() > maxQueueBytes) { check(); await wait(delay(10, undefined, { signal })); }
         if (++rowCount % 256 === 0) await yieldMessages();
         check();
       },

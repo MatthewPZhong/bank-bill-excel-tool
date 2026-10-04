@@ -369,7 +369,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
   //   splitExport(payload) 拆表第二步：{sourceFilePath,field,values[]} → 过滤 → 另存为；返回 {status:'success',filePath} / {status:'cancelled'} / {status:'failed',message}
   toolbox: {
     merge: () => ipcRenderer.invoke('toolbox:merge'),
-    splitRead: () => ipcRenderer.invoke('toolbox:split:read'),
+    splitRead: (payload) => ipcRenderer.invoke('toolbox:split:read', payload),
+    splitReadValues: (payload) => ipcRenderer.invoke('toolbox:split:read-values', payload),
+    splitCancelRead: (payload) => ipcRenderer.invoke('toolbox:split:cancel-read', payload),
     splitExport: (payload) => ipcRenderer.invoke('toolbox:split:export', payload)
   },
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（PR-B 实装算法/IO；本 PR 占位）

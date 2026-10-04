@@ -166,6 +166,7 @@ function createHarness(overrides = {}) {
     },
     async settleManifestArtifacts(payload) {
       calls.push(['settle-manifest', payload]);
+      if (overrides.settleManifestError) throw overrides.settleManifestError;
       return overrides.settleManifestResult || { ok: true, durable: true };
     },
     async finishFileTask(taskRunId, batchId, outcome) {
@@ -698,6 +699,64 @@ test('file task 成功但 manifest 未 durable 时只写 file-owner outbox，不
   assert.equal(persisted.owner.kind, 'file-batch');
   assert.equal(persisted.owner.batchContext.batchId, 33);
   assert.equal(persisted.terminalOutcome.taskStatus, 'succeeded');
+});
+
+for (const scenario of [
+  { label: '业务成功保留原结果和恢复意图', status: 'success' },
+  { label: '恢复意图持久化抛错仍拒绝收口', status: 'success', outboxFails: true },
+  { label: '恢复意图未持久化仍拒绝收口', status: 'success', outboxRejected: true },
+  { label: '普通失败不改动原拒绝语义', status: 'failed' },
+  { label: '取消不改动原拒绝语义', status: 'cancelled' }
+]) test(`File Task 缓存结算 rejection：${scenario.label}`, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-file-settle-rejection-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const outputPath = path.join(root, 'result.xlsx');
+  const plan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [],
+    outputs: [{ filePath: outputPath, role: 'output', sourceOperation: FILE_POLICY.channel }] });
+  const settleError = Object.assign(new Error('注入接管异常'), { code: 'INJECTED_HANDOFF_REJECTION' });
+  const persistError = new Error('注入 outbox 不可用');
+  const { calls, lifecycle, warnings } = createHarness({
+    reserveFileTask({ taskRun }) {
+      return { ok: true, batch: { ...taskRun, id: 39, batchNumber: '2026-09-29-039' } };
+    },
+    settleManifestError: settleError,
+    ...(scenario.outboxFails ? { persistTerminalIntentError: persistError } : {}),
+    ...(scenario.outboxRejected ? { persistTerminalIntentResult: { persisted: false } } : {})
+  });
+  const files = [{ artifactKey: plan.outputs[0].artifactKey, expectedSha256: 'a'.repeat(64), expectedSizeBytes: 9 }];
+  const businessResult = { status: scenario.status,
+    ...(scenario.status === 'success' ? { pendingArchiveHandoff: true } : {}) };
+  let afterTerminalCalls = 0;
+  const operation = lifecycle.runFileTask({ policy: FILE_POLICY,
+    flowPlanResolver: () => ({ startsNewFlow: true, flowIdentity: null }),
+    filePlanResolver: () => plan,
+    execute: async (_context, controls) => {
+      fs.writeFileSync(outputPath, 'committed');
+      // 首次业务回调仍然拿到 rejection；只由业务 owner 决定是否已提交成功。
+      await assert.rejects(controls.settleArtifacts({ files }), (error) => error === settleError);
+      return businessResult;
+    },
+    afterTerminal: () => { afterTerminalCalls += 1; }
+  });
+  if (scenario.outboxRejected) {
+    await assert.rejects(operation, { code: 'ARCHIVE_TASK_TERMINAL_INTENT_FAILED' });
+  } else if (scenario.status !== 'success' || scenario.outboxFails) {
+    await assert.rejects(operation, (error) => error === (scenario.outboxFails ? persistError : settleError));
+  } else {
+    assert.equal(await operation, businessResult);
+    assert.equal(warnings[0].code, settleError.code);
+  }
+  assert.equal(calls.filter((call) => call[0] === 'settle-manifest').length, 1);
+  assert.equal(calls.some((call) => call[0] === 'finish-file-task'), false);
+  assert.equal(afterTerminalCalls, 0);
+  const intents = calls.filter((call) => call[0] === 'persist-terminal-intent');
+  assert.equal(intents.length, scenario.status === 'success' ? 1 : 0);
+  if (intents.length) {
+    assert.equal(intents[0][1].terminalOutcome.taskStatus, 'succeeded');
+    assert.equal(intents[0][1].owner.batchContext.batchId, 39);
+    assert.deepEqual(intents[0][1].settleFiles, files);
+  }
+  assert.equal(fs.readFileSync(outputPath, 'utf8'), 'committed');
 });
 
 test('file artifact 失败结果已耐久时直接终结为业务 succeeded，不创建永久 outbox', async (t) => {

@@ -1,0 +1,94 @@
+{
+  "environment": {
+    "platform": "darwin",
+    "versions": {
+      "electron": "36.9.5",
+      "chrome": "136.0.7103.177"
+    },
+    "displayScaleFactor": 2,
+    "minimumSize": [
+      1080,
+      760
+    ],
+    "frame": false,
+    "windowBounds": {
+      "x": 324,
+      "y": 103,
+      "width": 1080,
+      "height": 760
+    },
+    "contentBounds": {
+      "x": 324,
+      "y": 103,
+      "width": 1080,
+      "height": 760
+    },
+    "zoom": 1,
+    "page": {
+      "width": 1080,
+      "height": 760,
+      "devicePixelRatio": 2,
+      "theme": "light"
+    }
+  },
+  "screenshotPixels": {
+    "width": 2160,
+    "height": 1520
+  },
+  "geometry": {
+    "viewport": {
+      "width": 1080,
+      "height": 760
+    },
+    "card": {
+      "x": 330,
+      "y": 28,
+      "width": 420,
+      "height": 704,
+      "right": 750,
+      "bottom": 732
+    },
+    "body": {
+      "x": 331,
+      "y": 29,
+      "width": 418,
+      "height": 627,
+      "right": 749,
+      "bottom": 656
+    },
+    "footer": {
+      "x": 331,
+      "y": 656,
+      "width": 418,
+      "height": 75,
+      "right": 749,
+      "bottom": 731
+    },
+    "bodyHeight": 627,
+    "bodyScroll": 7030,
+    "bodyWidth": 418,
+    "bodyScrollWidth": 418,
+    "cardHeight": 702,
+    "cardScroll": 702,
+    "overflow": "auto",
+    "buttons": [
+      {
+        "x": 510,
+        "y": 673,
+        "width": 60,
+        "height": 36,
+        "right": 570,
+        "bottom": 709,
+        "text": "确认",
+        "hit": true
+      }
+    ],
+    "focus": "primary-btn small",
+    "errors": []
+  },
+  "calls": {
+    "merge": 1,
+    "read": 0,
+    "exports": []
+  }
+}

@@ -209,3 +209,43 @@ test('文件读取失败沿用 FileValidationError，关闭后拒绝扫描', asy
   pass.close();
   await assert.rejects(() => pass.scanSheet(0), /已关闭/);
 });
+
+
+test('有界 CSV 保留旧解析语义和空表，边界之外在 parser 前拒绝', async () => {
+  const { LOW_MEMORY_CSV_MAX_BYTES: limit } = require('../../src/backend/toolbox-format/csv-capacity');
+  for (const content of ['', '\uFEFFa,b\r\n"a\nb","x""y"\n', ',,\n\n', 'a,b\n"未闭合,值', '\uFEFF']) {
+    const file = createCsv('bounded.csv', content);
+    const legacy = await openToolboxCsvPass(file);
+    const bounded = await openToolboxCsvPass(file, { csvMaxSourceBytes: limit });
+    assert.deepEqual(bounded.rows, legacy.rows);
+    bounded.close(); legacy.close();
+  }
+  for (const size of [limit - 1, limit, limit + 1]) {
+    const file = createCsv('edge.csv', 'a\n' + 'x'.repeat(size - 2));
+    if (size > limit) await assert.rejects(openToolboxCsvPass(file, { csvMaxSourceBytes: limit }),
+      { code: 'EXECUTION_INPUT_PROFILE_UNSUITABLE' });
+    else { const pass = await openToolboxCsvPass(file, { csvMaxSourceBytes: limit }); assert.equal(pass.rows.length, 2); pass.close(); }
+  }
+});
+
+test('stat 后 CSV 增长时实际读取仍限额，失败后文件句柄已关闭', async (t) => {
+  const file = createCsv('growing.csv', 'a\n1\n');
+  const original = fs.readSync;
+  let fdUsed; let bytesRead = 0;
+  t.mock.method(fs, 'readSync', function (fd, buffer, offset, length, position) {
+    if (fdUsed === undefined) { fdUsed = fd; fs.appendFileSync(file, 'x'.repeat(1000)); }
+    assert.ok(buffer.length <= 33);
+    const read = original.call(this, fd, buffer, offset, length, position); bytesRead += read; return read;
+  });
+  await assert.rejects(openToolboxCsvPass(file, { csvMaxSourceBytes: 32 }),
+    { code: 'EXECUTION_INPUT_PROFILE_UNSUITABLE' });
+  assert.equal(bytesRead, 33);
+  assert.throws(() => fs.fstatSync(fdUsed), { code: 'EBADF' });
+});
+
+test('有界 CSV 不会因二进制伪装重新进入无界 Excel reader，预取消不读取', async () => {
+  const binary = createCsv('changed.csv', Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]));
+  await assert.rejects(openToolboxCsvPass(binary, { csvMaxSourceBytes: 32 }), { code: 'TOOLBOX_SPLIT_READ_CONTEXT_STALE' });
+  await assert.rejects(openToolboxCsvPass(binary, { csvMaxSourceBytes: 32, cancelToken: { cancelled: true } }),
+    { code: 'TOOLBOX_CSV_CANCELLED' });
+});

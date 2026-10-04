@@ -1,0 +1,271 @@
+{
+  "recordedAt": "2026-09-29T12:09:26.693628+00:00",
+  "branch": "codex/v3.2.11-common-feedback-dialog-scroll",
+  "baseAndHead": "18b82b4328cf5e00c1b2549d373a5b2f2677215c",
+  "state": "uncommitted implementation; no publication",
+  "platform": "macOS-15.7.4-arm64-arm-64bit-Mach-O",
+  "macVersion": "15.7.4",
+  "styleOrder": [
+    "./src/fonts.css",
+    "./src/styles-gemini.css",
+    "./src/styles-gemini-extra.css",
+    "./src/styles-vcc-financial-op.css",
+    "./src/styles-biz-op-v327.css",
+    "./src/styles-dark-mode.css",
+    "./src/styles-dark-mode-settings.css"
+  ],
+  "files": [
+    {
+      "path": "src/renderer-dialogs.js",
+      "sha256": "5d2c86a29360cc3922300a7b016a6be410349875b4dfbd57a1f1da25ab400f96"
+    },
+    {
+      "path": "src/renderer/modal-host.js",
+      "sha256": "1c3b26093359dd574c454704bda8e2efed12b80a403935bdc7e02fe8eedb8575"
+    },
+    {
+      "path": "src/renderer/modal-bridge.js",
+      "sha256": "5c458a3a7683a6afeaa497bfc2c8363f7ef3ddf33bf06df012b77dfca841efbe"
+    },
+    {
+      "path": "src/renderer/dialogs/toolbox.js",
+      "sha256": "a5fccc2f2d5f3c4870ea16aa90178102fb37c22277e693563a5334d0049a9459"
+    },
+    {
+      "path": "src/renderer/dialogs/configuration.js",
+      "sha256": "4f14103f3062c6405ff5e18a7b286d06d075aeb87d56f20907c34b370deb1ec9"
+    },
+    {
+      "path": "src/renderer/dialogs/app-settings.js",
+      "sha256": "ebd2be60360ebe0a8ce41370be22030411c35367bf6ef07fa8768fdb2758716b"
+    },
+    {
+      "path": "src/renderer-position-reconciliation.js",
+      "sha256": "85d16ae50b88e85b25fe8bd5d9ab08bf114bc31fcdca42c6c1ce418447ffcabe"
+    },
+    {
+      "path": "src/renderer-vcc-financial-op.js",
+      "sha256": "bf4658ef434d675e347af7a2d81d6fef9152df204ab89d5be58da5dab79ba4e0"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/electron-main.cjs",
+      "sha256": "dccde4936888046c433aab8b0195dfdecc13719fd88029151a3d8bfb06618807"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/layout-driver.cjs",
+      "sha256": "97c315b0013f230dbbac809dd7c0225f833ae09606bb331659ee3c50cf6b9023"
+    },
+    {
+      "path": "scripts/renderer-lifecycle/fixtures/common-feedback-dialog-scroll.js",
+      "sha256": "72d477d18658691821010509617302472fb2813952d4ea30fcd611bee5c49e47"
+    },
+    {
+      "path": "scripts/test-renderer-lifecycle.js",
+      "sha256": "a39f9ba29fe2a285976fd900dfc2a3c101fe665249784655e60848a422c199f4"
+    },
+    {
+      "path": "scripts/integration/renderer-lifecycle.js",
+      "sha256": "03dac553c7246ef086f131d83900b5981f8931adfe3e1600f9054f6a89cf0ed0"
+    },
+    {
+      "path": "index.html",
+      "sha256": "9c28d7461ffa5a60dfbf732a357225bdb41d768931fb3730abdcb495d39df7cd"
+    },
+    {
+      "path": "package.json",
+      "sha256": "7ed892c28a4b561f4d15db1ee24ac2a14535389cb9d21ece8a11f29e84f1c1bf"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "6360f29a82d5f4c1d1003d9e61e6a4db678f398aab5043c23c46371e2f215e65"
+    },
+    {
+      "path": "src/fonts.css",
+      "sha256": "1b2c6c70fdf7114b04c025808cd17bcb3033682789fac66bc3a15426dacd5dfb"
+    },
+    {
+      "path": "src/styles-gemini.css",
+      "sha256": "5ec94ce0d82d61cca953c44ea3dd782179de6c6f3de858907a064520e88789bf"
+    },
+    {
+      "path": "src/styles-gemini-extra.css",
+      "sha256": "853f5845952fdf5dcb2e9d8bdc6047f5d73fd59a4841595b17b5c160e55968ab"
+    },
+    {
+      "path": "src/styles-vcc-financial-op.css",
+      "sha256": "135cb80599ac1c9514b9ec396722def18fae3eee9cca30f22f6b8273b3fb8d5d"
+    },
+    {
+      "path": "src/styles-biz-op-v327.css",
+      "sha256": "ff53411ad76cc44d1183751732ad54f5b58833891fb984f015de80b6e76ac127"
+    },
+    {
+      "path": "src/styles-dark-mode.css",
+      "sha256": "b45a9dead620b079da2b0024ef7f4a61b3a03f9a645477237b2335c2c02bee1b"
+    },
+    {
+      "path": "src/styles-dark-mode-settings.css",
+      "sha256": "2ff7549d9255896605449987cac3a1a908147f3515a59689028b626b2f721705"
+    }
+  ],
+  "savedDocumentSources": [
+    {
+      "path": "/Users/pzhong/Downloads/v3.2.11-common-feedback-dialog-scroll-spec.md",
+      "sha256": "02b03ef644201931c8199e8f0c694669e8add7504ed245d551ae2dffb4e7a6e5"
+    },
+    {
+      "path": "/Users/pzhong/Downloads/v3.2.11-common-feedback-dialog-scroll-techdoc.md",
+      "sha256": "e477ba018e358157be45766aabdc623b107ca609a7a1287dcc4cd3f0b44e6373"
+    }
+  ],
+  "boundaries": [
+    "Fixtures use fake API and temporary userData/Documents; production Main not loaded",
+    "Windows system scaling and physical trackpad/scrollbar drag not tested",
+    "Prior proposal probe retained separately",
+    "Full release-check passed on macOS; Windows acceptance remains pending"
+  ],
+  "validation": {
+    "completedAt": "2026-09-29T12:21:44.845943+00:00",
+    "focused": {
+      "command": "node scripts/test-renderer-lifecycle.js common-feedback-dialog-scroll",
+      "exitCode": 0,
+      "pass": 40,
+      "total": 40
+    },
+    "releaseCheck": {
+      "command": "npm run release-check",
+      "exitCode": 0,
+      "architectureParsed": 765,
+      "architectureTotal": 765,
+      "smoke": "PASS",
+      "unit": {
+        "pass": 9435,
+        "fail": 0,
+        "skip": 4,
+        "total": 9439,
+        "skipReason": "Windows-only cases on macOS"
+      },
+      "rendererLifecycle": {
+        "pass": 273,
+        "total": 273
+      },
+      "integration": {
+        "scriptsPassed": 68,
+        "scriptsFailed": 0,
+        "parsedCases": 2941
+      }
+    },
+    "diffCheck": "PASS",
+    "runtimeInputHashesRechecked": true
+  },
+  "evidenceFiles": [
+    {
+      "path": "call-inventory.json",
+      "sha256": "8cd862e31fe0aa2f50c216bffb0fb1e6e743669ad131ddfa2210f884b980cbef"
+    },
+    {
+      "path": "focused-output.txt",
+      "sha256": "a2947b8f515b4062a4bfc63f59b3f12da2639c5f888b00bc9a06d5fb9f1d77e9"
+    },
+    {
+      "path": "minimum-dark.json",
+      "sha256": "1e32ed96099cfc34e324becf42f659edfed65d59b36968bc14ca5796990a7653"
+    },
+    {
+      "path": "minimum-dark.png",
+      "sha256": "2ff2429620d4321635f12bd00af9030c8085d5903ff8c8ab6c6afc1757d79af3"
+    },
+    {
+      "path": "minimum-zoom-150.json",
+      "sha256": "d2f8671b49b06d7130e77f3498fe32ee490a4b802b363b5533804f8effa2fd60"
+    },
+    {
+      "path": "minimum-zoom-150.png",
+      "sha256": "243c3741b2a450dfc94ebb2b8478acc509e783aadcfa40dc99dccbed8d7a9212"
+    },
+    {
+      "path": "position-oos-01.json",
+      "sha256": "8cc49c4f072378e5a750071cd68f14900821f9d7948e0bd8f005d1add7ade8fe"
+    },
+    {
+      "path": "position-oos-01.png",
+      "sha256": "44b990f59f6c8999b1ad560e7b7c8891a5a31e66947f9dc73e7dcbc38412155b"
+    },
+    {
+      "path": "prefund-mixed.json",
+      "sha256": "8c084667c4882b13f3c67623af363337e1db6c948c34c8bd3c0a0f571728bea6"
+    },
+    {
+      "path": "prefund-mixed.png",
+      "sha256": "7a1d9ee50292eba6fee9ec111fbbd7efdca1576d7f608c4ef832ce09afa5cdc5"
+    },
+    {
+      "path": "pressure-1024-640.json",
+      "sha256": "eab520beef9abe3656cab5050d36360a213e6b853f9c572d5e02275ab01a3780"
+    },
+    {
+      "path": "pressure-1024-640.png",
+      "sha256": "939339081f34050bcb9d31c66f6c8b346f7a49cc90da92071ee804319f76f1e1"
+    },
+    {
+      "path": "pressure-1280-720.json",
+      "sha256": "e080ffd4068311fd5f9472b30cd29b042d7bea5141d21a13dc3d773bbaa28891"
+    },
+    {
+      "path": "pressure-1280-720.png",
+      "sha256": "4fa225125636977734814fdb54dce9b5bd28d8370429b5fccd281aa852acda8e"
+    },
+    {
+      "path": "pressure-800-480.json",
+      "sha256": "9b41dd279b5bf83833fea41e8ae37ff3744749dfdc4ad23b0fe959fc887bef31"
+    },
+    {
+      "path": "pressure-800-480.png",
+      "sha256": "94b3aa0358fe6b9ced5b82b27ad34c59028000f4a4a79dcd89dcd8661f7e5970"
+    },
+    {
+      "path": "public-three-bottom.json",
+      "sha256": "784ee832ace0d810733ec9153a986676d8f7691f645257544b64f62494855b9d"
+    },
+    {
+      "path": "public-three-bottom.png",
+      "sha256": "a6c4e6c510d66feaf0cc4b2cfb9d559bc63842911c6e111b6efce03c6510711e"
+    },
+    {
+      "path": "public-three-top.json",
+      "sha256": "784ee832ace0d810733ec9153a986676d8f7691f645257544b64f62494855b9d"
+    },
+    {
+      "path": "public-three-top.png",
+      "sha256": "10433ee956f248481533eedc4d4da2b04425d53f81deae4c0035fbadc0d2a871"
+    },
+    {
+      "path": "release-check-output.txt",
+      "sha256": "bef1243f32d710c71b042f3c786f8529906ac51b87e1e1c67bac0f9b14ee3787"
+    },
+    {
+      "path": "toolbox-merge-failed.json",
+      "sha256": "1e137384176c037a3edd3154b0fa6b0da9a8b2ec5b38c7d908b0fc7c6a359d8f"
+    },
+    {
+      "path": "toolbox-merge-failed.png",
+      "sha256": "2cb8976a2148f3d6adcc0d0609e0bab72a903eee829f717c1249073e23087f5b"
+    },
+    {
+      "path": "toolbox-multiple.json",
+      "sha256": "a6b1428f4885bcf7260fa11ea60f9dc3e0a1d84563126c65b55babe341e020d8"
+    },
+    {
+      "path": "toolbox-multiple.png",
+      "sha256": "f980dced07e005f671c37c1024d8103a28cd04254adbb0e60b2d57b311448838"
+    },
+    {
+      "path": "vcc-independent.json",
+      "sha256": "2254721e3a7054a6397acc5b27f841c9442b2345ef2742787b4102889cae40f5"
+    },
+    {
+      "path": "vcc-independent.png",
+      "sha256": "4f639416c0dc34b9cd963c364b0ca1f3f967bcc7dba040f3d8210493afdd3563"
+    }
+  ]
+}

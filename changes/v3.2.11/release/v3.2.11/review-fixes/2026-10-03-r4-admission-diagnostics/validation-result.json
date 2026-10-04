@@ -1,0 +1,84 @@
+{
+  "result": "PASS",
+  "baseline": "fb5d4bad55f9c41070ef6da9e3a302a13351a4a2",
+  "branch": "release/v3.2.11",
+  "commitStatusAtValidation": "uncommitted",
+  "gate": {
+    "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+    "head": "fb5d4bad55f9c41070ef6da9e3a302a13351a4a2",
+    "startedAt": "2026-10-03T16:17:41.672671+08:00",
+    "inputCount": 1783,
+    "execution": "interrupted-then-resumed",
+    "initialExitCode": null,
+    "completedBeforeInterruption": [
+      "lint",
+      "check:architecture",
+      "smoke",
+      "test:unit"
+    ],
+    "resumeCommand": "npm run test:integration",
+    "resumeStartedAt": "2026-10-03T16:43:33.002190+08:00",
+    "resumeFinishedAt": "2026-10-03T16:54:31.217837+08:00",
+    "resumeElapsedSeconds": 658.22,
+    "resumeExitCode": 0,
+    "changedInputs": [
+      "rules/integration-test-policy.md"
+    ],
+    "policyPrefixUnchanged": true,
+    "headUnchanged": true,
+    "result": "PASS"
+  },
+  "unit": {
+    "tests": 9597,
+    "pass": 9593,
+    "fail": 0,
+    "skipped": 4
+  },
+  "integration": {
+    "scripts": 82,
+    "passedScripts": 82,
+    "countedChecks": 3101,
+    "newDiagnosticCases": 3
+  },
+  "focusedUnit": {
+    "pass": 36,
+    "fail": 0,
+    "newCases": 5
+  },
+  "architectureFiles": 788,
+  "architectureHistoryCommits": 42,
+  "qualificationUnchanged": true,
+  "safeErrorSchemaUnchanged": true,
+  "limits": [
+    "实际执行环境 macOS / Node v25.8.0；Windows/Electron 身份、内存采样和冻结源计数为夹具",
+    "错误拒绝用例不启动 Worker/Publisher，不视为完整生成、发布或桌面 GUI 验收",
+    "未重跑 Windows 实机、安装包、Excel/WPS 或完整 GUI 人工验收"
+  ],
+  "fileSha256": {
+    "changes/v3.2.11/release/v3.2.11/review-fixes/2026-10-03-r4-admission-diagnostics/after-result.json": "7abb3053610e4f911cdab98c7f953d92c481eb2dac92bbe08ab67207dea6f410",
+    "changes/v3.2.11/release/v3.2.11/review-fixes/2026-10-03-r4-admission-diagnostics/before-result.json": "2ac8aaf9930203e737071e8022a2e29641ed17d92d359272cab1dacab88b8dfa",
+    "changes/v3.2.11/release/v3.2.11/review-fixes/2026-10-03-r4-admission-diagnostics/repair-report.md": "7fe080be4a901172a2327dd65f71288ad99342c56807fe8ea8887949e6217303",
+    "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/implementation-notes.md": "d4bea104dcd4ae8cd1931370f66aa21b0792b4289302f0f4f3409634a95260f5",
+    "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/techdoc.md": "197ea859a7e00c6d9ebd9961769cf3821ecb3e3596c9081f599a8dfd6d82721d",
+    "rules/integration-test-policy.md": "7b4e1ebfb983b0b4ca61245222967b23f91fbea1b1c167e23d5a255525a15af0",
+    "scripts/integration/toolbox-row-split-admission.js": "2f07323d63abbdd228adcbaa033ab39dac3ab743280b26941be428416b14c475",
+    "scripts/integration/toolbox-rows-admission-diagnostics.js": "094fa1b24010c68064ef5309e00b8ed0efbb1776fdff90975dae2fb4bba24fdd",
+    "src/main-process/background-execution/resource-governor.js": "e51ba543fccd5a1d3136640a24bbc95f3d084b47884a23d40e289c5076c02a28",
+    "src/main-process/background-execution/supervisor.js": "51e3ef5c2b44bf27125542506a9fae9e5ab2ef4035ce4696e5898cbc0b5d9b9e",
+    "src/main-process/toolbox-row-split/service.js": "b8f47ee63c7012b0c83db08c5fff304c91c52a2380362cefa0a2f4203aebe3db",
+    "tests/helpers/toolbox-rows-csv.js": "f861a1173962ed0447826b8ddb554adacfc501704f7620c327ae8c4cbeb52779",
+    "tests/unit/main-process/background-execution/supervisor-admission-diagnostics.test.js": "8f6c1f0d733eb6af88e13a2d71b4171db07a618ca9448c1072a7c15fa609356b",
+    "tests/unit/main-process/toolbox-row-split-admission-message.test.js": "1d81bbae4ec3a806bbdacf2e5166737bd5f0ecf92e37f790dd1724f867641da3"
+  },
+  "evidenceSha256": {
+    "before.log": "133a2ccb786222006ab8088b90b60dfa06cbf9b3d2f7008a793674f7ad474b8f",
+    "after.log": "d72c68af1aee924a5e77f3019034ba5824a697e40275edb3e3474750017d2e13",
+    "focused-unit.log": "ac9782df57e955cc89256d68e9a9a93f1d156ca9b8d589afcbb2b15b2ab0c3a2",
+    "release-check.log": "f838f20a11f149d697d3a549944a413cb59d0a04acee45371b4ab755eec8c34f",
+    "integration-resume.log": "2a4e2a2196f5eff735808f9f3d16440b40e5c8299bbc2972914f836cb10594d3",
+    "gate-inputs.json": "f30f4035200b2119fd84593f6648b96c47556352f816a9159c2efd60edcd0ecc",
+    "gate-start.json": "fdf9408dc1d639177d8a7f157127548d2ffb10b69dd1cbec21e7b4f1ba6518e7",
+    "gate-result.json": "131472154a9a04f997746a7b385639d76c0d32018fdf04d2afd88eb7c5c4c8e7"
+  },
+  "rawEvidenceDirectory": "outputs/release-v3.2.11/2026-10-03-r4-admission-diagnostics"
+}

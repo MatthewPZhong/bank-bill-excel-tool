@@ -455,7 +455,7 @@
 - 变更 review 要点：
   - controller / main IPC / preload 11 个方法 / renderer 调用必须同步，禁止 renderer 取得 Blob 路径、已登记原始源路径、预期 SHA 或预期大小
   - `selectRetrySources` 只能为具备不可变业务摘要的失败 artifact 选择替代路径；`retryBatch` 必须按 artifact ID 白名单透传，并由 ArchiveService 重新校验普通文件、大小、读取稳定性和 SHA
-  - `archive_center_retention_days` 只接受 30/60/90/180/365/永久；缺失或非法值按 60，改枚举必须同步 UI、controller、ArchiveService 和既有设置兼容
+  - `archive_center_retention_days` 只接受 30/60/90/180/365/永久；缺失或非法值按永久（`null`）；仅改变新批次默认，已有批次期限快照不回填，改枚举必须同步 UI、controller、ArchiveService 和既有设置兼容
   - `archive_center_excluded_template_ids` 自 v3.0.25 起为退役兼容 key，控制器启动时必须规范化为 `[]`；不得恢复隐藏的模板级跳过
   - 网银账单与月度余额不得再由模板元数据产生 `skipArchive`；operation tracker 通用 `skipArchive` 能力仍需回归
   - 删除元数据成功但物理清理失败是部分成功，UI 必须刷新批次并保留残留清理提示

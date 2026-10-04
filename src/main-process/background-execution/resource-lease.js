@@ -191,6 +191,12 @@ function createResourceLease(record, release) {
     get topology() { return record.topology || null; },
     release(reason = 'released') { return release(record.leaseId, reason); }
   };
+  if (record.memoryState) {
+    Object.defineProperties(lease, {
+      memoryConfig: { enumerable: true, get: () => record.memoryState.config },
+      memoryMode: { enumerable: true, get: () => record.memoryState.mode }
+    });
+  }
   return Object.freeze(lease);
 }
 

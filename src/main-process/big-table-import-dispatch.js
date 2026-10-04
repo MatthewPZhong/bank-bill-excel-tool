@@ -12,6 +12,7 @@
 // 约束：纯 Node，不访问 Electron API；不 require 任何业务模块（仅 serialize-error 通用工具）。
 
 'use strict';
+const { memoryCarrierAdmission } = require('./memory-activity');
 
 const { Worker } = require('node:worker_threads');
 const { computeMaxParallel } = require('../backend/big-table-import/pipeline');
@@ -75,7 +76,7 @@ function dispatchEngineImportHandle({
       const workerOptions = (resourceLimits && typeof resourceLimits === 'object')
         ? { resourceLimits }
         : undefined;
-      worker = new WorkerClass(ENGINE_WORKER_ENTRY, workerOptions);
+      worker = memoryCarrierAdmission(null).observe(new WorkerClass(ENGINE_WORKER_ENTRY, workerOptions));
     } catch (spawnErr) {
       reject(spawnErr);
       return;

@@ -1,0 +1,63 @@
+{
+  "head": "15e44b0ffaa304790f6821771791eacf085072b9",
+  "platform": "darwin",
+  "arch": "arm64",
+  "node": "v24.13.0",
+  "fixture": "生产策略、Main handler、Governor、真实 Node Worker；Windows/Electron 身份及可用内存注入",
+  "results": [
+    {
+      "availableMiB": 512,
+      "sizeBytes": 2906624,
+      "sourceSha256": "295831afa3d068e26f61597e70f42f38822923981dcea626a77ff7aff29fd250",
+      "result": {
+        "status": "failed",
+        "message": "拆分文件读取等待后台资源超时",
+        "detailLines": [
+          "已等待 5 秒，请等待其他任务完成后重试。"
+        ],
+        "code": "ADMISSION_TIMEOUT"
+      },
+      "workerLimits": [],
+      "elapsedMs": 5005,
+      "sourceUnchanged": true,
+      "workersClosed": true
+    },
+    {
+      "availableMiB": 2048,
+      "sizeBytes": 2906624,
+      "sourceSha256": "295831afa3d068e26f61597e70f42f38822923981dcea626a77ff7aff29fd250",
+      "result": {
+        "status": "success",
+        "version": 2,
+        "requestId": "rows-csv",
+        "valuesState": "not-requested",
+        "sourceFilePath": "input.csv",
+        "splitReadToken": "[runtime token omitted]",
+        "headers": [
+          "a",
+          "b",
+          "c",
+          "d",
+          "e",
+          "f",
+          "g",
+          "h"
+        ],
+        "dataRowCount": 20000,
+        "maxRowSplitFiles": 1000,
+        "executionMode": "normal"
+      },
+      "workerLimits": [
+        {
+          "maxYoungGenerationSizeMb": 8,
+          "maxOldGenerationSizeMb": 460,
+          "codeRangeSizeMb": 0,
+          "stackSizeMb": 4
+        }
+      ],
+      "elapsedMs": 716,
+      "sourceUnchanged": true,
+      "workersClosed": true
+    }
+  ]
+}

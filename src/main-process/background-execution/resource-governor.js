@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { isMemoryAdmissionPolicy } = require('./memory-admission');
 
 const {
   PRIORITIES,
@@ -73,8 +74,12 @@ function validateRequest(request, kind) {
   if (request.signal && request.signal.aborted) {
     throw new ResourceGovernorError('ADMISSION_CANCELLED', 'Resource request was already cancelled');
   }
+  if (request.allowLowMemory !== undefined && (kind !== 'phase' || typeof request.allowLowMemory !== 'boolean')) {
+    throw new ResourceGovernorError('RESOURCE_REQUEST_INVALID', 'allowLowMemory 只能用于 phase 请求，且必须为布尔值');
+  }
   return Object.freeze({
     kind,
+    allowLowMemory: request.allowLowMemory !== false,
     ownerKey: assertNonEmptyString(request.ownerKey, 'ownerKey'),
     actionKey: assertNonEmptyString(request.actionKey, 'actionKey'),
     operationKey: request.operationKey === undefined || request.operationKey === null
@@ -89,6 +94,18 @@ function validateRequest(request, kind) {
 
 function createResourceGovernor(options = {}) {
   const budgets = validateResourceVector(options.budgets, 'budgets');
+  const memoryAdmission = options.memoryAdmission || null;
+  if (memoryAdmission && !isMemoryAdmissionPolicy(memoryAdmission)) {
+    throw new ResourceGovernorError('RESOURCE_MEMORY_CONFIG_INVALID', '内存准入必须由 Main 静态装配');
+  }
+  const memoryRecheckMs = options.memoryRecheckMs === undefined ? 1000 : options.memoryRecheckMs;
+  if (!Number.isSafeInteger(memoryRecheckMs) || memoryRecheckMs < 1 || memoryRecheckMs > MAX_TIMER_DELAY_MS) {
+    throw new ResourceGovernorError('RESOURCE_MEMORY_CONFIG_INVALID', '内存重采样间隔无效');
+  }
+  const setRecheckTimer = options.setTimer || setTimeout;
+  const clearRecheckTimer = options.clearTimer || clearTimeout;
+  let recheckTimer = null;
+  let memoryEvaluationActive = false;
   const now = options.now || Date.now;
   const idFactory = options.idFactory || defaultIdFactory;
   const diagnosticsSink = options.diagnostics || (() => {});
@@ -96,7 +113,9 @@ function createResourceGovernor(options = {}) {
     now,
     setTimer: options.setTimer,
     clearTimer: options.clearTimer,
-    agingMs: options.agingMs
+    agingMs: options.agingMs,
+    canBypass: (candidate, predecessor) => Boolean(memoryAdmission &&
+      memoryAdmission.canBypass(candidate.memory, predecessor.memory))
   });
   const leases = new Map();
   const dependenciesByParent = new Map();
@@ -142,6 +161,80 @@ function createResourceGovernor(options = {}) {
       if (error instanceof ResourceGovernorError && error.code === 'RESOURCE_VECTOR_OVERFLOW') return false;
       throw error;
     }
+  }
+
+  function memoryFor(common, resources) {
+    return memoryAdmission ? memoryAdmission.prepare(common, resources) : null;
+  }
+
+  function fitsStable(memory, resources) {
+    return fitsWithin(resources, budgets) && (!memory ||
+      resources.memoryBytes <= memoryAdmission.limit(memory.scope, budgets.memoryBytes));
+  }
+
+  function assertStable(prepared, memory, candidates) {
+    if (!memory) return;
+    for (const candidate of memory.candidates) memoryAdmission.assertEvidence(candidate);
+    if (!candidates.some((resources) => fitsStable(memory, resources))) {
+      throw unavailable(prepared, {
+        reason: 'stable-limit',
+        memoryLimitKind: memory.scope.migrated ? 'hardware' : 'compatibility',
+        candidateMemoryBytes: memory.candidates.map((item) => item.resources.memoryBytes),
+        memoryLimitBytes: memoryAdmission.limit(memory.scope, budgets.memoryBytes)
+      });
+    }
+  }
+
+  function canAdmit(memory, candidate, contribution) {
+    if (memoryEvaluationActive) return false;
+    if (!canAdd(contribution)) return false;
+    if (!memory) return true;
+    if (activeUsage.memoryBytes + contribution.memoryBytes >
+        memoryAdmission.limit(memory.scope, budgets.memoryBytes)) return false;
+    memoryEvaluationActive = true;
+    try {
+      return memoryAdmission.evaluate(memory.scope, candidate, contribution.memoryBytes,
+        [...leases.values()].filter((record) => record.releasedAt === null));
+    } finally { memoryEvaluationActive = false; }
+  }
+
+  function memoryDetails(memory, candidate) {
+    return memory ? { memoryState: Object.freeze({
+      scope: memory.scope, mode: candidate.mode, config: candidate.config
+    }) } : {};
+  }
+
+  // simple job 的 base 与 phase 不可拆需求在取 base 前检查，避免持有 base
+  // 等待一个永远无法容纳的 phase。选档仍只在实际 grant 时发生。
+  function assertSimpleJobFits(request, base, phase) {
+    const common = validateRequest(request, 'phase');
+    const fixedBase = validateResourceVector(base);
+    const fixedPhase = validateResourceVector(phase);
+    const memory = memoryFor(common, fixedPhase);
+    const candidates = memory ? memory.candidates : [{ resources: fixedPhase }];
+    if (memory) for (const candidate of candidates) memoryAdmission.assertEvidence(candidate);
+    if (!candidates.some((candidate) => fitsStable(memory, checkedAdd(fixedBase, candidate.resources)))) {
+      throw unavailable({ ...common, resources: checkedAdd(fixedBase, fixedPhase) }, { reason: 'stable-limit',
+        memoryLimitKind: memory?.scope.migrated ? 'hardware' : 'compatibility',
+        candidateMemoryBytes: candidates.map((candidate) => fixedBase.memoryBytes + candidate.resources.memoryBytes),
+        memoryLimitBytes: memory ? memoryAdmission.limit(memory.scope, budgets.memoryBytes) : budgets.memoryBytes });
+    }
+  }
+
+  function refreshRecheckTimer() {
+    if (!memoryAdmission) return;
+    if (!accepting || queue.snapshot().size === 0) {
+      if (recheckTimer !== null) clearRecheckTimer(recheckTimer);
+      recheckTimer = null;
+      return;
+    }
+    if (recheckTimer !== null) return;
+    recheckTimer = setRecheckTimer(() => {
+      recheckTimer = null;
+      queue.drain();
+      refreshRecheckTimer();
+    }, memoryRecheckMs);
+    if (recheckTimer && typeof recheckTimer.unref === 'function') recheckTimer.unref();
   }
 
   function snapshotTopology(topology) {
@@ -231,6 +324,10 @@ function createResourceGovernor(options = {}) {
   }
 
   function grant(prepared, contribution, details = {}) {
+    if (!accepting) throw new ResourceGovernorError('RESOURCE_GOVERNOR_CLOSED', '资源管理器已关闭');
+    if (prepared.signal && prepared.signal.aborted) {
+      throw new ResourceGovernorError('ADMISSION_CANCELLED', '资源申请已取消');
+    }
     const leaseId = nextId('lease');
     const nextUsage = checkedAdd(activeUsage, contribution);
     const record = {
@@ -250,6 +347,7 @@ function createResourceGovernor(options = {}) {
       downgradeReason: details.downgradeReason || null,
       topology: snapshotTopology(details.topology)
     };
+    record.memoryState = details.memoryState || null;
     activeUsage = nextUsage;
     leases.set(record.leaseId, record);
     record.parentDependency = details.parentDependency || null;
@@ -262,7 +360,10 @@ function createResourceGovernor(options = {}) {
         leaseId: record.leaseId,
         kind: record.kind,
         ownerKeyHash: ownerKeyHash(record.ownerKey),
-        downgraded: record.downgraded
+        downgraded: record.downgraded,
+        ...(record.memoryState?.config ? { memoryMode: record.memoryState.mode,
+          memoryProfile: record.memoryState.config.profileId, policyDigest: record.memoryState.config.policyDigest,
+          memoryBytes: record.resources.memoryBytes, actionKey: record.actionKey } : {})
       });
     } finally {
       queueMicrotask(() => grantDeliveryProtected.delete(record.leaseId));
@@ -270,14 +371,14 @@ function createResourceGovernor(options = {}) {
     return createResourceLease(record, release);
   }
 
-  function unavailable(prepared) {
+  function unavailable(prepared, details = {}) {
     counters.rejected += 1;
     const hashedOwner = ownerKeyHash(prepared.ownerKey);
     emit('resource-rejected', { kind: prepared.kind, ownerKeyHash: hashedOwner });
     return new ResourceGovernorError(
       'RESOURCE_BUDGET_UNAVAILABLE',
       `Resource budget is unavailable for ${prepared.kind}`,
-      Object.freeze({ kind: prepared.kind, ownerKeyHash: hashedOwner })
+      Object.freeze({ kind: prepared.kind, ownerKeyHash: hashedOwner, ...details })
     );
   }
 
@@ -299,10 +400,20 @@ function createResourceGovernor(options = {}) {
         'ResourceGovernor is not accepting requests'
       ));
     }
+    try {
+      if (admissionOptions.assertStable) admissionOptions.assertStable();
+    } catch (error) {
+      onRejected();
+      return Promise.reject(error);
+    }
+    const guardedAttempt = () => {
+      if (admissionOptions.assertStable) admissionOptions.assertStable();
+      return attempt();
+    };
     if (queue.snapshot().size === 0) {
       let immediate;
       try {
-        immediate = attempt();
+        immediate = guardedAttempt();
       } catch (error) {
         onRejected();
         return Promise.reject(error);
@@ -320,23 +431,27 @@ function createResourceGovernor(options = {}) {
       onRejected();
       return Promise.reject(error);
     }
-    return queue.enqueue({
+    const waiting = queue.enqueue({
       requestId,
       priority: prepared.priority,
       timeoutMs: prepared.timeoutMs,
       signal: prepared.signal,
       payload: Object.freeze({
-        attempt,
+        attempt: guardedAttempt,
+        memory: admissionOptions.memory,
         prepared,
         rejectOnUnavailable: prepared.lowMemoryBehavior === 'reject'
       }),
       onSettled(status) {
         if (status === 'rejected') onRejected();
+        refreshRecheckTimer();
       }
     }).catch((error) => {
       onRejected();
       throw error;
     });
+    refreshRecheckTimer();
+    return waiting;
   }
 
   queue.drain((queued) => {
@@ -348,17 +463,25 @@ function createResourceGovernor(options = {}) {
   function acquireExact(kind, request) {
     let common;
     let resources;
+    let memory;
     try {
       common = validateRequest(request, kind);
       resources = validateResourceVector(request.resources);
+      memory = memoryFor(common, resources);
     } catch (error) {
       return Promise.reject(error);
     }
     const prepared = Object.freeze({ ...common, resources });
+    const candidates = memory ? memory.candidates : [{ resources }];
     return enqueue(prepared, () => {
-      if (!canAdd(resources)) return DEFER_ADMISSION;
-      return grant(prepared, resources);
-    });
+      for (const candidate of candidates) {
+        if (memory && !fitsStable(memory, candidate.resources)) continue;
+        if (!canAdmit(memory, candidate, candidate.resources)) continue;
+        return grant(Object.freeze({ ...common, resources: candidate.resources }), candidate.resources,
+          memoryDetails(memory, candidate));
+      }
+      return DEFER_ADMISSION;
+    }, { memory, assertStable: () => assertStable(prepared, memory, candidates.map((item) => item.resources)) });
   }
 
   function acquireReplaceableReservation(kind, request) {
@@ -367,9 +490,13 @@ function createResourceGovernor(options = {}) {
     let resources;
     let replacesReservationId;
     let parentDependency = null;
+    let memory;
+    let stableResources;
     try {
       common = validateRequest(request, kind);
       resources = validateResourceVector(request.resources);
+      memory = memoryFor(common, resources);
+      stableResources = resources;
       replacesReservationId = request.replacesReservationId === undefined
         ? null
         : request.replacesReservationId;
@@ -383,6 +510,7 @@ function createResourceGovernor(options = {}) {
           );
         }
         assertReplacementParentIsAdopted(old);
+        stableResources = checkedAdd(old.resources, positiveDelta(resources, old.resources));
         const existingDependencies = dependenciesByParent.get(old.leaseId);
         if (existingDependencies && [...existingDependencies]
           .some((dependency) => dependency.active && dependency.kind === 'replacement')) {
@@ -424,9 +552,12 @@ function createResourceGovernor(options = {}) {
         assertReplacementParentIsAdopted(old);
         contribution = positiveDelta(resources, old.resources);
       }
-      if (!canAdd(contribution)) return DEFER_ADMISSION;
-      return grant(prepared, contribution, { replacesReservationId, parentDependency });
-    }, { onRejected: () => releaseParentDependency(parentDependency) });
+      const candidate = memory ? memory.candidates[0] : { resources };
+      if (!canAdmit(memory, candidate, contribution)) return DEFER_ADMISSION;
+      return grant(prepared, contribution, { replacesReservationId, parentDependency,
+        ...memoryDetails(memory, candidate) });
+    }, { onRejected: () => releaseParentDependency(parentDependency),
+      assertStable: () => assertStable(prepared, memory, [stableResources]) });
   }
 
   function acquirePersistentReservation(request) {
@@ -521,11 +652,13 @@ function createResourceGovernor(options = {}) {
 
     let requested;
     let single;
+    let memory;
     try {
       requested = prepareForCount(requestedChildCount);
       single = common.lowMemoryBehavior === 'downgrade-to-single' && requestedChildCount > 1
         ? prepareForCount(1)
         : null;
+      memory = memoryFor(common, requested.prepared.resources);
     } catch (error) {
       releaseParentDependency(parentDependency);
       return Promise.reject(error);
@@ -552,23 +685,30 @@ function createResourceGovernor(options = {}) {
 
     return enqueue(requested.prepared, () => {
       const requestedContribution = contributionFor(requested);
-      if (canAdd(requestedContribution)) {
+      const candidate = memory ? memory.candidates[0] : { resources: requested.prepared.resources };
+      if ((!memory || fitsStable(memory, requested.prepared.resources)) &&
+          canAdmit(memory, candidate, requestedContribution)) {
         return grant(requested.prepared, requestedContribution, {
           ...requested.details,
-          parentDependency
+          parentDependency,
+          ...memoryDetails(memory, candidate)
         });
       }
       if (single) {
         const singleContribution = contributionFor(single);
-        if (canAdd(singleContribution)) {
+        if ((!memory || fitsStable(memory, single.prepared.resources)) &&
+            canAdmit(memory, candidate, singleContribution)) {
           return grant(single.prepared, singleContribution, {
             ...single.details,
-            parentDependency
+            parentDependency,
+            ...memoryDetails(memory, candidate)
           });
         }
       }
       return DEFER_ADMISSION;
-    }, { onRejected: () => releaseParentDependency(parentDependency) });
+    }, { onRejected: () => releaseParentDependency(parentDependency),
+      assertStable: () => assertStable(requested.prepared, memory,
+        [requested.prepared.resources, ...(single ? [single.prepared.resources] : [])]) });
   }
 
   function release(resourceId, reason = 'released') {
@@ -599,8 +739,12 @@ function createResourceGovernor(options = {}) {
     releaseParentDependency(record.parentDependency);
     record.parentDependency = null;
     counters.released += 1;
-    emit('resource-released', { resourceId, kind: record.kind, reason });
+    emit('resource-released', { resourceId, kind: record.kind, reason,
+      ...(record.memoryState?.config ? { memoryMode: record.memoryState.mode,
+        memoryProfile: record.memoryState.config.profileId, policyDigest: record.memoryState.config.policyDigest,
+        memoryBytes: record.resources.memoryBytes, actionKey: record.actionKey } : {}) });
     queue.drain();
+    refreshRecheckTimer();
     return true;
   }
 
@@ -741,7 +885,9 @@ function createResourceGovernor(options = {}) {
       replacesReservationId: record.replacesReservationId,
       downgraded: record.downgraded,
       downgradeReason: record.downgradeReason,
-      topology: record.topology
+      topology: record.topology,
+      ...(record.memoryState ? { memoryMode: record.memoryState.mode,
+        memoryConfig: record.memoryState.config } : {})
     });
   }
 
@@ -765,10 +911,13 @@ function createResourceGovernor(options = {}) {
     if (!accepting) return false;
     accepting = false;
     queue.close(reason);
+    refreshRecheckTimer();
     return true;
   }
 
   const governor = Object.freeze({
+    usesMemoryAdmission: Boolean(memoryAdmission),
+    assertSimpleJobFits,
     acquireBaseLease: (request) => acquireExact('base', request),
     acquirePersistentReservation,
     acquirePendingInteractionReservation,

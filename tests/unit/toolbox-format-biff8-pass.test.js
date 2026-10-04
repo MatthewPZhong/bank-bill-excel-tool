@@ -170,3 +170,14 @@ test('无物理 FORMAT 的 locale canonical built-in id 14/37 不被值层逐字
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+
+test('低档 BIFF8 reader 在 overlay 和值层读取前拒绝，不尝试打开文件', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'biff8-low-guard-'));
+  try {
+    const source = path.join(dir, 'not-created.xls');
+    await assert.rejects(openToolboxBiff8Pass(source, { allowBiff8: false }),
+      { code: 'EXECUTION_INPUT_PROFILE_UNSUITABLE' });
+    await assert.rejects(openToolboxBiff8Pass(source), { code: 'ENOENT' });
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

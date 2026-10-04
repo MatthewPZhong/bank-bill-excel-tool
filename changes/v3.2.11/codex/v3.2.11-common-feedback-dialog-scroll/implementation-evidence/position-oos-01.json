@@ -1,0 +1,39 @@
+{
+  "environment": {
+    "platform": "darwin",
+    "versions": {
+      "electron": "36.9.5",
+      "chrome": "136.0.7103.177"
+    },
+    "displayScaleFactor": 2,
+    "minimumSize": [
+      1080,
+      760
+    ],
+    "frame": false,
+    "windowBounds": {
+      "x": 324,
+      "y": 103,
+      "width": 1080,
+      "height": 760
+    },
+    "contentBounds": {
+      "x": 324,
+      "y": 103,
+      "width": 1080,
+      "height": 760
+    },
+    "zoom": 1,
+    "page": {
+      "width": 1080,
+      "height": 760,
+      "devicePixelRatio": 2,
+      "theme": "light"
+    }
+  },
+  "screenshotPixels": {
+    "width": 2160,
+    "height": 1520
+  },
+  "scope": "独立构造；不宣称本分支修复，不断言已知缺陷必须存在"
+}

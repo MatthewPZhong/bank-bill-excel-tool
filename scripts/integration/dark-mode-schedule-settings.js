@@ -1,6 +1,6 @@
 // 定时深色模式设置集成验证。
 // 覆盖真实 Preload → Main handler → 调度器 → AppDatabase 持久化、重启重判、
-// 失败不改主题、坏配置安全关闭，以及已有背景配置和图片文件保全。
+// 失败不改主题、坏配置使用新默认，以及已有背景配置和图片文件保全。
 // Main 的生产 handler / 初始化源码直接执行于隔离 VM，所有数据库和文件均在临时目录。
 // 用法：node scripts/integration/dark-mode-schedule-settings.js
 const assert = require('node:assert/strict');
@@ -137,16 +137,25 @@ async function run() {
     database.setBackgroundConfig(background);
     runtime = bootRuntime(database, tempDir, localTime(23, 0));
 
-    await check('首次启动即使处于默认夜间时段也关闭，读取不写入默认键', async () => {
-      const info = await runtime.desktopApi.app.getInfo();
-      assert.deepEqual(plain(info.darkModeSchedule), DEFAULT_DARK_MODE_SCHEDULE);
-      assert.equal(info.effectiveTheme, 'light');
-      assert.equal(runtime.nativeTheme.themeSource, 'light');
-      assert.equal(runtime.window.color, '#f9fafc');
-      assert.equal(database.db.prepare("SELECT COUNT(*) AS n FROM app_settings WHERE setting_key = 'dark_mode_schedule'").get().n, 0);
+    await check('新默认精确为开启 17:30–07:00，白天和夜间冷启动读取不写默认键', async () => {
+      assert.deepEqual(DEFAULT_DARK_MODE_SCHEDULE, { enabled: true, startTime: '17:30', endTime: '07:00' });
+      for (const [hour, minute, theme] of [
+        [17, 29, 'light'], [17, 30, 'dark'], [23, 59, 'dark'], [0, 0, 'dark'],
+        [6, 59, 'dark'], [7, 0, 'light'], [23, 0, 'dark']
+      ]) {
+        runtime.scheduler.stop();
+        runtime = bootRuntime(database, tempDir, localTime(hour, minute));
+        const info = await runtime.desktopApi.app.getInfo();
+        assert.deepEqual(plain(info.darkModeSchedule), DEFAULT_DARK_MODE_SCHEDULE);
+        assert.equal(info.effectiveTheme, theme);
+        assert.equal(runtime.nativeTheme.themeSource, theme);
+        assert.equal(runtime.window.color, theme === 'dark' ? '#111419' : '#f9fafc');
+        assert.equal(database.db.prepare("SELECT COUNT(*) AS n FROM app_settings WHERE setting_key = 'dark_mode_schedule'").get().n, 0);
+      }
     });
 
     await check('真实 Preload/Main 保存完整配置、推送一致快照并更新窗口底色', async () => {
+      await runtime.desktopApi.settings.setDarkModeSchedule({ ...enabled, enabled: false });
       const events = [];
       const cancel = runtime.desktopApi.settings.onDarkModeScheduleChanged((snapshot) => events.push(snapshot));
       const response = await runtime.desktopApi.settings.setDarkModeSchedule(enabled);
@@ -195,26 +204,54 @@ async function run() {
       runtime = bootRuntime(database, tempDir, localTime(6, 0));
       const info = await runtime.desktopApi.app.getInfo();
       assert.deepEqual(plain(info.darkModeSchedule), enabled);
-      assert.equal(info.effectiveTheme, 'light');
-      assert.equal(runtime.nativeTheme.themeSource, 'light');
-      runtime.setTime(localTime(18, 30));
-      runtime.app.emit('browser-window-focus');
+      assert.equal(info.effectiveTheme, 'dark');
+      assert.equal(runtime.nativeTheme.themeSource, 'dark');
+      runtime.setTime(localTime(6, 59));
+      runtime.powerMonitor.emit('resume');
       assert.equal(runtime.scheduler.getSnapshot().effectiveTheme, 'dark');
-      runtime.setTime(localTime(6, 0));
+      runtime.setTime(localTime(7, 0));
       runtime.powerMonitor.emit('resume');
       assert.equal(runtime.scheduler.getSnapshot().effectiveTheme, 'light');
+      runtime.setTime(localTime(17, 29));
+      runtime.app.emit('browser-window-focus');
+      assert.equal(runtime.scheduler.getSnapshot().effectiveTheme, 'light');
+      runtime.setTime(localTime(17, 30));
+      runtime.app.emit('browser-window-focus');
+      assert.equal(runtime.scheduler.getSnapshot().effectiveTheme, 'dark');
+      assert.equal(runtime.timers.size, 1);
     });
 
     await check('坏 JSON 和非法历史配置只在读取时回退，不改写原记录', () => {
       const writeRaw = database.db.prepare("UPDATE app_settings SET setting_value = ? WHERE setting_key = 'dark_mode_schedule'");
-      for (const raw of ['{broken', 'null', '[]', '{"enabled":true,"startTime":"24:00","endTime":"06:00"}']) {
+      for (const raw of ['{broken', 'null', '[]', '{"enabled":false}', '{"enabled":true,"startTime":"24:00","endTime":"06:00"}']) {
         writeRaw.run(raw);
         assert.deepEqual(database.getDarkModeSchedule(), DEFAULT_DARK_MODE_SCHEDULE);
         assert.equal(database.db.prepare("SELECT setting_value FROM app_settings WHERE setting_key = 'dark_mode_schedule'").get().setting_value, raw);
       }
       runtime.scheduler.stop();
       runtime = bootRuntime(database, tempDir, localTime(23, 0));
-      assert.equal(runtime.nativeTheme.themeSource, 'light');
+      assert.equal(runtime.nativeTheme.themeSource, 'dark');
+    });
+
+    await check('真实数据库重开保留旧关闭、旧开启、自定义及新版用户停用配置', async () => {
+      for (const [config, hour, minute, theme] of [
+        [{ enabled: false, startTime: '18:30', endTime: '06:00' }, 23, 0, 'light'],
+        [{ enabled: true, startTime: '18:30', endTime: '06:00' }, 17, 30, 'light'],
+        [{ enabled: true, startTime: '21:15', endTime: '08:30' }, 8, 0, 'dark'],
+        [{ ...enabled, enabled: false }, 23, 0, 'light']
+      ]) {
+        database.setDarkModeSchedule(config);
+        const before = database.db.prepare('SELECT * FROM app_settings ORDER BY setting_key').all();
+        runtime.scheduler.stop();
+        database.close();
+        database = new AppDatabase(dbPath);
+        database.init();
+        runtime = bootRuntime(database, tempDir, localTime(hour, minute));
+        const info = await runtime.desktopApi.app.getInfo();
+        assert.deepEqual(plain(info.darkModeSchedule), config);
+        assert.equal(info.effectiveTheme, theme);
+        assert.deepEqual(database.db.prepare('SELECT * FROM app_settings ORDER BY setting_key').all(), before);
+      }
     });
 
     await check('停用保留自定义时段，主题保存及读取不改写 Clear、背景或图片', async () => {

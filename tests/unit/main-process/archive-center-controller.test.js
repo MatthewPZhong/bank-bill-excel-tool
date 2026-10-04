@@ -305,9 +305,9 @@ test('tracked batch 无候选文件时不建批次、不发 pseudo batch 且不�
   assert.deepEqual(outboxStore.list(), []);
 });
 
-test('保留期默认 60 天并支持新增枚举，既有合法值保持兼容', () => {
+test('保留期默认永久，既有合法有限值保持兼容', () => {
   const { controller, settings } = createHarness();
-  assert.equal(controller.getSettings().settings.retentionDays, 60);
+  assert.equal(controller.getSettings().settings.retentionDays, null);
   assert.equal(controller.setRetentionDays(60).status, 'success');
   assert.equal(settings.get(ARCHIVE_RETENTION_SETTING_KEY), '60');
   assert.equal(controller.setRetentionDays(90).status, 'success');
@@ -754,13 +754,13 @@ test('控制器启动时将有效、损坏和空模板排除设置统一归一�
     );
     const expectedSettings = typeof controller.changeStorageLocation === 'function'
       ? {
-          retentionDays: 60,
+          retentionDays: null,
           retentionDaysByModule: {},
           retentionModules: listVisibleArchiveScopes(),
           storageRoot: '/tmp/archive-center',
           storageMigration: { status: 'idle', phase: '', processed: 0, total: 0 }
         }
-      : { retentionDays: 60 };
+      : { retentionDays: null };
     assert.deepEqual(controller.getSettings().settings, expectedSettings, label);
   }
 
@@ -803,7 +803,7 @@ test('存储根 manager 先于 service 初始化，设置/变更透传且 mainte
   assert.equal(initialized.available, true);
   assert.deepEqual(calls, ['manager-initialize']);
   assert.deepEqual(controller.getSettings().settings, {
-    retentionDays: 60,
+    retentionDays: null,
     retentionDaysByModule: {},
     retentionModules: listVisibleArchiveScopes(),
     storageRoot: '/new/archive-root',

@@ -6,6 +6,91 @@
     const { host, registerModal, pushModal, replaceModal } = modalBridge;
     const document = global.document;
     const window = global;
+    let nextReadId = 0;
+    const readId = () => `split-${Date.now()}-${++nextReadId}`;
+
+    function createFieldValuesSession(session) {
+      const fields = new Map();
+      let disposed = false;
+      const consumers = new Set();
+      let pinned = new Set();
+      function notify(field) {
+        for (const consumer of consumers) {
+          if (consumer.fields.has(field)) consumer.onChange(field);
+        }
+      }
+      function cancelUnused() {
+        pinned = new Set([...consumers].flatMap((consumer) => [...consumer.fields]));
+        for (const [field, entry] of fields) {
+          if (entry.state !== 'loading' || pinned.has(field)) continue;
+          fields.delete(field);
+          notify(field);
+          Promise.resolve(api.splitCancelRead({ version: 2, requestId: entry.requestId })).catch(() => {});
+        }
+      }
+      return {
+        state(field) { return fields.get(field) || { state: 'not-requested', values: [] }; },
+        // replace 先构造新视图再销毁旧视图；请求由所有存活视图共同持有。
+        subscribe(usedFields, onChange) {
+          const consumer = { fields: new Set(usedFields), onChange };
+          if (!disposed) consumers.add(consumer);
+          return {
+            update(nextFields) {
+              if (!consumers.has(consumer)) return;
+              consumer.fields = new Set(nextFields);
+              cancelUnused();
+            },
+            dispose() { consumers.delete(consumer); cancelUnused(); }
+          };
+        },
+        async load(field) {
+          if (disposed) return;
+          const existing = fields.get(field);
+          if (existing?.state === 'complete') return existing;
+          if (existing?.state === 'loading') return existing.promise;
+          if (!existing && fields.size >= 8) {
+            const old = [...fields].find(([name, entry]) => !pinned.has(name) && entry.state !== 'loading');
+            if (old) fields.delete(old[0]);
+            else return { state: 'failed', values: [], error: '正在读取多个字段，请稍后重试' };
+          }
+          const entry = { state: 'loading', values: [], requestId: readId(), error: '' };
+          fields.set(field, entry);
+          notify(field);
+          entry.promise = Promise.resolve().then(() => api.splitReadValues({ version: 2,
+            splitReadToken: session.splitReadToken, requestId: entry.requestId, field })).then((result) => {
+            if (disposed || fields.get(field) !== entry) return null;
+            if (result?.status !== 'success' || result.version !== 2 || result.requestId !== entry.requestId ||
+                result.splitReadToken !== session.splitReadToken || result.field !== field ||
+                result.valuesState !== 'complete' || !Array.isArray(result.values)) {
+              throw new Error(result?.message || '字段值读取未完成，请点击重试');
+            }
+            entry.state = 'complete';
+            entry.values = result.values;
+            notify(field);
+            return entry;
+          }).catch((error) => {
+            if (disposed || fields.get(field) !== entry) return null;
+            entry.state = 'failed';
+            entry.error = error?.message || '字段值读取失败，请点击重试';
+            notify(field);
+            return entry;
+          });
+          return entry.promise;
+        },
+        dispose() { disposed = true; consumers.clear(); cancelUnused(); fields.clear(); }
+      };
+    }
+
+    function fieldState(session, legacyValues, field) {
+      return session.fieldValues ? session.fieldValues.state(field)
+        : { state: 'complete', values: Array.isArray(legacyValues[field]) ? legacyValues[field] : [] };
+    }
+    function valuesHint(entry) {
+      if (entry.state === 'loading') return '正在读取当前字段的可选值';
+      if (entry.state === 'failed') return `${entry.error}；点击值入口可重试`;
+      if (entry.state === 'not-requested') return '点击值入口读取当前字段的可选值';
+      return entry.values.length === 0 ? '该字段无可选值（该列为空），请改选其他字段' : '';
+    }
 
     // 选择视图只持有自身交互资源；父工具箱持有读表 token 和提交资格。
     function bindPicker(overlay, dialog, { onComplete, onCancel, beforeSubmit }, cleanup) {
@@ -99,6 +184,7 @@
       let destroyed = false;
       let requestGeneration = 0;
       let splitSession = null;
+      let metadataRequestId = null;
 
       function live(generation = requestGeneration) {
         return !destroyed && handle?.isOpen() && generation === requestGeneration;
@@ -106,6 +192,7 @@
 
       function releaseSession(session) {
         if (!session) return;
+        session.fieldValues?.dispose();
         session.headers = [];
         session.valuesByField = {};
         session.draft = null;
@@ -124,6 +211,7 @@
           destroyed = true;
           requestGeneration += 1;
           releaseSession(splitSession);
+          if (metadataRequestId) Promise.resolve(api.splitCancelRead({ version: 2, requestId: metadataRequestId })).catch(() => {});
         }
       });
 
@@ -305,10 +393,12 @@
         releaseSession(splitSession);
         const generation = ++requestGeneration;
         splitImportInFlight = true;
-        setToolboxStatus('正在读取表格');
+        setToolboxStatus('正在读取表头与数据行数');
         syncToolboxRunningUi();
         try {
-          const result = await api.splitRead();
+          metadataRequestId = readId();
+          const result = await api.splitRead({ version: 2, scanKind: 'metadata', requestId: metadataRequestId });
+          metadataRequestId = null;
           if (!live(generation) || !handle.isTop()) return;
           if (!result || result.status === 'cancelled') {
             setToolboxStatus('已取消拆分');
@@ -338,9 +428,10 @@
             submitted: false
           };
           session.prepareSubmit = (value) => prepareSplit(session, value);
+          if (result.version === 2) session.fieldValues = createFieldValuesSession(session);
           splitSession = session;
           splitImportInFlight = false;
-          setToolboxStatus('等待拆分设置');
+          setToolboxStatus(result.executionMode === 'low' ? '已完成低内存读取，等待拆分设置；低内存模式可能需要更多磁盘读写。' : '等待拆分设置');
           syncToolboxRunningUi();
           pushModal(handle, () => createSplitFieldPickerDialog({
             ...session,
@@ -458,7 +549,11 @@
       let currentValuesList = [];      // 当前字段的去重值列表
       let selectedValues = new Set();  // 当前已勾选的值
       let panelOpen = false;
+      let valuesGeneration = 0;
+      let fieldSubscription = null;
       const lifecycle = bindPicker(overlay, dialog, { onComplete, onCancel, beforeSubmit: _session.prepareSubmit }, () => {
+        valuesGeneration += 1;
+        fieldSubscription?.dispose();
         closeValuesPanel();
         currentValuesList = [];
         selectedValues.clear();
@@ -539,9 +634,20 @@
         valuesDropdownBtn.setAttribute('aria-expanded', 'true');
         positionValuesPanel();
       }
-      valuesDropdownBtn.addEventListener('click', (e) => {
+      valuesDropdownBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!lifecycle.isActive()) return;
+        if (!lifecycle.isActive() || rowsCheck.checked || busy) return;
+        const field = currentFieldName();
+        if (_session.fieldValues && fieldState(_session, safeValuesByField, field).state !== 'complete') {
+          const generation = ++valuesGeneration;
+          const pending = _session.fieldValues.load(field);
+          updateCompleteState();
+          await pending;
+          if (!lifecycle.isActive() || generation !== valuesGeneration || rowsCheck.checked || currentFieldName() !== field) return;
+          currentValuesList = fieldState(_session, safeValuesByField, field).values;
+          updateCompleteState();
+          if (fieldState(_session, safeValuesByField, field).state !== 'complete') return;
+        }
         if (panelOpen) closeValuesPanel(); else openValuesPanel();
       });
 
@@ -549,7 +655,9 @@
       function refreshValues() {
         if (rowsCheck.checked || busy) return;
         const fieldName = currentFieldName();
-        currentValuesList = Array.isArray(safeValuesByField[fieldName]) ? safeValuesByField[fieldName] : [];
+        valuesGeneration += 1;
+        fieldSubscription?.update([fieldName]);
+        currentValuesList = fieldState(_session, safeValuesByField, fieldName).values;
         selectedValues = new Set();
         closeValuesPanel();
         valuesDropdownBtn.disabled = currentValuesList.length === 0; // 边界①：字段无去重值 → 下拉禁用
@@ -588,21 +696,26 @@
         const byRows = rowsCheck.checked;
         const checked = byRows ? rowsPreview() : null;
         fieldSelect.disabled = byRows || busy || safeHeaders.length === 0;
-        valuesDropdownBtn.disabled = byRows || busy || currentValuesList.length === 0;
+        const entry = fieldState(_session, safeValuesByField, currentFieldName());
+        valuesDropdownBtn.disabled = byRows || busy || entry.state === 'loading' || (entry.state === 'complete' && entry.values.length === 0);
+        if (entry.state !== 'complete') valuesDropdownBtn.textContent = entry.state === 'loading' ? '读取中…' : '点击读取';
+        else updateValuesLabel();
         multipleFilesCheck.disabled = byRows || busy;
         rowsCheck.disabled = busy;
         rowsWrap.hidden = !byRows;
         rowsInput.disabled = !byRows || busy;
         hintEl.textContent = byRows
           ? ((!checked.valid && (rowsTouched || rowsInput.value.trim())) ? checked.message : '')
-          : (currentValuesList.length === 0 ? '该字段无可选值（该列为空），请改选其他字段' : '');
+          : valuesHint(entry);
         rowsInput.setAttribute('aria-invalid', String(byRows && rowsTouched && !checked.valid));
-        completeBtn.disabled = busy || (byRows ? !checked.valid : selectedValues.size === 0);
+        completeBtn.disabled = busy || (byRows ? !checked.valid : entry.state !== 'complete' || selectedValues.size === 0);
       }
 
       rowsCheck.addEventListener('change', () => {
         if (!lifecycle.isActive() || busy) return;
         closeValuesPanel();
+        valuesGeneration += 1;
+        fieldSubscription?.update(rowsCheck.checked ? [] : [currentFieldName()]);
         if (rowsCheck.checked) multipleFilesCheck.checked = false;
         updateCompleteState();
         if (rowsCheck.checked && !rowsInput.disabled) rowsInput.focus();
@@ -662,6 +775,7 @@
           }
           return;
         }
+        if (fieldState(_session, safeValuesByField, currentFieldName()).state !== 'complete') return;
         const values = getSelectedValues();
         if (values.length === 0) {
           hintEl.textContent = '请至少选择一个值';
@@ -676,7 +790,12 @@
         }
       });
 
-      // 初始渲染：默认选中首个字段并刷新其值列表。
+      fieldSubscription = _session.fieldValues?.subscribe([currentFieldName()], (field) => {
+        if (!lifecycle.isActive() || rowsCheck.checked || currentFieldName() !== field) return;
+        currentValuesList = fieldState(_session, safeValuesByField, field).values;
+        updateCompleteState();
+      });
+      // 初始只展示默认首字段；首次点击值入口才扫描。
       refreshValues();
       return overlay;
     }
@@ -739,10 +858,12 @@
       let nextGroupId = 1;
       let panelGroupId = null;
       let panelOpen = false;
+      // 缓存可接纳迟到结果，共享面板只响应最近一次打开意图。
+      let panelIntentGeneration = 0;
       let busy = false;
       const initialValues = new Set(
         (initialGroup && Array.isArray(initialGroup.values) ? initialGroup.values : [])
-          .filter((value) => (safeValuesByField[safeHeaders[initialFieldIndex]] || []).includes(value))
+          .filter((value) => fieldState(_session, safeValuesByField, safeHeaders[initialFieldIndex]).values.includes(value))
       );
       const groups = [{
         id: nextGroupId++,
@@ -751,8 +872,10 @@
         selectedValues: initialValues
       }];
 
+      let fieldSubscription = null;
       _session.draft = { mode: 'multiple', groups };
       const lifecycle = bindPicker(overlay, dialog, { onComplete, onCancel, beforeSubmit: _session.prepareSubmit }, () => {
+        fieldSubscription?.dispose();
         closeValuesPanel();
         groups.length = 0;
         safeHeaders = [];
@@ -767,7 +890,7 @@
 
       function valuesOf(group) {
         const field = fieldNameOf(group);
-        return Array.isArray(safeValuesByField[field]) ? safeValuesByField[field] : [];
+        return fieldState(_session, safeValuesByField, field).values;
       }
 
       function selectedValuesOf(group) {
@@ -798,6 +921,7 @@
       }
 
       function closeValuesPanel() {
+        panelIntentGeneration += 1;
         panelOpen = false;
         panelGroupId = null;
         valuesPanel.hidden = true;
@@ -811,6 +935,7 @@
         completeButton.disabled = busy || groups.some((group) => (
           String(group.fileName || '').trim() === ''
           || fieldNameOf(group) === ''
+          || fieldState(_session, safeValuesByField, fieldNameOf(group)).state !== 'complete'
           || selectedValuesOf(group).length === 0
         ));
       }
@@ -836,7 +961,9 @@
         if (!button) return;
         button.textContent = valuesLabelOf(group);
         button.title = button.textContent;
-        button.disabled = valuesOf(group).length === 0;
+        const entry = fieldState(_session, safeValuesByField, fieldNameOf(group));
+        button.disabled = entry.state === 'loading' || (entry.state === 'complete' && entry.values.length === 0);
+        if (entry.state !== 'complete') button.textContent = entry.state === 'loading' ? '读取中…' : '点击读取';
       }
 
       function openValuesPanel(group, button) {
@@ -870,6 +997,7 @@
       }
 
       function renderGroups() {
+        fieldSubscription?.update(groups.map(fieldNameOf));
         closeValuesPanel();
         groupsRoot.replaceChildren();
         groups.forEach((group, index) => {
@@ -910,10 +1038,9 @@
           fieldSelect.addEventListener('change', () => {
             if (!lifecycle.isActive() || busy) return;
             group.fieldIndex = Number.parseInt(fieldSelect.value, 10);
+            group.valuesGeneration = (group.valuesGeneration || 0) + 1;
             group.selectedValues = new Set();
-            hintEl.textContent = valuesOf(group).length === 0
-              ? `文件${index + 1}所选字段无可选值，请改选其他字段`
-              : '';
+            hintEl.textContent = valuesHint(fieldState(_session, safeValuesByField, fieldNameOf(group)));
             renderGroups();
           });
 
@@ -929,12 +1056,33 @@
           valuesButton.setAttribute('aria-expanded', 'false');
           valuesButton.textContent = valuesLabelOf(group);
           valuesButton.title = valuesButton.textContent;
-          valuesButton.disabled = valuesOf(group).length === 0;
-          valuesButton.addEventListener('click', (event) => {
+          const entry = fieldState(_session, safeValuesByField, fieldNameOf(group));
+          valuesButton.disabled = entry.state === 'loading' || (entry.state === 'complete' && entry.values.length === 0);
+          if (entry.state !== 'complete') valuesButton.textContent = entry.state === 'loading' ? '读取中…' : '点击读取';
+          valuesButton.addEventListener('click', async (event) => {
             event.stopPropagation();
             if (!lifecycle.isActive() || busy) return;
+            const field = fieldNameOf(group);
+            const openingGeneration = ++panelIntentGeneration;
+            if (_session.fieldValues && fieldState(_session, safeValuesByField, field).state !== 'complete') {
+              const generation = (group.valuesGeneration || 0) + 1;
+              group.valuesGeneration = generation;
+              const pending = _session.fieldValues.load(field);
+              groups.forEach(refreshGroupValuesButton);
+              updateCompleteState();
+              await pending;
+              if (!lifecycle.isActive() || !groups.includes(group) || group.valuesGeneration !== generation
+                || fieldNameOf(group) !== field || openingGeneration !== panelIntentGeneration) return;
+              groups.forEach(refreshGroupValuesButton);
+              updateCompleteState();
+              const loaded = fieldState(_session, safeValuesByField, field);
+              hintEl.textContent = valuesHint(loaded);
+              if (loaded.state !== 'complete' || loaded.values.length === 0) return;
+            }
+            const currentButton = groupsRoot.querySelector(`[data-group-id="${group.id}"] [data-role="values-button"]`);
+            if (!currentButton) return;
             if (panelOpen && panelGroupId === group.id) closeValuesPanel();
-            else openValuesPanel(group, valuesButton);
+            else openValuesPanel(group, currentButton);
           });
           valuesWrap.appendChild(valuesButton);
 
@@ -1023,7 +1171,7 @@
           seenNames.add(duplicateKey);
           const field = fieldNameOf(group);
           const selectedValues = selectedValuesOf(group);
-          if (!field || selectedValues.length === 0) {
+          if (!field || selectedValues.length === 0 || fieldState(_session, safeValuesByField, field).state !== 'complete') {
             hintEl.textContent = `文件${index + 1}：请选择字段和至少一个值`;
             return;
           }
@@ -1038,6 +1186,12 @@
         }
       });
 
+      fieldSubscription = _session.fieldValues?.subscribe(groups.map(fieldNameOf), (field) => {
+        if (!lifecycle.isActive() || !groups.some((group) => fieldNameOf(group) === field)) return;
+        groups.forEach(refreshGroupValuesButton);
+        updateCompleteState();
+        hintEl.textContent = valuesHint(fieldState(_session, safeValuesByField, field));
+      });
       renderGroups();
       return overlay;
     }

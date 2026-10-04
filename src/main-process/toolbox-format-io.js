@@ -241,9 +241,13 @@ async function streamToolboxPassTables(pass, options = {}) {
         ...physicalSummary
       });
     }
-  } finally {
-    pass.close();
+  } catch (error) {
+    try { await pass.close(); } catch (closeError) {
+      throw new AggregateError([error, closeError], '工具箱扫描失败且资源关闭未确认', { cause: error });
+    }
+    throw error;
   }
+  await pass.close();
 
   if (!baseHeaderInfo) {
     const sourceFile = path.basename(pass.filePath);
@@ -277,7 +281,7 @@ async function streamToolboxPassTables(pass, options = {}) {
 }
 
 async function streamToolboxXlsxTables(filePath, options = {}) {
-  const pass = await openToolboxXlsxPass(filePath);
+  const pass = await openToolboxXlsxPass(filePath, { ...options.readerOptions, cancelToken: options.cancelToken });
   return streamToolboxPassTables(pass, {
     ...options,
     projectionProfile: options.projectionProfile || TOOLBOX_PROJECTION_PROFILES.XLSX_LEGACY
@@ -285,7 +289,7 @@ async function streamToolboxXlsxTables(filePath, options = {}) {
 }
 
 async function streamToolboxBiff8Tables(filePath, options = {}) {
-  const pass = await openToolboxBiff8Pass(filePath);
+  const pass = await openToolboxBiff8Pass(filePath, { ...options.readerOptions, cancelToken: options.cancelToken });
   return streamToolboxPassTables(pass, {
     ...options,
     projectionProfile: options.projectionProfile || TOOLBOX_PROJECTION_PROFILES.XLS_LEGACY
@@ -293,7 +297,7 @@ async function streamToolboxBiff8Tables(filePath, options = {}) {
 }
 
 async function streamToolboxCsvTables(filePath, options = {}) {
-  const pass = await openToolboxCsvPass(filePath);
+  const pass = await openToolboxCsvPass(filePath, { ...options.readerOptions, cancelToken: options.cancelToken });
   return streamToolboxPassTables(pass, {
     ...options,
     projectionProfile: options.projectionProfile || TOOLBOX_PROJECTION_PROFILES.CSV_LEGACY
@@ -302,6 +306,9 @@ async function streamToolboxCsvTables(filePath, options = {}) {
 
 async function streamToolboxTables(filePath, options = {}) {
   const kind = detectToolboxInputKind(filePath);
+  if (options.readerOptions?.expectedInputKind && options.readerOptions.expectedInputKind !== kind) {
+    throw new FileValidationError('TOOLBOX_SPLIT_READ_CONTEXT_STALE', '拆分源文件类型已变化，请重新选择');
+  }
   if (kind === 'xlsx') return streamToolboxXlsxTables(filePath, options);
   if (kind === 'xls') return streamToolboxBiff8Tables(filePath, options);
   return streamToolboxCsvTables(filePath, options);

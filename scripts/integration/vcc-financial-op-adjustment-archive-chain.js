@@ -38,10 +38,8 @@ const {
 const {
   parseAdjustmentLineageName
 } = require('../../src/backend/vcc-financial-op/adjustment-lineage');
-const {
-  RESULT_SHEET_NAME,
-  PENDING_SHEET_NAME
-} = require('../../src/main-process/vcc-financial-op-writer');
+const RESULT_SHEET_NAME = 'PPHK-结果表';
+const PENDING_SHEET_NAME = 'PPHK-移除归档Pending发生额计算表';
 const {
   createVccFinancialOpService
 } = require('../../src/main-process/vcc-financial-op-service');

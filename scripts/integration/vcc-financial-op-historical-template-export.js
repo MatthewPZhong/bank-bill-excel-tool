@@ -30,10 +30,8 @@ const {
 const {
   parseAdjustmentLineageName
 } = require('../../src/backend/vcc-financial-op/adjustment-lineage');
-const {
-  RESULT_SHEET_NAME,
-  PENDING_SHEET_NAME
-} = require('../../src/main-process/vcc-financial-op-writer');
+const RESULT_SHEET_NAME = 'PPHK-结果表';
+const PENDING_SHEET_NAME = 'PPHK-移除归档Pending发生额计算表';
 const {
   createVccFinancialOpService
 } = require('../../src/main-process/vcc-financial-op-service');
@@ -318,8 +316,8 @@ async function run() {
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(outputPath);
-    assertEq(workbook.worksheets[0].name, RESULT_SHEET_NAME, '结果表保持模板目标 sheet 名');
-    assertEq(workbook.worksheets[1].name, PENDING_SHEET_NAME, 'Pending 表保持第二 sheet');
+    assertEq(workbook.worksheets[0].name, RESULT_SHEET_NAME, '单主体结果表使用主体 sheet 名');
+    assertEq(workbook.worksheets[1].name, PENDING_SHEET_NAME, '主体 Pending 表保持第二 sheet');
     const sheet = workbook.getWorksheet(RESULT_SHEET_NAME);
     const movementRow = sheet.getColumn(2).values.findIndex((value) => value === 'VCC_discharge');
     const adjustmentRow = movementRow + 1;

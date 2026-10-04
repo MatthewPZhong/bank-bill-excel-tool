@@ -1,5 +1,7 @@
 'use strict';
 
+const { richReaderBudgets } = require('../background-execution/execution-memory-options');
+
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
@@ -30,13 +32,13 @@ async function hashClosedFile(filePath, safePoint = () => {}) {
     return { sha256: digest.digest('hex'), byteSize: Number(before.size), fileIdentity: exportFileIdentity(before) };
   } finally { await handle.close(); }
 }
-async function validateExportWorkbook({ filePath, source, expected, tempDirectory, cancelToken, safePoint = () => {} }) {
+async function validateExportWorkbook({ filePath, source, expected, tempDirectory, cancelToken, safePoint = () => {}, memoryConfig = null }) {
   if (hash(expected.identity) !== hash(evidenceIdentity({ ...source, maxRowsPerSheet: expected.identity.maxRowsPerSheet }))) fail('BIZOP_OUTPUT_IDENTITY_INVALID');
   const before = await fs.promises.lstat(filePath, { bigint: true });
   if (!before.isFile() || before.isSymbolicLink()) fail('BIZOP_OUTPUT_FILE_INVALID');
   // 实际输出回读与原件读取分别拥有 SST 子目录，均不拥有候选目录和 spool。
   const workbook = await openRichWorkbook(filePath, { sstTempRoot: path.join(tempDirectory, `sst-actual-${randomUUID()}`),
-    memoryBudgetBytes: 32 * 1024 * 1024, lruMaxEntries: 8192, cacheMaxBytes: 32 * 1024 * 1024, cancelToken, maxSheets: expected.pages.length });
+    memoryBudgetBytes: 32 * 1024 * 1024, lruMaxEntries: 8192, cacheMaxBytes: 32 * 1024 * 1024, ...richReaderBudgets(memoryConfig), cancelToken, maxSheets: expected.pages.length });
   const evidence = createEvidence(expected.identity);
   let dataRowCount = 0; let noteRowCount = 0;
   try {

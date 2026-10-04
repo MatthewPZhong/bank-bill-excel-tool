@@ -16,8 +16,10 @@
 // 约束：纯 Node，不访问 Electron API；只 require worker_threads + serialize-error（通用工具）。
 
 'use strict';
+const { memoryCarrierAdmission } = require('./memory-activity');
 
 const { Worker } = require('node:worker_threads');
+const { validateExecutionMemoryConfig } = require('./background-execution/execution-memory-config');
 
 // 工具箱大文件拆分薄 worker 入口（new Worker 拉起 → 内部跑三种拆分作业）。
 //   解析方式与 big-table-import-dispatch.js 一致（require.resolve 相对本文件定位 backend 下 worker entry）。
@@ -41,8 +43,9 @@ const WORKER_MAX_OLD_GEN_MB = 4096;
 //     groups       Object[]?                        exportMultiFilters 的 1-8 个输出分组
 //     onProgress   ((payload) => void)?             进度回调（v1 无 UI，最终接 activity log；OPEN-3）
 //     onLog        ((entry) => void)?               日志条目透传（调用方决定落库 domain）
-//   返回：{ promise, cancel }
-//     promise  Promise<result>   done→resolve(result) / error·exit→reject（deserializeError 还原 name/message/detailLines）
+//   返回：{ promise, closed, cancel }
+//     promise  Promise<result>   保留业务结果；真实 exit 后才结算，避免调用方提前释放资源。
+//     closed   Promise<object>   仅真实 exit／未创建载体时结算，独立于业务成功或失败。
 //     cancel   () => void        v1 无前端触发，仅保留进程退出兜底能力（postMessage cancel + 兜底 terminate）
 //
 //   错误：worker postMessage 'error' → deserializeError 还原 → reject；未 settled 的非零 exit → reject（兜底）。
@@ -54,6 +57,12 @@ function dispatchLargeSplit({
   values,
   savePath,
   groups,
+  privateDirectory,
+  maxValues,
+  maxValueBytes,
+  executionMemoryConfig,
+  sourceSnapshot,
+  inputKind,
   batchContext,
   onProgress,
   onLog
@@ -61,13 +70,22 @@ function dispatchLargeSplit({
   let worker = null;
   let settled = false;
   let jobId = null;
+  let resolveClosed;
+  let cancelTimer = null;
+  let cancelAfterDeadline = null;
+  const closed = new Promise(function captureClosed(resolve) { resolveClosed = resolve; });
 
   const promise = new Promise((resolve, reject) => {
     try {
-      worker = new Worker(workerScriptPath, {
-        resourceLimits: { maxOldGenerationSizeMb: WORKER_MAX_OLD_GEN_MB }
-      });
+      const config = executionMemoryConfig ? validateExecutionMemoryConfig(executionMemoryConfig) : null;
+      worker = memoryCarrierAdmission(executionMemoryConfig).observe(new Worker(workerScriptPath, {
+        resourceLimits: config ? config.workerLimits : (['scanMetadata', 'scanValues'].includes(op)
+          ? { maxOldGenerationSizeMb: 640, maxYoungGenerationSizeMb: 32 }
+          : { maxOldGenerationSizeMb: WORKER_MAX_OLD_GEN_MB })
+      }));
     } catch (spawnErr) {
+      settled = true;
+      resolveClosed(Object.freeze({ spawned: false, exitCode: null }));
       reject(spawnErr);
       return;
     }
@@ -77,10 +95,12 @@ function dispatchLargeSplit({
     const finish = (fn, arg) => {
       if (settled) return;
       settled = true;
+      if (cancelTimer) clearTimeout(cancelTimer);
       try { worker.postMessage({ type: 'close' }); } catch (_e) { /* swallow */ }
-      try { worker.terminate(); } catch (_e) { /* swallow */ }
-      fn(arg);
+      try { Promise.resolve(worker.terminate()).catch(() => {}); } catch (_e) { /* exit 仍是关闭事实 */ }
+      closed.then(() => fn(arg));
     };
+    cancelAfterDeadline = () => finish(reject, Object.assign(new Error('拆分读取已取消'), { code: 'ADMISSION_CANCELLED' }));
 
     const forwardLog = (entry) => {
       if (typeof onLog !== 'function' || !entry) return;
@@ -88,6 +108,7 @@ function dispatchLargeSplit({
     };
 
     worker.on('message', (msg) => {
+      if (settled) return;
       if (!msg || typeof msg !== 'object') return;
       // log 消息（带 jobId）也透传；jobId 不匹配的非 log 消息忽略（照搬 big-table-import-dispatch.js:81）。
       if (msg.jobId !== jobId) {
@@ -117,23 +138,35 @@ function dispatchLargeSplit({
 
     worker.on('error', (err) => finish(reject, err));
     worker.on('exit', (code) => {
+      resolveClosed(Object.freeze({ spawned: true, exitCode: code }));
+      if (cancelTimer) clearTimeout(cancelTimer);
       if (settled) return;
       // 未 settled 的非零退出 → 失败（settle 后的 terminate 退出忽略）。
       settled = true;
       reject(new Error(`工具箱大文件拆分 worker 异常退出（code=${code}）`));
     });
 
-    worker.postMessage({
-      type: 'run',
-      jobId,
-      op,
-      filePath,
-      field,
-      values,
-      savePath,
-      groups,
-      batchContext
-    });
+    try {
+      worker.postMessage({
+        type: 'run',
+        jobId,
+        op,
+        filePath,
+        field,
+        values,
+        savePath,
+        groups,
+        privateDirectory,
+        maxValues,
+        maxValueBytes,
+        executionMemoryConfig,
+        sourceSnapshot,
+        inputKind,
+        batchContext
+      });
+    } catch (error) {
+      finish(reject, error);
+    }
   });
 
   // cancel 能力（v1 无前端触发；保留作进程退出兜底）：发 cancel message（worker 置 cancelToken）。
@@ -141,9 +174,13 @@ function dispatchLargeSplit({
   const cancel = () => {
     if (!worker || settled || !jobId) return;
     try { worker.postMessage({ type: 'cancel', jobId }); } catch (_e) { /* swallow */ }
+    if (!cancelTimer) {
+      cancelTimer = setTimeout(() => cancelAfterDeadline(), 2000);
+      cancelTimer.unref();
+    }
   };
 
-  return { promise, cancel };
+  return { promise, closed, cancel };
 }
 
 // 单测注入桩 worker 脚本（传 null 还原默认生产 worker entry）。

@@ -1,0 +1,1498 @@
+{
+  "baseline": "18b82b4328cf5e00c1b2549d373a5b2f2677215c",
+  "platform": "darwin",
+  "electron": "36.9.5",
+  "chromium": "136.0.7103.177",
+  "styles": [
+    "./src/fonts.css",
+    "./src/styles-gemini.css",
+    "./src/styles-gemini-extra.css",
+    "./src/styles-vcc-financial-op.css",
+    "./src/styles-biz-op-v327.css",
+    "./src/styles-dark-mode.css",
+    "./src/styles-dark-mode-settings.css"
+  ],
+  "cases": [
+    {
+      "name": "baseline-confirm-long",
+      "proposal": false,
+      "viewport": {
+        "width": 1080,
+        "height": 760,
+        "dpr": 2
+      },
+      "card": {
+        "x": 330,
+        "y": 28,
+        "width": 420,
+        "height": 704,
+        "right": 750,
+        "bottom": 732
+      },
+      "body": {
+        "x": 331,
+        "y": 29,
+        "width": 418,
+        "height": 7015,
+        "right": 749,
+        "bottom": 7044
+      },
+      "footer": {
+        "x": 331,
+        "y": 7044,
+        "width": 418,
+        "height": 75,
+        "right": 749,
+        "bottom": 7119
+      },
+      "scroll": {
+        "height": 7015,
+        "client": 7015,
+        "top": 0,
+        "overflowY": "visible"
+      },
+      "last": {
+        "x": 419,
+        "y": 6967.25,
+        "width": 283.65625,
+        "height": 67.5,
+        "right": 702.65625,
+        "bottom": 7034.75
+      },
+      "footerShift": 0,
+      "buttons": [
+        {
+          "text": "删除错误数据并重跑",
+          "rect": {
+            "x": 368.5,
+            "y": 7061,
+            "width": 151,
+            "height": 36,
+            "right": 519.5,
+            "bottom": 7097
+          },
+          "hit": false
+        },
+        {
+          "text": "导出错误数据",
+          "rect": {
+            "x": 529.5,
+            "y": 7061,
+            "width": 112,
+            "height": 36,
+            "right": 641.5,
+            "bottom": 7097
+          },
+          "hit": false
+        },
+        {
+          "text": "关闭",
+          "rect": {
+            "x": 651.5,
+            "y": 7061,
+            "width": 60,
+            "height": 36,
+            "right": 711.5,
+            "bottom": 7097
+          },
+          "hit": false
+        }
+      ],
+      "initial": {
+        "tag": "BUTTON",
+        "className": "danger-btn small",
+        "action": "confirm"
+      },
+      "afterShiftTab": {
+        "tag": "BUTTON",
+        "className": "secondary-btn small",
+        "action": "cancel"
+      },
+      "bodyTabIndex": -1,
+      "bodyRole": null,
+      "logs": 0,
+      "calls": {
+        "logs": 0,
+        "confirm": 0,
+        "middle": 0,
+        "cancel": 0,
+        "repair": 0,
+        "export": 0
+      },
+      "errors": [],
+      "visible": false
+    },
+    {
+      "name": "proposal-confirm-long",
+      "proposal": true,
+      "viewport": {
+        "width": 1080,
+        "height": 760,
+        "dpr": 2
+      },
+      "card": {
+        "x": 330,
+        "y": 28,
+        "width": 420,
+        "height": 704,
+        "right": 750,
+        "bottom": 732
+      },
+      "body": {
+        "x": 331,
+        "y": 29,
+        "width": 418,
+        "height": 627,
+        "right": 749,
+        "bottom": 656
+      },
+      "footer": {
+        "x": 331,
+        "y": 656,
+        "width": 418,
+        "height": 75,
+        "right": 749,
+        "bottom": 731
+      },
+      "scroll": {
+        "height": 7007,
+        "client": 627,
+        "top": 6380,
+        "overflowY": "auto"
+      },
+      "last": {
+        "x": 419,
+        "y": 587.25,
+        "width": 283.65625,
+        "height": 67.5,
+        "right": 702.65625,
+        "bottom": 654.75
+      },
+      "footerShift": 0,
+      "buttons": [
+        {
+          "text": "删除错误数据并重跑",
+          "rect": {
+            "x": 368.5,
+            "y": 673,
+            "width": 151,
+            "height": 36,
+            "right": 519.5,
+            "bottom": 709
+          },
+          "hit": true
+        },
+        {
+          "text": "导出错误数据",
+          "rect": {
+            "x": 529.5,
+            "y": 673,
+            "width": 112,
+            "height": 36,
+            "right": 641.5,
+            "bottom": 709
+          },
+          "hit": true
+        },
+        {
+          "text": "关闭",
+          "rect": {
+            "x": 651.5,
+            "y": 673,
+            "width": 60,
+            "height": 36,
+            "right": 711.5,
+            "bottom": 709
+          },
+          "hit": true
+        }
+      ],
+      "initial": {
+        "tag": "BUTTON",
+        "className": "danger-btn small",
+        "action": "confirm"
+      },
+      "afterShiftTab": {
+        "tag": "DIV",
+        "className": "alert-body",
+        "action": null
+      },
+      "bodyTabIndex": 0,
+      "bodyRole": "region",
+      "logs": 0,
+      "calls": {
+        "logs": 0,
+        "confirm": 0,
+        "middle": 0,
+        "cancel": 0,
+        "repair": 0,
+        "export": 0
+      },
+      "errors": [],
+      "visible": true
+    },
+    {
+      "name": "baseline-alert-long",
+      "proposal": false,
+      "viewport": {
+        "width": 1080,
+        "height": 760,
+        "dpr": 2
+      },
+      "card": {
+        "x": 330,
+        "y": 28,
+        "width": 420,
+        "height": 704,
+        "right": 750,
+        "bottom": 732
+      },
+      "body": {
+        "x": 331,
+        "y": 29,
+        "width": 418,
+        "height": 7015,
+        "right": 749,
+        "bottom": 7044
+      },
+      "footer": {
+        "x": 331,
+        "y": 7044,
+        "width": 418,
+        "height": 75,
+        "right": 749,
+        "bottom": 7119
+      },
+      "scroll": {
+        "height": 7015,
+        "client": 7015,
+        "top": 0,
+        "overflowY": "visible"
+      },
+      "last": {
+        "x": 419,
+        "y": 6967.25,
+        "width": 283.65625,
+        "height": 67.5,
+        "right": 702.65625,
+        "bottom": 7034.75
+      },
+      "footerShift": 0,
+      "buttons": [
+        {
+          "text": "确认",
+          "rect": {
+            "x": 510,
+            "y": 7061,
+            "width": 60,
+            "height": 36,
+            "right": 570,
+            "bottom": 7097
+          },
+          "hit": false
+        }
+      ],
+      "initial": {
+        "tag": "BUTTON",
+        "className": "primary-btn small",
+        "action": null
+      },
+      "afterShiftTab": {
+        "tag": "BUTTON",
+        "className": "primary-btn small",
+        "action": null
+      },
+      "bodyTabIndex": -1,
+      "bodyRole": null,
+      "logs": 1,
+      "calls": {
+        "logs": 1,
+        "confirm": 0,
+        "middle": 0,
+        "cancel": 0,
+        "repair": 0,
+        "export": 0
+      },
+      "errors": [],
+      "visible": false
+    },
+    {
+      "name": "proposal-alert-long",
+      "proposal": true,
+      "viewport": {
+        "width": 1080,
+        "height": 760,
+        "dpr": 2
+      },
+      "card": {
+        "x": 330,
+        "y": 28,
+        "width": 420,
+        "height": 704,
+        "right": 750,
+        "bottom": 732
+      },
+      "body": {
+        "x": 331,
+        "y": 29,
+        "width": 418,
+        "height": 627,
+        "right": 749,
+        "bottom": 656
+      },
+      "footer": {
+        "x": 331,
+        "y": 656,
+        "width": 418,
+        "height": 75,
+        "right": 749,
+        "bottom": 731
+      },
+      "scroll": {
+        "height": 7007,
+        "client": 627,
+        "top": 6380,
+        "overflowY": "auto"
+      },
+      "last": {
+        "x": 419,
+        "y": 587.25,
+        "width": 283.65625,
+        "height": 67.5,
+        "right": 702.65625,
+        "bottom": 654.75
+      },
+      "footerShift": 0,
+      "buttons": [
+        {
+          "text": "确认",
+          "rect": {
+            "x": 510,
+            "y": 673,
+            "width": 60,
+            "height": 36,
+            "right": 570,
+            "bottom": 709
+          },
+          "hit": true
+        }
+      ],
+      "initial": {
+        "tag": "BUTTON",
+        "className": "primary-btn small",
+        "action": null
+      },
+      "afterShiftTab": {
+        "tag": "DIV",
+        "className": "alert-body",
+        "action": null
+      },
+      "bodyTabIndex": 0,
+      "bodyRole": "region",
+      "logs": 1,
+      "calls": {
+        "logs": 1,
+        "confirm": 0,
+        "middle": 0,
+        "cancel": 0,
+        "repair": 0,
+        "export": 0
+      },
+      "errors": [],
+      "visible": true
+    },
+    {
+      "name": "baseline-short",
+      "proposal": false,
+      "viewport": {
+        "width": 1080,
+        "height": 760,
+        "dpr": 2
+      },
+      "card": {
+        "x": 330,
+        "y": 301.5,
+        "width": 420,
+        "height": 157,
+        "right": 750,
+        "bottom": 458.5
+      },
+      "body": {
+        "x": 331,
+        "y": 302.5,
+        "width": 418,
+        "height": 80,
+        "right": 749,
+        "bottom": 382.5
+      },
+      "footer": {
+        "x": 331,
+        "y": 382.5,
+        "width": 418,
+        "height": 75,
+        "right": 749,
+        "bottom": 457.5
+      },
+      "scroll": {
+        "height": 80,
+        "client": 80,
+        "top": 0,
+        "overflowY": "visible"
+      },
+      "last": null,
+      "footerShift": 0,
+      "buttons": [
+        {
+          "text": "删除错误数据并重跑",
+          "rect": {
+            "x": 368.5,
+            "y": 399.5,
+            "width": 151,
+            "height": 36,
+            "right": 519.5,
+            "bottom": 435.5
+          },
+          "hit": true
+        },
+        {
+          "text": "导出错误数据",
+          "rect": {
+            "x": 529.5,
+            "y": 399.5,
+            "width": 112,
+            "height": 36,
+            "right": 641.5,
+            "bottom": 435.5
+          },
+          "hit": true
+        },
+        {
+          "text": "关闭",
+          "rect": {
+            "x": 651.5,
+            "y": 399.5,
+            "width": 60,
+            "height": 36,
+            "right": 711.5,
+            "bottom": 435.5
+          },
+          "hit": true
+        }
+      ],
+      "initial": {
+        "tag": "BUTTON",
+        "className": "danger-btn small",
+        "action": "confirm"
+      },
+      "afterShiftTab": {
+        "tag": "BUTTON",
+        "className": "secondary-btn small",
+        "action": "cancel"
+      },
+      "bodyTabIndex": -1,
+      "bodyRole": null,
+      "logs": 0,
+      "calls": {
+        "logs": 0,
+        "confirm": 0,
+        "middle": 0,
+        "cancel": 0,
+        "repair": 0,
+        "export": 0
+      },
+      "errors": [],
+      "visible": true
+    },
+    {
+      "name": "proposal-short",
+      "proposal": true,
+      "viewport": {
+        "width": 1080,
+        "height": 760,
+        "dpr": 2
+      },
+      "card": {
+        "x": 330,
+        "y": 301.5,
+        "width": 420,
+        "height": 157,
+        "right": 750,
+        "bottom": 458.5
+      },
+      "body": {
+        "x": 331,
+        "y": 302.5,
+        "width": 418,
+        "height": 80,
+        "right": 749,
+        "bottom": 382.5
+      },
+      "footer": {
+        "x": 331,
+        "y": 382.5,
+        "width": 418,
+        "height": 75,
+        "right": 749,
+        "bottom": 457.5
+      },
+      "scroll": {
+        "height": 80,
+        "client": 80,
+        "top": 0,
+        "overflowY": "auto"
+      },
+      "last": null,
+      "footerShift": 0,
+      "buttons": [
+        {
+          "text": "删除错误数据并重跑",
+          "rect": {
+            "x": 368.5,
+            "y": 399.5,
+            "width": 151,
+            "height": 36,
+            "right": 519.5,
+            "bottom": 435.5
+          },
+          "hit": true
+        },
+        {
+          "text": "导出错误数据",
+          "rect": {
+            "x": 529.5,
+            "y": 399.5,
+            "width": 112,
+            "height": 36,
+            "right": 641.5,
+            "bottom": 435.5
+          },
+          "hit": true
+        },
+        {
+          "text": "关闭",
+          "rect": {
+            "x": 651.5,
+            "y": 399.5,
+            "width": 60,
+            "height": 36,
+            "right": 711.5,
+            "bottom": 435.5
+          },
+          "hit": true
+        }
+      ],
+      "initial": {
+        "tag": "BUTTON",
+        "className": "danger-btn small",
+        "action": "confirm"
+      },
+      "afterShiftTab": {
+        "tag": "DIV",
+        "className": "alert-body",
+        "action": null
+      },
+      "bodyTabIndex": 0,
+      "bodyRole": "region",
+      "logs": 0,
+      "calls": {
+        "logs": 0,
+        "confirm": 0,
+        "middle": 0,
+        "cancel": 0,
+        "repair": 0,
+        "export": 0
+      },
+      "errors": [],
+      "visible": true
+    },
+    {
+      "name": "proposal-compact",
+      "proposal": true,
+      "viewport": {
+        "width": 800,
+        "height": 480,
+        "dpr": 2
+      },
+      "card": {
+        "x": 190,
+        "y": 28,
+        "width": 420,
+        "height": 424,
+        "right": 610,
+        "bottom": 452
+      },
+      "body": {
+        "x": 191,
+        "y": 29,
+        "width": 418,
+        "height": 347,
+        "right": 609,
+        "bottom": 376
+      },
+      "footer": {
+        "x": 191,
+        "y": 376,
+        "width": 418,
+        "height": 75,
+        "right": 609,
+        "bottom": 451
+      },
+      "scroll": {
+        "height": 7007,
+        "client": 347,
+        "top": 6660,
+        "overflowY": "auto"
+      },
+      "last": {
+        "x": 279,
+        "y": 307.25,
+        "width": 283.65625,
+        "height": 67.5,
+        "right": 562.65625,
+        "bottom": 374.75
+      },
+      "footerShift": 0,
+      "buttons": [
+        {
+          "text": "删除错误数据并重跑",
+          "rect": {
+            "x": 228.5,
+            "y": 393,
+            "width": 151,
+            "height": 36,
+            "right": 379.5,
+            "bottom": 429
+          },
+          "hit": true
+        },
+        {
+          "text": "导出错误数据",
+          "rect": {
+            "x": 389.5,
+            "y": 393,
+            "width": 112,
+            "height": 36,
+            "right": 501.5,
+            "bottom": 429
+          },
+          "hit": true
+        },
+        {
+          "text": "关闭",
+          "rect": {
+            "x": 511.5,
+            "y": 393,
+            "width": 60,
+            "height": 36,
+            "right": 571.5,
+            "bottom": 429
+          },
+          "hit": true
+        }
+      ],
+      "initial": {
+        "tag": "BUTTON",
+        "className": "danger-btn small",
+        "action": "confirm"
+      },
+      "afterShiftTab": {
+        "tag": "DIV",
+        "className": "alert-body",
+        "action": null
+      },
+      "bodyTabIndex": 0,
+      "bodyRole": "region",
+      "logs": 0,
+      "calls": {
+        "logs": 0,
+        "confirm": 0,
+        "middle": 0,
+        "cancel": 0,
+        "repair": 0,
+        "export": 0
+      },
+      "errors": [],
+      "visible": true
+    },
+    {
+      "name": "proposal-content1080x732-zoom150",
+      "proposal": true,
+      "viewport": {
+        "width": 720,
+        "height": 488,
+        "dpr": 3
+      },
+      "card": {
+        "x": 150,
+        "y": 28,
+        "width": 420,
+        "height": 432,
+        "right": 570,
+        "bottom": 460
+      },
+      "body": {
+        "x": 151,
+        "y": 29,
+        "width": 418,
+        "height": 355,
+        "right": 569,
+        "bottom": 384
+      },
+      "footer": {
+        "x": 151,
+        "y": 384,
+        "width": 418,
+        "height": 75,
+        "right": 569,
+        "bottom": 459
+      },
+      "scroll": {
+        "height": 7007,
+        "client": 355,
+        "top": 6652,
+        "overflowY": "auto"
+      },
+      "last": {
+        "x": 239,
+        "y": 315.25,
+        "width": 283.65106201171875,
+        "height": 67.5,
+        "right": 522.6510620117188,
+        "bottom": 382.75
+      },
+      "footerShift": 0,
+      "buttons": [
+        {
+          "text": "删除错误数据并重跑",
+          "rect": {
+            "x": 188.5,
+            "y": 401,
+            "width": 151,
+            "height": 36,
+            "right": 339.5,
+            "bottom": 437
+          },
+          "hit": true
+        },
+        {
+          "text": "导出错误数据",
+          "rect": {
+            "x": 349.5,
+            "y": 401,
+            "width": 112,
+            "height": 36,
+            "right": 461.5,
+            "bottom": 437
+          },
+          "hit": true
+        },
+        {
+          "text": "关闭",
+          "rect": {
+            "x": 471.5,
+            "y": 401,
+            "width": 60,
+            "height": 36,
+            "right": 531.5,
+            "bottom": 437
+          },
+          "hit": true
+        }
+      ],
+      "initial": {
+        "tag": "BUTTON",
+        "className": "danger-btn small",
+        "action": "confirm"
+      },
+      "afterShiftTab": {
+        "tag": "DIV",
+        "className": "alert-body",
+        "action": null
+      },
+      "bodyTabIndex": 0,
+      "bodyRole": "region",
+      "logs": 0,
+      "calls": {
+        "logs": 0,
+        "confirm": 0,
+        "middle": 0,
+        "cancel": 0,
+        "repair": 0,
+        "export": 0
+      },
+      "errors": [],
+      "visible": true
+    },
+    {
+      "name": "proposal-dark",
+      "proposal": true,
+      "viewport": {
+        "width": 1080,
+        "height": 760,
+        "dpr": 2
+      },
+      "card": {
+        "x": 330,
+        "y": 28,
+        "width": 420,
+        "height": 704,
+        "right": 750,
+        "bottom": 732
+      },
+      "body": {
+        "x": 331,
+        "y": 29,
+        "width": 418,
+        "height": 627,
+        "right": 749,
+        "bottom": 656
+      },
+      "footer": {
+        "x": 331,
+        "y": 656,
+        "width": 418,
+        "height": 75,
+        "right": 749,
+        "bottom": 731
+      },
+      "scroll": {
+        "height": 7007,
+        "client": 627,
+        "top": 6380,
+        "overflowY": "auto"
+      },
+      "last": {
+        "x": 419,
+        "y": 587.25,
+        "width": 283.65625,
+        "height": 67.5,
+        "right": 702.65625,
+        "bottom": 654.75
+      },
+      "footerShift": 0,
+      "buttons": [
+        {
+          "text": "删除错误数据并重跑",
+          "rect": {
+            "x": 368.5,
+            "y": 673,
+            "width": 151,
+            "height": 36,
+            "right": 519.5,
+            "bottom": 709
+          },
+          "hit": true
+        },
+        {
+          "text": "导出错误数据",
+          "rect": {
+            "x": 529.5,
+            "y": 673,
+            "width": 112,
+            "height": 36,
+            "right": 641.5,
+            "bottom": 709
+          },
+          "hit": true
+        },
+        {
+          "text": "关闭",
+          "rect": {
+            "x": 651.5,
+            "y": 673,
+            "width": 60,
+            "height": 36,
+            "right": 711.5,
+            "bottom": 709
+          },
+          "hit": true
+        }
+      ],
+      "initial": {
+        "tag": "BUTTON",
+        "className": "danger-btn small",
+        "action": "confirm"
+      },
+      "afterShiftTab": {
+        "tag": "DIV",
+        "className": "alert-body",
+        "action": null
+      },
+      "bodyTabIndex": 0,
+      "bodyRole": "region",
+      "logs": 0,
+      "calls": {
+        "logs": 0,
+        "confirm": 0,
+        "middle": 0,
+        "cancel": 0,
+        "repair": 0,
+        "export": 0
+      },
+      "errors": [],
+      "visible": true
+    },
+    {
+      "name": "proposal-old-toolbox-class",
+      "proposal": true,
+      "viewport": {
+        "width": 1080,
+        "height": 760,
+        "dpr": 2
+      },
+      "card": {
+        "x": 330,
+        "y": 28,
+        "width": 420,
+        "height": 704,
+        "right": 750,
+        "bottom": 732
+      },
+      "body": {
+        "x": 331,
+        "y": 29,
+        "width": 418,
+        "height": 627,
+        "right": 749,
+        "bottom": 656
+      },
+      "footer": {
+        "x": 331,
+        "y": 656,
+        "width": 418,
+        "height": 75,
+        "right": 749,
+        "bottom": 731
+      },
+      "scroll": {
+        "height": 7007,
+        "client": 627,
+        "top": 6380,
+        "overflowY": "auto"
+      },
+      "last": {
+        "x": 419,
+        "y": 587.25,
+        "width": 283.65625,
+        "height": 67.5,
+        "right": 702.65625,
+        "bottom": 654.75
+      },
+      "footerShift": 0,
+      "buttons": [
+        {
+          "text": "确认",
+          "rect": {
+            "x": 510,
+            "y": 673,
+            "width": 60,
+            "height": 36,
+            "right": 570,
+            "bottom": 709
+          },
+          "hit": true
+        }
+      ],
+      "initial": {
+        "tag": "BUTTON",
+        "className": "primary-btn small",
+        "action": null
+      },
+      "afterShiftTab": {
+        "tag": "DIV",
+        "className": "alert-body",
+        "action": null
+      },
+      "bodyTabIndex": 0,
+      "bodyRole": "region",
+      "logs": 1,
+      "calls": {
+        "logs": 1,
+        "confirm": 0,
+        "middle": 0,
+        "cancel": 0,
+        "repair": 0,
+        "export": 0
+      },
+      "errors": [],
+      "visible": true
+    },
+    {
+      "name": "proposal-old-big-account-class",
+      "proposal": true,
+      "viewport": {
+        "width": 1080,
+        "height": 760,
+        "dpr": 2
+      },
+      "card": {
+        "x": 330,
+        "y": 28,
+        "width": 420,
+        "height": 704,
+        "right": 750,
+        "bottom": 732
+      },
+      "body": {
+        "x": 331,
+        "y": 29,
+        "width": 418,
+        "height": 627,
+        "right": 749,
+        "bottom": 656
+      },
+      "footer": {
+        "x": 331,
+        "y": 656,
+        "width": 418,
+        "height": 75,
+        "right": 749,
+        "bottom": 731
+      },
+      "scroll": {
+        "height": 7007,
+        "client": 627,
+        "top": 6380,
+        "overflowY": "auto"
+      },
+      "last": {
+        "x": 419,
+        "y": 587.25,
+        "width": 283.65625,
+        "height": 67.5,
+        "right": 702.65625,
+        "bottom": 654.75
+      },
+      "footerShift": 0,
+      "buttons": [
+        {
+          "text": "确认",
+          "rect": {
+            "x": 510,
+            "y": 673,
+            "width": 60,
+            "height": 36,
+            "right": 570,
+            "bottom": 709
+          },
+          "hit": true
+        }
+      ],
+      "initial": {
+        "tag": "BUTTON",
+        "className": "primary-btn small",
+        "action": null
+      },
+      "afterShiftTab": {
+        "tag": "DIV",
+        "className": "alert-body",
+        "action": null
+      },
+      "bodyTabIndex": 0,
+      "bodyRole": "region",
+      "logs": 1,
+      "calls": {
+        "logs": 1,
+        "confirm": 0,
+        "middle": 0,
+        "cancel": 0,
+        "repair": 0,
+        "export": 0
+      },
+      "errors": [],
+      "visible": true
+    },
+    {
+      "name": "proposal-long-label",
+      "proposal": true,
+      "viewport": {
+        "width": 1080,
+        "height": 760,
+        "dpr": 2
+      },
+      "card": {
+        "x": 330,
+        "y": 28,
+        "width": 420,
+        "height": 704,
+        "right": 750,
+        "bottom": 732
+      },
+      "body": {
+        "x": 331,
+        "y": 29,
+        "width": 418,
+        "height": 578,
+        "right": 749,
+        "bottom": 607
+      },
+      "footer": {
+        "x": 331,
+        "y": 607,
+        "width": 418,
+        "height": 124,
+        "right": 749,
+        "bottom": 731
+      },
+      "scroll": {
+        "height": 7007,
+        "client": 578,
+        "top": 6429,
+        "overflowY": "auto"
+      },
+      "last": {
+        "x": 419,
+        "y": 538.25,
+        "width": 283.65625,
+        "height": 67.5,
+        "right": 702.65625,
+        "bottom": 605.75
+      },
+      "footerShift": 0,
+      "buttons": [
+        {
+          "text": "长操作文案长操作文案长操作文案长操作文案长操作文案长操作文案长操作文案长操作文案长操作文案长操作文案",
+          "rect": {
+            "x": 359,
+            "y": 624,
+            "width": 362,
+            "height": 39,
+            "right": 721,
+            "bottom": 663
+          },
+          "hit": true
+        },
+        {
+          "text": "导出错误数据",
+          "rect": {
+            "x": 449,
+            "y": 673,
+            "width": 112,
+            "height": 36,
+            "right": 561,
+            "bottom": 709
+          },
+          "hit": true
+        },
+        {
+          "text": "关闭",
+          "rect": {
+            "x": 571,
+            "y": 673,
+            "width": 60,
+            "height": 36,
+            "right": 631,
+            "bottom": 709
+          },
+          "hit": true
+        }
+      ],
+      "initial": {
+        "tag": "BUTTON",
+        "className": "danger-btn small",
+        "action": "confirm"
+      },
+      "afterShiftTab": {
+        "tag": "DIV",
+        "className": "alert-body",
+        "action": null
+      },
+      "bodyTabIndex": 0,
+      "bodyRole": "region",
+      "logs": 0,
+      "calls": {
+        "logs": 0,
+        "confirm": 0,
+        "middle": 0,
+        "cancel": 0,
+        "repair": 0,
+        "export": 0
+      },
+      "errors": [],
+      "visible": true
+    },
+    {
+      "name": "prefund-real-factory-baseline",
+      "proposal": false,
+      "viewport": {
+        "width": 1080,
+        "height": 760,
+        "dpr": 2
+      },
+      "card": {
+        "x": 330,
+        "y": 28,
+        "width": 420,
+        "height": 704,
+        "right": 750,
+        "bottom": 732
+      },
+      "body": {
+        "x": 331,
+        "y": 29,
+        "width": 418,
+        "height": 4829.5,
+        "right": 749,
+        "bottom": 4858.5
+      },
+      "footer": {
+        "x": 331,
+        "y": 4858.5,
+        "width": 418,
+        "height": 75,
+        "right": 749,
+        "bottom": 4933.5
+      },
+      "scroll": {
+        "height": 4830,
+        "client": 4830,
+        "top": 0,
+        "overflowY": "visible"
+      },
+      "last": null,
+      "footerShift": 0,
+      "buttons": [
+        {
+          "text": "删除错误数据并重跑",
+          "rect": {
+            "x": 368.5,
+            "y": 4875.5,
+            "width": 151,
+            "height": 36,
+            "right": 519.5,
+            "bottom": 4911.5
+          },
+          "hit": false
+        },
+        {
+          "text": "导出错误数据",
+          "rect": {
+            "x": 529.5,
+            "y": 4875.5,
+            "width": 112,
+            "height": 36,
+            "right": 641.5,
+            "bottom": 4911.5
+          },
+          "hit": false
+        },
+        {
+          "text": "关闭",
+          "rect": {
+            "x": 651.5,
+            "y": 4875.5,
+            "width": 60,
+            "height": 36,
+            "right": 711.5,
+            "bottom": 4911.5
+          },
+          "hit": false
+        }
+      ],
+      "initial": {
+        "tag": "BUTTON",
+        "className": "danger-btn small",
+        "action": "confirm"
+      },
+      "afterShiftTab": {
+        "tag": "BUTTON",
+        "className": "secondary-btn small",
+        "action": "cancel"
+      },
+      "bodyTabIndex": -1,
+      "bodyRole": null,
+      "logs": 0,
+      "calls": {
+        "logs": 0,
+        "confirm": 0,
+        "middle": 0,
+        "cancel": 0,
+        "repair": 0,
+        "export": 0
+      },
+      "errors": [],
+      "visible": false
+    },
+    {
+      "name": "prefund-real-factory-proposal",
+      "proposal": true,
+      "viewport": {
+        "width": 1080,
+        "height": 760,
+        "dpr": 2
+      },
+      "card": {
+        "x": 330,
+        "y": 28,
+        "width": 420,
+        "height": 704,
+        "right": 750,
+        "bottom": 732
+      },
+      "body": {
+        "x": 331,
+        "y": 29,
+        "width": 418,
+        "height": 627,
+        "right": 749,
+        "bottom": 656
+      },
+      "footer": {
+        "x": 331,
+        "y": 656,
+        "width": 418,
+        "height": 75,
+        "right": 749,
+        "bottom": 731
+      },
+      "scroll": {
+        "height": 4822,
+        "client": 627,
+        "top": 4194.5,
+        "overflowY": "auto"
+      },
+      "last": null,
+      "footerShift": 0,
+      "buttons": [
+        {
+          "text": "删除错误数据并重跑",
+          "rect": {
+            "x": 368.5,
+            "y": 673,
+            "width": 151,
+            "height": 36,
+            "right": 519.5,
+            "bottom": 709
+          },
+          "hit": true
+        },
+        {
+          "text": "导出错误数据",
+          "rect": {
+            "x": 529.5,
+            "y": 673,
+            "width": 112,
+            "height": 36,
+            "right": 641.5,
+            "bottom": 709
+          },
+          "hit": true
+        },
+        {
+          "text": "关闭",
+          "rect": {
+            "x": 651.5,
+            "y": 673,
+            "width": 60,
+            "height": 36,
+            "right": 711.5,
+            "bottom": 709
+          },
+          "hit": true
+        }
+      ],
+      "initial": {
+        "tag": "BUTTON",
+        "className": "danger-btn small",
+        "action": "confirm"
+      },
+      "afterShiftTab": {
+        "tag": "DIV",
+        "className": "alert-body",
+        "action": null
+      },
+      "bodyTabIndex": 0,
+      "bodyRole": "region",
+      "logs": 0,
+      "calls": {
+        "logs": 0,
+        "confirm": 0,
+        "middle": 0,
+        "cancel": 0,
+        "repair": 0,
+        "export": 0
+      },
+      "errors": [],
+      "visible": true
+    },
+    {
+      "name": "position-independent-save-error-proposal-excluded",
+      "proposal": true,
+      "viewport": {
+        "width": 1080,
+        "height": 760,
+        "dpr": 2
+      },
+      "card": {
+        "x": 330,
+        "y": 28,
+        "width": 420,
+        "height": 704,
+        "right": 750,
+        "bottom": 732
+      },
+      "body": {
+        "x": 331,
+        "y": 29,
+        "width": 418,
+        "height": 2481.25,
+        "right": 749,
+        "bottom": 2510.25
+      },
+      "footer": {
+        "x": 331,
+        "y": 2510.25,
+        "width": 418,
+        "height": 75,
+        "right": 749,
+        "bottom": 2585.25
+      },
+      "scroll": {
+        "height": 2481,
+        "client": 2481,
+        "top": 0,
+        "overflowY": "visible"
+      },
+      "last": null,
+      "footerShift": 0,
+      "buttons": [
+        {
+          "text": "确认",
+          "rect": {
+            "x": 510,
+            "y": 2527.25,
+            "width": 60,
+            "height": 36,
+            "right": 570,
+            "bottom": 2563.25
+          },
+          "hit": false
+        }
+      ],
+      "initial": {
+        "tag": "BUTTON",
+        "className": "primary-btn small",
+        "action": null
+      },
+      "afterShiftTab": {
+        "tag": "BUTTON",
+        "className": "primary-btn small",
+        "action": null
+      },
+      "bodyTabIndex": -1,
+      "bodyRole": null,
+      "logs": 0,
+      "calls": {
+        "logs": 0,
+        "confirm": 0,
+        "middle": 0,
+        "cancel": 0,
+        "repair": 0,
+        "export": 0
+      },
+      "errors": [],
+      "visible": false
+    }
+  ],
+  "assertions": "PASS：15 个受控案例符合预期，包括基线缺陷和范围外风险的复现；不代表功能已实施或正式验收通过。"
+}

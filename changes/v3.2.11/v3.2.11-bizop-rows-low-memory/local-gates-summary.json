@@ -1,0 +1,753 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-30T04:08:40.008Z",
+  "branch": "v3.2.11-bizop-rows-low-memory",
+  "head": "18b82b4328cf5e00c1b2549d373a5b2f2677215c",
+  "scope": "local-implementation-with-round2-concurrency-fix-and-fresh-full-gate",
+  "sourceIdentity": {
+    "sourceTreeSha256": "bb537fa243d6f2c77f0e29a28829be1485d4bf53b4d79f3674165e874117b884",
+    "dependencyLockSha256": "6360f29a82d5f4c1d1003d9e61e6a4db678f398aab5043c23c46371e2f215e65",
+    "appVersion": "3.2.10",
+    "platform": "darwin",
+    "arch": "arm64",
+    "nodeVersion": "25.8.0",
+    "electronVersion": null
+  },
+  "committed": false,
+  "checks": {
+    "releaseCheck": {
+      "command": "npm run release-check",
+      "exitCode": 0,
+      "status": "PASS",
+      "log": {
+        "path": "logs/low-memory/20260930-r2-release-check-2.log",
+        "bytes": 990697,
+        "sha256": "0eb3d3ee1e2d0582cbe94059eeeb83d09d33621c9ccf48626386b3f82af7cec4"
+      }
+    },
+    "lint": {
+      "status": "PASS"
+    },
+    "architecture": {
+      "status": "PASS",
+      "parsedFiles": 779,
+      "totalFiles": 779,
+      "activeBoundaries": 31,
+      "unresolvedLocations": 2,
+      "dynamicLocations": 33,
+      "historyCommits": 28
+    },
+    "smoke": {
+      "status": "PASS"
+    },
+    "unit": {
+      "total": 9516,
+      "passed": 9512,
+      "failed": 0,
+      "skipped": 4,
+      "cancelled": 0,
+      "durationMs": 324478.764125,
+      "files": 590,
+      "skipReasons": [
+        "﹣ Windows CI 真实 PowerShell snapshot→token cleanup 语义 (0.062708ms) # SKIP",
+        "﹣ Windows PowerShell 采集器使用原始 CIM 枚举并完整遍历真实文件祖先 (0.327209ms) # 需要 Windows PowerShell；受控 Storage 对象不代替真实 CIM 查询",
+        "﹣ Windows packaged canary 对报告前已退出进程快速返回专用 safe code (0.053541ms) # SKIP",
+        "﹣ Windows packaged canary 的 Setup 失败诊断仅返回固定退出/落地/身份枚举 (0.037833ms) # SKIP"
+      ]
+    },
+    "integration": {
+      "status": "PASS",
+      "scriptsPassed": 73,
+      "scriptsTotal": 73,
+      "reportedAssertionsPassed": 2942,
+      "reportedAssertionsTotal": 2942,
+      "scriptsWithoutCounts": [
+        "v2.1.12-beta-multiworker-nested"
+      ],
+      "elapsedMs": 379269,
+      "scripts": [
+        {
+          "name": "acquiring-bill-currency-idle-cleanup",
+          "passed": 38,
+          "total": 38,
+          "elapsedMs": 787
+        },
+        {
+          "name": "acquiring-bill-currency-n4-migration",
+          "passed": 128,
+          "total": 128,
+          "elapsedMs": 497
+        },
+        {
+          "name": "acquiring-engine-migration",
+          "passed": 45,
+          "total": 45,
+          "elapsedMs": 4346
+        },
+        {
+          "name": "acquiring-index-slim-v2",
+          "passed": 22,
+          "total": 22,
+          "elapsedMs": 179
+        },
+        {
+          "name": "acquiring-side-db-parity",
+          "passed": 19,
+          "total": 19,
+          "elapsedMs": 526
+        },
+        {
+          "name": "acquiring-worker-boundary",
+          "passed": 14,
+          "total": 14,
+          "elapsedMs": 516
+        },
+        {
+          "name": "application-recovery-governance",
+          "passed": 4,
+          "total": 4,
+          "elapsedMs": 798
+        },
+        {
+          "name": "archive-biz-op-auto-report-retention",
+          "passed": 6,
+          "total": 6,
+          "elapsedMs": 7453
+        },
+        {
+          "name": "archive-center-module-retention",
+          "passed": 11,
+          "total": 11,
+          "elapsedMs": 1560
+        },
+        {
+          "name": "archive-center-permanent-delete",
+          "passed": 52,
+          "total": 52,
+          "elapsedMs": 29120
+        },
+        {
+          "name": "background-execution-pure-compute-canary",
+          "passed": 9,
+          "total": 9,
+          "elapsedMs": 99
+        },
+        {
+          "name": "background-execution-recovery-canary",
+          "passed": 9,
+          "total": 9,
+          "elapsedMs": 113
+        },
+        {
+          "name": "background-execution-recovery-control",
+          "passed": 27,
+          "total": 27,
+          "elapsedMs": 278
+        },
+        {
+          "name": "bank-bu-background-dual-parser",
+          "passed": 9,
+          "total": 9,
+          "elapsedMs": 255
+        },
+        {
+          "name": "bank-bu-background-single-jobs",
+          "passed": 21,
+          "total": 21,
+          "elapsedMs": 491
+        },
+        {
+          "name": "bank-bu-recon-side-db-parity",
+          "passed": 17,
+          "total": 17,
+          "elapsedMs": 282
+        },
+        {
+          "name": "bank-statement-hit-scenario-report",
+          "passed": 49,
+          "total": 49,
+          "elapsedMs": 200
+        },
+        {
+          "name": "bank-statement-many-to-many-review-sheet",
+          "passed": 33,
+          "total": 33,
+          "elapsedMs": 199
+        },
+        {
+          "name": "bank-statement-universal-import-routing",
+          "passed": 20,
+          "total": 20,
+          "elapsedMs": 259
+        },
+        {
+          "name": "big-table-import-engine",
+          "passed": 19,
+          "total": 19,
+          "elapsedMs": 7394
+        },
+        {
+          "name": "biz-op-auto-error-report",
+          "passed": 12,
+          "total": 12,
+          "elapsedMs": 10172
+        },
+        {
+          "name": "biz-op-query-boundary",
+          "passed": 9,
+          "total": 9,
+          "elapsedMs": 7739
+        },
+        {
+          "name": "biz-op-recon-side-db-parity",
+          "passed": 16,
+          "total": 16,
+          "elapsedMs": 302
+        },
+        {
+          "name": "bizop-flow-engine-migration",
+          "passed": 73,
+          "total": 73,
+          "elapsedMs": 4961
+        },
+        {
+          "name": "dark-mode-schedule-settings",
+          "passed": 6,
+          "total": 6,
+          "elapsedMs": 188
+        },
+        {
+          "name": "duplicate-inbound-match-end-to-end",
+          "passed": 31,
+          "total": 31,
+          "elapsedMs": 336
+        },
+        {
+          "name": "execution-descriptor-governance",
+          "passed": 4,
+          "total": 4,
+          "elapsedMs": 870
+        },
+        {
+          "name": "fund-transfer-recon-account-mapping",
+          "passed": 19,
+          "total": 19,
+          "elapsedMs": 180
+        },
+        {
+          "name": "gateway-channel-filter-equivalence",
+          "passed": 23,
+          "total": 23,
+          "elapsedMs": 182
+        },
+        {
+          "name": "linked-fx-open7-stale-hit-e2e",
+          "passed": 27,
+          "total": 27,
+          "elapsedMs": 172
+        },
+        {
+          "name": "linked-table-delete-by-range-tablekey",
+          "passed": 73,
+          "total": 73,
+          "elapsedMs": 177
+        },
+        {
+          "name": "new-account-balance-statement",
+          "passed": 36,
+          "total": 36,
+          "elapsedMs": 219
+        },
+        {
+          "name": "pending-data-reconciliation",
+          "passed": 33,
+          "total": 33,
+          "elapsedMs": 48
+        },
+        {
+          "name": "pending-engine-migration",
+          "passed": 57,
+          "total": 57,
+          "elapsedMs": 4904
+        },
+        {
+          "name": "pending-removal-reconcile",
+          "passed": 62,
+          "total": 62,
+          "elapsedMs": 195
+        },
+        {
+          "name": "position-reconciliation-side-db-parity",
+          "passed": 38,
+          "total": 38,
+          "elapsedMs": 253
+        },
+        {
+          "name": "position-startup-task-recovery",
+          "passed": 3,
+          "total": 3,
+          "elapsedMs": 2267
+        },
+        {
+          "name": "pre-fund-reconciliation-output-contract",
+          "passed": 15,
+          "total": 15,
+          "elapsedMs": 270
+        },
+        {
+          "name": "pre-fund-reconciliation-side-db-parity",
+          "passed": 69,
+          "total": 69,
+          "elapsedMs": 308
+        },
+        {
+          "name": "publication-legacy-concurrency",
+          "passed": 2,
+          "total": 2,
+          "elapsedMs": 2759
+        },
+        {
+          "name": "publication-memory-compatibility",
+          "passed": 18,
+          "total": 18,
+          "elapsedMs": 671
+        },
+        {
+          "name": "refund-backfill-yellow-fill-e2e",
+          "passed": 258,
+          "total": 258,
+          "elapsedMs": 195
+        },
+        {
+          "name": "renderer-lifecycle",
+          "passed": 241,
+          "total": 241,
+          "elapsedMs": 20475
+        },
+        {
+          "name": "shared-xlsx-boundary",
+          "passed": 52,
+          "total": 52,
+          "elapsedMs": 3099
+        },
+        {
+          "name": "statement-generation-pipeline",
+          "passed": 45,
+          "total": 45,
+          "elapsedMs": 222
+        },
+        {
+          "name": "task-adapter-recovery",
+          "passed": 4,
+          "total": 4,
+          "elapsedMs": 538
+        },
+        {
+          "name": "toolbox-large-file-stream",
+          "passed": 50,
+          "total": 50,
+          "elapsedMs": 130702
+        },
+        {
+          "name": "toolbox-large-split-multi-sheet",
+          "passed": 31,
+          "total": 31,
+          "elapsedMs": 73473
+        },
+        {
+          "name": "toolbox-low-memory-complete",
+          "passed": 4,
+          "total": 4,
+          "elapsedMs": 12505
+        },
+        {
+          "name": "toolbox-low-memory-foundation",
+          "passed": 4,
+          "total": 4,
+          "elapsedMs": 747
+        },
+        {
+          "name": "toolbox-multi-sheet-merge",
+          "passed": 16,
+          "total": 16,
+          "elapsedMs": 14199
+        },
+        {
+          "name": "toolbox-multi-split-roundtrip",
+          "passed": 17,
+          "total": 17,
+          "elapsedMs": 451
+        },
+        {
+          "name": "toolbox-roundtrip",
+          "passed": 30,
+          "total": 30,
+          "elapsedMs": 167
+        },
+        {
+          "name": "toolbox-row-split-admission",
+          "passed": 2,
+          "total": 2,
+          "elapsedMs": 815
+        },
+        {
+          "name": "toolbox-row-split-archive-delete",
+          "passed": 2,
+          "total": 2,
+          "elapsedMs": 1043
+        },
+        {
+          "name": "toolbox-split-csv-scope",
+          "passed": 4,
+          "total": 4,
+          "elapsedMs": 805
+        },
+        {
+          "name": "v2.1.10-a3-phase1",
+          "passed": 40,
+          "total": 40,
+          "elapsedMs": 2527
+        },
+        {
+          "name": "v2.1.10-a3-phase2",
+          "passed": 56,
+          "total": 56,
+          "elapsedMs": 1833
+        },
+        {
+          "name": "v2.1.10-a4-phase3",
+          "passed": 75,
+          "total": 75,
+          "elapsedMs": 13914
+        },
+        {
+          "name": "v2.1.10-n4-cont-1-phase4",
+          "passed": 33,
+          "total": 33,
+          "elapsedMs": 662
+        },
+        {
+          "name": "v2.1.10-n4-cont-2-phase5",
+          "passed": 43,
+          "total": 43,
+          "elapsedMs": 452
+        },
+        {
+          "name": "v2.1.12-beta-multiworker-nested",
+          "passed": null,
+          "total": null,
+          "elapsedMs": 2765
+        },
+        {
+          "name": "v2.1.9-n5-end-to-end",
+          "passed": 68,
+          "total": 68,
+          "elapsedMs": 215
+        },
+        {
+          "name": "v2.1.9-n5-migration",
+          "passed": 67,
+          "total": 67,
+          "elapsedMs": 189
+        },
+        {
+          "name": "v2.1.9-sr-fix-1-coverage",
+          "passed": 148,
+          "total": 148,
+          "elapsedMs": 236
+        },
+        {
+          "name": "v2.1.9-sr-log-1",
+          "passed": 33,
+          "total": 33,
+          "elapsedMs": 140
+        },
+        {
+          "name": "v3.0.0-linked-streaming-import",
+          "passed": 19,
+          "total": 19,
+          "elapsedMs": 203
+        },
+        {
+          "name": "v3.0.1-linked-gateway-upsert",
+          "passed": 40,
+          "total": 40,
+          "elapsedMs": 209
+        },
+        {
+          "name": "v3.0.4-boc-dispatch-order-fix",
+          "passed": 31,
+          "total": 31,
+          "elapsedMs": 237
+        },
+        {
+          "name": "vcc-financial-op-adjustment-archive-chain",
+          "passed": 226,
+          "total": 226,
+          "elapsedMs": 1190
+        },
+        {
+          "name": "vcc-financial-op-destructive-state-chain",
+          "passed": 77,
+          "total": 77,
+          "elapsedMs": 1381
+        },
+        {
+          "name": "vcc-financial-op-effective-result",
+          "passed": 19,
+          "total": 19,
+          "elapsedMs": 131
+        },
+        {
+          "name": "vcc-financial-op-historical-template-export",
+          "passed": 29,
+          "total": 29,
+          "elapsedMs": 1024
+        }
+      ]
+    },
+    "capacity": {
+      "path": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/local-capacity-probe.json",
+      "bytes": 627542,
+      "sha256": "97ca81f3af555ff478ec6efc14a3afd5e88606ee06ca909d1659c642194c1f82",
+      "status": "PASS",
+      "sourceIdentityMatches": true,
+      "resultsEqual": true,
+      "productionEvidence": false,
+      "injectedAvailableMemory": true,
+      "runs": [
+        {
+          "mode": "normal",
+          "rows": 20000,
+          "phases": 21,
+          "grants": 34,
+          "profiles": [
+            "split-prepare-normal-v1",
+            "rows-generation-normal-v1",
+            "rows-io-normal-v1",
+            "publication-io-normal-v1",
+            "bizop-import-normal-v1",
+            "bizop-compute-normal-v1",
+            "bizop-io-normal-v1",
+            "bizop-export-normal-v1"
+          ]
+        },
+        {
+          "mode": "low",
+          "rows": 20000,
+          "phases": 21,
+          "grants": 34,
+          "profiles": [
+            "split-prepare-low-v1",
+            "rows-generation-low-v1",
+            "rows-io-low-v1",
+            "publication-io-low-v1",
+            "bizop-import-low-v1",
+            "bizop-compute-low-v1",
+            "bizop-io-low-v1",
+            "bizop-export-low-v1"
+          ]
+        }
+      ]
+    },
+    "documents": {
+      "status": "PASS",
+      "documents": 9,
+      "relativeFileLinks": 140,
+      "internalAnchors": 40,
+      "tables": 43,
+      "acceptanceCriteria": 24,
+      "canonicalDocumentIdentities": 4,
+      "errors": []
+    },
+    "diffWhitespace": {
+      "status": "PASS"
+    }
+  },
+  "priorAttempts": [
+    {
+      "status": "FAIL",
+      "log": {
+        "path": "logs/low-memory/20260930-release-check-attempt-1.log",
+        "bytes": 1069529,
+        "sha256": "a766b177ede0fc140e9437793b496060a873ca5da44f5e7d5d4e0356ee21a89e"
+      },
+      "unit": {
+        "total": 9498,
+        "passed": 9488,
+        "failed": 6,
+        "skipped": 4
+      },
+      "reason": "公共依赖方向及新增精确接口/Worker 形态断言需修正；已修复并完成最终复验。"
+    },
+    {
+      "status": "FAIL",
+      "log": {
+        "path": "logs/low-memory/20260930-release-check-attempt-2.log",
+        "bytes": 985099,
+        "sha256": "3379f9f0b4d7910c1505eac7b5913ab683a6385a65a8261da686d04edd524ba4"
+      },
+      "unit": {
+        "total": 9499,
+        "passed": 9495,
+        "failed": 0,
+        "skipped": 4
+      },
+      "integration": {
+        "scriptsTotal": 71,
+        "scriptsPassed": 69,
+        "scriptsFailed": 2
+      },
+      "reason": "两个提取 Main 源码的集成宿主遗漏新增 owner 与窗口 sender；补齐后通过。生产源码未变化。"
+    },
+    {
+      "scope": "round2-first-full-gate",
+      "status": "FAIL",
+      "exitCode": 1,
+      "reason": "ARCH-PLATFORM-CORE: core 直接依赖 Main 活动模块；已改为静态 provider 注入",
+      "sourceIdentity": {
+        "sourceTreeSha256": "73dfd5b36fa39ac8f03e64decebecdeb9a037e89eac701ab23534f32a39b2119",
+        "dependencyLockSha256": "6360f29a82d5f4c1d1003d9e61e6a4db678f398aab5043c23c46371e2f215e65",
+        "appVersion": "3.2.10",
+        "platform": "darwin",
+        "arch": "arm64",
+        "nodeVersion": "25.8.0",
+        "electronVersion": null
+      },
+      "log": {
+        "path": "logs/low-memory/20260930-r2-release-check.log",
+        "bytes": 1866,
+        "sha256": "ff9891e566c9af39a8f6e8b3fd4334fe4b8fe36ea66d8599b1a8cc3a201952b7"
+      }
+    }
+  ],
+  "repairedChecks": [
+    {
+      "path": "logs/low-memory/20260930-rows-admission-repaired.log",
+      "bytes": 267,
+      "sha256": "f4f91410dff821da2a7b959ef12d2a9495a7661925c02fe55774cefd812944e1"
+    },
+    {
+      "path": "logs/low-memory/20260930-rows-archive-repaired.log",
+      "bytes": 239,
+      "sha256": "00e84eddc79d1c036420f18773173b92ed2c1e6610dea657d0b43c49f0817615"
+    }
+  ],
+  "logsRepositoryIgnored": true,
+  "productionQualification": "pending",
+  "pendingAcceptance": [
+    "Windows 512/768 MiB 实际物理内存压力与普通环境对照",
+    "完整 Main/GUI 与最终 Windows 安装包",
+    "高样式、大样本、CSV/XLS 容量与性能阈值冻结",
+    "Windows 慢盘/文件锁/取消/强退及恢复",
+    "代表性业务样本和 Excel/WPS 人工验收",
+    "生产 profile 资格冻结和启用"
+  ],
+  "reviewFixes": {
+    "report": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/review-fixes/2026-09-30-r2/fix-report.md",
+    "reviewRound": 2,
+    "fixedFindings": [
+      "R4-R2"
+    ],
+    "previousFindingsPreserved": [
+      "R1",
+      "R2",
+      "R3",
+      "forkChild"
+    ],
+    "productionQualification": "pending",
+    "beforeManifest": {
+      "path": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/review-fixes/2026-09-30-r2/before/development-manifest.json",
+      "bytes": 26097,
+      "sha256": "577c0ff0e66bcde16926fa8fcb117c282f84cc6158a18489f063ecb70dc66faa"
+    },
+    "changedProductFiles": [
+      "src/main-process/background-execution/admission-queue.js",
+      "src/main-process/background-execution/memory-activity.js",
+      "src/main-process/background-execution/memory-admission.js",
+      "src/main-process/background-execution/resource-governor.js",
+      "src/main-process/execution-descriptors/memory-profiles.js"
+    ],
+    "targetedUnit": {
+      "total": 88,
+      "passed": 88,
+      "newCases": 16,
+      "log": {
+        "path": "logs/low-memory/20260930-r2-targeted-unit-2.log",
+        "bytes": 8607,
+        "sha256": "8a3c395ad6b6b813b62de1c1fb85feda4211b7b868acd7bd0ec86ac77506f9dc"
+      }
+    },
+    "publicationIntegration": {
+      "total": 18,
+      "passed": 18,
+      "newCases": 6,
+      "log": {
+        "path": "logs/low-memory/20260930-r2-publication-compatibility-2.log",
+        "bytes": 1484,
+        "sha256": "57f33ead247f1f68ad3390e3406b8ca7d489f0799df44fd00dcb26945fa05b79"
+      }
+    },
+    "businessConcurrency": {
+      "total": 2,
+      "passed": 2,
+      "modes": [
+        "normal",
+        "low"
+      ],
+      "fullGui": false,
+      "log": {
+        "path": "logs/low-memory/20260930-r2-business-concurrency-2.log",
+        "bytes": 192,
+        "sha256": "f7820fe1aa28018445e72b1009136dc37097cac6224dff193d7dcfb1c11270fe"
+      }
+    },
+    "beforeBehavior": {
+      "status": "REPRODUCED",
+      "availableMiB": 4096,
+      "compatibilityMiB": 2048,
+      "matrix": {
+        "path": "logs/low-memory/20260930-r2-before-matrix.log",
+        "bytes": 1385,
+        "sha256": "d07feb249f4c79aaa4ef6c7e6cfc91f6a801ecaa3329fd62c542cbeb18a67db5"
+      },
+      "businessControl": {
+        "status": "EXPECTED_FAILURE",
+        "exitCode": 1,
+        "log": {
+          "path": "logs/low-memory/20260930-r2-business-before.log",
+          "bytes": 1012,
+          "sha256": "444f62199af25b744e7b66110d1fd679f301ae2fb54d22a93c16997784b05145"
+        }
+      }
+    },
+    "fixtureCorrection": {
+      "reason": "单领域宿主缺少 Archive controller 归属查询；跨域集成改为装配真实 controller。",
+      "firstAttempt": {
+        "path": "logs/low-memory/20260930-r2-business-concurrency-diagnostic.log",
+        "bytes": 3124,
+        "sha256": "2196e079859a327444509ab9c4b71fe1fc9348edd2582f81db11981ca27f2140"
+      }
+    },
+    "changedExistingFiles": [
+      "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/baseline-evidence.md",
+      "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/implementation-notes.md",
+      "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/local-capacity-probe.json",
+      "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/local-gates-summary.json",
+      "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/local-verification.md",
+      "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/resource-entry-inventory.md",
+      "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/review-fixes/2026-09-30/fix-report.md",
+      "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/spec.md",
+      "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/techdoc.md",
+      "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/windows-acceptance.md",
+      "rules/integration-test-policy.md",
+      "scripts/integration/publication-memory-compatibility.js",
+      "src/main-process/background-execution/memory-activity.js",
+      "src/main-process/background-execution/memory-admission.js",
+      "src/main-process/background-execution/resource-governor.js",
+      "src/main-process/execution-descriptors/memory-profiles.js",
+      "tests/helpers/biz-op-v327-host.js"
+    ]
+  },
+  "previousReviewEvidence": "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/review-fixes/2026-09-30-r2/before/local-gates-summary.json"
+}

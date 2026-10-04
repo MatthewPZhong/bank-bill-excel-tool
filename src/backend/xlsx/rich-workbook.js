@@ -9,23 +9,21 @@ const { TOOLBOX_XLSX_METADATA_LIMITS, findRelationshipEntry, parseWorkbookRelati
 const { createSourceStyleRegistryFromOoxml } = require('./style-registry');
 const { scanXlsxSheet } = require('./xlsx-sheet-scanner');
 const { loadSharedStringsProvider } = require('./shared-strings-provider');
+const { closeZip } = require('./zip-lifecycle');
 
 function invalid(message) { const error = new Error(message); error.code = 'RICH_XLSX_WORKBOOK_INVALID'; return error; }
-function closeZip(zip) {
-  if (zip.reader.closed) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const clean = () => { zip.removeListener('close', done); zip.removeListener('error', failed); };
-    const done = () => { clean(); resolve(); };
-    const failed = (error) => { clean(); reject(error); };
-    zip.once('close', done); zip.once('error', failed);
-    try { zip.close(); } catch (error) { failed(error); }
-  });
-}
-
 // 组合既有中性解析器；单声明页检查先于 styles/SST，包含隐藏页。
 async function openRichWorkbook(filePath, options = {}, singleSheet = false) {
   const maxSheets = options.maxSheets ?? 4096;
   if (!Number.isSafeInteger(maxSheets) || maxSheets < 1 || maxSheets > 4096) throw invalid('工作表读取预算非法');
+  const limits = { ...TOOLBOX_XLSX_METADATA_LIMITS };
+  if (options.metadataLimits !== undefined) {
+    if (!options.metadataLimits || typeof options.metadataLimits !== 'object' || Array.isArray(options.metadataLimits)) throw invalid('元数据读取预算非法');
+    for (const [key, value] of Object.entries(options.metadataLimits)) {
+      if (!Object.hasOwn(limits, key) || !Number.isSafeInteger(value) || value < 1 || value > limits[key]) throw invalid('元数据读取预算不能放宽安全上限');
+      limits[key] = value;
+    }
+  }
   const sourceFile = path.basename(filePath);
   const { zip, entries } = await openZipWithEntries(sourceFile, filePath, { rejectDuplicateEntries: true });
   let sharedStrings;
@@ -43,8 +41,8 @@ async function openRichWorkbook(filePath, options = {}, singleSheet = false) {
     const metadata = (entry, label, limit) => readToolboxMetadataEntryAsString(zip, entry,
       { sourceFile, partName: label, limitBytes: limit });
     if (!entries.has(WORKBOOK_ENTRY_NAME) || !entries.has(WORKBOOK_RELS_ENTRY_NAME)) throw invalid('工作簿缺少 workbook 或 relationships');
-    const workbook = parseWorkbookXml(await metadata(entries.get(WORKBOOK_ENTRY_NAME), 'workbook.xml', TOOLBOX_XLSX_METADATA_LIMITS.workbook));
-    const relationships = parseWorkbookRelationships(await metadata(entries.get(WORKBOOK_RELS_ENTRY_NAME), 'workbook.xml.rels', TOOLBOX_XLSX_METADATA_LIMITS.relationships));
+    const workbook = parseWorkbookXml(await metadata(entries.get(WORKBOOK_ENTRY_NAME), 'workbook.xml', limits.workbook));
+    const relationships = parseWorkbookRelationships(await metadata(entries.get(WORKBOOK_RELS_ENTRY_NAME), 'workbook.xml.rels', limits.relationships));
     if (singleSheet && workbook.sheets.length !== 1) throw invalid('每个输入文件必须恰好声明一个工作表（包含隐藏页）');
     if (!workbook.sheets.length || workbook.sheets.length > maxSheets) throw invalid('工作表数量超出读取预算');
     const paths = new Set();
@@ -61,8 +59,8 @@ async function openRichWorkbook(filePath, options = {}, singleSheet = false) {
     const styles = related('styles', 'xl/styles.xml');
     const theme = related('theme', 'xl/theme/theme1.xml');
     const registry = createSourceStyleRegistryFromOoxml({ sourceRegistryId: `rich-${randomUUID()}`,
-      stylesXml: styles ? await metadata(styles, 'styles.xml', TOOLBOX_XLSX_METADATA_LIMITS.styles) : '',
-      themeXml: theme ? await metadata(theme, 'theme', TOOLBOX_XLSX_METADATA_LIMITS.theme) : '',
+      stylesXml: styles ? await metadata(styles, 'styles.xml', limits.styles) : '',
+      themeXml: theme ? await metadata(theme, 'theme', limits.theme) : '',
       requireStylesXml: !!styles, requireThemeXml: !!theme });
     sharedStrings = await loadSharedStringsProvider(zip, related('sharedStrings', 'xl/sharedStrings.xml'), {
       sourceFile, tempRoot: options.sstTempRoot ?? path.join(os.tmpdir(), `rich-xlsx-sst-${randomUUID()}`),
@@ -77,7 +75,7 @@ async function openRichWorkbook(filePath, options = {}, singleSheet = false) {
       const selected = sheets[index];
       try { return await scanXlsxSheet({ zip, sheetEntry: entries.get(selected.entryPath), sheet: selected, sourceFile,
         sourceRegistry: registry.registry, date1904: workbook.date1904, sharedStrings,
-        themeColors: registry.themeColors, cancelToken: options.cancelToken, onRow, onSheetMeta, onCellLexical }); }
+        themeColors: registry.themeColors, cancelToken: options.cancelToken, maxRowBytes: options.maxRowBytes, onRow, onSheetMeta, onCellLexical }); }
       finally { scanning = false; }
     }
     return Object.freeze({ sheet, sheets: Object.freeze(sheets), date1904: workbook.date1904, sharedStrings, close,

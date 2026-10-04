@@ -1,0 +1,72 @@
+{
+  "result": "PASS",
+  "baseline": "87bdb924b58ceddc23a1c262dbddf57ae54cf55f",
+  "branch": "release/v3.2.11",
+  "commitStatusAtValidation": "uncommitted",
+  "gate": {
+    "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+    "head": "87bdb924b58ceddc23a1c262dbddf57ae54cf55f",
+    "startedAt": "2026-10-03T02:11:37.240793+08:00",
+    "inputCount": 1782,
+    "finishedAt": "2026-10-03T02:32:29.295776+08:00",
+    "elapsedSeconds": 1252.05,
+    "exitCode": 0,
+    "changedInputs": [
+      "rules/integration-test-policy.md"
+    ],
+    "policyPrefixUnchanged": true,
+    "headUnchanged": true
+  },
+  "unit": {
+    "tests": 9592,
+    "pass": 9588,
+    "fail": 0,
+    "skipped": 4
+  },
+  "integration": {
+    "scripts": 81,
+    "passedScripts": 81,
+    "countedChecks": 3098,
+    "rowsCsvCases": 13
+  },
+  "focusedUnit": {
+    "pass": 118,
+    "fail": 0,
+    "newCases": 6
+  },
+  "architectureFiles": 788,
+  "architectureHistoryCommits": 41,
+  "qualificationUnchanged": true,
+  "limits": [
+    "实际执行平台为 macOS / Node v25.8.0",
+    "Windows/Electron 身份和可用内存为测试夹具",
+    "原生对话框、批次身份和归档耐久回执为夹具",
+    "150 万行样本验证低资源受控退出，未验证它的普通档完整生成",
+    "未重跑 Windows 实机、安装包、Excel/WPS 或完整 GUI 人工验收"
+  ],
+  "fileSha256": {
+    "changes/v3.2.11/release/v3.2.11/review-fixes/2026-10-03-rows-csv-admission/before-result.json": "354971ab5545c8855fedf8265af963043c0d04fb72d22efe38a95e474d5ff227",
+    "changes/v3.2.11/release/v3.2.11/review-fixes/2026-10-03-rows-csv-admission/repair-report.md": "cfc04972fa0efe108109d48dccc5e2c142b3b44571d79a0b3d9b0f63cfef69c0",
+    "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/implementation-notes.md": "81fe91f3b55225738fdbf094a0bacac1e9d3465238cda9193f3e2bbc13ce5c11",
+    "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/techdoc.md": "3b0eb2cb5a2690e72dca76df28de7ff59c2e4ed52cd37a4d9a80dbbebf5e80c5",
+    "rules/integration-test-policy.md": "cd9209ac0f778bcaf562c35e70c680c55bccb5df8b99c01881e9685dbde09ce6",
+    "scripts/integration/toolbox-rows-csv-admission.js": "970822d9f01b553d1ead88a1bb60ca081fc95170c9f2b13a94d4ba17f38b8a6a",
+    "src/main-process/background-execution/supervisor.js": "74481c0b2adb382d2e65e95a78bdb0de5f0add8b8be3e91130072030381e93bf",
+    "src/main-process/toolbox-row-split/cache.js": "29a9710692ec74431a5e7eefd22b3ff2da5c322e268e5b7007117b70ca15a4ed",
+    "src/main-process/toolbox-row-split/service.js": "086b3f00f43650badba6227dd32a52b88cfdd8f730766ef9a05abdc17d534312",
+    "tests/helpers/toolbox-rows-csv.js": "4104c052698880ebe4548c99cbef21f3223e005d294aef6adee088a1fe09c996",
+    "tests/unit/main-process/background-execution/supervisor-admission-diagnostics.test.js": "9ec5a967503ceb09b1df741ec8b85d977bc5c6bb0a351497d75272457812d01b",
+    "tests/unit/main-process/toolbox-row-split.test.js": "ada84ecc842868a5e01216d5891f6cb9778a066c83ab05442b43a3324b012ed7"
+  },
+  "evidenceSha256": {
+    "before.log": "354971ab5545c8855fedf8265af963043c0d04fb72d22efe38a95e474d5ff227",
+    "before-result.json": "354971ab5545c8855fedf8265af963043c0d04fb72d22efe38a95e474d5ff227",
+    "release-check.log": "f41e8d6be7a85567a56d41b264e29ae52ad82632c09c5ba9fe5e3762f2ba3a11",
+    "gate-inputs.json": "d4703dee2bbd5aba37415dd134a8ea845a00bc5950ed6cfb9254da570992db90",
+    "gate-start.json": "5edae77eef2d4a2a84acaa68f7f4c022290c2ecd0a6e07726bdbd9d2a18b6cfd",
+    "gate-result.json": "1e18847452dd0f785dd61ff2a20c339bb0fea46f021030e55eb8c5cc8399e80a",
+    "focused-unit.log": "553fdfeeb306b6cdca9b8d8c362a94f50252fd02a65e6c7823d74cba5389a8e5",
+    "rows-integration.log": "9caa9e45235c9e2595e0be796d277c4ec47727e1b6b42ab93996c5e9a039e0ed"
+  },
+  "rawEvidenceDirectory": "outputs/release-v3.2.11/2026-10-03-rows-csv-admission-repair"
+}

@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { FileValidationError } = require('../backend/file-service/common');
 const { ensureSupportedFile } = require('../backend/file-service/readers');
+const { LOW_MEMORY_CSV_MAX_BYTES } = require('../backend/toolbox-format/csv-capacity');
 
 const OLE_CFB_MAGIC = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
 const ZIP_MAGICS = [
@@ -67,9 +68,17 @@ function detectToolboxInputKind(filePath, options = {}) {
   );
 }
 
+// 低档只覆盖有界 XLSX reader 和已验证容量的 CSV；BIFF8 的前置整表分配尚无低档边界。
+// 这里只筛候选，不改变格式支持范围；普通档仍由 Governor 判断。
+function supportsToolboxLowMemoryInput(inputKind, sizeBytes) {
+  return inputKind === 'xlsx' || (inputKind === 'csv' && Number.isSafeInteger(sizeBytes) &&
+    sizeBytes >= 0 && sizeBytes <= LOW_MEMORY_CSV_MAX_BYTES);
+}
+
 module.exports = {
   OLE_CFB_MAGIC,
   ZIP_MAGICS,
   detectToolboxInputKind,
+  supportsToolboxLowMemoryInput,
   readToolboxFileMagic
 };

@@ -75,7 +75,7 @@ test('启动先计算主题并对齐分钟边界，到点切换、未变化不�
   h.scheduler.stop();
 });
 
-test('深色时段冷启动立即为深色，默认关闭冷启动仍为浅色', () => {
+test('深色时段冷启动立即为深色，已保存关闭冷启动仍为浅色', () => {
   const active = makeHarness({ date: at(23, 0) });
   active.scheduler.start();
   assert.equal(active.nativeTheme.themeSource, 'dark');
@@ -144,5 +144,24 @@ test('start 幂等，stop 清理计时器与事件；快照副本不可改写调
   assert.equal(h.changes.length, 1);
   h.scheduler.start();
   assert.equal(h.scheduler.getSnapshot().effectiveTheme, 'dark');
+  h.scheduler.stop();
+});
+
+
+test('缺失配置按新默认冷启动，分钟、聚焦与恢复跨边界且不写设置', () => {
+  const h = makeHarness({ config: null, date: at(17, 29) });
+  const initial = h.scheduler.start();
+  assert.deepEqual(initial.darkModeSchedule, { enabled: true, startTime: '17:30', endTime: '07:00' });
+  assert.equal(initial.effectiveTheme, 'light');
+  h.tick(at(17, 30));
+  assert.equal(h.scheduler.getSnapshot().effectiveTheme, 'dark');
+  h.setNow(at(6, 59));
+  h.powerMonitor.emit('resume');
+  assert.equal(h.scheduler.getSnapshot().effectiveTheme, 'dark');
+  h.setNow(at(7, 0));
+  h.focusSource.emit('browser-window-focus');
+  assert.equal(h.scheduler.getSnapshot().effectiveTheme, 'light');
+  assert.equal(h.timers.size, 1);
+  assert.equal(h.writes(), 0);
   h.scheduler.stop();
 });

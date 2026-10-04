@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { sqliteCacheKiB } = require('../background-execution/execution-memory-options');
 const { DatabaseSync } = require('node:sqlite');
 const { createHash } = require('node:crypto');
 const { ensureBizOpReconTablesSupport } = require('../../backend/biz-op-recon-db/migrations');
@@ -83,13 +84,14 @@ async function hashIdentity(file, safePoint) {
   if (hash(before) !== hash(statIdentity(file))) fail('BIZOP_LEGACY_FILE_CHANGED');
   return { identity: before, sha256: hasher.digest('hex') };
 }
-async function inspectFiles(userDataDir, names, quiescent, safePoint) {
+async function inspectFiles(userDataDir, names, quiescent, safePoint, memoryConfig = null) {
   if (!Array.isArray(names) || names.length > 32 || names.some((name) => !BASE.test(name))) fail('BIZOP_UPGRADE_PLAN_INVALID');
   const root = legacyRoot(userDataDir);
   for (const name of names) {
     safePoint(); statIdentity(path.join(root, name));
     const db = new DatabaseSync(path.join(root, name), { readOnly: true });
     try {
+      if (memoryConfig) db.exec(`PRAGMA cache_size=-${sqliteCacheKiB(memoryConfig, 2)}; PRAGMA temp_store=FILE`);
       validateSchema(db, { side: true, quiescent });
       if (Object.values(db.prepare('PRAGMA quick_check').get())[0] !== 'ok') fail('BIZOP_LEGACY_SQLITE_INVALID');
     } finally { db.close(); }

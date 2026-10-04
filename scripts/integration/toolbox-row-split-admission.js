@@ -13,6 +13,7 @@ const {
   createBackgroundExecutionRuntime
 } = require('../../src/main-process/execution-descriptors/composition');
 const { scanToolboxSplitFields } = require('../../src/main-process/toolbox-format-operations');
+const { createToolboxSplitReadOwner } = require('../../src/main-process/toolbox-split-read-owner');
 const { prepareRows, generateValidateAndPublishRows } = require('../../src/main-process/toolbox-row-split/service');
 const { publicResult, buildRowTargets, planRowCounts } = require('../../src/main-process/toolbox-row-split/contracts');
 const { ROWS_POLICY } = require('../../src/main-process/toolbox-row-split/policy');
@@ -82,7 +83,7 @@ async function runCase(memoryBytes, shouldSucceed) {
         }
         return fs.rmSync(file, options);
       } },
-      path, randomUUID, pathsAlias, sourceSnapshotFromStat, sourceSnapshotMatchesStat,
+      path, randomUUID, pathsAlias, sourceSnapshotFromStat, sourceSnapshotMatchesStat, createToolboxSplitReadOwner,
       trackedIpcHandle(channel, _scope, _label, value) { assert.equal(channel, 'toolbox:split:export'); contract = value; },
       app: { getPath: () => userDataDir }, mainWindow: null,
       showImportOpenDialog: async () => ({ canceled: false, filePaths: [outputDirectory] }),
@@ -100,8 +101,9 @@ async function runCase(memoryBytes, shouldSucceed) {
       appendActivityLogEntry: (entry) => activity.push(entry), buildToolboxAuditDetailLines: () => []
     };
     const helpers = Function(...Object.keys(scope), mainFunctions + '\nreturn { createToolboxSplitReadContext };')(...Object.values(scope));
-    const readContext = helpers.createToolboxSplitReadContext(sourcePath, scan.dataRowCount);
-    const prepared = await prepareIpcTaskInvocation(contract, {}, [{ sourceFilePath: sourcePath,
+    const event = { sender: { id: 1 } };
+    const readContext = helpers.createToolboxSplitReadContext(sourcePath, scan.dataRowCount, event.sender.id);
+    const prepared = await prepareIpcTaskInvocation(contract, event, [{ sourceFilePath: sourcePath,
       splitReadToken: readContext.token, mode: 'rows', rowsPerFile: 2 }]);
     assert.equal(prepared.proceed, true, JSON.stringify(prepared.result));
     assert.equal(overwriteCalls, 1, '失败场景也须覆盖已确认的旧目标');
@@ -116,7 +118,7 @@ async function runCase(memoryBytes, shouldSucceed) {
     } });
     process.on('worker', observeWorker);
     const started = process.hrtime.bigint();
-    const result = await contract.execute({}, prepared, context);
+    const result = await contract.execute(event, prepared, context);
     const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
     process.off('worker', observeWorker);
     assert.equal(hashFile(sourcePath), sourceHash); assert.deepEqual(await readRows(sourcePath), expectedRows);
@@ -131,7 +133,7 @@ async function runCase(memoryBytes, shouldSucceed) {
       assert.ok(!/Admission timed out|Resource budget cannot admit/.test(result.message));
       assert.ok(Array.isArray(result.detailLines) && result.detailLines.length > 0);
       assert.ok(result.detailLines.every((line) => typeof line === 'string'));
-      assert.ok(result.detailLines.some((line) => line.startsWith('申请资源：') && line.includes('1,024.000 MiB')));
+      assert.ok(result.detailLines.some((line) => line.startsWith('静态资源基线：') && line.includes('1,024.000 MiB')));
       assert.ok(result.detailLines.some((line) => line.startsWith('总预算：') && line.includes('768.000 MiB')));
       assert.ok(result.detailLines.every((line) => !line.includes('[redacted')));
       const rejected = diagnostics.find((event) => event.type === 'resource-admission-failed');

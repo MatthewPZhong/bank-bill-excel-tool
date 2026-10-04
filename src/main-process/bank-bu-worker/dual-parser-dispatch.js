@@ -1,4 +1,5 @@
 'use strict';
+const { memoryCarrierAdmission } = require('../memory-activity');
 
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
@@ -74,7 +75,7 @@ function normalizeOptions(options, { requireDual = true } = {}) {
 function runBankBuParserWorker(spool, options = {}) {
   const WorkerClass = options.WorkerClass || Worker;
   return new Promise((resolve, reject) => {
-    const worker = new WorkerClass(PARSER_ENTRY, { workerData: { spool } });
+    const worker = memoryCarrierAdmission(null).observe(new WorkerClass(PARSER_ENTRY, { workerData: { spool } }));
     const signal = options.signal || null;
     let terminalMessage = null;
     let transportError = null;

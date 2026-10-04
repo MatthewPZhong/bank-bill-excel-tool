@@ -133,7 +133,7 @@ test('B-12 真实 legacy fixture 的初读与导出租约内二次重查均可�
   const service = createVccFinancialOpService({
     database: { db, dbPath },
     assetsDir: '',
-    writeRunWorkbooksFn: async (args) => {
+    writeResultWorkbookFn: async (args) => {
       writerCalls.push(args);
       return { filePaths: ['/tmp/legacy-result.xlsx'] };
     }

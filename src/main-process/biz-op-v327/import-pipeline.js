@@ -1,5 +1,7 @@
 'use strict';
 
+const { richReaderBudgets, candidateWriterBudgets, checkExecutionMemory } = require('../background-execution/execution-memory-options');
+
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
@@ -47,17 +49,17 @@ function createSampler(filePath, { maxSamples = ERROR_SAMPLE_ROWS, maxSampleByte
   });
 }
 function resourceOrCancel(error, cancelToken) {
-  return cancelToken.cancelled || /^BIZOP_(CANCELLED|ROUTE_METADATA_LIMIT|ROUTER_STOPPED|REPORT_)/.test(error.code || '')
+  return /^EXECUTION_|^RESOURCE_|^TOOLBOX_XLSX_METADATA_TOO_LARGE$/.test(error.code || '') || cancelToken.cancelled || /^BIZOP_(CANCELLED|ROUTE_METADATA_LIMIT|ROUTER_STOPPED|REPORT_)/.test(error.code || '')
     || /^CANDIDATE_WRITER_/.test(error.code || '') || ['ENOSPC', 'ENOMEM', 'EMFILE', 'ENFILE', 'EIO'].includes(error.code)
     || error instanceof AggregateError;
 }
 
 async function runImportPipeline({ payloadStore, taskRunId, intentDigest, candidateRef, reportRef, files, planDigest = intentDigest,
-  cancelToken = { cancelled: false }, options = {} }) {
-  const safePoint = () => { if (cancelToken.cancelled) fail('BIZOP_CANCELLED', '业务 OP 导入已取消'); };
+  cancelToken = { cancelled: false }, options = {}, memoryConfig = null }) {
+  const safePoint = () => { checkExecutionMemory(memoryConfig); if (cancelToken.cancelled) fail('BIZOP_CANCELLED', '业务 OP 导入已取消'); };
   const report = payloadStore.prepareCandidate(taskRunId, reportRef);
   const router = createCandidateRouter({ payloadStore, taskRunId, intentDigest, safePoint,
-    partTargetRows: options.partTargetRows, partTargetBytes: options.partTargetBytes, writerOptions: options.writerOptions });
+    partTargetRows: options.partTargetRows, partTargetBytes: options.partTargetBytes, writerOptions: { ...options.writerOptions, ...candidateWriterBudgets(memoryConfig) }, memoryConfig });
   const sampler = createSampler(path.join(report.directory, 'part-000001.jsonl'), options);
   const counters = { scannedDataRows: 0, acceptedRows: 0, rowErrorCount: 0, fileErrorCount: 0,
     scanComplete: true, errorCountExact: true, batchRejected: false };
@@ -96,6 +98,7 @@ async function runImportPipeline({ payloadStore, taskRunId, intentDigest, candid
           sstTempRoot: path.join(payloadStore.prepareCandidate(taskRunId, candidateRef).directory, `sst-${file.order}`),
           memoryBudgetBytes: options.sstMemoryBudgetBytes ?? SST_MEMORY_BUDGET,
           cacheMaxBytes: options.sstCacheMaxBytes ?? SST_CACHE_MAX_BYTES,
+          ...richReaderBudgets(memoryConfig),
           lruMaxEntries: options.sstLruMaxEntries === undefined ? SST_LRU_MAX_ENTRIES : options.sstLruMaxEntries, cancelToken
         });
         await workbook.scan((row) => {
@@ -166,8 +169,8 @@ async function runImportPipeline({ payloadStore, taskRunId, intentDigest, candid
   const result = { schemaVersion: 1, taskRunId, intentDigest, candidateRef, reportRef,
     cellContractVersion: CELL_CONTRACT_VERSION, ruleVersion: RULE_VERSION,
     ...counters, ...sampling, cancelled: Boolean(cancelToken.cancelled), files: summaries, references,
-    metrics: { ...metrics, router: router.snapshot(), sstMemoryBudgetBytes: options.sstMemoryBudgetBytes ?? SST_MEMORY_BUDGET,
-      sstCacheMaxBytes: options.sstCacheMaxBytes ?? SST_CACHE_MAX_BYTES } };
+    metrics: { ...metrics, router: router.snapshot(), sstMemoryBudgetBytes: memoryConfig?.sstMemoryBytes ?? options.sstMemoryBudgetBytes ?? SST_MEMORY_BUDGET,
+      sstCacheMaxBytes: memoryConfig?.sstCacheBytes ?? options.sstCacheMaxBytes ?? SST_CACHE_MAX_BYTES } };
   // 诊断独立封存。样本只在受控文件中，任务消息始终仅返回 result 文档的不透明引用。
   const reportToken = await payloadStore.sealCandidate({ taskRunId, objectId: reportRef, objectKind: 'DIAGNOSTIC', intentDigest,
     catalog: { scanComplete: counters.scanComplete, errorCountExact: counters.errorCountExact, producerPlanDigest: planDigest, ...sampling },

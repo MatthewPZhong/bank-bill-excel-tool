@@ -1,9 +1,12 @@
 'use strict';
+const { memoryCarrierAdmission } = require('../memory-activity');
 
 const { Worker } = require('node:worker_threads');
 const { types: utilTypes } = require('node:util');
+const { validateExecutionMemoryConfig } = require('../execution-memory-config');
 
 const ADMITTED_TOPOLOGY_WORKER_DATA_KEY = 'backgroundExecutionAdmittedTopology';
+const ADMITTED_MEMORY_WORKER_DATA_KEY = 'backgroundExecutionMemoryConfig';
 
 function ownDataValue(value, key) {
   if (!value || typeof value !== 'object' || utilTypes.isProxy(value)) return undefined;
@@ -68,7 +71,8 @@ function createWorkerThreadAdapter(options = {}) {
       const normalized = normalizeWorkerEntry(startOptions.entry);
       const existingWorkerData = normalized.options.workerData;
       if (existingWorkerData && typeof existingWorkerData === 'object' &&
-          Object.hasOwn(existingWorkerData, ADMITTED_TOPOLOGY_WORKER_DATA_KEY)) {
+          (Object.hasOwn(existingWorkerData, ADMITTED_TOPOLOGY_WORKER_DATA_KEY) ||
+           Object.hasOwn(existingWorkerData, ADMITTED_MEMORY_WORKER_DATA_KEY))) {
         throw new TypeError('worker-thread entry workerData contains reserved admitted topology key');
       }
       let workerOptions = normalized.options;
@@ -95,7 +99,13 @@ function createWorkerThreadAdapter(options = {}) {
           }
         };
       }
-      const worker = new WorkerClass(normalized.filename, workerOptions);
+      if (startOptions.memoryConfig) {
+        const memoryConfig = validateExecutionMemoryConfig(startOptions.memoryConfig);
+        if (!memoryConfig.workerLimits) throw new TypeError('Worker 执行档缺少堆限制');
+        workerOptions = { ...workerOptions, resourceLimits: memoryConfig.workerLimits,
+          workerData: { ...(workerOptions.workerData || {}), [ADMITTED_MEMORY_WORKER_DATA_KEY]: memoryConfig } };
+      }
+      const worker = memoryCarrierAdmission(startOptions.memoryConfig).observe(new WorkerClass(normalized.filename, workerOptions));
       let closed = false;
       let closeCalled = false;
       let readySettled = false;

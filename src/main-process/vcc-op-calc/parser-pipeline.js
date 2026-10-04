@@ -1,4 +1,5 @@
 'use strict';
+const { memoryCarrierAdmission } = require('../memory-activity');
 
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
@@ -81,7 +82,7 @@ function runParserWorker(input, options = {}) {
 
     let worker;
     try {
-      worker = new WorkerClass(PARSER_WORKER_PATH, { workerData: input });
+      worker = memoryCarrierAdmission(null).observe(new WorkerClass(PARSER_WORKER_PATH, { workerData: input }));
     } catch (error) {
       reject(new VccParserPipelineError(
         'VCC_PARSER_WORKER_SPAWN_FAILED',

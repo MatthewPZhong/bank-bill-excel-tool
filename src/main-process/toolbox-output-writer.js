@@ -28,6 +28,9 @@ const {
   encodeExcelStXstring
 } = require('../backend/xlsx/excel-text');
 const { WATERMARK_AUTHOR } = require('./workbook-watermark');
+const { closeZip } = require('../backend/xlsx/zip-lifecycle');
+const { installBoundedWorkbookStreams } = require('./bounded-workbook-streams');
+const { toolboxReaderOptions, checkExecutionMemory } = require('./background-execution/execution-memory-options');
 
 const MAX_DATA_ROWS_PER_SHEET = 1048575;
 const DEFAULT_STYLE_BUDGETS = Object.freeze({
@@ -1182,11 +1185,11 @@ function formatHeadersForDetail(headers) {
   return headers.length > 0 ? headers.join(' | ') : '（空）';
 }
 
-async function validateGeneratedWorkbookStructure(filePath, expectedStructure = null) {
+async function validateGeneratedWorkbookStructure(filePath, expectedStructure = null, options = {}) {
   const expected = normalizeExpectedWorkbookStructure(expectedStructure);
   let pass = null;
   try {
-    pass = await openToolboxXlsxPass(filePath);
+    pass = await openToolboxXlsxPass(filePath, options.readerOptions);
     const actualSheetCount = pass.sheets.length;
     const declaredWorksheetEntries = new Set(pass.sheets.map((sheet) => sheet.entryPath));
     const packagedWorksheetEntries = [...pass.entries.keys()]
@@ -1335,7 +1338,7 @@ async function validateGeneratedWorkbookStructure(filePath, expectedStructure = 
     validationError.cause = error;
     throw validationError;
   } finally {
-    if (pass) pass.close();
+    if (pass) await pass.close();
   }
 }
 
@@ -1343,7 +1346,8 @@ async function validateGeneratedWorkbook(
   filePath,
   budgets = DEFAULT_STYLE_BUDGETS,
   projectedStyleCounts = null,
-  expectedStructure = null
+  expectedStructure = null,
+  options = {}
 ) {
   const initialStat = await fs.promises.stat(filePath);
   if (!initialStat.isFile() || initialStat.size <= 0) {
@@ -1372,6 +1376,12 @@ async function validateGeneratedWorkbook(
         [...missing.map((name) => `缺少：${name}`), ...(worksheets.length === 0 ? ['缺少 worksheet'] : [])]
       );
     }
+    const metadataLimit = options.memoryConfig ? options.memoryConfig.styleCacheBytes : 32 * 1024 ** 2;
+    for (const name of ['[Content_Types].xml', PACKAGE_RELATIONSHIPS_ENTRY_NAME, 'xl/styles.xml']) {
+      if (entries.get(name).uncompressedSize > metadataLimit) {
+        throw new ToolboxOutputValidationError('输出元数据超过回读预算', [name]);
+      }
+    }
     const contentTypesXml = await readEntryAsString(
       zip,
       entries.get('[Content_Types].xml')
@@ -1382,10 +1392,11 @@ async function validateGeneratedWorkbook(
       entries.get(PACKAGE_RELATIONSHIPS_ENTRY_NAME)
     );
     parseGeneratedPackageRelationships(packageRelationshipsXml, entries.keys());
-    const stylesXml = await readEntryAsString(zip, entries.get('xl/styles.xml'));
+    const styleEntry = entries.get('xl/styles.xml');
+    const stylesXml = await readEntryAsString(zip, styleEntry);
     actualCounts = countStyleComponents(stylesXml);
   } finally {
-    try { zip.close(); } catch (_error) { /* ignore */ }
+    await closeZip(zip);
   }
 
   const limits = { ...DEFAULT_STYLE_BUDGETS, ...(budgets || {}) };
@@ -1419,7 +1430,8 @@ async function validateGeneratedWorkbook(
     }
   }
 
-  const structure = await validateGeneratedWorkbookStructure(filePath, expectedStructure);
+  checkExecutionMemory(options.memoryConfig);
+  const structure = await validateGeneratedWorkbookStructure(filePath, expectedStructure, options);
   const finalStat = await fs.promises.stat(filePath);
   const finalSha256 = await sha256File(filePath);
   if (
@@ -1457,9 +1469,15 @@ function createToolboxOutputWriter({
   maxRowsPerSheet = MAX_DATA_ROWS_PER_SHEET,
   budgets = DEFAULT_STYLE_BUDGETS,
   projectCell = defaultProjectCell,
-  outputId = null
+  outputId = null,
+  memoryConfig = null,
+  privateDirectory = null,
+  boundedOutput = false
 }) {
   if (!savePath) throw new ToolboxOutputValidationError('未提供工具箱临时产物路径');
+  if (boundedOutput && require('exceljs/package.json').version !== '4.4.0') {
+    throw new ToolboxOutputValidationError('ExcelJS 版本变化，需要重新验证流式输出');
+  }
   if (!Array.isArray(normalizedHeaders) || normalizedHeaders.length === 0) {
     throw new ToolboxOutputValidationError('未提供工具箱输出表头');
   }
@@ -1481,7 +1499,7 @@ function createToolboxOutputWriter({
   fs.mkdirSync(path.dirname(savePath), { recursive: true });
 
   const warningCollector = createToolboxWarningCollector();
-  const outputRegistry = loadOutputRegistry(budgets);
+  let outputRegistry = loadOutputRegistry(budgets);
   const registerOutputStyle = (style, context) => registerStyle(outputRegistry, style, context);
 
   // 先校验首个 Sheet 提交前必需的表头行/表头单元格/列样式预算，再创建文件流；预算失败时 generation path
@@ -1515,12 +1533,17 @@ function createToolboxOutputWriter({
   if (layoutBaseline && layoutBaseline.defaultRowHidden === true) {
     installExcelJsZeroHeightSupport();
   }
-  const writer = new ExcelJS.stream.xlsx.WorkbookWriter({
+  let writer = new ExcelJS.stream.xlsx.WorkbookWriter({
     filename: savePath,
     useStyles: true,
     useSharedStrings: false
   });
   writer.lastModifiedBy = WATERMARK_AUTHOR;
+  let flow = boundedOutput ? installBoundedWorkbookStreams(writer, {
+    maxInFlightBytes: memoryConfig ? memoryConfig.maxInFlightBytes : 8 * 1024 ** 2,
+    maxSingleRecordBytes: memoryConfig ? memoryConfig.maxSingleRecordBytes : 4 * 1024 ** 2
+  }) : null;
+  let flowStats = null;
 
   let sheetIndex = 1;
   let worksheet = createSheetAndHeader({
@@ -1605,6 +1628,13 @@ function createToolboxOutputWriter({
 
   return {
     emitRow,
+    async emitRowAsync(row) {
+      if (flow) await flow.drain();
+      emitRow(row);
+      if (flow) await flow.drain();
+      checkExecutionMemory(memoryConfig);
+    },
+    get bufferStats() { return flow ? flow.snapshot() : flowStats; },
     get dataRowCount() {
       return dataRowCount;
     },
@@ -1619,6 +1649,8 @@ function createToolboxOutputWriter({
         await writer.commit();
         const registryStats = typeof outputRegistry.stats === 'function' ? outputRegistry.stats() : {};
         const projectedStyleCounts = registryStats.projectedFinalCounts || registryStats.counts || {};
+        // commit 结束后先关闭文件、解除 writer/样式注册表引用，再构造 validator。
+        await releaseWriter();
         const validation = await validateGeneratedWorkbook(
           savePath,
           budgets,
@@ -1627,7 +1659,8 @@ function createToolboxOutputWriter({
             sheetCount: sheetIndex,
             dataRowCount,
             normalizedHeaders
-          }
+          },
+          { memoryConfig, ...(privateDirectory ? { readerOptions: toolboxReaderOptions(memoryConfig, privateDirectory) } : {}) }
         );
         state = 'committed';
         return {
@@ -1652,6 +1685,24 @@ function createToolboxOutputWriter({
     },
     async release() {
       if (state !== 'committed') throw new Error('工具箱输出尚未完成校验，不能释放');
+      await releaseWriter();
+    },
+    async abort() {
+      if (state === 'aborted') return;
+      const previous = state;
+      state = 'aborted';
+      if (flow) flow.abort();
+      if (previous !== 'committed') await closeWorkbookOutputStream(writer);
+      writer = null;
+      worksheet = null;
+      outputRegistry = null;
+      flow = null;
+      await removeFileWithRetry(savePath);
+    }
+  };
+
+  async function releaseWriter() {
+      if (!writer) return;
       const stream = writer.stream;
       if (stream && !stream.closed) {
         await new Promise((resolve, reject) => {
@@ -1670,15 +1721,11 @@ function createToolboxOutputWriter({
         });
       }
       worksheet = null;
-    },
-    async abort() {
-      if (state === 'aborted') return;
-      const previous = state;
-      state = 'aborted';
-      if (previous !== 'committed') await closeWorkbookOutputStream(writer);
-      await removeFileWithRetry(savePath);
-    }
-  };
+      writer = null;
+      outputRegistry = null;
+      flowStats = flow ? flow.snapshot() : null;
+      flow = null;
+  }
 }
 
 async function writeToolboxRows({

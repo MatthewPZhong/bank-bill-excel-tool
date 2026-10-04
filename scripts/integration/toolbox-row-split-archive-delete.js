@@ -23,6 +23,7 @@ const {
   createBackgroundExecutionRuntime
 } = require('../../src/main-process/execution-descriptors/composition');
 const { scanToolboxSplitFields } = require('../../src/main-process/toolbox-format-operations');
+const { createToolboxSplitReadOwner } = require('../../src/main-process/toolbox-split-read-owner');
 const { prepareRows, generateValidateAndPublishRows } = require('../../src/main-process/toolbox-row-split/service');
 const { publicResult } = require('../../src/main-process/toolbox-row-split/contracts');
 const { createTestPublicationHarness } = require('../../tests/helpers/publication-authority');
@@ -95,7 +96,7 @@ async function run() {
     let contract;
     const activity = [];
     const scope = {
-      fs, path, randomUUID, pathsAlias, sourceSnapshotFromStat, sourceSnapshotMatchesStat,
+      fs, path, randomUUID, pathsAlias, sourceSnapshotFromStat, sourceSnapshotMatchesStat, createToolboxSplitReadOwner,
       trackedIpcHandle: (channel, _scope, _label, value) => {
         assert.equal(channel, 'toolbox:split:export');
         contract = value;
@@ -115,9 +116,10 @@ async function run() {
     };
     const helpers = Function(...Object.keys(scope), mainFunctions +
       '\nreturn { createToolboxSplitReadContext, acknowledgeToolboxPublicationReceipts };')(...Object.values(scope));
-    const readContext = helpers.createToolboxSplitReadContext(sourcePath, scan.dataRowCount);
+    const event = { sender: { id: 1 } };
+    const readContext = helpers.createToolboxSplitReadContext(sourcePath, scan.dataRowCount, event.sender.id);
     const payload = { sourceFilePath: sourcePath, splitReadToken: readContext.token, mode: 'rows', rowsPerFile: 2 };
-    const prepared = await prepareIpcTaskInvocation(contract, {}, [payload]);
+    const prepared = await prepareIpcTaskInvocation(contract, event, [payload]);
     assert.equal(prepared.proceed, true, JSON.stringify(prepared.result));
     assert.equal(prepared.filePlan, prepared.rows.filePlan, 'IPC 必须保留确认前的 FilePlan authority');
     const policy = createTaskPolicyRegistry().require('toolbox:split:export');
@@ -136,7 +138,7 @@ async function run() {
       execute: async (context, controls) => {
         batchContext = context;
         assert.equal(context.taskKey, 'toolbox:split:export');
-        const generated = await contract.execute({}, prepared, createIpcTaskContext(context, controls));
+        const generated = await contract.execute(event, prepared, createIpcTaskContext(context, controls));
         assert.equal(generated.status, 'success', JSON.stringify(generated));
         assert.equal(generated.files.length, 3);
         const journals = fs.readdirSync(outputDirectory).filter((name) => name.endsWith('.journal.json'));

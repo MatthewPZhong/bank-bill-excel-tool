@@ -24,49 +24,62 @@ function ensureSupportedFile(filePath) {
 function parseCsvText(content, { blankrows = false } = {}) {
   const rows = [];
   let current = [];
-  let cell = '';
+  let parts = [];
+  let start = 0;
   let inQuotes = false;
   let i = 0;
+  // 保留原状态机的宽松引号规则；按连续文本片段拼接，避免每字符一个
+  // cons string 留存到整表结束。这里仍是既有整表 CSV reader。
+  const finishCell = () => {
+    parts.push(content.slice(start, i));
+    const value = parts.join('');
+    parts = [];
+    return value;
+  };
 
   while (i < content.length) {
     const ch = content[i];
 
     if (inQuotes) {
       if (ch === '"' && content[i + 1] === '"') {
-        cell += '"';
+        parts.push(content.slice(start, i), '"');
         i += 2;
+        start = i;
       } else if (ch === '"') {
+        parts.push(content.slice(start, i));
         inQuotes = false;
         i++;
+        start = i;
       } else {
-        cell += ch;
         i++;
       }
     } else if (ch === '"') {
+      parts.push(content.slice(start, i));
       inQuotes = true;
       i++;
+      start = i;
     } else if (ch === ',') {
-      current.push(cell);
-      cell = '';
+      current.push(finishCell());
       i++;
+      start = i;
     } else if (ch === '\r' && content[i + 1] === '\n') {
-      current.push(cell);
-      cell = '';
+      current.push(finishCell());
       rows.push(current);
       current = [];
       i += 2;
+      start = i;
     } else if (ch === '\n' || ch === '\r') {
-      current.push(cell);
-      cell = '';
+      current.push(finishCell());
       rows.push(current);
       current = [];
       i++;
+      start = i;
     } else {
-      cell += ch;
       i++;
     }
   }
 
+  const cell = finishCell();
   if (cell || current.length) {
     current.push(cell);
     rows.push(current);
@@ -82,10 +95,10 @@ function parseCsvText(content, { blankrows = false } = {}) {
 // v2.1.16 PR#61 F4：可选 sheetName —— 缺省 = 第一个 sheet（行为与历史完全一致）。
 //   传入 sheetName 时读指定 sheet（detector 多 sheet 扫描用）；sheet 不存在抛 FILE_READ。
 //   ⚠️ CSV 无 sheet 概念：传 sheetName 也忽略，仍解析整份 CSV（detector 对 CSV 走单次默认读取）。
-function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, maxRows = 0 } = {}) {
+function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, maxRows = 0, csvMaxSourceBytes } = {}) {
   ensureSupportedFile(filePath);
 
-  if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
+  if (!fs.existsSync(filePath) || (fs.statSync(filePath).size === 0 && csvMaxSourceBytes === undefined)) {
     throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
   }
 
@@ -93,7 +106,7 @@ function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, max
 
   if (path.extname(filePath).toLowerCase() === '.csv') {
     try {
-      const raw = fs.readFileSync(filePath);
+      const raw = csvMaxSourceBytes === undefined ? fs.readFileSync(filePath) : readBoundedCsvBytes(filePath, csvMaxSourceBytes);
       // 检测 magic bytes：XLS (OLE2) = D0CF11E0，XLSX (ZIP) = 504B0304
       // 如果 .csv 文件实际是 Excel 二进制格式，跳过 CSV 解析，走 XLSX 库
       const isOLE2 = raw.length >= 4 && raw[0] === 0xD0 && raw[1] === 0xCF && raw[2] === 0x11 && raw[3] === 0xE0;
@@ -104,6 +117,9 @@ function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, max
           : raw.toString('utf-8');
         const rows = parseCsvText(content, { blankrows });
         return rowLimit > 0 ? rows.slice(0, rowLimit) : rows;
+      }
+      if (csvMaxSourceBytes !== undefined) {
+        throw new FileValidationError('TOOLBOX_SPLIT_READ_CONTEXT_STALE', 'CSV 文件类型已变化，请重新选择');
       }
       // 否则 fall through 到下方 XLSX.readFile
     } catch (error) {
@@ -191,6 +207,31 @@ function isMemoryLimitError(error) {
   if (error instanceof RangeError) return true;
   const message = String(error.message || '');
   return /array buffer allocation failed|invalid (string|array) length|out of memory|heap (out of memory|limit)|cannot allocate|allocation failed/i.test(message);
+}
+
+// 限额应用于实际读取量；即使 stat 后文件增长，也只读到上限加一个哨兵字节。
+function readBoundedCsvBytes(filePath, maxBytes) {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes >= 2 ** 30) throw new TypeError('CSV 读取上限无效');
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const unsuitable = () => new FileValidationError('EXECUTION_INPUT_PROFILE_UNSUITABLE',
+      '当前 CSV 超出本次低内存读取容量，请重新选择文件后重试');
+    if (fs.fstatSync(fd).size > maxBytes) throw unsuitable();
+    const buffer = Buffer.allocUnsafe(maxBytes + 1);
+    let size = 0;
+    while (size <= maxBytes) {
+      const read = fs.readSync(fd, buffer, size, buffer.length - size, null);
+      if (read === 0) return buffer.subarray(0, size);
+      size += read;
+    }
+    throw unsuitable();
+  } finally { fs.closeSync(fd); }
+}
+
+// 有界 CSV 允许空表返回 []，避免旧空表兼容分支重新做无界读取。
+function readCsvRowsWithinBudget(filePath, maxBytes) {
+  if (path.extname(filePath).toLowerCase() !== '.csv') throw new TypeError('有界 CSV 读取仅接受 CSV 路径');
+  return readWorkbookRows(filePath, { csvMaxSourceBytes: maxBytes });
 }
 
 function readRows(filePath, { blankrows = false, maxRows = 0, readGuard } = {}) {
@@ -530,6 +571,7 @@ module.exports = {
   listSheetNames,
   loadEnumValues,
   readMeaningfulRowsHead,
+  readCsvRowsWithinBudget,
   readRows,
   readRowsWithMetadata,
   readXlsxSheetMetaLite
