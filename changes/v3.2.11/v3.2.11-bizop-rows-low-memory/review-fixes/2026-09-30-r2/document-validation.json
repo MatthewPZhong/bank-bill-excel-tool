@@ -1,0 +1,10 @@
+{
+  "status": "PASS",
+  "documents": 9,
+  "relativeFileLinks": 140,
+  "internalAnchors": 40,
+  "tables": 43,
+  "acceptanceCriteria": 24,
+  "canonicalDocumentIdentities": 4,
+  "errors": []
+}

@@ -531,6 +531,8 @@ async function scanXlsxSheet(options = {}) {
   const onSheetMeta = typeof options.onSheetMeta === 'function' ? options.onSheetMeta : null;
   const onRow = typeof options.onRow === 'function' ? options.onRow : null;
   const onCellLexical = typeof options.onCellLexical === 'function' ? options.onCellLexical : null;
+  const maxRowBytes = options.maxRowBytes === undefined ? Infinity : options.maxRowBytes;
+  if (maxRowBytes !== Infinity && (!Number.isSafeInteger(maxRowBytes) || maxRowBytes < 1)) throw new TypeError('XLSX 单行读取预算无效');
 
   if (!zip || !sheetEntry || !sourceRegistry) {
     throw new TypeError('scanXlsxSheet 需要 zip、sheetEntry 与 sourceRegistry');
@@ -682,6 +684,13 @@ async function scanXlsxSheet(options = {}) {
       const body = lexicalXml.slice(currentCell.xmlBodyStart - lexicalOffset, end - lexicalOffset);
       const result = onCellLexical(cell, { type: currentCell.type, body });
       if (result && typeof result.then === 'function') throw new TypeError('onCellLexical 必须是同步回调');
+    }
+    if (maxRowBytes !== Infinity) {
+      const charge = 512 + Object.values(cell).reduce((total, value) => total + (typeof value === 'string' ? value.length * 2 : 0), 0);
+      currentRow.chargedBytes = (currentRow.chargedBytes || 0) + charge;
+      if (currentRow.chargedBytes > maxRowBytes) {
+        throw Object.assign(new Error('当前 XLSX 行超过获批读取预算'), { code: 'EXECUTION_ROW_MEMORY_LIMIT' });
+      }
     }
     currentRow.cells.set(cell.columnIndex, cell);
     currentRow.nextColumnIndex = cell.columnIndex + 1;

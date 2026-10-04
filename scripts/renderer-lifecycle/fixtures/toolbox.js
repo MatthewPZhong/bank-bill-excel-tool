@@ -26,6 +26,7 @@ async function runBrowserCase(caseIndex) {
     const api = {
       merge: async () => { calls.merge += 1; return { status: 'cancelled' }; },
       splitRead: async () => { calls.read += 1; return readResult(); },
+      splitCancelRead: async () => ({ status: 'cancelled' }),
       splitExport: async (payload) => { calls.exports.push(payload); return { status: 'cancelled' }; },
       ...overrides
     };
@@ -299,11 +300,264 @@ async function runBrowserCase(caseIndex) {
     cancelled.dispose(); passed.push('合并成功取消失败、路径转义和二十条格式提示');
   }
 
+  if (caseIndex === 12) {
+    const loads = [], cancellations = [];
+    const env = setup({
+      splitRead: async (request) => {
+        equal(request.version, 2, '真实选择入口请求 v2');
+        equal(request.scanKind, 'metadata', '选择入口只请求 metadata');
+        return readResult({ version: 2, valuesState: 'not-requested', valuesByField: undefined, headers: ['Currency'] });
+      },
+      splitReadValues: (request) => { const pending = deferred(); loads.push({ request, pending }); return pending.promise; },
+      splitCancelRead: async (request) => { cancellations.push(request.requestId); return { status: 'cancelled' }; }
+    });
+    click(query(env.parent, '[data-action="split-import"]')); await tick();
+    const picker = env.root.lastElementChild;
+    const values = query(picker, '.toolbox-split-values-dropdown-btn');
+    equal(loads.length, 0, '默认首字段和打开视图不自动补扫');
+    assert(!values.disabled, '单列未请求入口可操作');
+    values.click(); await tick();
+    equal(loads.length, 1, '首次点击加载默认列');
+    assert(values.disabled && query(picker, '[data-action="complete"]').disabled, '加载中禁止选值提交');
+    loads[0].pending.resolve({ status: 'failed', message: '模拟资源不足' }); await tick();
+    assert(!values.disabled && picker.textContent.includes('模拟资源不足'), '失败可重试且不是空列');
+    values.click(); await tick();
+    const request = loads[1].request;
+    loads[1].pending.resolve({ ...request, status: 'success', valuesState: 'complete', values: [] }); await tick();
+    assert(values.disabled && picker.textContent.includes('该列为空'), '完成的空列才显示空列');
+    change(query(picker, '[data-field="split-by-rows"]'), true);
+    input(query(picker, '[data-field="rows-per-file"]'), '10');
+    assert(!query(picker, '[data-action="complete"]').disabled, 'rows 不依赖字段值');
+    env.dispose(); passed.push('v2 默认首字段首次加载、失败重试、空列与 rows 独立');
+  }
+
+  if (caseIndex === 13) {
+    const loads = [], cancellations = [];
+    const env = setup({
+      splitRead: async () => readResult({ version: 2, valuesState: 'not-requested', valuesByField: undefined }),
+      splitReadValues: (request) => { const pending = deferred(); loads.push({ request, pending }); return pending.promise; },
+      splitCancelRead: async (request) => { cancellations.push(request.requestId); return { status: 'cancelled' }; }
+    });
+    click(query(env.parent, '[data-action="split-import"]')); await tick();
+    let picker = env.root.lastElementChild;
+    query(picker, '.toolbox-split-values-dropdown-btn').click(); await tick();
+    const field = query(picker, '.toolbox-split-picker-field');
+    field.value = '1'; field.dispatchEvent(new Event('change')); await tick();
+    equal(loads.length, 1, '切字段不补扫');
+    equal(cancellations, [loads[0].request.requestId], '撤销旧列请求');
+    loads[0].pending.resolve({ ...loads[0].request, status: 'success', valuesState: 'complete', values: ['OLD'] }); await tick();
+    assert(!picker.textContent.includes('OLD'), '迟到响应不写当前列');
+    change(query(picker, '[data-field="multiple-files-enabled"]'), true);
+    picker = env.root.lastElementChild;
+    click(query(picker, '[data-action="add-group"]'));
+    let groups = picker.querySelectorAll('.toolbox-split-group');
+    query(groups[0], '[data-role="values-button"]').click();
+    query(groups[1], '[data-role="values-button"]').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    equal(loads.length, 2, '多组相同字段只补扫一次');
+    const request = loads[1].request;
+    loads[1].pending.resolve({ ...request, status: 'success', valuesState: 'complete', values: ['A', 'B'] }); await tick();
+    change(query(picker, '.new-account-checkbox'), true);
+    groups = picker.querySelectorAll('.toolbox-split-group');
+    assert(query(groups[0], '[data-role="values-button"]').textContent !== query(groups[1], '[data-role="values-button"]').textContent,
+      '同字段共享值列表，选中项仍属于各自分组');
+    change(query(picker, '[data-field="multiple-files-enabled"]'), false);
+    picker = env.root.lastElementChild;
+    query(picker, '.toolbox-split-values-dropdown-btn').click(); await tick();
+    change(query(picker, '[data-field="split-by-rows"]'), true); await tick();
+    const last = loads.at(-1);
+    if (last.request.field === 'Currency') {
+      assert(cancellations.includes(last.request.requestId), '切 rows 取消不再需要的补扫');
+      last.pending.resolve({ ...last.request, status: 'success', valuesState: 'complete', values: ['LATE'] }); await tick();
+      assert(!picker.textContent.includes('LATE'), 'rows 不接纳迟到字段值');
+    }
+    env.dispose(); passed.push('v2 切列取消、迟到隔离、多组去重及独立选中项');
+  }
+
+
+  if (caseIndex >= 14 && caseIndex <= 16) {
+    const directions = caseIndex === 16 ? [true, false] : [caseIndex === 14];
+    for (const toMultiple of directions) {
+      const loads = [], cancellations = [];
+      const env = setup({
+        splitRead: async () => readResult({ version: 2, valuesState: 'not-requested', valuesByField: undefined, headers: ['Currency'] }),
+        splitReadValues: (request) => { const pending = deferred(); loads.push({ request, pending }); return pending.promise; },
+        splitCancelRead: async (request) => { cancellations.push(request.requestId); return { status: 'cancelled' }; }
+      });
+      click(query(env.parent, '[data-action="split-import"]')); await tick();
+      if (!toMultiple) change(query(env.root.lastElementChild, '[data-field="multiple-files-enabled"]'), true);
+      const old = env.root.lastElementChild;
+      query(old, '.toolbox-split-values-dropdown-btn').click(); await tick();
+      assert(query(old, '.toolbox-split-values-dropdown-btn').disabled, '旧视图确实在等待');
+      change(query(old, '[data-field="multiple-files-enabled"]'), toMultiple);
+      const picker = env.root.lastElementChild;
+      assert(picker !== old && !old.isConnected, '替换并销毁旧视图');
+      equal(cancellations, [], '新视图仍需同一列，不取消共享请求');
+      equal(loads.length, 1, '切模式不重复扫描');
+      let current = loads[0];
+      if (caseIndex === 16) {
+        current.pending.resolve({ status: 'failed', message: '模拟扫描失败' }); await tick();
+        assert(!query(picker, '.toolbox-split-values-dropdown-btn').disabled, '新视图收到失败，可重试');
+        assert(picker.textContent.includes('模拟扫描失败'), '新视图展示失败原因');
+        query(picker, '.toolbox-split-values-dropdown-btn').click(); await tick();
+        equal(loads.length, 2, '用户重试才发第二个请求');
+        current = loads[1];
+      }
+      current.pending.resolve({ ...current.request, status: 'success', valuesState: 'complete', values: ['USD'] }); await tick();
+      const values = query(picker, '.toolbox-split-values-dropdown-btn');
+      assert(!values.disabled && values.textContent !== '读取中…', '新视图收到完成状态');
+      if (caseIndex !== 16) {
+        assert(query(picker, '.toolbox-split-values-floating-panel').hidden, '旧视图回调不打开新视图面板');
+        values.click();
+      }
+      change(query(picker, '.new-account-checkbox'), true);
+      if (toMultiple) input(query(picker, '.toolbox-split-file-name-input'), 'result');
+      assert(!query(picker, '[data-action="complete"]').disabled, '新视图可选值并提交');
+      click(query(picker, '[data-action="complete"]')); await tick();
+      equal(env.calls.exports.length, 1, '只导出一次');
+      equal(toMultiple ? env.calls.exports[0].groups[0].values : env.calls.exports[0].values, ['USD'], '提交成功接纳的值');
+      equal(env.errors, [], '替换无宿主生命周期错误');
+      env.dispose();
+    }
+    passed.push(['v2 单列加载中单文件切多文件', 'v2 单列加载中多文件切单文件', 'v2 双向切模式后失败可重试'][caseIndex - 14]);
+  }
+
+  if (caseIndex === 17 || caseIndex === 18) {
+    const loads = [], cancellations = [];
+    const env = setup({
+      splitRead: async () => readResult({ version: 2, valuesState: 'not-requested', valuesByField: undefined }),
+      splitReadValues: (request) => { const pending = deferred(); loads.push({ request, pending }); return pending.promise; },
+      splitCancelRead: async (request) => { cancellations.push(request.requestId); return { status: 'cancelled' }; }
+    });
+    click(query(env.parent, '[data-action="split-import"]')); await tick();
+    change(query(env.root.lastElementChild, '[data-field="multiple-files-enabled"]'), true);
+    const picker = env.root.lastElementChild;
+    click(query(picker, '[data-action="add-group"]'));
+    let groups = picker.querySelectorAll('.toolbox-split-group');
+    query(groups[0], '[data-role="values-button"]').click(); await tick();
+    assert(query(groups[1], '[data-role="values-button"]').disabled, '第二组共享读取中状态');
+    if (caseIndex === 17) click(query(groups[0], '.toolbox-split-delete-group'));
+    else {
+      const field = query(groups[0], '.toolbox-split-picker-field');
+      field.value = '1'; field.dispatchEvent(new Event('change'));
+    }
+    equal(cancellations, [], '剩余分组仍需原字段，不取消请求');
+    loads[0].pending.resolve({ ...loads[0].request, status: 'success', valuesState: 'complete', values: ['USD', 'EUR'] }); await tick();
+    groups = picker.querySelectorAll('.toolbox-split-group');
+    const remaining = groups[groups.length - 1];
+    assert(!query(remaining, '[data-role="values-button"]').disabled, '发起组变化后其余组仍收到成功');
+    assert(query(picker, '.toolbox-split-values-floating-panel').hidden, '失效发起组不打开面板');
+    query(remaining, '[data-role="values-button"]').click();
+    change(query(picker, '.new-account-checkbox'), true);
+    input(query(remaining, '.toolbox-split-file-name-input'), 'currency');
+    if (caseIndex === 18) {
+      equal(query(groups[0], '[data-role="values-button"]').textContent, '点击读取', '新字段不接纳旧值');
+      query(groups[0], '[data-role="values-button"]').click(); await tick();
+      equal(loads[1].request.field, 'Account', '新字段独立扫描');
+      loads[1].pending.resolve({ ...loads[1].request, status: 'success', valuesState: 'complete', values: ['A'] }); await tick();
+      change(query(picker, '.new-account-checkbox'), true);
+      input(query(groups[0], '.toolbox-split-file-name-input'), 'account');
+    }
+    assert(!query(picker, '[data-action="complete"]').disabled, '各存活组可正常提交');
+    click(query(picker, '[data-action="complete"]')); await tick();
+    equal(env.calls.exports[0].groups.map((g) => [g.field, g.values]), caseIndex === 17
+      ? [['Currency', ['USD']]] : [['Account', ['A']], ['Currency', ['USD']]], '分组字段和值保持独立');
+    equal(loads.length, caseIndex === 17 ? 1 : 2, '同字段没有重复扫描');
+    equal(env.errors, [], '共享请求完成没有生命周期错误');
+    env.dispose(); passed.push(caseIndex === 17 ? 'v2 删除共享请求发起组后其余组可选值提交' : 'v2 发起组改字段后其余组接纳原字段结果');
+  }
+
+  if (caseIndex === 19) {
+    const loads = [], cancellations = [];
+    const env = setup({
+      splitRead: async () => readResult({ version: 2, valuesState: 'not-requested', valuesByField: undefined }),
+      splitReadValues: (request) => { const pending = deferred(); loads.push({ request, pending }); return pending.promise; },
+      splitCancelRead: async (request) => { cancellations.push(request.requestId); return { status: 'cancelled' }; }
+    });
+    click(query(env.parent, '[data-action="split-import"]')); await tick();
+    query(env.root.lastElementChild, '.toolbox-split-values-dropdown-btn').click(); await tick();
+    change(query(env.root.lastElementChild, '[data-field="multiple-files-enabled"]'), true);
+    click(query(env.root.lastElementChild, '[data-action="cancel"]')); await tick();
+    equal(cancellations, [loads[0].request.requestId], '最后使用者关闭时恰好取消一次');
+    loads[0].pending.resolve({ ...loads[0].request, status: 'success', valuesState: 'complete', values: ['LATE'] }); await tick();
+    assert(env.handle.isTop() && env.root.children.length === 1 && !env.root.textContent.includes('LATE'), '迟到结果不复活视图');
+    equal(env.calls.exports, [], '关闭不触发导出');
+    equal(env.errors, [], '关闭后不通知已销毁消费者');
+    env.dispose(); passed.push('v2 模式交接后关闭取消共享请求且隔离迟到结果');
+  }
+
+
+  if (caseIndex >= 20 && caseIndex <= 23) {
+    const labels = ['v2 迟到读取不覆盖其他分组缓存面板', 'v2 两组乱序返回只打开最近请求的面板',
+      'v2 旧请求先完成仍等待最近请求的面板', 'v2 关闭面板使迟到打开意图失效且缓存可复用'];
+    const loads = [];
+    const env = setup({
+      splitRead: async () => readResult({ version: 2, valuesState: 'not-requested', valuesByField: undefined }),
+      splitReadValues: (request) => { const pending = deferred(); loads.push({ request, pending }); return pending.promise; }
+    });
+    try {
+      click(query(env.parent, '[data-action="split-import"]')); await tick();
+      change(query(env.root.lastElementChild, '[data-field="multiple-files-enabled"]'), true);
+      const picker = env.root.lastElementChild;
+      click(query(picker, '[data-action="add-group"]'));
+      let groups = picker.querySelectorAll('.toolbox-split-group');
+      const accountField = query(groups[1], 'select');
+      accountField.value = '1'; accountField.dispatchEvent(new Event('change'));
+      groups = picker.querySelectorAll('.toolbox-split-group');
+      const currency = query(groups[0], '[data-role="values-button"]');
+      const account = query(groups[1], '[data-role="values-button"]');
+      const panel = query(picker, '.toolbox-split-values-floating-panel');
+      const resolveField = async (field, value) => {
+        const load = loads.find((item) => item.request.field === field);
+        assert(load, `没有 ${field} 请求`);
+        load.pending.resolve({ ...load.request, status: 'success', valuesState: 'complete', values: [value] });
+        await tick();
+      };
+      if (caseIndex === 20 || caseIndex === 23) {
+        account.click(); await tick();
+        await resolveField('Account', 'ACCOUNT_B');
+        account.click();
+      }
+      currency.click(); await tick();
+      account.focus(); account.click(); await tick();
+      if (caseIndex === 22) {
+        await resolveField('Currency', 'CURRENCY_A');
+        assert(panel.hidden, '旧请求先完成时不抢先打开面板');
+      }
+      if (caseIndex === 21 || caseIndex === 22) await resolveField('Account', 'ACCOUNT_B');
+      equal(panel.textContent, 'ACCOUNT_B', '用户最近打开的是 Account');
+      // 未缓存请求加载时按钮会禁用；返回后用户才能将焦点留在该按钮。
+      account.focus();
+      if (caseIndex === 23) { account.click(); assert(panel.hidden, '用户显式关闭面板'); }
+      if (caseIndex !== 22) await resolveField('Currency', 'CURRENCY_A');
+      if (caseIndex === 23) {
+        assert(panel.hidden, '迟到请求不复活已关闭面板');
+        account.click();
+      }
+      equal(panel.textContent, 'ACCOUNT_B', '迟到 Currency 不替换 Account 面板');
+      equal([currency, account].map((button) => button.getAttribute('aria-expanded')), ['false', 'true'], '展开归属仍是第二组');
+      equal(document.activeElement.closest('.toolbox-split-group').dataset.groupId, groups[1].dataset.groupId, '焦点仍属于第二组');
+      change(query(panel, 'input'), true);
+      equal([currency.textContent, account.textContent], [' ', '全部'], '当前选值只写入 Account 分组');
+      currency.click();
+      equal(panel.textContent, 'CURRENCY_A', '迟到结果已缓存，主动打开即可使用');
+      equal(loads.length, 2, '缓存重新打开不重复请求');
+      change(query(panel, 'input'), true);
+      input(query(groups[0], '.toolbox-split-file-name-input'), 'currency');
+      input(query(groups[1], '.toolbox-split-file-name-input'), 'account');
+      click(query(picker, '[data-action="complete"]')); await tick();
+      equal(env.calls.exports[0].groups.map((group) => [group.field, group.values]),
+        [['Currency', ['CURRENCY_A']], ['Account', ['ACCOUNT_B']]], '最终分组字段和值仍各自独立');
+      equal(env.errors, [], '没有宿主生命周期错误');
+      passed.push(labels[caseIndex - 20]);
+    } finally { env.dispose(); }
+  }
+
   return passed;
 }
 
 module.exports = async ({ js, load, reset, assert, test }) => {
-  const labels = ["读取锁、父子会话、单多模式替换、草稿转换、取消", "按行拆分、原 token、重复提交拒绝、busy、结果告警返回", "单字段选值导出与保存取消", "多文件合法命名、token 与重复提交拒绝", "按行计数与最大文件数校验", "强制销毁后的读取晚到无效", "强制销毁后的导出晚到无效", "Main stale 错误原样反馈、不重试旧 token", "空字段、空选、切字段重置不发导出", "多文件非法名、重复名、字段继承和一至八组边界", "缺读取身份先失败，预提交拒绝恢复可操作态", "合并成功取消失败、路径转义和二十条格式提示"];
+  const labels = ["读取锁、父子会话、单多模式替换、草稿转换、取消", "按行拆分、原 token、重复提交拒绝、busy、结果告警返回", "单字段选值导出与保存取消", "多文件合法命名、token 与重复提交拒绝", "按行计数与最大文件数校验", "强制销毁后的读取晚到无效", "强制销毁后的导出晚到无效", "Main stale 错误原样反馈、不重试旧 token", "空字段、空选、切字段重置不发导出", "多文件非法名、重复名、字段继承和一至八组边界", "缺读取身份先失败，预提交拒绝恢复可操作态", "合并成功取消失败、路径转义和二十条格式提示", "v2 默认首字段首次加载、失败重试、空列与 rows 独立", "v2 切列取消、迟到隔离、多组去重及独立选中项", "v2 单列加载中单文件切多文件", "v2 单列加载中多文件切单文件", "v2 双向切模式后失败可重试", "v2 删除共享请求发起组后其余组可选值提交", "v2 发起组改字段后其余组接纳原字段结果", "v2 模式交接后关闭取消共享请求且隔离迟到结果", "v2 迟到读取不覆盖其他分组缓存面板", "v2 两组乱序返回只打开最近请求的面板", "v2 旧请求先完成仍等待最近请求的面板", "v2 关闭面板使迟到打开意图失效且缓存可复用"];
   for (let index = 0; index < labels.length; index += 1) {
     await test(labels[index], async () => {
       await reset();

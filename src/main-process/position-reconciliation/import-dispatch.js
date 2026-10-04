@@ -1,4 +1,5 @@
 'use strict';
+const { memoryCarrierAdmission } = require('../memory-activity');
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -147,15 +148,15 @@ function dispatchPositionImportPreflight(input = {}) {
   };
   let worker;
   if (utilityProcess) {
-    worker = utilityProcess.fork(WORKER_ENTRY, [], {
+    worker = memoryCarrierAdmission(null).observe(utilityProcess.fork(WORKER_ENTRY, [], {
       env,
       stdio: 'pipe'
-    });
+    }));
   } else {
-    worker = forkChild(WORKER_ENTRY, [], {
+    worker = memoryCarrierAdmission(null).observe(forkChild(WORKER_ENTRY, [], {
       env,
       stdio: ['ignore', 'pipe', 'pipe', 'ipc']
-    });
+    }));
   }
 
   let settled = false;

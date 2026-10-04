@@ -2,12 +2,13 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { setImmediate: yieldIo } = require('node:timers/promises');
 const { createToolboxOutputWriter } = require('../toolbox-output-writer');
 const { ROWS_ACTION, ROWS_BUDGETS, assert, exactKeys, validatePlan, readPrivateJson, writePrivateJson, jsonBytes } = require('./contracts');
 const { createSealedCache, openSealedCache, checkCancelled, checkResources } = require('./cache');
+const { validateExecutionMemoryConfig } = require('../background-execution/execution-memory-config');
 
 async function executeRowsGeneration(input, signal, options = {}) {
+  const memoryConfig = options.memoryConfig ? validateExecutionMemoryConfig(options.memoryConfig) : null;
   exactKeys(input, ['version', 'planPath', 'planDescriptor', 'tokenId']);
   exactKeys(input.planDescriptor, ['byteSize', 'sha256']);
   assert(input.version === 1 && path.isAbsolute(input.planPath), '按行拆分任务消息非法');
@@ -19,11 +20,11 @@ async function executeRowsGeneration(input, signal, options = {}) {
     peakWorkerMemoryBytes = Math.max(peakWorkerMemoryBytes, memory.heapUsed + memory.external);
   };
   const observeResources = (cacheBytes, generatedBytes) => {
-    observeMemory(checkResources(plan.privateDirectory, cacheBytes, generatedBytes));
+    observeMemory(checkResources(plan.privateDirectory, cacheBytes, generatedBytes, memoryConfig));
   };
-  const cached = await createSealedCache(plan, signal, observeMemory, options.pollCommands);
+  const cached = await createSealedCache(plan, signal, observeMemory, options.pollCommands, memoryConfig);
   if (options.afterCache) await options.afterCache(plan, cached);
-  const { seal, reader } = openSealedCache(plan, cached.descriptor);
+  const { seal, reader } = openSealedCache(plan, cached.descriptor, memoryConfig);
   let active = null;
   const files = [];
   let generatedBytes = 0;
@@ -39,18 +40,19 @@ async function executeRowsGeneration(input, signal, options = {}) {
         normalizedHeaders: reader.header.normalizedHeaders,
         rawHeaderCells: reader.header.rawHeaderCells, headerRow: reader.header.headerRow,
         layoutBaseline: reader.header.sheetMeta, sourceRegistryResolver: reader.resolver,
+        memoryConfig, privateDirectory: plan.privateDirectory, boundedOutput: true,
         ...(options.maxRowsPerSheet ? { maxRowsPerSheet: options.maxRowsPerSheet } : {})
       });
       let rowsWritten = 0;
       let pendingBytes = 0;
       for (const row of reader.readRange(part.startRowSeq, part.endRowSeq, (size) => { pendingBytes += size; })) {
         checkCancelled(signal);
-        active.emitRow(row);
+        // 真正等待 worksheet → ZIP → 输出流的消费边界；同步测试 writer 显式兼容。
+        // eslint-disable-next-line no-await-in-loop
+        if (active.emitRowAsync) await active.emitRowAsync(row); else active.emitRow(row);
         rowsWritten += 1;
         if (rowsWritten % 128 === 0 || pendingBytes >= 1024 ** 2) {
-          // 缓存回放可暂停，让 ZIP 输出处理积压并观察取消消息。
-          // eslint-disable-next-line no-await-in-loop
-          await yieldIo();
+          if (options.pollCommands) options.pollCommands();
           pendingBytes = 0;
           const currentBytes = fs.existsSync(part.generationPath) ? fs.statSync(part.generationPath).size : 0;
           observeResources(seal.byteSize, generatedBytes + currentBytes);

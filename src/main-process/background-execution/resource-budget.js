@@ -30,7 +30,7 @@ function platformParallelism() {
   return Array.isArray(cpus) && cpus.length > 0 ? cpus.length : 1;
 }
 
-function createPlatformResourceBudgets(options = {}) {
+function createPlatformResourceEnvelope(options = {}) {
   const parallelism = positiveSafeInteger(
     options.availableParallelism === undefined
       ? platformParallelism()
@@ -57,20 +57,31 @@ function createPlatformResourceBudgets(options = {}) {
     'systemReserveBytes'
   );
   const cpuSlots = Math.max(1, Math.min(4, parallelism - 2));
-  return Object.freeze({
+  const hardBudgets = Object.freeze({
     cpuSlots,
     workerThreadSlots: Math.max(1, cpuSlots + 1),
     utilityProcessSlots: 1,
     ioHeavySlots: 2,
+    memoryBytes: memoryHardCeilingBytes
+  });
+  const compatibilityBudgets = Object.freeze({
+    ...hardBudgets,
     memoryBytes: Math.min(
       memoryHardCeilingBytes,
       Math.max(0, freeMemoryBytes - systemReserveBytes)
     )
   });
+  return Object.freeze({ hardBudgets, compatibilityBudgets });
+}
+
+// 未迁移 runtime 继续使用原公式；新机制显式取得 envelope 后才有固定账本。
+function createPlatformResourceBudgets(options = {}) {
+  return createPlatformResourceEnvelope(options).compatibilityBudgets;
 }
 
 module.exports = {
   COMPATIBILITY_MINIMUM_MEMORY_HARD_CEILING_BYTES,
   DEFAULT_SYSTEM_RESERVE_BYTES,
+  createPlatformResourceEnvelope,
   createPlatformResourceBudgets
 };

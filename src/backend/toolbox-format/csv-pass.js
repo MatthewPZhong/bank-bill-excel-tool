@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { FileValidationError } = require('../file-service/common');
-const { readRows } = require('../file-service/readers');
+const { readRows, readCsvRowsWithinBudget } = require('../file-service/readers');
 const {
   createToolboxCell,
   createToolboxRow,
@@ -77,11 +77,12 @@ function assertSynchronousCallback(result, callbackName) {
 }
 
 class ToolboxCsvPass {
-  constructor({ filePath, rows, sourceRegistry }) {
+  constructor({ filePath, rows, sourceRegistry, maxRowBytes }) {
     this.filePath = filePath;
     this.sourceFile = path.basename(filePath);
     this.format = 'csv';
     this.rows = rows;
+    this.maxRowBytes = maxRowBytes;
     this.sourceRegistry = sourceRegistry;
     this.sourceRegistryId = sourceRegistry.sourceRegistryId;
     this.closed = false;
@@ -142,6 +143,12 @@ class ToolboxCsvPass {
       for (let rowOffset = 0; rowOffset < this.rows.length; rowOffset += 1) {
         assertNotCancelled(options.cancelToken);
         const legacyRow = Array.isArray(this.rows[rowOffset]) ? this.rows[rowOffset] : [];
+        if (this.maxRowBytes !== undefined) {
+          // 在创建带样式的 cell 对象前计入结构及词法值，防止极宽单行击穿低档堆。
+          const rowBytes = legacyRow.reduce((bytes, value) => bytes + 512 + String(value ?? '').length * 4, 64);
+          if (rowBytes > this.maxRowBytes) throw new FileValidationError('EXECUTION_INPUT_PROFILE_UNSUITABLE',
+            '当前 CSV 单行结构超出本次低内存读取容量，请在资源充足后重试');
+        }
         const cells = legacyRow.map((value, columnIndex) => {
           const lexicalValue = value == null ? '' : String(value);
           explicitCellCount += 1;
@@ -227,14 +234,19 @@ class ToolboxCsvPass {
 
 async function openToolboxCsvPass(filePath, options = {}) {
   const absolutePath = path.resolve(filePath);
-  const rows = readLegacyCsvRowsAllowEmpty(absolutePath);
+  assertNotCancelled(options.cancelToken);
+  const rows = options.csvMaxSourceBytes === undefined
+    ? readLegacyCsvRowsAllowEmpty(absolutePath)
+    : readCsvRowsWithinBudget(absolutePath, options.csvMaxSourceBytes);
+  assertNotCancelled(options.cancelToken);
   const sourceRegistryId = options.sourceRegistryId ||
     `csv-${crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex')}`;
   const sourceRegistry = new SourceStyleRegistry(sourceRegistryId);
   return new ToolboxCsvPass({
     filePath: absolutePath,
     rows,
-    sourceRegistry
+    sourceRegistry,
+    maxRowBytes: options.csvMaxSourceBytes === undefined ? undefined : options.maxRowBytes
   });
 }
 

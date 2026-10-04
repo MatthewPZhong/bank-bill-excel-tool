@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 2,
+  "status": "qualified",
+  "platform": "win32",
+  "arch": "x64",
+  "approval": {
+    "kind": "manual-acceptance",
+    "result": "PASS",
+    "reference": "manual-v3.2.11-2026-10-02",
+    "releaseVersion": "3.2.11",
+    "confirmedAt": "2026-10-02",
+    "note": "用户确认人工测试通过，并授权以人工验收确认启用当前配置；不要求构建及压力报告摘要作为启用前提。"
+  },
+  "profiles": [
+    {
+      "profileId": "split-prepare-normal-v1",
+      "policyDigest": "28821d9ee5476db5e0653fe5fd265c29490d15122bc7ae1a6be7594849cdeee2"
+    },
+    {
+      "profileId": "split-prepare-low-v1",
+      "policyDigest": "f6e8211ee73a7f8a73583613110d9606d0b9c72d58ae06d91d6047b72610c9d1"
+    },
+    {
+      "profileId": "rows-generation-normal-v1",
+      "policyDigest": "c77149d5783317e16acc097a10b3cea9ac1c6dc755ac6afe1dc633911bbdf579"
+    },
+    {
+      "profileId": "rows-generation-low-v1",
+      "policyDigest": "60976530251a05d06bb2cdf27a0e711d7264b035af66ea1dc9a848072e1888bd"
+    },
+    {
+      "profileId": "rows-io-normal-v1",
+      "policyDigest": "8b4046bae410b1d101a1d3e28732ca24d3b6f5779eb37f56333476874e6a1ebd"
+    },
+    {
+      "profileId": "rows-io-low-v1",
+      "policyDigest": "3904f16600a8233cfbd4e18f99a5f99bfa38cfb5a4309a9349366ec6736884c9"
+    },
+    {
+      "profileId": "publication-io-normal-v1",
+      "policyDigest": "78dbd59b83dac3e6cc71826212ae30b3c35b9a8da67f1973448fd46db39260d1"
+    },
+    {
+      "profileId": "publication-io-low-v1",
+      "policyDigest": "0f9dae6707ddce3aa0d3d4834cb4016d312c2f8108e78e5173408027833d9a39"
+    },
+    {
+      "profileId": "bizop-import-normal-v1",
+      "policyDigest": "fdf394032f777b89d80646a62ee088ced1904adf8b42d22eb62847f45ebe549f"
+    },
+    {
+      "profileId": "bizop-import-low-v1",
+      "policyDigest": "fd0a5e8e83c1da2b7cedb95c097539d5588260ec7136cc3008c9aae2ad6b0f09"
+    },
+    {
+      "profileId": "bizop-compute-normal-v1",
+      "policyDigest": "f6daff7ccdb49a502cba79a235b007f0f4cccd6ffa0872cd31b1f2a55b6a0326"
+    },
+    {
+      "profileId": "bizop-compute-low-v1",
+      "policyDigest": "0579ce79a6addf4779141c7b309220eaede5763aa8f806bfd10856626abeedea"
+    },
+    {
+      "profileId": "bizop-export-normal-v1",
+      "policyDigest": "bf3d2383d59301efe688d122cd0aaec05bc40708a3f706547ce1c52fca94e6a6"
+    },
+    {
+      "profileId": "bizop-export-low-v1",
+      "policyDigest": "5a2d16ba5c51b39b0eb4fcf4fc9202e35269aa635229fb14974427e14eab2caa"
+    },
+    {
+      "profileId": "bizop-io-normal-v1",
+      "policyDigest": "fc84d6b77d1cadb610a6de825720a51712e792560175ed13891a50bd8191e814"
+    },
+    {
+      "profileId": "bizop-io-low-v1",
+      "policyDigest": "0f946f89b39d3c9a92e5ab3fe0e26a8d4acf6957ae099f40373c6910671a5919"
+    },
+    {
+      "profileId": "bizop-maintenance-normal-v1",
+      "policyDigest": "0c62a8d968b0ab12eb28423d473b398713d145f826215574ee9b1d5184694ad3"
+    },
+    {
+      "profileId": "bizop-maintenance-low-v1",
+      "policyDigest": "60dc97a50bdc811ec63f08a69ce1b1dbd0b8e92cd726660c0f828c816683bd1b"
+    }
+  ]
+}

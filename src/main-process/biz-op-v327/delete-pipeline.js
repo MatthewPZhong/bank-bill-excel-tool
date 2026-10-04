@@ -1,9 +1,11 @@
 'use strict';
 
+const { checkExecutionMemory } = require('../background-execution/execution-memory-options');
 const { fail, hash, snapshot } = require('./contracts');
 const { normalizeSelection } = require('./delete-preview');
 
-async function runDeletePipeline({ payloadStore, taskRunId, candidateRef, intentDigest, sourceRef, cancelToken }) {
+async function runDeletePipeline({ payloadStore, taskRunId, candidateRef, intentDigest, sourceRef, cancelToken, memoryConfig = null }) {
+  checkExecutionMemory(memoryConfig);
   if (cancelToken.cancelled) fail('BIZOP_CANCELLED');
   const source = payloadStore.readDocument(sourceRef.relativePath, sourceRef.digest).value;
   if (source.schemaVersion !== 1 || source.taskRunId !== taskRunId || source.intentDigest !== intentDigest
@@ -17,6 +19,7 @@ async function runDeletePipeline({ payloadStore, taskRunId, candidateRef, intent
   const result = snapshot({ schemaVersion: 1, taskRunId, candidateRef, intentDigest, previewId: source.previewId,
     closureDigest: source.closureDigest, mode: source.mode, datasetIds: selection.datasetIds, runIds,
     generation: source.closure.generation });
+  checkExecutionMemory(memoryConfig);
   if (cancelToken.cancelled) fail('BIZOP_CANCELLED');
   const document = payloadStore.writeDocument(`operations/${taskRunId}/${candidateRef}.json`, result);
   return { contractVersion: 1, candidateRef, sha256: document.digest, rowCount: result.datasetIds.length + result.runIds.length };

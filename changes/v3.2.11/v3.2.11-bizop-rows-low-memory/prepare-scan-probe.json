@@ -1,0 +1,387 @@
+{
+  "version": 1,
+  "scope": "synthetic-prepare-scan-only",
+  "productionEvidence": false,
+  "injectedAvailableMemory": false,
+  "environment": {
+    "platform": "darwin",
+    "release": "24.6.0",
+    "arch": "arm64",
+    "node": "v25.8.0",
+    "electron": null,
+    "totalMemoryBytes": 51539607552
+  },
+  "baseCommit": "18b82b4328cf5e00c1b2549d373a5b2f2677215c",
+  "dependencyLockSha256": "6360f29a82d5f4c1d1003d9e61e6a4db678f398aab5043c23c46371e2f215e65",
+  "input": {
+    "rows": 20000,
+    "columns": 4,
+    "uniqueTextColumns": 3,
+    "sourceBytes": 694758,
+    "sha256": "b0160bc849462baba9ff613086f38fb357f98644acf7947a6eb484b9db3646a6"
+  },
+  "reports": [
+    {
+      "mode": "legacy",
+      "workerLimits": {
+        "maxOldGenerationSizeMb": 4096
+      },
+      "exitCode": 0,
+      "result": {
+        "ok": true,
+        "headers": [
+          "序号",
+          "字段一",
+          "字段二",
+          "字段三"
+        ],
+        "dataRowCount": 20000,
+        "codeInputs": [
+          {
+            "path": "scripts/verify-low-memory-workflows.js",
+            "sha256": "d35fedee7617309f5156083ee1b3d88396c5bbbd36541330dd8407fae1557096"
+          },
+          {
+            "path": "src/backend/file-service/common.js",
+            "sha256": "054383092b727e5c3ceadfac5ba9db4881c2af5c6cc0c3a2c28781d8069b126c"
+          },
+          {
+            "path": "src/backend/file-service/readers.js",
+            "sha256": "3e8831e0b2ad6c450ce7f086caab8db5ac48821ba08b465a03e403b995dbe235"
+          },
+          {
+            "path": "src/backend/toolbox-format/biff8-colors.js",
+            "sha256": "88e23e3a84404d04adc7cb5c729de35e08c736177a7b0933a1d168505ac63708"
+          },
+          {
+            "path": "src/backend/toolbox-format/biff8-overlay.js",
+            "sha256": "2b0dd14e9226b3541c092eca8658ca94956e1671751576728a59b15894ba0297"
+          },
+          {
+            "path": "src/backend/toolbox-format/biff8-pass.js",
+            "sha256": "95f50f743e2e9f9edb00b115a62adbc1fee0f40006d2505a19750164a821a827"
+          },
+          {
+            "path": "src/backend/toolbox-format/biff8-records.js",
+            "sha256": "a63db4b860ae730ff736bb969458182cd77d5a7e1a79738503ed2b1dce90bad2"
+          },
+          {
+            "path": "src/backend/toolbox-format/csv-pass.js",
+            "sha256": "2e08285846c486d445c1ac749c8a8f7fc31cb374fdcf2992aaf925838da038c4"
+          },
+          {
+            "path": "src/backend/toolbox-format/xlsx-pass.js",
+            "sha256": "0f3005ea2b59afea925e6014566382862317e47072e4cc68b76a92cb79322a77"
+          },
+          {
+            "path": "src/backend/toolbox-xlsx-stream/bounded-values-accumulator.js",
+            "sha256": "8e4418d3e201ced777bd371bb704f0c0a5283d42c494ceb1c9732e9e747823c8"
+          },
+          {
+            "path": "src/backend/xlsx/excel-text.js",
+            "sha256": "e685c59e3b0f2054d69f5f057aa33dfd20bac7076d49e08916eb2715137e6f80"
+          },
+          {
+            "path": "src/backend/xlsx/legacy/entry-size-preflight.js",
+            "sha256": "77ada2f7f31b99dbc9b35fe2ccb0803757c5965da2df031113c5a2dc003f8258"
+          },
+          {
+            "path": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+            "sha256": "d25bbee4e6e02307b34f224f3355b99feabb8620a6c73952b6072ea1da2d02dc"
+          },
+          {
+            "path": "src/backend/xlsx/model.js",
+            "sha256": "2731774546381a40230d10f7f7294c2f9a216fbcd86dc2156bb2edd3ab3bf8dc"
+          },
+          {
+            "path": "src/backend/xlsx/number-date.js",
+            "sha256": "cc6679d8cb7c1707a7314dbbf91b1e4ef8066b1ddbf88b1394d40ddbf9976555"
+          },
+          {
+            "path": "src/backend/xlsx/ooxml-namespaces.js",
+            "sha256": "6567cb492247f222f1b4979d8d2779db65b74775c4364ae6c1821065c0ab543b"
+          },
+          {
+            "path": "src/backend/xlsx/shared-strings-provider.js",
+            "sha256": "5a3d52fd7a6512fae929f433d24c0c18f889fe5fc8e3db6751a442c15d83bf2c"
+          },
+          {
+            "path": "src/backend/xlsx/style-registry.js",
+            "sha256": "e2b0a71c99eb14bd7f28d1e7369d3efe85ced006876ae42779f2705e1afc47ad"
+          },
+          {
+            "path": "src/backend/xlsx/workbook-parts.js",
+            "sha256": "0f9e889ab737429b860e9d8496206eb9d8bbf9da747cd3e18df2cbf562c71c36"
+          },
+          {
+            "path": "src/backend/xlsx/xlsx-sheet-scanner.js",
+            "sha256": "a58e236130399f66844a5568ad3fbfcddb5fd98cbfe0c1acaf771704fa0d150d"
+          },
+          {
+            "path": "src/backend/xlsx/zip-lifecycle.js",
+            "sha256": "f05688642b8fe7995c5a148c4d4a9f27dca093879ba5e6f1148802aaade24fd6"
+          },
+          {
+            "path": "src/backend/xlsx/zip-reader.js",
+            "sha256": "2b3d3bfb7f95867263fccd700257a852edaecad5153b89157d19b40e4cbd75b1"
+          },
+          {
+            "path": "src/main-process/background-execution/memory-telemetry.js",
+            "sha256": "c96c49d6a6ba825d8f512ed8006439c0cf769f37b1d54a9cbc74f53f8380d9b4"
+          },
+          {
+            "path": "src/main-process/background-execution/resource-lease.js",
+            "sha256": "1a66af339c4bb82d44850b52fdb0dacf10b42faf841b4f642f969852984cf802"
+          },
+          {
+            "path": "src/main-process/toolbox-format-io.js",
+            "sha256": "91348b50a93b1e320714ac9c15b9670b250c4716f0d199c0a504f3642db2ec89"
+          },
+          {
+            "path": "src/main-process/toolbox-format-operations.js",
+            "sha256": "b4e7512be50a91564f353f38ec0b48a3f68ec6f30cd9c30cad7a6fd5267310e1"
+          },
+          {
+            "path": "src/main-process/toolbox-input-kind.js",
+            "sha256": "203deee171705d4a36f3f7b35ccc97eaf0506159a048a14d153e7d5e0a3e1270"
+          },
+          {
+            "path": "src/main-process/toolbox-output-writer.js",
+            "sha256": "c5d47a1c4d31287ab850779ea0ba273e3e4fe8387f212dc4d3af7579eaa5249a"
+          },
+          {
+            "path": "src/main-process/toolbox.js",
+            "sha256": "2573c5cc60235a2af6545d287fc5b8afa52efae593a8d6f8dc3f66809ac00397"
+          },
+          {
+            "path": "src/main-process/workbook-watermark.js",
+            "sha256": "29f9779f35b162a95fe7981073cd82f3bac6a9fbed1142ea120d7ec5e271ec7d"
+          }
+        ],
+        "returnedValueFields": 4,
+        "elapsedMs": 1016.6417090000001,
+        "sampleCount": 20,
+        "heapUsedBytes": {
+          "min": 5183760,
+          "median": 51158632,
+          "max": 74176080,
+          "count": 20
+        },
+        "externalBytes": {
+          "min": 1868622,
+          "median": 5732936,
+          "max": 6015205,
+          "count": 20
+        },
+        "arrayBufferBytes": {
+          "min": 20619,
+          "median": 3577251,
+          "max": 3860544,
+          "count": 20
+        }
+      },
+      "failure": null,
+      "elapsedUntilExitMs": 1034.861916,
+      "sstRemoved": true,
+      "actualAvailableBytes": {
+        "min": 859979776,
+        "median": 860798976,
+        "max": 961363968,
+        "count": 22
+      },
+      "pidRssBytes": {
+        "min": 48939008,
+        "median": 192823296,
+        "max": 210567168,
+        "count": 22
+      }
+    },
+    {
+      "mode": "adaptive",
+      "workerLimits": {
+        "maxOldGenerationSizeMb": 192,
+        "maxYoungGenerationSizeMb": 16
+      },
+      "exitCode": 0,
+      "result": {
+        "ok": true,
+        "headers": [
+          "序号",
+          "字段一",
+          "字段二",
+          "字段三"
+        ],
+        "dataRowCount": 20000,
+        "codeInputs": [
+          {
+            "path": "scripts/verify-low-memory-workflows.js",
+            "sha256": "d35fedee7617309f5156083ee1b3d88396c5bbbd36541330dd8407fae1557096"
+          },
+          {
+            "path": "src/backend/file-service/common.js",
+            "sha256": "054383092b727e5c3ceadfac5ba9db4881c2af5c6cc0c3a2c28781d8069b126c"
+          },
+          {
+            "path": "src/backend/file-service/readers.js",
+            "sha256": "3e8831e0b2ad6c450ce7f086caab8db5ac48821ba08b465a03e403b995dbe235"
+          },
+          {
+            "path": "src/backend/toolbox-format/biff8-colors.js",
+            "sha256": "88e23e3a84404d04adc7cb5c729de35e08c736177a7b0933a1d168505ac63708"
+          },
+          {
+            "path": "src/backend/toolbox-format/biff8-overlay.js",
+            "sha256": "2b0dd14e9226b3541c092eca8658ca94956e1671751576728a59b15894ba0297"
+          },
+          {
+            "path": "src/backend/toolbox-format/biff8-pass.js",
+            "sha256": "95f50f743e2e9f9edb00b115a62adbc1fee0f40006d2505a19750164a821a827"
+          },
+          {
+            "path": "src/backend/toolbox-format/biff8-records.js",
+            "sha256": "a63db4b860ae730ff736bb969458182cd77d5a7e1a79738503ed2b1dce90bad2"
+          },
+          {
+            "path": "src/backend/toolbox-format/csv-pass.js",
+            "sha256": "2e08285846c486d445c1ac749c8a8f7fc31cb374fdcf2992aaf925838da038c4"
+          },
+          {
+            "path": "src/backend/toolbox-format/xlsx-pass.js",
+            "sha256": "0f3005ea2b59afea925e6014566382862317e47072e4cc68b76a92cb79322a77"
+          },
+          {
+            "path": "src/backend/toolbox-xlsx-stream/bounded-values-accumulator.js",
+            "sha256": "8e4418d3e201ced777bd371bb704f0c0a5283d42c494ceb1c9732e9e747823c8"
+          },
+          {
+            "path": "src/backend/xlsx/excel-text.js",
+            "sha256": "e685c59e3b0f2054d69f5f057aa33dfd20bac7076d49e08916eb2715137e6f80"
+          },
+          {
+            "path": "src/backend/xlsx/legacy/entry-size-preflight.js",
+            "sha256": "77ada2f7f31b99dbc9b35fe2ccb0803757c5965da2df031113c5a2dc003f8258"
+          },
+          {
+            "path": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+            "sha256": "d25bbee4e6e02307b34f224f3355b99feabb8620a6c73952b6072ea1da2d02dc"
+          },
+          {
+            "path": "src/backend/xlsx/model.js",
+            "sha256": "2731774546381a40230d10f7f7294c2f9a216fbcd86dc2156bb2edd3ab3bf8dc"
+          },
+          {
+            "path": "src/backend/xlsx/number-date.js",
+            "sha256": "cc6679d8cb7c1707a7314dbbf91b1e4ef8066b1ddbf88b1394d40ddbf9976555"
+          },
+          {
+            "path": "src/backend/xlsx/ooxml-namespaces.js",
+            "sha256": "6567cb492247f222f1b4979d8d2779db65b74775c4364ae6c1821065c0ab543b"
+          },
+          {
+            "path": "src/backend/xlsx/shared-strings-provider.js",
+            "sha256": "5a3d52fd7a6512fae929f433d24c0c18f889fe5fc8e3db6751a442c15d83bf2c"
+          },
+          {
+            "path": "src/backend/xlsx/style-registry.js",
+            "sha256": "e2b0a71c99eb14bd7f28d1e7369d3efe85ced006876ae42779f2705e1afc47ad"
+          },
+          {
+            "path": "src/backend/xlsx/workbook-parts.js",
+            "sha256": "0f9e889ab737429b860e9d8496206eb9d8bbf9da747cd3e18df2cbf562c71c36"
+          },
+          {
+            "path": "src/backend/xlsx/xlsx-sheet-scanner.js",
+            "sha256": "a58e236130399f66844a5568ad3fbfcddb5fd98cbfe0c1acaf771704fa0d150d"
+          },
+          {
+            "path": "src/backend/xlsx/zip-lifecycle.js",
+            "sha256": "f05688642b8fe7995c5a148c4d4a9f27dca093879ba5e6f1148802aaade24fd6"
+          },
+          {
+            "path": "src/backend/xlsx/zip-reader.js",
+            "sha256": "2b3d3bfb7f95867263fccd700257a852edaecad5153b89157d19b40e4cbd75b1"
+          },
+          {
+            "path": "src/main-process/background-execution/memory-telemetry.js",
+            "sha256": "c96c49d6a6ba825d8f512ed8006439c0cf769f37b1d54a9cbc74f53f8380d9b4"
+          },
+          {
+            "path": "src/main-process/background-execution/resource-lease.js",
+            "sha256": "1a66af339c4bb82d44850b52fdb0dacf10b42faf841b4f642f969852984cf802"
+          },
+          {
+            "path": "src/main-process/toolbox-format-io.js",
+            "sha256": "91348b50a93b1e320714ac9c15b9670b250c4716f0d199c0a504f3642db2ec89"
+          },
+          {
+            "path": "src/main-process/toolbox-format-operations.js",
+            "sha256": "b4e7512be50a91564f353f38ec0b48a3f68ec6f30cd9c30cad7a6fd5267310e1"
+          },
+          {
+            "path": "src/main-process/toolbox-input-kind.js",
+            "sha256": "203deee171705d4a36f3f7b35ccc97eaf0506159a048a14d153e7d5e0a3e1270"
+          },
+          {
+            "path": "src/main-process/toolbox-output-writer.js",
+            "sha256": "c5d47a1c4d31287ab850779ea0ba273e3e4fe8387f212dc4d3af7579eaa5249a"
+          },
+          {
+            "path": "src/main-process/toolbox-split-scan.js",
+            "sha256": "6f2ff946256080f6a342c4970e051bf2d46cc0d0af7dcfbbeac6dcbd31b61426"
+          },
+          {
+            "path": "src/main-process/toolbox.js",
+            "sha256": "2573c5cc60235a2af6545d287fc5b8afa52efae593a8d6f8dc3f66809ac00397"
+          },
+          {
+            "path": "src/main-process/workbook-watermark.js",
+            "sha256": "29f9779f35b162a95fe7981073cd82f3bac6a9fbed1142ea120d7ec5e271ec7d"
+          }
+        ],
+        "returnedValueFields": 0,
+        "elapsedMs": 1476.428584,
+        "sampleCount": 25,
+        "heapUsedBytes": {
+          "min": 5188432,
+          "median": 37245632,
+          "max": 49363400,
+          "count": 25
+        },
+        "externalBytes": {
+          "min": 1868622,
+          "median": 5753048,
+          "max": 6654086,
+          "count": 25
+        },
+        "arrayBufferBytes": {
+          "min": 20619,
+          "median": 3519966,
+          "max": 4499425,
+          "count": 25
+        }
+      },
+      "failure": null,
+      "elapsedUntilExitMs": 1494.848042,
+      "sstRemoved": true,
+      "actualAvailableBytes": {
+        "min": 562659328,
+        "median": 630423552,
+        "max": 860798976,
+        "count": 31
+      },
+      "pidRssBytes": {
+        "min": 48906240,
+        "median": 150175744,
+        "max": 160071680,
+        "count": 31
+      }
+    }
+  ],
+  "passed": true,
+  "limitations": [
+    "仅准备扫描；未覆盖 Renderer、rows 输出与发布、OP、恢复、安装包或真实 Windows 压力。",
+    "每种模式使用独立子进程并创建真实 worker；RSS 为该 PID 总量，不能按线程求和。",
+    "50 ms 采样与阶段边界只能给出采样峰值；external 已包含 arrayBuffers，不能重复累加。",
+    "结果检查只核对合成表头和精确行数，未执行完整结果验证器；实验参数不能用于生产启用。"
+  ]
+}

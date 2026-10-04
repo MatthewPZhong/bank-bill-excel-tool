@@ -221,8 +221,13 @@ test('E04-A/B policy 与 Main source selector 保持 production false，真实�
   assert.ok(activationStart > 0 && activationEnd > activationStart);
   const activationBinding = mainSource.slice(activationStart, activationEnd);
   assert.equal((activationBinding.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 1);
-  const legacySource = mainSource.replace(bizOpBinding, '').replace(bizOpIpcBinding, '').replace(activationBinding, '');
-  assert.equal((legacySource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 15);
+  // VCC 正式结果沿用 direct task，只向现有 Governor 申请 phase lease，不激活旧 export-subjects canary。
+  const vccPhaseLeaseBinding = mainSource.match(/acquireResultExportLeaseFn:\s*\(operationKey\)\s*=>\s*acquireResultExportLease\(\s*backgroundExecutionRuntimeManager\.get\(\)\.resourceGovernor,\s*operationKey\s*\)/)?.[0];
+  assert.ok(vccPhaseLeaseBinding);
+  const legacySource = mainSource.replace(bizOpBinding, '').replace(bizOpIpcBinding, '')
+    .replace(activationBinding, '').replace(vccPhaseLeaseBinding, '');
+  // 排除 VCC 独立 phase lease 后，原 15 处调用加 metadata 和共享发布 owner 两处装配。
+  assert.equal((legacySource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 17);
   assert.equal((mainSource.match(/generateValidateAndPublishToolboxArtifact\(\{/g) || []).length, 2);
   assert.equal((mainSource.match(/generateValidateAndPublishMultiOutput\(\{/g) || []).length, 1);
   assert.equal((mainSource.match(/generateValidateAndPublishRows\(\{/g) || []).length, 1);
@@ -303,7 +308,8 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
   assert.equal(snapshot.budgets.workerThreadSlots, 3);
   assert.equal(snapshot.budgets.utilityProcessSlots, 1);
   assert.equal(snapshot.budgets.ioHeavySlots, 2);
-  assert.equal(snapshot.budgets.memoryBytes, 2 * 1024 ** 3);
+  // 稳定账本使用 H=4 GiB，旧动作仍由 Bcompat=2 GiB 在同一 Governor 限制。
+  assert.equal(snapshot.budgets.memoryBytes, 4 * 1024 ** 3);
   const multiPolicy = TOOLBOX_GENERATION_POLICIES.find(
     (policy) => policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
   );

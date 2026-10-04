@@ -30,6 +30,11 @@
 'use strict';
 
 const { parentPort, isMainThread } = require('node:worker_threads');
+const fs = require('node:fs');
+const { sourceSnapshotMatchesStat } = require('../../main-process/archive-center/source-snapshot');
+const { scanSplitMetadata, scanSplitFieldValues } = require('../../main-process/toolbox-split-scan');
+const { validateExecutionMemoryConfig } = require('../../main-process/background-execution/execution-memory-config');
+const { toolboxReaderOptions, checkExecutionMemory } = require('../../main-process/background-execution/execution-memory-options');
 const {
   freezeWorkerBatchContext
 } = require('../../main-process/archive-center/worker-batch-context');
@@ -181,7 +186,6 @@ if (!isMainThread && parentPort) {
     }
 
     if (msg.type !== 'run') return;
-    freezeWorkerBatchContext(msg.batchContext, { required: msg.op !== 'scanFields' });
 
     const { jobId, op, filePath, field, values, savePath, groups } = msg;
     activeJobId = jobId;
@@ -196,11 +200,28 @@ if (!isMainThread && parentPort) {
     });
 
     try {
+      const scanOnly = ['scanFields', 'scanMetadata', 'scanValues'].includes(op);
+      freezeWorkerBatchContext(msg.batchContext, { required: !scanOnly });
+      const memoryConfig = msg.executionMemoryConfig ? validateExecutionMemoryConfig(msg.executionMemoryConfig) : null;
       // 🔴 sharedStrings 护栏：在调拆分作业之前先查（超阈值不进解析）。
       await assertSharedStringsUnderLimit(filePath);
 
       let result;
-      if (op === 'scanFields') {
+      if (op === 'scanMetadata' || op === 'scanValues') {
+        if (msg.sourceSnapshot && !sourceSnapshotMatchesStat(msg.sourceSnapshot, fs.statSync(filePath, { bigint: true }))) {
+          throw Object.assign(new Error('拆分源文件已变化，请重新选择'), { code: 'TOOLBOX_SPLIT_READ_CONTEXT_STALE' });
+        }
+        const cancelToken = { get cancelled() {
+          checkExecutionMemory(memoryConfig);
+          return activeCancelToken.cancelled;
+        } };
+        const options = { cancelToken, readerOptions: { ...toolboxReaderOptions(memoryConfig, msg.privateDirectory),
+          expectedInputKind: msg.inputKind },
+          maxValues: msg.maxValues, maxValueBytes: msg.maxValueBytes };
+        result = op === 'scanMetadata'
+          ? await scanSplitMetadata(filePath, options)
+          : await scanSplitFieldValues(filePath, field, options);
+      } else if (op === 'scanFields') {
         result = await scanFields(filePath, activeCancelToken);
       } else if (op === 'exportFilter') {
         result = await exportFilter({

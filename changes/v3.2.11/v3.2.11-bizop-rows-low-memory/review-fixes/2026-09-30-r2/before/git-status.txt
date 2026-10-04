@@ -1,0 +1,111 @@
+ M architecture/boundaries.json
+ M package.json
+ M rules/integration-test-policy.md
+ M scripts/integration/toolbox-row-split-admission.js
+ M scripts/integration/toolbox-row-split-archive-delete.js
+ M scripts/renderer-lifecycle/fixtures/toolbox.js
+ M src/backend/big-table-import/pipeline.js
+ M src/backend/file-service/readers.js
+ M src/backend/toolbox-format/xlsx-pass.js
+ M src/backend/toolbox-xlsx-stream/large-split-worker.js
+ M src/backend/xlsx/rich-workbook.js
+ M src/backend/xlsx/xlsx-sheet-scanner.js
+ M src/main-process/acquiring-bill-currency-session.js
+ M src/main-process/archive-center/task-policy-registry.js
+ M src/main-process/background-execution/adapters/utility-process-adapter.js
+ M src/main-process/background-execution/adapters/worker-thread-adapter.js
+ M src/main-process/background-execution/canary/durable-recovery.js
+ M src/main-process/background-execution/resource-budget.js
+ M src/main-process/background-execution/resource-governor.js
+ M src/main-process/background-execution/resource-lease.js
+ M src/main-process/background-execution/runtime.js
+ M src/main-process/background-execution/supervisor.js
+ M src/main-process/bank-bu-worker/dual-parser-dispatch.js
+ M src/main-process/big-table-import-dispatch.js
+ M src/main-process/biz-op-recon-session.js
+ M src/main-process/biz-op-v327/candidate-router.js
+ M src/main-process/biz-op-v327/compute-pipeline.js
+ M src/main-process/biz-op-v327/delete-pipeline.js
+ M src/main-process/biz-op-v327/export-pipeline.js
+ M src/main-process/biz-op-v327/export-publication.js
+ M src/main-process/biz-op-v327/export-source.js
+ M src/main-process/biz-op-v327/export-spool.js
+ M src/main-process/biz-op-v327/export-validator.js
+ M src/main-process/biz-op-v327/export-writer.js
+ M src/main-process/biz-op-v327/import-pipeline.js
+ M src/main-process/biz-op-v327/phase-admission.js
+ M src/main-process/biz-op-v327/publication-owner.js
+ M src/main-process/biz-op-v327/result-sink.js
+ M src/main-process/biz-op-v327/upgrade-legacy.js
+ M src/main-process/biz-op-v327/upgrade-pipeline.js
+ M src/main-process/biz-op-v327/worker-entry.js
+ M src/main-process/bounded-xlsx-writer.js
+ M src/main-process/duplicate-inbound-match/paired-parser-dispatch.js
+ M src/main-process/execution-descriptors/composition.js
+ M src/main-process/execution-descriptors/legacy-task-policies.js
+ M src/main-process/pending-session.js
+ M src/main-process/position-reconciliation/import-dispatch.js
+ M src/main-process/pre-fund-reconciliation/mpt-import/managed-import.js
+ M src/main-process/publication-recovery/coordinator.js
+ M src/main-process/run-check-multiworker.js
+ M src/main-process/run-check-worker-pool.js
+ M src/main-process/toolbox-background/route-scanner-core.js
+ M src/main-process/toolbox-background/worker-host.js
+ M src/main-process/toolbox-format-io.js
+ M src/main-process/toolbox-large-split-dispatch.js
+ M src/main-process/toolbox-output-publication-dispatch.js
+ M src/main-process/toolbox-output-publication-worker.js
+ M src/main-process/toolbox-output-writer.js
+ M src/main-process/toolbox-row-split/cache.js
+ M src/main-process/toolbox-row-split/executor.js
+ M src/main-process/toolbox-row-split/service.js
+ M src/main-process/vcc-financial-op-output/writer-coordinator.js
+ M src/main-process/vcc-financial-op-service.js
+ M src/main-process/vcc-financial-op-storage-migration.js
+ M src/main-process/vcc-op-calc/parser-pipeline.js
+ M src/main.js
+ M src/preload.js
+ M src/renderer/dialogs/toolbox.js
+ M tests/helpers/biz-op-v327-host.js
+ M tests/helpers/publication-authority.js
+ M tests/unit/main-process/archive-task-policy-registry.test.js
+ M tests/unit/main-process/execution-descriptor-archive-baseline.test.js
+ M tests/unit/main-process/toolbox-background-generation.test.js
+ M tests/unit/main-process/toolbox-large-split-dispatch.test.js
+ M tests/unit/main-process/toolbox-row-split.test.js
+ M tests/unit/renderer-vcc-financial-op.test.js
+?? changes/v3.2.11/
+?? scripts/integration/publication-memory-compatibility.js
+?? scripts/integration/toolbox-low-memory-complete.js
+?? scripts/integration/toolbox-low-memory-foundation.js
+?? scripts/integration/toolbox-split-csv-scope.js
+?? scripts/lib/low-memory-scenario.js
+?? scripts/verify-low-memory-capacity.js
+?? scripts/verify-low-memory-workflows.js
+?? src/backend/xlsx/zip-lifecycle.js
+?? src/main-process/background-execution/admission-only-owner.js
+?? src/main-process/background-execution/execution-memory-config.js
+?? src/main-process/background-execution/execution-memory-options.js
+?? src/main-process/background-execution/memory-activity.js
+?? src/main-process/background-execution/memory-admission.js
+?? src/main-process/background-execution/memory-telemetry.js
+?? src/main-process/bounded-workbook-streams.js
+?? src/main-process/execution-descriptors/memory-evidence.js
+?? src/main-process/execution-descriptors/memory-profiles.js
+?? src/main-process/execution-descriptors/memory-qualification.json
+?? src/main-process/execution-descriptors/publication-memory.js
+?? src/main-process/memory-activity.js
+?? src/main-process/toolbox-split-read-owner.js
+?? src/main-process/toolbox-split-scan.js
+?? tests/unit/architecture/low-memory-core.test.js
+?? tests/unit/architecture/memory-carriers.test.js
+?? tests/unit/backend/file-service/readers-csv-memory.test.js
+?? tests/unit/main-process/__fixtures__/toolbox-publication-stub-controlled-exit.js
+?? tests/unit/main-process/background-execution/admission-only-owner.test.js
+?? tests/unit/main-process/background-execution/memory-admission.test.js
+?? tests/unit/main-process/biz-op-v327-low-memory.test.js
+?? tests/unit/main-process/bounded-workbook-streams.test.js
+?? tests/unit/main-process/memory-activity.test.js
+?? tests/unit/main-process/memory-evidence.test.js
+?? tests/unit/main-process/toolbox-low-memory-reader.test.js
+?? tests/unit/main-process/toolbox-split-read-owner.test.js

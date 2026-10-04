@@ -1,4 +1,5 @@
 'use strict';
+const { memoryCarrierAdmission } = require('../memory-activity');
 
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
@@ -18,7 +19,7 @@ function workerError(code, message) {
 
 function runOutputWriter(input, signal, options = {}) {
   const workerFactory = options.workerFactory || ((entryPath, workerOptions) => (
-    new Worker(entryPath, workerOptions)
+    memoryCarrierAdmission(null).observe(new Worker(entryPath, workerOptions))
   ));
   const worker = workerFactory(path.join(__dirname, 'output-writer-worker-entry.js'), {
     workerData: { input }

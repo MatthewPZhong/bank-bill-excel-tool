@@ -1,0 +1,216 @@
+diff --git a/src/main-process/execution-descriptors/publication-memory.js b/src/main-process/execution-descriptors/publication-memory.js
+--- a/src/main-process/execution-descriptors/publication-memory.js
++++ b/src/main-process/execution-descriptors/publication-memory.js
+@@ -3,7 +3,9 @@
+ 
+ const PUBLICATION_MEMORY_ACTION = 'publication:shared-io';
+ const PUBLICATION_RESOURCES = Object.freeze({ cpuSlots: 1, workerThreadSlots: 1, utilityProcessSlots: 0,
+-  ioHeavySlots: 1, memoryBytes: 1024 ** 3 });
++  // 兼容路径沿用共享 Publisher 原有的零内存记账；真实载体仍按未知增长观察。
++  // 获批档位由 memory policy 替换为 publication-io 阶段预算。
++  ioHeavySlots: 1, memoryBytes: 0 });
+ 
+ function createPublicationMemoryAdmission(getRuntime) {
+   return async function acquirePublicationMemory() {
+diff --git a/src/main-process/biz-op-v327/publication-owner.js b/src/main-process/biz-op-v327/publication-owner.js
+--- a/src/main-process/biz-op-v327/publication-owner.js
++++ b/src/main-process/biz-op-v327/publication-owner.js
+@@ -1,6 +1,7 @@
+ 'use strict';
+ 
+ const path = require('node:path');
++const { hasLegacyMemoryActivity } = require('../memory-activity');
+ const { artifactManifestFromFilePlan } = require('../archive-center/file-plan');
+ const { freezeWorkerBatchContext } = require('../archive-center/worker-batch-context');
+ const { acquireBizOpPhaseLease } = require('./phase-admission');
+@@ -101,7 +102,9 @@
+     }
+     if (!catalog.db.prepare('SELECT 1 FROM biz_op_v327_publications WHERE cleanup_completed=0 LIMIT 1').get()) return null;
+     const lease = await acquireBizOpPhaseLease(getRuntime(), {
+-      ownerKey: 'biz-op-v327:shared-publication-observation', actionKey: 'biz-op-v327:export-result-full',
++      ownerKey: 'biz-op-v327:shared-publication-observation',
++      // legacy IPC 自身仍是未知增长活动，内部恢复沿用已有兼容额度，避免等待外层自身。
++      actionKey: hasLegacyMemoryActivity() ? 'publication:legacy-observation' : 'biz-op-v327:export-result-full',
+       operationKey: 'biz-op-v327:shared-publication-observation', resources: EXPORT_IO_RESOURCES,
+       lowMemoryBehavior: 'queue'
+     });
+diff --git a/src/main-process/position-reconciliation/import-dispatch.js b/src/main-process/position-reconciliation/import-dispatch.js
+--- a/src/main-process/position-reconciliation/import-dispatch.js
++++ b/src/main-process/position-reconciliation/import-dispatch.js
+@@ -153,10 +153,10 @@
+       stdio: 'pipe'
+     }));
+   } else {
+-    worker = forkChild(WORKER_ENTRY, [], {
++    worker = memoryCarrierAdmission(null).observe(forkChild(WORKER_ENTRY, [], {
+       env,
+       stdio: ['ignore', 'pipe', 'pipe', 'ipc']
+-    });
++    }));
+   }
+ 
+   let settled = false;
+diff --git a/src/renderer/dialogs/toolbox.js b/src/renderer/dialogs/toolbox.js
+--- a/src/renderer/dialogs/toolbox.js
++++ b/src/renderer/dialogs/toolbox.js
+@@ -12,17 +12,37 @@
+     function createFieldValuesSession(session) {
+       const fields = new Map();
+       let disposed = false;
++      const consumers = new Set();
+       let pinned = new Set();
+-      function cancelUnused(usedFields = []) {
+-        pinned = new Set(usedFields);
++      function notify(field) {
++        for (const consumer of consumers) {
++          if (consumer.fields.has(field)) consumer.onChange(field);
++        }
++      }
++      function cancelUnused() {
++        pinned = new Set([...consumers].flatMap((consumer) => [...consumer.fields]));
+         for (const [field, entry] of fields) {
+-          if (entry.state !== 'loading' || usedFields.includes(field)) continue;
++          if (entry.state !== 'loading' || pinned.has(field)) continue;
+           fields.delete(field);
++          notify(field);
+           Promise.resolve(api.splitCancelRead({ version: 2, requestId: entry.requestId })).catch(() => {});
+         }
+       }
+       return {
+         state(field) { return fields.get(field) || { state: 'not-requested', values: [] }; },
++        // replace 先构造新视图再销毁旧视图；请求由所有存活视图共同持有。
++        subscribe(usedFields, onChange) {
++          const consumer = { fields: new Set(usedFields), onChange };
++          if (!disposed) consumers.add(consumer);
++          return {
++            update(nextFields) {
++              if (!consumers.has(consumer)) return;
++              consumer.fields = new Set(nextFields);
++              cancelUnused();
++            },
++            dispose() { consumers.delete(consumer); cancelUnused(); }
++          };
++        },
+         async load(field) {
+           if (disposed) return;
+           const existing = fields.get(field);
+@@ -35,6 +55,7 @@
+           }
+           const entry = { state: 'loading', values: [], requestId: readId(), error: '' };
+           fields.set(field, entry);
++          notify(field);
+           entry.promise = Promise.resolve().then(() => api.splitReadValues({ version: 2,
+             splitReadToken: session.splitReadToken, requestId: entry.requestId, field })).then((result) => {
+             if (disposed || fields.get(field) !== entry) return null;
+@@ -45,17 +66,18 @@
+             }
+             entry.state = 'complete';
+             entry.values = result.values;
++            notify(field);
+             return entry;
+           }).catch((error) => {
+             if (disposed || fields.get(field) !== entry) return null;
+             entry.state = 'failed';
+             entry.error = error?.message || '字段值读取失败，请点击重试';
++            notify(field);
+             return entry;
+           });
+           return entry.promise;
+         },
+-        cancelUnused,
+-        dispose() { cancelUnused(); disposed = true; fields.clear(); }
++        dispose() { disposed = true; consumers.clear(); cancelUnused(); fields.clear(); }
+       };
+     }
+ 
+@@ -528,9 +550,10 @@
+       let selectedValues = new Set();  // 当前已勾选的值
+       let panelOpen = false;
+       let valuesGeneration = 0;
++      let fieldSubscription = null;
+       const lifecycle = bindPicker(overlay, dialog, { onComplete, onCancel, beforeSubmit: _session.prepareSubmit }, () => {
+         valuesGeneration += 1;
+-        _session.fieldValues?.cancelUnused();
++        fieldSubscription?.dispose();
+         closeValuesPanel();
+         currentValuesList = [];
+         selectedValues.clear();
+@@ -633,7 +656,7 @@
+         if (rowsCheck.checked || busy) return;
+         const fieldName = currentFieldName();
+         valuesGeneration += 1;
+-        _session.fieldValues?.cancelUnused([fieldName]);
++        fieldSubscription?.update([fieldName]);
+         currentValuesList = fieldState(_session, safeValuesByField, fieldName).values;
+         selectedValues = new Set();
+         closeValuesPanel();
+@@ -692,7 +715,7 @@
+         if (!lifecycle.isActive() || busy) return;
+         closeValuesPanel();
+         valuesGeneration += 1;
+-        if (rowsCheck.checked) _session.fieldValues?.cancelUnused();
++        fieldSubscription?.update(rowsCheck.checked ? [] : [currentFieldName()]);
+         if (rowsCheck.checked) multipleFilesCheck.checked = false;
+         updateCompleteState();
+         if (rowsCheck.checked && !rowsInput.disabled) rowsInput.focus();
+@@ -767,6 +790,11 @@
+         }
+       });
+ 
++      fieldSubscription = _session.fieldValues?.subscribe([currentFieldName()], (field) => {
++        if (!lifecycle.isActive() || rowsCheck.checked || currentFieldName() !== field) return;
++        currentValuesList = fieldState(_session, safeValuesByField, field).values;
++        updateCompleteState();
++      });
+       // 初始只展示默认首字段；首次点击值入口才扫描。
+       refreshValues();
+       return overlay;
+@@ -842,9 +870,10 @@
+         selectedValues: initialValues
+       }];
+ 
++      let fieldSubscription = null;
+       _session.draft = { mode: 'multiple', groups };
+       const lifecycle = bindPicker(overlay, dialog, { onComplete, onCancel, beforeSubmit: _session.prepareSubmit }, () => {
+-        _session.fieldValues?.cancelUnused();
++        fieldSubscription?.dispose();
+         closeValuesPanel();
+         groups.length = 0;
+         safeHeaders = [];
+@@ -965,6 +994,7 @@
+       }
+ 
+       function renderGroups() {
++        fieldSubscription?.update(groups.map(fieldNameOf));
+         closeValuesPanel();
+         groupsRoot.replaceChildren();
+         groups.forEach((group, index) => {
+@@ -1007,7 +1037,6 @@
+             group.fieldIndex = Number.parseInt(fieldSelect.value, 10);
+             group.valuesGeneration = (group.valuesGeneration || 0) + 1;
+             group.selectedValues = new Set();
+-            _session.fieldValues?.cancelUnused(groups.map(fieldNameOf));
+             hintEl.textContent = valuesHint(fieldState(_session, safeValuesByField, fieldNameOf(group)));
+             renderGroups();
+           });
+@@ -1062,7 +1091,6 @@
+           deleteButton.addEventListener('click', () => {
+             if (!lifecycle.isActive() || busy || groups.length === 1) return;
+             groups.splice(index, 1);
+-            _session.fieldValues?.cancelUnused(groups.map(fieldNameOf));
+             hintEl.textContent = '';
+             renderGroups();
+           });
+@@ -1153,6 +1181,12 @@
+         }
+       });
+ 
++      fieldSubscription = _session.fieldValues?.subscribe(groups.map(fieldNameOf), (field) => {
++        if (!lifecycle.isActive() || !groups.some((group) => fieldNameOf(group) === field)) return;
++        groups.forEach(refreshGroupValuesButton);
++        updateCompleteState();
++        hintEl.textContent = valuesHint(fieldState(_session, safeValuesByField, field));
++      });
+       renderGroups();
+       return overlay;
+     }

@@ -1,4 +1,5 @@
 'use strict';
+const { memoryCarrierAdmission } = require('../../memory-activity');
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -20,7 +21,7 @@ function runWorkerDurableCanary(input) {
   }
   return new Promise((resolve, reject) => {
     let message = null;
-    const worker = new Worker(WORKER_PATH, { workerData: input });
+    const worker = memoryCarrierAdmission(null).observe(new Worker(WORKER_PATH, { workerData: input }));
     worker.once('message', (value) => { message = value; });
     worker.once('error', reject);
     worker.once('exit', (code) => {

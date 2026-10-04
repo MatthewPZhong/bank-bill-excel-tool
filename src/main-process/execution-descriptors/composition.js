@@ -5,6 +5,7 @@ const { compileExecutionDescriptors } = require('./contract');
 const { createDescriptor } = require('./descriptor-builder');
 const { BACKGROUND_EXECUTION_POLICIES, isBackgroundExecutionProductionEnabled } = require('./policy-catalog');
 const runtime = require('../background-execution/runtime');
+const { createProductionMemoryPolicy } = require('./memory-profiles');
 const { createTaskPolicyRegistry: createArchiveRegistry } = require('../archive-center/task-policy-registry');
 const { createActionTaskBindingRegistry } = require('../background-execution/action-task-binding-registry');
 const { validateApprovedExecutionPolicies } = require('../background-execution/approved-execution-baseline');
@@ -206,7 +207,8 @@ function runtimeOptionsForGeneration(options) {
       ...(next.carrierClosureActionKeys || []), ...(next.bizOpV327 ? next.bizOpV327.actionKeys : [])
     ])],
     beforeCarrierDispatch: next.beforeCarrierDispatch,
-    createEvidenceSettlementAdmission: createReconFixEvidenceSettlementAdmission
+    createEvidenceSettlementAdmission: createReconFixEvidenceSettlementAdmission,
+    createMemoryAdmission: createProductionMemoryPolicy
   };
 }
 

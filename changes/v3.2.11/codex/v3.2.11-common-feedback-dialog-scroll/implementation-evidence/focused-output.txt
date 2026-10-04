@@ -1,0 +1,41 @@
+PASS 公共默认 1 按钮／1 文件：真实布局、全文和 footer
+PASS 公共默认 1 按钮／10 文件：真实布局、全文和 footer
+PASS 公共默认 1 按钮／50 文件：真实布局、全文和 footer
+PASS 公共默认 1 按钮／100 文件：真实布局、全文和 footer
+PASS 公共默认 2 按钮／1 文件：真实布局、全文和 footer
+PASS 公共默认 2 按钮／10 文件：真实布局、全文和 footer
+PASS 公共默认 2 按钮／50 文件：真实布局、全文和 footer
+PASS 公共默认 2 按钮／100 文件：真实布局、全文和 footer
+PASS 公共默认 3 按钮／1 文件：真实布局、全文和 footer
+PASS 公共默认 3 按钮／10 文件：真实布局、全文和 footer
+PASS 公共默认 3 按钮／50 文件：真实布局、全文和 footer
+PASS 公共默认 3 按钮／100 文件：真实布局、全文和 footer
+PASS 布局环境 pressure-1280-720：长标签、滚轮与真实鼠标
+PASS 布局环境 pressure-1024-640：长标签、滚轮与真实鼠标
+PASS 布局环境 pressure-800-480：长标签、滚轮与真实鼠标
+PASS 布局环境 minimum-dark：长标签、滚轮与真实鼠标
+PASS 布局环境 minimum-zoom-150：长标签、滚轮与真实鼠标
+PASS 真实键盘：正文 PageDown／Space、Tab 环、按钮 Enter 与焦点恢复
+PASS 生命周期：输入初始焦点、注册合并、busy 拒关和日志只报一次
+PASS 旧局部类 toolbox-split-rows-result 与公共规则共存
+PASS 旧局部类 big-account-unmaintained-alert 与公共规则共存
+PASS 前置资金 100 混合结果：关闭／滚动／resize 不修复或导出
+PASS 前置资金无可修复项：单按钮反馈返回管理页
+PASS 前置资金导出 cancelled：原 tokens 与反馈返回链
+PASS 前置资金导出 ok：原 tokens 与反馈返回链
+PASS 前置资金导出 failed：原 tokens 与反馈返回链
+PASS 前置资金修复 failed：失败／部分失败重试资格与 tokens
+PASS 前置资金修复 ok：失败／部分失败重试资格与 tokens
+PASS 资金对账汇总 → ADM → BOC → 银行反馈：长文、采样和原返回顺序
+PASS BOC 引导 confirm：二按钮原动作
+PASS BOC 引导 cancel：二按钮原动作
+PASS 工具箱 merge-failed：真实包装、长反馈和原业务参数
+PASS 工具箱 read-failed：真实包装、长反馈和原业务参数
+PASS 工具箱 split-failed：真实包装、长反馈和原业务参数
+PASS 工具箱 multiple：真实包装、长反馈和原业务参数
+PASS 工具箱 rows：真实包装、长反馈和原业务参数
+PASS 公共反馈正文追加错误节点后仍保护 footer；管理与日期删除表单不误命中
+PASS 独立同名 alert-card 不误命中公共标记和正文焦点
+PASS 平盘账户映射保存失败 OOS-01：实际独立构造仍可按原回调关闭
+PASS VCC 独立消息框：原滚动结构及按钮未被公共规则改造
+40/40 PASS

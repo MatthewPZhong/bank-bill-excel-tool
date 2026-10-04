@@ -1,0 +1,210 @@
+{
+  "baseline": "72c80bab465ca36fb098ac4271a8ea1de782c880",
+  "runtime": {
+    "node": "v25.8.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "platformFixture": {
+    "platform": "win32",
+    "arch": "x64",
+    "versions": {
+      "electron": "36.9.5"
+    }
+  },
+  "boundaries": [
+    "实际执行平台为 macOS/Node，Windows/Electron 身份与可用内存为测试夹具",
+    "生产 Main IPC 函数由 vm 提取执行；选文件对话框与 sender 为夹具",
+    "未修改生产 manifest，未执行 Windows 实机、安装包或全量 release-check"
+  ],
+  "startedAt": "2026-10-02T15:50:12.421Z",
+  "sourceHashes": {
+    "src/main.js": "d79c579959228b87eca72e7f4f5a19762fdfe07b274e94f0ac76d29b4c3eabf9",
+    "src/main-process/toolbox-split-read-owner.js": "8b0bd65f72adb35fe07ec2b3b8fd0ebfab61baeedeb5081f132c5ea15d00979c",
+    "src/main-process/background-execution/admission-only-owner.js": "cf168e09b8952e81e0231718e60a365726a66fde6ce44b477db7594981645209",
+    "src/main-process/toolbox-scan-resources.js": "cc121360e1506c4defa82afb23bffa65de014a36a95c6c8d7798a170f1ac7fd4",
+    "src/main-process/execution-descriptors/memory-profiles.js": "4e77083d2fabc5621bc970d740837815003edb5a3a6e7fcc48ce15b8ff58f133",
+    "src/main-process/execution-descriptors/memory-qualification.json": "ff5b03b7a26e215e383472a622c9f254c7575e950af6052f5c8c87978e55fc3a",
+    "src/main-process/toolbox-format-io.js": "91348b50a93b1e320714ac9c15b9670b250c4716f0d199c0a504f3642db2ec89",
+    "src/backend/toolbox-format/csv-pass.js": "2e08285846c486d445c1ac749c8a8f7fc31cb374fdcf2992aaf925838da038c4",
+    "src/backend/file-service/readers.js": "1dd968a712f4a6a8e3aa542773ad8ddf2443f716937fc1d290e245228f44f761",
+    "src/backend/toolbox-xlsx-stream/large-split-worker.js": "52e4bf07f41523f227c63573fab24795d3f13b9b3b817c5ccee7e7c9264a0383"
+  },
+  "cases": [
+    {
+      "kind": "parser-worker",
+      "mode": "low",
+      "workerLimits": {
+        "maxOldGenerationSizeMb": 153,
+        "maxYoungGenerationSizeMb": 8
+      },
+      "messages": [
+        {
+          "stage": "before-open",
+          "resourceLimits": {
+            "maxYoungGenerationSizeMb": 8,
+            "maxOldGenerationSizeMb": 153,
+            "codeRangeSizeMb": 0,
+            "stackSizeMb": 4
+          }
+        }
+      ],
+      "errors": [
+        {
+          "code": "ERR_WORKER_OUT_OF_MEMORY",
+          "message": "Worker terminated due to reaching memory limit: JS heap out of memory"
+        }
+      ],
+      "exitCode": 1,
+      "elapsedMs": 502
+    },
+    {
+      "kind": "parser-worker",
+      "mode": "normal",
+      "workerLimits": {
+        "maxOldGenerationSizeMb": 460,
+        "maxYoungGenerationSizeMb": 8
+      },
+      "messages": [
+        {
+          "stage": "before-open",
+          "resourceLimits": {
+            "maxYoungGenerationSizeMb": 8,
+            "maxOldGenerationSizeMb": 460,
+            "codeRangeSizeMb": 0,
+            "stackSizeMb": 4
+          }
+        },
+        {
+          "stage": "opened",
+          "rowCount": 900001,
+          "heapUsed": 224516720
+        }
+      ],
+      "errors": [],
+      "exitCode": 0,
+      "elapsedMs": 1857
+    },
+    {
+      "kind": "main-ipc-production-policy-owner-worker",
+      "availableMiB": 512,
+      "grants": [
+        {
+          "op": "scanMetadata",
+          "profileId": "split-prepare-low-v1",
+          "workerLimits": {
+            "maxOldGenerationSizeMb": 153,
+            "maxYoungGenerationSizeMb": 8
+          },
+          "evidenceId": "manual-v3.2.11-2026-10-02",
+          "leaseCountAtDispatch": 1,
+          "closed": {
+            "spawned": true,
+            "exitCode": 1
+          }
+        }
+      ],
+      "result": {
+        "status": "failed",
+        "message": "Worker terminated due to reaching memory limit: JS heap out of memory",
+        "detailLines": [],
+        "code": "ERR_WORKER_OUT_OF_MEMORY"
+      },
+      "closeResult": {
+        "closed": true,
+        "unclosedCount": 0,
+        "cleanupPendingCount": 0
+      },
+      "ownerSnapshot": {
+        "accepting": false,
+        "activeCount": 0,
+        "states": [],
+        "cleanupPendingCount": 0,
+        "cleanupFailures": [],
+        "cleanupUnpersistedCount": 0
+      },
+      "activeLeasesAfterClose": 0,
+      "queuedAfterClose": 0,
+      "remainingFiles": [],
+      "memoryBlockersAfterClose": [],
+      "elapsedMs": 1503
+    },
+    {
+      "kind": "main-ipc-production-policy-owner-worker",
+      "availableMiB": 2048,
+      "grants": [
+        {
+          "op": "scanMetadata",
+          "profileId": "split-prepare-normal-v1",
+          "workerLimits": {
+            "maxOldGenerationSizeMb": 460,
+            "maxYoungGenerationSizeMb": 8
+          },
+          "evidenceId": "manual-v3.2.11-2026-10-02",
+          "leaseCountAtDispatch": 1,
+          "closed": {
+            "spawned": true,
+            "exitCode": 1
+          }
+        }
+      ],
+      "result": {
+        "status": "success",
+        "version": 2,
+        "requestId": "metadata",
+        "valuesState": "not-requested",
+        "sourceFilePath": "/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/csv-admission-review-F4Mi1M/dense.csv",
+        "headers": [
+          "a",
+          "b",
+          "c",
+          "d",
+          "e",
+          "f",
+          "g",
+          "h"
+        ],
+        "dataRowCount": 900000,
+        "maxRowSplitFiles": 1000,
+        "executionMode": "normal",
+        "splitReadTokenIssued": true
+      },
+      "closeResult": {
+        "closed": true,
+        "unclosedCount": 0,
+        "cleanupPendingCount": 0
+      },
+      "ownerSnapshot": {
+        "accepting": false,
+        "activeCount": 0,
+        "states": [],
+        "cleanupPendingCount": 0,
+        "cleanupFailures": [],
+        "cleanupUnpersistedCount": 0
+      },
+      "activeLeasesAfterClose": 0,
+      "queuedAfterClose": 0,
+      "remainingFiles": [],
+      "memoryBlockersAfterClose": [],
+      "elapsedMs": 2546
+    }
+  ],
+  "input": {
+    "dataRows": 900000,
+    "columns": 8,
+    "bytes": 14400016,
+    "sha256": "b9823143c9fa77203763cdca28b290ae4c29bf5c228eb9d1c8555e0e9a0b1ed7"
+  },
+  "sourceAndInputUnchanged": true,
+  "finishedAt": "2026-10-02T15:50:18.857Z",
+  "fixtureRemoved": true,
+  "cleanupRecheck": {
+    "command": "node scripts/integration/toolbox-scan-cleanup.js",
+    "passed": 16,
+    "total": 16,
+    "exitCode": 0,
+    "logSha256": "df9b358a94fcd849e1cf0542936963a5f24e819c57bcfcd870c936ac7f04c0a1"
+  },
+  "probeExitCode": 0,
+  "evidenceSanitization": "仅保留合成扫描 token 是否签发，不保存其值。"
+}

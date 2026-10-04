@@ -209,7 +209,7 @@ async function createCompletedFileTask(fixture, channel) {
 
 scenario('旧全局设置兼容，14 个模块设置经 SQLite 关闭/重开保持一致', async (fixture) => {
   assert.equal(SCOPES.length, 14, '完整模块清单包含 13 个主模块和工具箱');
-  assert.equal(fixture.controller.getRetentionDays(), 60);
+  assert.equal(fixture.controller.getRetentionDays(), null);
   fixture.database.setSetting(ARCHIVE_RETENTION_SETTING_KEY, '180');
   assert.equal(fixture.controller.getRetentionDays('statement-generator'), 180);
   const expected = {};
@@ -292,7 +292,7 @@ scenario('reserveTaskBatch 使用模块设置，显式期限优先且幂等重�
   for (const [moduleId, override, expected] of [
     ['bank-bu-recon', {}, 30],
     ['biz-op-recon', {}, null],
-    ['toolbox', {}, 60],
+    ['toolbox', {}, null],
     ['bank-bu-recon', { retentionDays: 365 }, 365],
     ['bank-bu-recon', { retentionDays: null }, null],
     ['biz-op-recon', { retentionDays: 90 }, 90]
@@ -323,7 +323,7 @@ scenario('reserveFileTaskBatch 按 Task Run 模块取期限且接受显式覆盖
   for (const [moduleId, override, expected] of [
     ['statement-generator', {}, 30],
     ['toolbox', {}, null],
-    ['pending-reconciliation', {}, 60],
+    ['pending-reconciliation', {}, null],
     ['statement-generator', { retentionDays: null }, null],
     ['toolbox', { retentionDays: 180 }, 180]
   ]) {

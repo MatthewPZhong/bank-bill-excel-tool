@@ -205,6 +205,8 @@ test('main 用冻结 FilePlan settle exact artifact 后才把 artifactId handoff
 
 test('VCC 四个 file action 统一走 FilePlan authority，三类输出以 receipt 结算全部 keys', async () => {
   const mainSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main.js'), 'utf8');
+  const resultSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main-process/vcc-financial-op-result-export-ipc.js'), 'utf8');
+  assert.match(mainSource, /createResultExportHandlers\(\{[\s\S]*?settlePublication: settleVccOutputPublication/);
   for (const channel of [
     'vccFinancialOp:import:apply',
     'vccFinancialOp:data-manager:export',
@@ -213,7 +215,7 @@ test('VCC 四个 file action 统一走 FilePlan authority，三类输出以 rece
   ]) {
     const start = mainSource.indexOf(`trackedIpcHandle('${channel}'`);
     const end = mainSource.indexOf('\n  });', start);
-    const handler = mainSource.slice(start, end);
+    const handler = channel === 'vccFinancialOp:export:result' ? resultSource : mainSource.slice(start, end);
     assert.ok(start >= 0 && end > start, channel);
     assert.match(handler, /filePlan:\s*\{/, channel);
     assert.match(handler, /taskContext\.fileEvidence\.filePlan/, channel);
@@ -230,13 +232,14 @@ test('VCC 四个 file action 统一走 FilePlan authority，三类输出以 rece
   ]) {
     const start = mainSource.indexOf(`trackedIpcHandle('${channel}'`);
     const end = mainSource.indexOf('\n  });', start);
-    const handler = mainSource.slice(start, end);
+    const handler = channel === 'vccFinancialOp:export:result' ? resultSource : mainSource.slice(start, end);
     assert.match(handler, /vccOutputPublicationTaskIds:\s*\[\]/, channel);
-    assert.match(handler, /settleVccOutputPublication\(prepared, taskContext, publication, evidence\)/, channel);
+    assert.match(handler, /settle(?:VccOutput)?Publication\(prepared, taskContext, publication, evidence\)/, channel);
   }
   const resultStart = mainSource.indexOf("trackedIpcHandle('vccFinancialOp:export:result'");
   const resultEnd = mainSource.indexOf('\n  });', resultStart);
-  const resultHandler = mainSource.slice(resultStart, resultEnd);
+  assert.ok(resultStart >= 0 && resultEnd > resultStart);
+  const resultHandler = resultSource;
   assert.match(resultHandler, /expectedRunId:\s*prepared\.runId/);
   assert.match(resultHandler, /expectedSubjects:\s*prepared\.subjects/);
 

@@ -1,5 +1,7 @@
 'use strict';
 
+const { candidateWriterBudgets } = require('../background-execution/execution-memory-options');
+
 const { createHash } = require('node:crypto');
 const { setImmediate: yieldWorker } = require('node:timers/promises');
 const { DatabaseSync } = require('node:sqlite');
@@ -15,13 +17,13 @@ function createEvidence(identity) {
   add(identity);
   return { add, finish: () => hash.digest('hex') };
 }
-function createExportSpool({ filename, source, maxRowsPerSheet = 1048575, safePoint = () => {} }) {
+function createExportSpool({ filename, source, maxRowsPerSheet = 1048575, safePoint = () => {}, memoryConfig = null }) {
   if (!Number.isSafeInteger(maxRowsPerSheet) || maxRowsPerSheet < 1 || maxRowsPerSheet > 1048575) fail('BIZOP_OUTPUT_PAGE_LIMIT');
   const schema = schemaFor(source.outputKind, source.columnSchemaVersion);
   const includeNotes = schema.notesSchema !== null;
-  const db = new DatabaseSync(filename); configure(db);
+  const db = new DatabaseSync(filename); configure(db, memoryConfig);
   db.exec('CREATE TABLE export_rows(section TEXT NOT NULL,ordinal INTEGER NOT NULL,cells TEXT NOT NULL,PRIMARY KEY(section,ordinal)) WITHOUT ROWID');
-  const writer = createSynchronousCandidateWriter({ db, insertSql: 'INSERT INTO export_rows VALUES (?,?,?)' });
+  const writer = createSynchronousCandidateWriter({ ...candidateWriterBudgets(memoryConfig), db, insertSql: 'INSERT INTO export_rows VALUES (?,?,?)' });
   const counts = { DATA: 0, NOTES: 0 }; let finished = false;
   const identity = evidenceIdentity({ ...source, maxRowsPerSheet });
   function append(section, values) {

@@ -1,9 +1,23 @@
 'use strict';
 
+const fs = require('node:fs');
+const path = require('node:path');
+const acorn = require('acorn');
+
 // 真实设置/公共确认工厂；仅使用可控 API，不删除真实数据。
 module.exports = async ({ js, load, reset, assert, test }) => {
+  const root = path.resolve(__dirname, '../../..');
+  const renderer = fs.readFileSync(path.join(root, 'src/renderer.js'), 'utf8');
+  // 只提取生产转义函数，不启动应用壳或加载用户数据。
+  const escapeHtmlNode = acorn.parse(renderer, { ecmaVersion: 'latest' }).body
+    .find(node => node.type === 'FunctionDeclaration' && node.id.name === 'escapeHtml');
+  assert.ok(escapeHtmlNode, '生产 escapeHtml 函数应存在');
+  const escapeHtmlSource = renderer.slice(escapeHtmlNode.start, escapeHtmlNode.end);
+  const dialogStyles = ['styles-gemini.css', 'styles-gemini-extra.css', 'styles-dark-mode.css']
+    .map(name => fs.readFileSync(path.join(root, 'src', name), 'utf8')).join('\n');
   async function setup({ useOverride = false, selectBatch = true } = {}) {
     await reset();
+    await js(escapeHtmlSource + '\n;void 0;');
     await load('src/renderer/dialogs/toolbox.js');
     await load('src/renderer-dialogs.js');
     await load('src/renderer/dialogs/app-settings.js');
@@ -17,7 +31,7 @@ module.exports = async ({ js, load, reset, assert, test }) => {
       window.fixtureSettings = window.__appSettingsDialogs.createAppSettingsDialogs({
         api: fixtureSettingsApi, modalBridge: fixtureBridge,
         modules: { bankStatementProcess: {id:'bank-statement-process',name:'资金对账'}, vccFinancialOp:{id:'vcc-financial-op',name:'VCC'} },
-        ui: { escapeHtml: value => String(value), createConfirmDialog: fixtureDialogs.createConfirmDialog,
+        ui: { escapeHtml, createConfirmDialog: fixtureDialogs.createConfirmDialog,
           getDarkModeController: () => null, mountAppearanceSettings: () => null,
           applyAppUpdateActionResult() {}, applyAppUpdateStatus() {}, getAppUpdateStatus:()=>({}),
           refreshOpenAppUpdateDialog() {}, restartAndInstallAppUpdate() {} }
@@ -64,6 +78,100 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     assert.equal(await js('__settingsTest.lists'),1);
     assert.equal(await js('settingsHandle.isTop()'),true);
   });
+
+  async function openDeleteConfirmation() {
+    await js(`settingsOverlay.querySelector('[data-action="delete-archive-batch"]').click()`);
+    await js('new Promise(resolve => setTimeout(resolve, 10))');
+  }
+
+  for (const [label, summary] of [
+    ['0', { fileCount: 0 }], ['1', { fileCount: 1 }], ['多份', { fileCount: 7 }],
+    ['缺失 fileCount', {}], ['缺失 summary', undefined]
+  ]) {
+    await test(`删除确认在数量 ${label} 时只显示目标批次与操作按钮`, async () => {
+      await setup();
+      const prepared = { ok: true, status: 'success', confirmationToken: 'exact-token', summary };
+      await js(`fixtureApi.prepareDeleteBatch = async id => {
+        __settingsTest.prepares.push(id); return ${JSON.stringify(prepared)};
+      }; void 0;`);
+      await openDeleteConfirmation();
+      const content = await js(`(() => {
+        const overlay = document.getElementById('modalRoot').lastElementChild;
+        const message = overlay.querySelector('.alert-message');
+        return { text: message.textContent, batchNumber: message.querySelector('strong').textContent,
+          breaks: message.querySelectorAll('br').length,
+          buttons: Array.from(overlay.querySelectorAll('button')).map(button => button.textContent) };
+      })()`);
+      assert.deepEqual(content, { text: '确定永久删除批次 2026-08-11-001 吗？',
+        batchNumber: '2026-08-11-001', breaks: 0, buttons: ['永久删除', '取消'] });
+      assert.deepEqual(await js('__settingsTest.prepares'), ['902']);
+      assert.deepEqual(await js('__settingsTest.deletes'), []);
+    });
+  }
+
+  await test('删除确认使用生产转义函数安全显示含特殊字符的批次号', async () => {
+    await setup();
+    const batchNumber = '<em data-injected="yes">合成&批次</em> "测试"';
+    await js(`settingsOverlay.querySelector('[data-action="delete-archive-batch"]').dataset.batchNumber = ${JSON.stringify(batchNumber)}`);
+    await openDeleteConfirmation();
+    assert.equal(await js(`document.querySelector('.alert-message').textContent`), `确定永久删除批次 ${batchNumber} 吗？`);
+    assert.equal(await js(`document.querySelector('.alert-message strong').textContent`), batchNumber);
+    assert.equal(await js(`document.querySelector('.alert-message em')`), null);
+  });
+
+  for (const failure of ['返回失败', '抛出异常', '缺少令牌']) {
+    await test(`删除预检${failure}时不打开确认层且不提交删除`, async () => {
+      await setup();
+      await js(`fixtureApi.prepareDeleteBatch = async id => {
+        __settingsTest.prepares.push(id);
+        if (${JSON.stringify(failure)} === '抛出异常') throw new Error('预检测试失败');
+        return ${JSON.stringify(failure)} === '返回失败'
+          ? { ok: false, status: 'failed', message: '预检测试失败' }
+          : { ok: true, status: 'success' };
+      }; void 0;`);
+      await openDeleteConfirmation();
+      assert.equal(await js(`document.getElementById('modalRoot').children.length`), 1);
+      assert.equal(await js(`settingsOverlay.querySelector('[data-action="delete-archive-batch"]').disabled`), false);
+      assert.deepEqual(await js('__settingsTest.prepares'), ['902']);
+      assert.deepEqual(await js('__settingsTest.deletes'), []);
+      if (failure !== '缺少令牌') {
+        assert.match(await js(`settingsOverlay.querySelector('[data-role="archive-feedback"]').textContent`), /预检测试失败/);
+      }
+    });
+  }
+
+  for (const theme of ['light', 'dark']) {
+    await test(`删除确认在 ${theme} 主题下按钮可见且取消后可重新打开`, async () => {
+      await setup();
+      await js(`const style = document.createElement('style'); style.textContent = ${JSON.stringify(dialogStyles)};
+        document.head.appendChild(style); document.documentElement.dataset.theme = ${JSON.stringify(theme)};`);
+      await openDeleteConfirmation();
+      await js(`document.querySelector('[data-action="cancel"]').click()`);
+      assert.deepEqual(await js('__settingsTest.deletes'), []);
+      await openDeleteConfirmation();
+      const display = await js(`(() => {
+        const overlay = document.getElementById('modalRoot').lastElementChild;
+        const message = overlay.querySelector('.alert-message');
+        const visible = element => {
+          const box = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return box.width > 0 && box.height > 0 && box.left >= 0 && box.top >= 0
+            && box.right <= innerWidth && box.bottom <= innerHeight
+            && style.visibility !== 'hidden' && style.display !== 'none';
+        };
+        return { text: message.textContent, messageVisible: visible(message),
+          overflow: message.scrollWidth > message.clientWidth + 1,
+          buttons: Array.from(overlay.querySelectorAll('button')).map(button => ({
+            text: button.textContent, visible: visible(button), disabled: button.disabled })) };
+      })()`);
+      assert.deepEqual(display, { text: '确定永久删除批次 2026-08-11-001 吗？',
+        messageVisible: true, overflow: false, buttons: [
+          { text: '永久删除', visible: true, disabled: false },
+          { text: '取消', visible: true, disabled: false }
+        ] });
+      assert.deepEqual(await js('__testErrors'), []);
+    });
+  }
 
   await test('设置父会话在删除确认取消后保留，零删除且最终退订一次', async () => {
     await setup();
@@ -123,5 +231,144 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     await js(`new Promise(resolve => setTimeout(resolve, 10))`);
     assert.equal(await js(`document.getElementById('modalRoot').children.length`), 1);
     await js(`deferredRetention.shift()(); fixtureHost.dispose()`);
+  });
+
+  await test('首次载入以永久占位，成功读取后继承永久，返回重进不写入设置', async () => {
+    await setup({ selectBatch: false });
+    await js(`
+      window.retentionWrites = [];
+      fixtureApi.setRetentionDays = async value => { retentionWrites.push(value); return {status:'success'}; };
+      fixtureApi.setModuleRetentionDays = async value => { retentionWrites.push(value); return {status:'success'}; };
+      fixtureApi.getSettings = () => new Promise(resolve => window.resolveSettings = resolve);
+      settingsOverlay.querySelector('[data-action="open-archive-settings"]').click();
+    `);
+    assert.deepEqual(await js(`(() => { const el=settingsOverlay.querySelector('[data-role="archive-retention-days"]'); return [el.value,el.disabled]; })()`), ['permanent', true]);
+    await js(`
+      window.savedSettings = {retentionDays:null,retentionDaysByModule:{}};
+      resolveSettings({status:'success',settings:savedSettings});
+    `);
+    await js('new Promise(resolve=>setTimeout(resolve,10))');
+    assert.deepEqual(await js(`(() => { const el=settingsOverlay.querySelector('[data-role="archive-retention-days"]'); return [el.value,el.disabled]; })()`), ['permanent', false]);
+    await js(`var moduleSelect=settingsOverlay.querySelector('[data-role="archive-retention-module"]'); moduleSelect.value='bank-statement-process'; moduleSelect.dispatchEvent(new Event('change'));`);
+    assert.equal(await js(`settingsOverlay.querySelector('[data-role="archive-retention-days"]').value`), 'inherit');
+    assert.equal(await js(`settingsOverlay.querySelector('[data-role="archive-retention-days"] [value="inherit"]').textContent`), '跟随默认（永久）');
+    await js(`
+      settingsOverlay.querySelector('[data-action="back-to-archive"]').click();
+      fixtureApi.getSettings=async()=>({status:'success',settings:savedSettings});
+      settingsOverlay.querySelector('[data-action="open-archive-settings"]').click();
+    `);
+    await js('new Promise(resolve=>setTimeout(resolve,10))');
+    assert.equal(await js(`settingsOverlay.querySelector('[data-role="archive-retention-days"]').value`), 'inherit');
+    assert.deepEqual(await js('retentionWrites'), []);
+    assert.deepEqual(await js('savedSettings.retentionDaysByModule'), {});
+  });
+
+  await test('已保存全局 60 天和模块永久均按回包展示，切换模块不触发保存', async () => {
+    await setup({ selectBatch: false });
+    await js(`
+      window.retentionWrites = [];
+      fixtureApi.getSettings = async()=>({status:'success',settings:{retentionDays:60,retentionDaysByModule:{'vcc-financial-op':null}}});
+      fixtureApi.setRetentionDays=async value=>retentionWrites.push(value);
+      fixtureApi.setModuleRetentionDays=async value=>retentionWrites.push(value);
+      settingsOverlay.querySelector('[data-action="open-archive-settings"]').click();
+    `);
+    await js('new Promise(resolve=>setTimeout(resolve,10))');
+    for (const [moduleId, expected] of [['', '60'], ['bank-statement-process', 'inherit'], ['vcc-financial-op', 'permanent'], ['', '60']]) {
+      await js(`var el=settingsOverlay.querySelector('[data-role="archive-retention-module"]'); el.value=${JSON.stringify(moduleId)}; el.dispatchEvent(new Event('change'));`);
+      assert.equal(await js(`settingsOverlay.querySelector('[data-role="archive-retention-days"]').value`), expected);
+    }
+    assert.deepEqual(await js('retentionWrites'), []);
+  });
+
+  for (const invalid of ['rejected', 'failed', 'empty-payload']) {
+    await test(`首次设置读取 ${invalid} 不允许保存，返回重试成功后恢复旧值`, async () => {
+      await setup({ selectBatch: false });
+      await js(`
+        window.retentionWrites=[];
+        fixtureApi.setRetentionDays=async value=>retentionWrites.push(value);
+        fixtureApi.getSettings=async()=>{
+          if (${JSON.stringify(invalid)}==='rejected') throw new Error('模拟读取失败');
+          return ${JSON.stringify(invalid)}==='failed' ? {status:'failed',message:'模拟读取失败'} : {status:'success',settings:null};
+        };
+        settingsOverlay.querySelector('[data-action="open-archive-settings"]').click();
+      `);
+      await js('new Promise(resolve=>setTimeout(resolve,10))');
+      assert.equal(await js(`settingsOverlay.querySelector('[data-role="archive-retention-days"]').disabled`), true);
+      assert.equal(await js(`settingsOverlay.querySelector('[data-role="archive-retention-module"]').disabled`), true);
+      assert.match(await js(`settingsOverlay.querySelector('[data-role="archive-feedback"]').textContent`), /加载失败/);
+      await js(`var el=settingsOverlay.querySelector('[data-role="archive-retention-days"]'); el.value='60'; el.dispatchEvent(new Event('change'));`);
+      assert.deepEqual(await js('retentionWrites'), []);
+      await js(`
+        settingsOverlay.querySelector('[data-action="back-to-archive"]').click();
+        fixtureApi.getSettings=async()=>({status:'success',settings:{retentionDays:60,retentionDaysByModule:{}}});
+        settingsOverlay.querySelector('[data-action="open-archive-settings"]').click();
+      `);
+      await js('new Promise(resolve=>setTimeout(resolve,10))');
+      assert.deepEqual(await js(`(() => { const el=settingsOverlay.querySelector('[data-role="archive-retention-days"]'); return [el.value,el.disabled]; })()`), ['60', false]);
+      assert.deepEqual(await js('retentionWrites'), []);
+      assert.doesNotMatch(await js(`settingsOverlay.querySelector('[data-role="archive-feedback"]').textContent`), /已保存/);
+      assert.equal(await js('settingsHandle.close().status'), 'closed');
+    });
+  }
+
+  await test('永久默认下快速保存仍串行，失败回显已保存值且不串模块', async () => {
+    await setup({ selectBatch: false });
+    await js(`
+      window.retentionWrites=[]; window.retentionResolvers=[];
+      fixtureApi.getSettings=async()=>({status:'success',settings:{retentionDays:null,retentionDaysByModule:{}}});
+      fixtureApi.setRetentionDays=value=>new Promise(resolve=>{retentionWrites.push(value);retentionResolvers.push(resolve);});
+      fixtureApi.setModuleRetentionDays=async value=>{retentionWrites.push(value);return {status:'success'};};
+      settingsOverlay.querySelector('[data-action="open-archive-settings"]').click();
+    `);
+    await js('new Promise(resolve=>setTimeout(resolve,10))');
+    await js(`
+      var days=settingsOverlay.querySelector('[data-role="archive-retention-days"]');
+      var modules=settingsOverlay.querySelector('[data-role="archive-retention-module"]');
+      days.value='90';days.dispatchEvent(new Event('change'));
+      modules.value='bank-statement-process';modules.dispatchEvent(new Event('change'));
+      days.value='60';days.dispatchEvent(new Event('change'));
+      days.value='permanent';days.dispatchEvent(new Event('change'));
+    `);
+    assert.equal(await js('modules.value'), '');
+    assert.deepEqual(await js('retentionWrites'), [90]);
+    await js(`retentionResolvers.shift()({status:'success'});`);
+    await js('new Promise(resolve=>setTimeout(resolve,10))');
+    assert.deepEqual(await js('retentionWrites'), [90, null]);
+    await js(`retentionResolvers.shift()({status:'failed',message:'模拟保存失败'});`);
+    await js('new Promise(resolve=>setTimeout(resolve,10))');
+    assert.equal(await js('days.value'), '90');
+    assert.match(await js(`settingsOverlay.querySelector('[data-role="archive-feedback"]').textContent`), /保存失败/);
+    await js(`days.value='permanent';days.dispatchEvent(new Event('change'));retentionResolvers.shift()({status:'success'});`);
+    await js('new Promise(resolve=>setTimeout(resolve,10))');
+    assert.equal(await js('days.value'), 'permanent');
+    await js(`modules.value='bank-statement-process';modules.dispatchEvent(new Event('change'));`);
+    assert.equal(await js('days.value'), 'inherit');
+    await js(`days.value='30';days.dispatchEvent(new Event('change'));`);
+    await js('new Promise(resolve=>setTimeout(resolve,10))');
+    assert.deepEqual(await js('retentionWrites'), [90, null, null, {moduleId:'bank-statement-process',retentionDays:30}]);
+    assert.equal(await js('days.value'), '30');
+    assert.deepEqual(await js('__testErrors'), []);
+  });
+
+
+  await test('缺省回包与兼容 defaultRetentionDays 的展示回退一致，读取不保存', async () => {
+    await setup({ selectBatch: false });
+    await js(`window.retentionWrites=[]; fixtureApi.setRetentionDays=async value=>retentionWrites.push(value); void 0;`);
+    for (const [payload, value, label] of [
+      ['{}','permanent','永久'], ['{retentionDays:undefined}','permanent','永久'],
+      ['{defaultRetentionDays:null}','permanent','永久'], ['{defaultRetentionDays:60}','60','60 天']
+    ]) {
+      await js(`
+        fixtureApi.getSettings=async()=>({status:'success',settings:${payload}});
+        settingsOverlay.querySelector('[data-action="open-archive-settings"]').click();
+      `);
+      await js('new Promise(resolve=>setTimeout(resolve,10))');
+      await js(`var modules=settingsOverlay.querySelector('[data-role="archive-retention-module"]');modules.value='';modules.dispatchEvent(new Event('change'));`);
+      assert.equal(await js(`settingsOverlay.querySelector('[data-role="archive-retention-days"]').value`),value);
+      await js(`modules.value='bank-statement-process';modules.dispatchEvent(new Event('change'));`);
+      assert.equal(await js(`settingsOverlay.querySelector('[data-role="archive-retention-days"] [value="inherit"]').textContent`),`跟随默认（${label}）`);
+      await js(`settingsOverlay.querySelector('[data-action="back-to-archive"]').click();`);
+    }
+    assert.deepEqual(await js('retentionWrites'),[]);
   });
 };

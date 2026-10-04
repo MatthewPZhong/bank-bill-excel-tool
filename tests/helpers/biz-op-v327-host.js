@@ -52,13 +52,13 @@ async function createHost(t, options = {}) {
   if (options.archiveRuntimeDelegate) service = createArchiveRuntimeDelegate({ service });
   const publicationRecovery = createPublicationRecoveryCoordinator({ userDataDir: root,
     dispatcher: publicationDispatcher, owners: [module.publication.publicationOwner,
-      createArchivePublicationOwner({ getArchiveCenter: () => ({ service }) })] });
+      createArchivePublicationOwner({ getArchiveCenter: options.getArchiveCenter || (() => ({ service })) })] });
   publicationRecovery.bindDispatcherAuthority();
   const publicationFacade = publicationRecovery.forOwner('biz-op-v327');
   module.publication.bindRecovery(options.wrapPublicationRecovery
     ? options.wrapPublicationRecovery(publicationFacade, { module, db, service, root }) : publicationFacade);
   runtime = createNonProductionBackgroundExecutionRuntime({ bizOpV327: module.runtimeBindings,
-    resourceGovernor: createResourceGovernor({ budgets: { cpuSlots: 2, workerThreadSlots: 2, utilityProcessSlots: 0,
+    resourceGovernor: options.resourceGovernor || createResourceGovernor({ budgets: { cpuSlots: 2, workerThreadSlots: 2, utilityProcessSlots: 0,
       ioHeavySlots: 2, memoryBytes: 2 * 1024 * 1024 * 1024 } }) });
   const lifecycle = createTaskLifecycle({ archiveService: service, businessOperationRegistry: createBusinessOperationRegistry(),
     flowResolver: createBusinessFlowResolver({ archiveService: service }), operationTracker: { async appendOperationFiles() { return { archiveFailed: false }; } } });

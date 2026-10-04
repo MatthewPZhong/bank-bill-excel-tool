@@ -26,12 +26,19 @@ function readBuildFilePatterns(repoRoot) {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   const patterns = manifest && manifest.build && manifest.build.files;
   if (!Array.isArray(patterns) || patterns.length === 0) {
-    throw new Error('package.json build.files 必须是非空字符串数组');
+    throw new Error('package.json build.files 必须是非空规则数组');
   }
-  if (patterns.some((pattern) => typeof pattern !== 'string' || !pattern.trim())) {
-    throw new Error('package.json build.files 出现不支持的非字符串或空规则');
-  }
-  return patterns.map((pattern) => pattern.trim());
+  return patterns.map((pattern) => {
+    if (typeof pattern === 'string' && pattern.trim()) return pattern.trim();
+    // 只支持仓库内根目录到根目录的独立 FileSet，未知映射必须明确失败。
+    if (!pattern || typeof pattern !== 'object' || Array.isArray(pattern)
+      || Object.keys(pattern).sort().join(',') !== 'filter,from,to'
+      || pattern.from !== '.' || pattern.to !== '.' || !Array.isArray(pattern.filter)
+      || pattern.filter.length === 0 || pattern.filter.some((entry) => typeof entry !== 'string' || !entry.trim())) {
+      throw new Error('package.json build.files 出现不支持的文件映射或空规则');
+    }
+    return { from: '.', to: '.', filter: pattern.filter.map((entry) => entry.trim()) };
+  });
 }
 
 function compileBuildFilePattern(pattern) {
@@ -62,26 +69,31 @@ function compileBuildFilePattern(pattern) {
 }
 
 function createBuildFileMatcher(patterns) {
-  const includePatterns = patterns
+  const independent = patterns.filter((pattern) => typeof pattern !== 'string')
+    .map((fileSet) => createBuildFileMatcher(fileSet.filter));
+  const ordinary = patterns.filter((pattern) => typeof pattern === 'string');
+  const includePatterns = ordinary
     .filter((pattern) => !pattern.startsWith('!'))
     .map(compileBuildFilePattern);
-  const excludePatterns = patterns
+  const excludePatterns = ordinary
     .filter((pattern) => pattern.startsWith('!'))
     .map((pattern) => compileBuildFilePattern(pattern.slice(1)));
-  if (includePatterns.length === 0) {
+  if (includePatterns.length === 0 && independent.length === 0) {
     throw new Error('package.json build.files 缺少正向包含规则');
   }
   return (relativePath) => {
     const normalized = normalizeRelativePath(relativePath);
     const included = includePatterns.some((pattern) => pattern.test(normalized));
-    if (!included) return false;
-    return !excludePatterns.some((pattern) => pattern.test(normalized));
+    // 独立 FileSet 不受默认 matcher 的排除规则影响，与 builder 收录范围一致。
+    return (included && !excludePatterns.some((pattern) => pattern.test(normalized)))
+      || independent.some((matches) => matches(normalized));
   };
 }
 
 function findBuildFileRoots(patterns) {
   const roots = new Set();
-  for (const pattern of patterns.filter((entry) => !entry.startsWith('!'))) {
+  const allPatterns = patterns.flatMap((pattern) => typeof pattern === 'string' ? [pattern] : pattern.filter);
+  for (const pattern of allPatterns.filter((entry) => !entry.startsWith('!'))) {
     const segments = normalizeRelativePath(pattern).split('/');
     const firstGlobIndex = segments.findIndex((segment) => /[*?\[\]{}()]/.test(segment));
     const rootSegments = firstGlobIndex < 0 ? segments : segments.slice(0, firstGlobIndex);

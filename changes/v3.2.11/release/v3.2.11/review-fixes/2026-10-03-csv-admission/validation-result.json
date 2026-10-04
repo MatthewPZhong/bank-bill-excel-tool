@@ -1,0 +1,80 @@
+{
+  "result": "PASS",
+  "baseline": "72c80bab465ca36fb098ac4271a8ea1de782c880",
+  "branch": "release/v3.2.11",
+  "commitStatusAtValidation": "uncommitted",
+  "gate": {
+    "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+    "head": "72c80bab465ca36fb098ac4271a8ea1de782c880",
+    "startedAt": "2026-10-03T00:43:27.805179+08:00",
+    "inputCount": 1780,
+    "finishedAt": "2026-10-03T01:05:39.208215+08:00",
+    "elapsedSeconds": 1331.4,
+    "exitCode": 0,
+    "changedInputs": [
+      "rules/integration-test-policy.md"
+    ],
+    "policyPrefixUnchanged": true,
+    "headUnchanged": true
+  },
+  "unit": {
+    "tests": 9586,
+    "pass": 9582,
+    "fail": 0,
+    "skipped": 4
+  },
+  "integration": {
+    "scripts": 80,
+    "passedScripts": 80,
+    "countedChecks": 3085,
+    "csvAdmissionCases": 17
+  },
+  "focusedUnit": {
+    "pass": 43,
+    "fail": 0
+  },
+  "callChainUnit": {
+    "pass": 80,
+    "fail": 0
+  },
+  "csvScopeChecks": 4,
+  "architectureFiles": 788,
+  "architectureHistoryCommits": 40,
+  "qualificationUnchanged": true,
+  "limits": [
+    "实际执行平台为 macOS / Node v25.8.0",
+    "Windows/Electron 身份和可用内存为测试夹具",
+    "未重跑 Windows 实机、安装包、Excel/WPS 或完整 GUI 人工验收"
+  ],
+  "fileSha256": {
+    "changes/v3.2.11/release/v3.2.11/review-fixes/2026-10-03-csv-admission/before-result.json": "264d879df2424aaa7b801127aae673bc74a18b70a773f759c60cce0417bd9210",
+    "changes/v3.2.11/release/v3.2.11/review-fixes/2026-10-03-csv-admission/repair-report.md": "d891b8e9781119c5b51b172a84d63fee5dbf8ca887962f69bec45e9146251ab8",
+    "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/implementation-notes.md": "ce1309de99aa462aace21ce232b6fbe43e7093b538766cd9543ea3a10af7201d",
+    "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/techdoc.md": "1a7c8dc2928dfe5c172c5cd1523b89a9398986d3918651f2996bd5f7046488a8",
+    "rules/integration-test-policy.md": "84f559b3b6ab03552c714724be2f1499721a466894acf86766c7b562f0c8529c",
+    "scripts/integration/toolbox-csv-admission.js": "a8cb53f170c4cf837dfec2b0e98cf7b933750068013ed184a26d72d37a6ddec1",
+    "src/backend/file-service/readers.js": "45f96300fa7b38ffacef322e36af82b4e0f4a6345bd104bdf72917d589ff987d",
+    "src/backend/toolbox-format/csv-capacity.js": "e5742f7c098ba593337d9e10518522460418e7ffccbaa8eb4890c2b2c3bfbe7c",
+    "src/backend/toolbox-format/csv-pass.js": "234eeeb81fe6dd16517bbdb9e8fc80a86869ef8159f486622cc2e1bbe790a918",
+    "src/backend/toolbox-xlsx-stream/large-split-worker.js": "7d45d6c1b43383fee5e0ccddce2efcfa361b9092f3f09cb2df4b785d05a69cf6",
+    "src/main-process/background-execution/admission-only-owner.js": "dbfe759ea3c3ea594cb8574e188aa38c15aaff8d2be169f0e22ed0018de00cec",
+    "src/main-process/background-execution/memory-admission.js": "1c5cffbeabad49036a26f5ffa375ac083000932036e6de7b117dccfb16ffa57e",
+    "src/main-process/background-execution/resource-governor.js": "60086753fd969f5ae9aeb1df6c07e9ed54e4a4dc36e842ce3795232c97c640e1",
+    "src/main-process/toolbox-format-io.js": "36f5b3658b75935187f9ac2562b3351fa7b0711b618e9c4dbbe20d8444d9daee",
+    "src/main-process/toolbox-large-split-dispatch.js": "4da9e1e917d37a646ba0a8db8da03bb35a54e3dd5acf5e586e27cf612361f638",
+    "src/main-process/toolbox-split-read-owner.js": "8688dc4e4e018320c906ffe4c097c47642a4fce629b42d7bb85a3dd475a43190",
+    "tests/unit/main-process/background-execution/memory-admission.test.js": "f506947e7b8deb9206900d3dc76a56f1db4da53f8fb6737b2e3a46f4874d18d9",
+    "tests/unit/toolbox-format-csv-pass.test.js": "5271eb152c9a642bdcd3a5ff32cb1fd7417b047aa8c7cfd3fdb96d9113cd2013"
+  },
+  "evidenceSha256": {
+    "release-check.log": "ee542d169f534791d1e2283fe423f89a66f7fd59b2978b50fff09e4e5a89d8de",
+    "gate-inputs.json": "c056f3f8c60851e1f2ab4ad5b39d5cc0075fb111a7982f724d9849dcad89725b",
+    "gate-start.json": "0c232db8d968141eb7a95ee7293b63b2fa0acebd8a5ee2ca61f40777e24a5d1e",
+    "gate-result.json": "8eae3e1275f2e8899510a440c249e20001d868bae491956618e5b1f19d7091a8",
+    "focused-unit.log": "1a998c6dc9b62f43ec87f6c22e4f63a4f5fe310553608dd09c7697dbe207ccd3",
+    "call-chain-unit.log": "0814245c8928a74ed4aecd777103fe2958505efb3b9a5cc1c75e99760ec64a19",
+    "csv-admission.log": "5d68674fdc59e7e8395da4d87a1d4d3e105de64e31dc016907e83ed0cb288299",
+    "csv-scope.log": "a039d5e4a92b54017d88d3659b8fb28896e12a97414b5167ad5db8aa2e71241d"
+  },
+  "rawEvidenceDirectory": "outputs/release-v3.2.11/2026-10-03-csv-admission-repair"
+}

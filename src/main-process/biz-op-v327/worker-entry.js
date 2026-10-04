@@ -1,11 +1,14 @@
 'use strict';
 
+const { checkExecutionMemory } = require('../background-execution/execution-memory-options');
+const { validateExecutionMemoryConfig } = require('../background-execution/execution-memory-config');
+
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 const { pathToFileURL } = require('node:url');
-const { parentPort } = require('node:worker_threads');
+const { parentPort, workerData } = require('node:worker_threads');
 const { createCanonicalEventEmitter } = require('../background-execution/adapters/canonical-event-emitter');
 const { validateEnvelope } = require('../background-execution/protocol-validator');
 const { createDirectionSequenceTracker } = require('../background-execution/sequence-tracker');
@@ -17,11 +20,13 @@ const { runExportPipeline } = require('./export-pipeline');
 const { runDeletePipeline } = require('./delete-pipeline');
 const { runUpgradePipeline } = require('./upgrade-pipeline');
 
+const memoryConfig = workerData?.backgroundExecutionMemoryConfig
+  ? validateExecutionMemoryConfig(workerData.backgroundExecutionMemoryConfig) : null;
 let emit;
 let terminal = false;
 let cancelled = false;
 const sequence = createDirectionSequenceTracker();
-function safePoint() { if (cancelled) fail('BIZOP_CANCELLED', '业务 OP 任务已取消'); }
+function safePoint() { checkExecutionMemory(memoryConfig); if (cancelled) fail('BIZOP_CANCELLED', '业务 OP 任务已取消'); }
 async function validateCandidate(input, envelope) {
   const handle = await fs.promises.open(input.planPath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
   let bytes;
@@ -36,13 +41,13 @@ async function validateCandidate(input, envelope) {
     const payloadStore = createBizOpPayloadStore({ userDataDir: plan.userDataDir });
     const result = await runImportPipeline({ payloadStore, taskRunId: plan.taskRunId, intentDigest: plan.intentDigest,
       candidateRef: plan.candidateRef, reportRef: plan.reportRef, files: plan.files,
-      options: plan.options, planDigest: input.planDigest, cancelToken: { get cancelled() { return cancelled; } } });
+      options: plan.options, memoryConfig, planDigest: input.planDigest, cancelToken: { get cancelled() { return cancelled; } } });
     return { ...result, planDigest: input.planDigest };
   }
   if (plan.phase === 'interval-compute-v1' && envelope.actionKey === 'biz-op-v327:run-candidate') {
     const payloadStore = createBizOpPayloadStore({ userDataDir: plan.userDataDir });
     const result = await runComputePipeline({ payloadStore, taskRunId: plan.taskRunId, intentDigest: plan.intentDigest,
-      candidateRef: plan.candidateRef, inputReference: plan.inputReference, options: plan.options,
+      candidateRef: plan.candidateRef, inputReference: plan.inputReference, options: plan.options, memoryConfig,
       cancelToken: { get cancelled() { return cancelled; } } });
     return { ...result, planDigest: input.planDigest };
   }
@@ -51,18 +56,18 @@ async function validateCandidate(input, envelope) {
     if (envelope.actionKey !== `biz-op-v327:export-${source.outputKind.toLowerCase().replace('_', '-')}`) fail('BIZOP_EXPORT_KIND_MISMATCH');
     const result = await runExportPipeline({ payloadStore: createBizOpPayloadStore({ userDataDir: plan.userDataDir }),
       taskRunId: plan.taskRunId, intentDigest: plan.intentDigest, candidateRef: plan.candidateRef, source,
-      options: plan.options, cancelToken: { get cancelled() { return cancelled; } } });
+      options: plan.options, memoryConfig, cancelToken: { get cancelled() { return cancelled; } } });
     return { ...result, planDigest: input.planDigest };
   }
   if (plan.phase === 'delete-plan-v1' && envelope.actionKey === 'biz-op-v327:delete-plan') {
     const result = await runDeletePipeline({ payloadStore: createBizOpPayloadStore({ userDataDir: plan.userDataDir }),
       taskRunId: plan.taskRunId, candidateRef: plan.candidateRef, intentDigest: plan.intentDigest,
-      sourceRef: plan.sourceRef, cancelToken: { get cancelled() { return cancelled; } } });
+      sourceRef: plan.sourceRef, memoryConfig, cancelToken: { get cancelled() { return cancelled; } } });
     return { ...result, planDigest: input.planDigest };
   }
   if (plan.phase === 'upgrade-legacy-v1' && envelope.actionKey === 'biz-op-v327:upgrade-preflight') {
     const result = await runUpgradePipeline({ payloadStore: createBizOpPayloadStore({ userDataDir: plan.userDataDir }),
-      plan, cancelToken: { get cancelled() { return cancelled; } } });
+      plan, memoryConfig, cancelToken: { get cancelled() { return cancelled; } } });
     return { ...result, planDigest: input.planDigest };
   }
   // 保留 PR1b 的最小候选验证入口，独立覆盖目录提交/进程崩溃合同。
@@ -92,7 +97,7 @@ async function validateCandidate(input, envelope) {
 function sendFailure(error) {
   if (terminal || !emit) return;
   terminal = true;
-  emit('job:error', { error: { code: /^BIZOP_[A-Z_]+$/.test(error.code || '') ? error.code : 'BIZOP_CANDIDATE_FAILED',
+  emit('job:error', { error: { code: /^(BIZOP_|EXECUTION_)[A-Z_]+$/.test(error.code || '') ? error.code : 'BIZOP_CANDIDATE_FAILED',
     message: '业务 OP 候选处理未完成', stage: 'execute', detailLines: [] } });
   parentPort.close();
 }

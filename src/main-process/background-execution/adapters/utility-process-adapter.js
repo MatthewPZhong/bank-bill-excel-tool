@@ -1,11 +1,12 @@
 'use strict';
+const { memoryCarrierAdmission } = require('../memory-activity');
 
 function defaultUtilityFork(filename, args, options) {
   const electron = require('electron');
   if (!electron || !electron.utilityProcess || typeof electron.utilityProcess.fork !== 'function') {
     throw new Error('Electron utilityProcess.fork is unavailable');
   }
-  return electron.utilityProcess.fork(filename, args, options);
+  return memoryCarrierAdmission(null).observe(electron.utilityProcess.fork(filename, args, options));
 }
 
 function normalizeUtilityEntry(entry) {

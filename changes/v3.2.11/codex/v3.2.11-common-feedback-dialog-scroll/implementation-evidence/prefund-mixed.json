@@ -1,0 +1,110 @@
+{
+  "environment": {
+    "platform": "darwin",
+    "versions": {
+      "electron": "36.9.5",
+      "chrome": "136.0.7103.177"
+    },
+    "displayScaleFactor": 2,
+    "minimumSize": [
+      1080,
+      760
+    ],
+    "frame": false,
+    "windowBounds": {
+      "x": 324,
+      "y": 103,
+      "width": 1280,
+      "height": 900
+    },
+    "contentBounds": {
+      "x": 324,
+      "y": 103,
+      "width": 1280,
+      "height": 900
+    },
+    "zoom": 1,
+    "page": {
+      "width": 1280,
+      "height": 900,
+      "devicePixelRatio": 2,
+      "theme": "light"
+    }
+  },
+  "screenshotPixels": {
+    "width": 2560,
+    "height": 1800
+  },
+  "geometry": {
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "card": {
+      "x": 430,
+      "y": 28,
+      "width": 420,
+      "height": 844,
+      "right": 850,
+      "bottom": 872
+    },
+    "body": {
+      "x": 431,
+      "y": 29,
+      "width": 418,
+      "height": 767,
+      "right": 849,
+      "bottom": 796
+    },
+    "footer": {
+      "x": 431,
+      "y": 796,
+      "width": 418,
+      "height": 75,
+      "right": 849,
+      "bottom": 871
+    },
+    "bodyHeight": 767,
+    "bodyScroll": 11308,
+    "bodyWidth": 418,
+    "bodyScrollWidth": 418,
+    "cardHeight": 842,
+    "cardScroll": 842,
+    "overflow": "auto",
+    "buttons": [
+      {
+        "x": 468.5,
+        "y": 813,
+        "width": 151,
+        "height": 36,
+        "right": 619.5,
+        "bottom": 849,
+        "text": "删除错误数据并重跑",
+        "hit": true
+      },
+      {
+        "x": 629.5,
+        "y": 813,
+        "width": 112,
+        "height": 36,
+        "right": 741.5,
+        "bottom": 849,
+        "text": "导出错误数据",
+        "hit": true
+      },
+      {
+        "x": 751.5,
+        "y": 813,
+        "width": 60,
+        "height": 36,
+        "right": 811.5,
+        "bottom": 849,
+        "text": "关闭",
+        "hit": true
+      }
+    ],
+    "focus": "danger-btn small",
+    "errors": []
+  },
+  "fileCount": 100
+}

@@ -1,4 +1,5 @@
 'use strict';
+const { memoryCarrierAdmission } = require('./memory-activity');
 
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -7,6 +8,7 @@ const { Worker } = require('node:worker_threads');
 const { deserializeError } = require('./serialize-error');
 const { JOURNAL_INDEX_NAME } = require('./toolbox-output-publication');
 const { freezeWorkerBatchContext } = require('./archive-center/worker-batch-context');
+const { validateExecutionMemoryConfig } = require('./background-execution/execution-memory-config');
 
 const DEFAULT_WORKER_ENTRY = require.resolve('./toolbox-output-publication-worker');
 
@@ -40,6 +42,14 @@ function createRecoveryFailure(userDataDir, workerError, recoveryError) {
   return error;
 }
 
+// 只在本次 publish Worker 已派发后标记；旧 receipt 阻止 preflight 不属于本次提交未知。
+function markPublicationOutcomeUncertain(error, taskId) {
+  error.publicationOutcomeUncertain = true;
+  error.publicationTaskId = taskId;
+  error.preserveTemporaryFiles = true;
+  return error;
+}
+
 function runWorkerJob(workerScriptPath, op, payload, onProgress, onWorkerExit, workerData) {
   return new Promise((resolve, reject) => {
     let worker;
@@ -68,7 +78,9 @@ function runWorkerJob(workerScriptPath, op, payload, onProgress, onWorkerExit, w
     };
 
     try {
-      worker = new Worker(workerScriptPath, { workerData });
+      const memoryConfig = workerData?.backgroundExecutionMemoryConfig;
+      worker = memoryCarrierAdmission(memoryConfig).observe(new Worker(workerScriptPath, { workerData,
+        ...(memoryConfig ? { resourceLimits: validateExecutionMemoryConfig(memoryConfig).workerLimits } : {}) }));
     } catch (error) {
       reject(createTransportError('无法启动工具箱发布 worker', error));
       return;
@@ -127,9 +139,9 @@ function createToolboxPublicationDispatcher(options = {}) {
     }
     return authority;
   }
-  function worker(op, payload, onProgress) {
+  function worker(op, payload, onProgress, memoryConfig) {
     return runWorkerJob(workerScriptPath, op, payload, onProgress, onWorkerExit,
-      { publicationRecoveryKey: workerKey });
+      { publicationRecoveryKey: workerKey, ...(memoryConfig ? { backgroundExecutionMemoryConfig: memoryConfig } : {}) });
   }
   function enqueue(run) {
     const result = queueTail.then(run, run);
@@ -137,40 +149,50 @@ function createToolboxPublicationDispatcher(options = {}) {
     return result;
   }
   // 仅在已经持有 FIFO 项及 observation lease 时调用；不得从这里再次 enqueue。
-  async function recoverWithinQueue(request, authorizeSnapshot) {
-    const snapshot = await worker('discover-recovery', { userDataDir: authority.root }, request.onProgress);
+  async function recoverWithinQueue(request, authorizeSnapshot, memoryConfig) {
+    const snapshot = await worker('discover-recovery', { userDataDir: authority.root }, request.onProgress, memoryConfig);
     const grants = await authorizeSnapshot(snapshot);
     const result = await worker('execute-recovery', { userDataDir: authority.root,
-      authorization: seal(workerKey, 'recovery', grants) }, request.onProgress);
+      authorization: seal(workerKey, 'recovery', grants) }, request.onProgress, memoryConfig);
     return authority.complete(snapshot, result, request);
   }
-  async function publishWithinQueue(payload, request) {
-    const preflightRecovery = await recoverWithinQueue(request,
-      (snapshot) => authority.authorizeSnapshot(snapshot, request));
-    const pending = preflightRecovery.recovered.filter((item) =>
-      ['commit-handoff-pending', 'commit-finalization-pending'].includes(item.action));
-    if (pending.length || preflightRecovery.deferred.length) {
-      const error = recoveryError('TOOLBOX_PUBLICATION_MANUAL_RECOVERY', authority.root,
-        '已有输出等待存档中心耐久接管或 owner 放行，已阻止新的发布任务',
-        preflightRecovery.deferred.flatMap((item) => item.recoveryPaths));
-      error.deferred = preflightRecovery.deferred;
-      error.skippedActive = preflightRecovery.skippedActive;
-      error.detailLines = [...pending.map((item) => `待接管发布：${item.taskId}`),
-        ...preflightRecovery.deferred.map((item) => `待恢复发布：${item.taskId}（${item.code}）`)];
+  async function publishWithinQueue(payload, request, memoryConfig) {
+    try {
+      const preflightRecovery = await recoverWithinQueue(request,
+        (snapshot) => authority.authorizeSnapshot(snapshot, request), memoryConfig);
+      const pending = preflightRecovery.recovered.filter((item) =>
+        ['commit-handoff-pending', 'commit-finalization-pending'].includes(item.action));
+      if (pending.length || preflightRecovery.deferred.length) {
+        const error = recoveryError('TOOLBOX_PUBLICATION_MANUAL_RECOVERY', authority.root,
+          '已有输出等待存档中心耐久接管或 owner 放行，已阻止新的发布任务',
+          preflightRecovery.deferred.flatMap((item) => item.recoveryPaths));
+        error.deferred = preflightRecovery.deferred;
+        error.skippedActive = preflightRecovery.skippedActive;
+        error.detailLines = [...pending.map((item) => `待接管发布：${item.taskId}`),
+          ...preflightRecovery.deferred.map((item) => `待恢复发布：${item.taskId}（${item.code}）`)];
+        throw error;
+      }
+      payload.preflight = seal(workerKey, 'preflight', { root: authority.root, taskId: payload.taskId,
+        indexDigest: preflightRecovery.resultingIndexDigest, nonce: crypto.randomUUID() });
+    } catch (error) {
+      // 此时尚未派发本次 publish；旧 receipt 的保护不覆盖调用方新建的 generation。
+      error.publicationNotStarted = true;
+      error.publicationTaskId = payload.taskId;
       throw error;
     }
-    payload.preflight = seal(workerKey, 'preflight', { root: authority.root, taskId: payload.taskId,
-      indexDigest: preflightRecovery.resultingIndexDigest, nonce: crypto.randomUUID() });
     try {
-      return await worker('publish', payload, request.onProgress);
+      return await worker('publish', payload, request.onProgress, memoryConfig);
     } catch (error) {
-      if (!error || error.isToolboxPublicationTransportError !== true) throw error;
+      if (!error || error.isToolboxPublicationTransportError !== true) {
+        if (error?.preserveTemporaryFiles) markPublicationOutcomeUncertain(error, payload.taskId);
+        throw error;
+      }
       // runWorkerJob 已跨过失败 worker 的真实 exit；复用当前租约和当前 FIFO。
       try {
         const recoveryRequest = authority.requestFor(null, { reason: 'transport-error', taskIds: [payload.taskId],
           observation: request.observation, onProgress: request.onProgress }, true);
         const recovery = await recoverWithinQueue(recoveryRequest,
-          (snapshot) => authority.authorizeSnapshot(snapshot, recoveryRequest));
+          (snapshot) => authority.authorizeSnapshot(snapshot, recoveryRequest), memoryConfig);
         const recoveredCommit = recovery.recovered.find((item) => item && item.taskId === payload.taskId
           && item.action === 'commit-handoff-pending' && item.batchContext
           && Array.isArray(item.files) && item.files.length > 0
@@ -187,10 +209,16 @@ function createToolboxPublicationDispatcher(options = {}) {
           ...recovery.recovered.map((item) => `${item.taskId}：${item.action}`)];
         error.deferred = recovery.deferred;
         error.skippedActive = recovery.skippedActive;
+        if (recovery.deferred.some((item) => item.taskId === payload.taskId)
+            || recovery.skippedActive.includes(payload.taskId)) {
+          markPublicationOutcomeUncertain(error, payload.taskId);
+        }
         throw error;
       } catch (recoveryErrorValue) {
         if (recoveryErrorValue === error) throw error;
-        throw createRecoveryFailure(authority.root, error, recoveryErrorValue);
+        throw markPublicationOutcomeUncertain(
+          createRecoveryFailure(authority.root, error, recoveryErrorValue), payload.taskId
+        );
       }
     }
   }
@@ -202,12 +230,12 @@ function createToolboxPublicationDispatcher(options = {}) {
       }
       authority = value;
     },
-    runAuthorizedRecovery({ authority: callerAuthority, request, authorizeSnapshot } = {}) {
+    runAuthorizedRecovery({ authority: callerAuthority, request, authorizeSnapshot, memoryConfig = null } = {}) {
       requireAuthority(request && request.root);
       if (callerAuthority !== authority || typeof authorizeSnapshot !== 'function') {
         return Promise.reject(recoveryError('PUBLICATION_RECOVERY_AUTHORITY_REQUIRED', authority.root, '恢复必须使用受限 owner facade'));
       }
-      return enqueue(() => recoverWithinQueue(request, authorizeSnapshot));
+      return enqueue(() => recoverWithinQueue(request, authorizeSnapshot, memoryConfig));
     },
     async publish(optionsForPublish = {}) {
       requireAuthority(optionsForPublish.userDataDir);
@@ -223,7 +251,7 @@ function createToolboxPublicationDispatcher(options = {}) {
           allowEmptyArchiveInputs: optionsForPublish.allowEmptyArchiveInputs === true,
           requireValidatedArtifacts: optionsForPublish.requireValidatedArtifacts === true,
           requireTargetParentIdentity: optionsForPublish.requireTargetParentIdentity === true
-        }, request));
+        }, request, release.memoryConfig));
       } finally { await release('publish-workers-exited'); }
     },
     recover(optionsForRecovery = {}) {

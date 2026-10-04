@@ -1,3 +1,4 @@
+const { memoryCarrierAdmission } = require('./memory-activity');
 // v2.1.6 T6 — 收单单据币种校验：session 层 + 对账算法（⚠️ 资金红线）
 //
 // 提供给 main.js 的 IPC handler 调用的高阶接口：
@@ -85,7 +86,7 @@ function dispatchEngineImport({ dbPath, files, contractModulePath, contractOptio
   return new Promise((resolve, reject) => {
     let worker;
     try {
-      worker = new Worker(ENGINE_WORKER_ENTRY);
+      worker = memoryCarrierAdmission(null).observe(new Worker(ENGINE_WORKER_ENTRY));
     } catch (spawnErr) {
       reject(spawnErr);
       return;

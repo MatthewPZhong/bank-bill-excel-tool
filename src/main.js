@@ -407,9 +407,8 @@ const {
 } = require('./main-process/vcc-op-calc/save-run-lifecycle');
 // v3.1.6：VCC财务OP校验（四类明细幂等、逐币种计算、系统OP比较与归档）。
 const { createVccFinancialOpService } = require('./main-process/vcc-financial-op-service');
-const {
-  planRunWorkbookOutputPaths
-} = require('./main-process/vcc-financial-op-writer');
+const { createResultExportHandlers } = require('./main-process/vcc-financial-op-result-export-ipc');
+const { acquireResultExportLease } = require('./main-process/vcc-financial-op-result-workbook-runner');
 const {
   recoverVccStorageMigration
 } = require('./main-process/vcc-financial-op-storage-rebuild');
@@ -573,6 +572,9 @@ const {
   generateValidateAndPublishMultiOutput
 } = require('./main-process/toolbox-background/multi-output-validator');
 const { MAX_ROW_SPLIT_FILES, publicResult: toolboxRowsPublicResult } = require('./main-process/toolbox-row-split/contracts');
+const { registerWithMemoryActivity, sealMemoryActivityInventory, runMemoryActivity } = require('./main-process/memory-activity');
+const { createPublicationMemoryAdmission } = require('./main-process/execution-descriptors/publication-memory');
+sealMemoryActivityInventory();
 const { prepareRows: prepareToolboxRows, generateValidateAndPublishRows } = require('./main-process/toolbox-row-split/service');
 const {
   publishToolboxPublicationAsync,
@@ -601,6 +603,8 @@ const {
 //   现有小文件分支原样不动（🔴 小文件零回归）。回传契约逐字节一致（前端零改动）。
 const { shouldUseLargeChannel } = require('./main-process/toolbox-large-split-router');
 const { dispatchLargeSplit } = require('./main-process/toolbox-large-split-dispatch');
+const { createToolboxSplitReadOwner } = require('./main-process/toolbox-split-read-owner');
+const { recoverToolboxScanResources } = require('./main-process/toolbox-scan-resources');
 // v2.1.9 N5 T26（spec §5.4 🔴 对外契约破坏性变更）：场景命中行独立报表 writer
 //   v2.1.8 主输出 Sheet 3 撤除 → 改独立报表 命中场景行-{basename}-{ts}.xlsx
 //   v3.0.4 F2：落位由 error-reports/{date}/ 改为 bank-statement-process/{date}/（与错误报告目录互换）
@@ -825,6 +829,14 @@ function runReconFixJpmAdmMutationBoundary(work) {
 
 let archiveOperationTail = Promise.resolve();
 const backgroundExecutionRuntimeManager = createBackgroundExecutionRuntimeManager({
+  diagnostics: function recordMemoryAdmissionDiagnostic(event) {
+    if (!event.memoryProfile || !['resource-granted', 'resource-released'].includes(event.type)) return;
+    appendActivityLogEntry({ source: 'background-execution', message: '后台阶段资源记录', details: [
+      JSON.stringify({ type: event.type, action: event.actionKey, mode: event.memoryMode,
+        profile: event.memoryProfile, policyDigest: event.policyDigest, bytes: event.memoryBytes,
+        at: event.at, lease: event.leaseId || event.resourceId })
+    ] });
+  },
   toolboxPublication: { recover: recoverArchivePublications },
   bizOpV327Provider: () => bizOpV327Module && bizOpV327Module.runtimeBindings,
   workerDurableCoordinatorProvider: () => backgroundWorkerDurableCoordinator,
@@ -1350,6 +1362,9 @@ function getVccFinancialOpService() {
       assetsDir: path.join(__dirname, '../assets'),
       appVersion: pkg.version,
       buildSha: buildInfo.commit,
+      acquireResultExportLeaseFn: (operationKey) => acquireResultExportLease(
+        backgroundExecutionRuntimeManager.get().resourceGovernor, operationKey
+      ),
       publishOutputFilesFn: (payload) => publishVccFinancialOpOutputs({
         ...payload,
         recoverPublications: recoverArchivePublications,
@@ -4591,6 +4606,10 @@ function initializeAppUpdaterService() {
 }
 
 async function checkAndDownloadAppUpdate(kind) {
+  return runMemoryActivity(() => checkAndDownloadAppUpdateWithMemoryActivity(kind));
+}
+
+async function checkAndDownloadAppUpdateWithMemoryActivity(kind) {
   const service = initializeAppUpdaterService();
   const checked = kind === 'startup'
     ? await service.checkForUpdatesOnStartup()
@@ -15988,106 +16007,16 @@ function registerNewAccountHandlers() {
         path.dirname(database.dbPath)]
     }));
 
-  trackedIpcHandle('vccFinancialOp:export:result', 'VCC财务OP校验', '导出校验结果表', {
-    prepare: async (_event, payload = {}) => {
-      try {
-        const target = await getVccFinancialOpService().getArchivedRunByMonth(payload.targetMonth);
-        const subjects = target.subjects;
-        if (subjects.length === 1) {
-          const choice = await dialog.showSaveDialog(mainWindow, {
-            title: '导出 VCC 财务OP校验结果表',
-            defaultPath: path.join(
-              app.getPath('documents'),
-              `${target.targetMonth}_${sanitizeFileName(subjects[0]) || '未命名主体'}_VCC财务OP校验结果表.xlsx`
-            ),
-            filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-          });
-          if (choice.canceled || !choice.filePath) {
-            return { proceed: false, result: { status: 'cancelled' } };
-          }
-          const outputPaths = planRunWorkbookOutputPaths({
-            targetMonth: target.targetMonth,
-            subjects,
-            outputPath: choice.filePath
-          });
-          return {
-            proceed: true,
-            runId: target.runId,
-            targetMonth: target.targetMonth,
-            subjects: Object.freeze(subjects.slice()),
-            vccOutputPublicationTaskIds: [],
-            filePlan: {
-              version: 1,
-              allocation: 'eager',
-              inputs: [],
-              outputs: outputPaths.map((filePath) => ({
-                filePath,
-                role: 'output',
-                sourceOperation: 'vccFinancialOp:export:result'
-              }))
-            }
-          };
-        }
-        const choice = await showImportOpenDialog('vcc-financial-op-export-directory', {
-          title: '选择各主体校验结果表保存目录',
-          properties: ['openDirectory', 'createDirectory']
-        });
-        if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
-          return { proceed: false, result: { status: 'cancelled' } };
-        }
-        const outputPaths = planRunWorkbookOutputPaths({
-          targetMonth: target.targetMonth,
-          subjects,
-          outputDirectory: choice.filePaths[0]
-        });
-        return {
-          proceed: true,
-          runId: target.runId,
-          targetMonth: target.targetMonth,
-          subjects: Object.freeze(subjects.slice()),
-          vccOutputPublicationTaskIds: [],
-          filePlan: {
-            version: 1,
-            allocation: 'eager',
-            inputs: [],
-            outputs: outputPaths.map((filePath) => ({
-              filePath,
-              role: 'output',
-              sourceOperation: 'vccFinancialOp:export:result'
-            }))
-          }
-        };
-      } catch (error) {
-        return { proceed: false, result: vccFinancialOpErrorResult(error) };
-      }
-    },
-    execute: async (_event, prepared, taskContext) => {
-      const batchContext = taskContext.batchContext;
-      const publicationStagingDirectory = createVccOutputStagingDirectory(batchContext);
-      try {
-        const outputPaths = taskContext.fileEvidence.filePlan.outputs.map((item) => item.filePath);
-        const result = await getVccFinancialOpService().exportRun({
-          targetMonth: prepared.targetMonth,
-          expectedRunId: prepared.runId,
-          expectedSubjects: prepared.subjects,
-          outputPaths,
-          publicationStagingDirectory,
-          targetSnapshots: taskContext.fileEvidence.targetSnapshots,
-          onDurableHandoff: (publication, _exportResult, evidence) => (
-            settleVccOutputPublication(prepared, taskContext, publication, evidence)
-          )
-        }, batchContext);
-        return { status: 'success', ...result };
-      } catch (error) {
-        return vccFinancialOpErrorResult(error);
-      } finally {
-        if (!fs.existsSync(publicationStagingDirectory)
-            || !fs.readdirSync(publicationStagingDirectory).length) {
-          cleanupVccOutputStagingDirectory(publicationStagingDirectory);
-        }
-      }
-    }
-  });
+  trackedIpcHandle('vccFinancialOp:export:result', 'VCC财务OP校验', '导出校验结果表',
+    createResultExportHandlers({
+      getService: getVccFinancialOpService,
+      dialog,
+      getWindow: () => mainWindow,
+      documentsPath: app.getPath('documents'),
+      createStagingDirectory: createVccOutputStagingDirectory,
+      cleanupStagingDirectory: cleanupVccOutputStagingDirectory,
+      settlePublication: settleVccOutputPublication
+    }));
 
   trackedIpcHandle('vccFinancialOp:export:import-audit', 'VCC财务OP校验', '导出导入审计', {
     prepare: async (_event, payload = {}) => {
@@ -18102,7 +18031,7 @@ function getPreFundReconciliationService() {
 }
 
 function schedulePreFundReconciliationStartupCleanup() {
-  setImmediate(() => {
+  setImmediate(observeBackgroundMemoryActivity(() => {
     try {
       getPreFundReconciliationService().reconcilePersistedRunMirrors();
     } catch (error) {
@@ -18115,7 +18044,7 @@ function schedulePreFundReconciliationStartupCleanup() {
         stack: error && error.stack ? error.stack : undefined
       });
     }
-  });
+  }));
 }
 
 function preFundFailureResult(error) {
@@ -19994,13 +19923,38 @@ function assertToolboxTargetsDoNotAliasSources(sourcePaths, targetPaths) {
 }
 
 let toolboxSplitReadContext = null;
+const toolboxSplitReadOwners = new WeakMap();
 
-function createToolboxSplitReadContext(sourceFilePath, dataRowCount) {
+function recoverToolboxScansAtStartup() {
+  const report = recoverToolboxScanResources({
+    temporaryRoot: path.join(app.getPath('userData'), 'toolbox-scan-temp')
+  });
+  if (report.cleanupPendingCount > 0) {
+    try { appendActivityLogEntry({
+      level: 'warning', source: 'main', domain: 'toolbox',
+      message: '拆分扫描临时资源仍待清理，已保留责任记录和原内容',
+      details: report.cleanupFailures.map((item) => `${item.id || 'root'}: ${item.code} ${item.message}`)
+    }); } catch (error) { console.warn('扫描补偿诊断写入日志失败，责任记录继续保留', error); }
+  }
+  return report;
+}
+
+function getToolboxSplitReadOwner() {
+  const runtime = backgroundExecutionRuntimeManager.get();
+  if (!toolboxSplitReadOwners.has(runtime)) {
+    toolboxSplitReadOwners.set(runtime, createToolboxSplitReadOwner({ governor: runtime.resourceGovernor,
+      temporaryRoot: path.join(app.getPath('userData'), 'toolbox-scan-temp') }));
+  }
+  return toolboxSplitReadOwners.get(runtime);
+}
+
+function createToolboxSplitReadContext(sourceFilePath, dataRowCount, senderId = null) {
   const resolvedPath = path.resolve(String(sourceFilePath || ''));
   const snapshot = sourceSnapshotFromStat(fs.statSync(resolvedPath, { bigint: true }));
   if (!snapshot) throw new Error('拆分源文件不可读，请重新选择');
   const context = Object.freeze({
     token: randomUUID(),
+    senderId,
     sourceFilePath: resolvedPath,
     dataRowCount,
     snapshot: Object.freeze({ ...snapshot })
@@ -20009,11 +19963,15 @@ function createToolboxSplitReadContext(sourceFilePath, dataRowCount) {
   return context;
 }
 
-function requireToolboxSplitReadContext(payload = {}) {
+function requireToolboxSplitReadContext(payload = {}, event = null) {
+  if (event && getToolboxSplitReadOwner().ownsToken(event.sender, payload.splitReadToken)) {
+    return getToolboxSplitReadOwner().requireContext(event.sender, payload);
+  }
   const token = String(payload.splitReadToken || '').trim();
   const sourceFilePath = path.resolve(String(payload.sourceFilePath || ''));
   const context = toolboxSplitReadContext;
-  if (!context || context.token !== token || context.sourceFilePath !== sourceFilePath) {
+  if (!context || context.token !== token || context.sourceFilePath !== sourceFilePath ||
+      (context.senderId !== null && context.senderId !== event?.sender?.id)) {
     const error = new Error('拆分源文件准备信息已失效，请重新选择');
     error.code = 'TOOLBOX_SPLIT_READ_CONTEXT_STALE';
     throw error;
@@ -20023,6 +19981,7 @@ function requireToolboxSplitReadContext(payload = {}) {
 
 function clearToolboxSplitReadContext(context) {
   if (toolboxSplitReadContext === context) toolboxSplitReadContext = null;
+  if (context && context.senderId != null && context.fields instanceof Map) getToolboxSplitReadOwner().clear(context);
 }
 
 function assertToolboxSplitSourceFresh(context, sourceEvidence) {
@@ -20250,8 +20209,17 @@ function registerToolboxHandlers() {
   // IPC 2 —— 拆表第一步：单选 → 取表头 + 流式扫一遍累积各字段去重值 → 回传给前端选字段弹框
   //   v3.0.8 BUG3：.xlsx 走流式（readHeaderRowStreamed 取表头 + streamDataRows 逐行喂去重累加器，内存常数），
   //   .csv/.xls 回退全量 extractHeaders + readRows + computeValuesByField。返回契约 {status,sourceFilePath,headers,valuesByField} 不变。
-  ipcMain.handle('toolbox:split:read', async () => {
+  ipcMain.handle('toolbox:split:read', async (event, request) => {
     try {
+      if (request !== undefined) {
+        return await getToolboxSplitReadOwner().read(event.sender, request, async () => {
+          const choice = await showImportOpenDialog('toolbox', {
+            title: '选择要拆分的表格', properties: ['openFile'], filters: statementFileDialogFilters()
+          });
+          return !choice.canceled && choice.filePaths && choice.filePaths[0];
+        });
+      }
+      // 保留旧调用的显式兼容入口；新 Renderer 始终使用 version:2。
       toolboxSplitReadContext = null;
       const choice = await showImportOpenDialog('toolbox', {
         title: '选择要拆分的表格',
@@ -20273,7 +20241,7 @@ function registerToolboxHandlers() {
       if (!headers || headers.length === 0) {
         return { status: 'failed', message: '文件为空或不可读，请重新导入', detailLines: [] };
       }
-      const readContext = createToolboxSplitReadContext(sourceFilePath, dataRowCount);
+      const readContext = createToolboxSplitReadContext(sourceFilePath, dataRowCount, event?.sender?.id ?? null);
       if (!sourceSnapshotMatchesStat(readStartedSnapshot, fs.statSync(sourceFilePath, { bigint: true }))) {
         clearToolboxSplitReadContext(readContext);
         throw new Error('拆分源文件在读取过程中已变化，请重新选择');
@@ -20292,6 +20260,15 @@ function registerToolboxHandlers() {
     }
   });
 
+  ipcMain.handle('toolbox:split:read-values', async (event, request) => {
+    try { return await getToolboxSplitReadOwner().readValues(event.sender, request); }
+    catch (error) { return toolboxFailureResult(error); }
+  });
+  ipcMain.handle('toolbox:split:cancel-read', async (event, request) => {
+    try { return getToolboxSplitReadOwner().cancel(event.sender, request); }
+    catch (error) { return toolboxFailureResult(error); }
+  });
+
   // IPC 3 —— 拆表第二步：{sourceFilePath, field, values[]} → 流式过滤 row[field]∈values（多选值→单文件）→ 写临时 → 另存为
   //   v3.0.8 BUG3：.xlsx 走流式（readHeaderRowStreamed 取表头判字段是否存在 + createRowFilter 逐行过滤 + writeRowsStreamed 逐行写命中行，内存常数），
   //   .csv/.xls 回退全量 readRows + filterRowsByFieldValues。
@@ -20299,7 +20276,7 @@ function registerToolboxHandlers() {
   trackedIpcHandle('toolbox:split:export', '工具箱', '拆分表格', {
     async prepare(_event, payload = {}) {
       try {
-        const readContext = requireToolboxSplitReadContext(payload);
+        const readContext = requireToolboxSplitReadContext(payload, _event);
         if (![undefined, 'single', 'multiple', 'rows'].includes(payload.mode)) {
           throw new Error('不支持的拆分模式');
         }
@@ -21095,6 +21072,7 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
         resultFlowIdentities: typeof policy.resultFlowIdentities === 'function'
           ? (result, context) => policy.resultFlowIdentities(result, context, invocation)
           : null,
+        beforeTerminalSettlement: adapterInvocation.beforeTerminalSettlement,
         afterTerminal: adapterInvocation.afterTerminal,
         afterTerminalIntent: adapterInvocation.afterTerminalIntent,
         beforeStart: async (context, filePlanEvidence) => {
@@ -21232,6 +21210,10 @@ function flushUsageStats() {
 
 // 完整初始化成功后才注册 IPC 并创建业务窗口。
 function registerAllIpcHandlers() {
+  return registerWithMemoryActivity(ipcMain, registerAllIpcHandlersWithMemoryActivity);
+}
+
+function registerAllIpcHandlersWithMemoryActivity() {
   registerBizOpV327Handlers({ ipcMain, getModule: () => bizOpV327Module, businessOperationRegistry,
     getTaskLifecycle: () => archiveTaskLifecycle, getRuntime: () => backgroundExecutionRuntimeManager.get(),
     dialog, getWindow: () => mainWindow, getStorageRoot });
@@ -21350,6 +21332,7 @@ async function initializeBackgroundExecutionRecovery() {
   publicationRecoveryCoordinator = createPublicationRecoveryCoordinator({
     userDataDir: path.dirname(database.dbPath),
     dispatcher: getDefaultToolboxPublicationDispatcher(),
+    acquireMemory: createPublicationMemoryAdmission(() => backgroundExecutionRuntimeManager.get()),
     owners: [
       bizOpV327Module.publication.publicationOwner,
       createArchivePublicationOwner({ getArchiveCenter: () => archiveCenterService })
@@ -21537,6 +21520,7 @@ async function initializeApplication() {
     // Toolbox committed publication 已作为 ArchiveCenter owner recovery 在通用
     // interrupted sweep 前写入“附件 + succeeded”耐久 outbox 并完成重放。
     // VCC lineage/hold 只由 Archive controller 的 post-outbox hook 执行一次。
+    recoverToolboxScansAtStartup();
     // 结果侧库只服务上一进程的最后一次 run；即使模块默认关闭，也要在本次启动后台立即回收。
     schedulePreFundReconciliationStartupCleanup();
 
@@ -21669,13 +21653,22 @@ if (hasSingleInstanceLock) app.whenReady()
 
 // v3.0.5 PR-5：启动期后台 post-setup（孤儿清理 / 备份保留 / idle 计时器 / failure listener / OneDrive 提示）。
 //   由 initializeApplication 末尾调用（database 已 init）。所有块 setImmediate 异步，不阻塞窗口。
+function observeBackgroundMemoryActivity(work) {
+  return function runObservedBackgroundWork(...args) {
+    return runMemoryActivity(() => work(...args)).catch((error) => {
+      appendActivityLogEntry({ level: 'warning', source: 'background-execution', message: '后台维护本次未完成',
+        details: [error.code || 'BACKGROUND_MAINTENANCE_FAILED'] });
+    });
+  };
+}
+
 function runStartupPostSetup() {
     // v2.1.6 fix10：启动期孤儿数据 cleanup（后台异步，不阻塞窗口 ready）
     // 触发场景：上一次 run 中途 OOM 闪退 / 异常退出 / 用户 force quit，导致 DB 残留 diff_rows + flow/bill imports
     // 检测口径：runs.status != 'success' OR diff/report 文件丢失（spec §5.4）
     // 复用 fix9 cleanupAfterRunBackground 分批 DELETE + setImmediate 让出 event loop
     // 失败容忍：抛错只记 activity log，不阻塞应用使用
-    setImmediate(async () => {
+    setImmediate(observeBackgroundMemoryActivity(async () => {
       if (!database || !database.db) return;
       const lock = tryAcquireAcquiringBillCurrencyOpLock('cleanup', null);
       if (!lock.acquired) return;
@@ -21718,7 +21711,7 @@ function runStartupPostSetup() {
       } finally {
         releaseAcquiringBillCurrencyOpLock();
       }
-    });
+    }));
 
     // v3.0.5 PR-3（Part B Phase 1 / B.6）：侧库孤儿双向兜底（启动扫描 run-data/{module}/ vs 主库 runs 元数据）
     //   ① 有文件无元数据「且空壳（侧库无 flow/bill imports）」→ 删文件 + log；
@@ -21726,7 +21719,7 @@ function runStartupPostSetup() {
     //   ② 有元数据无文件 → 标记 run 失效（UI 降级「数据已清理」不崩溃）。
     //   一致性原则：以侧库文件存在性为准（spec §B.6）。与上面主库孤儿清理（既有行级，双源过渡保留）并存。
     //   后台 setImmediate，不阻塞窗口 ready；持同一把 op lock 避免与用户首次 import/run 并发。
-    setImmediate(() => {
+    setImmediate(observeBackgroundMemoryActivity(() => {
       if (!database || !database.db) return;
       const lock = tryAcquireAcquiringBillCurrencyOpLock('cleanup', null);
       if (!lock.acquired) return;
@@ -21760,12 +21753,12 @@ function runStartupPostSetup() {
       } finally {
         releaseAcquiringBillCurrencyOpLock();
       }
-    });
+    }));
 
     // v3.0.5 PR-4（Part B Phase 2 / B.6）：biz-op + bank-bu 侧库孤儿双向兜底（启动扫描各自 run-data/{module}/）。
     //   ① 有文件无 imports/镜像（空壳/损坏）→ 删文件；② 有镜像无文件 → 标记 run 失效（UI 降级，不崩溃）。
     //   两模块无 op lock（导入/对账非长任务、无 cleanup 计时器）→ 直接跑；后台 setImmediate 不阻塞窗口。
-    setImmediate(() => {
+    setImmediate(observeBackgroundMemoryActivity(() => {
       if (!database || !database.db) return;
       const userDataDir = path.dirname(database.dbPath);
       for (const [domain, runData] of [['biz-op-recon', bizOpReconRunData], ['bank-bu-recon', bankBuReconRunData]]) {
@@ -21796,14 +21789,14 @@ function runStartupPostSetup() {
           } catch (_logErr) { /* swallow */ }
         }
       }
-    });
+    }));
 
     // v3.0.5 PR-2（Part B Phase 0 / B-D8）：旧备份保留策略 —— 合并 backups/ + 根目录旧格式为一个池子，
     //   mtime 降序保留最近 2 份，其余删除。启动后台异步（setImmediate，与上面 fix10 cleanup 同风格），
     //   不阻塞窗口 ready；逐个被删文件写一条 activity log（含文件名/大小/mtime），单文件删除失败不中断、记 error 级。
     //   ⚠️ 删用户数据动作（R-1）：白名单基于实际命名（tool-data-bak-*.sqlite / tool-data.sqlite.bak-*），
     //   绝不触碰主库本体（tool-data.sqlite / tool-data-pending.sqlite）及 -wal/-shm 旁文件，未知文件一律不动。
-    setImmediate(() => {
+    setImmediate(observeBackgroundMemoryActivity(() => {
       try {
         const userDataDir = app.getPath('userData');
         const backupsDir = path.join(userDataDir, 'backups');
@@ -21849,7 +21842,7 @@ function runStartupPostSetup() {
           details: [String(err && err.stack ? err.stack : err)]
         });
       }
-    });
+    }));
 
     // v2.1.8 N1' (v0.7)：启动 idle 30min 自动 cleanup 计时器（spec §3.2.2）
     //   database init 完后启动；setInterval 2 分钟 tick，达 30min 闲置 → 触发 cleanup
@@ -21870,9 +21863,9 @@ function runStartupPostSetup() {
     // v3.0.3 PR-D（W5）：OneDrive 导出目录提示（启动后单次 toast）
     //   spec acquiring-import-recon-perf §9.4 — 仅 Windows + 工作目录命中 OneDrive 同步路径 + 未提示过 → 弹 Notification。
     //   setImmediate 异步不阻塞窗口 ready（与上面 fix10 startup cleanup 同风格）；失败仅静默兜底。
-    setImmediate(() => {
+    setImmediate(observeBackgroundMemoryActivity(() => {
       notifyOneDriveStorageIfNeeded();
-    });
+    }));
 
     // v2.1.10 A3 Phase 2 T14：注册 worker pool failure listener
     //   - worker exit (code≠0) / error 事件 → pool 自动 reject activeJob + 调本回调
@@ -21997,6 +21990,13 @@ let cleanupBackgroundInProgress = false;
 //   - 兼容现有 caller（启动期 + 进入模块兜底 + idle tick）— fire-and-forget 不 await 不破坏既有行为
 //   - idle tick caller 可 await 后再调 raw_json 清理，保证顺序契约
 function triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded() {
+  return runMemoryActivity(() => triggerAcquiringBillCurrencyBackgroundCleanupWithMemoryActivity()).catch((error) => {
+    appendActivityLogEntry({ level: 'warning', source: 'background-execution', message: '后台清理延后，保留待清理记录',
+      details: [error.code || 'BACKGROUND_CLEANUP_FAILED'] });
+  });
+}
+
+function triggerAcquiringBillCurrencyBackgroundCleanupWithMemoryActivity() {
   if (cleanupBackgroundInProgress) return Promise.resolve();
   if (!database || !database.db) return Promise.resolve();
   let pendingRuns;
@@ -22133,7 +22133,7 @@ function setupIdleCleanupTimer() {
   if (idleCleanupTimer) return; // 重入保护
   // v2.1.9 N1-settings：启动期从 settings 读阈值（默认 30）
   loadIdleCleanupMsFromSettings();
-  idleCleanupTimer = setInterval(async () => {
+  idleCleanupTimer = setInterval(observeBackgroundMemoryActivity(async () => {
     const operation = businessOperationRegistry.begin({
       channel: 'background:idle-cleanup',
       moduleKey: '收单单据币种校验',
@@ -22222,7 +22222,7 @@ function setupIdleCleanupTimer() {
     } finally {
       businessOperationRegistry.end(operation.token);
     }
-  }, IDLE_CHECK_INTERVAL_MS);
+  }), IDLE_CHECK_INTERVAL_MS);
   if (idleCleanupTimer.unref) idleCleanupTimer.unref(); // 不阻塞退出
 }
 
@@ -22279,6 +22279,21 @@ async function shutdownWorkerPoolGracefully() {
 }
 
 async function shutdownBackgroundExecutionRuntimeGracefully() {
+  const runtime = backgroundExecutionRuntimeManager.peek();
+  const readOwner = runtime && toolboxSplitReadOwners.get(runtime);
+  if (readOwner) {
+    const closed = await readOwner.close();
+    if (closed.unclosedCount > 0) throw Object.assign(new Error('拆分准备扫描尚未关闭'), { code: 'TOOLBOX_SPLIT_READ_CLOSE_UNCONFIRMED' });
+    if (closed.cleanupPendingCount > 0) {
+      const pending = readOwner.snapshot();
+      if (pending.cleanupUnpersistedCount > 0) throw Object.assign(new Error('拆分扫描清理责任尚未保存，请重试退出'),
+        { code: 'TOOLBOX_SPLIT_READ_CLEANUP_UNPERSISTED' });
+      try { appendActivityLogEntry({ level: 'warning', source: 'main', domain: 'toolbox',
+        message: '拆分扫描载体已退出，临时资源保留待下次启动重试清理',
+        details: pending.cleanupFailures.map((item) => `${item.code || 'PENDING'}: ${item.message || '清理待重试'}`) });
+      } catch (error) { console.warn('扫描补偿诊断写入日志失败，责任记录继续保留', error); }
+    }
+  }
   const report = await backgroundExecutionRuntimeManager.shutdown({ timeoutMs: 5000 });
   const leakedTransports = Array.isArray(report && report.leakedTransports)
     ? report.leakedTransports

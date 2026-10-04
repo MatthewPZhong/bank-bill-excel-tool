@@ -160,6 +160,15 @@
   font-size: 13px;
 }
 
+/* 仅收窄结果导出的两个控件，保留原 Grid 轨道、字体及高度。 */
+.vcc-fin-op-archive-picker-dialog--export
+.vcc-fin-op-archive-picker-fields > select.vcc-fin-op-input {
+  width: 40%;
+  min-width: 0;
+  justify-self: start;
+  padding-inline: 2px;
+}
+
 .vcc-fin-op-export-dialog {
   width: min(100%, 680px);
 }

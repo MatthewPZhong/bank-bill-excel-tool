@@ -9,6 +9,7 @@ const { normalizeWarningSummary } = require('../toolbox-background/generation-co
 const { sha256File } = require('../toolbox-output-writer');
 const { normalizeFilePlanV1, assertFilePlanFresh } = require('../archive-center/file-plan');
 const { sourceSnapshotMatchesStat } = require('../archive-center/source-snapshot');
+const { detectToolboxInputKind, supportsToolboxLowMemoryInput } = require('../toolbox-input-kind');
 const {
   ROWS_ACTION, ROWS_BUDGETS, assert, exactKeys, rowsError, planRowCounts,
   buildRowTargets, assertResultBudget, assertSourceBudget, jsonBytes, assertDiskSpace, publicResult,
@@ -116,18 +117,20 @@ async function validateRowsManifest(plan, input, result) {
   return { artifacts: Object.freeze(artifacts), warningSummary, metrics: manifest.metrics };
 }
 
-function rowsAdmissionError(error) {
+function rowsAdmissionError(error, stage = 'generation') {
   if (!error || !['RESOURCE_BUDGET_UNAVAILABLE', 'ADMISSION_TIMEOUT'].includes(error.code)) return error;
   const insufficient = error.code === 'RESOURCE_BUDGET_UNAVAILABLE';
+  const compatibility = insufficient && error.details?.memoryLimitKind === 'compatibility';
   error.message = insufficient
-    ? '按行拆分暂时无法启动：后台资源配额不足。'
+    ? stage === 'validation' ? '按行拆分验证阶段无法启动：后台资源配额不足。' : '按行拆分暂时无法启动：后台资源配额不足。'
     : '按行拆分等待后台资源超时，请稍后重试。';
   error.detailLines = [
-    '本次尚未开始生成拆分文件。',
+    stage === 'validation' ? '拆分文件已生成在任务私有目录，尚未完成验证和正式发布。' : '本次尚未开始生成拆分文件。',
     ...(Array.isArray(error.detailLines) ? error.detailLines : []),
-    insufficient
+    compatibility
       ? '后台总配额在应用启动时计算；若总配额低于所需值，请关闭暂不使用的程序，释放内存后重新启动应用。'
-      : '请等待其他后台任务完成后重试；若持续出现，请保留以上资源信息便于排查。'
+      : insufficient ? '本次未能取得所需资源；请保留以上资源信息便于排查。'
+        : '请等待其他后台任务完成或释放其他程序占用后直接重试，无需重启本软件。'
   ];
   return error;
 }
@@ -142,6 +145,11 @@ async function generateValidateAndPublishRows({
     filePlan.outputs.length === checked.fileCount, '按行拆分 FilePlan 非法');
   const context = operationContextFromBatch(batchContext);
   const source = filePlan.inputs[0];
+  // 每次正式生成独立判断适用性，不能沿用预扫描时的资源或扩展名假设。
+  const inputKind = detectToolboxInputKind(source.filePath);
+  assert(sourceSnapshotMatchesStat(source.sourceSnapshot, fs.statSync(source.filePath, { bigint: true })),
+    '拆分源文件在生成前已变化，请重新选择', 'TOOLBOX_SPLIT_READ_CONTEXT_STALE');
+  const allowLowMemory = supportsToolboxLowMemoryInput(inputKind, source.sourceSnapshot.sizeBytes);
   const targets = buildRowTargets(source.filePath, path.dirname(filePlan.outputs[0].filePath), checked);
   const plan = validatePlan({ version: 1, action: ROWS_ACTION, attemptId: randomUUID(),
     taskRunId: context.taskRunId, source: { filePath: source.filePath, sourceSnapshot: source.sourceSnapshot },
@@ -157,13 +165,23 @@ async function generateValidateAndPublishRows({
   let execution;
   try {
     execution = await runtime.execute({ actionKey: ROWS_ACTION, operationKey: context.operationKey,
-      production: true, context: { kind: 'operation', value: context }, input });
+      production: true, allowLowMemory, context: { kind: 'operation', value: context }, input });
   } catch (error) { throw rowsAdmissionError(error); }
   if (!execution || execution.outcome !== 'completed' || execution.terminalSource !== 'job:done') {
     if (execution && execution.error) throw rowsAdmissionError(fromProtocolError(execution.error));
     throw rowsError('TOOLBOX_ROWS_GENERATION_FAILED', '按行拆分后台生成未完成');
   }
-  const validated = await validateRowsManifest(plan, input, execution.result);
+  let validationLease;
+  let validated;
+  try {
+    if (runtime.resourceGovernor) validationLease = await runtime.resourceGovernor.acquirePhaseLease({
+      ownerKey: `toolbox:rows-validate:${plan.attemptId}`, actionKey: ROWS_ACTION,
+      operationKey: context.operationKey, timeoutMs: 5000, lowMemoryBehavior: 'queue',
+      resources: { cpuSlots: 1, workerThreadSlots: 0, utilityProcessSlots: 0, ioHeavySlots: 1, memoryBytes: 1024 ** 3 }
+    });
+    validated = await validateRowsManifest(plan, input, execution.result);
+  } catch (error) { throw rowsAdmissionError(error, 'validation'); }
+  finally { if (validationLease) validationLease.release('rows-manifest-streams-closed'); }
   assert(sourceSnapshotMatchesStat(source.sourceSnapshot, fs.statSync(source.filePath, { bigint: true })),
     '拆分源文件在生成后已变化，请重新选择', 'TOOLBOX_SPLIT_READ_CONTEXT_STALE');
   if (metadataDirectory) assertDiskSpace(metadataDirectory, ROWS_BUDGETS.maxManifestBytes);

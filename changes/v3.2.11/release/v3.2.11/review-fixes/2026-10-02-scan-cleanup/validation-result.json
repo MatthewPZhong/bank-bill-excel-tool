@@ -1,0 +1,79 @@
+{
+  "result": "PASS",
+  "baseline": "8cc9b2ddbc056c8a78d4a8f061083853815db019",
+  "branch": "release/v3.2.11",
+  "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+  "startedAt": "2026-10-02T22:53:27.454452+08:00",
+  "finishedAt": "2026-10-02T23:12:32.023564+08:00",
+  "elapsedSeconds": 1144.54,
+  "frozenInputCount": 1778,
+  "unit": {
+    "tests": 9581,
+    "pass": 9577,
+    "fail": 0,
+    "skipped": 4
+  },
+  "integration": {
+    "scripts": 79,
+    "passedScripts": 79,
+    "countedChecks": 3068,
+    "cleanupCases": 16
+  },
+  "architecture": {
+    "files": 787,
+    "parsedFiles": 787,
+    "historyCommits": 39,
+    "result": "PASS"
+  },
+  "lint": "PASS",
+  "smoke": "PASS",
+  "changedGateInputs": [
+    {
+      "path": "rules/integration-test-policy.md",
+      "before": "fb0ccd9d00f2c06582f9cde3fffb54636e1f210730ca34cba00eb3b14e964833",
+      "after": "c63f9d7bd9370ea2725f1f7bb879212ac8ff440802d6d39d964a956e6ce5e0a1"
+    }
+  ],
+  "regressionBefore": {
+    "total": 11,
+    "pass": 7,
+    "fail": 4,
+    "newCasesFailed": 4
+  },
+  "focusedUnit": {
+    "pass": 27,
+    "fail": 0
+  },
+  "limits": [
+    "EPERM/EACCES 为隔离文件系统故障注入",
+    "真实 Worker 和恢复子进程在 macOS 运行",
+    "未重跑 Windows 实机、安装包、Excel/WPS 或完整页面人工验收",
+    "未声明断电耐久性"
+  ],
+  "fileSha256": {
+    "changes/v3.2.11/release/v3.2.11/review-fixes/2026-10-02-scan-cleanup/repair-report.md": "5cf3bc5ee07330fe13edbadf017c108560abea071972ca64542a7e839c52e409",
+    "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/implementation-notes.md": "0426ead7fe36b9ea83a264cefa711f915d36ef8b0fabc94c8378b3e3f1b2e855",
+    "changes/v3.2.11/v3.2.11-bizop-rows-low-memory/techdoc.md": "2c5372bb171925a1bc55e0f450e9e26dd73ebb5dfa8130371dfb63c4b0a85f08",
+    "rules/integration-test-policy.md": "c63f9d7bd9370ea2725f1f7bb879212ac8ff440802d6d39d964a956e6ce5e0a1",
+    "scripts/integration/toolbox-low-memory-foundation.js": "49e2dac2e7d90882730fc35a85cf70fba6f9083b939f4b9de03a093533c495bd",
+    "scripts/integration/toolbox-scan-cleanup.js": "43e7751d6ca965106b821b8c1ff70a52d1cc0a46b3d52275b2c3e5124b1f832b",
+    "src/main-process/background-execution/admission-only-owner.js": "cf168e09b8952e81e0231718e60a365726a66fde6ce44b477db7594981645209",
+    "src/main-process/toolbox-scan-resources.js": "cc121360e1506c4defa82afb23bffa65de014a36a95c6c8d7798a170f1ac7fd4",
+    "src/main-process/toolbox-split-read-owner.js": "8b0bd65f72adb35fe07ec2b3b8fd0ebfab61baeedeb5081f132c5ea15d00979c",
+    "src/main.js": "d79c579959228b87eca72e7f4f5a19762fdfe07b274e94f0ac76d29b4c3eabf9",
+    "tests/unit/main-process/background-execution/admission-only-owner.test.js": "6dacc4621bfa692fc65f66321bf6f1da9689911553ed59905b5e822954c4ce06"
+  },
+  "evidenceSha256": {
+    "gate-start.json": "7013a3d7fa3e50ee5a91daf85cdd70514ad3df78ada2cff74c4e1491199e2c52",
+    "gate-inputs.json": "abc2cdd1cbe49438ac8c78bf304630101cc9d378cf652929f6cb16d2ae0624b4",
+    "foundation-integration.log": "394c8233c2e4bd95ec4384d615c9d2ca2f22ba08595ece6e0fc939c82967f497",
+    "focused-unit.log": "022451b303537bf3b54e812accd9addedca28f92c75cd11649baed004820dfd8",
+    "gate-result.json": "978a2f0b3c9e441930148abf8e001a95d4b8d4ed30aed6c0b21fa57726285676",
+    "before-unit.log": "9d210649d1726f3f82d69e896bce83cebee1354c705d1a677d65a596bd30d842",
+    "release-check.log": "e247331e4ff439d55394136234193f572869281a67157183ed3f5bb808457567",
+    "compatibility-integration.log": "ca31f4b8d1c64e2a6c2b71bba6240edca6b5da47d84ebc674a4de591ee1b3b71",
+    "cleanup-integration.log": "5951eb1394b2697f0b19b46487d09499901ce0b60ebaf67cbd1c4abc095b119e"
+  },
+  "rawEvidenceDirectory": "outputs/release-v3.2.11/2026-10-02-scan-cleanup-repair",
+  "commitStatusAtValidation": "uncommitted"
+}

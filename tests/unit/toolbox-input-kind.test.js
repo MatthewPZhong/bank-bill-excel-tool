@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const {
-  detectToolboxInputKind
+  detectToolboxInputKind, supportsToolboxLowMemoryInput
 } = require('../../src/main-process/toolbox-input-kind');
 
 function withFixture(name, bytes, fn) {
@@ -46,5 +46,18 @@ test('XML Spreadsheet 伪装 .xls 明确拒绝并提示转换', () => {
       () => detectToolboxInputKind(filePath),
       /另存为 \.xlsx 或 Excel 97–2003 \.xls/
     );
+  });
+});
+
+
+test('低档按真实格式筛选：BIFF8 不凭磁盘大小放行，XLSX 与有界 CSV 继续可用', () => {
+  const { LOW_MEMORY_CSV_MAX_BYTES: limit } = require('../../src/backend/toolbox-format/csv-capacity');
+  for (const size of [1, limit, 2906624]) assert.equal(supportsToolboxLowMemoryInput('xls', size), false);
+  assert.equal(supportsToolboxLowMemoryInput('xlsx', 65 * 1024 ** 2), true);
+  assert.equal(supportsToolboxLowMemoryInput('csv', limit), true);
+  for (const size of [limit + 1, undefined, -1, '1']) assert.equal(supportsToolboxLowMemoryInput('csv', size), false);
+  assert.equal(supportsToolboxLowMemoryInput('unknown', 1), false);
+  withFixture('input.csv', Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), (filePath) => {
+    assert.equal(supportsToolboxLowMemoryInput(detectToolboxInputKind(filePath), fs.statSync(filePath).size), false);
   });
 });

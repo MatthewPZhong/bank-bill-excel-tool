@@ -1620,6 +1620,44 @@ tr.add-row .text-action:hover { background: var(--primary-soft, #c2d7fa); }
 }
 .alert-message strong { color: var(--primary); font-weight: 600; }
 
+/* 仅两个公共反馈工厂生成的卡片。 */
+.modal-card.feedback-dialog-card {
+  min-height: 0;
+  min-width: 0;
+}
+
+.feedback-dialog-card > .alert-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+
+.feedback-dialog-card > .alert-body > .alert-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.feedback-dialog-card > .dialog-actions {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+.feedback-dialog-card > .dialog-actions > button {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 36px;
+  height: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.feedback-dialog-card > .alert-body:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -3px;
+}
+
 /* 按行拆分保留完整文件列表，内容滚动时确认区始终可见。 */
 .toolbox-split-rows-result .alert-body { min-height: 0; overflow-y: auto; }
 .toolbox-split-rows-result .alert-message { min-width: 0; }

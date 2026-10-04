@@ -22,7 +22,7 @@ function pathsFor(record) {
     ...(entry.backupAbsolutePaths || []), ...(entry.targetAbsolutePaths || [])].filter(Boolean);
 }
 
-function createPublicationRecoveryCoordinator({ userDataDir, dispatcher, owners } = {}) {
+function createPublicationRecoveryCoordinator({ userDataDir, dispatcher, owners, acquireMemory = null } = {}) {
   const root = typeof userDataDir === 'string' && userDataDir ? path.resolve(userDataDir) : null;
   const registry = new Map();
   const invalid = () => recoveryError('PUBLICATION_RECOVERY_OWNER_REGISTRATION_INVALID', root,
@@ -84,9 +84,19 @@ function createPublicationRecoveryCoordinator({ userDataDir, dispatcher, owners 
         }
         if (!leases.includes(lease)) leases.push(lease);
       }
-      return async (reason) => {
+      // 已有 owner 观察（含借用）覆盖整个共享 Worker，不重复获取排他额度。
+      // 没有 owner 活动时，由 Main 装配的 admission-only I/O owner 承担资源。
+      if (leases.length === 0 && acquireMemory) {
+        const memoryLease = await acquireMemory();
+        if (memoryLease) leases.push(memoryLease);
+      }
+      const release = async (reason) => {
         for (const lease of leases.slice().reverse()) await lease.release(reason);
       };
+      const configs = leases.map((lease) => lease.memoryConfig).filter(Boolean);
+      // 同一观察包含多个 owner 时按最紧额度执行；能力仍由各 owner 独立核验和释放。
+      Object.defineProperty(release, 'memoryConfig', { value: configs.sort((a, b) => a.phaseMemoryBytes - b.phaseMemoryBytes)[0] || null });
+      return release;
     } catch (error) {
       for (const lease of leases.slice().reverse()) await lease.release('admission-failed');
       throw error;
@@ -187,7 +197,7 @@ function createPublicationRecoveryCoordinator({ userDataDir, dispatcher, owners 
           const request = requestFor(ownerId, options);
           const release = await acquire(request);
           try {
-            return await dispatcher.runAuthorizedRecovery({ authority, request,
+            return await dispatcher.runAuthorizedRecovery({ authority, request, memoryConfig: release.memoryConfig,
               authorizeSnapshot: (snapshot) => authorizeSnapshot(snapshot, request) });
           } finally { await release('recovery-worker-exited'); }
         }

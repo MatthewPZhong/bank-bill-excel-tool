@@ -21,6 +21,7 @@
 // 约束：本文件不得 require 任何业务模块；引擎自包含。worker 路径用 path.join(__dirname, ...)（asar 场景）。
 
 'use strict';
+const { memoryCarrierAdmission } = require('../../main-process/memory-activity');
 
 const os = require('node:os');
 const path = require('node:path');
@@ -274,7 +275,7 @@ function runPipeline({
   for (let i = 0; i < poolSize; i++) {
     let w;
     try {
-      w = new Worker(WORKER_SCRIPT_PATH);
+      w = memoryCarrierAdmission(null).observe(new Worker(WORKER_SCRIPT_PATH));
     } catch (spawnErr) {
       fail(new PipelineError(`pipeline：启动解析子 worker 失败 — ${spawnErr && spawnErr.message ? spawnErr.message : String(spawnErr)}`));
       break;

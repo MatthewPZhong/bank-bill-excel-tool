@@ -1,0 +1,23 @@
+{
+  "baseline": "fb5d4bad55f9c41070ef6da9e3a302a13351a4a2",
+  "phase": "before",
+  "results": [
+    {
+      "name": "普通档 768 MiB 超过固定 512 MiB：最终提示保留实际候选和固定上限，不建议重启",
+      "result": {
+        "status": "failed",
+        "message": "按行拆分暂时无法启动：后台资源配额不足。",
+        "detailLines": [
+          "本次尚未开始生成拆分文件。",
+          "申请阶段：Base + Phase；队列剩余：0",
+          "申请资源：CPU 1；Worker 1；进程 0；IO 1；内存 1,024.000 MiB",
+          "总预算：CPU 2；Worker 3；进程 1；IO 2；内存 512.000 MiB",
+          "当前占用：CPU 0；Worker 0；进程 0；IO 0；内存 0.000 MiB",
+          "当前可用：CPU 2；Worker 3；进程 1；IO 2；内存 512.000 MiB",
+          "后台总配额在应用启动时计算；若总配额低于所需值，请关闭暂不使用的程序，释放内存后重新启动应用。"
+        ],
+        "code": "RESOURCE_BUDGET_UNAVAILABLE"
+      }
+    }
+  ]
+}

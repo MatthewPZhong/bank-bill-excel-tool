@@ -170,6 +170,9 @@ function snapshotExecuteRequest(request) {
   if (data.production !== undefined && typeof data.production !== 'boolean') {
     throw new SupervisorError('EXECUTE_REQUEST_FIELD_INVALID', 'Execute request production must be boolean');
   }
+  if (data.allowLowMemory !== undefined && typeof data.allowLowMemory !== 'boolean') {
+    throw new SupervisorError('EXECUTE_REQUEST_FIELD_INVALID', '执行请求 allowLowMemory 必须为布尔值');
+  }
   if (data.deferUnitStart !== undefined && typeof data.deferUnitStart !== 'boolean') {
     throw new SupervisorError('EXECUTE_REQUEST_FIELD_INVALID', 'Execute request deferUnitStart must be boolean');
   }
@@ -265,6 +268,9 @@ function createExecutionSupervisor(options = {}) {
     const onProgress = requestSnapshot.onProgress;
     const { actionKey, operationKey } = request;
     const policy = options.policyRegistry.assertRunnable(actionKey, { production: request.production === true });
+    if (request.allowLowMemory !== undefined && (policy.lifetime !== 'job' || policy.resources.compound)) {
+      throw new SupervisorError('EXECUTE_REQUEST_FIELD_INVALID', '输入档位限制只支持独立 job 的生成阶段');
+    }
     if (typeof options.bindInputForAction === 'function') {
       const boundInput = options.bindInputForAction(Object.freeze({
         actionKey,
@@ -1475,8 +1481,10 @@ function createExecutionSupervisor(options = {}) {
       return Object.freeze({ adapter, inspectTopology: null });
     }
 
-    function admissionRequest(resources) {
+    function admissionRequest(resources, phase = false) {
       return {
+        // Main 的冻结输入事实只收窄本次 phase；不传给 base、子任务或其他阶段。
+        ...(phase && request.allowLowMemory !== undefined ? { allowLowMemory: request.allowLowMemory } : {}),
         ownerKey: `job:${jobId}`,
         actionKey,
         operationKey,
@@ -1523,7 +1531,15 @@ function createExecutionSupervisor(options = {}) {
         const state = snapshot || resourceGovernor.snapshot();
         const queueCount = state.queued && state.queued.size;
         if (!Number.isSafeInteger(queueCount) || queueCount < 0) return error;
-        // 只采集五维数值，不把租约归属、任务身份或队列 payload 带进错误信息。
+        // 只保留可信枚举和非负安全整数；不带入租约归属、任务身份或队列 payload。
+        const memoryLimitKind = ['hardware', 'compatibility'].includes(error.details?.memoryLimitKind)
+          ? error.details.memoryLimitKind : null;
+        const candidates = error.details?.candidateMemoryBytes;
+        const candidateMemoryBytes = Array.isArray(candidates) && candidates.length > 0 &&
+          candidates.every((value) => Number.isSafeInteger(value) && value >= 0)
+          ? Object.freeze([...candidates]) : null;
+        const memoryLimitBytes = Number.isSafeInteger(error.details?.memoryLimitBytes) && error.details.memoryLimitBytes >= 0
+          ? error.details.memoryLimitBytes : null;
         const admission = Object.freeze({
           schemaVersion: 1,
           reason,
@@ -1532,7 +1548,10 @@ function createExecutionSupervisor(options = {}) {
           budgets: validateResourceVector(state.budgets),
           activeUsage: validateResourceVector(state.activeUsage),
           available: validateResourceVector(state.available),
-          queueCount
+          queueCount,
+          ...(memoryLimitKind ? { memoryLimitKind } : {}),
+          ...(candidateMemoryBytes ? { candidateMemoryBytes } : {}),
+          ...(memoryLimitBytes !== null ? { memoryLimitBytes } : {})
         });
         const count = (value) => value.toLocaleString('en-US', { maximumFractionDigits: 0 });
         const format = (vector) => `CPU ${count(vector.cpuSlots)}；Worker ${count(vector.workerThreadSlots)}；` +
@@ -1544,13 +1563,26 @@ function createExecutionSupervisor(options = {}) {
         const normalized = new SupervisorError(error.code, error.message);
         normalized.stage = 'admission';
         normalized.details = admission;
-        // SafeErrorV1 只支持 detailLines；数值分组及 MiB 避免被隐私过滤误认成账号。
+        const mib = (value) => `${(value / (1024 ** 2)).toLocaleString('en-US', {
+          minimumFractionDigits: 3, maximumFractionDigits: 3
+        })} MiB`;
+        const insufficient = error.code === 'RESOURCE_BUDGET_UNAVAILABLE';
+        // 在 SafeError 编码前完成解释；下游只展示 detailLines，不从提示文字推断类型。
+        // 静态基线与本次候选分开标注，数值分组及 MiB 避免被隐私过滤误认成账号。
         normalized.detailLines = [
           `申请阶段：${stageLabel}；队列剩余：${count(queueCount)}`,
-          `申请资源：${format(admission.required)}`,
+          ...(insufficient && memoryLimitKind ? [memoryLimitKind === 'hardware'
+            ? '准入原因：本次适用执行档超过固定资源上限。'
+            : '准入原因：本次所需资源超过启动时冻结的兼容预算。'] : []),
+          ...(candidateMemoryBytes ? [`本次适用候选内存：${candidateMemoryBytes.map(mib).join(' / ')}`] : []),
+          ...(memoryLimitBytes !== null ? [`适用内存上限：${mib(memoryLimitBytes)}`] : []),
+          `静态资源基线：${format(admission.required)}`,
           `总预算：${format(admission.budgets)}`,
           `当前占用：${format(admission.activeUsage)}`,
-          `当前可用：${format(admission.available)}`
+          `当前可用：${format(admission.available)}`,
+          ...(insufficient && memoryLimitKind === 'compatibility' && memoryLimitBytes !== null &&
+            candidateMemoryBytes?.every((value) => value > memoryLimitBytes)
+            ? ['兼容内存预算在应用启动时计算；请关闭暂不使用的程序，释放内存后重新启动应用。'] : [])
         ];
         reportDiagnostic({ type: 'resource-admission-failed', code: normalized.code, admission });
         return normalized;
@@ -1567,7 +1599,16 @@ function createExecutionSupervisor(options = {}) {
       const required = includeBase
         ? checkedAdd(policy.resources.base, record.phaseResources, 'simple admission resources')
         : record.phaseResources;
-      if (!fitsWithin(required, governorSnapshot.budgets)) {
+      if (typeof resourceGovernor.assertSimpleJobFits === 'function') {
+        try {
+          resourceGovernor.assertSimpleJobFits(admissionRequest(record.phaseResources, true),
+            includeBase ? policy.resources.base : { cpuSlots: 0, workerThreadSlots: 0, utilityProcessSlots: 0, ioHeavySlots: 0, memoryBytes: 0 },
+            record.phaseResources);
+        } catch (error) {
+          throw describeAdmissionFailure(error, required, includeBase ? 'base-and-phase' : 'phase',
+            'total-budget-insufficient', governorSnapshot);
+        }
+      } else if (!fitsWithin(required, governorSnapshot.budgets)) {
         throw describeAdmissionFailure(new SupervisorError(
           'RESOURCE_BUDGET_UNAVAILABLE',
           `Resource budget cannot admit ${policy.resources.profile}`
@@ -1643,7 +1684,8 @@ function createExecutionSupervisor(options = {}) {
         }
         required = record.phaseResources;
         requestedLease = 'phase';
-        const phaseLease = await resourceGovernor.acquirePhaseLease(admissionRequest(required));
+        const phaseLease = await resourceGovernor.acquirePhaseLease(admissionRequest(required, true));
+        record.memoryConfig = phaseLease.memoryConfig || null;
         return retainGrantedLease(phaseLease);
       } catch (error) {
         if (error && ['ADMISSION_TIMEOUT', 'RESOURCE_BUDGET_UNAVAILABLE'].includes(error.code)) {
@@ -1773,6 +1815,7 @@ function createExecutionSupervisor(options = {}) {
           record.carrierCreationAttempted = true;
           candidate = resolved.adapter.start({
             entry: record.entry,
+            memoryConfig: record.memoryConfig || null,
             policy,
             topology: record.topology,
             ...callbacks
