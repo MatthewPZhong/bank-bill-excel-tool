@@ -55,3 +55,11 @@
 - `renderer-lifecycle`：302/303 PASS，公共反馈键盘用例失败。隔离 Electron 探针确认旧输入驱动缺少 Space 的字符事件；补发该事件，显式聚焦测试窗口，并等待 PageDown 动画结束后再独立验证 Space，额外断言恰好一次可信空格 keypress。强化后的用例在旧驱动下 39/40、修复后 40/40；本机探针与 Windows 最终结果分别记录。输入语义参考 [Electron sendInputEvent 合同](https://www.electronjs.org/docs/latest/api/web-contents#contentssendinputeventinputevent)。
 
 Windows 构建 workflow 将上述两个专项放到完整门禁前，使平台失败尽早返回；完整 `release-check`、进程语义、打包和正式发布检查均保留。Windows workflow 合同专项本机 5 PASS、2 项真实 Windows 条件 SKIP。修复不修改业务代码或资格清单，也不跳过失败断言。新候选完整本地／Windows 结果取得后写入 PR、Release 与独立 publication 记录。
+
+## 2026-10-04 Windows 全流程测试总时限修订
+
+候选 `b38ea038` 的两个 Windows 平台预检已通过。其 [第三轮完整检查](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/37181791844)为 9,594 单测 PASS、0 个断言 FAIL、1 个超时 CANCELLED、4 SKIP；唯一超时是低内存 OP 全流程与普通档结果对照用例，45 秒后取消。第二轮同一用例通过时已耗时 41.35 秒，原总时限对 Windows 真实 Worker 和文件持久化的调度波动余量不足。
+
+该用例串联两套真实导入和计算、六类导出、发布清理及恢复。仅将其 Windows 测试总时限设为有限的 120 秒，其他平台保持 45 秒；增加每段累计耗时诊断，保留结果等价、执行档、发布清理及 lease 归零的全部断言。生产准入／执行时限与资源预算不受此次测试修订影响。新候选实际结果取得后再登记，超时运行不能记作通过。 本机完整测试文件 4/4 PASS，新增诊断确认所有阶段完成；这项定向结果不代替 Windows 重跑。
+
+`b38ea038` 本地曾因磁盘空间耗尽导致两个 VCC 用例失败；用户明确批准清理 13 个已核对的临时 Git 目录后，两项定向回归 2/2 PASS，完整门禁重跑为 9,595 单测 PASS／0 FAIL／4 SKIP、83/83 集成脚本与 3,116 项计数检查 PASS，5,554 个 tracked 输入核对一致。失败与恢复日志独立留存，不将本机结果替代 Windows 检查。

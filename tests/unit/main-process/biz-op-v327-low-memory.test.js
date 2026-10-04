@@ -18,11 +18,19 @@ function governor() {
   }) });
 }
 
-test('512 MiB 注入准入下真实 OP 导入、计算、六类导出、发布及恢复与普通档业务结果一致', { timeout: 45000 }, async (t) => {
+// 此用例串联两套导入/计算、六次导出及恢复。Windows CI 成功记录已达 41 秒，
+// 为真实 Worker 启动与文件持久化的调度波动预留有限总时限，并记录各阶段耗时。
+const fullWorkflowTimeoutMs = process.platform === 'win32' ? 120000 : 45000;
+test('512 MiB 注入准入下真实 OP 导入、计算、六类导出、发布及恢复与普通档业务结果一致', { timeout: fullWorkflowTimeoutMs }, async (t) => {
+  const startedAt = Date.now();
+  const checkpoint = (stage) => t.diagnostic(JSON.stringify({ stage, elapsedMs: Date.now() - startedAt }));
   const f = await createExportHost(t, { resourceGovernor: governor() });
+  checkpoint('低档准备完成');
   await seed(f, { end: '120', count: 3 });
+  checkpoint('低档导入完成');
   const result = await compute(f);
   assert.equal(result.status, 'ok', JSON.stringify(result));
+  checkpoint('低档计算完成');
   const rows = readResult(f, result.runId).rows;
   assert.equal(rows.length, 1);
   const observations = [];
@@ -40,18 +48,23 @@ test('512 MiB 注入准入下真实 OP 导入、计算、六类导出、发布�
     assert.ok(book.SheetNames.length > 0);
     assert.equal(f.module.publication.record(exported.taskRunId).cleanup_completed, 1);
     assert.equal(f.runtime.resourceGovernor.snapshot().activeLeaseCount, 0);
+    checkpoint(`低档 ${kind} 导出及清理完成`);
   }
   assert.ok(observations.length > 0);
   assert.ok(observations.every((entry) => entry.bytes < 1024 * MiB && entry.profile.startsWith('bizop-io-')));
   assert.deepEqual(readResult(f, result.runId).rows, rows);
   assert.equal((await f.module.recovery.run()).ready, true);
+  checkpoint('低档恢复完成');
 
   const normal = await createExportHost(t);
   await seed(normal, { end: '120', count: 3 });
+  checkpoint('普通档导入完成');
   const baseline = await compute(normal);
+  checkpoint('普通档计算完成');
   const values = (items) => items.map(({ owner_id, ...row }) => row);
   // 结果表不含运行随机身份；完整业务列逐项比较。
   assert.deepEqual(values(readResult(normal, baseline.runId).rows), values(rows));
+  checkpoint('完整业务结果对照通过');
 });
 
 test('低档错误行诊断仍可经导出 worker、Publisher 和借用观察完整结算', { timeout: 20000 }, async (t) => {
