@@ -4,6 +4,7 @@ const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { EXPORT_IO_RESOURCES } = require('./export-publication');
+const { acquireBizOpPhaseLease } = require('./phase-admission');
 const {
   createTaskPolicyRegistry
 } = require('../execution-descriptors/composition');
@@ -200,19 +201,18 @@ function createBizOpUpgrade({ catalog, payloadStore, protection, admission, prep
     const runtime = host.getRuntime();
     if (!runtime?.resourceGovernor) fail('BIZOP_ACTIVATION_RUNTIME_REQUIRED');
     try {
-      // 启动阶段不能等待不可满足的固定预算；已有队列时 reject 仍会排队，必须同时限定等待时间。
-      return await runtime.resourceGovernor.acquirePhaseLease({ ownerKey: `biz-op-v327:precheck:${randomUUID()}`,
-        actionKey: ACTION, operationKey: `biz-op-v327:precheck:${randomUUID()}`, resources: EXPORT_IO_RESOURCES,
-        lowMemoryBehavior: 'reject', timeoutMs: 0 });
+      // 不可能满足的预算立即拒绝；暂时被占用时在调度器队列内最多等待 5 秒，超时只撤掉本申请。
+      return await acquireBizOpPhaseLease(runtime, { ownerKey: `biz-op-v327:precheck:${randomUUID()}`,
+        actionKey: ACTION, operationKey: `biz-op-v327:precheck:${randomUUID()}`, resources: EXPORT_IO_RESOURCES });
     } catch (error) {
-      if (['RESOURCE_BUDGET_UNAVAILABLE', 'ADMISSION_TIMEOUT'].includes(error.code)) {
-        const resources = runtime.resourceGovernor.snapshot();
-        const availableMiB = Math.floor(resources.available.memoryBytes / (1024 ** 2));
-        const budgetMiB = Math.floor(resources.budgets.memoryBytes / (1024 ** 2));
-        fail('BIZOP_ACTIVATION_RESOURCE_UNAVAILABLE',
-          `业务 OP 升级需要 1024 MiB 后台内存预算，当前可用 ${availableMiB} MiB（预算上限 ${budgetMiB} MiB），或后台执行槽位正被占用。请关闭不需要的程序后重新启动；现有迁移进度已保留`);
-      }
-      throw error;
+      if (!['BIZOP_RESOURCE_BUDGET_INSUFFICIENT', 'BIZOP_RESOURCE_WAIT_TIMEOUT'].includes(error.code)) throw error;
+      const waited = error.code === 'BIZOP_RESOURCE_WAIT_TIMEOUT';
+      throw Object.assign(new Error(waited
+        ? '业务 OP 升级等待后台资源超过 5 秒，升级尚未开始；现有迁移检查点已保留。请将本窗口截图发送给技术支持。'
+        : '业务 OP 升级所需后台资源超过本次可用上限，升级尚未开始；现有迁移检查点已保留。请将本窗口截图发送给技术支持。', { cause: error }), {
+        code: 'BIZOP_ACTIVATION_RESOURCE_UNAVAILABLE',
+        detailLines: [`内部原因：${error.code}`, ...(Array.isArray(error.detailLines) ? error.detailLines : [])]
+      });
     }
   }
   async function runAttempt({ quiesceOnly = false } = {}) {

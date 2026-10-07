@@ -1,0 +1,979 @@
+{
+  "generatedAt": "2026-10-06",
+  "baseline": "v3.2.11 (52b92b55)",
+  "environment": {
+    "host": "macOS arm64, Electron 36.9.5 开发模式",
+    "simulate": "资格身份视为 win32/x64；os.totalmem=16 GiB，os.freemem=5 GiB",
+    "isolation": "APP_USER_DATA_DIR / APP_DOCUMENTS_DIR 指向临时目录"
+  },
+  "scenarios": [
+    {
+      "id": "S1",
+      "description": "全新安装（空 userData）→ v3.2.11",
+      "outcome": "窗口创建，启动成功",
+      "events": [
+        {
+          "t": 392,
+          "ev": "activation-run",
+          "run": {
+            "options": {
+              "quiesceOnly": true
+            },
+            "phaseBefore": "DISABLED"
+          }
+        },
+        {
+          "t": 415,
+          "ev": "governor-created",
+          "budgets": {
+            "cpuSlots": 4,
+            "workerThreadSlots": 5,
+            "utilityProcessSlots": 1,
+            "ioHeavySlots": 2,
+            "memoryBytes": 4294967296
+          }
+        },
+        {
+          "t": 415,
+          "ev": "PRECHECK-SNAPSHOT",
+          "snapshot": {
+            "freeMemMiB": 5120,
+            "liveCarriers": 0,
+            "liveActivities": 0,
+            "blockers": 0,
+            "inventoryComplete": true,
+            "activeLeases": 0,
+            "queued": 0,
+            "budgetMemoryMiB": 4096,
+            "availableMemoryMiB": 4096
+          }
+        },
+        {
+          "t": 416,
+          "ev": "PRECHECK-GRANTED",
+          "precheck": {
+            "memMiB": 384,
+            "lowMemoryBehavior": "reject",
+            "timeoutMs": 0
+          }
+        },
+        {
+          "t": 431,
+          "ev": "activation-run-result",
+          "result": {
+            "status": "pending",
+            "phase": "MIGRATING"
+          }
+        },
+        {
+          "t": 433,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 457,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 1,
+            "aliveMs": 24
+          }
+        },
+        {
+          "t": 457,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 481,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 1,
+            "aliveMs": 24
+          }
+        },
+        {
+          "t": 482,
+          "ev": "activation-run",
+          "run": {
+            "options": {},
+            "phaseBefore": "MIGRATING"
+          }
+        },
+        {
+          "t": 482,
+          "ev": "PRECHECK-SNAPSHOT",
+          "snapshot": {
+            "freeMemMiB": 5120,
+            "liveCarriers": 0,
+            "liveActivities": 0,
+            "blockers": 0,
+            "inventoryComplete": true,
+            "activeLeases": 0,
+            "queued": 0,
+            "budgetMemoryMiB": 4096,
+            "availableMemoryMiB": 4096
+          }
+        },
+        {
+          "t": 483,
+          "ev": "PRECHECK-GRANTED",
+          "precheck": {
+            "memMiB": 384,
+            "lowMemoryBehavior": "reject",
+            "timeoutMs": 0
+          }
+        },
+        {
+          "t": 487,
+          "ev": "activation-run-result",
+          "result": {
+            "status": "ok",
+            "phase": "ACTIVE"
+          }
+        },
+        {
+          "t": 537,
+          "ev": "window-created"
+        }
+      ]
+    },
+    {
+      "id": "S2",
+      "description": "v3.2.6 生成的 userData（无旧业务 OP 月度文件）→ v3.2.11",
+      "outcome": "窗口创建，启动成功",
+      "events": [
+        {
+          "t": 339,
+          "ev": "activation-run",
+          "run": {
+            "options": {
+              "quiesceOnly": true
+            },
+            "phaseBefore": "DISABLED"
+          }
+        },
+        {
+          "t": 362,
+          "ev": "governor-created",
+          "budgets": {
+            "cpuSlots": 4,
+            "workerThreadSlots": 5,
+            "utilityProcessSlots": 1,
+            "ioHeavySlots": 2,
+            "memoryBytes": 4294967296
+          }
+        },
+        {
+          "t": 363,
+          "ev": "PRECHECK-SNAPSHOT",
+          "snapshot": {
+            "freeMemMiB": 5120,
+            "liveCarriers": 0,
+            "liveActivities": 0,
+            "blockers": 0,
+            "inventoryComplete": true,
+            "activeLeases": 0,
+            "queued": 0,
+            "budgetMemoryMiB": 4096,
+            "availableMemoryMiB": 4096
+          }
+        },
+        {
+          "t": 363,
+          "ev": "PRECHECK-GRANTED",
+          "precheck": {
+            "memMiB": 384,
+            "lowMemoryBehavior": "reject",
+            "timeoutMs": 0
+          }
+        },
+        {
+          "t": 383,
+          "ev": "activation-run-result",
+          "result": {
+            "status": "pending",
+            "phase": "MIGRATING"
+          }
+        },
+        {
+          "t": 385,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 409,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 1,
+            "aliveMs": 24
+          }
+        },
+        {
+          "t": 410,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 433,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 1,
+            "aliveMs": 23
+          }
+        },
+        {
+          "t": 435,
+          "ev": "activation-run",
+          "run": {
+            "options": {},
+            "phaseBefore": "MIGRATING"
+          }
+        },
+        {
+          "t": 435,
+          "ev": "PRECHECK-SNAPSHOT",
+          "snapshot": {
+            "freeMemMiB": 5120,
+            "liveCarriers": 0,
+            "liveActivities": 0,
+            "blockers": 0,
+            "inventoryComplete": true,
+            "activeLeases": 0,
+            "queued": 0,
+            "budgetMemoryMiB": 4096,
+            "availableMemoryMiB": 4096
+          }
+        },
+        {
+          "t": 435,
+          "ev": "PRECHECK-GRANTED",
+          "precheck": {
+            "memMiB": 384,
+            "lowMemoryBehavior": "reject",
+            "timeoutMs": 0
+          }
+        },
+        {
+          "t": 440,
+          "ev": "activation-run-result",
+          "result": {
+            "status": "ok",
+            "phase": "ACTIVE"
+          }
+        },
+        {
+          "t": 488,
+          "ev": "window-created"
+        }
+      ]
+    },
+    {
+      "id": "S3",
+      "description": "v3.2.6 userData + 3 个旧月度文件（v3.2.6 run-data-store 建表）→ v3.2.11",
+      "outcome": "窗口创建，启动成功",
+      "events": [
+        {
+          "t": 352,
+          "ev": "activation-run",
+          "run": {
+            "options": {
+              "quiesceOnly": true
+            },
+            "phaseBefore": "DISABLED"
+          }
+        },
+        {
+          "t": 375,
+          "ev": "governor-created",
+          "budgets": {
+            "cpuSlots": 4,
+            "workerThreadSlots": 5,
+            "utilityProcessSlots": 1,
+            "ioHeavySlots": 2,
+            "memoryBytes": 4294967296
+          }
+        },
+        {
+          "t": 375,
+          "ev": "PRECHECK-SNAPSHOT",
+          "snapshot": {
+            "freeMemMiB": 5120,
+            "liveCarriers": 0,
+            "liveActivities": 0,
+            "blockers": 0,
+            "inventoryComplete": true,
+            "activeLeases": 0,
+            "queued": 0,
+            "budgetMemoryMiB": 4096,
+            "availableMemoryMiB": 4096
+          }
+        },
+        {
+          "t": 376,
+          "ev": "PRECHECK-GRANTED",
+          "precheck": {
+            "memMiB": 384,
+            "lowMemoryBehavior": "reject",
+            "timeoutMs": 0
+          }
+        },
+        {
+          "t": 403,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 490,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 0,
+            "aliveMs": 87
+          }
+        },
+        {
+          "t": 496,
+          "ev": "activation-run-result",
+          "result": {
+            "status": "pending",
+            "phase": "MIGRATING"
+          }
+        },
+        {
+          "t": 497,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 520,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 1,
+            "aliveMs": 23
+          }
+        },
+        {
+          "t": 521,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 544,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 1,
+            "aliveMs": 23
+          }
+        },
+        {
+          "t": 546,
+          "ev": "activation-run",
+          "run": {
+            "options": {},
+            "phaseBefore": "MIGRATING"
+          }
+        },
+        {
+          "t": 546,
+          "ev": "PRECHECK-SNAPSHOT",
+          "snapshot": {
+            "freeMemMiB": 5120,
+            "liveCarriers": 0,
+            "liveActivities": 0,
+            "blockers": 0,
+            "inventoryComplete": true,
+            "activeLeases": 0,
+            "queued": 0,
+            "budgetMemoryMiB": 4096,
+            "availableMemoryMiB": 4096
+          }
+        },
+        {
+          "t": 546,
+          "ev": "PRECHECK-GRANTED",
+          "precheck": {
+            "memMiB": 384,
+            "lowMemoryBehavior": "reject",
+            "timeoutMs": 0
+          }
+        },
+        {
+          "t": 556,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 637,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 0,
+            "aliveMs": 81
+          }
+        },
+        {
+          "t": 651,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 728,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 0,
+            "aliveMs": 77
+          }
+        },
+        {
+          "t": 741,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 830,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 0,
+            "aliveMs": 89
+          }
+        },
+        {
+          "t": 832,
+          "ev": "activation-run-result",
+          "result": {
+            "status": "ok",
+            "phase": "ACTIVE"
+          }
+        },
+        {
+          "t": 868,
+          "ev": "window-created"
+        }
+      ]
+    },
+    {
+      "id": "S4",
+      "description": "v3.0.26 生成的 userData（无旧业务 OP 月度文件）→ v3.2.11",
+      "outcome": "窗口创建，启动成功",
+      "events": [
+        {
+          "t": 374,
+          "ev": "activation-run",
+          "run": {
+            "options": {
+              "quiesceOnly": true
+            },
+            "phaseBefore": "DISABLED"
+          }
+        },
+        {
+          "t": 396,
+          "ev": "governor-created",
+          "budgets": {
+            "cpuSlots": 4,
+            "workerThreadSlots": 5,
+            "utilityProcessSlots": 1,
+            "ioHeavySlots": 2,
+            "memoryBytes": 4294967296
+          }
+        },
+        {
+          "t": 396,
+          "ev": "PRECHECK-SNAPSHOT",
+          "snapshot": {
+            "freeMemMiB": 5120,
+            "liveCarriers": 0,
+            "liveActivities": 0,
+            "blockers": 0,
+            "inventoryComplete": true,
+            "activeLeases": 0,
+            "queued": 0,
+            "budgetMemoryMiB": 4096,
+            "availableMemoryMiB": 4096
+          }
+        },
+        {
+          "t": 397,
+          "ev": "PRECHECK-GRANTED",
+          "precheck": {
+            "memMiB": 384,
+            "lowMemoryBehavior": "reject",
+            "timeoutMs": 0
+          }
+        },
+        {
+          "t": 414,
+          "ev": "activation-run-result",
+          "result": {
+            "status": "pending",
+            "phase": "MIGRATING"
+          }
+        },
+        {
+          "t": 415,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 440,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 1,
+            "aliveMs": 25
+          }
+        },
+        {
+          "t": 441,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 464,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 1,
+            "aliveMs": 23
+          }
+        },
+        {
+          "t": 466,
+          "ev": "activation-run",
+          "run": {
+            "options": {},
+            "phaseBefore": "MIGRATING"
+          }
+        },
+        {
+          "t": 466,
+          "ev": "PRECHECK-SNAPSHOT",
+          "snapshot": {
+            "freeMemMiB": 5120,
+            "liveCarriers": 0,
+            "liveActivities": 0,
+            "blockers": 0,
+            "inventoryComplete": true,
+            "activeLeases": 0,
+            "queued": 0,
+            "budgetMemoryMiB": 4096,
+            "availableMemoryMiB": 4096
+          }
+        },
+        {
+          "t": 466,
+          "ev": "PRECHECK-GRANTED",
+          "precheck": {
+            "memMiB": 384,
+            "lowMemoryBehavior": "reject",
+            "timeoutMs": 0
+          }
+        },
+        {
+          "t": 471,
+          "ev": "activation-run-result",
+          "result": {
+            "status": "ok",
+            "phase": "ACTIVE"
+          }
+        },
+        {
+          "t": 519,
+          "ev": "window-created"
+        }
+      ]
+    },
+    {
+      "id": "S5",
+      "description": "v3.0.26 userData + 3 个旧月度文件（v3.0.26 run-data-store 建表）→ v3.2.11 首次启动",
+      "outcome": "启动失败：BIZOP_LEGACY_SCHEMA_INCOMPLETE",
+      "events": [
+        {
+          "t": 385,
+          "ev": "activation-run",
+          "run": {
+            "options": {
+              "quiesceOnly": true
+            },
+            "phaseBefore": "DISABLED"
+          }
+        },
+        {
+          "t": 409,
+          "ev": "governor-created",
+          "budgets": {
+            "cpuSlots": 4,
+            "workerThreadSlots": 5,
+            "utilityProcessSlots": 1,
+            "ioHeavySlots": 2,
+            "memoryBytes": 4294967296
+          }
+        },
+        {
+          "t": 409,
+          "ev": "PRECHECK-SNAPSHOT",
+          "snapshot": {
+            "freeMemMiB": 5120,
+            "liveCarriers": 0,
+            "liveActivities": 0,
+            "blockers": 0,
+            "inventoryComplete": true,
+            "activeLeases": 0,
+            "queued": 0,
+            "budgetMemoryMiB": 4096,
+            "availableMemoryMiB": 4096
+          }
+        },
+        {
+          "t": 410,
+          "ev": "PRECHECK-GRANTED",
+          "precheck": {
+            "memMiB": 384,
+            "lowMemoryBehavior": "reject",
+            "timeoutMs": 0
+          }
+        },
+        {
+          "t": 437,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 513,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 0,
+            "aliveMs": 76
+          }
+        },
+        {
+          "t": 514,
+          "ev": "activation-run-error",
+          "error": {
+            "code": "BIZOP_LEGACY_SCHEMA_INCOMPLETE"
+          }
+        },
+        {
+          "t": 515,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 538,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 1,
+            "aliveMs": 23
+          }
+        },
+        {
+          "t": 539,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 562,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 1,
+            "aliveMs": 23
+          }
+        },
+        {
+          "t": 563,
+          "ev": "showErrorBox",
+          "title": "清结算小助手启动失败",
+          "message": "错误摘要：模块恢复尚未完成耐久接管，已阻止业务启动\n处理明细：\nbiz-op-v327：[BIZOP_LEGACY_SCHEMA_INCOMPLETE] 业务 OP 状态或证据不满足操作条件\n日志文件：<已省略本机路径>"
+        }
+      ]
+    },
+    {
+      "id": "S5-R2",
+      "description": "S5 同一 userData 第 2 次启动",
+      "outcome": "启动失败：BIZOP_LEGACY_SCHEMA_INCOMPLETE",
+      "events": [
+        {
+          "t": 337,
+          "ev": "activation-run",
+          "run": {
+            "options": {
+              "quiesceOnly": true
+            },
+            "phaseBefore": "MIGRATING"
+          }
+        },
+        {
+          "t": 359,
+          "ev": "governor-created",
+          "budgets": {
+            "cpuSlots": 4,
+            "workerThreadSlots": 5,
+            "utilityProcessSlots": 1,
+            "ioHeavySlots": 2,
+            "memoryBytes": 4294967296
+          }
+        },
+        {
+          "t": 360,
+          "ev": "PRECHECK-SNAPSHOT",
+          "snapshot": {
+            "freeMemMiB": 5120,
+            "liveCarriers": 0,
+            "liveActivities": 0,
+            "blockers": 0,
+            "inventoryComplete": true,
+            "activeLeases": 0,
+            "queued": 0,
+            "budgetMemoryMiB": 4096,
+            "availableMemoryMiB": 4096
+          }
+        },
+        {
+          "t": 360,
+          "ev": "PRECHECK-GRANTED",
+          "precheck": {
+            "memMiB": 384,
+            "lowMemoryBehavior": "reject",
+            "timeoutMs": 0
+          }
+        },
+        {
+          "t": 375,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 452,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 0,
+            "aliveMs": 77
+          }
+        },
+        {
+          "t": 453,
+          "ev": "activation-run-error",
+          "error": {
+            "code": "BIZOP_LEGACY_SCHEMA_INCOMPLETE"
+          }
+        },
+        {
+          "t": 454,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 478,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 1,
+            "aliveMs": 24
+          }
+        },
+        {
+          "t": 478,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 501,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 1,
+            "aliveMs": 23
+          }
+        },
+        {
+          "t": 502,
+          "ev": "showErrorBox",
+          "title": "清结算小助手启动失败",
+          "message": "错误摘要：模块恢复尚未完成耐久接管，已阻止业务启动\n处理明细：\nbiz-op-v327：[BIZOP_LEGACY_SCHEMA_INCOMPLETE] 业务 OP 状态或证据不满足操作条件\n日志文件：<已省略本机路径>"
+        }
+      ]
+    },
+    {
+      "id": "S5-R3",
+      "description": "S5 同一 userData 第 3 次启动",
+      "outcome": "启动失败：BIZOP_LEGACY_SCHEMA_INCOMPLETE",
+      "events": [
+        {
+          "t": 324,
+          "ev": "activation-run",
+          "run": {
+            "options": {
+              "quiesceOnly": true
+            },
+            "phaseBefore": "MIGRATING"
+          }
+        },
+        {
+          "t": 345,
+          "ev": "governor-created",
+          "budgets": {
+            "cpuSlots": 4,
+            "workerThreadSlots": 5,
+            "utilityProcessSlots": 1,
+            "ioHeavySlots": 2,
+            "memoryBytes": 4294967296
+          }
+        },
+        {
+          "t": 346,
+          "ev": "PRECHECK-SNAPSHOT",
+          "snapshot": {
+            "freeMemMiB": 5120,
+            "liveCarriers": 0,
+            "liveActivities": 0,
+            "blockers": 0,
+            "inventoryComplete": true,
+            "activeLeases": 0,
+            "queued": 0,
+            "budgetMemoryMiB": 4096,
+            "availableMemoryMiB": 4096
+          }
+        },
+        {
+          "t": 346,
+          "ev": "PRECHECK-GRANTED",
+          "precheck": {
+            "memMiB": 384,
+            "lowMemoryBehavior": "reject",
+            "timeoutMs": 0
+          }
+        },
+        {
+          "t": 361,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 440,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 0,
+            "aliveMs": 79
+          }
+        },
+        {
+          "t": 441,
+          "ev": "activation-run-error",
+          "error": {
+            "code": "BIZOP_LEGACY_SCHEMA_INCOMPLETE"
+          }
+        },
+        {
+          "t": 443,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 466,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 1,
+            "aliveMs": 23
+          }
+        },
+        {
+          "t": 466,
+          "ev": "carrier-created",
+          "carrier": {
+            "kind": "Worker",
+            "via": "memoryCarrierAdmission"
+          }
+        },
+        {
+          "t": 490,
+          "ev": "carrier-exit",
+          "carrier": {
+            "kind": "Worker",
+            "code": 1,
+            "aliveMs": 24
+          }
+        },
+        {
+          "t": 491,
+          "ev": "showErrorBox",
+          "title": "清结算小助手启动失败",
+          "message": "错误摘要：模块恢复尚未完成耐久接管，已阻止业务启动\n处理明细：\nbiz-op-v327：[BIZOP_LEGACY_SCHEMA_INCOMPLETE] 业务 OP 状态或证据不满足操作条件\n日志文件：<已省略本机路径>"
+        }
+      ]
+    }
+  ]
+}

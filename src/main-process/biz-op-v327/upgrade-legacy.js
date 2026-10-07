@@ -9,6 +9,8 @@ const { ensureBizOpReconTablesSupport } = require('../../backend/biz-op-recon-db
 const { fail, hash } = require('./contracts');
 const TABLES = Object.freeze(['biz_op_recon_diff_rows', 'biz_op_recon_runs', 'biz_op_recon_imports',
   'biz_op_recon_flow_imports', 'biz_op_recon_dataset_heads', 'biz_op_recon_month_end_copy_intents']);
+// v3.1.11 起才加入月度文件；更早版本建的文件缺少它们，由原 provider 在 recoverLegacy 中补齐。
+const LATER_SIDE_TABLES = Object.freeze(['biz_op_recon_dataset_heads', 'biz_op_recon_month_end_copy_intents']);
 const FILE = /^month-\d{4}-(?:0[1-9]|1[0-2])\.sqlite(?:-wal|-shm)?$/;
 const BASE = /^month-\d{4}-(?:0[1-9]|1[0-2])\.sqlite$/;
 const LIMIT = 4096;
@@ -70,7 +72,9 @@ function validateSchema(db, { side = false, quiescent = false } = {}) {
   for (const row of db.prepare("SELECT name,tbl_name,sql FROM sqlite_master WHERE type='trigger'").iterate()) {
     if (TABLES.includes(row.tbl_name) && triggers().get(row.name) !== hash(row.sql)) fail('BIZOP_LEGACY_TRIGGER_UNKNOWN');
   }
-  if (side && TABLES.some((name) => !tables.includes(name))) fail('BIZOP_LEGACY_SCHEMA_INCOMPLETE');
+  // 第一轮只决定能否交给原 provider 打开，其结果不授权清理；授权清理的第二轮仍要求结构完整。
+  const missing = TABLES.filter((name) => !tables.includes(name));
+  if (side && missing.some((name) => quiescent || !LATER_SIDE_TABLES.includes(name))) fail('BIZOP_LEGACY_SCHEMA_INCOMPLETE');
   if (quiescent) {
     if (tables.includes('biz_op_recon_runs') && db.prepare(`SELECT 1 FROM biz_op_recon_runs
       WHERE archive_contract_version=1 AND archive_terminal_ack_at IS NULL LIMIT 1`).get()) fail('BIZOP_LEGACY_RECEIPT_PENDING');
