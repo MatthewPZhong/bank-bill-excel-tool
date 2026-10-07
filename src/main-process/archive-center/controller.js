@@ -459,6 +459,12 @@ class ArchiveCenterController {
         error.code = 'ARCHIVE_STARTUP_HOOK_FAILED';
         error.hookName = hook.hookName;
         error.cause = cause;
+        // 启动失败报告只读取顶层明细；与 owner 聚合同一格式透传，避免原错误的诊断在这里丢失。
+        error.detailLines = [
+          `${hook.hookName}：${cause && cause.code ? `[${cause.code}] ` : ''}${cause && cause.message || String(cause)}`,
+          ...(Array.isArray(cause && cause.detailLines) ? cause.detailLines : [])
+        ];
+        error.recoveryPaths = [...new Set(Array.isArray(cause && cause.recoveryPaths) ? cause.recoveryPaths : [])];
         throw error;
       }
     }

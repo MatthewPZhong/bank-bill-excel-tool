@@ -1,15 +1,16 @@
 'use strict';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const plainTest = require('node:test');
 const { durableDirectoryTest: test } = require('../../helpers/durable-directory-tests');
 const { DatabaseSync } = require('node:sqlite');
-const { createUpgradeHost, seedLegacy, passedGates } = require('../../helpers/biz-op-v327-upgrade');
+const { createUpgradeHost, seedLegacy, seedLegacyG1Month, passedGates } = require('../../helpers/biz-op-v327-upgrade');
 const { createHost } = require('../../helpers/biz-op-v327-host');
 const { evaluateReleaseGates, RELEASE_GATES, REQUIRED_GATES } = require('../../../src/main-process/biz-op-v327/release-gates');
 const { buildBizOpPolicies, BIZ_OP_V327_POLICIES } = require('../../../src/main-process/biz-op-v327/policies');
-const { TABLES } = require('../../../src/main-process/biz-op-v327/upgrade-legacy');
+const { TABLES, validateSchema } = require('../../../src/main-process/biz-op-v327/upgrade-legacy');
 const { ensureBizOpReconTablesSupport } = require('../../../src/backend/biz-op-recon-db/migrations');
 const runDataStore = require('../../../src/backend/run-data-store');
 const { registerWithLegacyGuard } = require('../../../src/main-process/biz-op-v327/legacy-ipc');
@@ -48,6 +49,49 @@ test('真实 worker 关闭后只清限定旧表和文件，分阶段收据、原
   const recovered = await f.module.retryRecovery(); assert.equal(recovered.ready, true, JSON.stringify(recovered));
   assert.equal(f.module.payloadStore.readDocument('upgrade/new-data.json').digest, newer.digest);
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM biz_op_v327_activation_stages').get().n, 5);
+});
+plainTest('v3.1.10 及以前的旧格式月度文件只在第一轮放行缺少的两张后续表，第二轮仍严格要求完整', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bizop-g1-schema-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const { file } = seedLegacyG1Month({ root });
+  const db = new DatabaseSync(file, { readOnly: true });
+  try {
+    assert.deepEqual(validateSchema(db, { side: true }).sort(),
+      ['biz_op_recon_diff_rows', 'biz_op_recon_flow_imports', 'biz_op_recon_imports', 'biz_op_recon_runs']);
+    assert.throws(() => validateSchema(db, { side: true, quiescent: true }), { code: 'BIZOP_LEGACY_SCHEMA_INCOMPLETE' });
+  } finally { db.close(); }
+});
+plainTest('旧格式月度文件缺少基础表、含未知表或未知触发器时，第一轮照旧阻断', async (t) => {
+  for (const [kind, sql, code] of [
+    ['missing-base', 'DROP TABLE biz_op_recon_flow_imports', 'BIZOP_LEGACY_SCHEMA_INCOMPLETE'],
+    ['unknown-table', 'CREATE TABLE unrelated(value TEXT)', 'BIZOP_LEGACY_SCHEMA_UNKNOWN'],
+    ['unknown-trigger', 'CREATE TRIGGER rogue AFTER DELETE ON biz_op_recon_imports BEGIN SELECT 1; END', 'BIZOP_LEGACY_TRIGGER_UNKNOWN']
+  ]) await t.test(kind, () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bizop-g1-reject-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const { file } = seedLegacyG1Month({ root });
+    const writer = new DatabaseSync(file); writer.exec(sql); writer.close();
+    const db = new DatabaseSync(file, { readOnly: true });
+    try { assert.throws(() => validateSchema(db, { side: true }), { code }); } finally { db.close(); }
+  });
+});
+test('从旧格式月度文件升级：原 provider 补齐结构后第二轮通过，旧文件与新格式文件一起回收到 ACTIVE', async (t) => {
+  const f = await createUpgradeHost(t); const { oldFile, external } = seedLegacy(f);
+  const { file: g1File } = seedLegacyG1Month({ root: f.root });
+  const prepared = await f.module.activation.run({ quiesceOnly: true }); assert.equal(prepared.status, 'pending');
+  const repaired = new DatabaseSync(g1File, { readOnly: true });
+  try {
+    assert.equal(validateSchema(repaired, { side: true, quiescent: true }).length, TABLES.length);
+    assert.equal(repaired.prepare('SELECT COUNT(*) AS n FROM biz_op_recon_diff_rows').get().n, 1);
+  } finally { repaired.close(); }
+  const result = await f.module.retryRecovery(); assert.equal(result.ready, true, JSON.stringify(result));
+  assert.equal(f.module.catalog.control().mode, 'ACTIVE');
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM biz_op_v327_activation_stages').get().n, 5);
+  assert.deepEqual(f.db.prepare('SELECT file_name FROM biz_op_v327_activation_files WHERE reclaimed=1 ORDER BY file_name').all()
+    .map((row) => row.file_name).filter((name) => !/-(wal|shm)$/.test(name)), ['month-2026-07.sqlite', 'month-2026-08.sqlite']);
+  for (const name of [g1File, oldFile]) for (const suffix of ['', '-wal', '-shm']) assert.equal(fs.existsSync(name + suffix), false);
+  assert.equal(fs.readFileSync(external, 'utf8'), 'external original');
+  assert.equal(f.db.prepare('SELECT value FROM preserve_settings').get().value, 'unchanged');
 });
 test('未知旧文件、符号链接和非白名单表都阻断预检，保留原 running Task 和主库数据', async (t) => {
   for (const kind of ['unknown-file', 'symlink', 'foreign-table']) await t.test(kind, async (t) => {

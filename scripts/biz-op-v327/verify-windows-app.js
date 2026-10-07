@@ -12,7 +12,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { randomUUID, createHash } = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 const { writeXlsx, opRow, flowRow } = require('../../tests/helpers/biz-op-v327-xlsx');
-const { seedLegacy } = require('../../tests/helpers/biz-op-v327-upgrade');
+const { seedLegacy, seedLegacyG1Month } = require('../../tests/helpers/biz-op-v327-upgrade');
 const { RELEASE_GATES } = require('../../src/main-process/biz-op-v327/release-gates');
 
 const project = path.resolve(__dirname, '../..');
@@ -124,10 +124,13 @@ async function launch(label) {
 async function main() {
   const seedDb = new DatabaseSync(path.join(userData, 'tool-data.sqlite'));
   const old = seedLegacy({ root: userData, db: seedDb }); seedDb.close();
+  // v3.1.10 及以前建的旧格式月度文件；当前 seedLegacy 只会建出新格式。
+  const g1 = seedLegacyG1Month({ root: userData, month: '2026-07' });
   const externalSha = sha(old.external); let app;
   try {
     app = await launch('first-activation');
     assert.equal(fs.existsSync(old.oldFile), false);
+    for (const suffix of ['', '-wal', '-shm']) assert.equal(fs.existsSync(g1.file + suffix), false);
     assert.equal(sha(old.external), externalSha);
     assert.equal(query('SELECT value FROM preserve_settings')[0].value, 'unchanged');
     const activation = query('SELECT * FROM biz_op_v327_activation');

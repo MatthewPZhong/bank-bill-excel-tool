@@ -185,17 +185,46 @@ function createResourceGovernor(options = {}) {
     }
   }
 
-  function canAdmit(memory, candidate, contribution) {
-    if (memoryEvaluationActive) return false;
-    if (!canAdd(contribution)) return false;
+  // trace 只记录拒绝原因供诊断使用，不参与判定。
+  function canAdmit(memory, candidate, contribution, trace = null) {
+    const deny = (reason, facts) => {
+      if (trace) Object.assign(trace, { reason }, facts ? { facts: Object.freeze(facts) } : {});
+      return false;
+    };
+    if (memoryEvaluationActive) return deny('evaluation-busy');
+    if (!canAdd(contribution)) return deny('slots');
     if (!memory) return true;
-    if (activeUsage.memoryBytes + contribution.memoryBytes >
-        memoryAdmission.limit(memory.scope, budgets.memoryBytes)) return false;
+    const limitBytes = memoryAdmission.limit(memory.scope, budgets.memoryBytes);
+    if (activeUsage.memoryBytes + contribution.memoryBytes > limitBytes) {
+      return deny('memory-limit', { usedBytes: activeUsage.memoryBytes, requestBytes: contribution.memoryBytes, limitBytes });
+    }
     memoryEvaluationActive = true;
     try {
       return memoryAdmission.evaluate(memory.scope, candidate, contribution.memoryBytes,
-        [...leases.values()].filter((record) => record.releasedAt === null));
+        [...leases.values()].filter((record) => record.releasedAt === null), trace);
     } finally { memoryEvaluationActive = false; }
+  }
+
+  // 记录同一申请最后一次判定的结果；错误产生时冻结附到 details.decision，
+  // 让诊断看到判定当时的原因，而不是错误处理时已经变化的现场。
+  function createDecisionRecord() {
+    return { startedAt: now(), attempts: 0, queuedAhead: 0, lastAt: null, candidates: [] };
+  }
+
+  function recordDecision(decision, candidates) {
+    decision.attempts += 1;
+    decision.lastAt = now();
+    decision.candidates = candidates;
+  }
+
+  function decisionDetails(decision) {
+    if (!decision) return {};
+    return { decision: Object.freeze({
+      attempts: decision.attempts,
+      queuedAhead: decision.queuedAhead,
+      lastElapsedMs: decision.lastAt === null ? null : Math.max(0, decision.lastAt - decision.startedAt),
+      candidates: Object.freeze(decision.candidates.map((item) => Object.freeze({ ...item })))
+    }) };
   }
 
   function memoryDetails(memory, candidate) {
@@ -421,9 +450,10 @@ function createResourceGovernor(options = {}) {
       if (immediate !== DEFER_ADMISSION) return Promise.resolve(immediate);
       if (prepared.lowMemoryBehavior === 'reject') {
         onRejected();
-        return Promise.reject(unavailable(prepared));
+        return Promise.reject(unavailable(prepared, decisionDetails(admissionOptions.decision)));
       }
     }
+    if (admissionOptions.decision) admissionOptions.decision.queuedAhead = queue.snapshot().size;
     let requestId;
     try {
       requestId = nextId('admission');
@@ -439,6 +469,7 @@ function createResourceGovernor(options = {}) {
       payload: Object.freeze({
         attempt: guardedAttempt,
         memory: admissionOptions.memory,
+        decision: admissionOptions.decision,
         prepared,
         rejectOnUnavailable: prepared.lowMemoryBehavior === 'reject'
       }),
@@ -448,6 +479,9 @@ function createResourceGovernor(options = {}) {
       }
     }).catch((error) => {
       onRejected();
+      if (error && error.code === 'ADMISSION_TIMEOUT' && admissionOptions.decision) {
+        error.details = Object.freeze({ ...error.details, ...decisionDetails(admissionOptions.decision) });
+      }
       throw error;
     });
     refreshRecheckTimer();
@@ -456,7 +490,9 @@ function createResourceGovernor(options = {}) {
 
   queue.drain((queued) => {
     const result = queued.attempt();
-    if (result === DEFER_ADMISSION && queued.rejectOnUnavailable) throw unavailable(queued.prepared);
+    if (result === DEFER_ADMISSION && queued.rejectOnUnavailable) {
+      throw unavailable(queued.prepared, decisionDetails(queued.decision));
+    }
     return result;
   });
 
@@ -473,15 +509,20 @@ function createResourceGovernor(options = {}) {
     }
     const prepared = Object.freeze({ ...common, resources });
     const candidates = memory ? memory.candidates : [{ resources }];
+    const decision = createDecisionRecord();
     return enqueue(prepared, () => {
+      const traces = [];
       for (const candidate of candidates) {
-        if (memory && !fitsStable(memory, candidate.resources)) continue;
-        if (!canAdmit(memory, candidate, candidate.resources)) continue;
+        const trace = { mode: candidate.mode || null, memoryBytes: candidate.resources.memoryBytes };
+        traces.push(trace);
+        if (memory && !fitsStable(memory, candidate.resources)) { trace.reason = 'stable-limit'; continue; }
+        if (!canAdmit(memory, candidate, candidate.resources, trace)) continue;
         return grant(Object.freeze({ ...common, resources: candidate.resources }), candidate.resources,
           memoryDetails(memory, candidate));
       }
+      recordDecision(decision, traces);
       return DEFER_ADMISSION;
-    }, { memory, assertStable: () => assertStable(prepared, memory, candidates.map((item) => item.resources)) });
+    }, { memory, decision, assertStable: () => assertStable(prepared, memory, candidates.map((item) => item.resources)) });
   }
 
   function acquireReplaceableReservation(kind, request) {

@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { reportStartupFailure } = require('../../../src/backend/startup-failure');
 const { DatabaseSync } = require('node:sqlite');
 
 const {
@@ -2332,6 +2333,34 @@ test('startup hook 严格位于 owner/outbox/flow/sweep/interrupted artifact 状
     'hook'
   ]);
   assert.doesNotMatch(order.join(','), /cleanup|raw-maintenance|background/);
+});
+
+test('post-outbox 钩子失败时按 owner 入口同一格式透传原错误明细，启动失败对话框和日志都能看到', async () => {
+  const cause = Object.assign(new Error('业务 OP 升级等待后台资源超过 5 秒'), {
+    code: 'BIZOP_ACTIVATION_RESOURCE_UNAVAILABLE',
+    detailLines: ['内部原因：BIZOP_RESOURCE_WAIT_TIMEOUT', '判定记录：等待期间一直没有轮到本申请（入队时前方 1 项）'],
+    recoveryPaths: ['/tmp/recover-a', '/tmp/recover-a']
+  });
+  const { controller } = createHarness({
+    postOutboxStartupHooks: [{ hookName: 'BizOP activation and recovery', run: async () => { throw cause; } }]
+  });
+  controller.flushOutbox = async () => ({ flushed: 0, discarded: 0, remaining: 0 });
+  let failure;
+  await assert.rejects(controller.initialize(), (error) => { failure = error; return true; });
+  assert.equal(failure.code, 'ARCHIVE_STARTUP_HOOK_FAILED');
+  assert.equal(failure.message, '存档启动校验未完成：BizOP activation and recovery');
+  assert.equal(failure.cause, cause);
+  assert.deepEqual(failure.detailLines, [
+    'BizOP activation and recovery：[BIZOP_ACTIVATION_RESOURCE_UNAVAILABLE] 业务 OP 升级等待后台资源超过 5 秒',
+    '内部原因：BIZOP_RESOURCE_WAIT_TIMEOUT',
+    '判定记录：等待期间一直没有轮到本申请（入队时前方 1 项）'
+  ]);
+  assert.deepEqual(failure.recoveryPaths, ['/tmp/recover-a']);
+  const records = [];
+  const report = reportStartupFailure({ error: failure, appendRecord: (_file, record) => records.push(record) });
+  assert.match(report.message, /处理明细：\nBizOP activation and recovery：\[BIZOP_ACTIVATION_RESOURCE_UNAVAILABLE\]/);
+  assert.match(report.message, /判定记录：等待期间一直没有轮到本申请/);
+  assert.ok(records[0].details.includes('内部原因：BIZOP_RESOURCE_WAIT_TIMEOUT'));
 });
 
 test('无 StorageRootManager 时 defer 初始化后只完成安全恢复并返回 PR4 维护边界', async () => {
