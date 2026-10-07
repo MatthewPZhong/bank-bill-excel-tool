@@ -1,7 +1,7 @@
 # 集成测试约定（Integration Test Policy）
 
 > 版本：v1（2026-05-26 v2.1.8 立项 D10-D15）
-> 关联：CLAUDE.md §6 验证证据优先 / `rules/important-variables.md`
+> 关联：`CODEX.md`「验证与风险审查」/ `rules/important-variables.md`
 
 ## 一、为什么有这层
 
@@ -116,7 +116,7 @@ run().catch((e) => { console.error('FATAL', e); process.exit(1); });
 - 任何一个 fail → 整个流程红 → 不能进入 GUI 手测 / 提 PR
 - 全 PASS 才有资格进入 `docs/iterations/<version>/manual-test-checklist.md` 跑 GUI 验证
 
-**版本号 bump 后必须跑一次**（与 `npm run scan:vars` + `/check-vars` 并列）。
+**版本号 bump 后必须跑一次**。
 
 **本地与 CI 使用同一门禁**：
 - 开发者可在 macOS / Windows / Linux 本地手动触发；Windows PR/Release workflow 也执行同一个完整命令
@@ -226,7 +226,7 @@ run().catch((e) => { console.error('FATAL', e); process.exit(1); });
 
 ## 九、参考
 
-- `CLAUDE.md` 第 6 条 "验证证据优先"
+- `CODEX.md`「验证与风险审查」
 - `rules/important-variables.md` 跨文件变更 review 配套
 - `docs/iterations/v2.1.8/manual-test-checklist.md` GUI 手测互补
 - `package.json` scripts: `smoke` / `test:unit` / `test:integration` / `release-check`

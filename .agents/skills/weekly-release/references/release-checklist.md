@@ -45,7 +45,7 @@
 ## C．版本、文档与最终候选验证
 
 - [ ] **C1 更新版本文件**：在 release 上将项目版本更新到目标稳定版本，同步实际存在的锁文件/版本元数据；已正确则不重复升版。使用 npm 时先核对生命周期脚本，再用 `npm version <版本> --no-git-tag-version`，此阶段不创建正式 tag。[2]
-- [ ] **C2 同步发布文档**：更新 `CHANGELOG.md`、`docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md`；既有 spec/TechDoc 直接引用，需要存放或补齐时使用 `versioned-docs`，不改写其他版本的需求。
+- [ ] **C2 同步发布文档**：更新 `CHANGELOG.md`、`docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md`；既有 spec/TechDoc 直接引用，需要存放或补齐时使用 `save-spec`，不改写其他版本的需求。
 - [ ] **C3 固定候选内容**：review release 相对已核对 main 的最终差异，确认范围、集成行为和文档一致；按授权提交本轮修改，记录候选 SHA。记录里只保存真实结果，不预填通过。
 - [ ] **C4 执行必要验证**：完成受影响的局部/回归验证和 `npm run release-check`；复用仍适用的证据，不额外重复无关测试。检查所需构建、打包、界面与平台验证是否有证据。
 - [ ] **C5 完成人工/专项检查**：按实际风险完成专项审查和必要人工验收；不适用项写明原因，资金损失红线不能以自动检查代替人工复核。
