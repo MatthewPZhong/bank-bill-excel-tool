@@ -1,9 +1,9 @@
 # 重要变量清单
 
-> 手工维护的"关键变量"清单。**每次代码变动前必读**，命中条目要在改动完成后做关联功能 review。
+> 手工维护的"关键变量"清单。**按需检索相关条目**（文件很大，用 `rg` 定位，不通读），命中条目要在改动完成后做关联功能 review。
 >
 > 全量自动统计在 `docs/analysis/var-reference-stats.md`（由 `npm run scan:vars` 生成）。
-> 触发节点与 review 流程详见 `CLAUDE.md` § 重要变量变动 check。
+> 使用时机见 `CODEX.md`「验证与风险审查」：按需参考相关风险说明，不沿用旧的固定扫描、统计刷新或分级汇报流程。
 
 ## 元数据
 
@@ -1409,7 +1409,7 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
 
 | 环节 | 谁做 |
 |---|---|
-| 发现升格/降级候选 | 脚本 (`scan:vars`) + agent (`/check-vars`) 自动扫 |
+| 发现升格/降级候选 | agent 按命中条目判断；用户明确要求时运行 `npm run scan:vars` / `npm run check:vars` 辅助扫描 |
 | 起草条目（层级 / 定义位置 / 关联功能 / review 要点） | agent，按下文"双门槛"判断 |
 | 起草降级/删除 diff | agent |
 | 最终审批 / 层级拍板 | 用户（看 diff 后 yes / no / 改层级） |
@@ -1473,12 +1473,7 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
 
 ### 触发时机与责任人
 
-| 节点 | 动作 | 责任方 |
-|---|---|---|
-| 提 PR 前 | `/check-vars` 输出「升格候选」段（自动报告里新出现的 A-share ∉ 本表） | team-lead agent 提示 |
-| 版本号 bump | 完整过一遍本表 + scan-vars，评估升格/降级 | 用户 + Claude 协作 |
-| 合并到受保护分支前 | 增量评估（不要求全量） | team-lead agent |
-| 日常 Edit/Write | 不做升格判断（只做命中 review） | agent |
+按 `CODEX.md`「验证与风险审查」：共享状态、持久化格式或业务契约变化时，由当前执行者核查命中条目，需要时起草升格/降级交用户审批；不再在提 PR、版本 bump 或合并前固定扫描、刷新统计或分级汇报。用户明确要求时可运行 `npm run scan:vars` / `npm run check:vars` 辅助。
 
 ### 元数据维护
 
