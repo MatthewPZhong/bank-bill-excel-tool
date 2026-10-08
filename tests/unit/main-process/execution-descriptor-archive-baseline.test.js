@@ -42,8 +42,14 @@ const policies = archivePolicies;
 const policyByChannel = new Map(policies.map((policy) => [policy.channel, policy]));
 const baselineRecoverable = baseline.policies.filter((policy) => policy.taskKind !== 'exclude');
 const newPreparationPolicies = [
+  { batchPolicy: 'exclude', channel: 'template-resources:get', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'template-resources:list', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'toolbox:split:cancel-read', excludeReason: 'cancel-active-task', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'toolbox:split:read-values', excludeReason: 'preview-only', taskKind: 'exclude', workerContext: 'none' }
+];
+// 基线之后新增的用户文件导出入口；固定基线本身不改。
+const newSupportActions = [
+  { channel: 'template-resources:save-as', kind: 'support-action', reason: 'user-document-export' }
 ];
 
 // 固定 fixture 与当前公开 API 分开读取；此测试不提供更新/重建 fixture 入口。
@@ -53,7 +59,7 @@ test('Archive 固定基线逐 channel 保留全部 268 项、模块身份、file
   const baselineChannels = new Set(baseline.policies.map((policy) => policy.channel));
   assert.deepEqual(snapshotArchivePolicies(policies.filter((policy) => baselineChannels.has(policy.channel))), baseline.policies);
   assert.deepEqual(snapshotArchivePolicies(policies.filter((policy) => !baselineChannels.has(policy.channel))), newPreparationPolicies);
-  assert.deepEqual(SUPPORT_ACTION_POLICIES, baseline.supportActions);
+  assert.deepEqual(SUPPORT_ACTION_POLICIES, [...baseline.supportActions, ...newSupportActions]);
   assert.deepEqual(
     sorted(FILE_ACTION_CHANNELS),
     sorted(baseline.policies.filter((policy) => policy.taskKind === 'file').map((policy) => policy.channel))

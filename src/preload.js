@@ -158,6 +158,11 @@ contextBridge.exposeInMainWorld('desktopApi', {
     setModuleRetentionDays: (payload) => ipcRenderer.invoke('archive-center:set-module-retention-days', payload),
     getStats: () => ipcRenderer.invoke('archive-center:get-stats')
   },
+  templateResources: {
+    list: () => ipcRenderer.invoke('template-resources:list'),
+    get: (resourceId) => ipcRenderer.invoke('template-resources:get', resourceId),
+    saveAs: (payload) => ipcRenderer.invoke('template-resources:save-as', payload)
+  },
   errors: {
     exportLast: () => ipcRenderer.invoke('error:export-last')
   },

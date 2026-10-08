@@ -4957,8 +4957,90 @@
           "getAppUpdateStatus",
           "getDarkModeController",
           "mountAppearanceSettings",
+          "mountTemplateFiles",
           "refreshOpenAppUpdateDialog",
           "restartAndInstallAppUpdate"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-dialog-template-files",
+      "governance": "G3",
+      "owner": "feat/settings-template-files",
+      "state": "active",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/dialogs/template-files.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/dialogs/template-files.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer/dialogs/template-files.js",
+          "kind": "classic-global",
+          "importedNames": [
+            "__templateFilesDialogs"
+          ]
+        }
+      ],
+      "activationEvidence": [
+        "scripts/test-renderer-lifecycle.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/dialogs/template-files.js",
+          "exportsGlobal": [
+            "__templateFilesDialogs"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer/dialogs/template-files.js",
+        "name": "createTemplateFilesDialogs",
+        "parameters": [
+          "api",
+          "modalBridge",
+          "modules",
+          "ui"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "templateResources.get",
+          "templateResources.list",
+          "templateResources.saveAs"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "createConfirmDialog",
+          "escapeHtml"
         ]
       },
       "deprecatedEntrypoints": [],
@@ -8070,6 +8152,129 @@
         }
       ],
       "reason": "release 合并记录：共享 Publisher 已有授权事务增加单独的技术内存配置实参；owner 授权、seal、journal 与真实退出责任不变，未增加恢复入口。"
+    },
+    {
+      "sourceCommit": "52b92b55c3d91f7a431ff62419e8712a6ed1774e",
+      "sourcePolicyBlob": "e1daa3f865a4cb49f7ad821748deecf71860e991",
+      "boundaryId": "renderer-dialog-app-settings",
+      "field": "allowedApiFields",
+      "from": {
+        "api": [
+          "appUpdate.checkNow",
+          "appUpdate.getStatus",
+          "appUpdate.onStatusChanged",
+          "appUpdate.restartAndInstall",
+          "appUpdate.setEnabled",
+          "archiveCenter.changeStorageLocation",
+          "archiveCenter.deleteBatch",
+          "archiveCenter.getBatch",
+          "archiveCenter.getSettings",
+          "archiveCenter.getStats",
+          "archiveCenter.listBatches",
+          "archiveCenter.listDeleteCleanupJobs",
+          "archiveCenter.onEntryMaintenanceCompleted",
+          "archiveCenter.onEntryMaintenanceFailed",
+          "archiveCenter.onEntryMaintenanceProgress",
+          "archiveCenter.onStorageMigrationProgress",
+          "archiveCenter.openFile",
+          "archiveCenter.prepareDeleteBatch",
+          "archiveCenter.retryBatch",
+          "archiveCenter.retryDeleteCleanupJob",
+          "archiveCenter.saveAs",
+          "archiveCenter.selectRetrySources",
+          "archiveCenter.setLocked",
+          "archiveCenter.setModuleRetentionDays",
+          "archiveCenter.setRetentionDays",
+          "archiveCenter.startEntryMaintenance"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "applyAppUpdateActionResult",
+          "applyAppUpdateStatus",
+          "createConfirmDialog",
+          "escapeHtml",
+          "getAppUpdateStatus",
+          "getDarkModeController",
+          "mountAppearanceSettings",
+          "refreshOpenAppUpdateDialog",
+          "restartAndInstallAppUpdate"
+        ]
+      },
+      "to": {
+        "api": [
+          "appUpdate.checkNow",
+          "appUpdate.getStatus",
+          "appUpdate.onStatusChanged",
+          "appUpdate.restartAndInstall",
+          "appUpdate.setEnabled",
+          "archiveCenter.changeStorageLocation",
+          "archiveCenter.deleteBatch",
+          "archiveCenter.getBatch",
+          "archiveCenter.getSettings",
+          "archiveCenter.getStats",
+          "archiveCenter.listBatches",
+          "archiveCenter.listDeleteCleanupJobs",
+          "archiveCenter.onEntryMaintenanceCompleted",
+          "archiveCenter.onEntryMaintenanceFailed",
+          "archiveCenter.onEntryMaintenanceProgress",
+          "archiveCenter.onStorageMigrationProgress",
+          "archiveCenter.openFile",
+          "archiveCenter.prepareDeleteBatch",
+          "archiveCenter.retryBatch",
+          "archiveCenter.retryDeleteCleanupJob",
+          "archiveCenter.saveAs",
+          "archiveCenter.selectRetrySources",
+          "archiveCenter.setLocked",
+          "archiveCenter.setModuleRetentionDays",
+          "archiveCenter.setRetentionDays",
+          "archiveCenter.startEntryMaintenance"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "applyAppUpdateActionResult",
+          "applyAppUpdateStatus",
+          "createConfirmDialog",
+          "escapeHtml",
+          "getAppUpdateStatus",
+          "getDarkModeController",
+          "mountAppearanceSettings",
+          "mountTemplateFiles",
+          "refreshOpenAppUpdateDialog",
+          "restartAndInstallAppUpdate"
+        ]
+      },
+      "reason": "设置弹窗新增「模板文件」页，只接收 Renderer 装配注入的视图挂载函数；模板 API 由独立的模板文件工厂持有，设置弹窗不直接访问。",
+      "designDoc": "changes/v3.2.12/feat/settings-template-files/techdoc.md"
     }
   ]
 }

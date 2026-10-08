@@ -31,12 +31,12 @@ const denied = result => assert.ok(result.violations.length, '真实旁路必须
 test('已集成 Renderer 登记由真实 factory、消费者、生产脚本和行为证据共同激活', () => {
   const config = JSON.parse(fs.readFileSync(path.join(root, 'architecture/boundaries.json')));
   const renderer = config.boundaries.filter(b => b.id.startsWith('renderer-'));
-  assert.equal(renderer.length, 20);
+  assert.equal(renderer.length, 21);
   assert.ok(renderer.every(b => b.state === 'active'));
   config.boundaries = renderer;
   const result = evaluateRules(scan(root, config), config, JSON.parse(fs.readFileSync(path.join(root, 'architecture/legacy-allowlist.json'))), { root });
   clean(result);
-  assert.equal(result.activeBoundaries.length, 20);
+  assert.equal(result.activeBoundaries.length, 21);
   assert.deepEqual(result.partialBoundaries, []);
 });
 

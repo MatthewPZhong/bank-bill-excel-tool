@@ -34,6 +34,7 @@ Statement 没有既有的公开 `sessionStatus` IPC。本次保留本窗口已�
 - DOM 工厂兼容层用 WeakMap 保存 descriptor；`openModal` 使用延迟工厂，`onMount(handle, scope)` 启动资源，scope 收口监听/计时器及清理。`returnToModal` 只返回仍存活父层，closed 节点不可重挂。
 - `handle.closed` 恰好一次结算 submitted/cancelled；disposer 不保存、导出或确认业务。强制 dispose 只用于最终卸载/初始化失败，不能拿来绕过业务 busy。
 - [dialogs/app-settings.js](dialogs/app-settings.js) 拥有期限保存队列、批次读取代次及父设置会话。删除子层只持有原 batchId/token，期限保存未结算不得预检/确认，删除提交中祖先不可关闭。
+- [dialogs/template-files.js](dialogs/template-files.js) 是设置「模板文件」页，由 `renderer.js` 以窄 API `templateResources` 装配，经 `ui.mountTemplateFiles` 挂入设置弹窗；自持列表/详情/变更记录读取代次，按 Main 返回的 capabilities 启用操作。导入与确认子层压在设置句柄上，提交中拒绝关闭，关闭时放弃未提交的暂存。
 - [dialogs/toolbox.js](dialogs/toolbox.js) 持有本次 splitReadToken/来源/草稿，选择层只拥有控件。单项/行数/多文件转换保留父会话；同步冻结 payload 并锁定提交后只发送一次原 splitExport。取消不导出、不添加 Main 清理 IPC。
 - [dialogs/configuration.js](dialogs/configuration.js) 拥有模板、映射、大账号、余额及迁移草稿。数据读取校验视图及请求代次；写入期间沿用对应 busy/确认语义；旧窗口不能接管新窗口。
 - 功能收纳的 `onCommit` 保存并接纳 Main 返回的启用列表；同步 busy 阻止导航，原 handle 正常提交关闭后才执行 `onCommitted` 导航。强制销毁不取消已提交写，也不授予旧窗新的导航权限。账单拆分配置的行编辑、单行删除、份数、合并组、金额元数据及规则子层共享父会话提交锁与关闭资格；写入开始使旧删除预检失效。预检失败不删除，原窗口关闭或行重绘后的迟到预检不能续发删除；已提交的配套写继续结算，旧视图不能接管新窗口。父映射窗口每次打开拆分子层前重读配置，父会话、请求和父写代次均有效才挂载，失败不使用旧缓存。按钮返回在异步onClose期间保持原拆分子层并锁定关闭；onClose可选资格上下文只允许原层仍有效的回调更新父缓存，随后精确结束原拆分子层。
