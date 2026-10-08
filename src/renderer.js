@@ -659,12 +659,20 @@ const {
   // v2.1.0-beta.1 PR-A（task A9）：场景管理 dialog 任意 CRUD 完成后 reload 主面板"场景"下拉
 });
 
+const templateFilesDialogs = window.__templateFilesDialogs.createTemplateFilesDialogs({
+  api: { templateResources: window.desktopApi?.templateResources },
+  modalBridge,
+  modules: MODULES,
+  ui: { escapeHtml, createConfirmDialog }
+});
+
 const { createAppUpdateSettingsDialog, createArchiveCenterPreviewApi } = window.__appSettingsDialogs.createAppSettingsDialogs({
   api: { archiveCenter: window.desktopApi?.archiveCenter, appUpdate: window.desktopApi?.appUpdate },
   modalBridge,
   modules: MODULES,
   ui: { escapeHtml, createConfirmDialog, getDarkModeController,
     mountAppearanceSettings: (panel, controller) => window.DarkModeUI.mountSettings(panel, controller),
+    mountTemplateFiles: (pane, options) => templateFilesDialogs.mountTemplateFiles(pane, options),
     applyAppUpdateActionResult, applyAppUpdateStatus,
     getAppUpdateStatus: () => state.appUpdateStatus,
     refreshOpenAppUpdateDialog, restartAndInstallAppUpdate }
