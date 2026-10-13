@@ -288,6 +288,14 @@
         listEl.innerHTML = html + foot;
       }
 
+      function markSelected() {
+        for (const item of listEl.querySelectorAll('.template-center-item')) {
+          const active = item.dataset.resourceId === state.selectedId;
+          item.classList.toggle('is-active', active);
+          item.setAttribute('aria-current', active ? 'true' : 'false');
+        }
+      }
+
       function selectResource(resourceId, { revealInList = false } = {}) {
         if (!resourceId) return;
         if (resourceId !== state.selectedId) {
@@ -297,7 +305,9 @@
           state.detail = null;
           showFeedback('');
         }
-        renderList();
+        // 只更新选中标记，保留列表按钮及键盘焦点；目标不在当前列表（跳转时重置了筛选）才重建。
+        if (listEl.querySelector(`[data-resource-id="${CSS.escape(resourceId)}"]`)) markSelected();
+        else renderList();
         if (revealInList) {
           listEl.querySelector(`[data-resource-id="${CSS.escape(resourceId)}"]`)?.scrollIntoView({ block: 'nearest' });
         }
@@ -654,6 +664,8 @@
           statusSelect.value = '';
         }
         selectResource(resourceId, { revealInList: true });
+        // 跳转来源（详情链接、变更记录）会随重绘移除或被隐藏，焦点移到目标模板，可继续用方向键浏览。
+        listEl.querySelector(`[data-resource-id="${CSS.escape(resourceId)}"]`)?.focus({ preventScroll: true });
       }
 
       async function saveAs(button) {
@@ -1111,6 +1123,7 @@
         else if (action === 'select-sheet') {
           state.sheetIndex = Number(button.dataset.sheetIndex) || 0;
           renderDetail({ keepScroll: true });
+          detailEl.querySelector(`[data-action="select-sheet"][data-sheet-index="${state.sheetIndex}"]`)?.focus({ preventScroll: true });
         } else if (action === 'save-as') saveAs(button);
         else if (action === 'import') openImportDialog();
         else if (action === 'restore-default') {

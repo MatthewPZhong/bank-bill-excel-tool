@@ -194,3 +194,26 @@ test('解析结果按文件签名复用，文件变化后重新读取', async ()
   await counted.get('fund-type-enum');
   assert.equal(reads, 2);
 });
+
+test('读取失败不缓存：文件签名不变，恢复可读后重新读取', async () => {
+  let reads = 0;
+  const flaky = createTemplateResourceService({
+    appRoot: ROOT,
+    stat: async (filePath) => ({ ...(await fs.promises.stat(filePath)), mtimeMs: 1 }),
+    readFile: async (filePath) => {
+      reads += 1;
+      if (reads === 1) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+      return fs.promises.readFile(filePath);
+    }
+  });
+  const failed = (await flaky.get('fund-type-enum')).resource;
+  assert.equal(failed.readError, '文件读取失败：EBUSY: resource busy or locked');
+  assert.equal(failed.capabilities.saveAs, false);
+
+  const recovered = (await flaky.get('fund-type-enum')).resource;
+  assert.equal(recovered.readError, '');
+  assert.equal(recovered.capabilities.saveAs, true);
+  assert.ok(recovered.enumValues.length > 0);
+  await flaky.get('fund-type-enum');
+  assert.equal(reads, 2, '恢复后的成功结果仍按签名复用');
+});
