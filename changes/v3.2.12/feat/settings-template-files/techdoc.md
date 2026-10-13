@@ -70,7 +70,7 @@ Renderer 仅在对应方法存在且 `capabilities` 允许时启用入口：
 - 纳管 39 个：输出模板 8、枚举 1、输入原表 24、链接表 4、示例参考 2；未纳入 `COMMON枚举.xlsx`、`余额账单模版.xlsx`、`币种映射表.xlsx`（由原模块维护）。
 - 读取方式依据现有代码：运行时读取 5 个（资金对账导出不平、重复入金召回邮件模板、平盘银行对账单、银行对账单、VCC 移除归档 Pending 发生额计算表；最后一个所属模块未接入替换）、缓存读取 2 个（FundType 枚举、网关对账单）、哈希锁定 1 个（VCC 结果模板）；其余为结构样例、程序生成、未启用或参考文件。
 - 解析用 SheetJS（与 `fund-type-enum.js`、`gateway-recon-headers-loader.js` 一致）。`<dimension>` 声明小于实际单元格时按实际单元格重算范围；合并单元格覆盖的行计入「另有 N 行内容」。枚举值口径与运行时一致：第 1 个 Sheet 第 1 列、跳过表头、去空去重保序。
-- 解析结果按文件大小与修改时间缓存；首次列表在开发机约 45ms。
+- 成功的解析结果按文件大小与修改时间缓存；读取或解析失败不缓存，下次请求重新读取（权限、占用等临时错误解除后文件签名通常不变）。首次列表在开发机约 45ms。
 
 ## 五、架构与策略登记
 
@@ -82,11 +82,11 @@ Renderer 仅在对应方法存在且 `capabilities` 允许时启用入口：
 
 | 层 | 入口 | 覆盖 |
 | --- | --- | --- |
-| Unit | `tests/unit/main-process/template-resources-service.test.js` | 清单与 assets 一致、运行时契约表头与代码常量一致、VCC 锁定哈希、枚举口径、能力与另存为边界 |
+| Unit | `tests/unit/main-process/template-resources-service.test.js` | 清单与 assets 一致、运行时契约表头与代码常量一致、VCC 锁定哈希、枚举口径、能力与另存为边界、读取失败恢复后重新读取 |
 | Unit | `tests/unit/main-process/template-resources-ipc.test.js` | 执行 `main.js`/`preload.js` 真实注册代码：方法与通道、列表/详情委托、另存为先校验再弹框、取消不写入 |
 | Unit | IPC 清单与基线测试、Renderer 边界登记、设置弹窗源码合同 | 通道数量与分类（基线 fixture 不改）、active Renderer 边界 20 → 21、导航顺序 |
 | Integration | `scripts/integration/template-resources-save-as.js` | 真实 assets 另存为字节一致、拒绝覆盖内置文件、未知资源 |
-| Renderer 生命周期 | `scripts/renderer-lifecycle/fixtures/template-files.js` | 真实 DOM：懒加载、筛选与高亮、详情标签、另存为、能力置灰、子弹窗栈、导入/冲突/启用/删除（受控 API）、晚到响应与释放 |
+| Renderer 生命周期 | `scripts/renderer-lifecycle/fixtures/template-files.js` | 真实 DOM：懒加载、筛选与高亮、详情标签、另存为、能力置灰、子弹窗栈、导入/冲突/启用/删除（受控 API）、晚到响应与释放；真实按键下激活模板、切换 Sheet、跳转关联模板后焦点不丢失 |
 
 人工检查：真实应用中打开设置 → 模板文件，浅色/深色、最小窗口 1080×760。
 

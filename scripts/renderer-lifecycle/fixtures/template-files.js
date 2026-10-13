@@ -345,6 +345,38 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(await js('__testErrors'), []);
   });
 
+  await test('键盘激活模板、切换 Sheet、跳转关联模板后焦点留在对应控件，方向键可继续切换', async () => {
+    // Enter/Space 激活按钮是浏览器默认行为，需真实按键；布局模式的窗口已显示并获得焦点。
+    await setup({ layoutOptions: { width: 1080, height: 760, theme: 'light' } });
+    const focusedResource = () => js('document.activeElement?.dataset.resourceId || document.activeElement?.tagName');
+    await js(`tf.q('[data-resource-id="dup-recall-mail"]').focus(); void 0;`);
+    await layout.key('Enter');
+    await waitFor(`tf.detailTitle() === tf.data.details['dup-recall-mail'].name`, 'Enter 激活模板');
+    assert.equal(await focusedResource(), 'dup-recall-mail');
+    const next = await js(`(() => { const items = [...tf.overlay.querySelectorAll('.template-center-item')];
+      return items[items.findIndex((item) => item.dataset.resourceId === 'dup-recall-mail') + 1].dataset.resourceId; })()`);
+    await layout.key('Down');
+    await waitFor(`tf.q('.template-center-item.is-active')?.dataset.resourceId === '${next}'`, '方向键切换模板');
+    assert.equal(await focusedResource(), next);
+    await layout.key('Space');
+    await settle();
+    assert.equal(await focusedResource(), next, 'Space 激活当前模板后焦点不变');
+
+    await selectResource('prefund-unbalanced');
+    await js(`tf.q('[data-action="select-sheet"][data-sheet-index="1"]').focus(); void 0;`);
+    await layout.key('Enter');
+    assert.deepEqual(await js(`({ index: document.activeElement?.dataset.sheetIndex, pressed: document.activeElement?.getAttribute('aria-pressed') })`),
+      { index: '1', pressed: 'true' });
+
+    await selectResource('fx-option');
+    await openTab('info');
+    await js(`tf.q('.template-center-kv [data-action="goto"]').focus(); void 0;`);
+    await layout.key('Enter');
+    await waitFor(`tf.detailTitle() === '外汇期权订单'`, 'Enter 跳转关联模板');
+    assert.equal(await focusedResource(), 'fx-option-order', '跳转后焦点移到目标模板');
+    assert.deepEqual(await js('__testErrors'), []);
+  });
+
   for (const [name, options] of [
     ['template-files-light', { width: 1080, height: 760, theme: 'light' }],
     ['template-files-dark', { width: 1080, height: 760, theme: 'dark' }],

@@ -99,6 +99,7 @@ function createTemplateResourceService({
   const fileNameOf = (resource) => path.posix.basename(resource.path);
 
   // 内置文件只读；按大小与修改时间复用解析结果，开发环境改动文件后会重新读取。
+  // 失败不缓存：权限、占用等临时错误解除后文件签名通常不变，下次请求需重新读取。
   async function inspect(resource) {
     const filePath = absolutePath(resource);
     let info;
@@ -110,15 +111,14 @@ function createTemplateResourceService({
     const signature = `${info.size}:${info.mtimeMs}`;
     const cached = inspections.get(resource.id);
     if (cached && cached.signature === signature) return cached;
-    let record;
     try {
       const bytes = await readFile(filePath);
-      record = { signature, size: bytes.length, sha256: sha256(bytes), ...describeWorkbook(bytes, resource) };
+      const record = { signature, size: bytes.length, sha256: sha256(bytes), ...describeWorkbook(bytes, resource) };
+      inspections.set(resource.id, record);
+      return record;
     } catch (error) {
-      record = { signature, size: info.size, error: `文件读取失败：${error && error.message ? error.message : '未知错误'}` };
+      return { signature, size: info.size, error: `文件读取失败：${error && error.message ? error.message : '未知错误'}` };
     }
-    inspections.set(resource.id, record);
-    return record;
   }
 
   function builtinVersion(resource, record) {
