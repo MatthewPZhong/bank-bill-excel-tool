@@ -123,6 +123,7 @@ const {
   createTaskPolicyRegistry
 } = require('./main-process/execution-descriptors/composition');
 const { createBusinessFlowResolver } = require('./main-process/archive-center/business-flow-resolver');
+const { createTemplateResourceService } = require('./main-process/template-resources/service');
 const {
   createTaskLifecycle
 } = require('./main-process/archive-center/task-lifecycle');
@@ -4809,6 +4810,33 @@ function registerArchiveCenterHandlers() {
 function archiveCenterMutationIpcHandle(channel, functionKey, handler) {
   const meta = { channel, moduleKey: '存档中心', functionKey };
   ipcMain.handle(channel, runRegisteredBusinessOperation(meta, handler));
+}
+
+let templateResourceService = null;
+
+function getTemplateResourceService() {
+  if (!templateResourceService) {
+    templateResourceService = createTemplateResourceService({ appRoot: app.getAppPath(), appVersion: app.getVersion() });
+  }
+  return templateResourceService;
+}
+
+// 设置 → 模板文件：只读查询与另存为；版本导入、启用与删除待后端接入。
+function registerTemplateResourceHandlers() {
+  ipcMain.handle('template-resources:list', () => getTemplateResourceService().list());
+  ipcMain.handle('template-resources:get', (_event, resourceId) => getTemplateResourceService().get(resourceId));
+  supportIpcHandle('template-resources:save-as', '另存模板文件', async (_event, payload) => {
+    const service = getTemplateResourceService();
+    const target = service.resolveVersion(payload || {});
+    if (target.status !== 'success') return target;
+    const choice = await dialog.showSaveDialog(mainWindow, {
+      title: '另存模板文件',
+      defaultPath: target.fileName,
+      filters: [{ name: target.extension.toUpperCase(), extensions: [target.extension] }]
+    });
+    if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+    return service.exportVersion({ ...payload, targetPath: choice.filePath });
+  });
 }
 
 function readToolboxRecoveryBatchIds(userDataDir) {
@@ -21221,6 +21249,7 @@ function registerAllIpcHandlersWithMemoryActivity() {
   registerAppHandlers();
   registerAppUpdateHandlers();
   registerArchiveCenterHandlers();
+  registerTemplateResourceHandlers();
   registerErrorHandlers();
   registerBackgroundHandlers();
   registerAccountMappingHandlers();

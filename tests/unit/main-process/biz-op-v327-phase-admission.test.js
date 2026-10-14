@@ -123,3 +123,45 @@ test('取消和 shutdown 保留原错误，零预算不掩盖已关闭或已取�
   await rejected;
   blocker.release('closed');
 });
+
+test('等待超时的明细在原有行之后追加判定记录和标注过的拒绝后现场，不含 ownerKey 或路径', async () => {
+  const f = fixture();
+  const blocker = await f.governor.acquirePhaseLease({ ...request, ownerKey: 'blocker-owner', resources: budgets });
+  const pending = acquireBizOpPhaseLease(f.runtime, request);
+  const rejected = assert.rejects(pending, (error) => {
+    assert.equal(error.code, 'BIZOP_RESOURCE_WAIT_TIMEOUT');
+    const lines = error.detailLines;
+    assert.match(lines[0], /^动作：biz-op-v327:export-result-diff$/);
+    assert.match(lines[1], /^内存：需要 1024.0 MiB/);
+    assert.match(lines[3], /^本阶段尚未开始执行/);
+    assert.match(lines[4], /^判定记录：共判定 \d+ 次，最后一次在第 0.0 秒，入队时前方 0 项/);
+    assert.equal(lines[5], '· 申请 1024.0 MiB：槽位或固定预算已占满');
+    assert.match(lines[6], /^拒绝后现场（错误处理时采集，可能已变化）：.*活动租约 1 项；排队 0 项；系统可用内存 \d+\.\d MiB$/);
+    assert.match(lines[7], /^拒绝后现场·活动租约：phase biz-op-v327:export-result-diff 未登记 2048.0 MiB$/);
+    const text = lines.join('\n');
+    assert.doesNotMatch(text, /test-phase|blocker-owner|test-operation/);
+    assert.doesNotMatch(text, /(^|\s)(\/[^\s/]+\/|[A-Za-z]:\\)|[0-9a-f]{8}-[0-9a-f]{4}-/i);
+    return true;
+  });
+  await f.advance(BIZ_OP_RESOURCE_WAIT_MS);
+  await rejected;
+  blocker.release('done');
+});
+
+test('排在无法推进的队首之后超时时，判定记录写明一直没有轮到本申请', async () => {
+  const f = fixture();
+  const blocker = await f.governor.acquirePhaseLease({ ...request, resources: budgets });
+  const head = f.governor.acquirePhaseLease({ ...request, ownerKey: 'head', resources: budgets, timeoutMs: 60000 });
+  const headSettled = head.catch(() => {});
+  const pending = acquireBizOpPhaseLease(f.runtime, request);
+  const rejected = assert.rejects(pending, (error) => {
+    assert.equal(error.code, 'BIZOP_RESOURCE_WAIT_TIMEOUT');
+    assert.ok(error.detailLines.includes('判定记录：等待期间一直没有轮到本申请（入队时前方 1 项）'));
+    return true;
+  });
+  await f.advance(BIZ_OP_RESOURCE_WAIT_MS);
+  await rejected;
+  assert.equal(f.governor.snapshot().queued.size, 1);
+  closeResourceGovernor(f.governor, 'test-complete'); await headSettled;
+  blocker.release('done');
+});

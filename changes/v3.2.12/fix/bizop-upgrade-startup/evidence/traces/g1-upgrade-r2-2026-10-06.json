@@ -1,0 +1,230 @@
+{
+  "generatedAt": "2026-10-06",
+  "environment": {
+    "host": "macOS arm64, Electron 36.9.5 开发模式",
+    "simulate": "资格身份视为 win32/x64；os.totalmem=16 GiB，os.freemem=5 GiB",
+    "isolation": "APP_USER_DATA_DIR / APP_DOCUMENTS_DIR 指向临时目录"
+  },
+  "seed": "用 v3.0.26 源码启动生成 userData，再用 v3.0.26 自己的 run-data-store 写入 3 个旧格式（G1）月度文件：month-2026-05/06/07；两次运行各用同一份种子的独立副本",
+  "runs": [
+    {
+      "id": "G1-BASE",
+      "app": "v3.2.11（52b92b55）",
+      "outcome": "启动失败：BIZOP_LEGACY_SCHEMA_INCOMPLETE；停在 MIGRATING；旧月度文件原样保留",
+      "events": [
+        {
+          "t": 382,
+          "ev": "activation-run",
+          "options": {
+            "quiesceOnly": true
+          },
+          "phaseBefore": "DISABLED"
+        },
+        {
+          "t": 406,
+          "ev": "PRECHECK-SNAPSHOT",
+          "method": "acquirePhaseLease",
+          "actionKey": "biz-op-v327:upgrade-preflight",
+          "lowMemoryBehavior": "reject",
+          "timeoutMs": 0,
+          "governor": {
+            "available": {
+              "cpuSlots": 4,
+              "workerThreadSlots": 5,
+              "utilityProcessSlots": 1,
+              "ioHeavySlots": 2,
+              "memoryBytes": 4294967296,
+              "memoryMiB": 4096
+            },
+            "budgets": {
+              "cpuSlots": 4,
+              "workerThreadSlots": 5,
+              "utilityProcessSlots": 1,
+              "ioHeavySlots": 2,
+              "memoryBytes": 4294967296,
+              "memoryMiB": 4096
+            },
+            "activeLeases": [],
+            "queued": 0,
+            "diagnostics": {
+              "granted": 0,
+              "released": 0,
+              "duplicateRelease": 0,
+              "rejected": 0,
+              "downgraded": 0,
+              "replacements": 0
+            }
+          },
+          "inventory": {
+            "inventoryComplete": true,
+            "blockers": []
+          },
+          "liveCarriers": [],
+          "liveActivities": [],
+          "freeMemMiB": 5120
+        },
+        {
+          "t": 407,
+          "ev": "PRECHECK-GRANTED",
+          "method": "acquirePhaseLease",
+          "actionKey": "biz-op-v327:upgrade-preflight",
+          "lowMemoryBehavior": "reject",
+          "timeoutMs": 0,
+          "memMiB": 384
+        },
+        {
+          "t": 519,
+          "ev": "activation-run-error",
+          "code": "BIZOP_LEGACY_SCHEMA_INCOMPLETE",
+          "message": "业务 OP 状态或证据不满足操作条件"
+        },
+        {
+          "t": 570,
+          "ev": "showErrorBox",
+          "title": "清结算小助手启动失败",
+          "message": "错误摘要：模块恢复尚未完成耐久接管，已阻止业务启动\n处理明细：\nbiz-op-v327：[BIZOP_LEGACY_SCHEMA_INCOMPLETE] 业务 OP 状态或证据不满足操作条件\n日志文件：<已省略本机路径>"
+        }
+      ]
+    },
+    {
+      "id": "G1-R2",
+      "app": "fix/bizop-upgrade-startup 工作区（R2 实现，未提交）",
+      "outcome": "两次预检均获批（timeoutMs=5000）；ACTIVE；窗口创建；run-data/biz-op-recon 下旧文件全部回收",
+      "events": [
+        {
+          "t": 372,
+          "ev": "activation-run",
+          "options": {
+            "quiesceOnly": true
+          },
+          "phaseBefore": "DISABLED"
+        },
+        {
+          "t": 396,
+          "ev": "PRECHECK-SNAPSHOT",
+          "method": "acquirePhaseLease",
+          "actionKey": "biz-op-v327:upgrade-preflight",
+          "timeoutMs": 5000,
+          "governor": {
+            "available": {
+              "cpuSlots": 4,
+              "workerThreadSlots": 5,
+              "utilityProcessSlots": 1,
+              "ioHeavySlots": 2,
+              "memoryBytes": 4294967296,
+              "memoryMiB": 4096
+            },
+            "budgets": {
+              "cpuSlots": 4,
+              "workerThreadSlots": 5,
+              "utilityProcessSlots": 1,
+              "ioHeavySlots": 2,
+              "memoryBytes": 4294967296,
+              "memoryMiB": 4096
+            },
+            "activeLeases": [],
+            "queued": 0,
+            "diagnostics": {
+              "granted": 0,
+              "released": 0,
+              "duplicateRelease": 0,
+              "rejected": 0,
+              "downgraded": 0,
+              "replacements": 0
+            }
+          },
+          "inventory": {
+            "inventoryComplete": true,
+            "blockers": []
+          },
+          "liveCarriers": [],
+          "liveActivities": [],
+          "freeMemMiB": 5120
+        },
+        {
+          "t": 397,
+          "ev": "PRECHECK-GRANTED",
+          "method": "acquirePhaseLease",
+          "actionKey": "biz-op-v327:upgrade-preflight",
+          "timeoutMs": 5000,
+          "memMiB": 384
+        },
+        {
+          "t": 527,
+          "ev": "activation-run-result",
+          "result": {
+            "status": "pending",
+            "phase": "MIGRATING"
+          }
+        },
+        {
+          "t": 579,
+          "ev": "activation-run",
+          "phaseBefore": "MIGRATING"
+        },
+        {
+          "t": 579,
+          "ev": "PRECHECK-SNAPSHOT",
+          "method": "acquirePhaseLease",
+          "actionKey": "biz-op-v327:upgrade-preflight",
+          "timeoutMs": 5000,
+          "governor": {
+            "available": {
+              "cpuSlots": 4,
+              "workerThreadSlots": 5,
+              "utilityProcessSlots": 1,
+              "ioHeavySlots": 2,
+              "memoryBytes": 4294967296,
+              "memoryMiB": 4096
+            },
+            "budgets": {
+              "cpuSlots": 4,
+              "workerThreadSlots": 5,
+              "utilityProcessSlots": 1,
+              "ioHeavySlots": 2,
+              "memoryBytes": 4294967296,
+              "memoryMiB": 4096
+            },
+            "activeLeases": [],
+            "queued": 0,
+            "diagnostics": {
+              "granted": 4,
+              "released": 4,
+              "duplicateRelease": 0,
+              "rejected": 0,
+              "downgraded": 0,
+              "replacements": 0
+            }
+          },
+          "inventory": {
+            "inventoryComplete": true,
+            "blockers": []
+          },
+          "liveCarriers": [],
+          "liveActivities": [],
+          "freeMemMiB": 5120
+        },
+        {
+          "t": 579,
+          "ev": "PRECHECK-GRANTED",
+          "method": "acquirePhaseLease",
+          "actionKey": "biz-op-v327:upgrade-preflight",
+          "timeoutMs": 5000,
+          "memMiB": 384
+        },
+        {
+          "t": 870,
+          "ev": "activation-run-result",
+          "result": {
+            "status": "ok",
+            "phase": "ACTIVE"
+          }
+        },
+        {
+          "t": 905,
+          "ev": "window-created"
+        }
+      ]
+    }
+  ]
+}

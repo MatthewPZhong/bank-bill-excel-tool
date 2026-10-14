@@ -7,6 +7,25 @@ const policies = new WeakSet();
 
 function error(code, message) { return new ResourceGovernorError(code, message); }
 
+function deny(trace, reason, facts = null) {
+  if (trace) Object.assign(trace, { reason }, facts ? { facts: Object.freeze(facts) } : {});
+  return false;
+}
+
+// 只统计增长未知的项：未登记执行档的租约，以及按 kind 分类的外部活动。
+function unboundedSources(active, blockers) {
+  const unbounded = (item) => item.maxGrowthBytes === null || item.maxGrowthBytes === undefined;
+  const sources = { lease: active.filter((entry) => unbounded(entry.scope)).length,
+    carrier: 0, main: 0, previousRuntime: 0, other: 0 };
+  for (const item of blockers.filter(unbounded)) {
+    if (item.kind === 'carrier') sources.carrier += 1;
+    else if (item.kind === 'main') sources.main += 1;
+    else if (item.kind === 'previous-runtime') sources.previousRuntime += 1;
+    else sources.other += 1;
+  }
+  return sources;
+}
+
 function checkedBytes(value, name) {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw error('RESOURCE_MEMORY_CONFIG_INVALID', name + '必须是非负安全整数');
@@ -89,23 +108,28 @@ function createMemoryAdmissionPolicy({
     }
   }
 
-  function evaluate(scope, candidate, contributionBytes, activeRecords) {
+  // trace 只记录拒绝原因供诊断使用，不参与判定；不传时与原判定完全相同。
+  function evaluate(scope, candidate, contributionBytes, activeRecords, trace = null) {
     assertEvidence(candidate);
     const active = activeRecords.map((record) => record.memoryState || {
       scope: { heavy: true, maxGrowthBytes: null }, mode: 'normal'
     });
-    if (scope.heavy && active.some((item) => item.mode === 'low')) return false;
-    if (candidate.mode === 'low' && active.some((item) => item.scope.heavy)) return false;
+    if (scope.heavy && active.some((item) => item.mode === 'low')) return deny(trace, 'low-mode-active');
+    if (candidate.mode === 'low' && active.some((item) => item.scope.heavy)) return deny(trace, 'heavy-active');
     const external = externalPressure();
-    if (scope.heavy && Array.isArray(external?.blockers) && external.blockers.some((item) => item?.mode === 'low')) return false;
+    if (scope.heavy && Array.isArray(external?.blockers) && external.blockers.some((item) => item?.mode === 'low')) {
+      return deny(trace, 'low-mode-active');
+    }
     if (!candidate.config) return true;
     if (!external || typeof external.then === 'function' || external.inventoryComplete !== true ||
-        !Array.isArray(external.blockers)) return false;
-    if (external.blockers.some((item) => !item || typeof item !== 'object')) return false;
-    if (candidate.mode === 'low' && external.blockers.some((item) => item.heavy !== false)) return false;
+        !Array.isArray(external.blockers)) return deny(trace, 'inventory-incomplete');
+    if (external.blockers.some((item) => !item || typeof item !== 'object')) return deny(trace, 'inventory-incomplete');
+    if (candidate.mode === 'low' && external.blockers.some((item) => item.heavy !== false)) return deny(trace, 'heavy-active');
     let growth = 0;
     for (const item of [...active.map((entry) => entry.scope), ...external.blockers]) {
-      if (item.maxGrowthBytes === null || item.maxGrowthBytes === undefined) return false;
+      if (item.maxGrowthBytes === null || item.maxGrowthBytes === undefined) {
+        return deny(trace, 'unbounded-growth', trace && unboundedSources(active, external.blockers));
+      }
       growth += checkedBytes(item.maxGrowthBytes, 'maxGrowthBytes');
       if (!Number.isSafeInteger(growth)) throw error('RESOURCE_MEMORY_CONFIG_INVALID', '未兑现增长合计超限');
     }
@@ -122,7 +146,8 @@ function createMemoryAdmissionPolicy({
     }
     // 已有驻留内存反映在 F 中；这里只加入当前新增峰值、R 与其他未兑现增长，不再扣整份 U。
     const needed = contributionBytes + candidate.config.systemReserveBytes + growth;
-    return Number.isSafeInteger(needed) && sample.availableBytes >= needed;
+    if (Number.isSafeInteger(needed) && sample.availableBytes >= needed) return true;
+    return deny(trace, 'system-memory', { availableBytes: sample.availableBytes, neededBytes: needed });
   }
 
   function canBypass(continuation, predecessor) {

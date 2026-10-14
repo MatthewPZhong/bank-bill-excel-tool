@@ -70,7 +70,7 @@
 
 ## 六、发版 checklist（启动指标）
 
-版本号 bump / 合并前，除 `npm run release-check` + `/check-vars` + `npm run scan:vars` 外，对账侧库相关改动还须确认：
+版本号 bump / 合并前，除 `npm run release-check` 外，对账侧库相关改动还须确认：
 
 - [ ] 四个已接入模块 parity 脚本全绿（`acquiring-side-db-parity` / `biz-op-recon-side-db-parity` / `bank-bu-recon-side-db-parity` / `pre-fund-reconciliation-side-db-parity`）。
 - [ ] `npm run startup:measure` 启动指标不退化（建窗 ≤300ms / 日常基线 ≤1.5s / 升级首启 ≤3s）。

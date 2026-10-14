@@ -319,3 +319,117 @@ test('没有适用候选时在排队前拒绝，不能把低档升成无资格�
     { code: 'RESOURCE_REQUEST_INVALID' });
   closeResourceGovernor(governor);
 });
+
+// 判定记录只服务诊断：原因必须来自判定当时，且不得改变准入结果。
+async function timedOutDecision(governor, clock, pending) {
+  let failure;
+  const settled = pending.catch((error) => { failure = error; });
+  // 逐秒推进，让每次内存重查都真实执行一次判定。
+  for (let elapsed = 0; elapsed < 5000; elapsed += 1000) { clock.advance(1000); await Promise.resolve(); }
+  await settled;
+  assert.equal(failure.code, 'ADMISSION_TIMEOUT');
+  assert.ok(Object.isFrozen(failure.details.decision));
+  return failure.details.decision;
+}
+
+test('排队超时的错误附带判定当时每个候选的拒绝原因和数值', async (t) => {
+  await t.test('system-memory', async () => {
+    const { governor, state, clock } = fixture();
+    state.free = 200 * MiB;
+    const decision = await timedOutDecision(governor, clock, governor.acquirePhaseLease(request()));
+    assert.ok(decision.attempts >= 5, `判定 ${decision.attempts} 次`);
+    assert.equal(decision.queuedAhead, 0);
+    assert.equal(decision.lastElapsedMs, 4000);
+    assert.deepEqual(decision.candidates, [{ mode: 'low', memoryBytes: 256 * MiB, reason: 'system-memory',
+      facts: { availableBytes: 200 * MiB, neededBytes: 384 * MiB } }]);
+    closeResourceGovernor(governor);
+  });
+  await t.test('unbounded-growth 按来源计数', async () => {
+    const { governor, state, clock } = fixture({ candidates: [{ mode: 'normal', config: config({ profileId: 'normal' }) }] });
+    const legacy = await governor.acquirePhaseLease(request('legacy', { resources: vector(10 * MiB) }));
+    state.blockers = [{ heavy: true, maxGrowthBytes: null, kind: 'carrier' },
+      { heavy: true, maxGrowthBytes: null, kind: 'previous-runtime' }, { heavy: true, maxGrowthBytes: 0, kind: 'main' }];
+    const decision = await timedOutDecision(governor, clock, governor.acquirePhaseLease(request()));
+    assert.equal(decision.candidates[0].reason, 'unbounded-growth');
+    assert.deepEqual(decision.candidates[0].facts, { lease: 1, carrier: 1, main: 0, previousRuntime: 1, other: 0 });
+    legacy.release(); closeResourceGovernor(governor);
+  });
+  await t.test('inventory-incomplete', async () => {
+    const { governor, state, clock } = fixture();
+    state.inventoryComplete = false;
+    const decision = await timedOutDecision(governor, clock, governor.acquirePhaseLease(request()));
+    assert.equal(decision.candidates[0].reason, 'inventory-incomplete');
+    closeResourceGovernor(governor);
+  });
+  await t.test('heavy-active 与 low-mode-active', async () => {
+    const { governor, clock } = fixture();
+    const legacy = await governor.acquirePhaseLease(request('legacy', { resources: vector(10 * MiB) }));
+    let decision = await timedOutDecision(governor, clock, governor.acquirePhaseLease(request()));
+    assert.equal(decision.candidates[0].reason, 'heavy-active');
+    legacy.release();
+    const low = await governor.acquirePhaseLease(request());
+    decision = await timedOutDecision(governor, clock, governor.acquirePhaseLease(request()));
+    assert.equal(decision.candidates[0].reason, 'low-mode-active');
+    low.release(); closeResourceGovernor(governor);
+  });
+  await t.test('memory-limit 与 slots', async () => {
+    const { governor, clock } = fixture();
+    const legacy = await governor.acquirePhaseLease(request('legacy', { resources: vector(1000 * MiB, { cpuSlots: 4 }) }));
+    let decision = await timedOutDecision(governor, clock, governor.acquirePhaseLease(request('legacy', { resources: vector(100 * MiB) })));
+    assert.deepEqual(decision.candidates, [{ mode: 'normal', memoryBytes: 100 * MiB, reason: 'memory-limit',
+      facts: { usedBytes: 1000 * MiB, requestBytes: 100 * MiB, limitBytes: 1024 * MiB } }]);
+    decision = await timedOutDecision(governor, clock, governor.acquirePhaseLease(request('legacy', { resources: vector(MiB, { cpuSlots: 1 }) })));
+    assert.equal(decision.candidates[0].reason, 'slots');
+    legacy.release(); closeResourceGovernor(governor);
+  });
+});
+
+test('立即拒绝和排队中按 reject 拒绝都附带判定记录，错误码与消息不变', async () => {
+  const { governor, state, clock } = fixture();
+  state.free = 200 * MiB;
+  await assert.rejects(governor.acquirePhaseLease(request('rows', { lowMemoryBehavior: 'reject' })), (error) => {
+    assert.equal(error.code, 'RESOURCE_BUDGET_UNAVAILABLE');
+    assert.equal(error.message, 'Resource budget is unavailable for phase');
+    assert.equal(error.details.kind, 'phase');
+    assert.equal(error.details.decision.attempts, 1);
+    assert.equal(error.details.decision.candidates[0].reason, 'system-memory');
+    return true;
+  });
+  state.free = 512 * MiB;
+  const head = governor.acquirePhaseLease(request('rows', { ownerKey: 'head' }));
+  const low = await head;
+  state.free = 200 * MiB;
+  const waiting = governor.acquirePhaseLease(request('rows', { ownerKey: 'waiting' }));
+  await Promise.resolve();
+  const rejecting = governor.acquirePhaseLease(request('rows', { ownerKey: 'reject', lowMemoryBehavior: 'reject' }));
+  let rejected;
+  const settled = rejecting.catch((error) => { rejected = error; });
+  const waited = waiting.catch(() => {});
+  low.release(); state.free = 512 * MiB;
+  clock.advance(1000);
+  const granted = await waiting;
+  clock.advance(1000);
+  await settled;
+  assert.equal(rejected.code, 'RESOURCE_BUDGET_UNAVAILABLE');
+  assert.equal(rejected.details.decision.queuedAhead, 1);
+  assert.equal(rejected.details.decision.candidates[0].reason, 'low-mode-active');
+  granted.release(); await waited; closeResourceGovernor(governor);
+});
+
+test('与队首同时到期时判定记录保留“未轮到”，不受随后授予的租约影响', async () => {
+  const { governor, state, clock } = fixture();
+  state.free = 200 * MiB;
+  const head = governor.acquirePhaseLease(request('rows', { ownerKey: 'head' })).catch((error) => error);
+  const probe = governor.acquirePhaseLease(request('rows', { ownerKey: 'probe' })).catch((error) => error);
+  clock.advance(1);
+  const later = governor.acquirePhaseLease(request('legacy', { ownerKey: 'later', resources: vector(10 * MiB), timeoutMs: 10000 }));
+  clock.advance(4999);
+  const [headError, probeError] = await Promise.all([head, probe]);
+  assert.equal(headError.code, 'ADMISSION_TIMEOUT');
+  assert.equal(probeError.code, 'ADMISSION_TIMEOUT');
+  assert.deepEqual({ ...probeError.details.decision }, { attempts: 0, queuedAhead: 1, lastElapsedMs: null, candidates: [] });
+  // 错误处理时的现场已经变化：队首消失，后来的请求已获批。
+  assert.equal(governor.snapshot().queued.size, 0);
+  assert.equal(governor.snapshot().activeLeaseCount, 1);
+  (await later).release(); closeResourceGovernor(governor);
+});

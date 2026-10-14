@@ -183,6 +183,8 @@ const archivePolicies = Object.freeze([
   createExcludePolicy('scenarios:list', 'read-only-query'),
   createExcludePolicy('settings:get-enabled-modules', 'read-only-query'),
   createExcludePolicy('settings:get-ui-style', 'read-only-query'),
+  createExcludePolicy('template-resources:get', 'read-only-query'),
+  createExcludePolicy('template-resources:list', 'read-only-query'),
   createExcludePolicy('template:get-amount-split-rules', 'read-only-query'),
   createExcludePolicy('template:get-bill-split-config', 'read-only-query'),
   createExcludePolicy('template:get-mappings', 'read-only-query'),

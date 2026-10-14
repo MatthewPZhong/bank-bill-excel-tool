@@ -29,6 +29,11 @@ const SUPPORT_ACTION_POLICIES = Object.freeze([
     channel: 'error:export-last',
     kind: 'support-action',
     reason: 'diagnostic-report-export'
+  }),
+  Object.freeze({
+    channel: 'template-resources:save-as',
+    kind: 'support-action',
+    reason: 'user-document-export'
   })
 ]);
 
@@ -336,6 +341,8 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'scenarios:list',
     'settings:get-enabled-modules',
     'settings:get-ui-style',
+    'template-resources:get',
+    'template-resources:list',
     'template:get-amount-split-rules',
     'template:get-bill-split-config',
     'template:get-mappings',

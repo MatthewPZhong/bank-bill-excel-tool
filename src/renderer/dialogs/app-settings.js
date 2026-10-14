@@ -2,7 +2,7 @@
   'use strict';
   function createAppSettingsDialogs({ api, modalBridge, modules: MODULES, ui }) {
     const { escapeHtml, createConfirmDialog, getDarkModeController, mountAppearanceSettings,
-      applyAppUpdateActionResult, applyAppUpdateStatus, getAppUpdateStatus,
+      mountTemplateFiles, applyAppUpdateActionResult, applyAppUpdateStatus, getAppUpdateStatus,
       refreshOpenAppUpdateDialog, restartAndInstallAppUpdate } = ui;
 function archiveCenterBatchId(batch) {
   return String(batch?.internalId ?? batch?.batchId ?? batch?.id ?? '');
@@ -307,6 +307,7 @@ function createArchiveCenterPreviewApi() {
 
 function createAppUpdateSettingsDialog(options = {}) {
   const archiveCenterApi = options.archiveCenterApi || null;
+  const templateFilesEnabled = typeof mountTemplateFiles === 'function';
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   const dialog = document.createElement('section');
@@ -376,6 +377,10 @@ function createAppUpdateSettingsDialog(options = {}) {
           <span class="app-settings-nav-icon" aria-hidden="true">▤</span>
           <span>存档中心</span>
         </button>
+        ${templateFilesEnabled ? `<button class="app-settings-nav-item" type="button" data-tab="templates" aria-controls="templateFilesPane" aria-current="false">
+          <span class="app-settings-nav-icon" aria-hidden="true">▦</span>
+          <span>模板文件</span>
+        </button>` : ''}
         <button class="app-settings-nav-item" type="button" data-tab="appearance" aria-controls="appearancePane" aria-current="false">
           <span class="app-settings-nav-icon" aria-hidden="true">☾</span>
           <span>外观设置</span>
@@ -509,6 +514,7 @@ function createAppUpdateSettingsDialog(options = {}) {
             </div>
           </section>
         </section>
+        ${templateFilesEnabled ? '<section id="templateFilesPane" class="app-settings-pane template-center-pane" data-pane="templates" aria-labelledby="templateCenterHeading" hidden></section>' : ''}
 
         <footer class="dialog-actions right app-settings-footer">
           <div class="app-settings-footer-group" data-footer="update">
@@ -527,6 +533,8 @@ function createAppUpdateSettingsDialog(options = {}) {
   let appearanceView = null;
   let settingsHandle = null;
   const archivePane = dialog.querySelector('[data-pane="archive"]');
+  const templatePane = dialog.querySelector('[data-pane="templates"]');
+  let templateFilesView = null;
   const archiveBrowser = dialog.querySelector('[data-archive-view="browser"]');
   const archiveSettingsView = dialog.querySelector('[data-archive-view="settings"]');
   const updateFooter = dialog.querySelector('[data-footer="update"]');
@@ -1257,9 +1265,11 @@ function createAppUpdateSettingsDialog(options = {}) {
     archiveSettingsView.hidden = !archiveState.archiveSettingsOpen;
   }
 
-  function setSettingsTab(tab) {
+  function setSettingsTab(requestedTab) {
     const wasArchive = archiveState.activeTab === 'archive';
-    archiveState.activeTab = ['archive', 'appearance'].includes(tab) ? tab : 'update';
+    const wasTemplates = archiveState.activeTab === 'templates';
+    const tab = requestedTab === 'templates' && !templatePane ? 'update' : requestedTab;
+    archiveState.activeTab = ['archive', 'templates', 'appearance'].includes(tab) ? tab : 'update';
     dialog.querySelectorAll('[data-tab]').forEach((button) => {
       const active = button.dataset.tab === archiveState.activeTab;
       button.classList.toggle('is-active', active);
@@ -1268,7 +1278,13 @@ function createAppUpdateSettingsDialog(options = {}) {
     updatePane.hidden = archiveState.activeTab !== 'update';
     appearancePane.hidden = archiveState.activeTab !== 'appearance';
     archivePane.hidden = archiveState.activeTab !== 'archive';
+    if (templatePane) templatePane.hidden = archiveState.activeTab !== 'templates';
     updateFooter.hidden = archiveState.activeTab !== 'update';
+    if (archiveState.activeTab === 'templates') {
+      if (!wasTemplates) templateFilesView?.enter();
+    } else if (wasTemplates) {
+      templateFilesView?.leave();
+    }
     if (archiveState.activeTab !== 'archive') {
       setArchiveSettingsOpen(false);
     } else {
@@ -1639,6 +1655,10 @@ function createAppUpdateSettingsDialog(options = {}) {
     onMount(handle, scope) {
       settingsHandle = handle;
       appearanceView = themeController ? mountAppearanceSettings(appearancePane, themeController) : null;
+      if (templatePane) {
+        templateFilesView = mountTemplateFiles(templatePane, { getParentHandle: () => settingsHandle });
+        scope.onDispose(() => templateFilesView?.destroy());
+      }
   const archiveApi = archiveCenterApi || api.archiveCenter;
   if (archiveApi && typeof archiveApi.onStorageMigrationProgress === 'function') {
     unsubscribeStorageMigration = archiveApi.onStorageMigrationProgress((progress) => {
