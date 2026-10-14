@@ -48,7 +48,7 @@
 
 - `current` 为内置版本：`{ id: 'v1', label: 'V1', source: 'builtin', current: true, fileName, size, appVersion, tasks: [] }`；详情另带 `sha256`、`versions`、`tasks`。
 - `capabilities`：`saveAs`（文件可读即为 true）、`importVersion/setCurrent/deleteVersion/restoreDefault`（当前均为 false）、`importReason`（目标设计可替换的 6 个模板为「版本导入尚未开放」，其余为清单中的具体原因）。
-- 另存为由 Main 弹出保存框，默认文件名为原文件名，写出前拒绝覆盖内置文件本身。
+- 另存为由 Main 弹出保存框，默认文件名为原文件名，写出前拒绝覆盖内置文件本身。写出时先写入目标所在目录的临时文件再替换目标；写出或替换失败时原有文件不变，临时文件随即清理。
 
 ### 3.2 后端阶段待实现（Renderer 已按此消费）
 
@@ -85,8 +85,8 @@ Renderer 仅在对应方法存在且 `capabilities` 允许时启用入口：
 | Unit | `tests/unit/main-process/template-resources-service.test.js` | 清单与 assets 一致、运行时契约表头与代码常量一致、VCC 锁定哈希、枚举口径、能力与另存为边界、读取失败恢复后重新读取 |
 | Unit | `tests/unit/main-process/template-resources-ipc.test.js` | 执行 `main.js`/`preload.js` 真实注册代码：方法与通道、列表/详情委托、另存为先校验再弹框、取消不写入 |
 | Unit | IPC 清单与基线测试、Renderer 边界登记、设置弹窗源码合同 | 通道数量与分类（基线 fixture 不改）、active Renderer 边界 20 → 21、导航顺序 |
-| Integration | `scripts/integration/template-resources-save-as.js` | 真实 assets 另存为字节一致、拒绝覆盖内置文件、未知资源 |
-| Renderer 生命周期 | `scripts/renderer-lifecycle/fixtures/template-files.js` | 真实 DOM：懒加载、筛选与高亮、详情标签、另存为、能力置灰、子弹窗栈、导入/冲突/启用/删除（受控 API）、晚到响应与释放；真实按键下激活模板、切换 Sheet、跳转关联模板后焦点不丢失 |
+| Integration | `scripts/integration/template-resources-save-as.js` | 真实 assets 另存为字节一致、拒绝覆盖内置文件、未知资源、覆盖已有文件时写出或替换失败保留原文件 |
+| Renderer 生命周期 | `scripts/renderer-lifecycle/fixtures/template-files.js` | 真实 DOM：懒加载、筛选与高亮、详情标签、另存为、能力置灰、子弹窗栈、导入/冲突/启用/删除（受控 API）、晚到响应与释放；真实按键下激活模板、切换 Sheet、跳转关联模板后焦点不丢失；列表返回前输入搜索时保持加载提示，返回后定位到命中的工作表 |
 
 人工检查：真实应用中打开设置 → 模板文件，浅色/深色、最小窗口 1080×760。
 

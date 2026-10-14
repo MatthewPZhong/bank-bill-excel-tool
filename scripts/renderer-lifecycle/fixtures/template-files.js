@@ -242,6 +242,21 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.equal(await js('tf.detailTitle()'), '业务OP账单');
   });
 
+  await test('列表返回前输入搜索：保持加载提示，返回后首个命中模板定位到命中的工作表', async () => {
+    await setup({ hold: ['list'] });
+    await js(`tf.search('网关-清算网络'); void 0;`);
+    // 越过 160ms 搜索防抖，确认筛选已执行。
+    await js('new Promise((resolve) => setTimeout(resolve, 250))');
+    assert.equal(await js(`tf.text('[data-role="template-list"]')`), '正在加载模板…');
+    await js('tf.hold.list.resolve(); void 0;');
+    await waitFor(`tf.detailTitle() === '资金对账导出不平'`, '首个命中模板');
+    assert.deepEqual(await js(`({ selected: tf.q('.template-center-item.is-active')?.dataset.resourceId,
+      sheet: tf.q('[data-action="select-sheet"][aria-pressed="true"]')?.textContent.split(' · ')[0],
+      mark: tf.q('.template-center-tab-panel mark')?.textContent })`),
+    { selected: 'prefund-unbalanced', sheet: '平账结果', mark: '网关-清算网络' });
+    assert.deepEqual(await js('__testErrors'), []);
+  });
+
   await test('导入新版本：选择、预检、保存并启用后关闭子弹窗并重读列表', async () => {
     await setup({ writes: true });
     await selectResource('dup-recall-mail');
