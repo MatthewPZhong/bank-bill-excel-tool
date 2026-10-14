@@ -315,6 +315,8 @@
       }
 
       function applyFilters() {
+        // 列表返回前只记下条件，由 loadList 按条件选中，避免以空列表替换加载提示。
+        if (!state.loaded) return;
         showFeedback('');
         const visible = sortedVisible();
         if (!visible.some((resource) => resource.id === state.selectedId)) {
@@ -350,7 +352,7 @@
           if (!visible.some((resource) => resource.id === state.selectedId)) {
             state.selectedId = visible[0]?.id || '';
             state.tab = 'fields';
-            state.sheetIndex = 0;
+            state.sheetIndex = matchingSheetIndex(visible[0]);
             state.detail = null;
           }
           renderList(visible);

@@ -89,7 +89,9 @@ function createTemplateResourceService({
   appVersion = '',
   readFile = fs.promises.readFile,
   stat = fs.promises.stat,
-  writeFile = fs.promises.writeFile
+  writeFile = fs.promises.writeFile,
+  rename = fs.promises.rename,
+  rm = fs.promises.rm
 } = {}) {
   if (!appRoot) throw new Error('模板文件服务缺少应用目录');
   const inspections = new Map();
@@ -199,9 +201,13 @@ function createTemplateResourceService({
     if (target.status !== 'success') return target;
     if (typeof targetPath !== 'string' || !path.isAbsolute(targetPath)) return { status: 'failed', message: '保存位置无效' };
     if (path.resolve(targetPath) === path.resolve(target.filePath)) return { status: 'failed', message: '不能覆盖内置模板' };
+    // 先写同目录临时文件再替换：用户确认覆盖已有文件时，写出或替换失败不会截断原文件。
+    const temporaryPath = `${targetPath}.${crypto.randomUUID()}.tmp`;
     try {
-      await writeFile(targetPath, await readFile(target.filePath));
+      await writeFile(temporaryPath, await readFile(target.filePath));
+      await rename(temporaryPath, targetPath);
     } catch (error) {
+      try { await rm(temporaryPath, { force: true }); } catch (_cleanupError) {}
       return { status: 'failed', message: `保存失败：${error && error.message ? error.message : '未知错误'}` };
     }
     return { status: 'success', filePath: targetPath, fileName: path.basename(targetPath) };

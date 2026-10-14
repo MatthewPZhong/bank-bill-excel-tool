@@ -1,5 +1,5 @@
 // 设置 · 模板文件「另存为」集成验证（真实随包模板与临时目录）
-//   覆盖：.xlsx / .xls 原样写出、覆盖用户已确认的目标、拒绝写回内置文件、
+//   覆盖：.xlsx / .xls 原样写出、覆盖用户已确认的目标、覆盖失败时保留原文件、拒绝写回内置文件、
 //         相对路径与未知资源/版本不落盘、写入失败返回结果而不抛错。
 //
 // 另存为由 Main 弹出保存框后调用 service.exportVersion；本脚本直接给定目标路径，验证写出的文件契约。
@@ -42,6 +42,29 @@ async function run() {
       fs.writeFileSync(target, 'old content');
       assert.equal((await service.exportVersion({ resourceId: 'dup-recall-mail', targetPath: target })).status, 'success');
       assert.equal(sha256(fs.readFileSync(target)), sha256(sourceBytes('assets/重复入金召回邮件模板.xlsx')));
+      assert.deepEqual(fs.readdirSync(temporary).filter((name) => name.endsWith('.tmp')), []);
+    }],
+    ['覆盖已有文件时写出或替换失败，原文件保持不变且不留临时文件', async () => {
+      const directory = fs.mkdtempSync(path.join(temporary, 'overwrite-'));
+      const target = path.join(directory, '用户文件.xlsx');
+      fs.writeFileSync(target, 'user document');
+      // 写到一半磁盘已满：替身先写出部分字节再报错。
+      const diskFull = createTemplateResourceService({ appRoot: ROOT, writeFile: async (file, bytes) => {
+        await fs.promises.writeFile(file, bytes.subarray(0, 16));
+        throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
+      } });
+      assert.deepEqual(await diskFull.exportVersion({ resourceId: 'dup-recall-mail', targetPath: target }),
+        { status: 'failed', message: '保存失败：ENOSPC: no space left on device, write' });
+      assert.equal(fs.readFileSync(target, 'utf8'), 'user document');
+      assert.deepEqual(fs.readdirSync(directory), ['用户文件.xlsx']);
+      // 目标被其他程序占用，替换失败。
+      const locked = createTemplateResourceService({ appRoot: ROOT, rename: async () => {
+        throw Object.assign(new Error('EBUSY: resource busy or locked, rename'), { code: 'EBUSY' });
+      } });
+      assert.deepEqual(await locked.exportVersion({ resourceId: 'dup-recall-mail', targetPath: target }),
+        { status: 'failed', message: '保存失败：EBUSY: resource busy or locked, rename' });
+      assert.equal(fs.readFileSync(target, 'utf8'), 'user document');
+      assert.deepEqual(fs.readdirSync(directory), ['用户文件.xlsx']);
     }],
     ['选择内置文件本身作为目标时拒绝写入，内置文件不变', async () => {
       const source = path.join(ROOT, 'assets', 'FundType枚举值.xlsx');
