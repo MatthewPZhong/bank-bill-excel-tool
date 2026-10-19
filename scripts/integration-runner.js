@@ -11,6 +11,7 @@
 //
 // v2.1.9 SR-policy-1（spec §12.2 / T32a）：runner 末尾把当前清单 in-place 写回 rules/integration-test-policy.md §七
 //   - 全 PASS 才更新（任一 FAIL → 跳过同步以免污染清单）
+//   - 只有耗时 / 时间戳变化不回写（避免每次运行都改动已跟踪文件）
 //   - 时间戳行 + DO NOT EDIT 注释
 //   - 同时把 markdown 表打到 stdout（CI / 本地都能看到）
 
@@ -102,9 +103,19 @@ function buildPolicyChecklistSection(results, { timestamp = formatChinaTimestamp
   }
   lines.push(`| **合计** | **${totalCases}** | **${totalAsserts}** | **${totalMs}** |`);
   lines.push('');
-  lines.push('> 同步策略：runner 末尾全 PASS 时 in-place 替换本章节；任一脚本 FAIL → 本章节不更新（避免被损坏数据覆盖）。');
+  lines.push('> 同步策略：runner 末尾全 PASS 时 in-place 替换本章节；只有耗时或时间戳变化时不改写；任一脚本 FAIL → 本章节不更新（避免被损坏数据覆盖）。');
   lines.push('');
   return lines.join('\n');
+}
+
+// 抹去 last-updated 时间戳与表格末列耗时，用于判断清单是否有实质变化
+//   脚本增删、用例数 / 断言数变化才回写；表头末列不是数字，不受影响
+function stripVolatileChecklistFields(section) {
+  return section
+    .replace(/last-updated: \S+ -->/, 'last-updated: -->')
+    .split('\n')
+    .map((line) => line.replace(/^(\|.*\|)\s*(?:\*\*)?\d+(?:\*\*)?\s*\|$/, '$1 - |'))
+    .join('\n');
 }
 
 // v2.1.9 SR-policy-1：ISO 时间戳 + 中国时区固定 +08:00（避免在不同 OS / 不同时区机器跑产生混乱差异）
@@ -144,19 +155,18 @@ function syncPolicyChecklist(results, { policyPath = POLICY_PATH, now = new Date
   // 定位 §七 章节：从 `## 七、` 开始到下一个 `## ` 章节标题（不含）或文件末
   //   注意：必须用非贪婪 + lookahead 到 `\n## `（避免误吃掉后续章节）
   const sectionRegex = /## 七、[\s\S]*?(?=\n## |$(?![\s\S]))/;
-  let updated;
-  if (sectionRegex.test(original)) {
-    updated = original.replace(sectionRegex, newSection);
-  } else {
+  const existingMatch = original.match(sectionRegex);
+  if (!existingMatch) {
     // 既有文件无 §七 → 不创造新章节（避免误位置）；仅警告
     console.warn(`[SR-policy-1] policy 文件无 §七 章节，跳过同步`);
     return { synced: false, reason: 'no-section-seven' };
   }
 
-  if (updated === original) {
-    // 内容完全一致 → 无写入需要（节省 git diff 噪音）
+  if (stripVolatileChecklistFields(existingMatch[0]) === stripVolatileChecklistFields(newSection)) {
+    // 仅耗时 / 时间戳不同 → 无写入需要（节省 git diff 噪音）
     return { synced: false, reason: 'no-change', section: newSection };
   }
+  const updated = original.replace(sectionRegex, newSection);
 
   try {
     fs.writeFileSync(policyPath, updated, 'utf8');
