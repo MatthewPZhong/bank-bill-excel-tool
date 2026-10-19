@@ -84,7 +84,7 @@ run().catch((e) => { console.error('FATAL', e); process.exit(1); });
 
 ## 四、新模块的硬约束
 
-**用户立项新业务模块时**，PM/Dev 必须：
+**立项新业务模块时**，须：
 
 - [ ] 在 `src/main-process/<module>-session.js` 或类似位置写业务逻辑
 - [ ] 在 `scripts/smoke/<module>.js` 写 smoke（单模块业务规则）
@@ -105,6 +105,7 @@ run().catch((e) => { console.error('FATAL', e); process.exit(1); });
 - 按文件名字母序串行跑（`spawnSync` 进程隔离）
 - 抓每个脚本 stdout 的 `N/N PASS` 字符串汇总
 - 任一 fail → 整体 `exit 1`
+- 全 PASS 时回写 §七；只有耗时或时间戳变化时不改写文件，避免每次运行都产生 diff（表中耗时为最近一次写入时的数据）
 
 **新加集成测试无需改 runner**：放到 `scripts/integration/` 下就自动被抓。
 
@@ -114,7 +115,7 @@ run().catch((e) => { console.error('FATAL', e); process.exit(1); });
 
 **发版前 hard gate**：
 - 任何一个 fail → 整个流程红 → 不能进入 GUI 手测 / 提 PR
-- 全 PASS 才有资格进入 `docs/iterations/<version>/manual-test-checklist.md` 跑 GUI 验证
+- 全 PASS 才进入 GUI 手测等人工验收；清单与结果记入本版 `changes/<版本>/` 记录或 PR（见 `rules/doc-archive-policy.md`）
 
 **版本号 bump 后必须跑一次**。
 
@@ -217,18 +218,18 @@ run().catch((e) => { console.error('FATAL', e); process.exit(1); });
 | `vcc-financial-op-result-workbook.js` | 9 | 9 | 1388 |
 | **合计** | **3140** | **3140** | **450290** |
 
-> 同步策略：runner 末尾全 PASS 时 in-place 替换本章节；任一脚本 FAIL → 本章节不更新（避免被损坏数据覆盖）。
+> 同步策略：runner 末尾全 PASS 时 in-place 替换本章节；只有耗时或时间戳变化时不改写；任一脚本 FAIL → 本章节不更新（避免被损坏数据覆盖）。
 
 ## 八、什么时候不写集成测试
 
 - 纯内部 helper / 算法（用 unit）
 - 单模块业务规则细节（用 smoke）
-- UI / IPC / Dialog 流程（用 manual-test-checklist GUI 手测）
+- UI / IPC / Dialog 的完整可见效果（用 GUI 手测或界面预览；弹窗宿主与生命周期装配已由 `renderer-lifecycle.js` 覆盖，它不替代 GUI 验收）
 - 性能验证（独立性能脚本，如 `scripts/test-vN.M.P-perf-*.js`）
 
 ## 九、参考
 
 - `CODEX.md`「验证与风险审查」
 - `rules/important-variables.md` 跨文件变更 review 配套
-- `docs/iterations/v2.1.8/manual-test-checklist.md` GUI 手测互补
+- `docs/iterations/v2.1.8/manual-test-checklist.md`：历史 GUI 手测清单示例（只读归档）
 - `package.json` scripts: `smoke` / `test:unit` / `test:integration` / `release-check`
