@@ -9,6 +9,7 @@
 | spec / TechDoc | 单分支版本 `changes/<版本>/`；多分支版本 `changes/<版本>/<分支名>/` | `save-spec` Skill |
 | 实施记录、审查与修复、验证证据 | 随所属版本或分支放在 `changes/<版本>/` 下 | `implementation-notes` Skill（实施记录） |
 | 本轮发布与集成记录 | `changes/<版本>/release.md`，或复用已有 PR / Release 记录 | `weekly-release` Skill |
+| 遗留项：未做、待核验、已知问题、顺延 | `knowledge/backlog.md`（当轮记录只引用编号） | 该文件「维护约定」 |
 | PR 说明 | GitHub PR 正文：范围、顺延项、依赖、验证与人工检查结果 | `weekly-release` 清单 D2 |
 | 发布文档 | `CHANGELOG.md`、`docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md` | `AGENTS.md`「约定与分支」 |
 | 文档范本 | `changes/templates/`、`docs/templates/` | `save-spec` Skill |
