@@ -11,6 +11,13 @@
 
 ## 未实施
 
+### B31（P3 · 顺延）managed 后台只读导出尚未接入模板版本
+
+- **来源**：v3.2.13 `feat/settings-template-versions`（`changes/v3.2.13/feat/settings-template-versions/techdoc.md` 第七节 L1、L2）
+- **影响**：设置 → 模板文件的用户版本只接入了生产在用的导出路径。资金对账、平盘的 managed 只读导出（`production.enabled: false`）仍按 `service.templatePath` 读内置模板，启用了用户版本时会在准备阶段拒绝（`assertManagedExportUsesBuiltinTemplate`）；VCC managed 导出（`writer-core / dispatch / artifact-evidence`）未接线，仍读 `assetsDir` 内置 Pending 模板。当前生产不受影响，但启用这些路径前若不处理，会出现拒绝导出或用户版本不生效
+- **关闭条件**：启用任一 managed 路径前，准备阶段按当前版本固定模板路径或字节并写入来源证据；VCC 还须让 `validateJoin` / `loadValidationContext` 使用同一版本；补对应回归测试
+- **目标版本**：未定（随 managed 导出启用）
+
 ### B25（P2）银行单 BillDate/ValueDate 真 Excel 日期单元格被读成序列号 → 输出三表显示数字（非回归 · 跨模块）
 
 - **来源**：2026-06-28 v3.0.12 迭代用户反馈 + 3 个复现实测 + 两份真实文件核验

@@ -973,6 +973,7 @@ td .muted { color: var(--muted); }
   background: var(--primary-soft);
   color: var(--primary, #174ea6);
 }
+.template-center-feedback.template-center-inline-alert { margin: 0 0 12px; }
 .template-center-browser {
   min-width: 0;
   min-height: 0;

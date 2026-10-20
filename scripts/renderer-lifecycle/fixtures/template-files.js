@@ -175,13 +175,13 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await selectResource('dup-recall-mail');
     assert.deepEqual(await js(`({ disabled: tf.q('[data-action="import"]').disabled, title: tf.q('[data-action="import"]').title,
       restore: !!tf.q('[data-action="restore-default"]'), meta: tf.text('.template-center-metadata') })`),
-    { disabled: true, title: '版本导入尚未开放', restore: false, meta: '读取方式运行时读取 当前版本V1 · 内置 使用模块重复入金匹配 更新时间随 v3.2.11' });
+    { disabled: true, title: '版本存储不可用', restore: false, meta: '读取方式运行时读取 当前版本V1 · 内置 使用模块重复入金匹配 更新时间随 v3.2.11' });
     await openTab('versions');
     assert.deepEqual(await js(`[...tf.overlay.querySelectorAll('.template-center-tab-panel tbody tr')].map((row) => ({
       label: row.cells[0].textContent.replace(/\\s+/g, ''), status: row.cells[3].textContent.trim(),
       actions: [...row.querySelectorAll('[data-action]')].map((button) => button.dataset.action) }))`),
     [{ label: 'V1内置', status: '当前', actions: ['save-as'] }]);
-    assert.equal(await js(`tf.text('.template-center-tab-panel .template-center-note')`), '版本导入尚未开放');
+    assert.equal(await js(`tf.text('.template-center-tab-panel .template-center-note')`), '版本存储不可用');
     await selectResource('vcc-result-template');
     assert.equal(await js(`tf.q('[data-action="import"]').title`), '文件受 SHA-256 锁定，需随应用版本更新');
     await openTab('info');
@@ -336,6 +336,30 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await waitFor('tf.host.getTop() === tf.handle');
     assert.deepEqual(await js('tf.last("delete")'), { resourceId: 'dup-recall-mail', versionId: 'v3' });
     assert.equal(await js(`tf.text('[data-role="template-feedback"]')`), '已删除 V3');
+    assert.deepEqual(await js('__testErrors'), []);
+  });
+
+  await test('不兼容的用户版本：版本行标出原因、不能启用；当前版本不兼容时详情顶部提示', async () => {
+    await setup({ writes: true, open: false });
+    await js(`(() => {
+      const detail = tf.data.details['dup-recall-mail'];
+      const v3 = detail.versions.find((version) => version.id === 'v3');
+      Object.assign(v3, { validation: 'failed', validationMessage: '与本版程序不兼容：表头：邮件模板表头不符合约定' });
+      const v4 = detail.versions.find((version) => version.id === 'v4');
+      Object.assign(v4, { validation: 'failed', validationMessage: '版本文件已被修改（SHA-256 不一致）' });
+      Object.assign(detail.current, { validation: 'failed', validationMessage: '版本文件已被修改（SHA-256 不一致）' });
+    })(); tf.open(); tf.q('[data-tab="templates"]').click(); void 0;`);
+    await waitFor('tf.q(\'[data-role="template-count"]\').textContent === "39 个" && !!tf.q(".template-center-detail-heading")', '模板列表与详情加载');
+    await selectResource('dup-recall-mail');
+    assert.equal(await js(`tf.text('.template-center-inline-alert')`),
+      '当前版本 V4 不可用：版本文件已被修改（SHA-256 不一致）。相关导出会中止，请恢复默认或导入兼容的新版本。');
+    await openTab('versions');
+    assert.deepEqual(await js(`[...tf.overlay.querySelectorAll('.template-center-tab-panel tbody tr')].slice(0, 2).map((row) => ({
+      status: row.cells[3].textContent.replace(/\\s+/g, ''), title: row.cells[3].querySelector('.template-center-status').title,
+      enable: row.querySelector('[data-action="set-current"]') ? { disabled: row.querySelector('[data-action="set-current"]').disabled, title: row.querySelector('[data-action="set-current"]').title } : null }))`), [
+      { status: '当前·不兼容', title: '版本文件已被修改（SHA-256 不一致）', enable: null },
+      { status: '不兼容', title: '与本版程序不兼容：表头：邮件模板表头不符合约定', enable: { disabled: true, title: '与本版程序不兼容：表头：邮件模板表头不符合约定' } }
+    ]);
     assert.deepEqual(await js('__testErrors'), []);
   });
 

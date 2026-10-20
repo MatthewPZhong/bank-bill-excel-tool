@@ -1,8 +1,9 @@
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
-const { randomUUID } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const ExcelJS = require('exceljs');
 const PrintOptionsXform = require('exceljs/lib/xlsx/xform/sheet/print-options-xform');
 const WorkbookXform = require('exceljs/lib/xlsx/xform/book/workbook-xform');
@@ -56,12 +57,21 @@ function assertSubjectBudget(db, runId, subject, limits) {
   return { rows, bytes };
 }
 
-async function loadResultWorkbookTemplates(assetsDir) {
+// pendingTemplate：设置 → 模板文件由 Main 传入的当前版本 { versionId, sha256, bytes }；缺省时读 assetsDir 内置文件。
+async function loadResultWorkbookTemplates(assetsDir, pendingTemplate = null) {
   const resultContract = await loadResultTemplateContract({ templatePath: path.join(assetsDir, 'VCC财务OP校验', RESULT_TEMPLATE_FILE_NAME) });
-  const pendingTemplate = new ExcelJS.Workbook();
-  await pendingTemplate.xlsx.readFile(path.join(assetsDir, 'VCC财务OP校验', '移除归档Pending发生额计算表.xlsx'));
-  if (!pendingTemplate.worksheets[0]) throw new Error('移除归档Pending发生额计算模板缺少工作表');
-  return { resultContract, pendingTemplateSheet: pendingTemplate.worksheets[0] };
+  const pendingWorkbook = new ExcelJS.Workbook();
+  if (pendingTemplate) {
+    const bytes = Buffer.from(pendingTemplate.bytes || []);
+    if (createHash('sha256').update(bytes).digest('hex') !== pendingTemplate.sha256) {
+      throw Object.assign(new Error('Pending 计算表模板内容与版本记录不一致'), { code: 'vcc-pending-template-mismatch' });
+    }
+    await pendingWorkbook.xlsx.load(bytes);
+  } else {
+    await pendingWorkbook.xlsx.readFile(path.join(assetsDir, 'VCC财务OP校验', '移除归档Pending发生额计算表.xlsx'));
+  }
+  if (!pendingWorkbook.worksheets[0]) throw new Error('移除归档Pending发生额计算模板缺少工作表');
+  return { resultContract, pendingTemplateSheet: pendingWorkbook.worksheets[0] };
 }
 
 function loadExpectedResultSheet({ db, runId, descriptor, templates, limits }) {
@@ -208,14 +218,14 @@ async function writeExpectedSheet(session, expected, descriptor) {
 }
 
 async function writeResultWorkbook({ db, runId, outputPaths, assetsDir = path.resolve(__dirname, '../../assets'),
-  publicationStagingDirectory = null, abortSignal = null, resourceLimits = {}, beforeValidate = null,
+  pendingTemplate = null, publicationStagingDirectory = null, abortSignal = null, resourceLimits = {}, beforeValidate = null,
   beforeSubjectWrite = null, onProgress = null }) {
   const limits = resolveResultResourceLimits(resourceLimits);
   safePoint(abortSignal);
   if (!Array.isArray(outputPaths) || outputPaths.length !== 1 || typeof outputPaths[0] !== 'string'
       || path.extname(outputPaths[0]).toLowerCase() !== '.xlsx') throw new TypeError('正式结果必须且只能提供一个 .xlsx 输出目标');
   const targetPath = path.resolve(outputPaths[0]);
-  const templates = await loadResultWorkbookTemplates(assetsDir);
+  const templates = await loadResultWorkbookTemplates(assetsDir, pendingTemplate);
   const transaction = `vcc_result_${randomUUID().replace(/-/g, '')}`;
   db.exec(`SAVEPOINT ${transaction}`);
   try {
@@ -284,5 +294,35 @@ async function writeResultWorkbook({ db, runId, outputPaths, assetsDir = path.re
   } finally { db.exec(`ROLLBACK TO ${transaction}; RELEASE ${transaction}`); }
 }
 
+const PROBE_SUBJECT = '模板预检';
+const PROBE_PENDING_DATA = Object.freeze({
+  pendingSummary: [{ subject: PROBE_SUBJECT, channel_name: '预检渠道', currency_mismatch: 0, flow_currency: 'USD',
+    pending_currency: 'USD', recon_type: '预检', flow_amount: '1.00', pending_amount: '1.00' }],
+  pendingTotals: [{ subject: PROBE_SUBJECT, currency: 'USD', amount: '0.00' }]
+});
+
+// 设置 → 模板文件导入预检：用正式导出的流式 Writer 与校验器写出一个 Pending Sheet，
+// 写不出或校验不通过的 Pending 模板在导入时即拒绝，不留到导出时才失败。
+async function probePendingTemplate({ pendingTemplateSheet, directory = os.tmpdir() }) {
+  const probeRoot = fs.mkdtempSync(path.join(directory, 'vcc-pending-template-probe-'));
+  const descriptor = Object.freeze({ ordinal: 0, subjectIndex: 0, kind: 'result-pending', subject: PROBE_SUBJECT, name: 'Pending' });
+  const sheetPlan = Object.freeze({ sheets: [descriptor], subjectCount: 1, sheetCount: 1, resultRevision: 0 });
+  const loadExpectedSheet = () => ({
+    sheet: buildPendingSheet(new ExcelJS.Workbook(), pendingTemplateSheet, PROBE_SUBJECT, PROBE_PENDING_DATA, { sheetName: descriptor.name }),
+    encodedCells: new Set()
+  });
+  try {
+    const filePath = path.join(probeRoot, 'probe.xlsx');
+    await withBoundedWorkbook({ filePath }, async (session) => {
+      session.writer.creator = '网银账单生成小助手';
+      preserveQuotedPrintAreas(session.writer);
+      await writeExpectedSheet(session, loadExpectedSheet(), descriptor);
+    });
+    await validateResultWorkbook({ filePath, sheetPlan, loadExpectedSheet, signal: null, limits: DEFAULT_RESULT_RESOURCE_LIMITS });
+  } finally {
+    fs.rmSync(probeRoot, { recursive: true, force: true });
+  }
+}
+
 module.exports = { writeResultWorkbook, DEFAULT_RESULT_RESOURCE_LIMITS, resolveResultResourceLimits,
-  loadResultWorkbookTemplates, loadExpectedResultSheet, assertSubjectBudget };
+  loadResultWorkbookTemplates, loadExpectedResultSheet, assertSubjectBudget, probePendingTemplate };

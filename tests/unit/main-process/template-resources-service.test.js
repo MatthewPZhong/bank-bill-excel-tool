@@ -127,7 +127,13 @@ test('合并单元格覆盖的行计入内容行数', async () => {
   assert.ok(rowsWithContent > 10);
 });
 
-test('当前只开放另存为：导入与版本操作全部关闭并给出原因', async () => {
+test('可替换范围固定为 7 个有导入契约的模板', () => {
+  assert.deepEqual(TEMPLATE_RESOURCES.filter((item) => item.replace.allowed).map((item) => item.id).sort(), [
+    'bank-statement', 'dup-recall-mail', 'fund-type-enum', 'gateway-recon', 'position-bank', 'prefund-unbalanced', 'vcc-pending-calc'
+  ]);
+});
+
+test('未接入版本存储时只开放另存为：导入与版本操作关闭并给出原因', async () => {
   const { status, resources, excluded } = await listedResources();
   assert.equal(status, 'success');
   assert.equal(resources.length, TEMPLATE_RESOURCES.length);
@@ -138,7 +144,7 @@ test('当前只开放另存为：导入与版本操作全部关闭并给出原�
     assert.deepEqual(resource.capabilities, {
       saveAs: true,
       importVersion: false,
-      importReason: definition.replace.allowed ? '版本导入尚未开放' : definition.replace.reason,
+      importReason: definition.replace.allowed ? '版本存储不可用' : definition.replace.reason,
       setCurrent: false,
       deleteVersion: false,
       restoreDefault: false

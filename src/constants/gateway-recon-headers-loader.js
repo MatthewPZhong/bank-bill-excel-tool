@@ -39,8 +39,8 @@ const headersCacheByPath = new Map();
 
 // 解析 xlsx 第一个 sheet 的表头行（第 0 行）→ 有序去空去重数组，并剔除 __CUSTOM__ sentinel。
 //   返回空数组表示「表头不可用」（空表 / 全空列），由调用方决定是否 fallback。
-function readHeadersFromWorkbook(filePath) {
-  const workbook = XLSX.readFile(filePath);
+//   v3.2.13：设置 → 模板文件导入预检复用同一解析（入参为已读取的 SheetJS workbook）。
+function parseGatewayReconHeadersWorkbook(workbook) {
   const firstSheetName = workbook.SheetNames[0];
   if (!firstSheetName) return [];
   const sheet = workbook.Sheets[firstSheetName];
@@ -61,6 +61,10 @@ function readHeadersFromWorkbook(filePath) {
     values.push(value);
   }
   return values;
+}
+
+function readHeadersFromWorkbook(filePath) {
+  return parseGatewayReconHeadersWorkbook(XLSX.readFile(filePath));
 }
 
 // 加载网关账单表头枚举（有序数组）。
@@ -98,5 +102,6 @@ module.exports = {
   CUSTOM_VALUE_SENTINEL,
   getDefaultGatewayReconHeadersPath,
   loadGatewayReconHeaders,
+  parseGatewayReconHeadersWorkbook,
   resetGatewayReconHeadersCache
 };

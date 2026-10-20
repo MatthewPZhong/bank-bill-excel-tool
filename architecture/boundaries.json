@@ -5018,9 +5018,17 @@
       },
       "allowedApiFields": {
         "api": [
+          "templateResources.commitImport",
+          "templateResources.deleteVersion",
+          "templateResources.discardImport",
           "templateResources.get",
           "templateResources.list",
-          "templateResources.saveAs"
+          "templateResources.listChanges",
+          "templateResources.onChanged",
+          "templateResources.pickImportFile",
+          "templateResources.prepareImport",
+          "templateResources.saveAs",
+          "templateResources.setCurrentVersion"
         ],
         "modalBridge": [
           "closeModal",
@@ -8398,6 +8406,76 @@
       },
       "reason": "模板文件页合入 release/v3.2.12：release 侧在 52b92b55 之后的提交仍持有原 ui 集合，按合并前末端 fa89dec2 补登同一放宽；设置弹窗只接收视图挂载函数，模板 API 仍由独立的模板文件工厂持有。",
       "designDoc": "changes/v3.2.12/feat/settings-template-files/techdoc.md"
+    },
+    {
+      "sourceCommit": "0f890fb2da3546f39e53b82d296694ff30d5db7d",
+      "sourcePolicyBlob": "77bb6897e48972eebd8df1c56eb87ee43b360681",
+      "boundaryId": "renderer-dialog-template-files",
+      "field": "allowedApiFields",
+      "from": {
+        "api": [
+          "templateResources.get",
+          "templateResources.list",
+          "templateResources.saveAs"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "createConfirmDialog",
+          "escapeHtml"
+        ]
+      },
+      "to": {
+        "api": [
+          "templateResources.commitImport",
+          "templateResources.deleteVersion",
+          "templateResources.discardImport",
+          "templateResources.get",
+          "templateResources.list",
+          "templateResources.listChanges",
+          "templateResources.onChanged",
+          "templateResources.pickImportFile",
+          "templateResources.prepareImport",
+          "templateResources.saveAs",
+          "templateResources.setCurrentVersion"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "createConfirmDialog",
+          "escapeHtml"
+        ]
+      },
+      "reason": "设置 → 模板文件接入后端版本管理：模板文件工厂新增导入新版本（选择文件、预检、放弃、提交）、启用/恢复默认、删除版本、变更记录与变更通知 8 个 templateResources 方法；命名空间仍只由该工厂持有，设置弹窗不直接接触。",
+      "designDoc": "changes/v3.2.13/feat/settings-template-versions/techdoc.md"
     }
   ]
 }

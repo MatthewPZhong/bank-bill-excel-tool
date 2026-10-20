@@ -30,8 +30,8 @@ function getDefaultFundTypeEnumPath() {
 const enumCacheByPath = new Map();
 
 // 解析 xlsx 第一个 sheet 第一列（跳表头）→ 有序去空去重数组
-function readEnumFromWorkbook(filePath) {
-  const workbook = XLSX.readFile(filePath);
+//   v3.2.13：设置 → 模板文件导入预检复用同一解析（入参为已读取的 SheetJS workbook）。
+function parseFundTypeEnumWorkbook(workbook) {
   const firstSheetName = workbook.SheetNames[0];
   if (!firstSheetName) return [];
   const sheet = workbook.Sheets[firstSheetName];
@@ -50,6 +50,10 @@ function readEnumFromWorkbook(filePath) {
     values.push(value);
   }
   return values;
+}
+
+function readEnumFromWorkbook(filePath) {
+  return parseFundTypeEnumWorkbook(XLSX.readFile(filePath));
 }
 
 // 加载 FundType 枚举（有序数组）。失败/缺失 → 返回空数组（降级，不抛错）。
@@ -83,5 +87,6 @@ module.exports = {
   FUND_TYPE_ENUM_FILE_NAME,
   getDefaultFundTypeEnumPath,
   loadFundTypeEnum,
+  parseFundTypeEnumWorkbook,
   resetFundTypeEnumCache
 };

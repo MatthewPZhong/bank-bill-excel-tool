@@ -111,6 +111,19 @@ function applyTextFormats(row, headers) {
   });
 }
 
+// 模板校验与写出共用：设置 → 模板文件导入预检调用同一函数，保证口径一致。
+function validateResultTemplateWorkbook(workbook) {
+  const sheet = workbook.getWorksheet(BANK_SHEET_NAME);
+  if (!sheet) {
+    throw new PositionReconciliationError(
+      'position-template-sheet-missing',
+      `结果模板缺少 sheet「${BANK_SHEET_NAME}」`
+    );
+  }
+  assertHeaderRow(sheet, POSITION_BANK_HEADERS);
+  return sheet;
+}
+
 async function writeResultWorkbook({
   templatePath,
   outputPath,
@@ -125,14 +138,7 @@ async function writeResultWorkbook({
   }
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(templatePath);
-  const sheet = workbook.getWorksheet(BANK_SHEET_NAME);
-  if (!sheet) {
-    throw new PositionReconciliationError(
-      'position-template-sheet-missing',
-      `结果模板缺少 sheet「${BANK_SHEET_NAME}」`
-    );
-  }
-  assertHeaderRow(sheet, POSITION_BANK_HEADERS);
+  const sheet = validateResultTemplateWorkbook(workbook);
   if (sheet.rowCount > 1) sheet.spliceRows(2, sheet.rowCount - 1);
   applyTextColumnFormats(sheet, POSITION_BANK_HEADERS);
   const fundTypeColumn = POSITION_BANK_HEADERS.indexOf('FundType') + 1;
@@ -244,6 +250,7 @@ function readResultWorkbook(filePath) {
 }
 
 module.exports = {
+  validateResultTemplateWorkbook,
   writeResultWorkbook,
   writeTableWorkbook,
   writeLinkedWorkbook,
