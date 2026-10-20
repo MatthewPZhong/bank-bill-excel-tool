@@ -253,11 +253,17 @@
         const modules = modulesOf(resource);
         const moduleText = modules.length === 1 ? moduleName(modules[0]) : `${modules.length} 个模块`;
         const user = resource.current?.source === 'user';
+        // 当前用户版本不可用时在列表中直接标出，原因放在悬停提示中。
+        const incompatible = user && resource.current.validation === 'failed';
+        const tagState = incompatible
+          ? ` data-state="failed" title="${escapeHtml(resource.current.validationMessage || '与本版程序不兼容')}"`
+          : '';
+        const tagText = user ? `${resource.current.label}${incompatible ? ' · 不兼容' : ''}` : '内置';
         return `
           <button class="template-center-item${active ? ' is-active' : ''}" type="button" data-resource-id="${escapeHtml(resource.id)}" aria-current="${active ? 'true' : 'false'}">
             <span class="template-center-item-row">
               <strong title="${escapeHtml(resource.fileName)}">${escapeHtml(resource.name)}</strong>
-              <span class="template-center-version-tag" data-source="${user ? 'user' : 'builtin'}">${user ? escapeHtml(resource.current.label) : '内置'}</span>
+              <span class="template-center-version-tag" data-source="${user ? 'user' : 'builtin'}"${tagState}>${escapeHtml(tagText)}</span>
             </span>
             <span class="template-center-item-row">
               <span class="template-center-status" data-tone="${mode.tone}">${escapeHtml(mode.label)}</span>

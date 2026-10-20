@@ -339,8 +339,10 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(await js('__testErrors'), []);
   });
 
-  await test('不兼容的用户版本：版本行标出原因、不能启用；当前版本不兼容时详情顶部提示', async () => {
-    await setup({ writes: true, open: false });
+  await test('不兼容的用户版本：列表标签与版本行标出原因、不能启用；当前版本不兼容时详情顶部提示（浅色/深色）', async () => {
+    for (const theme of ['light', 'dark']) {
+    // 加载生产样式，核对标签在两种主题下都使用危险色。
+    await setup({ writes: true, open: false, layoutOptions: { width: 1080, height: 760, theme } });
     await js(`(() => {
       const detail = tf.data.details['dup-recall-mail'];
       const v3 = detail.versions.find((version) => version.id === 'v3');
@@ -348,9 +350,23 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       const v4 = detail.versions.find((version) => version.id === 'v4');
       Object.assign(v4, { validation: 'failed', validationMessage: '版本文件已被修改（SHA-256 不一致）' });
       Object.assign(detail.current, { validation: 'failed', validationMessage: '版本文件已被修改（SHA-256 不一致）' });
+      const item = tf.data.resources.find((resource) => resource.id === 'dup-recall-mail');
+      Object.assign(item.current, { validation: 'failed', validationMessage: '版本文件已被修改（SHA-256 不一致）' });
     })(); tf.open(); tf.q('[data-tab="templates"]').click(); void 0;`);
     await waitFor('tf.q(\'[data-role="template-count"]\').textContent === "39 个" && !!tf.q(".template-center-detail-heading")', '模板列表与详情加载');
+    const tag = (id) => js(`(() => { const element = tf.q('[data-resource-id="${id}"] .template-center-version-tag');
+      return { text: element.textContent, state: element.dataset.state || '', title: element.title, color: getComputedStyle(element).color }; })()`);
+    const dangerColor = await js(`(() => { const probe = document.createElement('span'); probe.style.color = 'var(--danger)';
+      document.body.appendChild(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; })()`);
+    const incompatibleTag = await tag('dup-recall-mail');
+    const builtinTag = await tag('fund-type-enum');
+    assert.deepEqual({ text: incompatibleTag.text, state: incompatibleTag.state, title: incompatibleTag.title },
+      { text: 'V4 · 不兼容', state: 'failed', title: '版本文件已被修改（SHA-256 不一致）' });
+    assert.deepEqual({ text: builtinTag.text, state: builtinTag.state }, { text: '内置', state: '' });
+    assert.equal(incompatibleTag.color, dangerColor, `${theme}：不兼容标签使用危险色`);
+    assert.notEqual(builtinTag.color, dangerColor, `${theme}：内置标签不使用危险色`);
     await selectResource('dup-recall-mail');
+    assert.equal(await tag('dup-recall-mail').then((value) => value.state), 'failed', '选中后仍保留不兼容标记');
     assert.equal(await js(`tf.text('.template-center-inline-alert')`),
       '当前版本 V4 不可用：版本文件已被修改（SHA-256 不一致）。相关导出会中止，请恢复默认或导入兼容的新版本。');
     await openTab('versions');
@@ -361,6 +377,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       { status: '不兼容', title: '与本版程序不兼容：表头：邮件模板表头不符合约定', enable: { disabled: true, title: '与本版程序不兼容：表头：邮件模板表头不符合约定' } }
     ]);
     assert.deepEqual(await js('__testErrors'), []);
+    }
   });
 
   await test('有变更记录接口时显示入口，记录可跳回对应模板；关闭设置后退订', async () => {

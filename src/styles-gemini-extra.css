@@ -1154,6 +1154,11 @@ td .muted { color: var(--muted); }
   font-weight: 600;
 }
 .template-center-item.is-active .template-center-version-tag[data-source="user"] { background: var(--panel); }
+.template-center-version-tag[data-state="failed"],
+.template-center-item.is-active .template-center-version-tag[data-state="failed"] {
+  background: var(--danger-soft, #fce8e6);
+  color: var(--danger);
+}
 .template-center-status {
   display: inline-flex;
   align-items: center;

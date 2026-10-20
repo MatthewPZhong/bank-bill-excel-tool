@@ -55,7 +55,7 @@ v3.2.12 的「设置 → 模板文件」页只接了只读查询与另存为，�
 | `src/main-process/import-dialog-state.js` | 新增导入目录记忆 scope `template-resources` |
 | `src/main-process/archive-center/task-policy-registry.js`、`execution-descriptors/legacy-task-policies.js` | 新通道分类登记 |
 | `src/preload.js` | `templateResources` 新增 7 个 invoke 方法与 `onChanged` |
-| `src/renderer/dialogs/template-files.js`、`src/styles-gemini-extra.css` | 版本行「不兼容」状态与原因、不兼容版本不能启用、当前版本不兼容时详情顶部提示 |
+| `src/renderer/dialogs/template-files.js`、`src/styles-gemini-extra.css` | 当前版本不兼容时列表标签显示「Vn · 不兼容」（危险色，悬停显示原因）与详情顶部提示；版本行「不兼容」状态与原因；不兼容版本不能启用 |
 | `src/renderer/dialogs/scenarios.js` | C2/C3 配置弹窗每次打开时重新拉取枚举（保留旧值供首帧渲染） |
 | `architecture/boundaries.json` | `renderer-dialog-template-files.allowedApiFields.api` 新增 8 个方法，登记 policyChanges |
 
@@ -155,7 +155,7 @@ v3.2.12 的「设置 → 模板文件」页只接了只读查询与另存为，�
 | Unit | `vcc-financial-op-result-workbook.test.js`、`vcc-financial-op-result-export-service.test.js` | 传入版本字节按该样式写出并通过正式校验；SHA 不符拒绝；服务取租约、交字节、结束释放，模板不可用时不启动 Writer |
 | Unit | IPC 清单与基线测试 | 通道数量与分类 |
 | Integration | `scripts/integration/template-resources-versions.js` | 真实主库迁移 + 真实 writer：导入并启用后经资金对账、重复入金、平盘、VCC 结果 Worker 导出，输出采用用户版本样式且表头/数据不变；恢复默认；不兼容版本报指引错误；重建服务后状态保持 |
-| Renderer 生命周期 | `scripts/renderer-lifecycle/fixtures/template-files.js` | 新增「不兼容」状态、不能启用、顶部提示 |
+| Renderer 生命周期 | `scripts/renderer-lifecycle/fixtures/template-files.js` | 新增「不兼容」状态：列表标签（浅色与深色下为危险色）、版本行、不能启用、顶部提示 |
 
 人工检查：真实应用中 设置 → 模板文件 完成导入、启用、导出核对、恢复默认、删除，并查看变更记录。
 
@@ -169,6 +169,32 @@ v3.2.12 的「设置 → 模板文件」页只接了只读查询与另存为，�
   - `npm run test:integration`：86/86 脚本通过（含新增 `template-resources-versions.js` 6/6、`template-resources-save-as.js` 7/7）
 - 首轮全量集成中 `position-startup-task-recovery.js` 失败（`getTemplateResourceService is not defined`）：其 harness 在 `Function` 中执行 Main 的 `getPositionReconciliationService`，未提供新依赖。已在 `tests/helpers/position-startup-recovery-harness.js` 注入空来源替身，复跑后全量通过。
 - 全量单测之后又调整了 `contracts.js`（隐藏列、遮盖格式、相近取值提示），受影响的模板单测（34 项）已复跑通过，lint 与架构检查也已复跑。
-- Renderer 生命周期 `template-files` 16/16 通过，含新增「不兼容」用例，以及 1080×760 浅色、深色和 150% 缩放的无横向溢出检查。
+- Renderer 生命周期 `template-files` 16/16 通过，含「不兼容」用例（列表标签、版本行、顶部提示；浅色与深色），以及 1080×760 浅色、深色和 150% 缩放的无横向溢出检查。
 - 对账专项（`reconciliation-blindspot-pass`）：资金对账、平盘输出的金额为文本，数字格式不改变取值；VCC 金额列格式由程序固定。隐藏列、遮盖格式与 FundType 相近取值已加预检提示，结论见第五节。
-- 未执行：真实应用中的人工操作检查（`npm start` 会对本机真实 userData 主库执行迁移，未在本分支授权范围内）；Windows 实机 GUI 检查仍挂 backlog B26。
+- Windows 实机 GUI 检查未做，仍挂 backlog B26。
+
+### 9.2 真实应用走查（2026-10-20，macOS 本机）
+
+启动方式：`electron .`，用 `APP_USER_DATA_DIR` / `APP_DOCUMENTS_DIR` 指向临时目录，不触及本机真实数据。`NODE_OPTIONS=--require` 加载走查钩子，钩子只做两件事：
+
+- 打开 / 保存对话框返回预设路径（沿用 v3.2.12 复现 harness 的做法），并记录每次调用；
+- 固定 `os.freemem` 为 6 GiB。本机 `os.freemem` 只计完全空闲页，未固定时业务 OP 升级预检读到 244 MiB 并阻止启动，与 v3.2.12 发布记录是同一个既有问题。
+
+界面经远程调试协议在真实 DOM 上点击、读取并截图。重复入金的导入、运行、导出经 `window.desktopApi` 调真实 IPC。
+
+| 步骤 | 结果 |
+| --- | --- |
+| 设置 → 模板文件 | 39 个模板；可替换模板的「导入新版本」可用，变更记录入口出现 |
+| FundType 导入（新增 1 个取值）→ 保存并启用 | 预检通过，显示 `+ TemplateWalk-新增`；V2 成为当前版本，文件落在隔离 userData；时间按本机时间显示 |
+| 资金对账 → 场景管理 → 内置 C2 场景「outbound改标为outbound Fail」 | FundType 下拉含新增取值；恢复默认后再次打开，下拉回到 12 个内置值 |
+| 资金对账导出不平导入表头错误的文件 | 预检判 fail，原因与写出端校验一致，两个保存按钮置灰；重新选择正确文件 → 仅保存 → 在「版本」中启用 |
+| 重启应用 | 两个 V2 仍为当前版本 |
+| 重复入金召回邮件模板导入宽列版并启用 → 重复入金导入 MPT、银行与单据 → 运行 → 导出 | 输出「邮件模板」A 列宽 36（内置 19.66），表头与数据不变；活动日志记录「使用用户版本 V2」与 SHA 前 12 位 |
+| 恢复默认后再导出 | A 列宽回到 19.66 |
+| 另存为用户版本 | 默认文件名为导入时的原文件名，另存文件、版本文件与原文件 SHA-256 一致 |
+| 改动当前版本文件（追加字节） | 详情顶部提示不可用，版本行「当前 · 不兼容」并给出原因 |
+| 恢复默认 → 删除 V2 | 确认后删除，版本目录清空 |
+| FundType 导入删除 `outbound` 的文件 | 按真实场景配置判 fail「已被场景使用：outbound」 |
+| 变更记录 | 8 条，与操作顺序、版本变化一致 |
+
+走查期间应用日志无报错。warning 日志中只有新库首次启动的迁移提示，以及前置资金对账、重复入金的 usage-stats「unregistered function」（既有登记缺口，与本次改动无关）。走查发现：当前版本不兼容时，左侧列表的版本标签仍只显示「V2」。已补上：标签改为「V2 · 不兼容」，使用危险色，悬停显示原因。Renderer 生命周期「不兼容」用例在浅色和深色主题下核对了标签文字、原因和颜色，`template-files` 16/16 通过。
