@@ -320,7 +320,8 @@ async function probePendingTemplate({ pendingTemplateSheet, directory = os.tmpdi
     });
     await validateResultWorkbook({ filePath, sheetPlan, loadExpectedSheet, signal: null, limits: DEFAULT_RESULT_RESOURCE_LIMITS });
   } finally {
-    fs.rmSync(probeRoot, { recursive: true, force: true });
+    // 清理失败（如 Windows 上文件被杀毒软件短暂占用）只留下系统临时目录中的残留，不覆盖试写结论。
+    try { fs.rmSync(probeRoot, { recursive: true, force: true }); } catch (_cleanupError) { /* 由系统临时目录清理 */ }
   }
 }
 

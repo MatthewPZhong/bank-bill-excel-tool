@@ -380,6 +380,42 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     }
   });
 
+  await test('复核未完成的用户版本：标为暂不可用（警示色），提示稍后重试，仍可点启用重试（浅色/深色）', async () => {
+    for (const theme of ['light', 'dark']) {
+    await setup({ writes: true, open: false, layoutOptions: { width: 1080, height: 760, theme } });
+    await js(`(() => {
+      const message = '兼容复核未完成：样式：运行环境异常（ENOSPC: no space left on device），未能完成检查，请稍后重试';
+      const detail = tf.data.details['dup-recall-mail'];
+      const v3 = detail.versions.find((version) => version.id === 'v3');
+      Object.assign(v3, { validation: 'unverified', validationMessage: message });
+      const v4 = detail.versions.find((version) => version.id === 'v4');
+      Object.assign(v4, { validation: 'unverified', validationMessage: message });
+      Object.assign(detail.current, { validation: 'unverified', validationMessage: message });
+      const item = tf.data.resources.find((resource) => resource.id === 'dup-recall-mail');
+      Object.assign(item.current, { validation: 'unverified', validationMessage: message });
+    })(); tf.open(); tf.q('[data-tab="templates"]').click(); void 0;`);
+    await waitFor('tf.q(\'[data-role="template-count"]\').textContent === "39 个" && !!tf.q(".template-center-detail-heading")', '模板列表与详情加载');
+    const message = '兼容复核未完成：样式：运行环境异常（ENOSPC: no space left on device），未能完成检查，请稍后重试';
+    const tag = await js(`(() => { const element = tf.q('[data-resource-id="dup-recall-mail"] .template-center-version-tag');
+      return { text: element.textContent, state: element.dataset.state || '', title: element.title, color: getComputedStyle(element).color }; })()`);
+    const colorOf = (value) => js(`(() => { const probe = document.createElement('span'); probe.style.color = '${value}';
+      document.body.appendChild(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; })()`);
+    assert.deepEqual({ text: tag.text, state: tag.state, title: tag.title }, { text: 'V4 · 暂不可用', state: 'unverified', title: message });
+    assert.equal(tag.color, await colorOf('var(--warning, #a15c00)'), `${theme}：暂不可用标签使用警示色`);
+    assert.notEqual(tag.color, await colorOf('var(--danger)'), `${theme}：暂不可用不使用危险色`);
+    await selectResource('dup-recall-mail');
+    assert.equal(await js(`tf.text('.template-center-inline-alert')`), `当前版本 V4 暂不可用：${message}。相关导出会中止，请稍后重试。`);
+    await openTab('versions');
+    assert.deepEqual(await js(`[...tf.overlay.querySelectorAll('.template-center-tab-panel tbody tr')].slice(0, 2).map((row) => ({
+      status: row.cells[3].textContent.replace(/\\s+/g, ''), tone: row.cells[3].querySelector('.template-center-status').dataset.tone,
+      enable: row.querySelector('[data-action="set-current"]') ? { disabled: row.querySelector('[data-action="set-current"]').disabled, title: row.querySelector('[data-action="set-current"]').title } : null }))`), [
+      { status: '当前·暂不可用', tone: 'locked', enable: null },
+      { status: '暂不可用', tone: 'locked', enable: { disabled: false, title: message } }
+    ]);
+    assert.deepEqual(await js('__testErrors'), []);
+    }
+  });
+
   await test('有变更记录接口时显示入口，记录可跳回对应模板；关闭设置后退订', async () => {
     await setup({ writes: true });
     assert.equal(await js('tf.count("subscribe")'), 1);

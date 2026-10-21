@@ -23,6 +23,7 @@ const {
   parseGatewayReconHeadersWorkbook
 } = require('../../constants/gateway-recon-headers-loader');
 const { GATEWAY_RECON_SIGNATURE } = require('../../constants/table-signatures');
+const { declaredRange, sheetCells } = require('../../constants/sheetjs-sparse-cells');
 const { MAX_EXCEL_ROW_HEIGHT } = require('../vcc-financial-op-writer');
 const { probePendingTemplate } = require('../vcc-financial-op-result-workbook-writer');
 
@@ -34,6 +35,15 @@ const VCC_PENDING_HEADERS = Object.freeze([
 ]);
 
 const errorText = (error) => (error && error.message ? String(error.message) : '未知错误');
+// 文件系统等运行环境错误（Node 系统错误带 syscall）不代表模板不兼容：检查判 fail，但结果标为 transient，不被缓存。
+//   读取层会把系统错误包装成业务错误（如 ZIP 读取的 BigTableImportError、校验收尾的 AggregateError），沿 cause 与 errors 查找。
+function isEnvironmentError(error, seen = new Set()) {
+  if (!error || typeof error !== 'object' || seen.has(error)) return false;
+  seen.add(error);
+  if (typeof error.syscall === 'string') return true;
+  if (Array.isArray(error.errors) && error.errors.some((item) => isEnvironmentError(item, seen))) return true;
+  return isEnvironmentError(error.cause, seen);
+}
 const cellText = (value) => {
   if (value === null || value === undefined) return '';
   if (typeof value === 'object' && Array.isArray(value.richText)) return value.richText.map((part) => part.text || '').join('');
@@ -44,13 +54,21 @@ const listText = (values, limit = 3) => `${values.slice(0, limit).join('、')}${
 
 function createCheckList() {
   const checks = [];
+  let transient = false;
   return {
     checks,
     add(label, status, detail) {
       checks.push({ group: 'file', label, status, detail });
     },
+    environment(label, error) {
+      transient = true;
+      checks.push({ group: 'file', label, status: 'fail', detail: `运行环境异常（${errorText(error)}），未能完成检查，请稍后重试` });
+    },
     get failed() {
       return checks.some((check) => check.status === 'fail');
+    },
+    get transient() {
+      return transient;
     }
   };
 }
@@ -111,12 +129,13 @@ function presentationWarnings(list, worksheet, headers, { label = '', rowNumbers
   if (masked.length) list.add('数字格式', 'warn', `${where}${listText(masked, 5)} 的数字格式会遮盖或替换显示内容`);
 }
 
+// 第 1 个 Sheet 声明范围首行的非空表头（只读实际存在的单元格，不按声明范围展开）。
 function firstSheetHeaderRow(workbook) {
   const name = workbook.SheetNames[0];
   const sheet = name ? workbook.Sheets[name] : null;
-  if (!sheet) return [];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-  return (Array.isArray(rows[0]) ? rows[0] : []).map((value) => String(value ?? '').trim());
+  const range = declaredRange(sheet);
+  if (!range) return [];
+  return sheetCells(sheet, { s: range.s, e: { r: range.s.r, c: range.e.c } }).map((cell) => String(cell.value).trim());
 }
 
 const prefundContract = {
@@ -194,6 +213,12 @@ const positionContract = {
     const extras = extraHeaders(sheet, POSITION_BANK_HEADERS.length);
     if (extras.length) list.add('表头', 'fail', `存在多余表头：${listText(extras)}；要求固定 ${POSITION_BANK_HEADERS.length} 列`);
     else list.add('表头', 'pass', `${POSITION_BANK_HEADERS.length} 列一致`);
+    // 写出时只保留表头，第 2 行起的内容（如把旧结果当模板导入）会被清空，不进入结果。
+    let dataRows = 0;
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber > 1 && row.values.some((value) => cellText(value).trim())) dataRows += 1;
+    });
+    if (dataRows) list.add('数据区', 'warn', `第 2 行起有 ${dataRows} 行内容，导出时清空，不会写入结果`);
     presentationWarnings(list, sheet, POSITION_BANK_HEADERS);
   }
 };
@@ -262,7 +287,8 @@ const vccPendingContract = {
       await probePendingTemplate({ pendingTemplateSheet: sheet });
       list.add('样式', 'pass', '表头行与数据行样式可正常写出');
     } catch (error) {
-      list.add('样式', 'fail', `无法按原样写出：${errorText(error)}`);
+      if (isEnvironmentError(error)) list.environment('样式', error);
+      else list.add('样式', 'fail', `无法按原样写出：${errorText(error)}`);
     }
     // 金额列 F/G/K 的数字格式由程序固定；列隐藏与其余列的第 2 行格式随模板写出。
     presentationWarnings(list, sheet, VCC_PENDING_HEADERS, { rowNumbers: [2] });
@@ -348,12 +374,14 @@ async function inspectContract(resourceId, bytes, context = {}) {
   try {
     extra = (await contract.check(workbook, list, fullContext)) || {};
   } catch (error) {
-    list.add('读取文件', 'fail', `文件无法解析：${errorText(error)}`);
+    if (isEnvironmentError(error)) list.environment('读取文件', error);
+    else list.add('读取文件', 'fail', `文件无法解析：${errorText(error)}`);
   }
   const failure = list.checks.find((check) => check.status === 'fail');
   return {
     checks: list.checks,
     ok: !failure,
+    transient: list.transient,
     message: failure ? `${failure.label}：${failure.detail}` : '',
     diff: extra.diff || { added: [], removed: [] },
     enumValues: extra.enumValues

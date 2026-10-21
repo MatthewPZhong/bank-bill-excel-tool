@@ -317,6 +317,45 @@ test('枚举与网关表头：比较取值变化，阻止移除已被场景引�
   assert.equal(used.checks.find((check) => check.label === '保留值').status, 'warn');
 });
 
+// 在第 1 个 Sheet 的最后一格写一个值：文件仍只有几 KB，但 SheetJS 的声明范围变成整张表（A1:XFD1048576）。
+async function addFarCell(filePath) {
+  const ExcelJS = require('exceljs');
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(filePath);
+  workbook.worksheets[0].getCell('XFD1048576').value = '远端单元格';
+  await workbook.xlsx.writeFile(filePath);
+  return filePath;
+}
+
+test('范围覆盖整张表的小文件：预检与结构描述只按实际单元格读取，不按声明范围展开', { timeout: 60000 }, async (t) => {
+  const env = setup(t);
+  const XLSX = require('xlsx');
+
+  const builtinFundTypes = (await env.service.get('fund-type-enum')).resource.enumValues;
+  const fundType = await addFarCell(await writeEnumWorkbook(path.join(env.files, 'fund-type-far.xlsx'),
+    [['FundType'], ...builtinFundTypes.map((value) => [value]), ['NewType']]));
+  assert.ok(fs.statSync(fundType).size < 64 * 1024);
+  const declared = XLSX.read(fs.readFileSync(fundType), { type: 'buffer' });
+  assert.equal(declared.Sheets[declared.SheetNames[0]]['!ref'], 'A1:XFD1048576', '声明范围覆盖整张表');
+  const fundTypePrepared = await prepare(env.service, 'fund-type-enum', fundType);
+  assert.deepEqual(fundTypePrepared.diff, { added: ['NewType'], removed: [] });
+
+  const gatewayHeaders = (await env.service.get('gateway-recon')).resource.sheets[0].headers;
+  const gateway = await addFarCell(await writeEnumWorkbook(path.join(env.files, 'gateway-far.xlsx'), [gatewayHeaders]));
+  const gatewayPrepared = await prepare(env.service, 'gateway-recon', gateway);
+  assert.equal(gatewayPrepared.verdict, 'pass', JSON.stringify(gatewayPrepared.checks));
+  assert.deepEqual(gatewayPrepared.diff, { added: [], removed: [] });
+
+  const position = await addFarCell(await restyledTemplate('assets/平盘银行对账单.xlsx', path.join(env.files, 'position-far.xlsx')));
+  const positionPrepared = await prepare(env.service, 'position-bank', position);
+  assert.equal(positionPrepared.verdict, 'warn', JSON.stringify(positionPrepared.checks));
+  assert.equal(positionPrepared.checks.find((check) => check.label === '数据区').detail, '第 2 行起有 1 行内容，导出时清空，不会写入结果');
+  await env.service.commitImport({ importToken: positionPrepared.importToken, enable: false });
+  const saved = (await env.service.get('position-bank')).resource.versions.find((version) => version.id === 'v2');
+  assert.equal(saved.sheets[0].headers.length, 49);
+  assert.equal(saved.sheets[0].dataRows, 1);
+});
+
 test('场景引用只收集 FundType 取值与 C3 网关字段，忽略自取值', () => {
   const references = collectScenarioReferences([
     { category: 'offset-bill-mark', config: { billTypes: [{ conditions: [{ field: 'FundType', value: ' Inbound ' }, { field: 'Channel', value: 'X' }] }] } },
@@ -342,6 +381,7 @@ test('当前用户版本文件被改动或缺失：标记不可用，导出取�
     error instanceof TemplateResourceUnavailableError
     && error.message === '模板「重复入金召回邮件模板」当前版本 V2 不可用：版本文件已被修改（SHA-256 不一致）。请在 设置 → 模板文件 恢复默认或重新导入'
   ));
+  assert.deepEqual((await env.service.get('dup-recall-mail')).resource.tasks, [], '取用失败时释放已登记的租约');
   assert.deepEqual(await env.service.resolveCurrentFile('dup-recall-mail'),
     { status: 'unavailable', message: '版本文件已被修改（SHA-256 不一致）', versionId: 'v2' });
 
@@ -381,6 +421,126 @@ test('升级后契约变化：已启用的用户版本保留为当前版本，�
   assert.equal(resource.current.validation, 'failed');
   assert.match(resource.current.validationMessage, /^与本版程序不兼容：表头：资金对账导出模板「不平结果」表头不兼容/);
   await assert.rejects(env.service.acquire('prefund-unbalanced'), /当前版本 V2 不可用：与本版程序不兼容.*请在 设置 → 模板文件 恢复默认或重新导入/);
+});
+
+test('取用当前版本时先登记租约：复核期间切换并删除该版本会被拦下', async (t) => {
+  const env = setup(t);
+  const file = await restyledTemplate('assets/重复入金召回邮件模板.xlsx', path.join(env.files, 'a.xlsx'), widenMailColumn);
+  await importVersion(env.service, 'dup-recall-mail', file);
+  const versionPath = env.versionFile('dup-recall-mail', 'v2');
+  // 重建服务（复核缓存为空），版本文件的 stat 停在闸门处，模拟复核仍在进行。
+  let openGate;
+  const gate = new Promise((resolve) => { openGate = resolve; });
+  const restarted = createTemplateResourceService({
+    appRoot: ROOT,
+    userDataRoot: env.userData,
+    store: env.store,
+    stat: async (filePath) => {
+      if (filePath === versionPath) await gate;
+      return fs.promises.stat(filePath);
+    }
+  });
+  const pending = restarted.acquire('dup-recall-mail', { label: '重复入金导出' });
+  assert.equal((await restarted.setCurrentVersion({ resourceId: 'dup-recall-mail', versionId: 'v1', expectedVersionId: 'v2' })).status, 'success');
+  assert.deepEqual(await restarted.deleteVersion({ resourceId: 'dup-recall-mail', versionId: 'v2' }),
+    { status: 'failed', message: '1 个任务正在使用该版本' });
+  openGate();
+  const lease = await pending;
+  assert.equal(lease.versionId, 'v2');
+  assert.ok(fs.existsSync(lease.filePath), '复核结束后版本文件仍在');
+  lease.release();
+  assert.deepEqual(await restarted.deleteVersion({ resourceId: 'dup-recall-mail', versionId: 'v2' }), { status: 'success' });
+});
+
+const tintPendingHeader = (workbook) => {
+  workbook.worksheets[0].getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEEFF' } };
+};
+
+test('兼容复核遇到运行环境异常：提示稍后重试且不缓存，环境恢复后重新复核通过', async (t) => {
+  const env = setup(t);
+  const file = await restyledTemplate('assets/VCC财务OP校验/移除归档Pending发生额计算表.xlsx', path.join(env.files, 'vcc.xlsx'), tintPendingHeader);
+  await importVersion(env.service, 'vcc-pending-calc', file);
+  const mkdtempSync = fs.mkdtempSync;
+  let failing = true;
+  t.mock.method(fs, 'mkdtempSync', (prefix, ...rest) => {
+    if (failing && String(prefix).includes('vcc-pending-template-probe-')) {
+      throw Object.assign(new Error(`ENOSPC: no space left on device, mkdtemp '${prefix}XXXXXX'`), { code: 'ENOSPC', syscall: 'mkdtemp' });
+    }
+    return mkdtempSync.call(fs, prefix, ...rest);
+  });
+
+  // 重建服务（复核缓存为空）：试写因环境异常失败，版本暂不可用，但不判为不兼容、不引导恢复默认。
+  const restarted = createTemplateResourceService({ appRoot: ROOT, userDataRoot: env.userData, store: env.store });
+  const blocked = (await restarted.get('vcc-pending-calc')).resource.current;
+  assert.equal(blocked.validation, 'unverified', '复核未完成，与不兼容区分');
+  assert.match(blocked.validationMessage, /^兼容复核未完成：样式：运行环境异常（ENOSPC/);
+  await assert.rejects(restarted.acquire('vcc-pending-calc', { withBytes: true }), (error) => (
+    error instanceof TemplateResourceUnavailableError && /请稍后重试$/.test(error.message) && !/恢复默认/.test(error.message)
+  ));
+  const other = await restyledTemplate('assets/VCC财务OP校验/移除归档Pending发生额计算表.xlsx', path.join(env.files, 'vcc-b.xlsx'), (workbook) => {
+    workbook.worksheets[0].getCell('B1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEDDCC' } };
+  });
+  const preflight = await prepare(restarted, 'vcc-pending-calc', other);
+  assert.match(preflight.checks.find((check) => check.label === '样式').detail, /^运行环境异常（ENOSPC.*请稍后重试$/);
+
+  failing = false;
+  assert.equal((await restarted.get('vcc-pending-calc')).resource.current.validation, 'passed', '环境恢复后重新复核');
+  const lease = await restarted.acquire('vcc-pending-calc', { withBytes: true });
+  assert.equal(lease.versionId, 'v2');
+  lease.release();
+});
+
+test('试写回读时的系统错误被读取层包装后仍判为运行环境异常，不缓存', async (t) => {
+  const env = setup(t);
+  const file = await restyledTemplate('assets/VCC财务OP校验/移除归档Pending发生额计算表.xlsx', path.join(env.files, 'vcc.xlsx'), tintPendingHeader);
+  await importVersion(env.service, 'vcc-pending-calc', file);
+  // 回读校验经 openZipWithEntries 打开临时文件，yauzl 的系统错误在那里被包装成 BigTableImportError。
+  const yauzl = require('yauzl');
+  const open = yauzl.open;
+  let failing = true;
+  let probeOpens = 0;
+  t.mock.method(yauzl, 'open', (filePath, options, callback) => {
+    if (String(filePath).includes('vcc-pending-template-probe-')) {
+      probeOpens += 1;
+      if (failing) {
+        callback(Object.assign(new Error(`EMFILE: too many open files, open '${filePath}'`), { code: 'EMFILE', syscall: 'open' }));
+        return;
+      }
+    }
+    open.call(yauzl, filePath, options, callback);
+  });
+
+  const restarted = createTemplateResourceService({ appRoot: ROOT, userDataRoot: env.userData, store: env.store });
+  const blocked = (await restarted.get('vcc-pending-calc')).resource.current;
+  assert.equal(probeOpens, 1);
+  assert.equal(blocked.validation, 'unverified', '复核未完成，与不兼容区分');
+  assert.match(blocked.validationMessage, /^兼容复核未完成：样式：运行环境异常（.*EMFILE/);
+
+  failing = false;
+  assert.equal((await restarted.get('vcc-pending-calc')).resource.current.validation, 'passed', '环境恢复后重新复核');
+  const afterRecheck = probeOpens;
+  assert.ok(afterRecheck > 1, '失败结果没有被缓存，恢复后重新试写');
+  await restarted.get('vcc-pending-calc');
+  assert.equal(probeOpens, afterRecheck, '通过的结果照常缓存');
+});
+
+test('VCC 试写后清理临时目录失败不覆盖预检结论', async (t) => {
+  const env = setup(t);
+  const rmSync = fs.rmSync;
+  const leftovers = [];
+  t.mock.method(fs, 'rmSync', (target, ...rest) => {
+    if (String(target).includes('vcc-pending-template-probe-')) {
+      leftovers.push(target);
+      throw Object.assign(new Error(`EBUSY: resource busy or locked, rmdir '${target}'`), { code: 'EBUSY', syscall: 'rmdir' });
+    }
+    return rmSync.call(fs, target, ...rest);
+  });
+  t.after(() => leftovers.forEach((target) => rmSync.call(fs, target, { recursive: true, force: true })));
+  const file = await restyledTemplate('assets/VCC财务OP校验/移除归档Pending发生额计算表.xlsx', path.join(env.files, 'vcc.xlsx'), tintPendingHeader);
+  const prepared = await prepare(env.service, 'vcc-pending-calc', file);
+  assert.equal(prepared.verdict, 'pass', JSON.stringify(prepared.checks));
+  assert.equal(prepared.checks.find((check) => check.label === '样式').status, 'pass');
+  assert.equal(leftovers.length, 1);
 });
 
 test('首次使用时清扫库中无记录的版本文件与写入残留，不动已登记版本与其他文件', async (t) => {

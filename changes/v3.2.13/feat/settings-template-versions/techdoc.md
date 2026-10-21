@@ -48,14 +48,15 @@ v3.2.12 的「设置 → 模板文件」页只接了只读查询与另存为，�
 | `src/main-process/template-resources/service.js` | 版本合并视图、兼容复核、租约 `acquire/source`、`resolveCurrentFile`、导入（`rememberPickedFile/prepareImport/discardImport/commitImport`）、`setCurrentVersion`、`deleteVersion`、`listChanges`、孤儿清扫 |
 | `src/main-process/template-resources/catalog.js` | `vcc-pending-calc` 改为可替换；头注释同步 |
 | `src/main-process/{pre-fund-reconciliation,duplicate-inbound-match,position-reconciliation}/service.js` | 构造参数新增模板来源；导出时取租约、`finally` 释放；未注入时沿用原固定路径 |
-| `src/main-process/duplicate-inbound-match/excel-writer.js`、`position-reconciliation/excel-io.js` | 抽出 `validateMailTemplateWorkbook`、`validateBankTemplateWorkbook`、`validateResultTemplateWorkbook`，写出与预检共用 |
-| `src/constants/fund-type-enum.js`、`gateway-recon-headers-loader.js` | 抽出 `parseFundTypeEnumWorkbook`、`parseGatewayReconHeadersWorkbook`，loader 与预检共用 |
-| `src/main-process/vcc-financial-op-service.js`、`-result-workbook-runner.js`、`-result-workbook-writer.js` | Pending 模板由 Main 读出字节交给 Worker；Writer 核对 SHA-256 后 `xlsx.load`；新增 `probePendingTemplate` 供预检 |
+| `src/main-process/duplicate-inbound-match/excel-writer.js`、`position-reconciliation/excel-io.js` | 抽出 `validateMailTemplateWorkbook`、`validateBankTemplateWorkbook`、`validateResultTemplateWorkbook`，写出与预检共用；平盘 `writeResultWorkbook` 写出前截断模板数据区（ExcelJS 4.4 `spliceRows` 删除末尾多行无效），先取消数据区合并单元格，再核对只剩表头 |
+| `src/constants/fund-type-enum.js`、`gateway-recon-headers-loader.js`、新增 `sheetjs-sparse-cells.js` | 抽出 `parseFundTypeEnumWorkbook`、`parseGatewayReconHeadersWorkbook`，loader 与预检共用；改为只读实际存在的单元格（取值口径同 `sheet_to_json({header:1, defval:''})`），声明范围再大也不逐格展开 |
+| `src/backend/xlsx/zip-reader.js` | `openZipWithEntries` 包装打开与解析错误时保留原始错误（`cause`），供调用方区分运行环境错误 |
+| `src/main-process/vcc-financial-op-service.js`、`-result-workbook-runner.js`、`-result-workbook-writer.js` | Pending 模板由 Main 读出字节交给 Worker；Writer 核对 SHA-256 后 `xlsx.load`；新增 `probePendingTemplate` 供预检，试写后临时目录清理失败不覆盖结论 |
 | `src/main.js` | 服务装配（主库、日志、变更广播）、7 个新 IPC、枚举 IPC 读当前版本、各模块注入来源、managed 路径守卫 |
 | `src/main-process/import-dialog-state.js` | 新增导入目录记忆 scope `template-resources` |
 | `src/main-process/archive-center/task-policy-registry.js`、`execution-descriptors/legacy-task-policies.js` | 新通道分类登记 |
 | `src/preload.js` | `templateResources` 新增 7 个 invoke 方法与 `onChanged` |
-| `src/renderer/dialogs/template-files.js`、`src/styles-gemini-extra.css` | 当前版本不兼容时列表标签显示「Vn · 不兼容」（危险色，悬停显示原因）与详情顶部提示；版本行「不兼容」状态与原因；不兼容版本不能启用 |
+| `src/renderer/dialogs/template-files.js`、`src/styles-gemini-extra.css` | 当前版本不兼容时列表标签显示「Vn · 不兼容」（危险色，悬停显示原因）与详情顶部提示；版本行「不兼容」状态与原因；不兼容版本不能启用。复核未完成（`unverified`）单独显示「暂不可用」（警示色），提示稍后重试，仍可点启用重试 |
 | `src/renderer/dialogs/scenarios.js` | C2/C3 配置弹窗每次打开时重新拉取枚举（保留旧值供首帧渲染） |
 | `architecture/boundaries.json` | `renderer-dialog-template-files.allowedApiFields.api` 新增 8 个方法，登记 policyChanges |
 
@@ -96,7 +97,8 @@ v3.2.12 的「设置 → 模板文件」页只接了只读查询与另存为，�
 ### 4.4 兼容复核与租约
 
 - 用户版本在 `list/get/acquire/setCurrentVersion` 时复核：文件存在、SHA-256 与记录一致、按当前代码契约检查（按资源与内容哈希缓存）。任一不满足即 `validation: 'failed'`（D1）。
-- `acquire(resourceId, {moduleId, label, withBytes})`：内置返回随包路径；用户版本先复核，不通过抛 `TemplateResourceUnavailableError`（code `template-resource-unavailable`），提示指向设置页。使用用户版本时写一条活动日志（模板、版本、SHA 前 12 位）。返回的租约在 `release()` 前保护该版本不被删除，并在「版本 / 使用方」中显示为任务使用中。
+- 复核或预检中途遇到运行环境错误（Node 系统错误，带 `syscall`，如临时目录不可写、ENOSPC、EMFILE、文件被占用；被读取层包装时沿 `cause` 与 `AggregateError.errors` 查找）时，该检查判 fail 但标为 transient：提示“兼容复核未完成…请稍后重试”，结果不缓存，下次复核重新执行；版本 DTO 的 `validation` 为 `unverified`（区别于不兼容的 `failed`），`acquire` 此时只提示稍后重试，不引导恢复默认或重新导入。VCC 试写结束后清理临时目录失败只留下系统临时目录残留，不改变试写结论。
+- `acquire(resourceId, {moduleId, label, withBytes})`：读出当前版本后、任何等待之前先登记租约，复核失败时释放；内置返回随包路径；用户版本复核不通过抛 `TemplateResourceUnavailableError`（code `template-resource-unavailable`），提示指向设置页。使用用户版本时写一条活动日志（模板、版本、SHA 前 12 位）。返回的租约在 `release()` 前保护该版本不被删除（包括复核进行期间），并在「版本 / 使用方」中显示为任务使用中。
 - `source(resourceId, moduleId)` 只向模块暴露 `acquire`。
 
 ## 五、预检契约（`contracts.js`）
@@ -108,7 +110,7 @@ v3.2.12 的「设置 → 模板文件」页只接了只读查询与另存为，�
 | `prefund-unbalanced` | ExcelJS 读入后调用写出端 `validateTemplateWorkbook`：5 个 Sheet 名称与顺序、每个 Sheet 表头逐列一致且无多余表头 |
 | `dup-recall-mail` | `validateMailTemplateWorkbook`：只有 1 个 Sheet、前 10 列表头一致；右侧多余表头 warn（不写入导出） |
 | `bank-statement` | `validateBankTemplateWorkbook`：含「渠道对账单」、前 46 列一致；多余表头 warn |
-| `position-bank` | `validateResultTemplateWorkbook`：含「渠道对账单」、前 49 列一致；另外两种情况判 fail：内置之外的 Sheet（整本模板会写进输出），以及多余非空表头（结果回读要求恰好 49 列） |
+| `position-bank` | `validateResultTemplateWorkbook`：含「渠道对账单」、前 49 列一致；另外两种情况判 fail：内置之外的 Sheet（整本模板会写进输出），以及多余非空表头（结果回读要求恰好 49 列）；第 2 行起有内容时 warn（如把旧结果当模板导入，写出时清空，不进入结果） |
 | `fund-type-enum` | 与运行时同口径解析；无取值 fail；与当前版本 diff；移除已保存场景引用的值（任意 `{field:'FundType', value}`）fail |
 | `gateway-recon` | 与运行时同口径解析；缺少 `GATEWAY_RECON_SIGNATURE.signatureHeaders` 任一项 fail；含 `__CUSTOM__` warn（已忽略）；移除 C3 场景引用的字段（`reconFields[].gwField`、`conditions[side=网关].field`、`assign.gwField`，自取值除外）fail |
 | `vcc-pending-calc` | 需有第 1 个 Sheet；第 1、2 行行高不超过 409.5；用正式导出的流式 Writer 与 `validateResultWorkbook` 试写一个 Pending Sheet（`probePendingTemplate`），写不出或校验不过 fail；附一条生效范围说明 |
@@ -119,6 +121,8 @@ v3.2.12 的「设置 → 模板文件」页只接了只读查询与另存为，�
 - FundType：新增取值与当前取值仅大小写或空格不同（下游规则按原值匹配，多半是笔误）。
 
 已存版本的兼容复核只跑契约检查（不含场景引用与重复版本检查）。
+
+结构描述（各 Sheet 表头、数据行数、枚举取值）与 FundType / 网关表头解析只遍历实际存在的单元格，数据行数按行区间求并集计算：`<dimension>` 声明或一个零散单元格覆盖整张表（如 `XFD1048576`）的小文件，不会让主进程按整张表展开。结构描述失败时预检判 fail，不发放可提交的暂存。
 
 ## 六、模块接入
 
@@ -148,14 +152,15 @@ v3.2.12 的「设置 → 模板文件」页只接了只读查询与另存为，�
 
 | 层 | 入口 | 覆盖 |
 | --- | --- | --- |
-| Unit | `tests/unit/main-process/template-resources-versions.test.js` | 预检与仅保存、启用/租约/冲突/恢复默认/删除、版本号不复用、预检期间版本变化冲突、重复内容、令牌过期与上限、7 类输出契约的 fail/warn、枚举与网关的场景引用、文件篡改与缺失、升级后契约变化（D1）、孤儿清扫与重建后状态保持、写库失败回滚 |
+| Unit | `tests/unit/main-process/template-resources-versions.test.js` | 预检与仅保存、启用/租约/冲突/恢复默认/删除、版本号不复用、预检期间版本变化冲突、重复内容、令牌过期与上限、7 类输出契约的 fail/warn、枚举与网关的场景引用、文件篡改与缺失、升级后契约变化（D1）、复核期间租约拦截删除、环境性失败（含读取层包装的系统错误）不缓存且恢复后重新复核、试写清理失败不覆盖结论、声明范围覆盖整张表的小文件、平盘模板数据区提示、孤儿清扫与重建后状态保持、写库失败回滚 |
+| Unit | `tests/unit/main-process/position-reconciliation-excel-io.test.js` | 模板数据区的旧行（含金额）、合并单元格与仅有样式的行在写出前全部清空，回读只含本次数据 |
 | Unit | `tests/unit/backend/database/template-resource-repository.test.js` | 建表幂等、事务内更新、冲突与 CHECK 失败整体回滚 |
 | Unit | `tests/unit/main-process/template-resources-consumers.test.js` | 三个输出服务取/放租约；模板不可用时不改动已有文件、不写出 |
 | Unit | `template-resources-service.test.js`、`template-resources-ipc.test.js` | 可替换范围固定 7 个；未接存储时能力关闭；preload 与 Main 通道一一对应，导入经选择框、广播与变更记录 |
 | Unit | `vcc-financial-op-result-workbook.test.js`、`vcc-financial-op-result-export-service.test.js` | 传入版本字节按该样式写出并通过正式校验；SHA 不符拒绝；服务取租约、交字节、结束释放，模板不可用时不启动 Writer |
 | Unit | IPC 清单与基线测试 | 通道数量与分类 |
 | Integration | `scripts/integration/template-resources-versions.js` | 真实主库迁移 + 真实 writer：导入并启用后经资金对账、重复入金、平盘、VCC 结果 Worker 导出，输出采用用户版本样式且表头/数据不变；恢复默认；不兼容版本报指引错误；重建服务后状态保持 |
-| Renderer 生命周期 | `scripts/renderer-lifecycle/fixtures/template-files.js` | 新增「不兼容」状态：列表标签（浅色与深色下为危险色）、版本行、不能启用、顶部提示 |
+| Renderer 生命周期 | `scripts/renderer-lifecycle/fixtures/template-files.js` | 新增「不兼容」状态：列表标签（浅色与深色下为危险色）、版本行、不能启用、顶部提示；「暂不可用」状态：警示色标签、稍后重试提示、仍可点启用 |
 
 人工检查：真实应用中 设置 → 模板文件 完成导入、启用、导出核对、恢复默认、删除，并查看变更记录。
 
@@ -198,3 +203,18 @@ v3.2.12 的「设置 → 模板文件」页只接了只读查询与另存为，�
 | 变更记录 | 8 条，与操作顺序、版本变化一致 |
 
 走查期间应用日志无报错。warning 日志中只有新库首次启动的迁移提示，以及前置资金对账、重复入金的 usage-stats「unregistered function」（既有登记缺口，与本次改动无关）。走查发现：当前版本不兼容时，左侧列表的版本标签仍只显示「V2」。已补上：标签改为「V2 · 不兼容」，使用危险色，悬停显示原因。Renderer 生命周期「不兼容」用例在浅色和深色主题下核对了标签文字、原因和颜色，`template-files` 16/16 通过。
+
+### 9.3 代码审查与修复（2026-10-20）
+
+两轮审查：先由 Claude 审查分支全部改动，再由 Codex 只读复审（含第一轮修复）。已修复以下 6 项，其余审查发现记为已知、本轮不修：
+
+| 来源 | 问题 | 修复 |
+| --- | --- | --- |
+| 第一轮 | `acquire` 复核完成后才登记租约，复核期间切换并删除该版本会删掉正在取用的文件 | 读出当前版本后、任何等待前登记租约，复核失败时释放 |
+| 第一轮 | 运行环境错误（临时目录不可写、文件被占用）被当作不兼容缓存，进程内一直拒绝导出；VCC 试写的临时目录清理失败会覆盖试写结论 | 环境错误标为 transient、不缓存；清理失败不再抛出 |
+| Codex P1（资金红线） | 平盘模板数据区的旧行（含金额）会和本次结果一起写出：ExcelJS 4.4 `spliceRows` 删除末尾多行无效，预检也不提示 | 写出前截断数据区、取消数据区合并单元格并核对只剩表头；预检对数据区内容 warn |
+| Codex P1 | 几 KB 的小文件只要有一个单元格落在 `XFD1048576`，结构描述就按整张表（约 172 亿格）展开，主进程耗尽内存；FundType / 网关表头解析对超大声明范围同样会展开 | 改为只遍历实际存在的单元格；结构描述失败时预检判 fail |
+| Codex P2 | 试写回读经 `openZipWithEntries` 时系统错误被包装，丢失 `syscall`，仍被当作不兼容缓存 | ZIP 读取层保留 `cause`；契约层沿 `cause` 与 `AggregateError.errors` 识别环境错误 |
+| Codex P3 | 复核未完成在界面上仍显示「不兼容」并引导恢复默认 | DTO 区分 `unverified`；界面显示「暂不可用」（警示色）、提示稍后重试、仍可点启用 |
+
+验证：新增与改动的回归用例在旧实现上均失败（声明范围覆盖整张表的用例除外：旧实现会耗尽内存，未在本机运行）。FundType / 网关解析与结构描述在 `assets/` 全部 39 个 xlsx 上与旧实现逐项比对一致。`npm run test:unit` 9660/9664（0 失败，4 项为既有条件跳过）；`npm run lint`、`npm run check:architecture` 通过；集成脚本 `template-resources-versions`、`template-resources-save-as`、`position-reconciliation-side-db-parity`、`position-startup-task-recovery`、`vcc-financial-op-result-workbook`、`big-table-import-engine`、`bank-statement-universal-import-routing` 通过；Renderer 生命周期 `template-files` 17/17 通过。全量 `npm run test:integration` 与 smoke 本轮未重跑。

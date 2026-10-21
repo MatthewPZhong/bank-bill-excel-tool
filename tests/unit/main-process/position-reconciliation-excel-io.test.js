@@ -174,6 +174,38 @@ test('49列结果只标黄实际改变的 FundType，并保持标识符文本格
   assert.equal(parsed.rows[0].row.FundType, 'Inbound&FX');
 });
 
+test('模板数据区的旧行、合并单元格与仅有样式的行在写出前全部清空，结果只含本次数据', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'position-excel-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 模拟把旧结果当作模板导入：两条旧数据（含金额）、数据区合并单元格、只设了样式的空行。
+  const templatePath = path.join(root, 'template-with-rows.xlsx');
+  const template = new ExcelJS.Workbook();
+  await template.xlsx.readFile(RESULT_TEMPLATE);
+  const templateSheet = template.getWorksheet(BANK_SHEET_NAME);
+  for (const [bizId, amount] of [['OLD-1', '100.00'], ['OLD-2', '200.00']]) {
+    const old = { ...resultRow(bizId, 'Inbound'), 'Credit Amount': amount };
+    templateSheet.addRow(POSITION_BANK_HEADERS.map((header) => old[header] ?? ''));
+  }
+  templateSheet.mergeCells('A4:B5');
+  templateSheet.getRow(9).getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEEFF' } };
+  await template.xlsx.writeFile(templatePath);
+
+  const outputPath = path.join(root, 'result.xlsx');
+  await writeResultWorkbook({
+    templatePath,
+    outputPath,
+    rows: [{ resultRow: { ...resultRow('BIZ-NEW', 'Inbound'), 'Credit Amount': '3.00' }, changed: false }]
+  });
+
+  const parsed = readResultWorkbook(outputPath);
+  assert.deepEqual(parsed.rows.map((item) => [item.row.BizId, item.row['Credit Amount']]), [['BIZ-NEW', '3.00']]);
+  const written = new ExcelJS.Workbook();
+  await written.xlsx.readFile(outputPath);
+  const sheet = written.getWorksheet(BANK_SHEET_NAME);
+  assert.equal(sheet.rowCount, 2, '结果从第 2 行起只有本次数据');
+  assert.deepEqual(Object.keys(sheet._merges), [], '数据区合并单元格已取消');
+});
+
 test('链接表零数据仍导出合法表头，49列表头被篡改时回导拒绝', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'position-excel-empty-'));
   const linkedPath = path.join(root, 'linked.xlsx');

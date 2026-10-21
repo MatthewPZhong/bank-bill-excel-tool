@@ -64,10 +64,13 @@ function openZipWithEntries(sourceFile, filePath, options = {}) {
   return new Promise((resolve, reject) => {
     yauzl.open(filePath, { lazyEntries: false, autoClose: false }, (err, zip) => {
       if (err) {
-        return reject(new BigTableImportError(
+        const error = new BigTableImportError(
           `${sourceFile}：文件读取失败 — ${err.message || String(err)}`,
           []
-        ));
+        );
+        // 保留原始错误：调用方据此区分运行环境错误（EMFILE、EACCES 等）与文件内容问题。
+        error.cause = err;
+        return reject(error);
       }
       const entries = new Map();
       let settled = false;
@@ -96,10 +99,12 @@ function openZipWithEntries(sourceFile, filePath, options = {}) {
         if (!settled) {
           settled = true;
           try { zip.close(); } catch (_) {}
-          reject(new BigTableImportError(
+          const error = new BigTableImportError(
             `${sourceFile}：xlsx 解析失败 — ${e.message || String(e)}`,
             []
-          ));
+          );
+          error.cause = e;
+          reject(error);
         }
       });
     });

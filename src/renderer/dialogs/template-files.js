@@ -45,6 +45,16 @@
   const extensionOf = (fileName) => (String(fileName || '').split('.').pop() || '').toLowerCase();
   const readModeOf = (resource) => READ_MODES[resource?.readMode] || UNKNOWN_READ_MODE;
   const errorText = (error, fallback) => (error && error.message ? String(error.message) : fallback);
+  // 用户版本在当前程序下不可用的两种情形：不兼容（契约不符、文件缺失或被改动，需恢复默认或重新导入）；
+  // 暂不可用（运行环境异常导致复核未完成，稍后会重新复核）。可用时返回 null。
+  const UNAVAILABLE = Object.freeze({
+    failed: { label: '不兼容', tone: 'danger', fallback: '与本版程序不兼容', alert: '不可用', advice: '请恢复默认或导入兼容的新版本' },
+    unverified: { label: '暂不可用', tone: 'locked', fallback: '兼容复核未完成，请稍后重试', alert: '暂不可用', advice: '请稍后重试' }
+  });
+  function availabilityOf(version) {
+    const kind = UNAVAILABLE[version?.validation];
+    return kind ? { state: version.validation, ...kind, title: version.validationMessage || kind.fallback } : null;
+  }
 
   function createTemplateFilesDialogs({ api, modalBridge, modules: MODULES, ui }) {
     const { createConfirmDialog } = ui;
@@ -170,6 +180,13 @@
         return [...new Set((resource.bindings || []).map((binding) => binding.moduleId))];
       }
 
+      // 当前版本不可用时详情顶部的提示：不兼容引导恢复默认或重新导入；复核未完成只提示稍后重试。
+      function currentAlertHtml(current) {
+        const unavailable = availabilityOf(current);
+        if (!unavailable) return '';
+        return `<div class="template-center-feedback template-center-inline-alert" data-tone="error" role="alert">当前版本 ${escapeHtml(current.label || '')} ${unavailable.alert}：${escapeHtml(unavailable.title)}。相关导出会中止，${unavailable.advice}。</div>`;
+      }
+
       function highlight(text) {
         const value = String(text ?? '');
         const index = state.query ? value.toLowerCase().indexOf(state.query.toLowerCase()) : -1;
@@ -254,11 +271,11 @@
         const moduleText = modules.length === 1 ? moduleName(modules[0]) : `${modules.length} 个模块`;
         const user = resource.current?.source === 'user';
         // 当前用户版本不可用时在列表中直接标出，原因放在悬停提示中。
-        const incompatible = user && resource.current.validation === 'failed';
-        const tagState = incompatible
-          ? ` data-state="failed" title="${escapeHtml(resource.current.validationMessage || '与本版程序不兼容')}"`
+        const unavailable = user ? availabilityOf(resource.current) : null;
+        const tagState = unavailable
+          ? ` data-state="${unavailable.state}" title="${escapeHtml(unavailable.title)}"`
           : '';
-        const tagText = user ? `${resource.current.label}${incompatible ? ' · 不兼容' : ''}` : '内置';
+        const tagText = user ? `${resource.current.label}${unavailable ? ` · ${unavailable.label}` : ''}` : '内置';
         return `
           <button class="template-center-item${active ? ' is-active' : ''}" type="button" data-resource-id="${escapeHtml(resource.id)}" aria-current="${active ? 'true' : 'false'}">
             <span class="template-center-item-row">
@@ -461,12 +478,14 @@
           const tasks = Array.isArray(version.tasks) ? version.tasks : [];
           const taskTitle = tasks.map((task) => `${task.id} ${task.state}`).join('、');
           // 用户版本不再符合当前程序契约（升级后或文件被改动）：保留为当前版本但标出原因，导出时由 Main 中止。
-          const incompatible = version.validation === 'failed';
-          const incompatibleTitle = escapeHtml(version.validationMessage || '与本版程序不兼容');
+          // 复核未完成（运行环境异常）单独标为暂不可用，仍可点“启用”重试。
+          const unavailable = availabilityOf(version);
+          const incompatible = unavailable?.state === 'failed';
+          const unavailableTitle = unavailable ? escapeHtml(unavailable.title) : '';
           let status;
-          if (version.current && incompatible) status = `<span class="template-center-status" data-tone="danger" title="${incompatibleTitle}">当前 · 不兼容</span>`;
+          if (version.current && unavailable) status = `<span class="template-center-status" data-tone="${unavailable.tone}" title="${unavailableTitle}">当前 · ${unavailable.label}</span>`;
           else if (version.current) status = '<span class="template-center-status" data-tone="active">当前</span>';
-          else if (incompatible) status = `<span class="template-center-status" data-tone="danger" title="${incompatibleTitle}">不兼容</span>`;
+          else if (unavailable) status = `<span class="template-center-status" data-tone="${unavailable.tone}" title="${unavailableTitle}">${unavailable.label}</span>`;
           else if (tasks.length) status = `<span class="template-center-status" data-tone="locked" title="${escapeHtml(taskTitle)}">任务使用中</span>`;
           else if (builtin) status = '<span class="template-center-status" data-tone="neutral">默认</span>';
           else status = '<span class="template-center-status" data-tone="off">可启用</span>';
@@ -480,7 +499,7 @@
           const actions = [
             `<button class="template-center-icon-button" type="button" data-action="save-as" data-version-id="${escapeHtml(version.id)}" title="另存为" aria-label="另存为 ${escapeHtml(version.label)}"${caps.saveAs === false ? ' disabled' : ''}>💾</button>`,
             caps.setCurrent && !version.current
-              ? `<button class="template-center-icon-button template-center-text-button" type="button" data-action="set-current" data-version-id="${escapeHtml(version.id)}" title="${incompatible ? incompatibleTitle : (builtin ? '恢复为内置版本' : '设为当前版本')}"${incompatible ? ' disabled' : ''}>启用</button>`
+              ? `<button class="template-center-icon-button template-center-text-button" type="button" data-action="set-current" data-version-id="${escapeHtml(version.id)}" title="${unavailable ? unavailableTitle : (builtin ? '恢复为内置版本' : '设为当前版本')}"${incompatible ? ' disabled' : ''}>启用</button>`
               : '',
             caps.deleteVersion && !builtin
               ? `<button class="template-center-icon-button template-center-icon-button-danger" type="button" data-action="delete-version" data-version-id="${escapeHtml(version.id)}" title="${escapeHtml(deleteReason)}" aria-label="${escapeHtml(deleteReason)}"${canDelete ? '' : ' disabled'}>×</button>`
@@ -491,7 +510,7 @@
               <td><strong>${escapeHtml(version.label)}</strong><div class="template-center-cell-sub">${builtin ? '内置' : '用户'}</div></td>
               <td>
                 <div class="template-center-file-name" title="${escapeHtml(version.fileName)}">${escapeHtml(version.fileName)}</div>
-                <div class="template-center-cell-sub">${escapeHtml(formatBytes(version.size))}${version.validation === 'warning' ? ' · 有提示项' : ''}${incompatible ? ` · <span title="${incompatibleTitle}">${escapeHtml(version.validationMessage || '不兼容')}</span>` : ''}</div>
+                <div class="template-center-cell-sub">${escapeHtml(formatBytes(version.size))}${version.validation === 'warning' ? ' · 有提示项' : ''}${unavailable ? ` · <span title="${unavailableTitle}">${escapeHtml(unavailable.title)}</span>` : ''}</div>
               </td>
               <td>${escapeHtml(versionTimeText(version))}</td>
               <td>${status}${statusSub}</td>
@@ -606,7 +625,7 @@
               ${caps.restoreDefault ? '<button class="template-center-action" type="button" data-action="restore-default" title="恢复为内置版本"><span class="template-center-action-icon" aria-hidden="true">↺</span>恢复默认</button>' : ''}
             </div>
           </div>
-          ${current.validation === 'failed' ? `<div class="template-center-feedback template-center-inline-alert" data-tone="error" role="alert">当前版本 ${escapeHtml(current.label || '')} 不可用：${escapeHtml(current.validationMessage || '与本版程序不兼容')}。相关导出会中止，请恢复默认或导入兼容的新版本。</div>` : ''}
+          ${currentAlertHtml(current)}
           <div class="template-center-metadata">
             <div><span>读取方式</span><strong class="template-center-status" data-tone="${mode.tone}">${escapeHtml(mode.label)}</strong></div>
             <div><span>当前版本</span><strong>${escapeHtml(current.label || '-')} · ${current.source === 'user' ? '用户版本' : '内置'}</strong></div>

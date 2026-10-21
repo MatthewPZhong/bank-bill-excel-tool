@@ -14,6 +14,7 @@ const {
   verdictOf
 } = require('./contracts');
 const { CUSTOM_VALUE_SENTINEL } = require('../../constants/gateway-recon-headers-loader');
+const { ALL_CELLS, sheetCells } = require('../../constants/sheetjs-sparse-cells');
 const { writeFileAtomicDurable } = require('../background-execution/durable-file');
 
 // 内置版本固定为 v1、随应用打包只读；用户版本 v2 起存 {userData}/template-resources/<resourceId>/<versionId>.xlsx，
@@ -37,46 +38,53 @@ function trimTail(values) {
   return copy;
 }
 
-// SheetJS 以 <dimension> 声明作为 !ref；部分模板的声明小于实际单元格（如 VCC 结果表），按实际单元格重算范围。
-function sheetRows(sheet) {
-  let lastRow = -1;
-  let lastColumn = -1;
-  for (const key of Object.keys(sheet)) {
-    if (key.startsWith('!')) continue;
-    const { r, c } = XLSX.utils.decode_cell(key);
-    if (r > lastRow) lastRow = r;
-    if (c > lastColumn) lastColumn = c;
+// SheetJS 以 <dimension> 声明作为 !ref；部分模板的声明小于实际单元格（如 VCC 结果表），这里按全部实际单元格计算（从 A1 起）。
+//   只遍历有值的单元格，不展开矩形：一个落在 XFD1048576 的零散单元格不会让主进程按整张表分配内存。
+function textCells(sheet) {
+  return sheetCells(sheet, ALL_CELLS)
+    .map((cell) => ({ r: cell.r, c: cell.c, text: cellText(cell.value) }))
+    .filter((cell) => cell.text);
+}
+
+// 某一行从 A 列起的文本（中间空列保留为空串，末尾空列去掉）。
+function rowTexts(cells, rowIndex) {
+  const row = [];
+  for (const cell of cells) {
+    if (cell.r === rowIndex) row[cell.c] = cell.text;
   }
-  if (lastRow < 0) return [];
-  const range = { s: { r: 0, c: 0 }, e: { r: lastRow, c: lastColumn } };
-  return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', blankrows: true, range })
-    .map((row) => trimTail(row.map(cellText)));
+  return trimTail(Array.from(row, (value) => value || ''));
 }
 
 // 枚举口径与 src/constants/fund-type-enum.js 一致：第 1 个 Sheet 第 1 列，跳过表头，去空去重保序。
-function firstColumnValues(rows) {
+function firstColumnValues(cells) {
   const values = [];
   const seen = new Set();
-  for (const row of rows.slice(1)) {
-    const value = row[0] || '';
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    values.push(value);
+  for (const cell of cells) {
+    if (cell.c !== 0 || cell.r === 0 || seen.has(cell.text)) continue;
+    seen.add(cell.text);
+    values.push(cell.text);
   }
   return values;
 }
 
-// 合并单元格只在左上角保存值；其覆盖的行在 Excel 中同样显示内容，计数时一并计入。
-function filledRowCount(sheet, rows, headerIndex) {
-  const filled = new Set();
-  rows.forEach((row, index) => {
-    if (row.length > 0) filled.add(index);
-  });
+// 表头以下有内容的行数。合并单元格只在左上角保存值；其覆盖的行在 Excel 中同样显示内容，计数时一并计入。
+//   按行区间求并集计数，不逐行展开（合并区域可以覆盖上百万行）。
+function filledRowCount(sheet, cells, headerIndex) {
+  const textAt = new Set(cells.map((cell) => `${cell.r}:${cell.c}`));
+  const intervals = cells.map((cell) => [cell.r, cell.r]);
   for (const merge of sheet['!merges'] || []) {
-    if (!(rows[merge.s.r] || [])[merge.s.c]) continue;
-    for (let index = merge.s.r; index <= merge.e.r; index += 1) filled.add(index);
+    if (textAt.has(`${merge.s.r}:${merge.s.c}`)) intervals.push([merge.s.r, merge.e.r]);
   }
-  return [...filled].filter((index) => index > headerIndex).length;
+  intervals.sort((a, b) => a[0] - b[0]);
+  let count = 0;
+  let counted = headerIndex;
+  for (const [start, end] of intervals) {
+    const from = Math.max(start, counted + 1);
+    if (end < from) continue;
+    count += end - from + 1;
+    counted = end;
+  }
+  return count;
 }
 
 function describeWorkbook(bytes, resource) {
@@ -85,13 +93,13 @@ function describeWorkbook(bytes, resource) {
   let enumValues = null;
   const sheets = workbook.SheetNames.map((name, index) => {
     const sheet = workbook.Sheets[name];
-    const rows = sheetRows(sheet);
-    if (resource.type === 'enum' && index === 0) enumValues = firstColumnValues(rows);
+    const cells = textCells(sheet);
+    if (resource.type === 'enum' && index === 0) enumValues = firstColumnValues(cells);
     return {
       name,
       headerRow: resource.headerRow,
-      headers: rows[headerIndex] || [],
-      dataRows: filledRowCount(sheet, rows, headerIndex)
+      headers: rowTexts(cells, headerIndex),
+      dataRows: filledRowCount(sheet, cells, headerIndex)
     };
   });
   return { sheets, enumValues };
@@ -247,6 +255,7 @@ function createTemplateResourceService({
   }
 
   // 契约复核只取决于文件内容与当前代码，按内容哈希缓存。
+  // 运行环境导致的失败（临时目录不可写、文件被占用等）不代表模板不兼容，不缓存，下次复核重试。
   async function contractOf(resource, bytes, digest) {
     const key = `${resource.id}:${digest}`;
     if (compatibility.has(key)) return compatibility.get(key);
@@ -254,8 +263,8 @@ function createTemplateResourceService({
     const result = await inspectContract(resource.id, bytes, {
       builtinSheetNames: (builtin.sheets || []).map((sheet) => sheet.name)
     });
-    const verdict = { ok: result.ok, message: result.message };
-    compatibility.set(key, verdict);
+    const verdict = { ok: result.ok, message: result.message, transient: result.transient === true };
+    if (!verdict.transient) compatibility.set(key, verdict);
     return verdict;
   }
 
@@ -284,9 +293,11 @@ function createTemplateResourceService({
       record = { filePath, signature, sha256: version.sha256, ok: false, message: '版本文件已被修改（SHA-256 不一致）' };
     } else {
       const contract = await contractOf(resource, bytes, digest);
-      record = { filePath, signature, sha256: version.sha256, ok: contract.ok, message: contract.ok ? '' : `与本版程序不兼容：${contract.message}` };
+      let message = '';
+      if (!contract.ok) message = contract.transient ? `兼容复核未完成：${contract.message}` : `与本版程序不兼容：${contract.message}`;
+      record = { filePath, signature, sha256: version.sha256, ok: contract.ok, transient: contract.transient, message };
     }
-    userInspections.set(cacheKey, record);
+    if (!record.transient) userInspections.set(cacheKey, record);
     return { ...record, bytes };
   }
 
@@ -324,7 +335,8 @@ function createTemplateResourceService({
       sha256: version.sha256,
       createdAt: localTimeText(version.createdAt),
       location: inspected.filePath,
-      validation: inspected.ok ? version.validation : 'failed',
+      // failed：不兼容（契约不符、文件缺失或被改动）；unverified：运行环境异常导致复核未完成，下次复核重试。
+      validation: inspected.ok ? version.validation : (inspected.transient ? 'unverified' : 'failed'),
       validationMessage: inspected.ok ? '' : inspected.message,
       sheets: Array.isArray(structure.sheets) ? structure.sheets : [],
       enumValues: Array.isArray(structure.enumValues) ? structure.enumValues : null,
@@ -446,55 +458,60 @@ function createTemplateResourceService({
     const resource = findResource(resourceId);
     if (!resource) throw new TypeError(`未知模板：${resourceId}`);
     const { versions, currentVersionId } = stateOf(readStore(), resource.id);
-    const name = fileNameOf(resource).replace(/\.xlsx?$/i, '');
-    let result;
-    if (currentVersionId === BUILTIN_VERSION_ID) {
-      const filePath = absolutePath(resource);
-      let bytes = null;
-      if (withBytes) {
-        try {
-          bytes = await readFile(filePath);
-        } catch (error) {
-          throw new TemplateResourceUnavailableError(`模板「${name}」内置版本读取失败：${errorText(error)}`, { resourceId });
-        }
-      }
-      result = { filePath, versionId: BUILTIN_VERSION_ID, label: 'V1', source: 'builtin', sha256: bytes ? sha256(bytes) : '', bytes };
-    } else {
-      const version = versions.find((item) => item.versionId === currentVersionId);
-      const inspected = await inspectUserVersion(resource, version);
-      const versionLabel = labelOf(version.versionId);
-      if (!inspected.ok) {
-        throw new TemplateResourceUnavailableError(
-          `模板「${name}」当前版本 ${versionLabel} 不可用：${inspected.message}。${SETTINGS_HINT}`,
-          { resourceId, versionId: version.versionId }
-        );
-      }
-      const bytes = withBytes ? (inspected.bytes || await readFile(inspected.filePath)) : null;
-      if (bytes && sha256(bytes) !== version.sha256) {
-        throw new TemplateResourceUnavailableError(
-          `模板「${name}」当前版本 ${versionLabel} 不可用：版本文件已被修改（SHA-256 不一致）。${SETTINGS_HINT}`,
-          { resourceId, versionId: version.versionId }
-        );
-      }
-      result = { filePath: inspected.filePath, versionId: version.versionId, label: versionLabel, source: 'user', sha256: version.sha256, bytes };
-      log({
-        level: 'info',
-        message: `模板文件：${name} 使用用户版本 ${versionLabel}`,
-        details: [`模块：${moduleId || '-'}`, `SHA-256：${version.sha256.slice(0, 12)}`]
-      });
-    }
+    // 读出当前版本后、任何等待之前登记租约：复核需要读文件、试写，期间切换并删除该版本会被租约拦下。
     leaseSequence += 1;
     const leaseId = leaseSequence;
-    leases.set(leaseId, { resourceId: resource.id, versionId: result.versionId, moduleId, label: label || `任务 ${leaseId}` });
+    leases.set(leaseId, { resourceId: resource.id, versionId: currentVersionId, moduleId, label: label || `任务 ${leaseId}` });
     let released = false;
-    return Object.freeze({
-      ...result,
-      release() {
-        if (released) return;
-        released = true;
-        leases.delete(leaseId);
+    const release = () => {
+      if (released) return;
+      released = true;
+      leases.delete(leaseId);
+    };
+    const name = fileNameOf(resource).replace(/\.xlsx?$/i, '');
+    let result;
+    try {
+      if (currentVersionId === BUILTIN_VERSION_ID) {
+        const filePath = absolutePath(resource);
+        let bytes = null;
+        if (withBytes) {
+          try {
+            bytes = await readFile(filePath);
+          } catch (error) {
+            throw new TemplateResourceUnavailableError(`模板「${name}」内置版本读取失败：${errorText(error)}`, { resourceId });
+          }
+        }
+        result = { filePath, versionId: BUILTIN_VERSION_ID, label: 'V1', source: 'builtin', sha256: bytes ? sha256(bytes) : '', bytes };
+      } else {
+        const version = versions.find((item) => item.versionId === currentVersionId);
+        const inspected = await inspectUserVersion(resource, version);
+        const versionLabel = labelOf(version.versionId);
+        if (!inspected.ok) {
+          // 复核未完成（运行环境异常）时提示稍后重试，不引导用户恢复默认或重新导入。
+          throw new TemplateResourceUnavailableError(
+            `模板「${name}」当前版本 ${versionLabel} 不可用：${inspected.message}${inspected.transient ? '' : `。${SETTINGS_HINT}`}`,
+            { resourceId, versionId: version.versionId }
+          );
+        }
+        const bytes = withBytes ? (inspected.bytes || await readFile(inspected.filePath)) : null;
+        if (bytes && sha256(bytes) !== version.sha256) {
+          throw new TemplateResourceUnavailableError(
+            `模板「${name}」当前版本 ${versionLabel} 不可用：版本文件已被修改（SHA-256 不一致）。${SETTINGS_HINT}`,
+            { resourceId, versionId: version.versionId }
+          );
+        }
+        result = { filePath: inspected.filePath, versionId: version.versionId, label: versionLabel, source: 'user', sha256: version.sha256, bytes };
+        log({
+          level: 'info',
+          message: `模板文件：${name} 使用用户版本 ${versionLabel}`,
+          details: [`模块：${moduleId || '-'}`, `SHA-256：${version.sha256.slice(0, 12)}`]
+        });
       }
-    });
+    } catch (error) {
+      release();
+      throw error;
+    }
+    return Object.freeze({ ...result, release });
   }
 
   // 供各模块注入：只暴露 acquire，不让模块持有整个服务。
@@ -626,13 +643,14 @@ function createTemplateResourceService({
     }
     checks.push(...usageChecks(resource, contract.ok));
 
-    const verdict = verdictOf(checks);
+    // 结构描述失败（文件契约检查已过但 SheetJS 读不出）时预检不通过，不发放可提交的版本记录。
     let structure = {};
     try {
       structure = describeWorkbook(bytes, resource);
-    } catch (_error) {
-      structure = {};
+    } catch (describeError) {
+      if (!checks.some((check) => check.status === 'fail')) add('读取文件', 'fail', `无法读取表格结构：${errorText(describeError)}`);
     }
+    const verdict = verdictOf(checks);
     prunePendingImports();
     const importToken = crypto.randomUUID();
     pendingImports.set(importToken, {

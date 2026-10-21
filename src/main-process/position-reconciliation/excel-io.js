@@ -124,6 +124,20 @@ function validateResultTemplateWorkbook(workbook) {
   return sheet;
 }
 
+// 只保留第 1 行表头。ExcelJS 4.4 的 spliceRows 删除末尾多行时不生效（只处理起点恰为最后一行的情形），
+// 模板数据区的旧行会和本次结果一起写出；逐行删除又是平方复杂度。因此先取消数据区的合并单元格，
+// 再直接截断行集合，并在写入前核对只剩表头。
+function clearTemplateDataRows(sheet) {
+  for (const merge of Object.values(sheet._merges || {})) {
+    const { top, left, bottom, right } = merge.model;
+    if (bottom > 1) sheet.unMergeCells(top, left, bottom, right);
+  }
+  if (Array.isArray(sheet._rows) && sheet._rows.length > 1) sheet._rows.length = 1;
+  if (sheet.rowCount > 1) {
+    throw new PositionReconciliationError('position-template-data-not-cleared', '结果模板的数据区未能清空，已中止导出');
+  }
+}
+
 async function writeResultWorkbook({
   templatePath,
   outputPath,
@@ -139,7 +153,7 @@ async function writeResultWorkbook({
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(templatePath);
   const sheet = validateResultTemplateWorkbook(workbook);
-  if (sheet.rowCount > 1) sheet.spliceRows(2, sheet.rowCount - 1);
+  clearTemplateDataRows(sheet);
   applyTextColumnFormats(sheet, POSITION_BANK_HEADERS);
   const fundTypeColumn = POSITION_BANK_HEADERS.indexOf('FundType') + 1;
   for (const item of rows) {
