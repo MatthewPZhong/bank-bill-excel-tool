@@ -172,15 +172,31 @@ async function scanWorkbookXml(bytes) {
       }
     });
   }
-  return { expandedCells, printAreas };
+  return { expandedCells, printAreas, sheetNames };
 }
 
-// 输出端按结果行数调整打印区域，只支持每个工作表一个区域（多个区域逐段延伸会重叠）。
+// 输出端按结果行数调整打印区域，只支持每个工作表一个、写明首尾单元格的区域（如 $A$1:$AW$100）：
+//   多个区域逐段延伸会重叠；整列（$A:$AW）、整行（$1:$3）与单个单元格，ExcelJS 读入后变成无效区域或丢失。
+const EXPLICIT_RANGE = /^\$?[A-Z]{1,3}\$?\d+:\$?[A-Z]{1,3}\$?\d+$/i;
 function printAreaChecks(list, printAreas, sheetNames) {
   const multiple = sheetNames.filter((name) => (printAreas.get(name) || []).length > 1);
   if (multiple.length) {
     list.add('打印区域', 'fail', `${multiple.map((name) => `「${name}」`).join('、')}设置了多个打印区域，导出时无法按结果行数调整，请在 Excel 中只保留一个区域后再导入`);
   }
+  const unsupported = sheetNames.filter((name) => (printAreas.get(name) || []).length === 1 && !EXPLICIT_RANGE.test(printAreas.get(name)[0]));
+  if (unsupported.length) {
+    list.add('打印区域', 'fail', `${unsupported.map((name) => `「${name}」的打印区域 ${printAreas.get(name)[0]}`).join('、')} 不是明确的单元格区域，导出时无法按结果行数调整，请设置为如 $A$1:$AW$100 的区域后再导入`);
+  }
+}
+
+// 资金对账与平盘按工作表名称与顺序使用模板；图表工作表等非普通工作表不在 ExcelJS 的工作表列表中，
+// 会让打印区域等按序号对应的定义落到错误的工作表上，不接受。
+function sheetKindCheck(list, workbook, rawSheetNames) {
+  if (!rawSheetNames || rawSheetNames.length === workbook.worksheets.length) return true;
+  const worksheetNames = new Set(workbook.worksheets.map((sheet) => sheet.name));
+  const others = rawSheetNames.filter((name) => !worksheetNames.has(name));
+  list.add('Sheet 结构', 'fail', `含图表工作表等非普通工作表${others.length ? `（${listText(others)}）` : ''}，请删除后再导入`);
+  return false;
 }
 
 async function loadExcelWorkbook(bytes) {
@@ -251,6 +267,7 @@ function firstSheetHeaderRow(workbook) {
 const prefundContract = {
   engine: 'exceljs',
   check(workbook, list, context) {
+    if (!sheetKindCheck(list, workbook, context.rawSheetNames)) return;
     try {
       validateTemplateWorkbook(workbook);
     } catch (error) {
@@ -308,6 +325,7 @@ const bankStatementContract = {
 const positionContract = {
   engine: 'exceljs',
   check(workbook, list, context) {
+    if (!sheetKindCheck(list, workbook, context.rawSheetNames)) return;
     let sheet;
     try {
       sheet = validateResultTemplateWorkbook(workbook);
@@ -501,6 +519,7 @@ async function inspectContract(resourceId, bytes, context = {}) {
       return failed();
     }
     fullContext.printAreas = scan.printAreas;
+    fullContext.rawSheetNames = scan.sheetNames;
   }
   let workbook;
   try {

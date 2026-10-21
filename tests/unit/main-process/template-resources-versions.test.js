@@ -14,6 +14,7 @@ const {
   createTemplateResourceService
 } = require('../../../src/main-process/template-resources/service');
 const { collectScenarioReferences } = require('../../../src/main-process/template-resources/contracts');
+const { runInspectionTask } = require('../../../src/main-process/template-resources/inspection-task');
 const { createTemplateResourceStore, restyledTemplate } = require('../../helpers/template-resource-store');
 
 const ROOT = path.join(__dirname, '..', '..', '..');
@@ -21,7 +22,8 @@ const sha256 = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex'
 const checksOf = (prepared, group = 'file') => prepared.checks.filter((check) => check.group === group)
   .map((check) => [check.label, check.status]);
 
-function setup(t, { scenarios = [], store = null } = {}) {
+// inProcess：在进程内执行模板检查任务（需要在主线程模拟 fs 等错误的用例使用）；默认走正式的受限 Worker。
+function setup(t, { scenarios = [], store = null, inProcess = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'template-resource-versions-'));
   const userData = path.join(root, 'userData');
   const files = path.join(root, 'files');
@@ -37,7 +39,8 @@ function setup(t, { scenarios = [], store = null } = {}) {
     store: db,
     onChanged: (payload) => changed.push(payload),
     log: (entry) => logs.push(entry),
-    now: () => clock
+    now: () => clock,
+    ...(inProcess ? { runInspection: runInspectionTask } : {})
   });
   t.after(() => {
     try { db.close(); } catch (_error) { /* 已关闭 */ }
@@ -488,6 +491,92 @@ test('数据验证或合并单元格范围覆盖整张表的小文件：读入�
   }
 });
 
+test('用户文件只在受限 Worker 中解析：任何逐格展开超出内存上限都只终止 Worker，预检不通过，主进程照常工作', { timeout: 120000 }, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'template-resource-worker-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const store = createTemplateResourceStore();
+  t.after(() => store.close());
+  const service = createTemplateResourceService({
+    appRoot: ROOT,
+    userDataRoot: path.join(root, 'userData'),
+    store,
+    inspectionLimits: { maxOldGenerationSizeMb: 64, maxYoungGenerationSizeMb: 16, timeoutMs: 60000 }
+  });
+  // 定义名称（ExcelJS 读入时逐格建立）与超链接区域（SheetJS 读入时逐格建立）各一例，均为几 KB 的小文件。
+  const named = await patchXlsx('assets/平盘银行对账单.xlsx', path.join(root, 'position-named.xlsx'), {
+    'xl/workbook.xml': (xml) => xml.replace('</sheets>', '</sheets><definedNames><definedName name="AllCells">\'渠道对账单\'!$A$2:$XFD$1048576</definedName></definedNames>')
+  });
+  const linked = await patchXlsx('assets/重复入金召回邮件模板.xlsx', path.join(root, 'mail-hyperlink.xlsx'), {
+    'xl/worksheets/sheet1.xml': (xml) => xml.replace(/<pageMargins|<\/worksheet>/, (tag) => `<hyperlinks><hyperlink ref="A2:XFD1048576" location="A1" display="x"/></hyperlinks>${tag}`)
+  });
+  for (const [resourceId, file] of [['position-bank', named], ['dup-recall-mail', linked]]) {
+    assert.ok(fs.statSync(file).size < 64 * 1024);
+    const prepared = await prepare(service, resourceId, file);
+    assert.equal(prepared.verdict, 'fail', resourceId);
+    assert.equal(prepared.importToken === undefined, false);
+    assert.match(prepared.checks.find((check) => check.label === '读取文件').detail, /^模板过于复杂：读取时超出 64 MB 内存上限/, resourceId);
+  }
+  const normal = await restyledTemplate('assets/重复入金召回邮件模板.xlsx', path.join(root, 'mail-normal.xlsx'), widenMailColumn);
+  assert.equal((await prepare(service, 'dup-recall-mail', normal)).verdict, 'pass', 'Worker 超限后服务照常工作');
+});
+
+test('检查 Worker 超时：属于运行环境问题，标为暂不可用、不缓存', { timeout: 120000 }, async (t) => {
+  const env = setup(t);
+  const file = await restyledTemplate('assets/重复入金召回邮件模板.xlsx', path.join(env.files, 'a.xlsx'), widenMailColumn);
+  await importVersion(env.service, 'dup-recall-mail', file);
+  const slow = createTemplateResourceService({
+    appRoot: ROOT,
+    userDataRoot: env.userData,
+    store: env.store,
+    inspectionLimits: { maxOldGenerationSizeMb: 256, maxYoungGenerationSizeMb: 32, timeoutMs: 1 }
+  });
+  const current = (await slow.get('dup-recall-mail')).resource.current;
+  assert.equal(current.validation, 'unverified');
+  assert.match(current.validationMessage, /^兼容复核未完成：读取文件：读取模板超时（超过 0 秒），请稍后重试$/);
+  const normal = createTemplateResourceService({ appRoot: ROOT, userDataRoot: env.userData, store: env.store });
+  assert.equal((await normal.get('dup-recall-mail')).resource.current.validation, 'passed');
+});
+
+test('打印区域须为写明首尾单元格的区域；含图表工作表等非普通工作表的模板不接受', async (t) => {
+  const env = setup(t);
+  const printArea = (formula, name) => patchXlsx('assets/平盘银行对账单.xlsx', path.join(env.files, name), {
+    'xl/workbook.xml': (xml) => xml.replace('</sheets>', `</sheets><definedNames><definedName name="_xlnm.Print_Area" localSheetId="0">${formula}</definedName></definedNames>`)
+  });
+  for (const [formula, name] of [["'渠道对账单'!$A:$AW", 'columns.xlsx'], ["'渠道对账单'!$1:$3", 'rows.xlsx'], ["'渠道对账单'!$A$1", 'cell.xlsx']]) {
+    const prepared = await prepare(env.service, 'position-bank', await printArea(formula, name));
+    assert.equal(prepared.verdict, 'fail', formula);
+    assert.match(prepared.checks.find((check) => check.label === '打印区域').detail, /不是明确的单元格区域，导出时无法按结果行数调整/, formula);
+  }
+  assert.equal((await prepare(env.service, 'position-bank', await printArea("'渠道对账单'!$A$1:$AW$3", 'explicit.xlsx'))).verdict, 'pass');
+
+  const chartsheet = await patchXlsx('assets/平盘银行对账单.xlsx', path.join(env.files, 'chartsheet.xlsx'), {
+    'xl/workbook.xml': (xml) => xml.replace('<sheets>', '<sheets><sheet name="图表1" sheetId="9" r:id="rId99"/>'),
+    'xl/_rels/workbook.xml.rels': (xml) => xml.replace('</Relationships>', '<Relationship Id="rId99" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet" Target="chartsheets/sheet9.xml"/></Relationships>'),
+    '[Content_Types].xml': (xml) => xml.replace('</Types>', '<Override PartName="/xl/chartsheets/sheet9.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.chartsheet+xml"/></Types>')
+  });
+  const JSZip = require('jszip');
+  const zip = await JSZip.loadAsync(fs.readFileSync(chartsheet));
+  zip.file('xl/chartsheets/sheet9.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><chartsheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"/></sheetViews></chartsheet>');
+  fs.writeFileSync(chartsheet, await zip.generateAsync({ type: 'nodebuffer' }));
+  const chartPrepared = await prepare(env.service, 'position-bank', chartsheet);
+  assert.equal(chartPrepared.verdict, 'fail');
+  assert.equal(chartPrepared.checks.find((check) => check.label === 'Sheet 结构').detail, '含图表工作表等非普通工作表（图表1），请删除后再导入');
+});
+
+test('启用已保存的版本同样执行场景引用保护；恢复默认不受此限', async (t) => {
+  const env = setup(t);
+  await importVersion(env.service, 'fund-type-enum',
+    await writeOffsetWorkbook(path.join(env.files, 'v2.xlsx'), 1, 1, [['FundType'], ['KEEP'], ['REMOVE']]));
+  // 仅保存 V3（此时还没有场景引用 REMOVE），之后场景开始使用 REMOVE。
+  await importVersion(env.service, 'fund-type-enum',
+    await writeOffsetWorkbook(path.join(env.files, 'v3.xlsx'), 1, 1, [['FundType'], ['KEEP']]), { enable: false });
+  env.store.scenarios.push({ id: 1, category: 'offset-bill-mark', config: { billTypes: [{ seq: 1, conditions: [{ field: 'FundType', op: '等于', value: 'REMOVE' }] }] } });
+  assert.deepEqual(await env.service.setCurrentVersion({ resourceId: 'fund-type-enum', versionId: 'v3', expectedVersionId: 'v2' }),
+    { status: 'failed', message: 'V3 不能启用：缺少已被场景使用的取值 REMOVE' });
+  assert.equal((await env.service.get('fund-type-enum')).resource.current.id, 'v2');
+  assert.equal((await env.service.setCurrentVersion({ resourceId: 'fund-type-enum', versionId: 'v1', expectedVersionId: 'v2' })).status, 'success', '恢复默认始终可用');
+});
+
 test('打印区域只支持一个：Excel 同一定义中的多个区域、ExcelJS 写出的多个定义都在预检拒绝', async (t) => {
   const env = setup(t);
   // Excel 把多个打印区域写在同一个定义里（逗号分隔），ExcelJS 读入后只剩第一个。
@@ -694,7 +783,7 @@ const tintPendingHeader = (workbook) => {
 };
 
 test('兼容复核遇到运行环境异常：提示稍后重试且不缓存，环境恢复后重新复核通过', async (t) => {
-  const env = setup(t);
+  const env = setup(t, { inProcess: true });
   const file = await restyledTemplate('assets/VCC财务OP校验/移除归档Pending发生额计算表.xlsx', path.join(env.files, 'vcc.xlsx'), tintPendingHeader);
   await importVersion(env.service, 'vcc-pending-calc', file);
   const mkdtempSync = fs.mkdtempSync;
@@ -707,7 +796,7 @@ test('兼容复核遇到运行环境异常：提示稍后重试且不缓存，�
   });
 
   // 重建服务（复核缓存为空）：试写因环境异常失败，版本暂不可用，但不判为不兼容、不引导恢复默认。
-  const restarted = createTemplateResourceService({ appRoot: ROOT, userDataRoot: env.userData, store: env.store });
+  const restarted = createTemplateResourceService({ appRoot: ROOT, userDataRoot: env.userData, store: env.store, runInspection: runInspectionTask });
   const blocked = (await restarted.get('vcc-pending-calc')).resource.current;
   assert.equal(blocked.validation, 'unverified', '复核未完成，与不兼容区分');
   assert.match(blocked.validationMessage, /^兼容复核未完成：样式：运行环境异常（ENOSPC/);
@@ -728,7 +817,7 @@ test('兼容复核遇到运行环境异常：提示稍后重试且不缓存，�
 });
 
 test('试写回读时的系统错误被读取层包装后仍判为运行环境异常，不缓存', async (t) => {
-  const env = setup(t);
+  const env = setup(t, { inProcess: true });
   const file = await restyledTemplate('assets/VCC财务OP校验/移除归档Pending发生额计算表.xlsx', path.join(env.files, 'vcc.xlsx'), tintPendingHeader);
   await importVersion(env.service, 'vcc-pending-calc', file);
   // 回读校验经 openZipWithEntries 打开临时文件，yauzl 的系统错误在那里被包装成 BigTableImportError。
@@ -747,7 +836,7 @@ test('试写回读时的系统错误被读取层包装后仍判为运行环境�
     open.call(yauzl, filePath, options, callback);
   });
 
-  const restarted = createTemplateResourceService({ appRoot: ROOT, userDataRoot: env.userData, store: env.store });
+  const restarted = createTemplateResourceService({ appRoot: ROOT, userDataRoot: env.userData, store: env.store, runInspection: runInspectionTask });
   const blocked = (await restarted.get('vcc-pending-calc')).resource.current;
   assert.equal(probeOpens, 1);
   assert.equal(blocked.validation, 'unverified', '复核未完成，与不兼容区分');
@@ -762,7 +851,7 @@ test('试写回读时的系统错误被读取层包装后仍判为运行环境�
 });
 
 test('VCC 试写后清理临时目录失败不覆盖预检结论', async (t) => {
-  const env = setup(t);
+  const env = setup(t, { inProcess: true });
   const rmSync = fs.rmSync;
   const leftovers = [];
   t.mock.method(fs, 'rmSync', (target, ...rest) => {

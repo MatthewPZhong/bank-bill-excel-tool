@@ -93,6 +93,11 @@
       "carrier": "new Worker(resolveWorkerScript())"
     },
     {
+      "file": "src/main-process/template-resources/inspection-runner.js",
+      "line": 34,
+      "carrier": "new Worker(WORKER_PATH, { workerData: payload, resourceLimits })"
+    },
+    {
       "file": "src/main-process/toolbox-background/route-scanner-core.js",
       "line": 22,
       "carrier": "new Worker(entryPath, workerOptions)"

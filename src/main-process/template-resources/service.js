@@ -3,19 +3,17 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const XLSX = require('xlsx');
 const { EXCLUDED_TEMPLATE_FILES, TEMPLATE_RESOURCES } = require('./catalog');
 const {
   MAX_IMPORT_BYTES,
   collectScenarioReferences,
+  diffValues,
   hasContract,
-  inspectContract,
   usageChecks,
   verdictOf
 } = require('./contracts');
-const { parseFundTypeEnumWorkbook } = require('../../constants/fund-type-enum');
-const { parseGatewayReconHeadersWorkbook } = require('../../constants/gateway-recon-headers-loader');
-const { ALL_CELLS, sheetCells } = require('../../constants/sheetjs-sparse-cells');
+const { DEFAULT_INSPECTION_LIMITS, runTemplateInspection } = require('./inspection-runner');
+const { RUNTIME_VALUE_PARSERS, describeWorkbook, parseRuntimeValues } = require('./workbook-structure');
 const { writeFileAtomicDurable } = require('../background-execution/durable-file');
 
 // 内置版本固定为 v1、随应用打包只读；用户版本 v2 起存 {userData}/template-resources/<resourceId>/<versionId>.xlsx，
@@ -28,80 +26,6 @@ const IMPORT_TOKEN_TTL_MS = 30 * 60 * 1000;
 const MAX_PENDING_IMPORTS = 4;
 const MAX_CHANGES = 200;
 const SETTINGS_HINT = '请在 设置 → 模板文件 恢复默认或重新导入';
-
-function cellText(value) {
-  return value === undefined || value === null ? '' : String(value).trim();
-}
-
-function trimTail(values) {
-  const copy = [...values];
-  while (copy.length && copy[copy.length - 1] === '') copy.pop();
-  return copy;
-}
-
-// SheetJS 以 <dimension> 声明作为 !ref；部分模板的声明小于实际单元格（如 VCC 结果表），这里按全部实际单元格计算（从 A1 起）。
-//   只遍历有值的单元格，不展开矩形：一个落在 XFD1048576 的零散单元格不会让主进程按整张表分配内存。
-function textCells(sheet) {
-  return sheetCells(sheet, ALL_CELLS)
-    .map((cell) => ({ r: cell.r, c: cell.c, text: cellText(cell.value) }))
-    .filter((cell) => cell.text);
-}
-
-// 某一行从 A 列起的文本（中间空列保留为空串，末尾空列去掉）。
-function rowTexts(cells, rowIndex) {
-  const row = [];
-  for (const cell of cells) {
-    if (cell.r === rowIndex) row[cell.c] = cell.text;
-  }
-  return trimTail(Array.from(row, (value) => value || ''));
-}
-
-// 运行时 loader 的解析函数：枚举取值与比较基准都按它们的口径（声明范围的首列 / 首行）计算，
-// 声明范围不从 A1 开始时也与场景配置实际读到的取值一致。
-const RUNTIME_VALUE_PARSERS = Object.freeze({
-  'fund-type-enum': parseFundTypeEnumWorkbook,
-  'gateway-recon': parseGatewayReconHeadersWorkbook
-});
-
-// 表头以下有内容的行数。合并单元格只在左上角保存值；其覆盖的行在 Excel 中同样显示内容，计数时一并计入。
-//   按行区间求并集计数，不逐行展开（合并区域可以覆盖上百万行）。
-function filledRowCount(sheet, cells, headerIndex) {
-  const textAt = new Set(cells.map((cell) => `${cell.r}:${cell.c}`));
-  const intervals = cells.map((cell) => [cell.r, cell.r]);
-  for (const merge of sheet['!merges'] || []) {
-    if (textAt.has(`${merge.s.r}:${merge.s.c}`)) intervals.push([merge.s.r, merge.e.r]);
-  }
-  intervals.sort((a, b) => a[0] - b[0]);
-  let count = 0;
-  let counted = headerIndex;
-  for (const [start, end] of intervals) {
-    const from = Math.max(start, counted + 1);
-    if (end < from) continue;
-    count += end - from + 1;
-    counted = end;
-  }
-  return count;
-}
-
-function describeWorkbook(bytes, resource) {
-  const workbook = XLSX.read(bytes, { type: 'buffer', cellFormula: false, cellHTML: false, cellText: false });
-  const headerIndex = resource.headerRow - 1;
-  // comparableValues：按运行时口径解析的取值快照，导入时随版本记录保存，作为下一次导入的比较基准。
-  const parseValues = RUNTIME_VALUE_PARSERS[resource.id] || null;
-  const comparableValues = parseValues ? parseValues(workbook) : null;
-  const enumValues = resource.type === 'enum' ? comparableValues : null;
-  const sheets = workbook.SheetNames.map((name) => {
-    const sheet = workbook.Sheets[name];
-    const cells = textCells(sheet);
-    return {
-      name,
-      headerRow: resource.headerRow,
-      headers: rowTexts(cells, headerIndex),
-      dataRows: filledRowCount(sheet, cells, headerIndex)
-    };
-  });
-  return { sheets, enumValues, comparableValues };
-}
 
 function sha256(bytes) {
   return crypto.createHash('sha256').update(bytes).digest('hex');
@@ -140,7 +64,9 @@ function createTemplateResourceService({
   writeFile = fs.promises.writeFile,
   rename = fs.promises.rename,
   rm = fs.promises.rm,
-  writeVersionFile = (filePath, bytes) => writeFileAtomicDurable(filePath, bytes)
+  writeVersionFile = (filePath, bytes) => writeFileAtomicDurable(filePath, bytes),
+  inspectionLimits = DEFAULT_INSPECTION_LIMITS,
+  runInspection = (payload) => runTemplateInspection(payload, { limits: inspectionLimits })
 } = {}) {
   if (!appRoot) throw new Error('模板文件服务缺少应用目录');
   const versioning = Boolean(store && userDataRoot);
@@ -242,13 +168,33 @@ function createTemplateResourceService({
     }
   }
 
+  // 用户导入的文件只在受限 Worker 中解析（契约检查与结构描述）：读入时的逐格展开超出内存上限只终止该 Worker。
+  //   Worker 超限、超时或无法启动时转换为一条“读取文件”检查；超时与无法启动属于运行环境问题，标为 transient。
+  async function inspectUserBytes(resource, bytes, context) {
+    try {
+      return await runInspection({
+        task: 'inspect',
+        resource: { id: resource.id, type: resource.type, headerRow: resource.headerRow },
+        bytes,
+        context
+      });
+    } catch (error) {
+      const check = { group: 'file', label: '读取文件', status: 'fail', detail: errorText(error) };
+      return {
+        contract: { checks: [check], ok: false, transient: error && error.transient === true, message: `${check.label}：${check.detail}`, diff: { added: [], removed: [] } },
+        structure: null,
+        describeError: null
+      };
+    }
+  }
+
   // 契约复核只取决于文件内容与当前代码，按内容哈希缓存。
   // 运行环境导致的失败（临时目录不可写、文件被占用等）不代表模板不兼容，不缓存，下次复核重试。
   async function contractOf(resource, bytes, digest) {
     const key = `${resource.id}:${digest}`;
     if (compatibility.has(key)) return compatibility.get(key);
     const builtin = await inspect(resource);
-    const result = await inspectContract(resource.id, bytes, {
+    const { contract: result } = await inspectUserBytes(resource, bytes, {
       builtinSheetNames: (builtin.sheets || []).map((sheet) => sheet.name)
     });
     const verdict = { ok: result.ok, message: result.message, transient: result.transient === true };
@@ -539,29 +485,50 @@ function createTemplateResourceService({
     return { resource };
   }
 
-  // 与当前版本比较的取值（新增 / 移除、场景引用保护的基准），必须与运行时同口径且来自可信内容：
-  //   内置版本解析随包文件；用户版本取导入时保存的取值快照（导入时已按运行时口径解析，内容由 SHA-256 锁定）；
-  //   早期记录没有快照时，核对 SHA-256 后重新解析版本文件。都取不到时返回 null，由调用方按场景引用逐项核对。
-  async function currentComparableValues(resource, currentVersionId, versions) {
-    const parse = RUNTIME_VALUE_PARSERS[resource.id];
-    if (!parse) return { values: [] };
-    if (currentVersionId === BUILTIN_VERSION_ID) {
+  // 版本的取值（与运行时同口径，来自可信内容）：内置版本解析随包文件；用户版本取导入时保存的取值快照
+  //   （导入时已按运行时口径解析，内容由 SHA-256 锁定）；早期记录没有快照时，核对 SHA-256 后在检查 Worker 中重新解析。
+  //   都取不到时 values 为 null，由调用方按场景引用逐项核对。
+  async function versionComparableValues(resource, versionId, versions) {
+    if (!RUNTIME_VALUE_PARSERS[resource.id]) return { values: [] };
+    if (versionId === BUILTIN_VERSION_ID) {
       try {
-        return { values: parse(XLSX.read(await readFile(absolutePath(resource)), { type: 'buffer' })) };
+        return { values: parseRuntimeValues(resource.id, await readFile(absolutePath(resource))) };
       } catch (error) {
         return { values: null, reason: `内置版本读取失败：${errorText(error)}` };
       }
     }
-    const version = versions.find((item) => item.versionId === currentVersionId);
-    const snapshot = version && version.structure && version.structure.comparableValues;
+    const version = versions.find((item) => item.versionId === versionId);
+    if (!version) return { values: null, reason: '版本不存在' };
+    const snapshot = version.structure && version.structure.comparableValues;
     if (Array.isArray(snapshot)) return { values: snapshot };
     try {
-      const bytes = await readFile(versionPath(resource.id, currentVersionId));
+      const bytes = await readFile(versionPath(resource.id, versionId));
       if (sha256(bytes) !== version.sha256) return { values: null, reason: '版本文件已被修改（SHA-256 不一致）' };
-      return { values: parse(XLSX.read(bytes, { type: 'buffer' })) };
+      const parsed = await runInspection({ task: 'values', resource: { id: resource.id, type: resource.type, headerRow: resource.headerRow }, bytes });
+      return { values: parsed.values };
     } catch (error) {
       return { values: null, reason: `版本文件无法读取：${errorText(error)}` };
     }
+  }
+
+  function scenarioReferences() {
+    return collectScenarioReferences(typeof store.listScenarioConfigs === 'function' ? store.listScenarioConfigs() : []);
+  }
+
+  function referencedValuesOf(resource, references) {
+    return resource.id === 'gateway-recon' ? references.gatewayFields : references.fundTypeValues;
+  }
+
+  // 从一个版本切到另一个版本会移除的、已被场景使用的取值（与导入预检的场景引用保护同口径）。
+  async function removedReferencedValues(resource, fromVersionId, toVersionId, versions) {
+    if (!RUNTIME_VALUE_PARSERS[resource.id]) return { values: [] };
+    const referenced = referencedValuesOf(resource, scenarioReferences());
+    if (!referenced.size) return { values: [] };
+    const target = await versionComparableValues(resource, toVersionId, versions);
+    if (!target.values) return { error: `无法确认其取值（${target.reason}）` };
+    const current = await versionComparableValues(resource, fromVersionId, versions);
+    const before = current.values || [...referenced];
+    return { values: diffValues(before, target.values).removed.filter((value) => referenced.has(value)) };
   }
 
   function rememberPickedFile(filePath) {
@@ -634,20 +601,19 @@ function createTemplateResourceService({
     const file = { name: fileName, size: bytes.length, sha256: digest };
 
     const builtin = await inspect(resource);
-    const references = collectScenarioReferences(
-      typeof store.listScenarioConfigs === 'function' ? store.listScenarioConfigs() : []
-    );
+    const references = scenarioReferences();
     // 取不到可信的当前取值时，假定场景引用的值都在当前版本中：新版本缺少其中任何一个都按移除被引用的值处理。
-    const baseline = await currentComparableValues(resource, currentVersionId, versions);
+    const baseline = await versionComparableValues(resource, currentVersionId, versions);
     if (!baseline.values) {
       add('比较基准', 'warn', `无法确认当前版本 ${expected.label} 的取值（${baseline.reason}），按场景引用逐项核对`);
     }
-    const referenced = resource.id === 'gateway-recon' ? references.gatewayFields : references.fundTypeValues;
-    const contract = await inspectContract(resource.id, bytes, {
+    const inspected = await inspectUserBytes(resource, bytes, {
       builtinSheetNames: (builtin.sheets || []).map((sheet) => sheet.name),
-      currentValues: baseline.values || [...referenced],
-      references
+      currentValues: baseline.values || [...referencedValuesOf(resource, references)],
+      references: { fundTypeValues: [...references.fundTypeValues], gatewayFields: [...references.gatewayFields] },
+      describe: true
     });
+    const contract = inspected.contract;
     checks.push(...contract.checks);
 
     const sameUser = versions.find((version) => version.sha256 === digest);
@@ -668,12 +634,10 @@ function createTemplateResourceService({
     }
     checks.push(...usageChecks(resource, contract.ok));
 
-    // 结构描述失败（文件契约检查已过但 SheetJS 读不出）时预检不通过，不发放可提交的版本记录。
-    let structure = {};
-    try {
-      structure = describeWorkbook(bytes, resource);
-    } catch (describeError) {
-      if (!checks.some((check) => check.status === 'fail')) add('读取文件', 'fail', `无法读取表格结构：${errorText(describeError)}`);
+    // 结构描述在检查 Worker 中随契约检查一起完成；契约通过但结构读不出时预检不通过，不发放可提交的版本记录。
+    const structure = inspected.structure || {};
+    if (contract.ok && !inspected.structure) {
+      add('读取文件', 'fail', `无法读取表格结构：${inspected.describeError ? inspected.describeError.message : '未知错误'}`);
     }
     const verdict = verdictOf(checks);
     prunePendingImports();
@@ -803,6 +767,13 @@ function createTemplateResourceService({
       if (target) {
         const inspected = await inspectUserVersion(resource, target);
         if (!inspected.ok) return { status: 'failed', message: `${toLabel} 不能启用：${inspected.message}` };
+        // 与导入预检相同：启用后会缺少已被场景使用的取值时不允许启用。恢复默认不受此限，始终可以回退。
+        const removed = await removedReferencedValues(resource, currentVersionId, target.versionId, versions);
+        if (removed.error) return { status: 'failed', message: `${toLabel} 不能启用：${removed.error}` };
+        if (removed.values.length) {
+          const names = `${removed.values.slice(0, 5).join('、')}${removed.values.length > 5 ? ` 等 ${removed.values.length} 个` : ''}`;
+          return { status: 'failed', message: `${toLabel} 不能启用：缺少已被场景使用的取值 ${names}` };
+        }
       }
       const action = versionId === BUILTIN_VERSION_ID ? '恢复默认' : '启用';
       const createdAt = now().toISOString();
