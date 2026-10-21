@@ -1730,7 +1730,7 @@ class PositionReconciliationService {
       ? await this.templateSource.acquire({ label })
       : { filePath: this.templatePath, release() {} };
     try {
-      return await writeResultWorkbook({ ...options, templatePath: template.filePath });
+      return await writeResultWorkbook({ ...options, templatePath: template.filePath, templateBytes: template.bytes || null });
     } finally {
       template.release();
     }

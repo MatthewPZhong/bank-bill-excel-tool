@@ -119,13 +119,26 @@ function validateBankTemplateWorkbook(workbook) {
   return sheet;
 }
 
-async function buildWorkbook({ mailTemplatePath, bankTemplatePath, mailRows, manualRows }) {
-  assertTemplateFile(mailTemplatePath, '重复入金召回邮件模板');
-  assertTemplateFile(bankTemplatePath, '银行对账单模板');
+// 读入模板：有字节（设置 → 模板文件取得的用户版本，已核对 SHA-256 并通过检查）时直接读入这份字节，不再按路径打开。
+async function loadTemplate(filePath, bytes, label) {
+  const workbook = new ExcelJS.Workbook();
+  if (bytes) {
+    await workbook.xlsx.load(bytes);
+    return workbook;
+  }
+  assertTemplateFile(filePath, label);
+  await workbook.xlsx.readFile(filePath);
+  return workbook;
+}
+
+async function buildWorkbook({
+  mailTemplatePath, bankTemplatePath, mailTemplateBytes = null, bankTemplateBytes = null, mailRows, manualRows
+}) {
+  if (!mailTemplateBytes) assertTemplateFile(mailTemplatePath, '重复入金召回邮件模板');
+  if (!bankTemplateBytes) assertTemplateFile(bankTemplatePath, '银行对账单模板');
   assertOutputCapacity(mailRows.length, manualRows.length);
 
-  const mailTemplateWorkbook = new ExcelJS.Workbook();
-  await mailTemplateWorkbook.xlsx.readFile(mailTemplatePath);
+  const mailTemplateWorkbook = await loadTemplate(mailTemplatePath, mailTemplateBytes, '重复入金召回邮件模板');
   const mailTemplateSheet = validateMailTemplateWorkbook(mailTemplateWorkbook);
   const headerStyles = MAIL_HEADERS.map((_header, index) => (
     cloneStyle(mailTemplateSheet.getRow(1).getCell(index + 1).style)
@@ -155,8 +168,7 @@ async function buildWorkbook({ mailTemplatePath, bankTemplatePath, mailRows, man
     }
   }
 
-  const bankWorkbook = new ExcelJS.Workbook();
-  await bankWorkbook.xlsx.readFile(bankTemplatePath);
+  const bankWorkbook = await loadTemplate(bankTemplatePath, bankTemplateBytes, '银行对账单模板');
   const bankSheet = validateBankTemplateWorkbook(bankWorkbook);
 
   const manualSheet = workbook.addWorksheet(MANUAL_SHEET_NAME);
@@ -282,6 +294,8 @@ async function validateWrittenWorkbook(filePath, { mailRowCount, manualRowCount 
 async function writeDuplicateInboundWorkbook({
   mailTemplatePath,
   bankTemplatePath,
+  mailTemplateBytes = null,
+  bankTemplateBytes = null,
   savePath,
   mailRows = [],
   manualRows = []
@@ -289,7 +303,9 @@ async function writeDuplicateInboundWorkbook({
   if (!savePath || typeof savePath !== 'string') {
     throw new TypeError('重复入金导出 savePath 必填');
   }
-  const workbook = await buildWorkbook({ mailTemplatePath, bankTemplatePath, mailRows, manualRows });
+  const workbook = await buildWorkbook({
+    mailTemplatePath, bankTemplatePath, mailTemplateBytes, bankTemplateBytes, mailRows, manualRows
+  });
   const targetPath = path.resolve(savePath);
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   const tempPath = path.join(

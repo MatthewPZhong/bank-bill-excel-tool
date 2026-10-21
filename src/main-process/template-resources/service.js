@@ -74,6 +74,8 @@ function createTemplateResourceService({
   const inspections = new Map();
   const userInspections = new Map();
   const compatibility = new Map();
+  const contractsInFlight = new Map();
+  const reparsedValues = new Map();
   const pickedFiles = new Set();
   const pendingImports = new Map();
   const leases = new Map();
@@ -190,16 +192,23 @@ function createTemplateResourceService({
 
   // 契约复核只取决于文件内容与当前代码，按内容哈希缓存。
   // 运行环境导致的失败（临时目录不可写、文件被占用等）不代表模板不兼容，不缓存，下次复核重试。
-  async function contractOf(resource, bytes, digest) {
+  //   同一内容正在复核时合并为一次（列表刷新、导出取用等可能同时触发），不重复启动检查 Worker。
+  function contractOf(resource, bytes, digest) {
     const key = `${resource.id}:${digest}`;
-    if (compatibility.has(key)) return compatibility.get(key);
-    const builtin = await inspect(resource);
-    const { contract: result } = await inspectUserBytes(resource, bytes, {
-      builtinSheetNames: (builtin.sheets || []).map((sheet) => sheet.name)
-    });
-    const verdict = { ok: result.ok, message: result.message, transient: result.transient === true };
-    if (!verdict.transient) compatibility.set(key, verdict);
-    return verdict;
+    if (compatibility.has(key)) return Promise.resolve(compatibility.get(key));
+    if (contractsInFlight.has(key)) return contractsInFlight.get(key);
+    const running = (async () => {
+      const builtin = await inspect(resource);
+      const { contract: result } = await inspectUserBytes(resource, bytes, {
+        builtinSheetNames: (builtin.sheets || []).map((sheet) => sheet.name)
+      });
+      const verdict = { ok: result.ok, message: result.message, transient: result.transient === true };
+      if (!verdict.transient) compatibility.set(key, verdict);
+      return verdict;
+    })();
+    contractsInFlight.set(key, running);
+    running.finally(() => contractsInFlight.delete(key)).catch(() => {});
+    return running;
   }
 
   // 版本文件打不开：确认不存在或不是普通文件（如被同名目录替代）时为“缺失”（不兼容，需恢复默认或重新导入）；
@@ -396,7 +405,8 @@ function createTemplateResourceService({
   }
 
   // 运行时读取当前版本。返回的租约在任务结束前保护该版本不被删除，并在“版本/使用方”中显示为任务使用中；
-  // 用户版本不可用（缺失、被修改、不兼容）时抛错，导出中止。
+  // 用户版本不可用（缺失、被修改、不兼容）时抛错，导出中止。用户版本总带 bytes（已核对 SHA-256），
+  // withBytes 只决定内置版本是否也读出字节（VCC 交给 Worker 使用）。
   async function acquire(resourceId, { moduleId = '', label = '', withBytes = false } = {}) {
     const resource = findResource(resourceId);
     if (!resource) throw new TypeError(`未知模板：${resourceId}`);
@@ -436,8 +446,9 @@ function createTemplateResourceService({
             { resourceId, versionId: version.versionId }
           );
         }
-        const bytes = withBytes ? (inspected.bytes || await readFile(inspected.filePath)) : null;
-        if (bytes && sha256(bytes) !== version.sha256) {
+        // 用户版本总是返回核对过 SHA-256 的字节，Writer 直接读入这份字节：检查之后文件被替换也不会读到未经检查的内容。
+        const bytes = inspected.bytes || await readFile(inspected.filePath);
+        if (sha256(bytes) !== version.sha256) {
           throw new TemplateResourceUnavailableError(
             `模板「${name}」当前版本 ${versionLabel} 不可用：版本文件已被修改（SHA-256 不一致）。${SETTINGS_HINT}`,
             { resourceId, versionId: version.versionId }
@@ -501,14 +512,32 @@ function createTemplateResourceService({
     if (!version) return { values: null, reason: '版本不存在' };
     const snapshot = version.structure && version.structure.comparableValues;
     if (Array.isArray(snapshot)) return { values: snapshot };
+    const cacheKey = `${resource.id}:${version.sha256}`;
+    if (reparsedValues.has(cacheKey)) return { values: reparsedValues.get(cacheKey) };
     try {
       const bytes = await readFile(versionPath(resource.id, versionId));
       if (sha256(bytes) !== version.sha256) return { values: null, reason: '版本文件已被修改（SHA-256 不一致）' };
       const parsed = await runInspection({ task: 'values', resource: { id: resource.id, type: resource.type, headerRow: resource.headerRow }, bytes });
+      reparsedValues.set(cacheKey, parsed.values);
       return { values: parsed.values };
     } catch (error) {
       return { values: null, reason: `版本文件无法读取：${errorText(error)}` };
     }
+  }
+
+  // 场景配置下拉（FundType 取值、网关表头字段）使用的当前版本取值。内置版本返回 builtin，由调用方按原逻辑读取随包文件；
+  //   用户版本先复核文件（存在、SHA-256、契约），再返回导入时在检查 Worker 中按运行时口径解析的取值，主进程不解析用户文件。
+  async function currentRuntimeValues(resourceId) {
+    const resource = findResource(resourceId);
+    if (!resource || !RUNTIME_VALUE_PARSERS[resource.id]) throw new TypeError(`模板没有运行时取值：${resourceId}`);
+    const { versions, currentVersionId } = stateOf(readStore(), resource.id);
+    if (currentVersionId === BUILTIN_VERSION_ID) return { status: 'builtin' };
+    const version = versions.find((item) => item.versionId === currentVersionId);
+    const inspected = await inspectUserVersion(resource, version);
+    if (!inspected.ok) return { status: 'unavailable', message: inspected.message, versionId: currentVersionId };
+    const values = await versionComparableValues(resource, currentVersionId, versions);
+    if (!values.values) return { status: 'unavailable', message: values.reason, versionId: currentVersionId };
+    return { status: 'user', values: values.values, versionId: currentVersionId };
   }
 
   function scenarioReferences() {
@@ -865,6 +894,7 @@ function createTemplateResourceService({
     acquire,
     source,
     resolveCurrentFile,
+    currentRuntimeValues,
     rememberPickedFile,
     prepareImport,
     discardImport,

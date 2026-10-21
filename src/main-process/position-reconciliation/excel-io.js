@@ -139,20 +139,23 @@ function clearTemplateDataRows(sheet) {
   }
 }
 
+// templateBytes：设置 → 模板文件取得的用户版本字节（已核对 SHA-256 并通过检查），有则直接读入这份字节，不再按路径打开。
 async function writeResultWorkbook({
   templatePath,
+  templateBytes = null,
   outputPath,
   rows,
   highlightChanged = true
 }) {
-  if (!fs.existsSync(templatePath)) {
+  if (!templateBytes && !fs.existsSync(templatePath)) {
     throw new PositionReconciliationError('position-template-missing', `结果模板不存在：${templatePath}`);
   }
   if (rows.length > EXCEL_MAX_ROWS - 1) {
     throw new PositionReconciliationError('position-result-too-large', '结果超过 Excel 单 sheet 行数上限');
   }
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(templatePath);
+  if (templateBytes) await workbook.xlsx.load(templateBytes);
+  else await workbook.xlsx.readFile(templatePath);
   const sheet = validateResultTemplateWorkbook(workbook);
   clearTemplateDataRows(sheet);
   applyTextColumnFormats(sheet, POSITION_BANK_HEADERS);

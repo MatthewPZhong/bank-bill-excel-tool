@@ -1490,6 +1490,8 @@ class DuplicateInboundMatchService {
       written = await writeDuplicateInboundWorkbook({
         mailTemplatePath: mailTemplate.filePath,
         bankTemplatePath: bankTemplate.filePath,
+        mailTemplateBytes: mailTemplate.bytes || null,
+        bankTemplateBytes: bankTemplate.bytes || null,
         savePath,
         mailRows: result.mailRows,
         manualRows: result.manualRows

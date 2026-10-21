@@ -111,10 +111,10 @@ v3.2.12 的「设置 → 模板文件」页只接了只读查询与另存为，�
 
 ExcelJS 与 SheetJS 读入时会按文件声明的范围逐格展开（数据验证、合并单元格、定义名称、列定义、超链接等），几 KB 的文件就能让读入耗尽内存，且无法在读入前逐项预判。用户导入的文件因此只在受限的检查 Worker 中解析：导入预检（契约检查与结构描述）、已存版本的兼容复核、早期记录的取值重新解析都在 Worker 中进行，主进程只解析随包的内置模板。
 
-- Worker 经 `memoryCarrierAdmission` 启动，内存上限 256 MB（新生代 32 MB），超时 60 秒。
-- 超出内存上限：判为不通过（“模板过于复杂：读取时超出 256 MB 内存上限…”），按内容哈希缓存。
-- 超时、低内存任务占用、Worker 无法启动：运行环境问题，标为 transient（暂不可用，稍后重试，不缓存）。
-- 导出时主进程读入的用户模板都已在同样的读取方式下通过该上限，主进程的读入开销因此有界。读入前的原始 XML 扫描（第五节）也在 Worker 中执行，只用于给常见情况更明确的提示。
+- Worker 经 `memoryCarrierAdmission` 启动，堆上限 256 MB（新生代 32 MB），超时 60 秒；同一时间只运行一个检查 Worker，其余排队，名额在 Worker 真正退出后才释放。同一模板同一内容正在进行的复核合并为一次。
+- 堆上限不包括解压出的外部缓冲区（Node 的 `resourceLimits` 只限 V8 堆）：检查任务在交给 ExcelJS / SheetJS 之前，先用 `yauzl` 逐条流式解压并计数（只计字节，不保留内容），条目声明或实际解压量合计超过 100 MB 即判不通过（“文件大小：解压后内容超过 100 MB 上限”）；`yauzl` 同时核对条目声明大小与实际是否一致，结构无法读取时判“读取文件”不通过。
+- 超出堆上限：判为不通过（“模板过于复杂：读取时超出 256 MB 内存上限…”），按内容哈希缓存。其余失败（超时、低内存任务占用、Worker 无法启动或加载失败、任务意外抛错）都是运行环境问题，标为 transient（暂不可用，稍后重试，不缓存）；文件内容的问题由检查任务以契约结果返回。
+- 主进程不解析未经检查的用户文件：资金对账、重复入金、平盘导出取得的租约带有核对过 SHA-256 的字节，Writer 直接读入这份字节，不再按路径打开（检查之后文件被替换也读不到未经检查的内容）；VCC 导出在自己的 Worker 中读入传入的字节。FundType / 网关下拉使用导入时在检查 Worker 中解析的取值快照，早期记录没有快照时在检查 Worker 中解析（核对 SHA-256 后）。导出时读入的字节都已在检查 Worker 中以同样的库与选项通过上述上限。读入前的原始 XML 扫描（第五节）也在 Worker 中执行，只用于给常见情况更明确的提示。
 
 ## 五、预检契约（`contracts.js`）
 
@@ -147,11 +147,11 @@ FundType 的取值（含展示用的 `enumValues`）与运行时 loader 同口�
 
 | 模块 | 接入点 | 说明 |
 | --- | --- | --- |
-| 前置资金对账 | `export()` 在冲突检查后、备份已有文件前取租约，拆出 `_writeExport` | 模板不可用时不改动用户已有文件 |
-| 重复入金匹配 | `export()` 依次取邮件模板与银行对账单租约 | 任一失败或写出失败都释放已取的租约 |
-| 平盘对账 | `exportBank`、`exportRun` 经 `_writeResultWorkbook` 取租约 | — |
+| 前置资金对账 | `export()` 在冲突检查后、备份已有文件前取租约，拆出 `_writeExport`；用户版本以租约字节 `templateBytes` 读入模板 | 模板不可用时不改动用户已有文件 |
+| 重复入金匹配 | `export()` 依次取邮件模板与银行对账单租约；用户版本以租约字节读入 | 任一失败或写出失败都释放已取的租约 |
+| 平盘对账 | `exportBank`、`exportRun` 经 `_writeResultWorkbook` 取租约；用户版本以租约字节读入 | — |
 | VCC 财务OP | `exportRun` 在状态复核后 `acquire({withBytes: true})`，字节、SHA、版本号进 `workerData.pendingTemplate`，Writer 返回后释放 | Writer 核对 SHA 再 `xlsx.load`，写出与校验共用同一模板对象；缺省时仍读 `assetsDir`。导出完成后归档、恢复、复核都不再读模板，版本只需在导出期间保留 |
-| 场景配置 | `scenarios:fund-type-enum`、`scenarios:gateway-recon-headers` 改为 async，读当前版本路径（loader 按路径缓存，新版本自然不命中旧缓存）；用户版本不可用时按原降级（空列表 / 旧字段） | Renderer 弹窗每次打开时刷新，实现“下次打开场景配置生效” |
+| 场景配置 | `scenarios:fund-type-enum`、`scenarios:gateway-recon-headers` 改为 async；用户版本经 `currentRuntimeValues` 返回导入时在检查 Worker 中解析的取值（主进程不解析用户文件），内置版本沿用原 loader；用户版本不可用时按原降级（空列表 / 旧字段） | Renderer 弹窗每次打开时刷新，实现“下次打开场景配置生效” |
 
 ## 七、已知限制与偏离
 
@@ -227,7 +227,7 @@ FundType 的取值（含展示用的 `enumValues`）与运行时 loader 同口�
 
 ### 9.3 代码审查与修复（2026-10-20）
 
-五轮审查：先由 Claude 审查分支全部改动，再由 Codex 四次只读复审（每次都含此前的修复）。已修复以下 28 项（其中第四轮的 7 项逐格展开类问题以“用户文件只在受限 Worker 中解析”统一解决），其余审查发现记为已知、本轮不修：
+六轮审查：先由 Claude 审查分支全部改动，再由 Codex 五次只读复审（每次都含此前的修复）。已修复以下 33 项（其中第四轮的 7 项逐格展开类问题以“用户文件只在受限 Worker 中解析”统一解决），其余审查发现记为已知、本轮不修：
 
 | 来源 | 问题 | 修复 |
 | --- | --- | --- |
@@ -255,9 +255,16 @@ FundType 的取值（含展示用的 `enumValues`）与运行时 loader 同口�
 | Codex 四轮 P2 | 整列、整行、单个单元格的打印区域经 ExcelJS 读入后变成 `ANaN:AWNaN` 等无效区域或丢失 | 预检只接受写明首尾单元格的单个打印区域 |
 | Codex 四轮 P2 | 有图表工作表时 ExcelJS 把按序号对应的打印区域落到错误的工作表 | 资金对账与平盘模板含非普通工作表时预检拒绝 |
 | Codex 四轮 P2 | 启用已保存的版本时不做场景引用保护，可以绕过导入预检的拦截 | 启用用户版本时执行同样的检查；恢复默认不受此限 |
+| Codex 五轮 P1 | FundType / 网关下拉的 loader 在主进程按默认选项（含公式解析）重新读取用户文件，含大量共享公式的文件通过预检后在打开场景配置时展开 | 下拉改用导入时在检查 Worker 中解析的取值快照，主进程不再解析用户文件 |
+| Codex 五轮 P1 | Worker 堆上限不包括解压出的外部缓冲区：100 KB 的文件可解压出几百 MB | 检查任务先用 yauzl 流式解压计数，超过 100 MB 即不通过，并核对条目声明大小 |
+| Codex 五轮 P2 | 普通导出在检查后按路径重新打开版本文件，文件被替换时会解析未经检查的内容 | 用户版本租约总带核对过的字节，三个 Writer 直接读入这份字节 |
+| Codex 五轮 P2 | 检查 Worker 没有并发上限，同一内容的复核也不合并 | 同一时间只运行一个、退出后释放名额；同一内容的在途复核合并 |
+| Codex 五轮 P3 | Worker 启动后加载失败等异步错误被当作不兼容缓存 | 只有超出堆上限算文件问题，其余 Worker 失败一律暂不可用、不缓存 |
 
 二轮复审修复后：新增 4 个回归用例在旧实现上均失败、在新实现上通过；`npm run test:unit` 9664/9668（0 失败，4 项为既有条件跳过）；`npm run lint`、`npm run check:architecture` 通过；集成脚本 `template-resources-versions`、`template-resources-save-as`、`position-reconciliation-side-db-parity`、`position-startup-task-recovery` 通过；FundType / 网关解析在 `assets/` 39 个 xlsx 上仍与旧实现一致。本轮未改 Renderer，生命周期未重跑；全量 `npm run test:integration` 与 smoke 未重跑。
 
 三轮复审修复后：新增 5 个回归用例在旧实现上均失败、在新实现上通过（数据验证 / 合并单元格超限用例除外：旧实现会耗尽内存，未在本机运行）；`npm run test:unit` 9669/9673（0 失败，4 项为既有条件跳过）；`npm run lint`、`npm run check:architecture` 通过；集成脚本 `template-resources-versions`、`template-resources-save-as`、`position-reconciliation-side-db-parity`、`position-startup-task-recovery`、`pre-fund-reconciliation-output-contract`、`pre-fund-reconciliation-side-db-parity`、`duplicate-inbound-match-end-to-end`、`vcc-financial-op-result-workbook` 通过；5 个以 ExcelJS 读入的内置模板预检均通过（扫描在上限内）。本轮未改 Renderer，生命周期未重跑；全量 `npm run test:integration`、smoke 与 Excel 实机打印未做。
 
 四轮复审修复后：新增 4 个回归用例（受限 Worker 超出内存上限、Worker 超时、整列 / 整行 / 单格打印区域与图表工作表、启用已保存版本的场景引用保护）；依赖主线程模拟 fs / yauzl 错误的 3 个用例改为在进程内执行同一检查任务（`inspection-task.js`）。`npm run test:unit` 9673/9677（0 失败，4 项为既有条件跳过）；`npm run lint`、`npm run check:architecture`（worker 边 65 → 66）通过；原生载体清单测试通过；集成脚本 `template-resources-versions`、`template-resources-save-as`、`position-reconciliation-side-db-parity`、`pre-fund-reconciliation-output-contract`、`duplicate-inbound-match-end-to-end`、`vcc-financial-op-result-workbook` 通过；在 Electron 主进程中启动检查 Worker，VCC Pending 试写、结构描述与 FundType 取值解析均正常。本轮未改 Renderer，生命周期未重跑；全量 `npm run test:integration`、smoke 与 Excel 实机打印未做。
+
+五轮复审修复后：新增回归用例覆盖下拉取值快照（含早期记录在 Worker 中解析、文件被改动时不可用）、解压超限的小文件在读入前拒绝、租约字节不受文件替换影响、三个 Writer 只读入租约字节（在旧 Writer 上失败）、检查 Worker 排队与退出后释放、同一内容复核合并、启动失败按暂不可用且不缓存。过程中曾为测试给 Worker 入口加可替换路径，导致架构检查报告“动态加载未登记”；已改回固定入口，启动失败改用无法传给 Worker 的数据触发。`npm run test:unit` 9678/9682（0 失败，4 项为既有条件跳过）；`npm run lint`、`npm run check:architecture`（worker 边 66）、原生载体清单测试通过；集成脚本 `template-resources-versions`、`template-resources-save-as`、`pre-fund-reconciliation-output-contract`、`pre-fund-reconciliation-side-db-parity`、`duplicate-inbound-match-end-to-end`、`position-reconciliation-side-db-parity`、`position-startup-task-recovery`、`vcc-financial-op-result-workbook` 通过；在 Electron 主进程中启动检查 Worker 正常。本轮未改 Renderer，生命周期未重跑；全量 `npm run test:integration`、smoke 与 Excel 实机打印未做。取消已不需要的检查（如关闭导入弹窗后）未实现，排队中的检查仍会执行完。

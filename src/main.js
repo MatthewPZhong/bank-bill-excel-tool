@@ -4843,10 +4843,20 @@ function broadcastTemplateResourcesChanged(payload) {
   }
 }
 
-// 缓存读取类模板（FundType 枚举、网关表头）：返回当前用户版本路径；内置或服务不可用时由调用方沿用原路径逻辑。
+// managed 导出守卫用：当前版本是否为内置；服务不可用时视为内置，由调用方沿用原路径逻辑。
 async function resolveTemplateResourceFileForRead(resourceId) {
   try {
     return await getTemplateResourceService().resolveCurrentFile(resourceId);
+  } catch (_error) {
+    return { status: 'builtin' };
+  }
+}
+
+// 缓存读取类模板（FundType 枚举、网关表头）的当前取值：用户版本返回导入时在检查 Worker 中解析的取值，主进程不解析用户文件；
+//   内置或服务不可用时返回 builtin，由调用方沿用原路径逻辑读取随包文件。
+async function resolveTemplateResourceValues(resourceId) {
+  try {
+    return await getTemplateResourceService().currentRuntimeValues(resourceId);
   } catch (_error) {
     return { status: 'builtin' };
   }
@@ -5321,9 +5331,9 @@ function registerAppHandlers() {
   //   - 模块级缓存（按解析路径）：重复调用不反复读盘
   ipcMain.handle('scenarios:fund-type-enum', async () => {
     try {
-      // 设置 → 模板文件：启用了用户版本时读该版本（loader 按路径缓存，新版本自然不命中旧缓存）；不可用时按原降级返回空数组。
-      const current = await resolveTemplateResourceFileForRead('fund-type-enum');
-      if (current.status === 'user') return { status: 'ok', values: loadFundTypeEnum(current.filePath) };
+      // 设置 → 模板文件：启用了用户版本时使用该版本导入时解析的取值（主进程不再解析用户文件）；不可用时按原降级返回空数组。
+      const current = await resolveTemplateResourceValues('fund-type-enum');
+      if (current.status === 'user') return { status: 'ok', values: current.values };
       if (current.status === 'unavailable') return { status: 'ok', values: [] };
       const candidates = [
         path.join(app.getAppPath(), 'assets', FUND_TYPE_ENUM_FILE_NAME),
@@ -5347,9 +5357,9 @@ function registerAppHandlers() {
   //   - 模块级缓存（按解析路径）：重复调用不反复读盘
   ipcMain.handle('scenarios:gateway-recon-headers', async () => {
     try {
-      // 设置 → 模板文件：启用了用户版本时读该版本；不可用时按原降级返回旧字段。
-      const current = await resolveTemplateResourceFileForRead('gateway-recon');
-      if (current.status === 'user') return { status: 'ok', values: loadGatewayReconHeaders(current.filePath) };
+      // 设置 → 模板文件：启用了用户版本时使用该版本导入时解析的表头字段（已剔除 __CUSTOM__）；不可用时按原降级返回旧字段。
+      const current = await resolveTemplateResourceValues('gateway-recon');
+      if (current.status === 'user') return { status: 'ok', values: current.values };
       if (current.status === 'unavailable') return { status: 'ok', values: [...GATEWAY_RECON_FIELDS] };
       const candidates = [
         path.join(app.getAppPath(), 'assets', GATEWAY_RECON_HEADERS_FILE_NAME),

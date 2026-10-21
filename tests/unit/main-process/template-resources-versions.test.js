@@ -14,7 +14,8 @@ const {
   createTemplateResourceService
 } = require('../../../src/main-process/template-resources/service');
 const { collectScenarioReferences } = require('../../../src/main-process/template-resources/contracts');
-const { runInspectionTask } = require('../../../src/main-process/template-resources/inspection-task');
+const { measureUncompressed, runInspectionTask } = require('../../../src/main-process/template-resources/inspection-task');
+const { TemplateInspectionError, inspectionStats, runTemplateInspection } = require('../../../src/main-process/template-resources/inspection-runner');
 const { createTemplateResourceStore, restyledTemplate } = require('../../helpers/template-resource-store');
 
 const ROOT = path.join(__dirname, '..', '..', '..');
@@ -577,6 +578,132 @@ test('启用已保存的版本同样执行场景引用保护；恢复默认不�
   assert.equal((await env.service.setCurrentVersion({ resourceId: 'fund-type-enum', versionId: 'v1', expectedVersionId: 'v2' })).status, 'success', '恢复默认始终可用');
 });
 
+// 等待此前用例启动的检查 Worker 全部退出，再观察排队状态。
+async function waitInspectionsIdle() {
+  for (let attempt = 0; attempt < 400 && (inspectionStats().running || inspectionStats().queued); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.deepEqual(inspectionStats(), { running: 0, queued: 0 });
+}
+
+function commitRecord(store, resourceId, { versionId, versionNo, bytes, structure, enable, expectedVersionId }) {
+  const createdAt = '2026-10-21T08:00:00.000Z';
+  return store.commitTemplateResourceVersion({
+    resourceId,
+    version: { versionId, versionNo, fileName: `${versionId}.xlsx`, sizeBytes: bytes.length, sha256: sha256(bytes), validation: 'passed', structure, appVersion: '9.9.9', createdAt },
+    enable,
+    expectedVersionId,
+    now: createdAt,
+    change: { createdAt, resourceId, action: enable ? '导入并启用' : '导入', fromLabel: '', toLabel: `V${versionNo}`, result: 'success' }
+  });
+}
+
+test('场景配置下拉使用导入时在检查 Worker 中解析的取值，主进程不解析用户文件', async (t) => {
+  const env = setup(t);
+  // 版本记录中的取值快照与文件内容故意不同：返回快照即说明没有在主进程重新解析文件。
+  const bytes = fs.readFileSync(await writeOffsetWorkbook(path.join(env.files, 'fund.xlsx'), 1, 1, [['FundType'], ['FILE-VALUE']]));
+  fs.mkdirSync(path.dirname(env.versionFile('fund-type-enum', 'v2')), { recursive: true });
+  fs.writeFileSync(env.versionFile('fund-type-enum', 'v2'), bytes);
+  assert.equal(commitRecord(env.store, 'fund-type-enum', {
+    versionId: 'v2', versionNo: 2, bytes, structure: { enumValues: ['SNAPSHOT'], comparableValues: ['SNAPSHOT'] }, enable: true, expectedVersionId: 'v1'
+  }).status, 'success');
+  assert.deepEqual(await env.service.currentRuntimeValues('fund-type-enum'), { status: 'user', values: ['SNAPSHOT'], versionId: 'v2' });
+
+  // 早期记录没有快照：在检查 Worker 中按运行时口径解析（核对 SHA-256 后）。
+  const gatewayHeaders = (await env.service.get('gateway-recon')).resource.sheets[0].headers;
+  const gatewayBytes = fs.readFileSync(await writeOffsetWorkbook(path.join(env.files, 'gateway.xlsx'), 1, 1, [gatewayHeaders]));
+  fs.mkdirSync(path.dirname(env.versionFile('gateway-recon', 'v2')), { recursive: true });
+  fs.writeFileSync(env.versionFile('gateway-recon', 'v2'), gatewayBytes);
+  assert.equal(commitRecord(env.store, 'gateway-recon', {
+    versionId: 'v2', versionNo: 2, bytes: gatewayBytes, structure: {}, enable: true, expectedVersionId: 'v1'
+  }).status, 'success');
+  const gateway = await env.service.currentRuntimeValues('gateway-recon');
+  assert.equal(gateway.status, 'user');
+  assert.deepEqual(gateway.values, [...new Set(gatewayHeaders.filter((header) => header && header !== '__CUSTOM__'))]);
+
+  // 当前版本文件被改动：不可用，不返回取值；内置版本由调用方按原逻辑读取随包文件。
+  fs.appendFileSync(env.versionFile('fund-type-enum', 'v2'), 'tamper');
+  assert.equal((await env.service.currentRuntimeValues('fund-type-enum')).status, 'unavailable');
+  assert.equal((await env.service.setCurrentVersion({ resourceId: 'fund-type-enum', versionId: 'v1', expectedVersionId: 'v2' })).status, 'success');
+  assert.deepEqual(await env.service.currentRuntimeValues('fund-type-enum'), { status: 'builtin' });
+});
+
+test('解压后内容超过上限的小文件：读入前拒绝，不交给 ExcelJS / SheetJS', { timeout: 120000 }, async (t) => {
+  const env = setup(t);
+  const JSZip = require('jszip');
+  const zip = await JSZip.loadAsync(fs.readFileSync(path.join(ROOT, 'assets', '重复入金召回邮件模板.xlsx')));
+  zip.file('xl/media/image1.png', Buffer.alloc(101 * 1024 * 1024));
+  const file = path.join(env.files, 'mail-media.xlsx');
+  fs.writeFileSync(file, await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
+  assert.ok(fs.statSync(file).size < 1024 * 1024, '压缩后不到 1 MB');
+  const prepared = await prepare(env.service, 'dup-recall-mail', file);
+  assert.equal(prepared.verdict, 'fail');
+  assert.equal(prepared.checks.find((check) => check.label === '文件大小').detail,
+    '解压后内容超过 100 MB 上限（xl/media/image1.png），请精简后再导入');
+
+  // 条目声明的大小已超过上限时不解压直接停止；声明与实际不符时由流式计数与 yauzl 的大小核对兜底。
+  const measured = await measureUncompressed(fs.readFileSync(file), 1024 * 1024);
+  assert.equal(measured.exceeded, 'xl/media/image1.png');
+  assert.equal((await measureUncompressed(fs.readFileSync(path.join(ROOT, 'assets', '重复入金召回邮件模板.xlsx')))).exceeded, null);
+});
+
+test('取用用户版本时返回核对过的字节；之后版本文件被替换，本次导出仍使用检查过的内容', async (t) => {
+  const env = setup(t);
+  const file = await restyledTemplate('assets/重复入金召回邮件模板.xlsx', path.join(env.files, 'a.xlsx'), widenMailColumn);
+  await importVersion(env.service, 'dup-recall-mail', file);
+  const checked = sha256(fs.readFileSync(env.versionFile('dup-recall-mail', 'v2')));
+  const lease = await env.service.acquire('dup-recall-mail', { label: '重复入金导出' });
+  assert.equal(sha256(lease.bytes), checked);
+  assert.equal(lease.sha256, checked);
+  fs.writeFileSync(env.versionFile('dup-recall-mail', 'v2'), 'replaced after check');
+  assert.equal(sha256(lease.bytes), checked, '租约中的字节不受文件替换影响');
+  lease.release();
+});
+
+test('检查 Worker 同一时间只运行一个、退出后才释放名额；同一内容的复核合并为一次；启动失败按暂不可用处理', { timeout: 120000 }, async (t) => {
+  await waitInspectionsIdle();
+  const payload = {
+    task: 'inspect',
+    resource: { id: 'dup-recall-mail', type: 'output', headerRow: 1 },
+    bytes: fs.readFileSync(path.join(ROOT, 'assets', '重复入金召回邮件模板.xlsx')),
+    context: {}
+  };
+  const runs = [runTemplateInspection(payload), runTemplateInspection(payload), runTemplateInspection(payload)];
+  assert.deepEqual(inspectionStats(), { running: 1, queued: 2 });
+  assert.ok((await Promise.all(runs)).every((result) => result.contract.ok));
+  await waitInspectionsIdle();
+
+  // Worker 无法启动（此处用无法传给 Worker 的数据触发）属于运行环境问题；只有超出堆上限才算文件本身的问题。
+  await assert.rejects(runTemplateInspection({ ...payload, context: { unclonable: () => {} } }),
+    (error) => error.transient === true && /^模板检查暂时无法启动：/.test(error.message));
+  await waitInspectionsIdle();
+
+  const env = setup(t);
+  const file = await restyledTemplate('assets/重复入金召回邮件模板.xlsx', path.join(env.files, 'a.xlsx'), widenMailColumn);
+  await importVersion(env.service, 'dup-recall-mail', file);
+  let calls = 0;
+  let broken = true;
+  const counting = createTemplateResourceService({
+    appRoot: ROOT,
+    userDataRoot: env.userData,
+    store: env.store,
+    runInspection: (request) => {
+      calls += 1;
+      return broken
+        ? Promise.reject(new TemplateInspectionError('模板检查暂时无法完成：Cannot find module，请稍后重试'))
+        : runTemplateInspection(request);
+    }
+  });
+  const failed = (await counting.get('dup-recall-mail')).resource.current;
+  assert.equal(failed.validation, 'unverified', '启动失败不判为不兼容');
+  broken = false;
+  calls = 0;
+  const [first, second] = await Promise.all([counting.get('dup-recall-mail'), counting.get('dup-recall-mail')]);
+  assert.equal(first.resource.current.validation, 'passed', '恢复后重新复核');
+  assert.equal(second.resource.current.validation, 'passed');
+  assert.equal(calls, 1, '同一内容的并发复核只启动一次检查');
+});
+
 test('打印区域只支持一个：Excel 同一定义中的多个区域、ExcelJS 写出的多个定义都在预检拒绝', async (t) => {
   const env = setup(t);
   // Excel 把多个打印区域写在同一个定义里（逗号分隔），ExcelJS 读入后只剩第一个。
@@ -641,16 +768,21 @@ test('比较基准不信任被改动或读不出的当前文件：优先用导�
   assert.deepEqual(reparsed.diff.removed, ['REMOVE', 'EXTRA']);
   assert.equal(reparsed.checks.some((check) => check.label === '比较基准'), false);
 
-  // 3. 早期记录的文件被改动（SHA-256 不一致）：不采用该文件，提示后按场景引用逐项核对，仍拦下 REMOVE。
+  // 3. 早期记录的文件被改动（SHA-256 不一致）：同一服务沿用此前从核对过的内容解析出的取值；
+  //    重建后的服务不采用被改动的文件，提示后按场景引用逐项核对，仍拦下 REMOVE。
   fs.copyFileSync(keepOnly, legacyTarget);
-  const untrusted = await prepare(env.service, 'fund-type-enum', keepOnly);
+  const cached = await prepare(env.service, 'fund-type-enum', keepOnly);
+  blockedRemove(cached);
+  assert.equal(cached.checks.some((check) => check.label === '比较基准'), false, '沿用已核对内容解析出的取值');
+  const restarted = () => createTemplateResourceService({ appRoot: ROOT, userDataRoot: env.userData, store: env.store });
+  const untrusted = await prepare(restarted(), 'fund-type-enum', keepOnly);
   blockedRemove(untrusted);
   assert.equal(untrusted.checks.find((check) => check.label === '比较基准').detail,
     '无法确认当前版本 V3 的取值（版本文件已被修改（SHA-256 不一致）），按场景引用逐项核对');
 
   // 4. 早期记录的文件缺失：同样按场景引用逐项核对。
   fs.rmSync(legacyTarget);
-  const missing = await prepare(env.service, 'fund-type-enum', keepOnly);
+  const missing = await prepare(restarted(), 'fund-type-enum', keepOnly);
   blockedRemove(missing);
   assert.match(missing.checks.find((check) => check.label === '比较基准').detail, /^无法确认当前版本 V3 的取值（版本文件无法读取：ENOENT/);
 });

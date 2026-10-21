@@ -108,6 +108,50 @@ test('重复入金导出：邮件模板与银行对账单各取租约，写出�
   assert.equal(fs.existsSync(path.join(directory, '失败.xlsx')), false);
 });
 
+// 租约带有核对过的字节时，Writer 只读入这份字节：路径指向不存在的文件也能导出，说明没有按路径再次打开。
+function bytesSource(relativeAsset, events, name, mutate = null) {
+  return {
+    acquire: async (options) => {
+      events.push([name, 'acquire', options.label]);
+      let bytes = fs.readFileSync(asset(relativeAsset));
+      if (mutate) bytes = await mutate(bytes);
+      return { filePath: asset('已被替换的版本文件.xlsx'), bytes, release: () => events.push([name, 'release']) };
+    }
+  };
+}
+
+test('三个输出模块在租约带字节时只读入这份字节，不再按路径打开版本文件', async (t) => {
+  const directory = tempDir(t);
+  const events = [];
+  const prefund = preFundService(directory, bytesSource('资金对账导出不平.xlsx', events, 'prefund'));
+  assert.equal((await prefund.service.export({ outputDirectory: directory, runLocator: prefund.service.lastRun })).status, 'ok');
+  assert.ok(fs.existsSync(prefund.filePath));
+
+  const duplicate = duplicateService({
+    mailTemplateSource: bytesSource('重复入金召回邮件模板.xlsx', events, 'mail'),
+    bankTemplateSource: bytesSource('银行对账单.xlsx', events, 'bank')
+  });
+  await duplicate.export({ savePath: path.join(directory, '召回.xlsx') });
+  assert.ok(fs.existsSync(path.join(directory, '召回.xlsx')));
+
+  const widened = async (bytes) => {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(bytes);
+    workbook.getWorksheet('渠道对账单').getColumn(1).width = 41;
+    return Buffer.from(await workbook.xlsx.writeBuffer());
+  };
+  const position = Object.create(PositionReconciliationService.prototype);
+  position.templatePath = asset('不存在的模板.xlsx');
+  position.templateSource = bytesSource('平盘银行对账单.xlsx', events, 'position', widened);
+  position.store = { getBankRows: () => [{ workingRow: { Channel: 'C', BillDate: '2026-10-01' }, hit_summary: '', hit_type: '', match_detail: '' }] };
+  const outputPath = path.join(directory, '平盘.xlsx');
+  await position.exportBank({ channels: ['C'], months: ['2026-10'] }, outputPath);
+  const written = new ExcelJS.Workbook();
+  await written.xlsx.readFile(outputPath);
+  assert.equal(written.getWorksheet('渠道对账单').getColumn(1).width, 41, '输出采用租约字节中的样式');
+  assert.equal(events.filter(([, action]) => action === 'release').length, 4);
+});
+
 test('平盘银行数据导出：经来源取得当前版本，写出后释放', async (t) => {
   const directory = tempDir(t);
   const events = [];

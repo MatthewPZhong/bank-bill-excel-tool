@@ -94,7 +94,7 @@
     },
     {
       "file": "src/main-process/template-resources/inspection-runner.js",
-      "line": 34,
+      "line": 55,
       "carrier": "new Worker(WORKER_PATH, { workerData: payload, resourceLimits })"
     },
     {

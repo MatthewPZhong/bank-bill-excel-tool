@@ -1130,14 +1130,15 @@ class PreFundReconciliationService {
       : { filePath: this.templatePath, release() {} };
     try {
       return await this._writeExport({
-        plan, conflicts, outputDirectory, exportDate, runLocator, onProgress, templatePath: template.filePath
+        plan, conflicts, outputDirectory, exportDate, runLocator, onProgress,
+        templatePath: template.filePath, templateBytes: template.bytes || null
       });
     } finally {
       template.release();
     }
   }
 
-  async _writeExport({ plan, conflicts, outputDirectory, exportDate, runLocator, onProgress, templatePath }) {
+  async _writeExport({ plan, conflicts, outputDirectory, exportDate, runLocator, onProgress, templatePath, templateBytes = null }) {
     fs.mkdirSync(outputDirectory, { recursive: true });
     const backups = [];
     const publishedFiles = new Map();
@@ -1152,6 +1153,7 @@ class PreFundReconciliationService {
       if (onProgress) onProgress({ stage: 'export-start', current: 0, total: plan.length });
       files = await writeChannelWorkbooks({
         templatePath,
+        templateBytes,
         outputDirectory,
         exportDate,
         channelExports: (function* mapDuplicateRows(channelExports) {

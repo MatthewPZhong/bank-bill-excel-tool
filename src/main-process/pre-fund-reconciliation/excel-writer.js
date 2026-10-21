@@ -122,7 +122,21 @@ function validateTemplateWorkbook(workbook, templatePath = '') {
   return workbook;
 }
 
-async function loadTemplateWorkbook(templatePath) {
+// templateBytes：设置 → 模板文件取得的用户版本字节（已核对 SHA-256 并通过检查），有则直接读入这份字节，不再按路径打开。
+async function loadTemplateWorkbook(templatePath, templateBytes = null) {
+  if (templateBytes) {
+    const workbook = new ExcelJS.Workbook();
+    try {
+      await workbook.xlsx.load(templateBytes);
+    } catch (error) {
+      throw new PreFundTemplateError(`无法读取资金对账导出模板「${templatePath}」：${error.message}`, {
+        code: 'pre-fund-export-template-read-failed',
+        templatePath,
+        cause: error
+      });
+    }
+    return validateTemplateWorkbook(workbook, templatePath);
+  }
   if (!templatePath || typeof templatePath !== 'string') {
     throw new PreFundTemplateError('前置资金对账导出必须提供5-sheet模板路径', {
       code: 'pre-fund-export-template-path-required'
@@ -426,7 +440,7 @@ async function writeWithTemplate({
 
 async function writeChannelWorkbook(options = {}) {
   const templateWorkbook = options.templateWorkbook
-    || await loadTemplateWorkbook(options.templatePath);
+    || await loadTemplateWorkbook(options.templatePath, options.templateBytes);
   const channel = options.channelName ?? options.channel;
   const fileName = options.outputPath
     ? path.basename(options.outputPath)
@@ -460,7 +474,7 @@ async function writeChannelWorkbook(options = {}) {
  * channelExports 可直接接 side DB 的逐渠道游标，不要求全量数组。
  */
 async function writeChannelWorkbooks(options = {}) {
-  const templateWorkbook = await loadTemplateWorkbook(options.templatePath);
+  const templateWorkbook = await loadTemplateWorkbook(options.templatePath, options.templateBytes);
   const outputDirectory = options.outputDirectory;
   if (!outputDirectory || typeof outputDirectory !== 'string') {
     throw new TypeError('前置资金对账批量导出必须提供 outputDirectory');
