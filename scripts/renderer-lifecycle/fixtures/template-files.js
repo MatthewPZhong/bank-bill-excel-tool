@@ -416,6 +416,27 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     }
   });
 
+  await test('当前版本文件缺失：当前版本不能另存为，内置 V1 等可读版本仍可另存为', async () => {
+    await setup({ writes: true, open: false });
+    await js(`(() => {
+      const detail = tf.data.details['dup-recall-mail'];
+      detail.capabilities = { ...detail.capabilities, saveAs: false };
+      Object.assign(detail.current, { validation: 'failed', validationMessage: '版本文件缺失', saveAs: false });
+      for (const version of detail.versions) version.saveAs = version.id !== detail.current.id;
+    })(); tf.open(); tf.q('[data-tab="templates"]').click(); void 0;`);
+    await waitFor('tf.q(\'[data-role="template-count"]\').textContent === "39 个" && !!tf.q(".template-center-detail-heading")', '模板列表与详情加载');
+    await selectResource('dup-recall-mail');
+    assert.equal(await js(`tf.q('.template-center-action[data-action="save-as"]').disabled`), true, '当前版本的另存为不可用');
+    await openTab('versions');
+    const rows = await js(`[...tf.overlay.querySelectorAll('.template-center-tab-panel tbody tr')].map((row) => ({
+      label: row.cells[0].querySelector('strong').textContent, disabled: row.querySelector('[data-action="save-as"]').disabled }))`);
+    const current = await js(`tf.data.details['dup-recall-mail'].current.label`);
+    assert.deepEqual(rows.filter((row) => row.label === current).map((row) => row.disabled), [true]);
+    assert.ok(rows.filter((row) => row.label !== current).every((row) => row.disabled === false), JSON.stringify(rows));
+    assert.ok(rows.some((row) => row.label === 'V1'));
+    assert.deepEqual(await js('__testErrors'), []);
+  });
+
   await test('有变更记录接口时显示入口，记录可跳回对应模板；关闭设置后退订', async () => {
     await setup({ writes: true });
     assert.equal(await js('tf.count("subscribe")'), 1);

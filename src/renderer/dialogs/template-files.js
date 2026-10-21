@@ -497,7 +497,8 @@
             : (tasks.length ? `${tasks.length} 个任务正在使用` : `删除 ${version.label}`);
           const canDelete = !version.current && !tasks.length;
           const actions = [
-            `<button class="template-center-icon-button" type="button" data-action="save-as" data-version-id="${escapeHtml(version.id)}" title="另存为" aria-label="另存为 ${escapeHtml(version.label)}"${caps.saveAs === false ? ' disabled' : ''}>💾</button>`,
+            // 按各版本自身判断：当前版本文件缺失时，其他可读的版本（如内置 V1）仍可另存为。
+            `<button class="template-center-icon-button" type="button" data-action="save-as" data-version-id="${escapeHtml(version.id)}" title="另存为" aria-label="另存为 ${escapeHtml(version.label)}"${(version.saveAs ?? caps.saveAs) === false ? ' disabled' : ''}>💾</button>`,
             caps.setCurrent && !version.current
               ? `<button class="template-center-icon-button template-center-text-button" type="button" data-action="set-current" data-version-id="${escapeHtml(version.id)}" title="${unavailable ? unavailableTitle : (builtin ? '恢复为内置版本' : '设为当前版本')}"${incompatible ? ' disabled' : ''}>启用</button>`
               : '',

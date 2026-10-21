@@ -707,6 +707,60 @@ test('中央目录与本地文件头互相矛盾的 ZIP：按中央目录解出�
   assert.ok(saved.equals(await canonicalizeXlsx(saved)), '重新打包是幂等的');
 });
 
+test('条目名带 . 段、空段或仅大小写不同的别名：重新打包前拒绝，不让两个解析库读到不同部件', async (t) => {
+  const env = setup(t);
+  const JSZip = require('jszip');
+  const source = fs.readFileSync(path.join(ROOT, 'assets', '重复入金召回邮件模板.xlsx'));
+  const sheet = await (await JSZip.loadAsync(source)).file('xl/worksheets/sheet1.xml').async('nodebuffer');
+  for (const [alias, pattern] of [
+    ['xl/worksheets/./sheet1.xml', /文件的条目名不规范（xl\/worksheets\/\.\/sheet1\.xml）/],
+    ['xl/worksheets//sheet1.xml', /文件的条目名不规范（xl\/worksheets\/\/sheet1\.xml）/],
+    ['XL/WORKSHEETS/SHEET1.XML', /文件包含重复或仅大小写不同的条目（XL\/WORKSHEETS\/SHEET1\.XML）/]
+  ]) {
+    const zip = await JSZip.loadAsync(source);
+    zip.file(alias, sheet, { createFolders: false });
+    const bytes = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+    await assert.rejects(extractEntries(bytes), pattern, alias);
+  }
+  const zip = await JSZip.loadAsync(source);
+  zip.file('xl/worksheets/./sheet1.xml', sheet, { createFolders: false });
+  const file = path.join(env.files, 'alias.xlsx');
+  fs.writeFileSync(file, await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
+  const prepared = await prepare(env.service, 'dup-recall-mail', file);
+  assert.equal(prepared.verdict, 'fail');
+  assert.match(prepared.checks.find((check) => check.label === '读取文件').detail, /条目名不规范/);
+});
+
+test('同一版本的并发复核只读一次文件；当前版本缺失时其他版本仍可另存为', async (t) => {
+  const env = setup(t);
+  const file = await restyledTemplate('assets/重复入金召回邮件模板.xlsx', path.join(env.files, 'a.xlsx'), widenMailColumn);
+  await importVersion(env.service, 'dup-recall-mail', file);
+  let reads = 0;
+  let inspections = 0;
+  const restarted = createTemplateResourceService({
+    appRoot: ROOT,
+    userDataRoot: env.userData,
+    store: env.store,
+    readFileCapped: async (filePath) => {
+      reads += 1;
+      return fs.promises.readFile(filePath);
+    },
+    runInspection: async (request) => {
+      inspections += 1;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return runInspectionTask(request);
+    }
+  });
+  const views = await Promise.all(Array.from({ length: 6 }, () => restarted.get('dup-recall-mail')));
+  assert.ok(views.every((view) => view.resource.current.validation === 'passed'));
+  assert.deepEqual([reads, inspections], [1, 1], '并发复核共用一次读盘与检查');
+
+  fs.rmSync(env.versionFile('dup-recall-mail', 'v2'));
+  const { resource } = await restarted.get('dup-recall-mail');
+  assert.equal(resource.capabilities.saveAs, false, '当前版本缺失时，当前版本的另存为不可用');
+  assert.deepEqual(resource.versions.map((version) => [version.id, version.saveAs]), [['v2', false], ['v1', true]]);
+});
+
 test('已存版本大小与记录不一致时不在主进程整份读入', async (t) => {
   const env = setup(t);
   const file = await restyledTemplate('assets/重复入金召回邮件模板.xlsx', path.join(env.files, 'a.xlsx'), widenMailColumn);

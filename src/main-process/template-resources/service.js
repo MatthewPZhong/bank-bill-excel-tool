@@ -98,6 +98,7 @@ function createTemplateResourceService({
   const userInspections = new Map();
   const compatibility = new Map();
   const contractsInFlight = new Map();
+  const versionReadsInFlight = new Map();
   const reparsedValues = new Map();
   const pickedFiles = new Set();
   const pendingImports = new Map();
@@ -265,24 +266,32 @@ function createTemplateResourceService({
     const cacheKey = `${resource.id}:${version.versionId}`;
     const cached = userInspections.get(cacheKey);
     if (cached && cached.signature === signature && cached.sha256 === version.sha256) return cached;
-    let bytes;
-    try {
-      bytes = await readFileCapped(filePath, versionReadCap(version));
-    } catch (error) {
-      return accessFailure(filePath, error);
-    }
-    const digest = sha256(bytes);
-    let record;
-    if (digest !== version.sha256) {
-      record = { filePath, signature, sha256: version.sha256, ok: false, message: '版本文件已被修改（SHA-256 不一致）' };
-    } else {
-      const contract = await contractOf(resource, bytes, digest);
-      let message = '';
-      if (!contract.ok) message = contract.transient ? `兼容复核未完成：${contract.message}` : `与本版程序不兼容：${contract.message}`;
-      record = { filePath, signature, sha256: version.sha256, ok: contract.ok, transient: contract.transient, message };
-    }
-    if (!record.transient) userInspections.set(cacheKey, record);
-    return { ...record, bytes };
+    // 同一版本、同一文件签名正在复核时合并为一次：读盘、SHA-256 与契约检查只做一遍，并发请求不各自持有一份文件字节。
+    const flightKey = `${cacheKey}:${signature}:${version.sha256}`;
+    if (versionReadsInFlight.has(flightKey)) return versionReadsInFlight.get(flightKey);
+    const running = (async () => {
+      let bytes;
+      try {
+        bytes = await readFileCapped(filePath, versionReadCap(version));
+      } catch (error) {
+        return accessFailure(filePath, error);
+      }
+      const digest = sha256(bytes);
+      let record;
+      if (digest !== version.sha256) {
+        record = { filePath, signature, sha256: version.sha256, ok: false, message: '版本文件已被修改（SHA-256 不一致）' };
+      } else {
+        const contract = await contractOf(resource, bytes, digest);
+        let message = '';
+        if (!contract.ok) message = contract.transient ? `兼容复核未完成：${contract.message}` : `与本版程序不兼容：${contract.message}`;
+        record = { filePath, signature, sha256: version.sha256, ok: contract.ok, transient: contract.transient, message };
+      }
+      if (!record.transient) userInspections.set(cacheKey, record);
+      return { ...record, bytes };
+    })();
+    versionReadsInFlight.set(flightKey, running);
+    running.finally(() => versionReadsInFlight.delete(flightKey)).catch(() => {});
+    return running;
   }
 
   function leaseTasks(resourceId, versionId = null) {
@@ -301,6 +310,8 @@ function createTemplateResourceService({
       size: Number.isFinite(record.size) ? record.size : null,
       appVersion,
       sha256: record.sha256 || '',
+      // 每个版本各自能否另存为：当前版本缺失时，内置等其他可读的版本仍可另存为。
+      saveAs: !record.error,
       tasks: leaseTasks(resource.id, BUILTIN_VERSION_ID)
     };
   }
@@ -322,6 +333,7 @@ function createTemplateResourceService({
       // failed：不兼容（契约不符、文件缺失或被改动）；unverified：运行环境异常导致复核未完成，下次复核重试。
       validation: inspected.ok ? version.validation : (inspected.transient ? 'unverified' : 'failed'),
       validationMessage: inspected.ok ? '' : inspected.message,
+      saveAs: inspected.message !== '版本文件缺失',
       sheets: Array.isArray(structure.sheets) ? structure.sheets : [],
       enumValues: Array.isArray(structure.enumValues) ? structure.enumValues : null,
       tasks: leaseTasks(resource.id, version.versionId)
@@ -360,7 +372,7 @@ function createTemplateResourceService({
       versions: allVersions,
       tasks: leaseTasks(resource.id),
       capabilities: {
-        saveAs: current.source === 'user' ? current.validationMessage !== '版本文件缺失' : !record.error,
+        saveAs: current.saveAs,
         importVersion: allowed,
         importReason,
         setCurrent: allowed,

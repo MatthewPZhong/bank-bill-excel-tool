@@ -47,11 +47,19 @@ function extractEntries(buffer, limit = MAX_UNCOMPRESSED_BYTES) {
       zip.on('end', () => stop(resolve, entries));
       zip.on('entry', (entry) => {
         const name = entry.fileName;
-        if (names.has(name)) {
-          stop(reject, new ZipRejectedError('读取文件', `文件包含重复的条目（${name}），无法安全读取`));
+        // 条目名必须规范且无别名：带 . 段或空段（如 a/./b、a//b）的名称会被 JSZip 与 SheetJS 解释成不同部件；
+        // 包内部件名按 OPC 规则不区分大小写，仅大小写不同的两个条目同样有歧义。拒绝而不改名（改名还要同步关系引用）。
+        const segments = name.replace(/\/$/, '').split('/');
+        if (segments.some((segment) => segment === '' || segment === '.')) {
+          stop(reject, new ZipRejectedError('读取文件', `文件的条目名不规范（${name}），无法安全读取`));
           return;
         }
-        names.add(name);
+        const key = name.toLowerCase();
+        if (names.has(key)) {
+          stop(reject, new ZipRejectedError('读取文件', `文件包含重复或仅大小写不同的条目（${name}），无法安全读取`));
+          return;
+        }
+        names.add(key);
         if (/\/$/.test(name)) {
           if (entry.uncompressedSize > 0 || entry.compressedSize > 0) {
             stop(reject, new ZipRejectedError('读取文件', `文件的目录条目带有内容（${name}），无法安全读取`));
