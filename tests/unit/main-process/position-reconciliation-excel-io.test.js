@@ -243,6 +243,21 @@ test('模板的筛选与打印区域按本次结果行数调整，列范围不�
   const builtinRanges = await rangesOf(builtin);
   assert.equal(builtinRanges.autoFilter ?? null, null, '内置模板没有筛选，不新增');
   assert.equal(builtinRanges.printArea ?? null, null, '内置模板没有打印区域，不新增');
+
+  // 筛选起点不在第 1 行：首行统一为表头行；多个打印区域无法判断如何延伸，保持原样（导入预检会拒绝这类模板）。
+  const offsetPath = path.join(root, 'template-offset.xlsx');
+  const offset = new ExcelJS.Workbook();
+  await offset.xlsx.readFile(RESULT_TEMPLATE);
+  offset.getWorksheet(BANK_SHEET_NAME).autoFilter = 'A3:AW7';
+  offset.getWorksheet(BANK_SHEET_NAME).pageSetup.printArea = 'A1:AW3&&A4:AW6';
+  await offset.xlsx.writeFile(offsetPath);
+  const offsetOut = path.join(root, 'offset.xlsx');
+  await writeResultWorkbook({
+    templatePath: offsetPath,
+    outputPath: offsetOut,
+    rows: [1, 2, 3, 4, 5].map((index) => ({ resultRow: resultRow(`BIZ-${index}`, 'Inbound'), changed: false }))
+  });
+  assert.deepEqual(await rangesOf(offsetOut), { rowCount: 6, autoFilter: 'A1:AW6', printArea: 'A1:AW3&&A4:AW6' });
 });
 
 test('链接表零数据仍导出合法表头，49列表头被篡改时回导拒绝', async (t) => {

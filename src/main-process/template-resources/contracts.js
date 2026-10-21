@@ -5,6 +5,8 @@
 // 另加只在预检时检查、但会影响输出或回读的约束（如平盘结果模板的多余表头）。
 
 const ExcelJS = require('exceljs');
+const JSZip = require('jszip');
+const sax = require('sax');
 const XLSX = require('xlsx');
 
 const { PRIMARY_ARCHIVE_SCOPES } = require('../archive-center/module-scope-registry');
@@ -71,6 +73,114 @@ function createCheckList() {
       return transient;
     }
   };
+}
+
+// ExcelJS 4.4 读入时把数据验证（sqref）与合并单元格（ref）的范围逐格展开：几 KB 的文件只要范围写成整张表，
+// 主进程就要分配上百亿项。读入前先流式扫描工作表 XML，统计这两类范围覆盖的单元格数，超出上限即拒绝。
+const MAX_EXPANDED_CELLS = 1048576;
+const EXCEL_MAX_ROWS = 1048576;
+const EXCEL_MAX_COLUMNS = 16384;
+
+// 单个引用（A1、A1:C3、A:C、1:3，可带 $）覆盖的单元格数；无法识别时返回 null。
+function refCellCount(ref) {
+  const [start, end = start] = String(ref).replace(/\$/g, '').split(':');
+  const parse = (text) => {
+    const match = /^([A-Z]*)(\d*)$/i.exec(text);
+    if (!match || (!match[1] && !match[2])) return null;
+    return { c: match[1] ? XLSX.utils.decode_col(match[1].toUpperCase()) : null, r: match[2] ? Number(match[2]) - 1 : null };
+  };
+  const s = parse(start);
+  const e = parse(end);
+  if (!s || !e) return null;
+  const rows = Math.abs((e.r ?? EXCEL_MAX_ROWS - 1) - (s.r ?? 0)) + 1;
+  const columns = Math.abs((e.c ?? EXCEL_MAX_COLUMNS - 1) - (s.c ?? 0)) + 1;
+  return rows * columns;
+}
+
+// sqref 是空格分隔的多个引用。
+function sqrefCellCount(sqref) {
+  return String(sqref).trim().split(/\s+/).filter(Boolean)
+    .reduce((total, part) => total + (refCellCount(part) ?? 0), 0);
+}
+
+// 定义名称的公式按逗号分隔多个区域（引号内的逗号属于工作表名），返回去掉工作表名的区域列表。
+function definedNameRanges(formula) {
+  const parts = [];
+  let current = '';
+  let quoted = false;
+  for (const char of String(formula)) {
+    if (char === "'") quoted = !quoted;
+    if (char === ',' && !quoted) {
+      parts.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  parts.push(current);
+  return parts.map((part) => part.trim().replace(/^.*!/, '')).filter(Boolean);
+}
+
+function saxScan(stream, handlers) {
+  return new Promise((resolve, reject) => {
+    const parser = sax.createStream(true, {});
+    for (const [event, handler] of Object.entries(handlers)) parser.on(event, handler);
+    parser.on('error', reject);
+    parser.on('end', resolve);
+    stream.on('error', reject);
+    stream.pipe(parser);
+  });
+}
+
+// 读入前的原始 XML 扫描：数据验证与合并单元格覆盖的单元格数，以及各工作表的打印区域
+// （ExcelJS 读入时同一个打印区域定义中的多个区域只保留第一个，按原始定义判断）。
+async function scanWorkbookXml(bytes) {
+  const zip = await JSZip.loadAsync(bytes);
+  let expandedCells = 0;
+  const sheetPaths = Object.keys(zip.files).filter((name) => /^xl\/worksheets\/[^/]+\.xml$/i.test(name)).sort();
+  for (const name of sheetPaths) {
+    await saxScan(zip.file(name).nodeStream(), {
+      opentag(node) {
+        const local = node.name.replace(/^.*:/, '');
+        if (local === 'dataValidation' && node.attributes.sqref) expandedCells += sqrefCellCount(node.attributes.sqref);
+        else if (local === 'mergeCell' && node.attributes.ref) expandedCells += sqrefCellCount(node.attributes.ref);
+      }
+    });
+    if (expandedCells > MAX_EXPANDED_CELLS) break;
+  }
+  const sheetNames = [];
+  const printAreas = new Map();
+  const workbookXml = zip.file('xl/workbook.xml');
+  if (workbookXml) {
+    let printArea = null;
+    await saxScan(workbookXml.nodeStream(), {
+      opentag(node) {
+        const local = node.name.replace(/^.*:/, '');
+        if (local === 'sheet') sheetNames.push(String(node.attributes.name || ''));
+        if (local === 'definedName' && node.attributes.name === '_xlnm.Print_Area' && node.attributes.localSheetId !== undefined) {
+          printArea = { sheetIndex: Number(node.attributes.localSheetId), formula: '' };
+        }
+      },
+      text(text) {
+        if (printArea) printArea.formula += text;
+      },
+      closetag(name) {
+        if (!printArea || name.replace(/^.*:/, '') !== 'definedName') return;
+        const sheetName = sheetNames[printArea.sheetIndex];
+        if (sheetName !== undefined) printAreas.set(sheetName, [...(printAreas.get(sheetName) || []), ...definedNameRanges(printArea.formula)]);
+        printArea = null;
+      }
+    });
+  }
+  return { expandedCells, printAreas };
+}
+
+// 输出端按结果行数调整打印区域，只支持每个工作表一个区域（多个区域逐段延伸会重叠）。
+function printAreaChecks(list, printAreas, sheetNames) {
+  const multiple = sheetNames.filter((name) => (printAreas.get(name) || []).length > 1);
+  if (multiple.length) {
+    list.add('打印区域', 'fail', `${multiple.map((name) => `「${name}」`).join('、')}设置了多个打印区域，导出时无法按结果行数调整，请在 Excel 中只保留一个区域后再导入`);
+  }
 }
 
 async function loadExcelWorkbook(bytes) {
@@ -140,7 +250,7 @@ function firstSheetHeaderRow(workbook) {
 
 const prefundContract = {
   engine: 'exceljs',
-  check(workbook, list) {
+  check(workbook, list, context) {
     try {
       validateTemplateWorkbook(workbook);
     } catch (error) {
@@ -153,7 +263,8 @@ const prefundContract = {
     }
     list.add('Sheet 结构', 'pass', `${TEMPLATE_SHEETS.length} 个，名称与顺序一致`);
     list.add('表头', 'pass', `${TEMPLATE_SHEETS.length} 个 Sheet 的表头均一致`);
-    // 导出复制每列的宽度、隐藏与列样式，数据行沿用列样式。
+    // 导出复制每列的宽度、隐藏与列样式，数据行沿用列样式；筛选与打印区域按各 Sheet 的结果行数调整。
+    printAreaChecks(list, context.printAreas, TEMPLATE_SHEETS.map((sheet) => sheet.name));
     for (const contract of TEMPLATE_SHEETS) {
       presentationWarnings(list, workbook.getWorksheet(contract.name), contract.headers, { label: contract.name });
     }
@@ -219,7 +330,8 @@ const positionContract = {
       if (rowNumber > 1 && row.values.some((value) => cellText(value).trim())) dataRows += 1;
     });
     if (dataRows) list.add('数据区', 'warn', `第 2 行起有 ${dataRows} 行内容，导出时清空，不会写入结果`);
-    // 筛选与打印区域在写出时随结果行数调整；Excel 表（Table）的范围无法安全调整，不接受。
+    // 筛选与打印区域在写出时随结果行数调整（只支持一个打印区域）；Excel 表（Table）的范围无法安全调整，不接受。
+    printAreaChecks(list, context.printAreas, [BANK_SHEET_NAME]);
     const tables = typeof sheet.getTables === 'function' ? sheet.getTables() : [];
     if (tables.length) {
       const names = tables.map((table) => (table.table && table.table.name) || table.name).filter(Boolean);
@@ -371,8 +483,25 @@ async function inspectContract(resourceId, bytes, context = {}) {
   const fullContext = {
     builtinSheetNames: context.builtinSheetNames,
     currentValues: context.currentValues || [],
-    references: context.references || { fundTypeValues: new Set(), gatewayFields: new Set() }
+    references: context.references || { fundTypeValues: new Set(), gatewayFields: new Set() },
+    printAreas: new Map()
   };
+  const failed = () => ({ checks: list.checks, ok: false, message: `${list.checks[0].label}：${list.checks[0].detail}`, diff: { added: [], removed: [] } });
+  // ExcelJS 读入会逐格展开数据验证与合并单元格：先扫描原始 XML，超出上限时不再读入。扫描失败同样不读入（无法确认安全）。
+  if (contract.engine === 'exceljs') {
+    let scan;
+    try {
+      scan = await scanWorkbookXml(bytes);
+    } catch (error) {
+      list.add('读取文件', 'fail', `文件无法读取：${errorText(error)}`);
+      return failed();
+    }
+    if (scan.expandedCells > MAX_EXPANDED_CELLS) {
+      list.add('表格范围', 'fail', `数据验证或合并单元格覆盖约 ${scan.expandedCells} 个单元格，超过 ${MAX_EXPANDED_CELLS} 个的上限，请缩小到实际使用的区域后再导入`);
+      return failed();
+    }
+    fullContext.printAreas = scan.printAreas;
+  }
   let workbook;
   try {
     workbook = contract.engine === 'sheetjs'

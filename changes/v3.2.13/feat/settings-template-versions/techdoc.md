@@ -48,7 +48,8 @@ v3.2.12 的「设置 → 模板文件」页只接了只读查询与另存为，�
 | `src/main-process/template-resources/service.js` | 版本合并视图、兼容复核、租约 `acquire/source`、`resolveCurrentFile`、导入（`rememberPickedFile/prepareImport/discardImport/commitImport`）、`setCurrentVersion`、`deleteVersion`、`listChanges`、孤儿清扫 |
 | `src/main-process/template-resources/catalog.js` | `vcc-pending-calc` 改为可替换；头注释同步 |
 | `src/main-process/{pre-fund-reconciliation,duplicate-inbound-match,position-reconciliation}/service.js` | 构造参数新增模板来源；导出时取租约、`finally` 释放；未注入时沿用原固定路径 |
-| `src/main-process/duplicate-inbound-match/excel-writer.js`、`position-reconciliation/excel-io.js` | 抽出 `validateMailTemplateWorkbook`、`validateBankTemplateWorkbook`、`validateResultTemplateWorkbook`，写出与预检共用；平盘 `writeResultWorkbook` 写出前截断模板数据区（ExcelJS 4.4 `spliceRows` 删除末尾多行无效），先取消数据区合并单元格，再核对只剩表头；写入后把模板的筛选与打印区域下边界调整到最后一行（列范围不变） |
+| `src/main-process/duplicate-inbound-match/excel-writer.js`、`position-reconciliation/excel-io.js` | 抽出 `validateMailTemplateWorkbook`、`validateBankTemplateWorkbook`、`validateResultTemplateWorkbook`，写出与预检共用；平盘 `writeResultWorkbook` 写出前截断模板数据区（ExcelJS 4.4 `spliceRows` 删除末尾多行无效），先取消数据区合并单元格，再核对只剩表头；写入后按 `output-sheet-ranges.js` 调整筛选与打印区域 |
+| `src/main-process/output-sheet-ranges.js`、`pre-fund-reconciliation/excel-writer.js` | 新增输出范围调整：模板的筛选与单个打印区域首行固定为表头行、末行为最后一行结果（零结果为表头行），列范围不变；多个打印区域保持原样（预检已拒绝）。平盘结果与资金对账各 Sheet（流式写出，在 commit 前设置）共用 |
 | `src/constants/fund-type-enum.js`、`gateway-recon-headers-loader.js`、新增 `sheetjs-sparse-cells.js` | 抽出 `parseFundTypeEnumWorkbook`、`parseGatewayReconHeadersWorkbook`，loader 与预检共用；改为只读实际存在的单元格（取值口径同 `sheet_to_json({header:1, defval:''})`），声明范围再大也不逐格展开 |
 | `src/backend/xlsx/zip-reader.js` | `openZipWithEntries` 包装打开与解析错误时保留原始错误（`cause`），供调用方区分运行环境错误 |
 | `src/main-process/vcc-financial-op-service.js`、`-result-workbook-runner.js`、`-result-workbook-writer.js` | Pending 模板由 Main 读出字节交给 Worker；Writer 核对 SHA-256 后 `xlsx.load`；新增 `probePendingTemplate` 供预检，试写后临时目录清理失败不覆盖结论 |
@@ -98,7 +99,7 @@ v3.2.12 的「设置 → 模板文件」页只接了只读查询与另存为，�
 
 - 用户版本在 `list/get/acquire/setCurrentVersion` 时复核：文件存在、SHA-256 与记录一致、按当前代码契约检查（按资源与内容哈希缓存）。任一不满足即 `validation: 'failed'`（D1）。
 - 复核或预检中途遇到运行环境错误（Node 系统错误，带 `syscall`，如临时目录不可写、ENOSPC、EMFILE、文件被占用；被读取层包装时沿 `cause` 与 `AggregateError.errors` 查找）时，该检查判 fail 但标为 transient：提示“兼容复核未完成…请稍后重试”，结果不缓存，下次复核重新执行；版本 DTO 的 `validation` 为 `unverified`（区别于不兼容的 `failed`），`acquire` 此时只提示稍后重试，不引导恢复默认或重新导入。VCC 试写结束后清理临时目录失败只留下系统临时目录残留，不改变试写结论。
-- 版本文件打不开时：确认不存在（ENOENT、ENOTDIR）为“版本文件缺失”（`failed`）；权限、占用、句柄耗尽等其他读盘错误同样按运行环境问题处理（`unverified`，提示稍后重试，不缓存）。
+- 版本文件打不开时：确认不存在或不是普通文件（ENOENT、ENOTDIR、EISDIR，或 stat 显示为目录等）为“版本文件缺失”（`failed`）；权限、占用、句柄耗尽等其他读盘错误同样按运行环境问题处理（`unverified`，提示稍后重试，不缓存）。
 - `acquire(resourceId, {moduleId, label, withBytes})`：读出当前版本后、任何等待之前先登记租约，复核失败时释放；内置返回随包路径；用户版本复核不通过抛 `TemplateResourceUnavailableError`（code `template-resource-unavailable`），提示指向设置页。使用用户版本时写一条活动日志（模板、版本、SHA 前 12 位）。返回的租约在 `release()` 前保护该版本不被删除（包括复核进行期间），并在「版本 / 使用方」中显示为任务使用中。
 - `source(resourceId, moduleId)` 只向模块暴露 `acquire`。
 
@@ -108,10 +109,10 @@ v3.2.12 的「设置 → 模板文件」页只接了只读查询与另存为，�
 
 | 资源 | 判定（fail 阻止导入，warn 需确认） |
 | --- | --- |
-| `prefund-unbalanced` | ExcelJS 读入后调用写出端 `validateTemplateWorkbook`：5 个 Sheet 名称与顺序、每个 Sheet 表头逐列一致且无多余表头 |
+| `prefund-unbalanced` | ExcelJS 读入后调用写出端 `validateTemplateWorkbook`：5 个 Sheet 名称与顺序、每个 Sheet 表头逐列一致且无多余表头；任一 Sheet 有多个打印区域 fail（筛选与单个打印区域在写出时随各 Sheet 行数调整） |
 | `dup-recall-mail` | `validateMailTemplateWorkbook`：只有 1 个 Sheet、前 10 列表头一致；右侧多余表头 warn（不写入导出） |
 | `bank-statement` | `validateBankTemplateWorkbook`：含「渠道对账单」、前 46 列一致；多余表头 warn |
-| `position-bank` | `validateResultTemplateWorkbook`：含「渠道对账单」、前 49 列一致；另外两种情况判 fail：内置之外的 Sheet（整本模板会写进输出），以及多余非空表头（结果回读要求恰好 49 列）；第 2 行起有内容时 warn（如把旧结果当模板导入，写出时清空，不进入结果）；含 Excel 表（Table）fail（结果行数变化后范围无法安全调整，需转为普通区域）；含数据验证或条件格式 warn（按原范围带入结果）。筛选与打印区域在写出时随结果行数调整 |
+| `position-bank` | `validateResultTemplateWorkbook`：含「渠道对账单」、前 49 列一致；另外两种情况判 fail：内置之外的 Sheet（整本模板会写进输出），以及多余非空表头（结果回读要求恰好 49 列）；第 2 行起有内容时 warn（如把旧结果当模板导入，写出时清空，不进入结果）；含 Excel 表（Table）fail（结果行数变化后范围无法安全调整，需转为普通区域）；含数据验证或条件格式 warn（按原范围带入结果）；多个打印区域 fail。筛选与单个打印区域在写出时随结果行数调整 |
 | `fund-type-enum` | 与运行时同口径解析；无取值 fail；与当前版本 diff；移除已保存场景引用的值（任意 `{field:'FundType', value}`）fail |
 | `gateway-recon` | 与运行时同口径解析；缺少 `GATEWAY_RECON_SIGNATURE.signatureHeaders` 任一项 fail；含 `__CUSTOM__` warn（已忽略）；移除 C3 场景引用的字段（`reconFields[].gwField`、`conditions[side=网关].field`、`assign.gwField`，自取值除外）fail |
 | `vcc-pending-calc` | 需有第 1 个 Sheet；第 1、2 行行高不超过 409.5；用正式导出的流式 Writer 与 `validateResultWorkbook` 试写一个 Pending Sheet（`probePendingTemplate`），写不出或校验不过 fail；附一条生效范围说明 |
@@ -125,7 +126,9 @@ v3.2.12 的「设置 → 模板文件」页只接了只读查询与另存为，�
 
 结构描述（各 Sheet 表头、数据行数、枚举取值）与 FundType / 网关表头解析只遍历实际存在的单元格，数据行数按行区间求并集计算：`<dimension>` 声明或一个零散单元格覆盖整张表（如 `XFD1048576`）的小文件，不会让主进程按整张表展开。结构描述失败时预检判 fail，不发放可提交的暂存。
 
-FundType 的取值（含展示用的 `enumValues`）与运行时 loader 同口径（声明范围首列、跳过首行）。预检中新增 / 移除与场景引用保护的比较基准，用运行时 loader 重新解析当前版本文件得到（声明范围不从 A1 开始也一致，且不依赖版本记录里保存的结构）；当前版本文件读不出时退回记录中的结构。
+以 ExcelJS 读入的模板（资金对账、重复入金、银行对账单、平盘、VCC Pending），读入前先用 `jszip` + `sax` 流式扫描各工作表 XML：ExcelJS 4.4 读入时把数据验证（`sqref`）与合并单元格（`ref`）逐格展开，二者合计覆盖超过 1048576 个单元格时预检判 fail（“表格范围”），不再读入；扫描失败同样判 fail。同一次扫描从 `xl/workbook.xml` 读取原始打印区域定义（Excel 可在一个定义中用逗号写多个区域，ExcelJS 读入后只保留第一个），供资金对账与平盘判断是否只有一个打印区域。已存版本复核走同一契约，导出时读入的模板都已通过该上限。
+
+FundType 的取值（含展示用的 `enumValues`）与运行时 loader 同口径（声明范围首列、跳过首行）。导入时按运行时口径解析的取值另存为版本记录的 `structure.comparableValues` 快照（内容由 SHA-256 锁定）。预检中新增 / 移除与场景引用保护的比较基准：内置版本解析随包文件；用户版本取快照；早期记录没有快照时，核对 SHA-256 后重新解析版本文件。都取不到可信取值（文件被改动、缺失或读不出）时提示“比较基准”warn，并假定场景引用的值都在当前版本中，新版本缺少其中任何一个都判 fail。
 
 ## 六、模块接入
 
@@ -155,8 +158,9 @@ FundType 的取值（含展示用的 `enumValues`）与运行时 loader 同口�
 
 | 层 | 入口 | 覆盖 |
 | --- | --- | --- |
-| Unit | `tests/unit/main-process/template-resources-versions.test.js` | 预检与仅保存、启用/租约/冲突/恢复默认/删除、版本号不复用、预检期间版本变化冲突、重复内容、令牌过期与上限、7 类输出契约的 fail/warn、枚举与网关的场景引用、文件篡改与缺失、升级后契约变化（D1）、复核期间租约拦截删除、环境性失败（含读取层包装的系统错误）不缓存且恢复后重新复核、试写清理失败不覆盖结论、声明范围覆盖整张表的小文件、声明范围不从 A1 开始时的比较基准与场景引用保护、版本文件读盘错误按暂不可用处理、平盘模板数据区提示、Excel 表拒绝与数据验证 / 条件格式提示、孤儿清扫与重建后状态保持、写库失败回滚 |
-| Unit | `tests/unit/main-process/position-reconciliation-excel-io.test.js` | 模板数据区的旧行（含金额）、合并单元格与仅有样式的行在写出前全部清空，回读只含本次数据；筛选与打印区域按结果行数调整（5 行、0 行），内置模板不新增 |
+| Unit | `tests/unit/main-process/template-resources-versions.test.js` | 预检与仅保存、启用/租约/冲突/恢复默认/删除、版本号不复用、预检期间版本变化冲突、重复内容、令牌过期与上限、7 类输出契约的 fail/warn、枚举与网关的场景引用、文件篡改与缺失、升级后契约变化（D1）、复核期间租约拦截删除、环境性失败（含读取层包装的系统错误）不缓存且恢复后重新复核、试写清理失败不覆盖结论、声明范围覆盖整张表的小文件、声明范围不从 A1 开始时的比较基准与场景引用保护、比较基准不信任被改动或读不出的当前文件（快照、SHA 核对后重新解析、按场景引用逐项核对）、版本文件读盘错误按暂不可用处理、版本路径被目录替代判为缺失、数据验证或合并单元格范围超限在读入前拒绝、多个打印区域（Excel 逗号写法与多个定义）拒绝、平盘模板数据区提示、Excel 表拒绝与数据验证 / 条件格式提示、孤儿清扫与重建后状态保持、写库失败回滚 |
+| Unit | `tests/unit/main-process/position-reconciliation-excel-io.test.js` | 模板数据区的旧行（含金额）、合并单元格与仅有样式的行在写出前全部清空，回读只含本次数据；筛选与打印区域按结果行数调整（5 行、0 行），筛选起点不在第 1 行时首行归为表头，多个打印区域保持原样，内置模板不新增 |
+| Unit | `tests/unit/main-process/pre-fund-reconciliation-excel-writer.test.js` | 新增：模板的筛选与打印区域按各 Sheet 本次行数调整（含筛选起点不在第 1 行、零数据 Sheet），未设置时不新增 |
 | Unit | `tests/unit/backend/database/template-resource-repository.test.js` | 建表幂等、事务内更新、冲突与 CHECK 失败整体回滚 |
 | Unit | `tests/unit/main-process/template-resources-consumers.test.js` | 三个输出服务取/放租约；模板不可用时不改动已有文件、不写出 |
 | Unit | `template-resources-service.test.js`、`template-resources-ipc.test.js` | 可替换范围固定 7 个；未接存储时能力关闭；preload 与 Main 通道一一对应，导入经选择框、广播与变更记录 |
@@ -209,7 +213,7 @@ FundType 的取值（含展示用的 `enumValues`）与运行时 loader 同口�
 
 ### 9.3 代码审查与修复（2026-10-20）
 
-三轮审查：先由 Claude 审查分支全部改动，再由 Codex 两次只读复审（每次都含此前的修复）。已修复以下 9 项，其余审查发现记为已知、本轮不修：
+四轮审查：先由 Claude 审查分支全部改动，再由 Codex 三次只读复审（每次都含此前的修复）。已修复以下 18 项，其余审查发现记为已知、本轮不修：
 
 | 来源 | 问题 | 修复 |
 | --- | --- | --- |
@@ -224,5 +228,16 @@ FundType 的取值（含展示用的 `enumValues`）与运行时 loader 同口�
 | Codex 二轮 P3 | 版本文件因权限、占用等读盘错误打不开时仍标为不兼容（缺失 / 读取失败），引导恢复默认 | 只有确认不存在才算缺失；其余读盘错误为暂不可用、稍后重试、不缓存 |
 
 验证：新增与改动的回归用例在旧实现上均失败（声明范围覆盖整张表的用例除外：旧实现会耗尽内存，未在本机运行）。FundType / 网关解析与结构描述在 `assets/` 全部 39 个 xlsx 上与旧实现逐项比对一致。`npm run test:unit` 9660/9664（0 失败，4 项为既有条件跳过）；`npm run lint`、`npm run check:architecture` 通过；集成脚本 `template-resources-versions`、`template-resources-save-as`、`position-reconciliation-side-db-parity`、`position-startup-task-recovery`、`vcc-financial-op-result-workbook`、`big-table-import-engine`、`bank-statement-universal-import-routing` 通过；Renderer 生命周期 `template-files` 17/17 通过。全量 `npm run test:integration` 与 smoke 本轮未重跑。
+| Codex 三轮 P1 | ExcelJS 读入时把数据验证范围逐格展开：几 KB 的模板把 `sqref` 写成整张表，预检就会让主进程分配约 172 亿项 | 读入前流式扫描工作表 XML，数据验证与合并单元格合计超过 1048576 个单元格即拒绝 |
+| 核对三轮时发现 | 合并单元格同理：ExcelJS 读入时逐格创建合并区域内的单元格 | 同上，合并单元格计入同一上限 |
+| Codex 三轮 P2 | 比较基准直接重新解析当前版本文件，不核对 SHA-256：文件被改动后可绕过场景引用保护 | 导入时保存取值快照；早期记录核对 SHA 后才重新解析 |
+| Codex 三轮 P2 | 当前文件读不出时退回的结构在声明范围不从 A1 开始时为空，场景引用保护失效 | 取不到可信取值时提示并按场景引用逐项核对 |
+| Codex 三轮 P2 | Excel 在一个定义里用逗号写多个打印区域，ExcelJS 读入后只剩第一个 | 预检从原始 `workbook.xml` 读取打印区域，多个区域拒绝 |
+| Codex 三轮 P2 | 筛选起点不在第 1 行时只调整末行，第 1 条结果落在筛选外 | 筛选与打印区域首行统一为表头行 |
+| Codex 三轮 P2 | 上下分段的打印区域逐段延伸后互相重叠 | 只调整单个打印区域；多个区域预检拒绝、写出端保持原样 |
+| 核对三轮时发现 | 资金对账导出同样原样复制模板的筛选与打印区域，用户版本设置的旧行数范围会留在输出里 | 资金对账各 Sheet 在 commit 前按行数调整，规则与平盘相同 |
+| Codex 三轮 P3 | 版本路径被同名目录替代时读取报 EISDIR，被当作暂不可用 | 不是普通文件或 EISDIR 判为版本文件缺失 |
 
 二轮复审修复后：新增 4 个回归用例在旧实现上均失败、在新实现上通过；`npm run test:unit` 9664/9668（0 失败，4 项为既有条件跳过）；`npm run lint`、`npm run check:architecture` 通过；集成脚本 `template-resources-versions`、`template-resources-save-as`、`position-reconciliation-side-db-parity`、`position-startup-task-recovery` 通过；FundType / 网关解析在 `assets/` 39 个 xlsx 上仍与旧实现一致。本轮未改 Renderer，生命周期未重跑；全量 `npm run test:integration` 与 smoke 未重跑。
+
+三轮复审修复后：新增 5 个回归用例在旧实现上均失败、在新实现上通过（数据验证 / 合并单元格超限用例除外：旧实现会耗尽内存，未在本机运行）；`npm run test:unit` 9669/9673（0 失败，4 项为既有条件跳过）；`npm run lint`、`npm run check:architecture` 通过；集成脚本 `template-resources-versions`、`template-resources-save-as`、`position-reconciliation-side-db-parity`、`position-startup-task-recovery`、`pre-fund-reconciliation-output-contract`、`pre-fund-reconciliation-side-db-parity`、`duplicate-inbound-match-end-to-end`、`vcc-financial-op-result-workbook` 通过；5 个以 ExcelJS 读入的内置模板预检均通过（扫描在上限内）。本轮未改 Renderer，生命周期未重跑；全量 `npm run test:integration`、smoke 与 Excel 实机打印未做。

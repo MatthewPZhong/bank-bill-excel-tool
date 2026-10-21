@@ -461,6 +461,138 @@ test('版本文件因权限、占用等读盘错误打不开：标为暂不可�
   assert.equal((await restarted.get('dup-recall-mail')).resource.current.validation, 'failed', '文件确实不存在时仍为不兼容（缺失）');
 });
 
+// 直接改写 xlsx 内的 XML（ExcelJS 自身写不出、或写出时同样会逐格展开的结构）。
+async function patchXlsx(sourceRelativePath, targetPath, patches) {
+  const JSZip = require('jszip');
+  const zip = await JSZip.loadAsync(fs.readFileSync(path.join(ROOT, ...sourceRelativePath.split('/'))));
+  for (const [entry, patch] of Object.entries(patches)) zip.file(entry, patch(await zip.file(entry).async('string')));
+  fs.writeFileSync(targetPath, await zip.generateAsync({ type: 'nodebuffer' }));
+  return targetPath;
+}
+
+test('数据验证或合并单元格范围覆盖整张表的小文件：读入前拒绝，不逐格展开', { timeout: 60000 }, async (t) => {
+  const env = setup(t);
+  const validation = await patchXlsx('assets/平盘银行对账单.xlsx', path.join(env.files, 'position-dv.xlsx'), {
+    'xl/worksheets/sheet1.xml': (xml) => xml.replace('<pageMargins',
+      '<dataValidations count="1"><dataValidation type="list" allowBlank="1" sqref="A2:XFD1048576"><formula1>"USD,EUR"</formula1></dataValidation></dataValidations><pageMargins')
+  });
+  const merged = await patchXlsx('assets/重复入金召回邮件模板.xlsx', path.join(env.files, 'mail-merge.xlsx'), {
+    'xl/worksheets/sheet1.xml': (xml) => xml.replace('</sheetData>', '</sheetData><mergeCells count="1"><mergeCell ref="A2:XFD1048576"/></mergeCells>')
+  });
+  for (const [resourceId, file] of [['position-bank', validation], ['dup-recall-mail', merged]]) {
+    assert.ok(fs.statSync(file).size < 64 * 1024);
+    const prepared = await prepare(env.service, resourceId, file);
+    assert.equal(prepared.verdict, 'fail', resourceId);
+    assert.match(prepared.checks.find((check) => check.label === '表格范围').detail,
+      /^数据验证或合并单元格覆盖约 17179852800 个单元格，超过 1048576 个的上限/);
+  }
+});
+
+test('打印区域只支持一个：Excel 同一定义中的多个区域、ExcelJS 写出的多个定义都在预检拒绝', async (t) => {
+  const env = setup(t);
+  // Excel 把多个打印区域写在同一个定义里（逗号分隔），ExcelJS 读入后只剩第一个。
+  const excelUnion = await patchXlsx('assets/平盘银行对账单.xlsx', path.join(env.files, 'position-union.xlsx'), {
+    'xl/workbook.xml': (xml) => xml.replace('</sheets>',
+      '</sheets><definedNames><definedName name="_xlnm.Print_Area" localSheetId="0">\'渠道对账单\'!$A$1:$C$3,\'渠道对账单\'!$E$1:$AW$3</definedName></definedNames>')
+  });
+  const excelPrepared = await prepare(env.service, 'position-bank', excelUnion);
+  assert.equal(excelPrepared.verdict, 'fail', JSON.stringify(excelPrepared.checks));
+  assert.equal(excelPrepared.checks.find((check) => check.label === '打印区域').detail,
+    '「渠道对账单」设置了多个打印区域，导出时无法按结果行数调整，请在 Excel 中只保留一个区域后再导入');
+
+  const stacked = await restyledTemplate('assets/资金对账导出不平.xlsx', path.join(env.files, 'prefund-stacked.xlsx'), (workbook) => {
+    workbook.getWorksheet('平账结果').pageSetup.printArea = 'A1:AE3&&A4:AE6';
+  });
+  const stackedPrepared = await prepare(env.service, 'prefund-unbalanced', stacked);
+  assert.equal(stackedPrepared.verdict, 'fail', JSON.stringify(stackedPrepared.checks));
+  assert.match(stackedPrepared.checks.find((check) => check.label === '打印区域').detail, /^「平账结果」设置了多个打印区域/);
+
+  const single = await restyledTemplate('assets/资金对账导出不平.xlsx', path.join(env.files, 'prefund-single.xlsx'), (workbook) => {
+    workbook.getWorksheet('平账结果').pageSetup.printArea = 'A1:AE3';
+    workbook.getWorksheet('不平结果').autoFilter = 'A1:U1';
+  });
+  const singlePrepared = await prepare(env.service, 'prefund-unbalanced', single);
+  assert.equal(singlePrepared.verdict, 'pass', JSON.stringify(singlePrepared.checks));
+});
+
+test('比较基准不信任被改动或读不出的当前文件：优先用导入时的取值快照，取不到时按场景引用逐项核对', async (t) => {
+  const scenarios = [
+    { id: 1, category: 'offset-bill-mark', config: { billTypes: [{ seq: 1, conditions: [{ field: 'FundType', op: '等于', value: 'REMOVE' }] }] } }
+  ];
+  const env = setup(t, { scenarios });
+  const keepOnly = await writeOffsetWorkbook(path.join(env.files, 'keep-only.xlsx'), 3, 2, [['FundType'], ['KEEP']]);
+  const blockedRemove = (prepared) => {
+    assert.equal(prepared.verdict, 'fail', JSON.stringify(prepared.checks));
+    assert.equal(prepared.checks.find((check) => check.label === '场景引用').detail, '已被场景使用：REMOVE');
+  };
+
+  // 1. 当前 V2 的磁盘文件被改成只剩 KEEP：仍按导入时保存的快照（KEEP、REMOVE）比较。
+  await importVersion(env.service, 'fund-type-enum',
+    await writeOffsetWorkbook(path.join(env.files, 'v2.xlsx'), 3, 2, [['FundType'], ['KEEP'], ['REMOVE']]));
+  fs.copyFileSync(keepOnly, env.versionFile('fund-type-enum', 'v2'));
+  const tampered = await prepare(env.service, 'fund-type-enum', keepOnly);
+  blockedRemove(tampered);
+  assert.equal(tampered.checks.some((check) => check.label === '比较基准'), false, '快照可用时不需要提示');
+
+  // 2. 早期记录没有快照：文件完好时核对 SHA-256 后按运行时口径重新解析。
+  const legacyBytes = fs.readFileSync(await writeOffsetWorkbook(path.join(env.files, 'v3.xlsx'), 3, 2, [['FundType'], ['KEEP'], ['REMOVE'], ['EXTRA']]));
+  const legacyTarget = env.versionFile('fund-type-enum', 'v3');
+  fs.writeFileSync(legacyTarget, legacyBytes);
+  const createdAt = '2026-10-20T08:00:00.000Z';
+  assert.equal(env.store.commitTemplateResourceVersion({
+    resourceId: 'fund-type-enum',
+    version: { versionId: 'v3', versionNo: 3, fileName: 'v3.xlsx', sizeBytes: legacyBytes.length, sha256: sha256(legacyBytes), validation: 'passed', structure: {}, appVersion: '3.2.12', createdAt },
+    enable: true,
+    expectedVersionId: 'v2',
+    now: createdAt,
+    change: { createdAt, resourceId: 'fund-type-enum', action: '导入并启用', fromLabel: 'V2', toLabel: 'V3', result: 'success' }
+  }).status, 'success');
+  const reparsed = await prepare(env.service, 'fund-type-enum', keepOnly);
+  blockedRemove(reparsed);
+  assert.deepEqual(reparsed.diff.removed, ['REMOVE', 'EXTRA']);
+  assert.equal(reparsed.checks.some((check) => check.label === '比较基准'), false);
+
+  // 3. 早期记录的文件被改动（SHA-256 不一致）：不采用该文件，提示后按场景引用逐项核对，仍拦下 REMOVE。
+  fs.copyFileSync(keepOnly, legacyTarget);
+  const untrusted = await prepare(env.service, 'fund-type-enum', keepOnly);
+  blockedRemove(untrusted);
+  assert.equal(untrusted.checks.find((check) => check.label === '比较基准').detail,
+    '无法确认当前版本 V3 的取值（版本文件已被修改（SHA-256 不一致）），按场景引用逐项核对');
+
+  // 4. 早期记录的文件缺失：同样按场景引用逐项核对。
+  fs.rmSync(legacyTarget);
+  const missing = await prepare(env.service, 'fund-type-enum', keepOnly);
+  blockedRemove(missing);
+  assert.match(missing.checks.find((check) => check.label === '比较基准').detail, /^无法确认当前版本 V3 的取值（版本文件无法读取：ENOENT/);
+});
+
+test('版本路径被同名目录替代：判为版本文件缺失（不兼容），不是暂不可用', async (t) => {
+  const env = setup(t);
+  const file = await restyledTemplate('assets/重复入金召回邮件模板.xlsx', path.join(env.files, 'a.xlsx'), widenMailColumn);
+  await importVersion(env.service, 'dup-recall-mail', file);
+  const versionPath = env.versionFile('dup-recall-mail', 'v2');
+  fs.rmSync(versionPath);
+  fs.mkdirSync(versionPath);
+  const restarted = createTemplateResourceService({ appRoot: ROOT, userDataRoot: env.userData, store: env.store });
+  const current = (await restarted.get('dup-recall-mail')).resource.current;
+  assert.deepEqual([current.validation, current.validationMessage], ['failed', '版本文件缺失']);
+  await assert.rejects(restarted.acquire('dup-recall-mail'), /版本文件缺失。请在 设置 → 模板文件 恢复默认或重新导入$/);
+
+  // stat 之后才被替换（读取时报 EISDIR）同样判为缺失。
+  fs.rmSync(versionPath, { recursive: true });
+  fs.copyFileSync(file, versionPath);
+  const racing = createTemplateResourceService({
+    appRoot: ROOT,
+    userDataRoot: env.userData,
+    store: env.store,
+    readFile: async (filePath) => {
+      if (filePath === versionPath) throw Object.assign(new Error(`EISDIR: illegal operation on a directory, read`), { code: 'EISDIR', syscall: 'read' });
+      return fs.promises.readFile(filePath);
+    }
+  });
+  assert.equal((await racing.get('dup-recall-mail')).resource.current.validation, 'failed');
+});
+
 test('场景引用只收集 FundType 取值与 C3 网关字段，忽略自取值', () => {
   const references = collectScenarioReferences([
     { category: 'offset-bill-mark', config: { billTypes: [{ conditions: [{ field: 'FundType', value: ' Inbound ' }, { field: 'Channel', value: 'X' }] }] } },

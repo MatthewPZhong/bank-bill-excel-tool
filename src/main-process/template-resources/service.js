@@ -14,10 +14,7 @@ const {
   verdictOf
 } = require('./contracts');
 const { parseFundTypeEnumWorkbook } = require('../../constants/fund-type-enum');
-const {
-  CUSTOM_VALUE_SENTINEL,
-  parseGatewayReconHeadersWorkbook
-} = require('../../constants/gateway-recon-headers-loader');
+const { parseGatewayReconHeadersWorkbook } = require('../../constants/gateway-recon-headers-loader');
 const { ALL_CELLS, sheetCells } = require('../../constants/sheetjs-sparse-cells');
 const { writeFileAtomicDurable } = require('../background-execution/durable-file');
 
@@ -89,8 +86,10 @@ function filledRowCount(sheet, cells, headerIndex) {
 function describeWorkbook(bytes, resource) {
   const workbook = XLSX.read(bytes, { type: 'buffer', cellFormula: false, cellHTML: false, cellText: false });
   const headerIndex = resource.headerRow - 1;
-  const parseValues = resource.type === 'enum' ? RUNTIME_VALUE_PARSERS[resource.id] : null;
-  const enumValues = parseValues ? parseValues(workbook) : null;
+  // comparableValues：按运行时口径解析的取值快照，导入时随版本记录保存，作为下一次导入的比较基准。
+  const parseValues = RUNTIME_VALUE_PARSERS[resource.id] || null;
+  const comparableValues = parseValues ? parseValues(workbook) : null;
+  const enumValues = resource.type === 'enum' ? comparableValues : null;
   const sheets = workbook.SheetNames.map((name) => {
     const sheet = workbook.Sheets[name];
     const cells = textCells(sheet);
@@ -101,7 +100,7 @@ function describeWorkbook(bytes, resource) {
       dataRows: filledRowCount(sheet, cells, headerIndex)
     };
   });
-  return { sheets, enumValues };
+  return { sheets, enumValues, comparableValues };
 }
 
 function sha256(bytes) {
@@ -117,16 +116,6 @@ function localTimeText(value) {
   if (Number.isNaN(date.getTime())) return String(value || '');
   const pad = (number) => String(number).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-// 当前版本文件读不出时的比较取值：退回版本记录中的结构（FundType 为记录的取值，网关为第 1 行表头字段）。
-function recordedComparableValues(resource, structure) {
-  if (resource.type === 'enum') return structure.enumValues || [];
-  if (resource.id === 'gateway-recon') {
-    const headers = (structure.sheets && structure.sheets[0] && structure.sheets[0].headers) || [];
-    return [...new Set(headers.map(cellText).filter((value) => value && value !== CUSTOM_VALUE_SENTINEL))];
-  }
-  return [];
 }
 
 class TemplateResourceUnavailableError extends Error {
@@ -267,10 +256,11 @@ function createTemplateResourceService({
     return verdict;
   }
 
-  // 版本文件打不开：确认不存在时为“缺失”（不兼容，需恢复默认或重新导入）；权限、占用、句柄耗尽等其他读盘错误
-  // 是运行环境问题，标为 transient（暂不可用，稍后重试），结果不缓存。
+  // 版本文件打不开：确认不存在或不是普通文件（如被同名目录替代）时为“缺失”（不兼容，需恢复默认或重新导入）；
+  // 权限、占用、句柄耗尽等其他读盘错误是运行环境问题，标为 transient（暂不可用，稍后重试），结果不缓存。
+  const MISSING_FILE_CODES = new Set(['ENOENT', 'ENOTDIR', 'EISDIR']);
   function accessFailure(filePath, error) {
-    if (error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) return { filePath, ok: false, message: '版本文件缺失' };
+    if (error && MISSING_FILE_CODES.has(error.code)) return { filePath, ok: false, message: '版本文件缺失' };
     return { filePath, ok: false, transient: true, message: `版本文件暂时无法读取（${errorText(error)}），请稍后重试` };
   }
 
@@ -283,6 +273,7 @@ function createTemplateResourceService({
     } catch (error) {
       return accessFailure(filePath, error);
     }
+    if (typeof info.isFile === 'function' && !info.isFile()) return { filePath, ok: false, message: '版本文件缺失' };
     const signature = `${info.size}:${info.mtimeMs}`;
     const cacheKey = `${resource.id}:${version.versionId}`;
     const cached = userInspections.get(cacheKey);
@@ -548,18 +539,28 @@ function createTemplateResourceService({
     return { resource };
   }
 
-  // 与当前版本比较的取值（新增 / 移除、场景引用保护的基准）：用运行时 loader 重新解析当前版本文件，
-  // 与新文件同口径，也不依赖版本记录里按旧口径保存的结构；文件读不出时退回记录中的结构。
-  async function currentComparableValues(resource, currentVersionId, structure) {
+  // 与当前版本比较的取值（新增 / 移除、场景引用保护的基准），必须与运行时同口径且来自可信内容：
+  //   内置版本解析随包文件；用户版本取导入时保存的取值快照（导入时已按运行时口径解析，内容由 SHA-256 锁定）；
+  //   早期记录没有快照时，核对 SHA-256 后重新解析版本文件。都取不到时返回 null，由调用方按场景引用逐项核对。
+  async function currentComparableValues(resource, currentVersionId, versions) {
     const parse = RUNTIME_VALUE_PARSERS[resource.id];
-    if (!parse) return [];
-    const filePath = currentVersionId === BUILTIN_VERSION_ID
-      ? absolutePath(resource)
-      : versionPath(resource.id, currentVersionId);
+    if (!parse) return { values: [] };
+    if (currentVersionId === BUILTIN_VERSION_ID) {
+      try {
+        return { values: parse(XLSX.read(await readFile(absolutePath(resource)), { type: 'buffer' })) };
+      } catch (error) {
+        return { values: null, reason: `内置版本读取失败：${errorText(error)}` };
+      }
+    }
+    const version = versions.find((item) => item.versionId === currentVersionId);
+    const snapshot = version && version.structure && version.structure.comparableValues;
+    if (Array.isArray(snapshot)) return { values: snapshot };
     try {
-      return parse(XLSX.read(await readFile(filePath), { type: 'buffer' }));
-    } catch (_error) {
-      return recordedComparableValues(resource, structure);
+      const bytes = await readFile(versionPath(resource.id, currentVersionId));
+      if (sha256(bytes) !== version.sha256) return { values: null, reason: '版本文件已被修改（SHA-256 不一致）' };
+      return { values: parse(XLSX.read(bytes, { type: 'buffer' })) };
+    } catch (error) {
+      return { values: null, reason: `版本文件无法读取：${errorText(error)}` };
     }
   }
 
@@ -633,15 +634,18 @@ function createTemplateResourceService({
     const file = { name: fileName, size: bytes.length, sha256: digest };
 
     const builtin = await inspect(resource);
-    const currentStructure = currentVersionId === BUILTIN_VERSION_ID
-      ? builtin
-      : ((versions.find((version) => version.versionId === currentVersionId) || {}).structure || {});
     const references = collectScenarioReferences(
       typeof store.listScenarioConfigs === 'function' ? store.listScenarioConfigs() : []
     );
+    // 取不到可信的当前取值时，假定场景引用的值都在当前版本中：新版本缺少其中任何一个都按移除被引用的值处理。
+    const baseline = await currentComparableValues(resource, currentVersionId, versions);
+    if (!baseline.values) {
+      add('比较基准', 'warn', `无法确认当前版本 ${expected.label} 的取值（${baseline.reason}），按场景引用逐项核对`);
+    }
+    const referenced = resource.id === 'gateway-recon' ? references.gatewayFields : references.fundTypeValues;
     const contract = await inspectContract(resource.id, bytes, {
       builtinSheetNames: (builtin.sheets || []).map((sheet) => sheet.name),
-      currentValues: await currentComparableValues(resource, currentVersionId, currentStructure),
+      currentValues: baseline.values || [...referenced],
       references
     });
     checks.push(...contract.checks);

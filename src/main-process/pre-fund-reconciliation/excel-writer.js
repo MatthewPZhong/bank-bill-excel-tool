@@ -9,6 +9,7 @@ const {
   ORDER_REPAIR_FIELDS_GATEWAY
 } = require('../../constants/gateway-bill-recon-fields');
 const { sanitizeFileName } = require('../recon-id-fix-io');
+const { fitOutputRangesToRows } = require('../output-sheet-ranges');
 const { trimCell } = require('./bank-row');
 const {
   UNBALANCED_HEADERS,
@@ -387,6 +388,14 @@ async function writeWithTemplate({
       throw new Error('重复网关账单已标记存在，但审计明细为空');
     }
 
+    // 模板的筛选与打印区域按本次各 Sheet 的行数调整（首行为表头，末行为最后一行数据），须在 commit 之前设置。
+    const dataRowCounts = new Map([
+      [SHEET_NAMES[0], unbalancedCount],
+      [SHEET_NAMES[1], balancedCount],
+      [SHEET_NAMES[3], channelBillCount],
+      [DUPLICATE_SHEET_NAME, duplicateGatewayCount]
+    ]);
+    for (const [name, worksheet] of sheets) fitOutputRangesToRows(worksheet, 1 + (dataRowCounts.get(name) || 0));
     for (const worksheet of sheets.values()) worksheet.commit();
     await writer.commit();
     const publicationIdentity = moveFileNoClobber(temporaryPath, finalPath);
