@@ -13,7 +13,11 @@ const {
   usageChecks,
   verdictOf
 } = require('./contracts');
-const { CUSTOM_VALUE_SENTINEL } = require('../../constants/gateway-recon-headers-loader');
+const { parseFundTypeEnumWorkbook } = require('../../constants/fund-type-enum');
+const {
+  CUSTOM_VALUE_SENTINEL,
+  parseGatewayReconHeadersWorkbook
+} = require('../../constants/gateway-recon-headers-loader');
 const { ALL_CELLS, sheetCells } = require('../../constants/sheetjs-sparse-cells');
 const { writeFileAtomicDurable } = require('../background-execution/durable-file');
 
@@ -55,17 +59,12 @@ function rowTexts(cells, rowIndex) {
   return trimTail(Array.from(row, (value) => value || ''));
 }
 
-// 枚举口径与 src/constants/fund-type-enum.js 一致：第 1 个 Sheet 第 1 列，跳过表头，去空去重保序。
-function firstColumnValues(cells) {
-  const values = [];
-  const seen = new Set();
-  for (const cell of cells) {
-    if (cell.c !== 0 || cell.r === 0 || seen.has(cell.text)) continue;
-    seen.add(cell.text);
-    values.push(cell.text);
-  }
-  return values;
-}
+// 运行时 loader 的解析函数：枚举取值与比较基准都按它们的口径（声明范围的首列 / 首行）计算，
+// 声明范围不从 A1 开始时也与场景配置实际读到的取值一致。
+const RUNTIME_VALUE_PARSERS = Object.freeze({
+  'fund-type-enum': parseFundTypeEnumWorkbook,
+  'gateway-recon': parseGatewayReconHeadersWorkbook
+});
 
 // 表头以下有内容的行数。合并单元格只在左上角保存值；其覆盖的行在 Excel 中同样显示内容，计数时一并计入。
 //   按行区间求并集计数，不逐行展开（合并区域可以覆盖上百万行）。
@@ -90,11 +89,11 @@ function filledRowCount(sheet, cells, headerIndex) {
 function describeWorkbook(bytes, resource) {
   const workbook = XLSX.read(bytes, { type: 'buffer', cellFormula: false, cellHTML: false, cellText: false });
   const headerIndex = resource.headerRow - 1;
-  let enumValues = null;
-  const sheets = workbook.SheetNames.map((name, index) => {
+  const parseValues = resource.type === 'enum' ? RUNTIME_VALUE_PARSERS[resource.id] : null;
+  const enumValues = parseValues ? parseValues(workbook) : null;
+  const sheets = workbook.SheetNames.map((name) => {
     const sheet = workbook.Sheets[name];
     const cells = textCells(sheet);
-    if (resource.type === 'enum' && index === 0) enumValues = firstColumnValues(cells);
     return {
       name,
       headerRow: resource.headerRow,
@@ -120,8 +119,8 @@ function localTimeText(value) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-// 枚举类模板与当前版本比较的取值：FundType 为第 1 列取值，网关为表头字段（与运行时 loader 同口径）。
-function comparableValues(resource, structure) {
+// 当前版本文件读不出时的比较取值：退回版本记录中的结构（FundType 为记录的取值，网关为第 1 行表头字段）。
+function recordedComparableValues(resource, structure) {
   if (resource.type === 'enum') return structure.enumValues || [];
   if (resource.id === 'gateway-recon') {
     const headers = (structure.sheets && structure.sheets[0] && structure.sheets[0].headers) || [];
@@ -268,14 +267,21 @@ function createTemplateResourceService({
     return verdict;
   }
 
+  // 版本文件打不开：确认不存在时为“缺失”（不兼容，需恢复默认或重新导入）；权限、占用、句柄耗尽等其他读盘错误
+  // 是运行环境问题，标为 transient（暂不可用，稍后重试），结果不缓存。
+  function accessFailure(filePath, error) {
+    if (error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) return { filePath, ok: false, message: '版本文件缺失' };
+    return { filePath, ok: false, transient: true, message: `版本文件暂时无法读取（${errorText(error)}），请稍后重试` };
+  }
+
   // 用户版本：核对文件存在、SHA-256 与当前代码契约；任一不满足即视为不可用（保留为当前版本并报错，不自动切回内置）。
   async function inspectUserVersion(resource, version) {
     const filePath = versionPath(resource.id, version.versionId);
     let info;
     try {
       info = await stat(filePath);
-    } catch (_error) {
-      return { filePath, ok: false, message: '版本文件缺失' };
+    } catch (error) {
+      return accessFailure(filePath, error);
     }
     const signature = `${info.size}:${info.mtimeMs}`;
     const cacheKey = `${resource.id}:${version.versionId}`;
@@ -285,7 +291,7 @@ function createTemplateResourceService({
     try {
       bytes = await readFile(filePath);
     } catch (error) {
-      return { filePath, ok: false, message: `版本文件读取失败：${errorText(error)}` };
+      return accessFailure(filePath, error);
     }
     const digest = sha256(bytes);
     let record;
@@ -542,6 +548,21 @@ function createTemplateResourceService({
     return { resource };
   }
 
+  // 与当前版本比较的取值（新增 / 移除、场景引用保护的基准）：用运行时 loader 重新解析当前版本文件，
+  // 与新文件同口径，也不依赖版本记录里按旧口径保存的结构；文件读不出时退回记录中的结构。
+  async function currentComparableValues(resource, currentVersionId, structure) {
+    const parse = RUNTIME_VALUE_PARSERS[resource.id];
+    if (!parse) return [];
+    const filePath = currentVersionId === BUILTIN_VERSION_ID
+      ? absolutePath(resource)
+      : versionPath(resource.id, currentVersionId);
+    try {
+      return parse(XLSX.read(await readFile(filePath), { type: 'buffer' }));
+    } catch (_error) {
+      return recordedComparableValues(resource, structure);
+    }
+  }
+
   function rememberPickedFile(filePath) {
     pickedFiles.add(path.resolve(filePath));
   }
@@ -620,7 +641,7 @@ function createTemplateResourceService({
     );
     const contract = await inspectContract(resource.id, bytes, {
       builtinSheetNames: (builtin.sheets || []).map((sheet) => sheet.name),
-      currentValues: comparableValues(resource, currentStructure),
+      currentValues: await currentComparableValues(resource, currentVersionId, currentStructure),
       references
     });
     checks.push(...contract.checks);

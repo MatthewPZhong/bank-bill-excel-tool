@@ -219,6 +219,18 @@ const positionContract = {
       if (rowNumber > 1 && row.values.some((value) => cellText(value).trim())) dataRows += 1;
     });
     if (dataRows) list.add('数据区', 'warn', `第 2 行起有 ${dataRows} 行内容，导出时清空，不会写入结果`);
+    // 筛选与打印区域在写出时随结果行数调整；Excel 表（Table）的范围无法安全调整，不接受。
+    const tables = typeof sheet.getTables === 'function' ? sheet.getTables() : [];
+    if (tables.length) {
+      const names = tables.map((table) => (table.table && table.table.name) || table.name).filter(Boolean);
+      list.add('Excel 表', 'fail', `含 ${tables.length} 个 Excel 表${names.length ? `（${listText(names)}）` : ''}，结果行数变化后范围无法调整，请在 Excel 中转换为普通区域后再导入`);
+    }
+    // 数据验证与条件格式按模板中的范围原样带入结果，不随结果行数调整（ExcelJS 读入后数据验证按单元格展开，只判断有无）。
+    const parts = [
+      Object.keys((sheet.dataValidations && sheet.dataValidations.model) || {}).length ? '数据验证' : '',
+      (sheet.conditionalFormattings || []).length ? '条件格式' : ''
+    ].filter(Boolean);
+    if (parts.length) list.add('数据验证与条件格式', 'warn', `模板中的${parts.join('与')}按原范围带入结果，不随结果行数调整`);
     presentationWarnings(list, sheet, POSITION_BANK_HEADERS);
   }
 };

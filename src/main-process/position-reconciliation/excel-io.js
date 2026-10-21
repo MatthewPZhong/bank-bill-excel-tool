@@ -138,6 +138,32 @@ function clearTemplateDataRows(sheet) {
   }
 }
 
+// 模板的筛选与打印区域是按模板当时的行数保存的固定范围：写入本次结果后把下边界改到最后一行（列范围不变），
+// 否则多出的结果行落在筛选和打印范围之外，人工筛选、打印时看到的不是完整结果。
+function fitRangeToLastRow(ref, lastRow) {
+  const range = XLSX.utils.decode_range(String(ref).replace(/^.*!/, ''));
+  if (![range.s.r, range.s.c, range.e.r, range.e.c].every(Number.isInteger)) return String(ref);
+  range.e.r = Math.max(range.s.r, lastRow - 1);
+  return `${XLSX.utils.encode_cell(range.s)}:${XLSX.utils.encode_cell(range.e)}`;
+}
+
+function autoFilterRef(autoFilter) {
+  if (typeof autoFilter === 'string') return autoFilter;
+  const cell = (value) => (typeof value === 'string'
+    ? value
+    : XLSX.utils.encode_cell({ r: Number(value.row) - 1, c: Number(value.column) - 1 }));
+  return autoFilter.from && autoFilter.to ? `${cell(autoFilter.from)}:${cell(autoFilter.to)}` : '';
+}
+
+function fitSheetRangesToRows(sheet, lastRow) {
+  const filterRef = sheet.autoFilter ? autoFilterRef(sheet.autoFilter) : '';
+  if (filterRef) sheet.autoFilter = fitRangeToLastRow(filterRef, lastRow);
+  const printArea = sheet.pageSetup && sheet.pageSetup.printArea;
+  if (printArea) {
+    sheet.pageSetup.printArea = String(printArea).split('&&').map((ref) => fitRangeToLastRow(ref, lastRow)).join('&&');
+  }
+}
+
 async function writeResultWorkbook({
   templatePath,
   outputPath,
@@ -174,6 +200,7 @@ async function writeResultWorkbook({
       };
     }
   }
+  fitSheetRangesToRows(sheet, sheet.rowCount);
   return atomicWorkbookWrite(workbook, outputPath);
 }
 

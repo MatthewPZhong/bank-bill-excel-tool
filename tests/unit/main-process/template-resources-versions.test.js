@@ -356,6 +356,111 @@ test('范围覆盖整张表的小文件：预检与结构描述只按实际单�
   assert.equal(saved.sheets[0].dataRows, 1);
 });
 
+// 从指定单元格起写入若干行：声明范围（!ref）不从 A1 开始。
+async function writeOffsetWorkbook(filePath, startRow, startColumn, rows) {
+  const ExcelJS = require('exceljs');
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Sheet1');
+  rows.forEach((row, rowIndex) => row.forEach((value, columnIndex) => {
+    sheet.getCell(startRow + rowIndex, startColumn + columnIndex).value = value;
+  }));
+  await workbook.xlsx.writeFile(filePath);
+  return filePath;
+}
+
+test('比较基准按运行时口径重新解析当前版本文件：声明范围不从 A1 开始时，场景引用保护仍生效', async (t) => {
+  const scenarios = [
+    { id: 1, category: 'offset-bill-mark', config: { billTypes: [{ seq: 1, conditions: [{ field: 'FundType', op: '等于', value: 'REMOVE' }] }] } },
+    { id: 2, category: 'gateway-recon-join', config: { reconFields: [{ gwField: 'amount', bankField: 'Credit Amount' }], conditions: [{ side: '网关', field: 'currency' }], assign: { gwField: '__CUSTOM__', bankField: 'ReconciliationId' } } }
+  ];
+  const env = setup(t, { scenarios });
+
+  // FundType：V2 从 B3 起（表头、KEEP、REMOVE），场景引用 REMOVE；V3 去掉 REMOVE 应被拦下。
+  const fundTypeV2 = await writeOffsetWorkbook(path.join(env.files, 'fund-type-v2.xlsx'), 3, 2, [['FundType'], ['KEEP'], ['REMOVE']]);
+  const imported = await importVersion(env.service, 'fund-type-enum', fundTypeV2);
+  assert.deepEqual(imported.enumValues, ['KEEP', 'REMOVE'], '版本取值与运行时读到的一致');
+  const fundTypeV3 = await writeOffsetWorkbook(path.join(env.files, 'fund-type-v3.xlsx'), 3, 2, [['FundType'], ['KEEP']]);
+  const fundTypeBlocked = await prepare(env.service, 'fund-type-enum', fundTypeV3);
+  assert.equal(fundTypeBlocked.verdict, 'fail');
+  assert.deepEqual(fundTypeBlocked.diff, { added: [], removed: ['REMOVE'] });
+  assert.equal(fundTypeBlocked.checks.find((check) => check.label === '场景引用').detail, '已被场景使用：REMOVE');
+
+  // 网关：V2 表头从 C2 起（版本记录里按第 1 行保存的表头为空），V3 去掉被 C3 场景引用的 currency 应被拦下。
+  const gatewayHeaders = (await env.service.get('gateway-recon')).resource.sheets[0].headers;
+  await importVersion(env.service, 'gateway-recon',
+    await writeOffsetWorkbook(path.join(env.files, 'gateway-v2.xlsx'), 2, 3, [gatewayHeaders]));
+  const gatewayBlocked = await prepare(env.service, 'gateway-recon',
+    await writeOffsetWorkbook(path.join(env.files, 'gateway-v3.xlsx'), 2, 3, [gatewayHeaders.filter((header) => header !== 'currency')]));
+  assert.equal(gatewayBlocked.verdict, 'fail');
+  assert.deepEqual(gatewayBlocked.diff, { added: [], removed: ['currency'] });
+  assert.equal(gatewayBlocked.checks.find((check) => check.label === '场景引用').detail, '已被场景使用：currency');
+});
+
+test('平盘模板含 Excel 表时拒绝导入；数据验证与条件格式提示按模板范围原样带入', async (t) => {
+  const env = setup(t);
+  const { POSITION_BANK_HEADERS } = require('../../../src/main-process/position-reconciliation/constants');
+  const withTable = await restyledTemplate('assets/平盘银行对账单.xlsx', path.join(env.files, 'position-table.xlsx'), (workbook) => {
+    workbook.getWorksheet('渠道对账单').addTable({
+      name: 'ResultTable',
+      ref: 'A1',
+      columns: POSITION_BANK_HEADERS.map((name) => ({ name })),
+      rows: [POSITION_BANK_HEADERS.map(() => '')]
+    });
+  });
+  const tablePrepared = await prepare(env.service, 'position-bank', withTable);
+  assert.equal(tablePrepared.verdict, 'fail', JSON.stringify(tablePrepared.checks));
+  assert.match(tablePrepared.checks.find((check) => check.label === 'Excel 表').detail, /^含 1 个 Excel 表（ResultTable），结果行数变化后范围无法调整/);
+
+  const withRules = await restyledTemplate('assets/平盘银行对账单.xlsx', path.join(env.files, 'position-rules.xlsx'), (workbook) => {
+    const sheet = workbook.getWorksheet('渠道对账单');
+    sheet.dataValidations.add('C2:C100', { type: 'list', allowBlank: true, formulae: ['"USD,EUR"'] });
+    sheet.addConditionalFormatting({
+      ref: 'M2:M100',
+      rules: [{ type: 'expression', priority: 1, formulae: ['M2<0'], style: { font: { color: { argb: 'FFFF0000' } } } }]
+    });
+  });
+  const rulesPrepared = await prepare(env.service, 'position-bank', withRules);
+  assert.equal(rulesPrepared.verdict, 'warn', JSON.stringify(rulesPrepared.checks));
+  assert.equal(rulesPrepared.checks.find((check) => check.label === '数据验证与条件格式').detail,
+    '模板中的数据验证与条件格式按原范围带入结果，不随结果行数调整');
+});
+
+test('版本文件因权限、占用等读盘错误打不开：标为暂不可用并提示稍后重试，恢复后重新复核', async (t) => {
+  const env = setup(t);
+  const file = await restyledTemplate('assets/重复入金召回邮件模板.xlsx', path.join(env.files, 'a.xlsx'), widenMailColumn);
+  await importVersion(env.service, 'dup-recall-mail', file);
+  const versionPath = env.versionFile('dup-recall-mail', 'v2');
+  const denied = (operation) => Object.assign(new Error(`EACCES: permission denied, ${operation} '${versionPath}'`), { code: 'EACCES', syscall: operation });
+  let failing = null;
+  const restarted = createTemplateResourceService({
+    appRoot: ROOT,
+    userDataRoot: env.userData,
+    store: env.store,
+    stat: async (filePath) => {
+      if (filePath === versionPath && failing === 'stat') throw denied('stat');
+      return fs.promises.stat(filePath);
+    },
+    readFile: async (filePath) => {
+      if (filePath === versionPath && failing === 'open') throw denied('open');
+      return fs.promises.readFile(filePath);
+    }
+  });
+
+  for (const operation of ['stat', 'open']) {
+    failing = operation;
+    const current = (await restarted.get('dup-recall-mail')).resource.current;
+    assert.equal(current.validation, 'unverified', `${operation}：与不兼容区分`);
+    assert.match(current.validationMessage, new RegExp(`^版本文件暂时无法读取（EACCES: permission denied, ${operation} .*），请稍后重试$`));
+    await assert.rejects(restarted.acquire('dup-recall-mail'), (error) => (
+      error instanceof TemplateResourceUnavailableError && /请稍后重试$/.test(error.message) && !/恢复默认/.test(error.message)
+    ));
+  }
+  failing = null;
+  assert.equal((await restarted.get('dup-recall-mail')).resource.current.validation, 'passed', '恢复后重新复核');
+  fs.rmSync(versionPath);
+  assert.equal((await restarted.get('dup-recall-mail')).resource.current.validation, 'failed', '文件确实不存在时仍为不兼容（缺失）');
+});
+
 test('场景引用只收集 FundType 取值与 C3 网关字段，忽略自取值', () => {
   const references = collectScenarioReferences([
     { category: 'offset-bill-mark', config: { billTypes: [{ conditions: [{ field: 'FundType', value: ' Inbound ' }, { field: 'Channel', value: 'X' }] }] } },
