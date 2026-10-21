@@ -14,7 +14,7 @@ const {
   createTemplateResourceService
 } = require('../../../src/main-process/template-resources/service');
 const { collectScenarioReferences } = require('../../../src/main-process/template-resources/contracts');
-const { measureUncompressed, runInspectionTask } = require('../../../src/main-process/template-resources/inspection-task');
+const { canonicalizeXlsx, extractEntries, runInspectionTask } = require('../../../src/main-process/template-resources/inspection-task');
 const { TemplateInspectionError, inspectionStats, runTemplateInspection } = require('../../../src/main-process/template-resources/inspection-runner');
 const { createTemplateResourceStore, restyledTemplate } = require('../../helpers/template-resource-store');
 
@@ -99,7 +99,9 @@ test('导入预检通过后仅保存：版本列表新增 V2，当前仍为内�
   assert.equal(committed.enabled, false);
   assert.equal(committed.version.label, 'V2');
   assert.equal(committed.version.current, false);
-  assert.equal(sha256(fs.readFileSync(env.versionFile('dup-recall-mail', 'v2'))), prepared.file.sha256);
+  // 保存的是检查 Worker 重新打包后的字节：版本记录的 SHA-256 对应磁盘上的版本文件，与导入的原文件不同。
+  assert.equal(sha256(fs.readFileSync(env.versionFile('dup-recall-mail', 'v2'))), committed.version.sha256);
+  assert.equal(committed.version.sha256, sha256(await canonicalizeXlsx(fs.readFileSync(file))));
   assert.deepEqual(env.changed, [{ resourceId: 'dup-recall-mail' }]);
 
   const { resource } = await env.service.get('dup-recall-mail');
@@ -444,7 +446,7 @@ test('版本文件因权限、占用等读盘错误打不开：标为暂不可�
       if (filePath === versionPath && failing === 'stat') throw denied('stat');
       return fs.promises.stat(filePath);
     },
-    readFile: async (filePath) => {
+    readFileCapped: async (filePath) => {
       if (filePath === versionPath && failing === 'open') throw denied('open');
       return fs.promises.readFile(filePath);
     }
@@ -583,7 +585,8 @@ async function waitInspectionsIdle() {
   for (let attempt = 0; attempt < 400 && (inspectionStats().running || inspectionStats().queued); attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  assert.deepEqual(inspectionStats(), { running: 0, queued: 0 });
+  const stats = inspectionStats();
+  assert.deepEqual([stats.running, stats.queued, stats.queuedBytes], [0, 0, 0]);
 }
 
 function commitRecord(store, resourceId, { versionId, versionNo, bytes, structure, enable, expectedVersionId }) {
@@ -601,7 +604,7 @@ function commitRecord(store, resourceId, { versionId, versionNo, bytes, structur
 test('场景配置下拉使用导入时在检查 Worker 中解析的取值，主进程不解析用户文件', async (t) => {
   const env = setup(t);
   // 版本记录中的取值快照与文件内容故意不同：返回快照即说明没有在主进程重新解析文件。
-  const bytes = fs.readFileSync(await writeOffsetWorkbook(path.join(env.files, 'fund.xlsx'), 1, 1, [['FundType'], ['FILE-VALUE']]));
+  const bytes = await canonicalizeXlsx(fs.readFileSync(await writeOffsetWorkbook(path.join(env.files, 'fund.xlsx'), 1, 1, [['FundType'], ['FILE-VALUE']])));
   fs.mkdirSync(path.dirname(env.versionFile('fund-type-enum', 'v2')), { recursive: true });
   fs.writeFileSync(env.versionFile('fund-type-enum', 'v2'), bytes);
   assert.equal(commitRecord(env.store, 'fund-type-enum', {
@@ -611,7 +614,7 @@ test('场景配置下拉使用导入时在检查 Worker 中解析的取值，主
 
   // 早期记录没有快照：在检查 Worker 中按运行时口径解析（核对 SHA-256 后）。
   const gatewayHeaders = (await env.service.get('gateway-recon')).resource.sheets[0].headers;
-  const gatewayBytes = fs.readFileSync(await writeOffsetWorkbook(path.join(env.files, 'gateway.xlsx'), 1, 1, [gatewayHeaders]));
+  const gatewayBytes = await canonicalizeXlsx(fs.readFileSync(await writeOffsetWorkbook(path.join(env.files, 'gateway.xlsx'), 1, 1, [gatewayHeaders])));
   fs.mkdirSync(path.dirname(env.versionFile('gateway-recon', 'v2')), { recursive: true });
   fs.writeFileSync(env.versionFile('gateway-recon', 'v2'), gatewayBytes);
   assert.equal(commitRecord(env.store, 'gateway-recon', {
@@ -642,9 +645,121 @@ test('解压后内容超过上限的小文件：读入前拒绝，不交给 Exce
     '解压后内容超过 100 MB 上限（xl/media/image1.png），请精简后再导入');
 
   // 条目声明的大小已超过上限时不解压直接停止；声明与实际不符时由流式计数与 yauzl 的大小核对兜底。
-  const measured = await measureUncompressed(fs.readFileSync(file), 1024 * 1024);
-  assert.equal(measured.exceeded, 'xl/media/image1.png');
-  assert.equal((await measureUncompressed(fs.readFileSync(path.join(ROOT, 'assets', '重复入金召回邮件模板.xlsx')))).exceeded, null);
+  await assert.rejects(extractEntries(fs.readFileSync(file), 1024 * 1024), /解压后内容超过 1 MB 上限（xl\/media\/image1.png）/);
+  assert.ok((await extractEntries(fs.readFileSync(path.join(ROOT, 'assets', '重复入金召回邮件模板.xlsx')))).length > 0);
+});
+
+// ZIP 记录定位（测试中构造元信息互相矛盾的文件）：返回签名所在偏移。
+function zipRecordOffsets(buffer, signature) {
+  const offsets = [];
+  for (let index = 0; index <= buffer.length - 4; index += 1) {
+    if (buffer.readUInt32LE(index) === signature) offsets.push(index);
+  }
+  return offsets;
+}
+const LOCAL_HEADER = 0x04034b50;
+const CENTRAL_HEADER = 0x02014b50;
+const END_OF_CENTRAL_DIRECTORY = 0x06054b50;
+
+async function mailTemplateWithMedia(size) {
+  const JSZip = require('jszip');
+  const zip = await JSZip.loadAsync(fs.readFileSync(path.join(ROOT, 'assets', '重复入金召回邮件模板.xlsx')));
+  zip.file('xl/media/image1.png', Buffer.alloc(size));
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
+
+test('中央目录与本地文件头互相矛盾的 ZIP：按中央目录解出后重新打包，矛盾的元信息不会进入保存的文件', { timeout: 120000 }, async (t) => {
+  const env = setup(t);
+  const write = (name, buffer) => {
+    const file = path.join(env.files, name);
+    fs.writeFileSync(file, buffer);
+    return file;
+  };
+
+  // 1. 只把中央目录中的图片名改成目录名（长度不变），本地文件头仍是文件名：目录条目带内容，拒绝。
+  const renamed = await mailTemplateWithMedia(2 * 1024 * 1024);
+  const central = zipRecordOffsets(renamed, CENTRAL_HEADER)
+    .find((offset) => renamed.toString('latin1', offset + 46, offset + 46 + renamed.readUInt16LE(offset + 28)) === 'xl/media/image1.png');
+  renamed.write('/', central + 46 + 'xl/media/image1.png'.length - 1, 'latin1');
+  const renamedPrepared = await prepare(env.service, 'dup-recall-mail', write('renamed.xlsx', renamed));
+  assert.equal(renamedPrepared.verdict, 'fail');
+  assert.equal(renamedPrepared.checks.find((check) => check.label === '读取文件').detail,
+    '文件的目录条目带有内容（xl/media/image1.pn/），无法安全读取');
+
+  // 2. 结尾记录声明的总条目数为 0：按中央目录读不到任何条目，重新打包后的文件不是有效工作簿，拒绝。
+  const emptied = await mailTemplateWithMedia(1024);
+  const end = zipRecordOffsets(emptied, END_OF_CENTRAL_DIRECTORY).pop();
+  emptied.writeUInt16LE(0, end + 10);
+  assert.equal((await prepare(env.service, 'dup-recall-mail', write('emptied.xlsx', emptied))).verdict, 'fail');
+
+  // 3. 本地文件头把工作表的解压大小写成 1 GiB（中央目录正确）：按中央目录解出，保存的是重新打包的文件，不含该矛盾。
+  const lying = await restyledTemplate('assets/重复入金召回邮件模板.xlsx', path.join(env.files, 'lying-source.xlsx'), widenMailColumn)
+    .then((file) => fs.readFileSync(file));
+  const sheetHeader = zipRecordOffsets(lying, LOCAL_HEADER)
+    .find((offset) => lying.toString('latin1', offset + 30, offset + 30 + lying.readUInt16LE(offset + 26)) === 'xl/worksheets/sheet1.xml');
+  lying.writeUInt32LE(1024 * 1024 * 1024, sheetHeader + 22);
+  const version = await importVersion(env.service, 'dup-recall-mail', write('lying.xlsx', lying), { enable: false });
+  const saved = fs.readFileSync(env.versionFile('dup-recall-mail', version.id));
+  assert.equal(saved.equals(lying), false, '保存的不是原文件');
+  const savedSheet = zipRecordOffsets(saved, LOCAL_HEADER)
+    .find((offset) => saved.toString('latin1', offset + 30, offset + 30 + saved.readUInt16LE(offset + 26)) === 'xl/worksheets/sheet1.xml');
+  assert.ok(saved.readUInt32LE(savedSheet + 22) < 1024 * 1024, '本地文件头的大小与实际一致');
+  assert.ok(saved.equals(await canonicalizeXlsx(saved)), '重新打包是幂等的');
+});
+
+test('已存版本大小与记录不一致时不在主进程整份读入', async (t) => {
+  const env = setup(t);
+  const file = await restyledTemplate('assets/重复入金召回邮件模板.xlsx', path.join(env.files, 'a.xlsx'), widenMailColumn);
+  await importVersion(env.service, 'dup-recall-mail', file);
+  fs.writeFileSync(env.versionFile('dup-recall-mail', 'v2'), Buffer.alloc(3 * 1024 * 1024));
+  let reads = 0;
+  const restarted = createTemplateResourceService({
+    appRoot: ROOT,
+    userDataRoot: env.userData,
+    store: env.store,
+    readFileCapped: async () => {
+      reads += 1;
+      throw new Error('不应读取');
+    }
+  });
+  const current = (await restarted.get('dup-recall-mail')).resource.current;
+  assert.deepEqual([current.validation, current.validationMessage], ['failed', '版本文件已被修改（大小与记录不一致）']);
+  await assert.rejects(restarted.acquire('dup-recall-mail'), /大小与记录不一致/);
+  assert.equal(reads, 0);
+});
+
+test('检查排队有数量与字节上限，超出时按繁忙处理', { timeout: 120000 }, async (t) => {
+  await waitInspectionsIdle();
+  const payload = {
+    task: 'inspect',
+    resource: { id: 'dup-recall-mail', type: 'output', headerRow: 1 },
+    bytes: fs.readFileSync(path.join(ROOT, 'assets', '重复入金召回邮件模板.xlsx')),
+    context: {}
+  };
+  const accepted = [0, 1, 2, 3, 4].map(() => runTemplateInspection(payload));
+  assert.deepEqual([inspectionStats().running, inspectionStats().queued], [1, 4]);
+  await assert.rejects(runTemplateInspection(payload), (error) => error.transient === true && error.message === '模板检查繁忙（排队已满），请稍后重试');
+  await Promise.all(accepted);
+  await waitInspectionsIdle();
+
+  const running = runTemplateInspection(payload);
+  const large = { ...payload, bytes: Buffer.alloc(33 * 1024 * 1024) };
+  const firstLarge = runTemplateInspection(large);
+  await assert.rejects(runTemplateInspection(large), /排队已满/);
+  await running;
+  assert.equal((await firstLarge).contract.ok, false, '无效内容照常检查并判为不通过');
+  await waitInspectionsIdle();
+});
+
+test('取值快照为空时交由调用方按原逻辑降级', async (t) => {
+  const env = setup(t);
+  const bytes = await canonicalizeXlsx(fs.readFileSync(await writeOffsetWorkbook(path.join(env.files, 'fund.xlsx'), 1, 1, [['FundType'], ['KEEP']])));
+  fs.mkdirSync(path.dirname(env.versionFile('fund-type-enum', 'v2')), { recursive: true });
+  fs.writeFileSync(env.versionFile('fund-type-enum', 'v2'), bytes);
+  assert.equal(commitRecord(env.store, 'fund-type-enum', {
+    versionId: 'v2', versionNo: 2, bytes, structure: { enumValues: [], comparableValues: [] }, enable: true, expectedVersionId: 'v1'
+  }).status, 'success');
+  assert.deepEqual(await env.service.currentRuntimeValues('fund-type-enum'), { status: 'unavailable', message: '版本取值为空', versionId: 'v2' });
 });
 
 test('取用用户版本时返回核对过的字节；之后版本文件被替换，本次导出仍使用检查过的内容', async (t) => {
@@ -669,7 +784,7 @@ test('检查 Worker 同一时间只运行一个、退出后才释放名额；同
     context: {}
   };
   const runs = [runTemplateInspection(payload), runTemplateInspection(payload), runTemplateInspection(payload)];
-  assert.deepEqual(inspectionStats(), { running: 1, queued: 2 });
+  assert.deepEqual([inspectionStats().running, inspectionStats().queued], [1, 2]);
   assert.ok((await Promise.all(runs)).every((result) => result.contract.ok));
   await waitInspectionsIdle();
 
@@ -751,7 +866,7 @@ test('比较基准不信任被改动或读不出的当前文件：优先用导�
   assert.equal(tampered.checks.some((check) => check.label === '比较基准'), false, '快照可用时不需要提示');
 
   // 2. 早期记录没有快照：文件完好时核对 SHA-256 后按运行时口径重新解析。
-  const legacyBytes = fs.readFileSync(await writeOffsetWorkbook(path.join(env.files, 'v3.xlsx'), 3, 2, [['FundType'], ['KEEP'], ['REMOVE'], ['EXTRA']]));
+  const legacyBytes = await canonicalizeXlsx(fs.readFileSync(await writeOffsetWorkbook(path.join(env.files, 'v3.xlsx'), 3, 2, [['FundType'], ['KEEP'], ['REMOVE'], ['EXTRA']])));
   const legacyTarget = env.versionFile('fund-type-enum', 'v3');
   fs.writeFileSync(legacyTarget, legacyBytes);
   const createdAt = '2026-10-20T08:00:00.000Z';
@@ -777,8 +892,9 @@ test('比较基准不信任被改动或读不出的当前文件：优先用导�
   const restarted = () => createTemplateResourceService({ appRoot: ROOT, userDataRoot: env.userData, store: env.store });
   const untrusted = await prepare(restarted(), 'fund-type-enum', keepOnly);
   blockedRemove(untrusted);
-  assert.equal(untrusted.checks.find((check) => check.label === '比较基准').detail,
-    '无法确认当前版本 V3 的取值（版本文件已被修改（SHA-256 不一致）），按场景引用逐项核对');
+  // 被改动的文件比记录大时读取在上限处停止，比记录小时读完后 SHA-256 不一致：两种情况都不采用该文件。
+  assert.match(untrusted.checks.find((check) => check.label === '比较基准').detail,
+    /^无法确认当前版本 V3 的取值（版本文件(已被修改（SHA-256 不一致）|无法读取：文件超过 \d+ 字节的读取上限)），按场景引用逐项核对$/);
 
   // 4. 早期记录的文件缺失：同样按场景引用逐项核对。
   fs.rmSync(legacyTarget);
@@ -806,7 +922,7 @@ test('版本路径被同名目录替代：判为版本文件缺失（不兼容�
     appRoot: ROOT,
     userDataRoot: env.userData,
     store: env.store,
-    readFile: async (filePath) => {
+    readFileCapped: async (filePath) => {
       if (filePath === versionPath) throw Object.assign(new Error(`EISDIR: illegal operation on a directory, read`), { code: 'EISDIR', syscall: 'read' });
       return fs.promises.readFile(filePath);
     }
@@ -834,14 +950,14 @@ test('当前用户版本文件被改动或缺失：标记不可用，导出取�
   fs.appendFileSync(versionPath, Buffer.from('tamper'));
   const tampered = (await env.service.get('dup-recall-mail')).resource.current;
   assert.equal(tampered.validation, 'failed');
-  assert.equal(tampered.validationMessage, '版本文件已被修改（SHA-256 不一致）');
+  assert.equal(tampered.validationMessage, '版本文件已被修改（大小与记录不一致）');
   await assert.rejects(env.service.acquire('dup-recall-mail'), (error) => (
     error instanceof TemplateResourceUnavailableError
-    && error.message === '模板「重复入金召回邮件模板」当前版本 V2 不可用：版本文件已被修改（SHA-256 不一致）。请在 设置 → 模板文件 恢复默认或重新导入'
+    && error.message === '模板「重复入金召回邮件模板」当前版本 V2 不可用：版本文件已被修改（大小与记录不一致）。请在 设置 → 模板文件 恢复默认或重新导入'
   ));
   assert.deepEqual((await env.service.get('dup-recall-mail')).resource.tasks, [], '取用失败时释放已登记的租约');
   assert.deepEqual(await env.service.resolveCurrentFile('dup-recall-mail'),
-    { status: 'unavailable', message: '版本文件已被修改（SHA-256 不一致）', versionId: 'v2' });
+    { status: 'unavailable', message: '版本文件已被修改（大小与记录不一致）', versionId: 'v2' });
 
   fs.rmSync(versionPath);
   const missing = (await env.service.get('dup-recall-mail')).resource;
@@ -860,7 +976,7 @@ test('升级后契约变化：已启用的用户版本保留为当前版本，�
   const legacy = await restyledTemplate('assets/资金对账导出不平.xlsx', path.join(env.files, 'legacy.xlsx'), (workbook) => {
     workbook.getWorksheet('不平结果').spliceColumns(21, 1);
   });
-  const bytes = fs.readFileSync(legacy);
+  const bytes = await canonicalizeXlsx(fs.readFileSync(legacy));
   const target = env.versionFile('prefund-unbalanced', 'v2');
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, bytes);

@@ -42,6 +42,28 @@ function localTimeText(value) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+// 有上限地读文件：读到的字节超过 maxBytes 即停止并报错，文件在检查大小之后变大也不会在主进程整份读入。
+async function readFileWithCap(filePath, maxBytes) {
+  const handle = await fs.promises.open(filePath, 'r');
+  try {
+    const chunks = [];
+    let total = 0;
+    const chunk = Buffer.allocUnsafe(64 * 1024);
+    for (;;) {
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+      if (!bytesRead) break;
+      total += bytesRead;
+      if (total > maxBytes) {
+        throw Object.assign(new Error(`文件超过 ${maxBytes} 字节的读取上限`), { code: 'TEMPLATE_FILE_TOO_LARGE' });
+      }
+      chunks.push(Buffer.from(chunk.subarray(0, bytesRead)));
+    }
+    return Buffer.concat(chunks, total);
+  } finally {
+    await handle.close();
+  }
+}
+
 class TemplateResourceUnavailableError extends Error {
   constructor(message, details = {}) {
     super(message);
@@ -65,6 +87,7 @@ function createTemplateResourceService({
   rename = fs.promises.rename,
   rm = fs.promises.rm,
   writeVersionFile = (filePath, bytes) => writeFileAtomicDurable(filePath, bytes),
+  readFileCapped = readFileWithCap,
   inspectionLimits = DEFAULT_INSPECTION_LIMITS,
   runInspection = (payload) => runTemplateInspection(payload, { limits: inspectionLimits })
 } = {}) {
@@ -200,7 +223,8 @@ function createTemplateResourceService({
     const running = (async () => {
       const builtin = await inspect(resource);
       const { contract: result } = await inspectUserBytes(resource, bytes, {
-        builtinSheetNames: (builtin.sheets || []).map((sheet) => sheet.name)
+        builtinSheetNames: (builtin.sheets || []).map((sheet) => sheet.name),
+        expectCanonical: true
       });
       const verdict = { ok: result.ok, message: result.message, transient: result.transient === true };
       if (!verdict.transient) compatibility.set(key, verdict);
@@ -214,10 +238,16 @@ function createTemplateResourceService({
   // 版本文件打不开：确认不存在或不是普通文件（如被同名目录替代）时为“缺失”（不兼容，需恢复默认或重新导入）；
   // 权限、占用、句柄耗尽等其他读盘错误是运行环境问题，标为 transient（暂不可用，稍后重试），结果不缓存。
   const MISSING_FILE_CODES = new Set(['ENOENT', 'ENOTDIR', 'EISDIR']);
+  const MODIFIED_SIZE_MESSAGE = '版本文件已被修改（大小与记录不一致）';
   function accessFailure(filePath, error) {
     if (error && MISSING_FILE_CODES.has(error.code)) return { filePath, ok: false, message: '版本文件缺失' };
+    if (error && error.code === 'TEMPLATE_FILE_TOO_LARGE') return { filePath, ok: false, message: MODIFIED_SIZE_MESSAGE };
     return { filePath, ok: false, transient: true, message: `版本文件暂时无法读取（${errorText(error)}），请稍后重试` };
   }
+
+  const versionReadCap = (version) => (Number.isFinite(version.sizeBytes) && version.sizeBytes > 0
+    ? Math.min(version.sizeBytes, MAX_IMPORT_BYTES)
+    : MAX_IMPORT_BYTES);
 
   // 用户版本：核对文件存在、SHA-256 与当前代码契约；任一不满足即视为不可用（保留为当前版本并报错，不自动切回内置）。
   async function inspectUserVersion(resource, version) {
@@ -229,13 +259,15 @@ function createTemplateResourceService({
       return accessFailure(filePath, error);
     }
     if (typeof info.isFile === 'function' && !info.isFile()) return { filePath, ok: false, message: '版本文件缺失' };
+    // 先比大小再读：版本文件被替换成大文件时，不在主进程整份读入（读取本身也有上限）。
+    if (Number.isFinite(version.sizeBytes) && info.size !== version.sizeBytes) return { filePath, ok: false, message: MODIFIED_SIZE_MESSAGE };
     const signature = `${info.size}:${info.mtimeMs}`;
     const cacheKey = `${resource.id}:${version.versionId}`;
     const cached = userInspections.get(cacheKey);
     if (cached && cached.signature === signature && cached.sha256 === version.sha256) return cached;
     let bytes;
     try {
-      bytes = await readFile(filePath);
+      bytes = await readFileCapped(filePath, versionReadCap(version));
     } catch (error) {
       return accessFailure(filePath, error);
     }
@@ -395,7 +427,7 @@ function createTemplateResourceService({
     // 先写同目录临时文件再替换：用户确认覆盖已有文件时，写出或替换失败不会截断原文件。
     const temporaryPath = `${targetPath}.${crypto.randomUUID()}.tmp`;
     try {
-      await writeFile(temporaryPath, await readFile(target.filePath));
+      await writeFile(temporaryPath, await readFileCapped(target.filePath, MAX_IMPORT_BYTES));
       await rename(temporaryPath, targetPath);
     } catch (error) {
       try { await rm(temporaryPath, { force: true }); } catch (_cleanupError) {}
@@ -447,7 +479,7 @@ function createTemplateResourceService({
           );
         }
         // 用户版本总是返回核对过 SHA-256 的字节，Writer 直接读入这份字节：检查之后文件被替换也不会读到未经检查的内容。
-        const bytes = inspected.bytes || await readFile(inspected.filePath);
+        const bytes = inspected.bytes || await readFileCapped(inspected.filePath, versionReadCap(version));
         if (sha256(bytes) !== version.sha256) {
           throw new TemplateResourceUnavailableError(
             `模板「${name}」当前版本 ${versionLabel} 不可用：版本文件已被修改（SHA-256 不一致）。${SETTINGS_HINT}`,
@@ -515,7 +547,7 @@ function createTemplateResourceService({
     const cacheKey = `${resource.id}:${version.sha256}`;
     if (reparsedValues.has(cacheKey)) return { values: reparsedValues.get(cacheKey) };
     try {
-      const bytes = await readFile(versionPath(resource.id, versionId));
+      const bytes = await readFileCapped(versionPath(resource.id, versionId), versionReadCap(version));
       if (sha256(bytes) !== version.sha256) return { values: null, reason: '版本文件已被修改（SHA-256 不一致）' };
       const parsed = await runInspection({ task: 'values', resource: { id: resource.id, type: resource.type, headerRow: resource.headerRow }, bytes });
       reparsedValues.set(cacheKey, parsed.values);
@@ -537,6 +569,8 @@ function createTemplateResourceService({
     if (!inspected.ok) return { status: 'unavailable', message: inspected.message, versionId: currentVersionId };
     const values = await versionComparableValues(resource, currentVersionId, versions);
     if (!values.values) return { status: 'unavailable', message: values.reason, versionId: currentVersionId };
+    // 取值为空时交由调用方按原逻辑降级（FundType 空列表、网关旧字段），不返回空下拉。
+    if (!values.values.length) return { status: 'unavailable', message: '版本取值为空', versionId: currentVersionId };
     return { status: 'user', values: values.values, versionId: currentVersionId };
   }
 
@@ -621,7 +655,7 @@ function createTemplateResourceService({
         add('文件大小', 'fail', `超过 ${MAX_IMPORT_BYTES / 1024 / 1024} MB 上限`);
         return finish({ name: fileName, size: info.size });
       }
-      bytes = await readFile(filePath);
+      bytes = await readFileCapped(filePath, MAX_IMPORT_BYTES);
     } catch (readError) {
       add('读取文件', 'fail', `文件无法读取：${errorText(readError)}`);
       return finish({ name: fileName, size: null });
@@ -645,7 +679,10 @@ function createTemplateResourceService({
     const contract = inspected.contract;
     checks.push(...contract.checks);
 
-    const sameUser = versions.find((version) => version.sha256 === digest);
+    // 保存的是检查 Worker 重新打包后的字节：与已有用户版本按重新打包后的内容比较，与内置版本按原文件比较。
+    const canonical = inspected.canonical ? Buffer.from(inspected.canonical) : null;
+    const canonicalDigest = canonical ? sha256(canonical) : '';
+    const sameUser = canonical ? versions.find((version) => version.sha256 === canonicalDigest) : null;
     const same = sameUser
       ? { id: sameUser.versionId, label: labelOf(sameUser.versionId) }
       : (builtin.sha256 === digest ? { id: BUILTIN_VERSION_ID, label: 'V1' } : null);
@@ -675,8 +712,8 @@ function createTemplateResourceService({
       resourceId: resource.id,
       expectedVersionId: currentVersionId,
       fileName,
-      bytes,
-      sha256: digest,
+      bytes: canonical,
+      sha256: canonicalDigest,
       verdict,
       structure,
       createdAt: now().getTime()

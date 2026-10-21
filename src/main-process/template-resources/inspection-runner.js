@@ -18,6 +18,9 @@ const DEFAULT_INSPECTION_LIMITS = Object.freeze({
   timeoutMs: 60 * 1000
 });
 const MAX_CONCURRENT_INSPECTIONS = 1;
+// 排队中的检查各自持有文件字节：限制排队数量与字节总量，超出时按运行环境繁忙处理（稍后重试），不在主进程无限积压。
+const MAX_QUEUED_INSPECTIONS = 4;
+const MAX_QUEUED_BYTES = 64 * 1024 * 1024;
 
 class TemplateInspectionError extends Error {
   constructor(message, { transient = true, code = '' } = {}) {
@@ -32,10 +35,13 @@ const errorText = (error) => (error && error.message ? String(error.message) : '
 
 const queue = [];
 let running = 0;
+let queuedBytes = 0;
+const payloadBytes = (payload) => (payload && payload.bytes && Number.isFinite(payload.bytes.length) ? payload.bytes.length : 0);
 
 function pump() {
   while (running < MAX_CONCURRENT_INSPECTIONS && queue.length) {
     const job = queue.shift();
+    queuedBytes -= payloadBytes(job.payload);
     running += 1;
     let released = false;
     const release = () => {
@@ -107,19 +113,28 @@ function startInspection(payload, limits, release) {
 // payload：{ task: 'inspect' | 'values', resource: { id, type, headerRow }, bytes, context }
 function runTemplateInspection(payload, { limits = DEFAULT_INSPECTION_LIMITS } = {}) {
   return new Promise((resolve, reject) => {
+    const size = payloadBytes(payload);
+    if (running >= MAX_CONCURRENT_INSPECTIONS
+        && (queue.length >= MAX_QUEUED_INSPECTIONS || queuedBytes + size > MAX_QUEUED_BYTES)) {
+      reject(new TemplateInspectionError('模板检查繁忙（排队已满），请稍后重试', { code: 'template-inspection-busy' }));
+      return;
+    }
     queue.push({ payload, limits, resolve, reject });
+    queuedBytes += size;
     pump();
   });
 }
 
 // 诊断与测试用：正在运行（含已返回结果、尚未退出）与排队中的检查数。
 function inspectionStats() {
-  return { running, queued: queue.length };
+  return { running, queued: queue.length, queuedBytes };
 }
 
 module.exports = {
   DEFAULT_INSPECTION_LIMITS,
   MAX_CONCURRENT_INSPECTIONS,
+  MAX_QUEUED_BYTES,
+  MAX_QUEUED_INSPECTIONS,
   TemplateInspectionError,
   inspectionStats,
   runTemplateInspection

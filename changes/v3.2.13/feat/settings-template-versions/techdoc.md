@@ -111,10 +111,11 @@ v3.2.12 的「设置 → 模板文件」页只接了只读查询与另存为，�
 
 ExcelJS 与 SheetJS 读入时会按文件声明的范围逐格展开（数据验证、合并单元格、定义名称、列定义、超链接等），几 KB 的文件就能让读入耗尽内存，且无法在读入前逐项预判。用户导入的文件因此只在受限的检查 Worker 中解析：导入预检（契约检查与结构描述）、已存版本的兼容复核、早期记录的取值重新解析都在 Worker 中进行，主进程只解析随包的内置模板。
 
-- Worker 经 `memoryCarrierAdmission` 启动，堆上限 256 MB（新生代 32 MB），超时 60 秒；同一时间只运行一个检查 Worker，其余排队，名额在 Worker 真正退出后才释放。同一模板同一内容正在进行的复核合并为一次。
-- 堆上限不包括解压出的外部缓冲区（Node 的 `resourceLimits` 只限 V8 堆）：检查任务在交给 ExcelJS / SheetJS 之前，先用 `yauzl` 逐条流式解压并计数（只计字节，不保留内容），条目声明或实际解压量合计超过 100 MB 即判不通过（“文件大小：解压后内容超过 100 MB 上限”）；`yauzl` 同时核对条目声明大小与实际是否一致，结构无法读取时判“读取文件”不通过。
+- Worker 经 `memoryCarrierAdmission` 启动，堆上限 256 MB（新生代 32 MB），超时 60 秒；同一时间只运行一个检查 Worker，其余排队（最多 4 个、排队字节合计 64 MB，超出时按繁忙处理、稍后重试），名额在 Worker 真正退出后才释放。同一模板同一内容正在进行的复核合并为一次。
+- 堆上限不包括解压出的外部缓冲区（Node 的 `resourceLimits` 只限 V8 堆），而 ZIP 的中央目录与本地文件头可以写得互相矛盾（JSZip 取本地文件头的名称，SheetJS 取本地文件头的大小），任何预先计数都可能与解析库看到的内容不同。因此检查任务先用 `yauzl` 按中央目录逐条解压（条目声明或实际解压量合计超过 100 MB 即判“文件大小”不通过；核对声明大小；条目名重复、目录条目带内容判“读取文件”不通过），再把解出的条目用 JSZip 重新打包成元信息一致的 ZIP（固定条目时间，同一内容总得到相同字节，打包是幂等的）。契约检查与结构描述都在重新打包后的文件上进行，导入时保存的也是它：版本文件与导入的原文件内容相同，但字节与 SHA-256 不同，另存为得到的是重新打包后的文件。重新打包后超过 20 MB 判不通过。
+- 已存版本复核要求版本文件已是重新打包后的格式（重新打包结果与文件相同），否则判“版本文件不是本程序保存的格式，请重新导入”。主进程读取已存版本前先比较文件大小与记录，不一致直接判“已被修改”而不读入；读取本身有字节上限（记录大小与 20 MB 取小），读到超出即停止。导入时读取所选文件、租约补读、早期记录重新解析、另存为也都用有上限的读取。
 - 超出堆上限：判为不通过（“模板过于复杂：读取时超出 256 MB 内存上限…”），按内容哈希缓存。其余失败（超时、低内存任务占用、Worker 无法启动或加载失败、任务意外抛错）都是运行环境问题，标为 transient（暂不可用，稍后重试，不缓存）；文件内容的问题由检查任务以契约结果返回。
-- 主进程不解析未经检查的用户文件：资金对账、重复入金、平盘导出取得的租约带有核对过 SHA-256 的字节，Writer 直接读入这份字节，不再按路径打开（检查之后文件被替换也读不到未经检查的内容）；VCC 导出在自己的 Worker 中读入传入的字节。FundType / 网关下拉使用导入时在检查 Worker 中解析的取值快照，早期记录没有快照时在检查 Worker 中解析（核对 SHA-256 后）。导出时读入的字节都已在检查 Worker 中以同样的库与选项通过上述上限。读入前的原始 XML 扫描（第五节）也在 Worker 中执行，只用于给常见情况更明确的提示。
+- 主进程不解析未经检查的用户文件：资金对账、重复入金、平盘导出取得的租约带有核对过 SHA-256 的字节，Writer 直接读入这份字节，不再按路径打开（检查之后文件被替换也读不到未经检查的内容）；VCC 导出在自己的 Worker 中读入传入的字节。FundType / 网关下拉使用导入时在检查 Worker 中解析的取值快照，早期记录没有快照时在检查 Worker 中解析（核对 SHA-256 后）；快照为空时交由调用方按原逻辑降级（FundType 空列表、网关旧字段）。结构描述、取值快照与重新解析共用同一组 SheetJS 读取选项（不解析公式、HTML 与格式化文本）。导出时读入的字节都已在检查 Worker 中以同样的库与选项通过上述上限。读入前的原始 XML 扫描（第五节）也在 Worker 中执行，只用于给常见情况更明确的提示。
 
 ## 五、预检契约（`contracts.js`）
 
@@ -162,6 +163,7 @@ FundType 的取值（含展示用的 `enumValues`）与运行时 loader 同口�
 | L3 | 预检引用检查基于提交前的场景配置快照；预检与提交之间新增的场景引用不会再次检查 | 场景下拉只提供当前版本取值，新引用只会是当前版本已有的值；风险低，未额外处理 |
 | L4 | 枚举类模板的当前用户版本不可用时，场景配置沿用原降级（FundType 空列表、网关旧字段），弹窗不单独提示原因 | 原因显示在模板页 |
 | L5 | 比较基准取不到可信取值（早期记录没有快照，且文件被改动、缺失或读不出）时，按场景引用逐项核对：场景中手动输入、不在枚举里的自定义值也会被当作必须保留的取值，可能拦下原本可以导入的版本 | 只影响开发期早期记录；提示中说明了原因，恢复默认后重新导入即可 |
+| L6 | 本分支早期（重新打包之前）保存的用户版本不是重新打包后的格式，复核判为需要重新导入 | 功能尚未发布，只影响开发期数据；恢复默认后重新导入即可 |
 
 ## 八、架构与策略登记
 
@@ -172,7 +174,7 @@ FundType 的取值（含展示用的 `enumValues`）与运行时 loader 同口�
 
 | 层 | 入口 | 覆盖 |
 | --- | --- | --- |
-| Unit | `tests/unit/main-process/template-resources-versions.test.js` | 预检与仅保存、启用/租约/冲突/恢复默认/删除、版本号不复用、预检期间版本变化冲突、重复内容、令牌过期与上限、7 类输出契约的 fail/warn、枚举与网关的场景引用、文件篡改与缺失、升级后契约变化（D1）、复核期间租约拦截删除、环境性失败（含读取层包装的系统错误）不缓存且恢复后重新复核、试写清理失败不覆盖结论、声明范围覆盖整张表的小文件、声明范围不从 A1 开始时的比较基准与场景引用保护、比较基准不信任被改动或读不出的当前文件（快照、SHA 核对后重新解析、按场景引用逐项核对）、版本文件读盘错误按暂不可用处理、版本路径被目录替代判为缺失、数据验证或合并单元格范围超限在读入前拒绝、受限 Worker 中定义名称与超链接的逐格展开超出内存上限即不通过、检查 Worker 超时按暂不可用处理、整列 / 整行 / 单个单元格打印区域与图表工作表拒绝、启用已保存版本时的场景引用保护、多个打印区域（Excel 逗号写法与多个定义）拒绝、平盘模板数据区提示、Excel 表拒绝与数据验证 / 条件格式提示、孤儿清扫与重建后状态保持、写库失败回滚 |
+| Unit | `tests/unit/main-process/template-resources-versions.test.js` | 预检与仅保存、启用/租约/冲突/恢复默认/删除、版本号不复用、预检期间版本变化冲突、重复内容、令牌过期与上限、7 类输出契约的 fail/warn、枚举与网关的场景引用、文件篡改与缺失、升级后契约变化（D1）、复核期间租约拦截删除、环境性失败（含读取层包装的系统错误）不缓存且恢复后重新复核、试写清理失败不覆盖结论、声明范围覆盖整张表的小文件、声明范围不从 A1 开始时的比较基准与场景引用保护、比较基准不信任被改动或读不出的当前文件（快照、SHA 核对后重新解析、按场景引用逐项核对）、版本文件读盘错误按暂不可用处理、版本路径被目录替代判为缺失、数据验证或合并单元格范围超限在读入前拒绝、受限 Worker 中定义名称与超链接的逐格展开超出内存上限即不通过、检查 Worker 超时按暂不可用处理、中央目录与本地文件头矛盾的 ZIP 重新打包或拒绝、已存版本大小不一致时不读入、排队数量与字节上限、取值快照为空时降级、整列 / 整行 / 单个单元格打印区域与图表工作表拒绝、启用已保存版本时的场景引用保护、多个打印区域（Excel 逗号写法与多个定义）拒绝、平盘模板数据区提示、Excel 表拒绝与数据验证 / 条件格式提示、孤儿清扫与重建后状态保持、写库失败回滚 |
 | Unit | `tests/unit/main-process/position-reconciliation-excel-io.test.js` | 模板数据区的旧行（含金额）、合并单元格与仅有样式的行在写出前全部清空，回读只含本次数据；筛选与打印区域按结果行数调整（5 行、0 行），筛选起点不在第 1 行时首行归为表头，多个打印区域保持原样，内置模板不新增 |
 | Unit | `tests/unit/main-process/pre-fund-reconciliation-excel-writer.test.js` | 新增：模板的筛选与打印区域按各 Sheet 本次行数调整（含筛选起点不在第 1 行、零数据 Sheet），未设置时不新增 |
 | Unit | `tests/unit/backend/database/template-resource-repository.test.js` | 建表幂等、事务内更新、冲突与 CHECK 失败整体回滚 |
@@ -227,7 +229,7 @@ FundType 的取值（含展示用的 `enumValues`）与运行时 loader 同口�
 
 ### 9.3 代码审查与修复（2026-10-20）
 
-六轮审查：先由 Claude 审查分支全部改动，再由 Codex 五次只读复审（每次都含此前的修复）。已修复以下 33 项（其中第四轮的 7 项逐格展开类问题以“用户文件只在受限 Worker 中解析”统一解决），其余审查发现记为已知、本轮不修：
+七轮审查：先由 Claude 审查分支全部改动，再由 Codex 六次只读复审（每次都含此前的修复）。已修复以下 37 项（其中第四轮的 7 项逐格展开类问题以“用户文件只在受限 Worker 中解析”统一解决），其余审查发现记为已知、本轮不修：
 
 | 来源 | 问题 | 修复 |
 | --- | --- | --- |
@@ -260,6 +262,10 @@ FundType 的取值（含展示用的 `enumValues`）与运行时 loader 同口�
 | Codex 五轮 P2 | 普通导出在检查后按路径重新打开版本文件，文件被替换时会解析未经检查的内容 | 用户版本租约总带核对过的字节，三个 Writer 直接读入这份字节 |
 | Codex 五轮 P2 | 检查 Worker 没有并发上限，同一内容的复核也不合并 | 同一时间只运行一个、退出后释放名额；同一内容的在途复核合并 |
 | Codex 五轮 P3 | Worker 启动后加载失败等异步错误被当作不兼容缓存 | 只有超出堆上限算文件问题，其余 Worker 失败一律暂不可用、不缓存 |
+| Codex 六轮 P1 | ZIP 中央目录与本地文件头互相矛盾（中央目录把条目名写成目录、结尾记录总条目数写成 0、本地文件头的大小写成 1 GiB）时，解压计数与 ExcelJS / SheetJS 看到的内容不同，100 MB 上限可被绕过 | 按中央目录解出后重新打包，检查与保存都用重新打包的文件；条目名重复、目录条目带内容拒绝 |
+| Codex 六轮 P2 | 已存版本在主进程整份读入后才核对 SHA，被替换成大文件时先分配大块内存 | 读入前先比较文件大小与记录；所有用户文件读取都有字节上限 |
+| Codex 六轮 P2 | 检查排队不限数量与字节，主进程可积压大量待检文件 | 排队最多 4 个、合计 64 MB，超出按繁忙处理 |
+| Codex 六轮 P3 | 早期记录的重新解析与快照用不同的 SheetJS 选项，可能得到空网关字段且不降级 | 统一读取选项；取值为空时交由调用方降级 |
 
 二轮复审修复后：新增 4 个回归用例在旧实现上均失败、在新实现上通过；`npm run test:unit` 9664/9668（0 失败，4 项为既有条件跳过）；`npm run lint`、`npm run check:architecture` 通过；集成脚本 `template-resources-versions`、`template-resources-save-as`、`position-reconciliation-side-db-parity`、`position-startup-task-recovery` 通过；FundType / 网关解析在 `assets/` 39 个 xlsx 上仍与旧实现一致。本轮未改 Renderer，生命周期未重跑；全量 `npm run test:integration` 与 smoke 未重跑。
 
@@ -268,3 +274,5 @@ FundType 的取值（含展示用的 `enumValues`）与运行时 loader 同口�
 四轮复审修复后：新增 4 个回归用例（受限 Worker 超出内存上限、Worker 超时、整列 / 整行 / 单格打印区域与图表工作表、启用已保存版本的场景引用保护）；依赖主线程模拟 fs / yauzl 错误的 3 个用例改为在进程内执行同一检查任务（`inspection-task.js`）。`npm run test:unit` 9673/9677（0 失败，4 项为既有条件跳过）；`npm run lint`、`npm run check:architecture`（worker 边 65 → 66）通过；原生载体清单测试通过；集成脚本 `template-resources-versions`、`template-resources-save-as`、`position-reconciliation-side-db-parity`、`pre-fund-reconciliation-output-contract`、`duplicate-inbound-match-end-to-end`、`vcc-financial-op-result-workbook` 通过；在 Electron 主进程中启动检查 Worker，VCC Pending 试写、结构描述与 FundType 取值解析均正常。本轮未改 Renderer，生命周期未重跑；全量 `npm run test:integration`、smoke 与 Excel 实机打印未做。
 
 五轮复审修复后：新增回归用例覆盖下拉取值快照（含早期记录在 Worker 中解析、文件被改动时不可用）、解压超限的小文件在读入前拒绝、租约字节不受文件替换影响、三个 Writer 只读入租约字节（在旧 Writer 上失败）、检查 Worker 排队与退出后释放、同一内容复核合并、启动失败按暂不可用且不缓存。过程中曾为测试给 Worker 入口加可替换路径，导致架构检查报告“动态加载未登记”；已改回固定入口，启动失败改用无法传给 Worker 的数据触发。`npm run test:unit` 9678/9682（0 失败，4 项为既有条件跳过）；`npm run lint`、`npm run check:architecture`（worker 边 66）、原生载体清单测试通过；集成脚本 `template-resources-versions`、`template-resources-save-as`、`pre-fund-reconciliation-output-contract`、`pre-fund-reconciliation-side-db-parity`、`duplicate-inbound-match-end-to-end`、`position-reconciliation-side-db-parity`、`position-startup-task-recovery`、`vcc-financial-op-result-workbook` 通过；在 Electron 主进程中启动检查 Worker 正常。本轮未改 Renderer，生命周期未重跑；全量 `npm run test:integration`、smoke 与 Excel 实机打印未做。取消已不需要的检查（如关闭导入弹窗后）未实现，排队中的检查仍会执行完。
+
+六轮复审修复后：新增回归用例覆盖三类元信息矛盾的 ZIP（中央目录条目名改为目录、结尾记录条目数为 0、本地文件头大小写成 1 GiB）、保存的是幂等的重新打包文件、已存版本大小不一致时不读入（读取次数为 0）、排队数量与字节上限、取值快照为空时降级；直接写入版本记录的既有用例改为先重新打包。大小检查与排队上限两个用例在旧实现上失败；元信息矛盾用例未在旧实现上运行（其中本地文件头 1 GiB 的情形会让旧实现尝试分配 1 GiB）。`npm run test:unit` 9682/9686（0 失败，4 项为既有条件跳过）；`npm run lint`、`npm run check:architecture`（worker 边 66）、原生载体清单测试通过；集成脚本 `template-resources-versions`、`template-resources-save-as`、`pre-fund-reconciliation-output-contract`、`duplicate-inbound-match-end-to-end`、`position-reconciliation-side-db-parity`、`vcc-financial-op-result-workbook` 通过；7 个内置模板重新打包均幂等；在 Electron 主进程中启动检查 Worker 正常。未做：用 Excel 实机打开重新打包后的版本文件、全量 `npm run test:integration` 与 smoke。

@@ -62,8 +62,12 @@ function filledRowCount(sheet, cells, headerIndex) {
   return count;
 }
 
+// 结构描述、取值快照与早期记录的重新解析共用同一组读取选项（不解析公式、HTML 与格式化文本），
+//   同一份字节在各条路径上得到相同的取值。
+const READ_OPTIONS = Object.freeze({ type: 'buffer', cellFormula: false, cellHTML: false, cellText: false });
+
 function describeWorkbook(bytes, resource) {
-  const workbook = XLSX.read(bytes, { type: 'buffer', cellFormula: false, cellHTML: false, cellText: false });
+  const workbook = XLSX.read(bytes, READ_OPTIONS);
   const headerIndex = resource.headerRow - 1;
   // comparableValues：按运行时口径解析的取值快照，导入时随版本记录保存，作为下一次导入的比较基准。
   const parseValues = RUNTIME_VALUE_PARSERS[resource.id] || null;
@@ -85,7 +89,7 @@ function describeWorkbook(bytes, resource) {
 // 按运行时口径解析取值（FundType 取值、网关表头字段）；没有运行时解析的模板返回 null。
 function parseRuntimeValues(resourceId, bytes) {
   const parse = RUNTIME_VALUE_PARSERS[resourceId];
-  return parse ? parse(XLSX.read(bytes, { type: 'buffer' })) : null;
+  return parse ? parse(XLSX.read(bytes, READ_OPTIONS)) : null;
 }
 
 module.exports = {
