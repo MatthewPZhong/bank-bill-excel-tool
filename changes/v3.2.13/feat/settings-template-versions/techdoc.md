@@ -301,4 +301,11 @@ FundType 的取值（含展示用的 `enumValues`）与运行时 loader 同口�
 | 变更记录 | 4 条，与操作一致；未通过预检的导入不记录 |
 | 重启应用 | FundType V2 仍为当前版本，在 Electron 的检查 Worker 中复核通过（未被判为早期格式），下拉取值不变 |
 
-- 未做：用 Excel 实机打开重新打包后的版本文件、Excel 实机打印；Windows 实机 GUI 检查仍挂 backlog B26。
+- 重新打包文件的独立解析核对：本机未装 Excel / LibreOffice / Numbers，改用与本程序不共享代码的解析器。对象为 7 个可替换内置模板与走查用的 2 个文件，重新打包后逐一核对：
+  - Info-ZIP `unzip -t` 全部通过。
+  - Python `zipfile` 核对 CRC，以及本地文件头与中央目录的名称、大小、CRC，均一致。条目集合与原文件相同，各条目内容逐字节相同。
+  - XML 全部可解析；每个部件都有内容类型，包内关系的目标全部存在。
+  - macOS 快速查看（自带 Office 解析）对原文件与重新打包文件生成的缩略图逐字节相同，且为实际表格内容，不是通用图标；宽列版与内置版的缩略图不同。
+  - 应用保存的 FundType V2 与单独重新打包的结果逐字节一致。
+  - FundType 内置文件由 18 KB 变为 6 KB：原文件各条目未压缩（STORED），重新打包改为 DEFLATE，内容不变。
+- 未做：在 Excel 中实机打开与打印；Windows 实机 GUI 检查仍挂 backlog B26。
