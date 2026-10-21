@@ -58,6 +58,7 @@
 | 数据 | 路径 |
 |---|---|
 | 主 SQLite | `{userData}/tool-data.sqlite` |
+| 模板文件用户版本 | `{userData}/template-resources/<模板>/<版本>.xlsx`；元数据与变更记录在主 SQLite |
 | 导出 / 错误报告 | `exports/{date}/` / `error-reports/{date}/` |
 | 活动日志 | `app_activity_log.txt` |
 | 余额种子 / 模板库 | `balance-seeds/` / `templates/template-library.json` |

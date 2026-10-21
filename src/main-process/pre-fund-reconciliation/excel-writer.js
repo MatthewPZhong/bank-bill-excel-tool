@@ -9,6 +9,7 @@ const {
   ORDER_REPAIR_FIELDS_GATEWAY
 } = require('../../constants/gateway-bill-recon-fields');
 const { sanitizeFileName } = require('../recon-id-fix-io');
+const { fitOutputRangesToRows } = require('../output-sheet-ranges');
 const { trimCell } = require('./bank-row');
 const {
   UNBALANCED_HEADERS,
@@ -121,7 +122,21 @@ function validateTemplateWorkbook(workbook, templatePath = '') {
   return workbook;
 }
 
-async function loadTemplateWorkbook(templatePath) {
+// templateBytes：设置 → 模板文件取得的用户版本字节（已核对 SHA-256 并通过检查），有则直接读入这份字节，不再按路径打开。
+async function loadTemplateWorkbook(templatePath, templateBytes = null) {
+  if (templateBytes) {
+    const workbook = new ExcelJS.Workbook();
+    try {
+      await workbook.xlsx.load(templateBytes);
+    } catch (error) {
+      throw new PreFundTemplateError(`无法读取资金对账导出模板「${templatePath}」：${error.message}`, {
+        code: 'pre-fund-export-template-read-failed',
+        templatePath,
+        cause: error
+      });
+    }
+    return validateTemplateWorkbook(workbook, templatePath);
+  }
   if (!templatePath || typeof templatePath !== 'string') {
     throw new PreFundTemplateError('前置资金对账导出必须提供5-sheet模板路径', {
       code: 'pre-fund-export-template-path-required'
@@ -387,6 +402,14 @@ async function writeWithTemplate({
       throw new Error('重复网关账单已标记存在，但审计明细为空');
     }
 
+    // 模板的筛选与打印区域按本次各 Sheet 的行数调整（首行为表头，末行为最后一行数据），须在 commit 之前设置。
+    const dataRowCounts = new Map([
+      [SHEET_NAMES[0], unbalancedCount],
+      [SHEET_NAMES[1], balancedCount],
+      [SHEET_NAMES[3], channelBillCount],
+      [DUPLICATE_SHEET_NAME, duplicateGatewayCount]
+    ]);
+    for (const [name, worksheet] of sheets) fitOutputRangesToRows(worksheet, 1 + (dataRowCounts.get(name) || 0));
     for (const worksheet of sheets.values()) worksheet.commit();
     await writer.commit();
     const publicationIdentity = moveFileNoClobber(temporaryPath, finalPath);
@@ -417,7 +440,7 @@ async function writeWithTemplate({
 
 async function writeChannelWorkbook(options = {}) {
   const templateWorkbook = options.templateWorkbook
-    || await loadTemplateWorkbook(options.templatePath);
+    || await loadTemplateWorkbook(options.templatePath, options.templateBytes);
   const channel = options.channelName ?? options.channel;
   const fileName = options.outputPath
     ? path.basename(options.outputPath)
@@ -451,7 +474,7 @@ async function writeChannelWorkbook(options = {}) {
  * channelExports 可直接接 side DB 的逐渠道游标，不要求全量数组。
  */
 async function writeChannelWorkbooks(options = {}) {
-  const templateWorkbook = await loadTemplateWorkbook(options.templatePath);
+  const templateWorkbook = await loadTemplateWorkbook(options.templatePath, options.templateBytes);
   const outputDirectory = options.outputDirectory;
   if (!outputDirectory || typeof outputDirectory !== 'string') {
     throw new TypeError('前置资金对账批量导出必须提供 outputDirectory');

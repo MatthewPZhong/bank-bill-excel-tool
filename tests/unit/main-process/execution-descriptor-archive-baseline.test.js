@@ -42,14 +42,21 @@ const policies = archivePolicies;
 const policyByChannel = new Map(policies.map((policy) => [policy.channel, policy]));
 const baselineRecoverable = baseline.policies.filter((policy) => policy.taskKind !== 'exclude');
 const newPreparationPolicies = [
+  { batchPolicy: 'exclude', channel: 'template-resources:discard-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:get', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:list', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'template-resources:list-changes', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'template-resources:pick-import-file', excludeReason: 'file-picker-only', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'template-resources:prepare-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'toolbox:split:cancel-read', excludeReason: 'cancel-active-task', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'toolbox:split:read-values', excludeReason: 'preview-only', taskKind: 'exclude', workerContext: 'none' }
 ];
 // 基线之后新增的用户文件导出入口；固定基线本身不改。
 const newSupportActions = [
-  { channel: 'template-resources:save-as', kind: 'support-action', reason: 'user-document-export' }
+  { channel: 'template-resources:save-as', kind: 'support-action', reason: 'user-document-export' },
+  { channel: 'template-resources:commit-import', kind: 'support-action', reason: 'template-resource-version' },
+  { channel: 'template-resources:set-current-version', kind: 'support-action', reason: 'template-resource-version' },
+  { channel: 'template-resources:delete-version', kind: 'support-action', reason: 'template-resource-version' }
 ];
 
 // 固定 fixture 与当前公开 API 分开读取；此测试不提供更新/重建 fixture 入口。
