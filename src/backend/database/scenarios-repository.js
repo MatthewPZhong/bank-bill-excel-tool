@@ -377,6 +377,20 @@ function getScenario(db, id) {
   return row ? rowToDetail(row) : null;
 }
 
+// v3.2.13：设置 → 模板文件导入预检读取全部场景配置，找出仍被引用的 FundType 取值与网关字段。
+//   只读、不归一化写回；config 解析失败的行返回 null，由调用方跳过。
+function listScenarioConfigs(db) {
+  return db
+    .prepare('SELECT id, category, name, config_json FROM scenarios ORDER BY id ASC')
+    .all()
+    .map((row) => ({
+      id: Number(row.id),
+      category: row.category,
+      name: row.name,
+      config: parseConfig(row.config_json)
+    }));
+}
+
 // v2.1.9 N7 (Phase 7 T29) — 按 channelId 拉全部场景（含 disabled + 全 category）做 bundle 导出
 //   - listByChannelIdAndCategory 受 enabled=1 + category 双重过滤，不适合导出场景
 //   - 导出语义：用户当前看到的渠道全集（含 disabled），便于跨机器复制完整配置
@@ -769,6 +783,7 @@ module.exports = {
   listByChannelIdAndCategory,
   // v2.1.9 N7 Phase 7 T29：按渠道拉全部场景（导出 bundle 用）
   listAllByChannelId,
+  listScenarioConfigs,
   // v2.1.9 N5 Phase 5 T23：转移 + 批量删除
   transferScenarios,
   batchDelete,

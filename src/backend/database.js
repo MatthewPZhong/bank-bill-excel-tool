@@ -82,6 +82,7 @@ const {
   ensureFundTransferAccountMappingSupport,
   ensurePreFundReconciliationRunMetadataSupport,
   ensureDuplicateInboundMatchRunMetadataSupport,
+  ensureTemplateResourceVersionSupport,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
@@ -106,6 +107,7 @@ const channelEnumRepository = require('./database/channel-enum-repository');
 const fundTransferAccountMappingRepository = require('./database/fund-transfer-account-mapping-repository');
 const preFundReconciliationRunRepository = require('./database/pre-fund-reconciliation-run-repository');
 const duplicateInboundMatchRunRepository = require('./database/duplicate-inbound-match-run-repository');
+const templateResourceRepository = require('./database/template-resource-repository');
 const { createBackup: createBackupImpl } = require('./database/backup');
 // v2.1.9 SR-log-1 (T32h)：替换 console.error → appendModuleLog 双写
 const { appendModuleLog } = require('./logger');
@@ -617,6 +619,8 @@ class AppDatabase {
     this.ensureFundTransferAccountMappingSupport();
     this.ensurePreFundReconciliationRunMetadataSupport();
       this.ensureDuplicateInboundMatchRunMetadataSupport();
+      // v3.2.13：设置 → 模板文件用户版本（幂等 CREATE IF NOT EXISTS，纯新增）
+      this.ensureTemplateResourceVersionSupport();
     }, { onRecord: onStartupPhase });
 
     const finishVacuumPhase = startStartupPhase('database-vacuum', onStartupPhase);
@@ -1597,6 +1601,43 @@ class AppDatabase {
 
   ensureDuplicateInboundMatchRunMetadataSupport() {
     return ensureDuplicateInboundMatchRunMetadataSupport(this.db);
+  }
+
+  ensureTemplateResourceVersionSupport() {
+    return ensureTemplateResourceVersionSupport(this.db);
+  }
+
+  // v3.2.13：设置 → 模板文件用户版本 facade（版本元数据、当前指针与变更记录；文件由模板服务管理）
+  listScenarioConfigs() {
+    return scenariosRepository.listScenarioConfigs(this.db);
+  }
+
+  listTemplateResourceVersions() {
+    return templateResourceRepository.listVersions(this.db);
+  }
+
+  listTemplateResourceStates() {
+    return templateResourceRepository.listStates(this.db);
+  }
+
+  commitTemplateResourceVersion(payload) {
+    return templateResourceRepository.commitVersion(this.db, payload);
+  }
+
+  setTemplateResourceCurrentVersion(payload) {
+    return templateResourceRepository.setCurrentVersion(this.db, payload);
+  }
+
+  deleteTemplateResourceVersion(payload) {
+    return templateResourceRepository.deleteVersion(this.db, payload);
+  }
+
+  appendTemplateResourceChange(change) {
+    return templateResourceRepository.appendChange(this.db, change);
+  }
+
+  listTemplateResourceChanges(limit) {
+    return templateResourceRepository.listChanges(this.db, limit);
   }
 
   createPreFundReconciliationRunMirror(payload) {

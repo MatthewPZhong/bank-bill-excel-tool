@@ -34,6 +34,21 @@ const SUPPORT_ACTION_POLICIES = Object.freeze([
     channel: 'template-resources:save-as',
     kind: 'support-action',
     reason: 'user-document-export'
+  }),
+  Object.freeze({
+    channel: 'template-resources:commit-import',
+    kind: 'support-action',
+    reason: 'template-resource-version'
+  }),
+  Object.freeze({
+    channel: 'template-resources:set-current-version',
+    kind: 'support-action',
+    reason: 'template-resource-version'
+  }),
+  Object.freeze({
+    channel: 'template-resources:delete-version',
+    kind: 'support-action',
+    reason: 'template-resource-version'
   })
 ]);
 
@@ -343,6 +358,7 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'settings:get-ui-style',
     'template-resources:get',
     'template-resources:list',
+    'template-resources:list-changes',
     'template:get-amount-split-rules',
     'template:get-bill-split-config',
     'template:get-mappings',
@@ -373,11 +389,14 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'pending:import:pick-files',
     'pending:removed:pick-files',
     'scenarios:import-bundle',
+    'template-resources:pick-import-file',
     'vccOpCalc:import:pick-files',
     'vccFinancialOp:import:pick-files'
   ]),
   'staging-preflight-only': Object.freeze([
-    'position-reconciliation:bank:prepare-import'
+    'position-reconciliation:bank:prepare-import',
+    'template-resources:discard-import',
+    'template-resources:prepare-import'
   ]),
   'preview-only': Object.freeze([
     'bizOpReconV327:run:preflight',

@@ -57,7 +57,7 @@
 
 ## 五、新对账模块接入 checklist
 
-新增对账类模块（产生 run 级批量数据）时，PM/Dev 必须：
+新增对账类模块（产生 run 级批量数据）时，须：
 
 - [ ] 生命周期键裁定（§四）+ 在 spec 写明依据。
 - [ ] `run-data-store.js`：加 `MODULE_XXX` 常量 + 进 `KNOWN_MODULES` + `SIDE_DB_DDL_XXX`（byte-for-byte 平移主库 `ensure*TablesSupport`）+ `MODULE_DDL` 映射。

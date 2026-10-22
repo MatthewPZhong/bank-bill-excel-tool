@@ -4,7 +4,7 @@
 // 测试覆盖：
 //   1. buildPolicyChecklistSection — 表格生成 + 合计行 + 时间戳注释
 //   2. syncPolicyChecklist — in-place 替换 §七章节（保留其他章节）
-//   3. 边界：policy 文件无 §七 → 跳过；内容一致 → 不写文件；写入失败容忍
+//   3. 边界：policy 文件无 §七 → 跳过；仅耗时 / 时间戳不同 → 不写文件；计数或脚本变化 → 回写
 //   4. formatChinaTimestamp — 东八区 + ISO 格式
 
 const { test, describe } = require('node:test');
@@ -140,6 +140,59 @@ describe('syncPolicyChecklist', () => {
       assert.strictEqual(r.reason, 'no-section-seven');
       const after = fs.readFileSync(filePath, 'utf8');
       assert.ok(!after.includes('## 七、'), '不应硬塞 §七 章节进无该结构的文档');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function mkSyncedPolicy(rows) {
+    const section = buildPolicyChecklistSection(makeResults(rows), {
+      timestamp: '2026-05-27T14:30:00+08:00',
+    });
+    return mkTempPolicy(`# 集成测试约定\n\n## 六、门禁\n内容\n\n${section}\n## 八、后续\n后续章节不动\n`);
+  }
+
+  test('仅耗时与时间戳不同 → 不写文件', () => {
+    const { dir, filePath } = mkSyncedPolicy([['a', 5, 100], ['b', 3, 40]]);
+    try {
+      const before = fs.readFileSync(filePath, 'utf8');
+      const r = syncPolicyChecklist(makeResults([['a', 5, 999], ['b', 3, 1]]), {
+        policyPath: filePath,
+        now: new Date(Date.UTC(2026, 9, 18, 6, 0, 0)),
+      });
+      assert.strictEqual(r.synced, false);
+      assert.strictEqual(r.reason, 'no-change');
+      assert.ok(r.section.includes('| `a.js` | 5 | 5 | 999 |'), '返回的章节仍带本次耗时，供 stdout 打印');
+      assert.strictEqual(fs.readFileSync(filePath, 'utf8'), before, '文件保持原样');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('用例数变化 → 回写并刷新耗时与时间戳', () => {
+    const { dir, filePath } = mkSyncedPolicy([['a', 5, 100], ['b', 3, 40]]);
+    try {
+      const r = syncPolicyChecklist(makeResults([['a', 6, 999], ['b', 3, 1]]), {
+        policyPath: filePath,
+        now: new Date(Date.UTC(2026, 9, 18, 6, 0, 0)),
+      });
+      assert.strictEqual(r.synced, true);
+      const written = fs.readFileSync(filePath, 'utf8');
+      assert.ok(written.includes('| `a.js` | 6 | 6 | 999 |'));
+      assert.ok(written.includes('| `b.js` | 3 | 3 | 1 |'), '同次写入的其他行耗时一并刷新');
+      assert.ok(written.includes('last-updated: 2026-10-18T14:00:00+08:00'));
+      assert.ok(written.includes('后续章节不动'), '后续章节正文保留');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('新增脚本 → 回写', () => {
+    const { dir, filePath } = mkSyncedPolicy([['a', 5, 100]]);
+    try {
+      const r = syncPolicyChecklist(makeResults([['a', 5, 100], ['c', 2, 10]]), { policyPath: filePath });
+      assert.strictEqual(r.synced, true);
+      assert.ok(fs.readFileSync(filePath, 'utf8').includes('| `c.js` | 2 | 2 | 10 |'));
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

@@ -23,7 +23,8 @@ const EXTRA_IMPORT_DIALOG_SCOPES = Object.freeze([
   'position-reconciliation-result',
   'archive-center-retry-source',
   'archive-center-storage-location',
-  'bank-statement-process-bundle' // 场景包 JSON 导入，与银行对账单 xlsx 目录分开记忆
+  'bank-statement-process-bundle', // 场景包 JSON 导入，与银行对账单 xlsx 目录分开记忆
+  'template-resources'             // 设置 → 模板文件导入新版本
 ]);
 
 const IMPORT_DIALOG_SCOPES = Object.freeze([

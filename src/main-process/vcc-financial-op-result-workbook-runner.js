@@ -38,7 +38,7 @@ async function acquireResultExportLease(governor, operationKey) {
   }
 }
 
-async function runResultWorkbookWorker({ dbPath, runId, outputPaths, assetsDir,
+async function runResultWorkbookWorker({ dbPath, runId, outputPaths, assetsDir, pendingTemplate = null,
   publicationStagingDirectory, expectedSnapshot, resourceLimits,
   workerFactory = (_filename, options) => memoryCarrierAdmission(null).observe(new Worker(WORKER_PATH, options)),
   acquireLease, operationKey }) {
@@ -52,6 +52,7 @@ async function runResultWorkbookWorker({ dbPath, runId, outputPaths, assetsDir,
     const result = await new Promise((resolve, reject) => {
       const worker = workerFactory(WORKER_PATH, {
         workerData: { dbPath, runId, outputPaths, assetsDir,
+          ...(pendingTemplate ? { pendingTemplate } : {}),
           publicationStagingDirectory: ownedGenerationDirectory,
           expectedSnapshot, resourceLimits },
         resourceLimits: { maxOldGenerationSizeMb: 384 }

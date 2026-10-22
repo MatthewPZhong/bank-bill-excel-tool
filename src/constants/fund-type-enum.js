@@ -16,6 +16,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const XLSX = require('xlsx');
+const { declaredRange, sheetCells } = require('./sheetjs-sparse-cells');
 
 const FUND_TYPE_ENUM_FILE_NAME = 'FundType枚举值.xlsx';
 
@@ -30,26 +31,29 @@ function getDefaultFundTypeEnumPath() {
 const enumCacheByPath = new Map();
 
 // 解析 xlsx 第一个 sheet 第一列（跳表头）→ 有序去空去重数组
-function readEnumFromWorkbook(filePath) {
-  const workbook = XLSX.readFile(filePath);
+//   v3.2.13：设置 → 模板文件导入预检复用同一解析（入参为已读取的 SheetJS workbook）。
+function parseFundTypeEnumWorkbook(workbook) {
   const firstSheetName = workbook.SheetNames[0];
   if (!firstSheetName) return [];
-  const sheet = workbook.Sheets[firstSheetName];
-  if (!sheet) return [];
-  // header:1 → 二维数组；defval 保证空单元格为空串而非跳过
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+  const range = declaredRange(workbook.Sheets[firstSheetName]);
+  if (!range) return [];
   const values = [];
   const seen = new Set();
-  // 第 0 行是表头（FundType），跳过；从第 1 行起取第一列
-  for (let i = 1; i < rows.length; i += 1) {
-    const cell = rows[i] && rows[i][0];
-    const value = cell === undefined || cell === null ? '' : String(cell).trim();
+  // 声明范围的首行是表头（FundType），跳过；从下一行起取首列。
+  //   只读实际存在的单元格（口径同 sheet_to_json header:1），声明范围再大也不逐格展开。
+  for (const cell of sheetCells(workbook.Sheets[firstSheetName], range)) {
+    if (cell.c !== range.s.c || cell.r === range.s.r) continue;
+    const value = String(cell.value).trim();
     if (value === '') continue; // 跳空行
     if (seen.has(value)) continue; // 去重（保持首次出现顺序）
     seen.add(value);
     values.push(value);
   }
   return values;
+}
+
+function readEnumFromWorkbook(filePath) {
+  return parseFundTypeEnumWorkbook(XLSX.readFile(filePath));
 }
 
 // 加载 FundType 枚举（有序数组）。失败/缺失 → 返回空数组（降级，不抛错）。
@@ -83,5 +87,6 @@ module.exports = {
   FUND_TYPE_ENUM_FILE_NAME,
   getDefaultFundTypeEnumPath,
   loadFundTypeEnum,
+  parseFundTypeEnumWorkbook,
   resetFundTypeEnumCache
 };

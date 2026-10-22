@@ -58,6 +58,7 @@
 | 数据 | 路径 |
 |---|---|
 | 主 SQLite | `{userData}/tool-data.sqlite` |
+| 模板文件用户版本 | `{userData}/template-resources/<模板>/<版本>.xlsx`；元数据与变更记录在主 SQLite |
 | 导出 / 错误报告 | `exports/{date}/` / `error-reports/{date}/` |
 | 活动日志 | `app_activity_log.txt` |
 | 余额种子 / 模板库 | `balance-seeds/` / `templates/template-library.json` |
@@ -66,9 +67,11 @@
 - 界面、用户输出、文档、错误及注释使用中文；代码、注释、文档、提交、PR 和生成产物不加 AI 署名或标识。
 - 自定义错误为 `src/backend/file-service/common.js` 的 `FileValidationError`（code、message、detail lines、context）；固定字段以 `__FIXED__:` 开头，如 `__FIXED__:MerchantId=NET001`。
 - `src/backend/database/migrations.js` 在每次启动时执行迁移。
-- `main` 始终可发布；本地 `main` 默认跟踪远端 `main`，不作为长期预发集成分支。线上维护修复仍可走 `v1.5.x`；常规每周版本使用 `release/<版本号>` 作为集成与冻结分支。
-- 本轮 `release/<版本号>` 与独立模块分支以已确认的上一正式发布标签对应提交为基线，不直接沿用旧 release 分支的浮动末端；发布前核对并纳入最新 `origin/main` 的必要更新。模块分支先合入本轮 release，再通过 `release/<版本号> -> main` 的 PR 正式合并；已有集成成果直接核验复用，不重建或清空分支。
+- `main` 始终可发布；本地 `main` 默认跟踪远端 `main`，不作为长期预发集成分支。1.5.x 旧线的维护修复仍可走 `v1.5.x`；常规每周版本使用 `release/<版本号>` 作为集成与冻结分支。
+- 本轮 `release/<版本号>` 与独立模块分支以已确认的上一正式发布标签对应提交为基线，不直接沿用旧 release 分支的浮动末端；发布前核对并纳入最新 `origin/main` 的必要更新。模块分支先合入本轮 release，再通过 `release/<版本号> -> main` 的 PR 以 merge commit 正式合并（不用 squash / rebase：架构检查的策略历史要求 release 侧提交在 main 中可达）；已有集成成果直接核验复用，不重建或清空分支。
 - 正式发布标签使用附注标签 `v<版本号>`，仅在 `release/<版本号>` 的 PR 合入远端 `main` 且最终检查通过后，创建到当前 `origin/main` 的提交并推送。
+- 当前版本线的紧急修复不等周一窗口：从最新正式标签对应提交建 `release/<下一补丁版本>`，只纳入修复，按 weekly-release 清单 C–G 完成门禁、PR、标签与发布核验。进行中的 release 若已占用该版本号，顺延为再下一个版本号，并在其 B6 合入 main 上的修复后重验。
+- 分支保留：已被正式标签包含的 release 与模块分支，在该版本发布核验完成后可删除，删除远端分支须按批列出并获授权；未被任何正式标签包含的分支不删，先确认去向（并入后续版本、登记 `knowledge/backlog.md` 顺延或注明废弃）。`main` 与旧版本维护线（如 `v1.5.x`）长期保留。
 - 每次发布同步更新 `CHANGELOG.md`、`docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md`。
 
 ## 模块现行说明

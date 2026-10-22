@@ -300,6 +300,8 @@ class DuplicateInboundMatchService {
     database,
     mailTemplatePath,
     bankTemplatePath,
+    mailTemplateSource = null,
+    bankTemplateSource = null,
     fileHasher = hashFile,
     bankReader = readBankStatement,
     now = () => new Date()
@@ -324,6 +326,9 @@ class DuplicateInboundMatchService {
     this.database = database;
     this.mailTemplatePath = mailTemplatePath;
     this.bankTemplatePath = bankTemplatePath;
+    // 设置 → 模板文件：导出时经来源取得当前版本并持有租约；未注入时固定使用上面的路径。
+    this.mailTemplateSource = mailTemplateSource;
+    this.bankTemplateSource = bankTemplateSource;
     this.fileHasher = fileHasher;
     this.bankReader = bankReader;
     this.now = now;
@@ -1475,15 +1480,33 @@ class DuplicateInboundMatchService {
     }
     if (onProgress) onProgress({ stage: 'write', message: '正在写入重复入金结果文件...' });
     await yieldToEventLoop();
-    const written = await writeDuplicateInboundWorkbook({
-      mailTemplatePath: this.mailTemplatePath,
-      bankTemplatePath: this.bankTemplatePath,
-      savePath,
-      mailRows: result.mailRows,
-      manualRows: result.manualRows
-    });
+    const templates = [];
+    let written;
+    try {
+      const mailTemplate = await this._acquireTemplate(this.mailTemplateSource, this.mailTemplatePath);
+      templates.push(mailTemplate);
+      const bankTemplate = await this._acquireTemplate(this.bankTemplateSource, this.bankTemplatePath);
+      templates.push(bankTemplate);
+      written = await writeDuplicateInboundWorkbook({
+        mailTemplatePath: mailTemplate.filePath,
+        bankTemplatePath: bankTemplate.filePath,
+        mailTemplateBytes: mailTemplate.bytes || null,
+        bankTemplateBytes: bankTemplate.bytes || null,
+        savePath,
+        mailRows: result.mailRows,
+        manualRows: result.manualRows
+      });
+    } finally {
+      templates.forEach((template) => template.release());
+    }
     if (onProgress) onProgress({ stage: 'done', message: '重复入金结果文件已生成' });
     return written;
+  }
+
+  async _acquireTemplate(source, fallbackPath) {
+    return source
+      ? source.acquire({ label: '重复入金导出' })
+      : { filePath: fallbackPath, release() {} };
   }
 
   buildDefaultFileName(value = this.now()) {

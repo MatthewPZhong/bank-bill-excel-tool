@@ -1,8 +1,9 @@
 'use strict';
 
 // 设置 → 模板文件：随应用打包的模板清单。路径相对 app.getAppPath()。
-// readMode 描述程序当前如何使用该文件；replace 记录目标设计中能否替换（版本替换尚未开放）。
+// readMode 描述程序当前如何使用该文件；replace 记录能否导入用户版本替换（导入预检契约见 ./contracts.js）。
 // 读取口径以各模块实现为准：运行时读取的输出模板见对应 excel-writer，枚举与网关表头见 src/constants。
+// 用户版本存 {userData}/template-resources/，各模块经模板服务 acquire 读取当前版本。
 
 const TYPE_ORDER = Object.freeze(['output', 'enum', 'input', 'link', 'reference']);
 const READ_MODES = Object.freeze(['runtime', 'cached', 'locked', 'disabled', 'sample', 'generated', 'reference']);
@@ -62,8 +63,8 @@ const TEMPLATE_RESOURCES = Object.freeze([
   resource({
     id: 'vcc-pending-calc', path: 'assets/VCC财务OP校验/移除归档Pending发生额计算表.xlsx', type: 'output', readMode: 'runtime',
     bindings: [binding('vcc-financial-op', 'Pending 计算表 · 每主体一张', 'runtime')],
-    replace: { allowed: false, reason: '模块尚未接入' },
-    cache: '不缓存，每次导出读取', failure: '缺少工作表时导出失败'
+    replace: REPLACEABLE, cache: '不缓存，每次导出读取', failure: '版本文件缺失、被修改或不兼容时导出中止',
+    effect: '下次导出；仅表头行、数据行样式与列隐藏生效'
   }),
   resource({
     id: 'platform-cleanup', path: 'assets/中台加款单剔除模板.xlsx', type: 'output', readMode: 'generated',

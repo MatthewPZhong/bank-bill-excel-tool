@@ -75,3 +75,38 @@ test('提交结果不确定时保留生成文件，不改判成功、不吞 pres
   assert.equal(fs.existsSync(f.request.outputPaths[0]), false);
   await f.service.terminate();
 });
+
+test('设置 → 模板文件：Pending 计算表按当前版本取租约，字节交给 Writer，Writer 结束后释放', async (t) => {
+  const events = [];
+  const bytes = Buffer.from('pending-template-bytes');
+  const f = await setup(t, () => ({
+    pendingTemplateSource: {
+      acquire: async (options) => {
+        events.push(['acquire', options]);
+        return { versionId: 'v3', sha256: 'f'.repeat(64), bytes, release: () => events.push(['release']) };
+      }
+    },
+    writeResultWorkbookFn: async (args) => {
+      events.push(['write', args.pendingTemplate]);
+      return { filePaths: args.outputPaths };
+    }
+  }));
+  await f.service.exportRun({ ...f.request, publicationStagingDirectory: undefined }, {});
+  assert.deepEqual(events, [
+    ['acquire', { label: 'VCC 结果导出', withBytes: true }],
+    ['write', { versionId: 'v3', sha256: 'f'.repeat(64), bytes }],
+    ['release']
+  ]);
+
+  events.length = 0;
+  const failing = await setup(t, () => ({
+    pendingTemplateSource: {
+      acquire: async () => { throw Object.assign(new Error('模板「移除归档Pending发生额计算表」当前版本 V3 不可用'), { code: 'template-resource-unavailable' }); }
+    },
+    writeResultWorkbookFn: async () => { events.push(['write']); return {}; }
+  }));
+  await assert.rejects(failing.service.exportRun({ ...failing.request, publicationStagingDirectory: undefined }, {}), { code: 'template-resource-unavailable' });
+  assert.deepEqual(events, [], '模板不可用时不启动 Writer');
+  await f.service.terminate();
+  await failing.service.terminate();
+});

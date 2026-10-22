@@ -4048,6 +4048,44 @@ function ensureDuplicateInboundMatchRunMetadataSupport(db) {
   `);
 }
 
+// v3.2.13：设置 → 模板文件的用户版本。版本文件存 {userData}/template-resources/，
+// 主库只记录版本元数据、当前版本指针与变更记录；内置版本 v1 不入库。纯新增表，幂等。
+function ensureTemplateResourceVersionSupport(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS template_resource_versions (
+      resource_id TEXT NOT NULL,
+      version_id TEXT NOT NULL,
+      version_no INTEGER NOT NULL CHECK (version_no >= 2),
+      file_name TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      sha256 TEXT NOT NULL CHECK (length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'),
+      validation TEXT NOT NULL CHECK (validation IN ('passed', 'warning')),
+      structure_json TEXT NOT NULL DEFAULT '{}',
+      app_version TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (resource_id, version_id),
+      UNIQUE (resource_id, version_no)
+    );
+    CREATE TABLE IF NOT EXISTS template_resource_state (
+      resource_id TEXT PRIMARY KEY,
+      current_version_id TEXT NOT NULL,
+      next_version_no INTEGER NOT NULL CHECK (next_version_no >= 2),
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS template_resource_changes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL,
+      resource_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      from_label TEXT NOT NULL DEFAULT '',
+      to_label TEXT NOT NULL DEFAULT '',
+      result TEXT NOT NULL CHECK (result IN ('success', 'failed')),
+      detail TEXT NOT NULL DEFAULT '',
+      app_version TEXT NOT NULL DEFAULT ''
+    );
+  `);
+}
+
 module.exports = {
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
@@ -4136,6 +4174,7 @@ module.exports = {
   ensureFundTransferAccountMappingSupport,
   ensurePreFundReconciliationRunMetadataSupport,
   ensureDuplicateInboundMatchRunMetadataSupport,
+  ensureTemplateResourceVersionSupport,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
