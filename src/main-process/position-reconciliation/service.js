@@ -325,6 +325,7 @@ class PositionReconciliationService {
   constructor({
     userDataDir,
     templatePath,
+    templateSource = null,
     now = () => new Date(),
     store = null,
     requireExistingSideDb = false,
@@ -346,6 +347,8 @@ class PositionReconciliationService {
     if (!templatePath) throw new TypeError('平盘对账 service 需要 templatePath');
     this.userDataDir = path.resolve(userDataDir);
     this.templatePath = path.resolve(templatePath);
+    // 设置 → 模板文件：导出时经 templateSource 取得当前版本并持有租约；未注入时固定使用 templatePath。
+    this.templateSource = templateSource;
     this.now = now;
     this.recordArchiveIntent = typeof recordArchiveIntent === 'function'
       ? recordArchiveIntent
@@ -1714,13 +1717,23 @@ class PositionReconciliationService {
       match_detail: row.match_detail,
       changed: false
     }));
-    await writeResultWorkbook({
-      templatePath: this.templatePath,
+    await this._writeResultWorkbook({
       outputPath,
       rows: exportRows,
       highlightChanged: false
-    });
+    }, '平盘银行数据导出');
     return { status: 'ok', filePath: outputPath, rowCount: rows.length };
+  }
+
+  async _writeResultWorkbook(options, label) {
+    const template = this.templateSource
+      ? await this.templateSource.acquire({ label })
+      : { filePath: this.templatePath, release() {} };
+    try {
+      return await writeResultWorkbook({ ...options, templatePath: template.filePath, templateBytes: template.bytes || null });
+    } finally {
+      template.release();
+    }
   }
 
   async exportLinked(sourceType, outputPath) {
@@ -2085,12 +2098,11 @@ class PositionReconciliationService {
         '所选银行渠道、月份和状态下没有可导出的差异数据'
       );
     }
-    await writeResultWorkbook({
-      templatePath: this.templatePath,
+    await this._writeResultWorkbook({
       outputPath,
       rows,
       highlightChanged: true
-    });
+    }, '平盘对账结果导出');
     if (!differencesOnly) this.store.markRunExported(run.id);
     return {
       status: 'ok',

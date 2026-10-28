@@ -22,6 +22,7 @@ const path = require('node:path');
 const XLSX = require('xlsx');
 
 const { GATEWAY_RECON_FIELDS } = require('./gateway-recon-fields');
+const { declaredRange, sheetCells } = require('./sheetjs-sparse-cells');
 
 const GATEWAY_RECON_HEADERS_FILE_NAME = '网关对账单.xlsx';
 
@@ -39,20 +40,18 @@ const headersCacheByPath = new Map();
 
 // 解析 xlsx 第一个 sheet 的表头行（第 0 行）→ 有序去空去重数组，并剔除 __CUSTOM__ sentinel。
 //   返回空数组表示「表头不可用」（空表 / 全空列），由调用方决定是否 fallback。
-function readHeadersFromWorkbook(filePath) {
-  const workbook = XLSX.readFile(filePath);
+//   v3.2.13：设置 → 模板文件导入预检复用同一解析（入参为已读取的 SheetJS workbook）。
+function parseGatewayReconHeadersWorkbook(workbook) {
   const firstSheetName = workbook.SheetNames[0];
   if (!firstSheetName) return [];
   const sheet = workbook.Sheets[firstSheetName];
-  if (!sheet) return [];
-  // header:1 → 二维数组；defval 保证空单元格为空串而非跳过（列对齐）
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-  const headerRow = Array.isArray(rows[0]) ? rows[0] : [];
+  const range = declaredRange(sheet);
+  if (!range) return [];
   const values = [];
   const seen = new Set();
-  for (let i = 0; i < headerRow.length; i += 1) {
-    const cell = headerRow[i];
-    const value = cell === undefined || cell === null ? '' : String(cell).trim();
+  // 声明范围的首行即表头，按列序取值；只读实际存在的单元格（口径同 sheet_to_json header:1），声明范围再大也不逐格展开。
+  for (const cell of sheetCells(sheet, { s: range.s, e: { r: range.s.r, c: range.e.c } })) {
+    const value = String(cell.value).trim();
     if (value === '') continue; // 去空列
     // 🔴 资金红线：剔除 __CUSTOM__ sentinel（表头冲突会导致 C3 自取值 mode 误判）
     if (value === CUSTOM_VALUE_SENTINEL) continue;
@@ -61,6 +60,10 @@ function readHeadersFromWorkbook(filePath) {
     values.push(value);
   }
   return values;
+}
+
+function readHeadersFromWorkbook(filePath) {
+  return parseGatewayReconHeadersWorkbook(XLSX.readFile(filePath));
 }
 
 // 加载网关账单表头枚举（有序数组）。
@@ -98,5 +101,6 @@ module.exports = {
   CUSTOM_VALUE_SENTINEL,
   getDefaultGatewayReconHeadersPath,
   loadGatewayReconHeaders,
+  parseGatewayReconHeadersWorkbook,
   resetGatewayReconHeadersCache
 };

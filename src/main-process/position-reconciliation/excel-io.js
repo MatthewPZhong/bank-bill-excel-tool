@@ -19,6 +19,7 @@ const {
   isBlankRow
 } = require('./common');
 const { normalizeHeaderRow, headersEqual, rowValues } = require('./readers');
+const { fitOutputRangesToRows } = require('../output-sheet-ranges');
 
 const EXCEL_MAX_ROWS = 1048576;
 const TEXT_HEADERS = new Set([
@@ -111,20 +112,8 @@ function applyTextFormats(row, headers) {
   });
 }
 
-async function writeResultWorkbook({
-  templatePath,
-  outputPath,
-  rows,
-  highlightChanged = true
-}) {
-  if (!fs.existsSync(templatePath)) {
-    throw new PositionReconciliationError('position-template-missing', `结果模板不存在：${templatePath}`);
-  }
-  if (rows.length > EXCEL_MAX_ROWS - 1) {
-    throw new PositionReconciliationError('position-result-too-large', '结果超过 Excel 单 sheet 行数上限');
-  }
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(templatePath);
+// 模板校验与写出共用：设置 → 模板文件导入预检调用同一函数，保证口径一致。
+function validateResultTemplateWorkbook(workbook) {
   const sheet = workbook.getWorksheet(BANK_SHEET_NAME);
   if (!sheet) {
     throw new PositionReconciliationError(
@@ -133,7 +122,42 @@ async function writeResultWorkbook({
     );
   }
   assertHeaderRow(sheet, POSITION_BANK_HEADERS);
-  if (sheet.rowCount > 1) sheet.spliceRows(2, sheet.rowCount - 1);
+  return sheet;
+}
+
+// 只保留第 1 行表头。ExcelJS 4.4 的 spliceRows 删除末尾多行时不生效（只处理起点恰为最后一行的情形），
+// 模板数据区的旧行会和本次结果一起写出；逐行删除又是平方复杂度。因此先取消数据区的合并单元格，
+// 再直接截断行集合，并在写入前核对只剩表头。
+function clearTemplateDataRows(sheet) {
+  for (const merge of Object.values(sheet._merges || {})) {
+    const { top, left, bottom, right } = merge.model;
+    if (bottom > 1) sheet.unMergeCells(top, left, bottom, right);
+  }
+  if (Array.isArray(sheet._rows) && sheet._rows.length > 1) sheet._rows.length = 1;
+  if (sheet.rowCount > 1) {
+    throw new PositionReconciliationError('position-template-data-not-cleared', '结果模板的数据区未能清空，已中止导出');
+  }
+}
+
+// templateBytes：设置 → 模板文件取得的用户版本字节（已核对 SHA-256 并通过检查），有则直接读入这份字节，不再按路径打开。
+async function writeResultWorkbook({
+  templatePath,
+  templateBytes = null,
+  outputPath,
+  rows,
+  highlightChanged = true
+}) {
+  if (!templateBytes && !fs.existsSync(templatePath)) {
+    throw new PositionReconciliationError('position-template-missing', `结果模板不存在：${templatePath}`);
+  }
+  if (rows.length > EXCEL_MAX_ROWS - 1) {
+    throw new PositionReconciliationError('position-result-too-large', '结果超过 Excel 单 sheet 行数上限');
+  }
+  const workbook = new ExcelJS.Workbook();
+  if (templateBytes) await workbook.xlsx.load(templateBytes);
+  else await workbook.xlsx.readFile(templatePath);
+  const sheet = validateResultTemplateWorkbook(workbook);
+  clearTemplateDataRows(sheet);
   applyTextColumnFormats(sheet, POSITION_BANK_HEADERS);
   const fundTypeColumn = POSITION_BANK_HEADERS.indexOf('FundType') + 1;
   for (const item of rows) {
@@ -154,6 +178,8 @@ async function writeResultWorkbook({
       };
     }
   }
+  // 筛选与打印区域按本次结果行数调整（首行为表头，末行为最后一行结果）。
+  fitOutputRangesToRows(sheet, sheet.rowCount);
   return atomicWorkbookWrite(workbook, outputPath);
 }
 
@@ -244,6 +270,7 @@ function readResultWorkbook(filePath) {
 }
 
 module.exports = {
+  validateResultTemplateWorkbook,
   writeResultWorkbook,
   writeTableWorkbook,
   writeLinkedWorkbook,

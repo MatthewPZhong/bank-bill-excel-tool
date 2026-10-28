@@ -322,6 +322,7 @@ const { loadFundTypeEnum, FUND_TYPE_ENUM_FILE_NAME } = require('./constants/fund
 //   assets/网关对账单.xlsx 表头行（main 进程 require；经 IPC scenarios:gateway-recon-headers 暴露给 renderer）
 //   preload 无法 require 自定义模块（Electron sandbox），故走 IPC 而非 inline 副本
 const { loadGatewayReconHeaders, GATEWAY_RECON_HEADERS_FILE_NAME } = require('./constants/gateway-recon-headers-loader');
+const { GATEWAY_RECON_FIELDS } = require('./constants/gateway-recon-fields');
 // v2.1.16 阶段一 A4：链接表导入（识别 → 读行 → 落库）
 //   - detectTableType：A2 按表头自动识别表类型
 //   - LINKED_IMPORT_SIGNATURES：链接表「导入」按钮候选集 = 4 张 linked 签名 + 入金表签名（v2.1.16-beta.3 ②）
@@ -990,6 +991,7 @@ function assertPreFundEvidenceFresh(expected, locator, templatePath) {
 }
 
 async function freezePositionReadOnlyExportSource(service, variant, runId, filters) {
+  await assertManagedExportUsesBuiltinTemplate('position-bank');
   const reportFiles = variant === 'filtered'
     ? (await service.resolveRunFilteredReports(Number(runId))).reportFiles.map((item) => ({
         reportKey: item.reportKey,
@@ -1361,6 +1363,7 @@ function getVccFinancialOpService() {
     vccFinancialOpService = createVccFinancialOpService({
       database,
       assetsDir: path.join(__dirname, '../assets'),
+      pendingTemplateSource: getTemplateResourceService().source('vcc-pending-calc', 'vcc-financial-op'),
       appVersion: pkg.version,
       buildSha: buildInfo.commit,
       acquireResultExportLeaseFn: (operationKey) => acquireResultExportLease(
@@ -4814,17 +4817,91 @@ function archiveCenterMutationIpcHandle(channel, functionKey, handler) {
 
 let templateResourceService = null;
 
+// 设置 → 模板文件：用户版本文件存 {userData}/template-resources/，元数据与变更记录在主库。
 function getTemplateResourceService() {
+  if (!database || !database.db) throw new Error('数据库尚未初始化，请稍后重试');
   if (!templateResourceService) {
-    templateResourceService = createTemplateResourceService({ appRoot: app.getAppPath(), appVersion: app.getVersion() });
+    templateResourceService = createTemplateResourceService({
+      appRoot: app.getAppPath(),
+      appVersion: app.getVersion(),
+      userDataRoot: app.getPath('userData'),
+      store: database,
+      log: ({ level, message, details }) => appendActivityLogEntry({ level, message, details }),
+      onChanged: (payload) => broadcastTemplateResourcesChanged(payload)
+    });
   }
   return templateResourceService;
 }
 
-// 设置 → 模板文件：只读查询与另存为；版本导入、启用与删除待后端接入。
+function broadcastTemplateResourcesChanged(payload) {
+  for (const window of BrowserWindow.getAllWindows()) {
+    try {
+      if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+        window.webContents.send('template-resources:changed', payload);
+      }
+    } catch (_error) { /* 窗口关闭中，下次打开会重新读取 */ }
+  }
+}
+
+// managed 导出守卫用：当前版本是否为内置；服务不可用时视为内置，由调用方沿用原路径逻辑。
+async function resolveTemplateResourceFileForRead(resourceId) {
+  try {
+    return await getTemplateResourceService().resolveCurrentFile(resourceId);
+  } catch (_error) {
+    return { status: 'builtin' };
+  }
+}
+
+// 缓存读取类模板（FundType 枚举、网关表头）的当前取值：用户版本返回导入时在检查 Worker 中解析的取值，主进程不解析用户文件；
+//   内置或服务不可用时返回 builtin，由调用方沿用原路径逻辑读取随包文件。
+async function resolveTemplateResourceValues(resourceId) {
+  try {
+    return await getTemplateResourceService().currentRuntimeValues(resourceId);
+  } catch (_error) {
+    return { status: 'builtin' };
+  }
+}
+
+// managed（后台 Worker）只读导出在生产中未启用，尚未接入模板版本；启用了用户版本时拒绝走该路径，不静默改用内置模板。
+async function assertManagedExportUsesBuiltinTemplate(resourceId) {
+  const current = await resolveTemplateResourceFileForRead(resourceId);
+  if (current.status !== 'builtin') {
+    throw new Error('后台导出暂不支持已启用的用户模板版本，请在 设置 → 模板文件 恢复默认后重试');
+  }
+}
+
+// 设置 → 模板文件：查询、另存为、导入新版本、启用 / 恢复默认、删除版本与变更记录。
 function registerTemplateResourceHandlers() {
   ipcMain.handle('template-resources:list', () => getTemplateResourceService().list());
   ipcMain.handle('template-resources:get', (_event, resourceId) => getTemplateResourceService().get(resourceId));
+  ipcMain.handle('template-resources:list-changes', () => getTemplateResourceService().listChanges());
+  ipcMain.handle('template-resources:pick-import-file', async () => {
+    const service = getTemplateResourceService();
+    const choice = await showImportOpenDialog('template-resources', {
+      title: '选择要导入的模板文件',
+      properties: ['openFile'],
+      filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }]
+    });
+    const filePath = !choice.canceled && Array.isArray(choice.filePaths) ? choice.filePaths[0] : '';
+    if (!filePath) return { status: 'cancelled' };
+    let size = null;
+    try {
+      size = fs.statSync(filePath).size;
+    } catch (_error) { /* 预检时再报告读取失败 */ }
+    service.rememberPickedFile(filePath);
+    return { status: 'success', filePath, fileName: path.basename(filePath), size };
+  });
+  ipcMain.handle('template-resources:prepare-import', (_event, payload) => getTemplateResourceService().prepareImport(payload || {}));
+  ipcMain.handle('template-resources:discard-import', (_event, importToken) => getTemplateResourceService().discardImport(importToken));
+  supportIpcHandle('template-resources:commit-import', '导入模板版本', (_event, payload) => (
+    getTemplateResourceService().commitImport(payload || {})
+  ));
+  supportIpcHandle('template-resources:set-current-version', '切换模板版本', (_event, payload) => (
+    getTemplateResourceService().setCurrentVersion(payload || {})
+  ));
+  supportIpcHandle('template-resources:delete-version', '删除模板版本', (_event, payload) => (
+    getTemplateResourceService().deleteVersion(payload || {})
+  ));
   supportIpcHandle('template-resources:save-as', '另存模板文件', async (_event, payload) => {
     const service = getTemplateResourceService();
     const target = service.resolveVersion(payload || {});
@@ -5252,8 +5329,12 @@ function registerAppHandlers() {
   //     dev 期传 undefined → fund-type-enum 模块用默认路径 <repo>/assets/
   //   - 降级（文件缺失/读取失败）：loadFundTypeEnum 返空数组（不抛错）→ renderer 回退文本输入 + 一次性提示
   //   - 模块级缓存（按解析路径）：重复调用不反复读盘
-  ipcMain.handle('scenarios:fund-type-enum', () => {
+  ipcMain.handle('scenarios:fund-type-enum', async () => {
     try {
+      // 设置 → 模板文件：启用了用户版本时使用该版本导入时解析的取值（主进程不再解析用户文件）；不可用时按原降级返回空数组。
+      const current = await resolveTemplateResourceValues('fund-type-enum');
+      if (current.status === 'user') return { status: 'ok', values: current.values };
+      if (current.status === 'unavailable') return { status: 'ok', values: [] };
       const candidates = [
         path.join(app.getAppPath(), 'assets', FUND_TYPE_ENUM_FILE_NAME),
         path.join(__dirname, '..', 'assets', FUND_TYPE_ENUM_FILE_NAME)
@@ -5274,8 +5355,12 @@ function registerAppHandlers() {
   //   - 降级（文件缺失/读取失败/表头为空）：loadGatewayReconHeaders 内 fallback 到旧硬编码 GATEWAY_RECON_FIELDS（不抛错）
   //   - 🔴 资金红线：loader 已剔除表头中的 __CUSTOM__ sentinel（避免 C3 自取值 mode 误判）
   //   - 模块级缓存（按解析路径）：重复调用不反复读盘
-  ipcMain.handle('scenarios:gateway-recon-headers', () => {
+  ipcMain.handle('scenarios:gateway-recon-headers', async () => {
     try {
+      // 设置 → 模板文件：启用了用户版本时使用该版本导入时解析的表头字段（已剔除 __CUSTOM__）；不可用时按原降级返回旧字段。
+      const current = await resolveTemplateResourceValues('gateway-recon');
+      if (current.status === 'user') return { status: 'ok', values: current.values };
+      if (current.status === 'unavailable') return { status: 'ok', values: [...GATEWAY_RECON_FIELDS] };
       const candidates = [
         path.join(app.getAppPath(), 'assets', GATEWAY_RECON_HEADERS_FILE_NAME),
         path.join(__dirname, '..', 'assets', GATEWAY_RECON_HEADERS_FILE_NAME)
@@ -18052,7 +18137,8 @@ function getPreFundReconciliationService() {
     preFundReconciliationService = createPreFundReconciliationService({
       userDataDir: path.dirname(database.dbPath),
       database,
-      templatePath: path.join(__dirname, '..', 'assets', '资金对账导出不平.xlsx')
+      templatePath: path.join(__dirname, '..', 'assets', '资金对账导出不平.xlsx'),
+      templateSource: getTemplateResourceService().source('prefund-unbalanced', 'pre-fund-reconciliation')
     });
   }
   return preFundReconciliationService;
@@ -18478,6 +18564,7 @@ function registerPreFundReconciliationHandlers() {
         ) && backgroundExecutionRuntimeManager.isProductionEnabled(
           PRE_FUND_READ_ONLY_ACTIONS.AUDIT
         );
+        if (useManagedExport) await assertManagedExportUsesBuiltinTemplate('prefund-unbalanced');
         const stableSnapshot = useManagedExport
           ? freezePreFundSourceSnapshot({
               mainDb: database.db,
@@ -18709,7 +18796,9 @@ function getDuplicateInboundMatchService() {
       userDataDir: path.dirname(database.dbPath),
       database,
       mailTemplatePath: path.join(__dirname, '..', 'assets', '重复入金召回邮件模板.xlsx'),
-      bankTemplatePath: path.join(__dirname, '..', 'assets', '银行对账单.xlsx')
+      bankTemplatePath: path.join(__dirname, '..', 'assets', '银行对账单.xlsx'),
+      mailTemplateSource: getTemplateResourceService().source('dup-recall-mail', 'duplicate-inbound-match'),
+      bankTemplateSource: getTemplateResourceService().source('bank-statement', 'duplicate-inbound-match')
     });
   }
   return duplicateInboundMatchService;
@@ -18927,6 +19016,7 @@ function getPositionReconciliationService() {
       service = createPositionReconciliationService({
         userDataDir: path.dirname(database.dbPath),
         templatePath: path.join(__dirname, '..', 'assets', '平盘银行对账单.xlsx'),
+        templateSource: getTemplateResourceService().source('position-bank', 'position-reconciliation-process'),
         requireExistingSideDb: Boolean(expectedSideDbCheckpoint),
         expectedSideDbCheckpoint,
         expectedPendingOperation: pendingSideDbOperation,

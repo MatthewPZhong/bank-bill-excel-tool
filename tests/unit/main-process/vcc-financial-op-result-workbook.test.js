@@ -335,3 +335,37 @@ for (const subjects of [['Straße', 'STRASSE'], ['σ', 'ς'], ['ﬀ', 'FF'], ['�
     assert.equal(repeated.validation.sheetCount, 4);
   });
 }
+
+// 设置 → 模板文件：Pending 计算表由 Main 传入当前版本字节，Writer 先核对 SHA-256 再使用。
+async function restyledPendingTemplate(mutateSheet) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(path.join(assetsDir, 'VCC财务OP校验', '移除归档Pending发生额计算表.xlsx'));
+  mutateSheet(workbook.worksheets[0]);
+  const bytes = Buffer.from(await workbook.xlsx.writeBuffer());
+  return { versionId: 'v2', sha256: require('node:crypto').createHash('sha256').update(bytes).digest('hex'), bytes };
+}
+
+test('传入 Pending 模板版本字节时按该版本样式写出，并通过正式校验', async (t) => {
+  const data = fixture(t);
+  const pendingTemplate = await restyledPendingTemplate((sheet) => {
+    sheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEEFF' } };
+  });
+  const result = await runWriter(data, { pendingTemplate });
+  assert.ok(result.validation.sha256);
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(data.outputPath);
+  const pending = workbook.worksheets[data.subjects.length];
+  assert.equal(pending.getCell('A1').value, 'channel');
+  assert.equal(pending.getCell('A1').fill.fgColor.argb, 'FFDDEEFF');
+  assert.equal(pending.getCell('F2').value, 8, '金额仍来自运行数据');
+});
+
+test('Pending 模板版本字节与 SHA-256 不一致时拒绝写出，不生成目标文件', async (t) => {
+  const data = fixture(t);
+  const pendingTemplate = await restyledPendingTemplate(() => {});
+  await assert.rejects(
+    runWriter(data, { pendingTemplate: { ...pendingTemplate, sha256: '0'.repeat(64) } }),
+    (error) => error.code === 'vcc-pending-template-mismatch'
+  );
+  assert.equal(fs.existsSync(data.outputPath), false);
+});

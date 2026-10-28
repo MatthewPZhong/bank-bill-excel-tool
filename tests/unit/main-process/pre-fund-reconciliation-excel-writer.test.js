@@ -211,6 +211,32 @@ function projectValues(headers, row) {
   return headers.map((header) => row[header]);
 }
 
+test('模板的筛选与打印区域按各 Sheet 本次行数调整：首行为表头、末行为最后一行数据，列范围不变', async () => {
+  // 模拟用户版本模板：筛选与打印区域停在模板当时的行数，筛选起点还不在第 1 行。
+  const rangedTemplate = path.join(tempDir, 'ranged-template.xlsx');
+  await createTemplate(rangedTemplate, (workbook) => {
+    workbook.getWorksheet('不平结果').autoFilter = 'A3:U9';
+    workbook.getWorksheet('平账结果').pageSetup.printArea = 'A1:AE5';
+    workbook.getWorksheet('网关账单').autoFilter = 'A1:AE4';
+  });
+  const result = await writeChannelWorkbook({
+    templatePath: rangedTemplate,
+    outputDirectory: path.join(tempDir, 'ranged'),
+    channel: 'RANGED',
+    exportDate: new Date(2026, 9, 20),
+    unbalancedRows: [mappedRow(TEMPLATE_SHEETS[0].headers, 'U1'), mappedRow(TEMPLATE_SHEETS[0].headers, 'U2')],
+    balancedRows: [mappedRow(TEMPLATE_SHEETS[1].headers, 'B1')],
+    channelBillRows: [mappedRow(TEMPLATE_SHEETS[3].headers, 'C1'), mappedRow(TEMPLATE_SHEETS[3].headers, 'C2')]
+  });
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(result.filePath);
+  assert.equal(workbook.getWorksheet('不平结果').autoFilter, 'A1:U3');
+  assert.equal(workbook.getWorksheet('平账结果').pageSetup.printArea, 'A1:AE2');
+  assert.equal(workbook.getWorksheet('网关账单').autoFilter, 'A1:AE1', '零数据时只覆盖表头');
+  assert.equal(workbook.getWorksheet('渠道账单').autoFilter ?? null, null, '模板未设置时不新增');
+});
+
 test('0不平仍导出：不平结果和渠道账单只有表头，平账结果有数据', async () => {
   const result = await writeChannelWorkbook({
     templatePath,

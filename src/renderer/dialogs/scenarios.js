@@ -84,10 +84,11 @@
     //   - 已 ready → 直接 resolve 缓存
     //   - loading 中 → 复用同一 Promise（去抖）
     //   - 失败 → 降级为空数组（不 reject，保证调用方 .then 链不断）
-    function ensureFundTypeEnum() {
-      if (fundTypeEnumState === 'ready') return Promise.resolve(fundTypeEnumValues);
+    //   - refresh：弹窗每次打开时重新拉取（设置 → 模板文件切换版本后下次打开生效）；保留已就绪的旧值供首帧渲染
+    function ensureFundTypeEnum({ refresh = false } = {}) {
+      if (fundTypeEnumState === 'ready' && !refresh) return Promise.resolve(fundTypeEnumValues);
       if (fundTypeEnumState === 'loading' && fundTypeEnumPromise) return fundTypeEnumPromise;
-      fundTypeEnumState = 'loading';
+      if (fundTypeEnumState !== 'ready') fundTypeEnumState = 'loading';
       const api = scenarioCommands && scenarioCommands.scenarios && scenarioCommands.scenarios.getFundTypeEnum;
       if (typeof api !== 'function') {
         // 旧 preload / preview 兜底：无该 IPC → 直接降级
@@ -179,10 +180,11 @@
     //   - 已 ready → 直接 resolve 缓存
     //   - loading 中 → 复用同一 Promise（去抖）
     //   - 失败 → 降级为空数组（不 reject，保证调用方 .then 链不断）
-    function ensureGatewayReconHeaders() {
-      if (gatewayReconHeadersState === 'ready') return Promise.resolve(gatewayReconHeadersValues);
+    //   - refresh：弹窗每次打开时重新拉取（设置 → 模板文件切换版本后下次打开生效）；保留已就绪的旧值供首帧渲染
+    function ensureGatewayReconHeaders({ refresh = false } = {}) {
+      if (gatewayReconHeadersState === 'ready' && !refresh) return Promise.resolve(gatewayReconHeadersValues);
       if (gatewayReconHeadersState === 'loading' && gatewayReconHeadersPromise) return gatewayReconHeadersPromise;
-      gatewayReconHeadersState = 'loading';
+      if (gatewayReconHeadersState !== 'ready') gatewayReconHeadersState = 'loading';
       const api = scenarioCommands && scenarioCommands.scenarios && scenarioCommands.scenarios.getGatewayReconHeaders;
       if (typeof api !== 'function') {
         // 旧 preload / preview 兜底：无该 IPC → 直接降级空数组
@@ -3071,7 +3073,7 @@
         renderReconFields();
       }
       // 弹窗可能已被关闭（用户快速取消）→ 容器脱离 DOM 时跳过 rerender（照搬 C2 isConnected 守卫）
-      registerModal(overlay, { onMount: () => ensureGatewayReconHeaders().then(() => {
+      registerModal(overlay, { onMount: () => ensureGatewayReconHeaders({ refresh: true }).then(() => {
         if (!modalBridge.host.getHandle(overlay)?.isOpen()) return;
         if (dialog.isConnected) rerenderC3GatewayFields();
       }) });
@@ -3758,7 +3760,7 @@
       // v2.1.11 T3（spec §4.5）：异步拉取 FundType 枚举，就绪后重渲染（把已配 FundType 字段值升级为下拉）
       //   - 首帧先以「枚举未就绪」渲染（FundType 值暂为文本输入），不阻塞弹窗弹出
       //   - 枚举到位（或降级空数组）后 rerender：成功 → FundType 值变下拉；降级 → 保持文本 + 一次性提示
-      registerModal(overlay, { onMount: () => ensureFundTypeEnum().then(() => {
+      registerModal(overlay, { onMount: () => ensureFundTypeEnum({ refresh: true }).then(() => {
         if (!modalBridge.host.getHandle(overlay)?.isOpen()) return;
         // v2.1.14 第3条：枚举就绪后，编辑态若 markValue 已存自定义值（FundType 字段但值不在枚举）→ 进入「自己输入」模式，原值显示为输入框
         if (config.markValue && config.markValue.field === 'FundType' && config.markValue.value

@@ -168,6 +168,7 @@ function effectiveRunShape(effective) {
 function createVccFinancialOpService({
   database,
   assetsDir,
+  pendingTemplateSource = null,
   appVersion = null,
   buildSha = null,
   workerFactory = (filename, options) => memoryCarrierAdmission(null).observe(new Worker(filename, options)),
@@ -1011,16 +1012,29 @@ function createVccFinancialOpService({
         throw operationError('result-publication-unavailable', '结果文件发布服务尚未就绪');
       }
       const expectedSnapshot = archivedResultSnapshot(database.db, target);
-      const result = await writeResultWorkbookFn({
-        dbPath: database.dbPath,
-        expectedSnapshot,
-        acquireLease: acquireResultExportLeaseFn,
-        operationKey: batchContext?.operationKey,
-        runId: target.runId,
-        outputPaths,
-        assetsDir,
-        publicationStagingDirectory
-      });
+      // 设置 → 模板文件：Pending 计算表在 Main 按当前版本读出字节并核对 SHA-256，交给 Worker 使用；
+      // Worker 不再自行读取，切换或删除版本不影响进行中的导出。结果模板仍受哈希锁定，走 assetsDir。
+      const pendingTemplate = pendingTemplateSource
+        ? await pendingTemplateSource.acquire({ label: 'VCC 结果导出', withBytes: true })
+        : null;
+      let result;
+      try {
+        result = await writeResultWorkbookFn({
+          dbPath: database.dbPath,
+          expectedSnapshot,
+          acquireLease: acquireResultExportLeaseFn,
+          operationKey: batchContext?.operationKey,
+          runId: target.runId,
+          outputPaths,
+          assetsDir,
+          ...(pendingTemplate
+            ? { pendingTemplate: { versionId: pendingTemplate.versionId, sha256: pendingTemplate.sha256, bytes: pendingTemplate.bytes } }
+            : {}),
+          publicationStagingDirectory
+        });
+      } finally {
+        if (pendingTemplate) pendingTemplate.release();
+      }
       if (!result.generationFilePaths || typeof publishOutputFilesFn !== 'function') return result;
       try {
         const latest = await getArchivedRunByMonth(targetMonth, task);

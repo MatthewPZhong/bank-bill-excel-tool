@@ -161,7 +161,22 @@ contextBridge.exposeInMainWorld('desktopApi', {
   templateResources: {
     list: () => ipcRenderer.invoke('template-resources:list'),
     get: (resourceId) => ipcRenderer.invoke('template-resources:get', resourceId),
-    saveAs: (payload) => ipcRenderer.invoke('template-resources:save-as', payload)
+    saveAs: (payload) => ipcRenderer.invoke('template-resources:save-as', payload),
+    pickImportFile: (payload) => ipcRenderer.invoke('template-resources:pick-import-file', payload),
+    prepareImport: (payload) => ipcRenderer.invoke('template-resources:prepare-import', payload),
+    discardImport: (importToken) => ipcRenderer.invoke('template-resources:discard-import', importToken),
+    commitImport: (payload) => ipcRenderer.invoke('template-resources:commit-import', payload),
+    setCurrentVersion: (payload) => ipcRenderer.invoke('template-resources:set-current-version', payload),
+    deleteVersion: (payload) => ipcRenderer.invoke('template-resources:delete-version', payload),
+    listChanges: () => ipcRenderer.invoke('template-resources:list-changes'),
+    onChanged: (listener) => {
+      if (typeof listener !== 'function') return () => {};
+      const wrapped = (_event, payload) => {
+        try { listener(payload); } catch (_error) { /* renderer listener errors are isolated */ }
+      };
+      ipcRenderer.on('template-resources:changed', wrapped);
+      return () => ipcRenderer.removeListener('template-resources:changed', wrapped);
+    }
   },
   errors: {
     exportLast: () => ipcRenderer.invoke('error:export-last')

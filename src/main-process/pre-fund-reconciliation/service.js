@@ -158,6 +158,7 @@ class PreFundReconciliationService {
     userDataDir,
     database,
     templatePath,
+    templateSource = null,
     now = () => new Date(),
     openGatewayReadSnapshot = () => openMainDatabaseReadSnapshot(database.dbPath),
     gatewayReadRepository = linkedTableRepository
@@ -183,6 +184,8 @@ class PreFundReconciliationService {
     this.userDataDir = userDataDir;
     this.database = database;
     this.templatePath = templatePath;
+    // 设置 → 模板文件：导出时经 templateSource 取得当前版本并持有租约；未注入时固定使用 templatePath。
+    this.templateSource = templateSource;
     this.now = now;
     this.openGatewayReadSnapshot = openGatewayReadSnapshot;
     this.gatewayReadRepository = gatewayReadRepository;
@@ -1121,6 +1124,21 @@ class PreFundReconciliationService {
       return { status: 'conflict', conflicts };
     }
 
+    // 先取得模板当前版本：不可用时在改动用户已有文件前中止；导出期间持有租约，版本不会被删除。
+    const template = this.templateSource
+      ? await this.templateSource.acquire({ label: '资金对账导出' })
+      : { filePath: this.templatePath, release() {} };
+    try {
+      return await this._writeExport({
+        plan, conflicts, outputDirectory, exportDate, runLocator, onProgress,
+        templatePath: template.filePath, templateBytes: template.bytes || null
+      });
+    } finally {
+      template.release();
+    }
+  }
+
+  async _writeExport({ plan, conflicts, outputDirectory, exportDate, runLocator, onProgress, templatePath, templateBytes = null }) {
     fs.mkdirSync(outputDirectory, { recursive: true });
     const backups = [];
     const publishedFiles = new Map();
@@ -1134,7 +1152,8 @@ class PreFundReconciliationService {
       }
       if (onProgress) onProgress({ stage: 'export-start', current: 0, total: plan.length });
       files = await writeChannelWorkbooks({
-        templatePath: this.templatePath,
+        templatePath,
+        templateBytes,
         outputDirectory,
         exportDate,
         channelExports: (function* mapDuplicateRows(channelExports) {
