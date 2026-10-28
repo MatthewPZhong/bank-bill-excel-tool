@@ -1812,6 +1812,40 @@ td .muted { color: var(--muted); }
   color: var(--dim);
 }
 
+/* 账单日期断档确认（发生额计算余额） */
+.balance-gap-body {
+  padding: 16px 28px 12px;
+  display: flex; flex-direction: column; gap: 12px;
+  font-size: 13px; color: var(--text); line-height: 1.6;
+}
+.balance-gap-body p { margin: 0; }
+.balance-gap-list {
+  margin: 0; padding: 10px 14px;
+  list-style: none;
+  max-height: 220px; overflow-y: auto;
+  background: var(--bg-soft);
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.balance-gap-item {
+  display: flex; flex-direction: column; gap: 2px;
+  overflow-wrap: anywhere;
+}
+.balance-gap-account {
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  font-weight: 600;
+}
+.balance-gap-detail { color: var(--muted); }
+.balance-gap-question { font-weight: 600; }
+.balance-gap-warning {
+  padding: 8px 12px;
+  border-left: 3px solid var(--warning, #946000);
+  border-radius: 6px;
+  background: var(--warning-soft, #fff7e6);
+  color: var(--warning, #946000);
+}
+
 /* =================== Account-mapping-migration =================== */
 .migration-intro {
   padding: 14px 28px;

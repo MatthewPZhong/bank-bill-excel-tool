@@ -33,6 +33,7 @@ function setStatus(message, tone = 'info', options = {}) {
   updateStatusBox(elements.statusBox, message, tone, {
     errorReportReady: state.hasErrorReport,
     manualBalancePromptReady: state.manualBalancePromptReady,
+    manualBalancePromptTitle: state.manualBalancePrompt?.reason === 'gap' ? '点击处理账单日期断档' : '',
     idleTitle: options.idleTitle ?? getStatusBoxTitle(config.getAccountMappingCount())
   });
 }
@@ -244,10 +245,17 @@ async function handleOpenAccountMappings() {
           const failedLines=(result.failedFileNames||[]).map(name=>name+'的账户个数或账户号匹配不上（账户个数和账户号都匹配不上），请检查。').join('<br/>');
           openModal(()=>createRememberOrderMismatchDialog({message:failedLines,bigAccountResult:result}));return;
         }
-        applyStatementResult(result);return;
+        applyStatementResult(result);
+        // 账单日期断档直接弹出确认；关闭后仍可点击状态框重新打开。
+        if(result.manualBalancePrompt?.reason==='gap') openModal(()=>createManualBalanceSeedDialog(result.manualBalancePrompt));
+        return;
       }
       if(result.status==='select-export-scope') {openModal(()=>createExportScopeDialog(kind==='detail'?'detail':'balance'));return;}
-      if(kind==='balance'&&(result.manualBalancePromptReady||result.status==='manual-balance-required')) {applyManualBalancePromptStatus(result);return;}
+      if(kind==='balance'&&(result.manualBalancePromptReady||result.status==='manual-balance-required')) {
+        applyManualBalancePromptStatus(result);
+        if(result.manualBalancePrompt?.reason==='gap') openModal(()=>createManualBalanceSeedDialog(result.manualBalancePrompt));
+        return;
+      }
       if(kind==='monthly'&&['MONTHLY_BALANCE_NO_PENDING','MONTHLY_BALANCE_FILE_MISSING'].includes(result.errorCode)) {
         state.monthlyBalanceReady=false;state.monthlyBalancePreview=null;
       }

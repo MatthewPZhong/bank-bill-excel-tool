@@ -252,6 +252,41 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed')[1].args`),[{contextId:'seed-context',confirmOverwrite:true}]);
   });
 
+  const GAP_PROMPT_JS = `cfg.gapPrompt={reason:'gap',templateName:'模板 A',merchantId:'M001',currency:'USD',anchorDate:'2026-09-01',targetBillDate:'2026-09-04',
+    missingFrom:'2026-09-02',missingTo:'2026-09-03',suggestedSeedDate:'2026-09-03',gapKey:'K1',
+    gaps:[{key:'K1',merchantId:'M001',currency:'USD',anchorDate:'2026-09-01',targetBillDate:'2026-09-04',missingFrom:'2026-09-02',missingTo:'2026-09-03'},
+      {key:'K2',merchantId:'M002',currency:'EUR',anchorDate:'2026-09-01',targetBillDate:'2026-09-03',missingFrom:'2026-09-02',missingTo:'2026-09-02'}]};
+    cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog(cfg.gapPrompt)).handle;void 0;`;
+  await test('账单日期断档先确认；补录进入预填日期的补录弹窗，不补录此处只提交该处并直接进入下一处', async () => {
+    await setup();
+    await js(GAP_PROMPT_JS);
+    assert.equal(await js(`Boolean(cfg.top().querySelector('.balance-gap-card'))`), true);
+    assert.match(await js('cfg.top().textContent'), /共 2 处/);
+    assert.match(await js('cfg.top().textContent'), /缺 2026-09-02 ~ 2026-09-03/);
+    await js(`cfg.top().querySelector('[data-action="fill"]').click();`); await tick();
+    assert.deepEqual(await js(`({gap:Boolean(cfg.top().querySelector('.balance-gap-card')),date:cfg.top().querySelector('.manual-balance-date-input').value,
+      skip:Boolean(cfg.top().querySelector('[data-action="skip-gap"]')),count:document.getElementById('modalRoot').children.length})`),
+    {gap:false,date:'2026-09-03',skip:true,count:1});
+    await js(`cfg.next.seed={status:'manual-balance-required',manualBalancePromptReady:true,
+      manualBalancePrompt:{...cfg.gapPrompt,merchantId:'M002',currency:'EUR',gapKey:'K2',suggestedSeedDate:'2026-09-02',gaps:[cfg.gapPrompt.gaps[1]]}};
+      cfg.top().querySelector('[data-action="skip-gap"]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0])`), [{skipBalanceGapKeys:['K1']}]);
+    assert.deepEqual(await js(`({gap:Boolean(cfg.top().querySelector('.balance-gap-card')),date:cfg.top().querySelector('.manual-balance-date-input').value,
+      remaining:/还有 1 处待处理/.test(cfg.top().textContent),count:document.getElementById('modalRoot').children.length})`),
+    {gap:false,date:'2026-09-02',remaining:true,count:1});
+  });
+  await test('账单日期断档全部不补录：一次提交全部断档键，提交期间锁定窗口，完成后关闭', async () => {
+    await setup();
+    await js(GAP_PROMPT_JS);
+    await js(`cfg.write=cfg.defer();cfg.next.seed=cfg.write;cfg.action=cfg.top().querySelector('[data-action="skip-all"]');
+      cfg.action.click();cfg.action.dispatchEvent(new Event('click'));`);
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0])`), [{skipBalanceGapKeys:['K1','K2']}]);
+    assert.equal(await js('cfg.handle.close().status'), 'blocked');
+    await js(`cfg.write.resolve({status:'warning',message:'余额账单可导出'});`); await tick();
+    assert.equal(await js('cfg.handle.isOpen()'), false);
+    assert.equal(await js('cfg.applied'), 1);
+  });
+
   async function setupRowCount(nextN=1) {
     await setup();
     await js(`
