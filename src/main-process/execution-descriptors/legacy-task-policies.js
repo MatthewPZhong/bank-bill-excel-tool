@@ -255,6 +255,7 @@ const archivePolicies = Object.freeze([
   createExcludePolicy('app-update:set-enabled', 'ui-navigation'),
   createExcludePolicy('background:reset', 'ui-navigation'),
   createExcludePolicy('background:save', 'ui-navigation'),
+  createExcludePolicy('settings:acknowledge-release-notes', 'ui-navigation'),
   createExcludePolicy('settings:set-current-module', 'ui-navigation'),
   createExcludePolicy('settings:set-dark-mode-schedule', 'ui-navigation'),
   createExcludePolicy('settings:set-enabled-modules', 'ui-navigation'),

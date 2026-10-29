@@ -1084,6 +1084,14 @@ class AppDatabase {
     return settingsRepository.setAutoUpdateEnabled(this.db, enabled);
   }
 
+  getReleaseNotesAcknowledgedVersion() {
+    return settingsRepository.getReleaseNotesAcknowledgedVersion(this.db);
+  }
+
+  setReleaseNotesAcknowledgedVersion(version) {
+    return settingsRepository.setReleaseNotesAcknowledgedVersion(this.db, version);
+  }
+
   getUiStyle() {
     return settingsRepository.getUiStyle(this.db);
   }
