@@ -10179,15 +10179,21 @@ function generateMultiTemplateGroupFiles({
       ? { filePath: allDetailPaths[0], fileName: path.basename(allDetailPaths[0]), templateName: '按文件名映射模板' }
       : null;
 
-  const mergedBalance = allBalancePaths.length > 1
+  // 任一模板组还需补录或确认断档时不合并、不缓存余额：汇总只含已算出的组，文件名却按全部模板计数。
+  // 已算出的组照常写出各自的余额文件和计算种子，补录或不补录后按全部模板组重算（断档 spec §4.2 第 1 条）。
+  const balancePending = allWarnings.some(
+    (w) => w.type === 'balance-seed-required' || w.type === 'balance-gap-confirm'
+  );
+  const mergeableBalancePaths = balancePending ? [] : allBalancePaths;
+  const mergedBalance = mergeableBalancePaths.length > 1
     ? (() => {
         const mergedFileName = `${templateCount}-BALANCE-${dateRangeLabel || getToday()}.xlsx`;
         const { outputFilePath: mergedPath } = buildOutputFilePath({ kind: 'balance', outputFileName: mergedFileName });
-        mergeGeneratedXlsxFiles(allBalancePaths, mergedPath);
+        mergeGeneratedXlsxFiles(mergeableBalancePaths, mergedPath);
         return { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
       })()
-    : allBalancePaths.length === 1
-      ? { filePath: allBalancePaths[0], fileName: path.basename(allBalancePaths[0]), templateName: '按文件名映射模板' }
+    : mergeableBalancePaths.length === 1
+      ? { filePath: mergeableBalancePaths[0], fileName: path.basename(mergeableBalancePaths[0]), templateName: '按文件名映射模板' }
       : null;
 
   // session 只 append 一次（避免 importCount 膨胀导致首次导入就弹 scope 选择）
@@ -10202,8 +10208,7 @@ function generateMultiTemplateGroupFiles({
     preparedBatch: null,
     message: mergedBalance ? '明细账单可导出，余额账单可导出' : '明细账单可导出',
     warnings: allWarnings,
-    balanceRequested: allBalancePaths.length > 0
-      || allWarnings.some((w) => w.type === 'balance-seed-required' || w.type === 'balance-gap-confirm')
+    balanceRequested: allBalancePaths.length > 0 || balancePending
   };
 
   lastBatchId = appendStatementSessionImport({

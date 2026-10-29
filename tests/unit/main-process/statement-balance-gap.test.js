@@ -886,3 +886,109 @@ test('主进程：按文件名映射单模板组补录或不补录后重算，�
   assert.deepEqual(balanceMerchantIds(allResult.generatedFiles.balance.filePath), ['M001', 'M002']);
   assert.deepEqual(balanceMerchantIds(currentPath), ['M002']);
 });
+
+function findFileNames(root, pattern) {
+  if (!fs.existsSync(root)) return [];
+  return fs.readdirSync(root, { recursive: true })
+    .map((name) => path.basename(String(name)))
+    .filter((name) => pattern.test(name));
+}
+
+test('主进程：按文件名映射多模板导入，任一模板组需补录或确认断档时不合并、不缓存部分余额', (t) => {
+  for (const scenario of ['gap', 'seed-required']) {
+    const root = createTempRoot(t);
+    const storageRoot = path.join(root, 'storage');
+    const generation = createGenerationSeam(storageRoot);
+    const { buildOutputFilePath, mergeGeneratedXlsxFiles } = loadOutputPathHelpers(storageRoot, '2026-10-29');
+    // 三个模板各一个账号；第三组断档（9-02、9-03 缺失）或没有首次种子，其余两组可以算出余额。
+    const groups = [
+      { id: 1, templateName: '中行-上海', merchantId: 'M001', dates: ['2026-09-01', '2026-09-02'] },
+      { id: 2, templateName: '中行-北京', merchantId: 'M002', dates: ['2026-09-01', '2026-09-02'] },
+      { id: 3, templateName: '中行-深圳', merchantId: 'M003', dates: scenario === 'gap' ? ['2026-09-01', '2026-09-04'] : ['2026-09-01', '2026-09-02'] }
+    ];
+    for (const group of groups) {
+      if (scenario === 'seed-required' && group.id === 3) continue;
+      upsertBalanceSeedRecord(storageRoot, {
+        templateName: group.templateName, merchantId: group.merchantId, currency: 'USD',
+        billDate: '2026-08-31', endBalance: 1000, generationMethod: '人工录入'
+      });
+    }
+    const fileEntries = groups.map((group) => ({
+      ...mappedSourceEntry(root, `${scenario}-${group.id}.xlsx`, group.dates.map((date) => [date, group.merchantId, 'USD', '100', ''])),
+      matchedTemplateId: group.id
+    }));
+    const templateNameById = new Map(groups.map((group) => [group.id, group.templateName]));
+    const lastGeneratedExports = { detail: null, balance: null, allDetail: null, allBalance: null };
+    const imported = [];
+    const dependencies = {
+      getEntryTemplateConfig: ({ entry }) => ({
+        template: { name: templateNameById.get(entry.matchedTemplateId) },
+        exportMappings: [{ templateField: 'MerchantId', mappedField: 'Account' }],
+        exportTargetFields: HEADER
+      }),
+      normalizeCell,
+      FIXED_FIELD_VALUE_PREFIX: '__FIXED__:',
+      MERCHANT_ID_MULTI_ACCOUNT_MARKER: '__MULTI__',
+      buildStatementGenerationConfig: ({ template }) => ({
+        template,
+        mappingByTargetField: { MerchantId: 'Account' },
+        balanceRequested: true,
+        balanceMode: 'calculated'
+      }),
+      rebuildMatchedTemplateFileEntries: () => {
+        throw new Error('未选择大账号时不应重建');
+      },
+      buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
+      removeStatementSessionEntriesByFilePath: () => {},
+      generateStatementFiles: generation.generateStatementFiles,
+      parseRequiredBillDates,
+      buildDateRangeLabel,
+      getToday: () => '2026-10-29',
+      buildOutputFilePath,
+      mergeGeneratedXlsxFiles,
+      path,
+      buildStatementFileEntry: (entry) => entry,
+      buildStatementFileEntryId: () => 'entry',
+      appendStatementSessionImport: () => 'batch-1',
+      buildStatementBatchId: () => 'batch-1',
+      lastGeneratedExports,
+      updateStatementSessionCache: (session, batchId, generatedFiles) => {
+        generation.updateStatementSessionCache(session, batchId, generatedFiles, lastGeneratedExports);
+      },
+      buildImportResultFromGeneratedFiles: ({ generatedFiles }) => {
+        imported.push(generatedFiles);
+        return { status: 'captured' };
+      },
+      FILENAME_MAPPING_TEMPLATE_ID
+    };
+    const generateGroups = loadMainFunction(
+      'generateMultiTemplateGroupFiles',
+      Object.keys(dependencies),
+      Object.values(dependencies)
+    );
+
+    generateGroups({
+      fileEntries,
+      fallbackTemplateConfig: {},
+      selectedBigAccount: null,
+      session: { key: 'session-1' },
+      inputFilePaths: fileEntries.map((entry) => entry.filePath)
+    });
+
+    const [generatedFiles] = imported;
+    const pendingType = scenario === 'gap' ? 'balance-gap-confirm' : 'balance-seed-required';
+    assert.deepEqual(generatedFiles.warnings.map((warning) => warning.type), [pendingType], scenario);
+    assert.equal(generatedFiles.balance, null, scenario);
+    assert.equal(generatedFiles.balanceRequested, true, scenario);
+    assert.equal(lastGeneratedExports.balance, null, scenario);
+    assert.deepEqual(findFileNames(storageRoot, /^3-BALANCE-/), [], scenario);
+    // 明细照常合并；已算出的两组照常写出计算种子，待处理的一组不写。
+    assert.match(generatedFiles.detail.fileName, /^3-COMMON-/, scenario);
+    assert.ok(fs.existsSync(generatedFiles.detail.filePath), scenario);
+    const computedSeeds = readBalanceSeedRecords(storageRoot, '中行')
+      .filter((record) => record.billDate === '2026-09-02')
+      .map((record) => record.merchantId)
+      .sort();
+    assert.deepEqual(computedSeeds, ['M001', 'M002'], scenario);
+  }
+});
