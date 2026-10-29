@@ -16,7 +16,7 @@ module.exports = async ({ js, load, reset, assert, test }) => {
   const scripts = [...index.matchAll(/<script\b[^>]*\bsrc="\.\/([^"]+)"[^>]*><\/script>/g)].map(match => match[1]);
   const body = index.match(/<body[^>]*>([\s\S]*)<\/body>/i)[1].replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '');
   const preload = fs.readFileSync(path.join(root, 'src/preload.js'), 'utf8');
-  async function setup() {
+  async function setup({ info = {} } = {}) {
     await reset(body);
     await js(`
       window.shellErrors=[]; window.shellWarnings=[]; window.shellCalls=[]; window.shellSends=[];
@@ -27,9 +27,10 @@ module.exports = async ({ js, load, reset, assert, test }) => {
       console.warn=(...args)=>shellWarnings.push(args.map(value=>String(value?.stack||value)).join(' '));
       window.shellResponses={
         'app:get-info':{version:'3.2.9-fixture',previewModal:'',hasEnum:true,enumFileName:'COMMON.xlsx',currencyOptions:['USD','HKD'],accountMappingCount:0,
-          currentModule:'statement-generator',enabledModules:${JSON.stringify(moduleIds)},reconIdFixBillCategory:'gateway'},
+          currentModule:'statement-generator',enabledModules:${JSON.stringify(moduleIds)},reconIdFixBillCategory:'gateway',...${JSON.stringify(info)}},
         'app-update:get-status':{status:'idle',enabled:false},
         'settings:set-current-module':{status:'success'},'settings:set-recon-id-fix-bill-category':{status:'success'},
+        'settings:acknowledge-release-notes':{status:'ok'},
         'template:list':[], 'account-mapping:list':[],
         'scenarios:list':{status:'ok',scenarios:[]}, 'channels:list':{status:'ok',channels:[]},
         'bank-statement:session-status':{status:'ok',hasFile:false,hasResult:false},
@@ -291,6 +292,37 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     assert.equal(await js(`setCurrentModule('statement-generator').status`), 'disposed');
     assert.equal(await js(`document.getElementById('modalRoot').children.length`), 0);
     await clean();
+  });
+
+  await test('应用壳升级后弹出更新说明，关闭后确认一次；设置「版本管理」可再次查看且不确认', async () => {
+    const entry = { version: '3.2.16', date: '2026-11-11', highlights: ['十六'] };
+    const releaseNotes = { current: entry, pending: { fromVersion: '3.2.15', toVersion: '3.2.16', entries: [entry] } };
+    await setup({ info: { version: '3.2.16', releaseNotes } });
+    await clean();
+    assert.equal(await js(`document.getElementById('modalRoot').children.length`), 1);
+    assert.match(await js(`document.querySelector('.release-notes-card .release-notes-summary').textContent`), /已从 v3\.2\.15 更新到 v3\.2\.16/);
+    await js(`(async()=>{await setCurrentModule('new-account-generator',{persist:false}).ready;})()`); await flush();
+    assert.equal(await js(`!!document.querySelector('.release-notes-card')`), true, '切换模块不关闭应用级弹窗');
+    await js(`document.querySelector('.release-notes-card [data-action="acknowledge"]').click();`); await flush();
+    const acks = () => js(`shellCalls.filter(call=>call.channel==='settings:acknowledge-release-notes').map(call=>call.args)`);
+    assert.deepEqual(await acks(), [['3.2.16']]);
+    await js(`document.getElementById('settingsBtn').click();`); await flush();
+    await js(`document.querySelector('.app-update-settings-card [data-action="open-release-notes"]').click();`); await flush();
+    assert.equal(await js(`document.getElementById('modalRoot').children.length`), 2);
+    assert.equal(await js(`document.getElementById('modalRoot').lastElementChild.querySelector('.release-notes-summary').textContent`), '当前版本 v3.2.16');
+    await js(`document.getElementById('modalRoot').lastElementChild.querySelector('[data-action="acknowledge"]').click();`); await flush();
+    assert.equal(await js(`document.getElementById('modalRoot').children.length`), 1);
+    assert.equal(await js(`!!document.querySelector('.app-update-settings-card')`), true);
+    assert.deepEqual(await acks(), [['3.2.16']]);
+    await js(`modalHost.closeTop(); void 0;`);
+    await clean();
+  });
+
+  await test('应用壳预览截图运行不弹更新说明', async () => {
+    const entry = { version: '3.2.16', date: '2026-11-11', highlights: ['十六'] };
+    await setup({ info: { version: '3.2.16', previewModal: 'release-notes-not-a-preview', releaseNotes: { current: entry, pending: { fromVersion: null, toVersion: '3.2.16', entries: [entry] } } } });
+    await clean();
+    assert.equal(await js(`!!document.querySelector('.release-notes-card')`), false);
   });
 
 };

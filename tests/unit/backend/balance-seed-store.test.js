@@ -315,4 +315,15 @@ test.describe('findPreviousBalanceSeed', () => {
     assert.equal(r.currency, 'USD');
     assert.equal(r.endBalance, 50);
   });
+
+  test('指定 generationMethod 时只取该生成方式的最新记录，未指定时行为不变', () => {
+    writeBalanceSeedRecords(tmpRoot, '工商', [
+      { merchantId: 'M001', currency: 'CNY', billDate: '2026-04-01', endBalance: 100, generationMethod: '人工录入' },
+      { merchantId: 'M001', currency: 'CNY', billDate: '2026-04-02', endBalance: 200, generationMethod: '通过发生额计算' }
+    ]);
+    const query = { bankName: '工商', merchantId: 'M001', currency: 'CNY', beforeBillDate: '2026-05-01' };
+    assert.equal(findPreviousBalanceSeed(tmpRoot, query).endBalance, 200);
+    assert.equal(findPreviousBalanceSeed(tmpRoot, { ...query, generationMethod: '人工录入' }).endBalance, 100);
+    assert.equal(findPreviousBalanceSeed(tmpRoot, { ...query, generationMethod: '账单里的余额' }), null);
+  });
 });

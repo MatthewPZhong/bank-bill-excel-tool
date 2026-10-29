@@ -96,6 +96,22 @@ function setAutoUpdateEnabled(db, enabled) {
   setSetting(db, AUTO_UPDATE_ENABLED_KEY, enabled ? '1' : '0');
 }
 
+// v3.2.14：用户最后确认过「更新说明」的版本；null = 未记录（全新安装或本功能之前的版本）。
+const RELEASE_NOTES_ACKNOWLEDGED_VERSION_KEY = 'release_notes_acknowledged_version';
+
+function getReleaseNotesAcknowledgedVersion(db) {
+  const value = getSetting(db, RELEASE_NOTES_ACKNOWLEDGED_VERSION_KEY);
+  return value ? String(value) : null;
+}
+
+function setReleaseNotesAcknowledgedVersion(db, version) {
+  const value = typeof version === 'string' ? version.trim() : '';
+  if (!value) {
+    throw new Error(`release_notes_acknowledged_version 必须是非空版本号，收到：${JSON.stringify(version)}`);
+  }
+  setSetting(db, RELEASE_NOTES_ACKNOWLEDGED_VERSION_KEY, value);
+}
+
 // v2.1.15 W4：弃用 General 风格，UI 风格恒为 'Clear'。
 //   - 移除「切换页面风格」入口与 setUiStyle 写链路（不再有任何路径写入 'General'）。
 //   - 持久化兼容：老库 ui_style 可能存了 'General'（或其它历史/非法值），
@@ -524,6 +540,7 @@ module.exports = {
   getEnabledModules,
   getEnumConfig,
   getReconIdFixBillCategory,
+  getReleaseNotesAcknowledgedVersion,
   getSetting,
   getUiStyle,
   listAccountMappings,
@@ -536,6 +553,8 @@ module.exports = {
   setEnabledModules,
   setEnumConfig,
   setReconIdFixBillCategory,
+  setReleaseNotesAcknowledgedVersion,
+  RELEASE_NOTES_ACKNOWLEDGED_VERSION_KEY,
   setSetting,
   // v2.1.9 N1-settings (T32b)：idle cleanup 阈值
   getAcquiringBillIdleCleanupMinutes,
