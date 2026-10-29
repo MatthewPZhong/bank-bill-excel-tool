@@ -8750,6 +8750,201 @@
       },
       "reason": "升级后更新说明（v3.2.14）：设置「版本管理」页新增「查看本版更新说明」入口，只经 ui.openReleaseNotes 交给更新说明工厂叠层打开；settings.acknowledgeReleaseNotes 仍只由更新说明工厂持有，设置弹窗不直接接触。",
       "designDoc": "changes/v3.2.14/feat/release-notes-on-upgrade/spec.md"
+    },
+    {
+      "sourceCommit": "0043b2be4f1aceacd2a696c85e6f2860f772d249",
+      "sourcePolicyBlob": "17a367240481f1ec4c245f8d43b80bf9a5bd7066",
+      "boundaryId": "renderer-dialog-app-settings",
+      "field": "allowedApiFields",
+      "from": {
+        "api": [
+          "appUpdate.checkNow",
+          "appUpdate.getStatus",
+          "appUpdate.onStatusChanged",
+          "appUpdate.restartAndInstall",
+          "appUpdate.setEnabled",
+          "archiveCenter.changeStorageLocation",
+          "archiveCenter.deleteBatch",
+          "archiveCenter.getBatch",
+          "archiveCenter.getSettings",
+          "archiveCenter.getStats",
+          "archiveCenter.listBatches",
+          "archiveCenter.listDeleteCleanupJobs",
+          "archiveCenter.onEntryMaintenanceCompleted",
+          "archiveCenter.onEntryMaintenanceFailed",
+          "archiveCenter.onEntryMaintenanceProgress",
+          "archiveCenter.onStorageMigrationProgress",
+          "archiveCenter.openFile",
+          "archiveCenter.prepareDeleteBatch",
+          "archiveCenter.retryBatch",
+          "archiveCenter.retryDeleteCleanupJob",
+          "archiveCenter.saveAs",
+          "archiveCenter.selectRetrySources",
+          "archiveCenter.setLocked",
+          "archiveCenter.setModuleRetentionDays",
+          "archiveCenter.setRetentionDays",
+          "archiveCenter.startEntryMaintenance"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "applyAppUpdateActionResult",
+          "applyAppUpdateStatus",
+          "createConfirmDialog",
+          "escapeHtml",
+          "getAppUpdateStatus",
+          "getDarkModeController",
+          "mountAppearanceSettings",
+          "mountTemplateFiles",
+          "refreshOpenAppUpdateDialog",
+          "restartAndInstallAppUpdate"
+        ]
+      },
+      "to": {
+        "api": [
+          "appUpdate.checkNow",
+          "appUpdate.getStatus",
+          "appUpdate.onStatusChanged",
+          "appUpdate.restartAndInstall",
+          "appUpdate.setEnabled",
+          "archiveCenter.changeStorageLocation",
+          "archiveCenter.deleteBatch",
+          "archiveCenter.getBatch",
+          "archiveCenter.getSettings",
+          "archiveCenter.getStats",
+          "archiveCenter.listBatches",
+          "archiveCenter.listDeleteCleanupJobs",
+          "archiveCenter.onEntryMaintenanceCompleted",
+          "archiveCenter.onEntryMaintenanceFailed",
+          "archiveCenter.onEntryMaintenanceProgress",
+          "archiveCenter.onStorageMigrationProgress",
+          "archiveCenter.openFile",
+          "archiveCenter.prepareDeleteBatch",
+          "archiveCenter.retryBatch",
+          "archiveCenter.retryDeleteCleanupJob",
+          "archiveCenter.saveAs",
+          "archiveCenter.selectRetrySources",
+          "archiveCenter.setLocked",
+          "archiveCenter.setModuleRetentionDays",
+          "archiveCenter.setRetentionDays",
+          "archiveCenter.startEntryMaintenance"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "applyAppUpdateActionResult",
+          "applyAppUpdateStatus",
+          "createConfirmDialog",
+          "escapeHtml",
+          "getAppUpdateStatus",
+          "getDarkModeController",
+          "mountAppearanceSettings",
+          "mountTemplateFiles",
+          "openReleaseNotes",
+          "refreshOpenAppUpdateDialog",
+          "restartAndInstallAppUpdate"
+        ]
+      },
+      "reason": "更新说明合入 release/v3.2.14：断档提醒分支（基于 v3.2.12）与其合并提交 0043b2be 仍持有原 ui 集合，按合并前末端 0043b2be 补登同一放宽；settings.acknowledgeReleaseNotes 仍只由更新说明工厂持有，设置弹窗不直接接触。",
+      "designDoc": "changes/v3.2.14/feat/release-notes-on-upgrade/spec.md"
+    },
+    {
+      "sourceCommit": "9d4a554b6655d673189d46ae5759056fc07facf6",
+      "sourcePolicyBlob": "77bb6897e48972eebd8df1c56eb87ee43b360681",
+      "boundaryId": "renderer-dialog-template-files",
+      "field": "allowedApiFields",
+      "from": {
+        "api": [
+          "templateResources.get",
+          "templateResources.list",
+          "templateResources.saveAs"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "createConfirmDialog",
+          "escapeHtml"
+        ]
+      },
+      "to": {
+        "api": [
+          "templateResources.commitImport",
+          "templateResources.deleteVersion",
+          "templateResources.discardImport",
+          "templateResources.get",
+          "templateResources.list",
+          "templateResources.listChanges",
+          "templateResources.onChanged",
+          "templateResources.pickImportFile",
+          "templateResources.prepareImport",
+          "templateResources.saveAs",
+          "templateResources.setCurrentVersion"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "createConfirmDialog",
+          "escapeHtml"
+        ]
+      },
+      "reason": "断档提醒合入 release/v3.2.14：该分支基于 v3.2.12，其提交仍持有 v3.2.13 放宽前的 api 集合，按分支末端 9d4a554b 补登 v3.2.13 的同一放宽；templateResources 命名空间仍只由模板文件工厂持有，设置弹窗不直接接触。",
+      "designDoc": "changes/v3.2.13/feat/settings-template-versions/techdoc.md"
     }
   ]
 }
