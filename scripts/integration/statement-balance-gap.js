@@ -1,6 +1,7 @@
 // 网银账单：发生额计算余额的日期断档 e2e 集成验证
 //   覆盖：真实 xlsx 读取 → 生成层断档判定 → 补录一处（真实种子文件写入）→ 不补录另一处
 //         → 余额 xlsx 写出与回读 → 计算种子落盘
+//         → 按文件名映射多模板：全部范围重算余额不覆盖同名的当前批次汇总文件（主进程真实合并函数）
 //   UI 弹窗与 IPC 由单测和 GUI 检查覆盖；本脚本验证金额与文件在整条链路上的结果。
 //
 // 用法：node scripts/integration/statement-balance-gap.js
@@ -9,6 +10,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const XLSX = require('xlsx');
+const acorn = require('acorn');
 
 const {
   buildDetailExportRows,
@@ -47,6 +49,8 @@ const {
 } = require('../../src/main-process/statement-session');
 
 const ROOT = path.join(__dirname, '..', '..');
+const MAIN_SOURCE = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
+const MAIN_AST = acorn.parse(MAIN_SOURCE, { ecmaVersion: 'latest', sourceType: 'script' });
 const TEMPLATE_NAME = '中行-上海';
 const ORDERED_FIELDS = ['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount'];
 
@@ -104,6 +108,14 @@ function createGeneration(storageRoot, outputDir, acknowledgedKeys) {
   });
 }
 
+// 取 src/main.js 中的真实函数，依赖按名注入。
+function loadMainFunction(name, deps = {}) {
+  const node = MAIN_AST.body.find((item) => item.type === 'FunctionDeclaration' && item.id && item.id.name === name);
+  if (!node) throw new Error(`未找到 main.js 函数：${name}`);
+  const names = Object.keys(deps);
+  return Function(...names, `return (${MAIN_SOURCE.slice(node.start, node.end)});`)(...names.map((key) => deps[key]));
+}
+
 function writeSource(filePath) {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
@@ -131,6 +143,88 @@ function readBalanceSheet(filePath) {
       row[index('期末余额')]
     ];
   });
+}
+
+// Step 5：按文件名映射两套模板，当前批次与历史批次日期范围相同；
+//         先生成当前批次汇总余额，再按全部范围重算，回读确认当前批次文件不变。
+async function verifyMergedScopeIsolation(dir) {
+  const storageRoot = path.join(dir, 'storage-merge');
+  const outputDir = path.join(dir, 'exports-merge');
+  fs.mkdirSync(outputDir, { recursive: true });
+  const today = '2026-10-28';
+  const templates = { 1: '中行-上海', 2: '工行-北京' };
+  const accounts = { 1: ['M101', 'M102'], 2: ['M201', 'M202'] };
+  const entriesByScope = { current: [], all: [] };
+  for (const tid of [1, 2]) {
+    accounts[tid].forEach((merchantId, index) => {
+      upsertBalanceSeedRecord(storageRoot, {
+        templateName: templates[tid], merchantId, currency: 'USD',
+        billDate: '2026-08-31', endBalance: 100 * (index + 1), generationMethod: '人工录入'
+      });
+      const sourcePath = path.join(dir, `merge-${merchantId}.xlsx`);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+        ['Date', 'Account', 'Curr', 'Credit', 'Debit'],
+        ['2026-09-01', merchantId, 'USD', '10', ''],
+        ['2026-09-02', merchantId, 'USD', '', '1']
+      ]), 'Sheet1');
+      XLSX.writeFile(workbook, sourcePath);
+      const entry = {
+        matchedTemplateId: tid,
+        filePath: sourcePath,
+        detailRows: buildMappedRows({
+          inputFilePath: sourcePath,
+          orderedTargetFields: ORDERED_FIELDS,
+          mappingByField: {
+            BillDate: 'Date', MerchantId: 'Account', Currency: 'Curr',
+            'Credit Amount': 'Credit', 'Debit Amount': 'Debit'
+          }
+        })
+      };
+      // 每个模板的第二个账号属于历史批次。
+      if (index === 0) entriesByScope.current.push(entry);
+      entriesByScope.all.push(entry);
+    });
+  }
+
+  const generation = createGeneration(storageRoot, outputDir, new Set());
+  const sanitizeFileName = loadMainFunction('sanitizeFileName');
+  const buildOutputFilePath = loadMainFunction('buildOutputFilePath', {
+    getToday: () => today, path, ensureStorageRoot: () => storageRoot, sanitizeFileName
+  });
+  const regenerate = loadMainFunction('regenerateVirtualTemplateBalanceFromSession', {
+    getStatementSessionEntries: (_session, scope) => entriesByScope[scope],
+    getTemplateMappingConfig: (tid) => ({ template: { id: tid, name: templates[tid] }, exportMappings: [], exportTargetFields: [] }),
+    appendActivityLogEntry: () => {},
+    buildStatementGenerationConfig: ({ template }) => ({
+      template,
+      mappingByTargetField: { MerchantId: 'Account' },
+      balanceRequested: true,
+      balanceMode: 'calculated'
+    }),
+    buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
+    generateStatementFiles: generation.generateStatementFiles,
+    parseRequiredBillDates,
+    extractManualBalancePromptWarning: generation.extractManualBalancePromptWarning,
+    statementGenerationHelpers: generation,
+    buildDateRangeLabel,
+    buildOutputFilePath,
+    mergeGeneratedXlsxFiles: loadMainFunction('mergeGeneratedXlsxFiles', {
+      require, fs, path, applyWatermark: () => {}
+    }),
+    getToday: () => today,
+    path,
+    scopedMergedOutputFileName: loadMainFunction('scopedMergedOutputFileName')
+  });
+  const accountsIn = (filePath) => [...new Set(readBalanceSheet(filePath).map((row) => row[0]))].sort();
+
+  const current = regenerate({ key: 'merge-session' }, 'current').generatedFiles.balance;
+  assertEq(accountsIn(current.filePath), ['M101', 'M201'], 'Step5.当前批次汇总只含当前账号');
+  const all = regenerate({ key: 'merge-session' }, 'all').generatedFiles.balance;
+  assertTrue(all.filePath !== current.filePath, 'Step5.全部范围汇总文件与当前批次隔离');
+  assertEq(all.fileName, current.fileName, 'Step5.对外文件名不变');
+  assertEq(accountsIn(current.filePath), ['M101', 'M201'], 'Step5.回读当前批次汇总未被全部范围覆盖');
+  assertEq(accountsIn(all.filePath), ['M101', 'M102', 'M201', 'M202'], 'Step5.全部范围汇总含全部账号');
 }
 
 async function run() {
@@ -227,6 +321,8 @@ async function run() {
       ['M002', '2026-09-01', 2050, '通过发生额计算'],
       ['M002', '2026-09-03', 2040, '通过发生额计算']
     ], 'Step4.种子文件内容');
+
+    await verifyMergedScopeIsolation(dir);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

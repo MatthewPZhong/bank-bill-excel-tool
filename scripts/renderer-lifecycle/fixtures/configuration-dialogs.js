@@ -286,6 +286,16 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     assert.equal(await js('cfg.handle.isOpen()'), false);
     assert.equal(await js('cfg.applied'), 1);
   });
+  await test('首次补录上一账单日余额后转入断档：先弹统一断档确认框，可一键全部不补录', async () => {
+    await setup();
+    await js(`${GAP_PROMPT_JS.replace(/cfg\.handle=[\s\S]*$/, '')}
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog({merchantId:'M009',currency:'CNY',targetBillDate:'2026-09-01'},{billDate:'2026-08-31',endBalance:'10'})).handle;
+      cfg.next.seed={status:'manual-balance-required',manualBalancePromptReady:true,manualBalancePrompt:cfg.gapPrompt};
+      cfg.top().querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js(`({confirm:Boolean(cfg.top().querySelector('.balance-gap-card')),skipAll:Boolean(cfg.top().querySelector('[data-action="skip-all"]')),
+      count:document.getElementById('modalRoot').children.length})`), {confirm:true,skipAll:true,count:1});
+    assert.match(await js('cfg.top().textContent'), /共 2 处/);
+  });
 
   async function setupRowCount(nextN=1) {
     await setup();

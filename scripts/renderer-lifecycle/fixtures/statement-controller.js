@@ -104,6 +104,14 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     await js(`statementFixture.top().querySelector('.icon-close').click()`); await tick();
     await js(`document.getElementById('statusBox').click()`); await tick();
     assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.balance-gap-card'))`), true);
+    // 导出明细不处理余额：断档提示仍留在状态框，可再次打开。
+    await js(`statementFixture.top().querySelector('.icon-close').click()`); await tick();
+    await js(`statementFixture.controller.commands.exportDetail()`); await tick();
+    assert.equal(await js('statementFixture.text()'), '明细已导出');
+    assert.equal(await js(`statementFixture.feedback.at(-1).options.manualBalancePromptTitle`), '点击处理账单日期断档');
+    await js(`document.getElementById('statusBox').click()`); await tick();
+    assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.balance-gap-card'))`), true);
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 0);
   });
   await test('导出范围公共工厂准确传 current/all，错误报告成功后仍可再次导出', async () => {
     await setup(); await js(`statementFixture.controller.commands.importFile()`);

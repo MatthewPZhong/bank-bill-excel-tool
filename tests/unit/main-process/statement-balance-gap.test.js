@@ -625,3 +625,192 @@ test('主进程：断档确认结果与不补录告警文案', () => {
     '银行账号：M001，币种：USD，2026-09-01 之后下一个账单日是 2026-09-04，缺 2026-09-03'
   ]);
 });
+
+const FILENAME_MAPPING_TEMPLATE_ID = '__FILENAME_MAPPING__';
+
+function findMainNode(predicate) {
+  let found = null;
+  const visit = (node) => {
+    if (found || !node || typeof node !== 'object') return;
+    if (predicate(node)) {
+      found = node;
+      return;
+    }
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) value.forEach(visit);
+      else if (value && typeof value === 'object') visit(value);
+    }
+  };
+  visit(MAIN_AST);
+  return found;
+}
+
+// 取真实 file:save-balance-seed 的 execute，只替换它依赖的主进程函数。
+function loadSaveBalanceSeedExecute(deps) {
+  const call = findMainNode((node) => (
+    node.type === 'CallExpression'
+    && node.callee.name === 'businessIpcHandle'
+    && node.arguments[0]
+    && node.arguments[0].value === 'file:save-balance-seed'
+  ));
+  const executeNode = call.arguments[2].properties.find((prop) => prop.key.name === 'execute');
+  const names = Object.keys(deps);
+  return Function(
+    ...names,
+    `return ({ ${MAIN_SOURCE.slice(executeNode.start, executeNode.end)} }).execute;`
+  )(...names.map((name) => deps[name]));
+}
+
+function virtualExportAllDeps({ session, groups, generated }) {
+  const remembered = [];
+  const gapGeneration = createStatementGenerationHelpers({});
+  const deps = {
+    FILENAME_MAPPING_TEMPLATE_ID,
+    getCurrentStatementSession: () => session,
+    isFilenameMappingMode: (templateId) => templateId === FILENAME_MAPPING_TEMPLATE_ID,
+    getGeneratedStatementExport: () => null,
+    getStatementSessionEntries: () => groups.map((tid) => ({ matchedTemplateId: tid })),
+    getTemplateMappingConfig: (tid) => ({
+      template: { id: tid, name: `模板${tid}` },
+      exportMappings: [],
+      exportTargetFields: []
+    }),
+    appendActivityLogEntry: () => {},
+    buildStatementGenerationConfig: ({ template }) => ({ template }),
+    buildPreparedStatementBatchFromEntries: ({ config }) => ({ detailRows: [], tid: config.template.id }),
+    rememberLastFileImportContext: (context) => remembered.push(context),
+    createGenerationContext: (context) => context,
+    generateStatementFiles: ({ preparedBatch }) => generated[preparedBatch.tid],
+    parseRequiredBillDates: () => [],
+    extractManualBalancePromptWarning: gapGeneration.extractManualBalancePromptWarning,
+    statementGenerationHelpers: gapGeneration,
+    buildManualBalanceRequiredResult: (prompt) => ({ status: 'manual-balance-required', manualBalancePrompt: prompt }),
+    buildBalanceGapConfirmResult: (gaps) => ({ status: 'manual-balance-required', manualBalancePrompt: { reason: 'gap', gaps } })
+  };
+  return { deps, remembered };
+}
+
+function loadExportStatementByScope(deps) {
+  const names = Object.keys(deps);
+  return loadMainFunction('exportStatementByScope', names, names.map((name) => deps[name]));
+}
+
+test('主进程：按文件名映射导出全部余额遇到断档或首次补录时，记下按全部模板组重算的上下文', async () => {
+  const session = { key: 'session-1', templateId: FILENAME_MAPPING_TEMPLATE_ID, currentBatchId: 'batch-2' };
+  const gap = { key: '模板1|M001|USD|2026-09-01|2026-09-04', merchantId: 'M001', currency: 'USD' };
+  const cases = [
+    { label: '断档', warnings: [{ type: 'balance-gap-confirm', gaps: [gap] }] },
+    { label: '首次补录', warnings: [{ type: 'balance-seed-required', prompt: { merchantId: 'M001', currency: 'USD' } }] }
+  ];
+  for (const { label, warnings } of cases) {
+    // 模板 1 待处理，模板 2 正常；循环最后记下的是模板 2 的单模板上下文。
+    const { deps, remembered } = virtualExportAllDeps({
+      session,
+      groups: [1, 2],
+      generated: {
+        1: { balance: null, warnings },
+        2: { balance: { filePath: '/tmp/balance-2.xlsx' }, warnings: [] }
+      }
+    });
+    const result = await loadExportStatementByScope(deps)('balance', 'all');
+    assert.equal(result.status, 'manual-balance-required', label);
+    const finalContext = remembered[remembered.length - 1];
+    assert.equal(finalContext.templateId, FILENAME_MAPPING_TEMPLATE_ID, label);
+    assert.equal(finalContext.scope, 'all', label);
+    assert.equal(finalContext.statementSessionKey, 'session-1', label);
+  }
+});
+
+test('主进程：按文件名映射全部范围补录或不补录后，按全部模板组重算并只更新全部余额缓存', async () => {
+  const gap = { key: '模板1|M001|USD|2026-09-01|2026-09-04', merchantId: 'M001', currency: 'USD' };
+  const session = { key: 'session-1', templateId: FILENAME_MAPPING_TEMPLATE_ID, currentBatchId: 'batch-2' };
+  const merged = { filePath: '/tmp/2-BALANCE.xlsx' };
+  for (const scope of ['all', 'current']) {
+    const calls = { regenerate: [], cacheAll: [] };
+    const lastGeneratedExports = { detail: { filePath: '/tmp/detail.xlsx' }, balance: { filePath: '/tmp/current-balance.xlsx' } };
+    const execute = loadSaveBalanceSeedExecute({
+      FILENAME_MAPPING_TEMPLATE_ID,
+      FileValidationError,
+      isFilenameMappingMode: (templateId) => templateId === FILENAME_MAPPING_TEMPLATE_ID,
+      rememberAcknowledgedBalanceGaps: () => true,
+      appendActivityLogEntry: () => {},
+      formatBalanceGapLine: () => '',
+      regenerateVirtualTemplateBalanceFromSession: (target, regenerateScope) => {
+        calls.regenerate.push([target, regenerateScope]);
+        return { needsSeed: false, generatedFiles: { detail: null, balance: merged, warnings: [] } };
+      },
+      lastGeneratedExports,
+      cacheAllStatementExport: (kind, file) => calls.cacheAll.push([kind, file]),
+      buildImportResultFromGeneratedFiles: ({ generatedFiles }) => ({ status: 'success', balance: generatedFiles.balance })
+    });
+    const result = await execute(null, {
+      plan: null,
+      skipBalanceGapKeys: [gap.key],
+      skippedBalanceGaps: [gap],
+      pendingPrompt: { reason: 'gap', templateName: '模板1', gaps: [gap] },
+      session,
+      importContext: { templateId: FILENAME_MAPPING_TEMPLATE_ID, scope, template: { name: '模板2' } }
+    }, { fileEvidence: { filePlan: { inputs: [{ filePath: '/tmp/a.xlsx' }] } } });
+
+    assert.equal(result.status, 'success', scope);
+    assert.deepEqual(calls.regenerate, [[session, scope]], scope);
+    if (scope === 'all') {
+      assert.deepEqual(calls.cacheAll, [['balance', merged]]);
+      assert.equal(lastGeneratedExports.balance.filePath, '/tmp/current-balance.xlsx');
+    } else {
+      assert.deepEqual(calls.cacheAll, []);
+      assert.equal(lastGeneratedExports.balance, merged);
+    }
+  }
+});
+
+function loadOutputPathHelpers(storageRoot, today) {
+  const sanitizeFileName = loadMainFunction('sanitizeFileName');
+  const buildOutputFilePath = loadMainFunction(
+    'buildOutputFilePath',
+    ['getToday', 'path', 'ensureStorageRoot', 'sanitizeFileName'],
+    [() => today, path, () => storageRoot, sanitizeFileName]
+  );
+  const mergeGeneratedXlsxFiles = loadMainFunction(
+    'mergeGeneratedXlsxFiles',
+    ['require', 'fs', 'path', 'applyWatermark'],
+    [require, fs, path, () => {}]
+  );
+  return {
+    buildOutputFilePath,
+    mergeGeneratedXlsxFiles,
+    scopedMergedOutputFileName: loadMainFunction('scopedMergedOutputFileName')
+  };
+}
+
+test('主进程：按文件名映射导出全部的汇总文件与当前批次汇总文件路径隔离，对外文件名不变', async (t) => {
+  const root = createTempRoot(t);
+  const { buildOutputFilePath, scopedMergedOutputFileName } = loadOutputPathHelpers(root, '2026-10-28');
+  const session = { key: 'session-1', templateId: FILENAME_MAPPING_TEMPLATE_ID, currentBatchId: 'batch-2' };
+  const merged = [];
+  const { deps } = virtualExportAllDeps({
+    session,
+    groups: [1, 2],
+    generated: {
+      1: { balance: { filePath: '/tmp/group-1__all.xlsx' }, warnings: [] },
+      2: { balance: { filePath: '/tmp/group-2__all.xlsx' }, warnings: [] }
+    }
+  });
+  const result = await loadExportStatementByScope({
+    ...deps,
+    parseRequiredBillDates: () => ['2026-09-01', '2026-09-02'],
+    buildDateRangeLabel,
+    getToday: () => '2026-10-28',
+    path,
+    buildOutputFilePath,
+    scopedMergedOutputFileName,
+    mergeGeneratedXlsxFiles: (paths, mergedPath) => merged.push(mergedPath),
+    exportGeneratedFile: async (generatedFile) => ({ status: 'success', generatedFile })
+  })('balance', 'all');
+
+  const currentBatchPath = buildOutputFilePath({ kind: 'balance', outputFileName: '2-BALANCE-2026-09-01~2026-09-02.xlsx' }).outputFilePath;
+  assert.equal(result.status, 'success');
+  assert.equal(result.generatedFile.fileName, '2-BALANCE-2026-09-01~2026-09-02.xlsx');
+  assert.deepEqual(merged, [result.generatedFile.filePath]);
+  assert.notEqual(result.generatedFile.filePath, currentBatchPath);
+});

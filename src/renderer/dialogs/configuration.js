@@ -529,11 +529,12 @@
 
         if (result.manualBalancePromptReady && result.manualBalancePrompt) {
           if (!handle?.isOpen()) return;
-          // 已在补录流程中：下一处断档直接进补录弹窗，不再重复确认。
+          // 已在断档补录流程中：下一处断档直接进补录弹窗，不再重复确认；
+          // 从首次补录转入断档时仍先弹统一确认框。
           replaceModal(handle, () => createManualBalanceSeedDialog(
             result.manualBalancePrompt,
             {},
-            { index: queueIndex + 1, total: queueTotal, gapConfirmed: true }
+            { index: queueIndex + 1, total: queueTotal, gapConfirmed: isGapPrompt }
           ));
           return;
         }

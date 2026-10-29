@@ -9951,6 +9951,12 @@ function mergeGeneratedXlsxFiles(filePaths, mergedOutputPath) {
   return mergedOutputPath;
 }
 
+// 全部范围与当前批次的汇总文件可能同名（模板数、日期范围相同）；内部文件按范围加后缀隔离，
+// 避免覆盖当前批次已缓存的文件。对外文件名不变，与 buildStatementOutputFilePath 的 internalSuffix 同口径。
+function scopedMergedOutputFileName(fileName, scope) {
+  return scope === 'all' ? fileName.replace(/\.xlsx$/i, '__all.xlsx') : fileName;
+}
+
 // v1.5.2：虚拟 ID 下从 session 重新生成合并的余额文件（补录 seed 后调用）
 function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
   const allEntries = getStatementSessionEntries(session, scope);
@@ -10017,7 +10023,10 @@ function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
   if (balancePaths.length > 1) {
     const dateRange = buildDateRangeLabel(billDates);
     const mergedFileName = `${groupMap.size}-BALANCE-${dateRange || getToday()}.xlsx`;
-    const { outputFilePath: mergedPath } = buildOutputFilePath({ kind: 'balance', outputFileName: mergedFileName });
+    const { outputFilePath: mergedPath } = buildOutputFilePath({
+      kind: 'balance',
+      outputFileName: scopedMergedOutputFileName(mergedFileName, scope)
+    });
     mergeGeneratedXlsxFiles(balancePaths, mergedPath);
     mergedBalance = { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
   } else if (balancePaths.length === 1) {
@@ -10728,6 +10737,7 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
       const perGroupPaths = []; // [{detail, balance, warnings}]
       const exportBillDates = [];
       const skippedGroupNames = [];
+      let lastGroupTemplateConfig = null;
       for (const [tid, groupEntries] of groupMap) {
         const templateConfig = getTemplateMappingConfig(tid);
         if (!templateConfig) {
@@ -10738,6 +10748,7 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
           skippedGroupNames.push(`模板ID=${tid}（${groupEntries.length}个文件）`);
           continue;
         }
+        lastGroupTemplateConfig = templateConfig;
 
         const groupGenConfig = buildStatementGenerationConfig({
           template: templateConfig.template,
@@ -10789,6 +10800,19 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
       if (kind === 'balance') {
         const allGroupWarnings = perGroupPaths.flatMap((g) => g.warnings || []);
         const manualBalanceWarning = extractManualBalancePromptWarning(allGroupWarnings);
+        const balanceGaps = statementGenerationHelpers.extractBalanceGapConfirmGaps(allGroupWarnings);
+        if ((manualBalanceWarning || balanceGaps.length) && lastGroupTemplateConfig) {
+          // 循环里逐组记下的是单模板上下文；补录或不补录后须按全部模板组重算，否则只剩最后一组。
+          rememberLastFileImportContext(createGenerationContext({
+            templateId: FILENAME_MAPPING_TEMPLATE_ID,
+            template: lastGroupTemplateConfig.template,
+            mappings: lastGroupTemplateConfig.exportMappings,
+            orderedTargetFields: lastGroupTemplateConfig.exportTargetFields,
+            scope: 'all',
+            statementSessionKey: session.key,
+            currentBatchId: session.currentBatchId
+          }));
+        }
         if (manualBalanceWarning) {
           return buildManualBalanceRequiredResult(manualBalanceWarning.prompt, {
             warnings: allGroupWarnings,
@@ -10797,7 +10821,6 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
             balanceRequested: true
           });
         }
-        const balanceGaps = statementGenerationHelpers.extractBalanceGapConfirmGaps(allGroupWarnings);
         if (balanceGaps.length) {
           return buildBalanceGapConfirmResult(balanceGaps, { balance: null, detail: null });
         }
@@ -10809,7 +10832,10 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
         const exportDateRange = buildDateRangeLabel(exportBillDates);
         const outputTag = kind === 'detail' ? 'COMMON' : 'BALANCE';
         const mergedFileName = `${groupMap.size}-${outputTag}-${exportDateRange || getToday()}.xlsx`;
-        const { outputFilePath: mergedPath } = buildOutputFilePath({ kind, outputFileName: mergedFileName });
+        const { outputFilePath: mergedPath } = buildOutputFilePath({
+          kind,
+          outputFileName: scopedMergedOutputFileName(mergedFileName, 'all')
+        });
         mergeGeneratedXlsxFiles(targetPaths, mergedPath);
         generatedFile = { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
       } else if (targetPaths.length === 1) {
@@ -13324,7 +13350,11 @@ function registerFileHandlers() {
               : buildManualBalanceRequiredResult(regenResult.prompt, pendingFiles);
           }
           const generatedFiles = regenResult.generatedFiles;
-          lastGeneratedExports.balance = generatedFiles.balance;
+          if (importContext.scope === 'all') {
+            cacheAllStatementExport('balance', generatedFiles.balance);
+          } else {
+            lastGeneratedExports.balance = generatedFiles.balance;
+          }
           return buildImportResultFromGeneratedFiles({
             generatedFiles: { ...generatedFiles, detail: lastGeneratedExports.detail },
             templateId: FILENAME_MAPPING_TEMPLATE_ID,

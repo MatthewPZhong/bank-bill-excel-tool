@@ -259,8 +259,12 @@ async function handleOpenAccountMappings() {
       if(kind==='monthly'&&['MONTHLY_BALANCE_NO_PENDING','MONTHLY_BALANCE_FILE_MISSING'].includes(result.errorCode)) {
         state.monthlyBalanceReady=false;state.monthlyBalancePreview=null;
       }
+      // 导出明细不处理余额：尚未处理的补录或断档提示保留在状态框，否则只能重新导入才能继续。
+      const keepBalancePrompt=kind==='detail'&&!result.errorReportReady&&state.manualBalancePromptReady&&state.manualBalancePrompt;
       setStatus(result.message || (kind==='monthly'?(result.status==='success'?'月度余额账单导出成功':'月度余额账单导出失败'):''),result.status==='success'?'success':'error',{
-        errorReportReady:kind==='error'&&result.status==='success'?true:Boolean(result.errorReportReady)
+        errorReportReady:kind==='error'&&result.status==='success'?true:Boolean(result.errorReportReady),
+        manualBalancePromptReady:Boolean(keepBalancePrompt),
+        manualBalancePrompt:keepBalancePrompt?state.manualBalancePrompt:null
       });
     }
     function acceptBackgroundOutcome({ kind, result }) {
