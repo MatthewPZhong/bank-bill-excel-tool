@@ -814,3 +814,75 @@ test('主进程：按文件名映射导出全部的汇总文件与当前批次�
   assert.deepEqual(merged, [result.generatedFile.filePath]);
   assert.notEqual(result.generatedFile.filePath, currentBatchPath);
 });
+
+function mappedSourceEntry(root, fileName, rows) {
+  const filePath = writeSourceWorkbook(root, fileName, [['Date', 'Account', 'Curr', 'Credit', 'Debit'], ...rows]);
+  const detailRows = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: HEADER,
+    mappingByField: {
+      BillDate: 'Date',
+      MerchantId: 'Account',
+      Currency: 'Curr',
+      'Credit Amount': 'Credit',
+      'Debit Amount': 'Debit'
+    }
+  });
+  return { filePath, detailRows, matchedTemplateId: 1 };
+}
+
+function balanceMerchantIds(filePath) {
+  const workbook = XLSX.readFile(filePath, { raw: true });
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, raw: true });
+  const index = rows[0].indexOf('银行账号');
+  return [...new Set(rows.slice(1).map((row) => row[index]))].sort();
+}
+
+test('主进程：按文件名映射单模板组补录或不补录后重算，当前批次余额不被“导出全部”的同名文件覆盖', (t) => {
+  const root = createTempRoot(t);
+  const storageRoot = path.join(root, 'storage');
+  const generation = createGenerationSeam(storageRoot);
+  for (const merchantId of ['M001', 'M002']) {
+    upsertBalanceSeedRecord(storageRoot, {
+      templateName: TEMPLATE_NAME, merchantId, currency: 'USD',
+      billDate: '2026-08-31', endBalance: 1000, generationMethod: '人工录入'
+    });
+  }
+  // 历史批次只有 M001，当前批次只有 M002，同一模板、同一日期范围。
+  const history = mappedSourceEntry(root, 'history.xlsx', [['2026-09-01', 'M001', 'USD', '100', ''], ['2026-09-02', 'M001', 'USD', '5', '']]);
+  const current = mappedSourceEntry(root, 'current.xlsx', [['2026-09-01', 'M002', 'USD', '100', ''], ['2026-09-02', 'M002', 'USD', '5', '']]);
+  const regenerate = loadMainFunction(
+    'regenerateVirtualTemplateBalanceFromSession',
+    ['getStatementSessionEntries', 'getTemplateMappingConfig', 'appendActivityLogEntry', 'buildStatementGenerationConfig',
+      'buildPreparedStatementBatchFromEntries', 'generateStatementFiles', 'parseRequiredBillDates',
+      'extractManualBalancePromptWarning', 'statementGenerationHelpers', 'path'],
+    [
+      (_session, scope) => (scope === 'all' ? [history, current] : [current]),
+      () => ({ template: { name: TEMPLATE_NAME }, exportMappings: [], exportTargetFields: [] }),
+      () => {},
+      ({ template }) => ({
+        template,
+        mappingByTargetField: { MerchantId: 'Account' },
+        balanceRequested: true,
+        balanceMode: 'calculated'
+      }),
+      generation.buildPreparedStatementBatchFromEntries,
+      generation.generateStatementFiles,
+      parseRequiredBillDates,
+      generation.extractManualBalancePromptWarning,
+      generation,
+      path
+    ]
+  );
+
+  const currentResult = regenerate({ key: 'session-1' }, 'current');
+  assert.equal(currentResult.needsSeed, false);
+  const currentPath = currentResult.generatedFiles.balance.filePath;
+  assert.deepEqual(balanceMerchantIds(currentPath), ['M002']);
+
+  const allResult = regenerate({ key: 'session-1' }, 'all');
+  assert.equal(allResult.needsSeed, false);
+  assert.notEqual(allResult.generatedFiles.balance.filePath, currentPath);
+  assert.deepEqual(balanceMerchantIds(allResult.generatedFiles.balance.filePath), ['M001', 'M002']);
+  assert.deepEqual(balanceMerchantIds(currentPath), ['M002']);
+});

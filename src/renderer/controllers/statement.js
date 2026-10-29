@@ -250,7 +250,12 @@ async function handleOpenAccountMappings() {
         if(result.manualBalancePrompt?.reason==='gap') openModal(()=>createManualBalanceSeedDialog(result.manualBalancePrompt));
         return;
       }
-      if(result.status==='select-export-scope') {openModal(()=>createExportScopeDialog(kind==='detail'?'detail':'balance'));return;}
+      if(result.status==='select-export-scope') {
+        // 选完范围后的导出结果与直接导出同样处理，未处理的补录或断档入口不因导出明细丢失。
+        const version=generation;
+        openModal(()=>createExportScopeDialog(kind==='detail'?'detail':'balance',{onResult:scoped=>{if(live(version))present(kind,scoped);}}));
+        return;
+      }
       if(kind==='balance'&&(result.manualBalancePromptReady||result.status==='manual-balance-required')) {
         applyManualBalancePromptStatus(result);
         if(result.manualBalancePrompt?.reason==='gap') openModal(()=>createManualBalanceSeedDialog(result.manualBalancePrompt));

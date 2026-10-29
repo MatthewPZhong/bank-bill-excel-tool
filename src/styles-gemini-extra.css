@@ -1813,13 +1813,17 @@ td .muted { color: var(--muted); }
 }
 
 /* 账单日期断档确认（发生额计算余额） */
+/* 窗口较矮或放大时正文整体滚动，操作按钮始终可见 */
 .balance-gap-body {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
   padding: 16px 28px 12px;
   display: flex; flex-direction: column; gap: 12px;
   font-size: 13px; color: var(--text); line-height: 1.6;
 }
+.balance-gap-card .dialog-actions { flex: 0 0 auto; }
 .balance-gap-body p { margin: 0; }
 .balance-gap-list {
+  flex-shrink: 0;
   margin: 0; padding: 10px 14px;
   list-style: none;
   max-height: 220px; overflow-y: auto;

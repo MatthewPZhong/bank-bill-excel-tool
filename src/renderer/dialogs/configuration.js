@@ -52,7 +52,8 @@
     }
 
 
-    function createExportScopeDialog(kind) {
+    // onResult：调用方接管导出结果（账单页按直接导出的同一口径处理）；未提供时由本弹窗反馈。
+    function createExportScopeDialog(kind, { onResult } = {}) {
       const { setStatus, applyStatementResult, applyManualBalancePromptStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
       const overlay = createOverlay();
       const dialog = document.createElement('div');
@@ -92,6 +93,10 @@
         }
         closeModal(overlay, { status: 'submitted' });
         if (result.status === 'cancelled') {
+          return;
+        }
+        if (typeof onResult === 'function') {
+          onResult(result);
           return;
         }
 
