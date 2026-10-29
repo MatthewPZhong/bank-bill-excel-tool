@@ -34,6 +34,7 @@ Statement 没有既有的公开 `sessionStatus` IPC。本次保留本窗口已�
 - DOM 工厂兼容层用 WeakMap 保存 descriptor；`openModal` 使用延迟工厂，`onMount(handle, scope)` 启动资源，scope 收口监听/计时器及清理。`returnToModal` 只返回仍存活父层，closed 节点不可重挂。
 - `handle.closed` 恰好一次结算 submitted/cancelled；disposer 不保存、导出或确认业务。强制 dispose 只用于最终卸载/初始化失败，不能拿来绕过业务 busy。
 - [dialogs/app-settings.js](dialogs/app-settings.js) 拥有期限保存队列、批次读取代次及父设置会话。删除子层只持有原 batchId/token，期限保存未结算不得预检/确认，删除提交中祖先不可关闭。
+- [dialogs/release-notes.js](dialogs/release-notes.js) 是升级后首次启动的「更新说明」，由 `renderer.js` 以窄 API `settings.acknowledgeReleaseNotes` 装配。启动弹窗以 `owner: 'application'` 打开，已有弹窗时等 `modalRoot` 清空；只有用户主动关闭（知道了/×/Esc）才确认，被替换或卸载时下次启动再弹。设置「版本管理」经 `ui.openReleaseNotes` 叠层查看本版说明，不确认。
 - [dialogs/template-files.js](dialogs/template-files.js) 是设置「模板文件」页，由 `renderer.js` 以窄 API `templateResources` 装配，经 `ui.mountTemplateFiles` 挂入设置弹窗；自持列表/详情/变更记录读取代次，按 Main 返回的 capabilities 启用操作。导入与确认子层压在设置句柄上，提交中拒绝关闭，关闭时放弃未提交的暂存。
 - [dialogs/toolbox.js](dialogs/toolbox.js) 持有本次 splitReadToken/来源/草稿，选择层只拥有控件。单项/行数/多文件转换保留父会话；同步冻结 payload 并锁定提交后只发送一次原 splitExport。取消不导出、不添加 Main 清理 IPC。
 - [dialogs/configuration.js](dialogs/configuration.js) 拥有模板、映射、大账号、余额及迁移草稿。数据读取校验视图及请求代次；写入期间沿用对应 busy/确认语义；旧窗口不能接管新窗口。

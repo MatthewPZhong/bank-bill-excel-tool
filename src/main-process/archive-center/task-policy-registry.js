@@ -440,6 +440,7 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'app-update:set-enabled',
     'background:reset',
     'background:save',
+    'settings:acknowledge-release-notes',
     'settings:set-current-module',
     'settings:set-dark-mode-schedule',
     'settings:set-enabled-modules',

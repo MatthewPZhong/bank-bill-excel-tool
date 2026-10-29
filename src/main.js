@@ -104,6 +104,7 @@ const {
   createAppUpdaterService,
   detectDistribution
 } = require('./main-process/app-updater');
+const { createReleaseNotesState } = require('./main-process/release-notes/service');
 const {
   createBusinessOperationRegistry,
   INSTALL_BUSY_MESSAGE
@@ -786,6 +787,8 @@ let vccFinancialOpService = null;
 let appUpdaterService = null;
 let appUpdaterStartupScheduled = false;
 let appUpdateTransitionToken = null;
+// v3.2.14：升级后首次启动的「更新说明」，启动时判定一次，不跨重启。
+let releaseNotesState = null;
 let archiveCenterService = null;
 let bizOpV327Module = null;
 let publicationRecoveryCoordinator = null;
@@ -5251,8 +5254,14 @@ function registerAppHandlers() {
       // v2.1.4 T3：左上角模块切换按钮的启用列表（renderer 启动时一次拉，省一个 IPC round-trip）
       enabledModules: database.getEnabledModules(),
       // v1.5.3 R2（D15）：启动时自有账号迁移失败的错误文案；null 表示无失败
-      ownAccountsMigrationError: lastOwnAccountsMigrationError
+      ownAccountsMigrationError: lastOwnAccountsMigrationError,
+      // v3.2.14：current = 本版说明（设置中查看）；pending = 升级后待弹出的说明
+      releaseNotes: releaseNotesState ? releaseNotesState.getSnapshot() : { current: null, pending: null }
     };
+  });
+  ipcMain.handle('settings:acknowledge-release-notes', (_event, version) => {
+    if (!releaseNotesState) return { status: 'ignored' };
+    return releaseNotesState.acknowledge(version);
   });
   // v2.1.15 W4：弃用 General 风格。settings:set-ui-style 写链路已移除；
   //   getUiStyle 兜底后恒返回 'Clear'，renderer 启动 applyUiStyle 仍可用。
@@ -21578,6 +21587,8 @@ function assertTaskPolicyNotHeld(policy, prepared = null) {
 
 async function initializeApplication() {
     const dataPath = path.join(app.getPath('userData'), 'tool-data.sqlite');
+    // v3.2.14：主库此前不存在即全新安装，「更新说明」不弹出。
+    const databaseExisted = fs.existsSync(dataPath);
     // v3.1.10：VCC copy-on-write 迁移恢复必须先于任何数据库连接。
     // setting 真相仍在主库；journal 只负责 prepared/switching/switched 崩溃窗口收口。
     recoverVccStorageMigration({ journalPath: vccStorageMigrationJournalPath() });
@@ -21649,6 +21660,25 @@ async function initializeApplication() {
 
     // v2.0.0-beta.2 D16：风格-背景色联动（仅魔法值场景）
     ensureBackgroundColorMatchesStyle();
+
+    // v3.2.14：更新说明只影响提示，判定失败不阻断启动。
+    try {
+      releaseNotesState = createReleaseNotesState({
+        store: database,
+        currentVersion: app.getVersion(),
+        databaseExisted,
+        log: ({ level, message, details }) => appendActivityLogEntry({ level, source: 'main', domain: 'release-notes', message, details })
+      });
+    } catch (error) {
+      releaseNotesState = null;
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'release-notes',
+        message: '更新说明判定失败，本次不弹出',
+        details: [error && error.message ? error.message : String(error)]
+      });
+    }
 
     // v1.5.3 R2（D15）：一次性迁移 own-accounts/*.json → template_big_accounts
     // 失败不阻塞启动：异常由迁移模块内部捕获，返回 status='failed' 时记录到

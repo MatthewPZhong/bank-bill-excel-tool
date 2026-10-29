@@ -4958,6 +4958,7 @@
           "getDarkModeController",
           "mountAppearanceSettings",
           "mountTemplateFiles",
+          "openReleaseNotes",
           "refreshOpenAppUpdateDialog",
           "restartAndInstallAppUpdate"
         ]
@@ -5049,6 +5050,84 @@
         "ui": [
           "createConfirmDialog",
           "escapeHtml"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-dialog-release-notes",
+      "governance": "G3",
+      "owner": "feat/release-notes-on-upgrade",
+      "state": "active",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/dialogs/release-notes.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/dialogs/release-notes.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer/dialogs/release-notes.js",
+          "kind": "classic-global",
+          "importedNames": [
+            "__releaseNotesDialogs"
+          ]
+        }
+      ],
+      "activationEvidence": [
+        "scripts/test-renderer-lifecycle.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/dialogs/release-notes.js",
+          "exportsGlobal": [
+            "__releaseNotesDialogs"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer/dialogs/release-notes.js",
+        "name": "createReleaseNotesDialogs",
+        "parameters": [
+          "api",
+          "modalBridge",
+          "ui"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "settings.acknowledgeReleaseNotes"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "escapeHtml",
+          "getModalRoot"
         ]
       },
       "deprecatedEntrypoints": [],
@@ -8546,6 +8625,131 @@
       },
       "reason": "模板文件版本管理合入 release/v3.2.13：release 侧在 0f890fb2 之后的提交仍持有原 api 集合，按合并前末端 df0f0591 补登同一放宽；templateResources 命名空间仍只由模板文件工厂持有，设置弹窗不直接接触。",
       "designDoc": "changes/v3.2.13/feat/settings-template-versions/techdoc.md"
+    },
+    {
+      "sourceCommit": "e68089cc46c88c3eaed87b942fcd8badef00dff7",
+      "sourcePolicyBlob": "17a367240481f1ec4c245f8d43b80bf9a5bd7066",
+      "boundaryId": "renderer-dialog-app-settings",
+      "field": "allowedApiFields",
+      "from": {
+        "api": [
+          "appUpdate.checkNow",
+          "appUpdate.getStatus",
+          "appUpdate.onStatusChanged",
+          "appUpdate.restartAndInstall",
+          "appUpdate.setEnabled",
+          "archiveCenter.changeStorageLocation",
+          "archiveCenter.deleteBatch",
+          "archiveCenter.getBatch",
+          "archiveCenter.getSettings",
+          "archiveCenter.getStats",
+          "archiveCenter.listBatches",
+          "archiveCenter.listDeleteCleanupJobs",
+          "archiveCenter.onEntryMaintenanceCompleted",
+          "archiveCenter.onEntryMaintenanceFailed",
+          "archiveCenter.onEntryMaintenanceProgress",
+          "archiveCenter.onStorageMigrationProgress",
+          "archiveCenter.openFile",
+          "archiveCenter.prepareDeleteBatch",
+          "archiveCenter.retryBatch",
+          "archiveCenter.retryDeleteCleanupJob",
+          "archiveCenter.saveAs",
+          "archiveCenter.selectRetrySources",
+          "archiveCenter.setLocked",
+          "archiveCenter.setModuleRetentionDays",
+          "archiveCenter.setRetentionDays",
+          "archiveCenter.startEntryMaintenance"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "applyAppUpdateActionResult",
+          "applyAppUpdateStatus",
+          "createConfirmDialog",
+          "escapeHtml",
+          "getAppUpdateStatus",
+          "getDarkModeController",
+          "mountAppearanceSettings",
+          "mountTemplateFiles",
+          "refreshOpenAppUpdateDialog",
+          "restartAndInstallAppUpdate"
+        ]
+      },
+      "to": {
+        "api": [
+          "appUpdate.checkNow",
+          "appUpdate.getStatus",
+          "appUpdate.onStatusChanged",
+          "appUpdate.restartAndInstall",
+          "appUpdate.setEnabled",
+          "archiveCenter.changeStorageLocation",
+          "archiveCenter.deleteBatch",
+          "archiveCenter.getBatch",
+          "archiveCenter.getSettings",
+          "archiveCenter.getStats",
+          "archiveCenter.listBatches",
+          "archiveCenter.listDeleteCleanupJobs",
+          "archiveCenter.onEntryMaintenanceCompleted",
+          "archiveCenter.onEntryMaintenanceFailed",
+          "archiveCenter.onEntryMaintenanceProgress",
+          "archiveCenter.onStorageMigrationProgress",
+          "archiveCenter.openFile",
+          "archiveCenter.prepareDeleteBatch",
+          "archiveCenter.retryBatch",
+          "archiveCenter.retryDeleteCleanupJob",
+          "archiveCenter.saveAs",
+          "archiveCenter.selectRetrySources",
+          "archiveCenter.setLocked",
+          "archiveCenter.setModuleRetentionDays",
+          "archiveCenter.setRetentionDays",
+          "archiveCenter.startEntryMaintenance"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "applyAppUpdateActionResult",
+          "applyAppUpdateStatus",
+          "createConfirmDialog",
+          "escapeHtml",
+          "getAppUpdateStatus",
+          "getDarkModeController",
+          "mountAppearanceSettings",
+          "mountTemplateFiles",
+          "openReleaseNotes",
+          "refreshOpenAppUpdateDialog",
+          "restartAndInstallAppUpdate"
+        ]
+      },
+      "reason": "升级后更新说明（v3.2.14）：设置「版本管理」页新增「查看本版更新说明」入口，只经 ui.openReleaseNotes 交给更新说明工厂叠层打开；settings.acknowledgeReleaseNotes 仍只由更新说明工厂持有，设置弹窗不直接接触。",
+      "designDoc": "changes/v3.2.14/feat/release-notes-on-upgrade/spec.md"
     }
   ]
 }

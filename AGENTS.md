@@ -72,7 +72,7 @@
 - 正式发布标签使用附注标签 `v<版本号>`，仅在 `release/<版本号>` 的 PR 合入远端 `main` 且最终检查通过后，创建到当前 `origin/main` 的提交并推送。
 - 当前版本线的紧急修复不等周一窗口：从最新正式标签对应提交建 `release/<下一补丁版本>`，只纳入修复，按 weekly-release 清单 C–G 完成门禁、PR、标签与发布核验。进行中的 release 若已占用该版本号，顺延为再下一个版本号，并在其 B6 合入 main 上的修复后重验。
 - 分支保留：已被正式标签包含的 release 与模块分支，在该版本发布核验完成后可删除，删除远端分支须按批列出并获授权；未被任何正式标签包含的分支不删，先确认去向（并入后续版本、登记 `knowledge/backlog.md` 顺延或注明废弃）。`main` 与旧版本维护线（如 `v1.5.x`）长期保留。
-- 每次发布同步更新 `CHANGELOG.md`、`docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md`。
+- 每次发布同步更新 `CHANGELOG.md`、`docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md`，以及升级后弹窗用的 `src/main-process/release-notes/release-notes.json`。
 
 ## 模块现行说明
 - [应用恢复与共享发布恢复](src/main-process/application-recovery/README.md)：应用阶段、平台扫描事实、participant/owner 接口、授权与调用边界。

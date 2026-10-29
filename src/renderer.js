@@ -666,6 +666,14 @@ const templateFilesDialogs = window.__templateFilesDialogs.createTemplateFilesDi
   ui: { escapeHtml, createConfirmDialog }
 });
 
+// v3.2.14：升级后首次启动的「更新说明」，设置「版本管理」可再次查看本版说明。
+const releaseNotesDialogs = window.__releaseNotesDialogs.createReleaseNotesDialogs({
+  api: { settings: { acknowledgeReleaseNotes: window.desktopApi?.settings?.acknowledgeReleaseNotes } },
+  modalBridge,
+  ui: { escapeHtml, getModalRoot: () => elements.modalRoot }
+});
+shellDisposers.push(() => releaseNotesDialogs.dispose());
+
 const { createAppUpdateSettingsDialog, createArchiveCenterPreviewApi } = window.__appSettingsDialogs.createAppSettingsDialogs({
   api: { archiveCenter: window.desktopApi?.archiveCenter, appUpdate: window.desktopApi?.appUpdate },
   modalBridge,
@@ -675,7 +683,8 @@ const { createAppUpdateSettingsDialog, createArchiveCenterPreviewApi } = window.
     mountTemplateFiles: (pane, options) => templateFilesDialogs.mountTemplateFiles(pane, options),
     applyAppUpdateActionResult, applyAppUpdateStatus,
     getAppUpdateStatus: () => state.appUpdateStatus,
-    refreshOpenAppUpdateDialog, restartAndInstallAppUpdate }
+    refreshOpenAppUpdateDialog, restartAndInstallAppUpdate,
+    openReleaseNotes: (parentHandle) => releaseNotesDialogs.openCurrentReleaseNotes(parentHandle) }
 });
 
 const rendererPending = window.__pendingController.createPendingController({
@@ -1665,6 +1674,7 @@ async function applyFullInfo(info) {
     console.warn('initialize app update status failed:', error);
   });
   configurationServices.acceptBootstrap(info);
+  releaseNotesDialogs.accept(info.releaseNotes);
 
   // v2.1.0-beta.3 T4：从持久化恢复对账单ReconID修复模块「账单类别」
   // v2.1.4 T4：DB 持久化为空（'' / null）时默认 'gateway' 并写回（O2 拍板）
@@ -2280,6 +2290,10 @@ async function applyFullInfo(info) {
   }
 
   markRendererStartup(RENDERER_STARTUP_MARKS.initComplete);
+  // 预览截图运行不弹，避免遮挡目标画面。
+  if (!info.previewModal && window.desktopApi.previewCapture !== true) {
+    releaseNotesDialogs.showStartupReleaseNotes();
+  }
   reportRendererStartupMetrics();
   // v2.1.8 N1' (v0.7)：注册用户活动监听 → 10s 节流上报 main，作为 idle 30min 判定依据
   setupUserActivityReporter();

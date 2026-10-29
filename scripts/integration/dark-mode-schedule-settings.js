@@ -79,6 +79,7 @@ function bootRuntime(database, storageRoot, initialTime) {
     getAvailableCurrencyCodes: () => [],
     buildBackgroundPayload: () => database.getBackgroundConfig(),
     lastOwnAccountsMigrationError: null,
+    releaseNotesState: null,
     process: { env: {} },
     fs
   });
