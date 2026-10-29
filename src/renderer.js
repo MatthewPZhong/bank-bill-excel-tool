@@ -779,6 +779,7 @@ const {
   // v1.5.3 round 6：补全的 9 个 modal preview
   applyMonthlyBalanceExportDialogPreviewState,
   applyManualBalanceSeedDialogPreviewState,
+  applyBalanceGapConfirmDialogPreviewState,
   applyBalanceAddonManagerPreviewState,
   applyExportScopeDialogPreviewState,
   applyAmountSplitRulesDialogPreviewState,
@@ -858,6 +859,7 @@ function updateStatusBox(box, message, tone = 'info', options = {}) {
   const {
     errorReportReady = false,
     manualBalancePromptReady = false,
+    manualBalancePromptTitle = '',
     idleTitle = ''
   } = options;
 
@@ -874,7 +876,7 @@ function updateStatusBox(box, message, tone = 'info', options = {}) {
   box.dataset.manualBalancePromptReady = manualBalancePromptReady ? 'true' : 'false';
   box.classList.toggle('is-clickable', errorReportReady || manualBalancePromptReady);
   box.title = manualBalancePromptReady
-    ? '点击补录上一账单日余额'
+    ? (manualBalancePromptTitle || '点击补录上一账单日余额')
     : errorReportReady
       ? '点击导出报错文件'
       : idleTitle;
@@ -1975,6 +1977,10 @@ async function applyFullInfo(info) {
   } else if (info.previewModal === 'manual-balance-seed-dialog') {
     setTimeout(() => {
       applyManualBalanceSeedDialogPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'balance-gap-confirm-dialog') {
+    setTimeout(() => {
+      applyBalanceGapConfirmDialogPreviewState();
     }, 120);
   } else if (info.previewModal === 'balance-addon-manager') {
     setTimeout(() => {

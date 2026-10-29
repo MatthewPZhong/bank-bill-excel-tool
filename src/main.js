@@ -2127,12 +2127,50 @@ function createManualBalanceSeedFreshnessGuard({
         }
       }
       if (assertSourceFresh) assertSourceFresh();
+      // “不补录”断档不写种子，没有种子证据需要核对。
+      if (!plan) return;
       const currentRecords = readBalanceSeedRecords(plan.storageRoot, plan.bankName);
       if (balanceSeedRecordsEvidence(currentRecords) !== plan.recordsEvidence) {
         throw new Error('余额种子在确认期间已变化，请重新补录');
       }
     }
   };
+}
+
+// 断档“不补录”只记在内存中的账单会话上：不落盘，重启后失效。
+function rememberAcknowledgedBalanceGaps({ session, importContext, gapKeys }) {
+  const owner = session || importContext;
+  if (!owner) return false;
+  if (!(owner.acknowledgedBalanceGapKeys instanceof Set)) {
+    owner.acknowledgedBalanceGapKeys = new Set();
+  }
+  gapKeys.forEach((key) => owner.acknowledgedBalanceGapKeys.add(key));
+  return true;
+}
+
+function hasAcknowledgedBalanceGap(key) {
+  if (lastFileImportContext && lastFileImportContext.acknowledgedBalanceGapKeys instanceof Set
+      && lastFileImportContext.acknowledgedBalanceGapKeys.has(key)) {
+    return true;
+  }
+  for (const session of statementImportSessions.values()) {
+    if (session && session.acknowledgedBalanceGapKeys instanceof Set
+        && session.acknowledgedBalanceGapKeys.has(key)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function getAcknowledgedBalanceGapKeys() {
+  return { has: hasAcknowledgedBalanceGap };
+}
+
+function formatBalanceGapLine(gap) {
+  const missingRange = gap.missingFrom === gap.missingTo
+    ? gap.missingFrom
+    : `${gap.missingFrom} ~ ${gap.missingTo}`;
+  return `银行账号：${gap.merchantId}，币种：${gap.currency || '(空)'}，${gap.anchorDate} 之后下一个账单日是 ${gap.targetBillDate}，缺 ${missingRange}`;
 }
 
 function clearPendingBigAccountSelection(contextId = '') {
@@ -2315,6 +2353,55 @@ function buildManualBalanceRequiredResult(prompt, generatedFiles) {
     errorReportReady: false,
     manualBalancePromptReady: true,
     manualBalancePrompt: normalizedPrompt ? { ...normalizedPrompt } : null
+  };
+}
+
+// 断档复用补录通道：prompt 指向第一处断档，gaps 列出本次全部待确认断档。
+function buildBalanceGapConfirmResult(gaps, generatedFiles) {
+  clearLastErrorReport();
+  lastPendingBalanceSeedConfirmation = null;
+  const promptGaps = gaps.map((gap) => ({
+    key: gap.key,
+    templateName: gap.templateName,
+    bankName: gap.bankName,
+    merchantId: gap.merchantId,
+    currency: gap.currency,
+    anchorDate: gap.anchorDate,
+    targetBillDate: gap.targetBillDate,
+    missingFrom: gap.missingFrom,
+    missingTo: gap.missingTo,
+    suggestedSeedDate: gap.suggestedSeedDate
+  }));
+  const [first] = promptGaps;
+  const prompt = {
+    reason: 'gap',
+    templateName: first.templateName,
+    bankName: first.bankName,
+    merchantId: first.merchantId,
+    currency: first.currency,
+    targetBillDate: first.targetBillDate,
+    anchorDate: first.anchorDate,
+    missingFrom: first.missingFrom,
+    missingTo: first.missingTo,
+    suggestedSeedDate: first.suggestedSeedDate,
+    gapKey: first.key,
+    gaps: promptGaps
+  };
+  lastManualBalancePrompt = prompt;
+  appendActivityLogEntry({
+    level: 'info',
+    message: '账单日期不连续，等待确认是否补录期末余额',
+    details: [`模板名：${first.templateName}`, ...promptGaps.map(formatBalanceGapLine)]
+  });
+
+  return {
+    status: 'manual-balance-required',
+    message: `账单日期不连续（${promptGaps.length} 处），请确认是否补录断档前一日的期末余额`,
+    detailReady: Boolean(generatedFiles?.detail),
+    balanceReady: false,
+    errorReportReady: false,
+    manualBalancePromptReady: true,
+    manualBalancePrompt: { ...prompt, gaps: promptGaps.map((gap) => ({ ...gap })) }
   };
 }
 
@@ -3739,6 +3826,9 @@ function buildImportWarningDetailLines(warnings) {
   const currencyWarnings = warnings.filter((warning) => warning.type === 'currency-unmapped');
   const skippedDetailWarnings = warnings.filter((warning) => warning.type === 'detail-row-skipped');
   const balanceWarnings = warnings.filter((warning) => warning.type === 'balance-generate-failed');
+  const skippedBalanceGaps = warnings
+    .filter((warning) => warning.type === 'balance-gap-skipped')
+    .flatMap((warning) => (Array.isArray(warning.gaps) ? warning.gaps : []));
 
   if (skippedDetailWarnings.length) {
     detailLines.push('以下明细记录因 Credit Amount 和 Debit Amount 同时为 0 或空值，未写入导出的明细账单：');
@@ -3772,6 +3862,11 @@ function buildImportWarningDetailLines(warnings) {
     });
   }
 
+  if (skippedBalanceGaps.length) {
+    detailLines.push('以下账单日期不连续且未补录期末余额，断档后的余额按断档前的余额接着计算，可能不准确：');
+    skippedBalanceGaps.forEach((gap) => detailLines.push(formatBalanceGapLine(gap)));
+  }
+
   return detailLines;
 }
 
@@ -3780,6 +3875,9 @@ function buildImportWarningMessage({ warnings, balanceReady, balanceRequested })
   const skippedDetailCount = warnings.filter((warning) => warning.type === 'detail-row-skipped').length;
   const hasCurrencyWarning = warnings.some((warning) => warning.type === 'currency-unmapped');
   const hasBalanceWarning = warnings.some((warning) => warning.type === 'balance-generate-failed');
+  const skippedBalanceGapCount = warnings
+    .filter((warning) => warning.type === 'balance-gap-skipped')
+    .reduce((sum, warning) => sum + (Array.isArray(warning.gaps) ? warning.gaps.length : 0), 0);
   const exportParts = ['明细账单可导出'];
 
   if (balanceReady) {
@@ -3798,6 +3896,10 @@ function buildImportWarningMessage({ warnings, balanceReady, balanceRequested })
 
   if (hasBalanceWarning) {
     warningParts.push('存在余额账单异常');
+  }
+
+  if (skippedBalanceGapCount > 0) {
+    warningParts.push(`${skippedBalanceGapCount}处账单日期不连续未补录，余额可能不准确`);
   }
 
   return warningParts.length
@@ -9827,6 +9929,8 @@ const statementGenerationHelpers = createStatementGenerationHelpers({
   buildImportWarningDetailLines,
   buildImportWarningMessage,
   buildManualBalanceRequiredResult,
+  buildBalanceGapConfirmResult,
+  getAcknowledgedBalanceGapKeys,
   buildDetailExportRows,
   buildMappedRowsForFile,
   buildStatementGenerationConfig,
@@ -9932,6 +10036,12 @@ function mergeGeneratedXlsxFiles(filePaths, mergedOutputPath) {
   return mergedOutputPath;
 }
 
+// 全部范围与当前批次的汇总文件可能同名（模板数、日期范围相同）；内部文件按范围加后缀隔离，
+// 避免覆盖当前批次已缓存的文件。对外文件名不变，与 buildStatementOutputFilePath 的 internalSuffix 同口径。
+function scopedMergedOutputFileName(fileName, scope) {
+  return scope === 'all' ? fileName.replace(/\.xlsx$/i, '__all.xlsx') : fileName;
+}
+
 // v1.5.2：虚拟 ID 下从 session 重新生成合并的余额文件（补录 seed 后调用）
 function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
   const allEntries = getStatementSessionEntries(session, scope);
@@ -9987,13 +10097,21 @@ function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
   if (seedWarning) {
     return { needsSeed: true, prompt: seedWarning.prompt, warnings: allWarnings };
   }
+  // 任一模板组有待确认断档时不合并部分余额，统一询问。
+  const balanceGaps = statementGenerationHelpers.extractBalanceGapConfirmGaps(allWarnings);
+  if (balanceGaps.length) {
+    return { needsSeed: true, gaps: balanceGaps, warnings: allWarnings };
+  }
 
   // 合并
   let mergedBalance = null;
   if (balancePaths.length > 1) {
     const dateRange = buildDateRangeLabel(billDates);
     const mergedFileName = `${groupMap.size}-BALANCE-${dateRange || getToday()}.xlsx`;
-    const { outputFilePath: mergedPath } = buildOutputFilePath({ kind: 'balance', outputFileName: mergedFileName });
+    const { outputFilePath: mergedPath } = buildOutputFilePath({
+      kind: 'balance',
+      outputFileName: scopedMergedOutputFileName(mergedFileName, scope)
+    });
     mergeGeneratedXlsxFiles(balancePaths, mergedPath);
     mergedBalance = { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
   } else if (balancePaths.length === 1) {
@@ -10167,7 +10285,8 @@ function generateMultiTemplateGroupFiles({
     preparedBatch: null,
     message: mergedBalance ? '明细账单可导出，余额账单可导出' : '明细账单可导出',
     warnings: allWarnings,
-    balanceRequested: allBalancePaths.length > 0 || allWarnings.some((w) => w.type === 'balance-seed-required')
+    balanceRequested: allBalancePaths.length > 0
+      || allWarnings.some((w) => w.type === 'balance-seed-required' || w.type === 'balance-gap-confirm')
   };
 
   lastBatchId = appendStatementSessionImport({
@@ -10703,6 +10822,7 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
       const perGroupPaths = []; // [{detail, balance, warnings}]
       const exportBillDates = [];
       const skippedGroupNames = [];
+      let lastGroupTemplateConfig = null;
       for (const [tid, groupEntries] of groupMap) {
         const templateConfig = getTemplateMappingConfig(tid);
         if (!templateConfig) {
@@ -10713,6 +10833,7 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
           skippedGroupNames.push(`模板ID=${tid}（${groupEntries.length}个文件）`);
           continue;
         }
+        lastGroupTemplateConfig = templateConfig;
 
         const groupGenConfig = buildStatementGenerationConfig({
           template: templateConfig.template,
@@ -10764,6 +10885,19 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
       if (kind === 'balance') {
         const allGroupWarnings = perGroupPaths.flatMap((g) => g.warnings || []);
         const manualBalanceWarning = extractManualBalancePromptWarning(allGroupWarnings);
+        const balanceGaps = statementGenerationHelpers.extractBalanceGapConfirmGaps(allGroupWarnings);
+        if ((manualBalanceWarning || balanceGaps.length) && lastGroupTemplateConfig) {
+          // 循环里逐组记下的是单模板上下文；补录或不补录后须按全部模板组重算，否则只剩最后一组。
+          rememberLastFileImportContext(createGenerationContext({
+            templateId: FILENAME_MAPPING_TEMPLATE_ID,
+            template: lastGroupTemplateConfig.template,
+            mappings: lastGroupTemplateConfig.exportMappings,
+            orderedTargetFields: lastGroupTemplateConfig.exportTargetFields,
+            scope: 'all',
+            statementSessionKey: session.key,
+            currentBatchId: session.currentBatchId
+          }));
+        }
         if (manualBalanceWarning) {
           return buildManualBalanceRequiredResult(manualBalanceWarning.prompt, {
             warnings: allGroupWarnings,
@@ -10771,6 +10905,9 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
             detail: null,
             balanceRequested: true
           });
+        }
+        if (balanceGaps.length) {
+          return buildBalanceGapConfirmResult(balanceGaps, { balance: null, detail: null });
         }
       }
 
@@ -10780,7 +10917,10 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
         const exportDateRange = buildDateRangeLabel(exportBillDates);
         const outputTag = kind === 'detail' ? 'COMMON' : 'BALANCE';
         const mergedFileName = `${groupMap.size}-${outputTag}-${exportDateRange || getToday()}.xlsx`;
-        const { outputFilePath: mergedPath } = buildOutputFilePath({ kind, outputFileName: mergedFileName });
+        const { outputFilePath: mergedPath } = buildOutputFilePath({
+          kind,
+          outputFileName: scopedMergedOutputFileName(mergedFileName, 'all')
+        });
         mergeGeneratedXlsxFiles(targetPaths, mergedPath);
         generatedFile = { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
       } else if (targetPaths.length === 1) {
@@ -10861,6 +11001,10 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
 
         if (manualBalanceWarning) {
           return buildManualBalanceRequiredResult(manualBalanceWarning.prompt, generatedFiles);
+        }
+        const balanceGaps = statementGenerationHelpers.extractBalanceGapConfirmGaps(generatedFiles.warnings);
+        if (balanceGaps.length) {
+          return buildBalanceGapConfirmResult(balanceGaps, generatedFiles);
         }
 
         if (!generatedFiles.balance) {
@@ -13225,11 +13369,14 @@ function registerFileHandlers() {
       const inputFilePaths = taskContext.fileEvidence.filePlan.inputs
         .map((item) => item.filePath);
       const { plan, pendingPrompt, session } = prepared || {};
+      const skipBalanceGapKeys = Array.isArray(prepared && prepared.skipBalanceGapKeys)
+        ? prepared.skipBalanceGapKeys
+        : null;
       const importContext = prepared && prepared.importContext
         ? { ...prepared.importContext, inputFilePaths }
         : null;
-      if (!plan || !pendingPrompt || !importContext
-          || (plan.existingIndex >= 0 && prepared.confirmedOverwrite !== true)) {
+      if ((!plan && !skipBalanceGapKeys) || !pendingPrompt || !importContext
+          || (plan && plan.existingIndex >= 0 && prepared.confirmedOverwrite !== true)) {
         throw new TypeError('余额补录 execute 缺少已确认的准备计划');
       }
       if (prepared.confirmedOverwrite === true) {
@@ -13238,35 +13385,61 @@ function registerFileHandlers() {
       }
 
       try {
-        writeManualBalanceSeedPlan(plan);
-        const seedTemplateName = plan.record.templateName;
-        appendActivityLogEntry({
-          level: 'info',
-          message: '补录上一账单日余额成功',
-          details: [
-            `模板名：${seedTemplateName}`,
-            `银行账号：${plan.record.merchantId}`,
-            `币种：${plan.record.currency || '(空)'}`,
-            `账单日期：${plan.record.billDate}`,
-            `余额：${plan.record.endBalance}`,
-            `生成方式：${BALANCE_SEED_GENERATION_METHODS.manual}`
-          ]
-        });
+        if (skipBalanceGapKeys) {
+          // 登记在真实会话（或原 importContext）上，execute 内的 importContext 只是副本。
+          if (!rememberAcknowledgedBalanceGaps({
+            session,
+            importContext: prepared.importContext,
+            gapKeys: skipBalanceGapKeys
+          })) {
+            throw new FileValidationError('BALANCE_GAP_CONTEXT_MISSING', '当前账单会话已失效，请重新导入文件');
+          }
+          appendActivityLogEntry({
+            level: 'warn',
+            message: '账单日期不连续，选择不补录期末余额，余额可能不准确',
+            details: [
+              `模板名：${pendingPrompt.templateName || 'N/A'}`,
+              ...(prepared.skippedBalanceGaps || []).map(formatBalanceGapLine)
+            ]
+          });
+        } else {
+          writeManualBalanceSeedPlan(plan);
+          const seedTemplateName = plan.record.templateName;
+          appendActivityLogEntry({
+            level: 'info',
+            message: '补录上一账单日余额成功',
+            details: [
+              `模板名：${seedTemplateName}`,
+              `银行账号：${plan.record.merchantId}`,
+              `币种：${plan.record.currency || '(空)'}`,
+              `账单日期：${plan.record.billDate}`,
+              `余额：${plan.record.endBalance}`,
+              `生成方式：${BALANCE_SEED_GENERATION_METHODS.manual}`
+            ]
+          });
+        }
 
         // v1.5.2：虚拟 ID 下走多模板重新生成（避免用单组 importContext 产出不完整余额）
         if (isFilenameMappingMode(importContext.templateId) && session) {
           const regenResult = regenerateVirtualTemplateBalanceFromSession(session, importContext.scope || 'current');
           if (regenResult.needsSeed) {
-            // 还有其他 group 需要补录 → 返回下一个 prompt
-            return buildManualBalanceRequiredResult(regenResult.prompt, {
+            const pendingFiles = {
               warnings: regenResult.warnings,
               balance: null,
               detail: lastGeneratedExports.detail,
               balanceRequested: true
-            });
+            };
+            // 还有其他 group 需要补录或确认断档 → 返回下一个 prompt
+            return regenResult.gaps
+              ? buildBalanceGapConfirmResult(regenResult.gaps, pendingFiles)
+              : buildManualBalanceRequiredResult(regenResult.prompt, pendingFiles);
           }
           const generatedFiles = regenResult.generatedFiles;
-          lastGeneratedExports.balance = generatedFiles.balance;
+          if (importContext.scope === 'all') {
+            cacheAllStatementExport('balance', generatedFiles.balance);
+          } else {
+            lastGeneratedExports.balance = generatedFiles.balance;
+          }
           return buildImportResultFromGeneratedFiles({
             generatedFiles: { ...generatedFiles, detail: lastGeneratedExports.detail },
             templateId: FILENAME_MAPPING_TEMPLATE_ID,

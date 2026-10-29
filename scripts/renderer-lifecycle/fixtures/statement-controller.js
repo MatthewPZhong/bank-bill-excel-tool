@@ -92,6 +92,26 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     await js(`document.getElementById('statusBox').click()`); await tick();
     assert.match(await js(`statementFixture.top().textContent`), /FIXTURE/);
     assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 0);
+    await js(`statementFixture.host.dispose();`);
+    await setup();
+    // 账单日期断档：导入后直接弹确认；关闭后状态框可重新打开同一确认。
+    await js(`statementFixture.next.import={status:'manual-balance-required',message:'账单日期不连续（1 处），请确认是否补录断档前一日的期末余额',manualBalancePromptReady:true,
+      manualBalancePrompt:{reason:'gap',merchantId:'GAP',currency:'USD',anchorDate:'2026-08-01',targetBillDate:'2026-08-04',missingFrom:'2026-08-02',missingTo:'2026-08-03',suggestedSeedDate:'2026-08-03',gapKey:'G1',
+        gaps:[{key:'G1',merchantId:'GAP',currency:'USD',anchorDate:'2026-08-01',targetBillDate:'2026-08-04',missingFrom:'2026-08-02',missingTo:'2026-08-03'}]},detailReady:true,balanceReady:false};
+      statementFixture.controller.commands.importFile();`); await tick();
+    assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.balance-gap-card'))`), true);
+    assert.equal(await js(`statementFixture.feedback.at(-1).options.manualBalancePromptTitle`), '点击处理账单日期断档');
+    await js(`statementFixture.top().querySelector('.icon-close').click()`); await tick();
+    await js(`document.getElementById('statusBox').click()`); await tick();
+    assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.balance-gap-card'))`), true);
+    // 导出明细不处理余额：断档提示仍留在状态框，可再次打开。
+    await js(`statementFixture.top().querySelector('.icon-close').click()`); await tick();
+    await js(`statementFixture.controller.commands.exportDetail()`); await tick();
+    assert.equal(await js('statementFixture.text()'), '明细已导出');
+    assert.equal(await js(`statementFixture.feedback.at(-1).options.manualBalancePromptTitle`), '点击处理账单日期断档');
+    await js(`document.getElementById('statusBox').click()`); await tick();
+    assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.balance-gap-card'))`), true);
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 0);
   });
   await test('导出范围公共工厂准确传 current/all，错误报告成功后仍可再次导出', async () => {
     await setup(); await js(`statementFixture.controller.commands.importFile()`);

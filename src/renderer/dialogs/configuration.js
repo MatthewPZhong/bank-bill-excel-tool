@@ -97,6 +97,9 @@
 
         if (kind === 'balance' && (result.manualBalancePromptReady || result.status === 'manual-balance-required')) {
           applyManualBalancePromptStatus(result);
+          if (result.manualBalancePrompt?.reason === 'gap') {
+            openModal(() => createManualBalanceSeedDialog(result.manualBalancePrompt));
+          }
           return;
         }
 
@@ -295,7 +298,100 @@
       return overlay;
     }
 
+    function formatBalanceGapRange(gap) {
+      return gap.missingFrom === gap.missingTo ? gap.missingFrom : `${gap.missingFrom} ~ ${gap.missingTo}`;
+    }
+
+    // 发生额计算余额的日期断档：先确认补录或不补录，补录时转入补录弹窗。
+    function createBalanceGapConfirmDialog(prompt) {
+      const { applyStatementResult } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manual-balance-card balance-gap-card';
+      const gaps = Array.isArray(prompt?.gaps) ? prompt.gaps : [];
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">账单日期不连续</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="balance-gap-body">
+          <p class="balance-gap-intro">以下账户的账单日期有缺失，共 ${gaps.length} 处：</p>
+          <ul class="balance-gap-list">
+            ${gaps.map((gap) => `
+              <li class="balance-gap-item">
+                <span class="balance-gap-account">银行账号 ${escapeHtml(gap.merchantId)}（${escapeHtml(gap.currency || '(空)')}）</span>
+                <span class="balance-gap-detail">${escapeHtml(gap.anchorDate)} 之后下一个账单日是 ${escapeHtml(gap.targetBillDate)}，缺 ${escapeHtml(formatBalanceGapRange(gap))}</span>
+              </li>
+            `).join('')}
+          </ul>
+          <p class="balance-gap-question">是否补录断档前一日的期末余额？</p>
+          <p class="balance-gap-warning">不补录的话，断档后的余额会直接接着断档前的余额计算，可能是错的，之后导入的余额也会接着这个结果计算。</p>
+        </div>
+        <div class="dialog-actions right">
+          <button class="secondary-btn small" type="button" data-action="skip-all">不补录，继续生成</button>
+          <button class="primary-btn small" type="button" data-action="fill">补录期末余额</button>
+        </div>
+      `;
+
+      const skipBtn = dialog.querySelector('[data-action="skip-all"]');
+      const fillBtn = dialog.querySelector('[data-action="fill"]');
+      let saveInProgress = false;
+      registerModal(overlay, { canClose: () => !saveInProgress });
+
+      dialog.querySelector('.icon-close').addEventListener('click', () => closeModal(overlay));
+      fillBtn.addEventListener('click', () => {
+        const handle = modalBridge.host.getHandle(overlay);
+        if (saveInProgress || !handle?.isOpen()) return;
+        replaceModal(handle, () => createManualBalanceSeedDialog(prompt, {}, { gapConfirmed: true }));
+      });
+      skipBtn.addEventListener('click', async () => {
+        const handle = modalBridge.host.getHandle(overlay);
+        if (saveInProgress || !handle?.isOpen()) return;
+        saveInProgress = true;
+        skipBtn.disabled = true;
+        fillBtn.disabled = true;
+        let result = null;
+        try {
+          result = await api.files.saveBalanceSeed({ skipBalanceGapKeys: gaps.map((gap) => gap.key) });
+          if (!result || typeof result !== 'object') throw new Error('余额生成未返回有效结果');
+        } catch (error) {
+          if (handle.isOpen()) {
+            pushAlert(overlay, () => createAlertDialog(`余额生成失败：${escapeHtml(error?.message || String(error || '未知错误'))}`, {
+              onConfirm: null
+            }));
+          }
+          return;
+        } finally {
+          saveInProgress = false;
+          if (handle.isOpen()) {
+            skipBtn.disabled = false;
+            fillBtn.disabled = false;
+          }
+        }
+
+        applyStatementResult(result);
+        if (!handle.isOpen()) return;
+        if (result.manualBalancePromptReady && result.manualBalancePrompt) {
+          replaceModal(handle, () => createManualBalanceSeedDialog(result.manualBalancePrompt));
+          return;
+        }
+        if (['error', 'failed'].includes(result.status)) {
+          pushAlert(overlay, () => createAlertDialog(result.message || '余额生成失败'));
+          return;
+        }
+        closeModal(overlay, { status: 'submitted', value: result });
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     function createManualBalanceSeedDialog(prompt, draft = {}, queueState = null) {
+      const isGapPrompt = prompt?.reason === 'gap';
+      // 断档 prompt 未经确认时（导入后自动弹出、点击状态框）先显示确认框。
+      if (isGapPrompt && queueState?.gapConfirmed !== true) {
+        return createBalanceGapConfirmDialog(prompt);
+      }
       const { setStatus, applyStatementResult, applyManualBalancePromptStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
       const overlay = createOverlay();
       const dialog = document.createElement('div');
@@ -303,18 +399,23 @@
       const promptQueueIndex = Number.isInteger(prompt?.queueIndex) && prompt.queueIndex > 0 ? prompt.queueIndex : 0;
       const promptQueueTotal = Number.isInteger(prompt?.queueTotal) && prompt.queueTotal > 0 ? prompt.queueTotal : 0;
       const currentQueue = queueState || { index: promptQueueIndex || 1, total: promptQueueTotal || 0 };
-      const queueIndex = promptQueueIndex || currentQueue.index;
-      const queueTotal = promptQueueTotal || currentQueue.total;
+      const queueIndex = promptQueueIndex || currentQueue.index || 1;
+      const queueTotal = promptQueueTotal || currentQueue.total || 0;
       const merchantId = prompt?.merchantId || 'N/A';
       const currency = prompt?.currency || '(空)';
       const targetBillDate = prompt?.targetBillDate || 'N/A';
+      const remainingGapCount = isGapPrompt && Array.isArray(prompt.gaps) ? prompt.gaps.length : 0;
+      const progressText = isGapPrompt
+        ? `账单日期断档，还有 ${remainingGapCount} 处待处理`
+        : `第 ${queueIndex} 个账号${queueTotal ? `，共 ${queueTotal} 个` : ''}`;
+      const gapRange = isGapPrompt ? formatBalanceGapRange(prompt) : '';
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">补录上一账单日余额</div>
+          <div class="dialog-title">${isGapPrompt ? '补录断档前一日余额' : '补录上一账单日余额'}</div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="manual-balance-context">
-          <div class="manual-balance-progress">第 ${queueIndex} 个账号${queueTotal ? `，共 ${queueTotal} 个` : ''}</div>
+          <div class="manual-balance-progress">${progressText}</div>
           <div class="manual-balance-context-grid">
             <div class="manual-balance-context-row">
               <span class="manual-balance-context-label">银行账号</span>
@@ -325,29 +426,35 @@
               <span class="manual-balance-context-tag" title="${escapeHtml(currency)}">${escapeHtml(currency)}</span>
             </div>
             <div class="manual-balance-context-row">
-              <span class="manual-balance-context-label">当前账单日期</span>
+              <span class="manual-balance-context-label">${isGapPrompt ? '断档后首个账单日' : '当前账单日期'}</span>
               <span class="manual-balance-context-value" title="${escapeHtml(targetBillDate)}">${escapeHtml(targetBillDate)}</span>
             </div>
+            ${isGapPrompt ? `
+            <div class="manual-balance-context-row">
+              <span class="manual-balance-context-label">缺失日期</span>
+              <span class="manual-balance-context-value" title="${escapeHtml(gapRange)}">${escapeHtml(gapRange)}</span>
+            </div>` : ''}
           </div>
         </div>
         <div class="manual-balance-form">
           <label class="manual-balance-row">
-            <span class="manual-balance-label">请选择上一账单日日期</span>
+            <span class="manual-balance-label">${isGapPrompt ? '请选择补录日期' : '请选择上一账单日日期'}</span>
             <input class="mapping-text-input manual-balance-input manual-balance-date-input" type="text" value="" />
           </label>
           <label class="manual-balance-row">
-            <span class="manual-balance-label">请输入上一账单日余额</span>
+            <span class="manual-balance-label">${isGapPrompt ? '请输入该日期期末余额' : '请输入上一账单日余额'}</span>
             <input class="mapping-text-input manual-balance-input manual-balance-amount-input" type="text" spellcheck="false" value="" />
           </label>
         </div>
         <div class="dialog-actions right">
+          ${isGapPrompt ? '<button class="secondary-btn small" type="button" data-action="skip-gap">不补录此处</button>' : ''}
           <button class="primary-btn small" type="button" data-action="done">完成</button>
         </div>
       `;
 
       const dateInput = dialog.querySelector('.manual-balance-date-input');
       const amountInput = dialog.querySelector('.manual-balance-amount-input');
-      dateInput.value = draft.billDate || '';
+      dateInput.value = draft.billDate || (isGapPrompt ? prompt.suggestedSeedDate || '' : '');
       dateInput.type = dateInput.value ? 'date' : 'text';
       amountInput.value = draft.endBalance || '';
 
@@ -364,6 +471,7 @@
         }
       });
       const doneBtn = dialog.querySelector('[data-action="done"]');
+      const skipGapBtn = dialog.querySelector('[data-action="skip-gap"]');
       let saveInProgress = false;
       registerModal(overlay, { canClose: () => !saveInProgress });
 
@@ -385,6 +493,7 @@
         if (saveInProgress || !handle?.isOpen()) return null;
         saveInProgress = true;
         doneBtn.disabled = true;
+        if (skipGapBtn) skipGapBtn.disabled = true;
         try {
           const result = await api.files.saveBalanceSeed(request);
           if (!result || typeof result !== 'object') {
@@ -396,7 +505,10 @@
           return null;
         } finally {
           saveInProgress = false;
-          if (handle.isOpen()) doneBtn.disabled = false;
+          if (handle.isOpen()) {
+            doneBtn.disabled = false;
+            if (skipGapBtn) skipGapBtn.disabled = false;
+          }
         }
       }
 
@@ -417,10 +529,12 @@
 
         if (result.manualBalancePromptReady && result.manualBalancePrompt) {
           if (!handle?.isOpen()) return;
+          // 已在断档补录流程中：下一处断档直接进补录弹窗，不再重复确认；
+          // 从首次补录转入断档时仍先弹统一确认框。
           replaceModal(handle, () => createManualBalanceSeedDialog(
             result.manualBalancePrompt,
             {},
-            { index: queueIndex + 1, total: queueTotal }
+            { index: queueIndex + 1, total: queueTotal, gapConfirmed: isGapPrompt }
           ));
           return;
         }
@@ -433,6 +547,11 @@
       }
 
       dialog.querySelector('.icon-close').addEventListener('click', closeModal);
+      skipGapBtn?.addEventListener('click', async () => {
+        const result = await saveBalanceSeedWithFeedback({ skipBalanceGapKeys: [prompt.gapKey] });
+        if (!result) return;
+        handleSaveResult(result);
+      });
       doneBtn.addEventListener('click', async () => {
         const payload = {
           billDate: dateInput.value,
@@ -745,6 +864,8 @@
           if (!writeScope.isCurrent(handle)) return;
           if (result.status === 'error' && !result.manualBalancePromptReady) {
             replaceModal(handle, () => createAlertDialog(result.message));
+          } else if (result.manualBalancePrompt?.reason === 'gap') {
+            replaceModal(handle, () => createManualBalanceSeedDialog(result.manualBalancePrompt));
           } else closeModal(handle, { status: 'submitted', value: result });
         });
 
@@ -1935,6 +2056,9 @@
         selectionClosed = true;
         closeModal(overlay, { status: 'submitted', value: result });
         applyStatementResult(result);
+        if (result.manualBalancePrompt?.reason === 'gap') {
+          openModal(() => createManualBalanceSeedDialog(result.manualBalancePrompt));
+        }
         } catch (error) {
           setStatus(error?.message || '选择大账号失败，请重试', 'error');
         } finally {

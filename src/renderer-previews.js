@@ -371,6 +371,26 @@
       openModal(() => createManualBalanceSeedDialog(prompt, { billDate: '2026-03-31', endBalance: '12345.67' }));
     }
 
+    // 2b. 发生额计算余额的账单日期断档确认（v3.2.14）
+    function applyBalanceGapConfirmDialogPreviewState() {
+      setCurrentModule(MODULES.statementGenerator.id);
+      const gaps = [
+        {
+          key: 'HSBC-SG|6222000000000001|USD|2026-04-02|2026-04-05',
+          merchantId: '6222000000000001', currency: 'USD', anchorDate: '2026-04-02', targetBillDate: '2026-04-05',
+          missingFrom: '2026-04-03', missingTo: '2026-04-04', suggestedSeedDate: '2026-04-04'
+        },
+        {
+          key: 'HSBC-SG|9558800000000008|SGD|2026-04-07|2026-04-09',
+          merchantId: '9558800000000008', currency: 'SGD', anchorDate: '2026-04-07', targetBillDate: '2026-04-09',
+          missingFrom: '2026-04-08', missingTo: '2026-04-08', suggestedSeedDate: '2026-04-08'
+        }
+      ];
+      openModal(() => createManualBalanceSeedDialog({
+        reason: 'gap', templateName: 'HSBC-SG', ...gaps[0], gapKey: gaps[0].key, gaps
+      }));
+    }
+
     // 3. 余额管理（addon manager）对话框（v1.5.x，资金链路）
     function applyBalanceAddonManagerPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
@@ -1510,6 +1530,7 @@
       // v1.5.3 round 6：补全的 9 个 modal preview
       applyMonthlyBalanceExportDialogPreviewState,
       applyManualBalanceSeedDialogPreviewState,
+      applyBalanceGapConfirmDialogPreviewState,
       applyBalanceAddonManagerPreviewState,
       applyExportScopeDialogPreviewState,
       applyAmountSplitRulesDialogPreviewState,
