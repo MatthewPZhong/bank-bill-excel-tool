@@ -9,14 +9,14 @@
 | 正式基线 | `v3.2.13` → `e68089cc46c88c3eaed87b942fcd8badef00dff7` |
 | release 分支 | `release/v3.2.14`，从基线新建，仅在本地，未推送 |
 | 远端 main | `e68089cc46c88c3eaed87b942fcd8badef00dff7`，已包含在 release 历史 |
-| 合并方式 | 必须使用 merge commit：补登的 policyChanges 以 `0043b2be`、`9d4a554b`、`0aea4c26` 为来源，squash 或 rebase 后这些提交不在 main 历史中，架构检查会失败 |
+| 合并方式 | 必须使用 merge commit：补登的 policyChanges 以 `0043b2be`、`9d4a554b`、`0aea4c26`、`7e19fe8b` 为来源，squash 或 rebase 后这些提交不在 main 历史中，架构检查会失败 |
 
 ## 纳入范围
 
 | 分支 | 已合入来源 SHA | 合入提交 | 内容 |
 | --- | --- | --- | --- |
-| `feat/statement-balance-gap-prompt` | `0aea4c26` | `0043b2be`、`a12e77f1` | 发生额计算余额的账单日期断档提醒（`9d4a554b`），以及本轮 Codex 审查的 3 条修复（`0aea4c26`），见 [spec](feat/statement-balance-gap-prompt/spec.md) §8 T11–T13 |
-| `feat/release-notes-on-upgrade` | `8ea9bbb5` | `8c049d36` | 升级后首次启动弹出更新说明，见 [spec](feat/release-notes-on-upgrade/spec.md) |
+| `feat/statement-balance-gap-prompt` | `7e19fe8b` | `0043b2be`、`a12e77f1`、`dcbc3a52` | 发生额计算余额的账单日期断档提醒（`9d4a554b`），以及 Codex 第一轮的 3 条修复（`0aea4c26`，[spec](feat/statement-balance-gap-prompt/spec.md) §8 T11–T13）与第三轮的 1 条修复（`7e19fe8b`，T14） |
+| `feat/release-notes-on-upgrade` | `b06ff9c8` | `8c049d36`、`25b464fb` | 升级后首次启动弹出更新说明（`8ea9bbb5`），以及 Codex 第三轮的 1 条修复（`b06ff9c8`，[spec](feat/release-notes-on-upgrade/spec.md) §8 T6） |
 
 合并时的处理：
 
@@ -25,12 +25,14 @@
   - `renderer-dialog-app-settings.allowedApiFields`：以 `0043b2be` 为来源，补登更新说明的同一放宽（`ui` 新增 `openReleaseNotes`）。断档分支提交中的原值与 v3.2.13 相同，也由这一条覆盖。
   - `renderer-dialog-template-files.allowedApiFields`：以断档分支末端 `9d4a554b` 为来源，补登 v3.2.13 模板文件版本管理的同一放宽。
 - 审查修复在断档分支上提交为 `0aea4c26`，再以 `a12e77f1` 合入。新末端仍持有 v3.2.12 的 `boundaries.json`，不是 `0043b2be`、`9d4a554b` 的祖先，所以以 `0aea4c26` 为来源，再补登上述两个字段的同一放宽。这一条也覆盖断档分支的全部早先提交。
+- 第三轮审查修复在两个功能分支分别提交为 `7e19fe8b`、`b06ff9c8`，以 `dcbc3a52`、`25b464fb` 合入，无冲突。`7e19fe8b` 同样持有 v3.2.12 的 `boundaries.json`，按同一方式以它为来源补登两个字段（`cc35011f`），现行允许集合不变；`b06ff9c8` 持有的配置与现行一致，无需补登。
 
 ## 检查与证据边界
 
 - 两次合并后首次运行 `release-check`：lint 通过，架构检查报上述 5 条 `ARCH-POLICY-HISTORY` 后中止。
 - 补登后在提交内容上重跑 `release-check`，通过：架构检查 801/801 文件、历史 87 个提交；单测 9736/9740，4 项为既有条件跳过；集成测试 88/88 脚本。
 - 合入审查修复（`a12e77f1`）并补登后，在提交内容上重跑 `release-check`，通过：架构检查 801/801 文件、历史 90 个提交；单测 9737/9741，4 项为既有条件跳过；集成测试 88/88 脚本。
+- 合入第三轮审查修复（`25b464fb`）并补登（`cc35011f`）后，在提交内容上重跑 `release-check`，通过：架构检查 801/801 文件、历史 97 个提交；smoke 通过；单测 9740/9744，4 项为既有条件跳过；集成测试 88/88 脚本（`statement-balance-gap` 24/24）。
 - 真实应用 GUI 未实测：断档提醒见 B33、B34，更新说明只有 renderer-lifecycle 布局截图。
 
 ## 审查与处理
@@ -46,3 +48,15 @@
 处理：P1 按真实范围生成各模板组余额（T11），新增单测回读当前批次文件；P2 范围选择弹窗把结果交回账单页统一处理（T12），生命周期用例覆盖经范围选择导出明细后重开断档；P3 正文可收缩滚动（T13），生命周期在最小窗口 150% 缩放、12 处断档下用真实鼠标点击按钮。P1 属资金红线，修复后仍须人工复核余额导出范围。
 
 2026-10-29 Codex 第二轮只读审查 `main...release/v3.2.14`（`a00b4052`）：确认上一轮 3 条已从根因修复，未发现新的正确性缺陷；余额日期、币种、人工种子与导出范围链路，以及更新说明的版本区间、确认语义、全新安装判定、弹窗排队和 policyChanges 父链绑定均已核对。只读沙箱中有 5 项需要临时目录的测试未能运行，真实 GUI、Windows 与余额导出范围的人工复核仍待完成。
+
+2026-10-29 Codex 第三轮只读审查 `main...release/v3.2.14`（`7635d782`），要求不复述前两轮结论、换角度找遗漏，提出 2 条，均已对照代码核实。按用户要求在功能分支修复，每条都补了回归测试，并确认修复前失败、修复后通过：
+
+| 等级 | 位置 | 问题 |
+| --- | --- | --- |
+| P2 · 涉及余额输出，须人工复核 | `src/main.js` `generateMultiTemplateGroupFiles` | 按文件名映射一次导入多个模板、部分模板组需首次补录或确认断档时，仍把已算出的组合并成 `N-BALANCE-日期范围.xlsx` 写入导出目录，并缓存为当前余额。文件名按全部模板计数，内容缺少待处理的组，违反断档 spec §4.2 第 1 条。界面上余额导出是禁用的，但主进程导出当前余额时不检查待处理断档。`v3.2.13` 首次补录已经如此，断档提醒让触发更常见 |
+| P2 · 实际影响低 | `src/main-process/release-notes/service.js` | 只认纯 `X.Y.Z`，带构建元数据的正式版（如 `3.2.14+build.7`）既不弹窗，设置入口也显示暂无说明，与 `app-updater.js` 的稳定版判定不一致。仓库历史版本号都不带构建元数据，现行发版不会触发 |
+
+处理：
+- 断档分支 `7e19fe8b`（T14）：任一模板组还需补录或确认断档时，不合并、不缓存余额汇总；已算出的组照常写出各自的余额文件和计算种子。新增单测覆盖断档和缺首次种子两种情形。集成 `statement-balance-gap` 新增 Step 6：导入三套模板后确认不产出部分汇总，第三组不补录后重算，回读汇总含三组账号。
+- 更新说明分支 `b06ff9c8`（T6）：去掉构建元数据后再判定和查找说明，预发布号仍排除。新增单测 2 项。
+- 第 1 条属于余额输出，修复后仍须人工复核。
