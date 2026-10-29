@@ -111,6 +111,14 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     assert.equal(await js(`statementFixture.feedback.at(-1).options.manualBalancePromptTitle`), '点击处理账单日期断档');
     await js(`document.getElementById('statusBox').click()`); await tick();
     assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.balance-gap-card'))`), true);
+    // 多批次时导出明细先选范围：选完范围导出后同样保留断档入口。
+    await js(`statementFixture.top().querySelector('.icon-close').click()`); await tick();
+    await js(`statementFixture.next.detail={status:'select-export-scope'};statementFixture.controller.commands.exportDetail()`); await tick();
+    await js(`statementFixture.next.detail={status:'success',message:'当前批次明细已导出'};statementFixture.top().querySelector('[data-scope="current"]').click()`); await tick();
+    assert.equal(await js('statementFixture.text()'), '当前批次明细已导出');
+    assert.equal(await js(`statementFixture.feedback.at(-1).options.manualBalancePromptTitle`), '点击处理账单日期断档');
+    await js(`document.getElementById('statusBox').click()`); await tick();
+    assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.balance-gap-card'))`), true);
     assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 0);
   });
   await test('导出范围公共工厂准确传 current/all，错误报告成功后仍可再次导出', async () => {

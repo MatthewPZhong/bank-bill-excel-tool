@@ -1,10 +1,11 @@
 'use strict';
 
 // 真实配置工厂/宿主/桥接，API 仅用可控 Promise，不读写真实账户或配置。
-module.exports = async ({ js, load, reset, assert, test }) => {
+module.exports = async ({ js, load, reset, assert, test, layout }) => {
   const tick = () => js('new Promise(resolve=>setTimeout(resolve,5))');
-  async function setup() {
-    await reset();
+  // layoutOptions：加载生产样式的真实窗口，用于检查布局。
+  async function setup(layoutOptions = null) {
+    await reset(undefined, layoutOptions ? { layout: layoutOptions } : undefined);
     await load('src/renderer/dialogs/toolbox.js');
     await load('src/renderer/module-router.js');
     await load('src/renderer-dialogs.js');
@@ -295,6 +296,22 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     assert.deepEqual(await js(`({confirm:Boolean(cfg.top().querySelector('.balance-gap-card')),skipAll:Boolean(cfg.top().querySelector('[data-action="skip-all"]')),
       count:document.getElementById('modalRoot').children.length})`), {confirm:true,skipAll:true,count:1});
     assert.match(await js('cfg.top().textContent'), /共 2 处/);
+  });
+  await test('账单日期断档较多且最小窗口放大到 150% 时，正文滚动，两个操作按钮可见可点', async () => {
+    await setup({ zoom: 1.5 });
+    await js(`${GAP_PROMPT_JS.replace(/cfg\.handle=[\s\S]*$/, '')}
+      cfg.gapPrompt.gaps=Array.from({length:12},(_,i)=>({...cfg.gapPrompt.gaps[0],key:'K'+i,merchantId:'M'+String(i).padStart(3,'0')}));
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog(cfg.gapPrompt)).handle;void 0;`);
+    await layout.settle();
+    const geometry = await js(`(() => {
+      const card=cfg.top().querySelector('.balance-gap-card'), body=card.querySelector('.balance-gap-body'), rect=card.getBoundingClientRect();
+      return { fits: rect.bottom<=innerHeight, scrolls: body.scrollHeight>body.clientHeight,
+        buttons: [...card.querySelectorAll('.dialog-actions button')].map(button => {
+          const r=button.getBoundingClientRect(); return r.top>=rect.top && r.bottom<=rect.bottom; }) };
+    })()`);
+    assert.deepEqual(geometry, { fits: true, scrolls: true, buttons: [true, true] });
+    await layout.click('.balance-gap-card [data-action="skip-all"]');
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0].skipBalanceGapKeys.length)`), [12]);
   });
 
   async function setupRowCount(nextN=1) {

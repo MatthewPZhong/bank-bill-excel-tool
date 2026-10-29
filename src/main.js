@@ -10087,10 +10087,12 @@ function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
       config: groupGenConfig,
       fileEntries: groupEntries
     });
+    // 按本次重算的真实范围命名：只有一个模板组时这个文件直接作为该范围的余额，
+    // 固定按全部范围生成会与“导出全部”同名，当前批次的余额随后被全部批次覆盖。
     const groupGeneratedFiles = generateStatementFiles({
       config: groupGenConfig,
       preparedBatch: groupPreparedBatch,
-      scope: 'all',
+      scope,
       includeDetail: false,
       includeBalance: true
     });
