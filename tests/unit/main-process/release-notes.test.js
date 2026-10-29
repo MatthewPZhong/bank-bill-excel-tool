@@ -152,8 +152,15 @@ test.describe('resolveStartupReleaseNotes', () => {
     assert.deepEqual(resolve({ currentVersion: '3.2.17', acknowledgedVersion: '3.2.16' }), { pending: null, writeAcknowledged: '3.2.17' });
   });
 
+  test('带构建元数据的正式版：按对应正式版判定，记录写入不带元数据的版本', () => {
+    const { pending } = resolve({ currentVersion: '3.2.14+build.7' });
+    assert.equal(pending.toVersion, '3.2.14');
+    assert.deepEqual(versionsOf(pending.entries), ['3.2.14']);
+    assert.deepEqual(resolve({ currentVersion: '3.2.16+build.7', databaseExisted: false }), { pending: null, writeAcknowledged: '3.2.16' });
+  });
+
   test('开发版或预发布号：不弹，也不写记录', () => {
-    for (const currentVersion of ['3.2.17-beta.1', '', null]) {
+    for (const currentVersion of ['3.2.17-beta.1', '3.2.17-beta.1+build.3', '', null]) {
       assert.deepEqual(resolve({ currentVersion, databaseExisted: false }), { pending: null, writeAcknowledged: null });
     }
   });
@@ -219,6 +226,16 @@ test.describe('createReleaseNotesState', () => {
     assert.deepEqual(versionsOf(state.getSnapshot().pending.entries), ['3.2.16']);
     assert.equal(logs.length, 1);
     assert.equal(logs[0].level, 'warning');
+  });
+
+  test('带构建元数据的正式版：设置入口与启动弹窗都取对应正式版的说明，确认写入正式版', () => {
+    const store = createStore('3.2.15');
+    const state = createReleaseNotesState({ store, currentVersion: '3.2.16+build.7', databaseExisted: true, rawNotes: NOTES });
+    const snapshot = state.getSnapshot();
+    assert.equal(snapshot.current.version, '3.2.16');
+    assert.equal(snapshot.pending.toVersion, '3.2.16');
+    assert.deepEqual(state.acknowledge(snapshot.pending.toVersion), { status: 'ok', acknowledgedVersion: '3.2.16' });
+    assert.deepEqual(store.writes, ['3.2.16']);
   });
 
   test('本版没有条目时 current 为 null', () => {

@@ -18,6 +18,13 @@ function isStableVersion(value) {
   return typeof value === 'string' && STABLE_VERSION_PATTERN.test(value);
 }
 
+// 构建元数据（“+”之后）不影响版本先后，按对应正式版处理，与 app-updater 的稳定版判定同口径；预发布号仍不算正式版。
+function toStableVersion(value) {
+  if (typeof value !== 'string') return null;
+  const version = value.replace(/\+[0-9A-Za-z.-]+$/, '');
+  return isStableVersion(version) ? version : null;
+}
+
 function isValidDate(value) {
   const match = typeof value === 'string' ? value.match(DATE_PATTERN) : null;
   if (!match) return false;
@@ -82,13 +89,15 @@ function selectReleaseNotes({ entries, fromVersion, toVersion }) {
 }
 
 function findReleaseNotes(entries, version) {
-  return entries.find((entry) => entry.version === version) || null;
+  const stableVersion = toStableVersion(version);
+  return entries.find((entry) => entry.version === stableVersion) || null;
 }
 
 // 纯判定：返回本次启动待显示的说明（或 null）与启动时需写入的确认版本（或 null）。
-function resolveStartupReleaseNotes({ currentVersion, acknowledgedVersion, databaseExisted, entries }) {
+function resolveStartupReleaseNotes({ currentVersion: rawCurrentVersion, acknowledgedVersion, databaseExisted, entries }) {
   // 开发版、预发布号不参与，也不写记录，避免污染正式版判定。
-  if (!isStableVersion(currentVersion)) return { pending: null, writeAcknowledged: null };
+  const currentVersion = toStableVersion(rawCurrentVersion);
+  if (!currentVersion) return { pending: null, writeAcknowledged: null };
   const recorded = isStableVersion(acknowledgedVersion) ? acknowledgedVersion : null;
   if (!recorded && !databaseExisted) return { pending: null, writeAcknowledged: currentVersion };
   const baseline = recorded || LEGACY_BASELINE_VERSION;
