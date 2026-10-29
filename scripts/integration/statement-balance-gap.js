@@ -2,6 +2,7 @@
 //   覆盖：真实 xlsx 读取 → 生成层断档判定 → 补录一处（真实种子文件写入）→ 不补录另一处
 //         → 余额 xlsx 写出与回读 → 计算种子落盘
 //         → 按文件名映射多模板：全部范围重算余额不覆盖同名的当前批次汇总文件（主进程真实合并函数）
+//         → 按文件名映射多模板导入：一组断档时不出部分余额汇总，不补录后重算出含全部模板的汇总
 //   UI 弹窗与 IPC 由单测和 GUI 检查覆盖；本脚本验证金额与文件在整条链路上的结果。
 //
 // 用法：node scripts/integration/statement-balance-gap.js
@@ -227,6 +228,150 @@ async function verifyMergedScopeIsolation(dir) {
   assertEq(accountsIn(all.filePath), ['M101', 'M102', 'M201', 'M202'], 'Step5.全部范围汇总含全部账号');
 }
 
+// Step 6：按文件名映射三套模板一次导入，只有第三组断档；
+//         导入时不合并、不缓存只含两组的余额汇总，不补录后重算的汇总含三组账号。
+async function verifyMultiTemplateImportHoldsPartialBalance(dir) {
+  const storageRoot = path.join(dir, 'storage-import');
+  const outputDir = path.join(dir, 'exports-import');
+  fs.mkdirSync(outputDir, { recursive: true });
+  const today = '2026-10-29';
+  const groups = [
+    { tid: 1, templateName: '中行-上海', merchantId: 'M301', dates: ['2026-09-01', '2026-09-02'] },
+    { tid: 2, templateName: '工行-北京', merchantId: 'M302', dates: ['2026-09-01', '2026-09-02'] },
+    { tid: 3, templateName: '建行-深圳', merchantId: 'M303', dates: ['2026-09-01', '2026-09-04'] }
+  ];
+  const templates = Object.fromEntries(groups.map((group) => [group.tid, group.templateName]));
+  const fileEntries = groups.map((group) => {
+    upsertBalanceSeedRecord(storageRoot, {
+      templateName: group.templateName, merchantId: group.merchantId, currency: 'USD',
+      billDate: '2026-08-31', endBalance: 1000, generationMethod: '人工录入'
+    });
+    const sourcePath = path.join(dir, `import-${group.merchantId}.xlsx`);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ['Date', 'Account', 'Curr', 'Credit', 'Debit'],
+      ...group.dates.map((date) => [date, group.merchantId, 'USD', '10', ''])
+    ]), 'Sheet1');
+    XLSX.writeFile(workbook, sourcePath);
+    return {
+      matchedTemplateId: group.tid,
+      filePath: sourcePath,
+      detailRows: buildMappedRows({
+        inputFilePath: sourcePath,
+        orderedTargetFields: ORDERED_FIELDS,
+        mappingByField: {
+          BillDate: 'Date', MerchantId: 'Account', Currency: 'Curr',
+          'Credit Amount': 'Credit', 'Debit Amount': 'Debit'
+        }
+      })
+    };
+  });
+
+  const acknowledgedKeys = new Set();
+  const generation = createGeneration(storageRoot, outputDir, acknowledgedKeys);
+  const sanitizeFileName = loadMainFunction('sanitizeFileName');
+  const buildOutputFilePath = loadMainFunction('buildOutputFilePath', {
+    getToday: () => today, path, ensureStorageRoot: () => storageRoot, sanitizeFileName
+  });
+  const mergeGeneratedXlsxFiles = loadMainFunction('mergeGeneratedXlsxFiles', {
+    require, fs, path, applyWatermark: () => {}
+  });
+  const buildGenerationConfig = ({ template }) => ({
+    template,
+    mappingByTargetField: { MerchantId: 'Account' },
+    balanceRequested: true,
+    balanceMode: 'calculated'
+  });
+  const lastGeneratedExports = { detail: null, balance: null, allDetail: null, allBalance: null };
+  const imported = [];
+  const generateGroups = loadMainFunction('generateMultiTemplateGroupFiles', {
+    getEntryTemplateConfig: ({ entry }) => ({
+      template: { id: entry.matchedTemplateId, name: templates[entry.matchedTemplateId] },
+      exportMappings: [{ templateField: 'MerchantId', mappedField: 'Account' }],
+      exportTargetFields: ORDERED_FIELDS
+    }),
+    normalizeCell,
+    FIXED_FIELD_VALUE_PREFIX: '__FIXED__:',
+    MERCHANT_ID_MULTI_ACCOUNT_MARKER: '__MULTI__',
+    buildStatementGenerationConfig: buildGenerationConfig,
+    rebuildMatchedTemplateFileEntries: ({ fileEntries: entries }) => entries,
+    buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
+    removeStatementSessionEntriesByFilePath: () => {},
+    generateStatementFiles: generation.generateStatementFiles,
+    parseRequiredBillDates,
+    buildDateRangeLabel,
+    getToday: () => today,
+    buildOutputFilePath,
+    mergeGeneratedXlsxFiles,
+    path,
+    buildStatementFileEntry: (entry) => entry,
+    buildStatementFileEntryId: () => 'entry',
+    appendStatementSessionImport: () => 'import-batch',
+    buildStatementBatchId: () => 'import-batch',
+    lastGeneratedExports,
+    updateStatementSessionCache: (session, batchId, generatedFiles) => {
+      generation.updateStatementSessionCache(session, batchId, generatedFiles, lastGeneratedExports);
+    },
+    buildImportResultFromGeneratedFiles: ({ generatedFiles }) => {
+      imported.push(generatedFiles);
+      return { status: 'captured' };
+    },
+    FILENAME_MAPPING_TEMPLATE_ID: '__FILENAME_MAPPING__'
+  });
+  generateGroups({
+    fileEntries,
+    fallbackTemplateConfig: {},
+    selectedBigAccount: null,
+    session: { key: 'import-session' },
+    inputFilePaths: fileEntries.map((entry) => entry.filePath)
+  });
+
+  const [importedFiles] = imported;
+  const gaps = importedFiles.warnings.find((warning) => warning.type === 'balance-gap-confirm')?.gaps || [];
+  const balanceFolder = path.join(storageRoot, 'exports', today, 'balance');
+  const summaryFiles = () => (fs.existsSync(balanceFolder) ? fs.readdirSync(balanceFolder) : [])
+    .filter((name) => name.startsWith('3-BALANCE-'));
+  assertEq(gaps.map((gap) => [gap.merchantId, gap.anchorDate, gap.targetBillDate]), [
+    ['M303', '2026-09-01', '2026-09-04']
+  ], 'Step6.只有第三组断档');
+  assertEq(importedFiles.balance, null, 'Step6.导入结果不带余额汇总');
+  assertEq(lastGeneratedExports.balance, null, 'Step6.不缓存部分余额汇总');
+  assertEq(summaryFiles(), [], 'Step6.导出目录没有只含两组的余额汇总');
+  assertTrue(Boolean(importedFiles.detail && fs.existsSync(importedFiles.detail.filePath)), 'Step6.明细汇总照常生成');
+
+  // 第三组选择不补录后，按全部模板组重算当前批次余额。
+  acknowledgedKeys.add(gaps[0].key);
+  const regenerate = loadMainFunction('regenerateVirtualTemplateBalanceFromSession', {
+    getStatementSessionEntries: () => fileEntries,
+    getTemplateMappingConfig: (tid) => ({ template: { id: tid, name: templates[tid] }, exportMappings: [], exportTargetFields: [] }),
+    appendActivityLogEntry: () => {},
+    buildStatementGenerationConfig: buildGenerationConfig,
+    buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
+    generateStatementFiles: generation.generateStatementFiles,
+    parseRequiredBillDates,
+    extractManualBalancePromptWarning: generation.extractManualBalancePromptWarning,
+    statementGenerationHelpers: generation,
+    buildDateRangeLabel,
+    buildOutputFilePath,
+    mergeGeneratedXlsxFiles,
+    getToday: () => today,
+    path,
+    scopedMergedOutputFileName: loadMainFunction('scopedMergedOutputFileName')
+  });
+  const regenerated = regenerate({ key: 'import-session' }, 'current');
+  assertEq(regenerated.needsSeed, false, 'Step6.不补录后可以重算');
+  const summary = regenerated.generatedFiles?.balance;
+  assertEq(summaryFiles(), summary ? [summary.fileName] : [], 'Step6.重算后只有一份余额汇总');
+  assertEq(summary ? readBalanceSheet(summary.filePath).map((row) => [row[0], row[2], row[3]]) : [], [
+    ['M301', '2026-09-01', 1010],
+    ['M301', '2026-09-02', 1020],
+    ['M302', '2026-09-01', 1010],
+    ['M302', '2026-09-02', 1020],
+    ['M303', '2026-09-01', 1010],
+    ['M303', '2026-09-04', 1020]
+  ], 'Step6.回读余额汇总：三组账号齐全，M303 接着断档前余额');
+}
+
 async function run() {
   console.log('==== 网银账单发生额余额断档 e2e 集成验证 ====');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stmt-balance-gap-'));
@@ -323,6 +468,7 @@ async function run() {
     ], 'Step4.种子文件内容');
 
     await verifyMergedScopeIsolation(dir);
+    await verifyMultiTemplateImportHoldsPartialBalance(dir);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
