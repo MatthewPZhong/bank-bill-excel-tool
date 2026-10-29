@@ -2,7 +2,7 @@
 
 > status: in-progress
 > created: 2026-10-28
-> updated: 2026-10-28
+> updated: 2026-10-29
 > 目标版本：v3.2.14
 > 适用分支：`feat/release-notes-on-upgrade`
 > 分支创建基线：`v3.2.13` → `e68089cc46c88c3eaed87b942fcd8badef00dff7`
@@ -40,7 +40,7 @@
   1. 记录为空或不是合法稳定版本号：
      - 主库文件在本次启动前不存在（全新安装）：写入当前版本，不弹。
      - 主库已存在（从本功能之前的版本升级）：基线取 `3.2.13`（最后一个不含本功能的正式版），来源版本记为未知。
-  2. 当前版本不是基线的严格升级（同版本、降级、带预发布号）：不弹。记录为空时补写当前版本；降级不改记录。
+  2. 当前版本不是基线的严格升级（同版本、降级、带预发布号）：不弹。记录为空时补写当前版本；降级不改记录。带构建元数据（如 `3.2.14+build.7`）的正式版按对应正式版（`3.2.14`）判定、查说明和写入记录。
   3. 取版本在（基线, 当前版本] 内的说明条目；没有条目时写入当前版本，不弹。
   4. 否则本次启动有待显示的更新说明。
 
@@ -92,3 +92,4 @@
 | T3 | 读取走 `app:get-info` 的 `releaseNotes: { current, pending }`；写入新增 `settings:acknowledge-release-notes`，只接受当前版本且仅在有待显示内容时写入，归入 `ui-navigation` 排除策略 |
 | T4 | 渲染层新增 `src/renderer/dialogs/release-notes.js` 工厂，登记架构边界 `renderer-dialog-release-notes`；设置弹窗工厂 `ui` 新增 `openReleaseNotes`，按 `policyChanges` 登记放宽 |
 | T5 | 弹窗以 `owner: 'application'` 打开；等待其他弹窗关闭的方式与在线升级“已下载”提示一致（`modalRoot` MutationObserver） |
+| T6 | 当前版本去掉构建元数据后再判定与查找说明（`toStableVersion`），与 `app-updater.js` 的稳定版解析同口径；预发布号仍排除。2026-10-29 Codex 第三轮审查 `release/v3.2.14` 发现原先只认纯 `X.Y.Z`，带构建元数据的正式版既不弹窗、设置入口也显示暂无说明。仓库历史版本号都不带构建元数据，现行发版不会触发；新增单测 2 项，已确认修复前失败、修复后通过 |
