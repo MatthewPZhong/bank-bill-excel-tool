@@ -55,6 +55,25 @@
     ));
   }
 
+  // 导入 IPC 被拒（Main 抛错、传输失败）时转成失败结果，交给原有的失败提示；
+  // 去掉 Electron 附加的 “Error invoking remote method '…': ” 前缀与错误类名。
+  function importFailureFromError(error, fallbackMessage) {
+    const raw = String(error && error.message ? error.message : error || '');
+    const message = raw
+      .replace(/^Error invoking remote method '[^']*':\s*/, '')
+      .replace(/^[A-Za-z]*Error(?: \[[^\]]*\])?:\s*/, '')
+      .trim();
+    return { status: 'failed', message: message || fallbackMessage, detailLines: [] };
+  }
+
+  async function guardImportCall(call, fallbackMessage) {
+    try {
+      return await call();
+    } catch (error) {
+      return importFailureFromError(error, fallbackMessage);
+    }
+  }
+
   function createPositionReconciliationUI({
     api,
     panel,
@@ -571,7 +590,7 @@
         '正在读取平盘银行对账单…',
         () => withImportProgress(
           '导入平盘银行对账单',
-          () => api.prepareBankImport()
+          () => guardImportCall(() => api.prepareBankImport(), '平盘银行对账单导入失败')
         )
       );
       if (!live(actionGeneration)) { needsRefresh = true; return null; }
@@ -598,7 +617,7 @@
         '正在写入平盘银行对账单…',
         () => withImportProgress(
           '写入平盘银行对账单',
-          () => api.applyBankImport(result.token)
+          () => guardImportCall(() => api.applyBankImport(result.token), '平盘银行对账单写入失败')
         )
       );
       if (!live(actionGeneration)) { needsRefresh = true; return null; }
@@ -723,7 +742,7 @@
         '正在识别链接原始表…',
         () => withImportProgress(
           '导入链接原始表',
-          () => api.prepareSourceImport()
+          () => guardImportCall(() => api.prepareSourceImport(), '链接原始表导入失败')
         )
       );
       if (!live(actionGeneration)) { needsRefresh = true; return null; }
@@ -757,7 +776,7 @@
             '正在替换清结算银行账户表…',
             () => withImportProgress(
               '替换清结算银行账户表',
-              () => api.applySourceImport(item.token)
+              () => guardImportCall(() => api.applySourceImport(item.token), '清结算银行账户表写入失败')
             )
           );
           if (!live(actionGeneration)) { needsRefresh = true; return null; }
@@ -1993,6 +2012,7 @@
     buildRunReplaceConfirmationRequest,
     createPositionReconciliationUI,
     formatUpdatedDate,
+    importFailureFromError,
     isImportCancelledResult
   };
 }(window));

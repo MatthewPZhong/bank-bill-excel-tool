@@ -20,6 +20,20 @@
 
 ## 未实施
 
+### B37（P3 · 顺延）平盘后台 managed 导入未接入链接原始表当前结构，且全部文件失败时抛错
+
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §6 K2）；编号接续 `release/v3.2.14` 的 B35
+- **影响**：`background-execution/adapters/position-import-adapter.js`（生产 `production.enabled: false`）启动来源导入时不传 `contractOptions.sourceStructures`，启用了用户结构版本时仍按内置结构识别；选中文件全部被拒时 `authorizeApply` 落到未配置的授权器并抛错，不返回逐文件原因。当前生产不受影响
+- **关闭条件**：启用该路径前，准备阶段按当前结构冻结并传入 Worker，全部失败时返回逐文件失败结果；补对应回归测试
+- **目标版本**：未定（随 managed 导入启用）
+
+### B36（P2 · 已知问题）平盘启用后在已有数据上切换链接原始表结构，重导的重叠记录可能被再次自动匹配（资金口径）
+
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §3 D5、§6 K1）
+- **影响**：原始行以表头为键保存，表头也参与 `row_hash`。改名或增删列后重导与旧数据重叠的记录，会生成同一业务单号的新记录；匹配时只要存在未消费候选就自动确认（`matching-engine.js` `candidateEvaluation`），已被确认运行消费的同单号旧记录只在没有其他候选时才转人工，存在重复消费风险。内容变化后重导也有同类风险。用户确认平盘尚未正式启用、没有旧数据，本轮不处理
+- **关闭条件**：平盘正式启用前评估并实现防重策略（如同单号已被消费的记录一律转人工），经人工复核后补回归测试
+- **目标版本**：平盘正式启用前
+
 ### B31（P3 · 顺延）managed 后台只读导出尚未接入模板版本
 
 - **来源**：v3.2.13 `feat/settings-template-versions`（`changes/v3.2.13/feat/settings-template-versions/techdoc.md` 第七节 L1、L2）

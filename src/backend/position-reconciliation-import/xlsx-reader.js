@@ -40,6 +40,10 @@ const {
   BANK_STATEMENT_FIELDS
 } = require('../../constants/bank-statement-fields');
 const {
+  bankHeaderMismatchLines,
+  sourceHeaderMismatchLines
+} = require('../../main-process/position-reconciliation/header-mismatch');
+const {
   loadSharedStringsProvider
 } = require('../xlsx/shared-strings-provider');
 const {
@@ -285,7 +289,8 @@ async function readPhysicalHeader(workbook, sheet, cancelToken = null) {
   return header;
 }
 
-async function locatePositionBusinessSheet(workbook, kind, cancelToken = null) {
+// definitions：本次导入使用的来源表结构（当前启用版本），缺省为内置结构。
+async function locatePositionBusinessSheet(workbook, kind, cancelToken = null, definitions = SOURCE_DEFINITIONS) {
   if (kind === 'bank') {
     const sheet = workbook.sheets.find((candidate) => candidate.name === BANK_SHEET_NAME);
     if (!sheet) {
@@ -301,10 +306,7 @@ async function locatePositionBusinessSheet(workbook, kind, cancelToken = null) {
       throw new PositionReconciliationError(
         'position-bank-headers-invalid',
         `银行对账单表头不符合 46/49 列契约：${workbook.sourceFile}`,
-        [
-          `实际列数：${headers.length}`,
-          `实际表头：${headers.join(' / ')}`
-        ]
+        bankHeaderMismatchLines(headers)
       );
     }
     return {
@@ -316,9 +318,11 @@ async function locatePositionBusinessSheet(workbook, kind, cancelToken = null) {
   }
 
   const matches = [];
+  const sheetHeaders = [];
   for (const sheet of workbook.sheets) {
     const headers = await readPhysicalHeader(workbook, sheet, cancelToken);
-    for (const [sourceType, definition] of Object.entries(SOURCE_DEFINITIONS)) {
+    sheetHeaders.push({ name: sheet.name, headers });
+    for (const [sourceType, definition] of Object.entries(definitions)) {
       if (headersEqual(headers, definition.headers)) {
         matches.push({ sheet, sourceType, definition, headers });
       }
@@ -327,7 +331,8 @@ async function locatePositionBusinessSheet(workbook, kind, cancelToken = null) {
   if (matches.length === 0) {
     throw new PositionReconciliationError(
       'position-source-unrecognized',
-      `无法通过表头识别链接原始表：${workbook.sourceFile}`
+      `无法通过表头识别链接原始表：${workbook.sourceFile}`,
+      sourceHeaderMismatchLines(sheetHeaders, definitions)
     );
   }
   if (matches.length > 1) {
@@ -418,7 +423,8 @@ async function streamPositionXlsxRows(filePath, options = {}) {
     const detected = await locatePositionBusinessSheet(
       workbook,
       kind,
-      options.cancelToken
+      options.cancelToken,
+      options.sourceDefinitions || SOURCE_DEFINITIONS
     );
     const sourceHeaders = detected.headers;
     let nonBlankRowCount = 0;

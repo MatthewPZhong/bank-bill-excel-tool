@@ -20,6 +20,10 @@ const {
 const {
   BANK_STATEMENT_FIELDS
 } = require('../../constants/bank-statement-fields');
+const {
+  bankHeaderMismatchLines,
+  sourceHeaderMismatchLines
+} = require('../../main-process/position-reconciliation/header-mismatch');
 
 function ensureUtilityContext(options) {
   if (options.allowMainThread === true) return;
@@ -43,12 +47,14 @@ function openWorkbook(filePath) {
   }
 }
 
-function sourceMatch(workbook, fileName) {
+function sourceMatch(workbook, fileName, definitions = SOURCE_DEFINITIONS) {
   const matches = [];
+  const sheetHeaders = [];
   for (const sheetName of workbook.SheetNames) {
     const rows = rowValues(workbook.Sheets[sheetName]);
     const headers = normalizeHeaderRow(rows[0]);
-    for (const [sourceType, definition] of Object.entries(SOURCE_DEFINITIONS)) {
+    sheetHeaders.push({ name: sheetName, headers });
+    for (const [sourceType, definition] of Object.entries(definitions)) {
       if (headersEqual(headers, definition.headers)) {
         matches.push({ sourceType, definition, sheetName, rows, headers });
       }
@@ -57,7 +63,8 @@ function sourceMatch(workbook, fileName) {
   if (matches.length === 0) {
     throw new PositionReconciliationError(
       'position-source-unrecognized',
-      `无法通过表头识别链接原始表：${fileName}`
+      `无法通过表头识别链接原始表：${fileName}`,
+      sourceHeaderMismatchLines(sheetHeaders, definitions)
     );
   }
   if (matches.length > 1) {
@@ -86,7 +93,7 @@ function bankMatch(workbook, fileName) {
     throw new PositionReconciliationError(
       'position-bank-headers-invalid',
       `银行对账单表头不符合 46/49 列契约：${fileName}`,
-      [`实际列数：${headers.length}`, `实际表头：${headers.join(' / ')}`]
+      bankHeaderMismatchLines(headers)
     );
   }
   return { sourceType: null, definition: null, sheetName: BANK_SHEET_NAME, rows, headers };
@@ -99,7 +106,7 @@ async function streamPositionXlsRows(filePath, options = {}) {
   const workbook = openWorkbook(absolutePath);
   const detected = options.kind === 'bank'
     ? bankMatch(workbook, fileName)
-    : sourceMatch(workbook, fileName);
+    : sourceMatch(workbook, fileName, options.sourceDefinitions || SOURCE_DEFINITIONS);
   let nonBlankRowCount = 0;
 
   for (let index = 1; index < detected.rows.length; index += 1) {

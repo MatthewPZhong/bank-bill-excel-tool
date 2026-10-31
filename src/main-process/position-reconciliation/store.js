@@ -11,13 +11,14 @@ const {
   SOURCE_TYPES,
   SOURCE_DISPLAY_ORDER,
   SOURCE_DEFINITIONS,
-  LINK_HEADERS,
+  SOURCE_REQUIRED_FIELDS,
   BANK_STATUSES,
   DIFFERENCE_STATUSES,
   MATCH_TYPES,
   sourceTypeForFundType
 } = require('./constants');
 const { BANK_STATEMENT_FIELDS } = require('../../constants/bank-statement-fields');
+const { linkRequiredFields } = require('./source-structures');
 const {
   PositionReconciliationError,
   text,
@@ -2248,9 +2249,10 @@ class PositionReconciliationStore {
       WHERE source_type = ?
       ORDER BY id
     `).all(sourceType).map((row) => {
+      // 列名可随设置 → 模板文件的结构版本变化：已存行只校验程序按名读取的必用列。
       const payload = assertPayloadFields(
         parseJson(row.raw_json, `链接原始行 ${row.source_type}/${row.business_key}`),
-        SOURCE_DEFINITIONS[sourceType].headers,
+        SOURCE_REQUIRED_FIELDS[sourceType],
         `链接原始行 ${row.source_type}/${row.business_key}`
       );
       return {
@@ -2550,7 +2552,7 @@ class PositionReconciliationStore {
       ...row,
       row: assertPayloadFields(
         parseJson(row.linked_json, `链接行 ID=${row.id}`),
-        LINK_HEADERS[sourceType],
+        linkRequiredFields(sourceType),
         `链接行 ID=${row.id}`
       )
     }));

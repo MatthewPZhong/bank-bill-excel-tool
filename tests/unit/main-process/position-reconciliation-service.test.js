@@ -678,6 +678,102 @@ test('普通来源 worker 退出恢复后 Service 保留已提交文件的存档
   assert.equal(result.successCount, 1);
 });
 
+test('流式导入全部文件被拒时返回逐文件原因，不以异常结束且不引用已删除的暂存文件', async (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-streaming-all-rejected-'));
+  const stagedPath = path.join(userDataDir, 'run-data', 'position-reconciliation', 'import-staging', 'job-rejected', 'source.xlsx');
+  let authorizeCount = 0;
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    positionImportEngine: 'streaming',
+    authorizeStreamingSourceApply: async () => {
+      authorizeCount += 1;
+      return {};
+    },
+    positionImportDispatcher(input) {
+      const ready = {
+        jobId: 'job-rejected',
+        kind: 'source',
+        archiveManifestHash: 'b'.repeat(64),
+        acceptedOrdinaryInputFiles: [],
+        accountConfirmationDescriptor: null,
+        orderedFileResults: [{
+          status: 'failed',
+          fileIndex: 0,
+          filePath: '/input/gateway.xlsx',
+          archivePath: stagedPath,
+          stagingDir: path.dirname(stagedPath),
+          fileName: 'gateway.xlsx',
+          code: 'position-source-unrecognized',
+          message: '无法通过表头识别链接原始表：gateway.xlsx',
+          detailLines: ['第 20 列：应为「fieldId」，实际为「fileId」']
+        }],
+        outputFiles: [{ filePath: path.join(userDataDir, 'deleted-report.xlsx') }]
+      };
+      // 与真实 worker 一致：authorizeApply 拒绝后 worker 以 FATAL 结束。
+      const promise = new Promise((_resolve, reject) => {
+        queueMicrotask(async () => {
+          input.onPreflightReady(ready);
+          try {
+            await input.authorizeApply(ready);
+          } catch (error) {
+            reject(Object.assign(new Error(error.message), { code: error.code }));
+          }
+        });
+      });
+      return { jobId: 'job-rejected', promise, cancel: () => true, terminate: () => true };
+    }
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  const prepared = await service.prepareSourceImportForLifecycle(['/input/gateway.xlsx']);
+  assert.equal(prepared.requiresExecution, false);
+  assert.equal(prepared.result.status, 'failed');
+  assert.equal(prepared.result.message, '所选链接原始表全部导入失败');
+  assert.equal(prepared.result.failedCount, 1);
+  assert.deepEqual(prepared.result.results.map((item) => [item.code, item.detailLines]), [[
+    'position-source-unrecognized',
+    ['第 20 列：应为「fieldId」，实际为「fileId」']
+  ]]);
+  assert.equal(prepared.result.results[0].archivePath, undefined);
+  assert.equal(prepared.result.results[0].stagingDir, undefined);
+  assert.equal(prepared.result.outputFiles, undefined);
+  assert.deepEqual(prepared.result.cleanupPaths, []);
+  assert.equal(authorizeCount, 0);
+});
+
+test('流式导入全部文件被拒之外的 worker 失败照常抛出', async (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-streaming-rejected-other-'));
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    positionImportEngine: 'streaming',
+    authorizeStreamingSourceApply: async () => ({}),
+    positionImportDispatcher(input) {
+      const ready = { jobId: 'job-other', acceptedOrdinaryInputFiles: [], orderedFileResults: [] };
+      const promise = new Promise((_resolve, reject) => {
+        queueMicrotask(() => {
+          input.onPreflightReady(ready);
+          reject(Object.assign(new Error('平盘导入 utilityProcess 异常退出'), { code: 'position-import-worker-exited' }));
+        });
+      });
+      return { jobId: 'job-other', promise, cancel: () => true, terminate: () => true };
+    }
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  await assert.rejects(
+    service.prepareSourceImportForLifecycle(['/input/gateway.xlsx']),
+    { code: 'position-import-worker-exited' }
+  );
+});
+
 test('流式 lifecycle plan 未获 reserve 时终止 worker 并清暂存，ordinary 不获 apply 授权', async (t) => {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-streaming-abandon-'));
   const jobRoot = path.join(userDataDir, 'run-data', 'position-reconciliation', 'import-staging', 'job-abandon');
@@ -875,6 +971,112 @@ test('流式 service 完成银行确认、普通来源自动提交和账户快�
   assert.equal(accountApplied.rowCount, 1);
   assert.equal(service.store.countSourceRows(SOURCE_TYPES.BANK_ACCOUNT), 1);
   assert.equal(service.persistenceCheckpoint().generation, 3);
+});
+
+test('流式导入按设置 → 模板文件的当前结构识别、写入、确认账户表与导出，切回内置后同一文件给出差异', async (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-streaming-structures-'));
+  const inboundHeaders = SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_INBOUND].headers
+    .map((header) => (header === 'fieldId' ? 'fileId' : header));
+  const accountHeaders = SOURCE_DEFINITIONS[SOURCE_TYPES.BANK_ACCOUNT].headers
+    .map((header) => (header === '备注' ? '账户说明' : header));
+  const inboundPath = path.join(userDataDir, 'gateway-inbound.xlsx');
+  const accountPath = path.join(userDataDir, 'bank-account.xlsx');
+  writeWorkbook(inboundPath, '账单明细', inboundHeaders, [{
+    bizId: 'STRUCT-IN-1',
+    billDate: '2026-07-20',
+    tradeType: 'Inbound-VA',
+    reconId: 'STRUCT-RID-1',
+    channel: 'DBS',
+    merchantId: 'M001',
+    currency: 'USD',
+    amount: '100',
+    originOutboundCurrency: 'EUR',
+    fileId: 'FILE-1'
+  }]);
+  writeWorkbook(accountPath, '清结算银行账户表', accountHeaders, [{
+    账户状态: '正常', 账户性质: '自有', 币种: 'USD', 银行账号: 'STRUCT-ACCOUNT-1', 账户说明: '新列'
+  }]);
+
+  const builtin = (sourceType) => ({
+    status: 'builtin', label: 'V1', headers: [...SOURCE_DEFINITIONS[sourceType].headers]
+  });
+  let structures = Object.fromEntries(Object.values(SOURCE_TYPES).map((type) => [type, builtin(type)]));
+  structures[SOURCE_TYPES.GATEWAY_INBOUND] = { status: 'user', label: 'V2', headers: inboundHeaders };
+  structures[SOURCE_TYPES.BANK_ACCOUNT] = { status: 'user', label: 'V2', headers: accountHeaders };
+
+  let service = null;
+  let sequence = 0;
+  service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    positionImportEngine: 'streaming',
+    operationTokenProvider: () => `structures-${++sequence}`,
+    resolveSourceStructures: async () => structures,
+    authorizeStreamingSourceApply: async (ready) => {
+      const baseCheckpoint = service.persistenceCheckpoint();
+      const schema = await dispatchPositionLargeImportSchemaMigration({
+        engine: 'streaming',
+        userDataDir,
+        sideDbPath: service.store.dbPath,
+        expectedCheckpoint: baseCheckpoint,
+        batchContext: WORKER_BATCH_CONTEXT
+      }).promise;
+      return {
+        operationToken: `structures-apply-${++sequence}`,
+        archiveManifestHash: ready.archiveManifestHash,
+        schemaFingerprint: schema.fingerprint,
+        baseCheckpoint
+      };
+    }
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  const plan = await service.prepareSourceImportForLifecycle([inboundPath, accountPath]);
+  assert.equal(plan.requiresExecution, true);
+  // 准备之后切换结构不影响进行中的导入：写入与账户确认沿用准备时冻结的结构。
+  const frozen = structures;
+  structures = Object.fromEntries(Object.values(SOURCE_TYPES).map((type) => [type, builtin(type)]));
+  const applied = await service.executePreparedSourceImport(
+    plan.plan,
+    WORKER_BATCH_CONTEXT,
+    { executionInputPaths: plan.inputPaths, outputs: [] }
+  );
+  assert.deepEqual(applied.results.map((item) => item.status), ['ok', 'needs-confirmation']);
+  const accountToken = applied.results[1].token;
+  const accountApplied = await applySourceImport(service, accountToken, WORKER_BATCH_CONTEXT);
+  assert.equal(accountApplied.status, 'ok');
+  assert.equal(accountApplied.rowCount, 1);
+  structures = frozen;
+
+  const rawPath = path.join(userDataDir, 'raw.xlsx');
+  await service.exportRaw(SOURCE_TYPES.GATEWAY_INBOUND, rawPath);
+  const raw = XLSX.utils.sheet_to_json(XLSX.readFile(rawPath).Sheets['中台网关原始入账订单'], { header: 1, defval: '' });
+  assert.deepEqual(raw[0], inboundHeaders);
+  assert.equal(raw[1][inboundHeaders.indexOf('fileId')], 'FILE-1');
+  const linkedPath = path.join(userDataDir, 'linked-account.xlsx');
+  await service.exportLinked(SOURCE_TYPES.BANK_ACCOUNT, linkedPath);
+  const linked = XLSX.utils.sheet_to_json(XLSX.readFile(linkedPath).Sheets['清结算银行账户表'], { header: 1, defval: '' });
+  assert.deepEqual(linked[0], accountHeaders);
+  assert.equal(linked[1][accountHeaders.indexOf('账户说明')], '新列');
+
+  structures = Object.fromEntries(Object.values(SOURCE_TYPES).map((type) => [type, builtin(type)]));
+  const rejected = await service.prepareSourceImportForLifecycle([inboundPath]);
+  assert.equal(rejected.requiresExecution, false);
+  assert.equal(rejected.result.status, 'failed');
+  assert.equal(rejected.result.results[0].code, 'position-source-unrecognized');
+  assert.deepEqual(rejected.result.results[0].detailLines.slice(0, 2), [
+    '最接近：中台网关原始入账订单（当前版本 V1，41 列；文件 41 列）',
+    '第 20 列（T）：应为「fieldId」，实际为「fileId」'
+  ]);
+
+  structures = { ...structures, [SOURCE_TYPES.GATEWAY_INBOUND]: { status: 'unavailable', message: '模板「中台网关原始入账订单」当前版本 V2 不可用：版本文件缺失' } };
+  await assert.rejects(
+    service.prepareSourceImportForLifecycle([inboundPath]),
+    { code: 'position-source-structure-unavailable', message: /当前版本 V2 不可用/ }
+  );
 });
 
 test('流式 service 通过 utility worker 删除来源并同步 checkpoint', async (t) => {

@@ -105,8 +105,8 @@ function excelValueForHeader(header, value) {
   return { richText: [{ text: String(normalized) }] };
 }
 
-function reportDetailValues(item, sourceType) {
-  const definition = SOURCE_DEFINITIONS[sourceType];
+function reportDetailValues(item, sourceType, sourceDefinitions = SOURCE_DEFINITIONS) {
+  const definition = sourceDefinitions[sourceType];
   const headers = [...DETAIL_META_HEADERS, ...definition.headers];
   const values = [
     item.reportRowKey,
@@ -140,8 +140,10 @@ function normalizedReportFileIndexes(value) {
   return indexes.sort((left, right) => left - right);
 }
 
+// sourceDefinitions：本次导入的链接原始表结构，过滤明细按它出列。
 async function writePositionAnomalyReport({
   ledger,
+  sourceDefinitions = SOURCE_DEFINITIONS,
   jobRoot,
   jobId,
   fileIndexes = [],
@@ -205,7 +207,7 @@ async function writePositionAnomalyReport({
     summary.commit();
 
     for (const sourceType of [SOURCE_TYPES.FUND_TRANSFER, SOURCE_TYPES.TEST_PAYMENT]) {
-      const definition = SOURCE_DEFINITIONS[sourceType];
+      const definition = sourceDefinitions[sourceType];
       const headers = [...DETAIL_META_HEADERS, ...definition.headers];
       let sheet = null;
       let sheetIndex = 0;
@@ -223,7 +225,7 @@ async function writePositionAnomalyReport({
           sheet = workbook.addWorksheet(name.slice(0, 31));
           addHeader(sheet, headers);
         }
-        const reportRow = sheet.addRow(reportDetailValues(item, sourceType));
+        const reportRow = sheet.addRow(reportDetailValues(item, sourceType, sourceDefinitions));
         reportRow.height = 30;
         reportRow.getCell(9).alignment = { vertical: 'top', wrapText: true };
         reportRow.commit();

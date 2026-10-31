@@ -28,7 +28,8 @@ function createPositionStartupRecoveryHarness({ database, diagnostics, tracked }
     const { database, path, randomUUID, __dirname, createPositionReconciliationService,
       dispatchPositionLargeImportSchemaMigration, authorizePositionImportApply,
       POSITION_SIDE_DB_CHECKPOINT_SETTING, POSITION_SIDE_DB_BOOTSTRAP_SETTING,
-      appendActivityLogEntry, trackArchiveOperationPromise, getTemplateResourceService } = dependencies;
+      appendActivityLogEntry, trackArchiveOperationPromise, getTemplateResourceService,
+      resolvePositionSourceStructures } = dependencies;
     let positionTaskOwner;
     let archiveCenterService;
     let positionReconciliationService = null;
@@ -51,6 +52,8 @@ function createPositionStartupRecoveryHarness({ database, diagnostics, tracked }
     authorizePositionImportApply, ...constants,
     // 恢复测试不涉及模板版本：来源为空时服务沿用固定的内置模板路径。
     getTemplateResourceService: () => ({ source: () => null }),
+    // 链接原始表结构不注入解析器时，服务按内置结构导入。
+    resolvePositionSourceStructures: null,
     appendActivityLogEntry: (entry) => diagnostics.push(entry),
     trackArchiveOperationPromise(promise) {
       tracked.push(promise);

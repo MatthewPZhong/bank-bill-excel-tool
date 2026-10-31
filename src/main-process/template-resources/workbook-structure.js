@@ -7,6 +7,8 @@ const XLSX = require('xlsx');
 const { parseFundTypeEnumWorkbook } = require('../../constants/fund-type-enum');
 const { parseGatewayReconHeadersWorkbook } = require('../../constants/gateway-recon-headers-loader');
 const { ALL_CELLS, sheetCells } = require('../../constants/sheetjs-sparse-cells');
+const { TEMPLATE_RESOURCES } = require('./catalog');
+const { INPUT_STRUCTURES } = require('./input-structures');
 
 function cellText(value) {
   return value === undefined || value === null ? '' : String(value).trim();
@@ -35,11 +37,22 @@ function rowTexts(cells, rowIndex) {
   return trimTail(Array.from(row, (value) => value || ''));
 }
 
+// 输入原表的导入识别结构：第 1 个工作表表头行的文本（中间空列保留为空串，末尾空列去掉），与导入时读表头的口径一致。
+function firstSheetHeaders(workbook, headerRow) {
+  const name = workbook.SheetNames[0];
+  if (!name) return [];
+  return rowTexts(textCells(workbook.Sheets[name]), headerRow - 1);
+}
+
 // 运行时 loader 的解析函数：枚举取值与比较基准都按它们的口径（声明范围的首列 / 首行）计算，
-// 声明范围不从 A1 开始时也与场景配置实际读到的取值一致。
+// 声明范围不从 A1 开始时也与场景配置实际读到的取值一致。输入原表的取值为表头列表。
 const RUNTIME_VALUE_PARSERS = Object.freeze({
   'fund-type-enum': parseFundTypeEnumWorkbook,
-  'gateway-recon': parseGatewayReconHeadersWorkbook
+  'gateway-recon': parseGatewayReconHeadersWorkbook,
+  ...Object.fromEntries(Object.keys(INPUT_STRUCTURES).map((resourceId) => {
+    const headerRow = TEMPLATE_RESOURCES.find((resource) => resource.id === resourceId).headerRow;
+    return [resourceId, (workbook) => firstSheetHeaders(workbook, headerRow)];
+  }))
 });
 
 // 表头以下有内容的行数。合并单元格只在左上角保存值；其覆盖的行在 Excel 中同样显示内容，计数时一并计入。
@@ -94,6 +107,7 @@ function parseRuntimeValues(resourceId, bytes) {
 
 module.exports = {
   RUNTIME_VALUE_PARSERS,
+  firstSheetHeaders,
   describeWorkbook,
   parseRuntimeValues
 };

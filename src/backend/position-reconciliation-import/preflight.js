@@ -15,6 +15,9 @@ const {
   deriveLinkedRows
 } = require('../../main-process/position-reconciliation/derivation');
 const {
+  sourceDefinitionsFor
+} = require('../../main-process/position-reconciliation/source-structures');
+const {
   PositionReconciliationError,
   monthOf,
   normalizeDate,
@@ -100,7 +103,8 @@ async function preflightSourceFile({
   onProgress,
   startedAt,
   sstOptions,
-  allowMainThreadXls
+  allowMainThreadXls,
+  sourceDefinitions = SOURCE_DEFINITIONS
 }) {
   const stats = emptyStats();
   const contentHash = new StableArrayHashAccumulator();
@@ -116,6 +120,7 @@ async function preflightSourceFile({
       allowMainThread: allowMainThreadXls,
       sstTempRoot: path.join(descriptor.stagingDir, 'sst'),
       ...sstOptions,
+      sourceDefinitions,
       onRow: ({ row, excelRowNumber, sourceType: detectedType, sheetName: detectedSheet }) => {
         sourceType = detectedType;
         sheetName = detectedSheet;
@@ -495,6 +500,8 @@ async function runPositionImportPreflight(input = {}) {
   if (!jobId || !userDataDir || files.length === 0) {
     throw new TypeError('preflight 需要 jobId、userDataDir 和 files');
   }
+  // 本次导入冻结的链接原始表结构（设置 → 模板文件的当前版本），缺省为内置结构。
+  const sourceDefinitions = sourceDefinitionsFor(input.sourceStructures);
   const cancelToken = input.cancelToken && typeof input.cancelToken === 'object'
     ? input.cancelToken
     : { cancelled: false };
@@ -560,7 +567,8 @@ async function runPositionImportPreflight(input = {}) {
             onProgress: reportProgress,
             startedAt,
             sstOptions: input.sstOptions,
-            allowMainThreadXls: input.allowMainThreadXls
+            allowMainThreadXls: input.allowMainThreadXls,
+            sourceDefinitions
           });
         ledger.acceptFile(descriptor.fileIndex, preflight);
         filePreflightStats.set(descriptor.fileIndex, {
@@ -643,7 +651,8 @@ async function runPositionImportPreflight(input = {}) {
               onProgress: reportProgress,
               startedAt,
               sstOptions: input.sstOptions,
-              allowMainThreadXls: input.allowMainThreadXls
+              allowMainThreadXls: input.allowMainThreadXls,
+              sourceDefinitions
             });
             ledger.acceptFile(descriptor.fileIndex, preflight);
             filePreflightStats.set(descriptor.fileIndex, {
@@ -708,6 +717,7 @@ async function runPositionImportPreflight(input = {}) {
           for (const fileIndex of filteredFileIndexes) {
             const shard = await writeAnomalyReport({
               ledger,
+              sourceDefinitions,
               jobRoot,
               jobId,
               fileIndexes: [fileIndex],
@@ -729,6 +739,7 @@ async function runPositionImportPreflight(input = {}) {
         if (filteredFileIndexes.length > 0) {
           const aggregate = await writeAnomalyReport({
             ledger,
+            sourceDefinitions,
             jobRoot,
             jobId,
             fileIndexes: filteredFileIndexes
@@ -817,7 +828,8 @@ async function runPositionImportPreflight(input = {}) {
               onProgress: reportProgress,
               startedAt,
               sstOptions: input.sstOptions,
-              allowMainThreadXls: input.allowMainThreadXls
+              allowMainThreadXls: input.allowMainThreadXls,
+              sourceDefinitions
             });
             ledger.acceptFile(descriptor.fileIndex, preflight);
             filePreflightStats.set(descriptor.fileIndex, {

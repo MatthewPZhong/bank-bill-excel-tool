@@ -127,9 +127,11 @@ test('合并单元格覆盖的行计入内容行数', async () => {
   assert.ok(rowsWithContent > 10);
 });
 
-test('可替换范围固定为 7 个有导入契约的模板', () => {
+test('可替换范围固定为 12 个有导入契约的模板（含平盘 5 张链接原始表的导入识别结构）', () => {
   assert.deepEqual(TEMPLATE_RESOURCES.filter((item) => item.replace.allowed).map((item) => item.id).sort(), [
-    'bank-statement', 'dup-recall-mail', 'fund-type-enum', 'gateway-recon', 'position-bank', 'prefund-unbalanced', 'vcc-pending-calc'
+    'bank-statement', 'dup-recall-mail', 'fund-type-enum', 'gateway-recon', 'position-bank',
+    'position-bank-accounts', 'position-gateway-raw-in', 'position-gateway-raw-out', 'position-payment-full',
+    'position-transfer-orders', 'prefund-unbalanced', 'vcc-pending-calc'
   ]);
 });
 

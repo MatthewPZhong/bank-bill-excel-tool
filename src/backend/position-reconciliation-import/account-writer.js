@@ -4,7 +4,6 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
 const {
-  LINK_HEADERS,
   SOURCE_DEFINITIONS,
   SOURCE_TYPES
 } = require('../../main-process/position-reconciliation/constants');
@@ -16,6 +15,10 @@ const {
 const {
   deriveLinkedRowsForRecord
 } = require('../../main-process/position-reconciliation/derivation');
+const {
+  linkHeadersFor,
+  sourceDefinitionsFor
+} = require('../../main-process/position-reconciliation/source-structures');
 const {
   assertStagedInputUnchangedAsync
 } = require('../../main-process/position-reconciliation/input-staging');
@@ -169,6 +172,8 @@ async function applyPositionAccountSnapshot(input = {}) {
         const contentHash = new StableArrayHashAccumulator();
         let sheetName = '';
         let linkedRowCount = 0;
+        // 与预检同一份冻结结构：确认替换时重读暂存文件仍按预检时的结构识别，链接行按它校验。
+        const sourceDefinitions = sourceDefinitionsFor(input.sourceStructures);
         const read = readerFor(descriptor.archivePath);
         const summary = await read(descriptor.archivePath, {
           kind: 'source',
@@ -176,6 +181,7 @@ async function applyPositionAccountSnapshot(input = {}) {
           allowMainThread: false,
           sstTempRoot: path.join(descriptor.stagingDir, 'sst-account-apply'),
           ...(input.sstOptions || {}),
+          sourceDefinitions,
           onRow: ({
             row,
             excelRowNumber,
@@ -232,7 +238,7 @@ async function applyPositionAccountSnapshot(input = {}) {
             );
             if (derived.length === 0) stats.derivedZeroSourceRows += 1;
             for (const item of derived) {
-              const missing = LINK_HEADERS[SOURCE_TYPES.BANK_ACCOUNT].filter(
+              const missing = linkHeadersFor(SOURCE_TYPES.BANK_ACCOUNT, sourceDefinitions).filter(
                 (header) => !Object.prototype.hasOwnProperty.call(item.row, header)
               );
               if (missing.length > 0) {

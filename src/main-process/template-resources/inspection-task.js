@@ -159,6 +159,7 @@ async function runInspectionTask({ task, resource, bytes, context = {} }) {
   const contract = await inspectContract(resource.id, canonical, {
     builtinSheetNames: context.builtinSheetNames,
     currentValues: context.currentValues || [],
+    peerStructures: Array.isArray(context.peerStructures) ? context.peerStructures : [],
     references: {
       fundTypeValues: new Set(references.fundTypeValues || []),
       gatewayFields: new Set(references.gatewayFields || [])

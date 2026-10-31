@@ -2972,3 +2972,91 @@ test.describe('v3.1.3 position streaming preflight', () => {
     db.close();
   });
 });
+
+test.describe('v3.2.14 表头结构不一致的差异明细', () => {
+  const renamedHeaders = () => SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_INBOUND].headers
+    .map((header) => (header === 'fieldId' ? 'fileId' : header));
+  const expectedLines = [
+    '工作表「网关」最接近：中台网关原始入账订单（41 列；文件 41 列）',
+    '第 20 列（T）：应为「fieldId」，实际为「fileId」',
+    '缺少列：fieldId',
+    '多出列：fileId',
+    '如系统导出结构已变更，请在「设置 → 模板文件」导入新版本'
+  ];
+
+  test('xlsx / xls / legacy 读取未识别的链接原始表时给出同一组差异明细', async (t) => {
+    const dir = tempDir(t, 'position-header-diff-');
+    const sheets = [
+      { name: '说明', headers: ['说明'], rows: [{ 说明: '忽略' }] },
+      { name: '网关', headers: renamedHeaders(), rows: [sourceRows()[SOURCE_TYPES.GATEWAY_INBOUND]] }
+    ];
+    const xlsxPath = path.join(dir, 'gateway.xlsx');
+    const xlsPath = path.join(dir, 'gateway.xls');
+    writeWorkbook(xlsxPath, sheets);
+    writeWorkbook(xlsPath, sheets);
+
+    await assert.rejects(streamPositionXlsxRows(xlsxPath, { kind: 'source' }), (error) => {
+      assert.equal(error.code, 'position-source-unrecognized');
+      assert.deepEqual(error.detailLines, expectedLines);
+      return true;
+    });
+    await assert.rejects(
+      streamPositionXlsRows(xlsPath, { kind: 'source', allowMainThread: true }),
+      (error) => {
+        assert.equal(error.code, 'position-source-unrecognized');
+        assert.deepEqual(error.detailLines, expectedLines);
+        return true;
+      }
+    );
+    assert.throws(() => readSourceFile(xlsxPath), (error) => {
+      assert.equal(error.code, 'position-source-unrecognized');
+      assert.deepEqual(error.detailLines, expectedLines);
+      return true;
+    });
+  });
+
+  test('预检把未识别文件的差异明细放进逐文件失败结果', async (t) => {
+    const dir = tempDir(t, 'position-header-diff-preflight-');
+    const filePath = path.join(dir, 'gateway.xlsx');
+    writeWorkbook(filePath, [
+      { name: '网关', headers: renamedHeaders(), rows: [sourceRows()[SOURCE_TYPES.GATEWAY_INBOUND]] }
+    ]);
+    const result = await runPositionImportPreflight({
+      jobId: 'v3214-header-diff',
+      kind: 'source',
+      files: [filePath],
+      userDataDir: path.join(dir, 'worker'),
+      sideDbPath: path.join(dir, 'side.sqlite')
+    });
+    assert.equal(result.acceptedOrdinaryInputFiles.length, 0);
+    assert.equal(result.orderedFileResults[0].code, 'position-source-unrecognized');
+    assert.deepEqual(result.orderedFileResults[0].detailLines, [
+      '最接近：中台网关原始入账订单（41 列；文件 41 列）',
+      ...expectedLines.slice(1)
+    ]);
+  });
+
+  test('银行对账单表头不符时列出与 46 列契约的差异，不提示导入模板新版本', async (t) => {
+    const dir = tempDir(t, 'position-bank-header-diff-');
+    const headers = BANK_STATEMENT_FIELDS.map((header) => (header === 'Channel' ? 'channel' : header));
+    const filePath = path.join(dir, 'bank.xlsx');
+    writeWorkbook(filePath, [{ name: BANK_SHEET_NAME, headers, rows: [bankRow({ channel: 'DBS' })] }]);
+    const channelIndex = BANK_STATEMENT_FIELDS.indexOf('Channel');
+    const expected = [
+      '最接近：平盘银行对账单 46 列（46 列；文件 46 列）',
+      `第 ${channelIndex + 1} 列（${String.fromCharCode(65 + channelIndex)}）：应为「Channel」，实际为「channel」`,
+      '缺少列：Channel',
+      '多出列：channel'
+    ];
+    await assert.rejects(streamPositionXlsxRows(filePath, { kind: 'bank' }), (error) => {
+      assert.equal(error.code, 'position-bank-headers-invalid');
+      assert.deepEqual(error.detailLines, expected);
+      return true;
+    });
+    assert.throws(() => readBankFiles([filePath]), (error) => {
+      assert.equal(error.code, 'position-bank-headers-invalid');
+      assert.deepEqual(error.detailLines, expected);
+      return true;
+    });
+  });
+});

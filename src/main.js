@@ -124,6 +124,7 @@ const {
 } = require('./main-process/execution-descriptors/composition');
 const { createBusinessFlowResolver } = require('./main-process/archive-center/business-flow-resolver');
 const { createTemplateResourceService } = require('./main-process/template-resources/service');
+const { INPUT_STRUCTURES } = require('./main-process/template-resources/input-structures');
 const {
   createTaskLifecycle
 } = require('./main-process/archive-center/task-lifecycle');
@@ -4854,6 +4855,17 @@ async function resolveTemplateResourceFileForRead(resourceId) {
 
 // 缓存读取类模板（FundType 枚举、网关表头）的当前取值：用户版本返回导入时在检查 Worker 中解析的取值，主进程不解析用户文件；
 //   内置或服务不可用时返回 builtin，由调用方沿用原路径逻辑读取随包文件。
+// 平盘链接原始表各来源类型的当前导入识别结构（设置 → 模板文件）。
+async function resolvePositionSourceStructures() {
+  const service = getTemplateResourceService();
+  const structures = {};
+  for (const resourceId of Object.keys(INPUT_STRUCTURES)) {
+    const spec = INPUT_STRUCTURES[resourceId];
+    if (spec.group === 'position-sources') structures[spec.moduleKey] = await service.currentInputStructure(resourceId);
+  }
+  return structures;
+}
+
 async function resolveTemplateResourceValues(resourceId) {
   try {
     return await getTemplateResourceService().currentRuntimeValues(resourceId);
@@ -19017,6 +19029,7 @@ function getPositionReconciliationService() {
         userDataDir: path.dirname(database.dbPath),
         templatePath: path.join(__dirname, '..', 'assets', '平盘银行对账单.xlsx'),
         templateSource: getTemplateResourceService().source('position-bank', 'position-reconciliation-process'),
+        resolveSourceStructures: resolvePositionSourceStructures,
         requireExistingSideDb: Boolean(expectedSideDbCheckpoint),
         expectedSideDbCheckpoint,
         expectedPendingOperation: pendingSideDbOperation,

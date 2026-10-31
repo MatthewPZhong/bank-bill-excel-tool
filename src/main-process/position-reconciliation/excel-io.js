@@ -210,24 +210,25 @@ async function writeTableWorkbook({ outputPath, sheetName, headers, rows }) {
   return atomicWorkbookWrite(workbook, outputPath);
 }
 
-async function writeLinkedWorkbook({ outputPath, sourceType, rows }) {
+// headers：当前结构的列（设置 → 模板文件的当前版本），缺省为内置结构。
+async function writeLinkedWorkbook({ outputPath, sourceType, rows, headers = null }) {
   const definition = SOURCE_DEFINITIONS[sourceType];
   if (!definition) throw new Error('未知链接表类型');
   return writeTableWorkbook({
     outputPath,
     sheetName: definition.linkedName,
-    headers: LINK_HEADERS[sourceType],
+    headers: headers || LINK_HEADERS[sourceType],
     rows
   });
 }
 
-async function writeRawWorkbook({ outputPath, sourceType, rows }) {
+async function writeRawWorkbook({ outputPath, sourceType, rows, headers = null }) {
   const definition = SOURCE_DEFINITIONS[sourceType];
   if (!definition) throw new Error('未知原始表类型');
   return writeTableWorkbook({
     outputPath,
     sheetName: definition.sourceName,
-    headers: definition.headers,
+    headers: headers || definition.headers,
     rows
   });
 }

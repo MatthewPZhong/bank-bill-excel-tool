@@ -25,7 +25,10 @@ const {
   parseGatewayReconHeadersWorkbook
 } = require('../../constants/gateway-recon-headers-loader');
 const { GATEWAY_RECON_SIGNATURE } = require('../../constants/table-signatures');
-const { declaredRange, sheetCells } = require('../../constants/sheetjs-sparse-cells');
+const { ALL_CELLS, declaredRange, sheetCells } = require('../../constants/sheetjs-sparse-cells');
+const { TEMPLATE_RESOURCES } = require('./catalog');
+const { INPUT_STRUCTURES, inputStructureOf } = require('./input-structures');
+const { firstSheetHeaders } = require('./workbook-structure');
 const { MAX_EXCEL_ROW_HEIGHT } = require('../vcc-financial-op-writer');
 const { probePendingTemplate } = require('../vcc-financial-op-result-workbook-writer');
 
@@ -438,6 +441,67 @@ const vccPendingContract = {
   }
 };
 
+const sameHeaders = (left = [], right = []) => left.length === right.length && left.every((header, index) => header === right[index]);
+
+// 表头行以下有文本的行数（只数有值的单元格，不展开整张表）。
+function rowsBelowHeader(sheet, headerRow) {
+  const rows = new Set();
+  for (const cell of sheetCells(sheet, ALL_CELLS)) {
+    if (cell.r > headerRow - 1 && String(cell.value ?? '').trim()) rows.add(cell.r);
+  }
+  return rows.size;
+}
+
+// 输入原表：模板第 1 个工作表的表头行即导入识别结构，启用后对应模块导入时只认这一结构。
+//   必用列须保留且同名；同组的表结构不能相同（导入时无法区分）；与当前版本的列变化写入 diff，由“取值变化”展示。
+function inputStructureContract(resourceId) {
+  const spec = inputStructureOf(resourceId);
+  const headerRow = TEMPLATE_RESOURCES.find((resource) => resource.id === resourceId).headerRow;
+  return {
+    engine: 'sheetjs',
+    check(workbook, list, context) {
+      const sheetName = workbook.SheetNames[0];
+      if (!sheetName) {
+        list.add('Sheet 结构', 'fail', '文件中没有工作表');
+        return {};
+      }
+      if (workbook.SheetNames.length > 1) {
+        list.add('Sheet 结构', 'warn', `共 ${workbook.SheetNames.length} 个工作表，只读取第 1 个「${sheetName}」`);
+      } else {
+        list.add('Sheet 结构', 'pass', `读取「${sheetName}」`);
+      }
+      const headers = firstSheetHeaders(workbook, headerRow);
+      if (!headers.length) {
+        list.add('表头', 'fail', `第 ${headerRow} 行没有表头`);
+        return {};
+      }
+      const blankColumns = headers.map((header, index) => (header ? 0 : index + 1)).filter(Boolean);
+      const duplicates = [...new Set(headers.filter((header, index) => header && headers.indexOf(header) !== index))];
+      if (blankColumns.length) list.add('表头', 'fail', `第 ${listText(blankColumns.map(String), 5)} 列表头为空`);
+      else if (duplicates.length) list.add('表头', 'fail', `列名重复：${listText(duplicates, 5)}`);
+      else list.add('表头', 'pass', `${headers.length} 列`);
+      const required = spec.required();
+      const missing = required.filter((header) => !headers.includes(header));
+      if (missing.length) list.add('必用列', 'fail', `缺少 ${listText(missing, 10)}（程序按列名读取，区分大小写）`);
+      else list.add('必用列', 'pass', `${required.length} 个均存在`);
+      const conflict = context.peerStructures.find((peer) => sameHeaders(peer.headers, headers));
+      if (conflict) list.add('识别冲突', 'fail', `与「${conflict.name}」当前结构相同，导入时无法区分`);
+      const dataRows = rowsBelowHeader(workbook.Sheets[sheetName], headerRow);
+      if (dataRows) list.add('数据行', 'warn', `表头以下有 ${dataRows} 行内容：只使用表头，但版本文件会保留这些内容，建议删除后再导入`);
+      const current = context.currentValues;
+      const diff = diffValues(current, headers);
+      if (current.length && !sameHeaders(current, headers)) {
+        const parts = [];
+        if (diff.added.length) parts.push(`增加 ${listText(diff.added, 5)}`);
+        if (diff.removed.length) parts.push(`删除 ${listText(diff.removed, 5)}`);
+        if (!parts.length) parts.push('列顺序调整');
+        list.add('结构变化', 'warn', `启用后导入只认新结构：${parts.join('；')}`);
+      }
+      return { diff };
+    }
+  };
+}
+
 const CONTRACTS = Object.freeze({
   'prefund-unbalanced': prefundContract,
   'dup-recall-mail': mailContract,
@@ -445,7 +509,8 @@ const CONTRACTS = Object.freeze({
   'position-bank': positionContract,
   'fund-type-enum': fundTypeContract,
   'gateway-recon': gatewayContract,
-  'vcc-pending-calc': vccPendingContract
+  'vcc-pending-calc': vccPendingContract,
+  ...Object.fromEntries(Object.keys(INPUT_STRUCTURES).map((resourceId) => [resourceId, inputStructureContract(resourceId)]))
 });
 
 function diffValues(before = [], after = []) {
@@ -493,7 +558,7 @@ function hasContract(resourceId) {
 }
 
 // 契约检查：不含文件格式、大小与重复版本等导入专属检查，用于导入预检与已存版本的兼容复核。
-//   context: { builtinSheetNames, currentValues, references }
+//   context: { builtinSheetNames, currentValues, peerStructures, references }
 async function inspectContract(resourceId, bytes, context = {}) {
   const contract = CONTRACTS[resourceId];
   if (!contract) throw new Error(`模板「${resourceId}」没有导入契约`);
@@ -501,6 +566,7 @@ async function inspectContract(resourceId, bytes, context = {}) {
   const fullContext = {
     builtinSheetNames: context.builtinSheetNames,
     currentValues: context.currentValues || [],
+    peerStructures: context.peerStructures || [],
     references: context.references || { fundTypeValues: new Set(), gatewayFields: new Set() },
     printAreas: new Map()
   };

@@ -14,6 +14,7 @@ const {
 } = require('./contracts');
 const { DEFAULT_INSPECTION_LIMITS, runTemplateInspection } = require('./inspection-runner');
 const { RUNTIME_VALUE_PARSERS, describeWorkbook, parseRuntimeValues } = require('./workbook-structure');
+const { inputStructureOf, inputStructurePeers } = require('./input-structures');
 const { writeFileAtomicDurable } = require('../background-execution/durable-file');
 
 // 内置版本固定为 v1、随应用打包只读；用户版本 v2 起存 {userData}/template-resources/<resourceId>/<versionId>.xlsx，
@@ -590,8 +591,56 @@ function createTemplateResourceService({
     return collectScenarioReferences(typeof store.listScenarioConfigs === 'function' ? store.listScenarioConfigs() : []);
   }
 
+  // 只有 FundType 枚举与网关表头受场景引用保护；输入原表的表头没有场景引用。
   function referencedValuesOf(resource, references) {
-    return resource.id === 'gateway-recon' ? references.gatewayFields : references.fundTypeValues;
+    if (resource.id === 'gateway-recon') return references.gatewayFields;
+    if (resource.id === 'fund-type-enum') return references.fundTypeValues;
+    return new Set();
+  }
+
+  const displayNameOf = (resource) => fileNameOf(resource).replace(/\.xlsx?$/i, '');
+  const sameHeaders = (left, right) => left.length === right.length && left.every((header, index) => header === right[index]);
+
+  // 同组输入原表（如平盘 5 张链接原始表）各自当前版本的表头：导入时按表头区分来源，结构不能相同。
+  async function peerStructuresOf(resource, snapshot) {
+    const peers = [];
+    for (const peerId of inputStructurePeers(resource.id)) {
+      const peer = findResource(peerId);
+      const { versions, currentVersionId } = stateOf(snapshot, peerId);
+      const current = await versionComparableValues(peer, currentVersionId, versions);
+      if (Array.isArray(current.values)) peers.push({ name: displayNameOf(peer), headers: current.values });
+    }
+    return peers;
+  }
+
+  // 输入原表当前版本的导入识别结构。内置版本返回代码中的结构；用户版本先复核文件（存在、SHA-256、契约），
+  //   再返回导入时在检查 Worker 中解析的表头（主进程不解析用户文件）。不可用时由调用方中止导入并提示。
+  async function currentInputStructure(resourceId) {
+    const resource = findResource(resourceId);
+    const spec = inputStructureOf(resourceId);
+    if (!resource || !spec) throw new TypeError(`模板没有导入识别结构：${resourceId}`);
+    const { versions, currentVersionId } = stateOf(readStore(), resource.id);
+    if (currentVersionId === BUILTIN_VERSION_ID) {
+      return { status: 'builtin', versionId: BUILTIN_VERSION_ID, label: 'V1', headers: spec.builtinHeaders() };
+    }
+    const version = versions.find((item) => item.versionId === currentVersionId);
+    const label = labelOf(currentVersionId);
+    const name = displayNameOf(resource);
+    const inspected = await inspectUserVersion(resource, version);
+    if (!inspected.ok) {
+      return {
+        status: 'unavailable',
+        versionId: currentVersionId,
+        label,
+        message: `模板「${name}」当前版本 ${label} 不可用：${inspected.message}${inspected.transient ? '' : `。${SETTINGS_HINT}`}`
+      };
+    }
+    const snapshot = version.structure && version.structure.comparableValues;
+    if (!Array.isArray(snapshot) || !snapshot.length) {
+      return { status: 'unavailable', versionId: currentVersionId, label, message: `模板「${name}」当前版本 ${label} 缺少表头记录。${SETTINGS_HINT}` };
+    }
+    log({ level: 'info', message: `模板文件：${name} 使用用户版本 ${label}（导入识别结构）`, details: [`SHA-256：${version.sha256.slice(0, 12)}`] });
+    return { status: 'user', versionId: currentVersionId, label, headers: [...snapshot] };
   }
 
   // 从一个版本切到另一个版本会移除的、已被场景使用的取值（与导入预检的场景引用保护同口径）。
@@ -685,6 +734,7 @@ function createTemplateResourceService({
     const inspected = await inspectUserBytes(resource, bytes, {
       builtinSheetNames: (builtin.sheets || []).map((sheet) => sheet.name),
       currentValues: baseline.values || [...referencedValuesOf(resource, references)],
+      peerStructures: inputStructureOf(resource.id) ? await peerStructuresOf(resource, snapshot) : [],
       references: { fundTypeValues: [...references.fundTypeValues], gatewayFields: [...references.gatewayFields] },
       describe: true
     });
@@ -704,11 +754,18 @@ function createTemplateResourceService({
         : `与 ${same.label} 内容相同，可在“版本”中直接启用`);
     } else if (contract.ok) {
       const enumLike = resource.type === 'enum' || resource.id === 'gateway-recon';
-      add('与当前版本', 'info', enumLike
-        ? (contract.diff.added.length || contract.diff.removed.length
+      const changed = contract.diff.added.length || contract.diff.removed.length;
+      let detail = '表头不变，样式或内容有变化';
+      if (enumLike) {
+        detail = changed
           ? `新增 ${contract.diff.added.length} 个 · 移除 ${contract.diff.removed.length} 个`
-          : '取值不变，文件内容有变化')
-        : '表头不变，样式或内容有变化');
+          : '取值不变，文件内容有变化';
+      } else if (inputStructureOf(resource.id)) {
+        detail = changed
+          ? `增加 ${contract.diff.added.length} 列 · 删除 ${contract.diff.removed.length} 列`
+          : '列名不变，列顺序或其他内容有变化';
+      }
+      add('与当前版本', 'info', detail);
     }
     checks.push(...usageChecks(resource, contract.ok));
 
@@ -852,6 +909,12 @@ function createTemplateResourceService({
           const names = `${removed.values.slice(0, 5).join('、')}${removed.values.length > 5 ? ` 等 ${removed.values.length} 个` : ''}`;
           return { status: 'failed', message: `${toLabel} 不能启用：缺少已被场景使用的取值 ${names}` };
         }
+        // 输入原表：同组其他表的当前结构可能在导入后变化，启用前再核对一次，避免导入时无法区分来源。
+        if (inputStructureOf(resource.id)) {
+          const headers = (await versionComparableValues(resource, target.versionId, versions)).values;
+          const conflict = headers && (await peerStructuresOf(resource, snapshot)).find((peer) => sameHeaders(peer.headers, headers));
+          if (conflict) return { status: 'failed', message: `${toLabel} 不能启用：与「${conflict.name}」当前结构相同，导入时无法区分` };
+        }
       }
       const action = versionId === BUILTIN_VERSION_ID ? '恢复默认' : '启用';
       const createdAt = now().toISOString();
@@ -944,6 +1007,7 @@ function createTemplateResourceService({
     source,
     resolveCurrentFile,
     currentRuntimeValues,
+    currentInputStructure,
     rememberPickedFile,
     prepareImport,
     discardImport,

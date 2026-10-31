@@ -21,6 +21,9 @@ const {
   deriveLinkedRowsForRecord
 } = require('../../main-process/position-reconciliation/derivation');
 const {
+  sourceDefinitionsFor
+} = require('../../main-process/position-reconciliation/source-structures');
+const {
   assertStagedInputUnchangedAsync
 } = require('../../main-process/position-reconciliation/input-staging');
 const {
@@ -477,6 +480,7 @@ async function applySourceFile({
   cancelToken,
   mappings,
   sstOptions,
+  sourceDefinitions,
   onProgress,
   startedAt,
   ledgerSizeBytes,
@@ -529,6 +533,7 @@ async function applySourceFile({
         allowMainThread: false,
         sstTempRoot: path.join(descriptor.stagingDir, 'sst-apply'),
         ...(sstOptions || {}),
+        sourceDefinitions,
         onRow: ({
           row,
           excelRowNumber,
@@ -1011,6 +1016,8 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
         cancelToken: input.cancelToken,
         mappings,
         sstOptions: input.sstOptions,
+        // 与预检同一份冻结结构：写入时重读暂存文件仍按预检时的结构识别。
+        sourceDefinitions: sourceDefinitionsFor(input.sourceStructures),
         onProgress: input.onProgress,
         startedAt,
         ledgerSizeBytes: preflightReady.ledgerEvidence.ledgerSizeBytes,

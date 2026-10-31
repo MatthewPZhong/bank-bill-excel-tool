@@ -1,6 +1,7 @@
 'use strict';
 
 const { positionInputFilePlanEvidence, positionOutputFilePlanEvidence } = require('./archive-file-plan-evidence');
+const { positionReconciliationFailureResult } = require('./operation-lifecycle');
 
 function positionPreflightFailure(error) {
   return {
@@ -132,98 +133,116 @@ function createPositionSourceImportTaskContract({
   getService,
   withSourceLock
 } = {}) {
+  async function prepareSelected(choice, service, onPrepared) {
+    const preparedImport = await service.prepareSourceImportForLifecycle(choice.filePaths);
+    onPrepared(preparedImport);
+    const plan = preparedImport.plan;
+    const preflightReady = plan && plan.preflightReady;
+    const legacyEntries = plan && plan.engine === 'legacy' ? plan.entries : [];
+    const staged = plan && plan.engine === 'streaming'
+      ? [
+          ...(preflightReady.acceptedOrdinaryInputFiles || []),
+          ...(preflightReady.accountConfirmationDescriptor
+            ? [preflightReady.accountConfirmationDescriptor]
+            : [])
+        ]
+      : legacyEntries
+        .filter((entry) => entry.parsed && entry.parsed.archivePath)
+        .map((entry) => entry.parsed);
+    const resultFiles = !plan && preparedImport.result
+      ? (preparedImport.result.results || []).filter((item) => item.archivePath)
+      : [];
+    const stagedFiles = staged.length > 0 ? staged : resultFiles;
+    const selectedCount = choice.filePaths.length;
+    const executionInputIndexes = [];
+    if (plan && plan.engine === 'streaming') {
+      for (let index = 0; index < (preflightReady.acceptedOrdinaryInputFiles || []).length; index += 1) {
+        executionInputIndexes.push(selectedCount + index);
+      }
+    } else if (plan && plan.engine === 'legacy') {
+      let stagedIndex = 0;
+      for (const entry of legacyEntries) {
+        if (!entry.parsed || !entry.parsed.archivePath) continue;
+        if (entry.status === 'prepared') executionInputIndexes.push(selectedCount + stagedIndex);
+        stagedIndex += 1;
+      }
+    }
+    const outputFiles = preflightReady && Array.isArray(preflightReady.outputFiles)
+      ? preflightReady.outputFiles
+      : preparedImport.result && Array.isArray(preparedImport.result.outputFiles)
+        ? preparedImport.result.outputFiles
+        : [];
+    return {
+      proceed: true,
+      preparedImport,
+      executionInputIndexes: Object.freeze(executionInputIndexes),
+      positionArchiveEvidence: Object.freeze({
+        inputs: Object.freeze([
+          ...choice.filePaths.map(() => Object.freeze({})),
+          ...stagedFiles.map((file) => Object.freeze({
+            sourceType: file.sourceType,
+            sha256: file.stagedSha256,
+            sizeBytes: file.stagedSizeBytes
+          }))
+        ]),
+        outputs: Object.freeze(outputFiles.map((file) => Object.freeze({
+          sourceSnapshot: file.sourceSnapshot,
+          sha256: file.expectedSha256 || file.sha256,
+          sizeBytes: file.sizeBytes,
+          requiredInputPaths: file.requiredInputPaths,
+          metadata: file.metadata
+        })))
+      }),
+      filePlan: {
+        version: 1,
+        allocation: 'eager',
+        inputs: [
+          ...choice.filePaths.map((filePath) => ({
+            filePath,
+            role: 'input',
+            sourceOperation: 'position-reconciliation:source:prepare-import'
+          })),
+          ...stagedFiles.map((file) => ({
+            filePath: file.archivePath,
+            ...positionInputFilePlanEvidence(file),
+            role: 'input',
+            originalName: file.fileName,
+            sourceOperation: 'position-reconciliation:source:prepare-import'
+          }))
+        ],
+        outputs: outputFiles.map((file) => ({
+          filePath: file.filePath,
+          ...positionOutputFilePlanEvidence(file),
+          role: 'output',
+          originalName: file.originalName,
+          sourceOperation: 'position-reconciliation:source:prepare-import'
+        }))
+      },
+      onAbandon: () => service.abandonPreparedSourceImport(preparedImport.plan)
+    };
+  }
+
   return {
+    // 准备阶段的异常转为失败结果返回：IPC 不 reject，界面能显示错误码与明细。
     async prepare() {
       const choice = await pickFiles();
       if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
         return { proceed: false, result: { status: 'cancelled' } };
       }
-      const service = getService();
-      const preparedImport = await service.prepareSourceImportForLifecycle(choice.filePaths);
-      const plan = preparedImport.plan;
-      const preflightReady = plan && plan.preflightReady;
-      const legacyEntries = plan && plan.engine === 'legacy' ? plan.entries : [];
-      const staged = plan && plan.engine === 'streaming'
-        ? [
-            ...(preflightReady.acceptedOrdinaryInputFiles || []),
-            ...(preflightReady.accountConfirmationDescriptor
-              ? [preflightReady.accountConfirmationDescriptor]
-              : [])
-          ]
-        : legacyEntries
-          .filter((entry) => entry.parsed && entry.parsed.archivePath)
-          .map((entry) => entry.parsed);
-      const resultFiles = !plan && preparedImport.result
-        ? (preparedImport.result.results || []).filter((item) => item.archivePath)
-        : [];
-      const stagedFiles = staged.length > 0 ? staged : resultFiles;
-      const selectedCount = choice.filePaths.length;
-      const executionInputIndexes = [];
-      if (plan && plan.engine === 'streaming') {
-        for (let index = 0; index < (preflightReady.acceptedOrdinaryInputFiles || []).length; index += 1) {
-          executionInputIndexes.push(selectedCount + index);
+      let service = null;
+      let preparedImport = null;
+      try {
+        service = getService();
+        return await prepareSelected(choice, service, (value) => { preparedImport = value; });
+      } catch (error) {
+        // 已完成预检但还没交给 lifecycle：释放等待写入授权的 worker 与暂存文件。
+        if (preparedImport && preparedImport.requiresExecution) {
+          try {
+            await service.abandonPreparedSourceImport(preparedImport.plan);
+          } catch (_abandonError) { /* 保留原错误 */ }
         }
-      } else if (plan && plan.engine === 'legacy') {
-        let stagedIndex = 0;
-        for (const entry of legacyEntries) {
-          if (!entry.parsed || !entry.parsed.archivePath) continue;
-          if (entry.status === 'prepared') executionInputIndexes.push(selectedCount + stagedIndex);
-          stagedIndex += 1;
-        }
+        return { proceed: false, result: positionReconciliationFailureResult(error) };
       }
-      const outputFiles = preflightReady && Array.isArray(preflightReady.outputFiles)
-        ? preflightReady.outputFiles
-        : preparedImport.result && Array.isArray(preparedImport.result.outputFiles)
-          ? preparedImport.result.outputFiles
-          : [];
-      return {
-        proceed: true,
-        preparedImport,
-        executionInputIndexes: Object.freeze(executionInputIndexes),
-        positionArchiveEvidence: Object.freeze({
-          inputs: Object.freeze([
-            ...choice.filePaths.map(() => Object.freeze({})),
-            ...stagedFiles.map((file) => Object.freeze({
-              sourceType: file.sourceType,
-              sha256: file.stagedSha256,
-              sizeBytes: file.stagedSizeBytes
-            }))
-          ]),
-          outputs: Object.freeze(outputFiles.map((file) => Object.freeze({
-            sourceSnapshot: file.sourceSnapshot,
-            sha256: file.expectedSha256 || file.sha256,
-            sizeBytes: file.sizeBytes,
-            requiredInputPaths: file.requiredInputPaths,
-            metadata: file.metadata
-          })))
-        }),
-        filePlan: {
-          version: 1,
-          allocation: 'eager',
-          inputs: [
-            ...choice.filePaths.map((filePath) => ({
-              filePath,
-              role: 'input',
-              sourceOperation: 'position-reconciliation:source:prepare-import'
-            })),
-            ...stagedFiles.map((file) => ({
-              filePath: file.archivePath,
-              ...positionInputFilePlanEvidence(file),
-              role: 'input',
-              originalName: file.fileName,
-              sourceOperation: 'position-reconciliation:source:prepare-import'
-            }))
-          ],
-          outputs: outputFiles.map((file) => ({
-            filePath: file.filePath,
-            ...positionOutputFilePlanEvidence(file),
-            role: 'output',
-            originalName: file.originalName,
-            sourceOperation: 'position-reconciliation:source:prepare-import'
-          }))
-        },
-        onAbandon: () => service.abandonPreparedSourceImport(preparedImport.plan)
-      };
     },
     async execute(_event, prepared, taskContext) {
       const service = getService();

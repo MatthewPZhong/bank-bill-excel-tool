@@ -37,6 +37,16 @@ function resource(definition) {
 
 const REPLACEABLE = Object.freeze({ allowed: true });
 
+// 平盘链接原始表：导入时按当前版本第 1 个工作表的表头识别（契约见 ./contracts.js inputStructureContract）。
+const POSITION_INPUT_STRUCTURE = Object.freeze({
+  readMode: 'runtime',
+  bindings: [binding('position-reconciliation-process', '链接表导入 · 识别结构', 'runtime')],
+  replace: REPLACEABLE,
+  cache: '不缓存，每次导入开始时读取',
+  failure: '当前版本缺失、被修改或不兼容时导入中止，提示恢复默认或重新导入',
+  effect: '下次导入；只认当前版本结构，必用列须保留'
+});
+
 const TEMPLATE_RESOURCES = Object.freeze([
   // 输出模板
   resource({
@@ -126,16 +136,11 @@ const TEMPLATE_RESOURCES = Object.freeze([
     bindings: [binding('biz-op-recon', '导入结构参考'), binding('vcc-op-calc', '导入结构参考')] }),
   resource({ id: 'doc-recon-unbalanced', path: 'assets/单据对账导出不平.xlsx', type: 'input', readMode: 'sample',
     bindings: [binding('recon-id-fix', '导入结构参考 · 4 张 Sheet')] }),
-  resource({ id: 'position-payment-full', path: 'assets/中台测试付款全量信息表.xlsx', type: 'input', readMode: 'sample',
-    bindings: [binding('position-reconciliation-process', '链接表导入结构参考')] }),
-  resource({ id: 'position-gateway-raw-in', path: 'assets/中台网关原始入账订单.xlsx', type: 'input', readMode: 'sample',
-    bindings: [binding('position-reconciliation-process', '链接表导入结构参考')] }),
-  resource({ id: 'position-gateway-raw-out', path: 'assets/中台网关原始出账订单.xlsx', type: 'input', readMode: 'sample',
-    bindings: [binding('position-reconciliation-process', '链接表导入结构参考')] }),
-  resource({ id: 'position-transfer-orders', path: 'assets/中台调拨订单表.xlsx', type: 'input', readMode: 'sample',
-    bindings: [binding('position-reconciliation-process', '链接表导入结构参考')] }),
-  resource({ id: 'position-bank-accounts', path: 'assets/清结算银行账户表.xlsx', type: 'input', readMode: 'sample',
-    bindings: [binding('position-reconciliation-process', '链接表导入结构参考')] }),
+  resource({ id: 'position-payment-full', path: 'assets/中台测试付款全量信息表.xlsx', type: 'input', ...POSITION_INPUT_STRUCTURE }),
+  resource({ id: 'position-gateway-raw-in', path: 'assets/中台网关原始入账订单.xlsx', type: 'input', ...POSITION_INPUT_STRUCTURE }),
+  resource({ id: 'position-gateway-raw-out', path: 'assets/中台网关原始出账订单.xlsx', type: 'input', ...POSITION_INPUT_STRUCTURE }),
+  resource({ id: 'position-transfer-orders', path: 'assets/中台调拨订单表.xlsx', type: 'input', ...POSITION_INPUT_STRUCTURE }),
+  resource({ id: 'position-bank-accounts', path: 'assets/清结算银行账户表.xlsx', type: 'input', ...POSITION_INPUT_STRUCTURE }),
   resource({ id: 'vcc-removed-pending', path: 'assets/VCC财务OP校验/VCC_移除归档Pending账单.xlsx', type: 'input', readMode: 'sample',
     bindings: [binding('vcc-financial-op', '导入结构参考 · 46 列')] }),
   resource({ id: 'vcc-recharge-refund', path: 'assets/VCC财务OP校验/VCC充值清退明细.xlsx', type: 'input', readMode: 'sample',

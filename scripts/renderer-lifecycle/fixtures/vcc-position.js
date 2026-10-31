@@ -296,6 +296,28 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     assert.deepEqual(result,{confirmation:true,left:'left',cancelled:['source-a','source-b'],applied:0,count:0});
   });
 
+  await test('Position 源表导入被拒或全部失败时弹出原因，进度弹窗关闭且无未处理异常', async () => {
+    await setup();
+    const result = await js(`(async()=>{
+      fixture.api.prepareSourceImport=async()=>{throw new Error("Error invoking remote method 'position-reconciliation:source:prepare-import': PositionReconciliationError: 平盘导入 utilityProcess 异常退出");};
+      await fixture.ui.handleSourceImport();await fixture.tick();
+      const rejected=document.getElementById('modalRoot').textContent;
+      fixture.clickText('确认');await fixture.tick();
+      fixture.api.prepareSourceImport=async()=>({status:'failed',message:'所选链接原始表全部导入失败',results:[
+        {status:'failed',fileName:'gateway.xlsx',message:'无法通过表头识别链接原始表：gateway.xlsx',
+          detailLines:['第 20 列（T）：应为「fieldId」，实际为「fileId」']}]});
+      await fixture.ui.handleSourceImport();await fixture.tick();
+      const failed=document.getElementById('modalRoot').textContent;
+      return {rejected,failed,progress:document.querySelectorAll('.position-import-progress-dialog').length,errors:window.__testErrors};
+    })()`);
+    assert.match(result.rejected,/平盘导入 utilityProcess 异常退出/);
+    assert.doesNotMatch(result.rejected,/Error invoking remote method/);
+    assert.match(result.failed,/gateway\.xlsx：无法通过表头识别链接原始表/);
+    assert.match(result.failed,/应为「fieldId」，实际为「fileId」/);
+    assert.equal(result.progress,0);
+    assert.deepEqual(result.errors,[]);
+  });
+
   await test('Position 已提交银行写入仍拒绝导航，不把提交当作取消', async () => {
     await setup();
     const result = await js(`(async()=>{
