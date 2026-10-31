@@ -22,6 +22,7 @@ const {
 const { validateResultTemplateWorkbook } = require('../position-reconciliation/excel-io');
 const { BANK_SHEET_NAME, POSITION_BANK_HEADERS } = require('../position-reconciliation/constants');
 const { BANK_STATEMENT_FIELDS } = require('../../constants/bank-statement-fields');
+const { canonicalHeaderMapping, describeCanonicalMapping } = require('../../backend/file-service/header-structure-diff');
 const { parseFundTypeEnumWorkbook } = require('../../constants/fund-type-enum');
 const {
   CUSTOM_VALUE_SENTINEL,
@@ -560,6 +561,13 @@ function inputStructureContract(resourceId) {
         else if (sheet.referenceKey) list.add(label('场景引用', sheet), 'pass', '不影响已有场景');
       });
 
+      // 按内置列存储的模块：展示当前版本对应回内置列的结果（改名按位置对应、导入后为空、不导入）。
+      if (spec.storage === 'canonical') {
+        spec.sheets.forEach((sheet, index) => {
+          const lines = describeCanonicalMapping(canonicalHeaderMapping(sheet.builtinHeaders(), headersBySheet[index]));
+          if (lines.length) list.add(label('列对应', sheet), 'warn', `入库与导出仍按内置列：${lines.join('；')}`);
+        });
+      }
       if (single) {
         const conflict = context.peerStructures.find((peer) => sameHeaders(peer.headers, headersBySheet[0]));
         if (conflict) list.add('识别冲突', 'fail', `与「${conflict.name}」当前结构相同，导入时无法区分`);

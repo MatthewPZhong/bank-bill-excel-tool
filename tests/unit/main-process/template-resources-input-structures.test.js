@@ -69,7 +69,7 @@ test('输入原表结构规格：已接入的资源可替换；平盘 5 张为�
   const ids = Object.keys(INPUT_STRUCTURES).sort();
   assert.deepEqual(ids, [
     'doc-recon-unbalanced', 'position-bank-accounts', 'position-gateway-raw-in', 'position-gateway-raw-out',
-    'position-payment-full', 'position-transfer-orders'
+    'position-payment-full', 'position-transfer-orders', 'removed-pending'
   ]);
   for (const id of ids) {
     const resource = TEMPLATE_RESOURCES.find((item) => item.id === id);

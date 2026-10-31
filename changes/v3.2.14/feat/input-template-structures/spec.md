@@ -205,3 +205,21 @@ Codex 已核查未发现缺陷的方面：冻结结构在预检、重放、异�
 | `task-policy-registry.js`、`legacy-task-policies.js`、`architecture/boundaries.json` | 新通道登记为 exclude / read-only-query；`renderer-dialog-scenarios.allowedApiFields` 放宽并以 `24d1ea82` 为来源登记 policyChanges |
 
 偏离与说明：托管服务路径（生产未启用）未接入，登记 B38；场景引用保护对“恢复默认”不生效（与 FundType / 网关一致，保证随时可回退）。
+
+## 11. 第二批 · 移除归档 Pending 账单（`removed-pending`）
+
+### 11.1 现状与方案
+
+- 现状：`pending-import/removed-reader.js` 读第 1 个 sheet，表头须与内置 46 列逐列一致；行以内置列名存入 `removed_pending_rows.raw_json`（另抽 6 个索引列），导出按内置 46 列重建；移除核对按对账规则 `matchFields` / `compareFields` 的列名读 raw，而规则只能引用 Pending 主表的列（`assertFieldsInPendingColumns`）。生产已有存量数据，导入后不再重读原文件。
+- 必用列：前 28 列（与 Pending 主表共有，即规则可引用、且存在于移除文件中的全部列，含 6 个索引列）。后 18 列流水扩展字段可改名、增删。
+- 识别只认当前版本表头（口径不变：格式化文本、去首尾空格、末尾空单元格计入列数）；不符时原错误码，附与当前结构的逐列差异与指引。
+- 入库前按通用工具 `canonicalHeaderMapping` 对应回内置 46 列：同名优先；内置列找不到同名、且同一位置上的列也不是内置列名时视为改名（按位置）；仍对应不上的内置列为空；多出的列不导入。存量数据、对账规则与导出不变。模板预检以「列对应」提示展示改名、置空与不导入。
+
+### 11.2 实施记录
+
+| 文件 | 内容 |
+| --- | --- |
+| `backend/file-service/header-structure-diff.js` | 新增 `canonicalHeaderMapping` / `projectRowToCanonical` / `describeCanonicalMapping`（VCC 等按内置列存储的模块复用） |
+| `backend/pending-import/removed-reader.js` | `readRemovedPendingFile(filePath, { structure })`：按当前结构识别并对应回内置 46 列；新增 `REMOVED_PENDING_REQUIRED_COLUMNS`、`readRemovedPendingHeaders` |
+| `template-resources/{input-structures,contracts,catalog}.js` | 登记 `removed-pending`（`storage: 'canonical'`）；契约对按内置列存储的资源增加「列对应」提示；资源改为可替换 |
+| `main.js` | `pending:removed:import` 读取当前结构，不可用时不入库 |

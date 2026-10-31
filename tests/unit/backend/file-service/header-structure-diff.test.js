@@ -95,3 +95,32 @@ test('大量位置差异时截断，明细不超过 100 行', () => {
   assert.ok(lines.includes('多出列：inserted'));
   assert.equal(lines[lines.length - 1], TEMPLATE_STRUCTURE_HINT);
 });
+
+const {
+  canonicalHeaderMapping,
+  describeCanonicalMapping,
+  projectRowToCanonical
+} = require('../../../../src/backend/file-service/header-structure-diff');
+
+test('对应回内置列：同名优先，同一位置的非内置列名视为改名，其余置空或不导入', () => {
+  const canonical = ['id', 'amount', 'memo', 'extra1', 'extra2'];
+  const mapping = canonicalHeaderMapping(canonical, ['amount', 'id', 'note', 'extra1', 'newCol', 'tail']);
+  // memo（第 3 列）→ 同位置 note 视为改名；extra2（第 5 列）同位置 newCol 视为改名；tail 不导入。
+  assert.deepEqual(mapping.sourceIndex, [1, 0, 2, 3, 4]);
+  assert.deepEqual(mapping.renamed, [
+    { column: 3, from: 'memo', to: 'note' },
+    { column: 5, from: 'extra2', to: 'newCol' }
+  ]);
+  assert.deepEqual(mapping.emptied, []);
+  assert.deepEqual(mapping.dropped, ['tail']);
+  assert.deepEqual(projectRowToCanonical(['10', 'A', 'n', 'e1', 'x', 't'], mapping.sourceIndex), ['A', '10', 'n', 'e1', 'x']);
+});
+
+test('同一位置是另一个内置列名或已被使用时不按位置改名，内置列置空', () => {
+  const mapping = canonicalHeaderMapping(['a', 'b', 'c'], ['a', 'c']);
+  assert.deepEqual(mapping.sourceIndex, [0, -1, 1]);
+  assert.deepEqual(mapping.renamed, []);
+  assert.deepEqual(mapping.emptied, ['b']);
+  assert.deepEqual(describeCanonicalMapping(mapping), ['导入后为空：b']);
+  assert.deepEqual(projectRowToCanonical(['1', '3'], mapping.sourceIndex), ['1', undefined, '3']);
+});

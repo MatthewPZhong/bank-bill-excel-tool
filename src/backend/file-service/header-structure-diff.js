@@ -109,8 +109,62 @@ function describeHeaderMismatch({ sheets, candidates, hint = TEMPLATE_STRUCTURE_
   return lines.slice(0, MAX_DETAIL_LINES);
 }
 
+// 按内置列存储的模块（存量数据、导出与下游按内置列名读取）：把当前版本的表头对应回内置列。
+//   先按列名对应；内置列在当前版本中找不到同名列、且同一位置上的列也不是任何内置列名时，视为该列改名（按位置对应）；
+//   仍对应不上的内置列导入后为空；当前版本多出的列不导入。必用列须同名存在，由模板预检保证，不走按位置改名。
+//   返回 sourceIndex[i] = 内置第 i 列取文件第几列（-1 为空），以及改名、置空、不导入三类说明。
+function canonicalHeaderMapping(canonicalHeaders, versionHeaders) {
+  const canonical = normalizeHeaders(canonicalHeaders);
+  const version = normalizeHeaders(versionHeaders);
+  const canonicalSet = new Set(canonical);
+  const byName = new Map();
+  version.forEach((header, index) => {
+    if (header && !byName.has(header)) byName.set(header, index);
+  });
+  const used = new Set();
+  const sourceIndex = canonical.map((header) => {
+    const index = byName.has(header) ? byName.get(header) : -1;
+    if (index >= 0) used.add(index);
+    return index;
+  });
+  const renamed = [];
+  canonical.forEach((header, index) => {
+    if (sourceIndex[index] !== -1 || index >= version.length || used.has(index)) return;
+    const candidate = version[index];
+    if (!candidate || canonicalSet.has(candidate)) return;
+    sourceIndex[index] = index;
+    used.add(index);
+    renamed.push({ column: index + 1, from: header, to: candidate });
+  });
+  return {
+    sourceIndex,
+    renamed,
+    emptied: canonical.filter((_header, index) => sourceIndex[index] === -1),
+    dropped: version.filter((header, index) => header && !used.has(index))
+  };
+}
+
+// 把一行按当前版本列序读出的取值转换为按内置列序的取值。
+function projectRowToCanonical(values, sourceIndex) {
+  return sourceIndex.map((index) => (index >= 0 ? values[index] : undefined));
+}
+
+// 模板预检展示：当前版本相对内置列的对应关系（改名、导入后为空、不导入）。
+function describeCanonicalMapping(mapping) {
+  const lines = [];
+  if (mapping.renamed.length) {
+    lines.push(`按位置视为改名：${mapping.renamed.slice(0, MAX_LISTED_COLUMNS).map((item) => `第 ${item.column} 列「${item.to}」→「${item.from}」`).join('、')}${mapping.renamed.length > MAX_LISTED_COLUMNS ? ` 等 ${mapping.renamed.length} 列` : ''}`);
+  }
+  if (mapping.emptied.length) lines.push(`导入后为空：${listText(mapping.emptied)}`);
+  if (mapping.dropped.length) lines.push(`不导入：${listText(mapping.dropped)}`);
+  return lines;
+}
+
 module.exports = {
   TEMPLATE_STRUCTURE_HINT,
+  canonicalHeaderMapping,
+  describeCanonicalMapping,
   describeHeaderMismatch,
-  normalizeHeaders
+  normalizeHeaders,
+  projectRowToCanonical
 };

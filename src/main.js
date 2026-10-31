@@ -14504,15 +14504,18 @@ function registerNewAccountHandlers() {
         }
       };
     },
-    execute(_event, prepared, taskContext) {
+    async execute(_event, prepared, taskContext) {
     const { yearMonth } = prepared;
     const files = taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath);
+    // 设置 → 模板文件：按「移除归档Pending账单」当前版本识别；入库前对应回内置 46 列。不可用时不入库。
+    const structure = await getTemplateResourceService().currentInputStructure('removed-pending');
+    if (structure.status === 'unavailable') return { status: 'error', message: structure.message };
     // 多文件合并解析；任一文件解析失败（表头不符/空文件）→ 整体报错，不入库（资金红线：避免半写）
     const allRows = [];
     const sourceNames = [];
     try {
       for (const fp of files) {
-        const parsed = pendingRemovedReader.readRemovedPendingFile(fp);
+        const parsed = pendingRemovedReader.readRemovedPendingFile(fp, { structure });
         for (const r of parsed.rows) allRows.push(r);
         sourceNames.push(parsed.fileName || fp);
       }

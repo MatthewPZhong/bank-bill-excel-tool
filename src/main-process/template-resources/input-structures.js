@@ -6,6 +6,7 @@
 //   builtinHeaders 为代码中的内置结构；required 为程序按列名读取的必用列，由各模块常量提供；
 //   referenceKey 指向场景引用集合（如 C4 主边 / 从边字段），被场景引用的列视同必用列。
 // group 内的表在导入时互相区分，结构不能相同（目前只用于单表原表）。
+// storage 为 'canonical' 时，模块入库前把当前版本的列对应回内置列（canonicalHeaderMapping），预检展示改名、置空、不导入。
 // runtimeHeaders(filePath) 用模块导入时同一个读取函数读出各工作表的表头（与 sheets 一一对应）：
 //   模板检查以它核对解析口径，富文本、数字、布尔等表头在导入时读出的列名不同，预检直接拒绝。
 
@@ -28,6 +29,10 @@ const {
   RECON_RESULT_REQUIRED_FIELDS,
   RECON_RESULT_SHEET_NAME
 } = require('../../constants/recon-id-fix-fields');
+const {
+  REMOVED_PENDING_COLUMNS,
+  REMOVED_PENDING_REQUIRED_COLUMNS
+} = require('../../backend/pending-import/removed-reader');
 
 // 平盘链接原始表：与导入 Worker 相同的流式读取（openPositionWorkbook + readPhysicalHeader）。按需加载，目录不依赖导入模块。
 async function positionRuntimeHeaders(filePath) {
@@ -62,6 +67,12 @@ async function reconIdFixRuntimeHeaders(filePath) {
   return readReconIdFixSheetHeaders(filePath, DOC_RECON_SHEETS.map((sheet) => sheet.name));
 }
 
+// 移除归档 Pending：与 removed-reader 相同的读法（第 1 个 sheet 首行，格式化文本、去首尾空格）。
+async function removedPendingRuntimeHeaders(filePath) {
+  const { readRemovedPendingHeaders } = require('../../backend/pending-import/removed-reader');
+  return [readRemovedPendingHeaders(filePath)];
+}
+
 function namedSheet(name, headers, required, referenceKey = null) {
   return Object.freeze({
     name,
@@ -84,6 +95,17 @@ const INPUT_STRUCTURES = Object.freeze({
   'position-gateway-raw-out': positionSource(SOURCE_TYPES.GATEWAY_OUTBOUND),
   'position-transfer-orders': positionSource(SOURCE_TYPES.FUND_TRANSFER),
   'position-bank-accounts': positionSource(SOURCE_TYPES.BANK_ACCOUNT),
+  'removed-pending': Object.freeze({
+    group: null,
+    moduleKey: 'pending-removed',
+    storage: 'canonical',
+    sheets: Object.freeze([Object.freeze({
+      name: null,
+      builtinHeaders: () => [...REMOVED_PENDING_COLUMNS],
+      required: () => [...REMOVED_PENDING_REQUIRED_COLUMNS]
+    })]),
+    runtimeHeaders: removedPendingRuntimeHeaders
+  }),
   'doc-recon-unbalanced': Object.freeze({
     group: null,
     moduleKey: 'recon-id-fix-business',
