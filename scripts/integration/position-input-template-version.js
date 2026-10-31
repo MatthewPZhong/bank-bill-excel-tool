@@ -21,6 +21,7 @@ const { INPUT_STRUCTURES } = require('../../src/main-process/template-resources/
 const { createPositionReconciliationService } = require('../../src/main-process/position-reconciliation/service');
 const { dispatchPositionLargeImportSchemaMigration } = require('../../src/main-process/position-reconciliation/import-dispatch');
 const { SOURCE_DEFINITIONS, SOURCE_TYPES } = require('../../src/main-process/position-reconciliation/constants');
+const { STAGING_RELATIVE_PATH } = require('../../src/main-process/position-reconciliation/input-staging');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const BATCH_CONTEXT = Object.freeze({
@@ -116,9 +117,15 @@ async function run() {
   const results = [];
 
   const cases = [
-    ['内置结构下表头改名的系统导出被拒，逐列列出差异与导入新版本的指引', async () => {
-      assertRejectedWithDiff(await importSource());
+    ['内置结构下表头改名的系统导出被拒，逐列列出差异与导入新版本的指引；真实 Worker 已清理本次暂存', async () => {
+      const result = await importSource();
+      assertRejectedWithDiff(result);
       assert.equal(position.store.countSourceRows(SOURCE_TYPES.GATEWAY_INBOUND), 0);
+      // 全部被拒：结果不引用暂存文件，Worker 与 dispatcher 已删除 job root。
+      assert.equal(result.results[0].archivePath, undefined);
+      const stagingRoot = path.join(userData, STAGING_RELATIVE_PATH);
+      const leftovers = fs.existsSync(stagingRoot) ? fs.readdirSync(stagingRoot) : [];
+      assert.deepEqual(leftovers, []);
     }],
     ['导入并启用新结构后同一文件导入成功，原始表导出按新结构出列', async () => {
       templates.rememberPickedFile(templateFile);

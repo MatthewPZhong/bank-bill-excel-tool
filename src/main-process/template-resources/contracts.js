@@ -4,6 +4,9 @@
 // 每个契约直接调用对应模块写出时使用的校验函数，导入时的判定与运行时一致；
 // 另加只在预检时检查、但会影响输出或回读的约束（如平盘结果模板的多余表头）。
 
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const ExcelJS = require('exceljs');
 const JSZip = require('jszip');
 const sax = require('sax');
@@ -452,6 +455,18 @@ function rowsBelowHeader(sheet, headerRow) {
   return rows.size;
 }
 
+// 用模块导入时的读取函数读模板文件的表头（写入检查 Worker 的临时目录，读完即删）。
+async function readRuntimeHeaders(spec, bytes) {
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'template-input-headers-'));
+  try {
+    const filePath = path.join(directory, 'template.xlsx');
+    await fs.promises.writeFile(filePath, bytes);
+    return await spec.runtimeHeaders(filePath);
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+}
+
 // 输入原表：模板第 1 个工作表的表头行即导入识别结构，启用后对应模块导入时只认这一结构。
 //   必用列须保留且同名；同组的表结构不能相同（导入时无法区分）；与当前版本的列变化写入 diff，由“取值变化”展示。
 function inputStructureContract(resourceId) {
@@ -459,7 +474,7 @@ function inputStructureContract(resourceId) {
   const headerRow = TEMPLATE_RESOURCES.find((resource) => resource.id === resourceId).headerRow;
   return {
     engine: 'sheetjs',
-    check(workbook, list, context) {
+    async check(workbook, list, context) {
       const sheetName = workbook.SheetNames[0];
       if (!sheetName) {
         list.add('Sheet 结构', 'fail', '文件中没有工作表');
@@ -480,6 +495,27 @@ function inputStructureContract(resourceId) {
       if (blankColumns.length) list.add('表头', 'fail', `第 ${listText(blankColumns.map(String), 5)} 列表头为空`);
       else if (duplicates.length) list.add('表头', 'fail', `列名重复：${listText(duplicates, 5)}`);
       else list.add('表头', 'pass', `${headers.length} 列`);
+      // 快照按 SheetJS 口径解析；导入时用模块自己的读取函数。两者读出的列名必须一致，否则启用后仍无法识别。
+      if (typeof spec.runtimeHeaders === 'function' && context.bytes) {
+        let runtime;
+        try {
+          runtime = await readRuntimeHeaders(spec, context.bytes);
+        } catch (error) {
+          if (isEnvironmentError(error)) list.environment('表头读取', error);
+          else list.add('表头读取', 'fail', `导入时无法读取表头：${errorText(error)}`);
+          return {};
+        }
+        const differences = [];
+        for (let index = 0; index < Math.max(headers.length, runtime.length); index += 1) {
+          if ((headers[index] || '') !== (runtime[index] || '')) {
+            differences.push(`第 ${index + 1} 列「${headers[index] || ''}」导入时读作「${runtime[index] || ''}」`);
+          }
+        }
+        if (differences.length) {
+          list.add('表头读取', 'fail', `${listText(differences, 3)}：表头含富文本、数字、布尔等格式，请改为普通文本后导入`);
+          return {};
+        }
+      }
       const required = spec.required();
       const missing = required.filter((header) => !headers.includes(header));
       if (missing.length) list.add('必用列', 'fail', `缺少 ${listText(missing, 10)}（程序按列名读取，区分大小写）`);
@@ -568,7 +604,8 @@ async function inspectContract(resourceId, bytes, context = {}) {
     currentValues: context.currentValues || [],
     peerStructures: context.peerStructures || [],
     references: context.references || { fundTypeValues: new Set(), gatewayFields: new Set() },
-    printAreas: new Map()
+    printAreas: new Map(),
+    bytes
   };
   const failed = () => ({ checks: list.checks, ok: false, message: `${list.checks[0].label}：${list.checks[0].detail}`, diff: { added: [], removed: [] } });
   // ExcelJS 读入会逐格展开数据验证与合并单元格：先扫描原始 XML，超出上限时不再读入。扫描失败同样不读入（无法确认安全）。

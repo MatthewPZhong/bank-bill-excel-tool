@@ -613,6 +613,12 @@ function createTemplateResourceService({
     return peers;
   }
 
+  // 输入原表启用某一结构前的同组冲突核对（导入并启用、启用已有版本共用）：同组其他表的当前结构可能在预检后变化。
+  async function peerConflictOf(resource, headers, snapshot) {
+    if (!inputStructureOf(resource.id) || !Array.isArray(headers)) return null;
+    return (await peerStructuresOf(resource, snapshot)).find((peer) => sameHeaders(peer.headers, headers)) || null;
+  }
+
   // 输入原表当前版本的导入识别结构。内置版本返回代码中的结构；用户版本先复核文件（存在、SHA-256、契约），
   //   再返回导入时在检查 Worker 中解析的表头（主进程不解析用户文件）。不可用时由调用方中止导入并提示。
   async function currentInputStructure(resourceId) {
@@ -827,6 +833,13 @@ function createTemplateResourceService({
         pendingImports.delete(importToken);
         return { status: 'failed', message: '已存在内容相同的版本' };
       }
+      if (enable === true) {
+        const conflict = await peerConflictOf(resource, pending.structure && pending.structure.comparableValues, snapshot);
+        if (conflict) {
+          pendingImports.delete(importToken);
+          return { status: 'failed', message: `不能启用：与「${conflict.name}」当前结构相同，导入时无法区分，请重新校验` };
+        }
+      }
       const versionId = `v${nextVersionNo}`;
       const label = labelOf(versionId);
       const fromLabel = versionLabelInfo(snapshot, resource.id, currentVersionId).label;
@@ -909,10 +922,9 @@ function createTemplateResourceService({
           const names = `${removed.values.slice(0, 5).join('、')}${removed.values.length > 5 ? ` 等 ${removed.values.length} 个` : ''}`;
           return { status: 'failed', message: `${toLabel} 不能启用：缺少已被场景使用的取值 ${names}` };
         }
-        // 输入原表：同组其他表的当前结构可能在导入后变化，启用前再核对一次，避免导入时无法区分来源。
         if (inputStructureOf(resource.id)) {
           const headers = (await versionComparableValues(resource, target.versionId, versions)).values;
-          const conflict = headers && (await peerStructuresOf(resource, snapshot)).find((peer) => sameHeaders(peer.headers, headers));
+          const conflict = await peerConflictOf(resource, headers, snapshot);
           if (conflict) return { status: 'failed', message: `${toLabel} 不能启用：与「${conflict.name}」当前结构相同，导入时无法区分` };
         }
       }

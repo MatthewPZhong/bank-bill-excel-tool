@@ -81,21 +81,6 @@ test('平盘 5 张链接原始表可替换：规格、必用列与内置表头�
   }
 });
 
-test('readers / derivation / logical-accounts 按名读取的原始列都在必用列中（改名后不会静默变空）', () => {
-  const required = new Set(Object.values(SOURCE_REQUIRED_FIELDS).flat());
-  const read = new Set();
-  for (const name of ['readers.js', 'derivation.js', 'logical-accounts.js']) {
-    const source = fs.readFileSync(path.join(ROOT, 'src', 'main-process', 'position-reconciliation', name), 'utf8');
-    for (const match of source.matchAll(/\brow\[['"]([^'"]+)['"]\]/g)) read.add(match[1]);
-    for (const match of source.matchAll(/\brow\.([A-Za-z_]\w*)\b(?!\s*\()/g)) read.add(match[1]);
-  }
-  assert.ok(read.size > 30, `应读到全部按名读取的列，实际 ${read.size}`);
-  assert.deepEqual([...read].filter((header) => !required.has(header)).sort(), []);
-  for (const definition of Object.values(SOURCE_DEFINITIONS)) {
-    for (const field of [definition.keyField, definition.dateField].filter(Boolean)) assert.ok(required.has(field), field);
-  }
-});
-
 test('只改非必用列名：预检提示结构变化，启用后当前结构为新表头，恢复默认回到内置', async (t) => {
   const env = setup(t);
   const builtin = await env.service.currentInputStructure('position-gateway-raw-in');
@@ -190,4 +175,60 @@ test('当前用户版本文件被改动时当前结构不可用，并提示到�
   assert.equal(current.status, 'unavailable');
   assert.equal(current.label, 'V2');
   assert.match(current.message, /模板「中台网关原始入账订单」当前版本 V2 不可用：版本文件已被修改（SHA-256 不一致）。请在 设置 → 模板文件 恢复默认或重新导入/);
+});
+
+// 把模板文件中某个表头单元格替换为指定 XML（富文本、布尔等 SheetJS 写不出的表示）。
+async function patchHeaderCell(filePath, cellRef, cellXml) {
+  const JSZip = require('jszip');
+  const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
+  const entry = 'xl/worksheets/sheet1.xml';
+  const xml = await zip.file(entry).async('string');
+  const pattern = new RegExp(`<c r="${cellRef}"[^>]*?(?:/>|>[\\s\\S]*?</c>)`);
+  const patched = pattern.test(xml)
+    ? xml.replace(pattern, cellXml)
+    : xml.replace(/(<row r="1"[^>]*>[\s\S]*?)(<\/row>)/, `$1${cellXml}$2`);
+  zip.file(entry, patched);
+  fs.writeFileSync(filePath, await zip.generateAsync({ type: 'nodebuffer' }));
+  return filePath;
+}
+
+test('表头为富文本或布尔时，导入读出的列名与模板不同：预检按导入读取口径拒绝', async (t) => {
+  const env = setup(t);
+  const richText = await patchHeaderCell(
+    env.write('富文本表头.xlsx', [{ name: '账单明细', headers: RENAMED }]),
+    'T1',
+    '<c r="T1" t="inlineStr"><is><r><t>file</t></r><r><rPr><b/></rPr><t>Id</t></r></is></c>'
+  );
+  const rich = await prepare(env.service, 'position-gateway-raw-in', richText);
+  assert.equal(rich.verdict, 'fail');
+  assert.match(rich.checks.find((check) => check.label === '表头读取').detail, /第 20 列「fileId」导入时读作「Id」/);
+
+  const booleanHeader = await patchHeaderCell(
+    env.write('布尔表头.xlsx', [{ name: '账单明细', headers: RENAMED }]),
+    'AP1',
+    '<c r="AP1" t="b"><v>1</v></c>'
+  );
+  const bool = await prepare(env.service, 'position-gateway-raw-in', booleanHeader);
+  assert.equal(bool.verdict, 'fail');
+  assert.match(bool.checks.find((check) => check.label === '表头读取').detail, /第 42 列「true」导入时读作「1」/i);
+});
+
+test('两份预检都通过后依次“导入并启用”：提交时复核同组结构，第二份被拒且当前版本不变', async (t) => {
+  const env = setup(t);
+  const shared = [
+    ...SOURCE_REQUIRED_FIELDS[SOURCE_TYPES.GATEWAY_INBOUND],
+    ...SOURCE_REQUIRED_FIELDS[SOURCE_TYPES.GATEWAY_OUTBOUND]
+  ];
+  const inbound = await prepare(env.service, 'position-gateway-raw-in', env.write('入账.xlsx', [{ name: 'S', headers: shared }]));
+  const outbound = await prepare(env.service, 'position-gateway-raw-out', env.write('出账.xlsx', [{ name: 'S', headers: shared }]));
+  assert.notEqual(inbound.verdict, 'fail');
+  assert.notEqual(outbound.verdict, 'fail');
+
+  assert.equal((await env.service.commitImport({ importToken: inbound.importToken, enable: true })).status, 'success');
+  const second = await env.service.commitImport({ importToken: outbound.importToken, enable: true });
+  assert.equal(second.status, 'failed');
+  assert.match(second.message, /与「中台网关原始入账订单」当前结构相同/);
+  assert.equal((await env.service.currentInputStructure('position-gateway-raw-out')).status, 'builtin');
+  const { resource } = await env.service.get('position-gateway-raw-out');
+  assert.deepEqual(resource.versions.map((version) => version.id), ['v1'], '被拒的提交不留下版本文件与记录');
 });

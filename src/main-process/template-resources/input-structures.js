@@ -3,6 +3,10 @@
 // 设置 → 模板文件：输入原表的结构规格。可替换的输入原表以模板第 1 个工作表的表头行作为导入识别结构，
 //   用户版本的表头在检查 Worker 中解析并随版本记录保存（取值快照），导入时由各模块经模板服务读取当前版本。
 // required 为程序按列名读取的必用列，由各模块常量提供；group 内的表在导入时互相区分，结构不能相同。
+// runtimeHeaders(filePath) 用模块导入时同一个读取函数读第 1 个工作表的表头：模板检查以它核对解析口径，
+//   富文本、数字、布尔等表头在导入时读出的列名不同，预检直接拒绝，避免启用后仍无法识别。
+
+const path = require('node:path');
 
 const {
   SOURCE_DEFINITIONS,
@@ -10,12 +14,27 @@ const {
   SOURCE_TYPES
 } = require('../position-reconciliation/constants');
 
+// 平盘链接原始表：与导入 Worker 相同的流式读取（openPositionWorkbook + readPhysicalHeader）。按需加载，目录不依赖导入模块。
+async function positionRuntimeHeaders(filePath) {
+  const {
+    openPositionWorkbook,
+    readPhysicalHeader
+  } = require('../../backend/position-reconciliation-import/xlsx-reader');
+  const workbook = await openPositionWorkbook(filePath, { sstTempRoot: path.join(path.dirname(filePath), 'sst') });
+  try {
+    return await readPhysicalHeader(workbook, workbook.sheets[0]);
+  } finally {
+    await workbook.close();
+  }
+}
+
 function positionSource(sourceType) {
   return Object.freeze({
     group: 'position-sources',
     moduleKey: sourceType,
     builtinHeaders: () => [...SOURCE_DEFINITIONS[sourceType].headers],
-    required: () => [...SOURCE_REQUIRED_FIELDS[sourceType]]
+    required: () => [...SOURCE_REQUIRED_FIELDS[sourceType]],
+    runtimeHeaders: positionRuntimeHeaders
   });
 }
 
