@@ -14,7 +14,7 @@ const {
 } = require('./contracts');
 const { DEFAULT_INSPECTION_LIMITS, runTemplateInspection } = require('./inspection-runner');
 const { RUNTIME_VALUE_PARSERS, describeWorkbook, parseRuntimeValues } = require('./workbook-structure');
-const { inputStructureOf, inputStructurePeers } = require('./input-structures');
+const { inputStructureOf, inputStructurePeers, isSingleSheetStructure, structureLabel } = require('./input-structures');
 const { writeFileAtomicDurable } = require('../background-execution/durable-file');
 
 // 内置版本固定为 v1、随应用打包只读；用户版本 v2 起存 {userData}/template-resources/<resourceId>/<versionId>.xlsx，
@@ -591,11 +591,20 @@ function createTemplateResourceService({
     return collectScenarioReferences(typeof store.listScenarioConfigs === 'function' ? store.listScenarioConfigs() : []);
   }
 
-  // 只有 FundType 枚举与网关表头受场景引用保护；输入原表的表头没有场景引用。
+  // 受场景引用保护的取值：FundType 枚举、网关表头，以及输入原表中被场景引用的列（多表原表以「工作表」列名标签表示，
+  //   与该资源的取值快照同口径）。其余资源没有场景引用。
   function referencedValuesOf(resource, references) {
     if (resource.id === 'gateway-recon') return references.gatewayFields;
     if (resource.id === 'fund-type-enum') return references.fundTypeValues;
-    return new Set();
+    const spec = inputStructureOf(resource.id);
+    const values = new Set();
+    for (const sheet of spec ? spec.sheets : []) {
+      if (!sheet.referenceKey || !references[sheet.referenceKey]) continue;
+      for (const field of references[sheet.referenceKey]) {
+        values.add(sheet.name === null ? field : structureLabel(sheet.name, field));
+      }
+    }
+    return values;
   }
 
   const displayNameOf = (resource) => fileNameOf(resource).replace(/\.xlsx?$/i, '');
@@ -621,13 +630,18 @@ function createTemplateResourceService({
 
   // 输入原表当前版本的导入识别结构。内置版本返回代码中的结构；用户版本先复核文件（存在、SHA-256、契约），
   //   再返回导入时在检查 Worker 中解析的表头（主进程不解析用户文件）。不可用时由调用方中止导入并提示。
+  //   单表原表返回 headers；多表原表返回 sheets：{ [工作表名]: 表头 }。
   async function currentInputStructure(resourceId) {
     const resource = findResource(resourceId);
     const spec = inputStructureOf(resourceId);
     if (!resource || !spec) throw new TypeError(`模板没有导入识别结构：${resourceId}`);
+    const single = isSingleSheetStructure(spec);
     const { versions, currentVersionId } = stateOf(readStore(), resource.id);
     if (currentVersionId === BUILTIN_VERSION_ID) {
-      return { status: 'builtin', versionId: BUILTIN_VERSION_ID, label: 'V1', headers: spec.builtinHeaders() };
+      return single
+        ? { status: 'builtin', versionId: BUILTIN_VERSION_ID, label: 'V1', headers: spec.sheets[0].builtinHeaders() }
+        : { status: 'builtin', versionId: BUILTIN_VERSION_ID, label: 'V1',
+          sheets: Object.fromEntries(spec.sheets.map((sheet) => [sheet.name, sheet.builtinHeaders()])) };
     }
     const version = versions.find((item) => item.versionId === currentVersionId);
     const label = labelOf(currentVersionId);
@@ -641,12 +655,20 @@ function createTemplateResourceService({
         message: `模板「${name}」当前版本 ${label} 不可用：${inspected.message}${inspected.transient ? '' : `。${SETTINGS_HINT}`}`
       };
     }
-    const snapshot = version.structure && version.structure.comparableValues;
-    if (!Array.isArray(snapshot) || !snapshot.length) {
-      return { status: 'unavailable', versionId: currentVersionId, label, message: `模板「${name}」当前版本 ${label} 缺少表头记录。${SETTINGS_HINT}` };
+    const missingRecord = { status: 'unavailable', versionId: currentVersionId, label, message: `模板「${name}」当前版本 ${label} 缺少表头记录。${SETTINGS_HINT}` };
+    const structure = version.structure || {};
+    let current;
+    if (single) {
+      const snapshot = structure.comparableValues;
+      if (!Array.isArray(snapshot) || !snapshot.length) return missingRecord;
+      current = { headers: [...snapshot] };
+    } else {
+      const described = new Map((Array.isArray(structure.sheets) ? structure.sheets : []).map((sheet) => [sheet.name, sheet.headers]));
+      if (spec.sheets.some((sheet) => !Array.isArray(described.get(sheet.name)) || !described.get(sheet.name).length)) return missingRecord;
+      current = { sheets: Object.fromEntries(spec.sheets.map((sheet) => [sheet.name, [...described.get(sheet.name)]])) };
     }
     log({ level: 'info', message: `模板文件：${name} 使用用户版本 ${label}（导入识别结构）`, details: [`SHA-256：${version.sha256.slice(0, 12)}`] });
-    return { status: 'user', versionId: currentVersionId, label, headers: [...snapshot] };
+    return { status: 'user', versionId: currentVersionId, label, ...current };
   }
 
   // 从一个版本切到另一个版本会移除的、已被场景使用的取值（与导入预检的场景引用保护同口径）。
@@ -741,7 +763,7 @@ function createTemplateResourceService({
       builtinSheetNames: (builtin.sheets || []).map((sheet) => sheet.name),
       currentValues: baseline.values || [...referencedValuesOf(resource, references)],
       peerStructures: inputStructureOf(resource.id) ? await peerStructuresOf(resource, snapshot) : [],
-      references: { fundTypeValues: [...references.fundTypeValues], gatewayFields: [...references.gatewayFields] },
+      references: Object.fromEntries(Object.entries(references).map(([key, values]) => [key, [...values]])),
       describe: true
     });
     const contract = inspected.contract;

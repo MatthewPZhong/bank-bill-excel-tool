@@ -43,6 +43,11 @@
     // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块字段常量（spec §四，business 子模式）
     const BUSINESS_BILL_FIELDS = (appConstants && appConstants.businessBillFields) || [];
     const OPPONENT_BILL_FIELDS = (appConstants && appConstants.opponentBillFields) || [];
+    // 设置 → 模板文件：单据模式主 / 从字段随「单据对账导出不平」当前版本（IPC scenarios:recon-id-fix-fields），
+    //   未取到时沿用上面的内联字段。见 ensureReconIdFixFields。
+    let reconIdFixBusinessFields = BUSINESS_BILL_FIELDS;
+    let reconIdFixOpponentFields = OPPONENT_BILL_FIELDS;
+    let reconIdFixFieldsPromise = null;
     // v2.1.0-beta.3 T7：网关对账单 ReconID 修复模块字段常量（gateway 子模式）
     const GATEWAY_BILL_FIELDS = (appConstants && appConstants.gatewayBillFields) || [];
     const CHANNEL_BILL_FIELDS = (appConstants && appConstants.channelBillFields) || [];
@@ -208,6 +213,27 @@
           return gatewayReconHeadersValues;
         });
       return gatewayReconHeadersPromise;
+    }
+
+    // C4 单据模式字段：每次打开配置弹窗重新拉取（模板文件切换版本后生效）；并发调用复用同一请求；
+    //   接口缺失或失败时保留当前值（首次为内联字段），不让下拉变空。
+    function ensureReconIdFixFields() {
+      if (reconIdFixFieldsPromise) return reconIdFixFieldsPromise;
+      const api = scenarioCommands && scenarioCommands.scenarios && scenarioCommands.scenarios.getReconIdFixFields;
+      if (typeof api !== 'function') return Promise.resolve();
+      reconIdFixFieldsPromise = Promise.resolve()
+        .then(() => api())
+        .then((result) => {
+          if (result && Array.isArray(result.businessBillFields) && result.businessBillFields.length) {
+            reconIdFixBusinessFields = result.businessBillFields.map(String);
+          }
+          if (result && Array.isArray(result.opponentBillFields) && result.opponentBillFields.length) {
+            reconIdFixOpponentFields = result.opponentBillFields.map(String);
+          }
+        })
+        .catch(() => {})
+        .finally(() => { reconIdFixFieldsPromise = null; });
+      return reconIdFixFieldsPromise;
     }
 
     // C3 弹窗渲染/校验统一读当前缓存（首帧可能为空 → 弹窗 ensureGatewayReconHeaders().then 后重渲染填充）
@@ -3968,7 +3994,7 @@
       if (subMode === 'gateway') {
         return side === 'opp' ? CHANNEL_BILL_FIELDS : GATEWAY_BILL_FIELDS;
       }
-      return side === 'opp' ? OPPONENT_BILL_FIELDS : BUSINESS_BILL_FIELDS;
+      return side === 'opp' ? reconIdFixOpponentFields : reconIdFixBusinessFields;
     }
 
     function createScenarioConfigDialogC4() {
@@ -4422,6 +4448,8 @@
         renderFieldValue();
       }
       rerenderAll();
+      // 单据模式：按模板文件当前版本刷新主 / 从字段下拉后重渲染（弹窗已关闭时重渲染脱离文档的节点，无副作用）。
+      if (!isGatewayMode) ensureReconIdFixFields().then(rerenderAll);
 
       bindScenarioBasicFields(dialog, draft);
 

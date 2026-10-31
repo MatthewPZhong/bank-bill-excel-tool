@@ -181,6 +181,7 @@ const archivePolicies = Object.freeze([
   createExcludePolicy('scenarios:get', 'read-only-query'),
   createExcludePolicy('scenarios:get-applicable-channels', 'read-only-query'),
   createExcludePolicy('scenarios:list', 'read-only-query'),
+  createExcludePolicy('scenarios:recon-id-fix-fields', 'read-only-query'),
   createExcludePolicy('settings:get-enabled-modules', 'read-only-query'),
   createExcludePolicy('settings:get-ui-style', 'read-only-query'),
   createExcludePolicy('template-resources:get', 'read-only-query'),

@@ -1704,6 +1704,7 @@
           "scenarios.getApplicableChannels",
           "scenarios.getFundTypeEnum",
           "scenarios.getGatewayReconHeaders",
+          "scenarios.getReconIdFixFields",
           "scenarios.importBundle",
           "scenarios.list",
           "scenarios.setApplicableChannels",
@@ -8546,6 +8547,119 @@
       },
       "reason": "模板文件版本管理合入 release/v3.2.13：release 侧在 0f890fb2 之后的提交仍持有原 api 集合，按合并前末端 df0f0591 补登同一放宽；templateResources 命名空间仍只由模板文件工厂持有，设置弹窗不直接接触。",
       "designDoc": "changes/v3.2.13/feat/settings-template-versions/techdoc.md"
+    },
+    {
+      "sourceCommit": "24d1ea822908dedcc089b50928e518ae3334897b",
+      "sourcePolicyBlob": "17a367240481f1ec4c245f8d43b80bf9a5bd7066",
+      "boundaryId": "renderer-dialog-scenarios",
+      "field": "allowedApiFields",
+      "from": {
+        "scenarioCommands": [
+          "channels.create",
+          "channels.deleteOne",
+          "channels.list",
+          "channels.update",
+          "closed",
+          "dispose",
+          "scenarios.applyImport",
+          "scenarios.batchDelete",
+          "scenarios.create",
+          "scenarios.deleteOne",
+          "scenarios.exportBundle",
+          "scenarios.get",
+          "scenarios.getApplicableChannels",
+          "scenarios.getFundTypeEnum",
+          "scenarios.getGatewayReconHeaders",
+          "scenarios.importBundle",
+          "scenarios.list",
+          "scenarios.setApplicableChannels",
+          "scenarios.toggleEnabled",
+          "scenarios.transfer",
+          "scenarios.update"
+        ],
+        "subscriptions": [
+          "subscribeChannels",
+          "subscribeScenarios"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "createAlertDialog",
+          "createConfirmDialog",
+          "createOverlay",
+          "escapeHtml",
+          "pushAlert"
+        ]
+      },
+      "to": {
+        "scenarioCommands": [
+          "channels.create",
+          "channels.deleteOne",
+          "channels.list",
+          "channels.update",
+          "closed",
+          "dispose",
+          "scenarios.applyImport",
+          "scenarios.batchDelete",
+          "scenarios.create",
+          "scenarios.deleteOne",
+          "scenarios.exportBundle",
+          "scenarios.get",
+          "scenarios.getApplicableChannels",
+          "scenarios.getFundTypeEnum",
+          "scenarios.getGatewayReconHeaders",
+          "scenarios.getReconIdFixFields",
+          "scenarios.importBundle",
+          "scenarios.list",
+          "scenarios.setApplicableChannels",
+          "scenarios.toggleEnabled",
+          "scenarios.transfer",
+          "scenarios.update"
+        ],
+        "subscriptions": [
+          "subscribeChannels",
+          "subscribeScenarios"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "createAlertDialog",
+          "createConfirmDialog",
+          "createOverlay",
+          "escapeHtml",
+          "pushAlert"
+        ]
+      },
+      "reason": "C4 单据模式场景配置的主 / 从字段下拉随设置 → 模板文件「单据对账导出不平」当前版本：新增只读查询 scenarios.getReconIdFixFields（read-only-query），只由场景配置工厂持有",
+      "designDoc": "changes/v3.2.14/feat/input-template-structures/spec.md"
     }
   ]
 }

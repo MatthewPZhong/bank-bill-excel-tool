@@ -20,6 +20,13 @@
 
 ## 未实施
 
+### B38（P3 · 顺延）单据对账托管服务未接入「单据对账导出不平」当前结构
+
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §10）
+- **影响**：`recon-id-fix-service/service.js` 的托管导入（生产未启用，单测断言 production 保持 false）仍按内置结构读取 4 张工作表；启用了用户结构版本时，该路径会把改名后的文件判为表头不符。传统 IPC 路径已接入。当前生产不受影响
+- **关闭条件**：启用托管路径前，在准备阶段（同步回调之前）读取当前结构并传入 `readReconIdFixFile`，补对应回归测试
+- **目标版本**：未定（随托管服务启用）
+
 ### B37（P3 · 顺延）平盘后台 managed 导入未接入链接原始表当前结构，且全部文件失败时抛错
 
 - **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §6 K2）；编号接续 `release/v3.2.14` 的 B35

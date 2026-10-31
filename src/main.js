@@ -634,6 +634,12 @@ const {
   buildUnmatchedReportFileName: buildReconIdFixUnmatchedReportFileName,
   buildTimestampMinute: buildReconIdFixTimestampMinute
 } = require('./main-process/recon-id-fix-io');
+const {
+  BUSINESS_BILL_FIELDS,
+  BUSINESS_BILL_SHEET_NAME,
+  OPPONENT_BILL_FIELDS,
+  OPPONENT_BILL_SHEET_NAME
+} = require('./constants/recon-id-fix-fields');
 const { runReconIdFix } = require('./main-process/recon-id-fix-engine');
 const { runOwnAccountsMigration } = require('./backend/database/own-accounts-migration');
 const { groupBigAccountRows } = require('./backend/database/utils');
@@ -5386,6 +5392,22 @@ function registerAppHandlers() {
       return { status: 'ok', values: loadGatewayReconHeaders() };
     }
   });
+  // C4 单据模式场景配置的主 / 从字段下拉：设置 → 模板文件启用了「单据对账导出不平」用户版本时，取该版本
+  //   业务部门账单 / 对手部门账单的表头；内置版本、版本不可用或读取异常时回落内置字段（与导入预检的场景引用保护同口径）。
+  ipcMain.handle('scenarios:recon-id-fix-fields', async () => {
+    const builtin = { status: 'ok', businessBillFields: [...BUSINESS_BILL_FIELDS], opponentBillFields: [...OPPONENT_BILL_FIELDS] };
+    try {
+      const current = await getTemplateResourceService().currentInputStructure('doc-recon-unbalanced');
+      if (current.status !== 'user') return builtin;
+      return {
+        status: 'ok',
+        businessBillFields: [...current.sheets[BUSINESS_BILL_SHEET_NAME]],
+        opponentBillFields: [...current.sheets[OPPONENT_BILL_SHEET_NAME]]
+      };
+    } catch (_error) {
+      return builtin;
+    }
+  });
   // PR #35 Codex round 3 P2（资金红线分流）：4 个 scenarios:* 入口
   // 不再无条件清两个全局缓存，而是按变更场景的 category 分流：
   // - C1/C2/C3（'extract-recon-id' / 'offset-bill-mark' / 'gateway-recon-join'）→ 只清 processingResult
@@ -6815,7 +6837,13 @@ function registerAppHandlers() {
     try {
       const { subMode } = prepared;
       const filePath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
-      const result = readReconIdFixFile(filePath, subMode);
+      // 单据模式的 4 张工作表结构按设置 → 模板文件的当前版本识别；网关模式读资金对账导出不平，结构固定。
+      let structure = null;
+      if (subMode !== 'gateway') {
+        structure = await getTemplateResourceService().currentInputStructure('doc-recon-unbalanced');
+        if (structure.status === 'unavailable') return { status: 'failed', message: structure.message };
+      }
+      const result = readReconIdFixFile(filePath, subMode, { structure });
       reconIdFixSession = {
         filePath: result.filePath,
         fileName: result.fileName,

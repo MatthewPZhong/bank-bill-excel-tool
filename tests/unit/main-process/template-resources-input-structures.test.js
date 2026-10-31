@@ -65,19 +65,23 @@ async function prepare(service, resourceId, filePath) {
   return prepared;
 }
 
-test('平盘 5 张链接原始表可替换：规格、必用列与内置表头一致', () => {
+test('输入原表结构规格：已接入的资源可替换；平盘 5 张为单表，规格、必用列与内置表头一致', () => {
   const ids = Object.keys(INPUT_STRUCTURES).sort();
   assert.deepEqual(ids, [
-    'position-bank-accounts', 'position-gateway-raw-in', 'position-gateway-raw-out',
+    'doc-recon-unbalanced', 'position-bank-accounts', 'position-gateway-raw-in', 'position-gateway-raw-out',
     'position-payment-full', 'position-transfer-orders'
   ]);
   for (const id of ids) {
     const resource = TEMPLATE_RESOURCES.find((item) => item.id === id);
     assert.equal(resource.replace.allowed, true, id);
     assert.equal(resource.readMode, 'runtime', id);
+  }
+  for (const id of ids.filter((item) => item.startsWith('position-'))) {
     const spec = INPUT_STRUCTURES[id];
-    assert.deepEqual(spec.builtinHeaders(), [...SOURCE_DEFINITIONS[spec.moduleKey].headers], id);
-    assert.deepEqual(spec.required(), [...SOURCE_REQUIRED_FIELDS[spec.moduleKey]], id);
+    assert.equal(spec.sheets.length, 1, id);
+    assert.equal(spec.sheets[0].name, null, id);
+    assert.deepEqual(spec.sheets[0].builtinHeaders(), [...SOURCE_DEFINITIONS[spec.moduleKey].headers], id);
+    assert.deepEqual(spec.sheets[0].required(), [...SOURCE_REQUIRED_FIELDS[spec.moduleKey]], id);
   }
 });
 

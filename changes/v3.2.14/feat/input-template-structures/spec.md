@@ -191,3 +191,17 @@ Codex 已核查未发现缺陷的方面：冻结结构在预检、重放、异�
 | 口径核对 | 模板检查用与导入相同的 SheetJS 读法重读 4 张 sheet 表头，与快照不一致即拒绝（同 T1） |
 | 下拉 | 新增只读查询 `scenarios:recon-id-fix-fields`（模式同 `scenarios:gateway-recon-headers`），场景弹窗打开时按当前版本刷新单据模式的主 / 从字段；不可用时回落内置字段 |
 | 不变 | 输出「订单修复」15 列、未配报告、导出凭证与网关子模式（读的是资金对账导出不平，属输出模板） |
+
+### 10.3 实施记录
+
+| 文件 | 内容 |
+| --- | --- |
+| `template-resources/input-structures.js` | 结构规格统一为按工作表列表描述（`sheets`、`referenceKey`、`runtimeHeaders` 返回逐表表头）；平盘 5 张为单表（第 1 个工作表），新增 `doc-recon-unbalanced` 4 张按名工作表 |
+| `template-resources/contracts.js` | `inputStructureContract` 逐表检查（缺表、空列 / 重复、导入口径核对、必用列、场景引用、数据行），多表的变化以「工作表」列名标签展示；`collectScenarioReferences` 增加 C4 单据模式主 / 从边字段 |
+| `template-resources/{service,workbook-structure,inspection-task,catalog}.js` | 多表取值快照为标签列表、当前结构返回逐表表头；场景引用（含启用前复核）覆盖 C4；资源改为可替换 |
+| `constants/recon-id-fix-fields.js` | 新增 `RECON_ID_FIX_BILL_REQUIRED_FIELDS`、`RECON_RESULT_REQUIRED_FIELDS` |
+| `recon-id-fix-io.js` | `readReconIdFixFile` 接收当前结构，按文件实际表头取键；单据模式结构不符时附与当前版本的差异与指引（错误码不变）；新增 `readReconIdFixSheetHeaders` 供口径核对 |
+| `main.js`、`preload.js`、`renderer/scenario-command-service.js`、`renderer/dialogs/scenarios.js` | 单据模式导入读取当前结构（不可用时中止并提示）；新增只读查询 `scenarios:recon-id-fix-fields` 与 `scenarios.getReconIdFixFields`，C4 配置弹窗打开时刷新单据模式主 / 从字段下拉 |
+| `task-policy-registry.js`、`legacy-task-policies.js`、`architecture/boundaries.json` | 新通道登记为 exclude / read-only-query；`renderer-dialog-scenarios.allowedApiFields` 放宽并以 `24d1ea82` 为来源登记 policyChanges |
+
+偏离与说明：托管服务路径（生产未启用）未接入，登记 B38；场景引用保护对“恢复默认”不生效（与 FundType / 网关一致，保证随时可回退）。

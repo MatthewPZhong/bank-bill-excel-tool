@@ -354,6 +354,7 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'scenarios:get',
     'scenarios:get-applicable-channels',
     'scenarios:list',
+    'scenarios:recon-id-fix-fields',
     'settings:get-enabled-modules',
     'settings:get-ui-style',
     'template-resources:get',

@@ -8,7 +8,7 @@ const { parseFundTypeEnumWorkbook } = require('../../constants/fund-type-enum');
 const { parseGatewayReconHeadersWorkbook } = require('../../constants/gateway-recon-headers-loader');
 const { ALL_CELLS, sheetCells } = require('../../constants/sheetjs-sparse-cells');
 const { TEMPLATE_RESOURCES } = require('./catalog');
-const { INPUT_STRUCTURES } = require('./input-structures');
+const { INPUT_STRUCTURES, isSingleSheetStructure, structureLabel } = require('./input-structures');
 
 function cellText(value) {
   return value === undefined || value === null ? '' : String(value).trim();
@@ -37,11 +37,24 @@ function rowTexts(cells, rowIndex) {
   return trimTail(Array.from(row, (value) => value || ''));
 }
 
-// 输入原表的导入识别结构：第 1 个工作表表头行的文本（中间空列保留为空串，末尾空列去掉），与导入时读表头的口径一致。
-function firstSheetHeaders(workbook, headerRow) {
-  const name = workbook.SheetNames[0];
-  if (!name) return [];
+// 输入原表的导入识别结构：指定工作表（null 为第 1 个）表头行的文本（中间空列保留为空串，末尾空列去掉）。
+//   与导入时读表头的口径是否一致，由模板检查用各模块的读取函数再核对一次。
+function sheetHeaders(workbook, sheetName, headerRow) {
+  const name = sheetName === null ? workbook.SheetNames[0] : sheetName;
+  if (!name || !workbook.Sheets[name]) return [];
   return rowTexts(textCells(workbook.Sheets[name]), headerRow - 1);
+}
+
+function firstSheetHeaders(workbook, headerRow) {
+  return sheetHeaders(workbook, null, headerRow);
+}
+
+// 取值快照：单表原表为表头列表；多表原表为「工作表」列名标签（用于比较基准与“取值变化”展示），
+//   各表的表头另由结构描述 sheets[].headers 保存。
+function inputStructureValues(spec, workbook, headerRow) {
+  if (isSingleSheetStructure(spec)) return firstSheetHeaders(workbook, headerRow);
+  return spec.sheets.flatMap((sheet) => sheetHeaders(workbook, sheet.name, headerRow)
+    .map((header) => structureLabel(sheet.name, header)));
 }
 
 // 运行时 loader 的解析函数：枚举取值与比较基准都按它们的口径（声明范围的首列 / 首行）计算，
@@ -49,9 +62,9 @@ function firstSheetHeaders(workbook, headerRow) {
 const RUNTIME_VALUE_PARSERS = Object.freeze({
   'fund-type-enum': parseFundTypeEnumWorkbook,
   'gateway-recon': parseGatewayReconHeadersWorkbook,
-  ...Object.fromEntries(Object.keys(INPUT_STRUCTURES).map((resourceId) => {
+  ...Object.fromEntries(Object.entries(INPUT_STRUCTURES).map(([resourceId, spec]) => {
     const headerRow = TEMPLATE_RESOURCES.find((resource) => resource.id === resourceId).headerRow;
-    return [resourceId, (workbook) => firstSheetHeaders(workbook, headerRow)];
+    return [resourceId, (workbook) => inputStructureValues(spec, workbook, headerRow)];
   }))
 });
 
@@ -108,6 +121,7 @@ function parseRuntimeValues(resourceId, bytes) {
 module.exports = {
   RUNTIME_VALUE_PARSERS,
   firstSheetHeaders,
+  sheetHeaders,
   describeWorkbook,
   parseRuntimeValues
 };
