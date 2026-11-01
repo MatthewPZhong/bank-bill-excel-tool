@@ -329,6 +329,11 @@ const { GATEWAY_RECON_FIELDS } = require('./constants/gateway-recon-fields');
 //   - LINKED_IMPORT_SIGNATURES：链接表「导入」按钮候选集 = 4 张 linked 签名 + 入金表签名（v2.1.16-beta.3 ②）
 //   - linkedTableReaders.readRowsWithMetadata：读全部有意义行（交割表表头在第 2 行，滑窗自动定位）
 const { detectTableType } = require('./main-process/table-type-detector');
+const {
+  linkedStructureMismatchLines,
+  projectLinkedRow,
+  resolveLinkedSignatures
+} = require('./main-process/linked-structure-signatures');
 // v3.0.3 PR-D（W5）：检测工作目录是否落在 OneDrive 同步路径（纯函数，启动后单次 toast 用）
 const { isStorageRootOnOneDrive } = require('./main-process/onedrive-detector');
 // v3.0.0 块 B / PR-2：大文件链接表流式落库——单 sheet .xlsx 边解压边逐行喂入仓储事务（内存恒定，不全量读进内存）
@@ -16292,8 +16297,25 @@ function registerNewAccountHandlers() {
 
   // 按 detector tableKey 取对应 linked 签名（拿 expectedHeaders 做列映射）。
   //   v2.1.16-beta.3 ②：用 LINKED_IMPORT_SIGNATURES（含入金表签名），否则查不到 bank-deposit 签名走兜底。
-  function getLinkedSignatureByKey(detectorTableKey) {
-    return LINKED_IMPORT_SIGNATURES.find((s) => s.tableKey === detectorTableKey) || null;
+  //   signatures：本次导入按模板文件当前版本解析后的签名（resolveImportSignatures），缺省为内置签名。
+  function getLinkedSignatureByKey(detectorTableKey, signatures = LINKED_IMPORT_SIGNATURES) {
+    return signatures.find((s) => s.tableKey === detectorTableKey) || null;
+  }
+
+  // 设置 → 模板文件：网关对账单 / 中台调拨订单 / 中台退款订单 / 外汇交割表的签名随当前版本（每次导入解析一次）。
+  function resolveImportSignatures(signatures) {
+    return resolveLinkedSignatures(signatures, (resourceId) => getTemplateResourceService().currentInputStructure(resourceId));
+  }
+
+  // 未识别或指纹相近但不是当前版本表头：带与最接近候选结构的差异明细（含导入新版本的指引）。
+  function unrecognizedLinkedResult(fileName, detected, signatures, fallbackMessage) {
+    const signature = detected.status === 'structure-mismatch'
+      ? signatures.find((item) => item.tableKey === detected.tableKey)
+      : null;
+    const message = signature
+      ? `表头与「${signature.label}」${signature.versionLabel ? `当前版本 ${signature.versionLabel}` : '当前结构'}不一致`
+      : fallbackMessage;
+    return { fileName, status: 'unrecognized', message, detailLines: linkedStructureMismatchLines(detected, signatures) };
   }
 
   // v3.0.0 块 B / O-6：detector read-error 文案细分。历史一律「文件为空或不可读」，
@@ -16417,7 +16439,10 @@ function registerNewAccountHandlers() {
     //   detector L1/L2 + expectedHeaders zip 校验，异构文件读不出 44 列对象（前面 detector 已拦截）。
     //   入金表（bank-deposit）：按 13 字段名 pick 裁列（pickBankDepositFields，非索引切片）；
     //   其余链接表不裁列。raw_json 天然只存裁后字段。
-    const transform = repoKey === 'bank-deposit' ? pickBankDepositFields : (x) => x;
+    // 设置 → 模板文件启用了用户版本时，按当前版本读出的行先对应回内置列名（见 linked-structure-signatures）。
+    const transform = repoKey === 'bank-deposit'
+      ? (row) => pickBankDepositFields(projectLinkedRow(signature, row))
+      : (row) => projectLinkedRow(signature, row);
     const isGatewayBill = repoKey === 'gateway-bill';
     const isBankDeposit = repoKey === 'bank-deposit';
     const isMidAllocation = repoKey === 'mid-allocation';
@@ -16451,9 +16476,10 @@ function registerNewAccountHandlers() {
     } else {
       // 数组路径：fx-settlement 用 WithMeta 同时取物理行号（BOC 分组扫描热依赖）；其余表零行为变化。
       const meta = readLinkedRowsAsObjectsWithMeta(filePath, signature, detected.sheetName);
-      const rows = meta.objects;
+      // 一行对应一行，物理行号 rowNumbers 与之对齐不变（BOC 分组依赖行号断档）。
+      const rows = meta.objects.map((row) => projectLinkedRow(signature, row));
       if (repoKey === 'fx-settlement') {
-        fxObjects = meta.objects;
+        fxObjects = rows;
         fxRowNumbers = meta.rowNumbers;
       }
       const rowsToWrite = repoKey === 'bank-deposit'
@@ -16751,13 +16777,14 @@ function registerNewAccountHandlers() {
     if (!opLock.acquired) return { status: 'failed', message: opLock.message };
     try {
     const results = [];
+    const linkedSignatures = await resolveImportSignatures(LINKED_IMPORT_SIGNATURES);
     for (const filePath of taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath)) {
       const fileName = path.basename(filePath);
       // 识别：链接表导入候选集（4 张 linked 签名 + 入金表签名；detector 默认含全部，这里收窄）。
       //   v2.1.16-beta.3 ②：入金表与主表同构 44 列，但主表签名不在此集合 → 入金表唯一命中、不 ambiguous。
       let detected;
       try {
-        detected = await detectTableType(filePath, LINKED_IMPORT_SIGNATURES);
+        detected = await detectTableType(filePath, linkedSignatures);
       } catch (err) {
         results.push({ fileName, status: 'read-error', message: err && err.message ? err.message : String(err) });
         continue;
@@ -16767,8 +16794,8 @@ function registerNewAccountHandlers() {
         results.push({ fileName, status: 'ambiguous', message: '表头同时命中多张链接表，无法唯一判定' });
         continue;
       }
-      if (detected.status === 'unrecognized') {
-        results.push({ fileName, status: 'unrecognized', message: '未识别为任何链接表' });
+      if (detected.status === 'unrecognized' || detected.status === 'structure-mismatch') {
+        results.push(unrecognizedLinkedResult(fileName, detected, linkedSignatures, '未识别为任何链接表'));
         continue;
       }
       if (detected.status === 'read-error') {
@@ -16791,7 +16818,7 @@ function registerNewAccountHandlers() {
       //   双保险：理论上 fx-option 已在上方 unsupported 分支拦截，此处仍守卫缺失映射/签名。
       const detectorKey = detected.tableKey;
       const repoKey = LINKED_DETECTOR_TO_REPO_KEY[detectorKey];
-      const signature = getLinkedSignatureByKey(detectorKey);
+      const signature = getLinkedSignatureByKey(detectorKey, linkedSignatures);
       if (detectorKey === 'fx-option' || !repoKey || !signature) {
         results.push({
           fileName,
@@ -16802,6 +16829,10 @@ function registerNewAccountHandlers() {
         continue;
       }
 
+      if (signature.structureUnavailable) {
+        results.push({ fileName, tableKey: repoKey, status: 'read-error', message: signature.structureUnavailable });
+        continue;
+      }
       // 读行 → 对象数组 → 落库 + 派生（v3.0.7 需求2d：整段抽至 importLinkedFileToRepo 共享函数，
       //   供「链接表管理」与「导入文件」通用导入零复制复用；落库/派生/缓存清理口径字节级 parity）。
       try {
@@ -16840,7 +16871,10 @@ function registerNewAccountHandlers() {
         source: 'main',
         domain: '链接表管理',
         message: `链接表导入：${failedResults.length}/${results.length} 个文件失败`,
-        details: failedResults.map((r) => `${r.fileName}｜${r.status}｜${r.message || ''}`)
+        details: failedResults.flatMap((r) => [
+          `${r.fileName}｜${r.status}｜${r.message || ''}`,
+          ...(Array.isArray(r.detailLines) ? r.detailLines : [])
+        ])
       });
     }
 
@@ -16945,6 +16979,7 @@ function registerNewAccountHandlers() {
     const results = [];
     const filePaths = taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath);
     const fileCount = filePaths.length;
+    const batchSignatures = await resolveImportSignatures(ALL_TABLE_SIGNATURES);
     // 本批是否已建立/合并过银行对账单 session（用于：① 第一个建 vs 后续合并的分支；
     //   ② processingResult / gatewayReconSession 整批只清一次）。
     let bankStatementMerged = false;
@@ -16964,7 +16999,7 @@ function registerNewAccountHandlers() {
       // 识别：v3.0.7 需求2d 通用导入候选集 ALL_TABLE_SIGNATURES（预处理 3 张 + 链接 4 张；🔴 不含 bank-deposit）。
       let detected;
       try {
-        detected = await detectTableType(filePath, ALL_TABLE_SIGNATURES);
+        detected = await detectTableType(filePath, batchSignatures);
       } catch (err) {
         results.push({ fileName, status: 'read-error', message: err && err.message ? err.message : String(err) });
         continue;
@@ -16974,8 +17009,9 @@ function registerNewAccountHandlers() {
         results.push({ fileName, status: 'ambiguous', message: '表头同时命中多张表，无法唯一判定' });
         continue;
       }
-      if (detected.status === 'unrecognized') {
-        results.push({ fileName, status: 'unrecognized', message: '未识别为任何可导入的表（银行对账单 / 中台退款订单 / 入账原始订单 / 链接表）' });
+      if (detected.status === 'unrecognized' || detected.status === 'structure-mismatch') {
+        results.push(unrecognizedLinkedResult(fileName, detected, batchSignatures,
+          '未识别为任何可导入的表（银行对账单 / 中台退款订单 / 入账原始订单 / 链接表）'));
         continue;
       }
       if (detected.status === 'read-error') {
@@ -17153,8 +17189,11 @@ function registerNewAccountHandlers() {
         //   🔴 资金红线：refundOrderSession 是退款回填引擎入参源（run 阶段 main.js 注入）；重导整体覆盖。
         //   读取复用 readLinkedRowsAsObjects（按 signature.expectedHeaders zip，退款签名 25 列）。
         try {
-          const refundSignature = PREPROCESS_TABLE_SIGNATURES.find((s) => s.tableKey === 'zhongtai-refund-order');
-          const refundRows = readLinkedRowsAsObjects(filePath, refundSignature, detected.sheetName);
+          const refundSignature = batchSignatures.find((s) => s.tableKey === 'zhongtai-refund-order');
+          if (refundSignature.structureUnavailable) throw new Error(refundSignature.structureUnavailable);
+          // 按当前版本读出后对应回内置列名（退款回填按内置列名读取）。
+          const refundRows = readLinkedRowsAsObjects(filePath, refundSignature, detected.sheetName)
+            .map((row) => projectLinkedRow(refundSignature, row));
           refundOrderSession = { fileName, rows: refundRows, importedAt: Date.now() };
           // v2.1.16-beta.6 PR#65 Finding1（🔴 资金红线）：导入/覆盖退款订单后清运行结果，强制重新运行，
           //   否则导出仍用上一轮旧的 refundBackfillRows/refundUnmatchedRows（跨批复用）。
@@ -17193,8 +17232,13 @@ function registerNewAccountHandlers() {
       //   detector tableKey → repo tableKey 映射 + 取 linked 签名（与 linked-table:import 同口径）。
       //   fx-option 已在上方 unsupported 分支拦截（detectTableType 标 unsupported）；此处仍守卫缺失映射/签名（双保险）。
       const linkedRepoKey = LINKED_DETECTOR_TO_REPO_KEY[tableKey];
-      const linkedSignature = getLinkedSignatureByKey(tableKey);
+      const linkedSignature = getLinkedSignatureByKey(tableKey, batchSignatures);
       if (linkedRepoKey && linkedSignature && tableKey !== 'fx-option') {
+        // 设置 → 模板文件当前版本不可用（缺失、被修改、不兼容）：该表导入中止，不按内置结构入库。
+        if (linkedSignature.structureUnavailable) {
+          results.push({ fileName, tableKey: linkedRepoKey, status: 'read-error', message: linkedSignature.structureUnavailable });
+          continue;
+        }
         // 落库 ≠ 跳过：mid-allocation / gateway-bill / fx-settlement 落库即写对应链接表（+ 派生），
         //   bank-statement:run 阶段自动读回喂 R1-R5（gateway-bill→R1/C3/R5、mid-allocation→R5s2/DBS）。
         //   独立 try/catch：落库异常记 write-error（与 linked-table:import 错误契约一致）。

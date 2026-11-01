@@ -6,7 +6,9 @@
 //   builtinHeaders 为代码中的内置结构；required 为程序按列名读取的必用列，由各模块常量提供；
 //   referenceKey 指向场景引用集合（如 C4 主边 / 从边字段），被场景引用的列视同必用列。
 // group 内的表在导入时互相区分，结构不能相同（目前只用于单表原表）。
-// storage 为 'canonical' 时，模块入库前把当前版本的列对应回内置列（canonicalHeaderMapping），预检展示改名、置空、不导入。
+// storage 为 'canonical' 时，模块入库前把当前版本的列对应回内置列（canonicalHeaderMapping），预检展示改名、置空、不导入；
+//   keepExtra 时多出的列也入库，values 为 'stored' 时取值快照（及场景引用比较）为入库后实际可用的列名。
+// allowBlank：内置结构本身含空列（外汇交割表第 10 列），允许表头中间有空列。fixedPeers：识别候选中结构固定的其他签名。
 // runtimeHeaders(filePath) 用模块导入时同一个读取函数读出各工作表的表头（与 sheets 一一对应）：
 //   模板检查以它核对解析口径，富文本、数字、布尔等表头在导入时读出的列名不同，预检直接拒绝。
 
@@ -33,6 +35,18 @@ const {
   REMOVED_PENDING_COLUMNS,
   REMOVED_PENDING_REQUIRED_COLUMNS
 } = require('../../backend/pending-import/removed-reader');
+const {
+  BANK_DEPOSIT_SIGNATURE,
+  BANK_STATEMENT_SIGNATURE,
+  FX_DELIVERY_SIGNATURE,
+  FX_OPTION_SIGNATURE,
+  GATEWAY_RECON_SIGNATURE,
+  INTAKE_ORIGINAL_ORDER_SIGNATURE,
+  ZHONGTAI_DISPATCH_ORDER_SIGNATURE,
+  ZHONGTAI_REFUND_ORDER_SIGNATURE
+} = require('../../constants/table-signatures');
+const { FT_RECON_FIELD_MAP } = require('../../constants/fund-transfer-recon-fields');
+const { REFUND_ORDER_REQUIRED_COLUMNS } = require('../../constants/refund-backfill-fields');
 
 // 平盘链接原始表：与导入 Worker 相同的流式读取（openPositionWorkbook + readPhysicalHeader）。按需加载，目录不依赖导入模块。
 async function positionRuntimeHeaders(filePath) {
@@ -73,6 +87,49 @@ async function removedPendingRuntimeHeaders(filePath) {
   return [readRemovedPendingHeaders(filePath)];
 }
 
+// 银行账单处理链接表：与导入相同的两种读法——单表 .xlsx 走流式头部读取，其余走 SheetJS 全量读取。
+//   两种读法对布尔等表头读出的文本不同，任一与快照不一致都会在预检中被拒。返回第 headerRow 个有内容的行。
+function linkedRuntimeHeaders(headerRow) {
+  return async (filePath) => {
+    const { readRowsWithMetadata, readMeaningfulRowsHead } = require('../../backend/file-service/readers');
+    const { normalizeCell } = require('../../backend/file-service/common');
+    const pick = (rows) => {
+      const row = Array.isArray(rows) && Array.isArray(rows[headerRow - 1]) ? rows[headerRow - 1].map((cell) => normalizeCell(cell)) : [];
+      while (row.length && row[row.length - 1] === '') row.pop();
+      return row;
+    };
+    const sheetJs = pick(readRowsWithMetadata(filePath, []).rows);
+    let streamed = sheetJs;
+    try {
+      streamed = pick((await readMeaningfulRowsHead(filePath, headerRow + 20)).rows);
+    } catch (_error) { /* 非单表 xlsx：导入时不走流式读取 */ }
+    if (JSON.stringify(streamed) === JSON.stringify(sheetJs)) return [sheetJs];
+    // 两种读法结果不同：导入文件格式不同时读出的列名不同，不一致的列标出两种结果（必与快照不同，预检不通过）。
+    const width = Math.max(sheetJs.length, streamed.length);
+    return [Array.from({ length: width }, (_, index) => (sheetJs[index] === streamed[index]
+      ? sheetJs[index]
+      : `${sheetJs[index] ?? ''} / ${streamed[index] ?? ''}`))];
+  };
+}
+
+function linkedTable(signature, required, extra = {}) {
+  return Object.freeze({
+    group: 'bank-linked',
+    moduleKey: signature.tableKey,
+    storage: 'canonical',
+    sheets: Object.freeze([Object.freeze({
+      name: null,
+      builtinHeaders: () => [...signature.expectedHeaders],
+      required: () => [...required],
+      referenceKey: extra.referenceKey || null
+    })]),
+    fixedPeers: () => LINKED_FIXED_PEERS.map((peer) => ({ name: peer.label, headers: [...peer.expectedHeaders] })),
+    runtimeHeaders: linkedRuntimeHeaders(extra.headerRow || 1),
+    ...(extra.keepExtra ? { keepExtra: true, values: 'stored' } : {}),
+    ...(extra.allowBlank ? { allowBlank: true } : {})
+  });
+}
+
 function namedSheet(name, headers, required, referenceKey = null) {
   return Object.freeze({
     name,
@@ -89,7 +146,23 @@ const DOC_RECON_SHEETS = Object.freeze([
   namedSheet(ORDER_REPAIR_SHEET_NAME, ORDER_REPAIR_FIELDS, [])
 ]);
 
+// 识别候选中结构固定、不随模板版本变化的签名：新结构不能与它们相同。
+const LINKED_FIXED_PEERS = Object.freeze([
+  BANK_STATEMENT_SIGNATURE, INTAKE_ORIGINAL_ORDER_SIGNATURE, FX_OPTION_SIGNATURE, BANK_DEPOSIT_SIGNATURE
+]);
+// 网关对账单：入库与派生、前置资金对账按名读取的列（C3 场景引用的列另按场景引用保护）。
+const GATEWAY_RECON_REQUIRED = Object.freeze([
+  'Billdate', 'Channel', 'merchantid', 'orderid', 'currency', 'amount', 'ReconBillBizId', 'reconciliationid',
+  'TradeType', 'name', 'cardNo', '真实渠道', '清算网络'
+]);
+// 外汇交割表：主键、日期与 BOC 派生按名读取的列。
+const FX_DELIVERY_REQUIRED = Object.freeze(['交易编号', '交易日期', '到期日', '货币1金额', '货币2金额']);
+
 const INPUT_STRUCTURES = Object.freeze({
+  'gateway-recon': linkedTable(GATEWAY_RECON_SIGNATURE, GATEWAY_RECON_REQUIRED, { keepExtra: true, referenceKey: 'gatewayFields' }),
+  'transfer-order': linkedTable(ZHONGTAI_DISPATCH_ORDER_SIGNATURE, Object.values(FT_RECON_FIELD_MAP.mid)),
+  'refund-order': linkedTable(ZHONGTAI_REFUND_ORDER_SIGNATURE, REFUND_ORDER_REQUIRED_COLUMNS),
+  'fx-delivery': linkedTable(FX_DELIVERY_SIGNATURE, FX_DELIVERY_REQUIRED, { headerRow: 2, allowBlank: true }),
   'position-payment-full': positionSource(SOURCE_TYPES.TEST_PAYMENT),
   'position-gateway-raw-in': positionSource(SOURCE_TYPES.GATEWAY_INBOUND),
   'position-gateway-raw-out': positionSource(SOURCE_TYPES.GATEWAY_OUTBOUND),

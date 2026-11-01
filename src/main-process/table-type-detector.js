@@ -106,6 +106,18 @@ function runExactLayer(meaningfulRows, candidateSignatures, firstRowColumnCount)
   const matchedKeys = [];
 
   for (const signature of candidateSignatures) {
+    // 设置 → 模板文件启用了用户版本的签名（structureExact）：只认当前版本，要求某一行（去末尾空单元格）与表头逐列完全一致，
+    //   不接受多列、少列或错位；内置版本的签名不带该标记，保持原有连续段匹配。
+    if (signature.structureExact) {
+      const expected = (signature.expectedHeaders || []).map((h) => normalizeCell(h));
+      const exact = meaningfulRows.some((cells) => {
+        const row = (Array.isArray(cells) ? cells : []).map((cell) => normalizeCell(cell));
+        while (row.length && row[row.length - 1] === '') row.pop();
+        return row.length === expected.length && row.every((cell, index) => cell === expected[index]);
+      });
+      if (exact) matchedKeys.push(signature.tableKey);
+      continue;
+    }
     const anchor = getL1Anchor(signature);
     if (anchor.length === 0) {
       // 占位/空签名（如未实测的模板）跳过，不参与匹配
@@ -360,6 +372,29 @@ async function detectTableType(filePath, candidateSignatures = ALL_TABLE_SIGNATU
     }
   }
 
+  // 诊断用：各 sheet 前 3 个有意义行，供调用方给出与候选结构的差异明细（不参与识别判定）。
+  //   rowLabel 描述该行位置：单 sheet 的首个非空行不加前缀，其余为“[工作表「名」]第 N 个非空行”。
+  const headerCandidates = sheetRowsCache.flatMap(({ sheetName, rows }) => rows.slice(0, 3).map((cells, index) => {
+    const where = sheetRowsCache.length > 1 ? `工作表「${sheetName || ''}」` : '';
+    return {
+      name: sheetName || '',
+      rowLabel: index === 0 && !where ? '' : `${where}第 ${index + 1} 个非空行`,
+      headers: (Array.isArray(cells) ? cells : []).map((cell) => normalizeCell(cell))
+    };
+  }));
+  const fuzzySignature = globalBest.tableKey
+    ? signatures.find((signature) => signature.tableKey === globalBest.tableKey)
+    : null;
+  if (globalBest.tableKey && globalBest.score >= globalBest.minScore && fuzzySignature && fuzzySignature.structureExact) {
+    // 指纹相近但不是当前版本的表头：按“结构不一致”返回，由调用方给出差异明细，不当作命中。
+    return {
+      tableKey: globalBest.tableKey,
+      score: globalBest.score,
+      status: 'structure-mismatch',
+      sheetName: globalBest.sheetName,
+      headerCandidates
+    };
+  }
   if (globalBest.tableKey && globalBest.score >= globalBest.minScore) {
     return {
       tableKey: globalBest.tableKey,
@@ -371,7 +406,7 @@ async function detectTableType(filePath, candidateSignatures = ALL_TABLE_SIGNATU
     };
   }
 
-  return { tableKey: null, score: globalBest.score, status: 'unrecognized' };
+  return { tableKey: null, score: globalBest.score, status: 'unrecognized', headerCandidates };
 }
 
 module.exports = {

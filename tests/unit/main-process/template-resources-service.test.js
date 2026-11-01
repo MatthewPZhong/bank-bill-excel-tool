@@ -127,11 +127,12 @@ test('合并单元格覆盖的行计入内容行数', async () => {
   assert.ok(rowsWithContent > 10);
 });
 
-test('可替换范围固定为 14 个有导入契约的模板（含平盘 5 张链接原始表、单据对账与移除归档 Pending 的导入识别结构）', () => {
+test('可替换范围固定为 17 个有导入契约的模板（含平盘 5 张链接原始表、银行账单处理 4 张链接表、单据对账与移除归档 Pending 的导入识别结构）', () => {
   assert.deepEqual(TEMPLATE_RESOURCES.filter((item) => item.replace.allowed).map((item) => item.id).sort(), [
-    'bank-statement', 'doc-recon-unbalanced', 'dup-recall-mail', 'fund-type-enum', 'gateway-recon', 'position-bank',
-    'position-bank-accounts', 'position-gateway-raw-in', 'position-gateway-raw-out', 'position-payment-full',
-    'position-transfer-orders', 'prefund-unbalanced', 'removed-pending', 'vcc-pending-calc'
+    'bank-statement', 'doc-recon-unbalanced', 'dup-recall-mail', 'fund-type-enum', 'fx-delivery', 'gateway-recon',
+    'position-bank', 'position-bank-accounts', 'position-gateway-raw-in', 'position-gateway-raw-out',
+    'position-payment-full', 'position-transfer-orders', 'prefund-unbalanced', 'refund-order', 'removed-pending',
+    'transfer-order', 'vcc-pending-calc'
   ]);
 });
 

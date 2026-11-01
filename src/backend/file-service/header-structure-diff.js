@@ -53,11 +53,16 @@ function closestPair(sheets, candidates) {
   return best;
 }
 
-// sheets：[{ name, headers }]，文件中各工作表的表头行；candidates：[{ name, headers, versionLabel }]。
+// sheets：[{ name, headers, rowLabel? }]，文件中各工作表的表头行；candidates：[{ name, headers, versionLabel }]。
+//   rowLabel：调用方给出的行描述（如“第 2 个非空行”，表头行不确定时按候选行比较），给出时代替“工作表「name」”前缀。
 // 返回 detailLines；hint 为 null 时不附加模板文件提示（结构不可替换的表）。
 function describeHeaderMismatch({ sheets, candidates, hint = TEMPLATE_STRUCTURE_HINT } = {}) {
   const actualSheets = (Array.isArray(sheets) ? sheets : [])
-    .map((sheet) => ({ name: cellText(sheet && sheet.name), headers: normalizeHeaders(sheet && sheet.headers) }));
+    .map((sheet) => ({
+      name: cellText(sheet && sheet.name),
+      rowLabel: sheet && typeof sheet.rowLabel === 'string' ? cellText(sheet.rowLabel) : null,
+      headers: normalizeHeaders(sheet && sheet.headers)
+    }));
   const expected = (Array.isArray(candidates) ? candidates : [])
     .map((candidate) => ({
       name: cellText(candidate && candidate.name),
@@ -67,15 +72,18 @@ function describeHeaderMismatch({ sheets, candidates, hint = TEMPLATE_STRUCTURE_
     .filter((candidate) => candidate.headers.length > 0);
   const lines = [];
   const best = closestPair(actualSheets, expected);
-  const sheetPrefix = (sheet) => (actualSheets.length > 1 && sheet.name ? `工作表「${sheet.name}」` : '');
+  const sheetPrefix = (sheet) => {
+    if (sheet.rowLabel !== null) return sheet.rowLabel;
+    return actualSheets.length > 1 && sheet.name ? `工作表「${sheet.name}」` : '';
+  };
 
   if (!best || best.score === 0) {
     lines.push('文件表头与所有已知结构都没有相同的列名');
     for (const sheet of actualSheets.slice(0, 5)) {
-      const label = sheetPrefix(sheet) || '文件';
+      const label = sheet.rowLabel !== null ? (sheet.rowLabel || '第 1 个非空行') : `${sheetPrefix(sheet) || '文件'}第 1 行`;
       lines.push(sheet.headers.length
-        ? `${label}第 1 行（${sheet.headers.length} 列）：${listText(sheet.headers)}`
-        : `${label}第 1 行为空`);
+        ? `${label}（${sheet.headers.length} 列）：${listText(sheet.headers)}`
+        : `${label}为空`);
     }
   } else {
     const { sheet, candidate } = best;
@@ -112,6 +120,7 @@ function describeHeaderMismatch({ sheets, candidates, hint = TEMPLATE_STRUCTURE_
 // 按内置列存储的模块（存量数据、导出与下游按内置列名读取）：把当前版本的表头对应回内置列。
 //   先按列名对应；内置列在当前版本中找不到同名列、且同一位置上的列也不是任何内置列名时，视为该列改名（按位置对应）；
 //   仍对应不上的内置列导入后为空；当前版本多出的列不导入。必用列须同名存在，由模板预检保证，不走按位置改名。
+//   内置结构中的空列（如外汇交割表第 10 列）按物理位置保留，不参与对应，也不计为置空。
 //   返回 sourceIndex[i] = 内置第 i 列取文件第几列（-1 为空），以及改名、置空、不导入三类说明。
 function canonicalHeaderMapping(canonicalHeaders, versionHeaders) {
   const canonical = normalizeHeaders(canonicalHeaders);
@@ -123,13 +132,13 @@ function canonicalHeaderMapping(canonicalHeaders, versionHeaders) {
   });
   const used = new Set();
   const sourceIndex = canonical.map((header) => {
-    const index = byName.has(header) ? byName.get(header) : -1;
+    const index = header && byName.has(header) ? byName.get(header) : -1;
     if (index >= 0) used.add(index);
     return index;
   });
   const renamed = [];
   canonical.forEach((header, index) => {
-    if (sourceIndex[index] !== -1 || index >= version.length || used.has(index)) return;
+    if (!header || sourceIndex[index] !== -1 || index >= version.length || used.has(index)) return;
     const candidate = version[index];
     if (!candidate || canonicalSet.has(candidate)) return;
     sourceIndex[index] = index;
@@ -139,9 +148,35 @@ function canonicalHeaderMapping(canonicalHeaders, versionHeaders) {
   return {
     sourceIndex,
     renamed,
-    emptied: canonical.filter((_header, index) => sourceIndex[index] === -1),
+    emptied: canonical.filter((header, index) => header && sourceIndex[index] === -1),
     dropped: version.filter((header, index) => header && !used.has(index))
   };
+}
+
+// 按列名取键的行对象（键为当前版本表头）转换为按内置列名取键：内置列取对应列的值（对应不上为空串），
+//   内置结构中的空列跳过；keepExtra 时当前版本多出的列按原列名保留（网关对账单的新增列入库）。
+function projectObjectToCanonical(row, canonicalHeaders, versionHeaders, mapping, { keepExtra = false } = {}) {
+  const canonical = normalizeHeaders(canonicalHeaders);
+  const version = normalizeHeaders(versionHeaders);
+  const out = {};
+  canonical.forEach((header, index) => {
+    if (!header) return;
+    const source = mapping.sourceIndex[index];
+    out[header] = source >= 0 && row && Object.hasOwn(row, version[source]) ? row[version[source]] : '';
+  });
+  if (keepExtra) {
+    for (const header of mapping.dropped) {
+      if (row && Object.hasOwn(row, header) && !Object.hasOwn(out, header)) out[header] = row[header];
+    }
+  }
+  return out;
+}
+
+// 入库后实际可用的列名：内置列中未被置空的，加上（keepExtra 时）当前版本多出的列。
+function storedHeaderNames(canonicalHeaders, mapping, { keepExtra = false } = {}) {
+  const canonical = normalizeHeaders(canonicalHeaders);
+  const kept = canonical.filter((header, index) => header && mapping.sourceIndex[index] >= 0);
+  return keepExtra ? [...kept, ...mapping.dropped.filter((header) => !kept.includes(header))] : kept;
 }
 
 // 把一行按当前版本列序读出的取值转换为按内置列序的取值。
@@ -166,5 +201,7 @@ module.exports = {
   describeCanonicalMapping,
   describeHeaderMismatch,
   normalizeHeaders,
-  projectRowToCanonical
+  projectObjectToCanonical,
+  projectRowToCanonical,
+  storedHeaderNames
 };

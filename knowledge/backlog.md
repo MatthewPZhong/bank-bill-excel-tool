@@ -20,6 +20,13 @@
 
 ## 未实施
 
+### B39（P3 · 顺延）资金对账后台 worker 未接入银行账单处理链接表当前结构
+
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §12.3 K4）
+- **影响**：`fund-recon-worker/source-readers.js` 的退款订单按固定签名 `ZHONGTAI_REFUND_ORDER_SIGNATURE` 读取（网关来源走旧的 `readGatewayRecon`）；该后台路径生产未启用（`fund-recon:import` 未开启 production）。启用了「中台退款订单」用户结构版本时，该路径会把新结构文件判为表头不符，或按内置位置读出错列。传统 IPC 路径（链接表管理、导入文件）已接入。当前生产不受影响
+- **关闭条件**：启用后台路径前，在准备阶段读取 `refund-order` 当前结构（`resolveLinkedSignatures`），读取后按 `projectLinkedRow` 对应回内置列名，补对应回归测试
+- **目标版本**：未定（随后台资金对账启用）
+
 ### B38（P3 · 顺延）单据对账托管服务未接入「单据对账导出不平」当前结构
 
 - **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §10）

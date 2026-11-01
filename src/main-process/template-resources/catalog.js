@@ -28,6 +28,8 @@ function resource(definition) {
     failure: '',
     effect: '',
     twin: null,
+    // twinNote：两者只是同一份系统导出、各自有独立版本时的说明（详情显示为“同一系统导出”，不显示“内容相同”）。
+    twinNote: null,
     currentTemplate: null,
     ...definition,
     bindings: Object.freeze(definition.bindings),
@@ -36,6 +38,17 @@ function resource(definition) {
 }
 
 const REPLACEABLE = Object.freeze({ allowed: true });
+
+const SAME_EXPORT_NOTE = '版本各自独立，需分别导入';
+
+// 银行账单处理链接表：导入时按当前版本表头识别，入库 / 会话前对应回内置列名（见 linked-structure-signatures）。
+const LINKED_INPUT_STRUCTURE = Object.freeze({
+  readMode: 'runtime',
+  replace: REPLACEABLE,
+  cache: '不缓存，每次导入时读取',
+  failure: '当前版本缺失、被修改或不兼容时该表导入中止，提示恢复默认或重新导入',
+  effect: '下次导入；只认当前版本结构，入库与派生仍按内置列名'
+});
 
 // 平盘链接原始表：导入时按当前版本第 1 个工作表的表头识别（契约见 ./contracts.js inputStructureContract）。
 const POSITION_INPUT_STRUCTURE = Object.freeze({
@@ -96,12 +109,15 @@ const TEMPLATE_RESOURCES = Object.freeze([
   }),
   // 输入原表
   resource({
-    id: 'gateway-recon', path: 'assets/网关对账单.xlsx', type: 'input', readMode: 'cached',
+    // 网关对账单：导入时按当前版本识别，入库前对应回内置 31 列名（新增列也入库）；C3 下拉为入库后实际可用的列名。
+    id: 'gateway-recon', path: 'assets/网关对账单.xlsx', type: 'input', readMode: 'runtime',
     bindings: [
       binding('bank-statement-process', 'C3 场景 · 网关账单字段下拉', 'cached'),
-      binding('bank-statement-process', '链接表导入结构参考')
+      binding('bank-statement-process', '链接表导入 · 识别结构', 'runtime')
     ],
-    replace: REPLACEABLE, cache: '按文件路径缓存', failure: '读取失败时改用程序内置旧字段（也会缓存）', effect: '下次打开场景配置'
+    replace: REPLACEABLE, cache: '不缓存，每次导入与打开场景配置时读取',
+    failure: '当前版本缺失、被修改或不兼容时导入中止，C3 下拉改用程序内置旧字段',
+    effect: '下次导入与打开场景配置；只认当前版本结构，入库仍按内置列名'
   }),
   resource({
     id: 'bank-statement', path: 'assets/银行对账单.xlsx', type: 'input', readMode: 'runtime',
@@ -112,14 +128,17 @@ const TEMPLATE_RESOURCES = Object.freeze([
     ],
     replace: REPLACEABLE, cache: '不缓存，每次导出读取', failure: '导出中止，提示模板不兼容', effect: '下次导出'
   }),
-  resource({ id: 'transfer-order', path: 'assets/中台调拨订单.xlsx', type: 'input', readMode: 'sample',
-    bindings: [binding('bank-statement-process', '链接表导入结构参考')] }),
-  resource({ id: 'refund-order', path: 'assets/中台退款订单.xls', type: 'input', readMode: 'sample',
-    bindings: [binding('bank-statement-process', '导入结构参考')] }),
+  // 中台调拨订单与平盘「中台调拨订单表」是同一份系统导出，各自独立版本（twin 互相标注）。
+  resource({ id: 'transfer-order', path: 'assets/中台调拨订单.xlsx', type: 'input', ...LINKED_INPUT_STRUCTURE,
+    bindings: [binding('bank-statement-process', '链接表导入 · 识别结构', 'runtime')],
+    twin: 'position-transfer-orders', twinNote: SAME_EXPORT_NOTE }),
+  // 版本文件须为 .xlsx；导入的中台退款订单仍可为 .xls。
+  resource({ id: 'refund-order', path: 'assets/中台退款订单.xls', type: 'input', ...LINKED_INPUT_STRUCTURE,
+    bindings: [binding('bank-statement-process', '导入文件 · 识别结构', 'runtime')] }),
   resource({ id: 'inbound-raw-order', path: 'assets/入账原始订单.xlsx', type: 'input', readMode: 'sample',
     bindings: [binding('bank-statement-process', '导入结构参考')] }),
-  resource({ id: 'fx-delivery', path: 'assets/外汇交割表.xls', type: 'input', readMode: 'sample', headerRow: 2,
-    bindings: [binding('bank-statement-process', '链接表导入结构参考')] }),
+  resource({ id: 'fx-delivery', path: 'assets/外汇交割表.xls', type: 'input', ...LINKED_INPUT_STRUCTURE, headerRow: 2,
+    bindings: [binding('bank-statement-process', '链接表导入 · 识别结构', 'runtime')] }),
   resource({ id: 'fx-option', path: 'assets/外汇期权表.xlsx', type: 'input', readMode: 'disabled', headerRow: 2,
     bindings: [binding('bank-statement-process', '链接表 · 导入未启用')], twin: 'fx-option-order' }),
   resource({ id: 'fx-option-order', path: 'assets/外汇期权订单.xlsx', type: 'input', readMode: 'disabled', headerRow: 2,
@@ -147,7 +166,8 @@ const TEMPLATE_RESOURCES = Object.freeze([
   resource({ id: 'position-payment-full', path: 'assets/中台测试付款全量信息表.xlsx', type: 'input', ...POSITION_INPUT_STRUCTURE }),
   resource({ id: 'position-gateway-raw-in', path: 'assets/中台网关原始入账订单.xlsx', type: 'input', ...POSITION_INPUT_STRUCTURE }),
   resource({ id: 'position-gateway-raw-out', path: 'assets/中台网关原始出账订单.xlsx', type: 'input', ...POSITION_INPUT_STRUCTURE }),
-  resource({ id: 'position-transfer-orders', path: 'assets/中台调拨订单表.xlsx', type: 'input', ...POSITION_INPUT_STRUCTURE }),
+  resource({ id: 'position-transfer-orders', path: 'assets/中台调拨订单表.xlsx', type: 'input', ...POSITION_INPUT_STRUCTURE,
+    twin: 'transfer-order', twinNote: SAME_EXPORT_NOTE }),
   resource({ id: 'position-bank-accounts', path: 'assets/清结算银行账户表.xlsx', type: 'input', ...POSITION_INPUT_STRUCTURE }),
   resource({ id: 'vcc-removed-pending', path: 'assets/VCC财务OP校验/VCC_移除归档Pending账单.xlsx', type: 'input', readMode: 'sample',
     bindings: [binding('vcc-financial-op', '导入结构参考 · 46 列')] }),

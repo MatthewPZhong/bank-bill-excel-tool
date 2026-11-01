@@ -1024,9 +1024,14 @@
           lines.push(`成功：<br/>${okList}`);
         }
         if (failed.length > 0) {
+          // v3.2.14：表头与当前结构不一致（含未识别）时附差异明细（最接近的表、逐列差异、缺少 / 多出列与模板文件指引）。
           const failList = failed.map((r) => {
             const reason = r.message || statusLabel[r.status] || r.status || '未知原因';
-            return `• ${escapeHtml(r.fileName)}：${escapeHtml(reason)}`;
+            const details = Array.isArray(r.detailLines) ? r.detailLines.filter(Boolean) : [];
+            const detailHtml = details.length
+              ? `<br/><span style="font-size:12px;color:var(--muted);">${details.map(escapeHtml).join('<br/>')}</span>`
+              : '';
+            return `• ${escapeHtml(r.fileName)}：${escapeHtml(reason)}${detailHtml}`;
           }).join('<br/>');
           lines.push(`失败：<br/>${failList}`);
         }

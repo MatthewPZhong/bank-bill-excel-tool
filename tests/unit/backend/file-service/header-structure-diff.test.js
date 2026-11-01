@@ -124,3 +124,19 @@ test('同一位置是另一个内置列名或已被使用时不按位置改名�
   assert.deepEqual(describeCanonicalMapping(mapping), ['导入后为空：b']);
   assert.deepEqual(projectRowToCanonical(['1', '3'], mapping.sourceIndex), ['1', undefined, '3']);
 });
+
+test('调用方给出行描述时（表头行不确定，按前几个非空行比较）用它代替工作表前缀', () => {
+  const lines = describeHeaderMismatch({
+    sheets: [
+      { name: 'Sheet1', rowLabel: '', headers: ['外汇交割查询'] },
+      { name: 'Sheet1', rowLabel: '第 2 个非空行', headers: ['bizId', 'batchNo', 'billDate', 'fileId', 'currency'] }
+    ],
+    candidates
+  });
+  assert.equal(lines[0], '第 2 个非空行最接近：中台网关原始入账订单（当前版本 V1，5 列；文件 5 列）');
+  assert.deepEqual(describeHeaderMismatch({
+    sheets: [{ name: 'Sheet1', rowLabel: '', headers: ['x'] }, { name: 'Sheet1', rowLabel: '第 2 个非空行', headers: [] }],
+    candidates,
+    hint: null
+  }), ['文件表头与所有已知结构都没有相同的列名', '第 1 个非空行（1 列）：x', '第 2 个非空行为空']);
+});

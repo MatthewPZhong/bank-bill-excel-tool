@@ -442,3 +442,41 @@ test.describe('detectTableType — 导出常量自检', () => {
     assert.ok(L2_HEADER_SCAN_ROWS > 0);
   });
 });
+
+// v3.2.14：设置 → 模板文件启用了用户版本的链接表签名（structureExact）只认当前版本表头逐列一致；
+//   指纹相近但不一致时返回 structure-mismatch（带前几行表头供差异明细），不按模糊打分命中。
+test.describe('detectTableType — 模板文件当前版本（structureExact）', () => {
+  const { effectiveLinkedSignature } = require('../../../src/main-process/linked-structure-signatures');
+  const VERSION = [...GATEWAY_RECON_SIGNATURE.expectedHeaders.filter((header) => header !== 'bookdate'), '新增列'];
+  const signatures = LINKED_IMPORT_SIGNATURES.map((signature) => (signature.tableKey === 'gateway-recon'
+    ? effectiveLinkedSignature(signature, { status: 'user', headers: VERSION, label: 'V2' })
+    : signature));
+  let dir;
+  test.before(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'detector-structure-exact-')); });
+  test.after(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+  test('与当前版本表头逐列一致（末尾空单元格不计）：命中，单 sheet 可走流式', async () => {
+    const file = writeTempXlsx(dir, 'exact.xlsx', [[...VERSION, ''], VERSION.map(() => 'v')]);
+    const result = await detectTableType(file, signatures);
+    assert.deepEqual([result.status, result.tableKey, result.streamingEligible], ['matched', 'gateway-recon', true]);
+  });
+
+  test('内置结构、多一列或错位：structure-mismatch，带各行表头', async () => {
+    for (const headers of [GATEWAY_RECON_SIGNATURE.expectedHeaders, [...VERSION, '再多一列'], ['', ...VERSION]]) {
+      const file = writeTempXlsx(dir, 'mismatch.xlsx', [headers]);
+      const result = await detectTableType(file, signatures);
+      assert.deepEqual([result.status, result.tableKey], ['structure-mismatch', 'gateway-recon'], headers.join(','));
+      assert.equal(result.headerCandidates[0].rowLabel, '');
+      assert.equal(result.headerCandidates[0].headers.filter(Boolean).length, headers.filter(Boolean).length);
+    }
+  });
+
+  test('与任何结构都不像：unrecognized 也带各行表头；内置签名的识别不受影响', async () => {
+    const file = writeTempXlsx(dir, 'other.xlsx', [['标题'], ['甲', '乙', '丙']]);
+    const result = await detectTableType(file, signatures);
+    assert.equal(result.status, 'unrecognized');
+    assert.deepEqual(result.headerCandidates.map((item) => [item.rowLabel, item.headers]), [['', ['标题']], ['第 2 个非空行', ['甲', '乙', '丙']]]);
+    const transfer = await detectTableType(path.join(ASSETS, '中台调拨订单.xlsx'), signatures);
+    assert.deepEqual([transfer.status, transfer.tableKey], ['matched', 'zhongtai-dispatch-order']);
+  });
+});

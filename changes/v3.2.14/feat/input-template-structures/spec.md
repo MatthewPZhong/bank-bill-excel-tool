@@ -56,6 +56,7 @@
 | D11 | 外汇期权表、外汇期权订单、入账原始订单导入未启用，暂不处理，待启用导入时接入 |
 | D12 | VCC 财务OP：导入时按列名（同位置改名视为改名）归一到内置列序再入库，新增列不导入、删除的非必用列为空；导入时的表头持久化到 VCC 库（幂等迁移），存档重读按同一结构映射，哈希、血缘与导出不变 |
 | D13 | 顺序调整为：单据对账导出不平 → 移除归档 Pending 账单 → 流水对账单 → 银行账单处理链接表 4 张 → VCC 财务OP 5 张 → 银行对账单（取代 D7 的顺序） |
+| D14 | 流水对账单移到 VCC 之后：业务 OP v3.2.7 导出「流水校验原表」会重读存档原文件，且数据集复用只按文件摘要判断，需要与 VCC 相同的“记录导入时结构、重读按记录映射”机制；先在 VCC 上落地。顺序更新为：银行账单处理链接表 4 张 → VCC 财务OP 5 张 → 流水对账单 → 银行对账单 |
 
 ## 4. 功能规则
 
@@ -223,3 +224,65 @@ Codex 已核查未发现缺陷的方面：冻结结构在预检、重放、异�
 | `backend/pending-import/removed-reader.js` | `readRemovedPendingFile(filePath, { structure })`：按当前结构识别并对应回内置 46 列；新增 `REMOVED_PENDING_REQUIRED_COLUMNS`、`readRemovedPendingHeaders` |
 | `template-resources/{input-structures,contracts,catalog}.js` | 登记 `removed-pending`（`storage: 'canonical'`）；契约对按内置列存储的资源增加「列对应」提示；资源改为可替换 |
 | `main.js` | `pending:removed:import` 读取当前结构，不可用时不入库 |
+
+## 12. 第二批 · 银行账单处理链接表 4 张（`gateway-recon`、`transfer-order`、`refund-order`、`fx-delivery`）
+
+### 12.1 决策（用户，2026-10-31）
+
+| 编号 | 决策 |
+| --- | --- |
+| D15 | 网关对账单入库仍按内置 31 列名（前置资金对账、SQL `json_extract` 与迁移按列名读取）；按位置改名的列存为内置名，新增列也入库（`raw_json` 多出该键）；C3「网关账单字段」下拉 = 入库后实际可用的列名（内置列中未被置空的 + 新增列），场景引用保护按同一口径 |
+| D16 | 中台调拨订单（银行账单处理）与平盘「中台调拨订单表」各自独立版本，模板详情互相标注同结构资源 |
+
+### 12.2 方案
+
+- 识别只认当前版本：每次导入按 4 个资源的当前结构生成本次的识别签名（`expectedHeaders` 取当前版本；外汇交割表的 L1 锚点取第一个空列之前的连续段），L1 要求整行列宽与位置完全一致；只靠 L2 指纹命中、或 L1 命中但列宽不一致时，按“结构不一致”报错并附 1b 差异明细与指引。其余固定签名（银行对账单、入账原始订单、外汇期权、银行对账单表）不变。
+- 入库 / 会话前统一按 `canonicalHeaderMapping` 对应回内置列：网关保留新增列（D15），调拨与外汇丢弃新增列，退款订单丢弃新增列；内置结构中的空列（外汇第 10 列）不参与对应、不计为置空；外汇按物理行号分组（BOC）不受影响。流式路径的列宽随当前版本。
+- 必用列：
+  - 网关：Billdate、Channel、merchantid、orderid、currency、amount、ReconBillBizId、reconciliationid、TradeType、name、cardNo、真实渠道、清算网络（13），另加 C3 场景引用的字段（按入库后列名判断）。
+  - 中台调拨订单：`FT_RECON_FIELD_MAP.mid` 的 13 列（已覆盖 ADM、BOC 读取的列）。
+  - 中台退款订单：`REFUND_RO_COLUMNS` ∪ 回填读取的退款单列（16）。
+  - 外汇交割表：交易编号、交易日期、到期日、货币1金额、货币2金额。
+- 冲突：新结构不能与本次识别候选中的其他签名（含固定签名与其余 3 个资源的当前结构）表头完全相同。
+- 口径核对：xlsx 单表文件走流式读取、其余走 SheetJS，模板检查两种读法都要与快照一致（布尔表头两者读法不同）。模板版本须为 .xlsx；导入文件仍可为 .xls。
+- 报错可见：链接表导入与“导入文件”的结果带 `detailLines`，界面导入结果摘要显示明细。
+- 不变：`linked_*` 表结构与键、派生（FT_RECON / ADM / BOC / 退款回填）读取的列名、导出与前置资金对账口径。
+
+### 12.3 风险
+
+| 编号 | 风险 | 处理 |
+| --- | --- | --- |
+| K3 | v3.2.13 用户可能已为 C3 下拉启用网关对账单用户版本；升级后该版本同时驱动导入识别，若实际导入的文件仍是旧结构会被拒 | 发版说明写明；报错明细与指引提示恢复默认或导入与系统导出一致的版本 |
+| K4 | 后台 `fund-recon` worker（生产未启用）用固定签名重读退款订单 | 已登记 backlog B39，启用前接入当前结构 |
+
+### 12.4 实施记录
+
+| 文件 | 内容 |
+| --- | --- |
+| `main-process/linked-structure-signatures.js`（新增） | 4 张链接表 → 模板资源；按当前结构生成本次识别签名（用户版本 `structureExact`，不可用时 `structureUnavailable`）；读出的行对应回内置列名（网关保留新增列）；识别失败时的差异明细 |
+| `main-process/table-type-detector.js` | `structureExact` 签名只认整行逐列一致；指纹相近但不一致返回 `structure-mismatch`；未识别 / 不一致都带前 3 个非空行（`headerCandidates`） |
+| `backend/file-service/header-structure-diff.js` | 新增 `projectObjectToCanonical`、`storedHeaderNames`；内置结构中的空列不参与对应；差异明细支持调用方给出的行描述（`rowLabel`） |
+| `template-resources/input-structures.js` | 登记 4 个资源（组 `bank-linked`，`storage: 'canonical'`）；网关 `keepExtra` + `values: 'stored'`；外汇 `headerRow: 2` + `allowBlank`；固定签名（银行对账单、入账原始订单、外汇期权、银行对账单表）作为识别冲突对象；导入口径核对同时比较 SheetJS 与流式读法 |
+| `template-resources/contracts.js` | 删除旧 `gatewayContract`（网关改走 `inputStructureContract`）；`__CUSTOM__` 保留值提示迁入；外汇允许空列；场景引用按入库后的列名、只拦“当前可用而新版本不可用”的列 |
+| `template-resources/{workbook-structure,service,catalog}.js` | 网关取值快照 = 入库后的列名（C3 下拉与场景引用同口径）；比较基准、同组冲突与启用前复核按版本记录的各表表头计算；4 个资源可替换；中台调拨订单与平盘「中台调拨订单表」`twin` + `twinNote` |
+| `constants/refund-backfill-fields.js` | 新增 `REFUND_ORDER_REQUIRED_COLUMNS`（`REFUND_RO_COLUMNS` + 状态，16 列） |
+| `main.js` | 链接表管理与导入文件两个入口每次导入解析当前结构；流式 / 数组路径与退款会话按当前结构读后对应回内置列；结构不一致返回 `unrecognized` + `detailLines`；当前版本不可用时该表 `read-error`；链接表导入失败日志带明细 |
+| `renderer-dialogs.js`、`renderer/controllers/bank-statement.js` | 链接表管理导入结果在失败项下显示明细；导入文件有结构不一致时先弹差异明细（写入错误日志），确认后再给退款 / 网关提示 |
+| `renderer/dialogs/template-files.js` | 带 `twinNote` 的资源详情显示“同一系统导出（版本各自独立，需分别导入）”，其余仍为“内容相同” |
+| `knowledge/backlog.md` | B39（K4） |
+
+偏离与说明：
+
+- 识别：4 张表的用户版本统一按“某一非空行去掉末尾空单元格后与当前版本表头逐列一致”判定，外汇交割表不另取空列之前的 L1 锚点段（实测读取保留中间空单元格，整行比对可直接命中）。内置版本保持原签名与原识别（L1 连续段 + L2 指纹），不收紧现有行为。
+- 场景引用保护（所有输入原表）：只拦截当前版本中可用、新版本中不可用的被引用列，与切换版本时的复核同口径。原实现要求“被引用的列全部存在”，会被预置 C3 场景（引用 `Amount`、`MerchantId`、`Bank`、`reconciliationId`，与网关表头大小写不符，属存量配置）拦下任何网关新版本；集成测试在真实主库上发现。取不到当前取值时仍按全部被引用值逐项核对。
+- 网关对账单的旧模板契约（`识别字段` 检查 `signatureHeaders`、表头取声明范围首行）由输入结构契约取代：必用列 13 个；表头须在第 1 行、从 A 列起（与导入读取口径一致），v3.2.13 测试中表头从 C2 起的版本现在预检不通过。
+- 导入口径核对：SheetJS 与流式两种读法结果不同时，不一致的列标出两种结果（如「true / TRUE」），预检必不通过；不只返回其中一种，避免一种读法与快照一致而另一种不一致时放行。
+- 未接入：`gateway-recon:import`（`readGatewayRecon`，渲染层无调用方）与后台 `fund-recon` worker（B39）。
+
+### 12.5 验证结果（2026-10-31，macOS 本机，未提交工作区）
+
+- `npm run release-check` 通过：lint；架构检查 804/804 文件；smoke；单测 9746/9750（4 项为既有条件跳过）；集成 88/88 脚本（新增 `linked-input-template-version` 7/7）。
+- 新增 / 调整的回归：识别器 `structureExact`（命中、内置结构 / 多列 / 错位为结构不一致、未识别带各行表头）、签名解析与行对应（改名、删列、新增列、外汇空列、读取异常按内置）、两个导入入口在入库前拦截当前版本不可用（源码守卫）、链接表模板预检（场景引用口径、调拨订单独立版本、外汇第 2 行表头与空列、退款必用列、布尔表头两种读法不一致）、导入文件差异弹窗与后续提示顺序、差异明细行描述；v3.2.13 网关模板测试改为输入结构语义。
+- 集成测试在真实主库上发现的问题已修复：预置 C3 场景引用了网关表头中不存在的列，原口径会拦下任何网关新版本（见 12.4 偏离与说明）。
+- 复查中修复：「导入文件」入口的链接表分支在当前版本不可用时仍按内置结构入库，已改为该表中止（与链接表管理一致）。
+- 未执行：真实应用 GUI（本机开发版启动受已知 BizOP 资源预检阻断）与 Windows 安装版实测；用户真实网关样本未在本模块重跑（该样本属平盘中台网关入账订单，不是本模块的表）。
