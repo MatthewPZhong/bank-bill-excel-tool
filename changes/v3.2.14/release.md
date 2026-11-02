@@ -27,6 +27,44 @@
 - 审查修复在断档分支上提交为 `0aea4c26`，再以 `a12e77f1` 合入。新末端仍持有 v3.2.12 的 `boundaries.json`，不是 `0043b2be`、`9d4a554b` 的祖先，所以以 `0aea4c26` 为来源，再补登上述两个字段的同一放宽。这一条也覆盖断档分支的全部早先提交。
 - 第三轮审查修复在两个功能分支分别提交为 `7e19fe8b`、`b06ff9c8`，以 `dcbc3a52`、`25b464fb` 合入，无冲突。`7e19fe8b` 同样持有 v3.2.12 的 `boundaries.json`，按同一方式以它为来源补登两个字段（`cc35011f`），现行允许集合不变；`b06ff9c8` 持有的配置与现行一致，无需补登。
 
+## 2026-11-01 输入结构分支经 PR 合入
+
+用户要求：推送 `feat/input-template-structures`，开 PR 合入 `release/v3.2.14`。
+
+| 项目 | 事实 |
+| --- | --- |
+| 源分支 | `feat/input-template-structures`，从 `v3.2.13` 创建，功能末端 `7f318ed6` |
+| 内容 | 输入表结构与契约不一致时给出差异明细；「设置 → 模板文件」导入新版本驱动导入识别结构：平盘链接原始表 5 张、单据对账导出不平、移除归档 Pending、银行账单处理链接表 4 张、VCC 财务OP 5 张、流水对账单、银行对账单（导入识别结构），见 [spec](feat/input-template-structures/spec.md) |
+| 合入方式 | 先在源分支合入 `release/v3.2.14`（`87cab203`），合并提交 `38e6c96f`；再经 PR 以 merge commit 合入 release。release 侧的合入提交待 PR 合并后补记 |
+| 合并方式 | 必须使用 merge commit：补登的 policyChanges 以 `7f318ed6`、`87cab203`、`24d1ea82` 为来源 |
+
+合并时的处理：
+
+- 4 个文件冲突：
+  - `knowledge/backlog.md`：两侧都在「未实施」顶部新增条目，全部保留，B41–B36 在上。
+  - 执行描述基线测试：两侧新增的通道都保留。
+  - `architecture/boundaries.json`：两侧改动的是不同边界，按边界合并，policyChanges 按来源提交时间顺序拼接。
+  - `rules/integration-test-policy.md`：第七节先取源分支版本，再由完整集成运行重写。
+- `tests/unit/main-process/archive-task-policy-registry.test.js`：两侧各新增一个 exclude 通道，并对计数做了相同的 +1，因此合并无冲突，但合计应为 285 / 144。已在 `fa8c302f` 修正。
+- 架构历史检查报 26 条 `ARCH-POLICY-HISTORY`：
+  - 源分支 9 个提交仍持有原 `renderer-dialog-app-settings` ui 集合；
+  - release 侧 17 个提交仍持有原 `renderer-dialog-scenarios` scenarioCommands 集合；
+  - 已有的放宽来源都不是对方提交的后代。
+  
+  已按先例补登两条，以源分支末端 `7f318ed6`、release 末端 `87cab203` 为来源，各补登同一放宽（`f27e5208`）。现行允许集合不变。
+- PR 合并前如果 `release/v3.2.14` 又有新提交，这些提交同样持有原 scenarioCommands 集合，需要以新的 release 末端为来源再补登一次。
+
+检查：
+
+- 合并后首次运行 `release-check`：lint 通过，架构检查报上述 26 条后中止。
+- 补登后重跑：单测有 2 条计数失败，即上述 285 / 144。
+- 修正后在提交内容上重跑 `release-check`，通过：
+  - 架构检查 810/810 文件，历史 111 个提交；
+  - smoke 通过；
+  - 单测 9826/9830，4 项为既有条件跳过；
+  - 集成测试 93/93 脚本。
+- 真实应用 GUI 与 Windows 安装版未实测。
+
 ## 检查与证据边界
 
 - 两次合并后首次运行 `release-check`：lint 通过，架构检查报上述 5 条 `ARCH-POLICY-HISTORY` 后中止。
