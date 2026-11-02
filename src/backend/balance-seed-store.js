@@ -120,13 +120,16 @@ function writeBalanceSeedRecords(storageRoot, bankName, records) {
   return filePath;
 }
 
-function findPreviousBalanceSeed(storageRoot, { bankName, merchantId, currency, beforeBillDate }) {
+// generationMethod 可选：只取指定生成方式的种子（断档锚点只认人工录入）。
+function findPreviousBalanceSeed(storageRoot, { bankName, merchantId, currency, beforeBillDate, generationMethod = '' }) {
+  const method = normalizeCell(generationMethod);
   const records = readBalanceSeedRecords(storageRoot, bankName)
     .filter((record) => {
       return (
         record.merchantId === normalizeCell(merchantId) &&
         record.currency === normalizeCell(currency) &&
-        record.billDate < normalizeCell(beforeBillDate)
+        record.billDate < normalizeCell(beforeBillDate) &&
+        (!method || record.generationMethod === method)
       );
     })
     .sort((left, right) => left.billDate.localeCompare(right.billDate));

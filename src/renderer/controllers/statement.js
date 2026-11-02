@@ -33,6 +33,7 @@ function setStatus(message, tone = 'info', options = {}) {
   updateStatusBox(elements.statusBox, message, tone, {
     errorReportReady: state.hasErrorReport,
     manualBalancePromptReady: state.manualBalancePromptReady,
+    manualBalancePromptTitle: state.manualBalancePrompt?.reason === 'gap' ? '点击处理账单日期断档' : '',
     idleTitle: options.idleTitle ?? getStatusBoxTitle(config.getAccountMappingCount())
   });
 }
@@ -244,15 +245,31 @@ async function handleOpenAccountMappings() {
           const failedLines=(result.failedFileNames||[]).map(name=>name+'的账户个数或账户号匹配不上（账户个数和账户号都匹配不上），请检查。').join('<br/>');
           openModal(()=>createRememberOrderMismatchDialog({message:failedLines,bigAccountResult:result}));return;
         }
-        applyStatementResult(result);return;
+        applyStatementResult(result);
+        // 账单日期断档直接弹出确认；关闭后仍可点击状态框重新打开。
+        if(result.manualBalancePrompt?.reason==='gap') openModal(()=>createManualBalanceSeedDialog(result.manualBalancePrompt));
+        return;
       }
-      if(result.status==='select-export-scope') {openModal(()=>createExportScopeDialog(kind==='detail'?'detail':'balance'));return;}
-      if(kind==='balance'&&(result.manualBalancePromptReady||result.status==='manual-balance-required')) {applyManualBalancePromptStatus(result);return;}
+      if(result.status==='select-export-scope') {
+        // 选完范围后的导出结果与直接导出同样处理，未处理的补录或断档入口不因导出明细丢失。
+        const version=generation;
+        openModal(()=>createExportScopeDialog(kind==='detail'?'detail':'balance',{onResult:scoped=>{if(live(version))present(kind,scoped);}}));
+        return;
+      }
+      if(kind==='balance'&&(result.manualBalancePromptReady||result.status==='manual-balance-required')) {
+        applyManualBalancePromptStatus(result);
+        if(result.manualBalancePrompt?.reason==='gap') openModal(()=>createManualBalanceSeedDialog(result.manualBalancePrompt));
+        return;
+      }
       if(kind==='monthly'&&['MONTHLY_BALANCE_NO_PENDING','MONTHLY_BALANCE_FILE_MISSING'].includes(result.errorCode)) {
         state.monthlyBalanceReady=false;state.monthlyBalancePreview=null;
       }
+      // 导出明细不处理余额：尚未处理的补录或断档提示保留在状态框，否则只能重新导入才能继续。
+      const keepBalancePrompt=kind==='detail'&&!result.errorReportReady&&state.manualBalancePromptReady&&state.manualBalancePrompt;
       setStatus(result.message || (kind==='monthly'?(result.status==='success'?'月度余额账单导出成功':'月度余额账单导出失败'):''),result.status==='success'?'success':'error',{
-        errorReportReady:kind==='error'&&result.status==='success'?true:Boolean(result.errorReportReady)
+        errorReportReady:kind==='error'&&result.status==='success'?true:Boolean(result.errorReportReady),
+        manualBalancePromptReady:Boolean(keepBalancePrompt),
+        manualBalancePrompt:keepBalancePrompt?state.manualBalancePrompt:null
       });
     }
     function acceptBackgroundOutcome({ kind, result }) {

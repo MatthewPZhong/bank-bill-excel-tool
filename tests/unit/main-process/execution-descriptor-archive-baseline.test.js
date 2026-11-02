@@ -43,6 +43,7 @@ const policyByChannel = new Map(policies.map((policy) => [policy.channel, policy
 const baselineRecoverable = baseline.policies.filter((policy) => policy.taskKind !== 'exclude');
 const newPreparationPolicies = [
   { batchPolicy: 'exclude', channel: 'scenarios:recon-id-fix-fields', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'settings:acknowledge-release-notes', excludeReason: 'ui-navigation', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:discard-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:get', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:list', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },

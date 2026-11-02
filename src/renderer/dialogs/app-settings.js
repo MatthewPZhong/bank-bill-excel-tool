@@ -3,7 +3,7 @@
   function createAppSettingsDialogs({ api, modalBridge, modules: MODULES, ui }) {
     const { escapeHtml, createConfirmDialog, getDarkModeController, mountAppearanceSettings,
       mountTemplateFiles, applyAppUpdateActionResult, applyAppUpdateStatus, getAppUpdateStatus,
-      refreshOpenAppUpdateDialog, restartAndInstallAppUpdate } = ui;
+      refreshOpenAppUpdateDialog, restartAndInstallAppUpdate, openReleaseNotes } = ui;
 function archiveCenterBatchId(batch) {
   return String(batch?.internalId ?? batch?.batchId ?? batch?.id ?? '');
 }
@@ -308,6 +308,7 @@ function createArchiveCenterPreviewApi() {
 function createAppUpdateSettingsDialog(options = {}) {
   const archiveCenterApi = options.archiveCenterApi || null;
   const templateFilesEnabled = typeof mountTemplateFiles === 'function';
+  const releaseNotesEnabled = typeof openReleaseNotes === 'function';
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   const dialog = document.createElement('section');
@@ -397,6 +398,10 @@ function createAppUpdateSettingsDialog(options = {}) {
                 <span class="app-update-settings-label">当前版本</span>
                 <span class="app-update-settings-value" data-role="current-version">-</span>
               </div>
+              ${releaseNotesEnabled ? `<div class="app-update-settings-row">
+                <span class="app-update-settings-label">更新说明</span>
+                <button class="secondary-btn small" type="button" data-action="open-release-notes">查看本版更新说明</button>
+              </div>` : ''}
               <div class="app-update-settings-row">
                 <span class="app-update-settings-label">安装类型</span>
                 <span class="app-update-settings-value" data-role="distribution">-</span>
@@ -1569,6 +1574,9 @@ function createAppUpdateSettingsDialog(options = {}) {
   });
   dialog.querySelector('[data-action="restart-update"]').addEventListener('click', async () => {
     await restartAndInstallAppUpdate({ inline: true });
+  });
+  dialog.querySelector('[data-action="open-release-notes"]')?.addEventListener('click', () => {
+    if (settingsHandle?.isOpen()) openReleaseNotes(settingsHandle);
   });
 
   dateFilter.addEventListener('change', () => {
