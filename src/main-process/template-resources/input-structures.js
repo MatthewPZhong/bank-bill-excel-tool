@@ -46,6 +46,13 @@ const {
   ZHONGTAI_REFUND_ORDER_SIGNATURE
 } = require('../../constants/table-signatures');
 const { FT_RECON_FIELD_MAP } = require('../../constants/fund-transfer-recon-fields');
+const {
+  PENDING_V1_HEADERS,
+  REQUIRED_HEADERS: VCC_REQUIRED_HEADERS,
+  SOURCE_DEFINITIONS: VCC_SOURCE_DEFINITIONS,
+  SOURCE_TYPES: VCC_SOURCE_TYPES,
+  SYSTEM_OP_HEADERS: VCC_SYSTEM_OP_HEADERS
+} = require('../../backend/vcc-financial-op/definitions');
 const { REFUND_ORDER_REQUIRED_COLUMNS } = require('../../constants/refund-backfill-fields');
 
 // 平盘链接原始表：与导入 Worker 相同的流式读取（openPositionWorkbook + readPhysicalHeader）。按需加载，目录不依赖导入模块。
@@ -130,6 +137,61 @@ function linkedTable(signature, required, extra = {}) {
   });
 }
 
+// VCC 财务OP 原表：与导入相同的读法——导入预检（富工作簿，系统财务OP 另取显示值）与明细流式读取，
+//   读出第 1 个工作表首个非空行。几种读法结果不同时，不一致的列标出各自结果，预检必不通过。
+function vccRuntimeHeaders(sourceType) {
+  return async (filePath) => {
+    const { openRichWorkbook } = require('../../backend/xlsx/rich-workbook');
+    const { normalizeHeaderRow } = require('../../backend/vcc-financial-op/definitions');
+    const { rowValues } = require('../../backend/vcc-financial-op/workbook-import-plan');
+    const { readFirstSheetHeaderRow } = require('../../backend/vcc-financial-op/workbook-reader');
+    const { systemOpCellValues } = require('../../backend/vcc-financial-op/system-op-importer');
+    const reads = [];
+    const workbook = await openRichWorkbook(filePath, { memoryBudgetBytes: 64 * 1024 * 1024, lruMaxEntries: 8192 });
+    try {
+      await workbook.scanSheet(0, (row) => {
+        if (reads.length) return;
+        const values = rowValues(row);
+        if (!values.some((value) => value !== undefined && value !== '')) return;
+        reads.push(normalizeHeaderRow(values));
+        if (sourceType === VCC_SOURCE_TYPES.SYSTEM_OP) {
+          const display = [];
+          for (const cell of row.cells) {
+            if (cell.cellType !== 'blank' || cell.hasFormula) display[cell.columnIndex] = systemOpCellValues(cell).display;
+          }
+          reads.push(normalizeHeaderRow(Array.from(display, (value) => value ?? '')));
+        }
+      });
+    } finally {
+      await workbook.close();
+    }
+    if (sourceType !== VCC_SOURCE_TYPES.SYSTEM_OP) reads.push(normalizeHeaderRow(await readFirstSheetHeaderRow(filePath)));
+    const [first = [], ...others] = reads;
+    if (others.every((read) => JSON.stringify(read) === JSON.stringify(first))) return [first];
+    const width = Math.max(...reads.map((read) => read.length));
+    return [Array.from({ length: width }, (_, index) => {
+      const texts = reads.map((read) => read[index] ?? '');
+      return texts.every((text) => text === texts[0]) ? texts[0] : texts.join(' / ');
+    })];
+  };
+}
+
+function vccSource(sourceType, builtinHeaders) {
+  return Object.freeze({
+    group: 'vcc-sources',
+    moduleKey: sourceType,
+    storage: 'canonical',
+    sheets: Object.freeze([Object.freeze({
+      name: null,
+      builtinHeaders: () => [...builtinHeaders],
+      required: () => [...VCC_REQUIRED_HEADERS[sourceType]]
+    })]),
+    // 旧 48 列 Pending 模板不再接受导入，新结构不能与它相同。
+    fixedPeers: () => [{ name: '旧 48 列 VCC Pending 模板', headers: [...PENDING_V1_HEADERS] }],
+    runtimeHeaders: vccRuntimeHeaders(sourceType)
+  });
+}
+
 function namedSheet(name, headers, required, referenceKey = null) {
   return Object.freeze({
     name,
@@ -184,7 +246,12 @@ const INPUT_STRUCTURES = Object.freeze({
     moduleKey: 'recon-id-fix-business',
     sheets: DOC_RECON_SHEETS,
     runtimeHeaders: reconIdFixRuntimeHeaders
-  })
+  }),
+  'vcc-recharge-refund': vccSource(VCC_SOURCE_TYPES.RECHARGE, VCC_SOURCE_DEFINITIONS[VCC_SOURCE_TYPES.RECHARGE].headers),
+  'vcc-fee-fx': vccSource(VCC_SOURCE_TYPES.FEE_FX, VCC_SOURCE_DEFINITIONS[VCC_SOURCE_TYPES.FEE_FX].headers),
+  'vcc-channel': vccSource(VCC_SOURCE_TYPES.CHANNEL, VCC_SOURCE_DEFINITIONS[VCC_SOURCE_TYPES.CHANNEL].headers),
+  'vcc-removed-pending': vccSource(VCC_SOURCE_TYPES.PENDING, VCC_SOURCE_DEFINITIONS[VCC_SOURCE_TYPES.PENDING].headers),
+  'vcc-system-op': vccSource(VCC_SOURCE_TYPES.SYSTEM_OP, VCC_SYSTEM_OP_HEADERS)
 });
 
 function inputStructureOf(resourceId) {

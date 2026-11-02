@@ -50,6 +50,17 @@ const LINKED_INPUT_STRUCTURE = Object.freeze({
   effect: '下次导入；只认当前版本结构，入库与派生仍按内置列名'
 });
 
+// VCC 财务OP 原表：选文件预检时按当前版本识别并冻结进导入计划；导入时的表头随交接成员清单记录在存档原件上，
+//   入库与日后重读原件都对应回内置列序（见 backend/vcc-financial-op/source-structure.js）。
+const VCC_INPUT_STRUCTURE = Object.freeze({
+  readMode: 'runtime',
+  bindings: [binding('vcc-financial-op', '导入预检 · 识别结构', 'runtime')],
+  replace: REPLACEABLE,
+  cache: '不缓存，每次选择文件预检时读取',
+  failure: '当前版本缺失、被修改或不兼容时预检失败，提示恢复默认或重新导入',
+  effect: '下次选择文件；已导入的数据按导入时结构重读原件，入库、导出与校验仍按内置列'
+});
+
 // 平盘链接原始表：导入时按当前版本第 1 个工作表的表头识别（契约见 ./contracts.js inputStructureContract）。
 const POSITION_INPUT_STRUCTURE = Object.freeze({
   readMode: 'runtime',
@@ -150,7 +161,8 @@ const TEMPLATE_RESOURCES = Object.freeze([
     bindings: [binding('pending-reconciliation', '移除归档导入 · 识别结构', 'runtime')],
     replace: REPLACEABLE, cache: '不缓存，每次导入时读取',
     failure: '当前版本缺失、被修改或不兼容时导入中止，提示恢复默认或重新导入',
-    effect: '下次导入；只认当前版本结构，入库与导出仍按内置 46 列' }),
+    effect: '下次导入；只认当前版本结构，入库与导出仍按内置 46 列',
+    twin: 'vcc-removed-pending', twinNote: SAME_EXPORT_NOTE }),
   resource({ id: 'pending-data', path: 'assets/Pending数据管理.xlsx', type: 'input', readMode: 'sample',
     bindings: [binding('bank-bu-recon', '导入结构参考')] }),
   resource({ id: 'biz-op-bill', path: 'assets/业务OP账单.xlsx', type: 'input', readMode: 'sample',
@@ -169,16 +181,13 @@ const TEMPLATE_RESOURCES = Object.freeze([
   resource({ id: 'position-transfer-orders', path: 'assets/中台调拨订单表.xlsx', type: 'input', ...POSITION_INPUT_STRUCTURE,
     twin: 'transfer-order', twinNote: SAME_EXPORT_NOTE }),
   resource({ id: 'position-bank-accounts', path: 'assets/清结算银行账户表.xlsx', type: 'input', ...POSITION_INPUT_STRUCTURE }),
-  resource({ id: 'vcc-removed-pending', path: 'assets/VCC财务OP校验/VCC_移除归档Pending账单.xlsx', type: 'input', readMode: 'sample',
-    bindings: [binding('vcc-financial-op', '导入结构参考 · 46 列')] }),
-  resource({ id: 'vcc-recharge-refund', path: 'assets/VCC财务OP校验/VCC充值清退明细.xlsx', type: 'input', readMode: 'sample',
-    bindings: [binding('vcc-financial-op', '导入结构参考')] }),
-  resource({ id: 'vcc-fee-fx', path: 'assets/VCC财务OP校验/VCC费用及换汇明细.xlsx', type: 'input', readMode: 'sample',
-    bindings: [binding('vcc-financial-op', '导入结构参考')] }),
-  resource({ id: 'vcc-channel', path: 'assets/VCC财务OP校验/VCC通道明细.xlsx', type: 'input', readMode: 'sample',
-    bindings: [binding('vcc-financial-op', '导入结构参考')] }),
-  resource({ id: 'vcc-system-op', path: 'assets/VCC财务OP校验/系统财务OP.xlsx', type: 'input', readMode: 'sample',
-    bindings: [binding('vcc-financial-op', '导入结构参考')] }),
+  // 与 Pending 对账「移除归档Pending账单」是同一份系统导出（46 列），各自独立版本。
+  resource({ id: 'vcc-removed-pending', path: 'assets/VCC财务OP校验/VCC_移除归档Pending账单.xlsx', type: 'input', ...VCC_INPUT_STRUCTURE,
+    twin: 'removed-pending', twinNote: SAME_EXPORT_NOTE }),
+  resource({ id: 'vcc-recharge-refund', path: 'assets/VCC财务OP校验/VCC充值清退明细.xlsx', type: 'input', ...VCC_INPUT_STRUCTURE }),
+  resource({ id: 'vcc-fee-fx', path: 'assets/VCC财务OP校验/VCC费用及换汇明细.xlsx', type: 'input', ...VCC_INPUT_STRUCTURE }),
+  resource({ id: 'vcc-channel', path: 'assets/VCC财务OP校验/VCC通道明细.xlsx', type: 'input', ...VCC_INPUT_STRUCTURE }),
+  resource({ id: 'vcc-system-op', path: 'assets/VCC财务OP校验/系统财务OP.xlsx', type: 'input', ...VCC_INPUT_STRUCTURE }),
   // 链接表
   resource({ id: 'position-payment-link', path: 'assets/中台测试付款对账单.xlsx', type: 'link', readMode: 'generated',
     bindings: [binding('position-reconciliation-process', '派生链接表')] }),

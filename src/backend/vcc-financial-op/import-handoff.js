@@ -19,6 +19,18 @@ function integer(value, minimum, name) {
   if (!Number.isSafeInteger(value) || value < minimum) throw handoffError(name);
   return value;
 }
+// 设置 → 模板文件启用了用户结构时，导入时的表头（读取与日后重读原件都按它定位并对应回内置列序）。
+//   只在用户结构时出现；内置结构不写，存量成员清单与摘要不变。
+function canonicalSourceHeaders(value) {
+  if (!Array.isArray(value) || !value.length || value.length > 16384) throw handoffError('导入时表头无效');
+  const seen = new Set();
+  for (const header of value) {
+    nonempty(header, '导入时表头无效');
+    if (header !== header.trim() || seen.has(header)) throw handoffError('导入时表头无效');
+    seen.add(header);
+  }
+  return Object.freeze([...value]);
+}
 function canonicalMembers(value) {
   if (!Array.isArray(value) || !value.length) throw handoffError('成员清单为空');
   const seenTypes = new Set(), seenSheets = new Set();
@@ -36,6 +48,9 @@ function canonicalMembers(value) {
       seenSheets.add(sheet.sheetIndex);
       const result = { sheetName: sheet.sheetName, sheetIndex: sheet.sheetIndex,
         headerRow: sheet.headerRow, rawContractVersion: sheet.rawContractVersion };
+      if (sheet.sourceHeaders !== undefined && sheet.sourceHeaders !== null) {
+        result.sourceHeaders = canonicalSourceHeaders(sheet.sourceHeaders);
+      }
       if (member.sourceType === SOURCE_TYPES.CHANNEL) result.subject = nonempty(sheet.subject, '通道主体缺失');
       else if (sheet.subject !== undefined) throw handoffError('非通道成员不接受补充主体');
       return Object.freeze(result);

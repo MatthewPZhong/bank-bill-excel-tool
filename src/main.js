@@ -415,6 +415,7 @@ const {
 } = require('./main-process/vcc-op-calc/save-run-lifecycle');
 // v3.1.6：VCC财务OP校验（四类明细幂等、逐币种计算、系统OP比较与归档）。
 const { createVccFinancialOpService } = require('./main-process/vcc-financial-op-service');
+const { resolveVccSourceStructures } = require('./main-process/vcc-financial-op-source-structures');
 const { createResultExportHandlers } = require('./main-process/vcc-financial-op-result-export-ipc');
 const { acquireResultExportLease } = require('./main-process/vcc-financial-op-result-workbook-runner');
 const {
@@ -15662,9 +15663,10 @@ function registerNewAccountHandlers() {
       return { status: 'cancelled' };
     }
     try {
+      const sourceStructures = await resolveVccSourceStructures(getTemplateResourceService());
       const plan = await getVccFinancialOpService().inspectSelectedFiles(choice.filePaths, (progress) => {
         if (!owner.isDestroyed()) owner.send('vccFinancialOp:import:progress', progress);
-      });
+      }, sourceStructures);
       if (owner.isDestroyed() || vccImportPlans.get(owner.id) !== selectionToken) throw vccPlanError('vcc-import-plan-stale', '文件选择已更新，请重新预检');
       vccImportPlans.set(owner.id, plan);
       return { status: 'success', plan: publicImportPlan(plan) };

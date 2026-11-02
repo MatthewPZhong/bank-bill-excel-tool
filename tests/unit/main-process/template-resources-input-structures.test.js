@@ -70,7 +70,7 @@ test('输入原表结构规格：已接入的资源可替换；平盘 5 张为�
   assert.deepEqual(ids, [
     'doc-recon-unbalanced', 'fx-delivery', 'gateway-recon', 'position-bank-accounts', 'position-gateway-raw-in',
     'position-gateway-raw-out', 'position-payment-full', 'position-transfer-orders', 'refund-order', 'removed-pending',
-    'transfer-order'
+    'transfer-order', 'vcc-channel', 'vcc-fee-fx', 'vcc-recharge-refund', 'vcc-removed-pending', 'vcc-system-op'
   ]);
   for (const id of ids) {
     const resource = TEMPLATE_RESOURCES.find((item) => item.id === id);

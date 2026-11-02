@@ -286,3 +286,62 @@ Codex 已核查未发现缺陷的方面：冻结结构在预检、重放、异�
 - 集成测试在真实主库上发现的问题已修复：预置 C3 场景引用了网关表头中不存在的列，原口径会拦下任何网关新版本（见 12.4 偏离与说明）。
 - 复查中修复：「导入文件」入口的链接表分支在当前版本不可用时仍按内置结构入库，已改为该表中止（与链接表管理一致）。
 - 未执行：真实应用 GUI（本机开发版启动受已知 BizOP 资源预检阻断）与 Windows 安装版实测；用户真实网关样本未在本模块重跑（该样本属平盘中台网关入账订单，不是本模块的表）。
+
+## 13. 第二批 · VCC 财务OP 5 张（`vcc-recharge-refund`、`vcc-fee-fx`、`vcc-channel`、`vcc-removed-pending`、`vcc-system-op`）
+
+### 13.1 现状（取证 2026-11-01）
+
+- 识别：选文件后在 worker 中预检出导入计划（`workbook-import-plan.classifyHeaderRow`，按 `HEADER_RULES` 逐列一致）；应用前用同一函数重新预检并按 Sheet 计划摘要核对。不符时界面只显示“业务表头缺列、错序或含额外列”，逐列差异（`candidates[].mismatches`）不展示。
+- 存储：明细按内置原始结构的位置存 `raw_json`（`raw_contract_version`：明细 1，Pending 2）；幂等键、`content_hash` 按内置列计算；同键内容不同记为 `idempotent_conflict` 并列出差异字段。系统财务OP 快照的 `displayHeaders` 固定为内置 16 列。
+- 血缘：导入交接成员清单（归档原件元数据 `vccSourceMembers[].sheets`：sheetName / sheetIndex / headerRow / rawContractVersion，受原件 SHA 与成员摘要保护）是重读原件的唯一定位依据。数据集导出（明细 `streamStoredDetailRows`、系统 `readSystemOpSheetCandidates`）与审阅导出（`extractReviewSources`）按它重读、重新映射并校验 `content_hash`。没有按文件摘要复用数据集的逻辑。
+- VCC 的 Pending 46 列与「移除归档Pending账单」（§11）表头完全相同。
+
+### 13.2 方案
+
+- 识别只认当前版本：选文件预检时解析 5 个资源的当前结构，冻结进导入计划（重新预检沿用冻结结构）；规则表按当前结构逐列一致。用户版本不可用时预检失败并指向设置。表头不符时诊断附 1b 差异明细（与当前结构比较），界面显示。
+- 记录当时结构：计划 Sheet 与交接成员 Sheet 增加 `sourceHeaders`（仅启用用户版本时写入；内置版本不写，成员摘要与存量元数据不变），随成员清单存入归档原件元数据（主库，与 VCC 表同库）。
+- 归一：读取时按 `sourceHeaders` 定位表头、按位置读取，读出后立即按 `canonicalHeaderMapping` 对应回内置列序（同名优先，同位置非内置名视为改名，其余置空，多出的列不导入）。`raw_contract_version`、映射、幂等键、`content_hash`、`raw_json` / fallback、导出与存量数据口径不变。
+- 重读：数据集导出与审阅导出从成员 Sheet 取 `sourceHeaders`，经同一归一后校验血缘；审阅导出的原表页按导入时的原表结构输出（按表头指纹分组，已支持不同表头）。
+- 系统财务OP：按 `sourceHeaders` 定位表头与财务余额列，“模板外列”按导入时结构判断；读出后归一，快照 `displayHeaders` 仍为内置 16 列。
+- 必用列（程序按列名读取）：
+  - VCC充值清退明细：订单号、BillDate、公司主体、出入方向、我方到账金额、我方币种、业务部门、对手部门、业务子类型。
+  - VCC费用及换汇明细：同上去掉对手部门。
+  - VCC通道明细：渠道订单号、账单日期、借贷方向、通道名称、MID、部门、交易币种、交易金额、billdate、清算币种、清算金额、结算币种、实际到账金额。
+  - VCC_移除归档Pending账单：PendingBizId、平账账期、主体、对账类型、channel、币种、流水_币种、金额、流水_对账金额。
+  - 系统财务OP：账单日期、主体、业务部门、币种、财务余额。
+- 冲突：5 张互相不能相同，也不能与旧 48 列 Pending 模板相同。`vcc-removed-pending` 与 `removed-pending` 标注同一系统导出、版本各自独立。
+
+### 13.3 风险
+
+| 编号 | 风险 | 处理 |
+| --- | --- | --- |
+| K5 | 切换结构后重导已导入账期的数据：被置空的列使同键行内容不同 | 记为幂等冲突并列出差异字段，不静默覆盖或重复计入；发版说明提示同一账期内保持结构一致 |
+| K6 | 预检后、应用前切换模板版本 | 计划已冻结，导入沿用预检时的结构（与平盘一致） |
+
+### 13.4 实施记录
+
+| 文件 | 内容 |
+| --- | --- |
+| `backend/vcc-financial-op/source-structure.js`（新增） | 导入时结构 → 读取表头与对应回内置列序（`createSourceProjection`；`keepTail` 保留结构宽度外的单元格供“模板外列”检查） |
+| `backend/vcc-financial-op/definitions.js` | 新增 `REQUIRED_HEADERS`（§13.2 必用列，纯数据，不新增依赖） |
+| `backend/vcc-financial-op/workbook-import-plan.js` | `headerRulesFor(sourceStructures)`：识别规则按当前结构；命中时 Sheet 记 `sourceHeaders`；表头不符的诊断附差异明细（`detailLines`），计划失败时一并抛出；计划冻结 `sourceStructures`，重新预检沿用 |
+| `backend/vcc-financial-op/import-handoff.js` | 成员 Sheet 保留并校验 `sourceHeaders`（非空、无首尾空格、不重复），纳入成员摘要；内置结构不写该键 |
+| `backend/vcc-financial-op/workbook-reader.js`、`detail-importer.js` | 明细流式读取按 `sourceHeaders` 定位表头与业务键单元格类型，读出即对应回内置列序；新增 `readFirstSheetHeaderRow` 供模板口径核对 |
+| `backend/vcc-financial-op/system-op-importer.js` | 系统财务OP 按 `sourceHeaders` 定位表头与财务余额列，矩阵对应回内置 16 列后解析 |
+| `backend/vcc-financial-op/review-export-plan.js` | 审阅导出的原表页按导入时结构输出（分组表头 = `sourceHeaders`），核验时对应回内置列 |
+| `main-process/vcc-financial-op-source-structures.js`（新增）、`vcc-financial-op-service.js`、`worker-entry.js`、`main.js` | 选文件预检时解析 5 个资源当前结构（不可用时预检失败）并传入 worker 冻结进计划 |
+| `template-resources/{input-structures,catalog}.js` | 登记 5 个资源（组 `vcc-sources`，`storage: 'canonical'`，旧 48 列 Pending 模板为识别冲突对象）；口径核对同时比较导入预检、明细流式读取（系统财务OP 为显示值）；可替换；`vcc-removed-pending` ↔ `removed-pending` 互标同一系统导出 |
+| `renderer-vcc-financial-op.js` | 预检确认弹窗在诊断下显示差异明细 |
+
+偏离与说明：
+
+- 记录位置（D12 写作“持久化到 VCC 库（幂等迁移）”）：导入时表头记在交接成员清单上，随存档原件元数据保存在主库（与 VCC 表同库），不改 VCC 表结构，也不升级存储合同 v3（触发器写保护与逐句 schema 校验）。成员清单本就是两条重读路径定位原件的唯一依据，受原件 SHA 与成员摘要保护；内置结构不写新键，存量清单与摘要不变。未存档的新导入走 fallback（已是内置列序），不需要导入时结构。
+- 按位置改名只认同一位置：删除列会使其后各列左移，左移后的同名列仍按列名对应；位置不同的改名列视为“删除 + 新增”（导入后为空、不导入），预检「列对应」逐列列出。
+- 系统财务OP 的布尔表头在各读法下都读作 `true`，不拦；明细表的布尔表头在富工作簿与流式读取下不同（`true / 1`），预检不通过。
+- 未接入：worker 的旧 `inspect` 动作与不带计划 Sheet 的 SheetJS 系统读取（生产无调用方，正式导入的文件都带 Sheet），保持内置结构。
+
+### 13.5 验证结果（2026-11-01，macOS 本机，未提交工作区）
+
+- `npm run release-check`：lint、架构检查 806/806 文件、smoke、单测 9756/9760（4 项为既有条件跳过）通过；集成阶段首轮 `toolbox-csv-admission` 1 项失败（低内存档排队计时，与本模块无关；单独重跑 17/17），随后完整重跑 `npm run test:integration` 89/89 通过（新增 `vcc-input-template-version` 4/4）。
+- 新增 / 调整的回归：预检按当前结构识别与差异明细、计划冻结结构与重新预检、成员清单记录与摘要保护（含篡改）、明细 / Pending / 系统财务OP 按导入时结构导入后 `content_hash` 与内置结构同值导入一致、数据集导出与审阅导出重读存档原件核验通过（审阅原表页按导入时结构）、系统财务OP 结构外数据列仍拒绝、模板预检（必用列、旧 48 列 Pending 冲突、明细布尔表头两种读法不一致）、版本不可用时预检中止、`vcc-removed-pending` 与 `removed-pending` 互标；既有 VCC 与模板测试全部通过。
+- 未执行：真实应用 GUI（本机开发版启动受已知 BizOP 资源预检阻断）与 Windows 安装版实测；worker 线程中的预检与导入由单测和集成脚本在本进程调用同一函数覆盖。
