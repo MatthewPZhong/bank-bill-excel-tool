@@ -460,3 +460,11 @@ Codex 已核查未发现缺陷的方面：冻结结构在预检、重放、异�
 偏离与说明：平盘银行表头不符时的差异明细改为附模板指引（46 列结构现可在模板文件替换），对应 v3.2.14 第一批测试断言已更新。
 
 验证结果（第二次提交，2026-11-01，macOS 本机，未提交工作区）：`npm run release-check` 的 lint、架构检查 808/808 文件、smoke、单测 9773/9777（4 项为既有条件跳过）通过；集成阶段首轮 `position-startup-task-recovery` 失败（该脚本的测试装配按 Main 源码重建平盘服务，缺少新依赖 `bankStatementSourceHeaders` / `resolveBankStatementStructure`），已在 `tests/helpers/position-startup-recovery-harness.js` 补上（模板来源为空时回落内置），随后完整重跑 `npm run test:integration` 91/91 通过（`bank-statement-input-template-version` 扩展为 6/6，含平盘真实 Worker 与重复入账匹配；`position-startup-task-recovery` 3/3；`renderer-lifecycle` 324/324）。未执行：真实应用 GUI 与 Windows 安装版实测。
+
+### 15.7 PR 审查修复（2026-11-02，Codex 审查 PR #245 `85d69707`）
+
+| 等级 | 问题 | 处理 |
+| --- | --- | --- |
+| P2 | `bank-statement-input` 按内置列存储，但取值快照仍是原始表头。导入预检按对应后的内置列名做场景引用保护，切换版本按原始表头比较，口径不一致：场景引用「合并单号」、新版本只把它原位改名为「合并编号」时，导入后不立即启用、之后再启用会被误拒；如果导入时立即启用，之后删掉「合并编号」的版本反而不被拦下，场景读到的字段变空 | 与网关对账单一致，取值快照改为对应后实际可用的内置列名（`values: 'stored'`）。用户版本的取值按导入时保存的表头重新计算，已导入的版本无需迁移。新增单测覆盖两种情形，修复前失败、修复后通过 |
+
+验证（2026-11-02，macOS 本机，未提交工作区）：`npm run release-check` 通过：lint；架构检查 810/810 文件，历史 112 个提交；smoke；单测 9827/9831（4 项为既有条件跳过）；集成测试 93/93。

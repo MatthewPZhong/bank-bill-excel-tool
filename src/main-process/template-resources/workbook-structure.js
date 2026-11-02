@@ -51,7 +51,7 @@ function firstSheetHeaders(workbook, headerRow) {
 }
 
 // 取值快照：单表原表为表头列表；多表原表为「工作表」列名标签（用于比较基准与“取值变化”展示），
-//   各表的表头另由结构描述 sheets[].headers 保存。values 为 'stored' 的表（网关对账单）取入库后实际可用的列名，
+//   各表的表头另由结构描述 sheets[].headers 保存。values 为 'stored' 的表（网关对账单、银行对账单）取入库后实际可用的列名，
 //   即场景配置下拉与场景引用保护的口径。headersBySheet 与 spec.sheets 一一对应。
 function inputStructureValuesFromHeaders(spec, headersBySheet) {
   if (spec.values === 'stored') {

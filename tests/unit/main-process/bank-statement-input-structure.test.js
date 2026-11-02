@@ -149,6 +149,20 @@ test('模板预检：读取「渠道对账单」，必用列与场景引用保�
   assert.equal((await service.get('bank-statement')).resource.twin, 'bank-statement-input');
 });
 
+test('场景引用保护按对应回内置列后的列名：原位改名的版本可稍后启用，之后删掉该列的版本被拦下', async (t) => {
+  const scenario = { id: 1, category: 'extract-recon-id', config: { conditions: [{ field: '合并单号', op: '包含', value: 'X' }] } };
+  const { ws, service, prepare } = templates(t, [scenario]);
+  const renamed = BANK_STATEMENT_FIELDS.map((header) => (header === '合并单号' ? '合并编号' : header));
+  const imported = await service.commitImport({ importToken: (await prepare(ws.write('renamed.xlsx', renamed))).importToken, enable: false });
+  assert.equal(imported.status, 'success');
+  const enabled = await service.setCurrentVersion({ resourceId: 'bank-statement-input', versionId: imported.version.id });
+  assert.equal(enabled.status, 'success', enabled.message);
+
+  const deleted = await prepare(ws.write('deleted.xlsx', renamed.filter((header) => header !== '合并编号')));
+  assert.equal(deleted.verdict, 'fail');
+  assert.equal(check(deleted, '场景引用').detail, '已被场景使用：合并单号');
+});
+
 test('必用列覆盖各模块按列名读取的列；读取接入点均传入当前结构（源码守卫）', () => {
   for (const field of BANK_STATEMENT_REQUIRED_FIELDS) assert.ok(BANK_STATEMENT_FIELDS.includes(field), field);
   for (const field of ['BizId', 'Channel', '地区', 'Currency', 'Credit Amount', 'Debit Amount', 'ReconciliationId', 'FundType', 'Extra Fee', 'Payment Detail']) {

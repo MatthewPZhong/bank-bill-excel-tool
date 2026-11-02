@@ -307,11 +307,13 @@ const INPUT_STRUCTURES = Object.freeze({
   'vcc-channel': vccSource(VCC_SOURCE_TYPES.CHANNEL, VCC_SOURCE_DEFINITIONS[VCC_SOURCE_TYPES.CHANNEL].headers),
   'vcc-removed-pending': vccSource(VCC_SOURCE_TYPES.PENDING, VCC_SOURCE_DEFINITIONS[VCC_SOURCE_TYPES.PENDING].headers),
   'vcc-system-op': vccSource(VCC_SOURCE_TYPES.SYSTEM_OP, VCC_SYSTEM_OP_HEADERS),
-  // 银行对账单：启用后同时接受内置 46 列（D17）；读出的行对应回内置 46 列。场景引用的银行字段受保护（bankFields）。
+  // 银行对账单：启用后同时接受内置 46 列（D17）；读出的行对应回内置 46 列。场景引用的银行字段受保护（bankFields），
+  //   取值快照为对应后实际可用的内置列名，导入预检与切换版本按同一口径比较。
   'bank-statement-input': Object.freeze({
     group: null,
     moduleKey: 'bank-statement',
     storage: 'canonical',
+    values: 'stored',
     sheets: Object.freeze([Object.freeze({
       name: '渠道对账单',
       builtinHeaders: () => [...BANK_STATEMENT_FIELDS],
