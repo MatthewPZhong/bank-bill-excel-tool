@@ -20,6 +20,13 @@
 
 ## 未实施
 
+### B40（P3 · 顺延）VCC OP 发生额计算的 Parser Worker 路径未接入「流水对账单」当前结构
+
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §14）
+- **影响**：`vcc-op-calc/parser-core.js` / `parser-pipeline.js`（`production.enabled=false`，默认 IPC 未切换）的 worker 输入键固定（`PARSER_INPUT_KEYS`），仍按内置 28 列读取；启用了用户结构版本时，该路径会把新结构文件判为表头不符。生产扫描路径（`vcc-op-calc-session.streamScanAndCompute`）已接入。当前生产不受影响
+- **关闭条件**：启用 Parser Pipeline 前，在 Main 侧扫描开始时解析当前结构，作为新的 worker 输入键传给 `streamFlowFile`，补对应回归测试
+- **目标版本**：未定（随 Parser Pipeline 启用）
+
 ### B39（P3 · 顺延）资金对账后台 worker 未接入银行账单处理链接表当前结构
 
 - **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §12.3 K4）

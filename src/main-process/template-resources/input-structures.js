@@ -47,6 +47,11 @@ const {
 } = require('../../constants/table-signatures');
 const { FT_RECON_FIELD_MAP } = require('../../constants/fund-transfer-recon-fields');
 const {
+  BIZ_OP_HEADERS,
+  FLOW_HEADERS: BIZ_OP_FLOW_HEADERS,
+  FLOW_REQUIRED_HEADERS
+} = require('../../backend/biz-op-recon-db/columns');
+const {
   PENDING_V1_HEADERS,
   REQUIRED_HEADERS: VCC_REQUIRED_HEADERS,
   SOURCE_DEFINITIONS: VCC_SOURCE_DEFINITIONS,
@@ -176,6 +181,32 @@ function vccRuntimeHeaders(sourceType) {
   };
 }
 
+// 流水对账单：业务 OP 新版（单 Sheet 富工作簿，第 1 行）与 VCC OP 发生额计算（JSZip 流式解析首行）两种读法。
+async function flowStatementRuntimeHeaders(filePath) {
+  const { openSingleSheetRichWorkbook } = require('../../backend/xlsx/rich-workbook');
+  const { cellText } = require('../biz-op-v327/import-adapter');
+  const { readFirstWorksheetHeaderRow } = require('../../backend/vcc-op-calc-import/reader');
+  let richRow = null;
+  const workbook = await openSingleSheetRichWorkbook(filePath, { memoryBudgetBytes: 32 * 1024 * 1024, lruMaxEntries: 8192 });
+  try {
+    await workbook.scan((row) => {
+      if (richRow || row.rowIndex !== 1) return;
+      const cells = new Map(row.cells.map((cell) => [cell.columnIndex, cell]));
+      const width = Math.max(0, ...row.cells.map((cell) => cell.columnIndex + 1));
+      richRow = Array.from({ length: width }, (_, index) => cellText(cells.get(index)));
+      while (richRow.length && richRow[richRow.length - 1] === '') richRow.pop();
+    });
+  } finally {
+    await workbook.close();
+  }
+  const streamed = await readFirstWorksheetHeaderRow(filePath);
+  const rich = richRow || [];
+  if (JSON.stringify(rich) === JSON.stringify(streamed)) return [rich];
+  const width = Math.max(rich.length, streamed.length);
+  return [Array.from({ length: width }, (_, index) => ((rich[index] ?? '') === (streamed[index] ?? '')
+    ? rich[index] ?? '' : `${rich[index] ?? ''} / ${streamed[index] ?? ''}`))];
+}
+
 function vccSource(sourceType, builtinHeaders) {
   return Object.freeze({
     group: 'vcc-sources',
@@ -251,7 +282,20 @@ const INPUT_STRUCTURES = Object.freeze({
   'vcc-fee-fx': vccSource(VCC_SOURCE_TYPES.FEE_FX, VCC_SOURCE_DEFINITIONS[VCC_SOURCE_TYPES.FEE_FX].headers),
   'vcc-channel': vccSource(VCC_SOURCE_TYPES.CHANNEL, VCC_SOURCE_DEFINITIONS[VCC_SOURCE_TYPES.CHANNEL].headers),
   'vcc-removed-pending': vccSource(VCC_SOURCE_TYPES.PENDING, VCC_SOURCE_DEFINITIONS[VCC_SOURCE_TYPES.PENDING].headers),
-  'vcc-system-op': vccSource(VCC_SOURCE_TYPES.SYSTEM_OP, VCC_SYSTEM_OP_HEADERS)
+  'vcc-system-op': vccSource(VCC_SOURCE_TYPES.SYSTEM_OP, VCC_SYSTEM_OP_HEADERS),
+  // 业务 OP 新版与 VCC OP 发生额计算共用；业务 OP 账单（OP）不随版本变化，新结构不能与它相同（识别时 OP 优先）。
+  'flow-statement': Object.freeze({
+    group: null,
+    moduleKey: 'flow-statement',
+    storage: 'canonical',
+    sheets: Object.freeze([Object.freeze({
+      name: null,
+      builtinHeaders: () => [...BIZ_OP_FLOW_HEADERS],
+      required: () => [...FLOW_REQUIRED_HEADERS]
+    })]),
+    fixedPeers: () => [{ name: '业务 OP 账单', headers: [...BIZ_OP_HEADERS] }],
+    runtimeHeaders: flowStatementRuntimeHeaders
+  })
 });
 
 function inputStructureOf(resourceId) {

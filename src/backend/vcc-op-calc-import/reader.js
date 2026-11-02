@@ -26,6 +26,7 @@ const { validateFlowHeaders } = require('./validator');
 const { parseRowXml, readSharedStrings, lettersToIndex } = require('../xlsx/legacy/streaming-xlsx-reader');
 // v3.0.4 块 A · A1：JSZip loadAsync 前的入口尺寸预检（≥2^31 抛明确中文错误，预检自身失败 fail-open）。
 const { assertXlsxEntriesUnderLimit } = require('../xlsx/legacy/entry-size-preflight');
+const { TEMPLATE_STRUCTURE_HINT, canonicalHeaderMapping } = require('../file-service/header-structure-diff');
 
 const ERROR_CODE = 'VCC_OP_CALC_FLOW_HEADER_MISMATCH';
 const TEMPLATE_LABEL = '流水对账单';
@@ -106,21 +107,21 @@ function scanSheet(sheetEntry, sharedStrings, ctx) {
         const rowXml = pending.slice(rowStart, rowEnd + 6);
         pending = pending.slice(rowEnd + 6);
         rowIdx += 1;
-        const cells = parseRowXml(rowXml, COL_COUNT, sharedStrings);
+        const cells = parseRowXml(rowXml, ctx.colCount, sharedStrings);
         if (!headerChecked) {
           headerChecked = true;
-          const v = validateFlowHeaders(cells);
+          const v = validateFlowHeaders(cells, ctx.headers);
           if (!v.ok) { done({ matched: false, validation: v, dataRows: 0 }); return false; }
           // Minor②（v2.1.12 codex review）：前 28 列匹配 FLOW 后，再检测表头是否有超出 28 列的尾部 cell。
           //   流式固定 COL_COUNT=28，否则尾部多列被静默忽略，与同步 SheetJS「列数不匹配」严格性不一致 → 主动拒绝整个文件。
           let maxColIdx = -1; let hm;
           const headerColRe = /\br="([A-Z]+)\d+"/g;
           while ((hm = headerColRe.exec(rowXml))) { const ci = lettersToIndex(hm[1]); if (ci > maxColIdx) maxColIdx = ci; }
-          if (maxColIdx >= COL_COUNT) {
+          if (maxColIdx >= ctx.colCount) {
             fail(new FileValidationError(
               ERROR_CODE,
-              `${TEMPLATE_LABEL} 表头列数超出模板 ${COL_COUNT} 列（前 ${COL_COUNT} 列匹配，但检测到第 ${maxColIdx + 1} 列）`,
-              { detailLines: [`模板固定 ${COL_COUNT} 列；尾部多余列可能导致列错位，请核对是否选错文件`], context: { templateLabel: TEMPLATE_LABEL, maxColumn: maxColIdx + 1 } }
+              `${TEMPLATE_LABEL} 表头列数超出模板 ${ctx.colCount} 列（前 ${ctx.colCount} 列匹配，但检测到第 ${maxColIdx + 1} 列）`,
+              { detailLines: [`模板固定 ${ctx.colCount} 列；尾部多余列可能导致列错位，请核对是否选错文件`, TEMPLATE_STRUCTURE_HINT], context: { templateLabel: TEMPLATE_LABEL, maxColumn: maxColIdx + 1 } }
             ));
             return false;
           }
@@ -129,7 +130,11 @@ function scanSheet(sheetEntry, sharedStrings, ctx) {
         }
         if (!isRowMeaningful(cells)) continue;
         const obj = {};
-        for (let i = 0; i < COL_COUNT; i++) obj[FLOW_DB_COLUMNS[i]] = normalizeCell(cells[i]);
+        // 按导入时结构读出的单元格对应回内置 28 列（内置结构时 sourceIndex 即原列）。
+        for (let i = 0; i < COL_COUNT; i++) {
+          const source = ctx.sourceIndex[i];
+          obj[FLOW_DB_COLUMNS[i]] = normalizeCell(source >= 0 ? cells[source] : '');
+        }
         obj._rowIndex = excelRow != null ? excelRow : rowIdx;   // 真实 Excel 行号优先，缺 r 属性回退计数
         dataRows += 1;
         ctx.onDataRow(obj);
@@ -176,8 +181,10 @@ function scanSheet(sheetEntry, sharedStrings, ctx) {
 // 流式读单个流水文件 → 自动定位 FLOW 数据 sheet → 逐数据行回调 onDataRow。
 //   onProgress(dataRowsSoFar)：每 PROGRESS_INTERVAL 行 + 结束时回调。
 //   返回 { fileName, filePath, dataRows }。损坏/无 sheet/未找到数据表 → 抛 FileValidationError。
-async function streamFlowFile(filePath, { onDataRow, onProgress } = {}) {
+// sourceHeaders：设置 → 模板文件当前版本的表头（缺省为内置 28 列）。按它识别表头，读出的行对应回内置列。
+async function streamFlowFile(filePath, { onDataRow, onProgress, sourceHeaders = null } = {}) {
   const fileName = path.basename(filePath);
+  const headers = Array.isArray(sourceHeaders) && sourceHeaders.length ? sourceHeaders : FLOW_HEADERS;
 
   // v3.0.4 块 A · A1：在 JSZip.loadAsync 之前预检 entry 解压尺寸（≥2^31 → 抛明确中文错误）。
   //   预检抛 FileValidationError（wrapReadError 原样透传，errorCode 对齐本 reader）；预检自身失败 fail-open。
@@ -220,6 +227,9 @@ async function streamFlowFile(filePath, { onDataRow, onProgress } = {}) {
 
   let totalDataRows = 0;
   const ctx = {
+    headers,
+    colCount: headers.length,
+    sourceIndex: headers === FLOW_HEADERS ? FLOW_HEADERS.map((_header, index) => index) : canonicalHeaderMapping(FLOW_HEADERS, headers).sourceIndex,
     onDataRow: typeof onDataRow === 'function' ? onDataRow : () => {},
     tick: () => {
       totalDataRows += 1;
@@ -244,12 +254,13 @@ async function streamFlowFile(filePath, { onDataRow, onProgress } = {}) {
     const detail = lastValidation && lastValidation.detailLines
       ? lastValidation.detailLines
       : ['（所有 sheet 均为空或无有效表头）'];
+    const version = headers === FLOW_HEADERS ? '' : '（当前版本）';
     throw new FileValidationError(
       ERROR_CODE,
-      `${TEMPLATE_LABEL} 未找到流水数据表（所有 sheet 表头均与模板 28 列不匹配）`,
+      `${TEMPLATE_LABEL} 未找到流水数据表（所有 sheet 表头均与模板${version} ${headers.length} 列不匹配）`,
       {
-        detailLines: [`文件：${fileName}`, ...detail],
-        context: { filePath, fileName, templateLabel: TEMPLATE_LABEL, expectedColumnCount: FLOW_HEADERS.length }
+        detailLines: [`文件：${fileName}`, ...detail, TEMPLATE_STRUCTURE_HINT],
+        context: { filePath, fileName, templateLabel: TEMPLATE_LABEL, expectedColumnCount: headers.length }
       }
     );
   }
@@ -258,7 +269,26 @@ async function streamFlowFile(filePath, { onDataRow, onProgress } = {}) {
   return { fileName, filePath, dataRows: totalDataRows };
 }
 
+// 设置 → 模板文件导入预检：与正式读取相同的解析（JSZip + parseRowXml）读出第 1 个 worksheet 的首行，核对模板表头读取口径。
+async function readFirstWorksheetHeaderRow(filePath) {
+  const zip = await JSZip.loadAsync(await fs.promises.readFile(filePath));
+  const sharedStrings = await readSharedStrings(zip);
+  const first = Object.keys(zip.files).filter((name) => /^xl\/worksheets\/sheet\d+\.xml$/.test(name))
+    .sort((a, b) => Number(a.match(/sheet(\d+)\.xml$/)[1]) - Number(b.match(/sheet(\d+)\.xml$/)[1]))[0];
+  if (!first) return [];
+  const xml = await zip.file(first).async('string');
+  const row = /<row[ >][\s\S]*?<\/row>/.exec(xml);
+  if (!row) return [];
+  let width = 0; let match;
+  const columnRe = /\br="([A-Z]+)\d+"/g;
+  while ((match = columnRe.exec(row[0]))) width = Math.max(width, lettersToIndex(match[1]) + 1);
+  const cells = parseRowXml(row[0], width, sharedStrings).map((cell) => normalizeCell(cell));
+  while (cells.length && cells[cells.length - 1] === '') cells.pop();
+  return cells;
+}
+
 module.exports = {
+  readFirstWorksheetHeaderRow,
   streamFlowFile,
   ERROR_CODE,
   TEMPLATE_LABEL

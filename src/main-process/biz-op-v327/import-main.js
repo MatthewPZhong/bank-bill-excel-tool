@@ -10,7 +10,7 @@ const { readVerifiedManifest } = require('./payload-store');
 const { hash, fail, count } = require('./contracts');
 
 function createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, protection, admission, sources,
-  prepareOperation, prepareDispatch, forgetDispatch, getArchiveService }) {
+  prepareOperation, prepareDispatch, forgetDispatch, getArchiveService, resolveSourceStructures = null }) {
   async function restoreDiagnostic(taskRunId) {
     const op = catalog.operation(taskRunId);
     if (!op || op.action !== 'IMPORT') return null;
@@ -47,6 +47,8 @@ function createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, prot
   async function runImport({ taskLifecycle, runtime, filePlan, signal, onControl, onTaskIdentified, afterWorker, afterCommit, options = {} }) {
     return admission.exclusive(async () => {
       if (signal?.aborted) return { status: 'cancelled' };
+      // 当前导入识别结构在建立任务前解析（不可用时直接失败），冻结进 worker 计划文档，恢复沿用。
+      const sourceStructures = resolveSourceStructures ? await resolveSourceStructures() : null;
       let taskRunId;
       const candidateRef = `candidate-${randomUUID()}`;
       const reportRef = `report-${randomUUID()}`;
@@ -79,7 +81,8 @@ function createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, prot
             }
             if (!files.length) fail('BIZOP_INPUT_SET_EMPTY');
             const request = prepareDispatch({ taskContext: context, actionKey: 'biz-op-v327:import-candidate',
-              plan: { phase: 'xlsx-import-v1', userDataDir, candidateRef, reportRef, intentDigest: op.intent_digest, files, options } });
+              plan: { phase: 'xlsx-import-v1', userDataDir, candidateRef, reportRef, intentDigest: op.intent_digest, files, options,
+                ...(sourceStructures ? { sourceStructures } : {}) } });
             const planDigest = payloadStore.readDocument(`operations/${taskRunId}/${request.input.planRef}.json`).digest;
             const control = runtime.start(request);
             protection.attachControl(control);

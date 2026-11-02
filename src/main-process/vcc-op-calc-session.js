@@ -257,7 +257,8 @@ function createVccOpCalcSession({
   //   centsToAmountString / VALID_DIRECTION_IN，与同步 scan/computeAmounts 完全一致。
   //   成功 → 缓存 lastComputeCache 供 saveRun；errorRows 上限 MAX_ERRORS（百万行场景防 OOM）；多月份混杂整批拒绝。
   //   返回 { ok, yearMonth, totalRows, totals, perFile } 或 { ok:false, errorRows, errorCount }。
-  async function streamScanAndCompute(filePaths, { onProgress } = {}) {
+  // sourceHeaders：设置 → 模板文件「流水对账单」当前版本表头（缺省为内置 28 列），由调用方在扫描开始时解析。
+  async function streamScanAndCompute(filePaths, { onProgress, sourceHeaders = null } = {}) {
     const list = Array.isArray(filePaths) ? filePaths : [];
     const MAX_ERRORS = 100;
     const errorRows = [];
@@ -278,6 +279,7 @@ function createVccOpCalcSession({
       let fileOutCents = 0;
       let fileRowCount = 0;
       await streamFlowFile(fp, {
+        sourceHeaders,
         onDataRow: (row) => {
           totalRows += 1;
           fileRowCount += 1;

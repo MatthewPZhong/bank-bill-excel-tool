@@ -41,7 +41,8 @@ async function validateCandidate(input, envelope) {
     const payloadStore = createBizOpPayloadStore({ userDataDir: plan.userDataDir });
     const result = await runImportPipeline({ payloadStore, taskRunId: plan.taskRunId, intentDigest: plan.intentDigest,
       candidateRef: plan.candidateRef, reportRef: plan.reportRef, files: plan.files,
-      options: plan.options, memoryConfig, planDigest: input.planDigest, cancelToken: { get cancelled() { return cancelled; } } });
+      options: plan.options, memoryConfig, planDigest: input.planDigest, sourceStructures: plan.sourceStructures || null,
+      cancelToken: { get cancelled() { return cancelled; } } });
     return { ...result, planDigest: input.planDigest };
   }
   if (plan.phase === 'interval-compute-v1' && envelope.actionKey === 'biz-op-v327:run-candidate') {

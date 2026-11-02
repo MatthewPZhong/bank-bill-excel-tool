@@ -167,8 +167,13 @@ const TEMPLATE_RESOURCES = Object.freeze([
     bindings: [binding('bank-bu-recon', '导入结构参考')] }),
   resource({ id: 'biz-op-bill', path: 'assets/业务OP账单.xlsx', type: 'input', readMode: 'sample',
     bindings: [binding('biz-op-recon', '导入结构参考')] }),
-  resource({ id: 'flow-statement', path: 'assets/流水对账单.xlsx', type: 'input', readMode: 'sample',
-    bindings: [binding('biz-op-recon', '导入结构参考'), binding('vcc-op-calc', '导入结构参考')] }),
+  // 流水对账单：业务 OP 导入任务开始时按当前版本识别并冻结，数据集记录导入时结构（导出重读原件按它对应回内置列）；
+  //   VCC OP 发生额计算每次扫描时按当前版本识别。入库、计算与导出仍按内置 28 列。
+  resource({ id: 'flow-statement', path: 'assets/流水对账单.xlsx', type: 'input', readMode: 'runtime',
+    bindings: [binding('biz-op-recon', '导入 · 识别结构', 'runtime'), binding('vcc-op-calc', '导入扫描 · 识别结构', 'runtime')],
+    replace: REPLACEABLE, cache: '不缓存，每次导入或扫描时读取',
+    failure: '当前版本缺失、被修改或不兼容时导入 / 扫描中止，提示恢复默认或重新导入',
+    effect: '下次导入或扫描；已导入的业务 OP 数据按导入时结构重读原件，入库、计算与导出仍按内置 28 列' }),
   // 单据对账（C4 单据模式）：导入时按当前版本 4 张工作表的表头识别；场景配置的主 / 从字段下拉随当前版本。
   resource({ id: 'doc-recon-unbalanced', path: 'assets/单据对账导出不平.xlsx', type: 'input', readMode: 'runtime',
     bindings: [binding('recon-id-fix', '导入识别结构 · 4 张 Sheet；场景字段下拉', 'runtime')],

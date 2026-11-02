@@ -416,6 +416,7 @@ const {
 // v3.1.6：VCC财务OP校验（四类明细幂等、逐币种计算、系统OP比较与归档）。
 const { createVccFinancialOpService } = require('./main-process/vcc-financial-op-service');
 const { resolveVccSourceStructures } = require('./main-process/vcc-financial-op-source-structures');
+const { resolveFlowStatementStructure } = require('./main-process/flow-statement-structure');
 const { createResultExportHandlers } = require('./main-process/vcc-financial-op-result-export-ipc');
 const { acquireResultExportLease } = require('./main-process/vcc-financial-op-result-workbook-runner');
 const {
@@ -15534,7 +15535,10 @@ function registerNewAccountHandlers() {
     // 表头校验失败 → FileValidationError；非法行/多月份混杂 → ok:false + errorRows（整批拒绝）。
     let result;
     try {
+      // 设置 → 模板文件「流水对账单」当前结构：每次扫描时解析，不可用时中止并指向设置。
+      const flowStructure = await resolveFlowStatementStructure(getTemplateResourceService());
       result = await vccOpCalcSession.streamScanAndCompute(filePaths, {
+        sourceHeaders: flowStructure ? flowStructure.headers : null,
         onProgress: (rows) => {
           if (event && event.sender && !event.sender.isDestroyed()) {
             event.sender.send('vccOpCalc:scan:progress', { rows });
@@ -21454,6 +21458,10 @@ async function initializeBackgroundExecutionRecovery() {
   const providerRegistry = createSettlementRecoveryProviderRegistry();
   bizOpV327Module = createBizOpV327Module({ db: database.db, userDataDir: path.dirname(database.dbPath),
     readRepository: recoveryControlReadRepository, productionRequests: true,
+    resolveSourceStructures: async () => {
+      const flow = await resolveFlowStatementStructure(getTemplateResourceService());
+      return flow ? { FLOW: flow } : null;
+    },
     getRuntime: () => backgroundExecutionRuntimeManager.get(),
     getArchiveService: () => archiveCenterService && archiveCenterService.service });
   bizOpV327Module.sources.register(inspectorRegistry, providerRegistry);

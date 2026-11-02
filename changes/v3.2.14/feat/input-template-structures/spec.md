@@ -345,3 +345,51 @@ Codex 已核查未发现缺陷的方面：冻结结构在预检、重放、异�
 - `npm run release-check`：lint、架构检查 806/806 文件、smoke、单测 9756/9760（4 项为既有条件跳过）通过；集成阶段首轮 `toolbox-csv-admission` 1 项失败（低内存档排队计时，与本模块无关；单独重跑 17/17），随后完整重跑 `npm run test:integration` 89/89 通过（新增 `vcc-input-template-version` 4/4）。
 - 新增 / 调整的回归：预检按当前结构识别与差异明细、计划冻结结构与重新预检、成员清单记录与摘要保护（含篡改）、明细 / Pending / 系统财务OP 按导入时结构导入后 `content_hash` 与内置结构同值导入一致、数据集导出与审阅导出重读存档原件核验通过（审阅原表页按导入时结构）、系统财务OP 结构外数据列仍拒绝、模板预检（必用列、旧 48 列 Pending 冲突、明细布尔表头两种读法不一致）、版本不可用时预检中止、`vcc-removed-pending` 与 `removed-pending` 互标；既有 VCC 与模板测试全部通过。
 - 未执行：真实应用 GUI（本机开发版启动受已知 BizOP 资源预检阻断）与 Windows 安装版实测；worker 线程中的预检与导入由单测和集成脚本在本进程调用同一函数覆盖。
+
+## 14. 第二批 · 流水对账单（`flow-statement`，业务 OP v3.2.7 与 VCC OP 发生额计算共用）
+
+### 14.1 现状（取证 2026-11-01）
+
+- 业务 OP 新版（`biz-op-v327`，v3.2.7 起启动时自动升级启用，旧版导入已退役）：worker 中单文件单 Sheet，第 1 行逐列一致识别 OP / 流水（`import-adapter.detectHeader`），按固定列下标读取（`FLOW_PROJECTION` 等）。数据集清单 `catalog.sources`（artifactId / sha256 / order / sheetName / bu / rowCount）封存于数字摘要保护的 manifest；`inputFingerprint` 按原件 SHA 等计算，重复导入同一组原件复用已有数据集。「流水校验原表」导出（`FLOW_RAW`）重读存档原件，按 `FLOW_HEADERS` 位置读取并核对行数。
+- VCC OP 发生额计算（`vcc-op-calc`）：流式读取固定 28 列，首行与 `FLOW_HEADERS` 逐列一致，按 `FLOW_DB_COLUMNS` 位置取方向、对账金额、账单日期、币种计算；不持久化行，也不事后重读原件。worker 输入键固定（`PARSER_INPUT_KEYS`）。
+- 两个模块的 28 列定义一致。
+
+### 14.2 方案
+
+- 识别只认当前版本：业务 OP 在导入任务开始时解析当前结构，冻结进 worker 计划文档（数字摘要保护，恢复沿用）；VCC OP 计算在每次扫描时解析。用户版本不可用时中止并指向设置。表头不符时附 1b 差异明细（与当前结构比较）。业务 OP 账单（OP）不变。
+- 归一：按导入时结构读出后立即对应回内置 28 列（同名优先，同位置非内置名视为改名，其余置空，多出的列不导入；导入时结构宽度之外有数据仍按“超出原表模板”拒绝）。下游列下标、校验、计算、导出列与存量数据不变。
+- 记录当时结构（业务 OP）：数据集 `catalog.sources[]` 中该原件增加 `sourceHeaders`（仅用户版本时写入），计入 `sourceManifestDigest`，不计入 `inputFingerprint`（同一原件的表头由其字节决定，对应结果只取决于原件本身，复用判断不受影响）。「流水校验原表」导出重读时按记录的结构识别并对应回内置列，输出仍为内置 28 列。存量数据集没有该键，按内置结构。
+- 必用列（程序按列下标 / 列名读取）：账单日期、公司主体、业务部门、出入方向、流水单号、账户编号、对账金额、币种、账户类型（覆盖 VCC OP 计算读取的 4 列）。其余日期列（流水开始 / 完成时间、valueDate、系统创建 / 修改时间）有值时仍按日期校验，删除后为空。
+- 口径核对：模板表头须与业务 OP 富工作簿读法、VCC OP 计算流式读法一致。
+
+### 14.3 风险
+
+| 编号 | 风险 | 处理 |
+| --- | --- | --- |
+| K7 | 业务 OP 同一账期重导：新结构下被置空的列不进入 `inputFingerprint`（按原件 SHA），不同原件即视为新版本输入 | 与内置结构下更换原件一致：生成新输入版本，旧版本与结果保留可追溯 |
+| K8 | VCC OP 计算的保存运行回执按扫描时结构计算，不记录结构 | 回执记录原件快照与计算结果，不重读原件，不受之后切换版本影响 |
+
+### 14.4 实施记录
+
+| 文件 | 内容 |
+| --- | --- |
+| `main-process/flow-statement-structure.js`（新增） | 解析「流水对账单」当前结构（用户版本返回表头，内置返回 null，不可用时抛错） |
+| `backend/biz-op-recon-db/columns.js` | 新增 `FLOW_REQUIRED_HEADERS`（§14.2 必用列） |
+| `main-process/biz-op-v327/import-adapter.js` | `detectHeader(row, { flowHeaders })`：流水按导入时结构识别，不符时消息附与当前结构的逐列差异与指引；`createImportAdapter(kind, { sourceHeaders })`：单元格对应回内置 28 列下标，`cellsOf` 供原表导出使用；结构宽度之外的数据仍按“超出原表模板”拒绝 |
+| `main-process/biz-op-v327/{import-main,module,import-pipeline,worker-entry,candidate-router}.js` | 导入开始时（建立任务前）解析结构并冻结进 worker 计划；数据集 `catalog.sourceHeaders` 记录导入时结构，计入 `sourceManifestDigest`，不计入 `inputFingerprint` |
+| `main-process/biz-op-v327/export-source.js` | 「流水校验原表」导出按数据集记录的结构重读原件，输出内置 28 列 |
+| `backend/vcc-op-calc-import/{reader,validator}.js`、`main-process/vcc-op-calc-session.js` | `streamFlowFile(…, { sourceHeaders })`：按当前结构校验表头与列宽，行对应回内置 28 列；未找到数据表时附模板指引；新增 `readFirstWorksheetHeaderRow` 供模板口径核对 |
+| `main.js` | 业务 OP 模块注入 `resolveSourceStructures`；VCC OP 扫描开始时解析结构 |
+| `template-resources/{input-structures,catalog}.js` | 登记 `flow-statement`（`storage: 'canonical'`，业务 OP 账单表头为识别冲突对象，口径核对比较两种读法）；可替换 |
+| `knowledge/backlog.md` | B40（Parser Worker 路径） |
+
+偏离与说明：
+
+- 导入时结构按数据集记一份（`catalog.sourceHeaders`），不按原件逐条记：同一次导入的流水原件共用计划冻结的结构，数据集只来自一次导入；这样「流水校验原表」导出的来源快照（64 KiB 上限）不随原件数增长，来源条目字段与导出核对不变。
+- 旧版业务 OP 导入（`biz-op-recon-import`，v3.2.7 起启动时升级后退役）与 VCC OP 计算的 Parser Worker 路径（生产未启用，B40）未接入，保持内置结构。
+
+### 14.5 验证结果（2026-11-01，macOS 本机，未提交工作区）
+
+- `npm run release-check` 通过：lint；架构检查 807/807 文件；smoke；单测 9763/9767（4 项为既有条件跳过）；集成 90/90 脚本（新增 `flow-statement-template-version` 3/3）。
+- 新增 / 调整的回归：业务 OP 真实模块宿主上按当前结构导入、数据集记录导入时结构、「流水校验原表」与校验表导出、恢复默认后已导入数据集仍可导出、内置结构文件被拒且错误报告列出逐列差异、适配器结构宽度外数据拒绝；VCC OP 计算按当前结构读取并对应回内置列、内置结构文件被拒附指引；模板预检（必用列、两种读法不一致的布尔表头）、版本不可用时中止；既有业务 OP、VCC OP 与模板测试全部通过。
+- 未执行：真实应用 GUI（本机开发版启动受已知 BizOP 资源预检阻断）与 Windows 安装版实测。

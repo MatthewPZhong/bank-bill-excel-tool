@@ -68,7 +68,7 @@ async function prepare(service, resourceId, filePath) {
 test('输入原表结构规格：已接入的资源可替换；平盘 5 张为单表，规格、必用列与内置表头一致', () => {
   const ids = Object.keys(INPUT_STRUCTURES).sort();
   assert.deepEqual(ids, [
-    'doc-recon-unbalanced', 'fx-delivery', 'gateway-recon', 'position-bank-accounts', 'position-gateway-raw-in',
+    'doc-recon-unbalanced', 'flow-statement', 'fx-delivery', 'gateway-recon', 'position-bank-accounts', 'position-gateway-raw-in',
     'position-gateway-raw-out', 'position-payment-full', 'position-transfer-orders', 'refund-order', 'removed-pending',
     'transfer-order', 'vcc-channel', 'vcc-fee-fx', 'vcc-recharge-refund', 'vcc-removed-pending', 'vcc-system-op'
   ]);
