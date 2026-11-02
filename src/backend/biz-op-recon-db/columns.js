@@ -113,6 +113,11 @@ const FLOW_HEADERS = Object.freeze(
   FLOW_COLUMN_DEFS.map((d) => d.header)
 );
 
+// 设置 → 模板文件：流水对账单中程序按列读取的列（业务 OP 新版投影 / 键与 VCC OP 发生额计算），新结构须同名保留；
+//   其余列可改名、增删（读取时对应回内置 28 列）。
+const FLOW_REQUIRED_HEADERS = Object.freeze(['账单日期', '公司主体', '业务部门', '出入方向', '流水单号', '账户编号',
+  '对账金额', '币种', '账户类型']);
+
 const FLOW_DB_COLUMNS = Object.freeze(
   FLOW_COLUMN_DEFS.map((d) => d.dbColumn)
 );
@@ -156,6 +161,7 @@ const DIFF_HEADER_TAIL = Object.freeze([
 const ERROR_HEADER_TAIL = Object.freeze(['失败行号', '失败原因']);
 
 module.exports = {
+  FLOW_REQUIRED_HEADERS,
   // 资金红线常量（fix7-M2 提取）
   AMOUNT_EPSILON,
 

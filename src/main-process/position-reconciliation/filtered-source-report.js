@@ -223,12 +223,14 @@ async function streamAnomalyDetailRows(filePath, onRow) {
   }
 }
 
+// sourceDefinitions：过滤数据按当前结构出列（设置 → 模板文件的当前版本），缺省为内置结构。
 async function writeRunFilteredSourcesWorkbook({
   outputPath,
   run,
   filteredSources,
   reportFiles,
-  maxDetailRowsPerSheet = EXCEL_MAX_ROWS - 1
+  maxDetailRowsPerSheet = EXCEL_MAX_ROWS - 1,
+  sourceDefinitions = SOURCE_DEFINITIONS
 }) {
   const requested = new Map((Array.isArray(filteredSources) ? filteredSources : []).map(
     (item) => [text(item.reportRowKey), item]
@@ -297,11 +299,11 @@ async function writeRunFilteredSourcesWorkbook({
     const detailHeaders = new Map([
       [SOURCE_TYPES.FUND_TRANSFER, [
         ...DETAIL_META_HEADERS,
-        ...SOURCE_DEFINITIONS[SOURCE_TYPES.FUND_TRANSFER].headers
+        ...sourceDefinitions[SOURCE_TYPES.FUND_TRANSFER].headers
       ]],
       [SOURCE_TYPES.TEST_PAYMENT, [
         ...DETAIL_META_HEADERS,
-        ...SOURCE_DEFINITIONS[SOURCE_TYPES.TEST_PAYMENT].headers
+        ...sourceDefinitions[SOURCE_TYPES.TEST_PAYMENT].headers
       ]]
     ]);
     for (const sourceType of [SOURCE_TYPES.FUND_TRANSFER, SOURCE_TYPES.TEST_PAYMENT]) {

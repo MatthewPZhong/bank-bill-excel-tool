@@ -5,8 +5,11 @@
 
 const XLSX = require('xlsx');
 const { parseFundTypeEnumWorkbook } = require('../../constants/fund-type-enum');
-const { parseGatewayReconHeadersWorkbook } = require('../../constants/gateway-recon-headers-loader');
+const { CUSTOM_VALUE_SENTINEL } = require('../../constants/gateway-recon-headers-loader');
+const { canonicalHeaderMapping, storedHeaderNames } = require('../../backend/file-service/header-structure-diff');
 const { ALL_CELLS, sheetCells } = require('../../constants/sheetjs-sparse-cells');
+const { TEMPLATE_RESOURCES } = require('./catalog');
+const { INPUT_STRUCTURES, isSingleSheetStructure, structureLabel } = require('./input-structures');
 
 function cellText(value) {
   return value === undefined || value === null ? '' : String(value).trim();
@@ -35,11 +38,44 @@ function rowTexts(cells, rowIndex) {
   return trimTail(Array.from(row, (value) => value || ''));
 }
 
-// 运行时 loader 的解析函数：枚举取值与比较基准都按它们的口径（声明范围的首列 / 首行）计算，
-// 声明范围不从 A1 开始时也与场景配置实际读到的取值一致。
+// 输入原表的导入识别结构：指定工作表（null 为第 1 个）表头行的文本（中间空列保留为空串，末尾空列去掉）。
+//   与导入时读表头的口径是否一致，由模板检查用各模块的读取函数再核对一次。
+function sheetHeaders(workbook, sheetName, headerRow) {
+  const name = sheetName === null ? workbook.SheetNames[0] : sheetName;
+  if (!name || !workbook.Sheets[name]) return [];
+  return rowTexts(textCells(workbook.Sheets[name]), headerRow - 1);
+}
+
+function firstSheetHeaders(workbook, headerRow) {
+  return sheetHeaders(workbook, null, headerRow);
+}
+
+// 取值快照：单表原表为表头列表；多表原表为「工作表」列名标签（用于比较基准与“取值变化”展示），
+//   各表的表头另由结构描述 sheets[].headers 保存。values 为 'stored' 的表（网关对账单、银行对账单）取入库后实际可用的列名，
+//   即场景配置下拉与场景引用保护的口径。headersBySheet 与 spec.sheets 一一对应。
+function inputStructureValuesFromHeaders(spec, headersBySheet) {
+  if (spec.values === 'stored') {
+    const builtin = spec.sheets[0].builtinHeaders();
+    const headers = headersBySheet[0] || [];
+    return storedHeaderNames(builtin, canonicalHeaderMapping(builtin, headers), { keepExtra: spec.keepExtra === true })
+      .filter((header) => header !== CUSTOM_VALUE_SENTINEL);
+  }
+  if (isSingleSheetStructure(spec)) return [...(headersBySheet[0] || [])];
+  return spec.sheets.flatMap((sheet, index) => (headersBySheet[index] || []).map((header) => structureLabel(sheet.name, header)));
+}
+
+function inputStructureValues(spec, workbook, headerRow) {
+  return inputStructureValuesFromHeaders(spec, spec.sheets.map((sheet) => sheetHeaders(workbook, sheet.name, headerRow)));
+}
+
+// 运行时 loader 的解析函数：FundType 枚举按其口径（声明范围的首列）计算，声明范围不从 A1 开始时也与场景配置实际读到的取值一致。
+//   输入原表（含网关对账单）的取值为表头列表或入库后的列名，见 inputStructureValuesFromHeaders。
 const RUNTIME_VALUE_PARSERS = Object.freeze({
   'fund-type-enum': parseFundTypeEnumWorkbook,
-  'gateway-recon': parseGatewayReconHeadersWorkbook
+  ...Object.fromEntries(Object.entries(INPUT_STRUCTURES).map(([resourceId, spec]) => {
+    const headerRow = TEMPLATE_RESOURCES.find((resource) => resource.id === resourceId).headerRow;
+    return [resourceId, (workbook) => inputStructureValues(spec, workbook, headerRow)];
+  }))
 });
 
 // 表头以下有内容的行数。合并单元格只在左上角保存值；其覆盖的行在 Excel 中同样显示内容，计数时一并计入。
@@ -94,6 +130,9 @@ function parseRuntimeValues(resourceId, bytes) {
 
 module.exports = {
   RUNTIME_VALUE_PARSERS,
+  firstSheetHeaders,
+  inputStructureValuesFromHeaders,
+  sheetHeaders,
   describeWorkbook,
   parseRuntimeValues
 };

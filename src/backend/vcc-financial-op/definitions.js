@@ -84,6 +84,20 @@ const SYSTEM_OP_HEADERS = Object.freeze([
   '主体变动发生额', '财务主体余额', '创建时间'
 ]);
 
+// 设置 → 模板文件：各原表中程序按列名读取的列（键 / 账期 / 主体与 row-mapper、系统财务OP 解析读取的列），
+//   新结构须同名保留；其余列可改名、增删（导入时对应回内置列序，见 source-structure.js）。
+const REQUIRED_HEADERS = Object.freeze({
+  [SOURCE_TYPES.RECHARGE]: Object.freeze(['订单号', 'BillDate', '公司主体', '出入方向', '我方到账金额', '我方币种',
+    '业务部门', '对手部门', '业务子类型']),
+  [SOURCE_TYPES.FEE_FX]: Object.freeze(['订单号', 'BillDate', '公司主体', '出入方向', '我方到账金额', '我方币种',
+    '业务部门', '业务子类型']),
+  [SOURCE_TYPES.CHANNEL]: Object.freeze(['渠道订单号', '账单日期', '借贷方向', '通道名称', 'MID', '部门', '交易币种',
+    '交易金额', 'billdate', '清算币种', '清算金额', '结算币种', '实际到账金额']),
+  [SOURCE_TYPES.PENDING]: Object.freeze(['PendingBizId', '平账账期', '主体', '对账类型', 'channel', '币种', '流水_币种',
+    '金额', '流水_对账金额']),
+  [SOURCE_TYPES.SYSTEM_OP]: Object.freeze(['账单日期', '主体', '业务部门', '币种', '财务余额'])
+});
+
 function buildDefinition(sourceType, headers, fields) {
   const indexes = Object.freeze(Object.fromEntries(headers.map((header, index) => [header, index])));
   return Object.freeze({ sourceType, headers, indexes, ...fields });
@@ -171,6 +185,7 @@ module.exports = {
   PENDING_RAW_CONTRACT_V1,
   PENDING_RAW_CONTRACT_V2,
   SYSTEM_OP_HEADERS,
+  REQUIRED_HEADERS,
   SOURCE_DEFINITIONS,
   SYSTEM_OP_DEFINITION,
   normalizeHeader,

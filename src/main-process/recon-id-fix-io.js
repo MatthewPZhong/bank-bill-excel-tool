@@ -18,6 +18,7 @@ const {
 } = require('./pre-fund-reconciliation/output-mapper');
 
 const { FileValidationError } = require('../backend/file-service/common');
+const { describeHeaderMismatch } = require('../backend/file-service/header-structure-diff');
 const {
   RECON_RESULT_FIELDS,
   BUSINESS_BILL_FIELDS,
@@ -102,9 +103,21 @@ function getReconIdFixOutputContract(subMode = 'business') {
   });
 }
 
+// 结构可由设置 → 模板文件替换的 sheet：不一致时给出与当前版本的逐列差异与导入新版本的指引。
+function templateMismatchDetails(actualHeaders, expectedHeaders, sheetName, structureHint, fallbackLines) {
+  if (!structureHint) return fallbackLines;
+  const lines = describeHeaderMismatch({
+    sheets: [{ name: '', headers: actualHeaders }],
+    candidates: [{ name: `「${sheetName}」`, headers: expectedHeaders, versionLabel: structureHint.versionLabel }]
+  });
+  // 只差首尾空格等通用工具不区分的差异时，保留原逐列明细。
+  return lines.some((line) => line.startsWith('第 ')) ? lines : [...fallbackLines, ...lines];
+}
+
 // ===== 共用：把 sheet 转换成对象数组 + 严格列校验 =====
 // 模式与 bank-statement-io.js sheetToObjects 一致；为保留 sheetName 在 detailLines 里区分
-function sheetToObjects(sheet, expectedHeaders, sheetName) {
+// structureHint：{ versionLabel } 表示该 sheet 的结构来自模板文件当前版本（单据模式）。
+function sheetToObjects(sheet, expectedHeaders, sheetName, structureHint = null) {
   const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
   if (!aoa.length) {
     // 空 sheet（连表头都没）→ 视为"列校验失败"
@@ -120,10 +133,10 @@ function sheetToObjects(sheet, expectedHeaders, sheetName) {
       'invalid-column-count',
       `sheet「${sheetName}」表头列数不符：期望 ${expectedHeaders.length} 列，实际 ${actualHeaders.length} 列`,
       {
-        detailLines: [
+        detailLines: templateMismatchDetails(actualHeaders, expectedHeaders, sheetName, structureHint, [
           `期望表头：${expectedHeaders.join(' / ')}`,
           `实际表头：${actualHeaders.join(' / ')}`
-        ]
+        ])
       }
     );
   }
@@ -137,7 +150,7 @@ function sheetToObjects(sheet, expectedHeaders, sheetName) {
     throw new FileValidationError(
       'invalid-column-name',
       `sheet「${sheetName}」表头列名不符（${mismatched.length} 处）`,
-      { detailLines: mismatched }
+      { detailLines: templateMismatchDetails(actualHeaders, expectedHeaders, sheetName, structureHint, mismatched) }
     );
   }
   // 不取 rows，只取 headers（仅用于「订单修复」sheet 模板）
@@ -230,11 +243,24 @@ function readGatewayReconResult(wb, cfg) {
   });
 }
 
+// 设置 → 模板文件：按导入时的读法（第 1 行原样转字符串，不 trim）读出各 sheet 的表头；缺少的 sheet 为 null。
+function readReconIdFixSheetHeaders(filePath, sheetNames) {
+  const workbook = XLSX.readFile(filePath, { sheetRows: 1 });
+  return sheetNames.map((name) => {
+    const sheet = workbook.Sheets[name];
+    if (!sheet) return null;
+    const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
+    return aoa.length ? aoa[0].map((h) => (h === undefined || h === null ? '' : String(h))) : [];
+  });
+}
+
 // ===== readReconIdFixFile =====
 // 返回 { filePath, fileName, sheets: { reconResult, businessBills, opponentBills, fixTemplate }, importedAt }
 // v2.1.0-beta.3 T9：加 subMode 参数（'business' | 'gateway'），按 mode 选 sheet 名 + 字段常量
 //   sheets 输出 key 名（businessBills / opponentBills）保留不变，gateway 模式下分别承载网关账单/渠道账单数据
-function readReconIdFixFile(filePath, subMode = 'business') {
+// structure（单据模式）：设置 → 模板文件当前版本的各 sheet 表头 { label, sheets: { [sheetName]: headers } }；
+//   缺省为内置结构。行对象按当前结构的列名取键；「订单修复」输出列固定，不随版本变化。
+function readReconIdFixFile(filePath, subMode = 'business', { structure = null } = {}) {
   if (!filePath || !fs.existsSync(filePath)) {
     throw new FileValidationError('file-not-found', `文件不存在：${filePath}`);
   }
@@ -263,22 +289,31 @@ function readReconIdFixFile(filePath, subMode = 'business') {
   } else {
     wb = XLSX.readFile(filePath);
   }
+  // 单据模式的 4 张 sheet 结构可由模板文件替换；网关模式读的是资金对账导出不平（输出模板），结构固定。
+  const templateDriven = subMode !== 'gateway';
+  const hint = templateDriven ? { versionLabel: structure && structure.label ? structure.label : '' } : null;
+  const headersOf = (sheetName, builtin) => (
+    templateDriven && structure && structure.sheets && Array.isArray(structure.sheets[sheetName])
+      ? structure.sheets[sheetName]
+      : builtin
+  );
   // business 模式仍要求旧 4 sheet；gateway 模式兼容 3.0.14 的新结果和重复审计 sheet。
   const reconResultRows = subMode === 'gateway'
     ? readGatewayReconResult(wb, cfg)
     : sheetToObjects(
       readSheetOrThrow(wb, cfg.reconResultSheetName),
-      cfg.reconResultFields,
-      cfg.reconResultSheetName
+      headersOf(cfg.reconResultSheetName, cfg.reconResultFields),
+      cfg.reconResultSheetName,
+      hint
     ).rows;
   const businessSheet = readSheetOrThrow(wb, cfg.mainBillSheetName);
   const opponentSheet = readSheetOrThrow(wb, cfg.oppBillSheetName);
   const fixSheet = readSheetOrThrow(wb, cfg.orderRepairSheetName);
 
-  const businessObj = sheetToObjects(businessSheet, cfg.mainBillFields, cfg.mainBillSheetName);
-  const opponentObj = sheetToObjects(opponentSheet, cfg.oppBillFields, cfg.oppBillSheetName);
-  // 「订单修复」sheet 仅校验表头（PRD §六.4.1 + spec §五.1）
-  const fixObj = sheetToObjects(fixSheet, cfg.orderRepairFields, cfg.orderRepairSheetName);
+  const businessObj = sheetToObjects(businessSheet, headersOf(cfg.mainBillSheetName, cfg.mainBillFields), cfg.mainBillSheetName, hint);
+  const opponentObj = sheetToObjects(opponentSheet, headersOf(cfg.oppBillSheetName, cfg.oppBillFields), cfg.oppBillSheetName, hint);
+  // 「订单修复」sheet 仅校验表头（PRD §六.4.1 + spec §五.1）；输出列固定为常量。
+  sheetToObjects(fixSheet, headersOf(cfg.orderRepairSheetName, cfg.orderRepairFields), cfg.orderRepairSheetName, hint);
 
   return {
     filePath,
@@ -287,7 +322,7 @@ function readReconIdFixFile(filePath, subMode = 'business') {
       reconResult: reconResultRows,
       businessBills: businessObj.rows,
       opponentBills: opponentObj.rows,
-      fixTemplate: { headers: fixObj.headers, rows: [] }
+      fixTemplate: { headers: cfg.orderRepairFields.slice(), rows: [] }
     },
     importedAt: Date.now()
   };
@@ -463,6 +498,7 @@ function applyHeaderRowFont(worksheet, headerRowIndex = 0) {
 module.exports = {
   getReconIdFixOutputContract,
   readReconIdFixFile,
+  readReconIdFixSheetHeaders,
   writeReconIdFixOutput,
   writeUnmatchedReport,                  // Round 3 新增
   buildMainOutputFileName,

@@ -109,7 +109,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       void 0;`);
     if (open) {
       await js('tf.open(); tf.q(\'[data-tab="templates"]\').click(); void 0;');
-      if (!hold.includes('list')) await waitFor('tf.q(\'[data-role="template-count"]\').textContent === "39 个" && !!tf.q(".template-center-detail-heading")', '模板列表与详情加载');
+      if (!hold.includes('list')) await waitFor('tf.q(\'[data-role="template-count"]\').textContent === "40 个" && !!tf.q(".template-center-detail-heading")', '模板列表与详情加载');
     }
   }
 
@@ -142,7 +142,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       ['update', 'archive', 'templates', 'appearance']);
     assert.equal(await js('tf.count("list")'), 0);
     await js(`tf.q('[data-tab="templates"]').click(); void 0;`);
-    await waitFor('tf.q(\'[data-role="template-count"]\').textContent === "39 个" && !!tf.q(".template-center-detail-heading")');
+    await waitFor('tf.q(\'[data-role="template-count"]\').textContent === "40 个" && !!tf.q(".template-center-detail-heading")');
     assert.equal(await js(`tf.q('[data-pane="templates"]').hidden`), false);
     assert.equal(await js(`tf.q('[data-footer="update"]').hidden`), true);
     assert.equal(await js(`tf.q('.template-center-item.is-active')?.dataset.resourceId === tf.last('get')`), true);
@@ -167,7 +167,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.equal(await js(`tf.q('.template-center-tab-panel mark').textContent.toLowerCase()`), 'merchant_status');
     assert.equal(await js(`[...tf.overlay.querySelectorAll('.template-center-item')].some((item) => item.dataset.resourceId === 'gateway-recon')`), true);
     await js(`tf.search(''); void 0;`);
-    await waitFor(`tf.text('[data-role="template-count"]') === '39 个'`);
+    await waitFor(`tf.text('[data-role="template-count"]') === '40 个'`);
   });
 
   await test('详情四个标签展示后端结构；未开放的导入按能力置灰并说明原因', async () => {
@@ -189,7 +189,13 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await selectResource('bank-statement');
     await openTab('usage');
     assert.deepEqual(await js(`[...tf.overlay.querySelectorAll('.template-center-tab-panel tbody tr')].map((row) => [row.cells[2].textContent.trim(), row.cells[3].textContent.trim()])`),
-      [['运行时读取', 'V1 · 内置'], ['不读取', '—'], ['不读取', '—']]);
+      [['运行时读取', 'V1 · 内置']]);
+    // 同一随包文件的导入识别结构（D18）：以用途名显示，四个导入用途均运行时读取。
+    await selectResource('bank-statement-input');
+    assert.equal(await js('tf.detailTitle()'), '银行对账单（导入识别结构）');
+    await openTab('usage');
+    assert.deepEqual(await js(`[...tf.overlay.querySelectorAll('.template-center-tab-panel tbody tr')].map((row) => [row.cells[2].textContent.trim(), row.cells[3].textContent.trim()])`),
+      Array.from({ length: 4 }, () => ['运行时读取', 'V1 · 内置']));
     await selectResource('fx-option');
     await openTab('info');
     await js(`tf.q('.template-center-kv [data-action="goto"]').click(); void 0;`);
@@ -353,7 +359,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       const item = tf.data.resources.find((resource) => resource.id === 'dup-recall-mail');
       Object.assign(item.current, { validation: 'failed', validationMessage: '版本文件已被修改（SHA-256 不一致）' });
     })(); tf.open(); tf.q('[data-tab="templates"]').click(); void 0;`);
-    await waitFor('tf.q(\'[data-role="template-count"]\').textContent === "39 个" && !!tf.q(".template-center-detail-heading")', '模板列表与详情加载');
+    await waitFor('tf.q(\'[data-role="template-count"]\').textContent === "40 个" && !!tf.q(".template-center-detail-heading")', '模板列表与详情加载');
     const tag = (id) => js(`(() => { const element = tf.q('[data-resource-id="${id}"] .template-center-version-tag');
       return { text: element.textContent, state: element.dataset.state || '', title: element.title, color: getComputedStyle(element).color }; })()`);
     const dangerColor = await js(`(() => { const probe = document.createElement('span'); probe.style.color = 'var(--danger)';
@@ -394,7 +400,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       const item = tf.data.resources.find((resource) => resource.id === 'dup-recall-mail');
       Object.assign(item.current, { validation: 'unverified', validationMessage: message });
     })(); tf.open(); tf.q('[data-tab="templates"]').click(); void 0;`);
-    await waitFor('tf.q(\'[data-role="template-count"]\').textContent === "39 个" && !!tf.q(".template-center-detail-heading")', '模板列表与详情加载');
+    await waitFor('tf.q(\'[data-role="template-count"]\').textContent === "40 个" && !!tf.q(".template-center-detail-heading")', '模板列表与详情加载');
     const message = '兼容复核未完成：样式：运行环境异常（ENOSPC: no space left on device），未能完成检查，请稍后重试';
     const tag = await js(`(() => { const element = tf.q('[data-resource-id="dup-recall-mail"] .template-center-version-tag');
       return { text: element.textContent, state: element.dataset.state || '', title: element.title, color: getComputedStyle(element).color }; })()`);
@@ -424,7 +430,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       Object.assign(detail.current, { validation: 'failed', validationMessage: '版本文件缺失', saveAs: false });
       for (const version of detail.versions) version.saveAs = version.id !== detail.current.id;
     })(); tf.open(); tf.q('[data-tab="templates"]').click(); void 0;`);
-    await waitFor('tf.q(\'[data-role="template-count"]\').textContent === "39 个" && !!tf.q(".template-center-detail-heading")', '模板列表与详情加载');
+    await waitFor('tf.q(\'[data-role="template-count"]\').textContent === "40 个" && !!tf.q(".template-center-detail-heading")', '模板列表与详情加载');
     await selectResource('dup-recall-mail');
     assert.equal(await js(`tf.q('.template-center-action[data-action="save-as"]').disabled`), true, '当前版本的另存为不可用');
     await openTab('versions');

@@ -125,6 +125,7 @@ const {
 } = require('./main-process/execution-descriptors/composition');
 const { createBusinessFlowResolver } = require('./main-process/archive-center/business-flow-resolver');
 const { createTemplateResourceService } = require('./main-process/template-resources/service');
+const { INPUT_STRUCTURES } = require('./main-process/template-resources/input-structures');
 const {
   createTaskLifecycle
 } = require('./main-process/archive-center/task-lifecycle');
@@ -329,6 +330,13 @@ const { GATEWAY_RECON_FIELDS } = require('./constants/gateway-recon-fields');
 //   - LINKED_IMPORT_SIGNATURES：链接表「导入」按钮候选集 = 4 张 linked 签名 + 入金表签名（v2.1.16-beta.3 ②）
 //   - linkedTableReaders.readRowsWithMetadata：读全部有意义行（交割表表头在第 2 行，滑窗自动定位）
 const { detectTableType } = require('./main-process/table-type-detector');
+const {
+  linkedStructureMismatchLines,
+  projectLinkedRow,
+  resolveLinkedSignatures,
+  versionSignatureOf,
+  withBankStatementStructure
+} = require('./main-process/linked-structure-signatures');
 // v3.0.3 PR-D（W5）：检测工作目录是否落在 OneDrive 同步路径（纯函数，启动后单次 toast 用）
 const { isStorageRootOnOneDrive } = require('./main-process/onedrive-detector');
 // v3.0.0 块 B / PR-2：大文件链接表流式落库——单 sheet .xlsx 边解压边逐行喂入仓储事务（内存恒定，不全量读进内存）
@@ -410,6 +418,9 @@ const {
 } = require('./main-process/vcc-op-calc/save-run-lifecycle');
 // v3.1.6：VCC财务OP校验（四类明细幂等、逐币种计算、系统OP比较与归档）。
 const { createVccFinancialOpService } = require('./main-process/vcc-financial-op-service');
+const { resolveVccSourceStructures } = require('./main-process/vcc-financial-op-source-structures');
+const { resolveFlowStatementStructure } = require('./main-process/flow-statement-structure');
+const { bankStatementSourceHeaders, resolveBankStatementStructure } = require('./main-process/bank-statement-structure');
 const { createResultExportHandlers } = require('./main-process/vcc-financial-op-result-export-ipc');
 const { acquireResultExportLease } = require('./main-process/vcc-financial-op-result-workbook-runner');
 const {
@@ -634,6 +645,12 @@ const {
   buildUnmatchedReportFileName: buildReconIdFixUnmatchedReportFileName,
   buildTimestampMinute: buildReconIdFixTimestampMinute
 } = require('./main-process/recon-id-fix-io');
+const {
+  BUSINESS_BILL_FIELDS,
+  BUSINESS_BILL_SHEET_NAME,
+  OPPONENT_BILL_FIELDS,
+  OPPONENT_BILL_SHEET_NAME
+} = require('./constants/recon-id-fix-fields');
 const { runReconIdFix } = require('./main-process/recon-id-fix-engine');
 const { runOwnAccountsMigration } = require('./backend/database/own-accounts-migration');
 const { groupBigAccountRows } = require('./backend/database/utils');
@@ -4959,6 +4976,17 @@ async function resolveTemplateResourceFileForRead(resourceId) {
 
 // 缓存读取类模板（FundType 枚举、网关表头）的当前取值：用户版本返回导入时在检查 Worker 中解析的取值，主进程不解析用户文件；
 //   内置或服务不可用时返回 builtin，由调用方沿用原路径逻辑读取随包文件。
+// 平盘链接原始表各来源类型的当前导入识别结构（设置 → 模板文件）。
+async function resolvePositionSourceStructures() {
+  const service = getTemplateResourceService();
+  const structures = {};
+  for (const resourceId of Object.keys(INPUT_STRUCTURES)) {
+    const spec = INPUT_STRUCTURES[resourceId];
+    if (spec.group === 'position-sources') structures[spec.moduleKey] = await service.currentInputStructure(resourceId);
+  }
+  return structures;
+}
+
 async function resolveTemplateResourceValues(resourceId) {
   try {
     return await getTemplateResourceService().currentRuntimeValues(resourceId);
@@ -5485,6 +5513,22 @@ function registerAppHandlers() {
       return { status: 'ok', values: loadGatewayReconHeaders() };
     }
   });
+  // C4 单据模式场景配置的主 / 从字段下拉：设置 → 模板文件启用了「单据对账导出不平」用户版本时，取该版本
+  //   业务部门账单 / 对手部门账单的表头；内置版本、版本不可用或读取异常时回落内置字段（与导入预检的场景引用保护同口径）。
+  ipcMain.handle('scenarios:recon-id-fix-fields', async () => {
+    const builtin = { status: 'ok', businessBillFields: [...BUSINESS_BILL_FIELDS], opponentBillFields: [...OPPONENT_BILL_FIELDS] };
+    try {
+      const current = await getTemplateResourceService().currentInputStructure('doc-recon-unbalanced');
+      if (current.status !== 'user') return builtin;
+      return {
+        status: 'ok',
+        businessBillFields: [...current.sheets[BUSINESS_BILL_SHEET_NAME]],
+        opponentBillFields: [...current.sheets[OPPONENT_BILL_SHEET_NAME]]
+      };
+    } catch (_error) {
+      return builtin;
+    }
+  });
   // PR #35 Codex round 3 P2（资金红线分流）：4 个 scenarios:* 入口
   // 不再无条件清两个全局缓存，而是按变更场景的 category 分流：
   // - C1/C2/C3（'extract-recon-id' / 'offset-bill-mark' / 'gateway-recon-join'）→ 只清 processingResult
@@ -5985,7 +6029,9 @@ function registerAppHandlers() {
     async execute(_event, _prepared, taskContext) {
     try {
       const filePath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
-      const result = readBankStatement(filePath);
+      const result = readBankStatement(filePath, {
+        sourceHeaders: bankStatementSourceHeaders(await resolveBankStatementStructure(getTemplateResourceService()))
+      });
       bankStatementSession = {
         filePath: result.filePath,
         fileName: result.fileName,
@@ -6914,7 +6960,13 @@ function registerAppHandlers() {
     try {
       const { subMode } = prepared;
       const filePath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
-      const result = readReconIdFixFile(filePath, subMode);
+      // 单据模式的 4 张工作表结构按设置 → 模板文件的当前版本识别；网关模式读资金对账导出不平，结构固定。
+      let structure = null;
+      if (subMode !== 'gateway') {
+        structure = await getTemplateResourceService().currentInputStructure('doc-recon-unbalanced');
+        if (structure.status === 'unavailable') return { status: 'failed', message: structure.message };
+      }
+      const result = readReconIdFixFile(filePath, subMode, { structure });
       reconIdFixSession = {
         filePath: result.filePath,
         fileName: result.fileName,
@@ -14653,15 +14705,18 @@ function registerNewAccountHandlers() {
         }
       };
     },
-    execute(_event, prepared, taskContext) {
+    async execute(_event, prepared, taskContext) {
     const { yearMonth } = prepared;
     const files = taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath);
+    // 设置 → 模板文件：按「移除归档Pending账单」当前版本识别；入库前对应回内置 46 列。不可用时不入库。
+    const structure = await getTemplateResourceService().currentInputStructure('removed-pending');
+    if (structure.status === 'unavailable') return { status: 'error', message: structure.message };
     // 多文件合并解析；任一文件解析失败（表头不符/空文件）→ 整体报错，不入库（资金红线：避免半写）
     const allRows = [];
     const sourceNames = [];
     try {
       for (const fp of files) {
-        const parsed = pendingRemovedReader.readRemovedPendingFile(fp);
+        const parsed = pendingRemovedReader.readRemovedPendingFile(fp, { structure });
         for (const r of parsed.rows) allRows.push(r);
         sourceNames.push(parsed.fileName || fp);
       }
@@ -15674,7 +15729,10 @@ function registerNewAccountHandlers() {
     // 表头校验失败 → FileValidationError；非法行/多月份混杂 → ok:false + errorRows（整批拒绝）。
     let result;
     try {
+      // 设置 → 模板文件「流水对账单」当前结构：每次扫描时解析，不可用时中止并指向设置。
+      const flowStructure = await resolveFlowStatementStructure(getTemplateResourceService());
       result = await vccOpCalcSession.streamScanAndCompute(filePaths, {
+        sourceHeaders: flowStructure ? flowStructure.headers : null,
         onProgress: (rows) => {
           if (event && event.sender && !event.sender.isDestroyed()) {
             event.sender.send('vccOpCalc:scan:progress', { rows });
@@ -15803,9 +15861,10 @@ function registerNewAccountHandlers() {
       return { status: 'cancelled' };
     }
     try {
+      const sourceStructures = await resolveVccSourceStructures(getTemplateResourceService());
       const plan = await getVccFinancialOpService().inspectSelectedFiles(choice.filePaths, (progress) => {
         if (!owner.isDestroyed()) owner.send('vccFinancialOp:import:progress', progress);
-      });
+      }, sourceStructures);
       if (owner.isDestroyed() || vccImportPlans.get(owner.id) !== selectionToken) throw vccPlanError('vcc-import-plan-stale', '文件选择已更新，请重新预检');
       vccImportPlans.set(owner.id, plan);
       return { status: 'success', plan: publicImportPlan(plan) };
@@ -16438,8 +16497,25 @@ function registerNewAccountHandlers() {
 
   // 按 detector tableKey 取对应 linked 签名（拿 expectedHeaders 做列映射）。
   //   v2.1.16-beta.3 ②：用 LINKED_IMPORT_SIGNATURES（含入金表签名），否则查不到 bank-deposit 签名走兜底。
-  function getLinkedSignatureByKey(detectorTableKey) {
-    return LINKED_IMPORT_SIGNATURES.find((s) => s.tableKey === detectorTableKey) || null;
+  //   signatures：本次导入按模板文件当前版本解析后的签名（resolveImportSignatures），缺省为内置签名。
+  function getLinkedSignatureByKey(detectorTableKey, signatures = LINKED_IMPORT_SIGNATURES) {
+    return signatures.find((s) => s.tableKey === detectorTableKey) || null;
+  }
+
+  // 设置 → 模板文件：网关对账单 / 中台调拨订单 / 中台退款订单 / 外汇交割表的签名随当前版本（每次导入解析一次）。
+  function resolveImportSignatures(signatures) {
+    return resolveLinkedSignatures(signatures, (resourceId) => getTemplateResourceService().currentInputStructure(resourceId));
+  }
+
+  // 未识别或指纹相近但不是当前版本表头：带与最接近候选结构的差异明细（含导入新版本的指引）。
+  function unrecognizedLinkedResult(fileName, detected, signatures, fallbackMessage) {
+    const signature = detected.status === 'structure-mismatch'
+      ? signatures.find((item) => item.tableKey === detected.tableKey)
+      : null;
+    const message = signature
+      ? `表头与「${signature.label}」${signature.versionLabel ? `当前版本 ${signature.versionLabel}` : '当前结构'}不一致`
+      : fallbackMessage;
+    return { fileName, status: 'unrecognized', message, detailLines: linkedStructureMismatchLines(detected, signatures) };
   }
 
   // v3.0.0 块 B / O-6：detector read-error 文案细分。历史一律「文件为空或不可读」，
@@ -16563,7 +16639,10 @@ function registerNewAccountHandlers() {
     //   detector L1/L2 + expectedHeaders zip 校验，异构文件读不出 44 列对象（前面 detector 已拦截）。
     //   入金表（bank-deposit）：按 13 字段名 pick 裁列（pickBankDepositFields，非索引切片）；
     //   其余链接表不裁列。raw_json 天然只存裁后字段。
-    const transform = repoKey === 'bank-deposit' ? pickBankDepositFields : (x) => x;
+    // 设置 → 模板文件启用了用户版本时，按当前版本读出的行先对应回内置列名（见 linked-structure-signatures）。
+    const transform = repoKey === 'bank-deposit'
+      ? (row) => pickBankDepositFields(projectLinkedRow(signature, row))
+      : (row) => projectLinkedRow(signature, row);
     const isGatewayBill = repoKey === 'gateway-bill';
     const isBankDeposit = repoKey === 'bank-deposit';
     const isMidAllocation = repoKey === 'mid-allocation';
@@ -16597,9 +16676,10 @@ function registerNewAccountHandlers() {
     } else {
       // 数组路径：fx-settlement 用 WithMeta 同时取物理行号（BOC 分组扫描热依赖）；其余表零行为变化。
       const meta = readLinkedRowsAsObjectsWithMeta(filePath, signature, detected.sheetName);
-      const rows = meta.objects;
+      // 一行对应一行，物理行号 rowNumbers 与之对齐不变（BOC 分组依赖行号断档）。
+      const rows = meta.objects.map((row) => projectLinkedRow(signature, row));
       if (repoKey === 'fx-settlement') {
-        fxObjects = meta.objects;
+        fxObjects = rows;
         fxRowNumbers = meta.rowNumbers;
       }
       const rowsToWrite = repoKey === 'bank-deposit'
@@ -16897,13 +16977,16 @@ function registerNewAccountHandlers() {
     if (!opLock.acquired) return { status: 'failed', message: opLock.message };
     try {
     const results = [];
+    // 银行对账单入金表（D17）：启用了导入识别结构用户版本时，内置签名之外追加当前版本签名。
+    const linkedSignatures = withBankStatementStructure(await resolveImportSignatures(LINKED_IMPORT_SIGNATURES),
+      await resolveBankStatementStructure(getTemplateResourceService()));
     for (const filePath of taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath)) {
       const fileName = path.basename(filePath);
       // 识别：链接表导入候选集（4 张 linked 签名 + 入金表签名；detector 默认含全部，这里收窄）。
       //   v2.1.16-beta.3 ②：入金表与主表同构 44 列，但主表签名不在此集合 → 入金表唯一命中、不 ambiguous。
       let detected;
       try {
-        detected = await detectTableType(filePath, LINKED_IMPORT_SIGNATURES);
+        detected = await detectTableType(filePath, linkedSignatures);
       } catch (err) {
         results.push({ fileName, status: 'read-error', message: err && err.message ? err.message : String(err) });
         continue;
@@ -16913,8 +16996,8 @@ function registerNewAccountHandlers() {
         results.push({ fileName, status: 'ambiguous', message: '表头同时命中多张链接表，无法唯一判定' });
         continue;
       }
-      if (detected.status === 'unrecognized') {
-        results.push({ fileName, status: 'unrecognized', message: '未识别为任何链接表' });
+      if (detected.status === 'unrecognized' || detected.status === 'structure-mismatch') {
+        results.push(unrecognizedLinkedResult(fileName, detected, linkedSignatures, '未识别为任何链接表'));
         continue;
       }
       if (detected.status === 'read-error') {
@@ -16937,7 +17020,9 @@ function registerNewAccountHandlers() {
       //   双保险：理论上 fx-option 已在上方 unsupported 分支拦截，此处仍守卫缺失映射/签名。
       const detectorKey = detected.tableKey;
       const repoKey = LINKED_DETECTOR_TO_REPO_KEY[detectorKey];
-      const signature = getLinkedSignatureByKey(detectorKey);
+      // 只由当前版本签名命中（入金表按新结构导出）时按该签名读取并对应回内置列。
+      const signature = (detected.matchedVersion && versionSignatureOf(linkedSignatures, detectorKey))
+        || getLinkedSignatureByKey(detectorKey, linkedSignatures);
       if (detectorKey === 'fx-option' || !repoKey || !signature) {
         results.push({
           fileName,
@@ -16948,6 +17033,10 @@ function registerNewAccountHandlers() {
         continue;
       }
 
+      if (signature.structureUnavailable) {
+        results.push({ fileName, tableKey: repoKey, status: 'read-error', message: signature.structureUnavailable });
+        continue;
+      }
       // 读行 → 对象数组 → 落库 + 派生（v3.0.7 需求2d：整段抽至 importLinkedFileToRepo 共享函数，
       //   供「链接表管理」与「导入文件」通用导入零复制复用；落库/派生/缓存清理口径字节级 parity）。
       try {
@@ -16986,7 +17075,10 @@ function registerNewAccountHandlers() {
         source: 'main',
         domain: '链接表管理',
         message: `链接表导入：${failedResults.length}/${results.length} 个文件失败`,
-        details: failedResults.map((r) => `${r.fileName}｜${r.status}｜${r.message || ''}`)
+        details: failedResults.flatMap((r) => [
+          `${r.fileName}｜${r.status}｜${r.message || ''}`,
+          ...(Array.isArray(r.detailLines) ? r.detailLines : [])
+        ])
       });
     }
 
@@ -17091,6 +17183,10 @@ function registerNewAccountHandlers() {
     const results = [];
     const filePaths = taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath);
     const fileCount = filePaths.length;
+    const bankStructure = await resolveBankStatementStructure(getTemplateResourceService());
+    const batchSignatures = withBankStatementStructure(await resolveImportSignatures(ALL_TABLE_SIGNATURES), bankStructure);
+    // 银行对账单按当前版本读取时，入金表二次分流用同一结构的入金表签名。
+    const bankDepositVersionSignature = versionSignatureOf(withBankStatementStructure([BANK_DEPOSIT_SIGNATURE], bankStructure), 'bank-deposit');
     // 本批是否已建立/合并过银行对账单 session（用于：① 第一个建 vs 后续合并的分支；
     //   ② processingResult / gatewayReconSession 整批只清一次）。
     let bankStatementMerged = false;
@@ -17110,7 +17206,7 @@ function registerNewAccountHandlers() {
       // 识别：v3.0.7 需求2d 通用导入候选集 ALL_TABLE_SIGNATURES（预处理 3 张 + 链接 4 张；🔴 不含 bank-deposit）。
       let detected;
       try {
-        detected = await detectTableType(filePath, ALL_TABLE_SIGNATURES);
+        detected = await detectTableType(filePath, batchSignatures);
       } catch (err) {
         results.push({ fileName, status: 'read-error', message: err && err.message ? err.message : String(err) });
         continue;
@@ -17120,8 +17216,9 @@ function registerNewAccountHandlers() {
         results.push({ fileName, status: 'ambiguous', message: '表头同时命中多张表，无法唯一判定' });
         continue;
       }
-      if (detected.status === 'unrecognized') {
-        results.push({ fileName, status: 'unrecognized', message: '未识别为任何可导入的表（银行对账单 / 中台退款订单 / 入账原始订单 / 链接表）' });
+      if (detected.status === 'unrecognized' || detected.status === 'structure-mismatch') {
+        results.push(unrecognizedLinkedResult(fileName, detected, batchSignatures,
+          '未识别为任何可导入的表（银行对账单 / 中台退款订单 / 入账原始订单 / 链接表）'));
         continue;
       }
       if (detected.status === 'read-error') {
@@ -17147,7 +17244,7 @@ function registerNewAccountHandlers() {
         // 🔴 合并语义：第一个建 session；后续校验 headers 一致后追加 rows（不覆盖）。
         //   headers 校验 + rows 合并 + _rowId 全局重编号统一交给 mergeBankStatementRows（资金红线纯函数）。
         try {
-          const result = readBankStatement(filePath);
+          const result = readBankStatement(filePath, { sourceHeaders: bankStatementSourceHeaders(bankStructure) });
 
           // v3.0.7 需求2d（🔴🔴 资金红线）：44 列 bank-statement 命中后的「Channel 二次路由」——
           //   逐行判定 Channel+地区（database.isBankDepositChannelFile，与 C1 状态框前缀同源同模块的纯函数）：
@@ -17182,7 +17279,8 @@ function registerNewAccountHandlers() {
                 fileName,
                 detected,
                 repoKey: 'bank-deposit',
-                signature: BANK_DEPOSIT_SIGNATURE
+                signature: result.structure === 'current' && bankDepositVersionSignature
+                  ? bankDepositVersionSignature : BANK_DEPOSIT_SIGNATURE
               });
               // 仅保留对前端有意义的副作用信息（行数 + 各派生结果），不带 outcome/status（那是 merge 路径 result 的职责）。
               linkedSideEffect = {
@@ -17299,8 +17397,11 @@ function registerNewAccountHandlers() {
         //   🔴 资金红线：refundOrderSession 是退款回填引擎入参源（run 阶段 main.js 注入）；重导整体覆盖。
         //   读取复用 readLinkedRowsAsObjects（按 signature.expectedHeaders zip，退款签名 25 列）。
         try {
-          const refundSignature = PREPROCESS_TABLE_SIGNATURES.find((s) => s.tableKey === 'zhongtai-refund-order');
-          const refundRows = readLinkedRowsAsObjects(filePath, refundSignature, detected.sheetName);
+          const refundSignature = batchSignatures.find((s) => s.tableKey === 'zhongtai-refund-order');
+          if (refundSignature.structureUnavailable) throw new Error(refundSignature.structureUnavailable);
+          // 按当前版本读出后对应回内置列名（退款回填按内置列名读取）。
+          const refundRows = readLinkedRowsAsObjects(filePath, refundSignature, detected.sheetName)
+            .map((row) => projectLinkedRow(refundSignature, row));
           refundOrderSession = { fileName, rows: refundRows, importedAt: Date.now() };
           // v2.1.16-beta.6 PR#65 Finding1（🔴 资金红线）：导入/覆盖退款订单后清运行结果，强制重新运行，
           //   否则导出仍用上一轮旧的 refundBackfillRows/refundUnmatchedRows（跨批复用）。
@@ -17339,8 +17440,13 @@ function registerNewAccountHandlers() {
       //   detector tableKey → repo tableKey 映射 + 取 linked 签名（与 linked-table:import 同口径）。
       //   fx-option 已在上方 unsupported 分支拦截（detectTableType 标 unsupported）；此处仍守卫缺失映射/签名（双保险）。
       const linkedRepoKey = LINKED_DETECTOR_TO_REPO_KEY[tableKey];
-      const linkedSignature = getLinkedSignatureByKey(tableKey);
+      const linkedSignature = getLinkedSignatureByKey(tableKey, batchSignatures);
       if (linkedRepoKey && linkedSignature && tableKey !== 'fx-option') {
+        // 设置 → 模板文件当前版本不可用（缺失、被修改、不兼容）：该表导入中止，不按内置结构入库。
+        if (linkedSignature.structureUnavailable) {
+          results.push({ fileName, tableKey: linkedRepoKey, status: 'read-error', message: linkedSignature.structureUnavailable });
+          continue;
+        }
         // 落库 ≠ 跳过：mid-allocation / gateway-bill / fx-settlement 落库即写对应链接表（+ 派生），
         //   bank-statement:run 阶段自动读回喂 R1-R5（gateway-bill→R1/C3/R5、mid-allocation→R5s2/DBS）。
         //   独立 try/catch：落库异常记 write-error（与 linked-table:import 错误契约一致）。
@@ -18412,7 +18518,8 @@ function registerPreFundReconciliationHandlers() {
     try {
       const imported = getPreFundReconciliationService().importBank(
         taskContext.fileEvidence.filePlan.inputs[0].filePath,
-        taskContext.batchContext.taskRunId
+        taskContext.batchContext.taskRunId,
+        { sourceHeaders: bankStatementSourceHeaders(await resolveBankStatementStructure(getTemplateResourceService())) }
       );
       return imported;
     } catch (error) {
@@ -18987,7 +19094,8 @@ function getDuplicateInboundMatchService() {
       mailTemplatePath: path.join(__dirname, '..', 'assets', '重复入金召回邮件模板.xlsx'),
       bankTemplatePath: path.join(__dirname, '..', 'assets', '银行对账单.xlsx'),
       mailTemplateSource: getTemplateResourceService().source('dup-recall-mail', 'duplicate-inbound-match'),
-      bankTemplateSource: getTemplateResourceService().source('bank-statement', 'duplicate-inbound-match')
+      bankTemplateSource: getTemplateResourceService().source('bank-statement', 'duplicate-inbound-match'),
+      resolveBankSourceHeaders: async () => bankStatementSourceHeaders(await resolveBankStatementStructure(getTemplateResourceService()))
     });
   }
   return duplicateInboundMatchService;
@@ -19206,6 +19314,7 @@ function getPositionReconciliationService() {
         userDataDir: path.dirname(database.dbPath),
         templatePath: path.join(__dirname, '..', 'assets', '平盘银行对账单.xlsx'),
         templateSource: getTemplateResourceService().source('position-bank', 'position-reconciliation-process'),
+        resolveSourceStructures: resolvePositionSourceStructures,
         requireExistingSideDb: Boolean(expectedSideDbCheckpoint),
         expectedSideDbCheckpoint,
         expectedPendingOperation: pendingSideDbOperation,
@@ -19218,6 +19327,7 @@ function getPositionReconciliationService() {
         },
         protectedStagingPaths: positionTaskOwner.positionArchivePersistentStagingPaths,
         positionImportEngine: 'streaming',
+        resolveBankSourceHeaders: async () => bankStatementSourceHeaders(await resolveBankStatementStructure(getTemplateResourceService())),
         resolveAnomalyReport: resolvePositionAnomalyReportReference,
         onImportProgress: (progress) => {
           try {
@@ -21553,6 +21663,10 @@ async function initializeBackgroundExecutionRecovery() {
   const providerRegistry = createSettlementRecoveryProviderRegistry();
   bizOpV327Module = createBizOpV327Module({ db: database.db, userDataDir: path.dirname(database.dbPath),
     readRepository: recoveryControlReadRepository, productionRequests: true,
+    resolveSourceStructures: async () => {
+      const flow = await resolveFlowStatementStructure(getTemplateResourceService());
+      return flow ? { FLOW: flow } : null;
+    },
     getRuntime: () => backgroundExecutionRuntimeManager.get(),
     getArchiveService: () => archiveCenterService && archiveCenterService.service });
   bizOpV327Module.sources.register(inspectorRegistry, providerRegistry);

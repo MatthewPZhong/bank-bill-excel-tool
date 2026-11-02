@@ -20,6 +20,7 @@ const {
   stableHash
 } = require('./common');
 const { readBankFiles, readSourceFiles } = require('./readers');
+const { linkHeadersFor, normalizeSourceStructures, sourceDefinitionsFor } = require('./source-structures');
 const {
   writeResultWorkbook,
   writeLinkedWorkbook,
@@ -130,6 +131,28 @@ function legacySourceImportSummary(output) {
     cleanupPaths: results
       .filter((item) => item.status === 'ok')
       .flatMap((item) => item.cleanupPaths || [])
+  };
+}
+
+// 全部文件被拒时 worker 已删除 job root：结果只保留逐文件原因，不引用已删除的暂存文件、账本与异常报告。
+function rejectedSourcePreflight(preflightReady) {
+  const results = Array.isArray(preflightReady && preflightReady.orderedFileResults)
+    ? preflightReady.orderedFileResults
+    : [];
+  return {
+    jobId: preflightReady && preflightReady.jobId,
+    kind: preflightReady && preflightReady.kind,
+    orderedFileResults: results.map((item) => {
+      const {
+        archivePath: _archivePath,
+        stagingDir: _stagingDir,
+        anomalyReport: _anomalyReport,
+        cleanupPaths: _cleanupPaths,
+        ...rest
+      } = item || {};
+      return rest;
+    }),
+    elapsedMs: preflightReady && preflightReady.elapsedMs
   };
 }
 
@@ -341,7 +364,9 @@ class PositionReconciliationService {
     authorizeStreamingSourceApply = null,
     positionImportDispatcher = dispatchPositionImportPreflight,
     onImportProgress = null,
-    resolveAnomalyReport = null
+    resolveAnomalyReport = null,
+    resolveSourceStructures = null,
+    resolveBankSourceHeaders = null
   }) {
     if (!userDataDir) throw new TypeError('平盘对账 service 需要 userDataDir');
     if (!templatePath) throw new TypeError('平盘对账 service 需要 templatePath');
@@ -377,6 +402,14 @@ class PositionReconciliationService {
       : null;
     this.resolveAnomalyReport = typeof resolveAnomalyReport === 'function'
       ? resolveAnomalyReport
+      : null;
+    // 设置 → 模板文件：每次导入、导出开始时读取链接原始表的当前结构；未注入时使用内置结构。
+    this.resolveSourceStructures = typeof resolveSourceStructures === 'function'
+      ? resolveSourceStructures
+      : null;
+    // 银行对账单导入识别结构的当前用户版本表头（D17，与内置 46 / 49 列同时接受）；内置或未注入时为 null。
+    this.resolveBankSourceHeaders = typeof resolveBankSourceHeaders === 'function'
+      ? resolveBankSourceHeaders
       : null;
     this.activeImportJobs = new Map();
     this.store = store || createPositionReconciliationStore(this.userDataDir, {
@@ -639,6 +672,28 @@ class PositionReconciliationService {
     }
   }
 
+  // 链接原始表的当前结构 { [sourceType]: { headers, versionLabel } }；未注入解析器时为 null（内置结构）。
+  //   当前用户版本不可用（缺失、被修改、不兼容）时中止，提示到设置 → 模板文件处理。
+  async currentSourceStructures() {
+    if (!this.resolveSourceStructures) return null;
+    const resolved = await this.resolveSourceStructures();
+    const structures = {};
+    for (const [sourceType, current] of Object.entries(resolved || {})) {
+      if (!current || current.status === 'unavailable') {
+        throw new PositionReconciliationError(
+          'position-source-structure-unavailable',
+          (current && current.message) || '链接原始表的导入识别结构不可用'
+        );
+      }
+      structures[sourceType] = { headers: current.headers, versionLabel: current.label };
+    }
+    return normalizeSourceStructures(structures);
+  }
+
+  async currentSourceDefinitions() {
+    return sourceDefinitionsFor(await this.currentSourceStructures());
+  }
+
   dispatchTrackedImport(input, label) {
     const dispatched = this.positionImportDispatcher({
       ...input,
@@ -852,12 +907,15 @@ class PositionReconciliationService {
       );
     }
     await this.clearBankImportTokensAsync();
+    // 银行对账单导入识别结构当前用户版本：预检开始时冻结到确认令牌，写入沿用同一份。
+    const bankSourceHeaders = this.resolveBankSourceHeaders ? await this.resolveBankSourceHeaders() : null;
     const dispatched = this.dispatchTrackedImport({
       engine: this.positionImportEngine,
       command: POSITION_IMPORT_COMMANDS.BANK_PREPARE,
       files,
       userDataDir: this.userDataDir,
       sideDbPath: this.store.dbPath,
+      ...(bankSourceHeaders ? { contractOptions: { bankSourceHeaders } } : {}),
       featureFlags: { preflightOnly: true }
     }, '读取平盘银行对账单');
     const preflightReady = await dispatched.promise;
@@ -894,7 +952,8 @@ class PositionReconciliationService {
     this.bankImportTokens.set(token, {
       streaming: true,
       preflightReady,
-      jobRoot
+      jobRoot,
+      bankSourceHeaders
     });
     const scopes = (preflightReady.ledgerEvidence.manifest.bankScopes || []).map(
       ({ channel, monthKey }) => ({ channel, monthKey })
@@ -959,6 +1018,7 @@ class PositionReconciliationService {
           schemaFingerprint: schema.fingerprint,
           preflightReady: parsed.preflightReady
         },
+        ...(parsed.bankSourceHeaders ? { contractOptions: { bankSourceHeaders: parsed.bankSourceHeaders } } : {}),
         featureFlags: { importApply: true }
       }, '写入平盘银行对账单');
     } catch (error) {
@@ -1034,7 +1094,7 @@ class PositionReconciliationService {
     if (this.positionImportEngine === POSITION_IMPORT_ENGINES.STREAMING) {
       return this.prepareStreamingSourceImportForLifecycle(filePaths);
     }
-    return this.prepareLegacySourceImportForLifecycle(filePaths);
+    return this.prepareLegacySourceImportForLifecycle(filePaths, await this.currentSourceDefinitions());
   }
 
   prepareLegacySourceImport(filePaths) {
@@ -1047,11 +1107,11 @@ class PositionReconciliationService {
       : prepared.result;
   }
 
-  prepareLegacySourceImportForLifecycle(filePaths) {
+  prepareLegacySourceImportForLifecycle(filePaths, sourceDefinitions = SOURCE_DEFINITIONS) {
     this.clearSourceImportTokens();
     const batchToken = crypto.randomUUID();
     const staged = stageInputFiles(this.userDataDir, filePaths, `source-${batchToken}`);
-    const plan = this.prepareLegacyStagedSourceImportPlan(staged);
+    const plan = this.prepareLegacyStagedSourceImportPlan(staged, sourceDefinitions);
     const requiresExecution = plan.entries.some((entry) => entry.status === 'prepared');
     return {
       requiresExecution,
@@ -1065,11 +1125,12 @@ class PositionReconciliationService {
     };
   }
 
-  prepareLegacyStagedSourceImportPlan(staged) {
+  prepareLegacyStagedSourceImportPlan(staged, sourceDefinitions = SOURCE_DEFINITIONS) {
     const results = readSourceFiles(staged, {
       identityMode: this.store.usesModernSourceIdentity()
         ? 'row-hash'
-        : 'business-key'
+        : 'business-key',
+      sourceDefinitions
     });
     const output = [];
     for (const result of results) {
@@ -1186,6 +1247,8 @@ class PositionReconciliationService {
     }
     await this.clearSourceImportTokensAsync();
     const allowedSourceTypes = [...this.streamingSourceTypes];
+    // 本次导入只用开始时的结构：预检、写入与之后的账户确认都读这一份，切换模板版本不影响进行中的导入。
+    const sourceStructures = await this.currentSourceStructures();
     let releaseApply;
     const applyGate = new Promise((resolve) => { releaseApply = resolve; });
     let resolvePreflight;
@@ -1204,6 +1267,7 @@ class PositionReconciliationService {
         preflightOnly: false,
         streamingSourceTypes: allowedSourceTypes
       },
+      ...(sourceStructures ? { contractOptions: { sourceStructures } } : {}),
       onPreflightReady: resolvePreflight,
       authorizeApply: async (preflightReady) => {
         const accepted = Array.isArray(preflightReady.acceptedOrdinaryInputFiles)
@@ -1237,10 +1301,29 @@ class PositionReconciliationService {
       ? preflightReady.acceptedOrdinaryInputFiles
       : [];
     if (accepted.length === 0) {
+      if (!preflightReady.accountConfirmationDescriptor) {
+        // 全部文件被拒：authorizeApply 拒绝写入，worker 以 FATAL 结束并删除 job root；
+        // 逐文件原因已在预检结果中，按失败结果返回，不让整次导入以异常结束。
+        let streamed;
+        try {
+          streamed = await dispatched.promise;
+        } catch (error) {
+          if (!error || error.code !== 'position-streaming-source-empty') throw error;
+          return {
+            requiresExecution: false,
+            result: this.finalizeStreamingSourceImport(rejectedSourcePreflight(preflightReady))
+          };
+        }
+        // worker 退出后由恢复流程给出的结果：沿用原收口。
+        return {
+          requiresExecution: false,
+          result: this.finalizeStreamingSourceImport(streamed, sourceStructures)
+        };
+      }
       const streamed = await dispatched.promise;
       return {
         requiresExecution: false,
-        result: this.finalizeStreamingSourceImport(streamed)
+        result: this.finalizeStreamingSourceImport(streamed, sourceStructures)
       };
     }
     return {
@@ -1250,12 +1333,14 @@ class PositionReconciliationService {
         engine: 'streaming',
         dispatched,
         releaseApply,
-        preflightReady
+        preflightReady,
+        sourceStructures
       }
     };
   }
 
-  finalizeStreamingSourceImport(streamed) {
+  // sourceStructures：本次导入开始时冻结的结构，账户表确认替换时沿用。
+  finalizeStreamingSourceImport(streamed, sourceStructures = null) {
     const sourceResults = Array.isArray(streamed.results)
       ? streamed.results
       : (Array.isArray(streamed.orderedFileResults)
@@ -1281,7 +1366,8 @@ class PositionReconciliationService {
         streaming: true,
         preflightReady: streamed,
         descriptor: accountDescriptor,
-        jobRoot: path.dirname(path.resolve(ledgerPath))
+        jobRoot: path.dirname(path.resolve(ledgerPath)),
+        sourceStructures
       });
     }
     const results = sourceResults.map((item) => (
@@ -1358,7 +1444,7 @@ class PositionReconciliationService {
       }
       plan.releaseApply(batchContext);
       return plan.dispatched.promise.then((streamed) => (
-        this.finalizeStreamingSourceImport(streamed)
+        this.finalizeStreamingSourceImport(streamed, plan.sourceStructures || null)
       ));
     }
     throw new TypeError('链接原始表 lifecycle apply 计划缺失');
@@ -1475,6 +1561,7 @@ class PositionReconciliationService {
           schemaFingerprint: schema.fingerprint,
           preflightReady: parsed.preflightReady
         },
+        ...(parsed.sourceStructures ? { contractOptions: { sourceStructures: parsed.sourceStructures } } : {}),
         featureFlags: { importApply: true }
       }, '替换清结算银行账户表');
     } catch (error) {
@@ -1737,14 +1824,22 @@ class PositionReconciliationService {
   }
 
   async exportLinked(sourceType, outputPath) {
+    const definitions = await this.currentSourceDefinitions();
     const rows = this.store.listLinkRows(sourceType).map((item) => item.row);
-    await writeLinkedWorkbook({ outputPath, sourceType, rows });
+    await writeLinkedWorkbook({ outputPath, sourceType, rows, headers: linkHeadersFor(sourceType, definitions) });
     return { status: 'ok', filePath: outputPath, rowCount: rows.length };
   }
 
+  // 原始表按当前结构出列：列名与当前版本一致的列取已存值，当前结构没有的列不导出。
   async exportRaw(sourceType, outputPath) {
+    const definitions = await this.currentSourceDefinitions();
     const rows = this.store.sourceRecords(sourceType).map((item) => item.row);
-    await writeRawWorkbook({ outputPath, sourceType, rows });
+    await writeRawWorkbook({
+      outputPath,
+      sourceType,
+      rows,
+      headers: definitions[sourceType] ? definitions[sourceType].headers : null
+    });
     return { status: 'ok', filePath: outputPath, rowCount: rows.length };
   }
 
@@ -1826,7 +1921,8 @@ class PositionReconciliationService {
       outputPath,
       run,
       filteredSources,
-      reportFiles
+      reportFiles,
+      sourceDefinitions: await this.currentSourceDefinitions()
     });
   }
 

@@ -137,6 +137,30 @@ const SOURCE_DEFINITIONS = Object.freeze({
   })
 });
 
+// 程序按列名读取的列（主键、日期、校验、过滤、派生与逻辑账户）。设置 → 模板文件导入的新结构必须保留且同名；
+// 其余列可改名、调序或增减。改动 readers / derivation / logical-accounts 读取的列时同步这里。
+const SOURCE_REQUIRED_FIELDS = Object.freeze({
+  [SOURCE_TYPES.BANK_ACCOUNT]: Object.freeze([
+    '账户状态', '币种', '账户性质', '银行账号', '系统账号'
+  ]),
+  [SOURCE_TYPES.FUND_TRANSFER]: Object.freeze([
+    '调拨单号', '交易时间', '调拨状态', '渠道流水号', '付款币种', '收款币种', '付款金额',
+    '收款金额', '换汇渠道', '付款账户（卡号）', '收款账户（卡号）'
+  ]),
+  [SOURCE_TYPES.TEST_PAYMENT]: Object.freeze([
+    '付款单号', '创建时间', '付款状态', '渠道流水号', '源币种', '目标币种', '源金额',
+    '目标金额', '付款渠道', '银行流水号'
+  ]),
+  [SOURCE_TYPES.GATEWAY_INBOUND]: Object.freeze([
+    'bizId', 'billDate', 'currency', 'tradeType', 'originOutboundCurrency', 'reconId',
+    'merchantId', 'channel'
+  ]),
+  [SOURCE_TYPES.GATEWAY_OUTBOUND]: Object.freeze([
+    '业务单号', '账单日期', '币种', '主对账id', '账户号', '交易类型', '渠道名称', '原始币种',
+    '原始金额', '银行扣款币种'
+  ])
+});
+
 const LINK_HEADERS = Object.freeze({
   [SOURCE_TYPES.FUND_TRANSFER]: Object.freeze([
     'ReconID', 'MerchantId', 'Currency', 'Amount', 'FundType', '调拨单号', '调拨状态',
@@ -212,6 +236,7 @@ module.exports = {
   sourceTypeForFundType,
   SOURCE_DISPLAY_ORDER,
   SOURCE_DEFINITIONS,
+  SOURCE_REQUIRED_FIELDS,
   LINK_HEADERS,
   BANK_STATUSES,
   MATCH_TYPES,

@@ -5,9 +5,10 @@ const fs = require('node:fs');
 const { randomUUID, createHash } = require('node:crypto');
 const { openRichWorkbook } = require('../xlsx/rich-workbook');
 const {
-  SOURCE_TYPES, SOURCE_DEFINITIONS, SYSTEM_OP_HEADERS,
+  SOURCE_TYPES, SOURCE_LABELS, SOURCE_DEFINITIONS, SYSTEM_OP_HEADERS,
   PENDING_RAW_CONTRACT_V2, headersEqual, isLegacyPendingHeaders, normalizeHeaderRow
 } = require('./definitions');
+const { describeHeaderMismatch } = require('../file-service/header-structure-diff');
 const { hashSourceFile } = require('./source-lineage');
 
 const HEADER_RULES = Object.freeze([
@@ -20,6 +21,27 @@ const HEADER_RULES = Object.freeze([
   const headers = sourceType === SOURCE_TYPES.SYSTEM_OP ? SYSTEM_OP_HEADERS : SOURCE_DEFINITIONS[sourceType].headers;
   return Object.freeze({ sourceType, features, order, headers, headerSet: new Set(headers) });
 }));
+
+// 设置 → 模板文件：sourceStructures = { [sourceType]: { headers, versionLabel } }（仅启用了用户版本的原表）。
+//   该原表的识别规则改为当前版本表头（逐列一致），命中时 Sheet 记录 sourceHeaders；其余原表按内置结构。
+function headerRulesFor(sourceStructures) {
+  if (!sourceStructures) return HEADER_RULES;
+  return Object.freeze(HEADER_RULES.map((rule) => {
+    const structure = sourceStructures[rule.sourceType];
+    if (!structure || !Array.isArray(structure.headers) || !structure.headers.length) return rule;
+    const headers = Object.freeze([...structure.headers]);
+    return Object.freeze({ ...rule, headers, headerSet: new Set(headers), sourceHeaders: headers,
+      versionLabel: String(structure.versionLabel || '') });
+  }));
+}
+
+// 表头不符时的逐列差异（与各原表当前结构中最接近的一个比较），附模板文件指引。
+function headerMismatchLines(actual, rules) {
+  return describeHeaderMismatch({
+    sheets: [{ name: '', headers: actual }],
+    candidates: rules.map((rule) => ({ name: SOURCE_LABELS[rule.sourceType], headers: rule.headers, versionLabel: rule.versionLabel || '' }))
+  });
+}
 
 function planError(code, message, detailLines = []) {
   return Object.assign(new Error(message), { code, detailLines });
@@ -37,16 +59,19 @@ function rowValues(row) {
   return values;
 }
 
-function classifyHeaderRow(values) {
+function classifyHeaderRow(values, rules = HEADER_RULES) {
   const actual = normalizeHeaderRow(values);
-  const exact = HEADER_RULES.find((rule) => headersEqual(actual, rule.headers));
-  if (exact) return { status: 'ready', sourceType: exact.sourceType, candidates: [] };
+  const exact = rules.find((rule) => headersEqual(actual, rule.headers));
+  if (exact) {
+    return { status: 'ready', sourceType: exact.sourceType, candidates: [],
+      ...(exact.sourceHeaders ? { sourceHeaders: exact.sourceHeaders } : {}) };
+  }
   if (isLegacyPendingHeaders(actual)) {
     return { status: 'invalid', sourceType: SOURCE_TYPES.PENDING, code: 'pending-template-contract-mismatch',
       message: '旧 48 列 Pending 模板不能重新导入，请使用当前 46 列模板', candidates: [] };
   }
   const actualSet = new Set(actual.filter(Boolean));
-  const candidates = HEADER_RULES.map((rule) => {
+  const candidates = rules.map((rule) => {
     const overlap = [...actualSet].filter((value) => rule.headerSet.has(value)).length;
     const features = rule.features.filter((value) => actualSet.has(value)).length;
     const strong = overlap >= Math.ceil(rule.headers.length / 2) || features >= 2;
@@ -61,14 +86,16 @@ function classifyHeaderRow(values) {
   if (!candidates.length) return null;
   const uncertain = candidates.every((candidate) => candidate.uncertain);
   return { status: 'invalid', code: uncertain ? 'vcc-sheet-header-uncertain' : 'vcc-sheet-header-invalid',
-    message: uncertain ? '疑似业务表头，不能作为说明页排除' : '业务表头缺列、错序或含额外列', candidates };
+    message: uncertain ? '疑似业务表头，不能作为说明页排除' : '业务表头缺列、错序或含额外列', candidates,
+    detailLines: headerMismatchLines(actual, rules) };
 }
 
 function inputFileIdentity(filePath) {
   const stat = fs.statSync(filePath, { bigint: true });
   return Object.fromEntries(['dev', 'ino', 'size', 'mtimeNs', 'ctimeNs'].map((key) => [key, String(stat[key])]));
 }
-async function inspectWorkbook(filePath, { physicalFileId = randomUUID(), onProgress, shouldCancel } = {}) {
+async function inspectWorkbook(filePath, { physicalFileId = randomUUID(), onProgress, shouldCancel, sourceStructures = null } = {}) {
+  const rules = headerRulesFor(sourceStructures);
   const fileIdentity = inputFileIdentity(filePath);
   const before = await hashSourceFile(filePath);
   const workbook = await openRichWorkbook(before.filePath, {
@@ -87,7 +114,7 @@ async function inspectWorkbook(filePath, { physicalFileId = randomUUID(), onProg
       await workbook.scanSheet(sheet.sheetIndex, (row) => {
         if (!row.cells.some((cell) => cell.hasFormula || cell.cellType === 'error' || cellValue(cell) !== '')) return;
         meaningfulRows++;
-        const evidence = classifyHeaderRow(rowValues(row));
+        const evidence = classifyHeaderRow(rowValues(row), rules);
         if (evidence) {
           headerCount++;
           if (!firstHeader) firstHeader = { ...evidence, headerRow: row.rowIndex };
@@ -95,7 +122,8 @@ async function inspectWorkbook(filePath, { physicalFileId = randomUUID(), onProg
             const code = headerCount > 1 ? 'vcc-sheet-ambiguous' : (evidence.code || 'vcc-sheet-header-invalid');
             if (diagnostics.length < 20) diagnostics.push({ code, row: row.rowIndex,
               message: `${sheet.name} 第 ${row.rowIndex} 行：${headerCount > 1 ? '存在第二个独立业务表头' : evidence.message || '表头不能含公式'}`,
-              candidates: evidence.candidates });
+              candidates: evidence.candidates,
+              ...(headerCount === 1 && evidence.detailLines ? { detailLines: evidence.detailLines } : {}) });
           }
         }
         if (meaningfulRows % 10000 === 0 && onProgress) onProgress({ phase: 'preflight',
@@ -110,6 +138,7 @@ async function inspectWorkbook(filePath, { physicalFileId = randomUUID(), onProg
         entryPath: sheet.entryPath, status, sourceType: firstHeader?.sourceType,
         headerRow: firstHeader?.headerRow,
         rawContractVersion: firstHeader?.sourceType === SOURCE_TYPES.PENDING ? PENDING_RAW_CONTRACT_V2 : 1,
+        ...(firstHeader?.status === 'ready' && firstHeader.sourceHeaders ? { sourceHeaders: [...firstHeader.sourceHeaders] } : {}),
         requiresSubject: firstHeader?.sourceType === SOURCE_TYPES.CHANNEL, meaningfulRows, diagnostics });
     }
   } finally { await workbook.close(); }
@@ -129,7 +158,9 @@ async function inspectWorkbookImportPlan(filePaths, options = {}) {
     options.onProgress?.({ phase: 'preflight', fileName: path.basename(filePath), rows: 0 });
     physicalFiles.push(await inspectWorkbook(filePath, options));
   }
-  return { planId: randomUUID(), physicalFiles: physicalFiles.map(({ sources: _sources, ...file }) => file),
+  // 本次预检所用的当前结构冻结在计划中：重新预检沿用它，预检后切换模板版本不影响本次导入。
+  return { planId: randomUUID(), sourceStructures: options.sourceStructures || null,
+    physicalFiles: physicalFiles.map(({ sources: _sources, ...file }) => file),
     sources: physicalFiles.flatMap((file) => file.sources) };
 }
 
@@ -160,7 +191,9 @@ function resolveImportPlan(plan, request = {}) {
   }
   const bad = plan.sources.filter((source) => source.status === 'invalid');
   if (bad.length) throw planError(bad[0].diagnostics[0]?.code || 'vcc-sheet-header-invalid',
-    '原表结构错误，整个导入计划未提交', bad.flatMap((source) => source.diagnostics.map((d) => `${source.fileName} / ${d.message}`)));
+    '原表结构错误，整个导入计划未提交', bad.flatMap((source) => source.diagnostics.flatMap((d) => [
+      `${source.fileName} / ${d.message}`, ...(Array.isArray(d.detailLines) ? d.detailLines : [])
+    ])));
   const unknown = plan.sources.filter((source) => source.status === 'unrecognized' && !excluded.has(source.sourceId));
   if (unknown.length) throw planError('vcc-sheet-unrecognized', '请明确排除说明页或更换输入', unknown.map((s) => `${s.fileName} / ${s.sheetName}`));
   const ready = plan.sources.filter((source) => source.status === 'ready');
@@ -192,7 +225,8 @@ async function revalidateImportPlan(plan, options = {}) {
         || JSON.stringify(inputFileIdentity(file.filePath)) !== JSON.stringify(file.fileIdentity)) {
       throw planError('vcc-import-plan-stale', `${file.fileName}：文件已变化，请重新预检`);
     }
-    const current = await inspectWorkbook(file.filePath, { ...options, physicalFileId: file.physicalFileId });
+    const current = await inspectWorkbook(file.filePath, { ...options, physicalFileId: file.physicalFileId,
+      sourceStructures: plan.sourceStructures || null });
     const previous = plan.sources.filter((source) => source.physicalFileId === file.physicalFileId);
     if (current.sha256 !== file.sha256 || current.sizeBytes !== file.sizeBytes
         || sheetPlanDigest(previous) !== sheetPlanDigest(current.sources)) {
@@ -201,5 +235,5 @@ async function revalidateImportPlan(plan, options = {}) {
   }
 }
 
-module.exports = { HEADER_RULES, classifyHeaderRow, cellValue, rowValues, inspectWorkbook,
+module.exports = { HEADER_RULES, headerRulesFor, classifyHeaderRow, cellValue, rowValues, inspectWorkbook,
   inspectWorkbookImportPlan, publicImportPlan, resolveImportPlan, revalidateImportPlan, planError, inputFileIdentity };

@@ -240,6 +240,8 @@ contextBridge.exposeInMainWorld('desktopApi', {
     //   - 返回 { status:'ok', values: string[] }；文件缺失/读取失败 → values 为 loader fallback（旧硬编码兜底）
     //   - 取代旧 appConstants.gatewayReconFields 同步常量（已移除 inline 副本）
     getGatewayReconHeaders: () => ipcRenderer.invoke('scenarios:gateway-recon-headers'),
+    // C4 单据模式主 / 从字段下拉：随设置 → 模板文件「单据对账导出不平」当前版本（appConstants 内联字段为回落值）。
+    getReconIdFixFields: () => ipcRenderer.invoke('scenarios:recon-id-fix-fields'),
     // v2.1.13 D-3：自带写死场景「适用银行渠道」读写（空数组 = 适用全部渠道）
     getApplicableChannels: (id) => ipcRenderer.invoke('scenarios:get-applicable-channels', id),
     setApplicableChannels: (id, channelIds) => ipcRenderer.invoke('scenarios:set-applicable-channels', id, channelIds)

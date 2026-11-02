@@ -215,10 +215,20 @@
           if (bankImported) state.bankStatementProcessRunMode = 'bank';
           await refreshBankStatementStatus();
         } else render();
-        if (live(generation) && bankImported) {
+        const promptFollowUps = async () => {
+          if (!live(generation) || !bankImported) return;
           const refundPrompted = await maybePromptRefundOrderImport(results, generation);
           if (live(generation) && !refundPrompted) await maybePromptGatewayReconImport(generation);
-        }
+        };
+        // v3.2.14：表头与当前结构不一致的文件先弹差异明细（状态框只放得下摘要），确认后再给退款 / 网关导入提示。
+        const mismatchHtml = buildStructureMismatchHtml(results);
+        if (mismatchHtml && live(generation)) {
+          alert(mismatchHtml.html, {
+            logDomain: '银行对账单处理',
+            logDetails: mismatchHtml.logDetails,
+            onConfirm: () => { promptFollowUps().catch(reportError); }
+          }, generation);
+        } else await promptFollowUps();
         return result;
       }, 'onImportProgress', formatBankStatementImportProgress);
     }
@@ -257,11 +267,28 @@
         return live(generation) && result?.status === 'ok' && result.candidateCount > 0;
       } catch (error) { reportError(error); return false; }
     }
+    // 失败项的表头差异明细（主进程 detailLines），附在原因下方。
+    function detailLinesHtml(item) {
+      const details = Array.isArray(item?.detailLines) ? item.detailLines.filter(Boolean) : [];
+      return details.length
+        ? `<br><span style="font-size:12px;color:var(--muted);">${details.map(escapeHtml).join('<br>')}</span>`
+        : '';
+    }
+    function buildStructureMismatchHtml(results) {
+      const mismatched = results.filter((item) => item?.status === 'unrecognized'
+        && Array.isArray(item.detailLines) && item.detailLines.some(Boolean));
+      if (!mismatched.length) return null;
+      const lines = mismatched.map((item) => `${escapeHtml(item.fileName || '')}：${escapeHtml(item.message || '')}${detailLinesHtml(item)}`);
+      return {
+        html: `${mismatched.length} 个文件表头与当前结构不一致，未导入：<br>${lines.join('<br>')}`,
+        logDetails: mismatched.flatMap((item) => [`${item.fileName || ''}｜${item.message || ''}`, ...item.detailLines.filter(Boolean)])
+      };
+    }
     function notifyLinkedTableImportFailures(result, generation) {
       if (result?.status !== 'ok' || !Array.isArray(result.results)) return;
       const failed = result.results.filter((item) => ['read-error', 'write-error', 'ambiguous', 'unrecognized'].includes(item.status));
       if (!failed.length) return;
-      const lines = failed.map((item) => `${escapeHtml(item.fileName || '')}：${escapeHtml(item.message || item.status || '')}`).join('<br>');
+      const lines = failed.map((item) => `${escapeHtml(item.fileName || '')}：${escapeHtml(item.message || item.status || '')}${detailLinesHtml(item)}`).join('<br>');
       alert(`链接表导入有 ${failed.length}/${result.results.length} 个文件失败：<br>${lines}`, { skipLogReport: true }, generation);
     }
     function importLinked(generation) {

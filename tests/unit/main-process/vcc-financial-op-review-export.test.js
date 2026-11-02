@@ -326,3 +326,35 @@ test('真正未建立来源绑定的历史系统快照继续按审计和 raw_jso
     assert.ok(manifest.prepare('SELECT descriptor FROM sources').all().some((row) => JSON.parse(row.descriptor).mode === 'legacy'));
   } finally { manifest.close(); }
 });
+
+// v3.2.14：按设置 → 模板文件用户结构导入的原件，审阅导出按导入时结构定位与输出原表页，核验对应回内置列。
+test('导入时为用户结构的原件：原表页按导入时结构输出，血缘与系统 OP 余额核验通过', async (t) => {
+  const { SOURCE_TYPES: TYPES, SYSTEM_OP_HEADERS, getSourceDefinition } = require('../../../src/backend/vcc-financial-op/definitions');
+  const recharge = getSourceDefinition(TYPES.RECHARGE).headers;
+  const pendingHeaders = getSourceDefinition(TYPES.PENDING).headers;
+  const sourceStructures = {
+    [TYPES.RECHARGE]: { headers: [...recharge.filter((h) => h !== 'fee').map((h) => (h === '场景' ? '业务场景' : h)), '新增列'], versionLabel: 'V2' },
+    [TYPES.PENDING]: { headers: pendingHeaders.map((h) => (h === '维护人' ? '维护人BU' : h === '维护人BU' ? '维护人' : h)), versionLabel: 'V2' },
+    [TYPES.SYSTEM_OP]: { headers: SYSTEM_OP_HEADERS.filter((h) => h !== '创建时间'), versionLabel: 'V2' }
+  };
+  const f = await createReviewFixture(t, { sourceStructures });
+  const members = f.files[0].members;
+  assert.deepEqual(members.filter((m) => m.sheets[0].sourceHeaders).map((m) => m.sourceType).sort(),
+    [TYPES.PENDING, TYPES.RECHARGE, TYPES.SYSTEM_OP].sort());
+  const manifestPath = path.join(f.dir, 'manifest.sqlite'), outputPath = path.join(f.dir, 'review.xlsx');
+  await prepareReviewManifest({ ...f, manifestPath, appVersion: '3.2.14' });
+  assert.equal((await extractReviewSources({ manifestPath })).scannedFiles, 1);
+  const manifest = new DatabaseSync(manifestPath, { readOnly: true });
+  const groups = manifest.prepare('SELECT descriptor FROM groups').all().map((g) => JSON.parse(g.descriptor));
+  manifest.close();
+  for (const type of [TYPES.RECHARGE, TYPES.PENDING, TYPES.SYSTEM_OP]) {
+    assert.deepEqual(groups.find((g) => g.sourceType === type).headers, sourceStructures[type].headers, type);
+  }
+  assert.deepEqual(groups.find((g) => g.sourceType === TYPES.FEE_FX).headers, [...getSourceDefinition(TYPES.FEE_FX).headers]);
+  await writeReviewWorkbook({ filePath: outputPath, manifestPath, assetsDir: f.assetsDir });
+  await validateReviewWorkbook({ filePath: outputPath, manifestPath });
+  const book = new ExcelJS.Workbook(); await book.xlsx.readFile(outputPath);
+  const rechargeSheet = book.worksheets.find((s) => s.getRow(1).values.includes('业务场景'));
+  assert.ok(rechargeSheet, '充值清退原表页按导入时结构输出');
+  assert.equal(rechargeSheet.getRow(1).values.includes('fee'), false);
+});

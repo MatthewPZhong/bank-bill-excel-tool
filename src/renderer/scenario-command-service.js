@@ -13,7 +13,7 @@
     applyImport: 'scenarios:import-bundle-apply'
   });
   const CHANNEL_WRITES = Object.freeze({ create: 'channels:create', update: 'channels:update', deleteOne: 'channels:delete' });
-  const READS = Object.freeze(['exportBundle', 'importBundle', 'getFundTypeEnum', 'getGatewayReconHeaders', 'getApplicableChannels']);
+  const READS = Object.freeze(['exportBundle', 'importBundle', 'getFundTypeEnum', 'getGatewayReconHeaders', 'getReconIdFixFields', 'getApplicableChannels']);
   const CATEGORY_WRITES = new Set(['update', 'deleteOne', 'toggleEnabled']);
   const unique = (values) => Object.freeze([...new Set(values)]);
   const numericId = (value) => {

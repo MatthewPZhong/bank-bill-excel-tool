@@ -323,7 +323,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       assert.equal(main.includes(removedChannel), false, `main 不应保留 ${removedChannel}`);
     }
     assert.match(main, /await vccFinancialOpService\.terminate\(\)/);
-    assert.match(vccService, /return runWorker\('inspect-plan', \{ filePaths \}/);
+    assert.match(vccService, /return runWorker\('inspect-plan', \{ filePaths, sourceStructures \}/);
     assert.match(vccService, /return runResultWriteWorker\(VCC_MUTATION_OPERATIONS\.DELETE_DATA_TARGET/);
     for (const serviceCall of [
       'listArchivedResultMonths', 'previewUnarchive', 'listImportMonths',

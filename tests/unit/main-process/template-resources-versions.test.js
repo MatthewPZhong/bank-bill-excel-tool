@@ -282,7 +282,7 @@ test('枚举与网关表头：比较取值变化，阻止移除已被场景引�
     } },
     { id: 2, category: 'gateway-recon-join', config: {
       reconFields: [{ gwField: 'amount', bankField: 'Credit Amount' }],
-      conditions: [{ side: '网关', field: 'currency' }, { side: '银行', field: 'Channel' }],
+      conditions: [{ side: '网关', field: 'Reference' }, { side: '银行', field: 'Channel' }],
       assign: { gwField: '__CUSTOM__', bankField: 'ReconciliationId' }
     } }
   ];
@@ -309,18 +309,22 @@ test('枚举与网关表头：比较取值变化，阻止移除已被场景引�
   assert.equal(current.filePath, env.versionFile('fund-type-enum', 'v2'));
   assert.equal((await env.service.get('fund-type-enum')).resource.current.enumValues.includes('NewType'), true);
 
+  // 网关对账单（v3.2.14 起为导入识别结构）：必用列须同名保留；场景按入库后的列名引用，删除被引用的非必用列（Reference）被拦下。
   const gatewayHeaders = (await env.service.get('gateway-recon')).resource.sheets[0].headers;
   const missingSignature = await writeEnumWorkbook(path.join(env.files, 'gateway-a.xlsx'),
     [gatewayHeaders.filter((header) => header !== 'merchantid')]);
   const missing = await prepare(env.service, 'gateway-recon', missingSignature);
-  assert.equal(missing.checks.find((check) => check.label === '识别字段').detail, '缺少 merchantid（区分大小写）');
+  assert.equal(missing.verdict, 'fail');
+  assert.equal(missing.checks.find((check) => check.label === '必用列').detail, '缺少 merchantid（程序按列名读取，区分大小写）');
 
   const removedUsed = await writeEnumWorkbook(path.join(env.files, 'gateway-b.xlsx'),
-    [[...gatewayHeaders.filter((header) => header !== 'currency'), '__CUSTOM__']]);
+    [[...gatewayHeaders.filter((header) => header !== 'Reference'), '__CUSTOM__']]);
   const used = await prepare(env.service, 'gateway-recon', removedUsed);
   assert.equal(used.verdict, 'fail');
-  assert.equal(used.checks.find((check) => check.label === '场景引用').detail, '已被场景使用：currency');
+  assert.equal(used.checks.find((check) => check.label === '必用列').status, 'pass');
+  assert.equal(used.checks.find((check) => check.label === '场景引用').detail, '已被场景使用：Reference');
   assert.equal(used.checks.find((check) => check.label === '保留值').status, 'warn');
+  assert.deepEqual(used.diff, { added: [], removed: ['Reference'] }, '下拉取值为入库后的列名，不含 __CUSTOM__');
 });
 
 // 在第 1 个 Sheet 的最后一格写一个值：文件仍只有几 KB，但 SheetJS 的声明范围变成整张表（A1:XFD1048576）。
@@ -349,7 +353,9 @@ test('范围覆盖整张表的小文件：预检与结构描述只按实际单�
   const gatewayHeaders = (await env.service.get('gateway-recon')).resource.sheets[0].headers;
   const gateway = await addFarCell(await writeEnumWorkbook(path.join(env.files, 'gateway-far.xlsx'), [gatewayHeaders]));
   const gatewayPrepared = await prepare(env.service, 'gateway-recon', gateway);
-  assert.equal(gatewayPrepared.verdict, 'pass', JSON.stringify(gatewayPrepared.checks));
+  assert.equal(gatewayPrepared.verdict, 'warn', JSON.stringify(gatewayPrepared.checks));
+  assert.equal(gatewayPrepared.checks.find((check) => check.label === '表头').detail, '31 列');
+  assert.match(gatewayPrepared.checks.find((check) => check.label === '数据行').detail, /^表头以下有 1 行内容/);
   assert.deepEqual(gatewayPrepared.diff, { added: [], removed: [] });
 
   const position = await addFarCell(await restyledTemplate('assets/平盘银行对账单.xlsx', path.join(env.files, 'position-far.xlsx')));
@@ -391,15 +397,12 @@ test('比较基准按运行时口径重新解析当前版本文件：声明范�
   assert.deepEqual(fundTypeBlocked.diff, { added: [], removed: ['REMOVE'] });
   assert.equal(fundTypeBlocked.checks.find((check) => check.label === '场景引用').detail, '已被场景使用：REMOVE');
 
-  // 网关：V2 表头从 C2 起（版本记录里按第 1 行保存的表头为空），V3 去掉被 C3 场景引用的 currency 应被拦下。
+  // 网关对账单（v3.2.14 起为导入识别结构）：导入按第 1 行、从 A 列起读表头，表头从 C2 起的文件预检不通过。
   const gatewayHeaders = (await env.service.get('gateway-recon')).resource.sheets[0].headers;
-  await importVersion(env.service, 'gateway-recon',
+  const gatewayOffset = await prepare(env.service, 'gateway-recon',
     await writeOffsetWorkbook(path.join(env.files, 'gateway-v2.xlsx'), 2, 3, [gatewayHeaders]));
-  const gatewayBlocked = await prepare(env.service, 'gateway-recon',
-    await writeOffsetWorkbook(path.join(env.files, 'gateway-v3.xlsx'), 2, 3, [gatewayHeaders.filter((header) => header !== 'currency')]));
-  assert.equal(gatewayBlocked.verdict, 'fail');
-  assert.deepEqual(gatewayBlocked.diff, { added: [], removed: ['currency'] });
-  assert.equal(gatewayBlocked.checks.find((check) => check.label === '场景引用').detail, '已被场景使用：currency');
+  assert.equal(gatewayOffset.verdict, 'fail');
+  assert.equal(gatewayOffset.checks.find((check) => check.label === '表头').detail, '第 1 行没有表头');
 });
 
 test('平盘模板含 Excel 表时拒绝导入；数据验证与条件格式提示按模板范围原样带入', async (t) => {

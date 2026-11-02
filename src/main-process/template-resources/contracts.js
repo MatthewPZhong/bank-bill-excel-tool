@@ -4,6 +4,9 @@
 // 每个契约直接调用对应模块写出时使用的校验函数，导入时的判定与运行时一致；
 // 另加只在预检时检查、但会影响输出或回读的约束（如平盘结果模板的多余表头）。
 
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const ExcelJS = require('exceljs');
 const JSZip = require('jszip');
 const sax = require('sax');
@@ -19,13 +22,17 @@ const {
 const { validateResultTemplateWorkbook } = require('../position-reconciliation/excel-io');
 const { BANK_SHEET_NAME, POSITION_BANK_HEADERS } = require('../position-reconciliation/constants');
 const { BANK_STATEMENT_FIELDS } = require('../../constants/bank-statement-fields');
-const { parseFundTypeEnumWorkbook } = require('../../constants/fund-type-enum');
 const {
-  CUSTOM_VALUE_SENTINEL,
-  parseGatewayReconHeadersWorkbook
-} = require('../../constants/gateway-recon-headers-loader');
-const { GATEWAY_RECON_SIGNATURE } = require('../../constants/table-signatures');
-const { declaredRange, sheetCells } = require('../../constants/sheetjs-sparse-cells');
+  canonicalHeaderMapping,
+  describeCanonicalMapping,
+  storedHeaderNames
+} = require('../../backend/file-service/header-structure-diff');
+const { parseFundTypeEnumWorkbook } = require('../../constants/fund-type-enum');
+const { CUSTOM_VALUE_SENTINEL } = require('../../constants/gateway-recon-headers-loader');
+const { ALL_CELLS, sheetCells } = require('../../constants/sheetjs-sparse-cells');
+const { TEMPLATE_RESOURCES } = require('./catalog');
+const { INPUT_STRUCTURES, inputStructureOf, isSingleSheetStructure, structureLabel } = require('./input-structures');
+const { inputStructureValuesFromHeaders, sheetHeaders } = require('./workbook-structure');
 const { MAX_EXCEL_ROW_HEIGHT } = require('../vcc-financial-op-writer');
 const { probePendingTemplate } = require('../vcc-financial-op-result-workbook-writer');
 
@@ -255,15 +262,6 @@ function presentationWarnings(list, worksheet, headers, { label = '', rowNumbers
   if (masked.length) list.add('数字格式', 'warn', `${where}${listText(masked, 5)} 的数字格式会遮盖或替换显示内容`);
 }
 
-// 第 1 个 Sheet 声明范围首行的非空表头（只读实际存在的单元格，不按声明范围展开）。
-function firstSheetHeaderRow(workbook) {
-  const name = workbook.SheetNames[0];
-  const sheet = name ? workbook.Sheets[name] : null;
-  const range = declaredRange(sheet);
-  if (!range) return [];
-  return sheetCells(sheet, { s: range.s, e: { r: range.s.r, c: range.e.c } }).map((cell) => String(cell.value).trim());
-}
-
 const prefundContract = {
   engine: 'exceljs',
   check(workbook, list, context) {
@@ -388,27 +386,6 @@ const fundTypeContract = {
   }
 };
 
-const gatewayContract = {
-  engine: 'sheetjs',
-  check(workbook, list, context) {
-    const values = parseGatewayReconHeadersWorkbook(workbook);
-    if (!values.length) {
-      list.add('字段', 'fail', '第 1 行未读取到字段');
-      return {};
-    }
-    list.add('字段', 'pass', `${values.length} 个`);
-    const missing = GATEWAY_RECON_SIGNATURE.signatureHeaders.filter((header) => !values.includes(header));
-    if (missing.length) list.add('识别字段', 'fail', `缺少 ${missing.join('、')}（区分大小写）`);
-    else list.add('识别字段', 'pass', `${GATEWAY_RECON_SIGNATURE.signatureHeaders.length} 个均存在`);
-    if (firstSheetHeaderRow(workbook).includes(CUSTOM_VALUE_SENTINEL)) list.add('保留值', 'warn', `已忽略 ${CUSTOM_VALUE_SENTINEL}`);
-    const diff = diffValues(context.currentValues, values);
-    const blocked = diff.removed.filter((value) => context.references.gatewayFields.has(value));
-    if (blocked.length) list.add('场景引用', 'fail', `已被场景使用：${listText(blocked, 5)}`);
-    else list.add('场景引用', 'pass', '不影响已有场景');
-    return { diff };
-  }
-};
-
 // Pending 计算表只取第 1 个 Sheet 的列隐藏、第 1 行与第 2 行样式；用正式导出的 Writer 与校验器试写一次，
 // 保证导出时的写出与样式校验能通过。
 const vccPendingContract = {
@@ -438,14 +415,183 @@ const vccPendingContract = {
   }
 };
 
+const sameHeaders = (left = [], right = []) => left.length === right.length && left.every((header, index) => header === right[index]);
+
+// 表头行以下有文本的行数（只数有值的单元格，不展开整张表）。
+function rowsBelowHeader(sheet, headerRow) {
+  const rows = new Set();
+  for (const cell of sheetCells(sheet, ALL_CELLS)) {
+    if (cell.r > headerRow - 1 && String(cell.value ?? '').trim()) rows.add(cell.r);
+  }
+  return rows.size;
+}
+
+// 用模块导入时的读取函数读模板文件的表头（写入检查 Worker 的临时目录，读完即删）。
+async function readRuntimeHeaders(spec, bytes) {
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'template-input-headers-'));
+  try {
+    const filePath = path.join(directory, 'template.xlsx');
+    await fs.promises.writeFile(filePath, bytes);
+    return await spec.runtimeHeaders(filePath);
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+}
+
+// 输入原表：模板中对应工作表的表头行即导入识别结构，启用后对应模块导入时只认这一结构。
+//   必用列与被场景引用的列须保留且同名；同组的表结构不能相同（导入时无法区分）；与当前版本的列变化写入 diff，
+//   由“取值变化”展示。单表原表读第 1 个工作表，检查项不带工作表名；多表原表逐表检查，检查项带工作表名。
+function inputStructureContract(resourceId) {
+  const spec = inputStructureOf(resourceId);
+  const headerRow = TEMPLATE_RESOURCES.find((resource) => resource.id === resourceId).headerRow;
+  const single = isSingleSheetStructure(spec);
+  return {
+    engine: 'sheetjs',
+    async check(workbook, list, context) {
+      const label = (base, sheet) => (single ? base : `${base} · ${sheet.name}`);
+      let sheetNames;
+      if (single) {
+        // 单表：第 1 个工作表，或规格指定名称的工作表（如银行对账单的「渠道对账单」）。
+        const named = spec.sheets[0].name;
+        const sheetName = named === null ? workbook.SheetNames[0] : named;
+        if (!sheetName) {
+          list.add('Sheet 结构', 'fail', '文件中没有工作表');
+          return {};
+        }
+        if (named !== null && !workbook.SheetNames.includes(named)) {
+          list.add('Sheet 结构', 'fail', `缺少工作表「${named}」`);
+          return {};
+        }
+        if (workbook.SheetNames.length > 1) {
+          list.add('Sheet 结构', 'warn', named === null
+            ? `共 ${workbook.SheetNames.length} 个工作表，只读取第 1 个「${sheetName}」`
+            : `共 ${workbook.SheetNames.length} 个工作表，只读取「${sheetName}」`);
+        } else {
+          list.add('Sheet 结构', 'pass', `读取「${sheetName}」`);
+        }
+        sheetNames = [sheetName];
+      } else {
+        const missingSheets = spec.sheets.filter((sheet) => !workbook.SheetNames.includes(sheet.name));
+        if (missingSheets.length) {
+          list.add('Sheet 结构', 'fail', `缺少工作表 ${listText(missingSheets.map((sheet) => `「${sheet.name}」`), 5)}`);
+          return {};
+        }
+        const extra = workbook.SheetNames.filter((name) => !spec.sheets.some((sheet) => sheet.name === name));
+        list.add('Sheet 结构', extra.length ? 'warn' : 'pass', extra.length
+          ? `其余 ${extra.length} 个工作表不读取：${listText(extra, 3)}`
+          : `${spec.sheets.length} 个工作表`);
+        sheetNames = spec.sheets.map((sheet) => sheet.name);
+      }
+
+      const headersBySheet = sheetNames.map((name) => sheetHeaders(workbook, name, headerRow));
+      spec.sheets.forEach((sheet, index) => {
+        const headers = headersBySheet[index];
+        if (!headers.length) {
+          list.add(label('表头', sheet), 'fail', `第 ${headerRow} 行没有表头`);
+          return;
+        }
+        const blankColumns = spec.allowBlank ? [] : headers.map((header, column) => (header ? 0 : column + 1)).filter(Boolean);
+        const duplicates = [...new Set(headers.filter((header, column) => header && headers.indexOf(header) !== column))];
+        if (blankColumns.length) list.add(label('表头', sheet), 'fail', `第 ${listText(blankColumns.map(String), 5)} 列表头为空`);
+        else if (duplicates.length) list.add(label('表头', sheet), 'fail', `列名重复：${listText(duplicates, 5)}`);
+        else list.add(label('表头', sheet), 'pass', `${headers.length} 列`);
+      });
+
+      // 快照按 SheetJS 口径解析；导入时用模块自己的读取函数。两者读出的列名必须一致，否则启用后仍无法识别。
+      if (typeof spec.runtimeHeaders === 'function' && context.bytes) {
+        let runtime;
+        try {
+          runtime = await readRuntimeHeaders(spec, context.bytes);
+        } catch (error) {
+          if (isEnvironmentError(error)) list.environment('表头读取', error);
+          else list.add('表头读取', 'fail', `导入时无法读取表头：${errorText(error)}`);
+          return {};
+        }
+        const differences = [];
+        spec.sheets.forEach((sheet, index) => {
+          const headers = headersBySheet[index];
+          const read = Array.isArray(runtime[index]) ? runtime[index] : [];
+          const prefix = single ? '' : `「${sheet.name}」`;
+          for (let column = 0; column < Math.max(headers.length, read.length); column += 1) {
+            if (headers[column] === read[column]) continue;
+            const want = column < headers.length ? `「${headers[column]}」` : '（模板中没有）';
+            const got = column < read.length ? `「${read[column]}」` : '（没有）';
+            differences.push(`${prefix}第 ${column + 1} 列${want}导入时读作${got}`);
+          }
+        });
+        if (differences.length) {
+          list.add('表头读取', 'fail', `${listText(differences, 3)}：表头含富文本、数字、布尔、首尾空格或多余空单元格，请改为普通文本后导入`);
+          return {};
+        }
+      }
+
+      spec.sheets.forEach((sheet, index) => {
+        const headers = headersBySheet[index];
+        const required = sheet.required();
+        const missing = required.filter((header) => !headers.includes(header));
+        if (missing.length) list.add(label('必用列', sheet), 'fail', `缺少 ${listText(missing, 10)}（程序按列名读取，区分大小写）`);
+        else if (required.length) list.add(label('必用列', sheet), 'pass', `${required.length} 个均存在`);
+        const referenced = sheet.referenceKey && context.references[sheet.referenceKey]
+          ? [...context.references[sheet.referenceKey]]
+          : [];
+        // 按内置列存储的表：场景按入库后的列名引用（按位置改名的列仍是内置名，keepExtra 时新增列也可引用）。
+        const available = spec.storage === 'canonical'
+          ? storedHeaderNames(sheet.builtinHeaders(), canonicalHeaderMapping(sheet.builtinHeaders(), headers), { keepExtra: spec.keepExtra === true })
+          : headers;
+        // 只拦截当前版本中可用、新版本中不可用的被引用列（与切换版本时 removedReferencedValues 同口径）：
+        //   场景引用了当前版本本来就没有的列（如预置 C3 场景的 Amount、MerchantId）时不因此拦下新版本。
+        //   当前取值取不到时 currentValues 为全部被引用值（见 service.prepareImport），按逐项核对处理。
+        const current = new Set(context.currentValues);
+        const unreferenced = referenced.filter((header) => current.has(single ? header : structureLabel(sheet.name, header))
+          && !available.includes(header));
+        if (unreferenced.length) list.add(label('场景引用', sheet), 'fail', `已被场景使用：${listText(unreferenced, 5)}`);
+        else if (sheet.referenceKey) list.add(label('场景引用', sheet), 'pass', '不影响已有场景');
+      });
+
+      // 按内置列存储的模块：展示当前版本对应回内置列的结果（改名按位置对应、导入后为空、不导入）。
+      if (spec.storage === 'canonical') {
+        spec.sheets.forEach((sheet, index) => {
+          const lines = describeCanonicalMapping(canonicalHeaderMapping(sheet.builtinHeaders(), headersBySheet[index]));
+          if (lines.length) list.add(label('列对应', sheet), 'warn', `入库与导出仍按内置列：${lines.join('；')}`);
+        });
+      }
+      // 🔴 C3「自取值」保留值不能作为网关字段（见 gateway-recon-headers-loader.js），下拉取值中已剔除。
+      if (spec.values === 'stored' && headersBySheet[0].includes(CUSTOM_VALUE_SENTINEL)) {
+        list.add('保留值', 'warn', `已忽略 ${CUSTOM_VALUE_SENTINEL}`);
+      }
+      if (single) {
+        const peers = [...context.peerStructures, ...(typeof spec.fixedPeers === 'function' ? spec.fixedPeers() : [])];
+        const conflict = peers.find((peer) => sameHeaders(peer.headers, headersBySheet[0]));
+        if (conflict) list.add('识别冲突', 'fail', `与「${conflict.name}」当前结构相同，导入时无法区分`);
+      }
+      spec.sheets.forEach((sheet, index) => {
+        const dataRows = rowsBelowHeader(workbook.Sheets[sheetNames[index]], headerRow);
+        if (dataRows) list.add(label('数据行', sheet), 'warn', `表头以下有 ${dataRows} 行内容：只使用表头，但版本文件会保留这些内容，建议删除后再导入`);
+      });
+
+      const values = inputStructureValuesFromHeaders(spec, headersBySheet);
+      const current = context.currentValues;
+      const diff = diffValues(current, values);
+      if (current.length && !sameHeaders(current, values)) {
+        const parts = [];
+        if (diff.added.length) parts.push(`增加 ${listText(diff.added, 5)}`);
+        if (diff.removed.length) parts.push(`删除 ${listText(diff.removed, 5)}`);
+        if (!parts.length) parts.push('列顺序调整');
+        list.add('结构变化', 'warn', `启用后导入只认新结构：${parts.join('；')}`);
+      }
+      return { diff };
+    }
+  };
+}
+
 const CONTRACTS = Object.freeze({
   'prefund-unbalanced': prefundContract,
   'dup-recall-mail': mailContract,
   'bank-statement': bankStatementContract,
   'position-bank': positionContract,
   'fund-type-enum': fundTypeContract,
-  'gateway-recon': gatewayContract,
-  'vcc-pending-calc': vccPendingContract
+  'vcc-pending-calc': vccPendingContract,
+  ...Object.fromEntries(Object.keys(INPUT_STRUCTURES).map((resourceId) => [resourceId, inputStructureContract(resourceId)]))
 });
 
 function diffValues(before = [], after = []) {
@@ -457,10 +603,13 @@ function diffValues(before = [], after = []) {
   };
 }
 
-// 场景配置中仍被引用的 FundType 取值（任意 {field:'FundType', value}）与 C3 网关字段。
+// 场景配置中仍被引用的 FundType 取值（任意 {field:'FundType', value}）、C3 网关字段与 C4 单据模式的主 / 从边账单字段。
 function collectScenarioReferences(scenarios = []) {
   const fundTypeValues = new Set();
   const gatewayFields = new Set();
+  const reconIdFixMainFields = new Set();
+  const reconIdFixOppFields = new Set();
+  const bankFields = new Set();
   const addGateway = (value) => {
     const text = String(value ?? '').trim();
     if (text && text !== CUSTOM_VALUE_SENTINEL) gatewayFields.add(text);
@@ -478,6 +627,11 @@ function collectScenarioReferences(scenarios = []) {
     const config = scenario && scenario.config;
     if (!config || typeof config !== 'object') continue;
     walk(config);
+    if (scenario.category === 'recon-id-fix') {
+      collectReconIdFixFields(config, reconIdFixMainFields, reconIdFixOppFields);
+      continue;
+    }
+    collectBankFields(scenario.category, config, bankFields);
     if (scenario.category !== 'gateway-recon-join') continue;
     (Array.isArray(config.reconFields) ? config.reconFields : []).forEach((item) => addGateway(item && item.gwField));
     (Array.isArray(config.conditions) ? config.conditions : [])
@@ -485,7 +639,56 @@ function collectScenarioReferences(scenarios = []) {
       .forEach((item) => addGateway(item.field));
     addGateway(config.assign && config.assign.gwField);
   }
-  return { fundTypeValues, gatewayFields };
+  return { fundTypeValues, gatewayFields, reconIdFixMainFields, reconIdFixOppFields, bankFields };
+}
+
+// 场景引用的银行对账单字段（内置 46 列名）：C1 / C2 / 内置固定场景按 field、searchFields、leftField、rightField、
+//   requireBankZeroField 读银行行；C3 只取银行侧（bankField、银行侧条件）。字段缺失时引擎静默按空值处理，被引用的列视同必用列。
+const BANK_FIELD_KEYS = new Set(['field', 'searchFields', 'leftField', 'rightField', 'requireBankZeroField']);
+function collectBankFields(category, config, target) {
+  const add = (value) => {
+    const text = String(value ?? '').trim();
+    if (BANK_STATEMENT_FIELDS.includes(text)) target.add(text);
+  };
+  if (category === 'gateway-recon-join') {
+    (Array.isArray(config.reconFields) ? config.reconFields : []).forEach((item) => add(item && item.bankField));
+    (Array.isArray(config.conditions) ? config.conditions : [])
+      .filter((item) => item && item.side === '银行')
+      .forEach((item) => add(item.field));
+    add(config.assign && config.assign.bankField);
+    return;
+  }
+  const walk = (node) => {
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (!node || typeof node !== 'object') return;
+    for (const [key, value] of Object.entries(node)) {
+      if (BANK_FIELD_KEYS.has(key)) (Array.isArray(value) ? value : [value]).forEach(add);
+      else walk(value);
+    }
+  };
+  walk(config);
+}
+
+// C4 单据模式场景引用的账单字段：条件字段按主 / 从边，字段对的 leftField 读主边（业务部门账单）、rightField 读从边
+//   （对手部门账单），旧版 reconFields 同口径。字段缺失时引擎静默按空值处理，所以被引用的列视同必用列。
+function collectReconIdFixFields(config, mainFields, oppFields) {
+  const add = (target, value) => {
+    const text = String(value ?? '').trim();
+    if (text) target.add(text);
+  };
+  for (const billType of Array.isArray(config.billTypes) ? config.billTypes : []) {
+    const target = billType && billType.side === 'opp' ? oppFields : mainFields;
+    for (const condition of Array.isArray(billType && billType.conditions) ? billType.conditions : []) add(target, condition && condition.field);
+  }
+  const pairs = [
+    ...(Array.isArray(config.reconGroups) ? config.reconGroups : [])
+      .flatMap((group) => (Array.isArray(group && group.fieldPairs) ? group.fieldPairs : [])),
+    ...(Array.isArray(config.reconFields) ? config.reconFields : [])
+  ];
+  for (const pair of pairs) {
+    add(mainFields, pair && pair.leftField);
+    add(oppFields, pair && pair.rightField);
+  }
 }
 
 function hasContract(resourceId) {
@@ -493,7 +696,7 @@ function hasContract(resourceId) {
 }
 
 // 契约检查：不含文件格式、大小与重复版本等导入专属检查，用于导入预检与已存版本的兼容复核。
-//   context: { builtinSheetNames, currentValues, references }
+//   context: { builtinSheetNames, currentValues, peerStructures, references }
 async function inspectContract(resourceId, bytes, context = {}) {
   const contract = CONTRACTS[resourceId];
   if (!contract) throw new Error(`模板「${resourceId}」没有导入契约`);
@@ -501,8 +704,17 @@ async function inspectContract(resourceId, bytes, context = {}) {
   const fullContext = {
     builtinSheetNames: context.builtinSheetNames,
     currentValues: context.currentValues || [],
-    references: context.references || { fundTypeValues: new Set(), gatewayFields: new Set() },
-    printAreas: new Map()
+    peerStructures: context.peerStructures || [],
+    references: {
+      fundTypeValues: new Set(),
+      gatewayFields: new Set(),
+      reconIdFixMainFields: new Set(),
+      reconIdFixOppFields: new Set(),
+      bankFields: new Set(),
+      ...(context.references || {})
+    },
+    printAreas: new Map(),
+    bytes
   };
   const failed = () => ({ checks: list.checks, ok: false, message: `${list.checks[0].label}：${list.checks[0].detail}`, diff: { added: [], removed: [] } });
   // ExcelJS 读入会逐格展开数据验证与合并单元格：先扫描原始 XML，超出上限时不再读入。扫描失败同样不读入（无法确认安全）。

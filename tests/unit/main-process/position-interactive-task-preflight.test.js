@@ -302,6 +302,87 @@ test('source account-only、ordinary 与 mixed 均由真实输入 File Task 收�
   }
 });
 
+test('source prepare 抛错转为失败结果：不 reject、不进入 lifecycle、保留错误码与明细', async () => {
+  const contract = createPositionSourceImportTaskContract({
+    pickFiles: async () => ({ canceled: false, filePaths: [__filename] }),
+    getService: () => ({
+      async prepareSourceImportForLifecycle() {
+        throw Object.assign(new Error('平盘导入 utilityProcess 异常退出'), {
+          code: 'position-import-worker-exited',
+          detailLines: ['stderr 摘要']
+        });
+      }
+    }),
+    withSourceLock: (task) => task()
+  });
+  const harness = createLifecycleHarness();
+  const { result } = await invoke(contract, [], harness);
+  assert.deepEqual(result, {
+    status: 'failed',
+    code: 'position-import-worker-exited',
+    message: '平盘导入 utilityProcess 异常退出',
+    detailLines: ['stderr 摘要']
+  });
+  assert.deepEqual(harness.calls, []);
+});
+
+test('source prepare 取消转为 cancelled；预检后组装失败会释放已准备的 worker', async () => {
+  const cancelled = createPositionSourceImportTaskContract({
+    pickFiles: async () => ({ canceled: false, filePaths: [__filename] }),
+    getService: () => ({
+      async prepareSourceImportForLifecycle() {
+        throw Object.assign(new Error('平盘导入已取消'), { code: 'position-import-cancelled' });
+      }
+    }),
+    withSourceLock: (task) => task()
+  });
+  const first = await invoke(cancelled, [], createLifecycleHarness());
+  assert.equal(first.result.status, 'cancelled');
+
+  let abandonCount = 0;
+  const broken = createPositionSourceImportTaskContract({
+    pickFiles: async () => ({ canceled: false, filePaths: [__filename] }),
+    getService: () => ({
+      async prepareSourceImportForLifecycle() {
+        // preflightReady 缺失：组装 file plan 时抛错，必须终止等待写入授权的 worker。
+        return { requiresExecution: true, plan: { engine: 'streaming', preflightReady: null } };
+      },
+      async abandonPreparedSourceImport() { abandonCount += 1; }
+    }),
+    withSourceLock: (task) => task()
+  });
+  const second = await invoke(broken, [], createLifecycleHarness());
+  assert.equal(second.result.status, 'failed');
+  assert.equal(abandonCount, 1);
+});
+
+test('source 全部文件被拒的失败结果按原选择文件收口，不引用暂存文件', async () => {
+  const service = {
+    async prepareSourceImportForLifecycle() {
+      return {
+        requiresExecution: false,
+        result: {
+          status: 'failed',
+          message: '所选链接原始表全部导入失败',
+          results: [{ status: 'failed', fileName: 'gateway.xlsx', code: 'position-source-unrecognized' }]
+        }
+      };
+    },
+    executePreparedSourceImport() { throw new Error('全部失败时不应执行写入'); },
+    abandonPreparedSourceImport() { throw new Error('全部失败时没有可释放的 worker'); }
+  };
+  const contract = createPositionSourceImportTaskContract({
+    pickFiles: async () => ({ canceled: false, filePaths: [__filename] }),
+    getService: () => service,
+    withSourceLock: (task) => task()
+  });
+  const harness = createLifecycleHarness();
+  const { prepared, result } = await invoke(contract, [], harness);
+  assert.equal(result.status, 'failed');
+  assert.deepEqual(prepared.filePlan.inputs.map((item) => item.filePath), [path.resolve(__filename)]);
+  assert.deepEqual(prepared.filePlan.outputs, []);
+});
+
 test('source reserve 失败会 abandon prepared worker/staging 且 0 apply', async () => {
   let abandonCount = 0;
   let applyCount = 0;

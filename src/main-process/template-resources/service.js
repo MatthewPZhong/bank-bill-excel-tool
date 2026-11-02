@@ -13,7 +13,13 @@ const {
   verdictOf
 } = require('./contracts');
 const { DEFAULT_INSPECTION_LIMITS, runTemplateInspection } = require('./inspection-runner');
-const { RUNTIME_VALUE_PARSERS, describeWorkbook, parseRuntimeValues } = require('./workbook-structure');
+const {
+  RUNTIME_VALUE_PARSERS,
+  describeWorkbook,
+  inputStructureValuesFromHeaders,
+  parseRuntimeValues
+} = require('./workbook-structure');
+const { inputStructureOf, inputStructurePeers, isSingleSheetStructure, structureLabel } = require('./input-structures');
 const { writeFileAtomicDurable } = require('../background-execution/durable-file');
 
 // 内置版本固定为 v1、随应用打包只读；用户版本 v2 起存 {userData}/template-resources/<resourceId>/<versionId>.xlsx，
@@ -110,6 +116,8 @@ function createTemplateResourceService({
   const findResource = (resourceId) => TEMPLATE_RESOURCES.find((item) => item.id === String(resourceId || '')) || null;
   const absolutePath = (resource) => path.join(appRoot, ...resource.path.split('/'));
   const fileNameOf = (resource) => path.posix.basename(resource.path);
+  // 显示名：catalog 的 displayName（多个资源共用同一随包文件时区分用途），缺省取文件名。
+  const displayNameOf = (resource) => resource.displayName || fileNameOf(resource).replace(/\.xlsx?$/i, '');
   const replaceable = (resource) => resource.replace.allowed === true && hasContract(resource.id);
   const versionPath = (resourceId, versionId) => path.join(versionRoot, resourceId, `${versionId}.xlsx`);
   const labelOf = (versionId) => `V${String(versionId).replace(/^v/, '')}`;
@@ -354,7 +362,7 @@ function createTemplateResourceService({
       : (allowed ? '' : STORE_UNAVAILABLE_REASON);
     return {
       id: resource.id,
-      name: fileName.replace(/\.xlsx?$/i, ''),
+      name: displayNameOf(resource),
       fileName,
       path: resource.path,
       type: resource.type,
@@ -367,6 +375,7 @@ function createTemplateResourceService({
       failure: resource.failure,
       effect: resource.effect,
       twin: resource.twin,
+      twinNote: resource.twinNote,
       currentTemplate: resource.currentTemplate,
       current,
       versions: allVersions,
@@ -465,7 +474,7 @@ function createTemplateResourceService({
       released = true;
       leases.delete(leaseId);
     };
-    const name = fileNameOf(resource).replace(/\.xlsx?$/i, '');
+    const name = displayNameOf(resource);
     let result;
     try {
       if (currentVersionId === BUILTIN_VERSION_ID) {
@@ -554,6 +563,9 @@ function createTemplateResourceService({
     }
     const version = versions.find((item) => item.versionId === versionId);
     if (!version) return { values: null, reason: '版本不存在' };
+    // 输入原表：按导入时在检查 Worker 中解析的各表表头重新计算（取值口径随代码，如网关对账单取入库后的列名）。
+    const fromSheets = inputStructureHeadersOf(resource, version);
+    if (fromSheets) return { values: inputStructureValuesFromHeaders(inputStructureOf(resource.id), fromSheets) };
     const snapshot = version.structure && version.structure.comparableValues;
     if (Array.isArray(snapshot)) return { values: snapshot };
     const cacheKey = `${resource.id}:${version.sha256}`;
@@ -590,8 +602,101 @@ function createTemplateResourceService({
     return collectScenarioReferences(typeof store.listScenarioConfigs === 'function' ? store.listScenarioConfigs() : []);
   }
 
+  // 受场景引用保护的取值：FundType 枚举、网关表头，以及输入原表中被场景引用的列（多表原表以「工作表」列名标签表示，
+  //   与该资源的取值快照同口径）。其余资源没有场景引用。
   function referencedValuesOf(resource, references) {
-    return resource.id === 'gateway-recon' ? references.gatewayFields : references.fundTypeValues;
+    if (resource.id === 'gateway-recon') return references.gatewayFields;
+    if (resource.id === 'fund-type-enum') return references.fundTypeValues;
+    const spec = inputStructureOf(resource.id);
+    const values = new Set();
+    for (const sheet of spec ? spec.sheets : []) {
+      if (!sheet.referenceKey || !references[sheet.referenceKey]) continue;
+      for (const field of references[sheet.referenceKey]) {
+        values.add(isSingleSheetStructure(spec) ? field : structureLabel(sheet.name, field));
+      }
+    }
+    return values;
+  }
+
+  const sameHeaders = (left, right) => left.length === right.length && left.every((header, index) => header === right[index]);
+
+  // 用户版本中与结构规格一一对应的各表表头（结构描述 sheets[].headers，导入时在检查 Worker 中解析）；缺任一表时为 null。
+  function inputStructureHeadersOf(resource, version) {
+    const spec = inputStructureOf(resource.id);
+    const described = version && version.structure && Array.isArray(version.structure.sheets) ? version.structure.sheets : null;
+    if (!spec || !described || !described.length) return null;
+    const headers = spec.sheets.map((sheet) => {
+      const found = sheet.name === null ? described[0] : described.find((item) => item.name === sheet.name);
+      return found && Array.isArray(found.headers) ? [...found.headers] : null;
+    });
+    return headers.every((item) => item && item.length) ? headers : null;
+  }
+
+  // 同组输入原表（如平盘 5 张链接原始表）各自当前版本的表头：导入时按表头区分来源，结构不能相同。
+  async function peerStructuresOf(resource, snapshot) {
+    const peers = [];
+    for (const peerId of inputStructurePeers(resource.id)) {
+      const peer = findResource(peerId);
+      const { versions, currentVersionId } = stateOf(snapshot, peerId);
+      const peerVersion = currentVersionId === BUILTIN_VERSION_ID ? null : versions.find((item) => item.versionId === currentVersionId);
+      const headers = peerVersion
+        ? (inputStructureHeadersOf(peer, peerVersion) || [null])[0]
+        : inputStructureOf(peerId).sheets[0].builtinHeaders();
+      if (Array.isArray(headers)) peers.push({ name: displayNameOf(peer), headers });
+    }
+    const spec = inputStructureOf(resource.id);
+    if (spec && typeof spec.fixedPeers === 'function') peers.push(...spec.fixedPeers());
+    return peers;
+  }
+
+  // 输入原表启用某一结构前的同组冲突核对（导入并启用、启用已有版本共用）：同组其他表的当前结构可能在预检后变化。
+  async function peerConflictOf(resource, headers, snapshot) {
+    if (!inputStructureOf(resource.id) || !Array.isArray(headers)) return null;
+    return (await peerStructuresOf(resource, snapshot)).find((peer) => sameHeaders(peer.headers, headers)) || null;
+  }
+
+  // 输入原表当前版本的导入识别结构。内置版本返回代码中的结构；用户版本先复核文件（存在、SHA-256、契约），
+  //   再返回导入时在检查 Worker 中解析的表头（主进程不解析用户文件）。不可用时由调用方中止导入并提示。
+  //   单表原表返回 headers；多表原表返回 sheets：{ [工作表名]: 表头 }。
+  async function currentInputStructure(resourceId) {
+    const resource = findResource(resourceId);
+    const spec = inputStructureOf(resourceId);
+    if (!resource || !spec) throw new TypeError(`模板没有导入识别结构：${resourceId}`);
+    const single = isSingleSheetStructure(spec);
+    const { versions, currentVersionId } = stateOf(readStore(), resource.id);
+    if (currentVersionId === BUILTIN_VERSION_ID) {
+      return single
+        ? { status: 'builtin', versionId: BUILTIN_VERSION_ID, label: 'V1', headers: spec.sheets[0].builtinHeaders() }
+        : { status: 'builtin', versionId: BUILTIN_VERSION_ID, label: 'V1',
+          sheets: Object.fromEntries(spec.sheets.map((sheet) => [sheet.name, sheet.builtinHeaders()])) };
+    }
+    const version = versions.find((item) => item.versionId === currentVersionId);
+    const label = labelOf(currentVersionId);
+    const name = displayNameOf(resource);
+    const inspected = await inspectUserVersion(resource, version);
+    if (!inspected.ok) {
+      return {
+        status: 'unavailable',
+        versionId: currentVersionId,
+        label,
+        message: `模板「${name}」当前版本 ${label} 不可用：${inspected.message}${inspected.transient ? '' : `。${SETTINGS_HINT}`}`
+      };
+    }
+    const missingRecord = { status: 'unavailable', versionId: currentVersionId, label, message: `模板「${name}」当前版本 ${label} 缺少表头记录。${SETTINGS_HINT}` };
+    const structure = version.structure || {};
+    let current;
+    const describedHeaders = inputStructureHeadersOf(resource, version);
+    if (single) {
+      const headers = describedHeaders ? describedHeaders[0] : structure.comparableValues;
+      if (!Array.isArray(headers) || !headers.length) return missingRecord;
+      current = { headers: [...headers] };
+    } else {
+      const described = new Map((Array.isArray(structure.sheets) ? structure.sheets : []).map((sheet) => [sheet.name, sheet.headers]));
+      if (spec.sheets.some((sheet) => !Array.isArray(described.get(sheet.name)) || !described.get(sheet.name).length)) return missingRecord;
+      current = { sheets: Object.fromEntries(spec.sheets.map((sheet) => [sheet.name, [...described.get(sheet.name)]])) };
+    }
+    log({ level: 'info', message: `模板文件：${name} 使用用户版本 ${label}（导入识别结构）`, details: [`SHA-256：${version.sha256.slice(0, 12)}`] });
+    return { status: 'user', versionId: currentVersionId, label, ...current };
   }
 
   // 从一个版本切到另一个版本会移除的、已被场景使用的取值（与导入预检的场景引用保护同口径）。
@@ -685,7 +790,8 @@ function createTemplateResourceService({
     const inspected = await inspectUserBytes(resource, bytes, {
       builtinSheetNames: (builtin.sheets || []).map((sheet) => sheet.name),
       currentValues: baseline.values || [...referencedValuesOf(resource, references)],
-      references: { fundTypeValues: [...references.fundTypeValues], gatewayFields: [...references.gatewayFields] },
+      peerStructures: inputStructureOf(resource.id) ? await peerStructuresOf(resource, snapshot) : [],
+      references: Object.fromEntries(Object.entries(references).map(([key, values]) => [key, [...values]])),
       describe: true
     });
     const contract = inspected.contract;
@@ -704,11 +810,18 @@ function createTemplateResourceService({
         : `与 ${same.label} 内容相同，可在“版本”中直接启用`);
     } else if (contract.ok) {
       const enumLike = resource.type === 'enum' || resource.id === 'gateway-recon';
-      add('与当前版本', 'info', enumLike
-        ? (contract.diff.added.length || contract.diff.removed.length
+      const changed = contract.diff.added.length || contract.diff.removed.length;
+      let detail = '表头不变，样式或内容有变化';
+      if (enumLike) {
+        detail = changed
           ? `新增 ${contract.diff.added.length} 个 · 移除 ${contract.diff.removed.length} 个`
-          : '取值不变，文件内容有变化')
-        : '表头不变，样式或内容有变化');
+          : '取值不变，文件内容有变化';
+      } else if (inputStructureOf(resource.id)) {
+        detail = changed
+          ? `增加 ${contract.diff.added.length} 列 · 删除 ${contract.diff.removed.length} 列`
+          : '列名不变，列顺序或其他内容有变化';
+      }
+      add('与当前版本', 'info', detail);
     }
     checks.push(...usageChecks(resource, contract.ok));
 
@@ -769,6 +882,13 @@ function createTemplateResourceService({
       if (versions.some((version) => version.sha256 === pending.sha256)) {
         pendingImports.delete(importToken);
         return { status: 'failed', message: '已存在内容相同的版本' };
+      }
+      if (enable === true) {
+        const conflict = await peerConflictOf(resource, (inputStructureHeadersOf(resource, pending) || [null])[0], snapshot);
+        if (conflict) {
+          pendingImports.delete(importToken);
+          return { status: 'failed', message: `不能启用：与「${conflict.name}」当前结构相同，导入时无法区分，请重新校验` };
+        }
       }
       const versionId = `v${nextVersionNo}`;
       const label = labelOf(versionId);
@@ -852,6 +972,10 @@ function createTemplateResourceService({
           const names = `${removed.values.slice(0, 5).join('、')}${removed.values.length > 5 ? ` 等 ${removed.values.length} 个` : ''}`;
           return { status: 'failed', message: `${toLabel} 不能启用：缺少已被场景使用的取值 ${names}` };
         }
+        if (inputStructureOf(resource.id)) {
+          const conflict = await peerConflictOf(resource, (inputStructureHeadersOf(resource, target) || [null])[0], snapshot);
+          if (conflict) return { status: 'failed', message: `${toLabel} 不能启用：与「${conflict.name}」当前结构相同，导入时无法区分` };
+        }
       }
       const action = versionId === BUILTIN_VERSION_ID ? '恢复默认' : '启用';
       const createdAt = now().toISOString();
@@ -919,7 +1043,7 @@ function createTemplateResourceService({
 
   function listChanges() {
     if (!versioning) return { status: 'success', changes: [] };
-    const names = new Map(TEMPLATE_RESOURCES.map((resource) => [resource.id, fileNameOf(resource).replace(/\.xlsx?$/i, '')]));
+    const names = new Map(TEMPLATE_RESOURCES.map((resource) => [resource.id, displayNameOf(resource)]));
     return {
       status: 'success',
       changes: store.listTemplateResourceChanges(MAX_CHANGES).map((change) => ({
@@ -944,6 +1068,7 @@ function createTemplateResourceService({
     source,
     resolveCurrentFile,
     currentRuntimeValues,
+    currentInputStructure,
     rememberPickedFile,
     prepareImport,
     discardImport,

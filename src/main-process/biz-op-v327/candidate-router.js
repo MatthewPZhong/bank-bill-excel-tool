@@ -116,6 +116,8 @@ function createCandidateRouter({ payloadStore, taskRunId, intentDigest, safePoin
       current.writer.append(values);
       metrics.peakTransactionChargedBytes = Math.max(metrics.peakTransactionChargedBytes, acceptedCharge);
       route.rowCount += 1; current.part.rowCount += 1; metrics.insertedRows += 1;
+      // 导入时为用户结构（设置 → 模板文件）：同一次导入的流水原件共用计划冻结的结构，按数据集记录一份。
+      if (Array.isArray(source.sourceHeaders) && source.sourceHeaders.length && !route.sourceHeaders) route.sourceHeaders = [...source.sourceHeaders];
       let sourceInfo = route.sources.get(source.artifactId);
       if (!sourceInfo) {
         allocateMetadata();
@@ -154,7 +156,9 @@ function createCandidateRouter({ payloadStore, taskRunId, intentDigest, safePoin
         }
         safePoint();
         const sources = [...route.sources.values()].sort((a, b) => a.order - b.order);
-        const sourceManifestDigest = hash({ version: 1, kind: route.kind, dataDate: route.dataDate, sources });
+        // sourceHeaders 计入来源清单摘要，不计入 inputFingerprint：同一原件的表头由其字节决定，对应结果只取决于原件本身。
+        const structure = route.sourceHeaders ? { sourceHeaders: route.sourceHeaders } : {};
+        const sourceManifestDigest = hash({ version: 1, kind: route.kind, dataDate: route.dataDate, sources, ...structure });
         const inputFingerprint = hash({ version: 1, kind: route.kind, dataDate: route.dataDate,
           cellContractVersion: CELL_CONTRACT_VERSION, ruleVersion: RULE_VERSION,
           sources: sources.map(({ sha256, sheetName, bu, rowCount }) => ({ sha256, sheetName, bu, rowCount }))
@@ -162,7 +166,7 @@ function createCandidateRouter({ payloadStore, taskRunId, intentDigest, safePoin
         const started = Date.now();
         const token = await payloadStore.sealCandidate({ taskRunId, objectId: route.objectId, objectKind: 'DATASET', intentDigest,
           catalog: { kind: route.kind, dataDate: route.dataDate, sources, sourceManifestDigest, inputFingerprint,
-            cellContractVersion: CELL_CONTRACT_VERSION, ruleVersion: RULE_VERSION },
+            cellContractVersion: CELL_CONTRACT_VERSION, ruleVersion: RULE_VERSION, ...structure },
           parts: route.parts.map(({ name, rowCount }) => ({ name, rowCount })) });
         references.push({ objectId: token.ref, digest: token.sha256 });
         metrics.sealMs += Date.now() - started;

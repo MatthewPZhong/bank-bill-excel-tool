@@ -263,6 +263,30 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     );
   });
 
+  test('导入 IPC 被拒时转为失败结果，去掉 Electron 前缀与错误类名，四个导入调用均有兜底', () => {
+    const module = loadRendererModule();
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(module.importFailureFromError(
+        new Error("Error invoking remote method 'position-reconciliation:source:prepare-import': PositionReconciliationError: 预检后没有可提交的普通链接原始表"),
+        '链接原始表导入失败'
+      ))),
+      { status: 'failed', message: '预检后没有可提交的普通链接原始表', detailLines: [] }
+    );
+    assert.equal(
+      module.importFailureFromError(new Error("Error invoking remote method 'x': Error [ERR_IPC]: 通道已关闭"), '失败').message,
+      '通道已关闭'
+    );
+    assert.equal(module.importFailureFromError(null, '链接原始表导入失败').message, '链接原始表导入失败');
+    for (const call of [
+      'api.prepareBankImport()',
+      'api.applyBankImport(result.token)',
+      'api.prepareSourceImport()',
+      'api.applySourceImport(item.token)'
+    ]) {
+      assert.ok(positionRenderer.includes(`guardImportCall(() => ${call}`), call);
+    }
+  });
+
   test('独立控制器接通导入、管理、运行、导出、回导和确认，非一期功能继续占位', () => {
     assert.ok(
       html.indexOf('./src/renderer-position-reconciliation.js') < html.indexOf('./src/renderer.js'),

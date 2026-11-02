@@ -55,7 +55,9 @@ async function run() {
     : rawPayload;
   const inspectionOptions = { shouldCancel: () => cancelRequested,
     onProgress: (progress) => parentPort.postMessage({ type: 'progress', progress }) };
-  if (action === 'inspect-plan') return inspectWorkbookImportPlan(payload.filePaths, inspectionOptions);
+  if (action === 'inspect-plan') {
+    return inspectWorkbookImportPlan(payload.filePaths, { ...inspectionOptions, sourceStructures: payload.sourceStructures || null });
+  }
   if (action === 'revalidate-plan') { await revalidateImportPlan(payload.plan, inspectionOptions); return { valid: true }; }
   const db = openDb(workerData.dbPath);
   try {

@@ -580,7 +580,10 @@
           if (resource.effect) items.push(['生效时机', escapeHtml(`${resource.effect}；运行中的任务不切换`)]);
         }
         if (resource.twin) {
-          items.push(['内容相同', `<button class="template-center-link" type="button" data-action="goto" data-resource-id="${escapeHtml(resource.twin)}">${escapeHtml(nameOf(resource.twin))}</button>`]);
+          const link = `<button class="template-center-link" type="button" data-action="goto" data-resource-id="${escapeHtml(resource.twin)}">${escapeHtml(nameOf(resource.twin))}</button>`;
+          items.push(resource.twinNote
+            ? ['同一系统导出', `${link}（${escapeHtml(resource.twinNote)}）`]
+            : ['内容相同', link]);
         }
         if (resource.currentTemplate) {
           items.push(['当前模板', `<button class="template-center-link" type="button" data-action="goto" data-resource-id="${escapeHtml(resource.currentTemplate)}">${escapeHtml(nameOf(resource.currentTemplate))}</button>`]);

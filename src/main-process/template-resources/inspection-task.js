@@ -159,9 +159,13 @@ async function runInspectionTask({ task, resource, bytes, context = {} }) {
   const contract = await inspectContract(resource.id, canonical, {
     builtinSheetNames: context.builtinSheetNames,
     currentValues: context.currentValues || [],
+    peerStructures: Array.isArray(context.peerStructures) ? context.peerStructures : [],
     references: {
       fundTypeValues: new Set(references.fundTypeValues || []),
-      gatewayFields: new Set(references.gatewayFields || [])
+      gatewayFields: new Set(references.gatewayFields || []),
+      reconIdFixMainFields: new Set(references.reconIdFixMainFields || []),
+      reconIdFixOppFields: new Set(references.reconIdFixOppFields || []),
+      bankFields: new Set(references.bankFields || [])
     }
   });
   // 结构描述只在契约检查通过时进行：未通过的文件不会被保存，也就不再多读一遍。

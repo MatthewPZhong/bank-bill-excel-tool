@@ -174,9 +174,14 @@ if (__missingRoColumns.length > 0) {
   );
 }
 
+// 中台退款订单在设置 → 模板文件导入新结构时必须保留且同名的列：回填原样复制的 15 列，加上按名读取的「状态」
+//   （仅 SUBMITTED 参与）；其余列可改名、增删。入会话前按内置列名对应（见 linked-structure-signatures）。
+const REFUND_ORDER_REQUIRED_COLUMNS = Object.freeze([...REFUND_RO_COLUMNS, '状态']);
+
 module.exports = {
   REFUND_BACKFILL_FIELD_MAP,
   REFUND_BANK_COLUMNS,
+  REFUND_ORDER_REQUIRED_COLUMNS,
   REFUND_RO_COLUMNS,
   REFUND_TEMPLATE_HEADERS,
   MTX_FEATURE,

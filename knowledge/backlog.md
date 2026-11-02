@@ -20,6 +20,48 @@
 
 ## 未实施
 
+### B41（P3 · 顺延）重复入账匹配 Paired Parser 与平盘旧导入引擎未接入银行对账单导入识别结构
+
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §15 D19）
+- **影响**：重复入账匹配的 Paired Parser（`paired-parser-dispatch` / `spool-writer`，测量门禁未批准，生产走主进程 `importFiles`）与平盘旧导入引擎（`readers.readBankFiles`，生产为流式引擎）仍只认内置 46 / 49 列；启用了用户版本时，这两条路径会拒绝按新结构导出的银行对账单。生产路径已接入。当前生产不受影响
+- **关闭条件**：启用 Paired Parser 前，把当前结构写入 spool descriptor（`normalizeSpoolDescriptor` 增加可选字段）并传给 `readBankStatement`；旧引擎如需继续保留，同样经 `bankSourceStructure` 识别；补对应回归测试
+- **目标版本**：未定（随 Paired Parser 启用或旧引擎退役）
+
+### B40（P3 · 顺延）VCC OP 发生额计算的 Parser Worker 路径未接入「流水对账单」当前结构
+
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §14）
+- **影响**：`vcc-op-calc/parser-core.js` / `parser-pipeline.js`（`production.enabled=false`，默认 IPC 未切换）的 worker 输入键固定（`PARSER_INPUT_KEYS`），仍按内置 28 列读取；启用了用户结构版本时，该路径会把新结构文件判为表头不符。生产扫描路径（`vcc-op-calc-session.streamScanAndCompute`）已接入。当前生产不受影响
+- **关闭条件**：启用 Parser Pipeline 前，在 Main 侧扫描开始时解析当前结构，作为新的 worker 输入键传给 `streamFlowFile`，补对应回归测试
+- **目标版本**：未定（随 Parser Pipeline 启用）
+
+### B39（P3 · 顺延）资金对账后台 worker 未接入银行账单处理链接表与银行对账单当前结构
+
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §12.3 K4、§15 D19）
+- **影响**：`fund-recon-worker/source-readers.js` 的退款订单按固定签名 `ZHONGTAI_REFUND_ORDER_SIGNATURE` 读取（网关来源走旧的 `readGatewayRecon`），银行对账单按内置 46 列读取（`readBankStatement` 未传当前结构）；该后台路径生产未启用（`fund-recon:import` 未开启 production）。启用了「中台退款订单」或「银行对账单（导入识别结构）」用户版本时，该路径会把新结构文件判为表头不符，或按内置位置读出错列。传统 IPC 路径（链接表管理、导入文件）已接入。当前生产不受影响
+- **关闭条件**：启用后台路径前，在准备阶段读取 `refund-order` 与 `bank-statement-input` 当前结构（`resolveLinkedSignatures`、`resolveBankStatementStructure`），读取后对应回内置列名，补对应回归测试
+- **目标版本**：未定（随后台资金对账启用）
+
+### B38（P3 · 顺延）单据对账托管服务未接入「单据对账导出不平」当前结构
+
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §10）
+- **影响**：`recon-id-fix-service/service.js` 的托管导入（生产未启用，单测断言 production 保持 false）仍按内置结构读取 4 张工作表；启用了用户结构版本时，该路径会把改名后的文件判为表头不符。传统 IPC 路径已接入。当前生产不受影响
+- **关闭条件**：启用托管路径前，在准备阶段（同步回调之前）读取当前结构并传入 `readReconIdFixFile`，补对应回归测试
+- **目标版本**：未定（随托管服务启用）
+
+### B37（P3 · 顺延）平盘后台 managed 导入未接入链接原始表当前结构，且全部文件失败时抛错
+
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §6 K2）；编号接续 `release/v3.2.14` 的 B35
+- **影响**：`background-execution/adapters/position-import-adapter.js`（生产 `production.enabled: false`）启动来源导入时不传 `contractOptions.sourceStructures`，启用了用户结构版本时仍按内置结构识别；选中文件全部被拒时 `authorizeApply` 落到未配置的授权器并抛错，不返回逐文件原因。当前生产不受影响
+- **关闭条件**：启用该路径前，准备阶段按当前结构冻结并传入 Worker，全部失败时返回逐文件失败结果；补对应回归测试
+- **目标版本**：未定（随 managed 导入启用）
+
+### B36（P2 · 已知问题）平盘启用后在已有数据上切换链接原始表结构，重导的重叠记录可能被再次自动匹配（资金口径）
+
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §3 D5、§6 K1）
+- **影响**：原始行以表头为键保存，表头也参与 `row_hash`。改名或增删列后重导与旧数据重叠的记录，会生成同一业务单号的新记录；匹配时只要存在未消费候选就自动确认（`matching-engine.js` `candidateEvaluation`），已被确认运行消费的同单号旧记录只在没有其他候选时才转人工，存在重复消费风险。内容变化后重导也有同类风险。用户确认平盘尚未正式启用、没有旧数据，本轮不处理
+- **关闭条件**：平盘正式启用前评估并实现防重策略（如同单号已被消费的记录一律转人工），经人工复核后补回归测试
+- **目标版本**：平盘正式启用前
+
 ### B35（P2 · 已知问题）网银按文件名映射：同一账号跨模板时，断档补录的人工种子被另一模板的计算种子覆盖（资金口径）
 
 - **来源**：2026-10-29 Codex 第四轮只读审查 `release/v3.2.14`（`29e1dd9c`），按代码核实成立，用户决定本版不改；见 `changes/v3.2.14/release.md`「审查与处理」

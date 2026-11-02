@@ -294,6 +294,8 @@ async function applyPositionBankBatch(input = {}) {
             allowMainThread: false,
             sstTempRoot: path.join(descriptor.stagingDir, 'sst-bank-apply'),
             ...(input.sstOptions || {}),
+            // 与预检相同的冻结结构（银行对账单导入识别结构当前用户版本，D17）。
+            bankSourceHeaders: input.bankSourceHeaders || null,
             onRow: ({ row, excelRowNumber, sheetName: detectedSheet }) => {
               sheetName = detectedSheet;
               stats.scannedNonBlankRows += 1;

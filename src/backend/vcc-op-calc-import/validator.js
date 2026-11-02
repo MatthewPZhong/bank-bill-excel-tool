@@ -17,21 +17,22 @@ function normalizeHeaderCell(value) {
 }
 
 // 流水对账单表头校验（28 列，列数 + 顺序 + 内容三段式，仿 bank-bu-recon validator buildHeaderValidator）
-function validateFlowHeaders(actualHeaders) {
+//   expectedHeaders：设置 → 模板文件当前版本的表头（缺省为内置 28 列）。
+function validateFlowHeaders(actualHeaders, expectedHeaders = FLOW_HEADERS) {
   const templateLabel = '流水对账单';
   if (!Array.isArray(actualHeaders)) {
     return { ok: false, error: `${templateLabel} 表头不可读：不是数组`, detailLines: [] };
   }
 
   const actualLen = actualHeaders.length;
-  const expectedLen = FLOW_HEADERS.length;
+  const expectedLen = expectedHeaders.length;
 
   if (actualLen !== expectedLen) {
     return {
       ok: false,
       error: `${templateLabel} 表头列数不匹配：模板 ${expectedLen} 列，文件 ${actualLen} 列`,
       detailLines: [
-        `模板表头：${FLOW_HEADERS.join(' | ')}`,
+        `模板表头：${expectedHeaders.join(' | ')}`,
         `文件表头：${actualHeaders.map(normalizeHeaderCell).join(' | ')}`
       ]
     };
@@ -40,7 +41,7 @@ function validateFlowHeaders(actualHeaders) {
   const mismatches = [];
   for (let i = 0; i < expectedLen; i++) {
     const actual = normalizeHeaderCell(actualHeaders[i]);
-    const expected = FLOW_HEADERS[i];
+    const expected = expectedHeaders[i];
     if (actual !== expected) {
       mismatches.push({ index: i, actual, expected });
     }

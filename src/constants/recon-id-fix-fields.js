@@ -36,6 +36,18 @@ const ORDER_REPAIR_FIELDS = Object.freeze([
   'SubBizType'
 ]);
 
+// 单据模式程序按列名读取的列（设置 → 模板文件导入的新结构必须保留且同名；其余列可改名、调序或增减）。
+//   两张账单：C4 引擎读取的 BillDate / Amount / OrderId / BizType / reconId / createTime（BillDate 为空时补位），
+//   以及「订单修复」输出按名复制的 12 列（Type / Reference / SubBizType 由程序填写，不读取输入）。
+//   对账结果：子业务类型自动模式读取的 5 列。改动 c4-recon-id-fix 按名读取的列时同步这里。
+const RECON_ID_FIX_BILL_REQUIRED_FIELDS = Object.freeze([
+  'BillDate', 'Bank', 'MerchantId', 'OrderId', 'DataSource', 'OppBu', 'OriginBillSource', 'BillType',
+  'Currency', 'Amount', 'OriginBillBizId', 'ReconBillBizId', 'BizType', 'reconId', 'createTime'
+]);
+const RECON_RESULT_REQUIRED_FIELDS = Object.freeze([
+  '业务类型', '业务部门单号', '对手部门单号', '业务部门单据子类型', '对手部门单据子类型'
+]);
+
 // sheet 名常量
 const RECON_RESULT_SHEET_NAME = '对账结果';
 const BUSINESS_BILL_SHEET_NAME = '业务部门账单';
@@ -47,6 +59,8 @@ module.exports = {
   BUSINESS_BILL_FIELDS,
   OPPONENT_BILL_FIELDS,
   ORDER_REPAIR_FIELDS,
+  RECON_ID_FIX_BILL_REQUIRED_FIELDS,
+  RECON_RESULT_REQUIRED_FIELDS,
   RECON_RESULT_SHEET_NAME,
   BUSINESS_BILL_SHEET_NAME,
   OPPONENT_BILL_SHEET_NAME,

@@ -13,7 +13,7 @@ const { importFiles } = require('../../src/backend/vcc-financial-op/import-servi
 const { preflightCalculation, calculateMonth } = require('../../src/backend/vcc-financial-op/calculator');
 
 async function createReviewFixture(t, { subjects = ['甲', '乙'], pendingSameCurrency = false,
-  pendingRemark = '=1+1', systemBillDate = '2026-06-30', writeOptions = {}, beforeImport } = {}) {
+  pendingRemark = '=1+1', systemBillDate = '2026-06-30', writeOptions = {}, beforeImport, sourceStructures = null } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-review-'));
   const dbPath = path.join(dir, 'business.sqlite'), archiveRoot = path.join(dir, 'archive');
   fs.mkdirSync(path.join(archiveRoot, 'blobs'), { recursive: true });
@@ -24,7 +24,8 @@ async function createReviewFixture(t, { subjects = ['甲', '乙'], pendingSameCu
   t.after(() => { db.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   const book = XLSX.utils.book_new();
   const add = (name, type, rows) => {
-    const headers = type === T.SYSTEM_OP ? SYSTEM_OP_HEADERS : getSourceDefinition(type).headers;
+    // sourceStructures：按设置 → 模板文件用户结构导出的原表（{ [sourceType]: { headers, versionLabel } }）。
+    const headers = sourceStructures?.[type]?.headers || (type === T.SYSTEM_OP ? SYSTEM_OP_HEADERS : getSourceDefinition(type).headers);
     XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([headers, ...rows.map((row) => headers.map((h) => row[h] ?? ''))], writeOptions), name);
   };
   add('充值', T.RECHARGE, subjects.map((subject) => ({ 订单号: `0001-${subject}`, BillDate: '2026-06-01', 公司主体: subject,
@@ -40,7 +41,7 @@ async function createReviewFixture(t, { subjects = ['甲', '乙'], pendingSameCu
     主体: subject, 业务部门: 'VCC', 币种, 财务余额: '0', 财务主体余额: '0', 创建时间: '2026-07-01 00:00:00' }))));
   const filePath = path.join(dir, '全部主体.xlsx'); XLSX.writeFile(book, filePath, writeOptions);
   if (beforeImport) await beforeImport(filePath);
-  const plan = await inspectWorkbookImportPlan([filePath]);
+  const plan = await inspectWorkbookImportPlan([filePath], { sourceStructures });
   const files = buildMemberFiles(resolveImportPlan(plan, { planId: plan.planId,
     subjectBySourceId: Object.fromEntries(plan.sources.filter((s) => s.requiresSubject).map((s) => [s.sourceId, s.sheetName])), excludedSheetIds: [] }));
   const taskRunId = 'review-input-task';
