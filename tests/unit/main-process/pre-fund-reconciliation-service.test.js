@@ -1549,3 +1549,40 @@ test.describe('PreFundReconciliationService', () => {
     assert.equal(fs.readFileSync(secondPath, 'utf8'), 'SECOND-ORIGINAL');
   });
 });
+
+// v3.2.14：设置 → 模板文件「银行对账单（导入识别结构）」当前用户版本（D17）。按新结构导出的银行对账单读出后对应回内置 46 列，
+//   参与 / 跳过 / 排除的分类与内置结构同值文件一致；内置结构文件同时接受。
+test('银行对账单按当前用户版本导入：分类与内置结构同值文件一致，内置结构同时接受', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pre-fund-bank-structure-'));
+  try {
+    const versionHeaders = [...BANK_STATEMENT_FIELDS.filter((field) => field !== '分类人').map((field) => (field === '合并单号' ? '合并编号' : field)), '新增列'];
+    const rows = [
+      { Channel: 'CIT', Currency: 'USD', 'Credit Amount': '10', ReconciliationId: 'R-1', 合并编号: 'M-1' },
+      { Channel: 'CIT', 'Debit Amount': '2', ReconciliationId: '' },
+      { Channel: 'CIT', 'Credit Amount': '0', 'Debit Amount': '' }
+    ];
+    const writeWith = (filePath, headers, mapRow) => {
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([headers, ...rows.map((row) => {
+        const values = mapRow({ FundType: 'Inbound', ...row });
+        return headers.map((header) => values[header] ?? '');
+      })]), '渠道对账单');
+      XLSX.writeFile(workbook, filePath);
+    };
+    const v2File = path.join(dir, 'bank-v2.xlsx');
+    const builtinFile = path.join(dir, 'bank-builtin.xlsx');
+    writeWith(v2File, versionHeaders, (row) => row);
+    writeWith(builtinFile, BANK_STATEMENT_FIELDS.slice(), ({ 合并编号: merge, ...row }) => ({ ...row, 合并单号: merge }));
+    const summaryOf = (filePath) => {
+      const service = makeService({ userDataDir: dir, database: attachRunMirrorRepository({}), templatePath: path.join(dir, 'unused.xlsx') });
+      const imported = service.importBank(filePath, nextTaskRunId('bank-structure'), { sourceHeaders: versionHeaders });
+      return [imported.acceptedRows, imported.skippedZeroRows, imported.excludedEmptyIdRows];
+    };
+    assert.deepEqual(summaryOf(v2File), [1, 1, 1]);
+    assert.deepEqual(summaryOf(builtinFile), [1, 1, 1]);
+  } finally {
+    for (const db of mirrorDatabases) db.close();
+    mirrorDatabases = [];
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

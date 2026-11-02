@@ -393,3 +393,55 @@ Codex 已核查未发现缺陷的方面：冻结结构在预检、重放、异�
 - `npm run release-check` 通过：lint；架构检查 807/807 文件；smoke；单测 9763/9767（4 项为既有条件跳过）；集成 90/90 脚本（新增 `flow-statement-template-version` 3/3）。
 - 新增 / 调整的回归：业务 OP 真实模块宿主上按当前结构导入、数据集记录导入时结构、「流水校验原表」与校验表导出、恢复默认后已导入数据集仍可导出、内置结构文件被拒且错误报告列出逐列差异、适配器结构宽度外数据拒绝；VCC OP 计算按当前结构读取并对应回内置列、内置结构文件被拒附指引；模板预检（必用列、两种读法不一致的布尔表头）、版本不可用时中止；既有业务 OP、VCC OP 与模板测试全部通过。
 - 未执行：真实应用 GUI（本机开发版启动受已知 BizOP 资源预检阻断）与 Windows 安装版实测。
+
+## 15. 第二批 · 银行对账单（导入识别结构）
+
+### 15.1 决策（用户，2026-11-01 批准方案）
+
+| 编号 | 决策 |
+| --- | --- |
+| D17 | 启用新版本后同时接受“当前版本”与“内置 46 列”：本工具自身导出仍为内置 46 列（D4），下游模块须能继续导入；对本表偏离 D2。两者都不符时报错同时列出与两者的差异 |
+| D18 | 新增独立资源「银行对账单（导入识别结构）」（`bank-statement-input`），现有 `bank-statement` 仍为重复入账匹配输出样式模板，契约与已有版本不变；两者互标同一系统导出、版本各自独立。目录增加显示名字段，两个资源共用同一随包文件 |
+| D19 | 接入银行账单处理（批量导入含入金表分流、链接表管理导入入金表）、前置资金对账、重复入账匹配、平盘 46 列入口；平盘 49 列结果回读不变；后台资金对账 worker 并入 B39。分两次提交：①统一读取、新资源、银行账单处理、前置资金对账；②重复入账匹配、平盘 |
+
+### 15.2 现状（取证 2026-11-01）
+
+- 46 列（`BANK_STATEMENT_FIELDS`，PRD D7 固定列结构）既是外部「渠道对账单」导出（输入），也是本工具多个导出的格式（银行账单处理导出、命中明细、退款回填、线下付款配对等），在模块间流转；场景配置的银行字段下拉取自该常量（preload 内联副本）。
+- 读取：`readBankStatement`（`渠道对账单` Sheet，逐列一致）——银行账单处理批量导入（另有单文件入口，渲染层无调用方）、前置资金对账、重复入账匹配解析 worker；平盘银行导入接受 46 / 49 列。识别器：`BANK_STATEMENT_SIGNATURE`（批量导入）与 `BANK_DEPOSIT_SIGNATURE`（链接表管理，同 46 列）。均不事后重读原件（入金表只存 14 个字段）。
+- 按名读取（取证 `src` 字面量引用，排除 Bank BU 自有列表）：BizId、BillDate、ValueDate、Channel、地区、MerchantId、Currency、Credit Amount、Debit Amount、ReconciliationId、ChannelOrderNo、CustomerRef、Account Reference、Transaction Description、Extra Information、Payment Detail、Payee Name、Payee CardNo、Drawee Name、Drawee CardNo、Extra Fee、FundType、Remark-description、关联大账号、清算网络。其余 21 列只随行写出。
+- 场景引用银行字段：C1 / C2 / 内置固定场景的 `field`、`searchFields`、`leftField`、`rightField`、`requireBankZeroField`；C3 的 `bankField`、银行侧条件与赋值字段。C4 引用业务账单字段，不涉及。
+
+### 15.3 方案
+
+- 统一读取：`readBankStatement(filePath, { sourceHeaders })` 先按内置 46 列，再按当前版本识别；按当前版本读出的行对应回内置 46 列（同名优先、同位置非内置名视为改名、其余置空、多出列不导入）。输出、场景字段、preload 常量、入金表裁剪与存量数据不变。
+- 识别器：银行对账单、入金表各加一条当前版本的逐列一致签名（`structureExact`），内置签名保留；同一表多条签名命中只计一次。
+- 必用列：§15.2 按名读取的 25 列；另以场景引用保护覆盖场景配置的银行字段（只拦当前可用而新版本不可用的列）。
+- 冻结：银行账单处理、前置资金对账每次导入时解析当前结构；重复入账匹配写入解析 worker 输入；平盘冻结进银行导入任务。
+- 报错：两种结构都不符时，以 1b 工具给出与内置 / 当前版本中最接近者的逐列差异与指引。
+
+### 15.4 风险
+
+| 编号 | 风险 | 处理 |
+| --- | --- | --- |
+| K9 | 场景引用的银行字段在新版本中被删除，场景运行时静默读到空值 | 场景引用保护在预检与启用时拦下 |
+| K10 | 入金表与银行对账单同构，靠入口区分（链接表管理只认入金表，批量导入按 Channel 二次分流） | 当前版本签名保持同样分工，补回归测试 |
+| K11 | 恢复默认 | 内置结构始终接受，已导出文件不失效 |
+
+### 15.5 实施记录（第一次提交：统一读取、新资源、银行账单处理、前置资金对账）
+
+| 文件 | 内容 |
+| --- | --- |
+| `template-resources/catalog.js`、`service.js` | 资源增加 `displayName`（共用随包文件时区分用途，服务统一用 `displayNameOf`）；新增 `bank-statement-input`（「银行对账单（导入识别结构）」），`bank-statement` 只保留重复入账匹配样式用途，两者 `twin` 互标 |
+| `template-resources/input-structures.js`、`contracts.js`、`service.js` | 单表结构可指定工作表名（「渠道对账单」）；登记 `bank-statement-input`（`storage: 'canonical'`，`referenceKey: 'bankFields'`，口径核对与 `readBankStatement` 同读法） |
+| `template-resources/contracts.js`、`inspection-task.js` | `collectScenarioReferences` 增加 `bankFields`（C1 / C2 / 内置固定场景的字段键、C3 银行侧） |
+| `constants/bank-statement-fields.js` | 新增 `BANK_STATEMENT_REQUIRED_FIELDS`（§15.2 的 25 列；渲染层不用，无需同步 preload） |
+| `bank-statement-io.js` | `readBankStatement(filePath, { sourceHeaders })`：先内置 46 列、再当前版本，结果带 `structure`；两者都不符时附与最接近者的差异；只认内置时原错误末行附指引；新增 `readBankStatementHeaderRow` |
+| `linked-structure-signatures.js`、`table-type-detector.js` | `withBankStatementStructure` 为银行对账单 / 入金表追加当前版本签名，`versionSignatureOf` 取用；识别器同表多签名只计一次，命中结果带 `matchedVersion` |
+| `main-process/bank-statement-structure.js`（新增）、`main.js`、`pre-fund-reconciliation/service.js` | 解析当前结构（不可用时只认内置，不中止）；导入文件（含入金表二次分流用同结构签名）、链接表管理、单文件导入与前置资金对账导入传入当前结构 |
+
+偏离与说明：
+
+- 当前版本不可用时不中止导入，只认内置 46 列（D17：内置结构始终可导入）；按新结构导出的文件得到差异与指引，模板文件页显示版本不可用。
+- 重复入账匹配与平盘在第二次提交接入；在此之前它们只认内置 46 列（与启用前一致）。
+
+验证结果（第一次提交，2026-11-01，macOS 本机，未提交工作区）：`npm run release-check` 的 lint、架构检查 808/808 文件、smoke、单测 9769/9773（4 项为既有条件跳过）通过；集成阶段首轮 `renderer-lifecycle` 1 项失败（模板文件页用途列表断言仍按旧的 3 个用途，`bank-statement` 现只保留样式用途），已更新 fixture 并补「导入识别结构」显示名与用途断言，随后完整重跑 `npm run test:integration` 91/91 通过（新增 `bank-statement-input-template-version` 4/4，`renderer-lifecycle` 324/324）。未执行：真实应用 GUI 与 Windows 安装版实测。

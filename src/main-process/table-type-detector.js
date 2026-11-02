@@ -102,7 +102,8 @@ function getFirstRowColumnCount(meaningfulRows) {
 // meaningfulRows：该 sheet 已读到的有意义行（cell 二维数组，来自全量读或流式头部读取，二者同构）。
 // 判定逻辑与 readers.readRowsWithMetadata 同源——共用 findHeaderMatchPosition 的「连续子序列全等」匹配，
 //   故识别语义与历史完全一致；区别仅在数据来源不再对每签名重读文件（避免大文件 N 次重读 OOM）。
-function runExactLayer(meaningfulRows, candidateSignatures, firstRowColumnCount) {
+// hits（可选）：记录命中来源 { version: Set, builtin: Set }，供调用方判断按哪条签名读取（同一表可有内置与当前版本两条签名）。
+function runExactLayer(meaningfulRows, candidateSignatures, firstRowColumnCount, hits = null) {
   const matchedKeys = [];
 
   for (const signature of candidateSignatures) {
@@ -115,7 +116,10 @@ function runExactLayer(meaningfulRows, candidateSignatures, firstRowColumnCount)
         while (row.length && row[row.length - 1] === '') row.pop();
         return row.length === expected.length && row.every((cell, index) => cell === expected[index]);
       });
-      if (exact) matchedKeys.push(signature.tableKey);
+      if (exact) {
+        matchedKeys.push(signature.tableKey);
+        if (hits) hits.version.add(signature.tableKey);
+      }
       continue;
     }
     const anchor = getL1Anchor(signature);
@@ -144,10 +148,12 @@ function runExactLayer(meaningfulRows, candidateSignatures, firstRowColumnCount)
     const { matchedRowIndex } = findHeaderMatchPosition(meaningfulRows, normalizedAnchor);
     if (matchedRowIndex >= 0) {
       matchedKeys.push(signature.tableKey);
+      if (hits) hits.builtin.add(signature.tableKey);
     }
   }
 
-  return matchedKeys;
+  // 同一张表可有多条签名（银行对账单启用用户版本后同时保留内置签名），命中只计一次。
+  return [...new Set(matchedKeys)];
 }
 
 // L2 模糊层：扫描前 N 行，对每签名计算 signatureHeaders 命中率，返回最佳结果。
@@ -245,8 +251,9 @@ async function detectInSheet(filePath, signatures, sheetName, useStreaming) {
     return { matchedKeys: [], meaningfulRows: null };
   }
   const firstRowColumnCount = getFirstRowColumnCount(meaningfulRows);
-  const matchedKeys = runExactLayer(meaningfulRows, signatures, firstRowColumnCount);
-  return { matchedKeys, meaningfulRows };
+  const hits = { version: new Set(), builtin: new Set() };
+  const matchedKeys = runExactLayer(meaningfulRows, signatures, firstRowColumnCount, hits);
+  return { matchedKeys, meaningfulRows, hits };
 }
 
 // 主入口：识别单个文件的表类型（v2.1.16 F4：扫所有 sheet，任一命中即返回，短路余下 sheet）。
@@ -349,7 +356,10 @@ async function detectTableType(filePath, candidateSignatures = ALL_TABLE_SIGNATU
       // 带回命中的 sheetName（CSV 时为 null，透传），供链接表导入据此从正确 sheet 读表头落库。
       // v3.0.0 块 B / PR-2：带回 streamingEligible（落库是否可走流式整表覆盖；见顶部签名注释）。
       const tableKey = perSheet.matchedKeys[0];
-      return { tableKey, score: 1, status: statusForMatchedKey(tableKey), sheetName, streamingEligible: useStreaming };
+      // matchedVersion：只由当前用户版本签名命中（内置签名同时命中时按内置读取，两者表头相同）。
+      const matchedVersion = Boolean(perSheet.hits && perSheet.hits.version.has(tableKey) && !perSheet.hits.builtin.has(tableKey));
+      return { tableKey, score: 1, status: statusForMatchedKey(tableKey), sheetName, streamingEligible: useStreaming,
+        ...(matchedVersion ? { matchedVersion: true } : {}) };
     }
     if (perSheet.matchedKeys.length > 1) {
       // 同一 sheet 多签名精确命中，无法唯一判定

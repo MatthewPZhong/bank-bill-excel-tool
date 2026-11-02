@@ -242,8 +242,9 @@ class PreFundReconciliationService {
     return this.runStore.deleteAllRunDataAfterArchivePreflight();
   }
 
-  importBank(filePath, producerTaskRunId) {
-    const parsed = readBankStatement(filePath);
+  // sourceHeaders：设置 → 模板文件「银行对账单（导入识别结构）」当前用户版本（同时接受内置 46 列，行对应回内置列）。
+  importBank(filePath, producerTaskRunId, { sourceHeaders = null } = {}) {
+    const parsed = readBankStatement(filePath, { sourceHeaders });
     const rows = parsed.rows.map((row, index) => ({
       ...row,
       _sourceFileName: parsed.fileName,

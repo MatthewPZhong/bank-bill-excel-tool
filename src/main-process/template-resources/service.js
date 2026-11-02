@@ -116,6 +116,8 @@ function createTemplateResourceService({
   const findResource = (resourceId) => TEMPLATE_RESOURCES.find((item) => item.id === String(resourceId || '')) || null;
   const absolutePath = (resource) => path.join(appRoot, ...resource.path.split('/'));
   const fileNameOf = (resource) => path.posix.basename(resource.path);
+  // 显示名：catalog 的 displayName（多个资源共用同一随包文件时区分用途），缺省取文件名。
+  const displayNameOf = (resource) => resource.displayName || fileNameOf(resource).replace(/\.xlsx?$/i, '');
   const replaceable = (resource) => resource.replace.allowed === true && hasContract(resource.id);
   const versionPath = (resourceId, versionId) => path.join(versionRoot, resourceId, `${versionId}.xlsx`);
   const labelOf = (versionId) => `V${String(versionId).replace(/^v/, '')}`;
@@ -360,7 +362,7 @@ function createTemplateResourceService({
       : (allowed ? '' : STORE_UNAVAILABLE_REASON);
     return {
       id: resource.id,
-      name: fileName.replace(/\.xlsx?$/i, ''),
+      name: displayNameOf(resource),
       fileName,
       path: resource.path,
       type: resource.type,
@@ -472,7 +474,7 @@ function createTemplateResourceService({
       released = true;
       leases.delete(leaseId);
     };
-    const name = fileNameOf(resource).replace(/\.xlsx?$/i, '');
+    const name = displayNameOf(resource);
     let result;
     try {
       if (currentVersionId === BUILTIN_VERSION_ID) {
@@ -610,13 +612,12 @@ function createTemplateResourceService({
     for (const sheet of spec ? spec.sheets : []) {
       if (!sheet.referenceKey || !references[sheet.referenceKey]) continue;
       for (const field of references[sheet.referenceKey]) {
-        values.add(sheet.name === null ? field : structureLabel(sheet.name, field));
+        values.add(isSingleSheetStructure(spec) ? field : structureLabel(sheet.name, field));
       }
     }
     return values;
   }
 
-  const displayNameOf = (resource) => fileNameOf(resource).replace(/\.xlsx?$/i, '');
   const sameHeaders = (left, right) => left.length === right.length && left.every((header, index) => header === right[index]);
 
   // 用户版本中与结构规格一一对应的各表表头（结构描述 sheets[].headers，导入时在检查 Worker 中解析）；缺任一表时为 null。
@@ -1042,7 +1043,7 @@ function createTemplateResourceService({
 
   function listChanges() {
     if (!versioning) return { status: 'success', changes: [] };
-    const names = new Map(TEMPLATE_RESOURCES.map((resource) => [resource.id, fileNameOf(resource).replace(/\.xlsx?$/i, '')]));
+    const names = new Map(TEMPLATE_RESOURCES.map((resource) => [resource.id, displayNameOf(resource)]));
     return {
       status: 'success',
       changes: store.listTemplateResourceChanges(MAX_CHANGES).map((change) => ({

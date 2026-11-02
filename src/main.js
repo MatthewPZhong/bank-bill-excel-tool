@@ -332,7 +332,9 @@ const { detectTableType } = require('./main-process/table-type-detector');
 const {
   linkedStructureMismatchLines,
   projectLinkedRow,
-  resolveLinkedSignatures
+  resolveLinkedSignatures,
+  versionSignatureOf,
+  withBankStatementStructure
 } = require('./main-process/linked-structure-signatures');
 // v3.0.3 PR-D（W5）：检测工作目录是否落在 OneDrive 同步路径（纯函数，启动后单次 toast 用）
 const { isStorageRootOnOneDrive } = require('./main-process/onedrive-detector');
@@ -417,6 +419,7 @@ const {
 const { createVccFinancialOpService } = require('./main-process/vcc-financial-op-service');
 const { resolveVccSourceStructures } = require('./main-process/vcc-financial-op-source-structures');
 const { resolveFlowStatementStructure } = require('./main-process/flow-statement-structure');
+const { bankStatementSourceHeaders, resolveBankStatementStructure } = require('./main-process/bank-statement-structure');
 const { createResultExportHandlers } = require('./main-process/vcc-financial-op-result-export-ipc');
 const { acquireResultExportLease } = require('./main-process/vcc-financial-op-result-workbook-runner');
 const {
@@ -5915,7 +5918,9 @@ function registerAppHandlers() {
     async execute(_event, _prepared, taskContext) {
     try {
       const filePath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
-      const result = readBankStatement(filePath);
+      const result = readBankStatement(filePath, {
+        sourceHeaders: bankStatementSourceHeaders(await resolveBankStatementStructure(getTemplateResourceService()))
+      });
       bankStatementSession = {
         filePath: result.filePath,
         fileName: result.fileName,
@@ -16783,7 +16788,9 @@ function registerNewAccountHandlers() {
     if (!opLock.acquired) return { status: 'failed', message: opLock.message };
     try {
     const results = [];
-    const linkedSignatures = await resolveImportSignatures(LINKED_IMPORT_SIGNATURES);
+    // 银行对账单入金表（D17）：启用了导入识别结构用户版本时，内置签名之外追加当前版本签名。
+    const linkedSignatures = withBankStatementStructure(await resolveImportSignatures(LINKED_IMPORT_SIGNATURES),
+      await resolveBankStatementStructure(getTemplateResourceService()));
     for (const filePath of taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath)) {
       const fileName = path.basename(filePath);
       // 识别：链接表导入候选集（4 张 linked 签名 + 入金表签名；detector 默认含全部，这里收窄）。
@@ -16824,7 +16831,9 @@ function registerNewAccountHandlers() {
       //   双保险：理论上 fx-option 已在上方 unsupported 分支拦截，此处仍守卫缺失映射/签名。
       const detectorKey = detected.tableKey;
       const repoKey = LINKED_DETECTOR_TO_REPO_KEY[detectorKey];
-      const signature = getLinkedSignatureByKey(detectorKey, linkedSignatures);
+      // 只由当前版本签名命中（入金表按新结构导出）时按该签名读取并对应回内置列。
+      const signature = (detected.matchedVersion && versionSignatureOf(linkedSignatures, detectorKey))
+        || getLinkedSignatureByKey(detectorKey, linkedSignatures);
       if (detectorKey === 'fx-option' || !repoKey || !signature) {
         results.push({
           fileName,
@@ -16985,7 +16994,10 @@ function registerNewAccountHandlers() {
     const results = [];
     const filePaths = taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath);
     const fileCount = filePaths.length;
-    const batchSignatures = await resolveImportSignatures(ALL_TABLE_SIGNATURES);
+    const bankStructure = await resolveBankStatementStructure(getTemplateResourceService());
+    const batchSignatures = withBankStatementStructure(await resolveImportSignatures(ALL_TABLE_SIGNATURES), bankStructure);
+    // 银行对账单按当前版本读取时，入金表二次分流用同一结构的入金表签名。
+    const bankDepositVersionSignature = versionSignatureOf(withBankStatementStructure([BANK_DEPOSIT_SIGNATURE], bankStructure), 'bank-deposit');
     // 本批是否已建立/合并过银行对账单 session（用于：① 第一个建 vs 后续合并的分支；
     //   ② processingResult / gatewayReconSession 整批只清一次）。
     let bankStatementMerged = false;
@@ -17043,7 +17055,7 @@ function registerNewAccountHandlers() {
         // 🔴 合并语义：第一个建 session；后续校验 headers 一致后追加 rows（不覆盖）。
         //   headers 校验 + rows 合并 + _rowId 全局重编号统一交给 mergeBankStatementRows（资金红线纯函数）。
         try {
-          const result = readBankStatement(filePath);
+          const result = readBankStatement(filePath, { sourceHeaders: bankStatementSourceHeaders(bankStructure) });
 
           // v3.0.7 需求2d（🔴🔴 资金红线）：44 列 bank-statement 命中后的「Channel 二次路由」——
           //   逐行判定 Channel+地区（database.isBankDepositChannelFile，与 C1 状态框前缀同源同模块的纯函数）：
@@ -17078,7 +17090,8 @@ function registerNewAccountHandlers() {
                 fileName,
                 detected,
                 repoKey: 'bank-deposit',
-                signature: BANK_DEPOSIT_SIGNATURE
+                signature: result.structure === 'current' && bankDepositVersionSignature
+                  ? bankDepositVersionSignature : BANK_DEPOSIT_SIGNATURE
               });
               // 仅保留对前端有意义的副作用信息（行数 + 各派生结果），不带 outcome/status（那是 merge 路径 result 的职责）。
               linkedSideEffect = {
@@ -18316,7 +18329,8 @@ function registerPreFundReconciliationHandlers() {
     try {
       const imported = getPreFundReconciliationService().importBank(
         taskContext.fileEvidence.filePlan.inputs[0].filePath,
-        taskContext.batchContext.taskRunId
+        taskContext.batchContext.taskRunId,
+        { sourceHeaders: bankStatementSourceHeaders(await resolveBankStatementStructure(getTemplateResourceService())) }
       );
       return imported;
     } catch (error) {

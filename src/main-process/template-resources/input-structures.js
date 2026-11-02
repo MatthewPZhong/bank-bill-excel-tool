@@ -46,6 +46,7 @@ const {
   ZHONGTAI_REFUND_ORDER_SIGNATURE
 } = require('../../constants/table-signatures');
 const { FT_RECON_FIELD_MAP } = require('../../constants/fund-transfer-recon-fields');
+const { BANK_STATEMENT_FIELDS, BANK_STATEMENT_REQUIRED_FIELDS } = require('../../constants/bank-statement-fields');
 const {
   BIZ_OP_HEADERS,
   FLOW_HEADERS: BIZ_OP_FLOW_HEADERS,
@@ -181,6 +182,12 @@ function vccRuntimeHeaders(sourceType) {
   };
 }
 
+// 银行对账单（导入识别结构）：与 readBankStatement 相同的读法读出「渠道对账单」表头行。
+async function bankStatementRuntimeHeaders(filePath) {
+  const { readBankStatementHeaderRow } = require('../bank-statement-io');
+  return [readBankStatementHeaderRow(filePath)];
+}
+
 // 流水对账单：业务 OP 新版（单 Sheet 富工作簿，第 1 行）与 VCC OP 发生额计算（JSZip 流式解析首行）两种读法。
 async function flowStatementRuntimeHeaders(filePath) {
   const { openSingleSheetRichWorkbook } = require('../../backend/xlsx/rich-workbook');
@@ -283,6 +290,19 @@ const INPUT_STRUCTURES = Object.freeze({
   'vcc-channel': vccSource(VCC_SOURCE_TYPES.CHANNEL, VCC_SOURCE_DEFINITIONS[VCC_SOURCE_TYPES.CHANNEL].headers),
   'vcc-removed-pending': vccSource(VCC_SOURCE_TYPES.PENDING, VCC_SOURCE_DEFINITIONS[VCC_SOURCE_TYPES.PENDING].headers),
   'vcc-system-op': vccSource(VCC_SOURCE_TYPES.SYSTEM_OP, VCC_SYSTEM_OP_HEADERS),
+  // 银行对账单：启用后同时接受内置 46 列（D17）；读出的行对应回内置 46 列。场景引用的银行字段受保护（bankFields）。
+  'bank-statement-input': Object.freeze({
+    group: null,
+    moduleKey: 'bank-statement',
+    storage: 'canonical',
+    sheets: Object.freeze([Object.freeze({
+      name: '渠道对账单',
+      builtinHeaders: () => [...BANK_STATEMENT_FIELDS],
+      required: () => [...BANK_STATEMENT_REQUIRED_FIELDS],
+      referenceKey: 'bankFields'
+    })]),
+    runtimeHeaders: bankStatementRuntimeHeaders
+  }),
   // 业务 OP 新版与 VCC OP 发生额计算共用；业务 OP 账单（OP）不随版本变化，新结构不能与它相同（识别时 OP 优先）。
   'flow-statement': Object.freeze({
     group: null,
@@ -302,9 +322,9 @@ function inputStructureOf(resourceId) {
   return Object.hasOwn(INPUT_STRUCTURES, resourceId) ? INPUT_STRUCTURES[resourceId] : null;
 }
 
-// 单表原表（第 1 个工作表）的结构以表头列表比较与展示；多表原表以「工作表」列名的标签比较与展示。
+// 单表原表（第 1 个工作表，或指定名称的一个工作表）的结构以表头列表比较与展示；多表原表以「工作表」列名的标签比较与展示。
 function isSingleSheetStructure(spec) {
-  return spec.sheets.length === 1 && spec.sheets[0].name === null;
+  return spec.sheets.length === 1;
 }
 
 function structureLabel(sheetName, header) {

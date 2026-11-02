@@ -451,13 +451,21 @@ function inputStructureContract(resourceId) {
       const label = (base, sheet) => (single ? base : `${base} · ${sheet.name}`);
       let sheetNames;
       if (single) {
-        const sheetName = workbook.SheetNames[0];
+        // 单表：第 1 个工作表，或规格指定名称的工作表（如银行对账单的「渠道对账单」）。
+        const named = spec.sheets[0].name;
+        const sheetName = named === null ? workbook.SheetNames[0] : named;
         if (!sheetName) {
           list.add('Sheet 结构', 'fail', '文件中没有工作表');
           return {};
         }
+        if (named !== null && !workbook.SheetNames.includes(named)) {
+          list.add('Sheet 结构', 'fail', `缺少工作表「${named}」`);
+          return {};
+        }
         if (workbook.SheetNames.length > 1) {
-          list.add('Sheet 结构', 'warn', `共 ${workbook.SheetNames.length} 个工作表，只读取第 1 个「${sheetName}」`);
+          list.add('Sheet 结构', 'warn', named === null
+            ? `共 ${workbook.SheetNames.length} 个工作表，只读取第 1 个「${sheetName}」`
+            : `共 ${workbook.SheetNames.length} 个工作表，只读取「${sheetName}」`);
         } else {
           list.add('Sheet 结构', 'pass', `读取「${sheetName}」`);
         }
@@ -601,6 +609,7 @@ function collectScenarioReferences(scenarios = []) {
   const gatewayFields = new Set();
   const reconIdFixMainFields = new Set();
   const reconIdFixOppFields = new Set();
+  const bankFields = new Set();
   const addGateway = (value) => {
     const text = String(value ?? '').trim();
     if (text && text !== CUSTOM_VALUE_SENTINEL) gatewayFields.add(text);
@@ -622,6 +631,7 @@ function collectScenarioReferences(scenarios = []) {
       collectReconIdFixFields(config, reconIdFixMainFields, reconIdFixOppFields);
       continue;
     }
+    collectBankFields(scenario.category, config, bankFields);
     if (scenario.category !== 'gateway-recon-join') continue;
     (Array.isArray(config.reconFields) ? config.reconFields : []).forEach((item) => addGateway(item && item.gwField));
     (Array.isArray(config.conditions) ? config.conditions : [])
@@ -629,7 +639,34 @@ function collectScenarioReferences(scenarios = []) {
       .forEach((item) => addGateway(item.field));
     addGateway(config.assign && config.assign.gwField);
   }
-  return { fundTypeValues, gatewayFields, reconIdFixMainFields, reconIdFixOppFields };
+  return { fundTypeValues, gatewayFields, reconIdFixMainFields, reconIdFixOppFields, bankFields };
+}
+
+// 场景引用的银行对账单字段（内置 46 列名）：C1 / C2 / 内置固定场景按 field、searchFields、leftField、rightField、
+//   requireBankZeroField 读银行行；C3 只取银行侧（bankField、银行侧条件）。字段缺失时引擎静默按空值处理，被引用的列视同必用列。
+const BANK_FIELD_KEYS = new Set(['field', 'searchFields', 'leftField', 'rightField', 'requireBankZeroField']);
+function collectBankFields(category, config, target) {
+  const add = (value) => {
+    const text = String(value ?? '').trim();
+    if (BANK_STATEMENT_FIELDS.includes(text)) target.add(text);
+  };
+  if (category === 'gateway-recon-join') {
+    (Array.isArray(config.reconFields) ? config.reconFields : []).forEach((item) => add(item && item.bankField));
+    (Array.isArray(config.conditions) ? config.conditions : [])
+      .filter((item) => item && item.side === '银行')
+      .forEach((item) => add(item.field));
+    add(config.assign && config.assign.bankField);
+    return;
+  }
+  const walk = (node) => {
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (!node || typeof node !== 'object') return;
+    for (const [key, value] of Object.entries(node)) {
+      if (BANK_FIELD_KEYS.has(key)) (Array.isArray(value) ? value : [value]).forEach(add);
+      else walk(value);
+    }
+  };
+  walk(config);
 }
 
 // C4 单据模式场景引用的账单字段：条件字段按主 / 从边，字段对的 leftField 读主边（业务部门账单）、rightField 读从边
@@ -673,6 +710,7 @@ async function inspectContract(resourceId, bytes, context = {}) {
       gatewayFields: new Set(),
       reconIdFixMainFields: new Set(),
       reconIdFixOppFields: new Set(),
+      bankFields: new Set(),
       ...(context.references || {})
     },
     printAreas: new Map(),

@@ -19,12 +19,8 @@ const LINKED_STRUCTURE_RESOURCES = Object.freeze({
   'fx-delivery': Object.freeze({ resourceId: 'fx-delivery', keepExtra: false })
 });
 
-function effectiveLinkedSignature(signature, current) {
-  const binding = signature && LINKED_STRUCTURE_RESOURCES[signature.tableKey];
-  if (!binding || !current || current.status === 'builtin') return signature;
-  if (current.status === 'unavailable') {
-    return Object.freeze({ ...signature, structureUnavailable: current.message || '模板当前版本不可用' });
-  }
+// 当前用户版本的签名：只认版本表头逐列一致，读出的行经 structureProjection 对应回内置列名。
+function versionSignature(signature, current, keepExtra) {
   const versionHeaders = [...current.headers];
   return Object.freeze({
     ...signature,
@@ -36,9 +32,34 @@ function effectiveLinkedSignature(signature, current) {
       canonicalHeaders: Object.freeze([...signature.expectedHeaders]),
       versionHeaders: Object.freeze(versionHeaders),
       mapping: canonicalHeaderMapping(signature.expectedHeaders, versionHeaders),
-      keepExtra: binding.keepExtra
+      keepExtra
     })
   });
+}
+
+function effectiveLinkedSignature(signature, current) {
+  const binding = signature && LINKED_STRUCTURE_RESOURCES[signature.tableKey];
+  if (!binding || !current || current.status === 'builtin') return signature;
+  if (current.status === 'unavailable') {
+    return Object.freeze({ ...signature, structureUnavailable: current.message || '模板当前版本不可用' });
+  }
+  return versionSignature(signature, current, binding.keepExtra);
+}
+
+// 银行对账单（D17）：启用「银行对账单（导入识别结构）」用户版本后同时接受内置 46 列与当前版本——
+//   内置签名保留，另追加当前版本的逐列一致签名（银行对账单与入金表同构，两者各追加一条）。
+//   当前版本不可用或为内置时只认内置 46 列。
+const BANK_STATEMENT_TABLE_KEYS = Object.freeze(['bank-statement', 'bank-deposit']);
+function withBankStatementStructure(signatures, current) {
+  if (!current || current.status !== 'user') return signatures;
+  const extra = signatures.filter((signature) => BANK_STATEMENT_TABLE_KEYS.includes(signature.tableKey))
+    .map((signature) => versionSignature(signature, current, false));
+  return [...signatures, ...extra];
+}
+
+// 某张表在本次签名中的当前版本签名（银行对账单、入金表）；没有时为 null。
+function versionSignatureOf(signatures, tableKey) {
+  return signatures.find((signature) => signature.tableKey === tableKey && signature.structureExact) || null;
 }
 
 // resolveCurrent(resourceId) → 模板服务 currentInputStructure 的结果；读取异常按内置处理（不阻断其余表）。
@@ -87,8 +108,11 @@ function linkedStructureMismatchLines(detected, signatures) {
 }
 
 module.exports = {
+  BANK_STATEMENT_TABLE_KEYS,
   LINKED_STRUCTURE_RESOURCES,
   effectiveLinkedSignature,
+  versionSignatureOf,
+  withBankStatementStructure,
   linkedStructureMismatchLines,
   projectLinkedRow,
   resolveLinkedSignatures

@@ -30,6 +30,8 @@ function resource(definition) {
     twin: null,
     // twinNote：两者只是同一份系统导出、各自有独立版本时的说明（详情显示为“同一系统导出”，不显示“内容相同”）。
     twinNote: null,
+    // displayName：多个资源共用同一随包文件时的显示名（缺省取文件名）。
+    displayName: null,
     currentTemplate: null,
     ...definition,
     bindings: Object.freeze(definition.bindings),
@@ -40,6 +42,7 @@ function resource(definition) {
 const REPLACEABLE = Object.freeze({ allowed: true });
 
 const SAME_EXPORT_NOTE = '版本各自独立，需分别导入';
+const BANK_STATEMENT_ROLE_NOTE = '导出样式与导入识别结构分开管理，版本各自独立';
 
 // 银行账单处理链接表：导入时按当前版本表头识别，入库 / 会话前对应回内置列名（见 linked-structure-signatures）。
 const LINKED_INPUT_STRUCTURE = Object.freeze({
@@ -130,14 +133,29 @@ const TEMPLATE_RESOURCES = Object.freeze([
     failure: '当前版本缺失、被修改或不兼容时导入中止，C3 下拉改用程序内置旧字段',
     effect: '下次导入与打开场景配置；只认当前版本结构，入库仍按内置列名'
   }),
+  // 银行对账单随包文件有两个用途，各自独立版本：重复入账匹配输出页的样式（本条，契约要求前 46 列一致），
+  //   与导入识别结构（bank-statement-input）。
   resource({
     id: 'bank-statement', path: 'assets/银行对账单.xlsx', type: 'input', readMode: 'runtime',
     bindings: [
-      binding('duplicate-inbound-match', '「匹配不成功需人工判定」Sheet 样式', 'runtime'),
-      binding('bank-statement-process', '导入结构参考'),
-      binding('pre-fund-reconciliation', '导入结构参考')
+      binding('duplicate-inbound-match', '「匹配不成功需人工判定」Sheet 样式', 'runtime')
     ],
-    replace: REPLACEABLE, cache: '不缓存，每次导出读取', failure: '导出中止，提示模板不兼容', effect: '下次导出'
+    replace: REPLACEABLE, cache: '不缓存，每次导出读取', failure: '导出中止，提示模板不兼容', effect: '下次导出',
+    twin: 'bank-statement-input', twinNote: BANK_STATEMENT_ROLE_NOTE
+  }),
+  // 银行对账单导入识别结构：启用后同时接受当前版本与内置 46 列（本工具导出仍为内置 46 列，下游模块须能继续导入）；
+  //   按当前版本读出的行对应回内置 46 列，场景、计算与导出不变。
+  resource({
+    id: 'bank-statement-input', path: 'assets/银行对账单.xlsx', displayName: '银行对账单（导入识别结构）', type: 'input',
+    readMode: 'runtime',
+    bindings: [
+      binding('bank-statement-process', '导入 · 识别结构', 'runtime'),
+      binding('pre-fund-reconciliation', '导入银行对账单 · 识别结构', 'runtime')
+    ],
+    replace: REPLACEABLE, cache: '不缓存，每次导入时读取',
+    failure: '当前版本缺失、被修改或不兼容时只接受内置 46 列，按新结构导出的文件被拒',
+    effect: '下次导入；同时接受内置 46 列，入库、场景与导出仍按内置 46 列',
+    twin: 'bank-statement', twinNote: BANK_STATEMENT_ROLE_NOTE
   }),
   // 中台调拨订单与平盘「中台调拨订单表」是同一份系统导出，各自独立版本（twin 互相标注）。
   resource({ id: 'transfer-order', path: 'assets/中台调拨订单.xlsx', type: 'input', ...LINKED_INPUT_STRUCTURE,
