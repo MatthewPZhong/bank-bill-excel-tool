@@ -365,7 +365,8 @@ class PositionReconciliationService {
     positionImportDispatcher = dispatchPositionImportPreflight,
     onImportProgress = null,
     resolveAnomalyReport = null,
-    resolveSourceStructures = null
+    resolveSourceStructures = null,
+    resolveBankSourceHeaders = null
   }) {
     if (!userDataDir) throw new TypeError('平盘对账 service 需要 userDataDir');
     if (!templatePath) throw new TypeError('平盘对账 service 需要 templatePath');
@@ -405,6 +406,10 @@ class PositionReconciliationService {
     // 设置 → 模板文件：每次导入、导出开始时读取链接原始表的当前结构；未注入时使用内置结构。
     this.resolveSourceStructures = typeof resolveSourceStructures === 'function'
       ? resolveSourceStructures
+      : null;
+    // 银行对账单导入识别结构的当前用户版本表头（D17，与内置 46 / 49 列同时接受）；内置或未注入时为 null。
+    this.resolveBankSourceHeaders = typeof resolveBankSourceHeaders === 'function'
+      ? resolveBankSourceHeaders
       : null;
     this.activeImportJobs = new Map();
     this.store = store || createPositionReconciliationStore(this.userDataDir, {
@@ -902,12 +907,15 @@ class PositionReconciliationService {
       );
     }
     await this.clearBankImportTokensAsync();
+    // 银行对账单导入识别结构当前用户版本：预检开始时冻结到确认令牌，写入沿用同一份。
+    const bankSourceHeaders = this.resolveBankSourceHeaders ? await this.resolveBankSourceHeaders() : null;
     const dispatched = this.dispatchTrackedImport({
       engine: this.positionImportEngine,
       command: POSITION_IMPORT_COMMANDS.BANK_PREPARE,
       files,
       userDataDir: this.userDataDir,
       sideDbPath: this.store.dbPath,
+      ...(bankSourceHeaders ? { contractOptions: { bankSourceHeaders } } : {}),
       featureFlags: { preflightOnly: true }
     }, '读取平盘银行对账单');
     const preflightReady = await dispatched.promise;
@@ -944,7 +952,8 @@ class PositionReconciliationService {
     this.bankImportTokens.set(token, {
       streaming: true,
       preflightReady,
-      jobRoot
+      jobRoot,
+      bankSourceHeaders
     });
     const scopes = (preflightReady.ledgerEvidence.manifest.bankScopes || []).map(
       ({ channel, monthKey }) => ({ channel, monthKey })
@@ -1009,6 +1018,7 @@ class PositionReconciliationService {
           schemaFingerprint: schema.fingerprint,
           preflightReady: parsed.preflightReady
         },
+        ...(parsed.bankSourceHeaders ? { contractOptions: { bankSourceHeaders: parsed.bankSourceHeaders } } : {}),
         featureFlags: { importApply: true }
       }, '写入平盘银行对账单');
     } catch (error) {

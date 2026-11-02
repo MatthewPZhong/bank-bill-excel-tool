@@ -190,12 +190,12 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await openTab('usage');
     assert.deepEqual(await js(`[...tf.overlay.querySelectorAll('.template-center-tab-panel tbody tr')].map((row) => [row.cells[2].textContent.trim(), row.cells[3].textContent.trim()])`),
       [['运行时读取', 'V1 · 内置']]);
-    // 同一随包文件的导入识别结构（D18）：以用途名显示，两个导入用途均运行时读取。
+    // 同一随包文件的导入识别结构（D18）：以用途名显示，四个导入用途均运行时读取。
     await selectResource('bank-statement-input');
     assert.equal(await js('tf.detailTitle()'), '银行对账单（导入识别结构）');
     await openTab('usage');
     assert.deepEqual(await js(`[...tf.overlay.querySelectorAll('.template-center-tab-panel tbody tr')].map((row) => [row.cells[2].textContent.trim(), row.cells[3].textContent.trim()])`),
-      [['运行时读取', 'V1 · 内置'], ['运行时读取', 'V1 · 内置']]);
+      Array.from({ length: 4 }, () => ['运行时读取', 'V1 · 内置']));
     await selectResource('fx-option');
     await openTab('info');
     await js(`tf.q('.template-center-kv [data-action="goto"]').click(); void 0;`);

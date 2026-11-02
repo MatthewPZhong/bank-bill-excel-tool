@@ -276,7 +276,8 @@ async function preflightBankFile({
   onProgress,
   startedAt,
   sstOptions,
-  allowMainThreadXls
+  allowMainThreadXls,
+  bankSourceHeaders = null
 }) {
   const stats = emptyStats();
   const contentHash = new StableArrayHashAccumulator();
@@ -289,6 +290,8 @@ async function preflightBankFile({
       allowMainThread: allowMainThreadXls,
       sstTempRoot: path.join(descriptor.stagingDir, 'sst'),
       ...sstOptions,
+      // 银行对账单导入识别结构当前用户版本（D17，Main 在导入开始时冻结）；行已对应回内置 46 列名。
+      bankSourceHeaders,
       onRow: ({ row, excelRowNumber, sheetName: detectedSheet }) => {
         sheetName = detectedSheet;
         stats.scannedNonBlankRows += 1;
@@ -558,7 +561,8 @@ async function runPositionImportPreflight(input = {}) {
             onProgress: reportProgress,
             startedAt,
             sstOptions: input.sstOptions,
-            allowMainThreadXls: input.allowMainThreadXls
+            allowMainThreadXls: input.allowMainThreadXls,
+            bankSourceHeaders: input.bankSourceHeaders || null
           })
           : await preflightSourceFile({
             descriptor,

@@ -3036,7 +3036,8 @@ test.describe('v3.2.14 表头结构不一致的差异明细', () => {
     ]);
   });
 
-  test('银行对账单表头不符时列出与 46 列契约的差异，不提示导入模板新版本', async (t) => {
+  // v3.2.14 D18：46 列银行对账单可在设置 → 模板文件「银行对账单（导入识别结构）」导入新版本，差异末行附指引。
+  test('银行对账单表头不符时列出与 46 列契约的差异，并提示在模板文件导入新版本', async (t) => {
     const dir = tempDir(t, 'position-bank-header-diff-');
     const headers = BANK_STATEMENT_FIELDS.map((header) => (header === 'Channel' ? 'channel' : header));
     const filePath = path.join(dir, 'bank.xlsx');
@@ -3046,7 +3047,8 @@ test.describe('v3.2.14 表头结构不一致的差异明细', () => {
       '最接近：平盘银行对账单 46 列（46 列；文件 46 列）',
       `第 ${channelIndex + 1} 列（${String.fromCharCode(65 + channelIndex)}）：应为「Channel」，实际为「channel」`,
       '缺少列：Channel',
-      '多出列：channel'
+      '多出列：channel',
+      '如系统导出结构已变更，请在「设置 → 模板文件」导入新版本'
     ];
     await assert.rejects(streamPositionXlsxRows(filePath, { kind: 'bank' }), (error) => {
       assert.equal(error.code, 'position-bank-headers-invalid');

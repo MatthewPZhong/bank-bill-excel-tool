@@ -304,6 +304,7 @@ class DuplicateInboundMatchService {
     bankTemplateSource = null,
     fileHasher = hashFile,
     bankReader = readBankStatement,
+    resolveBankSourceHeaders = null,
     now = () => new Date()
   }) {
     if (!userDataDir || typeof userDataDir !== 'string') {
@@ -331,6 +332,8 @@ class DuplicateInboundMatchService {
     this.bankTemplateSource = bankTemplateSource;
     this.fileHasher = fileHasher;
     this.bankReader = bankReader;
+    // 每次导入时解析银行对账单导入识别结构的当前用户版本表头（未注入或内置时为 null）。
+    this.resolveBankSourceHeaders = typeof resolveBankSourceHeaders === 'function' ? resolveBankSourceHeaders : null;
     this.now = now;
     this.store = createDuplicateInboundMatchStore(this.userDataDir, { operationReceipts });
     this.tempStore = createPreFundReconciliationStore(this.userDataDir);
@@ -759,7 +762,9 @@ class DuplicateInboundMatchService {
       this.fileHasher(inputs.bank.filePath),
       this.fileHasher(inputs.document.filePath)
     ]);
-    const parsed = this.bankReader(inputs.bank.filePath);
+    // 设置 → 模板文件「银行对账单（导入识别结构）」当前用户版本：同时接受内置 46 列，按当前版本读出的行对应回内置列。
+    const bankSourceHeaders = this.resolveBankSourceHeaders ? await this.resolveBankSourceHeaders() : null;
+    const parsed = this.bankReader(inputs.bank.filePath, { sourceHeaders: bankSourceHeaders });
     const storedRows = prepareStoredBankRows(parsed.rows);
     const bankHashAfterRead = await this.fileHasher(inputs.bank.filePath);
     if (bankHashAfterRead !== bankFileHash) {

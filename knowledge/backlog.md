@@ -20,6 +20,13 @@
 
 ## 未实施
 
+### B41（P3 · 顺延）重复入账匹配 Paired Parser 与平盘旧导入引擎未接入银行对账单导入识别结构
+
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §15 D19）
+- **影响**：重复入账匹配的 Paired Parser（`paired-parser-dispatch` / `spool-writer`，测量门禁未批准，生产走主进程 `importFiles`）与平盘旧导入引擎（`readers.readBankFiles`，生产为流式引擎）仍只认内置 46 / 49 列；启用了用户版本时，这两条路径会拒绝按新结构导出的银行对账单。生产路径已接入。当前生产不受影响
+- **关闭条件**：启用 Paired Parser 前，把当前结构写入 spool descriptor（`normalizeSpoolDescriptor` 增加可选字段）并传给 `readBankStatement`；旧引擎如需继续保留，同样经 `bankSourceStructure` 识别；补对应回归测试
+- **目标版本**：未定（随 Paired Parser 启用或旧引擎退役）
+
 ### B40（P3 · 顺延）VCC OP 发生额计算的 Parser Worker 路径未接入「流水对账单」当前结构
 
 - **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §14）
@@ -27,11 +34,11 @@
 - **关闭条件**：启用 Parser Pipeline 前，在 Main 侧扫描开始时解析当前结构，作为新的 worker 输入键传给 `streamFlowFile`，补对应回归测试
 - **目标版本**：未定（随 Parser Pipeline 启用）
 
-### B39（P3 · 顺延）资金对账后台 worker 未接入银行账单处理链接表当前结构
+### B39（P3 · 顺延）资金对账后台 worker 未接入银行账单处理链接表与银行对账单当前结构
 
-- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §12.3 K4）
-- **影响**：`fund-recon-worker/source-readers.js` 的退款订单按固定签名 `ZHONGTAI_REFUND_ORDER_SIGNATURE` 读取（网关来源走旧的 `readGatewayRecon`）；该后台路径生产未启用（`fund-recon:import` 未开启 production）。启用了「中台退款订单」用户结构版本时，该路径会把新结构文件判为表头不符，或按内置位置读出错列。传统 IPC 路径（链接表管理、导入文件）已接入。当前生产不受影响
-- **关闭条件**：启用后台路径前，在准备阶段读取 `refund-order` 当前结构（`resolveLinkedSignatures`），读取后按 `projectLinkedRow` 对应回内置列名，补对应回归测试
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §12.3 K4、§15 D19）
+- **影响**：`fund-recon-worker/source-readers.js` 的退款订单按固定签名 `ZHONGTAI_REFUND_ORDER_SIGNATURE` 读取（网关来源走旧的 `readGatewayRecon`），银行对账单按内置 46 列读取（`readBankStatement` 未传当前结构）；该后台路径生产未启用（`fund-recon:import` 未开启 production）。启用了「中台退款订单」或「银行对账单（导入识别结构）」用户版本时，该路径会把新结构文件判为表头不符，或按内置位置读出错列。传统 IPC 路径（链接表管理、导入文件）已接入。当前生产不受影响
+- **关闭条件**：启用后台路径前，在准备阶段读取 `refund-order` 与 `bank-statement-input` 当前结构（`resolveLinkedSignatures`、`resolveBankStatementStructure`），读取后对应回内置列名，补对应回归测试
 - **目标版本**：未定（随后台资金对账启用）
 
 ### B38（P3 · 顺延）单据对账托管服务未接入「单据对账导出不平」当前结构

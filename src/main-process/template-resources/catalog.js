@@ -150,7 +150,9 @@ const TEMPLATE_RESOURCES = Object.freeze([
     readMode: 'runtime',
     bindings: [
       binding('bank-statement-process', '导入 · 识别结构', 'runtime'),
-      binding('pre-fund-reconciliation', '导入银行对账单 · 识别结构', 'runtime')
+      binding('pre-fund-reconciliation', '导入银行对账单 · 识别结构', 'runtime'),
+      binding('duplicate-inbound-match', '导入银行对账单 · 识别结构', 'runtime'),
+      binding('position-reconciliation-process', '银行对账单导入 · 识别结构', 'runtime')
     ],
     replace: REPLACEABLE, cache: '不缓存，每次导入时读取',
     failure: '当前版本缺失、被修改或不兼容时只接受内置 46 列，按新结构导出的文件被拒',

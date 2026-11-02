@@ -6,11 +6,31 @@
 
 const {
   LINK_HEADERS,
+  POSITION_BANK_HEADERS,
   SOURCE_DEFINITIONS,
   SOURCE_REQUIRED_FIELDS,
   SOURCE_TYPES
 } = require('./constants');
 const { PositionReconciliationError } = require('./common');
+const { BANK_STATEMENT_FIELDS } = require('../../constants/bank-statement-fields');
+const { canonicalHeaderMapping, projectObjectToCanonical } = require('../../backend/file-service/header-structure-diff');
+
+// 平盘银行对账单可接受的表头（headers 已去首尾空格与末尾空列）：内置 46 列、平盘结果 49 列，
+//   以及设置 → 模板文件「银行对账单（导入识别结构）」当前用户版本（bankSourceHeaders，D17，由 Main 在导入开始时冻结）。
+//   返回 { headers, project(row) }：project 把按当前版本读出的行对应回内置 46 列名，其余结构原样；都不符时返回 null。
+function bankSourceStructure(headers, bankSourceHeaders = null) {
+  const same = (expected) => headers.length === expected.length && headers.every((value, index) => value === expected[index]);
+  if (same(BANK_STATEMENT_FIELDS)) return { headers: BANK_STATEMENT_FIELDS, project: (row) => row };
+  if (same(POSITION_BANK_HEADERS)) return { headers: POSITION_BANK_HEADERS, project: (row) => row };
+  if (Array.isArray(bankSourceHeaders) && bankSourceHeaders.length && same(bankSourceHeaders)) {
+    const mapping = canonicalHeaderMapping(BANK_STATEMENT_FIELDS, bankSourceHeaders);
+    return {
+      headers: [...bankSourceHeaders],
+      project: (row) => projectObjectToCanonical(row, BANK_STATEMENT_FIELDS, bankSourceHeaders, mapping)
+    };
+  }
+  return null;
+}
 
 function invalidStructure(message) {
   return new PositionReconciliationError('position-source-structure-invalid', message);
@@ -66,6 +86,7 @@ function linkRequiredFields(sourceType) {
 }
 
 module.exports = {
+  bankSourceStructure,
   linkHeadersFor,
   linkRequiredFields,
   normalizeSourceStructures,

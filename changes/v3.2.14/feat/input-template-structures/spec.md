@@ -445,3 +445,18 @@ Codex 已核查未发现缺陷的方面：冻结结构在预检、重放、异�
 - 重复入账匹配与平盘在第二次提交接入；在此之前它们只认内置 46 列（与启用前一致）。
 
 验证结果（第一次提交，2026-11-01，macOS 本机，未提交工作区）：`npm run release-check` 的 lint、架构检查 808/808 文件、smoke、单测 9769/9773（4 项为既有条件跳过）通过；集成阶段首轮 `renderer-lifecycle` 1 项失败（模板文件页用途列表断言仍按旧的 3 个用途，`bank-statement` 现只保留样式用途），已更新 fixture 并补「导入识别结构」显示名与用途断言，随后完整重跑 `npm run test:integration` 91/91 通过（新增 `bank-statement-input-template-version` 4/4，`renderer-lifecycle` 324/324）。未执行：真实应用 GUI 与 Windows 安装版实测。
+
+### 15.6 实施记录（第二次提交：重复入账匹配、平盘）
+
+| 文件 | 内容 |
+| --- | --- |
+| `duplicate-inbound-match/service.js`、`main.js` | 服务构造注入 `resolveBankSourceHeaders`，每次导入解析当前结构并传给 `readBankStatement`（导入 IPC 处理函数不变） |
+| `position-reconciliation/source-structures.js`、`header-mismatch.js` | `bankSourceStructure`：内置 46 / 结果 49 / 当前版本三种表头判定，当前版本的行对应回内置 46 列；银行差异明细列出当前版本并附模板指引 |
+| `position-reconciliation-import/{xlsx-reader,xls-reader,preflight,bank-writer,worker-entry}.js` | 读取按 `bankSourceHeaders` 识别并对应回内置列；预检与写入经 `contractOptions.bankSourceHeaders` 使用同一份冻结结构 |
+| `position-reconciliation/service.js`、`main.js` | 服务注入 `resolveBankSourceHeaders`；流式银行预检开始时解析并冻结到确认令牌，写入沿用 |
+| `template-resources/{catalog,input-structures}.js` | `bank-statement-input` 增加重复入账匹配、平盘用途；口径核对加入平盘流式读法 |
+| `knowledge/backlog.md` | B39 扩展到银行对账单；B41（重复入账匹配 Paired Parser、平盘旧导入引擎） |
+
+偏离与说明：平盘银行表头不符时的差异明细改为附模板指引（46 列结构现可在模板文件替换），对应 v3.2.14 第一批测试断言已更新。
+
+验证结果（第二次提交，2026-11-01，macOS 本机，未提交工作区）：`npm run release-check` 的 lint、架构检查 808/808 文件、smoke、单测 9773/9777（4 项为既有条件跳过）通过；集成阶段首轮 `position-startup-task-recovery` 失败（该脚本的测试装配按 Main 源码重建平盘服务，缺少新依赖 `bankStatementSourceHeaders` / `resolveBankStatementStructure`），已在 `tests/helpers/position-startup-recovery-harness.js` 补上（模板来源为空时回落内置），随后完整重跑 `npm run test:integration` 91/91 通过（`bank-statement-input-template-version` 扩展为 6/6，含平盘真实 Worker 与重复入账匹配；`position-startup-task-recovery` 3/3；`renderer-lifecycle` 324/324）。未执行：真实应用 GUI 与 Windows 安装版实测。

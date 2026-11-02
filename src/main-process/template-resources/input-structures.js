@@ -182,10 +182,27 @@ function vccRuntimeHeaders(sourceType) {
   };
 }
 
-// 银行对账单（导入识别结构）：与 readBankStatement 相同的读法读出「渠道对账单」表头行。
+// 银行对账单（导入识别结构）：readBankStatement（银行账单处理、前置资金对账、重复入账匹配）与平盘银行导入（流式）两种读法
+//   读出「渠道对账单」表头行；结果不同时不一致的列标出两种结果，预检必不通过。
 async function bankStatementRuntimeHeaders(filePath) {
   const { readBankStatementHeaderRow } = require('../bank-statement-io');
-  return [readBankStatementHeaderRow(filePath)];
+  const {
+    openPositionWorkbook,
+    readPhysicalHeader
+  } = require('../../backend/position-reconciliation-import/xlsx-reader');
+  const sheetJs = readBankStatementHeaderRow(filePath);
+  let streamed = sheetJs;
+  const workbook = await openPositionWorkbook(filePath, { sstTempRoot: path.join(path.dirname(filePath), 'sst') });
+  try {
+    const sheet = workbook.sheets.find((item) => item.name === '渠道对账单');
+    if (sheet) streamed = await readPhysicalHeader(workbook, sheet);
+  } finally {
+    await workbook.close();
+  }
+  if (JSON.stringify(streamed) === JSON.stringify(sheetJs)) return [sheetJs];
+  const width = Math.max(sheetJs.length, streamed.length);
+  return [Array.from({ length: width }, (_, index) => ((sheetJs[index] ?? '') === (streamed[index] ?? '')
+    ? sheetJs[index] ?? '' : `${sheetJs[index] ?? ''} / ${streamed[index] ?? ''}`))];
 }
 
 // 流水对账单：业务 OP 新版（单 Sheet 富工作簿，第 1 行）与 VCC OP 发生额计算（JSZip 流式解析首行）两种读法。

@@ -18905,7 +18905,8 @@ function getDuplicateInboundMatchService() {
       mailTemplatePath: path.join(__dirname, '..', 'assets', '重复入金召回邮件模板.xlsx'),
       bankTemplatePath: path.join(__dirname, '..', 'assets', '银行对账单.xlsx'),
       mailTemplateSource: getTemplateResourceService().source('dup-recall-mail', 'duplicate-inbound-match'),
-      bankTemplateSource: getTemplateResourceService().source('bank-statement', 'duplicate-inbound-match')
+      bankTemplateSource: getTemplateResourceService().source('bank-statement', 'duplicate-inbound-match'),
+      resolveBankSourceHeaders: async () => bankStatementSourceHeaders(await resolveBankStatementStructure(getTemplateResourceService()))
     });
   }
   return duplicateInboundMatchService;
@@ -19137,6 +19138,7 @@ function getPositionReconciliationService() {
         },
         protectedStagingPaths: positionTaskOwner.positionArchivePersistentStagingPaths,
         positionImportEngine: 'streaming',
+        resolveBankSourceHeaders: async () => bankStatementSourceHeaders(await resolveBankStatementStructure(getTemplateResourceService())),
         resolveAnomalyReport: resolvePositionAnomalyReportReference,
         onImportProgress: (progress) => {
           try {

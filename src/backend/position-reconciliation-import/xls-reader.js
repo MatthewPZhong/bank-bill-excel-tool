@@ -5,7 +5,6 @@ const XLSX = require('xlsx');
 
 const {
   BANK_SHEET_NAME,
-  POSITION_BANK_HEADERS,
   SOURCE_DEFINITIONS
 } = require('../../main-process/position-reconciliation/constants');
 const {
@@ -18,12 +17,10 @@ const {
   rowValues
 } = require('../../main-process/position-reconciliation/readers');
 const {
-  BANK_STATEMENT_FIELDS
-} = require('../../constants/bank-statement-fields');
-const {
   bankHeaderMismatchLines,
   sourceHeaderMismatchLines
 } = require('../../main-process/position-reconciliation/header-mismatch');
+const { bankSourceStructure } = require('../../main-process/position-reconciliation/source-structures');
 
 function ensureUtilityContext(options) {
   if (options.allowMainThread === true) return;
@@ -77,7 +74,8 @@ function sourceMatch(workbook, fileName, definitions = SOURCE_DEFINITIONS) {
   return matches[0];
 }
 
-function bankMatch(workbook, fileName) {
+// bankSourceHeaders：银行对账单导入识别结构的当前用户版本（D17，与内置 46 / 49 列同时接受）。
+function bankMatch(workbook, fileName, bankSourceHeaders = null) {
   const sheet = workbook.Sheets[BANK_SHEET_NAME];
   if (!sheet) {
     throw new PositionReconciliationError(
@@ -88,15 +86,15 @@ function bankMatch(workbook, fileName) {
   }
   const rows = rowValues(sheet);
   const headers = normalizeHeaderRow(rows[0]);
-  if (!headersEqual(headers, BANK_STATEMENT_FIELDS) &&
-      !headersEqual(headers, POSITION_BANK_HEADERS)) {
+  const structure = bankSourceStructure(headers, bankSourceHeaders);
+  if (!structure) {
     throw new PositionReconciliationError(
       'position-bank-headers-invalid',
-      `银行对账单表头不符合 46/49 列契约：${fileName}`,
-      bankHeaderMismatchLines(headers)
+      `银行对账单表头不符合 46/49 列契约${bankSourceHeaders ? '或当前版本' : ''}：${fileName}`,
+      bankHeaderMismatchLines(headers, bankSourceHeaders)
     );
   }
-  return { sourceType: null, definition: null, sheetName: BANK_SHEET_NAME, rows, headers };
+  return { sourceType: null, definition: null, sheetName: BANK_SHEET_NAME, rows, headers, project: structure.project };
 }
 
 async function streamPositionXlsRows(filePath, options = {}) {
@@ -105,8 +103,10 @@ async function streamPositionXlsRows(filePath, options = {}) {
   const fileName = path.basename(absolutePath);
   const workbook = openWorkbook(absolutePath);
   const detected = options.kind === 'bank'
-    ? bankMatch(workbook, fileName)
+    ? bankMatch(workbook, fileName, options.bankSourceHeaders || null)
     : sourceMatch(workbook, fileName, options.sourceDefinitions || SOURCE_DEFINITIONS);
+  // 银行对账单按当前版本读取时，行对应回内置 46 列名再交给预检 / 写入（按列名取值）。
+  const project = detected.project || ((value) => value);
   let nonBlankRowCount = 0;
 
   for (let index = 1; index < detected.rows.length; index += 1) {
@@ -124,7 +124,7 @@ async function streamPositionXlsRows(filePath, options = {}) {
       : index;
     if (typeof options.onRow === 'function') {
       options.onRow({
-        row,
+        row: project(row),
         excelRowNumber: physicalRowIndex + 1,
         sourceType: detected.sourceType,
         sourceHeaders: detected.headers,
