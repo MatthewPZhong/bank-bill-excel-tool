@@ -65,6 +65,21 @@
   - 集成测试 93/93 脚本。
 - 真实应用 GUI 与 Windows 安装版未实测。
 
+## 2026-11-04 AGENTS.md 补充单个测试命令
+
+用户要求：把 `AGENTS.md` 的命令补充并入 `release/v3.2.14`，随 #244 一起发布，并推送。
+
+| 项目 | 事实 |
+| --- | --- |
+| 内容 | 只改 `AGENTS.md`：「常用命令」新增「单个单测」「单个集成脚本」两行；表后说明 `test:integration` 全部通过且清单有实质变化时会回写 `rules/integration-test-policy.md`「七」章节 |
+| 合入方式 | 原提交 `3cd9a190` 在本地分支 `docs/agents-test-commands`，从 `v3.2.13` 创建，未推送。该提交持有 v3.2.13 的 `boundaries.json`，merge 进 release 会再触发 `ARCH-POLICY-HISTORY` 补登，因此改为直接提交在 release 末端 `da9b4324` 上（`17c944bf`），不做 merge |
+
+检查：
+
+- 纯文档改动，不涉及代码、测试和架构配置。
+- 本地 `check:architecture` 未能完成：本机内存 3.8 GB、无 swap，运行约 10 分钟后 Node 堆内存耗尽退出（退出码 134）。
+- 门禁以推送后 #244 的 `build` 任务为准，该任务在 Windows 上对 PR head 完整运行 `release-check`（含架构检查）。
+
 ## 检查与证据边界
 
 - 两次合并后首次运行 `release-check`：lint 通过，架构检查报上述 5 条 `ARCH-POLICY-HISTORY` 后中止。
