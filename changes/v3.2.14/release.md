@@ -78,7 +78,11 @@
 
 - 纯文档改动，不涉及代码、测试和架构配置。
 - 本地 `check:architecture` 未能完成：本机内存 3.8 GB、无 swap，运行约 10 分钟后 Node 堆内存耗尽退出（退出码 134）。
-- 门禁以推送后 #244 的 `build` 任务为准，该任务在 Windows 上对 PR head 完整运行 `release-check`（含架构检查）。
+- 门禁以推送后 #244 的 `smoke-test` 任务为准，该任务在 Windows 上对 PR head 完整运行 `release-check`（含架构检查）；`build` 任务只负责打包。
+- 推送 `375740dc` 后，「Build Windows Packages」运行 41804952281 通过：
+  - `smoke-test` 的 `release-check` 通过：架构检查 810/810 文件；单测 9827/9831，4 项为既有条件跳过；集成测试 93/93 脚本；
+  - `build` 打包与 `check-dist-size` 通过；
+  - `bizop-durability-contract` 按分支条件跳过。
 
 ## 检查与证据边界
 
