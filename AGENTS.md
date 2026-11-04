@@ -47,10 +47,14 @@
 |---|---|
 | 开发 / lint | `npm start` / `npm run lint` |
 | 单测 / 覆盖率 | `npm run test:unit` / `npm run test:unit:coverage` |
+| 单个单测 | `node --test tests/unit/<文件>.test.js`（`test:unit` 不支持过滤，会跑全部） |
 | 集成 / smoke | `npm run test:integration` / `npm run smoke`；smoke 属于集成级验证 |
+| 单个集成脚本 | `node scripts/integration/<模块>-<功能>.js`；新脚本放该目录即被 runner 自动纳入 |
 | 完整本地门禁 | `npm run release-check` |
 | 界面预览 / 启动性能 | `npm run preview`、`npm run preview:account` / `npm run startup:measure` |
 | Windows 构建 | `npm run dist:win`（安装包＋便携版）、`npm run dist:win:portable`（便携版）、`npm run dist:win:setup`（NSIS 安装包） |
+
+`npm run test:integration`（含 `release-check`）全部通过且脚本增删或用例数变化时，会回写已跟踪的 `rules/integration-test-policy.md`「七」章节，工作区因此出现改动；单独运行集成脚本不回写，单测日志写入已忽略的 `logs/unit-tests/`。
 
 ## 存储位置
 除数据库外，以下相对路径均以 `Documents/网银账单生成小助手/` 为根目录。
