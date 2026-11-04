@@ -17,6 +17,8 @@
 | --- | --- | --- | --- |
 | `feat/statement-balance-gap-prompt` | `7e19fe8b` | `0043b2be`、`a12e77f1`、`dcbc3a52` | 发生额计算余额的账单日期断档提醒（`9d4a554b`），以及 Codex 第一轮的 3 条修复（`0aea4c26`，[spec](feat/statement-balance-gap-prompt/spec.md) §8 T11–T13）与第三轮的 1 条修复（`7e19fe8b`，T14） |
 | `feat/release-notes-on-upgrade` | `b06ff9c8` | `8c049d36`、`25b464fb` | 升级后首次启动弹出更新说明（`8ea9bbb5`），以及 Codex 第三轮的 1 条修复（`b06ff9c8`，[spec](feat/release-notes-on-upgrade/spec.md) §8 T6） |
+| `feat/input-template-structures` | `e61c6169` | `da9b4324`（#245） | 输入表结构清晰报错与模板文件版本驱动，第一批平盘 5 张、第二批其余 12 张输入表，见 [spec](feat/input-template-structures/spec.md) 与下文「2026-11-01 输入结构分支经 PR 合入」 |
+| `AGENTS.md` 文档补充 | `17c944bf` | 直接提交在 release 上 | 单个测试的运行方式与集成清单回写说明，见下文「2026-11-04 AGENTS.md 补充单个测试命令」 |
 
 合并时的处理：
 
@@ -35,7 +37,7 @@
 | --- | --- |
 | 源分支 | `feat/input-template-structures`，从 `v3.2.13` 创建，功能末端 `7f318ed6` |
 | 内容 | 输入表结构与契约不一致时给出差异明细；「设置 → 模板文件」导入新版本驱动导入识别结构：平盘链接原始表 5 张、单据对账导出不平、移除归档 Pending、银行账单处理链接表 4 张、VCC 财务OP 5 张、流水对账单、银行对账单（导入识别结构），见 [spec](feat/input-template-structures/spec.md) |
-| 合入方式 | 先在源分支合入 `release/v3.2.14`（`87cab203`），合并提交 `38e6c96f`；再经 PR 以 merge commit 合入 release。release 侧的合入提交待 PR 合并后补记 |
+| 合入方式 | 先在源分支合入 `release/v3.2.14`（`87cab203`），合并提交 `38e6c96f`；再经 PR 以 merge commit 合入 release：#245 于 2026-11-02 合并，合入提交 `da9b4324`，源分支末端 `e61c6169` |
 | 合并方式 | 必须使用 merge commit：补登的 policyChanges 以 `7f318ed6`、`87cab203`、`24d1ea82` 为来源 |
 
 合并时的处理：
@@ -83,6 +85,30 @@
   - `smoke-test` 的 `release-check` 通过：架构检查 810/810 文件；单测 9827/9831，4 项为既有条件跳过；集成测试 93/93 脚本；
   - `build` 打包与 `check-dist-size` 通过；
   - `bizop-durability-contract` 按分支条件跳过。
+
+## 2026-11-04 发版准备
+
+用户要求：执行 v3.2.14 正式发布，包括升版、同步发布文档、推送、把 #244 转为可合并、以 merge commit 合并、推送附注标签 `v3.2.14` 并核验发布结果；完成后再开始下一轮迭代。不删除分支。
+
+| 项目 | 事实 |
+| --- | --- |
+| 冻结范围 | 见上文「纳入范围」四项；冻结前 release 末端 `375740dc`，另有本地的记录更正 `64a3eea3`，随本次一并推送 |
+| 远端 main | `e68089cc`，已包含在 release 历史；合并前再次核对 |
+| 升版与文档 | `6fa5ee0a`：`package.json`、`package-lock.json` 升到 3.2.14；同步 `CHANGELOG.md`、`docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md`（新增「升级后的更新说明（v3.2.14）」与「输入表结构（v3.2.14）」）和升级弹窗用的 `release-notes.json`（3.2.14 共 5 条要点） |
+| 顺延 | B26、B27、B33 三项实机人工检查的目标版本改为 v3.2.15：2026-11-04 用户决定 v3.2.14 先发布，本轮没有可用的 Windows/macOS 实机。B27 的升级终点相应改为 v3.2.14 或之后的版本。B32、B34–B41 目标未定，本轮不处理 |
+| 资金红线复核 | 第一轮 P1（T11，当前批次余额混入其他批次账号）与第三轮第 1 条（T14，部分模板待处理时不产出余额汇总）：2026-11-04 用户确认已完成人工复核，未提供复核人与明细 |
+| 未修复 | B35（同一账号跨模板的种子覆盖）本版不修，见上文第四轮审查 |
+| 人工检查 | B26、B27、B33 为 N/A，顺延到 v3.2.15。本版发布时，真实应用 GUI、Windows 安装版与应用内在线升级都未经人工确认 |
+
+本地检查（`6fa5ee0a`，工作区另有本记录与 `knowledge/backlog.md` 的文档改动）：
+
+- `lint`、`smoke` 通过。
+- `test:unit`：9822/9831 通过，6 项条件跳过，3 项失败；`test:integration`：92/93 脚本通过，1 项失败。四项失败都已核实为本机环境原因，消除原因后单独重跑全部通过：
+  - `manifest-coverage-e13-g.test.js`：本仓库为部分克隆（blob:none），从本地克隆检出历史提交 `138c5b43` 时缺文件。从 origin 补齐三个历史提交树中缺的 455 个对象后重跑，9/9 通过。
+  - `v3-2-3-release-evidence.test.js`、`v3-2-4-release-evidence.test.js`：本机 umask 为 0002，检出文件权限为 664，历史校验器要求 644/755，报 `GIT_WORKTREE_TREE_INVALID`。以 umask 022 重跑，各 1/1 通过。
+  - 集成 `renderer-lifecycle`：本机 Electron 的 `chrome-sandbox` 未设为 root 所有、4755，启动即中止。以 `ELECTRON_DISABLE_SANDBOX=1` 在 xvfb 下重跑，338/338 通过。
+- 因集成测试整体未通过，`rules/integration-test-policy.md` 第七节未回写；表中脚本与用例数已与本次运行一致（如 `renderer-lifecycle` 338、`statement-balance-gap` 24、`release-notes-upgrade-prompt` 5），无需改动。
+- `check:architecture` 本机内存不足无法完成（见上节），完整 `release-check` 以 #244 最终 head 的 `smoke-test` 任务为 PASS/FAIL 依据。
 
 ## 检查与证据边界
 
