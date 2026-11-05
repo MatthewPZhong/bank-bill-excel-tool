@@ -20,6 +20,13 @@
 
 ## 未实施
 
+### B42（P2 · 已知问题）输入表「恢复默认」不检查同组结构冲突，VCC 来源识别遇多重命中静默取第一项（资金口径 · 须人工复核）
+
+- **来源**：v3.2.14 `feat/input-template-structures`；[PR #244](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/244#discussion_r4471371083) 转为可合并后的 Codex 自动审查（审查提交 `aa459d2f`），已对照代码核实机制成立
+- **影响**：`src/main-process/template-resources/service.js` `setCurrentVersion` 只在启用用户版本时调用 `peerConflictOf`，恢复默认（V1）跳过同组结构冲突检查；导入新版本时有检查。按「VCC充值清退明细启用末尾加列的版本 → VCC费用及换汇明细启用充值清退的内置表头 → 充值清退恢复默认」操作后，两张表当前结构完全相同。`src/backend/vcc-financial-op/workbook-import-plan.js` `classifyHeaderRow` 用 `rules.find()` 取第一个完全匹配，费用及换汇文件会被静默识别为充值清退，进入不同的计算分支。触发需要刻意的操作组合，概率低。恢复默认的缺口对所有有同组的输入表（平盘链接原始表等）都存在，其他模块识别器遇多重命中时的行为待核实
+- **关闭条件**：恢复默认同样检查同组结构冲突（或给出处理方式）；VCC 识别器遇多个完全匹配时拒绝并提示，不静默取第一项；核实并处理其他同组输入表识别器的多重命中；补回归测试。若用户已按上述顺序操作并导入过数据，相关分类与计算结果须人工复核
+- **目标版本**：v3.2.15（2026-11-04 用户决定 v3.2.14 先发布，本项顺延）
+
 ### B41（P3 · 顺延）重复入账匹配 Paired Parser 与平盘旧导入引擎未接入银行对账单导入识别结构
 
 - **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §15 D19）

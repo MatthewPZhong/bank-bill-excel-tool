@@ -110,6 +110,11 @@
 - 因集成测试整体未通过，`rules/integration-test-policy.md` 第七节未回写；表中脚本与用例数已与本次运行一致（如 `renderer-lifecycle` 338、`statement-balance-gap` 24、`release-notes-upgrade-prompt` 5），无需改动。
 - `check:architecture` 本机内存不足无法完成（见上节），完整 `release-check` 以 #244 最终 head 的 `smoke-test` 任务为 PASS/FAIL 依据。
 
+推送 `aa459d2f` 后：
+
+- 「Build Windows Packages」运行 [41882832935](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/41882832935) 通过：`smoke-test` 的 `release-check` 通过，架构检查 810/810 文件、对比 `e68089cc` 检查 119 个提交；单测 9827/9831，0 失败、4 项为既有条件跳过；集成测试 93/93 脚本。`build` 通过，`bizop-durability-contract` 按分支条件跳过。
+- #244 转为可合并后，Codex 自动审查提出 1 条 P2（[评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/244#discussion_r4471371083)）：输入表「恢复默认」不检查同组结构冲突，VCC 来源识别遇多重命中时静默取第一项，按特定顺序操作后费用及换汇文件会被识别为充值清退。已对照代码核实机制成立。用户决定 v3.2.14 不修，登记为 backlog B42，目标 v3.2.15；涉及资金口径，修复时须人工复核。
+
 ## 检查与证据边界
 
 - 两次合并后首次运行 `release-check`：lint 通过，架构检查报上述 5 条 `ARCH-POLICY-HISTORY` 后中止。
