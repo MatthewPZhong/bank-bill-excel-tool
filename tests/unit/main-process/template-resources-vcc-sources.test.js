@@ -104,6 +104,30 @@ test('必用列缺少、与旧 48 列 Pending 模板相同、表头含布尔值�
   assert.equal(check(systemBoolean, '表头读取'), undefined);
 });
 
+// v3.2.15 B42：恢复默认同样核对同组冲突。按审查发现的顺序操作：充值清退启用末尾加列的版本 →
+//   费用及换汇启用与充值清退内置表头相同的版本（此时不冲突）→ 充值清退恢复默认，须被阻止，当前版本不变。
+test('恢复默认会与同组另一张表当前结构相同时不能恢复，调整对方后可恢复', async (t) => {
+  const env = setup(t);
+  const extended = [...RECHARGE, '末尾列'];
+  const recharge = await prepare(env.service, 'vcc-recharge-refund', env.write('充值-末尾加列.xlsx', extended));
+  assert.equal((await env.service.commitImport({ importToken: recharge.importToken, enable: true })).status, 'success');
+  const feeFx = await prepare(env.service, 'vcc-fee-fx', env.write('费用换汇-与充值内置相同.xlsx', RECHARGE));
+  assert.notEqual(feeFx.verdict, 'fail', '此时充值清退当前为末尾加列的版本，不冲突');
+  assert.equal((await env.service.commitImport({ importToken: feeFx.importToken, enable: true })).status, 'success');
+
+  const blocked = await env.service.setCurrentVersion({ resourceId: 'vcc-recharge-refund', versionId: 'v1' });
+  assert.equal(blocked.status, 'failed');
+  assert.match(blocked.message, /^V1 不能恢复：与「[^」]+」当前结构相同，导入时无法区分，请先调整「[^」]+」的当前版本$/);
+  assert.deepEqual(await resolveVccSourceStructures(env.service), {
+    [T.RECHARGE]: { headers: extended, versionLabel: 'V2' },
+    [T.FEE_FX]: { headers: RECHARGE, versionLabel: 'V2' }
+  }, '被阻止时两张表的当前版本都不变');
+
+  assert.equal((await env.service.setCurrentVersion({ resourceId: 'vcc-fee-fx', versionId: 'v1' })).status, 'success', '对方恢复默认不冲突');
+  assert.equal((await env.service.setCurrentVersion({ resourceId: 'vcc-recharge-refund', versionId: 'v1' })).status, 'success');
+  assert.equal(await resolveVccSourceStructures(env.service), null);
+});
+
 test('VCC_移除归档Pending账单与 Pending 对账「移除归档Pending账单」互相标注同一系统导出', async (t) => {
   const env = setup(t);
   for (const [id, twin] of [['vcc-removed-pending', 'removed-pending'], ['removed-pending', 'vcc-removed-pending']]) {
