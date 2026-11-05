@@ -419,7 +419,11 @@ function createTestContext() {
     headers: ZHONGHANG_HEADERS
   });
   db.saveTemplateFilenameFixedField(zhChildTemplate.id, '中行001');
-  db.setChildParent(zhChildTemplate.id, zhTemplate.id);
+  // v3.2.15：主/子模板改为渠道——中行001 新建同名渠道，明细模板加入该渠道。
+  const zhChannel = db.saveMappings(zhTemplate.id, [], [], [], undefined, null, { channelAssignment: { mode: 'create' } });
+  db.saveMappings(zhChildTemplate.id, [], [], [], undefined, null, {
+    channelAssignment: { mode: 'join', channelId: zhChannel.channelAssignment.channelId }
+  });
 
   const ghTemplate = db.upsertTemplate({
     name: '工行002',

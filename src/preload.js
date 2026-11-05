@@ -410,8 +410,11 @@ contextBridge.exposeInMainWorld('desktopApi', {
     clearSession: () => ipcRenderer.invoke('recon-id-fix:clear-session')
   },
   accountMappings: {
-    list: (templateId) => ipcRenderer.invoke('account-mapping:list', templateId),
-    save: (templateId, mappings) => ipcRenderer.invoke('account-mapping:save', templateId, mappings),
+    // v3.2.15：scope 为 { templateId } 或 { channelId }（传数字视为模板）
+    list: (scope) => ipcRenderer.invoke('account-mapping:list', scope),
+    save: (scope, mappings) => ipcRenderer.invoke('account-mapping:save', scope, mappings),
+    listChannelConflicts: () => ipcRenderer.invoke('channel-account-mapping:list-conflicts'),
+    resolveChannelConflicts: (payload) => ipcRenderer.invoke('channel-account-mapping:resolve-conflicts', payload),
     checkMigrationPending: () => ipcRenderer.invoke('account-mapping:check-migration-pending'),
     getMigrationData: () => ipcRenderer.invoke('account-mapping:get-migration-data'),
     distributeMigration: (assignments) => ipcRenderer.invoke('account-mapping:distribute-migration', assignments)
@@ -433,10 +436,13 @@ contextBridge.exposeInMainWorld('desktopApi', {
   },
   templates: {
     list: () => ipcRenderer.invoke('template:list'),
+    // v3.2.15：以下三个旧的主/子模板入口已停用（主进程直接拒绝），只因冻结的归档登记保留，界面不再调用。
     listChildren: (parentTemplateId) => ipcRenderer.invoke('template:list-children', parentTemplateId),
     setParentStatus: (templateId, isParent) => ipcRenderer.invoke('template:set-parent-status', templateId, isParent),
     setChildParent: (templateId, parentTemplateId) => ipcRenderer.invoke('template:set-child-parent', templateId, parentTemplateId),
     importTemplate: () => ipcRenderer.invoke('template:import'),
+    // v3.2.15【导入子模板】：复用 template:import，按渠道编号命名并归入该渠道
+    importChild: (channelId) => ipcRenderer.invoke('template:import', { channelId }),
     deleteTemplate: (templateId) => ipcRenderer.invoke('template:delete', templateId),
     getMappings: (templateId) => ipcRenderer.invoke('template:get-mappings', templateId),
     saveMappings: (payload) => ipcRenderer.invoke('template:save-mappings', payload),
@@ -456,6 +462,12 @@ contextBridge.exposeInMainWorld('desktopApi', {
     clearBillSplitMergeGroups: (payload) => ipcRenderer.invoke('template:clear-bill-split-merge-groups', payload),
     saveBillSplitAmountRules: (payload) => ipcRenderer.invoke('template:save-bill-split-amount-rules', payload),
     saveBillSplitMeta: (payload) => ipcRenderer.invoke('template:save-bill-split-meta', payload)
+  },
+  // v3.2.15：网银账单渠道（模板分组，与对账模块的 channels 无关）
+  statementChannels: {
+    list: () => ipcRenderer.invoke('channel:list'),
+    rename: (payload) => ipcRenderer.invoke('channel:rename', payload),
+    delete: (channelId) => ipcRenderer.invoke('channel:delete', channelId)
   },
   bigAccount: {
     importBankInfo: (templateId) => ipcRenderer.invoke('big-account:import-bank-info', templateId),

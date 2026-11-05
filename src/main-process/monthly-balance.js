@@ -49,8 +49,8 @@ function buildTargetLastDay(year, month) {
 // PRD §四 术语 / §5.1.3：普通模板 = 不是主模板 && 不是子模板 && 不是虚拟 ID（__FILENAME_MAPPING__ 不会进 listTemplates，无需额外过滤）
 function isRegularTemplate(template) {
   if (!template) return false;
-  if (template.isParent) return false;
-  if (template.parentTemplateId) return false;
+  // v3.2.15（A7）：属于渠道的模板不在月度余额导出范围内，范围与原“排除主/子模板”一致。
+  if (template.channelId) return false;
   return true;
 }
 

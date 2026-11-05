@@ -5,7 +5,7 @@
 | 目标版本 | v3.2.15 |
 | 功能分支 | `feat/statement-channels`，基于正式标签 `v3.2.14`（main 合并提交 `245bae04`，内容与发布候选 `6eadb896` 一致） |
 | 日期 | 2026-11-04 |
-| 状态 | 草稿，未实现 |
+| 状态 | 已实现，待 PR 审查；实施中的偏差见「十一、实施记录」 |
 | 依据 | [spec.md](spec.md) 的 D1–D9、A1–A11；用户 2026-11-04 批准的实施方案，以及同日补充的账户映射渠道层与导入子模板命名 |
 | 格式来源 | `changes/v3.2.13/feat/settings-template-versions/techdoc.md` 的章节组织 |
 
@@ -243,3 +243,54 @@ CREATE TABLE IF NOT EXISTS statement_channel_account_mapping_conflicts (
 4. 渲染层（含账户映射下拉框与冲突弹窗、模块激活检查）、预览与生命周期夹具。
 5. 集成测试 `statement-channel.js` 与既有用例更新。
 6. 架构登记、专项审查、文档。
+
+## 十一、实施记录（2026-11-05）
+
+实现以本文为准，下列为实施中核实到的事实与相应调整。业务规则（spec D1–D9、A1–A11）没有变化。
+
+### 11.1 与上文不同的技术处理
+
+| 编号 | 原设计 | 实际处理 | 原因 |
+| --- | --- | --- | --- |
+| I1 | T8、§5.1：删除 `template:list-children`、`template:set-parent-status`、`template:set-child-parent` | 三个通道保留注册：主进程处理器不再读写数据（列表返回空数组，两个写入返回 `TEMPLATE_PARENT_RETIRED`），Preload 方法保留，界面不再调用 | 两个写入通道属于冻结的 G7 TaskPolicy 清单：`action-task-binding-registry.js` 在运行时校验清单数量（134）与 JCS 摘要，`archive-baseline.json` 与基线测试也逐项比对；删除即改动冻结契约。另有测试要求 Preload 通道与主进程注册完全相等。待 G7 基线下次重冻结时一并删除，登记为 backlog |
+| I2 | §5.1：新增 `template:import-child` | 复用 `template:import`，Preload `templates.importChild(channelId)` 传 `{ channelId }`；prepare 先确认渠道存在，execute 按 D9 命名并归入渠道 | 新增文件型任务通道同样会改变冻结的 TaskPolicy 清单；复用后文件计划、归档登记与执行描述保持不变 |
+| I3 | §5.1：`channel:rename`、`channel:delete` 用 `businessIpcHandle`；`channel-account-mapping:resolve-conflicts` 与 `account-mapping:distribute-migration` 同类 | 三者登记为 support action（reason `statement-channel`），用 `supportIpcHandle`；`channel:list`、`channel-account-mapping:list-conflicts` 登记为只读查询 exclude | 新增 no-file 任务同样改变冻结清单；support action 是 v3.2.13 模板文件版本写入（`template-resources:*`）的先例。基线测试的新增清单与通道计数已同步 |
+| I4 | §5.1：Preload 命名空间 `channels.*` | `statementChannels.list/rename/delete` | Preload 已有对账模块的 `channels` 命名空间 |
+| I5 | §3.3：门面方法 `listChannels`、`deleteChannel` 等 | `AppDatabase` 上统一加 `Statement` 前缀（如 `listStatementChannels`、`deleteStatementChannel`），仓储内部仍为原名 | `AppDatabase` 已有同名的对账渠道方法，后定义者会覆盖前者 |
+| I6 | §3.4：`clearingAccountId`、`noCurrency`、`currency` 三项全部相同才算同一设置 | 按生效值比较：只有勾选“无币种”时才比较兜底币种（大小写不敏感），未勾选时币种栏不参与比较 | `file-service` 只在 `noCurrency` 为真时使用 `currency` 作兜底币种；按存储值比较会把输出相同的设置误判为冲突 |
+| I7 | §3.2 第 6 步：失败回滚并抛出 | 失败回滚、写活动日志，启动不阻塞，旧标记保留到下次启动重试；备份失败同样不改动数据 | 与 N5 等启动迁移一致，避免一次迁移失败导致应用无法启动 |
+| I8 | §5.3：渠道条目 `{ name, accountMappings }` | 另带 `accountMappingConflicts`（未处理的冲突），v5 导入时原样还原 | 导出时若渠道仍有待处理冲突，不带冲突会丢失这些账户号 |
+| I9 | — | 渠道相关业务错误经 `createDetailedErrorResult` 把 `errorCode` 与 `detailLines` 一并返回给界面；`createErrorResult` 的公共返回形状不变 | 余额方式不一致、加入渠道时的账户映射冲突需要在弹窗里逐条展示 |
+| I11 | §4.9、A10：移出渠道时复制渠道映射 | 原渠道还有待处理的账户映射冲突时，阻断移出、新建渠道与转入其他渠道（`CHANNEL_ACCOUNT_MAPPING_CONFLICT_PENDING`），保存整体回滚；删除渠道仍按 §4.6 处理 | 对账专项审查：映射副本不含冲突账户号，之后这些账户号按原值输出且无提示（R7），与 D8“不静默取舍”冲突 |
+| I12 | §3.4：冲突只经冲突弹窗处理 | 在渠道层账户映射中显式保存了冲突账户号的设置，即视为已为该账户号选定，删除对应冲突，并在提示与活动日志中列出 | 对账专项审查：否则之后在冲突弹窗选定候选会覆盖用户手工设置 |
+| I13 | T9：组配置按 `groupEntries[0]` 判断多大账号 | 组内全部条目都是多大账号模板时，组配置才带所选大账号；逐文件注入仍由 `rebuildMatchedTemplateFileEntries` 按各自子模板判断 | 组配置的所选大账号只决定输出文件名中的账号；渠道混有固定账号子模板时，带上所选大账号会使文件名与内容不符 |
+| I10 | §4.2 未区分 | 已属于渠道的模板勾选【渠道存在多个子模板】：先移出原渠道，新渠道取原渠道账户映射的副本；同名渠道已存在时仍按 D6 阻断 | 界面上两个勾选互斥，勾选新建时会自动取消【设为子模板】，原实现会直接报错 |
+
+### 11.2 补充处理
+
+- 余额附加值（`余额管理`）从渠道子模板打开时按渠道名读写，与生成时按渠道银行段读取一致；附加值弹窗的账号下拉仍来自当前子模板的大账号（已知限制）。
+- 导出全部（`exportScope = all`）与导入一样，按渠道分组并在渠道余额方式不一致时阻断。
+- 旧版账户映射迁移分配（`v1.5.1` 之前的数据）只面向普通模板：分配目标为渠道子模板时返回 `MIGRATION_DISTRIBUTE_CHANNEL_TEMPLATE`，分配弹窗不列出渠道子模板。
+- 状态栏的账户映射条数包含渠道层映射。
+- 单模板导入路径（界面当前不可达）同样在渠道有待处理冲突时阻断，作为兜底。
+- 单模板导入路径中 `generateStatementFiles`、种子、补录预检的模板名统一经 `statementOutputName(config)` / `resolveStatementOutputName(template)` 取输出名；`statement-worker` 生成路径共用同一组函数。
+- 架构登记：`renderer-dialog-configuration`、`renderer-statement` 的 `allowedApiFields` 以 `f5348123`（本分支 spec 提交，配置与 `v3.2.14` 相同）为来源登记 `policyChanges`；Preload 仍保留的三个旧方法未从白名单移除（命名空间整体传入）。
+
+### 11.3 对账专项审查（2026-11-05，reconciliation-blindspot-pass）
+
+已修正：I11（有冲突时移出渠道会带走缺账户号的映射副本）、I12（手工设置被冲突候选覆盖）、I13（文件名中的大账号与内容不符），以及单模板导入路径的冲突兜底。
+
+⚠️ 资金红线，须人工复核（自动测试不能代替）：
+
+1. **同一渠道两种格式含同一笔交易**：渠道内不做跨文件去重（spec §4.5 第 8 条，与同模板多文件一致）。同一银行两种格式覆盖同一时段时，发生额计算会重复累加，余额多记。需确认业务上是否会对同一时段导入两种格式；如会，需另定去重或告警口径。
+2. **迁移后输出身份变化**：子模板名银行段或所在地段与原主模板不同的，`Channel` 列、余额银行名称/所在地、种子与余额调整改按渠道名（D5，逐条写活动日志）。需确认下游清结算对 `Channel` 列取值变化的影响，并核对迁移日志中的模板。
+3. **迁移后的余额链衔接**：渠道银行段的种子文件可能没有、或只有更早的原子模板账号种子。发生额计算会提示首次补录或断档（可观测），但用户须按实际期末余额补录，不能沿用原子模板银行段的旧值而不核对。
+4. **删除含冲突的渠道**：冲突随渠道清除，冲突账户号在子模板上没有映射，之后按原账户号输出（既有 R7 行为）；删除时有提示并写活动日志。
+5. **回退到 v3.2.14**：渠道层账户映射不被旧版读取，须恢复迁移前备份（R9）。
+
+已由 spec 明确为有意设计：渠道内同日多余额值的推导（取账单余额模式沿用 `inferEndingBalance`）；月度余额导出排除渠道模板（A7）；账户号未映射时按原值输出（R7）。
+
+### 11.4 验证
+
+见 PR 说明；新增单测 `statement-channel-migration`、`statement-channel-repository`、`statement-channel-account-mappings`、`statement-channel-identity`，集成脚本 `scripts/integration/statement-channel.js`，renderer lifecycle 新增渠道用例。
+

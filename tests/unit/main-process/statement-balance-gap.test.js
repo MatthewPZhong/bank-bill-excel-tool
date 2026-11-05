@@ -62,6 +62,26 @@ function loadMainFunction(name, dependencyNames = [], dependencyValues = []) {
   )(...dependencyValues);
 }
 
+// v3.2.15：生成分组改为按渠道 / 模板；这里的模板都不属于渠道，按模板各自成组。
+function loadGroupingFunction(getTemplateMappingConfig) {
+  const { resolveGenerationGroupKey } = require('../../../src/main-process/statement-channel-identity');
+  return loadMainFunction(
+    'groupStatementEntriesForGeneration',
+    ['database', 'resolveGenerationGroupKey', 'getTemplateMappingConfig'],
+    [{ getTemplate: (id) => ({ id, channelId: null }) }, resolveGenerationGroupKey, getTemplateMappingConfig]
+  );
+}
+
+// 普通模板组不做渠道余额方式校验，使用真实函数确认其对非渠道组直接放行。
+function loadBalanceModeMismatchFunction(getTemplateMappingConfig) {
+  const identity = require('../../../src/main-process/statement-channel-identity');
+  return loadMainFunction(
+    'findGenerationGroupBalanceModeMismatch',
+    ['getTemplateMappingConfig', 'resolveTemplateBalanceMode', 'findBalanceModeMismatch'],
+    [getTemplateMappingConfig, identity.resolveTemplateBalanceMode, identity.findBalanceModeMismatch]
+  );
+}
+
 function createTempRoot(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-balance-gap-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -664,7 +684,14 @@ function loadSaveBalanceSeedExecute(deps) {
 function virtualExportAllDeps({ session, groups, generated }) {
   const remembered = [];
   const gapGeneration = createStatementGenerationHelpers({});
+  const exportTemplateConfig = (tid) => ({
+    template: { id: tid, name: `模板${tid}` },
+    exportMappings: [],
+    exportTargetFields: []
+  });
   const deps = {
+    groupStatementEntriesForGeneration: loadGroupingFunction(exportTemplateConfig),
+    findGenerationGroupBalanceModeMismatch: loadBalanceModeMismatchFunction(exportTemplateConfig),
     FILENAME_MAPPING_TEMPLATE_ID,
     getCurrentStatementSession: () => session,
     isFilenameMappingMode: (templateId) => templateId === FILENAME_MAPPING_TEMPLATE_ID,
@@ -851,14 +878,16 @@ test('主进程：按文件名映射单模板组补录或不补录后重算，�
   // 历史批次只有 M001，当前批次只有 M002，同一模板、同一日期范围。
   const history = mappedSourceEntry(root, 'history.xlsx', [['2026-09-01', 'M001', 'USD', '100', ''], ['2026-09-02', 'M001', 'USD', '5', '']]);
   const current = mappedSourceEntry(root, 'current.xlsx', [['2026-09-01', 'M002', 'USD', '100', ''], ['2026-09-02', 'M002', 'USD', '5', '']]);
+  const singleTemplateConfig = () => ({ template: { name: TEMPLATE_NAME }, exportMappings: [], exportTargetFields: [] });
   const regenerate = loadMainFunction(
     'regenerateVirtualTemplateBalanceFromSession',
-    ['getStatementSessionEntries', 'getTemplateMappingConfig', 'appendActivityLogEntry', 'buildStatementGenerationConfig',
+    ['getStatementSessionEntries', 'groupStatementEntriesForGeneration', 'getTemplateMappingConfig', 'appendActivityLogEntry', 'buildStatementGenerationConfig',
       'buildPreparedStatementBatchFromEntries', 'generateStatementFiles', 'parseRequiredBillDates',
       'extractManualBalancePromptWarning', 'statementGenerationHelpers', 'path'],
     [
       (_session, scope) => (scope === 'all' ? [history, current] : [current]),
-      () => ({ template: { name: TEMPLATE_NAME }, exportMappings: [], exportTargetFields: [] }),
+      loadGroupingFunction(singleTemplateConfig),
+      singleTemplateConfig,
       () => {},
       ({ template }) => ({
         template,
@@ -921,6 +950,7 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
     const lastGeneratedExports = { detail: null, balance: null, allDetail: null, allBalance: null };
     const imported = [];
     const dependencies = {
+      groupStatementEntriesForGeneration: loadGroupingFunction(() => null),
       getEntryTemplateConfig: ({ entry }) => ({
         template: { name: templateNameById.get(entry.matchedTemplateId) },
         exportMappings: [{ templateField: 'MerchantId', mappedField: 'Account' }],

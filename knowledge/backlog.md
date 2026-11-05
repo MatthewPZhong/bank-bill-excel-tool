@@ -20,6 +20,13 @@
 
 ## 未实施
 
+### B44（P4 · 改进）删除已停用的主/子模板 IPC（`template:list-children`、`template:set-parent-status`、`template:set-child-parent`）
+
+- **来源**：v3.2.15 `feat/statement-channels`（渠道取代主模板）；[TechDoc §十一 I1](../changes/v3.2.15/feat/statement-channels/techdoc.md)
+- **影响**：三个通道仍在主进程注册与 Preload 中，但不再读写数据（列表返回空数组，写入返回 `TEMPLATE_PARENT_RETIRED`），界面不再调用。保留原因是两个写入通道属于冻结的 G7 TaskPolicy 清单（`action-task-binding-registry.js` 运行时校验数量 134 与 JCS 摘要，`archive-baseline.json` 逐项比对），删除需改动冻结契约。无功能与数据影响，只是多余的接口面
+- **关闭条件**：G7 执行与归档基线下次重冻结时，从主进程、Preload、`task-policy-registry.js`、`legacy-task-policies.js`、`archive-baseline.json`、`architecture/boundaries.json` 白名单中删除这三个通道，同步更新清单数量与摘要并记录差量
+- **目标版本**：未定（随 G7 基线重冻结）
+
 ### B42（P2 · 已知问题）输入表「恢复默认」不检查同组结构冲突，VCC 来源识别遇多重命中静默取第一项（资金口径 · 须人工复核）
 
 - **来源**：v3.2.14 `feat/input-template-structures`；[PR #244](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/244#discussion_r4471371083) 转为可合并后的 Codex 自动审查（审查提交 `aa459d2f`），已对照代码核实机制成立
@@ -78,7 +85,8 @@
   - **结果**：断档锚点只认人工种子（断档 spec §8 T7），B 会再次提示同一断档，补录无法完成。用户只能选“不补录”继续，此时 B 断档后的余额接着 B 自己断档前的余额计算。
 - **现状**：v3.2.13 本身也不支持同一账号跨模板。两条余额链各自计算，种子互相覆盖；合并汇总按行拼接，同一账号同一天会出现两行。断档提醒让它多了“补录不掉”的循环；余额要么停在提示里，要么经用户确认不补录后才导出，不会在不提示的情况下导出断档后的余额
 - **推荐**：先定口径，同一会话内同一账号跨模板时三选一：拒绝导入、合并为一条余额链、或计算种子不覆盖其他模板的人工种子。任一方案都改种子覆盖或导入规则，须补同账号跨模板回归，并做对账专项审查
-- **关闭条件**：确定口径并实现；或明确不支持同一账号跨模板，并在导入时提示
+- **v3.2.15 部分处理**：`feat/statement-channels` 把同一银行的多种文件格式放进同一渠道后，渠道内各子模板合为一条余额链，种子、补录与余额调整都按渠道归属，渠道内不再出现本条的种子互相覆盖（集成脚本 `statement-channel.js` ①④）。渠道之外的情形（两个普通模板、或两个不同渠道含同一账号）不变，仍按本条处理
+- **关闭条件**：确定口径并实现；或明确不支持同一账号跨模板，并在导入时提示（渠道内已由 v3.2.15 渠道合并覆盖）
 - **目标版本**：未定
 
 ### B34（P3 · 已知问题）`scripts/render-modal-preview.js` 弹窗预览启动即失败

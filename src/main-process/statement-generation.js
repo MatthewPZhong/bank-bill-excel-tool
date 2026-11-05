@@ -1,6 +1,13 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+// v3.2.15（T3）：输出身份（文件名、余额银行名、种子、余额调整、补录提示）取配置上的 outputName：
+//   属于渠道的模板为渠道名，普通模板为模板名；缺省时回退模板名（兼容未带 outputName 的旧配置）。
+function statementOutputName(config) {
+  const outputName = config && typeof config.outputName === 'string' ? config.outputName.trim() : '';
+  return outputName || String(config && config.template && config.template.name || '');
+}
+
 function createStatementGenerationHelpers(deps) {
   const {
     appendActivityLogEntry,
@@ -71,7 +78,7 @@ function createStatementGenerationHelpers(deps) {
           }),
           context: {
             inputFilePath: preparedBatch.inputFilePaths.join(';'),
-            templateName: config.template.name
+            templateName: statementOutputName(config)
           }
         }
       );
@@ -110,7 +117,7 @@ function createStatementGenerationHelpers(deps) {
     if (includeDetail) {
       const detailOutput = buildStatementOutputFilePath({
         kind: 'detail',
-        templateName: config.template.name,
+        templateName: statementOutputName(config),
         merchantId: outputMerchantId,
         outputTag: 'COMMON',
         dateRangeLabel,
@@ -125,7 +132,7 @@ function createStatementGenerationHelpers(deps) {
       result.detail = {
         filePath: detailOutput.outputFilePath,
         fileName: detailOutput.outputFileName,
-        templateName: config.template.name
+        templateName: statementOutputName(config)
       };
     }
 
@@ -158,10 +165,10 @@ function createStatementGenerationHelpers(deps) {
 
         balanceSeedStatus = scanBalanceSeedStatus({
           detailRows: effectiveDetailRows,
-          templateName: config.template.name
+          templateName: statementOutputName(config)
         });
 
-        const templateBankName = splitTemplateName(config.template.name).bankName;
+        const templateBankName = splitTemplateName(statementOutputName(config)).bankName;
         const balanceAdjustments = readBalanceAdjustments(
           ensureStorageRoot(),
           templateBankName
@@ -169,7 +176,7 @@ function createStatementGenerationHelpers(deps) {
 
         const balanceResult = deriveBalanceRecords({
           detailRows: effectiveDetailRows,
-          templateName: config.template.name,
+          templateName: statementOutputName(config),
           balanceTemplateFields,
           mode: preparedBatch.balanceMode,
           balanceAdjustments,
@@ -191,7 +198,7 @@ function createStatementGenerationHelpers(deps) {
         }
         const balanceOutput = buildStatementOutputFilePath({
           kind: 'balance',
-          templateName: config.template.name,
+          templateName: statementOutputName(config),
           merchantId: outputMerchantId,
           outputTag: 'BALANCE',
           dateRangeLabel: buildDateRangeLabel(balanceResult.billDates),
@@ -205,14 +212,14 @@ function createStatementGenerationHelpers(deps) {
           outputFilePath: balanceOutput.outputFilePath
         });
         storeGeneratedBalanceSeeds({
-          templateName: config.template.name,
+          templateName: statementOutputName(config),
           seedRecords: balanceResult.seedRecords
         });
 
         result.balance = {
           filePath: balanceOutput.outputFilePath,
           fileName: balanceOutput.outputFileName,
-          templateName: config.template.name
+          templateName: statementOutputName(config)
         };
         result.message = includeDetail ? '明细账单可导出，余额账单可导出' : '余额账单可导出';
       } catch (error) {
@@ -228,8 +235,8 @@ function createStatementGenerationHelpers(deps) {
               type: 'balance-seed-required',
               message: error.message,
               prompt: {
-                templateName: config.template.name,
-                bankName: error.context?.bankName || splitTemplateName(config.template.name).bankName,
+                templateName: statementOutputName(config),
+                bankName: error.context?.bankName || splitTemplateName(statementOutputName(config)).bankName,
                 merchantId: promptMerchantId,
                 currency: promptCurrency,
                 targetBillDate: normalizeCell(error.context?.targetBillDate),
@@ -668,5 +675,6 @@ function createStatementGenerationHelpers(deps) {
 }
 
 module.exports = {
-  createStatementGenerationHelpers
+  createStatementGenerationHelpers,
+  statementOutputName
 };
