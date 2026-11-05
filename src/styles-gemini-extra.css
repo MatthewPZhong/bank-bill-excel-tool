@@ -1689,6 +1689,18 @@ td .muted { color: var(--muted); }
   color: var(--muted);
   font-size: 13px;
 }
+/* v3.2.15 更新说明分页：每页 1 个版本，翻页控件在左、【知道了】在右 */
+.release-notes-pager {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.release-notes-page-indicator {
+  min-width: 64px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
 .template-excluded-body { padding: 16px 28px 18px; }
 .template-excluded-list {
   margin: 0;

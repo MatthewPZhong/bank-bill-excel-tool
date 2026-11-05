@@ -37,12 +37,25 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     `);
   }
 
-  await test('升级后弹出：版本从新到旧、文本转义，【知道了】后只确认一次且不再弹', async () => {
+  // 当前页：版本号、页码、翻页按钮是否可用（无翻页控件时为 null）。
+  const pageState = () => js(`(() => {
+    const top = rn.top();
+    const prev = top.querySelector('[data-action="previous-page"]');
+    const next = top.querySelector('[data-action="next-page"]');
+    return {
+      versions: [...top.querySelectorAll('.release-notes-version-title span:first-child')].map(node => node.textContent),
+      indicator: top.querySelector('[data-role="page-indicator"]')?.textContent ?? null,
+      previousDisabled: prev ? prev.disabled : null,
+      nextDisabled: next ? next.disabled : null
+    };
+  })()`);
+
+  await test('升级后弹出：每页 1 个版本从新到旧、文本转义，【知道了】后只确认一次且不再弹', async () => {
     await setup();
     await js('rn.dialogs.showStartupReleaseNotes()');
     assert.equal(await js('rn.root().children.length'), 1);
     assert.equal(await js(`rn.top().querySelector('.release-notes-summary').textContent`), '已从 v3.2.14 更新到 v3.2.16');
-    assert.deepEqual(await js(`[...rn.top().querySelectorAll('.release-notes-version-title span:first-child')].map(node=>node.textContent)`), ['v3.2.16', 'v3.2.15']);
+    assert.deepEqual(await pageState(), { versions: ['v3.2.16'], indicator: '第 1/2 页', previousDisabled: true, nextDisabled: false });
     assert.equal(await js(`rn.top().querySelector('.release-notes-list li').textContent`), '新增 <b>不应解析</b> 的要点');
     assert.equal(await js(`rn.top().querySelector('.release-notes-list b')`), null);
     assert.equal(await js(`document.activeElement?.dataset.action`), 'acknowledge');
@@ -53,6 +66,35 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.equal(await js('rn.root().children.length'), 0);
     assert.deepEqual(await js('rn.acks'), ['3.2.16']);
     assert.deepEqual(await js('rn.errors'), []);
+  });
+
+  await test('翻页：按钮到头置灰、页码随页变化、正文回顶；翻页不算确认', async () => {
+    await setup();
+    await js('rn.dialogs.showStartupReleaseNotes()');
+    await js(`rn.top().querySelector('.release-notes-body').scrollTop = 40; rn.top().querySelector('[data-action="next-page"]').click()`); await tick();
+    assert.deepEqual(await pageState(), { versions: ['v3.2.15'], indicator: '第 2/2 页', previousDisabled: false, nextDisabled: true });
+    assert.equal(await js(`rn.top().querySelector('.release-notes-body').scrollTop`), 0);
+    assert.equal(await js(`rn.top().querySelector('.release-notes-summary').textContent`), '已从 v3.2.14 更新到 v3.2.16', '首行不随翻页变化');
+    await js(`rn.top().querySelector('[data-action="previous-page"]').click()`); await tick();
+    assert.deepEqual(await pageState(), { versions: ['v3.2.16'], indicator: '第 1/2 页', previousDisabled: true, nextDisabled: false });
+    assert.equal(await js('rn.root().children.length'), 1);
+    assert.deepEqual(await js('rn.acks'), [], '翻页不算确认');
+  });
+
+  await test('翻到头时焦点从置灰按钮移到另一个翻页按钮', async () => {
+    await setup();
+    await js('rn.dialogs.showStartupReleaseNotes()');
+    await js(`rn.top().querySelector('[data-action="next-page"]').focus(); rn.top().querySelector('[data-action="next-page"]').click()`); await tick();
+    assert.equal(await js('document.activeElement?.dataset.action'), 'previous-page');
+    await js(`rn.top().querySelector('[data-action="previous-page"]').click()`); await tick();
+    assert.equal(await js('document.activeElement?.dataset.action'), 'next-page');
+  });
+
+  await test('只有 1 个版本：不显示翻页控件，【知道了】靠右', async () => {
+    await setup({ releaseNotes: { current: CURRENT, pending: { ...PENDING, entries: [CURRENT] } } });
+    await js('rn.dialogs.showStartupReleaseNotes()');
+    assert.deepEqual(await pageState(), { versions: ['v3.2.16'], indicator: null, previousDisabled: null, nextDisabled: null });
+    assert.equal(await js(`rn.top().querySelector('.dialog-actions').className`), 'dialog-actions right');
   });
 
   await test('来源版本未知时写“已更新到”；×、Esc 关闭同样确认，点背景不关', async () => {
@@ -100,9 +142,36 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(await js('rn.acks'), []);
   });
 
-  await test('设置入口：叠在设置弹窗上只显示本版，关闭后回到设置且不确认', async () => {
+  await test('设置入口：显示最近一次升级区间并可翻页，关闭后回到设置且不确认', async () => {
+    await setup({ releaseNotes: { current: CURRENT, pending: null, history: { kind: 'upgrade', ...PENDING } } });
+    await js('rn.parent=rn.other(); rn.dialogs.openReleaseNotesHistory(rn.parent); void 0;'); await tick();
+    assert.equal(await js('rn.root().children.length'), 2);
+    assert.equal(await js(`rn.top().querySelector('.release-notes-summary').textContent`), '已从 v3.2.14 更新到 v3.2.16');
+    assert.deepEqual(await pageState(), { versions: ['v3.2.16'], indicator: '第 1/2 页', previousDisabled: true, nextDisabled: false });
+    await js(`rn.top().querySelector('[data-action="next-page"]').click()`); await tick();
+    assert.deepEqual((await pageState()).versions, ['v3.2.15']);
+    await js(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`); await tick();
+    assert.equal(await js('rn.root().children.length'), 1);
+    assert.equal(await js('rn.parent.isTop()'), true);
+    assert.deepEqual(await js('rn.acks'), []);
+
+    await setup({ releaseNotes: { current: CURRENT, pending: null, history: { kind: 'upgrade', ...PENDING, fromVersion: null } } });
+    await js('rn.parent=rn.other(); rn.dialogs.openReleaseNotesHistory(rn.parent); void 0;'); await tick();
+    assert.equal(await js(`rn.top().querySelector('.release-notes-summary').textContent`), '已更新到 v3.2.16', '来源未知的老用户');
+  });
+
+  await test('设置入口：没有升级区间时只显示本版，关闭后回到设置且不确认', async () => {
+    await setup({ releaseNotes: { current: CURRENT, pending: null, history: { kind: 'current', fromVersion: null, toVersion: '3.2.16', entries: [CURRENT] } } });
+    await js('rn.parent=rn.other(); rn.dialogs.openReleaseNotesHistory(rn.parent); void 0;'); await tick();
+    assert.equal(await js(`rn.top().querySelector('.release-notes-summary').textContent`), '当前版本 v3.2.16');
+    assert.deepEqual(await pageState(), { versions: ['v3.2.16'], indicator: null, previousDisabled: null, nextDisabled: null });
+    await js(`rn.top().querySelector('[data-action="acknowledge"]').click()`); await tick();
+    assert.equal(await js('rn.root().children.length'), 1);
+    assert.deepEqual(await js('rn.acks'), []);
+
+    // 旧数据缺 history（Main 判定失败的兜底等）：退回本版
     await setup();
-    await js('rn.parent=rn.other(); rn.dialogs.openCurrentReleaseNotes(rn.parent); void 0;'); await tick();
+    await js('rn.parent=rn.other(); rn.dialogs.openReleaseNotesHistory(rn.parent); void 0;'); await tick();
     assert.equal(await js('rn.root().children.length'), 2);
     assert.equal(await js(`rn.top().querySelector('.release-notes-summary').textContent`), '当前版本 v3.2.16');
     assert.equal(await js(`rn.top().querySelectorAll('.release-notes-version').length`), 1);
@@ -111,15 +180,16 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.equal(await js('rn.parent.isTop()'), true);
     assert.deepEqual(await js('rn.acks'), []);
 
-    await setup({ releaseNotes: { current: null, pending: null } });
+    await setup({ releaseNotes: { current: null, pending: null, history: null } });
     await js('rn.dialogs.showStartupReleaseNotes()'); await tick();
     assert.equal(await js('rn.root().children.length'), 0, '没有待显示内容时不弹');
-    await js('rn.parent=rn.other(); rn.dialogs.openCurrentReleaseNotes(rn.parent); void 0;'); await tick();
+    await js('rn.parent=rn.other(); rn.dialogs.openReleaseNotesHistory(rn.parent); void 0;'); await tick();
     assert.equal(await js(`rn.top().querySelector('.release-notes-empty').textContent`), '本版暂无更新说明');
     assert.equal(await js(`rn.top().querySelector('.release-notes-summary')`), null);
   });
 
-  // 跨多个版本、每版写满 5 条的最长内容：正文滚动，标题与【知道了】始终可见。
+  // 跨多个版本、每版写满 5 条的最长内容：每页 1 个版本，卡片不超出窗口，标题、翻页控件与【知道了】始终可见；
+  //   单页内容超过正文高度时正文滚动。
   const LONG_PENDING = {
     fromVersion: '3.2.13',
     toVersion: '3.2.16',
@@ -134,7 +204,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     ['release-notes-dark', { width: 1080, height: 760, theme: 'dark' }],
     ['release-notes-zoom-150', { width: 1080, height: 760, theme: 'light', zoom: 1.5 }]
   ]) {
-    await test(`生产样式 ${options.width}×${options.height}${options.zoom ? ` @${options.zoom * 100}%` : ''} ${options.theme}：长内容正文滚动，标题与按钮可见`, async () => {
+    await test(`生产样式 ${options.width}×${options.height}${options.zoom ? ` @${options.zoom * 100}%` : ''} ${options.theme}：分页后标题、翻页与按钮可见`, async () => {
       // 先切回普通模式，使布局用例各自新建并显示窗口；复用被遮挡的窗口时截图可能停在旧帧。
       await reset();
       await setup({ releaseNotes: { current: LONG_PENDING.entries[0], pending: LONG_PENDING }, layoutOptions: options });
@@ -148,15 +218,25 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
           const rect = element.getBoundingClientRect();
           return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
         };
+        const pager = rn.top().querySelector('.release-notes-pager').getBoundingClientRect();
+        const acknowledge = rn.top().querySelector('[data-action="acknowledge"]').getBoundingClientRect();
         return {
           cardFits: card.left >= -1 && card.top >= -1 && card.right <= innerWidth + 1 && card.bottom <= innerHeight + 1,
-          bodyScrolls: body.scrollHeight > body.clientHeight && getComputedStyle(body).overflowY === 'auto',
+          onePagePerVersion: rn.top().querySelectorAll('.release-notes-version').length === 1,
+          bodyScrollsWhenNeeded: getComputedStyle(body).overflowY === 'auto',
           noHorizontalOverflow: body.scrollWidth <= body.clientWidth + 1,
           titleVisible: visible('.dialog-title'),
+          previousVisible: visible('[data-action="previous-page"]'),
+          indicatorVisible: visible('[data-role="page-indicator"]'),
+          nextVisible: visible('[data-action="next-page"]'),
+          pagerLeftOfAcknowledge: pager.right <= acknowledge.left,
           acknowledgeVisible: visible('[data-action="acknowledge"]')
         };
       })()`);
-      assert.deepEqual(geometry, { cardFits: true, bodyScrolls: true, noHorizontalOverflow: true, titleVisible: true, acknowledgeVisible: true });
+      assert.deepEqual(geometry, {
+        cardFits: true, onePagePerVersion: true, bodyScrollsWhenNeeded: true, noHorizontalOverflow: true, titleVisible: true,
+        previousVisible: true, indicatorVisible: true, nextVisible: true, pagerLeftOfAcknowledge: true, acknowledgeVisible: true
+      });
       await js('new Promise((resolve) => setTimeout(resolve, 250))');
       await layout.evidence(name, { geometry });
       await layout.click('[data-action="acknowledge"]');

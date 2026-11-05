@@ -400,7 +400,7 @@ function createAppUpdateSettingsDialog(options = {}) {
               </div>
               ${releaseNotesEnabled ? `<div class="app-update-settings-row">
                 <span class="app-update-settings-label">更新说明</span>
-                <button class="secondary-btn small" type="button" data-action="open-release-notes">查看本版更新说明</button>
+                <button class="secondary-btn small" type="button" data-action="open-release-notes">查看更新说明</button>
               </div>` : ''}
               <div class="app-update-settings-row">
                 <span class="app-update-settings-label">安装类型</span>

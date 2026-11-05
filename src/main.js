@@ -5386,7 +5386,7 @@ function registerAppHandlers() {
       // v1.5.3 R2（D15）：启动时自有账号迁移失败的错误文案；null 表示无失败
       ownAccountsMigrationError: lastOwnAccountsMigrationError,
       // v3.2.14：current = 本版说明（设置中查看）；pending = 升级后待弹出的说明
-      releaseNotes: releaseNotesState ? releaseNotesState.getSnapshot() : { current: null, pending: null }
+      releaseNotes: releaseNotesState ? releaseNotesState.getSnapshot() : { current: null, pending: null, history: null }
     };
   });
   ipcMain.handle('settings:acknowledge-release-notes', (_event, version) => {
