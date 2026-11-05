@@ -822,6 +822,25 @@ class AppDatabase {
         stack: result.error && result.error.stack ? result.error.stack : undefined
       });
     }
+    // v1.5.1 账户映射迁移标记：渠道迁移把子模板映射移到渠道层后，若已无普通模板持有模板级映射则清除（每次启动核对，幂等）。
+    try {
+      if (statementChannelRepository.settleLegacyAccountMappingMigration(this.db)) {
+        appendModuleLog({
+          level: 'info',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration v3.2.15] 旧账户映射迁移标记已清除：普通模板均无待分配的模板级映射（渠道子模板的映射已在渠道层）'
+        });
+      }
+    } catch (error) {
+      appendModuleLog({
+        level: 'warn',
+        source: 'main',
+        domain: 'migration',
+        message: '[migration v3.2.15] 核对旧账户映射迁移标记失败，下次启动重试',
+        details: [errorMessage(error)]
+      });
+    }
     return result;
   }
 
@@ -1064,8 +1083,13 @@ class AppDatabase {
       }
       for (const legacy of legacyChannelSources) {
         const channelId = resolveChannelId(legacy.name);
+        // 已有渠道的映射与待处理冲突一并作为来源（与启动迁移相同），包里未涉及的冲突不会被清掉。
+        const sources = [
+          ...statementChannelRepository.listChannelExistingSources(db, channelId, legacy.name),
+          ...(legacy.sources || [])
+        ];
         conflictCount += statementChannelRepository
-          .replaceChannelAccountMappingsFromSources(db, channelId, legacy.sources || [], now).conflictCount;
+          .replaceChannelAccountMappingsFromSources(db, channelId, sources, now).conflictCount;
       }
       for (const assignment of assignments) {
         const channelId = assignment.channelName ? resolveChannelId(assignment.channelName) : null;

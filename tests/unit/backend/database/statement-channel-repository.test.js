@@ -205,3 +205,46 @@ test('子模板改为新建渠道：先移出原渠道，新渠道取原渠道�
   assert.deepEqual(mappingRows({ channelId }), [['111', 'C111', false, '']]);
   assert.equal(appDb.getStatementChannel(channelId).templateCount, 1);
 });
+
+// PR #246 审查：普通模板与渠道同名时两者输出名称相同（明细 Channel 列、余额、种子、生成文件路径都按名称归属）。
+test('与渠道同名的模板不能移出渠道；渠道不能改成普通模板的名称；改名后可以', () => {
+  const owner = template('招商银行-上海');
+  const channelId = assign(owner.id, { mode: 'create' }).channelId;
+  const child = template('CMB-SH', ['x']);
+  assign(child.id, { mode: 'join', channelId });
+
+  assert.throws(() => assign(owner.id, { mode: 'none' }), (error) => error.code === 'CHANNEL_OUTPUT_NAME_CONFLICT'
+    && /模板「招商银行-上海」与渠道「招商银行-上海」同名/.test(error.message));
+  assert.equal(appDb.getTemplate(owner.id).channelId, channelId, '被阻止时归属与映射都不变');
+  assert.equal(assign(child.id, { mode: 'none' }).changed, true, '名称不同的子模板照常移出');
+
+  assert.throws(() => appDb.renameStatementChannel(channelId, 'CMB-SH'), (error) => error.code === 'CHANNEL_OUTPUT_NAME_CONFLICT'
+    && /已有同名的普通模板「CMB-SH」/.test(error.message));
+  assert.equal(appDb.getStatementChannel(channelId).name, '招商银行-上海');
+
+  appDb.renameStatementChannel(channelId, '招商银行-上海分行');
+  assert.equal(assign(owner.id, { mode: 'none' }).changed, true, '渠道改名后原同名模板可以移出');
+  appDb.renameStatementChannel(channelId, '招商银行-上海分行-2');
+});
+
+test('渠道改成本渠道子模板的名称不受限（子模板按渠道名输出）', () => {
+  const owner = template('招商银行-上海');
+  const channelId = assign(owner.id, { mode: 'create' }).channelId;
+  const child = template('CMB-SH', ['x']);
+  assign(child.id, { mode: 'join', channelId });
+  assert.equal(appDb.renameStatementChannel(channelId, 'CMB-SH').channel.name, 'CMB-SH');
+});
+
+// PR #246 审查：v1.5.1 账户映射迁移标记在没有可分配内容时清除，避免导入入口被永久阻断。
+test('旧账户映射迁移标记：普通模板都没有模板级映射时，移入渠道后清除；仍有普通模板持有映射时保留', () => {
+  const a = template('招商银行-上海');
+  const b = template('工行-深圳', ['y']);
+  appDb.saveAccountMappings({ templateId: a.id }, [{ bankAccountId: '111', clearingAccountId: 'C1' }]);
+  appDb.saveAccountMappings({ templateId: b.id }, [{ bankAccountId: '111', clearingAccountId: 'C1' }]);
+  appDb.setSetting('account_mapping_migration_pending', 'true');
+
+  const channelId = assign(a.id, { mode: 'create' }).channelId;
+  assert.equal(appDb.getSetting('account_mapping_migration_pending'), 'true', '工行-深圳 仍持有待分配的映射');
+  assign(b.id, { mode: 'join', channelId });
+  assert.equal(appDb.getSetting('account_mapping_migration_pending'), 'false', '已无普通模板持有模板级映射');
+});

@@ -426,18 +426,8 @@ function ensureStatementChannelSupport(db, createBackupFn) {
     db.prepare('UPDATE templates SET is_parent = 0, parent_template_id = NULL WHERE is_parent <> 0 OR parent_template_id IS NOT NULL').run();
 
     for (const [channelId, member] of channelMembers) {
-      const sources = [];
       // 降级后又升级时渠道可能已有映射与冲突：一并作为来源，不丢失。
-      const existingMappings = statementChannelRepository.listChannelAccountMappings(db, channelId);
-      if (existingMappings.length) sources.push({ sourceName: `渠道「${member.name}」原有设置`, mappings: existingMappings });
-      for (const conflict of statementChannelRepository.listConflictRows(db, channelId)) {
-        for (const candidate of conflict.candidates) {
-          sources.push({
-            sourceNames: candidate.sourceTemplateNames,
-            mappings: [{ bankAccountId: conflict.bankAccountId, ...candidate }]
-          });
-        }
-      }
+      const sources = statementChannelRepository.listChannelExistingSources(db, channelId, member.name);
       for (const template of member.templates) {
         sources.push({
           sourceName: template.name,

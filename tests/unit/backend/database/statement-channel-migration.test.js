@@ -197,3 +197,23 @@ test('启动迁移入口记录结果，迁移渠道的导入子模板编号从 1
   assert.equal(channel.nextChildNo, 1);
   assert.equal(channel.templateCount, 2);
 });
+
+// PR #246 审查：v1.5.1 旧账户映射迁移尚未分配（标记为 true）时，全部模板都属于主/子模板组——迁移把模板级映射搬到渠道后，
+//   分配弹窗既无数据也无目标，两个导入入口被永久阻断。启动核对时清除标记；仍有普通模板持有映射时保留，由用户分配。
+test('旧账户映射迁移标记：模板全部归入渠道后启动即清除；仍有普通模板持有映射时保留', () => {
+  const parent = insertTemplate('招商银行-上海', { isParent: true });
+  const child = insertTemplate('招商银行-上海-B', { parentId: parent });
+  insertAccountMapping(parent, '111', 'C1');
+  insertAccountMapping(child, '111', 'C1');
+  appDb.setSetting('account_mapping_migration_pending', 'true');
+  appDb.runStatementChannelMigration();
+  assert.equal(appDb.getSetting('account_mapping_migration_pending'), 'false');
+  assert.deepEqual(appDb.listAccountMappings({ channelId: channelId('招商银行-上海') }).map((m) => m.bankAccountId), ['111'],
+    '映射已在渠道层');
+
+  const ordinary = insertTemplate('工行-深圳');
+  insertAccountMapping(ordinary, '222', 'C2');
+  appDb.setSetting('account_mapping_migration_pending', 'true');
+  appDb.runStatementChannelMigration();
+  assert.equal(appDb.getSetting('account_mapping_migration_pending'), 'true', '工行-深圳 仍有待分配的映射');
+});

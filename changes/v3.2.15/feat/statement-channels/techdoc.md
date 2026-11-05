@@ -290,7 +290,21 @@ CREATE TABLE IF NOT EXISTS statement_channel_account_mapping_conflicts (
 
 已由 spec 明确为有意设计：渠道内同日多余额值的推导（取账单余额模式沿用 `inferEndingBalance`）；月度余额导出排除渠道模板（A7）；账户号未映射时按原值输出（R7）。
 
-### 11.4 验证
+### 11.4 PR #246 Codex 审查（2026-11-05）
+
+`@codex review` 审查 `d657dfe4`，提出 5 项，逐项核实都成立。修复如下，各项都有修复前失败、修复后通过的回归用例。
+
+| 编号 | 发现 | 处理 |
+| --- | --- | --- |
+| I14（P1） | 与渠道同名的首个子模板移出渠道（或渠道改名为普通模板名）后，普通模板与渠道输出名称相同：两组的生成文件路径相同、后一组覆盖前一组，余额与种子归属也相同 | 不只隔离路径，从源头禁止同名（spec §4.1）：`applyTemplateChannelAssignment`（移出）与 `renameChannel` 抛 `CHANNEL_OUTPUT_NAME_CONFLICT`；`template:rename`、`template:import` 普通模板与渠道同名返回 `TEMPLATE_NAME_CHANNEL_CONFLICT`；导入步骤 3.5 与“导出全部”用 `findGenerationGroupOutputNameConflicts` 兜底，返回 `STATEMENT_OUTPUT_NAME_CONFLICT` |
+| I15（P1） | 导入 v≤4 模板包并入已有渠道时只合并渠道生效映射，`replaceChannelAccountMappingsFromSources` 清空冲突后重建，包里未涉及的冲突账户号连同冲突一起消失，渠道解除阻断 | 新增 `listChannelExistingSources`（生效映射 + 冲突候选），启动迁移与 `restoreTemplateBundleStatementChannels` 的旧版包分支在同一事务内共用 |
+| I16（P1） | 模板包第一轮被跳过（表头重复、映射校验失败）的模板仍进入第二、三轮，账户映射与渠道归属被包内容改写 | 记录第一轮成功条目，第二、三轮抽为 `restoreBundleFollowUpRounds` 只处理成功条目（第二轮改写映射的问题自 v1.5.1 即存在，一并修正） |
+| I17（P1） | v1.5.1 账户映射迁移标记未清除且模板全在渠道时，分配弹窗无数据无目标，两个导入入口被永久阻断 | `settleLegacyAccountMappingMigration`：没有普通模板持有模板级映射时清除标记；每次启动与模板新建 / 加入渠道后核对 |
+| I18（P2） | 进入网银账单时的冲突提示用 `openModal` 替换弹窗栈，会关掉启动时的更新说明（不确认、本次不再弹） | `waitUntilNoModalOpen`：逐个等顶层弹窗关闭再提示，期间离开模块不提示；只用已允许的 `modalBridge.host.getTop` |
+
+I14、I15、I16 涉及输出身份与账户血缘，按资金红线列入 PR #246 人工复核。
+
+### 11.5 验证
 
 见 PR 说明；新增单测 `statement-channel-migration`、`statement-channel-repository`、`statement-channel-account-mappings`、`statement-channel-identity`，集成脚本 `scripts/integration/statement-channel.js`，renderer lifecycle 新增渠道用例。
 
