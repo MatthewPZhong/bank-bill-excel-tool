@@ -198,11 +198,22 @@ async function listChannelConflicts() {
   return result && result.status === 'success' && Array.isArray(result.channels) ? result.channels : [];
 }
 
+// 已有弹窗（启动时的更新说明、用户刚打开的配置弹窗等）时，逐个等顶层弹窗关闭，直到没有弹窗再提示；
+//   不用 openModal 替换别人的弹窗（v3.2.15 PR #246 审查）。期间离开本模块则不再提示。
+async function waitUntilNoModalOpen(version) {
+  for (let top = ui.modalBridge.host.getTop(); top; top = ui.modalBridge.host.getTop()) {
+    await top.closed;
+    if (!live(version)) return false;
+  }
+  return live(version);
+}
+
 async function promptChannelConflictsOnce() {
   if (channelConflictPromptShown) return;
   const version = generation;
   const channels = await listChannelConflicts();
   if (!live(version) || channelConflictPromptShown || channels.length === 0) return;
+  if (!(await waitUntilNoModalOpen(version)) || channelConflictPromptShown) return;
   channelConflictPromptShown = true;
   const names = channels.map((item) => item.channelName).join('、');
   openModal(() => createAlertDialog(`升级后，渠道「${names}」的账户映射有设置不一致的账户号，需要为每个账户号选定一条。处理前这些渠道无法生成账单。`, {

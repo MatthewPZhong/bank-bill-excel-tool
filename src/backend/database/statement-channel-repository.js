@@ -117,6 +117,18 @@ function runInTransaction(db, work) {
   }
 }
 
+// v3.2.15（PR #246 审查）：普通模板（不属于任何渠道）与渠道同名时，两者的输出名称相同——明细 Channel 列、
+//   余额银行名称与所在地、种子、余额调整和生成文件路径都按名称归属，生成时两组会互相覆盖、余额链混在一起。
+//   因此渠道名不能与普通模板同名；生成前另有兜底检查（main.js findGenerationGroupOutputNameConflicts）。
+function assertNoOrdinaryTemplateNamed(db, name, message) {
+  const template = db.prepare('SELECT id FROM templates WHERE name = ? AND channel_id IS NULL').get(normalizeText(name));
+  if (template) {
+    throw createChannelError('CHANNEL_OUTPUT_NAME_CONFLICT', message, {
+      context: { name: normalizeText(name), templateId: Number(template.id) }
+    });
+  }
+}
+
 function createChannel(db, name) {
   return runInTransaction(db, () => getChannel(db, insertChannelRow(db, name)));
 }
@@ -125,6 +137,8 @@ function renameChannel(db, channelId, name) {
   return runInTransaction(db, () => {
     const channel = requireChannel(db, channelId);
     const normalized = normalizeChannelNameOrThrow(db, name, { excludeChannelId: channel.id });
+    assertNoOrdinaryTemplateNamed(db, normalized,
+      `已有同名的普通模板「${normalized}」，渠道与普通模板同名会使两者的输出名称相同、生成的账单与余额混在一起；请换一个渠道名称`);
     db.prepare('UPDATE statement_channels SET name = ?, updated_at = ? WHERE id = ?')
       .run(normalized, new Date().toISOString(), channel.id);
     return { previous: channel, channel: getChannel(db, channel.id) };
@@ -343,6 +357,41 @@ function insertConflictRows(db, channelId, conflicts, now = new Date().toISOStri
 // 迁移与旧版模板包导入：按各来源模板的账户映射整体重建渠道映射与待处理冲突（D8）。
 //   sources：[{ sourceName, mappings }]；返回 { mergedCount, conflictCount }。调用方负责事务，
 //   并在之后删除来源模板的模板级映射。
+// v1.5.1 账户映射迁移标记：旧的全局映射复制给每个模板后，待用户逐条分配。分配只面向普通模板（渠道子模板的映射在渠道层，D7）；
+//   已没有普通模板持有模板级映射时无可分配内容，清除标记——否则分配弹窗既无数据也无目标、提交空分配被拒，
+//   两个账单导入入口被永久阻断（v3.2.15 PR #246 审查）。仍有普通模板持有映射时保持原样，由用户分配。
+const LEGACY_ACCOUNT_MAPPING_MIGRATION_KEY = 'account_mapping_migration_pending';
+
+function settleLegacyAccountMappingMigration(db, now = new Date().toISOString()) {
+  const row = db.prepare('SELECT setting_value AS value FROM app_settings WHERE setting_key = ?').get(LEGACY_ACCOUNT_MAPPING_MIGRATION_KEY);
+  if (!row || row.value !== 'true') return false;
+  const remaining = db.prepare(`
+    SELECT COUNT(1) AS cnt FROM account_mappings m JOIN templates t ON t.id = m.template_id WHERE t.channel_id IS NULL
+  `).get();
+  if (Number(remaining && remaining.cnt) > 0) return false;
+  db.prepare('UPDATE app_settings SET setting_value = ?, updated_at = ? WHERE setting_key = ?')
+    .run('false', now, LEGACY_ACCOUNT_MAPPING_MIGRATION_KEY);
+  return true;
+}
+
+// 渠道已有的账户映射设置作为合并来源：生效映射 + 待处理冲突的每个候选（v3.2.15 PR #246 审查）。
+//   启动迁移与旧版模板包导入都先纳入这些来源，再按新来源重建映射与冲突，避免未涉及的冲突账户号连同冲突记录一起消失、
+//   渠道在用户未选定设置时解除生成阻断。
+function listChannelExistingSources(db, channelId, channelName) {
+  const sources = [];
+  const mappings = listChannelAccountMappings(db, channelId);
+  if (mappings.length) sources.push({ sourceName: `渠道「${normalizeText(channelName)}」原有设置`, mappings });
+  for (const conflict of listConflictRows(db, channelId)) {
+    for (const candidate of conflict.candidates) {
+      sources.push({
+        sourceNames: candidate.sourceTemplateNames,
+        mappings: [{ bankAccountId: conflict.bankAccountId, ...candidate }]
+      });
+    }
+  }
+  return sources;
+}
+
 function replaceChannelAccountMappingsFromSources(db, channelId, sources, now = new Date().toISOString()) {
   const merged = mergeAccountMappingSources(sources);
   writeChannelAccountMappingRows(db, channelId, merged.mappings, now);
@@ -483,6 +532,14 @@ function applyTemplateChannelAssignment(db, templateId, assignment, now = new Da
     if (!previousChannelId) {
       return { changed: false, channelId: null, previousChannelId, createdChannel: null };
     }
+    const sameNameChannel = db.prepare('SELECT id FROM statement_channels WHERE name = ?').get(templateName);
+    if (sameNameChannel) {
+      throw createChannelError(
+        'CHANNEL_OUTPUT_NAME_CONFLICT',
+        `模板「${templateName}」与渠道「${templateName}」同名，移出渠道后两者的输出名称相同、生成的账单与余额会混在一起；请先重命名模板或渠道再移出`,
+        { context: { templateId: template.id, channelId: Number(sameNameChannel.id) } }
+      );
+    }
     // A10：移出渠道时复制渠道映射，输出保持不变。
     writeTemplateAccountMappingRows(db, template.id, listChannelAccountMappings(db, previousChannelId), now);
     db.prepare('UPDATE templates SET channel_id = NULL, updated_at = ? WHERE id = ?').run(now, template.id);
@@ -507,6 +564,7 @@ function applyTemplateChannelAssignment(db, templateId, assignment, now = new Da
     writeChannelAccountMappingRows(db, channelId, sourceMappings, now);
     db.prepare('DELETE FROM account_mappings WHERE template_id = ?').run(template.id);
     db.prepare('UPDATE templates SET channel_id = ?, updated_at = ? WHERE id = ?').run(channelId, now, template.id);
+    settleLegacyAccountMappingMigration(db, now);
     return { changed: true, channelId, previousChannelId, createdChannel: { id: channelId, name: templateName } };
   }
 
@@ -549,6 +607,7 @@ function applyTemplateChannelAssignment(db, templateId, assignment, now = new Da
   writeChannelAccountMappingRows(db, targetChannelId, merged.mappings, now);
   db.prepare('DELETE FROM account_mappings WHERE template_id = ?').run(template.id);
   db.prepare('UPDATE templates SET channel_id = ?, updated_at = ? WHERE id = ?').run(targetChannelId, now, template.id);
+  settleLegacyAccountMappingMigration(db, now);
   return { changed: true, channelId: targetChannelId, previousChannelId, createdChannel: null };
 }
 
@@ -610,6 +669,8 @@ module.exports = {
   countChannelAccountMappingConflicts,
   createChannel,
   createChannelError,
+  listChannelExistingSources,
+  settleLegacyAccountMappingMigration,
   createChildTemplate,
   deleteChannel,
   describeAccountMappingSetting,

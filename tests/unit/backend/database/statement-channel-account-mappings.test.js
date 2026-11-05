@@ -146,6 +146,10 @@ test('渠道有待处理冲突时，子模板不能移出或转入其他渠道�
   assert.equal(appDb.getTemplate(t.id).channelId, channelId);
   assert.equal(appDb.saveMappings(t.id, [], [], [], undefined, null, { channelAssignment: { mode: 'keep' } }).channelAssignment.changed, false);
   appDb.resolveStatementChannelAccountMappingConflicts(channelId, [{ bankAccountId: '111', candidateIndex: 0 }]);
+  // 与渠道同名的模板移出后会与渠道输出同名，先改名再移出（PR #246 审查）。
+  assert.throws(() => appDb.saveMappings(t.id, [], [], [], undefined, null, { channelAssignment: { mode: 'none' } }),
+    { code: 'CHANNEL_OUTPUT_NAME_CONFLICT' });
+  appDb.renameTemplate(t.id, '招商银行-上海-格式A');
   appDb.saveMappings(t.id, [], [], [], undefined, null, { channelAssignment: { mode: 'none' } });
   assert.deepEqual(appDb.listAccountMappings({ templateId: t.id }).map((m) => [m.bankAccountId, m.clearingAccountId]), [['333', 'C3'], ['111', 'C1']]);
 });
@@ -169,4 +173,24 @@ test('在渠道层显式设置冲突账户号的映射即视为已处理该冲�
   assert.deepEqual(result.resolvedConflictBankAccountIds, ['111']);
   assert.deepEqual(appDb.listStatementChannelAccountMappingConflicts(channelId)[0].conflicts.map((c) => c.bankAccountId), ['222']);
   assert.deepEqual(appDb.listAccountMappings({ channelId }).map((m) => [m.bankAccountId, m.clearingAccountId]), [['111', 'C1-MANUAL']]);
+});
+
+// PR #246 审查：旧版模板包（v≤4）并入已有渠道时，渠道的待处理冲突一并作为来源，包里未涉及的冲突不消失、渠道仍被阻断。
+test('导入旧版模板包并入已有渠道：原有映射与待处理冲突都保留，包里的映射照常并入', () => {
+  const t = template('招商银行-上海');
+  const channelId = createChannelFrom(t.id);
+  seedConflict(channelId);
+  assert.equal(appDb.countStatementChannelAccountMappingConflicts(channelId), 1);
+
+  const result = appDb.restoreTemplateBundleStatementChannels({
+    channels: [],
+    legacyChannelSources: [{ name: '招商银行-上海', sources: [{ sourceName: '包内子模板', mappings: [{ bankAccountId: '444', clearingAccountId: 'C4' }] }] }],
+    assignments: []
+  });
+  assert.equal(result.conflictCount, 1, '包里未涉及的冲突账户号 111 仍待处理');
+  assert.equal(appDb.countStatementChannelAccountMappingConflicts(channelId), 1);
+  const [group] = appDb.listStatementChannelAccountMappingConflicts(channelId);
+  assert.deepEqual(group.conflicts.map((conflict) => [conflict.bankAccountId, conflict.candidates.map((c) => c.clearingAccountId)]),
+    [['111', ['C1', 'C1X']]]);
+  assert.deepEqual(appDb.listAccountMappings({ channelId }).map((m) => m.bankAccountId).sort(), ['333', '444']);
 });

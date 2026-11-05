@@ -8399,6 +8399,7 @@ const STATEMENT_CHANNEL_BUSINESS_ERROR_CODES = new Set([
   'CHANNEL_ACCOUNT_MAPPING_CONFLICT',
   'CHANNEL_ACCOUNT_MAPPING_CONFLICT_STALE',
   'CHANNEL_ACCOUNT_MAPPING_CONFLICT_PENDING',
+  'CHANNEL_OUTPUT_NAME_CONFLICT',
   'TEMPLATE_NOT_FOUND'
 ]);
 
@@ -8581,14 +8582,34 @@ function buildLegacyBundleChannelRestore(importedTemplateRecords) {
     }
     assignments.push({ templateId: record.template.id, channelName: root.name });
   });
-  const legacyChannelSources = Array.from(membersByChannel.entries()).map(([name, member]) => {
-    const existing = database.getStatementChannelByName(name);
-    const sources = existing
-      ? [{ sourceName: `渠道「${name}」原有设置`, mappings: database.listAccountMappings({ channelId: existing.id }) }, ...member.sources]
-      : member.sources;
-    return { name, sources };
-  });
+  // 已有同名渠道的映射与待处理冲突由 restoreTemplateBundleStatementChannels 在同一事务内并入来源。
+  const legacyChannelSources = Array.from(membersByChannel.entries())
+    .map(([name, member]) => ({ name, sources: member.sources }));
   return { channels: [], legacyChannelSources, assignments };
+}
+
+// 模板包导入的第二、三轮，只处理第一轮成功导入的条目（succeededEntries）：
+//   第二轮写入模板级账户映射（v1.5.1，覆盖导入时也清除旧映射）；第三轮还原渠道与归属（v3.2.15，§5.3，v≤4 的主/子关系转为渠道）。
+//   被跳过的模板（表头重复、映射校验失败）保留原有映射与归属（v3.2.15 PR #246 审查）。
+function restoreBundleFollowUpRounds({ importedTemplates, succeededEntries, importedBundleVersion, importedChannels }) {
+  const importedTemplateRecords = [];
+  importedTemplates.forEach((entry) => {
+    if (!succeededEntries.has(entry)) return;
+    const template = entry.templateKey
+      ? database.getTemplateByKey(entry.templateKey)
+      : database.getTemplateByName(entry.name);
+    if (!template) return;
+    importedTemplateRecords.push({ entry, template });
+
+    // 始终写入：v3 bundle 无 accountMappings 时 mappings=[] → 清除旧映射
+    database.saveAccountMappings({ templateId: template.id }, normalizeBundleAccountMappings(entry.accountMappings));
+  });
+
+  const channelRestore = importedBundleVersion >= 5
+    ? buildBundleV5ChannelRestore(importedChannels, importedTemplateRecords)
+    : buildLegacyBundleChannelRestore(importedTemplateRecords);
+  const restoreResult = database.restoreTemplateBundleStatementChannels(channelRestore);
+  return { importedTemplateRecords, channelRestore, restoreResult };
 }
 
 function collectChannelBalanceModeWarnings(channelNames) {
@@ -8732,6 +8753,16 @@ function registerTemplateHandlers() {
           message: `该文件的表头与已有模板「${conflict.name}」完全相同，无法创建重复表头的模板。`,
           errorCode: 'TEMPLATE_HEADERS_DUPLICATE',
           context: { conflictTemplateName: conflict.name }
+        });
+      }
+
+      // v3.2.15：新建或覆盖的是普通模板时不能与渠道同名（覆盖渠道内的同名子模板不受限）。
+      if ((!existingByName || !existingByName.channelId) && database.getStatementChannelByName(templateName)) {
+        return createErrorResult({
+          step: '导入模板文件',
+          message: `已有同名渠道「${templateName}」，普通模板与渠道同名会使两者的输出名称相同；如是该渠道的另一种格式，请在渠道行点【导入子模板】，否则请先修改文件名`,
+          errorCode: 'TEMPLATE_NAME_CHANNEL_CONFLICT',
+          context: { channelName: templateName }
         });
       }
 
@@ -9049,6 +9080,16 @@ function registerTemplateHandlers() {
         });
       }
 
+      // v3.2.15：普通模板按模板名输出，不能与渠道同名（属于渠道的子模板按渠道名输出，不受限）。
+      if (!template.channelId && database.getStatementChannelByName(nextName)) {
+        return createErrorResult({
+          step: '重命名模板',
+          message: `已有同名渠道「${nextName}」，普通模板与渠道同名会使两者的输出名称相同，请换一个名称`,
+          errorCode: 'TEMPLATE_NAME_CHANNEL_CONFLICT',
+          templateName: template.name
+        });
+      }
+
       const renamedTemplate = database.renameTemplate(templateId, nextName);
       syncTemplateLibraryFile();
       clearLastErrorReport();
@@ -9269,6 +9310,9 @@ function registerTemplateHandlers() {
       let createdCount = 0;
       let updatedCount = 0;
       let skippedCount = 0;
+      // v3.2.15（PR #246 审查）：只有第一轮成功导入的条目进入后两轮（账户映射、渠道归属）；
+      //   被跳过的模板保留原有映射与归属，不按包内容改写。
+      const succeededEntries = new Set();
 
       importedTemplates.forEach((entry) => {
         if (!entry.name || !entry.headers.length) {
@@ -9441,6 +9485,7 @@ function registerTemplateHandlers() {
           } else {
             createdCount += 1;
           }
+          succeededEntries.add(entry);
         } catch (error) {
           if (error instanceof FileValidationError) {
             skippedCount += 1;
@@ -9451,25 +9496,9 @@ function registerTemplateHandlers() {
         }
       });
 
-      // v1.5.1: 第二轮 — 导入模板级账户映射（覆盖导入时也清除旧映射）
-      const importedTemplateRecords = [];
-      importedTemplates.forEach((entry) => {
-        if (!entry.name || !entry.headers.length) return;
-        const template = entry.templateKey
-          ? database.getTemplateByKey(entry.templateKey)
-          : database.getTemplateByName(entry.name);
-        if (!template) return;
-        importedTemplateRecords.push({ entry, template });
-
-        // 始终写入：v3 bundle 无 accountMappings 时 mappings=[] → 清除旧映射
-        database.saveAccountMappings({ templateId: template.id }, normalizeBundleAccountMappings(entry.accountMappings));
+      const { channelRestore, restoreResult } = restoreBundleFollowUpRounds({
+        importedTemplates, succeededEntries, importedBundleVersion, importedChannels
       });
-
-      // v3.2.15: 第三轮 — 还原渠道与归属（覆盖导入时也清除旧归属）；v≤4 的主/子关系转为渠道（§5.3）
-      const channelRestore = importedBundleVersion >= 5
-        ? buildBundleV5ChannelRestore(importedChannels, importedTemplateRecords)
-        : buildLegacyBundleChannelRestore(importedTemplateRecords);
-      const restoreResult = database.restoreTemplateBundleStatementChannels(channelRestore);
       const balanceModeWarnings = collectChannelBalanceModeWarnings(
         Array.from(new Set(channelRestore.assignments.map((item) => item.channelName).filter(Boolean)))
       );
@@ -10606,6 +10635,32 @@ function buildChannelBalanceModeMismatchError(group, detailLines) {
   );
 }
 
+// v3.2.15（PR #246 审查）：不同生成分组的输出名称不能相同。普通模板与渠道同名时（模板包或旧数据可能带来），
+//   两组的生成文件路径、明细 Channel 列、余额与种子归属都相同，会互相覆盖或混用余额链。返回逐行明细，否则 null。
+function findGenerationGroupOutputNameConflicts(groups) {
+  const ownersByName = new Map();
+  for (const group of Array.isArray(groups) ? groups : []) {
+    if (!group || !group.templateConfig) continue;
+    const outputName = resolveStatementOutputName(group.templateConfig.template);
+    if (!ownersByName.has(outputName)) ownersByName.set(outputName, []);
+    ownersByName.get(outputName).push(String(group.key).startsWith('channel:')
+      ? `渠道「${outputName}」`
+      : `模板「${normalizeCell(group.templateConfig.template.name)}」`);
+  }
+  const lines = Array.from(ownersByName.entries())
+    .filter(([, owners]) => owners.length > 1)
+    .map(([outputName, owners]) => `输出名称「${outputName}」：${owners.join('、')}`);
+  return lines.length ? lines : null;
+}
+
+function buildStatementOutputNameConflictError(detailLines) {
+  return new FileValidationError(
+    'STATEMENT_OUTPUT_NAME_CONFLICT',
+    '有普通模板与渠道同名，两者生成的账单与余额会混在一起，请先在模板管理中重命名模板或渠道后再导入',
+    { detailLines }
+  );
+}
+
 // v1.5.2：虚拟 ID 下从 session 重新生成合并的余额文件（补录 seed 后调用）
 function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
   const allEntries = getStatementSessionEntries(session, scope);
@@ -11370,6 +11425,18 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
     if (isVirtualTemplate) {
       const allEntries = getStatementSessionEntries(session, 'all');
       const generationGroups = groupStatementEntriesForGeneration(allEntries);
+      // v3.2.15：导入后若经模板包等途径使普通模板与渠道同名，导出全部同样阻断。
+      const outputNameConflicts = findGenerationGroupOutputNameConflicts(generationGroups);
+      if (outputNameConflicts) {
+        const error = buildStatementOutputNameConflictError(outputNameConflicts);
+        return createErrorResult({
+          step: kind === 'detail' ? '导出明细账单' : '导出余额账单',
+          message: error.message,
+          errorCode: error.code,
+          detailLines: outputNameConflicts,
+          templateName: session.templateName
+        });
+      }
       // v3.2.15（D2）：导入后若经模板包等途径使渠道余额方式不一致，导出全部同样阻断。
       for (const group of generationGroups) {
         const mismatch = findGenerationGroupBalanceModeMismatch(group);
@@ -12393,6 +12460,17 @@ async function handleFilenameMappingImport(prepared) {
     // ===== 步骤 3.5（v3.2.15）：渠道组校验 =====
     // 按渠道分组后，任一渠道组内余额方式不一致，或渠道还有未处理的账户映射冲突，整批阻断，不进入大账号选择与生成。
     const importGenerationGroups = groupStatementEntriesForGeneration(parentProvisionalEntries);
+    const outputNameConflicts = findGenerationGroupOutputNameConflicts(importGenerationGroups);
+    if (outputNameConflicts) {
+      const error = buildStatementOutputNameConflictError(outputNameConflicts);
+      return createErrorResult({
+        step: '导入网银明细文件',
+        message: error.message,
+        errorCode: error.code,
+        detailLines: outputNameConflicts,
+        templateName: virtualTemplateName
+      });
+    }
     for (const group of importGenerationGroups) {
       const mismatch = findGenerationGroupBalanceModeMismatch(group);
       if (mismatch) {

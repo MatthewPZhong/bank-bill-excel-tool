@@ -277,7 +277,12 @@ function createEnvironment(dir, label) {
     'generateMultiTemplateGroupFiles',
     'regenerateVirtualTemplateBalanceFromSession',
     'normalizeTemplateChannelAssignment',
-    'findSaveMappingsBalanceModeMismatch'
+    'findSaveMappingsBalanceModeMismatch',
+    'findGenerationGroupOutputNameConflicts',
+    'normalizeBundleAccountMappings',
+    'buildBundleV5ChannelRestore',
+    'buildLegacyBundleChannelRestore',
+    'restoreBundleFollowUpRounds'
   ], mainDeps));
 
   function defineTemplate(name, layout, options = {}) {
@@ -605,6 +610,58 @@ function verifyConflictBlocksImport(dir) {
   assertEq([...new Set(readDetailColumns(result.detail.filePath, ['MerchantId']).map((row) => row[0]))], ['M001-OTHER'], 'Step8.回读账号为所选候选');
 }
 
+// ⑨ PR #246 审查：普通模板与渠道同名（模板包或旧数据可能带来）时，两组输出名称相同，生成文件路径、
+//    Channel 列、余额与种子归属都会重叠；生成前的兜底检查列出冲突，界面入口阻止形成同名。
+function verifyOutputNameConflictGuard(dir) {
+  const env = createEnvironment(dir, 'step9');
+  const owner = env.defineTemplate('招商银行-上海', 'A');
+  const channelId = env.saveWithChannel(owner, { mode: 'create' }).channelId;
+  env.database.renameTemplate(owner.id, 'CMB-A');
+  const ordinary = env.defineTemplate('招商银行-上海', 'C');
+  const fileA = path.join(dir, 'step9-a.xlsx');
+  const fileC = path.join(dir, 'step9-c.xlsx');
+  writeSource(fileA, 'A', [['2026-09-01', 'M001', 'USD', '10', '']]);
+  writeSource(fileC, 'C', [['2026-09-01', 'M001', 'USD', '7', '']]);
+  const groups = env.fns.groupStatementEntriesForGeneration([
+    env.entryFor(env.database.getTemplate(owner.id), fileA),
+    env.entryFor(ordinary, fileC)
+  ]);
+  assertEq(env.fns.findGenerationGroupOutputNameConflicts(groups), ['输出名称「招商银行-上海」：渠道「招商银行-上海」、模板「招商银行-上海」'],
+    'Step9.普通模板与渠道同名时生成前列出冲突');
+  let leaveError = null;
+  try { env.saveWithChannel(env.database.getTemplate(owner.id), { mode: 'none' }); } catch (error) { leaveError = error; }
+  assertEq(leaveError, null, 'Step9.名称不同的子模板可以移出');
+  let renameError = null;
+  try { env.database.renameStatementChannel(channelId, '招商银行-上海'); } catch (error) { renameError = error; }
+  assertEq(renameError && renameError.code, 'CHANNEL_OUTPUT_NAME_CONFLICT', 'Step9.渠道不能改成（或保持）与普通模板相同的名称');
+  env.database.renameTemplate(ordinary.id, '招商银行-上海-普通');
+  const renamed = env.fns.groupStatementEntriesForGeneration([env.entryFor(env.database.getTemplate(ordinary.id), fileC)]);
+  assertEq(env.fns.findGenerationGroupOutputNameConflicts(renamed), null, 'Step9.改名后无冲突');
+}
+
+// ⑩ PR #246 审查：模板包导入第一轮被跳过（表头重复、映射校验失败）的模板，第二、三轮不改写其账户映射与渠道归属。
+function verifyBundleSkippedTemplateKeepsChannel(dir) {
+  const env = createEnvironment(dir, 'step10');
+  const kept = env.defineTemplate('招商银行-上海', 'A');
+  const keptChannelId = env.saveWithChannel(kept, { mode: 'create' }).channelId;
+  env.database.saveAccountMappings({ channelId: keptChannelId }, [{ bankAccountId: 'RAW001', clearingAccountId: 'M001' }]);
+  const moved = env.defineTemplate('工行-深圳', 'C');
+  const skippedEntry = { templateKey: kept.templateKey, name: kept.name, channelName: '包内渠道',
+    accountMappings: [{ bankAccountId: 'RAW001', clearingAccountId: 'M001-FROM-BUNDLE' }] };
+  const succeededEntry = { templateKey: moved.templateKey, name: moved.name, channelName: '包内渠道', accountMappings: [] };
+  const { restoreResult } = env.fns.restoreBundleFollowUpRounds({
+    importedTemplates: [skippedEntry, succeededEntry],
+    succeededEntries: new Set([succeededEntry]),
+    importedBundleVersion: 5,
+    importedChannels: [{ name: '包内渠道', accountMappings: [{ bankAccountId: 'RAW009', clearingAccountId: 'M009' }], accountMappingConflicts: [] }]
+  });
+  assertEq(restoreResult.channelCount, 1, 'Step10.包内渠道照常还原');
+  assertEq(env.database.getTemplate(kept.id).channelName, '招商银行-上海', 'Step10.被跳过的模板保留原渠道归属');
+  assertEq(env.database.listAccountMappings({ channelId: keptChannelId }).map((m) => m.clearingAccountId), ['M001'], 'Step10.原渠道映射不变');
+  assertEq(env.database.listAccountMappings({ templateId: kept.id }), [], 'Step10.被跳过的模板不写入包内模板级映射');
+  assertEq(env.database.getTemplate(moved.id).channelName, '包内渠道', 'Step10.成功导入的模板按包归入渠道');
+}
+
 async function run() {
   console.log('==== 网银账单渠道与子模板 e2e 集成验证 ====');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stmt-channel-'));
@@ -616,6 +673,8 @@ async function run() {
     verifyLegacyMigration(dir);
     verifyMixedMerchantMappings(dir);
     verifyConflictBlocksImport(dir);
+    verifyOutputNameConflictGuard(dir);
+    verifyBundleSkippedTemplateKeepsChannel(dir);
   } finally {
     openedDatabases.splice(0).forEach((database) => {
       try { database.close(); } catch (error) { console.error('关闭测试主库失败', error); }
