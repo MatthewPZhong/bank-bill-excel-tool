@@ -40,9 +40,11 @@ async function runChild(directory, mode) {
   const policy = createTaskPolicyRegistry().require('template:import');
   // 执行 Main 实际 prepare 形成 FilePlan；只将用户文件对话框替换成隔离输入。
   const main = fs.readFileSync(path.resolve(__dirname, '../../src/main.js'), 'utf8');
-  const prepareMatch = main.match(/trackedIpcHandle\('template:import',[\s\S]*?async prepare\(\) \{([\s\S]*?)\n    \},\n    async execute/);
+  // prepare 须紧跟在 handler 声明下一行，避免惰性匹配越过本 handler 截到其他 handler 的 prepare。
+  const prepareMatch = main.match(/trackedIpcHandle\('template:import',[^\n]*\n    async prepare\(([^)]*)\) \{([\s\S]*?)\n    \},\n    async execute/);
   assert.ok(prepareMatch, 'Main 应保留 template:import 的准备入口');
-  const prepared = await vm.runInNewContext(`(async function () {${prepareMatch[1]}\n})()`, {
+  // 不传参数即普通模板导入（v3.2.15 起 options.channelId 为导入渠道子模板）。
+  const prepared = await vm.runInNewContext(`(async function (${prepareMatch[1]}) {${prepareMatch[2]}\n})()`, {
     showImportOpenDialog: async () => ({ canceled: false, filePaths: [inputPath] }),
     templateFileDialogFilters: () => []
   });

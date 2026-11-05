@@ -142,10 +142,14 @@ function readDetailColumns(filePath, names) {
 
 // ===== 环境：真实主库 + main.js 真实函数 =====
 
+// 每步打开的主库须在删除临时目录前关闭（Windows 不允许删除仍被打开的 SQLite 文件）。
+const openedDatabases = [];
+
 function createEnvironment(dir, label) {
   const storageRoot = path.join(dir, `storage-${label}`);
   fs.mkdirSync(storageRoot, { recursive: true });
   const database = new AppDatabase(path.join(dir, `${label}.sqlite`));
+  openedDatabases.push(database);
   database.init();
   const exportMappingsByTemplateId = new Map();
   const acknowledgedKeys = new Set();
@@ -613,6 +617,9 @@ async function run() {
     verifyMixedMerchantMappings(dir);
     verifyConflictBlocksImport(dir);
   } finally {
+    openedDatabases.splice(0).forEach((database) => {
+      try { database.close(); } catch (error) { console.error('关闭测试主库失败', error); }
+    });
     fs.rmSync(dir, { recursive: true, force: true });
   }
 
