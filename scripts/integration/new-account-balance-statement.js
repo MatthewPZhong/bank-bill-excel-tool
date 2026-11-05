@@ -60,8 +60,8 @@ async function run() {
     // Step 3: isRegularTemplate 普通模板判定
     // ============================================================
     assertEq(monthlyBalance.isRegularTemplate({ id: 1, name: 'T1' }), true, 'Step3.普通模板 = true');
-    assertEq(monthlyBalance.isRegularTemplate({ id: 1, name: 'T1', isParent: true }), false, 'Step3.主模板 = false');
-    assertEq(monthlyBalance.isRegularTemplate({ id: 2, parentTemplateId: 1 }), false, 'Step3.子模板 = false');
+    assertEq(monthlyBalance.isRegularTemplate({ id: 1, name: 'T1', channelId: 1, channelName: 'T1' }), false, 'Step3.渠道下的原主模板 = false');
+    assertEq(monthlyBalance.isRegularTemplate({ id: 2, channelId: 1, channelName: 'T1' }), false, 'Step3.渠道子模板 = false');
     assertEq(monthlyBalance.isRegularTemplate(null), false, 'Step3.null = false');
 
     // ============================================================

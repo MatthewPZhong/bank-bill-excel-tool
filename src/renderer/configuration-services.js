@@ -1,8 +1,20 @@
 'use strict';
 
 (function installConfigurationServices(root) {
-  function createConfigurationServices({ templatesApi, reportError = () => {} }) {
+  // v3.2.15：渠道列表随模板一起刷新；未提供 channelsApi 时按模板上的 channelId / channelName 推导（不含空渠道）。
+  function deriveChannelsFromTemplates(list) {
+    const byId = new Map();
+    for (const template of Array.isArray(list) ? list : []) {
+      const channelId = Number(template && template.channelId || 0);
+      if (!channelId) continue;
+      if (!byId.has(channelId)) byId.set(channelId, { id: channelId, name: String(template.channelName || ''), templateCount: 0 });
+      byId.get(channelId).templateCount += 1;
+    }
+    return Array.from(byId.values()).sort((left, right) => left.name.localeCompare(right.name, 'zh-Hans-CN'));
+  }
+  function createConfigurationServices({ templatesApi, channelsApi = null, reportError = () => {} }) {
     let templates = [];
+    let channels = [];
     let currencyOptions = [];
     let accountMappingCount = 0;
     let requestGeneration = 0;
@@ -17,6 +29,7 @@
     }
     return Object.freeze({
       getTemplates: () => copy(templates),
+      getStatementChannels: () => copy(channels),
       getCurrencyOptions: () => copy(currencyOptions),
       getAccountMappingCount: () => accountMappingCount,
       acceptBootstrap(info) {
@@ -32,10 +45,14 @@
       },
       async refreshTemplates() {
         const generation = ++requestGeneration;
-        const result = await templatesApi.list();
+        const [result, channelResult] = await Promise.all([
+          templatesApi.list(),
+          channelsApi && typeof channelsApi.list === 'function' ? channelsApi.list() : Promise.resolve(null)
+        ]);
         if (!disposed && generation === requestGeneration) {
           if (!Array.isArray(result)) throw new TypeError('模板列表返回格式无效');
           templates = copy(result);
+          channels = Array.isArray(channelResult) ? copy(channelResult) : deriveChannelsFromTemplates(result);
           notify('templates');
         }
         return result;
@@ -49,6 +66,7 @@
         if (disposed) return;
         ++requestGeneration;
         templates = copy(value);
+        channels = deriveChannelsFromTemplates(value);
         notify('templates');
       },
       dispose() { disposed = true; ++requestGeneration; listeners.clear(); }

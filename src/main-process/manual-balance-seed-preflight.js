@@ -15,6 +15,7 @@ const {
   getStatementSessionEntries,
   normalizeInputFilePaths
 } = require('./statement-session');
+const { resolveStatementOutputName } = require('./statement-channel-identity');
 
 function pad(value) {
   return String(value).padStart(2, '0');
@@ -131,7 +132,7 @@ function buildManualBalanceSeedPlan({
 
   const seedTemplateName = normalizeCell(
     pendingPrompt && pendingPrompt.templateName
-  ) || normalizeCell(importContext && importContext.template && importContext.template.name);
+  ) || normalizeCell(resolveStatementOutputName(importContext && importContext.template));
   const bankName = splitTemplateName(seedTemplateName).bankName;
   const records = readBalanceSeedRecords(storageRoot, bankName);
   const record = {

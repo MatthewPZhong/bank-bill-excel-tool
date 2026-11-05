@@ -42,6 +42,9 @@ const policies = archivePolicies;
 const policyByChannel = new Map(policies.map((policy) => [policy.channel, policy]));
 const baselineRecoverable = baseline.policies.filter((policy) => policy.taskKind !== 'exclude');
 const newPreparationPolicies = [
+  // v3.2.15：网银账单渠道只读查询
+  { batchPolicy: 'exclude', channel: 'channel-account-mapping:list-conflicts', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'channel:list', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'scenarios:recon-id-fix-fields', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'settings:acknowledge-release-notes', excludeReason: 'ui-navigation', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:discard-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
@@ -58,7 +61,11 @@ const newSupportActions = [
   { channel: 'template-resources:save-as', kind: 'support-action', reason: 'user-document-export' },
   { channel: 'template-resources:commit-import', kind: 'support-action', reason: 'template-resource-version' },
   { channel: 'template-resources:set-current-version', kind: 'support-action', reason: 'template-resource-version' },
-  { channel: 'template-resources:delete-version', kind: 'support-action', reason: 'template-resource-version' }
+  { channel: 'template-resources:delete-version', kind: 'support-action', reason: 'template-resource-version' },
+  // v3.2.15：网银账单渠道的维护（主库写入、无文件）
+  { channel: 'channel:rename', kind: 'support-action', reason: 'statement-channel' },
+  { channel: 'channel:delete', kind: 'support-action', reason: 'statement-channel' },
+  { channel: 'channel-account-mapping:resolve-conflicts', kind: 'support-action', reason: 'statement-channel' }
 ];
 
 // 固定 fixture 与当前公开 API 分开读取；此测试不提供更新/重建 fixture 入口。
