@@ -382,6 +382,27 @@
 
 ## 已完成
 
+### B43（P3 · 改进）Windows CI 的 `smoke-test` 拆成并行任务，集成测试改为并行执行，缩短 PR 与发版等待
+
+- **来源**：2026-11-04 v3.2.14 发版期间用户提出，集成测试并行执行于同日由用户决定并入本条；耗时依据为 #244 的「Build Windows Packages」运行 41882832935（`aa459d2f`）
+- **影响**：`.github/workflows/build-windows.yml` 的 `smoke-test` 在一台 windows-latest 上依次运行 `release-check`：lint、架构检查（约 11 分钟）、smoke、单测（约 54 分钟）、集成测试（约 44 分钟），连同 `build` 一轮约 1 小时 55 分钟；只改文档的提交也要等满一轮（v3.2.14 最后两个文档提交各等一轮）。`release-windows.yml` 同样完整运行 `release-check`。单测已由 `node --test` 按文件并发；集成测试由 `scripts/integration-runner.js` 用 `spawnSync` 逐个运行（v3.2.14 共 93 个脚本），各脚本已在独立进程中，但彼此串行，本地 `release-check` 同样受此影响。集成测试耗时大头为 `toolbox-large-split-multi-sheet`（12.7 分钟）、`toolbox-large-file-stream`（10.5 分钟）；单测中业务OP相关 46 个文件在本机串行约占单测耗时的 47%。仓库公开，GitHub 托管 runner 不计分钟，拆分只增加每个 job 约 1 分钟的准备时间
+- **关闭条件**：
+  - **拆分 job**：架构检查、单测、集成测试拆为并行 job（单测或集成必要时再分片），`main` 保护规则的必需检查同步改为新 job 名，保持 strict 与对最终 head 的完整覆盖，不降低门禁；评估 `release-windows.yml` 是否同样拆分
+  - **集成测试并行执行**：先逐个排查脚本间的共享资源（临时目录、文档目录与 userData、SQLite 文件、端口、Electron 实例、环境变量）并消除冲突；测进程内存峰值或耗时的脚本（如上述两个 toolbox 大文件脚本）与设 Worker 内存上限的脚本（如 `toolbox-low-memory-foundation`）核实并发下断言稳定，必要时独占运行；并发数可配置，设为 1 时与现在的串行一致；汇总结果、失败退出码与 `rules/integration-test-policy.md`「七」的回写不受执行顺序影响
+  - 本地 `npm run release-check` 的入口与测试内容不变；记录两项改动前后的耗时
+  - 不含：把大规模用例移出 PR 门禁、只改文档的提交跳过完整检查，均需另行决定
+- **目标版本**：v3.2.15（2026-11-04 用户决定）
+- **关闭**：v3.2.15，`chore/ci-parallel-jobs`（`201f9d62`、`819f4663`、`082c04f6`），经 PR #247 验证后合入 release/v3.2.15；[TechDoc](../changes/v3.2.15/chore/ci-parallel-jobs/techdoc.md)
+  - **拆分 job**：`release-check-static`（lint、架构检查、smoke）、`release-check-unit` 5 片、`release-check-integration` 2 片并行。`smoke-test` 汇总各 job 结果后再跑 Windows 专项步骤，`build` 仍依赖它。
+  - **与原关闭条件不同**：保留必需检查名 `smoke-test`、`build`，不改 main 保护规则。`smoke-test` 用 `!cancelled()`，依赖失败时仍运行并失败，门禁覆盖不变。
+  - **集成测试**：分片加并发 2，独占名单 27 个脚本先单独运行；共享资源排查结论见 TechDoc 2.4。
+  - **单测**：负载敏感与耗时最长的文件先轮流分配。Node 原生 3 片实跑两次，都因业务OP真实进程测试同机拥挤而超时，见 TechDoc 2.3。
+  - **`release-windows.yml` 不拆**：一版只跑一次，作为最终门禁完整串行运行 release-check。
+  - **耗时**：
+    - 改动前：`smoke-test` 2 小时 13 分（run 41993644465：架构检查 10.6 分钟、单测 72 分钟、集成测试 48.7 分钟），连同 `build` 约 2 小时 15 分。
+    - 改动后（run 42086209141）整轮 27.6 分钟：static 12.8 分钟、单测各片 8.0–20.1 分钟、集成测试两片 21.9 / 22.3 分钟、`smoke-test` 1.6 分钟、`build` 3.5 分钟。
+  - **本地**：`npm run release-check` 入口与内容不变，runner 新参数默认关闭。
+
 ### B42（P2 · 已知问题）输入表「恢复默认」不检查同组结构冲突，VCC 来源识别遇多重命中静默取第一项（资金口径 · 须人工复核）
 
 - **来源**：v3.2.14 `feat/input-template-structures`；[PR #244](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/244#discussion_r4471371083) 转为可合并后的 Codex 自动审查（审查提交 `aa459d2f`），已对照代码核实机制成立

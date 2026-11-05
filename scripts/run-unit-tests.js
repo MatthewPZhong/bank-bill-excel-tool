@@ -12,6 +12,9 @@
 //   node scripts/run-unit-tests.js            # 跑全部 unit
 //   node scripts/run-unit-tests.js --coverage # 加 --experimental-test-coverage
 //   UNIT_TEST_CONCURRENCY=2 npm run release-check # 仅限制测试文件并发，默认保持 Node 原值
+//   UNIT_TEST_SHARD=1/5 npm run test:unit       # v3.2.15 B43：只跑第 1/5 片，CI 分多个 job 并行；未设置时跑全部，
+//                                                #   本地 release-check 不变。分片按文件：负载敏感与耗时最长的文件先轮流分配，
+//                                                #   其余按文件名轮流分配（见 selectShardFiles）
 //
 // 退出码：透传 node --test 的退出码（0=全 PASS / 非 0=有 FAIL）
 
@@ -35,6 +38,55 @@ function findTestFiles(dir) {
     }
   }
   return out.sort();
+}
+
+// v3.2.15 B43：Windows CI 实测（run 41993644465 / 42071950489 / 42077862105）——
+//   起真实 Main 进程、带固定时限的业务OP文件在同一台机器上同时运行会互相拖慢，曾超时失败（delete-main 的恢复期限、
+//   compute-main 的子进程 30 秒上限）；按 Node --test-shard 的轮流分配，它们与耗时最长的文件集中到同一片（31–44 分钟）。
+//   因此分片时先把负载敏感的文件各放一片，再分其他耗时长的文件（按实测从长到短），其余按文件名轮流分配。
+const LOAD_SENSITIVE_UNIT_FILES = Object.freeze([
+  'tests/unit/main-process/biz-op-v327-archive-owner-backfill.test.js',
+  'tests/unit/main-process/biz-op-v327-export-main.test.js',
+  'tests/unit/main-process/biz-op-v327-ipc.test.js',
+  'tests/unit/main-process/biz-op-v327-compute-main.test.js',
+  'tests/unit/main-process/biz-op-v327-delete-main.test.js'
+]);
+const HEAVY_UNIT_FILES = Object.freeze([
+  'tests/unit/scripts/v3-2-4-release-evidence.test.js',
+  'tests/unit/scripts/v3-2-3-release-evidence.test.js',
+  'tests/unit/main-process/position-reconciliation-service.test.js',
+  'tests/unit/scripts/v3-2-2-release-evidence.test.js',
+  'tests/unit/architecture/policy-history.test.js',
+  'tests/unit/main-process/vcc-financial-op-result-workbook.test.js',
+  'tests/unit/main-process/template-resources-versions.test.js',
+  'tests/unit/main-process/biz-op-v327-upgrade.test.js',
+  'tests/unit/backend/position-reconciliation-import-preflight.test.js',
+  'tests/unit/main-process/vcc-financial-op-review-export.test.js',
+  'tests/unit/backend/vcc-financial-op/result-write.test.js',
+  'tests/unit/main-process/biz-op-v327-archive-owner-completion.test.js'
+]);
+// Windows CreateProcess 命令行上限 32767 字符；超过时提示增加分片数，不截断文件清单。
+const MAX_SHARD_COMMAND_CHARS = 30000;
+
+// files：仓库相对路径（/ 分隔）。返回本片文件（按路径排序）；各片合起来恰好是全部文件。
+function selectShardFiles(files, shard) {
+  const sorted = [...files].sort();
+  if (!shard) return sorted;
+  const first = [...LOAD_SENSITIVE_UNIT_FILES, ...HEAVY_UNIT_FILES].filter((file) => sorted.includes(file));
+  const order = [...first, ...sorted.filter((file) => !first.includes(file))];
+  return order.filter((_file, position) => position % shard.total === shard.index - 1).sort();
+}
+
+// 分片参数 "i/n"（1 ≤ i ≤ n）；未设置返回 null。格式不对时抛错，避免静默跑全部或跑空。
+function parseShard(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const match = String(value).trim().match(/^(\d+)\/(\d+)$/);
+  const index = match ? Number(match[1]) : NaN;
+  const total = match ? Number(match[2]) : NaN;
+  if (!Number.isSafeInteger(index) || !Number.isSafeInteger(total) || total < 1 || index < 1 || index > total) {
+    throw new TypeError(`分片参数须为 i/n 且 1 ≤ i ≤ n，收到：${value}`);
+  }
+  return { index, total };
 }
 
 function buildNodeTestArgs(files, { coverage = false, concurrency } = {}) {
@@ -86,7 +138,7 @@ function formatLogTimestamp(date = new Date()) {
 }
 
 // 组装末尾汇总文本（终端 + 落盘共用）
-function buildSummaryText({ summary, fileCount, elapsedMs }) {
+function buildSummaryText({ summary, fileCount, elapsedMs, shard = null }) {
   const total = summary.tests;
   const pass = summary.pass;
   const fail = summary.fail;
@@ -97,6 +149,7 @@ function buildSummaryText({ summary, fileCount, elapsedMs }) {
   lines.push(`==== ${passDisp}/${totalDisp} PASS ====`);
   lines.push(
     `unit 文件数：${fileCount}` +
+      (shard ? `（第 ${shard.index}/${shard.total} 片）` : '') +
       (fail != null ? ` | 失败用例：${fail}` : '') +
       (summary.duration_ms != null
         ? ` | node --test 耗时：${summary.duration_ms}ms`
@@ -115,10 +168,23 @@ function main() {
 
   const coverage = process.argv.includes('--coverage');
   const configuredConcurrency = process.env.UNIT_TEST_CONCURRENCY;
-  const args = buildNodeTestArgs([], { coverage,
-    concurrency: configuredConcurrency === undefined ? undefined : Number(configuredConcurrency) });
-  // 直接交给 Node 匹配，不经 shell 展开；文件数量增长不会撑大 CreateProcess 的命令行。
-  args.push('tests/unit/**/*.test.js');
+  const shard = parseShard(process.env.UNIT_TEST_SHARD);
+  const concurrency = configuredConcurrency === undefined ? undefined : Number(configuredConcurrency);
+  let args;
+  if (shard) {
+    // 分片：传本片的文件清单（仓库相对路径，不经 shell）。
+    const relativeFiles = files.map((file) => path.relative(REPO_ROOT, file).split(path.sep).join('/'));
+    args = buildNodeTestArgs(selectShardFiles(relativeFiles, shard).map((file) => path.join(REPO_ROOT, file)), { coverage, concurrency });
+    const commandChars = args.reduce((sum, arg) => sum + arg.length + 1, process.execPath.length);
+    if (commandChars > MAX_SHARD_COMMAND_CHARS) {
+      throw new RangeError(`第 ${shard.index}/${shard.total} 片的命令行约 ${commandChars} 字符，超过 ${MAX_SHARD_COMMAND_CHARS}，请增加分片数`);
+    }
+  } else {
+    args = buildNodeTestArgs([], { coverage, concurrency });
+    // 直接交给 Node 匹配，不经 shell 展开；文件数量增长不会撑大 CreateProcess 的命令行。
+    args.push('tests/unit/**/*.test.js');
+  }
+  const shardFileCount = shard ? args.filter((arg) => arg.endsWith('.test.js')).length : null;
 
   const startedAt = new Date();
   const start = Date.now();
@@ -152,7 +218,7 @@ function main() {
     const elapsedMs = Date.now() - start;
     const combined = stdoutBuf + stderrBuf;
     const summary = parseTapSummary(combined);
-    const summaryText = buildSummaryText({ summary, fileCount: files.length, elapsedMs });
+    const summaryText = buildSummaryText({ summary, fileCount: shard ? shardFileCount : files.length, elapsedMs, shard });
 
     // 终端末尾汇总
     process.stdout.write('\n' + summaryText + '\n');
@@ -167,7 +233,7 @@ function main() {
         `时间：${startedAt.toISOString()}（本地 ${startedAt.toLocaleString()}）`,
         `Node 版本：${process.version}`,
         `平台：${process.platform} ${process.arch}`,
-        `命令：node ${args.slice(0, coverage ? 2 : 1).join(' ')} <${files.length} 个测试文件>`,
+        `命令：node ${args.filter((arg) => arg.startsWith('--')).join(' ')} <${shard ? shardFileCount : files.length} 个测试文件>`,
         `覆盖率模式：${coverage ? '是（--experimental-test-coverage）' : '否'}`,
         `unit 文件数：${files.length}`,
         '',
@@ -193,6 +259,10 @@ if (require.main === module) {
 
 // 导出可测试纯函数（unit test 用）
 module.exports = {
+  HEAVY_UNIT_FILES,
+  LOAD_SENSITIVE_UNIT_FILES,
+  parseShard,
+  selectShardFiles,
   parseTapSummary,
   formatLogTimestamp,
   buildSummaryText,

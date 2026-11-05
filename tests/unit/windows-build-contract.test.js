@@ -103,7 +103,8 @@ test('Windows PR final release-check只允许#183一次性Windows unit修复sync
     smokeJob.indexOf('- name: Run release checks'),
     smokeJob.indexOf('- name: Verify Windows startup process adapter semantics')
   );
-  const conditionMatch = releaseChecksStep.match(/if: >-\s*\n([\s\S]*?)\n\s*run: npm run release-check/);
+  // v3.2.15 B43：release-check 拆成并行 job，smoke-test 的 Run release checks 汇总各 job 结果（并行 job 的契约见 ci-release-check-jobs.test.js）。
+  const conditionMatch = releaseChecksStep.match(/if: >-\s*\n([\s\S]*?)\n\s*run: node scripts\/ci\/verify-release-check-jobs\.js/);
   assert.ok(conditionMatch, 'release-check if contract missing');
   const normalizedCondition = conditionMatch[1].split(/\r?\n/)
     .map((line) => line.trim())
@@ -123,7 +124,8 @@ test('Windows PR final release-check只允许#183一次性Windows unit修复sync
     "(github.event_name != 'pull_request' || " +
     'github.event.pull_request.head.repo.full_name != github.repository || ' +
     "!startsWith(github.head_ref, 'codex/v3.2.1-')) )");
-  assert.match(releaseChecksStep, /run: npm run release-check/);
+  assert.match(releaseChecksStep, /RELEASE_CHECK_JOB_RESULTS: \$\{\{ toJSON\(needs\) \}\}/);
+  assert.match(releaseChecksStep, /run: node scripts\/ci\/verify-release-check-jobs\.js/);
   const shouldRunReleaseChecks = ({
     eventName,
     action = '',
