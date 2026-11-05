@@ -1235,6 +1235,14 @@ class AppDatabase {
     return settingsRepository.setReleaseNotesAcknowledgedVersion(this.db, version);
   }
 
+  getReleaseNotesLastUpgrade() {
+    return settingsRepository.getReleaseNotesLastUpgrade(this.db);
+  }
+
+  recordReleaseNotesUpgrade(upgrade) {
+    return settingsRepository.recordReleaseNotesUpgrade(this.db, upgrade);
+  }
+
   getUiStyle() {
     return settingsRepository.getUiStyle(this.db);
   }

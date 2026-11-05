@@ -295,9 +295,11 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     await clean();
   });
 
-  await test('应用壳升级后弹出更新说明，关闭后确认一次；设置「版本管理」可再次查看且不确认', async () => {
+  await test('应用壳升级后弹出更新说明，关闭后确认一次；设置「版本管理」可再次查看升级区间且不确认', async () => {
     const entry = { version: '3.2.16', date: '2026-11-11', highlights: ['十六'] };
-    const releaseNotes = { current: entry, pending: { fromVersion: '3.2.15', toVersion: '3.2.16', entries: [entry] } };
+    const pending = { fromVersion: '3.2.15', toVersion: '3.2.16', entries: [entry] };
+    // 与 Main 快照一致：未确认时 history 即待显示区间。
+    const releaseNotes = { current: entry, pending, history: { kind: 'upgrade', ...pending } };
     await setup({ info: { version: '3.2.16', releaseNotes } });
     await clean();
     assert.equal(await js(`document.getElementById('modalRoot').children.length`), 1);
@@ -308,9 +310,10 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     const acks = () => js(`shellCalls.filter(call=>call.channel==='settings:acknowledge-release-notes').map(call=>call.args)`);
     assert.deepEqual(await acks(), [['3.2.16']]);
     await js(`document.getElementById('settingsBtn').click();`); await flush();
+    assert.equal(await js(`document.querySelector('.app-update-settings-card [data-action="open-release-notes"]').textContent`), '查看更新说明');
     await js(`document.querySelector('.app-update-settings-card [data-action="open-release-notes"]').click();`); await flush();
     assert.equal(await js(`document.getElementById('modalRoot').children.length`), 2);
-    assert.equal(await js(`document.getElementById('modalRoot').lastElementChild.querySelector('.release-notes-summary').textContent`), '当前版本 v3.2.16');
+    assert.equal(await js(`document.getElementById('modalRoot').lastElementChild.querySelector('.release-notes-summary').textContent`), '已从 v3.2.15 更新到 v3.2.16');
     await js(`document.getElementById('modalRoot').lastElementChild.querySelector('[data-action="acknowledge"]').click();`); await flush();
     assert.equal(await js(`document.getElementById('modalRoot').children.length`), 1);
     assert.equal(await js(`!!document.querySelector('.app-update-settings-card')`), true);

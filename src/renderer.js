@@ -690,7 +690,7 @@ const { createAppUpdateSettingsDialog, createArchiveCenterPreviewApi } = window.
     applyAppUpdateActionResult, applyAppUpdateStatus,
     getAppUpdateStatus: () => state.appUpdateStatus,
     refreshOpenAppUpdateDialog, restartAndInstallAppUpdate,
-    openReleaseNotes: (parentHandle) => releaseNotesDialogs.openCurrentReleaseNotes(parentHandle) }
+    openReleaseNotes: (parentHandle) => releaseNotesDialogs.openReleaseNotesHistory(parentHandle) }
 });
 
 const rendererPending = window.__pendingController.createPendingController({

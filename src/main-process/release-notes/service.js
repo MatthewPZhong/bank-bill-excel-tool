@@ -1,14 +1,15 @@
 'use strict';
 
 // v3.2.14 升级后首次启动的「更新说明」：随包数据 release-notes.json + 主库 app_settings 中的已确认版本。
-//   启动时只判定一次并缓存在本进程；用户关闭弹窗后由渲染层确认，写入当前版本。
-//   规则与编写规范见 changes/v3.2.14/feat/release-notes-on-upgrade/spec.md。
+//   启动时只判定一次并缓存在本进程；用户关闭弹窗后由渲染层确认，写入当前版本与本次升级区间。
+//   规则与编写规范见 changes/v3.2.14/feat/release-notes-on-upgrade/spec.md；
+//   v3.2.15 起老用户区间、升级记录与设置入口范围见 changes/v3.2.15/feat/release-notes-range/spec.md。
 
 const { isStrictStableUpgrade } = require('../app-updater');
 const BUNDLED_RELEASE_NOTES = require('./release-notes.json');
 
-// 本功能之前的版本不记录确认版本：已有数据但无记录时，以最后一个不含本功能的正式版为基线。
-const LEGACY_BASELINE_VERSION = '3.2.13';
+// 本功能之前的版本不记录确认版本：已有数据但无记录时，来源版本未知，从 3.2.13（含）起显示到当前版本。
+const LEGACY_FIRST_VERSION = '3.2.13';
 const MAX_HIGHLIGHTS = 5;
 const MAX_HIGHLIGHT_LENGTH = 120;
 const STABLE_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -88,29 +89,64 @@ function selectReleaseNotes({ entries, fromVersion, toVersion }) {
     && !isStrictStableUpgrade(toVersion, entry.version));
 }
 
+// [3.2.13, toVersion]：从 v3.2.14 之前的版本升级上来、来源未知时的区间。
+function selectLegacyReleaseNotes({ entries, toVersion }) {
+  return entries.filter((entry) => !isStrictStableUpgrade(entry.version, LEGACY_FIRST_VERSION)
+    && !isStrictStableUpgrade(toVersion, entry.version));
+}
+
+// 一次升级的说明区间：来源版本已知取 (from, to]，未知取 [3.2.13, to]。
+function selectUpgradeReleaseNotes({ entries, fromVersion, toVersion }) {
+  return fromVersion
+    ? selectReleaseNotes({ entries, fromVersion, toVersion })
+    : selectLegacyReleaseNotes({ entries, toVersion });
+}
+
+// 主库中的升级记录：两个版本号须为正式版本号且 from 低于 to；fromVersion 为 null 表示来源未知。不合格视为没有记录。
+function normalizeLastUpgrade(value) {
+  if (!value || typeof value !== 'object' || !isStableVersion(value.toVersion)) return null;
+  if (value.fromVersion === null || value.fromVersion === undefined) return { fromVersion: null, toVersion: value.toVersion };
+  if (!isStableVersion(value.fromVersion) || !isStrictStableUpgrade(value.fromVersion, value.toVersion)) return null;
+  return { fromVersion: value.fromVersion, toVersion: value.toVersion };
+}
+
 function findReleaseNotes(entries, version) {
   const stableVersion = toStableVersion(version);
   return entries.find((entry) => entry.version === stableVersion) || null;
 }
 
-// 纯判定：返回本次启动待显示的说明（或 null）与启动时需写入的确认版本（或 null）。
+// 纯判定：返回本次启动待显示的说明（或 null）、启动时需写入的确认版本（或 null）与升级记录（或 null）。
+//   writeUpgrade 非空时与确认版本同一事务写入（区间内没有说明条目、直接确认的升级）。
 function resolveStartupReleaseNotes({ currentVersion: rawCurrentVersion, acknowledgedVersion, databaseExisted, entries }) {
+  const none = { pending: null, writeAcknowledged: null, writeUpgrade: null };
   // 开发版、预发布号不参与，也不写记录，避免污染正式版判定。
   const currentVersion = toStableVersion(rawCurrentVersion);
-  if (!currentVersion) return { pending: null, writeAcknowledged: null };
+  if (!currentVersion) return none;
   const recorded = isStableVersion(acknowledgedVersion) ? acknowledgedVersion : null;
-  if (!recorded && !databaseExisted) return { pending: null, writeAcknowledged: currentVersion };
-  const baseline = recorded || LEGACY_BASELINE_VERSION;
-  if (!isStrictStableUpgrade(baseline, currentVersion)) {
-    // 同版本或降级：不弹；降级不改已有记录。
-    return { pending: null, writeAcknowledged: recorded ? null : currentVersion };
+  if (!recorded && !databaseExisted) return { ...none, writeAcknowledged: currentVersion };
+  // 同版本或降级：不弹，不改已有记录。
+  if (recorded && !isStrictStableUpgrade(recorded, currentVersion)) return none;
+  // 无记录且当前版本早于 3.2.13（本功能不会随这类版本发布，防御）：补写记录，不弹。
+  if (!recorded && isStrictStableUpgrade(currentVersion, LEGACY_FIRST_VERSION)) return { ...none, writeAcknowledged: currentVersion };
+  const upgrade = { fromVersion: recorded, toVersion: currentVersion };
+  const range = selectUpgradeReleaseNotes({ entries, ...upgrade });
+  if (!range.length) return { ...none, writeAcknowledged: currentVersion, writeUpgrade: upgrade };
+  return { ...none, pending: { ...upgrade, entries: range } };
+}
+
+// 设置入口显示的区间：待显示（未确认）的升级 → 最近一次升级到当前版本的记录 → 只有当前版本。
+function resolveReleaseNotesHistory({ entries, currentVersion: rawCurrentVersion, pending, lastUpgrade }) {
+  if (pending) {
+    return { kind: 'upgrade', fromVersion: pending.fromVersion, toVersion: pending.toVersion, entries: pending.entries };
   }
-  const range = selectReleaseNotes({ entries, fromVersion: baseline, toVersion: currentVersion });
-  if (!range.length) return { pending: null, writeAcknowledged: currentVersion };
-  return {
-    pending: { fromVersion: recorded, toVersion: currentVersion, entries: range },
-    writeAcknowledged: null
-  };
+  const currentVersion = toStableVersion(rawCurrentVersion);
+  const upgrade = normalizeLastUpgrade(lastUpgrade);
+  if (currentVersion && upgrade && upgrade.toVersion === currentVersion) {
+    const range = selectUpgradeReleaseNotes({ entries, ...upgrade });
+    if (range.length) return { kind: 'upgrade', ...upgrade, entries: range };
+  }
+  const current = findReleaseNotes(entries, rawCurrentVersion);
+  return { kind: 'current', fromVersion: null, toVersion: currentVersion, entries: current ? [current] : [] };
 }
 
 function cloneEntry(entry) {
@@ -119,6 +155,15 @@ function cloneEntry(entry) {
 
 function clonePending(pending) {
   return pending ? { ...pending, entries: pending.entries.map(cloneEntry) } : null;
+}
+
+function readLastUpgrade(store, log) {
+  try {
+    return normalizeLastUpgrade(store.getReleaseNotesLastUpgrade());
+  } catch (error) {
+    log({ level: 'warning', message: '读取更新说明升级记录失败', details: [errorMessage(error)] });
+    return null;
+  }
 }
 
 function errorMessage(error) {
@@ -141,9 +186,15 @@ function createReleaseNotesState({
     databaseExisted,
     entries
   });
+  let lastUpgrade = readLastUpgrade(store, log);
   if (decision.writeAcknowledged) {
     try {
-      store.setReleaseNotesAcknowledgedVersion(decision.writeAcknowledged);
+      if (decision.writeUpgrade) {
+        store.recordReleaseNotesUpgrade(decision.writeUpgrade);
+        lastUpgrade = decision.writeUpgrade;
+      } else {
+        store.setReleaseNotesAcknowledgedVersion(decision.writeAcknowledged);
+      }
     } catch (error) {
       log({ level: 'warning', message: '记录更新说明版本失败', details: [errorMessage(error)] });
     }
@@ -152,29 +203,39 @@ function createReleaseNotesState({
 
   return {
     getSnapshot() {
-      return { current: cloneEntry(current), pending: clonePending(pending) };
+      const history = resolveReleaseNotesHistory({ entries, currentVersion, pending, lastUpgrade });
+      return {
+        current: cloneEntry(current),
+        pending: clonePending(pending),
+        history: { ...history, entries: history.entries.map(cloneEntry) }
+      };
     },
     acknowledge(version) {
       if (!pending || version !== pending.toVersion) return { status: 'ignored' };
+      const upgrade = { fromVersion: pending.fromVersion, toVersion: version };
       try {
-        store.setReleaseNotesAcknowledgedVersion(version);
+        store.recordReleaseNotesUpgrade(upgrade);
       } catch (error) {
         log({ level: 'warning', message: '确认更新说明失败', details: [errorMessage(error)] });
         return { status: 'failed', message: errorMessage(error) };
       }
       pending = null;
+      lastUpgrade = upgrade;
       return { status: 'ok', acknowledgedVersion: version };
     }
   };
 }
 
 module.exports = {
-  LEGACY_BASELINE_VERSION,
+  LEGACY_FIRST_VERSION,
   MAX_HIGHLIGHTS,
   MAX_HIGHLIGHT_LENGTH,
   createReleaseNotesState,
   findReleaseNotes,
   normalizeReleaseNotes,
+  normalizeLastUpgrade,
+  resolveReleaseNotesHistory,
   resolveStartupReleaseNotes,
-  selectReleaseNotes
+  selectReleaseNotes,
+  selectUpgradeReleaseNotes
 };
