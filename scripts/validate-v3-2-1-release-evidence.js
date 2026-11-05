@@ -618,14 +618,16 @@ function validateReleaseEvidence(snapshot, options = {}) {
         expectEqual('/authority/windowsWorkflow/releaseCheckCondition',
           normalizeYamlCondition(conditionMatch[1]), EXPECTED_RELEASE_CHECK_CONDITION);
       }
+      // Windows checkout 可能把换行转为 CRLF：并行 job 的结构检查按 LF 解析。
+      const lfWorkflow = workflow.replace(/\r\n/g, '\n');
       for (const [jobName, commands] of Object.entries(PARALLEL_RELEASE_CHECK_JOBS)) {
-        const jobStart = workflow.indexOf(`\n  ${jobName}:`);
-        const jobEnd = jobStart === -1 ? -1 : workflow.indexOf('\n  smoke-test:', jobStart);
+        const jobStart = lfWorkflow.indexOf(`\n  ${jobName}:`);
+        const jobEnd = jobStart === -1 ? -1 : lfWorkflow.indexOf('\n  smoke-test:', jobStart);
         if (jobStart === -1 || jobEnd === -1) {
           add(`/authority/windowsWorkflow/parallelJobs/${jobName}`, 'parallel release-check job must precede smoke-test');
           continue;
         }
-        const job = workflow.slice(jobStart, workflow.slice(jobStart + 1).search(/\n  [a-z][a-z0-9-]*:\n/) + jobStart + 1);
+        const job = lfWorkflow.slice(jobStart, lfWorkflow.slice(jobStart + 1).search(/\n  [a-z][a-z0-9-]*:\n/) + jobStart + 1);
         const jobGuardStart = job.indexOf('- name: Reject unauthorized v3.2.1 final-gate invocation');
         const jobCheckoutStart = job.indexOf('- name: Checkout');
         const jobGuard = jobGuardStart !== -1 && jobGuardStart < jobCheckoutStart

@@ -13,7 +13,8 @@ const test = require('node:test');
 const { RELEASE_CHECK_JOBS, verifyReleaseCheckJobs } = require('../../scripts/ci/verify-release-check-jobs');
 
 const ROOT = path.join(__dirname, '..', '..');
-const read = (relativePath) => fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
+// Windows checkout 可能把换行转为 CRLF，统一为 LF 后再按行结构解析。
+const read = (relativePath) => fs.readFileSync(path.join(ROOT, relativePath), 'utf8').replace(/\r\n/g, '\n');
 const workflow = read('.github/workflows/build-windows.yml');
 
 function jobText(name) {
