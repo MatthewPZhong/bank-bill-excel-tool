@@ -1,6 +1,6 @@
 # TechDoc — v3.2.15 Windows CI 拆成并行 job，集成测试分片并发执行（B43）
 
-> status: in-progress
+> status: done
 > created: 2026-11-05
 > updated: 2026-11-05
 > 目标版本：v3.2.15
@@ -125,7 +125,15 @@ release-check-integ ×2┘   单测 5 片；集成测试 2 片、每片并发 2
 
 - 单测：runner 分片、并发、独占、真实 CLI（临时仓库，含失败退出码、分片不回写、完整运行回写）；单测 runner 分片（真实 CLI 两片合起来覆盖全部）；契约与校验器测试。
 - 远端：开 draft PR `chore/ci-parallel-jobs → release/v3.2.15`，新 workflow 在 PR 上实跑，记录各 job 实际耗时；通过后合入 release。
-- 实测耗时：Node 原生 3 片的两次运行见 2.3；5 片均衡分配的运行结果补记于此。
+- 实测耗时：
+  - Node 原生 3 片的两次运行见 2.3。
+  - 5 片均衡分配（run 42086209141，`082c04f6`）全部通过，整轮 27.6 分钟：
+    - `release-check-static` 12.8 分钟；
+    - 单测各片 20.1 / 12.5 / 19.2 / 9.3 / 8.0 分钟；
+    - 集成测试两片 22.3 / 21.9 分钟；
+    - `smoke-test` 1.6 分钟；
+    - `build` 3.5 分钟。
+  - 改动前约 2 小时 15 分（run 41993644465）。
 
 ## 5. 回滚
 
