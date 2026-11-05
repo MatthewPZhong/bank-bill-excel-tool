@@ -78,7 +78,7 @@ test('unit runner 按 UNIT_TEST_SHARD 分片，两片合起来恰好覆盖全部
     const result = run(root, [], { UNIT_TEST_SHARD: shard });
     assert.ifError(result.error);
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.match(result.stdout, new RegExp(`本次只跑第 ${shard} 片`));
+    assert.match(result.stdout, new RegExp(`unit 文件数：1（第 ${shard} 片）`));
     return parseTapSummary(result.stdout).tests;
   });
   assert.deepEqual(counts, [1, 1]);

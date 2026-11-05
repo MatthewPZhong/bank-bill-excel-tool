@@ -11,7 +11,10 @@ const {
   parseTapSummary,
   buildSummaryText,
   buildNodeTestArgs,
-  parseShard
+  parseShard,
+  selectShardFiles,
+  LOAD_SENSITIVE_UNIT_FILES,
+  HEAVY_UNIT_FILES
 } = require('../../scripts/run-unit-tests.js');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
@@ -168,20 +171,39 @@ describe('buildNodeTestArgs — spawn 路径契约', () => {
   });
 });
 
-// v3.2.15 B43：CI 把单测分到多个 job 并行，UNIT_TEST_SHARD=i/n 透传给 node --test-shard。
-describe('parseShard / --test-shard', () => {
+// v3.2.15 B43：CI 把单测分到多个 job 并行（UNIT_TEST_SHARD=i/n）。
+describe('parseShard / selectShardFiles', () => {
   test('未设置时跑全部，不加分片参数', () => {
     assert.strictEqual(parseShard(undefined), null);
     assert.strictEqual(parseShard(''), null);
     assert.deepStrictEqual(buildNodeTestArgs([]), ['--test']);
   });
 
-  test('i/n 透传为 --test-shard，并写进汇总', () => {
-    assert.deepStrictEqual(parseShard(' 2/3 '), { index: 2, total: 3 });
-    assert.deepStrictEqual(buildNodeTestArgs([], { shard: { index: 2, total: 3 }, concurrency: 2 }),
-      ['--test', '--test-concurrency=2', '--test-shard=2/3']);
-    const text = buildSummaryText({ summary: parseTapSummary(''), fileCount: 9, elapsedMs: 1, shard: { index: 2, total: 3 } });
-    assert.match(text, /unit 文件数：9（本次只跑第 2\/3 片）/);
+  test('i/n 解析并写进汇总', () => {
+    assert.deepStrictEqual(parseShard(' 2/5 '), { index: 2, total: 5 });
+    const text = buildSummaryText({ summary: parseTapSummary(''), fileCount: 9, elapsedMs: 1, shard: { index: 2, total: 5 } });
+    assert.match(text, /unit 文件数：9（第 2\/5 片）/);
+  });
+
+  test('当前全部单测文件按 5 片分配：不重不漏、每片按路径排序，负载敏感文件各在一片', () => {
+    const files = [];
+    const walk = (dir) => {
+      for (const entry of require('node:fs').readdirSync(path.join(REPO_ROOT, dir), { withFileTypes: true })) {
+        const relative = `${dir}/${entry.name}`;
+        if (entry.isDirectory()) walk(relative);
+        else if (entry.name.endsWith('.test.js')) files.push(relative);
+      }
+    };
+    walk('tests/unit');
+    for (const listed of [...LOAD_SENSITIVE_UNIT_FILES, ...HEAVY_UNIT_FILES]) {
+      assert.ok(files.includes(listed), `分片清单中的 ${listed} 须是现有单测文件`);
+    }
+    const shards = Array.from({ length: 5 }, (_value, index) => selectShardFiles(files, { index: index + 1, total: 5 }));
+    assert.deepStrictEqual(shards.flat().sort(), [...files].sort());
+    shards.forEach((shard) => assert.deepStrictEqual(shard, [...shard].sort()));
+    assert.deepStrictEqual(shards.map((shard) => shard.filter((file) => LOAD_SENSITIVE_UNIT_FILES.includes(file)).length), [1, 1, 1, 1, 1]);
+    assert.ok(Math.max(...shards.map((shard) => shard.length)) - Math.min(...shards.map((shard) => shard.length)) <= 1, '各片文件数相差不超过 1');
+    assert.deepStrictEqual(selectShardFiles(['b.test.js', 'a.test.js'], null), ['a.test.js', 'b.test.js']);
   });
 
   test('格式不对时报错，不静默跑全部或跑空', () => {

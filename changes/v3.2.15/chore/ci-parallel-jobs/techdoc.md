@@ -31,12 +31,12 @@
 
 ```
 release-check-static ─┐   lint → check:architecture → smoke
-release-check-unit ×3 ┼─→ smoke-test（汇总 + Windows 专项步骤）─→ build
-release-check-integ ×2┘   单测 3 片；集成测试 2 片、每片并发 2
+release-check-unit ×5 ┼─→ smoke-test（汇总 + Windows 专项步骤）─→ build
+release-check-integ ×2┘   单测 5 片；集成测试 2 片、每片并发 2
 ```
 
 - `release-check-static`：`npm run lint && npm run check:architecture && npm run smoke`，架构检查的 policy base 解析（`ci-policy-base.js`、`ARCHITECTURE_BASE_REF`）随之移入。
-- `release-check-unit`：matrix `shard: [1, 2, 3]`，`UNIT_TEST_SHARD=${{ matrix.shard }}/3`，`npm run test:unit`。
+- `release-check-unit`：matrix `shard: [1, 2, 3, 4, 5]`，`UNIT_TEST_SHARD=${{ matrix.shard }}/5`，`npm run test:unit`（分片方式见 2.3）。
 - `release-check-integration`：matrix `shard: [1, 2]`，`INTEGRATION_SHARD=${{ matrix.shard }}/2`、`INTEGRATION_CONCURRENCY=2`，`npm run test:integration`。
 - 两个 matrix 都 `fail-fast: false`，一片失败不取消其他片，便于一次看到全部失败。
 - `smoke-test`：`needs` 上述三个 job，`if: ${{ !cancelled() }}`。原有 Windows 专项步骤不变，仍在全部检查结束之后串行运行，不与全量单测同机并发。专项步骤包括：
@@ -62,7 +62,24 @@ release-check-integ ×2┘   单测 3 片；集成测试 2 片、每片并发 2
 
 ### 2.3 单测分片
 
-`scripts/run-unit-tests.js` 读取 `UNIT_TEST_SHARD=i/n`，透传为 Node 原生 `--test-shard=i/n`（按文件划分）。格式不对时报错退出，不静默跑全部或跑空；未设置时跑全部。汇总行注明“本次只跑第 i/n 片”。
+`scripts/run-unit-tests.js` 读取 `UNIT_TEST_SHARD=i/n`；格式不对时报错退出，不静默跑全部或跑空；未设置时仍用 glob 跑全部（本地不变）。
+
+最初透传为 Node 原生 `--test-shard`（按排序后的文件轮流分配，3 片），实跑两次都不均衡，并出现负载相关的超时：
+
+| 运行 | 单测各片 | 失败 |
+| --- | --- | --- |
+| 42071950489（`4a054a9b`） | 15.8 / 20.2 / 31.4 分钟 | Windows CRLF（契约测试，`819f4663` 已修）；`biz-op-v327-delete-main` 的 DELETE_ASSOCIATED 恢复超过 70 秒期限（平时约 40 秒） |
+| 42077862105（`819f4663`） | 13.5 / 15.1 / 43.9 分钟 | `biz-op-v327-compute-main` 真实 Main 子进程超过 30 秒上限 |
+
+按 run 41993644465 的用例耗时把顶层用例对回源文件估算：`biz-op-v327-archive-owner-backfill` 约 15 分钟，其次是 `v3-2-4-release-evidence` 和几个起真实 Main 进程的业务OP文件。Node 的轮流分配恰好把其中最重的几个放进第 3 片，同一台机器上同时运行，互相拖慢后超时。
+
+现改为 runner 自己选文件，把本片文件清单直接传给 `node --test`（`selectShardFiles`）：
+
+1. 负载敏感文件（`LOAD_SENSITIVE_UNIT_FILES`）先各放一片：起真实 Main 进程、带固定时限的 5 个业务OP文件。
+2. 再轮流分配其他耗时最长的文件（`HEAVY_UNIT_FILES`，按实测从长到短）。
+3. 其余按路径轮流分配。
+
+改为 5 片后，每个敏感文件各占一片，估算最慢一片约 17.6 分钟，主要是 15 分钟的 backfill。每片约 125 个文件，命令行约 7500 字符；超过 30000 字符（Windows 命令行上限 32767）时报错，提示增加分片数。单测核对：清单中的文件都存在、各片不重不漏、敏感文件各在一片。
 
 ### 2.4 集成测试分片与并发
 
@@ -86,7 +103,12 @@ release-check-integ ×2┘   单测 3 片；集成测试 2 片、每片并发 2
 
 ### 2.5 预计耗时
 
-最慢的并行 job 约 25 分钟（单测分片），加上 `smoke-test` 汇总与专项步骤约 5 分钟、`build` 约 4 分钟，一轮约 35 分钟。改动前约 2 小时 10 分。实测值在 draft PR 上记录（第 4 节）。
+按 Node 原生 3 片实测两次，整轮 32.8 和 45.3 分钟（第二次第 3 片 43.9 分钟）。其余 job 两次的耗时：
+- `release-check-static`：12.4～13.0 分钟；
+- 集成测试两片：20.2～23.8 分钟；
+- `smoke-test` 汇总：约 1.4 分钟。
+
+改为 5 片均衡分配后，预计最慢的 job 是集成测试（约 22 分钟），一轮约 30 分钟。改动前约 2 小时 10 分。实测值见第 4 节。
 
 ## 3. 契约测试与校验器的调整
 
@@ -103,7 +125,7 @@ release-check-integ ×2┘   单测 3 片；集成测试 2 片、每片并发 2
 
 - 单测：runner 分片、并发、独占、真实 CLI（临时仓库，含失败退出码、分片不回写、完整运行回写）；单测 runner 分片（真实 CLI 两片合起来覆盖全部）；契约与校验器测试。
 - 远端：开 draft PR `chore/ci-parallel-jobs → release/v3.2.15`，新 workflow 在 PR 上实跑，记录各 job 实际耗时；通过后合入 release。
-- 实测耗时：待 draft PR 运行后补记。
+- 实测耗时：Node 原生 3 片的两次运行见 2.3；5 片均衡分配的运行结果补记于此。
 
 ## 5. 回滚
 
