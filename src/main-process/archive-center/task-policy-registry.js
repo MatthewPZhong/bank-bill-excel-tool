@@ -49,6 +49,22 @@ const SUPPORT_ACTION_POLICIES = Object.freeze([
     channel: 'template-resources:delete-version',
     kind: 'support-action',
     reason: 'template-resource-version'
+  }),
+  // v3.2.15：网银账单渠道的维护（仅主库写入，不产生文件；不进入冻结的 G7 TaskPolicy 清单）。
+  Object.freeze({
+    channel: 'channel:rename',
+    kind: 'support-action',
+    reason: 'statement-channel'
+  }),
+  Object.freeze({
+    channel: 'channel:delete',
+    kind: 'support-action',
+    reason: 'statement-channel'
+  }),
+  Object.freeze({
+    channel: 'channel-account-mapping:resolve-conflicts',
+    kind: 'support-action',
+    reason: 'statement-channel'
   })
 ]);
 
@@ -293,6 +309,8 @@ const RESERVE_CHANNELS_BY_SCOPE = Object.freeze({
 
 const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
   'read-only-query': Object.freeze([
+    'channel:list',
+    'channel-account-mapping:list-conflicts',
     'bizOpReconV327:status',
     'bizOpReconV327:metadata:months',
     'bizOpReconV327:metadata:list',

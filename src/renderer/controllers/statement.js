@@ -17,7 +17,11 @@
     const updateStatusBox=(...args)=>{if(live())ui.status(...args);};
     function openModal(factory) { return live() ? ui.modalBridge.openModal(factory,{owner}) : {status:'stale'}; }
     const {createAlertDialog,createTemplateManagerDialog,createBigAccountSelectionDialog,createRememberOrderMismatchDialog,
-      createExportScopeDialog,createMonthlyBalanceExportDialog,createManualBalanceSeedDialog,createAccountMappingDialog,createAccountMappingMigrationDialog}=ui;
+      createExportScopeDialog,createMonthlyBalanceExportDialog,createManualBalanceSeedDialog,createAccountMappingDialog,createAccountMappingMigrationDialog,
+      createChannelAccountMappingConflictDialog}=ui;
+    const getStatementChannels=()=>typeof config.getStatementChannels==='function'?config.getStatementChannels():[];
+    // v3.2.15（D8）：升级后渠道账户映射冲突在进入网银账单时提示一次；关闭后本次运行不再自动弹出，打开账户映射时仍会提示。
+    let channelConflictPromptShown=false;
     const refreshTemplates=config.refreshTemplates;
 function isFilenameMappingMode(templateId) {
   return templateId === FILENAME_MAPPING_TEMPLATE_ID;
@@ -183,17 +187,48 @@ async function handleImportTemplate() {
   }
 }
 
+function openChannelConflictDialog(channels, version = generation) {
+  if (!live(version) || typeof createChannelAccountMappingConflictDialog !== 'function') return;
+  openModal(() => createChannelAccountMappingConflictDialog({ channels }));
+}
+
+async function listChannelConflicts() {
+  if (typeof api.accountMappings?.listChannelConflicts !== 'function') return [];
+  const result = await api.accountMappings.listChannelConflicts();
+  return result && result.status === 'success' && Array.isArray(result.channels) ? result.channels : [];
+}
+
+async function promptChannelConflictsOnce() {
+  if (channelConflictPromptShown) return;
+  const version = generation;
+  const channels = await listChannelConflicts();
+  if (!live(version) || channelConflictPromptShown || channels.length === 0) return;
+  channelConflictPromptShown = true;
+  const names = channels.map((item) => item.channelName).join('、');
+  openModal(() => createAlertDialog(`升级后，渠道「${names}」的账户映射有设置不一致的账户号，需要为每个账户号选定一条。处理前这些渠道无法生成账单。`, {
+    confirmText: '去处理',
+    onConfirm: () => openChannelConflictDialog(channels, version)
+  }));
+}
+
 async function handleOpenAccountMappings() {
   const version = generation;
   // v1.5.2 需求 3（G3-0）：虚拟 ID 不对应真实模板，这里当无选中处理，回落到第一个真实模板
   const hasRealSelection = state.selectedTemplateId && !isFilenameMappingMode(state.selectedTemplateId);
   const currentTemplateId = hasRealSelection ? Number(state.selectedTemplateId) : null;
-  const templateId = currentTemplateId || (config.getTemplates().length > 0 ? config.getTemplates()[0].id : null);
+  const templates = config.getTemplates();
+  const channels = getStatementChannels();
+  const templateId = currentTemplateId || (templates.length > 0 ? templates[0].id : null);
 
-  if (!templateId) {
+  if (!templateId && channels.length === 0) {
     setStatus('请先创建模板', 'error');
     return;
   }
+  // v3.2.15（D7）：属于渠道的模板在渠道层设置账户映射。
+  const selectedTemplate = templates.find((template) => Number(template.id) === Number(templateId));
+  const currentScope = selectedTemplate && selectedTemplate.channelId
+    ? { channelId: Number(selectedTemplate.channelId) }
+    : (templateId ? { templateId } : { channelId: Number(channels[0].id) });
 
   // 检查是否有待分配的迁移数据
   const migrationCheck = await api.accountMappings.checkMigrationPending();
@@ -209,7 +244,8 @@ async function handleOpenAccountMappings() {
         }
         openModal(() => createAccountMappingMigrationDialog({
           rows: migrationData.rows,
-          templates: config.getTemplates(),
+          // v3.2.15（D7）：渠道子模板的账户映射在渠道层设置，迁移分配只列普通模板。
+          templates: config.getTemplates().filter((template) => !template.channelId),
           onDone: () => {
             handleOpenAccountMappings();
           }
@@ -219,7 +255,7 @@ async function handleOpenAccountMappings() {
     return;
   }
 
-  const result = await api.accountMappings.list(templateId);
+  const result = await api.accountMappings.list(currentScope);
   if (!live(version)) return;
 
   if (result.status !== 'success') {
@@ -232,10 +268,15 @@ async function handleOpenAccountMappings() {
 
   openModal(() => createAccountMappingDialog({
     ...result,
-    currentTemplateId: templateId,
-    templates: config.getTemplates(),
+    currentScope,
+    templates,
+    channels,
     currencyOptions: config.getCurrencyOptions() || []
   }));
+  const conflictChannels = await listChannelConflicts();
+  if (live(version) && conflictChannels.length > 0) {
+    setStatus(`渠道「${conflictChannels.map((item) => item.channelName).join('、')}」的账户映射有待处理的冲突，请在账户映射中选择该渠道后点击【处理冲突】`, 'info');
+  }
 }
     function present(kind,result) {
       if (!result || result.status==='cancelled' || result.status==='empty') return;
@@ -351,6 +392,7 @@ async function handleOpenAccountMappings() {
         // Statement 无公开 sessionStatus；保留本窗口已确认结果，消费既有 Main 命令返回，绝不把离页伪装为取消。
         if(pending){const outcome=pending;pending=null;acceptBackgroundOutcome(outcome);}
         else setStatus(feedback.message,feedback.tone,feedback.options);
+        promptChannelConflictsOnce().catch(reportError);
         return{status:'ready'};},
       leave({reason='navigation'}={}){if(ui.modalHost.closeOwner(owner,reason).status==='blocked')return{status:'blocked'};active=false;++generation;return{status:'left'};},
       invalidate(){++generation;},

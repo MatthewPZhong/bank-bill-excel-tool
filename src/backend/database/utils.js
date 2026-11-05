@@ -104,8 +104,9 @@ function buildTemplateSummaryFromRow(row) {
     bigAccountMode,
     bigAccountSummary,
     dateFormat: normalizeText(row.dateFormat) || 'auto',
-    isParent: Boolean(row.isParent),
-    parentTemplateId: row.parentTemplateId || null,
+    // v3.2.15：所属渠道（取代主/子模板标记）；不属于任何渠道时为 null
+    channelId: row.channelId ? Number(row.channelId) : null,
+    channelName: row.channelId ? normalizeText(row.channelName) : '',
     // v1.5.2 需求 3：按文件名映射模板的固定字段（默认空串）
     filenameFixedField: normalizeText(row.filenameFixedField)
   };

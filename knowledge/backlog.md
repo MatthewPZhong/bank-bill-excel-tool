@@ -20,6 +20,13 @@
 
 ## 未实施
 
+### B44（P4 · 改进）删除已停用的主/子模板 IPC（`template:list-children`、`template:set-parent-status`、`template:set-child-parent`）
+
+- **来源**：v3.2.15 `feat/statement-channels`（渠道取代主模板）；[TechDoc §十一 I1](../changes/v3.2.15/feat/statement-channels/techdoc.md)
+- **影响**：三个通道仍在主进程注册与 Preload 中，但不再读写数据（列表返回空数组，写入返回 `TEMPLATE_PARENT_RETIRED`），界面不再调用。保留原因是两个写入通道属于冻结的 G7 TaskPolicy 清单（`action-task-binding-registry.js` 运行时校验数量 134 与 JCS 摘要，`archive-baseline.json` 逐项比对），删除需改动冻结契约。无功能与数据影响，只是多余的接口面
+- **关闭条件**：G7 执行与归档基线下次重冻结时，从主进程、Preload、`task-policy-registry.js`、`legacy-task-policies.js`、`archive-baseline.json`、`architecture/boundaries.json` 白名单中删除这三个通道，同步更新清单数量与摘要并记录差量
+- **目标版本**：未定（随 G7 基线重冻结）
+
 ### B43（P3 · 改进）Windows CI 的 `smoke-test` 拆成并行任务，集成测试改为并行执行，缩短 PR 与发版等待
 
 - **来源**：2026-11-04 v3.2.14 发版期间用户提出，集成测试并行执行于同日由用户决定并入本条；耗时依据为 #244 的「Build Windows Packages」运行 41882832935（`aa459d2f`）
@@ -30,13 +37,6 @@
   - 本地 `npm run release-check` 的入口与测试内容不变；记录两项改动前后的耗时
   - 不含：把大规模用例移出 PR 门禁、只改文档的提交跳过完整检查，均需另行决定
 - **目标版本**：v3.2.15（2026-11-04 用户决定）
-
-### B42（P2 · 已知问题）输入表「恢复默认」不检查同组结构冲突，VCC 来源识别遇多重命中静默取第一项（资金口径 · 须人工复核）
-
-- **来源**：v3.2.14 `feat/input-template-structures`；[PR #244](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/244#discussion_r4471371083) 转为可合并后的 Codex 自动审查（审查提交 `aa459d2f`），已对照代码核实机制成立
-- **影响**：`src/main-process/template-resources/service.js` `setCurrentVersion` 只在启用用户版本时调用 `peerConflictOf`，恢复默认（V1）跳过同组结构冲突检查；导入新版本时有检查。按「VCC充值清退明细启用末尾加列的版本 → VCC费用及换汇明细启用充值清退的内置表头 → 充值清退恢复默认」操作后，两张表当前结构完全相同。`src/backend/vcc-financial-op/workbook-import-plan.js` `classifyHeaderRow` 用 `rules.find()` 取第一个完全匹配，费用及换汇文件会被静默识别为充值清退，进入不同的计算分支。触发需要刻意的操作组合，概率低。恢复默认的缺口对所有有同组的输入表（平盘链接原始表等）都存在，其他模块识别器遇多重命中时的行为待核实
-- **关闭条件**：恢复默认同样检查同组结构冲突（或给出处理方式）；VCC 识别器遇多个完全匹配时拒绝并提示，不静默取第一项；核实并处理其他同组输入表识别器的多重命中；补回归测试。若用户已按上述顺序操作并导入过数据，相关分类与计算结果须人工复核
-- **目标版本**：v3.2.15（2026-11-04 用户决定 v3.2.14 先发布，本项顺延）
 
 ### B41（P3 · 顺延）重复入账匹配 Paired Parser 与平盘旧导入引擎未接入银行对账单导入识别结构
 
@@ -89,7 +89,8 @@
   - **结果**：断档锚点只认人工种子（断档 spec §8 T7），B 会再次提示同一断档，补录无法完成。用户只能选“不补录”继续，此时 B 断档后的余额接着 B 自己断档前的余额计算。
 - **现状**：v3.2.13 本身也不支持同一账号跨模板。两条余额链各自计算，种子互相覆盖；合并汇总按行拼接，同一账号同一天会出现两行。断档提醒让它多了“补录不掉”的循环；余额要么停在提示里，要么经用户确认不补录后才导出，不会在不提示的情况下导出断档后的余额
 - **推荐**：先定口径，同一会话内同一账号跨模板时三选一：拒绝导入、合并为一条余额链、或计算种子不覆盖其他模板的人工种子。任一方案都改种子覆盖或导入规则，须补同账号跨模板回归，并做对账专项审查
-- **关闭条件**：确定口径并实现；或明确不支持同一账号跨模板，并在导入时提示
+- **v3.2.15 部分处理**：`feat/statement-channels` 把同一银行的多种文件格式放进同一渠道后，渠道内各子模板合为一条余额链，种子、补录与余额调整都按渠道归属，渠道内不再出现本条的种子互相覆盖（集成脚本 `statement-channel.js` ①④）。渠道之外的情形（两个普通模板、或两个不同渠道含同一账号）不变，仍按本条处理
+- **关闭条件**：确定口径并实现；或明确不支持同一账号跨模板，并在导入时提示（渠道内已由 v3.2.15 渠道合并覆盖）
 - **目标版本**：未定
 
 ### B34（P3 · 已知问题）`scripts/render-modal-preview.js` 弹窗预览启动即失败
@@ -392,7 +393,18 @@
 
 ## 已完成
 
-（暂无）
+### B42（P2 · 已知问题）输入表「恢复默认」不检查同组结构冲突，VCC 来源识别遇多重命中静默取第一项（资金口径 · 须人工复核）
+
+- **来源**：v3.2.14 `feat/input-template-structures`；[PR #244](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/244#discussion_r4471371083) 转为可合并后的 Codex 自动审查（审查提交 `aa459d2f`），已对照代码核实机制成立
+- **影响**：`src/main-process/template-resources/service.js` `setCurrentVersion` 只在启用用户版本时调用 `peerConflictOf`，恢复默认（V1）跳过同组结构冲突检查；导入新版本时有检查。按「VCC充值清退明细启用末尾加列的版本 → VCC费用及换汇明细启用充值清退的内置表头 → 充值清退恢复默认」操作后，两张表当前结构完全相同。`src/backend/vcc-financial-op/workbook-import-plan.js` `classifyHeaderRow` 用 `rules.find()` 取第一个完全匹配，费用及换汇文件会被静默识别为充值清退，进入不同的计算分支。触发需要刻意的操作组合，概率低。恢复默认的缺口对所有有同组的输入表（平盘链接原始表等）都存在，其他模块识别器遇多重命中时的行为待核实
+- **关闭条件**：恢复默认同样检查同组结构冲突（或给出处理方式）；VCC 识别器遇多个完全匹配时拒绝并提示，不静默取第一项；核实并处理其他同组输入表识别器的多重命中；补回归测试。若用户已按上述顺序操作并导入过数据，相关分类与计算结果须人工复核
+- **目标版本**：v3.2.15（2026-11-04 用户决定 v3.2.14 先发布，本项顺延）
+- **关闭**：v3.2.15，`fix/input-structure-restore-default-conflict` 提交 `d64c3d9f`，经 PR #246 合入 release/v3.2.15；[Spec](../changes/v3.2.15/fix/input-structure-restore-default-conflict/spec.md)
+  - 恢复默认用内置结构核对同组冲突，相同时阻止并提示先调整对方表（用户 2026-11-05 决定）；VCC `classifyHeaderRow` 遇多个完全匹配返回 `vcc-sheet-header-ambiguous`，整个导入计划不能提交
+  - 核实：平盘链接原始表（`detectSourceSheet`、Worker `locatePositionBusinessSheet`）与银行账单处理链接表（`table-type-detector` `ambiguous`）遇多重命中原本就拒绝；按必用列核算，现有内置结构下只有 VCC 充值清退明细与费用及换汇明细一对可能走到该状态
+  - 证据：单测 `template-resources-vcc-sources`、`workbook-import-plan` 新增用例修复前失败、修复后通过；集成 `vcc-input-template-version` 5/5（含 B42 操作顺序与已处于相同状态时拒绝识别）
+  - 历史数据：v3.2.14 期间若已按上述顺序操作并导入过费用及换汇明细，分类与计算结果的人工复核列在 PR #246 待办
+
 
 ## 已废弃
 

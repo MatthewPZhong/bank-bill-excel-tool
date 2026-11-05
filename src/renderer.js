@@ -459,10 +459,13 @@ let reconIdFixController = null;
 let scenarioChangeRouter = null;
 const domainControllers = {};
 const configurationServices = window.ConfigurationServices.createConfigurationServices({
-  templatesApi: { list: window.desktopApi.templates.list }, reportError: error => console.warn('配置刷新失败：', error)
+  templatesApi: { list: window.desktopApi.templates.list },
+  channelsApi: { list: window.desktopApi.statementChannels.list },
+  reportError: error => console.warn('配置刷新失败：', error)
 });
 const configurationApi = Object.freeze({
   templates: window.desktopApi.templates, accountMappings: window.desktopApi.accountMappings,
+  statementChannels: window.desktopApi.statementChannels,
   bigAccount: window.desktopApi.bigAccount, balanceAdjustment: window.desktopApi.balanceAdjustment,
   monthlyBalance: window.desktopApi.monthlyBalance, files: window.desktopApi.files,
   app: { getInfo: window.desktopApi.app.getInfo }
@@ -505,11 +508,13 @@ function initializeDomainControllers(info) {
       templates: { importTemplate: window.desktopApi.templates.importTemplate }, accountMappings: window.desktopApi.accountMappings,
       errors: { exportLast: window.desktopApi.errors.exportLast } },
     config: { getTemplates: configurationServices.getTemplates, getCurrencyOptions: configurationServices.getCurrencyOptions,
+      getStatementChannels: configurationServices.getStatementChannels,
       getAccountMappingCount: configurationServices.getAccountMappingCount, subscribe: configurationServices.subscribe,
       refreshTemplates: configurationServices.refreshTemplates },
     ui: { modalHost, modalBridge, status: updateStatusBox, reportError: ui.reportError, alertNative: window.alert.bind(window),
       createAlertDialog, createTemplateManagerDialog, createBigAccountSelectionDialog, createRememberOrderMismatchDialog,
-      createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, createAccountMappingDialog, createAccountMappingMigrationDialog }
+      createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, createAccountMappingDialog, createAccountMappingMigrationDialog,
+      createChannelAccountMappingConflictDialog }
   });
   const domainUi = { modalHost, modalBridge, status: updateStatusBox, alert: createAlertDialog, escapeHtml, reportError: ui.reportError };
   domainControllers.preFund = window.__preFundController.createPreFundController({ api: window.desktopApi.preFundReconciliation,
@@ -569,6 +574,7 @@ const {
   createMappingDialog,
   createAccountMappingDialog,
   createAccountMappingMigrationDialog,
+  createChannelAccountMappingConflictDialog,
   // v3.0.12 功能2（批A）：账户映射管理弹窗（链接表管理内部打开，renderer 侧仅供 preview 链路引用）
   createFundTransferAccountMappingDialog,
   // v1.5.3 round 6：补全 preview 所需 factory（仅 preview 链路使用）
@@ -684,7 +690,7 @@ const { createAppUpdateSettingsDialog, createArchiveCenterPreviewApi } = window.
     applyAppUpdateActionResult, applyAppUpdateStatus,
     getAppUpdateStatus: () => state.appUpdateStatus,
     refreshOpenAppUpdateDialog, restartAndInstallAppUpdate,
-    openReleaseNotes: (parentHandle) => releaseNotesDialogs.openCurrentReleaseNotes(parentHandle) }
+    openReleaseNotes: (parentHandle) => releaseNotesDialogs.openReleaseNotesHistory(parentHandle) }
 });
 
 const rendererPending = window.__pendingController.createPendingController({

@@ -739,6 +739,13 @@ const {
   parseRequiredBillDates,
   scanBalanceSeedStatus: scanStatementBalanceSeedStatus
 } = require('./main-process/statement-generation-business');
+// v3.2.15：网银账单渠道的输出身份、生成分组与余额方式
+const {
+  findBalanceModeMismatch,
+  resolveGenerationGroupKey,
+  resolveStatementOutputName,
+  resolveTemplateBalanceMode
+} = require('./main-process/statement-channel-identity');
 const {
   ALL_BANKS_TEMPLATE_SCOPE,
   assembleMonthlyBalance,
@@ -1726,7 +1733,8 @@ const REUSE_MODULE_DEFAULT_OPTION = '是';
 // - `buildTemplateLibraryPayload` 通过 `listTemplateBundleEntries` 透传该字段（template-repository.js:856）
 // - `readTemplateBundleFile` 对未知字段采用显式解构式解析（:1221-1243），v1.5.1 旧应用读 v1.5.2 导出的 bundle 时自然忽略该字段
 // - v1.5.1 旧 bundle 若不含该字段，读时 fallback 为空串（:1242）
-const SUPPORTED_BUNDLE_VERSION = 4;
+// v3.2.15：v5 以渠道取代主/子模板（顶层 channels，条目 channelName），兼容读取 v≤4。
+const SUPPORTED_BUNDLE_VERSION = 5;
 // v1.5.2 需求 3：主页面「按文件名映射模板」的虚拟模板 ID（非 DB 记录）
 // helper 用于在接收 templateId 的调用点统一短路，避免将虚拟 ID 传入真实查询
 const FILENAME_MAPPING_TEMPLATE_ID = '__FILENAME_MAPPING__';
@@ -3528,22 +3536,48 @@ function buildTemplateLibraryPayload() {
       if (mode === 'fixed') {
         entry.bigAccountMode = mode;
       }
-      // v1.5.1: 导出账户映射
-      entry.accountMappings = database.listAccountMappings(template.id).map((m) => ({
-        bankAccountId: m.bankAccountId,
-        clearingAccountId: m.clearingAccountId,
-        noCurrency: Boolean(m.noCurrency),
-        currency: m.currency || ''
-      }));
+      // v1.5.1: 导出账户映射；v3.2.15：渠道子模板的账户映射在渠道层，条目不带。
+      if (!entry.channelName) {
+        entry.accountMappings = database.listAccountMappings({ templateId: template.id }).map(toBundleAccountMapping);
+      }
     }
     return entry;
+  });
+
+  // v3.2.15（§5.3）：渠道列表（保留空渠道）、渠道账户映射与未处理的冲突。
+  const channels = database.listStatementChannels().map((channel) => {
+    const conflictGroup = database.listStatementChannelAccountMappingConflicts(channel.id)[0];
+    return {
+      name: channel.name,
+      accountMappings: database.listAccountMappings({ channelId: channel.id }).map(toBundleAccountMapping),
+      accountMappingConflicts: conflictGroup ? conflictGroup.conflicts : []
+    };
   });
 
   return {
     bundleVersion: SUPPORTED_BUNDLE_VERSION,
     exportedAt: new Date().toISOString(),
+    channels,
     templates
   };
+}
+
+function toBundleAccountMapping(m) {
+  return {
+    bankAccountId: m.bankAccountId,
+    clearingAccountId: m.clearingAccountId,
+    noCurrency: Boolean(m.noCurrency),
+    currency: m.currency || ''
+  };
+}
+
+function normalizeBundleAccountMappings(list) {
+  return (Array.isArray(list) ? list : []).map((m) => ({
+    bankAccountId: normalizeCell(m && m.bankAccountId),
+    clearingAccountId: normalizeCell(m && m.clearingAccountId),
+    noCurrency: Boolean(m && m.noCurrency),
+    currency: normalizeCell(m && m.currency)
+  })).filter((m) => m.bankAccountId);
 }
 
 function writeTemplateBundleFile(filePath) {
@@ -3580,8 +3614,25 @@ function readTemplateBundleFile(filePath) {
   }
 
   const templates = Array.isArray(parsed?.templates) ? parsed.templates : [];
+  const channels = bundleVersion >= 5 && Array.isArray(parsed?.channels)
+    ? parsed.channels
+      .map((item) => ({
+        name: normalizeCell(item && item.name),
+        accountMappings: normalizeBundleAccountMappings(item && item.accountMappings),
+        accountMappingConflicts: (Array.isArray(item && item.accountMappingConflicts) ? item.accountMappingConflicts : [])
+          .map((conflict) => ({
+            bankAccountId: normalizeCell(conflict && conflict.bankAccountId),
+            candidates: Array.isArray(conflict && conflict.candidates) ? conflict.candidates : []
+          }))
+          .filter((conflict) => conflict.bankAccountId && conflict.candidates.length > 1)
+      }))
+      .filter((item) => item.name)
+    : [];
 
-  return templates.map((item) => ({
+  return {
+    bundleVersion,
+    channels,
+    templates: templates.map((item) => ({
     templateKey: normalizeCell(item.templateKey),
     name: normalizeCell(item.name),
     sourceFileName: normalizeCell(item.sourceFileName) || `${normalizeCell(item.name) || 'template'}.xlsx`,
@@ -3597,13 +3648,15 @@ function readTemplateBundleFile(filePath) {
       ? { signedAmountSourceField: normalizeCell(item.billSplitMeta.signedAmountSourceField) }
       : { signedAmountSourceField: '' },
     dateFormat: normalizeCell(item.dateFormat) || 'auto',
-    // v1.5.1: 主/子模板 + 账户映射
-    isParent: Boolean(item.isParent),
-    parentTemplateKey: normalizeCell(item.parentTemplateKey) || null,
+    // v3.2.15（v5）：所属渠道；v≤4 的主/子模板字段只用于导入时转为渠道。
+    channelName: bundleVersion >= 5 ? (normalizeCell(item.channelName) || null) : null,
+    isParent: bundleVersion < 5 && Boolean(item.isParent),
+    parentTemplateKey: bundleVersion < 5 ? (normalizeCell(item.parentTemplateKey) || null) : null,
     accountMappings: Array.isArray(item.accountMappings) ? item.accountMappings : [],
     // v1.5.2 需求 3：文件名固定字段（老 bundle 无此字段时落为空串）
     filenameFixedField: normalizeCell(item.filenameFixedField) || ''
-  }));
+    }))
+  };
 }
 
 // v2.0.0-beta.2 D16 fix（Codex PR #26 Finding 1）：默认/重置背景按当前 ui_style 取
@@ -4586,8 +4639,9 @@ function buildTemplateSummary(template) {
     bigAccountCount: template.bigAccountCount || 0,
     bigAccountMode: template.bigAccountMode || 'unset',
     bigAccountSummary: template.bigAccountSummary || '未设置',
-    isParent: Boolean(template.isParent),
-    parentTemplateId: template.parentTemplateId || null,
+    // v3.2.15：所属渠道（取代主/子模板标记）
+    channelId: template.channelId || null,
+    channelName: template.channelName || '',
     // v1.5.2 需求 3（G3-4）：透传「文件名里的固定字段」给映射关系对话框回显
     filenameFixedField: String(template.filenameFixedField || '')
   };
@@ -5386,7 +5440,7 @@ function registerAppHandlers() {
       // v1.5.3 R2（D15）：启动时自有账号迁移失败的错误文案；null 表示无失败
       ownAccountsMigrationError: lastOwnAccountsMigrationError,
       // v3.2.14：current = 本版说明（设置中查看）；pending = 升级后待弹出的说明
-      releaseNotes: releaseNotesState ? releaseNotesState.getSnapshot() : { current: null, pending: null }
+      releaseNotes: releaseNotesState ? releaseNotesState.getSnapshot() : { current: null, pending: null, history: null }
     };
   });
   ipcMain.handle('settings:acknowledge-release-notes', (_event, version) => {
@@ -7663,16 +7717,58 @@ function validateAccountMappings(mappings) {
   };
 }
 
+// v3.2.15（D7）：账户映射的作用范围 —— { channelId } 为渠道层，{ templateId } 或数字为模板（兼容旧调用）。
+function normalizeAccountMappingScopeArg(scope) {
+  if (scope && typeof scope === 'object') {
+    const channelId = Number(scope.channelId || 0);
+    if (channelId > 0) return { channelId };
+    return { templateId: Number(scope.templateId || 0) };
+  }
+  return { templateId: Number(scope || 0) };
+}
+
+function describeAccountMappingScope(scope) {
+  if (scope.channelId) {
+    const channel = database.getStatementChannel(scope.channelId);
+    return `渠道：${channel ? channel.name : scope.channelId}`;
+  }
+  const template = database.getTemplate(scope.templateId);
+  return `模板：${template ? template.name : scope.templateId}`;
+}
+
 function registerAccountMappingHandlers() {
-  ipcMain.handle('account-mapping:list', (_event, templateId) => {
+  ipcMain.handle('account-mapping:list', (_event, rawScope) => {
+    const scope = normalizeAccountMappingScopeArg(rawScope);
     return {
       status: 'success',
-      mappings: database.listAccountMappings(templateId)
+      mappings: database.listAccountMappings(scope),
+      conflictCount: scope.channelId ? database.countStatementChannelAccountMappingConflicts(scope.channelId) : 0
     };
   });
 
-  trackedIpcHandle('account-mapping:save', '生成网银账单', '账户映射', (_event, templateId, mappings) => {
+  trackedIpcHandle('account-mapping:save', '生成网银账单', '账户映射', (_event, rawScope, mappings) => {
+    const scope = normalizeAccountMappingScopeArg(rawScope);
+    const templateId = scope.templateId || null;
     try {
+      if (scope.channelId && !database.getStatementChannel(scope.channelId)) {
+        return createErrorResult({
+          step: '保存账户映射',
+          message: '未找到对应渠道，请刷新后重试',
+          errorCode: 'CHANNEL_NOT_FOUND',
+          context: { channelId: scope.channelId }
+        });
+      }
+      if (!scope.channelId) {
+        const template = database.getTemplate(scope.templateId);
+        if (template && template.channelId) {
+          return createErrorResult({
+            step: '保存账户映射',
+            message: `模板「${template.name}」属于渠道「${template.channelName}」，账户映射请在渠道层统一设置`,
+            errorCode: 'ACCOUNT_MAPPING_CHANNEL_SCOPE_REQUIRED',
+            context: { templateId: template.id, channelId: template.channelId }
+          });
+        }
+      }
       const validationResult = validateAccountMappings(mappings);
 
       if (validationResult.status !== 'success') {
@@ -7681,20 +7777,27 @@ function registerAccountMappingHandlers() {
           message: validationResult.message,
           errorCode: 'ACCOUNT_MAPPING_VALIDATE',
           detailLines: ['账户映射存在格式或完整性问题，未执行保存。'],
-          context: { templateId, mappings }
+          context: { ...scope, mappings }
         });
       }
 
-      database.saveAccountMappings(templateId, validationResult.mappings);
+      const saveResult = database.saveAccountMappings(scope, validationResult.mappings);
+      const resolvedConflicts = (saveResult && saveResult.resolvedConflictBankAccountIds) || [];
       clearLastErrorReport();
       appendActivityLogEntry({
         level: 'info',
         message: '保存账户映射成功',
-        details: [`模板ID：${templateId}`, `映射条数：${validationResult.mappings.length}`]
+        details: [
+          describeAccountMappingScope(scope),
+          `映射条数：${validationResult.mappings.length}`,
+          ...(resolvedConflicts.length ? [`按本次设置处理的冲突账户号：${resolvedConflicts.join('、')}`] : [])
+        ]
       });
       return {
         status: 'success',
-        message: '账户映射保存成功'
+        message: resolvedConflicts.length
+          ? `账户映射保存成功，账户号 ${resolvedConflicts.join('、')} 的冲突按本次设置处理`
+          : '账户映射保存成功'
       };
     } catch (error) {
       return createErrorResult({
@@ -7703,8 +7806,35 @@ function registerAccountMappingHandlers() {
         errorCode: 'ACCOUNT_MAPPING_RUNTIME',
         errorType: '系统错误',
         originalError: error,
-        context: { templateId, mappings }
+        context: { ...scope, templateId, mappings }
       });
+    }
+  });
+
+  // v3.2.15（D8）：迁移 / 旧版模板包合并时登记的渠道账户映射冲突。
+  ipcMain.handle('channel-account-mapping:list-conflicts', () => ({
+    status: 'success',
+    channels: database.listStatementChannelAccountMappingConflicts()
+  }));
+
+  supportIpcHandle('channel-account-mapping:resolve-conflicts', '处理渠道账户映射冲突', (_event, payload = {}) => {
+    const channelId = Number(payload.channelId);
+    try {
+      const { resolved, remaining } = database.resolveStatementChannelAccountMappingConflicts(channelId, payload.choices);
+      const channel = database.getStatementChannel(channelId);
+      clearLastErrorReport();
+      appendActivityLogEntry({
+        level: 'info',
+        message: '处理渠道账户映射冲突',
+        details: [
+          `渠道：${channel ? channel.name : channelId}`,
+          ...resolved.map((item) => `账户号 ${item.bankAccountId} → 清结算账号 ${item.clearingAccountId}${item.noCurrency ? `（无币种，兜底币种 ${item.currency}）` : ''}`),
+          `剩余未处理：${remaining}`
+        ]
+      });
+      return { status: 'success', message: '账户映射冲突已处理', remaining };
+    } catch (error) {
+      return createStatementChannelErrorResult('处理渠道账户映射冲突', error, { channelId });
     }
   });
 
@@ -7763,6 +7893,16 @@ function registerAccountMappingHandlers() {
       );
 
       const droppedRows = [];
+      // v3.2.15（D7）：渠道子模板不再持有模板级账户映射，迁移分配只面向普通模板。
+      const channelTemplateIds = new Set(allTemplates.filter((t) => t.channelId).map((t) => t.id));
+      const channelTargetRows = assignments.filter((a) => channelTemplateIds.has(Number(a.templateId)));
+      if (channelTargetRows.length > 0) {
+        return createErrorResult({
+          step: '分配账户映射',
+          message: `${channelTargetRows.length} 条映射的目标模板属于渠道，渠道的账户映射请在「账户映射」中选择渠道设置`,
+          errorCode: 'MIGRATION_DISTRIBUTE_CHANNEL_TEMPLATE'
+        });
+      }
       assignments.forEach((a, index) => {
         const tid = Number(a.templateId);
         if (!validTemplateIds.has(tid)) {
@@ -7788,8 +7928,9 @@ function registerAccountMappingHandlers() {
         });
       }
 
-      // 清空所有模板的 account_mappings，再按分配写入
+      // 清空所有普通模板的 account_mappings，再按分配写入（渠道子模板不持有模板级映射）
       for (const template of allTemplates) {
+        if (template.channelId) continue;
         const rows = byTemplate.get(template.id) || [];
         database.saveAccountMappings(template.id, rows);
       }
@@ -8240,51 +8381,317 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
   };
 }
 
+// v3.2.15：旧的主/子模板通道只保留注册（冻结登记），调用一律拒绝且不写数据。
+function createRetiredParentTemplateResult(step) {
+  return {
+    status: 'error',
+    message: '主模板 / 子模板已改为渠道，请在映射关系管理中使用【渠道存在多个子模板】或【设为子模板】',
+    errorCode: 'TEMPLATE_PARENT_RETIRED',
+    step
+  };
+}
+
+const STATEMENT_CHANNEL_BUSINESS_ERROR_CODES = new Set([
+  'CHANNEL_NOT_FOUND',
+  'CHANNEL_NAME_REQUIRED',
+  'CHANNEL_NAME_DUPLICATED',
+  'CHANNEL_ASSIGNMENT_INVALID',
+  'CHANNEL_ACCOUNT_MAPPING_CONFLICT',
+  'CHANNEL_ACCOUNT_MAPPING_CONFLICT_STALE',
+  'CHANNEL_ACCOUNT_MAPPING_CONFLICT_PENDING',
+  'TEMPLATE_NOT_FOUND'
+]);
+
+// v3.2.15：渠道相关业务错误需要界面逐条展示明细（冲突账户号、各子模板余额方式），
+//   在通用错误结果上补充 errorCode 与 detailLines；不改变 createErrorResult 的公共返回形状。
+function createDetailedErrorResult(options) {
+  return {
+    ...createErrorResult(options),
+    errorCode: options.errorCode,
+    detailLines: Array.isArray(options.detailLines) ? options.detailLines.slice() : []
+  };
+}
+
+function createStatementChannelErrorResult(step, error, context = {}) {
+  if (error && STATEMENT_CHANNEL_BUSINESS_ERROR_CODES.has(error.code)) {
+    return createDetailedErrorResult({
+      step,
+      message: error.message,
+      errorCode: error.code,
+      detailLines: Array.isArray(error.detailLines) ? error.detailLines : [],
+      context: { ...context, ...(error.context || {}) }
+    });
+  }
+  return createErrorResult({
+    step,
+    message: `${step}失败，请导出报错文件查看详情`,
+    errorCode: 'STATEMENT_CHANNEL_RUNTIME',
+    errorType: '系统错误',
+    originalError: error,
+    context
+  });
+}
+
+// v3.2.15【导入子模板】（spec §4.4，D9）：表头规则同【导入模板】；模板名按渠道编号自动生成，总是新建，不占用失败的编号。
+function importStatementChildTemplate(channelId, selectedPath) {
+  try {
+    const headers = extractHeaders(selectedPath);
+    const conflict = findConflictingTemplateByHeaders(headers, null);
+    if (conflict) {
+      return createErrorResult({
+        step: '导入子模板',
+        message: `该文件的表头与已有模板「${conflict.name}」完全相同，无法创建重复表头的模板。`,
+        errorCode: 'TEMPLATE_HEADERS_DUPLICATE',
+        context: { conflictTemplateName: conflict.name, channelId }
+      });
+    }
+    const created = database.createChildTemplate(channelId, {
+      sourceFileName: path.basename(selectedPath),
+      headers
+    });
+    syncTemplateLibraryFile();
+    clearLastErrorReport();
+    appendActivityLogEntry({
+      level: 'info',
+      message: '导入子模板成功',
+      details: [`渠道：${created.channel.name}`, `模板名：${created.name}`, `源文件：${selectedPath}`]
+    });
+    return {
+      status: 'success',
+      message: `已导入子模板「${created.name}」，请在【修改】中维护映射关系`,
+      template: buildTemplateSummary(created.template),
+      channelId: created.channel.id
+    };
+  } catch (error) {
+    if (error instanceof FileValidationError) {
+      return createErrorResult({
+        step: '导入子模板',
+        message: error.message,
+        errorCode: error.code,
+        detailLines: ['模板文件无法读取或表头无效，未完成导入。'],
+        context: { selectedPath, channelId }
+      });
+    }
+    if (error && STATEMENT_CHANNEL_BUSINESS_ERROR_CODES.has(error.code)) {
+      return createStatementChannelErrorResult('导入子模板', error, { selectedPath, channelId });
+    }
+    return createErrorResult({
+      step: '导入子模板',
+      message: '子模板导入失败，请导出报错文件查看详情',
+      errorCode: 'TEMPLATE_IMPORT_RUNTIME',
+      errorType: '系统错误',
+      originalError: error,
+      context: { selectedPath, channelId }
+    });
+  }
+}
+
+// v3.2.15：template:save-mappings 的 channel 参数 → 仓储的归属指令；缺省或无法识别为不改归属。
+function normalizeTemplateChannelAssignment(channel) {
+  if (!channel || typeof channel !== 'object') return { mode: 'keep' };
+  const mode = normalizeCell(channel.mode);
+  if (mode === 'none' || mode === 'create') return { mode };
+  if (mode === 'join') return { mode, channelId: Number(channel.channelId) };
+  return { mode: 'keep' };
+}
+
+// v3.2.15（D2、§5.2）：保存后所属渠道中，已保存过映射的其他子模板余额方式须与本次提交一致。
+function findSaveMappingsBalanceModeMismatch({ template, channelAssignment, mappings }) {
+  let channelId = null;
+  if (channelAssignment.mode === 'keep') channelId = Number(template.channelId || 0) || null;
+  if (channelAssignment.mode === 'join') channelId = Number(channelAssignment.channelId || 0) || null;
+  if (!channelId) return null;
+  const channel = database.getStatementChannel(channelId);
+  if (!channel) return null;
+  const entries = [{ templateName: template.name, balanceMode: resolveTemplateBalanceMode(mappings) }];
+  for (const sibling of database.listStatementChannelTemplates(channelId)) {
+    if (sibling.id === template.id || !sibling.mappingCount) continue;
+    const siblingConfig = getTemplateMappingConfig(sibling.id);
+    if (!siblingConfig) continue;
+    entries.push({ templateName: sibling.name, balanceMode: resolveTemplateBalanceMode(siblingConfig.exportMappings) });
+  }
+  const detailLines = findBalanceModeMismatch(entries);
+  return detailLines ? { channelName: channel.name, detailLines } : null;
+}
+
+// v3.2.15（§5.3）：v5 模板包——按名称取得或新建渠道，写入渠道映射与冲突，再按条目 channelName 归属。
+function buildBundleV5ChannelRestore(importedChannels, importedTemplateRecords) {
+  const channels = (Array.isArray(importedChannels) ? importedChannels : []).map((channel) => ({
+    name: channel.name,
+    accountMappings: normalizeBundleAccountMappings(channel.accountMappings),
+    accountMappingConflicts: channel.accountMappingConflicts || []
+  }));
+  const assignments = importedTemplateRecords.map(({ entry, template }) => ({
+    templateId: template.id,
+    channelName: entry.channelName || null
+  }));
+  return { channels, legacyChannelSources: [], assignments };
+}
+
+// v3.2.15（§5.3）：v≤4 模板包——isParent 的条目按其名称建渠道，它和 parentTemplateKey 指向它的条目归入该渠道，
+//   各条目的账户映射按迁移口径合并（相同去重、不一致登记为待处理冲突）。
+function buildLegacyBundleChannelRestore(importedTemplateRecords) {
+  const byKey = new Map();
+  importedTemplateRecords.forEach((record) => {
+    if (record.entry.templateKey) byKey.set(record.entry.templateKey, record);
+  });
+  const resolveParent = (record) => {
+    const parentKey = record.entry.parentTemplateKey;
+    if (!parentKey) return null;
+    if (byKey.has(parentKey)) return { record: byKey.get(parentKey) };
+    const external = database.getTemplateByKey(parentKey);
+    return external ? { external } : null;
+  };
+  const referencedKeys = new Set(importedTemplateRecords.map((record) => record.entry.parentTemplateKey).filter(Boolean));
+  const rootNameOf = (record) => {
+    let current = record;
+    const seen = new Set();
+    for (;;) {
+      seen.add(current.template.id);
+      const parent = resolveParent(current);
+      if (!parent) return { name: current.template.name };
+      if (parent.external) {
+        return { name: parent.external.channelName || parent.external.name, external: parent.external };
+      }
+      if (seen.has(parent.record.template.id)) return { name: current.template.name };
+      current = parent.record;
+    }
+  };
+  const membersByChannel = new Map();
+  const assignments = [];
+  importedTemplateRecords.forEach((record) => {
+    const involved = record.entry.isParent || Boolean(resolveParent(record))
+      || (record.entry.templateKey && referencedKeys.has(record.entry.templateKey));
+    if (!involved) {
+      assignments.push({ templateId: record.template.id, channelName: null });
+      return;
+    }
+    const root = rootNameOf(record);
+    if (!membersByChannel.has(root.name)) membersByChannel.set(root.name, { sources: [], externalIds: new Set() });
+    const member = membersByChannel.get(root.name);
+    member.sources.push({ sourceName: record.template.name, mappings: normalizeBundleAccountMappings(record.entry.accountMappings) });
+    if (root.external && !root.external.channelId && !member.externalIds.has(root.external.id)) {
+      // 包外的主模板随渠道转换一起归入，账户映射一并合并（同迁移 D1）。
+      member.externalIds.add(root.external.id);
+      member.sources.push({
+        sourceName: root.external.name,
+        mappings: database.listAccountMappings({ templateId: root.external.id })
+      });
+      assignments.push({ templateId: root.external.id, channelName: root.name });
+    }
+    assignments.push({ templateId: record.template.id, channelName: root.name });
+  });
+  const legacyChannelSources = Array.from(membersByChannel.entries()).map(([name, member]) => {
+    const existing = database.getStatementChannelByName(name);
+    const sources = existing
+      ? [{ sourceName: `渠道「${name}」原有设置`, mappings: database.listAccountMappings({ channelId: existing.id }) }, ...member.sources]
+      : member.sources;
+    return { name, sources };
+  });
+  return { channels: [], legacyChannelSources, assignments };
+}
+
+function collectChannelBalanceModeWarnings(channelNames) {
+  const warnings = [];
+  for (const name of channelNames) {
+    const channel = database.getStatementChannelByName(name);
+    if (!channel) continue;
+    const entries = database.listStatementChannelTemplates(channel.id)
+      .filter((template) => template.mappingCount > 0)
+      .map((template) => getTemplateMappingConfig(template.id))
+      .filter(Boolean)
+      .map((config) => ({ templateName: config.template.name, balanceMode: resolveTemplateBalanceMode(config.exportMappings) }));
+    const mismatch = findBalanceModeMismatch(entries);
+    if (mismatch) warnings.push(`渠道「${name}」：${mismatch.join('；')}`);
+  }
+  return warnings;
+}
+
 function registerTemplateHandlers() {
   ipcMain.handle('template:list', () => {
     return database.listTemplates();
   });
 
-  ipcMain.handle('template:list-children', (_event, parentTemplateId) => {
-    return database.listChildTemplates(parentTemplateId);
-  });
+  // v3.2.15：主/子模板已由渠道取代。以下三个通道仍在冻结的 G7 归档登记与 preload 中，暂保留注册，
+  //   但不再读写任何数据；界面改用渠道接口（channel:* 与 template:save-mappings 的 channel 参数）。
+  ipcMain.handle('template:list-children', () => []);
 
-  businessIpcHandle('template:set-parent-status', '设置父模板状态', (_event, templateId, isParent) => {
+  businessIpcHandle('template:set-parent-status', '设置父模板状态', () => (
+    createRetiredParentTemplateResult('设置主模板状态')
+  ));
+
+  businessIpcHandle('template:set-child-parent', '设置子模板归属', () => (
+    createRetiredParentTemplateResult('设置子模板')
+  ));
+
+  ipcMain.handle('channel:list', () => database.listStatementChannels());
+
+  supportIpcHandle('channel:rename', '重命名渠道', (_event, payload = {}) => {
+    const channelId = Number(payload.channelId);
     try {
-      database.setParentStatus(templateId, isParent);
+      const { previous, channel } = database.renameStatementChannel(channelId, payload.name);
       syncTemplateLibraryFile();
-      return { status: 'success' };
-    } catch (error) {
-      return createErrorResult({
-        step: '设置主模板状态',
-        message: '操作失败，请导出报错文件查看详情',
-        errorCode: 'TEMPLATE_SET_PARENT_RUNTIME',
-        errorType: '系统错误',
-        originalError: error,
-        context: { templateId, isParent }
+      clearLastErrorReport();
+      appendActivityLogEntry({
+        level: 'info',
+        message: '重命名渠道成功',
+        details: [
+          `原渠道名：${previous.name}`,
+          `新渠道名：${channel.name}`,
+          '渠道下子模板的输出身份、余额种子与余额调整改按新渠道名的银行段读取'
+        ]
       });
+      return { status: 'success', message: '渠道名称修改成功', channel };
+    } catch (error) {
+      return createStatementChannelErrorResult('重命名渠道', error, { channelId });
     }
   });
 
-  businessIpcHandle('template:set-child-parent', '设置子模板归属', (_event, templateId, parentTemplateId) => {
+  supportIpcHandle('channel:delete', '删除渠道', (_event, channelId) => {
     try {
-      database.setChildParent(templateId, parentTemplateId);
+      const { channel, releasedTemplates, conflictCount } = database.deleteStatementChannel(channelId);
       syncTemplateLibraryFile();
-      return { status: 'success' };
-    } catch (error) {
-      return createErrorResult({
-        step: '设置子模板',
-        message: '操作失败，请导出报错文件查看详情',
-        errorCode: 'TEMPLATE_SET_CHILD_RUNTIME',
-        errorType: '系统错误',
-        originalError: error,
-        context: { templateId, parentTemplateId }
+      clearGeneratedExports();
+      clearPendingManualBalancePrompt();
+      clearPendingBigAccountSelection();
+      clearLastErrorReport();
+      appendActivityLogEntry({
+        level: 'info',
+        message: '删除渠道成功',
+        details: [
+          `渠道名：${channel.name}`,
+          `恢复为普通模板：${releasedTemplates.map((item) => item.name).join('、') || '（无）'}`,
+          ...(conflictCount > 0 ? [`未处理的账户映射冲突 ${conflictCount} 个已随渠道清除，请为这些模板重新检查账户映射`] : [])
+        ]
       });
+      return {
+        status: 'success',
+        message: conflictCount > 0
+          ? `渠道已删除，${releasedTemplates.length} 个子模板恢复为普通模板；有 ${conflictCount} 个未处理的账户映射冲突随渠道清除，请为这些模板重新检查账户映射`
+          : `渠道已删除，${releasedTemplates.length} 个子模板恢复为普通模板`,
+        releasedTemplateCount: releasedTemplates.length,
+        clearedConflictCount: conflictCount
+      };
+    } catch (error) {
+      return createStatementChannelErrorResult('删除渠道', error, { channelId });
     }
   });
 
+  // v3.2.15：传 { channelId } 即【导入子模板】（T7）——模板名按渠道编号生成，总是新建并归入该渠道。
   trackedIpcHandle('template:import', '生成网银账单', '导入模板', {
-    async prepare() {
+    async prepare(_event, options = {}) {
+      const childChannelId = Number(options && options.channelId || 0);
+      if (childChannelId && !database.getStatementChannel(childChannelId)) {
+        return {
+          proceed: false,
+          result: createErrorResult({
+            step: '导入子模板',
+            message: '未找到对应渠道，请刷新后重试',
+            errorCode: 'CHANNEL_NOT_FOUND',
+            context: { channelId: childChannelId }
+          })
+        };
+      }
       const result = await showImportOpenDialog('template', {
         properties: ['openFile'],
         filters: templateFileDialogFilters()
@@ -8306,8 +8713,12 @@ function registerTemplateHandlers() {
         }
       };
     },
-    async execute(_event, prepared, taskContext) {
+    async execute(_event, prepared, taskContext, options = {}) {
     const selectedPath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
+    const childChannelId = Number(options && options.channelId || 0);
+    if (childChannelId) {
+      return importStatementChildTemplate(childChannelId, selectedPath);
+    }
     try {
       const headers = extractHeaders(selectedPath);
       const templateName = path.parse(selectedPath).name;
@@ -8520,27 +8931,60 @@ function registerTemplateHandlers() {
       // 默认 false（向后兼容旧行为：DELETE all + INSERT all，caller 接管 own 全集）
       // 仅当前端显式传 preserveOwn=true（即维护大账号没被打开过 → bigAccountsLoadedWithOwn=false → currentBigAccounts 是 client-only）才走 DELETE-client-only 保留 own 路径
       const preserveOwn = payload.preserveOwn === true;
-      database.saveMappings(
+      // v3.2.15（§4.2、T6）：渠道归属随映射一起提交；缺省为不改归属。
+      const channelAssignment = normalizeTemplateChannelAssignment(payload.channel);
+      const balanceModeMismatch = findSaveMappingsBalanceModeMismatch({
+        template,
+        channelAssignment,
+        mappings: templateConfiguration.mappings
+      });
+      if (balanceModeMismatch) {
+        return createDetailedErrorResult({
+          step: '保存模板映射',
+          message: `渠道「${balanceModeMismatch.channelName}」下各子模板的余额方式必须一致（不出余额 / 取账单余额列 / 通过发生额计算），请统一后再保存`,
+          errorCode: 'CHANNEL_BALANCE_MODE_MISMATCH',
+          detailLines: balanceModeMismatch.detailLines,
+          context: { templateId: payload.templateId, templateName: template.name },
+          templateName: template.name
+        });
+      }
+      const saveResult = database.saveMappings(
         payload.templateId,
         templateConfiguration.mappings,
         templateConfiguration.bigAccounts,
         templateConfiguration.fixedAssignments,
         payload.dateFormat,
         null,
-        { preserveOwn }
+        { preserveOwn, channelAssignment }
       );
+      const assignmentResult = saveResult && saveResult.channelAssignment;
       syncTemplateLibraryFile();
       clearLastErrorReport();
+      const savedTemplate = database.getTemplate(payload.templateId);
       appendActivityLogEntry({
         level: 'info',
         message: '保存模板映射成功',
-        details: [`模板名：${template.name}`]
+        details: [
+          `模板名：${template.name}`,
+          ...(assignmentResult && assignmentResult.changed
+            ? [`渠道：${savedTemplate && savedTemplate.channelName ? savedTemplate.channelName : '（不属于任何渠道）'}`]
+            : [])
+        ]
       });
       return {
         status: 'success',
-        message: '模板映射保存成功'
+        message: assignmentResult && assignmentResult.createdChannel
+          ? `模板映射保存成功，已新建渠道「${assignmentResult.createdChannel.name}」`
+          : '模板映射保存成功',
+        template: savedTemplate ? buildTemplateSummary(savedTemplate) : null
       };
     } catch (error) {
+      if (error && STATEMENT_CHANNEL_BUSINESS_ERROR_CODES.has(error.code)) {
+        return createStatementChannelErrorResult('保存模板映射', error, {
+          templateId: payload.templateId,
+          templateName: template?.name || ''
+        });
+      }
       if (error instanceof FileValidationError) {
         return createErrorResult({
           step: '保存模板映射',
@@ -8747,7 +9191,8 @@ function registerTemplateHandlers() {
           '模板包'
         );
         const enumValues = loadEnumValues(enumConfig.filePath);
-        const importedTemplates = readTemplateBundleFile(selectedPath);
+        const importedBundle = readTemplateBundleFile(selectedPath);
+        const importedTemplates = importedBundle.templates;
         const importCandidates = importedTemplates
           .filter((entry) => entry.name && entry.headers.length);
         const scanExisting = () => importCandidates
@@ -8783,6 +9228,8 @@ function registerTemplateHandlers() {
           proceed: true,
           enumValues,
           importedTemplates,
+          importedBundleVersion: importedBundle.bundleVersion,
+          importedChannels: importedBundle.channels,
           filePlan: {
             version: 1,
             allocation: 'eager',
@@ -8815,6 +9262,8 @@ function registerTemplateHandlers() {
     },
     async execute(_event, prepared, taskContext) {
     const { enumValues, importedTemplates } = prepared;
+    const importedBundleVersion = Number(prepared.importedBundleVersion || 1);
+    const importedChannels = Array.isArray(prepared.importedChannels) ? prepared.importedChannels : [];
     const selectedPath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
     try {
       let createdCount = 0;
@@ -9002,45 +9451,35 @@ function registerTemplateHandlers() {
         }
       });
 
-      // v1.5.1: 第二轮 — 还原主/子模板关系（覆盖导入时也清除旧的主/子状态）
+      // v1.5.1: 第二轮 — 导入模板级账户映射（覆盖导入时也清除旧映射）
+      const importedTemplateRecords = [];
       importedTemplates.forEach((entry) => {
         if (!entry.name || !entry.headers.length) return;
         const template = entry.templateKey
           ? database.getTemplateByKey(entry.templateKey)
           : database.getTemplateByName(entry.name);
         if (!template) return;
-
-        // 始终同步主/子状态：v3 bundle 无这些字段时 isParent=false, parentTemplateKey=null → 清除旧状态
-        database.setParentStatus(template.id, Boolean(entry.isParent));
-
-        if (entry.parentTemplateKey) {
-          const parentTemplate = database.getTemplateByKey(entry.parentTemplateKey);
-          if (parentTemplate) {
-            database.setChildParent(template.id, parentTemplate.id);
-          }
-        } else {
-          database.setChildParent(template.id, null);
-        }
-      });
-
-      // v1.5.1: 第三轮 — 导入账户映射（覆盖导入时也清除旧映射）
-      importedTemplates.forEach((entry) => {
-        if (!entry.name || !entry.headers.length) return;
-        const template = entry.templateKey
-          ? database.getTemplateByKey(entry.templateKey)
-          : database.getTemplateByName(entry.name);
-        if (!template) return;
-
-        const mappings = (Array.isArray(entry.accountMappings) ? entry.accountMappings : []).map((m) => ({
-          bankAccountId: normalizeCell(m.bankAccountId),
-          clearingAccountId: normalizeCell(m.clearingAccountId),
-          noCurrency: Boolean(m.noCurrency),
-          currency: normalizeCell(m.currency)
-        })).filter((m) => m.bankAccountId);
+        importedTemplateRecords.push({ entry, template });
 
         // 始终写入：v3 bundle 无 accountMappings 时 mappings=[] → 清除旧映射
-        database.saveAccountMappings(template.id, mappings);
+        database.saveAccountMappings({ templateId: template.id }, normalizeBundleAccountMappings(entry.accountMappings));
       });
+
+      // v3.2.15: 第三轮 — 还原渠道与归属（覆盖导入时也清除旧归属）；v≤4 的主/子关系转为渠道（§5.3）
+      const channelRestore = importedBundleVersion >= 5
+        ? buildBundleV5ChannelRestore(importedChannels, importedTemplateRecords)
+        : buildLegacyBundleChannelRestore(importedTemplateRecords);
+      const restoreResult = database.restoreTemplateBundleStatementChannels(channelRestore);
+      const balanceModeWarnings = collectChannelBalanceModeWarnings(
+        Array.from(new Set(channelRestore.assignments.map((item) => item.channelName).filter(Boolean)))
+      );
+      if (balanceModeWarnings.length) {
+        appendActivityLogEntry({
+          level: 'warn',
+          message: '模板包导入后，以下渠道的子模板余额方式不一致，生成账单时会被阻断，请在映射关系管理中统一',
+          details: balanceModeWarnings
+        });
+      }
 
       syncTemplateLibraryFile();
       clearLastErrorReport();
@@ -9049,14 +9488,20 @@ function registerTemplateHandlers() {
         message: '导入模板包成功',
         details: [
           `源文件：${selectedPath}`,
+          `模板包版本：${importedBundleVersion}`,
           `新增：${createdCount}`,
           `更新：${updatedCount}`,
-          `跳过：${skippedCount}`
+          `跳过：${skippedCount}`,
+          `渠道：${restoreResult.channelCount}`,
+          ...(restoreResult.conflictCount > 0 ? [`待处理的渠道账户映射冲突：${restoreResult.conflictCount} 个账户号`] : [])
         ]
       });
+      const followUps = [];
+      if (restoreResult.conflictCount > 0) followUps.push(`有 ${restoreResult.conflictCount} 个渠道账户号的映射设置不一致，请在「账户映射」中处理`);
+      if (balanceModeWarnings.length > 0) followUps.push('部分渠道的子模板余额方式不一致，请在映射关系管理中统一');
       return {
         status: 'success',
-        message: `模板文件导入成功：新增${createdCount}，更新${updatedCount}，跳过${skippedCount}`
+        message: `模板文件导入成功：新增${createdCount}，更新${updatedCount}，跳过${skippedCount}${followUps.length ? `。${followUps.join('；')}` : ''}`
       };
     } catch (error) {
       if (error instanceof FileValidationError) {
@@ -9760,7 +10205,9 @@ function buildStatementGenerationConfig({
   }
 
   const mappingByTargetField = buildMappedFieldLookup(selectedMappings);
-  const templateNameParts = splitTemplateName(template.name);
+  // v3.2.15（T3）：属于渠道的模板按渠道名输出，明细 Channel 列与余额、种子、文件名同一口径。
+  const outputName = resolveStatementOutputName(template);
+  const templateNameParts = splitTemplateName(outputName);
   const selectedMerchantId = normalizeCell(selectedBigAccount?.merchantId);
   const selectedCurrency = normalizeCell(selectedBigAccount?.currency);
   const merchantIdMappingValue = normalizeLookupMappingValue(mappingByTargetField.MerchantId);
@@ -9804,7 +10251,8 @@ function buildStatementGenerationConfig({
     )
   );
 
-  const accountMappingByBankId = database.listAccountMappings(template.id).reduce((accumulator, mapping) => {
+  // v3.2.15（T11）：属于渠道的模板使用渠道账户映射。
+  const accountMappingByBankId = database.listEffectiveAccountMappings(template).reduce((accumulator, mapping) => {
     accumulator[mapping.bankAccountId] = {
       clearingAccountId: mapping.clearingAccountId,
       noCurrency: Boolean(mapping.noCurrency),
@@ -9818,6 +10266,7 @@ function buildStatementGenerationConfig({
 
   return {
     template,
+    outputName,
     mappingByTargetField,
     selectedMerchantId,
     selectedCurrency,
@@ -10103,27 +10552,75 @@ function scopedMergedOutputFileName(fileName, scope) {
   return scope === 'all' ? fileName.replace(/\.xlsx$/i, '__all.xlsx') : fileName;
 }
 
+// v3.2.15（T4）：按生成分组键把文件条目分组：属于渠道的子模板合为一组（一条余额链），普通模板各自一组。
+//   组配置取组内第一个仍存在的模板（输出身份与余额方式在渠道内一致）；明细行仍是各条目按自己子模板构建的结果。
+//   返回 [{ key, entries, templateIds, templateConfig }]；组内模板都已删除时 templateConfig 为 null。
+function groupStatementEntriesForGeneration(entries) {
+  const templateCache = new Map();
+  const templateById = (templateId) => {
+    if (!templateCache.has(templateId)) {
+      templateCache.set(templateId, templateId ? database.getTemplate(templateId) : null);
+    }
+    return templateCache.get(templateId);
+  };
+  const groups = new Map();
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const templateId = Number(entry && entry.matchedTemplateId || 0);
+    const key = resolveGenerationGroupKey(templateById(templateId) || { id: templateId });
+    if (!groups.has(key)) groups.set(key, { key, entries: [], templateIds: [] });
+    const group = groups.get(key);
+    group.entries.push(entry);
+    if (!group.templateIds.includes(templateId)) group.templateIds.push(templateId);
+  }
+  return Array.from(groups.values()).map((group) => {
+    let templateConfig = null;
+    for (const templateId of group.templateIds) {
+      templateConfig = templateId ? getTemplateMappingConfig(templateId) : null;
+      if (templateConfig) break;
+    }
+    return { ...group, templateConfig };
+  });
+}
+
+// v3.2.15（D2、§5.2）：同一渠道组内各子模板的余额方式必须一致；不一致返回逐行明细，否则 null。
+function findGenerationGroupBalanceModeMismatch(group) {
+  if (!group || !String(group.key).startsWith('channel:') || group.templateIds.length < 2) return null;
+  const entries = group.templateIds
+    .map((templateId) => getTemplateMappingConfig(templateId))
+    .filter(Boolean)
+    .map((config) => ({
+      templateName: config.template.name,
+      balanceMode: resolveTemplateBalanceMode(config.exportMappings)
+    }));
+  return findBalanceModeMismatch(entries);
+}
+
+function buildChannelBalanceModeMismatchError(group, detailLines) {
+  const channelName = group.templateConfig
+    ? resolveStatementOutputName(group.templateConfig.template)
+    : group.key;
+  return new FileValidationError(
+    'CHANNEL_BALANCE_MODE_MISMATCH',
+    `渠道「${channelName}」下各子模板的余额方式不一致，无法合并生成，请在映射关系管理中统一后再导入`,
+    { detailLines, context: { channelName } }
+  );
+}
+
 // v1.5.2：虚拟 ID 下从 session 重新生成合并的余额文件（补录 seed 后调用）
 function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
   const allEntries = getStatementSessionEntries(session, scope);
-  const groupMap = new Map();
-  for (const entry of allEntries) {
-    const tid = entry.matchedTemplateId || 0;
-    if (!groupMap.has(tid)) groupMap.set(tid, []);
-    groupMap.get(tid).push(entry);
-  }
+  const generationGroups = groupStatementEntriesForGeneration(allEntries);
 
   const balancePaths = [];
   const billDates = [];
   const allWarnings = [];
   let skippedCount = 0;
 
-  for (const [tid, groupEntries] of groupMap) {
-    const templateConfig = getTemplateMappingConfig(tid);
+  for (const { entries: groupEntries, templateIds, templateConfig } of generationGroups) {
     if (!templateConfig) {
       appendActivityLogEntry({
         level: 'warn',
-        message: `余额重新生成时跳过模板组（templateId=${tid}）：模板已被删除，${groupEntries.length} 个文件的数据未包含`
+        message: `余额重新生成时跳过模板组（templateId=${templateIds.join('、')}）：模板已被删除，${groupEntries.length} 个文件的数据未包含`
       });
       skippedCount += 1;
       continue;
@@ -10170,7 +10667,7 @@ function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
   let mergedBalance = null;
   if (balancePaths.length > 1) {
     const dateRange = buildDateRangeLabel(billDates);
-    const mergedFileName = `${groupMap.size}-BALANCE-${dateRange || getToday()}.xlsx`;
+    const mergedFileName = `${generationGroups.length}-BALANCE-${dateRange || getToday()}.xlsx`;
     const { outputFilePath: mergedPath } = buildOutputFilePath({
       kind: 'balance',
       outputFileName: scopedMergedOutputFileName(mergedFileName, scope)
@@ -10215,15 +10712,8 @@ function generateMultiTemplateGroupFiles({
   replacePaths,
   inputFilePaths
 }) {
-  // 按 matchedTemplateId 分组
-  const groupMap = new Map();
-  for (const entry of fileEntries) {
-    const tid = entry.matchedTemplateId || 0;
-    if (!groupMap.has(tid)) {
-      groupMap.set(tid, []);
-    }
-    groupMap.get(tid).push(entry);
-  }
+  // v3.2.15（T4）：按渠道 / 模板分组；渠道内各文件合为一份明细、一条余额链。
+  const generationGroups = groupStatementEntriesForGeneration(fileEntries);
 
   let lastBatchId = null;
   let lastGenerationTemplateConfig = null;
@@ -10234,17 +10724,22 @@ function generateMultiTemplateGroupFiles({
   const allWarnings = [];
   const groupPlans = [];
 
-  for (const [, groupEntries] of groupMap) {
+  const multiBigAccountMarker = `${FIXED_FIELD_VALUE_PREFIX}${MERCHANT_ID_MULTI_ACCOUNT_MARKER}`;
+  const isMultiBigAccountConfig = (config) => normalizeCell((config.exportMappings || []).find(
+    (m) => normalizeCell(m.templateField) === 'MerchantId'
+  )?.mappedField) === multiBigAccountMarker;
+  for (const { entries: groupEntries } of generationGroups) {
     const groupTemplateConfig = getEntryTemplateConfig({
       entry: groupEntries[0],
       fallbackTemplateConfig
     });
 
-    const groupMerchantMapping = (groupTemplateConfig.exportMappings || []).find(
-      (m) => normalizeCell(m.templateField) === 'MerchantId'
-    );
-    const groupIsMultiBigAccount = normalizeCell(groupMerchantMapping?.mappedField)
-      === `${FIXED_FIELD_VALUE_PREFIX}${MERCHANT_ID_MULTI_ACCOUNT_MARKER}`;
+    // v3.2.15（T9）：渠道内各子模板的 MerchantId 映射可能不同。大账号注入由 rebuildMatchedTemplateFileEntries
+    //   按各条目自己的子模板判断；组配置只在全部条目都是多大账号模板时带上所选大账号（它只决定输出文件名中的账号），
+    //   混有固定账号子模板时不把所选大账号写进文件名。
+    const groupIsMultiBigAccount = groupEntries.every((entry) => isMultiBigAccountConfig(
+      getEntryTemplateConfig({ entry, fallbackTemplateConfig })
+    ));
 
     const groupConfig = buildStatementGenerationConfig({
       template: groupTemplateConfig.template,
@@ -10310,8 +10805,8 @@ function generateMultiTemplateGroupFiles({
     allFileEntries.push(...effectiveEntries);
   }
 
-  // 合并多组文件为汇总文件，命名：模板数量-COMMON/BALANCE-日期范围.xlsx
-  const templateCount = groupMap.size;
+  // 合并多组文件为汇总文件，命名：组数-COMMON/BALANCE-日期范围.xlsx（渠道按一组计）
+  const templateCount = generationGroups.length;
   const dateRangeLabel = buildDateRangeLabel(allBillDates);
 
   const mergedDetail = allDetailPaths.length > 1
@@ -10775,16 +11270,10 @@ function buildStatementExportPlan(kind, scope = 'auto') {
 
   let defaultFileName = '';
   if (isFilenameMappingMode(session.templateId)) {
-    const groupMap = new Map();
-    for (const entry of getStatementSessionEntries(session, 'all')) {
-      const templateId = entry.matchedTemplateId || 0;
-      if (!groupMap.has(templateId)) groupMap.set(templateId, []);
-      groupMap.get(templateId).push(entry);
-    }
+    const generationGroups = groupStatementEntriesForGeneration(getStatementSessionEntries(session, 'all'));
     const validGroups = [];
     const allDates = [];
-    for (const [templateId, entries] of groupMap) {
-      const templateConfig = getTemplateMappingConfig(templateId);
+    for (const { entries, templateConfig } of generationGroups) {
       if (!templateConfig) continue;
       const config = buildStatementGenerationConfig({
         template: templateConfig.template,
@@ -10808,9 +11297,9 @@ function buildStatementExportPlan(kind, scope = 'auto') {
       };
     }
     if (validGroups.length > 1) {
-      defaultFileName = `${groupMap.size}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(allDates) || getToday()}.xlsx`;
+      defaultFileName = `${generationGroups.length}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(allDates) || getToday()}.xlsx`;
     } else {
-      defaultFileName = `${validGroups[0].config.template.name}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(validGroups[0].dates) || getToday()}.xlsx`;
+      defaultFileName = `${validGroups[0].config.outputName}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(validGroups[0].dates) || getToday()}.xlsx`;
     }
   } else {
     const templateConfig = getTemplateMappingConfig(session.templateId);
@@ -10836,7 +11325,7 @@ function buildStatementExportPlan(kind, scope = 'auto') {
       orderedTargetFields: generationTemplateConfig.exportTargetFields,
       scope: 'all'
     });
-    defaultFileName = `${generationTemplateConfig.template.name}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(parseRequiredBillDates(preparedBatch.detailRows)) || getToday()}.xlsx`;
+    defaultFileName = `${resolveStatementOutputName(generationTemplateConfig.template)}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(parseRequiredBillDates(preparedBatch.detailRows)) || getToday()}.xlsx`;
   }
   return {
     normalizedScope,
@@ -10877,31 +11366,40 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
       });
     }
 
-    // v1.5.2：虚拟 ID 按 matchedTemplateId 分组，每组用各自模板 config 生成，最后合并
+    // v1.5.2：虚拟 ID 按生成分组（v3.2.15 起渠道合为一组），每组用组配置生成，最后合并
     if (isVirtualTemplate) {
       const allEntries = getStatementSessionEntries(session, 'all');
-      const groupMap = new Map();
-      for (const entry of allEntries) {
-        const tid = entry.matchedTemplateId || 0;
-        if (!groupMap.has(tid)) groupMap.set(tid, []);
-        groupMap.get(tid).push(entry);
+      const generationGroups = groupStatementEntriesForGeneration(allEntries);
+      // v3.2.15（D2）：导入后若经模板包等途径使渠道余额方式不一致，导出全部同样阻断。
+      for (const group of generationGroups) {
+        const mismatch = findGenerationGroupBalanceModeMismatch(group);
+        if (mismatch) {
+          const error = buildChannelBalanceModeMismatchError(group, mismatch);
+          return createErrorResult({
+            step: kind === 'detail' ? '导出明细账单' : '导出余额账单',
+            message: error.message,
+            errorCode: error.code,
+            detailLines: mismatch,
+            templateName: session.templateName
+          });
+        }
       }
 
       const perGroupPaths = []; // [{detail, balance, warnings}]
       const exportBillDates = [];
       const skippedGroupNames = [];
       let lastGroupTemplateConfig = null;
-      for (const [tid, groupEntries] of groupMap) {
-        const templateConfig = getTemplateMappingConfig(tid);
+      for (const { entries: groupEntries, templateIds, templateConfig } of generationGroups) {
         if (!templateConfig) {
           appendActivityLogEntry({
             level: 'warn',
-            message: `导出时跳过模板组（templateId=${tid}）：模板已被删除，${groupEntries.length} 个文件的数据未包含在导出中`
+            message: `导出时跳过模板组（templateId=${templateIds.join('、')}）：模板已被删除，${groupEntries.length} 个文件的数据未包含在导出中`
           });
-          skippedGroupNames.push(`模板ID=${tid}（${groupEntries.length}个文件）`);
+          skippedGroupNames.push(`模板ID=${templateIds.join('、')}（${groupEntries.length}个文件）`);
           continue;
         }
         lastGroupTemplateConfig = templateConfig;
+        const tid = templateConfig.template.id;
 
         const groupGenConfig = buildStatementGenerationConfig({
           template: templateConfig.template,
@@ -10984,7 +11482,7 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
       if (targetPaths.length > 1) {
         const exportDateRange = buildDateRangeLabel(exportBillDates);
         const outputTag = kind === 'detail' ? 'COMMON' : 'BALANCE';
-        const mergedFileName = `${groupMap.size}-${outputTag}-${exportDateRange || getToday()}.xlsx`;
+        const mergedFileName = `${generationGroups.length}-${outputTag}-${exportDateRange || getToday()}.xlsx`;
         const { outputFilePath: mergedPath } = buildOutputFilePath({
           kind,
           outputFileName: scopedMergedOutputFileName(mergedFileName, 'all')
@@ -11892,9 +12390,47 @@ async function handleFilenameMappingImport(prepared) {
       });
     }
 
+    // ===== 步骤 3.5（v3.2.15）：渠道组校验 =====
+    // 按渠道分组后，任一渠道组内余额方式不一致，或渠道还有未处理的账户映射冲突，整批阻断，不进入大账号选择与生成。
+    const importGenerationGroups = groupStatementEntriesForGeneration(parentProvisionalEntries);
+    for (const group of importGenerationGroups) {
+      const mismatch = findGenerationGroupBalanceModeMismatch(group);
+      if (mismatch) {
+        const error = buildChannelBalanceModeMismatchError(group, mismatch);
+        return createErrorResult({
+          step: '导入网银明细文件',
+          message: error.message,
+          errorCode: error.code,
+          detailLines: mismatch,
+          context: error.context,
+          templateName: virtualTemplateName
+        });
+      }
+    }
+    const pendingConflictChannels = [];
+    const checkedChannelIds = new Set();
+    for (const [, matchedConfig] of perTemplateConfigCache) {
+      const channelId = Number(matchedConfig.template.channelId || 0);
+      if (!channelId || checkedChannelIds.has(channelId)) continue;
+      checkedChannelIds.add(channelId);
+      const conflicts = database.listStatementChannelAccountMappingConflicts(channelId);
+      conflicts.forEach((item) => pendingConflictChannels.push(item));
+    }
+    if (pendingConflictChannels.length > 0) {
+      return createErrorResult({
+        step: '导入网银明细文件',
+        message: `渠道「${pendingConflictChannels.map((item) => item.channelName).join('、')}」的账户映射还有待处理的冲突，请先在「账户映射」中为每个账户号选定一条设置后再导入`,
+        errorCode: 'CHANNEL_ACCOUNT_MAPPING_CONFLICT_PENDING',
+        detailLines: pendingConflictChannels.map((item) => (
+          `渠道「${item.channelName}」：账户号 ${item.conflicts.map((conflict) => conflict.bankAccountId).join('、')}`
+        )),
+        context: { channelIds: pendingConflictChannels.map((item) => item.channelId) },
+        templateName: virtualTemplateName
+      });
+    }
+
     // ===== 步骤 4：聚合大账号 =====
-    // 每个命中的模板自身 bigAccounts；若模板是子模板，向上追加主模板的 bigAccounts（沿用 v1.5.1 聚合思路）。
-    // 主模板如也被直接命中（即也在 perTemplateConfigCache 内），跳过重复追加。
+    // 每个命中的模板自身 bigAccounts；v3.2.15（A3）：命中渠道的任一子模板时，取该渠道全部子模板的 bigAccounts。
     const aggregatedBigAccounts = [];
     const addBigAccounts = (baList) => {
       if (!Array.isArray(baList)) return;
@@ -11916,18 +12452,16 @@ async function handleFilenameMappingImport(prepared) {
       }
     };
 
-    const parentIdsProcessed = new Set();
+    const channelIdsProcessed = new Set();
     for (const [, matchedConfig] of perTemplateConfigCache) {
       addBigAccounts(matchedConfig.bigAccounts);
-      const parentId = matchedConfig.template.parentTemplateId;
-      if (parentId
-        && !parentIdsProcessed.has(parentId)
-        && !perTemplateConfigCache.has(parentId)
-      ) {
-        parentIdsProcessed.add(parentId);
-        const parentConfig = getTemplateMappingConfig(parentId);
-        if (parentConfig) {
-          addBigAccounts(parentConfig.bigAccounts);
+      const channelId = Number(matchedConfig.template.channelId || 0);
+      if (channelId && !channelIdsProcessed.has(channelId)) {
+        channelIdsProcessed.add(channelId);
+        for (const sibling of database.listStatementChannelTemplates(channelId)) {
+          if (perTemplateConfigCache.has(sibling.id)) continue;
+          const siblingConfig = getTemplateMappingConfig(sibling.id);
+          if (siblingConfig) addBigAccounts(siblingConfig.bigAccounts);
         }
       }
     }
@@ -12351,6 +12885,17 @@ function registerFileHandlers() {
         });
       }
 
+      // v3.2.15（D8）：与按表头匹配的导入一致，渠道有待处理的账户映射冲突时阻断。
+      const singleTemplateChannelId = Number(templateConfig.template.channelId || 0);
+      if (singleTemplateChannelId && database.countStatementChannelAccountMappingConflicts(singleTemplateChannelId) > 0) {
+        return createErrorResult({
+          step: '导入网银明细文件',
+          message: `渠道「${templateConfig.template.channelName}」的账户映射还有待处理的冲突，请先在「账户映射」中为每个账户号选定一条设置后再导入`,
+          errorCode: 'CHANNEL_ACCOUNT_MAPPING_CONFLICT_PENDING',
+          context: { channelId: singleTemplateChannelId }
+        });
+      }
+
       const inputFilePaths = prepared.inputFilePaths;
       const session = statementImportSessionForInvocation(
         prepared,
@@ -12359,106 +12904,6 @@ function registerFileHandlers() {
       );
       const selectionResult = prepared.selectionResult;
 
-      // v1.5.1: 主模板导入 — 自动匹配子模板
-      if (templateConfig.template.isParent && !selectionResult.parentProvisionalEntries) {
-        const childTemplates = database.listChildTemplates(templateId);
-        const candidateTemplates = [templateConfig.template, ...childTemplates];
-
-        const fileTemplateMap = new Map(); // filePath → matchedTemplate
-        for (const filePath of selectionResult.filePaths) {
-          const matches = matchFileToTemplate(filePath, candidateTemplates);
-
-          if (matches.length === 0) {
-            return createErrorResult({
-              step: '导入网银明细文件',
-              message: `文件 ${path.basename(filePath)} 的表头不匹配主模板或任何子模板，请检查文件或模板配置`,
-              errorCode: 'TEMPLATE_HEADER_MISMATCH',
-              templateName: templateConfig.template.name
-            });
-          }
-
-          if (matches.length > 1) {
-            return createErrorResult({
-              step: '导入网银明细文件',
-              message: `文件 ${path.basename(filePath)} 的表头匹配到多个模板（${matches.map((t) => t.name).join('、')}），请检查模板配置`,
-              errorCode: 'TEMPLATE_HEADER_AMBIGUOUS',
-              templateName: templateConfig.template.name
-            });
-          }
-
-          fileTemplateMap.set(filePath, matches[0]);
-        }
-
-
-
-        // 如果所有文件都匹配到主模板自身，无需特殊处理——直接 fall through 到标准流程
-        const allMatchParent = [...fileTemplateMap.values()].every((t) => t.id === templateId);
-        if (!allMatchParent) {
-          // 有文件匹配到子模板——用各自模板配置解析，生成 provisionalFileEntries 后走标准流程
-          const parentProvisionalEntries = [];
-          const childConfigCache = new Map(); // templateId → matchedConfig
-          for (const [filePath, matchedTemplate] of fileTemplateMap) {
-            const matchedConfig = matchedTemplate.id === templateId
-              ? templateConfig
-              : (childConfigCache.get(matchedTemplate.id) || getTemplateMappingConfig(matchedTemplate.id));
-
-            if (!matchedConfig) {
-              return createErrorResult({
-                step: '导入网银明细文件',
-                message: `未找到匹配模板 ${matchedTemplate.name} 的配置`,
-                errorCode: 'TEMPLATE_NOT_FOUND',
-                context: { templateId: matchedTemplate.id }
-              });
-            }
-
-            if (matchedTemplate.id !== templateId) {
-              childConfigCache.set(matchedTemplate.id, matchedConfig);
-            }
-
-            const config = buildStatementGenerationConfig({
-              template: matchedConfig.template,
-              mappings: matchedConfig.exportMappings,
-              orderedTargetFields: matchedConfig.exportTargetFields,
-              allowManagedMerchantWithoutSelection: true
-            });
-
-            const merchantLookupFlags = buildManagedMerchantLookupFlags(matchedConfig.exportMappings);
-
-            parentProvisionalEntries.push({
-              filePath,
-              detailRows: buildMappedRowsForFile({ config, inputFilePath: filePath }),
-              matchedTemplateId: matchedTemplate.id,
-              matchedHeaders: matchedConfig.template.headers || [],
-              selfInputMerchant: merchantLookupFlags.selfInputMerchant,
-              skipDirectMerchantLookup: merchantLookupFlags.skipDirectMerchantLookup
-            });
-          }
-
-          // 聚合所有匹配到的模板的大账号配置 + 检查是否有子模板启用了 Balance
-          const aggregatedBigAccounts = templateConfig.bigAccounts.map((ba) => ({ ...ba }));
-          for (const [, childConfig] of childConfigCache) {
-            for (const ba of (childConfig.bigAccounts || [])) {
-              const mid = normalizeCell(ba.merchantId);
-              if (!mid) continue;
-              const existing = aggregatedBigAccounts.find((a) => normalizeCell(a.merchantId) === mid);
-              if (existing) {
-                const newCurrencies = (Array.isArray(ba.currencies) ? ba.currencies : [])
-                  .map((c) => normalizeCell(c)).filter((c) => c !== '');
-                const existingCurrencies = Array.isArray(existing.currencies) ? existing.currencies : [];
-                existing.currencies = Array.from(new Set([...existingCurrencies, ...newCurrencies]));
-                existing.isMultiCurrency = existing.currencies.length > 1;
-              } else {
-                aggregatedBigAccounts.push({ ...ba });
-              }
-            }
-          }
-
-          // 将解析结果注入到 selectionResult 上下文中，供标准流程使用
-          selectionResult.parentProvisionalEntries = parentProvisionalEntries;
-          selectionResult.aggregatedBigAccounts = aggregatedBigAccounts;
-        }
-        // fall through to standard flow below
-      }
 
       const effectiveBigAccounts = selectionResult.aggregatedBigAccounts || templateConfig.bigAccounts;
       const bigAccountOptions = expandBigAccountConfigurations(effectiveBigAccounts);

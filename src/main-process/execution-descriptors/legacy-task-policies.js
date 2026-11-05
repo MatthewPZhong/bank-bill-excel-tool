@@ -132,6 +132,9 @@ const archivePolicies = Object.freeze([
   createExcludePolicy('acquiringBillCurrency:sessionStatus', 'read-only-query'),
   createExcludePolicy('app-update:get-status', 'read-only-query'),
   createExcludePolicy('app:get-info', 'read-only-query'),
+  // v3.2.15：网银账单渠道只读查询
+  createExcludePolicy('channel:list', 'read-only-query'),
+  createExcludePolicy('channel-account-mapping:list-conflicts', 'read-only-query'),
   createExcludePolicy('archive-center:get-batch', 'read-only-query'),
   createExcludePolicy('archive-center:get-settings', 'read-only-query'),
   createExcludePolicy('archive-center:get-stats', 'read-only-query'),

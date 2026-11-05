@@ -86,9 +86,12 @@ function registerAppHandlers(releaseNotesState) {
 function createStore(value) {
   return {
     value,
+    lastUpgrade: null,
     writes: [],
     getReleaseNotesAcknowledgedVersion() { return this.value; },
-    setReleaseNotesAcknowledgedVersion(version) { this.writes.push(version); this.value = version; }
+    getReleaseNotesLastUpgrade() { return this.lastUpgrade; },
+    setReleaseNotesAcknowledgedVersion(version) { this.writes.push(version); this.value = version; },
+    recordReleaseNotesUpgrade(upgrade) { this.writes.push({ ...upgrade }); this.value = upgrade.toVersion; this.lastUpgrade = { ...upgrade }; }
   };
 }
 
@@ -118,23 +121,25 @@ test('app:get-info 附带更新说明，确认通道只接受待显示的当前�
     toVersion: '3.2.16',
     entries: NOTES
   });
+  assert.deepEqual(info.releaseNotes.history, { kind: 'upgrade', fromVersion: '3.2.14', toVersion: '3.2.16', entries: NOTES });
 
   const acknowledge = handlers.get('settings:acknowledge-release-notes');
   assert.deepEqual(plain(await acknowledge({}, '3.2.15')), { status: 'ignored' });
   assert.deepEqual(plain(await acknowledge({}, { version: '3.2.16' })), { status: 'ignored' });
   assert.deepEqual(store.writes, []);
   assert.deepEqual(plain(await acknowledge({}, '3.2.16')), { status: 'ok', acknowledgedVersion: '3.2.16' });
-  assert.deepEqual(store.writes, ['3.2.16']);
+  assert.deepEqual(store.writes, [{ fromVersion: '3.2.14', toVersion: '3.2.16' }]);
 
   const reloaded = plain(await handlers.get('app:get-info')());
   assert.equal(reloaded.releaseNotes.pending, null, '渲染层重载后不再弹出');
   assert.equal(reloaded.releaseNotes.current.version, '3.2.16');
+  assert.deepEqual(reloaded.releaseNotes.history.entries.map((entry) => entry.version), ['3.2.16', '3.2.15'], '设置入口仍显示本次升级区间');
 });
 
 test('判定失败（无状态）时 get-info 返回空说明，确认通道忽略', async () => {
   const handlers = registerAppHandlers(null);
   const info = plain(await handlers.get('app:get-info')());
-  assert.deepEqual(info.releaseNotes, { current: null, pending: null });
+  assert.deepEqual(info.releaseNotes, { current: null, pending: null, history: null });
   assert.deepEqual(plain(await handlers.get('settings:acknowledge-release-notes')({}, '3.2.16')), { status: 'ignored' });
 });
 

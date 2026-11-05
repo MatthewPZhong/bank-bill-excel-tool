@@ -422,3 +422,46 @@ test.describe('getReleaseNotesAcknowledgedVersion / setReleaseNotesAcknowledgedV
     assert.equal(settingsRepo.getReleaseNotesAcknowledgedVersion(db), null);
   });
 });
+
+// ========================================================================
+// v3.2.15 更新说明的最近一次升级记录
+// ========================================================================
+
+test.describe('getReleaseNotesLastUpgrade / recordReleaseNotesUpgrade', () => {
+  test('未记录 → null', () => {
+    assert.equal(settingsRepo.getReleaseNotesLastUpgrade(db), null);
+  });
+
+  test('确认版本与升级记录同时写入，来源未知记 null', () => {
+    settingsRepo.recordReleaseNotesUpgrade(db, { fromVersion: '3.2.14', toVersion: '3.2.15' });
+    assert.equal(settingsRepo.getReleaseNotesAcknowledgedVersion(db), '3.2.15');
+    assert.deepEqual(settingsRepo.getReleaseNotesLastUpgrade(db), { fromVersion: '3.2.14', toVersion: '3.2.15' });
+    settingsRepo.recordReleaseNotesUpgrade(db, { fromVersion: null, toVersion: '3.2.16' });
+    assert.equal(settingsRepo.getReleaseNotesAcknowledgedVersion(db), '3.2.16');
+    assert.deepEqual(settingsRepo.getReleaseNotesLastUpgrade(db), { fromVersion: null, toVersion: '3.2.16' });
+  });
+
+  test('参数不合格 → 抛错，两个键都不写入', () => {
+    for (const upgrade of [{ toVersion: '' }, { toVersion: null }, { fromVersion: '', toVersion: '3.2.15' }, { fromVersion: 3214, toVersion: '3.2.15' }]) {
+      assert.throws(() => settingsRepo.recordReleaseNotesUpgrade(db, upgrade), /release_notes_last_upgrade/);
+    }
+    assert.equal(settingsRepo.getReleaseNotesAcknowledgedVersion(db), null);
+    assert.equal(settingsRepo.getReleaseNotesLastUpgrade(db), null);
+  });
+
+  test('写入中途失败时回滚，不留下只写一半的记录', () => {
+    settingsRepo.recordReleaseNotesUpgrade(db, { fromVersion: '3.2.13', toVersion: '3.2.14' });
+    db.exec(`CREATE TRIGGER reject_last_upgrade BEFORE UPDATE ON app_settings
+      WHEN NEW.setting_key = 'release_notes_last_upgrade' BEGIN SELECT RAISE(ABORT, '模拟写入失败'); END;`);
+    assert.throws(() => settingsRepo.recordReleaseNotesUpgrade(db, { fromVersion: '3.2.14', toVersion: '3.2.15' }), /模拟写入失败/);
+    assert.equal(settingsRepo.getReleaseNotesAcknowledgedVersion(db), '3.2.14');
+    assert.deepEqual(settingsRepo.getReleaseNotesLastUpgrade(db), { fromVersion: '3.2.13', toVersion: '3.2.14' });
+  });
+
+  test('存储值损坏 → null', () => {
+    for (const raw of ['{', '[]', '"3.2.15"', 'null']) {
+      settingsRepo.setSetting(db, settingsRepo.RELEASE_NOTES_LAST_UPGRADE_KEY, raw);
+      assert.equal(settingsRepo.getReleaseNotesLastUpgrade(db), null, raw);
+    }
+  });
+});

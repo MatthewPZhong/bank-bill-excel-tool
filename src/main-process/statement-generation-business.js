@@ -27,7 +27,7 @@ const {
   mergeMappedDetailRows,
   resolveSinglePreparedFieldValue
 } = require('./statement-session');
-const { createStatementGenerationHelpers } = require('./statement-generation');
+const { createStatementGenerationHelpers, statementOutputName } = require('./statement-generation');
 
 function pad(value) {
   return String(value).padStart(2, '0');
@@ -407,13 +407,13 @@ function createGenerationHelpers(options) {
       }
       balanceSeedStatus = scanBalanceSeedStatus({
         detailRows: effectiveDetailRows,
-        templateName: config.template.name
+        templateName: statementOutputName(config)
       }, storageRoot);
-      const templateBankName = splitTemplateName(config.template.name).bankName;
+      const templateBankName = splitTemplateName(statementOutputName(config)).bankName;
       const balanceAdjustments = readBalanceAdjustments(storageRoot, templateBankName);
       const balanceResult = deriveBalanceRecords({
         detailRows: effectiveDetailRows,
-        templateName: config.template.name,
+        templateName: statementOutputName(config),
         balanceTemplateFields,
         mode: preparedBatch.balanceMode,
         balanceAdjustments,
@@ -475,8 +475,8 @@ function createGenerationHelpers(options) {
           type: 'balance-seed-required',
           message: error.message,
           prompt: {
-            templateName: config.template.name,
-            bankName: error.context?.bankName || splitTemplateName(config.template.name).bankName,
+            templateName: statementOutputName(config),
+            bankName: error.context?.bankName || splitTemplateName(statementOutputName(config)).bankName,
             merchantId: promptMerchantId,
             currency: promptCurrency,
             targetBillDate: normalizeCell(error.context?.targetBillDate),
@@ -550,7 +550,7 @@ function createGenerationHelpers(options) {
       result.detail = {
         filePath: artifactPaths.detail,
         fileName: path.basename(artifactPaths.detail),
-        templateName: preparedGroups[0].config.template.name
+        templateName: statementOutputName(preparedGroups[0].config)
       };
     }
 
@@ -568,7 +568,7 @@ function createGenerationHelpers(options) {
         result.balance = {
           filePath: artifactPaths.balance,
           fileName: path.basename(artifactPaths.balance),
-          templateName: preparedGroups[0].config.template.name
+          templateName: statementOutputName(preparedGroups[0].config)
         };
       }
     }

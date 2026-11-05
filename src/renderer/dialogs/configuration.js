@@ -151,8 +151,8 @@
       // PRD Q5 "普通模板"：排除子模板、主模板、虚拟 ID（虚拟 ID 本就不在 services.getTemplates() 里）
       const regularTemplates = (services.getTemplates() || []).filter((template) => {
         if (!template) return false;
-        if (template.isParent) return false;
-        if (template.parentTemplateId) return false;
+        // v3.2.15（A7）：属于渠道的模板不在月度余额导出范围内（与主进程 isRegularTemplate 一致）。
+        if (template.channelId) return false;
         return true;
       });
 
@@ -783,8 +783,9 @@
 
       const input = dialog.querySelector('.rename-template-input');
       const writeScope = createDialogWriteScope(overlay, dialog);
+      const managerOptions = { expandChannelId: template.channelId || null };
       dialog.querySelector('.icon-close').addEventListener('click', () => {
-        replaceModal(overlay, () => createTemplateManagerDialog());
+        replaceModal(overlay, () => createTemplateManagerDialog(managerOptions));
       });
       dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
         const handle = writeScope.begin();
@@ -801,7 +802,63 @@
           setStatus(result.message, 'error');
         } finally { writeScope.finish(handle); }
         if (!writeScope.isCurrent(handle)) return;
-        if (result.status === 'success') replaceModal(handle, () => createTemplateManagerDialog());
+        if (result.status === 'success') replaceModal(handle, () => createTemplateManagerDialog(managerOptions));
+        else pushAlert(overlay, () => createAlertDialog(result.message));
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // v3.2.15（§4.6、A6）：渠道重命名；渠道名决定输出身份，改名后按新名称的银行段读取种子与余额调整。
+    function createChannelRenameDialog(channel) {
+      const { setStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manual-balance-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">重命名渠道</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="manual-balance-form">
+          <label class="manual-balance-row">
+            <span class="manual-balance-label">当前渠道名称</span>
+            <input class="mapping-text-input manual-balance-input" type="text" value="${escapeHtml(channel.name)}" disabled />
+          </label>
+          <label class="manual-balance-row">
+            <span class="manual-balance-label">新渠道名称</span>
+            <input class="mapping-text-input manual-balance-input rename-channel-input" type="text" spellcheck="false" value="${escapeHtml(channel.name)}" />
+          </label>
+          <div class="manual-balance-hint channel-rename-hint">渠道下子模板的账单按渠道名输出。改名后，Channel 列、余额账单的银行名称与所在地、导出文件名随之改变，余额种子与余额附加值改按新名称的银行段读取。已有子模板不会随之改名。</div>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="done">完成</button>
+        </div>
+      `;
+
+      const input = dialog.querySelector('.rename-channel-input');
+      const writeScope = createDialogWriteScope(overlay, dialog);
+      const managerOptions = { expandChannelId: channel.id };
+      dialog.querySelector('.icon-close').addEventListener('click', () => {
+        replaceModal(overlay, () => createTemplateManagerDialog(managerOptions));
+      });
+      dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
+        const handle = writeScope.begin();
+        if (!handle) return;
+        let result;
+        try {
+          result = await api.statementChannels.rename({ channelId: channel.id, name: input.value });
+          setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
+            errorReportReady: Boolean(result.errorReportReady)
+          });
+          if (result.status === 'success') await refreshTemplates();
+        } catch (error) {
+          result = { status: 'error', message: error.message || '重命名渠道失败' };
+          setStatus(result.message, 'error');
+        } finally { writeScope.finish(handle); }
+        if (!writeScope.isCurrent(handle)) return;
+        if (result.status === 'success') replaceModal(handle, () => createTemplateManagerDialog(managerOptions));
         else pushAlert(overlay, () => createAlertDialog(result.message));
       });
 
@@ -2616,11 +2673,11 @@
       return overlay;
     }
 
-    function renderTemplateTableRows(tableBody) {
+    function renderTemplateTableRows(tableBody, { expandChannelId = null } = {}) {
       let mappingRequest = 0;
       tableBody.innerHTML = '';
 
-      if (!services.getTemplates().length) {
+      if (!services.getTemplates().length && !services.getStatementChannels().length) {
         const emptyRow = document.createElement('tr');
         emptyRow.innerHTML = `
           <td class="empty-cell">暂无模板</td>
@@ -2689,7 +2746,9 @@
                 } finally { writeScope.finish(handle); }
                 if (!succeeded || !writeScope.isCurrent(handle)) return;
                 const closed = closeModal(handle, { status: 'submitted' });
-                if (closed.status === 'closed' && manager.isTop()) replaceModal(manager, () => createTemplateManagerDialog());
+                if (closed.status === 'closed' && manager.isTop()) {
+                  replaceModal(manager, () => createTemplateManagerDialog({ expandChannelId: template.channelId || null }));
+                }
               }
             });
             writeScope = createDialogWriteScope(confirmation, confirmation);
@@ -2700,59 +2759,154 @@
         return row;
       }
 
-      // 分类：主模板、子模板（按 parentTemplateId 分组）、普通模板
-      const parentTemplates = services.getTemplates().filter((t) => t.isParent);
-      const childByParent = new Map();
-      const childTemplateIds = new Set();
-      services.getTemplates().forEach((t) => {
-        if (t.parentTemplateId) {
-          childTemplateIds.add(t.id);
-          if (!childByParent.has(t.parentTemplateId)) {
-            childByParent.set(t.parentTemplateId, []);
+      // v3.2.15（§4.3）：渠道行沿用原主模板行的展开/折叠样式，子模板在折叠栏中；普通模板在后。
+      function summarizeChannelBigAccounts(children) {
+        const summaries = Array.from(new Set(children
+          .map((child) => child.bigAccountSummary || '未设置')
+          .filter((summary) => summary !== '未设置')));
+        return summaries.length ? summaries.join('、') : '未设置';
+      }
+
+      async function runChannelWrite(manager, action) {
+        let result;
+        try {
+          result = await action();
+          if (result.status === 'cancelled') return result;
+          setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
+            errorReportReady: Boolean(result.errorReportReady)
+          });
+          if (result.status === 'success') {
+            await refreshTemplates();
+          } else if (manager.isOpen() && manager.isTop()) {
+            pushAlert(tableBody.closest('.modal-overlay'), () => createAlertDialog(result.message));
           }
-          childByParent.get(t.parentTemplateId).push(t);
+        } catch (error) {
+          result = { status: 'error', message: error.message || '操作失败' };
+          setStatus(result.message, 'error');
+          if (manager.isOpen() && manager.isTop()) {
+            pushAlert(tableBody.closest('.modal-overlay'), () => createAlertDialog(result.message));
+          }
+        }
+        return result;
+      }
+
+      function createChannelRow(channel, children) {
+        const bigAccountSummary = summarizeChannelBigAccounts(children);
+        const row = document.createElement('tr');
+        row.className = 'template-channel-row';
+        row.dataset.channelId = String(channel.id);
+        row.innerHTML = `
+          <td>${escapeHtml(channel.name)}</td>
+          <td class="manager-big-account-cell">
+            <span class="manager-big-account-summary" title="${escapeHtml(bigAccountSummary)}">${escapeHtml(bigAccountSummary)}</span>
+          </td>
+          <td class="manager-action-cell">
+            <div class="manager-row-actions">
+              <button class="text-action" type="button" data-action="import-child">导入子模板</button>
+              <button class="text-action" type="button" data-action="rename">重命名</button>
+              <button class="text-action danger" type="button" data-action="delete">删除</button>
+            </div>
+          </td>
+        `;
+        let importing = false;
+        row.querySelector('[data-action="import-child"]').addEventListener('click', async () => {
+          const manager = modalBridge.host.getHandle(tableBody.closest('.modal-overlay'));
+          if (!manager?.isTop() || importing) return;
+          importing = true;
+          try {
+            const result = await runChannelWrite(manager, () => api.templates.importChild(channel.id));
+            if (result.status === 'success' && manager.isOpen() && manager.isTop()) {
+              replaceModal(manager, () => createTemplateManagerDialog({ expandChannelId: channel.id }));
+            }
+          } finally {
+            importing = false;
+          }
+        });
+        row.querySelector('[data-action="rename"]').addEventListener('click', () => {
+          openModal(() => createChannelRenameDialog(channel));
+        });
+        row.querySelector('[data-action="delete"]').addEventListener('click', () => {
+          const manager = modalBridge.host.getHandle(tableBody.closest('.modal-overlay'));
+          if (!manager?.isTop()) return;
+          pushModal(manager, () => {
+            let writeScope;
+            const confirmation = createConfirmDialog({
+              message: `确认删除渠道「${channel.name}」？删除后渠道下的 ${children.length} 个子模板恢复为普通模板，子模板及其映射不会删除，渠道的账户映射会复制给每个子模板。`,
+              confirmText: '确认删除', cancelText: '否',
+              onConfirm: async () => {
+                const handle = writeScope.begin();
+                if (!handle) return;
+                let result;
+                try {
+                  result = await api.statementChannels.delete(channel.id);
+                  setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
+                    errorReportReady: Boolean(result.errorReportReady)
+                  });
+                  if (result.status === 'success') await refreshTemplates();
+                } catch (error) {
+                  result = { status: 'error', message: error.message || '删除渠道失败' };
+                  setStatus(result.message, 'error');
+                } finally { writeScope.finish(handle); }
+                if (!writeScope.isCurrent(handle)) return;
+                if (result.status !== 'success') {
+                  pushAlert(confirmation, () => createAlertDialog(result.message));
+                  return;
+                }
+                const closed = closeModal(handle, { status: 'submitted' });
+                if (closed.status === 'closed' && manager.isTop()) replaceModal(manager, () => createTemplateManagerDialog());
+              }
+            });
+            writeScope = createDialogWriteScope(confirmation, confirmation);
+            return confirmation;
+          });
+        });
+        return row;
+      }
+
+      const allTemplates = services.getTemplates();
+      const childrenByChannel = new Map();
+      allTemplates.forEach((t) => {
+        if (!t.channelId) return;
+        if (!childrenByChannel.has(t.channelId)) childrenByChannel.set(t.channelId, []);
+        childrenByChannel.get(t.channelId).push(t);
+      });
+      const channels = services.getStatementChannels();
+      const knownChannelIds = new Set(channels.map((channel) => channel.id));
+      childrenByChannel.forEach((children, channelId) => {
+        if (!knownChannelIds.has(channelId)) {
+          channels.push({ id: channelId, name: children[0].channelName || '', templateCount: children.length });
         }
       });
-      const normalTemplates = services.getTemplates().filter((t) => !t.isParent && !t.parentTemplateId);
+      const normalTemplates = allTemplates.filter((t) => !t.channelId);
 
-      // 先渲染主模板（带展开/折叠）
-      parentTemplates.forEach((parent) => {
-        const children = childByParent.get(parent.id) || [];
-        const parentRow = createTemplateRow(parent);
+      channels.forEach((channel) => {
+        const children = (childrenByChannel.get(channel.id) || []).slice().sort((left, right) => left.id - right.id);
+        const channelRow = createChannelRow(channel, children);
+        const nameCell = channelRow.querySelector('td');
+        const toggleBtn = document.createElement('span');
+        toggleBtn.className = 'template-toggle-btn';
+        toggleBtn.style.cursor = 'pointer';
+        nameCell.insertBefore(toggleBtn, nameCell.firstChild);
+        tableBody.appendChild(channelRow);
 
         if (children.length > 0) {
-          const nameCell = parentRow.querySelector('td');
-          const toggleBtn = document.createElement('span');
-          toggleBtn.className = 'template-toggle-btn';
-          toggleBtn.textContent = '▶ ';
-          toggleBtn.style.cursor = 'pointer';
-          nameCell.insertBefore(toggleBtn, nameCell.firstChild);
-
           const childRows = children.map((child) => createTemplateRow(child, { isChild: true }));
-
-          let expanded = false;
-          toggleBtn.addEventListener('click', () => {
-            expanded = !expanded;
+          let expanded = Number(expandChannelId) === Number(channel.id);
+          const applyExpanded = () => {
             toggleBtn.textContent = expanded ? '▼ ' : '▶ ';
             childRows.forEach((cr) => {
               cr.style.display = expanded ? '' : 'none';
             });
+          };
+          toggleBtn.addEventListener('click', () => {
+            expanded = !expanded;
+            applyExpanded();
           });
-
-          tableBody.appendChild(parentRow);
-          childRows.forEach((cr) => {
-            cr.style.display = 'none';
-            tableBody.appendChild(cr);
-          });
+          childRows.forEach((cr) => tableBody.appendChild(cr));
+          applyExpanded();
         } else {
-          const nameCell = parentRow.querySelector('td');
-          const toggleBtn = document.createElement('span');
-          toggleBtn.className = 'template-toggle-btn';
           toggleBtn.textContent = '▶ ';
-          toggleBtn.style.cursor = 'pointer';
           toggleBtn.style.opacity = '0.3';
-          nameCell.insertBefore(toggleBtn, nameCell.firstChild);
-          tableBody.appendChild(parentRow);
         }
       });
 
@@ -2762,7 +2916,7 @@
       });
     }
 
-    function createTemplateManagerDialog() {
+    function createTemplateManagerDialog({ expandChannelId = null } = {}) {
       const { setStatus, applyStatementResult, applyManualBalancePromptStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
       const overlay = createOverlay();
       const dialog = document.createElement('div');
@@ -2813,7 +2967,7 @@
       }
       dialog.querySelector('[data-action="import-bundle"]').addEventListener('click', () => runBundleAction('import'));
       dialog.querySelector('[data-action="export-bundle"]').addEventListener('click', () => runBundleAction('export'));
-      renderTemplateTableRows(dialog.querySelector('tbody'));
+      renderTemplateTableRows(dialog.querySelector('tbody'), { expandChannelId });
       overlay.appendChild(dialog);
       return overlay;
     }
@@ -2871,17 +3025,17 @@
         ? { signedAmountSourceField: String(payload.billSplitMeta.signedAmountSourceField || '') }
         : { signedAmountSourceField: '' };
       dialog.className = 'modal-card mapping-card';
-      const templateIsParent = Boolean(payload.template.isParent);
-      const templateParentId = payload.template.parentTemplateId || null;
-      let unparentConfirmed = false;
+      // v3.2.15（§4.2）：【渠道存在多个子模板】新建同名渠道；【设为子模板】选择渠道；两者互斥。
+      //   打开属于渠道的模板时，【设为子模板】为勾选状态并选中所属渠道。
+      const templateChannelId = Number(payload.template.channelId || 0) || null;
       dialog.innerHTML = `
         <div class="dialog-header">
           <div class="dialog-title">映射关系管理</div>
           <div class="dialog-header-checkboxes">
-            <label class="dialog-checkbox-label"><input type="checkbox" data-role="is-parent" ${templateIsParent ? 'checked' : ''}>设为主模板</label>
-            <label class="dialog-checkbox-label"><input type="checkbox" data-role="is-child" ${templateParentId ? 'checked' : ''}>设为子模板</label>
-            <span class="dialog-child-parent-select-wrapper" ${templateParentId ? '' : 'style="display:none"'}>
-              主模板 <select data-role="parent-select"></select>
+            <label class="dialog-checkbox-label"><input type="checkbox" data-role="create-channel">渠道存在多个子模板</label>
+            <label class="dialog-checkbox-label"><input type="checkbox" data-role="is-child" ${templateChannelId ? 'checked' : ''}>设为子模板</label>
+            <span class="dialog-child-parent-select-wrapper" ${templateChannelId ? '' : 'style="display:none"'}>
+              渠道 <select data-role="channel-select"></select>
             </span>
           </div>
           <button class="icon-close" type="button">×</button>
@@ -2902,10 +3056,10 @@
         </div>
       `;
 
-      const isParentCheckbox = dialog.querySelector('[data-role="is-parent"]');
+      const createChannelCheckbox = dialog.querySelector('[data-role="create-channel"]');
       const isChildCheckbox = dialog.querySelector('[data-role="is-child"]');
-      const parentSelectWrapper = dialog.querySelector('.dialog-child-parent-select-wrapper');
-      const parentSelect = dialog.querySelector('[data-role="parent-select"]');
+      const channelSelectWrapper = dialog.querySelector('.dialog-child-parent-select-wrapper');
+      const channelSelect = dialog.querySelector('[data-role="channel-select"]');
       let mappingWriteEpoch = 0;
       let billSplitRowsOpenRequest = 0;
       const mappingWriteScope = createDialogWriteScope(overlay, dialog);
@@ -2915,62 +3069,49 @@
         return handle;
       } };
 
-      // 填充主模板下拉框
-      const allTemplates = services.getTemplates() || [];
-      const parentTemplates = allTemplates.filter((t) => t.isParent && t.id !== payload.template.id);
-      parentTemplates.forEach((t) => {
+      // 填充渠道下拉框（全部渠道）
+      const channelOptions = services.getStatementChannels() || [];
+      if (templateChannelId && !channelOptions.some((channel) => Number(channel.id) === templateChannelId)) {
+        channelOptions.push({ id: templateChannelId, name: payload.template.channelName || '' });
+      }
+      channelOptions.forEach((channel) => {
         const opt = document.createElement('option');
-        opt.value = String(t.id);
-        opt.textContent = t.name;
-        if (templateParentId && String(t.id) === String(templateParentId)) {
+        opt.value = String(channel.id);
+        opt.textContent = channel.name;
+        if (templateChannelId && Number(channel.id) === templateChannelId) {
           opt.selected = true;
         }
-        parentSelect.appendChild(opt);
+        channelSelect.appendChild(opt);
       });
+      if (!templateChannelId) channelSelect.selectedIndex = channelOptions.length ? 0 : -1;
 
-      // 取消主模板身份时的确认（有子模板的主模板才需要）
-      async function confirmUnparentIfNeeded(handle) {
-        if (!templateIsParent || unparentConfirmed) return true;
-        const children = await api.templates.listChildren(payload.template.id);
-        if (!writeScope.isCurrent(handle)) return false;
-        if (children && children.length > 0) {
-          const confirmed = confirm(`该模板下有 ${children.length} 个子模板，取消主模板身份后子模板将恢复为普通模板，是否继续？`);
-          if (!confirmed) return false;
+      createChannelCheckbox.addEventListener('change', () => {
+        if (createChannelCheckbox.checked) {
+          isChildCheckbox.checked = false;
+          channelSelectWrapper.style.display = 'none';
         }
-        unparentConfirmed = true;
-        return true;
+      });
+
+      isChildCheckbox.addEventListener('change', () => {
+        if (isChildCheckbox.checked) {
+          createChannelCheckbox.checked = false;
+          channelSelectWrapper.style.display = '';
+        } else {
+          channelSelectWrapper.style.display = 'none';
+        }
+      });
+
+      // 保存时随映射提交的渠道归属；缺省（不改归属）返回 null。
+      function buildChannelAssignment() {
+        if (createChannelCheckbox.checked) return { mode: 'create' };
+        if (isChildCheckbox.checked) {
+          const selectedChannelId = Number(channelSelect.value || 0);
+          if (!selectedChannelId) return { error: '请选择渠道' };
+          if (selectedChannelId === templateChannelId) return null;
+          return { mode: 'join', channelId: selectedChannelId };
+        }
+        return templateChannelId ? { mode: 'none' } : null;
       }
-
-      // 主/子身份读取确认与保存共享提交门；确认未结束不能保存中间状态。
-      isParentCheckbox.addEventListener('change', async () => {
-        const handle = writeScope.begin();
-        if (!handle) return;
-        try {
-          if (isParentCheckbox.checked) {
-            isChildCheckbox.checked = false;
-            parentSelectWrapper.style.display = 'none';
-          } else {
-            const ok = await confirmUnparentIfNeeded(handle);
-            if (writeScope.isCurrent(handle) && !ok) isParentCheckbox.checked = true;
-          }
-        } finally { writeScope.finish(handle); }
-      });
-
-      isChildCheckbox.addEventListener('change', async () => {
-        const handle = writeScope.begin();
-        if (!handle) return;
-        try {
-          if (isChildCheckbox.checked) {
-            const ok = await confirmUnparentIfNeeded(handle);
-            if (!writeScope.isCurrent(handle)) return;
-            if (!ok) { isChildCheckbox.checked = false; return; }
-            isParentCheckbox.checked = false;
-            parentSelectWrapper.style.display = '';
-          } else {
-            parentSelectWrapper.style.display = 'none';
-          }
-        } finally { writeScope.finish(handle); }
-      });
 
       const tbody = dialog.querySelector('tbody');
       const rowByField = new Map();
@@ -3193,7 +3334,8 @@
             pushModal(overlay, () => createBigAccountManagerDialog({
               bigAccounts: bigAccountsForDialog,
               templateId: payload.template.id,
-              templateName: payload.template.name,
+              // v3.2.15（D2）：余额附加值归属渠道，渠道子模板按渠道名读写。
+              templateName: payload.template.channelName || payload.template.name,
               onDone: (nextBigAccounts) => {
                 currentBigAccounts = cloneBigAccountItems(nextBigAccounts);
                 bigAccountsLoadedWithOwn = true;
@@ -3526,33 +3668,21 @@
       syncMerchantIdDependentRows();
 
       dialog.querySelector('.icon-close').addEventListener('click', () => {
-        replaceModal(overlay, () => createTemplateManagerDialog());
+        replaceModal(overlay, () => createTemplateManagerDialog({ expandChannelId: templateChannelId }));
       });
 
       dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
-        // v1.5.2 需求 1：子/主模板名校验（必须在 saveMappings 之前）
-        // 规则 D1：子模板名需包含主模板名字符串（含相等）；未勾子模板或未选主模板均跳过校验
-        if (isChildCheckbox.checked && parentSelect.value) {
-          const parentId = parentSelect.value;
-          const parentTemplate = (services.getTemplates() || []).find((t) => String(t.id) === String(parentId));
-          const currentName = String(payload.template.name || '');
-          const parentName = String(parentTemplate?.name || '');
-          if (!parentName || !currentName.includes(parentName)) {
-            pushAlert(overlay, () => createAlertDialog('子模板与主模板模板名匹配不上，请检查。', {
-              onConfirm: null
-            }));
-            return;
-          }
+        // v3.2.15（D3）：不再校验子模板名包含渠道名。
+        const channelAssignment = buildChannelAssignment();
+        if (channelAssignment && channelAssignment.error) {
+          pushAlert(overlay, () => createAlertDialog(channelAssignment.error, { onConfirm: null }));
+          return;
         }
 
         const handle = writeScope.begin();
         if (!handle) return;
         const draftBigAccounts = cloneBigAccountItems(currentBigAccounts);
         const draftMappings = collectMappingDraftFromTable(tbody);
-        const wantParent = isParentCheckbox.checked;
-        const wantChild = isChildCheckbox.checked;
-        const selectedParentId = parentSelect.value ? Number(parentSelect.value) : null;
-        const unparentWasConfirmed = unparentConfirmed;
 
         const saveMappings = async (mappings) => {
           // v1.5.3 R2 round 3 (Codex Finding 5)：透传 preserveOwn
@@ -3563,7 +3693,8 @@
             mappings,
             bigAccounts: draftBigAccounts,
             fixedAssignments: currentFixedAssignments,
-            preserveOwn: !bigAccountsLoadedWithOwn
+            preserveOwn: !bigAccountsLoadedWithOwn,
+            ...(channelAssignment ? { channel: channelAssignment } : {})
           });
 
           setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
@@ -3571,44 +3702,23 @@
           });
 
           if (result.status === 'success') {
-            // 保存主/子模板状态
-            const wasParent = templateIsParent;
-            const wasChild = Boolean(templateParentId);
-
-            if (wantParent !== wasParent) {
-              if (!wantParent && wasParent && !unparentWasConfirmed) {
-                // 取消主模板 — 检查是否有子模板（checkbox 层已确认则跳过）
-                const children = await api.templates.listChildren(payload.template.id);
-                if (children && children.length > 0) {
-                  if (!writeScope.isCurrent(handle)) { await refreshTemplates(); return; }
-                  const confirmed = confirm(`该主模板下有 ${children.length} 个子模板，取消主模板身份后，子模板将恢复为普通模板。是否确认？`);
-                  if (!confirmed) {
-                    await refreshTemplates();
-                    return true;
-                  }
-                }
-              }
-              await api.templates.setParentStatus(payload.template.id, wantParent);
-            }
-
-            if (wantChild) {
-              if (selectedParentId !== templateParentId) {
-                await api.templates.setChildParent(payload.template.id, selectedParentId);
-              }
-            } else if (wasChild && !wantChild) {
-              await api.templates.setChildParent(payload.template.id, null);
-            }
-
+            savedChannelId = result.template ? (Number(result.template.channelId || 0) || null) : templateChannelId;
             await refreshTemplates();
             return true;
           }
 
+          if (Array.isArray(result.detailLines) && result.detailLines.length) {
+            const alertHtml = [result.message, ...result.detailLines].map((line) => escapeHtml(line)).join('<br>');
+            pushAlert(overlay, () => createAlertDialog(alertHtml, { onConfirm: null }));
+            return false;
+          }
           pushAlert(overlay, () => createAlertDialog(result.message, {
             onConfirm: null
           }));
         };
 
         let returnToManager = false;
+        let savedChannelId = templateChannelId;
         try {
           returnToManager = await saveMappings(draftMappings);
         } catch (error) {
@@ -3616,7 +3726,9 @@
           setStatus('模板映射保存失败，请查看控制台', 'error');
           pushAlert(overlay, () => createAlertDialog(error.message || '模板映射保存失败'));
         } finally { writeScope.finish(handle); }
-        if (returnToManager && writeScope.isCurrent(handle)) replaceModal(handle, () => createTemplateManagerDialog());
+        if (returnToManager && writeScope.isCurrent(handle)) {
+          replaceModal(handle, () => createTemplateManagerDialog({ expandChannelId: savedChannelId }));
+        }
       });
 
       dialog.addEventListener('mousedown', (event) => {
@@ -5065,18 +5177,154 @@
       return overlay;
     }
 
+    // v3.2.15：账户映射的“渠道 / 模板”选项。payload.channels 缺省时按模板上的渠道字段推导。
+    function buildAccountMappingScopeOptions(payload) {
+      const templates = Array.isArray(payload.templates) ? payload.templates : [];
+      const channels = Array.isArray(payload.channels) && payload.channels.length
+        ? payload.channels.slice()
+        : [];
+      const knownChannelIds = new Set(channels.map((channel) => Number(channel.id)));
+      templates.forEach((template) => {
+        const channelId = Number(template.channelId || 0);
+        if (channelId && !knownChannelIds.has(channelId)) {
+          knownChannelIds.add(channelId);
+          channels.push({ id: channelId, name: template.channelName || '' });
+        }
+      });
+      return [
+        ...channels.map((channel) => ({
+          key: `channel:${channel.id}`,
+          label: `${channel.name}（渠道）`,
+          scope: { channelId: Number(channel.id) }
+        })),
+        ...templates.filter((template) => !template.channelId).map((template) => ({
+          key: `template:${template.id}`,
+          label: template.name,
+          scope: { templateId: Number(template.id) }
+        }))
+      ];
+    }
+
+    // 从子模板进入时默认选中其渠道。
+    function resolveAccountMappingScopeKey(scope, templates) {
+      if (!scope) return '';
+      if (scope.channelId) return `channel:${Number(scope.channelId)}`;
+      const template = templates.find((item) => Number(item.id) === Number(scope.templateId));
+      if (template && template.channelId) return `channel:${Number(template.channelId)}`;
+      return scope.templateId ? `template:${Number(scope.templateId)}` : '';
+    }
+
+    // v3.2.15（D8、§4.7）：渠道账户映射冲突——每个账户号单选一条候选；全部选定后才能确认，关闭不改数据。
+    function createChannelAccountMappingConflictDialog({ channels = [], onDone, onCancel } = {}) {
+      const { setStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manager-card account-card channel-conflict-card';
+      const describeCandidate = (candidate) => {
+        const currencyLabel = candidate.noCurrency ? `无币种，兜底币种 ${candidate.currency}` : '取账单币种';
+        const sources = (candidate.sourceTemplateNames || []).join('、') || '（未知来源）';
+        return `${candidate.clearingAccountId}（${currencyLabel}），来自：${sources}`;
+      };
+      const sections = channels.map((channel, channelIndex) => `
+        <div class="channel-conflict-section" data-channel-id="${escapeHtml(String(channel.channelId))}">
+          <div class="channel-conflict-title">渠道「${escapeHtml(channel.channelName)}」</div>
+          <table class="data-table">
+            <thead><tr><th>网银账单账户号</th><th>选择一条设置（清结算系统银行账号、币种与来源子模板）</th></tr></thead>
+            <tbody>
+              ${channel.conflicts.map((conflict, conflictIndex) => `
+                <tr data-bank-account-id="${escapeHtml(conflict.bankAccountId)}">
+                  <td>${escapeHtml(conflict.bankAccountId)}</td>
+                  <td>${conflict.candidates.map((candidate, candidateIndex) => `
+                    <label class="channel-conflict-option">
+                      <input type="radio" name="conflict-${channelIndex}-${conflictIndex}" value="${candidateIndex}">
+                      ${escapeHtml(describeCandidate(candidate))}
+                    </label>`).join('')}
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`).join('');
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">处理渠道账户映射冲突</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="channel-conflict-hint">升级时，同一渠道下的子模板对同一账户号设置了不同的清结算账号或币种。请为每个账户号选定一条，处理前该渠道无法生成账单。</div>
+        <div class="table-wrapper">${sections}</div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="done" disabled>确认</button>
+        </div>
+      `;
+      const doneButton = dialog.querySelector('[data-action="done"]');
+      const radios = Array.from(dialog.querySelectorAll('input[type="radio"]'));
+      const conflictRows = Array.from(dialog.querySelectorAll('tr[data-bank-account-id]'));
+      const allChosen = () => conflictRows.every((row) => row.querySelector('input[type="radio"]:checked'));
+      radios.forEach((radio) => radio.addEventListener('change', () => { doneButton.disabled = !allChosen(); }));
+      const writeScope = createDialogWriteScope(overlay, dialog);
+      dialog.querySelector('.icon-close').addEventListener('click', () => {
+        const closed = closeModal(overlay, { status: 'cancelled', reason: 'cancel' });
+        if (closed.status === 'closed' && onCancel) onCancel();
+      });
+      doneButton.addEventListener('click', async () => {
+        if (!allChosen()) return;
+        const handle = writeScope.begin();
+        if (!handle) return;
+        let failure = null;
+        try {
+          for (const section of dialog.querySelectorAll('.channel-conflict-section')) {
+            const choices = Array.from(section.querySelectorAll('tr[data-bank-account-id]')).map((row) => ({
+              bankAccountId: row.dataset.bankAccountId,
+              candidateIndex: Number(row.querySelector('input[type="radio"]:checked').value)
+            }));
+            const result = await api.accountMappings.resolveChannelConflicts({
+              channelId: Number(section.dataset.channelId),
+              choices
+            });
+            if (result.status !== 'success') { failure = result; break; }
+          }
+        } catch (error) {
+          failure = { status: 'error', message: error.message || '处理账户映射冲突失败' };
+        } finally { writeScope.finish(handle); }
+        if (!writeScope.isCurrent(handle)) return;
+        if (failure) {
+          setStatus(failure.message, 'error', { errorReportReady: Boolean(failure.errorReportReady) });
+          pushAlert(overlay, () => createAlertDialog(escapeHtml(failure.message)));
+          return;
+        }
+        setStatus('账户映射冲突已处理', 'success');
+        try {
+          const info = await api.app.getInfo();
+          services.acceptAccountMappingCount(info.accountMappingCount);
+        } catch (_error) { /* 计数只用于状态栏提示，读取失败不影响已完成的处理 */ }
+        if (!writeScope.isCurrent(handle)) return;
+        const closed = closeModal(handle, { status: 'submitted' });
+        if (closed.status === 'closed' && onDone) onDone();
+      });
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     function createAccountMappingDialog(payload) {
       const { setStatus, applyStatementResult, applyManualBalancePromptStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card manager-card account-card';
-      let activeTemplateId = payload.currentTemplateId || null;
+      // v3.2.15（D7、§4.9）：下拉框为“渠道 / 模板”——全部渠道与普通模板，渠道的子模板不单独列出。
+      const scopeOptions = buildAccountMappingScopeOptions(payload);
+      const initialScope = payload.currentScope
+        || (payload.currentTemplateId ? { templateId: payload.currentTemplateId } : null);
+      let activeScopeKey = resolveAccountMappingScopeKey(initialScope, payload.templates || [])
+        || (scopeOptions[0] ? scopeOptions[0].key : '');
       dialog.innerHTML = `
         <div class="dialog-header">
           <div class="account-mapping-template-select-wrapper">
-            模板 <select data-role="template-select"></select>
+            渠道 / 模板 <select data-role="template-select"></select>
           </div>
           <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="account-mapping-conflict-notice" data-role="conflict-notice" hidden>
+          <span data-role="conflict-text"></span>
+          <button class="text-action" type="button" data-action="resolve-conflicts">处理冲突</button>
         </div>
         <div class="table-wrapper">
           <table class="data-table">
@@ -5098,17 +5346,28 @@
 
       const templateSelect = dialog.querySelector('[data-role="template-select"]');
       const tbody = dialog.querySelector('tbody');
+      const conflictNotice = dialog.querySelector('[data-role="conflict-notice"]');
+      const conflictText = dialog.querySelector('[data-role="conflict-text"]');
 
-      // 填充模板下拉框
-      (payload.templates || []).forEach((t) => {
+      // 填充“渠道 / 模板”下拉框
+      scopeOptions.forEach((option) => {
         const opt = document.createElement('option');
-        opt.value = String(t.id);
-        opt.textContent = t.name;
-        if (String(t.id) === String(activeTemplateId)) {
+        opt.value = option.key;
+        opt.textContent = option.label;
+        if (option.key === activeScopeKey) {
           opt.selected = true;
         }
         templateSelect.appendChild(opt);
       });
+      const scopeByKey = new Map(scopeOptions.map((option) => [option.key, option.scope]));
+      function renderConflictNotice(conflictCount) {
+        const count = Number(conflictCount) || 0;
+        conflictNotice.hidden = count <= 0;
+        conflictText.textContent = count > 0
+          ? `该渠道有 ${count} 个账户号的映射设置不一致，处理前该渠道无法生成账单。`
+          : '';
+      }
+      renderConflictNotice(payload.conflictCount);
 
       function createReadOnlyRow(bankAccountId, clearingAccountId, noCurrency, currency) {
         const row = document.createElement('tr');
@@ -5294,18 +5553,17 @@
         tbody.inert = loading || saving || !mappingsReady;
       }
 
-      templateSelect.addEventListener('change', async () => {
+      async function reloadActiveScope() {
         const handle = modalBridge.host.getHandle(overlay);
         if (saving || !handle?.isTop()) return;
-        activeTemplateId = Number(templateSelect.value);
-        const templateId = activeTemplateId;
+        const scope = scopeByKey.get(activeScopeKey);
         const generation = ++loadGeneration;
         loading = true;
         mappingsReady = false;
         updateAvailability();
         let result;
         try {
-          result = await api.accountMappings.list(templateId);
+          result = await api.accountMappings.list(scope);
         } catch (error) {
           result = { status: 'error', message: error.message || '加载账户映射失败', errorReportReady: Boolean(error.errorReportReady) };
         }
@@ -5314,6 +5572,7 @@
         // ID 与显示行必须来自同一轮读取；失败时不能把旧模板行保存到新模板。
         if (result?.status === 'success' && Array.isArray(result.mappings)) {
           loadMappings(result.mappings);
+          renderConflictNotice(result.conflictCount);
           mappingsReady = true;
         } else {
           const message = result?.message || '加载账户映射失败';
@@ -5321,13 +5580,50 @@
           pushAlert(overlay, () => createAlertDialog(message));
         }
         updateAvailability();
+      }
+
+      templateSelect.addEventListener('change', () => {
+        if (saving) return;
+        activeScopeKey = templateSelect.value;
+        reloadActiveScope();
+      });
+
+      dialog.querySelector('[data-action="resolve-conflicts"]').addEventListener('click', async () => {
+        const handle = modalBridge.host.getHandle(overlay);
+        if (saving || loading || !handle?.isTop()) return;
+        const scope = scopeByKey.get(activeScopeKey);
+        if (!scope || !scope.channelId) return;
+        let result;
+        try {
+          result = await api.accountMappings.listChannelConflicts();
+        } catch (error) {
+          result = { status: 'error', message: error.message || '读取账户映射冲突失败' };
+        }
+        if (!handle.isOpen() || !handle.isTop()) return;
+        if (result?.status !== 'success') {
+          pushAlert(overlay, () => createAlertDialog(result?.message || '读取账户映射冲突失败'));
+          return;
+        }
+        const channels = (result.channels || []).filter((item) => Number(item.channelId) === Number(scope.channelId));
+        if (!channels.length) {
+          reloadActiveScope();
+          return;
+        }
+        pushModal(overlay, () => createChannelAccountMappingConflictDialog({
+          channels,
+          onDone: () => {
+            returnToModal(overlay);
+            reloadActiveScope();
+          },
+          onCancel: () => returnToModal(overlay)
+        }));
       });
 
       dialog.querySelector('.icon-close').addEventListener('click', () => closeModal(overlay));
       doneButton.addEventListener('click', async () => {
         const handle = modalBridge.host.getHandle(overlay);
         if (loading || saving || !mappingsReady || !handle?.isTop()) return;
-        const templateId = activeTemplateId;
+        const scope = scopeByKey.get(activeScopeKey);
         const mappings = Array.from(tbody.querySelectorAll('tr[data-account-mapping-row="true"]')).map((row) => ({
           bankAccountId: row.__rowApi.getBankAccountId(),
           clearingAccountId: row.__rowApi.getClearingAccountId(),
@@ -5339,7 +5635,7 @@
         try {
           let result;
           try {
-            result = await api.accountMappings.save(templateId, mappings);
+            result = await api.accountMappings.save(scope, mappings);
           } catch (error) {
             result = { status: 'error', message: error.message || '保存账户映射失败', errorReportReady: Boolean(error.errorReportReady) };
           }
@@ -5348,6 +5644,11 @@
             const info = await api.app.getInfo();
             services.acceptAccountMappingCount(info.accountMappingCount);
             setStatus(result.message, 'success');
+            // 渠道层显式设置的冲突账户号视为已处理，刷新冲突提示。
+            if (scope && scope.channelId) {
+              const refreshed = await api.accountMappings.list(scope);
+              if (handle.isOpen() && refreshed?.status === 'success') renderConflictNotice(refreshed.conflictCount);
+            }
           } else {
             setStatus(result.message, 'error', {
               errorReportReady: Boolean(result.errorReportReady)
@@ -5519,7 +5820,7 @@
     //   带「库」读着别扭，且 gateway 既有文案为「网关对账单数据」（硬约束行为不变）→ 此处用不带「库」的表名。
     //   仅含三张可删表（与后端 LINKED_DELETE_ALLOWED_TABLES 同口径）；默认 gateway-bill。
 
-    return Object.freeze({ looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createAccountMappingMigrationDialog });
+    return Object.freeze({ looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog });
   }
   global.ConfigurationDialogs = Object.freeze({ createConfigurationDialogs, buildBalanceSeedConfirmationRequest });
 })(window);

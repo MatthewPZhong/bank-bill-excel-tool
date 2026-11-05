@@ -112,6 +112,41 @@ function setReleaseNotesAcknowledgedVersion(db, version) {
   setSetting(db, RELEASE_NOTES_ACKNOWLEDGED_VERSION_KEY, value);
 }
 
+// v3.2.15：最近一次升级 { fromVersion, toVersion }，供设置「查看更新说明」显示上一个版本到当前版本；
+//   fromVersion 为 null = 从 v3.2.14 之前的版本升级、来源未知。版本号合法性由更新说明服务校验。
+const RELEASE_NOTES_LAST_UPGRADE_KEY = 'release_notes_last_upgrade';
+
+function getReleaseNotesLastUpgrade(db) {
+  const raw = getSetting(db, RELEASE_NOTES_LAST_UPGRADE_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return { fromVersion: parsed.fromVersion ?? null, toVersion: parsed.toVersion ?? null };
+  } catch (_error) {
+    return null;
+  }
+}
+
+// 确认版本与升级记录同一事务写入，避免只写入一半时设置入口与启动判定不一致。
+function recordReleaseNotesUpgrade(db, { fromVersion = null, toVersion } = {}) {
+  const to = typeof toVersion === 'string' ? toVersion.trim() : '';
+  if (!to) throw new Error(`release_notes_last_upgrade 的 toVersion 必须是非空版本号，收到：${JSON.stringify(toVersion)}`);
+  if (fromVersion !== null && (typeof fromVersion !== 'string' || !fromVersion.trim())) {
+    throw new Error(`release_notes_last_upgrade 的 fromVersion 必须是版本号或 null，收到：${JSON.stringify(fromVersion)}`);
+  }
+  const from = fromVersion === null ? null : fromVersion.trim();
+  db.exec('BEGIN');
+  try {
+    setSetting(db, RELEASE_NOTES_ACKNOWLEDGED_VERSION_KEY, to);
+    setSetting(db, RELEASE_NOTES_LAST_UPGRADE_KEY, JSON.stringify({ fromVersion: from, toVersion: to }));
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* 无活动事务 */ }
+    throw error;
+  }
+}
+
 // v2.1.15 W4：弃用 General 风格，UI 风格恒为 'Clear'。
 //   - 移除「切换页面风格」入口与 setUiStyle 写链路（不再有任何路径写入 'General'）。
 //   - 持久化兼容：老库 ui_style 可能存了 'General'（或其它历史/非法值），
@@ -541,6 +576,7 @@ module.exports = {
   getEnumConfig,
   getReconIdFixBillCategory,
   getReleaseNotesAcknowledgedVersion,
+  getReleaseNotesLastUpgrade,
   getSetting,
   getUiStyle,
   listAccountMappings,
@@ -554,7 +590,9 @@ module.exports = {
   setEnumConfig,
   setReconIdFixBillCategory,
   setReleaseNotesAcknowledgedVersion,
+  recordReleaseNotesUpgrade,
   RELEASE_NOTES_ACKNOWLEDGED_VERSION_KEY,
+  RELEASE_NOTES_LAST_UPGRADE_KEY,
   setSetting,
   // v2.1.9 N1-settings (T32b)：idle cleanup 阈值
   getAcquiringBillIdleCleanupMinutes,
