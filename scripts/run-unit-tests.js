@@ -12,6 +12,8 @@
 //   node scripts/run-unit-tests.js            # 跑全部 unit
 //   node scripts/run-unit-tests.js --coverage # 加 --experimental-test-coverage
 //   UNIT_TEST_CONCURRENCY=2 npm run release-check # 仅限制测试文件并发，默认保持 Node 原值
+//   UNIT_TEST_SHARD=1/3 npm run test:unit       # v3.2.15 B43：只跑第 1/3 片（Node --test-shard，按文件划分），
+//                                                #   CI 分多个 job 并行；未设置时跑全部，本地 release-check 不变
 //
 // 退出码：透传 node --test 的退出码（0=全 PASS / 非 0=有 FAIL）
 
@@ -37,12 +39,25 @@ function findTestFiles(dir) {
   return out.sort();
 }
 
-function buildNodeTestArgs(files, { coverage = false, concurrency } = {}) {
+// 分片参数 "i/n"（1 ≤ i ≤ n）；未设置返回 null。格式不对时抛错，避免静默跑全部或跑空。
+function parseShard(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const match = String(value).trim().match(/^(\d+)\/(\d+)$/);
+  const index = match ? Number(match[1]) : NaN;
+  const total = match ? Number(match[2]) : NaN;
+  if (!Number.isSafeInteger(index) || !Number.isSafeInteger(total) || total < 1 || index < 1 || index > total) {
+    throw new TypeError(`分片参数须为 i/n 且 1 ≤ i ≤ n，收到：${value}`);
+  }
+  return { index, total };
+}
+
+function buildNodeTestArgs(files, { coverage = false, concurrency, shard = null } = {}) {
   const args = ['--test'];
   if (concurrency !== undefined) {
     if (!Number.isSafeInteger(concurrency) || concurrency < 1) throw new TypeError('测试并发数必须是正整数');
     args.push(`--test-concurrency=${concurrency}`);
   }
+  if (shard) args.push(`--test-shard=${shard.index}/${shard.total}`);
   if (coverage) args.push('--experimental-test-coverage');
   args.push(...files.map((file) => path.relative(REPO_ROOT, file)));
   return args;
@@ -86,7 +101,7 @@ function formatLogTimestamp(date = new Date()) {
 }
 
 // 组装末尾汇总文本（终端 + 落盘共用）
-function buildSummaryText({ summary, fileCount, elapsedMs }) {
+function buildSummaryText({ summary, fileCount, elapsedMs, shard = null }) {
   const total = summary.tests;
   const pass = summary.pass;
   const fail = summary.fail;
@@ -97,6 +112,7 @@ function buildSummaryText({ summary, fileCount, elapsedMs }) {
   lines.push(`==== ${passDisp}/${totalDisp} PASS ====`);
   lines.push(
     `unit 文件数：${fileCount}` +
+      (shard ? `（本次只跑第 ${shard.index}/${shard.total} 片）` : '') +
       (fail != null ? ` | 失败用例：${fail}` : '') +
       (summary.duration_ms != null
         ? ` | node --test 耗时：${summary.duration_ms}ms`
@@ -115,7 +131,8 @@ function main() {
 
   const coverage = process.argv.includes('--coverage');
   const configuredConcurrency = process.env.UNIT_TEST_CONCURRENCY;
-  const args = buildNodeTestArgs([], { coverage,
+  const shard = parseShard(process.env.UNIT_TEST_SHARD);
+  const args = buildNodeTestArgs([], { coverage, shard,
     concurrency: configuredConcurrency === undefined ? undefined : Number(configuredConcurrency) });
   // 直接交给 Node 匹配，不经 shell 展开；文件数量增长不会撑大 CreateProcess 的命令行。
   args.push('tests/unit/**/*.test.js');
@@ -152,7 +169,7 @@ function main() {
     const elapsedMs = Date.now() - start;
     const combined = stdoutBuf + stderrBuf;
     const summary = parseTapSummary(combined);
-    const summaryText = buildSummaryText({ summary, fileCount: files.length, elapsedMs });
+    const summaryText = buildSummaryText({ summary, fileCount: files.length, elapsedMs, shard });
 
     // 终端末尾汇总
     process.stdout.write('\n' + summaryText + '\n');
@@ -167,7 +184,7 @@ function main() {
         `时间：${startedAt.toISOString()}（本地 ${startedAt.toLocaleString()}）`,
         `Node 版本：${process.version}`,
         `平台：${process.platform} ${process.arch}`,
-        `命令：node ${args.slice(0, coverage ? 2 : 1).join(' ')} <${files.length} 个测试文件>`,
+        `命令：node ${args.filter((arg) => arg.startsWith('--')).join(' ')} <${files.length} 个测试文件>`,
         `覆盖率模式：${coverage ? '是（--experimental-test-coverage）' : '否'}`,
         `unit 文件数：${files.length}`,
         '',
@@ -193,6 +210,7 @@ if (require.main === module) {
 
 // 导出可测试纯函数（unit test 用）
 module.exports = {
+  parseShard,
   parseTapSummary,
   formatLogTimestamp,
   buildSummaryText,

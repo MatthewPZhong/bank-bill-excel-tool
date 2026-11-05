@@ -64,7 +64,15 @@ test('现有 CI 使用同一完整门禁且全量获取历史，tag/main guard �
     assert.match(yaml, /ARCHITECTURE_BASE_REF: \$\{\{ steps\.architecture-policy\.outputs\.base \}\}/);
     assert.match(yaml, /github\.event\.pull_request\.base\.sha/);
     assert.match(yaml, /github\.event\.before/);
-    assert.match(yaml, /run: npm run release-check/);
+    if (name === 'release-windows.yml') {
+      assert.match(yaml, /run: npm run release-check/);
+    } else {
+      // v3.2.15 B43：PR / main CI 把 release-check 拆成并行 job，合起来与 release-check 相同（逐项核对见 ci-release-check-jobs.test.js）。
+      assert.match(yaml, /run: npm run lint && npm run check:architecture && npm run smoke/);
+      assert.match(yaml, /run: npm run test:unit/);
+      assert.match(yaml, /run: npm run test:integration/);
+      assert.match(yaml, /run: node scripts\/ci\/verify-release-check-jobs\.js/);
+    }
   }
   assert.match(fs.readFileSync(path.join(root, '.github/workflows/release-windows.yml'), 'utf8'), /Release tag must point to the current main commit/);
 });
