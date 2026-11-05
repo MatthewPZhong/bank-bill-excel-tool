@@ -14,6 +14,12 @@ const fs = require('fs');
 const XLSX = require('xlsx');
 
 const { FileValidationError } = require('../backend/file-service/common');
+const {
+  TEMPLATE_STRUCTURE_HINT,
+  canonicalHeaderMapping,
+  describeHeaderMismatch,
+  projectObjectToCanonical
+} = require('../backend/file-service/header-structure-diff');
 const { BANK_STATEMENT_FIELDS } = require('../constants/bank-statement-fields');
 const { GATEWAY_RECON_FIELDS } = require('../constants/gateway-recon-fields');
 const {
@@ -70,7 +76,10 @@ function sheetToObjects(sheet, expectedHeaders) {
 }
 
 // ===== readBankStatement =====
-function readBankStatement(filePath) {
+// sourceHeaders：设置 → 模板文件「银行对账单（导入识别结构）」当前用户版本的表头（缺省只认内置 46 列）。
+//   先按内置 46 列识别；不符时按当前版本识别，读出的行对应回内置 46 列（canonicalHeaderMapping）。
+//   返回的 headers 与行键始终为内置 46 列；structure 标明本文件按哪种结构读取（'builtin' / 'current'）。
+function readBankStatement(filePath, { sourceHeaders = null } = {}) {
   if (!filePath || !fs.existsSync(filePath)) {
     throw new FileValidationError('file-not-found', `文件不存在：${filePath}`);
   }
@@ -83,7 +92,39 @@ function readBankStatement(filePath) {
       { detailLines: [`实际 sheets：${wb.SheetNames.join(' / ')}`] }
     );
   }
-  const { headers, rows } = sheetToObjects(sheet, BANK_STATEMENT_FIELDS);
+  const custom = Array.isArray(sourceHeaders) && sourceHeaders.length ? sourceHeaders : null;
+  let parsed;
+  let structure = 'builtin';
+  try {
+    parsed = sheetToObjects(sheet, BANK_STATEMENT_FIELDS);
+  } catch (error) {
+    if (!error || error.name !== 'FileValidationError') throw error;
+    if (!custom) {
+      // 只认内置结构时保留原错误码与逐列明细，末行附模板文件指引。
+      error.detailLines = [...(error.detailLines || []), TEMPLATE_STRUCTURE_HINT];
+      throw error;
+    }
+    try {
+      const versioned = sheetToObjects(sheet, custom);
+      const mapping = canonicalHeaderMapping(BANK_STATEMENT_FIELDS, custom);
+      parsed = {
+        headers: BANK_STATEMENT_FIELDS.slice(),
+        rows: versioned.rows.map((row) => projectObjectToCanonical(row, BANK_STATEMENT_FIELDS, custom, mapping))
+      };
+      structure = 'current';
+    } catch (_customError) {
+      // 两种结构都不符：与内置 46 列、当前版本中最接近者逐列比较，附模板文件指引。
+      const actual = (XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true })[0] || [])
+        .map((value) => (value === undefined || value === null ? '' : String(value)));
+      throw new FileValidationError(error.code, `银行对账单表头与内置 ${BANK_STATEMENT_FIELDS.length} 列及当前版本都不一致`, {
+        detailLines: describeHeaderMismatch({ sheets: [{ name: '', headers: actual }], candidates: [
+          { name: '银行对账单（内置）', headers: BANK_STATEMENT_FIELDS },
+          { name: '银行对账单', headers: custom, versionLabel: '用户版本' }
+        ] })
+      });
+    }
+  }
+  const { headers, rows } = parsed;
   // 注入 _rowId（与 PR #31 ensureRowId 兼容）
   rows.forEach((r, idx) => {
     r._rowId = `row_${idx}`;
@@ -93,8 +134,19 @@ function readBankStatement(filePath) {
     fileName: path.basename(filePath),
     rows,
     headers,
-    rowCount: rows.length
+    rowCount: rows.length,
+    structure
   };
+}
+
+// 设置 → 模板文件导入预检：与 readBankStatement 相同的读法读出「渠道对账单」表头行（核对模板表头读取口径）。
+function readBankStatementHeaderRow(filePath) {
+  const sheet = XLSX.readFile(filePath).Sheets[BANK_STATEMENT_SHEET_NAME];
+  if (!sheet) return [];
+  const headers = (XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true })[0] || [])
+    .map((value) => (value === undefined || value === null ? '' : String(value)));
+  while (headers.length && headers[headers.length - 1] === '') headers.pop();
+  return headers;
 }
 
 // ===== readGatewayRecon =====
@@ -290,6 +342,7 @@ module.exports = {
   BANK_STATEMENT_SHEET_NAME,
   GATEWAY_RECON_SHEET_NAME,
   readBankStatement,
+  readBankStatementHeaderRow,
   readGatewayRecon,
   writeBankStatementMainOutput,
   writeErrorReportOutput,

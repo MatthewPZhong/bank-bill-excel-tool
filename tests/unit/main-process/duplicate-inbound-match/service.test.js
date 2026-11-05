@@ -1346,3 +1346,45 @@ test.describe('DuplicateInboundMatchService', () => {
     assert.equal(fs.existsSync(path.join(userDataDir, 'pure-inbound.xlsx')), false);
   });
 });
+
+// v3.2.14：设置 → 模板文件「银行对账单（导入识别结构）」当前用户版本（D17）：按新结构导出的银行对账单读出后对应回内置 46 列，
+//   分组计数与内置结构同值文件一致；内置结构文件同时接受。
+test('银行对账单按当前用户版本导入：分组计数与内置结构一致，内置结构同时接受', async () => {
+  const versionHeaders = [...BANK_STATEMENT_FIELDS.filter((field) => field !== '分类人').map((field) => (field === '合并单号' ? '合并编号' : field)), '新增列'];
+  const rows = duplicateGroup({ prefix: 'STRUCTURE', amount: '100' });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-inbound-structure-'));
+  const mirrors = [];
+  try {
+    const documentFile = path.join(dir, 'document.xlsx');
+    writeDocumentFile(documentFile, matchingDocumentRows());
+    const v2File = path.join(dir, 'bank-v2.xlsx');
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([versionHeaders, ...rows.map((row) => versionHeaders.map((header) => {
+      const index = BANK_STATEMENT_FIELDS.indexOf(header === '合并编号' ? '合并单号' : header);
+      return index >= 0 ? row[index] : '';
+    }))]), '渠道对账单');
+    XLSX.writeFile(workbook, v2File);
+    const builtinFile = path.join(dir, 'bank-builtin.xlsx');
+    writeBankFile(builtinFile, rows);
+    const importWith = async (bankFile) => {
+      const mirror = createMirrorDatabase();
+      mirrors.push(mirror);
+      const service = createDuplicateInboundMatchService({
+        userDataDir: fs.mkdtempSync(path.join(dir, 'user-')),
+        database: mirror.facade,
+        mailTemplatePath: MAIL_TEMPLATE,
+        bankTemplatePath: BANK_TEMPLATE,
+        resolveBankSourceHeaders: async () => versionHeaders,
+        now: () => new Date(2026, 6, 14, 12, 0, 0)
+      });
+      const imported = await service.importFiles([bankFile, documentFile]);
+      return [imported.bank.rowCount, imported.bank.reversalCount, imported.bank.inboundCount];
+    };
+    const expected = await importWith(builtinFile);
+    assert.deepEqual(await importWith(v2File), expected);
+    assert.equal(expected[0], rows.length);
+  } finally {
+    for (const mirror of mirrors) mirror.db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

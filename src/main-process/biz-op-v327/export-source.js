@@ -58,12 +58,14 @@ async function buildExportSource({ payloadStore, source, spool, tempDirectory, c
       // 每份原件只交付独立 SST 子目录；读取器仅清理身份匹配的登记文件和空目录。
       const workbook = await openSingleSheetRichWorkbook(original.filePath, { sstTempRoot: path.join(tempDirectory, `sst-raw-${randomUUID()}`),
         memoryBudgetBytes: 32 * 1024 * 1024, lruMaxEntries: 8192, cacheMaxBytes: 32 * 1024 * 1024, ...richReaderBudgets(memoryConfig), cancelToken });
-      let selected = 0; const adapter = createImportAdapter(kind);
+      // 导入时为用户结构的数据集：原件按数据集记录的表头识别并对应回内置列，输出仍为内置列。
+      const sourceHeaders = kind === 'FLOW' && Array.isArray(manifest.catalog.sourceHeaders) ? manifest.catalog.sourceHeaders : null;
+      let selected = 0; const adapter = createImportAdapter(kind, { sourceHeaders });
       try {
         if (workbook.sheet.name !== original.sheetName) fail('BIZOP_EXPORT_ORIGINAL_CHANGED');
         await workbook.scan((row) => {
           safePoint();
-          if (row.rowIndex === 1) { if (detectHeader(row) !== kind) fail('BIZOP_EXPORT_KIND_MISMATCH'); return; }
+          if (row.rowIndex === 1) { if (detectHeader(row, { flowHeaders: sourceHeaders }) !== kind) fail('BIZOP_EXPORT_KIND_MISMATCH'); return; }
           const adapted = adapter.adapt(row);
           if (adapted.blank) return;
           if (adapted.errors.length) fail('BIZOP_EXPORT_ORIGINAL_CHANGED');
@@ -71,7 +73,7 @@ async function buildExportSource({ payloadStore, source, spool, tempDirectory, c
           const metadata = { source_artifact_id: original.artifactId, source_dataset_id: source.objectId,
             source_date: manifest.catalog.dataDate, source_version: source.metadata.version, source_sheet: row.sourceSheet,
             source_row: row.rowIndex, key_bu: adapted.key[0], key_account: adapted.key[1], key_currency: adapted.key[2] };
-          const byColumn = new Map(row.cells.map((value) => [value.columnIndex, value]));
+          const byColumn = adapter.cellsOf(row);
           spool.data(adapted.originalValues.map((value, index) => rawCell(byColumn.get(index), value, kind, index,
             (decimal, reason) => spool.precision(index, decimal, reason, metadata))), metadata);
           selected += 1;

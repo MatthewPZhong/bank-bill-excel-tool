@@ -1,0 +1,158 @@
+# v3.2.14 发布与集成记录
+
+## 2026-10-29 模块集成
+
+用户要求：把 v3.2.14 的两个功能分支并入 `release/v3.2.14`，跑完门禁后由 Codex 审查一轮。推送、开 PR、升版和发布尚未授权。
+
+| 项目 | 事实 |
+| --- | --- |
+| 正式基线 | `v3.2.13` → `e68089cc46c88c3eaed87b942fcd8badef00dff7` |
+| release 分支 | `release/v3.2.14`，从基线新建，仅在本地，未推送 |
+| 远端 main | `e68089cc46c88c3eaed87b942fcd8badef00dff7`，已包含在 release 历史 |
+| 合并方式 | 必须使用 merge commit：补登的 policyChanges 以 `0043b2be`、`9d4a554b`、`0aea4c26`、`7e19fe8b` 为来源，squash 或 rebase 后这些提交不在 main 历史中，架构检查会失败 |
+
+## 纳入范围
+
+| 分支 | 已合入来源 SHA | 合入提交 | 内容 |
+| --- | --- | --- | --- |
+| `feat/statement-balance-gap-prompt` | `7e19fe8b` | `0043b2be`、`a12e77f1`、`dcbc3a52` | 发生额计算余额的账单日期断档提醒（`9d4a554b`），以及 Codex 第一轮的 3 条修复（`0aea4c26`，[spec](feat/statement-balance-gap-prompt/spec.md) §8 T11–T13）与第三轮的 1 条修复（`7e19fe8b`，T14） |
+| `feat/release-notes-on-upgrade` | `b06ff9c8` | `8c049d36`、`25b464fb` | 升级后首次启动弹出更新说明（`8ea9bbb5`），以及 Codex 第三轮的 1 条修复（`b06ff9c8`，[spec](feat/release-notes-on-upgrade/spec.md) §8 T6） |
+| `feat/input-template-structures` | `e61c6169` | `da9b4324`（#245） | 输入表结构清晰报错与模板文件版本驱动，第一批平盘 5 张、第二批其余 12 张输入表，见 [spec](feat/input-template-structures/spec.md) 与下文「2026-11-01 输入结构分支经 PR 合入」 |
+| `AGENTS.md` 文档补充 | `17c944bf` | 直接提交在 release 上 | 单个测试的运行方式与集成清单回写说明，见下文「2026-11-04 AGENTS.md 补充单个测试命令」 |
+
+合并时的处理：
+
+- `feat/statement-balance-gap-prompt` 从 `v3.2.12`（`0f890fb2`）创建，不是本轮基线 `v3.2.13`。合入时 `knowledge/backlog.md` 冲突，两侧都在「未实施」顶部新增了条目，全部保留，B34–B32 在上。`rules/integration-test-policy.md` 第七节是自动生成的耗时表，先取基线版本，再由完整集成运行重写。
+- 架构历史检查报 5 条 `ARCH-POLICY-HISTORY`。断档分支的两个提交持有 v3.2.12 的 `boundaries.json`（blob `77bb6897`），第一次合并提交 `0043b2be` 持有 v3.2.13 的版本（blob `17a36724`）。已有的 policyChanges 来源 `0f890fb2`、`e68089cc` 都不是这些提交的后代，因此无法覆盖。按 v3.2.11–v3.2.13 的先例补登两条，现行允许集合不变：
+  - `renderer-dialog-app-settings.allowedApiFields`：以 `0043b2be` 为来源，补登更新说明的同一放宽（`ui` 新增 `openReleaseNotes`）。断档分支提交中的原值与 v3.2.13 相同，也由这一条覆盖。
+  - `renderer-dialog-template-files.allowedApiFields`：以断档分支末端 `9d4a554b` 为来源，补登 v3.2.13 模板文件版本管理的同一放宽。
+- 审查修复在断档分支上提交为 `0aea4c26`，再以 `a12e77f1` 合入。新末端仍持有 v3.2.12 的 `boundaries.json`，不是 `0043b2be`、`9d4a554b` 的祖先，所以以 `0aea4c26` 为来源，再补登上述两个字段的同一放宽。这一条也覆盖断档分支的全部早先提交。
+- 第三轮审查修复在两个功能分支分别提交为 `7e19fe8b`、`b06ff9c8`，以 `dcbc3a52`、`25b464fb` 合入，无冲突。`7e19fe8b` 同样持有 v3.2.12 的 `boundaries.json`，按同一方式以它为来源补登两个字段（`cc35011f`），现行允许集合不变；`b06ff9c8` 持有的配置与现行一致，无需补登。
+
+## 2026-11-01 输入结构分支经 PR 合入
+
+用户要求：推送 `feat/input-template-structures`，开 PR 合入 `release/v3.2.14`。
+
+| 项目 | 事实 |
+| --- | --- |
+| 源分支 | `feat/input-template-structures`，从 `v3.2.13` 创建，功能末端 `7f318ed6` |
+| 内容 | 输入表结构与契约不一致时给出差异明细；「设置 → 模板文件」导入新版本驱动导入识别结构：平盘链接原始表 5 张、单据对账导出不平、移除归档 Pending、银行账单处理链接表 4 张、VCC 财务OP 5 张、流水对账单、银行对账单（导入识别结构），见 [spec](feat/input-template-structures/spec.md) |
+| 合入方式 | 先在源分支合入 `release/v3.2.14`（`87cab203`），合并提交 `38e6c96f`；再经 PR 以 merge commit 合入 release：#245 于 2026-11-02 合并，合入提交 `da9b4324`，源分支末端 `e61c6169` |
+| 合并方式 | 必须使用 merge commit：补登的 policyChanges 以 `7f318ed6`、`87cab203`、`24d1ea82` 为来源 |
+
+合并时的处理：
+
+- 4 个文件冲突：
+  - `knowledge/backlog.md`：两侧都在「未实施」顶部新增条目，全部保留，B41–B36 在上。
+  - 执行描述基线测试：两侧新增的通道都保留。
+  - `architecture/boundaries.json`：两侧改动的是不同边界，按边界合并，policyChanges 按来源提交时间顺序拼接。
+  - `rules/integration-test-policy.md`：第七节先取源分支版本，再由完整集成运行重写。
+- `tests/unit/main-process/archive-task-policy-registry.test.js`：两侧各新增一个 exclude 通道，并对计数做了相同的 +1，因此合并无冲突，但合计应为 285 / 144。已在 `fa8c302f` 修正。
+- 架构历史检查报 26 条 `ARCH-POLICY-HISTORY`：
+  - 源分支 9 个提交仍持有原 `renderer-dialog-app-settings` ui 集合；
+  - release 侧 17 个提交仍持有原 `renderer-dialog-scenarios` scenarioCommands 集合；
+  - 已有的放宽来源都不是对方提交的后代。
+  
+  已按先例补登两条，以源分支末端 `7f318ed6`、release 末端 `87cab203` 为来源，各补登同一放宽（`f27e5208`）。现行允许集合不变。
+- PR 合并前如果 `release/v3.2.14` 又有新提交，这些提交同样持有原 scenarioCommands 集合，需要以新的 release 末端为来源再补登一次。
+
+检查：
+
+- 合并后首次运行 `release-check`：lint 通过，架构检查报上述 26 条后中止。
+- 补登后重跑：单测有 2 条计数失败，即上述 285 / 144。
+- 修正后在提交内容上重跑 `release-check`，通过：
+  - 架构检查 810/810 文件，历史 111 个提交；
+  - smoke 通过；
+  - 单测 9826/9830，4 项为既有条件跳过；
+  - 集成测试 93/93 脚本。
+- 真实应用 GUI 与 Windows 安装版未实测。
+
+## 2026-11-04 AGENTS.md 补充单个测试命令
+
+用户要求：把 `AGENTS.md` 的命令补充并入 `release/v3.2.14`，随 #244 一起发布，并推送。
+
+| 项目 | 事实 |
+| --- | --- |
+| 内容 | 只改 `AGENTS.md`：「常用命令」新增「单个单测」「单个集成脚本」两行；表后说明 `test:integration` 全部通过且清单有实质变化时会回写 `rules/integration-test-policy.md`「七」章节 |
+| 合入方式 | 原提交 `3cd9a190` 在本地分支 `docs/agents-test-commands`，从 `v3.2.13` 创建，未推送。该提交持有 v3.2.13 的 `boundaries.json`，merge 进 release 会再触发 `ARCH-POLICY-HISTORY` 补登，因此改为直接提交在 release 末端 `da9b4324` 上（`17c944bf`），不做 merge |
+
+检查：
+
+- 纯文档改动，不涉及代码、测试和架构配置。
+- 本地 `check:architecture` 未能完成：本机内存 3.8 GB、无 swap，运行约 10 分钟后 Node 堆内存耗尽退出（退出码 134）。
+- 门禁以推送后 #244 的 `smoke-test` 任务为准，该任务在 Windows 上对 PR head 完整运行 `release-check`（含架构检查）；`build` 任务只负责打包。
+- 推送 `375740dc` 后，「Build Windows Packages」运行 41804952281 通过：
+  - `smoke-test` 的 `release-check` 通过：架构检查 810/810 文件；单测 9827/9831，4 项为既有条件跳过；集成测试 93/93 脚本；
+  - `build` 打包与 `check-dist-size` 通过；
+  - `bizop-durability-contract` 按分支条件跳过。
+
+## 2026-11-04 发版准备
+
+用户要求：执行 v3.2.14 正式发布，包括升版、同步发布文档、推送、把 #244 转为可合并、以 merge commit 合并、推送附注标签 `v3.2.14` 并核验发布结果；完成后再开始下一轮迭代。不删除分支。
+
+| 项目 | 事实 |
+| --- | --- |
+| 冻结范围 | 见上文「纳入范围」四项；冻结前 release 末端 `375740dc`，另有本地的记录更正 `64a3eea3`，随本次一并推送 |
+| 远端 main | `e68089cc`，已包含在 release 历史；合并前再次核对 |
+| 升版与文档 | `6fa5ee0a`：`package.json`、`package-lock.json` 升到 3.2.14；同步 `CHANGELOG.md`、`docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md`（新增「升级后的更新说明（v3.2.14）」与「输入表结构（v3.2.14）」）和升级弹窗用的 `release-notes.json`（3.2.14 共 5 条要点） |
+| 顺延 | B26、B27、B33 三项实机人工检查的目标版本改为 v3.2.15：2026-11-04 用户决定 v3.2.14 先发布，本轮没有可用的 Windows/macOS 实机。B27 的升级终点相应改为 v3.2.14 或之后的版本。B32、B34–B41 目标未定，本轮不处理 |
+| 资金红线复核 | 第一轮 P1（T11，当前批次余额混入其他批次账号）与第三轮第 1 条（T14，部分模板待处理时不产出余额汇总）：2026-11-04 用户确认已完成人工复核，未提供复核人与明细 |
+| 未修复 | B35（同一账号跨模板的种子覆盖）本版不修，见上文第四轮审查 |
+| 人工检查 | B26、B27、B33 为 N/A，顺延到 v3.2.15。本版发布时，真实应用 GUI、Windows 安装版与应用内在线升级都未经人工确认 |
+
+本地检查（`6fa5ee0a`，工作区另有本记录与 `knowledge/backlog.md` 的文档改动）：
+
+- `lint`、`smoke` 通过。
+- `test:unit`：9822/9831 通过，6 项条件跳过，3 项失败；`test:integration`：92/93 脚本通过，1 项失败。四项失败都已核实为本机环境原因，消除原因后单独重跑全部通过：
+  - `manifest-coverage-e13-g.test.js`：本仓库为部分克隆（blob:none），从本地克隆检出历史提交 `138c5b43` 时缺文件。从 origin 补齐三个历史提交树中缺的 455 个对象后重跑，9/9 通过。
+  - `v3-2-3-release-evidence.test.js`、`v3-2-4-release-evidence.test.js`：本机 umask 为 0002，检出文件权限为 664，历史校验器要求 644/755，报 `GIT_WORKTREE_TREE_INVALID`。以 umask 022 重跑，各 1/1 通过。
+  - 集成 `renderer-lifecycle`：本机 Electron 的 `chrome-sandbox` 未设为 root 所有、4755，启动即中止。以 `ELECTRON_DISABLE_SANDBOX=1` 在 xvfb 下重跑，338/338 通过。
+- 因集成测试整体未通过，`rules/integration-test-policy.md` 第七节未回写；表中脚本与用例数已与本次运行一致（如 `renderer-lifecycle` 338、`statement-balance-gap` 24、`release-notes-upgrade-prompt` 5），无需改动。
+- `check:architecture` 本机内存不足无法完成（见上节），完整 `release-check` 以 #244 最终 head 的 `smoke-test` 任务为 PASS/FAIL 依据。
+
+推送 `aa459d2f` 后：
+
+- 「Build Windows Packages」运行 [41882832935](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/41882832935) 通过：`smoke-test` 的 `release-check` 通过，架构检查 810/810 文件、对比 `e68089cc` 检查 119 个提交；单测 9827/9831，0 失败、4 项为既有条件跳过；集成测试 93/93 脚本。`build` 通过，`bizop-durability-contract` 按分支条件跳过。
+- #244 转为可合并后，Codex 自动审查提出 1 条 P2（[评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/244#discussion_r4471371083)）：输入表「恢复默认」不检查同组结构冲突，VCC 来源识别遇多重命中时静默取第一项，按特定顺序操作后费用及换汇文件会被识别为充值清退。已对照代码核实机制成立。用户决定 v3.2.14 不修，登记为 backlog B42，目标 v3.2.15；涉及资金口径，修复时须人工复核。
+
+## 检查与证据边界
+
+- 两次合并后首次运行 `release-check`：lint 通过，架构检查报上述 5 条 `ARCH-POLICY-HISTORY` 后中止。
+- 补登后在提交内容上重跑 `release-check`，通过：架构检查 801/801 文件、历史 87 个提交；单测 9736/9740，4 项为既有条件跳过；集成测试 88/88 脚本。
+- 合入审查修复（`a12e77f1`）并补登后，在提交内容上重跑 `release-check`，通过：架构检查 801/801 文件、历史 90 个提交；单测 9737/9741，4 项为既有条件跳过；集成测试 88/88 脚本。
+- 合入第三轮审查修复（`25b464fb`）并补登（`cc35011f`）后，在提交内容上重跑 `release-check`，通过：架构检查 801/801 文件、历史 97 个提交；smoke 通过；单测 9740/9744，4 项为既有条件跳过；集成测试 88/88 脚本（`statement-balance-gap` 24/24）。
+- 真实应用 GUI 未实测：断档提醒见 B33、B34，更新说明只有 renderer-lifecycle 布局截图。
+
+## 审查与处理
+
+2026-10-29 Codex 只读审查 `main...release/v3.2.14`（`27430b29`）。更新说明的版本判定、确认语义和 policyChanges 补登未发现缺陷。断档提醒有 3 条发现，已对照代码核实。按用户要求在功能分支修复（`0aea4c26`），每条都补了回归测试，并确认修复前失败、修复后通过：
+
+| 等级 | 位置 | 问题 |
+| --- | --- | --- |
+| P1 · 资金红线，须人工复核 | `src/main.js` `regenerateVirtualTemplateBalanceFromSession` | 各模板组固定按 `scope: 'all'` 生成，内部文件带 `__all` 后缀。只有一个模板组时，这个文件会直接缓存为当前批次余额；之后“导出全部”覆盖同名文件，再“导出当前批次”就会混入其他批次的账号。`v3.2.13` 的补录路径已经如此，选择“不补录”断档后新增了一个入口 |
+| P2 | `src/renderer/dialogs/configuration.js` `createExportScopeDialog` | 会话有多批文件时，明细导出经过范围选择弹窗，成功后 `setStatus` 不保留断档入口，用户只能重新导入，与断档 spec §4.2 第 5 条“导出明细不清除该入口”不符。直接导出路径（`controllers/statement.js`）有保留 |
+| P2 | `src/styles-gemini-extra.css` `.balance-gap-body` | 正文不可收缩、不能滚动；断档较多且窗口较矮或缩放到 150% 时，底部两个按钮会被 `.modal-card` 裁掉 |
+
+处理：P1 按真实范围生成各模板组余额（T11），新增单测回读当前批次文件；P2 范围选择弹窗把结果交回账单页统一处理（T12），生命周期用例覆盖经范围选择导出明细后重开断档；P3 正文可收缩滚动（T13），生命周期在最小窗口 150% 缩放、12 处断档下用真实鼠标点击按钮。P1 属资金红线，修复后仍须人工复核余额导出范围。
+
+2026-10-29 Codex 第二轮只读审查 `main...release/v3.2.14`（`a00b4052`）：确认上一轮 3 条已从根因修复，未发现新的正确性缺陷；余额日期、币种、人工种子与导出范围链路，以及更新说明的版本区间、确认语义、全新安装判定、弹窗排队和 policyChanges 父链绑定均已核对。只读沙箱中有 5 项需要临时目录的测试未能运行，真实 GUI、Windows 与余额导出范围的人工复核仍待完成。
+
+2026-10-29 Codex 第三轮只读审查 `main...release/v3.2.14`（`7635d782`），要求不复述前两轮结论、换角度找遗漏，提出 2 条，均已对照代码核实。按用户要求在功能分支修复，每条都补了回归测试，并确认修复前失败、修复后通过：
+
+| 等级 | 位置 | 问题 |
+| --- | --- | --- |
+| P2 · 涉及余额输出，须人工复核 | `src/main.js` `generateMultiTemplateGroupFiles` | 按文件名映射一次导入多个模板、部分模板组需首次补录或确认断档时，仍把已算出的组合并成 `N-BALANCE-日期范围.xlsx` 写入导出目录，并缓存为当前余额。文件名按全部模板计数，内容缺少待处理的组，违反断档 spec §4.2 第 1 条。界面上余额导出是禁用的，但主进程导出当前余额时不检查待处理断档。`v3.2.13` 首次补录已经如此，断档提醒让触发更常见 |
+| P2 · 实际影响低 | `src/main-process/release-notes/service.js` | 只认纯 `X.Y.Z`，带构建元数据的正式版（如 `3.2.14+build.7`）既不弹窗，设置入口也显示暂无说明，与 `app-updater.js` 的稳定版判定不一致。仓库历史版本号都不带构建元数据，现行发版不会触发 |
+
+处理：
+- 断档分支 `7e19fe8b`（T14）：任一模板组还需补录或确认断档时，不合并、不缓存余额汇总；已算出的组照常写出各自的余额文件和计算种子。新增单测覆盖断档和缺首次种子两种情形。集成 `statement-balance-gap` 新增 Step 6：导入三套模板后确认不产出部分汇总，第三组不补录后重算，回读汇总含三组账号。
+- 更新说明分支 `b06ff9c8`（T6）：去掉构建元数据后再判定和查找说明，预发布号仍排除。新增单测 2 项。
+- 第 1 条属于余额输出，修复后仍须人工复核。
+
+2026-10-29 Codex 第四轮只读审查 `main...release/v3.2.14`（`29e1dd9c`）确认第三轮 2 条修复完整：首次补录的优先级与提示口径不变，待处理时不缓存余额汇总；版本号归一后，启动快照、设置入口、确认 IPC 与写入记录一致；policyChanges 绑定无问题。另提出 1 条，按代码核实机制成立：
+
+| 等级 | 位置 | 问题 |
+| --- | --- | --- |
+| P2 · 涉及余额，须人工复核 | `src/main.js` `storeGeneratedBalanceSeeds` 与断档重算 | 同一银行的两个模板含同一账号和币种，且一个模板的日期覆盖另一个模板断档的建议补录日时，补录的人工种子会在重算中被另一模板的计算种子覆盖，断档反复提示，补录无法完成 |
+
+处理：用户决定本版不改种子覆盖规则，登记为 backlog B35。v3.2.13 本身也不支持同一账号跨模板（种子互相覆盖、合并汇总同一账号同一天两行），修复须先定口径。本轮没有代码改动，门禁证据沿用上一次 `release-check`（`cc35011f`）。

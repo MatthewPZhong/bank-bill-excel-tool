@@ -7,6 +7,7 @@ const { DatabaseSync } = require('node:sqlite');
 const {
   LINK_HEADERS,
   SOURCE_DEFINITIONS,
+  SOURCE_REQUIRED_FIELDS,
   SOURCE_TYPES
 } = require('../../main-process/position-reconciliation/constants');
 const {
@@ -378,7 +379,8 @@ function assertSourcePayload(payload, sourceType, businessKey) {
       `链接原始行 ${sourceType}/${businessKey} 不是对象`
     );
   }
-  const missing = SOURCE_DEFINITIONS[sourceType].headers.filter(
+  // 列名可随设置 → 模板文件的结构版本变化：只校验程序按名读取的必用列。
+  const missing = SOURCE_REQUIRED_FIELDS[sourceType].filter(
     (header) => !Object.prototype.hasOwnProperty.call(payload, header)
   );
   if (missing.length > 0) {

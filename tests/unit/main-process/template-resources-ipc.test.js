@@ -155,7 +155,7 @@ test('列表与详情由同一个应用目录服务返回', async (t) => {
   t.after(cleanup);
   const listed = await handlers.get('template-resources:list')({});
   assert.equal(listed.status, 'success');
-  assert.equal(listed.resources.length, 39);
+  assert.equal(listed.resources.length, 40);
   assert.equal(listed.resources[0].current.appVersion, '9.9.9');
   const detail = await handlers.get('template-resources:get')({}, 'gateway-recon');
   assert.equal(detail.resource.id, 'gateway-recon');

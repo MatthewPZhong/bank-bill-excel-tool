@@ -7,6 +7,8 @@ function createStatementGenerationHelpers(deps) {
     buildImportWarningDetailLines,
     buildImportWarningMessage,
     buildManualBalanceRequiredResult,
+    buildBalanceGapConfirmResult,
+    getAcknowledgedBalanceGapKeys,
     buildDetailExportRows,
     buildMappedRowsForFile,
     buildStatementGenerationConfig,
@@ -171,17 +173,22 @@ function createStatementGenerationHelpers(deps) {
           balanceTemplateFields,
           mode: preparedBatch.balanceMode,
           balanceAdjustments,
-          resolvePreviousEndBalance: ({ bankName, merchantId, currency, targetBillDate }) => {
-            const seedRecord = findPreviousBalanceSeed(ensureStorageRoot(), {
+          acknowledgedBalanceGapKeys: typeof getAcknowledgedBalanceGapKeys === 'function'
+            ? getAcknowledgedBalanceGapKeys()
+            : null,
+          resolvePreviousBalanceSeed: ({ bankName, merchantId, currency, targetBillDate, generationMethod }) => (
+            findPreviousBalanceSeed(ensureStorageRoot(), {
               bankName,
               merchantId,
               currency,
-              beforeBillDate: targetBillDate
-            });
-
-            return seedRecord ? seedRecord.endBalance : null;
-          }
+              beforeBillDate: targetBillDate,
+              generationMethod
+            })
+          )
         });
+        if (balanceResult.skippedBalanceGaps.length) {
+          warnings.push({ type: 'balance-gap-skipped', gaps: balanceResult.skippedBalanceGaps });
+        }
         const balanceOutput = buildStatementOutputFilePath({
           kind: 'balance',
           templateName: config.template.name,
@@ -229,6 +236,12 @@ function createStatementGenerationHelpers(deps) {
                 queueIndex,
                 queueTotal
               }
+            });
+          } else if (error.code === 'BALANCE_GAP_CONFIRM_REQUIRED') {
+            warnings.push({
+              type: 'balance-gap-confirm',
+              message: error.message,
+              gaps: Array.isArray(error.context?.gaps) ? error.context.gaps : []
             });
           } else {
             warnings.push({
@@ -378,6 +391,13 @@ function createStatementGenerationHelpers(deps) {
     return warnings.find((warning) => warning.type === 'balance-seed-required') || null;
   }
 
+  // 多个模板组各自返回的断档合并成一次确认。
+  function extractBalanceGapConfirmGaps(warnings = []) {
+    return warnings
+      .filter((warning) => warning.type === 'balance-gap-confirm')
+      .flatMap((warning) => (Array.isArray(warning.gaps) ? warning.gaps : []));
+  }
+
   function buildImportResultFromGeneratedFiles({
     generatedFiles,
     templateId,
@@ -404,6 +424,18 @@ function createStatementGenerationHelpers(deps) {
         manualResult.unmatchedBillSplitFiles = unmatchedBillSplitFiles;
       }
       return manualResult;
+    }
+
+    const balanceGaps = extractBalanceGapConfirmGaps(generatedFiles.warnings);
+    if (balanceGaps.length && typeof buildBalanceGapConfirmResult === 'function') {
+      const gapResult = buildBalanceGapConfirmResult(balanceGaps, generatedFiles);
+      if (unmatchedAmountSplitFiles.length) {
+        gapResult.unmatchedAmountSplitFiles = unmatchedAmountSplitFiles;
+      }
+      if (unmatchedBillSplitFiles.length) {
+        gapResult.unmatchedBillSplitFiles = unmatchedBillSplitFiles;
+      }
+      return gapResult;
     }
 
     if (generatedFiles.warnings.length) {
@@ -626,6 +658,7 @@ function createStatementGenerationHelpers(deps) {
     cacheCurrentStatementExports,
     createGenerationContext,
     extractManualBalancePromptWarning,
+    extractBalanceGapConfirmGaps,
     generateStatementFiles,
     generateFilesFromRememberedContext,
     getGeneratedStatementExport,

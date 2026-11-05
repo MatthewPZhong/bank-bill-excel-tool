@@ -258,6 +258,8 @@ async function runJob(message) {
       preflightReady: message.payload && message.payload.preflightReady,
       cancelToken: active.cancelToken,
       sstOptions: message.contractOptions && message.contractOptions.sstOptions,
+      sourceStructures: message.contractOptions && message.contractOptions.sourceStructures,
+      bankSourceHeaders: message.contractOptions && message.contractOptions.bankSourceHeaders,
       availableBytes: message.contractOptions && message.contractOptions.availableBytes,
       onProgress(progress) {
         active.stage = progress.stage || active.stage;
@@ -349,6 +351,8 @@ async function runJob(message) {
     sideDbPath: message.sideDbPath,
     cancelToken,
     sstOptions: message.contractOptions && message.contractOptions.sstOptions,
+    sourceStructures: message.contractOptions && message.contractOptions.sourceStructures,
+    bankSourceHeaders: message.contractOptions && message.contractOptions.bankSourceHeaders,
     onProgress(progress) {
       active.stage = progress.stage || active.stage;
       const memory = process.memoryUsage();
@@ -423,6 +427,8 @@ async function runJob(message) {
       cancelToken,
       allowedSourceTypes: message.featureFlags.streamingSourceTypes,
       sstOptions: message.contractOptions && message.contractOptions.sstOptions,
+      sourceStructures: message.contractOptions && message.contractOptions.sourceStructures,
+      bankSourceHeaders: message.contractOptions && message.contractOptions.bankSourceHeaders,
       availableBytes: message.contractOptions && message.contractOptions.availableBytes,
       onProgress(progress) {
         active.stage = progress.stage || active.stage;

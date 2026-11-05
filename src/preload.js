@@ -202,7 +202,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     setReconIdFixBillCategory: (category) => ipcRenderer.invoke('settings:set-recon-id-fix-bill-category', category),
     // v2.1.4 T3：左上角模块切换按钮的启用列表
     getEnabledModules: () => ipcRenderer.invoke('settings:get-enabled-modules'),
-    setEnabledModules: (moduleList) => ipcRenderer.invoke('settings:set-enabled-modules', moduleList)
+    setEnabledModules: (moduleList) => ipcRenderer.invoke('settings:set-enabled-modules', moduleList),
+    // v3.2.14：关闭升级后的「更新说明」弹窗时确认当前版本
+    acknowledgeReleaseNotes: (version) => ipcRenderer.invoke('settings:acknowledge-release-notes', version)
   },
   // v2.0.0-beta.3：银行对账单处理模块 — 场景 CRUD
   // v2.1.9 N5 Phase 5：新增 transfer / batchDelete（单条 + 批量同接口）
@@ -238,6 +240,8 @@ contextBridge.exposeInMainWorld('desktopApi', {
     //   - 返回 { status:'ok', values: string[] }；文件缺失/读取失败 → values 为 loader fallback（旧硬编码兜底）
     //   - 取代旧 appConstants.gatewayReconFields 同步常量（已移除 inline 副本）
     getGatewayReconHeaders: () => ipcRenderer.invoke('scenarios:gateway-recon-headers'),
+    // C4 单据模式主 / 从字段下拉：随设置 → 模板文件「单据对账导出不平」当前版本（appConstants 内联字段为回落值）。
+    getReconIdFixFields: () => ipcRenderer.invoke('scenarios:recon-id-fix-fields'),
     // v2.1.13 D-3：自带写死场景「适用银行渠道」读写（空数组 = 适用全部渠道）
     getApplicableChannels: (id) => ipcRenderer.invoke('scenarios:get-applicable-channels', id),
     setApplicableChannels: (id, channelIds) => ipcRenderer.invoke('scenarios:set-applicable-channels', id, channelIds)

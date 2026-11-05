@@ -47,10 +47,14 @@
 |---|---|
 | 开发 / lint | `npm start` / `npm run lint` |
 | 单测 / 覆盖率 | `npm run test:unit` / `npm run test:unit:coverage` |
+| 单个单测 | `node --test tests/unit/<文件>.test.js`（`test:unit` 不支持过滤，会跑全部） |
 | 集成 / smoke | `npm run test:integration` / `npm run smoke`；smoke 属于集成级验证 |
+| 单个集成脚本 | `node scripts/integration/<模块>-<功能>.js`；新脚本放该目录即被 runner 自动纳入 |
 | 完整本地门禁 | `npm run release-check` |
 | 界面预览 / 启动性能 | `npm run preview`、`npm run preview:account` / `npm run startup:measure` |
 | Windows 构建 | `npm run dist:win`（安装包＋便携版）、`npm run dist:win:portable`（便携版）、`npm run dist:win:setup`（NSIS 安装包） |
+
+`npm run test:integration`（含 `release-check`）全部通过且脚本增删或用例数变化时，会回写已跟踪的 `rules/integration-test-policy.md`「七」章节，工作区因此出现改动；单独运行集成脚本不回写，单测日志写入已忽略的 `logs/unit-tests/`。
 
 ## 存储位置
 除数据库外，以下相对路径均以 `Documents/网银账单生成小助手/` 为根目录。
@@ -72,7 +76,7 @@
 - 正式发布标签使用附注标签 `v<版本号>`，仅在 `release/<版本号>` 的 PR 合入远端 `main` 且最终检查通过后，创建到当前 `origin/main` 的提交并推送。
 - 当前版本线的紧急修复不等周一窗口：从最新正式标签对应提交建 `release/<下一补丁版本>`，只纳入修复，按 weekly-release 清单 C–G 完成门禁、PR、标签与发布核验。进行中的 release 若已占用该版本号，顺延为再下一个版本号，并在其 B6 合入 main 上的修复后重验。
 - 分支保留：已被正式标签包含的 release 与模块分支，在该版本发布核验完成后可删除，删除远端分支须按批列出并获授权；未被任何正式标签包含的分支不删，先确认去向（并入后续版本、登记 `knowledge/backlog.md` 顺延或注明废弃）。`main` 与旧版本维护线（如 `v1.5.x`）长期保留。
-- 每次发布同步更新 `CHANGELOG.md`、`docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md`。
+- 每次发布同步更新 `CHANGELOG.md`、`docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md`，以及升级后弹窗用的 `src/main-process/release-notes/release-notes.json`。
 
 ## 模块现行说明
 - [应用恢复与共享发布恢复](src/main-process/application-recovery/README.md)：应用阶段、平台扫描事实、participant/owner 接口、授权与调用边界。

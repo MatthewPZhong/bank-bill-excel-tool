@@ -18,6 +18,11 @@ const {
   normalizeCell,
   isRowMeaningful
 } = require('../file-service/common');
+const {
+  canonicalHeaderMapping,
+  describeHeaderMismatch,
+  projectRowToCanonical
+} = require('../file-service/header-structure-diff');
 
 const ERROR_CODE = 'PENDING_REMOVED_HEADER_MISMATCH';
 const TEMPLATE_LABEL = '移除归档 Pending';
@@ -73,6 +78,11 @@ const REMOVED_PENDING_COLUMNS = Object.freeze([
   '是否已流水替换'
 ]);
 
+// 设置 → 模板文件可替换结构时必须保留且同名的列：前 28 列与 Pending 主表一致，对账规则的 matchFields / compareFields
+//   只能引用 Pending 主表的列（engine.assertFieldsInPendingColumns），移除核对按这些列名读取 raw；6 个索引列也在其中。
+//   后 18 列流水扩展字段可改名、增删。入库与导出始终按内置 46 列（见 readRemovedPendingFile 的 structure）。
+const REMOVED_PENDING_REQUIRED_COLUMNS = Object.freeze(REMOVED_PENDING_COLUMNS.slice(0, 28));
+
 // 索引字段：与 removed_pending_rows 索引列、matchFields 公共字段对齐
 // 值从 raw 提取（列名即 REMOVED_PENDING_COLUMNS 中的同名列）
 const INDEX_FIELDS = Object.freeze([
@@ -84,25 +94,25 @@ const INDEX_FIELDS = Object.freeze([
   'bank_ref'
 ]);
 
-// 表头校验：列数 + 逐列内容（与模板严格对齐）
-function validateRemovedHeaders(headerRow) {
+// 表头校验：列数 + 逐列内容（与模板严格对齐）。expected 为当前结构（设置 → 模板文件的当前版本），缺省为内置 46 列。
+function validateRemovedHeaders(headerRow, expected = REMOVED_PENDING_COLUMNS) {
   if (!Array.isArray(headerRow)) {
     return { ok: false, error: '移除归档 Pending 表头不可读：不是数组' };
   }
-  if (headerRow.length !== REMOVED_PENDING_COLUMNS.length) {
+  if (headerRow.length !== expected.length) {
     return {
       ok: false,
-      error: `移除归档 Pending 表头列数不匹配：模板 ${REMOVED_PENDING_COLUMNS.length} 列，文件 ${headerRow.length} 列`,
-      detailLines: [`模板列数：${REMOVED_PENDING_COLUMNS.length}`, `文件列数：${headerRow.length}`]
+      error: `移除归档 Pending 表头列数不匹配：模板 ${expected.length} 列，文件 ${headerRow.length} 列`,
+      detailLines: [`模板列数：${expected.length}`, `文件列数：${headerRow.length}`]
     };
   }
-  for (let i = 0; i < REMOVED_PENDING_COLUMNS.length; i++) {
-    if (normalizeCell(headerRow[i]) !== REMOVED_PENDING_COLUMNS[i]) {
+  for (let i = 0; i < expected.length; i++) {
+    if (normalizeCell(headerRow[i]) !== expected[i]) {
       return {
         ok: false,
-        error: `移除归档 Pending 表头第 ${i + 1} 列不匹配：模板 "${REMOVED_PENDING_COLUMNS[i]}"，文件 "${normalizeCell(headerRow[i])}"`,
+        error: `移除归档 Pending 表头第 ${i + 1} 列不匹配：模板 "${expected[i]}"，文件 "${normalizeCell(headerRow[i])}"`,
         detailLines: [
-          `第 ${i + 1} 列模板："${REMOVED_PENDING_COLUMNS[i]}"`,
+          `第 ${i + 1} 列模板："${expected[i]}"`,
           `第 ${i + 1} 列文件："${normalizeCell(headerRow[i])}"`
         ]
       };
@@ -123,10 +133,12 @@ function readSheetAsRows(worksheet) {
 }
 
 // 把一行 cells（数组）映射成 { raw: {列名:值,...}, order_no, recon_id, 金额, channel, merchant_id, bank_ref }
-function mapRow(cells) {
+// sourceIndex：内置第 i 列取文件第几列（当前结构对应回内置列，见 canonicalHeaderMapping）；缺省为同位置。
+function mapRow(cells, sourceIndex = null) {
+  const values = sourceIndex ? projectRowToCanonical(cells, sourceIndex) : cells;
   const raw = {};
   for (let i = 0; i < REMOVED_PENDING_COLUMNS.length; i++) {
-    raw[REMOVED_PENDING_COLUMNS[i]] = normalizeCell(cells[i]);
+    raw[REMOVED_PENDING_COLUMNS[i]] = normalizeCell(values[i]);
   }
   const out = { raw };
   for (const f of INDEX_FIELDS) {
@@ -135,10 +147,22 @@ function mapRow(cells) {
   return out;
 }
 
+// 设置 → 模板文件：按导入时的读法（第 1 个 sheet 首行，格式化文本、去首尾空格、保留末尾空单元格）读出表头。
+function readRemovedPendingHeaders(filePath) {
+  const workbook = XLSX.readFile(filePath, { cellDates: false, cellNF: false });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return [];
+  const rows = readSheetAsRows(workbook.Sheets[sheetName]);
+  return Array.isArray(rows[0]) ? rows[0].map(normalizeCell) : [];
+}
+
 // 主入口：解析移除归档 Pending xlsx
 // 返回 { rows: [{raw, order_no, recon_id, 金额, channel, merchant_id, bank_ref, _rowIndex}], headerRow, sourceSheetName, totalRows, fileName, filePath }
 // 缺表头 / 空 sheet / 列数或内容不符 → 抛 FileValidationError
-function readRemovedPendingFile(filePath) {
+// structure：设置 → 模板文件当前版本 { label, headers }，缺省为内置 46 列。识别只认当前结构；
+//   入库前按列名（同位置改名按位置）对应回内置 46 列，存量数据、对账规则与导出不受版本影响。
+function readRemovedPendingFile(filePath, { structure = null } = {}) {
+  const expected = structure && Array.isArray(structure.headers) ? structure.headers : REMOVED_PENDING_COLUMNS;
   const fileName = path.basename(filePath);
   let workbook;
   try {
@@ -182,7 +206,7 @@ function readRemovedPendingFile(filePath) {
   }
 
   const headerRow = allRows[0];
-  const validation = validateRemovedHeaders(headerRow);
+  const validation = validateRemovedHeaders(headerRow, expected);
   if (!validation.ok) {
     throw new FileValidationError(
       ERROR_CODE,
@@ -191,14 +215,17 @@ function readRemovedPendingFile(filePath) {
         detailLines: [
           `文件：${fileName}`,
           `Sheet：${sourceSheetName}`,
-          ...(validation.detailLines || [])
+          ...describeHeaderMismatch({
+            sheets: [{ name: '', headers: Array.isArray(headerRow) ? headerRow.map(normalizeCell) : [] }],
+            candidates: [{ name: TEMPLATE_LABEL, headers: expected, versionLabel: structure && structure.label ? structure.label : '' }]
+          })
         ],
         context: {
           filePath,
           fileName,
           sourceSheetName,
           templateLabel: TEMPLATE_LABEL,
-          expectedColumnCount: REMOVED_PENDING_COLUMNS.length,
+          expectedColumnCount: expected.length,
           actualColumnCount: Array.isArray(headerRow) ? headerRow.length : 0
         }
       }
@@ -206,11 +233,12 @@ function readRemovedPendingFile(filePath) {
   }
 
   // 数据行：从第 2 行起；跳过全空行；_rowIndex 沿用 Excel 1-based 行号
+  const sourceIndex = expected === REMOVED_PENDING_COLUMNS ? null : canonicalHeaderMapping(REMOVED_PENDING_COLUMNS, expected).sourceIndex;
   const rows = [];
   for (let i = 1; i < allRows.length; i++) {
     const cells = allRows[i];
     if (!isRowMeaningful(cells)) continue;
-    const obj = mapRow(cells);
+    const obj = mapRow(cells, sourceIndex);
     obj._rowIndex = i + 1;
     rows.push(obj);
   }
@@ -227,8 +255,10 @@ function readRemovedPendingFile(filePath) {
 
 module.exports = {
   readRemovedPendingFile,
+  readRemovedPendingHeaders,
   validateRemovedHeaders,
   REMOVED_PENDING_COLUMNS,
+  REMOVED_PENDING_REQUIRED_COLUMNS,
   INDEX_FIELDS,
   ERROR_CODE,
   // 暴露给测试

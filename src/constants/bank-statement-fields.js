@@ -64,7 +64,18 @@ const BANK_STATEMENT_FIELDS_FOR_C3 = Object.freeze([
   BANK_STATEMENT_VIRTUAL_AMOUNT_ABS
 ]);
 
+// 设置 → 模板文件「银行对账单（导入识别结构）」：程序按列名读取的列（各模块计算、匹配、派生与导出映射），新结构须同名保留；
+//   场景配置引用的银行字段另按场景引用保护。其余列只随行写出，可改名、增删（读取时对应回内置 46 列）。
+//   无需同步到 preload（渲染层不使用）。
+const BANK_STATEMENT_REQUIRED_FIELDS = Object.freeze([
+  'BizId', 'BillDate', 'ValueDate', 'Channel', '地区', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount',
+  'ReconciliationId', 'ChannelOrderNo', 'CustomerRef', 'Account Reference', 'Transaction Description', 'Extra Information',
+  'Payment Detail', 'Payee Name', 'Payee CardNo', 'Drawee Name', 'Drawee CardNo', 'Extra Fee', 'FundType',
+  'Remark-description', '关联大账号', '清算网络'
+]);
+
 module.exports = {
+  BANK_STATEMENT_REQUIRED_FIELDS,
   BANK_STATEMENT_FIELDS,
   BANK_STATEMENT_FIELDS_FOR_C3,
   BANK_STATEMENT_VIRTUAL_AMOUNT_ABS

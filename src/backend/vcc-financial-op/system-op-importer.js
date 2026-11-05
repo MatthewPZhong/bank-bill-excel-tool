@@ -18,6 +18,7 @@ const {
   headersEqual,
   normalizeHeaderRow
 } = require('./definitions');
+const { createSourceProjection } = require('./source-structure');
 const {
   normalizeYearMonth,
   monthOfDate,
@@ -805,10 +806,12 @@ async function readSystemOpSheetCandidates(file, selectedSheet, targetMonth, wor
   if (!descriptor || descriptor.name !== selectedSheet.sheetName || workbook.date1904) {
     throw new Error(`${file.fileName}：系统 OP Sheet 身份或日期系统不符`);
   }
+  // 导入时结构（设置 → 模板文件用户版本）：按它定位表头与财务余额列，读出后对应回内置 16 列再解析（见 source-structure.js）。
+  const projection = createSourceProjection(SYSTEM_OP_HEADERS, selectedSheet.sourceHeaders);
   const displayMatrix = [];
   const rawMatrix = [];
   const balanceLexicalTokens = new Map();
-  const balanceColumn = SYSTEM_OP_DEFINITION.indexes[SYSTEM_OP_DEFINITION.balanceHeader];
+  const balanceColumn = projection.indexOf(SYSTEM_OP_DEFINITION.balanceHeader);
   let actualRows = 0;
   let locatedHeaderRow = selectedSheet.headerRow;
   let header = null;
@@ -827,7 +830,7 @@ async function readSystemOpSheetCandidates(file, selectedSheet, targetMonth, wor
       }
       rawMatrix[row.rowIndex - 1] = raw;
       displayMatrix[row.rowIndex - 1] = display;
-      if (headersEqual(display, SYSTEM_OP_HEADERS)) {
+      if (headersEqual(display, projection.headers)) {
         if (header || (locatedHeaderRow !== undefined && locatedHeaderRow !== row.rowIndex)) {
           throw new Error('系统 OP 表头位置已变化或存在重复业务表头');
         }
@@ -844,9 +847,13 @@ async function readSystemOpSheetCandidates(file, selectedSheet, targetMonth, wor
     onReadProgress?.(actualRows);
   }
   if (!header) throw new Error('系统 OP 未找到预检指定的正式表头');
+  // 导入时结构宽度之外的单元格接在内置列之后，“模板外列”检查照常生效；内置结构时原样。
+  const toCanonical = (matrix) => (projection.custom
+    ? Array.from(matrix, (row) => (Array.isArray(row) ? projection.project(row, { keepTail: true }) : row))
+    : matrix);
   return { ...parseSystemOpSnapshotCandidates({ normalizedMonth, sourceFile: file.fileName || path.basename(file.filePath),
     sheetName: selectedSheet.sheetName, sheetIndex: selectedSheet.sheetIndex, physicalFileId: file.physicalFileId,
-    displayMatrix, rawMatrix, balanceLexicalTokens, header }), actualRows };
+    displayMatrix: toCanonical(displayMatrix), rawMatrix: toCanonical(rawMatrix), balanceLexicalTokens, header }), actualRows };
 }
 
 async function importSystemOpWorkbookGroup(options) {

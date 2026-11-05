@@ -28,7 +28,6 @@ const {
 } = require('../xlsx/number-date');
 const {
   BANK_SHEET_NAME,
-  POSITION_BANK_HEADERS,
   SOURCE_DEFINITIONS
 } = require('../../main-process/position-reconciliation/constants');
 const {
@@ -37,8 +36,10 @@ const {
   text
 } = require('../../main-process/position-reconciliation/common');
 const {
-  BANK_STATEMENT_FIELDS
-} = require('../../constants/bank-statement-fields');
+  bankHeaderMismatchLines,
+  sourceHeaderMismatchLines
+} = require('../../main-process/position-reconciliation/header-mismatch');
+const { bankSourceStructure } = require('../../main-process/position-reconciliation/source-structures');
 const {
   loadSharedStringsProvider
 } = require('../xlsx/shared-strings-provider');
@@ -285,7 +286,9 @@ async function readPhysicalHeader(workbook, sheet, cancelToken = null) {
   return header;
 }
 
-async function locatePositionBusinessSheet(workbook, kind, cancelToken = null) {
+// definitions：本次导入使用的来源表结构（当前启用版本），缺省为内置结构。
+// bankSourceHeaders：银行对账单导入识别结构的当前用户版本（D17，与内置 46 / 49 列同时接受）。
+async function locatePositionBusinessSheet(workbook, kind, cancelToken = null, definitions = SOURCE_DEFINITIONS, bankSourceHeaders = null) {
   if (kind === 'bank') {
     const sheet = workbook.sheets.find((candidate) => candidate.name === BANK_SHEET_NAME);
     if (!sheet) {
@@ -296,29 +299,29 @@ async function locatePositionBusinessSheet(workbook, kind, cancelToken = null) {
       );
     }
     const headers = await readPhysicalHeader(workbook, sheet, cancelToken);
-    if (!headersEqual(headers, BANK_STATEMENT_FIELDS) &&
-        !headersEqual(headers, POSITION_BANK_HEADERS)) {
+    const structure = bankSourceStructure(headers, bankSourceHeaders);
+    if (!structure) {
       throw new PositionReconciliationError(
         'position-bank-headers-invalid',
-        `银行对账单表头不符合 46/49 列契约：${workbook.sourceFile}`,
-        [
-          `实际列数：${headers.length}`,
-          `实际表头：${headers.join(' / ')}`
-        ]
+        `银行对账单表头不符合 46/49 列契约${bankSourceHeaders ? '或当前版本' : ''}：${workbook.sourceFile}`,
+        bankHeaderMismatchLines(headers, bankSourceHeaders)
       );
     }
     return {
       sheet,
       sourceType: null,
       definition: null,
-      headers
+      headers,
+      project: structure.project
     };
   }
 
   const matches = [];
+  const sheetHeaders = [];
   for (const sheet of workbook.sheets) {
     const headers = await readPhysicalHeader(workbook, sheet, cancelToken);
-    for (const [sourceType, definition] of Object.entries(SOURCE_DEFINITIONS)) {
+    sheetHeaders.push({ name: sheet.name, headers });
+    for (const [sourceType, definition] of Object.entries(definitions)) {
       if (headersEqual(headers, definition.headers)) {
         matches.push({ sheet, sourceType, definition, headers });
       }
@@ -327,7 +330,8 @@ async function locatePositionBusinessSheet(workbook, kind, cancelToken = null) {
   if (matches.length === 0) {
     throw new PositionReconciliationError(
       'position-source-unrecognized',
-      `无法通过表头识别链接原始表：${workbook.sourceFile}`
+      `无法通过表头识别链接原始表：${workbook.sourceFile}`,
+      sourceHeaderMismatchLines(sheetHeaders, definitions)
     );
   }
   if (matches.length > 1) {
@@ -418,9 +422,13 @@ async function streamPositionXlsxRows(filePath, options = {}) {
     const detected = await locatePositionBusinessSheet(
       workbook,
       kind,
-      options.cancelToken
+      options.cancelToken,
+      options.sourceDefinitions || SOURCE_DEFINITIONS,
+      options.bankSourceHeaders || null
     );
     const sourceHeaders = detected.headers;
+    // 银行对账单按当前版本读取时，行对应回内置 46 列名再交给预检 / 写入（按列名取值）。
+    const project = detected.project || ((value) => value);
     let nonBlankRowCount = 0;
     await scanXlsxSheet({
       zip: workbook.zip,
@@ -442,7 +450,7 @@ async function streamPositionXlsxRows(filePath, options = {}) {
         nonBlankRowCount += 1;
         if (typeof options.onRow === 'function') {
           options.onRow({
-            row,
+            row: project(row),
             excelRowNumber: toolboxRow.rowIndex,
             sourceType: detected.sourceType,
             sourceHeaders,

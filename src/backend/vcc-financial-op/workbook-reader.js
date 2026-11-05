@@ -25,6 +25,7 @@ const {
   isSystemOpHeaders,
   normalizeHeaderRow
 } = require('./definitions');
+const { createSourceProjection } = require('./source-structure');
 const {
   legacyPendingUpgradeDetails,
   pendingHeaderCandidate,
@@ -335,6 +336,17 @@ async function inspectSourceFile(filePath) {
   }
 }
 
+// 设置 → 模板文件导入预检：与正式导入相同的流式读法读出第 1 个工作表首个非空行（核对模板表头读取口径）。
+async function readFirstSheetHeaderRow(filePath) {
+  const workbook = await openWorkbookSheets(filePath);
+  try {
+    const rows = await previewSheet(workbook, workbook.sheets[0], 1);
+    return rows.length ? rows[0].values : [];
+  } finally {
+    await workbook.close();
+  }
+}
+
 async function inspectSourceFiles(filePaths) {
   const results = [];
   for (const filePath of filePaths || []) results.push(await inspectSourceFile(filePath));
@@ -428,8 +440,17 @@ async function streamStoredDetailRows(filePath, sourceType, rawContractVersion, 
     indexes: Object.fromEntries(headers.map((header, index) => [header, index])) });
 }
 
-async function streamRowsWithDefinition(filePath, sourceType, { onDataRow, onProgress, workbook: sharedWorkbook, ...selection } = {}, definition) {
-  if (!definition) throw new Error(`不支持的明细原表类型：${sourceType}`);
+// sourceHeaders：导入时结构（用户版本，见 source-structure.js）。表头定位、业务键单元格类型按它取，
+//   读出的行立即对应回 definition.headers 的内置列序，onDataRow 收到的 values 始终为内置列序。
+async function streamRowsWithDefinition(filePath, sourceType, {
+  onDataRow, onProgress, workbook: sharedWorkbook, sourceHeaders, ...selection
+} = {}, canonicalDefinition) {
+  if (!canonicalDefinition) throw new Error(`不支持的明细原表类型：${sourceType}`);
+  const projection = createSourceProjection(canonicalDefinition.headers, sourceHeaders);
+  const definition = projection.custom
+    ? { ...canonicalDefinition, headers: projection.headers,
+      indexes: Object.fromEntries(projection.headers.map((header, index) => [header, index])) }
+    : canonicalDefinition;
   const workbook = sharedWorkbook || await openWorkbookSheets(filePath);
   try {
     const found = await findDetailSheet(workbook, definition, selection);
@@ -448,7 +469,7 @@ async function streamRowsWithDefinition(filePath, sourceType, { onDataRow, onPro
       onRow: ({ rowR, values, hasAnyCellText, cellTypes }) => {
         if (rowR === found.headerRow) {
           if (!headersEqual(values, definition.headers)) {
-            if (sourceType === SOURCE_TYPES.PENDING) {
+            if (sourceType === SOURCE_TYPES.PENDING && !projection.custom) {
               if (isLegacyPendingHeaders(values)) {
                 throw legacyPendingTemplateError(workbook.sourceFile, [{
                   sheetName: found.sheet.name,
@@ -474,7 +495,7 @@ async function streamRowsWithDefinition(filePath, sourceType, { onDataRow, onPro
         rowCount += 1;
         onDataRow({
           rowR,
-          values,
+          values: projection.project(values),
           sourceFile: workbook.sourceFile,
           sheetName: found.sheet.name,
           keyCellType: cellTypes && cellTypes[definition.indexes[definition.keyHeader]]
@@ -503,5 +524,6 @@ module.exports = {
   legacyPendingTemplateError,
   inspectSourceFile,
   inspectSourceFiles,
+  readFirstSheetHeaderRow,
   streamDetailRows
 };

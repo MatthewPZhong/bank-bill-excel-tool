@@ -68,6 +68,30 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     await js(`scenarioFixture.click('cancel')`);
     assert.deepEqual(await js(`({count:scenarioFixture.root.children.length,top:scenarioFixture.managerHandle.isTop(),writes:scenarioFixture.calls.filter(call=>call.name==='update').length})`), {count:1,top:true,writes:0});
   });
+  await test('C4 单据模式配置：主 / 从字段下拉随模板文件当前版本刷新', async () => {
+    await setup();
+    await js(`(async()=>{
+      const f=scenarioFixture;
+      f.rows=[{id:9,category:'recon-id-fix',name:'单据修复',priority:1,enabled:true,isBuiltin:false,channelId:1,displayIndex:1,
+        config:{matchRules:{oneToOne:true,oneToMany:false,manyToOne:false},
+          billTypes:[{seq:1,side:'main',conditions:[{field:'customerId',op:'等于',value:'0'}]},{seq:2,side:'opp',conditions:[{field:'AccountNo',op:'等于',value:'2'}]}],
+          reconGroups:[{leftTypeSeq:1,rightTypeSeq:2,fieldPairs:[{leftField:'Amount',rightField:'Amount',locked:true}]}],
+          output:{mode:'main',idEnabled:false}}}];
+      f.commands=ScenarioCommandService.createScenarioCommandService({scenariosApi:{...window.desktopApi.scenarios,
+        getReconIdFixFields:async()=>({status:'ok',businessBillFields:['BillDate','Amount','customerId'],opponentBillFields:['BillDate','Amount','AccountNo']})},
+        channelsApi:window.desktopApi.channels,publish:event=>f.router.route(event)});
+      f.dialogs=__rendererDialogs.createRendererDialogs({modalBridge:f.bridge,configurationServices:ConfigurationServices.createConfigurationServices({templatesApi:{}}),configurationApi:{},dialogApis:{},reportLog:()=>{},
+        appConstants:{bankStatementFields:[],businessBillFields:['BillDate','Amount','clientId'],opponentBillFields:['BillDate','Amount','AccountId']},scenarioCommands:f.commands,scenarioSubscriptions:f.subscriptions});
+      f.bridge.host.closeOwner && f.bridge.host.closeOwner(f.manager && f.manager.dataset ? f.manager.dataset.owner : undefined, 'navigation');
+      f.root.innerHTML='';
+      const opened=f.bridge.openModal(()=>{f.manager=f.dialogs.createScenariosManagerDialog(['recon-id-fix']);return f.manager;});f.managerHandle=opened.handle;
+    })()`);
+    await settle(); await js('scenarioFixture.edit()'); await settle(); await settle();
+    const options = await js(`[...scenarioFixture.top().querySelectorAll('[data-c4-cond-field="field"]')].map(select=>[...select.options].map(option=>option.value).filter(Boolean))`);
+    assert.deepEqual(options, [['BillDate', 'Amount', 'customerId'], ['BillDate', 'Amount', 'AccountNo']]);
+    assert.deepEqual(await js('window.__testErrors'), []);
+  });
+
   await test('保存失败告警关闭后保留草稿，重试成功先通知 service 再返回原父层', async () => {
     await setup(); await js('scenarioFixture.edit()'); await settle();
     await js(`scenarioFixture.setName('失败仍保留');scenarioFixture.click('confirm');scenarioFixture.failure={status:'failed',message:'fixture保存失败'};scenarioFixture.click('finish');`); await settle();

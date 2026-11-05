@@ -296,6 +296,50 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     assert.deepEqual(result,{confirmation:true,left:'left',cancelled:['source-a','source-b'],applied:0,count:0});
   });
 
+  await test('Position 源表导入被拒或全部失败时弹出原因，进度弹窗关闭且无未处理异常', async () => {
+    await setup();
+    const result = await js(`(async()=>{
+      fixture.api.prepareSourceImport=async()=>{throw new Error("Error invoking remote method 'position-reconciliation:source:prepare-import': PositionReconciliationError: 平盘导入 utilityProcess 异常退出");};
+      await fixture.ui.handleSourceImport();await fixture.tick();
+      const rejected=document.getElementById('modalRoot').textContent;
+      fixture.clickText('确认');await fixture.tick();
+      fixture.api.prepareSourceImport=async()=>({status:'failed',message:'所选链接原始表全部导入失败',results:[
+        {status:'failed',fileName:'gateway.xlsx',message:'无法通过表头识别链接原始表：gateway.xlsx',
+          detailLines:['第 20 列（T）：应为「fieldId」，实际为「fileId」']}]});
+      await fixture.ui.handleSourceImport();await fixture.tick();
+      const failed=document.getElementById('modalRoot').textContent;
+      return {rejected,failed,progress:document.querySelectorAll('.position-import-progress-dialog').length,errors:window.__testErrors};
+    })()`);
+    assert.match(result.rejected,/平盘导入 utilityProcess 异常退出/);
+    assert.doesNotMatch(result.rejected,/Error invoking remote method/);
+    assert.match(result.failed,/gateway\.xlsx：无法通过表头识别链接原始表/);
+    assert.match(result.failed,/应为「fieldId」，实际为「fileId」/);
+    assert.equal(result.progress,0);
+    assert.deepEqual(result.errors,[]);
+  });
+
+  await test('Position 银行写入与账户表替换 IPC 被拒时弹出原因，无未处理异常', async () => {
+    await setup();
+    const result = await js(`(async()=>{
+      fixture.api.prepareBankImport=async()=>({status:'needs-confirmation',token:'bank-prepared',fileCount:1,rowCount:12});
+      fixture.api.applyBankImport=async()=>{throw new Error("Error invoking remote method 'position-reconciliation:bank:apply-import': PositionReconciliationError: 银行导入确认已失效，请重新选择文件");};
+      const bankTask=fixture.ui.handleBankImport();await fixture.tick();await fixture.tick();
+      fixture.clickText('确认导入');await bankTask;await fixture.tick();
+      const bank=document.getElementById('modalRoot').textContent;
+      fixture.clickText('确认');await fixture.tick();
+      fixture.api.prepareSourceImport=async()=>({status:'ok',results:[{status:'needs-confirmation',token:'account-a',oldValidCount:5,newValidCount:10}]});
+      fixture.api.applySourceImport=async()=>{throw new Error("Error invoking remote method 'position-reconciliation:source:apply-import': PositionReconciliationError: 账户表导入确认已失效，请重新选择文件");};
+      const sourceTask=fixture.ui.handleSourceImport();await fixture.tick();await fixture.tick();
+      fixture.clickText('确认替换');await sourceTask;await fixture.tick();
+      const account=document.getElementById('modalRoot').textContent;
+      return {bank,account,errors:window.__testErrors};
+    })()`);
+    assert.match(result.bank,/银行导入确认已失效/);
+    assert.match(result.account,/账户表导入确认已失效/);
+    assert.doesNotMatch(result.bank + result.account,/Error invoking remote method/);
+    assert.deepEqual(result.errors,[]);
+  });
+
   await test('Position 已提交银行写入仍拒绝导航，不把提交当作取消', async () => {
     await setup();
     const result = await js(`(async()=>{

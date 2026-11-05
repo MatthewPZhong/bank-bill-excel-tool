@@ -24,7 +24,9 @@ const { createBizOpUpgrade } = require('./upgrade-main');
 const { RELEASE_GATES, evaluateReleaseGates } = require('./release-gates');
 const { ACTIONS, fail, hash } = require('./contracts');
 
-function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveService, getRuntime, budgetOptions, releaseGates = RELEASE_GATES, productionRequests = false, publicationPublish }) {
+// resolveSourceStructures：设置 → 模板文件当前导入识别结构（{ FLOW: { headers, versionLabel } } 或 null），每次导入开始时解析并冻结进计划。
+function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveService, getRuntime, budgetOptions, releaseGates = RELEASE_GATES, productionRequests = false, publicationPublish,
+  resolveSourceStructures = null }) {
   releaseGates = structuredClone(releaseGates);
   const releaseDecision = evaluateReleaseGates(releaseGates);
   const catalog = createBizOpCatalog(db, { assertCommitReady(op) {
@@ -106,7 +108,7 @@ function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveServ
   const deletion = createBizOpDeleteCoordinator({ ...mainBindings, previews, preservation });
   sources.setPublication(publication);
   const activation = createBizOpUpgrade({ ...mainBindings, readRepository, releaseGates });
-  const imports = createBizOpImportCoordinator(mainBindings);
+  const imports = createBizOpImportCoordinator({ ...mainBindings, resolveSourceStructures });
   const compute = createBizOpComputeCoordinator(mainBindings);
   sources.setBeforeFinalize((taskRunId) => imports.restoreDiagnostic(taskRunId));
   async function executeCandidateValidation({ runtime, taskContext, artifactId, candidateRef }) {

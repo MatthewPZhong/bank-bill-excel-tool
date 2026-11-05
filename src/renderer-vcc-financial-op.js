@@ -488,7 +488,9 @@
             <strong>${escapeHtml(source.fileName)} / ${escapeHtml(source.sheetName)}</strong>
             <span>第 ${source.sheetIndex + 1} 张 · ${source.visibility === 'visible' ? '可见' : '隐藏'} · ${escapeHtml(statusText[source.status] || source.status)}</span>
             <span>${escapeHtml(SOURCE_LABELS[source.sourceType] || '')}${source.headerRow ? ` · 表头第 ${source.headerRow} 行` : ''}</span>
-            ${(source.diagnostics || []).map((item) => `<span>${escapeHtml(item.message)}</span>`).join('')}
+            ${(source.diagnostics || []).map((item) => `<span>${escapeHtml(item.message)}</span>${Array.isArray(item.detailLines) && item.detailLines.length
+    ? `<span style="font-size:12px;color:var(--muted);">${item.detailLines.map(escapeHtml).join('<br>')}</span>`
+    : ''}`).join('')}
           </div>
           ${source.status === 'ready' && source.requiresSubject
     ? `<label class="vcc-fin-op-inline-field"><span>公司主体</span><input class="vcc-fin-op-input" data-subject-index="${index}" type="text" autocomplete="off"></label>`

@@ -23,6 +23,7 @@ const {
   stableJson
 } = require('./common');
 const { BANK_STATEMENT_FIELDS } = require('../../constants/bank-statement-fields');
+const { bankHeaderMismatchLines, sourceHeaderMismatchLines } = require('./header-mismatch');
 
 const POSITION_SUPPORTED_EXTENSIONS = new Set(['.xlsx', '.xls']);
 
@@ -146,10 +147,7 @@ function readBankFiles(filePaths) {
       throw new PositionReconciliationError(
         'position-bank-headers-invalid',
         `银行对账单表头不符合 46/49 列契约：${path.basename(filePath)}`,
-        [
-          `实际列数：${actualHeaders.length}`,
-          `实际表头：${actualHeaders.join(' / ')}`
-        ]
+        bankHeaderMismatchLines(actualHeaders)
       );
     }
 
@@ -226,13 +224,15 @@ function readBankFiles(filePaths) {
   };
 }
 
-function detectSourceSheet(workbook, fileName) {
+function detectSourceSheet(workbook, fileName, definitions = SOURCE_DEFINITIONS) {
   const matches = [];
+  const sheetHeaders = [];
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
     const rows = rowValues(sheet);
     const headers = normalizeHeaderRow(rows[0]);
-    for (const [sourceType, definition] of Object.entries(SOURCE_DEFINITIONS)) {
+    sheetHeaders.push({ name: sheetName, headers });
+    for (const [sourceType, definition] of Object.entries(definitions)) {
       if (headersEqual(headers, definition.headers)) {
         matches.push({ sourceType, definition, sheetName, rows });
       }
@@ -241,7 +241,8 @@ function detectSourceSheet(workbook, fileName) {
   if (matches.length === 0) {
     throw new PositionReconciliationError(
       'position-source-unrecognized',
-      `无法通过表头识别链接原始表：${fileName}`
+      `无法通过表头识别链接原始表：${fileName}`,
+      sourceHeaderMismatchLines(sheetHeaders, definitions)
     );
   }
   if (matches.length > 1) {
@@ -369,12 +370,13 @@ function classifySourceRow(sourceType, row) {
   return { disposition: 'invalid', validation, filter: null };
 }
 
-function readSourceFile(input, { identityMode = 'business-key' } = {}) {
+// sourceDefinitions：本次导入的链接原始表结构（设置 → 模板文件的当前版本），缺省为内置结构。
+function readSourceFile(input, { identityMode = 'business-key', sourceDefinitions = SOURCE_DEFINITIONS } = {}) {
   const descriptor = normalizeFileInput(input);
   const filePath = descriptor.filePath;
   const workbook = ensureReadableWorkbook(filePath);
   const fileName = descriptor.sourceFileName;
-  const detected = detectSourceSheet(workbook, fileName);
+  const detected = detectSourceSheet(workbook, fileName, sourceDefinitions);
   const parsedRows = objectsFromRows(detected.rows, detected.definition.headers);
   if (parsedRows.length === 0) {
     throw new PositionReconciliationError(
@@ -479,7 +481,7 @@ function readSourceFile(input, { identityMode = 'business-key' } = {}) {
   };
 }
 
-function readSourceFiles(filePaths, { identityMode = 'business-key' } = {}) {
+function readSourceFiles(filePaths, { identityMode = 'business-key', sourceDefinitions = SOURCE_DEFINITIONS } = {}) {
   const paths = Array.isArray(filePaths) ? filePaths : [];
   if (paths.length === 0) {
     throw new PositionReconciliationError('position-source-files-empty', '请选择至少一份链接原始表');
@@ -490,7 +492,7 @@ function readSourceFiles(filePaths, { identityMode = 'business-key' } = {}) {
   for (const input of paths) {
     const descriptor = normalizeFileInput(input);
     try {
-      const parsed = readSourceFile(descriptor, { identityMode });
+      const parsed = readSourceFile(descriptor, { identityMode, sourceDefinitions });
       const conflicting = [];
       if (
         parsed.sourceType === SOURCE_TYPES.BANK_ACCOUNT

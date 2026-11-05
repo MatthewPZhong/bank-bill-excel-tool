@@ -54,8 +54,11 @@ function resourceOrCancel(error, cancelToken) {
     || error instanceof AggregateError;
 }
 
+// sourceStructures：计划文档中冻结的设置 → 模板文件当前结构（{ FLOW: { headers, versionLabel } }，仅用户版本）。
 async function runImportPipeline({ payloadStore, taskRunId, intentDigest, candidateRef, reportRef, files, planDigest = intentDigest,
-  cancelToken = { cancelled: false }, options = {}, memoryConfig = null }) {
+  cancelToken = { cancelled: false }, options = {}, memoryConfig = null, sourceStructures = null }) {
+  const flowHeaders = Array.isArray(sourceStructures?.FLOW?.headers) && sourceStructures.FLOW.headers.length
+    ? sourceStructures.FLOW.headers : null;
   const safePoint = () => { checkExecutionMemory(memoryConfig); if (cancelToken.cancelled) fail('BIZOP_CANCELLED', '业务 OP 导入已取消'); };
   const report = payloadStore.prepareCandidate(taskRunId, reportRef);
   const router = createCandidateRouter({ payloadStore, taskRunId, intentDigest, safePoint,
@@ -103,7 +106,11 @@ async function runImportPipeline({ payloadStore, taskRunId, intentDigest, candid
         });
         await workbook.scan((row) => {
           safePoint();
-          if (!adapter) { kind = detectHeader(row); adapter = createImportAdapter(kind); return; }
+          if (!adapter) {
+            kind = detectHeader(row, { flowHeaders });
+            adapter = createImportAdapter(kind, { sourceHeaders: kind === 'FLOW' ? flowHeaders : null });
+            return;
+          }
           const adapted = adapter.adapt(row);
           if (adapted.blank) return;
           counters.scannedDataRows += 1; summary.scannedDataRows += 1;
@@ -115,7 +122,10 @@ async function runImportPipeline({ payloadStore, taskRunId, intentDigest, candid
               cells: row.cells.map((cell) => ({ columnIndex: cell.columnIndex, value: cellText(cell), type: cell.cellType })) });
           } else {
             counters.acceptedRows += 1; summary.acceptedRows += 1;
-            if (!counters.batchRejected) router.append(adapted, { ...file, sheetName: workbook.sheet.name });
+            if (!counters.batchRejected) {
+              router.append(adapted, { ...file, sheetName: workbook.sheet.name,
+                sourceHeaders: kind === 'FLOW' ? flowHeaders : null });
+            }
           }
           if (counters.scannedDataRows % 1024 === 0) metrics.peakRss = Math.max(metrics.peakRss, process.memoryUsage().rss);
         });

@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const acorn = require('acorn');
+const { bankStatementSourceHeaders, resolveBankStatementStructure } = require('../../src/main-process/bank-statement-structure');
 const { createPositionReconciliationService } = require('../../src/main-process/position-reconciliation/service');
 const { dispatchPositionLargeImportSchemaMigration } = require('../../src/main-process/position-reconciliation/import-dispatch');
 const { authorizePositionImportApply } = require('../../src/main-process/position-reconciliation/operation-lifecycle');
@@ -28,7 +29,8 @@ function createPositionStartupRecoveryHarness({ database, diagnostics, tracked }
     const { database, path, randomUUID, __dirname, createPositionReconciliationService,
       dispatchPositionLargeImportSchemaMigration, authorizePositionImportApply,
       POSITION_SIDE_DB_CHECKPOINT_SETTING, POSITION_SIDE_DB_BOOTSTRAP_SETTING,
-      appendActivityLogEntry, trackArchiveOperationPromise, getTemplateResourceService } = dependencies;
+      appendActivityLogEntry, trackArchiveOperationPromise, getTemplateResourceService,
+      resolvePositionSourceStructures, bankStatementSourceHeaders, resolveBankStatementStructure } = dependencies;
     let positionTaskOwner;
     let archiveCenterService;
     let positionReconciliationService = null;
@@ -51,6 +53,11 @@ function createPositionStartupRecoveryHarness({ database, diagnostics, tracked }
     authorizePositionImportApply, ...constants,
     // 恢复测试不涉及模板版本：来源为空时服务沿用固定的内置模板路径。
     getTemplateResourceService: () => ({ source: () => null }),
+    // 链接原始表结构不注入解析器时，服务按内置结构导入。
+    resolvePositionSourceStructures: null,
+    // 银行对账单导入识别结构：模板来源为空时解析回落内置（只认内置 46 / 49 列）。
+    bankStatementSourceHeaders,
+    resolveBankStatementStructure,
     appendActivityLogEntry: (entry) => diagnostics.push(entry),
     trackArchiveOperationPromise(promise) {
       tracked.push(promise);

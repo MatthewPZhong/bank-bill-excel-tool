@@ -1,6 +1,7 @@
 'use strict';
 
 const { BIZ_OP_HEADERS, FLOW_HEADERS } = require('../../backend/biz-op-recon-db/columns');
+const { canonicalHeaderMapping, describeHeaderMismatch } = require('../../backend/file-service/header-structure-diff');
 const { classifyExcelNumberFormat } = require('../../backend/xlsx/number-date');
 const { canonicalizeDecimal, addCanonicalDecimals, subtractCanonicalDecimals,
   compareCanonicalDecimals, absoluteDecimal } = require('../financial-decimal');
@@ -70,23 +71,47 @@ function structuralErrors(row, width) {
   }
   return errors;
 }
-function detectHeader(row) {
+// flowHeaders：流水的导入时结构（设置 → 模板文件用户版本；导入时取当前版本，重读原件时取数据集记录的结构）。
+//   不传时为内置 28 列。业务 OP 账单（OP）不随模板版本变化。
+function detectHeader(row, { flowHeaders = null } = {}) {
   if (row.rowIndex !== 1) reject('表头必须位于第一行');
   const cells = new Map(row.cells.map((cell) => [cell.columnIndex, cell]));
-  for (const [kind, headers] of [['OP', BIZ_OP_HEADERS], ['FLOW', FLOW_HEADERS]]) {
+  const flow = flowHeaders || FLOW_HEADERS;
+  for (const [kind, headers] of [['OP', BIZ_OP_HEADERS], ['FLOW', flow]]) {
     if (!structuralErrors(row, headers.length).length && headers.every((header, index) => cellText(cells.get(index)) === header)) return kind;
   }
-  reject('表头必须完整匹配 OP 23 列或流水 28 列原表，不能回导生成表');
+  // 与最接近的结构逐列比较（流水按当前结构），附模板文件指引。
+  const width = Math.max(0, ...row.cells.map((cell) => cell.columnIndex + 1));
+  const actual = Array.from({ length: width }, (_, index) => cellText(cells.get(index)));
+  const lines = describeHeaderMismatch({ sheets: [{ name: '', headers: actual }],
+    candidates: [{ name: '业务 OP 账单', headers: BIZ_OP_HEADERS }, { name: '流水对账单', headers: flow, versionLabel: flowHeaders ? '用户版本' : '' }] });
+  reject(`表头必须完整匹配 OP 23 列或流水 ${flow.length} 列原表，不能回导生成表：${lines.slice(0, 12).join('；')}`);
 }
-function createImportAdapter(kind) {
+// 流水按导入时结构读取时，单元格对应回内置 28 列下标（canonicalHeaderMapping）；其后的列下标、校验与投影不变。
+function flowColumnMap(sourceHeaders) {
+  if (!Array.isArray(sourceHeaders) || !sourceHeaders.length) return null;
+  return canonicalHeaderMapping(FLOW_HEADERS, sourceHeaders).sourceIndex;
+}
+function createImportAdapter(kind, { sourceHeaders = null } = {}) {
   if (!['OP', 'FLOW'].includes(kind)) throw new TypeError('未知导入类型');
   const headers = kind === 'OP' ? BIZ_OP_HEADERS : FLOW_HEADERS;
+  const columnMap = kind === 'FLOW' ? flowColumnMap(sourceHeaders) : null;
+  const width = columnMap ? sourceHeaders.length : headers.length;
   let firstBu = null;
   let firstDate = null;
+  // 按内置列下标取单元格（内置结构时即原列）。
+  const cellsOf = (row) => {
+    const byColumn = new Map(row.cells.map((cell) => [cell.columnIndex, cell]));
+    if (!columnMap) return byColumn;
+    const cells = new Map();
+    columnMap.forEach((source, index) => { if (source >= 0 && byColumn.has(source)) cells.set(index, byColumn.get(source)); });
+    return cells;
+  };
   return Object.freeze({
+    cellsOf,
     adapt(row) {
-      const errors = structuralErrors(row, headers.length);
-      const cells = new Map(row.cells.map((cell) => [cell.columnIndex, cell]));
+      const errors = structuralErrors(row, width);
+      const cells = cellsOf(row);
       if (!errors.length && row.cells.every((cell) => cellText(cell) === '')) return { blank: true };
       const values = headers.map((_, index) => cellText(cells.get(index)));
       const normalize = (index, parser, optional = false) => {

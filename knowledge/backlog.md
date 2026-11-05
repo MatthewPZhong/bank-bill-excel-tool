@@ -20,6 +20,90 @@
 
 ## 未实施
 
+### B42（P2 · 已知问题）输入表「恢复默认」不检查同组结构冲突，VCC 来源识别遇多重命中静默取第一项（资金口径 · 须人工复核）
+
+- **来源**：v3.2.14 `feat/input-template-structures`；[PR #244](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/244#discussion_r4471371083) 转为可合并后的 Codex 自动审查（审查提交 `aa459d2f`），已对照代码核实机制成立
+- **影响**：`src/main-process/template-resources/service.js` `setCurrentVersion` 只在启用用户版本时调用 `peerConflictOf`，恢复默认（V1）跳过同组结构冲突检查；导入新版本时有检查。按「VCC充值清退明细启用末尾加列的版本 → VCC费用及换汇明细启用充值清退的内置表头 → 充值清退恢复默认」操作后，两张表当前结构完全相同。`src/backend/vcc-financial-op/workbook-import-plan.js` `classifyHeaderRow` 用 `rules.find()` 取第一个完全匹配，费用及换汇文件会被静默识别为充值清退，进入不同的计算分支。触发需要刻意的操作组合，概率低。恢复默认的缺口对所有有同组的输入表（平盘链接原始表等）都存在，其他模块识别器遇多重命中时的行为待核实
+- **关闭条件**：恢复默认同样检查同组结构冲突（或给出处理方式）；VCC 识别器遇多个完全匹配时拒绝并提示，不静默取第一项；核实并处理其他同组输入表识别器的多重命中；补回归测试。若用户已按上述顺序操作并导入过数据，相关分类与计算结果须人工复核
+- **目标版本**：v3.2.15（2026-11-04 用户决定 v3.2.14 先发布，本项顺延）
+
+### B41（P3 · 顺延）重复入账匹配 Paired Parser 与平盘旧导入引擎未接入银行对账单导入识别结构
+
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §15 D19）
+- **影响**：重复入账匹配的 Paired Parser（`paired-parser-dispatch` / `spool-writer`，测量门禁未批准，生产走主进程 `importFiles`）与平盘旧导入引擎（`readers.readBankFiles`，生产为流式引擎）仍只认内置 46 / 49 列；启用了用户版本时，这两条路径会拒绝按新结构导出的银行对账单。生产路径已接入。当前生产不受影响
+- **关闭条件**：启用 Paired Parser 前，把当前结构写入 spool descriptor（`normalizeSpoolDescriptor` 增加可选字段）并传给 `readBankStatement`；旧引擎如需继续保留，同样经 `bankSourceStructure` 识别；补对应回归测试
+- **目标版本**：未定（随 Paired Parser 启用或旧引擎退役）
+
+### B40（P3 · 顺延）VCC OP 发生额计算的 Parser Worker 路径未接入「流水对账单」当前结构
+
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §14）
+- **影响**：`vcc-op-calc/parser-core.js` / `parser-pipeline.js`（`production.enabled=false`，默认 IPC 未切换）的 worker 输入键固定（`PARSER_INPUT_KEYS`），仍按内置 28 列读取；启用了用户结构版本时，该路径会把新结构文件判为表头不符。生产扫描路径（`vcc-op-calc-session.streamScanAndCompute`）已接入。当前生产不受影响
+- **关闭条件**：启用 Parser Pipeline 前，在 Main 侧扫描开始时解析当前结构，作为新的 worker 输入键传给 `streamFlowFile`，补对应回归测试
+- **目标版本**：未定（随 Parser Pipeline 启用）
+
+### B39（P3 · 顺延）资金对账后台 worker 未接入银行账单处理链接表与银行对账单当前结构
+
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §12.3 K4、§15 D19）
+- **影响**：`fund-recon-worker/source-readers.js` 的退款订单按固定签名 `ZHONGTAI_REFUND_ORDER_SIGNATURE` 读取（网关来源走旧的 `readGatewayRecon`），银行对账单按内置 46 列读取（`readBankStatement` 未传当前结构）；该后台路径生产未启用（`fund-recon:import` 未开启 production）。启用了「中台退款订单」或「银行对账单（导入识别结构）」用户版本时，该路径会把新结构文件判为表头不符，或按内置位置读出错列。传统 IPC 路径（链接表管理、导入文件）已接入。当前生产不受影响
+- **关闭条件**：启用后台路径前，在准备阶段读取 `refund-order` 与 `bank-statement-input` 当前结构（`resolveLinkedSignatures`、`resolveBankStatementStructure`），读取后对应回内置列名，补对应回归测试
+- **目标版本**：未定（随后台资金对账启用）
+
+### B38（P3 · 顺延）单据对账托管服务未接入「单据对账导出不平」当前结构
+
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §10）
+- **影响**：`recon-id-fix-service/service.js` 的托管导入（生产未启用，单测断言 production 保持 false）仍按内置结构读取 4 张工作表；启用了用户结构版本时，该路径会把改名后的文件判为表头不符。传统 IPC 路径已接入。当前生产不受影响
+- **关闭条件**：启用托管路径前，在准备阶段（同步回调之前）读取当前结构并传入 `readReconIdFixFile`，补对应回归测试
+- **目标版本**：未定（随托管服务启用）
+
+### B37（P3 · 顺延）平盘后台 managed 导入未接入链接原始表当前结构，且全部文件失败时抛错
+
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §6 K2）；编号接续 `release/v3.2.14` 的 B35
+- **影响**：`background-execution/adapters/position-import-adapter.js`（生产 `production.enabled: false`）启动来源导入时不传 `contractOptions.sourceStructures`，启用了用户结构版本时仍按内置结构识别；选中文件全部被拒时 `authorizeApply` 落到未配置的授权器并抛错，不返回逐文件原因。当前生产不受影响
+- **关闭条件**：启用该路径前，准备阶段按当前结构冻结并传入 Worker，全部失败时返回逐文件失败结果；补对应回归测试
+- **目标版本**：未定（随 managed 导入启用）
+
+### B36（P2 · 已知问题）平盘启用后在已有数据上切换链接原始表结构，重导的重叠记录可能被再次自动匹配（资金口径）
+
+- **来源**：v3.2.14 `feat/input-template-structures`（[spec](../changes/v3.2.14/feat/input-template-structures/spec.md) §3 D5、§6 K1）
+- **影响**：原始行以表头为键保存，表头也参与 `row_hash`。改名或增删列后重导与旧数据重叠的记录，会生成同一业务单号的新记录；匹配时只要存在未消费候选就自动确认（`matching-engine.js` `candidateEvaluation`），已被确认运行消费的同单号旧记录只在没有其他候选时才转人工，存在重复消费风险。内容变化后重导也有同类风险。用户确认平盘尚未正式启用、没有旧数据，本轮不处理
+- **关闭条件**：平盘正式启用前评估并实现防重策略（如同单号已被消费的记录一律转人工），经人工复核后补回归测试
+- **目标版本**：平盘正式启用前
+
+### B35（P2 · 已知问题）网银按文件名映射：同一账号跨模板时，断档补录的人工种子被另一模板的计算种子覆盖（资金口径）
+
+- **来源**：2026-10-29 Codex 第四轮只读审查 `release/v3.2.14`（`29e1dd9c`），按代码核实成立，用户决定本版不改；见 `changes/v3.2.14/release.md`「审查与处理」
+- **影响**：
+  - **触发**：按文件名映射一次导入同一银行的两个模板，两边含同一账号和币种，且模板 A 的日期覆盖模板 B 断档的建议补录日，如 A 有 09-01~09-03，B 有 09-01、09-04。
+  - **过程**：为 B 补录 09-03 余额后，重算时 A 照常写出计算种子。种子库按银行、账号、币种、日期去重，不区分模板，计算种子以 `overwrite: true` 写入（`src/main.js` `storeGeneratedBalanceSeeds`），用户补录的值被静默改成 A 的计算值。
+  - **结果**：断档锚点只认人工种子（断档 spec §8 T7），B 会再次提示同一断档，补录无法完成。用户只能选“不补录”继续，此时 B 断档后的余额接着 B 自己断档前的余额计算。
+- **现状**：v3.2.13 本身也不支持同一账号跨模板。两条余额链各自计算，种子互相覆盖；合并汇总按行拼接，同一账号同一天会出现两行。断档提醒让它多了“补录不掉”的循环；余额要么停在提示里，要么经用户确认不补录后才导出，不会在不提示的情况下导出断档后的余额
+- **推荐**：先定口径，同一会话内同一账号跨模板时三选一：拒绝导入、合并为一条余额链、或计算种子不覆盖其他模板的人工种子。任一方案都改种子覆盖或导入规则，须补同账号跨模板回归，并做对账专项审查
+- **关闭条件**：确定口径并实现；或明确不支持同一账号跨模板，并在导入时提示
+- **目标版本**：未定
+
+### B34（P3 · 已知问题）`scripts/render-modal-preview.js` 弹窗预览启动即失败
+
+- **来源**：2026-10-27 `feat/statement-balance-gap-prompt`（基线 `v3.2.12`）截图新弹窗时发现；改用现有的 `manual-balance-seed-dialog` 预览对照，同样失败
+- **影响**：预览进程在初始化阶段报“模块恢复尚未完成耐久接管，已阻止业务启动”，处理明细为 `biz-op-v327：[BIZOP_ACTIVATION_STARTUP_REQUIRED] 激活必须在持有单实例锁且业务窗口尚未开放的启动阶段执行`，弹出原生错误框后以 exit 1 退出，弹窗预览截图不可用。原生错误框需要人工点“好”，脚本在此期间一直不结束
+- **现状**：本分支没有改动启动、存档中心与业务 OP 激活路径，推断为原有问题。为避免再弹出原生错误框，未在纯 `v3.2.12` 上单独复现。`renderer-lifecycle` 集成（真实 Electron DOM + 生产工厂）不受影响
+- **关闭条件**：预览模式在隔离 userData 下能通过业务 OP 激活或安全跳过，`node scripts/render-modal-preview.js manual-balance-seed-dialog <文件名>` 正常出图
+- **目标版本**：未定
+
+### B33（P2 · 未做）v3.2.14 账单日期断档提醒的真实应用 GUI 检查
+
+- **来源**：2026-10-27 `feat/statement-balance-gap-prompt` 实现
+- **影响**：断档确认框和断档类补录弹窗的交互已经由 `renderer-lifecycle` 夹具验证（自动弹出、补录、不补录此处、全部不补录、关闭后点状态框重开）。但因 B34 无法截图，没有做视觉检查，也没有在真实应用里走完“导入有断档的文件 → 补录 / 不补录 → 导出余额”整条流程
+- **关闭条件**：在 macOS 与 Windows 实机，以浅色、深色和最小窗口检查确认框与补录弹窗，并完成一次补录和一次不补录的导出，核对余额账单数值
+- **目标版本**：v3.2.15（2026-11-04 用户决定 v3.2.14 先发布、本项顺延；本轮没有可用的 Windows/macOS 实机）
+
+### B32（P2 · 已知问题）网银发生额计算余额：余额附加值跨导入重复叠加（非回归 · 资金口径）
+
+- **来源**：2026-10-27 v3.2.14 `feat/statement-balance-gap-prompt` 实现时按方案复现，在 `v3.2.12` 基线上同样存在
+- **影响**：`deriveBalanceRecords` 每次导入首日从 0 起累计余额附加值，但上一次导入写入的计算种子已经含有附加值。同一段日期分两次导入时，生效日之后的余额会多加一次附加值。复现：期初 1000、09-01 起附加值 +10、三天发生额都为 0。一次导入三天，结果都是 1010；分两次导入（09-01~09-02 和 09-03），09-03 的结果是 1020
+- **现状**：首日锚点仍按原口径（任意种子、附加值从 0 起累计），问题出在首日锚点是计算种子时。本次断档功能的文件内锚点只认人工录入种子（人工补录的银行实际余额不含附加值，从 0 起累计是正确的），没有扩大这个问题。首日口径本次未修改
+- **推荐**：种子锚点按种子的生成方式区分：人工录入从 0 起累计，计算种子或账单余额从种子日已累计的附加值起算；须补跨导入回归，并由业务确认附加值的预期口径
+- **触发实施**：业务确认附加值口径后单独立项；改动涉及余额金额，须做对账专项审查
+
 ### B31（P3 · 顺延）managed 后台只读导出尚未接入模板版本
 
 - **来源**：v3.2.13 `feat/settings-template-versions`（`changes/v3.2.13/feat/settings-template-versions/techdoc.md` 第七节 L1、L2）
@@ -54,7 +138,7 @@
 - **来源**：v3.2.12 发布（[PR #242](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/242)「正式发布结果 · 未做」；`changes/v3.2.12/release.md`「检查与证据边界」）
 - **影响**：发布 workflow 已校验 `latest.yml` 的版本、安装包引用与 SHA-512，打包后正常启动与业务 OP 完整流程验收也已通过；但从已安装旧版经应用内更新升到 3.2.12 的过程未经人工确认，而本版含业务 OP 升级启动修复
 - **关闭条件**：在装有 v3.2.11 或更早版本的 Windows 环境，经应用内更新升到当前正式版，启动与业务 OP 抽查通过，结果记入当轮记录
-- **目标版本**：v3.2.14（2026-10-27 用户决定 v3.2.13 先发布、本项顺延；v3.2.13 轮没有可用的 Windows 实机。升级验收的起点仍为 v3.2.11 或更早版本，终点为届时的正式版）
+- **目标版本**：v3.2.15（2026-10-27 用户决定 v3.2.13 先发布、本项顺延；2026-11-04 用户再次决定 v3.2.14 先发布、本项顺延到 v3.2.15。两轮都没有可用的 Windows 实机。升级验收的起点仍为 v3.2.11 或更早版本，终点为届时的正式版，即 v3.2.14 或之后的版本）
 
 ### B26（P2 · 未做）v3.2.12 设置「模板文件」页 Windows 实机 GUI 人工检查
 
@@ -62,7 +146,7 @@
 - **影响**：模板文件页的真实应用验证只在 macOS 临时副本中完成；Windows 上浅色、深色与最小窗口下的显示未经人工确认。Windows CI 与 Renderer 生命周期自动检查已通过
 - **关闭条件**：在 Windows 实机完成浅色、深色、最小窗口三种情形的检查，结果记入当轮记录
 - **v3.2.13 补充**：本轮开放了版本管理，检查范围相应扩大：导入新版本（含未通过的情形）、启用、恢复默认、删除与变更记录；并用 Excel 打开、打印一份导入后保存的版本文件。该文件已重新打包，本机 macOS 未装 Excel，只做了独立解析核对
-- **目标版本**：v3.2.14（2026-10-27 用户决定 v3.2.13 先发布、本项顺延；v3.2.13 轮没有可用的 Windows 实机。检查范围含上方 v3.2.13 补充）
+- **目标版本**：v3.2.15（2026-10-27 用户决定 v3.2.13 先发布、本项顺延；2026-11-04 用户再次决定 v3.2.14 先发布、本项顺延到 v3.2.15。两轮都没有可用的 Windows 实机。检查范围含上方 v3.2.13 补充）
 
 ### B25（P2）银行单 BillDate/ValueDate 真 Excel 日期单元格被读成序列号 → 输出三表显示数字（非回归 · 跨模块）
 

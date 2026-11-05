@@ -9,6 +9,7 @@ const { createArchiveRepository } = require('../database/archive-repository');
 const { SOURCE_TYPES, SOURCE_LABELS, SUPPORTED_CURRENCIES, SYSTEM_OP_HEADERS, SYSTEM_OP_DEFINITION,
   getRawContractHeaders, normalizeLegacyStoredCurrency, headersEqual } = require('./definitions');
 const { assertArtifactMember, readHandoffMetadata } = require('./import-handoff');
+const { createSourceProjection } = require('./source-structure');
 const { projectReview } = require('../../shared/vcc-review-projection');
 const { isEffectiveDifferenceZero } = require('../../shared/vcc-financial-op-difference');
 const { mapDetailRow, pendingCanonicalValues, monthOfDate } = require('./row-mapper');
@@ -205,16 +206,19 @@ async function prepareReviewManifest({ dbPath, manifestPath, request, archiveRoo
         } else historical = parse(fact.raw_json, identity);
         if (!Array.isArray(historical) || historical.length !== headers.length) throw unavailable(`事实 ${identity} 历史原始值不完整`);
       }
-      const payload = { ...fact, source_type: type, headers, raw_contract_version: version,
+      // 导入时为用户结构的原件：按导入时表头定位与输出原表页（按表头指纹分组），核验时对应回内置列（source-structure.js）。
+      const sourceHeaders = sheet?.sourceHeaders || null;
+      const payload = { ...fact, source_type: type, headers: sourceHeaders || headers, canonicalHeaders: headers, sourceHeaders, raw_contract_version: version,
         expectedHeaderRow: sheet?.headerRow || extra.headerRow || null, verifiedSheetIndex: sheet?.sheetIndex ?? null,
         systemAuditContract: type === SOURCE_TYPES.SYSTEM_OP ? (descriptor.member ? 'rich-v1' : 'sheetjs-v1') : null, ...extra };
       manifest.prepare('INSERT INTO facts VALUES (?,?,?,?,?,?,?,?,?)').run(identity, descriptor.sourceKey, fact.sheet_name,
         sheet?.sheetIndex ?? 0, sourceRow, Number(fact.import_record_id), descriptor.sourceOrdinal, JSON.stringify(payload), historical === null ? null : JSON.stringify(historical));
       const coordinate = coordinates.get(fact.subject);
       for (const currency of currencyHits) {
-        const headerFingerprint = sha(JSON.stringify(headers));
+        const groupHeaders = sourceHeaders || headers;
+        const headerFingerprint = sha(JSON.stringify(groupHeaders));
         const groupKey = JSON.stringify([fact.subject, currency, type, version, headerFingerprint]);
-        const group = { subject: fact.subject, currency, sourceType: type, rawContractVersion: version, headers,
+        const group = { subject: fact.subject, currency, sourceType: type, rawContractVersion: version, headers: groupHeaders,
           headerFingerprint, fullLogicalName: `${fact.subject}-${currency}-${SOURCE_LABELS[type]}` };
         manifest.prepare('INSERT OR IGNORE INTO groups VALUES (?,?,?,?,?,?,?)').run(groupKey, coordinate.subjectOrder,
           SUPPORTED_CURRENCIES.indexOf(currency), TYPES.indexOf(type), version, headerFingerprint, JSON.stringify(group));
@@ -289,16 +293,21 @@ async function freezeExpectedPages(db, maxRows = MAX_DATA_ROWS, signal) {
   } catch (error) { db.exec('ROLLBACK'); throw error; }
 }
 
-function validateRawFact(fact, values, cells) {
+function validateRawFact(fact, rawValues, rawCells) {
   const expected = parse(fact.payload, fact.identity);
-  if (values.length !== expected.headers.length) throw mismatch(`${fact.identity} 原始列数不符`);
+  if (rawValues.length !== expected.headers.length) throw mismatch(`${fact.identity} 原始列数不符`);
+  // values / cells 按导入时结构的位置读出；核验按内置列（内置结构时原样）。
+  const projection = createSourceProjection(expected.canonicalHeaders || expected.headers, expected.sourceHeaders);
+  const values = projection.project(rawValues);
+  const cells = rawCells ? projection.project(rawCells, { fill: null }) : rawCells;
+  const canonicalHeaders = expected.canonicalHeaders || expected.headers;
   if (expected.source_type === SOURCE_TYPES.SYSTEM_OP) {
     const ix = SYSTEM_OP_DEFINITION.indexes;
     const stored = expected.systemRow;
     const criticalIndexes = ['主体', '币种', '业务部门', '账单日期', SYSTEM_OP_DEFINITION.balanceHeader].map((header) => ix[header]);
     if (criticalIndexes.some((index) => cells?.[index]?.cellType === 'error')) throw mismatch(`${fact.identity} 系统 OP 计算字段包含错误值`);
     // 归属按导入时的显示值解释；下面仍独立核验原始值，输出继续使用原件单元格。
-    const displayValues = cells ? expected.headers.map((_header, index) => cells[index]
+    const displayValues = cells ? canonicalHeaders.map((_header, index) => cells[index]
       ? systemOpCellValues(cells[index], { legacySheetJsDisplay: expected.systemAuditContract === 'sheetjs-v1' }).display : '')
       : stored.displayValues;
     const currency = normalizeLegacyStoredCurrency(String(displayValues[ix['币种']] ?? '').trim());

@@ -90,16 +90,46 @@ function balancePrompt(templateName, bankName, merchantId, currency, targetBillD
   return { templateName, bankName, merchantId, currency, targetBillDate };
 }
 
-function seededBalance(previous, resolver, prompt, required) {
-  if (previous !== null) return previous;
+function resolveSeedRecord(resolver, prompt) {
   const seed = typeof resolver === 'function' ? resolver(prompt) : null;
-  if (seed !== null && seed !== undefined) return seed;
-  if (required) {
-    throw new FileValidationError('BALANCE_SEED_REQUIRED', '因首次导入余额，请导入上一个账单日余额用于余额校验', {
-      context: prompt
-    });
-  }
-  return null;
+  if (!seed || seed.endBalance === null || seed.endBalance === undefined) return null;
+  return seed;
+}
+
+function requireSeedRecord(resolver, prompt) {
+  const seed = resolveSeedRecord(resolver, prompt);
+  if (seed) return seed;
+  throw new FileValidationError('BALANCE_SEED_REQUIRED', '因首次导入余额，请导入上一个账单日余额用于余额校验', {
+    context: prompt
+  });
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const BALANCE_GAP_CONFIRM_MESSAGE = '账单日期不连续，请确认是否补录断档前一日的期末余额';
+
+function dateLabelToUtcDay(dateLabel) {
+  const [year, month, day] = String(dateLabel).split('-').map(Number);
+  return Date.UTC(year, month - 1, day) / DAY_MS;
+}
+
+function utcDayToDateLabel(utcDay) {
+  const date = new Date(utcDay * DAY_MS);
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+}
+
+function shiftDateLabel(dateLabel, days) {
+  return utcDayToDateLabel(dateLabelToUtcDay(dateLabel) + days);
+}
+
+// 按自然日判断：锚点日期的下一天早于当前账单日即为断档。
+function isBalanceDateGap(anchorDate, dateLabel) {
+  return dateLabelToUtcDay(dateLabel) - dateLabelToUtcDay(anchorDate) > 1;
+}
+
+function balanceGapKey({ templateName, merchantId, currency, anchorDate, targetBillDate }) {
+  return [templateName, merchantId, currency, anchorDate, targetBillDate]
+    .map((value) => normalizeCell(value))
+    .join('|');
 }
 
 function deriveBalanceRecords({
@@ -107,8 +137,9 @@ function deriveBalanceRecords({
   templateName,
   balanceTemplateFields,
   mode = 'statement',
-  resolvePreviousEndBalance = null,
-  balanceAdjustments = []
+  resolvePreviousBalanceSeed = null,
+  balanceAdjustments = [],
+  acknowledgedBalanceGapKeys = null
 }) {
   const indexes = buildFieldIndexMap(detailRows[0] || []);
   const balanceIndex = indexes.get('Balance');
@@ -171,23 +202,66 @@ function deriveBalanceRecords({
   const records = [];
   const seedRecords = [];
   const billDates = new Set();
+  const pendingBalanceGaps = [];
+  const skippedBalanceGaps = [];
   for (const group of orderedGroups) {
     let previousEndBalance = null;
+    let previousDate = null;
     let lastAdjustment = 0;
     for (const dateLabel of [...group.dates.keys()].sort()) {
       const entries = group.dates.get(dateLabel);
       const prompt = balancePrompt(templateName, bank.bankName, group.merchantId, group.currency, dateLabel);
       let endBalance;
       if (mode === 'calculated') {
+        let anchor = null;
+        if (previousDate === null) {
+          const seed = requireSeedRecord(resolvePreviousBalanceSeed, prompt);
+          anchor = { date: normalizeCell(seed.billDate), endBalance: seed.endBalance, source: 'seed' };
+        } else {
+          anchor = { date: previousDate, endBalance: previousEndBalance, source: 'file' };
+          // 断档中有人工录入的种子（用户补录的期末余额）时，改用该种子接着算。
+          // 计算种子已含余额附加值，且可能来自另一条计算链，不作断档锚点。
+          if (isBalanceDateGap(previousDate, dateLabel)) {
+            const seed = resolveSeedRecord(resolvePreviousBalanceSeed, {
+              ...prompt,
+              generationMethod: BALANCE_SEED_GENERATION_METHODS.manual
+            });
+            if (seed && normalizeCell(seed.billDate) > previousDate) {
+              anchor = { date: normalizeCell(seed.billDate), endBalance: seed.endBalance, source: 'seed' };
+            }
+          }
+        }
+        // 种子锚点沿用首日口径：余额附加值从 0 起累计。
+        if (anchor.source === 'seed') lastAdjustment = 0;
+        if (isBalanceDateGap(anchor.date, dateLabel)) {
+          const gap = {
+            templateName,
+            bankName: bank.bankName,
+            merchantId: group.merchantId,
+            currency: group.currency,
+            anchorDate: anchor.date,
+            anchorSource: anchor.source,
+            targetBillDate: dateLabel,
+            missingFrom: shiftDateLabel(anchor.date, 1),
+            missingTo: shiftDateLabel(dateLabel, -1),
+            suggestedSeedDate: shiftDateLabel(dateLabel, -1)
+          };
+          gap.key = balanceGapKey(gap);
+          if (acknowledgedBalanceGapKeys && acknowledgedBalanceGapKeys.has(gap.key)) {
+            skippedBalanceGaps.push(gap);
+          } else {
+            pendingBalanceGaps.push(gap);
+          }
+        }
         endBalance = calculateEndingBalanceFromAmounts({
-          previousEndBalance: seededBalance(previousEndBalance, resolvePreviousEndBalance, prompt, true),
+          previousEndBalance: anchor.endBalance,
           entries
         });
       } else {
         const ambiguous = new Set(entries.filter((entry) => entry.balanceValue !== null)
           .map((entry) => Number(Number(entry.balanceValue).toFixed(2)))).size > 1;
         const effectivePrevious = previousEndBalance === null && ambiguous
-          ? seededBalance(previousEndBalance, resolvePreviousEndBalance, prompt, true)
+          ? requireSeedRecord(resolvePreviousBalanceSeed, prompt).endBalance
           : previousEndBalance;
         try {
           endBalance = inferEndingBalance({ previousEndBalance: effectivePrevious, entries, dateLabel });
@@ -210,6 +284,7 @@ function deriveBalanceRecords({
       }
       lastAdjustment = cumulative;
       previousEndBalance = endBalance;
+      previousDate = dateLabel;
       billDates.add(dateLabel);
       records.push(balanceTemplateRow(balanceTemplateFields, {
         银行名称: bank.bankName, 所在地: bank.location, 币种: group.currency,
@@ -224,7 +299,13 @@ function deriveBalanceRecords({
       });
     }
   }
-  return { records, billDates: [...billDates].sort(), seedRecords };
+  // 全部分组算完后统一询问；抛错发生在写余额表和计算种子之前。
+  if (pendingBalanceGaps.length) {
+    throw new FileValidationError('BALANCE_GAP_CONFIRM_REQUIRED', BALANCE_GAP_CONFIRM_MESSAGE, {
+      context: { templateName, bankName: bank.bankName, gaps: pendingBalanceGaps }
+    });
+  }
+  return { records, billDates: [...billDates].sort(), seedRecords, skippedBalanceGaps };
 }
 
 function scanBalanceSeedStatus({ detailRows, templateName }, storageRoot) {
@@ -288,6 +369,7 @@ function createGenerationHelpers(options) {
     extractHeaders,
     FileValidationError,
     findPreviousBalanceSeed,
+    getAcknowledgedBalanceGapKeys: options.getAcknowledgedBalanceGapKeys,
     getBalanceTemplatePath: () => balanceTemplatePath,
     getStatementSessionEntries,
     mergeMappedDetailRows,
@@ -335,25 +417,43 @@ function createGenerationHelpers(options) {
         balanceTemplateFields,
         mode: preparedBatch.balanceMode,
         balanceAdjustments,
-        resolvePreviousEndBalance: ({ bankName, merchantId, currency, targetBillDate }) => {
-          const seedRecord = findPreviousBalanceSeed(storageRoot, {
+        acknowledgedBalanceGapKeys: typeof options.getAcknowledgedBalanceGapKeys === 'function'
+          ? options.getAcknowledgedBalanceGapKeys()
+          : null,
+        resolvePreviousBalanceSeed: ({ bankName, merchantId, currency, targetBillDate, generationMethod }) => (
+          findPreviousBalanceSeed(storageRoot, {
             bankName,
             merchantId,
             currency,
-            beforeBillDate: targetBillDate
-          });
-          return seedRecord ? seedRecord.endBalance : null;
-        }
+            beforeBillDate: targetBillDate,
+            generationMethod
+          })
+        )
       });
       return {
         requested: true,
         failed: false,
         records: balanceResult.records,
         billDates: balanceResult.billDates,
-        warnings: []
+        warnings: balanceResult.skippedBalanceGaps.length
+          ? [{ type: 'balance-gap-skipped', gaps: balanceResult.skippedBalanceGaps }]
+          : []
       };
     } catch (error) {
       if (!(error instanceof FileValidationError)) throw error;
+      if (error.code === 'BALANCE_GAP_CONFIRM_REQUIRED') {
+        return {
+          requested: true,
+          failed: true,
+          records: [],
+          billDates: [],
+          warnings: [{
+            type: 'balance-gap-confirm',
+            message: error.message,
+            gaps: Array.isArray(error.context?.gaps) ? error.context.gaps : []
+          }]
+        };
+      }
       if (error.code !== 'BALANCE_SEED_REQUIRED') {
         return {
           requested: true,

@@ -504,8 +504,9 @@ function createVccFinancialOpService({
     });
   }
 
-  async function inspectSelectedFiles(filePaths, onProgress) {
-    return runWorker('inspect-plan', { filePaths }, onProgress);
+  // sourceStructures：设置 → 模板文件当前启用的用户结构 { [sourceType]: { headers, versionLabel } }，冻结进导入计划。
+  async function inspectSelectedFiles(filePaths, onProgress, sourceStructures = null) {
+    return runWorker('inspect-plan', { filePaths, sourceStructures }, onProgress);
   }
 
   async function validateImportPlan(plan, onProgress) {

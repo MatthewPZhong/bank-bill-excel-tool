@@ -106,6 +106,19 @@ function buildManualBalanceSeedPlan({
       )
     };
   }
+  // 断档补录早于断档前最后一个账单日时不会被采用，直接拒绝以免反复提示。
+  const anchorDate = pendingPrompt && pendingPrompt.reason === 'gap'
+    ? normalizeCell(pendingPrompt.anchorDate)
+    : '';
+  if (anchorDate && normalizedSeedDate <= anchorDate) {
+    return {
+      stopResult: buildManualBalanceInvalidResult(
+        `补录日期必须晚于断档前最后一个账单日 ${anchorDate}`,
+        pendingPrompt,
+        generatedExports
+      )
+    };
+  }
   if (endBalance === null) {
     return {
       stopResult: buildManualBalanceInvalidResult(
@@ -235,6 +248,59 @@ function manualBalancePreflightError(message, errorCode) {
   };
 }
 
+// “不补录”只能确认当前 prompt 列出的断档；不写种子，交由 execute 登记后重算。
+function prepareBalanceGapSkip({
+  payload,
+  pendingPrompt,
+  importContext,
+  session,
+  createFreshnessGuard
+}) {
+  const pendingGaps = pendingPrompt.reason === 'gap' && Array.isArray(pendingPrompt.gaps)
+    ? pendingPrompt.gaps
+    : [];
+  const gapByKey = new Map(pendingGaps.map((gap) => [normalizeCell(gap && gap.key), gap]));
+  const keys = Array.isArray(payload.skipBalanceGapKeys)
+    ? [...new Set(payload.skipBalanceGapKeys.map((key) => normalizeCell(key)))]
+    : [];
+  if (!pendingGaps.length || !keys.length || keys.some((key) => !key || !gapByKey.has(key))) {
+    return {
+      nextConfirmation: null,
+      prepared: {
+        proceed: false,
+        result: manualBalancePreflightError(
+          '账单日期断档确认已失效，请重新导入文件',
+          'BALANCE_GAP_CONFIRMATION_INVALID'
+        )
+      }
+    };
+  }
+  const freshness = createFreshnessGuard({
+    pendingPrompt,
+    importContext,
+    session,
+    plan: null
+  });
+  freshness.assertFresh();
+  return {
+    nextConfirmation: null,
+    prepared: {
+      proceed: true,
+      plan: null,
+      skipBalanceGapKeys: keys,
+      skippedBalanceGaps: keys.map((key) => ({ ...gapByKey.get(key) })),
+      pendingPrompt,
+      importContext,
+      session,
+      inputFilePaths: freshness.inputFilePaths,
+      assertFresh: freshness.assertFresh,
+      confirmedOverwrite: false,
+      inputPaths: freshness.inputFilePaths,
+      beforeStart: freshness.assertFresh
+    }
+  };
+}
+
 function prepareManualBalanceSeedSubmission({
   payload = {},
   confirmation = null,
@@ -297,6 +363,16 @@ function prepareManualBalanceSeedSubmission({
         )
       }
     };
+  }
+
+  if (payload && payload.skipBalanceGapKeys !== undefined) {
+    return prepareBalanceGapSkip({
+      payload,
+      pendingPrompt,
+      importContext,
+      session,
+      createFreshnessGuard
+    });
   }
 
   const planResult = buildManualBalanceSeedPlan({

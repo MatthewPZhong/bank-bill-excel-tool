@@ -577,6 +577,8 @@ async function importDetailGroup({
           sheetName: selectedSheet.sheetName,
           sheetIndex: selectedSheet.sheetIndex,
           headerRow: selectedSheet.headerRow,
+          // 导入时结构（设置 → 模板文件用户版本，见 source-structure.js）：读出的 values 已对应回内置列序。
+          sourceHeaders: selectedSheet.sourceHeaders,
           onDataRow: ({ rowR, values, sourceFile, sheetName, keyCellType }) => {
             throwIfCancelled(shouldCancel);
             const mapped = mapDetailRow({

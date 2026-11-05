@@ -398,3 +398,27 @@ test.describe('getEnabledModules / setEnabledModules', () => {
     assert.deepEqual(r, ['statement-generator', 'bank-statement-process']);
   });
 });
+
+// ========================================================================
+// v3.2.14 更新说明已确认版本
+// ========================================================================
+
+test.describe('getReleaseNotesAcknowledgedVersion / setReleaseNotesAcknowledgedVersion', () => {
+  test('未记录 → null', () => {
+    assert.equal(settingsRepo.getReleaseNotesAcknowledgedVersion(db), null);
+  });
+
+  test('写入后读回并覆盖', () => {
+    settingsRepo.setReleaseNotesAcknowledgedVersion(db, '3.2.14');
+    assert.equal(settingsRepo.getReleaseNotesAcknowledgedVersion(db), '3.2.14');
+    settingsRepo.setReleaseNotesAcknowledgedVersion(db, '3.2.15');
+    assert.equal(settingsRepo.getSetting(db, settingsRepo.RELEASE_NOTES_ACKNOWLEDGED_VERSION_KEY), '3.2.15');
+  });
+
+  test('空值或非字符串 → 抛错且不写入', () => {
+    for (const value of ['', '  ', null, 3214]) {
+      assert.throws(() => settingsRepo.setReleaseNotesAcknowledgedVersion(db, value), /release_notes_acknowledged_version/);
+    }
+    assert.equal(settingsRepo.getReleaseNotesAcknowledgedVersion(db), null);
+  });
+});
