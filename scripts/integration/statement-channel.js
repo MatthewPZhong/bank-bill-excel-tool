@@ -662,6 +662,69 @@ function verifyBundleSkippedTemplateKeepsChannel(dir) {
   assertEq(env.database.getTemplate(moved.id).channelName, '包内渠道', 'Step10.成功导入的模板按包归入渠道');
 }
 
+// ⑪ release/v3.2.15 审查：包内渠道与本地渠道同名，而包内归入它的模板全部被跳过时，不还原该渠道：
+//    本地渠道的生效映射（清结算账号、兜底币种）与待处理冲突都不变；包内有成功模板的渠道照常还原。
+function verifyBundleSkippedSameNameChannelKeepsMappings(dir) {
+  const env = createEnvironment(dir, 'step11');
+  const kept = env.defineTemplate('招商银行-上海', 'A');
+  const channelId = env.saveWithChannel(kept, { mode: 'create' }).channelId;
+  env.database.restoreTemplateBundleStatementChannels({
+    channels: [{
+      name: '招商银行-上海',
+      accountMappings: [{ bankAccountId: 'RAW001', clearingAccountId: 'OLD-ACCOUNT', noCurrency: true, currency: 'USD' }],
+      accountMappingConflicts: [{ bankAccountId: 'RAW002', candidates: [{ clearingAccountId: 'M002-A' }, { clearingAccountId: 'M002-B' }] }]
+    }]
+  });
+  const mappingsOf = () => env.database.listAccountMappings({ channelId })
+    .map((m) => [m.bankAccountId, m.clearingAccountId, Boolean(m.noCurrency), m.currency]);
+  const before = mappingsOf();
+  assertEq(before, [['RAW001', 'OLD-ACCOUNT', true, 'USD']], 'Step11.前置：本地渠道映射');
+  assertEq(env.database.countStatementChannelAccountMappingConflicts(channelId), 1, 'Step11.前置：本地渠道有 1 个待处理冲突');
+  const other = env.defineTemplate('工行-深圳', 'C');
+  const skippedEntry = { templateKey: kept.templateKey, name: kept.name, channelName: '招商银行-上海', accountMappings: [] };
+  const succeededEntry = { templateKey: other.templateKey, name: other.name, channelName: '工行-深圳', accountMappings: [] };
+  const { channelRestore, restoreResult } = env.fns.restoreBundleFollowUpRounds({
+    importedTemplates: [skippedEntry, succeededEntry],
+    succeededEntries: new Set([succeededEntry]),
+    importedBundleVersion: 5,
+    importedChannels: [
+      { name: '招商银行-上海', accountMappings: [{ bankAccountId: 'RAW001', clearingAccountId: 'NEW-ACCOUNT', noCurrency: true, currency: 'EUR' }], accountMappingConflicts: [] },
+      { name: '工行-深圳', accountMappings: [{ bankAccountId: 'RAW009', clearingAccountId: 'M009' }], accountMappingConflicts: [] }
+    ]
+  });
+  assertEq(channelRestore.channels.map((channel) => channel.name), ['工行-深圳'], 'Step11.只还原有成功模板的包内渠道');
+  assertEq(mappingsOf(), before, 'Step11.被跳过模板所在的同名渠道映射不变');
+  assertEq(env.database.countStatementChannelAccountMappingConflicts(channelId), 1, 'Step11.同名渠道的待处理冲突不变');
+  assertEq(env.database.getTemplate(kept.id).channelName, '招商银行-上海', 'Step11.被跳过的模板归属不变');
+  assertEq(restoreResult.channelCount, 1, 'Step11.还原 1 个渠道');
+  const restored = env.database.getStatementChannelByName('工行-深圳');
+  assertEq(env.database.listAccountMappings({ channelId: restored.id }).map((m) => m.clearingAccountId), ['M009'], 'Step11.成功模板所在渠道写入包内映射');
+}
+
+// ⑫ release/v3.2.15 审查：同名的渠道与普通模板分两批导入时，每批只有一组，也要按库里同名的另一方阻断，
+//    否则后一批覆盖前一批的明细、余额文件与同键余额种子。
+function verifyOutputNameConflictAcrossBatches(dir) {
+  const env = createEnvironment(dir, 'step12');
+  const owner = env.defineTemplate('招商银行-上海', 'A');
+  env.saveWithChannel(owner, { mode: 'create' });
+  env.database.renameTemplate(owner.id, 'CMB-A');
+  const ordinary = env.defineTemplate('招商银行-上海', 'C');
+  const fileA = path.join(dir, 'step12-a.xlsx');
+  const fileC = path.join(dir, 'step12-c.xlsx');
+  writeSource(fileA, 'A', [['2026-09-01', 'M001', 'USD', '10', '']]);
+  writeSource(fileC, 'C', [['2026-09-01', 'M001', 'USD', '7', '']]);
+  const channelBatch = env.fns.groupStatementEntriesForGeneration([env.entryFor(env.database.getTemplate(owner.id), fileA)]);
+  const ordinaryBatch = env.fns.groupStatementEntriesForGeneration([env.entryFor(ordinary, fileC)]);
+  assertEq(env.fns.findGenerationGroupOutputNameConflicts(channelBatch), ['输出名称「招商银行-上海」：渠道「招商银行-上海」、模板「招商银行-上海」'],
+    'Step12.只导入渠道子模板的文件也按库里同名的普通模板阻断');
+  assertEq(env.fns.findGenerationGroupOutputNameConflicts(ordinaryBatch), ['输出名称「招商银行-上海」：模板「招商银行-上海」、渠道「招商银行-上海」'],
+    'Step12.只导入普通模板的文件也按库里同名的渠道阻断');
+  env.database.renameTemplate(ordinary.id, '招商银行-上海-普通');
+  assertEq(env.fns.findGenerationGroupOutputNameConflicts(channelBatch), null, 'Step12.普通模板改名后渠道一批不再阻断');
+  const renamedBatch = env.fns.groupStatementEntriesForGeneration([env.entryFor(env.database.getTemplate(ordinary.id), fileC)]);
+  assertEq(env.fns.findGenerationGroupOutputNameConflicts(renamedBatch), null, 'Step12.普通模板改名后普通模板一批不再阻断');
+}
+
 async function run() {
   console.log('==== 网银账单渠道与子模板 e2e 集成验证 ====');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stmt-channel-'));
@@ -675,6 +738,8 @@ async function run() {
     verifyConflictBlocksImport(dir);
     verifyOutputNameConflictGuard(dir);
     verifyBundleSkippedTemplateKeepsChannel(dir);
+    verifyBundleSkippedSameNameChannelKeepsMappings(dir);
+    verifyOutputNameConflictAcrossBatches(dir);
   } finally {
     openedDatabases.splice(0).forEach((database) => {
       try { database.close(); } catch (error) { console.error('关闭测试主库失败', error); }

@@ -8599,12 +8599,18 @@ function findSaveMappingsBalanceModeMismatch({ template, channelAssignment, mapp
 }
 
 // v3.2.15（§5.3）：v5 模板包——按名称取得或新建渠道，写入渠道映射与冲突，再按条目 channelName 归属。
-function buildBundleV5ChannelRestore(importedChannels, importedTemplateRecords) {
-  const channels = (Array.isArray(importedChannels) ? importedChannels : []).map((channel) => ({
-    name: channel.name,
-    accountMappings: normalizeBundleAccountMappings(channel.accountMappings),
-    accountMappingConflicts: channel.accountMappingConflicts || []
-  }));
+//   包内有模板归入、但这些模板第一轮全部被跳过的渠道不还原：渠道层的映射与冲突整体替换，
+//   还原它会改写被跳过模板所在同名渠道的生效映射并清掉待处理冲突（release/v3.2.15 审查）。
+function buildBundleV5ChannelRestore(importedChannels, importedTemplateRecords, importedTemplates = []) {
+  const packagedChannelNames = new Set(importedTemplates.map((entry) => entry && entry.channelName).filter(Boolean));
+  const restoredChannelNames = new Set(importedTemplateRecords.map(({ entry }) => entry.channelName).filter(Boolean));
+  const channels = (Array.isArray(importedChannels) ? importedChannels : [])
+    .filter((channel) => !packagedChannelNames.has(channel.name) || restoredChannelNames.has(channel.name))
+    .map((channel) => ({
+      name: channel.name,
+      accountMappings: normalizeBundleAccountMappings(channel.accountMappings),
+      accountMappingConflicts: channel.accountMappingConflicts || []
+    }));
   const assignments = importedTemplateRecords.map(({ entry, template }) => ({
     templateId: template.id,
     channelName: entry.channelName || null
@@ -8689,7 +8695,7 @@ function restoreBundleFollowUpRounds({ importedTemplates, succeededEntries, impo
   });
 
   const channelRestore = importedBundleVersion >= 5
-    ? buildBundleV5ChannelRestore(importedChannels, importedTemplateRecords)
+    ? buildBundleV5ChannelRestore(importedChannels, importedTemplateRecords, importedTemplates)
     : buildLegacyBundleChannelRestore(importedTemplateRecords);
   const restoreResult = database.restoreTemplateBundleStatementChannels(channelRestore);
   return { importedTemplateRecords, channelRestore, restoreResult };
@@ -9585,6 +9591,8 @@ function registerTemplateHandlers() {
       const balanceModeWarnings = collectChannelBalanceModeWarnings(
         Array.from(new Set(channelRestore.assignments.map((item) => item.channelName).filter(Boolean)))
       );
+      const restoredChannelNames = new Set(channelRestore.channels.map((channel) => channel.name));
+      const unrestoredChannelNames = importedChannels.map((channel) => channel.name).filter((name) => !restoredChannelNames.has(name));
       if (balanceModeWarnings.length) {
         appendActivityLogEntry({
           level: 'warn',
@@ -9605,6 +9613,7 @@ function registerTemplateHandlers() {
           `更新：${updatedCount}`,
           `跳过：${skippedCount}`,
           `渠道：${restoreResult.channelCount}`,
+          ...(unrestoredChannelNames.length ? [`未还原的渠道（包内归入的模板均被跳过，原有映射与冲突不变）：${unrestoredChannelNames.join('、')}`] : []),
           ...(restoreResult.conflictCount > 0 ? [`待处理的渠道账户映射冲突：${restoreResult.conflictCount} 个账户号`] : [])
         ]
       });
@@ -10720,15 +10729,30 @@ function buildChannelBalanceModeMismatchError(group, detailLines) {
 
 // v3.2.15（PR #246 审查）：不同生成分组的输出名称不能相同。普通模板与渠道同名时（模板包或旧数据可能带来），
 //   两组的生成文件路径、明细 Channel 列、余额与种子归属都相同，会互相覆盖或混用余额链。返回逐行明细，否则 null。
+//   除本批各组外，还核对库里同名的另一方（release/v3.2.15 审查）：同名渠道与普通模板分两批导入时，
+//   每批只有一组，只比本批会放行，后一批覆盖前一批的明细、余额文件与同键余额种子。
 function findGenerationGroupOutputNameConflicts(groups) {
   const ownersByName = new Map();
+  const addOwner = (outputName, owner) => {
+    if (!ownersByName.has(outputName)) ownersByName.set(outputName, []);
+    const owners = ownersByName.get(outputName);
+    if (!owners.includes(owner)) owners.push(owner);
+  };
+  const batchNames = [];
   for (const group of Array.isArray(groups) ? groups : []) {
     if (!group || !group.templateConfig) continue;
     const outputName = resolveStatementOutputName(group.templateConfig.template);
-    if (!ownersByName.has(outputName)) ownersByName.set(outputName, []);
-    ownersByName.get(outputName).push(String(group.key).startsWith('channel:')
-      ? `渠道「${outputName}」`
-      : `模板「${normalizeCell(group.templateConfig.template.name)}」`);
+    const isChannel = String(group.key).startsWith('channel:');
+    addOwner(outputName, isChannel ? `渠道「${outputName}」` : `模板「${normalizeCell(group.templateConfig.template.name)}」`);
+    batchNames.push({ outputName, isChannel });
+  }
+  for (const { outputName, isChannel } of batchNames) {
+    if (isChannel) {
+      const ordinary = database.getTemplateByName(outputName);
+      if (ordinary && !ordinary.channelId) addOwner(outputName, `模板「${normalizeCell(ordinary.name)}」`);
+    } else if (database.getStatementChannelByName(outputName)) {
+      addOwner(outputName, `渠道「${outputName}」`);
+    }
   }
   const lines = Array.from(ownersByName.entries())
     .filter(([, owners]) => owners.length > 1)

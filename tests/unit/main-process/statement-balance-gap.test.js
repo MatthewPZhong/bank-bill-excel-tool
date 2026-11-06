@@ -82,15 +82,16 @@ function loadBalanceModeMismatchFunction(getTemplateMappingConfig) {
   );
 }
 
-// v3.2.15（PR #246 审查）：导出全部前核对各组输出名称不重复；这里的普通模板各不同名，使用真实函数确认直接放行。
+// v3.2.15（PR #246 审查）：导出全部前核对各组输出名称不重复；这里的普通模板各不同名、库里没有同名渠道，
+//   使用真实函数确认直接放行。
 function loadOutputNameConflictFunctions() {
   const identity = require('../../../src/main-process/statement-channel-identity');
   const { normalizeCell, FileValidationError } = require('../../../src/backend/file-service');
   return {
     findGenerationGroupOutputNameConflicts: loadMainFunction(
       'findGenerationGroupOutputNameConflicts',
-      ['resolveStatementOutputName', 'normalizeCell'],
-      [identity.resolveStatementOutputName, normalizeCell]
+      ['database', 'resolveStatementOutputName', 'normalizeCell'],
+      [{ getTemplateByName: () => null, getStatementChannelByName: () => null }, identity.resolveStatementOutputName, normalizeCell]
     ),
     buildStatementOutputNameConflictError: loadMainFunction(
       'buildStatementOutputNameConflictError',

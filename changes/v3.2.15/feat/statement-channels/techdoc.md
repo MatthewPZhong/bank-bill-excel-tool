@@ -304,7 +304,18 @@ CREATE TABLE IF NOT EXISTS statement_channel_account_mapping_conflicts (
 
 I14、I15、I16 涉及输出身份与账户血缘，按资金红线列入 PR #246 人工复核。
 
-### 11.5 验证
+### 11.5 release/v3.2.15 Codex 审查（2026-11-06）
+
+对 `main...release/v3.2.15` 的只读审查又提出两项 I14、I16 修复后仍可触发的旁路，逐项核实都成立。修复如下，回归在修复前失败、修复后通过。
+
+| 编号 | 发现 | 处理 |
+| --- | --- | --- |
+| I19（P1） | v5 模板包里归入某渠道的模板第一轮全部被跳过，而该渠道与本地渠道同名时，第三轮仍按包内 `channels[]` 整体替换该渠道的账户映射与冲突：被跳过模板的生效清结算账号、兜底币种被改写，原有待处理冲突被清掉 | `buildBundleV5ChannelRestore` 只还原包内没有模板归入、或至少有一个归入模板第一轮成功的渠道；未还原的渠道写入活动日志。同一渠道部分模板成功时照常还原（渠道层映射属于渠道） |
+| I20（P1） | 生成前的同名兜底只比较本批各组：同名的渠道与普通模板分两批导入时，每批只有一组被放行，后一批覆盖前一批的明细、余额文件与同键余额种子 | `findGenerationGroupOutputNameConflicts` 另查库里同名的另一方：渠道组查同名普通模板（不属于任何渠道），普通模板组查同名渠道；导入步骤 3.5 与“导出全部”共用 |
+
+回归：集成脚本 `statement-channel.js` 第 ⑪、⑫ 步。I19、I20 涉及账户血缘与输出身份，按资金红线人工复核。
+
+### 11.6 验证
 
 见 PR 说明；新增单测 `statement-channel-migration`、`statement-channel-repository`、`statement-channel-account-mappings`、`statement-channel-identity`，集成脚本 `scripts/integration/statement-channel.js`，renderer lifecycle 新增渠道用例。
 
