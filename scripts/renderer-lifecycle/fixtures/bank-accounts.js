@@ -152,6 +152,30 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(await js('__testErrors'), []);
   });
 
+  await test('翻页读取中两个翻页按钮不可用，连续点击不越过末页；结果越界时退回最后一页', async () => {
+    await setup();
+    await js(`ba.hold.list = ba.defer(); ba.q('[data-action="next-page"]').click(); ba.q('[data-action="next-page"]').click(); void 0;`);
+    await waitFor('ba.count("list") === 2');
+    assert.deepEqual(await js(`({ previous: ba.q('[data-action="previous-page"]').disabled, next: ba.q('[data-action="next-page"]').disabled })`),
+      { previous: true, next: true });
+    await js('ba.hold.list.resolve(); ba.hold.list = null; void 0;');
+    await waitFor('ba.bodyRows() === 50');
+    assert.deepEqual(await js(`ba.calls.filter((call) => call[0] === 'list').map((call) => call[1].offset)`), [0, 200]);
+    assert.deepEqual(await js(`({ page: ba.text('[data-role="bank-accounts-page"]'), pagerHidden: ba.q('[data-role="bank-accounts-pager"]').hidden,
+      previous: ba.q('[data-action="previous-page"]').disabled, next: ba.q('[data-action="next-page"]').disabled })`),
+    { page: '第 2 / 2 页（共 250 行）', pagerHidden: false, previous: false, next: true });
+
+    // 读取第 2 页期间行数减到 1 页以内（同一账户表）：不显示空表，改读最后一页。
+    await setup();
+    await js(`ba.hold.list = ba.defer(); ba.q('[data-action="next-page"]').click(); void 0;`);
+    await waitFor('ba.count("list") === 2');
+    await js(`ba.rows = ba.rows.slice(0, 150); ba.hold.list.resolve(); ba.hold.list = null; void 0;`);
+    await waitFor('ba.count("list") === 3 && ba.bodyRows() === 150');
+    assert.deepEqual(await js(`ba.calls.filter((call) => call[0] === 'list').map((call) => call[1].offset)`), [0, 200, 0]);
+    assert.equal(await js('!!ba.q(".bank-accounts-empty")'), false);
+    assert.deepEqual(await js('__testErrors'), []);
+  });
+
   await test('未导入时显示空状态，导出不可用、渠道下拉禁用', async () => {
     await setup({ snapshot: false });
     assert.equal(await js(`ba.text('.bank-accounts-empty')`), '尚未导入银行账户信息，请点击左下角【导入银行账户信息】');

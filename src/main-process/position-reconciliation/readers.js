@@ -75,10 +75,12 @@ function rowValues(sheet) {
     blankrows: false
   });
   return records.map((record) => {
-    const values = [];
+    const sparse = [];
     for (const [columnName, value] of Object.entries(record)) {
-      values[XLSX.utils.decode_col(columnName)] = value;
+      sparse[XLSX.utils.decode_col(columnName)] = value;
     }
+    // 工作表使用范围不从 A 列开始时，前面的列没有键；补成空串，避免表头比较跳过数组空位而放过缺列的文件。
+    const values = Array.from(sparse, (value) => (value === undefined ? '' : value));
     Object.defineProperty(values, '__rowNum__', {
       value: record.__rowNum__,
       enumerable: false

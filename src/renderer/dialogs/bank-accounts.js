@@ -6,6 +6,8 @@
   const PAGE_LIMIT = 200;
   const MAX_DETAIL_LINES = 12;
 
+  const pageCount = (total) => Math.max(1, Math.ceil((Number(total) || 0) / PAGE_LIMIT));
+
   function errorText(error, fallback) {
     if (error && typeof error === 'object' && error.message) return String(error.message);
     const text = String(error || '').trim();
@@ -22,6 +24,7 @@
         list: null,
         channel: '',
         page: 0,
+        listLoading: false,
         loaded: false,
         loading: null,
         overviewRequestId: 0,
@@ -146,23 +149,42 @@
           .map((_header, index) => `<td>${escapeHtml(row.values[index] ?? '')}</td>`).join('')}</tr>`).join('');
         tableEl.innerHTML = `<table class="bank-accounts-table" aria-labelledby="bankAccountsHeading"><thead>${head}</thead><tbody>${body}</tbody></table>`;
         tableEl.scrollTop = 0;
-        const pages = Math.max(1, Math.ceil(list.total / PAGE_LIMIT));
+        const pages = pageCount(list.total);
         pagerEl.hidden = pages <= 1;
         pageEl.textContent = `第 ${state.page + 1} / ${pages} 页（共 ${list.total} 行）`;
-        previousButton.disabled = state.page <= 0;
-        nextButton.disabled = state.page + 1 >= pages;
+        syncPager();
       }
 
+      // 读取中两个翻页按钮都不可用，避免连续点击按未返回的页码继续翻页。
+      function syncPager() {
+        const pages = state.list ? pageCount(state.list.total) : 1;
+        previousButton.disabled = state.listLoading || state.page <= 0;
+        nextButton.disabled = state.listLoading || state.page + 1 >= pages;
+      }
+
+      // 页码只在读取成功后生效；结果越界（总数非零而本页为空）时改读最后一页。
       async function loadPage(page) {
         const requestId = ++state.listRequestId;
-        state.page = Math.max(0, page);
+        const targetPage = Math.max(0, Math.trunc(Number(page)) || 0);
         const snapshotNo = state.overview?.snapshot?.snapshotNo || 0;
         if (!snapshotNo) {
+          state.page = 0;
           state.list = null;
+          state.listLoading = false;
           renderList();
           return;
         }
-        const result = await requireApi('list').list({ channel: state.channel, offset: state.page * PAGE_LIMIT, limit: PAGE_LIMIT });
+        state.listLoading = true;
+        syncPager();
+        let result;
+        try {
+          result = await requireApi('list').list({ channel: state.channel, offset: targetPage * PAGE_LIMIT, limit: PAGE_LIMIT });
+        } finally {
+          if (requestId === state.listRequestId) {
+            state.listLoading = false;
+            if (alive()) syncPager();
+          }
+        }
         if (!alive() || requestId !== state.listRequestId) return;
         if (result?.status !== 'success') throw new Error(result?.message || '读取账户失败');
         // 读取期间账户表被替换：重新读取概况，从第 1 页开始。
@@ -170,6 +192,12 @@
           await loadOverview({ keepFeedback: true });
           return;
         }
+        const lastPage = pageCount(result.total) - 1;
+        if (!result.rows.length && result.total > 0 && targetPage > lastPage) {
+          await loadPage(lastPage);
+          return;
+        }
+        state.page = targetPage;
         state.list = result;
         renderList();
       }

@@ -104,6 +104,17 @@ test('表头不一致时列出与当前结构的差异；多个工作表一致�
   assert.equal(parse(Buffer.from('not a workbook at all')).ok, false);
 });
 
+test('前面若干列完全空白（使用范围不从 A 列开始）的文件按缺列拒绝', () => {
+  const workbook = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([HEADERS.slice(1), ['1', '正常', '']], { origin: 'B1' });
+  sheet['!ref'] = 'B1:D2'; // 与 Excel 保存后的使用范围一致：A 列没有任何单元格
+  XLSX.utils.book_append_sheet(workbook, sheet, 'S');
+  const result = parse(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
+  assert.equal(result.ok, false);
+  assert.equal(result.message, '无法识别为清结算银行账户表：a.xlsx');
+  assert.ok(result.detailLines.some((line) => line.includes('银行/通道简称')), result.detailLines.join('\n'));
+});
+
 test('预检拦截：未经选择框的路径、不支持的扩展名、空文件、超限、结构不可用或缺渠道列、无数据行', async (t) => {
   const env = setup(t, { readFileCapped: async (filePath, maxBytes) => {
     if (filePath.endsWith('big.xlsx')) throw Object.assign(new Error(`文件超过 ${maxBytes / 1024 / 1024} MiB`), { code: 'BANK_ACCOUNT_FILE_TOO_LARGE' });
