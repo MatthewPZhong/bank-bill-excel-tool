@@ -98,6 +98,35 @@ function extractChannelLocation(row) {
   return String(row[LOCATION_FIELD_NAME] ?? '').trim();
 }
 
+// 行 → matchedChannel（按 Channel + 所在地查渠道，1 行 1 次 DB 查询）；R2 双维调度与 R4、退款回填共用。
+function buildRowMatchedChannelMap(bankRows, deps) {
+  const { channelsRepo, db } = deps;
+  const rowMatchedChannelMap = new Map(); // _rowId → matchedChannel | null
+  for (const row of bankRows) {
+    if (row && row._rowId != null) {
+      const matched = channelsRepo.findByNameAndLocation(
+        db,
+        extractChannelName(row),
+        extractChannelLocation(row)
+      );
+      rowMatchedChannelMap.set(row._rowId, matched || null);
+    }
+  }
+  return rowMatchedChannelMap;
+}
+
+// v2.1.13 D-3：自带写死场景（builtin-fixed）「适用银行渠道」——只保留 matchedChannel 在适用列表内的行；
+//   列表空/缺 = 适用全部，不过滤；未匹配到渠道的行在限定列表下不适用。
+//   v3.2.15 起 R4 资金性质校验与退款回填（独立分桶、不经 R2 dispatcher）同样按此口径过滤。
+function filterRowsByApplicableChannels(rows, applicableChannelIds, rowMatchedChannelMap) {
+  if (!Array.isArray(applicableChannelIds) || applicableChannelIds.length === 0) return rows;
+  const applicable = new Set(applicableChannelIds.map(Number));
+  return rows.filter((r) => {
+    const matched = rowMatchedChannelMap ? rowMatchedChannelMap.get(r._rowId) : null;
+    return !!matched && applicable.has(Number(matched.id));
+  });
+}
+
 // v2.1.9 N5 Phase 4 T16（spec §2.1 Step 3 优化）：caller 入参 scenarios 按 channel_id 切片
 //   - 输入 scenarios：已 enabled / 已过滤 C4 / 已 sort（priority DESC + id ASC）
 //   - 输出：Map<channelId, scenarios[]>
@@ -338,11 +367,7 @@ function runChannelBatch(args) {
     //   candidates 为空 → 跳过本场景（continue，非 break；后续不限定场景仍需处理剩余 unlocked 行）。
     let candidates = unlocked;
     if (Array.isArray(scenario._applicableChannelIds) && scenario._applicableChannelIds.length > 0) {
-      const applicable = new Set(scenario._applicableChannelIds.map(Number));
-      candidates = unlocked.filter((r) => {
-        const matched = rowMatchedChannelMap ? rowMatchedChannelMap.get(r._rowId) : null;
-        return matched && applicable.has(Number(matched.id));
-      });
+      candidates = filterRowsByApplicableChannels(unlocked, scenario._applicableChannelIds, rowMatchedChannelMap);
       if (candidates.length === 0) continue;
     }
 
@@ -432,17 +457,7 @@ function runDualDimensionDispatch(bankRows, gwRows, filtered, deps, ctx) {
   const generalChannel = channelsRepo.getBuiltinGeneral(db);
 
   // Step 2 — 为每行预查 matchedChannel（1 行 1 次 DB 查询）
-  const rowMatchedChannelMap = new Map(); // _rowId → matchedChannel | null
-  for (const row of bankRows) {
-    if (row && row._rowId != null) {
-      const matched = channelsRepo.findByNameAndLocation(
-        db,
-        extractChannelName(row),
-        extractChannelLocation(row)
-      );
-      rowMatchedChannelMap.set(row._rowId, matched || null);
-    }
-  }
+  const rowMatchedChannelMap = buildRowMatchedChannelMap(bankRows, deps);
 
   // 跨阶段共享状态（保证 first-match-wins 不变量「同行最多 1 命中」）
   const rowLockSet = new Set();
@@ -589,6 +604,9 @@ module.exports = {
   extractChannelName,
   extractChannelLocation,
   groupScenariosByChannelId,
+  // v3.2.15：builtin-fixed 适用银行渠道的行过滤（R2 与独立分桶的 R4、退款回填共用）
+  buildRowMatchedChannelMap,
+  filterRowsByApplicableChannels,
   // v2.1.9 SR-FIX-1 (spec §16.2)：per-channel batch helper（unit test 直查 + 内部使用）
   runChannelBatch
 };
