@@ -755,6 +755,7 @@ const {
   showImportOpenDialog: showRememberedImportOpenDialog
 } = require('./main-process/import-dialog-state');
 const {
+  matchImportFilesToSavedOrder,
   matchMerchantIds,
   normalizeMaintainedBigAccounts,
   resolveRecognizedBigAccount
@@ -12009,16 +12010,19 @@ function buildBigAccountOrderEvidence(pendingContext) {
           blockOrdinal
         );
       }
-      const matched = expandedOptions.find(
-        (option) => identified
-          && matchMerchantIds(identified.merchantId, option.merchantId) !== 'none'
-      );
+      // 直接识别和桥接返回的都是维护列表里的账号，按账号精确取其币种选项；
+      // 子串匹配会把相互包含的其他维护账号也算进来。
+      const identifiedMerchantId = identified ? normalizeCell(identified.merchantId) : '';
+      const accountOptions = identifiedMerchantId
+        ? expandedOptions.filter((option) => normalizeCell(option.merchantId) === identifiedMerchantId)
+        : [];
+      const matched = accountOptions[0];
       const merchantId = matched ? matched.merchantId : '';
       const currency = matched ? matched.currency : '';
-      const ambiguityCode = identified && identified.viaBridge
-        && expandedOptions.filter(
-          (option) => matchMerchantIds(identified.merchantId, option.merchantId) !== 'none'
-        ).length > 1
+      // 提取不读取账单里的币种，维护了多个币种时默认取首个币种；无论直接识别还是桥接都须提醒用户核对。
+      const ambiguityCode = new Set(
+        accountOptions.map((option) => normalizeCell(option.currency))
+      ).size > 1
         ? 'MULTI_CURRENCY'
         : null;
       return Object.freeze({
@@ -13055,12 +13059,9 @@ function registerFileHandlers() {
                   .map((ba) => normalizeCell(ba.merchantId))
                   .filter((id) => id !== '');
                 const defaultExpectedSourceHeaders = templateConfig.template.headers || [];
-                const failedFileNames = [];
-                const usedSavedIndices = new Set();
-                const fileMatchMap = new Map(); // importIndex → savedFileIndex
 
                 // 每个导入文件用账户个数+账户号去全部保存文件里找匹配（不按位置对位）
-                provisionalFileEntries.forEach((entry, fileIndex) => {
+                const importAccountLists = provisionalFileEntries.map((entry) => {
                   const entryHeaders = entry.matchedHeaders || defaultExpectedSourceHeaders;
                   let fileResult = entry.skipDirectMerchantLookup
                     ? { accounts: [], isSingleAccount: false }
@@ -13089,61 +13090,39 @@ function registerFileHandlers() {
                     }
                   }
 
-                  let matchedSavedIndex = -1;
-                  for (let si = 0; si < savedOrderConfig.files.length; si += 1) {
-                    if (usedSavedIndices.has(si)) continue;
-                    const savedFile = savedOrderConfig.files[si];
-                    if (fileResult.accounts.length !== savedFile.accountCount) continue;
-                    const allAccountsMatch = savedFile.accounts.every((savedAccount) => {
-                      return fileResult.accounts.some((identified) => (
-                        matchMerchantIds(identified.merchantId, savedAccount.merchantId) !== 'none'
-                      ));
-                    });
-                    if (allAccountsMatch) {
-                      matchedSavedIndex = si;
-                      break;
-                    }
-                  }
-
-                  if (matchedSavedIndex >= 0) {
-                    usedSavedIndices.add(matchedSavedIndex);
-                    fileMatchMap.set(fileIndex, matchedSavedIndex);
-                  } else {
-                    failedFileNames.push(path.basename(entry.filePath));
-                  }
+                  return fileResult.accounts;
                 });
 
-                const reorderedAssignments = [];
-                if (failedFileNames.length === 0
-                    && Array.isArray(savedOrderConfig.assignments)
-                    && savedOrderConfig.assignments.length > 0) {
-                  // 按 fileMatchMap 重排 assignments：按导入文件顺序重组保存的 assignments
-                  const savedFiles = savedOrderConfig.files || [];
-                  const savedAssignments = savedOrderConfig.assignments || [];
-                  const savedFileRanges = [];
-                  let cumulativeIndex = 0;
-                  savedFiles.forEach((savedFile) => {
-                    const count = savedFile.accountCount || 0;
-                    savedFileRanges.push({ start: cumulativeIndex, count });
-                    cumulativeIndex += count;
-                  });
-                  let newRowIndex = 0;
-                  for (let importIdx = 0; importIdx < provisionalFileEntries.length; importIdx += 1) {
-                    const savedIdx = fileMatchMap.get(importIdx);
-                    if (savedIdx === undefined) continue;
-                    const range = savedFileRanges[savedIdx];
-                    if (!range) continue;
-                    const slice = savedAssignments.slice(range.start, range.start + range.count);
-                    slice.forEach((assignment) => {
-                      reorderedAssignments.push({ ...assignment, rowIndex: newRowIndex });
-                      newRowIndex += 1;
-                    });
-                  }
-                }
-                return { failedFileNames, reorderedAssignments };
+                const {
+                  failedImportIndexes,
+                  ambiguousImportIndexes,
+                  reorderedAssignments
+                } = matchImportFilesToSavedOrder(importAccountLists, savedOrderConfig);
+                const importFileName = (index) => path.basename(provisionalFileEntries[index].filePath);
+                return {
+                  failedFileNames: failedImportIndexes.map(importFileName),
+                  ambiguousFileNames: ambiguousImportIndexes.map(importFileName),
+                  reorderedAssignments
+                };
               }
             );
-            const { failedFileNames, reorderedAssignments } = autoMatchDecision;
+            const { failedFileNames, ambiguousFileNames, reorderedAssignments } = autoMatchDecision;
+
+            // 记住的顺序无法唯一对应导入文件时（如同一多币种大账号的多份账单）不自动套用，降级为不固定模式由用户确认；
+            // 匹配不上的文件仍走下方“记住顺序不匹配”提示。
+            if (failedFileNames.length === 0 && ambiguousFileNames.length > 0) {
+              forceUnfixedMode = true;
+              if (!prepared.previewOnly) {
+                appendActivityLogEntry({
+                  level: 'info',
+                  message: '已记住的大账号顺序无法唯一确定部分文件的账号 / 币种，改为人工选择',
+                  details: [
+                    `模板名：${normalizeCell(templateConfig.template.name) || 'N/A'}`,
+                    `涉及文件：${ambiguousFileNames.join('、')}`
+                  ]
+                });
+              }
+            }
 
             if (failedFileNames.length === 0 && reorderedAssignments.length > 0) {
 
