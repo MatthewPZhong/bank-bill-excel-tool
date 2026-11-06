@@ -84,14 +84,14 @@ function loadBalanceModeMismatchFunction(getTemplateMappingConfig) {
 
 // v3.2.15（PR #246 审查）：导出全部前核对各组输出名称不重复；这里的普通模板各不同名、库里没有同名渠道，
 //   使用真实函数确认直接放行。
-function loadOutputNameConflictFunctions() {
+function loadOutputNameConflictFunctions(database = { listTemplates: () => [], listStatementChannels: () => [] }) {
   const identity = require('../../../src/main-process/statement-channel-identity');
   const { normalizeCell, FileValidationError } = require('../../../src/backend/file-service');
   return {
     findGenerationGroupOutputNameConflicts: loadMainFunction(
       'findGenerationGroupOutputNameConflicts',
       ['database', 'resolveStatementOutputName', 'normalizeCell'],
-      [{ getTemplateByName: () => null, getStatementChannelByName: () => null }, identity.resolveStatementOutputName, normalizeCell]
+      [database, identity.resolveStatementOutputName, normalizeCell]
     ),
     buildStatementOutputNameConflictError: loadMainFunction(
       'buildStatementOutputNameConflictError',
@@ -779,6 +779,7 @@ test('主进程：按文件名映射全部范围补录或不补录后，按全�
       FILENAME_MAPPING_TEMPLATE_ID,
       FileValidationError,
       isFilenameMappingMode: (templateId) => templateId === FILENAME_MAPPING_TEMPLATE_ID,
+      ...seedSaveGroupingDeps(),
       rememberAcknowledgedBalanceGaps: () => true,
       appendActivityLogEntry: () => {},
       formatBalanceGapLine: () => '',
@@ -809,6 +810,42 @@ test('主进程：按文件名映射全部范围补录或不补录后，按全�
       assert.equal(lastGeneratedExports.balance, merged);
     }
   }
+});
+
+// 补录后按会话全部分组重新生成前的输出名称核对：模板 1、模板 2 两组普通模板。
+function seedSaveGroupingDeps(database) {
+  const templateConfig = (tid) => ({ template: { id: tid, name: `模板${tid}` }, exportMappings: [], exportTargetFields: [] });
+  return {
+    groupStatementEntriesForGeneration: loadGroupingFunction(templateConfig),
+    getStatementSessionEntries: () => [{ matchedTemplateId: 1 }, { matchedTemplateId: 2 }],
+    ...loadOutputNameConflictFunctions(database)
+  };
+}
+
+test('主进程：按文件名映射补录时，会话里的模板与库里的渠道同名则先阻断，不写入种子也不重新生成（release/v3.2.15 审查）', async () => {
+  const calls = { seed: 0, regenerate: 0, cleared: 0 };
+  const execute = loadSaveBalanceSeedExecute({
+    FILENAME_MAPPING_TEMPLATE_ID,
+    FileValidationError,
+    isFilenameMappingMode: (templateId) => templateId === FILENAME_MAPPING_TEMPLATE_ID,
+    ...seedSaveGroupingDeps({ listTemplates: () => [], listStatementChannels: () => [{ id: 9, name: ' 模板1 ' }] }),
+    writeManualBalanceSeedPlan: () => { calls.seed += 1; },
+    regenerateVirtualTemplateBalanceFromSession: () => { calls.regenerate += 1; return { needsSeed: false, generatedFiles: {} }; },
+    appendActivityLogEntry: () => {},
+    clearPendingManualBalancePrompt: () => { calls.cleared += 1; },
+    createErrorResult: (payload) => ({ status: 'error', ...payload })
+  });
+  const result = await execute(null, {
+    plan: { record: { templateName: '模板1', merchantId: 'M001', currency: 'USD', billDate: '2026-08-31', endBalance: '1000' } },
+    skipBalanceGapKeys: null,
+    pendingPrompt: { templateName: '模板1' },
+    session: { key: 'session-1', templateId: FILENAME_MAPPING_TEMPLATE_ID },
+    importContext: { templateId: FILENAME_MAPPING_TEMPLATE_ID, scope: 'current', template: { name: '按文件名映射模板' } }
+  }, { fileEvidence: { filePlan: { inputs: [{ filePath: '/tmp/a.xlsx' }] } } });
+  assert.equal(result.status, 'error');
+  assert.equal(result.errorCode, 'STATEMENT_OUTPUT_NAME_CONFLICT');
+  assert.deepEqual(result.detailLines, ['输出名称「模板1」：模板「模板1」、渠道「模板1」']);
+  assert.deepEqual(calls, { seed: 0, regenerate: 0, cleared: 1 });
 });
 
 function loadOutputPathHelpers(storageRoot, today) {
