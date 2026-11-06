@@ -33,7 +33,7 @@ jobs:
           node -e "if (require('./tests/helpers/durable-directory-tests').directoryDurabilityCapability.capability !== 'supported') process.exit(1)"
           node --test tests/unit/main-process/biz-op-v327*.test.js
 
-  # v3.2.15 B43：release-check 拆成下面三个并行 job（lint + 架构检查 + smoke、单测 5 片、集成测试 2 片），
+  # v3.2.15 B43：release-check 拆成下面三个并行 job（lint + 架构检查 + smoke、单测 6 片、集成测试 2 片），
   #   各 job 沿用 smoke-test 的 v3.2.1 final gate 守卫、exact head checkout、一次性修复血缘与 release-check 运行条件；
   #   smoke-test 汇总各 job 结果（scripts/ci/verify-release-check-jobs.js）后再跑 Windows 专项步骤，必需检查名不变。
   #   本地 npm run release-check 的入口与内容不变。
@@ -139,12 +139,12 @@ jobs:
         run: npm run lint && npm run check:architecture && npm run smoke
 
   release-check-unit:
-    name: release-check-unit (${{ matrix.shard }}/5)
+    name: release-check-unit (${{ matrix.shard }}/6)
     runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5]
+        shard: [1, 2, 3, 4, 5, 6]
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -214,7 +214,7 @@ jobs:
 
       - name: Run unit tests shard
         env:
-          UNIT_TEST_SHARD: ${{ matrix.shard }}/5
+          UNIT_TEST_SHARD: ${{ matrix.shard }}/6
         if: >-
           (
             github.event_name == 'pull_request' &&

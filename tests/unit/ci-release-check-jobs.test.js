@@ -59,10 +59,10 @@ test('并行 job 的检查命令合起来恰好是 package.json 的 release-chec
   assert.match(read('.github/workflows/release-windows.yml'), /run: npm run release-check/, '发布 workflow 仍完整运行 release-check');
 });
 
-test('单测 5 片、集成测试 2 片：matrix 与分片参数一致，失败不取消其他分片', () => {
+test('单测 6 片、集成测试 2 片：matrix 与分片参数一致，失败不取消其他分片', () => {
   const unit = jobText('release-check-unit');
-  assert.match(unit, /strategy:\s*\n\s*fail-fast: false\s*\n\s*matrix:\s*\n\s*shard: \[1, 2, 3, 4, 5\]/);
-  assert.match(unit, /UNIT_TEST_SHARD: \$\{\{ matrix\.shard \}\}\/5/);
+  assert.match(unit, /strategy:\s*\n\s*fail-fast: false\s*\n\s*matrix:\s*\n\s*shard: \[1, 2, 3, 4, 5, 6\]/);
+  assert.match(unit, /UNIT_TEST_SHARD: \$\{\{ matrix\.shard \}\}\/6/);
   const integration = jobText('release-check-integration');
   assert.match(integration, /strategy:\s*\n\s*fail-fast: false\s*\n\s*matrix:\s*\n\s*shard: \[1, 2\]/);
   assert.match(integration, /INTEGRATION_SHARD: \$\{\{ matrix\.shard \}\}\/2/);

@@ -12,9 +12,9 @@
 //   node scripts/run-unit-tests.js            # 跑全部 unit
 //   node scripts/run-unit-tests.js --coverage # 加 --experimental-test-coverage
 //   UNIT_TEST_CONCURRENCY=2 npm run release-check # 仅限制测试文件并发，默认保持 Node 原值
-//   UNIT_TEST_SHARD=1/5 npm run test:unit       # v3.2.15 B43：只跑第 1/5 片，CI 分多个 job 并行；未设置时跑全部，
-//                                                #   本地 release-check 不变。分片按文件：负载敏感文件各占一片，最长的文件独占一片，
-//                                                #   其余按实测耗时从长到短放进当前最轻的片（见 selectShardFiles）
+//   UNIT_TEST_SHARD=1/6 npm run test:unit       # v3.2.15 B43：只跑第 1/6 片，CI 分多个 job 并行；未设置时跑全部，
+//                                                #   本地 release-check 不变。分片按文件：负载敏感文件各占一片（带固定期限的放轻载片），
+//                                                #   最长的文件独占一片，其余按实测耗时从长到短放进当前最轻的片（见 selectShardFiles）
 //
 // 退出码：透传 node --test 的退出码（0=全 PASS / 非 0=有 FAIL）
 
@@ -51,10 +51,19 @@ const LOAD_SENSITIVE_UNIT_FILES = Object.freeze([
   'tests/unit/main-process/biz-op-v327-compute-main.test.js',
   'tests/unit/main-process/biz-op-v327-delete-main.test.js'
 ]);
+// 负载敏感文件中带固定期限、同机负载高时会超时的文件，所在片的估算分钟数不超过 LIGHT_SHARD_MAX_MINUTES：
+//   - compute-main：协作取消 5 秒期限、真实 Main 子进程 30 秒上限。run 42136603684 中所在片估算 33 分钟，
+//     出现 CANCEL_TIMEOUT；此前两次所在片 18.6～19.5 分钟，都通过。
+//   - delete-main：DELETE_ASSOCIATED 恢复 70 秒期限。在 Node 原生 3 片中超时，所在片 18.7～25.8 分钟时通过。
+const LIGHT_LOAD_UNIT_FILES = Object.freeze([
+  'tests/unit/main-process/biz-op-v327-compute-main.test.js',
+  'tests/unit/main-process/biz-op-v327-delete-main.test.js'
+]);
+const LIGHT_SHARD_MAX_MINUTES = 20;
 // 独占一片的文件：文件内用例依次运行，单个文件的耗时就是所在片的下限（biz-op-v327 约 14 分钟，其中 1024/128/32 个
 //   真实 Task 来源的扫描用例约 13 分钟）。node --test 按路径排序启动文件，它排在同片多数文件之后；与其他文件同片时
 //   要等前面的文件让出位置才开始，所在片因此最慢（run 42086209141 第 3 片 19.2 分钟；run 42090975671 同一片在
-//   磁盘较慢的机器上 36 分钟）。所以它只与一个负载敏感文件同片，开跑即开始，其他文件不进该片。
+//   磁盘较慢的机器上 36 分钟）。所以它放进当前最轻的片（6 片时是空片），开跑即开始，其他文件不进该片。
 const DEDICATED_UNIT_FILES = Object.freeze([
   'tests/unit/main-process/biz-op-v327.test.js'
 ]);
@@ -108,15 +117,17 @@ function unitFileMinutes(file) {
 //   1. 负载敏感文件按耗时从长到短各放一片（片数不足时轮流）；
 //   2. 独占文件放进当前最轻的片，该片不再放其他文件（至少留 2 片给其余文件，否则按第 3 步分配）；
 //   3. 其余文件按耗时从长到短（同耗时按路径），每个放进当前估算分钟数最少的片（同为最少时取序号小的）。
+//      含 LIGHT_LOAD_UNIT_FILES 的片放入后不超过 LIGHT_SHARD_MAX_MINUTES 才可选；没有可选的片时不受此限。
 function selectShardFiles(files, shard) {
   const sorted = [...files].sort();
   if (!shard) return sorted;
   const present = new Set(sorted);
   const byMinutesDesc = (a, b) => unitFileMinutes(b) - unitFileMinutes(a) || (a < b ? -1 : a > b ? 1 : 0);
-  const shards = Array.from({ length: shard.total }, () => ({ files: [], minutes: 0, open: true }));
+  const shards = Array.from({ length: shard.total }, () => ({ files: [], minutes: 0, open: true, light: false }));
   const place = (target, file) => {
     target.files.push(file);
     target.minutes += unitFileMinutes(file);
+    if (LIGHT_LOAD_UNIT_FILES.includes(file)) target.light = true;
   };
   const lightest = (candidates) => candidates.reduce((best, item) => (item.minutes < best.minutes ? item : best));
   LOAD_SENSITIVE_UNIT_FILES.filter((file) => present.has(file)).sort(byMinutesDesc)
@@ -130,7 +141,9 @@ function selectShardFiles(files, shard) {
   }
   const placed = new Set(shards.flatMap((item) => item.files));
   for (const file of sorted.filter((item) => !placed.has(item)).sort(byMinutesDesc)) {
-    place(lightest(shards.filter((item) => item.open)), file);
+    const open = shards.filter((item) => item.open);
+    const fits = open.filter((item) => !item.light || item.minutes + unitFileMinutes(file) <= LIGHT_SHARD_MAX_MINUTES);
+    place(lightest(fits.length > 0 ? fits : open), file);
   }
   return shards[shard.index - 1].files.sort();
 }
@@ -318,6 +331,8 @@ if (require.main === module) {
 // 导出可测试纯函数（unit test 用）
 module.exports = {
   DEDICATED_UNIT_FILES,
+  LIGHT_LOAD_UNIT_FILES,
+  LIGHT_SHARD_MAX_MINUTES,
   LOAD_SENSITIVE_UNIT_FILES,
   UNIT_FILE_MINUTES,
   unitFileMinutes,
