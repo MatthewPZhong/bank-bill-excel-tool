@@ -723,6 +723,62 @@ function verifyOutputNameConflictAcrossBatches(dir) {
   assertEq(env.fns.findGenerationGroupOutputNameConflicts(channelBatch), null, 'Step12.普通模板改名后渠道一批不再阻断');
   const renamedBatch = env.fns.groupStatementEntriesForGeneration([env.entryFor(env.database.getTemplate(ordinary.id), fileC)]);
   assertEq(env.fns.findGenerationGroupOutputNameConflicts(renamedBatch), null, 'Step12.普通模板改名后普通模板一批不再阻断');
+
+  // 输出路径不区分大小写、名称去首尾空格：只差大小写或空格的渠道与普通模板同样阻断（两个方向）。
+  env.database.renameTemplate(ordinary.id, '招商银行-上海'.replace('上海', 'SH').toLowerCase());
+  const lowerName = env.database.getTemplate(ordinary.id).name;
+  env.database.renameStatementChannel(env.database.getTemplate(owner.id).channelId, '招商银行-SH');
+  const channelBatchUpper = env.fns.groupStatementEntriesForGeneration([env.entryFor(env.database.getTemplate(owner.id), fileA)]);
+  const ordinaryBatchLower = env.fns.groupStatementEntriesForGeneration([env.entryFor(env.database.getTemplate(ordinary.id), fileC)]);
+  assertEq(env.fns.findGenerationGroupOutputNameConflicts(channelBatchUpper), [`输出名称「招商银行-SH」：渠道「招商银行-SH」、模板「${lowerName}」`],
+    'Step12.渠道与只差大小写的普通模板：渠道一批阻断');
+  assertEq(env.fns.findGenerationGroupOutputNameConflicts(ordinaryBatchLower), [`输出名称「${lowerName}」：模板「${lowerName}」、渠道「招商银行-SH」`],
+    'Step12.渠道与只差大小写的普通模板：普通模板一批阻断');
+  env.database.renameTemplate(ordinary.id, ' 招商银行-SH ');
+  assertEq(env.database.getTemplate(ordinary.id).name, ' 招商银行-SH ', 'Step12.前置：模板名保留首尾空格');
+  assertEq(env.fns.findGenerationGroupOutputNameConflicts(channelBatchUpper), ['输出名称「招商银行-SH」：渠道「招商银行-SH」、模板「招商银行-SH」'],
+    'Step12.渠道与只差首尾空格的普通模板：渠道一批阻断');
+
+  // 两个普通模板名称只差首尾空格（显示文字相同、模板不同）：同批仍按两个所有者阻断。
+  env.database.renameTemplate(ordinary.id, '工行-深圳');
+  const spaced = env.defineTemplate(' 工行-深圳 ', 'A');
+  const fileSpaced = path.join(dir, 'step12-spaced.xlsx');
+  writeSource(fileSpaced, 'A', [['2026-09-01', 'M001', 'USD', '5', '']]);
+  const twoTemplates = env.fns.groupStatementEntriesForGeneration([
+    env.entryFor(env.database.getTemplate(ordinary.id), fileC),
+    env.entryFor(env.database.getTemplate(spaced.id), fileSpaced)
+  ]);
+  assertEq(twoTemplates.length, 2, 'Step12.前置：两个普通模板各自成组');
+  assertEq(env.fns.findGenerationGroupOutputNameConflicts(twoTemplates), ['输出名称「工行-深圳」：模板「工行-深圳」、模板「工行-深圳」'],
+    'Step12.名称只差首尾空格的两个普通模板同批阻断');
+}
+
+// ⑬ release/v3.2.15 审查：v≤4 模板包里父模板第一轮被跳过、子模板成功时，不把本地同 key 的父模板当作包外父模板：
+//    本地父模板的归属与模板级映射不变，子模板按普通模板导入，带包内自己的映射。
+function verifyLegacyBundleSkippedParent(dir) {
+  const env = createEnvironment(dir, 'step13');
+  const parent = env.defineTemplate('招商银行-上海', 'A');
+  env.database.saveAccountMappings({ templateId: parent.id }, [{ bankAccountId: 'RAW001', clearingAccountId: 'OLD-ACCOUNT', noCurrency: true, currency: 'USD' }]);
+  const child = env.defineTemplate('招商银行-上海-2', 'C');
+  const parentEntry = { templateKey: parent.templateKey, name: parent.name, isParent: true, parentTemplateKey: null,
+    accountMappings: [{ bankAccountId: 'RAW001', clearingAccountId: 'FROM-BUNDLE' }] };
+  const childEntry = { templateKey: child.templateKey, name: child.name, isParent: false, parentTemplateKey: parent.templateKey,
+    accountMappings: [{ bankAccountId: 'RAW002', clearingAccountId: 'NEW-ACCOUNT', noCurrency: true, currency: 'EUR' }] };
+  const { channelRestore, restoreResult } = env.fns.restoreBundleFollowUpRounds({
+    importedTemplates: [parentEntry, childEntry],
+    succeededEntries: new Set([childEntry]),
+    importedBundleVersion: 4,
+    importedChannels: []
+  });
+  const mappingsOf = (scope) => env.database.listAccountMappings(scope)
+    .map((m) => [m.bankAccountId, m.clearingAccountId, Boolean(m.noCurrency), m.currency]);
+  assertEq(env.database.getTemplate(parent.id).channelId || null, null, 'Step13.被跳过的父模板不归入渠道');
+  assertEq(mappingsOf({ templateId: parent.id }), [['RAW001', 'OLD-ACCOUNT', true, 'USD']], 'Step13.被跳过的父模板映射不变');
+  assertEq(env.database.getTemplate(child.id).channelId || null, null, 'Step13.子模板按普通模板导入');
+  assertEq(mappingsOf({ templateId: child.id }), [['RAW002', 'NEW-ACCOUNT', true, 'EUR']], 'Step13.子模板带包内自己的映射');
+  assertEq(channelRestore.orphanedTemplateNames, ['招商银行-上海-2'], 'Step13.列出按普通模板导入的子模板');
+  assertEq([restoreResult.channelCount, restoreResult.conflictCount], [0, 0], 'Step13.不新建渠道、不产生冲突');
+  assertEq(env.database.listStatementChannels().length, 0, 'Step13.库里没有渠道');
 }
 
 async function run() {
@@ -740,6 +796,7 @@ async function run() {
     verifyBundleSkippedTemplateKeepsChannel(dir);
     verifyBundleSkippedSameNameChannelKeepsMappings(dir);
     verifyOutputNameConflictAcrossBatches(dir);
+    verifyLegacyBundleSkippedParent(dir);
   } finally {
     openedDatabases.splice(0).forEach((database) => {
       try { database.close(); } catch (error) { console.error('关闭测试主库失败', error); }
