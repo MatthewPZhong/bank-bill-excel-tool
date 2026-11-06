@@ -672,6 +672,13 @@ const templateFilesDialogs = window.__templateFilesDialogs.createTemplateFilesDi
   ui: { escapeHtml, createConfirmDialog }
 });
 
+// v3.2.15：设置 → 账户管理（清结算系统银行账户表）。
+const bankAccountsDialogs = window.__bankAccountsDialogs.createBankAccountsDialogs({
+  api: { bankAccounts: window.desktopApi?.bankAccounts },
+  modalBridge,
+  ui: { escapeHtml, createConfirmDialog }
+});
+
 // v3.2.14：升级后首次启动的「更新说明」，设置「版本管理」可再次查看本版说明。
 const releaseNotesDialogs = window.__releaseNotesDialogs.createReleaseNotesDialogs({
   api: { settings: { acknowledgeReleaseNotes: window.desktopApi?.settings?.acknowledgeReleaseNotes } },
@@ -687,6 +694,7 @@ const { createAppUpdateSettingsDialog, createArchiveCenterPreviewApi } = window.
   ui: { escapeHtml, createConfirmDialog, getDarkModeController,
     mountAppearanceSettings: (panel, controller) => window.DarkModeUI.mountSettings(panel, controller),
     mountTemplateFiles: (pane, options) => templateFilesDialogs.mountTemplateFiles(pane, options),
+    mountBankAccounts: (pane, options) => bankAccountsDialogs.mountBankAccounts(pane, options),
     applyAppUpdateActionResult, applyAppUpdateStatus,
     getAppUpdateStatus: () => state.appUpdateStatus,
     refreshOpenAppUpdateDialog, restartAndInstallAppUpdate,

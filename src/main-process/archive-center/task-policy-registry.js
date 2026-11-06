@@ -65,6 +65,16 @@ const SUPPORT_ACTION_POLICIES = Object.freeze([
     channel: 'channel-account-mapping:resolve-conflicts',
     kind: 'support-action',
     reason: 'statement-channel'
+  }),
+  Object.freeze({
+    channel: 'bank-accounts:save-as',
+    kind: 'support-action',
+    reason: 'user-document-export'
+  }),
+  Object.freeze({
+    channel: 'bank-accounts:commit-import',
+    kind: 'support-action',
+    reason: 'bank-account-snapshot'
   })
 ]);
 
@@ -330,6 +340,8 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'archive-center:list-delete-cleanup-jobs',
     'archive-center:prepare-delete-batch',
     'balance-adjustment:list',
+    'bank-accounts:get-overview',
+    'bank-accounts:list',
     'bank-statement:c3-candidate-count',
     'bank-statement:refund-candidate-count',
     'bank-statement:session-status',
@@ -398,6 +410,7 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'bizOpReconV327:files:pick',
     'bizOpReconV327:export:pick',
     'background:select-file',
+    'bank-accounts:pick-import-file',
     'bankBuRecon:export:pick-save-path',
     'bankBuRecon:import:pick-bank-file',
     'bankBuRecon:import:pick-pending-file',
@@ -413,6 +426,8 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'vccFinancialOp:import:pick-files'
   ]),
   'staging-preflight-only': Object.freeze([
+    'bank-accounts:discard-import',
+    'bank-accounts:prepare-import',
     'position-reconciliation:bank:prepare-import',
     'template-resources:discard-import',
     'template-resources:prepare-import'

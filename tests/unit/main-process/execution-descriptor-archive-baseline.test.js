@@ -42,6 +42,11 @@ const policies = archivePolicies;
 const policyByChannel = new Map(policies.map((policy) => [policy.channel, policy]));
 const baselineRecoverable = baseline.policies.filter((policy) => policy.taskKind !== 'exclude');
 const newPreparationPolicies = [
+  { batchPolicy: 'exclude', channel: 'bank-accounts:discard-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'bank-accounts:get-overview', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'bank-accounts:list', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'bank-accounts:pick-import-file', excludeReason: 'file-picker-only', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'bank-accounts:prepare-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
   // v3.2.15：网银账单渠道只读查询
   { batchPolicy: 'exclude', channel: 'channel-account-mapping:list-conflicts', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'channel:list', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
@@ -65,7 +70,9 @@ const newSupportActions = [
   // v3.2.15：网银账单渠道的维护（主库写入、无文件）
   { channel: 'channel:rename', kind: 'support-action', reason: 'statement-channel' },
   { channel: 'channel:delete', kind: 'support-action', reason: 'statement-channel' },
-  { channel: 'channel-account-mapping:resolve-conflicts', kind: 'support-action', reason: 'statement-channel' }
+  { channel: 'channel-account-mapping:resolve-conflicts', kind: 'support-action', reason: 'statement-channel' },
+  { channel: 'bank-accounts:save-as', kind: 'support-action', reason: 'user-document-export' },
+  { channel: 'bank-accounts:commit-import', kind: 'support-action', reason: 'bank-account-snapshot' }
 ];
 
 // 固定 fixture 与当前公开 API 分开读取；此测试不提供更新/重建 fixture 入口。

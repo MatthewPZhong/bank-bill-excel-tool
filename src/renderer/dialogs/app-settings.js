@@ -2,7 +2,7 @@
   'use strict';
   function createAppSettingsDialogs({ api, modalBridge, modules: MODULES, ui }) {
     const { escapeHtml, createConfirmDialog, getDarkModeController, mountAppearanceSettings,
-      mountTemplateFiles, applyAppUpdateActionResult, applyAppUpdateStatus, getAppUpdateStatus,
+      mountTemplateFiles, mountBankAccounts, applyAppUpdateActionResult, applyAppUpdateStatus, getAppUpdateStatus,
       refreshOpenAppUpdateDialog, restartAndInstallAppUpdate, openReleaseNotes } = ui;
 function archiveCenterBatchId(batch) {
   return String(batch?.internalId ?? batch?.batchId ?? batch?.id ?? '');
@@ -308,6 +308,7 @@ function createArchiveCenterPreviewApi() {
 function createAppUpdateSettingsDialog(options = {}) {
   const archiveCenterApi = options.archiveCenterApi || null;
   const templateFilesEnabled = typeof mountTemplateFiles === 'function';
+  const bankAccountsEnabled = typeof mountBankAccounts === 'function';
   const releaseNotesEnabled = typeof openReleaseNotes === 'function';
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -381,6 +382,10 @@ function createAppUpdateSettingsDialog(options = {}) {
         ${templateFilesEnabled ? `<button class="app-settings-nav-item" type="button" data-tab="templates" aria-controls="templateFilesPane" aria-current="false">
           <span class="app-settings-nav-icon" aria-hidden="true">▦</span>
           <span>模板文件</span>
+        </button>` : ''}
+        ${bankAccountsEnabled ? `<button class="app-settings-nav-item" type="button" data-tab="accounts" aria-controls="bankAccountsPane" aria-current="false">
+          <span class="app-settings-nav-icon" aria-hidden="true">▣</span>
+          <span>账户管理</span>
         </button>` : ''}
         <button class="app-settings-nav-item" type="button" data-tab="appearance" aria-controls="appearancePane" aria-current="false">
           <span class="app-settings-nav-icon" aria-hidden="true">☾</span>
@@ -520,6 +525,7 @@ function createAppUpdateSettingsDialog(options = {}) {
           </section>
         </section>
         ${templateFilesEnabled ? '<section id="templateFilesPane" class="app-settings-pane template-center-pane" data-pane="templates" aria-labelledby="templateCenterHeading" hidden></section>' : ''}
+        ${bankAccountsEnabled ? '<section id="bankAccountsPane" class="app-settings-pane bank-accounts-pane" data-pane="accounts" aria-labelledby="bankAccountsHeading" hidden></section>' : ''}
 
         <footer class="dialog-actions right app-settings-footer">
           <div class="app-settings-footer-group" data-footer="update">
@@ -540,6 +546,8 @@ function createAppUpdateSettingsDialog(options = {}) {
   const archivePane = dialog.querySelector('[data-pane="archive"]');
   const templatePane = dialog.querySelector('[data-pane="templates"]');
   let templateFilesView = null;
+  const accountsPane = dialog.querySelector('[data-pane="accounts"]');
+  let bankAccountsView = null;
   const archiveBrowser = dialog.querySelector('[data-archive-view="browser"]');
   const archiveSettingsView = dialog.querySelector('[data-archive-view="settings"]');
   const updateFooter = dialog.querySelector('[data-footer="update"]');
@@ -1273,8 +1281,10 @@ function createAppUpdateSettingsDialog(options = {}) {
   function setSettingsTab(requestedTab) {
     const wasArchive = archiveState.activeTab === 'archive';
     const wasTemplates = archiveState.activeTab === 'templates';
-    const tab = requestedTab === 'templates' && !templatePane ? 'update' : requestedTab;
-    archiveState.activeTab = ['archive', 'templates', 'appearance'].includes(tab) ? tab : 'update';
+    const wasAccounts = archiveState.activeTab === 'accounts';
+    const unavailable = (requestedTab === 'templates' && !templatePane) || (requestedTab === 'accounts' && !accountsPane);
+    const tab = unavailable ? 'update' : requestedTab;
+    archiveState.activeTab = ['archive', 'templates', 'accounts', 'appearance'].includes(tab) ? tab : 'update';
     dialog.querySelectorAll('[data-tab]').forEach((button) => {
       const active = button.dataset.tab === archiveState.activeTab;
       button.classList.toggle('is-active', active);
@@ -1284,11 +1294,17 @@ function createAppUpdateSettingsDialog(options = {}) {
     appearancePane.hidden = archiveState.activeTab !== 'appearance';
     archivePane.hidden = archiveState.activeTab !== 'archive';
     if (templatePane) templatePane.hidden = archiveState.activeTab !== 'templates';
+    if (accountsPane) accountsPane.hidden = archiveState.activeTab !== 'accounts';
     updateFooter.hidden = archiveState.activeTab !== 'update';
     if (archiveState.activeTab === 'templates') {
       if (!wasTemplates) templateFilesView?.enter();
     } else if (wasTemplates) {
       templateFilesView?.leave();
+    }
+    if (archiveState.activeTab === 'accounts') {
+      if (!wasAccounts) bankAccountsView?.enter();
+    } else if (wasAccounts) {
+      bankAccountsView?.leave();
     }
     if (archiveState.activeTab !== 'archive') {
       setArchiveSettingsOpen(false);
@@ -1666,6 +1682,10 @@ function createAppUpdateSettingsDialog(options = {}) {
       if (templatePane) {
         templateFilesView = mountTemplateFiles(templatePane, { getParentHandle: () => settingsHandle });
         scope.onDispose(() => templateFilesView?.destroy());
+      }
+      if (accountsPane) {
+        bankAccountsView = mountBankAccounts(accountsPane, { getParentHandle: () => settingsHandle });
+        scope.onDispose(() => bankAccountsView?.destroy());
       }
   const archiveApi = archiveCenterApi || api.archiveCenter;
   if (archiveApi && typeof archiveApi.onStorageMigrationProgress === 'function') {

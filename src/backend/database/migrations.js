@@ -4244,7 +4244,40 @@ function ensureTemplateResourceVersionSupport(db) {
   `);
 }
 
+// v3.2.15：设置 → 账户管理的清结算系统银行账户表。原文件存 {userData}/bank-accounts/，主库只保留当前一份：
+//   bank_account_snapshot 为单行元数据（id 固定为 1），bank_account_rows 为按导入时表头对齐的账户行。
+//   导入整份替换，两表在同一事务内更新。纯新增表，幂等。
+function ensureBankAccountSnapshotSupport(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS bank_account_snapshot (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      snapshot_no INTEGER NOT NULL CHECK (snapshot_no >= 1),
+      file_name TEXT NOT NULL,
+      file_extension TEXT NOT NULL CHECK (file_extension IN ('xlsx', 'xls')),
+      size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
+      sha256 TEXT NOT NULL CHECK (length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'),
+      sheet_name TEXT NOT NULL DEFAULT '',
+      headers_json TEXT NOT NULL,
+      channel_header TEXT NOT NULL,
+      structure_version_id TEXT NOT NULL DEFAULT '',
+      structure_label TEXT NOT NULL DEFAULT '',
+      row_count INTEGER NOT NULL CHECK (row_count >= 1),
+      app_version TEXT NOT NULL DEFAULT '',
+      imported_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS bank_account_rows (
+      ordinal INTEGER PRIMARY KEY CHECK (ordinal >= 1),
+      excel_row_number INTEGER NOT NULL,
+      channel TEXT NOT NULL DEFAULT '',
+      values_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_bank_account_rows_channel
+      ON bank_account_rows(channel, ordinal);
+  `);
+}
+
 module.exports = {
+  ensureBankAccountSnapshotSupport,
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
   ensureAcquiringBillCurrencyTablesSupport,

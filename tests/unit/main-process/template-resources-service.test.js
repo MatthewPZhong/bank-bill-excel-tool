@@ -9,7 +9,7 @@ const test = require('node:test');
 const ExcelJS = require('exceljs');
 
 const ROOT = path.join(__dirname, '..', '..', '..');
-const { EXCLUDED_TEMPLATE_FILES, READ_MODES, TEMPLATE_RESOURCES, TYPE_ORDER } = require('../../../src/main-process/template-resources/catalog');
+const { EXCLUDED_TEMPLATE_FILES, READ_MODES, SETTINGS_CONSUMER_IDS, TEMPLATE_RESOURCES, TYPE_ORDER } = require('../../../src/main-process/template-resources/catalog');
 const { createTemplateResourceService } = require('../../../src/main-process/template-resources/service');
 const { TEMPLATE_SHEETS } = require('../../../src/main-process/pre-fund-reconciliation/excel-writer');
 const { MAIL_HEADERS } = require('../../../src/main-process/duplicate-inbound-match/excel-writer');
@@ -57,7 +57,7 @@ test('清单覆盖全部随包 Excel，且只纳管或明确未纳入一次；�
 });
 
 test('清单的类型、读取方式与使用模块均为已知取值', () => {
-  const moduleIds = new Set(PRIMARY_ARCHIVE_SCOPES.map((scope) => scope.id));
+  const moduleIds = new Set([...PRIMARY_ARCHIVE_SCOPES.map((scope) => scope.id), ...SETTINGS_CONSUMER_IDS]);
   const ids = new Set(TEMPLATE_RESOURCES.map((item) => item.id));
   for (const item of TEMPLATE_RESOURCES) {
     assert.ok(TYPE_ORDER.includes(item.type), item.id);

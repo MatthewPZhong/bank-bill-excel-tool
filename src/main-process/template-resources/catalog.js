@@ -15,6 +15,9 @@ const NOT_REPLACEABLE_REASONS = Object.freeze({
   disabled: '该表导入尚未启用'
 });
 
+// 不属于业务模块（存档范围）的使用方：设置里的功能页。界面显示名见 renderer/dialogs/template-files.js。
+const SETTINGS_CONSUMER_IDS = Object.freeze(['bank-account-management']);
+
 function binding(moduleId, use, read = 'none') {
   return Object.freeze({ moduleId, use, read });
 }
@@ -205,7 +208,9 @@ const TEMPLATE_RESOURCES = Object.freeze([
   resource({ id: 'position-gateway-raw-out', path: 'assets/中台网关原始出账订单.xlsx', type: 'input', ...POSITION_INPUT_STRUCTURE }),
   resource({ id: 'position-transfer-orders', path: 'assets/中台调拨订单表.xlsx', type: 'input', ...POSITION_INPUT_STRUCTURE,
     twin: 'transfer-order', twinNote: SAME_EXPORT_NOTE }),
-  resource({ id: 'position-bank-accounts', path: 'assets/清结算银行账户表.xlsx', type: 'input', ...POSITION_INPUT_STRUCTURE }),
+  // 清结算银行账户表：平盘链接原始表与「设置 → 账户管理」共用同一份识别结构（账户管理另需「银行/通道简称」作为渠道列）。
+  resource({ id: 'position-bank-accounts', path: 'assets/清结算银行账户表.xlsx', type: 'input', ...POSITION_INPUT_STRUCTURE,
+    bindings: [...POSITION_INPUT_STRUCTURE.bindings, binding('bank-account-management', '账户管理 · 导入识别结构', 'runtime')] }),
   // 与 Pending 对账「移除归档Pending账单」是同一份系统导出（46 列），各自独立版本。
   resource({ id: 'vcc-removed-pending', path: 'assets/VCC财务OP校验/VCC_移除归档Pending账单.xlsx', type: 'input', ...VCC_INPUT_STRUCTURE,
     twin: 'removed-pending', twinNote: SAME_EXPORT_NOTE }),
@@ -239,6 +244,7 @@ const EXCLUDED_TEMPLATE_FILES = Object.freeze([
 module.exports = {
   EXCLUDED_TEMPLATE_FILES,
   READ_MODES,
+  SETTINGS_CONSUMER_IDS,
   TEMPLATE_RESOURCES,
   TYPE_ORDER
 };
