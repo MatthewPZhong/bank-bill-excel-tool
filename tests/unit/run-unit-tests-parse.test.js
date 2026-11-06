@@ -14,7 +14,9 @@ const {
   parseShard,
   selectShardFiles,
   LOAD_SENSITIVE_UNIT_FILES,
-  HEAVY_UNIT_FILES
+  DEDICATED_UNIT_FILES,
+  UNIT_FILE_MINUTES,
+  unitFileMinutes
 } = require('../../scripts/run-unit-tests.js');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
@@ -185,7 +187,7 @@ describe('parseShard / selectShardFiles', () => {
     assert.match(text, /unit 文件数：9（第 2\/5 片）/);
   });
 
-  test('当前全部单测文件按 5 片分配：不重不漏、每片按路径排序，负载敏感文件各在一片', () => {
+  test('当前全部单测文件按 5 片分配：不重不漏、每片按路径排序，负载敏感文件各在一片，最长文件独占一片，其余各片估算耗时相近', () => {
     const files = [];
     const walk = (dir) => {
       for (const entry of require('node:fs').readdirSync(path.join(REPO_ROOT, dir), { withFileTypes: true })) {
@@ -195,15 +197,33 @@ describe('parseShard / selectShardFiles', () => {
       }
     };
     walk('tests/unit');
-    for (const listed of [...LOAD_SENSITIVE_UNIT_FILES, ...HEAVY_UNIT_FILES]) {
+    for (const listed of [...LOAD_SENSITIVE_UNIT_FILES, ...DEDICATED_UNIT_FILES, ...Object.keys(UNIT_FILE_MINUTES)]) {
       assert.ok(files.includes(listed), `分片清单中的 ${listed} 须是现有单测文件`);
     }
     const shards = Array.from({ length: 5 }, (_value, index) => selectShardFiles(files, { index: index + 1, total: 5 }));
     assert.deepStrictEqual(shards.flat().sort(), [...files].sort());
     shards.forEach((shard) => assert.deepStrictEqual(shard, [...shard].sort()));
     assert.deepStrictEqual(shards.map((shard) => shard.filter((file) => LOAD_SENSITIVE_UNIT_FILES.includes(file)).length), [1, 1, 1, 1, 1]);
-    assert.ok(Math.max(...shards.map((shard) => shard.length)) - Math.min(...shards.map((shard) => shard.length)) <= 1, '各片文件数相差不超过 1');
+    const lightestSensitive = [...LOAD_SENSITIVE_UNIT_FILES].sort((a, b) => unitFileMinutes(a) - unitFileMinutes(b))[0];
+    for (const dedicated of DEDICATED_UNIT_FILES) {
+      const own = shards.find((shard) => shard.includes(dedicated));
+      assert.deepStrictEqual(own, [lightestSensitive, dedicated].sort(), `${dedicated} 只与最轻的负载敏感文件同片`);
+    }
+    const others = shards.filter((shard) => !DEDICATED_UNIT_FILES.some((file) => shard.includes(file)));
+    const minutes = others.map((shard) => shard.reduce((sum, file) => sum + unitFileMinutes(file), 0));
+    assert.ok(Math.max(...minutes) - Math.min(...minutes) <= 1, `其余各片估算分钟数相差不超过 1：${minutes.map((value) => value.toFixed(1)).join(' / ')}`);
     assert.deepStrictEqual(selectShardFiles(['b.test.js', 'a.test.js'], null), ['a.test.js', 'b.test.js']);
+  });
+
+  test('片数少于 3 时不独占（至少留 2 片给其余文件）；未列出耗时的文件按默认值均分', () => {
+    const [dedicated] = DEDICATED_UNIT_FILES;
+    const files = ['tests/unit/a.test.js', 'tests/unit/b.test.js', 'tests/unit/c.test.js', 'tests/unit/d.test.js', dedicated];
+    const two = [1, 2].map((index) => selectShardFiles(files, { index, total: 2 }));
+    assert.deepStrictEqual(two, [[dedicated], ['tests/unit/a.test.js', 'tests/unit/b.test.js', 'tests/unit/c.test.js', 'tests/unit/d.test.js']],
+      '两片时最长文件按耗时分配，其余文件放进较轻的另一片');
+    const three = [1, 2, 3].map((index) => selectShardFiles(files, { index, total: 3 }));
+    assert.deepStrictEqual(three, [[dedicated], ['tests/unit/a.test.js', 'tests/unit/c.test.js'], ['tests/unit/b.test.js', 'tests/unit/d.test.js']]);
+    assert.deepStrictEqual(selectShardFiles(['tests/unit/x.test.js'], { index: 2, total: 2 }), [], '文件少于片数时多出的片为空');
   });
 
   test('格式不对时报错，不静默跑全部或跑空', () => {
