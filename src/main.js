@@ -11523,7 +11523,8 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
           exportBillDates.push(...dates);
         } catch (_ignored) {}
         perGroupPaths.push({
-          templateName: templateConfig.template.name,
+          // 渠道组按渠道名列出（与输出文件、余额银行名同口径），普通模板为模板名。
+          templateName: groupGenConfig.outputName || templateConfig.template.name,
           detail: groupGeneratedFiles.detail ? groupGeneratedFiles.detail.filePath : null,
           balance: groupGeneratedFiles.balance ? groupGeneratedFiles.balance.filePath : null,
           warnings: groupGeneratedFiles.warnings || []

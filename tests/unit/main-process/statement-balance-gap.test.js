@@ -1117,3 +1117,23 @@ test('主进程：按文件名映射全部范围补录后重算，任一模板�
   // 缓存清空：再次“导出全部”时重新生成并由导出层按失败组阻断，不直接导出缺组文件。
   assert.deepEqual(cacheAll, [['balance', null]]);
 });
+
+test('主进程：导出全部余额阻断时渠道组按渠道名列出失败组', async () => {
+  const session = { key: 'session-1', templateId: FILENAME_MAPPING_TEMPLATE_ID, currentBatchId: 'batch-3', templateName: '按文件名映射模板' };
+  const { deps } = virtualExportAllDeps({
+    session,
+    groups: [1, 2],
+    generated: {
+      1: { balance: null, warnings: [{ type: 'balance-generate-failed', message: '2026-11-01 未找到期末余额' }] },
+      2: { balance: { filePath: '/tmp/group-2__all.xlsx' }, warnings: [] }
+    }
+  });
+  const result = await loadExportStatementByScope({
+    ...deps,
+    // 生成配置的 outputName：属于渠道的模板为渠道名。
+    buildStatementGenerationConfig: ({ template }) => ({ template, outputName: template.id === 1 ? '中行渠道-上海' : template.name }),
+    createErrorResult: (payload) => ({ status: 'error', ...payload })
+  })('balance', 'all');
+  assert.equal(result.status, 'error');
+  assert.deepEqual(result.detailLines, ['中行渠道-上海：2026-11-01 未找到期末余额']);
+});
