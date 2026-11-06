@@ -5,6 +5,7 @@ const JSZip = require('jszip');
 const {
   FileValidationError,
   SUPPORTED_EXTENSIONS,
+  buildExpectedHeaderCandidates,
   isRowMeaningful,
   normalizeCell,
   trimTrailingEmptyCells
@@ -304,10 +305,12 @@ function collectMatchedRows({
 
 // 在「有意义行」二维数组里定位表头：找首个「连续子序列全等 normalizedExpectedHeaders」的行 + 起始列偏移。
 //   rowsCells：每行为一个 cell 数组（调用方负责已 trimTrailingEmptyCells + 过滤全空行）。
-//   normalizedExpectedHeaders：已 normalizeCell + 去空的锚点表头段。
+//   normalizedExpectedHeaders：已 normalizeCell 的表头段；空项（''）按位置参与比较，只匹配空单元格。
 //   返回 { matchedRowIndex, matchedColumnIndex }；未命中均为 -1。
 // 这是表类型识别 / 表头定位的「连续子序列全等」匹配核心算法（大小写敏感，由 normalizeCell 仅 trim 保证）。
-//   readRowsWithMetadata 与 table-type-detector 的 L1 共用此函数 → 二者识别语义同源、零漂移；改动须同步回归两侧单测。
+//   readRowsWithMetadata 与 table-type-detector 的 L1 共用此函数；改动须同步回归两侧单测。
+//   两侧传入的表头口径不同：账单模板按 buildExpectedHeaderCandidates 先保留中间空项再退回去空；
+//   detector 的内置签名锚点仍去空（含中间空列的表用 l1MatchHeaders 取空列前的连续段），不要互相对齐。
 function findHeaderMatchPosition(rowsCells, normalizedExpectedHeaders) {
   const expectedHeaderCount = normalizedExpectedHeaders.length;
   let matchedRowIndex = -1;
@@ -343,9 +346,7 @@ function readRowsWithMetadata(filePath, expectedHeaders = [], options = {}) {
   const { sheetName, readGuard, onWorkbookRows } = options;
   const rawRows = readWorkbookRows(filePath, { blankrows: true, sheetName, readGuard });
   if (typeof onWorkbookRows === 'function') onWorkbookRows(rawRows);
-  const normalizedExpectedHeaders = Array.isArray(expectedHeaders)
-    ? expectedHeaders.map((header) => normalizeCell(header)).filter((header) => header !== '')
-    : [];
+  const headerCandidates = buildExpectedHeaderCandidates(expectedHeaders);
   const meaningfulRows = rawRows
     .map((row, index) => ({
       rowNumber: index + 1,
@@ -357,31 +358,36 @@ function readRowsWithMetadata(filePath, expectedHeaders = [], options = {}) {
     throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
   }
 
-  if (!normalizedExpectedHeaders.length) {
+  if (!headerCandidates.length) {
     return {
       rows: meaningfulRows.map((row) => row.cells),
       rowNumbers: meaningfulRows.map((row) => row.rowNumber)
     };
   }
 
-  const { matchedRowIndex, matchedColumnIndex } = findHeaderMatchPosition(
-    meaningfulRows.map((row) => row.cells),
-    normalizedExpectedHeaders
-  );
+  const meaningfulCells = meaningfulRows.map((row) => row.cells);
 
-  if (matchedRowIndex < 0 || matchedColumnIndex < 0) {
-    throw new FileValidationError(
-      'FILE_READ',
-      '当前导入文件未匹配到所选模板的表头，请确认模板或原始网银账单是否正确'
+  // 先按完整结构定位；命中的口径同时决定截取宽度与重复表头判定，保证取值下标与物理列一致。
+  for (const normalizedExpectedHeaders of headerCandidates) {
+    const { matchedRowIndex, matchedColumnIndex } = findHeaderMatchPosition(
+      meaningfulCells,
+      normalizedExpectedHeaders
     );
+
+    if (matchedRowIndex >= 0 && matchedColumnIndex >= 0) {
+      return collectMatchedRows({
+        meaningfulRows,
+        matchedRowIndex,
+        matchedColumnIndex,
+        normalizedExpectedHeaders
+      });
+    }
   }
 
-  return collectMatchedRows({
-    meaningfulRows,
-    matchedRowIndex,
-    matchedColumnIndex,
-    normalizedExpectedHeaders
-  });
+  throw new FileValidationError(
+    'FILE_READ',
+    '当前导入文件未匹配到所选模板的表头，请确认模板或原始网银账单是否正确'
+  );
 }
 
 // 流式读取「文件头部前 N 个有意义行」——用于 detector 表头识别（表头/列宽守卫只需前几十行）。

@@ -140,7 +140,8 @@ function runExactLayer(meaningfulRows, candidateSignatures, firstRowColumnCount,
       continue;
     }
 
-    // 锚点归一化（与 readRowsWithMetadata 内部一致：normalizeCell + 去空），再做连续子序列全等匹配。
+    // 锚点归一化（normalizeCell + 去空），再做连续子序列全等匹配。内置签名的锚点段本身不含中间空列；
+    //   账单模板读取（buildExpectedHeaderCandidates）会先保留中间空项，此处有意不跟随，避免扩大表类型识别范围。
     const normalizedAnchor = anchor.map((h) => normalizeCell(h)).filter((h) => h !== '');
     if (normalizedAnchor.length === 0) {
       continue;
