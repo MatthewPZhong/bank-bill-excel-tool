@@ -14,6 +14,8 @@ const {
   parseShard,
   selectShardFiles,
   LOAD_SENSITIVE_UNIT_FILES,
+  LIGHT_LOAD_UNIT_FILES,
+  LIGHT_SHARD_MAX_MINUTES,
   DEDICATED_UNIT_FILES,
   UNIT_FILE_MINUTES,
   unitFileMinutes
@@ -187,7 +189,7 @@ describe('parseShard / selectShardFiles', () => {
     assert.match(text, /unit 文件数：9（第 2\/5 片）/);
   });
 
-  test('当前全部单测文件按 5 片分配：不重不漏、每片按路径排序，负载敏感文件各在一片，最长文件独占一片，其余各片估算耗时相近', () => {
+  test('当前全部单测文件按 6 片分配：不重不漏、每片按路径排序，负载敏感文件各在一片，带期限的在轻载片，最长文件独占一片，其余各片估算耗时相近', () => {
     const files = [];
     const walk = (dir) => {
       for (const entry of require('node:fs').readdirSync(path.join(REPO_ROOT, dir), { withFileTypes: true })) {
@@ -197,20 +199,23 @@ describe('parseShard / selectShardFiles', () => {
       }
     };
     walk('tests/unit');
-    for (const listed of [...LOAD_SENSITIVE_UNIT_FILES, ...DEDICATED_UNIT_FILES, ...Object.keys(UNIT_FILE_MINUTES)]) {
+    for (const listed of [...LOAD_SENSITIVE_UNIT_FILES, ...LIGHT_LOAD_UNIT_FILES, ...DEDICATED_UNIT_FILES, ...Object.keys(UNIT_FILE_MINUTES)]) {
       assert.ok(files.includes(listed), `分片清单中的 ${listed} 须是现有单测文件`);
     }
-    const shards = Array.from({ length: 5 }, (_value, index) => selectShardFiles(files, { index: index + 1, total: 5 }));
+    assert.ok(LIGHT_LOAD_UNIT_FILES.every((file) => LOAD_SENSITIVE_UNIT_FILES.includes(file)), '轻载文件同时是负载敏感文件');
+    const shards = Array.from({ length: 6 }, (_value, index) => selectShardFiles(files, { index: index + 1, total: 6 }));
     assert.deepStrictEqual(shards.flat().sort(), [...files].sort());
     shards.forEach((shard) => assert.deepStrictEqual(shard, [...shard].sort()));
-    assert.deepStrictEqual(shards.map((shard) => shard.filter((file) => LOAD_SENSITIVE_UNIT_FILES.includes(file)).length), [1, 1, 1, 1, 1]);
-    const lightestSensitive = [...LOAD_SENSITIVE_UNIT_FILES].sort((a, b) => unitFileMinutes(a) - unitFileMinutes(b))[0];
+    assert.deepStrictEqual(shards.map((shard) => shard.filter((file) => LOAD_SENSITIVE_UNIT_FILES.includes(file)).length), [1, 1, 1, 1, 1, 0]);
+    const estimate = (shard) => shard.reduce((sum, file) => sum + unitFileMinutes(file), 0);
     for (const dedicated of DEDICATED_UNIT_FILES) {
-      const own = shards.find((shard) => shard.includes(dedicated));
-      assert.deepStrictEqual(own, [lightestSensitive, dedicated].sort(), `${dedicated} 只与最轻的负载敏感文件同片`);
+      assert.deepStrictEqual(shards.find((shard) => shard.includes(dedicated)), [dedicated], `${dedicated} 单独一片`);
     }
-    const others = shards.filter((shard) => !DEDICATED_UNIT_FILES.some((file) => shard.includes(file)));
-    const minutes = others.map((shard) => shard.reduce((sum, file) => sum + unitFileMinutes(file), 0));
+    const light = shards.filter((shard) => LIGHT_LOAD_UNIT_FILES.some((file) => shard.includes(file)));
+    assert.equal(light.length, LIGHT_LOAD_UNIT_FILES.length, '带期限的文件各在一片');
+    light.forEach((shard) => assert.ok(estimate(shard) <= LIGHT_SHARD_MAX_MINUTES, `轻载片估算 ${estimate(shard).toFixed(1)} 分钟`));
+    const others = shards.filter((shard) => !light.includes(shard) && !DEDICATED_UNIT_FILES.some((file) => shard.includes(file)));
+    const minutes = others.map(estimate);
     assert.ok(Math.max(...minutes) - Math.min(...minutes) <= 1, `其余各片估算分钟数相差不超过 1：${minutes.map((value) => value.toFixed(1)).join(' / ')}`);
     assert.deepStrictEqual(selectShardFiles(['b.test.js', 'a.test.js'], null), ['a.test.js', 'b.test.js']);
   });
@@ -224,6 +229,12 @@ describe('parseShard / selectShardFiles', () => {
     const three = [1, 2, 3].map((index) => selectShardFiles(files, { index, total: 3 }));
     assert.deepStrictEqual(three, [[dedicated], ['tests/unit/a.test.js', 'tests/unit/c.test.js'], ['tests/unit/b.test.js', 'tests/unit/d.test.js']]);
     assert.deepStrictEqual(selectShardFiles(['tests/unit/x.test.js'], { index: 2, total: 2 }), [], '文件少于片数时多出的片为空');
+  });
+
+  test('轻载片放不下时不受上限限制，文件不会漏分', () => {
+    const files = [LIGHT_LOAD_UNIT_FILES[0], ...Object.keys(UNIT_FILE_MINUTES).filter((file) => !LOAD_SENSITIVE_UNIT_FILES.includes(file)).slice(0, 6)];
+    assert.ok(files.reduce((sum, file) => sum + unitFileMinutes(file), 0) > LIGHT_SHARD_MAX_MINUTES, '用例前提：合计超过轻载上限');
+    assert.deepStrictEqual(selectShardFiles(files, { index: 1, total: 1 }), [...files].sort());
   });
 
   test('格式不对时报错，不静默跑全部或跑空', () => {

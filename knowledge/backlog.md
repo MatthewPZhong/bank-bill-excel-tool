@@ -393,10 +393,10 @@
   - 不含：把大规模用例移出 PR 门禁、只改文档的提交跳过完整检查，均需另行决定
 - **目标版本**：v3.2.15（2026-11-04 用户决定）
 - **关闭**：v3.2.15，`chore/ci-parallel-jobs`（`201f9d62`、`819f4663`、`082c04f6`），经 PR #247 验证后合入 release/v3.2.15；[TechDoc](../changes/v3.2.15/chore/ci-parallel-jobs/techdoc.md)
-  - **拆分 job**：`release-check-static`（lint、架构检查、smoke）、`release-check-unit` 5 片、`release-check-integration` 2 片并行。`smoke-test` 汇总各 job 结果后再跑 Windows 专项步骤，`build` 仍依赖它。
+  - **拆分 job**：`release-check-static`（lint、架构检查、smoke）、`release-check-unit` 6 片、`release-check-integration` 2 片并行。`smoke-test` 汇总各 job 结果后再跑 Windows 专项步骤，`build` 仍依赖它。
   - **与原关闭条件不同**：保留必需检查名 `smoke-test`、`build`，不改 main 保护规则。`smoke-test` 用 `!cancelled()`，依赖失败时仍运行并失败，门禁覆盖不变。
   - **集成测试**：分片加并发 2，独占名单 27 个脚本先单独运行；共享资源排查结论见 TechDoc 2.4。
-  - **单测**：负载敏感文件各占一片，单个文件约 14 分钟的 `biz-op-v327.test.js` 独占一片，其余按实测耗时分配。Node 原生 3 片实跑两次，都因业务OP真实进程测试同机拥挤而超时；第一版均衡分配在 run 42090975671 上第 3 片跑了 36 分钟，原因与调整见 TechDoc 2.3。
+  - **单测**：6 片。负载敏感文件各占一片，带固定期限的 `compute-main`、`delete-main` 所在片估算不超过 20 分钟；单个文件约 14 分钟的 `biz-op-v327.test.js` 独占一片；其余按实测耗时分配。此前的问题：Node 原生 3 片实跑两次，都因业务OP真实进程测试同机拥挤而超时；第一版均衡分配在 run 42090975671 上第 3 片跑了 36 分钟；第二版 5 片按耗时均衡后，`compute-main` 取消用例超时。原因与调整见 TechDoc 2.3。
   - **`release-windows.yml` 不拆**：一版只跑一次，作为最终门禁完整串行运行 release-check。
   - **耗时**：
     - 改动前：`smoke-test` 2 小时 13 分（run 41993644465：架构检查 10.6 分钟、单测 72 分钟、集成测试 48.7 分钟），连同 `build` 约 2 小时 15 分。
