@@ -13,8 +13,8 @@
 //   node scripts/run-unit-tests.js --coverage # 加 --experimental-test-coverage
 //   UNIT_TEST_CONCURRENCY=2 npm run release-check # 仅限制测试文件并发，默认保持 Node 原值
 //   UNIT_TEST_SHARD=1/5 npm run test:unit       # v3.2.15 B43：只跑第 1/5 片，CI 分多个 job 并行；未设置时跑全部，
-//                                                #   本地 release-check 不变。分片按文件：负载敏感与耗时最长的文件先轮流分配，
-//                                                #   其余按文件名轮流分配（见 selectShardFiles）
+//                                                #   本地 release-check 不变。分片按文件：负载敏感文件各占一片，最长的文件独占一片，
+//                                                #   其余按实测耗时从长到短放进当前最轻的片（见 selectShardFiles）
 //
 // 退出码：透传 node --test 的退出码（0=全 PASS / 非 0=有 FAIL）
 
@@ -43,7 +43,7 @@ function findTestFiles(dir) {
 // v3.2.15 B43：Windows CI 实测（run 41993644465 / 42071950489 / 42077862105）——
 //   起真实 Main 进程、带固定时限的业务OP文件在同一台机器上同时运行会互相拖慢，曾超时失败（delete-main 的恢复期限、
 //   compute-main 的子进程 30 秒上限）；按 Node --test-shard 的轮流分配，它们与耗时最长的文件集中到同一片（31–44 分钟）。
-//   因此分片时先把负载敏感的文件各放一片，再分其他耗时长的文件（按实测从长到短），其余按文件名轮流分配。
+//   因此负载敏感的文件各放一片。
 const LOAD_SENSITIVE_UNIT_FILES = Object.freeze([
   'tests/unit/main-process/biz-op-v327-archive-owner-backfill.test.js',
   'tests/unit/main-process/biz-op-v327-export-main.test.js',
@@ -51,30 +51,88 @@ const LOAD_SENSITIVE_UNIT_FILES = Object.freeze([
   'tests/unit/main-process/biz-op-v327-compute-main.test.js',
   'tests/unit/main-process/biz-op-v327-delete-main.test.js'
 ]);
-const HEAVY_UNIT_FILES = Object.freeze([
-  'tests/unit/scripts/v3-2-4-release-evidence.test.js',
-  'tests/unit/scripts/v3-2-3-release-evidence.test.js',
-  'tests/unit/main-process/position-reconciliation-service.test.js',
-  'tests/unit/scripts/v3-2-2-release-evidence.test.js',
-  'tests/unit/architecture/policy-history.test.js',
-  'tests/unit/main-process/vcc-financial-op-result-workbook.test.js',
-  'tests/unit/main-process/template-resources-versions.test.js',
-  'tests/unit/main-process/biz-op-v327-upgrade.test.js',
-  'tests/unit/backend/position-reconciliation-import-preflight.test.js',
-  'tests/unit/main-process/vcc-financial-op-review-export.test.js',
-  'tests/unit/backend/vcc-financial-op/result-write.test.js',
-  'tests/unit/main-process/biz-op-v327-archive-owner-completion.test.js'
+// 独占一片的文件：文件内用例依次运行，单个文件的耗时就是所在片的下限（biz-op-v327 约 14 分钟，其中 1024/128/32 个
+//   真实 Task 来源的扫描用例约 13 分钟）。node --test 按路径排序启动文件，它排在同片多数文件之后；与其他文件同片时
+//   要等前面的文件让出位置才开始，所在片因此最慢（run 42086209141 第 3 片 19.2 分钟；run 42090975671 同一片在
+//   磁盘较慢的机器上 36 分钟）。所以它只与一个负载敏感文件同片，开跑即开始，其他文件不进该片。
+const DEDICATED_UNIT_FILES = Object.freeze([
+  'tests/unit/main-process/biz-op-v327.test.js'
 ]);
+// 各文件的实测分钟数：run 42086209141（5 片全部通过）的顶层用例耗时按源文件汇总，列出不少于 1 分钟的文件。
+//   未列出的文件按 DEFAULT_UNIT_FILE_MINUTES（其余 591 个文件的平均值）计。测试增删后耗时有偏差时按新的 CI 实测更新。
+const UNIT_FILE_MINUTES = Object.freeze({
+  'tests/unit/main-process/biz-op-v327.test.js': 14.4,
+  'tests/unit/main-process/biz-op-v327-archive-owner-backfill.test.js': 11.9,
+  'tests/unit/scripts/v3-2-4-release-evidence.test.js': 7.9,
+  'tests/unit/main-process/biz-op-v327-archive-owner-completion.test.js': 7.4,
+  'tests/unit/main-process/biz-op-v327-export-main.test.js': 5.0,
+  'tests/unit/main-process/biz-op-v327-compute-main.test.js': 4.7,
+  'tests/unit/main-process/biz-op-v327-delete-main.test.js': 4.1,
+  'tests/unit/main-process/archive-permanent-delete.test.js': 3.7,
+  'tests/unit/main-process/position-reconciliation-service.test.js': 2.9,
+  'tests/unit/main-process/vcc-financial-op-result-workbook.test.js': 2.8,
+  'tests/unit/main-process/biz-op-v327-ipc.test.js': 2.8,
+  'tests/unit/scripts/v3-2-2-release-evidence.test.js': 2.7,
+  'tests/unit/scripts/v3-2-3-release-evidence.test.js': 2.7,
+  'tests/unit/main-process/biz-op-v327-publication-owner.test.js': 2.7,
+  'tests/unit/main-process/biz-op-v327-upgrade.test.js': 2.6,
+  'tests/unit/architecture/policy-history.test.js': 2.3,
+  'tests/unit/main-process/biz-op-v327-low-memory.test.js': 2.2,
+  'tests/unit/backend/vcc-financial-op/result-write.test.js': 2.1,
+  'tests/unit/main-process/template-resources-versions.test.js': 2.0,
+  'tests/unit/backend/position-reconciliation-import-preflight.test.js': 1.9,
+  'tests/unit/backend/acquiring-bill-currency-db/raw-json-retention.test.js': 1.8,
+  'tests/unit/backend/vcc-financial-op/destructive-write.test.js': 1.8,
+  'tests/unit/main-process/duplicate-inbound-match/paired-parser-e07-c.test.js': 1.7,
+  'tests/unit/main-process/biz-op-v327-import-main.test.js': 1.6,
+  'tests/unit/main-process/vcc-financial-op-review-ipc.test.js': 1.5,
+  'tests/unit/main-process/biz-op-v327-export-sst.test.js': 1.5,
+  'tests/unit/main-process/vcc-financial-op-single-writer-e12-a.test.js': 1.4,
+  'tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js': 1.4,
+  'tests/unit/main-process/vcc-financial-op-review-export.test.js': 1.3,
+  'tests/unit/main-process/biz-op-v327-export.test.js': 1.3,
+  'tests/unit/main-process/biz-op-v327-startup-resource-recovery.test.js': 1.1,
+  'tests/unit/backend/vcc-financial-op/storage-contract-v3.test.js': 1.1,
+  'tests/unit/architecture/release-renderer-policy.test.js': 1.1,
+  'tests/unit/main-process/archive-position-fileplan-delete.test.js': 1.0
+});
+const DEFAULT_UNIT_FILE_MINUTES = 0.07;
 // Windows CreateProcess 命令行上限 32767 字符；超过时提示增加分片数，不截断文件清单。
 const MAX_SHARD_COMMAND_CHARS = 30000;
 
+function unitFileMinutes(file) {
+  return UNIT_FILE_MINUTES[file] ?? DEFAULT_UNIT_FILE_MINUTES;
+}
+
 // files：仓库相对路径（/ 分隔）。返回本片文件（按路径排序）；各片合起来恰好是全部文件。
+//   1. 负载敏感文件按耗时从长到短各放一片（片数不足时轮流）；
+//   2. 独占文件放进当前最轻的片，该片不再放其他文件（至少留 2 片给其余文件，否则按第 3 步分配）；
+//   3. 其余文件按耗时从长到短（同耗时按路径），每个放进当前估算分钟数最少的片（同为最少时取序号小的）。
 function selectShardFiles(files, shard) {
   const sorted = [...files].sort();
   if (!shard) return sorted;
-  const first = [...LOAD_SENSITIVE_UNIT_FILES, ...HEAVY_UNIT_FILES].filter((file) => sorted.includes(file));
-  const order = [...first, ...sorted.filter((file) => !first.includes(file))];
-  return order.filter((_file, position) => position % shard.total === shard.index - 1).sort();
+  const present = new Set(sorted);
+  const byMinutesDesc = (a, b) => unitFileMinutes(b) - unitFileMinutes(a) || (a < b ? -1 : a > b ? 1 : 0);
+  const shards = Array.from({ length: shard.total }, () => ({ files: [], minutes: 0, open: true }));
+  const place = (target, file) => {
+    target.files.push(file);
+    target.minutes += unitFileMinutes(file);
+  };
+  const lightest = (candidates) => candidates.reduce((best, item) => (item.minutes < best.minutes ? item : best));
+  LOAD_SENSITIVE_UNIT_FILES.filter((file) => present.has(file)).sort(byMinutesDesc)
+    .forEach((file, position) => place(shards[position % shard.total], file));
+  for (const file of DEDICATED_UNIT_FILES.filter((file) => present.has(file))) {
+    const open = shards.filter((item) => item.open);
+    if (open.length < 3) break;
+    const target = lightest(open);
+    place(target, file);
+    target.open = false;
+  }
+  const placed = new Set(shards.flatMap((item) => item.files));
+  for (const file of sorted.filter((item) => !placed.has(item)).sort(byMinutesDesc)) {
+    place(lightest(shards.filter((item) => item.open)), file);
+  }
+  return shards[shard.index - 1].files.sort();
 }
 
 // 分片参数 "i/n"（1 ≤ i ≤ n）；未设置返回 null。格式不对时抛错，避免静默跑全部或跑空。
@@ -259,8 +317,10 @@ if (require.main === module) {
 
 // 导出可测试纯函数（unit test 用）
 module.exports = {
-  HEAVY_UNIT_FILES,
+  DEDICATED_UNIT_FILES,
   LOAD_SENSITIVE_UNIT_FILES,
+  UNIT_FILE_MINUTES,
+  unitFileMinutes,
   parseShard,
   selectShardFiles,
   parseTapSummary,
