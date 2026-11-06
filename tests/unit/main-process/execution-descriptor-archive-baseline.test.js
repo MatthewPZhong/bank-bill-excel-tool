@@ -42,6 +42,11 @@ const policies = archivePolicies;
 const policyByChannel = new Map(policies.map((policy) => [policy.channel, policy]));
 const baselineRecoverable = baseline.policies.filter((policy) => policy.taskKind !== 'exclude');
 const newPreparationPolicies = [
+  { batchPolicy: 'exclude', channel: 'bank-accounts:discard-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'bank-accounts:get-overview', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'bank-accounts:list', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'bank-accounts:pick-import-file', excludeReason: 'file-picker-only', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'bank-accounts:prepare-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'scenarios:recon-id-fix-fields', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'settings:acknowledge-release-notes', excludeReason: 'ui-navigation', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:discard-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
@@ -58,7 +63,9 @@ const newSupportActions = [
   { channel: 'template-resources:save-as', kind: 'support-action', reason: 'user-document-export' },
   { channel: 'template-resources:commit-import', kind: 'support-action', reason: 'template-resource-version' },
   { channel: 'template-resources:set-current-version', kind: 'support-action', reason: 'template-resource-version' },
-  { channel: 'template-resources:delete-version', kind: 'support-action', reason: 'template-resource-version' }
+  { channel: 'template-resources:delete-version', kind: 'support-action', reason: 'template-resource-version' },
+  { channel: 'bank-accounts:save-as', kind: 'support-action', reason: 'user-document-export' },
+  { channel: 'bank-accounts:commit-import', kind: 'support-action', reason: 'bank-account-snapshot' }
 ];
 
 // 固定 fixture 与当前公开 API 分开读取；此测试不提供更新/重建 fixture 入口。

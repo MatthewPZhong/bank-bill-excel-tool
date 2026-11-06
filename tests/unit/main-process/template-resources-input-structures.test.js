@@ -82,7 +82,9 @@ test('输入原表结构规格：已接入的资源可替换；平盘 5 张为�
     assert.equal(spec.sheets.length, 1, id);
     assert.equal(spec.sheets[0].name, null, id);
     assert.deepEqual(spec.sheets[0].builtinHeaders(), [...SOURCE_DEFINITIONS[spec.moduleKey].headers], id);
-    assert.deepEqual(spec.sheets[0].required(), [...SOURCE_REQUIRED_FIELDS[spec.moduleKey]], id);
+    // 清结算银行账户表另需「银行/通道简称」：设置 → 账户管理按它筛选渠道（平盘自身读取的必用列不变）。
+    const extra = id === 'position-bank-accounts' ? ['银行/通道简称'] : [];
+    assert.deepEqual(spec.sheets[0].required(), [...SOURCE_REQUIRED_FIELDS[spec.moduleKey], ...extra], id);
   }
 });
 

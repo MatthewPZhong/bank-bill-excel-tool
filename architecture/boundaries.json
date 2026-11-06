@@ -4958,6 +4958,7 @@
           "getAppUpdateStatus",
           "getDarkModeController",
           "mountAppearanceSettings",
+          "mountBankAccounts",
           "mountTemplateFiles",
           "openReleaseNotes",
           "refreshOpenAppUpdateDialog",
@@ -5031,6 +5032,91 @@
           "templateResources.prepareImport",
           "templateResources.saveAs",
           "templateResources.setCurrentVersion"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "createConfirmDialog",
+          "escapeHtml"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-dialog-bank-accounts",
+      "governance": "G3",
+      "owner": "feat/bank-account-management",
+      "state": "active",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/dialogs/bank-accounts.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/dialogs/bank-accounts.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer/dialogs/bank-accounts.js",
+          "kind": "classic-global",
+          "importedNames": [
+            "__bankAccountsDialogs"
+          ]
+        }
+      ],
+      "activationEvidence": [
+        "scripts/test-renderer-lifecycle.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/dialogs/bank-accounts.js",
+          "exportsGlobal": [
+            "__bankAccountsDialogs"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer/dialogs/bank-accounts.js",
+        "name": "createBankAccountsDialogs",
+        "parameters": [
+          "api",
+          "modalBridge",
+          "ui"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "bankAccounts.commitImport",
+          "bankAccounts.discardImport",
+          "bankAccounts.getOverview",
+          "bankAccounts.list",
+          "bankAccounts.onChanged",
+          "bankAccounts.pickImportFile",
+          "bankAccounts.prepareImport",
+          "bankAccounts.saveAs"
         ],
         "modalBridge": [
           "closeModal",
@@ -9687,6 +9773,133 @@
       },
       "reason": "输入结构分支合入 release/v3.2.14：release 末端 87cab203 仍持有原 scenarioCommands 集合，按该提交补登 scenarios.getReconIdFixFields 的同一放宽（read-only-query）；该查询仍只由场景配置工厂持有。",
       "designDoc": "changes/v3.2.14/feat/input-template-structures/spec.md"
+    },
+    {
+      "sourceCommit": "245bae04285a443f7e733e9c6bbd4894ba008e43",
+      "sourcePolicyBlob": "a36f97119033575d56f73eccec7e3619d24ef619",
+      "boundaryId": "renderer-dialog-app-settings",
+      "field": "allowedApiFields",
+      "from": {
+        "api": [
+          "appUpdate.checkNow",
+          "appUpdate.getStatus",
+          "appUpdate.onStatusChanged",
+          "appUpdate.restartAndInstall",
+          "appUpdate.setEnabled",
+          "archiveCenter.changeStorageLocation",
+          "archiveCenter.deleteBatch",
+          "archiveCenter.getBatch",
+          "archiveCenter.getSettings",
+          "archiveCenter.getStats",
+          "archiveCenter.listBatches",
+          "archiveCenter.listDeleteCleanupJobs",
+          "archiveCenter.onEntryMaintenanceCompleted",
+          "archiveCenter.onEntryMaintenanceFailed",
+          "archiveCenter.onEntryMaintenanceProgress",
+          "archiveCenter.onStorageMigrationProgress",
+          "archiveCenter.openFile",
+          "archiveCenter.prepareDeleteBatch",
+          "archiveCenter.retryBatch",
+          "archiveCenter.retryDeleteCleanupJob",
+          "archiveCenter.saveAs",
+          "archiveCenter.selectRetrySources",
+          "archiveCenter.setLocked",
+          "archiveCenter.setModuleRetentionDays",
+          "archiveCenter.setRetentionDays",
+          "archiveCenter.startEntryMaintenance"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "applyAppUpdateActionResult",
+          "applyAppUpdateStatus",
+          "createConfirmDialog",
+          "escapeHtml",
+          "getAppUpdateStatus",
+          "getDarkModeController",
+          "mountAppearanceSettings",
+          "mountTemplateFiles",
+          "openReleaseNotes",
+          "refreshOpenAppUpdateDialog",
+          "restartAndInstallAppUpdate"
+        ]
+      },
+      "to": {
+        "api": [
+          "appUpdate.checkNow",
+          "appUpdate.getStatus",
+          "appUpdate.onStatusChanged",
+          "appUpdate.restartAndInstall",
+          "appUpdate.setEnabled",
+          "archiveCenter.changeStorageLocation",
+          "archiveCenter.deleteBatch",
+          "archiveCenter.getBatch",
+          "archiveCenter.getSettings",
+          "archiveCenter.getStats",
+          "archiveCenter.listBatches",
+          "archiveCenter.listDeleteCleanupJobs",
+          "archiveCenter.onEntryMaintenanceCompleted",
+          "archiveCenter.onEntryMaintenanceFailed",
+          "archiveCenter.onEntryMaintenanceProgress",
+          "archiveCenter.onStorageMigrationProgress",
+          "archiveCenter.openFile",
+          "archiveCenter.prepareDeleteBatch",
+          "archiveCenter.retryBatch",
+          "archiveCenter.retryDeleteCleanupJob",
+          "archiveCenter.saveAs",
+          "archiveCenter.selectRetrySources",
+          "archiveCenter.setLocked",
+          "archiveCenter.setModuleRetentionDays",
+          "archiveCenter.setRetentionDays",
+          "archiveCenter.startEntryMaintenance"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "applyAppUpdateActionResult",
+          "applyAppUpdateStatus",
+          "createConfirmDialog",
+          "escapeHtml",
+          "getAppUpdateStatus",
+          "getDarkModeController",
+          "mountAppearanceSettings",
+          "mountBankAccounts",
+          "mountTemplateFiles",
+          "openReleaseNotes",
+          "refreshOpenAppUpdateDialog",
+          "restartAndInstallAppUpdate"
+        ]
+      },
+      "reason": "设置弹窗新增「账户管理」页（v3.2.15），只接收 Renderer 装配注入的视图挂载函数 ui.mountBankAccounts；账户管理 API 由独立的账户管理工厂持有，设置弹窗不直接访问。",
+      "designDoc": "changes/v3.2.15/feat/bank-account-management/spec.md"
     }
   ]
 }

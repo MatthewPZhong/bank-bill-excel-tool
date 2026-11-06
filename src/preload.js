@@ -178,6 +178,23 @@ contextBridge.exposeInMainWorld('desktopApi', {
       return () => ipcRenderer.removeListener('template-resources:changed', wrapped);
     }
   },
+  bankAccounts: {
+    getOverview: () => ipcRenderer.invoke('bank-accounts:get-overview'),
+    list: (payload) => ipcRenderer.invoke('bank-accounts:list', payload),
+    pickImportFile: () => ipcRenderer.invoke('bank-accounts:pick-import-file'),
+    prepareImport: (payload) => ipcRenderer.invoke('bank-accounts:prepare-import', payload),
+    discardImport: (importToken) => ipcRenderer.invoke('bank-accounts:discard-import', importToken),
+    commitImport: (payload) => ipcRenderer.invoke('bank-accounts:commit-import', payload),
+    saveAs: () => ipcRenderer.invoke('bank-accounts:save-as'),
+    onChanged: (listener) => {
+      if (typeof listener !== 'function') return () => {};
+      const wrapped = (_event, payload) => {
+        try { listener(payload); } catch (_error) { /* renderer listener errors are isolated */ }
+      };
+      ipcRenderer.on('bank-accounts:changed', wrapped);
+      return () => ipcRenderer.removeListener('bank-accounts:changed', wrapped);
+    }
+  },
   errors: {
     exportLast: () => ipcRenderer.invoke('error:export-last')
   },

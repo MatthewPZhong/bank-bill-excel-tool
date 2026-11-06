@@ -125,6 +125,10 @@ const {
 } = require('./main-process/execution-descriptors/composition');
 const { createBusinessFlowResolver } = require('./main-process/archive-center/business-flow-resolver');
 const { createTemplateResourceService } = require('./main-process/template-resources/service');
+const {
+  STRUCTURE_RESOURCE_ID: BANK_ACCOUNT_STRUCTURE_RESOURCE_ID,
+  createBankAccountService
+} = require('./main-process/bank-accounts/service');
 const { INPUT_STRUCTURES } = require('./main-process/template-resources/input-structures');
 const {
   createTaskLifecycle
@@ -5046,6 +5050,70 @@ function registerTemplateResourceHandlers() {
     });
     if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
     return service.exportVersion({ ...payload, targetPath: choice.filePath });
+  });
+}
+
+let bankAccountService = null;
+
+// 设置 → 账户管理：清结算系统银行账户表原文件存 {userData}/bank-accounts/，元数据与账户行在主库；
+//   表头识别结构取模板文件「清结算银行账户表」当前版本（与平盘共用）。
+function getBankAccountService() {
+  if (!database || !database.db) throw new Error('数据库尚未初始化，请稍后重试');
+  if (!bankAccountService) {
+    bankAccountService = createBankAccountService({
+      userDataRoot: app.getPath('userData'),
+      store: database,
+      appVersion: app.getVersion(),
+      resolveStructure: () => getTemplateResourceService().currentInputStructure(BANK_ACCOUNT_STRUCTURE_RESOURCE_ID),
+      log: ({ level, message, details }) => appendActivityLogEntry({ level, message, details }),
+      onChanged: (payload) => broadcastBankAccountsChanged(payload)
+    });
+  }
+  return bankAccountService;
+}
+
+function broadcastBankAccountsChanged(payload) {
+  for (const window of BrowserWindow.getAllWindows()) {
+    try {
+      if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+        window.webContents.send('bank-accounts:changed', payload);
+      }
+    } catch (_error) { /* 窗口关闭中，下次打开会重新读取 */ }
+  }
+}
+
+// 设置 → 账户管理：概况与分页查询、导入（选择 → 预检 → 确认替换）、另存为原表。
+function registerBankAccountHandlers() {
+  ipcMain.handle('bank-accounts:get-overview', () => getBankAccountService().getOverview());
+  ipcMain.handle('bank-accounts:list', (_event, payload) => getBankAccountService().list(payload || {}));
+  ipcMain.handle('bank-accounts:pick-import-file', async () => {
+    const service = getBankAccountService();
+    const choice = await showImportOpenDialog('bank-accounts', {
+      title: '选择银行账户信息文件',
+      properties: ['openFile'],
+      filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
+    });
+    const filePath = !choice.canceled && Array.isArray(choice.filePaths) ? choice.filePaths[0] : '';
+    if (!filePath) return { status: 'cancelled' };
+    service.rememberPickedFile(filePath);
+    return { status: 'success', filePath, fileName: path.basename(filePath) };
+  });
+  ipcMain.handle('bank-accounts:prepare-import', (_event, payload) => getBankAccountService().prepareImport(payload || {}));
+  ipcMain.handle('bank-accounts:discard-import', (_event, importToken) => getBankAccountService().discardImport(importToken));
+  supportIpcHandle('bank-accounts:commit-import', '导入银行账户信息', (_event, payload) => (
+    getBankAccountService().commitImport(payload || {})
+  ));
+  supportIpcHandle('bank-accounts:save-as', '导出银行账户表原表', async () => {
+    const service = getBankAccountService();
+    const target = service.resolveOriginal();
+    if (target.status !== 'success') return target;
+    const choice = await dialog.showSaveDialog(mainWindow, {
+      title: '导出银行账户表原表',
+      defaultPath: target.fileName,
+      filters: [{ name: target.extension.toUpperCase(), extensions: [target.extension] }]
+    });
+    if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+    return service.exportOriginal({ targetPath: choice.filePath });
   });
 }
 
@@ -21639,6 +21707,7 @@ function registerAllIpcHandlersWithMemoryActivity() {
   registerAppUpdateHandlers();
   registerArchiveCenterHandlers();
   registerTemplateResourceHandlers();
+  registerBankAccountHandlers();
   registerErrorHandlers();
   registerBackgroundHandlers();
   registerAccountMappingHandlers();

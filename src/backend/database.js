@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const {
+  ensureBankAccountSnapshotSupport,
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
   ensureAcquiringBillCurrencyTablesSupport,
@@ -108,6 +109,7 @@ const fundTransferAccountMappingRepository = require('./database/fund-transfer-a
 const preFundReconciliationRunRepository = require('./database/pre-fund-reconciliation-run-repository');
 const duplicateInboundMatchRunRepository = require('./database/duplicate-inbound-match-run-repository');
 const templateResourceRepository = require('./database/template-resource-repository');
+const bankAccountRepository = require('./database/bank-account-repository');
 const { createBackup: createBackupImpl } = require('./database/backup');
 // v2.1.9 SR-log-1 (T32h)：替换 console.error → appendModuleLog 双写
 const { appendModuleLog } = require('./logger');
@@ -621,6 +623,8 @@ class AppDatabase {
       this.ensureDuplicateInboundMatchRunMetadataSupport();
       // v3.2.13：设置 → 模板文件用户版本（幂等 CREATE IF NOT EXISTS，纯新增）
       this.ensureTemplateResourceVersionSupport();
+      // v3.2.15：设置 → 账户管理的清结算系统银行账户表（幂等 CREATE IF NOT EXISTS，纯新增）
+      this.ensureBankAccountSnapshotSupport();
     }, { onRecord: onStartupPhase });
 
     const finishVacuumPhase = startStartupPhase('database-vacuum', onStartupPhase);
@@ -1613,6 +1617,31 @@ class AppDatabase {
 
   ensureTemplateResourceVersionSupport() {
     return ensureTemplateResourceVersionSupport(this.db);
+  }
+
+  ensureBankAccountSnapshotSupport() {
+    return ensureBankAccountSnapshotSupport(this.db);
+  }
+
+  // v3.2.15：设置 → 账户管理的清结算系统银行账户表 facade（原文件由账户管理服务管理）
+  readBankAccountSnapshot() {
+    return bankAccountRepository.readSnapshot(this.db);
+  }
+
+  listBankAccountChannels() {
+    return bankAccountRepository.listChannels(this.db);
+  }
+
+  countBankAccountRows(options) {
+    return bankAccountRepository.countRows(this.db, options);
+  }
+
+  listBankAccountRows(options) {
+    return bankAccountRepository.listRows(this.db, options);
+  }
+
+  replaceBankAccountSnapshot(payload) {
+    return bankAccountRepository.replaceSnapshot(this.db, payload);
   }
 
   // v3.2.13：设置 → 模板文件用户版本 facade（版本元数据、当前指针与变更记录；文件由模板服务管理）

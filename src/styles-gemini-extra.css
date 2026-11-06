@@ -1738,6 +1738,119 @@ td .muted { color: var(--muted); }
   .template-center-history { padding-top: 18px; }
 }
 
+/* =================== 设置 · 账户管理 =================== */
+.bank-accounts-pane {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.bank-accounts-toolbar {
+  flex: 0 0 70px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 24px;
+}
+.bank-accounts-channel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.bank-accounts-channel select {
+  min-width: 200px;
+  max-width: 320px;
+  height: 34px;
+}
+.bank-accounts-feedback { margin: 0 24px 10px; }
+.bank-accounts-feedback-lines {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.bank-accounts-summary {
+  flex: 0 0 auto;
+  padding: 0 24px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.bank-accounts-table-wrap {
+  flex: 1;
+  min-height: 0;
+  margin: 0 24px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.bank-accounts-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.bank-accounts-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 34px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-soft, #f7f9fb);
+  color: var(--muted);
+  text-align: left;
+  font-weight: 600;
+}
+.bank-accounts-table td {
+  height: 32px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text);
+}
+.bank-accounts-table tbody tr:hover td { background: var(--row-hover, #edf1f6); }
+.bank-accounts-table .bank-accounts-row-number {
+  color: var(--dim);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.bank-accounts-empty {
+  padding: 40px 16px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 13px;
+}
+.bank-accounts-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 12px;
+  padding: 12px 24px;
+}
+.bank-accounts-actions-main,
+.bank-accounts-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+.bank-accounts-pager {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+.bank-accounts-pager[hidden] { display: none; }
+.bank-accounts-confirm-detail {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 /* =================== Export-scope vertical buttons =================== */
 .export-scope-card .dialog-actions.vertical .export-scope-btn {
   height: auto;

@@ -60,6 +60,7 @@ const {
   SYSTEM_OP_HEADERS: VCC_SYSTEM_OP_HEADERS
 } = require('../../backend/vcc-financial-op/definitions');
 const { REFUND_ORDER_REQUIRED_COLUMNS } = require('../../constants/refund-backfill-fields');
+const { CHANNEL_HEADER: BANK_ACCOUNT_CHANNEL_HEADER } = require('../bank-accounts/constants');
 
 // 平盘链接原始表：与导入 Worker 相同的流式读取（openPositionWorkbook + readPhysicalHeader）。按需加载，目录不依赖导入模块。
 async function positionRuntimeHeaders(filePath) {
@@ -75,14 +76,14 @@ async function positionRuntimeHeaders(filePath) {
   }
 }
 
-function positionSource(sourceType) {
+function positionSource(sourceType, { extraRequired = [] } = {}) {
   return Object.freeze({
     group: 'position-sources',
     moduleKey: sourceType,
     sheets: Object.freeze([Object.freeze({
       name: null,
       builtinHeaders: () => [...SOURCE_DEFINITIONS[sourceType].headers],
-      required: () => [...SOURCE_REQUIRED_FIELDS[sourceType]]
+      required: () => [...new Set([...SOURCE_REQUIRED_FIELDS[sourceType], ...extraRequired])]
     })]),
     runtimeHeaders: positionRuntimeHeaders
   });
@@ -284,7 +285,8 @@ const INPUT_STRUCTURES = Object.freeze({
   'position-gateway-raw-in': positionSource(SOURCE_TYPES.GATEWAY_INBOUND),
   'position-gateway-raw-out': positionSource(SOURCE_TYPES.GATEWAY_OUTBOUND),
   'position-transfer-orders': positionSource(SOURCE_TYPES.FUND_TRANSFER),
-  'position-bank-accounts': positionSource(SOURCE_TYPES.BANK_ACCOUNT),
+  // 设置 → 账户管理按「银行/通道简称」筛选渠道，该列与平盘读取的必用列一起视为必用列（平盘自身的读取口径不变）。
+  'position-bank-accounts': positionSource(SOURCE_TYPES.BANK_ACCOUNT, { extraRequired: [BANK_ACCOUNT_CHANNEL_HEADER] }),
   'removed-pending': Object.freeze({
     group: null,
     moduleKey: 'pending-removed',
