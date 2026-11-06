@@ -89,3 +89,23 @@ test('unit runner 分片参数格式不对时失败，不跑全部', t => {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /分片参数须为 i\/n/);
 });
+
+test('unit runner 单独运行的分片逐个运行文件，其余片沿用设定的并发数', t => {
+  const root = fixture(t);
+  for (const name of ['biz-op-v327-export-main', 'biz-op-v327-compute-main']) {
+    const target = path.join(root, 'tests/unit/main-process', `${name}.test.js`);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, `require('node:test')('${name}', () => {});\n`);
+  }
+  const commands = ['1/2', '2/2'].map((shard) => {
+    const result = run(root, [], { UNIT_TEST_SHARD: shard, UNIT_TEST_CONCURRENCY: '3' });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    const logPath = result.stdout.match(/日志已落盘：(.+)\n/)[1];
+    return [parseTapSummary(result.stdout).tests, fs.readFileSync(logPath, 'utf8').match(/命令：(.+)/)[1]];
+  });
+  assert.deepEqual(commands, [
+    [2, 'node --test --test-concurrency=1 <2 个测试文件>'],
+    [2, 'node --test --test-concurrency=3 <2 个测试文件>']
+  ]);
+});
