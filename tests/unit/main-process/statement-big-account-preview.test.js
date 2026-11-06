@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 const acorn = require('acorn');
 const {
+  buildExpectedHeaderCandidates,
   buildMappedRows,
   sourceSnapshotFromStat,
   sourceSnapshotMatchesStat
@@ -203,8 +204,8 @@ test('self-input 单文件多 block 按 ordinal 独立桥接，未识别 block f
   const match = (cell, merchantId) => normalize(cell) === normalize(merchantId) ? 'exact' : 'none';
   const findHeaders = loadFunction(
     'findHeaderRowNumbersInRawRows',
-    ['normalizeCell'],
-    [normalize]
+    ['normalizeCell', 'buildExpectedHeaderCandidates'],
+    [normalize, buildExpectedHeaderCandidates]
   );
   const buildBasis = loadFunction(
     'buildBigAccountRecognitionBasis',
@@ -463,8 +464,8 @@ test('self-input 后块不得把前块交易行中的 bankId 误归为 bridge', 
   };
   const findHeaders = loadFunction(
     'findHeaderRowNumbersInRawRows',
-    ['normalizeCell'],
-    [normalize]
+    ['normalizeCell', 'buildExpectedHeaderCandidates'],
+    [normalize, buildExpectedHeaderCandidates]
   );
   const buildBasis = loadFunction(
     'buildBigAccountRecognitionBasis',
@@ -756,7 +757,11 @@ test('首次 workbook raw rows 派生最小 recognition basis，标准/bridge/�
     'buildBigAccountRecognitionBasis',
     ['findHeaderRowNumbersInRawRows', 'normalizeCell', 'matchMerchantIds'],
     [
-      loadFunction('findHeaderRowNumbersInRawRows', ['normalizeCell'], [normalize]),
+      loadFunction(
+        'findHeaderRowNumbersInRawRows',
+        ['normalizeCell', 'buildExpectedHeaderCandidates'],
+        [normalize, buildExpectedHeaderCandidates]
+      ),
       normalize,
       match
     ]

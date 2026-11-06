@@ -691,6 +691,7 @@ const { readBigAccountMode, writeBigAccountMode } = require('./backend/big-accou
 const {
   calculateEndingBalanceFromAmounts,
   buildDetailExportRows,
+  buildExpectedHeaderCandidates,
   buildMappedRows,
   compileRegexLiteral,
   FileValidationError,
@@ -2840,27 +2841,27 @@ function identifyAccountBlocks(detailRows, options = {}) {
   return [];
 }
 
+// 返回原始行里所有表头行的行号（1 起）。表头口径与 readRowsWithMetadata 相同（buildExpectedHeaderCandidates）：
+// 先按保留中间空项的完整结构找，一行都找不到再退回去空口径，避免两侧定位到不同的表头而丢失账号扫描窗口。
 function findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders) {
-  const normalizedExpected = (expectedSourceHeaders || [])
-    .map((h) => normalizeCell(h))
-    .filter((h) => h !== '');
-  if (!normalizedExpected.length) return [];
-
-  const results = [];
-  rawRows.forEach((row, index) => {
-    const cells = Array.isArray(row) ? row : [];
-    const maxStart = cells.length - normalizedExpected.length;
-    for (let start = 0; start <= maxStart; start += 1) {
-      const match = normalizedExpected.every(
-        (exp, ei) => normalizeCell(cells[start + ei]) === exp
-      );
-      if (match) {
-        results.push(index + 1);
-        break;
+  for (const normalizedExpected of buildExpectedHeaderCandidates(expectedSourceHeaders)) {
+    const results = [];
+    rawRows.forEach((row, index) => {
+      const cells = Array.isArray(row) ? row : [];
+      const maxStart = cells.length - normalizedExpected.length;
+      for (let start = 0; start <= maxStart; start += 1) {
+        const match = normalizedExpected.every(
+          (exp, ei) => normalizeCell(cells[start + ei]) === exp
+        );
+        if (match) {
+          results.push(index + 1);
+          break;
+        }
       }
-    }
-  });
-  return results;
+    });
+    if (results.length) return results;
+  }
+  return [];
 }
 
 function buildBigAccountRecognitionBasis({
@@ -3607,6 +3608,16 @@ function syncTemplateLibraryFile() {
   return writeTemplateBundleFile(getTemplateLibraryFilePath());
 }
 
+// 模板包里的表头与 extractHeaders 同口径：保留空项位置（合并单元格占位的中间空列参与表头定位），
+// 只去掉末尾空项；全空视为没有表头。
+function normalizeBundleTemplateHeaders(headers) {
+  const normalized = headers.map((value) => normalizeCell(value));
+  while (normalized.length && normalized[normalized.length - 1] === '') {
+    normalized.pop();
+  }
+  return normalized;
+}
+
 function readTemplateBundleFile(filePath) {
   if (!fs.existsSync(filePath)) {
     throw new FileValidationError('FILE_READ', '模板文件不存在或不可读');
@@ -3652,7 +3663,7 @@ function readTemplateBundleFile(filePath) {
     templateKey: normalizeCell(item.templateKey),
     name: normalizeCell(item.name),
     sourceFileName: normalizeCell(item.sourceFileName) || `${normalizeCell(item.name) || 'template'}.xlsx`,
-    headers: Array.isArray(item.headers) ? item.headers.map((value) => normalizeCell(value)).filter((value) => value !== '') : [],
+    headers: Array.isArray(item.headers) ? normalizeBundleTemplateHeaders(item.headers) : [],
     mappings: Array.isArray(item.mappings) ? item.mappings : [],
     bigAccounts: Array.isArray(item.bigAccounts) ? item.bigAccounts : [],
     fixedAssignments: Array.isArray(item.fixedAssignments) ? item.fixedAssignments : [],
@@ -3914,10 +3925,18 @@ function buildImportWarningDetailLines(warnings) {
   const detailLines = [];
   const currencyWarnings = warnings.filter((warning) => warning.type === 'currency-unmapped');
   const skippedDetailWarnings = warnings.filter((warning) => warning.type === 'detail-row-skipped');
+  const summaryRowWarnings = warnings.filter((warning) => warning.type === 'summary-row-skipped');
   const balanceWarnings = warnings.filter((warning) => warning.type === 'balance-generate-failed');
   const skippedBalanceGaps = warnings
     .filter((warning) => warning.type === 'balance-gap-skipped')
     .flatMap((warning) => (Array.isArray(warning.gaps) ? warning.gaps : []));
+
+  if (summaryRowWarnings.length) {
+    detailLines.push('以下行的账单日期列是账单自带的合计标签，按合计行处理，未写入导出的明细账单：');
+    summaryRowWarnings.forEach((warning) => {
+      detailLines.push(`第${warning.rowNumber}行，账单日期列="${warning.rawValue || '(空)'}"`);
+    });
+  }
 
   if (skippedDetailWarnings.length) {
     detailLines.push('以下明细记录因 Credit Amount 和 Debit Amount 同时为 0 或空值，未写入导出的明细账单：');
@@ -3962,6 +3981,7 @@ function buildImportWarningDetailLines(warnings) {
 function buildImportWarningMessage({ warnings, balanceReady, balanceRequested }) {
   const warningParts = [];
   const skippedDetailCount = warnings.filter((warning) => warning.type === 'detail-row-skipped').length;
+  const summaryRowCount = warnings.filter((warning) => warning.type === 'summary-row-skipped').length;
   const hasCurrencyWarning = warnings.some((warning) => warning.type === 'currency-unmapped');
   const hasBalanceWarning = warnings.some((warning) => warning.type === 'balance-generate-failed');
   const skippedBalanceGapCount = warnings
@@ -3973,6 +3993,10 @@ function buildImportWarningMessage({ warnings, balanceReady, balanceRequested })
     exportParts.push('余额账单可导出');
   } else if (balanceRequested) {
     exportParts.push('余额账单未生成');
+  }
+
+  if (summaryRowCount > 0) {
+    warningParts.push(`已跳过${summaryRowCount}条账单自带的合计行`);
   }
 
   if (skippedDetailCount > 0) {
