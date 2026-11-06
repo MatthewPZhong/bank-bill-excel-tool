@@ -1041,3 +1041,79 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
     assert.deepEqual(computedSeeds, ['M001', 'M002'], scenario);
   }
 });
+
+test('主进程：按文件名映射导出全部余额时任一模板组余额生成失败即阻断，列出失败组，不合并、不导出', async () => {
+  const session = { key: 'session-1', templateId: FILENAME_MAPPING_TEMPLATE_ID, currentBatchId: 'batch-3', templateName: '按文件名映射模板' };
+  const ok = (tid) => ({ balance: { filePath: `/tmp/group-${tid}__all.xlsx` }, warnings: [] });
+  const failed = { balance: null, warnings: [{ type: 'balance-generate-failed', message: '2026-11-01 未找到期末余额' }] };
+  const cases = [
+    { label: '第一组失败', generated: { 1: failed, 2: ok(2), 3: ok(3) }, failedNames: ['模板1'] },
+    { label: '中间组失败', generated: { 1: ok(1), 2: failed, 3: ok(3) }, failedNames: ['模板2'] },
+    { label: '最后一组失败', generated: { 1: ok(1), 2: ok(2), 3: failed }, failedNames: ['模板3'] },
+    { label: '全部失败', generated: { 1: failed, 2: failed, 3: failed }, failedNames: ['模板1', '模板2', '模板3'] }
+  ];
+  for (const { label, generated, failedNames } of cases) {
+    const merged = [];
+    const exported = [];
+    const { deps } = virtualExportAllDeps({ session, groups: [1, 2, 3], generated });
+    const result = await loadExportStatementByScope({
+      ...deps,
+      createErrorResult: (payload) => ({ status: 'error', ...payload }),
+      mergeGeneratedXlsxFiles: (paths) => merged.push(paths),
+      exportGeneratedFile: async (generatedFile) => {
+        exported.push(generatedFile);
+        return { status: 'success' };
+      }
+    })('balance', 'all');
+
+    assert.equal(result.status, 'error', label);
+    assert.equal(result.step, '导出余额账单', label);
+    assert.equal(result.errorCode, 'EXPORT_EMPTY', label);
+    assert.equal(
+      result.message,
+      `余额账单未导出：${failedNames.length} 个模板组的余额生成失败，导出全部会缺少这些组的账户余额，请处理后重新导出`,
+      label
+    );
+    assert.deepEqual(result.detailLines, failedNames.map((name) => `${name}：2026-11-01 未找到期末余额`), label);
+    assert.deepEqual(merged, [], label);
+    assert.deepEqual(exported, [], label);
+  }
+});
+
+test('主进程：按文件名映射全部范围补录后重算，任一模板组余额生成失败时不缓存缺组的全部余额', async () => {
+  const gap = { key: '模板1|M001|USD|2026-09-01|2026-09-04', merchantId: 'M001', currency: 'USD' };
+  const session = { key: 'session-1', templateId: FILENAME_MAPPING_TEMPLATE_ID, currentBatchId: 'batch-2' };
+  const partial = { filePath: '/tmp/1-BALANCE.xlsx' };
+  const cacheAll = [];
+  const execute = loadSaveBalanceSeedExecute({
+    FILENAME_MAPPING_TEMPLATE_ID,
+    FileValidationError,
+    isFilenameMappingMode: (templateId) => templateId === FILENAME_MAPPING_TEMPLATE_ID,
+    rememberAcknowledgedBalanceGaps: () => true,
+    appendActivityLogEntry: () => {},
+    formatBalanceGapLine: () => '',
+    regenerateVirtualTemplateBalanceFromSession: () => ({
+      needsSeed: false,
+      generatedFiles: {
+        detail: null,
+        balance: partial,
+        warnings: [{ type: 'balance-generate-failed', message: '2026-09-02 未找到期末余额' }]
+      }
+    }),
+    lastGeneratedExports: { detail: null, balance: null },
+    cacheAllStatementExport: (kind, file) => cacheAll.push([kind, file]),
+    buildImportResultFromGeneratedFiles: ({ generatedFiles }) => ({ status: 'success', warnings: generatedFiles.warnings })
+  });
+  const result = await execute(null, {
+    plan: null,
+    skipBalanceGapKeys: [gap.key],
+    skippedBalanceGaps: [gap],
+    pendingPrompt: { reason: 'gap', templateName: '模板1', gaps: [gap] },
+    session,
+    importContext: { templateId: FILENAME_MAPPING_TEMPLATE_ID, scope: 'all', template: { name: '模板2' } }
+  }, { fileEvidence: { filePlan: { inputs: [{ filePath: '/tmp/a.xlsx' }] } } });
+
+  assert.equal(result.warnings[0].type, 'balance-generate-failed');
+  // 缓存清空：再次“导出全部”时重新生成并由导出层按失败组阻断，不直接导出缺组文件。
+  assert.deepEqual(cacheAll, [['balance', null]]);
+});

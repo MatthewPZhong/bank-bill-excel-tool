@@ -2246,6 +2246,7 @@ function rememberPendingBigAccountSelection(context = null) {
         mappings: Array.isArray(context.mappings) ? context.mappings.map((mapping) => ({ ...mapping })) : [],
         orderedTargetFields: Array.isArray(context.orderedTargetFields) ? context.orderedTargetFields.slice() : [],
         inputFilePaths: normalizeInputFilePaths(context.inputFilePaths || context.inputFilePath),
+        replacePaths: Array.isArray(context.replacePaths) ? context.replacePaths.slice() : [],
         bigAccounts: Array.isArray(context.bigAccounts)
           ? context.bigAccounts.map((item) => ({
               merchantId: normalizeCell(item.merchantId),
@@ -2316,9 +2317,23 @@ function requirePendingBigAccountSelection(contextId) {
   return lastPendingBigAccountSelection;
 }
 
+// 大账号续跑时删除的会话旧记录：重复提示中确认覆盖的旧路径（可能与本次路径不同：跨目录同名、改名同内容），
+// 加上本次输入路径（同路径覆盖）。
+function resolvePendingReplacePaths(pendingContext) {
+  return Array.from(new Set([
+    ...(Array.isArray(pendingContext.replacePaths) ? pendingContext.replacePaths : []),
+    ...(Array.isArray(pendingContext.inputFilePaths) ? pendingContext.inputFilePaths : [])
+  ]));
+}
+
 function createPendingBigAccountSelectionContext(prepared, context) {
+  const selectionReplacePaths = prepared && prepared.selectionResult
+    && Array.isArray(prepared.selectionResult.replacePaths)
+    ? prepared.selectionResult.replacePaths
+    : [];
   const pendingContext = {
     ...context,
+    replacePaths: selectionReplacePaths.slice(),
     statementSelectionSessionId: normalizeCell(prepared && prepared.statementSelectionSessionId),
     sourceSelections: prepared && Array.isArray(prepared.sourceSelections)
       ? prepared.sourceSelections
@@ -11508,6 +11523,7 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
           exportBillDates.push(...dates);
         } catch (_ignored) {}
         perGroupPaths.push({
+          templateName: templateConfig.template.name,
           detail: groupGeneratedFiles.detail ? groupGeneratedFiles.detail.filePath : null,
           balance: groupGeneratedFiles.balance ? groupGeneratedFiles.balance.filePath : null,
           warnings: groupGeneratedFiles.warnings || []
@@ -11541,6 +11557,25 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
         }
         if (balanceGaps.length) {
           return buildBalanceGapConfirmResult(balanceGaps, { balance: null, detail: null });
+        }
+        // 任一模板组余额生成失败（如某日未找到期末余额）时阻断：否则合并结果缺这些组的账户，仍显示导出成功。
+        const failedGroupLines = perGroupPaths
+          .map((group) => ({
+            templateName: group.templateName,
+            messages: (group.warnings || [])
+              .filter((warning) => warning && warning.type === 'balance-generate-failed')
+              .map((warning) => warning.message)
+          }))
+          .filter((group) => group.messages.length > 0)
+          .map((group) => `${group.templateName}：${group.messages.join('；')}`);
+        if (failedGroupLines.length) {
+          return createErrorResult({
+            step: '导出余额账单',
+            message: `余额账单未导出：${failedGroupLines.length} 个模板组的余额生成失败，导出全部会缺少这些组的账户余额，请处理后重新导出`,
+            errorCode: 'EXPORT_EMPTY',
+            detailLines: failedGroupLines,
+            templateName: session.templateName
+          });
         }
       }
 
@@ -13201,7 +13236,7 @@ function registerFileHandlers() {
                       preparedBatch
                     };
 
-                    pendingContext.inputFilePaths.forEach((fp) => {
+                    resolvePendingReplacePaths(pendingContext).forEach((fp) => {
                       removeStatementSessionEntriesByFilePath(session, fp);
                     });
                     const batchId = appendStatementSessionImport({
@@ -13747,7 +13782,7 @@ function registerFileHandlers() {
           fallbackTemplateConfig,
           selectedBigAccount: null,
           session,
-          replacePaths: pendingContext.inputFilePaths,
+          replacePaths: resolvePendingReplacePaths(pendingContext),
           inputFilePaths: pendingContext.inputFilePaths
         });
 
@@ -13798,7 +13833,7 @@ function registerFileHandlers() {
         preparedBatch
       };
 
-      pendingContext.inputFilePaths.forEach((filePath) => {
+      resolvePendingReplacePaths(pendingContext).forEach((filePath) => {
         removeStatementSessionEntriesByFilePath(session, filePath);
       });
       const batchId = appendStatementSessionImport({
@@ -14027,7 +14062,10 @@ function registerFileHandlers() {
           }
           const generatedFiles = regenResult.generatedFiles;
           if (importContext.scope === 'all') {
-            cacheAllStatementExport('balance', generatedFiles.balance);
+            // 任一模板组余额生成失败时不缓存缺组的“全部”余额：再次导出全部时重新生成并按失败组阻断。
+            const hasFailedGroup = (generatedFiles.warnings || [])
+              .some((warning) => warning && warning.type === 'balance-generate-failed');
+            cacheAllStatementExport('balance', hasFailedGroup ? null : generatedFiles.balance);
           } else {
             lastGeneratedExports.balance = generatedFiles.balance;
           }
