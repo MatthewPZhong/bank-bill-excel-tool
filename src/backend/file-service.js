@@ -26,7 +26,9 @@ const {
   parseNumericValue,
   resolveCurrencyValue,
   roundAmount,
+  roundAmountHighPrecision,
   sanitizeAmountValue,
+  sanitizeSignedAmountValue,
   splitSignedAmountValue,
   toExcelSerial
 } = require('./file-service/normalizers');
@@ -37,6 +39,65 @@ const {
 
 function loadCurrencyMappings(filePath) {
   return loadCurrencyMappingsFromMappings(filePath, { readRows });
+}
+
+const INVALID_BILL_DATE_DETAIL_LIMIT = 20;
+
+// 有金额的行 BillDate 有值却不是有效日期时整份拒绝：否则该笔留在明细（日期为空），余额计算却静默跳过。
+// 收付金额均为空或 0 的行不进明细（buildDetailExportRows 跳过），不拦。
+function assertNoInvalidBillDateRows({ mappedRows, rowMetas, orderedTargetFields, invalidBillDateBySourceRow }) {
+  if (!invalidBillDateBySourceRow.size) {
+    return;
+  }
+
+  const billDateIndex = orderedTargetFields.indexOf('BillDate');
+  const creditAmountIndex = orderedTargetFields.indexOf('Credit Amount');
+  const debitAmountIndex = orderedTargetFields.indexOf('Debit Amount');
+  const amountColumnsMapped = creditAmountIndex >= 0 && debitAmountIndex >= 0;
+  const invalidRows = [];
+  const reportedRowNumbers = new Set();
+
+  mappedRows.slice(1).forEach((mappedRow, index) => {
+    const sourceRowNumber = rowMetas[index] ? rowMetas[index].sourceRowNumber : undefined;
+
+    if (reportedRowNumbers.has(sourceRowNumber) || !invalidBillDateBySourceRow.has(sourceRowNumber)) {
+      return;
+    }
+
+    if (normalizeCell(mappedRow[billDateIndex]) !== '') {
+      return;
+    }
+
+    if (
+      amountColumnsMapped &&
+      !hasEffectiveAmount(mappedRow[creditAmountIndex]) &&
+      !hasEffectiveAmount(mappedRow[debitAmountIndex])
+    ) {
+      return;
+    }
+
+    reportedRowNumbers.add(sourceRowNumber);
+    invalidRows.push({ sourceRowNumber, rawValue: invalidBillDateBySourceRow.get(sourceRowNumber) });
+  });
+
+  if (!invalidRows.length) {
+    return;
+  }
+
+  const detailLines = invalidRows
+    .slice(0, INVALID_BILL_DATE_DETAIL_LIMIT)
+    .map((item) => `第 ${item.sourceRowNumber} 行：${item.rawValue}`);
+
+  if (invalidRows.length > INVALID_BILL_DATE_DETAIL_LIMIT) {
+    detailLines.push(`另有 ${invalidRows.length - INVALID_BILL_DATE_DETAIL_LIMIT} 行，共 ${invalidRows.length} 行`);
+  }
+
+  const [firstRow] = invalidRows;
+  throw new FileValidationError(
+    'FILE_READ',
+    `账单日期存在无效值：第 ${firstRow.sourceRowNumber} 行「${firstRow.rawValue}」${invalidRows.length > 1 ? `等 ${invalidRows.length} 行` : ''}，请修正后重新导入`,
+    { detailLines }
+  );
 }
 
 function buildMappedRows({
@@ -62,6 +123,8 @@ function buildMappedRows({
   const sourceIndexByField = new Map();
   const issues = [];
   const rowMetas = [];
+  // 源行号 → 有值但无法识别为日期的 BillDate 原值（如 2026-11-31），映射完成后按行金额判定是否整份拒绝。
+  const invalidBillDateBySourceRow = new Map();
   const nameSourceField = normalizeCell(amountMappingRules.nameSourceField);
   const accountSourceField = normalizeCell(amountMappingRules.accountSourceField);
   const signedAmountSourceField = normalizeCell(amountMappingRules.signedAmountSourceField);
@@ -574,7 +637,8 @@ function buildMappedRows({
         const rawValue = resolveRawValueByMapping(mappingValue, row);
 
         if (targetField === 'Balance') {
-          return sanitizeAmountValue(rawValue);
+          // 余额可为负：保留符号（映射值已拼成字符串，不能依赖数值分支保号）。
+          return sanitizeSignedAmountValue(rawValue);
         }
 
         if (targetField === 'Credit Amount') {
@@ -586,7 +650,12 @@ function buildMappedRows({
         }
 
         if (targetField === 'BillDate' || targetField === 'ValueDate') {
-          return normalizeDateExportValue(resolveDateRawValueByMapping(mappingValue, row), { dateParseOrder }).value;
+          const rawDateValue = resolveDateRawValueByMapping(mappingValue, row);
+          const normalizedDateValue = normalizeDateExportValue(rawDateValue, { dateParseOrder }).value;
+          if (targetField === 'BillDate' && !normalizedDateValue && rawDateValue) {
+            invalidBillDateBySourceRow.set(sourceRowNumber, rawDateValue);
+          }
+          return normalizedDateValue;
         }
 
         if (nameSourceField && mappingValue === nameSourceField) {
@@ -706,6 +775,13 @@ function buildMappedRows({
     } else {
       mappedRows.push(mappedRow);
     }
+  });
+
+  assertNoInvalidBillDateRows({
+    mappedRows,
+    rowMetas,
+    orderedTargetFields,
+    invalidBillDateBySourceRow
   });
 
   mappedRows.issues = issues;
@@ -896,6 +972,7 @@ module.exports = {
   parseNumericValue,
   readRows,
   readRowsWithMetadata,
+  roundAmountHighPrecision,
   transformFileToWorkbook,
   writeBalanceWorkbook,
   writeWorkbookRows

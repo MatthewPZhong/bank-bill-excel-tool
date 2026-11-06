@@ -18,6 +18,7 @@ const {
   normalizeCell,
   parseDateValue,
   parseNumericValue,
+  roundAmountHighPrecision,
   writeBalanceWorkbook,
   writeWorkbookRows
 } = require('../backend/file-service');
@@ -94,6 +95,19 @@ function resolveSeedRecord(resolver, prompt) {
   const seed = typeof resolver === 'function' ? resolver(prompt) : null;
   if (!seed || seed.endBalance === null || seed.endBalance === undefined) return null;
   return seed;
+}
+
+// 账单里的余额首日按种子推导多候选余额时取账单原值：生成的种子（账单里的余额 / 通过发生额计算）
+// 是输出值，已含截至种子日的余额附加值，先扣回；人工录入的种子按账单原值（与发生额计算以人工种子为起点、叠加全部附加值同口径）。
+function statementSeedOriginalBalance(seed, balanceAdjustments, { merchantId, currency }) {
+  const generationMethod = normalizeCell(seed.generationMethod);
+  const includesAdjustment = generationMethod === BALANCE_SEED_GENERATION_METHODS.statement
+    || generationMethod === BALANCE_SEED_GENERATION_METHODS.calculated;
+  if (!includesAdjustment) return seed.endBalance;
+  const seedAdjustment = resolveBalanceAdjustment(balanceAdjustments, {
+    merchantId, currency, dateLabel: normalizeCell(seed.billDate)
+  });
+  return seedAdjustment ? roundAmountHighPrecision(seed.endBalance - seedAdjustment) : seed.endBalance;
 }
 
 function requireSeedRecord(resolver, prompt) {
@@ -206,6 +220,7 @@ function deriveBalanceRecords({
   const skippedBalanceGaps = [];
   for (const group of orderedGroups) {
     let previousEndBalance = null;
+    let previousStatementBalance = null;
     let previousDate = null;
     let lastAdjustment = 0;
     for (const dateLabel of [...group.dates.keys()].sort()) {
@@ -260,27 +275,35 @@ function deriveBalanceRecords({
       } else {
         const ambiguous = new Set(entries.filter((entry) => entry.balanceValue !== null)
           .map((entry) => Number(Number(entry.balanceValue).toFixed(2)))).size > 1;
-        const effectivePrevious = previousEndBalance === null && ambiguous
-          ? requireSeedRecord(resolvePreviousBalanceSeed, prompt).endBalance
-          : previousEndBalance;
+        // 同日多候选余额按账单原值链推导（previousStatementBalance 未叠加附加值）。
+        const effectivePrevious = previousStatementBalance === null && ambiguous
+          ? statementSeedOriginalBalance(requireSeedRecord(resolvePreviousBalanceSeed, prompt), balanceAdjustments, group)
+          : previousStatementBalance;
         try {
           endBalance = inferEndingBalance({ previousEndBalance: effectivePrevious, entries, dateLabel });
         } catch (error) {
           if (error instanceof FileValidationError && error.code === 'FILE_READ' &&
-              previousEndBalance === null && ambiguous && effectivePrevious !== null) {
+              previousStatementBalance === null && ambiguous && effectivePrevious !== null) {
             throw new FileValidationError('BALANCE_SEED_REQUIRED', '因首次导入余额，请导入上一个账单日余额用于余额校验', {
               context: prompt
             });
           }
           throw error;
         }
+        previousStatementBalance = endBalance;
       }
       const cumulative = resolveBalanceAdjustment(balanceAdjustments, {
         merchantId: group.merchantId, currency: group.currency, dateLabel
       });
-      const incrementalAdjustment = Math.round((cumulative - lastAdjustment) * 100) / 100;
-      if (incrementalAdjustment && endBalance !== null) {
-        endBalance = Math.round((endBalance + incrementalAdjustment) * 100) / 100;
+      if (mode === 'calculated') {
+        // 发生额计算沿用上一日已调整余额，只叠加附加值增量（跨导入口径见 backlog B32，未改）。
+        const incrementalAdjustment = Math.round((cumulative - lastAdjustment) * 100) / 100;
+        if (incrementalAdjustment && endBalance !== null) {
+          endBalance = roundAmountHighPrecision(endBalance + incrementalAdjustment);
+        }
+      } else if (cumulative && endBalance !== null) {
+        // 账单里的余额每天取账单原值，叠加截至当日的附加值累计额（PRD v1.4.6：当日及之后余额 = 原始余额 + 附加值）。
+        endBalance = roundAmountHighPrecision(endBalance + cumulative);
       }
       lastAdjustment = cumulative;
       previousEndBalance = endBalance;

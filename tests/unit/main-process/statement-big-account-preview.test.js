@@ -1619,3 +1619,126 @@ test('两个 deferred action 仅在非空结果确定具体 output 后 promote�
   assert.match(mainSource, /policy\.allocation === 'deferred'[\s\S]*?runDeferredFileTask/);
   assert.match(mainSource, /archiveTaskLifecycle\.runFileTask/);
 });
+
+// 取真实 completeBigAccountSelectionHandler.execute，只替换生成与外部副作用；会话与待选择上下文用 production 实现。
+function loadCompleteBigAccountSelectionExecute(deps) {
+  let executeNode = null;
+  const visit = (node) => {
+    if (executeNode || !node || typeof node !== 'object') return;
+    if (node.type === 'VariableDeclarator' && node.id && node.id.name === 'completeBigAccountSelectionHandler') {
+      executeNode = node.init.properties.find((prop) => prop.key && prop.key.name === 'execute');
+      return;
+    }
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) value.forEach(visit);
+      else if (value && typeof value === 'object') visit(value);
+    }
+  };
+  visit(mainAst);
+  if (!executeNode) throw new Error('未找到 completeBigAccountSelectionHandler.execute');
+  const names = Object.keys(deps);
+  return Function(
+    ...names,
+    `return ({ ${mainSource.slice(executeNode.start, executeNode.end)} }).execute;`
+  )(...names.map((name) => deps[name]));
+}
+
+function loadPendingBigAccountSelectionStore(deps) {
+  const names = Object.keys(deps);
+  return Function(
+    ...names,
+    `let lastPendingBigAccountSelection = null;
+    ${functionSource('resolvePendingReplacePaths')}
+    ${functionSource('createPendingBigAccountSelectionContext')}
+    ${functionSource('rememberPendingBigAccountSelection')}
+    ${functionSource('requirePendingBigAccountSelection')}
+    return { createPendingBigAccountSelectionContext, rememberPendingBigAccountSelection, requirePendingBigAccountSelection, resolvePendingReplacePaths };`
+  )(...names.map((name) => deps[name]));
+}
+
+test('大账号续跑沿用重复提示中确认覆盖的旧路径：跨目录同名、改名同内容只保留替换后的记录', async () => {
+  const sessionHelpers = require('../../../src/main-process/statement-session');
+  const normalizeCell = (value) => String(value == null ? '' : value).trim();
+  const detailRows = () => Object.assign(
+    [['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount'], ['2026-11-01', '', 'USD', '100', '']],
+    { rowMetas: [{ sourceRowNumber: 2 }] }
+  );
+  const cases = [
+    { label: '同一路径', oldPath: '/private/stmt/a.xlsx', newPath: '/private/stmt/a.xlsx' },
+    { label: '跨目录同名', oldPath: '/private/stmt/old/a.xlsx', newPath: '/private/stmt/new/a.xlsx' },
+    { label: '改名同内容', oldPath: '/private/stmt/a.xlsx', newPath: '/private/stmt/a-copy.xlsx' }
+  ];
+  for (const { label, oldPath, newPath } of cases) {
+    let entrySeq = 0;
+    let batchSeq = 0;
+    const buildEntryId = () => `entry-${++entrySeq}`;
+    const buildBatchId = () => `batch-${++batchSeq}`;
+    const statementImportSessions = new Map();
+    const session = sessionHelpers.getOrCreateStatementImportSession({ statementImportSessions, templateId: 7, templateName: '中行-上海' });
+    sessionHelpers.appendStatementSessionImport({
+      buildBatchId,
+      lastGeneratedExports: {},
+      session,
+      fileEntries: [sessionHelpers.buildStatementFileEntry({ buildEntryId, detailRows: detailRows(), filePath: oldPath })]
+    });
+
+    const store = loadPendingBigAccountSelectionStore({
+      normalizeCell,
+      normalizeInputFilePaths: sessionHelpers.normalizeInputFilePaths,
+      cloneRowsWithMetadata: sessionHelpers.cloneRowsWithMetadata,
+      buildBigAccountOrderEvidence: () => ({}),
+      randomUUID: () => `context-${label}`
+    });
+    // 重复提示中点击“覆盖旧记录”后，selectionResult.replacePaths 记录会话里的旧路径。
+    const prepared = { selectionResult: { filePaths: [newPath], replacePaths: [oldPath] } };
+    const contextId = store.rememberPendingBigAccountSelection(store.createPendingBigAccountSelectionContext(prepared, {
+      templateId: 7,
+      template: { id: 7, name: '中行-上海' },
+      mappings: [],
+      orderedTargetFields: [],
+      inputFilePaths: [newPath],
+      fileEntries: [{ filePath: newPath, detailRows: detailRows() }]
+    }));
+
+    const execute = loadCompleteBigAccountSelectionExecute({
+      requirePendingBigAccountSelection: store.requirePendingBigAccountSelection,
+      resolvePendingReplacePaths: store.resolvePendingReplacePaths,
+      clearPendingBigAccountSelection: () => {},
+      getOrCreateStatementImportSession: sessionHelpers.getOrCreateStatementImportSession,
+      statementImportSessions,
+      applyBigAccountAssignmentsToFileEntries: (entries) => entries,
+      isFilenameMappingMode: () => false,
+      resolveGenerationTemplateConfig: ({ fallbackTemplateConfig }) => fallbackTemplateConfig,
+      buildStatementGenerationConfig: ({ template }) => ({ template }),
+      statementGenerationHelpers: { buildPreparedStatementBatchFromEntries: ({ fileEntries }) => ({ detailRows: fileEntries[0].detailRows }) },
+      generateStatementFiles: () => ({ warnings: [] }),
+      buildStatementFileEntry: sessionHelpers.buildStatementFileEntry,
+      buildStatementFileEntryId: buildEntryId,
+      removeStatementSessionEntriesByFilePath: sessionHelpers.removeStatementSessionEntriesByFilePath,
+      appendStatementSessionImport: sessionHelpers.appendStatementSessionImport,
+      buildStatementBatchId: buildBatchId,
+      lastGeneratedExports: {},
+      rememberLastFileImportContext: () => {},
+      updateStatementSessionCache: () => {},
+      buildImportResultFromGeneratedFiles: () => ({ status: 'success' }),
+      persistBigAccountOrderAfterGeneration: ({ result }) => result,
+      clearGeneratedExports: () => {},
+      clearPendingManualBalancePrompt: () => {},
+      STATEMENT_SOURCE_FRESHNESS_FAILURE: { code: 'STATEMENT_SOURCE_FRESHNESS_FAILURE' },
+      FileValidationError: class FileValidationError extends Error {},
+      appendLog: (_root, error) => { throw error; },
+      ensureStorageRoot: () => '',
+      createErrorResult: (result) => ({ status: 'error', ...result })
+    });
+    const result = await execute(null, { contextId, isFixedMode: false, normalizedAssignments: [], rememberOrder: null }, {
+      fileEvidence: { filePlan: { inputs: [{ filePath: newPath }] } }
+    });
+
+    assert.equal(result.status, 'success', label);
+    assert.deepEqual(
+      sessionHelpers.getStatementSessionEntries(session, 'all').map((entry) => entry.filePath),
+      [path.resolve(newPath)],
+      label
+    );
+  }
+});
