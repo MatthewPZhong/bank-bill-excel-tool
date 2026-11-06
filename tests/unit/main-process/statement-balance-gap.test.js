@@ -1127,6 +1127,7 @@ test('主进程：按文件名映射全部范围补录后重算，任一模板�
     FILENAME_MAPPING_TEMPLATE_ID,
     FileValidationError,
     isFilenameMappingMode: (templateId) => templateId === FILENAME_MAPPING_TEMPLATE_ID,
+    ...seedSaveGroupingDeps(),
     rememberAcknowledgedBalanceGaps: () => true,
     appendActivityLogEntry: () => {},
     formatBalanceGapLine: () => '',
