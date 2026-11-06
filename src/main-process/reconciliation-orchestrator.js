@@ -43,7 +43,11 @@ const {
 const { runDbsChargeFundCheck } = require('./scenario-engines/dbs-charge-fund-check');
 // v3.0.12 功能1：多对多异常说明检测器（🔴 资金红线·纯只读 —— 不改回填/字段/行数守恒）
 const { detectFundTransferManyToMany } = require('./scenario-engines/many-to-many-detector');
-const { runAllScenarios } = require('./scenario-dispatcher');
+const {
+  buildRowMatchedChannelMap,
+  filterRowsByApplicableChannels,
+  runAllScenarios
+} = require('./scenario-dispatcher');
 
 // 重建 modifiedRows 时需嫁接 R2 命中元数据，但要排除这两个（_rowId 是行键、_modifiedColumns 由编排器跨轮合并重算）
 const META_EXCLUDE_KEYS = new Set(['_rowId', '_modifiedColumns']);
@@ -379,6 +383,18 @@ async function runReconciliation({
   const allWarnings = [...normalizedInitialWarnings];
   const allMods = [];     // 汇总 modifications（带 _round 标记便于审计）
 
+  // v3.2.15：自带写死场景的「适用银行渠道」对独立分桶的 R4、退款回填同样生效，与 R2 dispatcher 同口径
+  //   （v2.1.13 D-3：空列表 = 全部）。返回 null 表示不限定；与 R2 一致，仅双维调度（有渠道仓储）时按渠道过滤。
+  //   行 → 渠道映射在首次需要时建一次。
+  let rowMatchedChannelMap = null;
+  const applicableBankRowsOf = (scenario) => {
+    const applicableChannelIds = scenario && scenario._applicableChannelIds;
+    if (!Array.isArray(applicableChannelIds) || applicableChannelIds.length === 0) return null;
+    if (!(deps && deps.channelsRepo && deps.db)) return null;
+    if (!rowMatchedChannelMap) rowMatchedChannelMap = buildRowMatchedChannelMap(bankRows, deps);
+    return filterRowsByApplicableChannels(bankRows, applicableChannelIds, rowMatchedChannelMap);
+  };
+
   // ===== R1：reconid 1v1 匹配（不改字段，仅得 matchedGwRows）=====
   const r1 = runRound1ReconIdMatch(bankRows, safeGwRows);
   allWarnings.push(...(r1.warnings || [])); // r1.modifications 恒空，不并入 allMods
@@ -426,8 +442,16 @@ async function runReconciliation({
   // AchReturn 网关确认的具体银行行；与 modifications 分离，避免伪造改值和标黄。
   let r4MatchedPairs = [];
   if (r4Bucket.length) {
+    // v3.2.15：各 R4 子场景只处理其「适用银行渠道」内的银行行（同名子场景以最后一条为准，与 enabledR4Rules 一致）。
+    const applicableBankRowsBySubCategory = new Map();
+    for (const scenario of r4Bucket) {
+      const subCategory = String((scenario.config && scenario.config.subCategory) ?? '').trim();
+      const applicableRows = applicableBankRowsOf(scenario);
+      if (applicableRows) applicableBankRowsBySubCategory.set(subCategory, new Set(applicableRows));
+      else applicableBankRowsBySubCategory.delete(subCategory);
+    }
     // v3.0.23：R4 自己按固定 TradeType + 账号/币种/金额/方向筛选，不再受 R1 仅 ReconID 预配对结果限制。
-    const r4 = runRound4FundNatureCheck(safeGwRows, bankRows, r4Bucket);
+    const r4 = runRound4FundNatureCheck(safeGwRows, bankRows, r4Bucket, { applicableBankRowsBySubCategory });
     mergeMods(r4.modifications);
     allWarnings.push(...(r4.warnings || []));
     for (const m of r4.modifications || []) allMods.push({ ...m, _round: 'R4' });
@@ -547,7 +571,8 @@ async function runReconciliation({
       return !!(cols && cols.has('FundType'));
     };
     const r5d = runRound5RefundOrderBackfill(
-      bankRows,
+      // v3.2.15：退款回填只处理其「适用银行渠道」内的银行行。
+      applicableBankRowsOf(r5s4Bucket[0]) || bankRows,
       (refundContext && refundContext.refundOrderRows) || [],
       (refundContext && refundContext.depositRows) || [],
       {
