@@ -30,13 +30,15 @@ function cellText(value) {
 }
 
 // 按列字母取值，保留物理行号（跳过空行后行号仍对应 Excel）。
+//   工作表使用范围不从 A 列开始时，前面的列没有键；补成空串，避免表头比较跳过数组空位而放过缺列的文件。
 function sheetRows(sheet) {
   const records = XLSX.utils.sheet_to_json(sheet, { header: 'A', defval: '', raw: true, blankrows: false });
   return records.map((record) => {
-    const values = [];
+    const sparse = [];
     for (const [columnName, value] of Object.entries(record)) {
-      values[XLSX.utils.decode_col(columnName)] = value;
+      sparse[XLSX.utils.decode_col(columnName)] = value;
     }
+    const values = Array.from(sparse, (value) => (value === undefined ? '' : value));
     return { values, rowIndex: Number.isSafeInteger(record.__rowNum__) ? record.__rowNum__ : null };
   });
 }
