@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  matchImportFilesToSavedOrder,
   matchMerchantIds,
   normalizeMaintainedBigAccounts,
   resolveRecognizedBigAccount
@@ -106,5 +107,120 @@ test.describe('matchMerchantIds', () => {
 
   test('默认 fuzzy 仍保留子串匹配，供既有顺序提示路径使用', () => {
     assert.equal(matchMerchantIds('NET0011', 'NET001'), 'fuzzy');
+  });
+});
+
+test.describe('matchImportFilesToSavedOrder', () => {
+  // 已记住文件的 accounts 来自提取证据，币种为维护列表首币种；真实币种只在 assignments 里。
+  const savedFile = (merchantId, currency = 'CNY') => ({
+    accountCount: 1,
+    accounts: [{ merchantId, currency }]
+  });
+
+  test('同一多币种大账号的两份账单记住了不同币种：导入顺序变化时不自动套用，标出两份文件', () => {
+    const savedOrderConfig = {
+      files: [savedFile('FTN7013'), savedFile('NRA2268'), savedFile('FTN7013')],
+      assignments: [
+        { merchantId: 'FTN7013', currency: 'CNY', rowIndex: 0 },
+        { merchantId: 'NRA2268', currency: 'CNY', rowIndex: 1 },
+        { merchantId: 'FTN7013', currency: 'USD', rowIndex: 2 }
+      ]
+    };
+    const importAccountLists = [
+      [{ merchantId: 'FTN7013' }],
+      [{ merchantId: 'FTN7013' }],
+      [{ merchantId: 'NRA2268' }]
+    ];
+
+    assert.deepEqual(matchImportFilesToSavedOrder(importAccountLists, savedOrderConfig), {
+      failedImportIndexes: [],
+      ambiguousImportIndexes: [0, 1],
+      reorderedAssignments: []
+    });
+  });
+
+  test('同账号多份账单记住的币种相同：不算歧义，按导入顺序重排', () => {
+    const savedOrderConfig = {
+      files: [savedFile('FTN7013'), savedFile('NRA2268'), savedFile('FTN7013')],
+      assignments: [
+        { merchantId: 'FTN7013', currency: 'CNY', rowIndex: 0 },
+        { merchantId: 'NRA2268', currency: 'CNY', rowIndex: 1 },
+        { merchantId: 'FTN7013', currency: 'CNY', rowIndex: 2 }
+      ]
+    };
+
+    assert.deepEqual(matchImportFilesToSavedOrder([
+      [{ merchantId: 'FTN7013' }],
+      [{ merchantId: 'FTN7013' }],
+      [{ merchantId: 'NRA2268' }]
+    ], savedOrderConfig), {
+      failedImportIndexes: [],
+      ambiguousImportIndexes: [],
+      reorderedAssignments: [
+        { merchantId: 'FTN7013', currency: 'CNY', rowIndex: 0 },
+        { merchantId: 'FTN7013', currency: 'CNY', rowIndex: 1 },
+        { merchantId: 'NRA2268', currency: 'CNY', rowIndex: 2 }
+      ]
+    });
+  });
+
+  test('账号各不相同时仍按账号对位重排，保留各自记住的币种', () => {
+    const savedOrderConfig = {
+      files: [
+        savedFile('FTN7013'),
+        {
+          accountCount: 2,
+          accounts: [{ merchantId: 'NRA2268', currency: 'CNY' }, { merchantId: 'NRA6122', currency: 'USD' }]
+        }
+      ],
+      assignments: [
+        { merchantId: 'FTN7013', currency: 'USD', rowIndex: 0 },
+        { merchantId: 'NRA2268', currency: 'CNY', rowIndex: 1 },
+        { merchantId: 'NRA6122', currency: 'USD', rowIndex: 2 }
+      ]
+    };
+
+    assert.deepEqual(matchImportFilesToSavedOrder([
+      [{ merchantId: 'NRA2268' }, { merchantId: 'NRA6122' }],
+      [{ merchantId: 'FTN7013' }]
+    ], savedOrderConfig), {
+      failedImportIndexes: [],
+      ambiguousImportIndexes: [],
+      reorderedAssignments: [
+        { merchantId: 'NRA2268', currency: 'CNY', rowIndex: 0 },
+        { merchantId: 'NRA6122', currency: 'USD', rowIndex: 1 },
+        { merchantId: 'FTN7013', currency: 'USD', rowIndex: 2 }
+      ]
+    });
+  });
+
+  test('账户个数或账号对不上的文件记为失败，不产出自动分配', () => {
+    const savedOrderConfig = {
+      files: [savedFile('FTN7013'), savedFile('NRA2268')],
+      assignments: [
+        { merchantId: 'FTN7013', currency: 'CNY', rowIndex: 0 },
+        { merchantId: 'NRA2268', currency: 'CNY', rowIndex: 1 }
+      ]
+    };
+
+    assert.deepEqual(matchImportFilesToSavedOrder([
+      [{ merchantId: 'NRA9999' }],
+      [{ merchantId: 'NRA2268' }]
+    ], savedOrderConfig), {
+      failedImportIndexes: [0],
+      ambiguousImportIndexes: [],
+      reorderedAssignments: []
+    });
+  });
+
+  test('只记住了文件、没有记住分配时不产出自动分配', () => {
+    assert.deepEqual(matchImportFilesToSavedOrder(
+      [[{ merchantId: 'FTN7013' }]],
+      { files: [savedFile('FTN7013')], assignments: [] }
+    ), {
+      failedImportIndexes: [],
+      ambiguousImportIndexes: [],
+      reorderedAssignments: []
+    });
   });
 });

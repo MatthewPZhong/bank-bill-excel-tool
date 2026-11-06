@@ -636,6 +636,109 @@ test('冻结顺序 evidence 按 session + file block ordinal 提取，失败行�
   assert.match(extract(context, 'fixed', [0]).message, /已失效/);
 });
 
+test('直接识别到多币种大账号也提醒币种待核对，并按账号精确取币种选项', () => {
+  const {
+    matchMerchantIds,
+    normalizeMaintainedBigAccounts
+  } = require('../../../src/main-process/big-account-recognition');
+  const normalize = (value) => String(value == null ? '' : value).trim();
+  const findBridge = loadFunction(
+    'findSelfInputBigAccountBridge',
+    ['normalizeCell', 'matchMerchantIds'],
+    [normalize, matchMerchantIds]
+  );
+  const buildEvidence = loadFunction(
+    'buildBigAccountOrderEvidence',
+    [
+      'path',
+      'normalizeCell',
+      'expandBigAccountConfigurations',
+      'identifyAccountsFromRecognitionBasis',
+      'findSelfInputBigAccountBridge',
+      'matchMerchantIds'
+    ],
+    [
+      path,
+      normalize,
+      normalizeMaintainedBigAccounts,
+      ({ basis }) => ({ matches: (basis && basis.directMatches) || [] }),
+      findBridge,
+      matchMerchantIds
+    ]
+  );
+  const extract = loadFunction(
+    'extractBigAccountOrderFromEvidence',
+    ['selectPendingBigAccountRows', 'path', 'normalizeCell'],
+    [loadFunction('selectPendingBigAccountRows'), path, normalize]
+  );
+  // 对应 CZBANK 模板：MerchantId 为固定的多大账号标记，先直接从账单表头识别账号，账单里没有币种列。
+  const files = [
+    // 同一账号的人民币、美元账单；第一份同时带桥接值，直接识别优先时仍要提醒。
+    { name: 'CNY-7013.xls', directMatch: 'FTN7013', clearingId: 'NRA2268' },
+    { name: 'USD-7013.xls', directMatch: 'FTN7013' },
+    { name: 'CNY-2268.xls', directMatch: 'NRA2268' },
+    // 维护列表里 M0011 排在前面且包含 M001，不能被当成 M001 的币种选项。
+    { name: 'USD-M001.xls', directMatch: 'M001' }
+  ];
+  const fileEntries = files.map((file) => ({
+    filePath: path.resolve('/private/czbank', file.name),
+    detailRows: {
+      bigAccountRecognitionBasis: {
+        headerWindows: [{ headerRowNumber: 5, candidateRows: [] }],
+        bridgeClearingIdsByBlock: file.clearingId ? [file.clearingId] : [],
+        directMatches: [{ merchantId: file.directMatch, matchType: 'fuzzy' }]
+      }
+    },
+    selfInputMerchant: true,
+    skipDirectMerchantLookup: false
+  }));
+  const rows = fileEntries.map((entry, index) => ({
+    index,
+    filePath: entry.filePath,
+    fileName: path.basename(entry.filePath),
+    fileBlockOrdinal: 0,
+    sourceRowNumber: 6
+  }));
+  const context = {
+    statementSelectionSessionId: 'czbank-session',
+    bigAccounts: [
+      { merchantId: 'FTN7013', currencies: ['CNY', 'USD', 'GBP'] },
+      { merchantId: 'NRA2268', currencies: ['CNY'] },
+      { merchantId: 'M0011', currencies: ['CNY'] },
+      { merchantId: 'M001', currencies: ['USD'] }
+    ],
+    fileEntries,
+    rows,
+    rowsWithEmptyBlocks: rows
+  };
+  context.bigAccountOrderEvidence = buildEvidence(context);
+
+  assert.deepEqual(
+    context.bigAccountOrderEvidence.files.map((file) => file.rows[0].ambiguityCode),
+    ['MULTI_CURRENCY', 'MULTI_CURRENCY', null, null]
+  );
+  for (const mode of ['unfixed', 'fixed']) {
+    assert.deepEqual(extract(context, mode, [0, 1, 2, 3]), {
+      status: 'ok',
+      accounts: [
+        { merchantId: 'FTN7013', currency: 'CNY', matchType: 'fuzzy', fileName: 'CNY-7013.xls' },
+        { merchantId: 'FTN7013', currency: 'CNY', matchType: 'fuzzy', fileName: 'USD-7013.xls' },
+        { merchantId: 'NRA2268', currency: 'CNY', matchType: 'fuzzy', fileName: 'CNY-2268.xls' },
+        { merchantId: 'M001', currency: 'USD', matchType: 'fuzzy', fileName: 'USD-M001.xls' }
+      ],
+      ambiguousCurrencyFiles: ['CNY-7013.xls', 'USD-7013.xls']
+    }, mode);
+  }
+  // 只提取单币种账号时不追加多余提醒。
+  assert.deepEqual(extract(context, 'unfixed', [2, 3]), {
+    status: 'ok',
+    accounts: [
+      { merchantId: 'NRA2268', currency: 'CNY', matchType: 'fuzzy', fileName: 'CNY-2268.xls' },
+      { merchantId: 'M001', currency: 'USD', matchType: 'fuzzy', fileName: 'USD-M001.xls' }
+    ]
+  });
+});
+
 test('首次 workbook raw rows 派生最小 recognition basis，标准/bridge/多模板均不重读源', () => {
   const normalize = (value) => String(value == null ? '' : value).trim();
   const match = (cell, merchantId) => {

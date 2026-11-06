@@ -132,8 +132,69 @@ function resolveRecognizedBigAccount({
   };
 }
 
+function savedOrderAssignmentsKey(assignments) {
+  return assignments
+    .map((assignment) => `${normalizeCell(assignment && assignment.merchantId)}\u0000${normalizeCell(assignment && assignment.currency)}`)
+    .join('\u0001');
+}
+
+// 固定模式按已记住顺序自动套用：每个导入文件按账户个数和账号，依次对上第一个未用过的已记住文件，
+// 再按导入顺序重排该文件记住的账号 / 币种分配。
+// 匹配不看币种：一个导入文件能对上多个已记住文件、且它们记住的分配不同时（如同一多币种大账号的
+// CNY、USD 两份账单），实际取到哪份只取决于本次导入顺序，记为 ambiguous，不产出自动分配。
+function matchImportFilesToSavedOrder(importAccountLists = [], savedOrderConfig = {}) {
+  const savedFiles = Array.isArray(savedOrderConfig && savedOrderConfig.files) ? savedOrderConfig.files : [];
+  const savedAssignments = Array.isArray(savedOrderConfig && savedOrderConfig.assignments)
+    ? savedOrderConfig.assignments
+    : [];
+  const savedSlices = [];
+  let cursor = 0;
+  savedFiles.forEach((savedFile) => {
+    const count = savedFile.accountCount || 0;
+    savedSlices.push(savedAssignments.slice(cursor, cursor + count));
+    cursor += count;
+  });
+
+  const usedSavedIndices = new Set();
+  const failedImportIndexes = [];
+  const ambiguousImportIndexes = [];
+  const savedIndexByImport = (Array.isArray(importAccountLists) ? importAccountLists : [])
+    .map((accounts, importIndex) => {
+      const identifiedAccounts = Array.isArray(accounts) ? accounts : [];
+      const candidates = [];
+      savedFiles.forEach((savedFile, savedIndex) => {
+        if (identifiedAccounts.length !== savedFile.accountCount) return;
+        const savedAccounts = Array.isArray(savedFile.accounts) ? savedFile.accounts : [];
+        const allAccountsMatch = savedAccounts.every((savedAccount) => identifiedAccounts.some((identified) => (
+          matchMerchantIds(identified.merchantId, savedAccount.merchantId) !== 'none'
+        )));
+        if (allAccountsMatch) candidates.push(savedIndex);
+      });
+      const candidateKeys = new Set(candidates.map((savedIndex) => savedOrderAssignmentsKey(savedSlices[savedIndex])));
+      if (candidateKeys.size > 1) ambiguousImportIndexes.push(importIndex);
+      const savedIndex = candidates.find((index) => !usedSavedIndices.has(index));
+      if (savedIndex === undefined) {
+        failedImportIndexes.push(importIndex);
+        return -1;
+      }
+      usedSavedIndices.add(savedIndex);
+      return savedIndex;
+    });
+
+  const reorderedAssignments = [];
+  if (failedImportIndexes.length === 0 && ambiguousImportIndexes.length === 0 && savedAssignments.length > 0) {
+    savedIndexByImport.forEach((savedIndex) => {
+      savedSlices[savedIndex].forEach((assignment) => {
+        reorderedAssignments.push({ ...assignment, rowIndex: reorderedAssignments.length });
+      });
+    });
+  }
+  return { failedImportIndexes, ambiguousImportIndexes, reorderedAssignments };
+}
+
 module.exports = {
   normalizeMaintainedBigAccounts,
+  matchImportFilesToSavedOrder,
   matchMerchantIds,
   resolveRecognizedBigAccount
 };
