@@ -280,6 +280,7 @@ function createEnvironment(dir, label) {
     'normalizeTemplateChannelAssignment',
     'findSaveMappingsBalanceModeMismatch',
     'findGenerationGroupOutputNameConflicts',
+    'buildStatementOutputNameConflictError',
     'normalizeBundleAccountMappings',
     'buildBundleV5ChannelRestore',
     'buildLegacyBundleChannelRestore',
@@ -807,6 +808,22 @@ function verifyOutputNameConflictFileNameKey(dir) {
     'Step14.写盘时替换成同一字符的非法字符视为同名');
   env.database.renameTemplate(other.id, 'ACME-SG-y');
   assertEq(conflicts(batchOf(doubleSpace)), null, 'Step14.改名后写盘文件名不同则放行');
+  // Unicode 规范等价：预组合 É 与 E + 组合重音在 APFS 上是同一个文件名。
+  env.database.renameTemplate(doubleSpace.id, 'CAF\u00C9-SG');
+  env.database.renameTemplate(other.id, 'CAFE\u0301-SG');
+  assertEq(conflicts(batchOf(doubleSpace)), ['输出名称「CAF\u00C9-SG」：模板「CAF\u00C9-SG」、模板「CAFE\u0301-SG」'],
+    'Step14.Unicode 规范等价的两个名称视为同名');
+
+  // 多模板生成进入副作用前整批核对：冲突时不改会话、不写任何组的文件（预检后配置可能已变化）。
+  const fileB = path.join(dir, 'step14-b.xlsx');
+  writeSource(fileB, 'A', [['2026-09-02', 'M002', 'USD', '20', '']]);
+  const entries = [env.entryFor(env.database.getTemplate(other.id), fileB), env.entryFor(env.database.getTemplate(doubleSpace.id), fileA)];
+  let generationError = null;
+  try { env.generate(entries); } catch (error) { generationError = error; }
+  assertEq(generationError && generationError.code, 'STATEMENT_OUTPUT_NAME_CONFLICT', 'Step14.多模板生成前整批阻断');
+  const exportsDir = path.join(env.storageRoot, 'exports');
+  const written = fs.existsSync(exportsDir) ? fs.readdirSync(exportsDir, { recursive: true }).filter((name) => String(name).endsWith('.xlsx')) : [];
+  assertEq(written, [], 'Step14.阻断时任何组都没有写出文件');
 
   // 两个渠道名称只差大小写：分批导入也阻断；同一渠道的两个子模板同批不算冲突。
   const upperOwner = env.defineTemplate('BANK-SG', 'A');
@@ -845,6 +862,22 @@ function verifyLegacyBundleMultiLevelSkippedParent(dir) {
   assertEq([a, b, c, d].map(channelNameOf), [null, '层级-B', '层级-B', null], 'Step15.B 与 C 组成渠道「B」，A 不变、D 按普通模板导入');
   assertEq(channelRestore.orphanedTemplateNames, ['层级-D'], 'Step15.只把最终按普通模板导入的 D 记为普通模板');
   assertEq(channelRestore.regroupedTemplateNames, ['层级-B'], 'Step15.B 记为以自身名称组成渠道');
+
+  // 手工合并的包里同一模板出现两次：第一条的父模板被跳过，第二条自身是主模板。归属以最后一条为准，日志按最终归属列一次。
+  const env2 = createEnvironment(dir, 'step15-dup');
+  const [a2, b2] = ['重复-A', '重复-B'].map((name) => env2.defineTemplate(name, 'A'));
+  const entryOf2 = (template, parent, isParent) => ({ templateKey: template.templateKey, name: template.name, isParent,
+    parentTemplateKey: parent ? parent.templateKey : null, accountMappings: [] });
+  const dupEntries = [entryOf2(a2, null, true), entryOf2(b2, a2, false), entryOf2(b2, null, true)];
+  const dup = env2.fns.restoreBundleFollowUpRounds({
+    importedTemplates: dupEntries,
+    succeededEntries: new Set(dupEntries.slice(1)),
+    importedBundleVersion: 4,
+    importedChannels: []
+  }).channelRestore;
+  const b2ChannelId = env2.database.getTemplate(b2.id).channelId;
+  assertEq(b2ChannelId ? env2.database.getStatementChannel(b2ChannelId).name : null, '重复-B', 'Step15.重复条目按最后一条归入渠道「B」');
+  assertEq([dup.orphanedTemplateNames, dup.regroupedTemplateNames], [[], ['重复-B']], 'Step15.重复条目的日志按最终归属只列一次');
 }
 
 async function run() {

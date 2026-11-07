@@ -51,6 +51,16 @@ function listChannels(db) {
   return db.prepare(`${CHANNEL_SELECT} ORDER BY c.name ASC, c.id ASC`).all().map(mapChannelRow);
 }
 
+// v3.2.15（release 复审）：生成前的输出名称核对只需要各输出所有者的身份与名称——不属于任何渠道的普通模板、全部渠道
+//   （渠道里的子模板由渠道代表）。不复用带映射、大账号统计的模板摘要查询。
+function listOutputOwners(db) {
+  const templates = db.prepare('SELECT id, name FROM templates WHERE channel_id IS NULL ORDER BY id ASC').all()
+    .map((row) => ({ id: Number(row.id), name: row.name }));
+  const channels = db.prepare('SELECT id, name FROM statement_channels ORDER BY id ASC').all()
+    .map((row) => ({ id: Number(row.id), name: row.name }));
+  return { templates, channels };
+}
+
 function getChannel(db, channelId) {
   const id = Number(channelId);
   if (!Number.isSafeInteger(id) || id <= 0) return null;
@@ -675,6 +685,7 @@ module.exports = {
   deleteChannel,
   describeAccountMappingSetting,
   getChannel,
+  listOutputOwners,
   getChannelByName,
   getOrCreateChannelId,
   listChannelAccountMappingConflicts,
