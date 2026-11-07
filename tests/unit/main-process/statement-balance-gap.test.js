@@ -84,7 +84,7 @@ function loadBalanceModeMismatchFunction(getTemplateMappingConfig) {
 
 // v3.2.15（PR #246 审查）：导出全部前核对各组输出名称不重复；这里的普通模板各不同名、库里没有同名渠道，
 //   使用真实函数确认直接放行。
-function loadOutputNameConflictFunctions(database = { listTemplates: () => [], listStatementChannels: () => [] }) {
+function loadOutputNameConflictFunctions(database = { listStatementOutputOwners: () => ({ templates: [], channels: [] }) }) {
   const identity = require('../../../src/main-process/statement-channel-identity');
   const { normalizeCell, FileValidationError } = require('../../../src/backend/file-service');
   return {
@@ -828,7 +828,7 @@ test('主进程：按文件名映射补录时，会话里的模板与库里的�
     FILENAME_MAPPING_TEMPLATE_ID,
     FileValidationError,
     isFilenameMappingMode: (templateId) => templateId === FILENAME_MAPPING_TEMPLATE_ID,
-    ...seedSaveGroupingDeps({ listTemplates: () => [], listStatementChannels: () => [{ id: 9, name: ' 模板1 ' }] }),
+    ...seedSaveGroupingDeps({ listStatementOutputOwners: () => ({ templates: [], channels: [{ id: 9, name: ' 模板1 ' }] }) }),
     writeManualBalanceSeedPlan: () => { calls.seed += 1; },
     regenerateVirtualTemplateBalanceFromSession: () => { calls.regenerate += 1; return { needsSeed: false, generatedFiles: {} }; },
     appendActivityLogEntry: () => {},
@@ -850,8 +850,8 @@ test('主进程：按文件名映射补录时，会话里的模板与库里的�
 
 // 指定模板（非虚拟 ID）的会话：库里有输出名称只差大小写的渠道。
 const NAME_CONFLICT_DATABASE = {
-  listTemplates: () => [{ id: 5, name: 'bank-sg', channelId: null }],
-  listStatementChannels: () => [{ id: 9, name: 'BANK-SG' }],
+  listStatementOutputOwners: () => ({ templates: [{ id: 5, name: 'bank-sg' }, { id: 6, name: '模板6' }], channels: [{ id: 9, name: 'BANK-SG' }] }),
+  getTemplate: (id) => ({ id, name: id === 5 ? 'bank-sg' : `模板${id}`, channelId: null }),
   countStatementChannelAccountMappingConflicts: () => 0
 };
 const singleTemplateConfig = (tid) => ({
@@ -891,6 +891,77 @@ test('主进程：指定模板会话导出全部重新生成前，模板与库�
       await assert.rejects(exportAll('balance', 'all'), /reached-generation/, label);
       assert.deepEqual(calls, { context: 1, remembered: 1, generate: 1 }, label);
     }
+  }
+});
+
+// 生成入口的统一核对：按本次实际使用的模板配置，身份取库里模板当前的归属。
+function loadGenerationWrappers(database, calls) {
+  const { resolveGenerationGroupKey } = require('../../../src/main-process/statement-channel-identity');
+  const assertGenerationOutputNameUnique = loadMainFunction(
+    'assertGenerationOutputNameUnique',
+    ['database', 'resolveGenerationGroupKey', 'findGenerationGroupOutputNameConflicts', 'buildStatementOutputNameConflictError'],
+    [database, resolveGenerationGroupKey, ...Object.values(loadOutputNameConflictFunctions(database))]
+  );
+  const statementGenerationHelpers = {
+    generateStatementFiles: () => { calls.generate += 1; return {}; },
+    generateFilesFromRememberedContext: () => { calls.remembered += 1; return {}; }
+  };
+  const deps = [['assertGenerationOutputNameUnique', 'statementGenerationHelpers'], [assertGenerationOutputNameUnique, statementGenerationHelpers]];
+  return {
+    assertGenerationOutputNameUnique,
+    generateStatementFiles: loadMainFunction('generateStatementFiles', ...deps),
+    generateFilesFromRememberedContext: loadMainFunction('generateFilesFromRememberedContext', ...deps)
+  };
+}
+
+test('主进程：生成入口按本次使用的模板配置核对输出名称，等待期间改名造成同名时阻断（release/v3.2.15 复审）', () => {
+  const calls = { generate: 0, remembered: 0 };
+  // 库里：渠道 BANK-SG（id 9）；模板 7 导入后已移入同名渠道 11「CMB-SH」。
+  const database = {
+    listStatementOutputOwners: () => ({ templates: [{ id: 5, name: 'other' }], channels: [{ id: 9, name: 'BANK-SG' }, { id: 11, name: 'CMB-SH' }] }),
+    getTemplate: (id) => (id === 7 ? { id: 7, name: 'CMB-SH', channelId: 11, channelName: 'CMB-SH' } : { id, name: 'renamed', channelId: null })
+  };
+  const wrappers = loadGenerationWrappers(database, calls);
+  const stale = { id: 5, name: 'bank-sg', channelId: null };
+  for (const [label, run] of [
+    ['生成文件', () => wrappers.generateStatementFiles({ config: { template: stale } })],
+    ['按记下的上下文生成', () => wrappers.generateFilesFromRememberedContext({ template: stale })]
+  ]) {
+    assert.throws(run, (error) => error.code === 'STATEMENT_OUTPUT_NAME_CONFLICT'
+      && error.detailLines[0] === '输出名称「bank-sg」：模板「bank-sg」、渠道「BANK-SG」', label);
+  }
+  assert.deepEqual(calls, { generate: 0, remembered: 0 });
+  // 导入后移入同名渠道的模板：身份按当前归属，与自己的渠道不冲突；按文件名映射的虚拟模板跳过。
+  wrappers.generateStatementFiles({ config: { template: { id: 7, name: 'CMB-SH', channelId: null } } });
+  wrappers.generateFilesFromRememberedContext({ template: { id: '__FILENAME_MAPPING__', name: 'BANK-SG' } });
+  assert.deepEqual(calls, { generate: 1, remembered: 1 });
+});
+
+test('主进程：指定模板补录时记下的模板与库里渠道的输出名称相同，先阻断，不写入种子也不重新生成（release/v3.2.15 复审）', async () => {
+  for (const scope of ['current', 'all']) {
+    const calls = { seed: 0, generate: 0 };
+    const wrappers = loadGenerationWrappers(NAME_CONFLICT_DATABASE, { generate: 0, remembered: 0 });
+    const execute = loadSaveBalanceSeedExecute({
+      FILENAME_MAPPING_TEMPLATE_ID,
+      FileValidationError,
+      isFilenameMappingMode: (templateId) => templateId === FILENAME_MAPPING_TEMPLATE_ID,
+      assertGenerationOutputNameUnique: wrappers.assertGenerationOutputNameUnique,
+      writeManualBalanceSeedPlan: () => { calls.seed += 1; },
+      generateFilesFromRememberedContext: () => { calls.generate += 1; return {}; },
+      appendActivityLogEntry: () => {},
+      clearPendingManualBalancePrompt: () => {},
+      createErrorResult: (payload) => ({ status: 'error', ...payload })
+    });
+    const result = await execute(null, {
+      plan: { record: { templateName: 'bank-sg', merchantId: 'M001', currency: 'USD', billDate: '2026-08-31', endBalance: '1000' } },
+      skipBalanceGapKeys: null,
+      pendingPrompt: { templateName: 'bank-sg' },
+      session: null,
+      importContext: { templateId: 5, scope, template: { id: 5, name: 'bank-sg', channelId: null } }
+    }, { fileEvidence: { filePlan: { inputs: [{ filePath: '/tmp/a.xlsx' }] } } });
+    assert.equal(result.errorCode, 'STATEMENT_OUTPUT_NAME_CONFLICT', scope);
+    assert.deepEqual(result.detailLines, ['输出名称「bank-sg」：模板「bank-sg」、渠道「BANK-SG」'], scope);
+    assert.deepEqual(calls, { seed: 0, generate: 0 }, scope);
   }
 });
 
@@ -1111,6 +1182,7 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
     const imported = [];
     const dependencies = {
       groupStatementEntriesForGeneration: loadGroupingFunction(() => null),
+      ...loadOutputNameConflictFunctions(),
       getEntryTemplateConfig: ({ entry }) => ({
         template: { name: templateNameById.get(entry.matchedTemplateId) },
         exportMappings: [{ templateField: 'MerchantId', mappedField: 'Account' }],

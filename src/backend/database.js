@@ -1020,6 +1020,11 @@ class AppDatabase {
     return statementChannelRepository.getChannel(this.db, channelId);
   }
 
+  // 生成前输出名称核对用：不属于渠道的普通模板与全部渠道的身份和名称。
+  listStatementOutputOwners() {
+    return statementChannelRepository.listOutputOwners(this.db);
+  }
+
   getStatementChannelByName(name) {
     return statementChannelRepository.getChannelByName(this.db, name);
   }

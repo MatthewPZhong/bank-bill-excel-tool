@@ -8547,8 +8547,7 @@ function buildLegacyBundleChannelRestore(importedTemplateRecords, importedTempla
   const packagedKeys = new Set(importedTemplates.map((entry) => entry && entry.templateKey).filter(Boolean));
   // 父模板在包内但被跳过的成功模板，按最终归属分两类写日志：按普通模板导入的，以及自身仍是主模板或被成功的子模板引用、
   //   以自己的名称组成渠道的（多层旧包，release/v3.2.15 复审）。
-  const orphanedTemplateNames = [];
-  const regroupedTemplateNames = [];
+  const parentSkippedRecords = [];
   const resolveParent = (record) => {
     const parentKey = record.entry.parentTemplateKey;
     if (!parentKey) return null;
@@ -8579,12 +8578,11 @@ function buildLegacyBundleChannelRestore(importedTemplateRecords, importedTempla
     const parentSkipped = Boolean(parentKey && !byKey.has(parentKey) && packagedKeys.has(parentKey));
     const involved = record.entry.isParent || Boolean(resolveParent(record))
       || (record.entry.templateKey && referencedKeys.has(record.entry.templateKey));
+    if (parentSkipped) parentSkippedRecords.push(record);
     if (!involved) {
-      if (parentSkipped) orphanedTemplateNames.push(record.template.name);
       assignments.push({ templateId: record.template.id, channelName: null });
       return;
     }
-    if (parentSkipped) regroupedTemplateNames.push(record.template.name);
     const root = rootNameOf(record);
     if (!membersByChannel.has(root.name)) membersByChannel.set(root.name, { sources: [], externalIds: new Set() });
     const member = membersByChannel.get(root.name);
@@ -8603,6 +8601,16 @@ function buildLegacyBundleChannelRestore(importedTemplateRecords, importedTempla
   // 已有同名渠道的映射与待处理冲突由 restoreTemplateBundleStatementChannels 在同一事务内并入来源。
   const legacyChannelSources = Array.from(membersByChannel.entries())
     .map(([name, member]) => ({ name, sources: member.sources }));
+  // 归属按顺序生效，同一模板出现多次（手工合并的包）时以最后一条为准；日志按模板最终归属分类、每个模板只列一次。
+  const finalChannelByTemplateId = new Map(assignments.map((assignment) => [assignment.templateId, assignment.channelName]));
+  const orphanedTemplateNames = [];
+  const regroupedTemplateNames = [];
+  const loggedTemplateIds = new Set();
+  parentSkippedRecords.forEach((record) => {
+    if (loggedTemplateIds.has(record.template.id)) return;
+    loggedTemplateIds.add(record.template.id);
+    (finalChannelByTemplateId.get(record.template.id) ? regroupedTemplateNames : orphanedTemplateNames).push(record.template.name);
+  });
   return { channels: [], legacyChannelSources, assignments, orphanedTemplateNames, regroupedTemplateNames };
 }
 
@@ -10533,6 +10541,7 @@ function buildPreparedStatementBatchFromFilePaths({ config, inputFilePaths = [] 
 }
 
 function generateStatementFiles(options) {
+  assertGenerationOutputNameUnique(options && options.config && options.config.template);
   return statementGenerationHelpers.generateStatementFiles(options);
 }
 
@@ -10665,14 +10674,15 @@ function buildChannelBalanceModeMismatchError(group, detailLines) {
 // v3.2.15（PR #246 审查）：不同生成分组的输出名称不能相同。普通模板与渠道同名时（模板包或旧数据可能带来），
 //   两组的生成文件路径、明细 Channel 列与余额文件都相同，会互相覆盖。返回逐行明细，否则 null。
 //   release/v3.2.15 审查补充：
-//   - 名称按实际写盘文件名的口径比较：同 sanitizeFileName 替换非法字符、合并内部空白、去首尾空格，再不区分大小写
-//     （Windows / macOS 默认文件系统不区分大小写）；
+//   - 名称按实际写盘文件名的口径比较：同 sanitizeFileName 替换非法字符、合并内部空白、去首尾空格，再按 Unicode NFC
+//     规范化、不区分大小写（Windows / macOS 默认文件系统不区分大小写，APFS 不区分规范等价的写法）；
 //   - 所有者按组身份（渠道 / 模板 ID）去重，不按显示文字，名称只差空格的两个模板仍算两个所有者；
 //   - 除本批各组外，还核对库里所有同名的输出所有者（不属于任何渠道的普通模板、渠道，同类与异类都算）：
 //     同名的两方分两批导入时，每批只有一组，只比本批会放行，后一批覆盖前一批的明细与余额文件。
-//     属于渠道的子模板由渠道代表，不单独计数。
+//     属于渠道的子模板由渠道代表，不单独计数。库里只取各所有者的身份与名称（listStatementOutputOwners），
+//     不用带映射、大账号统计的模板摘要查询，避免每次生成前同步重聚合全库。
 function findGenerationGroupOutputNameConflicts(groups) {
-  const statementOutputNameKey = (name) => sanitizeFileName(normalizeCell(name)).toLowerCase();
+  const statementOutputNameKey = (name) => sanitizeFileName(normalizeCell(name)).normalize('NFC').toLowerCase();
   const byName = new Map();
   const addOwner = (outputName, identity, label) => {
     const nameKey = statementOutputNameKey(outputName);
@@ -10688,13 +10698,13 @@ function findGenerationGroupOutputNameConflicts(groups) {
       isChannel ? `渠道「${outputName}」` : `模板「${normalizeCell(group.templateConfig.template.name)}」`);
   }
   if (byName.size) {
-    for (const template of database.listTemplates()) {
-      if (Number(template.channelId || 0) > 0) continue;
+    const owners = database.listStatementOutputOwners();
+    for (const template of owners.templates) {
       if (byName.has(statementOutputNameKey(template.name))) {
         addOwner(template.name, `template:${template.id}`, `模板「${normalizeCell(template.name)}」`);
       }
     }
-    for (const channel of database.listStatementChannels()) {
+    for (const channel of owners.channels) {
       if (byName.has(statementOutputNameKey(channel.name))) {
         addOwner(channel.name, `channel:${channel.id}`, `渠道「${normalizeCell(channel.name)}」`);
       }
@@ -10712,6 +10722,19 @@ function buildStatementOutputNameConflictError(detailLines) {
     '有模板或渠道的输出名称相同（只差大小写、空格或文件名不允许的字符也算相同），生成的账单与余额会混在一起，请先在模板管理中重命名后再导入',
     { detailLines }
   );
+}
+
+// v3.2.15（release 复审）：每次生成前按本次实际使用的模板配置再核对一次。导入预检、大账号选择、补录确认等
+//   等待期间模板或渠道可能被改名，生成时用的仍是之前记下的配置。身份取库里模板当前的归属（导入后移入渠道的模板
+//   不与自己的渠道冲突），名称取本次实际写盘用的配置。虚拟模板（按文件名映射）不是库里的所有者，跳过。
+function assertGenerationOutputNameUnique(template) {
+  const templateId = Number(template && template.id);
+  if (!(templateId > 0)) return;
+  const current = database.getTemplate(templateId);
+  const conflicts = findGenerationGroupOutputNameConflicts([
+    { key: resolveGenerationGroupKey(current || template), templateConfig: { template } }
+  ]);
+  if (conflicts) throw buildStatementOutputNameConflictError(conflicts);
 }
 
 // v1.5.2：虚拟 ID 下从 session 重新生成合并的余额文件（补录 seed 后调用）
@@ -10882,6 +10905,9 @@ function generateMultiTemplateGroupFiles({
   }
 
   // 所有组先完成 source-stable 解析，再进入 session/输出副作用。
+  // v3.2.15（release 复审）：进入副作用前整批核对输出名称（预检后配置可能已变化），避免前几组已写出、后一组才被拦下。
+  const outputNameConflicts = findGenerationGroupOutputNameConflicts(generationGroups);
+  if (outputNameConflicts) throw buildStatementOutputNameConflictError(outputNameConflicts);
   if (Array.isArray(replacePaths)) {
     replacePaths.forEach((filePath) => {
       removeStatementSessionEntriesByFilePath(session, filePath);
@@ -11299,6 +11325,7 @@ function createGenerationContext({
 }
 
 function generateFilesFromRememberedContext(context) {
+  assertGenerationOutputNameUnique(context && context.template);
   return statementGenerationHelpers.generateFilesFromRememberedContext(context);
 }
 
@@ -14059,12 +14086,15 @@ function registerFileHandlers() {
       }
 
       try {
-        // v3.2.15（release 审查）：按文件名映射补录后会按会话全部分组重新生成；先核对输出名称，冲突时不写入种子、不生成。
+        // v3.2.15（release 审查）：补录后会重新生成；先按将使用的输出配置核对输出名称，冲突时不写入种子、不登记断档、不生成。
+        //   按文件名映射按会话全部分组核对；指定模板按记下的生成上下文核对（导入后模板或渠道可能已改名）。
         if (isFilenameMappingMode(importContext.templateId) && session) {
           const outputNameConflicts = findGenerationGroupOutputNameConflicts(
             groupStatementEntriesForGeneration(getStatementSessionEntries(session, importContext.scope || 'current'))
           );
           if (outputNameConflicts) throw buildStatementOutputNameConflictError(outputNameConflicts);
+        } else {
+          assertGenerationOutputNameUnique(importContext.template);
         }
         if (skipBalanceGapKeys) {
           // 登记在真实会话（或原 importContext）上，execute 内的 importContext 只是副本。
