@@ -10850,6 +10850,42 @@ function assertGenerationOutputNameUnique(templates) {
   if (conflicts) throw buildStatementOutputNameConflictError(conflicts);
 }
 
+// v3.2.15（release 审查）：同一批各组的实际输出文件名不能相同。内部文件名为“输出名称-账号-…”，组内只有一个账号时才带账号，
+//   不同的输出名称拼上账号后可能相同（如渠道「BANK-SG」只有账号 1001、模板「BANK-SG-1001」有多个账号），两组写到同一个文件，
+//   汇总时一组数据丢失、另一组重复。plans 为各组 { config, preparedBatch }；scope 为 'all' 时文件名不带账号。
+//   名称按写盘口径比较（同 findGenerationGroupOutputNameConflicts）。返回逐行明细，否则 null。
+function findGenerationGroupOutputPathConflicts(plans, scope = 'current') {
+  const byStem = new Map();
+  for (const plan of Array.isArray(plans) ? plans : []) {
+    const config = plan && plan.config;
+    const template = config && config.template;
+    if (!template) continue;
+    const outputName = normalizeCell(config.outputName) || normalizeCell(template.name);
+    const merchantId = scope === 'all' ? '' : normalizeCell(plan.preparedBatch && plan.preparedBatch.selectedMerchantId);
+    const stem = merchantId ? `${outputName}-${merchantId}` : outputName;
+    const stemKey = sanitizeFileName(stem).normalize('NFC').toLowerCase();
+    const current = Number(template.id) > 0 ? database.getTemplate(template.id) : null;
+    const identity = resolveGenerationGroupKey(current || template);
+    const label = `${identity.startsWith('channel:') ? `渠道「${outputName}」` : `模板「${normalizeCell(template.name)}」`}`
+      + (merchantId ? `（账号 ${merchantId}）` : '');
+    if (!byStem.has(stemKey)) byStem.set(stemKey, { stem, owners: new Map() });
+    const record = byStem.get(stemKey);
+    if (!record.owners.has(identity)) record.owners.set(identity, label);
+  }
+  const lines = Array.from(byStem.values())
+    .filter((record) => record.owners.size > 1)
+    .map((record) => `文件名「${record.stem}」：${Array.from(record.owners.values()).join('、')}`);
+  return lines.length ? lines : null;
+}
+
+function buildStatementOutputPathConflictError(detailLines) {
+  return new FileValidationError(
+    'STATEMENT_OUTPUT_NAME_CONFLICT',
+    '有两组账单的输出名称拼上账号后文件名相同，生成的账单会互相覆盖，请先在模板管理中重命名后再导入',
+    { detailLines }
+  );
+}
+
 // v1.5.2：虚拟 ID 下从 session 重新生成合并的余额文件（补录 seed 后调用）
 function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
   const allEntries = getStatementSessionEntries(session, scope);
@@ -10860,6 +10896,7 @@ function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
   const allWarnings = [];
   let skippedCount = 0;
 
+  const groupPlans = [];
   for (const { entries: groupEntries, templateIds, templateConfig } of generationGroups) {
     if (!templateConfig) {
       appendActivityLogEntry({
@@ -10880,6 +10917,13 @@ function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
       config: groupGenConfig,
       fileEntries: groupEntries
     });
+    groupPlans.push({ config: groupGenConfig, preparedBatch: groupPreparedBatch });
+  }
+  // v3.2.15（release 审查）：先规划全部组，再核对各组实际输出文件名，任一组写出之前拦下。
+  const outputPathConflicts = findGenerationGroupOutputPathConflicts(groupPlans, scope);
+  if (outputPathConflicts) throw buildStatementOutputPathConflictError(outputPathConflicts);
+
+  for (const { config: groupGenConfig, preparedBatch: groupPreparedBatch } of groupPlans) {
     // 按本次重算的真实范围命名：只有一个模板组时这个文件直接作为该范围的余额，
     // 固定按全部范围生成会与“导出全部”同名，当前批次的余额随后被全部批次覆盖。
     const groupGeneratedFiles = generateStatementFiles({
@@ -11035,6 +11079,10 @@ function generateMultiTemplateGroupFiles({
   //   而组配置可能取自之前记下的配置（getEntryTemplateConfig 的 fallback），不能按库里当前配置核对；
   //   避免先改了会话（替换旧文件）、前几组已写出，后一组才被拦下。
   assertGenerationOutputNameUnique(groupPlans.map((plan) => plan.groupTemplateConfig && plan.groupTemplateConfig.template));
+  const outputPathConflicts = findGenerationGroupOutputPathConflicts(
+    groupPlans.map((plan) => ({ config: plan.groupConfig, preparedBatch: plan.groupPreparedBatch }))
+  );
+  if (outputPathConflicts) throw buildStatementOutputPathConflictError(outputPathConflicts);
   if (Array.isArray(replacePaths)) {
     replacePaths.forEach((filePath) => {
       removeStatementSessionEntriesByFilePath(session, filePath);

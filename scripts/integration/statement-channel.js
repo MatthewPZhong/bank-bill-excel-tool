@@ -206,6 +206,7 @@ function createEnvironment(dir, label) {
   const mainDeps = {
     database,
     getTemplateMappingConfig,
+    getStatementSessionEntries,
     normalizeCell,
     sanitizeFileName,
     splitTemplateName,
@@ -283,6 +284,8 @@ function createEnvironment(dir, label) {
     'findGenerationGroupOutputNameConflicts',
     'buildStatementOutputNameConflictError',
     'assertGenerationOutputNameUnique',
+    'findGenerationGroupOutputPathConflicts',
+    'buildStatementOutputPathConflictError',
     'normalizeBundleAccountMappings',
     'buildBundleV5ChannelRestore',
     'buildLegacyBundleChannelRestore',
@@ -951,6 +954,63 @@ function verifyMultiTemplateGenerationStaleState(dir) {
   assertEq(writtenFiles(), [], 'Step16.删除拦下时没有写出文件');
 }
 
+// ⑰ release/v3.2.15 审查：内部文件名为“输出名称-账号-…”，组内只有一个账号时才带账号。渠道「名称」只有账号 M001、
+//    普通模板「名称-M001」有两个账号时，两组拼出同一个文件名；同批生成（导入、补录重算）都应在任一组写出之前拦下。
+function verifyOutputPathConcatenationConflict(dir) {
+  const env = createEnvironment(dir, 'step17');
+  const fileChannel = path.join(dir, 'step17-channel.xlsx');
+  const fileTemplate = path.join(dir, 'step17-template.xlsx');
+  writeSource(fileChannel, 'A', [['2026-09-01', 'M001', 'USD', '10', '']]);
+  writeSource(fileTemplate, 'B', [['2026-09-01', 'M002', 'USD', '20', ''], ['2026-09-01', 'M003', 'USD', '30', '']]);
+  const owner = env.defineTemplate('拼接-SG', 'A');
+  env.saveWithChannel(owner, { mode: 'create' });
+  const concatenated = env.defineTemplate('拼接-SG-M001', 'B');
+  const entries = [
+    env.entryFor(env.database.getTemplate(owner.id), fileChannel),
+    env.entryFor(env.database.getTemplate(concatenated.id), fileTemplate)
+  ];
+  assertEq(env.fns.findGenerationGroupOutputNameConflicts(env.fns.groupStatementEntriesForGeneration(entries)), null,
+    'Step17.前置：两组输出名称本身不同，名称核对放行');
+  const exportsDir = path.join(env.storageRoot, 'exports');
+  const writtenFiles = () => (fs.existsSync(exportsDir)
+    ? fs.readdirSync(exportsDir, { recursive: true }).filter((name) => String(name).endsWith('.xlsx')) : []);
+  const expectedLines = ['文件名「拼接-SG-M001」：渠道「拼接-SG」（账号 M001）、模板「拼接-SG-M001」'];
+
+  let importError = null;
+  try {
+    env.fns.generateMultiTemplateGroupFiles({
+      fileEntries: entries,
+      fallbackTemplateConfig: env.getTemplateMappingConfig(owner.id),
+      selectedBigAccount: null,
+      reuseMappedRows: true,
+      session: { key: 'session' },
+      replacePaths: ['/old/replaced.xlsx'],
+      inputFilePaths: [fileChannel, fileTemplate]
+    });
+  } catch (error) {
+    importError = error;
+  }
+  assertEq(importError && importError.code, 'STATEMENT_OUTPUT_NAME_CONFLICT', 'Step17.导入时按实际文件名整批拦下');
+  assertEq(importError && importError.detailLines, expectedLines, 'Step17.明细列出拼接后相同的文件名与两组');
+  assertEq(env.removedSessionPaths, [], 'Step17.拦下前没有替换会话里的旧文件');
+  assertEq(writtenFiles(), [], 'Step17.拦下前没有写出文件');
+
+  // 补录后按会话当前批次重算余额：同样在任一组写出之前拦下。
+  const session = {
+    fileEntries: entries.map((entry, index) => ({ ...entry, id: `entry-${index}` })),
+    batches: [{ id: 'batch-1', entryIds: ['entry-0', 'entry-1'] }],
+    currentBatchId: 'batch-1'
+  };
+  let regenerateError = null;
+  try {
+    env.fns.regenerateVirtualTemplateBalanceFromSession(session, 'current');
+  } catch (error) {
+    regenerateError = error;
+  }
+  assertEq(regenerateError && regenerateError.detailLines, expectedLines, 'Step17.补录重算时同样拦下');
+  assertEq(writtenFiles(), [], 'Step17.补录重算拦下前没有写出文件');
+}
+
 async function run() {
   console.log('==== 网银账单渠道与子模板 e2e 集成验证 ====');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stmt-channel-'));
@@ -970,6 +1030,7 @@ async function run() {
     verifyOutputNameConflictFileNameKey(dir);
     verifyLegacyBundleMultiLevelSkippedParent(dir);
     verifyMultiTemplateGenerationStaleState(dir);
+    verifyOutputPathConcatenationConflict(dir);
   } finally {
     openedDatabases.splice(0).forEach((database) => {
       try { database.close(); } catch (error) { console.error('关闭测试主库失败', error); }

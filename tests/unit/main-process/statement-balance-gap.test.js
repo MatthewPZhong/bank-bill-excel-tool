@@ -101,6 +101,23 @@ function loadOutputNameConflictFunctions(database = { listStatementOutputOwners:
   };
 }
 
+// 多组生成前核对各组实际输出文件名（输出名称拼上账号）不重复；这里的模板都不属于渠道。
+function loadOutputPathConflictFunctions(database = { getTemplate: () => null }) {
+  const { resolveGenerationGroupKey } = require('../../../src/main-process/statement-channel-identity');
+  return {
+    findGenerationGroupOutputPathConflicts: loadMainFunction(
+      'findGenerationGroupOutputPathConflicts',
+      ['database', 'normalizeCell', 'sanitizeFileName', 'resolveGenerationGroupKey'],
+      [database, normalizeCell, loadMainFunction('sanitizeFileName'), resolveGenerationGroupKey]
+    ),
+    buildStatementOutputPathConflictError: loadMainFunction(
+      'buildStatementOutputPathConflictError',
+      ['FileValidationError'],
+      [FileValidationError]
+    )
+  };
+}
+
 function createTempRoot(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-balance-gap-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -1114,7 +1131,8 @@ test('主进程：按文件名映射单模板组补录或不补录后重算，�
     'regenerateVirtualTemplateBalanceFromSession',
     ['getStatementSessionEntries', 'groupStatementEntriesForGeneration', 'getTemplateMappingConfig', 'appendActivityLogEntry', 'buildStatementGenerationConfig',
       'buildPreparedStatementBatchFromEntries', 'generateStatementFiles', 'parseRequiredBillDates',
-      'extractManualBalancePromptWarning', 'statementGenerationHelpers', 'path'],
+      'extractManualBalancePromptWarning', 'statementGenerationHelpers', 'path',
+      'findGenerationGroupOutputPathConflicts', 'buildStatementOutputPathConflictError'],
     [
       (_session, scope) => (scope === 'all' ? [history, current] : [current]),
       loadGroupingFunction(singleTemplateConfig),
@@ -1131,7 +1149,8 @@ test('主进程：按文件名映射单模板组补录或不补录后重算，�
       parseRequiredBillDates,
       generation.extractManualBalancePromptWarning,
       generation,
-      path
+      path,
+      ...Object.values(loadOutputPathConflictFunctions())
     ]
   );
 
@@ -1183,6 +1202,7 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
     const dependencies = {
       groupStatementEntriesForGeneration: loadGroupingFunction((tid) => ({ template: { id: tid, name: templateNameById.get(tid) } })),
       assertGenerationOutputNameUnique: () => {},
+      ...loadOutputPathConflictFunctions(),
       getEntryTemplateConfig: ({ entry }) => ({
         template: { name: templateNameById.get(entry.matchedTemplateId) },
         exportMappings: [{ templateField: 'MerchantId', mappedField: 'Account' }],
