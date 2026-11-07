@@ -1859,3 +1859,92 @@ test('大账号续跑沿用重复提示中确认覆盖的旧路径：跨目录�
     );
   }
 });
+
+// v3.2.15（release 审查）：标准入口（按文件名映射）进入大账号选择时，记住的顺序与本次导入文件无法逐个唯一对上、
+//   或对上后的顺序与记住的不同时，降级为不固定模式，界面不再按位置预填。
+function loadSavedOrderGuard({ mode, order, logs = [] }) {
+  const { matchImportFilesToSavedOrder } = require('../../../src/main-process/big-account-recognition');
+  const normalize = (value) => String(value == null ? '' : value).trim();
+  const resolveDecision = loadFunction(
+    'resolveSavedBigAccountOrderDecision',
+    ['readBigAccountMode', 'readBigAccountOrder', 'ensureStorageRoot', 'matchImportFilesToSavedOrder', 'normalizeCell'],
+    [() => mode, () => order, () => '/storage', matchImportFilesToSavedOrder, normalize]
+  );
+  return loadFunction(
+    'applySavedBigAccountOrderGuard',
+    ['resolveSavedBigAccountOrderDecision', 'appendActivityLogEntry', 'normalizeCell'],
+    [resolveDecision, (entry) => logs.push(entry), normalize]
+  );
+}
+
+function evidenceFile(fileName, merchantIds) {
+  return {
+    fileName,
+    rows: merchantIds.map((merchantId) => ({ merchantId, currency: 'CNY', accountKey: `${merchantId}\u0000CNY` }))
+  };
+}
+
+function savedOrder(fileAccounts, assignments) {
+  return {
+    assignments,
+    fileCount: fileAccounts.length,
+    files: fileAccounts.map((merchantIds, fileIndex) => ({
+      fileIndex,
+      accountCount: merchantIds.length,
+      accounts: merchantIds.map((merchantId) => ({ merchantId, currency: 'CNY' }))
+    }))
+  };
+}
+
+test('标准入口固定模式：同一多币种大账号的两份账单换了导入顺序时改为人工选择，不按位置预填币种', () => {
+  const logs = [];
+  const guard = loadSavedOrderGuard({
+    mode: 'fixed',
+    order: savedOrder([['7013'], ['7013']], [
+      { rowIndex: 0, merchantId: '7013', currency: 'CNY' },
+      { rowIndex: 1, merchantId: '7013', currency: 'USD' }
+    ]),
+    logs
+  });
+  const pendingContext = {
+    templateId: '__FILENAME_MAPPING__',
+    template: { name: '按文件名映射模板' },
+    bigAccountOrderEvidence: { files: [evidenceFile('USD-7013.xls', ['7013']), evidenceFile('CNY-7013.xls', ['7013'])] }
+  };
+  const result = guard({ previewOnly: false }, pendingContext, { status: 'select-big-account' });
+  assert.equal(result.forceMode, 'unfixed');
+  assert.equal(logs.length, 1);
+  assert.deepEqual(logs[0].details, ['模板名：按文件名映射模板', '涉及文件：USD-7013.xls、CNY-7013.xls']);
+  // 预检阶段同样降级，但不重复写活动日志。
+  const previewLogs = [];
+  const previewGuard = loadSavedOrderGuard({ mode: 'fixed', order: savedOrder([['7013'], ['7013']], [
+    { rowIndex: 0, merchantId: '7013', currency: 'CNY' },
+    { rowIndex: 1, merchantId: '7013', currency: 'USD' }
+  ]), logs: previewLogs });
+  assert.equal(previewGuard({ previewOnly: true }, pendingContext, { status: 'select-big-account' }).forceMode, 'unfixed');
+  assert.equal(previewLogs.length, 0);
+});
+
+test('标准入口固定模式：导入文件与记住的顺序逐个对上且顺序相同才保留预填，换序、个数不同、对不上都改为人工选择', () => {
+  const order = savedOrder([['A001'], ['B001']], [
+    { rowIndex: 0, merchantId: 'A001', currency: 'USD' },
+    { rowIndex: 1, merchantId: 'B001', currency: 'EUR' }
+  ]);
+  const contextOf = (...files) => ({ templateId: '__FILENAME_MAPPING__', template: { name: 't' }, bigAccountOrderEvidence: { files } });
+  const run = (mode, savedConfig, pendingContext) => loadSavedOrderGuard({ mode, order: savedConfig })(
+    { previewOnly: true }, pendingContext, { status: 'select-big-account' }
+  ).forceMode || null;
+  const same = contextOf(evidenceFile('a.xls', ['A001']), evidenceFile('b.xls', ['B001']));
+  assert.equal(run('fixed', order, same), null, '顺序相同');
+  assert.equal(run('fixed', order, contextOf(evidenceFile('b.xls', ['B001']), evidenceFile('a.xls', ['A001']))), 'unfixed', '换序');
+  assert.equal(run('fixed', order, contextOf(evidenceFile('a.xls', ['A001']))), 'unfixed', '文件个数不同');
+  assert.equal(run('fixed', order, contextOf(evidenceFile('a.xls', ['A001']), evidenceFile('c.xls', ['C001']))), 'unfixed', '对不上');
+  assert.equal(run('unfixed', order, contextOf(evidenceFile('b.xls', ['B001']), evidenceFile('a.xls', ['A001']))), null, '不固定模式不处理');
+  assert.equal(run('fixed', { assignments: order.assignments }, contextOf(evidenceFile('b.xls', ['B001']))), null, '没有文件信息的旧顺序沿用原行为');
+});
+
+test('标准入口（按文件名映射）进入大账号选择的两处都经过记住顺序核对', () => {
+  const source = functionSource('handleFilenameMappingImport');
+  assert.equal(source.match(/applySavedBigAccountOrderGuard\(prepared, pendingContext, buildBigAccountSelectionRequiredResult\(/g).length, 2);
+  assert.doesNotMatch(source, /return buildBigAccountSelectionRequiredResult\(/);
+});
