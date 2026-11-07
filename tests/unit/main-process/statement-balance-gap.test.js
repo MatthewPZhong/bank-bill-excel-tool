@@ -1181,8 +1181,8 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
     const lastGeneratedExports = { detail: null, balance: null, allDetail: null, allBalance: null };
     const imported = [];
     const dependencies = {
-      groupStatementEntriesForGeneration: loadGroupingFunction(() => null),
-      ...loadOutputNameConflictFunctions(),
+      groupStatementEntriesForGeneration: loadGroupingFunction((tid) => ({ template: { id: tid, name: templateNameById.get(tid) } })),
+      assertGenerationOutputNameUnique: () => {},
       getEntryTemplateConfig: ({ entry }) => ({
         template: { name: templateNameById.get(entry.matchedTemplateId) },
         exportMappings: [{ templateField: 'MerchantId', mappedField: 'Account' }],
