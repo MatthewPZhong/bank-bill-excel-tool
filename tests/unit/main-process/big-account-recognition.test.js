@@ -2,10 +2,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  findSavedOrderFileRowMismatches,
   matchImportFilesToSavedOrder,
   matchMerchantIds,
   normalizeMaintainedBigAccounts,
-  resolveRecognizedBigAccount
+  resolveRecognizedBigAccount,
+  resolveSavedOrderFileRows
 } = require('../../../src/main-process/big-account-recognition');
 
 test.describe('resolveRecognizedBigAccount', () => {
@@ -135,7 +137,8 @@ test.describe('matchImportFilesToSavedOrder', () => {
     assert.deepEqual(matchImportFilesToSavedOrder(importAccountLists, savedOrderConfig), {
       failedImportIndexes: [],
       ambiguousImportIndexes: [0, 1],
-      reorderedAssignments: []
+      reorderedAssignments: [],
+      savedIndexByImport: [0, 2, 1]
     });
   });
 
@@ -160,7 +163,8 @@ test.describe('matchImportFilesToSavedOrder', () => {
         { merchantId: 'FTN7013', currency: 'CNY', rowIndex: 0 },
         { merchantId: 'FTN7013', currency: 'CNY', rowIndex: 1 },
         { merchantId: 'NRA2268', currency: 'CNY', rowIndex: 2 }
-      ]
+      ],
+      savedIndexByImport: [0, 2, 1]
     });
   });
 
@@ -190,7 +194,8 @@ test.describe('matchImportFilesToSavedOrder', () => {
         { merchantId: 'NRA2268', currency: 'CNY', rowIndex: 0 },
         { merchantId: 'NRA6122', currency: 'USD', rowIndex: 1 },
         { merchantId: 'FTN7013', currency: 'USD', rowIndex: 2 }
-      ]
+      ],
+      savedIndexByImport: [1, 0]
     });
   });
 
@@ -209,7 +214,8 @@ test.describe('matchImportFilesToSavedOrder', () => {
     ], savedOrderConfig), {
       failedImportIndexes: [0],
       ambiguousImportIndexes: [],
-      reorderedAssignments: []
+      reorderedAssignments: [],
+      savedIndexByImport: [-1, 1]
     });
   });
 
@@ -220,7 +226,108 @@ test.describe('matchImportFilesToSavedOrder', () => {
     ), {
       failedImportIndexes: [],
       ambiguousImportIndexes: [],
-      reorderedAssignments: []
+      reorderedAssignments: [],
+      savedIndexByImport: [0]
     });
+  });
+});
+
+// v3.2.15（release 复审）：记住的顺序按位置逐块套用，块顺序、空段 / 未识别段位置都会改变每条分配落到哪一块。
+test.describe('记住顺序逐块核对', () => {
+  const assignment = (rowIndex, merchantId, currency) => ({ rowIndex, merchantId, currency });
+  const savedFileWithRows = (rowAccounts) => {
+    const accounts = rowAccounts.filter(Boolean).map((merchantId) => ({ merchantId, currency: 'CNY' }));
+    return { accountCount: accounts.length, accounts, rowAccounts };
+  };
+
+  test('同一文件里账号块换了顺序不算对上：记为失败，不按记住的块顺序挂反账号 / 币种（B65）', () => {
+    const savedOrderConfig = {
+      files: [savedFileWithRows(['A001', 'B001'])],
+      assignments: [assignment(0, 'A001', 'CNY'), assignment(1, 'B001', 'USD')]
+    };
+    assert.deepEqual(matchImportFilesToSavedOrder([[{ merchantId: 'B001' }, { merchantId: 'A001' }]], savedOrderConfig), {
+      failedImportIndexes: [0],
+      ambiguousImportIndexes: [],
+      reorderedAssignments: [],
+      savedIndexByImport: [-1]
+    });
+    assert.deepEqual(
+      matchImportFilesToSavedOrder([[{ merchantId: 'A001' }, { merchantId: 'B001' }]], savedOrderConfig).reorderedAssignments,
+      [assignment(0, 'A001', 'CNY'), assignment(1, 'B001', 'USD')]
+    );
+  });
+
+  test('含空段的记住顺序按逐块信息切分：同一文件原样再导入时取回该文件的全部分配', () => {
+    const savedOrderConfig = {
+      files: [savedFileWithRows(['', 'B001']), savedFileWithRows(['C001'])],
+      assignments: [assignment(0, 'A001', 'CNY'), assignment(1, 'B001', 'USD'), assignment(2, 'C001', 'EUR')]
+    };
+    const result = matchImportFilesToSavedOrder([[{ merchantId: 'C001' }], [{ merchantId: 'B001' }]], savedOrderConfig);
+    assert.deepEqual(result.savedIndexByImport, [1, 0]);
+    assert.deepEqual(result.reorderedAssignments, [
+      assignment(0, 'C001', 'EUR'),
+      assignment(1, 'A001', 'CNY'),
+      assignment(2, 'B001', 'USD')
+    ]);
+  });
+
+  test('空段占用的分配按识别个数切分会错位并掩盖同账号多币种歧义，按逐块切分能识别', () => {
+    const savedOrderConfig = {
+      files: [savedFileWithRows(['', '7013']), savedFileWithRows(['7013'])],
+      assignments: [assignment(0, '7013', 'CNY'), assignment(1, '7013', 'CNY'), assignment(2, '7013', 'USD')]
+    };
+    assert.deepEqual(
+      matchImportFilesToSavedOrder([[{ merchantId: '7013' }], [{ merchantId: '7013' }]], savedOrderConfig).ambiguousImportIndexes,
+      [0, 1]
+    );
+  });
+
+  test('同一文件里同一账号多个块记住了不同币种：块顺序决定币种，记为歧义；币种相同不算', () => {
+    const conflicting = {
+      files: [savedFileWithRows(['7013', '7013'])],
+      assignments: [assignment(0, '7013', 'CNY'), assignment(1, '7013', 'USD')]
+    };
+    const imported = [[{ merchantId: '7013' }, { merchantId: '7013' }]];
+    assert.deepEqual(matchImportFilesToSavedOrder(imported, conflicting).ambiguousImportIndexes, [0]);
+    assert.deepEqual(matchImportFilesToSavedOrder(imported, conflicting).reorderedAssignments, []);
+    const sameCurrency = {
+      files: [savedFileWithRows(['7013', '7013'])],
+      assignments: [assignment(0, '7013', 'CNY'), assignment(1, '7013', 'CNY')]
+    };
+    assert.deepEqual(matchImportFilesToSavedOrder(imported, sameCurrency).ambiguousImportIndexes, []);
+    // 旧数据无逐块信息时无法得知各块记住的币种，同一文件里账号重复即按歧义处理。
+    const legacy = {
+      files: [{ accountCount: 2, accounts: [{ merchantId: '7013' }, { merchantId: '7013' }] }],
+      assignments: [assignment(0, 'X001', 'CNY'), assignment(1, '7013', 'CNY'), assignment(2, '7013', 'CNY')]
+    };
+    assert.deepEqual(matchImportFilesToSavedOrder(imported, legacy).ambiguousImportIndexes, [0]);
+  });
+
+  test('逐块信息：新数据直接取 rowAccounts；旧数据仅在当时每块都识别到账号时可还原', () => {
+    assert.deepEqual(resolveSavedOrderFileRows({
+      files: [savedFileWithRows(['', 'B001'])],
+      assignments: [assignment(0, 'A001', 'CNY'), assignment(1, 'B001', 'USD')]
+    }), [['', 'B001']]);
+    const legacyFile = { accountCount: 1, accounts: [{ merchantId: 'B001', currency: 'CNY' }] };
+    assert.deepEqual(resolveSavedOrderFileRows({ files: [legacyFile], assignments: [assignment(0, 'B001', 'USD')] }), [['B001']]);
+    assert.equal(resolveSavedOrderFileRows({
+      files: [legacyFile],
+      assignments: [assignment(0, 'A001', 'CNY'), assignment(1, 'B001', 'USD')]
+    }), null, '旧数据含未识别段：无法还原各文件占用的分配');
+  });
+
+  test('按位置套用前逐块比对：空段位置变化、旧数据无法还原都视为对不上', () => {
+    const savedOrderConfig = {
+      files: [savedFileWithRows(['', 'B001']), savedFileWithRows(['C001'])],
+      assignments: [assignment(0, 'A001', 'CNY'), assignment(1, 'B001', 'USD'), assignment(2, 'C001', 'EUR')]
+    };
+    assert.deepEqual(findSavedOrderFileRowMismatches([['', 'B001'], ['C001']], savedOrderConfig, [0, 1]), []);
+    assert.deepEqual(findSavedOrderFileRowMismatches([['C001'], ['', 'B001']], savedOrderConfig, [1, 0]), []);
+    assert.deepEqual(findSavedOrderFileRowMismatches([['B001', ''], ['C001']], savedOrderConfig, [0, 1]), [0]);
+    assert.deepEqual(findSavedOrderFileRowMismatches([['', 'B001'], ['', 'C001']], savedOrderConfig, [0, 1]), [1]);
+    assert.deepEqual(findSavedOrderFileRowMismatches([['B001']], {
+      files: [{ accountCount: 1, accounts: [{ merchantId: 'B001' }] }],
+      assignments: [assignment(0, 'A001', 'CNY'), assignment(1, 'B001', 'USD')]
+    }, [0]), [0]);
   });
 });

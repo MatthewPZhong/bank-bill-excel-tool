@@ -1643,8 +1643,9 @@
           if (selectionClosed) return;
           currentMode = modeResult.mode || 'unfixed';
 
-          // forceMode 优先：文件个数不匹配时后端强制指定模式
-          if (payload?.forceMode === 'unfixed' || payload?.forceMode === 'fixed') {
+          // forceMode 优先：记住的顺序与本次文件对不上（文件个数、账号或账号块顺序不符、无法唯一对应）时后端强制指定模式
+          const savedOrderRejected = payload?.forceMode === 'unfixed' || payload?.forceMode === 'fixed';
+          if (savedOrderRejected) {
             currentMode = payload.forceMode;
           }
 
@@ -1652,7 +1653,8 @@
 
           const orderResult = await api.bigAccount.loadOrder(templateId);
           if (selectionClosed) return;
-          savedOrder = orderResult.order;
+          // 后端已判定记住的分配不能按位置套用到本次文件：之后手动切回固定模式也不预填，避免账号 / 币种填到别的文件或块上。
+          savedOrder = savedOrderRejected ? null : orderResult.order;
         } catch (_error) {}
         if (selectionClosed) return;
         syncModeUI();

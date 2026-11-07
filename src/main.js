@@ -756,6 +756,7 @@ const {
   showImportOpenDialog: showRememberedImportOpenDialog
 } = require('./main-process/import-dialog-state');
 const {
+  findSavedOrderFileRowMismatches,
   matchImportFilesToSavedOrder,
   matchMerchantIds,
   normalizeMaintainedBigAccounts,
@@ -12152,13 +12153,20 @@ function extractBigAccountOrderFromEvidence(pendingContext, mode, rowIndexes) {
   return result;
 }
 
-// v3.2.15（release 审查）：标准入口（按文件名映射）进入大账号选择时，固定模式下界面会按位置套用记住的顺序，
-//   而完成选择时服务端只核对账号、不核对币种。记住的顺序与本次导入文件无法逐个唯一对上（文件个数不同、匹配不上、
-//   同一多币种大账号的多份账单），或对上后的顺序与记住的不同时，按位置预填会把账号 / 币种填到别的文件上，
-//   因此降级为不固定模式由用户选择（同指定模板入口）。各文件识别到的账号取大账号顺序证据，与保存顺序同口径；
-//   没有文件信息的旧顺序无法核对，沿用原行为。
+// 大账号顺序证据里每份文件逐块（与固定模式预览行一一对应）识别到的账号，未识别为 ''；与保存顺序的 rowAccounts 同口径。
+function bigAccountOrderEvidenceRowLists(evidence) {
+  const files = evidence && Array.isArray(evidence.files) ? evidence.files : [];
+  return files.map((file) => (Array.isArray(file.rows) ? file.rows : [])
+    .map((row) => (row.accountKey !== '' ? normalizeCell(row.merchantId) : '')));
+}
+
+// v3.2.15（release 审查）：固定模式下界面按位置逐块套用记住的分配，而完成选择时服务端只核对账号、不核对币种。
+//   记住的顺序与本次导入文件无法按位置逐块对上时（文件个数不同、匹配不上、同一多币种大账号的多份账单或同一文件里
+//   同一账号多个币种、文件或账号块换序、空段 / 未识别段的位置变化），按位置套用会把账号 / 币种填到别的块上，
+//   因此降级为不固定模式由用户选择，界面也不再套用记住的分配（forceMode 存在即不预填）。
+//   各文件逐块识别到的账号取大账号顺序证据，与保存顺序同口径；没有文件信息的旧顺序无法核对，沿用原行为。
 function resolveSavedBigAccountOrderDecision(pendingContext) {
-  const keep = { forceUnfixed: false, ambiguousFileNames: [] };
+  const keep = { forceUnfixed: false, reason: '', fileNames: [] };
   const templateId = pendingContext && pendingContext.templateId;
   if (readBigAccountMode(ensureStorageRoot(), templateId) !== 'fixed') return keep;
   const savedOrderConfig = readBigAccountOrder(ensureStorageRoot(), templateId);
@@ -12167,38 +12175,55 @@ function resolveSavedBigAccountOrderDecision(pendingContext) {
   const evidenceFiles = pendingContext.bigAccountOrderEvidence && Array.isArray(pendingContext.bigAccountOrderEvidence.files)
     ? pendingContext.bigAccountOrderEvidence.files
     : [];
-  if (evidenceFiles.length !== savedOrderConfig.fileCount) return { forceUnfixed: true, ambiguousFileNames: [] };
-  const importAccountLists = evidenceFiles.map((file) => (Array.isArray(file.rows) ? file.rows : [])
-    .filter((row) => row.accountKey !== '')
-    .map((row) => ({ merchantId: row.merchantId })));
-  const { failedImportIndexes, ambiguousImportIndexes, reorderedAssignments } = matchImportFilesToSavedOrder(
-    importAccountLists,
+  const fileNamesOf = (indexes) => indexes.map((index) => evidenceFiles[index].fileName);
+  if (evidenceFiles.length !== savedOrderConfig.fileCount) return { forceUnfixed: true, reason: 'file-count', fileNames: [] };
+  const importRowLists = bigAccountOrderEvidenceRowLists(pendingContext.bigAccountOrderEvidence);
+  const { failedImportIndexes, ambiguousImportIndexes, savedIndexByImport } = matchImportFilesToSavedOrder(
+    importRowLists.map((rows) => rows.filter((merchantId) => merchantId !== '').map((merchantId) => ({ merchantId }))),
     savedOrderConfig
   );
-  const ambiguousFileNames = ambiguousImportIndexes.map((index) => evidenceFiles[index].fileName);
-  if (failedImportIndexes.length || ambiguousImportIndexes.length) return { forceUnfixed: true, ambiguousFileNames };
-  const assignmentKeys = (list) => list
-    .map((assignment) => `${normalizeCell(assignment.merchantId)}\u0000${normalizeCell(assignment.currency)}`)
-    .join('\u0001');
-  return {
-    forceUnfixed: assignmentKeys(reorderedAssignments) !== assignmentKeys(savedOrderConfig.assignments),
-    ambiguousFileNames: []
-  };
+  if (ambiguousImportIndexes.length) {
+    return { forceUnfixed: true, reason: 'ambiguous', fileNames: fileNamesOf(ambiguousImportIndexes) };
+  }
+  if (failedImportIndexes.length) return { forceUnfixed: true, reason: 'mismatch', fileNames: fileNamesOf(failedImportIndexes) };
+  // 界面按位置套用：本次第 i 份文件须对上记住的第 i 份，且逐块识别结果一致（不比较拼接后的分配，空段不会造成误降级）。
+  const reorderedIndexes = savedIndexByImport
+    .map((savedIndex, importIndex) => (savedIndex === importIndex ? -1 : importIndex))
+    .filter((importIndex) => importIndex >= 0);
+  if (reorderedIndexes.length) return { forceUnfixed: true, reason: 'reordered', fileNames: fileNamesOf(reorderedIndexes) };
+  const rowMismatches = findSavedOrderFileRowMismatches(importRowLists, savedOrderConfig, savedIndexByImport);
+  if (rowMismatches.length) return { forceUnfixed: true, reason: 'rows', fileNames: fileNamesOf(rowMismatches) };
+  return keep;
 }
 
-function applySavedBigAccountOrderGuard(prepared, pendingContext, selectionRequired) {
+const SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS = Object.freeze({
+  'file-count': '本次导入的文件个数与记住的不同',
+  mismatch: '部分文件的账户个数、账户号或账号块顺序与记住的对不上',
+  reordered: '文件顺序与记住的不同',
+  rows: '部分文件的账号块（含无交易的空段）与记住的对不上'
+});
+
+// 降级在预检阶段做出：常规导入预检返回大账号选择后直接转入完成选择，不会再以非预检方式运行到这里，
+// 因此日志不区分预检；同一次导入只会判定一次。
+function logSavedBigAccountOrderDowngrade(templateName, decision) {
+  const ambiguous = decision.reason === 'ambiguous';
+  appendActivityLogEntry({
+    level: 'info',
+    message: ambiguous
+      ? '已记住的大账号顺序无法唯一确定部分文件的账号 / 币种，改为人工选择'
+      : '已记住的大账号顺序与本次导入文件对不上，改为人工选择',
+    details: [
+      `模板名：${normalizeCell(templateName) || 'N/A'}`,
+      ...(ambiguous ? [] : [`原因：${SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS[decision.reason] || decision.reason}`]),
+      ...(decision.fileNames.length ? [`涉及文件：${decision.fileNames.join('、')}`] : [])
+    ]
+  });
+}
+
+function applySavedBigAccountOrderGuard(_prepared, pendingContext, selectionRequired) {
   const decision = resolveSavedBigAccountOrderDecision(pendingContext);
   if (!decision.forceUnfixed) return selectionRequired;
-  if (decision.ambiguousFileNames.length && !(prepared && prepared.previewOnly)) {
-    appendActivityLogEntry({
-      level: 'info',
-      message: '已记住的大账号顺序无法唯一确定部分文件的账号 / 币种，改为人工选择',
-      details: [
-        `模板名：${normalizeCell(pendingContext.template && pendingContext.template.name) || 'N/A'}`,
-        `涉及文件：${decision.ambiguousFileNames.join('、')}`
-      ]
-    });
-  }
+  logSavedBigAccountOrderDowngrade(pendingContext.template && pendingContext.template.name, decision);
   return { ...selectionRequired, forceMode: 'unfixed' };
 }
 
@@ -12214,7 +12239,9 @@ function buildBigAccountOrderData(pendingContext, assignments = []) {
       const accounts = file.rows
         .filter((row) => row.accountKey !== '')
         .map((row) => ({ merchantId: row.merchantId, currency: row.currency }));
-      return { fileIndex: file.fileOrdinal, accountCount: accounts.length, accounts };
+      // 逐块识别账号与 assignments 一一对应（含空段 / 未识别段），供下次按块核对能否按位置套用。
+      const rowAccounts = file.rows.map((row) => (row.accountKey !== '' ? row.merchantId : ''));
+      return { fileIndex: file.fileOrdinal, accountCount: accounts.length, accounts, rowAccounts };
     })
   };
 }
@@ -13173,30 +13200,29 @@ function registerFileHandlers() {
                 const {
                   failedImportIndexes,
                   ambiguousImportIndexes,
-                  reorderedAssignments
+                  reorderedAssignments,
+                  savedIndexByImport
                 } = matchImportFilesToSavedOrder(importAccountLists, savedOrderConfig);
                 const importFileName = (index) => path.basename(provisionalFileEntries[index].filePath);
                 return {
                   failedFileNames: failedImportIndexes.map(importFileName),
                   ambiguousFileNames: ambiguousImportIndexes.map(importFileName),
-                  reorderedAssignments
+                  reorderedAssignments,
+                  savedIndexByImport
                 };
               }
             );
-            const { failedFileNames, ambiguousFileNames, reorderedAssignments } = autoMatchDecision;
+            const { failedFileNames, ambiguousFileNames, reorderedAssignments, savedIndexByImport } = autoMatchDecision;
 
             // 记住的顺序无法唯一对应导入文件时（如同一多币种大账号的多份账单）不自动套用，降级为不固定模式由用户确认；
             // 匹配不上的文件仍走下方“记住顺序不匹配”提示。
             if (failedFileNames.length === 0 && ambiguousFileNames.length > 0) {
               forceUnfixedMode = true;
-              if (!prepared.previewOnly) {
-                appendActivityLogEntry({
-                  level: 'info',
-                  message: '已记住的大账号顺序无法唯一确定部分文件的账号 / 币种，改为人工选择',
-                  details: [
-                    `模板名：${normalizeCell(templateConfig.template.name) || 'N/A'}`,
-                    `涉及文件：${ambiguousFileNames.join('、')}`
-                  ]
+              // 常规导入在预检阶段即返回大账号选择，日志须在预检时写（判定按 prepared 缓存，同一次导入只写一次）。
+              if (prepared.previewOnly || !Object.hasOwn(prepared, 'fixedBigAccountAutoMatchDecision')) {
+                logSavedBigAccountOrderDowngrade(templateConfig.template.name, {
+                  reason: 'ambiguous',
+                  fileNames: ambiguousFileNames
                 });
               }
             }
@@ -13217,10 +13243,17 @@ function registerFileHandlers() {
                 rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true }),
               });
 
+              // 重排后按位置逐块套用：每份文件逐块识别结果须与对上的记住文件一致（空段 / 未识别段位置、
+              // 旧数据无法还原逐块信息时不自动套用，转人工选择，由下方选择结果的顺序核对降级）。
+              const rowMismatches = findSavedOrderFileRowMismatches(
+                bigAccountOrderEvidenceRowLists(pendingContext.bigAccountOrderEvidence),
+                savedOrderConfig,
+                savedIndexByImport
+              );
               const autoResult = prepared.previewOnly
                 ? null
                 : await ipcMain.emit('__internal-complete-big-account-selection__') || null;
-              if (!autoResult) {
+              if (!autoResult && rowMismatches.length === 0) {
                 try {
                   const directResult = await (async () => {
                     const isFixedMode = true;
@@ -13398,7 +13431,7 @@ function registerFileHandlers() {
 
         const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
 
-        stagePendingBigAccountSelection(prepared, {
+        const pendingContext = stagePendingBigAccountSelection(prepared, {
           templateId,
           template: templateConfig.template,
           mappings: templateConfig.exportMappings,
@@ -13419,8 +13452,11 @@ function registerFileHandlers() {
         });
         if (forceUnfixedMode) {
           selectionRequired.forceMode = 'unfixed';
+          return selectionRequired;
         }
-        return selectionRequired;
+        // 固定模式未能自动套用（重排后逐块对不上、币种不可用等）而进入人工选择时，界面会按位置预填记住的分配，
+        // 与标准入口同样按位置逐块核对，对不上就降级。
+        return applySavedBigAccountOrderGuard(prepared, pendingContext, selectionRequired);
       }
 
       if (isMerchantIdSelfInput && bigAccountOptions.length <= 1) {
