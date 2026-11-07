@@ -27,7 +27,7 @@ function load(name) {
 for (const name of ['findBigAccountMatchInRows', 'identifyAccountsFromRecognitionBasis',
   'findSelfInputBigAccountBridge', 'selectPendingBigAccountRows', 'identifyAccountBlocks',
   'findHeaderRowNumbersInRawRows', 'buildBigAccountRecognitionBasis',
-  'finalizeBigAccountRecognitionBasis', 'buildBigAccountSelectionRows']) deps[name] = load(name);
+  'finalizeBigAccountRecognitionBasis', 'buildBigAccountSelectionRows', 'bigAccountBlockHasTransactions']) deps[name] = load(name);
 const build = load('buildBigAccountOrderEvidence');
 const extract = load('extractBigAccountOrderFromEvidence');
 

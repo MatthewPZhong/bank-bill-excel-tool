@@ -11972,6 +11972,26 @@ function findSelfInputBigAccountBridge(recognitionBasis, expandedOptions, blockO
   return null;
 }
 
+// 大账号预览行对应的块里有没有交易（收入或支出非空的行），按块实际包含的明细行判断：
+//   没有分段的文件整份是一块，起止不经裁剪，只有表头时也是 [0, 0]，不能只看起止。
+//   明细没有收入 / 支出列时无法判断，返回 null（按有交易处理）。
+function bigAccountBlockHasTransactions(detailRows, startIndex, endIndex) {
+  const headerRow = Array.isArray(detailRows) && Array.isArray(detailRows[0]) ? detailRows[0] : [];
+  const amountIndexes = ['Credit Amount', 'Debit Amount']
+    .map((field) => headerRow.indexOf(field))
+    .filter((index) => index >= 0);
+  if (!amountIndexes.length) return null;
+  const start = Number(startIndex);
+  const end = Number(endIndex);
+  if (!Number.isInteger(start) || !Number.isInteger(end)) return null;
+  const dataRows = detailRows.slice(1);
+  for (let index = Math.max(0, start); index <= end && index < dataRows.length; index += 1) {
+    const row = dataRows[index];
+    if (Array.isArray(row) && amountIndexes.some((amountIndex) => normalizeCell(row[amountIndex]) !== '')) return true;
+  }
+  return false;
+}
+
 function buildBigAccountOrderEvidence(pendingContext) {
   const fileEntries = Array.isArray(pendingContext.fileEntries) ? pendingContext.fileEntries : [];
   const allMerchantIds = (pendingContext.bigAccounts || [])
@@ -12045,10 +12065,12 @@ function buildBigAccountOrderEvidence(pendingContext) {
       ).size > 1
         ? 'MULTI_CURRENCY'
         : null;
-      // 无交易空段：固定模式预览行的块起止为空区间。区分空段与“有交易但未识别账号”的块，
-      // 记住顺序时据此核对未识别块的位置是否变化。
-      const blockStart = Number(previewRow.blockStartIndex);
-      const blockEnd = Number(previewRow.blockEndIndex);
+      // 区分无交易空段与“有交易但未识别账号”的块，记住顺序时据此核对未识别块的位置是否变化。
+      const hasTransactions = bigAccountBlockHasTransactions(
+        entry.detailRows,
+        previewRow.blockStartIndex,
+        previewRow.blockEndIndex
+      );
       return Object.freeze({
         blockOrdinal,
         sourceRow,
@@ -12057,7 +12079,7 @@ function buildBigAccountOrderEvidence(pendingContext) {
         matchKind: identified ? identified.matchType : '',
         accountKey: merchantId ? `${merchantId}\u0000${currency}` : '',
         ambiguityCode,
-        empty: Number.isInteger(blockStart) && Number.isInteger(blockEnd) ? blockStart > blockEnd : null
+        empty: typeof hasTransactions === 'boolean' ? !hasTransactions : null
       });
     });
     return Object.freeze({
