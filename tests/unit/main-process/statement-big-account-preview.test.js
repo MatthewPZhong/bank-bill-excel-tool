@@ -2087,6 +2087,12 @@ function loadDesignatedImportExecute({ templateConfig, mode, order, logs }) {
     ensureStorageRoot: () => '/storage',
     appendActivityLogEntry: (entry) => logs.push(entry),
     createErrorResult: (payload) => ({ status: 'error', ...payload }),
+    createPreflightErrorResult: (payload) => ({ status: 'error', ...payload }),
+    FileValidationError: require('../../../src/backend/file-service').FileValidationError,
+    STATEMENT_SOURCE_FRESHNESS_FAILURE: Object.freeze({ code: 'STATEMENT_SOURCE_FRESHNESS_FAILURE', message: '源文件已变化' }),
+    // 合入渠道后，指定模板导入在大账号流程前还核对库里的输出名称；本测试的模板无同名所有者，直接放行。
+    findGenerationGroupOutputNameConflicts: () => null,
+    resolveGenerationGroupKey: (template) => `template:${template.id}`,
     MERCHANT_ID_SELF_INPUT_OPTION: constValue('MERCHANT_ID_SELF_INPUT_OPTION'),
     STATEMENT_IMPORT_PREVIEW_READY: constValue('STATEMENT_IMPORT_PREVIEW_READY'),
     SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS: constValue('SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS')
