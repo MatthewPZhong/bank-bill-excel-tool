@@ -8653,8 +8653,8 @@ function buildLegacyBundleChannelRestore(importedTemplateRecords, importedTempla
     if (record.entry.templateKey) byKey.set(record.entry.templateKey, record);
   });
   const packagedKeys = new Set(importedTemplates.map((entry) => entry && entry.templateKey).filter(Boolean));
-  // 父模板在包内但被跳过的成功模板，按最终归属分两类写日志：按普通模板导入的，以及自身仍是主模板或被成功的子模板引用、
-  //   以自己的名称组成渠道的（多层旧包，release/v3.2.15 复审）。
+  // 父模板在包内但被跳过的成功模板，按最终归属分两类写日志：按普通模板导入的，以及最终仍归入渠道的（自身仍是主模板、
+  //   被成功的子模板引用，或手工合并的包里另一条把它归入别的渠道），后者带上最终渠道名（release/v3.2.15 复审）。
   const parentSkippedRecords = [];
   const resolveParent = (record) => {
     const parentKey = record.entry.parentTemplateKey;
@@ -8717,7 +8717,9 @@ function buildLegacyBundleChannelRestore(importedTemplateRecords, importedTempla
   parentSkippedRecords.forEach((record) => {
     if (loggedTemplateIds.has(record.template.id)) return;
     loggedTemplateIds.add(record.template.id);
-    (finalChannelByTemplateId.get(record.template.id) ? regroupedTemplateNames : orphanedTemplateNames).push(record.template.name);
+    const finalChannelName = finalChannelByTemplateId.get(record.template.id);
+    if (finalChannelName) regroupedTemplateNames.push(`${record.template.name}（渠道「${finalChannelName}」）`);
+    else orphanedTemplateNames.push(record.template.name);
   });
   return { channels: [], legacyChannelSources, assignments, orphanedTemplateNames, regroupedTemplateNames };
 }
@@ -9663,7 +9665,7 @@ function registerTemplateHandlers() {
             ? [`父模板在包内被跳过、按普通模板导入的子模板：${channelRestore.orphanedTemplateNames.join('、')}`]
             : []),
           ...(channelRestore.regroupedTemplateNames && channelRestore.regroupedTemplateNames.length
-            ? [`父模板在包内被跳过、以自身名称组成渠道的模板：${channelRestore.regroupedTemplateNames.join('、')}`]
+            ? [`父模板在包内被跳过、仍归入渠道的模板：${channelRestore.regroupedTemplateNames.join('、')}`]
             : []),
           ...(restoreResult.conflictCount > 0 ? [`待处理的渠道账户映射冲突：${restoreResult.conflictCount} 个账户号`] : [])
         ]
@@ -10835,13 +10837,16 @@ function buildStatementOutputNameConflictError(detailLines) {
 // v3.2.15（release 复审）：每次生成前按本次实际使用的模板配置再核对一次。导入预检、大账号选择、补录确认等
 //   等待期间模板或渠道可能被改名，生成时用的仍是之前记下的配置。身份取库里模板当前的归属（导入后移入渠道的模板
 //   不与自己的渠道冲突），名称取本次实际写盘用的配置。虚拟模板（按文件名映射）不是库里的所有者，跳过。
-function assertGenerationOutputNameUnique(template) {
-  const templateId = Number(template && template.id);
-  if (!(templateId > 0)) return;
-  const current = database.getTemplate(templateId);
-  const conflicts = findGenerationGroupOutputNameConflicts([
-    { key: resolveGenerationGroupKey(current || template), templateConfig: { template } }
-  ]);
+//   可一次传入多个模板（多模板生成整批核对）。
+function assertGenerationOutputNameUnique(templates) {
+  const owners = (Array.isArray(templates) ? templates : [templates]).map((template) => {
+    const templateId = Number(template && template.id);
+    if (!(templateId > 0)) return null;
+    const current = database.getTemplate(templateId);
+    return { key: resolveGenerationGroupKey(current || template), templateConfig: { template } };
+  }).filter(Boolean);
+  if (!owners.length) return;
+  const conflicts = findGenerationGroupOutputNameConflicts(owners);
   if (conflicts) throw buildStatementOutputNameConflictError(conflicts);
 }
 
@@ -10954,6 +10959,19 @@ function generateMultiTemplateGroupFiles({
   // v3.2.15（T4）：按渠道 / 模板分组；渠道内各文件合为一份明细、一条余额链。
   const generationGroups = groupStatementEntriesForGeneration(fileEntries);
 
+  // v3.2.15（release 复审）：预检后、生成前模板被删除时整批拦下。否则该组按首模板的配置生成，
+  //   与首模板组写到同一个文件，汇总时一组数据丢失、另一组重复，导入仍显示成功。
+  const deletedTemplateGroups = generationGroups.filter((group) => (
+    !group.templateConfig && group.templateIds.some((templateId) => Number(templateId) > 0)
+  ));
+  if (deletedTemplateGroups.length) {
+    throw new FileValidationError('TEMPLATE_NOT_FOUND', '导入期间有模板已被删除，请重新导入文件', {
+      detailLines: deletedTemplateGroups.flatMap((group) => group.entries.map((entry) => (
+        `文件：${path.basename(String(entry.filePath || ''))}（模板 ID：${Number(entry.matchedTemplateId) || ''}）`
+      )))
+    });
+  }
+
   let lastBatchId = null;
   let lastGenerationTemplateConfig = null;
   const allDetailPaths = [];
@@ -11013,9 +11031,10 @@ function generateMultiTemplateGroupFiles({
   }
 
   // 所有组先完成 source-stable 解析，再进入 session/输出副作用。
-  // v3.2.15（release 复审）：进入副作用前整批核对输出名称（预检后配置可能已变化），避免前几组已写出、后一组才被拦下。
-  const outputNameConflicts = findGenerationGroupOutputNameConflicts(generationGroups);
-  if (outputNameConflicts) throw buildStatementOutputNameConflictError(outputNameConflicts);
+  // v3.2.15（release 复审）：进入副作用前，按各组实际生成用的配置整批核对输出名称。等待确认期间配置可能已变化，
+  //   而组配置可能取自之前记下的配置（getEntryTemplateConfig 的 fallback），不能按库里当前配置核对；
+  //   避免先改了会话（替换旧文件）、前几组已写出，后一组才被拦下。
+  assertGenerationOutputNameUnique(groupPlans.map((plan) => plan.groupTemplateConfig && plan.groupTemplateConfig.template));
   if (Array.isArray(replacePaths)) {
     replacePaths.forEach((filePath) => {
       removeStatementSessionEntriesByFilePath(session, filePath);

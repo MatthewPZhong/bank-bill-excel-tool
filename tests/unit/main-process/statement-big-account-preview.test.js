@@ -1115,11 +1115,11 @@ test('filename 多模板先完成全部稳定读取，再产生输出或 session
   let outputCount = 0;
   let sessionMutationCount = 0;
   const { resolveGenerationGroupKey } = require('../../../src/main-process/statement-channel-identity');
-  // v3.2.15：生成分组改为按渠道 / 模板；这里的模板都不属于渠道，按模板各自成组。
+  // v3.2.15：生成分组改为按渠道 / 模板；这里的模板都不属于渠道，按模板各自成组（模板都存在）。
   const groupStatementEntriesForGeneration = loadFunction(
     'groupStatementEntriesForGeneration',
     ['database', 'resolveGenerationGroupKey', 'getTemplateMappingConfig'],
-    [{ getTemplate: (id) => ({ id, channelId: null }) }, resolveGenerationGroupKey, () => null]
+    [{ getTemplate: (id) => ({ id, channelId: null }) }, resolveGenerationGroupKey, (id) => ({ template: { id }, exportMappings: [], exportTargetFields: [] })]
   );
   const generateGroups = loadFunction(
     'generateMultiTemplateGroupFiles',

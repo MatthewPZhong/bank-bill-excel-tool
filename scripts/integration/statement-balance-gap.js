@@ -130,14 +130,24 @@ function loadGroupingFunction(getTemplateMappingConfig) {
 // v3.2.15：多模板生成进入副作用前核对各组输出名称；本脚本的模板各不同名、库里没有渠道，用真实函数确认直接放行。
 function loadOutputNameConflictFunctions(templateNames) {
   const owners = { templates: Object.entries(templateNames).map(([id, name]) => ({ id: Number(id), name })), channels: [] };
+  const database = {
+    listStatementOutputOwners: () => owners,
+    getTemplate: (id) => ({ id: Number(id), name: templateNames[id], channelId: null })
+  };
+  const findGenerationGroupOutputNameConflicts = loadMainFunction('findGenerationGroupOutputNameConflicts', {
+    database,
+    resolveStatementOutputName,
+    normalizeCell,
+    sanitizeFileName: loadMainFunction('sanitizeFileName')
+  });
+  const buildStatementOutputNameConflictError = loadMainFunction('buildStatementOutputNameConflictError', { FileValidationError });
   return {
-    findGenerationGroupOutputNameConflicts: loadMainFunction('findGenerationGroupOutputNameConflicts', {
-      database: { listStatementOutputOwners: () => owners },
-      resolveStatementOutputName,
-      normalizeCell,
-      sanitizeFileName: loadMainFunction('sanitizeFileName')
-    }),
-    buildStatementOutputNameConflictError: loadMainFunction('buildStatementOutputNameConflictError', { FileValidationError })
+    assertGenerationOutputNameUnique: loadMainFunction('assertGenerationOutputNameUnique', {
+      database,
+      resolveGenerationGroupKey,
+      findGenerationGroupOutputNameConflicts,
+      buildStatementOutputNameConflictError
+    })
   };
 }
 

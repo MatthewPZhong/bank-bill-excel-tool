@@ -202,6 +202,7 @@ function createEnvironment(dir, label) {
     writeWorkbookRows
   });
 
+  const removedSessionPaths = [];
   const mainDeps = {
     database,
     getTemplateMappingConfig,
@@ -237,7 +238,7 @@ function createEnvironment(dir, label) {
     resolveTemplateBalanceMode: channelIdentity.resolveTemplateBalanceMode,
     findBalanceModeMismatch: channelIdentity.findBalanceModeMismatch,
     buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
-    removeStatementSessionEntriesByFilePath: () => {},
+    removeStatementSessionEntriesByFilePath: (_session, filePath) => { removedSessionPaths.push(filePath); },
     generateStatementFiles: generation.generateStatementFiles,
     parseRequiredBillDates,
     buildDateRangeLabel,
@@ -281,6 +282,7 @@ function createEnvironment(dir, label) {
     'findSaveMappingsBalanceModeMismatch',
     'findGenerationGroupOutputNameConflicts',
     'buildStatementOutputNameConflictError',
+    'assertGenerationOutputNameUnique',
     'normalizeBundleAccountMappings',
     'buildBundleV5ChannelRestore',
     'buildLegacyBundleChannelRestore',
@@ -334,6 +336,7 @@ function createEnvironment(dir, label) {
   return {
     database,
     storageRoot,
+    removedSessionPaths,
     fns,
     generation,
     acknowledgedKeys,
@@ -861,7 +864,7 @@ function verifyLegacyBundleMultiLevelSkippedParent(dir) {
   };
   assertEq([a, b, c, d].map(channelNameOf), [null, '层级-B', '层级-B', null], 'Step15.B 与 C 组成渠道「B」，A 不变、D 按普通模板导入');
   assertEq(channelRestore.orphanedTemplateNames, ['层级-D'], 'Step15.只把最终按普通模板导入的 D 记为普通模板');
-  assertEq(channelRestore.regroupedTemplateNames, ['层级-B'], 'Step15.B 记为以自身名称组成渠道');
+  assertEq(channelRestore.regroupedTemplateNames, ['层级-B（渠道「层级-B」）'], 'Step15.B 记为仍归入渠道，带最终渠道名');
 
   // 手工合并的包里同一模板出现两次：第一条的父模板被跳过，第二条自身是主模板。归属以最后一条为准，日志按最终归属列一次。
   const env2 = createEnvironment(dir, 'step15-dup');
@@ -877,7 +880,75 @@ function verifyLegacyBundleMultiLevelSkippedParent(dir) {
   }).channelRestore;
   const b2ChannelId = env2.database.getTemplate(b2.id).channelId;
   assertEq(b2ChannelId ? env2.database.getStatementChannel(b2ChannelId).name : null, '重复-B', 'Step15.重复条目按最后一条归入渠道「B」');
-  assertEq([dup.orphanedTemplateNames, dup.regroupedTemplateNames], [[], ['重复-B']], 'Step15.重复条目的日志按最终归属只列一次');
+  assertEq([dup.orphanedTemplateNames, dup.regroupedTemplateNames], [[], ['重复-B（渠道「重复-B」）']], 'Step15.重复条目的日志按最终归属只列一次');
+
+  // 重复条目最后一条把 B 归入另一个成功主模板 C 的渠道：日志写最终渠道「C」，不说 B 以自身名称组成渠道。
+  const env3 = createEnvironment(dir, 'step15-other');
+  const [a3, b3, c3] = ['另归-A', '另归-B', '另归-C'].map((name) => env3.defineTemplate(name, 'A'));
+  const otherEntries = [entryOf2(a3, null, true), entryOf2(b3, a3, false), entryOf2(b3, c3, false), entryOf2(c3, null, true)];
+  const other = env3.fns.restoreBundleFollowUpRounds({
+    importedTemplates: otherEntries,
+    succeededEntries: new Set(otherEntries.slice(1)),
+    importedBundleVersion: 4,
+    importedChannels: []
+  }).channelRestore;
+  const b3ChannelId = env3.database.getTemplate(b3.id).channelId;
+  assertEq(b3ChannelId ? env3.database.getStatementChannel(b3ChannelId).name : null, '另归-C', 'Step15.B 最终归入渠道「C」');
+  assertEq([other.orphanedTemplateNames, other.regroupedTemplateNames], [[], ['另归-B（渠道「另归-C」）']], 'Step15.日志写出最终渠道「C」');
+}
+
+// ⑯ release/v3.2.15 复审：多模板生成在预检之后、生成之前，
+//    （1）有模板被删除：整批拦下，不改会话、不写文件（否则该组按首模板配置生成，与首模板组写到同一文件）；
+//    （2）组配置取自之前记下的配置（fallback）而模板已改名、旧名被渠道占用：按实际生成用的配置核对，在替换会话旧文件之前拦下。
+function verifyMultiTemplateGenerationStaleState(dir) {
+  const env = createEnvironment(dir, 'step16');
+  const fileA = path.join(dir, 'step16-a.xlsx');
+  const fileB = path.join(dir, 'step16-b.xlsx');
+  writeSource(fileA, 'A', [['2026-09-01', 'M001', 'USD', '10', '']]);
+  writeSource(fileB, 'A', [['2026-09-01', 'M002', 'USD', '20', '']]);
+  const templateA = env.defineTemplate('多组-A', 'A');
+  const templateB = env.defineTemplate('多组-B', 'A');
+  const entries = [env.entryFor(templateA, fileA), env.entryFor(templateB, fileB)];
+  const exportsDir = path.join(env.storageRoot, 'exports');
+  const writtenFiles = () => (fs.existsSync(exportsDir)
+    ? fs.readdirSync(exportsDir, { recursive: true }).filter((name) => String(name).endsWith('.xlsx')) : []);
+  const runGeneration = (fallbackTemplateConfig) => {
+    try {
+      env.fns.generateMultiTemplateGroupFiles({
+        fileEntries: entries,
+        fallbackTemplateConfig,
+        selectedBigAccount: null,
+        reuseMappedRows: true,
+        session: { key: 'session' },
+        replacePaths: ['/old/replaced.xlsx'],
+        inputFilePaths: [fileA, fileB]
+      });
+      return null;
+    } catch (error) {
+      return error;
+    }
+  };
+
+  // （2）先做：A 的旧配置（名称「BANK-SG」）被记下后，A 改名、旧名被只差大小写的渠道占用。
+  env.database.renameTemplate(templateA.id, 'BANK-SG');
+  const staleConfigA = env.getTemplateMappingConfig(templateA.id);
+  env.database.renameTemplate(templateA.id, '多组-A-新');
+  const holder = env.defineTemplate('占位-渠道', 'A');
+  const holderChannelId = env.saveWithChannel(holder, { mode: 'create' }).channelId;
+  env.database.renameStatementChannel(holderChannelId, 'bank-sg');
+  const staleError = runGeneration(staleConfigA);
+  assertEq(staleError && staleError.code, 'STATEMENT_OUTPUT_NAME_CONFLICT', 'Step16.按实际生成用的旧配置核对出同名');
+  assertEq(staleError && staleError.detailLines, ['输出名称「BANK-SG」：模板「BANK-SG」、渠道「bank-sg」'], 'Step16.冲突明细为旧配置名称与渠道');
+  assertEq(env.removedSessionPaths, [], 'Step16.拦下前没有替换会话里的旧文件');
+  assertEq(writtenFiles(), [], 'Step16.拦下前没有写出文件');
+
+  // （1）删除 B：整批拦下。
+  env.database.deleteTemplate(templateB.id);
+  const deletedError = runGeneration(env.getTemplateMappingConfig(templateA.id));
+  assertEq(deletedError && deletedError.code, 'TEMPLATE_NOT_FOUND', 'Step16.有模板被删除时整批拦下');
+  assertEq(deletedError && deletedError.detailLines, [`文件：step16-b.xlsx（模板 ID：${templateB.id}）`], 'Step16.明细列出被删除模板的文件');
+  assertEq(env.removedSessionPaths, [], 'Step16.删除拦下时没有替换会话里的旧文件');
+  assertEq(writtenFiles(), [], 'Step16.删除拦下时没有写出文件');
 }
 
 async function run() {
@@ -898,6 +969,7 @@ async function run() {
     verifyLegacyBundleSkippedParent(dir);
     verifyOutputNameConflictFileNameKey(dir);
     verifyLegacyBundleMultiLevelSkippedParent(dir);
+    verifyMultiTemplateGenerationStaleState(dir);
   } finally {
     openedDatabases.splice(0).forEach((database) => {
       try { database.close(); } catch (error) { console.error('关闭测试主库失败', error); }
