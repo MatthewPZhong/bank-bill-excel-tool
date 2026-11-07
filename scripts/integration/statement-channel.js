@@ -206,6 +206,7 @@ function createEnvironment(dir, label) {
     database,
     getTemplateMappingConfig,
     normalizeCell,
+    sanitizeFileName,
     splitTemplateName,
     FileValidationError,
     FIXED_FIELD_VALUE_PREFIX: FIXED,
@@ -781,6 +782,71 @@ function verifyLegacyBundleSkippedParent(dir) {
   assertEq(env.database.listStatementChannels().length, 0, 'Step13.库里没有渠道');
 }
 
+// ⑭ release/v3.2.15 复审：同名核对按实际写盘文件名的口径（非法字符替换、内部空白合并、去首尾空格、不区分大小写），
+//    并核对库里所有同名的输出所有者（同类与异类都算），名称相近的两方分两批导入也阻断；同一渠道的多个子模板不算冲突。
+function verifyOutputNameConflictFileNameKey(dir) {
+  const env = createEnvironment(dir, 'step14');
+  const fileA = path.join(dir, 'step14-a.xlsx');
+  writeSource(fileA, 'A', [['2026-09-01', 'M001', 'USD', '10', '']]);
+  const batchOf = (...templates) => env.fns.groupStatementEntriesForGeneration(
+    templates.map((template) => env.entryFor(env.database.getTemplate(template.id), fileA))
+  );
+  const conflicts = (batch) => env.fns.findGenerationGroupOutputNameConflicts(batch);
+  const doubleSpace = env.defineTemplate('ACME  BANK-SG', 'A');
+  const other = env.defineTemplate('ACME BANK-SG', 'A');
+  assertEq(conflicts(batchOf(doubleSpace)), ['输出名称「ACME  BANK-SG」：模板「ACME  BANK-SG」、模板「ACME BANK-SG」'],
+    'Step14.内部多一个空格的两个普通模板：分批导入也阻断');
+  assertEq(conflicts(batchOf(other)), ['输出名称「ACME BANK-SG」：模板「ACME BANK-SG」、模板「ACME  BANK-SG」'],
+    'Step14.内部多一个空格的两个普通模板：另一方单独导入同样阻断');
+  env.database.renameTemplate(other.id, 'ACME\u3000BANK-SG');
+  assertEq(conflicts(batchOf(doubleSpace)), ['输出名称「ACME  BANK-SG」：模板「ACME  BANK-SG」、模板「ACME\u3000BANK-SG」'],
+    'Step14.内部全角空格与半角空格视为同名');
+  env.database.renameTemplate(doubleSpace.id, 'ACME-SG?x');
+  env.database.renameTemplate(other.id, 'ACME-SG*x');
+  assertEq(conflicts(batchOf(doubleSpace)), ['输出名称「ACME-SG?x」：模板「ACME-SG?x」、模板「ACME-SG*x」'],
+    'Step14.写盘时替换成同一字符的非法字符视为同名');
+  env.database.renameTemplate(other.id, 'ACME-SG-y');
+  assertEq(conflicts(batchOf(doubleSpace)), null, 'Step14.改名后写盘文件名不同则放行');
+
+  // 两个渠道名称只差大小写：分批导入也阻断；同一渠道的两个子模板同批不算冲突。
+  const upperOwner = env.defineTemplate('BANK-SG', 'A');
+  const upperChannelId = env.saveWithChannel(upperOwner, { mode: 'create' }).channelId;
+  const upperChild = env.defineTemplate('BANK-SG-2', 'A');
+  env.saveWithChannel(upperChild, { mode: 'join', channelId: upperChannelId });
+  assertEq(conflicts(batchOf(upperOwner, upperChild)), null, 'Step14.同一渠道的两个子模板同批不算冲突');
+  const lowerOwner = env.defineTemplate('bank-sg-tmp', 'A');
+  const lowerChannelId = env.saveWithChannel(lowerOwner, { mode: 'create' }).channelId;
+  env.database.renameStatementChannel(lowerChannelId, 'bank-sg');
+  assertEq(env.database.getStatementChannel(lowerChannelId).name, 'bank-sg', 'Step14.前置：库里允许只差大小写的两个渠道');
+  assertEq(conflicts(batchOf(upperOwner)), ['输出名称「BANK-SG」：渠道「BANK-SG」、渠道「bank-sg」'],
+    'Step14.只差大小写的两个渠道：分批导入也阻断');
+  assertEq(conflicts(batchOf(lowerOwner)), ['输出名称「bank-sg」：渠道「bank-sg」、渠道「BANK-SG」'],
+    'Step14.只差大小写的两个渠道：另一方单独导入同样阻断');
+}
+
+// ⑮ release/v3.2.15 复审：多层旧版模板包（A→B→C、A→D），A 被跳过：B 仍被成功的 C 引用，与 C 组成渠道「B」；
+//    D 按普通模板导入。日志按最终归属分别列出，不把组成渠道的 B 写成按普通模板导入。
+function verifyLegacyBundleMultiLevelSkippedParent(dir) {
+  const env = createEnvironment(dir, 'step15');
+  const [a, b, c, d] = ['层级-A', '层级-B', '层级-C', '层级-D'].map((name) => env.defineTemplate(name, 'A'));
+  const entryOf = (template, parent, isParent) => ({ templateKey: template.templateKey, name: template.name, isParent,
+    parentTemplateKey: parent ? parent.templateKey : null, accountMappings: [] });
+  const entries = [entryOf(a, null, true), entryOf(b, a, true), entryOf(c, b, false), entryOf(d, a, false)];
+  const { channelRestore } = env.fns.restoreBundleFollowUpRounds({
+    importedTemplates: entries,
+    succeededEntries: new Set(entries.slice(1)),
+    importedBundleVersion: 4,
+    importedChannels: []
+  });
+  const channelNameOf = (template) => {
+    const channelId = env.database.getTemplate(template.id).channelId;
+    return channelId ? env.database.getStatementChannel(channelId).name : null;
+  };
+  assertEq([a, b, c, d].map(channelNameOf), [null, '层级-B', '层级-B', null], 'Step15.B 与 C 组成渠道「B」，A 不变、D 按普通模板导入');
+  assertEq(channelRestore.orphanedTemplateNames, ['层级-D'], 'Step15.只把最终按普通模板导入的 D 记为普通模板');
+  assertEq(channelRestore.regroupedTemplateNames, ['层级-B'], 'Step15.B 记为以自身名称组成渠道');
+}
+
 async function run() {
   console.log('==== 网银账单渠道与子模板 e2e 集成验证 ====');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stmt-channel-'));
@@ -797,6 +863,8 @@ async function run() {
     verifyBundleSkippedSameNameChannelKeepsMappings(dir);
     verifyOutputNameConflictAcrossBatches(dir);
     verifyLegacyBundleSkippedParent(dir);
+    verifyOutputNameConflictFileNameKey(dir);
+    verifyLegacyBundleMultiLevelSkippedParent(dir);
   } finally {
     openedDatabases.splice(0).forEach((database) => {
       try { database.close(); } catch (error) { console.error('关闭测试主库失败', error); }

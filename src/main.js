@@ -8545,7 +8545,10 @@ function buildLegacyBundleChannelRestore(importedTemplateRecords, importedTempla
     if (record.entry.templateKey) byKey.set(record.entry.templateKey, record);
   });
   const packagedKeys = new Set(importedTemplates.map((entry) => entry && entry.templateKey).filter(Boolean));
+  // 父模板在包内但被跳过的成功模板，按最终归属分两类写日志：按普通模板导入的，以及自身仍是主模板或被成功的子模板引用、
+  //   以自己的名称组成渠道的（多层旧包，release/v3.2.15 复审）。
   const orphanedTemplateNames = [];
+  const regroupedTemplateNames = [];
   const resolveParent = (record) => {
     const parentKey = record.entry.parentTemplateKey;
     if (!parentKey) return null;
@@ -8573,13 +8576,15 @@ function buildLegacyBundleChannelRestore(importedTemplateRecords, importedTempla
   const assignments = [];
   importedTemplateRecords.forEach((record) => {
     const parentKey = record.entry.parentTemplateKey;
-    if (parentKey && !byKey.has(parentKey) && packagedKeys.has(parentKey)) orphanedTemplateNames.push(record.template.name);
+    const parentSkipped = Boolean(parentKey && !byKey.has(parentKey) && packagedKeys.has(parentKey));
     const involved = record.entry.isParent || Boolean(resolveParent(record))
       || (record.entry.templateKey && referencedKeys.has(record.entry.templateKey));
     if (!involved) {
+      if (parentSkipped) orphanedTemplateNames.push(record.template.name);
       assignments.push({ templateId: record.template.id, channelName: null });
       return;
     }
+    if (parentSkipped) regroupedTemplateNames.push(record.template.name);
     const root = rootNameOf(record);
     if (!membersByChannel.has(root.name)) membersByChannel.set(root.name, { sources: [], externalIds: new Set() });
     const member = membersByChannel.get(root.name);
@@ -8598,7 +8603,7 @@ function buildLegacyBundleChannelRestore(importedTemplateRecords, importedTempla
   // 已有同名渠道的映射与待处理冲突由 restoreTemplateBundleStatementChannels 在同一事务内并入来源。
   const legacyChannelSources = Array.from(membersByChannel.entries())
     .map(([name, member]) => ({ name, sources: member.sources }));
-  return { channels: [], legacyChannelSources, assignments, orphanedTemplateNames };
+  return { channels: [], legacyChannelSources, assignments, orphanedTemplateNames, regroupedTemplateNames };
 }
 
 // 模板包导入的第二、三轮，只处理第一轮成功导入的条目（succeededEntries）：
@@ -9540,6 +9545,9 @@ function registerTemplateHandlers() {
           ...(unrestoredChannelNames.length ? [`未还原的渠道（包内归入的模板均被跳过，原有映射与冲突不变）：${unrestoredChannelNames.join('、')}`] : []),
           ...(channelRestore.orphanedTemplateNames && channelRestore.orphanedTemplateNames.length
             ? [`父模板在包内被跳过、按普通模板导入的子模板：${channelRestore.orphanedTemplateNames.join('、')}`]
+            : []),
+          ...(channelRestore.regroupedTemplateNames && channelRestore.regroupedTemplateNames.length
+            ? [`父模板在包内被跳过、以自身名称组成渠道的模板：${channelRestore.regroupedTemplateNames.join('、')}`]
             : []),
           ...(restoreResult.conflictCount > 0 ? [`待处理的渠道账户映射冲突：${restoreResult.conflictCount} 个账户号`] : [])
         ]
@@ -10655,43 +10663,41 @@ function buildChannelBalanceModeMismatchError(group, detailLines) {
 }
 
 // v3.2.15（PR #246 审查）：不同生成分组的输出名称不能相同。普通模板与渠道同名时（模板包或旧数据可能带来），
-//   两组的生成文件路径、明细 Channel 列、余额与种子归属都相同，会互相覆盖或混用余额链。返回逐行明细，否则 null。
+//   两组的生成文件路径、明细 Channel 列与余额文件都相同，会互相覆盖。返回逐行明细，否则 null。
 //   release/v3.2.15 审查补充：
-//   - 名称按生成路径的口径比较：去首尾空格、不区分大小写（Windows / macOS 默认文件系统不区分大小写）；
+//   - 名称按实际写盘文件名的口径比较：同 sanitizeFileName 替换非法字符、合并内部空白、去首尾空格，再不区分大小写
+//     （Windows / macOS 默认文件系统不区分大小写）；
 //   - 所有者按组身份（渠道 / 模板 ID）去重，不按显示文字，名称只差空格的两个模板仍算两个所有者；
-//   - 除本批各组外，还核对库里同名的另一方：渠道组对不属于任何渠道的普通模板，普通模板组对渠道。
-//     同名渠道与普通模板分两批导入时，每批只有一组，只比本批会放行，后一批覆盖前一批的明细、余额文件与同键余额种子。
+//   - 除本批各组外，还核对库里所有同名的输出所有者（不属于任何渠道的普通模板、渠道，同类与异类都算）：
+//     同名的两方分两批导入时，每批只有一组，只比本批会放行，后一批覆盖前一批的明细与余额文件。
+//     属于渠道的子模板由渠道代表，不单独计数。
 function findGenerationGroupOutputNameConflicts(groups) {
-  const statementOutputNameKey = (name) => normalizeCell(name).toLowerCase();
+  const statementOutputNameKey = (name) => sanitizeFileName(normalizeCell(name)).toLowerCase();
   const byName = new Map();
   const addOwner = (outputName, identity, label) => {
     const nameKey = statementOutputNameKey(outputName);
-    if (!byName.has(nameKey)) byName.set(nameKey, { outputName, owners: new Map(), hasChannel: false, hasTemplate: false });
+    if (!byName.has(nameKey)) byName.set(nameKey, { outputName, owners: new Map() });
     const record = byName.get(nameKey);
     if (!record.owners.has(identity)) record.owners.set(identity, label);
-    return record;
   };
   for (const group of Array.isArray(groups) ? groups : []) {
     if (!group || !group.templateConfig) continue;
     const outputName = resolveStatementOutputName(group.templateConfig.template);
     const isChannel = String(group.key).startsWith('channel:');
-    const record = addOwner(outputName, String(group.key),
+    addOwner(outputName, String(group.key),
       isChannel ? `渠道「${outputName}」` : `模板「${normalizeCell(group.templateConfig.template.name)}」`);
-    if (isChannel) record.hasChannel = true;
-    else record.hasTemplate = true;
   }
-  const batchRecords = Array.from(byName.values());
-  if (batchRecords.some((record) => record.hasChannel)) {
+  if (byName.size) {
     for (const template of database.listTemplates()) {
       if (Number(template.channelId || 0) > 0) continue;
-      const record = byName.get(statementOutputNameKey(template.name));
-      if (record && record.hasChannel) addOwner(template.name, `template:${template.id}`, `模板「${normalizeCell(template.name)}」`);
+      if (byName.has(statementOutputNameKey(template.name))) {
+        addOwner(template.name, `template:${template.id}`, `模板「${normalizeCell(template.name)}」`);
+      }
     }
-  }
-  if (batchRecords.some((record) => record.hasTemplate)) {
     for (const channel of database.listStatementChannels()) {
-      const record = byName.get(statementOutputNameKey(channel.name));
-      if (record && record.hasTemplate) addOwner(channel.name, `channel:${channel.id}`, `渠道「${normalizeCell(channel.name)}」`);
+      if (byName.has(statementOutputNameKey(channel.name))) {
+        addOwner(channel.name, `channel:${channel.id}`, `渠道「${normalizeCell(channel.name)}」`);
+      }
     }
   }
   const lines = Array.from(byName.values())
@@ -10703,7 +10709,7 @@ function findGenerationGroupOutputNameConflicts(groups) {
 function buildStatementOutputNameConflictError(detailLines) {
   return new FileValidationError(
     'STATEMENT_OUTPUT_NAME_CONFLICT',
-    '有普通模板与渠道同名，两者生成的账单与余额会混在一起，请先在模板管理中重命名模板或渠道后再导入',
+    '有模板或渠道的输出名称相同（只差大小写、空格或文件名不允许的字符也算相同），生成的账单与余额会混在一起，请先在模板管理中重命名后再导入',
     { detailLines }
   );
 }
@@ -11643,6 +11649,21 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
         fileEntries: sessionFileEntries,
         fallbackTemplateConfig: templateConfig
       });
+
+      // v3.2.15（release 审查）：导入后模板可能已改名，与库里的渠道或其他普通模板输出名称相同；重新生成前同样阻断。
+      const exportAllOutputNameConflicts = findGenerationGroupOutputNameConflicts([
+        { key: resolveGenerationGroupKey(generationTemplateConfig.template), templateConfig: generationTemplateConfig }
+      ]);
+      if (exportAllOutputNameConflicts) {
+        const error = buildStatementOutputNameConflictError(exportAllOutputNameConflicts);
+        return createErrorResult({
+          step: kind === 'detail' ? '导出明细账单' : '导出余额账单',
+          message: error.message,
+          errorCode: error.code,
+          detailLines: exportAllOutputNameConflicts,
+          templateName: session.templateName
+        });
+      }
 
       const { config, preparedBatch } = buildStatementSessionGenerationContext({
         session,
@@ -13021,7 +13042,7 @@ function registerFileHandlers() {
         });
       }
 
-      // v3.2.15（release 审查）：指定模板导入同样核对库里同名的渠道 / 普通模板，避免两者的输出与余额种子混在一起。
+      // v3.2.15（release 审查）：指定模板导入同样核对库里输出名称相同的渠道 / 普通模板，避免两者的输出文件互相覆盖。
       const singleTemplateOutputNameConflicts = findGenerationGroupOutputNameConflicts([
         { key: resolveGenerationGroupKey(templateConfig.template), templateConfig }
       ]);
