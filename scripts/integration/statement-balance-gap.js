@@ -158,6 +158,25 @@ function loadOutputNameConflictFunctions(templateNames) {
   };
 }
 
+// v3.2.15（release 复审）：补录重算拆为“规划 + 实际文件名核对 + 生成”，规划与核对按同一套依赖装配真实函数。
+function loadRegenerateFunction(deps) {
+  const planVirtualTemplateBalanceRegeneration = loadMainFunction('planVirtualTemplateBalanceRegeneration', {
+    getStatementSessionEntries: deps.getStatementSessionEntries,
+    groupStatementEntriesForGeneration: deps.groupStatementEntriesForGeneration,
+    buildStatementGenerationConfig: deps.buildStatementGenerationConfig,
+    buildPreparedStatementBatchFromEntries: deps.buildPreparedStatementBatchFromEntries
+  });
+  const assertVirtualTemplateBalanceOutputPaths = loadMainFunction('assertVirtualTemplateBalanceOutputPaths', {
+    findGenerationGroupOutputPathConflicts: deps.findGenerationGroupOutputPathConflicts,
+    buildStatementOutputPathConflictError: deps.buildStatementOutputPathConflictError
+  });
+  return loadMainFunction('regenerateVirtualTemplateBalanceFromSession', {
+    ...deps,
+    planVirtualTemplateBalanceRegeneration,
+    assertVirtualTemplateBalanceOutputPaths
+  });
+}
+
 function writeSource(filePath) {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
@@ -235,7 +254,7 @@ async function verifyMergedScopeIsolation(dir) {
     getToday: () => today, path, ensureStorageRoot: () => storageRoot, sanitizeFileName
   });
   const step5TemplateConfig = (tid) => ({ template: { id: tid, name: templates[tid] }, exportMappings: [], exportTargetFields: [] });
-  const regenerate = loadMainFunction('regenerateVirtualTemplateBalanceFromSession', {
+  const regenerate = loadRegenerateFunction({
     getStatementSessionEntries: (_session, scope) => entriesByScope[scope],
     groupStatementEntriesForGeneration: loadGroupingFunction(step5TemplateConfig),
     ...loadOutputNameConflictFunctions(templates),
@@ -388,7 +407,7 @@ async function verifyMultiTemplateImportHoldsPartialBalance(dir) {
 
   // 第三组选择不补录后，按全部模板组重算当前批次余额。
   acknowledgedKeys.add(gaps[0].key);
-  const regenerate = loadMainFunction('regenerateVirtualTemplateBalanceFromSession', {
+  const regenerate = loadRegenerateFunction({
     getStatementSessionEntries: () => fileEntries,
     groupStatementEntriesForGeneration: loadGroupingFunction(step6TemplateConfig),
     ...loadOutputNameConflictFunctions(templates),

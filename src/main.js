@@ -10778,24 +10778,15 @@ function buildStatementOutputPathConflictError(detailLines) {
   );
 }
 
-// v1.5.2：虚拟 ID 下从 session 重新生成合并的余额文件（补录 seed 后调用）
-function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
-  const allEntries = getStatementSessionEntries(session, scope);
-  const generationGroups = groupStatementEntriesForGeneration(allEntries);
-
-  const balancePaths = [];
-  const billDates = [];
-  const allWarnings = [];
-  let skippedCount = 0;
-
+// 按文件名映射补录后重新生成余额前的分组规划：只读会话和模板配置，不写文件、不读种子。
+//   补录在写入种子、登记断档之前用它核对各组实际输出文件名，再把同一份规划交给重新生成。
+function planVirtualTemplateBalanceRegeneration(session, scope = 'all') {
+  const generationGroups = groupStatementEntriesForGeneration(getStatementSessionEntries(session, scope));
   const groupPlans = [];
+  const skippedGroups = [];
   for (const { entries: groupEntries, templateIds, templateConfig } of generationGroups) {
     if (!templateConfig) {
-      appendActivityLogEntry({
-        level: 'warn',
-        message: `余额重新生成时跳过模板组（templateId=${templateIds.join('、')}）：模板已被删除，${groupEntries.length} 个文件的数据未包含`
-      });
-      skippedCount += 1;
+      skippedGroups.push({ templateIds, fileCount: groupEntries.length });
       continue;
     }
 
@@ -10811,9 +10802,33 @@ function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
     });
     groupPlans.push({ config: groupGenConfig, preparedBatch: groupPreparedBatch });
   }
-  // v3.2.15（release 审查）：先规划全部组，再核对各组实际输出文件名，任一组写出之前拦下。
-  const outputPathConflicts = findGenerationGroupOutputPathConflicts(groupPlans, scope);
+  return { scope, generationGroups, groupPlans, skippedGroups };
+}
+
+function assertVirtualTemplateBalanceOutputPaths(regenerationPlan) {
+  const outputPathConflicts = findGenerationGroupOutputPathConflicts(regenerationPlan.groupPlans, regenerationPlan.scope);
   if (outputPathConflicts) throw buildStatementOutputPathConflictError(outputPathConflicts);
+}
+
+// v1.5.2：虚拟 ID 下从 session 重新生成合并的余额文件（补录 seed 后调用）
+function regenerateVirtualTemplateBalanceFromSession(
+  session,
+  scope = 'all',
+  regenerationPlan = planVirtualTemplateBalanceRegeneration(session, scope)
+) {
+  const { generationGroups, groupPlans, skippedGroups } = regenerationPlan;
+  const balancePaths = [];
+  const billDates = [];
+  const allWarnings = [];
+  const skippedCount = skippedGroups.length;
+  for (const { templateIds, fileCount } of skippedGroups) {
+    appendActivityLogEntry({
+      level: 'warn',
+      message: `余额重新生成时跳过模板组（templateId=${templateIds.join('、')}）：模板已被删除，${fileCount} 个文件的数据未包含`
+    });
+  }
+  // v3.2.15（release 审查）：先规划全部组，再核对各组实际输出文件名，任一组写出之前拦下。
+  assertVirtualTemplateBalanceOutputPaths(regenerationPlan);
 
   for (const { config: groupGenConfig, preparedBatch: groupPreparedBatch } of groupPlans) {
     // 按本次重算的真实范围命名：只有一个模板组时这个文件直接作为该范围的余额，
@@ -14155,11 +14170,15 @@ function registerFileHandlers() {
       try {
         // v3.2.15（release 审查）：补录后会重新生成；先按将使用的输出配置核对输出名称，冲突时不写入种子、不登记断档、不生成。
         //   按文件名映射按会话全部分组核对；指定模板按记下的生成上下文核对（导入后模板或渠道可能已改名）。
+        //   按文件名映射另按将重新生成的各组规划核对实际输出文件名（名称拼上账号），同样在写种子、登记断档之前拦下。
+        let regenerationPlan = null;
         if (isFilenameMappingMode(importContext.templateId) && session) {
           const outputNameConflicts = findGenerationGroupOutputNameConflicts(
             groupStatementEntriesForGeneration(getStatementSessionEntries(session, importContext.scope || 'current'))
           );
           if (outputNameConflicts) throw buildStatementOutputNameConflictError(outputNameConflicts);
+          regenerationPlan = planVirtualTemplateBalanceRegeneration(session, importContext.scope || 'current');
+          assertVirtualTemplateBalanceOutputPaths(regenerationPlan);
         } else {
           assertGenerationOutputNameUnique(importContext.template);
         }
@@ -14199,7 +14218,11 @@ function registerFileHandlers() {
 
         // v1.5.2：虚拟 ID 下走多模板重新生成（避免用单组 importContext 产出不完整余额）
         if (isFilenameMappingMode(importContext.templateId) && session) {
-          const regenResult = regenerateVirtualTemplateBalanceFromSession(session, importContext.scope || 'current');
+          const regenResult = regenerateVirtualTemplateBalanceFromSession(
+            session,
+            importContext.scope || 'current',
+            regenerationPlan || undefined
+          );
           if (regenResult.needsSeed) {
             const pendingFiles = {
               warnings: regenResult.warnings,

@@ -118,6 +118,29 @@ function loadOutputPathConflictFunctions(database = { getTemplate: () => null })
   };
 }
 
+// 补录重算拆为“规划 + 实际文件名核对 + 生成”：按同一套依赖装配真实的规划与核对函数。
+function regenerationPlanDeps({
+  getStatementSessionEntries,
+  groupStatementEntriesForGeneration,
+  buildStatementGenerationConfig,
+  buildPreparedStatementBatchFromEntries,
+  database
+}) {
+  const pathFunctions = loadOutputPathConflictFunctions(database);
+  return {
+    planVirtualTemplateBalanceRegeneration: loadMainFunction(
+      'planVirtualTemplateBalanceRegeneration',
+      ['getStatementSessionEntries', 'groupStatementEntriesForGeneration', 'buildStatementGenerationConfig', 'buildPreparedStatementBatchFromEntries'],
+      [getStatementSessionEntries, groupStatementEntriesForGeneration, buildStatementGenerationConfig, buildPreparedStatementBatchFromEntries]
+    ),
+    assertVirtualTemplateBalanceOutputPaths: loadMainFunction(
+      'assertVirtualTemplateBalanceOutputPaths',
+      ['findGenerationGroupOutputPathConflicts', 'buildStatementOutputPathConflictError'],
+      [pathFunctions.findGenerationGroupOutputPathConflicts, pathFunctions.buildStatementOutputPathConflictError]
+    )
+  };
+}
+
 function createTempRoot(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-balance-gap-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -800,8 +823,11 @@ test('主进程：按文件名映射全部范围补录或不补录后，按全�
       rememberAcknowledgedBalanceGaps: () => true,
       appendActivityLogEntry: () => {},
       formatBalanceGapLine: () => '',
-      regenerateVirtualTemplateBalanceFromSession: (target, regenerateScope) => {
+      regenerateVirtualTemplateBalanceFromSession: (target, regenerateScope, regenerationPlan) => {
         calls.regenerate.push([target, regenerateScope]);
+        // 补录前已按同一份规划核对过实际文件名，重新生成直接复用。
+        assert.equal(regenerationPlan.scope, regenerateScope);
+        assert.equal(regenerationPlan.groupPlans.length, 2);
         return { needsSeed: false, generatedFiles: { detail: null, balance: merged, warnings: [] } };
       },
       lastGeneratedExports,
@@ -829,15 +855,76 @@ test('主进程：按文件名映射全部范围补录或不补录后，按全�
   }
 });
 
-// 补录后按会话全部分组重新生成前的输出名称核对：模板 1、模板 2 两组普通模板。
-function seedSaveGroupingDeps(database) {
-  const templateConfig = (tid) => ({ template: { id: tid, name: `模板${tid}` }, exportMappings: [], exportTargetFields: [] });
+// 补录后按会话全部分组重新生成前的输出名称与实际文件名核对：默认模板 1、模板 2 两组普通模板，各一个账号。
+//   entries 的 merchantId 为该文件的账号，各组账号唯一时文件名拼上账号（同真实 preparedBatch.selectedMerchantId）。
+function seedSaveGroupingDeps(database, {
+  entries = [{ matchedTemplateId: 1, merchantId: 'M001' }, { matchedTemplateId: 2, merchantId: 'M002' }],
+  templateNames = {}
+} = {}) {
+  const templateConfig = (tid) => ({
+    template: { id: tid, name: templateNames[tid] || `模板${tid}` },
+    exportMappings: [],
+    exportTargetFields: []
+  });
+  const groupStatementEntriesForGeneration = loadGroupingFunction(templateConfig);
+  const getStatementSessionEntries = () => entries;
   return {
-    groupStatementEntriesForGeneration: loadGroupingFunction(templateConfig),
-    getStatementSessionEntries: () => [{ matchedTemplateId: 1 }, { matchedTemplateId: 2 }],
-    ...loadOutputNameConflictFunctions(database)
+    groupStatementEntriesForGeneration,
+    getStatementSessionEntries,
+    ...loadOutputNameConflictFunctions(database),
+    ...regenerationPlanDeps({
+      getStatementSessionEntries,
+      groupStatementEntriesForGeneration,
+      buildStatementGenerationConfig: ({ template }) => ({ template }),
+      buildPreparedStatementBatchFromEntries: ({ fileEntries }) => {
+        const merchantIds = Array.from(new Set(fileEntries.map((entry) => entry.merchantId)));
+        return { detailRows: [], selectedMerchantId: merchantIds.length === 1 ? merchantIds[0] : '' };
+      }
+    })
   };
 }
+
+test('主进程：按文件名映射补录时，各组输出名称拼上账号后文件名相同，先阻断，不写入种子、不登记断档、不重新生成（release 复审）', async () => {
+  // 导入后、补录前模板 2 被改名为「BANK-SG-1001」：模板 1「BANK-SG」只有账号 1001，模板 2 有两个账号，文件名都是 BANK-SG-1001-…。
+  const grouping = seedSaveGroupingDeps(undefined, {
+    entries: [
+      { matchedTemplateId: 1, merchantId: '1001' },
+      { matchedTemplateId: 2, merchantId: '2001' },
+      { matchedTemplateId: 2, merchantId: '2002' }
+    ],
+    templateNames: { 1: 'BANK-SG', 2: 'BANK-SG-1001' }
+  });
+  const gap = { key: 'BANK-SG|1001|USD|2026-09-01|2026-09-04', merchantId: '1001', currency: 'USD' };
+  for (const label of ['补录', '不补录']) {
+    const calls = { seed: 0, acknowledged: 0, regenerate: 0, cleared: 0 };
+    const execute = loadSaveBalanceSeedExecute({
+      FILENAME_MAPPING_TEMPLATE_ID,
+      FileValidationError,
+      isFilenameMappingMode: (templateId) => templateId === FILENAME_MAPPING_TEMPLATE_ID,
+      ...grouping,
+      writeManualBalanceSeedPlan: () => { calls.seed += 1; },
+      rememberAcknowledgedBalanceGaps: () => { calls.acknowledged += 1; return true; },
+      formatBalanceGapLine: () => '',
+      regenerateVirtualTemplateBalanceFromSession: () => { calls.regenerate += 1; return { needsSeed: false, generatedFiles: {} }; },
+      appendActivityLogEntry: () => {},
+      clearPendingManualBalancePrompt: () => { calls.cleared += 1; },
+      createErrorResult: (payload) => ({ status: 'error', ...payload })
+    });
+    const skip = label === '不补录';
+    const result = await execute(null, {
+      plan: skip ? null : { record: { templateName: 'BANK-SG', merchantId: '1001', currency: 'USD', billDate: '2026-08-31', endBalance: '1000' } },
+      skipBalanceGapKeys: skip ? [gap.key] : null,
+      skippedBalanceGaps: skip ? [gap] : [],
+      pendingPrompt: { templateName: 'BANK-SG' },
+      session: { key: 'session-1', templateId: FILENAME_MAPPING_TEMPLATE_ID },
+      importContext: { templateId: FILENAME_MAPPING_TEMPLATE_ID, scope: 'current', template: { name: '按文件名映射模板' } }
+    }, { fileEvidence: { filePlan: { inputs: [{ filePath: '/tmp/a.xlsx' }] } } });
+    assert.equal(result.status, 'error', label);
+    assert.equal(result.errorCode, 'STATEMENT_OUTPUT_NAME_CONFLICT', label);
+    assert.deepEqual(result.detailLines, ['文件名「BANK-SG-1001」：模板「BANK-SG」（账号 1001）、模板「BANK-SG-1001」'], label);
+    assert.deepEqual(calls, { seed: 0, acknowledged: 0, regenerate: 0, cleared: 1 }, label);
+  }
+});
 
 test('主进程：按文件名映射补录时，会话里的模板与库里的渠道同名则先阻断，不写入种子也不重新生成（release/v3.2.15 审查）', async () => {
   const calls = { seed: 0, regenerate: 0, cleared: 0 };
@@ -1127,31 +1214,29 @@ test('主进程：按文件名映射单模板组补录或不补录后重算，�
   const history = mappedSourceEntry(root, 'history.xlsx', [['2026-09-01', 'M001', 'USD', '100', ''], ['2026-09-02', 'M001', 'USD', '5', '']]);
   const current = mappedSourceEntry(root, 'current.xlsx', [['2026-09-01', 'M002', 'USD', '100', ''], ['2026-09-02', 'M002', 'USD', '5', '']]);
   const singleTemplateConfig = () => ({ template: { name: TEMPLATE_NAME }, exportMappings: [], exportTargetFields: [] });
+  const regenerateDeps = {
+    getStatementSessionEntries: (_session, scope) => (scope === 'all' ? [history, current] : [current]),
+    groupStatementEntriesForGeneration: loadGroupingFunction(singleTemplateConfig),
+    getTemplateMappingConfig: singleTemplateConfig,
+    appendActivityLogEntry: () => {},
+    buildStatementGenerationConfig: ({ template }) => ({
+      template,
+      mappingByTargetField: { MerchantId: 'Account' },
+      balanceRequested: true,
+      balanceMode: 'calculated'
+    }),
+    buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
+    generateStatementFiles: generation.generateStatementFiles,
+    parseRequiredBillDates,
+    extractManualBalancePromptWarning: generation.extractManualBalancePromptWarning,
+    statementGenerationHelpers: generation,
+    path
+  };
+  Object.assign(regenerateDeps, regenerationPlanDeps(regenerateDeps));
   const regenerate = loadMainFunction(
     'regenerateVirtualTemplateBalanceFromSession',
-    ['getStatementSessionEntries', 'groupStatementEntriesForGeneration', 'getTemplateMappingConfig', 'appendActivityLogEntry', 'buildStatementGenerationConfig',
-      'buildPreparedStatementBatchFromEntries', 'generateStatementFiles', 'parseRequiredBillDates',
-      'extractManualBalancePromptWarning', 'statementGenerationHelpers', 'path',
-      'findGenerationGroupOutputPathConflicts', 'buildStatementOutputPathConflictError'],
-    [
-      (_session, scope) => (scope === 'all' ? [history, current] : [current]),
-      loadGroupingFunction(singleTemplateConfig),
-      singleTemplateConfig,
-      () => {},
-      ({ template }) => ({
-        template,
-        mappingByTargetField: { MerchantId: 'Account' },
-        balanceRequested: true,
-        balanceMode: 'calculated'
-      }),
-      generation.buildPreparedStatementBatchFromEntries,
-      generation.generateStatementFiles,
-      parseRequiredBillDates,
-      generation.extractManualBalancePromptWarning,
-      generation,
-      path,
-      ...Object.values(loadOutputPathConflictFunctions())
-    ]
+    Object.keys(regenerateDeps),
+    Object.values(regenerateDeps)
   );
 
   const currentResult = regenerate({ key: 'session-1' }, 'current');
