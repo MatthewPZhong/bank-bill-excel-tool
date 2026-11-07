@@ -147,7 +147,14 @@ function loadOutputNameConflictFunctions(templateNames) {
       resolveGenerationGroupKey,
       findGenerationGroupOutputNameConflicts,
       buildStatementOutputNameConflictError
-    })
+    }),
+    findGenerationGroupOutputPathConflicts: loadMainFunction('findGenerationGroupOutputPathConflicts', {
+      database,
+      normalizeCell,
+      sanitizeFileName: loadMainFunction('sanitizeFileName'),
+      resolveGenerationGroupKey
+    }),
+    buildStatementOutputPathConflictError: loadMainFunction('buildStatementOutputPathConflictError', { FileValidationError })
   };
 }
 
@@ -231,6 +238,7 @@ async function verifyMergedScopeIsolation(dir) {
   const regenerate = loadMainFunction('regenerateVirtualTemplateBalanceFromSession', {
     getStatementSessionEntries: (_session, scope) => entriesByScope[scope],
     groupStatementEntriesForGeneration: loadGroupingFunction(step5TemplateConfig),
+    ...loadOutputNameConflictFunctions(templates),
     getTemplateMappingConfig: step5TemplateConfig,
     appendActivityLogEntry: () => {},
     buildStatementGenerationConfig: ({ template }) => ({
@@ -383,6 +391,7 @@ async function verifyMultiTemplateImportHoldsPartialBalance(dir) {
   const regenerate = loadMainFunction('regenerateVirtualTemplateBalanceFromSession', {
     getStatementSessionEntries: () => fileEntries,
     groupStatementEntriesForGeneration: loadGroupingFunction(step6TemplateConfig),
+    ...loadOutputNameConflictFunctions(templates),
     getTemplateMappingConfig: step6TemplateConfig,
     appendActivityLogEntry: () => {},
     buildStatementGenerationConfig: buildGenerationConfig,
