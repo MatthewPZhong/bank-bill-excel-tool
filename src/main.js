@@ -11298,10 +11298,13 @@ function matchFileToTemplate(filePath, candidateTemplates) {
     }
   }
 
-  // 过滤子集匹配：多个模板匹配时，只保留 headers 最多的（最精确匹配）
+  // 过滤子集匹配：多个模板匹配时，只保留有效表头最多的（最精确匹配）。
+  // v3.2.15（release 审查）：按非空表头计数。模板表头保留合并单元格占位的中间空列（K1）后，空占位不能算作精确度，
+  //   否则空列多、有效字段少的模板（借去空口径匹配上）会挤掉有效字段更多的正确模板，漏读其余列。
   if (matches.length > 1) {
-    const maxHeaderCount = Math.max(...matches.map((t) => (t.headers || []).length));
-    return matches.filter((t) => (t.headers || []).length === maxHeaderCount);
+    const effectiveHeaderCount = (template) => (template.headers || []).filter((header) => normalizeCell(header) !== '').length;
+    const maxHeaderCount = Math.max(...matches.map(effectiveHeaderCount));
+    return matches.filter((template) => effectiveHeaderCount(template) === maxHeaderCount);
   }
 
   return matches;
@@ -12379,6 +12382,56 @@ function extractBigAccountOrderFromEvidence(pendingContext, mode, rowIndexes) {
   return result;
 }
 
+// v3.2.15（release 审查）：标准入口（按文件名映射）进入大账号选择时，固定模式下界面会按位置套用记住的顺序，
+//   而完成选择时服务端只核对账号、不核对币种。记住的顺序与本次导入文件无法逐个唯一对上（文件个数不同、匹配不上、
+//   同一多币种大账号的多份账单），或对上后的顺序与记住的不同时，按位置预填会把账号 / 币种填到别的文件上，
+//   因此降级为不固定模式由用户选择（同指定模板入口）。各文件识别到的账号取大账号顺序证据，与保存顺序同口径；
+//   没有文件信息的旧顺序无法核对，沿用原行为。
+function resolveSavedBigAccountOrderDecision(pendingContext) {
+  const keep = { forceUnfixed: false, ambiguousFileNames: [] };
+  const templateId = pendingContext && pendingContext.templateId;
+  if (readBigAccountMode(ensureStorageRoot(), templateId) !== 'fixed') return keep;
+  const savedOrderConfig = readBigAccountOrder(ensureStorageRoot(), templateId);
+  if (!savedOrderConfig || !Array.isArray(savedOrderConfig.assignments) || !savedOrderConfig.assignments.length) return keep;
+  if (!Array.isArray(savedOrderConfig.files) || !savedOrderConfig.files.length) return keep;
+  const evidenceFiles = pendingContext.bigAccountOrderEvidence && Array.isArray(pendingContext.bigAccountOrderEvidence.files)
+    ? pendingContext.bigAccountOrderEvidence.files
+    : [];
+  if (evidenceFiles.length !== savedOrderConfig.fileCount) return { forceUnfixed: true, ambiguousFileNames: [] };
+  const importAccountLists = evidenceFiles.map((file) => (Array.isArray(file.rows) ? file.rows : [])
+    .filter((row) => row.accountKey !== '')
+    .map((row) => ({ merchantId: row.merchantId })));
+  const { failedImportIndexes, ambiguousImportIndexes, reorderedAssignments } = matchImportFilesToSavedOrder(
+    importAccountLists,
+    savedOrderConfig
+  );
+  const ambiguousFileNames = ambiguousImportIndexes.map((index) => evidenceFiles[index].fileName);
+  if (failedImportIndexes.length || ambiguousImportIndexes.length) return { forceUnfixed: true, ambiguousFileNames };
+  const assignmentKeys = (list) => list
+    .map((assignment) => `${normalizeCell(assignment.merchantId)}\u0000${normalizeCell(assignment.currency)}`)
+    .join('\u0001');
+  return {
+    forceUnfixed: assignmentKeys(reorderedAssignments) !== assignmentKeys(savedOrderConfig.assignments),
+    ambiguousFileNames: []
+  };
+}
+
+function applySavedBigAccountOrderGuard(prepared, pendingContext, selectionRequired) {
+  const decision = resolveSavedBigAccountOrderDecision(pendingContext);
+  if (!decision.forceUnfixed) return selectionRequired;
+  if (decision.ambiguousFileNames.length && !(prepared && prepared.previewOnly)) {
+    appendActivityLogEntry({
+      level: 'info',
+      message: '已记住的大账号顺序无法唯一确定部分文件的账号 / 币种，改为人工选择',
+      details: [
+        `模板名：${normalizeCell(pendingContext.template && pendingContext.template.name) || 'N/A'}`,
+        `涉及文件：${decision.ambiguousFileNames.join('、')}`
+      ]
+    });
+  }
+  return { ...selectionRequired, forceMode: 'unfixed' };
+}
+
 function buildBigAccountOrderData(pendingContext, assignments = []) {
   const evidence = pendingContext.bigAccountOrderEvidence;
   if (!evidence || evidence.sessionId !== pendingContext.statementSelectionSessionId) {
@@ -12871,7 +12924,7 @@ async function handleFilenameMappingImport(prepared) {
       }
       const selectionRowsWithEmpty = buildBigAccountSelectionRows(trimmedProvisionalEntries, { includeEmptyBlocks: true });
 
-      stagePendingBigAccountSelection(prepared, {
+      const pendingContext = stagePendingBigAccountSelection(prepared, {
         templateId: FILENAME_MAPPING_TEMPLATE_ID,
         template: syntheticTemplateConfig.template,
         mappings: syntheticTemplateConfig.exportMappings,
@@ -12883,13 +12936,13 @@ async function handleFilenameMappingImport(prepared) {
         rows: selectionRows,
         rowsWithEmptyBlocks: selectionRowsWithEmpty
       });
-      return buildBigAccountSelectionRequiredResult({
+      return applySavedBigAccountOrderGuard(prepared, pendingContext, buildBigAccountSelectionRequiredResult({
         rows: selectionRows,
         rowsWithEmptyBlocks: selectionRowsWithEmpty,
         bigAccounts: aggregatedBigAccounts,
         fixedAssignments: [],
         templateId: FILENAME_MAPPING_TEMPLATE_ID
-      });
+      }));
     }
 
     // ===== 步骤 8：边界 — bigAccountOptions.length <= 1 直接生成 =====
@@ -12925,7 +12978,7 @@ async function handleFilenameMappingImport(prepared) {
         }
         const selectionRowsWithEmpty = buildBigAccountSelectionRows(trimmedProvisionalEntries, { includeEmptyBlocks: true });
 
-        stagePendingBigAccountSelection(prepared, {
+        const pendingContext = stagePendingBigAccountSelection(prepared, {
           templateId: FILENAME_MAPPING_TEMPLATE_ID,
           template: syntheticTemplateConfig.template,
           mappings: syntheticTemplateConfig.exportMappings,
@@ -12937,13 +12990,13 @@ async function handleFilenameMappingImport(prepared) {
           rows: selectionRows,
           rowsWithEmptyBlocks: selectionRowsWithEmpty
         });
-        return buildBigAccountSelectionRequiredResult({
+        return applySavedBigAccountOrderGuard(prepared, pendingContext, buildBigAccountSelectionRequiredResult({
           rows: selectionRows,
           rowsWithEmptyBlocks: selectionRowsWithEmpty,
           bigAccounts: aggregatedBigAccounts,
           fixedAssignments: [],
           templateId: FILENAME_MAPPING_TEMPLATE_ID
-        });
+        }));
       }
 
       if (recognitionResult.selectedBigAccount) {
