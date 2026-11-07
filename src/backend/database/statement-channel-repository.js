@@ -590,6 +590,33 @@ function applyTemplateChannelAssignment(db, templateId, assignment, now = new Da
   const ownMappings = previousChannelId
     ? listChannelAccountMappings(db, previousChannelId)
     : listTemplateAccountMappings(db, template.id);
+  // 目标渠道的待处理冲突账户号没有生效设置，只比较生效映射会漏掉它们：模板设置写入渠道后不在冲突候选里，
+  //   之后处理冲突会被所选候选覆盖（v3.2.15 PR #246 审查）。模板也维护这些账户号时阻断，先处理冲突再加入（A9 不自动取舍）。
+  const ownSettingByBankAccount = new Map();
+  for (const mapping of ownMappings) {
+    const normalized = normalizeAccountMappingSetting(mapping);
+    if (normalized.bankAccountId && !ownSettingByBankAccount.has(normalized.bankAccountId)) {
+      ownSettingByBankAccount.set(normalized.bankAccountId, normalized);
+    }
+  }
+  const overlappingConflicts = listConflictRows(db, targetChannelId)
+    .filter((conflict) => ownSettingByBankAccount.has(conflict.bankAccountId));
+  if (overlappingConflicts.length > 0) {
+    throw createChannelError(
+      'CHANNEL_ACCOUNT_MAPPING_CONFLICT_PENDING',
+      `渠道「${normalizeText(channel.name)}」的账户映射还有待处理的冲突，模板「${templateName}」也维护了其中 ${overlappingConflicts.length} 个账户号，请先在「账户映射」中处理后再加入该渠道`,
+      {
+        detailLines: overlappingConflicts.map((conflict) => (
+          `账户号 ${conflict.bankAccountId}：渠道待选${conflict.candidates.map((candidate) => describeAccountMappingSetting(candidate)).join(' / ')}，模板为${describeAccountMappingSetting(ownSettingByBankAccount.get(conflict.bankAccountId))}`
+        )),
+        context: {
+          channelId: targetChannelId,
+          templateId: template.id,
+          conflictBankAccountIds: overlappingConflicts.map((conflict) => conflict.bankAccountId)
+        }
+      }
+    );
+  }
   const channelMappings = listChannelAccountMappings(db, targetChannelId);
   const merged = mergeAccountMappingSources([
     { sourceName: normalizeText(channel.name), mappings: channelMappings },

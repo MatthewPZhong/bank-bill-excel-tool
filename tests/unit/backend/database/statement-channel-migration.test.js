@@ -8,7 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { AppDatabase } = require('../../../../src/backend/database');
-const { ensureStatementChannelSupport } = require('../../../../src/backend/database/migrations');
+const { ensureStatementChannelSupport, hasPendingStatementChannelMigration } = require('../../../../src/backend/database/migrations');
 
 let appDb;
 let db;
@@ -186,6 +186,26 @@ test('备份失败时不改动数据，返回 backup-failed', () => {
   assert.equal(result.status, 'backup-failed');
   assert.equal(db.prepare('SELECT COUNT(1) AS cnt FROM statement_channels').get().cnt, 0);
   assert.equal(db.prepare('SELECT COUNT(1) AS cnt FROM templates WHERE is_parent = 1').get().cnt, 1);
+});
+
+// PR #246 审查：迁移失败（备份失败或事务回滚）后旧标记保留，调用方据此阻断依赖渠道模型的账单操作；迁移成功后解除。
+test('渠道迁移未完成判断：无旧标记为否；备份失败、事务回滚后为是；重试成功后为否', () => {
+  insertTemplate('工行-深圳');
+  assert.equal(hasPendingStatementChannelMigration(db), false);
+  const parent = insertTemplate('招商银行-上海', { isParent: true });
+  insertTemplate('招商银行-上海-B', { parentId: parent });
+  assert.equal(appDb.hasPendingStatementChannelMigration(), true, '尚未迁移');
+  assert.equal(ensureStatementChannelSupport(db, () => { throw new Error('disk full'); }).status, 'backup-failed');
+  assert.equal(appDb.hasPendingStatementChannelMigration(), true, '备份失败');
+  db.exec(`
+    CREATE TRIGGER statement_channel_migration_fail BEFORE UPDATE OF channel_id ON templates
+    WHEN NEW.channel_id IS NOT NULL BEGIN SELECT RAISE(ABORT, 'injected failure'); END;
+  `);
+  assert.equal(ensureStatementChannelSupport(db, () => null).status, 'migration-failed');
+  assert.equal(appDb.hasPendingStatementChannelMigration(), true, '事务回滚');
+  db.exec('DROP TRIGGER statement_channel_migration_fail');
+  assert.equal(appDb.runStatementChannelMigration().status, 'migrated');
+  assert.equal(appDb.hasPendingStatementChannelMigration(), false, '重试成功');
 });
 
 test('启动迁移入口记录结果，迁移渠道的导入子模板编号从 1 开始', () => {

@@ -8501,6 +8501,14 @@ function createRetiredParentTemplateResult(step) {
   };
 }
 
+// v3.2.15 PR #246 审查：主/子模板转为渠道的启动迁移未完成（备份失败或事务回滚，旧主/子标记保留）时，主、子模板都未归入渠道，
+//   按渠道模型生成会各自输出、月度余额对同一账号重复输出。迁移完成前阻断网银账单导入与月度余额装配，下次启动自动重试迁移。
+//   返回阻断提示；迁移已完成或无需迁移时返回空字符串。
+function getStatementChannelMigrationPendingMessage() {
+  if (!database.hasPendingStatementChannelMigration()) return '';
+  return '主模板 / 子模板转为渠道的数据迁移尚未完成（启动时迁移失败，原因见活动日志），为避免主、子模板的账单与余额重复输出，暂不能导入网银账单或装配月度余额；请重启应用重试迁移';
+}
+
 const STATEMENT_CHANNEL_BUSINESS_ERROR_CODES = new Set([
   'CHANNEL_NOT_FOUND',
   'CHANNEL_NAME_REQUIRED',
@@ -12784,6 +12792,15 @@ async function handleFilenameMappingImport(prepared) {
     });
   }
 
+  const channelMigrationPendingMessage = getStatementChannelMigrationPendingMessage();
+  if (channelMigrationPendingMessage) {
+    return createErrorResult({
+      step: '导入网银明细文件',
+      message: channelMigrationPendingMessage,
+      errorCode: 'STATEMENT_CHANNEL_MIGRATION_PENDING'
+    });
+  }
+
   // 虚拟模板名，用于错误上下文 / session 标题 / 文件名重复提示
   const virtualTemplateName = '按文件名映射模板';
 
@@ -13272,6 +13289,16 @@ function registerFileHandlers() {
           result: createPreflightErrorResult({
             message: '账户映射数据迁移尚未完成，请先打开「账户映射」页面完成数据分配',
             errorCode: 'ACCOUNT_MAPPING_MIGRATION_PENDING'
+          })
+        };
+      }
+      const channelMigrationPendingMessage = getStatementChannelMigrationPendingMessage();
+      if (channelMigrationPendingMessage) {
+        return {
+          proceed: false,
+          result: createPreflightErrorResult({
+            message: channelMigrationPendingMessage,
+            errorCode: 'STATEMENT_CHANNEL_MIGRATION_PENDING'
           })
         };
       }
@@ -14633,6 +14660,16 @@ function registerFileHandlers() {
           status: 'error',
           errorCode: 'MONTHLY_BALANCE_INVALID_INPUT',
           message: '请选择时间'
+        };
+      }
+
+      const channelMigrationPendingMessage = getStatementChannelMigrationPendingMessage();
+      if (channelMigrationPendingMessage) {
+        lastGeneratedExports.monthlyBalance = null;
+        return {
+          status: 'error',
+          errorCode: 'STATEMENT_CHANNEL_MIGRATION_PENDING',
+          message: channelMigrationPendingMessage
         };
       }
 

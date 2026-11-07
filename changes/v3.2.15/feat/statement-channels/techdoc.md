@@ -366,6 +366,15 @@ I25 扩大了阻断范围：已有的两个普通模板名称只差大小写、�
 
 回归：集成脚本 `statement-channel.js` 第 ⑪–⑰ 步、`statement-balance-gap.js` 多模板用例；单测 `statement-balance-gap.test.js` 的按文件名映射补录前阻断（输出名称、实际文件名两类，后者覆盖补录与不补录）、指定模板补录前阻断、指定模板导入建立会话前阻断、指定模板会话“导出全部”重新生成前阻断、生成入口统一核对等用例。I19–I35 涉及账户血缘与输出身份，按资金红线人工复核。
 
+PR #246 的 Codex 审查（`release/v3.2.15@cf78fd0b`）另提出两项：
+
+| 编号 | 发现 | 处理 |
+| --- | --- | --- |
+| I36（P2，资金） | 模板加入已有渠道时只比较渠道的生效映射；待处理冲突的账户号不在生效映射里，会被漏掉。渠道账户号 111 的冲突候选为 OLD1 / OLD2、模板维护 111 = NEW 时加入成功：模板级映射被删，NEW 写入渠道却不在冲突候选里，之后处理冲突时被所选候选覆盖，NEW 丢失 | `applyTemplateChannelAssignment` 加入前核对目标渠道的待处理冲突：模板维护了其中的账户号时阻断（`CHANNEL_ACCOUNT_MAPPING_CONFLICT_PENDING`），明细逐条列出渠道候选与模板设置，提示先处理冲突再加入；不涉及冲突账户号的模板照常加入。处理冲突后再加入按 A9 比较生效映射 |
+| I37（P1，资金） | 启动迁移备份失败或事务回滚时只记日志、继续启动：旧主/子标记保留，模板未归入渠道；新代码不再读旧标记，月度余额只按 `channelId` 排除渠道模板，主、子模板维护同一账号时同一余额输出两次，导入也会按普通模板各自输出 | 新增 `hasPendingStatementChannelMigration`（仍有旧标记即迁移未完成；标记只在迁移成功时清零）。迁移完成前网银账单导入（标准入口与指定模板入口）与月度余额装配返回 `STATEMENT_CHANNEL_MIGRATION_PENDING`，提示重启重试并查看活动日志；下次启动迁移成功后自动解除。不做按旧标记的兼容读取（旧主/子的生成口径已退役） |
+
+回归：单测 `statement-channel-repository.test.js`、`statement-channel-migration.test.js` 新增用例；集成脚本 `statement-channel.js` 第 ⑱、⑲ 步（真实主库迁移冲突后加入被拦、模板映射与候选不变；备份失败后月度余额装配复现重复、入口在处理前核对迁移状态、重试成功后解除）。I36、I37 涉及账户血缘与余额输出，按资金红线人工复核。
+
 ### 11.6 验证
 
 见 PR 说明；新增单测 `statement-channel-migration`、`statement-channel-repository`、`statement-channel-account-mappings`、`statement-channel-identity`，集成脚本 `scripts/integration/statement-channel.js`，renderer lifecycle 新增渠道用例。

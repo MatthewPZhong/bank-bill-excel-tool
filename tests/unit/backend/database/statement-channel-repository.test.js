@@ -8,6 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { AppDatabase } = require('../../../../src/backend/database');
+const statementChannelRepository = require('../../../../src/backend/database/statement-channel-repository');
 
 let appDb;
 let tmpDir;
@@ -91,6 +92,46 @@ test('加入已有渠道：无冲突的账户映射并入、相同去重；同�
   assert.equal(appDb.getTemplate(conflicting.id).channelId, null);
   assert.deepEqual(appDb.getTemplateMappings(conflicting.id).mappings, []);
   assert.deepEqual(mappingRows({ templateId: conflicting.id }), [['222', 'C222-OTHER', false, '']]);
+});
+
+// PR #246 审查：目标渠道账户号 111 的待处理冲突候选为 OLD1 / OLD2（生效映射里没有 111），模板维护 111 = NEW。
+//   只比较生效映射会放行：NEW 写入渠道而不在候选里，之后处理冲突被所选候选覆盖。加入前一并核对待处理冲突。
+test('加入已有渠道：模板维护了目标渠道待处理冲突中的账户号时阻断并回滚；不涉及冲突的模板照常加入', () => {
+  const owner = template('招商银行-上海');
+  const channelId = assign(owner.id, { mode: 'create' }).channelId;
+  appDb.saveAccountMappings({ channelId }, [{ bankAccountId: '333', clearingAccountId: 'C333' }]);
+  statementChannelRepository.replaceChannelAccountMappingConflicts(appDb.db, channelId, [{
+    bankAccountId: '111',
+    candidates: [
+      { clearingAccountId: 'OLD1', sourceNames: ['招商银行-上海'] },
+      { clearingAccountId: 'OLD2', sourceNames: ['CMB-SH'] }
+    ]
+  }]);
+  const joiner = template('招行-浦东');
+  appDb.saveAccountMappings({ templateId: joiner.id }, [{ bankAccountId: '111', clearingAccountId: 'NEW' }]);
+  assert.throws(() => assign(joiner.id, { mode: 'join', channelId }), (error) => (
+    error.code === 'CHANNEL_ACCOUNT_MAPPING_CONFLICT_PENDING'
+      && /渠道「招商银行-上海」的账户映射还有待处理的冲突/.test(error.message)
+      && error.detailLines.length === 1
+      && /^账户号 111：/.test(error.detailLines[0])
+      && /OLD1/.test(error.detailLines[0]) && /OLD2/.test(error.detailLines[0]) && /NEW/.test(error.detailLines[0])
+  ));
+  assert.equal(appDb.getTemplate(joiner.id).channelId, null);
+  assert.deepEqual(mappingRows({ templateId: joiner.id }), [['111', 'NEW', false, '']], '模板级映射保留');
+  assert.deepEqual(mappingRows({ channelId }), [['333', 'C333', false, '']], 'NEW 未写入渠道');
+  assert.equal(appDb.countStatementChannelAccountMappingConflicts(channelId), 1);
+
+  const unrelated = template('招行-陆家嘴');
+  appDb.saveAccountMappings({ templateId: unrelated.id }, [{ bankAccountId: '444', clearingAccountId: 'C444' }]);
+  assign(unrelated.id, { mode: 'join', channelId });
+  assert.deepEqual(mappingRows({ channelId }), [['333', 'C333', false, ''], ['444', 'C444', false, '']]);
+
+  // 处理冲突后 111 有了生效设置，再加入按 A9 比较：设置不同仍阻断，与所选候选相同则并入。
+  appDb.resolveStatementChannelAccountMappingConflicts(channelId, [{ bankAccountId: '111', candidateIndex: 0 }]);
+  assert.throws(() => assign(joiner.id, { mode: 'join', channelId }), { code: 'CHANNEL_ACCOUNT_MAPPING_CONFLICT' });
+  appDb.saveAccountMappings({ templateId: joiner.id }, [{ bankAccountId: '111', clearingAccountId: 'OLD1' }]);
+  assign(joiner.id, { mode: 'join', channelId });
+  assert.equal(appDb.getTemplate(joiner.id).channelId, channelId);
 });
 
 test('任意名称的模板都能加入渠道（取消名称包含校验，D3）；移出渠道时复制渠道映射（A10）', () => {

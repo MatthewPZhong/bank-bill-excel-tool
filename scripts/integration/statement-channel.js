@@ -9,6 +9,8 @@
 //   ⑥ 子模板 MerchantId 映射不同（固定账号 / 多大账号）：所选大账号只注入多大账号子模板的文件
 //   ⑦ 渠道账户映射：两个子模板的文件都按渠道映射输出清结算账号与兜底币种（回读明细）
 //   ⑧ 迁移账户映射冲突：未处理时该渠道导入阻断、普通模板照常；处理后导入成功且回读账号为所选候选
+//   ⑱ 加入渠道前核对目标渠道待处理冲突：模板维护了冲突账户号时阻断，模板映射与冲突候选不变
+//   ⑲ 渠道迁移备份失败：网银账单导入与月度余额装配被阻断（否则主、子模板同一账号的月度余额重复输出），重试成功后解除
 //   UI 由 renderer lifecycle 覆盖；本脚本验证数据、金额与文件在整条链路上的结果。
 //
 // 用法：node scripts/integration/statement-channel.js
@@ -56,6 +58,7 @@ const {
   resolveSinglePreparedFieldValue
 } = require('../../src/main-process/statement-session');
 const channelIdentity = require('../../src/main-process/statement-channel-identity');
+const { ALL_BANKS_TEMPLATE_SCOPE, assembleMonthlyBalance } = require('../../src/main-process/monthly-balance');
 
 const ROOT = path.join(__dirname, '..', '..');
 const MAIN_SOURCE = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
@@ -1013,6 +1016,93 @@ function verifyOutputPathConcatenationConflict(dir) {
   assertEq(writtenFiles(), [], 'Step17.补录重算拦下前没有写出文件');
 }
 
+// ⑱ PR #246 审查：目标渠道账户号有待处理冲突（候选 OLD1 / OLD2）、待加入模板维护该账户号为 NEW。只比较生效映射会放行加入，
+//    NEW 写入渠道而不在候选里，之后处理冲突被所选候选覆盖、账户血缘丢失。加入前一并核对待处理冲突。
+function verifyJoinChecksPendingConflicts(dir) {
+  const env = createEnvironment(dir, 'step18');
+  const owner = env.defineTemplate('招商银行-上海', 'A');
+  const child = env.defineTemplate('CMB-SH', 'B');
+  const raw = env.database.db;
+  raw.prepare('UPDATE templates SET is_parent = 1 WHERE id = ?').run(owner.id);
+  raw.prepare('UPDATE templates SET parent_template_id = ? WHERE id = ?').run(owner.id, child.id);
+  env.database.saveAccountMappings({ templateId: owner.id }, [{ bankAccountId: 'RAW001', clearingAccountId: 'OLD1' }]);
+  env.database.saveAccountMappings({ templateId: child.id }, [{ bankAccountId: 'RAW001', clearingAccountId: 'OLD2' }]);
+  assertEq(env.database.runStatementChannelMigration().conflictCount, 1, 'Step18.前置：迁移登记 RAW001 冲突');
+  const channel = env.database.getStatementChannelByName('招商银行-上海');
+  const candidates = () => env.database.listStatementChannelAccountMappingConflicts(channel.id)
+    .flatMap((item) => item.conflicts.flatMap((conflict) => conflict.candidates.map((candidate) => candidate.clearingAccountId))).sort();
+  const joiner = env.defineTemplate('招行-浦东', 'C');
+  env.database.saveAccountMappings({ templateId: joiner.id }, [{ bankAccountId: 'RAW001', clearingAccountId: 'NEW' }]);
+  const tryJoin = () => {
+    try {
+      env.saveWithChannel(joiner, { mode: 'join', channelId: channel.id });
+      return null;
+    } catch (error) {
+      return error;
+    }
+  };
+  const pendingError = tryJoin();
+  assertEq(pendingError && [pendingError.code, pendingError.detailLines.length], ['CHANNEL_ACCOUNT_MAPPING_CONFLICT_PENDING', 1],
+    'Step18.加入被阻断并列出冲突账户号');
+  assertEq(env.database.getTemplate(joiner.id).channelId, null, 'Step18.模板仍为普通模板');
+  assertEq(env.database.listAccountMappings({ templateId: joiner.id }).map((m) => [m.bankAccountId, m.clearingAccountId]), [['RAW001', 'NEW']],
+    'Step18.模板映射保留');
+  assertEq(env.database.listAccountMappings({ channelId: channel.id }).map((m) => m.clearingAccountId), [], 'Step18.NEW 未写入渠道');
+  assertEq(candidates(), ['OLD1', 'OLD2'], 'Step18.冲突候选不变');
+  const pending = env.database.listStatementChannelAccountMappingConflicts(channel.id)[0].conflicts[0].candidates.map((c) => c.clearingAccountId);
+  env.database.resolveStatementChannelAccountMappingConflicts(channel.id, [{ bankAccountId: 'RAW001', candidateIndex: pending.indexOf('OLD2') }]);
+  const a9Error = tryJoin();
+  assertEq(a9Error && a9Error.code, 'CHANNEL_ACCOUNT_MAPPING_CONFLICT', 'Step18.处理冲突后按 A9 比较生效映射，设置不同仍阻断');
+  assertEq(env.database.listAccountMappings({ channelId: channel.id }).map((m) => [m.bankAccountId, m.clearingAccountId]), [['RAW001', 'OLD2']],
+    'Step18.渠道保留所选候选');
+}
+
+// ⑲ PR #246 审查：渠道迁移备份失败（或事务回滚）后旧主/子标记保留、模板未归入渠道。月度余额只按 channelId 排除渠道模板，
+//    主、子模板维护同一账号时同一余额输出两次；迁移完成前网银账单导入（两个入口）与月度余额装配都被阻断，重试成功后解除。
+function verifyMigrationFailureBlocksStatementOperations(dir) {
+  const env = createEnvironment(dir, 'step19');
+  const owner = env.defineTemplate('招商银行-上海', 'A');
+  const child = env.defineTemplate('招商银行-上海-B', 'B');
+  for (const template of [owner, child]) {
+    env.database.saveMappings(template.id, env.exportMappingsByTemplateId.get(template.id), [{ merchantId: 'M001', currency: 'USD' }]);
+  }
+  const raw = env.database.db;
+  raw.prepare('UPDATE templates SET is_parent = 1 WHERE id = ?').run(owner.id);
+  raw.prepare('UPDATE templates SET parent_template_id = ? WHERE id = ?').run(owner.id, child.id);
+  seed(env, '招商银行-上海', 'M001', 'USD', '2026-08-31', 1000);
+  env.database.createBackup = () => { throw new Error('backup directory not writable'); };
+  assertEq(env.database.runStatementChannelMigration().status, 'backup-failed', 'Step19.前置：备份失败，迁移未执行');
+  const assemble = () => assembleMonthlyBalance({
+    templateScope: ALL_BANKS_TEMPLATE_SCOPE, year: 2026, month: 8, db: env.database, storageRoot: env.storageRoot
+  }).records.map((record) => [record.templateName, record.merchantId, record.endBalance]).sort();
+  assertEq(assemble(), [['招商银行-上海', 'M001', 1000], ['招商银行-上海-B', 'M001', 1000]],
+    'Step19.风险前提：迁移未完成时按渠道模型装配，同一账号余额输出两次');
+  const gate = loadMainFunctions(['getStatementChannelMigrationPendingMessage'], { database: env.database }).getStatementChannelMigrationPendingMessage;
+  assertTrue(/数据迁移尚未完成/.test(gate()), 'Step19.迁移未完成：阻断提示');
+  assertTrue(statementOperationsGatedByChannelMigration(), 'Step19.两个导入入口与月度余额装配在实际处理前核对迁移状态');
+
+  delete env.database.createBackup;
+  assertEq(env.database.runStatementChannelMigration().status, 'migrated', 'Step19.下次启动重试成功');
+  assertEq(gate(), '', 'Step19.迁移完成后解除阻断');
+  assertEq(assemble(), [], 'Step19.迁移完成后渠道模板不在月度余额范围（A7），不再重复');
+}
+
+function statementOperationsGatedByChannelMigration() {
+  const gateCall = 'getStatementChannelMigrationPendingMessage()';
+  const node = MAIN_AST.body.find((item) => item.type === 'FunctionDeclaration' && item.id && item.id.name === 'handleFilenameMappingImport');
+  const filenameMapping = MAIN_SOURCE.slice(node.start, node.end);
+  const designated = MAIN_SOURCE.slice(MAIN_SOURCE.indexOf('const fileImportHandler = {'), MAIN_SOURCE.indexOf('let preparedFiles;'));
+  const monthly = MAIN_SOURCE.slice(
+    MAIN_SOURCE.indexOf("trackedIpcHandle('monthly-balance:assemble'"),
+    MAIN_SOURCE.indexOf("trackedIpcHandle('monthly-balance:export'")
+  );
+  const filenameGate = filenameMapping.indexOf(gateCall);
+  const monthlyGate = monthly.indexOf(gateCall);
+  return filenameGate > 0 && filenameGate < filenameMapping.indexOf('fileImportInProgress = true;')
+    && designated.includes(gateCall)
+    && monthlyGate > 0 && monthlyGate < monthly.indexOf('assembleMonthlyBalance({');
+}
+
 async function run() {
   console.log('==== 网银账单渠道与子模板 e2e 集成验证 ====');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stmt-channel-'));
@@ -1033,6 +1123,8 @@ async function run() {
     verifyLegacyBundleMultiLevelSkippedParent(dir);
     verifyMultiTemplateGenerationStaleState(dir);
     verifyOutputPathConcatenationConflict(dir);
+    verifyJoinChecksPendingConflicts(dir);
+    verifyMigrationFailureBlocksStatementOperations(dir);
   } finally {
     openedDatabases.splice(0).forEach((database) => {
       try { database.close(); } catch (error) { console.error('关闭测试主库失败', error); }

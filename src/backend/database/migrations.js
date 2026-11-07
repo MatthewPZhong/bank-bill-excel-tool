@@ -338,6 +338,15 @@ function ensureStatementChannelTables(db) {
   }
 }
 
+// v3.2.15 PR #246 审查：渠道迁移是否尚未完成。旧主/子标记只在迁移成功时清零，备份失败或事务回滚后仍保留，
+//   此时主、子模板都未归入渠道，按渠道模型生成会各自输出、月度余额同一账号重复；调用方据此阻断依赖渠道模型的账单操作。
+function hasPendingStatementChannelMigration(db) {
+  if (!hasColumn(db, 'templates', 'is_parent') || !hasColumn(db, 'templates', 'parent_template_id')) {
+    return false;
+  }
+  return Boolean(db.prepare('SELECT 1 FROM templates WHERE is_parent <> 0 OR parent_template_id IS NOT NULL LIMIT 1').get());
+}
+
 // v3.2.15：把旧的主/子模板一次性转为渠道（spec §4.7，D1、D5、D8）。
 //   - 渠道来源：is_parent = 1 的模板，以及被 parent_template_id 引用的模板；沿 parent 链取根模板，
 //     根模板名即渠道名，链上的模板都归入该渠道。
@@ -4291,6 +4300,7 @@ module.exports = {
   ensureBillSplitTargetSeqSupport,
   ensureParentTemplateSupport,
   ensureStatementChannelSupport,
+  hasPendingStatementChannelMigration,
   ensureStatementChannelTables,
   ensureScenariosSupport,
   ensureScenariosCategoryReconIdFix,

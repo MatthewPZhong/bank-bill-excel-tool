@@ -17,6 +17,7 @@ const {
   ensureBillSplitTargetSeqSupport,
   ensureParentTemplateSupport,
   ensureStatementChannelSupport,
+  hasPendingStatementChannelMigration,
   ensureScenariosSupport,
   ensureScenariosCategoryReconIdFix,
   ensureScenariosCategoryGatewayReconIdFix,
@@ -781,7 +782,12 @@ class AppDatabase {
     return ensureStatementChannelSupport(this.db, (label) => this.createBackup(label));
   }
 
-  // v3.2.15：失败时回滚并记日志，启动不阻塞，旧标记保留到下次启动重试（同 N5 迁移的处理）。
+  hasPendingStatementChannelMigration() {
+    return hasPendingStatementChannelMigration(this.db);
+  }
+
+  // v3.2.15：失败时回滚并记日志，启动不阻塞，旧标记保留到下次启动重试（同 N5 迁移的处理）；
+  //   旧标记保留期间网银账单导入与月度余额装配被阻断（hasPendingStatementChannelMigration，PR #246 审查）。
   //   转换结果逐条写入活动日志：模板名银行段 / 所在地段与渠道不同的模板改按渠道名输出，种子文件不搬移（D5）。
   runStatementChannelMigration() {
     let result;
@@ -817,8 +823,8 @@ class AppDatabase {
         source: 'main',
         domain: 'migration',
         message: result.status === 'backup-failed'
-          ? '[migration v3.2.15] 备份失败，主模板未转为渠道，下次启动重试'
-          : '[migration v3.2.15] 主模板转为渠道失败，已回滚，下次启动重试',
+          ? '[migration v3.2.15] 备份失败，主模板未转为渠道，下次启动重试；完成前暂停网银账单导入与月度余额装配'
+          : '[migration v3.2.15] 主模板转为渠道失败，已回滚，下次启动重试；完成前暂停网银账单导入与月度余额装配',
         details: [
           `备份：${result.backupPath || '(none)'}`,
           errorMessage(result.error)
