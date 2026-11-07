@@ -138,9 +138,18 @@ function savedOrderAssignmentsKey(assignments) {
     .join('\u0001');
 }
 
-// 记住顺序里每份文件逐块（与当时大账号预览的固定模式行一一对应，含空段 / 未识别段）识别到的账号，未识别为 ''。
-// v3.2.15 之前保存的顺序没有逐块信息：只有当时每块都识别到账号时，逐块账号就是 accounts；
-// 否则无法还原各文件占了哪几条分配，返回 null，调用方不按记住的分配逐块套用。
+// 逐块信息统一为 { merchantId, empty }：merchantId 为识别到的账号（未识别为 ''），empty 为该块是否没有交易
+// （true / false；不知道时为 null，按有交易处理）。为兼容只传账号字符串的调用，字符串视为 empty 未知。
+function normalizeOrderRow(row) {
+  if (row && typeof row === 'object') {
+    return { merchantId: normalizeCell(row.merchantId), empty: typeof row.empty === 'boolean' ? row.empty : null };
+  }
+  return { merchantId: normalizeCell(row), empty: null };
+}
+
+// 记住顺序里每份文件逐块（与当时大账号预览的固定模式行一一对应，含空段 / 未识别段）的识别账号与是否有交易。
+// 新数据取 rowAccounts（未识别为 ''）与 rowEmpty；v3.2.15 之前保存的顺序没有逐块信息：只有当时每块都识别到账号时，
+// 逐块账号就是 accounts（是否有交易未知）；否则无法还原各文件占了哪几条分配，返回 null，调用方不按记住的分配逐块套用。
 function resolveSavedOrderFileRows(savedOrderConfig = {}) {
   const savedFiles = Array.isArray(savedOrderConfig && savedOrderConfig.files) ? savedOrderConfig.files : [];
   const savedAssignments = Array.isArray(savedOrderConfig && savedOrderConfig.assignments)
@@ -148,10 +157,15 @@ function resolveSavedOrderFileRows(savedOrderConfig = {}) {
     : [];
   if (!savedFiles.length) return null;
   const rowsByFile = savedFiles.map((savedFile) => {
-    if (Array.isArray(savedFile.rowAccounts)) return savedFile.rowAccounts.map((merchantId) => normalizeCell(merchantId));
+    if (Array.isArray(savedFile.rowAccounts)) {
+      const rowEmpty = Array.isArray(savedFile.rowEmpty) && savedFile.rowEmpty.length === savedFile.rowAccounts.length
+        ? savedFile.rowEmpty
+        : [];
+      return savedFile.rowAccounts.map((merchantId, position) => normalizeOrderRow({ merchantId, empty: rowEmpty[position] }));
+    }
     const accounts = Array.isArray(savedFile.accounts) ? savedFile.accounts : [];
     return accounts.length === savedFile.accountCount
-      ? accounts.map((account) => normalizeCell(account && account.merchantId))
+      ? accounts.map((account) => normalizeOrderRow(account && account.merchantId))
       : null;
   });
   if (rowsByFile.some((rows) => rows === null)) return null;
@@ -159,7 +173,8 @@ function resolveSavedOrderFileRows(savedOrderConfig = {}) {
   return rowTotal === savedAssignments.length ? rowsByFile : null;
 }
 
-// 按记住的分配逐块套用前，本次每份文件逐块识别结果（未识别为 ''）须与对上的记住文件逐块一致：
+// 按记住的分配逐块套用前，本次每份文件逐块识别结果须与对上的记住文件逐块一致：
+// 识别到账号的块须账号相同；未识别的块须同为无交易空段或同为有交易块（任一侧不知道是否有交易都算对不上）。
 // 账号块换序、空段 / 未识别段的位置或个数变化，按位置套用都会把账号 / 币种挂到别的块上。
 // 返回逐块对不上的导入文件下标；记住的顺序无法还原逐块信息时全部视为对不上。
 function findSavedOrderFileRowMismatches(importRowLists = [], savedOrderConfig = {}, savedIndexByImport = []) {
@@ -168,20 +183,33 @@ function findSavedOrderFileRowMismatches(importRowLists = [], savedOrderConfig =
   return importLists
     .map((rows, importIndex) => {
       const saved = savedRows ? savedRows[savedIndexByImport[importIndex]] : null;
-      const current = Array.isArray(rows) ? rows.map((merchantId) => normalizeCell(merchantId)) : null;
+      const current = Array.isArray(rows) ? rows.map(normalizeOrderRow) : null;
       const matches = Boolean(saved && current)
         && current.length === saved.length
-        && current.every((merchantId, position) => merchantId === saved[position]);
+        && current.every((row, position) => {
+          const savedRow = saved[position];
+          if (row.merchantId !== savedRow.merchantId) return false;
+          if (row.merchantId) return true;
+          return row.empty !== null && savedRow.empty !== null && row.empty === savedRow.empty;
+        });
       return matches ? -1 : importIndex;
     })
     .filter((importIndex) => importIndex >= 0);
 }
 
+// 有交易但识别不出账号的块：分配只能按位置取，无法核对。
+function hasUnidentifiedTransactionRows(importRowLists = []) {
+  return (Array.isArray(importRowLists) ? importRowLists : []).some((rows) => (Array.isArray(rows) ? rows : [])
+    .map(normalizeOrderRow)
+    .some((row) => !row.merchantId && row.empty !== true));
+}
+
 // 固定模式按已记住顺序自动套用：每个导入文件按账号块顺序依次比对识别到的账号，对上第一个未用过的已记住文件，
 // 再按导入顺序重排该文件记住的账号 / 币种分配。
 // 匹配不看币种：一个导入文件能对上多个已记住文件、且它们记住的分配不同时（如同一多币种大账号的
-// CNY、USD 两份账单），实际取到哪份只取决于本次导入顺序，记为 ambiguous，不产出自动分配；
-// 同一文件里同一账号出现在多个块且记住的币种不同时，哪块取哪个币种只取决于块顺序，同样记为 ambiguous。
+// CNY、USD 两份账单），实际取到哪份只取决于本次导入顺序，记为 ambiguous，不产出自动分配。
+// 同一文件里哪块取哪条分配只取决于块顺序、而识别无法区分时，同样记为 ambiguous：
+//   同一账号出现在多个块且记住的币种不同；或两个以上有交易但未识别账号的块记住的分配不同。
 function matchImportFilesToSavedOrder(importAccountLists = [], savedOrderConfig = {}) {
   const savedFiles = Array.isArray(savedOrderConfig && savedOrderConfig.files) ? savedOrderConfig.files : [];
   const savedAssignments = Array.isArray(savedOrderConfig && savedOrderConfig.assignments)
@@ -197,20 +225,26 @@ function matchImportFilesToSavedOrder(importAccountLists = [], savedOrderConfig 
     savedSlices.push(savedAssignments.slice(cursor, cursor + count));
     cursor += count;
   });
-  const sameAccountCurrencyConflicts = savedFiles.map((savedFile, savedIndex) => {
+  const blockOrderDependent = savedFiles.map((savedFile, savedIndex) => {
     if (!savedRows) {
       const merchantIds = (Array.isArray(savedFile.accounts) ? savedFile.accounts : [])
         .map((account) => normalizeCell(account && account.merchantId));
       return new Set(merchantIds).size !== merchantIds.length;
     }
     const currenciesByAccount = new Map();
-    savedRows[savedIndex].forEach((merchantId, position) => {
-      if (!merchantId) return;
-      const currencies = currenciesByAccount.get(merchantId) || new Set();
-      currencies.add(normalizeCell(savedSlices[savedIndex][position] && savedSlices[savedIndex][position].currency));
-      currenciesByAccount.set(merchantId, currencies);
+    const unidentifiedTransactionKeys = new Set();
+    savedRows[savedIndex].forEach((row, position) => {
+      const assignment = savedSlices[savedIndex][position];
+      if (!row.merchantId) {
+        if (row.empty !== true) unidentifiedTransactionKeys.add(savedOrderAssignmentsKey([assignment]));
+        return;
+      }
+      const currencies = currenciesByAccount.get(row.merchantId) || new Set();
+      currencies.add(normalizeCell(assignment && assignment.currency));
+      currenciesByAccount.set(row.merchantId, currencies);
     });
-    return Array.from(currenciesByAccount.values()).some((currencies) => currencies.size > 1);
+    return unidentifiedTransactionKeys.size > 1
+      || Array.from(currenciesByAccount.values()).some((currencies) => currencies.size > 1);
   });
 
   const usedSavedIndices = new Set();
@@ -230,7 +264,7 @@ function matchImportFilesToSavedOrder(importAccountLists = [], savedOrderConfig 
         if (sameOrder) candidates.push(savedIndex);
       });
       const candidateKeys = new Set(candidates.map((savedIndex) => savedOrderAssignmentsKey(savedSlices[savedIndex])));
-      if (candidateKeys.size > 1 || candidates.some((savedIndex) => sameAccountCurrencyConflicts[savedIndex])) {
+      if (candidateKeys.size > 1 || candidates.some((savedIndex) => blockOrderDependent[savedIndex])) {
         ambiguousImportIndexes.push(importIndex);
       }
       const savedIndex = candidates.find((index) => !usedSavedIndices.has(index));
@@ -255,6 +289,7 @@ function matchImportFilesToSavedOrder(importAccountLists = [], savedOrderConfig 
 
 module.exports = {
   findSavedOrderFileRowMismatches,
+  hasUnidentifiedTransactionRows,
   normalizeMaintainedBigAccounts,
   matchImportFilesToSavedOrder,
   matchMerchantIds,

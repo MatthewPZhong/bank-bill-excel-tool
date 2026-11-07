@@ -757,6 +757,7 @@ const {
 } = require('./main-process/import-dialog-state');
 const {
   findSavedOrderFileRowMismatches,
+  hasUnidentifiedTransactionRows,
   matchImportFilesToSavedOrder,
   matchMerchantIds,
   normalizeMaintainedBigAccounts,
@@ -11971,15 +11972,6 @@ function findSelfInputBigAccountBridge(recognitionBasis, expandedOptions, blockO
   return null;
 }
 
-function identifySelfInputBigAccountBridges(recognitionBasis, expandedOptions) {
-  const clearingIds = recognitionBasis && Array.isArray(recognitionBasis.bridgeClearingIdsByBlock)
-    ? recognitionBasis.bridgeClearingIdsByBlock
-    : [];
-  return clearingIds.map((_clearingId, blockOrdinal) => (
-    findSelfInputBigAccountBridge(recognitionBasis, expandedOptions, blockOrdinal)
-  ));
-}
-
 function buildBigAccountOrderEvidence(pendingContext) {
   const fileEntries = Array.isArray(pendingContext.fileEntries) ? pendingContext.fileEntries : [];
   const allMerchantIds = (pendingContext.bigAccounts || [])
@@ -12053,6 +12045,10 @@ function buildBigAccountOrderEvidence(pendingContext) {
       ).size > 1
         ? 'MULTI_CURRENCY'
         : null;
+      // 无交易空段：固定模式预览行的块起止为空区间。区分空段与“有交易但未识别账号”的块，
+      // 记住顺序时据此核对未识别块的位置是否变化。
+      const blockStart = Number(previewRow.blockStartIndex);
+      const blockEnd = Number(previewRow.blockEndIndex);
       return Object.freeze({
         blockOrdinal,
         sourceRow,
@@ -12060,7 +12056,8 @@ function buildBigAccountOrderEvidence(pendingContext) {
         currency,
         matchKind: identified ? identified.matchType : '',
         accountKey: merchantId ? `${merchantId}\u0000${currency}` : '',
-        ambiguityCode
+        ambiguityCode,
+        empty: Number.isInteger(blockStart) && Number.isInteger(blockEnd) ? blockStart > blockEnd : null
       });
     });
     return Object.freeze({
@@ -12153,11 +12150,22 @@ function extractBigAccountOrderFromEvidence(pendingContext, mode, rowIndexes) {
   return result;
 }
 
-// 大账号顺序证据里每份文件逐块（与固定模式预览行一一对应）识别到的账号，未识别为 ''；与保存顺序的 rowAccounts 同口径。
+// 大账号顺序证据里每份文件逐块（与固定模式预览行一一对应）的 { merchantId（未识别为 ''）, empty（是否无交易，未知为 null）}；
+// 与保存顺序的 rowAccounts / rowEmpty 同口径。
 function bigAccountOrderEvidenceRowLists(evidence) {
   const files = evidence && Array.isArray(evidence.files) ? evidence.files : [];
   return files.map((file) => (Array.isArray(file.rows) ? file.rows : [])
-    .map((row) => (row.accountKey !== '' ? normalizeCell(row.merchantId) : '')));
+    .map((row) => ({
+      merchantId: row.accountKey !== '' ? normalizeCell(row.merchantId) : '',
+      empty: typeof row.empty === 'boolean' ? row.empty : null
+    })));
+}
+
+// 逐块结果里识别到的账号（按块顺序），供匹配记住的文件。
+function identifiedAccountsFromRowLists(rowLists) {
+  return rowLists.map((rows) => rows
+    .filter((row) => row.merchantId !== '')
+    .map((row) => ({ merchantId: row.merchantId })));
 }
 
 // v3.2.15（release 审查）：固定模式下界面按位置逐块套用记住的分配，而完成选择时服务端只核对账号、不核对币种。
@@ -12179,7 +12187,7 @@ function resolveSavedBigAccountOrderDecision(pendingContext) {
   if (evidenceFiles.length !== savedOrderConfig.fileCount) return { forceUnfixed: true, reason: 'file-count', fileNames: [] };
   const importRowLists = bigAccountOrderEvidenceRowLists(pendingContext.bigAccountOrderEvidence);
   const { failedImportIndexes, ambiguousImportIndexes, savedIndexByImport } = matchImportFilesToSavedOrder(
-    importRowLists.map((rows) => rows.filter((merchantId) => merchantId !== '').map((merchantId) => ({ merchantId }))),
+    identifiedAccountsFromRowLists(importRowLists),
     savedOrderConfig
   );
   if (ambiguousImportIndexes.length) {
@@ -12200,7 +12208,7 @@ const SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS = Object.freeze({
   'file-count': '本次导入的文件个数与记住的不同',
   mismatch: '部分文件的账户个数、账户号或账号块顺序与记住的对不上',
   reordered: '文件顺序与记住的不同',
-  rows: '部分文件的账号块（含无交易的空段）与记住的对不上'
+  rows: '部分文件的账号块（含无交易的空段、未识别账号的块）与记住的对不上'
 });
 
 // 降级在预检阶段做出：常规导入预检返回大账号选择后直接转入完成选择，不会再以非预检方式运行到这里，
@@ -12239,9 +12247,10 @@ function buildBigAccountOrderData(pendingContext, assignments = []) {
       const accounts = file.rows
         .filter((row) => row.accountKey !== '')
         .map((row) => ({ merchantId: row.merchantId, currency: row.currency }));
-      // 逐块识别账号与 assignments 一一对应（含空段 / 未识别段），供下次按块核对能否按位置套用。
+      // 逐块识别账号、是否无交易与 assignments 一一对应（含空段 / 未识别段），供下次按块核对能否按位置套用。
       const rowAccounts = file.rows.map((row) => (row.accountKey !== '' ? row.merchantId : ''));
-      return { fileIndex: file.fileOrdinal, accountCount: accounts.length, accounts, rowAccounts };
+      const rowEmpty = file.rows.map((row) => (typeof row.empty === 'boolean' ? row.empty : null));
+      return { fileIndex: file.fileOrdinal, accountCount: accounts.length, accounts, rowAccounts, rowEmpty };
     })
   };
 }
@@ -13153,49 +13162,23 @@ function registerFileHandlers() {
           const importFileCount = selectionResult.filePaths.length;
 
           if (importFileCount !== savedOrderConfig.fileCount) {
-            // 文件个数不等于"记住顺序"里的文件个数 → 降级为"不固定"模式
+            // 文件个数不等于"记住顺序"里的文件个数 → 降级为"不固定"模式（不缓存判定，预检返回选择后不会再执行到这里）
             forceUnfixedMode = true;
+            logSavedBigAccountOrderDowngrade(templateConfig.template.name, { reason: 'file-count', fileNames: [] });
           } else if (importFileCount === savedOrderConfig.fileCount) {
             const autoMatchDecision = resolvePreparedFixedBigAccountAutoMatchDecision(
               prepared,
               () => {
-                const allMerchantIds = effectiveBigAccounts
-                  .map((ba) => normalizeCell(ba.merchantId))
-                  .filter((id) => id !== '');
-                const defaultExpectedSourceHeaders = templateConfig.template.headers || [];
-
-                // 每个导入文件用账户个数+账户号去全部保存文件里找匹配（不按位置对位）
-                const importAccountLists = provisionalFileEntries.map((entry) => {
-                  const entryHeaders = entry.matchedHeaders || defaultExpectedSourceHeaders;
-                  let fileResult = entry.skipDirectMerchantLookup
-                    ? { accounts: [], isSingleAccount: false }
-                    : identifyAccountsFromFile({
-                        filePath: entry.filePath,
-                        detailRows: entry.detailRows,
-                        expectedSourceHeaders: entryHeaders,
-                        allMerchantIds,
-                        recognitionBasis: entry.detailRows && entry.detailRows.bigAccountRecognitionBasis
-                      });
-
-                  // 自定义输入 MerchantId：通过账户映射桥接提取（merchantId 不在文件中，跳过全文搜索）
-                  if (fileResult.accounts.length === 0 && entry.selfInputMerchant) {
-                    const bridgeAccounts = identifySelfInputBigAccountBridges(
-                      entry.detailRows && entry.detailRows.bigAccountRecognitionBasis,
-                      expandBigAccountConfigurations(effectiveBigAccounts)
-                    );
-                    if (bridgeAccounts.length > 0 && bridgeAccounts.every(Boolean)) {
-                      fileResult = {
-                        accounts: bridgeAccounts.map((bridge) => ({
-                          merchantId: bridge.merchantId,
-                          matchType: bridge.matchType
-                        })),
-                        isSingleAccount: bridgeAccounts.length === 1
-                      };
-                    }
-                  }
-
-                  return fileResult.accounts;
-                });
+                // 每个导入文件按块顺序识别到的账号去全部保存文件里找匹配（不按位置对位）。识别取大账号顺序证据，
+                // 与保存顺序同口径：直接识别逐块取，自定义输入 MerchantId 逐块经账户映射桥接（部分块桥接不到时
+                // 保留已桥接的块，与保存时一致），只用导入时冻结的识别依据，不重开源文件。
+                const importAccountLists = identifiedAccountsFromRowLists(bigAccountOrderEvidenceRowLists(
+                  buildBigAccountOrderEvidence({
+                    fileEntries: provisionalFileEntries,
+                    bigAccounts: effectiveBigAccounts,
+                    rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true })
+                  })
+                ));
 
                 const {
                   failedImportIndexes,
@@ -13245,15 +13228,14 @@ function registerFileHandlers() {
 
               // 重排后按位置逐块套用：每份文件逐块识别结果须与对上的记住文件一致（空段 / 未识别段位置、
               // 旧数据无法还原逐块信息时不自动套用，转人工选择，由下方选择结果的顺序核对降级）。
-              const rowMismatches = findSavedOrderFileRowMismatches(
-                bigAccountOrderEvidenceRowLists(pendingContext.bigAccountOrderEvidence),
-                savedOrderConfig,
-                savedIndexByImport
-              );
+              // 有交易但识别不出账号的块只能按位置取分配、无法核对，也不自动生成，交由用户在选择窗口确认。
+              const importRowLists = bigAccountOrderEvidenceRowLists(pendingContext.bigAccountOrderEvidence);
+              const autoApplicable = findSavedOrderFileRowMismatches(importRowLists, savedOrderConfig, savedIndexByImport).length === 0
+                && !hasUnidentifiedTransactionRows(importRowLists);
               const autoResult = prepared.previewOnly
                 ? null
                 : await ipcMain.emit('__internal-complete-big-account-selection__') || null;
-              if (!autoResult && rowMismatches.length === 0) {
+              if (!autoResult && autoApplicable) {
                 try {
                   const directResult = await (async () => {
                     const isFixedMode = true;
