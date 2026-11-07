@@ -278,6 +278,8 @@ function createEnvironment(dir, label) {
     'findGenerationGroupBalanceModeMismatch',
     'buildChannelBalanceModeMismatchError',
     'generateMultiTemplateGroupFiles',
+    'planVirtualTemplateBalanceRegeneration',
+    'assertVirtualTemplateBalanceOutputPaths',
     'regenerateVirtualTemplateBalanceFromSession',
     'normalizeTemplateChannelAssignment',
     'findSaveMappingsBalanceModeMismatch',
