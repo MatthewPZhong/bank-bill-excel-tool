@@ -90,8 +90,8 @@ function loadOutputNameConflictFunctions(database = { listTemplates: () => [], l
   return {
     findGenerationGroupOutputNameConflicts: loadMainFunction(
       'findGenerationGroupOutputNameConflicts',
-      ['database', 'resolveStatementOutputName', 'normalizeCell'],
-      [database, identity.resolveStatementOutputName, normalizeCell]
+      ['database', 'resolveStatementOutputName', 'normalizeCell', 'sanitizeFileName'],
+      [database, identity.resolveStatementOutputName, normalizeCell, loadMainFunction('sanitizeFileName')]
     ),
     buildStatementOutputNameConflictError: loadMainFunction(
       'buildStatementOutputNameConflictError',
@@ -846,6 +846,109 @@ test('主进程：按文件名映射补录时，会话里的模板与库里的�
   assert.equal(result.errorCode, 'STATEMENT_OUTPUT_NAME_CONFLICT');
   assert.deepEqual(result.detailLines, ['输出名称「模板1」：模板「模板1」、渠道「模板1」']);
   assert.deepEqual(calls, { seed: 0, regenerate: 0, cleared: 1 });
+});
+
+// 指定模板（非虚拟 ID）的会话：库里有输出名称只差大小写的渠道。
+const NAME_CONFLICT_DATABASE = {
+  listTemplates: () => [{ id: 5, name: 'bank-sg', channelId: null }],
+  listStatementChannels: () => [{ id: 9, name: 'BANK-SG' }],
+  countStatementChannelAccountMappingConflicts: () => 0
+};
+const singleTemplateConfig = (tid) => ({
+  template: { id: tid, name: tid === 5 ? 'bank-sg' : `模板${tid}`, channelId: null },
+  exportMappings: [],
+  exportTargetFields: []
+});
+
+test('主进程：指定模板会话导出全部重新生成前，模板与库里渠道的输出名称相同则阻断，不记上下文也不生成（release/v3.2.15 复审）', async () => {
+  const { resolveGenerationGroupKey } = require('../../../src/main-process/statement-channel-identity');
+  for (const [label, templateId, expected] of [
+    ['同名', 5, ['输出名称「bank-sg」：模板「bank-sg」、渠道「BANK-SG」']],
+    ['不同名', 6, null]
+  ]) {
+    const calls = { context: 0, remembered: 0, generate: 0 };
+    const exportAll = loadExportStatementByScope({
+      ...loadOutputNameConflictFunctions(NAME_CONFLICT_DATABASE),
+      resolveGenerationGroupKey,
+      getCurrentStatementSession: () => ({ key: 'session-1', templateId, templateName: `模板${templateId}` }),
+      isFilenameMappingMode: () => false,
+      getGeneratedStatementExport: () => null,
+      getTemplateMappingConfig: singleTemplateConfig,
+      getStatementSessionEntries: () => [{ matchedTemplateId: templateId }],
+      resolveGenerationTemplateConfig: ({ fallbackTemplateConfig }) => fallbackTemplateConfig,
+      createErrorResult: (payload) => ({ status: 'error', ...payload }),
+      buildStatementSessionGenerationContext: () => { calls.context += 1; return { config: {}, preparedBatch: { detailRows: [] } }; },
+      rememberLastFileImportContext: () => { calls.remembered += 1; },
+      createGenerationContext: (context) => context,
+      generateStatementFiles: () => { calls.generate += 1; throw new Error('reached-generation'); }
+    });
+    if (expected) {
+      const result = await exportAll('balance', 'all');
+      assert.equal(result.errorCode, 'STATEMENT_OUTPUT_NAME_CONFLICT', label);
+      assert.deepEqual(result.detailLines, expected, label);
+      assert.deepEqual(calls, { context: 0, remembered: 0, generate: 0 }, label);
+    } else {
+      await assert.rejects(exportAll('balance', 'all'), /reached-generation/, label);
+      assert.deepEqual(calls, { context: 1, remembered: 1, generate: 1 }, label);
+    }
+  }
+});
+
+// 指定模板导入的 execute 是 registerFileHandlers 里任务对象的方法，按 AST 取出单独运行。
+function loadSingleTemplateImportExecute(deps) {
+  const register = MAIN_AST.body.find((item) => item.type === 'FunctionDeclaration' && item.id && item.id.name === 'registerFileHandlers');
+  const hits = [];
+  (function visit(node) {
+    if (!node || typeof node.type !== 'string') return;
+    if (node.type === 'Property' && node.key && node.key.name === 'execute'
+      && node.value.params.length === 4 && node.value.params[3].name === 'templateId') hits.push(node);
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) value.forEach(visit);
+      else if (value && typeof value.type === 'string') visit(value);
+    }
+  })(register);
+  assert.equal(hits.length, 1, '指定模板导入的 execute 应唯一');
+  const method = hits[0].value;
+  const source = `async function execute${MAIN_SOURCE.slice(method.params[0].start - 1, method.end)}`;
+  const names = Object.keys(deps);
+  return Function(...names, `return (${source});`)(...names.map((name) => deps[name]));
+}
+
+test('主进程：指定模板导入时模板与库里渠道的输出名称相同，在建立会话前阻断（release/v3.2.15 复审）', async () => {
+  const { resolveGenerationGroupKey } = require('../../../src/main-process/statement-channel-identity');
+  for (const [label, templateId, expected] of [
+    ['同名', 5, ['输出名称「bank-sg」：模板「bank-sg」、渠道「BANK-SG」']],
+    ['不同名', 6, null]
+  ]) {
+    const calls = { session: 0 };
+    const execute = loadSingleTemplateImportExecute({
+      ...loadOutputNameConflictFunctions(NAME_CONFLICT_DATABASE),
+      resolveGenerationGroupKey,
+      database: NAME_CONFLICT_DATABASE,
+      fileImportInProgress: false,
+      bindStatementImportPreparedToFileEvidence: (prepared) => prepared,
+      isFilenameMappingMode: () => false,
+      clearPendingManualBalancePrompt: () => {},
+      clearPendingBigAccountSelection: () => {},
+      clearGeneratedExports: () => {},
+      getTemplateMappingConfig: singleTemplateConfig,
+      STATEMENT_SOURCE_FRESHNESS_FAILURE: { code: 'STATEMENT_SOURCE_FRESHNESS_FAILURE' },
+      FileValidationError,
+      createErrorResult: (payload) => ({ status: 'error', ...payload }),
+      statementImportSessionForInvocation: () => { calls.session += 1; throw new FileValidationError('REACHED_SESSION', '已进入建立会话'); }
+    });
+    const prepared = { previewOnly: false, inputFilePaths: ['/tmp/a.xlsx'] };
+    const taskContext = { fileEvidence: { filePlan: { inputs: [] } } };
+    const result = await execute(null, prepared, taskContext, templateId);
+    if (expected) {
+      assert.equal(result.errorCode, 'STATEMENT_OUTPUT_NAME_CONFLICT', label);
+      assert.deepEqual(result.detailLines, expected, label);
+      assert.equal(calls.session, 0, label);
+    } else {
+      assert.equal(result.errorCode, 'REACHED_SESSION', label);
+      assert.equal(calls.session, 1, label);
+    }
+  }
 });
 
 function loadOutputPathHelpers(storageRoot, today) {
