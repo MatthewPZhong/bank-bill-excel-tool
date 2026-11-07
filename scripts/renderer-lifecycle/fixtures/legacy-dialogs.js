@@ -135,6 +135,34 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     {count:1,selectionOpen:false,parentTop:true,applied:1,assignments:[{rowIndex:0,merchantId:'TEST-ACCOUNT',currency:'USD'}],errors:[]});
   });
 
+  // v3.2.15（release 复审）：后端判定记住的顺序不能按位置套用到本次文件（forceMode）后，
+  //   首次打开和手动切回“账号顺序固定”都不能再预填旧分配，否则直接点完成会把账号 / 币种填到别的文件或块上。
+  await test('后端判定记住的顺序不适用时首次打开和手动切回固定模式都不预填旧顺序', async () => {
+    const openWith = async (forceMode, switchToFixed) => {
+      await setup();
+      await js(`Object.assign(window.desktopApi.bigAccount,{loadMode:async()=>({mode:'fixed'}),saveMode:async()=>({status:'success'}),
+        loadOrder:async()=>({order:{assignments:[{rowIndex:0,merchantId:'TEST-ACCOUNT',currency:'USD'}]}})});
+        legacy.open(()=>legacy.dialogs.createBigAccountSelectionDialog({contextId:'selection-fixture-token',templateId:7,templateName:'测试模板',
+          rows:[{index:0,fileIndex:0,fileName:'fixture.xlsx',sourceRowNumber:1}],
+          rowsWithEmptyBlocks:[{index:0,fileIndex:0,fileName:'fixture.xlsx',sourceRowNumber:1}],
+          expandedBigAccountOptions:[{merchantId:'TEST-ACCOUNT',currency:'USD'},{merchantId:'TEST-ACCOUNT',currency:'EUR'}]
+          ${forceMode ? `,forceMode:'${forceMode}'` : ''}}));void 0;`);
+      await settle(); await settle();
+      if (switchToFixed) {
+        await js(`const select=legacy.overlay.querySelector('.big-account-mode-select');select.value='fixed';select.dispatchEvent(new Event('change'));void 0;`);
+        await settle(); await settle();
+      }
+      return js(`({mode:legacy.overlay.querySelector('.big-account-mode-select').value,
+        remember:legacy.overlay.querySelector('.big-account-remember-checkbox').checked,
+        prefilled:legacy.overlay.querySelectorAll('.big-account-order-text-item').length
+          +legacy.overlay.querySelectorAll('.big-account-order-checkbox:checked').length,errors:window.__testErrors})`);
+    };
+    assert.deepEqual(await openWith(null, false), {mode:'fixed',remember:true,prefilled:1,errors:[]}, '对照：记住的顺序适用时照常预填');
+    assert.deepEqual(await openWith('unfixed', false), {mode:'unfixed',remember:false,prefilled:0,errors:[]});
+    assert.deepEqual(await openWith('unfixed', true), {mode:'fixed',remember:false,prefilled:0,errors:[]}, '降级后手动切回固定');
+    assert.deepEqual(await openWith('fixed', false), {mode:'fixed',remember:false,prefilled:0,errors:[]}, '记住顺序不匹配后变更配置');
+  });
+
   await test('未维护大账号确认与取消进度为子流程，取消失败可重试且成功结束原会话', async () => {
     await setup();
     await js(`legacy.cancellation=legacy.deferred();legacy.openBigAccount();`); await settle();

@@ -35,7 +35,11 @@ function readBigAccountOrder(storageRoot, templateId) {
               merchantId: normalizeCell(a.merchantId),
               currency: normalizeCell(a.currency)
             })).filter((a) => a.merchantId !== '')
-          : []
+          : [],
+        // 逐块识别账号（含空段 / 未识别段，未识别为 ''）；v3.2.15 之前保存的顺序没有此项。
+        ...(Array.isArray(file.rowAccounts)
+          ? { rowAccounts: file.rowAccounts.map((merchantId) => normalizeCell(merchantId)) }
+          : {})
       }));
     }
 
@@ -71,7 +75,10 @@ function writeBigAccountOrder(storageRoot, templateId, data) {
             merchantId: normalizeCell(a.merchantId),
             currency: normalizeCell(a.currency)
           })).filter((a) => a.merchantId !== '')
-        : []
+        : [],
+      ...(Array.isArray(file.rowAccounts)
+        ? { rowAccounts: file.rowAccounts.map((merchantId) => normalizeCell(merchantId)) }
+        : {})
     }));
   }
 
