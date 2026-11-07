@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 const acorn = require('acorn');
 const {
+  buildExpectedHeaderCandidates,
   buildMappedRows,
   sourceSnapshotFromStat,
   sourceSnapshotMatchesStat
@@ -39,6 +40,16 @@ function functionSource(name) {
 
 function loadFunction(name, names = [], values = []) {
   return Function(...names, `return (${functionSource(name)});`)(...values);
+}
+
+// 大账号顺序证据另按块实际包含的明细行判断有无交易（bigAccountBlockHasTransactions），各用例统一注入真实实现。
+function loadEvidenceBuilder(names = [], values = []) {
+  const blockHasTransactions = loadFunction(
+    'bigAccountBlockHasTransactions',
+    ['normalizeCell'],
+    [(value) => String(value == null ? '' : value).trim()]
+  );
+  return loadFunction('buildBigAccountOrderEvidence', [...names, 'bigAccountBlockHasTransactions'], [...values, blockHasTransactions]);
 }
 
 test('fixed 提取按服务端 rowsWithEmptyBlocks 选择，保留空 block 行', () => {
@@ -105,8 +116,7 @@ test('fixed 前块空、后块有交易时按 per-file block ordinal 冻结 M001
   assert.deepEqual(fixedRows.map((row) => row.sourceRowNumber), [11, 11]);
   assert.deepEqual(unfixedRows.map((row) => row.fileBlockOrdinal), [1]);
 
-  const buildEvidence = loadFunction(
-    'buildBigAccountOrderEvidence',
+  const buildEvidence = loadEvidenceBuilder(
     [
       'path',
       'normalizeCell',
@@ -186,7 +196,9 @@ test('fixed 前块空、后块有交易时按 per-file block ordinal 冻结 M001
     accounts: [
       { merchantId: 'M001', currency: 'USD' },
       { merchantId: 'M002', currency: 'EUR' }
-    ]
+    ],
+    rowAccounts: ['M001', 'M002'],
+    rowEmpty: [true, false]
   });
   const nextAutoMatch = identifyFromBasis({
     basis: detailRows.bigAccountRecognitionBasis,
@@ -203,8 +215,8 @@ test('self-input 单文件多 block 按 ordinal 独立桥接，未识别 block f
   const match = (cell, merchantId) => normalize(cell) === normalize(merchantId) ? 'exact' : 'none';
   const findHeaders = loadFunction(
     'findHeaderRowNumbersInRawRows',
-    ['normalizeCell'],
-    [normalize]
+    ['normalizeCell', 'buildExpectedHeaderCandidates'],
+    [normalize, buildExpectedHeaderCandidates]
   );
   const buildBasis = loadFunction(
     'buildBigAccountRecognitionBasis',
@@ -266,17 +278,15 @@ test('self-input 单文件多 block 按 ordinal 独立桥接，未识别 block f
     ['normalizeCell', 'matchMerchantIds'],
     [normalize, match]
   );
-  const identifyBridges = loadFunction(
-    'identifySelfInputBigAccountBridges',
-    ['findSelfInputBigAccountBridge'],
-    [findBridge]
-  );
+  // 逐块桥接（指定模板入口匹配记住顺序与保存顺序都经大账号顺序证据逐块取）。
+  const identifyBridges = (basis, options) => (Array.isArray(basis && basis.bridgeClearingIdsByBlock)
+    ? basis.bridgeClearingIdsByBlock.map((_clearingId, blockOrdinal) => findBridge(basis, options, blockOrdinal))
+    : []);
   const expandedOptions = [
     { merchantId: 'M001', currency: 'USD' },
     { merchantId: 'M002', currency: 'EUR' }
   ];
-  const buildEvidence = loadFunction(
-    'buildBigAccountOrderEvidence',
+  const buildEvidence = loadEvidenceBuilder(
     [
       'path',
       'normalizeCell',
@@ -395,8 +405,7 @@ test('self-input 单文件多 block 按 ordinal 独立桥接，未识别 block f
     { merchantId: 'M001', currency: 'CNY' },
     { merchantId: 'M002', currency: 'EUR' }
   ];
-  const buildMultiCurrencyEvidence = loadFunction(
-    'buildBigAccountOrderEvidence',
+  const buildMultiCurrencyEvidence = loadEvidenceBuilder(
     [
       'path',
       'normalizeCell',
@@ -463,8 +472,8 @@ test('self-input 后块不得把前块交易行中的 bankId 误归为 bridge', 
   };
   const findHeaders = loadFunction(
     'findHeaderRowNumbersInRawRows',
-    ['normalizeCell'],
-    [normalize]
+    ['normalizeCell', 'buildExpectedHeaderCandidates'],
+    [normalize, buildExpectedHeaderCandidates]
   );
   const buildBasis = loadFunction(
     'buildBigAccountRecognitionBasis',
@@ -522,8 +531,7 @@ test('self-input 后块不得把前块交易行中的 bankId 误归为 bridge', 
     ['normalizeCell', 'matchMerchantIds'],
     [normalize, match]
   );
-  const buildEvidence = loadFunction(
-    'buildBigAccountOrderEvidence',
+  const buildEvidence = loadEvidenceBuilder(
     [
       'path',
       'normalizeCell',
@@ -636,6 +644,108 @@ test('冻结顺序 evidence 按 session + file block ordinal 提取，失败行�
   assert.match(extract(context, 'fixed', [0]).message, /已失效/);
 });
 
+test('直接识别到多币种大账号也提醒币种待核对，并按账号精确取币种选项', () => {
+  const {
+    matchMerchantIds,
+    normalizeMaintainedBigAccounts
+  } = require('../../../src/main-process/big-account-recognition');
+  const normalize = (value) => String(value == null ? '' : value).trim();
+  const findBridge = loadFunction(
+    'findSelfInputBigAccountBridge',
+    ['normalizeCell', 'matchMerchantIds'],
+    [normalize, matchMerchantIds]
+  );
+  const buildEvidence = loadEvidenceBuilder(
+    [
+      'path',
+      'normalizeCell',
+      'expandBigAccountConfigurations',
+      'identifyAccountsFromRecognitionBasis',
+      'findSelfInputBigAccountBridge',
+      'matchMerchantIds'
+    ],
+    [
+      path,
+      normalize,
+      normalizeMaintainedBigAccounts,
+      ({ basis }) => ({ matches: (basis && basis.directMatches) || [] }),
+      findBridge,
+      matchMerchantIds
+    ]
+  );
+  const extract = loadFunction(
+    'extractBigAccountOrderFromEvidence',
+    ['selectPendingBigAccountRows', 'path', 'normalizeCell'],
+    [loadFunction('selectPendingBigAccountRows'), path, normalize]
+  );
+  // 对应 CZBANK 模板：MerchantId 为固定的多大账号标记，先直接从账单表头识别账号，账单里没有币种列。
+  const files = [
+    // 同一账号的人民币、美元账单；第一份同时带桥接值，直接识别优先时仍要提醒。
+    { name: 'CNY-7013.xls', directMatch: 'FTN7013', clearingId: 'NRA2268' },
+    { name: 'USD-7013.xls', directMatch: 'FTN7013' },
+    { name: 'CNY-2268.xls', directMatch: 'NRA2268' },
+    // 维护列表里 M0011 排在前面且包含 M001，不能被当成 M001 的币种选项。
+    { name: 'USD-M001.xls', directMatch: 'M001' }
+  ];
+  const fileEntries = files.map((file) => ({
+    filePath: path.resolve('/private/czbank', file.name),
+    detailRows: {
+      bigAccountRecognitionBasis: {
+        headerWindows: [{ headerRowNumber: 5, candidateRows: [] }],
+        bridgeClearingIdsByBlock: file.clearingId ? [file.clearingId] : [],
+        directMatches: [{ merchantId: file.directMatch, matchType: 'fuzzy' }]
+      }
+    },
+    selfInputMerchant: true,
+    skipDirectMerchantLookup: false
+  }));
+  const rows = fileEntries.map((entry, index) => ({
+    index,
+    filePath: entry.filePath,
+    fileName: path.basename(entry.filePath),
+    fileBlockOrdinal: 0,
+    sourceRowNumber: 6
+  }));
+  const context = {
+    statementSelectionSessionId: 'czbank-session',
+    bigAccounts: [
+      { merchantId: 'FTN7013', currencies: ['CNY', 'USD', 'GBP'] },
+      { merchantId: 'NRA2268', currencies: ['CNY'] },
+      { merchantId: 'M0011', currencies: ['CNY'] },
+      { merchantId: 'M001', currencies: ['USD'] }
+    ],
+    fileEntries,
+    rows,
+    rowsWithEmptyBlocks: rows
+  };
+  context.bigAccountOrderEvidence = buildEvidence(context);
+
+  assert.deepEqual(
+    context.bigAccountOrderEvidence.files.map((file) => file.rows[0].ambiguityCode),
+    ['MULTI_CURRENCY', 'MULTI_CURRENCY', null, null]
+  );
+  for (const mode of ['unfixed', 'fixed']) {
+    assert.deepEqual(extract(context, mode, [0, 1, 2, 3]), {
+      status: 'ok',
+      accounts: [
+        { merchantId: 'FTN7013', currency: 'CNY', matchType: 'fuzzy', fileName: 'CNY-7013.xls' },
+        { merchantId: 'FTN7013', currency: 'CNY', matchType: 'fuzzy', fileName: 'USD-7013.xls' },
+        { merchantId: 'NRA2268', currency: 'CNY', matchType: 'fuzzy', fileName: 'CNY-2268.xls' },
+        { merchantId: 'M001', currency: 'USD', matchType: 'fuzzy', fileName: 'USD-M001.xls' }
+      ],
+      ambiguousCurrencyFiles: ['CNY-7013.xls', 'USD-7013.xls']
+    }, mode);
+  }
+  // 只提取单币种账号时不追加多余提醒。
+  assert.deepEqual(extract(context, 'unfixed', [2, 3]), {
+    status: 'ok',
+    accounts: [
+      { merchantId: 'NRA2268', currency: 'CNY', matchType: 'fuzzy', fileName: 'CNY-2268.xls' },
+      { merchantId: 'M001', currency: 'USD', matchType: 'fuzzy', fileName: 'USD-M001.xls' }
+    ]
+  });
+});
+
 test('首次 workbook raw rows 派生最小 recognition basis，标准/bridge/多模板均不重读源', () => {
   const normalize = (value) => String(value == null ? '' : value).trim();
   const match = (cell, merchantId) => {
@@ -653,7 +763,11 @@ test('首次 workbook raw rows 派生最小 recognition basis，标准/bridge/�
     'buildBigAccountRecognitionBasis',
     ['findHeaderRowNumbersInRawRows', 'normalizeCell', 'matchMerchantIds'],
     [
-      loadFunction('findHeaderRowNumbersInRawRows', ['normalizeCell'], [normalize]),
+      loadFunction(
+        'findHeaderRowNumbersInRawRows',
+        ['normalizeCell', 'buildExpectedHeaderCandidates'],
+        [normalize, buildExpectedHeaderCandidates]
+      ),
       normalize,
       match
     ]
@@ -736,8 +850,7 @@ test('首次 workbook raw rows 派生最小 recognition basis，标准/bridge/�
     ]
   );
 
-  const buildEvidence = loadFunction(
-    'buildBigAccountOrderEvidence',
+  const buildEvidence = loadEvidenceBuilder(
     [
       'path',
       'normalizeCell',
@@ -1006,9 +1119,17 @@ test('filename 多模板先完成全部稳定读取，再产生输出或 session
   let rebuildCount = 0;
   let outputCount = 0;
   let sessionMutationCount = 0;
+  const { resolveGenerationGroupKey } = require('../../../src/main-process/statement-channel-identity');
+  // v3.2.15：生成分组改为按渠道 / 模板；这里的模板都不属于渠道，按模板各自成组（模板都存在）。
+  const groupStatementEntriesForGeneration = loadFunction(
+    'groupStatementEntriesForGeneration',
+    ['database', 'resolveGenerationGroupKey', 'getTemplateMappingConfig'],
+    [{ getTemplate: (id) => ({ id, channelId: null }) }, resolveGenerationGroupKey, (id) => ({ template: { id }, exportMappings: [], exportTargetFields: [] })]
+  );
   const generateGroups = loadFunction(
     'generateMultiTemplateGroupFiles',
     [
+      'groupStatementEntriesForGeneration',
       'getEntryTemplateConfig',
       'normalizeCell',
       'FIXED_FIELD_VALUE_PREFIX',
@@ -1020,6 +1141,7 @@ test('filename 多模板先完成全部稳定读取，再产生输出或 session
       'generateStatementFiles'
     ],
     [
+      groupStatementEntriesForGeneration,
       ({ entry }) => ({
         template: { id: entry.matchedTemplateId },
         exportMappings: [{ templateField: 'MerchantId', mappedField: '__FIXED__:__MULTI__' }],
@@ -1315,11 +1437,11 @@ test('fixed 顺序自定义输入的 preview auto-match 决策在 execute 复用
   );
   const autoMatchSource = importHandlerSource.slice(
     importHandlerSource.indexOf('const autoMatchDecision = resolvePreparedFixedBigAccountAutoMatchDecision'),
-    importHandlerSource.indexOf('const { failedFileNames, reorderedAssignments } = autoMatchDecision')
+    importHandlerSource.indexOf('= autoMatchDecision;')
   );
-  assert.match(autoMatchSource, /identifySelfInputBigAccountBridges\s*\(/);
-  assert.match(autoMatchSource, /bridgeAccounts\.every\(Boolean\)/);
-  assert.doesNotMatch(autoMatchSource, /readRows(?:WithMetadata)?\s*\(/);
+  // 匹配记住顺序与保存顺序同口径：经大账号顺序证据逐块识别 / 桥接，只用冻结的识别依据。
+  assert.match(autoMatchSource, /buildBigAccountOrderEvidence\s*\(/);
+  assert.doesNotMatch(autoMatchSource, /readRows(?:WithMetadata)?\s*\(|identifyAccountsFromFile\s*\(/);
 });
 
 test('网银 picker snapshot 注入 FilePlan，预检/重复弹窗不比较，beforeStart 只验 session', () => {
@@ -1618,4 +1740,603 @@ test('两个 deferred action 仅在非空结果确定具体 output 后 promote�
   assert.doesNotMatch(mainSource, /atomicFileLifecycleChannels/);
   assert.match(mainSource, /policy\.allocation === 'deferred'[\s\S]*?runDeferredFileTask/);
   assert.match(mainSource, /archiveTaskLifecycle\.runFileTask/);
+});
+
+// 取真实 completeBigAccountSelectionHandler.execute，只替换生成与外部副作用；会话与待选择上下文用 production 实现。
+function loadCompleteBigAccountSelectionExecute(deps) {
+  let executeNode = null;
+  const visit = (node) => {
+    if (executeNode || !node || typeof node !== 'object') return;
+    if (node.type === 'VariableDeclarator' && node.id && node.id.name === 'completeBigAccountSelectionHandler') {
+      executeNode = node.init.properties.find((prop) => prop.key && prop.key.name === 'execute');
+      return;
+    }
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) value.forEach(visit);
+      else if (value && typeof value === 'object') visit(value);
+    }
+  };
+  visit(mainAst);
+  if (!executeNode) throw new Error('未找到 completeBigAccountSelectionHandler.execute');
+  const names = Object.keys(deps);
+  return Function(
+    ...names,
+    `return ({ ${mainSource.slice(executeNode.start, executeNode.end)} }).execute;`
+  )(...names.map((name) => deps[name]));
+}
+
+function loadPendingBigAccountSelectionStore(deps) {
+  const names = Object.keys(deps);
+  return Function(
+    ...names,
+    `let lastPendingBigAccountSelection = null;
+    ${functionSource('resolvePendingReplacePaths')}
+    ${functionSource('createPendingBigAccountSelectionContext')}
+    ${functionSource('rememberPendingBigAccountSelection')}
+    ${functionSource('requirePendingBigAccountSelection')}
+    return { createPendingBigAccountSelectionContext, rememberPendingBigAccountSelection, requirePendingBigAccountSelection, resolvePendingReplacePaths };`
+  )(...names.map((name) => deps[name]));
+}
+
+test('大账号续跑沿用重复提示中确认覆盖的旧路径：跨目录同名、改名同内容只保留替换后的记录', async () => {
+  const sessionHelpers = require('../../../src/main-process/statement-session');
+  const normalizeCell = (value) => String(value == null ? '' : value).trim();
+  const detailRows = () => Object.assign(
+    [['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount'], ['2026-11-01', '', 'USD', '100', '']],
+    { rowMetas: [{ sourceRowNumber: 2 }] }
+  );
+  const cases = [
+    { label: '同一路径', oldPath: '/private/stmt/a.xlsx', newPath: '/private/stmt/a.xlsx' },
+    { label: '跨目录同名', oldPath: '/private/stmt/old/a.xlsx', newPath: '/private/stmt/new/a.xlsx' },
+    { label: '改名同内容', oldPath: '/private/stmt/a.xlsx', newPath: '/private/stmt/a-copy.xlsx' }
+  ];
+  for (const { label, oldPath, newPath } of cases) {
+    let entrySeq = 0;
+    let batchSeq = 0;
+    const buildEntryId = () => `entry-${++entrySeq}`;
+    const buildBatchId = () => `batch-${++batchSeq}`;
+    const statementImportSessions = new Map();
+    const session = sessionHelpers.getOrCreateStatementImportSession({ statementImportSessions, templateId: 7, templateName: '中行-上海' });
+    sessionHelpers.appendStatementSessionImport({
+      buildBatchId,
+      lastGeneratedExports: {},
+      session,
+      fileEntries: [sessionHelpers.buildStatementFileEntry({ buildEntryId, detailRows: detailRows(), filePath: oldPath })]
+    });
+
+    const store = loadPendingBigAccountSelectionStore({
+      normalizeCell,
+      normalizeInputFilePaths: sessionHelpers.normalizeInputFilePaths,
+      cloneRowsWithMetadata: sessionHelpers.cloneRowsWithMetadata,
+      buildBigAccountOrderEvidence: () => ({}),
+      randomUUID: () => `context-${label}`
+    });
+    // 重复提示中点击“覆盖旧记录”后，selectionResult.replacePaths 记录会话里的旧路径。
+    const prepared = { selectionResult: { filePaths: [newPath], replacePaths: [oldPath] } };
+    const contextId = store.rememberPendingBigAccountSelection(store.createPendingBigAccountSelectionContext(prepared, {
+      templateId: 7,
+      template: { id: 7, name: '中行-上海' },
+      mappings: [],
+      orderedTargetFields: [],
+      inputFilePaths: [newPath],
+      fileEntries: [{ filePath: newPath, detailRows: detailRows() }]
+    }));
+
+    const execute = loadCompleteBigAccountSelectionExecute({
+      requirePendingBigAccountSelection: store.requirePendingBigAccountSelection,
+      resolvePendingReplacePaths: store.resolvePendingReplacePaths,
+      clearPendingBigAccountSelection: () => {},
+      getOrCreateStatementImportSession: sessionHelpers.getOrCreateStatementImportSession,
+      statementImportSessions,
+      applyBigAccountAssignmentsToFileEntries: (entries) => entries,
+      isFilenameMappingMode: () => false,
+      resolveGenerationTemplateConfig: ({ fallbackTemplateConfig }) => fallbackTemplateConfig,
+      buildStatementGenerationConfig: ({ template }) => ({ template }),
+      statementGenerationHelpers: { buildPreparedStatementBatchFromEntries: ({ fileEntries }) => ({ detailRows: fileEntries[0].detailRows }) },
+      generateStatementFiles: () => ({ warnings: [] }),
+      buildStatementFileEntry: sessionHelpers.buildStatementFileEntry,
+      buildStatementFileEntryId: buildEntryId,
+      removeStatementSessionEntriesByFilePath: sessionHelpers.removeStatementSessionEntriesByFilePath,
+      appendStatementSessionImport: sessionHelpers.appendStatementSessionImport,
+      buildStatementBatchId: buildBatchId,
+      lastGeneratedExports: {},
+      rememberLastFileImportContext: () => {},
+      updateStatementSessionCache: () => {},
+      buildImportResultFromGeneratedFiles: () => ({ status: 'success' }),
+      persistBigAccountOrderAfterGeneration: ({ result }) => result,
+      clearGeneratedExports: () => {},
+      clearPendingManualBalancePrompt: () => {},
+      STATEMENT_SOURCE_FRESHNESS_FAILURE: { code: 'STATEMENT_SOURCE_FRESHNESS_FAILURE' },
+      FileValidationError: class FileValidationError extends Error {},
+      appendLog: (_root, error) => { throw error; },
+      ensureStorageRoot: () => '',
+      createErrorResult: (result) => ({ status: 'error', ...result })
+    });
+    const result = await execute(null, { contextId, isFixedMode: false, normalizedAssignments: [], rememberOrder: null }, {
+      fileEvidence: { filePlan: { inputs: [{ filePath: newPath }] } }
+    });
+
+    assert.equal(result.status, 'success', label);
+    assert.deepEqual(
+      sessionHelpers.getStatementSessionEntries(session, 'all').map((entry) => entry.filePath),
+      [path.resolve(newPath)],
+      label
+    );
+  }
+});
+
+// v3.2.15（release 审查）：进入大账号选择时，记住的顺序与本次导入文件无法按位置逐块对上，
+//   降级为不固定模式，界面不再按位置预填。
+function constValue(name) {
+  const node = mainAst.body.find((item) => (
+    item.type === 'VariableDeclaration' && item.declarations.some((declaration) => declaration.id.name === name)
+  ));
+  if (!node) throw new Error(`未找到常量：${name}`);
+  const declaration = node.declarations.find((item) => item.id.name === name);
+  return Function(`return (${mainSource.slice(declaration.init.start, declaration.init.end)});`)();
+}
+
+function loadSavedOrderGuard({ mode, order, logs = [] }) {
+  const {
+    findSavedOrderFileRowMismatches,
+    matchImportFilesToSavedOrder
+  } = require('../../../src/main-process/big-account-recognition');
+  const normalize = (value) => String(value == null ? '' : value).trim();
+  const evidenceRowLists = loadFunction('bigAccountOrderEvidenceRowLists', ['normalizeCell'], [normalize]);
+  const resolveDecision = loadFunction(
+    'resolveSavedBigAccountOrderDecision',
+    [
+      'readBigAccountMode', 'readBigAccountOrder', 'ensureStorageRoot', 'matchImportFilesToSavedOrder',
+      'findSavedOrderFileRowMismatches', 'bigAccountOrderEvidenceRowLists', 'identifiedAccountsFromRowLists', 'normalizeCell'
+    ],
+    [
+      () => mode, () => order, () => '/storage', matchImportFilesToSavedOrder, findSavedOrderFileRowMismatches,
+      evidenceRowLists, loadFunction('identifiedAccountsFromRowLists'), normalize
+    ]
+  );
+  const logDowngrade = loadFunction(
+    'logSavedBigAccountOrderDowngrade',
+    ['appendActivityLogEntry', 'normalizeCell', 'SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS'],
+    [(entry) => logs.push(entry), normalize, constValue('SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS')]
+  );
+  return loadFunction(
+    'applySavedBigAccountOrderGuard',
+    ['resolveSavedBigAccountOrderDecision', 'logSavedBigAccountOrderDowngrade'],
+    [resolveDecision, logDowngrade]
+  );
+}
+
+function evidenceFile(fileName, merchantIds) {
+  return {
+    fileName,
+    // '' 表示无交易且未识别账号的空段，'?' 表示有交易但未识别账号的块，与大账号顺序证据同口径。
+    rows: merchantIds.map((merchantId) => {
+      if (merchantId === '') return { merchantId: '', currency: '', accountKey: '', empty: true };
+      if (merchantId === '?') return { merchantId: '', currency: '', accountKey: '', empty: false };
+      return { merchantId, currency: 'CNY', accountKey: `${merchantId}\u0000CNY`, empty: false };
+    })
+  };
+}
+
+function savedOrder(fileAccounts, assignments) {
+  return {
+    assignments,
+    fileCount: fileAccounts.length,
+    files: fileAccounts.map((merchantIds, fileIndex) => ({
+      fileIndex,
+      accountCount: merchantIds.length,
+      accounts: merchantIds.map((merchantId) => ({ merchantId, currency: 'CNY' }))
+    }))
+  };
+}
+
+test('标准入口固定模式：同一多币种大账号的两份账单换了导入顺序时改为人工选择，不按位置预填币种', () => {
+  const logs = [];
+  const guard = loadSavedOrderGuard({
+    mode: 'fixed',
+    order: savedOrder([['7013'], ['7013']], [
+      { rowIndex: 0, merchantId: '7013', currency: 'CNY' },
+      { rowIndex: 1, merchantId: '7013', currency: 'USD' }
+    ]),
+    logs
+  });
+  const pendingContext = {
+    templateId: '__FILENAME_MAPPING__',
+    template: { name: '按文件名映射模板' },
+    bigAccountOrderEvidence: { files: [evidenceFile('USD-7013.xls', ['7013']), evidenceFile('CNY-7013.xls', ['7013'])] }
+  };
+  const result = guard({ previewOnly: false }, pendingContext, { status: 'select-big-account' });
+  assert.equal(result.forceMode, 'unfixed');
+  assert.equal(logs.length, 1);
+  assert.deepEqual(logs[0].details, ['模板名：按文件名映射模板', '涉及文件：USD-7013.xls、CNY-7013.xls']);
+  // 常规导入在预检阶段即返回大账号选择、随后直接转入完成选择，降级日志须在预检时写。
+  const previewLogs = [];
+  const previewGuard = loadSavedOrderGuard({ mode: 'fixed', order: savedOrder([['7013'], ['7013']], [
+    { rowIndex: 0, merchantId: '7013', currency: 'CNY' },
+    { rowIndex: 1, merchantId: '7013', currency: 'USD' }
+  ]), logs: previewLogs });
+  assert.equal(previewGuard({ previewOnly: true }, pendingContext, { status: 'select-big-account' }).forceMode, 'unfixed');
+  assert.equal(previewLogs.length, 1);
+  assert.equal(previewLogs[0].message, '已记住的大账号顺序无法唯一确定部分文件的账号 / 币种，改为人工选择');
+});
+
+test('标准入口固定模式：导入文件与记住的顺序逐个对上且顺序相同才保留预填，换序、个数不同、对不上都改为人工选择', () => {
+  const order = savedOrder([['A001'], ['B001']], [
+    { rowIndex: 0, merchantId: 'A001', currency: 'USD' },
+    { rowIndex: 1, merchantId: 'B001', currency: 'EUR' }
+  ]);
+  const contextOf = (...files) => ({ templateId: '__FILENAME_MAPPING__', template: { name: 't' }, bigAccountOrderEvidence: { files } });
+  const run = (mode, savedConfig, pendingContext) => loadSavedOrderGuard({ mode, order: savedConfig })(
+    { previewOnly: true }, pendingContext, { status: 'select-big-account' }
+  ).forceMode || null;
+  const same = contextOf(evidenceFile('a.xls', ['A001']), evidenceFile('b.xls', ['B001']));
+  assert.equal(run('fixed', order, same), null, '顺序相同');
+  assert.equal(run('fixed', order, contextOf(evidenceFile('b.xls', ['B001']), evidenceFile('a.xls', ['A001']))), 'unfixed', '换序');
+  assert.equal(run('fixed', order, contextOf(evidenceFile('a.xls', ['A001']))), 'unfixed', '文件个数不同');
+  assert.equal(run('fixed', order, contextOf(evidenceFile('a.xls', ['A001']), evidenceFile('c.xls', ['C001']))), 'unfixed', '对不上');
+  assert.equal(run('unfixed', order, contextOf(evidenceFile('b.xls', ['B001']), evidenceFile('a.xls', ['A001']))), null, '不固定模式不处理');
+  assert.equal(run('fixed', { assignments: order.assignments }, contextOf(evidenceFile('b.xls', ['B001']))), null, '没有文件信息的旧顺序沿用原行为');
+});
+
+test('固定模式按位置预填：同一文件账号块换序时改为人工选择，并写明原因（B65，release 复审）', () => {
+  const logs = [];
+  const guard = loadSavedOrderGuard({
+    mode: 'fixed',
+    order: savedOrder([['A001', 'B001']], [
+      { rowIndex: 0, merchantId: 'A001', currency: 'CNY' },
+      { rowIndex: 1, merchantId: 'B001', currency: 'USD' }
+    ]),
+    logs
+  });
+  const contextOf = (...files) => ({ templateId: 7, template: { name: '测试模板' }, bigAccountOrderEvidence: { files } });
+  assert.equal(guard({ previewOnly: true }, contextOf(evidenceFile('ab.xls', ['A001', 'B001'])), {}).forceMode, undefined);
+  assert.equal(guard({ previewOnly: true }, contextOf(evidenceFile('ba.xls', ['B001', 'A001'])), {}).forceMode, 'unfixed');
+  assert.deepEqual(logs.map((entry) => entry.details), [[
+    '模板名：测试模板',
+    '原因：部分文件的账户个数、账户号或账号块顺序与记住的对不上',
+    '涉及文件：ba.xls'
+  ]]);
+});
+
+test('固定模式按位置预填：含空段的同一文件原样再导入保留预填，空段换位或旧数据无法还原时改为人工选择（release 复审）', (t) => {
+  const { readBigAccountOrder, writeBigAccountOrder } = require('../../../src/backend/big-account-order-store');
+  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'saved-order-rows-'));
+  t.after(() => fs.rmSync(storageRoot, { recursive: true, force: true }));
+  // 按真实保存路径生成：第一段无交易且未识别账号，第二段识别到 B001。
+  const savedContext = {
+    statementSelectionSessionId: 'saved-session',
+    bigAccountOrderEvidence: {
+      sessionId: 'saved-session',
+      files: [{ fileOrdinal: 0, ...evidenceFile('a.xls', ['', 'B001']) }]
+    }
+  };
+  const orderData = loadFunction('buildBigAccountOrderData')(savedContext, [
+    { rowIndex: 0, merchantId: 'A001', currency: 'CNY' },
+    { rowIndex: 1, merchantId: 'B001', currency: 'USD' }
+  ]);
+  writeBigAccountOrder(storageRoot, 7, orderData);
+  const persisted = readBigAccountOrder(storageRoot, 7);
+  assert.deepEqual(persisted.files[0].rowAccounts, ['', 'B001']);
+  assert.deepEqual(persisted.files[0].rowEmpty, [true, false]);
+
+  const run = (order, ...files) => loadSavedOrderGuard({ mode: 'fixed', order })(
+    { previewOnly: true },
+    { templateId: 7, template: { name: 't' }, bigAccountOrderEvidence: { files } },
+    {}
+  ).forceMode || null;
+  assert.equal(run(persisted, evidenceFile('a.xls', ['', 'B001'])), null, '同一文件原样再导入');
+  assert.equal(run(persisted, evidenceFile('a.xls', ['B001', ''])), 'unfixed', '空段换位');
+  assert.equal(run(persisted, evidenceFile('a.xls', ['B001'])), 'unfixed', '空段消失');
+  assert.equal(run(persisted, evidenceFile('a.xls', ['?', 'B001'])), 'unfixed', '空段变成有交易但未识别账号的块');
+  const legacy = { ...persisted, files: persisted.files.map(({ rowAccounts, rowEmpty, ...file }) => file) };
+  assert.equal(run(legacy, evidenceFile('a.xls', ['', 'B001'])), 'unfixed', '旧数据含未识别段，无法还原各块分配');
+});
+
+test('指定模板入口：自动套用前逐块核对，未能自动套用而进入人工选择时同样按位置核对（release 复审）', () => {
+  const importHandlerSource = mainSource.slice(
+    mainSource.indexOf('const fileImportHandler ='),
+    mainSource.indexOf("trackedIpcHandle(\n    'file:import'")
+  );
+  assert.match(importHandlerSource, /return applySavedBigAccountOrderGuard\(prepared, pendingContext, selectionRequired\);/);
+  assert.doesNotMatch(importHandlerSource, /if \(!prepared\.previewOnly\) \{\s*appendActivityLogEntry\(\{\s*level: 'info',\s*message: '已记住的大账号顺序/);
+});
+
+test('标准入口（按文件名映射）进入大账号选择的两处都经过记住顺序核对', () => {
+  const source = functionSource('handleFilenameMappingImport');
+  assert.equal(source.match(/applySavedBigAccountOrderGuard\(prepared, pendingContext, buildBigAccountSelectionRequiredResult\(/g).length, 2);
+  assert.doesNotMatch(source, /return buildBigAccountSelectionRequiredResult\(/);
+});
+
+test('固定模式按位置预填：同一文件两个有交易但未识别账号的块记住了不同分配时改为人工选择（release 复审）', () => {
+  const logs = [];
+  const guard = loadSavedOrderGuard({
+    mode: 'fixed',
+    order: {
+      assignments: [
+        { rowIndex: 0, merchantId: 'M001', currency: 'USD' },
+        { rowIndex: 1, merchantId: 'M001', currency: 'EUR' }
+      ],
+      fileCount: 1,
+      files: [{ fileIndex: 0, accountCount: 0, accounts: [], rowAccounts: ['', ''], rowEmpty: [false, false] }]
+    },
+    logs
+  });
+  const pendingContext = { templateId: 7, template: { name: '测试模板' }, bigAccountOrderEvidence: { files: [evidenceFile('m.xls', ['?', '?'])] } };
+  assert.equal(guard({ previewOnly: true }, pendingContext, {}).forceMode, 'unfixed');
+  assert.equal(logs[0].message, '已记住的大账号顺序无法唯一确定部分文件的账号 / 币种，改为人工选择');
+});
+
+// 运行真实的指定模板导入 execute（预检）：模板配置、记住的模式 / 顺序、活动日志为替身，
+// 大账号分块、证据、匹配、核对与选择结果取 main.js 及识别模块的真实实现。
+function loadDesignatedImportExecute({ templateConfig, mode, order, logs }) {
+  const scope = new Map();
+  const proxy = new Proxy({}, {
+    has: (_target, key) => scope.has(key),
+    get: (_target, key) => (key === Symbol.unscopables ? undefined : scope.get(key)),
+    set: (_target, key, value) => { scope.set(key, value); return true; }
+  });
+  const evaluate = (source) => Function('scope', `with (scope) { return (${source}); }`)(proxy);
+  const recognition = require('../../../src/main-process/big-account-recognition');
+  const { normalizeCell } = require('../../../src/backend/file-service');
+  Object.entries({
+    ...recognition,
+    normalizeCell,
+    path,
+    isFilenameMappingMode: () => false,
+    fileImportInProgress: false,
+    getTemplateMappingConfig: () => templateConfig,
+    statementImportSessionForInvocation: () => ({ key: 'session' }),
+    readBigAccountMode: () => mode,
+    readBigAccountOrder: () => order,
+    ensureStorageRoot: () => '/storage',
+    appendActivityLogEntry: (entry) => logs.push(entry),
+    createErrorResult: (payload) => ({ status: 'error', ...payload }),
+    createPreflightErrorResult: (payload) => ({ status: 'error', ...payload }),
+    FileValidationError: require('../../../src/backend/file-service').FileValidationError,
+    STATEMENT_SOURCE_FRESHNESS_FAILURE: Object.freeze({ code: 'STATEMENT_SOURCE_FRESHNESS_FAILURE', message: '源文件已变化' }),
+    // 合入渠道后，指定模板导入在大账号流程前还核对库里的输出名称；本测试的模板无同名所有者，直接放行。
+    findGenerationGroupOutputNameConflicts: () => null,
+    resolveGenerationGroupKey: (template) => `template:${template.id}`,
+    MERCHANT_ID_SELF_INPUT_OPTION: constValue('MERCHANT_ID_SELF_INPUT_OPTION'),
+    STATEMENT_IMPORT_PREVIEW_READY: constValue('STATEMENT_IMPORT_PREVIEW_READY'),
+    SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS: constValue('SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS')
+  }).forEach(([name, value]) => scope.set(name, value));
+  [
+    'expandBigAccountConfigurations', 'identifyAccountBlocks', 'buildBigAccountSelectionRows',
+    'findBigAccountMatchInRows', 'identifyAccountsFromRecognitionBasis', 'findSelfInputBigAccountBridge',
+    'bigAccountBlockHasTransactions', 'buildBigAccountOrderEvidence', 'bigAccountOrderEvidenceRowLists', 'identifiedAccountsFromRowLists',
+    'resolvePreparedFixedBigAccountAutoMatchDecision', 'createPendingBigAccountSelectionContext',
+    'stagePendingBigAccountSelection', 'buildBigAccountSelectionRequiredResult', 'resolveSavedBigAccountOrderDecision',
+    'logSavedBigAccountOrderDowngrade', 'applySavedBigAccountOrderGuard', 'statementImportPreviewReady'
+  ].forEach((name) => scope.set(name, evaluate(functionSource(name))));
+  let handlerNode = null;
+  (function visit(node) {
+    if (!node || typeof node !== 'object' || handlerNode) return;
+    if (node.type === 'VariableDeclarator' && node.id && node.id.name === 'fileImportHandler') {
+      handlerNode = node.init;
+      return;
+    }
+    Object.values(node).forEach((value) => (Array.isArray(value) ? value.forEach(visit) : visit(value)));
+  })(mainAst);
+  const handler = evaluate(mainSource.slice(handlerNode.start, handlerNode.end));
+  return (prepared) => handler.execute(null, prepared, null, 7);
+}
+
+// 两个块的明细：headerBreaks 把第 10 行前后分为两块，rows 给出每块是否有交易。
+function twoBlockEntry(fileName, { firstHasTransaction, basis, selfInput = false }) {
+  const detailRows = firstHasTransaction
+    ? [['Credit Amount', 'Debit Amount'], ['', '100'], ['', '200']]
+    : [['Credit Amount', 'Debit Amount'], ['', '200']];
+  detailRows.rowMetas = firstHasTransaction ? [{ sourceRowNumber: 3 }, { sourceRowNumber: 11 }] : [{ sourceRowNumber: 11 }];
+  detailRows.headerBreaks = [10];
+  Object.defineProperty(detailRows, 'bigAccountRecognitionBasis', { enumerable: false, value: basis });
+  return {
+    filePath: path.resolve(`/private/${fileName}`),
+    detailRows,
+    ...(selfInput ? { selfInputMerchant: true, skipDirectMerchantLookup: true } : {})
+  };
+}
+
+function designatedTemplateConfig(bigAccounts, merchantMappedField = 'Account') {
+  return {
+    template: { id: 7, name: '指定模板', headers: ['Credit Amount', 'Debit Amount'], channelId: null },
+    exportMappings: [{ templateField: 'MerchantId', mappedField: merchantMappedField }],
+    exportTargetFields: [],
+    bigAccounts,
+    fixedAssignments: []
+  };
+}
+
+function designatedPrepared(entries) {
+  return {
+    previewOnly: true,
+    inputFilePaths: entries.map((entry) => entry.filePath),
+    selectionResult: { filePaths: entries.map((entry) => entry.filePath), parentProvisionalEntries: entries }
+  };
+}
+
+const UNIDENTIFIED_BASIS = Object.freeze({
+  version: 1,
+  headerWindows: [{ headerRowNumber: 2, candidateRows: [['无账号']] }, { headerRowNumber: 10, candidateRows: [['无账号']] }],
+  bridgeClearingIdsByBlock: ['', '']
+});
+
+test('指定模板入口：有交易但未识别账号的块不自动生成，记住的分配随块顺序变化时改为人工选择（release 复审）', async () => {
+  const logs = [];
+  const execute = loadDesignatedImportExecute({
+    templateConfig: designatedTemplateConfig([{ merchantId: 'M001', currencies: ['USD', 'EUR'], isMultiCurrency: true }]),
+    mode: 'fixed',
+    order: {
+      assignments: [
+        { rowIndex: 0, merchantId: 'M001', currency: 'USD' },
+        { rowIndex: 1, merchantId: 'M001', currency: 'EUR' }
+      ],
+      fileCount: 1,
+      files: [{ fileIndex: 0, accountCount: 0, accounts: [], rowAccounts: ['', ''], rowEmpty: [false, false] }]
+    },
+    logs
+  });
+  const result = await execute(designatedPrepared([twoBlockEntry('m.xls', { firstHasTransaction: true, basis: UNIDENTIFIED_BASIS })]));
+  assert.equal(result.status, 'select-big-account');
+  assert.equal(result.forceMode, 'unfixed');
+  assert.equal(logs.length, 1);
+
+  // 两块记住的分配相同（与块顺序无关）：仍不自动生成，进入选择窗口按位置预填由用户确认。
+  const sameLogs = [];
+  const sameExecute = loadDesignatedImportExecute({
+    templateConfig: designatedTemplateConfig([{ merchantId: 'M001', currencies: ['USD', 'EUR'], isMultiCurrency: true }]),
+    mode: 'fixed',
+    order: {
+      assignments: [
+        { rowIndex: 0, merchantId: 'M001', currency: 'USD' },
+        { rowIndex: 1, merchantId: 'M001', currency: 'USD' }
+      ],
+      fileCount: 1,
+      files: [{ fileIndex: 0, accountCount: 0, accounts: [], rowAccounts: ['', ''], rowEmpty: [false, false] }]
+    },
+    logs: sameLogs
+  });
+  const sameResult = await sameExecute(designatedPrepared([twoBlockEntry('m.xls', { firstHasTransaction: true, basis: UNIDENTIFIED_BASIS })]));
+  assert.equal(sameResult.status, 'select-big-account');
+  assert.equal(sameResult.forceMode, undefined);
+  assert.equal(sameLogs.length, 0);
+});
+
+test('指定模板入口：自定义输入 MerchantId 部分块桥接不到时，按与保存同口径的逐块结果匹配，原样再导入仍自动套用（release 复审）', async () => {
+  const logs = [];
+  const bigAccounts = [
+    { merchantId: 'A001', currencies: ['USD'], isMultiCurrency: false },
+    { merchantId: 'B001', currencies: ['USD'], isMultiCurrency: false }
+  ];
+  const execute = loadDesignatedImportExecute({
+    templateConfig: designatedTemplateConfig(bigAccounts, '自己输入'),
+    mode: 'fixed',
+    order: {
+      assignments: [
+        { rowIndex: 0, merchantId: 'A001', currency: 'USD' },
+        { rowIndex: 1, merchantId: 'B001', currency: 'USD' }
+      ],
+      fileCount: 1,
+      files: [{
+        fileIndex: 0,
+        accountCount: 1,
+        accounts: [{ merchantId: 'B001', currency: 'USD' }],
+        rowAccounts: ['', 'B001'],
+        rowEmpty: [true, false]
+      }]
+    },
+    logs
+  });
+  const basis = Object.freeze({
+    version: 1,
+    headerWindows: [{ headerRowNumber: 2, candidateRows: [] }, { headerRowNumber: 10, candidateRows: [] }],
+    bridgeClearingIdsByBlock: ['', 'B001']
+  });
+  const result = await execute(designatedPrepared([
+    twoBlockEntry('b.xls', { firstHasTransaction: false, basis, selfInput: true })
+  ]));
+  assert.equal(result.status, 'statement-import-preview-ready');
+  assert.deepEqual(logs, []);
+});
+
+test('指定模板入口：文件个数与记住的不同而降级时写活动日志（release 复审）', async () => {
+  const logs = [];
+  const execute = loadDesignatedImportExecute({
+    templateConfig: designatedTemplateConfig([{ merchantId: 'M001', currencies: ['USD', 'EUR'], isMultiCurrency: true }]),
+    mode: 'fixed',
+    order: {
+      assignments: [
+        { rowIndex: 0, merchantId: 'M001', currency: 'USD' },
+        { rowIndex: 1, merchantId: 'M001', currency: 'EUR' }
+      ],
+      fileCount: 2,
+      files: [
+        { fileIndex: 0, accountCount: 0, accounts: [], rowAccounts: [''], rowEmpty: [false] },
+        { fileIndex: 1, accountCount: 0, accounts: [], rowAccounts: [''], rowEmpty: [false] }
+      ]
+    },
+    logs
+  });
+  const result = await execute(designatedPrepared([twoBlockEntry('m.xls', { firstHasTransaction: true, basis: UNIDENTIFIED_BASIS })]));
+  assert.equal(result.status, 'select-big-account');
+  assert.equal(result.forceMode, 'unfixed');
+  assert.deepEqual(logs.map((entry) => entry.details), [[
+    '模板名：指定模板',
+    '原因：本次导入的文件个数与记住的不同'
+  ]]);
+});
+
+test('块内有无交易按实际明细行判断：没有分段的单块文件只有表头或只有非交易行也是空段，缺收入 / 支出列时未知', () => {
+  const hasTransactions = loadFunction(
+    'bigAccountBlockHasTransactions',
+    ['normalizeCell'],
+    [(value) => String(value == null ? '' : value).trim()]
+  );
+  const header = ['Date', 'Credit Amount', 'Debit Amount'];
+  assert.equal(hasTransactions([header], 0, 0), false, '只有表头，单块起止仍为 [0, 0]');
+  assert.equal(hasTransactions([header, ['2026-11-07', '', '']], 0, 0), false, '只有非交易行');
+  assert.equal(hasTransactions([header, ['2026-11-07', '', ''], ['2026-11-07', '', '5']], 0, 1), true);
+  assert.equal(hasTransactions([header, ['2026-11-07', '100', '']], 1, 0), false, '裁剪后的空区间');
+  assert.equal(hasTransactions([['Date', 'Amount'], ['2026-11-07', '100']], 0, 0), null, '没有收入 / 支出列');
+});
+
+test('固定模式按位置预填：只有表头的单块文件记为空段，之后变成有交易但未识别账号的文件时改为人工选择（release 复审）', () => {
+  const normalize = (value) => String(value == null ? '' : value).trim();
+  const match = (cell, merchantId) => (normalize(cell) === normalize(merchantId) ? 'exact' : 'none');
+  const identifyBlocks = loadFunction('identifyAccountBlocks', ['normalizeCell'], [normalize]);
+  const buildSelectionRows = loadFunction('buildBigAccountSelectionRows', ['identifyAccountBlocks', 'path'], [identifyBlocks, path]);
+  const findMatch = loadFunction('findBigAccountMatchInRows', ['normalizeCell', 'matchMerchantIds'], [normalize, match]);
+  const identifyFromBasis = loadFunction('identifyAccountsFromRecognitionBasis', ['findBigAccountMatchInRows'], [findMatch]);
+  const buildEvidence = loadEvidenceBuilder(
+    ['path', 'normalizeCell', 'expandBigAccountConfigurations', 'identifyAccountsFromRecognitionBasis', 'findSelfInputBigAccountBridge', 'matchMerchantIds'],
+    [
+      path,
+      normalize,
+      (items) => items.flatMap((item) => item.currencies.map((currency) => ({ merchantId: item.merchantId, currency }))),
+      identifyFromBasis,
+      () => null,
+      match
+    ]
+  );
+  // 没有分段（无 headerBreaks）的单块文件；a.xls 识别不到账号，b.xls 识别到 B001。
+  const entryOf = (fileName, candidate, dataRows) => {
+    const detailRows = [['Date', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount'], ...dataRows];
+    detailRows.rowMetas = dataRows.map((_row, index) => ({ sourceRowNumber: index + 2 }));
+    Object.defineProperty(detailRows, 'bigAccountRecognitionBasis', {
+      enumerable: false,
+      value: Object.freeze({ version: 1, headerWindows: [{ headerRowNumber: 1, candidateRows: [[candidate]] }], bridgeClearingIdsByBlock: [''] })
+    });
+    return { filePath: path.resolve(`/private/${fileName}`), detailRows };
+  };
+  const contextOf = (sessionId, entries) => {
+    const context = {
+      statementSelectionSessionId: sessionId,
+      bigAccounts: [{ merchantId: 'M001', currencies: ['USD', 'EUR'] }, { merchantId: 'B001', currencies: ['USD'] }],
+      fileEntries: entries,
+      rows: buildSelectionRows(entries),
+      rowsWithEmptyBlocks: buildSelectionRows(entries, { includeEmptyBlocks: true })
+    };
+    context.bigAccountOrderEvidence = buildEvidence(context);
+    return context;
+  };
+  const transaction = [['2026-11-07', '', 'EUR', '100', '']];
+  const first = contextOf('first', [entryOf('a.xls', '无账号', []), entryOf('b.xls', 'B001', transaction)]);
+  const orderData = loadFunction('buildBigAccountOrderData')(first, [
+    { rowIndex: 0, merchantId: 'M001', currency: 'USD' },
+    { rowIndex: 1, merchantId: 'B001', currency: 'USD' }
+  ]);
+  assert.deepEqual(orderData.files.map((file) => file.rowAccounts), [[''], ['B001']]);
+  assert.deepEqual(orderData.files.map((file) => file.rowEmpty), [[true], [false]]);
+
+  const guard = (context) => loadSavedOrderGuard({ mode: 'fixed', order: orderData })(
+    { previewOnly: true },
+    { ...context, templateId: 7, template: { name: 't' } },
+    {}
+  ).forceMode || null;
+  assert.equal(guard(contextOf('same', [entryOf('a.xls', '无账号', []), entryOf('b.xls', 'B001', transaction)])), null, '原样再导入');
+  assert.equal(
+    guard(contextOf('changed', [entryOf('a.xls', '无账号', transaction), entryOf('b.xls', 'B001', transaction)])),
+    'unfixed',
+    '空文件变成有交易但未识别账号的文件：不能按位置套用记住的 M001/USD'
+  );
 });

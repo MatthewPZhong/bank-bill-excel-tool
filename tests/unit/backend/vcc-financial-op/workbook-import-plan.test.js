@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const XLSX = require('xlsx');
 const {
-  HEADER_RULES, classifyHeaderRow, inspectWorkbookImportPlan, publicImportPlan,
+  HEADER_RULES, classifyHeaderRow, headerRulesFor, inspectWorkbookImportPlan, publicImportPlan,
   resolveImportPlan, revalidateImportPlan
 } = require('../../../../src/backend/vcc-financial-op/workbook-import-plan');
 const { SOURCE_TYPES, SOURCE_DEFINITIONS, PENDING_V1_HEADERS } = require('../../../../src/backend/vcc-financial-op/definitions');
@@ -91,6 +91,38 @@ test('预览范围之后的第二表块也在提交前被发现，坏表不能�
   assert.equal(plan.sources[0].diagnostics[0].row, 252);
   assert.throws(() => resolveImportPlan(plan, { planId: plan.planId, subjectBySourceId: {}, excludedSheetIds: [] }), { code: 'vcc-sheet-ambiguous' });
   assert.throws(() => resolveImportPlan(plan, { planId: plan.planId, subjectBySourceId: {}, excludedSheetIds: [plan.sources[0].sourceId] }), { code: 'vcc-import-plan-invalid' });
+});
+
+// v3.2.15 B42：两张原表的当前结构完全相同（如 v3.2.14 恢复默认未核对同组冲突时留下的状态），
+//   该表头不再按规则顺序静默识别为第一项，整份计划拒绝并列出候选。
+test('多张原表当前结构与表头完全相同时拒绝识别，不静默取第一项', async (t) => {
+  const structures = { [SOURCE_TYPES.FEE_FX]: { headers: recharge, versionLabel: 'V2' } };
+  const evidence = classifyHeaderRow(recharge, headerRulesFor(structures));
+  assert.equal(evidence.status, 'invalid');
+  assert.equal(evidence.code, 'vcc-sheet-header-ambiguous');
+  assert.equal(evidence.sourceType, undefined, '不给出来源类型');
+  assert.deepEqual(evidence.candidates.map((candidate) => candidate.sourceType), [SOURCE_TYPES.RECHARGE, SOURCE_TYPES.FEE_FX]);
+  assert.match(evidence.message, /^表头与「[^」]+」、「[^」]+」的当前结构完全相同，无法确定来源；请在 设置 → 模板文件 调整其中一张表的当前版本$/);
+  assert.equal(evidence.detailLines.length, 2);
+  assert.match(evidence.detailLines[0], /：内置结构$/);
+  assert.match(evidence.detailLines[1], /：当前版本 V2$/);
+
+  const file = workbookFile(t, [{ name: '明细', rows: [recharge, ['data']] }]);
+  const plan = await inspectWorkbookImportPlan([file], { sourceStructures: structures });
+  assert.equal(plan.sources[0].status, 'invalid');
+  assert.equal(plan.sources[0].sourceType, undefined);
+  assert.equal(plan.sources[0].diagnostics[0].code, 'vcc-sheet-header-ambiguous');
+  assert.throws(() => resolveImportPlan(plan, { planId: plan.planId, subjectBySourceId: {}, excludedSheetIds: [] }), (error) => {
+    assert.equal(error.code, 'vcc-sheet-header-ambiguous');
+    assert.ok(error.detailLines.some((line) => /当前版本 V2/.test(line)), JSON.stringify(error.detailLines));
+    return true;
+  });
+});
+
+test('内置五类原表的表头两两不同，内置结构下不会多重命中', () => {
+  for (const rule of HEADER_RULES) {
+    assert.equal(classifyHeaderRow(rule.headers).status, 'ready', rule.sourceType);
+  }
 });
 
 test('同名物理文件不合并，排除说明后没有业务 Sheet 时不创建任务', async (t) => {

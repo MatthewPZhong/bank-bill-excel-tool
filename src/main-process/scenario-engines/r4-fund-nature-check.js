@@ -188,15 +188,20 @@ function enabledR4Rules(r4Scenarios) {
  * @param {Array<Object>} gwRows 本次运行的完整 exactRows，保持链接表 id ASC 原序
  * @param {Array<Object>} bankRows 全量银行行，保持 Excel 原序
  * @param {Array<Object>} r4Scenarios 已启用 R4 场景
+ * @param {{ applicableBankRowsBySubCategory?: Map<string, Set<Object>> }} [options]
+ *   子场景配置了「适用银行渠道」时，由编排器给出该子场景可处理的银行行；缺省的子场景处理全部银行行。
  * @returns {{ modifications:Array, warnings:Array, matchedPairs:Array }}
  */
-function runRound4FundNatureCheck(gwRows, bankRows, r4Scenarios) {
+function runRound4FundNatureCheck(gwRows, bankRows, r4Scenarios, options = {}) {
   const warningCollector = makeWarningCollector('R4', '资金性质校验');
   const modCollector = makeModificationCollector();
   const matchedPairs = [];
   const safeGwRows = Array.isArray(gwRows) ? gwRows : [];
   const safeBankRows = Array.isArray(bankRows) ? bankRows : [];
   const rulesByTradeType = enabledR4Rules(r4Scenarios);
+  const applicableBankRowsBySubCategory = options.applicableBankRowsBySubCategory instanceof Map
+    ? options.applicableBankRowsBySubCategory
+    : new Map();
 
   if (safeGwRows.length === 0 || safeBankRows.length === 0 || rulesByTradeType.size === 0) {
     return {
@@ -224,7 +229,10 @@ function runRound4FundNatureCheck(gwRows, bankRows, r4Scenarios) {
 
     const reconId = normalizeCellValue(gwRow && gwRow[GW_RECON_ID_FIELD]);
     if (reconId === '') continue;
-    const relatedBankRows = bankByReconId.get(reconId) || [];
+    // 子场景不适用的渠道的银行行对该规则不可见：不改写、不消费、不产生不匹配告警。
+    const applicableRows = applicableBankRowsBySubCategory.get(rule.subCategory);
+    const relatedBankRows = (bankByReconId.get(reconId) || [])
+      .filter((row) => !applicableRows || applicableRows.has(row));
     if (relatedBankRows.length === 0) continue;
 
     const unconsumedRows = relatedBankRows.filter((row) => !consumedBankRows.has(row));

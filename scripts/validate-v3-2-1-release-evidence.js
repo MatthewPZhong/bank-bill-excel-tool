@@ -26,6 +26,11 @@ const E04_NOTES_SOURCE =
 const E05_BENCHMARK_SOURCE =
   'changes/background-execution-e05-c-prefund-parser-pool/benchmark-evidence.json';
 const WINDOWS_BUILD_WORKFLOW_SOURCE = '.github/workflows/build-windows.yml';
+// v3.2.15 B43：release-check 的并行 job 及其检查命令（与 scripts/ci/verify-release-check-jobs.js 一致）。
+const PARALLEL_RELEASE_CHECK_JOBS = Object.freeze(Object.fromEntries(
+  Object.entries(require('./ci/verify-release-check-jobs').RELEASE_CHECK_JOBS)
+    .map(([jobName, commands]) => [jobName, commands.join(' && ')])
+));
 const PREVIOUS_FINAL_RELEASE_BRANCH = 'codex/v3.2.1-r3-release-evidence';
 const FINAL_RELEASE_BRANCH = 'codex/v3.2.1-r4-review-hardening';
 const FINAL_RELEASE_BASE = 'codex/v3.2.1-r3-release-evidence';
@@ -597,12 +602,14 @@ function validateReleaseEvidence(snapshot, options = {}) {
             `test "$(git rev-parse HEAD^1^2)" = "${FINAL_RELEASE_R3_HEAD}"`
           ), true);
       }
+      // v3.2.15 B43：release-check 拆成并行 job，smoke-test 的 Run release checks 汇总各 job 结果；
+      //   该步骤与每个并行 job 的检查步骤都须沿用同一运行条件，每个并行 job 都须在 checkout 前拒绝未授权 final gate。
       const releaseChecksStep = smokeJob.slice(
         smokeJob.indexOf('- name: Run release checks'),
         smokeJob.indexOf('- name: Verify Windows startup process adapter semantics')
       );
       const conditionMatch = releaseChecksStep.match(
-        /if: >-\s*\n([\s\S]*?)\n\s*run: npm run release-check/
+        /if: >-\s*\n([\s\S]*?)\n\s*run: node scripts\/ci\/verify-release-check-jobs\.js/
       );
       if (!conditionMatch) {
         add('/authority/windowsWorkflow/releaseCheckCondition',
@@ -610,6 +617,36 @@ function validateReleaseEvidence(snapshot, options = {}) {
       } else {
         expectEqual('/authority/windowsWorkflow/releaseCheckCondition',
           normalizeYamlCondition(conditionMatch[1]), EXPECTED_RELEASE_CHECK_CONDITION);
+      }
+      // Windows checkout 可能把换行转为 CRLF：并行 job 的结构检查按 LF 解析。
+      const lfWorkflow = workflow.replace(/\r\n/g, '\n');
+      for (const [jobName, commands] of Object.entries(PARALLEL_RELEASE_CHECK_JOBS)) {
+        const jobStart = lfWorkflow.indexOf(`\n  ${jobName}:`);
+        const jobEnd = jobStart === -1 ? -1 : lfWorkflow.indexOf('\n  smoke-test:', jobStart);
+        if (jobStart === -1 || jobEnd === -1) {
+          add(`/authority/windowsWorkflow/parallelJobs/${jobName}`, 'parallel release-check job must precede smoke-test');
+          continue;
+        }
+        const job = lfWorkflow.slice(jobStart, lfWorkflow.slice(jobStart + 1).search(/\n  [a-z][a-z0-9-]*:\n/) + jobStart + 1);
+        const jobGuardStart = job.indexOf('- name: Reject unauthorized v3.2.1 final-gate invocation');
+        const jobCheckoutStart = job.indexOf('- name: Checkout');
+        const jobGuard = jobGuardStart !== -1 && jobGuardStart < jobCheckoutStart
+          ? job.slice(jobGuardStart, jobCheckoutStart).match(/if: >-\s*\n([\s\S]*?)\n\s*run: \|/)
+          : null;
+        expectEqual(`/authority/windowsWorkflow/parallelJobs/${jobName}/unauthorizedFinalGuard`,
+          jobGuard ? normalizeYamlCondition(jobGuard[1]) : null, EXPECTED_UNAUTHORIZED_FINAL_CONDITION);
+        expectEqual(`/authority/windowsWorkflow/parallelJobs/${jobName}/checkoutRef`,
+          job.includes(EXPECTED_CHECKOUT_REF), true);
+        const jobLineageStart = job.indexOf('- name: Verify authorized v3.2.1 repair lineage');
+        const jobSetupStart = job.indexOf('- name: Setup Node.js');
+        expectEqual(`/authority/windowsWorkflow/parallelJobs/${jobName}/repairLineage`,
+          jobCheckoutStart < jobLineageStart && jobLineageStart < jobSetupStart, true);
+        // 检查命令所在步骤的运行条件：取该命令之前最近的 if: >- 块（前面还有守卫步骤自己的 if）。
+        const runAt = job.indexOf(`run: ${commands}\n`);
+        const ifAt = runAt === -1 ? -1 : job.lastIndexOf('if: >-', runAt);
+        const runCondition = ifAt === -1 ? null : job.slice(ifAt, runAt).match(/^if: >-\s*\n([\s\S]*?)\n\s*$/);
+        expectEqual(`/authority/windowsWorkflow/parallelJobs/${jobName}/releaseCheckCondition`,
+          runCondition ? normalizeYamlCondition(runCondition[1]) : null, EXPECTED_RELEASE_CHECK_CONDITION);
       }
     }
   }

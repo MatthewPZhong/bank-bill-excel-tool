@@ -1,4 +1,5 @@
 const { randomUUID } = require('node:crypto');
+const { applyTemplateChannelAssignment } = require('./statement-channel-repository');
 // v2.1.9 SR-log-1 (T32h)：替换 console.warn → appendModuleLog 双写
 const { appendModuleLog } = require('../logger');
 const {
@@ -21,14 +22,15 @@ function listTemplates(db) {
       t.created_at AS createdAt,
       t.updated_at AS updatedAt,
       t.date_format AS dateFormat,
-      t.is_parent AS isParent,
-      t.parent_template_id AS parentTemplateId,
+      t.channel_id AS channelId,
+      sc.name AS channelName,
       t.filename_fixed_field AS filenameFixedField,
       COUNT(DISTINCT m.id) AS mappingCount,
       COUNT(DISTINCT ba.merchant_id) AS bigAccountCount,
       merchant_mapping.mapped_field AS merchantIdMappedField,
       MIN(ba.merchant_id) AS singleBigAccountMerchantId
     FROM templates t
+    LEFT JOIN statement_channels sc ON sc.id = t.channel_id
     LEFT JOIN template_mappings m ON m.template_id = t.id
     LEFT JOIN template_big_accounts ba
       ON ba.template_id = t.id AND ba.account_nature = 'client'
@@ -54,8 +56,8 @@ function getTemplate(db, templateId) {
         t.created_at AS createdAt,
         t.updated_at AS updatedAt,
         t.date_format AS dateFormat,
-        t.is_parent AS isParent,
-        t.parent_template_id AS parentTemplateId,
+        t.channel_id AS channelId,
+        (SELECT sc.name FROM statement_channels sc WHERE sc.id = t.channel_id) AS channelName,
         t.filename_fixed_field AS filenameFixedField,
         (
           SELECT COUNT(1)
@@ -130,70 +132,6 @@ function getTemplatesByBankName(db, bankName) {
       const firstPart = t.name.split('-')[0] || '';
       return firstPart === target;
     });
-}
-
-function listChildTemplates(db, parentTemplateId) {
-  return db.prepare(`
-    SELECT
-      t.id,
-      t.template_key AS templateKey,
-      t.name,
-      t.source_file_name AS sourceFileName,
-      t.headers_json AS headersJson,
-      t.created_at AS createdAt,
-      t.updated_at AS updatedAt,
-      t.date_format AS dateFormat,
-      t.is_parent AS isParent,
-      t.parent_template_id AS parentTemplateId,
-      t.filename_fixed_field AS filenameFixedField,
-      (SELECT COUNT(1) FROM template_mappings m WHERE m.template_id = t.id) AS mappingCount,
-      (SELECT COUNT(DISTINCT merchant_id) FROM template_big_accounts ba WHERE ba.template_id = t.id AND ba.account_nature = 'client') AS bigAccountCount,
-      (SELECT mapped_field FROM template_mappings mm WHERE mm.template_id = t.id AND mm.template_field = 'MerchantId' LIMIT 1) AS merchantIdMappedField,
-      (SELECT MIN(merchant_id) FROM template_big_accounts ba WHERE ba.template_id = t.id AND ba.account_nature = 'client') AS singleBigAccountMerchantId
-    FROM templates t
-    WHERE t.parent_template_id = ?
-    ORDER BY t.id ASC
-  `).all(parentTemplateId).map((row) => buildTemplateSummaryFromRow(row));
-}
-
-function setParentStatus(db, templateId, isParent) {
-  const now = new Date().toISOString();
-  db.exec('BEGIN');
-  try {
-    db.prepare('UPDATE templates SET is_parent = ?, updated_at = ? WHERE id = ?').run(isParent ? 1 : 0, now, templateId);
-    if (!isParent) {
-      // 取消主模板身份时，将子模板的 parent_template_id 置 NULL
-      db.prepare('UPDATE templates SET parent_template_id = NULL, updated_at = ? WHERE parent_template_id = ?').run(now, templateId);
-    }
-    // 设为主模板时，确保自身不是子模板
-    if (isParent) {
-      db.prepare('UPDATE templates SET parent_template_id = NULL, updated_at = ? WHERE id = ?').run(now, templateId);
-    }
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-}
-
-function setChildParent(db, templateId, parentTemplateId) {
-  const now = new Date().toISOString();
-  db.exec('BEGIN');
-  try {
-    if (parentTemplateId) {
-      // 设为子模板：设置 parent_template_id，清除 is_parent
-      db.prepare('UPDATE templates SET parent_template_id = ?, is_parent = 0, updated_at = ? WHERE id = ?')
-        .run(parentTemplateId, now, templateId);
-    } else {
-      // 取消子模板身份
-      db.prepare('UPDATE templates SET parent_template_id = NULL, updated_at = ? WHERE id = ?')
-        .run(now, templateId);
-    }
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
 }
 
 function upsertTemplate(db, { templateKey = '', name, sourceFileName, headers }) {
@@ -421,9 +359,10 @@ function saveMappings(
   fixedAssignments = [],
   dateFormat,
   amountSplitRules = null,
-  { preserveOwn = false } = {}
+  { preserveOwn = false, channelAssignment = null } = {}
 ) {
   const now = new Date().toISOString();
+  let channelAssignmentResult = null;
   // v1.5.3 R2 round 6 second-pass self-review (C2)：在 try 块外声明
   // 让 COMMIT 之后的 warn 能访问到；transaction rollback 抛出时永远不到 warn 那行
   const skippedOwnRows = [];
@@ -544,6 +483,11 @@ function saveMappings(
       db.prepare('UPDATE templates SET updated_at = ? WHERE id = ?').run(now, templateId);
     }
 
+    // v3.2.15（T6）：渠道归属与映射同一事务写入；归属校验失败时映射也回滚。
+    if (channelAssignment) {
+      channelAssignmentResult = applyTemplateChannelAssignment(db, templateId, channelAssignment, now);
+    }
+
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');
@@ -566,6 +510,8 @@ function saveMappings(
       ]
     });
   }
+
+  return { channelAssignment: channelAssignmentResult };
 }
 
 function getBillSplitMappings(db, templateId) {
@@ -916,13 +862,6 @@ function listTemplateBundleEntries(db) {
   return listTemplates(db).map((template) => {
     const payload = getTemplateMappings(db, template.id);
 
-    // v1.5.1: 主/子模板关系
-    let parentTemplateKey = null;
-    if (template.parentTemplateId) {
-      const parentRow = db.prepare('SELECT template_key FROM templates WHERE id = ?').get(template.parentTemplateId);
-      parentTemplateKey = parentRow ? normalizeText(parentRow.template_key) : null;
-    }
-
     // v1.5.3 R2：bundle 导出带 accountNature，且包含 own 账号（bundle 是全量备份/恢复场景，特例放行）
     // 独立再查一次大账号（含 own），然后分组，避免依赖 payload.bigAccounts（后者来自 getTemplateMappings 默认过滤 own）
     const allBigAccountsWithNature = groupBigAccountRows(
@@ -934,8 +873,8 @@ function listTemplateBundleEntries(db) {
       name: template.name,
       sourceFileName: template.sourceFileName,
       headers: template.headers,
-      isParent: Boolean(template.isParent),
-      parentTemplateKey,
+      // v3.2.15（bundle v5）：所属渠道名，取代 isParent / parentTemplateKey。
+      channelName: template.channelName || null,
       // v1.5.2 需求 3：文件名固定字段随 bundle 透传
       filenameFixedField: template.filenameFixedField || '',
       mappings: payload ? payload.mappings.map((mapping) => ({ ...mapping })) : [],
@@ -985,7 +924,6 @@ module.exports = {
   getTemplateByName,
   getTemplateMappings,
   getTemplatesByBankName,
-  listChildTemplates,
   listTemplateBundleEntries,
   listTemplates,
   renameTemplate,
@@ -998,7 +936,5 @@ module.exports = {
   saveBillSplitRowCount,
   saveMappings,
   saveTemplateFilenameFixedField,
-  setChildParent,
-  setParentStatus,
   upsertTemplate
 };

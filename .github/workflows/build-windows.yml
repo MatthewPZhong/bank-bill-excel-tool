@@ -33,7 +33,314 @@ jobs:
           node -e "if (require('./tests/helpers/durable-directory-tests').directoryDurabilityCapability.capability !== 'supported') process.exit(1)"
           node --test tests/unit/main-process/biz-op-v327*.test.js
 
+  # v3.2.15 B43：release-check 拆成下面三个并行 job（lint + 架构检查 + smoke、单测 6 片、集成测试 2 片），
+  #   各 job 沿用 smoke-test 的 v3.2.1 final gate 守卫、exact head checkout、一次性修复血缘与 release-check 运行条件；
+  #   smoke-test 汇总各 job 结果（scripts/ci/verify-release-check-jobs.js）后再跑 Windows 专项步骤，必需检查名不变。
+  #   本地 npm run release-check 的入口与内容不变。
+  release-check-static:
+    runs-on: windows-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: Reject unauthorized v3.2.1 final-gate invocation
+        if: >-
+          (
+            (
+              github.event_name == 'pull_request' &&
+              (
+                github.head_ref == 'codex/v3.2.1-r3-release-evidence' ||
+                github.head_ref == 'codex/v3.2.1-r4-review-hardening'
+              )
+            ) ||
+            (
+              github.event_name == 'workflow_dispatch' &&
+              (
+                github.ref_name == 'codex/v3.2.1-r3-release-evidence' ||
+                github.ref_name == 'codex/v3.2.1-r4-review-hardening'
+              )
+            )
+          ) &&
+          !(
+            github.event_name == 'pull_request' &&
+            github.event.pull_request.number == 183 &&
+            github.head_ref == 'codex/v3.2.1-r4-review-hardening' &&
+            github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
+            github.event.pull_request.head.repo.full_name == github.repository &&
+            github.event.action == 'synchronize' &&
+            github.event.pull_request.commits == 6 &&
+            github.run_attempt == 1
+          )
+        run: |
+          echo "Unauthorized v3.2.1 final release-gate invocation"
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify authorized v3.2.1 repair lineage
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.number == 183 &&
+          github.head_ref == 'codex/v3.2.1-r4-review-hardening' &&
+          github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.action == 'synchronize' &&
+          github.event.pull_request.commits == 6 &&
+          github.run_attempt == 1
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          test "$(git rev-parse HEAD^1)" = "f87f2b2994e86b75d350f64eec53252fe24a67b6"
+          test "$(git rev-parse HEAD^1^1)" = "ce599e206894f3683b748254068dd750479ffc74"
+          test "$(git rev-parse HEAD^1^2)" = "d7d96938196a61a36892c40721cdba56992a14a8"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve architecture policy comparison
+        id: architecture-policy
+        env:
+          ARCHITECTURE_EVENT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'push' && github.ref_type != 'tag' && github.event.before || '' }}
+          ARCHITECTURE_EXPECTED_HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/architecture/ci-policy-base.js
+
+      - name: Run lint, architecture and smoke checks
+        env:
+          ARCHITECTURE_BASE_REF: ${{ steps.architecture-policy.outputs.base }}
+        if: >-
+          (
+            github.event_name == 'pull_request' &&
+            github.event.pull_request.number == 183 &&
+            github.head_ref == 'codex/v3.2.1-r4-review-hardening' &&
+            github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
+            github.event.pull_request.head.repo.full_name == github.repository &&
+            github.event.action == 'synchronize' &&
+            github.event.pull_request.commits == 6 &&
+            github.run_attempt == 1
+          ) ||
+          (
+            (github.event_name != 'pull_request' ||
+             github.head_ref != 'codex/v3.2.1-r4-review-hardening') &&
+            (github.event_name != 'workflow_dispatch' ||
+             github.ref_name != 'codex/v3.2.1-r4-review-hardening') &&
+            (github.event_name != 'pull_request' ||
+             github.event.pull_request.head.repo.full_name != github.repository ||
+             !startsWith(github.head_ref, 'codex/v3.2.1-'))
+          )
+        run: npm run lint && npm run check:architecture && npm run smoke
+
+  release-check-unit:
+    name: release-check-unit (${{ matrix.shard }}/6)
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: Reject unauthorized v3.2.1 final-gate invocation
+        if: >-
+          (
+            (
+              github.event_name == 'pull_request' &&
+              (
+                github.head_ref == 'codex/v3.2.1-r3-release-evidence' ||
+                github.head_ref == 'codex/v3.2.1-r4-review-hardening'
+              )
+            ) ||
+            (
+              github.event_name == 'workflow_dispatch' &&
+              (
+                github.ref_name == 'codex/v3.2.1-r3-release-evidence' ||
+                github.ref_name == 'codex/v3.2.1-r4-review-hardening'
+              )
+            )
+          ) &&
+          !(
+            github.event_name == 'pull_request' &&
+            github.event.pull_request.number == 183 &&
+            github.head_ref == 'codex/v3.2.1-r4-review-hardening' &&
+            github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
+            github.event.pull_request.head.repo.full_name == github.repository &&
+            github.event.action == 'synchronize' &&
+            github.event.pull_request.commits == 6 &&
+            github.run_attempt == 1
+          )
+        run: |
+          echo "Unauthorized v3.2.1 final release-gate invocation"
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify authorized v3.2.1 repair lineage
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.number == 183 &&
+          github.head_ref == 'codex/v3.2.1-r4-review-hardening' &&
+          github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.action == 'synchronize' &&
+          github.event.pull_request.commits == 6 &&
+          github.run_attempt == 1
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          test "$(git rev-parse HEAD^1)" = "f87f2b2994e86b75d350f64eec53252fe24a67b6"
+          test "$(git rev-parse HEAD^1^1)" = "ce599e206894f3683b748254068dd750479ffc74"
+          test "$(git rev-parse HEAD^1^2)" = "d7d96938196a61a36892c40721cdba56992a14a8"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests shard
+        env:
+          UNIT_TEST_SHARD: ${{ matrix.shard }}/6
+        if: >-
+          (
+            github.event_name == 'pull_request' &&
+            github.event.pull_request.number == 183 &&
+            github.head_ref == 'codex/v3.2.1-r4-review-hardening' &&
+            github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
+            github.event.pull_request.head.repo.full_name == github.repository &&
+            github.event.action == 'synchronize' &&
+            github.event.pull_request.commits == 6 &&
+            github.run_attempt == 1
+          ) ||
+          (
+            (github.event_name != 'pull_request' ||
+             github.head_ref != 'codex/v3.2.1-r4-review-hardening') &&
+            (github.event_name != 'workflow_dispatch' ||
+             github.ref_name != 'codex/v3.2.1-r4-review-hardening') &&
+            (github.event_name != 'pull_request' ||
+             github.event.pull_request.head.repo.full_name != github.repository ||
+             !startsWith(github.head_ref, 'codex/v3.2.1-'))
+          )
+        run: npm run test:unit
+
+  release-check-integration:
+    name: release-check-integration (${{ matrix.shard }}/2)
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: Reject unauthorized v3.2.1 final-gate invocation
+        if: >-
+          (
+            (
+              github.event_name == 'pull_request' &&
+              (
+                github.head_ref == 'codex/v3.2.1-r3-release-evidence' ||
+                github.head_ref == 'codex/v3.2.1-r4-review-hardening'
+              )
+            ) ||
+            (
+              github.event_name == 'workflow_dispatch' &&
+              (
+                github.ref_name == 'codex/v3.2.1-r3-release-evidence' ||
+                github.ref_name == 'codex/v3.2.1-r4-review-hardening'
+              )
+            )
+          ) &&
+          !(
+            github.event_name == 'pull_request' &&
+            github.event.pull_request.number == 183 &&
+            github.head_ref == 'codex/v3.2.1-r4-review-hardening' &&
+            github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
+            github.event.pull_request.head.repo.full_name == github.repository &&
+            github.event.action == 'synchronize' &&
+            github.event.pull_request.commits == 6 &&
+            github.run_attempt == 1
+          )
+        run: |
+          echo "Unauthorized v3.2.1 final release-gate invocation"
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify authorized v3.2.1 repair lineage
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.number == 183 &&
+          github.head_ref == 'codex/v3.2.1-r4-review-hardening' &&
+          github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.action == 'synchronize' &&
+          github.event.pull_request.commits == 6 &&
+          github.run_attempt == 1
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          test "$(git rev-parse HEAD^1)" = "f87f2b2994e86b75d350f64eec53252fe24a67b6"
+          test "$(git rev-parse HEAD^1^1)" = "ce599e206894f3683b748254068dd750479ffc74"
+          test "$(git rev-parse HEAD^1^2)" = "d7d96938196a61a36892c40721cdba56992a14a8"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run integration tests shard
+        env:
+          INTEGRATION_SHARD: ${{ matrix.shard }}/2
+          INTEGRATION_CONCURRENCY: '2'
+        if: >-
+          (
+            github.event_name == 'pull_request' &&
+            github.event.pull_request.number == 183 &&
+            github.head_ref == 'codex/v3.2.1-r4-review-hardening' &&
+            github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
+            github.event.pull_request.head.repo.full_name == github.repository &&
+            github.event.action == 'synchronize' &&
+            github.event.pull_request.commits == 6 &&
+            github.run_attempt == 1
+          ) ||
+          (
+            (github.event_name != 'pull_request' ||
+             github.head_ref != 'codex/v3.2.1-r4-review-hardening') &&
+            (github.event_name != 'workflow_dispatch' ||
+             github.ref_name != 'codex/v3.2.1-r4-review-hardening') &&
+            (github.event_name != 'pull_request' ||
+             github.event.pull_request.head.repo.full_name != github.repository ||
+             !startsWith(github.head_ref, 'codex/v3.2.1-'))
+          )
+        run: npm run test:integration
+
   smoke-test:
+    needs: [release-check-static, release-check-unit, release-check-integration]
+    # 依赖 job 失败时仍运行本 job 并在 Run release checks 失败，避免必需检查显示为 skipped。
+    if: ${{ !cancelled() }}
     runs-on: windows-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -108,16 +415,9 @@ jobs:
       - name: Verify common feedback keyboard and layout on Windows
         run: node scripts/test-renderer-lifecycle.js common-feedback-dialog-scroll
 
-      - name: Resolve architecture policy comparison
-        id: architecture-policy
-        env:
-          ARCHITECTURE_EVENT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'push' && github.ref_type != 'tag' && github.event.before || '' }}
-          ARCHITECTURE_EXPECTED_HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-        run: node scripts/architecture/ci-policy-base.js
-
       - name: Run release checks
         env:
-          ARCHITECTURE_BASE_REF: ${{ steps.architecture-policy.outputs.base }}
+          RELEASE_CHECK_JOB_RESULTS: ${{ toJSON(needs) }}
         if: >-
           (
             github.event_name == 'pull_request' &&
@@ -138,7 +438,7 @@ jobs:
              github.event.pull_request.head.repo.full_name != github.repository ||
              !startsWith(github.head_ref, 'codex/v3.2.1-'))
           )
-        run: npm run release-check
+        run: node scripts/ci/verify-release-check-jobs.js
 
       - name: Verify Windows startup process adapter semantics
         env:

@@ -235,6 +235,36 @@ test.describe('平盘导入读取器', () => {
     );
   });
 
+  test('前面若干列完全空白（使用范围不从 A 列开始）的原始表与银行对账单按缺列拒绝', (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-sparse-header-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const writeFromColumnB = (filePath, sheetName, headers, row) => {
+      const workbook = XLSX.utils.book_new();
+      const tail = headers.slice(1);
+      const sheet = XLSX.utils.aoa_to_sheet([tail, tail.map((header) => row[header] ?? '')], { origin: 'B1' });
+      // 与 Excel 保存后的使用范围一致：A 列没有任何单元格
+      sheet['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 1 }, e: { r: 1, c: tail.length } });
+      XLSX.utils.book_append_sheet(workbook, sheet, sheetName);
+      XLSX.writeFile(workbook, filePath);
+    };
+    const accountPath = path.join(dir, 'account-from-b.xls');
+    const accountHeaders = SOURCE_DEFINITIONS[SOURCE_TYPES.BANK_ACCOUNT].headers;
+    writeFromColumnB(accountPath, 'Sheet1', accountHeaders, { 账户状态: '正常', 账户性质: '自有', 币种: 'USD', 银行账号: 'OWN-1' });
+    assert.throws(() => readSourceFile(accountPath), (error) => error.code === 'position-source-unrecognized');
+
+    const bankPath = path.join(dir, 'bank-from-b.xls');
+    writeFromColumnB(bankPath, BANK_SHEET_NAME, BANK_STATEMENT_FIELDS, bankRow());
+    assert.throws(
+      () => readBankFiles([bankPath]),
+      (error) => error.code === 'position-bank-headers-invalid'
+        && error.detailLines.includes('第 1 列（A）：应为「账户主体」，实际为空')
+    );
+
+    const fromColumnC = XLSX.utils.aoa_to_sheet([['X', 'Y']], { origin: 'C1' });
+    fromColumnC['!ref'] = 'C1:D1';
+    assert.deepEqual([...rowValues(fromColumnC)[0]], ['', '', 'X', 'Y']);
+  });
+
   test('稀疏工作表只返回非空行并保留物理行号', () => {
     const rows = rowValues({
       A1: { t: 's', v: '表头' },

@@ -2,6 +2,7 @@ const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { normalizeText } = require('./utils');
+const statementChannelRepository = require('./statement-channel-repository');
 // v2.1.9 SR-log-1 (T32h)：替换 console.error → appendModuleLog 双写
 const { appendModuleLog } = require('../logger');
 // v2.1.16-beta.5 需求4：JPM 调拨订单修复写死场景默认商户号（与引擎从 scenario.config.merchantId 读同源）。
@@ -298,6 +299,163 @@ function ensureParentTemplateSupport(db) {
   if (!hasColumn(db, 'templates', 'is_parent')) {
     db.exec('ALTER TABLE templates ADD COLUMN is_parent INTEGER NOT NULL DEFAULT 0;');
   }
+}
+
+// v3.2.15 网银账单渠道（取代主模板）：渠道表、渠道账户映射与待处理冲突，templates.channel_id。
+//   幂等：CREATE TABLE IF NOT EXISTS + hasColumn 判断。
+function ensureStatementChannelTables(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS statement_channels (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      next_child_no INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS statement_channel_account_mappings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel_id INTEGER NOT NULL REFERENCES statement_channels(id) ON DELETE CASCADE,
+      bank_account_id TEXT NOT NULL,
+      clearing_account_id TEXT NOT NULL,
+      no_currency INTEGER NOT NULL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT '',
+      row_index INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(channel_id, bank_account_id)
+    );
+    CREATE TABLE IF NOT EXISTS statement_channel_account_mapping_conflicts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel_id INTEGER NOT NULL REFERENCES statement_channels(id) ON DELETE CASCADE,
+      bank_account_id TEXT NOT NULL,
+      candidates_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(channel_id, bank_account_id)
+    );
+  `);
+  if (!hasColumn(db, 'templates', 'channel_id')) {
+    db.exec('ALTER TABLE templates ADD COLUMN channel_id INTEGER REFERENCES statement_channels(id) ON DELETE SET NULL;');
+  }
+}
+
+// v3.2.15：把旧的主/子模板一次性转为渠道（spec §4.7，D1、D5、D8）。
+//   - 渠道来源：is_parent = 1 的模板，以及被 parent_template_id 引用的模板；沿 parent 链取根模板，
+//     根模板名即渠道名，链上的模板都归入该渠道。
+//   - 转换后清零 is_parent / parent_template_id：再次启动没有旧标记，自然为空操作；
+//     用户删除的渠道没有旧标记可依，不会重建（T2）。
+//   - 账户映射：渠道下各模板的模板级映射合并为渠道映射，相同设置去重，同一账户号设置不同登记为待处理冲突，
+//     合并后删除这些模板的模板级映射（T10、T12）。
+//   - 种子文件不搬移（D5）：返回模板名银行段 / 所在地段与渠道名不同的清单，由调用方写入活动日志。
+//   有待迁移数据时先备份（事务外，与 ensureScenariosNameUniqueByChannelId 同一套备份）。
+//   返回 { status: 'skipped' | 'migrated' | 'backup-failed' | 'migration-failed', ... }
+function ensureStatementChannelSupport(db, createBackupFn) {
+  ensureStatementChannelTables(db);
+  if (!hasColumn(db, 'templates', 'is_parent') || !hasColumn(db, 'templates', 'parent_template_id')) {
+    return { status: 'skipped' };
+  }
+  const rows = db
+    .prepare('SELECT id, name, is_parent AS isParent, parent_template_id AS parentTemplateId FROM templates ORDER BY id ASC')
+    .all()
+    .map((row) => ({
+      id: Number(row.id),
+      name: normalizeText(row.name),
+      isParent: Number(row.isParent) === 1,
+      parentTemplateId: row.parentTemplateId === null || row.parentTemplateId === undefined
+        ? null
+        : Number(row.parentTemplateId)
+    }));
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const hasMarkers = rows.some((row) => row.isParent || row.parentTemplateId !== null);
+  if (!hasMarkers) {
+    return { status: 'skipped' };
+  }
+  const referenced = new Set(
+    rows.filter((row) => row.parentTemplateId !== null && byId.has(row.parentTemplateId)).map((row) => row.parentTemplateId)
+  );
+  const involved = rows.filter((row) => row.isParent
+    || (row.parentTemplateId !== null && byId.has(row.parentTemplateId))
+    || referenced.has(row.id));
+
+  let backupPath = null;
+  if (involved.length > 0 && typeof createBackupFn === 'function') {
+    try {
+      backupPath = createBackupFn('pre-statement-channels');
+    } catch (error) {
+      return { status: 'backup-failed', error };
+    }
+  }
+
+  const rootOf = (row) => {
+    let current = row;
+    const seen = new Set([current.id]);
+    while (current.parentTemplateId !== null && byId.has(current.parentTemplateId) && !seen.has(current.parentTemplateId)) {
+      current = byId.get(current.parentTemplateId);
+      seen.add(current.id);
+    }
+    return current;
+  };
+
+  const now = new Date().toISOString();
+  const channelMembers = new Map(); // channelId -> { name, templates: [] }
+  const outputChanges = [];
+  let createdChannelCount = 0;
+  let mergedMappingCount = 0;
+  let conflictCount = 0;
+  try {
+    db.exec('BEGIN');
+    for (const row of involved) {
+      const channelName = rootOf(row).name;
+      const { channelId, created } = statementChannelRepository.getOrCreateChannelId(db, channelName, now);
+      if (created) createdChannelCount += 1;
+      if (!channelMembers.has(channelId)) channelMembers.set(channelId, { name: channelName, templates: [] });
+      channelMembers.get(channelId).templates.push(row);
+      db.prepare('UPDATE templates SET channel_id = ? WHERE id = ?').run(channelId, row.id);
+      const templateSegments = statementChannelRepository.splitOutputNameSegments(row.name);
+      const channelSegments = statementChannelRepository.splitOutputNameSegments(channelName);
+      if (templateSegments.bankName !== channelSegments.bankName || templateSegments.location !== channelSegments.location) {
+        outputChanges.push({
+          templateName: row.name,
+          channelName,
+          fromBankName: templateSegments.bankName,
+          toBankName: channelSegments.bankName,
+          fromLocation: templateSegments.location,
+          toLocation: channelSegments.location
+        });
+      }
+    }
+    db.prepare('UPDATE templates SET is_parent = 0, parent_template_id = NULL WHERE is_parent <> 0 OR parent_template_id IS NOT NULL').run();
+
+    for (const [channelId, member] of channelMembers) {
+      // 降级后又升级时渠道可能已有映射与冲突：一并作为来源，不丢失。
+      const sources = statementChannelRepository.listChannelExistingSources(db, channelId, member.name);
+      for (const template of member.templates) {
+        sources.push({
+          sourceName: template.name,
+          mappings: statementChannelRepository.listTemplateAccountMappings(db, template.id)
+        });
+      }
+      const result = statementChannelRepository.replaceChannelAccountMappingsFromSources(db, channelId, sources, now);
+      mergedMappingCount += result.mergedCount;
+      conflictCount += result.conflictCount;
+      const removeTemplateMappings = db.prepare('DELETE FROM account_mappings WHERE template_id = ?');
+      member.templates.forEach((template) => removeTemplateMappings.run(template.id));
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* 事务可能未开启 */ }
+    return { status: 'migration-failed', backupPath, error };
+  }
+
+  return {
+    status: involved.length > 0 ? 'migrated' : 'cleared-dangling-markers',
+    backupPath,
+    createdChannelCount,
+    channelCount: channelMembers.size,
+    templateCount: involved.length,
+    outputChanges,
+    mergedMappingCount,
+    conflictCount
+  };
 }
 
 // v1.5.2 需求 3：按文件名映射模板 — 在 templates 表新增 filename_fixed_field 列
@@ -4086,7 +4244,40 @@ function ensureTemplateResourceVersionSupport(db) {
   `);
 }
 
+// v3.2.15：设置 → 账户管理的清结算系统银行账户表。原文件存 {userData}/bank-accounts/，主库只保留当前一份：
+//   bank_account_snapshot 为单行元数据（id 固定为 1），bank_account_rows 为按导入时表头对齐的账户行。
+//   导入整份替换，两表在同一事务内更新。纯新增表，幂等。
+function ensureBankAccountSnapshotSupport(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS bank_account_snapshot (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      snapshot_no INTEGER NOT NULL CHECK (snapshot_no >= 1),
+      file_name TEXT NOT NULL,
+      file_extension TEXT NOT NULL CHECK (file_extension IN ('xlsx', 'xls')),
+      size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
+      sha256 TEXT NOT NULL CHECK (length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'),
+      sheet_name TEXT NOT NULL DEFAULT '',
+      headers_json TEXT NOT NULL,
+      channel_header TEXT NOT NULL,
+      structure_version_id TEXT NOT NULL DEFAULT '',
+      structure_label TEXT NOT NULL DEFAULT '',
+      row_count INTEGER NOT NULL CHECK (row_count >= 1),
+      app_version TEXT NOT NULL DEFAULT '',
+      imported_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS bank_account_rows (
+      ordinal INTEGER PRIMARY KEY CHECK (ordinal >= 1),
+      excel_row_number INTEGER NOT NULL,
+      channel TEXT NOT NULL DEFAULT '',
+      values_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_bank_account_rows_channel
+      ON bank_account_rows(channel, ordinal);
+  `);
+}
+
 module.exports = {
+  ensureBankAccountSnapshotSupport,
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
   ensureAcquiringBillCurrencyTablesSupport,
@@ -4099,6 +4290,8 @@ module.exports = {
   ensureBillSplitMergeSupport,
   ensureBillSplitTargetSeqSupport,
   ensureParentTemplateSupport,
+  ensureStatementChannelSupport,
+  ensureStatementChannelTables,
   ensureScenariosSupport,
   ensureScenariosCategoryReconIdFix,
   ensureScenariosCategoryGatewayReconIdFix,

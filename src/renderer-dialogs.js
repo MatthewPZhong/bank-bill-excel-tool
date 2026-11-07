@@ -33,7 +33,7 @@
       ui: { createOverlay, createAlertDialog, createConfirmDialog, escapeHtml, pushAlert }
     });
 
-    const { looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createAccountMappingMigrationDialog } = global.ConfigurationDialogs.createConfigurationDialogs({
+    const { looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog } = global.ConfigurationDialogs.createConfigurationDialogs({
       services: configurationServices, api: configurationApi, modalBridge,
       ui: { createOverlay, escapeHtml, createAlertDialog, createConfirmDialog, pushAlert, setStatus, applyStatementResult, applyManualBalancePromptStatus, createFeedbackScope },
       constants: { BALANCE_DISABLED_OPTION, BALANCE_CALCULATED_OPTION, MERCHANT_ID_SELF_INPUT_OPTION, ADVANCED_MAPPING_FIELDS, CONCAT_FIELDS_MAPPING_FIELD, AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD, AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION }
@@ -1747,6 +1747,8 @@
       createMappingDialog,
       createAccountMappingDialog,
       createAccountMappingMigrationDialog,
+      // v3.2.15：渠道账户映射冲突弹窗（网银账单模块激活与账户映射内打开）
+      createChannelAccountMappingConflictDialog,
       // v3.0.12 功能2（批A）：账户映射管理弹窗（链接表管理左下角入口；preview 链路也需此 factory）
       createFundTransferAccountMappingDialog,
       // v1.5.3 round 6：补全 preview 所需 factory（业务代码不直接用，仅 preview 链路调）

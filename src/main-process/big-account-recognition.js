@@ -132,8 +132,167 @@ function resolveRecognizedBigAccount({
   };
 }
 
+function savedOrderAssignmentsKey(assignments) {
+  return assignments
+    .map((assignment) => `${normalizeCell(assignment && assignment.merchantId)}\u0000${normalizeCell(assignment && assignment.currency)}`)
+    .join('\u0001');
+}
+
+// 逐块信息统一为 { merchantId, empty }：merchantId 为识别到的账号（未识别为 ''），empty 为该块是否没有交易
+// （true / false；不知道时为 null，按有交易处理）。为兼容只传账号字符串的调用，字符串视为 empty 未知。
+function normalizeOrderRow(row) {
+  if (row && typeof row === 'object') {
+    return { merchantId: normalizeCell(row.merchantId), empty: typeof row.empty === 'boolean' ? row.empty : null };
+  }
+  return { merchantId: normalizeCell(row), empty: null };
+}
+
+// 记住顺序里每份文件逐块（与当时大账号预览的固定模式行一一对应，含空段 / 未识别段）的识别账号与是否有交易。
+// 新数据取 rowAccounts（未识别为 ''）与 rowEmpty；v3.2.15 之前保存的顺序没有逐块信息：只有当时每块都识别到账号时，
+// 逐块账号就是 accounts（是否有交易未知）；否则无法还原各文件占了哪几条分配，返回 null，调用方不按记住的分配逐块套用。
+function resolveSavedOrderFileRows(savedOrderConfig = {}) {
+  const savedFiles = Array.isArray(savedOrderConfig && savedOrderConfig.files) ? savedOrderConfig.files : [];
+  const savedAssignments = Array.isArray(savedOrderConfig && savedOrderConfig.assignments)
+    ? savedOrderConfig.assignments
+    : [];
+  if (!savedFiles.length) return null;
+  const rowsByFile = savedFiles.map((savedFile) => {
+    if (Array.isArray(savedFile.rowAccounts)) {
+      const rowEmpty = Array.isArray(savedFile.rowEmpty) && savedFile.rowEmpty.length === savedFile.rowAccounts.length
+        ? savedFile.rowEmpty
+        : [];
+      return savedFile.rowAccounts.map((merchantId, position) => normalizeOrderRow({ merchantId, empty: rowEmpty[position] }));
+    }
+    const accounts = Array.isArray(savedFile.accounts) ? savedFile.accounts : [];
+    return accounts.length === savedFile.accountCount
+      ? accounts.map((account) => normalizeOrderRow(account && account.merchantId))
+      : null;
+  });
+  if (rowsByFile.some((rows) => rows === null)) return null;
+  const rowTotal = rowsByFile.reduce((sum, rows) => sum + rows.length, 0);
+  return rowTotal === savedAssignments.length ? rowsByFile : null;
+}
+
+// 按记住的分配逐块套用前，本次每份文件逐块识别结果须与对上的记住文件逐块一致：
+// 识别到账号的块须账号相同；未识别的块须同为无交易空段或同为有交易块（任一侧不知道是否有交易都算对不上）。
+// 账号块换序、空段 / 未识别段的位置或个数变化，按位置套用都会把账号 / 币种挂到别的块上。
+// 返回逐块对不上的导入文件下标；记住的顺序无法还原逐块信息时全部视为对不上。
+function findSavedOrderFileRowMismatches(importRowLists = [], savedOrderConfig = {}, savedIndexByImport = []) {
+  const importLists = Array.isArray(importRowLists) ? importRowLists : [];
+  const savedRows = resolveSavedOrderFileRows(savedOrderConfig);
+  return importLists
+    .map((rows, importIndex) => {
+      const saved = savedRows ? savedRows[savedIndexByImport[importIndex]] : null;
+      const current = Array.isArray(rows) ? rows.map(normalizeOrderRow) : null;
+      const matches = Boolean(saved && current)
+        && current.length === saved.length
+        && current.every((row, position) => {
+          const savedRow = saved[position];
+          if (row.merchantId !== savedRow.merchantId) return false;
+          if (row.merchantId) return true;
+          return row.empty !== null && savedRow.empty !== null && row.empty === savedRow.empty;
+        });
+      return matches ? -1 : importIndex;
+    })
+    .filter((importIndex) => importIndex >= 0);
+}
+
+// 有交易但识别不出账号的块：分配只能按位置取，无法核对。
+function hasUnidentifiedTransactionRows(importRowLists = []) {
+  return (Array.isArray(importRowLists) ? importRowLists : []).some((rows) => (Array.isArray(rows) ? rows : [])
+    .map(normalizeOrderRow)
+    .some((row) => !row.merchantId && row.empty !== true));
+}
+
+// 固定模式按已记住顺序自动套用：每个导入文件按账号块顺序依次比对识别到的账号，对上第一个未用过的已记住文件，
+// 再按导入顺序重排该文件记住的账号 / 币种分配。
+// 匹配不看币种：一个导入文件能对上多个已记住文件、且它们记住的分配不同时（如同一多币种大账号的
+// CNY、USD 两份账单），实际取到哪份只取决于本次导入顺序，记为 ambiguous，不产出自动分配。
+// 同一文件里哪块取哪条分配只取决于块顺序、而识别无法区分时，同样记为 ambiguous：
+//   同一账号出现在多个块且记住的币种不同；或两个以上有交易但未识别账号的块记住的分配不同。
+function matchImportFilesToSavedOrder(importAccountLists = [], savedOrderConfig = {}) {
+  const savedFiles = Array.isArray(savedOrderConfig && savedOrderConfig.files) ? savedOrderConfig.files : [];
+  const savedAssignments = Array.isArray(savedOrderConfig && savedOrderConfig.assignments)
+    ? savedOrderConfig.assignments
+    : [];
+  // 能还原逐块信息时按各文件实际占用的分配条数切分（含空段 / 未识别段）；
+  // 不能还原的旧数据沿用按识别个数切分，此时切分总数小于分配总数，调用方的逐块核对不会放行。
+  const savedRows = resolveSavedOrderFileRows(savedOrderConfig);
+  const savedSlices = [];
+  let cursor = 0;
+  savedFiles.forEach((savedFile, savedIndex) => {
+    const count = savedRows ? savedRows[savedIndex].length : (savedFile.accountCount || 0);
+    savedSlices.push(savedAssignments.slice(cursor, cursor + count));
+    cursor += count;
+  });
+  const blockOrderDependent = savedFiles.map((savedFile, savedIndex) => {
+    if (!savedRows) {
+      const merchantIds = (Array.isArray(savedFile.accounts) ? savedFile.accounts : [])
+        .map((account) => normalizeCell(account && account.merchantId));
+      return new Set(merchantIds).size !== merchantIds.length;
+    }
+    const currenciesByAccount = new Map();
+    const unidentifiedTransactionKeys = new Set();
+    savedRows[savedIndex].forEach((row, position) => {
+      const assignment = savedSlices[savedIndex][position];
+      if (!row.merchantId) {
+        if (row.empty !== true) unidentifiedTransactionKeys.add(savedOrderAssignmentsKey([assignment]));
+        return;
+      }
+      const currencies = currenciesByAccount.get(row.merchantId) || new Set();
+      currencies.add(normalizeCell(assignment && assignment.currency));
+      currenciesByAccount.set(row.merchantId, currencies);
+    });
+    return unidentifiedTransactionKeys.size > 1
+      || Array.from(currenciesByAccount.values()).some((currencies) => currencies.size > 1);
+  });
+
+  const usedSavedIndices = new Set();
+  const failedImportIndexes = [];
+  const ambiguousImportIndexes = [];
+  const savedIndexByImport = (Array.isArray(importAccountLists) ? importAccountLists : [])
+    .map((accounts, importIndex) => {
+      const identifiedAccounts = Array.isArray(accounts) ? accounts : [];
+      const candidates = [];
+      savedFiles.forEach((savedFile, savedIndex) => {
+        const savedAccounts = Array.isArray(savedFile.accounts) ? savedFile.accounts : [];
+        if (identifiedAccounts.length !== savedFile.accountCount || identifiedAccounts.length !== savedAccounts.length) return;
+        // 逐块按顺序比对：同一文件里账号块换了顺序不算对上，否则会按记住的块顺序把账号 / 币种挂反。
+        const sameOrder = savedAccounts.every((savedAccount, position) => (
+          matchMerchantIds(identifiedAccounts[position] && identifiedAccounts[position].merchantId, savedAccount.merchantId) !== 'none'
+        ));
+        if (sameOrder) candidates.push(savedIndex);
+      });
+      const candidateKeys = new Set(candidates.map((savedIndex) => savedOrderAssignmentsKey(savedSlices[savedIndex])));
+      if (candidateKeys.size > 1 || candidates.some((savedIndex) => blockOrderDependent[savedIndex])) {
+        ambiguousImportIndexes.push(importIndex);
+      }
+      const savedIndex = candidates.find((index) => !usedSavedIndices.has(index));
+      if (savedIndex === undefined) {
+        failedImportIndexes.push(importIndex);
+        return -1;
+      }
+      usedSavedIndices.add(savedIndex);
+      return savedIndex;
+    });
+
+  const reorderedAssignments = [];
+  if (failedImportIndexes.length === 0 && ambiguousImportIndexes.length === 0 && savedAssignments.length > 0) {
+    savedIndexByImport.forEach((savedIndex) => {
+      savedSlices[savedIndex].forEach((assignment) => {
+        reorderedAssignments.push({ ...assignment, rowIndex: reorderedAssignments.length });
+      });
+    });
+  }
+  return { failedImportIndexes, ambiguousImportIndexes, reorderedAssignments, savedIndexByImport };
+}
+
 module.exports = {
+  findSavedOrderFileRowMismatches,
+  hasUnidentifiedTransactionRows,
   normalizeMaintainedBigAccounts,
+  matchImportFilesToSavedOrder,
   matchMerchantIds,
-  resolveRecognizedBigAccount
+  resolveRecognizedBigAccount,
+  resolveSavedOrderFileRows
 };

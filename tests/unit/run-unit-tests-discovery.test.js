@@ -26,8 +26,9 @@ function fixture(t, { fail = false } = {}) {
   return root;
 }
 
-function run(root, args = []) {
-  const env = { ...process.env, UNIT_TEST_CONCURRENCY: '1' };
+function run(root, args = [], extraEnv = {}) {
+  const env = { ...process.env, UNIT_TEST_CONCURRENCY: '1', ...extraEnv };
+  if (!('UNIT_TEST_SHARD' in extraEnv)) delete env.UNIT_TEST_SHARD;
   // 此处启动独立的 CLI；不继承外层 node:test 的内部二进制 reporter 上下文。
   delete env.NODE_TEST_CONTEXT;
   delete env.NODE_V8_COVERAGE;
@@ -68,4 +69,43 @@ test('unit runner 原生发现保留覆盖率模式和同一测试集合', t => 
   assert.equal(parseTapSummary(result.stdout).pass, 2);
   assert.match(result.stdout, /start of coverage report/);
   assert.match(result.stdout, /end of coverage report/);
+});
+
+// v3.2.15 B43：CI 分片运行时，各片合起来恰好覆盖全部测试文件，不重不漏。
+test('unit runner 按 UNIT_TEST_SHARD 分片，两片合起来恰好覆盖全部文件', t => {
+  const root = fixture(t);
+  const counts = ['1/2', '2/2'].map((shard) => {
+    const result = run(root, [], { UNIT_TEST_SHARD: shard });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, new RegExp(`unit 文件数：1（第 ${shard} 片）`));
+    return parseTapSummary(result.stdout).tests;
+  });
+  assert.deepEqual(counts, [1, 1]);
+});
+
+test('unit runner 分片参数格式不对时失败，不跑全部', t => {
+  const result = run(fixture(t), [], { UNIT_TEST_SHARD: '3/2' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /分片参数须为 i\/n/);
+});
+
+test('unit runner 单独运行的分片逐个运行文件，其余片沿用设定的并发数', t => {
+  const root = fixture(t);
+  for (const name of ['biz-op-v327-export-main', 'biz-op-v327-compute-main']) {
+    const target = path.join(root, 'tests/unit/main-process', `${name}.test.js`);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, `require('node:test')('${name}', () => {});\n`);
+  }
+  const commands = ['1/2', '2/2'].map((shard) => {
+    const result = run(root, [], { UNIT_TEST_SHARD: shard, UNIT_TEST_CONCURRENCY: '3' });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    const logPath = result.stdout.match(/日志已落盘：(.+)\n/)[1];
+    return [parseTapSummary(result.stdout).tests, fs.readFileSync(logPath, 'utf8').match(/命令：(.+)/)[1]];
+  });
+  assert.deepEqual(commands, [
+    [2, 'node --test --test-concurrency=1 <2 个测试文件>'],
+    [2, 'node --test --test-concurrency=3 <2 个测试文件>']
+  ]);
 });

@@ -59,9 +59,21 @@ function rowValues(row) {
   return values;
 }
 
+// 多张原表的当前结构与该行完全相同（v3.2.15 B42）：拒绝并列出候选，不按规则顺序静默取第一项，避免进入错误的计算分支。
+function ambiguousHeaderEvidence(matches) {
+  const names = matches.map((rule) => `「${SOURCE_LABELS[rule.sourceType]}」`);
+  return { status: 'invalid', code: 'vcc-sheet-header-ambiguous',
+    message: `表头与${names.join('、')}的当前结构完全相同，无法确定来源；请在 设置 → 模板文件 调整其中一张表的当前版本`,
+    candidates: matches.map((rule) => ({ sourceType: rule.sourceType, overlap: rule.headers.length, uncertain: false,
+      order: rule.order, positionMatches: rule.headers.length, mismatches: [] })),
+    detailLines: matches.map((rule) => `${SOURCE_LABELS[rule.sourceType]}：${rule.versionLabel ? `当前版本 ${rule.versionLabel}` : '内置结构'}`) };
+}
+
 function classifyHeaderRow(values, rules = HEADER_RULES) {
   const actual = normalizeHeaderRow(values);
-  const exact = rules.find((rule) => headersEqual(actual, rule.headers));
+  const matches = rules.filter((rule) => headersEqual(actual, rule.headers));
+  if (matches.length > 1) return ambiguousHeaderEvidence(matches);
+  const exact = matches[0];
   if (exact) {
     return { status: 'ready', sourceType: exact.sourceType, candidates: [],
       ...(exact.sourceHeaders ? { sourceHeaders: exact.sourceHeaders } : {}) };

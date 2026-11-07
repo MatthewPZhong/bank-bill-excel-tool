@@ -976,6 +976,13 @@ function createTemplateResourceService({
           const conflict = await peerConflictOf(resource, (inputStructureHeadersOf(resource, target) || [null])[0], snapshot);
           if (conflict) return { status: 'failed', message: `${toLabel} 不能启用：与「${conflict.name}」当前结构相同，导入时无法区分` };
         }
+      } else if (currentVersionId !== BUILTIN_VERSION_ID && inputStructureOf(resource.id)) {
+        // 恢复默认同样核对同组冲突（v3.2.15 B42）：同组其他表可能已启用与本表内置结构相同的版本，
+        //   恢复后两张表当前结构相同，导入时无法区分来源。
+        const conflict = await peerConflictOf(resource, inputStructureOf(resource.id).sheets[0].builtinHeaders(), snapshot);
+        if (conflict) {
+          return { status: 'failed', message: `V1 不能恢复：与「${conflict.name}」当前结构相同，导入时无法区分，请先调整「${conflict.name}」的当前版本` };
+        }
       }
       const action = versionId === BUILTIN_VERSION_ID ? '恢复默认' : '启用';
       const createdAt = now().toISOString();

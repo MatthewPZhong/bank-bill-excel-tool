@@ -147,9 +147,16 @@
       });
     }
 
+    // v3.2.15：示例含一个展开的渠道（两个子模板）与普通模板。
+    const PREVIEW_CHANNEL_TEMPLATES = Object.freeze([
+      { id: 'preview-template-11', name: '招商银行-上海', channelId: 1, channelName: '招商银行-上海', bigAccountSummary: '6222000000000001' },
+      { id: 'preview-template-12', name: '招商银行-上海-子模板-1', channelId: 1, channelName: '招商银行-上海', bigAccountSummary: '来自账单' }
+    ]);
+
     function applyTemplateManagerPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
       configurationPreview.templates([
+        ...PREVIEW_CHANNEL_TEMPLATES,
         {
           id: 'preview-template-1',
           name: 'LusoBank-MO',
@@ -171,14 +178,16 @@
           bigAccountSummary: '3个'
         }
       ]);
-      openModal(() => createTemplateManagerDialog());
+      openModal(() => createTemplateManagerDialog({ expandChannelId: 1 }));
     }
 
     function buildPreviewMappingPayload() {
       return {
         template: {
-          id: 'preview-template-4',
-          name: 'HSBC-SG',
+          id: 'preview-template-12',
+          name: '招商银行-上海-子模板-1',
+          channelId: 1,
+          channelName: '招商银行-上海',
           headers: [
             '交易日期',
             '起息日期',
@@ -241,6 +250,7 @@
     function applyMappingDialogPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
       configurationPreview.currencies(['USD', 'HKD', 'CNY', 'EUR', 'JPY']);
+      configurationPreview.templates(PREVIEW_CHANNEL_TEMPLATES.slice());
       openModal(() => createMappingDialog(buildPreviewMappingPayload()));
     }
 
@@ -350,10 +360,10 @@
       setCurrentModule(MODULES.statementGenerator.id);
       // 准备模板下拉数据（实模板列表，下拉显示）
       configurationPreview.templates([
-        { id: 'preview-template-1', name: 'LusoBank-MO', isParent: false, parentTemplateId: null, bigAccountSummary: '来自账单' },
-        { id: 'preview-template-2', name: 'BankABC-HK', isParent: false, parentTemplateId: null, bigAccountSummary: '未设置' },
-        { id: 'preview-template-3', name: 'PingPong-US', isParent: false, parentTemplateId: null, bigAccountSummary: '62220000000000012345' },
-        { id: 'preview-template-4', name: 'HSBC-SG', isParent: false, parentTemplateId: null, bigAccountSummary: '3个' }
+        { id: 'preview-template-1', name: 'LusoBank-MO', channelId: null, channelName: '', bigAccountSummary: '来自账单' },
+        { id: 'preview-template-2', name: 'BankABC-HK', channelId: null, channelName: '', bigAccountSummary: '未设置' },
+        { id: 'preview-template-3', name: 'PingPong-US', channelId: null, channelName: '', bigAccountSummary: '62220000000000012345' },
+        { id: 'preview-template-4', name: 'HSBC-SG', channelId: null, channelName: '', bigAccountSummary: '3个' }
       ]);
       openModal(() => createMonthlyBalanceExportDialog({ onAssembleReady: () => {} }));
     }
@@ -853,7 +863,7 @@
       setCurrentModule(MODULES.statementGenerator.id);
       configurationPreview.currencies(['USD', 'HKD', 'CNY', 'EUR']);
       configurationPreview.templates([
-        { id: 'preview-template-4', name: 'HSBC-SG', isParent: false, parentTemplateId: null, bigAccountSummary: '3个' }
+        { id: 'preview-template-4', name: 'HSBC-SG', channelId: null, channelName: '', bigAccountSummary: '3个' }
       ]);
       openModal(() => createAccountMappingDialog({
         templates: configurationPreview.getTemplates(),

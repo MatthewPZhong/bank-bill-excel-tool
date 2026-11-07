@@ -66,4 +66,5 @@ html, body { background-color: var(--bg); color: var(--text); }
 :root[data-theme="dark"] tr.is-editing td { background: var(--primary-soft); }
 :root[data-theme="dark"] ::-webkit-scrollbar-thumb { background-color: var(--line-strong); }
 :root[data-theme="dark"] ::-webkit-scrollbar-track { background-color: transparent; }
+:root[data-theme="dark"] .bank-accounts-table-wrap { color-scheme: dark; }
 :root[data-theme="dark"] ::selection { background: var(--primary-soft); color: var(--text); }

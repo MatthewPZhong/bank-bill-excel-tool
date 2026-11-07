@@ -31,7 +31,8 @@ module.exports = async ({ js, load, reset, assert, test }) => {
           cancelBigAccountSelection:id=>f.invoke('cancelAccount',[id],{status:'cancelled'})},
         monthlyBalance:{assemble:payload=>f.invoke('assemble',[payload],{status:'ready',summary:{count:6}}),export:()=>f.invoke('monthly',[],{status:'success',message:'月度导出成功'})},
         errors:{exportLast:()=>f.invoke('error',[],{status:'success',message:'错误报告已导出'})},
-        accountMappings:{checkMigrationPending:()=>f.invoke('migration',[],{pending:false}),list:id=>f.invoke('mappingList',[id],{status:'success',rows:[]})},
+        accountMappings:{checkMigrationPending:()=>f.invoke('migration',[],{pending:false}),list:id=>f.invoke('mappingList',[id],{status:'success',rows:[]}),
+          listChannelConflicts:()=>f.invoke('conflicts',[],{status:'success',channels:[]})},
         bigAccount:{loadMode:async()=>({mode:'unfixed'}),loadOrder:async()=>({order:null})}};
       f.config=ConfigurationServices.createConfigurationServices({templatesApi:f.api.templates});
       f.config.acceptBootstrap({currencyOptions:['USD'],accountMappingCount:2});
@@ -56,6 +57,35 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     await tick();
     await js(`const monthlyElement=statementFixture.top();monthlyElement.querySelector('[data-role="year"]').value=String(new Date().getFullYear());monthlyElement.querySelector('[data-role="month"]').value='8';`);
   }
+  // v3.2.15 PR #246 审查：进入网银账单时的渠道冲突提示不替换已有弹窗（如启动时的更新说明），等其关闭后再弹；期间离开模块则不弹。
+  await test('渠道冲突提示等已有弹窗关闭后再弹，不替换应用级弹窗；等待期间离开模块则不弹', async () => {
+    await setup();
+    const conflicts = "({status:'success',channels:[{channelId:3,channelName:'招商银行-上海',conflicts:[{bankAccountId:'111',candidates:[]}]}]})";
+    await js(`{const f=statementFixture;f.controller.leave();f.conflicts=f.defer();f.next.conflicts=f.conflicts;
+      f.other=f.bridge.openModal(()=>f.modal('更新说明'),{owner:'application'}).handle;f.controller.enter();}void 0;`);
+    await tick();
+    await js(`statementFixture.conflicts.resolve(${conflicts});void 0;`);
+    await tick(); await tick();
+    assert.deepEqual(await js(`({count:statementFixture.root.children.length,title:statementFixture.top()?.querySelector('.dialog-title')?.textContent||statementFixture.top()?.textContent.trim().slice(0,20),otherOpen:statementFixture.other.isOpen()})`),
+      { count: 1, title: '更新说明', otherOpen: true }, '冲突提示不替换已有弹窗');
+    await js(`statementFixture.other.close({status:'submitted'});void 0;`);
+    await tick(); await tick();
+    assert.match(await js(`statementFixture.top()?.textContent||''`), /升级后，渠道「招商银行-上海」的账户映射有设置不一致的账户号/);
+    await js(`statementFixture.host.closeTop();void 0;`);
+    await tick();
+
+    await setup();
+    await js(`{const f=statementFixture;f.controller.leave();f.conflicts=f.defer();f.next.conflicts=f.conflicts;
+      f.other=f.bridge.openModal(()=>f.modal('更新说明'),{owner:'application'}).handle;f.controller.enter();}void 0;`);
+    await tick();
+    await js(`statementFixture.conflicts.resolve(${conflicts});void 0;`);
+    await tick();
+    await js(`statementFixture.controller.leave();statementFixture.other.close({status:'submitted'});void 0;`);
+    await tick(); await tick();
+    assert.equal(await js('statementFixture.root.children.length'), 0, '离开模块后不再弹出冲突提示');
+    assert.deepEqual(await js('statementFixture.errors'), []);
+  });
+
   await test('Statement 使用实际模式面板，导入原样传虚拟模板ID，成功/取消保持原结果', async () => {
     await setup();
     await js(`statementFixture.controller.commands.importFile()`);

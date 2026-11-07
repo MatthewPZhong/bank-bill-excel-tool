@@ -125,6 +125,10 @@ const {
 } = require('./main-process/execution-descriptors/composition');
 const { createBusinessFlowResolver } = require('./main-process/archive-center/business-flow-resolver');
 const { createTemplateResourceService } = require('./main-process/template-resources/service');
+const {
+  STRUCTURE_RESOURCE_ID: BANK_ACCOUNT_STRUCTURE_RESOURCE_ID,
+  createBankAccountService
+} = require('./main-process/bank-accounts/service');
 const { INPUT_STRUCTURES } = require('./main-process/template-resources/input-structures');
 const {
   createTaskLifecycle
@@ -691,6 +695,7 @@ const { readBigAccountMode, writeBigAccountMode } = require('./backend/big-accou
 const {
   calculateEndingBalanceFromAmounts,
   buildDetailExportRows,
+  buildExpectedHeaderCandidates,
   buildMappedRows,
   compileRegexLiteral,
   FileValidationError,
@@ -739,6 +744,13 @@ const {
   parseRequiredBillDates,
   scanBalanceSeedStatus: scanStatementBalanceSeedStatus
 } = require('./main-process/statement-generation-business');
+// v3.2.15：网银账单渠道的输出身份、生成分组与余额方式
+const {
+  findBalanceModeMismatch,
+  resolveGenerationGroupKey,
+  resolveStatementOutputName,
+  resolveTemplateBalanceMode
+} = require('./main-process/statement-channel-identity');
 const {
   ALL_BANKS_TEMPLATE_SCOPE,
   assembleMonthlyBalance,
@@ -748,6 +760,9 @@ const {
   showImportOpenDialog: showRememberedImportOpenDialog
 } = require('./main-process/import-dialog-state');
 const {
+  findSavedOrderFileRowMismatches,
+  hasUnidentifiedTransactionRows,
+  matchImportFilesToSavedOrder,
   matchMerchantIds,
   normalizeMaintainedBigAccounts,
   resolveRecognizedBigAccount
@@ -1726,7 +1741,8 @@ const REUSE_MODULE_DEFAULT_OPTION = '是';
 // - `buildTemplateLibraryPayload` 通过 `listTemplateBundleEntries` 透传该字段（template-repository.js:856）
 // - `readTemplateBundleFile` 对未知字段采用显式解构式解析（:1221-1243），v1.5.1 旧应用读 v1.5.2 导出的 bundle 时自然忽略该字段
 // - v1.5.1 旧 bundle 若不含该字段，读时 fallback 为空串（:1242）
-const SUPPORTED_BUNDLE_VERSION = 4;
+// v3.2.15：v5 以渠道取代主/子模板（顶层 channels，条目 channelName），兼容读取 v≤4。
+const SUPPORTED_BUNDLE_VERSION = 5;
 // v1.5.2 需求 3：主页面「按文件名映射模板」的虚拟模板 ID（非 DB 记录）
 // helper 用于在接收 templateId 的调用点统一短路，避免将虚拟 ID 传入真实查询
 const FILENAME_MAPPING_TEMPLATE_ID = '__FILENAME_MAPPING__';
@@ -2238,6 +2254,7 @@ function rememberPendingBigAccountSelection(context = null) {
         mappings: Array.isArray(context.mappings) ? context.mappings.map((mapping) => ({ ...mapping })) : [],
         orderedTargetFields: Array.isArray(context.orderedTargetFields) ? context.orderedTargetFields.slice() : [],
         inputFilePaths: normalizeInputFilePaths(context.inputFilePaths || context.inputFilePath),
+        replacePaths: Array.isArray(context.replacePaths) ? context.replacePaths.slice() : [],
         bigAccounts: Array.isArray(context.bigAccounts)
           ? context.bigAccounts.map((item) => ({
               merchantId: normalizeCell(item.merchantId),
@@ -2308,9 +2325,23 @@ function requirePendingBigAccountSelection(contextId) {
   return lastPendingBigAccountSelection;
 }
 
+// 大账号续跑时删除的会话旧记录：重复提示中确认覆盖的旧路径（可能与本次路径不同：跨目录同名、改名同内容），
+// 加上本次输入路径（同路径覆盖）。
+function resolvePendingReplacePaths(pendingContext) {
+  return Array.from(new Set([
+    ...(Array.isArray(pendingContext.replacePaths) ? pendingContext.replacePaths : []),
+    ...(Array.isArray(pendingContext.inputFilePaths) ? pendingContext.inputFilePaths : [])
+  ]));
+}
+
 function createPendingBigAccountSelectionContext(prepared, context) {
+  const selectionReplacePaths = prepared && prepared.selectionResult
+    && Array.isArray(prepared.selectionResult.replacePaths)
+    ? prepared.selectionResult.replacePaths
+    : [];
   const pendingContext = {
     ...context,
+    replacePaths: selectionReplacePaths.slice(),
     statementSelectionSessionId: normalizeCell(prepared && prepared.statementSelectionSessionId),
     sourceSelections: prepared && Array.isArray(prepared.sourceSelections)
       ? prepared.sourceSelections
@@ -2816,27 +2847,27 @@ function identifyAccountBlocks(detailRows, options = {}) {
   return [];
 }
 
+// 返回原始行里所有表头行的行号（1 起）。表头口径与 readRowsWithMetadata 相同（buildExpectedHeaderCandidates）：
+// 先按保留中间空项的完整结构找，一行都找不到再退回去空口径，避免两侧定位到不同的表头而丢失账号扫描窗口。
 function findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders) {
-  const normalizedExpected = (expectedSourceHeaders || [])
-    .map((h) => normalizeCell(h))
-    .filter((h) => h !== '');
-  if (!normalizedExpected.length) return [];
-
-  const results = [];
-  rawRows.forEach((row, index) => {
-    const cells = Array.isArray(row) ? row : [];
-    const maxStart = cells.length - normalizedExpected.length;
-    for (let start = 0; start <= maxStart; start += 1) {
-      const match = normalizedExpected.every(
-        (exp, ei) => normalizeCell(cells[start + ei]) === exp
-      );
-      if (match) {
-        results.push(index + 1);
-        break;
+  for (const normalizedExpected of buildExpectedHeaderCandidates(expectedSourceHeaders)) {
+    const results = [];
+    rawRows.forEach((row, index) => {
+      const cells = Array.isArray(row) ? row : [];
+      const maxStart = cells.length - normalizedExpected.length;
+      for (let start = 0; start <= maxStart; start += 1) {
+        const match = normalizedExpected.every(
+          (exp, ei) => normalizeCell(cells[start + ei]) === exp
+        );
+        if (match) {
+          results.push(index + 1);
+          break;
+        }
       }
-    }
-  });
-  return results;
+    });
+    if (results.length) return results;
+  }
+  return [];
 }
 
 function buildBigAccountRecognitionBasis({
@@ -3528,22 +3559,48 @@ function buildTemplateLibraryPayload() {
       if (mode === 'fixed') {
         entry.bigAccountMode = mode;
       }
-      // v1.5.1: 导出账户映射
-      entry.accountMappings = database.listAccountMappings(template.id).map((m) => ({
-        bankAccountId: m.bankAccountId,
-        clearingAccountId: m.clearingAccountId,
-        noCurrency: Boolean(m.noCurrency),
-        currency: m.currency || ''
-      }));
+      // v1.5.1: 导出账户映射；v3.2.15：渠道子模板的账户映射在渠道层，条目不带。
+      if (!entry.channelName) {
+        entry.accountMappings = database.listAccountMappings({ templateId: template.id }).map(toBundleAccountMapping);
+      }
     }
     return entry;
+  });
+
+  // v3.2.15（§5.3）：渠道列表（保留空渠道）、渠道账户映射与未处理的冲突。
+  const channels = database.listStatementChannels().map((channel) => {
+    const conflictGroup = database.listStatementChannelAccountMappingConflicts(channel.id)[0];
+    return {
+      name: channel.name,
+      accountMappings: database.listAccountMappings({ channelId: channel.id }).map(toBundleAccountMapping),
+      accountMappingConflicts: conflictGroup ? conflictGroup.conflicts : []
+    };
   });
 
   return {
     bundleVersion: SUPPORTED_BUNDLE_VERSION,
     exportedAt: new Date().toISOString(),
+    channels,
     templates
   };
+}
+
+function toBundleAccountMapping(m) {
+  return {
+    bankAccountId: m.bankAccountId,
+    clearingAccountId: m.clearingAccountId,
+    noCurrency: Boolean(m.noCurrency),
+    currency: m.currency || ''
+  };
+}
+
+function normalizeBundleAccountMappings(list) {
+  return (Array.isArray(list) ? list : []).map((m) => ({
+    bankAccountId: normalizeCell(m && m.bankAccountId),
+    clearingAccountId: normalizeCell(m && m.clearingAccountId),
+    noCurrency: Boolean(m && m.noCurrency),
+    currency: normalizeCell(m && m.currency)
+  })).filter((m) => m.bankAccountId);
 }
 
 function writeTemplateBundleFile(filePath) {
@@ -3555,6 +3612,16 @@ function writeTemplateBundleFile(filePath) {
 
 function syncTemplateLibraryFile() {
   return writeTemplateBundleFile(getTemplateLibraryFilePath());
+}
+
+// 模板包里的表头与 extractHeaders 同口径：保留空项位置（合并单元格占位的中间空列参与表头定位），
+// 只去掉末尾空项；全空视为没有表头。
+function normalizeBundleTemplateHeaders(headers) {
+  const normalized = headers.map((value) => normalizeCell(value));
+  while (normalized.length && normalized[normalized.length - 1] === '') {
+    normalized.pop();
+  }
+  return normalized;
 }
 
 function readTemplateBundleFile(filePath) {
@@ -3580,12 +3647,29 @@ function readTemplateBundleFile(filePath) {
   }
 
   const templates = Array.isArray(parsed?.templates) ? parsed.templates : [];
+  const channels = bundleVersion >= 5 && Array.isArray(parsed?.channels)
+    ? parsed.channels
+      .map((item) => ({
+        name: normalizeCell(item && item.name),
+        accountMappings: normalizeBundleAccountMappings(item && item.accountMappings),
+        accountMappingConflicts: (Array.isArray(item && item.accountMappingConflicts) ? item.accountMappingConflicts : [])
+          .map((conflict) => ({
+            bankAccountId: normalizeCell(conflict && conflict.bankAccountId),
+            candidates: Array.isArray(conflict && conflict.candidates) ? conflict.candidates : []
+          }))
+          .filter((conflict) => conflict.bankAccountId && conflict.candidates.length > 1)
+      }))
+      .filter((item) => item.name)
+    : [];
 
-  return templates.map((item) => ({
+  return {
+    bundleVersion,
+    channels,
+    templates: templates.map((item) => ({
     templateKey: normalizeCell(item.templateKey),
     name: normalizeCell(item.name),
     sourceFileName: normalizeCell(item.sourceFileName) || `${normalizeCell(item.name) || 'template'}.xlsx`,
-    headers: Array.isArray(item.headers) ? item.headers.map((value) => normalizeCell(value)).filter((value) => value !== '') : [],
+    headers: Array.isArray(item.headers) ? normalizeBundleTemplateHeaders(item.headers) : [],
     mappings: Array.isArray(item.mappings) ? item.mappings : [],
     bigAccounts: Array.isArray(item.bigAccounts) ? item.bigAccounts : [],
     fixedAssignments: Array.isArray(item.fixedAssignments) ? item.fixedAssignments : [],
@@ -3597,13 +3681,15 @@ function readTemplateBundleFile(filePath) {
       ? { signedAmountSourceField: normalizeCell(item.billSplitMeta.signedAmountSourceField) }
       : { signedAmountSourceField: '' },
     dateFormat: normalizeCell(item.dateFormat) || 'auto',
-    // v1.5.1: 主/子模板 + 账户映射
-    isParent: Boolean(item.isParent),
-    parentTemplateKey: normalizeCell(item.parentTemplateKey) || null,
+    // v3.2.15（v5）：所属渠道；v≤4 的主/子模板字段只用于导入时转为渠道。
+    channelName: bundleVersion >= 5 ? (normalizeCell(item.channelName) || null) : null,
+    isParent: bundleVersion < 5 && Boolean(item.isParent),
+    parentTemplateKey: bundleVersion < 5 ? (normalizeCell(item.parentTemplateKey) || null) : null,
     accountMappings: Array.isArray(item.accountMappings) ? item.accountMappings : [],
     // v1.5.2 需求 3：文件名固定字段（老 bundle 无此字段时落为空串）
     filenameFixedField: normalizeCell(item.filenameFixedField) || ''
-  }));
+    }))
+  };
 }
 
 // v2.0.0-beta.2 D16 fix（Codex PR #26 Finding 1）：默认/重置背景按当前 ui_style 取
@@ -3845,10 +3931,18 @@ function buildImportWarningDetailLines(warnings) {
   const detailLines = [];
   const currencyWarnings = warnings.filter((warning) => warning.type === 'currency-unmapped');
   const skippedDetailWarnings = warnings.filter((warning) => warning.type === 'detail-row-skipped');
+  const summaryRowWarnings = warnings.filter((warning) => warning.type === 'summary-row-skipped');
   const balanceWarnings = warnings.filter((warning) => warning.type === 'balance-generate-failed');
   const skippedBalanceGaps = warnings
     .filter((warning) => warning.type === 'balance-gap-skipped')
     .flatMap((warning) => (Array.isArray(warning.gaps) ? warning.gaps : []));
+
+  if (summaryRowWarnings.length) {
+    detailLines.push('以下行的账单日期列是账单自带的合计标签，按合计行处理，未写入导出的明细账单：');
+    summaryRowWarnings.forEach((warning) => {
+      detailLines.push(`第${warning.rowNumber}行，账单日期列="${warning.rawValue || '(空)'}"`);
+    });
+  }
 
   if (skippedDetailWarnings.length) {
     detailLines.push('以下明细记录因 Credit Amount 和 Debit Amount 同时为 0 或空值，未写入导出的明细账单：');
@@ -3893,6 +3987,7 @@ function buildImportWarningDetailLines(warnings) {
 function buildImportWarningMessage({ warnings, balanceReady, balanceRequested }) {
   const warningParts = [];
   const skippedDetailCount = warnings.filter((warning) => warning.type === 'detail-row-skipped').length;
+  const summaryRowCount = warnings.filter((warning) => warning.type === 'summary-row-skipped').length;
   const hasCurrencyWarning = warnings.some((warning) => warning.type === 'currency-unmapped');
   const hasBalanceWarning = warnings.some((warning) => warning.type === 'balance-generate-failed');
   const skippedBalanceGapCount = warnings
@@ -3904,6 +3999,10 @@ function buildImportWarningMessage({ warnings, balanceReady, balanceRequested })
     exportParts.push('余额账单可导出');
   } else if (balanceRequested) {
     exportParts.push('余额账单未生成');
+  }
+
+  if (summaryRowCount > 0) {
+    warningParts.push(`已跳过${summaryRowCount}条账单自带的合计行`);
   }
 
   if (skippedDetailCount > 0) {
@@ -4586,8 +4685,9 @@ function buildTemplateSummary(template) {
     bigAccountCount: template.bigAccountCount || 0,
     bigAccountMode: template.bigAccountMode || 'unset',
     bigAccountSummary: template.bigAccountSummary || '未设置',
-    isParent: Boolean(template.isParent),
-    parentTemplateId: template.parentTemplateId || null,
+    // v3.2.15：所属渠道（取代主/子模板标记）
+    channelId: template.channelId || null,
+    channelName: template.channelName || '',
     // v1.5.2 需求 3（G3-4）：透传「文件名里的固定字段」给映射关系对话框回显
     filenameFixedField: String(template.filenameFixedField || '')
   };
@@ -5049,6 +5149,70 @@ function registerTemplateResourceHandlers() {
   });
 }
 
+let bankAccountService = null;
+
+// 设置 → 账户管理：清结算系统银行账户表原文件存 {userData}/bank-accounts/，元数据与账户行在主库；
+//   表头识别结构取模板文件「清结算银行账户表」当前版本（与平盘共用）。
+function getBankAccountService() {
+  if (!database || !database.db) throw new Error('数据库尚未初始化，请稍后重试');
+  if (!bankAccountService) {
+    bankAccountService = createBankAccountService({
+      userDataRoot: app.getPath('userData'),
+      store: database,
+      appVersion: app.getVersion(),
+      resolveStructure: () => getTemplateResourceService().currentInputStructure(BANK_ACCOUNT_STRUCTURE_RESOURCE_ID),
+      log: ({ level, message, details }) => appendActivityLogEntry({ level, message, details }),
+      onChanged: (payload) => broadcastBankAccountsChanged(payload)
+    });
+  }
+  return bankAccountService;
+}
+
+function broadcastBankAccountsChanged(payload) {
+  for (const window of BrowserWindow.getAllWindows()) {
+    try {
+      if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+        window.webContents.send('bank-accounts:changed', payload);
+      }
+    } catch (_error) { /* 窗口关闭中，下次打开会重新读取 */ }
+  }
+}
+
+// 设置 → 账户管理：概况与分页查询、导入（选择 → 预检 → 确认替换）、另存为原表。
+function registerBankAccountHandlers() {
+  ipcMain.handle('bank-accounts:get-overview', () => getBankAccountService().getOverview());
+  ipcMain.handle('bank-accounts:list', (_event, payload) => getBankAccountService().list(payload || {}));
+  ipcMain.handle('bank-accounts:pick-import-file', async () => {
+    const service = getBankAccountService();
+    const choice = await showImportOpenDialog('bank-accounts', {
+      title: '选择银行账户信息文件',
+      properties: ['openFile'],
+      filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
+    });
+    const filePath = !choice.canceled && Array.isArray(choice.filePaths) ? choice.filePaths[0] : '';
+    if (!filePath) return { status: 'cancelled' };
+    service.rememberPickedFile(filePath);
+    return { status: 'success', filePath, fileName: path.basename(filePath) };
+  });
+  ipcMain.handle('bank-accounts:prepare-import', (_event, payload) => getBankAccountService().prepareImport(payload || {}));
+  ipcMain.handle('bank-accounts:discard-import', (_event, importToken) => getBankAccountService().discardImport(importToken));
+  supportIpcHandle('bank-accounts:commit-import', '导入银行账户信息', (_event, payload) => (
+    getBankAccountService().commitImport(payload || {})
+  ));
+  supportIpcHandle('bank-accounts:save-as', '导出银行账户表原表', async () => {
+    const service = getBankAccountService();
+    const target = service.resolveOriginal();
+    if (target.status !== 'success') return target;
+    const choice = await dialog.showSaveDialog(mainWindow, {
+      title: '导出银行账户表原表',
+      defaultPath: target.fileName,
+      filters: [{ name: target.extension.toUpperCase(), extensions: [target.extension] }]
+    });
+    if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+    return service.exportOriginal({ targetPath: choice.filePath });
+  });
+}
+
 function readToolboxRecoveryBatchIds(userDataDir) {
   const indexPath = path.join(userDataDir, JOURNAL_INDEX_NAME);
   let parsed;
@@ -5386,7 +5550,7 @@ function registerAppHandlers() {
       // v1.5.3 R2（D15）：启动时自有账号迁移失败的错误文案；null 表示无失败
       ownAccountsMigrationError: lastOwnAccountsMigrationError,
       // v3.2.14：current = 本版说明（设置中查看）；pending = 升级后待弹出的说明
-      releaseNotes: releaseNotesState ? releaseNotesState.getSnapshot() : { current: null, pending: null }
+      releaseNotes: releaseNotesState ? releaseNotesState.getSnapshot() : { current: null, pending: null, history: null }
     };
   });
   ipcMain.handle('settings:acknowledge-release-notes', (_event, version) => {
@@ -7663,16 +7827,58 @@ function validateAccountMappings(mappings) {
   };
 }
 
+// v3.2.15（D7）：账户映射的作用范围 —— { channelId } 为渠道层，{ templateId } 或数字为模板（兼容旧调用）。
+function normalizeAccountMappingScopeArg(scope) {
+  if (scope && typeof scope === 'object') {
+    const channelId = Number(scope.channelId || 0);
+    if (channelId > 0) return { channelId };
+    return { templateId: Number(scope.templateId || 0) };
+  }
+  return { templateId: Number(scope || 0) };
+}
+
+function describeAccountMappingScope(scope) {
+  if (scope.channelId) {
+    const channel = database.getStatementChannel(scope.channelId);
+    return `渠道：${channel ? channel.name : scope.channelId}`;
+  }
+  const template = database.getTemplate(scope.templateId);
+  return `模板：${template ? template.name : scope.templateId}`;
+}
+
 function registerAccountMappingHandlers() {
-  ipcMain.handle('account-mapping:list', (_event, templateId) => {
+  ipcMain.handle('account-mapping:list', (_event, rawScope) => {
+    const scope = normalizeAccountMappingScopeArg(rawScope);
     return {
       status: 'success',
-      mappings: database.listAccountMappings(templateId)
+      mappings: database.listAccountMappings(scope),
+      conflictCount: scope.channelId ? database.countStatementChannelAccountMappingConflicts(scope.channelId) : 0
     };
   });
 
-  trackedIpcHandle('account-mapping:save', '生成网银账单', '账户映射', (_event, templateId, mappings) => {
+  trackedIpcHandle('account-mapping:save', '生成网银账单', '账户映射', (_event, rawScope, mappings) => {
+    const scope = normalizeAccountMappingScopeArg(rawScope);
+    const templateId = scope.templateId || null;
     try {
+      if (scope.channelId && !database.getStatementChannel(scope.channelId)) {
+        return createErrorResult({
+          step: '保存账户映射',
+          message: '未找到对应渠道，请刷新后重试',
+          errorCode: 'CHANNEL_NOT_FOUND',
+          context: { channelId: scope.channelId }
+        });
+      }
+      if (!scope.channelId) {
+        const template = database.getTemplate(scope.templateId);
+        if (template && template.channelId) {
+          return createErrorResult({
+            step: '保存账户映射',
+            message: `模板「${template.name}」属于渠道「${template.channelName}」，账户映射请在渠道层统一设置`,
+            errorCode: 'ACCOUNT_MAPPING_CHANNEL_SCOPE_REQUIRED',
+            context: { templateId: template.id, channelId: template.channelId }
+          });
+        }
+      }
       const validationResult = validateAccountMappings(mappings);
 
       if (validationResult.status !== 'success') {
@@ -7681,20 +7887,27 @@ function registerAccountMappingHandlers() {
           message: validationResult.message,
           errorCode: 'ACCOUNT_MAPPING_VALIDATE',
           detailLines: ['账户映射存在格式或完整性问题，未执行保存。'],
-          context: { templateId, mappings }
+          context: { ...scope, mappings }
         });
       }
 
-      database.saveAccountMappings(templateId, validationResult.mappings);
+      const saveResult = database.saveAccountMappings(scope, validationResult.mappings);
+      const resolvedConflicts = (saveResult && saveResult.resolvedConflictBankAccountIds) || [];
       clearLastErrorReport();
       appendActivityLogEntry({
         level: 'info',
         message: '保存账户映射成功',
-        details: [`模板ID：${templateId}`, `映射条数：${validationResult.mappings.length}`]
+        details: [
+          describeAccountMappingScope(scope),
+          `映射条数：${validationResult.mappings.length}`,
+          ...(resolvedConflicts.length ? [`按本次设置处理的冲突账户号：${resolvedConflicts.join('、')}`] : [])
+        ]
       });
       return {
         status: 'success',
-        message: '账户映射保存成功'
+        message: resolvedConflicts.length
+          ? `账户映射保存成功，账户号 ${resolvedConflicts.join('、')} 的冲突按本次设置处理`
+          : '账户映射保存成功'
       };
     } catch (error) {
       return createErrorResult({
@@ -7703,8 +7916,35 @@ function registerAccountMappingHandlers() {
         errorCode: 'ACCOUNT_MAPPING_RUNTIME',
         errorType: '系统错误',
         originalError: error,
-        context: { templateId, mappings }
+        context: { ...scope, templateId, mappings }
       });
+    }
+  });
+
+  // v3.2.15（D8）：迁移 / 旧版模板包合并时登记的渠道账户映射冲突。
+  ipcMain.handle('channel-account-mapping:list-conflicts', () => ({
+    status: 'success',
+    channels: database.listStatementChannelAccountMappingConflicts()
+  }));
+
+  supportIpcHandle('channel-account-mapping:resolve-conflicts', '处理渠道账户映射冲突', (_event, payload = {}) => {
+    const channelId = Number(payload.channelId);
+    try {
+      const { resolved, remaining } = database.resolveStatementChannelAccountMappingConflicts(channelId, payload.choices);
+      const channel = database.getStatementChannel(channelId);
+      clearLastErrorReport();
+      appendActivityLogEntry({
+        level: 'info',
+        message: '处理渠道账户映射冲突',
+        details: [
+          `渠道：${channel ? channel.name : channelId}`,
+          ...resolved.map((item) => `账户号 ${item.bankAccountId} → 清结算账号 ${item.clearingAccountId}${item.noCurrency ? `（无币种，兜底币种 ${item.currency}）` : ''}`),
+          `剩余未处理：${remaining}`
+        ]
+      });
+      return { status: 'success', message: '账户映射冲突已处理', remaining };
+    } catch (error) {
+      return createStatementChannelErrorResult('处理渠道账户映射冲突', error, { channelId });
     }
   });
 
@@ -7763,6 +8003,16 @@ function registerAccountMappingHandlers() {
       );
 
       const droppedRows = [];
+      // v3.2.15（D7）：渠道子模板不再持有模板级账户映射，迁移分配只面向普通模板。
+      const channelTemplateIds = new Set(allTemplates.filter((t) => t.channelId).map((t) => t.id));
+      const channelTargetRows = assignments.filter((a) => channelTemplateIds.has(Number(a.templateId)));
+      if (channelTargetRows.length > 0) {
+        return createErrorResult({
+          step: '分配账户映射',
+          message: `${channelTargetRows.length} 条映射的目标模板属于渠道，渠道的账户映射请在「账户映射」中选择渠道设置`,
+          errorCode: 'MIGRATION_DISTRIBUTE_CHANNEL_TEMPLATE'
+        });
+      }
       assignments.forEach((a, index) => {
         const tid = Number(a.templateId);
         if (!validTemplateIds.has(tid)) {
@@ -7788,8 +8038,9 @@ function registerAccountMappingHandlers() {
         });
       }
 
-      // 清空所有模板的 account_mappings，再按分配写入
+      // 清空所有普通模板的 account_mappings，再按分配写入（渠道子模板不持有模板级映射）
       for (const template of allTemplates) {
+        if (template.channelId) continue;
         const rows = byTemplate.get(template.id) || [];
         database.saveAccountMappings(template.id, rows);
       }
@@ -8240,51 +8491,366 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
   };
 }
 
+// v3.2.15：旧的主/子模板通道只保留注册（冻结登记），调用一律拒绝且不写数据。
+function createRetiredParentTemplateResult(step) {
+  return {
+    status: 'error',
+    message: '主模板 / 子模板已改为渠道，请在映射关系管理中使用【渠道存在多个子模板】或【设为子模板】',
+    errorCode: 'TEMPLATE_PARENT_RETIRED',
+    step
+  };
+}
+
+const STATEMENT_CHANNEL_BUSINESS_ERROR_CODES = new Set([
+  'CHANNEL_NOT_FOUND',
+  'CHANNEL_NAME_REQUIRED',
+  'CHANNEL_NAME_DUPLICATED',
+  'CHANNEL_ASSIGNMENT_INVALID',
+  'CHANNEL_ACCOUNT_MAPPING_CONFLICT',
+  'CHANNEL_ACCOUNT_MAPPING_CONFLICT_STALE',
+  'CHANNEL_ACCOUNT_MAPPING_CONFLICT_PENDING',
+  'CHANNEL_OUTPUT_NAME_CONFLICT',
+  'TEMPLATE_NOT_FOUND'
+]);
+
+// v3.2.15：渠道相关业务错误需要界面逐条展示明细（冲突账户号、各子模板余额方式），
+//   在通用错误结果上补充 errorCode 与 detailLines；不改变 createErrorResult 的公共返回形状。
+function createDetailedErrorResult(options) {
+  return {
+    ...createErrorResult(options),
+    errorCode: options.errorCode,
+    detailLines: Array.isArray(options.detailLines) ? options.detailLines.slice() : []
+  };
+}
+
+function createStatementChannelErrorResult(step, error, context = {}) {
+  if (error && STATEMENT_CHANNEL_BUSINESS_ERROR_CODES.has(error.code)) {
+    return createDetailedErrorResult({
+      step,
+      message: error.message,
+      errorCode: error.code,
+      detailLines: Array.isArray(error.detailLines) ? error.detailLines : [],
+      context: { ...context, ...(error.context || {}) }
+    });
+  }
+  return createErrorResult({
+    step,
+    message: `${step}失败，请导出报错文件查看详情`,
+    errorCode: 'STATEMENT_CHANNEL_RUNTIME',
+    errorType: '系统错误',
+    originalError: error,
+    context
+  });
+}
+
+// v3.2.15【导入子模板】（spec §4.4，D9）：表头规则同【导入模板】；模板名按渠道编号自动生成，总是新建，不占用失败的编号。
+function importStatementChildTemplate(channelId, selectedPath) {
+  try {
+    const headers = extractHeaders(selectedPath);
+    const conflict = findConflictingTemplateByHeaders(headers, null);
+    if (conflict) {
+      return createErrorResult({
+        step: '导入子模板',
+        message: `该文件的表头与已有模板「${conflict.name}」完全相同，无法创建重复表头的模板。`,
+        errorCode: 'TEMPLATE_HEADERS_DUPLICATE',
+        context: { conflictTemplateName: conflict.name, channelId }
+      });
+    }
+    const created = database.createChildTemplate(channelId, {
+      sourceFileName: path.basename(selectedPath),
+      headers
+    });
+    syncTemplateLibraryFile();
+    clearLastErrorReport();
+    appendActivityLogEntry({
+      level: 'info',
+      message: '导入子模板成功',
+      details: [`渠道：${created.channel.name}`, `模板名：${created.name}`, `源文件：${selectedPath}`]
+    });
+    return {
+      status: 'success',
+      message: `已导入子模板「${created.name}」，请在【修改】中维护映射关系`,
+      template: buildTemplateSummary(created.template),
+      channelId: created.channel.id
+    };
+  } catch (error) {
+    if (error instanceof FileValidationError) {
+      return createErrorResult({
+        step: '导入子模板',
+        message: error.message,
+        errorCode: error.code,
+        detailLines: ['模板文件无法读取或表头无效，未完成导入。'],
+        context: { selectedPath, channelId }
+      });
+    }
+    if (error && STATEMENT_CHANNEL_BUSINESS_ERROR_CODES.has(error.code)) {
+      return createStatementChannelErrorResult('导入子模板', error, { selectedPath, channelId });
+    }
+    return createErrorResult({
+      step: '导入子模板',
+      message: '子模板导入失败，请导出报错文件查看详情',
+      errorCode: 'TEMPLATE_IMPORT_RUNTIME',
+      errorType: '系统错误',
+      originalError: error,
+      context: { selectedPath, channelId }
+    });
+  }
+}
+
+// v3.2.15：template:save-mappings 的 channel 参数 → 仓储的归属指令；缺省或无法识别为不改归属。
+function normalizeTemplateChannelAssignment(channel) {
+  if (!channel || typeof channel !== 'object') return { mode: 'keep' };
+  const mode = normalizeCell(channel.mode);
+  if (mode === 'none' || mode === 'create') return { mode };
+  if (mode === 'join') return { mode, channelId: Number(channel.channelId) };
+  return { mode: 'keep' };
+}
+
+// v3.2.15（D2、§5.2）：保存后所属渠道中，已保存过映射的其他子模板余额方式须与本次提交一致。
+function findSaveMappingsBalanceModeMismatch({ template, channelAssignment, mappings }) {
+  let channelId = null;
+  if (channelAssignment.mode === 'keep') channelId = Number(template.channelId || 0) || null;
+  if (channelAssignment.mode === 'join') channelId = Number(channelAssignment.channelId || 0) || null;
+  if (!channelId) return null;
+  const channel = database.getStatementChannel(channelId);
+  if (!channel) return null;
+  const entries = [{ templateName: template.name, balanceMode: resolveTemplateBalanceMode(mappings) }];
+  for (const sibling of database.listStatementChannelTemplates(channelId)) {
+    if (sibling.id === template.id || !sibling.mappingCount) continue;
+    const siblingConfig = getTemplateMappingConfig(sibling.id);
+    if (!siblingConfig) continue;
+    entries.push({ templateName: sibling.name, balanceMode: resolveTemplateBalanceMode(siblingConfig.exportMappings) });
+  }
+  const detailLines = findBalanceModeMismatch(entries);
+  return detailLines ? { channelName: channel.name, detailLines } : null;
+}
+
+// v3.2.15（§5.3）：v5 模板包——按名称取得或新建渠道，写入渠道映射与冲突，再按条目 channelName 归属。
+//   包内有模板归入、但这些模板第一轮全部被跳过的渠道不还原：渠道层的映射与冲突整体替换，
+//   还原它会改写被跳过模板所在同名渠道的生效映射并清掉待处理冲突（release/v3.2.15 审查）。
+function buildBundleV5ChannelRestore(importedChannels, importedTemplateRecords, importedTemplates = []) {
+  const packagedChannelNames = new Set(importedTemplates.map((entry) => entry && entry.channelName).filter(Boolean));
+  const restoredChannelNames = new Set(importedTemplateRecords.map(({ entry }) => entry.channelName).filter(Boolean));
+  const channels = (Array.isArray(importedChannels) ? importedChannels : [])
+    .filter((channel) => !packagedChannelNames.has(channel.name) || restoredChannelNames.has(channel.name))
+    .map((channel) => ({
+      name: channel.name,
+      accountMappings: normalizeBundleAccountMappings(channel.accountMappings),
+      accountMappingConflicts: channel.accountMappingConflicts || []
+    }));
+  const assignments = importedTemplateRecords.map(({ entry, template }) => ({
+    templateId: template.id,
+    channelName: entry.channelName || null
+  }));
+  return { channels, legacyChannelSources: [], assignments };
+}
+
+// v3.2.15（§5.3）：v≤4 模板包——isParent 的条目按其名称建渠道，它和 parentTemplateKey 指向它的条目归入该渠道，
+//   各条目的账户映射按迁移口径合并（相同去重、不一致登记为待处理冲突）。
+//   父模板在包内但第一轮被跳过时，不当作包外父模板去找本地同 key 模板（release/v3.2.15 审查）：
+//   否则本地模板会被归入渠道、清掉模板级映射，与“被跳过模板保留原映射与归属”相违；子模板按无父模板处理。
+function buildLegacyBundleChannelRestore(importedTemplateRecords, importedTemplates = []) {
+  const byKey = new Map();
+  importedTemplateRecords.forEach((record) => {
+    if (record.entry.templateKey) byKey.set(record.entry.templateKey, record);
+  });
+  const packagedKeys = new Set(importedTemplates.map((entry) => entry && entry.templateKey).filter(Boolean));
+  // 父模板在包内但被跳过的成功模板，按最终归属分两类写日志：按普通模板导入的，以及最终仍归入渠道的（自身仍是主模板、
+  //   被成功的子模板引用，或手工合并的包里另一条把它归入别的渠道），后者带上最终渠道名（release/v3.2.15 复审）。
+  const parentSkippedRecords = [];
+  const resolveParent = (record) => {
+    const parentKey = record.entry.parentTemplateKey;
+    if (!parentKey) return null;
+    if (byKey.has(parentKey)) return { record: byKey.get(parentKey) };
+    if (packagedKeys.has(parentKey)) return null;
+    const external = database.getTemplateByKey(parentKey);
+    return external ? { external } : null;
+  };
+  const referencedKeys = new Set(importedTemplateRecords.map((record) => record.entry.parentTemplateKey).filter(Boolean));
+  const rootNameOf = (record) => {
+    let current = record;
+    const seen = new Set();
+    for (;;) {
+      seen.add(current.template.id);
+      const parent = resolveParent(current);
+      if (!parent) return { name: current.template.name };
+      if (parent.external) {
+        return { name: parent.external.channelName || parent.external.name, external: parent.external };
+      }
+      if (seen.has(parent.record.template.id)) return { name: current.template.name };
+      current = parent.record;
+    }
+  };
+  const membersByChannel = new Map();
+  const assignments = [];
+  importedTemplateRecords.forEach((record) => {
+    const parentKey = record.entry.parentTemplateKey;
+    const parentSkipped = Boolean(parentKey && !byKey.has(parentKey) && packagedKeys.has(parentKey));
+    const involved = record.entry.isParent || Boolean(resolveParent(record))
+      || (record.entry.templateKey && referencedKeys.has(record.entry.templateKey));
+    if (parentSkipped) parentSkippedRecords.push(record);
+    if (!involved) {
+      assignments.push({ templateId: record.template.id, channelName: null });
+      return;
+    }
+    const root = rootNameOf(record);
+    if (!membersByChannel.has(root.name)) membersByChannel.set(root.name, { sources: [], externalIds: new Set() });
+    const member = membersByChannel.get(root.name);
+    member.sources.push({ sourceName: record.template.name, mappings: normalizeBundleAccountMappings(record.entry.accountMappings) });
+    if (root.external && !root.external.channelId && !member.externalIds.has(root.external.id)) {
+      // 包外的主模板随渠道转换一起归入，账户映射一并合并（同迁移 D1）。
+      member.externalIds.add(root.external.id);
+      member.sources.push({
+        sourceName: root.external.name,
+        mappings: database.listAccountMappings({ templateId: root.external.id })
+      });
+      assignments.push({ templateId: root.external.id, channelName: root.name });
+    }
+    assignments.push({ templateId: record.template.id, channelName: root.name });
+  });
+  // 已有同名渠道的映射与待处理冲突由 restoreTemplateBundleStatementChannels 在同一事务内并入来源。
+  const legacyChannelSources = Array.from(membersByChannel.entries())
+    .map(([name, member]) => ({ name, sources: member.sources }));
+  // 归属按顺序生效，同一模板出现多次（手工合并的包）时以最后一条为准；日志按模板最终归属分类、每个模板只列一次。
+  const finalChannelByTemplateId = new Map(assignments.map((assignment) => [assignment.templateId, assignment.channelName]));
+  const orphanedTemplateNames = [];
+  const regroupedTemplateNames = [];
+  const loggedTemplateIds = new Set();
+  parentSkippedRecords.forEach((record) => {
+    if (loggedTemplateIds.has(record.template.id)) return;
+    loggedTemplateIds.add(record.template.id);
+    const finalChannelName = finalChannelByTemplateId.get(record.template.id);
+    if (finalChannelName) regroupedTemplateNames.push(`${record.template.name}（渠道「${finalChannelName}」）`);
+    else orphanedTemplateNames.push(record.template.name);
+  });
+  return { channels: [], legacyChannelSources, assignments, orphanedTemplateNames, regroupedTemplateNames };
+}
+
+// 模板包导入的第二、三轮，只处理第一轮成功导入的条目（succeededEntries）：
+//   第二轮写入模板级账户映射（v1.5.1，覆盖导入时也清除旧映射）；第三轮还原渠道与归属（v3.2.15，§5.3，v≤4 的主/子关系转为渠道）。
+//   被跳过的模板（表头重复、映射校验失败）保留原有映射与归属（v3.2.15 PR #246 审查）。
+function restoreBundleFollowUpRounds({ importedTemplates, succeededEntries, importedBundleVersion, importedChannels }) {
+  const importedTemplateRecords = [];
+  importedTemplates.forEach((entry) => {
+    if (!succeededEntries.has(entry)) return;
+    const template = entry.templateKey
+      ? database.getTemplateByKey(entry.templateKey)
+      : database.getTemplateByName(entry.name);
+    if (!template) return;
+    importedTemplateRecords.push({ entry, template });
+
+    // 始终写入：v3 bundle 无 accountMappings 时 mappings=[] → 清除旧映射
+    database.saveAccountMappings({ templateId: template.id }, normalizeBundleAccountMappings(entry.accountMappings));
+  });
+
+  const channelRestore = importedBundleVersion >= 5
+    ? buildBundleV5ChannelRestore(importedChannels, importedTemplateRecords, importedTemplates)
+    : buildLegacyBundleChannelRestore(importedTemplateRecords, importedTemplates);
+  const restoreResult = database.restoreTemplateBundleStatementChannels(channelRestore);
+  return { importedTemplateRecords, channelRestore, restoreResult };
+}
+
+function collectChannelBalanceModeWarnings(channelNames) {
+  const warnings = [];
+  for (const name of channelNames) {
+    const channel = database.getStatementChannelByName(name);
+    if (!channel) continue;
+    const entries = database.listStatementChannelTemplates(channel.id)
+      .filter((template) => template.mappingCount > 0)
+      .map((template) => getTemplateMappingConfig(template.id))
+      .filter(Boolean)
+      .map((config) => ({ templateName: config.template.name, balanceMode: resolveTemplateBalanceMode(config.exportMappings) }));
+    const mismatch = findBalanceModeMismatch(entries);
+    if (mismatch) warnings.push(`渠道「${name}」：${mismatch.join('；')}`);
+  }
+  return warnings;
+}
+
 function registerTemplateHandlers() {
   ipcMain.handle('template:list', () => {
     return database.listTemplates();
   });
 
-  ipcMain.handle('template:list-children', (_event, parentTemplateId) => {
-    return database.listChildTemplates(parentTemplateId);
-  });
+  // v3.2.15：主/子模板已由渠道取代。以下三个通道仍在冻结的 G7 归档登记与 preload 中，暂保留注册，
+  //   但不再读写任何数据；界面改用渠道接口（channel:* 与 template:save-mappings 的 channel 参数）。
+  ipcMain.handle('template:list-children', () => []);
 
-  businessIpcHandle('template:set-parent-status', '设置父模板状态', (_event, templateId, isParent) => {
+  businessIpcHandle('template:set-parent-status', '设置父模板状态', () => (
+    createRetiredParentTemplateResult('设置主模板状态')
+  ));
+
+  businessIpcHandle('template:set-child-parent', '设置子模板归属', () => (
+    createRetiredParentTemplateResult('设置子模板')
+  ));
+
+  ipcMain.handle('channel:list', () => database.listStatementChannels());
+
+  supportIpcHandle('channel:rename', '重命名渠道', (_event, payload = {}) => {
+    const channelId = Number(payload.channelId);
     try {
-      database.setParentStatus(templateId, isParent);
+      const { previous, channel } = database.renameStatementChannel(channelId, payload.name);
       syncTemplateLibraryFile();
-      return { status: 'success' };
-    } catch (error) {
-      return createErrorResult({
-        step: '设置主模板状态',
-        message: '操作失败，请导出报错文件查看详情',
-        errorCode: 'TEMPLATE_SET_PARENT_RUNTIME',
-        errorType: '系统错误',
-        originalError: error,
-        context: { templateId, isParent }
+      clearLastErrorReport();
+      appendActivityLogEntry({
+        level: 'info',
+        message: '重命名渠道成功',
+        details: [
+          `原渠道名：${previous.name}`,
+          `新渠道名：${channel.name}`,
+          '渠道下子模板的输出身份、余额种子与余额调整改按新渠道名的银行段读取'
+        ]
       });
+      return { status: 'success', message: '渠道名称修改成功', channel };
+    } catch (error) {
+      return createStatementChannelErrorResult('重命名渠道', error, { channelId });
     }
   });
 
-  businessIpcHandle('template:set-child-parent', '设置子模板归属', (_event, templateId, parentTemplateId) => {
+  supportIpcHandle('channel:delete', '删除渠道', (_event, channelId) => {
     try {
-      database.setChildParent(templateId, parentTemplateId);
+      const { channel, releasedTemplates, conflictCount } = database.deleteStatementChannel(channelId);
       syncTemplateLibraryFile();
-      return { status: 'success' };
-    } catch (error) {
-      return createErrorResult({
-        step: '设置子模板',
-        message: '操作失败，请导出报错文件查看详情',
-        errorCode: 'TEMPLATE_SET_CHILD_RUNTIME',
-        errorType: '系统错误',
-        originalError: error,
-        context: { templateId, parentTemplateId }
+      clearGeneratedExports();
+      clearPendingManualBalancePrompt();
+      clearPendingBigAccountSelection();
+      clearLastErrorReport();
+      appendActivityLogEntry({
+        level: 'info',
+        message: '删除渠道成功',
+        details: [
+          `渠道名：${channel.name}`,
+          `恢复为普通模板：${releasedTemplates.map((item) => item.name).join('、') || '（无）'}`,
+          ...(conflictCount > 0 ? [`未处理的账户映射冲突 ${conflictCount} 个已随渠道清除，请为这些模板重新检查账户映射`] : [])
+        ]
       });
+      return {
+        status: 'success',
+        message: conflictCount > 0
+          ? `渠道已删除，${releasedTemplates.length} 个子模板恢复为普通模板；有 ${conflictCount} 个未处理的账户映射冲突随渠道清除，请为这些模板重新检查账户映射`
+          : `渠道已删除，${releasedTemplates.length} 个子模板恢复为普通模板`,
+        releasedTemplateCount: releasedTemplates.length,
+        clearedConflictCount: conflictCount
+      };
+    } catch (error) {
+      return createStatementChannelErrorResult('删除渠道', error, { channelId });
     }
   });
 
+  // v3.2.15：传 { channelId } 即【导入子模板】（T7）——模板名按渠道编号生成，总是新建并归入该渠道。
   trackedIpcHandle('template:import', '生成网银账单', '导入模板', {
-    async prepare() {
+    async prepare(_event, options = {}) {
+      const childChannelId = Number(options && options.channelId || 0);
+      if (childChannelId && !database.getStatementChannel(childChannelId)) {
+        return {
+          proceed: false,
+          result: createErrorResult({
+            step: '导入子模板',
+            message: '未找到对应渠道，请刷新后重试',
+            errorCode: 'CHANNEL_NOT_FOUND',
+            context: { channelId: childChannelId }
+          })
+        };
+      }
       const result = await showImportOpenDialog('template', {
         properties: ['openFile'],
         filters: templateFileDialogFilters()
@@ -8306,8 +8872,12 @@ function registerTemplateHandlers() {
         }
       };
     },
-    async execute(_event, prepared, taskContext) {
+    async execute(_event, prepared, taskContext, options = {}) {
     const selectedPath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
+    const childChannelId = Number(options && options.channelId || 0);
+    if (childChannelId) {
+      return importStatementChildTemplate(childChannelId, selectedPath);
+    }
     try {
       const headers = extractHeaders(selectedPath);
       const templateName = path.parse(selectedPath).name;
@@ -8321,6 +8891,16 @@ function registerTemplateHandlers() {
           message: `该文件的表头与已有模板「${conflict.name}」完全相同，无法创建重复表头的模板。`,
           errorCode: 'TEMPLATE_HEADERS_DUPLICATE',
           context: { conflictTemplateName: conflict.name }
+        });
+      }
+
+      // v3.2.15：新建或覆盖的是普通模板时不能与渠道同名（覆盖渠道内的同名子模板不受限）。
+      if ((!existingByName || !existingByName.channelId) && database.getStatementChannelByName(templateName)) {
+        return createErrorResult({
+          step: '导入模板文件',
+          message: `已有同名渠道「${templateName}」，普通模板与渠道同名会使两者的输出名称相同；如是该渠道的另一种格式，请在渠道行点【导入子模板】，否则请先修改文件名`,
+          errorCode: 'TEMPLATE_NAME_CHANNEL_CONFLICT',
+          context: { channelName: templateName }
         });
       }
 
@@ -8520,27 +9100,60 @@ function registerTemplateHandlers() {
       // 默认 false（向后兼容旧行为：DELETE all + INSERT all，caller 接管 own 全集）
       // 仅当前端显式传 preserveOwn=true（即维护大账号没被打开过 → bigAccountsLoadedWithOwn=false → currentBigAccounts 是 client-only）才走 DELETE-client-only 保留 own 路径
       const preserveOwn = payload.preserveOwn === true;
-      database.saveMappings(
+      // v3.2.15（§4.2、T6）：渠道归属随映射一起提交；缺省为不改归属。
+      const channelAssignment = normalizeTemplateChannelAssignment(payload.channel);
+      const balanceModeMismatch = findSaveMappingsBalanceModeMismatch({
+        template,
+        channelAssignment,
+        mappings: templateConfiguration.mappings
+      });
+      if (balanceModeMismatch) {
+        return createDetailedErrorResult({
+          step: '保存模板映射',
+          message: `渠道「${balanceModeMismatch.channelName}」下各子模板的余额方式必须一致（不出余额 / 取账单余额列 / 通过发生额计算），请统一后再保存`,
+          errorCode: 'CHANNEL_BALANCE_MODE_MISMATCH',
+          detailLines: balanceModeMismatch.detailLines,
+          context: { templateId: payload.templateId, templateName: template.name },
+          templateName: template.name
+        });
+      }
+      const saveResult = database.saveMappings(
         payload.templateId,
         templateConfiguration.mappings,
         templateConfiguration.bigAccounts,
         templateConfiguration.fixedAssignments,
         payload.dateFormat,
         null,
-        { preserveOwn }
+        { preserveOwn, channelAssignment }
       );
+      const assignmentResult = saveResult && saveResult.channelAssignment;
       syncTemplateLibraryFile();
       clearLastErrorReport();
+      const savedTemplate = database.getTemplate(payload.templateId);
       appendActivityLogEntry({
         level: 'info',
         message: '保存模板映射成功',
-        details: [`模板名：${template.name}`]
+        details: [
+          `模板名：${template.name}`,
+          ...(assignmentResult && assignmentResult.changed
+            ? [`渠道：${savedTemplate && savedTemplate.channelName ? savedTemplate.channelName : '（不属于任何渠道）'}`]
+            : [])
+        ]
       });
       return {
         status: 'success',
-        message: '模板映射保存成功'
+        message: assignmentResult && assignmentResult.createdChannel
+          ? `模板映射保存成功，已新建渠道「${assignmentResult.createdChannel.name}」`
+          : '模板映射保存成功',
+        template: savedTemplate ? buildTemplateSummary(savedTemplate) : null
       };
     } catch (error) {
+      if (error && STATEMENT_CHANNEL_BUSINESS_ERROR_CODES.has(error.code)) {
+        return createStatementChannelErrorResult('保存模板映射', error, {
+          templateId: payload.templateId,
+          templateName: template?.name || ''
+        });
+      }
       if (error instanceof FileValidationError) {
         return createErrorResult({
           step: '保存模板映射',
@@ -8601,6 +9214,16 @@ function registerTemplateHandlers() {
           step: '重命名模板',
           message: '模板名称已存在，请重新输入',
           errorCode: 'TEMPLATE_NAME_DUPLICATED',
+          templateName: template.name
+        });
+      }
+
+      // v3.2.15：普通模板按模板名输出，不能与渠道同名（属于渠道的子模板按渠道名输出，不受限）。
+      if (!template.channelId && database.getStatementChannelByName(nextName)) {
+        return createErrorResult({
+          step: '重命名模板',
+          message: `已有同名渠道「${nextName}」，普通模板与渠道同名会使两者的输出名称相同，请换一个名称`,
+          errorCode: 'TEMPLATE_NAME_CHANNEL_CONFLICT',
           templateName: template.name
         });
       }
@@ -8747,7 +9370,8 @@ function registerTemplateHandlers() {
           '模板包'
         );
         const enumValues = loadEnumValues(enumConfig.filePath);
-        const importedTemplates = readTemplateBundleFile(selectedPath);
+        const importedBundle = readTemplateBundleFile(selectedPath);
+        const importedTemplates = importedBundle.templates;
         const importCandidates = importedTemplates
           .filter((entry) => entry.name && entry.headers.length);
         const scanExisting = () => importCandidates
@@ -8783,6 +9407,8 @@ function registerTemplateHandlers() {
           proceed: true,
           enumValues,
           importedTemplates,
+          importedBundleVersion: importedBundle.bundleVersion,
+          importedChannels: importedBundle.channels,
           filePlan: {
             version: 1,
             allocation: 'eager',
@@ -8815,11 +9441,16 @@ function registerTemplateHandlers() {
     },
     async execute(_event, prepared, taskContext) {
     const { enumValues, importedTemplates } = prepared;
+    const importedBundleVersion = Number(prepared.importedBundleVersion || 1);
+    const importedChannels = Array.isArray(prepared.importedChannels) ? prepared.importedChannels : [];
     const selectedPath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
     try {
       let createdCount = 0;
       let updatedCount = 0;
       let skippedCount = 0;
+      // v3.2.15（PR #246 审查）：只有第一轮成功导入的条目进入后两轮（账户映射、渠道归属）；
+      //   被跳过的模板保留原有映射与归属，不按包内容改写。
+      const succeededEntries = new Set();
 
       importedTemplates.forEach((entry) => {
         if (!entry.name || !entry.headers.length) {
@@ -8992,6 +9623,7 @@ function registerTemplateHandlers() {
           } else {
             createdCount += 1;
           }
+          succeededEntries.add(entry);
         } catch (error) {
           if (error instanceof FileValidationError) {
             skippedCount += 1;
@@ -9002,45 +9634,21 @@ function registerTemplateHandlers() {
         }
       });
 
-      // v1.5.1: 第二轮 — 还原主/子模板关系（覆盖导入时也清除旧的主/子状态）
-      importedTemplates.forEach((entry) => {
-        if (!entry.name || !entry.headers.length) return;
-        const template = entry.templateKey
-          ? database.getTemplateByKey(entry.templateKey)
-          : database.getTemplateByName(entry.name);
-        if (!template) return;
-
-        // 始终同步主/子状态：v3 bundle 无这些字段时 isParent=false, parentTemplateKey=null → 清除旧状态
-        database.setParentStatus(template.id, Boolean(entry.isParent));
-
-        if (entry.parentTemplateKey) {
-          const parentTemplate = database.getTemplateByKey(entry.parentTemplateKey);
-          if (parentTemplate) {
-            database.setChildParent(template.id, parentTemplate.id);
-          }
-        } else {
-          database.setChildParent(template.id, null);
-        }
+      const { channelRestore, restoreResult } = restoreBundleFollowUpRounds({
+        importedTemplates, succeededEntries, importedBundleVersion, importedChannels
       });
-
-      // v1.5.1: 第三轮 — 导入账户映射（覆盖导入时也清除旧映射）
-      importedTemplates.forEach((entry) => {
-        if (!entry.name || !entry.headers.length) return;
-        const template = entry.templateKey
-          ? database.getTemplateByKey(entry.templateKey)
-          : database.getTemplateByName(entry.name);
-        if (!template) return;
-
-        const mappings = (Array.isArray(entry.accountMappings) ? entry.accountMappings : []).map((m) => ({
-          bankAccountId: normalizeCell(m.bankAccountId),
-          clearingAccountId: normalizeCell(m.clearingAccountId),
-          noCurrency: Boolean(m.noCurrency),
-          currency: normalizeCell(m.currency)
-        })).filter((m) => m.bankAccountId);
-
-        // 始终写入：v3 bundle 无 accountMappings 时 mappings=[] → 清除旧映射
-        database.saveAccountMappings(template.id, mappings);
-      });
+      const balanceModeWarnings = collectChannelBalanceModeWarnings(
+        Array.from(new Set(channelRestore.assignments.map((item) => item.channelName).filter(Boolean)))
+      );
+      const restoredChannelNames = new Set(channelRestore.channels.map((channel) => channel.name));
+      const unrestoredChannelNames = importedChannels.map((channel) => channel.name).filter((name) => !restoredChannelNames.has(name));
+      if (balanceModeWarnings.length) {
+        appendActivityLogEntry({
+          level: 'warn',
+          message: '模板包导入后，以下渠道的子模板余额方式不一致，生成账单时会被阻断，请在映射关系管理中统一',
+          details: balanceModeWarnings
+        });
+      }
 
       syncTemplateLibraryFile();
       clearLastErrorReport();
@@ -9049,14 +9657,27 @@ function registerTemplateHandlers() {
         message: '导入模板包成功',
         details: [
           `源文件：${selectedPath}`,
+          `模板包版本：${importedBundleVersion}`,
           `新增：${createdCount}`,
           `更新：${updatedCount}`,
-          `跳过：${skippedCount}`
+          `跳过：${skippedCount}`,
+          `渠道：${restoreResult.channelCount}`,
+          ...(unrestoredChannelNames.length ? [`未还原的渠道（包内归入的模板均被跳过，原有映射与冲突不变）：${unrestoredChannelNames.join('、')}`] : []),
+          ...(channelRestore.orphanedTemplateNames && channelRestore.orphanedTemplateNames.length
+            ? [`父模板在包内被跳过、按普通模板导入的子模板：${channelRestore.orphanedTemplateNames.join('、')}`]
+            : []),
+          ...(channelRestore.regroupedTemplateNames && channelRestore.regroupedTemplateNames.length
+            ? [`父模板在包内被跳过、仍归入渠道的模板：${channelRestore.regroupedTemplateNames.join('、')}`]
+            : []),
+          ...(restoreResult.conflictCount > 0 ? [`待处理的渠道账户映射冲突：${restoreResult.conflictCount} 个账户号`] : [])
         ]
       });
+      const followUps = [];
+      if (restoreResult.conflictCount > 0) followUps.push(`有 ${restoreResult.conflictCount} 个渠道账户号的映射设置不一致，请在「账户映射」中处理`);
+      if (balanceModeWarnings.length > 0) followUps.push('部分渠道的子模板余额方式不一致，请在映射关系管理中统一');
       return {
         status: 'success',
-        message: `模板文件导入成功：新增${createdCount}，更新${updatedCount}，跳过${skippedCount}`
+        message: `模板文件导入成功：新增${createdCount}，更新${updatedCount}，跳过${skippedCount}${followUps.length ? `。${followUps.join('；')}` : ''}`
       };
     } catch (error) {
       if (error instanceof FileValidationError) {
@@ -9760,7 +10381,9 @@ function buildStatementGenerationConfig({
   }
 
   const mappingByTargetField = buildMappedFieldLookup(selectedMappings);
-  const templateNameParts = splitTemplateName(template.name);
+  // v3.2.15（T3）：属于渠道的模板按渠道名输出，明细 Channel 列与余额、种子、文件名同一口径。
+  const outputName = resolveStatementOutputName(template);
+  const templateNameParts = splitTemplateName(outputName);
   const selectedMerchantId = normalizeCell(selectedBigAccount?.merchantId);
   const selectedCurrency = normalizeCell(selectedBigAccount?.currency);
   const merchantIdMappingValue = normalizeLookupMappingValue(mappingByTargetField.MerchantId);
@@ -9804,7 +10427,8 @@ function buildStatementGenerationConfig({
     )
   );
 
-  const accountMappingByBankId = database.listAccountMappings(template.id).reduce((accumulator, mapping) => {
+  // v3.2.15（T11）：属于渠道的模板使用渠道账户映射。
+  const accountMappingByBankId = database.listEffectiveAccountMappings(template).reduce((accumulator, mapping) => {
     accumulator[mapping.bankAccountId] = {
       clearingAccountId: mapping.clearingAccountId,
       noCurrency: Boolean(mapping.noCurrency),
@@ -9818,6 +10442,7 @@ function buildStatementGenerationConfig({
 
   return {
     template,
+    outputName,
     mappingByTargetField,
     selectedMerchantId,
     selectedCurrency,
@@ -10028,6 +10653,7 @@ function buildPreparedStatementBatchFromFilePaths({ config, inputFilePaths = [] 
 }
 
 function generateStatementFiles(options) {
+  assertGenerationOutputNameUnique(options && options.config && options.config.template);
   return statementGenerationHelpers.generateStatementFiles(options);
 }
 
@@ -10103,29 +10729,174 @@ function scopedMergedOutputFileName(fileName, scope) {
   return scope === 'all' ? fileName.replace(/\.xlsx$/i, '__all.xlsx') : fileName;
 }
 
-// v1.5.2：虚拟 ID 下从 session 重新生成合并的余额文件（补录 seed 后调用）
-function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
-  const allEntries = getStatementSessionEntries(session, scope);
-  const groupMap = new Map();
-  for (const entry of allEntries) {
-    const tid = entry.matchedTemplateId || 0;
-    if (!groupMap.has(tid)) groupMap.set(tid, []);
-    groupMap.get(tid).push(entry);
+// v3.2.15（T4）：按生成分组键把文件条目分组：属于渠道的子模板合为一组（一条余额链），普通模板各自一组。
+//   组配置取组内第一个仍存在的模板（输出身份与余额方式在渠道内一致）；明细行仍是各条目按自己子模板构建的结果。
+//   返回 [{ key, entries, templateIds, templateConfig }]；组内模板都已删除时 templateConfig 为 null。
+function groupStatementEntriesForGeneration(entries) {
+  const templateCache = new Map();
+  const templateById = (templateId) => {
+    if (!templateCache.has(templateId)) {
+      templateCache.set(templateId, templateId ? database.getTemplate(templateId) : null);
+    }
+    return templateCache.get(templateId);
+  };
+  const groups = new Map();
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const templateId = Number(entry && entry.matchedTemplateId || 0);
+    const key = resolveGenerationGroupKey(templateById(templateId) || { id: templateId });
+    if (!groups.has(key)) groups.set(key, { key, entries: [], templateIds: [] });
+    const group = groups.get(key);
+    group.entries.push(entry);
+    if (!group.templateIds.includes(templateId)) group.templateIds.push(templateId);
   }
+  return Array.from(groups.values()).map((group) => {
+    let templateConfig = null;
+    for (const templateId of group.templateIds) {
+      templateConfig = templateId ? getTemplateMappingConfig(templateId) : null;
+      if (templateConfig) break;
+    }
+    return { ...group, templateConfig };
+  });
+}
 
-  const balancePaths = [];
-  const billDates = [];
-  const allWarnings = [];
-  let skippedCount = 0;
+// v3.2.15（D2、§5.2）：同一渠道组内各子模板的余额方式必须一致；不一致返回逐行明细，否则 null。
+function findGenerationGroupBalanceModeMismatch(group) {
+  if (!group || !String(group.key).startsWith('channel:') || group.templateIds.length < 2) return null;
+  const entries = group.templateIds
+    .map((templateId) => getTemplateMappingConfig(templateId))
+    .filter(Boolean)
+    .map((config) => ({
+      templateName: config.template.name,
+      balanceMode: resolveTemplateBalanceMode(config.exportMappings)
+    }));
+  return findBalanceModeMismatch(entries);
+}
 
-  for (const [tid, groupEntries] of groupMap) {
-    const templateConfig = getTemplateMappingConfig(tid);
+function buildChannelBalanceModeMismatchError(group, detailLines) {
+  const channelName = group.templateConfig
+    ? resolveStatementOutputName(group.templateConfig.template)
+    : group.key;
+  return new FileValidationError(
+    'CHANNEL_BALANCE_MODE_MISMATCH',
+    `渠道「${channelName}」下各子模板的余额方式不一致，无法合并生成，请在映射关系管理中统一后再导入`,
+    { detailLines, context: { channelName } }
+  );
+}
+
+// v3.2.15（PR #246 审查）：不同生成分组的输出名称不能相同。普通模板与渠道同名时（模板包或旧数据可能带来），
+//   两组的生成文件路径、明细 Channel 列与余额文件都相同，会互相覆盖。返回逐行明细，否则 null。
+//   release/v3.2.15 审查补充：
+//   - 名称按实际写盘文件名的口径比较：同 sanitizeFileName 替换非法字符、合并内部空白、去首尾空格，再按 Unicode NFC
+//     规范化、不区分大小写（Windows / macOS 默认文件系统不区分大小写，APFS 不区分规范等价的写法）；
+//   - 所有者按组身份（渠道 / 模板 ID）去重，不按显示文字，名称只差空格的两个模板仍算两个所有者；
+//   - 除本批各组外，还核对库里所有同名的输出所有者（不属于任何渠道的普通模板、渠道，同类与异类都算）：
+//     同名的两方分两批导入时，每批只有一组，只比本批会放行，后一批覆盖前一批的明细与余额文件。
+//     属于渠道的子模板由渠道代表，不单独计数。库里只取各所有者的身份与名称（listStatementOutputOwners），
+//     不用带映射、大账号统计的模板摘要查询，避免每次生成前同步重聚合全库。
+function findGenerationGroupOutputNameConflicts(groups) {
+  const statementOutputNameKey = (name) => sanitizeFileName(normalizeCell(name)).normalize('NFC').toLowerCase();
+  const byName = new Map();
+  const addOwner = (outputName, identity, label) => {
+    const nameKey = statementOutputNameKey(outputName);
+    if (!byName.has(nameKey)) byName.set(nameKey, { outputName, owners: new Map() });
+    const record = byName.get(nameKey);
+    if (!record.owners.has(identity)) record.owners.set(identity, label);
+  };
+  for (const group of Array.isArray(groups) ? groups : []) {
+    if (!group || !group.templateConfig) continue;
+    const outputName = resolveStatementOutputName(group.templateConfig.template);
+    const isChannel = String(group.key).startsWith('channel:');
+    addOwner(outputName, String(group.key),
+      isChannel ? `渠道「${outputName}」` : `模板「${normalizeCell(group.templateConfig.template.name)}」`);
+  }
+  if (byName.size) {
+    const owners = database.listStatementOutputOwners();
+    for (const template of owners.templates) {
+      if (byName.has(statementOutputNameKey(template.name))) {
+        addOwner(template.name, `template:${template.id}`, `模板「${normalizeCell(template.name)}」`);
+      }
+    }
+    for (const channel of owners.channels) {
+      if (byName.has(statementOutputNameKey(channel.name))) {
+        addOwner(channel.name, `channel:${channel.id}`, `渠道「${normalizeCell(channel.name)}」`);
+      }
+    }
+  }
+  const lines = Array.from(byName.values())
+    .filter((record) => record.owners.size > 1)
+    .map((record) => `输出名称「${record.outputName}」：${Array.from(record.owners.values()).join('、')}`);
+  return lines.length ? lines : null;
+}
+
+function buildStatementOutputNameConflictError(detailLines) {
+  return new FileValidationError(
+    'STATEMENT_OUTPUT_NAME_CONFLICT',
+    '有模板或渠道的输出名称相同（只差大小写、空格或文件名不允许的字符也算相同），生成的账单与余额会混在一起，请先在模板管理中重命名后再导入',
+    { detailLines }
+  );
+}
+
+// v3.2.15（release 复审）：每次生成前按本次实际使用的模板配置再核对一次。导入预检、大账号选择、补录确认等
+//   等待期间模板或渠道可能被改名，生成时用的仍是之前记下的配置。身份取库里模板当前的归属（导入后移入渠道的模板
+//   不与自己的渠道冲突），名称取本次实际写盘用的配置。虚拟模板（按文件名映射）不是库里的所有者，跳过。
+//   可一次传入多个模板（多模板生成整批核对）。
+function assertGenerationOutputNameUnique(templates) {
+  const owners = (Array.isArray(templates) ? templates : [templates]).map((template) => {
+    const templateId = Number(template && template.id);
+    if (!(templateId > 0)) return null;
+    const current = database.getTemplate(templateId);
+    return { key: resolveGenerationGroupKey(current || template), templateConfig: { template } };
+  }).filter(Boolean);
+  if (!owners.length) return;
+  const conflicts = findGenerationGroupOutputNameConflicts(owners);
+  if (conflicts) throw buildStatementOutputNameConflictError(conflicts);
+}
+
+// v3.2.15（release 审查）：同一批各组的实际输出文件名不能相同。内部文件名为“输出名称-账号-…”，组内只有一个账号时才带账号，
+//   不同的输出名称拼上账号后可能相同（如渠道「BANK-SG」只有账号 1001、模板「BANK-SG-1001」有多个账号），两组写到同一个文件，
+//   汇总时一组数据丢失、另一组重复。plans 为各组 { config, preparedBatch }；scope 为 'all' 时文件名不带账号。
+//   名称按写盘口径比较（同 findGenerationGroupOutputNameConflicts）。返回逐行明细，否则 null。
+function findGenerationGroupOutputPathConflicts(plans, scope = 'current') {
+  const byStem = new Map();
+  for (const plan of Array.isArray(plans) ? plans : []) {
+    const config = plan && plan.config;
+    const template = config && config.template;
+    if (!template) continue;
+    const outputName = normalizeCell(config.outputName) || normalizeCell(template.name);
+    const merchantId = scope === 'all' ? '' : normalizeCell(plan.preparedBatch && plan.preparedBatch.selectedMerchantId);
+    const stem = merchantId ? `${outputName}-${merchantId}` : outputName;
+    const stemKey = sanitizeFileName(stem).normalize('NFC').toLowerCase();
+    const current = Number(template.id) > 0 ? database.getTemplate(template.id) : null;
+    const identity = resolveGenerationGroupKey(current || template);
+    const label = `${identity.startsWith('channel:') ? `渠道「${outputName}」` : `模板「${normalizeCell(template.name)}」`}`
+      + (merchantId ? `（账号 ${merchantId}）` : '');
+    if (!byStem.has(stemKey)) byStem.set(stemKey, { stem, owners: new Map() });
+    const record = byStem.get(stemKey);
+    if (!record.owners.has(identity)) record.owners.set(identity, label);
+  }
+  const lines = Array.from(byStem.values())
+    .filter((record) => record.owners.size > 1)
+    .map((record) => `文件名「${record.stem}」：${Array.from(record.owners.values()).join('、')}`);
+  return lines.length ? lines : null;
+}
+
+function buildStatementOutputPathConflictError(detailLines) {
+  return new FileValidationError(
+    'STATEMENT_OUTPUT_NAME_CONFLICT',
+    '有两组账单的输出名称拼上账号后文件名相同，生成的账单会互相覆盖，请先在模板管理中重命名后再导入',
+    { detailLines }
+  );
+}
+
+// 按文件名映射补录后重新生成余额前的分组规划：只读会话和模板配置，不写文件、不读种子。
+//   补录在写入种子、登记断档之前用它核对各组实际输出文件名，再把同一份规划交给重新生成。
+function planVirtualTemplateBalanceRegeneration(session, scope = 'all') {
+  const generationGroups = groupStatementEntriesForGeneration(getStatementSessionEntries(session, scope));
+  const groupPlans = [];
+  const skippedGroups = [];
+  for (const { entries: groupEntries, templateIds, templateConfig } of generationGroups) {
     if (!templateConfig) {
-      appendActivityLogEntry({
-        level: 'warn',
-        message: `余额重新生成时跳过模板组（templateId=${tid}）：模板已被删除，${groupEntries.length} 个文件的数据未包含`
-      });
-      skippedCount += 1;
+      skippedGroups.push({ templateIds, fileCount: groupEntries.length });
       continue;
     }
 
@@ -10139,6 +10910,37 @@ function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
       config: groupGenConfig,
       fileEntries: groupEntries
     });
+    groupPlans.push({ config: groupGenConfig, preparedBatch: groupPreparedBatch });
+  }
+  return { scope, generationGroups, groupPlans, skippedGroups };
+}
+
+function assertVirtualTemplateBalanceOutputPaths(regenerationPlan) {
+  const outputPathConflicts = findGenerationGroupOutputPathConflicts(regenerationPlan.groupPlans, regenerationPlan.scope);
+  if (outputPathConflicts) throw buildStatementOutputPathConflictError(outputPathConflicts);
+}
+
+// v1.5.2：虚拟 ID 下从 session 重新生成合并的余额文件（补录 seed 后调用）
+function regenerateVirtualTemplateBalanceFromSession(
+  session,
+  scope = 'all',
+  regenerationPlan = planVirtualTemplateBalanceRegeneration(session, scope)
+) {
+  const { generationGroups, groupPlans, skippedGroups } = regenerationPlan;
+  const balancePaths = [];
+  const billDates = [];
+  const allWarnings = [];
+  const skippedCount = skippedGroups.length;
+  for (const { templateIds, fileCount } of skippedGroups) {
+    appendActivityLogEntry({
+      level: 'warn',
+      message: `余额重新生成时跳过模板组（templateId=${templateIds.join('、')}）：模板已被删除，${fileCount} 个文件的数据未包含`
+    });
+  }
+  // v3.2.15（release 审查）：先规划全部组，再核对各组实际输出文件名，任一组写出之前拦下。
+  assertVirtualTemplateBalanceOutputPaths(regenerationPlan);
+
+  for (const { config: groupGenConfig, preparedBatch: groupPreparedBatch } of groupPlans) {
     // 按本次重算的真实范围命名：只有一个模板组时这个文件直接作为该范围的余额，
     // 固定按全部范围生成会与“导出全部”同名，当前批次的余额随后被全部批次覆盖。
     const groupGeneratedFiles = generateStatementFiles({
@@ -10170,7 +10972,7 @@ function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
   let mergedBalance = null;
   if (balancePaths.length > 1) {
     const dateRange = buildDateRangeLabel(billDates);
-    const mergedFileName = `${groupMap.size}-BALANCE-${dateRange || getToday()}.xlsx`;
+    const mergedFileName = `${generationGroups.length}-BALANCE-${dateRange || getToday()}.xlsx`;
     const { outputFilePath: mergedPath } = buildOutputFilePath({
       kind: 'balance',
       outputFileName: scopedMergedOutputFileName(mergedFileName, scope)
@@ -10215,14 +11017,20 @@ function generateMultiTemplateGroupFiles({
   replacePaths,
   inputFilePaths
 }) {
-  // 按 matchedTemplateId 分组
-  const groupMap = new Map();
-  for (const entry of fileEntries) {
-    const tid = entry.matchedTemplateId || 0;
-    if (!groupMap.has(tid)) {
-      groupMap.set(tid, []);
-    }
-    groupMap.get(tid).push(entry);
+  // v3.2.15（T4）：按渠道 / 模板分组；渠道内各文件合为一份明细、一条余额链。
+  const generationGroups = groupStatementEntriesForGeneration(fileEntries);
+
+  // v3.2.15（release 复审）：预检后、生成前模板被删除时整批拦下。否则该组按首模板的配置生成，
+  //   与首模板组写到同一个文件，汇总时一组数据丢失、另一组重复，导入仍显示成功。
+  const deletedTemplateGroups = generationGroups.filter((group) => (
+    !group.templateConfig && group.templateIds.some((templateId) => Number(templateId) > 0)
+  ));
+  if (deletedTemplateGroups.length) {
+    throw new FileValidationError('TEMPLATE_NOT_FOUND', '导入期间有模板已被删除，请重新导入文件', {
+      detailLines: deletedTemplateGroups.flatMap((group) => group.entries.map((entry) => (
+        `文件：${path.basename(String(entry.filePath || ''))}（模板 ID：${Number(entry.matchedTemplateId) || ''}）`
+      )))
+    });
   }
 
   let lastBatchId = null;
@@ -10234,17 +11042,22 @@ function generateMultiTemplateGroupFiles({
   const allWarnings = [];
   const groupPlans = [];
 
-  for (const [, groupEntries] of groupMap) {
+  const multiBigAccountMarker = `${FIXED_FIELD_VALUE_PREFIX}${MERCHANT_ID_MULTI_ACCOUNT_MARKER}`;
+  const isMultiBigAccountConfig = (config) => normalizeCell((config.exportMappings || []).find(
+    (m) => normalizeCell(m.templateField) === 'MerchantId'
+  )?.mappedField) === multiBigAccountMarker;
+  for (const { entries: groupEntries } of generationGroups) {
     const groupTemplateConfig = getEntryTemplateConfig({
       entry: groupEntries[0],
       fallbackTemplateConfig
     });
 
-    const groupMerchantMapping = (groupTemplateConfig.exportMappings || []).find(
-      (m) => normalizeCell(m.templateField) === 'MerchantId'
-    );
-    const groupIsMultiBigAccount = normalizeCell(groupMerchantMapping?.mappedField)
-      === `${FIXED_FIELD_VALUE_PREFIX}${MERCHANT_ID_MULTI_ACCOUNT_MARKER}`;
+    // v3.2.15（T9）：渠道内各子模板的 MerchantId 映射可能不同。大账号注入由 rebuildMatchedTemplateFileEntries
+    //   按各条目自己的子模板判断；组配置只在全部条目都是多大账号模板时带上所选大账号（它只决定输出文件名中的账号），
+    //   混有固定账号子模板时不把所选大账号写进文件名。
+    const groupIsMultiBigAccount = groupEntries.every((entry) => isMultiBigAccountConfig(
+      getEntryTemplateConfig({ entry, fallbackTemplateConfig })
+    ));
 
     const groupConfig = buildStatementGenerationConfig({
       template: groupTemplateConfig.template,
@@ -10279,6 +11092,14 @@ function generateMultiTemplateGroupFiles({
   }
 
   // 所有组先完成 source-stable 解析，再进入 session/输出副作用。
+  // v3.2.15（release 复审）：进入副作用前，按各组实际生成用的配置整批核对输出名称。等待确认期间配置可能已变化，
+  //   而组配置可能取自之前记下的配置（getEntryTemplateConfig 的 fallback），不能按库里当前配置核对；
+  //   避免先改了会话（替换旧文件）、前几组已写出，后一组才被拦下。
+  assertGenerationOutputNameUnique(groupPlans.map((plan) => plan.groupTemplateConfig && plan.groupTemplateConfig.template));
+  const outputPathConflicts = findGenerationGroupOutputPathConflicts(
+    groupPlans.map((plan) => ({ config: plan.groupConfig, preparedBatch: plan.groupPreparedBatch }))
+  );
+  if (outputPathConflicts) throw buildStatementOutputPathConflictError(outputPathConflicts);
   if (Array.isArray(replacePaths)) {
     replacePaths.forEach((filePath) => {
       removeStatementSessionEntriesByFilePath(session, filePath);
@@ -10310,8 +11131,8 @@ function generateMultiTemplateGroupFiles({
     allFileEntries.push(...effectiveEntries);
   }
 
-  // 合并多组文件为汇总文件，命名：模板数量-COMMON/BALANCE-日期范围.xlsx
-  const templateCount = groupMap.size;
+  // 合并多组文件为汇总文件，命名：组数-COMMON/BALANCE-日期范围.xlsx（渠道按一组计）
+  const templateCount = generationGroups.length;
   const dateRangeLabel = buildDateRangeLabel(allBillDates);
 
   const mergedDetail = allDetailPaths.length > 1
@@ -10494,10 +11315,13 @@ function matchFileToTemplate(filePath, candidateTemplates) {
     }
   }
 
-  // 过滤子集匹配：多个模板匹配时，只保留 headers 最多的（最精确匹配）
+  // 过滤子集匹配：多个模板匹配时，只保留有效表头最多的（最精确匹配）。
+  // v3.2.15（release 审查）：按非空表头计数。模板表头保留合并单元格占位的中间空列（K1）后，空占位不能算作精确度，
+  //   否则空列多、有效字段少的模板（借去空口径匹配上）会挤掉有效字段更多的正确模板，漏读其余列。
   if (matches.length > 1) {
-    const maxHeaderCount = Math.max(...matches.map((t) => (t.headers || []).length));
-    return matches.filter((t) => (t.headers || []).length === maxHeaderCount);
+    const effectiveHeaderCount = (template) => (template.headers || []).filter((header) => normalizeCell(header) !== '').length;
+    const maxHeaderCount = Math.max(...matches.map(effectiveHeaderCount));
+    return matches.filter((template) => effectiveHeaderCount(template) === maxHeaderCount);
   }
 
   return matches;
@@ -10696,6 +11520,7 @@ function createGenerationContext({
 }
 
 function generateFilesFromRememberedContext(context) {
+  assertGenerationOutputNameUnique(context && context.template);
   return statementGenerationHelpers.generateFilesFromRememberedContext(context);
 }
 
@@ -10775,16 +11600,10 @@ function buildStatementExportPlan(kind, scope = 'auto') {
 
   let defaultFileName = '';
   if (isFilenameMappingMode(session.templateId)) {
-    const groupMap = new Map();
-    for (const entry of getStatementSessionEntries(session, 'all')) {
-      const templateId = entry.matchedTemplateId || 0;
-      if (!groupMap.has(templateId)) groupMap.set(templateId, []);
-      groupMap.get(templateId).push(entry);
-    }
+    const generationGroups = groupStatementEntriesForGeneration(getStatementSessionEntries(session, 'all'));
     const validGroups = [];
     const allDates = [];
-    for (const [templateId, entries] of groupMap) {
-      const templateConfig = getTemplateMappingConfig(templateId);
+    for (const { entries, templateConfig } of generationGroups) {
       if (!templateConfig) continue;
       const config = buildStatementGenerationConfig({
         template: templateConfig.template,
@@ -10808,9 +11627,9 @@ function buildStatementExportPlan(kind, scope = 'auto') {
       };
     }
     if (validGroups.length > 1) {
-      defaultFileName = `${groupMap.size}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(allDates) || getToday()}.xlsx`;
+      defaultFileName = `${generationGroups.length}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(allDates) || getToday()}.xlsx`;
     } else {
-      defaultFileName = `${validGroups[0].config.template.name}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(validGroups[0].dates) || getToday()}.xlsx`;
+      defaultFileName = `${validGroups[0].config.outputName}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(validGroups[0].dates) || getToday()}.xlsx`;
     }
   } else {
     const templateConfig = getTemplateMappingConfig(session.templateId);
@@ -10836,7 +11655,7 @@ function buildStatementExportPlan(kind, scope = 'auto') {
       orderedTargetFields: generationTemplateConfig.exportTargetFields,
       scope: 'all'
     });
-    defaultFileName = `${generationTemplateConfig.template.name}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(parseRequiredBillDates(preparedBatch.detailRows)) || getToday()}.xlsx`;
+    defaultFileName = `${resolveStatementOutputName(generationTemplateConfig.template)}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(parseRequiredBillDates(preparedBatch.detailRows)) || getToday()}.xlsx`;
   }
   return {
     normalizedScope,
@@ -10877,31 +11696,52 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
       });
     }
 
-    // v1.5.2：虚拟 ID 按 matchedTemplateId 分组，每组用各自模板 config 生成，最后合并
+    // v1.5.2：虚拟 ID 按生成分组（v3.2.15 起渠道合为一组），每组用组配置生成，最后合并
     if (isVirtualTemplate) {
       const allEntries = getStatementSessionEntries(session, 'all');
-      const groupMap = new Map();
-      for (const entry of allEntries) {
-        const tid = entry.matchedTemplateId || 0;
-        if (!groupMap.has(tid)) groupMap.set(tid, []);
-        groupMap.get(tid).push(entry);
+      const generationGroups = groupStatementEntriesForGeneration(allEntries);
+      // v3.2.15：导入后若经模板包等途径使普通模板与渠道同名，导出全部同样阻断。
+      const outputNameConflicts = findGenerationGroupOutputNameConflicts(generationGroups);
+      if (outputNameConflicts) {
+        const error = buildStatementOutputNameConflictError(outputNameConflicts);
+        return createErrorResult({
+          step: kind === 'detail' ? '导出明细账单' : '导出余额账单',
+          message: error.message,
+          errorCode: error.code,
+          detailLines: outputNameConflicts,
+          templateName: session.templateName
+        });
+      }
+      // v3.2.15（D2）：导入后若经模板包等途径使渠道余额方式不一致，导出全部同样阻断。
+      for (const group of generationGroups) {
+        const mismatch = findGenerationGroupBalanceModeMismatch(group);
+        if (mismatch) {
+          const error = buildChannelBalanceModeMismatchError(group, mismatch);
+          return createErrorResult({
+            step: kind === 'detail' ? '导出明细账单' : '导出余额账单',
+            message: error.message,
+            errorCode: error.code,
+            detailLines: mismatch,
+            templateName: session.templateName
+          });
+        }
       }
 
       const perGroupPaths = []; // [{detail, balance, warnings}]
       const exportBillDates = [];
       const skippedGroupNames = [];
       let lastGroupTemplateConfig = null;
-      for (const [tid, groupEntries] of groupMap) {
-        const templateConfig = getTemplateMappingConfig(tid);
+      for (const { entries: groupEntries, templateIds, templateConfig } of generationGroups) {
         if (!templateConfig) {
           appendActivityLogEntry({
             level: 'warn',
-            message: `导出时跳过模板组（templateId=${tid}）：模板已被删除，${groupEntries.length} 个文件的数据未包含在导出中`
+            message: `导出时跳过模板组（templateId=${templateIds.join('、')}）：模板已被删除，${groupEntries.length} 个文件的数据未包含在导出中`
           });
-          skippedGroupNames.push(`模板ID=${tid}（${groupEntries.length}个文件）`);
+          skippedGroupNames.push(`模板ID=${templateIds.join('、')}（${groupEntries.length}个文件）`);
           continue;
         }
         lastGroupTemplateConfig = templateConfig;
+        const tid = templateConfig.template.id;
 
         const groupGenConfig = buildStatementGenerationConfig({
           template: templateConfig.template,
@@ -10943,6 +11783,8 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
           exportBillDates.push(...dates);
         } catch (_ignored) {}
         perGroupPaths.push({
+          // 渠道组按渠道名列出（与输出文件、余额银行名同口径），普通模板为模板名。
+          templateName: groupGenConfig.outputName || templateConfig.template.name,
           detail: groupGeneratedFiles.detail ? groupGeneratedFiles.detail.filePath : null,
           balance: groupGeneratedFiles.balance ? groupGeneratedFiles.balance.filePath : null,
           warnings: groupGeneratedFiles.warnings || []
@@ -10977,6 +11819,25 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
         if (balanceGaps.length) {
           return buildBalanceGapConfirmResult(balanceGaps, { balance: null, detail: null });
         }
+        // 任一模板组余额生成失败（如某日未找到期末余额）时阻断：否则合并结果缺这些组的账户，仍显示导出成功。
+        const failedGroupLines = perGroupPaths
+          .map((group) => ({
+            templateName: group.templateName,
+            messages: (group.warnings || [])
+              .filter((warning) => warning && warning.type === 'balance-generate-failed')
+              .map((warning) => warning.message)
+          }))
+          .filter((group) => group.messages.length > 0)
+          .map((group) => `${group.templateName}：${group.messages.join('；')}`);
+        if (failedGroupLines.length) {
+          return createErrorResult({
+            step: '导出余额账单',
+            message: `余额账单未导出：${failedGroupLines.length} 个模板组的余额生成失败，导出全部会缺少这些组的账户余额，请处理后重新导出`,
+            errorCode: 'EXPORT_EMPTY',
+            detailLines: failedGroupLines,
+            templateName: session.templateName
+          });
+        }
       }
 
       // 合并多组文件，命名：模板数量-COMMON/BALANCE-日期范围.xlsx
@@ -10984,7 +11845,7 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
       if (targetPaths.length > 1) {
         const exportDateRange = buildDateRangeLabel(exportBillDates);
         const outputTag = kind === 'detail' ? 'COMMON' : 'BALANCE';
-        const mergedFileName = `${groupMap.size}-${outputTag}-${exportDateRange || getToday()}.xlsx`;
+        const mergedFileName = `${generationGroups.length}-${outputTag}-${exportDateRange || getToday()}.xlsx`;
         const { outputFilePath: mergedPath } = buildOutputFilePath({
           kind,
           outputFileName: scopedMergedOutputFileName(mergedFileName, 'all')
@@ -11031,6 +11892,21 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
         fileEntries: sessionFileEntries,
         fallbackTemplateConfig: templateConfig
       });
+
+      // v3.2.15（release 审查）：导入后模板可能已改名，与库里的渠道或其他普通模板输出名称相同；重新生成前同样阻断。
+      const exportAllOutputNameConflicts = findGenerationGroupOutputNameConflicts([
+        { key: resolveGenerationGroupKey(generationTemplateConfig.template), templateConfig: generationTemplateConfig }
+      ]);
+      if (exportAllOutputNameConflicts) {
+        const error = buildStatementOutputNameConflictError(exportAllOutputNameConflicts);
+        return createErrorResult({
+          step: kind === 'detail' ? '导出明细账单' : '导出余额账单',
+          message: error.message,
+          errorCode: error.code,
+          detailLines: exportAllOutputNameConflicts,
+          templateName: session.templateName
+        });
+      }
 
       const { config, preparedBatch } = buildStatementSessionGenerationContext({
         session,
@@ -11341,13 +12217,24 @@ function findSelfInputBigAccountBridge(recognitionBasis, expandedOptions, blockO
   return null;
 }
 
-function identifySelfInputBigAccountBridges(recognitionBasis, expandedOptions) {
-  const clearingIds = recognitionBasis && Array.isArray(recognitionBasis.bridgeClearingIdsByBlock)
-    ? recognitionBasis.bridgeClearingIdsByBlock
-    : [];
-  return clearingIds.map((_clearingId, blockOrdinal) => (
-    findSelfInputBigAccountBridge(recognitionBasis, expandedOptions, blockOrdinal)
-  ));
+// 大账号预览行对应的块里有没有交易（收入或支出非空的行），按块实际包含的明细行判断：
+//   没有分段的文件整份是一块，起止不经裁剪，只有表头时也是 [0, 0]，不能只看起止。
+//   明细没有收入 / 支出列时无法判断，返回 null（按有交易处理）。
+function bigAccountBlockHasTransactions(detailRows, startIndex, endIndex) {
+  const headerRow = Array.isArray(detailRows) && Array.isArray(detailRows[0]) ? detailRows[0] : [];
+  const amountIndexes = ['Credit Amount', 'Debit Amount']
+    .map((field) => headerRow.indexOf(field))
+    .filter((index) => index >= 0);
+  if (!amountIndexes.length) return null;
+  const start = Number(startIndex);
+  const end = Number(endIndex);
+  if (!Number.isInteger(start) || !Number.isInteger(end)) return null;
+  const dataRows = detailRows.slice(1);
+  for (let index = Math.max(0, start); index <= end && index < dataRows.length; index += 1) {
+    const row = dataRows[index];
+    if (Array.isArray(row) && amountIndexes.some((amountIndex) => normalizeCell(row[amountIndex]) !== '')) return true;
+  }
+  return false;
 }
 
 function buildBigAccountOrderEvidence(pendingContext) {
@@ -11408,18 +12295,27 @@ function buildBigAccountOrderEvidence(pendingContext) {
           blockOrdinal
         );
       }
-      const matched = expandedOptions.find(
-        (option) => identified
-          && matchMerchantIds(identified.merchantId, option.merchantId) !== 'none'
-      );
+      // 直接识别和桥接返回的都是维护列表里的账号，按账号精确取其币种选项；
+      // 子串匹配会把相互包含的其他维护账号也算进来。
+      const identifiedMerchantId = identified ? normalizeCell(identified.merchantId) : '';
+      const accountOptions = identifiedMerchantId
+        ? expandedOptions.filter((option) => normalizeCell(option.merchantId) === identifiedMerchantId)
+        : [];
+      const matched = accountOptions[0];
       const merchantId = matched ? matched.merchantId : '';
       const currency = matched ? matched.currency : '';
-      const ambiguityCode = identified && identified.viaBridge
-        && expandedOptions.filter(
-          (option) => matchMerchantIds(identified.merchantId, option.merchantId) !== 'none'
-        ).length > 1
+      // 提取不读取账单里的币种，维护了多个币种时默认取首个币种；无论直接识别还是桥接都须提醒用户核对。
+      const ambiguityCode = new Set(
+        accountOptions.map((option) => normalizeCell(option.currency))
+      ).size > 1
         ? 'MULTI_CURRENCY'
         : null;
+      // 区分无交易空段与“有交易但未识别账号”的块，记住顺序时据此核对未识别块的位置是否变化。
+      const hasTransactions = bigAccountBlockHasTransactions(
+        entry.detailRows,
+        previewRow.blockStartIndex,
+        previewRow.blockEndIndex
+      );
       return Object.freeze({
         blockOrdinal,
         sourceRow,
@@ -11427,7 +12323,8 @@ function buildBigAccountOrderEvidence(pendingContext) {
         currency,
         matchKind: identified ? identified.matchType : '',
         accountKey: merchantId ? `${merchantId}\u0000${currency}` : '',
-        ambiguityCode
+        ambiguityCode,
+        empty: typeof hasTransactions === 'boolean' ? !hasTransactions : null
       });
     });
     return Object.freeze({
@@ -11520,6 +12417,91 @@ function extractBigAccountOrderFromEvidence(pendingContext, mode, rowIndexes) {
   return result;
 }
 
+// 大账号顺序证据里每份文件逐块（与固定模式预览行一一对应）的 { merchantId（未识别为 ''）, empty（是否无交易，未知为 null）}；
+// 与保存顺序的 rowAccounts / rowEmpty 同口径。
+function bigAccountOrderEvidenceRowLists(evidence) {
+  const files = evidence && Array.isArray(evidence.files) ? evidence.files : [];
+  return files.map((file) => (Array.isArray(file.rows) ? file.rows : [])
+    .map((row) => ({
+      merchantId: row.accountKey !== '' ? normalizeCell(row.merchantId) : '',
+      empty: typeof row.empty === 'boolean' ? row.empty : null
+    })));
+}
+
+// 逐块结果里识别到的账号（按块顺序），供匹配记住的文件。
+function identifiedAccountsFromRowLists(rowLists) {
+  return rowLists.map((rows) => rows
+    .filter((row) => row.merchantId !== '')
+    .map((row) => ({ merchantId: row.merchantId })));
+}
+
+// v3.2.15（release 审查）：固定模式下界面按位置逐块套用记住的分配，而完成选择时服务端只核对账号、不核对币种。
+//   记住的顺序与本次导入文件无法按位置逐块对上时（文件个数不同、匹配不上、同一多币种大账号的多份账单或同一文件里
+//   同一账号多个币种、文件或账号块换序、空段 / 未识别段的位置变化），按位置套用会把账号 / 币种填到别的块上，
+//   因此降级为不固定模式由用户选择，界面也不再套用记住的分配（forceMode 存在即不预填）。
+//   各文件逐块识别到的账号取大账号顺序证据，与保存顺序同口径；没有文件信息的旧顺序无法核对，沿用原行为。
+function resolveSavedBigAccountOrderDecision(pendingContext) {
+  const keep = { forceUnfixed: false, reason: '', fileNames: [] };
+  const templateId = pendingContext && pendingContext.templateId;
+  if (readBigAccountMode(ensureStorageRoot(), templateId) !== 'fixed') return keep;
+  const savedOrderConfig = readBigAccountOrder(ensureStorageRoot(), templateId);
+  if (!savedOrderConfig || !Array.isArray(savedOrderConfig.assignments) || !savedOrderConfig.assignments.length) return keep;
+  if (!Array.isArray(savedOrderConfig.files) || !savedOrderConfig.files.length) return keep;
+  const evidenceFiles = pendingContext.bigAccountOrderEvidence && Array.isArray(pendingContext.bigAccountOrderEvidence.files)
+    ? pendingContext.bigAccountOrderEvidence.files
+    : [];
+  const fileNamesOf = (indexes) => indexes.map((index) => evidenceFiles[index].fileName);
+  if (evidenceFiles.length !== savedOrderConfig.fileCount) return { forceUnfixed: true, reason: 'file-count', fileNames: [] };
+  const importRowLists = bigAccountOrderEvidenceRowLists(pendingContext.bigAccountOrderEvidence);
+  const { failedImportIndexes, ambiguousImportIndexes, savedIndexByImport } = matchImportFilesToSavedOrder(
+    identifiedAccountsFromRowLists(importRowLists),
+    savedOrderConfig
+  );
+  if (ambiguousImportIndexes.length) {
+    return { forceUnfixed: true, reason: 'ambiguous', fileNames: fileNamesOf(ambiguousImportIndexes) };
+  }
+  if (failedImportIndexes.length) return { forceUnfixed: true, reason: 'mismatch', fileNames: fileNamesOf(failedImportIndexes) };
+  // 界面按位置套用：本次第 i 份文件须对上记住的第 i 份，且逐块识别结果一致（不比较拼接后的分配，空段不会造成误降级）。
+  const reorderedIndexes = savedIndexByImport
+    .map((savedIndex, importIndex) => (savedIndex === importIndex ? -1 : importIndex))
+    .filter((importIndex) => importIndex >= 0);
+  if (reorderedIndexes.length) return { forceUnfixed: true, reason: 'reordered', fileNames: fileNamesOf(reorderedIndexes) };
+  const rowMismatches = findSavedOrderFileRowMismatches(importRowLists, savedOrderConfig, savedIndexByImport);
+  if (rowMismatches.length) return { forceUnfixed: true, reason: 'rows', fileNames: fileNamesOf(rowMismatches) };
+  return keep;
+}
+
+const SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS = Object.freeze({
+  'file-count': '本次导入的文件个数与记住的不同',
+  mismatch: '部分文件的账户个数、账户号或账号块顺序与记住的对不上',
+  reordered: '文件顺序与记住的不同',
+  rows: '部分文件的账号块（含无交易的空段、未识别账号的块）与记住的对不上'
+});
+
+// 降级在预检阶段做出：常规导入预检返回大账号选择后直接转入完成选择，不会再以非预检方式运行到这里，
+// 因此日志不区分预检；同一次导入只会判定一次。
+function logSavedBigAccountOrderDowngrade(templateName, decision) {
+  const ambiguous = decision.reason === 'ambiguous';
+  appendActivityLogEntry({
+    level: 'info',
+    message: ambiguous
+      ? '已记住的大账号顺序无法唯一确定部分文件的账号 / 币种，改为人工选择'
+      : '已记住的大账号顺序与本次导入文件对不上，改为人工选择',
+    details: [
+      `模板名：${normalizeCell(templateName) || 'N/A'}`,
+      ...(ambiguous ? [] : [`原因：${SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS[decision.reason] || decision.reason}`]),
+      ...(decision.fileNames.length ? [`涉及文件：${decision.fileNames.join('、')}`] : [])
+    ]
+  });
+}
+
+function applySavedBigAccountOrderGuard(_prepared, pendingContext, selectionRequired) {
+  const decision = resolveSavedBigAccountOrderDecision(pendingContext);
+  if (!decision.forceUnfixed) return selectionRequired;
+  logSavedBigAccountOrderDowngrade(pendingContext.template && pendingContext.template.name, decision);
+  return { ...selectionRequired, forceMode: 'unfixed' };
+}
+
 function buildBigAccountOrderData(pendingContext, assignments = []) {
   const evidence = pendingContext.bigAccountOrderEvidence;
   if (!evidence || evidence.sessionId !== pendingContext.statementSelectionSessionId) {
@@ -11532,7 +12514,10 @@ function buildBigAccountOrderData(pendingContext, assignments = []) {
       const accounts = file.rows
         .filter((row) => row.accountKey !== '')
         .map((row) => ({ merchantId: row.merchantId, currency: row.currency }));
-      return { fileIndex: file.fileOrdinal, accountCount: accounts.length, accounts };
+      // 逐块识别账号、是否无交易与 assignments 一一对应（含空段 / 未识别段），供下次按块核对能否按位置套用。
+      const rowAccounts = file.rows.map((row) => (row.accountKey !== '' ? row.merchantId : ''));
+      const rowEmpty = file.rows.map((row) => (typeof row.empty === 'boolean' ? row.empty : null));
+      return { fileIndex: file.fileOrdinal, accountCount: accounts.length, accounts, rowAccounts, rowEmpty };
     })
   };
 }
@@ -11892,9 +12877,58 @@ async function handleFilenameMappingImport(prepared) {
       });
     }
 
+    // ===== 步骤 3.5（v3.2.15）：渠道组校验 =====
+    // 按渠道分组后，任一渠道组内余额方式不一致，或渠道还有未处理的账户映射冲突，整批阻断，不进入大账号选择与生成。
+    const importGenerationGroups = groupStatementEntriesForGeneration(parentProvisionalEntries);
+    const outputNameConflicts = findGenerationGroupOutputNameConflicts(importGenerationGroups);
+    if (outputNameConflicts) {
+      const error = buildStatementOutputNameConflictError(outputNameConflicts);
+      return createErrorResult({
+        step: '导入网银明细文件',
+        message: error.message,
+        errorCode: error.code,
+        detailLines: outputNameConflicts,
+        templateName: virtualTemplateName
+      });
+    }
+    for (const group of importGenerationGroups) {
+      const mismatch = findGenerationGroupBalanceModeMismatch(group);
+      if (mismatch) {
+        const error = buildChannelBalanceModeMismatchError(group, mismatch);
+        return createErrorResult({
+          step: '导入网银明细文件',
+          message: error.message,
+          errorCode: error.code,
+          detailLines: mismatch,
+          context: error.context,
+          templateName: virtualTemplateName
+        });
+      }
+    }
+    const pendingConflictChannels = [];
+    const checkedChannelIds = new Set();
+    for (const [, matchedConfig] of perTemplateConfigCache) {
+      const channelId = Number(matchedConfig.template.channelId || 0);
+      if (!channelId || checkedChannelIds.has(channelId)) continue;
+      checkedChannelIds.add(channelId);
+      const conflicts = database.listStatementChannelAccountMappingConflicts(channelId);
+      conflicts.forEach((item) => pendingConflictChannels.push(item));
+    }
+    if (pendingConflictChannels.length > 0) {
+      return createErrorResult({
+        step: '导入网银明细文件',
+        message: `渠道「${pendingConflictChannels.map((item) => item.channelName).join('、')}」的账户映射还有待处理的冲突，请先在「账户映射」中为每个账户号选定一条设置后再导入`,
+        errorCode: 'CHANNEL_ACCOUNT_MAPPING_CONFLICT_PENDING',
+        detailLines: pendingConflictChannels.map((item) => (
+          `渠道「${item.channelName}」：账户号 ${item.conflicts.map((conflict) => conflict.bankAccountId).join('、')}`
+        )),
+        context: { channelIds: pendingConflictChannels.map((item) => item.channelId) },
+        templateName: virtualTemplateName
+      });
+    }
+
     // ===== 步骤 4：聚合大账号 =====
-    // 每个命中的模板自身 bigAccounts；若模板是子模板，向上追加主模板的 bigAccounts（沿用 v1.5.1 聚合思路）。
-    // 主模板如也被直接命中（即也在 perTemplateConfigCache 内），跳过重复追加。
+    // 每个命中的模板自身 bigAccounts；v3.2.15（A3）：命中渠道的任一子模板时，取该渠道全部子模板的 bigAccounts。
     const aggregatedBigAccounts = [];
     const addBigAccounts = (baList) => {
       if (!Array.isArray(baList)) return;
@@ -11916,18 +12950,16 @@ async function handleFilenameMappingImport(prepared) {
       }
     };
 
-    const parentIdsProcessed = new Set();
+    const channelIdsProcessed = new Set();
     for (const [, matchedConfig] of perTemplateConfigCache) {
       addBigAccounts(matchedConfig.bigAccounts);
-      const parentId = matchedConfig.template.parentTemplateId;
-      if (parentId
-        && !parentIdsProcessed.has(parentId)
-        && !perTemplateConfigCache.has(parentId)
-      ) {
-        parentIdsProcessed.add(parentId);
-        const parentConfig = getTemplateMappingConfig(parentId);
-        if (parentConfig) {
-          addBigAccounts(parentConfig.bigAccounts);
+      const channelId = Number(matchedConfig.template.channelId || 0);
+      if (channelId && !channelIdsProcessed.has(channelId)) {
+        channelIdsProcessed.add(channelId);
+        for (const sibling of database.listStatementChannelTemplates(channelId)) {
+          if (perTemplateConfigCache.has(sibling.id)) continue;
+          const siblingConfig = getTemplateMappingConfig(sibling.id);
+          if (siblingConfig) addBigAccounts(siblingConfig.bigAccounts);
         }
       }
     }
@@ -11965,7 +12997,7 @@ async function handleFilenameMappingImport(prepared) {
       }
       const selectionRowsWithEmpty = buildBigAccountSelectionRows(trimmedProvisionalEntries, { includeEmptyBlocks: true });
 
-      stagePendingBigAccountSelection(prepared, {
+      const pendingContext = stagePendingBigAccountSelection(prepared, {
         templateId: FILENAME_MAPPING_TEMPLATE_ID,
         template: syntheticTemplateConfig.template,
         mappings: syntheticTemplateConfig.exportMappings,
@@ -11977,13 +13009,13 @@ async function handleFilenameMappingImport(prepared) {
         rows: selectionRows,
         rowsWithEmptyBlocks: selectionRowsWithEmpty
       });
-      return buildBigAccountSelectionRequiredResult({
+      return applySavedBigAccountOrderGuard(prepared, pendingContext, buildBigAccountSelectionRequiredResult({
         rows: selectionRows,
         rowsWithEmptyBlocks: selectionRowsWithEmpty,
         bigAccounts: aggregatedBigAccounts,
         fixedAssignments: [],
         templateId: FILENAME_MAPPING_TEMPLATE_ID
-      });
+      }));
     }
 
     // ===== 步骤 8：边界 — bigAccountOptions.length <= 1 直接生成 =====
@@ -12019,7 +13051,7 @@ async function handleFilenameMappingImport(prepared) {
         }
         const selectionRowsWithEmpty = buildBigAccountSelectionRows(trimmedProvisionalEntries, { includeEmptyBlocks: true });
 
-        stagePendingBigAccountSelection(prepared, {
+        const pendingContext = stagePendingBigAccountSelection(prepared, {
           templateId: FILENAME_MAPPING_TEMPLATE_ID,
           template: syntheticTemplateConfig.template,
           mappings: syntheticTemplateConfig.exportMappings,
@@ -12031,13 +13063,13 @@ async function handleFilenameMappingImport(prepared) {
           rows: selectionRows,
           rowsWithEmptyBlocks: selectionRowsWithEmpty
         });
-        return buildBigAccountSelectionRequiredResult({
+        return applySavedBigAccountOrderGuard(prepared, pendingContext, buildBigAccountSelectionRequiredResult({
           rows: selectionRows,
           rowsWithEmptyBlocks: selectionRowsWithEmpty,
           bigAccounts: aggregatedBigAccounts,
           fixedAssignments: [],
           templateId: FILENAME_MAPPING_TEMPLATE_ID
-        });
+        }));
       }
 
       if (recognitionResult.selectedBigAccount) {
@@ -12351,6 +13383,32 @@ function registerFileHandlers() {
         });
       }
 
+      // v3.2.15（D8）：与按表头匹配的导入一致，渠道有待处理的账户映射冲突时阻断。
+      const singleTemplateChannelId = Number(templateConfig.template.channelId || 0);
+      if (singleTemplateChannelId && database.countStatementChannelAccountMappingConflicts(singleTemplateChannelId) > 0) {
+        return createErrorResult({
+          step: '导入网银明细文件',
+          message: `渠道「${templateConfig.template.channelName}」的账户映射还有待处理的冲突，请先在「账户映射」中为每个账户号选定一条设置后再导入`,
+          errorCode: 'CHANNEL_ACCOUNT_MAPPING_CONFLICT_PENDING',
+          context: { channelId: singleTemplateChannelId }
+        });
+      }
+
+      // v3.2.15（release 审查）：指定模板导入同样核对库里输出名称相同的渠道 / 普通模板，避免两者的输出文件互相覆盖。
+      const singleTemplateOutputNameConflicts = findGenerationGroupOutputNameConflicts([
+        { key: resolveGenerationGroupKey(templateConfig.template), templateConfig }
+      ]);
+      if (singleTemplateOutputNameConflicts) {
+        const error = buildStatementOutputNameConflictError(singleTemplateOutputNameConflicts);
+        return createErrorResult({
+          step: '导入网银明细文件',
+          message: error.message,
+          errorCode: error.code,
+          detailLines: singleTemplateOutputNameConflicts,
+          templateName: templateConfig.template.name
+        });
+      }
+
       const inputFilePaths = prepared.inputFilePaths;
       const session = statementImportSessionForInvocation(
         prepared,
@@ -12359,106 +13417,6 @@ function registerFileHandlers() {
       );
       const selectionResult = prepared.selectionResult;
 
-      // v1.5.1: 主模板导入 — 自动匹配子模板
-      if (templateConfig.template.isParent && !selectionResult.parentProvisionalEntries) {
-        const childTemplates = database.listChildTemplates(templateId);
-        const candidateTemplates = [templateConfig.template, ...childTemplates];
-
-        const fileTemplateMap = new Map(); // filePath → matchedTemplate
-        for (const filePath of selectionResult.filePaths) {
-          const matches = matchFileToTemplate(filePath, candidateTemplates);
-
-          if (matches.length === 0) {
-            return createErrorResult({
-              step: '导入网银明细文件',
-              message: `文件 ${path.basename(filePath)} 的表头不匹配主模板或任何子模板，请检查文件或模板配置`,
-              errorCode: 'TEMPLATE_HEADER_MISMATCH',
-              templateName: templateConfig.template.name
-            });
-          }
-
-          if (matches.length > 1) {
-            return createErrorResult({
-              step: '导入网银明细文件',
-              message: `文件 ${path.basename(filePath)} 的表头匹配到多个模板（${matches.map((t) => t.name).join('、')}），请检查模板配置`,
-              errorCode: 'TEMPLATE_HEADER_AMBIGUOUS',
-              templateName: templateConfig.template.name
-            });
-          }
-
-          fileTemplateMap.set(filePath, matches[0]);
-        }
-
-
-
-        // 如果所有文件都匹配到主模板自身，无需特殊处理——直接 fall through 到标准流程
-        const allMatchParent = [...fileTemplateMap.values()].every((t) => t.id === templateId);
-        if (!allMatchParent) {
-          // 有文件匹配到子模板——用各自模板配置解析，生成 provisionalFileEntries 后走标准流程
-          const parentProvisionalEntries = [];
-          const childConfigCache = new Map(); // templateId → matchedConfig
-          for (const [filePath, matchedTemplate] of fileTemplateMap) {
-            const matchedConfig = matchedTemplate.id === templateId
-              ? templateConfig
-              : (childConfigCache.get(matchedTemplate.id) || getTemplateMappingConfig(matchedTemplate.id));
-
-            if (!matchedConfig) {
-              return createErrorResult({
-                step: '导入网银明细文件',
-                message: `未找到匹配模板 ${matchedTemplate.name} 的配置`,
-                errorCode: 'TEMPLATE_NOT_FOUND',
-                context: { templateId: matchedTemplate.id }
-              });
-            }
-
-            if (matchedTemplate.id !== templateId) {
-              childConfigCache.set(matchedTemplate.id, matchedConfig);
-            }
-
-            const config = buildStatementGenerationConfig({
-              template: matchedConfig.template,
-              mappings: matchedConfig.exportMappings,
-              orderedTargetFields: matchedConfig.exportTargetFields,
-              allowManagedMerchantWithoutSelection: true
-            });
-
-            const merchantLookupFlags = buildManagedMerchantLookupFlags(matchedConfig.exportMappings);
-
-            parentProvisionalEntries.push({
-              filePath,
-              detailRows: buildMappedRowsForFile({ config, inputFilePath: filePath }),
-              matchedTemplateId: matchedTemplate.id,
-              matchedHeaders: matchedConfig.template.headers || [],
-              selfInputMerchant: merchantLookupFlags.selfInputMerchant,
-              skipDirectMerchantLookup: merchantLookupFlags.skipDirectMerchantLookup
-            });
-          }
-
-          // 聚合所有匹配到的模板的大账号配置 + 检查是否有子模板启用了 Balance
-          const aggregatedBigAccounts = templateConfig.bigAccounts.map((ba) => ({ ...ba }));
-          for (const [, childConfig] of childConfigCache) {
-            for (const ba of (childConfig.bigAccounts || [])) {
-              const mid = normalizeCell(ba.merchantId);
-              if (!mid) continue;
-              const existing = aggregatedBigAccounts.find((a) => normalizeCell(a.merchantId) === mid);
-              if (existing) {
-                const newCurrencies = (Array.isArray(ba.currencies) ? ba.currencies : [])
-                  .map((c) => normalizeCell(c)).filter((c) => c !== '');
-                const existingCurrencies = Array.isArray(existing.currencies) ? existing.currencies : [];
-                existing.currencies = Array.from(new Set([...existingCurrencies, ...newCurrencies]));
-                existing.isMultiCurrency = existing.currencies.length > 1;
-              } else {
-                aggregatedBigAccounts.push({ ...ba });
-              }
-            }
-          }
-
-          // 将解析结果注入到 selectionResult 上下文中，供标准流程使用
-          selectionResult.parentProvisionalEntries = parentProvisionalEntries;
-          selectionResult.aggregatedBigAccounts = aggregatedBigAccounts;
-        }
-        // fall through to standard flow below
-      }
 
       const effectiveBigAccounts = selectionResult.aggregatedBigAccounts || templateConfig.bigAccounts;
       const bigAccountOptions = expandBigAccountConfigurations(effectiveBigAccounts);
@@ -12486,105 +13444,53 @@ function registerFileHandlers() {
           const importFileCount = selectionResult.filePaths.length;
 
           if (importFileCount !== savedOrderConfig.fileCount) {
-            // 文件个数不等于"记住顺序"里的文件个数 → 降级为"不固定"模式
+            // 文件个数不等于"记住顺序"里的文件个数 → 降级为"不固定"模式（不缓存判定，预检返回选择后不会再执行到这里）
             forceUnfixedMode = true;
+            logSavedBigAccountOrderDowngrade(templateConfig.template.name, { reason: 'file-count', fileNames: [] });
           } else if (importFileCount === savedOrderConfig.fileCount) {
             const autoMatchDecision = resolvePreparedFixedBigAccountAutoMatchDecision(
               prepared,
               () => {
-                const allMerchantIds = effectiveBigAccounts
-                  .map((ba) => normalizeCell(ba.merchantId))
-                  .filter((id) => id !== '');
-                const defaultExpectedSourceHeaders = templateConfig.template.headers || [];
-                const failedFileNames = [];
-                const usedSavedIndices = new Set();
-                const fileMatchMap = new Map(); // importIndex → savedFileIndex
+                // 每个导入文件按块顺序识别到的账号去全部保存文件里找匹配（不按位置对位）。识别取大账号顺序证据，
+                // 与保存顺序同口径：直接识别逐块取，自定义输入 MerchantId 逐块经账户映射桥接（部分块桥接不到时
+                // 保留已桥接的块，与保存时一致），只用导入时冻结的识别依据，不重开源文件。
+                const importAccountLists = identifiedAccountsFromRowLists(bigAccountOrderEvidenceRowLists(
+                  buildBigAccountOrderEvidence({
+                    fileEntries: provisionalFileEntries,
+                    bigAccounts: effectiveBigAccounts,
+                    rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true })
+                  })
+                ));
 
-                // 每个导入文件用账户个数+账户号去全部保存文件里找匹配（不按位置对位）
-                provisionalFileEntries.forEach((entry, fileIndex) => {
-                  const entryHeaders = entry.matchedHeaders || defaultExpectedSourceHeaders;
-                  let fileResult = entry.skipDirectMerchantLookup
-                    ? { accounts: [], isSingleAccount: false }
-                    : identifyAccountsFromFile({
-                        filePath: entry.filePath,
-                        detailRows: entry.detailRows,
-                        expectedSourceHeaders: entryHeaders,
-                        allMerchantIds,
-                        recognitionBasis: entry.detailRows && entry.detailRows.bigAccountRecognitionBasis
-                      });
-
-                  // 自定义输入 MerchantId：通过账户映射桥接提取（merchantId 不在文件中，跳过全文搜索）
-                  if (fileResult.accounts.length === 0 && entry.selfInputMerchant) {
-                    const bridgeAccounts = identifySelfInputBigAccountBridges(
-                      entry.detailRows && entry.detailRows.bigAccountRecognitionBasis,
-                      expandBigAccountConfigurations(effectiveBigAccounts)
-                    );
-                    if (bridgeAccounts.length > 0 && bridgeAccounts.every(Boolean)) {
-                      fileResult = {
-                        accounts: bridgeAccounts.map((bridge) => ({
-                          merchantId: bridge.merchantId,
-                          matchType: bridge.matchType
-                        })),
-                        isSingleAccount: bridgeAccounts.length === 1
-                      };
-                    }
-                  }
-
-                  let matchedSavedIndex = -1;
-                  for (let si = 0; si < savedOrderConfig.files.length; si += 1) {
-                    if (usedSavedIndices.has(si)) continue;
-                    const savedFile = savedOrderConfig.files[si];
-                    if (fileResult.accounts.length !== savedFile.accountCount) continue;
-                    const allAccountsMatch = savedFile.accounts.every((savedAccount) => {
-                      return fileResult.accounts.some((identified) => (
-                        matchMerchantIds(identified.merchantId, savedAccount.merchantId) !== 'none'
-                      ));
-                    });
-                    if (allAccountsMatch) {
-                      matchedSavedIndex = si;
-                      break;
-                    }
-                  }
-
-                  if (matchedSavedIndex >= 0) {
-                    usedSavedIndices.add(matchedSavedIndex);
-                    fileMatchMap.set(fileIndex, matchedSavedIndex);
-                  } else {
-                    failedFileNames.push(path.basename(entry.filePath));
-                  }
-                });
-
-                const reorderedAssignments = [];
-                if (failedFileNames.length === 0
-                    && Array.isArray(savedOrderConfig.assignments)
-                    && savedOrderConfig.assignments.length > 0) {
-                  // 按 fileMatchMap 重排 assignments：按导入文件顺序重组保存的 assignments
-                  const savedFiles = savedOrderConfig.files || [];
-                  const savedAssignments = savedOrderConfig.assignments || [];
-                  const savedFileRanges = [];
-                  let cumulativeIndex = 0;
-                  savedFiles.forEach((savedFile) => {
-                    const count = savedFile.accountCount || 0;
-                    savedFileRanges.push({ start: cumulativeIndex, count });
-                    cumulativeIndex += count;
-                  });
-                  let newRowIndex = 0;
-                  for (let importIdx = 0; importIdx < provisionalFileEntries.length; importIdx += 1) {
-                    const savedIdx = fileMatchMap.get(importIdx);
-                    if (savedIdx === undefined) continue;
-                    const range = savedFileRanges[savedIdx];
-                    if (!range) continue;
-                    const slice = savedAssignments.slice(range.start, range.start + range.count);
-                    slice.forEach((assignment) => {
-                      reorderedAssignments.push({ ...assignment, rowIndex: newRowIndex });
-                      newRowIndex += 1;
-                    });
-                  }
-                }
-                return { failedFileNames, reorderedAssignments };
+                const {
+                  failedImportIndexes,
+                  ambiguousImportIndexes,
+                  reorderedAssignments,
+                  savedIndexByImport
+                } = matchImportFilesToSavedOrder(importAccountLists, savedOrderConfig);
+                const importFileName = (index) => path.basename(provisionalFileEntries[index].filePath);
+                return {
+                  failedFileNames: failedImportIndexes.map(importFileName),
+                  ambiguousFileNames: ambiguousImportIndexes.map(importFileName),
+                  reorderedAssignments,
+                  savedIndexByImport
+                };
               }
             );
-            const { failedFileNames, reorderedAssignments } = autoMatchDecision;
+            const { failedFileNames, ambiguousFileNames, reorderedAssignments, savedIndexByImport } = autoMatchDecision;
+
+            // 记住的顺序无法唯一对应导入文件时（如同一多币种大账号的多份账单）不自动套用，降级为不固定模式由用户确认；
+            // 匹配不上的文件仍走下方“记住顺序不匹配”提示。
+            if (failedFileNames.length === 0 && ambiguousFileNames.length > 0) {
+              forceUnfixedMode = true;
+              // 常规导入在预检阶段即返回大账号选择，日志须在预检时写（判定按 prepared 缓存，同一次导入只写一次）。
+              if (prepared.previewOnly || !Object.hasOwn(prepared, 'fixedBigAccountAutoMatchDecision')) {
+                logSavedBigAccountOrderDowngrade(templateConfig.template.name, {
+                  reason: 'ambiguous',
+                  fileNames: ambiguousFileNames
+                });
+              }
+            }
 
             if (failedFileNames.length === 0 && reorderedAssignments.length > 0) {
 
@@ -12602,10 +13508,16 @@ function registerFileHandlers() {
                 rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true }),
               });
 
+              // 重排后按位置逐块套用：每份文件逐块识别结果须与对上的记住文件一致（空段 / 未识别段位置、
+              // 旧数据无法还原逐块信息时不自动套用，转人工选择，由下方选择结果的顺序核对降级）。
+              // 有交易但识别不出账号的块只能按位置取分配、无法核对，也不自动生成，交由用户在选择窗口确认。
+              const importRowLists = bigAccountOrderEvidenceRowLists(pendingContext.bigAccountOrderEvidence);
+              const autoApplicable = findSavedOrderFileRowMismatches(importRowLists, savedOrderConfig, savedIndexByImport).length === 0
+                && !hasUnidentifiedTransactionRows(importRowLists);
               const autoResult = prepared.previewOnly
                 ? null
                 : await ipcMain.emit('__internal-complete-big-account-selection__') || null;
-              if (!autoResult) {
+              if (!autoResult && autoApplicable) {
                 try {
                   const directResult = await (async () => {
                     const isFixedMode = true;
@@ -12678,7 +13590,7 @@ function registerFileHandlers() {
                       preparedBatch
                     };
 
-                    pendingContext.inputFilePaths.forEach((fp) => {
+                    resolvePendingReplacePaths(pendingContext).forEach((fp) => {
                       removeStatementSessionEntriesByFilePath(session, fp);
                     });
                     const batchId = appendStatementSessionImport({
@@ -12783,7 +13695,7 @@ function registerFileHandlers() {
 
         const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
 
-        stagePendingBigAccountSelection(prepared, {
+        const pendingContext = stagePendingBigAccountSelection(prepared, {
           templateId,
           template: templateConfig.template,
           mappings: templateConfig.exportMappings,
@@ -12804,8 +13716,11 @@ function registerFileHandlers() {
         });
         if (forceUnfixedMode) {
           selectionRequired.forceMode = 'unfixed';
+          return selectionRequired;
         }
-        return selectionRequired;
+        // 固定模式未能自动套用（重排后逐块对不上、币种不可用等）而进入人工选择时，界面会按位置预填记住的分配，
+        // 与标准入口同样按位置逐块核对，对不上就降级。
+        return applySavedBigAccountOrderGuard(prepared, pendingContext, selectionRequired);
       }
 
       if (isMerchantIdSelfInput && bigAccountOptions.length <= 1) {
@@ -13224,7 +14139,7 @@ function registerFileHandlers() {
           fallbackTemplateConfig,
           selectedBigAccount: null,
           session,
-          replacePaths: pendingContext.inputFilePaths,
+          replacePaths: resolvePendingReplacePaths(pendingContext),
           inputFilePaths: pendingContext.inputFilePaths
         });
 
@@ -13275,7 +14190,7 @@ function registerFileHandlers() {
         preparedBatch
       };
 
-      pendingContext.inputFilePaths.forEach((filePath) => {
+      resolvePendingReplacePaths(pendingContext).forEach((filePath) => {
         removeStatementSessionEntriesByFilePath(session, filePath);
       });
       const batchId = appendStatementSessionImport({
@@ -13453,6 +14368,20 @@ function registerFileHandlers() {
       }
 
       try {
+        // v3.2.15（release 审查）：补录后会重新生成；先按将使用的输出配置核对输出名称，冲突时不写入种子、不登记断档、不生成。
+        //   按文件名映射按会话全部分组核对；指定模板按记下的生成上下文核对（导入后模板或渠道可能已改名）。
+        //   按文件名映射另按将重新生成的各组规划核对实际输出文件名（名称拼上账号），同样在写种子、登记断档之前拦下。
+        let regenerationPlan = null;
+        if (isFilenameMappingMode(importContext.templateId) && session) {
+          const outputNameConflicts = findGenerationGroupOutputNameConflicts(
+            groupStatementEntriesForGeneration(getStatementSessionEntries(session, importContext.scope || 'current'))
+          );
+          if (outputNameConflicts) throw buildStatementOutputNameConflictError(outputNameConflicts);
+          regenerationPlan = planVirtualTemplateBalanceRegeneration(session, importContext.scope || 'current');
+          assertVirtualTemplateBalanceOutputPaths(regenerationPlan);
+        } else {
+          assertGenerationOutputNameUnique(importContext.template);
+        }
         if (skipBalanceGapKeys) {
           // 登记在真实会话（或原 importContext）上，execute 内的 importContext 只是副本。
           if (!rememberAcknowledgedBalanceGaps({
@@ -13489,7 +14418,11 @@ function registerFileHandlers() {
 
         // v1.5.2：虚拟 ID 下走多模板重新生成（避免用单组 importContext 产出不完整余额）
         if (isFilenameMappingMode(importContext.templateId) && session) {
-          const regenResult = regenerateVirtualTemplateBalanceFromSession(session, importContext.scope || 'current');
+          const regenResult = regenerateVirtualTemplateBalanceFromSession(
+            session,
+            importContext.scope || 'current',
+            regenerationPlan || undefined
+          );
           if (regenResult.needsSeed) {
             const pendingFiles = {
               warnings: regenResult.warnings,
@@ -13504,7 +14437,10 @@ function registerFileHandlers() {
           }
           const generatedFiles = regenResult.generatedFiles;
           if (importContext.scope === 'all') {
-            cacheAllStatementExport('balance', generatedFiles.balance);
+            // 任一模板组余额生成失败时不缓存缺组的“全部”余额：再次导出全部时重新生成并按失败组阻断。
+            const hasFailedGroup = (generatedFiles.warnings || [])
+              .some((warning) => warning && warning.type === 'balance-generate-failed');
+            cacheAllStatementExport('balance', hasFailedGroup ? null : generatedFiles.balance);
           } else {
             lastGeneratedExports.balance = generatedFiles.balance;
           }
@@ -21639,6 +22575,7 @@ function registerAllIpcHandlersWithMemoryActivity() {
   registerAppUpdateHandlers();
   registerArchiveCenterHandlers();
   registerTemplateResourceHandlers();
+  registerBankAccountHandlers();
   registerErrorHandlers();
   registerBackgroundHandlers();
   registerAccountMappingHandlers();

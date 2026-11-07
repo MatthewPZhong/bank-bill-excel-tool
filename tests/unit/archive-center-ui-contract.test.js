@@ -198,10 +198,10 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
     assert.match(renderer, /data-pane="archive"[^>]*hidden/);
     assert.match(renderer, /id="appUpdatePaneHeading"[^>]*>版本管理<\/h3>/);
     assert.match(renderer, /data-role="auto-update-toggle" aria-label="自动更新"/);
-    assert.match(renderer, /archiveState\.activeTab = \['archive', 'templates', 'appearance'\]\.includes\(tab\) \? tab : 'update'/);
+    assert.match(renderer, /archiveState\.activeTab = \['archive', 'templates', 'accounts', 'appearance'\]\.includes\(tab\) \? tab : 'update'/);
     assert.match(
       renderer,
-      /data-tab="archive"[\s\S]*?<span>存档中心<\/span>[\s\S]*?data-tab="templates"[\s\S]*?<span>模板文件<\/span>[\s\S]*?data-tab="appearance"/
+      /data-tab="archive"[\s\S]*?<span>存档中心<\/span>[\s\S]*?data-tab="templates"[\s\S]*?<span>模板文件<\/span>[\s\S]*?data-tab="accounts"[\s\S]*?<span>账户管理<\/span>[\s\S]*?data-tab="appearance"/
     );
     assert.match(renderer, /data-pane="appearance"[^>]*hidden/);
     assert.match(renderer, /activeTab: 'update'/);

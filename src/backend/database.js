@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const {
+  ensureBankAccountSnapshotSupport,
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
   ensureAcquiringBillCurrencyTablesSupport,
@@ -15,6 +16,7 @@ const {
   ensureBillSplitMergeSupport,
   ensureBillSplitTargetSeqSupport,
   ensureParentTemplateSupport,
+  ensureStatementChannelSupport,
   ensureScenariosSupport,
   ensureScenariosCategoryReconIdFix,
   ensureScenariosCategoryGatewayReconIdFix,
@@ -98,6 +100,8 @@ const { registerVccStorageWriteCapability, assertVccStorageContract } = require(
 const scenariosRepository = require('./database/scenarios-repository');
 const settingsRepository = require('./database/settings-repository');
 const templateRepository = require('./database/template-repository');
+// v3.2.15：网银账单渠道（取代主模板）
+const statementChannelRepository = require('./database/statement-channel-repository');
 const channelsRepository = require('./database/channels-repository');
 // v2.1.16 阶段一 A3：链接表持久化仓储
 const linkedTableRepository = require('./database/linked-table-repository');
@@ -108,6 +112,7 @@ const fundTransferAccountMappingRepository = require('./database/fund-transfer-a
 const preFundReconciliationRunRepository = require('./database/pre-fund-reconciliation-run-repository');
 const duplicateInboundMatchRunRepository = require('./database/duplicate-inbound-match-run-repository');
 const templateResourceRepository = require('./database/template-resource-repository');
+const bankAccountRepository = require('./database/bank-account-repository');
 const { createBackup: createBackupImpl } = require('./database/backup');
 // v2.1.9 SR-log-1 (T32h)：替换 console.error → appendModuleLog 双写
 const { appendModuleLog } = require('./logger');
@@ -135,6 +140,15 @@ function formatBytesForLog(bytes) {
     i += 1;
   }
   return `${value.toFixed(2)} ${units[i]}`;
+}
+
+function normalizeAccountMappingScope(scope) {
+  if (scope && typeof scope === 'object') {
+    const channelId = Number(scope.channelId || 0);
+    if (channelId > 0) return { channelId, templateId: null };
+    return { channelId: null, templateId: Number(scope.templateId || 0) };
+  }
+  return { channelId: null, templateId: Number(scope || 0) };
 }
 
 class AppDatabase {
@@ -244,6 +258,9 @@ class AppDatabase {
     this.ensureTemplateFilenameFixedFieldSupport();
     this.ensureAccountMappingTemplateSupport();
     this.ensureTemplateBigAccountNatureSupport();
+    // v3.2.15：主/子模板一次性转为渠道；必须在 ensureParentTemplateSupport 与
+    //   ensureAccountMappingTemplateSupport 之后（依赖旧标记列与模板级账户映射）。
+    this.runStatementChannelMigration();
     this.ensureScenariosSupport();
     // v2.1.0-beta.1 PR-A：扩 CHECK 约束到 4 值（含 'recon-id-fix'）
     // 必须在 ensureScenariosSupport 之后；幂等检查 sqlite_master.sql 含 'recon-id-fix' → no-op
@@ -621,6 +638,8 @@ class AppDatabase {
       this.ensureDuplicateInboundMatchRunMetadataSupport();
       // v3.2.13：设置 → 模板文件用户版本（幂等 CREATE IF NOT EXISTS，纯新增）
       this.ensureTemplateResourceVersionSupport();
+      // v3.2.15：设置 → 账户管理的清结算系统银行账户表（幂等 CREATE IF NOT EXISTS，纯新增）
+      this.ensureBankAccountSnapshotSupport();
     }, { onRecord: onStartupPhase });
 
     const finishVacuumPhase = startStartupPhase('database-vacuum', onStartupPhase);
@@ -756,6 +775,77 @@ class AppDatabase {
 
   ensureAccountMappingTemplateSupport() {
     return ensureAccountMappingTemplateSupport(this.db);
+  }
+
+  ensureStatementChannelSupport() {
+    return ensureStatementChannelSupport(this.db, (label) => this.createBackup(label));
+  }
+
+  // v3.2.15：失败时回滚并记日志，启动不阻塞，旧标记保留到下次启动重试（同 N5 迁移的处理）。
+  //   转换结果逐条写入活动日志：模板名银行段 / 所在地段与渠道不同的模板改按渠道名输出，种子文件不搬移（D5）。
+  runStatementChannelMigration() {
+    let result;
+    try {
+      result = this.ensureStatementChannelSupport();
+    } catch (error) {
+      result = { status: 'migration-failed', error };
+    }
+    const errorMessage = (error) => (error && error.message ? error.message : String(error));
+    if (result.status === 'migrated') {
+      appendModuleLog({
+        level: 'info',
+        source: 'main',
+        domain: 'migration',
+        message: '[migration v3.2.15] 主模板已转为渠道',
+        details: [
+          `备份：${result.backupPath || '(none)'}`,
+          `渠道：${result.channelCount} 个（新建 ${result.createdChannelCount} 个）`,
+          `归入渠道的模板：${result.templateCount} 个`,
+          `合并到渠道的账户映射：${result.mergedMappingCount} 条`,
+          `待处理的账户映射冲突：${result.conflictCount} 个账户号`,
+          ...result.outputChanges.map((change) => {
+            const parts = [];
+            if (change.fromBankName !== change.toBankName) parts.push(`银行段 ${change.fromBankName || '(空)'} → ${change.toBankName || '(空)'}`);
+            if (change.fromLocation !== change.toLocation) parts.push(`所在地 ${change.fromLocation || '(空)'} → ${change.toLocation || '(空)'}`);
+            return `模板「${change.templateName}」改按渠道「${change.channelName}」输出：${parts.join('，')}；原银行段的余额种子与余额调整不会自动搬移`;
+          })
+        ]
+      });
+    } else if (result.status === 'backup-failed' || result.status === 'migration-failed') {
+      appendModuleLog({
+        level: 'error',
+        source: 'main',
+        domain: 'migration',
+        message: result.status === 'backup-failed'
+          ? '[migration v3.2.15] 备份失败，主模板未转为渠道，下次启动重试'
+          : '[migration v3.2.15] 主模板转为渠道失败，已回滚，下次启动重试',
+        details: [
+          `备份：${result.backupPath || '(none)'}`,
+          errorMessage(result.error)
+        ],
+        stack: result.error && result.error.stack ? result.error.stack : undefined
+      });
+    }
+    // v1.5.1 账户映射迁移标记：渠道迁移把子模板映射移到渠道层后，若已无普通模板持有模板级映射则清除（每次启动核对，幂等）。
+    try {
+      if (statementChannelRepository.settleLegacyAccountMappingMigration(this.db)) {
+        appendModuleLog({
+          level: 'info',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration v3.2.15] 旧账户映射迁移标记已清除：普通模板均无待分配的模板级映射（渠道子模板的映射已在渠道层）'
+        });
+      }
+    } catch (error) {
+      appendModuleLog({
+        level: 'warn',
+        source: 'main',
+        domain: 'migration',
+        message: '[migration v3.2.15] 核对旧账户映射迁移标记失败，下次启动重试',
+        details: [errorMessage(error)]
+      });
+    }
+    return result;
   }
 
   // v1.5.3 需求 R2：自有账号合并入大账号表 — 幂等 schema 迁移
@@ -925,16 +1015,102 @@ class AppDatabase {
     return templateRepository.getTemplate(this.db, templateId);
   }
 
-  listChildTemplates(parentTemplateId) {
-    return templateRepository.listChildTemplates(this.db, parentTemplateId);
+  // ===== v3.2.15 网银账单渠道（与对账模块的 listChannels / deleteChannel 等无关）=====
+  listStatementChannels() {
+    return statementChannelRepository.listChannels(this.db);
   }
 
-  setParentStatus(templateId, isParent) {
-    return templateRepository.setParentStatus(this.db, templateId, isParent);
+  getStatementChannel(channelId) {
+    return statementChannelRepository.getChannel(this.db, channelId);
   }
 
-  setChildParent(templateId, parentTemplateId) {
-    return templateRepository.setChildParent(this.db, templateId, parentTemplateId);
+  // 生成前输出名称核对用：不属于渠道的普通模板与全部渠道的身份和名称。
+  listStatementOutputOwners() {
+    return statementChannelRepository.listOutputOwners(this.db);
+  }
+
+  getStatementChannelByName(name) {
+    return statementChannelRepository.getChannelByName(this.db, name);
+  }
+
+  renameStatementChannel(channelId, name) {
+    return statementChannelRepository.renameChannel(this.db, channelId, name);
+  }
+
+  deleteStatementChannel(channelId) {
+    return statementChannelRepository.deleteChannel(this.db, channelId);
+  }
+
+  listStatementChannelTemplates(channelId) {
+    return statementChannelRepository.listTemplateIdsByChannel(this.db, channelId)
+      .map((item) => templateRepository.getTemplate(this.db, item.id))
+      .filter(Boolean);
+  }
+
+  createChildTemplate(channelId, { sourceFileName, headers }) {
+    const created = statementChannelRepository.createChildTemplate(this.db, channelId, { sourceFileName, headers });
+    return { ...created, template: templateRepository.getTemplate(this.db, created.templateId) };
+  }
+
+  listStatementChannelAccountMappingConflicts(channelId = null) {
+    return statementChannelRepository.listChannelAccountMappingConflicts(this.db, channelId);
+  }
+
+  countStatementChannelAccountMappingConflicts(channelId) {
+    return statementChannelRepository.countChannelAccountMappingConflicts(this.db, channelId);
+  }
+
+  resolveStatementChannelAccountMappingConflicts(channelId, choices) {
+    return statementChannelRepository.resolveChannelAccountMappingConflicts(this.db, channelId, choices);
+  }
+
+  listEffectiveAccountMappings(template) {
+    return statementChannelRepository.listEffectiveAccountMappings(this.db, template);
+  }
+
+  // 模板包导入：按包内容恢复渠道、归属与渠道账户映射（§5.3）。
+  //   channels：[{ name, accountMappings, accountMappingConflicts }]；legacyChannelSources：[{ name, sources }]（v≤4 主/子转为渠道，合并并登记冲突）。
+  //   assignments：[{ templateId, channelName | null }]。单个事务内完成。
+  restoreTemplateBundleStatementChannels({ channels = [], legacyChannelSources = [], assignments = [] }) {
+    const db = this.db;
+    const now = new Date().toISOString();
+    db.exec('BEGIN');
+    try {
+      const channelIdByName = new Map();
+      const resolveChannelId = (name) => {
+        if (!channelIdByName.has(name)) {
+          channelIdByName.set(name, statementChannelRepository.getOrCreateChannelId(db, name, now).channelId);
+        }
+        return channelIdByName.get(name);
+      };
+      let conflictCount = 0;
+      for (const channel of channels) {
+        const channelId = resolveChannelId(channel.name);
+        statementChannelRepository.writeChannelAccountMappingRows(db, channelId, channel.accountMappings || [], now);
+        statementChannelRepository.replaceChannelAccountMappingConflicts(db, channelId, channel.accountMappingConflicts || [], now);
+        conflictCount += statementChannelRepository.countChannelAccountMappingConflicts(db, channelId);
+      }
+      for (const legacy of legacyChannelSources) {
+        const channelId = resolveChannelId(legacy.name);
+        // 已有渠道的映射与待处理冲突一并作为来源（与启动迁移相同），包里未涉及的冲突不会被清掉。
+        const sources = [
+          ...statementChannelRepository.listChannelExistingSources(db, channelId, legacy.name),
+          ...(legacy.sources || [])
+        ];
+        conflictCount += statementChannelRepository
+          .replaceChannelAccountMappingsFromSources(db, channelId, sources, now).conflictCount;
+      }
+      for (const assignment of assignments) {
+        const channelId = assignment.channelName ? resolveChannelId(assignment.channelName) : null;
+        statementChannelRepository.setTemplateChannel(db, assignment.templateId, channelId);
+        if (channelId) db.prepare('DELETE FROM account_mappings WHERE template_id = ?').run(Number(assignment.templateId));
+      }
+      db.exec('COMMIT');
+      return { channelCount: channelIdByName.size, conflictCount };
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   getTemplateByKey(templateKey) {
@@ -1092,6 +1268,14 @@ class AppDatabase {
     return settingsRepository.setReleaseNotesAcknowledgedVersion(this.db, version);
   }
 
+  getReleaseNotesLastUpgrade() {
+    return settingsRepository.getReleaseNotesLastUpgrade(this.db);
+  }
+
+  recordReleaseNotesUpgrade(upgrade) {
+    return settingsRepository.recordReleaseNotesUpgrade(this.db, upgrade);
+  }
+
   getUiStyle() {
     return settingsRepository.getUiStyle(this.db);
   }
@@ -1126,17 +1310,31 @@ class AppDatabase {
     return settingsRepository.setEnabledModules(this.db, moduleList);
   }
 
-  listAccountMappings(templateId) {
-    return settingsRepository.listAccountMappings(this.db, templateId);
+  // v3.2.15：scope 为 { templateId } 或 { channelId }；传数字视为模板（兼容旧调用）。
+  listAccountMappings(scope) {
+    const normalized = normalizeAccountMappingScope(scope);
+    if (normalized.channelId) {
+      return statementChannelRepository.listChannelAccountMappings(this.db, normalized.channelId);
+    }
+    return settingsRepository.listAccountMappings(this.db, normalized.templateId);
   }
 
+  // v3.2.15：含渠道层账户映射。
   countAllAccountMappings() {
-    const row = this.db.prepare('SELECT COUNT(1) AS cnt FROM account_mappings').get();
+    const row = this.db.prepare(`
+      SELECT
+        (SELECT COUNT(1) FROM account_mappings)
+        + (SELECT COUNT(1) FROM statement_channel_account_mappings) AS cnt
+    `).get();
     return row ? Number(row.cnt) : 0;
   }
 
-  saveAccountMappings(templateId, mappings) {
-    return settingsRepository.saveAccountMappings(this.db, templateId, mappings);
+  saveAccountMappings(scope, mappings) {
+    const normalized = normalizeAccountMappingScope(scope);
+    if (normalized.channelId) {
+      return statementChannelRepository.saveChannelAccountMappings(this.db, normalized.channelId, mappings);
+    }
+    return settingsRepository.saveAccountMappings(this.db, normalized.templateId, mappings);
   }
 
   // v2.0.0-beta.3：场景 CRUD（银行对账单处理模块）
@@ -1613,6 +1811,31 @@ class AppDatabase {
 
   ensureTemplateResourceVersionSupport() {
     return ensureTemplateResourceVersionSupport(this.db);
+  }
+
+  ensureBankAccountSnapshotSupport() {
+    return ensureBankAccountSnapshotSupport(this.db);
+  }
+
+  // v3.2.15：设置 → 账户管理的清结算系统银行账户表 facade（原文件由账户管理服务管理）
+  readBankAccountSnapshot() {
+    return bankAccountRepository.readSnapshot(this.db);
+  }
+
+  listBankAccountChannels() {
+    return bankAccountRepository.listChannels(this.db);
+  }
+
+  countBankAccountRows(options) {
+    return bankAccountRepository.countRows(this.db, options);
+  }
+
+  listBankAccountRows(options) {
+    return bankAccountRepository.listRows(this.db, options);
+  }
+
+  replaceBankAccountSnapshot(payload) {
+    return bankAccountRepository.replaceSnapshot(this.db, payload);
   }
 
   // v3.2.13：设置 → 模板文件用户版本 facade（版本元数据、当前指针与变更记录；文件由模板服务管理）
