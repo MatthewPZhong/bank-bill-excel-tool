@@ -22,14 +22,18 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       cfg.api={app:{getInfo:()=>cfg.invoke('info',[],{accountMappingCount:1})},
         templates:{list:()=>cfg.invoke('refresh',[],cfg.templates),rename:payload=>cfg.invoke('rename',[payload],{status:'success',message:'重命名完成'}),
           importBundle:()=>cfg.invoke('import',[],{status:'success',message:'导入完成'}),deleteTemplate:id=>cfg.invoke('delete',[id],{status:'success'}),
-          saveMappings:payload=>cfg.invoke('mappingSave',[payload],{status:'success',message:'映射保存完成'}),listChildren:id=>cfg.invoke('children',[id],[]),
-          setParentStatus:(...args)=>cfg.invoke('parent',args,{status:'success'}),setChildParent:(...args)=>cfg.invoke('child',args,{status:'success'}),
+          saveMappings:payload=>cfg.invoke('mappingSave',[payload],{status:'success',message:'映射保存完成'}),
+          importChild:id=>cfg.invoke('importChild',[id],{status:'success',message:'已导入子模板「渠道 A-子模板-1」'}),
           saveAmountSplitRules:payload=>cfg.invoke('amount',[payload],{status:'success'}),saveBillSplitMappings:payload=>cfg.invoke('splitMapping',[payload],{status:'success'}),
           saveBillSplitAmountRules:payload=>cfg.invoke('splitAmount',[payload],{status:'success'}),
           getMappings:id=>cfg.invoke('templateRead',[id],{status:'success',template:cfg.templates[0],targetFields:[],mappings:[]})},
         accountMappings:{list:id=>cfg.invoke('list',[id],{status:'success',mappings:[]}),
           save:(id,mappings)=>cfg.invoke('save',[id,mappings],{status:'success',message:'保存完成'}),
-          distributeMigration:assignments=>cfg.invoke('migration',[assignments],{status:'success'})}};
+          listChannelConflicts:()=>cfg.invoke('conflicts',[],{status:'success',channels:[]}),
+          resolveChannelConflicts:payload=>cfg.invoke('resolveConflicts',[payload],{status:'success',remaining:0}),
+          distributeMigration:assignments=>cfg.invoke('migration',[assignments],{status:'success'})},
+        statementChannels:{list:()=>cfg.invoke('channels',[],[]),rename:payload=>cfg.invoke('channelRename',[payload],{status:'success',message:'渠道名称修改成功'}),
+          delete:id=>cfg.invoke('channelDelete',[id],{status:'success',message:'渠道已删除'})}};
       cfg.api.balanceAdjustment={list:async()=>({adjustments:[{merchantId:'M001',currency:'USD',effectiveDate:'2026-09-01',adjustmentValue:'10',remark:'原备注'}]}),save:payload=>cfg.invoke('addon',[payload],{status:'success',message:'余额保存完成'})};
       cfg.api.files={saveBalanceSeed:payload=>cfg.invoke('seed',[payload],{status:'success'}),completeBigAccountSelection:payload=>cfg.invoke('simpleSelection',[payload],{status:'success'})};
       cfg.rules=[{targetField:'Credit Amount',conditionField:'Currency',conditionValue:'C',mappedField:'Amount',rowIndex:0},{targetField:'Debit Amount',conditionField:'Currency',conditionValue:'D',mappedField:'Amount',rowIndex:1}];
@@ -40,7 +44,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
         appConstants:{},ADVANCED_MAPPING_FIELDS:[],setStatus:(...args)=>cfg.feedback.push(args),applyStatementResult:()=>cfg.applied++,applyManualBalancePromptStatus:()=>cfg.applied++});
       cfg.openMapping=()=>{cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createAccountMappingDialog({currentTemplateId:1,templates:cfg.templates,mappings:cfg.mappings('A')})).handle;
         cfg.overlay=cfg.top();cfg.select=cfg.overlay.querySelector('[data-role="template-select"]');cfg.save=cfg.overlay.querySelector('[data-action="done"]');};
-      cfg.choose=id=>{cfg.select.value=String(id);cfg.select.dispatchEvent(new Event('change'));};
+      cfg.choose=id=>{cfg.select.value='template:'+id;cfg.select.dispatchEvent(new Event('change'));};
       cfg.openMigration=()=>{cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createAccountMappingMigrationDialog({rows:cfg.mappings('A'),templates:cfg.templates,onDone:()=>cfg.done++})).handle;
         cfg.overlay=cfg.top();cfg.overlay.querySelector('.migration-template-select').value='2';cfg.save=cfg.overlay.querySelector('[data-action="done"]');};
       window.addEventListener('unhandledrejection',event=>cfg.errors.push(String(event.reason?.message||event.reason)));
@@ -55,7 +59,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.match(await js(`cfg.overlay.querySelector('tbody').textContent`), /B-ACCOUNT/);
     assert.doesNotMatch(await js(`cfg.overlay.querySelector('tbody').textContent`), /A-ACCOUNT/);
     await js('cfg.save.click()'); await tick();
-    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='save').map(call=>call.args)`), [[2,[{bankAccountId:'B-ACCOUNT',clearingAccountId:'B-CLEARING',noCurrency:true,currency:'HKD'}]]]);
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='save').map(call=>call.args)`), [[{templateId:2},[{bankAccountId:'B-ACCOUNT',clearingAccountId:'B-CLEARING',noCurrency:true,currency:'HKD'}]]]);
   });
   await test('账户映射加载中及失败不保存旧模板行，重读合法空映射后可保存', async () => {
     await setup();
@@ -69,7 +73,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await js(`cfg.choose(2);`); await tick();
     assert.equal(await js('cfg.save.disabled'), false);
     await js(`cfg.save.click();`); await tick();
-    assert.deepEqual(await js(`cfg.calls.find(call=>call.name==='save').args`), [2,[]]);
+    assert.deepEqual(await js(`cfg.calls.find(call=>call.name==='save').args`), [{templateId:2},[]]);
   });
   await test('账户映射保存冻结模板身份且只发一次，失败告警返回原稿可重试', async () => {
     await setup();
@@ -164,15 +168,80 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.equal(await js('cfg.newHandle.isTop()'), true);
     assert.equal(await js(`cfg.calls.filter(call=>call.name==='refresh').length`), 1);
   });
-  await test('映射主/子关系后续写入使用提交时快照，原窗结束也完成已确定关系链', async () => {
+  await test('渠道归属随映射一次提交，使用提交时快照；原窗结束后的成功不接管新窗', async () => {
     await setup();
-    await js(`cfg.templates[1].name='模板 A 的主模板';cfg.templates[0].name='模板 A 的主模板-子';cfg.templates[1].isParent=true;cfg.services.applyPreviewTemplates(cfg.templates);
+    await js(`cfg.templates[1].name='渠道 A';cfg.templates[1].channelId=7;cfg.templates[1].channelName='渠道 A';cfg.templates[0].name='任意名称';cfg.services.applyPreviewTemplates(cfg.templates);
       cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:cfg.templates[0],targetFields:[],mappings:[]})).handle;
-      cfg.overlay=cfg.top();cfg.child=cfg.overlay.querySelector('[data-role="is-child"]');cfg.parent=cfg.overlay.querySelector('[data-role="parent-select"]');
-      cfg.child.checked=true;cfg.parent.value='2';cfg.write=cfg.defer();cfg.next.mappingSave=cfg.write;cfg.overlay.querySelector('[data-action="done"]').click();
-      cfg.child.checked=false;cfg.parent.value='';cfg.handle.dispose();cfg.newHandle=cfg.other();cfg.write.resolve({status:'success',message:'映射已保存'});`); await tick();
-    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='child').map(call=>call.args)`), [[1,2]]);
+      cfg.overlay=cfg.top();cfg.child=cfg.overlay.querySelector('[data-role="is-child"]');cfg.channel=cfg.overlay.querySelector('[data-role="channel-select"]');
+      cfg.child.checked=true;cfg.child.dispatchEvent(new Event('change'));cfg.channel.value='7';cfg.write=cfg.defer();cfg.next.mappingSave=cfg.write;cfg.overlay.querySelector('[data-action="done"]').click();
+      cfg.child.checked=false;cfg.channel.value='';cfg.handle.dispose();cfg.newHandle=cfg.other();cfg.write.resolve({status:'success',message:'映射已保存'});`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='mappingSave').map(call=>call.args[0].channel)`), [{mode:'join',channelId:7}]);
+    assert.equal(await js(`cfg.overlay.textContent.includes('主模板')`), false);
     assert.equal(await js('cfg.newHandle.isTop()'), true);
+  });
+  await test('渠道两个勾选互斥：新建渠道提交 create，渠道子模板取消勾选提交 none，未改归属不带 channel', async () => {
+    const open = (templateIndex) => js(`cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:cfg.templates[${templateIndex}],targetFields:[],mappings:[]})).handle;
+      cfg.overlay=cfg.top();cfg.create=cfg.overlay.querySelector('[data-role="create-channel"]');cfg.child=cfg.overlay.querySelector('[data-role="is-child"]');void 0;`);
+    await setup();
+    await js(`cfg.templates[1].channelId=7;cfg.templates[1].channelName='渠道 A';cfg.services.applyPreviewTemplates(cfg.templates);`);
+    await open(1);
+    assert.equal(await js(`cfg.child.checked&&cfg.overlay.querySelector('[data-role="channel-select"]').value==='7'`), true);
+    await js(`cfg.create.checked=true;cfg.create.dispatchEvent(new Event('change'));`);
+    assert.equal(await js('cfg.child.checked'), false);
+    await js(`cfg.child.checked=true;cfg.child.dispatchEvent(new Event('change'));`);
+    assert.equal(await js('cfg.create.checked'), false);
+    await js(`cfg.child.checked=false;cfg.child.dispatchEvent(new Event('change'));cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    await js('cfg.host.closeAll?.();');
+    await open(0);
+    await js(`cfg.create.checked=true;cfg.create.dispatchEvent(new Event('change'));cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    await open(0);
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='mappingSave').map(call=>call.args[0].channel||null)`), [{mode:'none'},{mode:'create'},null]);
+  });
+  await test('模板管理渠道行：子模板默认折叠，导入子模板后刷新并展开该渠道；删除渠道先确认', async () => {
+    await setup();
+    await js(`cfg.templates.push({id:3,name:'渠道 A',channelId:7,channelName:'渠道 A',bigAccountSummary:'来自账单'},{id:4,name:'渠道 A-子模板-1',channelId:7,channelName:'渠道 A',bigAccountSummary:'未设置'});
+      cfg.services.applyPreviewTemplates(cfg.templates);cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;void 0;`);
+    const rowState = () => js(`Array.from(cfg.top().querySelectorAll('tbody tr')).map(row=>[row.className,row.querySelector('td').textContent.replace(/\s+/g,' ').trim(),row.style.display])`);
+    const collapsed = await rowState();
+    assert.deepEqual(collapsed.map(([cls, , display]) => [cls, display]).slice(0, 3), [['template-channel-row',''],['template-child-row','none'],['template-child-row','none']]);
+    assert.match(collapsed[0][1], /渠道 A/);
+    assert.equal(await js(`cfg.top().querySelector('.template-channel-row').textContent.includes('导入子模板')`), true);
+    await js(`cfg.top().querySelector('.template-channel-row [data-action="import-child"]').click();`); await tick(); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='importChild').map(call=>call.args)`), [[7]]);
+    const expanded = await rowState();
+    assert.deepEqual(expanded.slice(1, 3).map(([cls, , display]) => [cls, display]), [['template-child-row',''],['template-child-row','']]);
+    await js(`cfg.top().querySelector('.template-channel-row [data-action="delete"]').click();`);
+    assert.match(await js('cfg.top().textContent'), /子模板恢复为普通模板/);
+    await js(`cfg.top().querySelector('[data-action="confirm"]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='channelDelete').map(call=>call.args)`), [[7]]);
+    assert.match(await js('cfg.top().textContent'), /模板管理/);
+  });
+  await test('账户映射下拉为渠道与普通模板，从子模板进入默认选中渠道，保存按渠道范围', async () => {
+    await setup();
+    await js(`cfg.templates.push({id:3,name:'渠道 A-子模板-1',channelId:7,channelName:'渠道 A'});cfg.services.applyPreviewTemplates(cfg.templates);
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createAccountMappingDialog({currentScope:{templateId:3},templates:cfg.templates,mappings:cfg.mappings('A'),conflictCount:2})).handle;
+      cfg.overlay=cfg.top();cfg.select=cfg.overlay.querySelector('[data-role="template-select"]');void 0;`);
+    assert.deepEqual(await js(`Array.from(cfg.select.options).map(option=>[option.value,option.textContent])`), [['channel:7','渠道 A（渠道）'],['template:1','模板 A'],['template:2','模板 B']]);
+    assert.equal(await js('cfg.select.value'), 'channel:7');
+    assert.equal(await js(`cfg.overlay.querySelector('[data-role="conflict-notice"]').hidden`), false);
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='save').map(call=>call.args[0])`), [{channelId:7}]);
+  });
+  await test('渠道账户映射冲突：全部选定才能确认，确认按渠道提交选中的候选', async () => {
+    await setup();
+    await js(`cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createChannelAccountMappingConflictDialog({channels:[{channelId:7,channelName:'渠道 A',conflicts:[
+        {bankAccountId:'111',candidates:[{clearingAccountId:'C1',noCurrency:false,currency:'',sourceTemplateNames:['子模板一']},{clearingAccountId:'C2',noCurrency:true,currency:'USD',sourceTemplateNames:['子模板二']}]},
+        {bankAccountId:'222',candidates:[{clearingAccountId:'C3',noCurrency:false,currency:'',sourceTemplateNames:['子模板一']},{clearingAccountId:'C4',noCurrency:false,currency:'',sourceTemplateNames:['子模板二']}]}]}],
+      onDone:()=>cfg.done++})).handle;cfg.overlay=cfg.top();cfg.ok=cfg.overlay.querySelector('[data-action="done"]');void 0;`);
+    assert.equal(await js('cfg.ok.disabled'), true);
+    await js(`{const radios=cfg.overlay.querySelectorAll('input[type="radio"]');radios[1].checked=true;radios[1].dispatchEvent(new Event('change'));}`);
+    assert.equal(await js('cfg.ok.disabled'), true);
+    await js(`{const radios=cfg.overlay.querySelectorAll('input[type="radio"]');radios[2].checked=true;radios[2].dispatchEvent(new Event('change'));}`);
+    assert.equal(await js('cfg.ok.disabled'), false);
+    await js('cfg.ok.click();'); await tick(); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='resolveConflicts').map(call=>call.args[0])`), [{channelId:7,choices:[{bankAccountId:'111',candidateIndex:1},{bankAccountId:'222',candidateIndex:0}]}]);
+    assert.equal(await js('cfg.done===1&&!cfg.handle.isOpen()'), true);
   });
   await test('模板删除取消返回原管理层，成功后刷新管理层且不重挂旧确认', async () => {
     await setup();
@@ -227,18 +296,6 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       await js(`cfg.handle.dispose();cfg.newHandle=cfg.other();cfg.write.resolve({status:'success',manualBalancePromptReady:true,manualBalancePrompt:{merchantId:'M002',currency:'HKD'}});`);await tick();
       assert.equal(await js('cfg.newHandle.isTop()&&cfg.applied===1'),true);
     }
-  });
-
-  await test('主模板身份确认未结束不提交中间态，窗口结束后不弹迟到原生确认', async () => {
-    await setup();
-    await js(`cfg.templates[0].isParent=true;cfg.prompts=0;window.confirm=()=>{cfg.prompts++;return true;};
-      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:cfg.templates[0],targetFields:[],mappings:[]})).handle;cfg.overlay=cfg.top();
-      cfg.read=cfg.defer();cfg.next.children=cfg.read;cfg.checkbox=cfg.overlay.querySelector('[data-role="is-parent"]');cfg.checkbox.checked=false;cfg.checkbox.dispatchEvent(new Event('change'));
-      cfg.overlay.querySelector('[data-action="done"]').dispatchEvent(new Event('click'));`);
-    assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`),0);
-    assert.equal(await js('cfg.handle.close().status'),'blocked');
-    await js(`cfg.handle.dispose();cfg.newHandle=cfg.other();cfg.read.resolve([{id:2}]);`);await tick();
-    assert.equal(await js('cfg.newHandle.isTop()&&cfg.prompts===0'),true);
   });
 
   await test('手工余额覆盖确认成功后父子一起结束，下一补录项继续原队列', async () => {

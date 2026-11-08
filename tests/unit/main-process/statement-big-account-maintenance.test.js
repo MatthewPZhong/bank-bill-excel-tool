@@ -8,11 +8,17 @@ const path = require('node:path');
 const acorn = require('acorn');
 const XLSX = require('xlsx');
 const { buildMappedRows } = require('../../../src/backend/file-service');
-const { normalizeCell } = require('../../../src/backend/file-service/common');
+const { buildExpectedHeaderCandidates, normalizeCell } = require('../../../src/backend/file-service/common');
 const { matchMerchantIds, normalizeMaintainedBigAccounts } = require('../../../src/main-process/big-account-recognition');
 const source = fs.readFileSync(path.join(__dirname, '../../../src/main.js'), 'utf8');
 const ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'script' });
-const deps = { path, normalizeCell, matchMerchantIds, expandBigAccountConfigurations: normalizeMaintainedBigAccounts };
+const deps = {
+  path,
+  buildExpectedHeaderCandidates,
+  normalizeCell,
+  matchMerchantIds,
+  expandBigAccountConfigurations: normalizeMaintainedBigAccounts
+};
 function load(name) {
   const node = ast.body.find((n) => n.type === 'FunctionDeclaration' && n.id.name === name);
   assert.ok(node, name);
@@ -21,7 +27,7 @@ function load(name) {
 for (const name of ['findBigAccountMatchInRows', 'identifyAccountsFromRecognitionBasis',
   'findSelfInputBigAccountBridge', 'selectPendingBigAccountRows', 'identifyAccountBlocks',
   'findHeaderRowNumbersInRawRows', 'buildBigAccountRecognitionBasis',
-  'finalizeBigAccountRecognitionBasis', 'buildBigAccountSelectionRows']) deps[name] = load(name);
+  'finalizeBigAccountRecognitionBasis', 'buildBigAccountSelectionRows', 'bigAccountBlockHasTransactions']) deps[name] = load(name);
 const build = load('buildBigAccountOrderEvidence');
 const extract = load('extractBigAccountOrderFromEvidence');
 

@@ -2,7 +2,8 @@
 //   覆盖：内置结构下按新结构导出的充值清退原表预检不通过，并给出与当前结构的逐列差异；在模板文件导入并启用新结构后，
 //         选文件预检按 main.js 的同一装配解析结构并冻结进计划，导入时的表头随交接成员清单记录在存档原件上；
 //         入库对应回内置列序（content_hash 与内置结构同值导入一致），数据集导出重读存档原件按导入时结构核验血缘；
-//         恢复默认后已导入数据仍按记录的结构导出，同一文件再预检不通过。
+//         恢复默认后已导入数据仍按记录的结构导出，同一文件再预检不通过；
+//         v3.2.15 B42：恢复默认会与同组另一张表当前结构相同时被阻止，已处于相同状态（v3.2.14 可能留下）时导入拒绝识别。
 //
 // 预检 / 导入在 worker 中执行的部分在本进程直接调用同一函数（inspectWorkbookImportPlan、importFiles）；
 //   存档按 tests/helpers/vcc-review-export.js 的方式登记 ready 原件与交接元数据。
@@ -20,7 +21,7 @@ const ExcelJS = require('exceljs');
 const { AppDatabase } = require('../../src/backend/database');
 const { createArchiveRepository } = require('../../src/backend/database/archive-repository');
 const { SOURCE_TYPES: T, getSourceDefinition } = require('../../src/backend/vcc-financial-op/definitions');
-const { inspectWorkbookImportPlan, resolveImportPlan } = require('../../src/backend/vcc-financial-op/workbook-import-plan');
+const { headerRulesFor, inspectWorkbookImportPlan, resolveImportPlan } = require('../../src/backend/vcc-financial-op/workbook-import-plan');
 const { buildMemberFiles, handoffMetadata } = require('../../src/backend/vcc-financial-op/import-handoff');
 const { importFiles } = require('../../src/backend/vcc-financial-op/import-service');
 const { mapDetailRow } = require('../../src/backend/vcc-financial-op/row-mapper');
@@ -131,6 +132,41 @@ async function run() {
       const { row } = await exportRaw('raw-restored.xlsx');
       assert.equal(row['场景'], '改名列的值');
       assert.equal((await inspect()).sources[0].status, 'invalid');
+    }],
+    ['B42：恢复默认会与费用及换汇明细当前结构相同时被阻止；已处于相同状态时导入拒绝识别，不静默按充值清退处理', async () => {
+      // 充值清退再次启用 V2（末尾加列），费用及换汇明细启用与充值清退内置表头相同的版本（此时不冲突）。
+      assert.equal((await templates.setCurrentVersion({ resourceId: 'vcc-recharge-refund', versionId: 'v2' })).status, 'success');
+      const feeTemplate = writeWorkbook(path.join(files, 'VCC费用及换汇明细-与充值内置相同.xlsx'), RECHARGE);
+      templates.rememberPickedFile(feeTemplate);
+      const prepared = await templates.prepareImport({ resourceId: 'vcc-fee-fx', filePath: feeTemplate });
+      assert.equal(prepared.status, 'success', prepared.message);
+      assert.notEqual(prepared.verdict, 'fail', JSON.stringify(prepared.checks));
+      assert.equal((await templates.commitImport({ importToken: prepared.importToken, enable: true })).status, 'success');
+
+      const blocked = await templates.setCurrentVersion({ resourceId: 'vcc-recharge-refund', versionId: 'v1' });
+      assert.equal(blocked.status, 'failed');
+      assert.match(blocked.message, /^V1 不能恢复：与「[^」]+」当前结构相同，导入时无法区分/);
+      const structures = await resolveVccSourceStructures(templates);
+      assert.deepEqual(structures, {
+        [T.RECHARGE]: { headers: RECHARGE_V2, versionLabel: 'V2' },
+        [T.FEE_FX]: { headers: [...RECHARGE], versionLabel: 'V2' }
+      });
+
+      // 当前状态下，按充值清退内置表头导出的文件唯一识别为费用及换汇明细。
+      const feeFile = writeWorkbook(path.join(files, 'VCC费用及换汇明细-导出.xlsx'), RECHARGE, [ROW]);
+      const plan = await inspectWorkbookImportPlan([feeFile], { sourceStructures: structures });
+      assert.deepEqual([plan.sources[0].status, plan.sources[0].sourceType], ['ready', T.FEE_FX]);
+
+      // v3.2.14 恢复默认未核对同组冲突，用户数据可能已处于两表结构相同的状态：识别拒绝，整个计划不能提交，不入库。
+      const before = db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_sources').get().n;
+      const legacyState = { [T.FEE_FX]: { headers: [...RECHARGE], versionLabel: 'V2' } };
+      assert.equal(headerRulesFor(legacyState).filter((rule) => rule.headers.join('\u0000') === RECHARGE.join('\u0000')).length, 2);
+      const conflicted = await inspectWorkbookImportPlan([feeFile], { sourceStructures: legacyState });
+      assert.equal(conflicted.sources[0].status, 'invalid');
+      assert.equal(conflicted.sources[0].sourceType, undefined);
+      assert.throws(() => resolveImportPlan(conflicted, { planId: conflicted.planId, subjectBySourceId: {}, excludedSheetIds: [] }),
+        { code: 'vcc-sheet-header-ambiguous' });
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_sources').get().n, before);
     }]
   ];
 

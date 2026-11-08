@@ -47,20 +47,25 @@ function roundAmountHighPrecision(value) {
 }
 
 function inferEndingBalance({ previousEndBalance, entries, dateLabel }) {
-  const uniqueBalances = Array.from(
-    new Set(
-      entries
-        .filter((entry) => entry.balanceValue !== null)
-        .map((entry) => roundAmount(entry.balanceValue))
-    )
-  );
+  // 候选余额按两位小数去重、比较（容差口径）；返回值取选中候选的原值（直接映射余额保留 12 位精度，PRD v1.5.0）。
+  const originalByRounded = new Map();
+  entries.forEach((entry) => {
+    if (entry.balanceValue === null) {
+      return;
+    }
+    const roundedValue = roundAmount(entry.balanceValue);
+    if (!originalByRounded.has(roundedValue)) {
+      originalByRounded.set(roundedValue, roundAmountHighPrecision(entry.balanceValue));
+    }
+  });
+  const uniqueBalances = Array.from(originalByRounded.keys());
 
   if (uniqueBalances.length === 0) {
     throw new FileValidationError('FILE_READ', `${dateLabel} 未找到期末余额`);
   }
 
   if (uniqueBalances.length === 1) {
-    return uniqueBalances[0];
+    return originalByRounded.get(uniqueBalances[0]);
   }
 
   if (previousEndBalance === null) {
@@ -74,13 +79,13 @@ function inferEndingBalance({ previousEndBalance, entries, dateLabel }) {
   const subtractMatch = uniqueBalances.find((balance) => Math.abs(balance - subtractDebitAmount) < 0.005);
 
   if (subtractMatch !== undefined) {
-    return subtractMatch;
+    return originalByRounded.get(subtractMatch);
   }
 
   const addMatch = uniqueBalances.find((balance) => Math.abs(balance - addDebitAmount) < 0.005);
 
   if (addMatch !== undefined) {
-    return addMatch;
+    return originalByRounded.get(addMatch);
   }
 
   throw new FileValidationError('FILE_READ', `${dateLabel} 的期末余额无法根据收支金额推导`);

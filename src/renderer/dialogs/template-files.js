@@ -59,7 +59,11 @@
   function createTemplateFilesDialogs({ api, modalBridge, modules: MODULES, ui }) {
     const { createConfirmDialog } = ui;
     const escapeHtml = (value) => ui.escapeHtml(value === null || value === undefined ? '' : value);
-    const moduleEntries = Object.values(MODULES || {}).map((module) => [module.id, module.name]);
+    // 设置里的使用方（如账户管理）不是业务模块，名称在此补充。
+    const moduleEntries = [
+      ...Object.values(MODULES || {}).map((module) => [module.id, module.name]),
+      ['bank-account-management', '账户管理']
+    ];
     const moduleNames = new Map(moduleEntries);
     const moduleName = (moduleId) => moduleNames.get(moduleId) || moduleId;
 

@@ -41,6 +41,7 @@ const {
   buildManualBalanceSeedPlan,
   writeManualBalanceSeedPlan
 } = require('../../src/main-process/manual-balance-seed-preflight');
+const { resolveGenerationGroupKey, resolveStatementOutputName } = require('../../src/main-process/statement-channel-identity');
 const {
   cloneRowsWithMetadata,
   getStatementSessionEntries,
@@ -115,6 +116,65 @@ function loadMainFunction(name, deps = {}) {
   if (!node) throw new Error(`未找到 main.js 函数：${name}`);
   const names = Object.keys(deps);
   return Function(...names, `return (${MAIN_SOURCE.slice(node.start, node.end)});`)(...names.map((key) => deps[key]));
+}
+
+// v3.2.15：生成分组改为按渠道 / 模板；本脚本的模板都不属于渠道，按模板各自成组。
+function loadGroupingFunction(getTemplateMappingConfig) {
+  return loadMainFunction('groupStatementEntriesForGeneration', {
+    database: { getTemplate: (id) => ({ id, channelId: null }) },
+    resolveGenerationGroupKey,
+    getTemplateMappingConfig
+  });
+}
+
+// v3.2.15：多模板生成进入副作用前核对各组输出名称；本脚本的模板各不同名、库里没有渠道，用真实函数确认直接放行。
+function loadOutputNameConflictFunctions(templateNames) {
+  const owners = { templates: Object.entries(templateNames).map(([id, name]) => ({ id: Number(id), name })), channels: [] };
+  const database = {
+    listStatementOutputOwners: () => owners,
+    getTemplate: (id) => ({ id: Number(id), name: templateNames[id], channelId: null })
+  };
+  const findGenerationGroupOutputNameConflicts = loadMainFunction('findGenerationGroupOutputNameConflicts', {
+    database,
+    resolveStatementOutputName,
+    normalizeCell,
+    sanitizeFileName: loadMainFunction('sanitizeFileName')
+  });
+  const buildStatementOutputNameConflictError = loadMainFunction('buildStatementOutputNameConflictError', { FileValidationError });
+  return {
+    assertGenerationOutputNameUnique: loadMainFunction('assertGenerationOutputNameUnique', {
+      database,
+      resolveGenerationGroupKey,
+      findGenerationGroupOutputNameConflicts,
+      buildStatementOutputNameConflictError
+    }),
+    findGenerationGroupOutputPathConflicts: loadMainFunction('findGenerationGroupOutputPathConflicts', {
+      database,
+      normalizeCell,
+      sanitizeFileName: loadMainFunction('sanitizeFileName'),
+      resolveGenerationGroupKey
+    }),
+    buildStatementOutputPathConflictError: loadMainFunction('buildStatementOutputPathConflictError', { FileValidationError })
+  };
+}
+
+// v3.2.15（release 复审）：补录重算拆为“规划 + 实际文件名核对 + 生成”，规划与核对按同一套依赖装配真实函数。
+function loadRegenerateFunction(deps) {
+  const planVirtualTemplateBalanceRegeneration = loadMainFunction('planVirtualTemplateBalanceRegeneration', {
+    getStatementSessionEntries: deps.getStatementSessionEntries,
+    groupStatementEntriesForGeneration: deps.groupStatementEntriesForGeneration,
+    buildStatementGenerationConfig: deps.buildStatementGenerationConfig,
+    buildPreparedStatementBatchFromEntries: deps.buildPreparedStatementBatchFromEntries
+  });
+  const assertVirtualTemplateBalanceOutputPaths = loadMainFunction('assertVirtualTemplateBalanceOutputPaths', {
+    findGenerationGroupOutputPathConflicts: deps.findGenerationGroupOutputPathConflicts,
+    buildStatementOutputPathConflictError: deps.buildStatementOutputPathConflictError
+  });
+  return loadMainFunction('regenerateVirtualTemplateBalanceFromSession', {
+    ...deps,
+    planVirtualTemplateBalanceRegeneration,
+    assertVirtualTemplateBalanceOutputPaths
+  });
 }
 
 function writeSource(filePath) {
@@ -193,9 +253,12 @@ async function verifyMergedScopeIsolation(dir) {
   const buildOutputFilePath = loadMainFunction('buildOutputFilePath', {
     getToday: () => today, path, ensureStorageRoot: () => storageRoot, sanitizeFileName
   });
-  const regenerate = loadMainFunction('regenerateVirtualTemplateBalanceFromSession', {
+  const step5TemplateConfig = (tid) => ({ template: { id: tid, name: templates[tid] }, exportMappings: [], exportTargetFields: [] });
+  const regenerate = loadRegenerateFunction({
     getStatementSessionEntries: (_session, scope) => entriesByScope[scope],
-    getTemplateMappingConfig: (tid) => ({ template: { id: tid, name: templates[tid] }, exportMappings: [], exportTargetFields: [] }),
+    groupStatementEntriesForGeneration: loadGroupingFunction(step5TemplateConfig),
+    ...loadOutputNameConflictFunctions(templates),
+    getTemplateMappingConfig: step5TemplateConfig,
     appendActivityLogEntry: () => {},
     buildStatementGenerationConfig: ({ template }) => ({
       template,
@@ -284,7 +347,10 @@ async function verifyMultiTemplateImportHoldsPartialBalance(dir) {
   });
   const lastGeneratedExports = { detail: null, balance: null, allDetail: null, allBalance: null };
   const imported = [];
+  const step6TemplateConfig = (tid) => ({ template: { id: tid, name: templates[tid] }, exportMappings: [], exportTargetFields: [] });
   const generateGroups = loadMainFunction('generateMultiTemplateGroupFiles', {
+    groupStatementEntriesForGeneration: loadGroupingFunction(step6TemplateConfig),
+    ...loadOutputNameConflictFunctions(templates),
     getEntryTemplateConfig: ({ entry }) => ({
       template: { id: entry.matchedTemplateId, name: templates[entry.matchedTemplateId] },
       exportMappings: [{ templateField: 'MerchantId', mappedField: 'Account' }],
@@ -341,9 +407,11 @@ async function verifyMultiTemplateImportHoldsPartialBalance(dir) {
 
   // 第三组选择不补录后，按全部模板组重算当前批次余额。
   acknowledgedKeys.add(gaps[0].key);
-  const regenerate = loadMainFunction('regenerateVirtualTemplateBalanceFromSession', {
+  const regenerate = loadRegenerateFunction({
     getStatementSessionEntries: () => fileEntries,
-    getTemplateMappingConfig: (tid) => ({ template: { id: tid, name: templates[tid] }, exportMappings: [], exportTargetFields: [] }),
+    groupStatementEntriesForGeneration: loadGroupingFunction(step6TemplateConfig),
+    ...loadOutputNameConflictFunctions(templates),
+    getTemplateMappingConfig: step6TemplateConfig,
     appendActivityLogEntry: () => {},
     buildStatementGenerationConfig: buildGenerationConfig,
     buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,

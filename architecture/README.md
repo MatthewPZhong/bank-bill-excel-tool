@@ -15,7 +15,7 @@ node scripts/check-architecture.js --against <commit> --json <absolute-output-pa
 
 检查不修改源码或配置，不执行生产模块、不联网；只有显式 `--json` 写入指定报告，父目录须存在。返回码为：0 通过，1 边界违规，2 输入／配置／解析器／Git 历史／报告写入错误。输出按稳定路径和标识排序，没有时间戳。不得以吞掉非零退出码方式绕过门禁。
 
-`release-check` 顺序为 `lint → check:architecture → smoke → unit → integration`。现有 Windows workflows 保留原条件与发布守卫，PR 传 base.sha，main push 传 before，tag/manual 传核对后的实际 HEAD；保留 `fetch-depth: 0`。检查器不会自动 fetch。
+`release-check` 顺序为 `lint → check:architecture → smoke → unit → integration`。现有 Windows workflows 保留原条件与发布守卫，PR 传 base.sha，main push 传 before，tag/manual 传核对后的实际 HEAD；保留 `fetch-depth: 0`。检查器不会自动 fetch。v3.2.15 起 PR / main 的 `build-windows.yml` 把 release-check 拆成并行 job（架构检查在 `release-check-static` 中运行，传参不变），`smoke-test` 汇总结果；发布 `release-windows.yml` 仍完整串行运行 release-check（见 [B43 TechDoc](../changes/v3.2.15/chore/ci-parallel-jobs/techdoc.md)）。
 
 ## 职责和调用方向
 

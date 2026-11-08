@@ -712,11 +712,13 @@ function runMonthlyBalanceScenario() {
     const t2 = db.upsertTemplate({ name: '建行-上海', sourceFileName: 'b.xlsx', headers: ['h'] });
     const t3 = db.upsertTemplate({ name: '工行-深圳', sourceFileName: 'c.xlsx', headers: ['h'] });
 
-    // 构造主模板 + 子模板 — 验证 Q5 "普通模板" 不包含它们
+    // 构造渠道（v3.2.15 取代主/子模板）— 验证 Q5 "普通模板" 不包含渠道下的模板
     const tParent = db.upsertTemplate({ name: '招商', sourceFileName: 'p.xlsx', headers: ['h'] });
-    db.setParentStatus(tParent.id, true);
+    const created = db.saveMappings(tParent.id, [], [], [], undefined, null, { channelAssignment: { mode: 'create' } });
     const tChild = db.upsertTemplate({ name: '招商-北京', sourceFileName: 'ch.xlsx', headers: ['h'] });
-    db.setChildParent(tChild.id, tParent.id);
+    db.saveMappings(tChild.id, [], [], [], undefined, null, {
+      channelAssignment: { mode: 'join', channelId: created.channelAssignment.channelId }
+    });
 
     // 3 模板 × 2 大账号 × 2 币种 = 12 组合；另加 1 个自有账号（验证 Q6）
     db.saveMappings(t1.id, [{ templateField: 'MerchantId', mappedField: 'h' }], [

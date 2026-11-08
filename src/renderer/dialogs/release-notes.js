@@ -2,22 +2,25 @@
   'use strict';
 
   // v3.2.14 升级后首次启动的「更新说明」：启动弹窗由用户关闭后确认当前版本；
-  //   设置「版本管理」入口只查看本版说明，不改变确认记录。
+  //   设置「版本管理」入口查看上一个版本到当前版本的说明（v3.2.15），不改变确认记录。
+  //   两处共用同一弹窗，每页 1 个版本，翻页不算确认。
   //   数据来自 app:get-info 的 releaseNotes（Main 启动时判定一次）。
   const ACKNOWLEDGE_REASONS = Object.freeze(['cancel', 'escape']);
 
   function createReleaseNotesDialogs({ api, modalBridge, ui }) {
     const { escapeHtml, getModalRoot } = ui;
-    let releaseNotes = { current: null, pending: null };
+    let releaseNotes = { current: null, pending: null, history: null };
     let startupShown = false;
     let observer = null;
     let dialogSequence = 0;
 
     function accept(value) {
       const pending = value?.pending;
+      const history = value?.history;
       releaseNotes = {
         current: value?.current || null,
-        pending: pending && Array.isArray(pending.entries) && pending.entries.length ? pending : null
+        pending: pending && Array.isArray(pending.entries) && pending.entries.length ? pending : null,
+        history: history && Array.isArray(history.entries) ? history : null
       };
     }
 
@@ -37,6 +40,9 @@
     function createReleaseNotesDialog({ summary, entries }) {
       dialogSequence += 1;
       const titleId = `releaseNotesTitle${dialogSequence}`;
+      const pageCount = entries.length;
+      const paged = pageCount > 1;
+      let pageIndex = 0;
       const overlay = document.createElement('div');
       overlay.className = 'modal-overlay';
       const card = document.createElement('section');
@@ -51,16 +57,45 @@
         </div>
         <div class="release-notes-body">
           ${summary ? `<p class="release-notes-summary">${escapeHtml(summary)}</p>` : ''}
-          ${entries.length ? renderEntries(entries) : '<p class="release-notes-empty">本版暂无更新说明</p>'}
+          <div data-role="release-notes-page">${pageCount ? '' : '<p class="release-notes-empty">本版暂无更新说明</p>'}</div>
         </div>
-        <footer class="dialog-actions right">
+        <footer class="dialog-actions ${paged ? 'split' : 'right'}">
+          ${paged ? `<div class="release-notes-pager">
+            <button class="secondary-btn small" type="button" data-action="previous-page">上一页</button>
+            <span class="release-notes-page-indicator" data-role="page-indicator" aria-live="polite"></span>
+            <button class="secondary-btn small" type="button" data-action="next-page">下一页</button>
+          </div>` : ''}
           <button class="primary-btn small" type="button" data-action="acknowledge">知道了</button>
         </footer>`;
       overlay.appendChild(card);
+      const body = card.querySelector('.release-notes-body');
+      const page = card.querySelector('[data-role="release-notes-page"]');
+      const previousButton = card.querySelector('[data-action="previous-page"]');
+      const nextButton = card.querySelector('[data-action="next-page"]');
+
+      // 第 1 页是最新版本；翻页后正文回到顶部。焦点所在按钮被置灰时移到另一个翻页按钮，避免焦点落空。
+      function showPage(index) {
+        if (!pageCount) return;
+        pageIndex = Math.min(Math.max(index, 0), pageCount - 1);
+        page.innerHTML = renderEntries([entries[pageIndex]]);
+        body.scrollTop = 0;
+        if (!paged) return;
+        card.querySelector('[data-role="page-indicator"]').textContent = `第 ${pageIndex + 1}/${pageCount} 页`;
+        // 置灰会让浏览器立即移走焦点，须先记下焦点所在按钮。
+        const focused = card.ownerDocument.activeElement;
+        previousButton.disabled = pageIndex === 0;
+        nextButton.disabled = pageIndex === pageCount - 1;
+        if (focused === previousButton && previousButton.disabled) nextButton.focus();
+        else if (focused === nextButton && nextButton.disabled) previousButton.focus();
+      }
+      showPage(0);
+
       card.addEventListener('click', (event) => {
         const action = event.target.closest('[data-action]')?.dataset.action;
         if (action === 'acknowledge') modalBridge.closeModal(overlay, { status: 'submitted', value: true });
         else if (action === 'close') modalBridge.closeModal(overlay, { status: 'cancelled', reason: 'cancel' });
+        else if (action === 'previous-page') showPage(pageIndex - 1);
+        else if (action === 'next-page') showPage(pageIndex + 1);
       });
       modalBridge.registerModal(overlay, {
         dialog: card,
@@ -122,11 +157,26 @@
       }).catch((error) => console.warn('更新说明弹窗关闭处理失败：', error));
     }
 
-    function openCurrentReleaseNotes(parentHandle) {
+    // 设置入口：Main 给出的 history（待显示的升级 → 最近一次升级 → 只有本版）；旧数据缺 history 时退回本版。
+    function historyOf() {
+      if (releaseNotes.history) return releaseNotes.history;
       const current = releaseNotes.current;
+      return { kind: 'current', fromVersion: null, toVersion: current ? current.version : null, entries: current ? [current] : [] };
+    }
+
+    function historySummary(history) {
+      if (!history.entries.length) return '';
+      if (history.kind !== 'upgrade') return `当前版本 v${history.toVersion}`;
+      return history.fromVersion
+        ? `已从 v${history.fromVersion} 更新到 v${history.toVersion}`
+        : `已更新到 v${history.toVersion}`;
+    }
+
+    function openReleaseNotesHistory(parentHandle) {
+      const history = historyOf();
       return modalBridge.pushModal(parentHandle, createReleaseNotesDialog({
-        summary: current ? `当前版本 v${current.version}` : '',
-        entries: current ? [current] : []
+        summary: historySummary(history),
+        entries: history.entries
       }));
     }
 
@@ -134,7 +184,7 @@
       stopWaiting();
     }
 
-    return Object.freeze({ accept, showStartupReleaseNotes, openCurrentReleaseNotes, dispose });
+    return Object.freeze({ accept, showStartupReleaseNotes, openReleaseNotesHistory, dispose });
   }
 
   global.__releaseNotesDialogs = Object.freeze({ createReleaseNotesDialogs });

@@ -2,6 +2,7 @@ const {
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
   SUPPORTED_EXTENSIONS,
+  buildExpectedHeaderCandidates,
   normalizeCell
 } = require('./file-service/common');
 const {
@@ -26,7 +27,9 @@ const {
   parseNumericValue,
   resolveCurrencyValue,
   roundAmount,
+  roundAmountHighPrecision,
   sanitizeAmountValue,
+  sanitizeSignedAmountValue,
   splitSignedAmountValue,
   toExcelSerial
 } = require('./file-service/normalizers');
@@ -37,6 +40,93 @@ const {
 
 function loadCurrencyMappings(filePath) {
   return loadCurrencyMappingsFromMappings(filePath, { readRows });
+}
+
+const INVALID_BILL_DATE_DETAIL_LIMIT = 20;
+
+// 账单自带合计行的识别标签：账单日期列整格等于其中之一时按合计行跳过（如 KBANK-VN 第 73 行「Tổng / Total」，
+// 借贷两列是全表总额）。只做整格精确比较（忽略大小写、多余空格和「/」两侧空格），不做包含匹配，
+// 交易行的日期列不会是这些文字，因此只影响原本会被判为无效账单日期的行。
+const STATEMENT_SUMMARY_DATE_LABELS = new Set([
+  'Tổng / Total',
+  'Tổng cộng / Total',
+  'Tổng',
+  'Tổng cộng',
+  'Total',
+  'Grand Total',
+  '合计',
+  '总计'
+].map(normalizeSummaryDateLabel));
+
+function normalizeSummaryDateLabel(value) {
+  return normalizeCell(value)
+    .normalize('NFC')
+    .toLowerCase()
+    .replace(/\s*\/\s*/g, ' / ')
+    .replace(/\s+/g, ' ');
+}
+
+function isStatementSummaryDateLabel(value) {
+  const normalized = normalizeSummaryDateLabel(value);
+  return normalized !== '' && STATEMENT_SUMMARY_DATE_LABELS.has(normalized);
+}
+
+// 有金额的行 BillDate 有值却不是有效日期时整份拒绝：否则该笔留在明细（日期为空），余额计算却静默跳过。
+// 收付金额均为空或 0 的行不进明细（buildDetailExportRows 跳过），不拦。
+// 带金额且账单日期列是合计标签的行已在映射时按合计行跳过并记入 issues（summary-row-skipped），不会走到这里。
+function assertNoInvalidBillDateRows({ mappedRows, rowMetas, orderedTargetFields, invalidBillDateBySourceRow }) {
+  if (!invalidBillDateBySourceRow.size) {
+    return;
+  }
+
+  const billDateIndex = orderedTargetFields.indexOf('BillDate');
+  const creditAmountIndex = orderedTargetFields.indexOf('Credit Amount');
+  const debitAmountIndex = orderedTargetFields.indexOf('Debit Amount');
+  const amountColumnsMapped = creditAmountIndex >= 0 && debitAmountIndex >= 0;
+  const invalidRows = [];
+  const reportedRowNumbers = new Set();
+
+  mappedRows.slice(1).forEach((mappedRow, index) => {
+    const sourceRowNumber = rowMetas[index] ? rowMetas[index].sourceRowNumber : undefined;
+
+    if (reportedRowNumbers.has(sourceRowNumber) || !invalidBillDateBySourceRow.has(sourceRowNumber)) {
+      return;
+    }
+
+    if (normalizeCell(mappedRow[billDateIndex]) !== '') {
+      return;
+    }
+
+    if (
+      amountColumnsMapped &&
+      !hasEffectiveAmount(mappedRow[creditAmountIndex]) &&
+      !hasEffectiveAmount(mappedRow[debitAmountIndex])
+    ) {
+      return;
+    }
+
+    reportedRowNumbers.add(sourceRowNumber);
+    invalidRows.push({ sourceRowNumber, rawValue: invalidBillDateBySourceRow.get(sourceRowNumber) });
+  });
+
+  if (!invalidRows.length) {
+    return;
+  }
+
+  const detailLines = invalidRows
+    .slice(0, INVALID_BILL_DATE_DETAIL_LIMIT)
+    .map((item) => `第 ${item.sourceRowNumber} 行：${item.rawValue}`);
+
+  if (invalidRows.length > INVALID_BILL_DATE_DETAIL_LIMIT) {
+    detailLines.push(`另有 ${invalidRows.length - INVALID_BILL_DATE_DETAIL_LIMIT} 行，共 ${invalidRows.length} 行`);
+  }
+
+  const [firstRow] = invalidRows;
+  throw new FileValidationError(
+    'FILE_READ',
+    `账单日期存在无效值：第 ${firstRow.sourceRowNumber} 行「${firstRow.rawValue}」${invalidRows.length > 1 ? `等 ${invalidRows.length} 行` : ''}，请修正后重新导入`,
+    { detailLines }
+  );
 }
 
 function buildMappedRows({
@@ -62,6 +152,8 @@ function buildMappedRows({
   const sourceIndexByField = new Map();
   const issues = [];
   const rowMetas = [];
+  // 源行号 → 有值但无法识别为日期的 BillDate 原值（如 2026-11-31），映射完成后按行金额判定是否整份拒绝。
+  const invalidBillDateBySourceRow = new Map();
   const nameSourceField = normalizeCell(amountMappingRules.nameSourceField);
   const accountSourceField = normalizeCell(amountMappingRules.accountSourceField);
   const signedAmountSourceField = normalizeCell(amountMappingRules.signedAmountSourceField);
@@ -532,13 +624,6 @@ function buildMappedRows({
       debitAmountValue = matchedDebitRule ? sanitizeAmountValue(debitRawFromRule) : '';
       hasCreditAmount = matchedCreditRule && hasEffectiveAmount(creditRawFromRule);
       hasDebitAmount = matchedDebitRule && hasEffectiveAmount(debitRawFromRule);
-
-      if (hasCreditAmount) {
-        matchedCreditCount += 1;
-      }
-      if (hasDebitAmount) {
-        matchedDebitCount += 1;
-      }
     } else {
       creditAmountValue = signedAmountValue
         ? signedAmountValue.creditAmount
@@ -555,6 +640,38 @@ function buildMappedRows({
     }
 
     const sourceRowNumber = rowNumbers[rowIndex + 1] || rowIndex + 2;
+
+    // 账单自带的合计行：实际生效的账单日期列是合计标签且带金额（金额是全表总额，原本会被判为无效账单日期而整份拒绝）。
+    // 不进明细、不计入拆分统计，记入 issues 供导出报错文件核查。无金额的合计标签行仍按收支为空的行过滤，行为不变。
+    // 账单拆分时最终日期取自实际生效的映射（不复用主映射时为拆分映射），金额取自拆分配置，
+    // 因此在展开后按拆分结果判定（见下方拆分分支），避免误删真实交易或漏判只在拆分里配金额的合计行。
+    const effectiveBillDateMapping = billSplitEnabled && !billSplitReuseModuleMapping
+      ? billSplitMappingByField.BillDate
+      : mappingByField.BillDate;
+    const rawEffectiveBillDate = resolveDateRawValueByMapping(effectiveBillDateMapping, row);
+    const summaryDateLabel = isStatementSummaryDateLabel(rawEffectiveBillDate)
+      ? normalizeCell(rawEffectiveBillDate)
+      : '';
+    const recordSummaryRow = () => {
+      issues.push({ type: 'summary-row-skipped', rowNumber: sourceRowNumber, rawValue: summaryDateLabel });
+    };
+    const countAmountSplitHits = () => {
+      if (!amountSplitEnabled) {
+        return;
+      }
+      if (hasCreditAmount) {
+        matchedCreditCount += 1;
+      }
+      if (hasDebitAmount) {
+        matchedDebitCount += 1;
+      }
+    };
+
+    if (!billSplitEnabled && summaryDateLabel && (hasCreditAmount || hasDebitAmount)) {
+      recordSummaryRow();
+      return;
+    }
+
     if (!billSplitEnabled) {
       rowMetas.push({ sourceRowNumber });
     }
@@ -574,7 +691,8 @@ function buildMappedRows({
         const rawValue = resolveRawValueByMapping(mappingValue, row);
 
         if (targetField === 'Balance') {
-          return sanitizeAmountValue(rawValue);
+          // 余额可为负：保留符号（映射值已拼成字符串，不能依赖数值分支保号）。
+          return sanitizeSignedAmountValue(rawValue);
         }
 
         if (targetField === 'Credit Amount') {
@@ -586,7 +704,12 @@ function buildMappedRows({
         }
 
         if (targetField === 'BillDate' || targetField === 'ValueDate') {
-          return normalizeDateExportValue(resolveDateRawValueByMapping(mappingValue, row), { dateParseOrder }).value;
+          const rawDateValue = resolveDateRawValueByMapping(mappingValue, row);
+          const normalizedDateValue = normalizeDateExportValue(rawDateValue, { dateParseOrder }).value;
+          if (targetField === 'BillDate' && !normalizedDateValue && rawDateValue) {
+            invalidBillDateBySourceRow.set(sourceRowNumber, rawDateValue);
+          }
+          return normalizedDateValue;
         }
 
         if (nameSourceField && mappingValue === nameSourceField) {
@@ -674,6 +797,7 @@ function buildMappedRows({
       });
     }
 
+    const issueCountBeforeRow = issues.length;
     const mappedRow = computeMappedRow(mappingByField);
 
     if (billSplitEnabled) {
@@ -695,7 +819,17 @@ function buildMappedRows({
         billSplitEffectiveMappingByField = mappingByField;
       }
       const expanded = expandBillSplitForRow(row, billSplitBaseRow, sourceRowNumber);
+      // 合计行在合并前按展开后的金额判定：合并会校验组内币种、净额为 0 时整组丢弃，放在合并后会误拒或漏记。
+      if (summaryDateLabel && expanded.some((entry) => (
+        hasEffectiveAmount(entry.creditAmount) || hasEffectiveAmount(entry.debitAmount)
+      ))) {
+        // 合计行不产出明细：撤回本行映射时记下的其他提示（如币种未匹配），只留合计行记录。
+        issues.length = issueCountBeforeRow;
+        recordSummaryRow();
+        return;
+      }
       const merged = applyBillSplitMergeForRow(expanded);
+      countAmountSplitHits();
       merged.forEach((entry) => {
         rowMetas.push({ sourceRowNumber: entry.sourceRowNumber });
         mappedRows.push(entry.rowArray);
@@ -704,8 +838,16 @@ function buildMappedRows({
         matchedBillSplitCount += merged.length;
       }
     } else {
+      countAmountSplitHits();
       mappedRows.push(mappedRow);
     }
+  });
+
+  assertNoInvalidBillDateRows({
+    mappedRows,
+    rowMetas,
+    orderedTargetFields,
+    invalidBillDateBySourceRow
   });
 
   mappedRows.issues = issues;
@@ -876,6 +1018,7 @@ function transformFileToWorkbook({
 
 module.exports = {
   calculateEndingBalanceFromAmounts,
+  buildExpectedHeaderCandidates,
   buildMappedRows,
   buildDetailExportRows,
   compileRegexLiteral,
@@ -896,6 +1039,7 @@ module.exports = {
   parseNumericValue,
   readRows,
   readRowsWithMetadata,
+  roundAmountHighPrecision,
   transformFileToWorkbook,
   writeBalanceWorkbook,
   writeWorkbookRows
