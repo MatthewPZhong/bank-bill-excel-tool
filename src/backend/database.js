@@ -88,6 +88,7 @@ const {
   ensureTemplateResourceVersionSupport,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
+  ensureTemplateCurrencyBigAccountSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateFilenameFixedFieldSupport,
   ensureTemplateKeySupport,
@@ -259,6 +260,7 @@ class AppDatabase {
     this.ensureTemplateFilenameFixedFieldSupport();
     this.ensureAccountMappingTemplateSupport();
     this.ensureTemplateBigAccountNatureSupport();
+    this.ensureTemplateCurrencyBigAccountSupport();
     // v3.2.15：主/子模板一次性转为渠道；必须在 ensureParentTemplateSupport 与
     //   ensureAccountMappingTemplateSupport 之后（依赖旧标记列与模板级账户映射）。
     this.runStatementChannelMigration();
@@ -859,6 +861,11 @@ class AppDatabase {
     return ensureTemplateBigAccountNatureSupport(this.db);
   }
 
+  // v3.2.16：MerchantId「原始账单仅有币种无账户号」的 币种 → 大账号 配置表
+  ensureTemplateCurrencyBigAccountSupport() {
+    return ensureTemplateCurrencyBigAccountSupport(this.db);
+  }
+
   // v2.1.2 T2：月度银行对账单BU回填校验模块 3 张表（pending_imports / bank_imports / runs）
   ensureBankBuReconTablesSupport() {
     return ensureBankBuReconTablesSupport(this.db);
@@ -1146,6 +1153,10 @@ class AppDatabase {
 
   getTemplateBigAccounts(templateId, options = {}) {
     return templateRepository.getTemplateBigAccounts(this.db, templateId, options);
+  }
+
+  getTemplateCurrencyBigAccounts(templateId) {
+    return templateRepository.getTemplateCurrencyBigAccounts(this.db, templateId);
   }
 
   getTemplateMappings(templateId) {

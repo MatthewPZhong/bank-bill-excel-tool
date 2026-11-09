@@ -27,6 +27,8 @@ const {
   buildMappedRows,
   extractHeaders,
   FileValidationError,
+  MERCHANT_ID_CURRENCY_ONLY_MARKER,
+  mapEachCollectingCurrencyBigAccountIssues,
   normalizeCell,
   writeBalanceWorkbook,
   writeWorkbookRows
@@ -216,6 +218,10 @@ function createEnvironment(dir, label) {
     FileValidationError,
     FIXED_FIELD_VALUE_PREFIX: FIXED,
     MERCHANT_ID_MULTI_ACCOUNT_MARKER: MULTI,
+    // v3.2.16：「原始账单仅有币种无账户号」相关依赖（buildStatementGenerationConfig / rebuildMatchedTemplateFileEntries 引用）
+    MERCHANT_ID_CURRENCY_ONLY_MARKER,
+    MERCHANT_ID_CURRENCY_ONLY_OPTION: '原始账单仅有币种无账户号',
+    mapEachCollectingCurrencyBigAccountIssues,
     ADVANCED_MAPPING_FIELDS: [],
     BALANCE_DISABLED_OPTION: '无',
     BALANCE_CALCULATED_OPTION: '通过发生额计算',
@@ -274,6 +280,7 @@ function createEnvironment(dir, label) {
     'getMappingFieldValues',
     'getPrimaryMappedField',
     'buildStatementGenerationConfig',
+    'buildCurrencyBigAccountMappingConfig',
     'buildMappedRowsForFile',
     'getEntryTemplateConfig',
     'rebuildMatchedTemplateFileEntries',

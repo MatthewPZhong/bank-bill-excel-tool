@@ -85,6 +85,16 @@ function applyStatementResult(result, { allowAlerts = true } = {}) {
     ui.alertNative(`以下文件全部未命中收支规则，请检查规则配置：\n${result.unmatchedAmountSplitFiles.join('\n')}`);
   }
 
+  // v3.2.16：「原始账单仅有币种无账户号」币种未维护大账号时整批阻断，弹窗列出文件、币种和行号
+  if (
+    allowAlerts
+    && String(result.errorCode || '').startsWith('CURRENCY_BIG_ACCOUNT_')
+    && Array.isArray(result.detailLines)
+    && result.detailLines.length
+  ) {
+    ui.alertNative([result.message, ...result.detailLines].join('\n'));
+  }
+
   // v1.4.9 PR #16 review P1 Fix C: ACI-12 — 拆分/合并账单全部未命中聚合告警
   if (allowAlerts && Array.isArray(result.unmatchedBillSplitFiles) && result.unmatchedBillSplitFiles.length) {
     ui.alertNative(`以下文件全部未命中拆分/合并规则，请检查规则配置：\n${result.unmatchedBillSplitFiles.join('\n')}`);

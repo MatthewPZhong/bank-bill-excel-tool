@@ -8,6 +8,7 @@ const {
   normalizeText,
   parseJsonArray
 } = require('./utils');
+const { MERCHANT_ID_CURRENCY_ONLY_MARKER } = require('../file-service/common');
 
 function listTemplates(db) {
   // v1.5.3 R2 §3.1：bigAccountCount / singleBigAccountMerchantId 不含自有账号
@@ -28,7 +29,12 @@ function listTemplates(db) {
       COUNT(DISTINCT m.id) AS mappingCount,
       COUNT(DISTINCT ba.merchant_id) AS bigAccountCount,
       merchant_mapping.mapped_field AS merchantIdMappedField,
-      MIN(ba.merchant_id) AS singleBigAccountMerchantId
+      MIN(ba.merchant_id) AS singleBigAccountMerchantId,
+      (
+        SELECT COUNT(DISTINCT cba.merchant_id)
+        FROM template_currency_big_accounts cba
+        WHERE cba.template_id = t.id
+      ) AS currencyBigAccountCount
     FROM templates t
     LEFT JOIN statement_channels sc ON sc.id = t.channel_id
     LEFT JOIN template_mappings m ON m.template_id = t.id
@@ -80,7 +86,12 @@ function getTemplate(db, templateId) {
           SELECT MIN(merchant_id)
           FROM template_big_accounts ba
           WHERE ba.template_id = t.id AND ba.account_nature = 'client'
-        ) AS singleBigAccountMerchantId
+        ) AS singleBigAccountMerchantId,
+        (
+          SELECT COUNT(DISTINCT cba.merchant_id)
+          FROM template_currency_big_accounts cba
+          WHERE cba.template_id = t.id
+        ) AS currencyBigAccountCount
       FROM templates t
       WHERE t.id = ?
     `)
@@ -156,6 +167,7 @@ function upsertTemplate(db, { templateKey = '', name, sourceFileName, headers })
       db.prepare('DELETE FROM template_mappings WHERE template_id = ?').run(existing.id);
       db.prepare('DELETE FROM template_big_accounts WHERE template_id = ?').run(existing.id);
       db.prepare('DELETE FROM template_fixed_assignments WHERE template_id = ?').run(existing.id);
+      db.prepare('DELETE FROM template_currency_big_accounts WHERE template_id = ?').run(existing.id);
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
@@ -222,6 +234,26 @@ function getTemplateBigAccounts(db, templateId, { includeOwn = false } = {}) {
       currency: normalizeText(row.currency),
       rowIndex: Number(row.rowIndex || 0),
       accountNature: normalizeText(row.accountNature) || 'client'
+    }));
+}
+
+// v3.2.16：MerchantId「原始账单仅有币种无账户号」的 币种 → 大账号（按维护顺序）
+function getTemplateCurrencyBigAccounts(db, templateId) {
+  return db
+    .prepare(`
+      SELECT
+        currency,
+        merchant_id AS merchantId,
+        row_index AS rowIndex
+      FROM template_currency_big_accounts
+      WHERE template_id = ?
+      ORDER BY row_index ASC, id ASC
+    `)
+    .all(templateId)
+    .map((row) => ({
+      currency: normalizeText(row.currency),
+      merchantId: normalizeText(row.merchantId),
+      rowIndex: Number(row.rowIndex || 0)
     }));
 }
 
@@ -340,7 +372,8 @@ function getTemplateMappings(db, templateId) {
     billSplitMappings: getBillSplitMappings(db, templateId),
     billSplitRows: getBillSplitRows(db, templateId),
     billSplitAmountRules: getBillSplitAmountRules(db, templateId),
-    billSplitMeta: getBillSplitMeta(db, templateId)
+    billSplitMeta: getBillSplitMeta(db, templateId),
+    currencyBigAccounts: getTemplateCurrencyBigAccounts(db, templateId)
   };
 }
 
@@ -359,7 +392,7 @@ function saveMappings(
   fixedAssignments = [],
   dateFormat,
   amountSplitRules = null,
-  { preserveOwn = false, channelAssignment = null } = {}
+  { preserveOwn = false, channelAssignment = null, currencyBigAccounts = null } = {}
 ) {
   const now = new Date().toISOString();
   let channelAssignmentResult = null;
@@ -377,6 +410,15 @@ function saveMappings(
       db.prepare('DELETE FROM template_big_accounts WHERE template_id = ?').run(templateId);
     }
     db.prepare('DELETE FROM template_fixed_assignments WHERE template_id = ?').run(templateId);
+    // v3.2.16：传入数组时整体替换 币种 → 大账号；未传（null）时只在 MerchantId 不再是
+    //   「原始账单仅有币种无账户号」时清空，避免切换模式后残留配置。
+    const merchantIdMapping = (Array.isArray(mappings) ? mappings : [])
+      .find((mapping) => normalizeText(mapping && mapping.templateField) === 'MerchantId');
+    const keepsCurrencyOnlyMode = normalizeText(merchantIdMapping && merchantIdMapping.mappedField)
+      === MERCHANT_ID_CURRENCY_ONLY_MARKER;
+    if (Array.isArray(currencyBigAccounts) || !keepsCurrencyOnlyMode) {
+      db.prepare('DELETE FROM template_currency_big_accounts WHERE template_id = ?').run(templateId);
+    }
 
     const insertMappingStatement = db.prepare(`
       INSERT INTO template_mappings (
@@ -436,6 +478,22 @@ function saveMappings(
       );
     });
     // 注：console.warn 在 COMMIT 之后才打（见函数末尾），避免 transaction rollback 时误导排障
+
+    if (Array.isArray(currencyBigAccounts) && keepsCurrencyOnlyMode) {
+      const insertCurrencyBigAccountStatement = db.prepare(`
+        INSERT INTO template_currency_big_accounts (
+          template_id, currency, merchant_id, row_index, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      currencyBigAccounts.forEach((item, index) => {
+        const currency = normalizeText(item && item.currency).toUpperCase();
+        const merchantId = normalizeText(item && item.merchantId);
+        if (!currency || !merchantId) {
+          return;
+        }
+        insertCurrencyBigAccountStatement.run(templateId, currency, merchantId, index, now, now);
+      });
+    }
 
     fixedAssignments.forEach((item, index) => {
       const merchantId = normalizeText(item.merchantId);
@@ -886,6 +944,10 @@ function listTemplateBundleEntries(db) {
         accountNature: item.accountNature || 'client'
       })),
       fixedAssignments: payload ? payload.fixedAssignments.map((item) => ({ ...item })) : [],
+      // v3.2.16（bundle v6）：MerchantId「原始账单仅有币种无账户号」的 币种 → 大账号
+      currencyBigAccounts: payload && Array.isArray(payload.currencyBigAccounts)
+        ? payload.currencyBigAccounts.map((item) => ({ currency: item.currency, merchantId: item.merchantId }))
+        : [],
       amountSplitRules: payload && Array.isArray(payload.amountSplitRules)
         ? payload.amountSplitRules.map((rule) => ({ ...rule }))
         : [],
@@ -919,6 +981,7 @@ module.exports = {
   getBillSplitRows,
   getTemplate,
   getTemplateBigAccounts,
+  getTemplateCurrencyBigAccounts,
   getTemplateFixedAssignments,
   getTemplateByKey,
   getTemplateByName,

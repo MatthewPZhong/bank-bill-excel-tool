@@ -20,6 +20,27 @@
 
 ## 未实施
 
+### B74（P3 · 已知问题）网银「自己输入」：导入流程按字面量“自己输入”判断，单大账号分支与账号桥接永远不生效（既有）
+
+- **来源**：2026-11-08 v3.2.16 `feat/statement-currency-big-account` 方案调研（[spec](../changes/v3.2.16/feat/statement-currency-big-account/spec.md)）；v3.2.15 起既有
+- **影响**：`main.js` 指定模板导入的 `isMerchantIdSelfInput` 与 `buildManagedMerchantLookupFlags().skipDirectMerchantLookup` 拿 `exportMappings` 与字面量“自己输入”比较，而 `exportMappings` 存的是 `__FIXED__:__MULTI_BIG_ACCOUNT__`，两者恒为假：只维护一个大账号的“自己输入”模板不走单大账号分支（`BIG_ACCOUNT_REQUIRED` 永不触发），表头区只有银行账户号的文件不经账户映射桥接，可能报“未识别到大账号”。相关单测直接传字面量，覆盖不到
+- **关闭条件**：确认现行“自己输入”导入的期望行为后，改为按存储值判断并补用真实存储值的回归测试
+- **目标版本**：未定（本轮不修，避免改变「自己输入」现有行为）
+
+### B73（P3 · 顺延）网银：同批导入「原始账单仅有币种无账户号」文件与需要选择大账号的文件时，暂不支持同批选择
+
+- **来源**：v3.2.16 [spec §4.4](../changes/v3.2.16/feat/statement-currency-big-account/spec.md)
+- **影响**：选择大账号窗口按块列出全部文件、选定后覆盖每块的 MerchantId / Currency；本轮遇到这种混合批次整批阻断（`CURRENCY_BIG_ACCOUNT_MIXED_SELECTION`），提示分开导入
+- **关闭条件**：选择窗口只列需要选择的文件，指派与记住顺序都排除本模式文件，补渠道混合批次回归测试
+- **目标版本**：未定
+
+### B72（P3 · 顺延）月度余额导出不含「原始账单仅有币种无账户号」模板的大账号
+
+- **来源**：v3.2.16 spec D3（2026-11-08 用户决定本次不纳入）
+- **影响**：月度余额导出只读 `template_big_accounts`；本模式的 币种 → 大账号 存于 `template_currency_big_accounts`，这些模板按“无大账号”跳过，与 MerchantId 直接取列的模板一致
+- **关闭条件**：月度余额导出 spec 确定是否读取本模式配置（每个 大账号 + 币种 作为一条账号）后实现并补回归测试
+- **目标版本**：未定
+
 ### B68（P2 · 已知问题）不同批次之间“输出名称+账号”拼出同一内部文件名时，后生成的覆盖 `exports/` 下先前的成果（资金口径 · 输出身份）
 
 - **来源**：2026-11-07 release/v3.2.15 第二次只读复审（`db830a44`）；I35（[TechDoc §11.5](../changes/v3.2.15/feat/statement-channels/techdoc.md)）只核对同一批各组，v3.2.14 起既有

@@ -252,6 +252,15 @@ test.describe('resolveCurrencyValue — 币种解析（含模糊匹配）', () =
     assert.equal(r.value, 'CNY');
   });
 
+  test('allowFuzzy=false（v3.2.16 按币种取大账号）：精确名称照常换算，包含式模糊命中改为原值 + issue', () => {
+    assert.equal(resolveCurrencyValue('美元', mappings, { allowFuzzy: false }).value, 'USD');
+    const strict = resolveCurrencyValue('美元结算', mappings, { allowFuzzy: false });
+    assert.equal(strict.value, '美元结算');
+    assert.equal(strict.issue.type, 'currency-unmapped');
+    // 默认（其他 MerchantId 模式）保持模糊匹配不变
+    assert.equal(resolveCurrencyValue('美元结算', mappings).value, 'USD');
+  });
+
   test('未匹配 → 原值 + issue', () => {
     const r = resolveCurrencyValue('比特币', mappings);
     assert.equal(r.value, '比特币');

@@ -206,7 +206,9 @@ function loadCurrencyMappings(filePath, { readRows }) {
   return mappings;
 }
 
-function resolveCurrencyValue(rawValue, currencyMappings = []) {
+// allowFuzzy=false（v3.2.16「原始账单仅有币种无账户号」）：只认币种代码与币种映射表中的精确名称，
+// 不做“包含”式模糊匹配（如「人民币离岸」会被模糊认成 CNY）；未精确命中时原样返回并记 currency-unmapped。
+function resolveCurrencyValue(rawValue, currencyMappings = [], { allowFuzzy = true } = {}) {
   const normalizedValue = normalizeCell(rawValue);
 
   if (!normalizedValue) {
@@ -225,7 +227,7 @@ function resolveCurrencyValue(rawValue, currencyMappings = []) {
 
   const normalizedAlias = normalizeCurrencyAlias(normalizedValue);
   const exactMatches = currencyMappings.filter((mapping) => mapping.aliases.includes(normalizedAlias));
-  const fuzzyMatches = exactMatches.length
+  const fuzzyMatches = exactMatches.length || !allowFuzzy
     ? exactMatches
     : currencyMappings.filter((mapping) => {
         return mapping.aliases.some((alias) => alias.includes(normalizedAlias) || normalizedAlias.includes(alias));

@@ -1,6 +1,7 @@
 const {
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
+  MERCHANT_ID_CURRENCY_ONLY_MARKER,
   SUPPORTED_EXTENSIONS,
   buildExpectedHeaderCandidates,
   normalizeCell
@@ -33,6 +34,14 @@ const {
   splitSignedAmountValue,
   toExcelSerial
 } = require('./file-service/normalizers');
+const {
+  appendCurrencyBigAccountIssues,
+  applyCurrencyBigAccountMapping,
+  buildCurrencyBigAccountUnmappedError,
+  createConfigMissingError: createCurrencyBigAccountConfigMissingError,
+  isCurrencyBigAccountUnmappedError,
+  mapEachCollectingCurrencyBigAccountIssues
+} = require('./file-service/currency-big-account');
 const {
   writeBalanceWorkbook: writeBalanceWorkbookInternal,
   writeWorkbookRows: writeWorkbookRowsInternal
@@ -141,8 +150,16 @@ function buildMappedRows({
   expectedSourceHeaders = [],
   selectedBigAccount = null,
   dateParseOrder = 'auto',
-  readOptions = {}
+  readOptions = {},
+  // v3.2.16：MerchantId「原始账单仅有币种无账户号」时为 { templateName, pairs: [{ currency, merchantId }] }
+  currencyBigAccountMapping = null
 }) {
+  // 拿不到 币种 → 大账号 配置时直接拒绝，避免 MerchantId 整列留空静默输出。
+  const merchantIdUsesCurrencyMapping = normalizeMappingTokens(mappingByField && mappingByField.MerchantId)[0]
+    === MERCHANT_ID_CURRENCY_ONLY_MARKER;
+  if (merchantIdUsesCurrencyMapping && !currencyBigAccountMapping) {
+    throw createCurrencyBigAccountConfigMissingError('');
+  }
   const { rows, rowNumbers, headerBreaks = [] } = readRowsWithMetadata(
     inputFilePath,
     expectedSourceHeaders,
@@ -741,7 +758,10 @@ function buildMappedRows({
             return primaryMappingValue.slice(FIXED_FIELD_VALUE_PREFIX.length);
           }
 
-          const currencyResult = resolveCurrencyValue(rawValue, currencyMappings);
+          // v3.2.16：按币种取大账号时币种直接决定账号，只认代码与精确名称，模糊命中按未维护阻断
+          const currencyResult = resolveCurrencyValue(rawValue, currencyMappings, {
+            allowFuzzy: !merchantIdUsesCurrencyMapping
+          });
 
           if (!currencyResult.value || currencyResult.value === '') {
             const merchantIdValue = resolveRawValueByMapping(mappingByFieldParam['MerchantId'], row);
@@ -766,6 +786,11 @@ function buildMappedRows({
         }
 
         if (targetField === 'MerchantId') {
+          // v3.2.16：按币种取大账号的模板在全部行生成后统一回填（applyCurrencyBigAccountMapping）
+          if (primaryMappingValue === MERCHANT_ID_CURRENCY_ONLY_MARKER) {
+            return '';
+          }
+
           if (selectedMerchantId) {
             return selectedMerchantId;
           }
@@ -849,6 +874,16 @@ function buildMappedRows({
     orderedTargetFields,
     invalidBillDateBySourceRow
   });
+
+  if (merchantIdUsesCurrencyMapping) {
+    applyCurrencyBigAccountMapping({
+      mappedRows,
+      rowMetas,
+      orderedTargetFields,
+      mapping: currencyBigAccountMapping,
+      inputFilePath
+    });
+  }
 
   mappedRows.issues = issues;
   mappedRows.rowMetas = rowMetas;
@@ -1017,15 +1052,20 @@ function transformFileToWorkbook({
 }
 
 module.exports = {
+  appendCurrencyBigAccountIssues,
   calculateEndingBalanceFromAmounts,
+  buildCurrencyBigAccountUnmappedError,
   buildExpectedHeaderCandidates,
   buildMappedRows,
   buildDetailExportRows,
   compileRegexLiteral,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
+  MERCHANT_ID_CURRENCY_ONLY_MARKER,
   inferEndingBalance,
+  isCurrencyBigAccountUnmappedError,
   isRegexLiteral,
+  mapEachCollectingCurrencyBigAccountIssues,
   matchAmountSplitConditionValue,
   SUPPORTED_EXTENSIONS,
   ensureSupportedFile,
