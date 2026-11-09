@@ -11729,8 +11729,8 @@ function cacheCurrentStatementExports({
   });
 }
 
-function cacheAllStatementExport(kind, generatedFile) {
-  statementGenerationHelpers.cacheAllStatementExport(lastGeneratedExports, kind, generatedFile);
+function cacheAllStatementExport(kind, generatedFile, balanceWarnings = []) {
+  statementGenerationHelpers.cacheAllStatementExport(lastGeneratedExports, kind, generatedFile, balanceWarnings);
 }
 
 function updateStatementSessionCache(session, batchId, generatedFiles) {
@@ -11881,7 +11881,11 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
     : `暂无可导出的${kind === 'detail' ? '明细' : '余额'}账单`;
   let generatedFile = getGeneratedStatementExport(kind, normalizedScope);
   // 导出全部余额会重新生成：记下本次重算的告警，导出成功后带出已接受的风险。
-  let exportBalanceWarnings = [];
+  // 命中“全部”余额缓存时取随文件缓存的告警（重算后再次导出、确认后重算再导出）。
+  let exportBalanceWarnings = kind === 'balance' && normalizedScope === 'all' &&
+    generatedFile && Array.isArray(generatedFile.balanceWarnings)
+    ? generatedFile.balanceWarnings
+    : [];
 
   if (!generatedFile && normalizedScope === 'all') {
     if (!session) {
@@ -12178,7 +12182,7 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
           });
         }
 
-        cacheAllStatementExport('balance', generatedFiles.balance);
+        cacheAllStatementExport('balance', generatedFiles.balance, generatedFiles.warnings);
         generatedFile = generatedFiles.balance;
         exportBalanceWarnings = generatedFiles.warnings || [];
       }
@@ -14751,7 +14755,7 @@ function registerFileHandlers() {
             // 任一模板组余额生成失败时不缓存缺组的“全部”余额：再次导出全部时重新生成并按失败组阻断。
             const hasFailedGroup = (generatedFiles.warnings || [])
               .some((warning) => warning && warning.type === 'balance-generate-failed');
-            cacheAllStatementExport('balance', hasFailedGroup ? null : generatedFiles.balance);
+            cacheAllStatementExport('balance', hasFailedGroup ? null : generatedFiles.balance, generatedFiles.warnings);
           } else {
             lastGeneratedExports.balance = generatedFiles.balance;
           }
@@ -14766,7 +14770,7 @@ function registerFileHandlers() {
         const generatedFiles = generateFilesFromRememberedContext(importContext);
 
         if (importContext.scope === 'all') {
-          cacheAllStatementExport('balance', generatedFiles.balance);
+          cacheAllStatementExport('balance', generatedFiles.balance, generatedFiles.warnings);
         } else if (session) {
           updateStatementSessionCache(session, importContext.currentBatchId || session.currentBatchId, generatedFiles);
         } else {

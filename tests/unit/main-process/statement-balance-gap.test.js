@@ -855,6 +855,8 @@ test('主进程：按文件名映射全部范围补录或不补录后，按全�
   const gap = { key: '模板1|M001|USD|2026-09-01|2026-09-04', merchantId: 'M001', currency: 'USD' };
   const session = { key: 'session-1', templateId: FILENAME_MAPPING_TEMPLATE_ID, currentBatchId: 'batch-2' };
   const merged = { filePath: '/tmp/2-BALANCE.xlsx' };
+  // 重算的告警随“全部”余额一起缓存，再次导出全部命中缓存时带出（v3.2.16 D12）。
+  const regenWarnings = [{ type: 'balance-gap-skipped', gaps: [gap] }];
   for (const scope of ['all', 'current']) {
     const calls = { regenerate: [], cacheAll: [] };
     const lastGeneratedExports = { detail: { filePath: '/tmp/detail.xlsx' }, balance: { filePath: '/tmp/current-balance.xlsx' } };
@@ -871,10 +873,10 @@ test('主进程：按文件名映射全部范围补录或不补录后，按全�
         // 补录前已按同一份规划核对过实际文件名，重新生成直接复用。
         assert.equal(regenerationPlan.scope, regenerateScope);
         assert.equal(regenerationPlan.groupPlans.length, 2);
-        return { needsSeed: false, generatedFiles: { detail: null, balance: merged, warnings: [] } };
+        return { needsSeed: false, generatedFiles: { detail: null, balance: merged, warnings: regenWarnings } };
       },
       lastGeneratedExports,
-      cacheAllStatementExport: (kind, file) => calls.cacheAll.push([kind, file]),
+      cacheAllStatementExport: (kind, file, warnings) => calls.cacheAll.push([kind, file, warnings]),
       buildImportResultFromGeneratedFiles: ({ generatedFiles }) => ({ status: 'success', balance: generatedFiles.balance })
     });
     const result = await execute(null, {
@@ -889,7 +891,7 @@ test('主进程：按文件名映射全部范围补录或不补录后，按全�
     assert.equal(result.status, 'success', scope);
     assert.deepEqual(calls.regenerate, [[session, scope]], scope);
     if (scope === 'all') {
-      assert.deepEqual(calls.cacheAll, [['balance', merged]]);
+      assert.deepEqual(calls.cacheAll, [['balance', merged, regenWarnings]]);
       assert.equal(lastGeneratedExports.balance.filePath, '/tmp/current-balance.xlsx');
     } else {
       assert.deepEqual(calls.cacheAll, []);
@@ -1408,6 +1410,70 @@ test('主进程：指定模板会话导出全部余额，本次重算含已确�
   assert.equal(result.message, '文件导出成功，1处余额校验不一致，已按账单余额生成，请点击状态框导出报错文件');
   assert.equal(warningPayloads[0].templateName, '模板6');
   assert.match(warningPayloads[0].detailLines.join('\n'), /差额：\+8,899\.00/);
+});
+
+// v3.2.16（提交后 Codex 审查 P2）：“全部”余额缓存只存文件时，再次导出全部、或确认后重算写入缓存再导出，
+//   都会只显示“文件导出成功”。告警随文件缓存，命中缓存时带出。用真实缓存读写函数连续调用。
+test('主进程：导出全部余额命中缓存时仍带出该文件已接受的风险（再次导出、确认后重算再导出）', async () => {
+  const { resolveGenerationGroupKey } = require('../../../src/main-process/statement-channel-identity');
+  const cacheHelpers = createStatementGenerationHelpers({});
+  const lastGeneratedExports = { detail: null, balance: null, allDetail: null, allBalance: null };
+  let generateCount = 0;
+  const warningPayloads = [];
+  const exportAll = loadExportStatementByScope({
+    ...loadOutputNameConflictFunctions(NAME_CONFLICT_DATABASE),
+    ...acceptedRiskExportDeps(warningPayloads),
+    resolveGenerationGroupKey,
+    getCurrentStatementSession: () => ({ key: 'session-1', templateId: 6, templateName: '模板6' }),
+    isFilenameMappingMode: () => false,
+    getGeneratedStatementExport: (kind, scope) => cacheHelpers.getGeneratedStatementExport(lastGeneratedExports, kind, scope),
+    cacheAllStatementExport: (kind, file, warnings) => cacheHelpers.cacheAllStatementExport(lastGeneratedExports, kind, file, warnings),
+    getTemplateMappingConfig: singleTemplateConfig,
+    getStatementSessionEntries: () => [{ matchedTemplateId: 6 }],
+    resolveGenerationTemplateConfig: ({ fallbackTemplateConfig }) => fallbackTemplateConfig,
+    createErrorResult: (payload) => ({ status: 'error', ...payload }),
+    buildStatementSessionGenerationContext: () => ({ config: {}, preparedBatch: { detailRows: [] } }),
+    rememberLastFileImportContext: () => {},
+    createGenerationContext: (context) => context,
+    generateStatementFiles: () => {
+      generateCount += 1;
+      return {
+        balance: { filePath: '/tmp/all-balance.xlsx', templateName: '模板6' },
+        warnings: [{ type: 'balance-mismatch-confirmed', mismatches: [ACCEPTED_RISK_MISMATCH] }, { type: 'detail-row-skipped', rowNumber: 3 }]
+      };
+    },
+    extractManualBalancePromptWarning: () => null,
+    statementGenerationHelpers: cacheHelpers,
+    exportGeneratedFile: async (file) => ({ status: 'success', message: '文件导出成功', filePath: `/saved/${path.basename(file.filePath)}` })
+  });
+  const mismatchMessage = '文件导出成功，1处余额校验不一致，已按账单余额生成，请点击状态框导出报错文件';
+
+  const first = await exportAll('balance', 'all');
+  const second = await exportAll('balance', 'all');
+  assert.equal(generateCount, 1, '第二次导出命中缓存，不重算');
+  assert.equal(first.message, mismatchMessage);
+  assert.equal(second.status, 'warning', '命中缓存仍为告警');
+  assert.equal(second.message, mismatchMessage);
+  assert.equal(second.errorReportReady, true);
+  assert.equal(second.filePath, '/saved/all-balance.xlsx');
+  assert.deepEqual(warningPayloads[1].detailLines, warningPayloads[0].detailLines, '报错明细与首次导出一致');
+
+  // 补录 IPC 确认后重算写入“全部”缓存（文件 + 本次重算告警），之后实际导出也带告警。
+  cacheHelpers.cacheAllStatementExport(lastGeneratedExports, 'balance', { filePath: '/tmp/all-balance-2.xlsx', templateName: '模板6' }, [
+    { type: 'balance-seed-replace-confirmed', replacements: [ACCEPTED_RISK_REPLACEMENT] }
+  ]);
+  const afterConfirm = await exportAll('balance', 'all');
+  assert.equal(generateCount, 1);
+  assert.equal(afterConfirm.status, 'warning');
+  assert.equal(afterConfirm.message, '文件导出成功，1处人工补录余额已按本次余额替换，请点击状态框导出报错文件');
+  assert.match(warningPayloads[2].detailLines.join('\n'), /人工补录余额：5,000\.00，账单余额：1,100\.00/);
+
+  // 没有已接受风险的缓存文件、导出当前批次：保持“文件导出成功”。
+  cacheHelpers.cacheAllStatementExport(lastGeneratedExports, 'balance', { filePath: '/tmp/all-balance-3.xlsx', templateName: '模板6' }, []);
+  assert.deepEqual(await exportAll('balance', 'all'), { status: 'success', message: '文件导出成功', filePath: '/saved/all-balance-3.xlsx' });
+  lastGeneratedExports.balance = { filePath: '/tmp/current-balance.xlsx', balanceWarnings: [{ type: 'balance-mismatch-confirmed', mismatches: [ACCEPTED_RISK_MISMATCH] }] };
+  assert.equal((await exportAll('balance', 'current')).status, 'success', '当前批次的告警在导入时已显示，导出不再带');
+  assert.equal(warningPayloads.length, 3);
 });
 
 test('主进程：导出全部余额时部分模板已删除且含已接受的风险，提示同时说明数据不完整与风险', async () => {

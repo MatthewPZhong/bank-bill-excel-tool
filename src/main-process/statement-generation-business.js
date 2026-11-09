@@ -211,15 +211,34 @@ function balanceSeedReplaceKey({ templateName, merchantId, currency, billDate, m
   ].map((value) => normalizeCell(value)).join('|');
 }
 
+function balanceSeedRecordKey(record) {
+  return [record.merchantId, record.currency, record.billDate].map((value) => normalizeCell(value)).join('@@');
+}
+
 // 同一账单日的人工补录种子：按 账号@@币种@@日期 索引（未写生成方式的旧记录按人工录入读取）。
-function indexManualBalanceSeeds(existingBalanceSeeds) {
+// seenManualBalanceSeeds（可选，本次运行里见过的人工补录，key 同上）：先按当前种子同步——当前为人工补录的记下
+// 最新值，已没有种子的日期去掉（用户删除）；某日当前为工具生成、而这里记着人工补录时，仍按该人工补录比对。
+// 工具按同值回写把人工补录改成工具生成后，与该日余额不同的回写仍须确认替换（v3.2.16 Codex 审查 P1）。
+function indexManualBalanceSeeds(existingBalanceSeeds, seenManualBalanceSeeds = null) {
+  const currentRecords = (Array.isArray(existingBalanceSeeds) ? existingBalanceSeeds : []).filter(Boolean);
+  const isManual = (record) => normalizeCell(record.generationMethod) === BALANCE_SEED_GENERATION_METHODS.manual &&
+    record.endBalance !== null && record.endBalance !== undefined;
   const index = new Map();
-  (Array.isArray(existingBalanceSeeds) ? existingBalanceSeeds : []).forEach((record) => {
-    if (!record || normalizeCell(record.generationMethod) !== BALANCE_SEED_GENERATION_METHODS.manual) return;
-    if (record.endBalance === null || record.endBalance === undefined) return;
-    const key = [record.merchantId, record.currency, record.billDate].map((value) => normalizeCell(value)).join('@@');
-    index.set(key, record);
+  const generatedKeys = new Set();
+  currentRecords.forEach((record) => {
+    if (isManual(record)) index.set(balanceSeedRecordKey(record), record);
+    else generatedKeys.add(balanceSeedRecordKey(record));
   });
+  if (seenManualBalanceSeeds instanceof Map) {
+    const currentKeys = new Set(currentRecords.map(balanceSeedRecordKey));
+    [...seenManualBalanceSeeds.keys()].forEach((key) => {
+      if (!currentKeys.has(key)) seenManualBalanceSeeds.delete(key);
+    });
+    index.forEach((record, key) => seenManualBalanceSeeds.set(key, { ...record }));
+    generatedKeys.forEach((key) => {
+      if (seenManualBalanceSeeds.has(key)) index.set(key, seenManualBalanceSeeds.get(key));
+    });
+  }
   return index;
 }
 
@@ -233,6 +252,7 @@ function deriveBalanceRecords({
   acknowledgedBalanceGapKeys = null,
   acknowledgedBalanceMismatchKeys = null,
   existingBalanceSeeds = [],
+  seenManualBalanceSeeds = null,
   acknowledgedBalanceSeedReplaceKeys = null
 }) {
   const indexes = buildFieldIndexMap(detailRows[0] || []);
@@ -300,7 +320,7 @@ function deriveBalanceRecords({
   const skippedBalanceGaps = [];
   const pendingBalanceMismatches = [];
   const confirmedBalanceMismatches = [];
-  const manualSeedByDate = indexManualBalanceSeeds(existingBalanceSeeds);
+  const manualSeedByDate = indexManualBalanceSeeds(existingBalanceSeeds, seenManualBalanceSeeds);
   const pendingBalanceSeedReplacements = [];
   const confirmedBalanceSeedReplacements = [];
   for (const group of orderedGroups) {
@@ -501,7 +521,9 @@ function deriveBalanceRecords({
     seedRecords,
     skippedBalanceGaps,
     confirmedBalanceMismatches,
-    confirmedBalanceSeedReplacements
+    confirmedBalanceSeedReplacements,
+    // 已确认替换的种子键（账号@@币种@@日期）：调用方写入后从“见过的人工补录”中去掉。
+    confirmedBalanceSeedReplacementKeys: confirmedBalanceSeedReplacements.map(balanceSeedRecordKey)
   };
 }
 

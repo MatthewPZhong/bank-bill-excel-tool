@@ -33,8 +33,29 @@
 | T10 | 人工补录替换：`deriveBalanceRecords` 新增 `existingBalanceSeeds`（调用方按输出银行名 `readBalanceSeedRecords` 读一次）与 `acknowledgedBalanceSeedReplaceKeys`；每日算出写入值后，按 账号@@币种@@日期 查同日人工种子，比对原值（写入值 − 当日附加值累计）与人工值（按分），不一致记待确认，全部分组算完在余额不一致之后抛 `BALANCE_SEED_REPLACE_CONFIRM_REQUIRED`；确认键 `seed-replace|模板|账号|币种|日期|人工值|本次原值` | D10、D11；两种模板共用一处判断；读种子一次，避免逐日读文件；人工种子与原值同口径 |
 | T11 | 替换确认通道与不一致同构：warning `balance-seed-replace-confirm` / `-confirmed`，prompt `reason: 'seed-replace'`（`buildBalanceSeedReplaceConfirmResult`），IPC 字段 `confirmBalanceSeedReplaceKeys`；preflight 把两类确认合并为 `prepareBalanceConfirmation(reason)`；生成层缺 `readBalanceSeedRecords` 依赖时跳过替换判断，因此用单测核对 main.js 装配 | 复用已验证的链路与安全边界；防止装配遗漏导致静默跳过 |
 | T12 | 已有种子但首日多候选都不符（D7 调整）：`verifyStatementEndingBalance` 的 `unresolved` 结果带回 `candidateBalances`；`deriveBalanceRecords` 仍抛 `BALANCE_SEED_REQUIRED`（文案“上一账单日余额与账单对不上，请核对后重新补录”），`context.seedMismatch` 含种子日期/金额/生成方式、计算起点 `anchorBalance`、首日收支合计、预期、候选余额；生产路径（`statement-generation.js`）与 worker 路径（`prepareBalanceGroup`）把 `seedMismatch` 原样放进 `balance-seed-required` 的 prompt；`buildManualBalanceRequiredResult` 按有无 `seedMismatch` 选文案并在活动日志附 `formatBalanceSeedMismatchLine`；补录弹窗显示说明、预填种子日期与 `anchorBalance` | 沿用补录通道与覆盖确认，不新增错误码、IPC 字段或 prompt reason，路由与 freshness 不变；只改提示与预填，不改种子写入时机（仍先写后算） |
-| T12 | 导出全部余额：`exportStatementByScope` 记下本次重算的告警（指定模板取 `generatedFiles.warnings`，按文件名映射取各组告警），导出后经 `withAcceptedBalanceRiskWarnings` 处理：成功且含三类已接受风险时改为 `createWarningResult`（`EXPORT_BALANCE_WARNING`，报错明细复用 `buildImportWarningDetailLines`），保留 `filePath`；部分模板已删除的分支以“数据不完整”开头 | D12；Codex 第二轮 P2 |
+| T13 | 导出全部余额：`exportStatementByScope` 记下本次重算的告警（指定模板取 `generatedFiles.warnings`，按文件名映射取各组告警），导出后经 `withAcceptedBalanceRiskWarnings` 处理：成功且含三类已接受风险时改为 `createWarningResult`（`EXPORT_BALANCE_WARNING`，报错明细复用 `buildImportWarningDetailLines`），保留 `filePath`；部分模板已删除的分支以“数据不完整”开头 | D12；Codex 第二轮 P2 |
+| T14 | 本次运行里见过的人工补录：生成层（`createStatementGenerationHelpers` 闭包，主进程只有一个实例，所有自动回写都经过它）按磁盘上的实际种子文件保存“账号@@币种@@日期 → 最近一次读到的人工补录”，只存内存、重启失效；人工补录被工具同值回写成工具生成后，替换检查仍按它比对，确认替换写入后去掉。细则见下方「T14 细则」 | D10、D11；提交后 Codex 审查 P1（两轮）：工具按同值回写会把人工补录改成工具生成，之后另一模板或本模板以不同金额回写就不再确认。触发路径包括：同批后续组、返回核查后的重算（补录其他组、导出全部）、按文件名映射分批单组导入、会话中途补录或改值。第一轮的会话基准只在首次读取时拍快照，也只覆盖三处多组循环，挡不住这些路径；改为在所有入口共用的生成层按运行同步。范围与确认键一致（本次运行内），重启后按 D10 只认人工补录 |
+| T15 | “全部”余额缓存同时存下生成时的告警：`cacheAllStatementExport(kind, file, warnings)` 把告警放进缓存对象的 `balanceWarnings`；`exportStatementByScope` 命中“全部”缓存时取出，交给 `withAcceptedBalanceRiskWarnings`；补录 IPC 确认后重算写缓存的两处同步传入告警。worker probe 只投影 `filePath`、`fileName`、`templateName`，不受影响 | D12；对应提交后 Codex 审查的 P2：再次导出全部，或确认后重算再导出，都会命中缓存，结果只显示“文件导出成功”，报错入口也被清掉 |
 | T9 | 渲染层新增 `createBalanceMismatchConfirmDialog`，复用断档弹窗样式；`createManualBalanceSeedDialog` 遇 mismatch 转入；导入、导出、选择大账号后的自动弹出与状态框标题认 mismatch | D6 |
+
+### T14 细则
+
+- 文件身份：`getBalanceSeedFileIdentity` 对 `getBalanceSeedFilePath` 解析出的文件取 dev + ino。用 bigint，Windows 64 位文件编号不丢精度。取身份与读种子用同一个 storageRoot、同一个银行名，同步进行。身份解析可注入（`resolveBalanceSeedFileIdentity`），供测试模拟区分大小写的文件系统。
+- 同一个文件的不同写法共用一份记录，包括空白、特殊字符，以及文件系统不区分时的大小写、Unicode NFC/NFD。不同文件互不影响，不用字符串规整去猜。
+- 种子写入是原地覆盖（`writeBalanceSeedRecords`），身份不变。
+  - 文件删除后重建，或被以“临时文件 + 重命名”方式替换：前提是取得了新编号，才视为新文件，旧记录不再生效，与删除同口径。
+  - 编号被复用是例外：外层按身份的记录不会随删除清掉，复用时可能沿用旧记录，多出一次提醒（多报方向）。
+- 文件不存在时不记，因为没有可保护的记录。文件系统不提供文件编号（ino 为 0）时，退回按完整路径区分，不能保证覆盖同一文件的所有写法。
+- 同步与比对：`deriveBalanceRecords` 新增 `seenManualBalanceSeeds`；`indexManualBalanceSeeds` 每次读种子时先同步。
+  - 当前为人工补录的，记下最新值，含中途补录、改值。
+  - 已没有种子的日期，去掉（用户删除）。
+  - 某日当前为工具生成、而记录里是人工补录时，按该人工补录比对。
+  - 确认替换写入后，按 `confirmedBalanceSeedReplacementKeys` 去掉该日。
+- 触发范围：
+  - 当前应用的正常流程（人工补录、自动回写、启动恢复）不改变文件身份。
+  - 外部修改在默认 NTFS/APFS 上也可能改变身份，例如编辑器原子保存、删除后重建。这会让已转为工具生成的人工补录失去本次运行内的保护，登记 backlog B35。
+  - `manual-balance-seed-settlement` 的原子写入器（`writeManualBalanceTargetPostImage`，经 `createMainSettlementIntentCoordinator`）尚未接入生产：`main.js` 只注册 inspector、recovery provider 与 policy，执行基线为 legacy-only、`runtimeRegistered: false`。以后接入时须重新处理身份迁移。
+- worker：多组 `prepareBalanceGroup` 不传此参数；单组 worker 经共享 helper 会传，但 worker 不写种子，结论不变。
 
 ## 三、数据流
 
@@ -73,7 +94,32 @@ deriveBalanceRecords(statement)
 - `scripts/renderer-lifecycle/fixtures/configuration-dialogs.js`、`statement-controller.js`：确认框列出差异与缺的日期、返回核查不提交、确认继续一次提交全部键并锁定、150% 放大下正文滚动按钮可见；导入后自动弹出、状态框标题与重开。
 - 人工补录替换：单测覆盖两种模板、只认人工补录、按原值比对（附加值）、与不一致的先后顺序、确认键失效、preflight、主进程文案与 main.js 装配；「红线-回写7–9」走真实链路（提醒前不写、返回核查不写、确认后替换、两步确认、相符不提醒）；`statement-balance-gap.test.js` 覆盖导出全部与补录 IPC 的替换路由；renderer-lifecycle 夹具覆盖替换弹窗（列出两个值、返回核查、确认、由不一致转入、状态框重开）；集成脚本 Step7 覆盖两种模板与真实种子文件。
 - 已有种子但首日对不上（T12）：单测覆盖 `candidateBalances`、KBANK 形态数据（补 0 → 带明细的补录提示；补期初余额 → 正常生成）、附加值种子的原值与起点、缺种子时不带明细、生成层真实 xlsx 与种子文件、主进程文案与日志；renderer-lifecycle 覆盖补录后转入说明弹窗（标题、说明、预填、改值提交）与普通补录弹窗不受影响，状态框标题；集成脚本 Step8 走真实种子文件（补 0 → 提示 → 覆盖为期初余额 → 回读余额表与种子）。
-- 未做：弹窗截图受 B34 影响不可用；真实应用 GUI 与真实账单回归登记 B70。
+- 见过的人工补录（T14）：单测都走真实 xlsx 与种子文件，生成层为真实 helpers：
+  - 「红线-回写10」：A→B、B→A 两种顺序（同批与分批在生成层都是先后调用）。验证 B 先提醒；返回核查后重算仍提醒；确认后带“已确认替换”告警。
+  - 「红线-回写11」：先导入、后补录（C→A→B、C→B→A，初始无种子），之后补录的人工余额同样受保护。
+  - 「红线-回写12」：确认 5000→1100 后，人工值改为 6000，旧确认失效，按 6000→1100 重新提醒。
+  - 「红线-回写13」边界：同一模板同值回写后更正金额也要确认；确认替换写入后不再按旧值比对；用户删掉该日种子后不误报；重启（新实例）后按 D10 不比对。
+  - 反测：去掉“已删日期去掉”或“确认写入后去掉”，「红线-回写13」都会失败。
+  - 「红线-回写14」：银行名写法不同，覆盖空白数量、特殊字符、大小写、Unicode NFC/NFD 四类，每类跑 A→B、B→A，走真实磁盘。
+    - 先在临时目录探测两种写法是否解析到同一个文件，再按结果断言共享或隔离，不跳过。
+    - 共享时依次验证：先提醒；返回核查后仍提醒；确认写入后不再按旧值比对（断言在再次改值之前）；改值后按新值重新提醒。
+    - 隔离时验证：B 读不到 A 的种子；A 的保护不受影响。
+  - 「红线-回写15」：注入每个银行名各自的目录，模拟区分大小写的磁盘（HSBC.json 与 hsbc.json 是两个文件），身份走真实 stat。覆盖三种情况：对方文件缺该日不清除；对方的人工值不覆盖；确认后清理互不影响。
+  - 另有单测覆盖文件身份：别名一致；原地覆盖后不变；不同文件不同；文件不存在为 null。
+  - 反测（失败数取决于文件系统，以下为本机 macOS APFS：不区分大小写、不区分 NFC/NFD）：
+    - 改回小写字符串键：NFC/NFD 两例与回写15 失败。
+    - 改回原始银行名：8 个别名用例全部失败。
+    - 去掉确认写入后的清理：回写13 与 8 个别名用例失败。
+    - Codex 第五轮按三种文件系统语义模拟，改回原始银行名时失败 8/6/4 例，改回小写键时失败 3/1/2 例。
+  - 集成脚本 Step9：用真实的 `generateMultiTemplateGroupFiles` 与重算函数跑两种顺序（第一轮修复时加入；当时去掉会话 key 反测，能复现原问题与重算路径的跳过）。
+- 缓存告警（T15）：`statement-balance-gap.test.js` 用真实的缓存读写函数连续调用：
+  - 首次导出后再次导出，命中缓存，只生成一次，仍告警，报错明细一致；
+  - 确认后重算写缓存，再导出仍告警；
+  - 没有已接受风险的缓存、导出当前批次，都保持“文件导出成功”；
+  - 补录 IPC 按全部范围重算后，告警写入缓存。
+- 未做：
+  - 弹窗截图受 B34 影响不可用；真实应用 GUI 与真实账单回归登记 B70。
+  - Codex 在提交后的审查里列出两个可选的测试缺口，已登记 B70：worker 路径 `prepareBalanceGroup` 的 D7 `seedMismatch` 透传缺专项回归；“带附加值的生成种子 → D7 核对弹窗预填 → 覆盖确认 → 再生成”缺贯通用例。
 - 首日须有种子后更新的既有用例：`statement-balance-review-fixes`（单测与集成）、`statement-legacy-golden-e09-p0`、`statement-generation-e09-c`、`statement-balance-gap`（账单里的余额不做断档判定）。
 
 ## 六、兼容与回滚
@@ -82,6 +128,17 @@ deriveBalanceRecords(statement)
 - 回滚即回退本分支提交；期间按账单余额回写的种子与旧版口径一致（旧版单一余额同样直接采用并回写）。
 
 ## 七、实施记录
+
+- 2026-11-08 提交 `9f7624a8` 后，Codex 做了只读审查，由另一会话转交并核实：
+  - P1（资金红线）：多模板共用种子时，人工补录替换确认取决于处理顺序，修复见 T14。第一轮先改成按会话保留基准。
+  - Codex 对修复的第四轮审查：第三轮的 P3 已关闭，其余各项保持关闭；原始 P1 还剩两条路径，均已核实。
+    - 存储身份键没有做 Unicode 规范化：APFS 上 NFC/NFD 两种写法是同一个文件，运行期却分成两组。
+    - 一律转小写：在区分大小写的磁盘上，会把两个独立文件合成一组，对方文件里没有的日期被当成删除、对方的人工值覆盖本方。
+    - 用户 2026-11-09 决定按磁盘上种子文件的实际身份分组（T14 现行做法），保护范围仍是本次运行。修完后做第五轮审查；只剩不影响默认配置的少见边界时登记 backlog，再由用户决定提交、推送、合并。
+  - Codex 对修复的第三轮审查：第二轮的两处残留已关闭，P2 仍保持关闭；原始 P1 还剩一处，另有一处 P3 文档问题，均已核实。P1：运行期记录按原始银行名分组，而种子文件名先规整再存放；银行名写法不同却共用同一个种子文件时（如“中行  总行”“中行:总行”，或 macOS/Windows 上的“HSBC”“hsbc”），先同值回写的一方记在另一组，后者绕过确认。现在改为按种子存储身份分组（`balance-seed-store` 导出 `getBalanceSeedStorageKey`，与 `getBalanceSeedFilePath` 同口径，再按大小写折叠）。P3：B35 与本记录改写为用户已决定不采用结构性做法。
+  - Codex 对修复的第二轮审查：P2 关闭；P1 两处残留，均已核实。一是基准只在首次读取时拍快照，会话中途的补录、改值不进基准，还会用旧人工值复用旧确认；二是按文件名映射每批只有一个模板时不传会话 key，分批导入可以绕过。改为在生成层按运行同步“见过的人工补录”（T14 现行做法），不再依赖入口传 key。
+  - 两组对同一账号同一天给出不同余额时，种子取后写入的一组，这是既有行为，见 backlog B35。Codex 还提出一种结构性做法：同值回写时保留人工记录，跨重启也有效。它会改 D11“相符时直接回写”，并影响发生额计算的后续锚点（与 B32 有交集）。用户 2026-11-09 决定本轮不采用，在现有设计上补漏。
+  - P2：导出全部命中缓存时丢失 D12 告警，修复见 T15。
 
 - 2026-11-08 Codex 第二轮只读审查一条 P2，已核实：导出全部重算时已确认差异只提示“文件导出成功”（断档未补录同样如此，v3.2.14 起既有）→ 用户决定三类都带告警（D12），补 `statement-balance-gap.test.js` 三个用例（按文件名映射、指定模板复现场景、部分模板已删除）。
 - 2026-11-08 Codex 只读审查两条 P2，均已核实：

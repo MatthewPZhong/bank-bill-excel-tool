@@ -33,6 +33,24 @@ function getBalanceSeedFilePath(storageRoot, bankName) {
   return path.join(getBalanceSeedsDir(storageRoot), `${safeBankName}.json`);
 }
 
+// 种子文件在磁盘上的实际身份（v3.2.16 Codex 审查）：按 getBalanceSeedFilePath 解析出的文件取 dev + ino（bigint，
+// 避免 Windows 64 位文件编号丢精度）。同一个文件的不同写法——空白、特殊字符，以及文件系统不区分时的大小写、
+// Unicode NFC/NFD——得到同一身份；不同文件身份不同，不靠字符串规整去猜。种子写入是原地覆盖
+// （writeBalanceSeedRecords），同一文件身份不变；文件删除后重建视为新文件。
+// 文件不存在时返回 null（没有可保护的记录）；文件系统不提供文件编号（ino 为 0）时退回按解析后的完整路径。
+function getBalanceSeedFileIdentity(storageRoot, bankName) {
+  const filePath = getBalanceSeedFilePath(storageRoot, bankName);
+  let stat;
+  try {
+    stat = fs.statSync(filePath, { bigint: true });
+  } catch (error) {
+    if (error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) return null;
+    throw error;
+  }
+  if (!stat.ino) return `path:${path.resolve(filePath)}`;
+  return `file:${stat.dev}:${stat.ino}`;
+}
+
 // v1.5.3 R1 (T1.1)：跨模板遍历 balance-seeds 目录，按 bankName 聚合
 // 返回值：balance-seeds 目录下所有 *.json 文件去扩展名后的 bankName 列表
 // 使用场景：月度余额导出模式下"全部银行渠道"需要枚举有 seeds 数据的所有 bankName
@@ -192,6 +210,7 @@ function upsertBalanceSeedRecord(
 module.exports = {
   BALANCE_SEED_GENERATION_METHODS,
   findPreviousBalanceSeed,
+  getBalanceSeedFileIdentity,
   getBalanceSeedFilePath,
   getBalanceSeedsDir,
   listBalanceSeedBankNames,

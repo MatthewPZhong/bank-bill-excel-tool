@@ -218,32 +218,9 @@ const STATEMENT_CONFIG = {
   balanceMode: 'statement'
 };
 
-// Step 6：按文件名映射三套模板一次导入，只有第三组余额不一致；
-//         导入时不合并、不缓存只含两组的余额汇总，确认后重算的汇总含三组账号。
-async function verifyMultiTemplateImportHoldsPartialBalance(dir) {
-  const storageRoot = path.join(dir, 'storage-import');
-  const outputDir = path.join(dir, 'exports-import');
-  fs.mkdirSync(outputDir, { recursive: true });
-  const today = '2026-11-08';
-  const groups = [
-    { tid: 1, templateName: '中行-上海', merchantId: 'M301', balances: ['1010', '1020'] },
-    { tid: 2, templateName: '工行-北京', merchantId: 'M302', balances: ['1010', '1020'] },
-    { tid: 3, templateName: '建行-深圳', merchantId: 'M303', balances: ['1010', '1500'] }
-  ];
-  const templates = Object.fromEntries(groups.map((group) => [group.tid, group.templateName]));
-  const fileEntries = groups.map((group) => {
-    upsertBalanceSeedRecord(storageRoot, {
-      templateName: group.templateName, merchantId: group.merchantId, currency: 'USD',
-      billDate: '2026-08-31', endBalance: 1000, generationMethod: '人工录入'
-    });
-    const sourcePath = path.join(dir, `import-${group.merchantId}.xlsx`);
-    writeSource(sourcePath, [
-      ['2026-09-01', group.merchantId, 'USD', '10', '', group.balances[0]],
-      ['2026-09-02', group.merchantId, 'USD', '10', '', group.balances[1]]
-    ]);
-    return { matchedTemplateId: group.tid, filePath: sourcePath, detailRows: mapSource(sourcePath) };
-  });
-
+// 按文件名映射多模板组：取 src/main.js 的真实导入（generateMultiTemplateGroupFiles）与补录/确认后重算
+// （regenerateVirtualTemplateBalanceFromSession），生成层用真实 helpers 与种子文件。
+function createMultiTemplateHarness({ storageRoot, outputDir, templates, fileEntries, today }) {
   const acknowledgedKeys = new Set();
   const generation = createGeneration(storageRoot, outputDir, acknowledgedKeys);
   const sanitizeFileName = loadMainFunction('sanitizeFileName');
@@ -293,6 +270,114 @@ async function verifyMultiTemplateImportHoldsPartialBalance(dir) {
     },
     FILENAME_MAPPING_TEMPLATE_ID: '__FILENAME_MAPPING__'
   });
+  const regenerate = loadRegenerateFunction({
+    getStatementSessionEntries: () => fileEntries,
+    groupStatementEntriesForGeneration: loadGroupingFunction(templateConfig),
+    ...loadOutputNameConflictFunctions(templates),
+    getTemplateMappingConfig: templateConfig,
+    appendActivityLogEntry: () => {},
+    buildStatementGenerationConfig: buildGenerationConfig,
+    buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
+    generateStatementFiles: generation.generateStatementFiles,
+    parseRequiredBillDates,
+    extractManualBalancePromptWarning: generation.extractManualBalancePromptWarning,
+    statementGenerationHelpers: generation,
+    buildDateRangeLabel,
+    buildOutputFilePath,
+    mergeGeneratedXlsxFiles,
+    getToday: () => today,
+    path,
+    scopedMergedOutputFileName: loadMainFunction('scopedMergedOutputFileName')
+  });
+  return { acknowledgedKeys, generation, generateGroups, regenerate, imported, lastGeneratedExports, buildOutputFilePath };
+}
+
+// Step 9（v3.2.16 Codex 审查 P1）：按文件名映射一次导入同银行两个模板（中行-A、中行-B），共用 M901/USD 的种子。
+//   09-01 已有人工补录 5000：A 的账单余额 5000 与之相符、同值回写；B 的 1100 与之不符。两种处理顺序下 B 都先提醒；
+//   返回核查后重算仍提醒；确认替换后重算，B 按账单余额生成并带“已确认替换”告警。
+async function verifySharedSeedAcrossTemplates(dir) {
+  const today = '2026-11-08';
+  const templates = { 1: '中行-A', 2: '中行-B' };
+  const rows = { 1: ['4000', '5000'], 2: ['100', '1100'] };
+  for (const order of [[1, 2], [2, 1]]) {
+    const label = `Step9.${order.map((tid) => templates[tid]).join('→')}`;
+    const caseDir = path.join(dir, `shared-${order.join('')}`);
+    const storageRoot = path.join(caseDir, 'storage');
+    const outputDir = path.join(caseDir, 'exports');
+    fs.mkdirSync(outputDir, { recursive: true });
+    for (const [billDate, endBalance] of [['2026-08-31', 1000], ['2026-09-01', 5000]]) {
+      upsertBalanceSeedRecord(storageRoot, {
+        templateName: '中行-A', merchantId: 'M901', currency: 'USD', billDate, endBalance, generationMethod: '人工录入'
+      });
+    }
+    const fileEntries = order.map((tid) => {
+      const sourcePath = path.join(caseDir, `shared-${tid}.xlsx`);
+      writeSource(sourcePath, [['2026-09-01', 'M901', 'USD', rows[tid][0], '', rows[tid][1]]]);
+      return { matchedTemplateId: tid, filePath: sourcePath, detailRows: mapSource(sourcePath) };
+    });
+    const { acknowledgedKeys, generation, generateGroups, regenerate, imported } = createMultiTemplateHarness({
+      storageRoot, outputDir, templates, fileEntries, today
+    });
+    const session = { key: `shared-session-${order.join('')}` };
+    const seed0901 = () => readBalanceSeedRecords(storageRoot, '中行')
+      .filter((record) => record.billDate === '2026-09-01')
+      .map((record) => [record.endBalance, record.generationMethod, record.templateName]);
+
+    generateGroups({ fileEntries, fallbackTemplateConfig: {}, selectedBigAccount: null, session, inputFilePaths: [] });
+    const replacements = generation.extractBalanceSeedReplaceConfirmItems(imported[0].warnings);
+    assertEq(replacements.map((item) => [item.templateName, item.billDate, item.manualBalance, item.balance]), [
+      ['中行-B', '2026-09-01', 5000, 1100]
+    ], `${label}.导入：B 与人工补录不一致先提醒`);
+    assertEq(imported[0].balance, null, `${label}.导入：待确认时不出余额汇总`);
+    assertEq(seed0901(), [[5000, '账单里的余额', '中行-A']], `${label}.导入：A 同值回写，B 未写`);
+
+    const pending = regenerate(session, 'current');
+    assertEq((pending.replacements || []).map((item) => item.key), replacements.map((item) => item.key),
+      `${label}.返回核查后重算：仍提醒同一处替换`);
+    assertEq(seed0901(), [[5000, '账单里的余额', '中行-A']], `${label}.返回核查后重算：B 未覆盖`);
+
+    replacements.forEach((item) => acknowledgedKeys.add(item.key));
+    const confirmed = regenerate(session, 'current');
+    assertEq(confirmed.needsSeed, false, `${label}.确认替换后可以重算`);
+    const accepted = (confirmed.generatedFiles?.warnings || []).filter((warning) => warning.type === 'balance-seed-replace-confirmed');
+    assertEq(accepted.flatMap((warning) => warning.replacements.map((item) => [item.manualBalance, item.balance])), [[5000, 1100]],
+      `${label}.确认后重算：带“已确认替换”告警`);
+    const summary = confirmed.generatedFiles?.balance;
+    // 汇总按组的处理顺序合并：A 为 5000，B 为确认后的账单余额 1100。
+    assertEq(summary ? readBalanceSheet(summary.filePath).map((row) => [row[0], row[2], row[3]]) : [],
+      order.map((tid) => ['M901', '2026-09-01', tid === 1 ? 5000 : 1100]), `${label}.确认后余额汇总含两组`);
+  }
+}
+
+// Step 6：按文件名映射三套模板一次导入，只有第三组余额不一致；
+//         导入时不合并、不缓存只含两组的余额汇总，确认后重算的汇总含三组账号。
+async function verifyMultiTemplateImportHoldsPartialBalance(dir) {
+  const storageRoot = path.join(dir, 'storage-import');
+  const outputDir = path.join(dir, 'exports-import');
+  fs.mkdirSync(outputDir, { recursive: true });
+  const today = '2026-11-08';
+  const groups = [
+    { tid: 1, templateName: '中行-上海', merchantId: 'M301', balances: ['1010', '1020'] },
+    { tid: 2, templateName: '工行-北京', merchantId: 'M302', balances: ['1010', '1020'] },
+    { tid: 3, templateName: '建行-深圳', merchantId: 'M303', balances: ['1010', '1500'] }
+  ];
+  const templates = Object.fromEntries(groups.map((group) => [group.tid, group.templateName]));
+  const fileEntries = groups.map((group) => {
+    upsertBalanceSeedRecord(storageRoot, {
+      templateName: group.templateName, merchantId: group.merchantId, currency: 'USD',
+      billDate: '2026-08-31', endBalance: 1000, generationMethod: '人工录入'
+    });
+    const sourcePath = path.join(dir, `import-${group.merchantId}.xlsx`);
+    writeSource(sourcePath, [
+      ['2026-09-01', group.merchantId, 'USD', '10', '', group.balances[0]],
+      ['2026-09-02', group.merchantId, 'USD', '10', '', group.balances[1]]
+    ]);
+    return { matchedTemplateId: group.tid, filePath: sourcePath, detailRows: mapSource(sourcePath) };
+  });
+
+  const { acknowledgedKeys, generation, generateGroups, regenerate, imported, lastGeneratedExports } = createMultiTemplateHarness({
+    storageRoot, outputDir, templates, fileEntries, today
+  });
   generateGroups({
     fileEntries,
     fallbackTemplateConfig: {},
@@ -323,25 +408,6 @@ async function verifyMultiTemplateImportHoldsPartialBalance(dir) {
   assertEq(seedsOf('建行'), [['M303', '2026-08-31', 1000, '人工录入']], 'Step6.待确认的模板组不回写种子');
 
   // 先不确认：重算仍返回待确认的不一致，不出汇总。
-  const regenerate = loadRegenerateFunction({
-    getStatementSessionEntries: () => fileEntries,
-    groupStatementEntriesForGeneration: loadGroupingFunction(templateConfig),
-    ...loadOutputNameConflictFunctions(templates),
-    getTemplateMappingConfig: templateConfig,
-    appendActivityLogEntry: () => {},
-    buildStatementGenerationConfig: buildGenerationConfig,
-    buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
-    generateStatementFiles: generation.generateStatementFiles,
-    parseRequiredBillDates,
-    extractManualBalancePromptWarning: generation.extractManualBalancePromptWarning,
-    statementGenerationHelpers: generation,
-    buildDateRangeLabel,
-    buildOutputFilePath,
-    mergeGeneratedXlsxFiles,
-    getToday: () => today,
-    path,
-    scopedMergedOutputFileName: loadMainFunction('scopedMergedOutputFileName')
-  });
   const pending = regenerate({ key: 'import-session' }, 'current');
   assertEq(pending.needsSeed, true, 'Step6.未确认时重算仍待处理');
   assertEq((pending.mismatches || []).map((item) => item.key), mismatches.map((item) => item.key), 'Step6.重算返回同一处不一致');
@@ -629,6 +695,7 @@ async function run() {
     await verifyMultiTemplateImportHoldsPartialBalance(dir);
     await verifyManualSeedReplacement(dir);
     await verifyWrongManualSeedPrompt(dir);
+    await verifySharedSeedAcrossTemplates(dir);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

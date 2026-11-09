@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { getBalanceSeedFileIdentity } = require('../backend/balance-seed-store');
 
 // v3.2.15（T3）：输出身份（文件名、余额银行名、种子、余额调整、补录提示）取配置上的 outputName：
 //   属于渠道的模板为渠道名，普通模板为模板名；缺省时回退模板名（兼容未带 outputName 的旧配置）。
@@ -46,8 +47,26 @@ function createStatementGenerationHelpers(deps) {
     deriveBalanceRecords,
     ensureStorageRoot,
     FileValidationError,
+    // 可注入：测试用它模拟区分大小写等文件系统；缺省按磁盘上的实际文件取身份。
+    resolveBalanceSeedFileIdentity = getBalanceSeedFileIdentity,
     appendLog
   } = deps;
+
+  // 本次运行里见过的人工补录（v3.2.16 Codex 审查 P1）：种子文件身份 → 账号@@币种@@日期 → 最近一次读到的人工补录。
+  // 按磁盘上的实际种子文件分组（getBalanceSeedFileIdentity）：银行名写法不同但是同一个文件时共用一份记录，
+  // 不同文件互不影响（不会把另一个文件里没有的日期当成删除，也不会用另一个文件的人工值比对）。
+  // 每次生成读种子时由 deriveBalanceRecords 同步（新补录、改值记下，种子已删的去掉）。工具按同值回写会把人工补录
+  // 改成工具生成；之后不论哪个模板、哪个入口（同批后续组、返回核查后的重算、分批导入、导出全部）与该日余额不同，
+  // 仍按这里的人工补录提醒替换。确认替换并写入后去掉该日。只存内存，重启失效（与确认键同一口径）。
+  const seenManualBalanceSeedsByFile = new Map();
+
+  // 与读取种子用同一个 storageRoot + 银行名、同一时刻解析。文件还不存在时没有可保护的记录，用一次性的空记录。
+  function seenManualBalanceSeedsFor(storageRoot, bankName) {
+    const fileIdentity = resolveBalanceSeedFileIdentity(storageRoot, bankName);
+    if (!fileIdentity) return new Map();
+    if (!seenManualBalanceSeedsByFile.has(fileIdentity)) seenManualBalanceSeedsByFile.set(fileIdentity, new Map());
+    return seenManualBalanceSeedsByFile.get(fileIdentity);
+  }
 
   // E09-P0 现状取证接缝：production Main 委托到此同一函数；依赖注入不改变
   // 现有 storage、writer 与 balance 的所有权。
@@ -181,6 +200,8 @@ function createStatementGenerationHelpers(deps) {
         const acknowledgedBalanceKeys = typeof getAcknowledgedBalanceGapKeys === 'function'
           ? getAcknowledgedBalanceGapKeys()
           : null;
+        const seedStorageRoot = ensureStorageRoot();
+        const seenManualBalanceSeeds = seenManualBalanceSeedsFor(seedStorageRoot, templateBankName);
         const balanceResult = deriveBalanceRecords({
           detailRows: effectiveDetailRows,
           templateName: statementOutputName(config),
@@ -192,8 +213,9 @@ function createStatementGenerationHelpers(deps) {
           acknowledgedBalanceSeedReplaceKeys: acknowledgedBalanceKeys,
           // 同一账单日的人工补录种子：回写前与本次余额比对，不一致须确认替换。
           existingBalanceSeeds: typeof readBalanceSeedRecords === 'function'
-            ? readBalanceSeedRecords(ensureStorageRoot(), templateBankName)
+            ? readBalanceSeedRecords(seedStorageRoot, templateBankName)
             : [],
+          seenManualBalanceSeeds,
           resolvePreviousBalanceSeed: ({ bankName, merchantId, currency, targetBillDate, generationMethod }) => (
             findPreviousBalanceSeed(ensureStorageRoot(), {
               bankName,
@@ -232,6 +254,8 @@ function createStatementGenerationHelpers(deps) {
           templateName: statementOutputName(config),
           seedRecords: balanceResult.seedRecords
         });
+        // 已确认替换的人工补录写入后不再按它比对：用户已同意替换（D11）。
+        (balanceResult.confirmedBalanceSeedReplacementKeys || []).forEach((key) => seenManualBalanceSeeds.delete(key));
 
         result.balance = {
           filePath: balanceOutput.outputFilePath,
@@ -660,14 +684,17 @@ function createStatementGenerationHelpers(deps) {
     lastGeneratedExports.currentBatchId = session?.currentBatchId || '';
   }
 
-  function cacheAllStatementExport(lastGeneratedExports, kind, generatedFile) {
+  function cacheAllStatementExport(lastGeneratedExports, kind, generatedFile, balanceWarnings = []) {
     if (kind === 'detail') {
       lastGeneratedExports.allDetail = generatedFile;
       return;
     }
 
     if (kind === 'balance') {
-      lastGeneratedExports.allBalance = generatedFile;
+      // 生成该文件时的告警随文件一起缓存：命中缓存再导出时仍带出已接受的风险（v3.2.16 D12）。
+      lastGeneratedExports.allBalance = generatedFile
+        ? { ...generatedFile, balanceWarnings: Array.isArray(balanceWarnings) ? balanceWarnings.slice() : [] }
+        : generatedFile;
     }
   }
 
