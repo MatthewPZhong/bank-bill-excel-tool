@@ -16,16 +16,21 @@ const {
   updateOwnerSeed
 } = require('../../../src/main-process/balance-seed-management');
 const { getBalanceSeedFilePath } = require('../../../src/backend/balance-seed-store');
+const {
+  prepareManualBalanceSeedSubmission,
+  writeManualBalanceSeedPlan
+} = require('../../../src/main-process/manual-balance-seed-preflight');
 
 // 渠道「招商银行-上海」含两个子模板；普通模板「招商银行-北京」与渠道同银行段；「汇丰-香港」另一银行段。
-function createFakeDatabase() {
-  const channels = [{ id: 7, name: '招商银行-上海' }];
-  const templates = [
-    { id: 1, name: '招商银行-上海-子模板-1', channelId: 7, channelName: '招商银行-上海' },
-    { id: 2, name: 'CMB-SH-OLD', channelId: 7, channelName: '招商银行-上海' },
-    { id: 3, name: '招商银行-北京', channelId: null, channelName: null },
-    { id: 4, name: '汇丰-香港', channelId: null, channelName: null }
-  ];
+const DEFAULT_CHANNELS = [{ id: 7, name: '招商银行-上海' }];
+const DEFAULT_TEMPLATES = [
+  { id: 1, name: '招商银行-上海-子模板-1', channelId: 7, channelName: '招商银行-上海' },
+  { id: 2, name: 'CMB-SH-OLD', channelId: 7, channelName: '招商银行-上海' },
+  { id: 3, name: '招商银行-北京', channelId: null, channelName: null },
+  { id: 4, name: '汇丰-香港', channelId: null, channelName: null }
+];
+
+function createFakeDatabase({ channels = DEFAULT_CHANNELS, templates = DEFAULT_TEMPLATES } = {}) {
   return {
     getStatementChannel: (id) => channels.find((channel) => channel.id === Number(id)) || null,
     listStatementChannels: () => channels.map((channel) => ({ ...channel })),
@@ -174,7 +179,8 @@ test('余额未变时不写文件；非数字余额被拒且不写文件', (t) =
   assert.equal(unchanged.changed, false);
   assert.equal(fs.readFileSync(filePath, 'utf8'), before);
 
-  for (const endBalance of ['', 'abc', '1e3', null]) {
+  // 309 位数字解析为 Infinity：写回时会被种子库过滤掉，若放行就等于把“修改”变成删除。
+  for (const endBalance of ['', 'abc', '1e3', null, '9'.repeat(309), `-${'9'.repeat(309)}`]) {
     assert.throws(
       () => updateOwnerSeed({ database, storageRoot, payload: { owner, key, expected: target, endBalance } }),
       (error) => error.code === 'BALANCE_SEED_BALANCE_INVALID'
@@ -312,4 +318,93 @@ test('活动日志记录所属、种子文件、键、原值与新值、原生�
     '原写入者：（空）'
   ]);
   assert.equal(buildBalanceSeedActivityLog('delete', base).message, '删除余额种子成功');
+});
+
+test('同一文件按实际文件名判断：银行段带空格、大小写不同的归属共用文件时，不能经当前选项看到或改动对方的种子', (t) => {
+  const database = createFakeDatabase({
+    channels: [{ id: 9, name: '招商银行 -深圳' }],
+    templates: [
+      { id: 3, name: '招商银行-北京', channelId: null, channelName: null },
+      { id: 5, name: 'abc-SH', channelId: null, channelName: null },
+      { id: 6, name: 'ABC-HK', channelId: null, channelName: null }
+    ]
+  });
+  const storageRoot = setupStorage(t, {
+    招商银行: [seed('B001', 'CNY', '2026-10-31', 100, '招商银行-北京'), seed('S001', 'CNY', '2026-10-31', 5, '招商银行 -深圳')],
+    abc: [seed('H001', 'HKD', '2026-10-31', 50, 'ABC-HK'), seed('A001', 'CNY', '2026-10-31', 1, 'abc-SH')]
+  });
+  const shenzhen = { kind: 'channel', id: 9 };
+  const shenzhenList = listOwnerSeeds({ database, storageRoot, owner: shenzhen });
+  assert.equal(shenzhenList.owner.seedFileName, '招商银行.json');
+  assert.deepEqual(shenzhenList.records.map((record) => record.merchantId), ['S001']);
+  const beijingSeed = listOwnerSeeds({ database, storageRoot, owner: { kind: 'template', id: 3 } }).records[0];
+  const before = fs.readFileSync(getBalanceSeedFilePath(storageRoot, '招商银行'), 'utf8');
+  const payload = {
+    owner: shenzhen,
+    key: { merchantId: 'B001', currency: 'CNY', billDate: '2026-10-31' },
+    expected: beijingSeed
+  };
+  assert.equal(updateOwnerSeed({ database, storageRoot, payload: { ...payload, endBalance: '7' } }).status, 'conflict');
+  assert.equal(deleteOwnerSeed({ database, storageRoot, payload }).status, 'conflict');
+  assert.equal(fs.readFileSync(getBalanceSeedFilePath(storageRoot, '招商银行'), 'utf8'), before);
+
+  assert.deepEqual(
+    listOwnerSeeds({ database, storageRoot, owner: { kind: 'template', id: 5 } }).records.map((record) => record.merchantId),
+    ['A001']
+  );
+});
+
+test('渠道名与另一渠道的子模板名相同：该写入者归渠道（当前输出身份），子模板所属渠道看不到也改不了', (t) => {
+  const database = createFakeDatabase({
+    channels: [{ id: 7, name: '招商银行-上海' }, { id: 10, name: '招商银行-上海-子模板-1' }],
+    templates: [{ id: 1, name: '招商银行-上海-子模板-1', channelId: 7, channelName: '招商银行-上海' }]
+  });
+  const storageRoot = setupStorage(t, {
+    招商银行: [seed('C001', 'CNY', '2026-10-31', 30, '招商银行-上海-子模板-1'), seed('M001', 'CNY', '2026-10-31', 10, '招商银行-上海')]
+  });
+  const shanghai = { kind: 'channel', id: 7 };
+  const renamed = { kind: 'channel', id: 10 };
+  assert.deepEqual(listOwnerSeeds({ database, storageRoot, owner: shanghai }).records.map((record) => record.merchantId), ['M001']);
+  const target = listOwnerSeeds({ database, storageRoot, owner: renamed }).records[0];
+  assert.equal(target.merchantId, 'C001');
+  const key = { merchantId: 'C001', currency: 'CNY', billDate: '2026-10-31' };
+  assert.equal(updateOwnerSeed({ database, storageRoot, payload: { owner: shanghai, key, expected: target, endBalance: '1' } }).status, 'conflict');
+  assert.equal(updateOwnerSeed({ database, storageRoot, payload: { owner: renamed, key, expected: target, endBalance: '31' } }).status, 'success');
+});
+
+test('补录确认后、写入前种子被【余额管理】改过：补录拒绝写入，不用旧计划覆盖', (t) => {
+  const database = createFakeDatabase({ channels: [], templates: [{ id: 5, name: 'ICBC-境内', channelId: null, channelName: null }] });
+  const storageRoot = setupStorage(t, { ICBC: [seed('M002', 'CNY', '2026-08-01', 100, 'ICBC-境内')] });
+  const prepareArgs = () => ({
+    payload: { billDate: '2026-08-09', endBalance: '20.50' },
+    confirmation: null,
+    pendingPrompt: { templateName: 'ICBC-境内', merchantId: 'M001', currency: 'CNY', targetBillDate: '2026-08-10', queueIndex: 1, queueTotal: 1 },
+    importContext: { template: { name: 'ICBC-境内' } },
+    generatedExports: { detail: { filePath: '/detail.xlsx' }, balance: null },
+    storageRoot,
+    session: null,
+    createContextId: () => 'balance-context-1',
+    createFreshnessGuard: () => ({ inputFilePaths: [], assertFresh() {} })
+  });
+  const resolution = prepareManualBalanceSeedSubmission(prepareArgs());
+  assert.equal(resolution.prepared.proceed, true);
+
+  const owner = { kind: 'template', id: 5 };
+  const [target] = listOwnerSeeds({ database, storageRoot, owner }).records;
+  assert.equal(updateOwnerSeed({
+    database, storageRoot, payload: { owner, key: { merchantId: 'M002', currency: 'CNY', billDate: '2026-08-01' }, expected: target, endBalance: '200' }
+  }).status, 'success');
+  const afterEdit = fs.readFileSync(getBalanceSeedFilePath(storageRoot, 'ICBC'), 'utf8');
+  assert.throws(
+    () => writeManualBalanceSeedPlan(resolution.prepared.plan),
+    (error) => error.name === 'FileValidationError' && error.code === 'BALANCE_SEED_CHANGED_BEFORE_WRITE'
+      && error.message === '余额种子在确认期间已变化，请重新补录'
+  );
+  assert.equal(fs.readFileSync(getBalanceSeedFilePath(storageRoot, 'ICBC'), 'utf8'), afterEdit);
+
+  // 文件未变时照常写入：重新准备后补录成功，B 账户保留修改后的值。
+  const fresh = prepareManualBalanceSeedSubmission(prepareArgs());
+  writeManualBalanceSeedPlan(fresh.prepared.plan);
+  const stored = JSON.parse(fs.readFileSync(getBalanceSeedFilePath(storageRoot, 'ICBC'), 'utf8'));
+  assert.deepEqual(stored.map((record) => [record.merchantId, record.endBalance]), [['M001', 20.5], ['M002', 200]]);
 });

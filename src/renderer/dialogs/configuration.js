@@ -5425,7 +5425,7 @@
 
       async function saveSeed(record, rawValue) {
         const text = String(rawValue || '').trim().replace(/,/g, '');
-        if (!/^[+-]?\d+(\.\d+)?$/.test(text)) {
+        if (!/^[+-]?\d+(\.\d+)?$/.test(text) || !Number.isFinite(Number(text))) {
           setStatus('余额必须是有效数字', 'error');
           pushAlert(overlay, () => createAlertDialog('余额必须是有效数字'));
           return;

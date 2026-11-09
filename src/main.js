@@ -12202,7 +12202,8 @@ function registerBigAccountHandlers() {
     }
   });
 
-  supportIpcHandle('balance-seed:update', '修改余额种子', (_event, payload = {}) => {
+  supportIpcHandle('balance-seed:update', '修改余额种子', (_event, rawPayload) => {
+    const payload = normalizeBalanceSeedPayload(rawPayload);
     try {
       const result = updateOwnerSeed({ database, storageRoot: ensureStorageRoot(), payload });
       if (result.status === 'success' && result.changed) {
@@ -12214,7 +12215,8 @@ function registerBigAccountHandlers() {
     }
   });
 
-  supportIpcHandle('balance-seed:delete', '删除余额种子', (_event, payload = {}) => {
+  supportIpcHandle('balance-seed:delete', '删除余额种子', (_event, rawPayload) => {
+    const payload = normalizeBalanceSeedPayload(rawPayload);
     try {
       const result = deleteOwnerSeed({ database, storageRoot: ensureStorageRoot(), payload });
       if (result.status === 'success') {
@@ -12225,6 +12227,11 @@ function registerBigAccountHandlers() {
       return createBalanceSeedManagementErrorResult('删除余额种子', error, { key: payload.key, owner: payload.owner });
     }
   });
+}
+
+// 非对象载荷（如 null）按空对象处理，由服务返回结构化的业务错误。
+function normalizeBalanceSeedPayload(payload) {
+  return payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
 }
 
 // 选项失效、余额非法、种子文件损坏等按业务错误返回原因；其余按系统错误生成报错文件。

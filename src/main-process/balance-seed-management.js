@@ -7,6 +7,8 @@
 //   - 只有写入者属于“另一个读同一种子文件的现有渠道 / 普通模板”时才隐藏：渠道可见渠道名与其子模板名写入的记录
 //     （含迁移前子模板写的种子），普通模板可见自己写入的记录；写入者为空、已改名或删除、或其现在的归属读的是另一份
 //     种子文件的记录，在同一银行段的所有选项下都可见，避免生成仍按账号读取、界面却看不到的种子。
+//     “同一文件”按实际文件名判断（与 getBalanceSeedFilePath 同一规范化，再忽略大小写，Windows / macOS 默认不区分）。
+//     渠道名、普通模板名是当前输出身份，优先认领；子模板名只认领迁移前的旧记录，与某个输出名重名时让给该输出名。
 //   - 修改只改余额：生成方式改为「人工录入」，templateName 改为渠道 / 模板的输出名（与补录一致）。
 //   - 修改、删除都先重新读文件，按渲染层带回的原值核对（乐观并发），不一致时不写文件，返回 conflict。
 
@@ -36,32 +38,40 @@ function ownerLabel(owner) {
   return owner.kind === OWNER_KINDS.channel ? `渠道「${owner.outputName}」` : `模板「${owner.outputName}」`;
 }
 
-// 属于其他现有归属、且该归属读同一银行段种子文件的写入者名称：渠道名按渠道名、子模板按所属渠道名、
-//   普通模板按模板名取银行段（与生成时的输出身份一致）。
-function listForeignWriterNames(database, templates, bankName, ownWriterNames) {
-  const foreign = new Set();
-  const claim = (writerName, outputName) => {
-    const name = normalizeCell(writerName);
-    if (name && !ownWriterNames.has(name) && splitTemplateName(normalizeCell(outputName)).bankName === bankName) {
-      foreign.add(name);
-    }
-  };
-  (database.listStatementChannels() || []).forEach((channel) => claim(channel.name, channel.name));
-  templates.forEach((template) => {
-    claim(template.name, Number(template.channelId) > 0 ? (template.channelName || template.name) : template.name);
-  });
-  return foreign;
+// 种子文件身份：与 getBalanceSeedFilePath 相同的文件名规范化，再按 NFC 与小写比较。
+function seedFileIdentity(bankName) {
+  return path.basename(getBalanceSeedFilePath('', bankName)).normalize('NFC').toLowerCase();
 }
 
-function buildOwner(database, { kind, id, outputName, writerNames, templates }) {
+// 写入者名称 → 现有归属 { key, outputName }。渠道名、普通模板名先认领；子模板名只在未被认领时归所属渠道。
+function buildWriterClaims(database, templates) {
+  const claims = new Map();
+  const claim = (name, key, outputName) => {
+    const writer = normalizeCell(name);
+    if (writer && !claims.has(writer)) claims.set(writer, { key, outputName: normalizeCell(outputName) });
+  };
+  (database.listStatementChannels() || []).forEach((channel) => {
+    claim(channel.name, `channel:${Number(channel.id)}`, channel.name);
+  });
+  templates.filter((template) => !(Number(template.channelId) > 0)).forEach((template) => {
+    claim(template.name, `template:${Number(template.id)}`, template.name);
+  });
+  templates.filter((template) => Number(template.channelId) > 0).forEach((template) => {
+    claim(template.name, `channel:${Number(template.channelId)}`, template.channelName || template.name);
+  });
+  return claims;
+}
+
+function buildOwner(database, { kind, id, outputName, templates }) {
   const bankName = splitTemplateName(outputName).bankName;
   return {
     kind,
     id,
+    key: `${kind}:${id}`,
     outputName,
     bankName,
-    writerNames,
-    foreignWriterNames: listForeignWriterNames(database, templates, bankName, writerNames)
+    fileIdentity: seedFileIdentity(bankName),
+    claims: buildWriterClaims(database, templates)
   };
 }
 
@@ -79,12 +89,7 @@ function resolveSeedOwner(database, owner) {
     if (!outputName) {
       throw new BalanceSeedManagementError('BALANCE_SEED_OWNER_NOT_FOUND', '未找到对应渠道，请刷新后重试', { owner });
     }
-    const templates = database.listTemplates() || [];
-    const childNames = templates
-      .filter((template) => Number(template.channelId) === id)
-      .map((template) => normalizeCell(template.name))
-      .filter(Boolean);
-    return buildOwner(database, { kind, id, outputName, writerNames: new Set([outputName, ...childNames]), templates });
+    return buildOwner(database, { kind, id, outputName, templates: database.listTemplates() || [] });
   }
 
   const template = database.getTemplate(id);
@@ -99,13 +104,13 @@ function resolveSeedOwner(database, owner) {
       { owner }
     );
   }
-  return buildOwner(database, {
-    kind, id, outputName, writerNames: new Set([outputName]), templates: database.listTemplates() || []
-  });
+  return buildOwner(database, { kind, id, outputName, templates: database.listTemplates() || [] });
 }
 
 function isVisibleToOwner(record, owner) {
-  return !owner.foreignWriterNames.has(normalizeCell(record.templateName));
+  const claim = owner.claims.get(normalizeCell(record.templateName));
+  if (!claim || claim.key === owner.key) return true;
+  return seedFileIdentity(splitTemplateName(claim.outputName).bankName) !== owner.fileIdentity;
 }
 
 function describeOwner(owner, storageRoot) {
@@ -205,7 +210,8 @@ function conflictResult(storageRoot, located) {
 
 function updateOwnerSeed({ database, storageRoot, payload, now = new Date() }) {
   const endBalance = parseNumericValue(payload && payload.endBalance);
-  if (endBalance === null) {
+  // 超出数值范围的输入解析为 Infinity，写回时会被种子库当作无效记录过滤掉，须在这里拒绝。
+  if (endBalance === null || !Number.isFinite(endBalance)) {
     throw new BalanceSeedManagementError('BALANCE_SEED_BALANCE_INVALID', '余额必须是有效数字', {
       endBalance: payload && payload.endBalance
     });
