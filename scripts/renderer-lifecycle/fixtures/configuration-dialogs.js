@@ -252,7 +252,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
   await test('余额管理修改只改余额并带回原值，写入中禁止关闭；非法数字不提交；conflict 提示后重读', async () => {
     await setup();
     await js(`cfg.templates.push({id:3,name:'渠道 A',channelId:7,channelName:'渠道 A'});cfg.services.applyPreviewTemplates(cfg.templates);
-      cfg.seedRecords=[{merchantId:'M001',currency:'USD',billDate:'2026-09-02',endBalance:1010,generationMethod:'通过发生额计算',templateName:'渠道 A',updatedAt:'u2'}];
+      cfg.seedRecords=[{merchantId:'M001',currency:'USD',billDate:'2026-09-02',endBalance:1010,generationMethod:'通过发生额计算',templateName:'渠道 A',updatedAt:'u2',fileIdentity:'渠道.json'}];
       cfg.seedList=owner=>({status:'success',owner:{kind:owner.kind,id:owner.id,seedFileName:'渠道.json'},records:cfg.seedRecords});
       cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;cfg.top().querySelector('[data-action="balance-seed-management"]').click();
       cfg.overlay=cfg.top();cfg.handle=cfg.host.getHandle(cfg.overlay);void 0;`); await tick();
@@ -269,7 +269,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(await js(`cfg.calls.find(call=>call.name==='seedUpdate').args[0]`), {
       owner: { kind: 'channel', id: 7 },
       key: { merchantId: 'M001', currency: 'USD', billDate: '2026-09-02' },
-      expected: { merchantId: 'M001', currency: 'USD', billDate: '2026-09-02', endBalance: 1010, generationMethod: '通过发生额计算', templateName: '渠道 A', updatedAt: 'u2' },
+      expected: { merchantId: 'M001', currency: 'USD', billDate: '2026-09-02', endBalance: 1010, generationMethod: '通过发生额计算', templateName: '渠道 A', updatedAt: 'u2', fileIdentity: '渠道.json' },
       endBalance: '1005.5'
     });
     await js(`cfg.seedRecords=[{...cfg.seedRecords[0],endBalance:1005.5,generationMethod:'人工录入',updatedAt:'u3'}];cfg.write.resolve({status:'success',changed:true,message:'余额种子已修改'});`); await tick(); await tick();
@@ -286,7 +286,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
   await test('余额管理删除先确认，取消不提交；确认按原值删除后重读；维护大账号入口改名为余额附加值', async () => {
     await setup();
     await js(`cfg.templates.push({id:3,name:'渠道 A',channelId:7,channelName:'渠道 A'});cfg.services.applyPreviewTemplates(cfg.templates);
-      cfg.seedRecords=[{merchantId:'M001',currency:'USD',billDate:'2026-09-02',endBalance:1010,generationMethod:'通过发生额计算',templateName:'渠道 A',updatedAt:'u2'}];
+      cfg.seedRecords=[{merchantId:'M001',currency:'USD',billDate:'2026-09-02',endBalance:1010,generationMethod:'通过发生额计算',templateName:'渠道 A',updatedAt:'u2',fileIdentity:'渠道.json'}];
       cfg.seedList=owner=>({status:'success',owner:{kind:owner.kind,id:owner.id,seedFileName:'渠道.json'},records:cfg.seedRecords});
       cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;cfg.top().querySelector('[data-action="balance-seed-management"]').click();
       cfg.overlay=cfg.top();cfg.handle=cfg.host.getHandle(cfg.overlay);void 0;`); await tick();
@@ -298,7 +298,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seedDelete').map(call=>call.args[0])`), [{
       owner: { kind: 'channel', id: 7 },
       key: { merchantId: 'M001', currency: 'USD', billDate: '2026-09-02' },
-      expected: { merchantId: 'M001', currency: 'USD', billDate: '2026-09-02', endBalance: 1010, generationMethod: '通过发生额计算', templateName: '渠道 A', updatedAt: 'u2' }
+      expected: { merchantId: 'M001', currency: 'USD', billDate: '2026-09-02', endBalance: 1010, generationMethod: '通过发生额计算', templateName: '渠道 A', updatedAt: 'u2', fileIdentity: '渠道.json' }
     }]);
     assert.equal(await js('cfg.handle.isTop()'), true);
     assert.match(await js(`cfg.overlay.querySelector('tbody').textContent`), /暂无余额种子/);

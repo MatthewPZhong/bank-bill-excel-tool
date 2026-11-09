@@ -122,4 +122,5 @@ G7 TaskPolicy 清单已冻结，写操作按 `channel:rename`、`bank-accounts:s
 - Codex 第二轮复审（提交 `e4a949b1`）：上一轮 5 项均确认关闭，补录路径（正常补录、覆盖确认、断档不补录、按文件名映射重新生成、业务 catch）未见回归。新确认 2 项，已修复：
   - P1 生产 `renderer.js` 的 `configurationApi` 没有接上 `balanceSeeds`，真实界面打开【余额管理】即报错；生命周期夹具手工注入 API，绕过了生产装配点。已补装配，并新增契约测试 `tests/unit/renderer/configuration-api-wiring.test.js`：配置弹窗用到的每个 `api.<命名空间>` 都须在生产 `configurationApi` 中装配（去掉修复时该测试失败）。
   - P2 列表读取后渠道跨银行段改名，旧列表的修改 / 删除会改到新银行段文件里字段相同的记录。每条记录带所在文件身份，写入时核对（§4.3），单测复现该场景。
+- Codex 第三轮复审（提交 `44d8a856`）：第二轮 2 项确认关闭，`5b5caf7b..44d8a856` 未发现新的 P0–P3 问题。按其测试覆盖建议补强：契约测试另核对每个命名空间绑定到 `window.desktopApi` 同名命名空间、配置弹窗调用的每个方法都由 preload 暴露（绑定写错、preload 缺方法两种变异均会失败）；生命周期夹具的记录带 `fileIdentity` 并断言修改、删除原样回传。
 - 验证（worktree `feat/balance-seed-management`，基线 `5b5caf7b`）：`npm run lint` 通过；`npm run check:architecture` 通过；`npm run smoke` 通过；`npm run test:unit` 10000/10004（第二轮修复后；4 个 Windows 专用跳过，0 失败）；`npm run test:integration` 99 个脚本全部通过（含新增 5/5，§七 清单已回写）；`node scripts/test-renderer-lifecycle.js configuration-dialogs` 90/90。未做：实机界面与真实种子文件检查（B34 无法截图，见 B72）。
