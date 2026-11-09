@@ -30,6 +30,9 @@ const mainAst = acorn.parse(mainSource, {
   sourceType: 'script'
 });
 
+// v3.2.16：rebuildMatchedTemplateFileEntries 用它把各文件的「币种未维护大账号」问题汇总后一次报错
+const { mapEachCollectingCurrencyBigAccountIssues } = require('../../../src/backend/file-service/currency-big-account');
+
 function functionSource(name) {
   const node = mainAst.body.find((item) => (
     item.type === 'FunctionDeclaration' && item.id && item.id.name === name
@@ -1283,7 +1286,8 @@ test('非 bill-split 缓存行注入大账号且移除 selectedCurrency 已短�
       'buildFieldIndexMap',
       'buildManagedMerchantLookupFlags',
       'buildStatementGenerationConfig',
-      'buildMappedRowsForFile'
+      'buildMappedRowsForFile',
+      'mapEachCollectingCurrencyBigAccountIssues'
     ],
     [
       () => config,
@@ -1300,7 +1304,8 @@ test('非 bill-split 缓存行注入大账号且移除 selectedCurrency 已短�
       (header) => new Map(header.map((field, index) => [field, index])),
       () => ({ selfInputMerchant: false, skipDirectMerchantLookup: false }),
       () => ({ billSplitMerge: { enabled: false } }),
-      () => { throw new Error('reuseMappedRows 不得重新解析文件'); }
+      () => { throw new Error('reuseMappedRows 不得重新解析文件'); },
+      mapEachCollectingCurrencyBigAccountIssues
     ]
   );
   const sourceRows = [
@@ -1352,7 +1357,8 @@ test('多大账号 + bill-split 缓存路径回退 raw rebuild，保留原币种
       'buildFieldIndexMap',
       'buildManagedMerchantLookupFlags',
       'buildStatementGenerationConfig',
-      'buildMappedRowsForFile'
+      'buildMappedRowsForFile',
+      'mapEachCollectingCurrencyBigAccountIssues'
     ],
     [
       () => config,
@@ -1371,7 +1377,8 @@ test('多大账号 + bill-split 缓存路径回退 raw rebuild，保留原币种
         assert.equal(generationConfig.billSplitMerge.enabled, true);
         assert.equal(inputFilePath, '/private/A.xlsx');
         return rawRows;
-      }
+      },
+      mapEachCollectingCurrencyBigAccountIssues
     ]
   );
   const [entry] = rebuild({

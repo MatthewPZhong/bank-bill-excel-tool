@@ -28,6 +28,7 @@ const {
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
   loadCurrencyMappings,
+  MERCHANT_ID_CURRENCY_ONLY_MARKER,
   normalizeCell,
   normalizeFeatureFilterRule,
   writeWorkbookRows
@@ -90,6 +91,7 @@ function loadMainFunctions(names, deps = {}) {
 
 const CONSTANTS = loadMainConstants([
   'BALANCE_DISABLED_OPTION', 'BALANCE_CALCULATED_OPTION', 'MERCHANT_ID_SELF_INPUT_OPTION', 'MERCHANT_ID_MULTI_ACCOUNT_MARKER',
+  'MERCHANT_ID_CURRENCY_ONLY_OPTION',
   'CONCAT_FIELDS_MAPPING_FIELD', 'FEATURE_FILTER_MAPPING_FIELD', 'CUSTOM_INPUT_TARGET_FIELDS',
   'SIGNED_AMOUNT_MAPPING_FIELD', 'AMOUNT_BASED_NAME_MAPPING_FIELD', 'AMOUNT_BASED_ACCOUNT_MAPPING_FIELD',
   'AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD', 'AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION',
@@ -156,7 +158,11 @@ function createMain(database, constantOverrides = {}) {
     'validateBillSplitMappingsPayload',
     'normalizeBundleTemplateHeaders',
     'readTemplateBundleFile',
-    'resolveTemplateBundleVersion'
+    'resolveTemplateBundleVersion',
+    // v3.2.16 同轮合入的「原始账单仅有币种无账户号」：校验、生成配置与模板包版本会引用
+    'validateCurrencyBigAccountConfiguration',
+    'buildCurrencyBigAccountMappingConfig',
+    'isCurrencyOnlyMerchantMapping'
   ], {
     ...CONSTANTS,
     ...constantOverrides,
@@ -166,6 +172,7 @@ function createMain(database, constantOverrides = {}) {
     FileValidationError,
     FIXED_FIELD_VALUE_PREFIX,
     FEATURE_FILTER_FIELD_TOKEN,
+    MERCHANT_ID_CURRENCY_ONLY_MARKER,
     normalizeFeatureFilterRule,
     buildMappedRows,
     loadCurrencyMappings,

@@ -1,5 +1,6 @@
 const FIXED_FIELD_VALUE_PREFIX = '__FIXED__:';
 const MERCHANT_ID_MULTI_ACCOUNT_MARKER = '__MULTI_BIG_ACCOUNT__';
+const { MERCHANT_ID_CURRENCY_ONLY_MARKER } = require('../file-service/common');
 
 function normalizeText(value) {
   if (value === null || value === undefined) {
@@ -83,7 +84,12 @@ function buildTemplateSummaryFromRow(row) {
   let bigAccountSummary = '未设置';
   let bigAccountMode = 'unset';
 
-  if (merchantIdMappedField.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
+  if (merchantIdMappedField === MERCHANT_ID_CURRENCY_ONLY_MARKER) {
+    // v3.2.16：按币种取大账号；大账号来自 template_currency_big_accounts，不计入 bigAccountCount
+    const currencyBigAccountCount = Number(row.currencyBigAccountCount || 0);
+    bigAccountSummary = currencyBigAccountCount > 0 ? `按币种（${currencyBigAccountCount}个大账号）` : '未设置';
+    bigAccountMode = currencyBigAccountCount > 0 ? 'by-currency' : 'unset';
+  } else if (merchantIdMappedField.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
     if (bigAccountCount > 0) {
       if (bigAccountCount === 1 && singleBigAccountMerchantId) {
         bigAccountSummary = singleBigAccountMerchantId;

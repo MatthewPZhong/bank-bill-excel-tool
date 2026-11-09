@@ -1,6 +1,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { mapEachCollectingCurrencyBigAccountIssues } = require('../backend/file-service/currency-big-account');
+
 // v3.2.15（T3）：输出身份（文件名、余额银行名、种子、余额调整、补录提示）取配置上的 outputName：
 //   属于渠道的模板为渠道名，普通模板为模板名；缺省时回退模板名（兼容未带 outputName 的旧配置）。
 function statementOutputName(config) {
@@ -346,13 +348,17 @@ function createStatementGenerationHelpers(deps) {
   }
 
   function buildPreparedStatementBatchFromFilePaths({ config, inputFilePaths = [] }) {
-    const fileEntries = normalizeInputFilePaths(inputFilePaths, { dedupe: false }).map((inputFilePath) => ({
-      filePath: inputFilePath,
-      detailRows: buildMappedRowsForFile({
-        config,
-        inputFilePath
+    // v3.2.16：币种未维护大账号的问题跨文件汇总后一次报错（spec D1）
+    const fileEntries = mapEachCollectingCurrencyBigAccountIssues(
+      normalizeInputFilePaths(inputFilePaths, { dedupe: false }),
+      (inputFilePath) => ({
+        filePath: inputFilePath,
+        detailRows: buildMappedRowsForFile({
+          config,
+          inputFilePath
+        })
       })
-    }));
+    );
 
     return {
       fileEntries,

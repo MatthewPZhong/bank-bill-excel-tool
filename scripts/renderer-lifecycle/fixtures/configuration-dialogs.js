@@ -41,7 +41,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       cfg.services.acceptBootstrap({currencyOptions:['USD','HKD']});cfg.services.applyPreviewTemplates(cfg.templates);
       cfg.dialogs=__rendererDialogs.createRendererDialogs({modalBridge:cfg.bridge,configurationServices:cfg.services,configurationApi:cfg.api,dialogApis:{},reportLog:()=>{},
         scenarioCommands:ScenarioCommandService.createScenarioCommandService({scenariosApi:{},channelsApi:{}}),scenarioSubscriptions:ScenarioChangeRouter.createScenarioChangeRouter(),
-        appConstants:{},ADVANCED_MAPPING_FIELDS:[],CONCAT_FIELDS_MAPPING_FIELD:'需要拼接字段',FEATURE_FILTER_MAPPING_FIELD:'字段筛选特征值',setStatus:(...args)=>cfg.feedback.push(args),applyStatementResult:()=>cfg.applied++,applyManualBalancePromptStatus:()=>cfg.applied++});
+        appConstants:{},ADVANCED_MAPPING_FIELDS:[],CONCAT_FIELDS_MAPPING_FIELD:'需要拼接字段',FEATURE_FILTER_MAPPING_FIELD:'字段筛选特征值',MERCHANT_ID_SELF_INPUT_OPTION:'自己输入',MERCHANT_ID_CURRENCY_ONLY_OPTION:'原始账单仅有币种无账户号',setStatus:(...args)=>cfg.feedback.push(args),applyStatementResult:()=>cfg.applied++,applyManualBalancePromptStatus:()=>cfg.applied++});
       cfg.openMapping=()=>{cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createAccountMappingDialog({currentTemplateId:1,templates:cfg.templates,mappings:cfg.mappings('A')})).handle;
         cfg.overlay=cfg.top();cfg.select=cfg.overlay.querySelector('[data-role="template-select"]');cfg.save=cfg.overlay.querySelector('[data-action="done"]');};
       cfg.choose=id=>{cfg.select.value='template:'+id;cfg.select.dispatchEvent(new Event('change'));};
@@ -899,6 +899,94 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await layout.evidence('feature-filter-dialog', { geometry });
     await layout.click('.feature-filter-card [data-action="done"]');
     assert.match(await js('cfg.top().textContent'), /请选择筛选字段/);
+  });
+
+  // v3.2.16：MerchantId「原始账单仅有币种无账户号」+【映射管理】（spec §4.1、§4.2、D2）
+  const CURRENCY_ONLY = '原始账单仅有币种无账户号';
+  async function openCurrencyOnlyMapping(layoutOptions = null) {
+    await setup(layoutOptions);
+    await js(`
+      cfg.currencyTemplate={id:9,name:'招商银行-上海',headers:['日期','币种','收入']};
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:cfg.currencyTemplate,targetFields:['MerchantId','Currency'],
+        mappings:[{templateField:'MerchantId',mappedField:${JSON.stringify(CURRENCY_ONLY)},mappedFields:[]},{templateField:'Currency',mappedField:'币种',mappedFields:[]}],
+        currencyBigAccounts:[{currency:'USD',merchantId:'NET1'}]})).handle;
+      cfg.mappingOverlay=cfg.top();
+      cfg.row=field=>[...cfg.mappingOverlay.querySelectorAll('tr')].find(row=>row.firstElementChild&&row.firstElementChild.textContent.trim()===field);
+      cfg.merchantSelect=cfg.row('MerchantId').querySelector('.mapping-select');
+      cfg.manageBtn=cfg.row('MerchantId').querySelector('.mapping-currency-big-account-manage-btn');
+      cfg.pairRows=()=>[...cfg.top().querySelectorAll('tr[data-currency-big-account-row]')];
+      cfg.pairs=()=>cfg.pairRows().map(row=>[row.querySelector('.currency-big-account-currency-input').value,row.querySelector('.currency-big-account-merchant-input').value]);
+      cfg.fill=(index,currency,merchantId)=>{const row=cfg.pairRows()[index];const c=row.querySelector('.currency-big-account-currency-input');c.value=currency;c.dispatchEvent(new Event('input'));row.querySelector('.currency-big-account-merchant-input').value=merchantId;};
+      void 0;`);
+  }
+
+  await test('MerchantId 新选项：显示【映射管理】且 Currency 行可见；改选「自己输入」隐藏按钮与 Currency 行', async () => {
+    await openCurrencyOnlyMapping();
+    assert.equal(await js('[...cfg.merchantSelect.options].map(option=>option.value).includes("原始账单仅有币种无账户号")'), true);
+    assert.deepEqual(await js('({value:cfg.merchantSelect.value,button:cfg.manageBtn.hidden,text:cfg.manageBtn.textContent.trim(),currencyHidden:cfg.row("Currency").hidden,selfInputHidden:cfg.row("MerchantId").querySelector(".mapping-big-account-manage-btn").hidden})'),
+      { value: CURRENCY_ONLY, button: false, text: '映射管理', currencyHidden: false, selfInputHidden: true });
+    await js('cfg.merchantSelect.value="自己输入";cfg.merchantSelect.dispatchEvent(new Event("change"));');
+    assert.deepEqual(await js('({button:cfg.manageBtn.hidden,currencyHidden:cfg.row("Currency").hidden})'), { button: true, currencyHidden: true });
+  });
+
+  await test('【映射管理】新增在当前行下方插入、删除最后一行改为清空；保存带回草稿，完成时提交大写配置', async () => {
+    await openCurrencyOnlyMapping();
+    await js('cfg.manageBtn.click();');
+    assert.match(await js('cfg.top().querySelector(".dialog-title").textContent'), /映射管理/);
+    assert.deepEqual(await js('cfg.pairs()'), [['USD', 'NET1']]);
+    await js('cfg.pairRows()[0].querySelector("[data-action=insert-below]").click();cfg.fill(1,"hkd","NET1");cfg.pairRows()[0].querySelector("[data-action=insert-below]").click();');
+    assert.deepEqual(await js('cfg.pairs()'), [['USD', 'NET1'], ['', ''], ['hkd', 'NET1']]);
+    await js('cfg.pairRows()[1].querySelector("[data-action=delete]").click();');
+    assert.deepEqual(await js('cfg.pairs()'), [['USD', 'NET1'], ['hkd', 'NET1']]);
+    await js('cfg.top().querySelector("[data-action=save]").click();');
+    assert.equal(await js('cfg.handle.isTop()&&cfg.top()===cfg.mappingOverlay'), true);
+    assert.equal(await js('cfg.feedback.some(entry=>/点击【完成】后保存到模板/.test(entry[0]))'), true);
+    await js('cfg.mappingOverlay.querySelector("[data-action=done]").click();'); await tick();
+    assert.deepEqual(await js('cfg.calls.find(call=>call.name==="mappingSave").args[0].currencyBigAccounts'),
+      [{ currency: 'USD', merchantId: 'NET1' }, { currency: 'HKD', merchantId: 'NET1' }]);
+    assert.equal(await js('cfg.calls.find(call=>call.name==="mappingSave").args[0].mappings.find(m=>m.templateField==="MerchantId").mappedField'), CURRENCY_ONLY);
+
+    await openCurrencyOnlyMapping();
+    await js('cfg.manageBtn.click();cfg.pairRows()[0].querySelector("[data-action=delete]").click();');
+    assert.deepEqual(await js('cfg.pairs()'), [['', '']]);
+  });
+
+  await test('【映射管理】校验一次列出全部问题；【返回】与 × 放弃本次编辑', async () => {
+    await openCurrencyOnlyMapping();
+    await js('cfg.manageBtn.click();cfg.dialog=cfg.host.getTop();cfg.pairOverlay=cfg.top();cfg.fill(0,"","");cfg.pairOverlay.querySelector("[data-action=save]").click();');
+    assert.match(await js('cfg.top().textContent'), /请至少维护 1 组币种与大账号/);
+    await js('cfg.host.closeTop();');
+    await js('cfg.fill(0,"usd","");cfg.pairRows()[0].querySelector("[data-action=insert-below]").click();cfg.fill(1,"XYZ","N2");cfg.pairRows()[1].querySelector("[data-action=insert-below]").click();cfg.fill(2,"USD","N3");cfg.pairOverlay.querySelector("[data-action=save]").click();');
+    const alertText = await js('cfg.top().textContent');
+    assert.match(alertText, /第 1 行：请填写大账号/);
+    assert.match(alertText, /第 2 行：币种「XYZ」不在币种映射表中/);
+    assert.match(alertText, /币种「USD」重复（第 1、3 行），一个币种只能对应一个大账号/);
+    await js('cfg.host.closeTop();');
+    assert.equal(await js('cfg.top()===cfg.pairOverlay'), true);
+    await js('cfg.pairOverlay.querySelector("[data-action=back]").click();');
+    assert.equal(await js('cfg.top()===cfg.mappingOverlay'), true);
+    await js('cfg.manageBtn.click();');
+    assert.deepEqual(await js('cfg.pairs()'), [['USD', 'NET1']]);
+    await js('cfg.fill(0,"EUR","X");cfg.top().querySelector(".icon-close").click();cfg.manageBtn.click();');
+    assert.deepEqual(await js('cfg.pairs()'), [['USD', 'NET1']]);
+  });
+
+  await test('【映射管理】布局：【新增】在每行最左侧，右下角【保存】在【返回】左侧，币种与大账号各占一半', async () => {
+    await openCurrencyOnlyMapping({ zoom: 1 });
+    await layout.settle();
+    await layout.evidence('currency-big-account-mapping-row', { button: await js('!cfg.manageBtn.hidden') });
+    await js('cfg.manageBtn.click();cfg.pairRows()[0].querySelector("[data-action=insert-below]").click();cfg.fill(1,"EUR","NET2");');
+    await layout.settle();
+    const geometry = await js(`(() => {
+      const card=cfg.top().querySelector('.currency-big-account-card'),rect=card.getBoundingClientRect();
+      const save=card.querySelector('[data-action=save]').getBoundingClientRect(),back=card.querySelector('[data-action=back]').getBoundingClientRect();
+      const row=cfg.pairRows()[0],cells=[...row.children].map(cell=>cell.getBoundingClientRect());
+      return { saveLeftOfBack: save.right<=back.left, footerRight: rect.right-back.right<48, footerBottom: save.top>row.getBoundingClientRect().bottom,
+        insertFirst: row.children[0].querySelector('[data-action=insert-below]')!==null, deleteLast: row.lastElementChild.querySelector('[data-action=delete]')!==null,
+        halves: Math.abs(cells[1].width-cells[2].width)<=1, fits: rect.right<=innerWidth&&rect.bottom<=innerHeight };
+    })()`);
+    assert.deepEqual(geometry, { saveLeftOfBack: true, footerRight: true, footerBottom: true, insertFirst: true, deleteLast: true, halves: true, fits: true });
+    await layout.evidence('currency-big-account-dialog', { geometry });
   });
 
 };

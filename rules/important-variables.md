@@ -142,6 +142,17 @@
 - 关联功能：大账号弹窗"自行输入 MerchantId"选项；CLAUDE.md Big Account Selection 的默认分支来源
 - 变更 review 要点：自行输入值落盘到 `lastFileImportContext`，导出时复用——改了标识要同步改匹配逻辑
 
+### `MERCHANT_ID_CURRENCY_ONLY_OPTION` / `MERCHANT_ID_CURRENCY_ONLY_MARKER` / `template_currency_big_accounts`（v3.2.16）
+- 定义：选项文字 `原始账单仅有币种无账户号` 在 `src/main.js` 与 `src/renderer.js`；存储值 `__CURRENCY_ONLY_BIG_ACCOUNT__` 只在 `src/backend/file-service/common.js`；配置表由 `ensureTemplateCurrencyBigAccountSupport` 建立
+- 关联功能：MerchantId 按每行最终币种取【映射管理】中的大账号（`src/backend/file-service/currency-big-account.js`），币种未维护时整批阻断（`CURRENCY_BIG_ACCOUNT_UNMAPPED`）；spec `changes/v3.2.16/feat/statement-currency-big-account/`
+- 变更 review 要点：
+  - 存储值**刻意不带** `__FIXED__:` 前缀：带前缀会被 `decodeCustomInputMappingValue` / `buildCompatibleBigAccounts` / `computeMappedRow` 当成「自己输入」或固定账号而静默出错；`buildMappedRows` 遇到该存储值却没有配置时抛 `CURRENCY_BIG_ACCOUNT_CONFIG_MISSING`
+  - 配置与 `template_big_accounts` 分开存放：不参与大账号识别、选择窗口、渠道大账号汇总与月度余额导出；与 MULTI 标记精确比较的各处（`isMultiBigAccountMapping` 等）不会命中本模式
+  - 按文件名映射导入：全部文件为本模式时跳过选择；与需要选择大账号的文件同批时阻断（`classifyCurrencyOnlyEntries`）
+  - 本模式的币种识别调用 `resolveCurrencyValue(..., { allowFuzzy: false })`：只认代码与精确名称，模糊命中按未维护阻断（spec D4）；其他模式保持模糊匹配
+  - 模板包：条目带 `currencyBigAccounts`；用到本模式时 `resolveTemplateBundleVersion` 写 v6（与「字段筛选特征值」同一规则），否则写 v5；改格式须同步 `SUPPORTED_BUNDLE_VERSION`
+  - 必跑：`tests/unit/backend/file-service/currency-big-account.test.js`、`tests/unit/main-process/statement-currency-big-account.test.js`、`scripts/integration/statement-currency-big-account.js`
+
 ### `BALANCE_CALCULATED_OPTION` / `BALANCE_DISABLED_OPTION`
 - 定义：`src/main.js`
 - 关联功能：余额字段的三态（直列 / 发生额推算 / 停用），CLAUDE.md Key Business Rules § Balance calculation

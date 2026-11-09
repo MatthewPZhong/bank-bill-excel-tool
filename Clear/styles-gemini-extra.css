@@ -1322,3 +1322,24 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 .modal-overlay.is-committing {
   cursor: wait;
 }
+
+/* v3.2.16：MerchantId「原始账单仅有币种无账户号」的【映射管理】——左半边币种、右半边大账号，
+   每行最左侧【新增】、行尾【删除】；币种输入复用 .big-account-currency-input-shell 的补全，此处撑满列宽 */
+.currency-big-account-card { width: min(100%, 760px); }
+.currency-big-account-table { table-layout: fixed; }
+.currency-big-account-insert-col,
+.currency-big-account-delete-col { width: 76px; }
+/* 覆盖 .manager-card .data-table 前两列 40% / 30% 的通用比例：两侧按钮列定宽，币种与大账号平分剩余宽度 */
+.currency-big-account-card .data-table th:nth-child(1),
+.currency-big-account-card .data-table td:nth-child(1),
+.currency-big-account-card .data-table th:nth-child(4),
+.currency-big-account-card .data-table td:nth-child(4) { width: 76px; }
+.currency-big-account-card .data-table th:nth-child(2),
+.currency-big-account-card .data-table td:nth-child(2),
+.currency-big-account-card .data-table th:nth-child(3),
+.currency-big-account-card .data-table td:nth-child(3) { width: auto; }
+.currency-big-account-insert-cell,
+.currency-big-account-delete-cell { white-space: nowrap; }
+.currency-big-account-insert-cell .text-action { padding-left: 0; }
+.currency-big-account-card .big-account-currency-input-shell { width: 100%; flex: 1 1 auto; }
+.currency-big-account-merchant-input { width: 100%; }

@@ -2,7 +2,7 @@
   'use strict';
   function buildBalanceSeedConfirmationRequest(contextId) { return { contextId, confirmOverwrite: true }; }
   function createConfigurationDialogs({ services, api, modalBridge, ui, constants }) {
-    const { BALANCE_DISABLED_OPTION, BALANCE_CALCULATED_OPTION, MERCHANT_ID_SELF_INPUT_OPTION, ADVANCED_MAPPING_FIELDS, CONCAT_FIELDS_MAPPING_FIELD, FEATURE_FILTER_MAPPING_FIELD = '字段筛选特征值', AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD, AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION } = constants;
+    const { BALANCE_DISABLED_OPTION, BALANCE_CALCULATED_OPTION, MERCHANT_ID_SELF_INPUT_OPTION, MERCHANT_ID_CURRENCY_ONLY_OPTION = '原始账单仅有币种无账户号', ADVANCED_MAPPING_FIELDS, CONCAT_FIELDS_MAPPING_FIELD, FEATURE_FILTER_MAPPING_FIELD = '字段筛选特征值', AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD, AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION } = constants;
     const { createOverlay, escapeHtml, createAlertDialog, createConfirmDialog, pushAlert, setStatus, applyStatementResult, applyManualBalancePromptStatus } = ui;
     const { openModal, closeModal, pushModal, replaceModal, registerModal, returnToModal } = modalBridge;
     const refreshTemplates = services.refreshTemplates;
@@ -600,6 +600,14 @@
           accountNature: rawNature === 'own' ? 'own' : 'client'
         };
       });
+    }
+
+    // v3.2.16：MerchantId「原始账单仅有币种无账户号」的 币种 → 大账号 草稿
+    function cloneCurrencyBigAccountPairs(pairs = []) {
+      return (Array.isArray(pairs) ? pairs : []).map((pair) => ({
+        currency: String((pair && pair.currency) || '').trim().toUpperCase(),
+        merchantId: String((pair && pair.merchantId) || '').trim()
+      }));
     }
 
     function formatBigAccountCurrencySummary(currencies) {
@@ -3204,6 +3212,174 @@
       return overlay;
     }
 
+    // v3.2.16（spec §4.2、D2）：MerchantId「原始账单仅有币种无账户号」的【映射管理】。
+    // 左半边币种、右半边大账号，逐行成对编辑：每行最左侧【新增】在该行下方插入空行，行尾【删除】（只剩一行时清空），
+    // 右下角【保存】在【返回】左侧。【保存】只校验并把配置带回映射关系管理（点【完成】时写入模板）；【返回】/ × 放弃本次编辑。
+    function createCurrencyBigAccountMappingDialog({ pairs = [], onDone, onCancel }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manager-card currency-big-account-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">映射管理</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table currency-big-account-table">
+            <colgroup>
+              <col class="currency-big-account-insert-col" />
+              <col class="currency-big-account-currency-col" />
+              <col class="currency-big-account-merchant-col" />
+              <col class="currency-big-account-delete-col" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th></th>
+                <th>币种</th>
+                <th>大账号</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="dialog-actions right currency-big-account-footer-actions">
+          <button class="primary-btn small" type="button" data-action="save">保存</button>
+          <button class="secondary-btn small" type="button" data-action="back">返回</button>
+        </div>
+      `;
+
+      const tbody = dialog.querySelector('tbody');
+
+      function createPairRow(pair = {}) {
+        const row = document.createElement('tr');
+        row.dataset.currencyBigAccountRow = 'true';
+        row.innerHTML = `
+          <td class="currency-big-account-insert-cell">
+            <button class="text-action" type="button" data-action="insert-below">新增</button>
+          </td>
+          <td>
+            <div class="enum-input-shell big-account-currency-input-shell currency-big-account-currency-shell">
+              <input class="new-account-input enum-ghost-input big-account-currency-ghost" type="text" tabindex="-1" disabled />
+              <input class="new-account-input enum-active-input big-account-currency-input currency-big-account-currency-input" type="text" spellcheck="false" />
+            </div>
+          </td>
+          <td>
+            <input class="mapping-text-input currency-big-account-merchant-input" type="text" spellcheck="false" />
+          </td>
+          <td class="currency-big-account-delete-cell">
+            <button class="text-action danger" type="button" data-action="delete">删除</button>
+          </td>
+        `;
+
+        const currencyInput = row.querySelector('.currency-big-account-currency-input');
+        const currencyGhost = row.querySelector('.big-account-currency-ghost');
+        const merchantInput = row.querySelector('.currency-big-account-merchant-input');
+        currencyInput.value = String((pair && pair.currency) || '');
+        merchantInput.value = String((pair && pair.merchantId) || '');
+
+        function renderCurrencySuggestion() {
+          const suggestion = getCurrencySuggestion(currencyInput.value);
+          currencyGhost.value = suggestion;
+          return suggestion;
+        }
+
+        renderCurrencySuggestion();
+        currencyInput.addEventListener('input', renderCurrencySuggestion);
+        currencyInput.addEventListener('keydown', (event) => {
+          if (event.key !== 'ArrowRight') return;
+          const suggestion = renderCurrencySuggestion();
+          const currentValue = String(currencyInput.value || '');
+          if (suggestion && suggestion !== currentValue && suggestion.toUpperCase().startsWith(currentValue.trim().toUpperCase())) {
+            currencyInput.value = suggestion;
+            renderCurrencySuggestion();
+            event.preventDefault();
+          }
+        });
+        currencyInput.addEventListener('blur', () => {
+          currencyInput.value = currencyInput.value.trim().toUpperCase();
+          renderCurrencySuggestion();
+        });
+        row.querySelector('[data-action="insert-below"]').addEventListener('click', () => {
+          const nextRow = createPairRow();
+          row.after(nextRow);
+          nextRow.querySelector('.currency-big-account-currency-input').focus();
+        });
+        row.querySelector('[data-action="delete"]').addEventListener('click', () => {
+          if (tbody.querySelectorAll('tr[data-currency-big-account-row]').length > 1) {
+            row.remove();
+            return;
+          }
+          currencyInput.value = '';
+          merchantInput.value = '';
+          renderCurrencySuggestion();
+        });
+        return row;
+      }
+
+      const initialPairs = cloneCurrencyBigAccountPairs(pairs);
+      (initialPairs.length ? initialPairs : [{}]).forEach((pair) => tbody.appendChild(createPairRow(pair)));
+
+      function collectRows() {
+        return Array.from(tbody.querySelectorAll('tr[data-currency-big-account-row]')).map((row, index) => {
+          const currencyInput = row.querySelector('.currency-big-account-currency-input');
+          currencyInput.value = currencyInput.value.trim().toUpperCase();
+          return {
+            rowNumber: index + 1,
+            currency: currencyInput.value,
+            merchantId: row.querySelector('.currency-big-account-merchant-input').value.trim()
+          };
+        });
+      }
+
+      function validateRows(filledRows) {
+        if (!filledRows.length) {
+          return ['请至少维护 1 组币种与大账号'];
+        }
+        const errors = [];
+        const knownCodes = new Set(getCurrencyOptionEntries().map((entry) => String(entry.code || '').trim().toUpperCase()));
+        if (!knownCodes.size) {
+          errors.push('未读取到币种选项，无法校验币种');
+        }
+        filledRows.forEach((item) => {
+          if (!item.currency) {
+            errors.push(`第 ${item.rowNumber} 行：请填写币种`);
+          } else if (knownCodes.size && !knownCodes.has(item.currency)) {
+            errors.push(`第 ${item.rowNumber} 行：币种「${item.currency}」不在币种映射表中`);
+          }
+          if (!item.merchantId) {
+            errors.push(`第 ${item.rowNumber} 行：请填写大账号`);
+          }
+        });
+        const rowNumbersByCurrency = new Map();
+        filledRows.forEach((item) => {
+          if (!item.currency) return;
+          rowNumbersByCurrency.set(item.currency, (rowNumbersByCurrency.get(item.currency) || []).concat(item.rowNumber));
+        });
+        rowNumbersByCurrency.forEach((rowNumbers, currency) => {
+          if (rowNumbers.length > 1) {
+            errors.push(`币种「${currency}」重复（第 ${rowNumbers.join('、')} 行），一个币种只能对应一个大账号`);
+          }
+        });
+        return errors;
+      }
+
+      dialog.querySelector('[data-action="save"]').addEventListener('click', () => {
+        const filledRows = collectRows().filter((item) => item.currency || item.merchantId);
+        const errors = validateRows(filledRows);
+        if (errors.length) {
+          pushAlert(overlay, () => createAlertDialog(errors.map((line) => escapeHtml(line)).join('<br>'), { onConfirm: null }));
+          return;
+        }
+        onDone(filledRows.map(({ currency, merchantId }) => ({ currency, merchantId })));
+      });
+      dialog.querySelector('[data-action="back"]').addEventListener('click', () => onCancel());
+      dialog.querySelector('.icon-close').addEventListener('click', () => onCancel());
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     function createMappingDialog(payload) {
       const { setStatus, applyStatementResult, applyManualBalancePromptStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
       const overlay = createOverlay();
@@ -3223,6 +3399,8 @@
       // payload.bigAccounts 已是上次维护大账号 onDone 的内存版（含 own + 用户编辑），透传 loadedWithOwn=true 跳过 getWithOwn，
       // 避免静默覆盖用户的内存编辑（包括主动删除的 own 行）。
       let bigAccountsLoadedWithOwn = Boolean(payload.bigAccountsLoadedWithOwn);
+      // v3.2.16：MerchantId「原始账单仅有币种无账户号」的 币种 → 大账号（【映射管理】带回的草稿，点【完成】时保存）
+      let currentCurrencyBigAccounts = cloneCurrencyBigAccountPairs(payload.currencyBigAccounts);
       const currentFixedAssignments = Array.isArray(payload.fixedAssignments)
         ? payload.fixedAssignments.map((item) => ({
             merchantId: String(item.merchantId || ''),
@@ -3398,6 +3576,7 @@
           selectOptions = [isBalanceField ? `<option value="${BALANCE_DISABLED_OPTION}">${BALANCE_DISABLED_OPTION}</option>` : '<option value=""></option>']
             .concat(isBalanceField ? [`<option value="${BALANCE_CALCULATED_OPTION}">${BALANCE_CALCULATED_OPTION}</option>`] : [])
             .concat(supportsSelfInputOption ? [`<option value="${MERCHANT_ID_SELF_INPUT_OPTION}">${MERCHANT_ID_SELF_INPUT_OPTION}</option>`] : [])
+            .concat(supportsSelfInputOption ? [`<option value="${MERCHANT_ID_CURRENCY_ONLY_OPTION}">${MERCHANT_ID_CURRENCY_ONLY_OPTION}</option>`] : [])
             .concat(supportsMultiSelect ? [`<option value="${CONCAT_FIELDS_MAPPING_FIELD}">${CONCAT_FIELDS_MAPPING_FIELD}</option>`] : [])
             .concat(supportsMultiSelect ? [`<option value="${FEATURE_FILTER_MAPPING_FIELD}">${FEATURE_FILTER_MAPPING_FIELD}</option>`] : [])
             .concat(headerOptions)
@@ -3413,6 +3592,7 @@
               ` : ''}
               ${isMerchantIdField ? `
                 <button class="secondary-btn small mapping-big-account-manage-btn" type="button" hidden>维护大账号</button>
+                <button class="secondary-btn small mapping-currency-big-account-manage-btn" type="button" hidden>映射管理</button>
               ` : ''}
               ${isAmountSplitByFieldField ? `
                 <button class="secondary-btn small mapping-amount-split-manage-btn" type="button" hidden>维护发生额映射关系</button>
@@ -3433,6 +3613,7 @@
 
         const select = row.querySelector('.mapping-select');
         const manageBigAccountBtn = row.querySelector('.mapping-big-account-manage-btn');
+        const manageCurrencyBigAccountBtn = row.querySelector('.mapping-currency-big-account-manage-btn');
         const manageAmountSplitBtn = row.querySelector('.mapping-amount-split-manage-btn');
         const featureFilterBtn = row.querySelector('.mapping-feature-filter-btn');
         const concatFieldPicker = row.querySelector('.concat-field-picker');
@@ -3532,6 +3713,9 @@
           if (manageBigAccountBtn) {
             manageBigAccountBtn.hidden = !isCustomInput;
           }
+          if (manageCurrencyBigAccountBtn) {
+            manageCurrencyBigAccountBtn.hidden = selectedValue !== MERCHANT_ID_CURRENCY_ONLY_OPTION;
+          }
           if (manageAmountSplitBtn) {
             manageAmountSplitBtn.hidden = !isAmountSplitEnabled;
           }
@@ -3585,6 +3769,22 @@
                 const merchantRow = rowByField.get('MerchantId');
                 const merchantSelect = merchantRow?.querySelector('.mapping-select');
                 if (merchantSelect) { merchantSelect.value = MERCHANT_ID_SELF_INPUT_OPTION; merchantSelect.dispatchEvent(new Event('change')); }
+                returnToModal(overlay);
+              },
+              onCancel: () => {
+                returnToModal(overlay);
+              }
+            }));
+          });
+        }
+
+        if (manageCurrencyBigAccountBtn) {
+          manageCurrencyBigAccountBtn.addEventListener('click', () => {
+            pushModal(overlay, () => createCurrencyBigAccountMappingDialog({
+              pairs: currentCurrencyBigAccounts,
+              onDone: (nextPairs) => {
+                currentCurrencyBigAccounts = cloneCurrencyBigAccountPairs(nextPairs);
+                setStatus('币种与大账号已暂存，点击【完成】后保存到模板', 'info');
                 returnToModal(overlay);
               },
               onCancel: () => {
@@ -3980,6 +4180,7 @@
             mappings,
             bigAccounts: draftBigAccounts,
             fixedAssignments: currentFixedAssignments,
+            currencyBigAccounts: cloneCurrencyBigAccountPairs(currentCurrencyBigAccounts),
             preserveOwn: !bigAccountsLoadedWithOwn,
             featureFilter: cloneFeatureFilter(currentFeatureFilter),
             ...(channelAssignment ? { channel: channelAssignment } : {})
@@ -4418,6 +4619,9 @@
         // 从主模板映射复制，排除 Currency/Credit/Debit/advanced/bill-split group
         const imported = (mainTemplateMappings || [])
           .filter((m) => !excludeFields.has(m.templateField))
+          // v3.2.16：MerchantId 的「自己输入」「原始账单仅有币种无账户号」不是源字段，复制到拆分映射后保存会报“映射字段不存在”
+          .filter((m) => !(m.templateField === 'MerchantId'
+            && [MERCHANT_ID_SELF_INPUT_OPTION, MERCHANT_ID_CURRENCY_ONLY_OPTION].includes(String(m.mappedField || ''))))
           .map((m) => ({
             templateField: m.templateField,
             mappedField: String(m.mappedField || ''),
@@ -6145,7 +6349,7 @@
     //   带「库」读着别扭，且 gateway 既有文案为「网关对账单数据」（硬约束行为不变）→ 此处用不带「库」的表名。
     //   仅含三张可删表（与后端 LINKED_DELETE_ALLOWED_TABLES 同口径）；默认 gateway-bill。
 
-    return Object.freeze({ looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog });
+    return Object.freeze({ looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, createCurrencyBigAccountMappingDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog });
   }
   global.ConfigurationDialogs = Object.freeze({ createConfigurationDialogs, buildBalanceSeedConfirmationRequest });
 })(window);

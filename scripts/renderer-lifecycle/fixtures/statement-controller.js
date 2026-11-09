@@ -162,6 +162,19 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     await js(`statementFixture.controller.commands.exportError();`); await tick();
     assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 2);
   });
+  // v3.2.16：「原始账单仅有币种无账户号」币种未维护大账号时整批阻断，弹窗列出文件、币种和行号（spec D1）
+  await test('导入因币种未维护大账号被阻断时，弹窗列出明细并禁用导出', async () => {
+    await setup();
+    await js(`statementFixture.next.import={status:'error',message:'有 2 行明细的币种为空或未在【映射管理】中维护大账号',errorCode:'CURRENCY_BIG_ACCOUNT_UNMAPPED',
+      detailLines:['模板「招商银行-上海」文件「a.xlsx」币种「GBP」：第 3 行','模板「招商银行-上海」文件「a.xlsx」币种「（空）」：第 5 行'],errorReportReady:true};
+      statementFixture.controller.commands.importFile()`); await tick();
+    assert.deepEqual(await js('statementFixture.alerts'), [
+      '有 2 行明细的币种为空或未在【映射管理】中维护大账号\n模板「招商银行-上海」文件「a.xlsx」币种「GBP」：第 3 行\n模板「招商银行-上海」文件「a.xlsx」币种「（空）」：第 5 行'
+    ]);
+    assert.equal(await js(`document.getElementById('exportDetailBtn').disabled&&document.getElementById('exportBalanceBtn').disabled`), true);
+    await js(`statementFixture.next.import={status:'error',message:'测试错误',errorCode:'FILE_READ',detailLines:['不弹窗'],errorReportReady:true};statementFixture.controller.commands.importFile()`); await tick();
+    assert.equal(await js('statementFixture.alerts.length'), 1);
+  });
   await test('导入双击只有一个IPC，离页期间不渲染；重进消费真实在途结果且不新增sessionStatus', async () => {
     await setup();
     await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.import=statementFixture.pending;document.getElementById('importFileBtn').click();document.getElementById('importFileBtn').click();statementFixture.controller.leave();`);

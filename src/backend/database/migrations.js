@@ -490,6 +490,39 @@ function ensureTemplateBigAccountNatureSupport(db) {
   }
 }
 
+// v3.2.16：MerchantId「原始账单仅有币种无账户号」— 按模板维护 币种 → 大账号。
+// 与 template_big_accounts 分开存放：这里的配置不参与大账号识别、选择与渠道汇总。
+// 幂等：CREATE TABLE / INDEX IF NOT EXISTS；删除模板时级联删除。
+function ensureTemplateCurrencyBigAccountSupport(db) {
+  db.exec('BEGIN');
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS template_currency_big_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id INTEGER NOT NULL,
+        currency TEXT NOT NULL COLLATE NOCASE,
+        merchant_id TEXT NOT NULL,
+        row_index INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE,
+        UNIQUE(template_id, currency)
+      );
+    `);
+
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS template_currency_big_accounts_template_id_idx
+      ON template_currency_big_accounts(template_id);
+    `);
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 // v2.0.0-beta.3：银行对账单处理模块 — 场景表 + 内置 3 场景 seed
 // 幂等：CREATE TABLE IF NOT EXISTS + seed-if-empty
 const BUILTIN_SCENARIOS = [
@@ -4387,6 +4420,7 @@ module.exports = {
   ensureTemplateResourceVersionSupport,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
+  ensureTemplateCurrencyBigAccountSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateFilenameFixedFieldSupport,
   ensureTemplateFeatureFilterSupport,
