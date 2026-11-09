@@ -128,6 +128,15 @@
 - 关联功能：字段拼接映射（如 Narrative = 摘要 + 备注）
 - 变更 review 要点：拼接顺序 / 分隔符变化会直接改动输出内容
 
+### `FEATURE_FILTER_MAPPING_FIELD` / `FEATURE_FILTER_FIELD_TOKEN` / `templates.feature_filter_json`
+- 定义：映射值 `'字段筛选特征值'` 在 `src/main.js` 与 `src/renderer.js`（两处同值）；生成 lookup 内部 token `'__FEATURE_FILTER__'` 在 `src/backend/file-service/common.js`；模板级规则列由 `ensureTemplateFeatureFilterSupport` 迁移（v3.2.16）
+- 关联功能：按模板级规则从一个源字段筛出特征值，赋给选该值的目标字段（主映射与「不复用」的拆分映射共用一套规则）
+- 变更 review 要点：
+  - 匹配口径在 `src/backend/file-service/feature-filter.js`，渲染端 `configuration.js` 有同口径的样例校验与推导，改一处要同步另一处
+  - 映射行不带源字段（`mapped_fields_json = []`），旧代码会失败关闭；改存储形状须评估旧版本与模板包兼容
+  - 模板包：主映射或拆分映射用到该值时 `resolveTemplateBundleVersion` 写 v6（旧版整包拒绝），否则写 v5；“是否使用”只看实际生效的映射（拆分且不复用时为拆分映射）
+  - 必跑：`scripts/integration/statement-feature-filter.js`、`node scripts/test-renderer-lifecycle.js configuration-dialogs.js`
+
 ### `MERCHANT_ID_SELF_INPUT_OPTION`
 - 定义：`src/main.js`
 - 关联功能：大账号弹窗"自行输入 MerchantId"选项；CLAUDE.md Big Account Selection 的默认分支来源

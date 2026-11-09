@@ -37,6 +37,8 @@ const ADVANCED_MAPPING_FIELDS = [
   AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD
 ];
 const CONCAT_FIELDS_MAPPING_FIELD = '需要拼接字段';
+// v3.2.16：映射值「字段筛选特征值」，与 main.js 同名常量保持一致
+const FEATURE_FILTER_MAPPING_FIELD = '字段筛选特征值';
 const MODULES = Object.freeze({
   statementGenerator: {
     id: 'statement-generator',
@@ -651,6 +653,7 @@ const {
   MERCHANT_ID_SELF_INPUT_OPTION,
   ADVANCED_MAPPING_FIELDS,
   CONCAT_FIELDS_MAPPING_FIELD,
+  FEATURE_FILTER_MAPPING_FIELD,
   AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD,
   AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION,
   refreshTemplates: configurationServices.refreshTemplates,

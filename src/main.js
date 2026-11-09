@@ -698,6 +698,7 @@ const {
   buildExpectedHeaderCandidates,
   buildMappedRows,
   compileRegexLiteral,
+  FEATURE_FILTER_FIELD_TOKEN,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
   extractHeaders,
@@ -706,6 +707,7 @@ const {
   loadCurrencyMappings,
   loadEnumValues,
   normalizeCell,
+  normalizeFeatureFilterRule,
   parseDateValue,
   parseNumericValue,
   readRows,
@@ -1727,6 +1729,8 @@ const BALANCE_CALCULATED_OPTION = '通过发生额计算';
 const MERCHANT_ID_SELF_INPUT_OPTION = '自己输入';
 const MERCHANT_ID_MULTI_ACCOUNT_MARKER = '__MULTI_BIG_ACCOUNT__';
 const CONCAT_FIELDS_MAPPING_FIELD = '需要拼接字段';
+// v3.2.16：映射值「字段筛选特征值」——从一个源字段按模板级规则筛出特征值（规则存 templates.feature_filter_json）
+const FEATURE_FILTER_MAPPING_FIELD = '字段筛选特征值';
 const CUSTOM_INPUT_TARGET_FIELDS = new Set(['MerchantId']);
 const SIGNED_AMOUNT_MAPPING_FIELD = '按正负号拆分的发生额';
 const AMOUNT_BASED_NAME_MAPPING_FIELD = '根据发生额做映射的户名';
@@ -1742,7 +1746,10 @@ const REUSE_MODULE_DEFAULT_OPTION = '是';
 // - `readTemplateBundleFile` 对未知字段采用显式解构式解析（:1221-1243），v1.5.1 旧应用读 v1.5.2 导出的 bundle 时自然忽略该字段
 // - v1.5.1 旧 bundle 若不含该字段，读时 fallback 为空串（:1242）
 // v3.2.15：v5 以渠道取代主/子模板（顶层 channels，条目 channelName），兼容读取 v≤4。
-const SUPPORTED_BUNDLE_VERSION = 5;
+// v3.2.16：用到「字段筛选特征值」（主映射或拆分映射）的模板包写 v6，让旧版按版本号整包拒绝
+//   （旧版不校验拆分映射，只用于拆分映射时会被静默导入并输出空值）；未用到时仍写 v5，旧版照常可导入。
+const SUPPORTED_BUNDLE_VERSION = 6;
+const BASE_BUNDLE_VERSION = 5;
 // v1.5.2 需求 3：主页面「按文件名映射模板」的虚拟模板 ID（非 DB 记录）
 // helper 用于在接收 templateId 的调用点统一短路，避免将虚拟 ID 传入真实查询
 const FILENAME_MAPPING_TEMPLATE_ID = '__FILENAME_MAPPING__';
@@ -3578,11 +3585,20 @@ function buildTemplateLibraryPayload() {
   });
 
   return {
-    bundleVersion: SUPPORTED_BUNDLE_VERSION,
+    bundleVersion: resolveTemplateBundleVersion(templates),
     exportedAt: new Date().toISOString(),
     channels,
     templates
   };
+}
+
+// v3.2.16：任一模板的主映射或拆分映射用到「字段筛选特征值」时写 v6，否则写 v5（见 SUPPORTED_BUNDLE_VERSION 注释）。
+function resolveTemplateBundleVersion(templates) {
+  const usesFeatureFilter = (Array.isArray(templates) ? templates : []).some((entry) => (
+    [].concat(entry && entry.mappings || [], entry && entry.billSplitMappings || [])
+      .some((mapping) => normalizeCell(mapping && mapping.mappedField) === FEATURE_FILTER_MAPPING_FIELD)
+  ));
+  return usesFeatureFilter ? SUPPORTED_BUNDLE_VERSION : BASE_BUNDLE_VERSION;
 }
 
 function toBundleAccountMapping(m) {
@@ -3681,6 +3697,10 @@ function readTemplateBundleFile(filePath) {
       ? { signedAmountSourceField: normalizeCell(item.billSplitMeta.signedAmountSourceField) }
       : { signedAmountSourceField: '' },
     dateFormat: normalizeCell(item.dateFormat) || 'auto',
+    // v3.2.16：模板级「字段筛选特征值」规则（旧 bundle 无此字段时为 null；导入时再校验）
+    featureFilter: item.featureFilter && typeof item.featureFilter === 'object' && !Array.isArray(item.featureFilter)
+      ? { ...item.featureFilter }
+      : null,
     // v3.2.15（v5）：所属渠道；v≤4 的主/子模板字段只用于导入时转为渠道。
     channelName: bundleVersion >= 5 ? (normalizeCell(item.channelName) || null) : null,
     isParent: bundleVersion < 5 && Boolean(item.isParent),
@@ -3936,6 +3956,7 @@ function buildImportWarningDetailLines(warnings) {
   const skippedBalanceGaps = warnings
     .filter((warning) => warning.type === 'balance-gap-skipped')
     .flatMap((warning) => (Array.isArray(warning.gaps) ? warning.gaps : []));
+  const featureValueWarnings = warnings.filter((warning) => warning.type === 'feature-value-unmatched');
 
   if (summaryRowWarnings.length) {
     detailLines.push('以下行的账单日期列是账单自带的合计标签，按合计行处理，未写入导出的明细账单：');
@@ -3950,6 +3971,14 @@ function buildImportWarningDetailLines(warnings) {
       detailLines.push(
         `第${warning.rowNumber}行，Credit Amount="${warning.creditAmount || '(空)'}"，Debit Amount="${warning.debitAmount || '(空)'}"`
       );
+    });
+  }
+
+  // v3.2.16：字段筛选特征值未命中的行（选该映射值的字段已留空）
+  if (featureValueWarnings.length) {
+    detailLines.push('以下行未筛出特征值，选择「字段筛选特征值」的字段已留空：');
+    featureValueWarnings.forEach((warning) => {
+      detailLines.push(`第${warning.rowNumber}行，源字段“${warning.sourceField}”，原值“${warning.rawValue || '(空)'}”`);
     });
   }
 
@@ -3990,6 +4019,7 @@ function buildImportWarningMessage({ warnings, balanceReady, balanceRequested })
   const summaryRowCount = warnings.filter((warning) => warning.type === 'summary-row-skipped').length;
   const hasCurrencyWarning = warnings.some((warning) => warning.type === 'currency-unmapped');
   const hasBalanceWarning = warnings.some((warning) => warning.type === 'balance-generate-failed');
+  const featureValueMissCount = warnings.filter((warning) => warning.type === 'feature-value-unmatched').length;
   const skippedBalanceGapCount = warnings
     .filter((warning) => warning.type === 'balance-gap-skipped')
     .reduce((sum, warning) => sum + (Array.isArray(warning.gaps) ? warning.gaps.length : 0), 0);
@@ -4007,6 +4037,10 @@ function buildImportWarningMessage({ warnings, balanceReady, balanceRequested })
 
   if (skippedDetailCount > 0) {
     warningParts.push(`已过滤${skippedDetailCount}条收支均为0或空值的明细`);
+  }
+
+  if (featureValueMissCount > 0) {
+    warningParts.push(`${featureValueMissCount}行未筛出特征值，相关字段已留空`);
   }
 
   if (hasCurrencyWarning) {
@@ -4689,7 +4723,11 @@ function buildTemplateSummary(template) {
     channelId: template.channelId || null,
     channelName: template.channelName || '',
     // v1.5.2 需求 3（G3-4）：透传「文件名里的固定字段」给映射关系对话框回显
-    filenameFixedField: String(template.filenameFixedField || '')
+    filenameFixedField: String(template.filenameFixedField || ''),
+    // v3.2.16：模板级「字段筛选特征值」规则，供映射关系对话框回显
+    featureFilter: template.featureFilter && typeof template.featureFilter === 'object'
+      ? { ...template.featureFilter }
+      : null
   };
 }
 
@@ -8183,7 +8221,22 @@ function registerFundTransferAccountMappingHandlers() {
   });
 }
 
-function validateTemplateConfiguration({ template, mappings, enumValues, bigAccounts = [], fixedAssignments = [] }) {
+// v3.2.16：保存时的筛选规则——实际用到时必须有效（无效即抛错）；未用到时有效草稿照存（便于再次选用），无效则不写。
+function resolveSavedFeatureFilter({ used, featureFilter, headers }) {
+  if (used) {
+    return normalizeFeatureFilterRule(featureFilter, { headers });
+  }
+  if (!featureFilter) {
+    return null;
+  }
+  try {
+    return normalizeFeatureFilterRule(featureFilter, { headers });
+  } catch (_error) {
+    return null;
+  }
+}
+
+function validateTemplateConfiguration({ template, mappings, enumValues, bigAccounts = [], fixedAssignments = [], featureFilter = null, billSplitMappings = [] }) {
   const targetFields = buildManagedMappingFields(enumValues);
   const targetFieldSet = new Set(targetFields);
   const sourceFieldSet = new Set(template.headers.map((header) => normalizeCell(header)));
@@ -8198,14 +8251,16 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
       return;
     }
 
+    const isFeatureFilterMode = rawMappedField === FEATURE_FILTER_MAPPING_FIELD;
     mappingByTarget.set(targetField, {
-      mappedField: rawMappedField === CONCAT_FIELDS_MAPPING_FIELD ? CONCAT_FIELDS_MAPPING_FIELD : sourceField,
-      mappedFields: getMappingFieldValues(mapping),
+      mappedField: rawMappedField === CONCAT_FIELDS_MAPPING_FIELD || isFeatureFilterMode ? rawMappedField : sourceField,
+      mappedFields: isFeatureFilterMode ? [] : getMappingFieldValues(mapping),
       customValue: normalizeCell(mapping.customValue)
     });
   });
 
   const cleanedMappings = [];
+  const featureFilterTargetFields = [];
   const merchantIdMapping = mappingByTarget.get('MerchantId') || {
     mappedField: '',
     mappedFields: [],
@@ -8411,6 +8466,25 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
       return;
     }
 
+    // v3.2.16：字段筛选特征值，可用字段同「需要拼接字段」；规则模板级共用，循环后统一校验。
+    if (normalizedSourceField === FEATURE_FILTER_MAPPING_FIELD) {
+      if (
+        targetField === 'Balance'
+        || targetField === 'MerchantId'
+        || targetField === 'Currency'
+        || ADVANCED_MAPPING_FIELDS.includes(targetField)
+      ) {
+        throw new FileValidationError('FILE_READ', `${targetField} 不支持使用"${FEATURE_FILTER_MAPPING_FIELD}"`);
+      }
+      featureFilterTargetFields.push(targetField);
+      cleanedMappings.push({
+        templateField: targetField,
+        mappedField: FEATURE_FILTER_MAPPING_FIELD,
+        mappedFields: []
+      });
+      return;
+    }
+
     if (normalizedSourceField === CONCAT_FIELDS_MAPPING_FIELD) {
       if (!selectedSourceFields.length) {
         throw new FileValidationError('FILE_READ', `${targetField} 使用"需要拼接字段"时必须至少选择 1 个源字段`);
@@ -8484,10 +8558,32 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
     });
   }
 
+  // v3.2.16：只按实际生效的映射判断是否用到（与生成口径 resolveStatementFeatureFilter 一致）：
+  //   启用拆分/合并且不复用模块映射时看拆分映射（已存或模板包内），否则看主映射。
+  const splitMappingsEffective = usesBillSplitMerge && cleanedMappings.some((mapping) => (
+    mapping.templateField === REUSE_MODULE_MAPPING_FIELD && mapping.mappedField === '否'
+  ));
+  const billSplitUsesFeatureFilter = splitMappingsEffective
+    && (Array.isArray(billSplitMappings) ? billSplitMappings : [])
+      .some((mapping) => normalizeCell(mapping && mapping.mappedField) === FEATURE_FILTER_MAPPING_FIELD);
+  const featureFilterUsed = splitMappingsEffective ? billSplitUsesFeatureFilter : featureFilterTargetFields.length > 0;
+  if (billSplitUsesFeatureFilter && !featureFilter) {
+    throw new FileValidationError(
+      'FILE_READ',
+      `拆分/合并账单映射关系设置中有字段使用了"${FEATURE_FILTER_MAPPING_FIELD}"，请先在该弹窗点击【筛选条件】设置`
+    );
+  }
+  const cleanedFeatureFilter = resolveSavedFeatureFilter({
+    used: featureFilterUsed,
+    featureFilter,
+    headers: template.headers
+  });
+
   return {
     mappings: cleanedMappings,
     bigAccounts: expandBigAccountConfigurations(cleanedBigAccounts),
-    fixedAssignments: cleanedFixedAssignments
+    fixedAssignments: cleanedFixedAssignments,
+    featureFilter: cleanedFeatureFilter
   };
 }
 
@@ -9055,7 +9151,10 @@ function registerTemplateHandlers() {
         mappings: payload.mappings,
         enumValues: loadEnumValues(enumConfig.filePath),
         bigAccounts: payload.bigAccounts,
-        fixedAssignments: payload.fixedAssignments
+        fixedAssignments: payload.fixedAssignments,
+        // v3.2.16：载荷未带规则时用已存规则；不复用的拆分映射用到该值时一并校验
+        featureFilter: payload.featureFilter || template.featureFilter || null,
+        billSplitMappings: database.getBillSplitMappings(payload.templateId)
       });
 
       const usesAmountSplitByField = templateConfiguration.mappings.some(
@@ -9132,7 +9231,7 @@ function registerTemplateHandlers() {
         templateConfiguration.fixedAssignments,
         payload.dateFormat,
         null,
-        { preserveOwn, channelAssignment }
+        { preserveOwn, channelAssignment, featureFilter: templateConfiguration.featureFilter }
       );
       const assignmentResult = saveResult && saveResult.channelAssignment;
       syncTemplateLibraryFile();
@@ -9503,7 +9602,9 @@ function registerTemplateHandlers() {
             }),
             enumValues,
             bigAccounts: entry.bigAccounts,
-            fixedAssignments: entry.fixedAssignments
+            fixedAssignments: entry.fixedAssignments,
+            featureFilter: entry.featureFilter,
+            billSplitMappings: entry.billSplitMappings
           });
           const template = database.upsertTemplate({
             templateKey: entry.templateKey,
@@ -9533,7 +9634,7 @@ function registerTemplateHandlers() {
             validated.fixedAssignments,
             entry.dateFormat,
             normalizedAmountSplitRules,
-            { preserveOwn: false }
+            { preserveOwn: false, featureFilter: validated.featureFilter }
           );
 
           // v1.5.2 需求 3：透传文件名固定字段（老 bundle 无此字段时落为空串）
@@ -9863,7 +9964,14 @@ function registerTemplateHandlers() {
         });
       }
       const validated = validateBillSplitMappingsPayload(payload.mappings, template);
-      database.saveBillSplitMappings(templateId, validated);
+      // v3.2.16：用到字段筛选特征值时规则必须有效（载荷未带则用已存规则），与映射同一事务写入
+      // 未用到时有效草稿照存，避免弹窗里改过的规则被丢弃而与界面不一致
+      const featureFilter = resolveSavedFeatureFilter({
+        used: validated.some((mapping) => mapping.mappedField === FEATURE_FILTER_MAPPING_FIELD),
+        featureFilter: payload.featureFilter || template.featureFilter,
+        headers: template.headers
+      });
+      database.saveBillSplitMappings(templateId, validated, { featureFilter });
       syncTemplateLibraryFile();
       return { status: 'success', message: '拆分账单字段映射保存成功' };
     } catch (error) {
@@ -10187,6 +10295,19 @@ function validateBillSplitMappingsPayload(mappings, template) {
     // 与主表格保持一致
     const isBalanceSpecialValue = templateField === 'Balance'
       && (mappedField === BALANCE_DISABLED_OPTION || mappedField === BALANCE_CALCULATED_OPTION);
+    // v3.2.16：字段筛选特征值共用模板级规则（由保存处统一校验），不带源字段
+    if (mappedField === FEATURE_FILTER_MAPPING_FIELD) {
+      if (templateField === 'Balance') {
+        throw new FileValidationError('FILE_READ', `${templateField} 不支持使用"${FEATURE_FILTER_MAPPING_FIELD}"`);
+      }
+      normalized.push({
+        templateField,
+        mappedField,
+        mappedFields: [],
+        rowIndex: Number.isInteger(mapping?.rowIndex) ? mapping.rowIndex : index
+      });
+      return;
+    }
     // Header existence check (allow concat marker + custom prefix to pass)
     const checkSourceFieldExists = (field) => {
       if (!field) return;
@@ -10349,6 +10470,11 @@ function buildMappedFieldLookup(mappings) {
   return mappings.reduce((accumulator, mapping) => {
     const mappedFields = getMappingFieldValues(mapping);
     const isConcatMode = normalizeCell(mapping.mappedField) === CONCAT_FIELDS_MAPPING_FIELD;
+    // v3.2.16：字段筛选特征值转为内部 token，由 buildMappedRows 按模板级规则逐行取值
+    if (normalizeCell(mapping.mappedField) === FEATURE_FILTER_MAPPING_FIELD) {
+      accumulator[mapping.templateField] = FEATURE_FILTER_FIELD_TOKEN;
+      return accumulator;
+    }
     accumulator[mapping.templateField] = isConcatMode
       ? (Array.isArray(mapping.mappedFields) && mapping.mappedFields.length ? mapping.mappedFields : mappedFields)
       : mappedFields.length > 1
@@ -10447,6 +10573,7 @@ function buildStatementGenerationConfig({
 
   const amountSplitByFieldConfig = buildAmountSplitByFieldConfig(template, selectedMappings);
   const billSplitMergeConfig = buildBillSplitMergeConfig(template, selectedMappings);
+  const featureFilter = resolveStatementFeatureFilter(template, mappingByTargetField, billSplitMergeConfig);
 
   return {
     template,
@@ -10466,8 +10593,24 @@ function buildStatementGenerationConfig({
     },
     amountSplitByField: amountSplitByFieldConfig,
     billSplitMerge: billSplitMergeConfig,
+    featureFilter,
     dateParseOrder: template.dateFormat || 'auto'
   };
+}
+
+// v3.2.16：实际生效的映射（拆分/合并且不复用时为拆分映射，否则为主映射）用到「字段筛选特征值」时，
+// 模板须有有效规则，否则拒绝生成；与 buildMappedRows 的启用口径一致。
+function resolveStatementFeatureFilter(template, mappingByTargetField, billSplitMergeConfig) {
+  const effectiveLookup = billSplitMergeConfig
+    && billSplitMergeConfig.enabled
+    && billSplitMergeConfig.reuseModuleMapping === false
+    ? billSplitMergeConfig.billSplitMappingByTargetField
+    : mappingByTargetField;
+  const used = Object.values(effectiveLookup || {}).some((value) => value === FEATURE_FILTER_FIELD_TOKEN);
+  if (!used) {
+    return null;
+  }
+  return normalizeFeatureFilterRule(template && template.featureFilter, { headers: template && template.headers });
 }
 
 function buildBillSplitMergeConfig(template, selectedMappings) {
@@ -10585,6 +10728,7 @@ function buildMappedRowsForFile({
     amountMappingRules: config.amountMappingRules,
     amountSplitByField: config.amountSplitByField,
     billSplitMerge: config.billSplitMerge,
+    featureFilter: config.featureFilter || null,
     expectedSourceHeaders: config.template.headers,
     selectedBigAccount: {
       merchantId: config.selectedMerchantId,

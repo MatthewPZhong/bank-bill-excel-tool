@@ -41,7 +41,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       cfg.services.acceptBootstrap({currencyOptions:['USD','HKD']});cfg.services.applyPreviewTemplates(cfg.templates);
       cfg.dialogs=__rendererDialogs.createRendererDialogs({modalBridge:cfg.bridge,configurationServices:cfg.services,configurationApi:cfg.api,dialogApis:{},reportLog:()=>{},
         scenarioCommands:ScenarioCommandService.createScenarioCommandService({scenariosApi:{},channelsApi:{}}),scenarioSubscriptions:ScenarioChangeRouter.createScenarioChangeRouter(),
-        appConstants:{},ADVANCED_MAPPING_FIELDS:[],setStatus:(...args)=>cfg.feedback.push(args),applyStatementResult:()=>cfg.applied++,applyManualBalancePromptStatus:()=>cfg.applied++});
+        appConstants:{},ADVANCED_MAPPING_FIELDS:[],CONCAT_FIELDS_MAPPING_FIELD:'需要拼接字段',FEATURE_FILTER_MAPPING_FIELD:'字段筛选特征值',setStatus:(...args)=>cfg.feedback.push(args),applyStatementResult:()=>cfg.applied++,applyManualBalancePromptStatus:()=>cfg.applied++});
       cfg.openMapping=()=>{cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createAccountMappingDialog({currentTemplateId:1,templates:cfg.templates,mappings:cfg.mappings('A')})).handle;
         cfg.overlay=cfg.top();cfg.select=cfg.overlay.querySelector('[data-role="template-select"]');cfg.save=cfg.overlay.querySelector('[data-action="done"]');};
       cfg.choose=id=>{cfg.select.value='template:'+id;cfg.select.dispatchEvent(new Event('change'));};
@@ -758,6 +758,147 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await js('cfg.handle.dispose();cfg.detachedMarkup=cfg.overlay.innerHTML;cfg.nextHandle=cfg.other();cfg.configReadGate.resolve();void 0;');await tick();
     assert.deepEqual(await js('({unchanged:cfg.detachedMarkup===cfg.overlay.innerHTML,newTop:cfg.nextHandle.isTop(),oldOpen:cfg.handle.isOpen(),errors:cfg.errors})'),{unchanged:true,newTop:true,oldOpen:false,errors:[]});
     assert.deepEqual(await js('cfg.store'),{rules:[],meta:originalRuleMeta});
+  });
+
+  // v3.2.16「字段筛选特征值」
+  const FEATURE = '字段筛选特征值';
+  const FEATURE_SETUP_JS = `cfg.tpl={id:9,name:'模板 F',headers:['交易日期','附言','']};
+    cfg.row=field=>cfg.top().querySelector('tr[data-template-field="'+field+'"]');
+    cfg.pick=(field,value)=>{const select=cfg.row(field).querySelector('select');select.value=value;select.dispatchEvent(new Event('change'));};
+    cfg.btn=field=>cfg.row(field).querySelector('.mapping-feature-filter-btn');
+    cfg.ff=()=>{const card=cfg.top().querySelector('.feature-filter-card');return card&&{source:card.querySelector('.feature-filter-source'),separator:card.querySelector('.feature-filter-separator'),
+      length:card.querySelector('.feature-filter-length'),prefix:card.querySelector('.feature-filter-prefix'),digits:card.querySelector('.feature-filter-digits'),
+      digitsLabel:card.querySelector('.feature-filter-digits-label'),sample:card.querySelector('.feature-filter-sample'),done:card.querySelector('[data-action="done"]')};};
+    cfg.type=(input,value)=>{input.value=value;input.dispatchEvent(new Event('input'));};void 0;`;
+  const openFeatureMapping = (extra = '') => js(`${FEATURE_SETUP_JS}
+    cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:{...cfg.tpl${extra}},targetFields:['BillDate','Remark','Reference','Currency','Balance'],mappings:cfg.featureMappings||[]})).handle;
+    cfg.overlay=cfg.top();void 0;`);
+
+  await test('字段筛选特征值：紧跟拼接选项出现，选中显示【筛选条件】，无规则时不保存，样例推导后规则随映射提交', async () => {
+    await setup();
+    await openFeatureMapping();
+    const options = await js(`['Remark','Currency','Balance'].map(field=>Array.from(cfg.row(field).querySelectorAll('option')).map(option=>option.value))`);
+    assert.equal(options[0].indexOf(FEATURE), options[0].indexOf('需要拼接字段') + 1);
+    assert.equal(options[1].includes(FEATURE), false);
+    assert.equal(options[2].includes(FEATURE), false);
+    assert.deepEqual(await js(`[cfg.btn('Remark').hidden,cfg.btn('Reference').hidden]`), [true, true]);
+    await js(`cfg.pick('Remark','${FEATURE}');cfg.pick('Reference','${FEATURE}');`);
+    assert.deepEqual(await js(`[cfg.btn('Remark').hidden,cfg.btn('Reference').hidden]`), [false, false]);
+
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /Remark、Reference 选择了「字段筛选特征值」，请先点击【筛选条件】设置/);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 0);
+    await js('cfg.host.closeTop();');
+
+    await js(`cfg.btn('Remark').click();`);
+    assert.deepEqual(await js(`Array.from(cfg.ff().source.options).map(option=>option.value)`), ['', '交易日期', '附言']);
+    assert.equal(await js('cfg.ff().separator.value'), 'space');
+    await js(`cfg.ff().source.value='附言';cfg.type(cfg.ff().sample,'FT24123456');`);
+    assert.deepEqual(await js(`[cfg.ff().length.value,cfg.ff().prefix.value,cfg.ff().digits.checked,cfg.ff().digitsLabel.textContent]`),
+      ['10', '2', true, '前 2 位之后全是数字']);
+    await js('cfg.ff().done.click();'); await tick();
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    assert.match(await js(`cfg.btn('Reference').title`), /筛选字段：附言；分隔符：空格；长度 10；前 2 位英文；其余为纯数字/);
+
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    const payload = await js(`(()=>{const args=cfg.calls.filter(call=>call.name==='mappingSave')[0].args[0];
+      return {featureFilter:args.featureFilter,feature:args.mappings.filter(m=>m.mappedField==='${FEATURE}').map(m=>[m.templateField,m.mappedFields])};})()`);
+    assert.deepEqual(payload, {
+      featureFilter: { sourceField: '附言', separator: 'space', length: 10, letterPrefixCount: 2, digitsOnly: true, sample: 'FT24123456' },
+      feature: [['Remark', []], ['Reference', []]]
+    });
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
+  await test('字段筛选特征值：筛选条件弹窗校验与回显，切走映射值后按钮隐藏，取消不改草稿', async () => {
+    await setup();
+    await js(`cfg.featureMappings=[{templateField:'Remark',mappedField:'${FEATURE}',mappedFields:[]}];void 0;`);
+    await openFeatureMapping(`,featureFilter:{sourceField:'附言',separator:'slash',length:6,letterPrefixCount:null,digitsOnly:true,sample:'123456'}`);
+    assert.equal(await js(`cfg.btn('Remark').hidden`), false);
+    await js(`cfg.btn('Remark').click();`);
+    assert.deepEqual(await js(`[cfg.ff().source.value,cfg.ff().separator.value,cfg.ff().length.value,cfg.ff().prefix.value,cfg.ff().digits.checked,cfg.ff().sample.value,cfg.ff().digitsLabel.textContent]`),
+      ['附言', 'slash', '6', '', true, '123456', '整段都是数字']);
+
+    await js(`cfg.ff().sample.value='12/3456';cfg.ff().done.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /特征值「12\/3456」不能包含所选分隔符/);
+    await js('cfg.host.closeTop();');
+    await js(`cfg.ff().sample.value='AB1234';cfg.ff().done.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /特征值「AB1234」不符合当前筛选条件/);
+    await js('cfg.host.closeTop();');
+    await js(`cfg.ff().sample.value='';cfg.ff().length.value='';cfg.ff().digits.checked=false;cfg.ff().done.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /特征长度、前几位英文、纯数字至少设置一项/);
+    await js('cfg.host.closeTop();');
+    await js(`cfg.ff().source.value='';cfg.ff().length.value='3';cfg.ff().done.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /请选择筛选字段/);
+    await js('cfg.host.closeTop();');
+
+    await js(`cfg.top().querySelector('.feature-filter-card [data-action="cancel"]').click();`); await tick();
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+
+    await js(`cfg.pick('Remark','附言');`);
+    assert.equal(await js(`cfg.btn('Remark').hidden`), true);
+    await js(`cfg.pick('Reference','${FEATURE}');cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='mappingSave')[0].args[0].featureFilter`),
+      { sourceField: '附言', separator: 'slash', length: 6, letterPrefixCount: null, digitsOnly: true, sample: '123456' });
+  });
+
+  await test('字段筛选特征值：拆分/合并且不复用时主映射残留该值不阻止保存，复用时仍要求先设置', async () => {
+    await setup();
+    const open = (reuse) => js(`${FEATURE_SETUP_JS}
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:cfg.tpl,targetFields:['BillDate','Remark','是否拆分/合并明细账单','复用模块字段的映射关系'],
+        mappings:[{templateField:'Remark',mappedField:'${FEATURE}',mappedFields:[]},{templateField:'是否拆分/合并明细账单',mappedField:'是',mappedFields:[]},{templateField:'复用模块字段的映射关系',mappedField:'${reuse}',mappedFields:[]}]})).handle;
+      cfg.overlay=cfg.top();cfg.overlay.querySelector('[data-action="done"]').click();void 0;`);
+    await open('否'); await tick();
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 1);
+    await js('cfg.host.closeAll?.();');
+    await open('是'); await tick();
+    assert.match(await js('cfg.top().textContent'), /Remark 选择了「字段筛选特征值」，请先点击【筛选条件】设置/);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 1);
+  });
+
+  await test('字段筛选特征值：拆分/合并映射弹窗共用同一套规则，保存时随拆分映射提交并回传', async () => {
+    await setup();
+    await js(`${FEATURE_SETUP_JS}cfg.splitDone=[];
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createBillSplitMappingsDialog({template:cfg.tpl,headers:cfg.tpl.headers,targetFields:['BillDate','MerchantId','Reference','Balance','Currency'],
+        initialMappings:[],featureFilter:null,onDone:(mappings,featureFilter)=>cfg.splitDone.push(featureFilter)})).handle;
+      cfg.overlay=cfg.top();void 0;`);
+    assert.equal(await js(`Array.from(cfg.row('Balance').querySelectorAll('option')).some(option=>option.value==='${FEATURE}')`), false);
+    await js(`cfg.pick('Reference','${FEATURE}');cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /Reference 选择了「字段筛选特征值」/);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='splitMapping').length`), 0);
+    await js('cfg.host.closeTop();');
+    await js(`cfg.btn('Reference').click();cfg.ff().source.value='附言';cfg.ff().separator.value='comma';cfg.type(cfg.ff().sample,'INV001');cfg.ff().done.click();`); await tick();
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    const expected = { sourceField: '附言', separator: 'comma', length: 6, letterPrefixCount: 3, digitsOnly: true, sample: 'INV001' };
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='splitMapping')[0].args[0].featureFilter`), expected);
+    assert.deepEqual(await js('cfg.splitDone'), [expected]);
+  });
+
+  await test('字段筛选特征值：筛选条件弹窗在最小窗口内完整可见、可点确定', async () => {
+    await setup({ zoom: 1 });
+    await openFeatureMapping();
+    await js(`cfg.pick('Remark','${FEATURE}');`);
+    await layout.settle();
+    const buttonGeometry = await js(`(() => {
+      const select=cfg.row('Remark').querySelector('select').getBoundingClientRect(), button=cfg.btn('Remark').getBoundingClientRect();
+      return { rightOfSelect: button.left>=select.right, sameLine: Math.abs((button.top+button.bottom)/2-(select.top+select.bottom)/2)<4 };
+    })()`);
+    assert.deepEqual(buttonGeometry, { rightOfSelect: true, sameLine: true });
+    await js('new Promise((resolve) => setTimeout(resolve, 250))');
+    await layout.evidence('feature-filter-mapping-row', { geometry: buttonGeometry });
+    await js(`cfg.btn('Remark').click();`);
+    await layout.settle();
+    const geometry = await js(`(() => {
+      const card=cfg.top().querySelector('.feature-filter-card'), rect=card.getBoundingClientRect();
+      const inside=element=>{const r=element.getBoundingClientRect();return r.left>=rect.left&&r.right<=rect.right&&r.top>=rect.top&&r.bottom<=rect.bottom;};
+      return { fits: rect.top>=0&&rect.bottom<=innerHeight&&rect.left>=0&&rect.right<=innerWidth,
+        controls: [...card.querySelectorAll('.feature-filter-grid select, .feature-filter-grid input, .dialog-actions button')].map(inside) };
+    })()`);
+    assert.deepEqual(geometry, { fits: true, controls: [true, true, true, true, true, true, true, true] });
+    await js('new Promise((resolve) => setTimeout(resolve, 250))');
+    await layout.evidence('feature-filter-dialog', { geometry });
+    await layout.click('.feature-filter-card [data-action="done"]');
+    assert.match(await js('cfg.top().textContent'), /请选择筛选字段/);
   });
 
 };

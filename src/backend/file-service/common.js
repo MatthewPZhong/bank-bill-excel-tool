@@ -1,5 +1,7 @@
 const SUPPORTED_EXTENSIONS = new Set(['.xlsx', '.xls', '.csv']);
 const FIXED_FIELD_VALUE_PREFIX = '__FIXED__:';
+// v3.2.16：映射值「字段筛选特征值」在生成 lookup 里的内部 token，避免与真实表头重名。
+const FEATURE_FILTER_FIELD_TOKEN = '__FEATURE_FILTER__';
 
 class FileValidationError extends Error {
   constructor(code, message, options = {}) {
@@ -66,6 +68,7 @@ function buildExpectedHeaderCandidates(expectedHeaders) {
 }
 
 module.exports = {
+  FEATURE_FILTER_FIELD_TOKEN,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
   SUPPORTED_EXTENSIONS,
