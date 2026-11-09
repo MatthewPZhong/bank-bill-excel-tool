@@ -12,6 +12,7 @@
       MERCHANT_ID_SELF_INPUT_OPTION,
       ADVANCED_MAPPING_FIELDS,
       CONCAT_FIELDS_MAPPING_FIELD,
+      FEATURE_FILTER_MAPPING_FIELD,
       AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD,
       AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION,
       refreshTemplates,
@@ -36,7 +37,7 @@
     const { looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog } = global.ConfigurationDialogs.createConfigurationDialogs({
       services: configurationServices, api: configurationApi, modalBridge,
       ui: { createOverlay, escapeHtml, createAlertDialog, createConfirmDialog, pushAlert, setStatus, applyStatementResult, applyManualBalancePromptStatus, createFeedbackScope },
-      constants: { BALANCE_DISABLED_OPTION, BALANCE_CALCULATED_OPTION, MERCHANT_ID_SELF_INPUT_OPTION, ADVANCED_MAPPING_FIELDS, CONCAT_FIELDS_MAPPING_FIELD, AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD, AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION }
+      constants: { BALANCE_DISABLED_OPTION, BALANCE_CALCULATED_OPTION, MERCHANT_ID_SELF_INPUT_OPTION, ADVANCED_MAPPING_FIELDS, CONCAT_FIELDS_MAPPING_FIELD, FEATURE_FILTER_MAPPING_FIELD, AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD, AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION }
     });
 
     function pushAlert(parentElement, factory) {

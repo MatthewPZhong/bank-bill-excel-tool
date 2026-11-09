@@ -18,6 +18,19 @@ function parseJsonArray(rawValue) {
   }
 }
 
+// v3.2.16：模板级「字段筛选特征值」规则；空串、非对象或解析失败时为 null（规则校验由主进程负责）。
+function parseJsonObject(rawValue) {
+  if (!normalizeText(rawValue)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(rawValue);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
 function groupBigAccountRows(rows) {
   // v1.5.3 R2：按 (merchantId + accountNature) 分组，保证 client 与 own 不被误合并
   // 返回结构含 accountNature（缺省 'client'，与老调用点向后兼容）
@@ -108,7 +121,9 @@ function buildTemplateSummaryFromRow(row) {
     channelId: row.channelId ? Number(row.channelId) : null,
     channelName: row.channelId ? normalizeText(row.channelName) : '',
     // v1.5.2 需求 3：按文件名映射模板的固定字段（默认空串）
-    filenameFixedField: normalizeText(row.filenameFixedField)
+    filenameFixedField: normalizeText(row.filenameFixedField),
+    // v3.2.16：模板级「字段筛选特征值」规则（未设置为 null）
+    featureFilter: parseJsonObject(row.featureFilterJson)
   };
 }
 
@@ -118,5 +133,6 @@ module.exports = {
   buildTemplateSummaryFromRow,
   groupBigAccountRows,
   normalizeText,
-  parseJsonArray
+  parseJsonArray,
+  parseJsonObject
 };

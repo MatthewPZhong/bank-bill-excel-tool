@@ -25,6 +25,7 @@ function listTemplates(db) {
       t.channel_id AS channelId,
       sc.name AS channelName,
       t.filename_fixed_field AS filenameFixedField,
+      t.feature_filter_json AS featureFilterJson,
       COUNT(DISTINCT m.id) AS mappingCount,
       COUNT(DISTINCT ba.merchant_id) AS bigAccountCount,
       merchant_mapping.mapped_field AS merchantIdMappedField,
@@ -59,6 +60,7 @@ function getTemplate(db, templateId) {
         t.channel_id AS channelId,
         (SELECT sc.name FROM statement_channels sc WHERE sc.id = t.channel_id) AS channelName,
         t.filename_fixed_field AS filenameFixedField,
+        t.feature_filter_json AS featureFilterJson,
         (
           SELECT COUNT(1)
           FROM template_mappings m
@@ -153,6 +155,8 @@ function upsertTemplate(db, { templateKey = '', name, sourceFileName, headers })
           WHERE id = ?
         `)
         .run(normalizedTemplateKey, name, sourceFileName, JSON.stringify(headers), now, existing.id);
+      // v3.2.16：表头被覆盖、映射清空时，筛选特征值规则（引用旧表头）一并清空
+      db.prepare("UPDATE templates SET feature_filter_json = '' WHERE id = ?").run(existing.id);
       db.prepare('DELETE FROM template_mappings WHERE template_id = ?').run(existing.id);
       db.prepare('DELETE FROM template_big_accounts WHERE template_id = ?').run(existing.id);
       db.prepare('DELETE FROM template_fixed_assignments WHERE template_id = ?').run(existing.id);
@@ -344,6 +348,15 @@ function getTemplateMappings(db, templateId) {
   };
 }
 
+// v3.2.16：写入模板级「字段筛选特征值」规则；调用方须在事务内调用。
+// featureFilter 为对象时覆盖写入；undefined / null 不动（规则不再被使用时保留，便于再次选用）。
+function writeTemplateFeatureFilter(db, templateId, featureFilter) {
+  if (!featureFilter || typeof featureFilter !== 'object' || Array.isArray(featureFilter)) {
+    return;
+  }
+  db.prepare('UPDATE templates SET feature_filter_json = ? WHERE id = ?').run(JSON.stringify(featureFilter), templateId);
+}
+
 // v1.5.3 R2 round 3 修复 (Codex Finding 5)：
 // 用户在 mapping dialog 直接保存（不开维护大账号）时，前端 currentBigAccounts 来自 §3.1 过滤后的 client-only 列表，
 // 旧 saveMappings 直接 DELETE all + INSERT all → 数据库 own 被静默删除。
@@ -359,7 +372,7 @@ function saveMappings(
   fixedAssignments = [],
   dateFormat,
   amountSplitRules = null,
-  { preserveOwn = false, channelAssignment = null } = {}
+  { preserveOwn = false, channelAssignment = null, featureFilter = undefined } = {}
 ) {
   const now = new Date().toISOString();
   let channelAssignmentResult = null;
@@ -477,6 +490,8 @@ function saveMappings(
       });
     }
 
+    writeTemplateFeatureFilter(db, templateId, featureFilter);
+
     if (dateFormat) {
       db.prepare('UPDATE templates SET updated_at = ?, date_format = ? WHERE id = ?').run(now, dateFormat, templateId);
     } else {
@@ -537,7 +552,7 @@ function getBillSplitMappings(db, templateId) {
     }));
 }
 
-function saveBillSplitMappings(db, templateId, mappings = []) {
+function saveBillSplitMappings(db, templateId, mappings = [], { featureFilter = undefined } = {}) {
   const now = new Date().toISOString();
   db.exec('BEGIN');
 
@@ -573,6 +588,9 @@ function saveBillSplitMappings(db, templateId, mappings = []) {
         now
       );
     });
+
+    // v3.2.16：拆分/合并映射用到「字段筛选特征值」时，规则与映射同一事务写入
+    writeTemplateFeatureFilter(db, templateId, featureFilter);
 
     db.exec('COMMIT');
   } catch (error) {
@@ -902,6 +920,8 @@ function listTemplateBundleEntries(db) {
         ? { signedAmountSourceField: payload.billSplitMeta.signedAmountSourceField || '' }
         : { signedAmountSourceField: '' },
       dateFormat: template.dateFormat || 'auto',
+      // v3.2.16：模板级「字段筛选特征值」规则（未设置为 null；旧版读取时忽略）
+      featureFilter: template.featureFilter ? { ...template.featureFilter } : null,
       createdAt: template.createdAt,
       updatedAt: template.updatedAt
     };

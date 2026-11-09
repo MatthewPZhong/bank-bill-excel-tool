@@ -90,6 +90,7 @@ const {
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateFilenameFixedFieldSupport,
+  ensureTemplateFeatureFilterSupport,
   ensureTemplateKeySupport,
   ensureTemplateMappingEnhancements,
   hasColumn
@@ -257,6 +258,7 @@ class AppDatabase {
     this.ensureBillSplitTargetSeqSupport();
     this.ensureParentTemplateSupport();
     this.ensureTemplateFilenameFixedFieldSupport();
+    this.ensureTemplateFeatureFilterSupport();
     this.ensureAccountMappingTemplateSupport();
     this.ensureTemplateBigAccountNatureSupport();
     // v3.2.15：主/子模板一次性转为渠道；必须在 ensureParentTemplateSupport 与
@@ -774,6 +776,10 @@ class AppDatabase {
     return ensureTemplateFilenameFixedFieldSupport(this.db);
   }
 
+  ensureTemplateFeatureFilterSupport() {
+    return ensureTemplateFeatureFilterSupport(this.db);
+  }
+
   ensureAccountMappingTemplateSupport() {
     return ensureAccountMappingTemplateSupport(this.db);
   }
@@ -1182,8 +1188,8 @@ class AppDatabase {
     return templateRepository.getBillSplitMappings(this.db, templateId);
   }
 
-  saveBillSplitMappings(templateId, mappings) {
-    return templateRepository.saveBillSplitMappings(this.db, templateId, mappings);
+  saveBillSplitMappings(templateId, mappings, options = {}) {
+    return templateRepository.saveBillSplitMappings(this.db, templateId, mappings, options);
   }
 
   getBillSplitRows(templateId) {

@@ -2,7 +2,7 @@
   'use strict';
   function buildBalanceSeedConfirmationRequest(contextId) { return { contextId, confirmOverwrite: true }; }
   function createConfigurationDialogs({ services, api, modalBridge, ui, constants }) {
-    const { BALANCE_DISABLED_OPTION, BALANCE_CALCULATED_OPTION, MERCHANT_ID_SELF_INPUT_OPTION, ADVANCED_MAPPING_FIELDS, CONCAT_FIELDS_MAPPING_FIELD, AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD, AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION } = constants;
+    const { BALANCE_DISABLED_OPTION, BALANCE_CALCULATED_OPTION, MERCHANT_ID_SELF_INPUT_OPTION, ADVANCED_MAPPING_FIELDS, CONCAT_FIELDS_MAPPING_FIELD, FEATURE_FILTER_MAPPING_FIELD = '字段筛选特征值', AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD, AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION } = constants;
     const { createOverlay, escapeHtml, createAlertDialog, createConfirmDialog, pushAlert, setStatus, applyStatementResult, applyManualBalancePromptStatus } = ui;
     const { openModal, closeModal, pushModal, replaceModal, registerModal, returnToModal } = modalBridge;
     const refreshTemplates = services.refreshTemplates;
@@ -695,6 +695,236 @@
       });
 
       return matchedOption?.code || '';
+    }
+
+    // ==================== v3.2.16「字段筛选特征值」 ====================
+    // 匹配口径与 src/backend/file-service/feature-filter.js 一致（后端为准，保存时再次校验）。
+    const FEATURE_FILTER_SEPARATOR_OPTIONS = [
+      { value: '', label: '不拆分（整格匹配）' },
+      { value: 'space', label: '空格' },
+      { value: 'slash', label: '/' },
+      { value: 'comma', label: ',' },
+      { value: 'dot', label: '.' },
+      { value: 'backslash', label: '\\' }
+    ];
+    const FEATURE_FILTER_MAX_LENGTH = 200;
+
+    function cloneFeatureFilter(rule) {
+      return rule && typeof rule === 'object' && !Array.isArray(rule) ? { ...rule } : null;
+    }
+
+    function splitFeatureFilterText(text, separator) {
+      const value = String(text ?? '').trim();
+      if (!value) return [];
+      const splitter = { space: /\s+/u, slash: '/', comma: ',', dot: '.', backslash: '\\' }[separator];
+      if (!splitter) return [value];
+      return value.split(splitter).map((part) => part.trim()).filter((part) => part !== '');
+    }
+
+    function matchesFeatureFilterRule(token, rule) {
+      const chars = Array.from(String(token ?? ''));
+      if (!chars.length) return false;
+      if (rule.length !== null && chars.length !== rule.length) return false;
+      const prefixCount = rule.letterPrefixCount || 0;
+      if (prefixCount > 0 && (chars.length < prefixCount || !chars.slice(0, prefixCount).every((c) => /^[A-Za-z]$/.test(c)))) {
+        return false;
+      }
+      if (rule.digitsOnly) {
+        const rest = chars.slice(prefixCount);
+        if (!rest.length || !rest.every((c) => /^[0-9]$/.test(c))) return false;
+      }
+      return true;
+    }
+
+    // 输入特征值（样例）后推导：长度、开头连续英文位数、其余是否全为数字。
+    function deriveFeatureFilterFromSample(sample) {
+      const chars = Array.from(String(sample ?? '').trim());
+      if (!chars.length) return null;
+      let prefixCount = 0;
+      while (prefixCount < chars.length && /^[A-Za-z]$/.test(chars[prefixCount])) prefixCount += 1;
+      const rest = chars.slice(prefixCount);
+      return {
+        length: chars.length,
+        letterPrefixCount: prefixCount > 0 ? prefixCount : null,
+        digitsOnly: rest.length > 0 && rest.every((c) => /^[0-9]$/.test(c))
+      };
+    }
+
+    function describeFeatureFilter(rule) {
+      if (!rule) return '尚未设置筛选条件';
+      const separator = FEATURE_FILTER_SEPARATOR_OPTIONS.find((option) => option.value === rule.separator);
+      const parts = [`筛选字段：${rule.sourceField}`, `分隔符：${separator ? separator.label : '不拆分'}`];
+      if (rule.length !== null && rule.length !== undefined) parts.push(`长度 ${rule.length}`);
+      if (rule.letterPrefixCount) parts.push(`前 ${rule.letterPrefixCount} 位英文`);
+      if (rule.digitsOnly) parts.push(rule.letterPrefixCount ? '其余为纯数字' : '纯数字');
+      return parts.join('；');
+    }
+
+    function parseFeatureFilterCount(rawValue, label, errors, { allowZero = false } = {}) {
+      const text = String(rawValue ?? '').trim();
+      if (text === '') return null;
+      if (!/^\d+$/.test(text)) {
+        errors.push(`${label}须为整数`);
+        return null;
+      }
+      const count = Number(text);
+      if (count === 0 && allowZero) return null;
+      if (count < 1 || count > FEATURE_FILTER_MAX_LENGTH) {
+        errors.push(`${label}须在 1–${FEATURE_FILTER_MAX_LENGTH} 之间`);
+        return null;
+      }
+      return count;
+    }
+
+    // 校验弹窗草稿，返回 { errors, rule }；错误文案与后端一致。
+    function validateFeatureFilterDraft(draft, headers) {
+      const errors = [];
+      const sourceField = String(draft.sourceField || '').trim();
+      const headerSet = new Set((headers || []).map((header) => String(header ?? '').trim()).filter(Boolean));
+      if (!sourceField) {
+        errors.push('请选择筛选字段');
+      } else if (!headerSet.has(sourceField)) {
+        errors.push(`筛选字段不存在：${sourceField}`);
+      }
+      const separator = String(draft.separator || '');
+      const length = parseFeatureFilterCount(draft.length, '特征长度', errors);
+      const letterPrefixCount = parseFeatureFilterCount(draft.letterPrefixCount, '前几位英文', errors, { allowZero: true });
+      const digitsOnly = draft.digitsOnly === true;
+      if (!errors.length) {
+        if (length === null && letterPrefixCount === null && !digitsOnly) {
+          errors.push('特征长度、前几位英文、纯数字至少设置一项');
+        } else if (length !== null && letterPrefixCount !== null && letterPrefixCount > length) {
+          errors.push('前几位英文不能大于特征长度');
+        } else if (length !== null && letterPrefixCount !== null && digitsOnly && letterPrefixCount === length) {
+          errors.push('勾选纯数字时，特征长度须大于前几位英文');
+        }
+      }
+      const rule = { sourceField, separator, length, letterPrefixCount, digitsOnly, sample: String(draft.sample || '').trim() };
+      if (!errors.length && rule.sample) {
+        const sampleTokens = splitFeatureFilterText(rule.sample, separator);
+        if (sampleTokens.length !== 1 || sampleTokens[0] !== rule.sample) {
+          errors.push(`特征值「${rule.sample}」不能包含所选分隔符`);
+        } else if (!matchesFeatureFilterRule(rule.sample, rule)) {
+          errors.push(`特征值「${rule.sample}」不符合当前筛选条件`);
+        }
+      }
+      return { errors, rule };
+    }
+
+    function createFeatureFilterDialog({ headers = [], featureFilter = null, onDone, onCancel }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card feature-filter-card';
+      const initial = cloneFeatureFilter(featureFilter);
+      const sourceOptions = ['<option value=""></option>']
+        .concat((headers || [])
+          .filter((header) => String(header ?? '').trim() !== '')
+          .map((header) => `<option value="${escapeHtml(String(header).trim())}">${escapeHtml(String(header).trim())}</option>`))
+        .join('');
+      const separatorOptions = FEATURE_FILTER_SEPARATOR_OPTIONS
+        .map((option) => `<option value="${option.value}">${escapeHtml(option.label)}</option>`)
+        .join('');
+
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">筛选特征值</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="feature-filter-body">
+          <p class="feature-filter-hint">按分隔符把筛选字段拆成多段，取第一个满足条件的片段；筛不出时留空。本模板所有选择「${escapeHtml(FEATURE_FILTER_MAPPING_FIELD)}」的字段共用这一套条件。</p>
+          <div class="feature-filter-grid">
+            <label class="feature-filter-label" for="feature-filter-source">筛选字段</label>
+            <select id="feature-filter-source" class="mapping-select feature-filter-source">${sourceOptions}</select>
+            <label class="feature-filter-label" for="feature-filter-separator">分隔符</label>
+            <select id="feature-filter-separator" class="mapping-select feature-filter-separator">${separatorOptions}</select>
+            <label class="feature-filter-label" for="feature-filter-length">特征长度</label>
+            <input id="feature-filter-length" class="mapping-text-input feature-filter-length" type="text" inputmode="numeric" placeholder="不限" spellcheck="false" />
+            <label class="feature-filter-label" for="feature-filter-prefix">前几位是英文字母</label>
+            <input id="feature-filter-prefix" class="mapping-text-input feature-filter-prefix" type="text" inputmode="numeric" placeholder="不限" spellcheck="false" />
+            <span class="feature-filter-label">纯数字</span>
+            <label class="feature-filter-check">
+              <input class="feature-filter-digits" type="checkbox" />
+              <span class="feature-filter-digits-label"></span>
+            </label>
+            <label class="feature-filter-label" for="feature-filter-sample">输入特征值</label>
+            <input id="feature-filter-sample" class="mapping-text-input feature-filter-sample" type="text" placeholder="如 FT24123456，输入后自动填写上面的条件" spellcheck="false" />
+          </div>
+        </div>
+        <div class="dialog-actions right">
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+          <button class="primary-btn small" type="button" data-action="done">确定</button>
+        </div>
+      `;
+
+      const sourceSelect = dialog.querySelector('.feature-filter-source');
+      const separatorSelect = dialog.querySelector('.feature-filter-separator');
+      const lengthInput = dialog.querySelector('.feature-filter-length');
+      const prefixInput = dialog.querySelector('.feature-filter-prefix');
+      const digitsInput = dialog.querySelector('.feature-filter-digits');
+      const digitsLabel = dialog.querySelector('.feature-filter-digits-label');
+      const sampleInput = dialog.querySelector('.feature-filter-sample');
+
+      function syncDigitsLabel() {
+        const prefixText = String(prefixInput.value || '').trim();
+        digitsLabel.textContent = /^[1-9]\d*$/.test(prefixText)
+          ? `前 ${prefixText} 位之后全是数字`
+          : '整段都是数字';
+      }
+
+      sourceSelect.value = initial ? String(initial.sourceField || '') : '';
+      separatorSelect.value = initial ? String(initial.separator || '') : 'space';
+      lengthInput.value = initial && initial.length ? String(initial.length) : '';
+      prefixInput.value = initial && initial.letterPrefixCount ? String(initial.letterPrefixCount) : '';
+      digitsInput.checked = Boolean(initial && initial.digitsOnly);
+      sampleInput.value = initial ? String(initial.sample || '') : '';
+      syncDigitsLabel();
+
+      prefixInput.addEventListener('input', syncDigitsLabel);
+      sampleInput.addEventListener('input', () => {
+        const derived = deriveFeatureFilterFromSample(sampleInput.value);
+        if (!derived) return;
+        lengthInput.value = String(derived.length);
+        prefixInput.value = derived.letterPrefixCount ? String(derived.letterPrefixCount) : '';
+        digitsInput.checked = derived.digitsOnly;
+        syncDigitsLabel();
+      });
+
+      function cancelFeatureFilter() {
+        const closed = closeModal(overlay, { status: 'cancelled', reason: 'cancel' });
+        if (closed.status === 'closed' && typeof onCancel === 'function') onCancel();
+      }
+      dialog.querySelector('.icon-close').addEventListener('click', cancelFeatureFilter);
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', cancelFeatureFilter);
+      dialog.querySelector('[data-action="done"]').addEventListener('click', () => {
+        const { errors, rule } = validateFeatureFilterDraft({
+          sourceField: sourceSelect.value,
+          separator: separatorSelect.value,
+          length: lengthInput.value,
+          letterPrefixCount: prefixInput.value,
+          digitsOnly: digitsInput.checked,
+          sample: sampleInput.value
+        }, headers);
+        if (errors.length) {
+          pushAlert(overlay, () => createAlertDialog(errors.map((error) => escapeHtml(error)).join('<br/>'), { onConfirm: null }));
+          return;
+        }
+        const closed = closeModal(overlay, { status: 'submitted', value: rule });
+        if (closed.status === 'closed' && typeof onDone === 'function') onDone(rule);
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // 选了「字段筛选特征值」但模板还没有规则时，返回提示文案；否则返回 ''。
+    function findFeatureFilterMissingMessage(mappings, featureFilter) {
+      if (featureFilter) return '';
+      const fields = (mappings || [])
+        .filter((mapping) => mapping && mapping.mappedField === FEATURE_FILTER_MAPPING_FIELD)
+        .map((mapping) => mapping.templateField);
+      return fields.length
+        ? `${fields.join('、')} 选择了「${FEATURE_FILTER_MAPPING_FIELD}」，请先点击【筛选条件】设置`
+        : '';
     }
 
     function getSelectValues(selectElement) {
@@ -3026,6 +3256,8 @@
       let currentBillSplitMeta = payload.billSplitMeta && typeof payload.billSplitMeta === 'object'
         ? { signedAmountSourceField: String(payload.billSplitMeta.signedAmountSourceField || '') }
         : { signedAmountSourceField: '' };
+      // v3.2.16：模板级「字段筛选特征值」规则草稿；所有选该映射值的行共用，完成时随映射保存。
+      let currentFeatureFilter = cloneFeatureFilter(payload.template && payload.template.featureFilter);
       dialog.className = 'modal-card mapping-card';
       // v3.2.15（§4.2）：【渠道存在多个子模板】新建同名渠道；【设为子模板】选择渠道；两者互斥。
       //   打开属于渠道的模板时，【设为子模板】为勾选状态并选中所属渠道。
@@ -3167,6 +3399,7 @@
             .concat(isBalanceField ? [`<option value="${BALANCE_CALCULATED_OPTION}">${BALANCE_CALCULATED_OPTION}</option>`] : [])
             .concat(supportsSelfInputOption ? [`<option value="${MERCHANT_ID_SELF_INPUT_OPTION}">${MERCHANT_ID_SELF_INPUT_OPTION}</option>`] : [])
             .concat(supportsMultiSelect ? [`<option value="${CONCAT_FIELDS_MAPPING_FIELD}">${CONCAT_FIELDS_MAPPING_FIELD}</option>`] : [])
+            .concat(supportsMultiSelect ? [`<option value="${FEATURE_FILTER_MAPPING_FIELD}">${FEATURE_FILTER_MAPPING_FIELD}</option>`] : [])
             .concat(headerOptions)
             .join('');
         }
@@ -3175,6 +3408,9 @@
           <td>
             <div class="mapping-field-editor">
               <select class="mapping-select">${selectOptions}</select>
+              ${supportsMultiSelect ? `
+                <button class="secondary-btn small mapping-feature-filter-btn" type="button" hidden>筛选条件</button>
+              ` : ''}
               ${isMerchantIdField ? `
                 <button class="secondary-btn small mapping-big-account-manage-btn" type="button" hidden>维护大账号</button>
               ` : ''}
@@ -3198,6 +3434,7 @@
         const select = row.querySelector('.mapping-select');
         const manageBigAccountBtn = row.querySelector('.mapping-big-account-manage-btn');
         const manageAmountSplitBtn = row.querySelector('.mapping-amount-split-manage-btn');
+        const featureFilterBtn = row.querySelector('.mapping-feature-filter-btn');
         const concatFieldPicker = row.querySelector('.concat-field-picker');
         const concatPickerTrigger = row.querySelector('.concat-picker-trigger');
         const concatPickerPanel = row.querySelector('.concat-picker-panel');
@@ -3298,6 +3535,10 @@
           if (manageAmountSplitBtn) {
             manageAmountSplitBtn.hidden = !isAmountSplitEnabled;
           }
+          if (featureFilterBtn) {
+            featureFilterBtn.hidden = selectedValue !== FEATURE_FILTER_MAPPING_FIELD;
+            featureFilterBtn.title = describeFeatureFilter(currentFeatureFilter);
+          }
           if (concatFieldPicker) {
             concatFieldPicker.hidden = !isConcatMode;
             if (!isConcatMode) {
@@ -3356,6 +3597,23 @@
         if (manageAmountSplitBtn) {
           manageAmountSplitBtn.addEventListener('click', async () => {
             await openAmountSplitRulesDialog();
+          });
+        }
+
+        if (featureFilterBtn) {
+          featureFilterBtn.addEventListener('click', () => {
+            pushModal(overlay, () => createFeatureFilterDialog({
+              headers: payload.template.headers || [],
+              featureFilter: currentFeatureFilter,
+              onDone: (nextFeatureFilter) => {
+                currentFeatureFilter = cloneFeatureFilter(nextFeatureFilter);
+                refreshFeatureFilterButtons();
+                returnToModal(overlay);
+              },
+              onCancel: () => {
+                returnToModal(overlay);
+              }
+            }));
           });
         }
 
@@ -3499,8 +3757,14 @@
           targetFields: (payload.targetFields || []).slice(),
           advancedMappingFields: advancedMappingFields.slice(),
           billSplitGroupFields: billSplitGroupFields.slice(),
-          onDone: (nextMappings) => {
+          featureFilter: currentFeatureFilter,
+          onDone: (nextMappings, nextFeatureFilter) => {
             currentBillSplitMappings = nextMappings.map((m) => ({ ...m }));
+            // v3.2.16：拆分/合并弹窗编辑的是同一套筛选条件，保存后回写草稿
+            if (nextFeatureFilter) {
+              currentFeatureFilter = cloneFeatureFilter(nextFeatureFilter);
+              refreshFeatureFilterButtons();
+            }
             // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
             returnToModal(overlay);
           },
@@ -3515,6 +3779,12 @@
         const row = rowByField.get(BILL_SPLIT_MERGE_FIELD);
         const select = row?.querySelector('.mapping-select');
         return select && select.value === '是';
+      }
+
+      function refreshFeatureFilterButtons() {
+        tbody.querySelectorAll('.mapping-feature-filter-btn').forEach((button) => {
+          button.title = describeFeatureFilter(currentFeatureFilter);
+        });
       }
 
       function applyAmountSplitMutualExclusion() {
@@ -3552,12 +3822,16 @@
 
         function setRowDisabled(row, select, disabled) {
           if (!row || !select) return;
+          // v3.2.16：互斥禁用时【筛选条件】按钮随下拉框一起禁用
+          const featureFilterButton = row.querySelector('.mapping-feature-filter-btn');
           if (disabled) {
             row.classList.add('mapping-row-mutex-disabled');
             select.disabled = true;
+            if (featureFilterButton) featureFilterButton.disabled = true;
           } else {
             row.classList.remove('mapping-row-mutex-disabled');
             select.disabled = false;
+            if (featureFilterButton) featureFilterButton.disabled = false;
           }
         }
 
@@ -3680,6 +3954,11 @@
           pushAlert(overlay, () => createAlertDialog(channelAssignment.error, { onConfirm: null }));
           return;
         }
+        const featureFilterMissing = findFeatureFilterMissingMessage(collectMappingDraftFromTable(tbody), currentFeatureFilter);
+        if (featureFilterMissing) {
+          pushAlert(overlay, () => createAlertDialog(escapeHtml(featureFilterMissing), { onConfirm: null }));
+          return;
+        }
 
         const handle = writeScope.begin();
         if (!handle) return;
@@ -3696,6 +3975,7 @@
             bigAccounts: draftBigAccounts,
             fixedAssignments: currentFixedAssignments,
             preserveOwn: !bigAccountsLoadedWithOwn,
+            featureFilter: cloneFeatureFilter(currentFeatureFilter),
             ...(channelAssignment ? { channel: channelAssignment } : {})
           });
 
@@ -3904,12 +4184,15 @@
       targetFields = [],
       advancedMappingFields = [],
       billSplitGroupFields = [],
+      featureFilter = null,
       onDone,
       onCancel
     }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card bill-split-mappings-card';
+      // v3.2.16：与主映射共用同一套筛选条件；保存时随拆分映射写入并回传给主映射弹窗。
+      let currentFeatureFilter = cloneFeatureFilter(featureFilter);
 
       // 模板字段列表 = targetFields 排除 Currency / Credit Amount / Debit Amount + 高级字段 + bill-split group 字段
       const excludeFields = new Set([
@@ -3985,6 +4268,7 @@
           } else {
             selectOptions = ['<option value=""></option>']
               .concat(supportsMultiSelect ? [`<option value="${CONCAT_FIELDS_MAPPING_FIELD}">${CONCAT_FIELDS_MAPPING_FIELD}</option>`] : [])
+              .concat(supportsMultiSelect ? [`<option value="${FEATURE_FILTER_MAPPING_FIELD}">${FEATURE_FILTER_MAPPING_FIELD}</option>`] : [])
               .concat(headerOptions)
               .join('');
           }
@@ -3994,6 +4278,9 @@
             <td>
               <div class="mapping-field-editor">
                 <select class="mapping-select bill-split-mapping-select">${selectOptions}</select>
+                ${supportsMultiSelect ? `
+                <button class="secondary-btn small mapping-feature-filter-btn" type="button" hidden>筛选条件</button>
+                ` : ''}
                 ${supportsMultiSelect ? `
                 <div class="concat-field-picker" hidden>
                   <button class="concat-picker-trigger secondary-btn small" type="button">选择字段</button>
@@ -4009,6 +4296,7 @@
           `;
 
           const select = row.querySelector('.bill-split-mapping-select');
+          const featureFilterBtn = row.querySelector('.mapping-feature-filter-btn');
           const concatPicker = row.querySelector('.concat-field-picker');
           const concatTrigger = row.querySelector('.concat-picker-trigger');
           const concatPanel = row.querySelector('.concat-picker-panel');
@@ -4068,8 +4356,31 @@
             });
           }
 
+          if (featureFilterBtn) {
+            featureFilterBtn.addEventListener('click', () => {
+              pushModal(overlay, () => createFeatureFilterDialog({
+                headers,
+                featureFilter: currentFeatureFilter,
+                onDone: (nextFeatureFilter) => {
+                  currentFeatureFilter = cloneFeatureFilter(nextFeatureFilter);
+                  tbody.querySelectorAll('.mapping-feature-filter-btn').forEach((button) => {
+                    button.title = describeFeatureFilter(currentFeatureFilter);
+                  });
+                  returnToModal(overlay);
+                },
+                onCancel: () => {
+                  returnToModal(overlay);
+                }
+              }));
+            });
+          }
+
           function syncEditorState() {
             const isConcatMode = select.value === CONCAT_FIELDS_MAPPING_FIELD;
+            if (featureFilterBtn) {
+              featureFilterBtn.hidden = select.value !== FEATURE_FILTER_MAPPING_FIELD;
+              featureFilterBtn.title = describeFeatureFilter(currentFeatureFilter);
+            }
             if (concatPicker) concatPicker.hidden = !isConcatMode;
             if (!isConcatMode) {
               concatSelectedFields = [];
@@ -4144,15 +4455,21 @@
       });
       dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
         if (!validateLocalMappings()) return;
+        const featureFilterMissing = findFeatureFilterMissingMessage(currentDialogMappings, currentFeatureFilter);
+        if (featureFilterMissing) {
+          pushAlert(overlay, () => createAlertDialog(escapeHtml(featureFilterMissing), { onConfirm: null }));
+          return;
+        }
         const handle = writeScope.begin();
         if (!handle) return;
         // 保存参数快照不再共享仍可编辑的行对象。
         const toSave = currentDialogMappings.filter(
           m => m.mappedField || (Array.isArray(m.mappedFields) && m.mappedFields.length > 0)
         ).map(mapping => ({ ...mapping, mappedFields: Array.isArray(mapping.mappedFields) ? mapping.mappedFields.slice() : [] }));
+        const savedFeatureFilter = cloneFeatureFilter(currentFeatureFilter);
         let result;
         try {
-          result = await api.templates.saveBillSplitMappings({ templateId: template.id, mappings: toSave });
+          result = await api.templates.saveBillSplitMappings({ templateId: template.id, mappings: toSave, featureFilter: savedFeatureFilter });
         } catch (error) {
           console.error(error);
           result = { status: 'error', message: '保存失败，请查看控制台' };
@@ -4160,7 +4477,7 @@
         if (!writeScope.isCurrent(handle)) return;
         if (result?.status === 'success') {
           const closed = closeModal(overlay, { status: 'submitted', value: toSave });
-          if (closed.status === 'closed' && typeof onDone === 'function') onDone(toSave);
+          if (closed.status === 'closed' && typeof onDone === 'function') onDone(toSave, savedFeatureFilter);
         } else {
           pushAlert(overlay, () => createAlertDialog(result?.message || '保存失败', { onConfirm: null }));
         }

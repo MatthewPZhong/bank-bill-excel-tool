@@ -26,8 +26,10 @@ const {
   buildDetailExportRows,
   buildMappedRows,
   extractHeaders,
+  FEATURE_FILTER_FIELD_TOKEN,
   FileValidationError,
   normalizeCell,
+  normalizeFeatureFilterRule,
   writeBalanceWorkbook,
   writeWorkbookRows
 } = require('../../src/backend/file-service');
@@ -220,6 +222,10 @@ function createEnvironment(dir, label) {
     BALANCE_DISABLED_OPTION: '无',
     BALANCE_CALCULATED_OPTION: '通过发生额计算',
     CONCAT_FIELDS_MAPPING_FIELD: '__CONCAT__',
+    // v3.2.16：字段筛选特征值（本脚本不使用，仅满足生成配置的依赖）
+    FEATURE_FILTER_MAPPING_FIELD: '__FEATURE_FILTER_MAPPING__',
+    FEATURE_FILTER_FIELD_TOKEN,
+    normalizeFeatureFilterRule,
     SIGNED_AMOUNT_MAPPING_FIELD: '__SIGNED_AMOUNT__',
     AMOUNT_BASED_NAME_MAPPING_FIELD: '__AMOUNT_NAME__',
     AMOUNT_BASED_ACCOUNT_MAPPING_FIELD: '__AMOUNT_ACCOUNT__',
@@ -274,6 +280,7 @@ function createEnvironment(dir, label) {
     'getMappingFieldValues',
     'getPrimaryMappedField',
     'buildStatementGenerationConfig',
+    'resolveStatementFeatureFilter',
     'buildMappedRowsForFile',
     'getEntryTemplateConfig',
     'rebuildMatchedTemplateFileEntries',

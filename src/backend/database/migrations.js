@@ -475,6 +475,13 @@ function ensureTemplateFilenameFixedFieldSupport(db) {
   }
 }
 
+// v3.2.16：模板级「字段筛选特征值」规则（JSON；'' 表示未设置）。幂等：列已存在则跳过。
+function ensureTemplateFeatureFilterSupport(db) {
+  if (!hasColumn(db, 'templates', 'feature_filter_json')) {
+    db.exec("ALTER TABLE templates ADD COLUMN feature_filter_json TEXT NOT NULL DEFAULT '';");
+  }
+}
+
 // v1.5.3 需求 R2：自有账号合并入大账号表 — 在 template_big_accounts 表新增 account_nature 列
 // 幂等：若列已存在则跳过；默认值 'client'（客资），迁移脚本写入 'own' 表示自有
 function ensureTemplateBigAccountNatureSupport(db) {
@@ -4382,6 +4389,7 @@ module.exports = {
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateFilenameFixedFieldSupport,
+  ensureTemplateFeatureFilterSupport,
   ensureTemplateMappingEnhancements,
   ensureTemplateKeySupport,
   hasColumn,
