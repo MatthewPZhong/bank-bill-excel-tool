@@ -1746,7 +1746,10 @@ const REUSE_MODULE_DEFAULT_OPTION = '是';
 // - `readTemplateBundleFile` 对未知字段采用显式解构式解析（:1221-1243），v1.5.1 旧应用读 v1.5.2 导出的 bundle 时自然忽略该字段
 // - v1.5.1 旧 bundle 若不含该字段，读时 fallback 为空串（:1242）
 // v3.2.15：v5 以渠道取代主/子模板（顶层 channels，条目 channelName），兼容读取 v≤4。
-const SUPPORTED_BUNDLE_VERSION = 5;
+// v3.2.16：用到「字段筛选特征值」（主映射或拆分映射）的模板包写 v6，让旧版按版本号整包拒绝
+//   （旧版不校验拆分映射，只用于拆分映射时会被静默导入并输出空值）；未用到时仍写 v5，旧版照常可导入。
+const SUPPORTED_BUNDLE_VERSION = 6;
+const BASE_BUNDLE_VERSION = 5;
 // v1.5.2 需求 3：主页面「按文件名映射模板」的虚拟模板 ID（非 DB 记录）
 // helper 用于在接收 templateId 的调用点统一短路，避免将虚拟 ID 传入真实查询
 const FILENAME_MAPPING_TEMPLATE_ID = '__FILENAME_MAPPING__';
@@ -3582,11 +3585,20 @@ function buildTemplateLibraryPayload() {
   });
 
   return {
-    bundleVersion: SUPPORTED_BUNDLE_VERSION,
+    bundleVersion: resolveTemplateBundleVersion(templates),
     exportedAt: new Date().toISOString(),
     channels,
     templates
   };
+}
+
+// v3.2.16：任一模板的主映射或拆分映射用到「字段筛选特征值」时写 v6，否则写 v5（见 SUPPORTED_BUNDLE_VERSION 注释）。
+function resolveTemplateBundleVersion(templates) {
+  const usesFeatureFilter = (Array.isArray(templates) ? templates : []).some((entry) => (
+    [].concat(entry && entry.mappings || [], entry && entry.billSplitMappings || [])
+      .some((mapping) => normalizeCell(mapping && mapping.mappedField) === FEATURE_FILTER_MAPPING_FIELD)
+  ));
+  return usesFeatureFilter ? SUPPORTED_BUNDLE_VERSION : BASE_BUNDLE_VERSION;
 }
 
 function toBundleAccountMapping(m) {
@@ -8209,7 +8221,7 @@ function registerFundTransferAccountMappingHandlers() {
   });
 }
 
-function validateTemplateConfiguration({ template, mappings, enumValues, bigAccounts = [], fixedAssignments = [], featureFilter = null }) {
+function validateTemplateConfiguration({ template, mappings, enumValues, bigAccounts = [], fixedAssignments = [], featureFilter = null, billSplitMappings = [] }) {
   const targetFields = buildManagedMappingFields(enumValues);
   const targetFieldSet = new Set(targetFields);
   const sourceFieldSet = new Set(template.headers.map((header) => normalizeCell(header)));
@@ -8532,8 +8544,21 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
   }
 
   // v3.2.16：有字段使用时规则必须有效；未使用时有效规则照存（便于再次选用），无效则忽略不写。
+  //   启用拆分/合并且不复用模块映射时，拆分映射（已存或模板包内）用到该值也算使用。
+  const reusesModuleMapping = cleanedMappings.some((mapping) => (
+    mapping.templateField === REUSE_MODULE_MAPPING_FIELD && mapping.mappedField === '否'
+  )) === false;
+  const billSplitUsesFeatureFilter = usesBillSplitMerge && !reusesModuleMapping
+    && (Array.isArray(billSplitMappings) ? billSplitMappings : [])
+      .some((mapping) => normalizeCell(mapping && mapping.mappedField) === FEATURE_FILTER_MAPPING_FIELD);
+  if (billSplitUsesFeatureFilter && !featureFilterTargetFields.length && !featureFilter) {
+    throw new FileValidationError(
+      'FILE_READ',
+      `拆分/合并账单映射关系设置中有字段使用了"${FEATURE_FILTER_MAPPING_FIELD}"，请先在该弹窗点击【筛选条件】设置`
+    );
+  }
   let cleanedFeatureFilter = null;
-  if (featureFilterTargetFields.length) {
+  if (featureFilterTargetFields.length || billSplitUsesFeatureFilter) {
     cleanedFeatureFilter = normalizeFeatureFilterRule(featureFilter, { headers: template.headers });
   } else if (featureFilter) {
     try {
@@ -9116,7 +9141,9 @@ function registerTemplateHandlers() {
         enumValues: loadEnumValues(enumConfig.filePath),
         bigAccounts: payload.bigAccounts,
         fixedAssignments: payload.fixedAssignments,
-        featureFilter: payload.featureFilter || null
+        // v3.2.16：载荷未带规则时用已存规则；不复用的拆分映射用到该值时一并校验
+        featureFilter: payload.featureFilter || template.featureFilter || null,
+        billSplitMappings: database.getBillSplitMappings(payload.templateId)
       });
 
       const usesAmountSplitByField = templateConfiguration.mappings.some(
@@ -9565,7 +9592,8 @@ function registerTemplateHandlers() {
             enumValues,
             bigAccounts: entry.bigAccounts,
             fixedAssignments: entry.fixedAssignments,
-            featureFilter: entry.featureFilter
+            featureFilter: entry.featureFilter,
+            billSplitMappings: entry.billSplitMappings
           });
           const template = database.upsertTemplate({
             templateKey: entry.templateKey,
@@ -10557,16 +10585,15 @@ function buildStatementGenerationConfig({
   };
 }
 
-// v3.2.16：主映射或「不复用」的拆分/合并映射用到「字段筛选特征值」时，模板须有有效规则，否则拒绝生成。
+// v3.2.16：实际生效的映射（拆分/合并且不复用时为拆分映射，否则为主映射）用到「字段筛选特征值」时，
+// 模板须有有效规则，否则拒绝生成；与 buildMappedRows 的启用口径一致。
 function resolveStatementFeatureFilter(template, mappingByTargetField, billSplitMergeConfig) {
-  const usesToken = (lookup) => Object.values(lookup || {}).some((value) => value === FEATURE_FILTER_FIELD_TOKEN);
-  const used = usesToken(mappingByTargetField)
-    || Boolean(
-      billSplitMergeConfig
-      && billSplitMergeConfig.enabled
-      && billSplitMergeConfig.reuseModuleMapping === false
-      && usesToken(billSplitMergeConfig.billSplitMappingByTargetField)
-    );
+  const effectiveLookup = billSplitMergeConfig
+    && billSplitMergeConfig.enabled
+    && billSplitMergeConfig.reuseModuleMapping === false
+    ? billSplitMergeConfig.billSplitMappingByTargetField
+    : mappingByTargetField;
+  const used = Object.values(effectiveLookup || {}).some((value) => value === FEATURE_FILTER_FIELD_TOKEN);
   if (!used) {
     return null;
   }

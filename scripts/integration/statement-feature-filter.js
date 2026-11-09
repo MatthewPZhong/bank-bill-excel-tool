@@ -4,8 +4,10 @@
 //   ② 保存 → 读回 → 生成：两个目标字段共用一套规则、取第一个命中段；未命中留空，提示与报错文件列出该行；
 //      收支均为空的行不重复提示；回读导出明细
 //   ③ 拒绝：缺规则、筛选字段不存在、Currency / MerchantId / Balance 选该值、直接写库缺规则后生成被拒
-//   ④ 模板包：导出条目带规则 → 读包 → 导入新库后规则与映射一致；覆盖表头重建模板时规则清空
-//   ⑤ 拆分/合并「不复用」映射：只有拆分映射用该值时，规则随拆分映射保存并在展开行生效
+//   ④ 模板包：导出条目带规则 → 读包 → 导入新库后规则与映射一致；覆盖表头重建模板时规则清空；
+//      用到该值（含只在拆分映射中用到）时包写 v6，旧版读包整包拒绝，未用到时仍写 v5
+//   ⑤ 拆分/合并「不复用」映射：只有拆分映射用该值时，规则随拆分映射保存并在展开行生效；
+//      规则缺失时保存主映射被拒；主映射残留该值但拆分映射未用时不要求规则、不记未命中
 //   UI 由 renderer lifecycle 覆盖；本脚本验证数据与文件在整条链路上的结果。
 //
 // 用法：node scripts/integration/statement-feature-filter.js
@@ -91,7 +93,7 @@ const CONSTANTS = loadMainConstants([
   'SIGNED_AMOUNT_MAPPING_FIELD', 'AMOUNT_BASED_NAME_MAPPING_FIELD', 'AMOUNT_BASED_ACCOUNT_MAPPING_FIELD',
   'AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD', 'AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION',
   'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
-  'SUPPORTED_BUNDLE_VERSION', 'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS'
+  'SUPPORTED_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION', 'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS'
 ]);
 const FEATURE = CONSTANTS.FEATURE_FILTER_MAPPING_FIELD;
 
@@ -127,7 +129,7 @@ function closeDatabase(database) {
   if (index >= 0) openedDatabases.splice(index, 1);
 }
 
-function createMain(database) {
+function createMain(database, constantOverrides = {}) {
   return loadMainFunctions([
     'validateTemplateConfiguration',
     'buildExportTargetFields',
@@ -151,9 +153,11 @@ function createMain(database) {
     'buildImportWarningMessage',
     'validateBillSplitMappingsPayload',
     'normalizeBundleTemplateHeaders',
-    'readTemplateBundleFile'
+    'readTemplateBundleFile',
+    'resolveTemplateBundleVersion'
   ], {
     ...CONSTANTS,
+    ...constantOverrides,
     database,
     fs,
     normalizeCell,
@@ -320,10 +324,19 @@ function verifyRejections(dir, { database, main, template }) {
 function verifyBundleRoundTrip(dir, { database, main, template }) {
   const entry = database.listTemplateBundleEntries().find((item) => item.name === template.name);
   assertEq(entry.featureFilter && entry.featureFilter.sourceField, '附言', '④ 导出条目带规则');
+  const plainEntry = { mappings: [{ templateField: 'Remark', mappedField: '附言' }], billSplitMappings: [] };
+  const splitOnlyEntry = { mappings: plainEntry.mappings, billSplitMappings: [{ templateField: 'Reference', mappedField: FEATURE }] };
+  assertEq(
+    [main.resolveTemplateBundleVersion([plainEntry]), main.resolveTemplateBundleVersion([entry]), main.resolveTemplateBundleVersion([plainEntry, splitOnlyEntry])],
+    [5, 6, 6],
+    '④ 用到该值（含只在拆分映射中用到）时包写 v6，未用到时写 v5'
+  );
   const bundlePath = path.join(dir, 'bundle.json');
-  fs.writeFileSync(bundlePath, JSON.stringify({ bundleVersion: CONSTANTS.SUPPORTED_BUNDLE_VERSION, channels: [], templates: [entry] }), 'utf8');
+  fs.writeFileSync(bundlePath, JSON.stringify({ bundleVersion: main.resolveTemplateBundleVersion([entry]), channels: [], templates: [entry] }), 'utf8');
   const readEntry = main.readTemplateBundleFile(bundlePath).templates[0];
   assertEq(readEntry.featureFilter, entry.featureFilter, '④ 读包保留规则');
+  const legacyReader = createMain(database, { SUPPORTED_BUNDLE_VERSION: 5 });
+  assertThrows(() => legacyReader.readTemplateBundleFile(bundlePath), /模板文件版本（6）高于当前应用支持的版本（5）/, '④ 旧版（支持到 v5）读 v6 包整包拒绝');
 
   const target = openDatabase(path.join(dir, 'import.sqlite'));
   const targetMain = createMain(target);
@@ -395,6 +408,57 @@ function verifyBillSplitNotReuse(dir, { database, main }) {
     [3],
     '⑤ 拆分路径未命中行记提示'
   );
+
+  const splitMainMappings = mappingsFor({
+    Currency: '',
+    'Credit Amount': '',
+    'Debit Amount': '',
+    Remark: '附言',
+    Reference: '',
+    [CONSTANTS.BILL_SPLIT_MERGE_MAPPING_FIELD]: CONSTANTS.BILL_SPLIT_MERGE_ENABLED_OPTION,
+    [CONSTANTS.REUSE_MODULE_MAPPING_FIELD]: '否'
+  });
+  const storedBillSplit = database.getBillSplitMappings(template.id);
+  assertThrows(() => main.validateTemplateConfiguration({
+    template, mappings: splitMainMappings, enumValues: ENUM_VALUES, featureFilter: null, billSplitMappings: storedBillSplit
+  }), /拆分\/合并账单映射关系设置中有字段使用了"字段筛选特征值"/, '⑤ 不复用的拆分映射用到该值而缺规则：保存主映射被拒');
+  assertThrows(() => main.validateTemplateConfiguration({
+    template, mappings: splitMainMappings, enumValues: ENUM_VALUES, featureFilter: { sourceField: '附言' }, billSplitMappings: storedBillSplit
+  }), /至少设置一项/, '⑤ 不复用的拆分映射用到该值而规则无效：保存主映射被拒');
+  assertEq(
+    main.validateTemplateConfiguration({
+      template, mappings: splitMainMappings, enumValues: ENUM_VALUES, featureFilter: rule, billSplitMappings: storedBillSplit
+    }).featureFilter,
+    rule,
+    '⑤ 规则有效时保存主映射通过并带回规则'
+  );
+  assertEq(
+    main.validateTemplateConfiguration({
+      template,
+      mappings: mappingsFor({ ...Object.fromEntries(splitMainMappings.map((m) => [m.templateField, m.mappedField])), [CONSTANTS.REUSE_MODULE_MAPPING_FIELD]: '是' }),
+      enumValues: ENUM_VALUES,
+      featureFilter: null,
+      billSplitMappings: storedBillSplit
+    }).featureFilter,
+    null,
+    '⑤ 复用模块映射时拆分映射不生效，不要求规则'
+  );
+
+  // 主映射残留该值、拆分映射（不复用）未用：不要求规则、不记未命中
+  const residual = database.upsertTemplate({ name: 'BANKD-残留', sourceFileName: 'd.xlsx', headers: HEADERS });
+  database.saveMappings(residual.id, splitMainMappings.map((m) => (
+    m.templateField === 'Remark' ? { ...m, mappedField: FEATURE } : m
+  )).map((m) => ({ templateField: m.templateField, mappedField: m.mappedField, mappedFields: [] })), [], [], undefined, null, {});
+  database.saveBillSplitMappings(residual.id, [
+    { templateField: 'BillDate', mappedField: '交易日期', mappedFields: [] },
+    { templateField: 'MerchantId', mappedField: '账号', mappedFields: [] },
+    { templateField: 'Remark', mappedField: '附言', mappedFields: [] }
+  ]);
+  database.saveBillSplitRowCount(residual.id, 1);
+  database.saveBillSplitRow(residual.id, { seqNo: 1, currencySourceField: '币种', creditSourceField: '收入', debitSourceField: '支出', amountSourceField: '', rowStatus: 'completed' });
+  const residualRows = generate(main, database, residual.id, sourcePath);
+  assertEq(pickColumns(residualRows, ['Remark']), [['INV/123456/备注'], ['INV/12345']], '⑤ 不复用时按拆分映射直接取列');
+  assertEq(residualRows.issues.filter((issue) => issue.type === 'feature-value-unmatched').length, 0, '⑤ 主映射残留该值不记未命中提示');
 }
 
 async function run() {

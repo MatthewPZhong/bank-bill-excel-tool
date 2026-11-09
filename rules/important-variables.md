@@ -134,6 +134,7 @@
 - 变更 review 要点：
   - 匹配口径在 `src/backend/file-service/feature-filter.js`，渲染端 `configuration.js` 有同口径的样例校验与推导，改一处要同步另一处
   - 映射行不带源字段（`mapped_fields_json = []`），旧代码会失败关闭；改存储形状须评估旧版本与模板包兼容
+  - 模板包：主映射或拆分映射用到该值时 `resolveTemplateBundleVersion` 写 v6（旧版整包拒绝），否则写 v5；“是否使用”只看实际生效的映射（拆分且不复用时为拆分映射）
   - 必跑：`scripts/integration/statement-feature-filter.js`、`node scripts/test-renderer-lifecycle.js configuration-dialogs.js`
 
 ### `MERCHANT_ID_SELF_INPUT_OPTION`

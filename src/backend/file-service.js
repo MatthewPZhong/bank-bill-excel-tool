@@ -212,12 +212,14 @@ function buildMappedRows({
     }
   });
 
-  // v3.2.16：字段筛选特征值——主映射或「不复用」的拆分映射用到 token 时启用；
+  // v3.2.16：字段筛选特征值——实际生效的映射（拆分且不复用时为拆分映射，否则为主映射）用到 token 时启用；
   // 每行只计算一次，所有使用该映射值的目标字段共用同一个结果，再各自走后续规范化（日期、金额等）。
-  const lookupUsesFeatureFilter = (lookup) => Object.values(lookup || {})
+  // 不复用时主映射里残留的该值不输出，不启用、也不记未命中提示。
+  const featureFilterEffectiveLookup = billSplitEnabled && !billSplitReuseModuleMapping
+    ? billSplitMappingByField
+    : mappingByField;
+  const featureFilterActive = Object.values(featureFilterEffectiveLookup || {})
     .some((value) => value === FEATURE_FILTER_FIELD_TOKEN);
-  const featureFilterActive = lookupUsesFeatureFilter(mappingByField)
-    || (billSplitEnabled && !billSplitReuseModuleMapping && lookupUsesFeatureFilter(billSplitMappingByField));
   const featureFilterRule = featureFilterActive ? normalizeFeatureFilterRule(featureFilter) : null;
   const featureFilterSourceIndex = featureFilterRule ? sourceIndexByField.get(featureFilterRule.sourceField) : undefined;
   if (featureFilterRule && featureFilterSourceIndex === undefined) {
