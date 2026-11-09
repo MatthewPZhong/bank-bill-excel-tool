@@ -147,7 +147,8 @@ test('修改只改余额：生成方式转为人工录入、写入者改为渠�
     endBalance: 1234.56,
     generationMethod: '人工录入',
     templateName: '招商银行-上海',
-    updatedAt: now.toISOString()
+    updatedAt: now.toISOString(),
+    fileIdentity: '招商银行.json'
   });
 
   const stored = readSeedFile(storageRoot, '招商银行');
@@ -199,6 +200,8 @@ test('期间被改过、已不存在或对当前选项不可见的种子返回 c
   const key = { merchantId: target.merchantId, currency: target.currency, billDate: target.billDate };
 
   const staleCases = [
+    { ...target, fileIdentity: '汇丰.json' },
+    { ...target, fileIdentity: undefined },
     { ...target, endBalance: 101 },
     { ...target, updatedAt: '2026-11-01T00:00:00.000Z' },
     { ...target, generationMethod: '人工录入' },
@@ -407,4 +410,29 @@ test('补录确认后、写入前种子被【余额管理】改过：补录拒�
   writeManualBalanceSeedPlan(fresh.prepared.plan);
   const stored = JSON.parse(fs.readFileSync(getBalanceSeedFilePath(storageRoot, 'ICBC'), 'utf8'));
   assert.deepEqual(stored.map((record) => [record.merchantId, record.endBalance]), [['M001', 20.5], ['M002', 200]]);
+});
+
+test('列表读取后渠道跨银行段改名：旧列表的修改与删除返回 conflict，新旧两份种子文件都不变', (t) => {
+  // 两份文件各有一条字段完全相同的旧格式记录（无写入者、无更新时间），只靠字段核对无法区分。
+  const legacy = { merchantId: '1001', currency: 'CNY', billDate: '2026-10-31', endBalance: 0 };
+  const storageRoot = setupStorage(t, { OLD: [legacy], NEW: [legacy] });
+  const channels = [{ id: 9, name: 'OLD-A' }];
+  const database = createFakeDatabase({ channels, templates: [] });
+  const owner = { kind: 'channel', id: 9 };
+  const [listed] = listOwnerSeeds({ database, storageRoot, owner }).records;
+  assert.equal(listed.fileIdentity, 'old.json');
+
+  channels[0] = { id: 9, name: 'NEW-A' };
+  const files = ['OLD', 'NEW'].map((bankName) => getBalanceSeedFilePath(storageRoot, bankName));
+  const before = files.map((filePath) => fs.readFileSync(filePath, 'utf8'));
+  const key = { merchantId: '1001', currency: 'CNY', billDate: '2026-10-31' };
+  assert.equal(updateOwnerSeed({ database, storageRoot, payload: { owner, key, expected: listed, endBalance: '77' } }).status, 'conflict');
+  assert.equal(deleteOwnerSeed({ database, storageRoot, payload: { owner, key, expected: listed } }).status, 'conflict');
+  assert.deepEqual(files.map((filePath) => fs.readFileSync(filePath, 'utf8')), before);
+
+  // 改名后重新读取列表即带新文件身份，可以正常修改。
+  const [relisted] = listOwnerSeeds({ database, storageRoot, owner }).records;
+  assert.equal(relisted.fileIdentity, 'new.json');
+  assert.equal(updateOwnerSeed({ database, storageRoot, payload: { owner, key, expected: relisted, endBalance: '77' } }).status, 'success');
+  assert.equal(fs.readFileSync(files[0], 'utf8'), before[0]);
 });

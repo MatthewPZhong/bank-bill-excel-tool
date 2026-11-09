@@ -123,7 +123,8 @@ function describeOwner(owner, storageRoot) {
   };
 }
 
-function toPublicRecord(record) {
+// fileIdentity：这条记录所在种子文件的身份，渲染层随原值带回，写入时核对（见 matchesExpected）。
+function toPublicRecord(record, owner) {
   return {
     merchantId: record.merchantId,
     currency: record.currency,
@@ -131,7 +132,8 @@ function toPublicRecord(record) {
     endBalance: record.endBalance,
     generationMethod: record.generationMethod,
     templateName: record.templateName,
-    updatedAt: record.updatedAt
+    updatedAt: record.updatedAt,
+    fileIdentity: owner.fileIdentity
   };
 }
 
@@ -147,7 +149,7 @@ function listOwnerSeeds({ database, storageRoot, owner }) {
   const records = readBalanceSeedRecords(storageRoot, resolved.bankName)
     .filter((record) => isVisibleToOwner(record, resolved))
     .sort(compareForDisplay)
-    .map(toPublicRecord);
+    .map((record) => toPublicRecord(record, resolved));
   return { owner: describeOwner(resolved, storageRoot), records };
 }
 
@@ -166,9 +168,12 @@ function sameKey(record, key) {
 }
 
 // 渲染层带回列表里的原值；任一字段与文件当前值不同即视为期间已被生成、补录或另一次修改改过。
-function matchesExpected(record, expected) {
+//   还须是同一份种子文件：列表读取后渠道 / 模板跨银行段改名时，当前解析出的文件已换成另一份，
+//   即使另一份文件里恰有字段相同的记录（如旧格式记录），也不能改到它。
+function matchesExpected(record, expected, owner) {
   if (!expected || typeof expected !== 'object') return false;
-  return parseNumericValue(expected.endBalance) === record.endBalance
+  return normalizeCell(expected.fileIdentity) === owner.fileIdentity
+    && parseNumericValue(expected.endBalance) === record.endBalance
     && normalizeCell(expected.generationMethod) === record.generationMethod
     && normalizeCell(expected.templateName) === record.templateName
     && normalizeCell(expected.updatedAt) === record.updatedAt;
@@ -194,7 +199,7 @@ function locateSeed({ database, storageRoot, payload }) {
   }
   const index = matchedIndexes.length ? matchedIndexes[0] : -1;
   const record = index >= 0 ? records[index] : null;
-  if (!record || !isVisibleToOwner(record, owner) || !matchesExpected(record, payload.expected)) {
+  if (!record || !isVisibleToOwner(record, owner) || !matchesExpected(record, payload.expected, owner)) {
     return { conflict: true, owner, key };
   }
   return { conflict: false, owner, key, records, index, record };
@@ -226,8 +231,8 @@ function updateOwnerSeed({ database, storageRoot, payload, now = new Date() }) {
       changed: false,
       message: '余额未变化',
       owner: describeOwner(owner, storageRoot),
-      previous: toPublicRecord(record),
-      record: toPublicRecord(record)
+      previous: toPublicRecord(record, owner),
+      record: toPublicRecord(record, owner)
     };
   }
 
@@ -250,8 +255,8 @@ function updateOwnerSeed({ database, storageRoot, payload, now = new Date() }) {
     owner: describeOwner(owner, storageRoot),
     ownerLabel: ownerLabel(owner),
     filePath,
-    previous: toPublicRecord(record),
-    record: toPublicRecord(nextRecord)
+    previous: toPublicRecord(record, owner),
+    record: toPublicRecord(nextRecord, owner)
   };
 }
 
@@ -268,7 +273,7 @@ function deleteOwnerSeed({ database, storageRoot, payload }) {
     owner: describeOwner(owner, storageRoot),
     ownerLabel: ownerLabel(owner),
     filePath,
-    previous: toPublicRecord(record)
+    previous: toPublicRecord(record, owner)
   };
 }
 

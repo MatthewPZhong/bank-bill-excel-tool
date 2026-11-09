@@ -57,7 +57,7 @@
 
 - 修改：只改余额，余额须为有限数字（允许千分位逗号；超出数值范围的输入会解析为 Infinity，写回时会被种子库当作无效记录过滤，等于删除，因此拒绝）。写入后该条生成方式为「人工录入」，`templateName` 为渠道名 / 模板名，`updatedAt` 为当前时间；余额未变化时不写文件。
 - 删除：先弹确认（显示账户号、币种、日期、余额，并提示删除后下次生成若需要这一天的余额会提示补录），确认后只删这一条。
-- 乐观并发：修改、删除都先重新读文件，按渲染层带回的原值（余额、生成方式、写入者、更新时间）核对；不一致、记录已不存在或对当前选项不可见时返回 `conflict`（“余额种子已变化，请刷新后重试”），不写文件，渲染层提示并重新读取。
+- 乐观并发：修改、删除都先重新读文件，按渲染层带回的原值（所在种子文件身份、余额、生成方式、写入者、更新时间）核对；文件身份随每条记录在列表中返回，防止列表读取后渠道 / 模板跨银行段改名时改到另一份文件里字段相同的记录；不一致、记录已不存在或对当前选项不可见时返回 `conflict`（“余额种子已变化，请刷新后重试”），不写文件，渲染层提示并重新读取。
 - 同一文件同键出现多条记录时拒绝处理并提示检查文件。种子文件损坏时沿用原有提示。
 - 审计：成功的修改与删除写活动日志，内容为所属、种子文件路径、账户号、币种、日期、原余额 → 新余额（删除为被删余额）、原生成方式、原写入者。
 
@@ -119,4 +119,7 @@ G7 TaskPolicy 清单已冻结，写操作按 `channel:rename`、`bank-accounts:s
   - P3 `balanceSeeds.update(null)` / `delete(null)` 在错误处理中再次抛错。IPC 入口把非对象载荷按空对象处理，返回结构化业务错误。
   - 归属歧义：渠道名与另一渠道的子模板名相同时同一写入者被两个选项认领。按“输出名优先”定序（§4.2）。
   - 回归：单测新增文件身份、名称重合、溢出数值、补录写入前核对 4 组；IPC `null` 载荷未单独加测试（入口一行规范化）。
-- 验证（worktree `feat/balance-seed-management`，基线 `5b5caf7b`）：`npm run lint` 通过；`npm run check:architecture` 通过；`npm run smoke` 通过；`npm run test:unit` 9998/10002（审查修复后；4 个 Windows 专用跳过，0 失败）；`npm run test:integration` 99 个脚本全部通过（含新增 5/5，§七 清单已回写）；`node scripts/test-renderer-lifecycle.js configuration-dialogs` 90/90。未做：实机界面与真实种子文件检查（B34 无法截图，见 B72）。
+- Codex 第二轮复审（提交 `e4a949b1`）：上一轮 5 项均确认关闭，补录路径（正常补录、覆盖确认、断档不补录、按文件名映射重新生成、业务 catch）未见回归。新确认 2 项，已修复：
+  - P1 生产 `renderer.js` 的 `configurationApi` 没有接上 `balanceSeeds`，真实界面打开【余额管理】即报错；生命周期夹具手工注入 API，绕过了生产装配点。已补装配，并新增契约测试 `tests/unit/renderer/configuration-api-wiring.test.js`：配置弹窗用到的每个 `api.<命名空间>` 都须在生产 `configurationApi` 中装配（去掉修复时该测试失败）。
+  - P2 列表读取后渠道跨银行段改名，旧列表的修改 / 删除会改到新银行段文件里字段相同的记录。每条记录带所在文件身份，写入时核对（§4.3），单测复现该场景。
+- 验证（worktree `feat/balance-seed-management`，基线 `5b5caf7b`）：`npm run lint` 通过；`npm run check:architecture` 通过；`npm run smoke` 通过；`npm run test:unit` 10000/10004（第二轮修复后；4 个 Windows 专用跳过，0 失败）；`npm run test:integration` 99 个脚本全部通过（含新增 5/5，§七 清单已回写）；`node scripts/test-renderer-lifecycle.js configuration-dialogs` 90/90。未做：实机界面与真实种子文件检查（B34 无法截图，见 B72）。
