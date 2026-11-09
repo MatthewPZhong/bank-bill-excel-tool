@@ -42,6 +42,8 @@ const policies = archivePolicies;
 const policyByChannel = new Map(policies.map((policy) => [policy.channel, policy]));
 const baselineRecoverable = baseline.policies.filter((policy) => policy.taskKind !== 'exclude');
 const newPreparationPolicies = [
+  // v3.2.16 模板管理【余额管理】：余额种子只读查询
+  { batchPolicy: 'exclude', channel: 'balance-seed:list', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'bank-accounts:discard-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'bank-accounts:get-overview', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'bank-accounts:list', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
@@ -72,7 +74,10 @@ const newSupportActions = [
   { channel: 'channel:delete', kind: 'support-action', reason: 'statement-channel' },
   { channel: 'channel-account-mapping:resolve-conflicts', kind: 'support-action', reason: 'statement-channel' },
   { channel: 'bank-accounts:save-as', kind: 'support-action', reason: 'user-document-export' },
-  { channel: 'bank-accounts:commit-import', kind: 'support-action', reason: 'bank-account-snapshot' }
+  { channel: 'bank-accounts:commit-import', kind: 'support-action', reason: 'bank-account-snapshot' },
+  // v3.2.16 模板管理【余额管理】：修改、删除单条余额种子
+  { channel: 'balance-seed:update', kind: 'support-action', reason: 'balance-seed' },
+  { channel: 'balance-seed:delete', kind: 'support-action', reason: 'balance-seed' }
 ];
 
 // 固定 fixture 与当前公开 API 分开读取；此测试不提供更新/重建 fixture 入口。

@@ -751,6 +751,14 @@ const {
   resolveStatementOutputName,
   resolveTemplateBalanceMode
 } = require('./main-process/statement-channel-identity');
+// v3.2.16：模板管理【余额管理】
+const {
+  BalanceSeedManagementError,
+  buildBalanceSeedActivityLog,
+  deleteOwnerSeed,
+  listOwnerSeeds,
+  updateOwnerSeed
+} = require('./main-process/balance-seed-management');
 const {
   ALL_BANKS_TEMPLATE_SCOPE,
   assembleMonthlyBalance,
@@ -12180,6 +12188,63 @@ function registerBigAccountHandlers() {
         originalError: error
       });
     }
+  });
+
+  // v3.2.16 模板管理【余额管理】：按渠道 / 普通模板查看余额种子，修改余额、删除单条种子。
+  ipcMain.handle('balance-seed:list', (_event, owner) => {
+    try {
+      return {
+        status: 'success',
+        ...listOwnerSeeds({ database, storageRoot: ensureStorageRoot(), owner })
+      };
+    } catch (error) {
+      return createBalanceSeedManagementErrorResult('读取余额种子', error, { owner });
+    }
+  });
+
+  supportIpcHandle('balance-seed:update', '修改余额种子', (_event, payload = {}) => {
+    try {
+      const result = updateOwnerSeed({ database, storageRoot: ensureStorageRoot(), payload });
+      if (result.status === 'success' && result.changed) {
+        appendActivityLogEntry({ level: 'info', ...buildBalanceSeedActivityLog('update', result) });
+      }
+      return result;
+    } catch (error) {
+      return createBalanceSeedManagementErrorResult('修改余额种子', error, { key: payload.key, owner: payload.owner });
+    }
+  });
+
+  supportIpcHandle('balance-seed:delete', '删除余额种子', (_event, payload = {}) => {
+    try {
+      const result = deleteOwnerSeed({ database, storageRoot: ensureStorageRoot(), payload });
+      if (result.status === 'success') {
+        appendActivityLogEntry({ level: 'info', ...buildBalanceSeedActivityLog('delete', result) });
+      }
+      return result;
+    } catch (error) {
+      return createBalanceSeedManagementErrorResult('删除余额种子', error, { key: payload.key, owner: payload.owner });
+    }
+  });
+}
+
+// 选项失效、余额非法、种子文件损坏等按业务错误返回原因；其余按系统错误生成报错文件。
+function createBalanceSeedManagementErrorResult(step, error, context = {}) {
+  if (error instanceof BalanceSeedManagementError || error instanceof FileValidationError) {
+    return createDetailedErrorResult({
+      step,
+      message: error.message,
+      errorCode: error.code || 'BALANCE_SEED_MANAGEMENT_FAILED',
+      detailLines: Array.isArray(error.detailLines) ? error.detailLines : [],
+      context: { ...context, ...(error.context || {}) }
+    });
+  }
+  return createErrorResult({
+    step,
+    message: `${step}失败，请导出报错文件查看详情`,
+    errorCode: 'BALANCE_SEED_MANAGEMENT_RUNTIME',
+    errorType: '系统错误',
+    originalError: error,
+    context
   });
 }
 

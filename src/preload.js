@@ -500,6 +500,12 @@ contextBridge.exposeInMainWorld('desktopApi', {
     list: (templateName) => ipcRenderer.invoke('balance-adjustment:list', templateName),
     save: (payload) => ipcRenderer.invoke('balance-adjustment:save', payload)
   },
+  // v3.2.16 模板管理【余额管理】：owner 为 { kind: 'channel' | 'template', id }
+  balanceSeeds: {
+    list: (owner) => ipcRenderer.invoke('balance-seed:list', owner),
+    update: (payload) => ipcRenderer.invoke('balance-seed:update', payload),
+    delete: (payload) => ipcRenderer.invoke('balance-seed:delete', payload)
+  },
   files: {
     importFile: (templateId) => ipcRenderer.invoke('file:import', templateId),
     cancelBigAccountSelection: (contextId) => ipcRenderer.invoke('file:cancel-big-account-selection', contextId),

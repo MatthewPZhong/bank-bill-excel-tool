@@ -75,6 +75,17 @@ const SUPPORT_ACTION_POLICIES = Object.freeze([
     channel: 'bank-accounts:commit-import',
     kind: 'support-action',
     reason: 'bank-account-snapshot'
+  }),
+  // v3.2.16 模板管理【余额管理】：修改、删除单条余额种子（只写 balance-seeds 文件，不产生导出文件）。
+  Object.freeze({
+    channel: 'balance-seed:update',
+    kind: 'support-action',
+    reason: 'balance-seed'
+  }),
+  Object.freeze({
+    channel: 'balance-seed:delete',
+    kind: 'support-action',
+    reason: 'balance-seed'
   })
 ]);
 
@@ -340,6 +351,7 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'archive-center:list-delete-cleanup-jobs',
     'archive-center:prepare-delete-batch',
     'balance-adjustment:list',
+    'balance-seed:list',
     'bank-accounts:get-overview',
     'bank-accounts:list',
     'bank-statement:c3-candidate-count',

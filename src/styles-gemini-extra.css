@@ -28,6 +28,7 @@
 .account-card { width: min(100%, 920px); }
 .big-account-card { width: min(100%, 980px); }
 .balance-addon-card { width: min(100%, 1120px); }
+.balance-seed-card { width: min(100%, 1120px); }
 .alert-card { width: min(100%, 420px); }
 
 .big-account-unmaintained-alert {
@@ -192,6 +193,23 @@ td .muted { color: var(--muted); }
   padding: 8px 28px 22px;
 }
 .big-account-footer-left { display: flex; gap: 8px; }
+/* v3.2.16 模板管理【余额管理】：底栏左侧入口，右侧导入/导出；弹窗提示行与分页 */
+.template-manager-bundle-right { display: flex; gap: 10px; }
+.balance-seed-hint {
+  flex: 0 0 auto;
+  padding: 10px 28px 0;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.balance-seed-pager {
+  display: inline-flex; align-items: center; gap: 10px;
+  margin-right: auto;
+  color: var(--muted); font-size: 12px;
+  white-space: nowrap;
+}
+.balance-seed-pager[hidden] { display: none; }
+.balance-seed-balance-input { width: 100%; min-width: 120px; }
 
 /* =================== Card size presets for new dialogs =================== */
 .export-scope-card { width: min(100%, 480px); }
