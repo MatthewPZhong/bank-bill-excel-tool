@@ -8221,6 +8221,21 @@ function registerFundTransferAccountMappingHandlers() {
   });
 }
 
+// v3.2.16：保存时的筛选规则——实际用到时必须有效（无效即抛错）；未用到时有效草稿照存（便于再次选用），无效则不写。
+function resolveSavedFeatureFilter({ used, featureFilter, headers }) {
+  if (used) {
+    return normalizeFeatureFilterRule(featureFilter, { headers });
+  }
+  if (!featureFilter) {
+    return null;
+  }
+  try {
+    return normalizeFeatureFilterRule(featureFilter, { headers });
+  } catch (_error) {
+    return null;
+  }
+}
+
 function validateTemplateConfiguration({ template, mappings, enumValues, bigAccounts = [], fixedAssignments = [], featureFilter = null, billSplitMappings = [] }) {
   const targetFields = buildManagedMappingFields(enumValues);
   const targetFieldSet = new Set(targetFields);
@@ -8543,30 +8558,26 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
     });
   }
 
-  // v3.2.16：有字段使用时规则必须有效；未使用时有效规则照存（便于再次选用），无效则忽略不写。
-  //   启用拆分/合并且不复用模块映射时，拆分映射（已存或模板包内）用到该值也算使用。
-  const reusesModuleMapping = cleanedMappings.some((mapping) => (
+  // v3.2.16：只按实际生效的映射判断是否用到（与生成口径 resolveStatementFeatureFilter 一致）：
+  //   启用拆分/合并且不复用模块映射时看拆分映射（已存或模板包内），否则看主映射。
+  const splitMappingsEffective = usesBillSplitMerge && cleanedMappings.some((mapping) => (
     mapping.templateField === REUSE_MODULE_MAPPING_FIELD && mapping.mappedField === '否'
-  )) === false;
-  const billSplitUsesFeatureFilter = usesBillSplitMerge && !reusesModuleMapping
+  ));
+  const billSplitUsesFeatureFilter = splitMappingsEffective
     && (Array.isArray(billSplitMappings) ? billSplitMappings : [])
       .some((mapping) => normalizeCell(mapping && mapping.mappedField) === FEATURE_FILTER_MAPPING_FIELD);
-  if (billSplitUsesFeatureFilter && !featureFilterTargetFields.length && !featureFilter) {
+  const featureFilterUsed = splitMappingsEffective ? billSplitUsesFeatureFilter : featureFilterTargetFields.length > 0;
+  if (billSplitUsesFeatureFilter && !featureFilter) {
     throw new FileValidationError(
       'FILE_READ',
       `拆分/合并账单映射关系设置中有字段使用了"${FEATURE_FILTER_MAPPING_FIELD}"，请先在该弹窗点击【筛选条件】设置`
     );
   }
-  let cleanedFeatureFilter = null;
-  if (featureFilterTargetFields.length || billSplitUsesFeatureFilter) {
-    cleanedFeatureFilter = normalizeFeatureFilterRule(featureFilter, { headers: template.headers });
-  } else if (featureFilter) {
-    try {
-      cleanedFeatureFilter = normalizeFeatureFilterRule(featureFilter, { headers: template.headers });
-    } catch (_error) {
-      cleanedFeatureFilter = null;
-    }
-  }
+  const cleanedFeatureFilter = resolveSavedFeatureFilter({
+    used: featureFilterUsed,
+    featureFilter,
+    headers: template.headers
+  });
 
   return {
     mappings: cleanedMappings,
@@ -9954,10 +9965,12 @@ function registerTemplateHandlers() {
       }
       const validated = validateBillSplitMappingsPayload(payload.mappings, template);
       // v3.2.16：用到字段筛选特征值时规则必须有效（载荷未带则用已存规则），与映射同一事务写入
-      const usesFeatureFilter = validated.some((mapping) => mapping.mappedField === FEATURE_FILTER_MAPPING_FIELD);
-      const featureFilter = usesFeatureFilter
-        ? normalizeFeatureFilterRule(payload.featureFilter || template.featureFilter, { headers: template.headers })
-        : null;
+      // 未用到时有效草稿照存，避免弹窗里改过的规则被丢弃而与界面不一致
+      const featureFilter = resolveSavedFeatureFilter({
+        used: validated.some((mapping) => mapping.mappedField === FEATURE_FILTER_MAPPING_FIELD),
+        featureFilter: payload.featureFilter || template.featureFilter,
+        headers: template.headers
+      });
       database.saveBillSplitMappings(templateId, validated, { featureFilter });
       syncTemplateLibraryFile();
       return { status: 'success', message: '拆分账单字段映射保存成功' };

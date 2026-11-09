@@ -3954,7 +3954,13 @@
           pushAlert(overlay, () => createAlertDialog(channelAssignment.error, { onConfirm: null }));
           return;
         }
-        const featureFilterMissing = findFeatureFilterMissingMessage(collectMappingDraftFromTable(tbody), currentFeatureFilter);
+        // v3.2.16：拆分/合并且不复用模块映射时主映射不生效，主映射里残留的该值不要求规则（拆分映射由后端校验）
+        const featureFilterDraft = collectMappingDraftFromTable(tbody);
+        const splitMappingsEffective = featureFilterDraft.some((m) => m.templateField === BILL_SPLIT_MERGE_FIELD && m.mappedField === '是')
+          && featureFilterDraft.some((m) => m.templateField === REUSE_MODULE_FIELD && m.mappedField === '否');
+        const featureFilterMissing = splitMappingsEffective
+          ? ''
+          : findFeatureFilterMissingMessage(featureFilterDraft, currentFeatureFilter);
         if (featureFilterMissing) {
           pushAlert(overlay, () => createAlertDialog(escapeHtml(featureFilterMissing), { onConfirm: null }));
           return;

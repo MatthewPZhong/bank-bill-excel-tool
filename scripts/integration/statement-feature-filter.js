@@ -8,6 +8,7 @@
 //      用到该值（含只在拆分映射中用到）时包写 v6，旧版读包整包拒绝，未用到时仍写 v5
 //   ⑤ 拆分/合并「不复用」映射：只有拆分映射用该值时，规则随拆分映射保存并在展开行生效；
 //      规则缺失时保存主映射被拒；主映射残留该值但拆分映射未用时不要求规则、不记未命中
+//   ⑥ BillDate 取该值时，源列里的“合计”标签仍按合计行跳过，合计金额不作为交易导出（资金红线回归）
 //   UI 由 renderer lifecycle 覆盖；本脚本验证数据与文件在整条链路上的结果。
 //
 // 用法：node scripts/integration/statement-feature-filter.js
@@ -132,6 +133,7 @@ function closeDatabase(database) {
 function createMain(database, constantOverrides = {}) {
   return loadMainFunctions([
     'validateTemplateConfiguration',
+    'resolveSavedFeatureFilter',
     'buildExportTargetFields',
     'buildMappingTargetFields',
     'buildManagedMappingFields',
@@ -456,9 +458,54 @@ function verifyBillSplitNotReuse(dir, { database, main }) {
   ]);
   database.saveBillSplitRowCount(residual.id, 1);
   database.saveBillSplitRow(residual.id, { seqNo: 1, currencySourceField: '币种', creditSourceField: '收入', debitSourceField: '支出', amountSourceField: '', rowStatus: 'completed' });
+  assertEq(
+    main.validateTemplateConfiguration({
+      template: residual,
+      mappings: database.getTemplateMappings(residual.id).mappings,
+      enumValues: ENUM_VALUES,
+      featureFilter: null,
+      billSplitMappings: database.getBillSplitMappings(residual.id)
+    }).featureFilter,
+    null,
+    '⑤ 主映射残留该值但不生效：缺规则也可保存（与生成口径一致）'
+  );
+  assertEq(
+    [
+      main.resolveSavedFeatureFilter({ used: false, featureFilter: { ...RULE_INPUT, length: '6', letterPrefixCount: '', sample: '' }, headers: HEADERS }),
+      main.resolveSavedFeatureFilter({ used: false, featureFilter: { sourceField: '附言' }, headers: HEADERS })
+    ],
+    [{ sourceField: '附言', separator: 'space', length: 6, letterPrefixCount: null, digitsOnly: true, sample: '' }, null],
+    '⑤ 未用到时有效草稿照存、无效草稿不写（拆分映射保存同口径）'
+  );
+  assertThrows(() => main.resolveSavedFeatureFilter({ used: true, featureFilter: { sourceField: '附言' }, headers: HEADERS }),
+    /至少设置一项/, '⑤ 用到时无效规则被拒');
   const residualRows = generate(main, database, residual.id, sourcePath);
   assertEq(pickColumns(residualRows, ['Remark']), [['INV/123456/备注'], ['INV/12345']], '⑤ 不复用时按拆分映射直接取列');
   assertEq(residualRows.issues.filter((issue) => issue.type === 'feature-value-unmatched').length, 0, '⑤ 主映射残留该值不记未命中提示');
+}
+
+// ⑥ BillDate 取该值且源列含合计标签：按合计行跳过，不导出合计金额
+function verifySummaryRowWithFeatureBillDate(dir, { database, main }) {
+  const template = database.upsertTemplate({ name: 'BANKE-合计', sourceFileName: 'e.xlsx', headers: HEADERS });
+  const validated = main.validateTemplateConfiguration({
+    template,
+    mappings: mappingsFor({ BillDate: FEATURE, Remark: '附言', Reference: '' }),
+    enumValues: ENUM_VALUES,
+    featureFilter: { sourceField: '附言', separator: 'space', length: '10' }
+  });
+  database.saveMappings(template.id, validated.mappings, [], [], undefined, null, { featureFilter: validated.featureFilter });
+  const sourcePath = path.join(dir, 'source-e.xlsx');
+  writeSource(sourcePath, [
+    ['', '转账 2026-11-01', 'USD', '100', '', 'ACC1'],
+    ['', '合计', 'USD', '100', '', 'ACC1']
+  ]);
+  const detailRows = generate(main, database, template.id, sourcePath);
+  assertEq(pickColumns(detailRows, ['BillDate', 'Credit Amount', 'Remark']), [['2026-11-01', '100', '转账 2026-11-01']], '⑥ 合计行不作为交易导出');
+  assertEq(
+    detailRows.issues.map((issue) => [issue.type, issue.rowNumber, issue.rawValue]),
+    [['summary-row-skipped', 3, '合计']],
+    '⑥ 记为跳过的合计行，不记未命中'
+  );
 }
 
 async function run() {
@@ -469,6 +516,7 @@ async function run() {
     verifyRejections(dir, context);
     verifyBundleRoundTrip(dir, context);
     verifyBillSplitNotReuse(dir, context);
+    verifySummaryRowWithFeatureBillDate(dir, context);
   } finally {
     openedDatabases.splice(0).forEach((database) => {
       try { database.close(); } catch (error) { console.error('关闭测试主库失败', error); }

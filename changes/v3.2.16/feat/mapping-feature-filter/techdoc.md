@@ -29,6 +29,8 @@
 | T8 | 拆分/合并映射保存（`template:save-bill-split-mappings`）载荷带 `featureFilter`，用到时校验（缺省回落已存规则）并与拆分映射同一事务写入 | D4 共用一套；该弹窗即时写库，不能依赖主弹窗稍后保存 |
 | T9 | 不新增 `desktopApi` 方法；模板包按需升版：任一模板主映射或拆分映射用到该值时写 v6（`resolveTemplateBundleVersion`，`SUPPORTED_BUNDLE_VERSION = 6`），否则写 `BASE_BUNDLE_VERSION = 5` | 避开 `architecture/boundaries.json` 白名单放宽；旧版不校验拆分映射，只靠 T2 时“只在拆分映射中用到”的包会被旧版静默导入，按版本号整包拒绝才能失败关闭；未用到时不影响旧版导入 |
 | T10 | `upsertTemplate` 覆盖表头、清空映射时一并清空规则 | 规则引用的源字段可能已不存在 |
+| T12 | BillDate 取该值时，合计行识别同时看筛选源单元格原文（`buildMappedRows` 中 `featureFilterBillDateSource`） | 合计标签会被筛成空串，若只看筛选结果，合计金额会作为普通交易再导出一次（资金红线） |
+| T13 | 保存规则统一走 `resolveSavedFeatureFilter`：用到时必须有效；未用到时有效草稿照存、无效不写；主映射保存与拆分映射保存同口径 | 拆分弹窗里改过规则后不再使用时，旧实现丢弃新规则，界面草稿与库不一致 |
 | T11 | “是否使用”只看实际生效的映射：拆分/合并且不复用时看拆分映射，否则看主映射（`resolveStatementFeatureFilter` 与 `buildMappedRows` 同口径）；保存主映射与导入模板包时，不复用的拆分映射（已存或包内）用到该值也要求规则有效 | 主映射残留该值不应误报未命中；只在拆分映射中用到时也要在保存时拦住缺规则，而不是到生成才失败 |
 
 ## 三、数据流
@@ -70,8 +72,8 @@ buildStatementGenerationConfig ─ resolveStatementFeatureFilter（用到 token 
 | 层级 | 位置 | 覆盖 |
 | --- | --- | --- |
 | 单测 | `tests/unit/backend/file-service/feature-filter.test.js` | 五种分隔符与不拆分、连续/全角空白、首个命中、未命中、单项与组合条件、数值单元格、规则校验各错误、样例不符/含分隔符 |
-| 集成 | `scripts/integration/statement-feature-filter.js`（41 项） | ① 旧库补列与重复启动；② 保存→读回→生成→回读导出，提示与报错文件；③ 缺规则、字段不存在、非法目标、直接写库缺规则生成被拒；④ 模板包往返、覆盖表头清空、按需 v6 与旧版拒绝；⑤ 拆分/合并「不复用」路径、缺规则保存被拒、主映射残留不误报 |
-| 渲染生命周期 | `scripts/renderer-lifecycle/fixtures/configuration-dialogs.js`（新增 4 例） | 选项位置与范围、按钮显隐、无规则阻止保存、样例推导、保存载荷、弹窗校验与回显、拆分弹窗共用规则与回传、最小窗口布局与截图证据 |
+| 集成 | `scripts/integration/statement-feature-filter.js`（46 项） | ① 旧库补列与重复启动；② 保存→读回→生成→回读导出，提示与报错文件；③ 缺规则、字段不存在、非法目标、直接写库缺规则生成被拒；④ 模板包往返、覆盖表头清空、按需 v6 与旧版拒绝；⑤ 拆分/合并「不复用」路径、缺规则保存被拒、主映射残留不误报且可保存、未用到时草稿照存；⑥ BillDate 取该值时合计行仍跳过 |
+| 渲染生命周期 | `scripts/renderer-lifecycle/fixtures/configuration-dialogs.js`（新增 5 例） | 选项位置与范围、按钮显隐、无规则阻止保存、样例推导、保存载荷、弹窗校验与回显、拆分弹窗共用规则与回传、最小窗口布局与截图证据 |
 
 fixture 的 `setup` 补传 `CONCAT_FIELDS_MAPPING_FIELD`、`FEATURE_FILTER_MAPPING_FIELD`（此前未传，拼接选项值为 `undefined`；不影响既有用例）。
 
@@ -97,3 +99,8 @@ fixture 的 `setup` 补传 `CONCAT_FIELDS_MAPPING_FIELD`、`FEATURE_FILTER_MAPPI
   2. 保存主映射只校验主映射，不复用的拆分映射用到该值而缺规则时能保存、到生成才失败 → 保存与模板包导入一并校验（T11）。
   3. 不复用时主映射残留该值仍会记未命中提示 → 只看实际生效的映射（T11）。
   集成脚本补对应用例（41 项）。
+- 2026-11-09 Codex 第二轮审查 1 条 P1、2 条 P2，均已核实并修复：
+  1. ⚠️ P1 资金红线：BillDate 取该值且源列含合计标签时，合计金额被当作交易导出 → T12；修复前回归用例复现出多导出一行 100，修复后按合计行跳过。**须人工复核**。
+  2. P2：不复用时主映射残留该值，保存要求规则而生成不要求 → 保存按实际生效映射判断（T11），主弹窗保存前检查同步。
+  3. P2：拆分映射保存在未用到时丢弃有效新规则 → T13。
+  集成脚本 46 项；生命周期新增一例（共 5 例）。

@@ -677,9 +677,17 @@ function buildMappedRows({
       ? billSplitMappingByField.BillDate
       : mappingByField.BillDate;
     const rawEffectiveBillDate = resolveDateRawValueByMapping(effectiveBillDateMapping, row);
+    // v3.2.16：BillDate 取「字段筛选特征值」时，合计标签会被筛成空串；改按筛选源单元格原文识别合计行，
+    // 否则合计金额会作为普通交易再导出一次。
+    const featureFilterBillDateSource = featureFilterRule
+      && normalizeMappingTokens(effectiveBillDateMapping).includes(FEATURE_FILTER_FIELD_TOKEN)
+      ? normalizeCell(row[featureFilterSourceIndex])
+      : '';
     const summaryDateLabel = isStatementSummaryDateLabel(rawEffectiveBillDate)
       ? normalizeCell(rawEffectiveBillDate)
-      : '';
+      : isStatementSummaryDateLabel(featureFilterBillDateSource)
+        ? featureFilterBillDateSource
+        : '';
     const recordSummaryRow = () => {
       issues.push({ type: 'summary-row-skipped', rowNumber: sourceRowNumber, rawValue: summaryDateLabel });
     };

@@ -842,6 +842,20 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       { sourceField: '附言', separator: 'slash', length: 6, letterPrefixCount: null, digitsOnly: true, sample: '123456' });
   });
 
+  await test('字段筛选特征值：拆分/合并且不复用时主映射残留该值不阻止保存，复用时仍要求先设置', async () => {
+    await setup();
+    const open = (reuse) => js(`${FEATURE_SETUP_JS}
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:cfg.tpl,targetFields:['BillDate','Remark','是否拆分/合并明细账单','复用模块字段的映射关系'],
+        mappings:[{templateField:'Remark',mappedField:'${FEATURE}',mappedFields:[]},{templateField:'是否拆分/合并明细账单',mappedField:'是',mappedFields:[]},{templateField:'复用模块字段的映射关系',mappedField:'${reuse}',mappedFields:[]}]})).handle;
+      cfg.overlay=cfg.top();cfg.overlay.querySelector('[data-action="done"]').click();void 0;`);
+    await open('否'); await tick();
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 1);
+    await js('cfg.host.closeAll?.();');
+    await open('是'); await tick();
+    assert.match(await js('cfg.top().textContent'), /Remark 选择了「字段筛选特征值」，请先点击【筛选条件】设置/);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 1);
+  });
+
   await test('字段筛选特征值：拆分/合并映射弹窗共用同一套规则，保存时随拆分映射提交并回传', async () => {
     await setup();
     await js(`${FEATURE_SETUP_JS}cfg.splitDone=[];
