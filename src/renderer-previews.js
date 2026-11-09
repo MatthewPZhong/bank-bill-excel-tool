@@ -401,6 +401,52 @@
       }));
     }
 
+    // 2c. 账单里的余额逐日校验不一致确认（v3.2.16）
+    function applyBalanceMismatchConfirmDialogPreviewState() {
+      setCurrentModule(MODULES.statementGenerator.id);
+      const mismatches = [
+        {
+          key: 'mismatch|HSBC-SG|6222000000000001|USD|2026-04-01|2026-03-31|1000.00|100.00|0.00|9999.00',
+          templateName: 'HSBC-SG', bankName: 'HSBC', merchantId: '6222000000000001', currency: 'USD',
+          billDate: '2026-04-01', anchorDate: '2026-03-31', anchorSource: 'seed', anchorBalance: 1000,
+          creditAmount: 100, debitAmount: 0, expectedBalance: 1100, statementBalance: 9999, difference: 8899,
+          missingFrom: '', missingTo: ''
+        },
+        {
+          key: 'mismatch|HSBC-SG|9558800000000008|SGD|2026-04-07|2026-04-03|5000.50|300.00|70.00|5180.50',
+          templateName: 'HSBC-SG', bankName: 'HSBC', merchantId: '9558800000000008', currency: 'SGD',
+          billDate: '2026-04-07', anchorDate: '2026-04-03', anchorSource: 'statement', anchorBalance: 5000.5,
+          creditAmount: 300, debitAmount: 70, expectedBalance: 5230.5, statementBalance: 5180.5, difference: -50,
+          missingFrom: '2026-04-04', missingTo: '2026-04-06'
+        }
+      ];
+      openModal(() => createManualBalanceSeedDialog({
+        reason: 'mismatch', templateName: 'HSBC-SG', merchantId: mismatches[0].merchantId,
+        currency: mismatches[0].currency, targetBillDate: mismatches[0].billDate, mismatches
+      }));
+    }
+
+    // 2d. 同一账单日人工补录余额将被替换的确认（v3.2.16）
+    function applyBalanceSeedReplaceConfirmDialogPreviewState() {
+      setCurrentModule(MODULES.statementGenerator.id);
+      const replacements = [
+        {
+          key: 'seed-replace|HSBC-SG|6222000000000001|USD|2026-04-01|5000.00|9999.00',
+          templateName: 'HSBC-SG', bankName: 'HSBC', merchantId: '6222000000000001', currency: 'USD', billDate: '2026-04-01',
+          balanceSource: 'statement', manualBalance: 5000, balance: 9999, difference: 4999, adjustment: 0, writtenBalance: 9999
+        },
+        {
+          key: 'seed-replace|HSBC-SG|9558800000000008|SGD|2026-04-07|5180.50|5230.50',
+          templateName: 'HSBC-SG', bankName: 'HSBC', merchantId: '9558800000000008', currency: 'SGD', billDate: '2026-04-07',
+          balanceSource: 'calculated', manualBalance: 5180.5, balance: 5230.5, difference: 50, adjustment: 10, writtenBalance: 5240.5
+        }
+      ];
+      openModal(() => createManualBalanceSeedDialog({
+        reason: 'seed-replace', templateName: 'HSBC-SG', merchantId: replacements[0].merchantId,
+        currency: replacements[0].currency, targetBillDate: replacements[0].billDate, replacements
+      }));
+    }
+
     // 3. 余额管理（addon manager）对话框（v1.5.x，资金链路）
     function applyBalanceAddonManagerPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
@@ -1541,6 +1587,8 @@
       applyMonthlyBalanceExportDialogPreviewState,
       applyManualBalanceSeedDialogPreviewState,
       applyBalanceGapConfirmDialogPreviewState,
+      applyBalanceMismatchConfirmDialogPreviewState,
+      applyBalanceSeedReplaceConfirmDialogPreviewState,
       applyBalanceAddonManagerPreviewState,
       applyExportScopeDialogPreviewState,
       applyAmountSplitRulesDialogPreviewState,

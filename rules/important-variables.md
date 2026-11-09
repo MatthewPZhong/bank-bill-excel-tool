@@ -739,10 +739,10 @@
 
 ### 余额计算
 - `calculateEndingBalanceFromAmounts` — `file-service/normalizers.js`
-- `inferEndingBalance` — `file-service/normalizers.js`
+- `verifyStatementEndingBalance` — `file-service/normalizers.js`（v3.2.16 起替代 `inferEndingBalance`：账单里的余额逐日校验）
 - 关联功能：由发生额倒推期末余额（CLAUDE.md Balance calculation）
 - 变更 review 要点：
-  - 算法变化会让所有"通过发生额计算"模式的模板输出数值变化
+  - 算法变化会让所有"通过发生额计算"模式的模板输出数值变化；校验口径变化会改变"账单里的余额"模式的补录 / 不一致确认提示
   - 必跑：单币种 + 混币种余额表对比
   - **资金相关**，必须高亮
 

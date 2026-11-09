@@ -10,10 +10,10 @@ const {
   buildMappedRows,
   extractHeaders,
   FIXED_FIELD_VALUE_PREFIX,
-  inferEndingBalance,
   loadCurrencyMappings,
   loadEnumValues,
   normalizeDateExportValue,
+  verifyStatementEndingBalance,
   writeBalanceWorkbook,
   writeWorkbookRows
 } = require('../../src/backend/file-service');
@@ -444,25 +444,24 @@ function runMappingScenario(context, state) {
   assert.strictEqual(filteredExportRows.sourceRows[1][6], '100');
   assert.strictEqual(filteredExportRows.sourceRows[1][7], '');
 
-  assert.strictEqual(
-    inferEndingBalance({
-      previousEndBalance: 606784530.83,
-      dateLabel: '2026-02-12',
-      entries: [
-        {
-          balanceValue: 466784381.89,
-          creditAmount: 0,
-          debitAmount: 40000074.47
-        },
-        {
-          balanceValue: 506784456.36,
-          creditAmount: 0,
-          debitAmount: 100000074.47
-        }
-      ]
-    }),
-    466784381.89
-  );
+  const statementBalanceCheck = verifyStatementEndingBalance({
+    anchorBalance: 606784530.83,
+    dateLabel: '2026-02-12',
+    entries: [
+      {
+        balanceValue: 466784381.89,
+        creditAmount: 0,
+        debitAmount: 40000074.47
+      },
+      {
+        balanceValue: 506784456.36,
+        creditAmount: 0,
+        debitAmount: 100000074.47
+      }
+    ]
+  });
+  assert.strictEqual(statementBalanceCheck.status, 'match');
+  assert.strictEqual(statementBalanceCheck.endBalance, 466784381.89);
   assert.strictEqual(
     calculateEndingBalanceFromAmounts({
       previousEndBalance: 456.78,

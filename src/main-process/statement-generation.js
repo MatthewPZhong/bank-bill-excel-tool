@@ -15,6 +15,8 @@ function createStatementGenerationHelpers(deps) {
     buildImportWarningMessage,
     buildManualBalanceRequiredResult,
     buildBalanceGapConfirmResult,
+    buildBalanceMismatchConfirmResult,
+    buildBalanceSeedReplaceConfirmResult,
     getAcknowledgedBalanceGapKeys,
     buildDetailExportRows,
     buildMappedRowsForFile,
@@ -36,6 +38,7 @@ function createStatementGenerationHelpers(deps) {
     splitTemplateName,
     scanBalanceSeedStatus,
     readBalanceAdjustments,
+    readBalanceSeedRecords,
     storeGeneratedBalanceSeeds,
     writeBalanceWorkbook,
     writeWorkbookRows,
@@ -174,15 +177,23 @@ function createStatementGenerationHelpers(deps) {
           templateBankName
         );
 
+        // 断档“不补录”与余额不一致“确认继续”共用会话确认集合（键以类型前缀区分）。
+        const acknowledgedBalanceKeys = typeof getAcknowledgedBalanceGapKeys === 'function'
+          ? getAcknowledgedBalanceGapKeys()
+          : null;
         const balanceResult = deriveBalanceRecords({
           detailRows: effectiveDetailRows,
           templateName: statementOutputName(config),
           balanceTemplateFields,
           mode: preparedBatch.balanceMode,
           balanceAdjustments,
-          acknowledgedBalanceGapKeys: typeof getAcknowledgedBalanceGapKeys === 'function'
-            ? getAcknowledgedBalanceGapKeys()
-            : null,
+          acknowledgedBalanceGapKeys: acknowledgedBalanceKeys,
+          acknowledgedBalanceMismatchKeys: acknowledgedBalanceKeys,
+          acknowledgedBalanceSeedReplaceKeys: acknowledgedBalanceKeys,
+          // 同一账单日的人工补录种子：回写前与本次余额比对，不一致须确认替换。
+          existingBalanceSeeds: typeof readBalanceSeedRecords === 'function'
+            ? readBalanceSeedRecords(ensureStorageRoot(), templateBankName)
+            : [],
           resolvePreviousBalanceSeed: ({ bankName, merchantId, currency, targetBillDate, generationMethod }) => (
             findPreviousBalanceSeed(ensureStorageRoot(), {
               bankName,
@@ -195,6 +206,12 @@ function createStatementGenerationHelpers(deps) {
         });
         if (balanceResult.skippedBalanceGaps.length) {
           warnings.push({ type: 'balance-gap-skipped', gaps: balanceResult.skippedBalanceGaps });
+        }
+        if (Array.isArray(balanceResult.confirmedBalanceMismatches) && balanceResult.confirmedBalanceMismatches.length) {
+          warnings.push({ type: 'balance-mismatch-confirmed', mismatches: balanceResult.confirmedBalanceMismatches });
+        }
+        if (Array.isArray(balanceResult.confirmedBalanceSeedReplacements) && balanceResult.confirmedBalanceSeedReplacements.length) {
+          warnings.push({ type: 'balance-seed-replace-confirmed', replacements: balanceResult.confirmedBalanceSeedReplacements });
         }
         const balanceOutput = buildStatementOutputFilePath({
           kind: 'balance',
@@ -241,7 +258,16 @@ function createStatementGenerationHelpers(deps) {
                 currency: promptCurrency,
                 targetBillDate: normalizeCell(error.context?.targetBillDate),
                 queueIndex,
-                queueTotal
+                queueTotal,
+                // 已有种子但首日对不上时附上明细，补录弹窗据此说明原因（v3.2.16 D7）。
+                ...(error.context?.seedMismatch
+                  ? {
+                      seedMismatch: {
+                        ...error.context.seedMismatch,
+                        statementBalances: [...(error.context.seedMismatch.statementBalances || [])]
+                      }
+                    }
+                  : {})
               }
             });
           } else if (error.code === 'BALANCE_GAP_CONFIRM_REQUIRED') {
@@ -249,6 +275,18 @@ function createStatementGenerationHelpers(deps) {
               type: 'balance-gap-confirm',
               message: error.message,
               gaps: Array.isArray(error.context?.gaps) ? error.context.gaps : []
+            });
+          } else if (error.code === 'BALANCE_MISMATCH_CONFIRM_REQUIRED') {
+            warnings.push({
+              type: 'balance-mismatch-confirm',
+              message: error.message,
+              mismatches: Array.isArray(error.context?.mismatches) ? error.context.mismatches : []
+            });
+          } else if (error.code === 'BALANCE_SEED_REPLACE_CONFIRM_REQUIRED') {
+            warnings.push({
+              type: 'balance-seed-replace-confirm',
+              message: error.message,
+              replacements: Array.isArray(error.context?.replacements) ? error.context.replacements : []
             });
           } else {
             warnings.push({
@@ -405,6 +443,20 @@ function createStatementGenerationHelpers(deps) {
       .flatMap((warning) => (Array.isArray(warning.gaps) ? warning.gaps : []));
   }
 
+  // 多个模板组各自返回的余额不一致合并成一次确认（在补录、断档之后处理）。
+  function extractBalanceMismatchConfirmItems(warnings = []) {
+    return warnings
+      .filter((warning) => warning.type === 'balance-mismatch-confirm')
+      .flatMap((warning) => (Array.isArray(warning.mismatches) ? warning.mismatches : []));
+  }
+
+  // 多个模板组各自返回的人工补录替换合并成一次确认（最后处理）。
+  function extractBalanceSeedReplaceConfirmItems(warnings = []) {
+    return warnings
+      .filter((warning) => warning.type === 'balance-seed-replace-confirm')
+      .flatMap((warning) => (Array.isArray(warning.replacements) ? warning.replacements : []));
+  }
+
   function buildImportResultFromGeneratedFiles({
     generatedFiles,
     templateId,
@@ -443,6 +495,30 @@ function createStatementGenerationHelpers(deps) {
         gapResult.unmatchedBillSplitFiles = unmatchedBillSplitFiles;
       }
       return gapResult;
+    }
+
+    const balanceMismatches = extractBalanceMismatchConfirmItems(generatedFiles.warnings);
+    if (balanceMismatches.length && typeof buildBalanceMismatchConfirmResult === 'function') {
+      const mismatchResult = buildBalanceMismatchConfirmResult(balanceMismatches, generatedFiles);
+      if (unmatchedAmountSplitFiles.length) {
+        mismatchResult.unmatchedAmountSplitFiles = unmatchedAmountSplitFiles;
+      }
+      if (unmatchedBillSplitFiles.length) {
+        mismatchResult.unmatchedBillSplitFiles = unmatchedBillSplitFiles;
+      }
+      return mismatchResult;
+    }
+
+    const balanceSeedReplacements = extractBalanceSeedReplaceConfirmItems(generatedFiles.warnings);
+    if (balanceSeedReplacements.length && typeof buildBalanceSeedReplaceConfirmResult === 'function') {
+      const replaceResult = buildBalanceSeedReplaceConfirmResult(balanceSeedReplacements, generatedFiles);
+      if (unmatchedAmountSplitFiles.length) {
+        replaceResult.unmatchedAmountSplitFiles = unmatchedAmountSplitFiles;
+      }
+      if (unmatchedBillSplitFiles.length) {
+        replaceResult.unmatchedBillSplitFiles = unmatchedBillSplitFiles;
+      }
+      return replaceResult;
     }
 
     if (generatedFiles.warnings.length) {
@@ -666,6 +742,8 @@ function createStatementGenerationHelpers(deps) {
     createGenerationContext,
     extractManualBalancePromptWarning,
     extractBalanceGapConfirmGaps,
+    extractBalanceMismatchConfirmItems,
+    extractBalanceSeedReplaceConfirmItems,
     generateStatementFiles,
     generateFilesFromRememberedContext,
     getGeneratedStatementExport,

@@ -701,7 +701,6 @@ const {
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
   extractHeaders,
-  inferEndingBalance,
   isRegexLiteral,
   loadCurrencyMappings,
   loadEnumValues,
@@ -2173,7 +2172,8 @@ function createManualBalanceSeedFreshnessGuard({
   };
 }
 
-// 断档“不补录”只记在内存中的账单会话上：不落盘，重启后失效。
+// 断档“不补录”与余额不一致“确认继续”只记在内存中的账单会话上：不落盘，重启后失效。
+// 两类确认共用同一集合，键按类型区分（余额不一致键以 mismatch| 开头）。
 function rememberAcknowledgedBalanceGaps({ session, importContext, gapKeys }) {
   const owner = session || importContext;
   if (!owner) return false;
@@ -2200,6 +2200,48 @@ function hasAcknowledgedBalanceGap(key) {
 
 function getAcknowledgedBalanceGapKeys() {
   return { has: hasAcknowledgedBalanceGap };
+}
+
+function formatBalanceAmount(value, { signed = false } = {}) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return '(空)';
+  const text = numericValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 12 });
+  return signed && numericValue > 0 ? `+${text}` : text;
+}
+
+function formatBalanceSeedMismatchLine(seedMismatch) {
+  const statementBalances = (Array.isArray(seedMismatch.statementBalances) ? seedMismatch.statementBalances : [])
+    .map((value) => formatBalanceAmount(value))
+    .join('、');
+  return `已有 ${seedMismatch.seedDate} 余额 ${formatBalanceAmount(seedMismatch.seedBalance)}（${seedMismatch.seedGenerationMethod || '人工录入'}）；`
+    + `${seedMismatch.billDate}：上一日余额 ${formatBalanceAmount(seedMismatch.anchorBalance)}`
+    + ` + 收入 ${formatBalanceAmount(seedMismatch.creditAmount)} − 支出 ${formatBalanceAmount(seedMismatch.debitAmount)}`
+    + ` = 预期 ${formatBalanceAmount(seedMismatch.expectedBalance)}，账单当日余额 ${statementBalances || '(空)'} 都对不上`;
+}
+
+function formatBalanceMismatchLine(mismatch) {
+  const anchorLabel = mismatch.anchorSource === 'seed'
+    ? `余额种子 ${mismatch.anchorDate}`
+    : `上一账单日 ${mismatch.anchorDate}`;
+  const missingRange = mismatch.missingFrom
+    ? `，中间缺 ${mismatch.missingFrom === mismatch.missingTo ? mismatch.missingFrom : `${mismatch.missingFrom} ~ ${mismatch.missingTo}`}`
+    : '';
+  return `银行账号：${mismatch.merchantId}，币种：${mismatch.currency || '(空)'}，账单日期：${mismatch.billDate}，`
+    + `上一日余额：${formatBalanceAmount(mismatch.anchorBalance)}（${anchorLabel}），`
+    + `收入：${formatBalanceAmount(mismatch.creditAmount)}，支出：${formatBalanceAmount(mismatch.debitAmount)}，`
+    + `预期余额：${formatBalanceAmount(mismatch.expectedBalance)}，账单余额：${formatBalanceAmount(mismatch.statementBalance)}，`
+    + `差额：${formatBalanceAmount(mismatch.difference, { signed: true })}${missingRange}`;
+}
+
+function formatBalanceSeedReplaceLine(replacement) {
+  const balanceLabel = replacement.balanceSource === 'calculated' ? '计算余额' : '账单余额';
+  const adjustment = Number(replacement.adjustment) || 0;
+  const written = adjustment
+    ? `，另加余额附加值 ${formatBalanceAmount(adjustment)} 后写入 ${formatBalanceAmount(replacement.writtenBalance)}`
+    : '';
+  return `银行账号：${replacement.merchantId}，币种：${replacement.currency || '(空)'}，账单日期：${replacement.billDate}，`
+    + `人工补录余额：${formatBalanceAmount(replacement.manualBalance)}，${balanceLabel}：${formatBalanceAmount(replacement.balance)}，`
+    + `差额：${formatBalanceAmount(replacement.difference, { signed: true })}${written}`;
 }
 
 function formatBalanceGapLine(gap) {
@@ -2385,20 +2427,25 @@ function buildManualBalanceRequiredResult(prompt, generatedFiles) {
       }
     : null;
   lastManualBalancePrompt = normalizedPrompt ? { ...normalizedPrompt } : null;
+  // 已有种子但首日对不上（v3.2.16 D7）：提示与日志写明是已有余额对不上，不是缺余额。
+  const seedMismatch = normalizedPrompt?.seedMismatch || null;
   appendActivityLogEntry({
     level: 'info',
-    message: '等待补录上一账单日余额',
+    message: seedMismatch ? '上一账单日余额与账单对不上，等待重新补录' : '等待补录上一账单日余额',
     details: [
       `模板名：${normalizedPrompt?.templateName || 'N/A'}`,
       `银行账号：${normalizedPrompt?.merchantId || 'N/A'}`,
       `币种：${normalizedPrompt?.currency || '(空)'}`,
-      `当前账单日期：${normalizedPrompt?.targetBillDate || 'N/A'}`
+      `当前账单日期：${normalizedPrompt?.targetBillDate || 'N/A'}`,
+      ...(seedMismatch ? [formatBalanceSeedMismatchLine(seedMismatch)] : [])
     ]
   });
 
   return {
     status: 'manual-balance-required',
-    message: '因首次导入余额，请导入上一个账单日余额用于余额校验',
+    message: seedMismatch
+      ? '上一账单日余额与账单对不上，请核对后重新补录'
+      : '因首次导入余额，请导入上一个账单日余额用于余额校验',
     detailReady: Boolean(generatedFiles?.detail),
     balanceReady: false,
     errorReportReady: false,
@@ -2453,6 +2500,102 @@ function buildBalanceGapConfirmResult(gaps, generatedFiles) {
     errorReportReady: false,
     manualBalancePromptReady: true,
     manualBalancePrompt: { ...prompt, gaps: promptGaps.map((gap) => ({ ...gap })) }
+  };
+}
+
+// 同一账单日人工补录的期末余额与本次余额不一致（v3.2.16）：替换前复用补录通道确认，prompt 列出全部待替换项。
+function buildBalanceSeedReplaceConfirmResult(replacements, generatedFiles) {
+  clearLastErrorReport();
+  lastPendingBalanceSeedConfirmation = null;
+  const promptReplacements = replacements.map((replacement) => ({
+    key: replacement.key,
+    templateName: replacement.templateName,
+    bankName: replacement.bankName,
+    merchantId: replacement.merchantId,
+    currency: replacement.currency,
+    billDate: replacement.billDate,
+    balanceSource: replacement.balanceSource,
+    manualBalance: replacement.manualBalance,
+    balance: replacement.balance,
+    difference: replacement.difference,
+    adjustment: replacement.adjustment,
+    writtenBalance: replacement.writtenBalance
+  }));
+  const [first] = promptReplacements;
+  const prompt = {
+    reason: 'seed-replace',
+    templateName: first.templateName,
+    bankName: first.bankName,
+    merchantId: first.merchantId,
+    currency: first.currency,
+    targetBillDate: first.billDate,
+    replacements: promptReplacements
+  };
+  lastManualBalancePrompt = prompt;
+  appendActivityLogEntry({
+    level: 'info',
+    message: '人工补录的期末余额与本次余额不一致，等待核查或确认替换',
+    details: [`模板名：${first.templateName}`, ...promptReplacements.map(formatBalanceSeedReplaceLine)]
+  });
+
+  return {
+    status: 'manual-balance-required',
+    message: `人工补录的期末余额与本次余额不一致（${promptReplacements.length} 处），请核查或确认替换`,
+    detailReady: Boolean(generatedFiles?.detail),
+    balanceReady: false,
+    errorReportReady: false,
+    manualBalancePromptReady: true,
+    manualBalancePrompt: { ...prompt, replacements: promptReplacements.map((replacement) => ({ ...replacement })) }
+  };
+}
+
+// 账单里的余额逐日校验不一致（v3.2.16）：复用补录通道，prompt 列出本次全部待确认的不一致。
+function buildBalanceMismatchConfirmResult(mismatches, generatedFiles) {
+  clearLastErrorReport();
+  lastPendingBalanceSeedConfirmation = null;
+  const promptMismatches = mismatches.map((mismatch) => ({
+    key: mismatch.key,
+    templateName: mismatch.templateName,
+    bankName: mismatch.bankName,
+    merchantId: mismatch.merchantId,
+    currency: mismatch.currency,
+    billDate: mismatch.billDate,
+    anchorDate: mismatch.anchorDate,
+    anchorSource: mismatch.anchorSource,
+    anchorBalance: mismatch.anchorBalance,
+    creditAmount: mismatch.creditAmount,
+    debitAmount: mismatch.debitAmount,
+    expectedBalance: mismatch.expectedBalance,
+    statementBalance: mismatch.statementBalance,
+    difference: mismatch.difference,
+    missingFrom: mismatch.missingFrom || '',
+    missingTo: mismatch.missingTo || ''
+  }));
+  const [first] = promptMismatches;
+  const prompt = {
+    reason: 'mismatch',
+    templateName: first.templateName,
+    bankName: first.bankName,
+    merchantId: first.merchantId,
+    currency: first.currency,
+    targetBillDate: first.billDate,
+    mismatches: promptMismatches
+  };
+  lastManualBalancePrompt = prompt;
+  appendActivityLogEntry({
+    level: 'info',
+    message: '账单余额校验不一致，等待核查或确认按账单余额生成',
+    details: [`模板名：${first.templateName}`, ...promptMismatches.map(formatBalanceMismatchLine)]
+  });
+
+  return {
+    status: 'manual-balance-required',
+    message: `账单余额校验不一致（${promptMismatches.length} 处），请核查或确认按账单余额生成`,
+    detailReady: Boolean(generatedFiles?.detail),
+    balanceReady: false,
+    errorReportReady: false,
+    manualBalancePromptReady: true,
+    manualBalancePrompt: { ...prompt, mismatches: promptMismatches.map((mismatch) => ({ ...mismatch })) }
   };
 }
 
@@ -3936,6 +4079,12 @@ function buildImportWarningDetailLines(warnings) {
   const skippedBalanceGaps = warnings
     .filter((warning) => warning.type === 'balance-gap-skipped')
     .flatMap((warning) => (Array.isArray(warning.gaps) ? warning.gaps : []));
+  const confirmedBalanceMismatches = warnings
+    .filter((warning) => warning.type === 'balance-mismatch-confirmed')
+    .flatMap((warning) => (Array.isArray(warning.mismatches) ? warning.mismatches : []));
+  const confirmedBalanceSeedReplacements = warnings
+    .filter((warning) => warning.type === 'balance-seed-replace-confirmed')
+    .flatMap((warning) => (Array.isArray(warning.replacements) ? warning.replacements : []));
 
   if (summaryRowWarnings.length) {
     detailLines.push('以下行的账单日期列是账单自带的合计标签，按合计行处理，未写入导出的明细账单：');
@@ -3981,6 +4130,16 @@ function buildImportWarningDetailLines(warnings) {
     skippedBalanceGaps.forEach((gap) => detailLines.push(formatBalanceGapLine(gap)));
   }
 
+  if (confirmedBalanceMismatches.length) {
+    detailLines.push('以下账单余额与「上一日余额 + 当日收入 − 当日支出」不一致，已确认按账单余额生成，请核查是否漏单、重复或种子有误：');
+    confirmedBalanceMismatches.forEach((mismatch) => detailLines.push(formatBalanceMismatchLine(mismatch)));
+  }
+
+  if (confirmedBalanceSeedReplacements.length) {
+    detailLines.push('以下账单日的人工补录期末余额与本次余额不一致，已确认按本次余额生成并替换人工补录：');
+    confirmedBalanceSeedReplacements.forEach((replacement) => detailLines.push(formatBalanceSeedReplaceLine(replacement)));
+  }
+
   return detailLines;
 }
 
@@ -3993,6 +4152,12 @@ function buildImportWarningMessage({ warnings, balanceReady, balanceRequested })
   const skippedBalanceGapCount = warnings
     .filter((warning) => warning.type === 'balance-gap-skipped')
     .reduce((sum, warning) => sum + (Array.isArray(warning.gaps) ? warning.gaps.length : 0), 0);
+  const confirmedBalanceMismatchCount = warnings
+    .filter((warning) => warning.type === 'balance-mismatch-confirmed')
+    .reduce((sum, warning) => sum + (Array.isArray(warning.mismatches) ? warning.mismatches.length : 0), 0);
+  const confirmedBalanceSeedReplaceCount = warnings
+    .filter((warning) => warning.type === 'balance-seed-replace-confirmed')
+    .reduce((sum, warning) => sum + (Array.isArray(warning.replacements) ? warning.replacements.length : 0), 0);
   const exportParts = ['明细账单可导出'];
 
   if (balanceReady) {
@@ -4019,6 +4184,14 @@ function buildImportWarningMessage({ warnings, balanceReady, balanceRequested })
 
   if (skippedBalanceGapCount > 0) {
     warningParts.push(`${skippedBalanceGapCount}处账单日期不连续未补录，余额可能不准确`);
+  }
+
+  if (confirmedBalanceMismatchCount > 0) {
+    warningParts.push(`${confirmedBalanceMismatchCount}处余额校验不一致，已按账单余额生成`);
+  }
+
+  if (confirmedBalanceSeedReplaceCount > 0) {
+    warningParts.push(`${confirmedBalanceSeedReplaceCount}处人工补录余额已按本次余额替换`);
   }
 
   return warningParts.length
@@ -10624,6 +10797,8 @@ const statementGenerationHelpers = createStatementGenerationHelpers({
   buildImportWarningMessage,
   buildManualBalanceRequiredResult,
   buildBalanceGapConfirmResult,
+  buildBalanceMismatchConfirmResult,
+  buildBalanceSeedReplaceConfirmResult,
   getAcknowledgedBalanceGapKeys,
   buildDetailExportRows,
   buildMappedRowsForFile,
@@ -10646,6 +10821,7 @@ const statementGenerationHelpers = createStatementGenerationHelpers({
   resolveSinglePreparedFieldValue,
   scanBalanceSeedStatus,
   readBalanceAdjustments,
+  readBalanceSeedRecords,
   splitTemplateName,
   storeGeneratedBalanceSeeds,
   writeBalanceWorkbook,
@@ -10975,6 +11151,15 @@ function regenerateVirtualTemplateBalanceFromSession(
   if (balanceGaps.length) {
     return { needsSeed: true, gaps: balanceGaps, warnings: allWarnings };
   }
+  // 余额不一致同样不合并部分余额，统一确认。
+  const balanceMismatches = statementGenerationHelpers.extractBalanceMismatchConfirmItems(allWarnings);
+  if (balanceMismatches.length) {
+    return { needsSeed: true, mismatches: balanceMismatches, warnings: allWarnings };
+  }
+  const balanceSeedReplacements = statementGenerationHelpers.extractBalanceSeedReplaceConfirmItems(allWarnings);
+  if (balanceSeedReplacements.length) {
+    return { needsSeed: true, replacements: balanceSeedReplacements, warnings: allWarnings };
+  }
 
   // 合并
   let mergedBalance = null;
@@ -11158,6 +11343,7 @@ function generateMultiTemplateGroupFiles({
   // 已算出的组照常写出各自的余额文件和计算种子，补录或不补录后按全部模板组重算（断档 spec §4.2 第 1 条）。
   const balancePending = allWarnings.some(
     (w) => w.type === 'balance-seed-required' || w.type === 'balance-gap-confirm'
+      || w.type === 'balance-mismatch-confirm' || w.type === 'balance-seed-replace-confirm'
   );
   const mergeableBalancePaths = balancePending ? [] : allBalancePaths;
   const mergedBalance = mergeableBalancePaths.length > 1
@@ -11694,6 +11880,8 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
     ? `暂无可导出的全部${kind === 'detail' ? '明细' : '余额'}账单`
     : `暂无可导出的${kind === 'detail' ? '明细' : '余额'}账单`;
   let generatedFile = getGeneratedStatementExport(kind, normalizedScope);
+  // 导出全部余额会重新生成：记下本次重算的告警，导出成功后带出已接受的风险。
+  let exportBalanceWarnings = [];
 
   if (!generatedFile && normalizedScope === 'all') {
     if (!session) {
@@ -11804,7 +11992,10 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
         const allGroupWarnings = perGroupPaths.flatMap((g) => g.warnings || []);
         const manualBalanceWarning = extractManualBalancePromptWarning(allGroupWarnings);
         const balanceGaps = statementGenerationHelpers.extractBalanceGapConfirmGaps(allGroupWarnings);
-        if ((manualBalanceWarning || balanceGaps.length) && lastGroupTemplateConfig) {
+        const balanceMismatches = statementGenerationHelpers.extractBalanceMismatchConfirmItems(allGroupWarnings);
+        const balanceSeedReplacements = statementGenerationHelpers.extractBalanceSeedReplaceConfirmItems(allGroupWarnings);
+        if ((manualBalanceWarning || balanceGaps.length || balanceMismatches.length || balanceSeedReplacements.length)
+            && lastGroupTemplateConfig) {
           // 循环里逐组记下的是单模板上下文；补录或不补录后须按全部模板组重算，否则只剩最后一组。
           rememberLastFileImportContext(createGenerationContext({
             templateId: FILENAME_MAPPING_TEMPLATE_ID,
@@ -11827,6 +12018,12 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
         if (balanceGaps.length) {
           return buildBalanceGapConfirmResult(balanceGaps, { balance: null, detail: null });
         }
+        if (balanceMismatches.length) {
+          return buildBalanceMismatchConfirmResult(balanceMismatches, { balance: null, detail: null });
+        }
+        if (balanceSeedReplacements.length) {
+          return buildBalanceSeedReplaceConfirmResult(balanceSeedReplacements, { balance: null, detail: null });
+        }
         // 任一模板组余额生成失败（如某日未找到期末余额）时阻断：否则合并结果缺这些组的账户，仍显示导出成功。
         const failedGroupLines = perGroupPaths
           .map((group) => ({
@@ -11846,6 +12043,7 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
             templateName: session.templateName
           });
         }
+        exportBalanceWarnings = allGroupWarnings;
       }
 
       // 合并多组文件，命名：模板数量-COMMON/BALANCE-日期范围.xlsx
@@ -11877,10 +12075,13 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
       if (skippedGroupNames.length > 0) {
         const step = kind === 'detail' ? '导出明细账单' : '导出余额账单';
         const exportResult = await exportGeneratedFile(generatedFile, emptyMessage, step, savePath);
+        const incompleteMessage = `文件已导出，但数据不完整：${skippedGroupNames.join('、')} 的模板已被删除，对应文件未包含在导出中`;
         if (exportResult.status === 'success') {
-          exportResult.message = `文件已导出，但数据不完整：${skippedGroupNames.join('、')} 的模板已被删除，对应文件未包含在导出中。`;
+          exportResult.message = `${incompleteMessage}。`;
         }
-        return exportResult;
+        return kind === 'balance'
+          ? withAcceptedBalanceRiskWarnings(exportResult, exportBalanceWarnings, session.templateName || '', incompleteMessage)
+          : exportResult;
       }
     } else {
       // 正常模板流程（非虚拟 ID）
@@ -11958,6 +12159,14 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
         if (balanceGaps.length) {
           return buildBalanceGapConfirmResult(balanceGaps, generatedFiles);
         }
+        const balanceMismatches = statementGenerationHelpers.extractBalanceMismatchConfirmItems(generatedFiles.warnings);
+        if (balanceMismatches.length) {
+          return buildBalanceMismatchConfirmResult(balanceMismatches, generatedFiles);
+        }
+        const balanceSeedReplacements = statementGenerationHelpers.extractBalanceSeedReplaceConfirmItems(generatedFiles.warnings);
+        if (balanceSeedReplacements.length) {
+          return buildBalanceSeedReplaceConfirmResult(balanceSeedReplacements, generatedFiles);
+        }
 
         if (!generatedFiles.balance) {
           const balanceWarning = generatedFiles.warnings.find((warning) => warning.type === 'balance-generate-failed');
@@ -11971,16 +12180,47 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
 
         cacheAllStatementExport('balance', generatedFiles.balance);
         generatedFile = generatedFiles.balance;
+        exportBalanceWarnings = generatedFiles.warnings || [];
       }
     }
   }
 
-  return exportGeneratedFile(
+  const exportResult = await exportGeneratedFile(
     generatedFile,
     emptyMessage,
     kind === 'detail' ? '导出明细账单' : '导出余额账单',
     savePath
   );
+  return kind === 'balance'
+    ? withAcceptedBalanceRiskWarnings(exportResult, exportBalanceWarnings, generatedFile?.templateName || session?.templateName || '')
+    : exportResult;
+}
+
+// v3.2.16（Codex 审查）：导出全部余额重新生成时，本次重算中已接受的风险——断档未补录、已确认的余额不一致、
+// 已确认替换人工补录——随导出结果告警并可导出报错文件，不只提示“文件导出成功”。
+function withAcceptedBalanceRiskWarnings(exportResult, warnings, templateName, leadMessage = '文件导出成功') {
+  const acceptedTypes = ['balance-gap-skipped', 'balance-mismatch-confirmed', 'balance-seed-replace-confirmed'];
+  const accepted = (Array.isArray(warnings) ? warnings : [])
+    .filter((warning) => warning && acceptedTypes.includes(warning.type));
+  if (!exportResult || exportResult.status !== 'success' || !accepted.length) return exportResult;
+  const countOf = (type, field) => accepted
+    .filter((warning) => warning.type === type)
+    .reduce((sum, warning) => sum + (Array.isArray(warning[field]) ? warning[field].length : 0), 0);
+  const parts = [
+    [countOf('balance-gap-skipped', 'gaps'), (count) => `${count}处账单日期不连续未补录，余额可能不准确`],
+    [countOf('balance-mismatch-confirmed', 'mismatches'), (count) => `${count}处余额校验不一致，已按账单余额生成`],
+    [countOf('balance-seed-replace-confirmed', 'replacements'), (count) => `${count}处人工补录余额已按本次余额替换`]
+  ].filter(([count]) => count > 0).map(([count, text]) => text(count));
+  const warningResult = createWarningResult({
+    step: '导出余额账单',
+    message: `${leadMessage}，${parts.join('，')}，请点击状态框导出报错文件`,
+    balanceReady: true,
+    detailLines: buildImportWarningDetailLines(accepted),
+    context: { templateName, filePath: exportResult.filePath },
+    errorCode: 'EXPORT_BALANCE_WARNING',
+    templateName
+  });
+  return { ...warningResult, filePath: exportResult.filePath };
 }
 
 function registerBigAccountHandlers() {
@@ -14382,10 +14622,17 @@ function registerFileHandlers() {
       const skipBalanceGapKeys = Array.isArray(prepared && prepared.skipBalanceGapKeys)
         ? prepared.skipBalanceGapKeys
         : null;
+      const confirmBalanceMismatchKeys = Array.isArray(prepared && prepared.confirmBalanceMismatchKeys)
+        ? prepared.confirmBalanceMismatchKeys
+        : null;
+      const confirmBalanceSeedReplaceKeys = Array.isArray(prepared && prepared.confirmBalanceSeedReplaceKeys)
+        ? prepared.confirmBalanceSeedReplaceKeys
+        : null;
       const importContext = prepared && prepared.importContext
         ? { ...prepared.importContext, inputFilePaths }
         : null;
-      if ((!plan && !skipBalanceGapKeys) || !pendingPrompt || !importContext
+      if ((!plan && !skipBalanceGapKeys && !confirmBalanceMismatchKeys && !confirmBalanceSeedReplaceKeys)
+          || !pendingPrompt || !importContext
           || (plan && plan.existingIndex >= 0 && prepared.confirmedOverwrite !== true)) {
         throw new TypeError('余额补录 execute 缺少已确认的准备计划');
       }
@@ -14426,6 +14673,40 @@ function registerFileHandlers() {
               ...(prepared.skippedBalanceGaps || []).map(formatBalanceGapLine)
             ]
           });
+        } else if (confirmBalanceMismatchKeys) {
+          // 与断档“不补录”同一会话确认集合；登记后按账单余额重算，种子照常回写。
+          if (!rememberAcknowledgedBalanceGaps({
+            session,
+            importContext: prepared.importContext,
+            gapKeys: confirmBalanceMismatchKeys
+          })) {
+            throw new FileValidationError('BALANCE_MISMATCH_CONTEXT_MISSING', '当前账单会话已失效，请重新导入文件');
+          }
+          appendActivityLogEntry({
+            level: 'warn',
+            message: '余额校验不一致，已确认按账单余额生成',
+            details: [
+              `模板名：${pendingPrompt.templateName || 'N/A'}`,
+              ...(prepared.confirmedBalanceMismatches || []).map(formatBalanceMismatchLine)
+            ]
+          });
+        } else if (confirmBalanceSeedReplaceKeys) {
+          // 与断档、余额不一致同一确认集合；登记后重算，按本次余额回写并替换人工补录。
+          if (!rememberAcknowledgedBalanceGaps({
+            session,
+            importContext: prepared.importContext,
+            gapKeys: confirmBalanceSeedReplaceKeys
+          })) {
+            throw new FileValidationError('BALANCE_SEED_REPLACE_CONTEXT_MISSING', '当前账单会话已失效，请重新导入文件');
+          }
+          appendActivityLogEntry({
+            level: 'warn',
+            message: '人工补录的期末余额与本次余额不一致，已确认替换',
+            details: [
+              `模板名：${pendingPrompt.templateName || 'N/A'}`,
+              ...(prepared.confirmedBalanceSeedReplacements || []).map(formatBalanceSeedReplaceLine)
+            ]
+          });
         } else {
           writeManualBalanceSeedPlan(plan);
           const seedTemplateName = plan.record.templateName;
@@ -14457,10 +14738,13 @@ function registerFileHandlers() {
               detail: lastGeneratedExports.detail,
               balanceRequested: true
             };
-            // 还有其他 group 需要补录或确认断档 → 返回下一个 prompt
-            return regenResult.gaps
-              ? buildBalanceGapConfirmResult(regenResult.gaps, pendingFiles)
-              : buildManualBalanceRequiredResult(regenResult.prompt, pendingFiles);
+            // 还有其他 group 需要补录、确认断档或确认余额不一致 → 返回下一个 prompt
+            if (regenResult.gaps) return buildBalanceGapConfirmResult(regenResult.gaps, pendingFiles);
+            if (regenResult.mismatches) return buildBalanceMismatchConfirmResult(regenResult.mismatches, pendingFiles);
+            if (regenResult.replacements) {
+              return buildBalanceSeedReplaceConfirmResult(regenResult.replacements, pendingFiles);
+            }
+            return buildManualBalanceRequiredResult(regenResult.prompt, pendingFiles);
           }
           const generatedFiles = regenResult.generatedFiles;
           if (importContext.scope === 'all') {

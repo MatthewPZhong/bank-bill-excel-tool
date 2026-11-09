@@ -102,7 +102,7 @@
 
         if (kind === 'balance' && (result.manualBalancePromptReady || result.status === 'manual-balance-required')) {
           applyManualBalancePromptStatus(result);
-          if (result.manualBalancePrompt?.reason === 'gap') {
+          if (['gap', 'mismatch', 'seed-replace'].includes(result.manualBalancePrompt?.reason)) {
             openModal(() => createManualBalanceSeedDialog(result.manualBalancePrompt));
           }
           return;
@@ -391,7 +391,226 @@
       return overlay;
     }
 
+    function formatBalanceAmount(value, signed = false) {
+      const numericValue = Number(value);
+      if (!Number.isFinite(numericValue)) return '(空)';
+      const text = numericValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 12 });
+      return signed && numericValue > 0 ? `+${text}` : text;
+    }
+
+    function formatBalanceMismatchDetail(mismatch) {
+      const anchorLabel = mismatch.anchorSource === 'seed'
+        ? `余额种子 ${mismatch.anchorDate}`
+        : `上一账单日 ${mismatch.anchorDate}`;
+      const missing = mismatch.missingFrom
+        ? `；中间缺 ${mismatch.missingFrom === mismatch.missingTo ? mismatch.missingFrom : `${mismatch.missingFrom} ~ ${mismatch.missingTo}`}`
+        : '';
+      return `${mismatch.billDate}：上一日余额 ${formatBalanceAmount(mismatch.anchorBalance)}（${anchorLabel}）`
+        + ` + 收入 ${formatBalanceAmount(mismatch.creditAmount)} − 支出 ${formatBalanceAmount(mismatch.debitAmount)}`
+        + ` = 预期 ${formatBalanceAmount(mismatch.expectedBalance)}，账单余额 ${formatBalanceAmount(mismatch.statementBalance)}`
+        + `，差额 ${formatBalanceAmount(mismatch.difference, true)}${missing}`;
+    }
+
+    // 已有种子但首日多个余额都对不上：写明已有余额、当日收支与账单当日余额，提示核对后重填（v3.2.16 D7）。
+    function formatBalanceSeedMismatchDetail(seedMismatch) {
+      const statementBalances = (Array.isArray(seedMismatch.statementBalances) ? seedMismatch.statementBalances : [])
+        .map((value) => formatBalanceAmount(value))
+        .join('、') || '(空)';
+      const seedAmount = formatBalanceAmount(seedMismatch.seedBalance);
+      const anchorAmount = formatBalanceAmount(seedMismatch.anchorBalance);
+      const anchorNote = anchorAmount === seedAmount ? '' : `（扣回余额附加值后为 ${anchorAmount}）`;
+      return `已有 ${seedMismatch.seedDate} 的余额 ${seedAmount}（${seedMismatch.seedGenerationMethod || '人工录入'}）${anchorNote}，`
+        + `加上 ${seedMismatch.billDate} 收入 ${formatBalanceAmount(seedMismatch.creditAmount)}、`
+        + `支出 ${formatBalanceAmount(seedMismatch.debitAmount)} 后应为 ${formatBalanceAmount(seedMismatch.expectedBalance)}，`
+        + `与账单当日余额 ${statementBalances} 都对不上。请核对上一账单日余额（可参考账单上的期初余额）后重新填写。`;
+    }
+
+    function formatSeedMismatchAmountInput(value) {
+      const numericValue = Number(value);
+      return Number.isFinite(numericValue) ? String(numericValue) : '';
+    }
+
+    // 账单里的余额逐日校验不一致：返回核查，或确认按账单余额生成（v3.2.16）。
+    function createBalanceMismatchConfirmDialog(prompt) {
+      const { applyStatementResult } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manual-balance-card balance-gap-card balance-mismatch-card';
+      const mismatches = Array.isArray(prompt?.mismatches) ? prompt.mismatches : [];
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">余额校验不一致</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="balance-gap-body">
+          <p class="balance-gap-intro">以下账户的账单余额与「上一日余额 + 当日收入 − 当日支出」对不上，共 ${mismatches.length} 处：</p>
+          <ul class="balance-gap-list">
+            ${mismatches.map((mismatch) => `
+              <li class="balance-gap-item">
+                <span class="balance-gap-account">银行账号 ${escapeHtml(mismatch.merchantId)}（${escapeHtml(mismatch.currency || '(空)')}）</span>
+                <span class="balance-gap-detail">${escapeHtml(formatBalanceMismatchDetail(mismatch))}</span>
+              </li>
+            `).join('')}
+          </ul>
+          <p class="balance-gap-question">可能有漏单、重复入账，或上一日余额（余额种子）有误。请先核查账单。</p>
+          <p class="balance-gap-warning">确认继续的话，余额账单按账单余额生成，并作为之后导入的起点；导入提示和报错文件会列出以上差异。</p>
+        </div>
+        <div class="dialog-actions right">
+          <button class="secondary-btn small" type="button" data-action="review">返回核查</button>
+          <button class="primary-btn small" type="button" data-action="confirm">确认继续生成</button>
+        </div>
+      `;
+
+      const reviewBtn = dialog.querySelector('[data-action="review"]');
+      const confirmBtn = dialog.querySelector('[data-action="confirm"]');
+      let saveInProgress = false;
+      registerModal(overlay, { canClose: () => !saveInProgress });
+
+      dialog.querySelector('.icon-close').addEventListener('click', () => closeModal(overlay));
+      reviewBtn.addEventListener('click', () => closeModal(overlay));
+      confirmBtn.addEventListener('click', async () => {
+        const handle = modalBridge.host.getHandle(overlay);
+        if (saveInProgress || !handle?.isOpen()) return;
+        saveInProgress = true;
+        reviewBtn.disabled = true;
+        confirmBtn.disabled = true;
+        let result = null;
+        try {
+          result = await api.files.saveBalanceSeed({
+            confirmBalanceMismatchKeys: mismatches.map((mismatch) => mismatch.key)
+          });
+          if (!result || typeof result !== 'object') throw new Error('余额生成未返回有效结果');
+        } catch (error) {
+          if (handle.isOpen()) {
+            pushAlert(overlay, () => createAlertDialog(`余额生成失败：${escapeHtml(error?.message || String(error || '未知错误'))}`, {
+              onConfirm: null
+            }));
+          }
+          return;
+        } finally {
+          saveInProgress = false;
+          if (handle.isOpen()) {
+            reviewBtn.disabled = false;
+            confirmBtn.disabled = false;
+          }
+        }
+
+        applyStatementResult(result);
+        if (!handle.isOpen()) return;
+        if (result.manualBalancePromptReady && result.manualBalancePrompt) {
+          replaceModal(handle, () => createManualBalanceSeedDialog(result.manualBalancePrompt));
+          return;
+        }
+        if (['error', 'failed'].includes(result.status)) {
+          pushAlert(overlay, () => createAlertDialog(result.message || '余额生成失败'));
+          return;
+        }
+        closeModal(overlay, { status: 'submitted', value: result });
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // 同一账单日人工补录的期末余额与本次余额不一致：返回核查，或确认替换并生成（v3.2.16）。
+    function createBalanceSeedReplaceConfirmDialog(prompt) {
+      const { applyStatementResult } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manual-balance-card balance-gap-card balance-seed-replace-card';
+      const replacements = Array.isArray(prompt?.replacements) ? prompt.replacements : [];
+      const balanceLabel = (item) => (item.balanceSource === 'calculated' ? '计算余额' : '账单余额');
+      const detail = (item) => {
+        const adjustment = Number(item.adjustment) || 0;
+        const written = adjustment
+          ? `（另加余额附加值 ${formatBalanceAmount(adjustment)} 后写入 ${formatBalanceAmount(item.writtenBalance)}）`
+          : '';
+        return `${item.billDate}：人工补录余额 ${formatBalanceAmount(item.manualBalance)}，`
+          + `${balanceLabel(item)} ${formatBalanceAmount(item.balance)}${written}，差额 ${formatBalanceAmount(item.difference, true)}`;
+      };
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">人工补录余额将被替换</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="balance-gap-body">
+          <p class="balance-gap-intro">以下账单日已有人工补录的期末余额，与本次生成的余额不一致，共 ${replacements.length} 处：</p>
+          <ul class="balance-gap-list">
+            ${replacements.map((item) => `
+              <li class="balance-gap-item">
+                <span class="balance-gap-account">银行账号 ${escapeHtml(item.merchantId)}（${escapeHtml(item.currency || '(空)')}）</span>
+                <span class="balance-gap-detail">${escapeHtml(detail(item))}</span>
+              </li>
+            `).join('')}
+          </ul>
+          <p class="balance-gap-question">请先核查哪一个余额是对的。</p>
+          <p class="balance-gap-warning">确认替换的话，余额账单按本次余额生成，并用它覆盖人工补录的余额，之后导入从它接着计算；不替换请返回核查，余额账单不会生成。</p>
+        </div>
+        <div class="dialog-actions right">
+          <button class="secondary-btn small" type="button" data-action="review">返回核查</button>
+          <button class="primary-btn small" type="button" data-action="confirm">确认替换并生成</button>
+        </div>
+      `;
+
+      const reviewBtn = dialog.querySelector('[data-action="review"]');
+      const confirmBtn = dialog.querySelector('[data-action="confirm"]');
+      let saveInProgress = false;
+      registerModal(overlay, { canClose: () => !saveInProgress });
+
+      dialog.querySelector('.icon-close').addEventListener('click', () => closeModal(overlay));
+      reviewBtn.addEventListener('click', () => closeModal(overlay));
+      confirmBtn.addEventListener('click', async () => {
+        const handle = modalBridge.host.getHandle(overlay);
+        if (saveInProgress || !handle?.isOpen()) return;
+        saveInProgress = true;
+        reviewBtn.disabled = true;
+        confirmBtn.disabled = true;
+        let result = null;
+        try {
+          result = await api.files.saveBalanceSeed({
+            confirmBalanceSeedReplaceKeys: replacements.map((item) => item.key)
+          });
+          if (!result || typeof result !== 'object') throw new Error('余额生成未返回有效结果');
+        } catch (error) {
+          if (handle.isOpen()) {
+            pushAlert(overlay, () => createAlertDialog(`余额生成失败：${escapeHtml(error?.message || String(error || '未知错误'))}`, {
+              onConfirm: null
+            }));
+          }
+          return;
+        } finally {
+          saveInProgress = false;
+          if (handle.isOpen()) {
+            reviewBtn.disabled = false;
+            confirmBtn.disabled = false;
+          }
+        }
+
+        applyStatementResult(result);
+        if (!handle.isOpen()) return;
+        if (result.manualBalancePromptReady && result.manualBalancePrompt) {
+          replaceModal(handle, () => createManualBalanceSeedDialog(result.manualBalancePrompt));
+          return;
+        }
+        if (['error', 'failed'].includes(result.status)) {
+          pushAlert(overlay, () => createAlertDialog(result.message || '余额生成失败'));
+          return;
+        }
+        closeModal(overlay, { status: 'submitted', value: result });
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     function createManualBalanceSeedDialog(prompt, draft = {}, queueState = null) {
+      // 余额不一致、人工补录替换只有确认框，不进入补录。
+      if (prompt?.reason === 'mismatch') {
+        return createBalanceMismatchConfirmDialog(prompt);
+      }
+      if (prompt?.reason === 'seed-replace') {
+        return createBalanceSeedReplaceConfirmDialog(prompt);
+      }
       const isGapPrompt = prompt?.reason === 'gap';
       // 断档 prompt 未经确认时（导入后自动弹出、点击状态框）先显示确认框。
       if (isGapPrompt && queueState?.gapConfirmed !== true) {
@@ -414,9 +633,16 @@
         ? `账单日期断档，还有 ${remainingGapCount} 处待处理`
         : `第 ${queueIndex} 个账号${queueTotal ? `，共 ${queueTotal} 个` : ''}`;
       const gapRange = isGapPrompt ? formatBalanceGapRange(prompt) : '';
+      // 已有种子但首日对不上（v3.2.16 D7）：说明对不上的明细，预填已有种子的日期与金额供修改。
+      const seedMismatch = !isGapPrompt && prompt?.seedMismatch && typeof prompt.seedMismatch === 'object'
+        ? prompt.seedMismatch
+        : null;
+      const dialogTitle = isGapPrompt
+        ? '补录断档前一日余额'
+        : (seedMismatch ? '核对上一账单日余额' : '补录上一账单日余额');
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">${isGapPrompt ? '补录断档前一日余额' : '补录上一账单日余额'}</div>
+          <div class="dialog-title">${dialogTitle}</div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="manual-balance-context">
@@ -440,6 +666,10 @@
               <span class="manual-balance-context-value" title="${escapeHtml(gapRange)}">${escapeHtml(gapRange)}</span>
             </div>` : ''}
           </div>
+          ${seedMismatch ? `
+          <div class="balance-gap-warning manual-balance-seed-mismatch">
+            ${escapeHtml(formatBalanceSeedMismatchDetail(seedMismatch))}
+          </div>` : ''}
         </div>
         <div class="manual-balance-form">
           <label class="manual-balance-row">
@@ -459,9 +689,9 @@
 
       const dateInput = dialog.querySelector('.manual-balance-date-input');
       const amountInput = dialog.querySelector('.manual-balance-amount-input');
-      dateInput.value = draft.billDate || (isGapPrompt ? prompt.suggestedSeedDate || '' : '');
+      dateInput.value = draft.billDate || (isGapPrompt ? prompt.suggestedSeedDate || '' : (seedMismatch?.seedDate || ''));
       dateInput.type = dateInput.value ? 'date' : 'text';
-      amountInput.value = draft.endBalance || '';
+      amountInput.value = draft.endBalance || (seedMismatch ? formatSeedMismatchAmountInput(seedMismatch.anchorBalance) : '');
 
       dateInput.addEventListener('focus', () => {
         if (dateInput.type !== 'date') {
@@ -926,7 +1156,7 @@
           if (!writeScope.isCurrent(handle)) return;
           if (result.status === 'error' && !result.manualBalancePromptReady) {
             replaceModal(handle, () => createAlertDialog(result.message));
-          } else if (result.manualBalancePrompt?.reason === 'gap') {
+          } else if (['gap', 'mismatch', 'seed-replace'].includes(result.manualBalancePrompt?.reason)) {
             replaceModal(handle, () => createManualBalanceSeedDialog(result.manualBalancePrompt));
           } else closeModal(handle, { status: 'submitted', value: result });
         });
@@ -2120,7 +2350,7 @@
         selectionClosed = true;
         closeModal(overlay, { status: 'submitted', value: result });
         applyStatementResult(result);
-        if (result.manualBalancePrompt?.reason === 'gap') {
+        if (['gap', 'mismatch', 'seed-replace'].includes(result.manualBalancePrompt?.reason)) {
           openModal(() => createManualBalanceSeedDialog(result.manualBalancePrompt));
         }
         } catch (error) {
