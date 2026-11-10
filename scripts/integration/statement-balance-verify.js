@@ -6,6 +6,7 @@
 //         → 按文件名映射多模板导入：一组不一致时不出部分余额汇总，确认后重算出含全部模板的汇总
 //         → 同一账单日已有人工补录且与本次余额不一致：账单里的余额与发生额计算都先提醒（列出两个值），确认后才替换
 //         → 上一账单日余额补错（首日多个余额都对不上）：补录提示写明对不上的明细，改对后覆盖种子并正常生成
+//         → 断档后的账单日多个余额都对不上：余额账单不生成，报错文件写明账号与缺的日期
 //   UI 弹窗与 IPC 由单测和 GUI 检查覆盖；本脚本验证金额与文件在整条链路上的结果。
 //
 // 用法：node scripts/integration/statement-balance-verify.js
@@ -582,6 +583,46 @@ async function verifyWrongManualSeedPrompt(dir) {
   ], 'Step8.种子：补录值已改对，生成种子回写');
 }
 
+// 断档后的账单日有多笔余额且都对不上：余额账单不生成，导入状态框给摘要，报错文件写明账号与缺的日期（D13）。
+async function verifyGapWithMultipleBalancesMessage(dir) {
+  const storageRoot = path.join(dir, 'storage-gap-multi');
+  const outputDir = path.join(dir, 'exports-gap-multi');
+  fs.mkdirSync(outputDir, { recursive: true });
+  upsertBalanceSeedRecord(storageRoot, {
+    templateName: TEMPLATE_NAME, merchantId: 'M901', currency: 'USD',
+    billDate: '2026-09-30', endBalance: 1000, generationMethod: '人工录入'
+  });
+  const generation = createGeneration(storageRoot, outputDir, new Set());
+  const sourcePath = path.join(dir, 'gap-multi.xlsx');
+  writeSource(sourcePath, [
+    ['2026-10-01', 'M901', 'USD', '100', '', '1100'],
+    ['2026-10-05', 'M901', 'USD', '10', '', '1490'],
+    ['2026-10-05', 'M901', 'USD', '10', '', '1500']
+  ]);
+  const result = generation.generateStatementFiles({
+    config: STATEMENT_CONFIG,
+    preparedBatch: generation.buildPreparedStatementBatchFromEntries({
+      config: STATEMENT_CONFIG,
+      fileEntries: [{ filePath: sourcePath, detailRows: mapSource(sourcePath) }]
+    })
+  });
+  const reason = '银行账号 M901（USD）2026-10-05 的期末余额无法根据收支金额推导：上一账单日是 2026-10-01，'
+    + '中间缺 2026-10-02 ~ 2026-10-04，请核对导入的账单是否漏了这几天的交易';
+  assertTrue(Boolean(result.detail && fs.existsSync(result.detail.filePath)), 'Step9.明细账单照常生成');
+  assertEq(result.balance, null, 'Step9.余额账单不生成');
+  assertEq(result.warnings, [{ type: 'balance-generate-failed', message: reason }], 'Step9.余额失败原因写明账号与缺的日期');
+  assertEq(loadMainFunction('buildImportWarningMessage')({
+    warnings: result.warnings, balanceReady: false, balanceRequested: result.balanceRequested
+  }), '明细账单可导出，余额账单未生成，存在余额账单异常，请点击状态框导出报错文件', 'Step9.导入状态框摘要');
+  assertEq(loadMainFunction('buildImportWarningDetailLines', {
+    formatBalanceGapLine: () => '', formatBalanceMismatchLine: () => '', formatBalanceSeedReplaceLine: () => ''
+  })(result.warnings), ['余额账单未生成，原因如下：', reason], 'Step9.报错文件写明原因');
+  assertEq(readBalanceSeedRecords(storageRoot, '中行')
+    .map((record) => [record.merchantId, record.billDate, record.endBalance, record.generationMethod]), [
+    ['M901', '2026-09-30', 1000, '人工录入']
+  ], 'Step9.不回写生成种子');
+}
+
 async function run() {
   console.log('==== 网银账单「账单里的余额」逐日校验 e2e 集成验证 ====');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stmt-balance-verify-'));
@@ -696,6 +737,7 @@ async function run() {
     await verifyManualSeedReplacement(dir);
     await verifyWrongManualSeedPrompt(dir);
     await verifySharedSeedAcrossTemplates(dir);
+    await verifyGapWithMultipleBalancesMessage(dir);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

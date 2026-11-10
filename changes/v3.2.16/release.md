@@ -31,6 +31,8 @@
 
 release 上另有直接提交 `356753e4`：按用户 2026-11-09 要求清理 Agent 指令文件（`CLAUDE.md`、`CODEX.md`、`AGENTS.md`、`unknowns-first` Skill、`rules/important-variables.md`），不涉及运行代码。
 
+2026-11-10 按用户要求在 release 上直接调整「账单里的余额」报错文案（spec D13、TechDoc T16）：非首日多个余额都对不上时写明银行账号与币种，与上一账单日之间缺日期时写明缺的日期并提示核对是否漏了交易；只改文案，仍不生成余额账单。
+
 同一需求另有一份实现 `feat/mapping-feature-value`（工作树 `.claude/worktrees/mapping-feature-value`，口径不同；之后已在该分支提交，末端 `d8ff7b20`，Codex 第五轮无发现）。2026-11-09 用户选定以 `feat/mapping-feature-filter` 为准合入；该分支未纳入、未改动 release；2026-11-09 用户确认保留分支与工作树、本轮不纳入。
 
 ## 待人工复核
@@ -51,4 +53,5 @@ release 上另有直接提交 `356753e4`：按用户 2026-11-09 要求清理 Age
 - 2026-11-09 release 工作树（合入【余额管理】后，`94f6a825`）：合并前 lint 通过、受合并影响的单测 74/74、`balance-seed-management` 集成 5/5；`npm run check:architecture` 通过（补登后）；随后 `npm run lint`、`npm run smoke` 通过，单测 10034/10038、0 失败（4 个 Windows 专用跳过），渲染生命周期 `configuration-dialogs` + `statement-controller` 112/112，`npm run test:integration` 101/101 通过，§七回写单独提交（`aeb85dde`）。以上为分项运行，未在最终末端跑一次完整 `npm run release-check`。
 - 2026-11-09 release 工作树（合入「账单里的余额」逐日校验与 backlog 登记、补登策略后，`7503c498`）：合并后 lint 通过；`npm run check:architecture` 通过；`npm run smoke` 通过；单测 10091/10095、0 失败（4 个 Windows 专用跳过）；渲染生命周期 `configuration-dialogs` + `statement-controller` 118/118；`npm run test:integration` 102/102（新增 `statement-balance-verify.js` 67/67），§七回写单独提交（`79b63692`）。分项运行，未在最终末端跑一次完整 `npm run release-check`。
 - 2026-11-09 release 级 Codex 只读审查（`356753e4..3f583ae7`，合并冲突与跨模块交互）：无 P0–P2；1 项 P3 为集成清单未含新脚本，已由上面的完整集成回写关闭。内存实验覆盖【余额管理】改值/删除后的逐日校验与人工补录替换确认、两套写入前核对叠加、按币种推出的账号与特征值筛出的日期进入逐日链、告警缓存路径，均未发现问题；资金口径仍按上面「待人工复核」处理。
+- 2026-11-10 release 工作树（D13 报错文案调整）：`npm run lint` 通过；`statement-balance-verify.test.js` 53/53，其余余额相关单测（`statement-balance-gap`、`statement-balance-review-fixes`、`statement-generation-e09-c`、`statement-legacy-golden-e09-p0`）127/127；`node scripts/integration/statement-balance-verify.js` 73/73（原 67，新增 Step9）。未跑全量单测与完整集成，§七清单条数待下次完整集成回写。
 - 真实应用 GUI 人工检查未做（本机开发版启动受 BizOP 资源预检阻断）；界面由渲染生命周期用例与布局截图覆盖。

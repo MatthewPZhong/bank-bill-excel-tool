@@ -36,6 +36,7 @@
 | T13 | 导出全部余额：`exportStatementByScope` 记下本次重算的告警（指定模板取 `generatedFiles.warnings`，按文件名映射取各组告警），导出后经 `withAcceptedBalanceRiskWarnings` 处理：成功且含三类已接受风险时改为 `createWarningResult`（`EXPORT_BALANCE_WARNING`，报错明细复用 `buildImportWarningDetailLines`），保留 `filePath`；部分模板已删除的分支以“数据不完整”开头 | D12；Codex 第二轮 P2 |
 | T14 | 本次运行里见过的人工补录：生成层（`createStatementGenerationHelpers` 闭包，主进程只有一个实例，所有自动回写都经过它）按磁盘上的实际种子文件保存“账号@@币种@@日期 → 最近一次读到的人工补录”，只存内存、重启失效；人工补录被工具同值回写成工具生成后，替换检查仍按它比对，确认替换写入后去掉。细则见下方「T14 细则」 | D10、D11；提交后 Codex 审查 P1（两轮）：工具按同值回写会把人工补录改成工具生成，之后另一模板或本模板以不同金额回写就不再确认。触发路径包括：同批后续组、返回核查后的重算（补录其他组、导出全部）、按文件名映射分批单组导入、会话中途补录或改值。第一轮的会话基准只在首次读取时拍快照，也只覆盖三处多组循环，挡不住这些路径；改为在所有入口共用的生成层按运行同步。范围与确认键一致（本次运行内），重启后按 D10 只认人工补录 |
 | T15 | “全部”余额缓存同时存下生成时的告警：`cacheAllStatementExport(kind, file, warnings)` 把告警放进缓存对象的 `balanceWarnings`；`exportStatementByScope` 命中“全部”缓存时取出，交给 `withAcceptedBalanceRiskWarnings`；补录 IPC 确认后重算写缓存的两处同步传入告警。worker probe 只投影 `filePath`、`fileName`、`templateName`，不受影响 | D12；对应提交后 Codex 审查的 P2：再次导出全部，或确认后重算再导出，都会命中缓存，结果只显示“文件导出成功”，报错入口也被清掉 |
+| T16 | 非首日多候选都不符的 `FILE_READ` 文案由 `buildStatementBalanceUnresolvedMessage` 生成：带 `银行账号 X（币种）`；锚点（上一账单日）与当日之间按 `isBalanceDateGap` 断档时，用 `shiftDateLabel` 补“上一账单日是 …，中间缺 … ~ …，请核对导入的账单是否漏了这几天的交易”。错误码不变，经 `balance-generate-failed` 进入导入摘要与报错文件、导出全部的失败明细（前缀模板名）；worker 路径同一函数 | D13；只改文案，路由、错误码与生成结果不变 |
 | T9 | 渲染层新增 `createBalanceMismatchConfirmDialog`，复用断档弹窗样式；`createManualBalanceSeedDialog` 遇 mismatch 转入；导入、导出、选择大账号后的自动弹出与状态框标题认 mismatch | D6 |
 
 ### T14 细则
@@ -147,3 +148,4 @@ deriveBalanceRecords(statement)
 
 - 2026-11-08 用户反馈（v3.2.15，KBANK-VN）：首日两笔余额，上一账单日余额误填 0 后补录框反复弹出、重启仍提示。根因是多候选都不符时回到与缺种子相同的提示，前端以空白输入重开同一弹窗，错误种子已落盘。用户确认调整 D7（T12）：提示写明已有余额对不上并预填；种子写入时机不变。真实文件核对：填账单上的期初余额后 v3.2.15 可生成；本分支另在该账单一处中间缺日期的账单日报单一余额不一致，属 D6 预期行为。真实账单金额不入库，回归用例用同结构的合成数据。
 - worker 路径（E09-C，staging-only、未接入生产）：`prepareBalanceGroup` 与生产路径同样产出 `balance-mismatch-confirm` / `balance-mismatch-confirmed`；worker 只把 `balance-seed-required` 视为需人工结算，与断档确认现状一致，未扩展。
+- 2026-11-10 用户核对断档提醒：「账单里的余额」断档后的账单日有多个余额且都对不上时，只报“期末余额无法根据收支金额推导”，不说缺日期、不说账号。用户确认 D13（T16）：在 release/v3.2.16 上补文案；单测补多日 / 单日断档与无币种用例，集成 `statement-balance-verify.js` 补 Step9（真实 xlsx → 余额不生成、导入摘要、报错文件原因、不回写种子）。

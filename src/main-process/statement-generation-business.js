@@ -159,6 +159,17 @@ function isBalanceDateGap(anchorDate, dateLabel) {
   return dateLabelToUtcDay(dateLabel) - dateLabelToUtcDay(anchorDate) > 1;
 }
 
+// 账单里的余额非首日多个余额都对不上（D7）：写明账号与币种；与上一账单日之间缺日期时写明缺的日期（D13）。
+function buildStatementBalanceUnresolvedMessage({ merchantId, currency, dateLabel, anchorDate }) {
+  const message = `银行账号 ${merchantId}${currency ? `（${currency}）` : ' '}${dateLabel} 的期末余额无法根据收支金额推导`;
+  if (!anchorDate || !isBalanceDateGap(anchorDate, dateLabel)) return message;
+  const missingFrom = shiftDateLabel(anchorDate, 1);
+  const missingTo = shiftDateLabel(dateLabel, -1);
+  const singleDay = missingFrom === missingTo;
+  return `${message}：上一账单日是 ${anchorDate}，中间缺 ${singleDay ? missingFrom : `${missingFrom} ~ ${missingTo}`}，`
+    + `请核对导入的账单是否漏了${singleDay ? '这天' : '这几天'}的交易`;
+}
+
 function balanceGapKey({ templateName, merchantId, currency, anchorDate, targetBillDate }) {
   return [templateName, merchantId, currency, anchorDate, targetBillDate]
     .map((value) => normalizeCell(value))
@@ -406,7 +417,12 @@ function deriveBalanceRecords({
               }
             });
           }
-          throw new FileValidationError('FILE_READ', `${dateLabel} 的期末余额无法根据收支金额推导`);
+          throw new FileValidationError('FILE_READ', buildStatementBalanceUnresolvedMessage({
+            merchantId: group.merchantId,
+            currency: group.currency,
+            dateLabel,
+            anchorDate: anchor.date
+          }));
         }
         if (verification.status === 'mismatch') {
           const mismatch = {
