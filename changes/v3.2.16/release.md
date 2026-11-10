@@ -6,7 +6,8 @@
 
 | 项目 | 事实 |
 | --- | --- |
-| 目标版本 | 3.2.16（暂定；`package.json` 仍为 3.2.15，升版在清单 C1） |
+| 目标版本 | 3.2.16（2026-11-10 升版，见「升版与发布文档」） |
+| 操作范围 | 2026-11-10 用户要求执行完整发版流程，并确认资金红线复核已通过：升版、同步发布文档、推送、PR 转为可合并并以 merge commit 合并、推送附注标签 `v3.2.16` 并核验发布结果。不删除远端分支 |
 | 正式基线 | `v3.2.15` → `5b5caf7b9349160957b0e60f617bc90abc3fd611` |
 | release 分支 | `release/v3.2.16`，远端已从基线创建（2026-11-09 核对时远端末端即基线）；本地跟踪分支与工作树 `.claude/worktrees/release-v3.2.16` 于 2026-11-09 建立 |
 | 远端 main | `5b5caf7b`，已包含在 release 历史 |
@@ -36,9 +37,18 @@ release 上另有直接提交 `356753e4`：按用户 2026-11-09 要求清理 Age
 
 2026-11-10 按用户要求在 release 上直接调整「账单里的余额」报错文案（spec D13、TechDoc T16）：非首日多个余额都对不上时写明银行账号与币种，与上一账单日之间缺日期时写明缺的日期并提示核对是否漏了交易；只改文案，仍不生成余额账单。
 
-同一需求另有一份实现 `feat/mapping-feature-value`（工作树 `.claude/worktrees/mapping-feature-value`，口径不同；之后已在该分支提交，末端 `d8ff7b20`，Codex 第五轮无发现）。2026-11-09 用户选定以 `feat/mapping-feature-filter` 为准合入；该分支未纳入、未改动 release；2026-11-09 用户确认保留分支与工作树、本轮不纳入。
+同一需求另有一份实现 `feat/mapping-feature-value`（工作树 `.claude/worktrees/mapping-feature-value`，口径不同；之后已在该分支提交，末端 `d8ff7b20`，Codex 第五轮无发现）。2026-11-09 用户选定以 `feat/mapping-feature-filter` 为准合入；该分支未纳入、未改动 release；2026-11-09 用户确认保留分支与工作树、本轮不纳入。2026-11-10 用户确认该分支不纳入 v3.2.17、予以移除：本地工作树与分支已删除（从未推送远端），末端 `d8ff7b20` 保留在本地引用 `refs/archive/feat/mapping-feature-value` 备查。
+
+## 遗留项处置（清单 B4）
+
+- 顺延 v3.2.17：B45、B47、B48、B52–B58、B60（v3.2.15 深审遗留，原目标 v3.2.16）。本轮没有对应修复分支纳入，按 v3.2.15 先例不在本轮，backlog 已更新目标版本。
+- B70、B75：资金红线人工复核 2026-11-10 用户确认通过；实机 GUI 检查与真实账单 / 种子回归未做，顺延 v3.2.17 发布后补做。
+- B77：工具箱 Windows 打包版回归未做，顺延 v3.2.17；B78 随 B77 测量。
+- B71–B74、B76 及其他目标未定的条目状态不变。
 
 ## 待人工复核
+
+2026-11-10 用户确认以下资金红线人工复核通过，未提供复核人与明细。实机 GUI 与真实账单回归仍未做（B70、B75，见上）。
 
 - ⚠️ 资金红线：「字段筛选特征值」第二轮审查 P1——BillDate 取该值且源列含合计标签时，合计金额曾被当作交易导出；已修复（TechDoc T12），回归用例在修复前复现多导出一行、修复后按合计行跳过。按 `CODEX.md`「验证与风险审查」须人工复核后再发布。
 
@@ -58,4 +68,16 @@ release 上另有直接提交 `356753e4`：按用户 2026-11-09 要求清理 Age
 - 2026-11-09 release 级 Codex 只读审查（`356753e4..3f583ae7`，合并冲突与跨模块交互）：无 P0–P2；1 项 P3 为集成清单未含新脚本，已由上面的完整集成回写关闭。内存实验覆盖【余额管理】改值/删除后的逐日校验与人工补录替换确认、两套写入前核对叠加、按币种推出的账号与特征值筛出的日期进入逐日链、告警缓存路径，均未发现问题；资金口径仍按上面「待人工复核」处理。
 - 2026-11-10 release 工作树（D13 报错文案调整）：`npm run lint` 通过；`statement-balance-verify.test.js` 53/53，其余余额相关单测（`statement-balance-gap`、`statement-balance-review-fixes`、`statement-generation-e09-c`、`statement-legacy-golden-e09-p0`）127/127；`node scripts/integration/statement-balance-verify.js` 73/73（原 67，新增 Step9）。未跑全量单测与完整集成，§七清单条数待下次完整集成回写。
 - 2026-11-10 release 末端 `4841949e`（合入工具箱提速、补登策略，含上面 D13 文案调整）完整 `npm run release-check` 通过：lint、架构检查、smoke 通过；单测 10113/10117、0 失败（4 个 Windows 专用跳过）；集成 102/102、3595 例（`statement-balance-verify.js` 73、`toolbox-split-read-compatibility.js` 18、`toolbox-csv-admission.js` 18、`shared-xlsx-boundary.js` 53，后者因 `src/backend/xlsx/` 新增模块多 1 例），§七回写单独提交（`e9b0732d`），D13 的待回写项随之关闭。首次在 `30315760` 运行时架构检查失败，处理见「纳入范围」；`a57fd055` 上的一次运行中途有新提交进入工作树，已中止作废。工具箱提速的 Windows 打包版与真实文件回归未做（[B77](../../knowledge/backlog.md)），发布 / 存档阶段耗时未测（B78）。
+- 2026-11-10 Codex 审查 D13 提交（`codex review --commit 4841949e`）：未发现缺陷；其复跑余额校验相关 5 个单测文件与 `statement-balance-verify.js` 73/73 通过。
 - 真实应用 GUI 人工检查未做（本机开发版启动受 BizOP 资源预检阻断）；界面由渲染生命周期用例与布局截图覆盖。
+
+## 升版与发布文档（清单 C1–C2，2026-11-10）
+
+| 项目 | 事实 |
+| --- | --- |
+| 升版 | `package.json`、`package-lock.json` 升到 3.2.16（`npm version 3.2.16 --no-git-tag-version`，项目无 version 生命周期脚本；npm 重排的 `build.files` 数组格式已还原） |
+| 发布文档 | `CHANGELOG.md`、`docs/VERSION_FEATURE_HISTORY.md` 新增 3.2.16；`docs/USER_GUIDE.md` 版本号与顶部说明更新，补充「账单里的余额」逐日校验（不一致确认、人工补录替换、导出全部告警）、「原始账单仅有币种无账户号」与工具箱提速；「字段筛选特征值」与【余额管理】两节已由模块分支写入 |
+| 升级弹窗 | `release-notes.json` 新增 3.2.16 的 5 条要点（单测 36/36） |
+| backlog | 见「遗留项处置」；B74 已按代码更正（`57b6a81c`） |
+
+CI、合并提交、正式标签与发布产物核验记录在 PR #248 正文「发布结果」。
