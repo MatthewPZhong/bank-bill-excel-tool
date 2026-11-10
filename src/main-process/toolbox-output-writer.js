@@ -243,13 +243,15 @@ function resolveSourceStyle(styleRef, sourceRegistryResolver) {
 }
 
 // 逐单元格调用 require 的模块解析开销不可忽略；首次加载成功后复用，失败时下次照常重试。
-let outputModel = null;
-function loadOutputModel() {
-  if (!outputModel) {
+// require 处保持按名解构，架构检查据此识别对 projectOutputCell 的约定依赖。
+let cachedProjectOutputCell = null;
+function loadProjectOutputCell() {
+  if (!cachedProjectOutputCell) {
     // eslint-disable-next-line global-require
-    outputModel = require('../backend/xlsx/model');
+    const { projectOutputCell } = require('../backend/xlsx/model');
+    cachedProjectOutputCell = projectOutputCell;
   }
-  return outputModel;
+  return cachedProjectOutputCell;
 }
 
 function defaultProjectCell(cell, warningCollector = null) {
@@ -296,7 +298,7 @@ function defaultProjectCell(cell, warningCollector = null) {
 
   try {
     // 正式统一模型负责十进制、日期系统和长 ID 输出决策。
-    const { projectOutputCell } = loadOutputModel();
+    const projectOutputCell = loadProjectOutputCell();
     if (typeof projectOutputCell === 'function') return projectOutputCell(cell, warningCollector);
   } catch (_error) {
     // 增量接线时保留下方兼容投影。
