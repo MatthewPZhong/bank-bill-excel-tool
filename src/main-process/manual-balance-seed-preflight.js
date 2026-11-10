@@ -1,6 +1,7 @@
 'use strict';
 
 const {
+  FileValidationError,
   normalizeCell,
   parseDateValue,
   parseNumericValue
@@ -228,6 +229,16 @@ function materializeManualBalanceSeedPlan(plan, now = new Date()) {
 
 function writeManualBalanceSeedPlan(plan, now = new Date()) {
   const materialized = materializeManualBalanceSeedPlan(plan, now);
+  // v3.2.16：确认后的 beforeStart 核对与这里之间有异步等待，模板管理【余额管理】等入口可能在其间改写同一文件；
+  //   写入前同步重读并核对，变化即拒绝，不用旧计划整文件覆盖他人的修改（核对与写入之间不让出事件循环）。
+  const currentEvidence = balanceSeedRecordsEvidence(
+    readBalanceSeedRecords(materialized.storageRoot, materialized.bankName)
+  );
+  if (currentEvidence !== materialized.sourceRecordsEvidence) {
+    throw new FileValidationError('BALANCE_SEED_CHANGED_BEFORE_WRITE', '余额种子在确认期间已变化，请重新补录', {
+      context: { bankName: materialized.bankName }
+    });
+  }
   return {
     status: 'success',
     filePath: writeBalanceSeedRecords(

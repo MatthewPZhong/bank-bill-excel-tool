@@ -401,7 +401,7 @@
       }));
     }
 
-    // 3. 余额管理（addon manager）对话框（v1.5.x，资金链路）
+    // 3. 余额附加值（addon manager）对话框（v1.5.x，资金链路）
     function applyBalanceAddonManagerPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
       openModal(() => createBalanceAddonManagerDialog({

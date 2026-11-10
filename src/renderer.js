@@ -471,6 +471,7 @@ const configurationApi = Object.freeze({
   templates: window.desktopApi.templates, accountMappings: window.desktopApi.accountMappings,
   statementChannels: window.desktopApi.statementChannels,
   bigAccount: window.desktopApi.bigAccount, balanceAdjustment: window.desktopApi.balanceAdjustment,
+  balanceSeeds: window.desktopApi.balanceSeeds,
   monthlyBalance: window.desktopApi.monthlyBalance, files: window.desktopApi.files,
   app: { getInfo: window.desktopApi.app.getInfo }
 });

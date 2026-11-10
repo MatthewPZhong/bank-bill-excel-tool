@@ -2401,7 +2401,7 @@
           <div class="big-account-footer-left">
             <button class="secondary-btn small" type="button" data-action="add">新增</button>
             <button class="secondary-btn small" type="button" data-action="import-bank-info">导入银行账号信息</button>
-            <button class="secondary-btn small" type="button" data-action="balance-management">余额管理</button>
+            <button class="secondary-btn small" type="button" data-action="balance-management">余额附加值</button>
           </div>
           <button class="primary-btn small" type="button" data-action="done">完成</button>
         </div>
@@ -2868,7 +2868,7 @@
           bigAccountSnapshot = [];
         }
         if (!bigAccountSnapshot.length) {
-          setStatus('请先保存大账号配置后再使用余额管理', 'error');
+          setStatus('请先保存大账号配置后再使用余额附加值', 'error');
           return;
         }
         pushModal(overlay, () => createBalanceAddonManagerDialog({
@@ -3178,14 +3178,20 @@
             <tbody></tbody>
           </table>
         </div>
-        <div class="dialog-actions right template-manager-bundle-actions">
-          <button class="secondary-btn small" type="button" data-action="import-bundle">导入模板文件</button>
-          <button class="secondary-btn small" type="button" data-action="export-bundle">导出模板文件</button>
+        <div class="dialog-actions split template-manager-bundle-actions">
+          <button class="secondary-btn small" type="button" data-action="balance-seed-management">余额管理</button>
+          <div class="template-manager-bundle-right">
+            <button class="secondary-btn small" type="button" data-action="import-bundle">导入模板文件</button>
+            <button class="secondary-btn small" type="button" data-action="export-bundle">导出模板文件</button>
+          </div>
         </div>
       `;
 
       const writeScope = createDialogWriteScope(overlay, dialog);
       dialog.querySelector('.icon-close').addEventListener('click', () => closeModal(overlay));
+      dialog.querySelector('[data-action="balance-seed-management"]').addEventListener('click', () => {
+        pushModal(overlay, () => createBalanceSeedManagerDialog());
+      });
       async function runBundleAction(kind) {
         const handle = writeScope.begin();
         if (!handle) return;
@@ -5517,7 +5523,7 @@
       dialog.className = 'modal-card manager-card balance-addon-card';
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">余额管理</div>
+          <div class="dialog-title">余额附加值</div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="table-wrapper">
@@ -5702,6 +5708,338 @@
         if (handle.isOpen()) tbody.appendChild(createAddonRow());
       }) });
 
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // v3.2.16 模板管理【余额管理】：按渠道 / 普通模板查看余额种子，只能修改余额、删除单条种子
+    //   （spec：changes/v3.2.16/feat/balance-seed-management/spec.md）。
+    //   只把 { kind, id } 交给 Main，可见范围与写入核对都在 Main；切换选项时按请求代次丢弃迟到的列表，
+    //   写入期间锁定弹窗，结果为 conflict（期间被生成、补录或另一次修改改过）时提示并重新读取。
+    const BALANCE_SEED_PAGE_LIMIT = 200;
+
+    function buildBalanceSeedOwnerOptions() {
+      const templates = services.getTemplates() || [];
+      const channels = (services.getStatementChannels() || []).slice();
+      const knownChannelIds = new Set(channels.map((channel) => Number(channel.id)));
+      templates.forEach((template) => {
+        const channelId = Number(template.channelId || 0);
+        if (channelId && !knownChannelIds.has(channelId)) {
+          knownChannelIds.add(channelId);
+          channels.push({ id: channelId, name: template.channelName || '' });
+        }
+      });
+      return {
+        channels: channels.map((channel) => ({
+          key: `channel:${Number(channel.id)}`,
+          label: channel.name,
+          owner: { kind: 'channel', id: Number(channel.id) }
+        })),
+        templates: templates.filter((template) => !template.channelId).map((template) => ({
+          key: `template:${Number(template.id)}`,
+          label: template.name,
+          owner: { kind: 'template', id: Number(template.id) }
+        }))
+      };
+    }
+
+    function balanceSeedRowKey(record) {
+      return [record.merchantId, record.currency, record.billDate].join('\u0001');
+    }
+
+    function createBalanceSeedManagerDialog() {
+      const { setStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manager-card balance-seed-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">余额管理</div>
+          <label class="account-mapping-template-select-wrapper balance-seed-owner-wrapper">
+            渠道 <select data-role="balance-seed-owner" aria-label="渠道"></select>
+          </label>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="balance-seed-hint" data-role="balance-seed-hint"></div>
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>账户号</th>
+                <th>币种</th>
+                <th>日期</th>
+                <th>余额</th>
+                <th>生成方式</th>
+                <th class="manager-action-header"><span class="manager-action-header-label">执行操作</span></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="dialog-actions right">
+          <div class="balance-seed-pager" data-role="balance-seed-pager" hidden>
+            <button class="secondary-btn small" type="button" data-action="previous-page">上一页</button>
+            <span data-role="balance-seed-page"></span>
+            <button class="secondary-btn small" type="button" data-action="next-page">下一页</button>
+          </div>
+          <button class="primary-btn small" type="button" data-action="done">完成</button>
+        </div>
+      `;
+
+      const ownerSelect = dialog.querySelector('[data-role="balance-seed-owner"]');
+      const hintEl = dialog.querySelector('[data-role="balance-seed-hint"]');
+      const tbody = dialog.querySelector('tbody');
+      const pagerEl = dialog.querySelector('[data-role="balance-seed-pager"]');
+      const pageEl = dialog.querySelector('[data-role="balance-seed-page"]');
+      const ownerOptions = buildBalanceSeedOwnerOptions();
+      const optionByKey = new Map([...ownerOptions.channels, ...ownerOptions.templates].map((option) => [option.key, option]));
+      const state = {
+        key: (ownerOptions.channels[0] || ownerOptions.templates[0] || {}).key || '',
+        owner: null,
+        records: [],
+        page: 0,
+        loading: false,
+        loadError: '',
+        editingKey: '',
+        requestId: 0
+      };
+
+      [['渠道', ownerOptions.channels], ['普通模板', ownerOptions.templates]].forEach(([label, options]) => {
+        if (!options.length) return;
+        const group = document.createElement('optgroup');
+        group.label = label;
+        options.forEach((option) => {
+          const element = document.createElement('option');
+          element.value = option.key;
+          element.textContent = option.label;
+          group.appendChild(element);
+        });
+        ownerSelect.appendChild(group);
+      });
+      ownerSelect.value = state.key;
+      ownerSelect.disabled = !state.key;
+
+      const writeScope = createDialogWriteScope(overlay, dialog);
+
+      function pageCount() {
+        return Math.max(1, Math.ceil(state.records.length / BALANCE_SEED_PAGE_LIMIT));
+      }
+
+      function renderHint() {
+        if (!state.key) {
+          hintEl.textContent = '暂无渠道或模板';
+          return;
+        }
+        if (state.loading) {
+          hintEl.textContent = '正在读取余额种子…';
+          return;
+        }
+        if (state.loadError) {
+          hintEl.textContent = state.loadError;
+          return;
+        }
+        const fileName = state.owner ? state.owner.seedFileName : '';
+        hintEl.textContent = `共 ${state.records.length} 条。种子文件 balance-seeds/${fileName} 按名称的银行段存放，生成账单时按账户号与币种读取；修改后的余额按「人工录入」处理。`;
+      }
+
+      function createEmptyRow(text) {
+        const row = document.createElement('tr');
+        row.innerHTML = `<td class="empty-cell" colspan="6">${escapeHtml(text)}</td>`;
+        return row;
+      }
+
+      function createSeedRow(record) {
+        const rowKey = balanceSeedRowKey(record);
+        const editing = state.editingKey === rowKey;
+        const row = document.createElement('tr');
+        row.dataset.balanceSeedRow = rowKey;
+        row.innerHTML = `
+          <td>${escapeHtml(record.merchantId)}</td>
+          <td>${escapeHtml(record.currency)}</td>
+          <td>${escapeHtml(record.billDate)}</td>
+          <td class="balance-seed-balance-cell">${editing
+            ? `<input class="mapping-text-input balance-seed-balance-input" type="text" spellcheck="false" aria-label="余额" value="${escapeHtml(String(record.endBalance))}" />`
+            : escapeHtml(String(record.endBalance))}</td>
+          <td>${escapeHtml(record.generationMethod)}</td>
+          <td class="manager-action-cell">
+            <div class="manager-row-actions">
+              ${editing
+                ? '<button class="text-action" type="button" data-action="save-seed">保存</button><button class="text-action" type="button" data-action="cancel-edit">取消</button>'
+                : '<button class="text-action" type="button" data-action="edit-seed">修改</button><button class="text-action danger" type="button" data-action="delete-seed">删除</button>'}
+            </div>
+          </td>
+        `;
+        if (editing) {
+          const input = row.querySelector('.balance-seed-balance-input');
+          row.querySelector('[data-action="save-seed"]').addEventListener('click', () => saveSeed(record, input.value));
+          row.querySelector('[data-action="cancel-edit"]').addEventListener('click', () => {
+            state.editingKey = '';
+            renderRows();
+          });
+          input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') saveSeed(record, input.value);
+          });
+        } else {
+          row.querySelector('[data-action="edit-seed"]').addEventListener('click', () => {
+            state.editingKey = rowKey;
+            renderRows();
+            const input = tbody.querySelector('.balance-seed-balance-input');
+            if (input) { input.focus(); input.select(); }
+          });
+          row.querySelector('[data-action="delete-seed"]').addEventListener('click', () => confirmDeleteSeed(record));
+        }
+        return row;
+      }
+
+      function renderRows() {
+        renderHint();
+        tbody.innerHTML = '';
+        const totalPages = pageCount();
+        state.page = Math.min(state.page, totalPages - 1);
+        pagerEl.hidden = state.records.length <= BALANCE_SEED_PAGE_LIMIT;
+        pageEl.textContent = `第 ${state.page + 1} / ${totalPages} 页`;
+        dialog.querySelector('[data-action="previous-page"]').disabled = state.page <= 0;
+        dialog.querySelector('[data-action="next-page"]').disabled = state.page >= totalPages - 1;
+        if (!state.key || state.loading || state.loadError) return;
+        if (!state.records.length) {
+          tbody.appendChild(createEmptyRow('暂无余额种子'));
+          return;
+        }
+        const start = state.page * BALANCE_SEED_PAGE_LIMIT;
+        state.records.slice(start, start + BALANCE_SEED_PAGE_LIMIT)
+          .forEach((record) => tbody.appendChild(createSeedRow(record)));
+      }
+
+      async function loadSeeds({ keepPage = false } = {}) {
+        const option = optionByKey.get(state.key);
+        if (!option) {
+          renderRows();
+          return;
+        }
+        const requestId = ++state.requestId;
+        state.loading = true;
+        state.loadError = '';
+        state.editingKey = '';
+        if (!keepPage) state.page = 0;
+        renderRows();
+        let result;
+        try {
+          result = await api.balanceSeeds.list(option.owner);
+        } catch (error) {
+          result = { status: 'error', message: error.message || '读取余额种子失败' };
+        }
+        if (requestId !== state.requestId || !overlay.isConnected) return;
+        state.loading = false;
+        if (result.status === 'success') {
+          state.owner = result.owner || null;
+          state.records = Array.isArray(result.records) ? result.records : [];
+        } else {
+          state.owner = null;
+          state.records = [];
+          state.loadError = result.message || '读取余额种子失败';
+          setStatus(state.loadError, 'error', { errorReportReady: Boolean(result.errorReportReady) });
+        }
+        renderRows();
+      }
+
+      // 写入结果的共同收尾：conflict 与失败都提示并弹窗说明；成功或 conflict 后重新读取列表（保留页码）。
+      async function finishSeedWrite(result, alertParent) {
+        const succeeded = result.status === 'success';
+        setStatus(result.message, succeeded ? 'success' : 'error', { errorReportReady: Boolean(result.errorReportReady) });
+        if (!succeeded) pushAlert(alertParent, () => createAlertDialog(escapeHtml(result.message || '操作失败')));
+        if (succeeded || result.status === 'conflict') await loadSeeds({ keepPage: true });
+      }
+
+      async function saveSeed(record, rawValue) {
+        const text = String(rawValue || '').trim().replace(/,/g, '');
+        if (!/^[+-]?\d+(\.\d+)?$/.test(text) || !Number.isFinite(Number(text))) {
+          setStatus('余额必须是有效数字', 'error');
+          pushAlert(overlay, () => createAlertDialog('余额必须是有效数字'));
+          return;
+        }
+        if (Number(text) === Number(record.endBalance)) {
+          state.editingKey = '';
+          renderRows();
+          return;
+        }
+        const option = optionByKey.get(state.key);
+        const handle = writeScope.begin();
+        if (!option || !handle) return;
+        let result;
+        try {
+          result = await api.balanceSeeds.update({
+            owner: option.owner,
+            key: { merchantId: record.merchantId, currency: record.currency, billDate: record.billDate },
+            expected: record,
+            endBalance: text
+          });
+        } catch (error) {
+          result = { status: 'error', message: error.message || '修改余额种子失败' };
+        } finally { writeScope.finish(handle); }
+        if (!writeScope.isCurrent(handle)) return;
+        await finishSeedWrite(result, overlay);
+      }
+
+      function confirmDeleteSeed(record) {
+        const option = optionByKey.get(state.key);
+        if (!option) return;
+        pushModal(overlay, () => {
+          let confirmScope;
+          const confirmation = createConfirmDialog({
+            message: `确认删除余额种子？<br>账户号：${escapeHtml(record.merchantId)}　币种：${escapeHtml(record.currency || '（空）')}　日期：${escapeHtml(record.billDate)}　余额：${escapeHtml(String(record.endBalance))}<br>删除后，下次生成账单若需要这一天的余额，会提示补录。`,
+            confirmText: '确认删除',
+            cancelText: '否',
+            onConfirm: async () => {
+              const handle = confirmScope.begin();
+              if (!handle) return;
+              let result;
+              try {
+                result = await api.balanceSeeds.delete({
+                  owner: option.owner,
+                  key: { merchantId: record.merchantId, currency: record.currency, billDate: record.billDate },
+                  expected: record
+                });
+              } catch (error) {
+                result = { status: 'error', message: error.message || '删除余额种子失败' };
+              } finally { confirmScope.finish(handle); }
+              if (!confirmScope.isCurrent(handle)) return;
+              if (result.status === 'success' || result.status === 'conflict') {
+                const closed = closeModal(handle, { status: 'submitted' });
+                if (closed.status !== 'closed') return;
+                await finishSeedWrite(result, overlay);
+                return;
+              }
+              await finishSeedWrite(result, confirmation);
+            }
+          });
+          confirmScope = createDialogWriteScope(confirmation, confirmation);
+          return confirmation;
+        });
+      }
+
+      ownerSelect.addEventListener('change', () => {
+        state.key = ownerSelect.value;
+        loadSeeds();
+      });
+      dialog.querySelector('[data-action="previous-page"]').addEventListener('click', () => {
+        state.page = Math.max(0, state.page - 1);
+        state.editingKey = '';
+        renderRows();
+      });
+      dialog.querySelector('[data-action="next-page"]').addEventListener('click', () => {
+        state.page = Math.min(pageCount() - 1, state.page + 1);
+        state.editingKey = '';
+        renderRows();
+      });
+      const close = () => closeModal(overlay, { status: 'cancelled', reason: 'cancel' });
+      dialog.querySelector('.icon-close').addEventListener('click', close);
+      dialog.querySelector('[data-action="done"]').addEventListener('click', close);
+      registerModal(overlay, {
+        onMount: () => { loadSeeds(); },
+        onDispose: () => { state.requestId += 1; }
+      });
+
+      renderRows();
       overlay.appendChild(dialog);
       return overlay;
     }

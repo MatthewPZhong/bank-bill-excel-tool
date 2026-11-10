@@ -43,7 +43,7 @@ npm run preview:all
 | ![big-account-selection](big-account-selection.png) | 大账号选择对话框 — 单文件 radio 模式 | `npm run preview:big-account-selection` |
 | ![big-account-selection-multi](big-account-selection-multi.png) | 大账号选择对话框 — 多文件 split 双栏模式（v1.5.2） | `npm run preview:big-account-selection-multi` |
 | ![extract-order](extract-order.png) | 提取大账号顺序 — 确认大账号顺序对话框（v1.5.0） | `npm run preview:extract-order` |
-| ![balance-addon-manager](balance-addon-manager.png) | 余额管理（addon manager）对话框 | `npm run preview:balance-addon-manager` |
+| ![balance-addon-manager](balance-addon-manager.png) | 余额附加值（addon manager）对话框 | `npm run preview:balance-addon-manager` |
 | ![manual-balance-seed](manual-balance-seed.png) | 余额种子人工录入对话框 | `npm run preview:manual-balance-seed` |
 
 ### 拆分 / 合并账单（3 张）

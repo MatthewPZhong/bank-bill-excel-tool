@@ -142,6 +142,7 @@ const archivePolicies = Object.freeze([
   createExcludePolicy('archive-center:list-delete-cleanup-jobs', 'read-only-query'),
   createExcludePolicy('archive-center:prepare-delete-batch', 'read-only-query'),
   createExcludePolicy('balance-adjustment:list', 'read-only-query'),
+  createExcludePolicy('balance-seed:list', 'read-only-query'),
   createExcludePolicy('bank-statement:c3-candidate-count', 'read-only-query'),
   createExcludePolicy('bank-statement:refund-candidate-count', 'read-only-query'),
   createExcludePolicy('bank-statement:session-status', 'read-only-query'),
