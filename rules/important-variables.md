@@ -3,7 +3,7 @@
 > 手工维护的"关键变量"清单。**按需检索相关条目**（文件很大，用 `rg` 定位，不通读），命中条目要在改动完成后做关联功能 review。
 >
 > 全量自动统计在 `docs/analysis/var-reference-stats.md`（由 `npm run scan:vars` 生成）。
-> 使用时机见 `CODEX.md`「验证与风险审查」：按需参考相关风险说明，不沿用旧的固定扫描、统计刷新或分级汇报流程。
+> 使用时机见 `CODEX.md`「验证与风险审查」：按需参考相关风险说明。
 
 ## 元数据
 
@@ -56,16 +56,12 @@
 | v3.1.11 人工资金 review | 待业务负责人使用真实或脱敏 Biz OP、Pending、Pre-fund 样本复核 dataset tag → run receipt → 输出文件的直接血缘、行数和金额/币种守恒；并在真实 Archive 数据库副本复核 017/018、001。自动化 release-check 不替代该发布门禁。 |
 | v3.1.12 人工资金/状态 review | 2026-08-20 发布负责人明确确认已完成网银源文件身份、VCC CNY/CNH 主体/金额/幂等/原始审计/九币种输出、Archive 迁移/未知文件/指纹/首次进入维护以及受控 Windows 启动与恢复验收，并授权 `v3.1.12 → main`；仓库只记录最终结论，不收录敏感数据库、sidecar 或 raw report。 |
 | 基线数据 | `docs/analysis/var-reference-stats.md`（218 个 JS 文件 / 2553 顶层声明；A-share 376 / A-pair 637 / A-local 1396 / B 1013；报告版本 3.1.0） |
-| 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
 
 ## 如何使用本表
 
 1. 准备改代码前：搜本表，看改动文件 / 改动符号是否在表中出现
 2. 改完代码后：对命中的每一条，按"变更 review 要点"列出的清单自查一遍
-3. PR body 追加"⚠️ 关联功能 review"段落，列出命中变量与 review 结论
-4. 新发现的跨度 ≥ 3 的符号（见自动统计报告），评估是否升格入本表
-5. 版本号 bump 时：人工完整 review 一次本表，同步进展到 CHANGELOG
 
 本表中跨度/次数数据为**人工 review 时刻的参考**，不精确追踪每次改动（精确数据看自动报告）。
 
@@ -119,7 +115,7 @@
 - `BILL_SPLIT_MERGE_MAPPING_FIELD` — 账单拆分合并
 - 定义位置：均在 `src/main.js`
 - 变更 review 要点：
-  - 四种模式互斥（CLAUDE.md Key Business Rules），改任意一个都要验证其他三种未串味
+  - 四种模式互斥（`src/main.js` 的 `validateTemplateConfiguration` 拒绝同时启用），改任意一个都要验证其他三种未串味
   - 模板 JSON bundle 的 `bundleVersion` 可能需要同步升格
   - 必跑：四种模式各一个样例模板的导入/导出
 
@@ -155,7 +151,7 @@
 
 ### `BALANCE_CALCULATED_OPTION` / `BALANCE_DISABLED_OPTION`
 - 定义：`src/main.js`
-- 关联功能：余额字段的三态（直列 / 发生额推算 / 停用），CLAUDE.md Key Business Rules § Balance calculation
+- 关联功能：余额字段的三态（直列 / 发生额推算 / 停用）
 - 变更 review 要点：
   - 改枚举值会让历史模板持久化记录错位
   - **资金相关**，必跑：余额工作表（单币种 + 混币种）导出对比
@@ -1493,7 +1489,7 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
 
 ### 触发时机与责任人
 
-按 `CODEX.md`「验证与风险审查」：共享状态、持久化格式或业务契约变化时，由当前执行者核查命中条目，需要时起草升格/降级交用户审批；不再在提 PR、版本 bump 或合并前固定扫描、刷新统计或分级汇报。用户明确要求时可运行 `npm run scan:vars` / `npm run check:vars` 辅助。
+按 `CODEX.md`「验证与风险审查」：共享状态、持久化格式或业务契约变化时，由当前执行者核查命中条目，需要时起草升格/降级交用户审批。用户明确要求时可运行 `npm run scan:vars` / `npm run check:vars` 辅助。
 
 ### 元数据维护
 
