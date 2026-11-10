@@ -20,6 +20,14 @@
 
 ## 未实施
 
+### B76（P3 · 已知问题）单测 `run-check-multiworker` 的 B0「close timeout 后 terminate 延迟」在 Windows CI 偶发等待超时
+
+- **来源**：2026-11-07 [PR #246](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/246) 最终候选 `f2d55e3d` 的 Windows CI（run 42396472653 第 1 次，`release-check-unit (6/6)`）。同一提交只重跑失败 job 后通过，合并后的 main 检查（run 42449980840）与 v3.2.15 发布 workflow（run 42453987798）也通过；`chore/backlog-b70-multiworker-flake` 分支上原为 B70，合入 release/v3.2.16 时与「账单里的余额」的 B70 重号，改为 B76
+- **影响**：`tests/unit/main-process/run-check-multiworker.test.js:808`（循环生成的四个 B0 退出屏障场景之一）在第 823 行等待两个 worker 都被 terminate，`waitForBarrierCondition` 固定 4 秒期限，超时报“等待条件超时：所有 terminate 已调用”，该用例耗时 12.1 秒；harness 的 `closeTimeoutMs` 为 20 ms，正常应很快发出 terminate。同片 3198 项中 3196 通过、1 项平台跳过。失败使 `smoke-test` 汇总失败、`build` 跳过，需人工判断后重跑
+- **现状**：该测试与 `src/main-process/run-check-multiworker.js`、`run-check-multiworker-worker.js` 自 v3.2.14 未改。未定位卡住的阶段（worker 就绪、分块写入还是关闭），未在本机复现；推断为 CI 机器负载下的测试时序问题，未确认
+- **关闭条件**：查明 4 秒内未到达 terminate 的原因。属测试时序则改为按阶段等待或调整测试自身的等待期限（产品的 closeTimeout 策略不变）；属产品问题则修复并补回归。之后 Windows CI 多次运行无复现
+- **目标版本**：未定
+
 ### B75（P3 · 未做）模板管理【余额管理】实机界面检查与种子修改口径人工复核（资金口径）
 
 - **来源**：v3.2.16 `feat/balance-seed-management`（[spec](../changes/v3.2.16/feat/balance-seed-management/spec.md)）；模块分支上原为 B72，合入 release/v3.2.16 时与已有 B72–B74 重号，改为 B75
