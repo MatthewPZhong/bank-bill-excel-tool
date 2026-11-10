@@ -121,4 +121,5 @@
 - 提交 `343a494d` 后 Codex 只读审查一轮，P2：生效样式缓存按（cell / 行 / 列 XF、customFormat）组合作键，行样式与单元格样式都多时条数近似相乘且常驻（1000 行 × 1000 列、1001 个等价 XF 的流式扫描，GC 后堆增长约 120 MiB，v3.2.15 无此缓存）。改为按解析后的样式引用缓存（T8），同一场景堆增长降到约 1 MiB；补回归测试，对拍与比速复跑无差异、无退化。
 - 修复提交 `671f25cc` 后 Codex 对整个分支再审一轮，上一条确认已修复；新 P2：`emitRow` 复用的闭包级投影缓冲只覆写前缀，宽行之后写窄行时历史行尾部的单元格（含文本）一直被 writer 持有，release 后也不释放。改为每次调用的局部数组，并在 release / abort 时清空输出样式缓存；补 WeakRef + 强制 GC 的回归测试（旧实现失败、新实现通过），输出对拍与比速复跑无差异、无退化。
 - 修复提交 `89eb1698` 后 Codex 对整个分支第三轮审查：无新发现（其定向复跑相关单测与拆分读取兼容、共享 XLSX 边界集成脚本均通过；未跑 release-check 与 Windows 验证）。
+- 合入 release/v3.2.16 后 `npm run release-check` 的架构检查报 `ARCH-STATIC-COVERAGE`：writer 为避免逐单元格 `require`，改为缓存整个 `model.js` 模块对象，架构检查因此认不出约定依赖 `projectOutputCell`（`architecture/boundaries.json` 中 writer → `model.js` 的 `importedNames`）。现改为在 `require` 处按名解构，只缓存该函数，行为不变。分支此前只跑了 lint、单测和集成，没有单独跑架构检查。
 - 未覆盖：Windows 打包版与用户真实文件的耗时回归（B77）；发布存档阶段的耗时（B78）。
