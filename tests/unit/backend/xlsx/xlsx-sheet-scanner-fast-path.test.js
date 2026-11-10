@@ -152,3 +152,34 @@ test('rowCallbackLimit 只限定 onRow 次数，后续行照常校验、计数�
 
   await assert.rejects(scanXlsxSheet({ rowCallbackLimit: 0 }), TypeError);
 });
+
+test('生效样式缓存按实际样式引用去重，不随行 / 单元格 XF 组合增长', async () => {
+  const sourceRegistry = new SourceStyleRegistry('style-cache-test');
+  // 21 个 XF 内容相同，注册表去重后只有一个实际样式引用
+  for (let xf = 0; xf <= 20; xf += 1) sourceRegistry.bindXf(xf, { numFmt: '0.00' });
+  let compoundRefCalls = 0;
+  const compoundRef = sourceRegistry.compoundRef.bind(sourceRegistry);
+  sourceRegistry.compoundRef = (styleRef) => {
+    compoundRefCalls += 1;
+    return compoundRef(styleRef);
+  };
+  let rowsXml = '';
+  for (let r = 1; r <= 40; r += 1) {
+    rowsXml += `<row r="${r}" s="${1 + (r % 20)}" customFormat="1">`;
+    for (let c = 0; c < 20; c += 1) rowsXml += `<c r="${String.fromCharCode(65 + c)}${r}" s="${1 + ((r + c) % 20)}"><v>${c}</v></c>`;
+    rowsXml += '</row>';
+  }
+  const rows = [];
+  await scanXlsxSheet({
+    zip: { openReadStream(_entry, callback) { callback(null, Readable.from([Buffer.from(sheet(rowsXml))])); } },
+    sheetEntry: { fileName: 'xl/worksheets/sheet1.xml' },
+    sheet: { name: 'S', sheetIndex: 0, state: 'visible' },
+    sourceFile: 'fixture.xlsx',
+    sourceRegistry,
+    onRow: (row) => rows.push(row)
+  });
+  assert.equal(rows.length, 40);
+  assert.ok(rows.every((row) => row.cells.every((cell) => cell.sourceFormat === '0.00')));
+  // 400 种行 × 单元格 XF 组合只对应 1 个实际样式；单元格与行各解析一次（列样式 XF 1 另计一次以内）
+  assert.ok(compoundRefCalls <= 3, `compoundRef 调用 ${compoundRefCalls} 次`);
+});

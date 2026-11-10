@@ -41,7 +41,7 @@
 | T5 | 输出样式的 numFmt / font / fill / border / alignment 齐全时，同一输出样式的单元格共享一个 ExcelJS 样式对象（`sharedCellStyleFor`），否则退回逐格 `applyExcelJsStyle` | 齐全时 `applyExcelJsStyle` 会覆盖行 / 列合并来的全部键，行列样式也从不含 protection，最终样式与行列无关；共享后命中 ExcelJS WeakMap，首次出现顺序不变，styleId 与 styles.xml 不变 |
 | T6 | `defaultProjectCell` 不再逐格 `require('../backend/xlsx/model')`，首次加载成功后复用模块引用；原包住调用的 try/catch 保留 | 逐格模块解析约占写入阶段 16%；加载失败仍每次重试，语义不变 |
 | T7 | 词法扫描器增加可选快路径钩子（`leadCodes` / `match` / `apply`）：根元素内遇到指定首字母的标记时，由调用方只读匹配当前缓冲区内完整的标记，命中则整段跳过逐事件处理、先吐出已累积文本再调用 `apply`；仍打开的元素（行开标签）照常压入标签栈，闭合标签走通用路径。工作表扫描接管 `<row …>`（属性限精确拼写的白名单或已绑定前缀属性、不重复、不声明命名空间、值为 ASCII 字母数字与 `.:+-`）与 `<c r s t/>`、`<c r s t><v>文本</v></c>`（属性仅限精确小写 r/s/t、值为字母数字；文本不含 `<`、`&` 且不超过 4096）；其余形态、状态（嵌套、收集中、前缀元素、CDATA、实体、公式、内联字符串、大小写变体、重复属性、默认命名空间不合法、`onCellLexical` 审计）一律回退 | 白名单形态在逐事件路径上只会经过「开始行 / 开始单元格 → 开始缓存值 → 追加文本 → 收尾」这几个已抽成共享函数的步骤，大小写、命名空间与父子结构校验必然通过，错误种类、文案、context 与先后顺序不变。`scanXlsxSheet` 内部选项 `fastPath: false` 仅供开 / 关对照测试 |
-| T8 | 逐单元格削减：纯 ASCII 坐标手写解析（非 ASCII 仍走原正则，`toUpperCase` 可能把 ß 展开）；样式属性原文 → XF 号只缓存成功结果；生效样式按（cell / 行 / 列 XF、customFormat）缓存冻结样式引用与 numFmt；解码改为按位传参、出错才构造 context；单元格可变状态整表复用；行内单元格用数组 + 递增判重；扫描器专用的冻结 cell / row 构造函数复用共享样式引用，单元格已按列递增时跳过原实现的 Map 去重与排序；规范元素名的大小写校验结果预置；属性循环改用 `Object.keys` | XF 绑定在扫描前固定、列元数据不得出现在 sheetData 之后，生效样式只取决于入参；构造结果与 `createToolboxCell` / `createToolboxRow` 字段、键顺序、取值、冻结状态一致（无坐标单元格顺延到 16384 时仍交给原构造函数按原样报错） |
+| T8 | 逐单元格削减：纯 ASCII 坐标手写解析（非 ASCII 仍走原正则，`toUpperCase` 可能把 ß 展开）；样式属性原文 → XF 号只缓存成功结果（至多 4096 条）；每格照常由 `effectiveStyleRef` 算出实际样式引用，再按该引用缓存冻结样式引用与 numFmt（条数不超过来源样式数，行样式引用同理）；解码改为按位传参、出错才构造 context；单元格可变状态整表复用；行内单元格用数组 + 递增判重；扫描器专用的冻结 cell / row 构造函数复用共享样式引用，单元格已按列递增时跳过原实现的 Map 去重与排序；规范元素名的大小写校验结果预置；属性循环改用 `Object.keys` | 缓存键是解析后的样式引用而非 XF 组合，内存不随行 / 单元格 / 列 XF 的组合增长；行样式引用与原实现一样不查样式内容；构造结果与 `createToolboxCell` / `createToolboxRow` 字段、键顺序、取值、冻结状态一致（无坐标单元格顺延到 16384 时仍交给原构造函数按原样报错） |
 | T9 | `number-date`：常见「正负号 + 整数 + 可选小数」词法手写解析，其余仍走原正则；规范比较去正则；`classifyExcelNumberFormat` 按格式串有界缓存（结果本就冻结）；数值解码只解析一次（`classifyNumericLexical`）；有效数字 ≤ 15、整数位 ≤ 15、小数位 ≤ 20 时 double 往返判定直接成立（DBL_DIG），范围外仍重新解析比较。`excel-text`：无 `_` 时解码跳过正则替换，无需转义时编码直接返回原串 | DBL_DIG：15 位有效数字网格的相对间距（≥ 1e-15）大于 double 的 ulp（≈ 2.2e-16），且最短往返表示不长于原值，故正规数范围内必然往返不变；以 v3.2.15 原实现作对照逐值比较 |
 | T10 | `loadToolboxSharedStrings` 用同一钩子接管 `<si><t>文本</t></si>` 与 `<si><t xml:space="preserve">文本</t></si>`（文本不含 `<`、`&`、不超过 4096），语义动作复用原 t 解码与 si 交付，出错仍经 `finish(error)` | 同 T7 |
 | T11 | `scanXlsxSheet` 新增 `rowCallbackLimit`：只把前 N 行交给 `onRow`，其后各行照常严格解析、解码、样式校验与计数，在无逐 cell 审计与行字节预算时不构造模型对象；写后复核（`validateGeneratedWorkbookStructure`）只取表头，设为 1。`emitRow` 不再为每格分配投影记录；`projectToolboxMatchValues` 一次遍历；读字段累加器预先展开字段数组 | 复核原本只在首行取表头，其余行回调为空操作；解析、解码与计数路径不变，失败条件不变 |
@@ -64,7 +64,7 @@
 | `src/main-process/toolbox-split-scan.js`、`toolbox-split-read-owner.js` | T12 |
 | `src/backend/xlsx/README.md` | 登记新文件、快路径与 `rowCallbackLimit` 的使用约束 |
 | `tests/unit/backend/xlsx/strict-xml-tokenizer.test.js` | 新增：与 sax 逐事件对照（边界构造、非法与截断输入、固定种子随机变异；字符串 / UTF-8 / UTF-16 与多种切块）；快路径钩子的事件、位置与压栈 |
-| `tests/unit/backend/xlsx/xlsx-sheet-scanner-fast-path.test.js` | 新增：快路径开 / 关在常见、近邻、出错形态与固定种子随机工作表上逐行一致（多种切块）；`rowCallbackLimit` 语义 |
+| `tests/unit/backend/xlsx/xlsx-sheet-scanner-fast-path.test.js` | 新增：快路径开 / 关在常见、近邻、出错形态与固定种子随机工作表上逐行一致（多种切块）；`rowCallbackLimit` 语义；400 种等价行 / 单元格 XF 组合只解析一次实际样式 |
 | `tests/unit/backend/xlsx/number-text-fast-path.test.js` | 新增：内嵌 v3.2.15 原实现，逐值对照十进制解析、规范比较、数值输出分类、格式分类缓存与 ST_Xstring 编解码 |
 | `tests/unit/backend/xlsx/model-scanned-constructors.test.js` | 新增：扫描器专用构造函数与通用构造函数逐字段一致 |
 | `tests/unit/backend/xlsx/zip-entry-stream.test.js` | 新增：与 yauzl `openReadStream` 对照读出内容、声明大小偏小 / 偏大时的报错文案与报错前已交付字节数、非 yauzl zip 回退 |
@@ -98,7 +98,7 @@
 | 命令 | 结果 |
 | --- | --- |
 | `node --test` 新增 / 修改的单测（tokenizer、快路径开关对照、数值文本对照、构造函数、ZIP 条目流、预取、split read owner） | 全部 PASS |
-| `npm run test:unit` | 10006/10010 PASS，4 项按平台跳过，0 失败（638 个文件） |
+| `npm run test:unit` | 10007/10011 PASS，4 项按平台跳过，0 失败（638 个文件；含 Codex 审查修复后的复跑） |
 | `npm run test:integration` | 98 个脚本、3431/3431 PASS；`toolbox-split-read-compatibility.js` 增加预取 / 补扫两种路径（12 → 18 例），`toolbox-csv-admission.js` 增加预取用例（17 → 18 例），runner 回写 `rules/integration-test-policy.md` 第七章 |
 | `npm run lint` | PASS |
 
@@ -118,4 +118,5 @@
 - 对照中发现并修复两处偏差：收尾阶段把未闭合注释当作根内文本吐出；按 XML 规范去重重复属性（sax 在 xmlns 模式下实际不去重，已改为按 sax 行为保留后者）。
 - 第二轮起初用替换 `zlib.createInflateRaw` 的方式试加大分块，测得无收益；后查明该导出不可写、替换从未生效。改为自建管线实测：加大读缓冲（highWaterMark）无效，加大解压分块有效（10 万行等待 118ms → 73ms），据此实施 T13。输出文件哈希本身只占约 10ms，未改。
 - 第二轮对照语料扩充：工作表近邻变异（属性顺序 / 引号 / 空白、大小写与重复属性、非 ASCII 与小写坐标、`<v/>`、CDATA、实体、超长文本、前缀元素、行内重绑默认命名空间、未绑定前缀行属性、乱序与顺延到 16384 的单元格）在 1–1e9 字节任意切块下逐行对比 v3.2.15；共享字符串加入空 t、`xml:space` 变体、转义孤立代理项与超长文本。
+- 提交 `343a494d` 后 Codex 只读审查一轮，P2：生效样式缓存按（cell / 行 / 列 XF、customFormat）组合作键，行样式与单元格样式都多时条数近似相乘且常驻（1000 行 × 1000 列、1001 个等价 XF 的流式扫描，GC 后堆增长约 120 MiB，v3.2.15 无此缓存）。改为按解析后的样式引用缓存（T8），同一场景堆增长降到约 1 MiB；补回归测试，对拍与比速复跑无差异、无退化。
 - 未覆盖：Windows 打包版与用户真实文件的耗时回归（B76）；发布存档阶段的耗时（B75）。

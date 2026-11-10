@@ -102,8 +102,6 @@ const OOXML_ERROR_VALUES = new Set([
 const EXCEL_FORMULA_MAX_UTF16_UNITS = 8192;
 // 快路径只接管短文本；更长的缓存值交回逐事件路径，保证分段计长与报错 context 不变。
 const FAST_CELL_TEXT_MAX = 4096;
-// 样式缓存键的单项上限（XF 号 + 1）；更大的编号不缓存，直接计算。
-const STYLE_KEY_LIMIT = 32767;
 const MAX_LEXICAL_CELL_XML_UTF16_UNITS = 16 * 1024 * 1024;
 
 class ToolboxXlsxFormatError extends Error {
@@ -714,10 +712,24 @@ async function scanXlsxSheet(options = {}) {
     return styleId;
   }
 
-  // 生效样式：effectiveStyleRef 在扫描期间只取决于入参（XF 绑定在扫描前已固定，列元数据不能出现在
-  // sheetData 之后），按入参缓存冻结样式引用与 numFmt；解析失败不缓存，原错误照常抛出。
+  // 生效样式：每个单元格照常由 effectiveStyleRef 算出实际样式引用，再按该引用缓存冻结的
+  // {sourceRegistryId, styleRef} 与 numFmt。条数不超过注册表中的来源样式数，不随行 / 单元格 / 列
+  // XF 的组合增长；只缓存原始值类型的引用，解析失败不缓存、原错误照常抛出。
   const columnStyleIds = [];
-  const cellStyleInfos = new Map();
+  const styleInfosByRef = new Map();
+  function styleInfoFor(effectiveStyleRef) {
+    const cacheable = typeof effectiveStyleRef === 'number' || typeof effectiveStyleRef === 'string';
+    if (cacheable) {
+      const cached = styleInfosByRef.get(effectiveStyleRef);
+      if (cached !== undefined) return cached;
+    }
+    const styleRef = freezeToolboxStyleRef(sourceRegistry.compoundRef(effectiveStyleRef));
+    const numFmt = sourceRegistry.get(styleRef.styleRef).numFmt;
+    const info = { styleRef, sourceFormat: String(numFmt == null ? 'General' : numFmt) };
+    if (cacheable) styleInfosByRef.set(effectiveStyleRef, info);
+    return info;
+  }
+
   function cellStyleInfo(cellStyleId, rowStyleId, rowCustomFormat, columnIndex) {
     let columnStyleId = columnStyleIds[columnIndex];
     if (columnStyleId === undefined) {
@@ -725,39 +737,25 @@ async function scanXlsxSheet(options = {}) {
       columnStyleId = column ? column.sourceStyleId : null;
       columnStyleIds[columnIndex] = columnStyleId;
     }
-    const cellKey = cellStyleId === null ? 0 : cellStyleId + 1;
-    const rowKey = rowStyleId === null ? 0 : rowStyleId + 1;
-    const columnKey = columnStyleId === null ? 0 : columnStyleId + 1;
-    const cacheable = cellKey <= STYLE_KEY_LIMIT && rowKey <= STYLE_KEY_LIMIT && columnKey <= STYLE_KEY_LIMIT;
-    const key = cacheable
-      ? ((cellKey * (STYLE_KEY_LIMIT + 1) + rowKey) * 2 + (rowCustomFormat ? 1 : 0)) * (STYLE_KEY_LIMIT + 1) + columnKey
-      : -1;
-    if (cacheable) {
-      const cached = cellStyleInfos.get(key);
-      if (cached !== undefined) return cached;
-    }
-    const styleRef = freezeToolboxStyleRef(sourceRegistry.compoundRef(sourceRegistry.effectiveStyleRef({
+    return styleInfoFor(sourceRegistry.effectiveStyleRef({
       cellStyleId,
       rowStyleId,
       rowCustomFormat,
       columnStyleId
-    })));
-    const numFmt = sourceRegistry.get(styleRef.styleRef).numFmt;
-    const info = { styleRef, sourceFormat: String(numFmt == null ? 'General' : numFmt) };
-    if (cacheable) cellStyleInfos.set(key, info);
-    return info;
+    }));
   }
 
-  const rowStyleRefs = new Map();
+  // 行样式引用同样按实际样式引用缓存；与原实现一致，行这里不查样式内容（不调用 get）。
+  const rowStyleRefsByRef = new Map();
   function rowStyleRefFor(rowStyleId, rowCustomFormat) {
-    const key = rowStyleId === null ? (rowCustomFormat ? -1 : -2) : rowStyleId * 2 + (rowCustomFormat ? 1 : 0);
-    const cached = rowStyleRefs.get(key);
-    if (cached !== undefined) return cached;
-    const styleRef = freezeToolboxStyleRef(sourceRegistry.compoundRef(sourceRegistry.effectiveStyleRef({
-      rowStyleId,
-      rowCustomFormat
-    })));
-    rowStyleRefs.set(key, styleRef);
+    const effectiveStyleRef = sourceRegistry.effectiveStyleRef({ rowStyleId, rowCustomFormat });
+    const cacheable = typeof effectiveStyleRef === 'number' || typeof effectiveStyleRef === 'string';
+    if (cacheable) {
+      const cached = rowStyleRefsByRef.get(effectiveStyleRef);
+      if (cached !== undefined) return cached;
+    }
+    const styleRef = freezeToolboxStyleRef(sourceRegistry.compoundRef(effectiveStyleRef));
+    if (cacheable) rowStyleRefsByRef.set(effectiveStyleRef, styleRef);
     return styleRef;
   }
 
