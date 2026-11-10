@@ -88,8 +88,10 @@ const {
   ensureTemplateResourceVersionSupport,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
+  ensureTemplateCurrencyBigAccountSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateFilenameFixedFieldSupport,
+  ensureTemplateFeatureFilterSupport,
   ensureTemplateKeySupport,
   ensureTemplateMappingEnhancements,
   hasColumn
@@ -257,8 +259,10 @@ class AppDatabase {
     this.ensureBillSplitTargetSeqSupport();
     this.ensureParentTemplateSupport();
     this.ensureTemplateFilenameFixedFieldSupport();
+    this.ensureTemplateFeatureFilterSupport();
     this.ensureAccountMappingTemplateSupport();
     this.ensureTemplateBigAccountNatureSupport();
+    this.ensureTemplateCurrencyBigAccountSupport();
     // v3.2.15：主/子模板一次性转为渠道；必须在 ensureParentTemplateSupport 与
     //   ensureAccountMappingTemplateSupport 之后（依赖旧标记列与模板级账户映射）。
     this.runStatementChannelMigration();
@@ -774,6 +778,10 @@ class AppDatabase {
     return ensureTemplateFilenameFixedFieldSupport(this.db);
   }
 
+  ensureTemplateFeatureFilterSupport() {
+    return ensureTemplateFeatureFilterSupport(this.db);
+  }
+
   ensureAccountMappingTemplateSupport() {
     return ensureAccountMappingTemplateSupport(this.db);
   }
@@ -857,6 +865,11 @@ class AppDatabase {
   // v1.5.3 需求 R2：自有账号合并入大账号表 — 幂等 schema 迁移
   ensureTemplateBigAccountNatureSupport() {
     return ensureTemplateBigAccountNatureSupport(this.db);
+  }
+
+  // v3.2.16：MerchantId「原始账单仅有币种无账户号」的 币种 → 大账号 配置表
+  ensureTemplateCurrencyBigAccountSupport() {
+    return ensureTemplateCurrencyBigAccountSupport(this.db);
   }
 
   // v2.1.2 T2：月度银行对账单BU回填校验模块 3 张表（pending_imports / bank_imports / runs）
@@ -1148,6 +1161,10 @@ class AppDatabase {
     return templateRepository.getTemplateBigAccounts(this.db, templateId, options);
   }
 
+  getTemplateCurrencyBigAccounts(templateId) {
+    return templateRepository.getTemplateCurrencyBigAccounts(this.db, templateId);
+  }
+
   getTemplateMappings(templateId) {
     return templateRepository.getTemplateMappings(this.db, templateId);
   }
@@ -1182,8 +1199,8 @@ class AppDatabase {
     return templateRepository.getBillSplitMappings(this.db, templateId);
   }
 
-  saveBillSplitMappings(templateId, mappings) {
-    return templateRepository.saveBillSplitMappings(this.db, templateId, mappings);
+  saveBillSplitMappings(templateId, mappings, options = {}) {
+    return templateRepository.saveBillSplitMappings(this.db, templateId, mappings, options);
   }
 
   getBillSplitRows(templateId) {

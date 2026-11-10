@@ -46,8 +46,10 @@ function roundAmountHighPrecision(value) {
   return Number(Number(value).toFixed(12));
 }
 
-function inferEndingBalance({ previousEndBalance, entries, dateLabel }) {
-  // 候选余额按两位小数去重、比较（容差口径）；返回值取选中候选的原值（直接映射余额保留 12 位精度，PRD v1.5.0）。
+// 账单里的余额逐日校验（v3.2.16）：预期 = 上一日余额 + 当日收入 − 当日支出，不再接受“+支出”。
+// 候选余额按两位小数去重、比较（容差口径）；返回值取选中候选的原值（直接映射余额保留 12 位精度，PRD v1.5.0）。
+// 结果：match 有候选相符；mismatch 只有一个候选且不符；unresolved 多个候选都不符。
+function verifyStatementEndingBalance({ anchorBalance, entries, dateLabel }) {
   const originalByRounded = new Map();
   entries.forEach((entry) => {
     if (entry.balanceValue === null) {
@@ -64,31 +66,29 @@ function inferEndingBalance({ previousEndBalance, entries, dateLabel }) {
     throw new FileValidationError('FILE_READ', `${dateLabel} 未找到期末余额`);
   }
 
+  const creditAmountSum = roundAmountHighPrecision(entries.reduce((sum, entry) => sum + entry.creditAmount, 0));
+  const debitAmountSum = roundAmountHighPrecision(entries.reduce((sum, entry) => sum + entry.debitAmount, 0));
+  const expectedBalance = roundAmountHighPrecision(anchorBalance + creditAmountSum - debitAmountSum);
+  const roundedExpectedBalance = roundAmount(expectedBalance);
+  const amounts = { creditAmountSum, debitAmountSum, expectedBalance };
+  const matched = uniqueBalances.find((balance) => Math.abs(balance - roundedExpectedBalance) < 0.005);
+
+  if (matched !== undefined) {
+    return { status: 'match', endBalance: originalByRounded.get(matched), ...amounts };
+  }
+
   if (uniqueBalances.length === 1) {
-    return originalByRounded.get(uniqueBalances[0]);
+    const statementBalance = originalByRounded.get(uniqueBalances[0]);
+    return {
+      status: 'mismatch',
+      endBalance: statementBalance,
+      ...amounts,
+      difference: roundAmountHighPrecision(statementBalance - expectedBalance)
+    };
   }
 
-  if (previousEndBalance === null) {
-    throw new FileValidationError('FILE_READ', `${dateLabel} 存在多个期末余额，且无法推导首日余额`);
-  }
-
-  const creditAmountSum = entries.reduce((sum, entry) => sum + entry.creditAmount, 0);
-  const debitAmountSum = entries.reduce((sum, entry) => sum + entry.debitAmount, 0);
-  const subtractDebitAmount = roundAmount(previousEndBalance + creditAmountSum - debitAmountSum);
-  const addDebitAmount = roundAmount(previousEndBalance + creditAmountSum + debitAmountSum);
-  const subtractMatch = uniqueBalances.find((balance) => Math.abs(balance - subtractDebitAmount) < 0.005);
-
-  if (subtractMatch !== undefined) {
-    return originalByRounded.get(subtractMatch);
-  }
-
-  const addMatch = uniqueBalances.find((balance) => Math.abs(balance - addDebitAmount) < 0.005);
-
-  if (addMatch !== undefined) {
-    return originalByRounded.get(addMatch);
-  }
-
-  throw new FileValidationError('FILE_READ', `${dateLabel} 的期末余额无法根据收支金额推导`);
+  // 多个候选都不符时带回全部候选原值，供首日补录提示列出账单当日余额。
+  return { status: 'unresolved', endBalance: null, ...amounts, candidateBalances: Array.from(originalByRounded.values()) };
 }
 
 function calculateEndingBalanceFromAmounts({ previousEndBalance, entries }) {
@@ -206,7 +206,9 @@ function loadCurrencyMappings(filePath, { readRows }) {
   return mappings;
 }
 
-function resolveCurrencyValue(rawValue, currencyMappings = []) {
+// allowFuzzy=false（v3.2.16「原始账单仅有币种无账户号」）：只认币种代码与币种映射表中的精确名称，
+// 不做“包含”式模糊匹配（如「人民币离岸」会被模糊认成 CNY）；未精确命中时原样返回并记 currency-unmapped。
+function resolveCurrencyValue(rawValue, currencyMappings = [], { allowFuzzy = true } = {}) {
   const normalizedValue = normalizeCell(rawValue);
 
   if (!normalizedValue) {
@@ -225,7 +227,7 @@ function resolveCurrencyValue(rawValue, currencyMappings = []) {
 
   const normalizedAlias = normalizeCurrencyAlias(normalizedValue);
   const exactMatches = currencyMappings.filter((mapping) => mapping.aliases.includes(normalizedAlias));
-  const fuzzyMatches = exactMatches.length
+  const fuzzyMatches = exactMatches.length || !allowFuzzy
     ? exactMatches
     : currencyMappings.filter((mapping) => {
         return mapping.aliases.some((alias) => alias.includes(normalizedAlias) || normalizedAlias.includes(alias));
@@ -691,7 +693,7 @@ module.exports = {
   extractCurrencyAliases,
   hasEffectiveAmount,
   inferDateCellFormat,
-  inferEndingBalance,
+  verifyStatementEndingBalance,
   isRegexLiteral,
   loadCurrencyMappings,
   matchAmountSplitConditionValue,

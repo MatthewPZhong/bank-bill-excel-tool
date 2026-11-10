@@ -1,5 +1,6 @@
 const FIXED_FIELD_VALUE_PREFIX = '__FIXED__:';
 const MERCHANT_ID_MULTI_ACCOUNT_MARKER = '__MULTI_BIG_ACCOUNT__';
+const { MERCHANT_ID_CURRENCY_ONLY_MARKER } = require('../file-service/common');
 
 function normalizeText(value) {
   if (value === null || value === undefined) {
@@ -15,6 +16,19 @@ function parseJsonArray(rawValue) {
     return Array.isArray(parsed) ? parsed : [];
   } catch (_error) {
     return [];
+  }
+}
+
+// v3.2.16：模板级「字段筛选特征值」规则；空串、非对象或解析失败时为 null（规则校验由主进程负责）。
+function parseJsonObject(rawValue) {
+  if (!normalizeText(rawValue)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(rawValue);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch (_error) {
+    return null;
   }
 }
 
@@ -70,7 +84,12 @@ function buildTemplateSummaryFromRow(row) {
   let bigAccountSummary = '未设置';
   let bigAccountMode = 'unset';
 
-  if (merchantIdMappedField.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
+  if (merchantIdMappedField === MERCHANT_ID_CURRENCY_ONLY_MARKER) {
+    // v3.2.16：按币种取大账号；大账号来自 template_currency_big_accounts，不计入 bigAccountCount
+    const currencyBigAccountCount = Number(row.currencyBigAccountCount || 0);
+    bigAccountSummary = currencyBigAccountCount > 0 ? `按币种（${currencyBigAccountCount}个大账号）` : '未设置';
+    bigAccountMode = currencyBigAccountCount > 0 ? 'by-currency' : 'unset';
+  } else if (merchantIdMappedField.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
     if (bigAccountCount > 0) {
       if (bigAccountCount === 1 && singleBigAccountMerchantId) {
         bigAccountSummary = singleBigAccountMerchantId;
@@ -108,7 +127,9 @@ function buildTemplateSummaryFromRow(row) {
     channelId: row.channelId ? Number(row.channelId) : null,
     channelName: row.channelId ? normalizeText(row.channelName) : '',
     // v1.5.2 需求 3：按文件名映射模板的固定字段（默认空串）
-    filenameFixedField: normalizeText(row.filenameFixedField)
+    filenameFixedField: normalizeText(row.filenameFixedField),
+    // v3.2.16：模板级「字段筛选特征值」规则（未设置为 null）
+    featureFilter: parseJsonObject(row.featureFilterJson)
   };
 }
 
@@ -118,5 +139,6 @@ module.exports = {
   buildTemplateSummaryFromRow,
   groupBigAccountRows,
   normalizeText,
-  parseJsonArray
+  parseJsonArray,
+  parseJsonObject
 };

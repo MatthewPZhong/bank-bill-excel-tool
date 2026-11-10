@@ -25,6 +25,8 @@ const BACKGROUND_FILE_HINT = '支持 PNG/JPG/JPEG/WEBP，大小不超过 5MB，�
 const BALANCE_DISABLED_OPTION = '无';
 const BALANCE_CALCULATED_OPTION = '通过发生额计算';
 const MERCHANT_ID_SELF_INPUT_OPTION = '自己输入';
+// v3.2.16：MerchantId 按每行币种取【映射管理】中维护的大账号
+const MERCHANT_ID_CURRENCY_ONLY_OPTION = '原始账单仅有币种无账户号';
 const SIGNED_AMOUNT_MAPPING_FIELD = '按正负号拆分的发生额';
 const AMOUNT_BASED_NAME_MAPPING_FIELD = '根据发生额做映射的户名';
 const AMOUNT_BASED_ACCOUNT_MAPPING_FIELD = '根据发生额做映射的账户号';
@@ -37,6 +39,8 @@ const ADVANCED_MAPPING_FIELDS = [
   AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD
 ];
 const CONCAT_FIELDS_MAPPING_FIELD = '需要拼接字段';
+// v3.2.16：映射值「字段筛选特征值」，与 main.js 同名常量保持一致
+const FEATURE_FILTER_MAPPING_FIELD = '字段筛选特征值';
 const MODULES = Object.freeze({
   statementGenerator: {
     id: 'statement-generator',
@@ -467,6 +471,7 @@ const configurationApi = Object.freeze({
   templates: window.desktopApi.templates, accountMappings: window.desktopApi.accountMappings,
   statementChannels: window.desktopApi.statementChannels,
   bigAccount: window.desktopApi.bigAccount, balanceAdjustment: window.desktopApi.balanceAdjustment,
+  balanceSeeds: window.desktopApi.balanceSeeds,
   monthlyBalance: window.desktopApi.monthlyBalance, files: window.desktopApi.files,
   app: { getInfo: window.desktopApi.app.getInfo }
 });
@@ -649,8 +654,10 @@ const {
   BALANCE_DISABLED_OPTION,
   BALANCE_CALCULATED_OPTION,
   MERCHANT_ID_SELF_INPUT_OPTION,
+  MERCHANT_ID_CURRENCY_ONLY_OPTION,
   ADVANCED_MAPPING_FIELDS,
   CONCAT_FIELDS_MAPPING_FIELD,
+  FEATURE_FILTER_MAPPING_FIELD,
   AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD,
   AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION,
   refreshTemplates: configurationServices.refreshTemplates,
@@ -803,6 +810,8 @@ const {
   applyMonthlyBalanceExportDialogPreviewState,
   applyManualBalanceSeedDialogPreviewState,
   applyBalanceGapConfirmDialogPreviewState,
+  applyBalanceMismatchConfirmDialogPreviewState,
+  applyBalanceSeedReplaceConfirmDialogPreviewState,
   applyBalanceAddonManagerPreviewState,
   applyExportScopeDialogPreviewState,
   applyAmountSplitRulesDialogPreviewState,
@@ -2005,6 +2014,14 @@ async function applyFullInfo(info) {
   } else if (info.previewModal === 'balance-gap-confirm-dialog') {
     setTimeout(() => {
       applyBalanceGapConfirmDialogPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'balance-mismatch-confirm-dialog') {
+    setTimeout(() => {
+      applyBalanceMismatchConfirmDialogPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'balance-seed-replace-confirm-dialog') {
+    setTimeout(() => {
+      applyBalanceSeedReplaceConfirmDialogPreviewState();
     }, 120);
   } else if (info.previewModal === 'balance-addon-manager') {
     setTimeout(() => {

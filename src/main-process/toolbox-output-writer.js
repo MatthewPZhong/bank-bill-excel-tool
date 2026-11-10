@@ -242,6 +242,18 @@ function resolveSourceStyle(styleRef, sourceRegistryResolver) {
   return style;
 }
 
+// 逐单元格调用 require 的模块解析开销不可忽略；首次加载成功后复用，失败时下次照常重试。
+// require 处保持按名解构，架构检查据此识别对 projectOutputCell 的约定依赖。
+let cachedProjectOutputCell = null;
+function loadProjectOutputCell() {
+  if (!cachedProjectOutputCell) {
+    // eslint-disable-next-line global-require
+    const { projectOutputCell } = require('../backend/xlsx/model');
+    cachedProjectOutputCell = projectOutputCell;
+  }
+  return cachedProjectOutputCell;
+}
+
 function defaultProjectCell(cell, warningCollector = null) {
   if (!cell || cell.isExplicitCell === false) return { value: null };
   if (Object.prototype.hasOwnProperty.call(cell, 'outputValue')) {
@@ -286,8 +298,7 @@ function defaultProjectCell(cell, warningCollector = null) {
 
   try {
     // 正式统一模型负责十进制、日期系统和长 ID 输出决策。
-    // eslint-disable-next-line global-require
-    const { projectOutputCell } = require('../backend/xlsx/model');
+    const projectOutputCell = loadProjectOutputCell();
     if (typeof projectOutputCell === 'function') return projectOutputCell(cell, warningCollector);
   } catch (_error) {
     // 增量接线时保留下方兼容投影。
@@ -327,6 +338,8 @@ function applyExcelJsStyle(target, style) {
     target.alignment = stripNullish(style.alignment);
   }
 }
+
+const EMPTY_ROW_STYLE = Object.freeze({});
 
 function applyRowMetadata(targetRow, sourceRow) {
   if (!targetRow || !sourceRow) return;
@@ -1266,6 +1279,8 @@ async function validateGeneratedWorkbookStructure(filePath, expectedStructure = 
       // 才会严格解析并完整闭合验证每个已声明 worksheet。
       // eslint-disable-next-line no-await-in-loop
       const summary = await pass.scanSheet(sheet, {
+        // 只取表头行；其余行照常严格解析、解码与计数，但不构造行模型。
+        rowCallbackLimit: 1,
         onRow: (row) => {
           if (!headerSeen) {
             headerSeen = true;
@@ -1502,6 +1517,51 @@ function createToolboxOutputWriter({
   let outputRegistry = loadOutputRegistry(budgets);
   const registerOutputStyle = (style, context) => registerStyle(outputRegistry, style, context);
 
+  // 逐单元格规范化来源样式并生成签名是写入阶段的主要开销。来源注册表条目只增不改，
+  // 同一（注册表, styleRef, 数字格式覆盖）必然得到同一输出样式；首次出现时照常注册
+  // （预算校验与注册顺序不变），之后直接复用。
+  const outputStyleCache = new Map();
+  function cachedOutputStyle(effectiveStyleRef, numFmtOverride, context) {
+    const isRef = Boolean(effectiveStyleRef) && typeof effectiveStyleRef === 'object';
+    const registry = isRef
+      ? getRegistry(sourceRegistryResolver, effectiveStyleRef.sourceRegistryId)
+      : null;
+    if (isRef && (!registry || typeof registry.get !== 'function')) {
+      // 无法解析时沿用原路径抛出同一错误。
+      resolveSourceStyle(effectiveStyleRef, sourceRegistryResolver);
+    }
+    let byRef = outputStyleCache.get(registry);
+    if (!byRef) {
+      byRef = new Map();
+      outputStyleCache.set(registry, byRef);
+    }
+    const styleRefKey = isRef ? effectiveStyleRef.styleRef : null;
+    const key = numFmtOverride ? `${styleRefKey}\u0000${numFmtOverride}` : styleRefKey;
+    if (byRef.has(key)) return byRef.get(key);
+    const sourceStyle = isRef
+      ? resolveSourceStyle(effectiveStyleRef, sourceRegistryResolver)
+      : {};
+    const finalStyle = numFmtOverride ? { ...sourceStyle, numFmt: numFmtOverride } : sourceStyle;
+    const outputStyle = registerOutputStyle(finalStyle, context);
+    byRef.set(key, outputStyle);
+    return outputStyle;
+  }
+
+  // ExcelJS 按样式对象身份（WeakMap）复用 styleId；每个单元格各持一份新对象时每格都要
+  // 重新渲染字体/边框/填充 XML 去重。输出样式五个组成部分齐全时，单元格最终样式与行/列
+  // 样式无关（applyExcelJsStyle 会全部覆盖，行列样式不含 protection），可共享同一对象。
+  const sharedCellStyles = new WeakMap();
+  function sharedCellStyleFor(outputStyle) {
+    if (!outputStyle || typeof outputStyle !== 'object') return null;
+    if (sharedCellStyles.has(outputStyle)) return sharedCellStyles.get(outputStyle);
+    const style = {};
+    applyExcelJsStyle(style, outputStyle);
+    const complete = Boolean(style.numFmt && style.font && style.fill && style.border && style.alignment);
+    const shared = complete ? style : null;
+    sharedCellStyles.set(outputStyle, shared);
+    return shared;
+  }
+
   // 先校验首个 Sheet 提交前必需的表头行/表头单元格/列样式预算，再创建文件流；预算失败时 generation path
   // 尚未被触碰，避免构造函数抛错后留下无法由调用方 abort 的半开 stream。
   const headerRowStyleRef = headerRow && (headerRow.rowStyleRef || headerRow.effectiveStyleRef);
@@ -1590,7 +1650,11 @@ function createToolboxOutputWriter({
     }
     const width = Math.max(normalizedHeaders.length, highestColumnIndex + 1);
     const values = new Array(width);
-    const projections = [];
+    // 本行投影结果用三个局部数组记录（不为每个单元格分配记录对象）；随本次调用结束释放，
+    // 不跨行持有已写出的单元格。
+    const projectedColumns = [];
+    const projectedCells = [];
+    const projectedNumFmtOverrides = [];
     for (let index = 0; index < sourceCells.length; index += 1) {
       const cell = sourceCells[index];
       if (!cell) continue;
@@ -1600,26 +1664,32 @@ function createToolboxOutputWriter({
         projection ? projection.value : null,
         cell
       );
-      projections.push({ columnIndex, cell, projection: projection || {} });
+      projectedColumns.push(columnIndex);
+      projectedCells.push(cell);
+      projectedNumFmtOverrides.push(projection ? projection.numFmtOverride : undefined);
     }
 
     const outputRow = worksheet.addRow(values);
     applyRowMetadata(outputRow, sourceRow);
     const rowStyleRef = sourceRow && (sourceRow.rowStyleRef || sourceRow.effectiveStyleRef);
     if (sourceRow && sourceRow.customFormat && rowStyleRef) {
-      const sourceStyle = resolveSourceStyle(rowStyleRef, sourceRegistryResolver);
-      applyExcelJsStyle(outputRow, registerOutputStyle(sourceStyle, sourceRow));
+      applyExcelJsStyle(outputRow, cachedOutputStyle(rowStyleRef, null, sourceRow));
+    } else {
+      // 没有行样式时内容与 ExcelJS 新建行的空样式 {} 相同；换成同一个冻结空对象，提交时
+      // addStyleModel 的身份缓存即可命中，不再每行重新登记一次空样式（样式编号与登记顺序不变）。
+      outputRow.style = EMPTY_ROW_STYLE;
     }
-    for (const { columnIndex, cell, projection } of projections) {
-      const targetCell = outputRow.getCell(columnIndex + 1);
-      let sourceStyle = {};
-      if (cell.effectiveStyleRef) {
-        sourceStyle = resolveSourceStyle(cell.effectiveStyleRef, sourceRegistryResolver);
-      }
-      const finalStyle = projection.numFmtOverride
-        ? { ...sourceStyle, numFmt: projection.numFmtOverride }
-        : sourceStyle;
-      applyExcelJsStyle(targetCell, registerOutputStyle(finalStyle, cell));
+    for (let index = 0; index < projectedCells.length; index += 1) {
+      const cell = projectedCells[index];
+      const targetCell = outputRow.getCell(projectedColumns[index] + 1);
+      const outputStyle = cachedOutputStyle(
+        cell.effectiveStyleRef || null,
+        projectedNumFmtOverrides[index],
+        cell
+      );
+      const sharedStyle = sharedCellStyleFor(outputStyle);
+      if (sharedStyle) targetCell.style = sharedStyle;
+      else applyExcelJsStyle(targetCell, outputStyle);
     }
     outputRow.commit();
     currentSheetDataRows += 1;
@@ -1696,6 +1766,7 @@ function createToolboxOutputWriter({
       writer = null;
       worksheet = null;
       outputRegistry = null;
+      outputStyleCache.clear();
       flow = null;
       await removeFileWithRetry(savePath);
     }
@@ -1723,6 +1794,8 @@ function createToolboxOutputWriter({
       worksheet = null;
       writer = null;
       outputRegistry = null;
+      // 输出样式缓存引用来源注册表与样式对象；写出结束后与 writer 一同释放。
+      outputStyleCache.clear();
       flowStats = flow ? flow.snapshot() : null;
       flow = null;
   }

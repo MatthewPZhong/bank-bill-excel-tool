@@ -475,11 +475,51 @@ function ensureTemplateFilenameFixedFieldSupport(db) {
   }
 }
 
+// v3.2.16：模板级「字段筛选特征值」规则（JSON；'' 表示未设置）。幂等：列已存在则跳过。
+function ensureTemplateFeatureFilterSupport(db) {
+  if (!hasColumn(db, 'templates', 'feature_filter_json')) {
+    db.exec("ALTER TABLE templates ADD COLUMN feature_filter_json TEXT NOT NULL DEFAULT '';");
+  }
+}
+
 // v1.5.3 需求 R2：自有账号合并入大账号表 — 在 template_big_accounts 表新增 account_nature 列
 // 幂等：若列已存在则跳过；默认值 'client'（客资），迁移脚本写入 'own' 表示自有
 function ensureTemplateBigAccountNatureSupport(db) {
   if (!hasColumn(db, 'template_big_accounts', 'account_nature')) {
     db.exec("ALTER TABLE template_big_accounts ADD COLUMN account_nature TEXT NOT NULL DEFAULT 'client';");
+  }
+}
+
+// v3.2.16：MerchantId「原始账单仅有币种无账户号」— 按模板维护 币种 → 大账号。
+// 与 template_big_accounts 分开存放：这里的配置不参与大账号识别、选择与渠道汇总。
+// 幂等：CREATE TABLE / INDEX IF NOT EXISTS；删除模板时级联删除。
+function ensureTemplateCurrencyBigAccountSupport(db) {
+  db.exec('BEGIN');
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS template_currency_big_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id INTEGER NOT NULL,
+        currency TEXT NOT NULL COLLATE NOCASE,
+        merchant_id TEXT NOT NULL,
+        row_index INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE,
+        UNIQUE(template_id, currency)
+      );
+    `);
+
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS template_currency_big_accounts_template_id_idx
+      ON template_currency_big_accounts(template_id);
+    `);
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
   }
 }
 
@@ -4380,8 +4420,10 @@ module.exports = {
   ensureTemplateResourceVersionSupport,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
+  ensureTemplateCurrencyBigAccountSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateFilenameFixedFieldSupport,
+  ensureTemplateFeatureFilterSupport,
   ensureTemplateMappingEnhancements,
   ensureTemplateKeySupport,
   hasColumn,

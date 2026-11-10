@@ -28,6 +28,7 @@
 .account-card { width: min(100%, 920px); }
 .big-account-card { width: min(100%, 980px); }
 .balance-addon-card { width: min(100%, 1120px); }
+.balance-seed-card { width: min(100%, 1120px); }
 .alert-card { width: min(100%, 420px); }
 
 .big-account-unmaintained-alert {
@@ -192,6 +193,23 @@ td .muted { color: var(--muted); }
   padding: 8px 28px 22px;
 }
 .big-account-footer-left { display: flex; gap: 8px; }
+/* v3.2.16 模板管理【余额管理】：底栏左侧入口，右侧导入/导出；弹窗提示行与分页 */
+.template-manager-bundle-right { display: flex; gap: 10px; }
+.balance-seed-hint {
+  flex: 0 0 auto;
+  padding: 10px 28px 0;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.balance-seed-pager {
+  display: inline-flex; align-items: center; gap: 10px;
+  margin-right: auto;
+  color: var(--muted); font-size: 12px;
+  white-space: nowrap;
+}
+.balance-seed-pager[hidden] { display: none; }
+.balance-seed-balance-input { width: 100%; min-width: 120px; }
 
 /* =================== Card size presets for new dialogs =================== */
 .export-scope-card { width: min(100%, 480px); }
@@ -210,6 +228,7 @@ td .muted { color: var(--muted); }
 }
 .account-mapping-migration-card { width: min(100%, 900px); }
 .amount-split-rules-card { width: min(100%, 880px); }
+.feature-filter-card { width: min(100%, 640px); }
 .bill-split-mappings-card { width: 80vw; max-width: 1280px; }
 .bill-split-rows-card { width: min(100%, 1180px); }
 /* v2.1.7 round 2 R6a 方案 C：弹窗 1080 → 1200（spec §8.7.3 — 给文件名 + 后缀 ' → MERCHANT USD' 多 120px 横向空间） */
@@ -1995,7 +2014,7 @@ td .muted { color: var(--muted); }
   color: var(--dim);
 }
 
-/* 账单日期断档确认（发生额计算余额） */
+/* 账单日期断档确认（发生额计算余额）；余额校验不一致确认（账单里的余额）共用同一套样式 */
 /* 窗口较矮或放大时正文整体滚动，操作按钮始终可见 */
 .balance-gap-body {
   flex: 1 1 auto; min-height: 0; overflow-y: auto;
@@ -2242,6 +2261,35 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
 .amount-split-rules-table .mapping-select,
 .amount-split-rules-table .mapping-text-input {
   height: 40px;
+}
+
+/* =================== v3.2.16 字段筛选特征值 =================== */
+.feature-filter-body {
+  padding: 18px 28px 16px;
+}
+.feature-filter-hint {
+  margin: 0 0 16px;
+  font-size: 13px; color: var(--muted);
+  line-height: 1.55;
+}
+.feature-filter-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 12px 16px;
+}
+.feature-filter-label {
+  font-size: 13px; color: var(--text);
+  white-space: nowrap;
+}
+.feature-filter-grid .mapping-select,
+.feature-filter-grid .mapping-text-input {
+  width: 100%;
+  height: 40px;
+}
+.feature-filter-check {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--text);
 }
 .amount-split-target-pill {
   display: inline-flex; align-items: center;
@@ -6064,3 +6112,24 @@ body[data-platform="win32"] .dialog-title * {
   .position-reconciliation-board #positionReconciliationExportBtn,
   .position-reconciliation-board #positionReconciliationStatusBox { transform: none; }
 }
+
+/* v3.2.16：MerchantId「原始账单仅有币种无账户号」的【映射管理】——左半边币种、右半边大账号，
+   每行最左侧【新增】、行尾【删除】；币种输入复用 .big-account-currency-input-shell 的补全，此处撑满列宽 */
+.currency-big-account-card { width: min(100%, 760px); }
+.currency-big-account-table { table-layout: fixed; }
+.currency-big-account-insert-col,
+.currency-big-account-delete-col { width: 76px; }
+/* 覆盖 .manager-card .data-table 前两列 40% / 30% 的通用比例：两侧按钮列定宽，币种与大账号平分剩余宽度 */
+.currency-big-account-card .data-table th:nth-child(1),
+.currency-big-account-card .data-table td:nth-child(1),
+.currency-big-account-card .data-table th:nth-child(4),
+.currency-big-account-card .data-table td:nth-child(4) { width: 76px; }
+.currency-big-account-card .data-table th:nth-child(2),
+.currency-big-account-card .data-table td:nth-child(2),
+.currency-big-account-card .data-table th:nth-child(3),
+.currency-big-account-card .data-table td:nth-child(3) { width: auto; }
+.currency-big-account-insert-cell,
+.currency-big-account-delete-cell { white-space: nowrap; }
+.currency-big-account-insert-cell .text-action { padding-left: 0; }
+.currency-big-account-card .big-account-currency-input-shell { width: 100%; flex: 1 1 auto; }
+.currency-big-account-merchant-input { width: 100%; }

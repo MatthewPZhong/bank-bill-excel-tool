@@ -37,7 +37,8 @@ function setStatus(message, tone = 'info', options = {}) {
   updateStatusBox(elements.statusBox, message, tone, {
     errorReportReady: state.hasErrorReport,
     manualBalancePromptReady: state.manualBalancePromptReady,
-    manualBalancePromptTitle: state.manualBalancePrompt?.reason === 'gap' ? '点击处理账单日期断档' : '',
+    manualBalancePromptTitle: ({ gap: '点击处理账单日期断档', mismatch: '点击处理余额校验不一致', 'seed-replace': '点击处理人工补录余额替换' })[state.manualBalancePrompt?.reason]
+      || (state.manualBalancePrompt?.seedMismatch ? '点击核对上一账单日余额' : ''),
     idleTitle: options.idleTitle ?? getStatusBoxTitle(config.getAccountMappingCount())
   });
 }
@@ -83,6 +84,16 @@ function applyStatementResult(result, { allowAlerts = true } = {}) {
 
   if (allowAlerts && Array.isArray(result.unmatchedAmountSplitFiles) && result.unmatchedAmountSplitFiles.length) {
     ui.alertNative(`以下文件全部未命中收支规则，请检查规则配置：\n${result.unmatchedAmountSplitFiles.join('\n')}`);
+  }
+
+  // v3.2.16：「原始账单仅有币种无账户号」币种未维护大账号时整批阻断，弹窗列出文件、币种和行号
+  if (
+    allowAlerts
+    && String(result.errorCode || '').startsWith('CURRENCY_BIG_ACCOUNT_')
+    && Array.isArray(result.detailLines)
+    && result.detailLines.length
+  ) {
+    ui.alertNative([result.message, ...result.detailLines].join('\n'));
   }
 
   // v1.4.9 PR #16 review P1 Fix C: ACI-12 — 拆分/合并账单全部未命中聚合告警
@@ -298,8 +309,8 @@ async function handleOpenAccountMappings() {
           openModal(()=>createRememberOrderMismatchDialog({message:failedLines,bigAccountResult:result}));return;
         }
         applyStatementResult(result);
-        // 账单日期断档直接弹出确认；关闭后仍可点击状态框重新打开。
-        if(result.manualBalancePrompt?.reason==='gap') openModal(()=>createManualBalanceSeedDialog(result.manualBalancePrompt));
+        // 账单日期断档、余额校验不一致、人工补录替换直接弹出确认；关闭后仍可点击状态框重新打开。
+        if(['gap','mismatch','seed-replace'].includes(result.manualBalancePrompt?.reason)) openModal(()=>createManualBalanceSeedDialog(result.manualBalancePrompt));
         return;
       }
       if(result.status==='select-export-scope') {
@@ -310,7 +321,7 @@ async function handleOpenAccountMappings() {
       }
       if(kind==='balance'&&(result.manualBalancePromptReady||result.status==='manual-balance-required')) {
         applyManualBalancePromptStatus(result);
-        if(result.manualBalancePrompt?.reason==='gap') openModal(()=>createManualBalanceSeedDialog(result.manualBalancePrompt));
+        if(['gap','mismatch','seed-replace'].includes(result.manualBalancePrompt?.reason)) openModal(()=>createManualBalanceSeedDialog(result.manualBalancePrompt));
         return;
       }
       if(kind==='monthly'&&['MONTHLY_BALANCE_NO_PENDING','MONTHLY_BALANCE_FILE_MISSING'].includes(result.errorCode)) {

@@ -2,7 +2,7 @@
   'use strict';
   function buildBalanceSeedConfirmationRequest(contextId) { return { contextId, confirmOverwrite: true }; }
   function createConfigurationDialogs({ services, api, modalBridge, ui, constants }) {
-    const { BALANCE_DISABLED_OPTION, BALANCE_CALCULATED_OPTION, MERCHANT_ID_SELF_INPUT_OPTION, ADVANCED_MAPPING_FIELDS, CONCAT_FIELDS_MAPPING_FIELD, AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD, AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION } = constants;
+    const { BALANCE_DISABLED_OPTION, BALANCE_CALCULATED_OPTION, MERCHANT_ID_SELF_INPUT_OPTION, MERCHANT_ID_CURRENCY_ONLY_OPTION = '原始账单仅有币种无账户号', ADVANCED_MAPPING_FIELDS, CONCAT_FIELDS_MAPPING_FIELD, FEATURE_FILTER_MAPPING_FIELD = '字段筛选特征值', AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD, AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION } = constants;
     const { createOverlay, escapeHtml, createAlertDialog, createConfirmDialog, pushAlert, setStatus, applyStatementResult, applyManualBalancePromptStatus } = ui;
     const { openModal, closeModal, pushModal, replaceModal, registerModal, returnToModal } = modalBridge;
     const refreshTemplates = services.refreshTemplates;
@@ -102,7 +102,7 @@
 
         if (kind === 'balance' && (result.manualBalancePromptReady || result.status === 'manual-balance-required')) {
           applyManualBalancePromptStatus(result);
-          if (result.manualBalancePrompt?.reason === 'gap') {
+          if (['gap', 'mismatch', 'seed-replace'].includes(result.manualBalancePrompt?.reason)) {
             openModal(() => createManualBalanceSeedDialog(result.manualBalancePrompt));
           }
           return;
@@ -391,7 +391,226 @@
       return overlay;
     }
 
+    function formatBalanceAmount(value, signed = false) {
+      const numericValue = Number(value);
+      if (!Number.isFinite(numericValue)) return '(空)';
+      const text = numericValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 12 });
+      return signed && numericValue > 0 ? `+${text}` : text;
+    }
+
+    function formatBalanceMismatchDetail(mismatch) {
+      const anchorLabel = mismatch.anchorSource === 'seed'
+        ? `余额种子 ${mismatch.anchorDate}`
+        : `上一账单日 ${mismatch.anchorDate}`;
+      const missing = mismatch.missingFrom
+        ? `；中间缺 ${mismatch.missingFrom === mismatch.missingTo ? mismatch.missingFrom : `${mismatch.missingFrom} ~ ${mismatch.missingTo}`}`
+        : '';
+      return `${mismatch.billDate}：上一日余额 ${formatBalanceAmount(mismatch.anchorBalance)}（${anchorLabel}）`
+        + ` + 收入 ${formatBalanceAmount(mismatch.creditAmount)} − 支出 ${formatBalanceAmount(mismatch.debitAmount)}`
+        + ` = 预期 ${formatBalanceAmount(mismatch.expectedBalance)}，账单余额 ${formatBalanceAmount(mismatch.statementBalance)}`
+        + `，差额 ${formatBalanceAmount(mismatch.difference, true)}${missing}`;
+    }
+
+    // 已有种子但首日多个余额都对不上：写明已有余额、当日收支与账单当日余额，提示核对后重填（v3.2.16 D7）。
+    function formatBalanceSeedMismatchDetail(seedMismatch) {
+      const statementBalances = (Array.isArray(seedMismatch.statementBalances) ? seedMismatch.statementBalances : [])
+        .map((value) => formatBalanceAmount(value))
+        .join('、') || '(空)';
+      const seedAmount = formatBalanceAmount(seedMismatch.seedBalance);
+      const anchorAmount = formatBalanceAmount(seedMismatch.anchorBalance);
+      const anchorNote = anchorAmount === seedAmount ? '' : `（扣回余额附加值后为 ${anchorAmount}）`;
+      return `已有 ${seedMismatch.seedDate} 的余额 ${seedAmount}（${seedMismatch.seedGenerationMethod || '人工录入'}）${anchorNote}，`
+        + `加上 ${seedMismatch.billDate} 收入 ${formatBalanceAmount(seedMismatch.creditAmount)}、`
+        + `支出 ${formatBalanceAmount(seedMismatch.debitAmount)} 后应为 ${formatBalanceAmount(seedMismatch.expectedBalance)}，`
+        + `与账单当日余额 ${statementBalances} 都对不上。请核对上一账单日余额（可参考账单上的期初余额）后重新填写。`;
+    }
+
+    function formatSeedMismatchAmountInput(value) {
+      const numericValue = Number(value);
+      return Number.isFinite(numericValue) ? String(numericValue) : '';
+    }
+
+    // 账单里的余额逐日校验不一致：返回核查，或确认按账单余额生成（v3.2.16）。
+    function createBalanceMismatchConfirmDialog(prompt) {
+      const { applyStatementResult } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manual-balance-card balance-gap-card balance-mismatch-card';
+      const mismatches = Array.isArray(prompt?.mismatches) ? prompt.mismatches : [];
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">余额校验不一致</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="balance-gap-body">
+          <p class="balance-gap-intro">以下账户的账单余额与「上一日余额 + 当日收入 − 当日支出」对不上，共 ${mismatches.length} 处：</p>
+          <ul class="balance-gap-list">
+            ${mismatches.map((mismatch) => `
+              <li class="balance-gap-item">
+                <span class="balance-gap-account">银行账号 ${escapeHtml(mismatch.merchantId)}（${escapeHtml(mismatch.currency || '(空)')}）</span>
+                <span class="balance-gap-detail">${escapeHtml(formatBalanceMismatchDetail(mismatch))}</span>
+              </li>
+            `).join('')}
+          </ul>
+          <p class="balance-gap-question">可能有漏单、重复入账，或上一日余额（余额种子）有误。请先核查账单。</p>
+          <p class="balance-gap-warning">确认继续的话，余额账单按账单余额生成，并作为之后导入的起点；导入提示和报错文件会列出以上差异。</p>
+        </div>
+        <div class="dialog-actions right">
+          <button class="secondary-btn small" type="button" data-action="review">返回核查</button>
+          <button class="primary-btn small" type="button" data-action="confirm">确认继续生成</button>
+        </div>
+      `;
+
+      const reviewBtn = dialog.querySelector('[data-action="review"]');
+      const confirmBtn = dialog.querySelector('[data-action="confirm"]');
+      let saveInProgress = false;
+      registerModal(overlay, { canClose: () => !saveInProgress });
+
+      dialog.querySelector('.icon-close').addEventListener('click', () => closeModal(overlay));
+      reviewBtn.addEventListener('click', () => closeModal(overlay));
+      confirmBtn.addEventListener('click', async () => {
+        const handle = modalBridge.host.getHandle(overlay);
+        if (saveInProgress || !handle?.isOpen()) return;
+        saveInProgress = true;
+        reviewBtn.disabled = true;
+        confirmBtn.disabled = true;
+        let result = null;
+        try {
+          result = await api.files.saveBalanceSeed({
+            confirmBalanceMismatchKeys: mismatches.map((mismatch) => mismatch.key)
+          });
+          if (!result || typeof result !== 'object') throw new Error('余额生成未返回有效结果');
+        } catch (error) {
+          if (handle.isOpen()) {
+            pushAlert(overlay, () => createAlertDialog(`余额生成失败：${escapeHtml(error?.message || String(error || '未知错误'))}`, {
+              onConfirm: null
+            }));
+          }
+          return;
+        } finally {
+          saveInProgress = false;
+          if (handle.isOpen()) {
+            reviewBtn.disabled = false;
+            confirmBtn.disabled = false;
+          }
+        }
+
+        applyStatementResult(result);
+        if (!handle.isOpen()) return;
+        if (result.manualBalancePromptReady && result.manualBalancePrompt) {
+          replaceModal(handle, () => createManualBalanceSeedDialog(result.manualBalancePrompt));
+          return;
+        }
+        if (['error', 'failed'].includes(result.status)) {
+          pushAlert(overlay, () => createAlertDialog(result.message || '余额生成失败'));
+          return;
+        }
+        closeModal(overlay, { status: 'submitted', value: result });
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // 同一账单日人工补录的期末余额与本次余额不一致：返回核查，或确认替换并生成（v3.2.16）。
+    function createBalanceSeedReplaceConfirmDialog(prompt) {
+      const { applyStatementResult } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manual-balance-card balance-gap-card balance-seed-replace-card';
+      const replacements = Array.isArray(prompt?.replacements) ? prompt.replacements : [];
+      const balanceLabel = (item) => (item.balanceSource === 'calculated' ? '计算余额' : '账单余额');
+      const detail = (item) => {
+        const adjustment = Number(item.adjustment) || 0;
+        const written = adjustment
+          ? `（另加余额附加值 ${formatBalanceAmount(adjustment)} 后写入 ${formatBalanceAmount(item.writtenBalance)}）`
+          : '';
+        return `${item.billDate}：人工补录余额 ${formatBalanceAmount(item.manualBalance)}，`
+          + `${balanceLabel(item)} ${formatBalanceAmount(item.balance)}${written}，差额 ${formatBalanceAmount(item.difference, true)}`;
+      };
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">人工补录余额将被替换</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="balance-gap-body">
+          <p class="balance-gap-intro">以下账单日已有人工补录的期末余额，与本次生成的余额不一致，共 ${replacements.length} 处：</p>
+          <ul class="balance-gap-list">
+            ${replacements.map((item) => `
+              <li class="balance-gap-item">
+                <span class="balance-gap-account">银行账号 ${escapeHtml(item.merchantId)}（${escapeHtml(item.currency || '(空)')}）</span>
+                <span class="balance-gap-detail">${escapeHtml(detail(item))}</span>
+              </li>
+            `).join('')}
+          </ul>
+          <p class="balance-gap-question">请先核查哪一个余额是对的。</p>
+          <p class="balance-gap-warning">确认替换的话，余额账单按本次余额生成，并用它覆盖人工补录的余额，之后导入从它接着计算；不替换请返回核查，余额账单不会生成。</p>
+        </div>
+        <div class="dialog-actions right">
+          <button class="secondary-btn small" type="button" data-action="review">返回核查</button>
+          <button class="primary-btn small" type="button" data-action="confirm">确认替换并生成</button>
+        </div>
+      `;
+
+      const reviewBtn = dialog.querySelector('[data-action="review"]');
+      const confirmBtn = dialog.querySelector('[data-action="confirm"]');
+      let saveInProgress = false;
+      registerModal(overlay, { canClose: () => !saveInProgress });
+
+      dialog.querySelector('.icon-close').addEventListener('click', () => closeModal(overlay));
+      reviewBtn.addEventListener('click', () => closeModal(overlay));
+      confirmBtn.addEventListener('click', async () => {
+        const handle = modalBridge.host.getHandle(overlay);
+        if (saveInProgress || !handle?.isOpen()) return;
+        saveInProgress = true;
+        reviewBtn.disabled = true;
+        confirmBtn.disabled = true;
+        let result = null;
+        try {
+          result = await api.files.saveBalanceSeed({
+            confirmBalanceSeedReplaceKeys: replacements.map((item) => item.key)
+          });
+          if (!result || typeof result !== 'object') throw new Error('余额生成未返回有效结果');
+        } catch (error) {
+          if (handle.isOpen()) {
+            pushAlert(overlay, () => createAlertDialog(`余额生成失败：${escapeHtml(error?.message || String(error || '未知错误'))}`, {
+              onConfirm: null
+            }));
+          }
+          return;
+        } finally {
+          saveInProgress = false;
+          if (handle.isOpen()) {
+            reviewBtn.disabled = false;
+            confirmBtn.disabled = false;
+          }
+        }
+
+        applyStatementResult(result);
+        if (!handle.isOpen()) return;
+        if (result.manualBalancePromptReady && result.manualBalancePrompt) {
+          replaceModal(handle, () => createManualBalanceSeedDialog(result.manualBalancePrompt));
+          return;
+        }
+        if (['error', 'failed'].includes(result.status)) {
+          pushAlert(overlay, () => createAlertDialog(result.message || '余额生成失败'));
+          return;
+        }
+        closeModal(overlay, { status: 'submitted', value: result });
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     function createManualBalanceSeedDialog(prompt, draft = {}, queueState = null) {
+      // 余额不一致、人工补录替换只有确认框，不进入补录。
+      if (prompt?.reason === 'mismatch') {
+        return createBalanceMismatchConfirmDialog(prompt);
+      }
+      if (prompt?.reason === 'seed-replace') {
+        return createBalanceSeedReplaceConfirmDialog(prompt);
+      }
       const isGapPrompt = prompt?.reason === 'gap';
       // 断档 prompt 未经确认时（导入后自动弹出、点击状态框）先显示确认框。
       if (isGapPrompt && queueState?.gapConfirmed !== true) {
@@ -414,9 +633,16 @@
         ? `账单日期断档，还有 ${remainingGapCount} 处待处理`
         : `第 ${queueIndex} 个账号${queueTotal ? `，共 ${queueTotal} 个` : ''}`;
       const gapRange = isGapPrompt ? formatBalanceGapRange(prompt) : '';
+      // 已有种子但首日对不上（v3.2.16 D7）：说明对不上的明细，预填已有种子的日期与金额供修改。
+      const seedMismatch = !isGapPrompt && prompt?.seedMismatch && typeof prompt.seedMismatch === 'object'
+        ? prompt.seedMismatch
+        : null;
+      const dialogTitle = isGapPrompt
+        ? '补录断档前一日余额'
+        : (seedMismatch ? '核对上一账单日余额' : '补录上一账单日余额');
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">${isGapPrompt ? '补录断档前一日余额' : '补录上一账单日余额'}</div>
+          <div class="dialog-title">${dialogTitle}</div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="manual-balance-context">
@@ -440,6 +666,10 @@
               <span class="manual-balance-context-value" title="${escapeHtml(gapRange)}">${escapeHtml(gapRange)}</span>
             </div>` : ''}
           </div>
+          ${seedMismatch ? `
+          <div class="balance-gap-warning manual-balance-seed-mismatch">
+            ${escapeHtml(formatBalanceSeedMismatchDetail(seedMismatch))}
+          </div>` : ''}
         </div>
         <div class="manual-balance-form">
           <label class="manual-balance-row">
@@ -459,9 +689,9 @@
 
       const dateInput = dialog.querySelector('.manual-balance-date-input');
       const amountInput = dialog.querySelector('.manual-balance-amount-input');
-      dateInput.value = draft.billDate || (isGapPrompt ? prompt.suggestedSeedDate || '' : '');
+      dateInput.value = draft.billDate || (isGapPrompt ? prompt.suggestedSeedDate || '' : (seedMismatch?.seedDate || ''));
       dateInput.type = dateInput.value ? 'date' : 'text';
-      amountInput.value = draft.endBalance || '';
+      amountInput.value = draft.endBalance || (seedMismatch ? formatSeedMismatchAmountInput(seedMismatch.anchorBalance) : '');
 
       dateInput.addEventListener('focus', () => {
         if (dateInput.type !== 'date') {
@@ -602,6 +832,14 @@
       });
     }
 
+    // v3.2.16：MerchantId「原始账单仅有币种无账户号」的 币种 → 大账号 草稿
+    function cloneCurrencyBigAccountPairs(pairs = []) {
+      return (Array.isArray(pairs) ? pairs : []).map((pair) => ({
+        currency: String((pair && pair.currency) || '').trim().toUpperCase(),
+        merchantId: String((pair && pair.merchantId) || '').trim()
+      }));
+    }
+
     function formatBigAccountCurrencySummary(currencies) {
       const uniqueCurrencies = Array.from(new Set((currencies || []).filter((value) => value)));
 
@@ -695,6 +933,236 @@
       });
 
       return matchedOption?.code || '';
+    }
+
+    // ==================== v3.2.16「字段筛选特征值」 ====================
+    // 匹配口径与 src/backend/file-service/feature-filter.js 一致（后端为准，保存时再次校验）。
+    const FEATURE_FILTER_SEPARATOR_OPTIONS = [
+      { value: '', label: '不拆分（整格匹配）' },
+      { value: 'space', label: '空格' },
+      { value: 'slash', label: '/' },
+      { value: 'comma', label: ',' },
+      { value: 'dot', label: '.' },
+      { value: 'backslash', label: '\\' }
+    ];
+    const FEATURE_FILTER_MAX_LENGTH = 200;
+
+    function cloneFeatureFilter(rule) {
+      return rule && typeof rule === 'object' && !Array.isArray(rule) ? { ...rule } : null;
+    }
+
+    function splitFeatureFilterText(text, separator) {
+      const value = String(text ?? '').trim();
+      if (!value) return [];
+      const splitter = { space: /\s+/u, slash: '/', comma: ',', dot: '.', backslash: '\\' }[separator];
+      if (!splitter) return [value];
+      return value.split(splitter).map((part) => part.trim()).filter((part) => part !== '');
+    }
+
+    function matchesFeatureFilterRule(token, rule) {
+      const chars = Array.from(String(token ?? ''));
+      if (!chars.length) return false;
+      if (rule.length !== null && chars.length !== rule.length) return false;
+      const prefixCount = rule.letterPrefixCount || 0;
+      if (prefixCount > 0 && (chars.length < prefixCount || !chars.slice(0, prefixCount).every((c) => /^[A-Za-z]$/.test(c)))) {
+        return false;
+      }
+      if (rule.digitsOnly) {
+        const rest = chars.slice(prefixCount);
+        if (!rest.length || !rest.every((c) => /^[0-9]$/.test(c))) return false;
+      }
+      return true;
+    }
+
+    // 输入特征值（样例）后推导：长度、开头连续英文位数、其余是否全为数字。
+    function deriveFeatureFilterFromSample(sample) {
+      const chars = Array.from(String(sample ?? '').trim());
+      if (!chars.length) return null;
+      let prefixCount = 0;
+      while (prefixCount < chars.length && /^[A-Za-z]$/.test(chars[prefixCount])) prefixCount += 1;
+      const rest = chars.slice(prefixCount);
+      return {
+        length: chars.length,
+        letterPrefixCount: prefixCount > 0 ? prefixCount : null,
+        digitsOnly: rest.length > 0 && rest.every((c) => /^[0-9]$/.test(c))
+      };
+    }
+
+    function describeFeatureFilter(rule) {
+      if (!rule) return '尚未设置筛选条件';
+      const separator = FEATURE_FILTER_SEPARATOR_OPTIONS.find((option) => option.value === rule.separator);
+      const parts = [`筛选字段：${rule.sourceField}`, `分隔符：${separator ? separator.label : '不拆分'}`];
+      if (rule.length !== null && rule.length !== undefined) parts.push(`长度 ${rule.length}`);
+      if (rule.letterPrefixCount) parts.push(`前 ${rule.letterPrefixCount} 位英文`);
+      if (rule.digitsOnly) parts.push(rule.letterPrefixCount ? '其余为纯数字' : '纯数字');
+      return parts.join('；');
+    }
+
+    function parseFeatureFilterCount(rawValue, label, errors, { allowZero = false } = {}) {
+      const text = String(rawValue ?? '').trim();
+      if (text === '') return null;
+      if (!/^\d+$/.test(text)) {
+        errors.push(`${label}须为整数`);
+        return null;
+      }
+      const count = Number(text);
+      if (count === 0 && allowZero) return null;
+      if (count < 1 || count > FEATURE_FILTER_MAX_LENGTH) {
+        errors.push(`${label}须在 1–${FEATURE_FILTER_MAX_LENGTH} 之间`);
+        return null;
+      }
+      return count;
+    }
+
+    // 校验弹窗草稿，返回 { errors, rule }；错误文案与后端一致。
+    function validateFeatureFilterDraft(draft, headers) {
+      const errors = [];
+      const sourceField = String(draft.sourceField || '').trim();
+      const headerSet = new Set((headers || []).map((header) => String(header ?? '').trim()).filter(Boolean));
+      if (!sourceField) {
+        errors.push('请选择筛选字段');
+      } else if (!headerSet.has(sourceField)) {
+        errors.push(`筛选字段不存在：${sourceField}`);
+      }
+      const separator = String(draft.separator || '');
+      const length = parseFeatureFilterCount(draft.length, '特征长度', errors);
+      const letterPrefixCount = parseFeatureFilterCount(draft.letterPrefixCount, '前几位英文', errors, { allowZero: true });
+      const digitsOnly = draft.digitsOnly === true;
+      if (!errors.length) {
+        if (length === null && letterPrefixCount === null && !digitsOnly) {
+          errors.push('特征长度、前几位英文、纯数字至少设置一项');
+        } else if (length !== null && letterPrefixCount !== null && letterPrefixCount > length) {
+          errors.push('前几位英文不能大于特征长度');
+        } else if (length !== null && letterPrefixCount !== null && digitsOnly && letterPrefixCount === length) {
+          errors.push('勾选纯数字时，特征长度须大于前几位英文');
+        }
+      }
+      const rule = { sourceField, separator, length, letterPrefixCount, digitsOnly, sample: String(draft.sample || '').trim() };
+      if (!errors.length && rule.sample) {
+        const sampleTokens = splitFeatureFilterText(rule.sample, separator);
+        if (sampleTokens.length !== 1 || sampleTokens[0] !== rule.sample) {
+          errors.push(`特征值「${rule.sample}」不能包含所选分隔符`);
+        } else if (!matchesFeatureFilterRule(rule.sample, rule)) {
+          errors.push(`特征值「${rule.sample}」不符合当前筛选条件`);
+        }
+      }
+      return { errors, rule };
+    }
+
+    function createFeatureFilterDialog({ headers = [], featureFilter = null, onDone, onCancel }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card feature-filter-card';
+      const initial = cloneFeatureFilter(featureFilter);
+      const sourceOptions = ['<option value=""></option>']
+        .concat((headers || [])
+          .filter((header) => String(header ?? '').trim() !== '')
+          .map((header) => `<option value="${escapeHtml(String(header).trim())}">${escapeHtml(String(header).trim())}</option>`))
+        .join('');
+      const separatorOptions = FEATURE_FILTER_SEPARATOR_OPTIONS
+        .map((option) => `<option value="${option.value}">${escapeHtml(option.label)}</option>`)
+        .join('');
+
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">筛选特征值</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="feature-filter-body">
+          <p class="feature-filter-hint">按分隔符把筛选字段拆成多段，取第一个满足条件的片段；筛不出时留空。本模板所有选择「${escapeHtml(FEATURE_FILTER_MAPPING_FIELD)}」的字段共用这一套条件。</p>
+          <div class="feature-filter-grid">
+            <label class="feature-filter-label" for="feature-filter-source">筛选字段</label>
+            <select id="feature-filter-source" class="mapping-select feature-filter-source">${sourceOptions}</select>
+            <label class="feature-filter-label" for="feature-filter-separator">分隔符</label>
+            <select id="feature-filter-separator" class="mapping-select feature-filter-separator">${separatorOptions}</select>
+            <label class="feature-filter-label" for="feature-filter-length">特征长度</label>
+            <input id="feature-filter-length" class="mapping-text-input feature-filter-length" type="text" inputmode="numeric" placeholder="不限" spellcheck="false" />
+            <label class="feature-filter-label" for="feature-filter-prefix">前几位是英文字母</label>
+            <input id="feature-filter-prefix" class="mapping-text-input feature-filter-prefix" type="text" inputmode="numeric" placeholder="不限" spellcheck="false" />
+            <span class="feature-filter-label">纯数字</span>
+            <label class="feature-filter-check">
+              <input class="feature-filter-digits" type="checkbox" />
+              <span class="feature-filter-digits-label"></span>
+            </label>
+            <label class="feature-filter-label" for="feature-filter-sample">输入特征值</label>
+            <input id="feature-filter-sample" class="mapping-text-input feature-filter-sample" type="text" placeholder="如 FT24123456，输入后自动填写上面的条件" spellcheck="false" />
+          </div>
+        </div>
+        <div class="dialog-actions right">
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+          <button class="primary-btn small" type="button" data-action="done">确定</button>
+        </div>
+      `;
+
+      const sourceSelect = dialog.querySelector('.feature-filter-source');
+      const separatorSelect = dialog.querySelector('.feature-filter-separator');
+      const lengthInput = dialog.querySelector('.feature-filter-length');
+      const prefixInput = dialog.querySelector('.feature-filter-prefix');
+      const digitsInput = dialog.querySelector('.feature-filter-digits');
+      const digitsLabel = dialog.querySelector('.feature-filter-digits-label');
+      const sampleInput = dialog.querySelector('.feature-filter-sample');
+
+      function syncDigitsLabel() {
+        const prefixText = String(prefixInput.value || '').trim();
+        digitsLabel.textContent = /^[1-9]\d*$/.test(prefixText)
+          ? `前 ${prefixText} 位之后全是数字`
+          : '整段都是数字';
+      }
+
+      sourceSelect.value = initial ? String(initial.sourceField || '') : '';
+      separatorSelect.value = initial ? String(initial.separator || '') : 'space';
+      lengthInput.value = initial && initial.length ? String(initial.length) : '';
+      prefixInput.value = initial && initial.letterPrefixCount ? String(initial.letterPrefixCount) : '';
+      digitsInput.checked = Boolean(initial && initial.digitsOnly);
+      sampleInput.value = initial ? String(initial.sample || '') : '';
+      syncDigitsLabel();
+
+      prefixInput.addEventListener('input', syncDigitsLabel);
+      sampleInput.addEventListener('input', () => {
+        const derived = deriveFeatureFilterFromSample(sampleInput.value);
+        if (!derived) return;
+        lengthInput.value = String(derived.length);
+        prefixInput.value = derived.letterPrefixCount ? String(derived.letterPrefixCount) : '';
+        digitsInput.checked = derived.digitsOnly;
+        syncDigitsLabel();
+      });
+
+      function cancelFeatureFilter() {
+        const closed = closeModal(overlay, { status: 'cancelled', reason: 'cancel' });
+        if (closed.status === 'closed' && typeof onCancel === 'function') onCancel();
+      }
+      dialog.querySelector('.icon-close').addEventListener('click', cancelFeatureFilter);
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', cancelFeatureFilter);
+      dialog.querySelector('[data-action="done"]').addEventListener('click', () => {
+        const { errors, rule } = validateFeatureFilterDraft({
+          sourceField: sourceSelect.value,
+          separator: separatorSelect.value,
+          length: lengthInput.value,
+          letterPrefixCount: prefixInput.value,
+          digitsOnly: digitsInput.checked,
+          sample: sampleInput.value
+        }, headers);
+        if (errors.length) {
+          pushAlert(overlay, () => createAlertDialog(errors.map((error) => escapeHtml(error)).join('<br/>'), { onConfirm: null }));
+          return;
+        }
+        const closed = closeModal(overlay, { status: 'submitted', value: rule });
+        if (closed.status === 'closed' && typeof onDone === 'function') onDone(rule);
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // 选了「字段筛选特征值」但模板还没有规则时，返回提示文案；否则返回 ''。
+    function findFeatureFilterMissingMessage(mappings, featureFilter) {
+      if (featureFilter) return '';
+      const fields = (mappings || [])
+        .filter((mapping) => mapping && mapping.mappedField === FEATURE_FILTER_MAPPING_FIELD)
+        .map((mapping) => mapping.templateField);
+      return fields.length
+        ? `${fields.join('、')} 选择了「${FEATURE_FILTER_MAPPING_FIELD}」，请先点击【筛选条件】设置`
+        : '';
     }
 
     function getSelectValues(selectElement) {
@@ -926,7 +1394,7 @@
           if (!writeScope.isCurrent(handle)) return;
           if (result.status === 'error' && !result.manualBalancePromptReady) {
             replaceModal(handle, () => createAlertDialog(result.message));
-          } else if (result.manualBalancePrompt?.reason === 'gap') {
+          } else if (['gap', 'mismatch', 'seed-replace'].includes(result.manualBalancePrompt?.reason)) {
             replaceModal(handle, () => createManualBalanceSeedDialog(result.manualBalancePrompt));
           } else closeModal(handle, { status: 'submitted', value: result });
         });
@@ -2120,7 +2588,7 @@
         selectionClosed = true;
         closeModal(overlay, { status: 'submitted', value: result });
         applyStatementResult(result);
-        if (result.manualBalancePrompt?.reason === 'gap') {
+        if (['gap', 'mismatch', 'seed-replace'].includes(result.manualBalancePrompt?.reason)) {
           openModal(() => createManualBalanceSeedDialog(result.manualBalancePrompt));
         }
         } catch (error) {
@@ -2163,7 +2631,7 @@
           <div class="big-account-footer-left">
             <button class="secondary-btn small" type="button" data-action="add">新增</button>
             <button class="secondary-btn small" type="button" data-action="import-bank-info">导入银行账号信息</button>
-            <button class="secondary-btn small" type="button" data-action="balance-management">余额管理</button>
+            <button class="secondary-btn small" type="button" data-action="balance-management">余额附加值</button>
           </div>
           <button class="primary-btn small" type="button" data-action="done">完成</button>
         </div>
@@ -2630,7 +3098,7 @@
           bigAccountSnapshot = [];
         }
         if (!bigAccountSnapshot.length) {
-          setStatus('请先保存大账号配置后再使用余额管理', 'error');
+          setStatus('请先保存大账号配置后再使用余额附加值', 'error');
           return;
         }
         pushModal(overlay, () => createBalanceAddonManagerDialog({
@@ -2940,14 +3408,20 @@
             <tbody></tbody>
           </table>
         </div>
-        <div class="dialog-actions right template-manager-bundle-actions">
-          <button class="secondary-btn small" type="button" data-action="import-bundle">导入模板文件</button>
-          <button class="secondary-btn small" type="button" data-action="export-bundle">导出模板文件</button>
+        <div class="dialog-actions split template-manager-bundle-actions">
+          <button class="secondary-btn small" type="button" data-action="balance-seed-management">余额管理</button>
+          <div class="template-manager-bundle-right">
+            <button class="secondary-btn small" type="button" data-action="import-bundle">导入模板文件</button>
+            <button class="secondary-btn small" type="button" data-action="export-bundle">导出模板文件</button>
+          </div>
         </div>
       `;
 
       const writeScope = createDialogWriteScope(overlay, dialog);
       dialog.querySelector('.icon-close').addEventListener('click', () => closeModal(overlay));
+      dialog.querySelector('[data-action="balance-seed-management"]').addEventListener('click', () => {
+        pushModal(overlay, () => createBalanceSeedManagerDialog());
+      });
       async function runBundleAction(kind) {
         const handle = writeScope.begin();
         if (!handle) return;
@@ -2974,6 +3448,174 @@
       return overlay;
     }
 
+    // v3.2.16（spec §4.2、D2）：MerchantId「原始账单仅有币种无账户号」的【映射管理】。
+    // 左半边币种、右半边大账号，逐行成对编辑：每行最左侧【新增】在该行下方插入空行，行尾【删除】（只剩一行时清空），
+    // 右下角【保存】在【返回】左侧。【保存】只校验并把配置带回映射关系管理（点【完成】时写入模板）；【返回】/ × 放弃本次编辑。
+    function createCurrencyBigAccountMappingDialog({ pairs = [], onDone, onCancel }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manager-card currency-big-account-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">映射管理</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table currency-big-account-table">
+            <colgroup>
+              <col class="currency-big-account-insert-col" />
+              <col class="currency-big-account-currency-col" />
+              <col class="currency-big-account-merchant-col" />
+              <col class="currency-big-account-delete-col" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th></th>
+                <th>币种</th>
+                <th>大账号</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="dialog-actions right currency-big-account-footer-actions">
+          <button class="primary-btn small" type="button" data-action="save">保存</button>
+          <button class="secondary-btn small" type="button" data-action="back">返回</button>
+        </div>
+      `;
+
+      const tbody = dialog.querySelector('tbody');
+
+      function createPairRow(pair = {}) {
+        const row = document.createElement('tr');
+        row.dataset.currencyBigAccountRow = 'true';
+        row.innerHTML = `
+          <td class="currency-big-account-insert-cell">
+            <button class="text-action" type="button" data-action="insert-below">新增</button>
+          </td>
+          <td>
+            <div class="enum-input-shell big-account-currency-input-shell currency-big-account-currency-shell">
+              <input class="new-account-input enum-ghost-input big-account-currency-ghost" type="text" tabindex="-1" disabled />
+              <input class="new-account-input enum-active-input big-account-currency-input currency-big-account-currency-input" type="text" spellcheck="false" />
+            </div>
+          </td>
+          <td>
+            <input class="mapping-text-input currency-big-account-merchant-input" type="text" spellcheck="false" />
+          </td>
+          <td class="currency-big-account-delete-cell">
+            <button class="text-action danger" type="button" data-action="delete">删除</button>
+          </td>
+        `;
+
+        const currencyInput = row.querySelector('.currency-big-account-currency-input');
+        const currencyGhost = row.querySelector('.big-account-currency-ghost');
+        const merchantInput = row.querySelector('.currency-big-account-merchant-input');
+        currencyInput.value = String((pair && pair.currency) || '');
+        merchantInput.value = String((pair && pair.merchantId) || '');
+
+        function renderCurrencySuggestion() {
+          const suggestion = getCurrencySuggestion(currencyInput.value);
+          currencyGhost.value = suggestion;
+          return suggestion;
+        }
+
+        renderCurrencySuggestion();
+        currencyInput.addEventListener('input', renderCurrencySuggestion);
+        currencyInput.addEventListener('keydown', (event) => {
+          if (event.key !== 'ArrowRight') return;
+          const suggestion = renderCurrencySuggestion();
+          const currentValue = String(currencyInput.value || '');
+          if (suggestion && suggestion !== currentValue && suggestion.toUpperCase().startsWith(currentValue.trim().toUpperCase())) {
+            currencyInput.value = suggestion;
+            renderCurrencySuggestion();
+            event.preventDefault();
+          }
+        });
+        currencyInput.addEventListener('blur', () => {
+          currencyInput.value = currencyInput.value.trim().toUpperCase();
+          renderCurrencySuggestion();
+        });
+        row.querySelector('[data-action="insert-below"]').addEventListener('click', () => {
+          const nextRow = createPairRow();
+          row.after(nextRow);
+          nextRow.querySelector('.currency-big-account-currency-input').focus();
+        });
+        row.querySelector('[data-action="delete"]').addEventListener('click', () => {
+          if (tbody.querySelectorAll('tr[data-currency-big-account-row]').length > 1) {
+            row.remove();
+            return;
+          }
+          currencyInput.value = '';
+          merchantInput.value = '';
+          renderCurrencySuggestion();
+        });
+        return row;
+      }
+
+      const initialPairs = cloneCurrencyBigAccountPairs(pairs);
+      (initialPairs.length ? initialPairs : [{}]).forEach((pair) => tbody.appendChild(createPairRow(pair)));
+
+      function collectRows() {
+        return Array.from(tbody.querySelectorAll('tr[data-currency-big-account-row]')).map((row, index) => {
+          const currencyInput = row.querySelector('.currency-big-account-currency-input');
+          currencyInput.value = currencyInput.value.trim().toUpperCase();
+          return {
+            rowNumber: index + 1,
+            currency: currencyInput.value,
+            merchantId: row.querySelector('.currency-big-account-merchant-input').value.trim()
+          };
+        });
+      }
+
+      function validateRows(filledRows) {
+        if (!filledRows.length) {
+          return ['请至少维护 1 组币种与大账号'];
+        }
+        const errors = [];
+        const knownCodes = new Set(getCurrencyOptionEntries().map((entry) => String(entry.code || '').trim().toUpperCase()));
+        if (!knownCodes.size) {
+          errors.push('未读取到币种选项，无法校验币种');
+        }
+        filledRows.forEach((item) => {
+          if (!item.currency) {
+            errors.push(`第 ${item.rowNumber} 行：请填写币种`);
+          } else if (knownCodes.size && !knownCodes.has(item.currency)) {
+            errors.push(`第 ${item.rowNumber} 行：币种「${item.currency}」不在币种映射表中`);
+          }
+          if (!item.merchantId) {
+            errors.push(`第 ${item.rowNumber} 行：请填写大账号`);
+          }
+        });
+        const rowNumbersByCurrency = new Map();
+        filledRows.forEach((item) => {
+          if (!item.currency) return;
+          rowNumbersByCurrency.set(item.currency, (rowNumbersByCurrency.get(item.currency) || []).concat(item.rowNumber));
+        });
+        rowNumbersByCurrency.forEach((rowNumbers, currency) => {
+          if (rowNumbers.length > 1) {
+            errors.push(`币种「${currency}」重复（第 ${rowNumbers.join('、')} 行），一个币种只能对应一个大账号`);
+          }
+        });
+        return errors;
+      }
+
+      dialog.querySelector('[data-action="save"]').addEventListener('click', () => {
+        const filledRows = collectRows().filter((item) => item.currency || item.merchantId);
+        const errors = validateRows(filledRows);
+        if (errors.length) {
+          pushAlert(overlay, () => createAlertDialog(errors.map((line) => escapeHtml(line)).join('<br>'), { onConfirm: null }));
+          return;
+        }
+        onDone(filledRows.map(({ currency, merchantId }) => ({ currency, merchantId })));
+      });
+      dialog.querySelector('[data-action="back"]').addEventListener('click', () => onCancel());
+      dialog.querySelector('.icon-close').addEventListener('click', () => onCancel());
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     function createMappingDialog(payload) {
       const { setStatus, applyStatementResult, applyManualBalancePromptStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
       const overlay = createOverlay();
@@ -2993,6 +3635,8 @@
       // payload.bigAccounts 已是上次维护大账号 onDone 的内存版（含 own + 用户编辑），透传 loadedWithOwn=true 跳过 getWithOwn，
       // 避免静默覆盖用户的内存编辑（包括主动删除的 own 行）。
       let bigAccountsLoadedWithOwn = Boolean(payload.bigAccountsLoadedWithOwn);
+      // v3.2.16：MerchantId「原始账单仅有币种无账户号」的 币种 → 大账号（【映射管理】带回的草稿，点【完成】时保存）
+      let currentCurrencyBigAccounts = cloneCurrencyBigAccountPairs(payload.currencyBigAccounts);
       const currentFixedAssignments = Array.isArray(payload.fixedAssignments)
         ? payload.fixedAssignments.map((item) => ({
             merchantId: String(item.merchantId || ''),
@@ -3026,6 +3670,8 @@
       let currentBillSplitMeta = payload.billSplitMeta && typeof payload.billSplitMeta === 'object'
         ? { signedAmountSourceField: String(payload.billSplitMeta.signedAmountSourceField || '') }
         : { signedAmountSourceField: '' };
+      // v3.2.16：模板级「字段筛选特征值」规则草稿；所有选该映射值的行共用，完成时随映射保存。
+      let currentFeatureFilter = cloneFeatureFilter(payload.template && payload.template.featureFilter);
       dialog.className = 'modal-card mapping-card';
       // v3.2.15（§4.2）：【渠道存在多个子模板】新建同名渠道；【设为子模板】选择渠道；两者互斥。
       //   打开属于渠道的模板时，【设为子模板】为勾选状态并选中所属渠道。
@@ -3166,7 +3812,9 @@
           selectOptions = [isBalanceField ? `<option value="${BALANCE_DISABLED_OPTION}">${BALANCE_DISABLED_OPTION}</option>` : '<option value=""></option>']
             .concat(isBalanceField ? [`<option value="${BALANCE_CALCULATED_OPTION}">${BALANCE_CALCULATED_OPTION}</option>`] : [])
             .concat(supportsSelfInputOption ? [`<option value="${MERCHANT_ID_SELF_INPUT_OPTION}">${MERCHANT_ID_SELF_INPUT_OPTION}</option>`] : [])
+            .concat(supportsSelfInputOption ? [`<option value="${MERCHANT_ID_CURRENCY_ONLY_OPTION}">${MERCHANT_ID_CURRENCY_ONLY_OPTION}</option>`] : [])
             .concat(supportsMultiSelect ? [`<option value="${CONCAT_FIELDS_MAPPING_FIELD}">${CONCAT_FIELDS_MAPPING_FIELD}</option>`] : [])
+            .concat(supportsMultiSelect ? [`<option value="${FEATURE_FILTER_MAPPING_FIELD}">${FEATURE_FILTER_MAPPING_FIELD}</option>`] : [])
             .concat(headerOptions)
             .join('');
         }
@@ -3175,8 +3823,12 @@
           <td>
             <div class="mapping-field-editor">
               <select class="mapping-select">${selectOptions}</select>
+              ${supportsMultiSelect ? `
+                <button class="secondary-btn small mapping-feature-filter-btn" type="button" hidden>筛选条件</button>
+              ` : ''}
               ${isMerchantIdField ? `
                 <button class="secondary-btn small mapping-big-account-manage-btn" type="button" hidden>维护大账号</button>
+                <button class="secondary-btn small mapping-currency-big-account-manage-btn" type="button" hidden>映射管理</button>
               ` : ''}
               ${isAmountSplitByFieldField ? `
                 <button class="secondary-btn small mapping-amount-split-manage-btn" type="button" hidden>维护发生额映射关系</button>
@@ -3197,7 +3849,9 @@
 
         const select = row.querySelector('.mapping-select');
         const manageBigAccountBtn = row.querySelector('.mapping-big-account-manage-btn');
+        const manageCurrencyBigAccountBtn = row.querySelector('.mapping-currency-big-account-manage-btn');
         const manageAmountSplitBtn = row.querySelector('.mapping-amount-split-manage-btn');
+        const featureFilterBtn = row.querySelector('.mapping-feature-filter-btn');
         const concatFieldPicker = row.querySelector('.concat-field-picker');
         const concatPickerTrigger = row.querySelector('.concat-picker-trigger');
         const concatPickerPanel = row.querySelector('.concat-picker-panel');
@@ -3295,8 +3949,15 @@
           if (manageBigAccountBtn) {
             manageBigAccountBtn.hidden = !isCustomInput;
           }
+          if (manageCurrencyBigAccountBtn) {
+            manageCurrencyBigAccountBtn.hidden = selectedValue !== MERCHANT_ID_CURRENCY_ONLY_OPTION;
+          }
           if (manageAmountSplitBtn) {
             manageAmountSplitBtn.hidden = !isAmountSplitEnabled;
+          }
+          if (featureFilterBtn) {
+            featureFilterBtn.hidden = selectedValue !== FEATURE_FILTER_MAPPING_FIELD;
+            featureFilterBtn.title = describeFeatureFilter(currentFeatureFilter);
           }
           if (concatFieldPicker) {
             concatFieldPicker.hidden = !isConcatMode;
@@ -3353,9 +4014,42 @@
           });
         }
 
+        if (manageCurrencyBigAccountBtn) {
+          manageCurrencyBigAccountBtn.addEventListener('click', () => {
+            pushModal(overlay, () => createCurrencyBigAccountMappingDialog({
+              pairs: currentCurrencyBigAccounts,
+              onDone: (nextPairs) => {
+                currentCurrencyBigAccounts = cloneCurrencyBigAccountPairs(nextPairs);
+                setStatus('币种与大账号已暂存，点击【完成】后保存到模板', 'info');
+                returnToModal(overlay);
+              },
+              onCancel: () => {
+                returnToModal(overlay);
+              }
+            }));
+          });
+        }
+
         if (manageAmountSplitBtn) {
           manageAmountSplitBtn.addEventListener('click', async () => {
             await openAmountSplitRulesDialog();
+          });
+        }
+
+        if (featureFilterBtn) {
+          featureFilterBtn.addEventListener('click', () => {
+            pushModal(overlay, () => createFeatureFilterDialog({
+              headers: payload.template.headers || [],
+              featureFilter: currentFeatureFilter,
+              onDone: (nextFeatureFilter) => {
+                currentFeatureFilter = cloneFeatureFilter(nextFeatureFilter);
+                refreshFeatureFilterButtons();
+                returnToModal(overlay);
+              },
+              onCancel: () => {
+                returnToModal(overlay);
+              }
+            }));
           });
         }
 
@@ -3499,8 +4193,14 @@
           targetFields: (payload.targetFields || []).slice(),
           advancedMappingFields: advancedMappingFields.slice(),
           billSplitGroupFields: billSplitGroupFields.slice(),
-          onDone: (nextMappings) => {
+          featureFilter: currentFeatureFilter,
+          onDone: (nextMappings, nextFeatureFilter) => {
             currentBillSplitMappings = nextMappings.map((m) => ({ ...m }));
+            // v3.2.16：拆分/合并弹窗编辑的是同一套筛选条件，保存后回写草稿
+            if (nextFeatureFilter) {
+              currentFeatureFilter = cloneFeatureFilter(nextFeatureFilter);
+              refreshFeatureFilterButtons();
+            }
             // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
             returnToModal(overlay);
           },
@@ -3515,6 +4215,12 @@
         const row = rowByField.get(BILL_SPLIT_MERGE_FIELD);
         const select = row?.querySelector('.mapping-select');
         return select && select.value === '是';
+      }
+
+      function refreshFeatureFilterButtons() {
+        tbody.querySelectorAll('.mapping-feature-filter-btn').forEach((button) => {
+          button.title = describeFeatureFilter(currentFeatureFilter);
+        });
       }
 
       function applyAmountSplitMutualExclusion() {
@@ -3552,12 +4258,16 @@
 
         function setRowDisabled(row, select, disabled) {
           if (!row || !select) return;
+          // v3.2.16：互斥禁用时【筛选条件】按钮随下拉框一起禁用
+          const featureFilterButton = row.querySelector('.mapping-feature-filter-btn');
           if (disabled) {
             row.classList.add('mapping-row-mutex-disabled');
             select.disabled = true;
+            if (featureFilterButton) featureFilterButton.disabled = true;
           } else {
             row.classList.remove('mapping-row-mutex-disabled');
             select.disabled = false;
+            if (featureFilterButton) featureFilterButton.disabled = false;
           }
         }
 
@@ -3680,6 +4390,17 @@
           pushAlert(overlay, () => createAlertDialog(channelAssignment.error, { onConfirm: null }));
           return;
         }
+        // v3.2.16：拆分/合并且不复用模块映射时主映射不生效，主映射里残留的该值不要求规则（拆分映射由后端校验）
+        const featureFilterDraft = collectMappingDraftFromTable(tbody);
+        const splitMappingsEffective = featureFilterDraft.some((m) => m.templateField === BILL_SPLIT_MERGE_FIELD && m.mappedField === '是')
+          && featureFilterDraft.some((m) => m.templateField === REUSE_MODULE_FIELD && m.mappedField === '否');
+        const featureFilterMissing = splitMappingsEffective
+          ? ''
+          : findFeatureFilterMissingMessage(featureFilterDraft, currentFeatureFilter);
+        if (featureFilterMissing) {
+          pushAlert(overlay, () => createAlertDialog(escapeHtml(featureFilterMissing), { onConfirm: null }));
+          return;
+        }
 
         const handle = writeScope.begin();
         if (!handle) return;
@@ -3695,7 +4416,9 @@
             mappings,
             bigAccounts: draftBigAccounts,
             fixedAssignments: currentFixedAssignments,
+            currencyBigAccounts: cloneCurrencyBigAccountPairs(currentCurrencyBigAccounts),
             preserveOwn: !bigAccountsLoadedWithOwn,
+            featureFilter: cloneFeatureFilter(currentFeatureFilter),
             ...(channelAssignment ? { channel: channelAssignment } : {})
           });
 
@@ -3904,12 +4627,15 @@
       targetFields = [],
       advancedMappingFields = [],
       billSplitGroupFields = [],
+      featureFilter = null,
       onDone,
       onCancel
     }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card bill-split-mappings-card';
+      // v3.2.16：与主映射共用同一套筛选条件；保存时随拆分映射写入并回传给主映射弹窗。
+      let currentFeatureFilter = cloneFeatureFilter(featureFilter);
 
       // 模板字段列表 = targetFields 排除 Currency / Credit Amount / Debit Amount + 高级字段 + bill-split group 字段
       const excludeFields = new Set([
@@ -3985,6 +4711,7 @@
           } else {
             selectOptions = ['<option value=""></option>']
               .concat(supportsMultiSelect ? [`<option value="${CONCAT_FIELDS_MAPPING_FIELD}">${CONCAT_FIELDS_MAPPING_FIELD}</option>`] : [])
+              .concat(supportsMultiSelect ? [`<option value="${FEATURE_FILTER_MAPPING_FIELD}">${FEATURE_FILTER_MAPPING_FIELD}</option>`] : [])
               .concat(headerOptions)
               .join('');
           }
@@ -3994,6 +4721,9 @@
             <td>
               <div class="mapping-field-editor">
                 <select class="mapping-select bill-split-mapping-select">${selectOptions}</select>
+                ${supportsMultiSelect ? `
+                <button class="secondary-btn small mapping-feature-filter-btn" type="button" hidden>筛选条件</button>
+                ` : ''}
                 ${supportsMultiSelect ? `
                 <div class="concat-field-picker" hidden>
                   <button class="concat-picker-trigger secondary-btn small" type="button">选择字段</button>
@@ -4009,6 +4739,7 @@
           `;
 
           const select = row.querySelector('.bill-split-mapping-select');
+          const featureFilterBtn = row.querySelector('.mapping-feature-filter-btn');
           const concatPicker = row.querySelector('.concat-field-picker');
           const concatTrigger = row.querySelector('.concat-picker-trigger');
           const concatPanel = row.querySelector('.concat-picker-panel');
@@ -4068,8 +4799,31 @@
             });
           }
 
+          if (featureFilterBtn) {
+            featureFilterBtn.addEventListener('click', () => {
+              pushModal(overlay, () => createFeatureFilterDialog({
+                headers,
+                featureFilter: currentFeatureFilter,
+                onDone: (nextFeatureFilter) => {
+                  currentFeatureFilter = cloneFeatureFilter(nextFeatureFilter);
+                  tbody.querySelectorAll('.mapping-feature-filter-btn').forEach((button) => {
+                    button.title = describeFeatureFilter(currentFeatureFilter);
+                  });
+                  returnToModal(overlay);
+                },
+                onCancel: () => {
+                  returnToModal(overlay);
+                }
+              }));
+            });
+          }
+
           function syncEditorState() {
             const isConcatMode = select.value === CONCAT_FIELDS_MAPPING_FIELD;
+            if (featureFilterBtn) {
+              featureFilterBtn.hidden = select.value !== FEATURE_FILTER_MAPPING_FIELD;
+              featureFilterBtn.title = describeFeatureFilter(currentFeatureFilter);
+            }
             if (concatPicker) concatPicker.hidden = !isConcatMode;
             if (!isConcatMode) {
               concatSelectedFields = [];
@@ -4101,6 +4855,9 @@
         // 从主模板映射复制，排除 Currency/Credit/Debit/advanced/bill-split group
         const imported = (mainTemplateMappings || [])
           .filter((m) => !excludeFields.has(m.templateField))
+          // v3.2.16：MerchantId 的「自己输入」「原始账单仅有币种无账户号」不是源字段，复制到拆分映射后保存会报“映射字段不存在”
+          .filter((m) => !(m.templateField === 'MerchantId'
+            && [MERCHANT_ID_SELF_INPUT_OPTION, MERCHANT_ID_CURRENCY_ONLY_OPTION].includes(String(m.mappedField || ''))))
           .map((m) => ({
             templateField: m.templateField,
             mappedField: String(m.mappedField || ''),
@@ -4144,15 +4901,21 @@
       });
       dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
         if (!validateLocalMappings()) return;
+        const featureFilterMissing = findFeatureFilterMissingMessage(currentDialogMappings, currentFeatureFilter);
+        if (featureFilterMissing) {
+          pushAlert(overlay, () => createAlertDialog(escapeHtml(featureFilterMissing), { onConfirm: null }));
+          return;
+        }
         const handle = writeScope.begin();
         if (!handle) return;
         // 保存参数快照不再共享仍可编辑的行对象。
         const toSave = currentDialogMappings.filter(
           m => m.mappedField || (Array.isArray(m.mappedFields) && m.mappedFields.length > 0)
         ).map(mapping => ({ ...mapping, mappedFields: Array.isArray(mapping.mappedFields) ? mapping.mappedFields.slice() : [] }));
+        const savedFeatureFilter = cloneFeatureFilter(currentFeatureFilter);
         let result;
         try {
-          result = await api.templates.saveBillSplitMappings({ templateId: template.id, mappings: toSave });
+          result = await api.templates.saveBillSplitMappings({ templateId: template.id, mappings: toSave, featureFilter: savedFeatureFilter });
         } catch (error) {
           console.error(error);
           result = { status: 'error', message: '保存失败，请查看控制台' };
@@ -4160,7 +4923,7 @@
         if (!writeScope.isCurrent(handle)) return;
         if (result?.status === 'success') {
           const closed = closeModal(overlay, { status: 'submitted', value: toSave });
-          if (closed.status === 'closed' && typeof onDone === 'function') onDone(toSave);
+          if (closed.status === 'closed' && typeof onDone === 'function') onDone(toSave, savedFeatureFilter);
         } else {
           pushAlert(overlay, () => createAlertDialog(result?.message || '保存失败', { onConfirm: null }));
         }
@@ -4990,7 +5753,7 @@
       dialog.className = 'modal-card manager-card balance-addon-card';
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">余额管理</div>
+          <div class="dialog-title">余额附加值</div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="table-wrapper">
@@ -5175,6 +5938,338 @@
         if (handle.isOpen()) tbody.appendChild(createAddonRow());
       }) });
 
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // v3.2.16 模板管理【余额管理】：按渠道 / 普通模板查看余额种子，只能修改余额、删除单条种子
+    //   （spec：changes/v3.2.16/feat/balance-seed-management/spec.md）。
+    //   只把 { kind, id } 交给 Main，可见范围与写入核对都在 Main；切换选项时按请求代次丢弃迟到的列表，
+    //   写入期间锁定弹窗，结果为 conflict（期间被生成、补录或另一次修改改过）时提示并重新读取。
+    const BALANCE_SEED_PAGE_LIMIT = 200;
+
+    function buildBalanceSeedOwnerOptions() {
+      const templates = services.getTemplates() || [];
+      const channels = (services.getStatementChannels() || []).slice();
+      const knownChannelIds = new Set(channels.map((channel) => Number(channel.id)));
+      templates.forEach((template) => {
+        const channelId = Number(template.channelId || 0);
+        if (channelId && !knownChannelIds.has(channelId)) {
+          knownChannelIds.add(channelId);
+          channels.push({ id: channelId, name: template.channelName || '' });
+        }
+      });
+      return {
+        channels: channels.map((channel) => ({
+          key: `channel:${Number(channel.id)}`,
+          label: channel.name,
+          owner: { kind: 'channel', id: Number(channel.id) }
+        })),
+        templates: templates.filter((template) => !template.channelId).map((template) => ({
+          key: `template:${Number(template.id)}`,
+          label: template.name,
+          owner: { kind: 'template', id: Number(template.id) }
+        }))
+      };
+    }
+
+    function balanceSeedRowKey(record) {
+      return [record.merchantId, record.currency, record.billDate].join('\u0001');
+    }
+
+    function createBalanceSeedManagerDialog() {
+      const { setStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manager-card balance-seed-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">余额管理</div>
+          <label class="account-mapping-template-select-wrapper balance-seed-owner-wrapper">
+            渠道 <select data-role="balance-seed-owner" aria-label="渠道"></select>
+          </label>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="balance-seed-hint" data-role="balance-seed-hint"></div>
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>账户号</th>
+                <th>币种</th>
+                <th>日期</th>
+                <th>余额</th>
+                <th>生成方式</th>
+                <th class="manager-action-header"><span class="manager-action-header-label">执行操作</span></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="dialog-actions right">
+          <div class="balance-seed-pager" data-role="balance-seed-pager" hidden>
+            <button class="secondary-btn small" type="button" data-action="previous-page">上一页</button>
+            <span data-role="balance-seed-page"></span>
+            <button class="secondary-btn small" type="button" data-action="next-page">下一页</button>
+          </div>
+          <button class="primary-btn small" type="button" data-action="done">完成</button>
+        </div>
+      `;
+
+      const ownerSelect = dialog.querySelector('[data-role="balance-seed-owner"]');
+      const hintEl = dialog.querySelector('[data-role="balance-seed-hint"]');
+      const tbody = dialog.querySelector('tbody');
+      const pagerEl = dialog.querySelector('[data-role="balance-seed-pager"]');
+      const pageEl = dialog.querySelector('[data-role="balance-seed-page"]');
+      const ownerOptions = buildBalanceSeedOwnerOptions();
+      const optionByKey = new Map([...ownerOptions.channels, ...ownerOptions.templates].map((option) => [option.key, option]));
+      const state = {
+        key: (ownerOptions.channels[0] || ownerOptions.templates[0] || {}).key || '',
+        owner: null,
+        records: [],
+        page: 0,
+        loading: false,
+        loadError: '',
+        editingKey: '',
+        requestId: 0
+      };
+
+      [['渠道', ownerOptions.channels], ['普通模板', ownerOptions.templates]].forEach(([label, options]) => {
+        if (!options.length) return;
+        const group = document.createElement('optgroup');
+        group.label = label;
+        options.forEach((option) => {
+          const element = document.createElement('option');
+          element.value = option.key;
+          element.textContent = option.label;
+          group.appendChild(element);
+        });
+        ownerSelect.appendChild(group);
+      });
+      ownerSelect.value = state.key;
+      ownerSelect.disabled = !state.key;
+
+      const writeScope = createDialogWriteScope(overlay, dialog);
+
+      function pageCount() {
+        return Math.max(1, Math.ceil(state.records.length / BALANCE_SEED_PAGE_LIMIT));
+      }
+
+      function renderHint() {
+        if (!state.key) {
+          hintEl.textContent = '暂无渠道或模板';
+          return;
+        }
+        if (state.loading) {
+          hintEl.textContent = '正在读取余额种子…';
+          return;
+        }
+        if (state.loadError) {
+          hintEl.textContent = state.loadError;
+          return;
+        }
+        const fileName = state.owner ? state.owner.seedFileName : '';
+        hintEl.textContent = `共 ${state.records.length} 条。种子文件 balance-seeds/${fileName} 按名称的银行段存放，生成账单时按账户号与币种读取；修改后的余额按「人工录入」处理。`;
+      }
+
+      function createEmptyRow(text) {
+        const row = document.createElement('tr');
+        row.innerHTML = `<td class="empty-cell" colspan="6">${escapeHtml(text)}</td>`;
+        return row;
+      }
+
+      function createSeedRow(record) {
+        const rowKey = balanceSeedRowKey(record);
+        const editing = state.editingKey === rowKey;
+        const row = document.createElement('tr');
+        row.dataset.balanceSeedRow = rowKey;
+        row.innerHTML = `
+          <td>${escapeHtml(record.merchantId)}</td>
+          <td>${escapeHtml(record.currency)}</td>
+          <td>${escapeHtml(record.billDate)}</td>
+          <td class="balance-seed-balance-cell">${editing
+            ? `<input class="mapping-text-input balance-seed-balance-input" type="text" spellcheck="false" aria-label="余额" value="${escapeHtml(String(record.endBalance))}" />`
+            : escapeHtml(String(record.endBalance))}</td>
+          <td>${escapeHtml(record.generationMethod)}</td>
+          <td class="manager-action-cell">
+            <div class="manager-row-actions">
+              ${editing
+                ? '<button class="text-action" type="button" data-action="save-seed">保存</button><button class="text-action" type="button" data-action="cancel-edit">取消</button>'
+                : '<button class="text-action" type="button" data-action="edit-seed">修改</button><button class="text-action danger" type="button" data-action="delete-seed">删除</button>'}
+            </div>
+          </td>
+        `;
+        if (editing) {
+          const input = row.querySelector('.balance-seed-balance-input');
+          row.querySelector('[data-action="save-seed"]').addEventListener('click', () => saveSeed(record, input.value));
+          row.querySelector('[data-action="cancel-edit"]').addEventListener('click', () => {
+            state.editingKey = '';
+            renderRows();
+          });
+          input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') saveSeed(record, input.value);
+          });
+        } else {
+          row.querySelector('[data-action="edit-seed"]').addEventListener('click', () => {
+            state.editingKey = rowKey;
+            renderRows();
+            const input = tbody.querySelector('.balance-seed-balance-input');
+            if (input) { input.focus(); input.select(); }
+          });
+          row.querySelector('[data-action="delete-seed"]').addEventListener('click', () => confirmDeleteSeed(record));
+        }
+        return row;
+      }
+
+      function renderRows() {
+        renderHint();
+        tbody.innerHTML = '';
+        const totalPages = pageCount();
+        state.page = Math.min(state.page, totalPages - 1);
+        pagerEl.hidden = state.records.length <= BALANCE_SEED_PAGE_LIMIT;
+        pageEl.textContent = `第 ${state.page + 1} / ${totalPages} 页`;
+        dialog.querySelector('[data-action="previous-page"]').disabled = state.page <= 0;
+        dialog.querySelector('[data-action="next-page"]').disabled = state.page >= totalPages - 1;
+        if (!state.key || state.loading || state.loadError) return;
+        if (!state.records.length) {
+          tbody.appendChild(createEmptyRow('暂无余额种子'));
+          return;
+        }
+        const start = state.page * BALANCE_SEED_PAGE_LIMIT;
+        state.records.slice(start, start + BALANCE_SEED_PAGE_LIMIT)
+          .forEach((record) => tbody.appendChild(createSeedRow(record)));
+      }
+
+      async function loadSeeds({ keepPage = false } = {}) {
+        const option = optionByKey.get(state.key);
+        if (!option) {
+          renderRows();
+          return;
+        }
+        const requestId = ++state.requestId;
+        state.loading = true;
+        state.loadError = '';
+        state.editingKey = '';
+        if (!keepPage) state.page = 0;
+        renderRows();
+        let result;
+        try {
+          result = await api.balanceSeeds.list(option.owner);
+        } catch (error) {
+          result = { status: 'error', message: error.message || '读取余额种子失败' };
+        }
+        if (requestId !== state.requestId || !overlay.isConnected) return;
+        state.loading = false;
+        if (result.status === 'success') {
+          state.owner = result.owner || null;
+          state.records = Array.isArray(result.records) ? result.records : [];
+        } else {
+          state.owner = null;
+          state.records = [];
+          state.loadError = result.message || '读取余额种子失败';
+          setStatus(state.loadError, 'error', { errorReportReady: Boolean(result.errorReportReady) });
+        }
+        renderRows();
+      }
+
+      // 写入结果的共同收尾：conflict 与失败都提示并弹窗说明；成功或 conflict 后重新读取列表（保留页码）。
+      async function finishSeedWrite(result, alertParent) {
+        const succeeded = result.status === 'success';
+        setStatus(result.message, succeeded ? 'success' : 'error', { errorReportReady: Boolean(result.errorReportReady) });
+        if (!succeeded) pushAlert(alertParent, () => createAlertDialog(escapeHtml(result.message || '操作失败')));
+        if (succeeded || result.status === 'conflict') await loadSeeds({ keepPage: true });
+      }
+
+      async function saveSeed(record, rawValue) {
+        const text = String(rawValue || '').trim().replace(/,/g, '');
+        if (!/^[+-]?\d+(\.\d+)?$/.test(text) || !Number.isFinite(Number(text))) {
+          setStatus('余额必须是有效数字', 'error');
+          pushAlert(overlay, () => createAlertDialog('余额必须是有效数字'));
+          return;
+        }
+        if (Number(text) === Number(record.endBalance)) {
+          state.editingKey = '';
+          renderRows();
+          return;
+        }
+        const option = optionByKey.get(state.key);
+        const handle = writeScope.begin();
+        if (!option || !handle) return;
+        let result;
+        try {
+          result = await api.balanceSeeds.update({
+            owner: option.owner,
+            key: { merchantId: record.merchantId, currency: record.currency, billDate: record.billDate },
+            expected: record,
+            endBalance: text
+          });
+        } catch (error) {
+          result = { status: 'error', message: error.message || '修改余额种子失败' };
+        } finally { writeScope.finish(handle); }
+        if (!writeScope.isCurrent(handle)) return;
+        await finishSeedWrite(result, overlay);
+      }
+
+      function confirmDeleteSeed(record) {
+        const option = optionByKey.get(state.key);
+        if (!option) return;
+        pushModal(overlay, () => {
+          let confirmScope;
+          const confirmation = createConfirmDialog({
+            message: `确认删除余额种子？<br>账户号：${escapeHtml(record.merchantId)}　币种：${escapeHtml(record.currency || '（空）')}　日期：${escapeHtml(record.billDate)}　余额：${escapeHtml(String(record.endBalance))}<br>删除后，下次生成账单若需要这一天的余额，会提示补录。`,
+            confirmText: '确认删除',
+            cancelText: '否',
+            onConfirm: async () => {
+              const handle = confirmScope.begin();
+              if (!handle) return;
+              let result;
+              try {
+                result = await api.balanceSeeds.delete({
+                  owner: option.owner,
+                  key: { merchantId: record.merchantId, currency: record.currency, billDate: record.billDate },
+                  expected: record
+                });
+              } catch (error) {
+                result = { status: 'error', message: error.message || '删除余额种子失败' };
+              } finally { confirmScope.finish(handle); }
+              if (!confirmScope.isCurrent(handle)) return;
+              if (result.status === 'success' || result.status === 'conflict') {
+                const closed = closeModal(handle, { status: 'submitted' });
+                if (closed.status !== 'closed') return;
+                await finishSeedWrite(result, overlay);
+                return;
+              }
+              await finishSeedWrite(result, confirmation);
+            }
+          });
+          confirmScope = createDialogWriteScope(confirmation, confirmation);
+          return confirmation;
+        });
+      }
+
+      ownerSelect.addEventListener('change', () => {
+        state.key = ownerSelect.value;
+        loadSeeds();
+      });
+      dialog.querySelector('[data-action="previous-page"]').addEventListener('click', () => {
+        state.page = Math.max(0, state.page - 1);
+        state.editingKey = '';
+        renderRows();
+      });
+      dialog.querySelector('[data-action="next-page"]').addEventListener('click', () => {
+        state.page = Math.min(pageCount() - 1, state.page + 1);
+        state.editingKey = '';
+        renderRows();
+      });
+      const close = () => closeModal(overlay, { status: 'cancelled', reason: 'cancel' });
+      dialog.querySelector('.icon-close').addEventListener('click', close);
+      dialog.querySelector('[data-action="done"]').addEventListener('click', close);
+      registerModal(overlay, {
+        onMount: () => { loadSeeds(); },
+        onDispose: () => { state.requestId += 1; }
+      });
+
+      renderRows();
       overlay.appendChild(dialog);
       return overlay;
     }
@@ -5822,7 +6917,7 @@
     //   带「库」读着别扭，且 gateway 既有文案为「网关对账单数据」（硬约束行为不变）→ 此处用不带「库」的表名。
     //   仅含三张可删表（与后端 LINKED_DELETE_ALLOWED_TABLES 同口径）；默认 gateway-bill。
 
-    return Object.freeze({ looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog });
+    return Object.freeze({ looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, createCurrencyBigAccountMappingDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog });
   }
   global.ConfigurationDialogs = Object.freeze({ createConfigurationDialogs, buildBalanceSeedConfirmationRequest });
 })(window);

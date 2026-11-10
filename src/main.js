@@ -693,19 +693,25 @@ const {
 const { readBigAccountOrder, writeBigAccountOrder } = require('./backend/big-account-order-store');
 const { readBigAccountMode, writeBigAccountMode } = require('./backend/big-account-mode-store');
 const {
+  appendCurrencyBigAccountIssues,
   calculateEndingBalanceFromAmounts,
   buildDetailExportRows,
   buildExpectedHeaderCandidates,
   buildMappedRows,
+  buildCurrencyBigAccountUnmappedError,
   compileRegexLiteral,
+  FEATURE_FILTER_FIELD_TOKEN,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
+  MERCHANT_ID_CURRENCY_ONLY_MARKER,
   extractHeaders,
-  inferEndingBalance,
+  isCurrencyBigAccountUnmappedError,
   isRegexLiteral,
+  mapEachCollectingCurrencyBigAccountIssues,
   loadCurrencyMappings,
   loadEnumValues,
   normalizeCell,
+  normalizeFeatureFilterRule,
   parseDateValue,
   parseNumericValue,
   readRows,
@@ -751,6 +757,14 @@ const {
   resolveStatementOutputName,
   resolveTemplateBalanceMode
 } = require('./main-process/statement-channel-identity');
+// v3.2.16：模板管理【余额管理】
+const {
+  BalanceSeedManagementError,
+  buildBalanceSeedActivityLog,
+  deleteOwnerSeed,
+  listOwnerSeeds,
+  updateOwnerSeed
+} = require('./main-process/balance-seed-management');
 const {
   ALL_BANKS_TEMPLATE_SCOPE,
   assembleMonthlyBalance,
@@ -1726,7 +1740,11 @@ const BALANCE_DISABLED_OPTION = '无';
 const BALANCE_CALCULATED_OPTION = '通过发生额计算';
 const MERCHANT_ID_SELF_INPUT_OPTION = '自己输入';
 const MERCHANT_ID_MULTI_ACCOUNT_MARKER = '__MULTI_BIG_ACCOUNT__';
+// v3.2.16：MerchantId 按每行币种取【映射管理】中维护的大账号（存储值见 MERCHANT_ID_CURRENCY_ONLY_MARKER）
+const MERCHANT_ID_CURRENCY_ONLY_OPTION = '原始账单仅有币种无账户号';
 const CONCAT_FIELDS_MAPPING_FIELD = '需要拼接字段';
+// v3.2.16：映射值「字段筛选特征值」——从一个源字段按模板级规则筛出特征值（规则存 templates.feature_filter_json）
+const FEATURE_FILTER_MAPPING_FIELD = '字段筛选特征值';
 const CUSTOM_INPUT_TARGET_FIELDS = new Set(['MerchantId']);
 const SIGNED_AMOUNT_MAPPING_FIELD = '按正负号拆分的发生额';
 const AMOUNT_BASED_NAME_MAPPING_FIELD = '根据发生额做映射的户名';
@@ -1742,7 +1760,10 @@ const REUSE_MODULE_DEFAULT_OPTION = '是';
 // - `readTemplateBundleFile` 对未知字段采用显式解构式解析（:1221-1243），v1.5.1 旧应用读 v1.5.2 导出的 bundle 时自然忽略该字段
 // - v1.5.1 旧 bundle 若不含该字段，读时 fallback 为空串（:1242）
 // v3.2.15：v5 以渠道取代主/子模板（顶层 channels，条目 channelName），兼容读取 v≤4。
-const SUPPORTED_BUNDLE_VERSION = 5;
+// v3.2.16：用到「字段筛选特征值」（主映射或拆分映射）或 MerchantId「原始账单仅有币种无账户号」（条目带 currencyBigAccounts）
+//   的模板包写 v6，让旧版按版本号整包拒绝（旧版会静默输出空值，或把新存储值当成映射字段）；都未用到时仍写 v5，旧版照常可导入。
+const SUPPORTED_BUNDLE_VERSION = 6;
+const BASE_BUNDLE_VERSION = 5;
 // v1.5.2 需求 3：主页面「按文件名映射模板」的虚拟模板 ID（非 DB 记录）
 // helper 用于在接收 templateId 的调用点统一短路，避免将虚拟 ID 传入真实查询
 const FILENAME_MAPPING_TEMPLATE_ID = '__FILENAME_MAPPING__';
@@ -2173,7 +2194,8 @@ function createManualBalanceSeedFreshnessGuard({
   };
 }
 
-// 断档“不补录”只记在内存中的账单会话上：不落盘，重启后失效。
+// 断档“不补录”与余额不一致“确认继续”只记在内存中的账单会话上：不落盘，重启后失效。
+// 两类确认共用同一集合，键按类型区分（余额不一致键以 mismatch| 开头）。
 function rememberAcknowledgedBalanceGaps({ session, importContext, gapKeys }) {
   const owner = session || importContext;
   if (!owner) return false;
@@ -2200,6 +2222,48 @@ function hasAcknowledgedBalanceGap(key) {
 
 function getAcknowledgedBalanceGapKeys() {
   return { has: hasAcknowledgedBalanceGap };
+}
+
+function formatBalanceAmount(value, { signed = false } = {}) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return '(空)';
+  const text = numericValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 12 });
+  return signed && numericValue > 0 ? `+${text}` : text;
+}
+
+function formatBalanceSeedMismatchLine(seedMismatch) {
+  const statementBalances = (Array.isArray(seedMismatch.statementBalances) ? seedMismatch.statementBalances : [])
+    .map((value) => formatBalanceAmount(value))
+    .join('、');
+  return `已有 ${seedMismatch.seedDate} 余额 ${formatBalanceAmount(seedMismatch.seedBalance)}（${seedMismatch.seedGenerationMethod || '人工录入'}）；`
+    + `${seedMismatch.billDate}：上一日余额 ${formatBalanceAmount(seedMismatch.anchorBalance)}`
+    + ` + 收入 ${formatBalanceAmount(seedMismatch.creditAmount)} − 支出 ${formatBalanceAmount(seedMismatch.debitAmount)}`
+    + ` = 预期 ${formatBalanceAmount(seedMismatch.expectedBalance)}，账单当日余额 ${statementBalances || '(空)'} 都对不上`;
+}
+
+function formatBalanceMismatchLine(mismatch) {
+  const anchorLabel = mismatch.anchorSource === 'seed'
+    ? `余额种子 ${mismatch.anchorDate}`
+    : `上一账单日 ${mismatch.anchorDate}`;
+  const missingRange = mismatch.missingFrom
+    ? `，中间缺 ${mismatch.missingFrom === mismatch.missingTo ? mismatch.missingFrom : `${mismatch.missingFrom} ~ ${mismatch.missingTo}`}`
+    : '';
+  return `银行账号：${mismatch.merchantId}，币种：${mismatch.currency || '(空)'}，账单日期：${mismatch.billDate}，`
+    + `上一日余额：${formatBalanceAmount(mismatch.anchorBalance)}（${anchorLabel}），`
+    + `收入：${formatBalanceAmount(mismatch.creditAmount)}，支出：${formatBalanceAmount(mismatch.debitAmount)}，`
+    + `预期余额：${formatBalanceAmount(mismatch.expectedBalance)}，账单余额：${formatBalanceAmount(mismatch.statementBalance)}，`
+    + `差额：${formatBalanceAmount(mismatch.difference, { signed: true })}${missingRange}`;
+}
+
+function formatBalanceSeedReplaceLine(replacement) {
+  const balanceLabel = replacement.balanceSource === 'calculated' ? '计算余额' : '账单余额';
+  const adjustment = Number(replacement.adjustment) || 0;
+  const written = adjustment
+    ? `，另加余额附加值 ${formatBalanceAmount(adjustment)} 后写入 ${formatBalanceAmount(replacement.writtenBalance)}`
+    : '';
+  return `银行账号：${replacement.merchantId}，币种：${replacement.currency || '(空)'}，账单日期：${replacement.billDate}，`
+    + `人工补录余额：${formatBalanceAmount(replacement.manualBalance)}，${balanceLabel}：${formatBalanceAmount(replacement.balance)}，`
+    + `差额：${formatBalanceAmount(replacement.difference, { signed: true })}${written}`;
 }
 
 function formatBalanceGapLine(gap) {
@@ -2385,20 +2449,25 @@ function buildManualBalanceRequiredResult(prompt, generatedFiles) {
       }
     : null;
   lastManualBalancePrompt = normalizedPrompt ? { ...normalizedPrompt } : null;
+  // 已有种子但首日对不上（v3.2.16 D7）：提示与日志写明是已有余额对不上，不是缺余额。
+  const seedMismatch = normalizedPrompt?.seedMismatch || null;
   appendActivityLogEntry({
     level: 'info',
-    message: '等待补录上一账单日余额',
+    message: seedMismatch ? '上一账单日余额与账单对不上，等待重新补录' : '等待补录上一账单日余额',
     details: [
       `模板名：${normalizedPrompt?.templateName || 'N/A'}`,
       `银行账号：${normalizedPrompt?.merchantId || 'N/A'}`,
       `币种：${normalizedPrompt?.currency || '(空)'}`,
-      `当前账单日期：${normalizedPrompt?.targetBillDate || 'N/A'}`
+      `当前账单日期：${normalizedPrompt?.targetBillDate || 'N/A'}`,
+      ...(seedMismatch ? [formatBalanceSeedMismatchLine(seedMismatch)] : [])
     ]
   });
 
   return {
     status: 'manual-balance-required',
-    message: '因首次导入余额，请导入上一个账单日余额用于余额校验',
+    message: seedMismatch
+      ? '上一账单日余额与账单对不上，请核对后重新补录'
+      : '因首次导入余额，请导入上一个账单日余额用于余额校验',
     detailReady: Boolean(generatedFiles?.detail),
     balanceReady: false,
     errorReportReady: false,
@@ -2453,6 +2522,102 @@ function buildBalanceGapConfirmResult(gaps, generatedFiles) {
     errorReportReady: false,
     manualBalancePromptReady: true,
     manualBalancePrompt: { ...prompt, gaps: promptGaps.map((gap) => ({ ...gap })) }
+  };
+}
+
+// 同一账单日人工补录的期末余额与本次余额不一致（v3.2.16）：替换前复用补录通道确认，prompt 列出全部待替换项。
+function buildBalanceSeedReplaceConfirmResult(replacements, generatedFiles) {
+  clearLastErrorReport();
+  lastPendingBalanceSeedConfirmation = null;
+  const promptReplacements = replacements.map((replacement) => ({
+    key: replacement.key,
+    templateName: replacement.templateName,
+    bankName: replacement.bankName,
+    merchantId: replacement.merchantId,
+    currency: replacement.currency,
+    billDate: replacement.billDate,
+    balanceSource: replacement.balanceSource,
+    manualBalance: replacement.manualBalance,
+    balance: replacement.balance,
+    difference: replacement.difference,
+    adjustment: replacement.adjustment,
+    writtenBalance: replacement.writtenBalance
+  }));
+  const [first] = promptReplacements;
+  const prompt = {
+    reason: 'seed-replace',
+    templateName: first.templateName,
+    bankName: first.bankName,
+    merchantId: first.merchantId,
+    currency: first.currency,
+    targetBillDate: first.billDate,
+    replacements: promptReplacements
+  };
+  lastManualBalancePrompt = prompt;
+  appendActivityLogEntry({
+    level: 'info',
+    message: '人工补录的期末余额与本次余额不一致，等待核查或确认替换',
+    details: [`模板名：${first.templateName}`, ...promptReplacements.map(formatBalanceSeedReplaceLine)]
+  });
+
+  return {
+    status: 'manual-balance-required',
+    message: `人工补录的期末余额与本次余额不一致（${promptReplacements.length} 处），请核查或确认替换`,
+    detailReady: Boolean(generatedFiles?.detail),
+    balanceReady: false,
+    errorReportReady: false,
+    manualBalancePromptReady: true,
+    manualBalancePrompt: { ...prompt, replacements: promptReplacements.map((replacement) => ({ ...replacement })) }
+  };
+}
+
+// 账单里的余额逐日校验不一致（v3.2.16）：复用补录通道，prompt 列出本次全部待确认的不一致。
+function buildBalanceMismatchConfirmResult(mismatches, generatedFiles) {
+  clearLastErrorReport();
+  lastPendingBalanceSeedConfirmation = null;
+  const promptMismatches = mismatches.map((mismatch) => ({
+    key: mismatch.key,
+    templateName: mismatch.templateName,
+    bankName: mismatch.bankName,
+    merchantId: mismatch.merchantId,
+    currency: mismatch.currency,
+    billDate: mismatch.billDate,
+    anchorDate: mismatch.anchorDate,
+    anchorSource: mismatch.anchorSource,
+    anchorBalance: mismatch.anchorBalance,
+    creditAmount: mismatch.creditAmount,
+    debitAmount: mismatch.debitAmount,
+    expectedBalance: mismatch.expectedBalance,
+    statementBalance: mismatch.statementBalance,
+    difference: mismatch.difference,
+    missingFrom: mismatch.missingFrom || '',
+    missingTo: mismatch.missingTo || ''
+  }));
+  const [first] = promptMismatches;
+  const prompt = {
+    reason: 'mismatch',
+    templateName: first.templateName,
+    bankName: first.bankName,
+    merchantId: first.merchantId,
+    currency: first.currency,
+    targetBillDate: first.billDate,
+    mismatches: promptMismatches
+  };
+  lastManualBalancePrompt = prompt;
+  appendActivityLogEntry({
+    level: 'info',
+    message: '账单余额校验不一致，等待核查或确认按账单余额生成',
+    details: [`模板名：${first.templateName}`, ...promptMismatches.map(formatBalanceMismatchLine)]
+  });
+
+  return {
+    status: 'manual-balance-required',
+    message: `账单余额校验不一致（${promptMismatches.length} 处），请核查或确认按账单余额生成`,
+    detailReady: Boolean(generatedFiles?.detail),
+    balanceReady: false,
+    errorReportReady: false,
+    manualBalancePromptReady: true,
+    manualBalancePrompt: { ...prompt, mismatches: promptMismatches.map((mismatch) => ({ ...mismatch })) }
   };
 }
 
@@ -2593,14 +2758,18 @@ function buildPendingBigAccountFileEntries({ template, mappings, orderedTargetFi
   });
   const merchantLookupFlags = buildManagedMerchantLookupFlags(mappings);
 
-  return normalizeInputFilePaths(inputFilePaths, { dedupe: false }).map((inputFilePath) => ({
-    filePath: inputFilePath,
-    ...merchantLookupFlags,
-    detailRows: buildMappedRowsForFile({
-      config,
-      inputFilePath
+  // v3.2.16：币种未维护大账号的问题跨文件汇总后一次报错（spec D1）
+  return mapEachCollectingCurrencyBigAccountIssues(
+    normalizeInputFilePaths(inputFilePaths, { dedupe: false }),
+    (inputFilePath) => ({
+      filePath: inputFilePath,
+      ...merchantLookupFlags,
+      detailRows: buildMappedRowsForFile({
+        config,
+        inputFilePath
+      })
     })
-  }));
+  );
 }
 
 function buildManagedMerchantLookupFlags(mappings = []) {
@@ -2661,7 +2830,8 @@ function rebuildMatchedTemplateFileEntries({
   // 避免大型文件在 prepare + execute 两阶段做两次完整解析。
   const templateConfigCache = new Map();
 
-  return (Array.isArray(fileEntries) ? fileEntries : []).map((entry) => {
+  // v3.2.16：从原文件重建时，币种未维护大账号的问题跨文件汇总后一次报错（spec D1）
+  return mapEachCollectingCurrencyBigAccountIssues(Array.isArray(fileEntries) ? fileEntries : [], (entry) => {
     const entryTemplateConfig = getEntryTemplateConfig({
       entry,
       fallbackTemplateConfig,
@@ -3095,6 +3265,42 @@ function isMultiBigAccountMapping(mappings = []) {
     return normalizeCell(mapping && mapping.templateField) === 'MerchantId'
       && normalizeCell(mapping && mapping.mappedField)
         === `${FIXED_FIELD_VALUE_PREFIX}${MERCHANT_ID_MULTI_ACCOUNT_MARKER}`;
+  });
+}
+
+// v3.2.16：MerchantId「原始账单仅有币种无账户号」— 逐行按币种回填，不参与大账号识别与选择
+function isCurrencyOnlyMerchantMapping(mappings = []) {
+  return (Array.isArray(mappings) ? mappings : []).some((mapping) => {
+    return normalizeCell(mapping && mapping.templateField) === 'MerchantId'
+      && normalizeCell(mapping && mapping.mappedField) === MERCHANT_ID_CURRENCY_ONLY_MARKER;
+  });
+}
+
+// v3.2.16（spec §4.4）：按文件名映射导入时，找出 MerchantId 为本模式的文件（按各文件命中的模板判断）。
+function classifyCurrencyOnlyEntries(fileEntries = [], templateConfigById = new Map()) {
+  const entries = Array.isArray(fileEntries) ? fileEntries : [];
+  const currencyOnlyFileNames = entries
+    .filter((entry) => {
+      const entryConfig = templateConfigById.get(entry.matchedTemplateId);
+      return isCurrencyOnlyMerchantMapping(entryConfig && entryConfig.exportMappings);
+    })
+    .map((entry) => path.basename(entry.filePath || ''));
+  return {
+    currencyOnlyFileNames,
+    allCurrencyOnly: currencyOnlyFileNames.length > 0 && currencyOnlyFileNames.length === entries.length
+  };
+}
+
+// v3.2.16（spec §4.4）：本模式的文件不能与需要选择大账号的文件同批导入——选择窗口按块列出全部文件，
+// 选定后会覆盖每个块的 MerchantId / Currency。此时整批阻断，提示分开导入。
+function createCurrencyOnlyMixedSelectionErrorResult(fileNames, templateName) {
+  return createDetailedErrorResult({
+    step: '导入网银明细文件',
+    message: `以下文件的模板 MerchantId 为「${MERCHANT_ID_CURRENCY_ONLY_OPTION}」，不能与需要选择大账号的文件同批导入，请分开导入。已取消本次导入。`,
+    errorCode: 'CURRENCY_BIG_ACCOUNT_MIXED_SELECTION',
+    detailLines: fileNames.map((fileName) => `文件「${fileName}」`),
+    context: { fileNames: fileNames.slice() },
+    templateName
   });
 }
 
@@ -3578,11 +3784,23 @@ function buildTemplateLibraryPayload() {
   });
 
   return {
-    bundleVersion: SUPPORTED_BUNDLE_VERSION,
+    bundleVersion: resolveTemplateBundleVersion(templates),
     exportedAt: new Date().toISOString(),
     channels,
     templates
   };
+}
+
+// v3.2.16：任一模板的主映射或拆分映射用到「字段筛选特征值」时写 v6，否则写 v5（见 SUPPORTED_BUNDLE_VERSION 注释）。
+function resolveTemplateBundleVersion(templates) {
+  const entries = Array.isArray(templates) ? templates : [];
+  const usesFeatureFilter = entries.some((entry) => (
+    [].concat(entry && entry.mappings || [], entry && entry.billSplitMappings || [])
+      .some((mapping) => normalizeCell(mapping && mapping.mappedField) === FEATURE_FILTER_MAPPING_FIELD)
+  ));
+  // v3.2.16：MerchantId「原始账单仅有币种无账户号」——旧版会把存储值当成映射字段，或丢掉 currencyBigAccounts
+  const usesCurrencyOnlyMerchant = entries.some((entry) => isCurrencyOnlyMerchantMapping(entry && entry.mappings));
+  return usesFeatureFilter || usesCurrencyOnlyMerchant ? SUPPORTED_BUNDLE_VERSION : BASE_BUNDLE_VERSION;
 }
 
 function toBundleAccountMapping(m) {
@@ -3673,6 +3891,13 @@ function readTemplateBundleFile(filePath) {
     mappings: Array.isArray(item.mappings) ? item.mappings : [],
     bigAccounts: Array.isArray(item.bigAccounts) ? item.bigAccounts : [],
     fixedAssignments: Array.isArray(item.fixedAssignments) ? item.fixedAssignments : [],
+    // v3.2.16（v6）：MerchantId「原始账单仅有币种无账户号」的 币种 → 大账号；v≤5 的包没有此字段
+    currencyBigAccounts: Array.isArray(item.currencyBigAccounts)
+      ? item.currencyBigAccounts.map((pair) => ({
+          currency: normalizeCell(pair && pair.currency),
+          merchantId: normalizeCell(pair && pair.merchantId)
+        }))
+      : [],
     amountSplitRules: Array.isArray(item.amountSplitRules) ? item.amountSplitRules : [],
     billSplitMappings: Array.isArray(item.billSplitMappings) ? item.billSplitMappings : [],
     billSplitRows: Array.isArray(item.billSplitRows) ? item.billSplitRows : [],
@@ -3681,6 +3906,10 @@ function readTemplateBundleFile(filePath) {
       ? { signedAmountSourceField: normalizeCell(item.billSplitMeta.signedAmountSourceField) }
       : { signedAmountSourceField: '' },
     dateFormat: normalizeCell(item.dateFormat) || 'auto',
+    // v3.2.16：模板级「字段筛选特征值」规则（旧 bundle 无此字段时为 null；导入时再校验）
+    featureFilter: item.featureFilter && typeof item.featureFilter === 'object' && !Array.isArray(item.featureFilter)
+      ? { ...item.featureFilter }
+      : null,
     // v3.2.15（v5）：所属渠道；v≤4 的主/子模板字段只用于导入时转为渠道。
     channelName: bundleVersion >= 5 ? (normalizeCell(item.channelName) || null) : null,
     isParent: bundleVersion < 5 && Boolean(item.isParent),
@@ -3936,6 +4165,13 @@ function buildImportWarningDetailLines(warnings) {
   const skippedBalanceGaps = warnings
     .filter((warning) => warning.type === 'balance-gap-skipped')
     .flatMap((warning) => (Array.isArray(warning.gaps) ? warning.gaps : []));
+  const featureValueWarnings = warnings.filter((warning) => warning.type === 'feature-value-unmatched');
+  const confirmedBalanceMismatches = warnings
+    .filter((warning) => warning.type === 'balance-mismatch-confirmed')
+    .flatMap((warning) => (Array.isArray(warning.mismatches) ? warning.mismatches : []));
+  const confirmedBalanceSeedReplacements = warnings
+    .filter((warning) => warning.type === 'balance-seed-replace-confirmed')
+    .flatMap((warning) => (Array.isArray(warning.replacements) ? warning.replacements : []));
 
   if (summaryRowWarnings.length) {
     detailLines.push('以下行的账单日期列是账单自带的合计标签，按合计行处理，未写入导出的明细账单：');
@@ -3950,6 +4186,14 @@ function buildImportWarningDetailLines(warnings) {
       detailLines.push(
         `第${warning.rowNumber}行，Credit Amount="${warning.creditAmount || '(空)'}"，Debit Amount="${warning.debitAmount || '(空)'}"`
       );
+    });
+  }
+
+  // v3.2.16：字段筛选特征值未命中的行（选该映射值的字段已留空）
+  if (featureValueWarnings.length) {
+    detailLines.push('以下行未筛出特征值，选择「字段筛选特征值」的字段已留空：');
+    featureValueWarnings.forEach((warning) => {
+      detailLines.push(`第${warning.rowNumber}行，源字段“${warning.sourceField}”，原值“${warning.rawValue || '(空)'}”`);
     });
   }
 
@@ -3981,6 +4225,16 @@ function buildImportWarningDetailLines(warnings) {
     skippedBalanceGaps.forEach((gap) => detailLines.push(formatBalanceGapLine(gap)));
   }
 
+  if (confirmedBalanceMismatches.length) {
+    detailLines.push('以下账单余额与「上一日余额 + 当日收入 − 当日支出」不一致，已确认按账单余额生成，请核查是否漏单、重复或种子有误：');
+    confirmedBalanceMismatches.forEach((mismatch) => detailLines.push(formatBalanceMismatchLine(mismatch)));
+  }
+
+  if (confirmedBalanceSeedReplacements.length) {
+    detailLines.push('以下账单日的人工补录期末余额与本次余额不一致，已确认按本次余额生成并替换人工补录：');
+    confirmedBalanceSeedReplacements.forEach((replacement) => detailLines.push(formatBalanceSeedReplaceLine(replacement)));
+  }
+
   return detailLines;
 }
 
@@ -3990,9 +4244,16 @@ function buildImportWarningMessage({ warnings, balanceReady, balanceRequested })
   const summaryRowCount = warnings.filter((warning) => warning.type === 'summary-row-skipped').length;
   const hasCurrencyWarning = warnings.some((warning) => warning.type === 'currency-unmapped');
   const hasBalanceWarning = warnings.some((warning) => warning.type === 'balance-generate-failed');
+  const featureValueMissCount = warnings.filter((warning) => warning.type === 'feature-value-unmatched').length;
   const skippedBalanceGapCount = warnings
     .filter((warning) => warning.type === 'balance-gap-skipped')
     .reduce((sum, warning) => sum + (Array.isArray(warning.gaps) ? warning.gaps.length : 0), 0);
+  const confirmedBalanceMismatchCount = warnings
+    .filter((warning) => warning.type === 'balance-mismatch-confirmed')
+    .reduce((sum, warning) => sum + (Array.isArray(warning.mismatches) ? warning.mismatches.length : 0), 0);
+  const confirmedBalanceSeedReplaceCount = warnings
+    .filter((warning) => warning.type === 'balance-seed-replace-confirmed')
+    .reduce((sum, warning) => sum + (Array.isArray(warning.replacements) ? warning.replacements.length : 0), 0);
   const exportParts = ['明细账单可导出'];
 
   if (balanceReady) {
@@ -4009,6 +4270,10 @@ function buildImportWarningMessage({ warnings, balanceReady, balanceRequested })
     warningParts.push(`已过滤${skippedDetailCount}条收支均为0或空值的明细`);
   }
 
+  if (featureValueMissCount > 0) {
+    warningParts.push(`${featureValueMissCount}行未筛出特征值，相关字段已留空`);
+  }
+
   if (hasCurrencyWarning) {
     warningParts.push('存在币种未匹配记录');
   }
@@ -4019,6 +4284,14 @@ function buildImportWarningMessage({ warnings, balanceReady, balanceRequested })
 
   if (skippedBalanceGapCount > 0) {
     warningParts.push(`${skippedBalanceGapCount}处账单日期不连续未补录，余额可能不准确`);
+  }
+
+  if (confirmedBalanceMismatchCount > 0) {
+    warningParts.push(`${confirmedBalanceMismatchCount}处余额校验不一致，已按账单余额生成`);
+  }
+
+  if (confirmedBalanceSeedReplaceCount > 0) {
+    warningParts.push(`${confirmedBalanceSeedReplaceCount}处人工补录余额已按本次余额替换`);
   }
 
   return warningParts.length
@@ -4054,6 +4327,16 @@ function getMappingFieldValues(mapping) {
 
 function decodeCustomInputMappingValue(rawValue) {
   const normalizedValue = normalizeCell(rawValue);
+
+  // v3.2.16：按币种取大账号——界面显示为选项文字，不属于「自己输入」
+  if (normalizedValue === MERCHANT_ID_CURRENCY_ONLY_MARKER) {
+    return {
+      isCustomInput: false,
+      mappedField: MERCHANT_ID_CURRENCY_ONLY_OPTION,
+      customValue: '',
+      isMultiBigAccount: false
+    };
+  }
 
   if (!normalizedValue.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
     return {
@@ -4341,7 +4624,14 @@ function getTemplateMappingConfig(templateId) {
       : [],
     billSplitMeta: templatePayload.billSplitMeta && typeof templatePayload.billSplitMeta === 'object'
       ? { signedAmountSourceField: normalizeCell(templatePayload.billSplitMeta.signedAmountSourceField) }
-      : { signedAmountSourceField: '' }
+      : { signedAmountSourceField: '' },
+    // v3.2.16：MerchantId「原始账单仅有币种无账户号」的 币种 → 大账号
+    currencyBigAccounts: Array.isArray(templatePayload.currencyBigAccounts)
+      ? templatePayload.currencyBigAccounts.map((item) => ({
+          currency: normalizeCell(item.currency),
+          merchantId: normalizeCell(item.merchantId)
+        }))
+      : []
   };
 }
 
@@ -4689,7 +4979,11 @@ function buildTemplateSummary(template) {
     channelId: template.channelId || null,
     channelName: template.channelName || '',
     // v1.5.2 需求 3（G3-4）：透传「文件名里的固定字段」给映射关系对话框回显
-    filenameFixedField: String(template.filenameFixedField || '')
+    filenameFixedField: String(template.filenameFixedField || ''),
+    // v3.2.16：模板级「字段筛选特征值」规则，供映射关系对话框回显
+    featureFilter: template.featureFilter && typeof template.featureFilter === 'object'
+      ? { ...template.featureFilter }
+      : null
   };
 }
 
@@ -8183,7 +8477,33 @@ function registerFundTransferAccountMappingHandlers() {
   });
 }
 
-function validateTemplateConfiguration({ template, mappings, enumValues, bigAccounts = [], fixedAssignments = [] }) {
+// v3.2.16：保存时的筛选规则——实际用到时必须有效（无效即抛错）；未用到时有效草稿照存（便于再次选用），无效则不写。
+function resolveSavedFeatureFilter({ used, featureFilter, headers }) {
+  if (used) {
+    return normalizeFeatureFilterRule(featureFilter, { headers });
+  }
+  if (!featureFilter) {
+    return null;
+  }
+  try {
+    return normalizeFeatureFilterRule(featureFilter, { headers });
+  } catch (_error) {
+    return null;
+  }
+}
+
+function validateTemplateConfiguration({
+  template,
+  mappings,
+  enumValues,
+  bigAccounts = [],
+  fixedAssignments = [],
+  featureFilter = null,
+  billSplitMappings = [],
+  // v3.2.16：MerchantId「原始账单仅有币种无账户号」的 币种 → 大账号，与币种映射表中的币种代码
+  currencyBigAccounts = [],
+  availableCurrencyCodes = null
+}) {
   const targetFields = buildManagedMappingFields(enumValues);
   const targetFieldSet = new Set(targetFields);
   const sourceFieldSet = new Set(template.headers.map((header) => normalizeCell(header)));
@@ -8198,14 +8518,16 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
       return;
     }
 
+    const isFeatureFilterMode = rawMappedField === FEATURE_FILTER_MAPPING_FIELD;
     mappingByTarget.set(targetField, {
-      mappedField: rawMappedField === CONCAT_FIELDS_MAPPING_FIELD ? CONCAT_FIELDS_MAPPING_FIELD : sourceField,
-      mappedFields: getMappingFieldValues(mapping),
+      mappedField: rawMappedField === CONCAT_FIELDS_MAPPING_FIELD || isFeatureFilterMode ? rawMappedField : sourceField,
+      mappedFields: isFeatureFilterMode ? [] : getMappingFieldValues(mapping),
       customValue: normalizeCell(mapping.customValue)
     });
   });
 
   const cleanedMappings = [];
+  const featureFilterTargetFields = [];
   const merchantIdMapping = mappingByTarget.get('MerchantId') || {
     mappedField: '',
     mappedFields: [],
@@ -8213,6 +8535,8 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
     isMultiBigAccount: false
   };
   const merchantIdManagedByBigAccounts = merchantIdMapping.mappedField === MERCHANT_ID_SELF_INPUT_OPTION;
+  const merchantIdManagedByCurrency = merchantIdMapping.mappedField === MERCHANT_ID_CURRENCY_ONLY_OPTION
+    || merchantIdMapping.mappedField === MERCHANT_ID_CURRENCY_ONLY_MARKER;
   const signedAmountSourceField = normalizeCell(mappingByTarget.get(SIGNED_AMOUNT_MAPPING_FIELD)?.mappedField);
   const creditAmountSourceField = normalizeCell(mappingByTarget.get('Credit Amount')?.mappedField);
   const debitAmountSourceField = normalizeCell(mappingByTarget.get('Debit Amount')?.mappedField);
@@ -8384,6 +8708,15 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
       return;
     }
 
+    if (targetField === 'MerchantId' && merchantIdManagedByCurrency) {
+      cleanedMappings.push({
+        templateField: targetField,
+        mappedField: MERCHANT_ID_CURRENCY_ONLY_MARKER,
+        mappedFields: []
+      });
+      return;
+    }
+
     if (targetField === 'Currency' && normalizedSourceField === MERCHANT_ID_SELF_INPUT_OPTION) {
       cleanedMappings.push({
         templateField: targetField,
@@ -8406,6 +8739,25 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
       cleanedMappings.push({
         templateField: targetField,
         mappedField: merchantIdManagedByBigAccounts ? '' : normalizedSourceField,
+        mappedFields: []
+      });
+      return;
+    }
+
+    // v3.2.16：字段筛选特征值，可用字段同「需要拼接字段」；规则模板级共用，循环后统一校验。
+    if (normalizedSourceField === FEATURE_FILTER_MAPPING_FIELD) {
+      if (
+        targetField === 'Balance'
+        || targetField === 'MerchantId'
+        || targetField === 'Currency'
+        || ADVANCED_MAPPING_FIELDS.includes(targetField)
+      ) {
+        throw new FileValidationError('FILE_READ', `${targetField} 不支持使用"${FEATURE_FILTER_MAPPING_FIELD}"`);
+      }
+      featureFilterTargetFields.push(targetField);
+      cleanedMappings.push({
+        templateField: targetField,
+        mappedField: FEATURE_FILTER_MAPPING_FIELD,
         mappedFields: []
       });
       return;
@@ -8484,11 +8836,111 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
     });
   }
 
+  // v3.2.16：只按实际生效的映射判断是否用到（与生成口径 resolveStatementFeatureFilter 一致）：
+  //   启用拆分/合并且不复用模块映射时看拆分映射（已存或模板包内），否则看主映射。
+  const splitMappingsEffective = usesBillSplitMerge && cleanedMappings.some((mapping) => (
+    mapping.templateField === REUSE_MODULE_MAPPING_FIELD && mapping.mappedField === '否'
+  ));
+  const billSplitUsesFeatureFilter = splitMappingsEffective
+    && (Array.isArray(billSplitMappings) ? billSplitMappings : [])
+      .some((mapping) => normalizeCell(mapping && mapping.mappedField) === FEATURE_FILTER_MAPPING_FIELD);
+  const featureFilterUsed = splitMappingsEffective ? billSplitUsesFeatureFilter : featureFilterTargetFields.length > 0;
+  if (billSplitUsesFeatureFilter && !featureFilter) {
+    throw new FileValidationError(
+      'FILE_READ',
+      `拆分/合并账单映射关系设置中有字段使用了"${FEATURE_FILTER_MAPPING_FIELD}"，请先在该弹窗点击【筛选条件】设置`
+    );
+  }
+  const cleanedFeatureFilter = resolveSavedFeatureFilter({
+    used: featureFilterUsed,
+    featureFilter,
+    headers: template.headers
+  });
+  const cleanedCurrencyBigAccounts = merchantIdManagedByCurrency
+    ? validateCurrencyBigAccountConfiguration({
+        cleanedMappings,
+        currencyBigAccounts,
+        availableCurrencyCodes,
+        usesBillSplitMerge
+      })
+    : [];
+
   return {
     mappings: cleanedMappings,
     bigAccounts: expandBigAccountConfigurations(cleanedBigAccounts),
-    fixedAssignments: cleanedFixedAssignments
+    fixedAssignments: cleanedFixedAssignments,
+    featureFilter: cleanedFeatureFilter,
+    currencyBigAccounts: cleanedCurrencyBigAccounts
   };
+}
+
+// v3.2.16：MerchantId「原始账单仅有币种无账户号」的保存校验（spec §4.1、§4.2）。
+// 不拆分明细时 Currency 必须映射到原始账单的单个币种列；启用拆分 / 合并明细账单时币种取自各拆分行。
+// 币种不区分大小写、统一存大写代码，必须在币种映射表中，且只能出现一次；一个大账号可对应多个币种。
+function validateCurrencyBigAccountConfiguration({
+  cleanedMappings,
+  currencyBigAccounts = [],
+  availableCurrencyCodes = null,
+  usesBillSplitMerge = false
+}) {
+  const invalid = (message) => new FileValidationError('CURRENCY_BIG_ACCOUNT_INVALID', message);
+
+  if (!usesBillSplitMerge) {
+    const currencyMapping = cleanedMappings.find((mapping) => mapping.templateField === 'Currency');
+    const currencySource = normalizeCell(currencyMapping && currencyMapping.mappedField);
+    const currencySourceFields = Array.isArray(currencyMapping && currencyMapping.mappedFields)
+      ? currencyMapping.mappedFields
+      : [];
+    if (
+      !currencySource
+      || currencySource === CONCAT_FIELDS_MAPPING_FIELD
+      || currencySource.startsWith(FIXED_FIELD_VALUE_PREFIX)
+      || currencySourceFields.length > 1
+    ) {
+      throw invalid(`MerchantId 选择「${MERCHANT_ID_CURRENCY_ONLY_OPTION}」时，Currency 必须映射到原始账单中的币种列`);
+    }
+  }
+
+  const pairs = [];
+  (Array.isArray(currencyBigAccounts) ? currencyBigAccounts : []).forEach((item, index) => {
+    const currency = normalizeCell(item && item.currency).toUpperCase();
+    const merchantId = normalizeCell(item && item.merchantId);
+    if (!currency && !merchantId) {
+      return;
+    }
+    if (!currency) {
+      throw invalid(`【映射管理】第 ${index + 1} 行币种为空`);
+    }
+    if (!merchantId) {
+      throw invalid(`【映射管理】第 ${index + 1} 行大账号为空`);
+    }
+    pairs.push({ currency, merchantId, rowNumber: index + 1 });
+  });
+
+  if (!pairs.length) {
+    throw invalid('请在 MerchantId 的【映射管理】中至少维护 1 组币种与大账号');
+  }
+
+  if (Array.isArray(availableCurrencyCodes)) {
+    const knownCodes = new Set(availableCurrencyCodes.map((code) => normalizeCell(code).toUpperCase()).filter(Boolean));
+    if (!knownCodes.size) {
+      throw invalid('未读取到币种映射表，无法校验【映射管理】中的币种');
+    }
+    const unknown = pairs.find((pair) => !knownCodes.has(pair.currency));
+    if (unknown) {
+      throw invalid(`【映射管理】第 ${unknown.rowNumber} 行币种「${unknown.currency}」不在币种映射表中`);
+    }
+  }
+
+  const seen = new Map();
+  pairs.forEach((pair) => {
+    if (seen.has(pair.currency)) {
+      throw invalid(`【映射管理】币种「${pair.currency}」重复（第 ${seen.get(pair.currency)}、${pair.rowNumber} 行），一个币种只能对应一个大账号`);
+    }
+    seen.set(pair.currency, pair.rowNumber);
+  });
+
+  return pairs.map(({ currency, merchantId }) => ({ currency, merchantId }));
 }
 
 // v3.2.15：旧的主/子模板通道只保留注册（冻结登记），调用一律拒绝且不写数据。
@@ -9003,6 +9455,7 @@ function registerTemplateHandlers() {
         billSplitRows: mappingConfig.billSplitRows,
         billSplitAmountRules: mappingConfig.billSplitAmountRules,
         billSplitMeta: mappingConfig.billSplitMeta,
+        currencyBigAccounts: mappingConfig.currencyBigAccounts,
         dateFormat: mappingConfig.template.dateFormat || 'auto'
       };
     } catch (error) {
@@ -9055,7 +9508,12 @@ function registerTemplateHandlers() {
         mappings: payload.mappings,
         enumValues: loadEnumValues(enumConfig.filePath),
         bigAccounts: payload.bigAccounts,
-        fixedAssignments: payload.fixedAssignments
+        fixedAssignments: payload.fixedAssignments,
+        // v3.2.16：载荷未带规则时用已存规则；不复用的拆分映射用到该值时一并校验
+        featureFilter: payload.featureFilter || template.featureFilter || null,
+        billSplitMappings: database.getBillSplitMappings(payload.templateId),
+        currencyBigAccounts: payload.currencyBigAccounts,
+        availableCurrencyCodes: getAvailableCurrencyCodes().map((option) => option.code)
       });
 
       const usesAmountSplitByField = templateConfiguration.mappings.some(
@@ -9132,7 +9590,7 @@ function registerTemplateHandlers() {
         templateConfiguration.fixedAssignments,
         payload.dateFormat,
         null,
-        { preserveOwn, channelAssignment }
+        { preserveOwn, channelAssignment, featureFilter: templateConfiguration.featureFilter, currencyBigAccounts: templateConfiguration.currencyBigAccounts }
       );
       const assignmentResult = saveResult && saveResult.channelAssignment;
       syncTemplateLibraryFile();
@@ -9460,6 +9918,8 @@ function registerTemplateHandlers() {
       //   被跳过的模板保留原有映射与归属，不按包内容改写。
       const succeededEntries = new Set();
 
+      // v3.2.16：校验「原始账单仅有币种无账户号」的币种用（只读一次币种映射表）
+      const bundleCurrencyCodes = getAvailableCurrencyCodes().map((option) => option.code);
       importedTemplates.forEach((entry) => {
         if (!entry.name || !entry.headers.length) {
           skippedCount += 1;
@@ -9503,7 +9963,11 @@ function registerTemplateHandlers() {
             }),
             enumValues,
             bigAccounts: entry.bigAccounts,
-            fixedAssignments: entry.fixedAssignments
+            fixedAssignments: entry.fixedAssignments,
+            featureFilter: entry.featureFilter,
+            billSplitMappings: entry.billSplitMappings,
+            currencyBigAccounts: entry.currencyBigAccounts,
+            availableCurrencyCodes: bundleCurrencyCodes
           });
           const template = database.upsertTemplate({
             templateKey: entry.templateKey,
@@ -9533,7 +9997,7 @@ function registerTemplateHandlers() {
             validated.fixedAssignments,
             entry.dateFormat,
             normalizedAmountSplitRules,
-            { preserveOwn: false }
+            { preserveOwn: false, featureFilter: validated.featureFilter, currencyBigAccounts: validated.currencyBigAccounts }
           );
 
           // v1.5.2 需求 3：透传文件名固定字段（老 bundle 无此字段时落为空串）
@@ -9863,7 +10327,14 @@ function registerTemplateHandlers() {
         });
       }
       const validated = validateBillSplitMappingsPayload(payload.mappings, template);
-      database.saveBillSplitMappings(templateId, validated);
+      // v3.2.16：用到字段筛选特征值时规则必须有效（载荷未带则用已存规则），与映射同一事务写入
+      // 未用到时有效草稿照存，避免弹窗里改过的规则被丢弃而与界面不一致
+      const featureFilter = resolveSavedFeatureFilter({
+        used: validated.some((mapping) => mapping.mappedField === FEATURE_FILTER_MAPPING_FIELD),
+        featureFilter: payload.featureFilter || template.featureFilter,
+        headers: template.headers
+      });
+      database.saveBillSplitMappings(templateId, validated, { featureFilter });
       syncTemplateLibraryFile();
       return { status: 'success', message: '拆分账单字段映射保存成功' };
     } catch (error) {
@@ -10187,6 +10658,19 @@ function validateBillSplitMappingsPayload(mappings, template) {
     // 与主表格保持一致
     const isBalanceSpecialValue = templateField === 'Balance'
       && (mappedField === BALANCE_DISABLED_OPTION || mappedField === BALANCE_CALCULATED_OPTION);
+    // v3.2.16：字段筛选特征值共用模板级规则（由保存处统一校验），不带源字段
+    if (mappedField === FEATURE_FILTER_MAPPING_FIELD) {
+      if (templateField === 'Balance') {
+        throw new FileValidationError('FILE_READ', `${templateField} 不支持使用"${FEATURE_FILTER_MAPPING_FIELD}"`);
+      }
+      normalized.push({
+        templateField,
+        mappedField,
+        mappedFields: [],
+        rowIndex: Number.isInteger(mapping?.rowIndex) ? mapping.rowIndex : index
+      });
+      return;
+    }
     // Header existence check (allow concat marker + custom prefix to pass)
     const checkSourceFieldExists = (field) => {
       if (!field) return;
@@ -10349,6 +10833,11 @@ function buildMappedFieldLookup(mappings) {
   return mappings.reduce((accumulator, mapping) => {
     const mappedFields = getMappingFieldValues(mapping);
     const isConcatMode = normalizeCell(mapping.mappedField) === CONCAT_FIELDS_MAPPING_FIELD;
+    // v3.2.16：字段筛选特征值转为内部 token，由 buildMappedRows 按模板级规则逐行取值
+    if (normalizeCell(mapping.mappedField) === FEATURE_FILTER_MAPPING_FIELD) {
+      accumulator[mapping.templateField] = FEATURE_FILTER_FIELD_TOKEN;
+      return accumulator;
+    }
     accumulator[mapping.templateField] = isConcatMode
       ? (Array.isArray(mapping.mappedFields) && mapping.mappedFields.length ? mapping.mappedFields : mappedFields)
       : mappedFields.length > 1
@@ -10392,9 +10881,11 @@ function buildStatementGenerationConfig({
   // v3.2.15（T3）：属于渠道的模板按渠道名输出，明细 Channel 列与余额、种子、文件名同一口径。
   const outputName = resolveStatementOutputName(template);
   const templateNameParts = splitTemplateName(outputName);
-  const selectedMerchantId = normalizeCell(selectedBigAccount?.merchantId);
-  const selectedCurrency = normalizeCell(selectedBigAccount?.currency);
   const merchantIdMappingValue = normalizeLookupMappingValue(mappingByTargetField.MerchantId);
+  // v3.2.16：按币种取大账号的模板逐行回填 MerchantId，不使用选择的大账号（防御：即便传入也忽略）。
+  const isCurrencyOnlyTemplate = merchantIdMappingValue === MERCHANT_ID_CURRENCY_ONLY_MARKER;
+  const selectedMerchantId = isCurrencyOnlyTemplate ? '' : normalizeCell(selectedBigAccount?.merchantId);
+  const selectedCurrency = isCurrencyOnlyTemplate ? '' : normalizeCell(selectedBigAccount?.currency);
   const currencyMappingValue = normalizeLookupMappingValue(mappingByTargetField.Currency);
   const isMultiBigAccountTemplate = merchantIdMappingValue
     === `${FIXED_FIELD_VALUE_PREFIX}${MERCHANT_ID_MULTI_ACCOUNT_MARKER}`;
@@ -10447,6 +10938,10 @@ function buildStatementGenerationConfig({
 
   const amountSplitByFieldConfig = buildAmountSplitByFieldConfig(template, selectedMappings);
   const billSplitMergeConfig = buildBillSplitMergeConfig(template, selectedMappings);
+  const featureFilter = resolveStatementFeatureFilter(template, mappingByTargetField, billSplitMergeConfig);
+  const currencyBigAccountMapping = isCurrencyOnlyTemplate
+    ? buildCurrencyBigAccountMappingConfig(template, outputName)
+    : null;
 
   return {
     template,
@@ -10466,8 +10961,43 @@ function buildStatementGenerationConfig({
     },
     amountSplitByField: amountSplitByFieldConfig,
     billSplitMerge: billSplitMergeConfig,
+    featureFilter,
+    currencyBigAccountMapping,
     dateParseOrder: template.dateFormat || 'auto'
   };
+}
+
+// v3.2.16：实际生效的映射（拆分/合并且不复用时为拆分映射，否则为主映射）用到「字段筛选特征值」时，
+// 模板须有有效规则，否则拒绝生成；与 buildMappedRows 的启用口径一致。
+function resolveStatementFeatureFilter(template, mappingByTargetField, billSplitMergeConfig) {
+  const effectiveLookup = billSplitMergeConfig
+    && billSplitMergeConfig.enabled
+    && billSplitMergeConfig.reuseModuleMapping === false
+    ? billSplitMergeConfig.billSplitMappingByTargetField
+    : mappingByTargetField;
+  const used = Object.values(effectiveLookup || {}).some((value) => value === FEATURE_FILTER_FIELD_TOKEN);
+  if (!used) {
+    return null;
+  }
+  return normalizeFeatureFilterRule(template && template.featureFilter, { headers: template && template.headers });
+}
+
+// v3.2.16：MerchantId「原始账单仅有币种无账户号」— 读取模板【映射管理】中的 币种 → 大账号。
+// 没有配置时拒绝生成，避免 MerchantId 整列留空。
+function buildCurrencyBigAccountMappingConfig(template, outputName) {
+  const pairs = template && template.id
+    ? (database.getTemplateCurrencyBigAccounts(template.id) || [])
+      .map((item) => ({ currency: normalizeCell(item.currency), merchantId: normalizeCell(item.merchantId) }))
+      .filter((item) => item.currency && item.merchantId)
+    : [];
+  const templateName = normalizeCell(template && template.name) || normalizeCell(outputName);
+  if (!pairs.length) {
+    throw new FileValidationError(
+      'CURRENCY_BIG_ACCOUNT_CONFIG_MISSING',
+      `模板「${templateName}」的 MerchantId 为「${MERCHANT_ID_CURRENCY_ONLY_OPTION}」，但未在【映射管理】中维护币种与大账号，请先维护后重新导入`
+    );
+  }
+  return { templateName, pairs };
 }
 
 function buildBillSplitMergeConfig(template, selectedMappings) {
@@ -10585,11 +11115,13 @@ function buildMappedRowsForFile({
     amountMappingRules: config.amountMappingRules,
     amountSplitByField: config.amountSplitByField,
     billSplitMerge: config.billSplitMerge,
+    featureFilter: config.featureFilter || null,
     expectedSourceHeaders: config.template.headers,
     selectedBigAccount: {
       merchantId: config.selectedMerchantId,
       currency: config.selectedCurrency
     },
+    currencyBigAccountMapping: config.currencyBigAccountMapping || null,
     dateParseOrder: config.dateParseOrder,
     readOptions: {
       readGuard: createStatementWorkbookReadGuard(inputFilePath),
@@ -10624,6 +11156,8 @@ const statementGenerationHelpers = createStatementGenerationHelpers({
   buildImportWarningMessage,
   buildManualBalanceRequiredResult,
   buildBalanceGapConfirmResult,
+  buildBalanceMismatchConfirmResult,
+  buildBalanceSeedReplaceConfirmResult,
   getAcknowledgedBalanceGapKeys,
   buildDetailExportRows,
   buildMappedRowsForFile,
@@ -10646,6 +11180,7 @@ const statementGenerationHelpers = createStatementGenerationHelpers({
   resolveSinglePreparedFieldValue,
   scanBalanceSeedStatus,
   readBalanceAdjustments,
+  readBalanceSeedRecords,
   splitTemplateName,
   storeGeneratedBalanceSeeds,
   writeBalanceWorkbook,
@@ -10975,6 +11510,15 @@ function regenerateVirtualTemplateBalanceFromSession(
   if (balanceGaps.length) {
     return { needsSeed: true, gaps: balanceGaps, warnings: allWarnings };
   }
+  // 余额不一致同样不合并部分余额，统一确认。
+  const balanceMismatches = statementGenerationHelpers.extractBalanceMismatchConfirmItems(allWarnings);
+  if (balanceMismatches.length) {
+    return { needsSeed: true, mismatches: balanceMismatches, warnings: allWarnings };
+  }
+  const balanceSeedReplacements = statementGenerationHelpers.extractBalanceSeedReplaceConfirmItems(allWarnings);
+  if (balanceSeedReplacements.length) {
+    return { needsSeed: true, replacements: balanceSeedReplacements, warnings: allWarnings };
+  }
 
   // 合并
   let mergedBalance = null;
@@ -11158,6 +11702,7 @@ function generateMultiTemplateGroupFiles({
   // 已算出的组照常写出各自的余额文件和计算种子，补录或不补录后按全部模板组重算（断档 spec §4.2 第 1 条）。
   const balancePending = allWarnings.some(
     (w) => w.type === 'balance-seed-required' || w.type === 'balance-gap-confirm'
+      || w.type === 'balance-mismatch-confirm' || w.type === 'balance-seed-replace-confirm'
   );
   const mergeableBalancePaths = balancePending ? [] : allBalancePaths;
   const mergedBalance = mergeableBalancePaths.length > 1
@@ -11543,8 +12088,8 @@ function cacheCurrentStatementExports({
   });
 }
 
-function cacheAllStatementExport(kind, generatedFile) {
-  statementGenerationHelpers.cacheAllStatementExport(lastGeneratedExports, kind, generatedFile);
+function cacheAllStatementExport(kind, generatedFile, balanceWarnings = []) {
+  statementGenerationHelpers.cacheAllStatementExport(lastGeneratedExports, kind, generatedFile, balanceWarnings);
 }
 
 function updateStatementSessionCache(session, batchId, generatedFiles) {
@@ -11694,6 +12239,12 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
     ? `暂无可导出的全部${kind === 'detail' ? '明细' : '余额'}账单`
     : `暂无可导出的${kind === 'detail' ? '明细' : '余额'}账单`;
   let generatedFile = getGeneratedStatementExport(kind, normalizedScope);
+  // 导出全部余额会重新生成：记下本次重算的告警，导出成功后带出已接受的风险。
+  // 命中“全部”余额缓存时取随文件缓存的告警（重算后再次导出、确认后重算再导出）。
+  let exportBalanceWarnings = kind === 'balance' && normalizedScope === 'all' &&
+    generatedFile && Array.isArray(generatedFile.balanceWarnings)
+    ? generatedFile.balanceWarnings
+    : [];
 
   if (!generatedFile && normalizedScope === 'all') {
     if (!session) {
@@ -11804,7 +12355,10 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
         const allGroupWarnings = perGroupPaths.flatMap((g) => g.warnings || []);
         const manualBalanceWarning = extractManualBalancePromptWarning(allGroupWarnings);
         const balanceGaps = statementGenerationHelpers.extractBalanceGapConfirmGaps(allGroupWarnings);
-        if ((manualBalanceWarning || balanceGaps.length) && lastGroupTemplateConfig) {
+        const balanceMismatches = statementGenerationHelpers.extractBalanceMismatchConfirmItems(allGroupWarnings);
+        const balanceSeedReplacements = statementGenerationHelpers.extractBalanceSeedReplaceConfirmItems(allGroupWarnings);
+        if ((manualBalanceWarning || balanceGaps.length || balanceMismatches.length || balanceSeedReplacements.length)
+            && lastGroupTemplateConfig) {
           // 循环里逐组记下的是单模板上下文；补录或不补录后须按全部模板组重算，否则只剩最后一组。
           rememberLastFileImportContext(createGenerationContext({
             templateId: FILENAME_MAPPING_TEMPLATE_ID,
@@ -11827,6 +12381,12 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
         if (balanceGaps.length) {
           return buildBalanceGapConfirmResult(balanceGaps, { balance: null, detail: null });
         }
+        if (balanceMismatches.length) {
+          return buildBalanceMismatchConfirmResult(balanceMismatches, { balance: null, detail: null });
+        }
+        if (balanceSeedReplacements.length) {
+          return buildBalanceSeedReplaceConfirmResult(balanceSeedReplacements, { balance: null, detail: null });
+        }
         // 任一模板组余额生成失败（如某日未找到期末余额）时阻断：否则合并结果缺这些组的账户，仍显示导出成功。
         const failedGroupLines = perGroupPaths
           .map((group) => ({
@@ -11846,6 +12406,7 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
             templateName: session.templateName
           });
         }
+        exportBalanceWarnings = allGroupWarnings;
       }
 
       // 合并多组文件，命名：模板数量-COMMON/BALANCE-日期范围.xlsx
@@ -11877,10 +12438,13 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
       if (skippedGroupNames.length > 0) {
         const step = kind === 'detail' ? '导出明细账单' : '导出余额账单';
         const exportResult = await exportGeneratedFile(generatedFile, emptyMessage, step, savePath);
+        const incompleteMessage = `文件已导出，但数据不完整：${skippedGroupNames.join('、')} 的模板已被删除，对应文件未包含在导出中`;
         if (exportResult.status === 'success') {
-          exportResult.message = `文件已导出，但数据不完整：${skippedGroupNames.join('、')} 的模板已被删除，对应文件未包含在导出中。`;
+          exportResult.message = `${incompleteMessage}。`;
         }
-        return exportResult;
+        return kind === 'balance'
+          ? withAcceptedBalanceRiskWarnings(exportResult, exportBalanceWarnings, session.templateName || '', incompleteMessage)
+          : exportResult;
       }
     } else {
       // 正常模板流程（非虚拟 ID）
@@ -11958,6 +12522,14 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
         if (balanceGaps.length) {
           return buildBalanceGapConfirmResult(balanceGaps, generatedFiles);
         }
+        const balanceMismatches = statementGenerationHelpers.extractBalanceMismatchConfirmItems(generatedFiles.warnings);
+        if (balanceMismatches.length) {
+          return buildBalanceMismatchConfirmResult(balanceMismatches, generatedFiles);
+        }
+        const balanceSeedReplacements = statementGenerationHelpers.extractBalanceSeedReplaceConfirmItems(generatedFiles.warnings);
+        if (balanceSeedReplacements.length) {
+          return buildBalanceSeedReplaceConfirmResult(balanceSeedReplacements, generatedFiles);
+        }
 
         if (!generatedFiles.balance) {
           const balanceWarning = generatedFiles.warnings.find((warning) => warning.type === 'balance-generate-failed');
@@ -11969,18 +12541,49 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
           });
         }
 
-        cacheAllStatementExport('balance', generatedFiles.balance);
+        cacheAllStatementExport('balance', generatedFiles.balance, generatedFiles.warnings);
         generatedFile = generatedFiles.balance;
+        exportBalanceWarnings = generatedFiles.warnings || [];
       }
     }
   }
 
-  return exportGeneratedFile(
+  const exportResult = await exportGeneratedFile(
     generatedFile,
     emptyMessage,
     kind === 'detail' ? '导出明细账单' : '导出余额账单',
     savePath
   );
+  return kind === 'balance'
+    ? withAcceptedBalanceRiskWarnings(exportResult, exportBalanceWarnings, generatedFile?.templateName || session?.templateName || '')
+    : exportResult;
+}
+
+// v3.2.16（Codex 审查）：导出全部余额重新生成时，本次重算中已接受的风险——断档未补录、已确认的余额不一致、
+// 已确认替换人工补录——随导出结果告警并可导出报错文件，不只提示“文件导出成功”。
+function withAcceptedBalanceRiskWarnings(exportResult, warnings, templateName, leadMessage = '文件导出成功') {
+  const acceptedTypes = ['balance-gap-skipped', 'balance-mismatch-confirmed', 'balance-seed-replace-confirmed'];
+  const accepted = (Array.isArray(warnings) ? warnings : [])
+    .filter((warning) => warning && acceptedTypes.includes(warning.type));
+  if (!exportResult || exportResult.status !== 'success' || !accepted.length) return exportResult;
+  const countOf = (type, field) => accepted
+    .filter((warning) => warning.type === type)
+    .reduce((sum, warning) => sum + (Array.isArray(warning[field]) ? warning[field].length : 0), 0);
+  const parts = [
+    [countOf('balance-gap-skipped', 'gaps'), (count) => `${count}处账单日期不连续未补录，余额可能不准确`],
+    [countOf('balance-mismatch-confirmed', 'mismatches'), (count) => `${count}处余额校验不一致，已按账单余额生成`],
+    [countOf('balance-seed-replace-confirmed', 'replacements'), (count) => `${count}处人工补录余额已按本次余额替换`]
+  ].filter(([count]) => count > 0).map(([count, text]) => text(count));
+  const warningResult = createWarningResult({
+    step: '导出余额账单',
+    message: `${leadMessage}，${parts.join('，')}，请点击状态框导出报错文件`,
+    balanceReady: true,
+    detailLines: buildImportWarningDetailLines(accepted),
+    context: { templateName, filePath: exportResult.filePath },
+    errorCode: 'EXPORT_BALANCE_WARNING',
+    templateName
+  });
+  return { ...warningResult, filePath: exportResult.filePath };
 }
 
 function registerBigAccountHandlers() {
@@ -12180,6 +12783,70 @@ function registerBigAccountHandlers() {
         originalError: error
       });
     }
+  });
+
+  // v3.2.16 模板管理【余额管理】：按渠道 / 普通模板查看余额种子，修改余额、删除单条种子。
+  ipcMain.handle('balance-seed:list', (_event, owner) => {
+    try {
+      return {
+        status: 'success',
+        ...listOwnerSeeds({ database, storageRoot: ensureStorageRoot(), owner })
+      };
+    } catch (error) {
+      return createBalanceSeedManagementErrorResult('读取余额种子', error, { owner });
+    }
+  });
+
+  supportIpcHandle('balance-seed:update', '修改余额种子', (_event, rawPayload) => {
+    const payload = normalizeBalanceSeedPayload(rawPayload);
+    try {
+      const result = updateOwnerSeed({ database, storageRoot: ensureStorageRoot(), payload });
+      if (result.status === 'success' && result.changed) {
+        appendActivityLogEntry({ level: 'info', ...buildBalanceSeedActivityLog('update', result) });
+      }
+      return result;
+    } catch (error) {
+      return createBalanceSeedManagementErrorResult('修改余额种子', error, { key: payload.key, owner: payload.owner });
+    }
+  });
+
+  supportIpcHandle('balance-seed:delete', '删除余额种子', (_event, rawPayload) => {
+    const payload = normalizeBalanceSeedPayload(rawPayload);
+    try {
+      const result = deleteOwnerSeed({ database, storageRoot: ensureStorageRoot(), payload });
+      if (result.status === 'success') {
+        appendActivityLogEntry({ level: 'info', ...buildBalanceSeedActivityLog('delete', result) });
+      }
+      return result;
+    } catch (error) {
+      return createBalanceSeedManagementErrorResult('删除余额种子', error, { key: payload.key, owner: payload.owner });
+    }
+  });
+}
+
+// 非对象载荷（如 null）按空对象处理，由服务返回结构化的业务错误。
+function normalizeBalanceSeedPayload(payload) {
+  return payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+}
+
+// 选项失效、余额非法、种子文件损坏等按业务错误返回原因；其余按系统错误生成报错文件。
+function createBalanceSeedManagementErrorResult(step, error, context = {}) {
+  if (error instanceof BalanceSeedManagementError || error instanceof FileValidationError) {
+    return createDetailedErrorResult({
+      step,
+      message: error.message,
+      errorCode: error.code || 'BALANCE_SEED_MANAGEMENT_FAILED',
+      detailLines: Array.isArray(error.detailLines) ? error.detailLines : [],
+      context: { ...context, ...(error.context || {}) }
+    });
+  }
+  return createErrorResult({
+    step,
+    message: `${step}失败，请导出报错文件查看详情`,
+    errorCode: 'BALANCE_SEED_MANAGEMENT_RUNTIME',
+    errorType: '系统错误',
+    originalError: error,
+    context
   });
 }
 
@@ -12858,6 +13525,8 @@ async function handleFilenameMappingImport(prepared) {
     // 会据此挑选正确的 config（逻辑同 main.js:6070-6107 主模板多文件分支）
     const perTemplateConfigCache = new Map(); // templateId → matchedConfig
     const parentProvisionalEntries = [];
+    // v3.2.16：币种未维护大账号的问题先收集，全部文件解析完再一次报错（spec D1）
+    const currencyBigAccountIssues = [];
 
     for (const { filePath, matchedTemplate } of perFileMatch) {
       const matchedId = matchedTemplate.id;
@@ -12883,15 +13552,29 @@ async function handleFilenameMappingImport(prepared) {
         allowManagedMerchantWithoutSelection: true
       });
       const merchantLookupFlags = buildManagedMerchantLookupFlags(matchedConfig.exportMappings);
+      let detailRows;
+      try {
+        detailRows = buildMappedRowsForFile({ config, inputFilePath: filePath });
+      } catch (error) {
+        if (!isCurrencyBigAccountUnmappedError(error)) {
+          throw error;
+        }
+        appendCurrencyBigAccountIssues(currencyBigAccountIssues, error);
+        continue;
+      }
 
       parentProvisionalEntries.push({
         filePath,
-        detailRows: buildMappedRowsForFile({ config, inputFilePath: filePath }),
+        detailRows,
         matchedTemplateId: matchedId,
         matchedHeaders: matchedConfig.template.headers || [],
         selfInputMerchant: merchantLookupFlags.selfInputMerchant,
         skipDirectMerchantLookup: merchantLookupFlags.skipDirectMerchantLookup
       });
+    }
+
+    if (currencyBigAccountIssues.length) {
+      throw buildCurrencyBigAccountUnmappedError(currencyBigAccountIssues);
     }
 
     // ===== 步骤 3.5（v3.2.15）：渠道组校验 =====
@@ -13000,7 +13683,17 @@ async function handleFilenameMappingImport(prepared) {
     };
 
     // ===== 步骤 7：大账号选择流程 =====
-    const bigAccountOptions = expandBigAccountConfigurations(aggregatedBigAccounts);
+    // v3.2.16（spec §4.4）：「原始账单仅有币种无账户号」的文件逐行按币种回填，不参与选择。
+    //   全部文件都是本模式时跳过选择（渠道兄弟子模板的大账号不应触发选择）；与需要选择的文件混在一起时阻断。
+    const { currencyOnlyFileNames, allCurrencyOnly } = classifyCurrencyOnlyEntries(
+      trimmedProvisionalEntries,
+      perTemplateConfigCache
+    );
+    const bigAccountOptions = allCurrencyOnly ? [] : expandBigAccountConfigurations(aggregatedBigAccounts);
+
+    if (bigAccountOptions.length > 1 && currencyOnlyFileNames.length) {
+      return createCurrencyOnlyMixedSelectionErrorResult(currencyOnlyFileNames, virtualTemplateName);
+    }
 
     if (bigAccountOptions.length > 1) {
       const selectionRows = buildBigAccountSelectionRows(trimmedProvisionalEntries);
@@ -13054,6 +13747,10 @@ async function handleFilenameMappingImport(prepared) {
           templateName: virtualTemplateName,
           inputFilePaths: selectionResult.filePaths
         });
+      }
+
+      if (recognitionResult.status === 'needs-selection' && currencyOnlyFileNames.length) {
+        return createCurrencyOnlyMixedSelectionErrorResult(currencyOnlyFileNames, virtualTemplateName);
       }
 
       if (recognitionResult.status === 'needs-selection') {
@@ -13125,7 +13822,11 @@ async function handleFilenameMappingImport(prepared) {
     }
 
     if (error instanceof FileValidationError) {
-      return createErrorResult({
+      // v3.2.16：币种未维护大账号需要把文件 / 币种 / 行号带回界面弹窗（spec D1）
+      const buildResult = String(error.code || '').startsWith('CURRENCY_BIG_ACCOUNT_')
+        ? createDetailedErrorResult
+        : createErrorResult;
+      return buildResult({
         step: '导入网银明细文件',
         message: error.message,
         errorCode: error.code,
@@ -14004,7 +14705,11 @@ function registerFileHandlers() {
       }
 
       if (error instanceof FileValidationError) {
-        return createErrorResult({
+        // v3.2.16：币种未维护大账号需要把文件 / 币种 / 行号带回界面弹窗（spec D1）
+        const buildResult = String(error.code || '').startsWith('CURRENCY_BIG_ACCOUNT_')
+          ? createDetailedErrorResult
+          : createErrorResult;
+        return buildResult({
           step: '导入网银明细文件',
           message: error.message,
           errorCode: error.code,
@@ -14260,7 +14965,11 @@ function registerFileHandlers() {
       }
 
       if (error instanceof FileValidationError) {
-        return createErrorResult({
+        // v3.2.16：币种未维护大账号需要把文件 / 币种 / 行号带回界面弹窗（spec D1）
+        const buildResult = String(error.code || '').startsWith('CURRENCY_BIG_ACCOUNT_')
+          ? createDetailedErrorResult
+          : createErrorResult;
+        return buildResult({
           step: '选择大账号',
           message: error.message,
           errorCode: error.code,
@@ -14382,10 +15091,17 @@ function registerFileHandlers() {
       const skipBalanceGapKeys = Array.isArray(prepared && prepared.skipBalanceGapKeys)
         ? prepared.skipBalanceGapKeys
         : null;
+      const confirmBalanceMismatchKeys = Array.isArray(prepared && prepared.confirmBalanceMismatchKeys)
+        ? prepared.confirmBalanceMismatchKeys
+        : null;
+      const confirmBalanceSeedReplaceKeys = Array.isArray(prepared && prepared.confirmBalanceSeedReplaceKeys)
+        ? prepared.confirmBalanceSeedReplaceKeys
+        : null;
       const importContext = prepared && prepared.importContext
         ? { ...prepared.importContext, inputFilePaths }
         : null;
-      if ((!plan && !skipBalanceGapKeys) || !pendingPrompt || !importContext
+      if ((!plan && !skipBalanceGapKeys && !confirmBalanceMismatchKeys && !confirmBalanceSeedReplaceKeys)
+          || !pendingPrompt || !importContext
           || (plan && plan.existingIndex >= 0 && prepared.confirmedOverwrite !== true)) {
         throw new TypeError('余额补录 execute 缺少已确认的准备计划');
       }
@@ -14426,6 +15142,40 @@ function registerFileHandlers() {
               ...(prepared.skippedBalanceGaps || []).map(formatBalanceGapLine)
             ]
           });
+        } else if (confirmBalanceMismatchKeys) {
+          // 与断档“不补录”同一会话确认集合；登记后按账单余额重算，种子照常回写。
+          if (!rememberAcknowledgedBalanceGaps({
+            session,
+            importContext: prepared.importContext,
+            gapKeys: confirmBalanceMismatchKeys
+          })) {
+            throw new FileValidationError('BALANCE_MISMATCH_CONTEXT_MISSING', '当前账单会话已失效，请重新导入文件');
+          }
+          appendActivityLogEntry({
+            level: 'warn',
+            message: '余额校验不一致，已确认按账单余额生成',
+            details: [
+              `模板名：${pendingPrompt.templateName || 'N/A'}`,
+              ...(prepared.confirmedBalanceMismatches || []).map(formatBalanceMismatchLine)
+            ]
+          });
+        } else if (confirmBalanceSeedReplaceKeys) {
+          // 与断档、余额不一致同一确认集合；登记后重算，按本次余额回写并替换人工补录。
+          if (!rememberAcknowledgedBalanceGaps({
+            session,
+            importContext: prepared.importContext,
+            gapKeys: confirmBalanceSeedReplaceKeys
+          })) {
+            throw new FileValidationError('BALANCE_SEED_REPLACE_CONTEXT_MISSING', '当前账单会话已失效，请重新导入文件');
+          }
+          appendActivityLogEntry({
+            level: 'warn',
+            message: '人工补录的期末余额与本次余额不一致，已确认替换',
+            details: [
+              `模板名：${pendingPrompt.templateName || 'N/A'}`,
+              ...(prepared.confirmedBalanceSeedReplacements || []).map(formatBalanceSeedReplaceLine)
+            ]
+          });
         } else {
           writeManualBalanceSeedPlan(plan);
           const seedTemplateName = plan.record.templateName;
@@ -14457,17 +15207,20 @@ function registerFileHandlers() {
               detail: lastGeneratedExports.detail,
               balanceRequested: true
             };
-            // 还有其他 group 需要补录或确认断档 → 返回下一个 prompt
-            return regenResult.gaps
-              ? buildBalanceGapConfirmResult(regenResult.gaps, pendingFiles)
-              : buildManualBalanceRequiredResult(regenResult.prompt, pendingFiles);
+            // 还有其他 group 需要补录、确认断档或确认余额不一致 → 返回下一个 prompt
+            if (regenResult.gaps) return buildBalanceGapConfirmResult(regenResult.gaps, pendingFiles);
+            if (regenResult.mismatches) return buildBalanceMismatchConfirmResult(regenResult.mismatches, pendingFiles);
+            if (regenResult.replacements) {
+              return buildBalanceSeedReplaceConfirmResult(regenResult.replacements, pendingFiles);
+            }
+            return buildManualBalanceRequiredResult(regenResult.prompt, pendingFiles);
           }
           const generatedFiles = regenResult.generatedFiles;
           if (importContext.scope === 'all') {
             // 任一模板组余额生成失败时不缓存缺组的“全部”余额：再次导出全部时重新生成并按失败组阻断。
             const hasFailedGroup = (generatedFiles.warnings || [])
               .some((warning) => warning && warning.type === 'balance-generate-failed');
-            cacheAllStatementExport('balance', hasFailedGroup ? null : generatedFiles.balance);
+            cacheAllStatementExport('balance', hasFailedGroup ? null : generatedFiles.balance, generatedFiles.warnings);
           } else {
             lastGeneratedExports.balance = generatedFiles.balance;
           }
@@ -14482,7 +15235,7 @@ function registerFileHandlers() {
         const generatedFiles = generateFilesFromRememberedContext(importContext);
 
         if (importContext.scope === 'all') {
-          cacheAllStatementExport('balance', generatedFiles.balance);
+          cacheAllStatementExport('balance', generatedFiles.balance, generatedFiles.warnings);
         } else if (session) {
           updateStatementSessionCache(session, importContext.currentBatchId || session.currentBatchId, generatedFiles);
         } else {

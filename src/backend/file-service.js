@@ -1,10 +1,16 @@
 const {
+  FEATURE_FILTER_FIELD_TOKEN,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
+  MERCHANT_ID_CURRENCY_ONLY_MARKER,
   SUPPORTED_EXTENSIONS,
   buildExpectedHeaderCandidates,
   normalizeCell
 } = require('./file-service/common');
+const {
+  extractFeatureValue,
+  normalizeFeatureFilterRule
+} = require('./file-service/feature-filter');
 const {
   ensureSupportedFile,
   extractEnumValuesFromImportedFile,
@@ -18,7 +24,7 @@ const {
   compileRegexLiteral,
   hasEffectiveAmount,
   inferDateCellFormat,
-  inferEndingBalance,
+  verifyStatementEndingBalance,
   isRegexLiteral,
   loadCurrencyMappings: loadCurrencyMappingsFromMappings,
   matchAmountSplitConditionValue,
@@ -33,6 +39,14 @@ const {
   splitSignedAmountValue,
   toExcelSerial
 } = require('./file-service/normalizers');
+const {
+  appendCurrencyBigAccountIssues,
+  applyCurrencyBigAccountMapping,
+  buildCurrencyBigAccountUnmappedError,
+  createConfigMissingError: createCurrencyBigAccountConfigMissingError,
+  isCurrencyBigAccountUnmappedError,
+  mapEachCollectingCurrencyBigAccountIssues
+} = require('./file-service/currency-big-account');
 const {
   writeBalanceWorkbook: writeBalanceWorkbookInternal,
   writeWorkbookRows: writeWorkbookRowsInternal
@@ -138,11 +152,20 @@ function buildMappedRows({
   amountMappingRules = {},
   amountSplitByField = null,
   billSplitMerge = null,
+  featureFilter = null,
   expectedSourceHeaders = [],
   selectedBigAccount = null,
   dateParseOrder = 'auto',
-  readOptions = {}
+  readOptions = {},
+  // v3.2.16：MerchantId「原始账单仅有币种无账户号」时为 { templateName, pairs: [{ currency, merchantId }] }
+  currencyBigAccountMapping = null
 }) {
+  // 拿不到 币种 → 大账号 配置时直接拒绝，避免 MerchantId 整列留空静默输出。
+  const merchantIdUsesCurrencyMapping = normalizeMappingTokens(mappingByField && mappingByField.MerchantId)[0]
+    === MERCHANT_ID_CURRENCY_ONLY_MARKER;
+  if (merchantIdUsesCurrencyMapping && !currencyBigAccountMapping) {
+    throw createCurrencyBigAccountConfigMissingError('');
+  }
   const { rows, rowNumbers, headerBreaks = [] } = readRowsWithMetadata(
     inputFilePath,
     expectedSourceHeaders,
@@ -206,6 +229,21 @@ function buildMappedRows({
     }
   });
 
+  // v3.2.16：字段筛选特征值——实际生效的映射（拆分且不复用时为拆分映射，否则为主映射）用到 token 时启用；
+  // 每行只计算一次，所有使用该映射值的目标字段共用同一个结果，再各自走后续规范化（日期、金额等）。
+  // 不复用时主映射里残留的该值不输出，不启用、也不记未命中提示。
+  const featureFilterEffectiveLookup = billSplitEnabled && !billSplitReuseModuleMapping
+    ? billSplitMappingByField
+    : mappingByField;
+  const featureFilterActive = Object.values(featureFilterEffectiveLookup || {})
+    .some((value) => value === FEATURE_FILTER_FIELD_TOKEN);
+  const featureFilterRule = featureFilterActive ? normalizeFeatureFilterRule(featureFilter) : null;
+  const featureFilterSourceIndex = featureFilterRule ? sourceIndexByField.get(featureFilterRule.sourceField) : undefined;
+  if (featureFilterRule && featureFilterSourceIndex === undefined) {
+    throw new FileValidationError('FILE_READ', `映射字段不存在：${featureFilterRule.sourceField}`);
+  }
+  let currentRowFeatureValue = '';
+
   if (amountSplitEnabled) {
     amountSplitRules.forEach((rule) => {
       const conditionField = normalizeCell(rule.conditionField);
@@ -267,6 +305,10 @@ function buildMappedRows({
     return mappingTokens.map((token) => {
       if (token.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
         return token.slice(FIXED_FIELD_VALUE_PREFIX.length);
+      }
+
+      if (token === FEATURE_FILTER_FIELD_TOKEN) {
+        return currentRowFeatureValue;
       }
 
       const sourceIndex = sourceIndexByField.get(token);
@@ -574,6 +616,9 @@ function buildMappedRows({
   }
 
   rows.slice(1).forEach((row, rowIndex) => {
+    currentRowFeatureValue = featureFilterRule
+      ? extractFeatureValue(row[featureFilterSourceIndex], featureFilterRule)
+      : '';
     const directCreditAmountRaw = resolveRawValueByMapping(mappingByField['Credit Amount'], row);
     const directDebitAmountRaw = resolveRawValueByMapping(mappingByField['Debit Amount'], row);
     const signedAmountValue = signedAmountSourceField
@@ -649,9 +694,17 @@ function buildMappedRows({
       ? billSplitMappingByField.BillDate
       : mappingByField.BillDate;
     const rawEffectiveBillDate = resolveDateRawValueByMapping(effectiveBillDateMapping, row);
+    // v3.2.16：BillDate 取「字段筛选特征值」时，合计标签会被筛成空串；改按筛选源单元格原文识别合计行，
+    // 否则合计金额会作为普通交易再导出一次。
+    const featureFilterBillDateSource = featureFilterRule
+      && normalizeMappingTokens(effectiveBillDateMapping).includes(FEATURE_FILTER_FIELD_TOKEN)
+      ? normalizeCell(row[featureFilterSourceIndex])
+      : '';
     const summaryDateLabel = isStatementSummaryDateLabel(rawEffectiveBillDate)
       ? normalizeCell(rawEffectiveBillDate)
-      : '';
+      : isStatementSummaryDateLabel(featureFilterBillDateSource)
+        ? featureFilterBillDateSource
+        : '';
     const recordSummaryRow = () => {
       issues.push({ type: 'summary-row-skipped', rowNumber: sourceRowNumber, rawValue: summaryDateLabel });
     };
@@ -741,7 +794,10 @@ function buildMappedRows({
             return primaryMappingValue.slice(FIXED_FIELD_VALUE_PREFIX.length);
           }
 
-          const currencyResult = resolveCurrencyValue(rawValue, currencyMappings);
+          // v3.2.16：按币种取大账号时币种直接决定账号，只认代码与精确名称，模糊命中按未维护阻断
+          const currencyResult = resolveCurrencyValue(rawValue, currencyMappings, {
+            allowFuzzy: !merchantIdUsesCurrencyMapping
+          });
 
           if (!currencyResult.value || currencyResult.value === '') {
             const merchantIdValue = resolveRawValueByMapping(mappingByFieldParam['MerchantId'], row);
@@ -766,6 +822,11 @@ function buildMappedRows({
         }
 
         if (targetField === 'MerchantId') {
+          // v3.2.16：按币种取大账号的模板在全部行生成后统一回填（applyCurrencyBigAccountMapping）
+          if (primaryMappingValue === MERCHANT_ID_CURRENCY_ONLY_MARKER) {
+            return '';
+          }
+
           if (selectedMerchantId) {
             return selectedMerchantId;
           }
@@ -798,6 +859,17 @@ function buildMappedRows({
     }
 
     const issueCountBeforeRow = issues.length;
+    // v3.2.16：只为会进入明细的行（有收入或支出）记录未筛出特征值；收支均为空的行另有过滤提示。
+    const recordFeatureValueMiss = (hasAmount) => {
+      if (featureFilterRule && currentRowFeatureValue === '' && hasAmount) {
+        issues.push({
+          type: 'feature-value-unmatched',
+          rowNumber: sourceRowNumber,
+          sourceField: featureFilterRule.sourceField,
+          rawValue: normalizeCell(row[featureFilterSourceIndex])
+        });
+      }
+    };
     const mappedRow = computeMappedRow(mappingByField);
 
     if (billSplitEnabled) {
@@ -829,6 +901,9 @@ function buildMappedRows({
         return;
       }
       const merged = applyBillSplitMergeForRow(expanded);
+      recordFeatureValueMiss(merged.some((entry) => (
+        hasEffectiveAmount(entry.creditAmount) || hasEffectiveAmount(entry.debitAmount)
+      )));
       countAmountSplitHits();
       merged.forEach((entry) => {
         rowMetas.push({ sourceRowNumber: entry.sourceRowNumber });
@@ -838,6 +913,7 @@ function buildMappedRows({
         matchedBillSplitCount += merged.length;
       }
     } else {
+      recordFeatureValueMiss(hasCreditAmount || hasDebitAmount);
       countAmountSplitHits();
       mappedRows.push(mappedRow);
     }
@@ -849,6 +925,16 @@ function buildMappedRows({
     orderedTargetFields,
     invalidBillDateBySourceRow
   });
+
+  if (merchantIdUsesCurrencyMapping) {
+    applyCurrencyBigAccountMapping({
+      mappedRows,
+      rowMetas,
+      orderedTargetFields,
+      mapping: currencyBigAccountMapping,
+      inputFilePath
+    });
+  }
 
   mappedRows.issues = issues;
   mappedRows.rowMetas = rowMetas;
@@ -1017,15 +1103,21 @@ function transformFileToWorkbook({
 }
 
 module.exports = {
+  appendCurrencyBigAccountIssues,
   calculateEndingBalanceFromAmounts,
+  buildCurrencyBigAccountUnmappedError,
   buildExpectedHeaderCandidates,
   buildMappedRows,
   buildDetailExportRows,
   compileRegexLiteral,
+  FEATURE_FILTER_FIELD_TOKEN,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
-  inferEndingBalance,
+  MERCHANT_ID_CURRENCY_ONLY_MARKER,
+  verifyStatementEndingBalance,
+  isCurrencyBigAccountUnmappedError,
   isRegexLiteral,
+  mapEachCollectingCurrencyBigAccountIssues,
   matchAmountSplitConditionValue,
   SUPPORTED_EXTENSIONS,
   ensureSupportedFile,
@@ -1035,6 +1127,7 @@ module.exports = {
   loadEnumValues,
   normalizeCell,
   normalizeDateExportValue,
+  normalizeFeatureFilterRule,
   parseDateValue,
   parseNumericValue,
   readRows,

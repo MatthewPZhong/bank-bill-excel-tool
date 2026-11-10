@@ -1,13 +1,20 @@
 'use strict';
 
-const sax = require('sax');
 const {
+  StrictXmlSyntaxError,
+  createStrictXmlTokenizer
+} = require('./strict-xml-tokenizer');
+const { openZipEntryReadStream } = require('./zip-reader');
+const {
+  createScannedToolboxCell,
+  createScannedToolboxRow,
   createToolboxCell,
   createToolboxRow,
-  createToolboxSheetMeta
+  createToolboxSheetMeta,
+  freezeToolboxStyleRef
 } = require('./model');
 const {
-  classifyNumericOutput,
+  classifyNumericLexical,
   decimalComparable,
   parseDecimalLexical,
   parseOoxmlWallClock
@@ -93,6 +100,8 @@ const OOXML_ERROR_VALUES = new Set([
   '#GETTING_DATA'
 ]);
 const EXCEL_FORMULA_MAX_UTF16_UNITS = 8192;
+// 快路径只接管短文本；更长的缓存值交回逐事件路径，保证分段计长与报错 context 不变。
+const FAST_CELL_TEXT_MAX = 4096;
 const MAX_LEXICAL_CELL_XML_UTF16_UNITS = 16 * 1024 * 1024;
 
 class ToolboxXlsxFormatError extends Error {
@@ -110,6 +119,28 @@ class ToolboxXlsxCancelledError extends Error {
     this.name = 'ToolboxXlsxCancelledError';
     this.code = 'TOOLBOX_XLSX_CANCELLED';
   }
+}
+
+function isXmlWhitespaceCode(code) {
+  return code === 32 || code === 10 || code === 13 || code === 9;
+}
+
+// 快路径接受的行属性（精确拼写）；其中 r/ht/hidden/outlineLevel/s/customFormat 会被读取。
+const FAST_ROW_ATTRIBUTE_NAMES = new Set([
+  'r', 'spans', 's', 'customFormat', 'ht', 'hidden', 'customHeight', 'outlineLevel',
+  'collapsed', 'thickTop', 'thickBot', 'ph'
+]);
+
+function isAsciiLetterCode(code) {
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
+function isFastRowValueCode(code) {
+  return isAsciiAlphanumericCode(code) || code === 46 || code === 58 || code === 43 || code === 45;
+}
+
+function isAsciiAlphanumericCode(code) {
+  return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
 }
 
 function parseBoolean(value, fallback = false) {
@@ -253,8 +284,18 @@ function exactLocalName(nodeOrName) {
   return colon >= 0 ? value.slice(colon + 1) : value;
 }
 
+// 规范名称本身的校验结果固定；只缓存这 14 个名称，避免按文件内容无界增长。
+const CANONICAL_ELEMENT_CASE_RESULTS = new Map(
+  SPREADSHEETML_CANONICAL_ELEMENTS.map((name) => [
+    name,
+    Object.freeze({ canonicalName: name, normalizedName: name.toLowerCase() })
+  ])
+);
+
 function validateWorksheetElementCase(nodeOrName, context = {}) {
   const exactName = exactLocalName(nodeOrName);
+  const cached = CANONICAL_ELEMENT_CASE_RESULTS.get(exactName);
+  if (cached) return cached;
   const canonicalName = SPREADSHEETML_ELEMENTS_BY_CASEFOLD.get(exactName.toLowerCase()) || null;
   if (canonicalName && exactName !== canonicalName) {
     throw new ToolboxXlsxFormatError(
@@ -275,7 +316,11 @@ function validateWorksheetElementCase(nodeOrName, context = {}) {
 function validateConsumedAttributeCase(attributes, canonicalElementName, context = {}) {
   const expectedAttributes = WORKSHEET_ATTRIBUTES_BY_CASEFOLD[canonicalElementName];
   if (!expectedAttributes) return;
-  for (const [rawName, rawAttribute] of Object.entries(attributes || {})) {
+  const source = attributes || {};
+  const names = Object.keys(source);
+  for (let index = 0; index < names.length; index += 1) {
+    const rawName = names[index];
+    const rawAttribute = source[rawName];
     const qualifiedName = rawAttribute && typeof rawAttribute === 'object' && rawAttribute.name
       ? String(rawAttribute.name)
       : String(rawName);
@@ -318,13 +363,51 @@ function columnLettersToIndex(letters) {
   return result >= 0 && result <= 16383 ? result : -1;
 }
 
+// 纯 ASCII 坐标的手写解析，结果与下方正则路径一致；undefined 表示需要走正则路径
+// （非字符串或含非 ASCII 字符：toUpperCase 可能把 ß、ſ 等展开成 ASCII 字母）。
+function parseAsciiCellReference(reference) {
+  const length = reference.length;
+  let index = 0;
+  let column = 0;
+  for (; index < length; index += 1) {
+    const code = reference.charCodeAt(index);
+    if (code >= 65 && code <= 90) column = column * 26 + code - 64;
+    else if (code >= 97 && code <= 122) column = column * 26 + code - 96;
+    else break;
+  }
+  const letterCount = index;
+  let row = 0;
+  for (; index < length; index += 1) {
+    const code = reference.charCodeAt(index);
+    if (code >= 48 && code <= 57) {
+      if (index === letterCount && code === 48) return null;
+      if (index - letterCount < 8) row = row * 10 + code - 48;
+    } else {
+      return code < 128 ? null : undefined;
+    }
+  }
+  if (letterCount < 1 || letterCount > 3 || index === letterCount) return null;
+  if (index - letterCount >= 8 || row > 1048576) return null;
+  const columnIndex = column - 1;
+  if (columnIndex > 16383) return null;
+  return { columnIndex, rowIndex: row };
+}
+
 function parseCellReference(reference) {
+  if (typeof reference === 'string') {
+    const parsed = parseAsciiCellReference(reference);
+    if (parsed !== undefined) return parsed;
+  }
   const match = String(reference || '').toUpperCase().match(/^([A-Z]{1,3})([1-9]\d*)$/);
   if (!match) return null;
   const columnIndex = columnLettersToIndex(match[1]);
   const rowIndex = Number.parseInt(match[2], 10);
   if (columnIndex < 0 || rowIndex < 1 || rowIndex > 1048576) return null;
   return { columnIndex, rowIndex };
+}
+
+function rowHasColumn(columnIndexes, columnIndex) {
+  return columnIndexes.indexOf(columnIndex) >= 0;
 }
 
 function findColumnMetadata(columns, columnIndex) {
@@ -363,23 +446,46 @@ function decodeCellPayload({
   valueSeen = false,
   context = {}
 }) {
+  return decodeCellPayloadAt(type, rawValue, inlineText, sharedStrings, valueSeen, () => context);
+}
+
+// 纯数字共享字符串下标（不超过 9 位、无空白）直接按位累加；其他情况沿用 trim + 正则口径。
+function sharedStringLexicalIndex(rawValue) {
+  if (typeof rawValue === 'string' && rawValue.length > 0 && rawValue.length <= 9) {
+    let index = 0;
+    for (let position = 0; position < rawValue.length; position += 1) {
+      const code = rawValue.charCodeAt(position);
+      if (code < 48 || code > 57) return sharedStringLexicalIndexSlow(rawValue);
+      index = index * 10 + code - 48;
+    }
+    return index;
+  }
+  return sharedStringLexicalIndexSlow(rawValue);
+}
+
+function sharedStringLexicalIndexSlow(rawValue) {
+  const lexicalIndex = String(rawValue || '').trim();
+  return /^\d+$/.test(lexicalIndex) ? Number.parseInt(lexicalIndex, 10) : -1;
+}
+
+// contextOf() 只在报错时调用，返回本次报错使用的 context 副本来源（键顺序与原实现一致）。
+function decodeCellPayloadAt(type, rawValue, inlineText, sharedStrings, valueSeen, contextOf) {
   const normalizedType = type === undefined || type === null ? '' : String(type);
   if (normalizedType !== '' && !OOXML_CELL_TYPES.has(normalizedType)) {
     throw new ToolboxXlsxFormatError('单元格声明了不支持的 OOXML 数据类型', {
-      ...context,
+      ...contextOf(),
       cellType: type
     });
   }
   if (normalizedType === 's') {
-    const lexicalIndex = String(rawValue || '').trim();
-    const index = /^\d+$/.test(lexicalIndex) ? Number.parseInt(lexicalIndex, 10) : -1;
+    const index = sharedStringLexicalIndex(rawValue);
     const count = sharedStringCount(sharedStrings);
     const decoded = Number.isSafeInteger(index) && index >= 0 && index < count
       ? sharedStringAt(sharedStrings, index)
       : undefined;
     if (decoded === undefined) {
       throw new ToolboxXlsxFormatError('共享字符串索引越界或无效，无法安全读取单元格', {
-        ...context,
+        ...contextOf(),
         sharedStringIndex: rawValue,
         sharedStringCount: count
       });
@@ -395,7 +501,7 @@ function decodeCellPayload({
       assertExcelCellTextLength(inlineText);
     } catch (error) {
       throw new ToolboxXlsxFormatError('内联字符串超过 Excel 单元格文本上限', {
-        ...context,
+        ...contextOf(),
         cause: error.message
       });
     }
@@ -412,7 +518,7 @@ function decodeCellPayload({
       assertExcelCellTextLength(decoded);
     } catch (error) {
       throw new ToolboxXlsxFormatError('字符串缓存值包含无效或超长的 ST_Xstring/UTF-16 文本', {
-        ...context,
+        ...contextOf(),
         cause: error.message
       });
     }
@@ -426,7 +532,7 @@ function decodeCellPayload({
     const booleanLexical = String(rawValue == null ? '' : rawValue).trim();
     if (!['0', '1', 'false', 'true'].includes(booleanLexical)) {
       throw new ToolboxXlsxFormatError('布尔单元格缓存值不是有效的 OOXML boolean', {
-        ...context,
+        ...contextOf(),
         rawValue
       });
     }
@@ -440,7 +546,7 @@ function decodeCellPayload({
   if (normalizedType === 'e') {
     if (!valueSeen || !OOXML_ERROR_VALUES.has(rawValue)) {
       throw new ToolboxXlsxFormatError('错误单元格缓存值不是受支持的 Excel 错误码', {
-        ...context,
+        ...contextOf(),
         rawValue,
         valueSeen,
         allowedErrorValues: Array.from(OOXML_ERROR_VALUES)
@@ -463,7 +569,7 @@ function decodeCellPayload({
     const classification = classifyOoxmlWallClockLexical(rawValue);
     if (!classification.valid) {
       throw new ToolboxXlsxFormatError('日期单元格缓存值与声明类型不一致', {
-        ...context,
+        ...contextOf(),
         rawValue
       });
     }
@@ -472,7 +578,7 @@ function decodeCellPayload({
       : null;
     if (classification.inExcelRange && !parsedDate) {
       throw new ToolboxXlsxFormatError('日期单元格缓存值与声明类型不一致', {
-        ...context,
+        ...contextOf(),
         rawValue
       });
     }
@@ -490,26 +596,26 @@ function decodeCellPayload({
     };
   }
 
-  const parsed = parseDecimalLexical(rawValue);
-  if (!parsed) {
+  // 等价于先 parseDecimalLexical 判定、再 classifyNumericOutput(rawValue, 'General')，只解析一次。
+  const numericOutput = classifyNumericLexical(rawValue, 'General');
+  if (!numericOutput) {
     throw new ToolboxXlsxFormatError('数值单元格缓存值与声明类型不一致', {
-      ...context,
+      ...contextOf(),
       rawValue
     });
   }
-  const numericOutput = classifyNumericOutput(rawValue, 'General');
   return {
     cellType: 'number',
-    decodedSemanticValue: numericOutput && numericOutput.outputType === 'number'
+    decodedSemanticValue: numericOutput.outputType === 'number'
       ? numericOutput.outputValue
-      : parsed.canonical,
+      : numericOutput.canonical,
     matchProjectionValue: legacyNumericProjection(rawValue)
   };
 }
 
 function openEntryStream(zip, entry) {
   return new Promise((resolve, reject) => {
-    zip.openReadStream(entry, (error, stream) => {
+    openZipEntryReadStream(zip, entry, (error, stream) => {
       if (error) reject(error);
       else resolve(stream);
     });
@@ -532,6 +638,12 @@ async function scanXlsxSheet(options = {}) {
   const onRow = typeof options.onRow === 'function' ? options.onRow : null;
   const onCellLexical = typeof options.onCellLexical === 'function' ? options.onCellLexical : null;
   const maxRowBytes = options.maxRowBytes === undefined ? Infinity : options.maxRowBytes;
+  // 只需前若干行模型的调用方（如写后复核只看表头）可限定 onRow 次数；之后的行照常解析、解码、
+  // 校验样式与计数，只是在没有逐 cell 审计与行字节预算时不再构造冻结的行 / 单元格对象。
+  const rowCallbackLimit = options.rowCallbackLimit === undefined ? Infinity : options.rowCallbackLimit;
+  if (rowCallbackLimit !== Infinity && (!Number.isSafeInteger(rowCallbackLimit) || rowCallbackLimit < 1)) {
+    throw new TypeError('scanXlsxSheet 的 rowCallbackLimit 必须是正整数');
+  }
   if (maxRowBytes !== Infinity && (!Number.isSafeInteger(maxRowBytes) || maxRowBytes < 1)) throw new TypeError('XLSX 单行读取预算无效');
 
   if (!zip || !sheetEntry || !sourceRegistry) {
@@ -581,8 +693,12 @@ async function scanXlsxSheet(options = {}) {
   const sheetName = String(sheet && sheet.name ? sheet.name : '');
   const sheetIndex = Number.isInteger(sheet && sheet.sheetIndex) ? sheet.sheetIndex : 0;
 
+  // 已通过校验的样式属性原文 → XF 号；只缓存成功结果，失败照常逐次报错。
+  const verifiedStyleIds = new Map();
   function explicitStyleId(value, owner, coordinate = null) {
     if (value === undefined) return null;
+    const cachedStyleId = verifiedStyleIds.get(value);
+    if (cachedStyleId !== undefined) return cachedStyleId;
     const styleId = parseInteger(value);
     if (!Number.isInteger(styleId) || styleId < 0 || !sourceRegistry.hasXf(styleId)) {
       throw new ToolboxXlsxFormatError(`${owner}引用了不存在的 cell XF`, {
@@ -592,19 +708,65 @@ async function scanXlsxSheet(options = {}) {
         sourceStyleId: value
       });
     }
+    if (typeof value === 'string' && verifiedStyleIds.size < 4096) verifiedStyleIds.set(value, styleId);
     return styleId;
   }
 
-  function effectiveRefFor({ cellStyleId, rowStyleId, rowCustomFormat, columnIndex }) {
-    const column = findColumnMetadata(columns, columnIndex);
-    const styleRef = sourceRegistry.effectiveStyleRef({
+  // 生效样式：每个单元格照常由 effectiveStyleRef 算出实际样式引用，再按该引用缓存冻结的
+  // {sourceRegistryId, styleRef} 与 numFmt。条数不超过注册表中的来源样式数，不随行 / 单元格 / 列
+  // XF 的组合增长；只缓存原始值类型的引用，解析失败不缓存、原错误照常抛出。
+  const columnStyleIds = [];
+  const styleInfosByRef = new Map();
+  function styleInfoFor(effectiveStyleRef) {
+    const cacheable = typeof effectiveStyleRef === 'number' || typeof effectiveStyleRef === 'string';
+    if (cacheable) {
+      const cached = styleInfosByRef.get(effectiveStyleRef);
+      if (cached !== undefined) return cached;
+    }
+    const styleRef = freezeToolboxStyleRef(sourceRegistry.compoundRef(effectiveStyleRef));
+    const numFmt = sourceRegistry.get(styleRef.styleRef).numFmt;
+    const info = { styleRef, sourceFormat: String(numFmt == null ? 'General' : numFmt) };
+    if (cacheable) styleInfosByRef.set(effectiveStyleRef, info);
+    return info;
+  }
+
+  function cellStyleInfo(cellStyleId, rowStyleId, rowCustomFormat, columnIndex) {
+    let columnStyleId = columnStyleIds[columnIndex];
+    if (columnStyleId === undefined) {
+      const column = findColumnMetadata(columns, columnIndex);
+      columnStyleId = column ? column.sourceStyleId : null;
+      columnStyleIds[columnIndex] = columnStyleId;
+    }
+    return styleInfoFor(sourceRegistry.effectiveStyleRef({
       cellStyleId,
       rowStyleId,
       rowCustomFormat,
-      columnStyleId: column ? column.sourceStyleId : null
-    });
-    return sourceRegistry.compoundRef(styleRef);
+      columnStyleId
+    }));
   }
+
+  // 行样式引用同样按实际样式引用缓存；与原实现一致，行这里不查样式内容（不调用 get）。
+  const rowStyleRefsByRef = new Map();
+  function rowStyleRefFor(rowStyleId, rowCustomFormat) {
+    const effectiveStyleRef = sourceRegistry.effectiveStyleRef({ rowStyleId, rowCustomFormat });
+    const cacheable = typeof effectiveStyleRef === 'number' || typeof effectiveStyleRef === 'string';
+    if (cacheable) {
+      const cached = rowStyleRefsByRef.get(effectiveStyleRef);
+      if (cached !== undefined) return cached;
+    }
+    const styleRef = freezeToolboxStyleRef(sourceRegistry.compoundRef(effectiveStyleRef));
+    if (cacheable) rowStyleRefsByRef.set(effectiveStyleRef, styleRef);
+    return styleRef;
+  }
+
+  const sourceFileText = String(sourceFile || '');
+  const sourceDateSystem = date1904 ? 1904 : 1900;
+  const cellErrorContext = () => ({
+    sourceFile,
+    sheetName,
+    rowIndex: currentRow.rowIndex,
+    columnIndex: currentCell.columnIndex
+  });
 
   function buildSheetMeta() {
     if (sheetMeta) return sheetMeta;
@@ -636,50 +798,77 @@ async function scanXlsxSheet(options = {}) {
 
   function finalizeCell() {
     if (!currentCell || !currentRow) return;
-    const rawValue = currentCell.valueParts.join('');
-    const inlineText = currentCell.inlineParts.join('');
-    const decoded = decodeCellPayload({
-      type: currentCell.type,
+    const rawValue = currentCell.valueText;
+    const inlineText = currentCell.inlineText;
+    const columnIndex = currentCell.columnIndex;
+    const decoded = decodeCellPayloadAt(
+      currentCell.type,
       rawValue,
       inlineText,
       sharedStrings,
-      valueSeen: currentCell.valueSeen,
-      context: {
-        sourceFile,
+      currentCell.valueSeen,
+      cellErrorContext
+    );
+    const styleInfo = cellStyleInfo(
+      currentCell.sourceStyleId,
+      currentRow.sourceStyleId,
+      currentRow.customFormat,
+      columnIndex
+    );
+    const rawLexicalValue = currentCell.type === 'inlineStr' ? inlineText : rawValue;
+    const formulaLexical = currentCell.formulaSeen ? currentCell.formulaText : null;
+    if (currentRow.materialized || columnIndex > 16383) {
+      finalizeCellModel(decoded, styleInfo, rawLexicalValue, formulaLexical, columnIndex);
+    }
+    if (columnIndex <= currentRow.lastColumnIndex) currentRow.ascending = false;
+    else currentRow.lastColumnIndex = columnIndex;
+    currentRow.columnIndexes.push(columnIndex);
+    currentRow.nextColumnIndex = columnIndex + 1;
+    explicitCellCount += 1;
+    maxColumnIndex = Math.max(maxColumnIndex, columnIndex);
+    currentCell = null;
+  }
+
+  function finalizeCellModel(decoded, styleInfo, rawLexicalValue, formulaLexical, columnIndex) {
+    // 无坐标的单元格可能顺延到 16384；交给 createToolboxCell 按原样报错。
+    const cell = columnIndex <= 16383
+      ? createScannedToolboxCell(
+        rawLexicalValue,
+        decoded.decodedSemanticValue,
+        decoded.cellType,
+        decoded.matchProjectionValue,
+        currentCell.sourceStyleId,
+        styleInfo.styleRef,
+        sourceDateSystem,
+        styleInfo.sourceFormat,
+        sourceFileText,
         sheetName,
+        currentRow.rowIndex,
+        columnIndex,
+        formulaLexical
+      )
+      : createToolboxCell({
+        rawLexicalValue,
+        cachedValue: decoded.decodedSemanticValue,
+        cellType: decoded.cellType,
+        decodedSemanticValue: decoded.decodedSemanticValue,
+        matchProjectionValue: decoded.matchProjectionValue,
+        sourceStyleId: currentCell.sourceStyleId,
+        effectiveStyleRef: styleInfo.styleRef,
+        isExplicitCell: true,
+        sourceDateSystem,
+        sourceFormat: styleInfo.sourceFormat,
+        sourceFile,
+        sourceSheet: sheetName,
         rowIndex: currentRow.rowIndex,
-        columnIndex: currentCell.columnIndex
-      }
-    });
-    const effectiveStyleRef = effectiveRefFor({
-      cellStyleId: currentCell.sourceStyleId,
-      rowStyleId: currentRow.sourceStyleId,
-      rowCustomFormat: currentRow.customFormat,
-      columnIndex: currentCell.columnIndex
-    });
-    const effectiveStyle = sourceRegistry.get(effectiveStyleRef.styleRef);
-    const cell = createToolboxCell({
-      rawLexicalValue: currentCell.type === 'inlineStr' ? inlineText : rawValue,
-      cachedValue: decoded.decodedSemanticValue,
-      cellType: decoded.cellType,
-      decodedSemanticValue: decoded.decodedSemanticValue,
-      matchProjectionValue: decoded.matchProjectionValue,
-      sourceStyleId: currentCell.sourceStyleId,
-      effectiveStyleRef,
-      isExplicitCell: true,
-      sourceDateSystem: date1904 ? 1904 : 1900,
-      sourceFormat: effectiveStyle.numFmt,
-      sourceFile,
-      sourceSheet: sheetName,
-      rowIndex: currentRow.rowIndex,
-      columnIndex: currentCell.columnIndex,
-      hasFormula: currentCell.formulaSeen,
-      formulaLexical: currentCell.formulaSeen ? currentCell.formulaParts.join('') : null
-    });
+        columnIndex,
+        hasFormula: currentCell.formulaSeen,
+        formulaLexical
+      });
     // 原始 body 交给调用方复用历史解析器；不能从 SAX 语义值反推 CDATA、注音或空标签。
     // 不改变中性 cell 的语义值，也不额外读取工作表。
     if (onCellLexical) {
-      const end = currentCell.xmlSelfClosing ? currentCell.xmlBodyStart : parser._parser.startTagPosition - 1;
+      const end = currentCell.xmlSelfClosing ? currentCell.xmlBodyStart : parser.startTagPosition - 1;
       assertLexicalCellLength(end - currentCell.xmlBodyStart);
       const body = lexicalXml.slice(currentCell.xmlBodyStart - lexicalOffset, end - lexicalOffset);
       const result = onCellLexical(cell, { type: currentCell.type, body });
@@ -692,36 +881,42 @@ async function scanXlsxSheet(options = {}) {
         throw Object.assign(new Error('当前 XLSX 行超过获批读取预算'), { code: 'EXECUTION_ROW_MEMORY_LIMIT' });
       }
     }
-    currentRow.cells.set(cell.columnIndex, cell);
-    currentRow.nextColumnIndex = cell.columnIndex + 1;
-    explicitCellCount += 1;
-    maxColumnIndex = Math.max(maxColumnIndex, cell.columnIndex);
-    currentCell = null;
+    currentRow.cells.push(cell);
   }
 
   function finalizeRow() {
     if (!currentRow) return;
     emitSheetMeta();
     if (currentCell) finalizeCell();
-    const rowStyleRef = sourceRegistry.effectiveStyleRef({
-      rowStyleId: currentRow.sourceStyleId,
-      rowCustomFormat: currentRow.customFormat
-    });
-    const row = createToolboxRow({
-      cells: Array.from(currentRow.cells.values()),
+    if (!currentRow.materialized) {
+      previousRowIndex = currentRow.rowIndex;
+      rowCount += 1;
+      if (cancelToken && cancelToken.cancelled) {
+        throw new ToolboxXlsxCancelledError();
+      }
+      currentRow = null;
+      return;
+    }
+    const rowStyleRef = rowStyleRefFor(currentRow.sourceStyleId, currentRow.customFormat);
+    const rowInput = {
+      cells: currentRow.cells,
       rowIndex: currentRow.rowIndex,
       height: currentRow.height,
       hidden: currentRow.hidden,
       outlineLevel: currentRow.outlineLevel,
       sourceStyleId: currentRow.sourceStyleId,
-      effectiveStyleRef: sourceRegistry.compoundRef(rowStyleRef),
+      effectiveStyleRef: rowStyleRef,
       customFormat: currentRow.customFormat,
-      sourceFile,
+      sourceFile: sourceFileText,
       sourceSheet: sheetName
-    });
+    };
+    // 单元格按列严格递增（常见情况）时无需原实现的去重排序；乱序时仍交给 createToolboxRow 排序。
+    const row = currentRow.ascending
+      ? createScannedToolboxRow(rowInput, rowStyleRef)
+      : createToolboxRow(rowInput);
     previousRowIndex = currentRow.rowIndex;
     rowCount += 1;
-    const result = onRow ? onRow(row, buildSheetMeta()) : null;
+    const result = onRow && rowCount <= rowCallbackLimit ? onRow(row, buildSheetMeta()) : null;
     if (result && typeof result.then === 'function') {
       throw new TypeError('scanXlsxSheet 的 onRow 必须是同步回调');
     }
@@ -730,12 +925,6 @@ async function scanXlsxSheet(options = {}) {
     }
     currentRow = null;
   }
-
-  const parser = sax.createStream(true, {
-    trim: false,
-    normalize: false,
-    xmlns: true
-  });
 
   function assertLexicalCellLength(length) {
     if (length < 0 || length > MAX_LEXICAL_CELL_XML_UTF16_UNITS) {
@@ -746,7 +935,406 @@ async function scanXlsxSheet(options = {}) {
     }
   }
 
-  parser.on('opentag', (node) => {
+  // 单元格扫描期间的可变状态。finalizeCell 把需要的值拷进冻结 cell 后即作废，整个工作表复用同一对象。
+  const cellState = {
+    columnIndex: 0,
+    type: '',
+    sourceStyleId: null,
+    valueText: '',
+    valueLexicalLength: 0,
+    inlineText: '',
+    xmlBodyStart: null,
+    xmlSelfClosing: false,
+    inlineSemanticLength: 0,
+    formulaText: '',
+    formulaLexicalLength: 0,
+    formulaSeen: false,
+    valueSeen: false,
+    inlineStringSeen: false,
+    inlineStringMode: null,
+    plainInlineTextSeen: false,
+    richRunTextSeen: false
+  };
+
+  // `<row>` 开标签的语义处理；通用事件路径与快路径共用，校验顺序与错误文案不变。
+  function beginRow(rawReference, rawHeight, rawHidden, rawOutlineLevel, rawStyle, rawCustomFormat) {
+    if (cancelToken && cancelToken.cancelled) throw new ToolboxXlsxCancelledError();
+    if (currentRow) {
+      throw new ToolboxXlsxFormatError('工作表存在嵌套 row，文件结构已损坏', { sourceFile, sheetName });
+    }
+    const explicitRowIndex = parseInteger(rawReference);
+    const rowIndex = explicitRowIndex === null ? previousRowIndex + 1 : explicitRowIndex;
+    if (rowIndex < 1 || rowIndex > 1048576) {
+      throw new ToolboxXlsxFormatError('工作表行号超出 XLSX 范围', {
+        sourceFile,
+        sheetName,
+        rowIndex
+      });
+    }
+    if (rowIndex <= previousRowIndex) {
+      throw new ToolboxXlsxFormatError('工作表 row r 必须严格递增', {
+        sourceFile,
+        sheetName,
+        previousRowIndex,
+        rowIndex
+      });
+    }
+    currentRow = {
+      rowIndex,
+      height: parsePositiveLayoutNumber(
+        rawHeight,
+        'row.ht',
+        { sourceFile, sheetName, rowIndex }
+      ),
+      hidden: parseBoolean(rawHidden),
+      outlineLevel: parseOutlineLevel(
+        rawOutlineLevel,
+        '行',
+        { sourceFile, sheetName, rowIndex }
+      ),
+      sourceStyleId: explicitStyleId(rawStyle, '行样式', String(rowIndex)),
+      customFormat: parseBoolean(rawCustomFormat),
+      cells: [],
+      columnIndexes: [],
+      // 超过 rowCallbackLimit 且无需逐 cell 审计 / 行字节计费时，不构造该行的模型对象。
+      materialized: rowCount < rowCallbackLimit || onCellLexical !== null || maxRowBytes !== Infinity,
+      lastColumnIndex: -1,
+      ascending: true,
+      nextColumnIndex: 0
+    };
+  }
+
+  // `<c>` 开标签的语义处理；通用事件路径与快路径共用，校验顺序与错误文案不变。
+  function beginCell(rawReference, rawStyle, rawType, selfClosing) {
+    if (currentCell) {
+      throw new ToolboxXlsxFormatError('工作表存在嵌套 cell，文件结构已损坏', { sourceFile, sheetName });
+    }
+    const hasExplicitReference = rawReference !== undefined && rawReference !== null;
+    const reference = hasExplicitReference ? parseCellReference(rawReference) : null;
+    if (hasExplicitReference && !reference) {
+      throw new ToolboxXlsxFormatError('单元格坐标无效或超出 XLSX 范围', {
+        sourceFile,
+        sheetName,
+        cellReference: rawReference
+      });
+    }
+    if (reference && reference.rowIndex !== currentRow.rowIndex) {
+      throw new ToolboxXlsxFormatError('单元格坐标行号与所属 row 不一致', {
+        sourceFile,
+        sheetName,
+        cellReference: rawReference,
+        rowIndex: currentRow.rowIndex
+      });
+    }
+    const columnIndex = reference ? reference.columnIndex : currentRow.nextColumnIndex;
+    if (columnIndex <= currentRow.lastColumnIndex && rowHasColumn(currentRow.columnIndexes, columnIndex)) {
+      throw new ToolboxXlsxFormatError('同一 row 内存在重复单元格坐标', {
+        sourceFile,
+        sheetName,
+        rowIndex: currentRow.rowIndex,
+        columnIndex,
+        cellReference: rawReference || null
+      });
+    }
+    const type = rawType === undefined || rawType === null
+      ? ''
+      : (OOXML_CELL_TYPES.has(rawType) ? rawType : parseCellType(rawType, {
+        sourceFile,
+        sheetName,
+        rowIndex: currentRow.rowIndex,
+        columnIndex
+      }));
+    const sourceStyleId = explicitStyleId(
+      rawStyle,
+      '单元格样式',
+      rawReference || `${currentRow.rowIndex}:${reference ? reference.columnIndex : currentRow.nextColumnIndex}`
+    );
+    const cell = cellState;
+    cell.columnIndex = columnIndex;
+    cell.type = type;
+    cell.sourceStyleId = sourceStyleId;
+    cell.valueText = '';
+    cell.valueLexicalLength = 0;
+    cell.inlineText = '';
+    cell.xmlBodyStart = onCellLexical ? parser.position : null;
+    cell.xmlSelfClosing = selfClosing;
+    cell.inlineSemanticLength = 0;
+    cell.formulaText = '';
+    cell.formulaLexicalLength = 0;
+    cell.formulaSeen = false;
+    cell.valueSeen = false;
+    cell.inlineStringSeen = false;
+    cell.inlineStringMode = null;
+    cell.plainInlineTextSeen = false;
+    cell.richRunTextSeen = false;
+    currentCell = cell;
+  }
+
+  // `<v>` 开标签的语义处理（父元素与命名空间已由调用方保证）。
+  function beginValue() {
+    if (currentCell.type === 'inlineStr') {
+      throw new ToolboxXlsxFormatError('inlineStr 单元格不能声明 v 缓存值', {
+        sourceFile,
+        sheetName,
+        rowIndex: currentRow.rowIndex,
+        columnIndex: currentCell.columnIndex
+      });
+    }
+    if (currentCell.valueSeen) {
+      throw new ToolboxXlsxFormatError('同一单元格重复声明 v 缓存值', {
+        sourceFile,
+        sheetName,
+        rowIndex: currentRow.rowIndex,
+        columnIndex: currentCell.columnIndex
+      });
+    }
+    if (currentCell.inlineStringSeen) {
+      throw new ToolboxXlsxFormatError('同一单元格不能同时声明 v 与 is', {
+        sourceFile,
+        sheetName,
+        rowIndex: currentRow.rowIndex,
+        columnIndex: currentCell.columnIndex
+      });
+    }
+    currentCell.valueSeen = true;
+    collectingValue = true;
+  }
+
+  function appendValueText(text) {
+    currentCell.valueText += text;
+    currentCell.valueLexicalLength += text.length;
+    if (currentCell.valueLexicalLength > EXCEL_ST_XSTRING_MAX_RAW_UTF16_UNITS) {
+      throw new ToolboxXlsxFormatError(
+        '单元格缓存值词法长度超过 Excel 单元格读取上限',
+        {
+          sourceFile,
+          sheetName,
+          rowIndex: currentRow.rowIndex,
+          columnIndex: currentCell.columnIndex,
+          rawUtf16Length: currentCell.valueLexicalLength,
+          maxRawUtf16Length: EXCEL_ST_XSTRING_MAX_RAW_UTF16_UNITS
+        }
+      );
+    }
+  }
+
+  // 单元格快路径：只认 `<c r s t/>` 与 `<c r s t><v>文本</v></c>` 两种形态（属性仅限精确小写的
+  // r/s/t、各至多一次、值为 ASCII 字母数字；文本不含 `<`、`&` 且不超过 FAST_CELL_TEXT_MAX）。
+  // 这些形态在逐事件路径上只会触发 beginCell → beginValue → appendValueText → finalizeCell，
+  // 大小写、命名空间、父子结构校验必然通过；其他任何形态或状态都返回 -1 交回通用路径。
+  let fastNamespaceScope = null;
+  let fastReference;
+  let fastStyle;
+  let fastType;
+  let fastText = null;
+
+  // 无前缀元素的 URI 取法与分词器 _emitOpenTag 一致；同一作用域对象的结果不变，按身份缓存。
+  function fastNamespaceAllowed(nsScope) {
+    if (nsScope === fastNamespaceScope) return true;
+    if (!namespaceAllowed(nsScope[''] || '', SPREADSHEETML_NAMESPACES)) return false;
+    fastNamespaceScope = nsScope;
+    return true;
+  }
+
+  function matchFastMarkup(buf, lt, len, nsScope) {
+    fastKind = buf.charCodeAt(lt + 1);
+    return fastKind === 99 ? matchFastCell(buf, lt, len, nsScope) : matchFastRow(buf, lt, len, nsScope);
+  }
+
+  function applyFastMarkup() {
+    if (fastKind === 99) applyFastCell();
+    else applyFastRow();
+  }
+
+  // 行开标签快路径：`<row` + 属性 + `>`。属性名限于下列精确拼写（大小写变体交回通用路径报错），
+  // 或前缀已绑定、非 xmlns 的前缀属性（例如 x14ac:dyDescent，行处理本就忽略）；不得重复、不得声明
+  // 命名空间，值只含 ASCII 字母数字与 `.:+-`。元素保持打开，`</row>` 仍走通用路径收尾。
+  let fastRowReference;
+  let fastRowHeight;
+  let fastRowHidden;
+  let fastRowOutlineLevel;
+  let fastRowStyle;
+  let fastRowCustomFormat;
+  let fastRowPrefixScope = null;
+  let fastRowPrefix = '';
+  const fastRowNames = [];
+
+  function matchFastRow(buf, lt, len, nsScope) {
+    if (currentRow || currentCell || collectingValue || collectingFormula || collectingInlineText ||
+        insideInlineString || phoneticDepth !== 0 || !sheetDataOpen || elementStack.length !== 2 ||
+        elementStack[1] !== 'sheetdata' || buf.charCodeAt(lt + 2) !== 111 || buf.charCodeAt(lt + 3) !== 119 ||
+        !fastNamespaceAllowed(nsScope)) {
+      return -1;
+    }
+    let reference;
+    let height;
+    let hidden;
+    let outlineLevel;
+    let style;
+    let customFormat;
+    fastRowNames.length = 0;
+    let index = lt + 4;
+    for (;;) {
+      if (index >= len) return -1;
+      let code = buf.charCodeAt(index);
+      if (code === 62) {
+        fastRowReference = reference;
+        fastRowHeight = height;
+        fastRowHidden = hidden;
+        fastRowOutlineLevel = outlineLevel;
+        fastRowStyle = style;
+        fastRowCustomFormat = customFormat;
+        fastPathHooks.lastTagStart = lt;
+        fastPathHooks.openTagName = 'row';
+        return index + 1;
+      }
+      if (!isXmlWhitespaceCode(code)) return -1;
+      index += 1;
+      while (index < len && isXmlWhitespaceCode(buf.charCodeAt(index))) index += 1;
+      if (index >= len) return -1;
+      code = buf.charCodeAt(index);
+      if (code === 62) continue;
+      if (!isAsciiLetterCode(code)) return -1;
+      const nameStart = index;
+      let colon = -1;
+      index += 1;
+      for (; index < len; index += 1) {
+        code = buf.charCodeAt(index);
+        if (isAsciiAlphanumericCode(code)) continue;
+        if (code === 58 && colon < 0) {
+          colon = index;
+          continue;
+        }
+        break;
+      }
+      if (index + 1 >= len || code !== 61) return -1;
+      const quote = buf.charCodeAt(index + 1);
+      if (quote !== 34 && quote !== 39) return -1;
+      const name = buf.slice(nameStart, index);
+      if (fastRowNames.indexOf(name) >= 0) return -1;
+      fastRowNames.push(name);
+      if (colon >= 0) {
+        const prefix = buf.slice(nameStart, colon);
+        if (colon === index - 1 || prefix === 'xmlns') return -1;
+        if (nsScope !== fastRowPrefixScope || prefix !== fastRowPrefix) {
+          if (!nsScope[prefix]) return -1;
+          fastRowPrefixScope = nsScope;
+          fastRowPrefix = prefix;
+        }
+      } else if (!FAST_ROW_ATTRIBUTE_NAMES.has(name)) {
+        return -1;
+      }
+      const valueStart = index + 2;
+      let valueEnd = valueStart;
+      while (valueEnd < len && isFastRowValueCode(buf.charCodeAt(valueEnd))) valueEnd += 1;
+      if (valueEnd >= len || buf.charCodeAt(valueEnd) !== quote) return -1;
+      if (colon < 0) {
+        const value = buf.slice(valueStart, valueEnd);
+        if (name === 'r') reference = value;
+        else if (name === 'ht') height = value;
+        else if (name === 'hidden') hidden = value;
+        else if (name === 'outlineLevel') outlineLevel = value;
+        else if (name === 's') style = value;
+        else if (name === 'customFormat') customFormat = value;
+      }
+      index = valueEnd + 1;
+    }
+  }
+
+  function applyFastRow() {
+    elementStack.push('row');
+    beginRow(fastRowReference, fastRowHeight, fastRowHidden, fastRowOutlineLevel, fastRowStyle, fastRowCustomFormat);
+  }
+
+  function matchFastCell(buf, lt, len, nsScope) {
+    if (currentCell || !currentRow || collectingValue || collectingFormula || collectingInlineText ||
+        insideInlineString || phoneticDepth !== 0 || elementStack.length !== 3 ||
+        elementStack[2] !== 'row' || !fastNamespaceAllowed(nsScope)) {
+      return -1;
+    }
+    let reference;
+    let style;
+    let type;
+    let index = lt + 2;
+    for (;;) {
+      if (index >= len) return -1;
+      let code = buf.charCodeAt(index);
+      if (code === 32 || code === 10 || code === 13 || code === 9) {
+        index += 1;
+        while (index < len && isXmlWhitespaceCode(buf.charCodeAt(index))) index += 1;
+        if (index + 1 >= len) return -1;
+        code = buf.charCodeAt(index);
+        if ((code === 114 || code === 115 || code === 116) && buf.charCodeAt(index + 1) === 61) {
+          const quote = buf.charCodeAt(index + 2);
+          if (quote !== 34 && quote !== 39) return -1;
+          const valueStart = index + 3;
+          let valueEnd = valueStart;
+          while (valueEnd < len && isAsciiAlphanumericCode(buf.charCodeAt(valueEnd))) valueEnd += 1;
+          if (valueEnd === valueStart || valueEnd >= len || buf.charCodeAt(valueEnd) !== quote) return -1;
+          const value = buf.slice(valueStart, valueEnd);
+          if (code === 114) {
+            if (reference !== undefined) return -1;
+            reference = value;
+          } else if (code === 115) {
+            if (style !== undefined) return -1;
+            style = value;
+          } else {
+            if (type !== undefined) return -1;
+            type = value;
+          }
+          index = valueEnd + 1;
+          continue;
+        }
+      }
+      if (code === 47) {
+        if (index + 1 >= len || buf.charCodeAt(index + 1) !== 62) return -1;
+        fastReference = reference;
+        fastStyle = style;
+        fastType = type;
+        fastText = null;
+        fastPathHooks.lastTagStart = lt;
+        fastPathHooks.openTagName = null;
+        return index + 2;
+      }
+      if (code !== 62 || buf.charCodeAt(index + 1) !== 60 || buf.charCodeAt(index + 2) !== 118 ||
+          buf.charCodeAt(index + 3) !== 62) {
+        return -1;
+      }
+      const textStart = index + 4;
+      const textEnd = buf.indexOf('<', textStart);
+      if (textEnd < 0 || textEnd - textStart > FAST_CELL_TEXT_MAX || !buf.startsWith('</v></c>', textEnd)) return -1;
+      const text = buf.slice(textStart, textEnd);
+      if (text.indexOf('&') >= 0) return -1;
+      fastReference = reference;
+      fastStyle = style;
+      fastType = type;
+      fastText = text;
+      fastPathHooks.lastTagStart = textEnd + 4;
+      fastPathHooks.openTagName = null;
+      return textEnd + 8;
+    }
+  }
+
+  let fastKind = 0;
+  const fastPathHooks = {
+    leadCodes: [99, 114],
+    match: matchFastMarkup,
+    apply: applyFastMarkup,
+    lastTagStart: -1,
+    openTagName: null
+  };
+
+  function applyFastCell() {
+    beginCell(fastReference, fastStyle, fastType, fastText === null);
+    if (fastText !== null) {
+      beginValue();
+      if (fastText !== '') appendValueText(fastText);
+      collectingValue = false;
+    }
+    finalizeCell();
+  }
+
+  function handleOpenTag(node) {
     const elementName = validateWorksheetElementCase(node, { sourceFile, sheetName });
     const name = elementName.normalizedName;
     validateConsumedAttributeCase(
@@ -1003,139 +1591,17 @@ async function scanXlsxSheet(options = {}) {
     }
 
     if (name === 'row') {
-      if (cancelToken && cancelToken.cancelled) throw new ToolboxXlsxCancelledError();
-      if (currentRow) {
-        throw new ToolboxXlsxFormatError('工作表存在嵌套 row，文件结构已损坏', { sourceFile, sheetName });
-      }
-      const explicitRowIndex = parseInteger(attrs.r);
-      const rowIndex = explicitRowIndex === null ? previousRowIndex + 1 : explicitRowIndex;
-      if (rowIndex < 1 || rowIndex > 1048576) {
-        throw new ToolboxXlsxFormatError('工作表行号超出 XLSX 范围', {
-          sourceFile,
-          sheetName,
-          rowIndex
-        });
-      }
-      if (rowIndex <= previousRowIndex) {
-        throw new ToolboxXlsxFormatError('工作表 row r 必须严格递增', {
-          sourceFile,
-          sheetName,
-          previousRowIndex,
-          rowIndex
-        });
-      }
-      currentRow = {
-        rowIndex,
-        height: parsePositiveLayoutNumber(
-          attrs.ht,
-          'row.ht',
-          { sourceFile, sheetName, rowIndex }
-        ),
-        hidden: parseBoolean(attrs.hidden),
-        outlineLevel: parseOutlineLevel(
-          attrs.outlinelevel,
-          '行',
-          { sourceFile, sheetName, rowIndex }
-        ),
-        sourceStyleId: explicitStyleId(attrs.s, '行样式', String(rowIndex)),
-        customFormat: parseBoolean(attrs.customformat),
-        cells: new Map(),
-        nextColumnIndex: 0
-      };
+      beginRow(attrs.r, attrs.ht, attrs.hidden, attrs.outlinelevel, attrs.s, attrs.customformat);
       return;
     }
 
     if (name === 'c' && currentRow) {
-      if (currentCell) {
-        throw new ToolboxXlsxFormatError('工作表存在嵌套 cell，文件结构已损坏', { sourceFile, sheetName });
-      }
-      const hasExplicitReference = attrs.r !== undefined && attrs.r !== null;
-      const reference = hasExplicitReference ? parseCellReference(attrs.r) : null;
-      if (hasExplicitReference && !reference) {
-        throw new ToolboxXlsxFormatError('单元格坐标无效或超出 XLSX 范围', {
-          sourceFile,
-          sheetName,
-          cellReference: attrs.r
-        });
-      }
-      if (reference && reference.rowIndex !== currentRow.rowIndex) {
-        throw new ToolboxXlsxFormatError('单元格坐标行号与所属 row 不一致', {
-          sourceFile,
-          sheetName,
-          cellReference: attrs.r,
-          rowIndex: currentRow.rowIndex
-        });
-      }
-      const columnIndex = reference ? reference.columnIndex : currentRow.nextColumnIndex;
-      if (currentRow.cells.has(columnIndex)) {
-        throw new ToolboxXlsxFormatError('同一 row 内存在重复单元格坐标', {
-          sourceFile,
-          sheetName,
-          rowIndex: currentRow.rowIndex,
-          columnIndex,
-          cellReference: attrs.r || null
-        });
-      }
-      currentCell = {
-        columnIndex,
-        type: parseCellType(attrs.t, {
-          sourceFile,
-          sheetName,
-          rowIndex: currentRow.rowIndex,
-          columnIndex
-        }),
-        sourceStyleId: explicitStyleId(
-          attrs.s,
-          '单元格样式',
-          attrs.r || `${currentRow.rowIndex}:${reference ? reference.columnIndex : currentRow.nextColumnIndex}`
-        ),
-        valueParts: [],
-        valueLexicalLength: 0,
-        inlineParts: [],
-        xmlBodyStart: onCellLexical ? parser._parser.position : null,
-        xmlSelfClosing: node.isSelfClosing === true,
-        inlineSemanticLength: 0,
-        formulaParts: [],
-        formulaLexicalLength: 0,
-        formulaSeen: false,
-        valueSeen: false,
-        inlineStringSeen: false,
-        inlineStringMode: null,
-        plainInlineTextSeen: false,
-        richRunTextSeen: false
-      };
+      beginCell(attrs.r, attrs.s, attrs.t, node.isSelfClosing === true);
       return;
     }
 
     if (!currentCell) return;
-    if (name === 'v') {
-      if (currentCell.type === 'inlineStr') {
-        throw new ToolboxXlsxFormatError('inlineStr 单元格不能声明 v 缓存值', {
-          sourceFile,
-          sheetName,
-          rowIndex: currentRow.rowIndex,
-          columnIndex: currentCell.columnIndex
-        });
-      }
-      if (currentCell.valueSeen) {
-        throw new ToolboxXlsxFormatError('同一单元格重复声明 v 缓存值', {
-          sourceFile,
-          sheetName,
-          rowIndex: currentRow.rowIndex,
-          columnIndex: currentCell.columnIndex
-        });
-      }
-      if (currentCell.inlineStringSeen) {
-        throw new ToolboxXlsxFormatError('同一单元格不能同时声明 v 与 is', {
-          sourceFile,
-          sheetName,
-          rowIndex: currentRow.rowIndex,
-          columnIndex: currentCell.columnIndex
-        });
-      }
-      currentCell.valueSeen = true;
-      collectingValue = true;
-    }
+    if (name === 'v') beginValue();
     else if (name === 'f') {
       if (currentCell.type === 'inlineStr') {
         throw new ToolboxXlsxFormatError('inlineStr 单元格不能声明 f 公式', {
@@ -1199,29 +1665,13 @@ async function scanXlsxSheet(options = {}) {
       collectingInlineText = true;
       currentInlineText = '';
     }
-  });
+  }
 
   function collectText(text) {
     if (!currentCell) return;
-    if (collectingValue) {
-      currentCell.valueParts.push(text);
-      currentCell.valueLexicalLength += text.length;
-      if (currentCell.valueLexicalLength > EXCEL_ST_XSTRING_MAX_RAW_UTF16_UNITS) {
-        throw new ToolboxXlsxFormatError(
-          '单元格缓存值词法长度超过 Excel 单元格读取上限',
-          {
-            sourceFile,
-            sheetName,
-            rowIndex: currentRow.rowIndex,
-            columnIndex: currentCell.columnIndex,
-            rawUtf16Length: currentCell.valueLexicalLength,
-            maxRawUtf16Length: EXCEL_ST_XSTRING_MAX_RAW_UTF16_UNITS
-          }
-        );
-      }
-    }
+    if (collectingValue) appendValueText(text);
     if (collectingFormula) {
-      currentCell.formulaParts.push(text);
+      currentCell.formulaText += text;
       currentCell.formulaLexicalLength += text.length;
       if (currentCell.formulaLexicalLength > EXCEL_FORMULA_MAX_UTF16_UNITS) {
         throw new ToolboxXlsxFormatError(
@@ -1255,10 +1705,7 @@ async function scanXlsxSheet(options = {}) {
       }
     }
   }
-  parser.on('text', collectText);
-  parser.on('cdata', collectText);
-
-  parser.on('closetag', (rawName) => {
+  function handleCloseTag(rawName) {
     const name = validateWorksheetElementCase(
       rawName,
       { sourceFile, sheetName }
@@ -1284,7 +1731,7 @@ async function scanXlsxSheet(options = {}) {
               `内联字符串超过 ${EXCEL_CELL_TEXT_MAX_UTF16_UNITS} 个 UTF-16 code unit`
             );
           }
-          currentCell.inlineParts.push(decodedText);
+          currentCell.inlineText += decodedText;
         } catch (error) {
           throw new ToolboxXlsxFormatError(
             '内联字符串包含无效的 ST_Xstring/UTF-16 文本',
@@ -1314,6 +1761,15 @@ async function scanXlsxSheet(options = {}) {
     } else if (name === 'worksheet') {
       worksheetClosed = true;
     }
+  }
+
+  // 事件、命名空间与严格错误判定与原 sax.createStream(true, { xmlns: true }) 一致，见 strict-xml-tokenizer。
+  const parser = createStrictXmlTokenizer({
+    onOpenTag: handleOpenTag,
+    onCloseTag: handleCloseTag,
+    onText: collectText,
+    onCdata: collectText,
+    fastPath: options.fastPath === false || onCellLexical ? null : fastPathHooks
   });
 
   return new Promise((resolve, reject) => {
@@ -1322,7 +1778,6 @@ async function scanXlsxSheet(options = {}) {
       stream.removeAllListeners('data');
       stream.removeAllListeners('end');
       stream.removeAllListeners('error');
-      parser.removeAllListeners();
     };
     const fail = (error) => {
       if (settled) return;
@@ -1359,8 +1814,9 @@ async function scanXlsxSheet(options = {}) {
       }
     };
 
-    parser.on('error', (error) => {
-      if (error instanceof ToolboxXlsxFormatError) {
+    // 只有 XML 语法错误需要翻译；事件处理器抛出的业务/格式错误原样失败。
+    const failParser = (error) => {
+      if (!(error instanceof StrictXmlSyntaxError)) {
         fail(error);
         return;
       }
@@ -1377,7 +1833,7 @@ async function scanXlsxSheet(options = {}) {
         sheetName,
         parserMessage: error && error.message ? error.message : String(error)
       }));
-    });
+    };
     stream.on('data', (chunk) => {
       if (settled) return;
       if (cancelToken && cancelToken.cancelled) {
@@ -1388,13 +1844,13 @@ async function scanXlsxSheet(options = {}) {
         if (onCellLexical) lexicalXml += chunk;
         parser.write(chunk);
         if (onCellLexical) {
-          const retainedStart = currentCell ? currentCell.xmlBodyStart : parser._parser.position;
+          const retainedStart = currentCell ? currentCell.xmlBodyStart : parser.position;
           lexicalXml = lexicalXml.slice(retainedStart - lexicalOffset);
           lexicalOffset = retainedStart;
           assertLexicalCellLength(lexicalXml.length);
         }
       } catch (error) {
-        fail(error);
+        failParser(error);
       }
     });
     stream.on('end', () => {
@@ -1403,7 +1859,7 @@ async function scanXlsxSheet(options = {}) {
         parser.end();
         finish();
       } catch (error) {
-        fail(error);
+        failParser(error);
       }
     });
     stream.on('error', fail);

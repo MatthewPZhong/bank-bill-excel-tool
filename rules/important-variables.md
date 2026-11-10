@@ -3,7 +3,7 @@
 > 手工维护的"关键变量"清单。**按需检索相关条目**（文件很大，用 `rg` 定位，不通读），命中条目要在改动完成后做关联功能 review。
 >
 > 全量自动统计在 `docs/analysis/var-reference-stats.md`（由 `npm run scan:vars` 生成）。
-> 使用时机见 `CODEX.md`「验证与风险审查」：按需参考相关风险说明，不沿用旧的固定扫描、统计刷新或分级汇报流程。
+> 使用时机见 `CODEX.md`「验证与风险审查」：按需参考相关风险说明。
 
 ## 元数据
 
@@ -56,16 +56,12 @@
 | v3.1.11 人工资金 review | 待业务负责人使用真实或脱敏 Biz OP、Pending、Pre-fund 样本复核 dataset tag → run receipt → 输出文件的直接血缘、行数和金额/币种守恒；并在真实 Archive 数据库副本复核 017/018、001。自动化 release-check 不替代该发布门禁。 |
 | v3.1.12 人工资金/状态 review | 2026-08-20 发布负责人明确确认已完成网银源文件身份、VCC CNY/CNH 主体/金额/幂等/原始审计/九币种输出、Archive 迁移/未知文件/指纹/首次进入维护以及受控 Windows 启动与恢复验收，并授权 `v3.1.12 → main`；仓库只记录最终结论，不收录敏感数据库、sidecar 或 raw report。 |
 | 基线数据 | `docs/analysis/var-reference-stats.md`（218 个 JS 文件 / 2553 顶层声明；A-share 376 / A-pair 637 / A-local 1396 / B 1013；报告版本 3.1.0） |
-| 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
 
 ## 如何使用本表
 
 1. 准备改代码前：搜本表，看改动文件 / 改动符号是否在表中出现
 2. 改完代码后：对命中的每一条，按"变更 review 要点"列出的清单自查一遍
-3. PR body 追加"⚠️ 关联功能 review"段落，列出命中变量与 review 结论
-4. 新发现的跨度 ≥ 3 的符号（见自动统计报告），评估是否升格入本表
-5. 版本号 bump 时：人工完整 review 一次本表，同步进展到 CHANGELOG
 
 本表中跨度/次数数据为**人工 review 时刻的参考**，不精确追踪每次改动（精确数据看自动报告）。
 
@@ -119,7 +115,7 @@
 - `BILL_SPLIT_MERGE_MAPPING_FIELD` — 账单拆分合并
 - 定义位置：均在 `src/main.js`
 - 变更 review 要点：
-  - 四种模式互斥（CLAUDE.md Key Business Rules），改任意一个都要验证其他三种未串味
+  - 四种模式互斥（`src/main.js` 的 `validateTemplateConfiguration` 拒绝同时启用），改任意一个都要验证其他三种未串味
   - 模板 JSON bundle 的 `bundleVersion` 可能需要同步升格
   - 必跑：四种模式各一个样例模板的导入/导出
 
@@ -128,14 +124,34 @@
 - 关联功能：字段拼接映射（如 Narrative = 摘要 + 备注）
 - 变更 review 要点：拼接顺序 / 分隔符变化会直接改动输出内容
 
+### `FEATURE_FILTER_MAPPING_FIELD` / `FEATURE_FILTER_FIELD_TOKEN` / `templates.feature_filter_json`
+- 定义：映射值 `'字段筛选特征值'` 在 `src/main.js` 与 `src/renderer.js`（两处同值）；生成 lookup 内部 token `'__FEATURE_FILTER__'` 在 `src/backend/file-service/common.js`；模板级规则列由 `ensureTemplateFeatureFilterSupport` 迁移（v3.2.16）
+- 关联功能：按模板级规则从一个源字段筛出特征值，赋给选该值的目标字段（主映射与「不复用」的拆分映射共用一套规则）
+- 变更 review 要点：
+  - 匹配口径在 `src/backend/file-service/feature-filter.js`，渲染端 `configuration.js` 有同口径的样例校验与推导，改一处要同步另一处
+  - 映射行不带源字段（`mapped_fields_json = []`），旧代码会失败关闭；改存储形状须评估旧版本与模板包兼容
+  - 模板包：主映射或拆分映射用到该值时 `resolveTemplateBundleVersion` 写 v6（旧版整包拒绝），否则写 v5；“是否使用”只看实际生效的映射（拆分且不复用时为拆分映射）
+  - 必跑：`scripts/integration/statement-feature-filter.js`、`node scripts/test-renderer-lifecycle.js configuration-dialogs.js`
+
 ### `MERCHANT_ID_SELF_INPUT_OPTION`
 - 定义：`src/main.js`
 - 关联功能：大账号弹窗"自行输入 MerchantId"选项；CLAUDE.md Big Account Selection 的默认分支来源
 - 变更 review 要点：自行输入值落盘到 `lastFileImportContext`，导出时复用——改了标识要同步改匹配逻辑
 
+### `MERCHANT_ID_CURRENCY_ONLY_OPTION` / `MERCHANT_ID_CURRENCY_ONLY_MARKER` / `template_currency_big_accounts`（v3.2.16）
+- 定义：选项文字 `原始账单仅有币种无账户号` 在 `src/main.js` 与 `src/renderer.js`；存储值 `__CURRENCY_ONLY_BIG_ACCOUNT__` 只在 `src/backend/file-service/common.js`；配置表由 `ensureTemplateCurrencyBigAccountSupport` 建立
+- 关联功能：MerchantId 按每行最终币种取【映射管理】中的大账号（`src/backend/file-service/currency-big-account.js`），币种未维护时整批阻断（`CURRENCY_BIG_ACCOUNT_UNMAPPED`）；spec `changes/v3.2.16/feat/statement-currency-big-account/`
+- 变更 review 要点：
+  - 存储值**刻意不带** `__FIXED__:` 前缀：带前缀会被 `decodeCustomInputMappingValue` / `buildCompatibleBigAccounts` / `computeMappedRow` 当成「自己输入」或固定账号而静默出错；`buildMappedRows` 遇到该存储值却没有配置时抛 `CURRENCY_BIG_ACCOUNT_CONFIG_MISSING`
+  - 配置与 `template_big_accounts` 分开存放：不参与大账号识别、选择窗口、渠道大账号汇总与月度余额导出；与 MULTI 标记精确比较的各处（`isMultiBigAccountMapping` 等）不会命中本模式
+  - 按文件名映射导入：全部文件为本模式时跳过选择；与需要选择大账号的文件同批时阻断（`classifyCurrencyOnlyEntries`）
+  - 本模式的币种识别调用 `resolveCurrencyValue(..., { allowFuzzy: false })`：只认代码与精确名称，模糊命中按未维护阻断（spec D4）；其他模式保持模糊匹配
+  - 模板包：条目带 `currencyBigAccounts`；用到本模式时 `resolveTemplateBundleVersion` 写 v6（与「字段筛选特征值」同一规则），否则写 v5；改格式须同步 `SUPPORTED_BUNDLE_VERSION`
+  - 必跑：`tests/unit/backend/file-service/currency-big-account.test.js`、`tests/unit/main-process/statement-currency-big-account.test.js`、`scripts/integration/statement-currency-big-account.js`
+
 ### `BALANCE_CALCULATED_OPTION` / `BALANCE_DISABLED_OPTION`
 - 定义：`src/main.js`
-- 关联功能：余额字段的三态（直列 / 发生额推算 / 停用），CLAUDE.md Key Business Rules § Balance calculation
+- 关联功能：余额字段的三态（直列 / 发生额推算 / 停用）
 - 变更 review 要点：
   - 改枚举值会让历史模板持久化记录错位
   - **资金相关**，必跑：余额工作表（单币种 + 混币种）导出对比
@@ -739,10 +755,12 @@
 
 ### 余额计算
 - `calculateEndingBalanceFromAmounts` — `file-service/normalizers.js`
-- `inferEndingBalance` — `file-service/normalizers.js`
+- `verifyStatementEndingBalance` — `file-service/normalizers.js`（v3.2.16 起替代 `inferEndingBalance`：账单里的余额逐日校验）
+- `seenManualBalanceSeedsByFile` — `main-process/statement-generation.js` 闭包；`indexManualBalanceSeeds` — `main-process/statement-generation-business.js`（v3.2.16：本次运行里见过的人工补录，工具同值回写后仍按它做人工补录替换确认；按 `getBalanceSeedFileIdentity` 磁盘上的实际种子文件（dev + ino）分组，不能用原始银行名或字符串规整）
 - 关联功能：由发生额倒推期末余额（CLAUDE.md Balance calculation）
 - 变更 review 要点：
-  - 算法变化会让所有"通过发生额计算"模式的模板输出数值变化
+  - 算法变化会让所有"通过发生额计算"模式的模板输出数值变化；校验口径变化会改变"账单里的余额"模式的补录 / 不一致确认提示
+  - 改动种子读取、回写或“见过的人工补录”同步时，回归 `statement-balance-verify.test.js`「红线-回写10–14」：同批或分批、先导入后补录、改值后旧确认失效、删除与重启边界、银行名写法不同（探测文件系统后断言共享或隔离）、区分大小写的隔离（回写15）
   - 必跑：单币种 + 混币种余额表对比
   - **资金相关**，必须高亮
 
@@ -1473,7 +1491,7 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
 
 ### 触发时机与责任人
 
-按 `CODEX.md`「验证与风险审查」：共享状态、持久化格式或业务契约变化时，由当前执行者核查命中条目，需要时起草升格/降级交用户审批；不再在提 PR、版本 bump 或合并前固定扫描、刷新统计或分级汇报。用户明确要求时可运行 `npm run scan:vars` / `npm run check:vars` 辅助。
+按 `CODEX.md`「验证与风险审查」：共享状态、持久化格式或业务契约变化时，由当前执行者核查命中条目，需要时起草升格/降级交用户审批。用户明确要求时可运行 `npm run scan:vars` / `npm run check:vars` 辅助。
 
 ### 元数据维护
 

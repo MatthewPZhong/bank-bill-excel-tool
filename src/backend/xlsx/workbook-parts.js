@@ -2,6 +2,8 @@
 
 const path = require('node:path');
 const sax = require('sax');
+const { createStrictXmlTokenizer } = require('./strict-xml-tokenizer');
+const { openZipEntryReadStream } = require('./zip-reader');
 const {
   assertExcelCellTextLength,
   assertExcelStXstringRawLength,
@@ -654,22 +656,19 @@ function readToolboxMetadataEntryAsString(
   });
 }
 
+const SHARED_STRING_FAST_TEXT_MAX = 4096;
+
 function loadToolboxSharedStrings(zip, entry, sourceFile = '', options = {}) {
   if (!entry) return Promise.resolve([]);
   if (options.skipDeclaredSizeLimit !== true) {
     assertToolboxSharedStringsSize(entry, sourceFile);
   }
   return new Promise((resolve, reject) => {
-    zip.openReadStream(entry, (openError, stream) => {
+    openZipEntryReadStream(zip, entry, (openError, stream) => {
       if (openError) {
         reject(openError);
         return;
       }
-      const parser = sax.createStream(true, {
-        trim: false,
-        normalize: false,
-        xmlns: true
-      });
       const values = [];
       const onValue = typeof options.onValue === 'function'
         ? options.onValue
@@ -714,7 +713,7 @@ function loadToolboxSharedStrings(zip, entry, sourceFile = '', options = {}) {
         }
         else resolve(values);
       };
-      parser.on('opentag', (node) => {
+      const handleOpenTag = (node) => {
         if (settled) return;
         let elementName;
         try {
@@ -833,7 +832,7 @@ function loadToolboxSharedStrings(zip, entry, sourceFile = '', options = {}) {
           return;
         }
         elementStack.push(name);
-      });
+      };
       const collect = (text) => {
         if (settled) return;
         if (insideSi && textDepth >= 0) {
@@ -851,9 +850,7 @@ function loadToolboxSharedStrings(zip, entry, sourceFile = '', options = {}) {
           finish(invalidSharedStrings('包含合法 t 节点之外的非空文本'));
         }
       };
-      parser.on('text', collect);
-      parser.on('cdata', collect);
-      parser.on('closetag', (rawName) => {
+      const handleCloseTag = (rawName) => {
         if (settled) return;
         const name = localName(rawName);
         const openName = elementStack.pop();
@@ -902,9 +899,91 @@ function loadToolboxSharedStrings(zip, entry, sourceFile = '', options = {}) {
           rootClosed = true;
         }
         depth -= 1;
+      };
+      // 快路径：`<si><t>文本</t></si>` 与 `<si><t xml:space="preserve">文本</t></si>`（文本不含 `<`、`&`，
+      // 不超过 SHARED_STRING_FAST_TEXT_MAX）。逐事件处理时这两种形态只会走 si → plain t → 文本 →
+      // t 解码 → si 交付，结构、大小写与命名空间校验必然通过；其他形态或状态返回 -1 交回通用路径。
+      let fastNamespaceScope = null;
+      let fastText = '';
+      const fastSharedStringPath = { leadCodes: [115], match: null, apply: null, lastTagStart: -1, openTagName: null };
+      const matchFastSharedString = (buf, lt, _len, nsScope) => {
+        if (settled || !rootSeen || rootClosed || insideSi || textDepth >= 0 || depth !== 1 ||
+            elementStack.length !== 1 || elementStack[0] !== 'sst') {
+          return -1;
+        }
+        if (nsScope !== fastNamespaceScope) {
+          if (!namespaceAllowed(nsScope[''] || '', SPREADSHEETML_NAMESPACES)) return -1;
+          fastNamespaceScope = nsScope;
+        }
+        if (!buf.startsWith('<si><t', lt)) return -1;
+        let index = lt + 6;
+        if (buf.charCodeAt(index) === 62) index += 1;
+        else if (buf.startsWith(' xml:space="preserve">', index)) index += 22;
+        else return -1;
+        const textEnd = buf.indexOf('<', index);
+        if (textEnd < 0 || textEnd - index > SHARED_STRING_FAST_TEXT_MAX ||
+            !buf.startsWith('</t></si>', textEnd)) {
+          return -1;
+        }
+        const text = buf.slice(index, textEnd);
+        if (text.indexOf('&') >= 0) return -1;
+        fastText = text;
+        fastSharedStringPath.lastTagStart = textEnd + 4;
+        return textEnd + 9;
+      };
+      const applyFastSharedString = () => {
+        let value;
+        try {
+          value = decodeExcelStXstring(fastText);
+          assertExcelCellTextLength(value);
+        } catch (error) {
+          finish(invalidSharedStrings('包含无效或超长的 ST_Xstring/UTF-16 文本', {
+            cause: error.message
+          }));
+          return;
+        }
+        try {
+          onValue(value);
+        } catch (error) {
+          finish(error);
+        }
+      };
+      // 与原 sax.createStream(true, { xmlns: true }) 事件与严格错误一致，见 strict-xml-tokenizer。
+      const parser = createStrictXmlTokenizer({
+        onOpenTag: handleOpenTag,
+        onCloseTag: handleCloseTag,
+        onText: collect,
+        onCdata: collect,
+        fastPath: Object.assign(fastSharedStringPath, {
+          match: matchFastSharedString,
+          apply: applyFastSharedString
+        })
       });
-      parser.on('error', finish);
-      parser.on('end', () => {
+      stream.on('data', (chunk) => {
+        if (settled) return;
+        if (cancelToken && cancelToken.cancelled) {
+          const error = new ToolboxXlsxFormatError(
+            `${sourceFile || '该文件'}：sharedStrings.xml 读取已取消`,
+            { sourceFile }
+          );
+          error.code = 'TOOLBOX_XLSX_CANCELLED';
+          finish(error);
+          return;
+        }
+        try {
+          parser.write(chunk);
+        } catch (error) {
+          finish(error);
+        }
+      });
+      stream.on('end', () => {
+        if (settled) return;
+        try {
+          parser.end();
+        } catch (error) {
+          finish(error);
+          return;
+        }
         if (!rootSeen || !rootClosed || insideSi || textDepth >= 0 ||
             richRunDepth >= 0 || phoneticRunDepth >= 0 ||
             elementStack.length !== 0 || depth !== 0) {
@@ -913,18 +992,7 @@ function loadToolboxSharedStrings(zip, entry, sourceFile = '', options = {}) {
         }
         finish();
       });
-      stream.on('data', () => {
-        if (!settled && cancelToken && cancelToken.cancelled) {
-          const error = new ToolboxXlsxFormatError(
-            `${sourceFile || '该文件'}：sharedStrings.xml 读取已取消`,
-            { sourceFile }
-          );
-          error.code = 'TOOLBOX_XLSX_CANCELLED';
-          finish(error);
-        }
-      });
       stream.on('error', finish);
-      stream.pipe(parser);
     });
   });
 }

@@ -124,6 +124,18 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 0);
     await js(`statementFixture.host.dispose();`);
     await setup();
+    // v3.2.16 D7：已有上一账单日余额但首日对不上，状态框标题与补录弹窗写明是“核对”，不是缺余额。
+    await js(`statementFixture.next.import={status:'manual-balance-required',message:'上一账单日余额与账单对不上，请核对后重新补录',manualBalancePromptReady:true,
+      manualBalancePrompt:{merchantId:'SEED',currency:'VND',targetBillDate:'2026-10-01',queueIndex:1,queueTotal:1,
+        seedMismatch:{seedDate:'2026-09-30',seedBalance:0,seedGenerationMethod:'人工录入',anchorBalance:0,billDate:'2026-10-01',
+          creditAmount:0,debitAmount:201500,expectedBalance:-201500,statementBalances:[800000,798500]}},detailReady:true,balanceReady:false};
+      statementFixture.controller.commands.importFile();`); await tick();
+    assert.equal(await js(`statementFixture.feedback.at(-1).options.manualBalancePromptTitle`), '点击核对上一账单日余额');
+    await js(`document.getElementById('statusBox').click()`); await tick();
+    assert.deepEqual(await js(`({warning:Boolean(statementFixture.top()?.querySelector('.manual-balance-seed-mismatch')),
+      date:statementFixture.top()?.querySelector('.manual-balance-date-input')?.value})`), {warning:true,date:'2026-09-30'});
+    await js(`statementFixture.host.dispose();`);
+    await setup();
     // 账单日期断档：导入后直接弹确认；关闭后状态框可重新打开同一确认。
     await js(`statementFixture.next.import={status:'manual-balance-required',message:'账单日期不连续（1 处），请确认是否补录断档前一日的期末余额',manualBalancePromptReady:true,
       manualBalancePrompt:{reason:'gap',merchantId:'GAP',currency:'USD',anchorDate:'2026-08-01',targetBillDate:'2026-08-04',missingFrom:'2026-08-02',missingTo:'2026-08-03',suggestedSeedDate:'2026-08-03',gapKey:'G1',
@@ -150,6 +162,33 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     await js(`document.getElementById('statusBox').click()`); await tick();
     assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.balance-gap-card'))`), true);
     assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 0);
+    await js(`statementFixture.host.dispose();`);
+    await setup();
+    // v3.2.16 余额校验不一致：导入后直接弹确认；关闭后状态框可重新打开同一确认。
+    await js(`statementFixture.next.import={status:'manual-balance-required',message:'账单余额校验不一致（1 处），请核查或确认按账单余额生成',manualBalancePromptReady:true,
+      manualBalancePrompt:{reason:'mismatch',merchantId:'MIS',currency:'USD',targetBillDate:'2026-08-04',
+        mismatches:[{key:'X1',merchantId:'MIS',currency:'USD',billDate:'2026-08-04',anchorDate:'2026-08-03',anchorSource:'statement',anchorBalance:100,
+          creditAmount:10,debitAmount:0,expectedBalance:110,statementBalance:120,difference:10,missingFrom:'',missingTo:''}]},detailReady:true,balanceReady:false};
+      statementFixture.controller.commands.importFile();`); await tick();
+    assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.balance-mismatch-card'))`), true);
+    assert.equal(await js(`statementFixture.feedback.at(-1).options.manualBalancePromptTitle`), '点击处理余额校验不一致');
+    await js(`statementFixture.top().querySelector('.icon-close').click()`); await tick();
+    await js(`document.getElementById('statusBox').click()`); await tick();
+    assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.balance-mismatch-card'))`), true);
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 0);
+    await js(`statementFixture.host.dispose();`);
+    await setup();
+    // v3.2.16 人工补录替换：导入后直接弹确认；关闭后状态框可重新打开同一确认。
+    await js(`statementFixture.next.import={status:'manual-balance-required',message:'人工补录的期末余额与本次余额不一致（1 处），请核查或确认替换',manualBalancePromptReady:true,
+      manualBalancePrompt:{reason:'seed-replace',merchantId:'REP',currency:'USD',targetBillDate:'2026-08-04',
+        replacements:[{key:'R1',merchantId:'REP',currency:'USD',billDate:'2026-08-04',balanceSource:'statement',manualBalance:500,balance:120,difference:-380,adjustment:0,writtenBalance:120}]},
+      detailReady:true,balanceReady:false};
+      statementFixture.controller.commands.importFile();`); await tick();
+    assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.balance-seed-replace-card'))`), true);
+    assert.equal(await js(`statementFixture.feedback.at(-1).options.manualBalancePromptTitle`), '点击处理人工补录余额替换');
+    await js(`statementFixture.top().querySelector('.icon-close').click()`); await tick();
+    await js(`document.getElementById('statusBox').click()`); await tick();
+    assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.balance-seed-replace-card'))`), true);
   });
   await test('导出范围公共工厂准确传 current/all，错误报告成功后仍可再次导出', async () => {
     await setup(); await js(`statementFixture.controller.commands.importFile()`);
@@ -161,6 +200,19 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     await js(`statementFixture.controller.commands.exportError();`); await tick();
     await js(`statementFixture.controller.commands.exportError();`); await tick();
     assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='error').length`), 2);
+  });
+  // v3.2.16：「原始账单仅有币种无账户号」币种未维护大账号时整批阻断，弹窗列出文件、币种和行号（spec D1）
+  await test('导入因币种未维护大账号被阻断时，弹窗列出明细并禁用导出', async () => {
+    await setup();
+    await js(`statementFixture.next.import={status:'error',message:'有 2 行明细的币种为空或未在【映射管理】中维护大账号',errorCode:'CURRENCY_BIG_ACCOUNT_UNMAPPED',
+      detailLines:['模板「招商银行-上海」文件「a.xlsx」币种「GBP」：第 3 行','模板「招商银行-上海」文件「a.xlsx」币种「（空）」：第 5 行'],errorReportReady:true};
+      statementFixture.controller.commands.importFile()`); await tick();
+    assert.deepEqual(await js('statementFixture.alerts'), [
+      '有 2 行明细的币种为空或未在【映射管理】中维护大账号\n模板「招商银行-上海」文件「a.xlsx」币种「GBP」：第 3 行\n模板「招商银行-上海」文件「a.xlsx」币种「（空）」：第 5 行'
+    ]);
+    assert.equal(await js(`document.getElementById('exportDetailBtn').disabled&&document.getElementById('exportBalanceBtn').disabled`), true);
+    await js(`statementFixture.next.import={status:'error',message:'测试错误',errorCode:'FILE_READ',detailLines:['不弹窗'],errorReportReady:true};statementFixture.controller.commands.importFile()`); await tick();
+    assert.equal(await js('statementFixture.alerts.length'), 1);
   });
   await test('导入双击只有一个IPC，离页期间不渲染；重进消费真实在途结果且不新增sessionStatus', async () => {
     await setup();

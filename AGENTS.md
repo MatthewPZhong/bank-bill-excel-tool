@@ -26,7 +26,7 @@
 
 模块现行说明：[BizOP catalog 查询与命令边界](src/main-process/biz-op-v327/README.md)。
 
-网银账单生成小助手：导入 Excel/CSV 账单，按模板映射列，导出标准化明细与余额 Excel。技术栈：Electron 36、原生 JavaScript、SQLite（`node:sqlite` 的 `DatabaseSync`）、SheetJS/XLSX；依赖版本以 `package.json` 为准。
+清结算小助手（`package.json` 的 `productName`；数据目录仍为 `Documents/网银账单生成小助手/`，见「存储位置」）：核心为网银账单——导入 Excel/CSV 账单，按模板映射列，导出标准化明细与余额 Excel；对账、清结算等其他模块见「模块资料入口」与「模块现行说明」。技术栈：Electron 36、原生 JavaScript、SQLite（`node:sqlite` 的 `DatabaseSync`）、SheetJS/XLSX；依赖版本以 `package.json` 为准。
 
 - Renderer（`index.html`、`src/renderer.js`、`src/renderer-dialogs.js`）经 `src/preload.js` 的 `window.desktopApi` 连接 `src/main.js` 的 IPC 与业务编排。修改跨模块大文件时读相关逻辑与调用方，不强制通读全文件。
 - `src/backend/database.js` 是 `AppDatabase` 门面，`database/` 下为迁移、仓储和工具；`src/backend/file-service.js` 是文件 IO 门面，`file-service/` 下为 readers、writers、normalizers、common；`src/main-process/` 管理 statement-session、statement-generation；`src/backend/*-store.js` 管理余额种子、调整和账户顺序/模式。

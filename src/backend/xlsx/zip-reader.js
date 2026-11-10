@@ -19,6 +19,8 @@
 //
 // 约束：本文件不得 require 任何业务模块（收单/biz-op/pending/vcc 等），引擎自包含。
 
+const { Transform } = require('node:stream');
+const zlib = require('node:zlib');
 const yauzl = require('yauzl');
 const sax = require('sax');
 
@@ -108,6 +110,95 @@ function openZipWithEntries(sourceFile, filePath, options = {}) {
         }
       });
     });
+  });
+}
+
+// 大条目流式读取的解压输出分块。yauzl 内部用 zlib 默认 16KB 分块，解析端每处理完一块都要等
+// 解压线程送来下一块；10 万行工作表约 4700 次往返。加大分块只减少往返，不改变解压结果。
+const LARGE_ENTRY_INFLATE_CHUNK_BYTES = 64 * 1024;
+
+// 与 yauzl AssertByteCountStream 相同：解压字节数与中央目录声明不符时以同样文案报错。
+// 「got at least」是越界时已解压的字节数，取决于分块：yauzl 默认管线的解压输出在累计字节数为
+// Z_DEFAULT_CHUNK 整数倍处、以及每个原始数据块处理完处切块；本管线只是把前者放大，后者相同。
+// 因此原管线报出的数值 = min(声明大小之后的下一个 Z_DEFAULT_CHUNK 整数倍, 本块结束位置)。
+class EntryByteCountStream extends Transform {
+  constructor(byteCount) {
+    super();
+    this.actualByteCount = 0;
+    this.expectedByteCount = byteCount;
+  }
+
+  _transform(chunk, _encoding, callback) {
+    const start = this.actualByteCount;
+    this.actualByteCount += chunk.length;
+    if (this.actualByteCount > this.expectedByteCount) {
+      const block = zlib.constants.Z_DEFAULT_CHUNK;
+      const blockStart = Math.floor(this.expectedByteCount / block) * block;
+      const reported = Math.min(blockStart + block, this.actualByteCount);
+      const error = new Error(`too many bytes in the stream. expected ${this.expectedByteCount}. got at least ${reported}`);
+      // 原管线在越界块之前会把本块中更早的整块照常交付；先交付同一前缀，下一轮事件循环再报错。
+      if (blockStart > start) {
+        this.push(chunk.subarray(0, blockStart - start));
+        setImmediate(() => callback(error));
+        return;
+      }
+      callback(error);
+      return;
+    }
+    callback(null, chunk);
+  }
+
+  _flush(callback) {
+    if (this.actualByteCount < this.expectedByteCount) {
+      callback(new Error(`not enough bytes in the stream. expected ${this.expectedByteCount}. got only ${this.actualByteCount}`));
+      return;
+    }
+    callback();
+  }
+}
+
+// 打开 zip 条目的读取流，结果与 zip.openReadStream(entry, callback) 相同。对 yauzl 打开的普通
+// deflate（未加密）条目，按 yauzl 3.x openReadStreamLowLevel 的同一管线自行解压：本地文件头校验
+// 仍由 yauzl 完成（decompress:false 只取原始数据），读流错误转给解压流、解压错误转给字节数断言流
+// （均为 setImmediate 且销毁后不再转发），validateEntrySizes 时断言解压字节数，destroy 时断开管线
+// 并销毁原始读流；唯一差异是解压输出分块更大。其余情况（假 zip、stored、加密）直接调用原接口。
+function openZipEntryReadStream(zip, entry, callback) {
+  if (!(zip instanceof yauzl.ZipFile) || !(entry instanceof yauzl.Entry) ||
+      entry.compressionMethod !== 8 || entry.isEncrypted()) {
+    zip.openReadStream(entry, callback);
+    return;
+  }
+  zip.openReadStream(entry, { decompress: false }, (error, readStream) => {
+    if (error) {
+      callback(error);
+      return;
+    }
+    let destroyed = false;
+    const inflateFilter = zlib.createInflateRaw({ chunkSize: LARGE_ENTRY_INFLATE_CHUNK_BYTES });
+    readStream.on('error', (streamError) => {
+      setImmediate(() => {
+        if (!destroyed) inflateFilter.emit('error', streamError);
+      });
+    });
+    readStream.pipe(inflateFilter);
+    let endpointStream = inflateFilter;
+    if (zip.validateEntrySizes) {
+      endpointStream = new EntryByteCountStream(entry.uncompressedSize);
+      inflateFilter.on('error', (inflateError) => {
+        setImmediate(() => {
+          if (!destroyed) endpointStream.emit('error', inflateError);
+        });
+      });
+      inflateFilter.pipe(endpointStream);
+    }
+    endpointStream._destroy = (destroyError, done) => {
+      destroyed = true;
+      if (inflateFilter !== endpointStream) inflateFilter.unpipe(endpointStream);
+      readStream.unpipe(inflateFilter);
+      readStream.destroy();
+      if (done != null) done(destroyError);
+    };
+    callback(null, endpointStream);
   });
 }
 
@@ -273,6 +364,7 @@ module.exports = {
   loadSharedStrings,
   // 以下供单测 / 未来 pipeline 复用
   openZipWithEntries,
+  openZipEntryReadStream,
   locateSheets,
   readEntryAsString,
   normalizeWorksheetTarget,

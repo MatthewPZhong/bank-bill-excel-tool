@@ -53,7 +53,12 @@ async function withHarness(options, run) {
   const unregister = registerMemoryGovernor(governor);
   const facts = [];
   const owner = createToolboxSplitReadOwner({ governor, temporaryRoot: root, dispatch(payload) {
-    const carrier = dispatchLargeSplit(payload);
+    const dispatched = dispatchLargeSplit(payload);
+    // withoutPrefetch：去掉元数据扫描的字段值预取，迫使选字段时走单独补扫 Worker。
+    const carrier = options.withoutPrefetch ? { ...dispatched, promise: dispatched.promise.then((result) => {
+      const { prefetchedValues: _prefetched, ...rest } = result;
+      return rest;
+    }) } : dispatched;
     const fact = { op: payload.op, config: payload.executionMemoryConfig,
       lease: governor.snapshot().activeLeases[0],
       activity: memoryActivitySnapshot(), closed: false };
@@ -94,8 +99,9 @@ async function withHarness(options, run) {
   }
 }
 
-for (const freeMiB of [512, 2560, 3584]) for (const format of ['csv', 'xlsx']) {
-  test(`pending ${format}：启动空闲 ${freeMiB} MiB，读取/字段补扫/导出回读`, () => withHarness({ freeMiB, format }, async (h) => {
+for (const freeMiB of [512, 2560, 3584]) for (const format of ['csv', 'xlsx']) for (const prefetch of [false, true]) {
+  const label = prefetch ? '读取（字段值随元数据预取）/取值/导出回读' : '读取/字段补扫/导出回读';
+  test(`pending ${format}：启动空闲 ${freeMiB} MiB，${label}`, () => withHarness({ freeMiB, format, withoutPrefetch: !prefetch }, async (h) => {
     assert.equal(h.envelope.compatibilityBudgets.memoryBytes / MiB, Math.max(0, freeMiB - 2048));
     if (format === 'csv') assert.equal(h.original.length, 22);
     const metadata = await h.read();
@@ -109,7 +115,7 @@ for (const freeMiB of [512, 2560, 3584]) for (const format of ['csv', 'xlsx']) {
     assert.equal(values.status, 'success', JSON.stringify(values));
     assert.deepEqual(values.values, ['A', 'B']);
     assert.equal(values.valuesState, 'complete');
-    assert.equal(h.facts.length, 2);
+    assert.deepEqual(h.facts.map((fact) => fact.op), prefetch ? ['scanMetadata'] : ['scanMetadata', 'scanValues']);
     for (const fact of h.facts) {
       assert.equal(fact.config, null, 'pending 不启用实验配置');
       assert.equal(fact.lease.resources.memoryBytes, 0, '兼容记账不声称工作集为零');
