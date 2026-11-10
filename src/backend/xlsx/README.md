@@ -8,10 +8,12 @@
 | --- | --- | --- |
 | `legacy/streaming-xlsx-reader.js` | `readXlsxStreamed`、行/cell/XML helper；完整 ZIP Buffer、JSZip 和 SST 全量加载，sheet1 行扫描流式；正整数 maxRows 才截断，返回 `{rowCount,truncated}` | 业务保留 colCount、maxRows、手写投影；onRow 同步调用且忽略 Promise 返回值 |
 | `legacy/entry-size-preflight.js` | 对实际读取 worksheet 和 SST 做 2^31 字节预检；确定超限报 XLSX_ENTRY_TOO_LARGE，预检自身失败保持旧放行分支 | 调用方传入真实 sheetEntryNames；不扩大到未读取页 |
+| `xlsx-sheet-scanner.js` 的 `rowCallbackLimit` | 只把前 N 行交给 `onRow`；之后的行照常严格解析、解码、校验样式并计数，在无 `onCellLexical` 与行字节预算时不构造冻结行 / 单元格对象 | 只看前几行的调用方使用（写后复核只取表头）；需要逐行模型的调用方不得设置 |
 | `rich-workbook.js` | `openRichWorkbook` 支持声明页（含隐藏页），默认 maxSheets=4096；`openSingleSheetRichWorkbook` 在 styles/SST 前拒绝非单声明页 | 保留 date1904、styles 与 lexical；onRow/onCellLexical 必须同步，thenable 拒绝；禁止并发 scan 和关闭后 scan |
 | `shared-strings-provider.js` | Memory/Adaptive provider；公共缺省 64 MiB、LRU 8192；缺 entry 返回空内存 provider | 业务显式传入有效预算与 tempRoot，null/undefined 差异保持原合同 |
-| `zip-reader.js`、`workbook-parts.js` | ZIP entry、workbook/relationships/metadata/SST 解析及原有限额 | Toolbox 任务装配保留在 `../toolbox-format/xlsx-pass.js` |
+| `zip-reader.js`、`workbook-parts.js` | ZIP entry、workbook/relationships/metadata/SST 解析及原有限额；`openZipEntryReadStream` 复刻 yauzl 3.x 的 deflate 读取管线（错误转发、解压字节数断言及其报错数值），只把解压输出分块调到 64KB，供工作表扫描与 SST 流式读取 | Toolbox 任务装配保留在 `../toolbox-format/xlsx-pass.js`；升级 yauzl 时须重跑 `tests/unit/backend/xlsx/zip-entry-stream.test.js` 的对照 |
 | `excel-text.js`、`ooxml-namespaces.js`、`number-date.js`、`model.js`、`style-registry.js`、`xlsx-sheet-scanner.js` | 文本、OOXML、日期/数字、模型、样式与 worksheet 扫描；Source/OutputStyleRegistry 均保留 | 不包含业务列映射、数据库、归档或发布策略 |
+| `strict-xml-tokenizer.js` | worksheet 扫描与 `loadToolboxSharedStrings` 的 XML 词法层；事件、命名空间、实体表与严格错误文案对齐 `sax.createStream(true, { xmlns: true })`（v3.2.16 起替换 sax 以提速），差异见文件头。可选快路径钩子让调用方整段接管能证明与逐事件处理等价的标记（工作表的 `<row …>`、简单 `<c>`，共享字符串的简单 `<si><t>`），其余一律回退逐事件路径 | 仅供上述两处热路径；改动须通过 `tests/unit/backend/xlsx/strict-xml-tokenizer.test.js` 的 sax 对照；扩大快路径接管范围须同步 `xlsx-sheet-scanner-fast-path.test.js` 的开 / 关对照（`scanXlsxSheet` 内部选项 `fastPath: false` 仅供该测试） |
 
 允许依赖本目录、Node 标准库、既有 yauzl/sax/jszip；legacy 预检额外允许 `../file-service/common.js` 的错误类。不允许依赖 Pending、Position、Toolbox 等业务目录、main-process、数据库或业务 writer/session。不要在本目录增加业务聚合 index。
 

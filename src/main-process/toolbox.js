@@ -206,16 +206,27 @@ function createValuesByFieldAccumulator(headers) {
     colIdxByField.set(header, colIdx);
   });
 
+  // 构造完成后字段顺序、列索引、去重集合与结果数组都不再变化；逐行累加时直接按数组遍历，
+  // 不再为每行创建 Map 迭代器与解构条目（顺序仍是 colIdxByField 的插入序）。
+  const fieldColumns = [];
+  const fieldSeen = [];
+  const fieldValues = [];
+  for (const [header, colIdx] of colIdxByField.entries()) {
+    fieldColumns.push(colIdx);
+    fieldSeen.push(seenByField[header]);
+    fieldValues.push(valuesByField[header]);
+  }
+
   return {
     addRow(cells) {
       if (!Array.isArray(cells)) return;
-      for (const [header, colIdx] of colIdxByField.entries()) {
-        const value = normalizeCell(cells[colIdx]);
+      for (let index = 0; index < fieldColumns.length; index += 1) {
+        const value = normalizeCell(cells[fieldColumns[index]]);
         if (value === '') continue;
-        const seen = seenByField[header];
+        const seen = fieldSeen[index];
         if (seen.has(value)) continue;
         seen.add(value);
-        valuesByField[header].push(value);
+        fieldValues[index].push(value);
       }
     },
     result() {

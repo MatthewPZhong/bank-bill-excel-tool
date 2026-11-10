@@ -65,7 +65,12 @@ async function withFixture(options, run) {
   const owner = createToolboxSplitReadOwner({ governor, temporaryRoot, dispatch(input) {
     grants.push(input.executionMemoryConfig);
     if (options.changeBeforeWorker) fs.appendFileSync(file, 'changed\n');
-    return dispatchLargeSplit(input);
+    const carrier = dispatchLargeSplit(input);
+    // withoutPrefetch：去掉元数据扫描顺带预取的字段值，迫使选字段时走单独补扫 Worker。
+    return options.withoutPrefetch ? { ...carrier, promise: carrier.promise.then((result) => {
+      const { prefetchedValues: _prefetched, ...rest } = result;
+      return rest;
+    }) } : carrier;
   } });
   const handlers = new Map();
   const ipcMain = { handle: (name, callback) => handlers.set(name, callback) };
@@ -99,7 +104,7 @@ test('90 万短行在 512 MiB 下等待普通档并受控超时，不启动低�
   assert.equal(result.status, 'failed'); assert.equal(result.code, 'ADMISSION_TIMEOUT');
   assert.match(result.message, /等待后台资源超时/); assert.equal(h.grants.length, 0);
 }));
-test('同一 90 万行 CSV 普通档准确计数，字段补扫同样等待普通档', () => withFixture({ dense: true, availableMiB: 2048 }, async (h) => {
+test('同一 90 万行 CSV 普通档准确计数，字段补扫同样等待普通档', () => withFixture({ dense: true, availableMiB: 2048, withoutPrefetch: true }, async (h) => {
   const metadata = await h.read(); assert.equal(metadata.status, 'success'); assert.equal(metadata.dataRowCount, 900000);
   assert.equal(metadata.executionMode, 'normal');
   h.state.availableMiB = 512;
@@ -120,7 +125,13 @@ test('pending 零兼容预算仍可读取大 CSV，不把低档容量限制套�
   const result = await h.read(); assert.equal(result.status, 'success'); assert.equal(result.dataRowCount, 900000);
   assert.deepEqual(h.grants, [null]);
 }));
-test('小 CSV 的 metadata 和单字段补扫均保留真实低档执行', () => withFixture({}, async (h) => {
+test('同一 90 万行 CSV 的字段值随元数据预取，选字段不再启动补扫 Worker', () => withFixture({ dense: true, availableMiB: 2048 }, async (h) => {
+  const metadata = await h.read(); assert.equal(metadata.status, 'success'); assert.equal(metadata.dataRowCount, 900000);
+  h.state.availableMiB = 512;
+  const values = await h.values(metadata); assert.equal(values.status, 'success'); assert.deepEqual(values.values, ['1']);
+  assert.equal(h.grants.length, 1); assert.equal(h.governor.snapshot().queued.size, 0);
+}));
+test('小 CSV 的 metadata 和单字段补扫均保留真实低档执行', () => withFixture({ withoutPrefetch: true }, async (h) => {
   const metadata = await h.read(); assert.equal(metadata.executionMode, 'low'); assert.equal(metadata.dataRowCount, 2);
   const values = await h.values(metadata); assert.deepEqual(values.values, ['1', '3']);
   assert.ok(h.grants.every((config) => config.profileId === 'split-prepare-low-v1'));

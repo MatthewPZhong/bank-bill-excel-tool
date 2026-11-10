@@ -17,6 +17,7 @@ const SCAN_ACTION = 'toolbox:split:prepare';
 const SCAN_RESOURCES = Object.freeze({ cpuSlots: 1, workerThreadSlots: 1,
   utilityProcessSlots: 0, ioHeavySlots: 1, memoryBytes: 0 });
 const VALUES_BYTES = 4 * 1024 ** 2;
+const MAX_FIELD_VALUES = 50000;
 const MAX_CACHED_FIELDS = 8;
 
 function failure(code, message) { return Object.assign(new Error(message), { code }); }
@@ -26,6 +27,21 @@ function validateRequest(request, keys) {
       typeof request.requestId !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(request.requestId)) {
     throw failure('TOOLBOX_SPLIT_READ_INVALID', '拆分读取请求无效');
   }
+}
+
+// 元数据扫描顺带预取的字段可选值 → 与单独 scanValues 相同形状的结果；只接受本次表头内的字段。
+function prefetchedFieldValues(result, headers) {
+  const prefetched = new Map();
+  if (!Array.isArray(result.prefetchedValues)) return prefetched;
+  for (const item of result.prefetchedValues) {
+    if (!Array.isArray(item) || typeof item[0] !== 'string' || !headers.includes(item[0]) ||
+        !Array.isArray(item[1]) || prefetched.has(item[0])) {
+      continue;
+    }
+    prefetched.set(item[0], Object.freeze({ field: item[0], values: item[1], valuesState: 'complete',
+      executionMode: result.executionMode }));
+  }
+  return prefetched;
 }
 
 // Main 持有窗口、来源与私有目录；Renderer 只能持有 token 与请求号。
@@ -131,10 +147,13 @@ function createToolboxSplitReadOwner({ governor, dispatch = dispatchLargeSplit,
       const sourceFilePath = path.resolve(selected);
       const snapshot = sourceSnapshotFromStat(fs.statSync(sourceFilePath, { bigint: true }));
       if (!snapshot) throw failure('TOOLBOX_SPLIT_READ_INVALID', '拆分源文件不可读');
-      const result = await runScan({ op: 'scanMetadata', filePath: sourceFilePath, sourceSnapshot: Object.freeze(snapshot) },
-        { operationKey: request.requestId, signal: record.controller.signal });
+      const result = await runScan({ op: 'scanMetadata', filePath: sourceFilePath, sourceSnapshot: Object.freeze(snapshot),
+        maxValues: MAX_FIELD_VALUES, maxValueBytes: VALUES_BYTES },
+      { operationKey: request.requestId, signal: record.controller.signal });
+      const headers = Object.freeze([...result.headers]);
       const context = { token: randomUUID(), senderId: id, sourceFilePath, snapshot: Object.freeze(snapshot),
-        dataRowCount: result.dataRowCount, headers: Object.freeze([...result.headers]), fields: new Map() };
+        dataRowCount: result.dataRowCount, headers, fields: new Map(),
+        prefetched: prefetchedFieldValues(result, headers) };
       assertFresh(context);
       if (record.controller.signal.aborted) return { status: 'cancelled' };
       sessions.set(id, context);
@@ -161,9 +180,12 @@ function createToolboxSplitReadOwner({ governor, dispatch = dispatchLargeSplit,
         }
         field = { controller: new AbortController(), subscribers: new Set(), promise: null };
         context.fields.set(request.field, field);
-        field.promise = runScan({ op: 'scanValues', filePath: context.sourceFilePath, sourceSnapshot: context.snapshot, field: request.field,
-          maxValues: 50000, maxValueBytes: VALUES_BYTES },
-        { operationKey: `values-${randomUUID()}`, signal: field.controller.signal }).then((result) => {
+        // 元数据扫描已完整预取该字段时直接复用（口径与单独扫描相同），否则照旧单独扫描一次。
+        const prefetched = context.prefetched.get(request.field);
+        field.promise = (prefetched ? Promise.resolve(prefetched) : runScan({ op: 'scanValues',
+          filePath: context.sourceFilePath, sourceSnapshot: context.snapshot, field: request.field,
+          maxValues: MAX_FIELD_VALUES, maxValueBytes: VALUES_BYTES },
+        { operationKey: `values-${randomUUID()}`, signal: field.controller.signal })).then((result) => {
           assertFresh(context);
           return result;
         }).catch((error) => {

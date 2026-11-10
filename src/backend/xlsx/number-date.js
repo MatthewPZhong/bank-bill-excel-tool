@@ -139,10 +139,47 @@ function parseBoundedExponent(rawExponent, maxMagnitude) {
   };
 }
 
+// 「可选正负号 + 至少一位整数 + 可选的小数点与小数位」且无空白、无指数的词法；返回
+// [negative, integerPart, fractionPart]，其他形态返回 null 交给正则路径（结果与正则分组一致）。
+function plainDecimalParts(source) {
+  const length = source.length;
+  let index = 0;
+  let code = length > 0 ? source.charCodeAt(0) : -1;
+  if (code === 43 || code === 45) index = 1;
+  const integerStart = index;
+  while (index < length) {
+    code = source.charCodeAt(index);
+    if (code < 48 || code > 57) break;
+    index += 1;
+  }
+  const integerEnd = index;
+  if (integerEnd === integerStart) return null;
+  let fractionStart = integerEnd;
+  if (index < length) {
+    if (source.charCodeAt(index) !== 46) return null;
+    index += 1;
+    fractionStart = index;
+    while (index < length) {
+      code = source.charCodeAt(index);
+      if (code < 48 || code > 57) return null;
+      index += 1;
+    }
+  }
+  return [
+    integerStart === 1 && source.charCodeAt(0) === 45,
+    source.slice(integerStart, integerEnd),
+    source.slice(fractionStart, length)
+  ];
+}
+
 function parseDecimalLexicalInternal(input) {
   const source = String(input == null ? '' : input);
   if (source.length > TOOLBOX_MAX_CANONICAL_DECIMAL_CHARS) {
     return decimalCanonicalLimit(source.length);
+  }
+  const plain = plainDecimalParts(source);
+  if (plain !== null) {
+    return buildParsedDecimal(source, source, plain[0], plain[1], plain[2], undefined);
   }
   const lexical = source.trim();
   const match = lexical.match(/^([+-])?(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/);
@@ -151,11 +188,23 @@ function parseDecimalLexicalInternal(input) {
   const negative = match[1] === '-';
   const integerPart = match[2] === undefined ? '' : match[2];
   const fractionPart = match[2] === undefined ? match[4] : (match[3] || '');
+  return buildParsedDecimal(source, lexical, negative, integerPart, fractionPart, match[5]);
+}
+
+function firstNonZeroDigitIndex(digits) {
+  for (let index = 0; index < digits.length; index += 1) {
+    const code = digits.charCodeAt(index);
+    if (code >= 49 && code <= 57) return index;
+  }
+  return -1;
+}
+
+function buildParsedDecimal(source, lexical, negative, integerPart, fractionPart, rawExponent) {
   const coefficientRaw = (integerPart || '0') + fractionPart;
-  const firstNonZero = coefficientRaw.search(/[1-9]/);
+  const firstNonZero = firstNonZeroDigitIndex(coefficientRaw);
   const coefficientDigits = firstNonZero < 0 ? '0' : coefficientRaw.slice(firstNonZero);
   const exponentResult = parseBoundedExponent(
-    match[5],
+    rawExponent,
     TOOLBOX_MAX_CANONICAL_DECIMAL_CHARS +
       fractionPart.length +
       coefficientDigits.length +
@@ -190,7 +239,8 @@ function parseDecimalLexicalInternal(input) {
   const dot = unsignedCanonical.indexOf('.');
   const scale = dot < 0 ? 0 : unsignedCanonical.length - dot - 1;
   const unsignedInteger = dot < 0 ? unsignedCanonical : unsignedCanonical.slice(0, dot);
-  const nonZeroInteger = unsignedInteger.replace(/^0+/, '');
+  let leadingZeros = 0;
+  while (leadingZeros < unsignedInteger.length && unsignedInteger.charCodeAt(leadingZeros) === 48) leadingZeros += 1;
   const significantDigits = firstNonZero < 0 ? 1 : coefficientDigits.length;
 
   return {
@@ -203,7 +253,7 @@ function parseDecimalLexicalInternal(input) {
       decimalPower,
       scale,
       significantDigits,
-      integerDigits: nonZeroInteger.length,
+      integerDigits: unsignedInteger.length - leadingZeros,
       isZero: firstNonZero < 0
     })
   };
@@ -219,7 +269,26 @@ function decimalComparable(input) {
     ? input
     : parseDecimalLexical(input);
   if (!parsed) return null;
-  let value = parsed.canonical;
+  const canonical = parsed.canonical;
+  if (typeof canonical !== 'string') return decimalComparableByPattern(canonical);
+  // 去掉小数尾零与悬空小数点、去掉后面仍跟数字的前导零，全零归一为 '0'（与 decimalComparableByPattern 一致）。
+  const negative = canonical.charCodeAt(0) === 45;
+  let start = negative ? 1 : 0;
+  let end = canonical.length;
+  if (canonical.indexOf('.', start) >= 0) {
+    while (end > start && canonical.charCodeAt(end - 1) === 48) end -= 1;
+    if (end > start && canonical.charCodeAt(end - 1) === 46) end -= 1;
+  }
+  while (end - start > 1 && canonical.charCodeAt(start) === 48 && isAsciiDigitCode(canonical.charCodeAt(start + 1))) {
+    start += 1;
+  }
+  const value = canonical.slice(start, end);
+  if (value === '' || /^0(?:\.0*)?$/.test(value)) return '0';
+  return `${negative ? '-' : ''}${value}`;
+}
+
+function decimalComparableByPattern(canonical) {
+  let value = canonical;
   const negative = value.startsWith('-');
   if (negative) value = value.slice(1);
   if (value.includes('.')) {
@@ -228,6 +297,10 @@ function decimalComparable(input) {
   value = value.replace(/^0+(?=\d)/, '');
   if (value === '' || /^0(?:\.0*)?$/.test(value)) return '0';
   return `${negative ? '-' : ''}${value}`;
+}
+
+function isAsciiDigitCode(code) {
+  return code >= 48 && code <= 57;
 }
 
 function formatScaledInteger(coefficient, scale) {
@@ -320,7 +393,21 @@ function classifyMinuteMonthTokens(code) {
   return { hasMinute, hasMonth };
 }
 
+// 结果为冻结对象且只取决于格式串；读写热路径每个单元格都会查询，按格式串缓存（有界）。
+const NUMBER_FORMAT_CLASS_CACHE = new Map();
+const NUMBER_FORMAT_CLASS_CACHE_LIMIT = 1024;
+
 function classifyExcelNumberFormat(formatCode) {
+  const key = String(formatCode == null ? '' : formatCode);
+  const cached = NUMBER_FORMAT_CLASS_CACHE.get(key);
+  if (cached !== undefined) return cached;
+  const result = classifyExcelNumberFormatUncached(key);
+  if (NUMBER_FORMAT_CLASS_CACHE.size >= NUMBER_FORMAT_CLASS_CACHE_LIMIT) NUMBER_FORMAT_CLASS_CACHE.clear();
+  NUMBER_FORMAT_CLASS_CACHE.set(key, result);
+  return result;
+}
+
+function classifyExcelNumberFormatUncached(formatCode) {
   const stripped = stripFormatLiterals(formatCode);
   const code = stripped.visible;
   const hasAmPm = /am\/pm|a\/p/.test(code);
@@ -356,10 +443,9 @@ function generatedPlainNumberFormat(parsed) {
   const canonical = String(parsed.canonical || '');
   const decimalPoint = canonical.indexOf('.');
   if (decimalPoint < 0) return '0';
-  const effectiveScale = canonical
-    .slice(decimalPoint + 1)
-    .replace(/0+$/, '')
-    .length;
+  let end = canonical.length;
+  while (end > decimalPoint + 1 && canonical.charCodeAt(end - 1) === 48) end -= 1;
+  const effectiveScale = end - decimalPoint - 1;
   if (effectiveScale <= 0) return '0';
   return `0.${'#'.repeat(effectiveScale)}`;
 }
@@ -385,16 +471,38 @@ function classifyNumericOutput(rawLexicalValue, sourceNumFmt = 'General') {
       reason: 'invalid-decimal'
     });
   }
-  const parsed = parseResult.value;
+  return classifyParsedNumericOutput(parseResult.value, sourceNumFmt);
+}
 
-  const plainFormat = generatedPlainNumberFormat(parsed);
-  const plainFormatSafetyLength = generatedPlainNumberFormatSafetyLength(parsed);
-  const numeric = Number(parsed.canonical);
+// 词法能解析为十进制时等价于 classifyNumericOutput(raw, sourceNumFmt)，否则返回 null
+// （与 parseDecimalLexical 返回 null 的条件相同，含 canonical 超限），供需要先判定再分类的调用方只解析一次。
+function classifyNumericLexical(rawLexicalValue, sourceNumFmt = 'General') {
+  const parseResult = parseDecimalLexicalInternal(rawLexicalValue);
+  return parseResult.status === 'parsed'
+    ? classifyParsedNumericOutput(parseResult.value, sourceNumFmt)
+    : null;
+}
+
+// 十进制值经 double 往返（String(Number(canonical))）后数值是否不变。
+// 有效数字不超过 15 位（DBL_DIG）且非零时绝对值不小于 1e-20（正规数范围内）的十进制必然往返不变：
+// 最短往返表示的位数不超过原值位数，而 15 位有效数字网格的相对间距大于 double 的 ulp，两个不同的
+// 15 位十进制不可能舍入到同一个 double。此范围外仍按原方式重新解析比较。
+function decimalRoundTripsExactly(parsed, numeric) {
+  if (parsed.significantDigits <= 15 && parsed.integerDigits <= 15 && parsed.scale <= 20) {
+    return Number.isFinite(numeric);
+  }
   const numericRoundTrip = Number.isFinite(numeric)
     ? parseDecimalLexical(String(numeric))
     : null;
-  const roundTripEqual = numericRoundTrip !== null &&
+  return numericRoundTrip !== null &&
     decimalComparable(numericRoundTrip) === decimalComparable(parsed);
+}
+
+function classifyParsedNumericOutput(parsed, sourceNumFmt) {
+  const plainFormat = generatedPlainNumberFormat(parsed);
+  const plainFormatSafetyLength = generatedPlainNumberFormatSafetyLength(parsed);
+  const numeric = Number(parsed.canonical);
+  const roundTripEqual = decimalRoundTripsExactly(parsed, numeric);
   const safe = parsed.significantDigits <= 15 &&
     parsed.integerDigits <= 15 &&
     Number.isFinite(numeric) &&
@@ -516,6 +624,7 @@ module.exports = {
   addIntegerToDecimal,
   classifyExcelNumberFormat,
   classifyMinuteMonthTokens,
+  classifyNumericLexical,
   classifyNumericOutput,
   decimalComparable,
   generatedPlainNumberFormat,

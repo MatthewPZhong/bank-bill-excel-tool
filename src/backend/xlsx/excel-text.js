@@ -44,7 +44,8 @@ function assertWellFormedUtf16(text) {
 
 function decodeExcelStXstring(value) {
   const source = String(value == null ? '' : value);
-  const decoded = source.replace(
+  // 没有下划线就不可能命中 _xHHHH_ 转义，replace 结果与原串相同。
+  const decoded = source.indexOf('_') < 0 ? source : source.replace(
     ST_XSTRING_ESCAPE_PATTERN,
     (_match, hex) => String.fromCharCode(Number.parseInt(hex, 16))
   );
@@ -59,9 +60,19 @@ function shouldEncodeCodeUnit(code) {
     code === 0x007F;
 }
 
+// 是否含需要 ST_Xstring 转义的字符（下划线或控制字符）；没有时逐字符编码的结果就是原串。
+function needsStXstringEncoding(source) {
+  for (let index = 0; index < source.length; index += 1) {
+    const code = source.charCodeAt(index);
+    if (code === 0x5F || shouldEncodeCodeUnit(code)) return true;
+  }
+  return false;
+}
+
 function encodeExcelStXstring(value) {
   const source = String(value == null ? '' : value);
   assertWellFormedUtf16(source);
+  if (!needsStXstringEncoding(source)) return source;
   let encoded = '';
   for (let index = 0; index < source.length; index += 1) {
     if (source[index] === '_' &&
