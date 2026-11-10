@@ -456,6 +456,13 @@ test('production generation seam覆盖混合币种alias、statement直取与calc
     balanceRequested: true,
     balanceMode: 'statement'
   };
+  // v3.2.16 起账单里的余额逐日校验、首日必须有种子：补上与账单首日衔接的人工种子。
+  upsertBalanceSeedRecord(storageRoot, {
+    templateName: '中行-上海', merchantId: 'M001', currency: 'USD', billDate: '2026-07-31', endBalance: 900
+  });
+  upsertBalanceSeedRecord(storageRoot, {
+    templateName: '中行-上海', merchantId: 'M001', currency: 'EUR', billDate: '2026-08-01', endBalance: 920
+  });
   const directPrepared = generation.buildPreparedStatementBatchFromEntries({
     config: directConfig,
     fileEntries: [{ filePath: path.join(root, 'direct-balance.xlsx'), detailRows: directRows }]

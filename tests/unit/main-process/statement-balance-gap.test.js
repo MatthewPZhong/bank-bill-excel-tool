@@ -391,6 +391,7 @@ test('日期按自然日计算：跨年、非闰年二月连续，闰年二月�
   assert.equal(error.context.gaps[0].missingTo, '2028-02-29');
 });
 
+// v3.2.16 起账单里的余额逐日校验：断档不单独确认，缺的日期无净发生额时余额对得上即通过。
 test('账单里的余额模式不做断档判定', () => {
   const result = deriveBalanceRecords({
     detailRows: [
@@ -401,7 +402,7 @@ test('账单里的余额模式不做断档判定', () => {
     templateName: TEMPLATE_NAME,
     balanceTemplateFields: BALANCE_FIELDS,
     mode: 'statement',
-    resolvePreviousBalanceSeed: () => null
+    resolvePreviousBalanceSeed: () => seed('M001', 'USD', '2026-08-25', 1000)
   });
   assert.deepEqual(balances(result), [
     ['M001', 'USD', '2026-09-01', 1100],
@@ -740,6 +741,30 @@ function loadSaveBalanceSeedExecute(deps) {
   )(...names.map((name) => deps[name]));
 }
 
+// 导出全部余额带出已接受风险：真实 withAcceptedBalanceRiskWarnings + 真实告警明细，createWarningResult 记下载荷。
+function acceptedRiskExportDeps(warningPayloads = []) {
+  const formatBalanceAmount = loadMainFunction('formatBalanceAmount');
+  const formatters = {
+    formatBalanceGapLine: loadMainFunction('formatBalanceGapLine'),
+    formatBalanceMismatchLine: loadMainFunction('formatBalanceMismatchLine', ['formatBalanceAmount'], [formatBalanceAmount]),
+    formatBalanceSeedReplaceLine: loadMainFunction('formatBalanceSeedReplaceLine', ['formatBalanceAmount'], [formatBalanceAmount])
+  };
+  const buildImportWarningDetailLines = loadMainFunction(
+    'buildImportWarningDetailLines', Object.keys(formatters), Object.values(formatters)
+  );
+  const createWarningResult = (payload) => {
+    warningPayloads.push(payload);
+    return { status: 'warning', message: payload.message, balanceReady: payload.balanceReady, errorReportReady: true };
+  };
+  return {
+    withAcceptedBalanceRiskWarnings: loadMainFunction(
+      'withAcceptedBalanceRiskWarnings',
+      ['createWarningResult', 'buildImportWarningDetailLines'],
+      [createWarningResult, buildImportWarningDetailLines]
+    )
+  };
+}
+
 function virtualExportAllDeps({ session, groups, generated }) {
   const remembered = [];
   const gapGeneration = createStatementGenerationHelpers({});
@@ -772,7 +797,16 @@ function virtualExportAllDeps({ session, groups, generated }) {
     extractManualBalancePromptWarning: gapGeneration.extractManualBalancePromptWarning,
     statementGenerationHelpers: gapGeneration,
     buildManualBalanceRequiredResult: (prompt) => ({ status: 'manual-balance-required', manualBalancePrompt: prompt }),
-    buildBalanceGapConfirmResult: (gaps) => ({ status: 'manual-balance-required', manualBalancePrompt: { reason: 'gap', gaps } })
+    buildBalanceGapConfirmResult: (gaps) => ({ status: 'manual-balance-required', manualBalancePrompt: { reason: 'gap', gaps } }),
+    buildBalanceMismatchConfirmResult: (mismatches) => ({
+      status: 'manual-balance-required',
+      manualBalancePrompt: { reason: 'mismatch', mismatches }
+    }),
+    buildBalanceSeedReplaceConfirmResult: (replacements) => ({
+      status: 'manual-balance-required',
+      manualBalancePrompt: { reason: 'seed-replace', replacements }
+    }),
+    ...acceptedRiskExportDeps()
   };
   return { deps, remembered };
 }
@@ -785,11 +819,19 @@ function loadExportStatementByScope(deps) {
 test('主进程：按文件名映射导出全部余额遇到断档或首次补录时，记下按全部模板组重算的上下文', async () => {
   const session = { key: 'session-1', templateId: FILENAME_MAPPING_TEMPLATE_ID, currentBatchId: 'batch-2' };
   const gap = { key: '模板1|M001|USD|2026-09-01|2026-09-04', merchantId: 'M001', currency: 'USD' };
+  const mismatch = { key: 'mismatch|模板1|M001|USD|2026-09-01|2026-08-31|1000.00|100.00|0.00|9999.00', merchantId: 'M001', currency: 'USD' };
   const cases = [
-    { label: '断档', warnings: [{ type: 'balance-gap-confirm', gaps: [gap] }] },
-    { label: '首次补录', warnings: [{ type: 'balance-seed-required', prompt: { merchantId: 'M001', currency: 'USD' } }] }
+    { label: '断档', warnings: [{ type: 'balance-gap-confirm', gaps: [gap] }], reason: 'gap' },
+    { label: '首次补录', warnings: [{ type: 'balance-seed-required', prompt: { merchantId: 'M001', currency: 'USD' } }] },
+    // v3.2.16：账单里的余额不一致与断档同一通道。
+    { label: '余额不一致', warnings: [{ type: 'balance-mismatch-confirm', mismatches: [mismatch] }], reason: 'mismatch' },
+    {
+      label: '人工补录替换',
+      warnings: [{ type: 'balance-seed-replace-confirm', replacements: [{ key: 'seed-replace|模板1|M001|USD|2026-09-01|5000.00|1100.00' }] }],
+      reason: 'seed-replace'
+    }
   ];
-  for (const { label, warnings } of cases) {
+  for (const { label, warnings, reason } of cases) {
     // 模板 1 待处理，模板 2 正常；循环最后记下的是模板 2 的单模板上下文。
     const { deps, remembered } = virtualExportAllDeps({
       session,
@@ -801,6 +843,7 @@ test('主进程：按文件名映射导出全部余额遇到断档或首次补�
     });
     const result = await loadExportStatementByScope(deps)('balance', 'all');
     assert.equal(result.status, 'manual-balance-required', label);
+    if (reason) assert.equal(result.manualBalancePrompt.reason, reason, label);
     const finalContext = remembered[remembered.length - 1];
     assert.equal(finalContext.templateId, FILENAME_MAPPING_TEMPLATE_ID, label);
     assert.equal(finalContext.scope, 'all', label);
@@ -812,6 +855,8 @@ test('主进程：按文件名映射全部范围补录或不补录后，按全�
   const gap = { key: '模板1|M001|USD|2026-09-01|2026-09-04', merchantId: 'M001', currency: 'USD' };
   const session = { key: 'session-1', templateId: FILENAME_MAPPING_TEMPLATE_ID, currentBatchId: 'batch-2' };
   const merged = { filePath: '/tmp/2-BALANCE.xlsx' };
+  // 重算的告警随“全部”余额一起缓存，再次导出全部命中缓存时带出（v3.2.16 D12）。
+  const regenWarnings = [{ type: 'balance-gap-skipped', gaps: [gap] }];
   for (const scope of ['all', 'current']) {
     const calls = { regenerate: [], cacheAll: [] };
     const lastGeneratedExports = { detail: { filePath: '/tmp/detail.xlsx' }, balance: { filePath: '/tmp/current-balance.xlsx' } };
@@ -828,10 +873,10 @@ test('主进程：按文件名映射全部范围补录或不补录后，按全�
         // 补录前已按同一份规划核对过实际文件名，重新生成直接复用。
         assert.equal(regenerationPlan.scope, regenerateScope);
         assert.equal(regenerationPlan.groupPlans.length, 2);
-        return { needsSeed: false, generatedFiles: { detail: null, balance: merged, warnings: [] } };
+        return { needsSeed: false, generatedFiles: { detail: null, balance: merged, warnings: regenWarnings } };
       },
       lastGeneratedExports,
-      cacheAllStatementExport: (kind, file) => calls.cacheAll.push([kind, file]),
+      cacheAllStatementExport: (kind, file, warnings) => calls.cacheAll.push([kind, file, warnings]),
       buildImportResultFromGeneratedFiles: ({ generatedFiles }) => ({ status: 'success', balance: generatedFiles.balance })
     });
     const result = await execute(null, {
@@ -846,11 +891,97 @@ test('主进程：按文件名映射全部范围补录或不补录后，按全�
     assert.equal(result.status, 'success', scope);
     assert.deepEqual(calls.regenerate, [[session, scope]], scope);
     if (scope === 'all') {
-      assert.deepEqual(calls.cacheAll, [['balance', merged]]);
+      assert.deepEqual(calls.cacheAll, [['balance', merged, regenWarnings]]);
       assert.equal(lastGeneratedExports.balance.filePath, '/tmp/current-balance.xlsx');
     } else {
       assert.deepEqual(calls.cacheAll, []);
       assert.equal(lastGeneratedExports.balance, merged);
+    }
+  }
+});
+
+// v3.2.16：余额不一致“确认继续”、人工补录“确认替换”与断档“不补录”同一通道：登记确认键、写警告日志、按全部模板组重算。
+test('主进程：余额不一致确认继续、人工补录确认替换后登记确认键并重算；重算仍待确认时返回下一次确认', async () => {
+  const kinds = [
+    {
+      label: '余额不一致',
+      item: { key: 'mismatch|模板1|M001|USD|2026-09-01|2026-08-31|1000.00|100.00|0.00|9999.00', templateName: '模板1', merchantId: 'M001', currency: 'USD', billDate: '2026-09-01' },
+      payload: (item) => ({ confirmBalanceMismatchKeys: [item.key], confirmedBalanceMismatches: [item] }),
+      reason: 'mismatch',
+      itemsField: 'mismatches',
+      logMessage: '余额校验不一致，已确认按账单余额生成'
+    },
+    {
+      label: '人工补录替换',
+      item: { key: 'seed-replace|模板1|M001|USD|2026-09-01|5000.00|1100.00', templateName: '模板1', merchantId: 'M001', currency: 'USD', billDate: '2026-09-01' },
+      payload: (item) => ({ confirmBalanceSeedReplaceKeys: [item.key], confirmedBalanceSeedReplacements: [item] }),
+      reason: 'seed-replace',
+      itemsField: 'replacements',
+      logMessage: '人工补录的期末余额与本次余额不一致，已确认替换'
+    }
+  ];
+  const session = { key: 'session-1', templateId: FILENAME_MAPPING_TEMPLATE_ID, currentBatchId: 'batch-2' };
+  const merged = { filePath: '/tmp/2-BALANCE.xlsx' };
+  for (const kind of kinds) {
+    for (const regenOutcome of ['success', 'pending']) {
+      const label = `${kind.label}/${regenOutcome}`;
+      const calls = { remembered: [], logs: [], results: [] };
+      const lastGeneratedExports = { detail: { filePath: '/tmp/detail.xlsx' }, balance: null };
+      const capture = (reason) => (items, pendingFiles) => {
+        calls.results.push({ reason, items, pendingFiles });
+        return { status: 'manual-balance-required', manualBalancePrompt: { reason, [kind.itemsField]: items } };
+      };
+      const execute = loadSaveBalanceSeedExecute({
+        FILENAME_MAPPING_TEMPLATE_ID,
+        FileValidationError,
+        isFilenameMappingMode: (templateId) => templateId === FILENAME_MAPPING_TEMPLATE_ID,
+        ...seedSaveGroupingDeps(),
+        rememberAcknowledgedBalanceGaps: (input) => {
+          calls.remembered.push(input.gapKeys);
+          return true;
+        },
+        appendActivityLogEntry: (entry) => calls.logs.push(entry),
+        formatBalanceGapLine: () => '',
+        formatBalanceMismatchLine: (item) => `不一致 ${item.merchantId} ${item.billDate}`,
+        formatBalanceSeedReplaceLine: (item) => `替换 ${item.merchantId} ${item.billDate}`,
+        regenerateVirtualTemplateBalanceFromSession: () => (regenOutcome === 'success'
+          ? { needsSeed: false, generatedFiles: { detail: null, balance: merged, warnings: [] } }
+          : { needsSeed: true, [kind.itemsField]: [{ ...kind.item, billDate: '2026-09-02' }], warnings: [] }),
+        buildBalanceGapConfirmResult: () => {
+          throw new Error('不应进入断档确认');
+        },
+        buildBalanceMismatchConfirmResult: capture('mismatch'),
+        buildBalanceSeedReplaceConfirmResult: capture('seed-replace'),
+        buildManualBalanceRequiredResult: () => {
+          throw new Error('不应进入首次补录');
+        },
+        writeManualBalanceSeedPlan: () => {
+          throw new Error('确认不写人工种子');
+        },
+        lastGeneratedExports,
+        cacheAllStatementExport: () => {},
+        buildImportResultFromGeneratedFiles: ({ generatedFiles }) => ({ status: 'success', balance: generatedFiles.balance })
+      });
+      const result = await execute(null, {
+        plan: null,
+        ...kind.payload(kind.item),
+        pendingPrompt: { reason: kind.reason, templateName: '模板1', [kind.itemsField]: [kind.item] },
+        session,
+        importContext: { templateId: FILENAME_MAPPING_TEMPLATE_ID, scope: 'current', template: { name: '模板2' } }
+      }, { fileEvidence: { filePlan: { inputs: [{ filePath: '/tmp/a.xlsx' }] } } });
+
+      assert.deepEqual(calls.remembered, [[kind.item.key]], label);
+      assert.equal(calls.logs[0].level, 'warn', label);
+      assert.equal(calls.logs[0].message, kind.logMessage, label);
+      assert.equal(calls.logs[0].details.length, 2, label);
+      if (regenOutcome === 'success') {
+        assert.equal(result.status, 'success', label);
+        assert.equal(lastGeneratedExports.balance, merged, label);
+      } else {
+        assert.equal(result.manualBalancePrompt.reason, kind.reason, label);
+        assert.equal(calls.results[0].reason, kind.reason, label);
+        assert.equal(calls.results[0].items[0].billDate, '2026-09-02', label);
+      }
     }
   }
 });
@@ -1175,6 +1306,204 @@ test('主进程：按文件名映射导出全部的汇总文件与当前批次�
   assert.equal(result.generatedFile.fileName, '2-BALANCE-2026-09-01~2026-09-02.xlsx');
   assert.deepEqual(merged, [result.generatedFile.filePath]);
   assert.notEqual(result.generatedFile.filePath, currentBatchPath);
+});
+
+// v3.2.16（Codex 第二轮审查）：导出全部余额会重新生成；本次重算里已接受的风险随导出结果告警并可导出报错文件。
+const ACCEPTED_RISK_GAP = {
+  key: '模板1|M001|USD|2026-09-01|2026-09-04', merchantId: 'M001', currency: 'USD',
+  anchorDate: '2026-09-01', targetBillDate: '2026-09-04', missingFrom: '2026-09-02', missingTo: '2026-09-03'
+};
+const ACCEPTED_RISK_MISMATCH = {
+  key: 'mismatch|模板1|M001|USD|2026-09-01|2026-08-31|1000.00|100.00|0.00|9999.00', merchantId: 'M001', currency: 'USD',
+  billDate: '2026-09-01', anchorDate: '2026-08-31', anchorSource: 'seed', anchorBalance: 1000, creditAmount: 100, debitAmount: 0,
+  expectedBalance: 1100, statementBalance: 9999, difference: 8899, missingFrom: '', missingTo: ''
+};
+const ACCEPTED_RISK_REPLACEMENT = {
+  key: 'seed-replace|模板2|M002|USD|2026-09-02|5000.00|1100.00', merchantId: 'M002', currency: 'USD', billDate: '2026-09-02',
+  balanceSource: 'statement', manualBalance: 5000, balance: 1100, difference: -3900, adjustment: 0, writtenBalance: 1100
+};
+const ACCEPTED_RISK_MESSAGE = '1处账单日期不连续未补录，余额可能不准确，1处余额校验不一致，已按账单余额生成，1处人工补录余额已按本次余额替换，请点击状态框导出报错文件';
+
+test('主进程：按文件名映射导出全部余额，本次重算含已接受的风险时导出结果带告警与报错明细', async () => {
+  const session = { key: 'session-1', templateId: FILENAME_MAPPING_TEMPLATE_ID, currentBatchId: 'batch-2', templateName: '按文件名映射模板' };
+  const run = async (generated, overrides = {}) => {
+    const warningPayloads = [];
+    const { deps } = virtualExportAllDeps({ session, groups: Object.keys(generated).map(Number), generated });
+    const result = await loadExportStatementByScope({
+      ...deps,
+      ...acceptedRiskExportDeps(warningPayloads),
+      parseRequiredBillDates: () => ['2026-09-01'],
+      buildDateRangeLabel,
+      getToday: () => '2026-11-08',
+      path,
+      buildOutputFilePath: ({ outputFileName }) => ({ outputFilePath: `/tmp/${outputFileName}` }),
+      scopedMergedOutputFileName: (name) => name,
+      mergeGeneratedXlsxFiles: () => {},
+      exportGeneratedFile: async () => ({ status: 'success', message: '文件导出成功', filePath: '/tmp/saved.xlsx' }),
+      ...overrides
+    })(overrides.kind || 'balance', 'all');
+    return { result, warningPayloads };
+  };
+
+  const { result, warningPayloads } = await run({
+    1: { balance: { filePath: '/tmp/group-1__all.xlsx' }, warnings: [
+      { type: 'balance-mismatch-confirmed', mismatches: [ACCEPTED_RISK_MISMATCH] },
+      { type: 'balance-gap-skipped', gaps: [ACCEPTED_RISK_GAP] }
+    ] },
+    2: { balance: { filePath: '/tmp/group-2__all.xlsx' }, warnings: [
+      { type: 'balance-seed-replace-confirmed', replacements: [ACCEPTED_RISK_REPLACEMENT] },
+      { type: 'detail-row-skipped', rowNumber: 3 }
+    ] }
+  });
+  assert.equal(result.status, 'warning');
+  assert.equal(result.errorReportReady, true);
+  assert.equal(result.filePath, '/tmp/saved.xlsx');
+  assert.equal(result.message, `文件导出成功，${ACCEPTED_RISK_MESSAGE}`);
+  assert.equal(warningPayloads[0].step, '导出余额账单');
+  assert.equal(warningPayloads[0].errorCode, 'EXPORT_BALANCE_WARNING');
+  const detail = warningPayloads[0].detailLines.join('\n');
+  assert.match(detail, /以下账单日期不连续且未补录期末余额/);
+  assert.match(detail, /预期余额：1,100\.00，账单余额：9,999\.00/);
+  assert.match(detail, /人工补录余额：5,000\.00，账单余额：1,100\.00/);
+  assert.doesNotMatch(detail, /Credit Amount 和 Debit Amount 同时为 0/, '与已接受风险无关的告警不带入');
+
+  const plain = await run({ 1: { balance: { filePath: '/tmp/group-1__all.xlsx' }, warnings: [] } });
+  assert.deepEqual(plain.result, { status: 'success', message: '文件导出成功', filePath: '/tmp/saved.xlsx' }, '没有已接受风险时保持成功');
+
+  const failedExport = await run({ 1: { balance: { filePath: '/tmp/group-1__all.xlsx' }, warnings: [
+    { type: 'balance-mismatch-confirmed', mismatches: [ACCEPTED_RISK_MISMATCH] }
+  ] } }, { exportGeneratedFile: async () => ({ status: 'error', message: '文件导出失败' }) });
+  assert.equal(failedExport.result.status, 'error', '导出失败时保留原错误');
+  assert.deepEqual(failedExport.warningPayloads, []);
+});
+
+test('主进程：指定模板会话导出全部余额，本次重算含已确认的余额不一致时导出结果带告警（Codex 复现场景）', async () => {
+  const { resolveGenerationGroupKey } = require('../../../src/main-process/statement-channel-identity');
+  const warningPayloads = [];
+  const cached = [];
+  const result = await loadExportStatementByScope({
+    ...loadOutputNameConflictFunctions(NAME_CONFLICT_DATABASE),
+    ...acceptedRiskExportDeps(warningPayloads),
+    resolveGenerationGroupKey,
+    getCurrentStatementSession: () => ({ key: 'session-1', templateId: 6, templateName: '模板6' }),
+    isFilenameMappingMode: () => false,
+    getGeneratedStatementExport: () => null,
+    getTemplateMappingConfig: singleTemplateConfig,
+    getStatementSessionEntries: () => [{ matchedTemplateId: 6 }],
+    resolveGenerationTemplateConfig: ({ fallbackTemplateConfig }) => fallbackTemplateConfig,
+    createErrorResult: (payload) => ({ status: 'error', ...payload }),
+    buildStatementSessionGenerationContext: () => ({ config: {}, preparedBatch: { detailRows: [] } }),
+    rememberLastFileImportContext: () => {},
+    createGenerationContext: (context) => context,
+    // 第一批的差异已确认，导入第二批后导出全部：确认键复用，重算返回已确认告警。
+    generateStatementFiles: () => ({
+      balance: { filePath: '/tmp/all-balance.xlsx', templateName: '模板6' },
+      warnings: [{ type: 'balance-mismatch-confirmed', mismatches: [ACCEPTED_RISK_MISMATCH] }]
+    }),
+    extractManualBalancePromptWarning: () => null,
+    statementGenerationHelpers: createStatementGenerationHelpers({}),
+    cacheAllStatementExport: (kind, file) => cached.push([kind, file.filePath]),
+    exportGeneratedFile: async () => ({ status: 'success', message: '文件导出成功', filePath: '/tmp/saved.xlsx' })
+  })('balance', 'all');
+  assert.deepEqual(cached, [['balance', '/tmp/all-balance.xlsx']]);
+  assert.equal(result.status, 'warning');
+  assert.equal(result.message, '文件导出成功，1处余额校验不一致，已按账单余额生成，请点击状态框导出报错文件');
+  assert.equal(warningPayloads[0].templateName, '模板6');
+  assert.match(warningPayloads[0].detailLines.join('\n'), /差额：\+8,899\.00/);
+});
+
+// v3.2.16（提交后 Codex 审查 P2）：“全部”余额缓存只存文件时，再次导出全部、或确认后重算写入缓存再导出，
+//   都会只显示“文件导出成功”。告警随文件缓存，命中缓存时带出。用真实缓存读写函数连续调用。
+test('主进程：导出全部余额命中缓存时仍带出该文件已接受的风险（再次导出、确认后重算再导出）', async () => {
+  const { resolveGenerationGroupKey } = require('../../../src/main-process/statement-channel-identity');
+  const cacheHelpers = createStatementGenerationHelpers({});
+  const lastGeneratedExports = { detail: null, balance: null, allDetail: null, allBalance: null };
+  let generateCount = 0;
+  const warningPayloads = [];
+  const exportAll = loadExportStatementByScope({
+    ...loadOutputNameConflictFunctions(NAME_CONFLICT_DATABASE),
+    ...acceptedRiskExportDeps(warningPayloads),
+    resolveGenerationGroupKey,
+    getCurrentStatementSession: () => ({ key: 'session-1', templateId: 6, templateName: '模板6' }),
+    isFilenameMappingMode: () => false,
+    getGeneratedStatementExport: (kind, scope) => cacheHelpers.getGeneratedStatementExport(lastGeneratedExports, kind, scope),
+    cacheAllStatementExport: (kind, file, warnings) => cacheHelpers.cacheAllStatementExport(lastGeneratedExports, kind, file, warnings),
+    getTemplateMappingConfig: singleTemplateConfig,
+    getStatementSessionEntries: () => [{ matchedTemplateId: 6 }],
+    resolveGenerationTemplateConfig: ({ fallbackTemplateConfig }) => fallbackTemplateConfig,
+    createErrorResult: (payload) => ({ status: 'error', ...payload }),
+    buildStatementSessionGenerationContext: () => ({ config: {}, preparedBatch: { detailRows: [] } }),
+    rememberLastFileImportContext: () => {},
+    createGenerationContext: (context) => context,
+    generateStatementFiles: () => {
+      generateCount += 1;
+      return {
+        balance: { filePath: '/tmp/all-balance.xlsx', templateName: '模板6' },
+        warnings: [{ type: 'balance-mismatch-confirmed', mismatches: [ACCEPTED_RISK_MISMATCH] }, { type: 'detail-row-skipped', rowNumber: 3 }]
+      };
+    },
+    extractManualBalancePromptWarning: () => null,
+    statementGenerationHelpers: cacheHelpers,
+    exportGeneratedFile: async (file) => ({ status: 'success', message: '文件导出成功', filePath: `/saved/${path.basename(file.filePath)}` })
+  });
+  const mismatchMessage = '文件导出成功，1处余额校验不一致，已按账单余额生成，请点击状态框导出报错文件';
+
+  const first = await exportAll('balance', 'all');
+  const second = await exportAll('balance', 'all');
+  assert.equal(generateCount, 1, '第二次导出命中缓存，不重算');
+  assert.equal(first.message, mismatchMessage);
+  assert.equal(second.status, 'warning', '命中缓存仍为告警');
+  assert.equal(second.message, mismatchMessage);
+  assert.equal(second.errorReportReady, true);
+  assert.equal(second.filePath, '/saved/all-balance.xlsx');
+  assert.deepEqual(warningPayloads[1].detailLines, warningPayloads[0].detailLines, '报错明细与首次导出一致');
+
+  // 补录 IPC 确认后重算写入“全部”缓存（文件 + 本次重算告警），之后实际导出也带告警。
+  cacheHelpers.cacheAllStatementExport(lastGeneratedExports, 'balance', { filePath: '/tmp/all-balance-2.xlsx', templateName: '模板6' }, [
+    { type: 'balance-seed-replace-confirmed', replacements: [ACCEPTED_RISK_REPLACEMENT] }
+  ]);
+  const afterConfirm = await exportAll('balance', 'all');
+  assert.equal(generateCount, 1);
+  assert.equal(afterConfirm.status, 'warning');
+  assert.equal(afterConfirm.message, '文件导出成功，1处人工补录余额已按本次余额替换，请点击状态框导出报错文件');
+  assert.match(warningPayloads[2].detailLines.join('\n'), /人工补录余额：5,000\.00，账单余额：1,100\.00/);
+
+  // 没有已接受风险的缓存文件、导出当前批次：保持“文件导出成功”。
+  cacheHelpers.cacheAllStatementExport(lastGeneratedExports, 'balance', { filePath: '/tmp/all-balance-3.xlsx', templateName: '模板6' }, []);
+  assert.deepEqual(await exportAll('balance', 'all'), { status: 'success', message: '文件导出成功', filePath: '/saved/all-balance-3.xlsx' });
+  lastGeneratedExports.balance = { filePath: '/tmp/current-balance.xlsx', balanceWarnings: [{ type: 'balance-mismatch-confirmed', mismatches: [ACCEPTED_RISK_MISMATCH] }] };
+  assert.equal((await exportAll('balance', 'current')).status, 'success', '当前批次的告警在导入时已显示，导出不再带');
+  assert.equal(warningPayloads.length, 3);
+});
+
+test('主进程：导出全部余额时部分模板已删除且含已接受的风险，提示同时说明数据不完整与风险', async () => {
+  const session = { key: 'session-1', templateId: FILENAME_MAPPING_TEMPLATE_ID, currentBatchId: 'batch-2', templateName: '按文件名映射模板' };
+  const warningPayloads = [];
+  const { deps } = virtualExportAllDeps({
+    session,
+    groups: [1, 2],
+    generated: { 1: { balance: { filePath: '/tmp/group-1__all.xlsx' }, warnings: [
+      { type: 'balance-mismatch-confirmed', mismatches: [ACCEPTED_RISK_MISMATCH] }
+    ] } }
+  });
+  const result = await loadExportStatementByScope({
+    ...deps,
+    ...acceptedRiskExportDeps(warningPayloads),
+    // 模板 2 已删除：分组时拿不到模板配置。
+    groupStatementEntriesForGeneration: () => [
+      { entries: [{ matchedTemplateId: 1 }], templateIds: [1], templateConfig: { template: { id: 1, name: '模板1' }, exportMappings: [], exportTargetFields: [] } },
+      { entries: [{ matchedTemplateId: 2 }], templateIds: [2], templateConfig: null }
+    ],
+    appendActivityLogEntry: () => {},
+    parseRequiredBillDates: () => ['2026-09-01'],
+    path,
+    exportGeneratedFile: async () => ({ status: 'success', message: '文件导出成功', filePath: '/tmp/saved.xlsx' })
+  })('balance', 'all');
+  assert.equal(result.status, 'warning');
+  assert.equal(
+    result.message,
+    '文件已导出，但数据不完整：模板ID=2（1个文件） 的模板已被删除，对应文件未包含在导出中，1处余额校验不一致，已按账单余额生成，请点击状态框导出报错文件'
+  );
 });
 
 function mappedSourceEntry(root, fileName, rows) {

@@ -755,10 +755,12 @@
 
 ### 余额计算
 - `calculateEndingBalanceFromAmounts` — `file-service/normalizers.js`
-- `inferEndingBalance` — `file-service/normalizers.js`
+- `verifyStatementEndingBalance` — `file-service/normalizers.js`（v3.2.16 起替代 `inferEndingBalance`：账单里的余额逐日校验）
+- `seenManualBalanceSeedsByFile` — `main-process/statement-generation.js` 闭包；`indexManualBalanceSeeds` — `main-process/statement-generation-business.js`（v3.2.16：本次运行里见过的人工补录，工具同值回写后仍按它做人工补录替换确认；按 `getBalanceSeedFileIdentity` 磁盘上的实际种子文件（dev + ino）分组，不能用原始银行名或字符串规整）
 - 关联功能：由发生额倒推期末余额（CLAUDE.md Balance calculation）
 - 变更 review 要点：
-  - 算法变化会让所有"通过发生额计算"模式的模板输出数值变化
+  - 算法变化会让所有"通过发生额计算"模式的模板输出数值变化；校验口径变化会改变"账单里的余额"模式的补录 / 不一致确认提示
+  - 改动种子读取、回写或“见过的人工补录”同步时，回归 `statement-balance-verify.test.js`「红线-回写10–14」：同批或分批、先导入后补录、改值后旧确认失效、删除与重启边界、银行名写法不同（探测文件系统后断言共享或隔离）、区分大小写的隔离（回写15）
   - 必跑：单币种 + 混币种余额表对比
   - **资金相关**，必须高亮
 

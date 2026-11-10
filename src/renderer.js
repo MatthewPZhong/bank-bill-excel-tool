@@ -810,6 +810,8 @@ const {
   applyMonthlyBalanceExportDialogPreviewState,
   applyManualBalanceSeedDialogPreviewState,
   applyBalanceGapConfirmDialogPreviewState,
+  applyBalanceMismatchConfirmDialogPreviewState,
+  applyBalanceSeedReplaceConfirmDialogPreviewState,
   applyBalanceAddonManagerPreviewState,
   applyExportScopeDialogPreviewState,
   applyAmountSplitRulesDialogPreviewState,
@@ -2012,6 +2014,14 @@ async function applyFullInfo(info) {
   } else if (info.previewModal === 'balance-gap-confirm-dialog') {
     setTimeout(() => {
       applyBalanceGapConfirmDialogPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'balance-mismatch-confirm-dialog') {
+    setTimeout(() => {
+      applyBalanceMismatchConfirmDialogPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'balance-seed-replace-confirm-dialog') {
+    setTimeout(() => {
+      applyBalanceSeedReplaceConfirmDialogPreviewState();
     }, 120);
   } else if (info.previewModal === 'balance-addon-manager') {
     setTimeout(() => {

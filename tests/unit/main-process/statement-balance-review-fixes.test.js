@@ -2,6 +2,7 @@
 
 // v3.2.15 网银账单深审修复：余额保号（F01）、无效账单日期整份拒绝（F03）、
 // 账单里的余额附加值逐日生效（F05）、直接映射余额保留原精度（F07）。
+// v3.2.16 起账单里的余额逐日校验、首日必须有种子：账单里的余额用例补上与账单首日衔接的种子。
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -11,7 +12,7 @@ const test = require('node:test');
 const XLSX = require('xlsx');
 
 const { buildMappedRows, FileValidationError } = require('../../../src/backend/file-service');
-const { inferEndingBalance } = require('../../../src/backend/file-service/normalizers');
+const { verifyStatementEndingBalance } = require('../../../src/backend/file-service/normalizers');
 const { deriveBalanceRecords } = require('../../../src/main-process/statement-generation-business');
 
 const SOURCE_HEADER = ['日期', '账号', '收入', '支出', '余额'];
@@ -80,6 +81,7 @@ function endBalances(result) {
 }
 
 const adjustment = (effectiveDate, adjustmentValue) => ({ merchantId: 'M1', currency: 'USD', effectiveDate, adjustmentValue });
+const manualSeed = (billDate, endBalance) => ({ merchantId: 'M1', currency: 'USD', billDate, endBalance, generationMethod: '人工录入' });
 
 test('F01 映射余额保留负号：CSV、文本 XLSX、数值 XLSX 均不翻正', (t) => {
   const dir = createTempDir(t);
@@ -141,11 +143,13 @@ test('F05 账单里的余额：附加值从生效日起每天叠加，后续生�
     ['2026-09-02', 'M1', 'USD', '1', '', '1001'],
     ['2026-09-03', 'M1', 'USD', '1', '', '1002']
   ];
-  assert.deepEqual(endBalances(derive(rows, { balanceAdjustments: [adjustment('2026-09-01', 10)] })), [
+  const seeds = [manualSeed('2026-08-31', 999)];
+  assert.deepEqual(endBalances(derive(rows, { balanceAdjustments: [adjustment('2026-09-01', 10)], seeds })), [
     ['2026-09-01', 1010], ['2026-09-02', 1011], ['2026-09-03', 1012]
   ]);
   assert.deepEqual(endBalances(derive(rows, {
-    balanceAdjustments: [adjustment('2026-09-01', 10), adjustment('2026-09-03', -3.5)]
+    balanceAdjustments: [adjustment('2026-09-01', 10), adjustment('2026-09-03', -3.5)],
+    seeds
   })), [['2026-09-01', 1010], ['2026-09-02', 1011], ['2026-09-03', 1008.5]]);
 });
 
@@ -156,33 +160,44 @@ test('F05 账单里的余额：同日多候选按账单原值推导，不受附�
     ['2026-09-02', 'M1', 'USD', '5', '', '1005'],
     ['2026-09-02', 'M1', 'USD', '', '2', '1003']
   ];
-  const once = derive(rows, { balanceAdjustments: adjustments });
+  const seeds = [manualSeed('2026-08-31', 999)];
+  const once = derive(rows, { balanceAdjustments: adjustments, seeds });
   assert.deepEqual(endBalances(once), [['2026-09-01', 1010], ['2026-09-02', 1013]]);
   assert.deepEqual(once.seedRecords.map((record) => record.endBalance), [1010, 1013]);
 
-  const firstImport = derive([rows[0]], { balanceAdjustments: adjustments });
-  const secondImport = derive([['2026-09-02', 'M1', 'USD', '1', '', '1001']], { balanceAdjustments: adjustments });
+  // 分次导入：第二次以第一次回写的种子（已含附加值，校验时扣回）为起点。
+  const firstImport = derive([rows[0]], { balanceAdjustments: adjustments, seeds });
+  const secondImport = derive([['2026-09-02', 'M1', 'USD', '1', '', '1001']], {
+    balanceAdjustments: adjustments,
+    seeds: [...seeds, ...firstImport.seedRecords]
+  });
   assert.deepEqual([...endBalances(firstImport), ...endBalances(secondImport)], [['2026-09-01', 1010], ['2026-09-02', 1011]]);
 });
 
 test('F07 直接映射余额保留原精度；多候选时返回选中候选的原值', () => {
-  assert.deepEqual(endBalances(derive([['2026-09-01', 'M1', 'USD', '1', '', '1000.123456']])), [['2026-09-01', 1000.123456]]);
-  assert.equal(inferEndingBalance({
-    previousEndBalance: 1000.123456,
+  const seeds = [manualSeed('2026-08-31', 999.123456)];
+  assert.deepEqual(endBalances(derive([['2026-09-01', 'M1', 'USD', '1', '', '1000.123456']], { seeds })), [['2026-09-01', 1000.123456]]);
+  const multiple = verifyStatementEndingBalance({
+    anchorBalance: 1000.123456,
     dateLabel: '2026-09-02',
     entries: [
       { balanceValue: 1005.123456, creditAmount: 5, debitAmount: 0 },
       { balanceValue: 1003.123456, creditAmount: 0, debitAmount: 2 }
     ]
-  }), 1003.123456);
+  });
+  assert.equal(multiple.status, 'match');
+  assert.equal(multiple.endBalance, 1003.123456);
   // 两位小数以内相同的候选仍视为同一余额（比较容差不变）。
-  assert.equal(inferEndingBalance({
-    previousEndBalance: null,
+  const sameCent = verifyStatementEndingBalance({
+    anchorBalance: 1000.12,
     dateLabel: '2026-09-01',
     entries: [{ balanceValue: 1000.121, creditAmount: 0, debitAmount: 0 }, { balanceValue: 1000.124, creditAmount: 0, debitAmount: 0 }]
-  }), 1000.121);
+  });
+  assert.equal(sameCent.status, 'match');
+  assert.equal(sameCent.endBalance, 1000.121);
   assert.deepEqual(endBalances(derive([['2026-09-01', 'M1', 'USD', '1', '', '1000.123456']], {
-    balanceAdjustments: [adjustment('2026-09-01', 10)]
+    balanceAdjustments: [adjustment('2026-09-01', 10)],
+    seeds
   })), [['2026-09-01', 1010.123456]]);
 });
 

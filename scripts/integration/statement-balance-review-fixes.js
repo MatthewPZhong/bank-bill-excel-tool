@@ -165,6 +165,13 @@ function readSeedBalances(storageRoot) {
     .sort((left, right) => left[0].localeCompare(right[0]));
 }
 
+// v3.2.16 起账单里的余额逐日校验、首日必须有种子：用人工种子衔接账单首日。
+function seedManual(storageRoot, billDate, endBalance) {
+  upsertBalanceSeedRecord(storageRoot, {
+    templateName: TEMPLATE_NAME, merchantId: 'M1', currency: 'USD', billDate, endBalance, generationMethod: '人工录入'
+  });
+}
+
 function freshRoots(dir, name) {
   const storageRoot = path.join(dir, `storage-${name}`);
   const outputDir = path.join(dir, `exports-${name}`);
@@ -195,11 +202,12 @@ async function run() {
     ];
     for (const [label, filePath] of sources) {
       const { storageRoot, outputDir } = freshRoots(dir, label);
+      seedManual(storageRoot, '2026-08-31', -99.25);
       const result = generate(createGeneration(storageRoot, outputDir), [filePath]);
       assertTrue(Boolean(result.balance && fs.existsSync(result.balance.filePath)), `Step1.${label}.余额账单生成`);
       assertEq(result.warnings, [], `Step1.${label}.无告警`);
       assertEq(readEndBalances(result.balance.filePath), expected, `Step1.${label}.余额表期末余额保号且保留原精度`);
-      assertEq(readSeedBalances(storageRoot), expected, `Step1.${label}.种子保号且保留原精度`);
+      assertEq(readSeedBalances(storageRoot), [['2026-08-31', -99.25], ...expected], `Step1.${label}.种子保号且保留原精度`);
     }
 
     // Step 2：余额附加值（09-01 起 +10，09-03 起再 -3.5）每天叠加；一次导入与分次导入一致
@@ -215,14 +223,16 @@ async function run() {
     const adjustedExpected = [['2026-09-01', 1010], ['2026-09-02', 1011], ['2026-09-03', 1008.5]];
 
     const once = freshRoots(dir, 'adjust-once');
+    seedManual(once.storageRoot, '2026-08-31', 999);
     writeBalanceAdjustments(once.storageRoot, '中行', adjustments);
     const onceResult = generate(createGeneration(once.storageRoot, once.outputDir), [
       writeXlsx(path.join(dir, 'adjust-all.xlsx'), adjustmentRows)
     ]);
     assertEq(readEndBalances(onceResult.balance.filePath), adjustedExpected, 'Step2.一次导入三天：附加值每天生效');
-    assertEq(readSeedBalances(once.storageRoot), adjustedExpected, 'Step2.一次导入种子');
+    assertEq(readSeedBalances(once.storageRoot), [['2026-08-31', 999], ...adjustedExpected], 'Step2.一次导入种子');
 
     const split = freshRoots(dir, 'adjust-split');
+    seedManual(split.storageRoot, '2026-08-31', 999);
     writeBalanceAdjustments(split.storageRoot, '中行', adjustments);
     const splitGeneration = createGeneration(split.storageRoot, split.outputDir);
     const firstSplit = generate(splitGeneration, [writeXlsx(path.join(dir, 'adjust-1.xlsx'), adjustmentRows.slice(0, 2))]);
@@ -232,7 +242,7 @@ async function run() {
       adjustedExpected,
       'Step2.分两次导入与一次导入结果一致'
     );
-    assertEq(readSeedBalances(split.storageRoot), adjustedExpected, 'Step2.分次导入种子与一次导入一致');
+    assertEq(readSeedBalances(split.storageRoot), [['2026-08-31', 999], ...adjustedExpected], 'Step2.分次导入种子与一次导入一致');
 
     // Step 3：有金额的行账单日期无效（2026-09-31）→ 整份拒绝，列出行号与原值，不产生文件
     const invalid = freshRoots(dir, 'invalid-date');

@@ -11,6 +11,7 @@ const { DatabaseSync } = require('node:sqlite');
 const JSZip = require('jszip');
 const XLSX = require('xlsx');
 const StyledXLSX = require('xlsx-js-style');
+const { upsertBalanceSeedRecord } = require('../../../src/backend/balance-seed-store');
 
 const {
   buildMappedRows,
@@ -99,6 +100,11 @@ const BALANCE_HEADERS = Object.freeze(XLSX.utils.sheet_to_json(
   XLSX.readFile(BALANCE_TEMPLATE_PATH, { raw: true }).Sheets.balance,
   { header: 1, defval: '', raw: true }
 )[0]);
+
+// v3.2.16 起账单里的余额逐日校验、首日必须有种子：用人工种子衔接账单首日。
+function seedStatementBalance(storageRoot, { templateName, merchantId, currency, billDate, endBalance }) {
+  upsertBalanceSeedRecord(storageRoot, { templateName, merchantId, currency, billDate, endBalance });
+}
 
 function tempRoot(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-c-'));
@@ -807,6 +813,9 @@ test('已登记success completion但release-ack未到时shutdown cancel仍权威
     ['Date', 'Credit', 'Debit', 'Currency', 'Account', 'Balance'],
     ['2026-08-01', 10, '', 'USD', 'M001', 100]
   ]);
+  seedStatementBalance(storage, {
+    templateName: '中行-上海', merchantId: 'M001', currency: 'USD', billDate: '2026-07-31', endBalance: 90
+  });
   const evidence = templateEvidence({
     expectedSourceHeaders: ['Date', 'Credit', 'Debit', 'Currency', 'Account', 'Balance'],
     orderedTargetFields: DETAIL_HEADERS.concat('Balance'),
@@ -906,6 +915,12 @@ test('filename parent session按child template digest生成混合明细与余额
     ['A日期', 'A贷', 'A借', 'A币种', 'A账号', 'A余额'],
     ['2026-08-22', 80, '', 'USD', 'A001', 1200]
   ]);
+  seedStatementBalance(storage, {
+    templateName: '中行-上海', merchantId: 'A001', currency: 'USD', billDate: '2026-08-19', endBalance: 1000
+  });
+  seedStatementBalance(storage, {
+    templateName: '汇丰-香港', merchantId: 'B001', currency: 'EUR', billDate: '2026-08-20', endBalance: 1000
+  });
   const orderedTargetFields = DETAIL_HEADERS.concat('Balance');
   const alphaEvidence = templateEvidence({
     templateId: 'template-alpha',
@@ -2129,6 +2144,12 @@ test('E09-C generation复用四金额mapped rows并保持warning/行序，混合
     ['2026-08-02', 'M001', 'USD', '100', '', '1100'],
     ['2026-08-02', 'M001', 'EUR', '', '20', '900']
   ]);
+  seedStatementBalance(storage, {
+    templateName: '中行-上海', merchantId: 'M001', currency: 'USD', billDate: '2026-07-31', endBalance: 900
+  });
+  seedStatementBalance(storage, {
+    templateName: '中行-上海', merchantId: 'M001', currency: 'EUR', billDate: '2026-08-01', endBalance: 920
+  });
   const balanceFields = fields.concat('Balance');
   const balanceRows = buildMappedRows({
     inputFilePath: balanceSource,

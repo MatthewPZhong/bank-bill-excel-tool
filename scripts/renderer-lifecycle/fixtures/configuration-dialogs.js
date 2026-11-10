@@ -400,6 +400,39 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed')[1].args`),[{contextId:'seed-context',confirmOverwrite:true}]);
   });
 
+  // v3.2.16 D7（用户反馈 KBANK-VN）：已有上一账单日余额但首日对不上时，补录弹窗写明原因并预填已有种子，不再像关不掉的同一个空白框。
+  const SEED_MISMATCH_JS = `cfg.seedMismatchPrompt={templateName:'模板 A',bankName:'模板',merchantId:'M001',currency:'VND',targetBillDate:'2026-10-01',queueIndex:1,queueTotal:1,
+    seedMismatch:{seedDate:'2026-09-30',seedBalance:0,seedGenerationMethod:'人工录入',anchorBalance:0,billDate:'2026-10-01',
+      creditAmount:0,debitAmount:201500,expectedBalance:-201500,statementBalances:[800000,798500]}};`;
+  await test('已有余额对不上：补录完成后转入的弹窗写明原因并预填已有种子；改对后提交修改后的值', async () => {
+    await setup();
+    await js(`${SEED_MISMATCH_JS}
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog({merchantId:'M001',currency:'VND',targetBillDate:'2026-10-01'})).handle;
+      cfg.top().querySelector('.manual-balance-date-input').value='2026-09-30';cfg.top().querySelector('.manual-balance-amount-input').value='0';
+      cfg.next.seed={status:'manual-balance-required',manualBalancePromptReady:true,manualBalancePrompt:cfg.seedMismatchPrompt};
+      cfg.top().querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js(`({title:cfg.top().querySelector('.dialog-title').textContent,
+      warning:Boolean(cfg.top().querySelector('.manual-balance-seed-mismatch')),
+      date:cfg.top().querySelector('.manual-balance-date-input').value,amount:cfg.top().querySelector('.manual-balance-amount-input').value,
+      count:document.getElementById('modalRoot').children.length})`),
+    {title:'核对上一账单日余额',warning:true,date:'2026-09-30',amount:'0',count:1});
+    assert.match(await js(`cfg.top().querySelector('.manual-balance-seed-mismatch').textContent`),
+      /已有 2026-09-30 的余额 0\.00（人工录入），加上 2026-10-01 收入 0\.00、支出 201,500\.00 后应为 -201,500\.00，与账单当日余额 800,000\.00、798,500\.00 都对不上/);
+    await js(`cfg.next.seed={status:'success',message:'余额账单可导出'};cfg.top().querySelector('.manual-balance-amount-input').value='1000000';
+      cfg.top().querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0])`),
+      [{billDate:'2026-09-30',endBalance:'0'},{billDate:'2026-09-30',endBalance:'1000000'}]);
+    assert.equal(await js('document.getElementById("modalRoot").children.length'), 0);
+  });
+  await test('缺余额的普通补录弹窗不显示对不上说明，输入为空', async () => {
+    await setup();
+    await js(`cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog({merchantId:'M001',currency:'VND',targetBillDate:'2026-10-01'})).handle;void 0;`);
+    assert.deepEqual(await js(`({title:cfg.top().querySelector('.dialog-title').textContent,
+      warning:Boolean(cfg.top().querySelector('.manual-balance-seed-mismatch')),
+      date:cfg.top().querySelector('.manual-balance-date-input').value,amount:cfg.top().querySelector('.manual-balance-amount-input').value})`),
+    {title:'补录上一账单日余额',warning:false,date:'',amount:''});
+  });
+
   const GAP_PROMPT_JS = `cfg.gapPrompt={reason:'gap',templateName:'模板 A',merchantId:'M001',currency:'USD',anchorDate:'2026-09-01',targetBillDate:'2026-09-04',
     missingFrom:'2026-09-02',missingTo:'2026-09-03',suggestedSeedDate:'2026-09-03',gapKey:'K1',
     gaps:[{key:'K1',merchantId:'M001',currency:'USD',anchorDate:'2026-09-01',targetBillDate:'2026-09-04',missingFrom:'2026-09-02',missingTo:'2026-09-03'},
@@ -459,6 +492,88 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(geometry, { fits: true, scrolls: true, buttons: [true, true] });
     await layout.click('.balance-gap-card [data-action="skip-all"]');
     assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0].skipBalanceGapKeys.length)`), [12]);
+  });
+
+  // v3.2.16：账单里的余额逐日校验不一致确认。
+  const MISMATCH_PROMPT_JS = `cfg.mismatchPrompt={reason:'mismatch',templateName:'模板 A',merchantId:'M001',currency:'USD',targetBillDate:'2026-09-01',
+    mismatches:[{key:'X1',merchantId:'M001',currency:'USD',billDate:'2026-09-01',anchorDate:'2026-08-31',anchorSource:'seed',anchorBalance:1000,
+        creditAmount:100,debitAmount:0,expectedBalance:1100,statementBalance:9999,difference:8899,missingFrom:'',missingTo:''},
+      {key:'X2',merchantId:'M002',currency:'EUR',billDate:'2026-09-07',anchorDate:'2026-09-04',anchorSource:'statement',anchorBalance:500,
+        creditAmount:0,debitAmount:20,expectedBalance:480,statementBalance:470,difference:-10,missingFrom:'2026-09-05',missingTo:'2026-09-06'}]};
+    cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog(cfg.mismatchPrompt)).handle;void 0;`;
+  await test('余额校验不一致：列出差异与缺的日期；返回核查不提交；确认继续一次提交全部键，提交期间锁定，完成后关闭', async () => {
+    await setup();
+    await js(MISMATCH_PROMPT_JS);
+    assert.equal(await js(`Boolean(cfg.top().querySelector('.balance-mismatch-card'))`), true);
+    assert.equal(await js(`Boolean(cfg.top().querySelector('.manual-balance-date-input'))`), false);
+    const text = await js('cfg.top().textContent');
+    assert.match(text, /共 2 处/);
+    assert.match(text, /上一日余额 1,000\.00（余额种子 2026-08-31） \+ 收入 100\.00 − 支出 0\.00 = 预期 1,100\.00，账单余额 9,999\.00，差额 \+8,899\.00/);
+    assert.match(text, /差额 -10\.00；中间缺 2026-09-05 ~ 2026-09-06/);
+    await js(`cfg.top().querySelector('[data-action="review"]').click();`); await tick();
+    assert.equal(await js('cfg.handle.isOpen()'), false);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='seed').length`), 0);
+
+    await js(MISMATCH_PROMPT_JS);
+    await js(`cfg.write=cfg.defer();cfg.next.seed=cfg.write;cfg.action=cfg.top().querySelector('[data-action="confirm"]');
+      cfg.action.click();cfg.action.dispatchEvent(new Event('click'));`);
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0])`), [{confirmBalanceMismatchKeys:['X1','X2']}]);
+    assert.equal(await js('cfg.handle.close().status'), 'blocked');
+    await js(`cfg.write.resolve({status:'warning',message:'余额账单可导出'});`); await tick();
+    assert.equal(await js('cfg.handle.isOpen()'), false);
+    assert.equal(await js('cfg.applied'), 1);
+  });
+  await test('余额校验不一致较多且最小窗口放大到 150% 时，正文滚动，两个操作按钮可见可点', async () => {
+    await setup({ zoom: 1.5 });
+    await js(`${MISMATCH_PROMPT_JS.replace(/cfg\.handle=[\s\S]*$/, '')}
+      cfg.mismatchPrompt.mismatches=Array.from({length:12},(_,i)=>({...cfg.mismatchPrompt.mismatches[1],key:'X'+i,merchantId:'M'+String(i).padStart(3,'0')}));
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog(cfg.mismatchPrompt)).handle;void 0;`);
+    await layout.settle();
+    const geometry = await js(`(() => {
+      const card=cfg.top().querySelector('.balance-mismatch-card'), body=card.querySelector('.balance-gap-body'), rect=card.getBoundingClientRect();
+      return { fits: rect.bottom<=innerHeight, scrolls: body.scrollHeight>body.clientHeight,
+        buttons: [...card.querySelectorAll('.dialog-actions button')].map(button => {
+          const r=button.getBoundingClientRect(); return r.top>=rect.top && r.bottom<=rect.bottom; }) };
+    })()`);
+    assert.deepEqual(geometry, { fits: true, scrolls: true, buttons: [true, true] });
+    await layout.click('.balance-mismatch-card [data-action="confirm"]');
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0].confirmBalanceMismatchKeys.length)`), [12]);
+  });
+
+  // v3.2.16：同一账单日人工补录余额将被替换的确认，列出人工补录值与账单值。
+  const REPLACE_PROMPT_JS = `cfg.replacePrompt={reason:'seed-replace',templateName:'模板 A',merchantId:'M001',currency:'USD',targetBillDate:'2026-09-01',
+    replacements:[{key:'R1',merchantId:'M001',currency:'USD',billDate:'2026-09-01',balanceSource:'statement',manualBalance:5000,balance:1100,difference:-3900,adjustment:0,writtenBalance:1100},
+      {key:'R2',merchantId:'M002',currency:'EUR',billDate:'2026-09-03',balanceSource:'calculated',manualBalance:480,balance:470,difference:-10,adjustment:10,writtenBalance:480}]};
+    cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog(cfg.replacePrompt)).handle;void 0;`;
+  await test('人工补录替换：列出人工补录值与账单值；返回核查不提交；确认替换一次提交全部键，提交期间锁定，完成后关闭', async () => {
+    await setup();
+    await js(REPLACE_PROMPT_JS);
+    assert.equal(await js(`Boolean(cfg.top().querySelector('.balance-seed-replace-card'))`), true);
+    assert.equal(await js(`Boolean(cfg.top().querySelector('.manual-balance-date-input'))`), false);
+    const text = await js('cfg.top().textContent');
+    assert.match(text, /人工补录余额将被替换/);
+    assert.match(text, /2026-09-01：人工补录余额 5,000\.00，账单余额 1,100\.00，差额 -3,900\.00/);
+    assert.match(text, /2026-09-03：人工补录余额 480\.00，计算余额 470\.00（另加余额附加值 10\.00 后写入 480\.00），差额 -10\.00/);
+    await js(`cfg.top().querySelector('[data-action="review"]').click();`); await tick();
+    assert.equal(await js('cfg.handle.isOpen()'), false);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='seed').length`), 0);
+
+    await js(REPLACE_PROMPT_JS);
+    await js(`cfg.write=cfg.defer();cfg.next.seed=cfg.write;cfg.action=cfg.top().querySelector('[data-action="confirm"]');
+      cfg.action.click();cfg.action.dispatchEvent(new Event('click'));`);
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0])`), [{confirmBalanceSeedReplaceKeys:['R1','R2']}]);
+    assert.equal(await js('cfg.handle.close().status'), 'blocked');
+    await js(`cfg.write.resolve({status:'warning',message:'余额账单可导出'});`); await tick();
+    assert.equal(await js('cfg.handle.isOpen()'), false);
+    assert.equal(await js('cfg.applied'), 1);
+  });
+  await test('余额不一致确认后转入人工补录替换：确认框换成替换确认', async () => {
+    await setup();
+    await js(`${MISMATCH_PROMPT_JS}${REPLACE_PROMPT_JS.replace(/cfg\.handle=[\s\S]*$/, '')}
+      cfg.next.seed={status:'manual-balance-required',manualBalancePromptReady:true,manualBalancePrompt:cfg.replacePrompt};
+      cfg.top().querySelector('[data-action="confirm"]').click();`); await tick();
+    assert.deepEqual(await js(`({replace:Boolean(cfg.top().querySelector('.balance-seed-replace-card')),
+      count:document.getElementById('modalRoot').children.length})`), {replace:true,count:1});
   });
 
   async function setupRowCount(nextN=1) {

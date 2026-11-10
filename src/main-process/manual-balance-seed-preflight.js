@@ -313,6 +313,74 @@ function prepareBalanceGapSkip({
   };
 }
 
+// 余额不一致“确认继续”、人工补录“确认替换”只能确认当前 prompt 列出的项；不写人工种子，交由 execute 登记后重算。
+const BALANCE_CONFIRMATION_KINDS = Object.freeze({
+  mismatch: {
+    itemsField: 'mismatches',
+    payloadField: 'confirmBalanceMismatchKeys',
+    preparedItemsField: 'confirmedBalanceMismatches',
+    invalidMessage: '余额校验确认已失效，请重新导入文件',
+    errorCode: 'BALANCE_MISMATCH_CONFIRMATION_INVALID'
+  },
+  'seed-replace': {
+    itemsField: 'replacements',
+    payloadField: 'confirmBalanceSeedReplaceKeys',
+    preparedItemsField: 'confirmedBalanceSeedReplacements',
+    invalidMessage: '人工补录替换确认已失效，请重新导入文件',
+    errorCode: 'BALANCE_SEED_REPLACE_CONFIRMATION_INVALID'
+  }
+});
+
+function prepareBalanceConfirmation(reason, {
+  payload,
+  pendingPrompt,
+  importContext,
+  session,
+  createFreshnessGuard
+}) {
+  const kind = BALANCE_CONFIRMATION_KINDS[reason];
+  const pendingItems = pendingPrompt.reason === reason && Array.isArray(pendingPrompt[kind.itemsField])
+    ? pendingPrompt[kind.itemsField]
+    : [];
+  const itemByKey = new Map(pendingItems.map((item) => [normalizeCell(item && item.key), item]));
+  const keys = Array.isArray(payload[kind.payloadField])
+    ? [...new Set(payload[kind.payloadField].map((key) => normalizeCell(key)))]
+    : [];
+  if (!pendingItems.length || !keys.length || keys.some((key) => !key || !itemByKey.has(key))) {
+    return {
+      nextConfirmation: null,
+      prepared: {
+        proceed: false,
+        result: manualBalancePreflightError(kind.invalidMessage, kind.errorCode)
+      }
+    };
+  }
+  const freshness = createFreshnessGuard({
+    pendingPrompt,
+    importContext,
+    session,
+    plan: null
+  });
+  freshness.assertFresh();
+  return {
+    nextConfirmation: null,
+    prepared: {
+      proceed: true,
+      plan: null,
+      [kind.payloadField]: keys,
+      [kind.preparedItemsField]: keys.map((key) => ({ ...itemByKey.get(key) })),
+      pendingPrompt,
+      importContext,
+      session,
+      inputFilePaths: freshness.inputFilePaths,
+      assertFresh: freshness.assertFresh,
+      confirmedOverwrite: false,
+      inputPaths: freshness.inputFilePaths,
+      beforeStart: freshness.assertFresh
+    }
+  };
+}
+
 function prepareManualBalanceSeedSubmission({
   payload = {},
   confirmation = null,
@@ -385,6 +453,35 @@ function prepareManualBalanceSeedSubmission({
       session,
       createFreshnessGuard
     });
+  }
+
+  for (const reason of Object.keys(BALANCE_CONFIRMATION_KINDS)) {
+    if (payload && payload[BALANCE_CONFIRMATION_KINDS[reason].payloadField] !== undefined) {
+      return prepareBalanceConfirmation(reason, {
+        payload,
+        pendingPrompt,
+        importContext,
+        session,
+        createFreshnessGuard
+      });
+    }
+  }
+
+  // 余额不一致、人工补录替换的 prompt 只接受确认，不接受人工补录（spec §4 非目标）。
+  if (Object.prototype.hasOwnProperty.call(BALANCE_CONFIRMATION_KINDS, pendingPrompt.reason)) {
+    const kind = BALANCE_CONFIRMATION_KINDS[pendingPrompt.reason];
+    return {
+      nextConfirmation: null,
+      prepared: {
+        proceed: false,
+        result: manualBalancePreflightError(
+          pendingPrompt.reason === 'mismatch'
+            ? '当前是余额校验不一致的确认，请核查账单或确认按账单余额生成'
+            : '当前是人工补录余额替换的确认，请核查或确认替换',
+          kind.errorCode
+        )
+      }
+    };
   }
 
   const planResult = buildManualBalanceSeedPlan({

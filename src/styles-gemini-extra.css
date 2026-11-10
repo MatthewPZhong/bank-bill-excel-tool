@@ -2014,7 +2014,7 @@ td .muted { color: var(--muted); }
   color: var(--dim);
 }
 
-/* 账单日期断档确认（发生额计算余额） */
+/* 账单日期断档确认（发生额计算余额）；余额校验不一致确认（账单里的余额）共用同一套样式 */
 /* 窗口较矮或放大时正文整体滚动，操作按钮始终可见 */
 .balance-gap-body {
   flex: 1 1 auto; min-height: 0; overflow-y: auto;
