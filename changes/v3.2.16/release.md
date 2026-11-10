@@ -25,7 +25,7 @@
 
 合入【余额管理】时：`knowledge/backlog.md` 模块分支上的 B72 与 release 已有的 B72–B74 重号，改编为 B75（spec 同步）；`rules/integration-test-policy.md` 取 release 版本，完整集成后回写（`aeb85dde`）。合入后架构检查报 12 处 `ARCH-POLICY-HISTORY`：release 历史中另两个模块的 12 个提交仍持有 `renderer-dialog-configuration` 原 `allowedApiFields.api` 集合，按 v3.2.15 先例在 `architecture/boundaries.json` 逐个补登放宽记录（`94f6a825`），之后通过。
 
-同一需求另有一份实现 `feat/mapping-feature-value`（工作树 `.claude/worktrees/mapping-feature-value`，口径不同；之后已在该分支提交，末端 `d8ff7b20`，Codex 第五轮无发现）。2026-11-09 用户选定以 `feat/mapping-feature-filter` 为准合入；该分支未纳入、未改动 release，去向由用户决定。
+同一需求另有一份实现 `feat/mapping-feature-value`（工作树 `.claude/worktrees/mapping-feature-value`，口径不同；之后已在该分支提交，末端 `d8ff7b20`，Codex 第五轮无发现）。2026-11-09 用户选定以 `feat/mapping-feature-filter` 为准合入；该分支未纳入、未改动 release；2026-11-09 用户确认保留分支与工作树、本轮不纳入。
 
 ## 待人工复核
 
