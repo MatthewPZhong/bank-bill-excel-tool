@@ -49,11 +49,14 @@
 - **关闭条件**：在 macOS 与 Windows 实机以浅色、深色和最小窗口检查模板管理底栏与【余额管理】弹窗（含超过 200 条分页）；用真实种子文件确认渠道 / 普通模板的可见范围符合预期，修改一条计算种子后重新生成后续日期，核对余额与断档提示；人工复核 D3 口径
 - **目标版本**：v3.2.16
 
-### B74（P3 · 已知问题）网银「自己输入」：导入流程按字面量“自己输入”判断，单大账号分支与账号桥接永远不生效（既有）
+### B74（P3 · 已知问题）网银「自己输入」：导入流程按字面量“自己输入”判断，单大账号分支不生效、无法跳过直接查找（既有）
 
-- **来源**：2026-11-08 v3.2.16 `feat/statement-currency-big-account` 方案调研（[spec](../changes/v3.2.16/feat/statement-currency-big-account/spec.md)）；v3.2.15 起既有
-- **影响**：`main.js` 指定模板导入的 `isMerchantIdSelfInput` 与 `buildManagedMerchantLookupFlags().skipDirectMerchantLookup` 拿 `exportMappings` 与字面量“自己输入”比较，而 `exportMappings` 存的是 `__FIXED__:__MULTI_BIG_ACCOUNT__`，两者恒为假：只维护一个大账号的“自己输入”模板不走单大账号分支（`BIG_ACCOUNT_REQUIRED` 永不触发），表头区只有银行账户号的文件不经账户映射桥接，可能报“未识别到大账号”。相关单测直接传字面量，覆盖不到
-- **关闭条件**：确认现行“自己输入”导入的期望行为后，改为按存储值判断并补用真实存储值的回归测试
+- **来源**：2026-11-08 v3.2.16 `feat/statement-currency-big-account` 方案调研（[spec](../changes/v3.2.16/feat/statement-currency-big-account/spec.md)）；v3.2.15 起既有。2026-11-10 按代码核对更正影响描述：原写“账号桥接永远不生效”，实际在提取大账号顺序时仍作兜底生效
+- **影响**：`main.js` 导入流程从 `exportMappings` 读到的是存储值 `__FIXED__:__MULTI_BIG_ACCOUNT__`（映射弹窗显示时才翻译为“自己输入”），但有两处拿它与字面量“自己输入”比较，恒为假：
+  - `isMerchantIdSelfInput`：单大账号分支从不执行。只维护一个大账号时不会直接采用该账号，仍须在文件里识别到它，识别不到报“未识别到大账号”；一个都没维护时不报 `BIG_ACCOUNT_REQUIRED`（“请先在映射管理中维护大账号列表”），同样报“未识别到大账号”
+  - `buildManagedMerchantLookupFlags().skipDirectMerchantLookup`：恒为 false，“自己输入”模板总是先在文件里直接查找大账号。账户映射桥接（`findSelfInputBigAccountBridge`）在提取大账号顺序（`buildBigAccountOrderEvidence`）中仍作为直接查找失败后的兜底：那里按 `selfInputMerchant` 判断，它认 `__FIXED__:` 前缀，结果正确。导入时识别大账号（`resolveDirectBigAccountRecognition`）只有直接查找、没有桥接：表头区只有银行账户号、需经账户映射对应到大账号的文件，可能报“未识别到大账号”
+  - 相关单测直接传字面量，覆盖不到
+- **关闭条件**：确认现行“自己输入”导入的期望行为（只有一个大账号时是否直接采用、导入识别是否也走桥接）后，改为按存储值判断，并补用真实存储值的回归测试。直接采用会改变每行 MerchantId 与余额链归属，须做对账专项审查
 - **目标版本**：未定（本轮不修，避免改变「自己输入」现有行为）
 
 ### B73（P3 · 顺延）网银：同批导入「原始账单仅有币种无账户号」文件与需要选择大账号的文件时，暂不支持同批选择
