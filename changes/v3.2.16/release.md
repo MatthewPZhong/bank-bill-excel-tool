@@ -10,7 +10,7 @@
 | 正式基线 | `v3.2.15` → `5b5caf7b9349160957b0e60f617bc90abc3fd611` |
 | release 分支 | `release/v3.2.16`，远端已从基线创建（2026-11-09 核对时远端末端即基线）；本地跟踪分支与工作树 `.claude/worktrees/release-v3.2.16` 于 2026-11-09 建立 |
 | 远端 main | `5b5caf7b`，已包含在 release 历史 |
-| PR | 尚未创建（清单 A5：推送与开 draft PR 须授权） |
+| PR | [#248](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/248)，`release/v3.2.16` → `main`，draft；2026-11-09 用户授权推送并开 draft PR（首次推送末端 `cdf448c9`） |
 | 合并方式 | release → main 必须使用 merge commit（见 `AGENTS.md`「约定与分支」） |
 
 ## 纳入范围（清单 A4）
@@ -34,4 +34,5 @@
 
 - 2026-11-09 release 工作树（`61fe40fd`）`npm run release-check`：lint、架构检查、smoke 通过；单测 9996/10000、0 失败；集成 98/99，`toolbox-biff8-admission` 报 `EXECUTION_SYSTEM_MEMORY_PRESSURE`（本机可用内存不足），单独重跑 15/15 通过；随后完整重跑 `npm run test:integration` 99/99 通过，`rules/integration-test-policy.md` §七回写单独提交。
 - 2026-11-09 release 工作树（`59970cf5`，合入「原始账单仅有币种无账户号」后）`npm run release-check`：lint、架构检查、smoke 通过；单测 10020/10024、0 失败；集成 99/100，`toolbox-large-split-multi-sheet` 的 RSS 增量预算断言失败（负载敏感，模块分支上同样出现、单独重跑 31/31 通过）；随后完整重跑 `npm run test:integration` 100/100 通过，§七回写单独提交。合入前另跑渲染生命周期 `configuration-dialogs` + `statement-controller` 109/109。
+- 2026-11-09 release 末端 `c38a39f9`（两个模块合入后）复核「字段筛选特征值」未被冲突处理改动：功能相关标识在 8 个源文件中与 `feat/mapping-feature-filter` 一致；`statement-feature-filter.js` 46/46、`feature-filter.test.js` 9/9、渲染生命周期 `configuration-dialogs` 96/96（含本功能 5 例）。
 - 真实应用 GUI 人工检查未做（本机开发版启动受 BizOP 资源预检阻断）；界面由渲染生命周期用例与布局截图覆盖。
