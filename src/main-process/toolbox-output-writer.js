@@ -1634,11 +1634,6 @@ function createToolboxOutputWriter({
     currentSheetDataRows = 0;
   }
 
-  // 逐行复用的投影结果缓冲（只在单次 emitRow 内有效），避免为每个单元格分配记录对象。
-  const projectedColumns = [];
-  const projectedCells = [];
-  const projectedNumFmtOverrides = [];
-
   function emitRow(sourceRow) {
     if (state !== 'open') throw new Error(`工具箱输出已结束：${savePath}`);
     if (currentSheetDataRows >= maxRowsPerSheet) addPage();
@@ -1653,7 +1648,11 @@ function createToolboxOutputWriter({
     }
     const width = Math.max(normalizedHeaders.length, highestColumnIndex + 1);
     const values = new Array(width);
-    let projectedCount = 0;
+    // 本行投影结果用三个局部数组记录（不为每个单元格分配记录对象）；随本次调用结束释放，
+    // 不跨行持有已写出的单元格。
+    const projectedColumns = [];
+    const projectedCells = [];
+    const projectedNumFmtOverrides = [];
     for (let index = 0; index < sourceCells.length; index += 1) {
       const cell = sourceCells[index];
       if (!cell) continue;
@@ -1663,10 +1662,9 @@ function createToolboxOutputWriter({
         projection ? projection.value : null,
         cell
       );
-      projectedColumns[projectedCount] = columnIndex;
-      projectedCells[projectedCount] = cell;
-      projectedNumFmtOverrides[projectedCount] = projection ? projection.numFmtOverride : undefined;
-      projectedCount += 1;
+      projectedColumns.push(columnIndex);
+      projectedCells.push(cell);
+      projectedNumFmtOverrides.push(projection ? projection.numFmtOverride : undefined);
     }
 
     const outputRow = worksheet.addRow(values);
@@ -1679,7 +1677,7 @@ function createToolboxOutputWriter({
       // addStyleModel 的身份缓存即可命中，不再每行重新登记一次空样式（样式编号与登记顺序不变）。
       outputRow.style = EMPTY_ROW_STYLE;
     }
-    for (let index = 0; index < projectedCount; index += 1) {
+    for (let index = 0; index < projectedCells.length; index += 1) {
       const cell = projectedCells[index];
       const targetCell = outputRow.getCell(projectedColumns[index] + 1);
       const outputStyle = cachedOutputStyle(
@@ -1766,6 +1764,7 @@ function createToolboxOutputWriter({
       writer = null;
       worksheet = null;
       outputRegistry = null;
+      outputStyleCache.clear();
       flow = null;
       await removeFileWithRetry(savePath);
     }
@@ -1793,6 +1792,8 @@ function createToolboxOutputWriter({
       worksheet = null;
       writer = null;
       outputRegistry = null;
+      // 输出样式缓存引用来源注册表与样式对象；写出结束后与 writer 一同释放。
+      outputStyleCache.clear();
       flowStats = flow ? flow.snapshot() : null;
       flow = null;
   }

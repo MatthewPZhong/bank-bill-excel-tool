@@ -44,7 +44,7 @@
 | T8 | 逐单元格削减：纯 ASCII 坐标手写解析（非 ASCII 仍走原正则，`toUpperCase` 可能把 ß 展开）；样式属性原文 → XF 号只缓存成功结果（至多 4096 条）；每格照常由 `effectiveStyleRef` 算出实际样式引用，再按该引用缓存冻结样式引用与 numFmt（条数不超过来源样式数，行样式引用同理）；解码改为按位传参、出错才构造 context；单元格可变状态整表复用；行内单元格用数组 + 递增判重；扫描器专用的冻结 cell / row 构造函数复用共享样式引用，单元格已按列递增时跳过原实现的 Map 去重与排序；规范元素名的大小写校验结果预置；属性循环改用 `Object.keys` | 缓存键是解析后的样式引用而非 XF 组合，内存不随行 / 单元格 / 列 XF 的组合增长；行样式引用与原实现一样不查样式内容；构造结果与 `createToolboxCell` / `createToolboxRow` 字段、键顺序、取值、冻结状态一致（无坐标单元格顺延到 16384 时仍交给原构造函数按原样报错） |
 | T9 | `number-date`：常见「正负号 + 整数 + 可选小数」词法手写解析，其余仍走原正则；规范比较去正则；`classifyExcelNumberFormat` 按格式串有界缓存（结果本就冻结）；数值解码只解析一次（`classifyNumericLexical`）；有效数字 ≤ 15、整数位 ≤ 15、小数位 ≤ 20 时 double 往返判定直接成立（DBL_DIG），范围外仍重新解析比较。`excel-text`：无 `_` 时解码跳过正则替换，无需转义时编码直接返回原串 | DBL_DIG：15 位有效数字网格的相对间距（≥ 1e-15）大于 double 的 ulp（≈ 2.2e-16），且最短往返表示不长于原值，故正规数范围内必然往返不变；以 v3.2.15 原实现作对照逐值比较 |
 | T10 | `loadToolboxSharedStrings` 用同一钩子接管 `<si><t>文本</t></si>` 与 `<si><t xml:space="preserve">文本</t></si>`（文本不含 `<`、`&`、不超过 4096），语义动作复用原 t 解码与 si 交付，出错仍经 `finish(error)` | 同 T7 |
-| T11 | `scanXlsxSheet` 新增 `rowCallbackLimit`：只把前 N 行交给 `onRow`，其后各行照常严格解析、解码、样式校验与计数，在无逐 cell 审计与行字节预算时不构造模型对象；写后复核（`validateGeneratedWorkbookStructure`）只取表头，设为 1。`emitRow` 不再为每格分配投影记录；`projectToolboxMatchValues` 一次遍历；读字段累加器预先展开字段数组 | 复核原本只在首行取表头，其余行回调为空操作；解析、解码与计数路径不变，失败条件不变 |
+| T11 | `scanXlsxSheet` 新增 `rowCallbackLimit`：只把前 N 行交给 `onRow`，其后各行照常严格解析、解码、样式校验与计数，在无逐 cell 审计与行字节预算时不构造模型对象；写后复核（`validateGeneratedWorkbookStructure`）只取表头，设为 1。`emitRow` 不再为每格分配投影记录（改为本次调用内的局部数组，不跨行持有已写出的单元格）；输出样式缓存随 release / abort 清空；`projectToolboxMatchValues` 一次遍历；读字段累加器预先展开字段数组 | 复核原本只在首行取表头，其余行回调为空操作；解析、解码与计数路径不变，失败条件不变 |
 | T11b | `emitRow` 对没有行样式的数据行，把 ExcelJS 新建行自带的空样式 `{}` 换成同一个冻结空对象 | ExcelJS 提交行时按样式对象身份缓存 `addStyleModel`，每行新建的 `{}` 每次都未命中、重新登记（8 份拆分中 20208 次，换后 216 次）；内容相同，样式编号与登记顺序不变；有行样式（customFormat）的行仍按原路径逐行设置 |
 | T12 | GUI 读字段（v2）：主进程给元数据扫描传入与字段取值相同的预算（单字段 5 万个值 / 4MB），Worker 在同一次扫描里按 `scanSplitFieldValues` 的口径（matchValues、首次出现顺序、计费公式）预取各字段可选值，另设合计 4MB 上限；任一上限超出的字段整列放弃。选字段时命中预取直接返回（仍校验字段属于表头并重新核对源文件快照），未命中照旧单独扫描 | 返回结构与单独扫描相同（含 executionMode），Renderer IPC 不变；预取不改变元数据结果；放弃的字段在单独扫描时照常按原预算报错 |
 | T13 | 工作表与共享字符串的流式读取改用 `zip-reader.openZipEntryReadStream`：对 yauzl 打开的普通 deflate 条目按 yauzl 3.x `openReadStreamLowLevel` 的同一管线自行解压（`decompress:false` 取原始数据，本地文件头校验仍由 yauzl 完成；读流 / 解压错误按原方式 setImmediate 转发、销毁后不再转发；`validateEntrySizes` 时断言解压字节数；destroy 断开管线并销毁原始读流），只把解压输出分块由 16KB 调到 64KB；其余情况（假 zip、stored、加密）照旧调用 `openReadStream` | 剖析显示扫描等待解压约占 12%：解析每处理完 16KB 就要等解压线程送来下一块（10 万行约 4700 次往返），加大读缓冲无效，只有加大分块有效。原管线在声明大小不符时报的「got at least N」取决于分块：其解压输出在累计 16KB 整数倍与每个原始数据块处理完处切块，本管线只放大前者，故 N = min(声明大小后的下一个 16KB 整数倍, 本块结束位置)，并先交付原管线在越界前会交付的同一前缀、下一轮事件循环再报错，报错文案与报错前已解析的行与原管线一致 |
@@ -98,7 +98,7 @@
 | 命令 | 结果 |
 | --- | --- |
 | `node --test` 新增 / 修改的单测（tokenizer、快路径开关对照、数值文本对照、构造函数、ZIP 条目流、预取、split read owner） | 全部 PASS |
-| `npm run test:unit` | 10007/10011 PASS，4 项按平台跳过，0 失败（638 个文件；含 Codex 审查修复后的复跑） |
+| `npm run test:unit` | 10008/10012 PASS，4 项按平台跳过，0 失败（638 个文件；含两轮 Codex 审查修复后的复跑） |
 | `npm run test:integration` | 98 个脚本、3431/3431 PASS；`toolbox-split-read-compatibility.js` 增加预取 / 补扫两种路径（12 → 18 例），`toolbox-csv-admission.js` 增加预取用例（17 → 18 例），runner 回写 `rules/integration-test-policy.md` 第七章 |
 | `npm run lint` | PASS |
 
@@ -119,4 +119,5 @@
 - 第二轮起初用替换 `zlib.createInflateRaw` 的方式试加大分块，测得无收益；后查明该导出不可写、替换从未生效。改为自建管线实测：加大读缓冲（highWaterMark）无效，加大解压分块有效（10 万行等待 118ms → 73ms），据此实施 T13。输出文件哈希本身只占约 10ms，未改。
 - 第二轮对照语料扩充：工作表近邻变异（属性顺序 / 引号 / 空白、大小写与重复属性、非 ASCII 与小写坐标、`<v/>`、CDATA、实体、超长文本、前缀元素、行内重绑默认命名空间、未绑定前缀行属性、乱序与顺延到 16384 的单元格）在 1–1e9 字节任意切块下逐行对比 v3.2.15；共享字符串加入空 t、`xml:space` 变体、转义孤立代理项与超长文本。
 - 提交 `343a494d` 后 Codex 只读审查一轮，P2：生效样式缓存按（cell / 行 / 列 XF、customFormat）组合作键，行样式与单元格样式都多时条数近似相乘且常驻（1000 行 × 1000 列、1001 个等价 XF 的流式扫描，GC 后堆增长约 120 MiB，v3.2.15 无此缓存）。改为按解析后的样式引用缓存（T8），同一场景堆增长降到约 1 MiB；补回归测试，对拍与比速复跑无差异、无退化。
+- 修复提交 `671f25cc` 后 Codex 对整个分支再审一轮，上一条确认已修复；新 P2：`emitRow` 复用的闭包级投影缓冲只覆写前缀，宽行之后写窄行时历史行尾部的单元格（含文本）一直被 writer 持有，release 后也不释放。改为每次调用的局部数组，并在 release / abort 时清空输出样式缓存；补 WeakRef + 强制 GC 的回归测试（旧实现失败、新实现通过），输出对拍与比速复跑无差异、无退化。
 - 未覆盖：Windows 打包版与用户真实文件的耗时回归（B76）；发布存档阶段的耗时（B75）。
