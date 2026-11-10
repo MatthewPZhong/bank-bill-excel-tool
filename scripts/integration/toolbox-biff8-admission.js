@@ -54,7 +54,7 @@ for (const sourceName of ['input.csv', 'input.xls']) test(`${sourceName} 的 BIF
   assert.equal(h.workers.length, 0); h.state.availableMiB = 2048;
   normalScan(h, await pending); assert.equal(h.hash(h.source), before);
 }));
-test('BIFF8 普通档 metadata 后降到 512 MiB，字段补扫重新等待并恢复为普通档', () => withRowsCsv({ createSource }, async (h) => {
+test('BIFF8 普通档 metadata 后降到 512 MiB，字段补扫重新等待并恢复为普通档', () => withRowsCsv({ createSource, withoutPrefetch: true }, async (h) => {
   const metadata = await h.scan(); normalScan(h, metadata);
   h.state.availableMiB = 512;
   const pending = h.values(metadata);
@@ -103,7 +103,7 @@ test('防御性验证：强制真实 153/8 MiB 扫描 Worker 读 BIFF8，在前�
   assert.equal(h.workers[0].threadId, -1); assert.equal(h.state.publisherCalls, 0);
 }));
 test('防御性验证：BIFF8 字段补扫强制低档也在实际 reader 前拒绝', async () => {
-  const options = { createSource };
+  const options = { createSource, withoutPrefetch: true };
   await withRowsCsv(options, async (h) => {
     const metadata = await h.scan(); normalScan(h, metadata); options.forceScanLow = true;
     const result = await h.values(metadata); assert.equal(result.code, 'EXECUTION_INPUT_PROFILE_UNSUITABLE');
@@ -142,7 +142,7 @@ test('小 BIFF8 不凭磁盘大小启用低档，资源恢复后普通档仍可�
   assert.equal(h.workers.length, 0); h.state.availableMiB = 2048; normalScan(h, await pending, 2);
 }));
 test('pending 兼容路径仍支持 BIFF8 metadata、字段补扫和 rows 输出', () => withRowsCsv({
-  createSource: (file) => createSource(file, 100), pending: true
+  createSource: (file) => createSource(file, 100), pending: true, withoutPrefetch: true
 }, async (h) => {
   const metadata = await h.scan(); assert.equal(metadata.status, 'success'); assert.equal(metadata.dataRowCount, 100);
   assert.deepEqual((await h.values(metadata)).values, ['1']); assert.ok(h.scanStarts.every((item) => item.memoryConfig === null));

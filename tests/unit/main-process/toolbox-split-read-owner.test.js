@@ -22,8 +22,17 @@ function fixture(t, options = {}) {
   return { root, filePath, governor, owner, sender, read };
 }
 
+// 去掉元数据扫描的预取结果，迫使字段取值走单独扫描。
+function withoutPrefetch(carrier) {
+  return { ...carrier, promise: carrier.promise.then((result) => {
+    const { prefetchedValues: _prefetched, ...rest } = result;
+    return rest;
+  }) };
+}
+
 test('真实准备 Worker 只返回计数，显式补扫当前字段，空列状态与错误不同', async (t) => {
-  const f = fixture(t);
+  const { dispatchLargeSplit } = require('../../../src/main-process/toolbox-large-split-dispatch');
+  const f = fixture(t, { dispatch: (input) => withoutPrefetch(dispatchLargeSplit(input)) });
   const metadata = await f.read();
   assert.equal(metadata.dataRowCount, 3);
   assert.equal(metadata.valuesState, 'not-requested');
@@ -49,10 +58,32 @@ test('token 绑定窗口与源身份，未知字段及 Renderer 配置不能进�
   await assert.rejects(f.owner.readValues(f.sender, request), { code: 'TOOLBOX_SPLIT_READ_CONTEXT_STALE' });
 });
 
+test('元数据扫描预取完整的字段取值直接复用，不再启动第二次扫描且仍校验源文件未变', async (t) => {
+  let calls = 0;
+  const ops = [];
+  const { dispatchLargeSplit } = require('../../../src/main-process/toolbox-large-split-dispatch');
+  const f = fixture(t, { dispatch(input) { calls += 1; ops.push(input.op); return dispatchLargeSplit(input); } });
+  const metadata = await f.read();
+  assert.equal(Object.hasOwn(metadata, 'prefetchedValues'), false);
+  for (const [field, values] of [['字段', ['甲', '乙']], ['空列', []]]) {
+    const result = await f.owner.readValues(f.sender, { version: 2, requestId: `pre-${field === '字段' ? '1' : '2'}`,
+      splitReadToken: metadata.splitReadToken, field });
+    assert.equal(result.status, 'success');
+    assert.equal(result.field, field);
+    assert.equal(result.valuesState, 'complete');
+    assert.deepEqual(result.values, values);
+  }
+  assert.deepEqual(ops, ['scanMetadata']);
+  assert.equal(calls, 1);
+  fs.appendFileSync(f.filePath, '丙,\n');
+  await assert.rejects(f.owner.readValues(f.sender, { version: 2, requestId: 'pre-3',
+    splitReadToken: metadata.splitReadToken, field: '字段' }), { code: 'TOOLBOX_SPLIT_READ_CONTEXT_STALE' });
+});
+
 test('同字段并发请求合并，一个订阅者取消不影响其他订阅者或基础 token', async (t) => {
   let calls = 0;
   const { dispatchLargeSplit } = require('../../../src/main-process/toolbox-large-split-dispatch');
-  const f = fixture(t, { dispatch(input) { calls += 1; return dispatchLargeSplit(input); } });
+  const f = fixture(t, { dispatch(input) { calls += 1; return withoutPrefetch(dispatchLargeSplit(input)); } });
   const metadata = await f.read();
   const request = { version: 2, requestId: 'values-a', splitReadToken: metadata.splitReadToken, field: '字段' };
   const a = f.owner.readValues(f.sender, request);

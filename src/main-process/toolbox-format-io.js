@@ -4,7 +4,7 @@ const path = require('node:path');
 const {
   TOOLBOX_PROJECTION_PROFILES,
   normalizeCell,
-  projectToolboxRowValues,
+  projectToolboxValue,
   toMatchValue
 } = require('../backend/xlsx/model');
 const { openToolboxBiff8Pass } = require('../backend/toolbox-format/biff8-pass');
@@ -40,8 +40,15 @@ function projectToolboxMatchValues(
   width = null
 ) {
   const outputWidth = Number.isInteger(width) && width >= 0 ? width : toolboxRowWidth(row);
-  const values = projectToolboxRowValues(row, projectionProfile, outputWidth);
-  return values.map((value) => normalizeCell(value));
+  // 与 projectToolboxRowValues(...).map(normalizeCell) 相同，只是一次遍历、少一个中间数组。
+  const values = new Array(outputWidth).fill('');
+  const cells = row && Array.isArray(row.cells) ? row.cells : [];
+  for (const cell of cells) {
+    if (cell.columnIndex < outputWidth) {
+      values[cell.columnIndex] = normalizeCell(projectToolboxValue(cell, projectionProfile));
+    }
+  }
+  return values;
 }
 
 function trimTrailingEmptyMatchValues(values) {

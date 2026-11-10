@@ -1226,3 +1226,33 @@ test('写后结构复核允许 0 数据行，并精确核对自动分页的表�
     pagedOutput.cleanup();
   }
 });
+
+test('writer 不跨行持有已写出的单元格（宽行之后写窄行，提交释放后可回收）', async () => {
+  require('node:v8').setFlagsFromString('--expose_gc');
+  const gc = require('node:vm').runInNewContext('gc');
+  const output = tempOutput();
+  try {
+    const writer = createToolboxOutputWriter({
+      savePath: output.filePath,
+      normalizedHeaders: ['A'],
+      rawHeaderCells: [cell(0, 'A', 0)],
+      sourceRegistryResolver: makeResolver()
+    });
+    const refs = [];
+    (() => {
+      for (let width = 8; width >= 1; width -= 1) {
+        const cells = Array.from({ length: width }, (_, columnIndex) => cell(columnIndex, `v${width}-${columnIndex}`, 0));
+        refs.push(new WeakRef(cells[width - 1]));
+        writer.emitRow({ cells });
+      }
+    })();
+    await writer.commitAndValidate();
+    await writer.release();
+    await new Promise((resolve) => setImmediate(resolve));
+    gc();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(refs.map((ref) => ref.deref() === undefined), refs.map(() => true));
+  } finally {
+    output.cleanup();
+  }
+});

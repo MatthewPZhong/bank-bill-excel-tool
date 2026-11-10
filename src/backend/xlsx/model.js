@@ -59,6 +59,63 @@ function createToolboxCell(input = {}) {
   });
 }
 
+// 扫描器专用：调用方已保证 rowIndex >= 1、columnIndex 位于 0..16383、字符串字段已是字符串，
+// effectiveStyleRef 已是 freezeToolboxStyleRef 的结果（可在多个 cell 间共享）。产出与
+// createToolboxCell 同一输入时的字段、键顺序、取值和冻结状态完全一致。
+function createScannedToolboxCell(
+  rawLexicalValue,
+  decodedSemanticValue,
+  cellType,
+  matchProjectionValue,
+  sourceStyleId,
+  frozenStyleRef,
+  sourceDateSystem,
+  sourceFormat,
+  sourceFile,
+  sourceSheet,
+  rowIndex,
+  columnIndex,
+  formulaLexical
+) {
+  const semantic = decodedSemanticValue === undefined ? null : decodedSemanticValue;
+  return Object.freeze({
+    rawLexicalValue,
+    cachedValue: semantic,
+    cellType: cellType || 'blank',
+    decodedSemanticValue: semantic,
+    matchProjectionValue: matchProjectionValue === undefined
+      ? decodedSemanticValue
+      : matchProjectionValue,
+    sourceStyleId,
+    effectiveStyleRef: frozenStyleRef,
+    isExplicitCell: true,
+    sourceDateSystem,
+    sourceFormat,
+    sourceFile,
+    sourceSheet,
+    rowIndex,
+    columnIndex,
+    hasFormula: formulaLexical !== null,
+    formulaLexical
+  });
+}
+
+// 扫描器专用：cells 已按 columnIndex 严格递增且不再被调用方修改；其余约束同上。
+function createScannedToolboxRow(input, frozenStyleRef) {
+  return Object.freeze({
+    cells: Object.freeze(input.cells),
+    rowIndex: input.rowIndex,
+    height: Number.isFinite(input.height) ? input.height : null,
+    hidden: !!input.hidden,
+    outlineLevel: Number.isInteger(input.outlineLevel) ? input.outlineLevel : 0,
+    sourceStyleId: input.sourceStyleId === undefined ? null : input.sourceStyleId,
+    effectiveStyleRef: frozenStyleRef,
+    customFormat: !!input.customFormat,
+    sourceFile: input.sourceFile,
+    sourceSheet: input.sourceSheet
+  });
+}
+
 function createToolboxRow(input = {}) {
   const rowIndex = Number.parseInt(input.rowIndex, 10);
   if (!Number.isInteger(rowIndex) || rowIndex < 1) {
@@ -294,10 +351,13 @@ function projectOutputCell(cell, warningCollector = null) {
 module.exports = {
   TOOLBOX_PROJECTION_PROFILES,
   cellReference,
+  createScannedToolboxCell,
+  createScannedToolboxRow,
   createToolboxCell,
   createToolboxRow,
   createToolboxSheetMeta,
   createWarningCollector,
+  freezeToolboxStyleRef: freezeStyleRef,
   findToolboxCell,
   normalizeCell,
   projectOutputCell,

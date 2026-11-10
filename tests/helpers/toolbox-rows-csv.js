@@ -92,7 +92,12 @@ async function withRowsCsv(options, run) {
         return createToolboxSplitReadOwner({ ...ownerOptions, dispatch(input) {
           if (options.forceScanLow) input = { ...input, executionMemoryConfig: profiles.profile('split-prepare', 'low', 'reader-guard-fixture') };
           scanStarts.push({ op: input.op, memoryConfig: input.executionMemoryConfig });
-          return dispatchLargeSplit(input);
+          const carrier = dispatchLargeSplit(input);
+          // withoutPrefetch：去掉元数据扫描顺带预取的字段值，迫使选字段时走单独补扫 Worker。
+          return options.withoutPrefetch ? { ...carrier, promise: carrier.promise.then((result) => {
+            const { prefetchedValues: _prefetched, ...rest } = result;
+            return rest;
+          }) } : carrier;
         } });
       },
       trackedIpcHandle(_channel, _scope, _label, value) { contract = value; }, app: { getPath: () => userData }, mainWindow: null,

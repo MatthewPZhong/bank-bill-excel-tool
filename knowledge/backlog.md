@@ -20,6 +20,20 @@
 
 ## 未实施
 
+### B78（P3 · 改进）工具箱发布 / 存档阶段耗时未测量
+
+- **来源**：同 B77（TechDoc 第一节「不在范围」）；模块分支上原为 B75，合入 release/v3.2.16 时与已有 B75 重号，改为 B78
+- **影响**：分支内合并、拆分、读字段的处理耗时已低于 v3.0.18（10 万行合并 4.9s / 5.8s、读字段 0.8s / 1.0s，见 TechDoc 第五节），但只统计到写后复核为止。GUI 中正式发布还要经过暂存、fsync、SHA-256 与存档复制（v3.0.18 没有这一阶段），这部分耗时未测，用户感知可能仍有差距
+- **关闭条件**：在 Windows 打包版测量发布与存档阶段耗时（与 B77 同批文件）；占比明显时评估在保持耐久与可恢复语义前提下的优化，行为变化须补回归测试
+- **触发时机**：B77 回归时一并测量
+
+### B77（P2 · 待核验）工具箱合并 / 拆分提速：Windows 打包版用真实账单回归耗时与输出
+
+- **来源**：2026-11-09 用户反馈从 3.0.18 升级后工具箱变慢；分支 `perf/toolbox-merge-split-speed`（[TechDoc](../changes/v3.2.16/perf/toolbox-merge-split-speed/techdoc.md)）；模块分支上原为 B76，合入 release/v3.2.16 时与已有 B76 重号，改为 B77
+- **影响**：提速数据只在 macOS 的 Node 环境、生成的测试文件上测得；Windows 打包版（含 Worker 启动、杀毒软件对暂存、fsync、存档复制的影响）与反馈用户的真实文件尚未回归
+- **关闭条件**：Windows 打包版对反馈用户同类文件分别执行合并、单值拆分、多文件拆分、读字段，记录与 v3.0.18、v3.2.15 的端到端耗时对比，并用 Excel / WPS 打开产物确认格式不变
+- **目标版本**：v3.2.16（暂定）
+
 ### B76（P3 · 已知问题）单测 `run-check-multiworker` 的 B0「close timeout 后 terminate 延迟」在 Windows CI 偶发等待超时
 
 - **来源**：2026-11-07 [PR #246](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/246) 最终候选 `f2d55e3d` 的 Windows CI（run 42396472653 第 1 次，`release-check-unit (6/6)`）。同一提交只重跑失败 job 后通过，合并后的 main 检查（run 42449980840）与 v3.2.15 发布 workflow（run 42453987798）也通过；`chore/backlog-b70-multiworker-flake` 分支上原为 B70，合入 release/v3.2.16 时与「账单里的余额」的 B70 重号，改为 B76
