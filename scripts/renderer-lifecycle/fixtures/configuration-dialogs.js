@@ -424,6 +424,51 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       [{billDate:'2026-09-30',endBalance:'0'},{billDate:'2026-09-30',endBalance:'1000000'}]);
     assert.equal(await js('document.getElementById("modalRoot").children.length'), 0);
   });
+  // v3.2.17（用户反馈 SCB-SG）：首日每笔交易一个余额（上百个）且种子日期与首日之间缺日期。
+  // D1：余额只列前后各 3 个并注明总数；D3：写明缺的日期，预填首日前一天、金额留空。金额为合成数据。
+  const SEED_MISMATCH_GAP_JS = `cfg.seedMismatchGapPrompt={templateName:'模板 A',bankName:'模板',merchantId:'M001',currency:'SGD',targetBillDate:'2026-11-02',queueIndex:1,queueTotal:1,
+    seedMismatch:{seedDate:'2026-10-27',seedBalance:2000000.11,seedGenerationMethod:'账单里的余额',anchorBalance:2000000.11,billDate:'2026-11-02',
+      creditAmount:5126.1,debitAmount:0,expectedBalance:2005126.21,
+      statementBalances:Array.from({length:150},(_,i)=>2003500+i+0.05),
+      missingFrom:'2026-10-28',missingTo:'2026-11-01',suggestedSeedDate:'2026-11-01'}};`;
+  await test('已有余额对不上且缺日期：说明写明缺的日期、余额只列前后几个；预填首日前一天、金额留空', async () => {
+    await setup();
+    await js(`${SEED_MISMATCH_GAP_JS}cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog(cfg.seedMismatchGapPrompt)).handle;void 0;`);
+    assert.equal(await js(`cfg.top().querySelector('.manual-balance-seed-mismatch').textContent.trim()`),
+      '已有 2026-10-27 的余额 2,000,000.11（账单里的余额），加上 2026-11-02 收入 5,126.10、支出 0.00 后应为 2,005,126.21，'
+      + '与账单当日余额（共 150 个）2,003,500.05、2,003,501.05、2,003,502.05 … 2,003,647.05、2,003,648.05、2,003,649.05 都对不上。'
+      + '2026-10-27 与 2026-11-02 之间缺 2026-10-28 ~ 2026-11-01 的账单，请先核对是否漏导了这几天的账单；'
+      + '也可以直接填写 2026-11-01 的期末余额（可参考账单上的期初余额）。');
+    assert.deepEqual(await js(`({date:cfg.top().querySelector('.manual-balance-date-input').value,amount:cfg.top().querySelector('.manual-balance-amount-input').value})`),
+      {date:'2026-11-01',amount:''});
+    await js(`cfg.next.seed={status:'success',message:'余额账单可导出'};cfg.top().querySelector('.manual-balance-amount-input').value='2003456.78';
+      cfg.top().querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0])`), [{billDate:'2026-11-01',endBalance:'2003456.78'}]);
+
+    // 只缺一天：写该日与“这天”；不超过 6 个余额时全部列出。
+    await js(`${SEED_MISMATCH_GAP_JS}Object.assign(cfg.seedMismatchGapPrompt.seedMismatch,{seedDate:'2026-10-31',missingFrom:'2026-11-01',missingTo:'2026-11-01',
+      statementBalances:[1,2,3,4,5,6]});cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog(cfg.seedMismatchGapPrompt)).handle;void 0;`);
+    const oneDay = await js(`cfg.top().querySelector('.manual-balance-seed-mismatch').textContent`);
+    assert.match(oneDay, /与账单当日余额 1\.00、2\.00、3\.00、4\.00、5\.00、6\.00 都对不上。2026-10-31 与 2026-11-02 之间缺 2026-11-01 的账单，请先核对是否漏导了这天的账单/);
+  });
+  await test('已有余额对不上、余额很多且最小窗口放大到 150% 时，说明区滚动，日期、金额与完成可见可点', async () => {
+    await setup({ zoom: 1.5 });
+    await js(`${SEED_MISMATCH_GAP_JS}cfg.seedMismatchGapPrompt.seedMismatch.missingFrom='';cfg.seedMismatchGapPrompt.seedMismatch.missingTo='';
+      cfg.seedMismatchGapPrompt.seedMismatch.suggestedSeedDate='2026-10-27';
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog(cfg.seedMismatchGapPrompt)).handle;void 0;`);
+    await layout.settle();
+    const geometry = await js(`(() => {
+      const card=cfg.top().querySelector('.manual-balance-card'), context=card.querySelector('.manual-balance-context'), rect=card.getBoundingClientRect();
+      const visible = (selector) => { const r=card.querySelector(selector).getBoundingClientRect();
+        return r.height>0 && r.top>=rect.top && r.bottom<=rect.bottom && r.bottom<=innerHeight; };
+      return { fits: rect.bottom<=innerHeight, contextScrolls: context.scrollHeight>context.clientHeight, cardScrolls: card.scrollHeight>card.clientHeight+1,
+        date: visible('.manual-balance-date-input'), amount: visible('.manual-balance-amount-input'), done: visible('[data-action="done"]') };
+    })()`);
+    assert.deepEqual(geometry, { fits: true, contextScrolls: true, cardScrolls: false, date: true, amount: true, done: true });
+    await js(`cfg.next.seed={status:'success',message:'余额账单可导出'};void 0;`);
+    await layout.click('.manual-balance-card [data-action="done"]'); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0])`), [{billDate:'2026-10-27',endBalance:'2000000.11'}]);
+  });
   await test('缺余额的普通补录弹窗不显示对不上说明，输入为空', async () => {
     await setup();
     await js(`cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog({merchantId:'M001',currency:'VND',targetBillDate:'2026-10-01'})).handle;void 0;`);

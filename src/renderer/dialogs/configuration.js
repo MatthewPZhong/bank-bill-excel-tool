@@ -411,18 +411,37 @@
         + `，差额 ${formatBalanceAmount(mismatch.difference, true)}${missing}`;
     }
 
+    // 账单当日余额较多（每笔交易一个余额）时只列前后各 3 个并注明总数，避免说明撑满弹窗（v3.2.17 D1）。
+    const SEED_MISMATCH_BALANCE_PREVIEW_EACH_SIDE = 3;
+    // 返回「与账单当日余额」之后的部分：不超过 6 个时与 v3.2.16 相同（空格后全部列出）。
+    function formatSeedMismatchStatementBalances(values) {
+      const balances = Array.isArray(values) ? values : [];
+      if (!balances.length) return ' (空)';
+      const join = (items) => items.map((value) => formatBalanceAmount(value)).join('、');
+      if (balances.length <= SEED_MISMATCH_BALANCE_PREVIEW_EACH_SIDE * 2) return ` ${join(balances)}`;
+      return `（共 ${balances.length} 个）${join(balances.slice(0, SEED_MISMATCH_BALANCE_PREVIEW_EACH_SIDE))} … `
+        + join(balances.slice(-SEED_MISMATCH_BALANCE_PREVIEW_EACH_SIDE));
+    }
+
     // 已有种子但首日多个余额都对不上：写明已有余额、当日收支与账单当日余额，提示核对后重填（v3.2.16 D7）。
+    // 种子日期与首日之间缺日期时写明缺的日期，引导补录首日前一天的期末余额（v3.2.17 D3）。
     function formatBalanceSeedMismatchDetail(seedMismatch) {
-      const statementBalances = (Array.isArray(seedMismatch.statementBalances) ? seedMismatch.statementBalances : [])
-        .map((value) => formatBalanceAmount(value))
-        .join('、') || '(空)';
+      const statementBalances = formatSeedMismatchStatementBalances(seedMismatch.statementBalances);
       const seedAmount = formatBalanceAmount(seedMismatch.seedBalance);
       const anchorAmount = formatBalanceAmount(seedMismatch.anchorBalance);
       const anchorNote = anchorAmount === seedAmount ? '' : `（扣回余额附加值后为 ${anchorAmount}）`;
-      return `已有 ${seedMismatch.seedDate} 的余额 ${seedAmount}（${seedMismatch.seedGenerationMethod || '人工录入'}）${anchorNote}，`
+      const summary = `已有 ${seedMismatch.seedDate} 的余额 ${seedAmount}（${seedMismatch.seedGenerationMethod || '人工录入'}）${anchorNote}，`
         + `加上 ${seedMismatch.billDate} 收入 ${formatBalanceAmount(seedMismatch.creditAmount)}、`
         + `支出 ${formatBalanceAmount(seedMismatch.debitAmount)} 后应为 ${formatBalanceAmount(seedMismatch.expectedBalance)}，`
-        + `与账单当日余额 ${statementBalances} 都对不上。请核对上一账单日余额（可参考账单上的期初余额）后重新填写。`;
+        + `与账单当日余额${statementBalances} 都对不上。`;
+      if (!seedMismatch.missingFrom) {
+        return `${summary}请核对上一账单日余额（可参考账单上的期初余额）后重新填写。`;
+      }
+      const singleDay = seedMismatch.missingFrom === seedMismatch.missingTo;
+      const missing = singleDay ? seedMismatch.missingFrom : `${seedMismatch.missingFrom} ~ ${seedMismatch.missingTo}`;
+      return `${summary}${seedMismatch.seedDate} 与 ${seedMismatch.billDate} 之间缺 ${missing} 的账单，`
+        + `请先核对是否漏导了${singleDay ? '这天' : '这几天'}的账单；`
+        + `也可以直接填写 ${seedMismatch.suggestedSeedDate} 的期末余额（可参考账单上的期初余额）。`;
     }
 
     function formatSeedMismatchAmountInput(value) {
@@ -689,9 +708,14 @@
 
       const dateInput = dialog.querySelector('.manual-balance-date-input');
       const amountInput = dialog.querySelector('.manual-balance-amount-input');
-      dateInput.value = draft.billDate || (isGapPrompt ? prompt.suggestedSeedDate || '' : (seedMismatch?.seedDate || ''));
+      // 核对弹窗：不缺日期时预填已有种子的日期与金额；种子日期与首日之间缺日期时预填首日前一天、金额留空（v3.2.17 D3）。
+      const seedMismatchGap = Boolean(seedMismatch?.missingFrom);
+      dateInput.value = draft.billDate || (isGapPrompt
+        ? prompt.suggestedSeedDate || ''
+        : (seedMismatch?.suggestedSeedDate || seedMismatch?.seedDate || ''));
       dateInput.type = dateInput.value ? 'date' : 'text';
-      amountInput.value = draft.endBalance || (seedMismatch ? formatSeedMismatchAmountInput(seedMismatch.anchorBalance) : '');
+      amountInput.value = draft.endBalance
+        || (seedMismatch && !seedMismatchGap ? formatSeedMismatchAmountInput(seedMismatch.anchorBalance) : '');
 
       dateInput.addEventListener('focus', () => {
         if (dateInput.type !== 'date') {

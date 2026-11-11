@@ -1947,6 +1947,14 @@ td .muted { color: var(--muted); }
   border-bottom: 1px solid var(--line-soft);
   display: flex; flex-direction: column; gap: 14px;
 }
+/* 账号信息与说明在窗口较矮、放大或说明较长时滚动，输入区与按钮始终可见（v3.2.17 D1） */
+.manual-balance-card > .manual-balance-context {
+  flex: 0 1 auto; min-height: 0; overflow-y: auto;
+}
+.manual-balance-card > .manual-balance-context > *,
+.manual-balance-card > .manual-balance-form,
+.manual-balance-card > .dialog-actions { flex-shrink: 0; }
+.manual-balance-seed-mismatch { overflow-wrap: anywhere; }
 .manual-balance-progress {
   display: flex; flex-direction: column; gap: 8px;
 }

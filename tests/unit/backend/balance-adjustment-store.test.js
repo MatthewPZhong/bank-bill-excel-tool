@@ -176,4 +176,14 @@ test.describe('resolveBalanceAdjustment', () => {
     });
     assert.equal(sum, 100);
   });
+
+  test('多条附加值累计不带浮点尾差（v3.2.17 D2）', () => {
+    const adjustments = [
+      { merchantId: 'M', currency: 'CNY', effectiveDate: '2026-03-01', adjustmentValue: 0.1 },
+      { merchantId: 'M', currency: 'CNY', effectiveDate: '2026-04-01', adjustmentValue: 0.2 }
+    ];
+    assert.equal(resolveBalanceAdjustment(adjustments, {
+      merchantId: 'M', currency: 'CNY', dateLabel: '2026-05-01'
+    }), 0.3);
+  });
 });

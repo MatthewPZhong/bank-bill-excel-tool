@@ -37,6 +37,7 @@ const {
   sanitizeAmountValue,
   sanitizeSignedAmountValue,
   splitSignedAmountValue,
+  sumAmounts,
   toExcelSerial
 } = require('./file-service/normalizers');
 const {
@@ -1133,6 +1134,7 @@ module.exports = {
   readRows,
   readRowsWithMetadata,
   roundAmountHighPrecision,
+  sumAmounts,
   transformFileToWorkbook,
   writeBalanceWorkbook,
   writeWorkbookRows

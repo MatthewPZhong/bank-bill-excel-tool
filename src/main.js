@@ -2238,7 +2238,12 @@ function formatBalanceSeedMismatchLine(seedMismatch) {
   return `已有 ${seedMismatch.seedDate} 余额 ${formatBalanceAmount(seedMismatch.seedBalance)}（${seedMismatch.seedGenerationMethod || '人工录入'}）；`
     + `${seedMismatch.billDate}：上一日余额 ${formatBalanceAmount(seedMismatch.anchorBalance)}`
     + ` + 收入 ${formatBalanceAmount(seedMismatch.creditAmount)} − 支出 ${formatBalanceAmount(seedMismatch.debitAmount)}`
-    + ` = 预期 ${formatBalanceAmount(seedMismatch.expectedBalance)}，账单当日余额 ${statementBalances || '(空)'} 都对不上`;
+    + ` = 预期 ${formatBalanceAmount(seedMismatch.expectedBalance)}，账单当日余额 ${statementBalances || '(空)'} 都对不上`
+    + (seedMismatch.missingFrom
+      ? `；中间缺 ${seedMismatch.missingFrom === seedMismatch.missingTo
+        ? seedMismatch.missingFrom
+        : `${seedMismatch.missingFrom} ~ ${seedMismatch.missingTo}`}`
+      : '');
 }
 
 function formatBalanceMismatchLine(mismatch) {
