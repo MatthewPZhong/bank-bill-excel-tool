@@ -339,6 +339,97 @@ function mapPending(row) {
   }
 }
 
+// v3.2.17 通道明细补录：可在导入预检时修改的字段（只含参与计算的字段；渠道订单号、账单日期不可改）。
+// 字段清单与分组和预检弹窗共用 src/shared/vcc-channel-correction.js。
+const {
+  CORRECTABLE_FIELDS: CHANNEL_CORRECTABLE_FIELDS,
+  GROUP_FIELDS: CHANNEL_GROUP_FIELDS
+} = require('../../shared/vcc-channel-correction');
+
+// 与 mapChannel 同一规则：CITI 用交易币种/金额；其他通道按 billdate 是否晚于账期月末取清算或结算/实际到账。
+function channelAmountGroup(fieldValue, targetMonth) {
+  const channelName = text(fieldValue('通道名称'));
+  if (!channelName) return null;
+  if (channelName === 'CITI') return 'transaction';
+  const billDate = normalizeDate(fieldValue('billdate'));
+  if (!billDate) return null;
+  return billDate > monthEndIso(targetMonth) ? 'clearing' : 'settlement';
+}
+
+function channelRequiredFields(fieldValue, targetMonth) {
+  const fields = ['借贷方向', '通道名称'];
+  const channelName = text(fieldValue('通道名称'));
+  if (channelName && channelName !== 'CITI') fields.push('billdate');
+  const group = channelAmountGroup(fieldValue, targetMonth);
+  return group ? [...fields, ...CHANNEL_GROUP_FIELDS[group]] : fields;
+}
+
+function channelFieldProblem(field, value) {
+  try {
+    if (field === '借贷方向') {
+      const direction = requireText(value, field);
+      if (direction !== 'in' && direction !== 'out') {
+        throw new Error(`借贷方向仅允许 in 或 out，实际为“${direction}”`);
+      }
+    } else if (field === '通道名称') {
+      requireText(value, field);
+    } else if (field === 'billdate') {
+      if (!normalizeDate(value)) throw new Error('billdate无法解析为有效日期');
+    } else if (field.endsWith('币种')) {
+      normalizeIncomingVccCurrency(value, field);
+    } else {
+      parseAmount(value, field);
+    }
+    return null;
+  } catch (error) {
+    return error.message;
+  }
+}
+
+// 返回导致通道发生额无法计算的可改字段问题；为空表示这些字段已满足 mapChannel。
+function channelCorrectionProblems(fieldValue, targetMonth) {
+  return channelRequiredFields(fieldValue, targetMonth)
+    .map((field) => ({ field, message: channelFieldProblem(field, fieldValue(field)) }))
+    .filter((problem) => problem.message);
+}
+
+function channelFieldValueGetter(values, definition) {
+  return (field) => rowValue(values, definition, field);
+}
+
+// 预检：判定通道明细行是否为可补录行（业务键与账单日期有效，仅可改字段为空或不合规）。
+function inspectChannelCorrectionCandidate({ values, targetMonth, keyCellType, sourceRow }) {
+  const normalizedMonth = normalizeYearMonth(targetMonth);
+  if (!normalizedMonth) return null;
+  const mapped = mapDetailRow({
+    sourceType: SOURCE_TYPES.CHANNEL,
+    values,
+    targetMonth: normalizedMonth,
+    assignedSubject: '预检',
+    sourceFile: '',
+    sheetName: '',
+    sourceRow,
+    keyCellType
+  });
+  if (mapped.disposition !== 'format_error') return null;
+  const definition = getSourceDefinition(SOURCE_TYPES.CHANNEL);
+  if (mapped.validationField === definition.monthHeader) return null;
+  const fieldValue = channelFieldValueGetter(mapped.values, definition);
+  const problems = channelCorrectionProblems(fieldValue, normalizedMonth);
+  if (problems.length === 0) return null;
+  return Object.freeze({
+    sourceRow,
+    idempotencyKey: mapped.idempotencyKey,
+    fields: Object.freeze(Object.fromEntries(CHANNEL_CORRECTABLE_FIELDS.map((field) => [
+      field, rawText(fieldValue(field))
+    ]))),
+    amountGroup: channelAmountGroup(fieldValue, normalizedMonth),
+    normalizedBilldate: normalizeDate(fieldValue('billdate')) || null,
+    requiredFields: Object.freeze(channelRequiredFields(fieldValue, normalizedMonth)),
+    problems: Object.freeze(problems.map((problem) => Object.freeze(problem)))
+  });
+}
+
 function mapDetailRow(input) {
   const targetMonth = normalizeYearMonth(input && input.targetMonth);
   if (!targetMonth) throw new Error(`导入账期格式无效：${input && input.targetMonth}`);
@@ -409,5 +500,10 @@ module.exports = {
   pendingContentHash,
   normalizeIncomingVccCurrency,
   mapDetailRow,
-  mappedRowToInsertParams
+  mappedRowToInsertParams,
+  CHANNEL_CORRECTABLE_FIELDS,
+  channelAmountGroup,
+  channelRequiredFields,
+  channelCorrectionProblems,
+  inspectChannelCorrectionCandidate
 };

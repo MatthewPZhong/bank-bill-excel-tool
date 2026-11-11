@@ -169,9 +169,11 @@
         details.push(`${formatInteger(completed.physicalFileCount)} 个文件 / ${formatInteger(completed.businessSheetCount)} 张业务 Sheet`);
         if (Number.isSafeInteger(completed.readRowCount)) details.push(`读取 ${formatInteger(completed.readRowCount)} 行原始数据`);
       }
+      const correctedRows = records.reduce((sum, record) => sum + (Number(record.correctedRowCount) || 0), 0);
       if (detailRecords.length > 0) {
         const prefix = systemRecords.length > 0 ? '明细' : '';
         details.push(`${prefix}新增 ${formatInteger(detailTotals.inserted)} 行`);
+        if (correctedRows > 0) details.push(`其中人工补录 ${formatInteger(correctedRows)} 行`);
         details.push(`${prefix}幂等跳过 ${formatInteger(detailTotals.skipped)} 行`);
         if (detailTotals.filtered > 0) {
           details.push(`${prefix}过滤异常 ${formatInteger(detailTotals.filtered)} 行`);
@@ -477,10 +479,87 @@
       });
     }
 
+    // v3.2.17 通道明细预检补录：列出对账字段为空或不合规的行，可修改参与计算的字段。
+    const CHANNEL_CORRECTION_LIMIT = 2000;
+    const channelCorrection = globalThis.__vccChannelCorrection;
+
+    function correctionCandidatesOf(sources) {
+      return sources.flatMap((source) => (
+        source.status === 'ready' && source.channelCorrectionCandidates
+          ? (source.channelCorrectionCandidates.candidates || []).map((candidate) => ({ source, candidate }))
+          : []
+      ));
+    }
+
+    function correctionRequiredFields(entry, values, targetMonth) {
+      const { candidate } = entry;
+      if (values['通道名称'] === candidate.fields['通道名称'] && values.billdate === candidate.fields.billdate) {
+        return candidate.requiredFields;
+      }
+      const isoBilldate = values.billdate === candidate.fields.billdate
+        ? candidate.normalizedBilldate
+        : channelCorrection.parseIsoDate(values.billdate);
+      const group = channelCorrection.amountGroupFor(values['通道名称'], isoBilldate, targetMonth);
+      return channelCorrection.requiredFieldsFor(values['通道名称'], group);
+    }
+
+    function renderCorrectionFields(entry, index, values, targetMonth) {
+      const problemFields = new Set((entry.candidate.problems || []).map((problem) => problem.field));
+      return correctionRequiredFields(entry, values, targetMonth).map((field) => `
+        <label class="vcc-fin-op-correction-field${problemFields.has(field) ? ' is-invalid' : ''}">
+          <span>${escapeHtml(field)}</span>
+          <input class="vcc-fin-op-input" type="text" autocomplete="off" maxlength="200"
+            data-correction-index="${index}" data-correction-field="${escapeHtml(field)}" value="${escapeHtml(values[field] || '')}">
+        </label>
+      `).join('');
+    }
+
+    function correctionSectionHtml(sources, targetMonth) {
+      const total = sources.reduce((sum, source) => sum + (source.status === 'ready' && source.channelCorrectionCandidates
+        ? Number(source.channelCorrectionCandidates.total) || 0 : 0), 0);
+      if (total === 0 || !channelCorrection) return { html: '', editable: false, total };
+      const truncated = total > CHANNEL_CORRECTION_LIMIT
+        || sources.some((source) => source.channelCorrectionCandidates && source.channelCorrectionCandidates.truncated);
+      const intro = `
+        <p class="vcc-fin-op-correction-title">需要确认的通道明细行（${formatInteger(total)} 行）</p>
+        <p class="vcc-fin-op-correction-hint">这些行的对账字段为空或格式不合规。不修改的行按异常过滤、不参与计算；修改后的行按新值导入，原值与新值记入导入记录的【导出明细】。</p>`;
+      if (truncated) {
+        return {
+          html: `<section class="vcc-fin-op-correction-section">${intro}
+            <p class="vcc-fin-op-correction-hint">超过单次补录上限 ${formatInteger(CHANNEL_CORRECTION_LIMIT)} 行，请在原表中修正后重新导入；本次继续导入时这些行按异常过滤。</p>
+          </section>`,
+          editable: false,
+          total
+        };
+      }
+      const entries = correctionCandidatesOf(sources);
+      const rows = entries.map((entry, index) => `
+        <div class="vcc-fin-op-correction-row">
+          <div class="vcc-fin-op-correction-meta">
+            <strong>${escapeHtml(entry.source.fileName)} / ${escapeHtml(entry.source.sheetName)} 第 ${entry.candidate.sourceRow} 行</strong>
+            <span>渠道订单号 ${escapeHtml(entry.candidate.idempotencyKey)}</span>
+            <span>${(entry.candidate.problems || []).map((problem) => escapeHtml(problem.message)).join('；')}</span>
+          </div>
+          <div class="vcc-fin-op-correction-fields" data-correction-fields="${index}">
+            ${renderCorrectionFields(entry, index, { ...entry.candidate.fields }, targetMonth)}
+          </div>
+        </div>
+      `).join('');
+      return {
+        html: `<section class="vcc-fin-op-correction-section">${intro}<div class="vcc-fin-op-correction-list">${rows}</div></section>`,
+        editable: true,
+        total
+      };
+    }
+
     function confirmImportPlan(plan) {
       return new Promise((resolve) => {
         let result = null;
         const sources = plan.sources || [];
+        const targetMonth = plan.targetMonth || '';
+        const correctionEntries = correctionCandidatesOf(sources);
+        const correctionValues = correctionEntries.map((entry) => ({ ...entry.candidate.fields }));
+        const correctionSection = correctionSectionHtml(sources, targetMonth);
         const statusText = { ready: '可导入', empty: '空白，自动跳过', unrecognized: '无法识别，需明确排除', invalid: '结构错误，不能导入' };
         const rows = sources.map((source, index) => `
         <div class="vcc-fin-op-file-row">
@@ -503,6 +582,7 @@
           onClose: () => resolve(result), bodyHtml: `
           <p>${plan.physicalFiles.length} 个文件，${sources.length} 张 Sheet；隐藏业务 Sheet 也会导入。</p>
           <div class="vcc-fin-op-file-list">${rows}</div>
+          ${correctionSection.html}
           <p class="vcc-fin-op-field-error" data-role="error" hidden></p>
           <div class="dialog-actions right">
             <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
@@ -510,6 +590,50 @@
           </div>` });
         if (!modal) return null;
         const error = modal.dialog.querySelector('[data-role="error"]');
+        if (correctionSection.editable) {
+          modal.dialog.addEventListener('input', (event) => {
+            const input = event.target;
+            if (!input || !input.dataset || input.dataset.correctionIndex === undefined) return;
+            correctionValues[Number(input.dataset.correctionIndex)][input.dataset.correctionField] = input.value;
+          });
+          // 改了通道名称或 billdate 后，本行需要填写的币种/金额字段随之切换。
+          modal.dialog.addEventListener('change', (event) => {
+            const input = event.target;
+            if (!input || !input.dataset || input.dataset.correctionIndex === undefined) return;
+            if (!['通道名称', 'billdate'].includes(input.dataset.correctionField)) return;
+            const index = Number(input.dataset.correctionIndex);
+            const container = modal.dialog.querySelector(`[data-correction-fields="${index}"]`);
+            if (container) container.innerHTML = renderCorrectionFields(correctionEntries[index], index, correctionValues[index], targetMonth);
+          });
+        }
+        const collectCorrections = () => {
+          if (!correctionSection.editable) return { corrections: [], message: '' };
+          const corrections = [];
+          for (let index = 0; index < correctionEntries.length; index += 1) {
+            const entry = correctionEntries[index];
+            const values = correctionValues[index];
+            const changed = {};
+            for (const field of channelCorrection.CORRECTABLE_FIELDS) {
+              if (String(values[field] ?? '').trim() !== String(entry.candidate.fields[field] ?? '').trim()) {
+                changed[field] = String(values[field] ?? '').trim();
+              }
+            }
+            if (Object.keys(changed).length === 0) continue;
+            const problemFields = new Set((entry.candidate.problems || []).map((problem) => problem.field));
+            for (const field of correctionRequiredFields(entry, values, targetMonth)) {
+              if (!Object.hasOwn(changed, field) && !problemFields.has(field)) continue;
+              const fieldError = channelCorrection.validateField(field, values[field]);
+              if (fieldError) {
+                return {
+                  corrections: [],
+                  message: `${entry.source.sheetName} 第 ${entry.candidate.sourceRow} 行：${fieldError}`
+                };
+              }
+            }
+            corrections.push({ sourceId: entry.source.sourceId, sourceRow: entry.candidate.sourceRow, fields: changed });
+          }
+          return { corrections, message: '' };
+        };
         modal.dialog.querySelector('[data-action="cancel"]').addEventListener('click', modal.close);
         modal.dialog.querySelector('[data-action="confirm"]').addEventListener('click', () => {
           const subjectBySourceId = {}, excludedSheetIds = [];
@@ -526,8 +650,15 @@
             }
           });
           if (!sources.some((source) => source.status === 'ready')) message ||= '没有可导入的业务 Sheet';
+          const correctionResult = collectCorrections();
+          message ||= correctionResult.message;
           if (message) { error.textContent = message; error.hidden = false; return; }
-          result = { planId: plan.planId, subjectBySourceId, excludedSheetIds };
+          result = {
+            planId: plan.planId,
+            subjectBySourceId,
+            excludedSheetIds,
+            channelCorrections: correctionResult.corrections
+          };
           modal.close({ status: 'submitted', value: result });
         });
       });
@@ -550,7 +681,7 @@
           const progressStatus = buildImportProgressStatus(progress, state.cancelRequested);
           if (progressStatus) setStatus(progressStatus.message, progressStatus.tone);
         });
-        const picked = await api.pickFiles();
+        const picked = await api.pickFiles({ targetMonth: month });
         if (!live(actionGeneration)) { needsRefresh = true; return null; }
         if (!picked || picked.status === 'cancelled') {
           setStatus('已取消导入', 'info');
@@ -3534,16 +3665,19 @@
       return createArchivedMonthPickerDialog({
         months: PREVIEW_ARCHIVED_MONTHS,
         actionLabel: '解归档',
-        previewSelection: async (entry) => ({
+        previewSelection: async (entry) => describeUnarchivePreview(entry, {
           status: 'success',
-          canUnarchive: entry.targetMonth === '2026-06',
+          canUnarchive: true,
           dependentMonths: entry.targetMonth === '2026-06' ? [] : ['2026-06'],
-          message: entry.targetMonth === '2026-06'
-            ? '2026-06 可解归档；基础结果和调整记录将保留。'
-            : '该月之后仍存在已归档月份，请先从最新月份开始解归档。',
+          cascade: entry.targetMonth === '2026-06' ? null : {
+            months: ['2026-06'],
+            runs: [{ runId: 2, targetMonth: '2026-06', status: 'archived', adjustmentCount: 1 }],
+            adjustmentCount: 1
+          },
           previewToken: 'preview-token',
           taskGeneration: 0
         }),
+        previewConfirmation: cascadeConfirmationLabel,
         executeSelection: async (entry) => ({ status: 'success', targetMonth: entry.targetMonth })
       });
     }
@@ -3711,15 +3845,12 @@
           runningText: '正在解归档…',
           executeSelection: () => new Promise(() => {})
         });
+        // v3.2.17：尾月解归档不再需要版本确认勾选，预览通过后按钮直接可用。
         return waitForArchivedPickerPreview(modal, {
           expectedYear: '2026',
           expectedMonth: '2026-06',
-          expectedConfirmDisabled: true
+          expectedConfirmDisabled: false
         }).then(() => {
-          const confirmation = modal && modal.dialog.querySelector('[data-field="archive-picker-confirm"]');
-          if (!confirmation) throw new Error('解归档确认警示缺失');
-          confirmation.checked = true;
-          confirmation.dispatchEvent(new Event('change', { bubbles: true }));
           const button = modal && modal.dialog.querySelector('[data-action="archive-picker-confirm"]');
           if (!button || button.disabled) throw new Error('执行中预览无法启动解归档');
           button.click();

@@ -13,6 +13,7 @@ const { freezeHandoffV2, buildMemberFiles, membersDigest, assertArtifactMember, 
 const { createArchiveRepository } = require('../database/archive-repository');
 const {
   DETAIL_SOURCE_TYPES,
+  channelCorrectionSheetKey,
   importDetailGroup,
   throwIfCancelled
 } = require('./detail-importer');
@@ -157,10 +158,32 @@ function statVerifiedArchiveFiles(files, archiveHandoffFiles) {
   }));
 }
 
+// 预检补录按 物理文件 + Sheet 序号 + 行号 定位（与存档成员清单中的稳定标识一致）。
+function indexChannelCorrections(channelCorrections) {
+  if (!Array.isArray(channelCorrections)) throw new Error('通道明细补录参数格式无效');
+  const index = new Map();
+  for (const correction of channelCorrections) {
+    const key = channelCorrectionSheetKey(correction.physicalFileId, correction.sheetIndex);
+    if (!index.has(key)) index.set(key, new Map());
+    const rows = index.get(key);
+    const sourceRow = Number(correction.sourceRow);
+    if (!Number.isSafeInteger(sourceRow) || sourceRow < 1 || rows.has(sourceRow)) {
+      throw new Error('通道明细补录行号无效或重复');
+    }
+    rows.set(sourceRow, Object.freeze({
+      idempotencyKey: String(correction.idempotencyKey),
+      original: Object.freeze({ ...correction.original }),
+      corrected: Object.freeze({ ...correction.corrected })
+    }));
+  }
+  return index;
+}
+
 function detailRecordResult(record, db) {
   const sourceFiles = repository.listImportSources(db, record.recordId);
   return {
     ...record,
+    correctedRowCount: repository.countCorrectedRows(db, record.recordId),
     sourceLabel: SOURCE_LABELS[record.sourceType],
     anomalyCount: Number(record.anomalyCount) || 0,
     archiveState: repository.refreshImportRecordArchiveState(db, record.recordId),
@@ -201,9 +224,12 @@ async function importFiles({
   onProgress,
   shouldCancel,
   batchId,
-  archiveHandoffFiles
+  archiveHandoffFiles,
+  channelCorrections = [],
+  provenance = null
 }) {
   const normalizedBatchId = normalizeImportBatchId(batchId);
+  const correctionIndex = indexChannelCorrections(channelCorrections);
   const normalizedMonth = normalizeYearMonth(targetMonth);
   if (!normalizedMonth) throw new Error(`导入账期格式无效：${targetMonth}`);
   if (!Array.isArray(files) || files.length === 0) throw new Error('请选择至少一个原表文件');
@@ -311,7 +337,9 @@ async function importFiles({
           files: sourceFiles,
           recordId: recordIds.get(sourceType),
           onProgress: reportProgress,
-          shouldCancel
+          shouldCancel,
+          corrections: sourceType === SOURCE_TYPES.CHANNEL ? correctionIndex : null,
+          provenance
         });
         records.push(detailRecordResult(record, db));
       } else if (sourceType === SOURCE_TYPES.SYSTEM_OP) {

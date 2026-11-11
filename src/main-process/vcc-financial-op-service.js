@@ -524,8 +524,9 @@ function createVccFinancialOpService({
   }
 
   // sourceStructures：设置 → 模板文件当前启用的用户结构 { [sourceType]: { headers, versionLabel } }，冻结进导入计划。
-  async function inspectSelectedFiles(filePaths, onProgress, sourceStructures = null) {
-    return runWorker('inspect-plan', { filePaths, sourceStructures }, onProgress);
+  // targetMonth：导入账期，用于预检阶段找出可补录的通道明细行（v3.2.17）。
+  async function inspectSelectedFiles(filePaths, onProgress, sourceStructures = null, targetMonth = null) {
+    return runWorker('inspect-plan', { filePaths, sourceStructures, targetMonth }, onProgress);
   }
 
   async function validateImportPlan(plan, onProgress) {
@@ -547,6 +548,7 @@ function createVccFinancialOpService({
     const targetMonth = normalizeYearMonth(payload && payload.targetMonth);
     return runWorker('import', {
       ...payload,
+      provenance: { appVersion, buildSha },
       batchId: importBatchId,
       batchContext,
       archiveHandoffFiles: frozenArchiveHandoffFiles

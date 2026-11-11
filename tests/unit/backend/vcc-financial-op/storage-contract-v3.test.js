@@ -143,3 +143,27 @@ test('generic 初始化拒绝未迁移 v2；v3 缺 guard 时不能靠 IF NOT EXI
   assert.throws(() => ensureVccFinancialOpTablesSupport(db), { code: 'vcc-storage-contract-mismatch' });
   assert.equal(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'vcc_storage_contract_v3_guard_vcc_fin_op_runs_insert'").get(), undefined);
 });
+
+test('v3.2.17 升级：v3 库缺少通道补录记录表时先建表与写保护再做合同断言', () => {
+  const { DatabaseSync: Database } = require('node:sqlite');
+  const migrations = require('../../../../src/backend/vcc-financial-op-db/migrations');
+  const contract = require('../../../../src/backend/vcc-financial-op-db/storage-contract');
+  const db = new Database(':memory:');
+  try {
+    db.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE app_settings (setting_key TEXT PRIMARY KEY, setting_value TEXT, updated_at TEXT);
+    `);
+    migrations.ensureVccFinancialOpTablesSupport(db, { autoUpgradeEmptyV1: true });
+    db.exec('DROP TABLE vcc_fin_op_channel_corrections');
+    assert.throws(() => contract.assertVccStorageContract(db), /受保护表集合不一致/);
+    migrations.ensureVccFinancialOpTablesSupport(db);
+    assert.equal(contract.assertVccStorageContract(db).tableCount, 24);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS n FROM sqlite_master
+      WHERE type = 'trigger' AND tbl_name = 'vcc_fin_op_channel_corrections'
+    `).get().n, 3);
+  } finally {
+    db.close();
+  }
+});

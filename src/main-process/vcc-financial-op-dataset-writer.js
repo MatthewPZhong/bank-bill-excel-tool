@@ -19,6 +19,11 @@ const {
   pendingCanonicalValues
 } = require('../backend/vcc-financial-op/row-mapper');
 const { assertMappedLineage } = require('../backend/vcc-financial-op/mapped-lineage-contract');
+const {
+  loadChannelCorrectionIndex,
+  channelCorrectionsFor,
+  applyChannelCorrections
+} = require('../backend/vcc-financial-op/channel-correction-lineage');
 const { streamStoredDetailRows, openWorkbookSheets } = require('../backend/vcc-financial-op/workbook-reader');
 const { openRichWorkbook } = require('../backend/xlsx/rich-workbook');
 const { hashSourceFile } = require('../backend/vcc-financial-op/source-lineage');
@@ -797,6 +802,9 @@ async function emitReconstructedDetailRows(db, scope, archiveSources, emit) {
     }));
     let seenCount = 0;
     const member = storedSourceMember(db, sourceId);
+    const correctionIndex = scope.sourceType === SOURCE_TYPES.CHANNEL
+      ? loadChannelCorrectionIndex(db, sourceId)
+      : new Map();
     const workbook = await openWorkbookSheets(source.filePath);
     try {
     for (const expectedSheet of expectedSheets) {
@@ -813,10 +821,21 @@ async function emitReconstructedDetailRows(db, scope, archiveSources, emit) {
             `导入来源 ${sourceId} 缺少 ${input.sheetName} 第 ${expected.source_row} 行`
           );
         }
+        // 预检补录行：原件取值先还原为导入时的补录值再比对血缘，导出显示补录后的值。
+        const sourceValues = applyChannelCorrections(
+          input.values,
+          channelCorrectionsFor(correctionIndex, input.sheetName, input.rowR),
+          (field) => {
+            throw exportError(
+              'archive-row-integrity-failure',
+              `导入来源 ${sourceId} 的 ${input.sheetName} 第 ${input.rowR} 行“${field}”与补录原值不一致`
+            );
+          }
+        );
         const mapped = mapDetailRow({
           sourceType: scope.sourceType,
           values: scope.sourceType === SOURCE_TYPES.PENDING
-            ? pendingCanonicalValues(input.values, expected.raw_contract_version) : input.values,
+            ? pendingCanonicalValues(sourceValues, expected.raw_contract_version) : sourceValues,
           targetMonth: scope.targetMonth,
           assignedSubject: expected.subject,
           sourceFile: input.sourceFile,

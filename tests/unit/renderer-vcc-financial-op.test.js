@@ -276,7 +276,9 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     const handleImportStart = moduleRenderer.indexOf('async function handleImport()');
     const handleImportEnd = moduleRenderer.indexOf('async function handleCancelImport()', handleImportStart);
     const handleImportSource = moduleRenderer.slice(handleImportStart, handleImportEnd);
-    assert.ok(handleImportSource.indexOf('api.onImportProgress') < handleImportSource.indexOf('api.pickFiles()'), '预检之前必须订阅进度');
+    const pickIndex = handleImportSource.indexOf('api.pickFiles({ targetMonth: month })');
+    assert.ok(pickIndex > 0, '选文件时传入导入账期，供预检找出可补录的通道明细行');
+    assert.ok(handleImportSource.indexOf('api.onImportProgress') < pickIndex, '预检之前必须订阅进度');
     assert.match(
       handleImportSource,
       /subscribeImportProgress\(\(progress\) => \{\s*const progressStatus = buildImportProgressStatus\(progress, state\.cancelRequested\);\s*if \(progressStatus\) setStatus\(progressStatus\.message, progressStatus\.tone\);\s*\}\)/
@@ -323,7 +325,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       assert.equal(main.includes(removedChannel), false, `main 不应保留 ${removedChannel}`);
     }
     assert.match(main, /await vccFinancialOpService\.terminate\(\)/);
-    assert.match(vccService, /return runWorker\('inspect-plan', \{ filePaths, sourceStructures \}/);
+    assert.match(vccService, /return runWorker\('inspect-plan', \{ filePaths, sourceStructures, targetMonth \}/);
     assert.match(vccService, /return runResultWriteWorker\(VCC_MUTATION_OPERATIONS\.DELETE_DATA_TARGET/);
     for (const serviceCall of [
       'listArchivedResultMonths', 'previewUnarchive', 'listImportMonths',

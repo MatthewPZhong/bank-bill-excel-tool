@@ -976,6 +976,9 @@ test('级联解归档：须明确确认；目标月恢复待确认，后续月�
     ['2026-08', 'USD', '1', '测试'],
     ['2026-09', 'USD', '1', '测试']
   ]);
+  assert.deepEqual(evidence.deletedArchives.map((row) => [row.targetMonth, row.subject, row.balancesJson]), [
+    ['2026-09', 'PPHK', '{}']
+  ], '被删的已归档余额快照写入审计');
   assert.equal(evidence.minimumSafeAppVersion, '3.2.17');
   assert.equal(evidence.expectedTotalChanges, 8 + 1 + 2 + 2 + 2 + 2 + 2 + 2 + 1);
 });

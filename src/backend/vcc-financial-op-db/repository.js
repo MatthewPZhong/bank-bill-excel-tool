@@ -104,6 +104,57 @@ function ensureImportStagingScratch(db) {
   return true;
 }
 
+// v3.2.17 通道明细补录：每个被改字段一行（原值、新值、时间、程序版本），与导入同事务写入。
+function insertChannelCorrections(db, { recordId, targetMonth, corrections, provenance = null }) {
+  const insert = db.prepare(`
+    INSERT INTO vcc_fin_op_channel_corrections (
+      import_record_id, import_source_id, target_month, sheet_name, source_row,
+      idempotency_key, field_name, original_value, corrected_value,
+      created_app_version, created_build_sha
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  let inserted = 0;
+  for (const correction of corrections) {
+    for (const [field, correctedValue] of Object.entries(correction.corrected)) {
+      insert.run(
+        Number(recordId),
+        Number(correction.importSourceId),
+        targetMonth,
+        String(correction.sheetName),
+        Number(correction.sourceRow),
+        String(correction.idempotencyKey),
+        field,
+        String(correction.original[field] ?? ''),
+        String(correctedValue),
+        provenance && provenance.appVersion != null ? String(provenance.appVersion) : null,
+        provenance && provenance.buildSha != null ? String(provenance.buildSha) : null
+      );
+      inserted += 1;
+    }
+  }
+  return inserted;
+}
+
+function countCorrectedRows(db, recordId) {
+  const exists = db.prepare(`
+    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'vcc_fin_op_channel_corrections'
+  `).get();
+  if (!exists) return 0;
+  // 只统计补录后成为本次有效数据的行；幂等跳过或冲突的补录行仍在【导出明细】中可见。
+  return Number(db.prepare(`
+    SELECT COUNT(*) AS row_count FROM (
+      SELECT DISTINCT correction.import_source_id, correction.sheet_name, correction.source_row
+      FROM vcc_fin_op_channel_corrections AS correction
+      JOIN vcc_fin_op_effective_rows AS effective
+        ON effective.import_source_id = correction.import_source_id
+       AND effective.sheet_name = correction.sheet_name
+       AND effective.source_row = correction.source_row
+       AND effective.import_record_id = correction.import_record_id
+      WHERE correction.import_record_id = ?
+    )
+  `).get(Number(recordId)).row_count) || 0;
+}
+
 function createImportBatch(db, { id, targetMonth, fileCount }) {
   db.prepare(`
     INSERT INTO vcc_fin_op_import_batches (id, target_month, file_count)
@@ -535,6 +586,10 @@ function compactImportAnomalyCount(db, recordId) {
 }
 
 function countExportableImportAnomalies(db, recordId) {
+  return countImportAnomalyRows(db, recordId) + countChannelCorrectionAuditRows(db, recordId);
+}
+
+function countImportAnomalyRows(db, recordId) {
   const normalizedRecordId = Number(recordId);
   const compactCount = compactImportAnomalyCount(db, normalizedRecordId);
   if (compactCount > 0) return compactCount;
@@ -601,13 +656,24 @@ function countExportableImportAnomaliesByMonth(db, yearMonth) {
     count: Number(row.count) || 0,
     fileFailureCount: Number(row.file_failure_count) || 0
   }]));
+  const corrections = new Map();
+  if (db.prepare(`
+    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'vcc_fin_op_channel_corrections'
+  `).get()) {
+    for (const row of db.prepare(`
+      SELECT import_record_id AS record_id, COUNT(*) AS count
+      FROM vcc_fin_op_channel_corrections WHERE target_month = ?
+      GROUP BY import_record_id
+    `).all(yearMonth)) corrections.set(Number(row.record_id), Number(row.count) || 0);
+  }
   for (const record of db.prepare(`
     SELECT id, status FROM vcc_fin_op_import_records WHERE target_month = ?
   `).all(yearMonth)) {
     const recordId = Number(record.id);
     const compactCount = compact.get(recordId) || 0;
+    const correctionCount = corrections.get(recordId) || 0;
     if (compactCount > 0) {
-      counts.set(recordId, compactCount);
+      counts.set(recordId, compactCount + correctionCount);
       continue;
     }
     const errors = legacyErrors.get(recordId) || { count: 0, fileFailureCount: 0 };
@@ -615,12 +681,49 @@ function countExportableImportAnomaliesByMonth(db, yearMonth) {
       && errors.fileFailureCount === 0
       ? 1
       : 0;
-    counts.set(recordId, (legacyRows.get(recordId) || 0) + errors.count + syntheticFileFailure);
+    counts.set(recordId, (legacyRows.get(recordId) || 0) + errors.count + syntheticFileFailure + correctionCount);
   }
   return counts;
 }
 
+function* iterateChannelCorrectionAuditRows(db, recordId) {
+  const exists = db.prepare(`
+    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'vcc_fin_op_channel_corrections'
+  `).get();
+  if (!exists) return;
+  yield* db.prepare(`
+    SELECT correction.idempotency_key,
+           COALESCE(source.source_file_name, '') AS source_file_name,
+           correction.source_row,
+           'channel_correction' AS category,
+           json_array(correction.field_name) AS abnormal_fields_json,
+           '[]' AS diff_fields_json,
+           '原值 ' || CASE WHEN correction.original_value = '' THEN '（空）' ELSE correction.original_value END
+             || ' → 新值 ' || correction.corrected_value AS description
+    FROM vcc_fin_op_channel_corrections AS correction
+    LEFT JOIN vcc_fin_op_import_sources AS source ON source.id = correction.import_source_id
+    WHERE correction.import_record_id = ?
+    ORDER BY correction.id
+  `).iterate(Number(recordId));
+}
+
+function countChannelCorrectionAuditRows(db, recordId) {
+  const exists = db.prepare(`
+    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'vcc_fin_op_channel_corrections'
+  `).get();
+  if (!exists) return 0;
+  return Number(db.prepare(`
+    SELECT COUNT(*) AS row_count FROM vcc_fin_op_channel_corrections WHERE import_record_id = ?
+  `).get(Number(recordId)).row_count) || 0;
+}
+
+// 导出明细：真正异常之后追加“人工补录”记录（v3.2.17，每个被修改字段一行）。
 function* iterateExportableImportAnomalies(db, recordId) {
+  yield* iterateImportAnomalyRows(db, recordId);
+  yield* iterateChannelCorrectionAuditRows(db, recordId);
+}
+
+function* iterateImportAnomalyRows(db, recordId) {
   const normalizedRecordId = Number(recordId);
   if (compactImportAnomalyCount(db, normalizedRecordId) > 0) {
     yield* db.prepare(`
@@ -1006,6 +1109,8 @@ module.exports = {
   IMPORT_ROW_INSERT_SQL,
   STAGING_ROW_INSERT_SQL,
   ensureImportStagingScratch,
+  insertChannelCorrections,
+  countCorrectedRows,
   createImportBatch,
   finishImportBatch,
   createImportRecord,

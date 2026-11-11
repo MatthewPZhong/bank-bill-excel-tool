@@ -21,6 +21,7 @@ const {
   assertEmptyVccStorageForUpgrade,
   assertVccStorageContract,
   ensureVccStorageSideTables,
+  ensureVccChannelCorrectionsTable,
   getVccStorageContractVersion,
   installVccStorageWriteGuards,
   registerVccStorageWriteCapability,
@@ -731,7 +732,11 @@ function ensureVccFinancialOpTablesSupport(db, options = {}) {
       code: 'vcc-storage-upgrade-required'
     });
   }
-  if (storageContractVersion === 3) assertVccStorageContract(db);
+  if (storageContractVersion === 3) {
+    // v3.2.17 新增的补录记录表须先建好（含写保护），再做表集合严格一致的合同断言。
+    ensureVccChannelCorrectionsTable(db);
+    assertVccStorageContract(db);
+  }
   registerVccStorageWriteCapability(db);
   const shouldAutoUpgradeEmptyV1 = options.autoUpgradeEmptyV1 === true
     && hasSettings

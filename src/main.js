@@ -17568,8 +17568,10 @@ function registerNewAccountHandlers() {
 
   const vccImportPlans = new Map();
   const vccImportPlanOwners = new WeakSet();
-  const { publicImportPlan, resolveImportPlan, planError: vccPlanError } = require('./backend/vcc-financial-op/workbook-import-plan');
-  ipcMain.handle('vccFinancialOp:import:pick-files', async (event) => {
+  const {
+    publicImportPlan, resolveImportPlan, collectChannelCorrections, planError: vccPlanError
+  } = require('./backend/vcc-financial-op/workbook-import-plan');
+  ipcMain.handle('vccFinancialOp:import:pick-files', async (event, payload = {}) => {
     const owner = event.sender;
     const selectionToken = {};
     vccImportPlans.set(owner.id, selectionToken);
@@ -17588,9 +17590,10 @@ function registerNewAccountHandlers() {
     }
     try {
       const sourceStructures = await resolveVccSourceStructures(getTemplateResourceService());
+      const targetMonth = payload && typeof payload.targetMonth === 'string' ? payload.targetMonth : null;
       const plan = await getVccFinancialOpService().inspectSelectedFiles(choice.filePaths, (progress) => {
         if (!owner.isDestroyed()) owner.send('vccFinancialOp:import:progress', progress);
-      }, sourceStructures);
+      }, sourceStructures, targetMonth);
       if (owner.isDestroyed() || vccImportPlans.get(owner.id) !== selectionToken) throw vccPlanError('vcc-import-plan-stale', '文件选择已更新，请重新预检');
       vccImportPlans.set(owner.id, plan);
       return { status: 'success', plan: publicImportPlan(plan) };
@@ -17619,6 +17622,7 @@ function registerNewAccountHandlers() {
       return {
         proceed: true,
         fileDescriptors,
+        channelCorrections: collectChannelCorrections(inspectedFiles),
         filePlan: {
           version: 1,
           allocation: 'eager',
@@ -17675,7 +17679,11 @@ function registerNewAccountHandlers() {
             members: metadata.vccSourceMembers });
         }
         const workerHandoffFiles = { version: 2, taskRunId: batchContext.taskRunId, files: frozenFiles };
-        const businessPayload = { targetMonth: payload.targetMonth, files: frozenFiles };
+        const businessPayload = {
+          targetMonth: payload.targetMonth,
+          files: frozenFiles,
+          channelCorrections: prepared.channelCorrections || []
+        };
         const result = await service.importSelectedFiles(businessPayload, (progress) => {
           if (event && event.sender && !event.sender.isDestroyed()) {
             event.sender.send('vccFinancialOp:import:progress', progress);

@@ -636,7 +636,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
   },
   // v3.1.6：VCC财务OP校验（明细幂等审计、逐币种计算、系统OP比较与归档）。
   vccFinancialOp: {
-    pickFiles: () => ipcRenderer.invoke('vccFinancialOp:import:pick-files'),
+    pickFiles: (payload) => ipcRenderer.invoke('vccFinancialOp:import:pick-files', payload),
     importFiles: (payload) => ipcRenderer.invoke('vccFinancialOp:import:apply', payload),
     cancelTask: () => ipcRenderer.invoke('vccFinancialOp:task:cancel'),
     preflightRun: (payload) => ipcRenderer.invoke('vccFinancialOp:run:preflight', payload),

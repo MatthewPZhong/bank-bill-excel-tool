@@ -74,7 +74,11 @@ async function run() {
   const inspectionOptions = { shouldCancel: () => cancelRequested,
     onProgress: (progress) => parentPort.postMessage({ type: 'progress', progress }) };
   if (action === 'inspect-plan') {
-    return inspectWorkbookImportPlan(payload.filePaths, { ...inspectionOptions, sourceStructures: payload.sourceStructures || null });
+    return inspectWorkbookImportPlan(payload.filePaths, {
+      ...inspectionOptions,
+      sourceStructures: payload.sourceStructures || null,
+      targetMonth: payload.targetMonth || null
+    });
   }
   if (action === 'revalidate-plan') { await revalidateImportPlan(payload.plan, inspectionOptions); return { valid: true }; }
   const db = openDb(workerData.dbPath);

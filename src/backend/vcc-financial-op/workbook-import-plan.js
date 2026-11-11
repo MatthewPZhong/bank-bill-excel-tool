@@ -106,7 +106,9 @@ function inputFileIdentity(filePath) {
   const stat = fs.statSync(filePath, { bigint: true });
   return Object.fromEntries(['dev', 'ino', 'size', 'mtimeNs', 'ctimeNs'].map((key) => [key, String(stat[key])]));
 }
-async function inspectWorkbook(filePath, { physicalFileId = randomUUID(), onProgress, shouldCancel, sourceStructures = null } = {}) {
+async function inspectWorkbook(filePath, {
+  physicalFileId = randomUUID(), onProgress, shouldCancel, sourceStructures = null, targetMonth = null
+} = {}) {
   const rules = headerRulesFor(sourceStructures);
   const fileIdentity = inputFileIdentity(filePath);
   const before = await hashSourceFile(filePath);
@@ -154,12 +156,63 @@ async function inspectWorkbook(filePath, { physicalFileId = randomUUID(), onProg
         requiresSubject: firstHeader?.sourceType === SOURCE_TYPES.CHANNEL, meaningfulRows, diagnostics });
     }
   } finally { await workbook.close(); }
+  if (targetMonth) {
+    await detectChannelCorrections(before, sources, { targetMonth, onProgress, shouldCancel });
+  }
   const after = await hashSourceFile(before.filePath);
   if (after.sha256 !== before.sha256 || after.sizeBytes !== before.sizeBytes
       || JSON.stringify(inputFileIdentity(filePath)) !== JSON.stringify(fileIdentity)) {
     throw planError('vcc-import-plan-stale', `${before.fileName}：预检期间文件发生变化，请重新选择`);
   }
   return { ...before, fileIdentity, physicalFileId, sheetCount: sources.length, sources };
+}
+
+// v3.2.17 通道明细补录：用正式导入同一读取与映射链路逐行判定，列出业务键与账单日期有效、
+// 仅参与计算的字段为空或不合规的行，供预检弹窗补录。每个 Sheet 最多保留 MAX 条明细。
+const CHANNEL_CORRECTION_CANDIDATE_LIMIT = 2000;
+
+async function detectChannelCorrections(file, sources, { targetMonth, onProgress, shouldCancel }) {
+  const channelSources = sources.filter((source) => (
+    source.sourceType === SOURCE_TYPES.CHANNEL && source.status === 'ready'
+  ));
+  if (channelSources.length === 0) return;
+  const { openWorkbookSheets, streamDetailRows } = require('./workbook-reader');
+  const { inspectChannelCorrectionCandidate } = require('./row-mapper');
+  const workbook = await openWorkbookSheets(file.filePath);
+  try {
+    for (const source of channelSources) {
+      const candidates = [];
+      let total = 0;
+      let scanned = 0;
+      await streamDetailRows(file.filePath, SOURCE_TYPES.CHANNEL, {
+        workbook,
+        sheetName: source.sheetName,
+        sheetIndex: source.sheetIndex,
+        headerRow: source.headerRow,
+        sourceHeaders: source.sourceHeaders,
+        onDataRow: ({ rowR, values, keyCellType }) => {
+          if (shouldCancel && shouldCancel()) throw planError('vcc-import-cancelled', '已取消预检');
+          scanned += 1;
+          if (scanned % 10000 === 0) {
+            onProgress?.({ phase: 'preflight', fileName: file.fileName, sheetName: source.sheetName, rows: scanned });
+          }
+          const candidate = inspectChannelCorrectionCandidate({
+            values, targetMonth, keyCellType, sourceRow: rowR
+          });
+          if (!candidate) return;
+          total += 1;
+          if (candidates.length < CHANNEL_CORRECTION_CANDIDATE_LIMIT) candidates.push(candidate);
+        }
+      });
+      source.channelCorrectionCandidates = Object.freeze({
+        total,
+        truncated: total > candidates.length,
+        candidates: Object.freeze(candidates)
+      });
+    }
+  } finally {
+    await workbook.close();
+  }
 }
 
 async function inspectWorkbookImportPlan(filePaths, options = {}) {
@@ -172,18 +225,90 @@ async function inspectWorkbookImportPlan(filePaths, options = {}) {
   }
   // 本次预检所用的当前结构冻结在计划中：重新预检沿用它，预检后切换模板版本不影响本次导入。
   return { planId: randomUUID(), sourceStructures: options.sourceStructures || null,
+    targetMonth: options.targetMonth || null,
     physicalFiles: physicalFiles.map(({ sources: _sources, ...file }) => file),
     sources: physicalFiles.flatMap((file) => file.sources) };
 }
 
 function publicImportPlan(plan) {
-  return { planId: plan.planId,
+  return { planId: plan.planId, targetMonth: plan.targetMonth || null,
     physicalFiles: plan.physicalFiles.map(({ physicalFileId, fileName, sheetCount }) => ({ physicalFileId, fileName, sheetCount })),
     sources: plan.sources.map(({ entryPath: _entryPath, ...source }) => source) };
 }
 
+const MAX_CORRECTION_VALUE_LENGTH = 200;
+
+// 校验预检弹窗提交的通道明细补录：只能改预检列出的行与可改字段，改后须满足通道发生额计算规则。
+function resolveChannelCorrections(plan, request, readySourceIds) {
+  const { CHANNEL_CORRECTABLE_FIELDS, channelCorrectionProblems } = require('./row-mapper');
+  const editable = new Set(CHANNEL_CORRECTABLE_FIELDS);
+  const raw = request.channelCorrections === undefined ? [] : request.channelCorrections;
+  if (!Array.isArray(raw)) throw planError('vcc-import-plan-invalid', '通道明细补录参数格式无效');
+  const sources = new Map(plan.sources.map((source) => [source.sourceId, source]));
+  const bySource = new Map();
+  const seen = new Set();
+  const errors = [];
+  for (const item of raw) {
+    const source = item && sources.get(item.sourceId);
+    if (!source || !readySourceIds.has(source.sourceId) || source.sourceType !== SOURCE_TYPES.CHANNEL) {
+      throw planError('vcc-import-plan-invalid', '补录只能针对当前计划中的通道明细 Sheet');
+    }
+    const sourceRow = Number(item.sourceRow);
+    const candidate = (source.channelCorrectionCandidates?.candidates || [])
+      .find((entry) => entry.sourceRow === sourceRow);
+    if (!candidate) throw planError('vcc-import-plan-invalid', `${source.sheetName} 第 ${item.sourceRow} 行不在待补录清单中`);
+    const identity = `${source.sourceId}\u0000${sourceRow}`;
+    if (seen.has(identity)) throw planError('vcc-import-plan-invalid', `${source.sheetName} 第 ${sourceRow} 行重复提交`);
+    seen.add(identity);
+    const fields = item.fields;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) {
+      throw planError('vcc-import-plan-invalid', '通道明细补录字段格式无效');
+    }
+    const corrected = {};
+    for (const [field, value] of Object.entries(fields)) {
+      if (!editable.has(field)) throw planError('vcc-import-plan-invalid', `字段“${field}”不允许补录`);
+      if (typeof value !== 'string' || value.length > MAX_CORRECTION_VALUE_LENGTH) {
+        throw planError('vcc-import-plan-invalid', `字段“${field}”的补录值无效`);
+      }
+      const normalized = value.trim();
+      if (normalized !== candidate.fields[field]) corrected[field] = normalized;
+    }
+    if (Object.keys(corrected).length === 0) continue;
+    const merged = { ...candidate.fields, ...corrected };
+    const problems = channelCorrectionProblems((field) => merged[field], plan.targetMonth);
+    if (problems.length > 0) {
+      errors.push(`${source.fileName} / ${source.sheetName} 第 ${sourceRow} 行：${problems.map((problem) => problem.message).join('；')}`);
+      continue;
+    }
+    if (!bySource.has(source.sourceId)) bySource.set(source.sourceId, []);
+    bySource.get(source.sourceId).push(Object.freeze({
+      sourceRow,
+      idempotencyKey: candidate.idempotencyKey,
+      original: Object.freeze(Object.fromEntries(Object.keys(corrected).map((field) => [field, candidate.fields[field]]))),
+      corrected: Object.freeze(corrected)
+    }));
+  }
+  if (errors.length > 0) {
+    throw planError('vcc-channel-correction-invalid', '补录内容仍不合规，请修改后再导入', errors.slice(0, 50));
+  }
+  return bySource;
+}
+
+// 汇总已解析计划中各 Sheet 的补录，供导入 worker 按 物理文件 + Sheet 序号 + 行号 应用。
+function collectChannelCorrections(inspectedFiles) {
+  return Object.freeze((inspectedFiles || []).flatMap((file) => (file.sheets || [])
+    .flatMap((sheet) => (sheet.channelCorrections || []).map((correction) => Object.freeze({
+      physicalFileId: file.physicalFileId,
+      sheetIndex: sheet.sheetIndex,
+      ...correction
+    })))));
+}
+
 function resolveImportPlan(plan, request = {}) {
   if (!plan || request.planId !== plan.planId) throw planError('vcc-import-plan-stale', '导入计划已失效，请重新预检');
+  if (plan.targetMonth && request.targetMonth !== undefined && request.targetMonth !== plan.targetMonth) {
+    throw planError('vcc-import-plan-stale', '导入账期与预检账期不一致，请重新预检');
+  }
   const subjects = request.subjectBySourceId;
   if (!subjects || typeof subjects !== 'object' || Array.isArray(subjects) || !Array.isArray(request.excludedSheetIds)) {
     throw planError('vcc-import-plan-invalid', '主体和说明页排除参数格式无效');
@@ -215,9 +340,14 @@ function resolveImportPlan(plan, request = {}) {
       throw planError('vcc-sheet-subject-required', `${source.fileName} / ${source.sheetName}：请补充公司主体`);
     }
   }
+  const corrections = resolveChannelCorrections(plan, request, new Set(ready.map((source) => source.sourceId)));
   return plan.physicalFiles.map((file) => ({ ...file, sheets: ready
     .filter((source) => source.physicalFileId === file.physicalFileId)
-    .map((source) => ({ ...source, ...(source.requiresSubject ? { subject: subjects[source.sourceId].trim() } : {}) }))
+    .map(({ channelCorrectionCandidates: _candidates, ...source }) => ({
+      ...source,
+      ...(source.requiresSubject ? { subject: subjects[source.sourceId].trim() } : {}),
+      ...(corrections.has(source.sourceId) ? { channelCorrections: corrections.get(source.sourceId) } : {})
+    }))
   })).filter((file) => file.sheets.length);
 }
 
@@ -238,5 +368,6 @@ async function revalidateImportPlan(plan, _options = {}) {
   }
 }
 
-module.exports = { HEADER_RULES, headerRulesFor, classifyHeaderRow, cellValue, rowValues, inspectWorkbook,
+module.exports = { CHANNEL_CORRECTION_CANDIDATE_LIMIT, collectChannelCorrections,
+  HEADER_RULES, headerRulesFor, classifyHeaderRow, cellValue, rowValues, inspectWorkbook,
   inspectWorkbookImportPlan, publicImportPlan, resolveImportPlan, revalidateImportPlan, planError, inputFileIdentity };

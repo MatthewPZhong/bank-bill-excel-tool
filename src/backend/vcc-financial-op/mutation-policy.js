@@ -45,6 +45,8 @@ const VCC_TABLE_POLICY_REGISTRY = Object.freeze({
     VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH,
     VCC_MUTATION_OPERATIONS.UNARCHIVE_CASCADE
   ]),
+  // 通道明细补录记录只由导入写入，解归档、删除等受保护写操作一律不得改动。
+  vcc_fin_op_channel_corrections: tablePolicy('vcc_fin_op_channel_corrections', ['id'], 'audit'),
   vcc_fin_op_dataset_deletions: tablePolicy('vcc_fin_op_dataset_deletions', ['id'], 'audit', [
     VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET
   ]),

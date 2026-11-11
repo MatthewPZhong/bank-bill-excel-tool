@@ -329,14 +329,25 @@ function loadCascadeScope(db, targetMonth) {
     WHERE target_month > ? AND (data_status = 'archived' OR archived_run_id IS NOT NULL)
     ORDER BY target_month, dataset_type
   `).all(targetMonth).map((row) => ({ ...row }));
+  // 被删的已归档余额快照原样写入审计，保留已确认金额的去向。
+  const deletedArchives = db.prepare(`
+    SELECT target_month, subject, run_id, archived_at, balances_json
+    FROM vcc_fin_op_archives WHERE target_month > ?
+    ORDER BY target_month, subject
+  `).all(targetMonth).map((row) => Object.freeze({
+    targetMonth: String(row.target_month),
+    subject: row.subject,
+    runId: Number(row.run_id),
+    archivedAt: row.archived_at,
+    balancesJson: row.balances_json
+  }));
   return Object.freeze({
     laterRuns: Object.freeze(laterRuns),
     deletedAdjustments: Object.freeze(deletedAdjustments),
+    deletedArchives: Object.freeze(deletedArchives),
     oldLaterDatasets: Object.freeze(oldLaterDatasets),
     counts: Object.freeze({
-      archives: countRows(db, `
-        SELECT COUNT(*) AS row_count FROM vcc_fin_op_archives WHERE target_month > ?
-      `, [targetMonth]),
+      archives: deletedArchives.length,
       adjustments: deletedAdjustments.length,
       runRows: childCount('vcc_fin_op_run_rows'),
       runBalances: childCount('vcc_fin_op_run_balances'),
@@ -366,6 +377,7 @@ function buildCascadeUnarchivePlan(db, evidence, transactionTimestamp, provenanc
     laterMonths: Object.freeze([...evidence.gate.dependentMonths]),
     deletedRuns: scope.laterRuns,
     deletedAdjustments: scope.deletedAdjustments,
+    deletedArchives: scope.deletedArchives,
     deletedCounts: counts,
     expectedTotalChanges,
     minimumSafeAppVersion: '3.2.17'

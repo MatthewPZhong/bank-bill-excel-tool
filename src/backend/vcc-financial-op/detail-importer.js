@@ -58,6 +58,33 @@ function describeDiskFull(error) {
   return error;
 }
 
+function channelCorrectionSheetKey(physicalFileId, sheetIndex) {
+  return `${physicalFileId}\u0000${Number(sheetIndex)}`;
+}
+
+function correctionStaleError(detail) {
+  const error = new Error(`导入计划已失效：${detail}，请重新预检`);
+  error.code = 'vcc-import-plan-stale';
+  return error;
+}
+
+// 预检补录：先核对本行业务键与被改字段的原值与预检时一致，再用修改后的值映射（内容哈希按修改后整行计算）。
+function applyChannelCorrection(values, correction, sheetName, sourceRow) {
+  const definition = getSourceDefinition(SOURCE_TYPES.CHANNEL);
+  const valueText = (field) => String(values[definition.indexes[field]] == null ? '' : values[definition.indexes[field]]);
+  if (valueText(definition.keyHeader).trim() !== correction.idempotencyKey) {
+    throw correctionStaleError(`${sheetName} 第 ${sourceRow} 行渠道订单号与预检不一致`);
+  }
+  const corrected = [...values];
+  for (const [field, original] of Object.entries(correction.original)) {
+    if (valueText(field) !== original) {
+      throw correctionStaleError(`${sheetName} 第 ${sourceRow} 行“${field}”与预检不一致`);
+    }
+    corrected[definition.indexes[field]] = correction.corrected[field];
+  }
+  return corrected;
+}
+
 function safeRollback(db) {
   try { db.exec('ROLLBACK'); } catch (_error) { /* ignore */ }
 }
@@ -499,9 +526,21 @@ function promoteRows(db, recordId, targetMonth, sourceType) {
   repository.clearImportStagingRows(db, recordId);
 }
 
-function classifyAndPromote(db, recordId, targetMonth, sourceType) {
+function classifyAndPromote(db, recordId, targetMonth, sourceType, {
+  appliedCorrections = [],
+  provenance = null
+} = {}) {
   db.exec('BEGIN IMMEDIATE');
   try {
+    // 补录记录与本次导入在同一事务提交：逐字段保存原值、新值、时间与程序版本（spec 3.4）。
+    if (appliedCorrections.length > 0) {
+      repository.insertChannelCorrections(db, {
+        recordId,
+        targetMonth,
+        corrections: appliedCorrections,
+        provenance
+      });
+    }
     markRowsAgainstEffective(db, recordId);
     markMixedBatchKeys(db, recordId);
 
@@ -535,7 +574,9 @@ async function importDetailGroup({
   files,
   recordId: preparedRecordId,
   onProgress,
-  shouldCancel
+  shouldCancel,
+  corrections = null,
+  provenance = null
 }) {
   if (!DETAIL_SOURCE_TYPES.has(sourceType)) throw new Error(`不是明细原表类型：${sourceType}`);
   const normalizedMonth = normalizeYearMonth(targetMonth);
@@ -565,6 +606,7 @@ async function importDetailGroup({
   }
   const insert = db.prepare(repository.STAGING_ROW_INSERT_SQL);
   let rawCount = 0;
+  const appliedCorrections = [];
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const file of importFiles) {
@@ -574,6 +616,10 @@ async function importDetailGroup({
         workbook = await openWorkbookSheets(file.filePath);
         for (const selectedSheet of file.sheets || [file]) {
           throwIfCancelled(shouldCancel);
+          const sheetCorrections = sourceType === SOURCE_TYPES.CHANNEL && corrections
+            ? corrections.get(channelCorrectionSheetKey(file.physicalFileId, selectedSheet.sheetIndex)) || null
+            : null;
+          const appliedRows = new Set();
           const fileResult = await streamDetailRows(file.filePath, sourceType, {
           workbook,
           sheetName: selectedSheet.sheetName,
@@ -583,9 +629,22 @@ async function importDetailGroup({
           sourceHeaders: selectedSheet.sourceHeaders,
           onDataRow: ({ rowR, values, sourceFile, sheetName, keyCellType }) => {
             throwIfCancelled(shouldCancel);
+            const correction = sheetCorrections ? sheetCorrections.get(rowR) : null;
+            const rowValues = correction ? applyChannelCorrection(values, correction, sheetName, rowR) : values;
+            if (correction) {
+              appliedRows.add(rowR);
+              appliedCorrections.push(Object.freeze({
+                importSourceId: Number(file.importSourceId),
+                sheetName,
+                sourceRow: rowR,
+                idempotencyKey: correction.idempotencyKey,
+                original: correction.original,
+                corrected: correction.corrected
+              }));
+            }
             const mapped = mapDetailRow({
               sourceType,
-              values,
+              values: rowValues,
               targetMonth: normalizedMonth,
               assignedSubject: selectedSheet.subject,
               sourceFile: file.fileName || sourceFile,
@@ -620,6 +679,9 @@ async function importDetailGroup({
             const error = new Error(`${fileResult.sourceFile} / ${selectedSheet.sheetName || fileResult.sheetName}：${SOURCE_LABELS[sourceType]}没有数据行`);
             error.code = 'empty-source-shard';
             throw error;
+          }
+          if (sheetCorrections && appliedRows.size !== sheetCorrections.size) {
+            throw correctionStaleError(`${selectedSheet.sheetName}：部分补录行在原表中未找到`);
           }
         }
       } catch (error) {
@@ -698,7 +760,7 @@ async function importDetailGroup({
       rows: rawCount
     });
   }
-  return classifyAndPromote(db, recordId, normalizedMonth, sourceType);
+  return classifyAndPromote(db, recordId, normalizedMonth, sourceType, { appliedCorrections, provenance });
 }
 
 async function importDetailBatch({
@@ -797,6 +859,7 @@ async function inspectAndPrepareFiles(filePaths, subjectByPath = {}) {
 }
 
 module.exports = {
+  channelCorrectionSheetKey,
   DETAIL_SOURCE_TYPES,
   IMPORT_CANCELLED_CODE,
   STAGING_COMMIT_INTERVAL,
