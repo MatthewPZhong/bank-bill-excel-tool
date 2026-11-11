@@ -58,6 +58,44 @@
   font-size: 22px; font-weight: 500; letter-spacing: -0.01em;
   flex: 0 0 auto;
 }
+/* 标题右侧「Tips」悬停说明：图案 1em 宽、0.5em 高（随标题字号），上沿对齐标题上沿；平时淡化，悬停变清晰并弹出说明 */
+.title-tips {
+  position: relative;
+  display: inline-block;
+  /* 图案底边在基线上，抬高 0.34em 后顶边≈基线上 0.84em，即汉字字形顶部（text-top 只到字体内容区顶部，会偏高） */
+  vertical-align: 0.34em;
+  margin-left: 0.08em;
+  cursor: help;
+}
+.title-tips[hidden] { display: none; }
+.title-tips-mark {
+  display: block;
+  width: 1em; height: 0.5em;
+  fill: currentColor;
+  opacity: 0.4;
+  transition: opacity .15s ease;
+}
+.title-tips:hover .title-tips-mark { opacity: 1; }
+.title-tips-mark text { font-weight: 700; }
+.title-tips-bubble {
+  position: absolute;
+  top: calc(100% + 8px); left: 0;
+  z-index: 70;
+  width: max-content; max-width: 320px;
+  padding: 10px 12px;
+  font-family: "Google Sans Text", "Google Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 13px; font-weight: 400; line-height: 1.6; letter-spacing: 0;
+  white-space: normal; overflow-wrap: anywhere;
+  color: var(--text);
+  background: var(--panel, #fff);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s ease;
+}
+.title-tips:hover .title-tips-bubble { opacity: 1; }
 .dialog-header-checkboxes {
   display: flex; align-items: center; gap: 16px;
   margin-left: 16px;
@@ -209,7 +247,32 @@ td .muted { color: var(--muted); }
   white-space: nowrap;
 }
 .balance-seed-pager[hidden] { display: none; }
-.balance-seed-balance-input { width: 100%; min-width: 120px; }
+/* 余额管理表格：列为 日期/账户号/币种/余额/生成方式/执行操作，列名与数据单行；
+   日期、币种按内容收窄，余额/生成方式/执行操作三列等宽，账户号占剩余宽度。
+   改用 auto 布局让单行内容不被截断；输入框不贡献最小宽度，编辑态切换时列宽不变。 */
+.balance-seed-card.manager-card .data-table { table-layout: auto; }
+.balance-seed-card.manager-card .data-table th,
+.balance-seed-card.manager-card .data-table td { white-space: nowrap; }
+.balance-seed-card.manager-card .data-table th:nth-child(1),
+.balance-seed-card.manager-card .data-table td:nth-child(1),
+.balance-seed-card.manager-card .data-table th:nth-child(3),
+.balance-seed-card.manager-card .data-table td:nth-child(3) { width: 1%; }
+.balance-seed-card.manager-card .data-table th:nth-child(2),
+.balance-seed-card.manager-card .data-table td:nth-child(2) { width: auto; }
+.balance-seed-card.manager-card .data-table th:nth-child(n+4),
+.balance-seed-card.manager-card .data-table td:nth-child(n+4) { width: 16%; }
+.balance-seed-card .balance-seed-balance-input {
+  width: 100%; min-width: 0; box-sizing: border-box;
+  padding: 0 10px; font-size: inherit;
+}
+/* 窄窗口（如最小窗口放大到 125%/150%）收紧字号与内边距，六列仍可一屏单行显示，不出现横向滚动 */
+@media (max-width: 1021px) {
+  .balance-seed-card.manager-card .data-table { font-size: 13px; }
+  .balance-seed-card.manager-card .data-table th,
+  .balance-seed-card.manager-card .data-table td { padding-left: 10px; padding-right: 10px; }
+  .balance-seed-card.manager-card .data-table th:nth-child(n+4),
+  .balance-seed-card.manager-card .data-table td:nth-child(n+4) { width: 15%; }
+}
 
 /* =================== Card size presets for new dialogs =================== */
 .export-scope-card { width: min(100%, 480px); }
@@ -2266,11 +2329,6 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
 /* =================== v3.2.16 字段筛选特征值 =================== */
 .feature-filter-body {
   padding: 18px 28px 16px;
-}
-.feature-filter-hint {
-  margin: 0 0 16px;
-  font-size: 13px; color: var(--muted);
-  line-height: 1.55;
 }
 .feature-filter-grid {
   display: grid;
@@ -6060,6 +6118,10 @@ body[data-platform="win32"] .page-title *,
 body[data-platform="win32"] .dialog-title,
 body[data-platform="win32"] .dialog-title * {
   font-family: "Google Sans", "Google Sans Display", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+/* 标题 Tips 气泡是正文说明，沿用 1) 的正文字体 */
+body[data-platform="win32"] .dialog-title .title-tips-bubble {
+  font-family: "Courier New", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", monospace;
 }
 
 /* v3.0.1 需求3：网关对账单修复场景单选框样式（卡片 / 列表项 / 操作区） */

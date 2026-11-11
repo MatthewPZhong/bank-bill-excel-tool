@@ -31,6 +31,14 @@
       };
     }
 
+    // 标题右侧「Tips」悬停说明：放在 .dialog-title 内，图案按标题字号取 1em 宽、0.5em 高。
+    function titleTipsHtml(text, { hidden = false } = {}) {
+      return `<span class="title-tips"${hidden ? ' hidden' : ''}>`
+        + '<svg class="title-tips-mark" viewBox="0 0 40 20" aria-hidden="true" focusable="false">'
+        + '<text x="20" y="15.5" text-anchor="middle" textLength="36" lengthAdjust="spacingAndGlyphs">Tips</text></svg>'
+        + `<span class="title-tips-bubble" role="tooltip">${escapeHtml(text)}</span></span>`;
+    }
+
 
     function looksLikeRegexLiteral(input) {
       if (typeof input !== 'string') {
@@ -1065,11 +1073,10 @@
 
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">筛选特征值</div>
+          <div class="dialog-title">筛选特征值${titleTipsHtml(`按分隔符把筛选字段拆成多段，取第一个满足条件的片段；筛不出时留空。本模板所有选择「${FEATURE_FILTER_MAPPING_FIELD}」的字段共用这一套条件。`)}</div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="feature-filter-body">
-          <p class="feature-filter-hint">按分隔符把筛选字段拆成多段，取第一个满足条件的片段；筛不出时留空。本模板所有选择「${escapeHtml(FEATURE_FILTER_MAPPING_FIELD)}」的字段共用这一套条件。</p>
           <div class="feature-filter-grid">
             <label class="feature-filter-label" for="feature-filter-source">筛选字段</label>
             <select id="feature-filter-source" class="mapping-select feature-filter-source">${sourceOptions}</select>
@@ -1286,7 +1293,7 @@
       dialog.className = 'modal-card manual-balance-card';
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">重命名渠道</div>
+          <div class="dialog-title">重命名渠道${titleTipsHtml('渠道下子模板的账单按渠道名输出。改名后，Channel 列、余额账单的银行名称与所在地、导出文件名随之改变，余额种子与余额附加值改按新名称的银行段读取。已有子模板不会随之改名。')}</div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="manual-balance-form">
@@ -1298,7 +1305,6 @@
             <span class="manual-balance-label">新渠道名称</span>
             <input class="mapping-text-input manual-balance-input rename-channel-input" type="text" spellcheck="false" value="${escapeHtml(channel.name)}" />
           </label>
-          <div class="manual-balance-hint channel-rename-hint">渠道下子模板的账单按渠道名输出。改名后，Channel 列、余额账单的银行名称与所在地、导出文件名随之改变，余额种子与余额附加值改按新名称的银行段读取。已有子模板不会随之改名。</div>
         </div>
         <div class="dialog-actions right">
           <button class="primary-btn small" type="button" data-action="done">完成</button>
@@ -5984,7 +5990,7 @@
       dialog.className = 'modal-card manager-card balance-seed-card';
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">余额管理</div>
+          <div class="dialog-title">余额管理${titleTipsHtml('', { hidden: true })}</div>
           <label class="account-mapping-template-select-wrapper balance-seed-owner-wrapper">
             渠道 <select data-role="balance-seed-owner" aria-label="渠道"></select>
           </label>
@@ -5995,9 +6001,9 @@
           <table class="data-table">
             <thead>
               <tr>
+                <th>日期</th>
                 <th>账户号</th>
                 <th>币种</th>
-                <th>日期</th>
                 <th>余额</th>
                 <th>生成方式</th>
                 <th class="manager-action-header"><span class="manager-action-header-label">执行操作</span></th>
@@ -6012,12 +6018,14 @@
             <span data-role="balance-seed-page"></span>
             <button class="secondary-btn small" type="button" data-action="next-page">下一页</button>
           </div>
-          <button class="primary-btn small" type="button" data-action="done">完成</button>
+          <button class="secondary-btn small" type="button" data-action="back">返回</button>
         </div>
       `;
 
       const ownerSelect = dialog.querySelector('[data-role="balance-seed-owner"]');
       const hintEl = dialog.querySelector('[data-role="balance-seed-hint"]');
+      const tipsEl = dialog.querySelector('.dialog-title .title-tips');
+      const tipsBubbleEl = tipsEl.querySelector('.title-tips-bubble');
       const tbody = dialog.querySelector('tbody');
       const pagerEl = dialog.querySelector('[data-role="balance-seed-pager"]');
       const pageEl = dialog.querySelector('[data-role="balance-seed-page"]');
@@ -6056,6 +6064,7 @@
       }
 
       function renderHint() {
+        tipsEl.hidden = true;
         if (!state.key) {
           hintEl.textContent = '暂无渠道或模板';
           return;
@@ -6069,7 +6078,9 @@
           return;
         }
         const fileName = state.owner ? state.owner.seedFileName : '';
-        hintEl.textContent = `共 ${state.records.length} 条。种子文件 balance-seeds/${fileName} 按名称的银行段存放，生成账单时按账户号与币种读取；修改后的余额按「人工录入」处理。`;
+        hintEl.textContent = `共 ${state.records.length} 条`;
+        tipsBubbleEl.textContent = `种子文件 balance-seeds/${fileName} 按名称的银行段存放，生成账单时按账户号与币种读取；修改后的余额按「人工录入」处理。`;
+        tipsEl.hidden = false;
       }
 
       function createEmptyRow(text) {
@@ -6084,9 +6095,9 @@
         const row = document.createElement('tr');
         row.dataset.balanceSeedRow = rowKey;
         row.innerHTML = `
+          <td>${escapeHtml(record.billDate)}</td>
           <td>${escapeHtml(record.merchantId)}</td>
           <td>${escapeHtml(record.currency)}</td>
-          <td>${escapeHtml(record.billDate)}</td>
           <td class="balance-seed-balance-cell">${editing
             ? `<input class="mapping-text-input balance-seed-balance-input" type="text" spellcheck="false" aria-label="余额" value="${escapeHtml(String(record.endBalance))}" />`
             : escapeHtml(String(record.endBalance))}</td>
@@ -6263,7 +6274,7 @@
       });
       const close = () => closeModal(overlay, { status: 'cancelled', reason: 'cancel' });
       dialog.querySelector('.icon-close').addEventListener('click', close);
-      dialog.querySelector('[data-action="done"]').addEventListener('click', close);
+      dialog.querySelector('[data-action="back"]').addEventListener('click', close);
       registerModal(overlay, {
         onMount: () => { loadSeeds(); },
         onDispose: () => { state.requestId += 1; }
@@ -6343,10 +6354,9 @@
         </div>`).join('');
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">处理渠道账户映射冲突</div>
+          <div class="dialog-title">处理渠道账户映射冲突${titleTipsHtml('升级时，同一渠道下的子模板对同一账户号设置了不同的清结算账号或币种。请为每个账户号选定一条，处理前该渠道无法生成账单。')}</div>
           <button class="icon-close" type="button">×</button>
         </div>
-        <div class="channel-conflict-hint">升级时，同一渠道下的子模板对同一账户号设置了不同的清结算账号或币种。请为每个账户号选定一条，处理前该渠道无法生成账单。</div>
         <div class="table-wrapper">${sections}</div>
         <div class="dialog-actions right">
           <button class="primary-btn small" type="button" data-action="done" disabled>确认</button>
