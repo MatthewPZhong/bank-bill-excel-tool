@@ -1371,6 +1371,36 @@ const terminalRouteRegistrations = [
   createPreFundTerminalRouteRegistration({ getService: getPreFundReconciliationService })
 ];
 const businessOperationRegistry = createBusinessOperationRegistry();
+// v3.2.17 空闲时自动整理主库：用户 30 分钟无操作且无任务时在子进程中 VACUUM，用户一操作即中止。
+const { createIdleCompactionController } = require('./main-process/database-compaction/idle-compaction');
+const idleDatabaseCompaction = createIdleCompactionController({
+  getDatabase: () => (database && database.db ? {
+    db: database.db,
+    dbPath: database.dbPath,
+    getSetting: (key) => database.getSetting(key),
+    setSetting: (key, value) => database.setSetting(key, value)
+  } : null),
+  registry: businessOperationRegistry,
+  getLastUserActivityTs: () => lastUserActivityTs,
+  isOtherWorkBusy: () => (
+    runCheckWorkerPool && typeof runCheckWorkerPool.isBusy === 'function' && runCheckWorkerPool.isBusy()
+      ? 'acquiring-worker-busy'
+      : ''
+  ),
+  beginMaintenance: async () => (archiveStorageRootManager
+    ? archiveStorageRootManager.beginDatabaseMaintenance('正在整理存储空间，请稍后重试')
+    : { acquired: true }),
+  endMaintenance: async () => {
+    if (archiveStorageRootManager) await archiveStorageRootManager.endDatabaseMaintenance();
+  },
+  log: (entry) => appendActivityLogEntry({
+    level: entry.level,
+    source: 'main',
+    domain: 'database-maintenance',
+    message: `[空闲存储整理] ${entry.message}`,
+    details: entry.details
+  })
+});
 const taskPolicyRegistry = createTaskPolicyRegistry();
 const executionTaskComposition = createExecutionTaskComposition({
   terminalRoutes: terminalRouteRegistrations,
@@ -7881,6 +7911,7 @@ function registerAppHandlers() {
   //   - 节流由 renderer 端做（10s 一次），main 不再做防抖
   ipcMain.on('app:user-activity', () => {
     lastUserActivityTs = Date.now();
+    idleDatabaseCompaction.abort('user-activity');
   });
 
   // v2.1.9 SR-log-1 (T32g)：renderer 通用告警上报 handler（spec §15.4）
@@ -24392,6 +24423,10 @@ function setupIdleCleanupTimer() {
     } finally {
       businessOperationRegistry.end(operation.token);
     }
+    // 收单空闲清理结束后，再判断是否需要空闲整理主库（自带空闲、任务与磁盘条件，失败已记日志）。
+    try {
+      await idleDatabaseCompaction.maybeRun();
+    } catch (_compactionError) { /* 下次空闲再试 */ }
   }), IDLE_CHECK_INTERVAL_MS);
   if (idleCleanupTimer.unref) idleCleanupTimer.unref(); // 不阻塞退出
 }
@@ -24688,6 +24723,12 @@ function resumeApplicationAfterFailedRestart() {
 
 if (!packagedRuntimeModeSelected) {
   app.on('before-quit', (event) => {
+    // 空闲存储整理持有过渡租约；退出时先中止整理并等其收尾，再继续退出。
+    if (idleDatabaseCompaction.isRunning() && !quitPreparationComplete) {
+      event.preventDefault();
+      idleDatabaseCompaction.stop('quit').then(() => app.quit());
+      return;
+    }
     if (businessOperationRegistry.isInstallTransitionActive() && !quitPreparationComplete) {
       event.preventDefault();
       return;
