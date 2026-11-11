@@ -51,6 +51,6 @@
 
 ## Remaining unknowns
 
-- 真实 Windows 机器与真实库上的提速幅度（B84）。
+- 真实 Windows 机器与真实库上的提速幅度（B86）。
 - 界面预览截图 `docs/previews/vcc-financial-op-unarchive*.png` 未重生成：本机执行 `npm run preview:vcc-financial-op-unarchive` 时 Electron 主进程启动后不创建渲染进程（基线代码同样卡住），属环境问题。预览桩已按新规则更新（非尾月显示级联提示与删除确认），需在可开窗口的机器上重跑四个 `preview:vcc-financial-op-unarchive*` 命令。
 - 预检补录弹窗与级联解归档弹窗尚未做 GUI 人工检查（同上原因）。
