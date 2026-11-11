@@ -53,7 +53,21 @@ const RESULT_WRITE_WORKER_PATH = path.join(__dirname, 'vcc-financial-op-write-wo
 const REVIEW_WORKER_PATH = path.join(__dirname, 'vcc-financial-op-review-worker.js');
 const { validateReviewRequest, assertReviewFresh, reviewError } = require('../backend/vcc-financial-op/review-export-contract');
 const { assertTargetAllowed, captureTarget, publishReviewFile } = require('./vcc-financial-op-review-target');
-const READ_ONLY_TASKS = new Set(['inspect-plan', 'revalidate-plan', 'export-review']);
+const READ_ONLY_TASKS = new Set([
+  'inspect-plan', 'revalidate-plan', 'export-review',
+  'export-dataset', 'export-result', 'export-import-audit', 'export-read-only'
+]);
+// 只有会改变 VCC 业务数据的任务结束后才推进任务计数，使已打开的预览失效（spec D4）；
+// 选文件预检与各类导出不改数据，结束后预览仍有效。
+const WRITE_TASK_ACTIONS = new Set([
+  'import',
+  'calculate',
+  'initialize-opening',
+  VCC_MUTATION_OPERATIONS.ADD_ADJUSTMENT,
+  VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT,
+  VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH,
+  VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET
+]);
 
 const IMPORT_STATUS_TEXT = Object.freeze({
   deleted: '已删除',
@@ -272,9 +286,11 @@ function createVccFinancialOpService({
     task.released = true;
     if (activeTask === task) {
       activeTask = null;
-      taskGeneration += 1;
-      activeMonthsCache = null;
-      archivedMonthsCache = null;
+      if (WRITE_TASK_ACTIONS.has(task.action)) {
+        taskGeneration += 1;
+        activeMonthsCache = null;
+        archivedMonthsCache = null;
+      }
     }
     task.complete(outcome);
   }
@@ -399,7 +415,8 @@ function createVccFinancialOpService({
     if (action === VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH) {
       return {
         targetMonth: payload.targetMonth,
-        expectedPreviewToken: payload.expectedPreviewToken
+        expectedPreviewToken: payload.expectedPreviewToken,
+        confirmCascade: payload.confirmCascade === true
       };
     }
     if (action === VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET) {
@@ -778,7 +795,8 @@ function createVccFinancialOpService({
     return runResultWriteWorker(VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH, {
       targetMonth: payload.targetMonth,
       expectedPreviewToken,
-      taskGeneration: payload.taskGeneration
+      taskGeneration: payload.taskGeneration,
+      confirmCascade: payload.confirmCascade === true
     }, onProgress, operationContext);
   }
 

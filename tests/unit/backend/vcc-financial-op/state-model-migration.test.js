@@ -385,3 +385,71 @@ test('调整账本约束坐标与序号唯一且随 run 级联删除', (t) => {
     0
   );
 });
+
+test('调整周期迁移：旧坐标唯一约束重建为按周期唯一，旧调整归入周期 0 且可重复执行', (t) => {
+  const db = createDb(t);
+  ensureVccFinancialOpTablesSupport(db);
+  const runId = Number(db.prepare(`
+    INSERT INTO vcc_fin_op_runs (target_month, input_revisions_json)
+    VALUES ('2026-05', '{}')
+  `).run().lastInsertRowid);
+  // 还原为 v3.2.16 及以前的表结构与约束。
+  db.exec(`
+    DROP TABLE vcc_fin_op_run_adjustments;
+    CREATE TABLE vcc_fin_op_run_adjustments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id INTEGER NOT NULL,
+      row_key TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      category_major TEXT NOT NULL,
+      category_minor TEXT NOT NULL DEFAULT '',
+      currency TEXT NOT NULL,
+      adjustment_amount TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+      created_app_version TEXT,
+      created_build_sha TEXT,
+      FOREIGN KEY (run_id) REFERENCES vcc_fin_op_runs(id) ON DELETE CASCADE,
+      UNIQUE (run_id, sequence),
+      UNIQUE (run_id, row_key, currency)
+    );
+  `);
+  db.exec('ALTER TABLE vcc_fin_op_runs DROP COLUMN adjustment_cycle');
+  const legacyInsert = db.prepare(`
+    INSERT INTO vcc_fin_op_run_adjustments (
+      id, run_id, row_key, subject, source_type, category_major, category_minor,
+      currency, adjustment_amount, reason, sequence
+    ) VALUES (?, ?, ?, 'PPHK', 'recharge_refund', '入金', '', 'USD', ?, '旧调整', ?)
+  `);
+  legacyInsert.run(7, runId, 'v1:key-a', '1.23', 1);
+  legacyInsert.run(9, runId, 'v1:key-b', '-2', 2);
+
+  ensureVccFinancialOpTablesSupport(db);
+  const rows = db.prepare(`
+    SELECT id, row_key, adjustment_amount, sequence, adjustment_cycle
+    FROM vcc_fin_op_run_adjustments ORDER BY id
+  `).all().map((row) => ({ ...row }));
+  assert.deepEqual(rows, [
+    { id: 7, row_key: 'v1:key-a', adjustment_amount: '1.23', sequence: 1, adjustment_cycle: 0 },
+    { id: 9, row_key: 'v1:key-b', adjustment_amount: '-2', sequence: 2, adjustment_cycle: 0 }
+  ]);
+  assert.equal(db.prepare('SELECT adjustment_cycle FROM vcc_fin_op_runs WHERE id = ?').get(runId).adjustment_cycle, 0);
+
+  const insert = db.prepare(`
+    INSERT INTO vcc_fin_op_run_adjustments (
+      run_id, row_key, subject, source_type, category_major, category_minor,
+      currency, adjustment_amount, reason, sequence, adjustment_cycle
+    ) VALUES (?, 'v1:key-a', 'PPHK', 'recharge_refund', '入金', '', 'USD', '1', '再调整', ?, ?)
+  `);
+  assert.throws(() => insert.run(runId, 3, 0), /UNIQUE/, '同一周期同坐标仍只能调整一次');
+  const newId = Number(insert.run(runId, 3, 1).lastInsertRowid);
+  assert.equal(newId, 10, '自增序号接续旧表，不复用');
+
+  // 再次执行迁移不重建、不改数据。
+  const before = db.prepare('SELECT sql FROM sqlite_master WHERE name = ?').get('vcc_fin_op_run_adjustments').sql;
+  ensureVccFinancialOpTablesSupport(db);
+  assert.equal(db.prepare('SELECT sql FROM sqlite_master WHERE name = ?').get('vcc_fin_op_run_adjustments').sql, before);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_run_adjustments').get().n, 3);
+});

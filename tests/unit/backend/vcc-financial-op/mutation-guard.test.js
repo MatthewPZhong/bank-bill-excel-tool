@@ -73,7 +73,8 @@ function adjustmentPlan() {
         1,
         '2026-08-11 12:00:00',
         '3.1.9',
-        'build'
+        'build',
+        0
       ]
     }, {
       stepId: 'adjustment.bump-run',

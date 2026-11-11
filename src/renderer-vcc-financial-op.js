@@ -912,7 +912,7 @@
           canClose: () => !saving,
           onClose: () => resolve(outcome),
           bodyHtml: `
-          <p class="vcc-fin-op-summary-line">调整作为独立审计行保存，不覆盖基础结果；同一结果行的同一币种只能调整一次。</p>
+          <p class="vcc-fin-op-summary-line">调整作为独立审计行保存，不覆盖基础结果；同一结果行的同一币种在每次归档前只能调整一次，解归档后可再调整一次。</p>
           <div class="vcc-fin-op-adjustment-form">
             <label class="vcc-fin-op-field"><span>主体</span><select class="vcc-fin-op-input" data-field="adjustment-subject"></select></label>
             <label class="vcc-fin-op-field"><span>大类</span><select class="vcc-fin-op-input" data-field="adjustment-major" disabled></select></label>
@@ -1705,6 +1705,7 @@
       onCompleted = null,
       runningText = '正在处理…',
       confirmationLabel = '',
+      previewConfirmation = null,
       allowOperationCancel = false
     }) {
       const normalizeEntries = normalizeArchivedPickerEntries;
@@ -1745,9 +1746,9 @@
           <select class="vcc-fin-op-input" data-field="archive-month" aria-label="月份"></select>
         </div>
         <p class="vcc-fin-op-delete-state" data-role="archive-picker-state" data-tone="neutral"></p>
-        ${confirmationLabel ? `
-          <label class="vcc-fin-op-confirm-check" data-role="archive-picker-confirm-row">
-            <input type="checkbox" data-field="archive-picker-confirm">${escapeHtml(confirmationLabel)}
+        ${confirmationLabel || typeof previewConfirmation === 'function' ? `
+          <label class="vcc-fin-op-confirm-check" data-role="archive-picker-confirm-row"${confirmationLabel ? '' : ' hidden'}>
+            <input type="checkbox" data-field="archive-picker-confirm"><span data-role="archive-picker-confirm-text">${escapeHtml(confirmationLabel)}</span>
           </label>
         ` : ''}
         <div class="dialog-actions right">
@@ -1764,9 +1765,20 @@
       const closeButton = modal.dialog.querySelector('[data-action="close"]');
       const stateText = modal.dialog.querySelector('[data-role="archive-picker-state"]');
       const confirmation = modal.dialog.querySelector('[data-field="archive-picker-confirm"]');
+      const confirmationRow = modal.dialog.querySelector('[data-role="archive-picker-confirm-row"]');
+      const confirmationText = modal.dialog.querySelector('[data-role="archive-picker-confirm-text"]');
+
+      // 预览决定是否需要额外确认（如级联解归档）；行隐藏时视为无需确认。
+      function applyPreviewConfirmation(result) {
+        if (typeof previewConfirmation !== 'function' || !confirmationRow) return;
+        const label = result ? String(previewConfirmation(result) || '') : '';
+        confirmationText.textContent = label;
+        confirmationRow.hidden = !label;
+        confirmation.checked = false;
+      }
 
       function confirmationSatisfied() {
-        return !confirmation || confirmation.checked === true;
+        return !confirmation || (confirmationRow && confirmationRow.hidden) || confirmation.checked === true;
       }
 
       function setPickerState(message, tone = 'neutral', phase = 'feedback') {
@@ -1814,6 +1826,7 @@
         latestPreview = null;
         currentSelectionCanExecute = false;
         if (confirmation) confirmation.checked = false;
+        applyPreviewConfirmation(null);
         actionButton.disabled = true;
         const entry = selectedEntry();
         if (!entry) {
@@ -1868,11 +1881,12 @@
           const successMessage = result.message || (
             Object.hasOwn(result, 'canExecute')
               ? `${entry.targetMonth} 已归档，可${actionLabel}`
-              : `${entry.targetMonth} 可解归档；基础结果和调整记录将保留。`
+              : `${entry.targetMonth} 可解归档；基础结果和调整记录将保留，每个结果行的每个币种可再调整一次。`
           );
           const tone = result.tone || (Object.hasOwn(result, 'canExecute') ? 'success' : 'warning');
           const phase = Object.hasOwn(result, 'canExecute') && tone === 'success' ? 'ready' : 'feedback';
           setPickerState(successMessage, tone, phase);
+          applyPreviewConfirmation(result);
           currentSelectionCanExecute = true;
           actionButton.disabled = !confirmationSatisfied();
           return { ok: true, canExecute: true };
@@ -2056,6 +2070,26 @@
       return modal;
     }
 
+    // 级联解归档（v3.2.17）：预览列出将删除结果的后续月份与人工调整条数。
+    function describeUnarchivePreview(entry, result) {
+      const cascade = result && result.status === 'success' && result.cascade;
+      if (!cascade || !Array.isArray(cascade.months) || cascade.months.length === 0) return result;
+      const adjustments = Number(cascade.adjustmentCount) || 0;
+      return {
+        ...result,
+        tone: 'warning',
+        message: `${entry.targetMonth} 之后的 ${cascade.months.join('、')} 已有结果，`
+          + `解归档会同时删除这些月份的结果${adjustments > 0 ? `及 ${adjustments} 条人工调整（调整明细写入审计）` : ''}，`
+          + `原表数据保留；完成后请从 ${cascade.months[0]} 起按月份顺序重新运行并归档。`
+      };
+    }
+
+    function cascadeConfirmationLabel(result) {
+      const cascade = result && result.cascade;
+      if (!cascade || !Array.isArray(cascade.months) || cascade.months.length === 0) return '';
+      return `我已了解：将删除 ${cascade.months.join('、')} 的结果和人工调整`;
+    }
+
     async function openUnarchiveDialog({ archivedMonths = null, onUnarchived = null } = {}) {
       const actionGeneration = renderGeneration;
       if (!live(actionGeneration)) return null;
@@ -2068,9 +2102,12 @@
         return createArchivedMonthPickerDialog({
           months,
           actionLabel: '解归档',
-          previewSelection: (entry) => api.previewUnarchive({ targetMonth: entry.targetMonth }),
+          previewSelection: async (entry) => describeUnarchivePreview(
+            entry,
+            await api.previewUnarchive({ targetMonth: entry.targetMonth })
+          ),
+          previewConfirmation: cascadeConfirmationLabel,
           runningText: '正在解归档…',
-          confirmationLabel: '我已确认：解归档后只能由 v3.1.9 及以上版本继续维护；降级前必须恢复完整数据库备份',
           allowOperationCancel: true,
           executeSelection: async (entry, preview, controls) => {
             const actionGeneration = renderGeneration;
@@ -2089,7 +2126,8 @@
               return await api.unarchiveMonth({
                 targetMonth: entry.targetMonth,
                 expectedPreviewToken: preview && preview.previewToken,
-                taskGeneration: preview && preview.taskGeneration
+                taskGeneration: preview && preview.taskGeneration,
+                confirmCascade: Boolean(preview && preview.cascade && preview.cascade.months.length > 0)
               });
             } catch (error) {
               if (!live(actionGeneration)) { needsRefresh = true; return null; }
@@ -2108,11 +2146,24 @@
             await refreshArchivedState();
             if (!live(actionGeneration)) { needsRefresh = true; return null; }
             if (!continuation.isCurrent()) return;
-            setStatus(`${entry.targetMonth} 已解归档，结果恢复为待确认`, 'success');
+            const laterMonths = result && result.cascade && Array.isArray(result.laterMonths)
+              ? result.laterMonths
+              : [];
+            setStatus(
+              laterMonths.length > 0
+                ? `${entry.targetMonth} 已解归档，${laterMonths.join('、')} 的结果已删除`
+                : `${entry.targetMonth} 已解归档，结果恢复为待确认`,
+              'success'
+            );
             if (typeof onUnarchived === 'function') await onUnarchived(result, entry);
             if (!live(actionGeneration)) { needsRefresh = true; return null; }
             if (!continuation.isCurrent()) return;
-            showMessage('解归档完成', `${entry.targetMonth} 已恢复为待确认；基础结果和调整记录均已保留。`, 'success');
+            showMessage('解归档完成', laterMonths.length > 0
+              ? `${entry.targetMonth} 已恢复为待确认，基础结果和调整记录均已保留；`
+                + `${laterMonths.join('、')} 的结果与人工调整已删除（调整明细已写入审计），原表数据保留。`
+                + `请从 ${laterMonths[0]} 起按月份顺序重新运行并归档。`
+              : `${entry.targetMonth} 已恢复为待确认；基础结果和调整记录均已保留，每个结果行的每个币种可再调整一次。`,
+            'success');
           }
         });
       } catch (error) {
@@ -3483,7 +3534,6 @@
       return createArchivedMonthPickerDialog({
         months: PREVIEW_ARCHIVED_MONTHS,
         actionLabel: '解归档',
-        confirmationLabel: '我已确认：解归档后只能由 v3.1.9 及以上版本继续维护；降级前必须恢复完整数据库备份',
         previewSelection: async (entry) => ({
           status: 'success',
           canUnarchive: entry.targetMonth === '2026-06',
@@ -3655,7 +3705,6 @@
         const modal = createArchivedMonthPickerDialog({
           months: PREVIEW_ARCHIVED_MONTHS,
           actionLabel: '解归档',
-          confirmationLabel: '我已确认：解归档后只能由 v3.1.9 及以上版本继续维护；降级前必须恢复完整数据库备份',
           previewSelection: async () => ({
             status: 'success', canUnarchive: true, previewToken: 'preview-token', taskGeneration: 0
           }),

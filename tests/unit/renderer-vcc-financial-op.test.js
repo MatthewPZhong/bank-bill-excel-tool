@@ -531,7 +531,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.ok(elapsed < 50, `1000 次缓存切换耗时 ${elapsed.toFixed(3)}ms`);
   });
 
-  test('解归档复用年月选择器、强制降级警示，并只在 pre-critical 开放取消', () => {
+  test('解归档复用年月选择器、级联时才要求删除确认，并只在 pre-critical 开放取消', () => {
     assert.match(moduleRenderer, /function createArchivedMonthPickerDialog\(/);
     assert.match(moduleRenderer, /title: actionLabel === '导出' \? '请选择要导出的月份' : '请选择月份'/);
     assert.match(moduleRenderer, /data-field="archive-year"[\s\S]*data-field="archive-month"/);
@@ -554,8 +554,12 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       ),
       /actionLabel: '删除'/
     );
-    assert.match(moduleRenderer, /解归档后只能由 v3\.1\.9 及以上版本继续维护/);
-    assert.match(moduleRenderer, /降级前必须恢复完整数据库备份/);
+    // v3.2.17：去掉版本确认勾选框；只有级联解归档（存在后续月份）时显示删除确认勾选。
+    assert.doesNotMatch(moduleRenderer, /解归档后只能由 v3\.1\.9 及以上版本继续维护/);
+    assert.doesNotMatch(moduleRenderer, /降级前必须恢复完整数据库备份/);
+    assert.match(moduleRenderer, /previewConfirmation: cascadeConfirmationLabel/);
+    assert.match(moduleRenderer, /我已了解：将删除 \$\{cascade\.months\.join\('、'\)\} 的结果和人工调整/);
+    assert.match(moduleRenderer, /confirmCascade: Boolean\(preview && preview\.cascade && preview\.cascade\.months\.length > 0\)/);
     assert.match(moduleRenderer, /data-field="archive-picker-confirm"/);
     assert.match(moduleRenderer, /confirmationSatisfied\(\)/);
     assert.match(moduleRenderer, /allowOperationCancel: true/);

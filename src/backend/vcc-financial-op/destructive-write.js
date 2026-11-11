@@ -9,7 +9,7 @@ const {
   ARCHIVE_CONTRACTS,
   classifyArchiveContract
 } = require('./archive-contract');
-const { evaluateUnarchiveGate } = require('./unarchive-gate');
+const { evaluateCascadeUnarchiveGate } = require('./unarchive-gate');
 const {
   loadArchiveEvidenceSet,
   loadUnarchiveGateEvidence,
@@ -129,7 +129,10 @@ function normalizeDestructivePayload(action, payload = {}) {
     targetMonth: normalizeMonth(payload.targetMonth),
     expectedPreviewToken: normalizePreviewToken(payload.expectedPreviewToken)
   };
-  if (action === VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH) return Object.freeze(normalized);
+  if (action === VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH) {
+    // 级联解归档必须由用户在预览中明确确认；锁内发现存在后续月份而未确认时拒绝执行。
+    return Object.freeze({ ...normalized, confirmCascade: payload.confirmCascade === true });
+  }
   const targetType = String(payload.targetType || payload.sourceType || '').trim();
   if (!DELETE_TARGET_TYPE_SET.has(targetType)) {
     throw destructiveWriteError('invalid-delete-target', `不支持删除的目标表：${targetType}`);
@@ -176,7 +179,7 @@ function loadLockedUnarchiveEvidence(db, normalizedPayload, taskGeneration) {
     taskGeneration,
     taskActive: false
   });
-  const gate = evaluateUnarchiveGate(archiveContract, gateEvidence);
+  const gate = evaluateCascadeUnarchiveGate(archiveContract, gateEvidence);
   const token = buildOperationTokenV2({
     action: 'unarchive',
     targetMonth: normalizedPayload.targetMonth,
@@ -280,6 +283,234 @@ function buildUnarchivePlan(db, evidence, transactionTimestamp, provenance) {
   });
 }
 
+const CASCADE_LATER_RUN_SCOPE_SQL = 'SELECT id FROM vcc_fin_op_runs WHERE target_month > ?';
+
+function loadCascadeScope(db, targetMonth) {
+  const laterRuns = db.prepare(`
+    SELECT id, target_month, status, result_revision, adjustment_cycle
+    FROM vcc_fin_op_runs WHERE target_month > ?
+    ORDER BY target_month, id
+  `).all(targetMonth).map((row) => Object.freeze({
+    runId: Number(row.id),
+    targetMonth: String(row.target_month),
+    status: String(row.status),
+    resultRevision: Number(row.result_revision) || 0,
+    adjustmentCycle: Number(row.adjustment_cycle) || 0
+  }));
+  const childCount = (tableName) => countRows(db, `
+    SELECT COUNT(*) AS row_count FROM ${tableName}
+    WHERE run_id IN (${CASCADE_LATER_RUN_SCOPE_SQL})
+  `, [targetMonth]);
+  const deletedAdjustments = db.prepare(`
+    SELECT run.target_month AS run_target_month, adjustment.*
+    FROM vcc_fin_op_run_adjustments adjustment
+    JOIN vcc_fin_op_runs run ON run.id = adjustment.run_id
+    WHERE run.target_month > ?
+    ORDER BY run.target_month, adjustment.run_id, adjustment.sequence, adjustment.id
+  `).all(targetMonth).map((row) => Object.freeze({
+    targetMonth: String(row.run_target_month),
+    runId: Number(row.run_id),
+    adjustmentId: Number(row.id),
+    subject: row.subject,
+    sourceType: row.source_type,
+    categoryMajor: row.category_major,
+    categoryMinor: row.category_minor,
+    currency: row.currency,
+    adjustmentAmount: row.adjustment_amount,
+    reason: row.reason,
+    sequence: Number(row.sequence),
+    adjustmentCycle: Number(row.adjustment_cycle) || 0,
+    createdAt: row.created_at,
+    createdAppVersion: row.created_app_version,
+    createdBuildSha: row.created_build_sha
+  }));
+  const oldLaterDatasets = db.prepare(`
+    SELECT * FROM vcc_fin_op_datasets
+    WHERE target_month > ? AND (data_status = 'archived' OR archived_run_id IS NOT NULL)
+    ORDER BY target_month, dataset_type
+  `).all(targetMonth).map((row) => ({ ...row }));
+  return Object.freeze({
+    laterRuns: Object.freeze(laterRuns),
+    deletedAdjustments: Object.freeze(deletedAdjustments),
+    oldLaterDatasets: Object.freeze(oldLaterDatasets),
+    counts: Object.freeze({
+      archives: countRows(db, `
+        SELECT COUNT(*) AS row_count FROM vcc_fin_op_archives WHERE target_month > ?
+      `, [targetMonth]),
+      adjustments: deletedAdjustments.length,
+      runRows: childCount('vcc_fin_op_run_rows'),
+      runBalances: childCount('vcc_fin_op_run_balances'),
+      pendingSummaries: childCount('vcc_fin_op_pending_summary_rows'),
+      pendingCurrencyTotals: childCount('vcc_fin_op_pending_currency_totals'),
+      runs: laterRuns.length,
+      datasets: oldLaterDatasets.length
+    })
+  });
+}
+
+// 级联解归档（spec 3.1）：同一事务内写一条成功审计，删除后续月份的归档快照、结果及其明细
+// （含人工调整，调整明细写入审计），后续月份数据集恢复为未处理，再按原规则解归档目标月。
+function buildCascadeUnarchivePlan(db, evidence, transactionTimestamp, provenance) {
+  const single = buildUnarchivePlan(db, evidence, transactionTimestamp, provenance);
+  const scope = loadCascadeScope(db, evidence.targetMonth);
+  const counts = scope.counts;
+  const runId = single.runId;
+  const targetArchiveCount = single.tableBudgets.vcc_fin_op_archives.deletes;
+  const datasetTypes = single.expectedPostState.datasetTypes;
+  const expectedTotalChanges = single.expectedTotalChanges
+    + counts.archives + counts.adjustments + counts.runRows + counts.runBalances
+    + counts.pendingSummaries + counts.pendingCurrencyTotals + counts.runs + counts.datasets;
+  const auditEvidence = Object.freeze({
+    ...single.expectedPostState.auditEvidence,
+    operation: 'unarchive_cascade',
+    laterMonths: Object.freeze([...evidence.gate.dependentMonths]),
+    deletedRuns: scope.laterRuns,
+    deletedAdjustments: scope.deletedAdjustments,
+    deletedCounts: counts,
+    expectedTotalChanges,
+    minimumSafeAppVersion: '3.2.17'
+  });
+  const auditStep = single.steps.find((step) => step.stepId === 'unarchive.audit-success');
+  const targetSteps = single.steps.filter((step) => step.stepId !== 'unarchive.audit-success');
+  const monthBinding = [evidence.targetMonth];
+  return freezePlan({
+    operation: VCC_MUTATION_OPERATIONS.UNARCHIVE_CASCADE,
+    targetMonth: evidence.targetMonth,
+    runId,
+    lockedEvidenceToken: evidence.previewToken,
+    expectedTotalChanges,
+    tableBudgets: {
+      vcc_fin_op_operation_audit: { inserts: 1, updates: 0, deletes: 0, protection: 'planned-scope' },
+      vcc_fin_op_archives: {
+        inserts: 0, updates: 0, deletes: counts.archives + targetArchiveCount, protection: 'planned-scope'
+      },
+      vcc_fin_op_run_adjustments: { inserts: 0, updates: 0, deletes: counts.adjustments, protection: 'planned-scope' },
+      vcc_fin_op_run_rows: { inserts: 0, updates: 0, deletes: counts.runRows, protection: 'planned-scope' },
+      vcc_fin_op_run_balances: { inserts: 0, updates: 0, deletes: counts.runBalances, protection: 'planned-scope' },
+      vcc_fin_op_pending_summary_rows: {
+        inserts: 0, updates: 0, deletes: counts.pendingSummaries, protection: 'planned-scope'
+      },
+      vcc_fin_op_pending_currency_totals: {
+        inserts: 0, updates: 0, deletes: counts.pendingCurrencyTotals, protection: 'planned-scope'
+      },
+      vcc_fin_op_runs: { inserts: 0, updates: 1, deletes: counts.runs, protection: 'planned-scope' },
+      vcc_fin_op_datasets: {
+        inserts: 0, updates: counts.datasets + datasetTypes.length, deletes: 0, protection: 'planned-scope'
+      }
+    },
+    steps: [{
+      stepId: 'unarchive-cascade.audit-success',
+      expectedChanges: 1,
+      bindings: [
+        auditStep.bindings[0],
+        auditStep.bindings[1],
+        auditStep.bindings[2],
+        JSON.stringify(auditEvidence),
+        auditStep.bindings[4],
+        auditStep.bindings[5],
+        auditStep.bindings[6]
+      ]
+    }, {
+      stepId: 'unarchive-cascade.delete-later-archives',
+      expectedChanges: counts.archives,
+      bindings: monthBinding
+    }, {
+      stepId: 'unarchive-cascade.delete-later-adjustments',
+      expectedChanges: counts.adjustments,
+      bindings: monthBinding
+    }, {
+      stepId: 'unarchive-cascade.delete-later-run-rows',
+      expectedChanges: counts.runRows,
+      bindings: monthBinding
+    }, {
+      stepId: 'unarchive-cascade.delete-later-run-balances',
+      expectedChanges: counts.runBalances,
+      bindings: monthBinding
+    }, {
+      stepId: 'unarchive-cascade.delete-later-pending-summaries',
+      expectedChanges: counts.pendingSummaries,
+      bindings: monthBinding
+    }, {
+      stepId: 'unarchive-cascade.delete-later-pending-currency-totals',
+      expectedChanges: counts.pendingCurrencyTotals,
+      bindings: monthBinding
+    }, {
+      stepId: 'unarchive-cascade.delete-later-runs',
+      expectedChanges: counts.runs,
+      bindings: monthBinding
+    }, {
+      stepId: 'unarchive-cascade.restore-later-datasets',
+      expectedChanges: counts.datasets,
+      bindings: [transactionTimestamp, evidence.targetMonth]
+    }, ...targetSteps],
+    expectedPostState: Object.freeze({
+      ...single.expectedPostState,
+      auditEvidence,
+      auditOperationType: 'unarchive_cascade',
+      auditStepId: 'unarchive-cascade.audit-success',
+      cascade: Object.freeze({
+        laterMonths: auditEvidence.laterMonths,
+        deletedRunIds: Object.freeze(scope.laterRuns.map((run) => run.runId)),
+        oldLaterDatasets: scope.oldLaterDatasets,
+        deletedAdjustmentCount: counts.adjustments
+      })
+    })
+  });
+}
+
+function assertCascadeUnarchivePostconditions(db, plan, stepResults) {
+  const post = plan.expectedPostState;
+  const cascade = post.cascade;
+  const remainingLaterRuns = countRows(db, `
+    SELECT COUNT(*) AS row_count FROM vcc_fin_op_runs WHERE target_month > ?
+  `, [plan.targetMonth]);
+  const remainingLaterArchives = countRows(db, `
+    SELECT COUNT(*) AS row_count FROM vcc_fin_op_archives WHERE target_month > ?
+  `, [plan.targetMonth]);
+  const deletedRunIds = JSON.stringify(cascade.deletedRunIds);
+  const remainingChildren = [
+    'vcc_fin_op_run_adjustments',
+    'vcc_fin_op_run_rows',
+    'vcc_fin_op_run_balances',
+    'vcc_fin_op_pending_summary_rows',
+    'vcc_fin_op_pending_currency_totals'
+  ].reduce((total, tableName) => total + countRows(db, `
+    SELECT COUNT(*) AS row_count FROM ${tableName}
+    WHERE run_id IN (SELECT value FROM json_each(?))
+  `, [deletedRunIds]), 0);
+  const actualLaterDatasets = cascade.oldLaterDatasets.map((row) => {
+    const actual = db.prepare(`
+      SELECT * FROM vcc_fin_op_datasets WHERE target_month = ? AND dataset_type = ?
+    `).get(row.target_month, row.dataset_type);
+    return actual ? { ...actual } : null;
+  });
+  const expectedLaterDatasets = cascade.oldLaterDatasets.map((row) => ({
+    ...row,
+    data_status: 'unprocessed',
+    archived_run_id: null,
+    updated_at: post.transactionTimestamp
+  }));
+  if (
+    remainingLaterRuns !== 0
+    || remainingLaterArchives !== 0
+    || remainingChildren !== 0
+    || stableStringify(actualLaterDatasets) !== stableStringify(expectedLaterDatasets)
+  ) {
+    throw destructiveWriteError(
+      'unarchive-invariant-failed',
+      '级联解归档提交前后续月份状态断言失败，操作已回滚。'
+    );
+  }
+  const result = assertUnarchivePostconditions(db, plan, stepResults);
+  return Object.freeze({
+    ...result,
+    cascade: true,
+    laterMonths: cascade.laterMonths,
+    deletedRunCount: cascade.deletedRunIds.length,
+    deletedAdjustmentCount: cascade.deletedAdjustmentCount
+  });
+}
+
 function loadLockedDeleteEvidence(db, normalizedPayload, taskGeneration) {
   const deleteEvidence = loadDeleteEvidenceV2(db, {
     targetMonth: normalizedPayload.targetMonth,
@@ -315,6 +546,16 @@ function assertLockedEvidenceAllowed(action, evidence, normalizedPayload) {
       const error = destructiveWriteError(
         evidence.gate.code || 'unarchive-blocked',
         evidence.gate.message || '当前月份不可解归档',
+        { dependentMonths: evidence.gate.dependentMonths }
+      );
+      error.dependentMonths = evidence.gate.dependentMonths;
+      throw error;
+    }
+    if (evidence.gate.cascade && normalizedPayload.confirmCascade !== true) {
+      const error = destructiveWriteError(
+        'unarchive-cascade-confirmation-required',
+        `该月之后仍存在已归档或已计算月份：${evidence.gate.dependentMonths.join('、')}，`
+          + '请在解归档窗口确认同时删除这些月份的结果后再执行。',
         { dependentMonths: evidence.gate.dependentMonths }
       );
       error.dependentMonths = evidence.gate.dependentMonths;
@@ -853,7 +1094,7 @@ function buildDeletePlan(db, evidence, transactionTimestamp, provenance) {
 
 function assertSuccessAudit(db, plan, stepResults) {
   const post = plan.expectedPostState;
-  const step = stepResults.find((entry) => entry.stepId === 'unarchive.audit-success');
+  const step = stepResults.find((entry) => entry.stepId === (post.auditStepId || 'unarchive.audit-success'));
   const auditId = step ? step.lastInsertRowid : null;
   const row = Number.isSafeInteger(auditId) ? db.prepare(`
     SELECT id, target_month, operation_type, run_id, status, preview_token,
@@ -868,7 +1109,7 @@ function assertSuccessAudit(db, plan, stepResults) {
     || auditId <= post.auditBoundary
     || boundaryCount !== 1
     || row.target_month !== plan.targetMonth
-    || row.operation_type !== 'unarchive'
+    || row.operation_type !== (post.auditOperationType || 'unarchive')
     || Number(row.run_id) !== plan.runId
     || row.status !== 'success'
     || row.preview_token !== plan.lockedEvidenceToken
@@ -894,7 +1135,10 @@ function assertUnarchivePostconditions(db, plan, stepResults) {
     ...post.oldRun,
     status: 'calculated',
     updated_at: post.transactionTimestamp,
-    archived_at: null
+    archived_at: null,
+    ...(Object.hasOwn(post.oldRun, 'adjustment_cycle')
+      ? { adjustment_cycle: (Number(post.oldRun.adjustment_cycle) || 0) + 1 }
+      : {})
   };
   const actualDatasets = db.prepare(`
     SELECT * FROM vcc_fin_op_datasets
@@ -1272,7 +1516,7 @@ function buildFailureAuditPlan({ action, evidence, normalizedPayload, provenance
   const contract = evidence && evidence.archiveContract;
   const deleteTargetType = evidence && evidence.targetType;
   const operationType = action === VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH
-    ? DESTRUCTIVE_OPERATION_TYPES[action]
+    ? (evidence && evidence.gate && evidence.gate.cascade ? 'unarchive_cascade' : DESTRUCTIVE_OPERATION_TYPES[action])
     : (deleteTargetType ? deleteOperationType(deleteTargetType) : DESTRUCTIVE_OPERATION_TYPES[action]);
   return Object.freeze({
     operationType,
@@ -1335,9 +1579,14 @@ function executeLockedDestructiveMutation({
       : loadLockedDeleteEvidence(db, normalizedPayload, taskGeneration);
     assertLockedEvidenceAllowed(action, evidence, normalizedPayload);
     const transactionTimestamp = readDatabaseLocalTimestamp(db);
-    const plan = action === VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH
-      ? buildUnarchivePlan(db, evidence, transactionTimestamp, provenance)
-      : buildDeletePlan(db, evidence, transactionTimestamp, provenance);
+    let plan;
+    if (action !== VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH) {
+      plan = buildDeletePlan(db, evidence, transactionTimestamp, provenance);
+    } else if (evidence.gate.cascade) {
+      plan = buildCascadeUnarchivePlan(db, evidence, transactionTimestamp, provenance);
+    } else {
+      plan = buildUnarchivePlan(db, evidence, transactionTimestamp, provenance);
+    }
     guard = beginMutationGuard(db, plan, hooks.guardOptions || {});
     emitProgress(onProgress, action, normalizedPayload.targetMonth, 'preserving-audit', false);
     emitProgress(onProgress, action, normalizedPayload.targetMonth, 'applying', false);
@@ -1350,9 +1599,14 @@ function executeLockedDestructiveMutation({
     });
     assertMutationGuardPostwrite(db, guard);
     emitProgress(onProgress, action, normalizedPayload.targetMonth, 'verifying', false);
-    const result = action === VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH
-      ? assertUnarchivePostconditions(db, plan, stepResults)
-      : assertDeletePostconditions(db, plan, stepResults);
+    let result;
+    if (action !== VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH) {
+      result = assertDeletePostconditions(db, plan, stepResults);
+    } else if (plan.operation === VCC_MUTATION_OPERATIONS.UNARCHIVE_CASCADE) {
+      result = assertCascadeUnarchivePostconditions(db, plan, stepResults);
+    } else {
+      result = assertUnarchivePostconditions(db, plan, stepResults);
+    }
     closeFailures = closeMutationGuard(guard);
     if (closeFailures.length > 0) {
       throw destructiveWriteError(

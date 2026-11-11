@@ -871,3 +871,138 @@ test('未知 VCC trigger 在首写前阻断 delete 且数据库零 failure audit
   assert.equal(verify.prepare('SELECT COUNT(*) AS count FROM vcc_fin_op_operation_audit').get().count, 0);
   verify.close();
 });
+
+test('级联解归档：须明确确认；目标月恢复待确认，后续月份结果连同调整删除并写入审计，原表数据不动', (t) => {
+  const dbPath = createTempDb(t);
+  const raw = seedCurrentArchived(dbPath);
+  assert.equal(raw.targetMonth, '2026-07');
+  const setup = new DatabaseSync(dbPath);
+  setup.exec('PRAGMA foreign_keys = ON');
+  const calculatedLater = seedCalculatedRunWithChildren(setup, '2026-08');
+  seedDataset(setup, '2026-08', 'recharge_refund');
+  const archivedLater = seedCalculatedRunWithChildren(setup, '2026-09');
+  setup.prepare(`
+    UPDATE vcc_fin_op_runs SET status = 'archived', archived_at = '2026-10-01 09:00:00' WHERE id = ?
+  `).run(archivedLater);
+  setup.prepare(`
+    INSERT INTO vcc_fin_op_archives (target_month, subject, balances_json, run_id, archived_at)
+    VALUES ('2026-09', 'PPHK', '{}', ?, '2026-10-01 09:00:00')
+  `).run(archivedLater);
+  setup.prepare(`
+    INSERT INTO vcc_fin_op_datasets (
+      target_month, dataset_type, data_status, archived_run_id, revision, generated_at, updated_at
+    ) VALUES ('2026-09', 'recharge_refund', 'archived', ?, 1, '2026-09-30 00:00:00', '2026-09-30 00:00:00')
+  `).run(archivedLater);
+  const effectiveBefore = setup.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n;
+  setup.close();
+
+  const snapshot = preview(dbPath, '2026-07');
+  assert.equal(snapshot.canUnarchive, true);
+  assert.equal(snapshot.code, '');
+  assert.deepEqual(snapshot.dependentMonths, ['2026-08', '2026-09']);
+  assert.deepEqual(snapshot.cascade.months, ['2026-08', '2026-09']);
+  assert.deepEqual(snapshot.cascade.runs.map((run) => [run.targetMonth, run.status, run.adjustmentCount]), [
+    ['2026-08', 'calculated', 1],
+    ['2026-09', 'archived', 1]
+  ]);
+  assert.equal(snapshot.cascade.adjustmentCount, 2);
+
+  assert.throws(
+    () => execute(dbPath, '2026-07', snapshot),
+    (error) => error.code === 'unarchive-cascade-confirmation-required'
+      && error.dependentMonths.join(',') === '2026-08,2026-09'
+  );
+  assert.equal(unarchiveState(dbPath, '2026-07').run.status, 'archived', '未确认时不改任何状态');
+
+  const result = executeDestructiveMutationWithSafeAudit({
+    dbPath,
+    action: VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH,
+    payload: {
+      targetMonth: '2026-07',
+      expectedPreviewToken: snapshot.previewToken,
+      confirmCascade: true
+    },
+    taskGeneration: snapshot.taskGeneration,
+    appVersion: '3.2.17',
+    buildSha: 'cascade-test'
+  });
+  assert.equal(result.status, 'unarchived');
+  assert.equal(result.cascade, true);
+  assert.deepEqual(result.laterMonths, ['2026-08', '2026-09']);
+  assert.equal(result.deletedRunCount, 2);
+  assert.equal(result.deletedAdjustmentCount, 2);
+
+  const verify = new DatabaseSync(dbPath, { readOnly: true });
+  t.after(() => verify.close());
+  const target = verify.prepare(`
+    SELECT status, archived_at, adjustment_cycle FROM vcc_fin_op_runs WHERE target_month = '2026-07'
+  `).get();
+  assert.deepEqual({ ...target }, { status: 'calculated', archived_at: null, adjustment_cycle: 1 });
+  assert.equal(verify.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_runs WHERE target_month > '2026-07'`).get().n, 0);
+  assert.equal(verify.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_archives').get().n, 0);
+  for (const tableName of [
+    'vcc_fin_op_run_adjustments',
+    'vcc_fin_op_run_rows',
+    'vcc_fin_op_run_balances',
+    'vcc_fin_op_pending_summary_rows',
+    'vcc_fin_op_pending_currency_totals'
+  ]) {
+    assert.equal(verify.prepare(`
+      SELECT COUNT(*) AS n FROM ${tableName} WHERE run_id IN (?, ?)
+    `).get(calculatedLater, archivedLater).n, 0, tableName);
+  }
+  assert.deepEqual(verify.prepare(`
+    SELECT target_month, data_status, archived_run_id FROM vcc_fin_op_datasets
+    WHERE target_month > '2026-07' ORDER BY target_month
+  `).all().map((row) => ({ ...row })), [
+    { target_month: '2026-08', data_status: 'unprocessed', archived_run_id: null },
+    { target_month: '2026-09', data_status: 'unprocessed', archived_run_id: null }
+  ]);
+  assert.equal(verify.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, effectiveBefore);
+  const audit = verify.prepare(`
+    SELECT status, run_id, evidence_json FROM vcc_fin_op_operation_audit
+    WHERE operation_type = 'unarchive_cascade' AND status = 'success'
+  `).get();
+  const evidence = JSON.parse(audit.evidence_json);
+  assert.equal(Number(audit.run_id), raw.runs[0].id);
+  assert.deepEqual(evidence.laterMonths, ['2026-08', '2026-09']);
+  assert.deepEqual(evidence.deletedRuns.map((run) => [run.targetMonth, run.status]), [
+    ['2026-08', 'calculated'],
+    ['2026-09', 'archived']
+  ]);
+  assert.deepEqual(evidence.deletedAdjustments.map((row) => [
+    row.targetMonth, row.currency, row.adjustmentAmount, row.reason
+  ]), [
+    ['2026-08', 'USD', '1', '测试'],
+    ['2026-09', 'USD', '1', '测试']
+  ]);
+  assert.equal(evidence.minimumSafeAppVersion, '3.2.17');
+  assert.equal(evidence.expectedTotalChanges, 8 + 1 + 2 + 2 + 2 + 2 + 2 + 2 + 1);
+});
+
+test('级联解归档预览后后续月份又有变化时按陈旧 token 拒绝', (t) => {
+  const dbPath = createTempDb(t);
+  seedCurrentArchived(dbPath);
+  const setup = new DatabaseSync(dbPath);
+  setup.exec('PRAGMA foreign_keys = ON');
+  const laterRunId = seedCalculatedRunWithChildren(setup, '2026-08');
+  setup.close();
+  const snapshot = preview(dbPath, '2026-07');
+  assert.equal(snapshot.cascade.adjustmentCount, 1);
+  const change = new DatabaseSync(dbPath);
+  change.prepare(`UPDATE vcc_fin_op_runs SET result_revision = 2, updated_at = '2026-08-12 00:00:00' WHERE id = ?`)
+    .run(laterRunId);
+  change.close();
+  assert.throws(
+    () => executeDestructiveMutationWithSafeAudit({
+      dbPath,
+      action: VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH,
+      payload: { targetMonth: '2026-07', expectedPreviewToken: snapshot.previewToken, confirmCascade: true },
+      taskGeneration: snapshot.taskGeneration,
+      appVersion: '3.2.17',
+      buildSha: 'cascade-test'
+    }),
+    (error) => error.code === 'state-changed'
+  );
+  assert.equal(unarchiveState(dbPath, '2026-07').run.status, 'archived');
+});

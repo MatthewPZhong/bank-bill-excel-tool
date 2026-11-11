@@ -231,7 +231,17 @@ test('B-02 current archive 集合加载复用 A 合同，并生成稳定 token v
   assert.equal(previewUnarchiveSnapshot(db, {
     targetMonth: raw.targetMonth,
     taskGeneration: 4
-  }).code, 'active-vcc-task');
+  }).canUnarchive, true, '其他月份的导入中批次不再阻断本月解归档');
+  db.prepare(`
+    INSERT INTO vcc_fin_op_import_batches (
+      id, target_month, status, file_count, started_at
+    ) VALUES ('archive-read-active-same-month', ?, 'importing', 1, '2026-08-01 00:00:00')
+  `).run(raw.targetMonth);
+  assert.equal(previewUnarchiveSnapshot(db, {
+    targetMonth: raw.targetMonth,
+    taskGeneration: 4
+  }).code, 'active-vcc-task', '目标月自身的导入中批次仍阻断');
+  db.prepare("DELETE FROM vcc_fin_op_import_batches WHERE id = 'archive-read-active-same-month'").run();
 
   db.prepare(`
     UPDATE vcc_fin_op_archives SET balances_json = '{}'

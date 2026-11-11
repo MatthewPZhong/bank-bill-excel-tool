@@ -14,7 +14,7 @@ const {
 } = require('./archive-contract');
 const {
   UNARCHIVE_GATE_VERSION,
-  evaluateUnarchiveGate
+  evaluateCascadeUnarchiveGate
 } = require('./unarchive-gate');
 const {
   sha256,
@@ -181,7 +181,8 @@ function loadArchiveEvidenceSet(db, { targetMonth = null, trace = null } = {}) {
            adjustment.category_major, adjustment.category_minor,
            adjustment.currency, adjustment.adjustment_amount,
            adjustment.reason, adjustment.sequence, adjustment.created_at,
-           adjustment.created_app_version, adjustment.created_build_sha
+           adjustment.created_app_version, adjustment.created_build_sha,
+           adjustment.adjustment_cycle
     FROM vcc_fin_op_run_adjustments adjustment
     JOIN vcc_fin_op_runs run ON run.id = adjustment.run_id
     JOIN candidate_months candidate ON candidate.target_month = run.target_month
@@ -300,7 +301,8 @@ function loadArchiveEvidenceSet(db, { targetMonth = null, trace = null } = {}) {
       sequence: Number(row.sequence),
       createdAt: row.created_at,
       createdAppVersion: row.created_app_version,
-      createdBuildSha: row.created_build_sha
+      createdBuildSha: row.created_build_sha,
+      adjustmentCycle: Number(row.adjustment_cycle) || 0
     });
   }
   for (const row of runBalances) {
@@ -363,11 +365,12 @@ function loadUnarchiveGateEvidence(db, targetMonth, {
   taskActive,
   trace = null
 }) {
+  // 只看目标月的进行中批次（spec D3）；导入运行期间全局单任务租约仍会挡住解归档。
   const activeBatches = executeQuery(db, trace, 'unarchive-active-batches', `
     SELECT id FROM vcc_fin_op_import_batches
-    WHERE status = 'importing'
+    WHERE status = 'importing' AND target_month = ?
     ORDER BY id
-  `);
+  `, [targetMonth]);
   const importRecords = executeQuery(db, trace, 'unarchive-import-gate', `
     SELECT id, status
     FROM vcc_fin_op_import_records
@@ -444,7 +447,7 @@ function previewUnarchiveSnapshot(db, {
     taskActive,
     trace
   });
-  const gate = evaluateUnarchiveGate(archiveContract, gateEvidence);
+  const gate = evaluateCascadeUnarchiveGate(archiveContract, gateEvidence);
   const token = buildOperationTokenV2({
     action: 'unarchive',
     targetMonth: month,
@@ -466,10 +469,33 @@ function previewUnarchiveSnapshot(db, {
     canEnumerate: canReadArchive,
     canExport: canReadArchive,
     canUnarchive: gate.canUnarchive,
+    cascade: gate.cascade ? loadCascadePreview(db, month, gate.dependentMonths, trace) : null,
     code: gate.code,
     message: gate.message,
     previewToken: token ? token.previewToken : null,
     taskGeneration: Number(taskGeneration)
+  });
+}
+
+// 级联解归档预览：列出将删除结果的后续月份及其人工调整条数，供确认。
+function loadCascadePreview(db, targetMonth, dependentMonths, trace = null) {
+  const runs = executeQuery(db, trace, 'unarchive-cascade-runs', `
+    SELECT run.id, run.target_month, run.status,
+           (SELECT COUNT(*) FROM vcc_fin_op_run_adjustments adjustment
+            WHERE adjustment.run_id = run.id) AS adjustment_count
+    FROM vcc_fin_op_runs run
+    WHERE run.target_month > ?
+    ORDER BY run.target_month, run.id
+  `, [targetMonth]).map((row) => Object.freeze({
+    runId: Number(row.id),
+    targetMonth: String(row.target_month),
+    status: String(row.status),
+    adjustmentCount: Number(row.adjustment_count) || 0
+  }));
+  return Object.freeze({
+    months: Object.freeze([...dependentMonths]),
+    runs: Object.freeze(runs),
+    adjustmentCount: runs.reduce((total, run) => total + run.adjustmentCount, 0)
   });
 }
 
