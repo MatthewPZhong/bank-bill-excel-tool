@@ -17719,9 +17719,9 @@ function registerNewAccountHandlers() {
     }
   });
 
-  ipcMain.handle('vccFinancialOp:run:preflight', (_event, payload = {}) => {
+  ipcMain.handle('vccFinancialOp:run:preflight', async (_event, payload = {}) => {
     try {
-      return getVccFinancialOpService().preflightRun(payload);
+      return await getVccFinancialOpService().preflightRun(payload);
     } catch (error) {
       return { status: 'error', message: error && error.message ? error.message : String(error) };
     }
@@ -17840,8 +17840,8 @@ function registerNewAccountHandlers() {
     return await getVccFinancialOpService().listImportMonths();
   });
 
-  ipcMain.handle('vccFinancialOp:imports:list-records', (_event, payload = {}) => {
-    return getVccFinancialOpService().listImportRecords(payload.yearMonth);
+  ipcMain.handle('vccFinancialOp:imports:list-records', async (_event, payload = {}) => {
+    return await getVccFinancialOpService().listImportRecords(payload.yearMonth);
   });
 
   ipcMain.handle('vccFinancialOp:data-manager:overview', (_event, payload = {}) => {
@@ -17916,11 +17916,11 @@ function registerNewAccountHandlers() {
     }
   );
 
-  ipcMain.handle('vccFinancialOp:data-manager:export-preview', (_event, payload = {}) => {
+  ipcMain.handle('vccFinancialOp:data-manager:export-preview', async (_event, payload = {}) => {
     try {
       return {
         status: 'success',
-        ...getVccFinancialOpService().previewDatasetExport(payload)
+        ...await getVccFinancialOpService().previewDatasetExport(payload)
       };
     } catch (error) {
       return { status: 'error', message: error && error.message ? error.message : String(error) };
@@ -17930,7 +17930,7 @@ function registerNewAccountHandlers() {
   trackedIpcHandle('vccFinancialOp:data-manager:export', 'VCC财务OP校验', '导出数据', {
     prepare: async (_event, payload = {}) => {
       try {
-        const inspection = getVccFinancialOpService().previewDatasetExport(payload);
+        const inspection = await getVccFinancialOpService().previewDatasetExport(payload);
         if (!inspection.exportable) {
           return {
             proceed: false,

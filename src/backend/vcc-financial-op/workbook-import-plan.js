@@ -2,7 +2,7 @@
 
 const path = require('node:path');
 const fs = require('node:fs');
-const { randomUUID, createHash } = require('node:crypto');
+const { randomUUID } = require('node:crypto');
 const { openRichWorkbook } = require('../xlsx/rich-workbook');
 const {
   SOURCE_TYPES, SOURCE_LABELS, SOURCE_DEFINITIONS, SYSTEM_OP_HEADERS,
@@ -221,11 +221,7 @@ function resolveImportPlan(plan, request = {}) {
   })).filter((file) => file.sheets.length);
 }
 
-function sheetPlanDigest(sources) {
-  return createHash('sha256').update(JSON.stringify(sources.map(({ sourceId: _id, physicalFileId: _fileId, ...source }) => source))).digest('hex');
-}
-
-async function revalidateImportPlan(plan, options = {}) {
+async function revalidateImportPlan(plan, _options = {}) {
   for (const file of plan.physicalFiles) {
     let fingerprint;
     try {
@@ -237,13 +233,8 @@ async function revalidateImportPlan(plan, options = {}) {
         || JSON.stringify(inputFileIdentity(file.filePath)) !== JSON.stringify(file.fileIdentity)) {
       throw planError('vcc-import-plan-stale', `${file.fileName}：文件已变化，请重新预检`);
     }
-    const current = await inspectWorkbook(file.filePath, { ...options, physicalFileId: file.physicalFileId,
-      sourceStructures: plan.sourceStructures || null });
-    const previous = plan.sources.filter((source) => source.physicalFileId === file.physicalFileId);
-    if (current.sha256 !== file.sha256 || current.sizeBytes !== file.sizeBytes
-        || sheetPlanDigest(previous) !== sheetPlanDigest(current.sources)) {
-      throw planError('vcc-import-plan-stale', `${file.fileName}：文件或 Sheet 计划已变化，请重新预检`);
-    }
+    // 字节与文件身份未变、识别结构已冻结在计划中，重新解析只会得到同一份 Sheet 计划，
+    // 因此不再整本重扫（v3.2.17）。
   }
 }
 

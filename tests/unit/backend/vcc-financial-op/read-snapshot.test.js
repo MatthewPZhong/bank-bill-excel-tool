@@ -379,7 +379,7 @@ test('B-04 archive 0/1/100 候选均固定十条 SQL，且不读取禁表', () =
         .map((row) => String(row.detail)).join('\n');
       assert.match(
         plan,
-        /SEARCH fact USING COVERING INDEX idx_vcc_fin_op_effective_month_source \(target_month=\? AND source_type=\?\)/i
+        /SEARCH fact (EXISTS )?USING COVERING INDEX idx_vcc_fin_op_effective_month_source \(target_month=\? AND source_type=\?\)/i
       );
       assert.doesNotMatch(plan, /SCAN fact/i);
     }

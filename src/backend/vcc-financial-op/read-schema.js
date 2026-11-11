@@ -130,6 +130,8 @@ function openVccReadDatabase(dbPath) {
     db.exec('PRAGMA query_only = ON');
     db.exec('PRAGMA foreign_keys = ON');
     db.exec('PRAGMA busy_timeout = 30000');
+    db.exec('PRAGMA cache_size = -65536');
+    db.exec('PRAGMA temp_store = MEMORY');
     assertVccSchemaReady(db);
     return db;
   } catch (error) {

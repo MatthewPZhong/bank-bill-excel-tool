@@ -279,8 +279,10 @@ function readLegacyRawEvidence(db) {
     runAdjustments,
     storedRunBalances,
     pendingEffectiveFactCount: scalarCount(`
-      SELECT COUNT(*) AS count FROM vcc_fin_op_effective_rows
-      WHERE target_month = ? AND source_type = 'pending_archive_removal'
+      SELECT EXISTS (
+        SELECT 1 FROM vcc_fin_op_effective_rows
+        WHERE target_month = ? AND source_type = 'pending_archive_removal'
+      ) AS count
     `, targetMonth),
     pendingRunRowCount: scalarCount(`
       SELECT COUNT(*) AS count FROM vcc_fin_op_run_rows

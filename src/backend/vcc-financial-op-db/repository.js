@@ -35,6 +35,75 @@ const STAGING_ROW_INSERT_SQL = `
   )
 `;
 
+// 导入中转行（含每行原始 JSON）只在单次导入期间存在。生产导入在本连接建同名 TEMP 表，
+// 未限定库名的中转 SQL 自动落到 TEMP 表（SQLite 名称解析 temp 优先于 main），
+// 数据写入 SQLite 临时文件、连接关闭即删除，不再撑大主库与 WAL。
+// 列与约束须与主库 vcc_fin_op_import_staging_rows 保持一致（外键除外：TEMP 表不能引用 main 表）。
+const SCRATCH_STAGING_TABLE_SQL = `
+  CREATE TEMP TABLE vcc_fin_op_import_staging_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    import_record_id INTEGER NOT NULL,
+    import_source_id INTEGER NOT NULL,
+    source_type TEXT NOT NULL,
+    target_month TEXT NOT NULL,
+    idempotency_key_raw TEXT,
+    idempotency_key TEXT,
+    content_hash TEXT,
+    hash_version INTEGER NOT NULL DEFAULT 1,
+    raw_contract_version INTEGER NOT NULL DEFAULT 1,
+    subject TEXT,
+    stat_currency TEXT,
+    signed_amount TEXT,
+    business_department TEXT,
+    counterparty_department TEXT,
+    business_sub_type TEXT,
+    channel_name TEXT,
+    mid TEXT,
+    recon_type TEXT,
+    pending_currency TEXT,
+    pending_amount TEXT,
+    flow_currency TEXT,
+    flow_amount TEXT,
+    currency_mismatch INTEGER,
+    source_file TEXT NOT NULL,
+    sheet_name TEXT NOT NULL,
+    source_row INTEGER NOT NULL,
+    raw_json TEXT NOT NULL,
+    disposition TEXT CHECK (disposition IS NULL OR disposition IN (
+      'accepted', 'idempotent_skip', 'idempotent_conflict',
+      'invalid_key', 'format_error', 'rolled_back'
+    )),
+    validation_field TEXT,
+    validation_message TEXT,
+    existing_effective_id INTEGER,
+    comparison_import_row_id INTEGER,
+    diff_fields_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE INDEX temp.idx_vcc_fin_op_staging_record_disposition
+    ON vcc_fin_op_import_staging_rows(import_record_id, disposition, id);
+  CREATE INDEX temp.idx_vcc_fin_op_staging_record_key
+    ON vcc_fin_op_import_staging_rows(import_record_id, idempotency_key, content_hash, id);
+  CREATE INDEX temp.idx_vcc_fin_op_staging_comparison
+    ON vcc_fin_op_import_staging_rows(comparison_import_row_id)
+    WHERE comparison_import_row_id IS NOT NULL;
+`;
+
+function ensureImportStagingScratch(db) {
+  const existing = db.prepare(`
+    SELECT 1 AS present FROM temp.sqlite_master
+    WHERE type = 'table' AND name = 'vcc_fin_op_import_staging_rows'
+  `).get();
+  if (existing) return false;
+  if (db.isTransaction) {
+    throw new Error('VCC 导入暂存区必须在事务外创建');
+  }
+  // TEMP 表落在 SQLite 临时文件而非内存，百万行暂存不占用 worker 内存。
+  db.exec('PRAGMA temp_store = FILE');
+  db.exec(SCRATCH_STAGING_TABLE_SQL);
+  return true;
+}
+
 function createImportBatch(db, { id, targetMonth, fileCount }) {
   db.prepare(`
     INSERT INTO vcc_fin_op_import_batches (id, target_month, file_count)
@@ -181,8 +250,9 @@ function refreshImportRecordArchiveState(db, recordId) {
   else if (Number(row.failed_count) > 0) state = 'failed';
   else if (Number(row.unavailable_count) === total) state = 'unavailable';
   db.prepare(`
-    UPDATE vcc_fin_op_import_records SET archive_state = ? WHERE id = ?
-  `).run(state, recordId);
+    UPDATE vcc_fin_op_import_records SET archive_state = ?
+    WHERE id = ? AND archive_state IS NOT ?
+  `).run(state, recordId, state);
   return state;
 }
 
@@ -494,6 +564,60 @@ function countExportableImportAnomalies(db, recordId) {
     ? 1
     : 0;
   return legacyRowCount + (Number(legacyErrors.count) || 0) + syntheticFileFailure;
+}
+
+// 与 countExportableImportAnomalies 同一口径，按账期一次分组统计，避免列表逐条查询。
+function countExportableImportAnomaliesByMonth(db, yearMonth) {
+  const counts = new Map();
+  const compact = new Map(db.prepare(`
+    SELECT anomaly.import_record_id AS record_id, COUNT(*) AS count
+    FROM vcc_fin_op_import_anomalies AS anomaly
+    JOIN vcc_fin_op_import_records AS record ON record.id = anomaly.import_record_id
+    WHERE record.target_month = ?
+    GROUP BY anomaly.import_record_id
+  `).all(yearMonth).map((row) => [Number(row.record_id), Number(row.count) || 0]));
+  const legacyRows = new Map(db.prepare(`
+    SELECT legacy_row.import_record_id AS record_id, COUNT(*) AS count
+    FROM vcc_fin_op_import_rows AS legacy_row
+    JOIN vcc_fin_op_import_records AS record ON record.id = legacy_row.import_record_id
+    WHERE record.target_month = ?
+      AND legacy_row.disposition IN ('invalid_key', 'format_error', 'idempotent_conflict')
+    GROUP BY legacy_row.import_record_id
+  `).all(yearMonth).map((row) => [Number(row.record_id), Number(row.count) || 0]));
+  const legacyErrors = new Map(db.prepare(`
+    SELECT record_id, COUNT(*) AS count,
+           COALESCE(SUM(CASE WHEN category = 'file_failure' THEN 1 ELSE 0 END), 0)
+             AS file_failure_count
+    FROM (
+      SELECT import_error.import_record_id AS record_id,
+             ${LEGACY_ERROR_CATEGORY_SQL} AS category
+      FROM vcc_fin_op_import_errors AS import_error
+      JOIN vcc_fin_op_import_records AS record ON record.id = import_error.import_record_id
+      WHERE record.target_month = ?
+        AND ${LEGACY_ERROR_NOT_IN_ROWS_SQL}
+    )
+    GROUP BY record_id
+  `).all(yearMonth).map((row) => [Number(row.record_id), {
+    count: Number(row.count) || 0,
+    fileFailureCount: Number(row.file_failure_count) || 0
+  }]));
+  for (const record of db.prepare(`
+    SELECT id, status FROM vcc_fin_op_import_records WHERE target_month = ?
+  `).all(yearMonth)) {
+    const recordId = Number(record.id);
+    const compactCount = compact.get(recordId) || 0;
+    if (compactCount > 0) {
+      counts.set(recordId, compactCount);
+      continue;
+    }
+    const errors = legacyErrors.get(recordId) || { count: 0, fileFailureCount: 0 };
+    const syntheticFileFailure = String(record.status || '').startsWith('failed')
+      && errors.fileFailureCount === 0
+      ? 1
+      : 0;
+    counts.set(recordId, (legacyRows.get(recordId) || 0) + errors.count + syntheticFileFailure);
+  }
+  return counts;
 }
 
 function* iterateExportableImportAnomalies(db, recordId) {
@@ -881,6 +1005,7 @@ function claimVccFinancialOpFirstMonth(db, targetMonth) {
 module.exports = {
   IMPORT_ROW_INSERT_SQL,
   STAGING_ROW_INSERT_SQL,
+  ensureImportStagingScratch,
   createImportBatch,
   finishImportBatch,
   createImportRecord,
@@ -898,6 +1023,7 @@ module.exports = {
   listImportMonths,
   listImportRecords,
   countExportableImportAnomalies,
+  countExportableImportAnomaliesByMonth,
   iterateExportableImportAnomalies,
   countImportRowsByDisposition,
   failImportBatch,

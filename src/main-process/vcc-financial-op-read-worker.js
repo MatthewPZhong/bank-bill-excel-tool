@@ -10,7 +10,9 @@ const {
   listActiveMonthsSnapshot,
   listDeleteTargetsSnapshot,
   previewDeleteTargetSnapshot,
-  getRunResultSnapshot
+  getRunResultSnapshot,
+  listImportRecordsSnapshot,
+  preflightCalculationSnapshot
 } = require('../backend/vcc-financial-op/read-snapshot');
 
 const READ_ACTIONS = Object.freeze([
@@ -19,7 +21,10 @@ const READ_ACTIONS = Object.freeze([
   'list-delete-targets',
   'preview-delete-target',
   'list-active-months',
-  'get-run-result'
+  'get-run-result',
+  'list-import-records',
+  'inspect-dataset-export',
+  'preflight-calculation'
 ]);
 const READ_ACTION_SET = new Set(READ_ACTIONS);
 
@@ -37,6 +42,22 @@ function runReadAction(db, action, payload, trace) {
   if (action === 'preview-delete-target') return previewDeleteTargetSnapshot(db, options);
   if (action === 'list-active-months') return listActiveMonthsSnapshot(db, options);
   if (action === 'get-run-result') return getRunResultSnapshot(db, options);
+  if (action === 'list-import-records') return listImportRecordsSnapshot(db, options);
+  if (action === 'preflight-calculation') return preflightCalculationSnapshot(db, options);
+  if (action === 'inspect-dataset-export') {
+    // 导出写入模块较重（ExcelJS 等），只在本动作按需加载。
+    const { inspectDatasetExport } = require('./vcc-financial-op-dataset-writer');
+    return Object.freeze({
+      inspection: inspectDatasetExport(
+        db,
+        options.targetMonth,
+        options.sourceType,
+        options.targetKind,
+        { taskActive: Boolean(options.taskActive) }
+      ),
+      taskGeneration: Number(options.taskGeneration) || 0
+    });
+  }
   throw invalidReadAction(action);
 }
 

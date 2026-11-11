@@ -450,50 +450,46 @@ function detailLineageInspection(db, scope) {
     )
   `;
   const exportable = `(${legacyExportable}) OR (${boundReady}) OR (${retryableFallback})`;
-  const counts = db.prepare(`
-    SELECT
-      COUNT(*) AS total_rows,
-      COALESCE(SUM(CASE WHEN ${exportable} THEN 1 ELSE 0 END), 0) AS exportable_rows,
-      COALESCE(SUM(CASE WHEN ${integrityFailure} THEN 1 ELSE 0 END), 0)
-        AS integrity_failure_rows
+  // 可导出、完整性异常、缺失三类互斥，一次分组扫描得出原先三次全月扫描的全部结果。
+  const groups = db.prepare(`
+    SELECT e.import_record_id AS import_record_id,
+           COALESCE(s.id, e.import_source_id) AS source_id,
+           CASE WHEN ${exportable} THEN 'exportable'
+                WHEN ${integrityFailure} THEN 'integrity'
+                ELSE 'missing' END AS category,
+           COUNT(*) AS row_count
     FROM vcc_fin_op_effective_rows e
     LEFT JOIN vcc_fin_op_import_sources s ON s.id = e.import_source_id
     LEFT JOIN vcc_fin_op_effective_raw_fallback f ON f.effective_row_id = e.id
     WHERE e.target_month = ? AND e.source_type = ?
-  `).get(scope.targetMonth, scope.sourceType);
-  const exportableRows = Number(counts.exportable_rows) || 0;
-  const integrityFailures = db.prepare(`
-    SELECT COALESCE(s.id, e.import_source_id) AS source_id, COUNT(*) AS row_count
-    FROM vcc_fin_op_effective_rows e
-    LEFT JOIN vcc_fin_op_import_sources s ON s.id = e.import_source_id
-    LEFT JOIN vcc_fin_op_effective_raw_fallback f ON f.effective_row_id = e.id
-    WHERE e.target_month = ? AND e.source_type = ?
-      AND (${integrityFailure})
-    GROUP BY COALESCE(s.id, e.import_source_id)
-    ORDER BY COALESCE(s.id, e.import_source_id)
+    GROUP BY 1, 2, 3
   `).all(scope.targetMonth, scope.sourceType);
-  const integrityFailureRows = Number(counts.integrity_failure_rows) || 0;
-  const missingByImportRecord = db.prepare(`
-    SELECT e.import_record_id AS import_record_id, COUNT(*) AS missing_rows
-    FROM vcc_fin_op_effective_rows e
-    LEFT JOIN vcc_fin_op_import_sources s ON s.id = e.import_source_id
-    LEFT JOIN vcc_fin_op_effective_raw_fallback f ON f.effective_row_id = e.id
-    WHERE e.target_month = ? AND e.source_type = ?
-      AND NOT (${exportable})
-      AND NOT (${integrityFailure})
-    GROUP BY e.import_record_id
-    ORDER BY e.import_record_id
-  `).all(scope.targetMonth, scope.sourceType).map((row) => ({
-    importRecordId: Number(row.import_record_id),
-    missingRows: Number(row.missing_rows) || 0
-  }));
+  let exportableRows = 0;
+  let integrityFailureRows = 0;
+  const integrityFailureSourceIds = new Set();
+  const missingByRecord = new Map();
+  for (const group of groups) {
+    const rowCount = Number(group.row_count) || 0;
+    if (group.category === 'exportable') {
+      exportableRows += rowCount;
+    } else if (group.category === 'integrity') {
+      integrityFailureRows += rowCount;
+      integrityFailureSourceIds.add(Number(group.source_id));
+    } else {
+      const recordId = Number(group.import_record_id);
+      missingByRecord.set(recordId, (missingByRecord.get(recordId) || 0) + rowCount);
+    }
+  }
+  const missingByImportRecord = [...missingByRecord.entries()]
+    .sort((left, right) => left[0] - right[0])
+    .map(([importRecordId, missingRows]) => ({ importRecordId, missingRows }));
   return {
     totalRows,
     exportableRows,
     missingRows: Math.max(0, totalRows - exportableRows - integrityFailureRows),
     missingByImportRecord,
     integrityFailureRows,
-    integrityFailureSourceIds: integrityFailures.map((row) => Number(row.source_id))
+    integrityFailureSourceIds: [...integrityFailureSourceIds].sort((left, right) => left - right)
   };
 }
 

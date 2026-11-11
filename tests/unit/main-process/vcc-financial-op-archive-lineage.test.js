@@ -247,6 +247,33 @@ test('ready artifact 精确绑定后清 fallback、建立不可绕过业务锁�
   `).get(source.recordId).archive_state, 'unavailable');
 });
 
+test('已绑定且 hold 与引用一致的来源重复同步时零写入', (t) => {
+  const { db, archiveRepository } = fixture(t);
+  const source = seedSource(db);
+  const artifact = seedReadyArtifact(archiveRepository, source);
+  assert.equal(reconcileVccImportArchiveLineage({ db, archiveRepository }).bound, 1);
+  const updatedAt = db.prepare(`
+    SELECT updated_at FROM vcc_fin_op_import_sources WHERE id = ?
+  `).get(source.sourceId).updated_at;
+
+  const changesBefore = Number(db.prepare('SELECT total_changes() AS n').get().n);
+  const repeated = reconcileVccImportArchiveLineage({ db, archiveRepository });
+  assert.equal(Number(db.prepare('SELECT total_changes() AS n').get().n), changesBefore);
+  assert.equal(repeated.unchanged, 1);
+  assert.equal(repeated.bound, 0);
+  assert.equal(db.prepare(`
+    SELECT updated_at FROM vcc_fin_op_import_sources WHERE id = ?
+  `).get(source.sourceId).updated_at, updatedAt);
+  assert.equal(archiveRepository.listArtifactHolds(artifact.id).length, 1);
+
+  // 同一失败重复同步也不再写库。
+  db.prepare('UPDATE archive_blobs SET sha256 = ? WHERE id = ?').run('c'.repeat(64), artifact.blob.id);
+  assert.equal(reconcileVccImportArchiveLineage({ db, archiveRepository }).failed, 1);
+  const changesAfterFailure = Number(db.prepare('SELECT total_changes() AS n').get().n);
+  assert.equal(reconcileVccImportArchiveLineage({ db, archiveRepository }).failed, 1);
+  assert.equal(Number(db.prepare('SELECT total_changes() AS n').get().n), changesAfterFailure);
+});
+
 test('fallback-only 来源绑定后使用删除后引用数，不留下 stale hold', (t) => {
   const { db, archiveRepository } = fixture(t);
   const source = seedSource(db);

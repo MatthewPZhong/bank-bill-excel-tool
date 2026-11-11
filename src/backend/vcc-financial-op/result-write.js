@@ -781,7 +781,13 @@ function executeLockedResultMutation({
 function openVccWriteDatabase(dbPath, Database = DatabaseSync) {
   const db = new Database(dbPath);
   try {
-    db.exec('PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 30000;');
+    db.exec([
+      'PRAGMA foreign_keys = ON;',
+      'PRAGMA synchronous = NORMAL;',
+      'PRAGMA cache_size = -65536;',
+      'PRAGMA temp_store = MEMORY;',
+      'PRAGMA busy_timeout = 30000;'
+    ].join(' '));
     return db;
   } catch (error) {
     db.close();

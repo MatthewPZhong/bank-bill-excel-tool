@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const path = require('node:path');
 const {
   SOURCE_TYPES,
@@ -137,6 +138,25 @@ function assertImportArchiveHandoffMatches(hashedFiles, handoffFiles, batchId) {
   return descriptors;
 }
 
+function statVerifiedArchiveFiles(files, archiveHandoffFiles) {
+  const expectedFiles = Array.isArray(archiveHandoffFiles && archiveHandoffFiles.files)
+    ? archiveHandoffFiles.files
+    : [];
+  return Object.freeze(files.map((file, index) => {
+    const filePath = path.resolve(String(file && file.filePath || ''));
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) throw handoffError('输入原件不是普通文件');
+    const expected = expectedFiles[index] || {};
+    return Object.freeze({
+      ...file,
+      filePath,
+      fileName: path.basename(filePath),
+      sha256: String(expected.sha256 || ''),
+      sizeBytes: Number(stat.size)
+    });
+  }));
+}
+
 function detailRecordResult(record, db) {
   const sourceFiles = repository.listImportSources(db, record.recordId);
   return {
@@ -194,10 +214,15 @@ async function importFiles({
     }
   }
   throwIfCancelled(shouldCancel);
-  const hashedFiles = await hashSourceFiles(files);
+  // 工作簿计划路径的输入是主进程刚用 resolveVerifiedArtifact 校验过 SHA-256 的存档副本，
+  // 这里只核对路径与字节数；各导入器在解析后、首条业务写入前仍会整文件复核 SHA-256。
+  const frozenHandoff = isWorkbookPlan ? freezeHandoffV2(archiveHandoffFiles, normalizedBatchId) : null;
+  const hashedFiles = isWorkbookPlan
+    ? statVerifiedArchiveFiles(files, frozenHandoff)
+    : await hashSourceFiles(files);
   let exactFiles;
   if (isWorkbookPlan) {
-    const handoff = freezeHandoffV2(archiveHandoffFiles, normalizedBatchId);
+    const handoff = frozenHandoff;
     const expectedFiles = buildMemberFiles(files);
     if (handoff.files.length !== files.length) throw handoffError('物理文件数变化');
     exactFiles = hashedFiles.map((actual, index) => {
@@ -274,6 +299,7 @@ async function importFiles({
       recordIds.clear();
       throw error;
     }
+    repository.ensureImportStagingScratch(db);
     for (const [sourceType, sourceFiles] of grouped) {
       throwIfCancelled(shouldCancel);
       if (DETAIL_SOURCE_TYPES.has(sourceType)) {

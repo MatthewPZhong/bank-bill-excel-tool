@@ -30,6 +30,14 @@ test('相同字节替换文件仍使预检计划过期，不只比较 hash 与�
   const replacement = `${file}.replacement`; fs.copyFileSync(file, replacement); fs.renameSync(replacement, file);
   await assert.rejects(revalidateImportPlan(plan), { code: 'vcc-import-plan-stale' });
 });
+test('提交前复检只核对字节与文件身份，不再整本重新解析', async (t) => {
+  const file = workbookFile(t, [{ name: '业务', rows: [SOURCE_DEFINITIONS[SOURCE_TYPES.RECHARGE].headers] }]);
+  const plan = await inspectWorkbookImportPlan([file]);
+  // 计划里的 Sheet 清单被改动也不会再被重新解析覆盖，说明复检只依赖冻结的字节与身份。
+  const tampered = { ...plan, sources: plan.sources.map((source) => ({ ...source, sheetName: '未重扫' })) };
+  await revalidateImportPlan(tampered);
+});
+
 const channel = [...SOURCE_DEFINITIONS[SOURCE_TYPES.CHANNEL].headers];
 const recharge = [...SOURCE_DEFINITIONS[SOURCE_TYPES.RECHARGE].headers];
 

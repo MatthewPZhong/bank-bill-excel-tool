@@ -511,20 +511,34 @@ function nestedAmountKey(subject, currency) {
   return JSON.stringify([subject, currency]);
 }
 
+// 精确十进制加法与顺序无关，因此不再让 SQLite 按 id 排序整月数据；各汇总集合按“最早出现的行 id”
+// 重排，保证主体、分组和合计的遍历顺序（以及写入 run_rows 的顺序、报错首项）与按 id 处理时完全一致。
+function firstSeen(ranks, key, rank) {
+  const previous = ranks.get(key);
+  if (previous === undefined || rank < previous) ranks.set(key, rank);
+}
+
+function orderedByFirstSeen(map, ranks) {
+  return new Map([...map.entries()].sort((left, right) => ranks.get(left[0]) - ranks.get(right[0])));
+}
+
 function aggregateEffectiveRows(db, targetMonth) {
   const movementGroups = new Map();
   const pendingGroups = new Map();
   const pendingCurrencyTotals = new Map();
-  const periodTotals = new Map();
-  const subjects = new Set();
+  const movementPeriodTotals = new Map();
+  const subjectRanks = new Map();
+  const movementRanks = new Map();
+  const pendingRanks = new Map();
+  const pendingTotalRanks = new Map();
+  const periodRanks = new Map();
   const rows = db.prepare(`
-    SELECT source_type, subject, stat_currency, signed_amount,
+    SELECT id, source_type, subject, stat_currency, signed_amount,
            business_sub_type, counterparty_department, channel_name, mid,
            recon_type, pending_currency, pending_amount,
            flow_currency, flow_amount, currency_mismatch
     FROM vcc_fin_op_effective_rows
     WHERE target_month = ?
-    ORDER BY id
   `).iterate(targetMonth);
 
   for (const storedRow of rows) {
@@ -535,7 +549,9 @@ function aggregateEffectiveRows(db, targetMonth) {
       pending_currency: normalizeLegacyStoredCurrency(storedRow.pending_currency),
       flow_currency: normalizeLegacyStoredCurrency(storedRow.flow_currency)
     };
-    subjects.add(row.subject);
+    // 同一行内先流水币种、后 Pending 币种，保持原有插入先后。
+    const rank = Number(storedRow.id) * 2;
+    firstSeen(subjectRanks, row.subject, rank);
     if (row.source_type !== SOURCE_TYPES.PENDING) {
       const key = movementGroupKey(row);
       let group = movementGroups.get(key);
@@ -547,8 +563,11 @@ function aggregateEffectiveRows(db, targetMonth) {
         };
         movementGroups.set(key, group);
       }
+      firstSeen(movementRanks, key, rank);
       group.amount.add(row.signed_amount);
-      addToAccumulatorMap(periodTotals, nestedAmountKey(row.subject, row.stat_currency), row.signed_amount);
+      const periodKey = nestedAmountKey(row.subject, row.stat_currency);
+      addToAccumulatorMap(movementPeriodTotals, periodKey, row.signed_amount);
+      firstSeen(periodRanks, periodKey, rank);
       continue;
     }
 
@@ -563,24 +582,31 @@ function aggregateEffectiveRows(db, targetMonth) {
       };
       pendingGroups.set(summaryKey, summary);
     }
+    firstSeen(pendingRanks, summaryKey, rank);
     summary.flowAmount.add(row.flow_amount);
     summary.pendingAmount.add(row.pending_amount);
-    addToAccumulatorMap(
-      pendingCurrencyTotals,
-      nestedAmountKey(row.subject, row.flow_currency),
-      row.flow_amount
-    );
-    addToAccumulatorMap(
-      pendingCurrencyTotals,
-      nestedAmountKey(row.subject, row.pending_currency),
-      row.pending_amount
-    );
+    const flowKey = nestedAmountKey(row.subject, row.flow_currency);
+    addToAccumulatorMap(pendingCurrencyTotals, flowKey, row.flow_amount);
+    firstSeen(pendingTotalRanks, flowKey, rank);
+    const pendingKey = nestedAmountKey(row.subject, row.pending_currency);
+    addToAccumulatorMap(pendingCurrencyTotals, pendingKey, row.pending_amount);
+    firstSeen(pendingTotalRanks, pendingKey, rank + 1);
   }
 
-  for (const [key, amount] of pendingCurrencyTotals) {
+  const orderedPendingCurrencyTotals = orderedByFirstSeen(pendingCurrencyTotals, pendingTotalRanks);
+  const periodTotals = orderedByFirstSeen(movementPeriodTotals, periodRanks);
+  for (const [key, amount] of orderedPendingCurrencyTotals) {
     addToAccumulatorMap(periodTotals, key, amount.value());
   }
-  return { movementGroups, pendingGroups, pendingCurrencyTotals, periodTotals, subjects };
+  return {
+    movementGroups: orderedByFirstSeen(movementGroups, movementRanks),
+    pendingGroups: orderedByFirstSeen(pendingGroups, pendingRanks),
+    pendingCurrencyTotals: orderedPendingCurrencyTotals,
+    periodTotals,
+    subjects: new Set([...subjectRanks.entries()]
+      .sort((left, right) => left[1] - right[1])
+      .map(([subject]) => subject))
+  };
 }
 
 function loadSystemSnapshots(db, targetMonth) {

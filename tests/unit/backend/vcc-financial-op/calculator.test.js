@@ -1633,3 +1633,37 @@ test('聚合后超过 Excel 有效数字上限时在生成可归档结果前阻�
     SELECT COUNT(*) AS n FROM vcc_fin_op_runs WHERE target_month = '2026-06'
   `).get().n, 0);
 });
+
+test('汇总不依赖 SQLite 返回顺序：主体、分组与合计按最早出现的行 id 排列', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  // 按 id 先插入 ZZ 主体与 USD，再插 AA 与 EUR；月份索引返回顺序与此相反。
+  insertEffective(db, { sourceType: SOURCE_TYPES.RECHARGE, key: 'r1', subject: 'ZZ', currency: 'USD', amount: '1.10' });
+  insertEffective(db, {
+    sourceType: SOURCE_TYPES.PENDING, key: 'p1', subject: 'ZZ', pendingCurrency: 'USD', pendingAmount: '-2',
+    flowCurrency: 'EUR', flowAmount: '3', channelName: 'C', reconType: 'VCC_clearing_credit', currencyMismatch: 1
+  });
+  insertEffective(db, { sourceType: SOURCE_TYPES.RECHARGE, key: 'r2', subject: 'AA', currency: 'EUR', amount: '2.20' });
+  insertEffective(db, { sourceType: SOURCE_TYPES.RECHARGE, key: 'r3', subject: 'ZZ', currency: 'USD', amount: '0.90' });
+
+  const aggregate = aggregateEffectiveRows(db, '2026-06');
+  assert.deepEqual([...aggregate.subjects], ['ZZ', 'AA']);
+  assert.deepEqual(
+    [...aggregate.movementGroups.values()].map((group) => [group.subject, group.currency, group.amount.value()]),
+    [['ZZ', 'USD', '2'], ['AA', 'EUR', '2.2']]
+  );
+  // 同一 Pending 行内先流水币种（EUR）后 Pending 币种（USD）。
+  assert.deepEqual([...aggregate.pendingCurrencyTotals.keys()], [
+    JSON.stringify(['ZZ', 'EUR']),
+    JSON.stringify(['ZZ', 'USD'])
+  ]);
+  // 期间合计先按单据行首次出现，再追加 Pending 新坐标。
+  assert.deepEqual(
+    [...aggregate.periodTotals.entries()].map(([key, amount]) => [key, amount.value()]),
+    [
+      [JSON.stringify(['ZZ', 'USD']), '0'],
+      [JSON.stringify(['AA', 'EUR']), '2.2'],
+      [JSON.stringify(['ZZ', 'EUR']), '3']
+    ]
+  );
+});
