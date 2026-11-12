@@ -170,6 +170,23 @@ test('退出时 stop 等待整理收尾后再继续', async (t) => {
   assert.equal(run.registry.isInstallTransitionActive(), false);
 });
 
+test('低内存任务占用资源时跳过整理，释放租约并恢复存档维护', async (t) => {
+  const fixture = fileDb(t);
+  const run = controller(fixture, {
+    launch: () => {
+      const error = new Error('内存占用中');
+      error.code = 'RESOURCE_MEMORY_ACTIVITY_BUSY';
+      throw error;
+    }
+  });
+  const result = await run.instance.maybeRun();
+  assert.deepEqual(result, { status: 'skipped', reason: 'memory-activity-busy' });
+  assert.equal(run.logs.length, 0);
+  assert.deepEqual([run.calls.begin, run.calls.end], [1, 1]);
+  assert.equal(run.registry.isInstallTransitionActive(), false);
+  assert.equal(fixture.database.getSetting(LAST_SUCCESS_SETTING_KEY), null);
+});
+
 test('业务登记表：过渡租约可带自定义拒绝提示，默认仍为升级提示', () => {
   const registry = createBusinessOperationRegistry();
   const lease = registry.acquireTransition('custom', { requireIdle: true, busyMessage: '自定义提示' });

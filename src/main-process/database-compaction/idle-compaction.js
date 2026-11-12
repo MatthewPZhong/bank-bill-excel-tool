@@ -9,6 +9,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { memoryCarrierAdmission } = require('../memory-activity');
 
 const GIB = 1024 ** 3;
 const DEFAULT_OPTIONS = Object.freeze({
@@ -63,9 +64,10 @@ function electronUtilityProcess() {
 function launchCompactionProcess({ dbPath }) {
   const request = JSON.stringify({ dbPath });
   const utility = electronUtilityProcess();
+  // 低内存任务占用资源时准入会抛出 RESOURCE_MEMORY_ACTIVITY_BUSY，由控制器按“跳过”处理。
   const child = utility
-    ? utility.fork(PROCESS_SCRIPT, [request], { stdio: 'pipe', serviceName: 'database-compaction' })
-    : spawn(process.execPath, [PROCESS_SCRIPT, request], { stdio: ['ignore', 'pipe', 'pipe'] });
+    ? memoryCarrierAdmission(null).observe(utility.fork(PROCESS_SCRIPT, [request], { stdio: 'pipe', serviceName: 'database-compaction' }))
+    : memoryCarrierAdmission(null).observe(spawn(process.execPath, [PROCESS_SCRIPT, request], { stdio: ['ignore', 'pipe', 'pipe'] }));
   let stdout = '';
   let stderr = '';
   if (child.stdout) child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
@@ -207,6 +209,9 @@ function createIdleCompactionController({
       });
       return { status: 'compacted', result };
     } catch (error) {
+      if (error && error.code === 'RESOURCE_MEMORY_ACTIVITY_BUSY') {
+        return { status: 'skipped', reason: 'memory-activity-busy' };
+      }
       log({
         level: 'error',
         message: '空闲存储整理异常，下次空闲再试',

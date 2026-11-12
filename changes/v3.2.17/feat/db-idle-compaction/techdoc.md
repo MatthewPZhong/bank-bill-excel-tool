@@ -26,6 +26,7 @@
 - 业务任务：过渡租约 `requireIdle` 保证开始时无登记任务；整理期间 `begin()` 一律拒绝。
 - 存档中心：`beginDatabaseMaintenance` 等待存档操作结束并暂停后台物化与归属扫描，结束后 `endDatabaseMaintenance`。
 - 主连接：整理开始前在主连接做一次 `wal_checkpoint(TRUNCATE)`；主连接没有 `busy_timeout`，整理期间若有未登记的主线程写入（例如定时深色模式的设置写入）会得到“数据库忙”，按各自的失败路径处理，下次再写。
+- 子进程：创建前经 `memoryCarrierAdmission` 准入（与其他原生载体一致，已登记 `changes/v3.2.11/v3.2.11-bizop-rows-low-memory/carrier-inventory.json`）；低内存任务占用资源时本次跳过，下次空闲再试。
 
 ## 四、兼容与回滚
 
@@ -33,6 +34,6 @@
 
 ## 五、验证
 
-- `tests/unit/main-process/database-idle-compaction.test.js`：7 项（评估、跳过条件、磁盘告警限频、成功、中止、退出等待、登记表提示）。
+- `tests/unit/main-process/database-idle-compaction.test.js`：8 项（评估、跳过条件、磁盘告警限频、成功、中止、退出等待、低内存任务占用时跳过、登记表提示）。
 - 相关既有单测 156 项通过；lint 与架构检查通过。
 - 未完成：Electron 打包环境下 `utilityProcess` 路径的实际整理与中止（本机 Electron 无法开窗口），随 VCC B86 在 Windows 回归。
