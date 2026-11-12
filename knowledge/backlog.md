@@ -20,6 +20,14 @@
 
 ## 未实施
 
+### B79（P1 · 顺延）新开账户「生成余额账单」与月度余额「装配」在业务开始前必然失败，修复待并入下一周版本
+
+- **来源**：2026-11-10 同事反馈生成新开账户余额账单报 `worker file action 缺少 TaskRun-dependent FilePlan resolver：new-account:generate`；修复分支 `fix/deferred-file-plan-resolver`（基于 v3.2.16）
+- **影响**：v3.1.11（`d327895b`）起，`task-file-plan-registry.js` 把 deferred 动作 `new-account:generate`、`monthly-balance:assemble` 的初始 FilePlan 交给要求 `prepared.filePlanResolver` 的解析器，而两个入口按设计只给空的 deferred FilePlan，任务在建立 Task Run 后、业务开始前失败；两个功能在 v3.1.11–v3.2.16 均不可用，没有界面绕过办法。只是不能生成，不产生错误文件或数据
+- **修复**：deferred 初始计划改为取入口显式的 deferred 字面量（非 deferred 或缺失仍报 `ARCHIVE_FILE_PLAN_INVALID`）；`task-adapters.test.js` 用 Main 真实 prepare 回归，`execution-descriptor-archive-baseline.test.js` 登记基线后行为修正（固定基线不改），新增集成 `archive-center-deferred-generation.js`（真实 handler、生命周期、存档服务，含零输出不预留 Batch）
+- **关闭条件**：分支合入本轮 `release/<版本号>` 并正式发布；发布时同步 CHANGELOG、`docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md`（如需）、`release-notes.json`；Windows 打包版实测「新开账户 → 生成余额账单 → 导出」与「月度余额 → 装配 → 导出」成功，并在存档中心看到对应批次（本机开发版 GUI 受 `BIZOP_ACTIVATION_RESOURCE_UNAVAILABLE` 阻断未实测）
+- **目标版本**：v3.2.17（下一周常规版本）
+
 ### B78（P3 · 改进）工具箱发布 / 存档阶段耗时未测量
 
 - **来源**：同 B77（TechDoc 第一节「不在范围」）；模块分支上原为 B75，合入 release/v3.2.16 时与已有 B75 重号，改为 B78

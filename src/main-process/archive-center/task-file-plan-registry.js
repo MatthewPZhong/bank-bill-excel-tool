@@ -28,6 +28,18 @@ function preparedWorkerPlan(invocation) {
   return resolver({ taskRun: invocation.taskRun });
 }
 
+// deferred 动作的初始计划由入口 prepare 显式给出空的 deferred plan；
+// 真实输出在业务确认非空后经 ensureFileBatch(promotionManifest) 晋升，不依赖 Task Run。
+function preparedDeferredPlan(invocation) {
+  const plan = requiredPreparedFilePlan(invocation);
+  if (plan.allocation !== 'deferred') {
+    const error = new TypeError(`deferred file action 入口 filePlan 必须为 deferred：${invocation.channel || ''}`);
+    error.code = 'ARCHIVE_FILE_PLAN_INVALID';
+    throw error;
+  }
+  return plan;
+}
+
 function persistedResumePlan(invocation) {
   const prepared = invocation.prepared || {};
   if (typeof prepared.assertPreRecoveryFresh === 'function') {
@@ -75,7 +87,7 @@ const FILE_PLAN_RESOLVERS_BY_SOURCE_KIND = Object.freeze({
   'payload-input-paths': preparedPayloadPlan,
   'prepare-selected-and-staging': preparedPayloadPlan,
   'staged-token-inputs': preparedPayloadPlan,
-  'nonempty-result-before-workbook-write': preparedWorkerPlan
+  'nonempty-result-before-workbook-write': preparedDeferredPlan
 });
 
 function eager(sourceKind, workerContext = 'none') {
