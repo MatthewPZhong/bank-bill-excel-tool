@@ -474,7 +474,16 @@ function buildNormalizedDateResult(date, displayFormat = 'yyyy-mm-dd', value = '
   };
 }
 
-function normalizeDateExportValue(value, { dateParseOrder = 'auto' } = {}) {
+// v3.2.17：Excel 序列号的日期系统（只影响下方两个序列号分支）：
+//   '1900'（默认，原行为）；'1904'（序列号加 1462 天，Mac 旧版工作簿）；'unknown'（如 CSV，序列号不解析，返回空）。
+const EXCEL_1904_SERIAL_OFFSET = 1462;
+
+function resolveExcelSerial(serial, excelDateSystem) {
+  if (excelDateSystem === 'unknown') return null;
+  return excelDateSystem === '1904' ? serial + EXCEL_1904_SERIAL_OFFSET : serial;
+}
+
+function normalizeDateExportValue(value, { dateParseOrder = 'auto', excelDateSystem = '1900' } = {}) {
   if (value === null || value === undefined || value === '') {
     return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
   }
@@ -489,7 +498,8 @@ function normalizeDateExportValue(value, { dateParseOrder = 'auto' } = {}) {
   }
 
   if (typeof value === 'number' && Number.isFinite(value)) {
-    const parsed = XLSX.SSF.parse_date_code(value);
+    const serial = resolveExcelSerial(value, excelDateSystem);
+    const parsed = serial === null ? null : XLSX.SSF.parse_date_code(serial);
 
     if (!parsed) {
       return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
@@ -622,7 +632,11 @@ function normalizeDateExportValue(value, { dateParseOrder = 'auto' } = {}) {
   if (/^\d+$/.test(candidateValue)) {
     const numericCandidate = Number(candidateValue);
     if (Number.isFinite(numericCandidate) && numericCandidate > 365 && numericCandidate < 200000) {
-      const parsed = XLSX.SSF.parse_date_code(numericCandidate);
+      const serial = resolveExcelSerial(numericCandidate, excelDateSystem);
+      if (serial === null) {
+        return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
+      }
+      const parsed = XLSX.SSF.parse_date_code(serial);
       if (parsed) {
         const date = buildDateObject(parsed.y, parsed.m, parsed.d);
         if (date) {
@@ -650,8 +664,8 @@ function normalizeDateExportValue(value, { dateParseOrder = 'auto' } = {}) {
   return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
 }
 
-function parseDateValue(value) {
-  return normalizeDateExportValue(value).date;
+function parseDateValue(value, options = {}) {
+  return normalizeDateExportValue(value, options).date;
 }
 
 function toExcelSerial(date) {

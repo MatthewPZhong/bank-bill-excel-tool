@@ -844,6 +844,8 @@ test('生成层：已有种子但首日对不上时只出明细，补录提示�
     targetBillDate: '2026-10-01',
     queueIndex: 1,
     queueTotal: 1,
+    // v3.2.17：已有种子（只是对不上）的账号不算待补录，导入余额文件清单为空。
+    pendingAccounts: [],
     seedMismatch: KBANK_SEED_MISMATCH
   });
   assert.deepEqual(

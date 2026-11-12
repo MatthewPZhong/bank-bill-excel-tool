@@ -512,6 +512,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
     completeBigAccountSelection: (payload) => ipcRenderer.invoke('file:complete-big-account-selection', payload),
     extractBigAccountOrder: (payload) => ipcRenderer.invoke('file:extract-big-account-order', payload),
     saveBalanceSeed: (payload) => ipcRenderer.invoke('file:save-balance-seed', payload),
+    importBalanceSeedFile: () => ipcRenderer.invoke('file:import-balance-seed-file'),
     exportDetail: (scope) => ipcRenderer.invoke('file:export-detail', scope),
     exportBalance: (scope) => ipcRenderer.invoke('file:export-balance', scope)
   },

@@ -589,7 +589,12 @@ test('production generation seam缺calculated seed时冻结真实queue prompt且
       currency: 'USD',
       targetBillDate: '2026-08-01',
       queueIndex: 1,
-      queueTotal: 2
+      queueTotal: 2,
+      // v3.2.17：附本组全部待补录账号（与逐个提示的顺序一致），供「导入余额文件」匹配。
+      pendingAccounts: [
+        { merchantId: 'M001', currency: 'USD', targetBillDate: '2026-08-01' },
+        { merchantId: 'M002', currency: 'EUR', targetBillDate: '2026-08-01' }
+      ]
     }
   }]);
 });
