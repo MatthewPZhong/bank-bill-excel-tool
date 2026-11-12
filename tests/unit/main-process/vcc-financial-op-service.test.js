@@ -181,6 +181,13 @@ function seedCalculatedReviewRun(db) {
 }
 
 
+// node:test 按注册顺序执行 after；Windows 上打开的库文件不能删除。用到 Service worker 的测试
+//   在 terminate 与关库之后再调用 removeLater 注册删目录。
+function tempDbPathRemovedLater() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-service-db-'));
+  return { dbPath: path.join(dir, 'tool-data.sqlite'), removeLater: (t) => t.after(() => fs.rmSync(dir, { recursive: true, force: true })) };
+}
+
 function tempDbPath(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-service-db-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -828,7 +835,7 @@ test('数据管理校验表返回独立生成时间', (t) => {
 });
 
 test('删除有效明细后导入记录列表仍保留文件级状态与归档字段', async (t) => {
-  const dbPath = tempDbPath(t);
+  const { dbPath, removeLater } = tempDbPathRemovedLater();
   const db = new DatabaseSync(dbPath);
   t.after(() => db.close());
   db.exec('PRAGMA foreign_keys = ON');
@@ -862,6 +869,7 @@ test('删除有效明细后导入记录列表仍保留文件级状态与归档�
     assetsDir: ''
   });
   t.after(async () => { await service.terminate(); });
+  removeLater(t);
 
   deleteWithPreview(db, '2026-06', SOURCE_TYPES.RECHARGE);
   const listed = await service.listImportRecords('2026-06');
@@ -880,7 +888,7 @@ test('删除有效明细后导入记录列表仍保留文件级状态与归档�
 });
 
 test('显式重建前导入记录 DTO 仍暴露 v1 历史异常的可导出数量', async (t) => {
-  const dbPath = tempDbPath(t);
+  const { dbPath, removeLater } = tempDbPathRemovedLater();
   const db = new DatabaseSync(dbPath);
   t.after(() => db.close());
   db.exec('PRAGMA foreign_keys = ON');
@@ -912,6 +920,7 @@ test('显式重建前导入记录 DTO 仍暴露 v1 历史异常的可导出数�
     assetsDir: ''
   });
   t.after(async () => { await service.terminate(); });
+  removeLater(t);
 
   const [record] = await service.listImportRecords('2026-06');
   assert.equal(record.anomalyCount, 2);

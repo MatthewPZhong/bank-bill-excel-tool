@@ -148,10 +148,14 @@ test('用户操作即中止：结束子进程、不记完成时间、释放租�
   assert.equal(fixture.database.getSetting(LAST_SUCCESS_SETTING_KEY), null);
   assert.equal(run.registry.isInstallTransitionActive(), false);
   assert.equal(run.calls.end, 1);
+  // fileDb 先注册了删目录的 after；Windows 上须在测试内关库后才能删除。
   const verify = new DatabaseSync(fixture.dbPath, { readOnly: true });
-  t.after(() => verify.close());
-  assert.equal(Object.values(verify.prepare('PRAGMA quick_check').get())[0], 'ok');
-  assert.equal(verify.prepare('SELECT COUNT(*) AS n FROM payload').get().n, countBefore);
+  try {
+    assert.equal(Object.values(verify.prepare('PRAGMA quick_check').get())[0], 'ok');
+    assert.equal(verify.prepare('SELECT COUNT(*) AS n FROM payload').get().n, countBefore);
+  } finally {
+    verify.close();
+  }
 });
 
 test('退出时 stop 等待整理收尾后再继续', async (t) => {

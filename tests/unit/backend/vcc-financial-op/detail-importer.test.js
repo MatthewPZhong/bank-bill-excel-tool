@@ -1475,7 +1475,6 @@ test('异常退出恢复不会把暂存行提升为有效事实', (t) => {
 test('TEMP 暂存随 worker 连接消失后，中断恢复保留检查点已持久化的读取行数并计为回滚', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-temp-staging-recover-'));
   const dbPath = path.join(directory, 'tool-data.sqlite');
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const worker = new DatabaseSync(dbPath);
   worker.exec('PRAGMA foreign_keys = ON');
   ensureVccFinancialOpTablesSupport(worker);
@@ -1499,7 +1498,9 @@ test('TEMP 暂存随 worker 连接消失后，中断恢复保留检查点已持�
   worker.close();
 
   const main = new DatabaseSync(dbPath);
+  // node:test 按注册顺序执行 after；Windows 上打开的库文件不能删除，删目录须在关库之后注册。
   t.after(() => main.close());
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   main.exec('PRAGMA foreign_keys = ON');
   assert.equal(main.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows').get().n, 0);
   assert.equal(repository.recoverInterruptedImports(main), 1);

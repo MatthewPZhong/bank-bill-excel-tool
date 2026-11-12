@@ -932,55 +932,59 @@ test('级联解归档：须明确确认；目标月恢复待确认，后续月�
   assert.equal(result.deletedRunCount, 2);
   assert.equal(result.deletedAdjustmentCount, 2);
 
+  // createTempDb 先注册了删目录的 after；Windows 上须在测试内关库后才能删除。
   const verify = new DatabaseSync(dbPath, { readOnly: true });
-  t.after(() => verify.close());
-  const target = verify.prepare(`
-    SELECT status, archived_at, adjustment_cycle FROM vcc_fin_op_runs WHERE target_month = '2026-07'
-  `).get();
-  assert.deepEqual({ ...target }, { status: 'calculated', archived_at: null, adjustment_cycle: 1 });
-  assert.equal(verify.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_runs WHERE target_month > '2026-07'`).get().n, 0);
-  assert.equal(verify.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_archives').get().n, 0);
-  for (const tableName of [
-    'vcc_fin_op_run_adjustments',
-    'vcc_fin_op_run_rows',
-    'vcc_fin_op_run_balances',
-    'vcc_fin_op_pending_summary_rows',
-    'vcc_fin_op_pending_currency_totals'
-  ]) {
-    assert.equal(verify.prepare(`
-      SELECT COUNT(*) AS n FROM ${tableName} WHERE run_id IN (?, ?)
-    `).get(calculatedLater, archivedLater).n, 0, tableName);
+  try {
+    const target = verify.prepare(`
+      SELECT status, archived_at, adjustment_cycle FROM vcc_fin_op_runs WHERE target_month = '2026-07'
+    `).get();
+    assert.deepEqual({ ...target }, { status: 'calculated', archived_at: null, adjustment_cycle: 1 });
+    assert.equal(verify.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_runs WHERE target_month > '2026-07'`).get().n, 0);
+    assert.equal(verify.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_archives').get().n, 0);
+    for (const tableName of [
+      'vcc_fin_op_run_adjustments',
+      'vcc_fin_op_run_rows',
+      'vcc_fin_op_run_balances',
+      'vcc_fin_op_pending_summary_rows',
+      'vcc_fin_op_pending_currency_totals'
+    ]) {
+      assert.equal(verify.prepare(`
+        SELECT COUNT(*) AS n FROM ${tableName} WHERE run_id IN (?, ?)
+      `).get(calculatedLater, archivedLater).n, 0, tableName);
+    }
+    assert.deepEqual(verify.prepare(`
+      SELECT target_month, data_status, archived_run_id FROM vcc_fin_op_datasets
+      WHERE target_month > '2026-07' ORDER BY target_month
+    `).all().map((row) => ({ ...row })), [
+      { target_month: '2026-08', data_status: 'unprocessed', archived_run_id: null },
+      { target_month: '2026-09', data_status: 'unprocessed', archived_run_id: null }
+    ]);
+    assert.equal(verify.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, effectiveBefore);
+    const audit = verify.prepare(`
+      SELECT status, run_id, evidence_json FROM vcc_fin_op_operation_audit
+      WHERE operation_type = 'unarchive_cascade' AND status = 'success'
+    `).get();
+    const evidence = JSON.parse(audit.evidence_json);
+    assert.equal(Number(audit.run_id), raw.runs[0].id);
+    assert.deepEqual(evidence.laterMonths, ['2026-08', '2026-09']);
+    assert.deepEqual(evidence.deletedRuns.map((run) => [run.targetMonth, run.status]), [
+      ['2026-08', 'calculated'],
+      ['2026-09', 'archived']
+    ]);
+    assert.deepEqual(evidence.deletedAdjustments.map((row) => [
+      row.targetMonth, row.currency, row.adjustmentAmount, row.reason
+    ]), [
+      ['2026-08', 'USD', '1', '测试'],
+      ['2026-09', 'USD', '1', '测试']
+    ]);
+    assert.deepEqual(evidence.deletedArchives.map((row) => [row.targetMonth, row.subject, row.balancesJson]), [
+      ['2026-09', 'PPHK', '{}']
+    ], '被删的已归档余额快照写入审计');
+    assert.equal(evidence.minimumSafeAppVersion, '3.2.17');
+    assert.equal(evidence.expectedTotalChanges, 8 + 1 + 2 + 2 + 2 + 2 + 2 + 2 + 1);
+  } finally {
+    verify.close();
   }
-  assert.deepEqual(verify.prepare(`
-    SELECT target_month, data_status, archived_run_id FROM vcc_fin_op_datasets
-    WHERE target_month > '2026-07' ORDER BY target_month
-  `).all().map((row) => ({ ...row })), [
-    { target_month: '2026-08', data_status: 'unprocessed', archived_run_id: null },
-    { target_month: '2026-09', data_status: 'unprocessed', archived_run_id: null }
-  ]);
-  assert.equal(verify.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, effectiveBefore);
-  const audit = verify.prepare(`
-    SELECT status, run_id, evidence_json FROM vcc_fin_op_operation_audit
-    WHERE operation_type = 'unarchive_cascade' AND status = 'success'
-  `).get();
-  const evidence = JSON.parse(audit.evidence_json);
-  assert.equal(Number(audit.run_id), raw.runs[0].id);
-  assert.deepEqual(evidence.laterMonths, ['2026-08', '2026-09']);
-  assert.deepEqual(evidence.deletedRuns.map((run) => [run.targetMonth, run.status]), [
-    ['2026-08', 'calculated'],
-    ['2026-09', 'archived']
-  ]);
-  assert.deepEqual(evidence.deletedAdjustments.map((row) => [
-    row.targetMonth, row.currency, row.adjustmentAmount, row.reason
-  ]), [
-    ['2026-08', 'USD', '1', '测试'],
-    ['2026-09', 'USD', '1', '测试']
-  ]);
-  assert.deepEqual(evidence.deletedArchives.map((row) => [row.targetMonth, row.subject, row.balancesJson]), [
-    ['2026-09', 'PPHK', '{}']
-  ], '被删的已归档余额快照写入审计');
-  assert.equal(evidence.minimumSafeAppVersion, '3.2.17');
-  assert.equal(evidence.expectedTotalChanges, 8 + 1 + 2 + 2 + 2 + 2 + 2 + 2 + 1);
 });
 
 test('级联解归档预览后后续月份又有变化时按陈旧 token 拒绝', (t) => {
