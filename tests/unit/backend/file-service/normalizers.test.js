@@ -5,6 +5,9 @@ const {
   parseNumericValue,
   roundAmount,
   roundAmountHighPrecision,
+  sumAmounts,
+  verifyStatementEndingBalance,
+  calculateEndingBalanceFromAmounts,
   sanitizeAmountValue,
   sanitizeSignedAmountValue,
   hasEffectiveAmount,
@@ -65,6 +68,64 @@ test.describe('roundAmount / roundAmountHighPrecision', () => {
 
   test('roundAmountHighPrecision 保留 12 位', () => {
     assert.equal(roundAmountHighPrecision(1.123456789012345), 1.123456789012);
+  });
+});
+
+// v3.2.17 D2（用户反馈 SCB-SG）：两位小数逐笔累加到万级以上时，12 位取整去不掉浮点尾差，
+// 提示里的收支合计带长尾数，发生额计算的期末余额带尾差后超过 15 位有效数字被写成文本。
+// 合成数据：150 笔两位小数收入，朴素累加为 5126.100000000002、加种子为 2005126.2100000002。
+const NOISY_CREDITS = Array.from({ length: 150 }, (_, index) => (
+  [12.34, 56.78, 9.99, 0.37, 101.01, 48.6, 3.33, 77.77, 25.5, 6.05][index % 10]
+));
+
+test.describe('sumAmounts — 金额加减按输入小数位取整（v3.2.17 D2）', () => {
+  test('合成数据确实能在旧口径下产生尾差', () => {
+    const naive = roundAmountHighPrecision(NOISY_CREDITS.reduce((sum, value) => sum + value, 0));
+    assert.equal(naive, 5126.100000000002);
+    assert.equal(roundAmountHighPrecision(2000000.11 + naive), 2005126.2100000002);
+  });
+
+  test('两位小数累加与加减还原精确值', () => {
+    assert.equal(sumAmounts(NOISY_CREDITS), 5126.1);
+    assert.equal(sumAmounts([2000000.11, sumAmounts(NOISY_CREDITS), -0]), 2005126.21);
+    assert.equal(sumAmounts([0.1, 0.2]), 0.3);
+    assert.equal(sumAmounts([2008582.88, -2005126.21]), 3456.67);
+  });
+
+  test('保留输入的高精度小数（PRD v1.5.0 最多 12 位），超过 12 位与 roundAmountHighPrecision 同口径', () => {
+    assert.equal(sumAmounts([1.123456789012, 2]), 3.123456789012);
+    assert.equal(sumAmounts([1e-7, 1]), 1.0000001);
+    assert.equal(sumAmounts([1.123456789012345, 0]), roundAmountHighPrecision(1.123456789012345));
+  });
+
+  test('空数组为 0；整数、负数与字符串数值', () => {
+    assert.equal(sumAmounts([]), 0);
+    assert.equal(sumAmounts([100, -30]), 70);
+    assert.equal(sumAmounts(['10.5', '-0.25']), 10.25);
+    assert.ok(Number.isNaN(sumAmounts([1, Number.NaN])));
+  });
+
+  test('逐日校验的收支合计、预期与差额无尾差；判定不变', () => {
+    const entries = NOISY_CREDITS.map((creditAmount) => ({ creditAmount, debitAmount: 0, balanceValue: null }));
+    entries[0].balanceValue = 2003469.12;
+    entries[1].balanceValue = 2003525.9;
+    const unresolved = verifyStatementEndingBalance({ anchorBalance: 2000000.11, entries, dateLabel: '2026-11-02' });
+    assert.deepEqual([unresolved.status, unresolved.creditAmountSum, unresolved.debitAmountSum, unresolved.expectedBalance],
+      ['unresolved', 5126.1, 0, 2005126.21]);
+
+    const single = entries.map((entry, index) => ({ ...entry, balanceValue: index === 0 ? 2005126.22 : null }));
+    const mismatch = verifyStatementEndingBalance({ anchorBalance: 2000000.11, entries: single, dateLabel: '2026-11-02' });
+    assert.deepEqual([mismatch.status, mismatch.expectedBalance, mismatch.difference], ['mismatch', 2005126.21, 0.01]);
+
+    const matched = entries.map((entry, index) => ({ ...entry, balanceValue: index === 0 ? 2005126.21 : null }));
+    assert.equal(verifyStatementEndingBalance({ anchorBalance: 2000000.11, entries: matched, dateLabel: '2026-11-02' }).status, 'match');
+  });
+
+  test('发生额计算的期末余额无尾差', () => {
+    const entries = NOISY_CREDITS.map((creditAmount) => ({ creditAmount, debitAmount: 0 }));
+    assert.equal(calculateEndingBalanceFromAmounts({ previousEndBalance: 2000000.11, entries }), 2005126.21);
+    entries.push({ creditAmount: 0, debitAmount: 500.25 });
+    assert.equal(calculateEndingBalanceFromAmounts({ previousEndBalance: 2000000.11, entries }), 2004625.96);
   });
 });
 

@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { normalizeCell } = require('./file-service/common');
+const { sumAmounts } = require('./file-service/normalizers');
 
 function sanitizeBankName(value) {
   return String(value || '')
@@ -75,14 +76,15 @@ function writeBalanceAdjustments(storageRoot, bankName, records) {
   fs.writeFileSync(filePath, `${JSON.stringify(normalizedRecords, null, 2)}\n`, 'utf8');
 }
 
+// 截至当日的附加值累计额；按各值小数位求和，避免多条附加值累加出浮点尾差（v3.2.17 D2）。
 function resolveBalanceAdjustment(adjustments, { merchantId, currency, dateLabel }) {
-  return adjustments
+  return sumAmounts(adjustments
     .filter((record) =>
       record.merchantId === merchantId &&
       record.currency === currency &&
       record.effectiveDate <= dateLabel
     )
-    .reduce((sum, record) => sum + (record.adjustmentValue || 0), 0);
+    .map((record) => record.adjustmentValue || 0));
 }
 
 module.exports = {
