@@ -508,7 +508,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       {date:'2026-11-01',amount:''});
     await js(`cfg.next.seed={status:'success',message:'余额账单可导出'};cfg.top().querySelector('.manual-balance-amount-input').value='2003456.78';
       cfg.top().querySelector('[data-action="done"]').click();`); await tick();
-    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0])`), [{billDate:'2026-11-01',endBalance:'2003456.78'}]);
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0])`), [{billDate:'2026-11-01',endBalance:'2003456.78',merchantId:'M001',currency:'SGD',templateName:'模板 A'}]);
 
     // 只缺一天：写该日与“这天”；不超过 6 个余额时全部列出。
     await js(`${SEED_MISMATCH_GAP_JS}Object.assign(cfg.seedMismatchGapPrompt.seedMismatch,{seedDate:'2026-10-31',missingFrom:'2026-11-01',missingTo:'2026-11-01',
@@ -532,7 +532,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(geometry, { fits: true, contextScrolls: true, cardScrolls: false, date: true, amount: true, done: true });
     await js(`cfg.next.seed={status:'success',message:'余额账单可导出'};void 0;`);
     await layout.click('.manual-balance-card [data-action="done"]'); await tick();
-    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0])`), [{billDate:'2026-10-27',endBalance:'2000000.11'}]);
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0])`), [{billDate:'2026-10-27',endBalance:'2000000.11',merchantId:'M001',currency:'SGD',templateName:'模板 A'}]);
   });
   await test('缺余额的普通补录弹窗不显示对不上说明，输入为空', async () => {
     await setup();
