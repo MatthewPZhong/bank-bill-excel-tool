@@ -7,6 +7,7 @@
 //         在可强制结束的子进程中 VACUUM + 截断 WAL；用户一有操作即结束子进程，下次空闲再试。
 //   不在启动时运行（保持 v3.1.10“不在普通启动时偷偷压缩”的约定）。
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { memoryCarrierAdmission } = require('../memory-activity');
@@ -62,12 +63,12 @@ function electronUtilityProcess() {
 }
 
 // Electron 下用 utilityProcess（真正的 Node 子进程），纯 Node（测试）下用 spawn。
-function createCompactionChild(request) {
+function createCompactionChild(request, env) {
   const utility = electronUtilityProcess();
   // 低内存任务占用资源时准入会抛出 RESOURCE_MEMORY_ACTIVITY_BUSY，由控制器按“跳过”处理。
   const child = utility
-    ? memoryCarrierAdmission(null).observe(utility.fork(PROCESS_SCRIPT, [request], { stdio: 'pipe', serviceName: 'database-compaction' }))
-    : memoryCarrierAdmission(null).observe(spawn(process.execPath, [PROCESS_SCRIPT, request], { stdio: ['ignore', 'pipe', 'pipe'] }));
+    ? memoryCarrierAdmission(null).observe(utility.fork(PROCESS_SCRIPT, [request], { stdio: 'pipe', serviceName: 'database-compaction', env }))
+    : memoryCarrierAdmission(null).observe(spawn(process.execPath, [PROCESS_SCRIPT, request], { stdio: ['ignore', 'pipe', 'pipe'], env }));
   return { child, exitEvent: utility ? 'exit' : 'close' };
 }
 
@@ -76,8 +77,15 @@ const KILL_RETRY_MS = 500;
 // 结果只在子进程真实退出（exit/close）后给出，作为释放租约与恢复存档维护的退出屏障。
 //   error 事件不代表已退出：仅进程从未启动（无 pid）时直接结束，否则补发终止并继续等退出。
 //   kill：记录取消请求；启动前（utilityProcess 尚无 pid）或 kill() 返回 false 时，在 spawn 后及每 500 ms 重试，直到退出。
-function launchCompactionProcess({ dbPath, createChild = createCompactionChild }) {
-  const { child, exitEvent } = createChild(JSON.stringify({ dbPath }));
+// VACUUM 的重建临时库写在 SQLite 临时目录：显式指定为已做余量检查的目录
+//   （Unix 读 SQLITE_TMPDIR，Windows 读 TMP/TEMP），避免落到未检查的磁盘卷。
+function compactionChildEnv(tempDir) {
+  if (!tempDir) return { ...process.env };
+  return { ...process.env, SQLITE_TMPDIR: tempDir, TMP: tempDir, TEMP: tempDir };
+}
+
+function launchCompactionProcess({ dbPath, tempDir = '', createChild = createCompactionChild }) {
+  const { child, exitEvent } = createChild(JSON.stringify({ dbPath }), compactionChildEnv(tempDir));
   let stdout = '';
   let stderr = '';
   let settled = false;
@@ -133,10 +141,11 @@ function createIdleCompactionController({
   beginMaintenance = async () => ({ acquired: true }),
   endMaintenance = async () => {},
   launch = launchCompactionProcess,
-  getFreeBytes = (dbPath) => {
-    const stat = fs.statfsSync(path.dirname(dbPath));
+  getFreeBytes = (directory) => {
+    const stat = fs.statfsSync(directory);
     return Number(stat.bavail) * Number(stat.bsize);
   },
+  getTempDir = () => os.tmpdir(),
   log = () => {},
   now = () => Date.now(),
   options: overrides = {}
@@ -200,8 +209,13 @@ function createIdleCompactionController({
     }
     const busyReason = isOtherWorkBusy();
     if (busyReason) return { status: 'skipped', reason: busyReason };
+    // 整理同时用到主库所在卷（WAL 回写）与 SQLite 临时目录所在卷（重建临时库），两处都须满足余量，取较小者判断。
     let freeBytes = null;
-    try { freeBytes = getFreeBytes(database.dbPath); } catch (_error) { freeBytes = null; }
+    let tempDir = '';
+    try {
+      tempDir = getTempDir();
+      freeBytes = Math.min(Number(getFreeBytes(path.dirname(database.dbPath))), Number(getFreeBytes(tempDir)));
+    } catch (_error) { freeBytes = null; }
     const evaluation = evaluateCompactionNeed({ db: database.db, freeBytes, options });
     if (!evaluation.needed) {
       if (['insufficient-disk', 'disk-unknown'].includes(evaluation.reason)) logBlocked(evaluation);
@@ -226,7 +240,7 @@ function createIdleCompactionController({
         return { status: 'aborted', reason: current.abortReason || 'user-activity' };
       }
       try { database.db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (_error) { /* 由子进程再次截断 */ }
-      const launched = launch({ dbPath: database.dbPath });
+      const launched = launch({ dbPath: database.dbPath, tempDir });
       current.kill = launched.kill;
       if (current.aborted) launched.kill();
       const result = await launched.promise;

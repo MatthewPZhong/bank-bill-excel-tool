@@ -24,6 +24,7 @@
 退出屏障与终止：
 - 结果只在子进程真实退出（utilityProcess 的 `exit`、Node 子进程的 `close`）后给出，之后才恢复存档维护、释放业务租约。`error` 事件不代表已退出：进程从未启动（无 pid）时直接结束，否则补发终止并继续等待退出。
 - 终止请求会被记住：`kill()` 返回 false 或进程尚未启动（utilityProcess 在 `spawn` 前无 pid）时，在 `spawn` 后及每 500 ms 重试，直到退出；重复的用户操作也会再次尝试终止。
+- 用户活动由渲染层在 window 捕获阶段监听（`src/renderer.js` `setupUserActivityReporter`）：弹窗在 document 捕获阶段拦截 Tab/Escape 时仍能上报并中止整理；收单空闲清理同样受益。
 - 存档维护准备（等待存档操作、暂停后台物化与归属扫描）期间也响应取消：用户操作或退出时立即放弃本次整理、释放业务租约；准备完成后再自行释放存档维护，在此之前新存档仍会收到“正在整理存储空间，请稍后重试”。
 
 ## 三、与其他写入者的关系
@@ -35,7 +36,7 @@
 
 ## 四、兼容与回滚
 
-不改数据结构；只新增 `app_settings` 键 `db_idle_compaction_last_success_at`。回滚代码即不再整理。整理需要临时空间：SQLite 先在临时目录重建再经 WAL 写回，因此要求剩余磁盘 ≥ 库大小 × 2（比 v3.0.5 一次性整理的 1.2 倍更保守）。
+不改数据结构；只新增 `app_settings` 键 `db_idle_compaction_last_success_at`。回滚代码即不再整理。整理需要临时空间：SQLite 先在临时目录重建再经 WAL 写回，因此主库所在卷与 SQLite 临时目录所在卷都要求剩余 ≥ 库大小 × 2（比 v3.0.5 一次性整理的 1.2 倍更保守，两卷相同时即同一判断）。临时目录由主进程确定为系统临时目录（`os.tmpdir()`），经环境变量 `SQLITE_TMPDIR`（Unix）与 `TMP`/`TEMP`（Windows）传给整理进程，保证重建临时库落在已检查的卷上，也不写入可能被 OneDrive 同步的数据目录。
 
 ## 五、验证
 
@@ -44,4 +45,5 @@
 - 相关既有单测 156 项通过；lint 与架构检查通过。
 - 2026-11-11 Codex 审查指出关窗入口与收单阈值两处接入缺陷，已修复并补上述回归测试。
 - 2026-11-11 Codex 第二轮审查指出存档维护准备不可取消、终止失败未重试、`error` 事件提前放行三处生命周期缺口，已修复；`database-idle-compaction.test.js` 增至 13 项（新增维护准备取消、重复终止、error 后等真实退出、未启动即失败、启动前终止重试）。
+- 2026-11-11 Codex 第三轮审查指出 SQLite 临时目录所在卷未纳入余量检查、弹窗拦截键盘活动导致无法中止两处，已修复；新增临时卷余量与临时目录传递用例、`tests/unit/renderer-user-activity-reporter.test.js`。
 - 未完成：Electron 打包环境下 `utilityProcess` 路径的实际整理与中止（本机 Electron 无法开窗口），随 VCC B86 在 Windows 回归。

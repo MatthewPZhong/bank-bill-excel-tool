@@ -286,6 +286,36 @@ test('启动前请求终止或 kill() 返回 false 时，在 spawn 后重试终�
   assert.equal((await launched.promise).status, 'error');
 });
 
+test('磁盘余量同时检查主库所在卷与 SQLite 临时目录所在卷，并把临时目录传给整理进程', async (t) => {
+  const fixture = fileDb(t);
+  const tempDir = path.join(fixture.dir, 'sqlite-temp');
+  fs.mkdirSync(tempDir);
+  const registry = createBusinessOperationRegistry();
+  const skipped = await createIdleCompactionController({
+    getDatabase: () => fixture.database,
+    registry,
+    getLastUserActivityTs: () => 0,
+    getFreeBytes: (directory) => (directory === tempDir ? 1 : 1024 ** 4),
+    getTempDir: () => tempDir,
+    launch: () => { throw new Error('临时卷不足时不应启动整理'); },
+    now: () => 100 * 24 * 60 * MINUTE,
+    options: SMALL
+  }).maybeRun();
+  assert.equal(skipped.reason, 'insufficient-disk');
+  assert.equal(registry.isInstallTransitionActive(), false);
+
+  let childEnv = null;
+  const child = fakeChild();
+  const launched = launchCompactionProcess({
+    dbPath: fixture.dbPath,
+    tempDir,
+    createChild: (_request, env) => { childEnv = env; return { child, exitEvent: 'exit' }; }
+  });
+  assert.deepEqual([childEnv.SQLITE_TMPDIR, childEnv.TMP, childEnv.TEMP], [tempDir, tempDir, tempDir]);
+  child.emit('exit', 0);
+  await launched.promise;
+});
+
 test('业务登记表：过渡租约可带自定义拒绝提示，默认仍为升级提示', () => {
   const registry = createBusinessOperationRegistry();
   const lease = registry.acquireTransition('custom', { requireIdle: true, busyMessage: '自定义提示' });

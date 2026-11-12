@@ -288,8 +288,10 @@ function setupUserActivityReporter() {
       window.desktopApi.app.reportUserActivity();
     } catch (_e) { /* swallow，main idle 误判由 mutex 兜底 */ }
   };
+  // window 捕获阶段最先收到事件：弹窗在 document 捕获阶段对 Tab/Escape 等调用 stopPropagation，
+  // 冒泡阶段监听会漏报，导致空闲存储整理等以用户活动为准的逻辑误判为仍空闲。
   ['mousemove', 'keydown', 'click', 'wheel', 'touchstart'].forEach((evt) => {
-    window.addEventListener(evt, report, { passive: true, signal: shellAbort.signal });
+    window.addEventListener(evt, report, { passive: true, capture: true, signal: shellAbort.signal });
   });
 }
 
