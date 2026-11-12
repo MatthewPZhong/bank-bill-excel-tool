@@ -743,6 +743,46 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       ['M001:1234.5','M002:88','M002:99']);
     assert.equal(await js('document.getElementById("modalRoot").children.length'), 0);
   });
+  // release/v3.2.17 Codex 审查 P2：保存被准入拒绝（busy，如数据库空闲整理尚未退出）时种子未写入，
+  //   不能标为已保存，也不能清状态、关弹窗；保留确认视图与未保存行，稍后重试接着保存。
+  await test('余额确认连续保存遇到 busy：该账号不标已保存，保留确认视图与草稿；重试接着保存', async () => {
+    await setup();
+    await js(`${IMPORT_PROMPT_JS}cfg.openImport();cfg.importFile();`); await tick();
+    await js(`cfg.fillRow(1,'2026-10-01','88');
+      cfg.seedQueue=[{status:'manual-balance-required',manualBalancePromptReady:true,manualBalancePrompt:cfg.secondPrompt},{status:'busy',message:'数据库正在整理'}];
+      cfg.top().querySelector('[data-action="confirm-save"]').click();`); await tick(); await tick();
+    assert.equal(await js('document.getElementById("modalRoot").children.length'), 2);
+    assert.match(await js('cfg.top().textContent'), /余额尚未保存：数据库正在整理/);
+    await js('cfg.host.closeTop();');
+    assert.equal(await js('cfg.handle.isOpen()'), true);
+    assert.deepEqual(await js('cfg.view()'), {title:'余额确认',manualHidden:true,confirmHidden:false});
+    assert.deepEqual(await js(`cfg.rows().map(row=>({saved:row.classList.contains('is-saved'),
+      values:[...row.querySelectorAll('input')].map(input=>[input.value,input.disabled])}))`), [
+      {saved:true,values:[['2026-09-30',true],['1234.5',true]]},
+      {saved:false,values:[['2026-10-01',false],['88',false]]}
+    ]);
+    assert.match(await js(`cfg.top().querySelector('[data-role="confirm-message"]').textContent`), /余额尚未保存/);
+    assert.equal(await js('cfg.applied'), 1);
+    await js(`cfg.seedQueue=[{status:'success'}];cfg.top().querySelector('[data-action="confirm-save"]').click();`); await tick(); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0].merchantId+':'+call.args[0].endBalance)`),
+      ['M001:1234.5','M002:88','M002:88']);
+    assert.equal(await js('document.getElementById("modalRoot").children.length'), 0);
+  });
+  await test('手工补录完成遇到 busy：保留弹窗与已填日期、余额，不清状态；重试成功后关闭', async () => {
+    await setup();
+    await js(`cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog({templateName:'模板 A',merchantId:'M001',currency:'VND',targetBillDate:'2026-10-01'})).handle;
+      cfg.top().querySelector('.manual-balance-date-input').value='2026-09-30';cfg.top().querySelector('.manual-balance-amount-input').value='1000';
+      cfg.next.seed={status:'busy',message:'数据库正在整理'};cfg.top().querySelector('[data-action="done"]').click();`); await tick();
+    assert.equal(await js('document.getElementById("modalRoot").children.length'), 2);
+    assert.match(await js('cfg.top().textContent'), /余额尚未保存：数据库正在整理/);
+    await js('cfg.host.closeTop();');
+    assert.deepEqual(await js(`({open:cfg.handle.isOpen(),applied:cfg.applied,date:cfg.top().querySelector('.manual-balance-date-input').value,
+      amount:cfg.top().querySelector('.manual-balance-amount-input').value,doneDisabled:cfg.top().querySelector('[data-action="done"]').disabled})`),
+    {open:true,applied:0,date:'2026-09-30',amount:'1000',doneDisabled:false});
+    await js(`cfg.next.seed={status:'success'};cfg.top().querySelector('[data-action="done"]').click();`); await tick();
+    assert.equal(await js('cfg.handle.isOpen()'), false);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='seed').length`), 2);
+  });
   await test('导入余额文件失败时提示原因，停留在手工补录视图', async () => {
     await setup();
     await js(`${IMPORT_PROMPT_JS}cfg.openImport();cfg.next.balanceImport={status:'error',message:'余额文件缺少列：期末余额',detailLines:['需要表头']};
@@ -784,6 +824,18 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0])`), [{skipBalanceGapKeys:['K1','K2']}]);
     assert.equal(await js('cfg.handle.close().status'), 'blocked');
     await js(`cfg.write.resolve({status:'warning',message:'余额账单可导出'});`); await tick();
+    assert.equal(await js('cfg.handle.isOpen()'), false);
+    assert.equal(await js('cfg.applied'), 1);
+  });
+  await test('账单日期断档全部不补录遇到 busy：保留断档确认框、不清状态，可重试', async () => {
+    await setup();
+    await js(GAP_PROMPT_JS);
+    await js(`cfg.next.seed={status:'busy',message:'数据库正在整理'};cfg.top().querySelector('[data-action="skip-all"]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /余额尚未保存：数据库正在整理/);
+    await js('cfg.host.closeTop();');
+    assert.deepEqual(await js(`({open:cfg.handle.isOpen(),applied:cfg.applied,gap:Boolean(cfg.top().querySelector('.balance-gap-card')),
+      disabled:cfg.top().querySelector('[data-action="skip-all"]').disabled})`), {open:true,applied:0,gap:true,disabled:false});
+    await js(`cfg.next.seed={status:'warning',message:'余额账单可导出'};cfg.top().querySelector('[data-action="skip-all"]').click();`); await tick();
     assert.equal(await js('cfg.handle.isOpen()'), false);
     assert.equal(await js('cfg.applied'), 1);
   });

@@ -315,6 +315,16 @@
       return gap.missingFrom === gap.missingTo ? gap.missingFrom : `${gap.missingFrom} ~ ${gap.missingTo}`;
     }
 
+    // 补录 / 断档 / 不一致确认的保存被准入拒绝（busy，如数据库空闲整理尚未退出）：任务未开始、
+    //   未写入任何种子，主进程待补录提示不变。调用方须在 applyStatementResult 之前拦下并保留弹窗。
+    function balanceSeedBusyMessage(result) {
+      return `余额尚未保存：${result?.message || '当前暂时不能开始新的任务'}。请稍后再试，已填写的内容已保留。`;
+    }
+
+    function alertBalanceSeedBusy(overlay, result) {
+      pushAlert(overlay, () => createAlertDialog(escapeHtml(balanceSeedBusyMessage(result)), { onConfirm: null }));
+    }
+
     // 发生额计算余额的日期断档：先确认补录或不补录，补录时转入补录弹窗。
     function createBalanceGapConfirmDialog(prompt) {
       const { applyStatementResult } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
@@ -382,6 +392,10 @@
           }
         }
 
+        if (result.status === 'busy') {
+          if (handle.isOpen()) alertBalanceSeedBusy(overlay, result);
+          return;
+        }
         applyStatementResult(result);
         if (!handle.isOpen()) return;
         if (result.manualBalancePromptReady && result.manualBalancePrompt) {
@@ -522,6 +536,10 @@
           }
         }
 
+        if (result.status === 'busy') {
+          if (handle.isOpen()) alertBalanceSeedBusy(overlay, result);
+          return;
+        }
         applyStatementResult(result);
         if (!handle.isOpen()) return;
         if (result.manualBalancePromptReady && result.manualBalancePrompt) {
@@ -613,6 +631,10 @@
           }
         }
 
+        if (result.status === 'busy') {
+          if (handle.isOpen()) alertBalanceSeedBusy(overlay, result);
+          return;
+        }
         applyStatementResult(result);
         if (!handle.isOpen()) return;
         if (result.manualBalancePromptReady && result.manualBalancePrompt) {
@@ -890,6 +912,14 @@
 
       function handleSaveResult(result, invalidDraft = currentDraft()) {
         const handle = modalBridge.host.getHandle(overlay);
+        // 准入拒绝（busy）：任务未开始、种子未写入、主进程待补录提示未变。保留弹窗、当前视图与全部草稿，
+        //   不交给 applyStatementResult（会清掉待补录状态），提示稍后重试。
+        if (result.status === 'busy') {
+          if (!handle?.isOpen()) return;
+          setConfirmMessage(balanceSeedBusyMessage(result));
+          alertBalanceSeedBusy(overlay, result);
+          return;
+        }
         if (result.status === 'manual-balance-invalid') {
           applyManualBalancePromptStatus(result);
           if (!handle?.isOpen()) return;
@@ -1072,7 +1102,8 @@
           }
           lastResult = result;
           lastEntry = entry;
-          if (['manual-balance-invalid', 'confirm-overwrite', 'error', 'failed'].includes(result.status)) break;
+          // busy（如数据库空闲整理尚未退出）、cancelled 时任务未开始，种子没有写入，不能标为已保存。
+          if (['manual-balance-invalid', 'confirm-overwrite', 'error', 'failed', 'busy', 'cancelled'].includes(result.status)) break;
           savedAccountKeys.add(key);
           savedThisRun += 1;
           markRowSaved([...confirmTbody.querySelectorAll('tr')].find((row) => confirmRowKey(row) === key));

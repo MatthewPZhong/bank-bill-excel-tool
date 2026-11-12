@@ -55,7 +55,8 @@ function sourceIdentityFromError(error) {
   };
 }
 
-async function hashSourceFile(filePath) {
+// shouldCancel：可选；读取每块前检查，取消时中止读取并抛出 code 为 vcc-import-cancelled 的错误。
+async function hashSourceFile(filePath, { shouldCancel = null } = {}) {
   const resolvedPath = path.resolve(String(filePath || ''));
   const before = await fs.promises.stat(resolvedPath);
   if (!before.isFile()) throw new Error(`VCC 导入来源不是普通文件：${path.basename(resolvedPath)}`);
@@ -64,6 +65,11 @@ async function hashSourceFile(filePath) {
   await new Promise((resolve, reject) => {
     const stream = fs.createReadStream(resolvedPath);
     stream.on('data', (chunk) => {
+      if (typeof shouldCancel === 'function' && shouldCancel()) {
+        stream.destroy();
+        reject(Object.assign(new Error('已取消导入'), { code: 'vcc-import-cancelled' }));
+        return;
+      }
       digest.update(chunk);
       sizeBytes += chunk.length;
     });

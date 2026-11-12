@@ -351,14 +351,23 @@ function resolveImportPlan(plan, request = {}) {
   })).filter((file) => file.sheets.length);
 }
 
-async function revalidateImportPlan(plan, _options = {}) {
+// 提交前复核在 prepare 阶段运行，尚未进入存档任务生命周期：取消只能靠 worker 的 shouldCancel，
+//   每个文件哈希前、哈希中与返回前都检查，取消时抛 vcc-import-cancelled，不让已取消的导入继续写入。
+async function revalidateImportPlan(plan, options = {}) {
+  const shouldCancel = typeof options.shouldCancel === 'function' ? options.shouldCancel : null;
+  const assertNotCancelled = () => {
+    if (shouldCancel && shouldCancel()) throw planError('vcc-import-cancelled', '已取消导入');
+  };
   for (const file of plan.physicalFiles) {
+    assertNotCancelled();
     let fingerprint;
     try {
-      fingerprint = await hashSourceFile(file.filePath);
+      fingerprint = await hashSourceFile(file.filePath, { shouldCancel });
     } catch (error) {
+      if (error && error.code === 'vcc-import-cancelled') throw planError('vcc-import-cancelled', '已取消导入');
       throw planError('vcc-import-plan-stale', `${file.fileName}：预检后的文件已不可读取，请重新预检`, [error.message]);
     }
+    assertNotCancelled();
     if (fingerprint.sha256 !== file.sha256 || fingerprint.sizeBytes !== file.sizeBytes
         || JSON.stringify(inputFileIdentity(file.filePath)) !== JSON.stringify(file.fileIdentity)) {
       throw planError('vcc-import-plan-stale', `${file.fileName}：文件已变化，请重新预检`);
@@ -366,6 +375,7 @@ async function revalidateImportPlan(plan, _options = {}) {
     // 字节与文件身份未变、识别结构已冻结在计划中，重新解析只会得到同一份 Sheet 计划，
     // 因此不再整本重扫（v3.2.17）。
   }
+  assertNotCancelled();
 }
 
 module.exports = { CHANNEL_CORRECTION_CANDIDATE_LIMIT, collectChannelCorrections,
