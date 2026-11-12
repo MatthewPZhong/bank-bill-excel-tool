@@ -49,6 +49,14 @@
 
 - 单测：detail-importer、archive-lineage、service、read-worker、read-service、dataset-writer、read-snapshot、calculator、workbook-import-plan、multisheet、system-op-importer、fileplan-handoff 等相关文件逐个通过（见各步骤运行记录）；新增用例：已绑定来源不写 fallback、无变化零写入、批量异常数与逐条一致、复检不重扫、汇总顺序与 id 序一致、TEMP 暂存区结构与主库一致、生产导入中转行不入主库。
 
+## Codex 审查（2026-11-11，`codex review --base v3.2.16`）
+
+三项均已核实并修复，各补回归测试（对旧代码失败、修复后通过）：
+
+- [P1] 旧库启动失败：`AppDatabase.init()` 先调 `upgradeVccStorageFile()`，在只读连接上做表集合严格一致的合同断言，v3.2.16 的 v2/v3 库没有新增的 `vcc_fin_op_channel_corrections`，应用无法初始化。修复：`storage-upgrade.js` 在断言前用专用连接、同一事务内补表与写保护并断言，库在其他方面不合规时整体回滚、不留新表。另用 v3.2.16 代码实际建库（含两条旧调整）再用本分支打开两次核验：合同 24 表、调整周期迁移后 cycle=0、自增序号保留、`quick_check` ok；修复前同库报“受保护表集合不一致”。测试：`storage-contract-v3.test.js` 4 项（v3 补表幂等、v2 补表后升级、另有缺陷时回滚、`AppDatabase.init`）。
+- [P1] 跨周期同坐标调整相邻时正式结果导出失败：ExcelJS 把共用血缘名的相邻单元格合并为 `$M$a:$M$b`，流式校验器与旧主体 writer 校验都只接受单个单元格。修复：两处按行展开同列区域后逐行校验（区域行数不得超过该名称的调整行数，倒序、跨列仍拒绝）。测试：`vcc-financial-op-result-workbook.test.js` 真实写出两条相邻调整并经两种写出与校验；`vcc-financial-op-writer.test.js` 增倒序、跨列区域。
+- [P2] 原金额为无缓存值公式的补录行导致待确认表导出失败：输出单元格先对原公式 `rawCell()` 抛错。修复：补录字段直接写补录值，其余字段照常转换核验。校验原表导出走取值链路，不受影响。测试：`vcc-financial-op-review-export.test.js` 公式夹具。
+
 ## Remaining unknowns
 
 - 真实 Windows 机器与真实库上的提速幅度（B86）。

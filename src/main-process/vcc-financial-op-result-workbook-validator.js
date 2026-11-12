@@ -180,6 +180,17 @@ function readDefinedNames(xml) {
   parser.write(xml).close();
   return names;
 }
+// 同一调整坐标跨周期的多条调整行相邻时，ExcelJS 把共用名称的单元格合并为同列区域（如 M4:M5）；
+// 展开为逐个单元格再与期望比对。区域行数超过该名称期望的单元格数直接判为不符。
+function expandColumnRange(range, limit) {
+  const match = /^(.*!)([A-Z]+)([1-9]\d*):([A-Z]+)([1-9]\d*)$/.exec(range);
+  if (!match || match[2] !== match[4]) return [range];
+  const first = Number(match[3]);
+  const last = Number(match[5]);
+  if (last < first || last - first + 1 > limit) throw failure('调整血缘引用与主体、币种或局部行号不符');
+  return Array.from({ length: last - first + 1 }, (_, offset) => `${match[1]}${match[2]}${first + offset}`);
+}
+
 function validateDefinedNames(actual, expectedNames, printAreas) {
   const seen = new Set();
   for (const item of actual) {
@@ -192,7 +203,8 @@ function validateDefinedNames(actual, expectedNames, printAreas) {
     seen.add(String(item.name).toLocaleLowerCase('en-US'));
     const expected = expectedNames.get(item.name);
     if (!expected) throw failure('工作簿存在孤儿或非预期定义名称');
-    const ranges = splitRanges(item.value).map(normalizeRange).sort();
+    const ranges = splitRanges(item.value).map(normalizeRange)
+      .flatMap((range) => expandColumnRange(range, expected.length)).sort();
     equal(ranges, expected.map(normalizeRange).sort(), '调整血缘引用与主体、币种或局部行号不符');
     expectedNames.delete(item.name);
   }

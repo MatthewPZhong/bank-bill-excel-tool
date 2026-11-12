@@ -178,6 +178,24 @@ test('Sheet 名含单引号和逗号，调整引用仍精确对应原始主体',
   }
 });
 
+test('解归档后同坐标再调整：相邻两条调整行共用血缘名（合并为同列区域），新旧两种写出与校验均通过', async (t) => {
+  const data = fixture(t, ['A主体']);
+  data.db.prepare('UPDATE vcc_fin_op_runs SET adjustment_cycle = 1, result_revision = 2 WHERE id = ?').run(data.runId);
+  data.db.prepare('INSERT INTO vcc_fin_op_run_adjustments(run_id,row_key,subject,source_type,category_major,category_minor,currency,adjustment_amount,reason,sequence,adjustment_cycle) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+    .run(data.runId, data.rowKeys[0], 'A主体', SOURCE_TYPES.CHANNEL, 'CHANNEL', 'PRODUCT', 'USD', '0.5', '解归档后再调整', 2, 1);
+  const result = await runWriter(data);
+  assert.ok(result.validation.sha256);
+  const book = new ExcelJS.Workbook(); await book.xlsx.readFile(data.outputPath);
+  const name = encodeAdjustmentLineageName(data.rowKeys[0], 'USD');
+  const found = book.definedNames.model.find((entry) => entry.name === name);
+  assert.deepEqual(found.ranges.map(normalizeRange), [normalizeRange(`'${result.sheetMapping[0].name}'!$M$4:$M$5`)]);
+  assert.deepEqual([4, 5].map((row) => book.worksheets[0].getCell(row, 13).value), [1, 0.5]);
+  const legacyPath = path.join(data.root, 'legacy.xlsx');
+  await writeRunWorkbooks({ db: data.db, runId: data.runId, assetsDir, outputPaths: [legacyPath] });
+  const legacy = new ExcelJS.Workbook(); await legacy.xlsx.readFile(legacyPath);
+  assert.deepEqual(legacy.definedNames.model.find((entry) => entry.name === name).ranges.map(normalizeRange),
+    [normalizeRange("'财务OP校验结果表'!$M$4:$M$5")]);
+});
 test('预算/第二主体失败/取消不交付部分正式结果，并保留原文件', async (t) => {
   const data = fixture(t); fs.writeFileSync(data.outputPath, 'original-protected');
   await assert.rejects(runWriter(data, { resourceLimits: { maxSubjectSourceRows: 1 } }), { code: 'vcc-result-export-resource-limit' });

@@ -938,15 +938,24 @@ function assertAdjustmentLineage(workbook, sheet, renderedRows, lastRow) {
     const lineage = parseAdjustmentLineageName(model.name);
     if (!lineage) throw exportValidationError(`调整血缘名称非法：${model.name}`);
     // 同一坐标在不同调整周期（解归档后再调整）可有多条调整行，共用同一血缘名、各占一个 M 列单元格。
+    // 相邻行共用一个名称时 ExcelJS 会合并为 $M$a:$M$b，按行展开后逐行校验。
     if (!Array.isArray(model.ranges) || model.ranges.length < 1) {
       throw exportValidationError(`调整血缘必须至少引用一个单元格：${model.name}`);
     }
+    const rowNumbers = [];
     for (const range of model.ranges) {
-      const rangeMatch = /^(?:'财务OP校验结果表'|财务OP校验结果表)!\$M\$(\d+)$/.exec(range);
+      const rangeMatch = /^(?:'财务OP校验结果表'|财务OP校验结果表)!\$M\$(\d+)(?::\$M\$(\d+))?$/.exec(range);
       if (!rangeMatch) {
-        throw exportValidationError(`调整血缘必须引用结果表 M 列单个单元格：${model.name}`);
+        throw exportValidationError(`调整血缘必须引用结果表 M 列单元格：${model.name}`);
       }
-      const rowNumber = Number(rangeMatch[1]);
+      const first = Number(rangeMatch[1]);
+      const last = rangeMatch[2] === undefined ? first : Number(rangeMatch[2]);
+      if (last < first || last - first + 1 > adjustments.length) {
+        throw exportValidationError(`调整血缘引用区域无效：${model.name}`);
+      }
+      for (let rowNumber = first; rowNumber <= last; rowNumber += 1) rowNumbers.push(rowNumber);
+    }
+    for (const rowNumber of rowNumbers) {
       if (rowNumber < 2 || rowNumber > lastRow || seenRows.has(rowNumber)) {
         throw exportValidationError(`调整血缘引用行无效或重复：${model.name}`);
       }

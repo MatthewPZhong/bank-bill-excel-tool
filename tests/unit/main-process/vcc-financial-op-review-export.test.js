@@ -373,3 +373,18 @@ test('通道明细预检补录：待确认表按补录记录核验原件血缘�
   assert.equal(String(channel.getCell(2, headers.indexOf('交易金额')).value), '3');
   assert.equal(channel.getCell(2, headers.indexOf('渠道订单号')).value, 'channel-甲');
 });
+
+test('通道明细预检补录：原金额为无缓存值公式时，待确认表直接写补录值，不因原公式失败', async (t) => {
+  const f = await createReviewFixture(t, { subjects: ['甲'], correctChannelAmount: 'formula' });
+  const correction = f.db.prepare('SELECT field_name, original_value, corrected_value FROM vcc_fin_op_channel_corrections').all();
+  assert.deepEqual(correction.map((row) => ({ ...row })), [{ field_name: '交易金额', original_value: '', corrected_value: '3' }]);
+  const manifestPath = path.join(f.dir, 'manifest.sqlite'), outputPath = path.join(f.dir, 'review.xlsx');
+  await prepareReviewManifest({ ...f, manifestPath, appVersion: '3.2.17' });
+  await extractReviewSources({ manifestPath });
+  await writeReviewWorkbook({ filePath: outputPath, manifestPath, assetsDir: f.assetsDir });
+  await validateReviewWorkbook({ filePath: outputPath, manifestPath });
+  const book = new ExcelJS.Workbook(); await book.xlsx.readFile(outputPath);
+  const channel = book.worksheets.find((sheet) => sheet.getRow(1).values.includes('渠道订单号'));
+  const headers = channel.getRow(1).values;
+  assert.equal(String(channel.getCell(2, headers.indexOf('交易金额')).value), '3');
+});

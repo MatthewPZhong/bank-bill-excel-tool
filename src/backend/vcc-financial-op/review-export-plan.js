@@ -369,12 +369,15 @@ async function extractReviewSources({ manifestPath, signal, onProgress }) {
       const save = (fact, values, cells) => {
         safePoint(signal);
         const expected = validateRawFact(fact, values, cells);
-        const output = cells ? expected.headers.map((header, index) => rawCell(cells[index], header)) : values.map(historicCell);
-        // 待确认表的原表行显示补录后的值，与计算口径一致。
-        for (const [field, correction] of Object.entries(expected.channelCorrections || {})) {
-          const index = expected.headers.indexOf(field);
-          if (index >= 0) output[index] = historicCell(correction.corrected);
-        }
+        // 待确认表的原表行显示补录后的值，与计算口径一致。补录字段直接取补录值，
+        // 不再转换原单元格（原值可能是无缓存值的公式，正是被补录的原因）；其余字段照常核验转换。
+        const correctedByIndex = new Map(Object.entries(expected.channelCorrections || {})
+          .map(([field, correction]) => [expected.headers.indexOf(field), correction.corrected])
+          .filter(([index]) => index >= 0));
+        const output = cells
+          ? expected.headers.map((header, index) => (correctedByIndex.has(index)
+            ? historicCell(correctedByIndex.get(index)) : rawCell(cells[index], header)))
+          : values.map((value, index) => historicCell(correctedByIndex.has(index) ? correctedByIndex.get(index) : value));
         db.prepare('INSERT INTO actual VALUES (?,?)').run(fact.identity, JSON.stringify(output)); extracted += 1;
       };
       db.exec('BEGIN');

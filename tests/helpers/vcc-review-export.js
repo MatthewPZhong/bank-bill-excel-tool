@@ -36,7 +36,9 @@ async function createReviewFixture(t, { subjects = ['甲', '乙'], pendingSameCu
   add('费用', T.FEE_FX, subjects.map((subject) => ({ 订单号: `fee-${subject}`, BillDate: '2026-06-01', 公司主体: subject,
     业务部门: 'VCC', 对手部门: 'OPS', 业务子类型: '手续费', 出入方向: 'out', 我方币种: 'USD', 我方到账金额: '2' })));
   for (const subject of subjects) add(subject, T.CHANNEL, [{ 渠道订单号: `channel-${subject}`, 账单日期: '2026-06-01',
-    通道名称: 'CITI', MID: '000009876543210', 交易金额: correctChannelAmount ? '' : '3', 交易币种: 'EUR', 借贷方向: 'in' }]);
+    通道名称: 'CITI', MID: '000009876543210',
+    // correctChannelAmount: 'formula' 时交易金额为无缓存值的公式（预检视为空、可补录）。
+    交易金额: correctChannelAmount === 'formula' ? { t: 'n', f: '1+2' } : correctChannelAmount ? '' : '3', 交易币种: 'EUR', 借贷方向: 'in' }]);
   add('Pending', T.PENDING, subjects.map((subject) => ({ PendingBizId: `pending-${subject}`, 平账账期: '2026-06', 主体: subject,
     对账类型: 'VCC_clearing_credit', 金额: '5', 币种: 'USD', 流水_币种: pendingSameCurrency ? 'USD' : 'EUR', 流水_对账金额: '5',
     channel: 'CITI', 备注: pendingRemark, merchant_id: '00000000000000001' })));
