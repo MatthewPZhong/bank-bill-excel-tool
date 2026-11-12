@@ -20,6 +20,14 @@
 
 ## 未实施
 
+### B91（P3 · 已知问题）单测 `paired-parser-e07-c` 的「persist窗口shutdown在receipt/COMMIT前回滚」在 Windows CI 偶发得到 `CANCEL_TIMEOUT`
+
+- **来源**：2026-11-10 v3.2.16 合并到 main 后的检查（run 42860911144 第 1 次，`release-check-unit (6/6)`）。同一提交只重跑失败 job 后通过（第 2 次）；内容相同的 PR 合并引用（run 42856741271）与本机两次完整 `release-check` 也都通过
+- **影响**：`tests/unit/main-process/duplicate-inbound-match/paired-parser-e07-c.test.js:1188`，第 1247 行期望 paired 结果的错误码为 `DUPLICATE_SHUTDOWN`，实际为 `CANCEL_TIMEOUT`；该用例耗时 9.9 秒（`shutdown` 的 `timeoutMs` 为 10000），同片相邻用例「真实Parser graceful shutdown…」耗时 194 秒，机器负载很高。失败使 `smoke-test` 汇总失败、`build` 跳过，需人工判断后重跑
+- **现状**：该测试与 `src/main-process/duplicate-inbound-match/` 在 v3.2.16 未改；未在本机复现。推断为 CI 负载下取消等待先超时，未确认
+- **关闭条件**：查明负载下得到 `CANCEL_TIMEOUT` 的路径。属测试时序则调整测试自身的等待方式或期限（产品的 shutdown 超时策略不变）；属产品问题则修复，保证取消超时时持久化窗口仍回滚，并补回归。之后 Windows CI 多次运行无复现
+- **目标版本**：未定
+
 ### B79（P1 · 顺延）新开账户「生成余额账单」与月度余额「装配」在业务开始前必然失败，修复待并入下一周版本
 
 - **来源**：2026-11-10 同事反馈生成新开账户余额账单报 `worker file action 缺少 TaskRun-dependent FilePlan resolver：new-account:generate`；修复分支 `fix/deferred-file-plan-resolver`（基于 v3.2.16）
