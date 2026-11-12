@@ -23,6 +23,7 @@ const LAST_SUCCESS_SETTING_KEY = 'db_idle_compaction_last_success_at';
 const TRANSITION_OWNER = 'database-idle-compaction';
 const BUSY_MESSAGE = '正在整理存储空间，已自动停止整理，请再试一次。';
 const PROCESS_SCRIPT = path.join(__dirname, 'compaction-process.js');
+const MAINTENANCE_ABORTED = Symbol('maintenance-aborted');
 
 function pragmaNumber(db, name) {
   const row = db.prepare(`PRAGMA ${name}`).get();
@@ -61,22 +62,45 @@ function electronUtilityProcess() {
 }
 
 // Electron 下用 utilityProcess（真正的 Node 子进程），纯 Node（测试）下用 spawn。
-function launchCompactionProcess({ dbPath }) {
-  const request = JSON.stringify({ dbPath });
+function createCompactionChild(request) {
   const utility = electronUtilityProcess();
   // 低内存任务占用资源时准入会抛出 RESOURCE_MEMORY_ACTIVITY_BUSY，由控制器按“跳过”处理。
   const child = utility
     ? memoryCarrierAdmission(null).observe(utility.fork(PROCESS_SCRIPT, [request], { stdio: 'pipe', serviceName: 'database-compaction' }))
     : memoryCarrierAdmission(null).observe(spawn(process.execPath, [PROCESS_SCRIPT, request], { stdio: ['ignore', 'pipe', 'pipe'] }));
+  return { child, exitEvent: utility ? 'exit' : 'close' };
+}
+
+const KILL_RETRY_MS = 500;
+
+// 结果只在子进程真实退出（exit/close）后给出，作为释放租约与恢复存档维护的退出屏障。
+//   error 事件不代表已退出：仅进程从未启动（无 pid）时直接结束，否则补发终止并继续等退出。
+//   kill：记录取消请求；启动前（utilityProcess 尚无 pid）或 kill() 返回 false 时，在 spawn 后及每 500 ms 重试，直到退出。
+function launchCompactionProcess({ dbPath, createChild = createCompactionChild }) {
+  const { child, exitEvent } = createChild(JSON.stringify({ dbPath }));
   let stdout = '';
   let stderr = '';
+  let settled = false;
+  let killRequested = false;
+  let retryTimer = null;
   if (child.stdout) child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
   if (child.stderr) child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+
+  function attemptKill() {
+    if (settled) return;
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    let killed = false;
+    try { killed = child.kill() !== false; } catch (_error) { killed = false; }
+    if (killed || settled) return;
+    retryTimer = setTimeout(() => { retryTimer = null; attemptKill(); }, KILL_RETRY_MS);
+    if (retryTimer.unref) retryTimer.unref();
+  }
+
   const promise = new Promise((resolve) => {
-    let settled = false;
     const finish = (code, signal) => {
       if (settled) return;
       settled = true;
+      if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
       const parsed = parseResult(stdout);
       resolve(parsed || {
         status: 'error',
@@ -84,16 +108,19 @@ function launchCompactionProcess({ dbPath }) {
         message: stderr.trim().slice(0, 500) || `整理进程退出（code ${code}${signal ? `，signal ${signal}` : ''}）`
       });
     };
-    child.on(utility ? 'exit' : 'close', finish);
+    child.on(exitEvent, finish);
+    child.on('spawn', () => { if (killRequested) attemptKill(); });
     child.on('error', (error) => {
       stderr += error && error.message ? error.message : String(error);
-      finish(null, null);
+      if (child.pid == null) finish(null, null);
+      else attemptKill();
     });
   });
   return {
     promise,
     kill() {
-      try { child.kill(); } catch (_error) { /* 已退出 */ }
+      killRequested = true;
+      attemptKill();
     }
   };
 }
@@ -138,6 +165,21 @@ function createIdleCompactionController({
     });
   }
 
+  // 存档维护准备（等待存档操作、暂停后台物化与归属扫描）可能较久，期间也要响应取消：
+  //   取消后立即放弃本次整理并释放业务租约；准备完成后再补做存档维护释放。
+  function waitForMaintenance(current) {
+    const pending = Promise.resolve().then(() => beginMaintenance());
+    const aborted = new Promise((resolve) => { current.onAbort = () => resolve(MAINTENANCE_ABORTED); });
+    if (current.aborted) current.onAbort();
+    return Promise.race([pending, aborted]).then((value) => {
+      current.onAbort = null;
+      if (value === MAINTENANCE_ABORTED) {
+        pending.then((late) => (late && late.acquired === true ? endMaintenance() : undefined)).catch(() => {});
+      }
+      return value;
+    });
+  }
+
   function maybeRun() {
     if (runningPromise) return Promise.resolve({ status: 'skipped', reason: 'running' });
     const promise = runOnce();
@@ -169,10 +211,14 @@ function createIdleCompactionController({
     const lease = registry.acquireTransition(TRANSITION_OWNER, { requireIdle: true, busyMessage: BUSY_MESSAGE });
     if (!lease.acquired) return { status: 'skipped', reason: lease.reason || 'business-busy' };
     let maintenance = null;
-    const current = { aborted: false, abortReason: '', kill: null };
+    const current = { aborted: false, abortReason: '', kill: null, onAbort: null };
     running = current;
     try {
-      maintenance = await beginMaintenance();
+      maintenance = await waitForMaintenance(current);
+      if (maintenance === MAINTENANCE_ABORTED) {
+        maintenance = null;
+        return { status: 'aborted', reason: current.abortReason || 'user-activity' };
+      }
       if (!maintenance || maintenance.acquired !== true) {
         return { status: 'skipped', reason: (maintenance && maintenance.reason) || 'maintenance-unavailable' };
       }
@@ -227,11 +273,15 @@ function createIdleCompactionController({
     }
   }
 
-  // 用户操作、退出应用时调用：立即结束整理子进程，释放租约。
+  // 用户操作、退出应用时调用：结束整理子进程（或放弃尚未完成的存档维护准备），释放租约。
+  //   重复调用会再次尝试终止，不因首次终止未生效而失效。
   function abort(reason = 'user-activity') {
-    if (!running || running.aborted) return false;
-    running.aborted = true;
-    running.abortReason = reason;
+    if (!running) return false;
+    if (!running.aborted) {
+      running.aborted = true;
+      running.abortReason = reason;
+    }
+    if (typeof running.onAbort === 'function') running.onAbort();
     if (typeof running.kill === 'function') running.kill();
     return true;
   }
@@ -241,7 +291,8 @@ function createIdleCompactionController({
     abort('closing');
   }
 
-  // 退出应用等场景：中止整理并等本次收尾（子进程退出、存档维护恢复、租约释放）完成。
+  // 退出应用等场景：中止整理并等本次收尾（子进程真实退出、租约释放）完成；
+  //   存档维护若仍在准备中被放弃，准备完成后自行释放，不阻塞退出。
   async function stop(reason = 'closing') {
     abort(reason);
     if (runningPromise) {

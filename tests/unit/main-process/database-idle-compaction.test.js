@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { EventEmitter } = require('node:events');
 const { DatabaseSync } = require('node:sqlite');
 const { createBusinessOperationRegistry } = require('../../../src/main-process/business-operation-registry');
 const {
@@ -185,6 +186,104 @@ test('低内存任务占用资源时跳过整理，释放租约并恢复存档�
   assert.deepEqual([run.calls.begin, run.calls.end], [1, 1]);
   assert.equal(run.registry.isInstallTransitionActive(), false);
   assert.equal(fixture.database.getSetting(LAST_SUCCESS_SETTING_KEY), null);
+});
+
+test('存档维护准备阶段用户操作：立即放弃本次整理并释放租约，准备完成后再释放存档维护', async (t) => {
+  const fixture = fileDb(t);
+  let finishPreparation;
+  const ends = [];
+  let launches = 0;
+  const registry = createBusinessOperationRegistry();
+  const instance = createIdleCompactionController({
+    getDatabase: () => fixture.database,
+    registry,
+    getLastUserActivityTs: () => 0,
+    beginMaintenance: () => new Promise((resolve) => { finishPreparation = resolve; }),
+    endMaintenance: async () => { ends.push('end'); },
+    launch: () => { launches += 1; throw new Error('不应启动整理'); },
+    getFreeBytes: () => 1024 ** 4,
+    now: () => 100 * 24 * 60 * MINUTE,
+    options: SMALL
+  });
+  const pending = instance.maybeRun();
+  while (!finishPreparation) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(registry.begin({ channel: 'blocked' }).accepted, false);
+  assert.equal(instance.abort('user-activity'), true);
+  assert.deepEqual(await pending, { status: 'aborted', reason: 'user-activity' });
+  assert.equal(registry.isInstallTransitionActive(), false);
+  assert.equal(instance.isRunning(), false);
+  assert.deepEqual(ends, []);
+  finishPreparation({ acquired: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(ends, ['end']);
+  assert.equal(launches, 0);
+});
+
+test('重复的用户操作会再次尝试终止整理进程', async (t) => {
+  const fixture = fileDb(t);
+  let kills = 0;
+  let resolveLaunch;
+  const run = controller(fixture, {
+    launch: () => ({
+      promise: new Promise((resolve) => { resolveLaunch = resolve; }),
+      kill: () => { kills += 1; }
+    })
+  });
+  const pending = run.instance.maybeRun();
+  while (!resolveLaunch) await new Promise((resolve) => setImmediate(resolve));
+  run.instance.abort('user-activity');
+  run.instance.abort('user-activity');
+  assert.equal(kills, 2);
+  resolveLaunch({ status: 'error', code: 'killed' });
+  assert.equal((await pending).status, 'aborted');
+});
+
+function fakeChild({ pid = 4321, killResult = true } = {}) {
+  const child = new EventEmitter();
+  child.pid = pid;
+  child.kills = 0;
+  child.killResult = killResult;
+  child.kill = () => { child.kills += 1; return child.killResult; };
+  return child;
+}
+
+async function settledWithin(promise) {
+  let settled = false;
+  promise.then(() => { settled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  return settled;
+}
+
+test('整理进程 error 事件后仍等真实退出再给出结果，并补发终止', async () => {
+  const child = fakeChild();
+  const launched = launchCompactionProcess({ dbPath: 'x', createChild: () => ({ child, exitEvent: 'exit' }) });
+  child.emit('error', new Error('V8 致命错误'));
+  assert.equal(await settledWithin(launched.promise), false, 'error 后尚未退出，不能放行');
+  assert.equal(child.kills, 1);
+  child.emit('exit', 1);
+  const result = await launched.promise;
+  assert.equal(result.status, 'error');
+  assert.match(result.message, /V8 致命错误/);
+});
+
+test('整理进程从未启动（无 pid）时 error 直接结束', async () => {
+  const child = fakeChild({ pid: null });
+  const launched = launchCompactionProcess({ dbPath: 'x', createChild: () => ({ child, exitEvent: 'close' }) });
+  child.emit('error', new Error('spawn ENOENT'));
+  assert.equal((await launched.promise).status, 'error');
+});
+
+test('启动前请求终止或 kill() 返回 false 时，在 spawn 后重试终止直到退出', async () => {
+  const child = fakeChild({ pid: null, killResult: false });
+  const launched = launchCompactionProcess({ dbPath: 'x', createChild: () => ({ child, exitEvent: 'exit' }) });
+  launched.kill();
+  assert.equal(child.kills, 1);
+  child.pid = 4321;
+  child.killResult = true;
+  child.emit('spawn');
+  assert.equal(child.kills, 2, 'spawn 后补发终止');
+  child.emit('exit', null, 'SIGTERM');
+  assert.equal((await launched.promise).status, 'error');
 });
 
 test('业务登记表：过渡租约可带自定义拒绝提示，默认仍为升级提示', () => {
