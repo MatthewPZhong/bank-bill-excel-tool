@@ -52,8 +52,12 @@ const newPreparationPolicies = [
   // v3.2.15：网银账单渠道只读查询
   { batchPolicy: 'exclude', channel: 'channel-account-mapping:list-conflicts', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'channel:list', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
+  // v3.2.17：补录余额「导入余额文件」只读预检
+  { batchPolicy: 'exclude', channel: 'file:import-balance-seed-file', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'scenarios:recon-id-fix-fields', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'settings:acknowledge-release-notes', excludeReason: 'ui-navigation', taskKind: 'exclude', workerContext: 'none' },
+  // v3.2.17 外观设置：深色模式深浅度
+  { batchPolicy: 'exclude', channel: 'settings:set-dark-mode-lightness', excludeReason: 'ui-navigation', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:discard-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:get', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:list', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
@@ -79,6 +83,43 @@ const newSupportActions = [
   { channel: 'balance-seed:update', kind: 'support-action', reason: 'balance-seed' },
   { channel: 'balance-seed:delete', kind: 'support-action', reason: 'balance-seed' }
 ];
+
+// 基线之后的行为修正，固定基线本身不改：基线把两个 deferred 动作与 acquiringBillCurrency:run 同列
+// workerFilePlan，固化了“初始计划须由 prepared.filePlanResolver 按 Task Run 生成”。这两个入口的 prepare
+// 只给空的 deferred FilePlan，该行为使它们自 v3.1.11 起在业务开始前必然失败；修正后初始计划取入口显式给出的
+// deferred 字面量，真实输出仍在结果非空后经 promotion manifest 晋升（deferredPromotion 样例不变）。
+const correctedBehaviorCases = [{
+  group: 'workerFilePlan',
+  hook: 'filePlanResolver',
+  channels: ['monthly-balance:assemble', 'new-account:generate'],
+  samples: [
+    {
+      id: 'prepared-deferred-plan',
+      args: [{ prepared: { filePlan: { allocation: 'deferred', inputs: [], outputs: [] } }, taskRun: { taskRunId: 'task1' } }],
+      preparedResolver: true,
+      expected: { value: { allocation: 'deferred', inputs: [], outputs: [] }, effects: [] }
+    },
+    {
+      id: 'missing-plan',
+      args: [{ taskRun: { taskRunId: 'task1' } }],
+      preparedResolver: true,
+      expected: { error: { name: 'TypeError', code: 'ARCHIVE_FILE_PLAN_INVALID' }, effects: [] }
+    },
+    {
+      id: 'non-deferred-plan',
+      args: [{ prepared: { filePlan: { allocation: 'eager', inputs: [], outputs: [{ path: 'synthetic-output.xlsx' }] } } }],
+      expected: { error: { name: 'TypeError', code: 'ARCHIVE_FILE_PLAN_INVALID' }, effects: [] }
+    }
+  ]
+}];
+
+function baselineBehaviorChannels(scenario) {
+  const corrected = correctedBehaviorCases.find((item) => (
+    item.group === scenario.group && item.hook === scenario.hook
+  ));
+  const channels = baseline.groups[scenario.group];
+  return corrected ? channels.filter((channel) => !corrected.channels.includes(channel)) : channels;
+}
 
 // 固定 fixture 与当前公开 API 分开读取；此测试不提供更新/重建 fixture 入口。
 test('Archive 固定基线逐 channel 保留全部 268 项、模块身份、file/no-file/exclude 和 hook 注册', () => {
@@ -154,11 +195,19 @@ test('行为样例覆盖每个可恢复 channel 的分类/metadata/lineage，及
     assert.equal(new Set(group).size, group.length);
     for (const channel of group) assert.ok(policyByChannel.has(channel), channel);
   }
-  for (const scenario of baseline.behaviorCases) {
+  for (const correction of correctedBehaviorCases) {
+    for (const channel of correction.channels) {
+      assert.ok(baseline.groups[correction.group].includes(channel), `${correction.group} 修正项必须来自基线：${channel}`);
+    }
+  }
+  const effectiveCases = [
+    ...baseline.behaviorCases.map((scenario) => ({ ...scenario, channels: baselineBehaviorChannels(scenario) })),
+    ...correctedBehaviorCases
+  ];
+  for (const scenario of effectiveCases) {
     assert.ok(scenario.samples.length > 0, scenario.group);
-    const channels = baseline.groups[scenario.group];
-    assert.ok(channels && channels.length > 0, scenario.group);
-    for (const channel of channels) {
+    assert.ok(scenario.channels && scenario.channels.length > 0, scenario.group);
+    for (const channel of scenario.channels) {
       const hooks = covered.get(channel) || new Set();
       hooks.add(scenario.hook);
       covered.set(channel, hooks);
@@ -180,11 +229,23 @@ test('行为样例覆盖每个可恢复 channel 的分类/metadata/lineage，及
 
 for (const scenario of baseline.behaviorCases) {
   test(`Archive 固定行为：${scenario.group} / ${scenario.hook}`, async () => {
-    for (const channel of baseline.groups[scenario.group]) {
+    for (const channel of baselineBehaviorChannels(scenario)) {
       const policy = policyByChannel.get(channel);
       for (const sample of scenario.samples) {
         const observed = await observeArchiveBehavior(policy, { ...sample, hook: scenario.hook });
         assert.deepEqual(observed, sample.expected, `${channel} / ${scenario.hook} / ${sample.id}`);
+      }
+    }
+  });
+}
+
+for (const correction of correctedBehaviorCases) {
+  test(`Archive 基线后行为修正：${correction.group} / ${correction.hook}（${correction.channels.join('、')}）`, async () => {
+    for (const channel of correction.channels) {
+      const policy = policyByChannel.get(channel);
+      for (const sample of correction.samples) {
+        const observed = await observeArchiveBehavior(policy, { ...sample, hook: correction.hook });
+        assert.deepEqual(observed, sample.expected, `${channel} / ${correction.hook} / ${sample.id}`);
       }
     }
   });

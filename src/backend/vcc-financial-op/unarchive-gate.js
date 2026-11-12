@@ -46,7 +46,22 @@ function evaluateUnarchiveGate(contractResult, gateEvidence) {
   });
 }
 
+// v3.2.17 级联解归档：只有“后续月份存在已归档或已计算结果”这一项改为可执行（cascade），
+// 归档不一致、有活动任务、目标月导入中仍按原顺序阻断。旧写路径继续使用 evaluateUnarchiveGate。
+function evaluateCascadeUnarchiveGate(contractResult, gateEvidence) {
+  const gate = evaluateUnarchiveGate(contractResult, gateEvidence);
+  if (gate.code !== 'unarchive-not-tail') return Object.freeze({ ...gate, cascade: false });
+  return Object.freeze({
+    canUnarchive: true,
+    cascade: true,
+    code: '',
+    message: '',
+    dependentMonths: gate.dependentMonths
+  });
+}
+
 module.exports = {
   UNARCHIVE_GATE_VERSION,
-  evaluateUnarchiveGate
+  evaluateUnarchiveGate,
+  evaluateCascadeUnarchiveGate
 };

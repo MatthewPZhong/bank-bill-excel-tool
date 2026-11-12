@@ -49,6 +49,42 @@ function commitStagingProgress(db, recordId, rawCount) {
   db.exec('BEGIN IMMEDIATE');
 }
 
+// SQLITE_FULL（含扩展码）：导入暂存区或主库所在磁盘写满时给出可读原因。
+function describeDiskFull(error) {
+  if (!error || (Number(error.errcode) & 0xff) !== 13) return error;
+  if (!String(error.message || '').startsWith('磁盘空间不足')) {
+    error.message = `磁盘空间不足，导入已中止，请清理磁盘后重试（${error.message}）`;
+  }
+  return error;
+}
+
+function channelCorrectionSheetKey(physicalFileId, sheetIndex) {
+  return `${physicalFileId}\u0000${Number(sheetIndex)}`;
+}
+
+function correctionStaleError(detail) {
+  const error = new Error(`导入计划已失效：${detail}，请重新预检`);
+  error.code = 'vcc-import-plan-stale';
+  return error;
+}
+
+// 预检补录：先核对本行业务键与被改字段的原值与预检时一致，再用修改后的值映射（内容哈希按修改后整行计算）。
+function applyChannelCorrection(values, correction, sheetName, sourceRow) {
+  const definition = getSourceDefinition(SOURCE_TYPES.CHANNEL);
+  const valueText = (field) => String(values[definition.indexes[field]] == null ? '' : values[definition.indexes[field]]);
+  if (valueText(definition.keyHeader).trim() !== correction.idempotencyKey) {
+    throw correctionStaleError(`${sheetName} 第 ${sourceRow} 行渠道订单号与预检不一致`);
+  }
+  const corrected = [...values];
+  for (const [field, original] of Object.entries(correction.original)) {
+    if (valueText(field) !== original) {
+      throw correctionStaleError(`${sheetName} 第 ${sourceRow} 行“${field}”与预检不一致`);
+    }
+    corrected[definition.indexes[field]] = correction.corrected[field];
+  }
+  return corrected;
+}
+
 function safeRollback(db) {
   try { db.exec('ROLLBACK'); } catch (_error) { /* ignore */ }
 }
@@ -224,13 +260,25 @@ function updateConflictComparisons(db, recordId, sourceType) {
   }
 }
 
-function countRows(db, recordId, disposition) {
-  const row = db.prepare(`
-    SELECT COUNT(*) AS row_count
+// 一次按处置结果分组计数，代替逐类 COUNT（暂存行百万级时省去多次全量扫描）。
+function countDispositions(db, recordId) {
+  const counts = {
+    accepted: 0,
+    idempotent_skip: 0,
+    idempotent_conflict: 0,
+    invalid_key: 0,
+    format_error: 0,
+    rolled_back: 0
+  };
+  for (const row of db.prepare(`
+    SELECT disposition, COUNT(*) AS row_count
     FROM vcc_fin_op_import_staging_rows
-    WHERE import_record_id = ? AND disposition = ?
-  `).get(recordId, disposition);
-  return Number(row.row_count) || 0;
+    WHERE import_record_id = ? AND disposition IS NOT NULL
+    GROUP BY disposition
+  `).all(recordId)) {
+    if (Object.hasOwn(counts, row.disposition)) counts[row.disposition] = Number(row.row_count) || 0;
+  }
+  return counts;
 }
 
 function hasArchivedDataset(db, targetMonth, sourceType) {
@@ -254,11 +302,12 @@ function finalizeFailedRows(db, recordId, sourceType, message) {
   `).run(message, recordId);
   updateConflictComparisons(db, recordId, sourceType);
 
-  const invalidKeyCount = countRows(db, recordId, 'invalid_key');
-  const conflictCount = countRows(db, recordId, 'idempotent_conflict');
-  const formatErrorCount = countRows(db, recordId, 'format_error');
-  const rolledBackCount = countRows(db, recordId, 'rolled_back');
-  const skippedCount = countRows(db, recordId, 'idempotent_skip');
+  const counts = countDispositions(db, recordId);
+  const invalidKeyCount = counts.invalid_key;
+  const conflictCount = counts.idempotent_conflict;
+  const formatErrorCount = counts.format_error;
+  const rolledBackCount = counts.rolled_back;
+  const skippedCount = counts.idempotent_skip;
   const rawCount = invalidKeyCount + conflictCount + formatErrorCount + rolledBackCount + skippedCount;
   const status = conflictCount > 0 ? 'failed_conflict' : 'failed_validation';
   repository.persistStagingAnomalies(db, recordId);
@@ -277,30 +326,29 @@ function finalizeFailedRows(db, recordId, sourceType, message) {
   repository.clearImportStagingRows(db, recordId);
 }
 
-function markConflictRows(db, recordId, sourceType) {
+// 与已有有效行同键的暂存行一遍判定：内容相同为幂等跳过，不同为幂等冲突。
+// 有效行在 (source_type, idempotency_key) 上唯一，因此与原先两次带子查询的 UPDATE 等价。
+function markRowsAgainstEffective(db, recordId) {
   db.prepare(`
     UPDATE vcc_fin_op_import_staging_rows AS incoming
-    SET disposition = 'idempotent_conflict',
-        existing_effective_id = (
-          SELECT effective.id
-          FROM vcc_fin_op_effective_rows effective
-          WHERE effective.source_type = incoming.source_type
-            AND effective.idempotency_key = incoming.idempotency_key
-          LIMIT 1
-        ),
-        validation_field = 'idempotency_key',
-        validation_message = '同一业务键对应的原始业务内容不一致'
+    SET disposition = CASE WHEN effective.content_hash = incoming.content_hash
+                           THEN 'idempotent_skip' ELSE 'idempotent_conflict' END,
+        existing_effective_id = effective.id,
+        validation_field = CASE WHEN effective.content_hash = incoming.content_hash
+                                THEN incoming.validation_field ELSE 'idempotency_key' END,
+        validation_message = CASE WHEN effective.content_hash = incoming.content_hash
+                                  THEN '同键同内容，幂等跳过，未参与重复计算'
+                                  ELSE '同一业务键对应的原始业务内容不一致' END
+    FROM vcc_fin_op_effective_rows AS effective
     WHERE incoming.import_record_id = ?
       AND incoming.disposition IS NULL
-      AND EXISTS (
-        SELECT 1
-        FROM vcc_fin_op_effective_rows effective
-        WHERE effective.source_type = incoming.source_type
-          AND effective.idempotency_key = incoming.idempotency_key
-          AND effective.content_hash <> incoming.content_hash
-      )
+      AND effective.source_type = incoming.source_type
+      AND effective.idempotency_key = incoming.idempotency_key
   `).run(recordId);
+}
 
+// 同一导入批次内同键异内容：全部标为冲突（与已有有效行的比较已在 markRowsAgainstEffective 完成）。
+function markMixedBatchKeys(db, recordId) {
   const mixedKeys = db.prepare(`
     SELECT idempotency_key
     FROM vcc_fin_op_import_staging_rows
@@ -316,31 +364,6 @@ function markConflictRows(db, recordId, sourceType) {
     WHERE import_record_id = ? AND idempotency_key = ? AND disposition IS NULL
   `);
   for (const key of mixedKeys) markMixed.run(recordId, key);
-  return countRows(db, recordId, 'idempotent_conflict');
-}
-
-function markExistingIdenticalRows(db, recordId) {
-  db.prepare(`
-    UPDATE vcc_fin_op_import_staging_rows AS incoming
-    SET disposition = 'idempotent_skip',
-        existing_effective_id = (
-          SELECT effective.id
-          FROM vcc_fin_op_effective_rows effective
-          WHERE effective.source_type = incoming.source_type
-            AND effective.idempotency_key = incoming.idempotency_key
-          LIMIT 1
-        ),
-        validation_message = '同键同内容，幂等跳过，未参与重复计算'
-    WHERE incoming.import_record_id = ?
-      AND incoming.disposition IS NULL
-      AND EXISTS (
-        SELECT 1
-        FROM vcc_fin_op_effective_rows effective
-        WHERE effective.source_type = incoming.source_type
-          AND effective.idempotency_key = incoming.idempotency_key
-          AND effective.content_hash = incoming.content_hash
-      )
-  `).run(recordId);
 }
 
 function filteredRowMessage(sourceType, counts) {
@@ -411,6 +434,8 @@ function promoteRows(db, recordId, targetMonth, sourceType) {
     `).run(recordId);
   }
 
+  // fallback 只给尚未绑定存档原件的来源兜底；生产导入在写入前已绑定 ready 原件，
+  // 读取方（dataset writer / review export）对已绑定来源只走原件，写入即是死数据。
   db.prepare(`
     INSERT INTO vcc_fin_op_effective_raw_fallback (
       effective_row_id, import_source_id, raw_contract_version, raw_json
@@ -418,10 +443,13 @@ function promoteRows(db, recordId, targetMonth, sourceType) {
     SELECT effective.id, staging.import_source_id,
            staging.raw_contract_version, staging.raw_json
     FROM vcc_fin_op_import_staging_rows staging
+    JOIN vcc_fin_op_import_sources source
+      ON source.id = staging.import_source_id
     JOIN vcc_fin_op_effective_rows effective
       ON effective.source_type = staging.source_type
      AND effective.idempotency_key = staging.idempotency_key
     WHERE staging.import_record_id = ? AND staging.disposition = 'accepted'
+      AND source.archive_artifact_id IS NULL
     ON CONFLICT(effective_row_id) DO UPDATE SET
       import_source_id = excluded.import_source_id,
       raw_contract_version = excluded.raw_contract_version,
@@ -442,12 +470,13 @@ function promoteRows(db, recordId, targetMonth, sourceType) {
     WHERE incoming.import_record_id = ? AND incoming.disposition IS NULL
   `).run(recordId);
 
-  const insertedCount = countRows(db, recordId, 'accepted');
-  const skippedCount = countRows(db, recordId, 'idempotent_skip');
-  const invalidKeyCount = countRows(db, recordId, 'invalid_key');
-  const conflictCount = countRows(db, recordId, 'idempotent_conflict');
-  const formatErrorCount = countRows(db, recordId, 'format_error');
-  const rolledBackCount = countRows(db, recordId, 'rolled_back');
+  const counts = countDispositions(db, recordId);
+  const insertedCount = counts.accepted;
+  const skippedCount = counts.idempotent_skip;
+  const invalidKeyCount = counts.invalid_key;
+  const conflictCount = counts.idempotent_conflict;
+  const formatErrorCount = counts.format_error;
+  const rolledBackCount = counts.rolled_back;
   const rawCount = insertedCount + skippedCount + invalidKeyCount
     + conflictCount + formatErrorCount + rolledBackCount;
   const filteredCount = invalidKeyCount + conflictCount + formatErrorCount;
@@ -497,11 +526,23 @@ function promoteRows(db, recordId, targetMonth, sourceType) {
   repository.clearImportStagingRows(db, recordId);
 }
 
-function classifyAndPromote(db, recordId, targetMonth, sourceType) {
+function classifyAndPromote(db, recordId, targetMonth, sourceType, {
+  appliedCorrections = [],
+  provenance = null
+} = {}) {
   db.exec('BEGIN IMMEDIATE');
   try {
-    markConflictRows(db, recordId, sourceType);
-    markExistingIdenticalRows(db, recordId);
+    // 补录记录与本次导入在同一事务提交：逐字段保存原值、新值、时间与程序版本（spec 3.4）。
+    if (appliedCorrections.length > 0) {
+      repository.insertChannelCorrections(db, {
+        recordId,
+        targetMonth,
+        corrections: appliedCorrections,
+        provenance
+      });
+    }
+    markRowsAgainstEffective(db, recordId);
+    markMixedBatchKeys(db, recordId);
 
     const candidateCount = Number(db.prepare(`
       SELECT COUNT(*) AS row_count
@@ -533,7 +574,9 @@ async function importDetailGroup({
   files,
   recordId: preparedRecordId,
   onProgress,
-  shouldCancel
+  shouldCancel,
+  corrections = null,
+  provenance = null
 }) {
   if (!DETAIL_SOURCE_TYPES.has(sourceType)) throw new Error(`不是明细原表类型：${sourceType}`);
   const normalizedMonth = normalizeYearMonth(targetMonth);
@@ -563,6 +606,7 @@ async function importDetailGroup({
   }
   const insert = db.prepare(repository.STAGING_ROW_INSERT_SQL);
   let rawCount = 0;
+  const appliedCorrections = [];
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const file of importFiles) {
@@ -572,6 +616,10 @@ async function importDetailGroup({
         workbook = await openWorkbookSheets(file.filePath);
         for (const selectedSheet of file.sheets || [file]) {
           throwIfCancelled(shouldCancel);
+          const sheetCorrections = sourceType === SOURCE_TYPES.CHANNEL && corrections
+            ? corrections.get(channelCorrectionSheetKey(file.physicalFileId, selectedSheet.sheetIndex)) || null
+            : null;
+          const appliedRows = new Set();
           const fileResult = await streamDetailRows(file.filePath, sourceType, {
           workbook,
           sheetName: selectedSheet.sheetName,
@@ -581,9 +629,22 @@ async function importDetailGroup({
           sourceHeaders: selectedSheet.sourceHeaders,
           onDataRow: ({ rowR, values, sourceFile, sheetName, keyCellType }) => {
             throwIfCancelled(shouldCancel);
+            const correction = sheetCorrections ? sheetCorrections.get(rowR) : null;
+            const rowValues = correction ? applyChannelCorrection(values, correction, sheetName, rowR) : values;
+            if (correction) {
+              appliedRows.add(rowR);
+              appliedCorrections.push(Object.freeze({
+                importSourceId: Number(file.importSourceId),
+                sheetName,
+                sourceRow: rowR,
+                idempotencyKey: correction.idempotencyKey,
+                original: correction.original,
+                corrected: correction.corrected
+              }));
+            }
             const mapped = mapDetailRow({
               sourceType,
-              values,
+              values: rowValues,
               targetMonth: normalizedMonth,
               assignedSubject: selectedSheet.subject,
               sourceFile: file.fileName || sourceFile,
@@ -619,6 +680,9 @@ async function importDetailGroup({
             error.code = 'empty-source-shard';
             throw error;
           }
+          if (sheetCorrections && appliedRows.size !== sheetCorrections.size) {
+            throw correctionStaleError(`${selectedSheet.sheetName}：部分补录行在原表中未找到`);
+          }
         }
       } catch (error) {
         throw attachSourceIdentity(error, file);
@@ -633,6 +697,7 @@ async function importDetailGroup({
     if (rawCount === 0) throw new Error(`${SOURCE_LABELS[sourceType]}没有有效数据行`);
     db.exec('COMMIT');
   } catch (error) {
+    describeDiskFull(error);
     const wasCancelled = error && error.code === IMPORT_CANCELLED_CODE;
     try {
       db.prepare(`
@@ -641,9 +706,10 @@ async function importDetailGroup({
             validation_message = COALESCE(validation_message, '原表读取未完成，整表未导入')
         WHERE import_record_id = ? AND disposition IS NULL
       `).run(recordId);
-      const invalidKeyCount = countRows(db, recordId, 'invalid_key');
-      const formatErrorCount = countRows(db, recordId, 'format_error');
-      const rolledBackCount = countRows(db, recordId, 'rolled_back');
+      const counts = countDispositions(db, recordId);
+      const invalidKeyCount = counts.invalid_key;
+      const formatErrorCount = counts.format_error;
+      const rolledBackCount = counts.rolled_back;
       repository.persistStagingAnomalies(db, recordId);
       const anomalyCount = repository.addFileFailureAnomaly(db, recordId, {
         ...sourceIdentityFromError(error),
@@ -694,7 +760,7 @@ async function importDetailGroup({
       rows: rawCount
     });
   }
-  return classifyAndPromote(db, recordId, normalizedMonth, sourceType);
+  return classifyAndPromote(db, recordId, normalizedMonth, sourceType, { appliedCorrections, provenance });
 }
 
 async function importDetailBatch({
@@ -793,6 +859,7 @@ async function inspectAndPrepareFiles(filePaths, subjectByPath = {}) {
 }
 
 module.exports = {
+  channelCorrectionSheetKey,
   DETAIL_SOURCE_TYPES,
   IMPORT_CANCELLED_CODE,
   STAGING_COMMIT_INTERVAL,

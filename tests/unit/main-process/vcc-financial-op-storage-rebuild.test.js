@@ -366,6 +366,37 @@ test('reset-only COW 清空全部 VCC 表并保留非 VCC、Archive 与自增高
   }
 });
 
+test('v3.2.17：不含补录记录表的旧 v1 库，迁移与重置候选库均补建该表及写保护，源库不变', (t) => {
+  for (const resetVccData of [false, true]) {
+    const directory = tempDir(t);
+    const sourcePath = path.join(directory, 'tool-data.sqlite');
+    const targetPath = path.join(directory, 'tool-data.sqlite.vcc-next');
+    createLegacyDatabase(sourcePath);
+    const legacy = new DatabaseSync(sourcePath);
+    legacy.exec('DROP TABLE vcc_fin_op_channel_corrections');
+    const sourceSchema = legacy.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY type, name').all();
+    legacy.close();
+
+    buildVccStorageCandidate({ sourcePath, targetPath, resetVccData, availableBytes: 1024 ** 4 });
+
+    const oldDb = new DatabaseSync(sourcePath, { readOnly: true });
+    const nextDb = new DatabaseSync(targetPath, { readOnly: true });
+    try {
+      assert.deepEqual(oldDb.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY type, name').all(), sourceSchema,
+        `${resetVccData ? '重置' : '迁移'}：源库结构不变`);
+      assert.equal(storageContractVersion(nextDb), 3);
+      assert.equal(nextDb.prepare(`
+        SELECT COUNT(*) AS n FROM sqlite_master
+        WHERE type = 'trigger' AND tbl_name = 'vcc_fin_op_channel_corrections'
+      `).get().n, 3);
+      assert.equal(nextDb.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_channel_corrections').get().n, 0);
+    } finally {
+      oldDb.close();
+      nextDb.close();
+    }
+  }
+});
+
 test('reset-only 遇到 VCC artifact hold 时保持源库不变且不创建候选', (t) => {
   const directory = tempDir(t);
   const sourcePath = path.join(directory, 'tool-data.sqlite');

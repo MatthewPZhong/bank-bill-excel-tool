@@ -279,6 +279,68 @@
   font-size: 12px;
 }
 
+.vcc-fin-op-correction-section {
+  margin-top: 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.vcc-fin-op-correction-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.vcc-fin-op-correction-hint {
+  margin: 0;
+  color: var(--muted, #68717d);
+  font-size: 12px;
+}
+
+.vcc-fin-op-correction-list {
+  max-height: min(40vh, 360px);
+  overflow: auto;
+  border-top: 1px solid var(--line, #e5e8ec);
+}
+
+.vcc-fin-op-correction-row {
+  display: grid;
+  gap: 8px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--line, #e5e8ec);
+}
+
+.vcc-fin-op-correction-meta {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.vcc-fin-op-correction-meta span {
+  color: var(--muted, #68717d);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.vcc-fin-op-correction-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.vcc-fin-op-correction-field {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.vcc-fin-op-correction-field.is-invalid span {
+  color: var(--danger, #c0392b);
+}
+
+.vcc-fin-op-correction-field.is-invalid .vcc-fin-op-input {
+  border-color: var(--danger, #c0392b);
+}
+
 .vcc-fin-op-table-wrap {
   width: 100%;
   overflow: auto;

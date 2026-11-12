@@ -48,6 +48,16 @@
       "carrier": "spawn(process.execPath, ["
     },
     {
+      "file": "src/main-process/database-compaction/idle-compaction.js",
+      "line": 69,
+      "carrier": "utility.fork(PROCESS_SCRIPT, [request], { stdio: 'pipe', serviceName: 'database-compaction' })"
+    },
+    {
+      "file": "src/main-process/database-compaction/idle-compaction.js",
+      "line": 70,
+      "carrier": "spawn(process.execPath, [PROCESS_SCRIPT, request], { stdio: ['ignore', 'pipe', 'pipe'] })"
+    },
+    {
       "file": "src/main-process/duplicate-inbound-match/paired-parser-dispatch.js",
       "line": 87,
       "carrier": "new WorkerClass(PARSER_ENTRY, { workerData: { spool } })"

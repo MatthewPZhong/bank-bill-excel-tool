@@ -46,6 +46,31 @@ function roundAmountHighPrecision(value) {
   return Number(Number(value).toFixed(12));
 }
 
+const AMOUNT_MAX_DECIMALS = 12;
+
+// 数值按最短十进制表示的小数位数（含科学计数法，如 1e-7 为 7 位），上限 12 位。
+function countAmountDecimals(value) {
+  if (!Number.isFinite(value) || Number.isInteger(value)) return 0;
+  const match = /^(\d+)(?:\.(\d+))?(?:e([+-]\d+))?$/.exec(String(Math.abs(value)));
+  if (!match) return AMOUNT_MAX_DECIMALS;
+  const decimals = (match[2] ? match[2].length : 0) - (match[3] ? Number(match[3]) : 0);
+  return Math.min(Math.max(decimals, 0), AMOUNT_MAX_DECIMALS);
+}
+
+// 金额加减（v3.2.17 D2）：结果按参与运算各值的最大小数位取整，去掉浮点累加尾差
+// （如两位小数逐笔累加得 5126.100000000002）。加减法的精确结果不会多于该位数；
+// 输入本身带 12 位以上小数时与 roundAmountHighPrecision 的 12 位口径一致。减数传负值。
+function sumAmounts(values) {
+  let sum = 0;
+  let decimals = 0;
+  for (const value of values) {
+    const numericValue = Number(value);
+    sum += numericValue;
+    decimals = Math.max(decimals, countAmountDecimals(numericValue));
+  }
+  return Number(sum.toFixed(decimals));
+}
+
 // 账单里的余额逐日校验（v3.2.16）：预期 = 上一日余额 + 当日收入 − 当日支出，不再接受“+支出”。
 // 候选余额按两位小数去重、比较（容差口径）；返回值取选中候选的原值（直接映射余额保留 12 位精度，PRD v1.5.0）。
 // 结果：match 有候选相符；mismatch 只有一个候选且不符；unresolved 多个候选都不符。
@@ -66,9 +91,9 @@ function verifyStatementEndingBalance({ anchorBalance, entries, dateLabel }) {
     throw new FileValidationError('FILE_READ', `${dateLabel} 未找到期末余额`);
   }
 
-  const creditAmountSum = roundAmountHighPrecision(entries.reduce((sum, entry) => sum + entry.creditAmount, 0));
-  const debitAmountSum = roundAmountHighPrecision(entries.reduce((sum, entry) => sum + entry.debitAmount, 0));
-  const expectedBalance = roundAmountHighPrecision(anchorBalance + creditAmountSum - debitAmountSum);
+  const creditAmountSum = sumAmounts(entries.map((entry) => entry.creditAmount));
+  const debitAmountSum = sumAmounts(entries.map((entry) => entry.debitAmount));
+  const expectedBalance = sumAmounts([anchorBalance, creditAmountSum, -debitAmountSum]);
   const roundedExpectedBalance = roundAmount(expectedBalance);
   const amounts = { creditAmountSum, debitAmountSum, expectedBalance };
   const matched = uniqueBalances.find((balance) => Math.abs(balance - roundedExpectedBalance) < 0.005);
@@ -83,7 +108,7 @@ function verifyStatementEndingBalance({ anchorBalance, entries, dateLabel }) {
       status: 'mismatch',
       endBalance: statementBalance,
       ...amounts,
-      difference: roundAmountHighPrecision(statementBalance - expectedBalance)
+      difference: sumAmounts([statementBalance, -expectedBalance])
     };
   }
 
@@ -92,9 +117,9 @@ function verifyStatementEndingBalance({ anchorBalance, entries, dateLabel }) {
 }
 
 function calculateEndingBalanceFromAmounts({ previousEndBalance, entries }) {
-  const creditAmountSum = entries.reduce((sum, entry) => sum + entry.creditAmount, 0);
-  const debitAmountSum = entries.reduce((sum, entry) => sum + entry.debitAmount, 0);
-  return roundAmountHighPrecision(previousEndBalance + creditAmountSum - debitAmountSum);
+  const creditAmountSum = sumAmounts(entries.map((entry) => entry.creditAmount));
+  const debitAmountSum = sumAmounts(entries.map((entry) => entry.debitAmount));
+  return sumAmounts([previousEndBalance, creditAmountSum, -debitAmountSum]);
 }
 
 function sanitizeAmountValue(value) {
@@ -449,7 +474,16 @@ function buildNormalizedDateResult(date, displayFormat = 'yyyy-mm-dd', value = '
   };
 }
 
-function normalizeDateExportValue(value, { dateParseOrder = 'auto' } = {}) {
+// v3.2.17：Excel 序列号的日期系统（只影响下方两个序列号分支）：
+//   '1900'（默认，原行为）；'1904'（序列号加 1462 天，Mac 旧版工作簿）；'unknown'（如 CSV，序列号不解析，返回空）。
+const EXCEL_1904_SERIAL_OFFSET = 1462;
+
+function resolveExcelSerial(serial, excelDateSystem) {
+  if (excelDateSystem === 'unknown') return null;
+  return excelDateSystem === '1904' ? serial + EXCEL_1904_SERIAL_OFFSET : serial;
+}
+
+function normalizeDateExportValue(value, { dateParseOrder = 'auto', excelDateSystem = '1900' } = {}) {
   if (value === null || value === undefined || value === '') {
     return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
   }
@@ -464,7 +498,8 @@ function normalizeDateExportValue(value, { dateParseOrder = 'auto' } = {}) {
   }
 
   if (typeof value === 'number' && Number.isFinite(value)) {
-    const parsed = XLSX.SSF.parse_date_code(value);
+    const serial = resolveExcelSerial(value, excelDateSystem);
+    const parsed = serial === null ? null : XLSX.SSF.parse_date_code(serial);
 
     if (!parsed) {
       return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
@@ -597,7 +632,11 @@ function normalizeDateExportValue(value, { dateParseOrder = 'auto' } = {}) {
   if (/^\d+$/.test(candidateValue)) {
     const numericCandidate = Number(candidateValue);
     if (Number.isFinite(numericCandidate) && numericCandidate > 365 && numericCandidate < 200000) {
-      const parsed = XLSX.SSF.parse_date_code(numericCandidate);
+      const serial = resolveExcelSerial(numericCandidate, excelDateSystem);
+      if (serial === null) {
+        return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
+      }
+      const parsed = XLSX.SSF.parse_date_code(serial);
       if (parsed) {
         const date = buildDateObject(parsed.y, parsed.m, parsed.d);
         if (date) {
@@ -625,8 +664,8 @@ function normalizeDateExportValue(value, { dateParseOrder = 'auto' } = {}) {
   return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
 }
 
-function parseDateValue(value) {
-  return normalizeDateExportValue(value).date;
+function parseDateValue(value, options = {}) {
+  return normalizeDateExportValue(value, options).date;
 }
 
 function toExcelSerial(date) {
@@ -708,5 +747,6 @@ module.exports = {
   sanitizeSignedAmountValue,
   splitSignedAmountValue,
   stripDateTimeSuffix,
+  sumAmounts,
   toExcelSerial
 };

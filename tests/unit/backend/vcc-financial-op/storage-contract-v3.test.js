@@ -143,3 +143,97 @@ test('generic 初始化拒绝未迁移 v2；v3 缺 guard 时不能靠 IF NOT EXI
   assert.throws(() => ensureVccFinancialOpTablesSupport(db), { code: 'vcc-storage-contract-mismatch' });
   assert.equal(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'vcc_storage_contract_v3_guard_vcc_fin_op_runs_insert'").get(), undefined);
 });
+
+test('v3.2.17 升级：v3 库缺少通道补录记录表时先建表与写保护再做合同断言', () => {
+  const { DatabaseSync: Database } = require('node:sqlite');
+  const migrations = require('../../../../src/backend/vcc-financial-op-db/migrations');
+  const contract = require('../../../../src/backend/vcc-financial-op-db/storage-contract');
+  const db = new Database(':memory:');
+  try {
+    db.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE app_settings (setting_key TEXT PRIMARY KEY, setting_value TEXT, updated_at TEXT);
+    `);
+    migrations.ensureVccFinancialOpTablesSupport(db, { autoUpgradeEmptyV1: true });
+    db.exec('DROP TABLE vcc_fin_op_channel_corrections');
+    assert.throws(() => contract.assertVccStorageContract(db), /受保护表集合不一致/);
+    migrations.ensureVccFinancialOpTablesSupport(db);
+    assert.equal(contract.assertVccStorageContract(db).tableCount, 24);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS n FROM sqlite_master
+      WHERE type = 'trigger' AND tbl_name = 'vcc_fin_op_channel_corrections'
+    `).get().n, 3);
+  } finally {
+    db.close();
+  }
+});
+
+function correctionsSchema(db) {
+  return db.prepare(`
+    SELECT type, name FROM sqlite_master
+    WHERE tbl_name = 'vcc_fin_op_channel_corrections' ORDER BY type, name
+  `).all().map(({ type, name }) => `${type}:${name}`);
+}
+
+test('v3.2.17 启动：v3.2.16 的 v3 库（无补录记录表）在合同检查前补表与写保护，重复启动幂等', (t) => {
+  const { file, open } = fixture(t);
+  upgradeVccStorageFile(file);
+  let db = open();
+  db.exec('DROP TABLE vcc_fin_op_channel_corrections');
+  const businessBefore = contents(db);
+  db.close();
+  assert.deepEqual(upgradeVccStorageFile(file), { upgraded: false, fromVersion: 3, toVersion: 3 });
+  db = open({ readOnly: true });
+  assert.equal(assertVccStorageContract(db).tableCount, 24);
+  assert.deepEqual(correctionsSchema(db).filter((item) => item.startsWith('trigger:')), [
+    'trigger:vcc_storage_contract_v3_guard_vcc_fin_op_channel_corrections_delete',
+    'trigger:vcc_storage_contract_v3_guard_vcc_fin_op_channel_corrections_insert',
+    'trigger:vcc_storage_contract_v3_guard_vcc_fin_op_channel_corrections_update'
+  ]);
+  assert.deepEqual(contents(db).filter(([name]) => name !== 'vcc_fin_op_channel_corrections'), businessBefore);
+  db.close();
+  assert.deepEqual(upgradeVccStorageFile(file), { upgraded: false, fromVersion: 3, toVersion: 3 });
+});
+
+test('v3.2.17 启动：无补录记录表的 v2 库先补表再增量升级到 v3', (t) => {
+  const { file, open } = fixture(t);
+  let db = open();
+  db.exec('DROP TABLE IF EXISTS vcc_fin_op_channel_corrections');
+  db.close();
+  assert.deepEqual(upgradeVccStorageFile(file), { upgraded: true, fromVersion: 2, toVersion: 3 });
+  db = open({ readOnly: true });
+  assert.equal(assertVccStorageContract(db).tableCount, 24);
+  assert.equal(correctionsSchema(db).filter((item) => item.includes('_v3_guard_')).length, 3);
+});
+
+test('v3.2.17 启动：缺补录记录表且另有不合规处的库整体回滚，不留下新表', (t) => {
+  const { file, open } = fixture(t);
+  upgradeVccStorageFile(file);
+  const db = open();
+  db.exec(`DROP TABLE vcc_fin_op_channel_corrections;
+    DROP TRIGGER vcc_storage_contract_v3_guard_vcc_fin_op_runs_insert;`);
+  const before = db.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY type, name').all();
+  assert.throws(() => upgradeVccStorageFile(file), { code: 'vcc-storage-contract-mismatch' });
+  assert.deepEqual(db.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY type, name').all(), before);
+});
+
+test('v3.2.17 启动：AppDatabase.init 可打开无补录记录表的旧库', (t) => {
+  const { AppDatabase } = require('../../../../src/backend/database');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-contract-appdb-'));
+  const dbPath = path.join(directory, 'tool-data.sqlite');
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  let appDb = new AppDatabase(dbPath);
+  appDb.init();
+  appDb.close();
+  const raw = new DatabaseSync(dbPath);
+  raw.exec('DROP TABLE vcc_fin_op_channel_corrections');
+  raw.close();
+  appDb = new AppDatabase(dbPath);
+  try {
+    appDb.init();
+    assert.equal(assertVccStorageContract(appDb.db).tableCount, 24);
+    assert.equal(correctionsSchema(appDb.db).filter((item) => item.startsWith('trigger:')).length, 3);
+  } finally {
+    appDb.close();
+  }
+});

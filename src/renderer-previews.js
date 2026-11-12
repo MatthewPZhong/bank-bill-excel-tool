@@ -376,7 +376,13 @@
         currency: 'USD',
         targetBillDate: '2026-04-01',
         queueIndex: 1,
-        queueTotal: 3
+        queueTotal: 3,
+        // v3.2.17：带待补录清单时左下角显示【导入余额文件】
+        pendingAccounts: [
+          { merchantId: '6222000000000001', currency: 'USD', targetBillDate: '2026-04-01' },
+          { merchantId: '6222000000000002', currency: 'EUR', targetBillDate: '2026-04-01' },
+          { merchantId: '6222000000000003', currency: 'HKD', targetBillDate: '2026-04-02' }
+        ]
       };
       openModal(() => createManualBalanceSeedDialog(prompt, { billDate: '2026-03-31', endBalance: '12345.67' }));
     }

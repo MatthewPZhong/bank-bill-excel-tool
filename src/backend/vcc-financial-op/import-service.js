@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const path = require('node:path');
 const {
   SOURCE_TYPES,
@@ -12,6 +13,7 @@ const { freezeHandoffV2, buildMemberFiles, membersDigest, assertArtifactMember, 
 const { createArchiveRepository } = require('../database/archive-repository');
 const {
   DETAIL_SOURCE_TYPES,
+  channelCorrectionSheetKey,
   importDetailGroup,
   throwIfCancelled
 } = require('./detail-importer');
@@ -137,10 +139,51 @@ function assertImportArchiveHandoffMatches(hashedFiles, handoffFiles, batchId) {
   return descriptors;
 }
 
+function statVerifiedArchiveFiles(files, archiveHandoffFiles) {
+  const expectedFiles = Array.isArray(archiveHandoffFiles && archiveHandoffFiles.files)
+    ? archiveHandoffFiles.files
+    : [];
+  return Object.freeze(files.map((file, index) => {
+    const filePath = path.resolve(String(file && file.filePath || ''));
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) throw handoffError('输入原件不是普通文件');
+    const expected = expectedFiles[index] || {};
+    return Object.freeze({
+      ...file,
+      filePath,
+      fileName: path.basename(filePath),
+      sha256: String(expected.sha256 || ''),
+      sizeBytes: Number(stat.size)
+    });
+  }));
+}
+
+// 预检补录按 物理文件 + Sheet 序号 + 行号 定位（与存档成员清单中的稳定标识一致）。
+function indexChannelCorrections(channelCorrections) {
+  if (!Array.isArray(channelCorrections)) throw new Error('通道明细补录参数格式无效');
+  const index = new Map();
+  for (const correction of channelCorrections) {
+    const key = channelCorrectionSheetKey(correction.physicalFileId, correction.sheetIndex);
+    if (!index.has(key)) index.set(key, new Map());
+    const rows = index.get(key);
+    const sourceRow = Number(correction.sourceRow);
+    if (!Number.isSafeInteger(sourceRow) || sourceRow < 1 || rows.has(sourceRow)) {
+      throw new Error('通道明细补录行号无效或重复');
+    }
+    rows.set(sourceRow, Object.freeze({
+      idempotencyKey: String(correction.idempotencyKey),
+      original: Object.freeze({ ...correction.original }),
+      corrected: Object.freeze({ ...correction.corrected })
+    }));
+  }
+  return index;
+}
+
 function detailRecordResult(record, db) {
   const sourceFiles = repository.listImportSources(db, record.recordId);
   return {
     ...record,
+    correctedRowCount: repository.countCorrectedRows(db, record.recordId),
     sourceLabel: SOURCE_LABELS[record.sourceType],
     anomalyCount: Number(record.anomalyCount) || 0,
     archiveState: repository.refreshImportRecordArchiveState(db, record.recordId),
@@ -181,9 +224,12 @@ async function importFiles({
   onProgress,
   shouldCancel,
   batchId,
-  archiveHandoffFiles
+  archiveHandoffFiles,
+  channelCorrections = [],
+  provenance = null
 }) {
   const normalizedBatchId = normalizeImportBatchId(batchId);
+  const correctionIndex = indexChannelCorrections(channelCorrections);
   const normalizedMonth = normalizeYearMonth(targetMonth);
   if (!normalizedMonth) throw new Error(`导入账期格式无效：${targetMonth}`);
   if (!Array.isArray(files) || files.length === 0) throw new Error('请选择至少一个原表文件');
@@ -194,10 +240,15 @@ async function importFiles({
     }
   }
   throwIfCancelled(shouldCancel);
-  const hashedFiles = await hashSourceFiles(files);
+  // 工作簿计划路径的输入是主进程刚用 resolveVerifiedArtifact 校验过 SHA-256 的存档副本，
+  // 这里只核对路径与字节数；各导入器在解析后、首条业务写入前仍会整文件复核 SHA-256。
+  const frozenHandoff = isWorkbookPlan ? freezeHandoffV2(archiveHandoffFiles, normalizedBatchId) : null;
+  const hashedFiles = isWorkbookPlan
+    ? statVerifiedArchiveFiles(files, frozenHandoff)
+    : await hashSourceFiles(files);
   let exactFiles;
   if (isWorkbookPlan) {
-    const handoff = freezeHandoffV2(archiveHandoffFiles, normalizedBatchId);
+    const handoff = frozenHandoff;
     const expectedFiles = buildMemberFiles(files);
     if (handoff.files.length !== files.length) throw handoffError('物理文件数变化');
     exactFiles = hashedFiles.map((actual, index) => {
@@ -274,6 +325,7 @@ async function importFiles({
       recordIds.clear();
       throw error;
     }
+    repository.ensureImportStagingScratch(db);
     for (const [sourceType, sourceFiles] of grouped) {
       throwIfCancelled(shouldCancel);
       if (DETAIL_SOURCE_TYPES.has(sourceType)) {
@@ -285,7 +337,9 @@ async function importFiles({
           files: sourceFiles,
           recordId: recordIds.get(sourceType),
           onProgress: reportProgress,
-          shouldCancel
+          shouldCancel,
+          corrections: sourceType === SOURCE_TYPES.CHANNEL ? correctionIndex : null,
+          provenance
         });
         records.push(detailRecordResult(record, db));
       } else if (sourceType === SOURCE_TYPES.SYSTEM_OP) {

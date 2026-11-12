@@ -6,9 +6,11 @@ const { createDarkModeScheduler } = require('../../../src/main-process/dark-mode
 const enabled = { enabled: true, startTime: '18:30', endTime: '06:00' };
 const at = (hour, minute, second = 0, ms = 0) => new Date(2026, 8, 12, hour, minute, second, ms);
 
-function makeHarness({ config = enabled, date = at(18, 29, 59, 500) } = {}) {
+function makeHarness({ config = enabled, date = at(18, 29, 59, 500), lightness } = {}) {
   let current = date;
   let stored = { ...config };
+  let storedLightness = lightness;
+  let lightnessWrites = 0;
   let writeError = null;
   let nextTimerId = 0;
   let writes = 0;
@@ -24,6 +26,12 @@ function makeHarness({ config = enabled, date = at(18, 29, 59, 500) } = {}) {
       writes += 1;
       if (writeError) throw writeError;
       stored = { ...value };
+    },
+    readLightness: () => storedLightness,
+    writeLightness: (value) => {
+      lightnessWrites += 1;
+      if (writeError) throw writeError;
+      storedLightness = value;
     },
     nativeTheme,
     focusSource,
@@ -46,6 +54,8 @@ function makeHarness({ config = enabled, date = at(18, 29, 59, 500) } = {}) {
     setNow: (dateValue) => { current = dateValue; },
     failWrite: (error) => { writeError = error; },
     writes: () => writes,
+    lightnessWrites: () => lightnessWrites,
+    storedLightness: () => storedLightness,
     tick(dateValue) {
       current = dateValue;
       assert.equal(timers.size, 1);
@@ -163,5 +173,63 @@ test('缺失配置按新默认冷启动，分钟、聚焦与恢复跨边界且�
   assert.equal(h.scheduler.getSnapshot().effectiveTheme, 'light');
   assert.equal(h.timers.size, 1);
   assert.equal(h.writes(), 0);
+  h.scheduler.stop();
+});
+
+test('深浅度随启动读取，缺失或损坏按 0；深色窗口底色按深浅度插值', () => {
+  for (const lightness of [undefined, null, '40', 101, 2.5]) {
+    const h = makeHarness({ date: at(23, 0), lightness });
+    assert.equal(h.scheduler.start().darkModeLightness, 0);
+    assert.deepEqual(h.colors, ['#111419']);
+    h.scheduler.stop();
+  }
+  const h = makeHarness({ date: at(23, 0), lightness: 100 });
+  assert.equal(h.scheduler.start().darkModeLightness, 100);
+  assert.deepEqual(h.colors, ['#383d46']);
+  h.setNow(at(12, 0));
+  h.focusSource.emit('browser-window-focus');
+  assert.equal(h.colors.at(-1), '#f9fafc');
+  assert.equal(h.scheduler.getSnapshot().darkModeLightness, 100);
+  h.scheduler.stop();
+});
+
+test('setLightness 写库成功后才发布；失败与非法值保持快照、主题和窗口底色', () => {
+  const h = makeHarness({ date: at(23, 0), lightness: 0 });
+  h.scheduler.start();
+  const initial = h.scheduler.getSnapshot();
+  for (const value of [-1, 101, 1.5, '50']) {
+    assert.throws(() => h.scheduler.setLightness(value), /0 到 100 的整数/);
+  }
+  assert.equal(h.lightnessWrites(), 0);
+  h.failWrite(new Error('模拟数据库写入失败'));
+  assert.throws(() => h.scheduler.setLightness(60), /写入失败/);
+  assert.deepEqual(h.scheduler.getSnapshot(), initial);
+  assert.deepEqual(h.colors, ['#111419']);
+  assert.equal(h.changes.length, 1);
+  h.failWrite(null);
+  const saved = h.scheduler.setLightness(100);
+  assert.equal(h.storedLightness(), 100);
+  assert.equal(saved.darkModeLightness, 100);
+  assert.equal(saved.themeRevision, initial.themeRevision + 1);
+  assert.deepEqual(saved.darkModeSchedule, initial.darkModeSchedule);
+  assert.equal(h.colors.at(-1), '#383d46');
+  assert.equal(h.changes.at(-1).darkModeLightness, 100);
+  assert.equal(h.scheduler.setLightness(100).themeRevision, saved.themeRevision);
+  // 修改定时配置保留已保存深浅度。
+  assert.equal(h.scheduler.setSchedule({ ...enabled, enabled: false }).darkModeLightness, 100);
+  assert.equal(h.colors.at(-1), '#f9fafc');
+  h.scheduler.stop();
+});
+
+test('浅色时保存深浅度只更新快照，窗口保持浅色底色', () => {
+  const h = makeHarness({ date: at(12, 0), lightness: 0 });
+  h.scheduler.start();
+  const saved = h.scheduler.setLightness(40);
+  assert.equal(saved.effectiveTheme, 'light');
+  assert.equal(saved.darkModeLightness, 40);
+  assert.equal(h.nativeTheme.themeSource, 'light');
+  assert.ok(h.colors.every((color) => color === '#f9fafc'));
+  h.tick(at(18, 30));
+  assert.equal(h.colors.at(-1), '#21242b');
   h.scheduler.stop();
 });

@@ -1678,7 +1678,10 @@ function createAppUpdateSettingsDialog(options = {}) {
     onDispose: disposeSettingsDialog,
     onMount(handle, scope) {
       settingsHandle = handle;
-      appearanceView = themeController ? mountAppearanceSettings(appearancePane, themeController) : null;
+      appearanceView = themeController ? mountAppearanceSettings(appearancePane, themeController, {
+        // 深浅度调节页压在设置句柄上；设置非栈顶（已有子层）或已关闭时不打开。
+        openLayer: (layer) => (handle.isOpen() && handle.isTop() ? modalBridge.pushModal(handle, layer) : null)
+      }) : null;
       if (templatePane) {
         templateFilesView = mountTemplateFiles(templatePane, { getParentHandle: () => settingsHandle });
         scope.onDispose(() => templateFilesView?.destroy());

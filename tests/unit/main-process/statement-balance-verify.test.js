@@ -395,7 +395,10 @@ test('多候选首日都对不上且已有种子：仍要求补录，但写明�
     creditAmount: 0,
     debitAmount: 201500,
     expectedBalance: -201500,
-    statementBalances: [800000, 798500]
+    statementBalances: [800000, 798500],
+    missingFrom: '',
+    missingTo: '',
+    suggestedSeedDate: '2026-09-30'
   });
 
   // 填账单上的期初余额后：首日选中 798,500，次日接着校验通过。
@@ -419,6 +422,55 @@ test('多候选首日都对不上且已有种子：仍要求补录，但写明�
       adjusted.context.seedMismatch.statementBalances],
     [1010, 1000, '账单里的余额', 1100, [1050, 1300]]
   );
+});
+
+// 用户反馈（SCB-SG，v3.2.16）：种子停在 10-27，账单从 11-02 开始，首日逐笔余额都对不上。
+// v3.2.17 D3：写明种子日期与首日之间缺的日期，建议补录首日前一天；D2：当日收支合计与预期无浮点尾差。
+// 金额为合成数据，只保留反馈账单的结构（首日多笔小额收入、每笔一个余额，起点为账单期初余额）。
+function runningCreditRows(dateLabel, opening, credits) {
+  let balance = opening;
+  return credits.map((credit) => {
+    balance = Math.round((balance + credit) * 100) / 100;
+    return [dateLabel, 'M001', 'SGD', String(credit), '', String(balance)];
+  });
+}
+const SCB_CREDITS = Array.from({ length: 150 }, (_, index) => (
+  [12.34, 56.78, 9.99, 0.37, 101.01, 48.6, 3.33, 77.77, 25.5, 6.05][index % 10]
+));
+
+test('首日多个余额都对不上且种子日期与首日之间缺日期：写明缺的日期并建议补录首日前一天；收支合计无尾差', () => {
+  const rows = runningCreditRows('2026-11-02', 2003456.78, SCB_CREDITS);
+  const wrong = deriveError(() => derive(rows, [seed('M001', 'SGD', '2026-10-27', 2000000.11, '账单里的余额')]));
+  assert.equal(wrong.code, 'BALANCE_SEED_REQUIRED');
+  assert.equal(wrong.message, '上一账单日余额与账单对不上，请核对后重新补录');
+  const { statementBalances, ...detail } = wrong.context.seedMismatch;
+  assert.deepEqual(detail, {
+    seedDate: '2026-10-27',
+    seedBalance: 2000000.11,
+    seedGenerationMethod: '账单里的余额',
+    anchorBalance: 2000000.11,
+    billDate: '2026-11-02',
+    creditAmount: 5126.1,
+    debitAmount: 0,
+    expectedBalance: 2005126.21,
+    missingFrom: '2026-10-28',
+    missingTo: '2026-11-01',
+    suggestedSeedDate: '2026-11-01'
+  });
+  assert.equal(statementBalances.length, 150);
+  assert.deepEqual([statementBalances[0], statementBalances.at(-1)], [2003469.12, 2008582.88]);
+
+  // 只缺一天时缺的日期首尾相同。
+  const oneDay = deriveError(() => derive(rows, [seed('M001', 'SGD', '2026-10-31', 2000000.11)]));
+  assert.deepEqual([oneDay.context.seedMismatch.missingFrom, oneDay.context.seedMismatch.missingTo,
+    oneDay.context.seedMismatch.suggestedSeedDate], ['2026-11-01', '2026-11-01', '2026-11-01']);
+
+  // 按建议补录 11-01 的期末余额（账单期初余额）后首日相符；10-27 的种子不受影响。
+  const { result } = derive(rows, [
+    seed('M001', 'SGD', '2026-10-27', 2000000.11, '账单里的余额'),
+    seed('M001', 'SGD', '2026-11-01', 2003456.78)
+  ]);
+  assert.deepEqual(balances(result), [['M001', 'SGD', '2026-11-02', 2008582.88]]);
 });
 
 test('余额附加值：校验按账单原值链，生成种子先扣回附加值；输出仍叠加附加值', () => {
@@ -744,7 +796,10 @@ const KBANK_SEED_MISMATCH = {
   creditAmount: 0,
   debitAmount: 201500,
   expectedBalance: -201500,
-  statementBalances: [800000, 798500]
+  statementBalances: [800000, 798500],
+  missingFrom: '',
+  missingTo: '',
+  suggestedSeedDate: '2026-09-30'
 };
 
 test('生成层：已有种子但首日对不上时只出明细，补录提示带上对不上的明细；不写余额表和种子', (t) => {
@@ -789,6 +844,8 @@ test('生成层：已有种子但首日对不上时只出明细，补录提示�
     targetBillDate: '2026-10-01',
     queueIndex: 1,
     queueTotal: 1,
+    // v3.2.17：已有种子（只是对不上）的账号不算待补录，导入余额文件清单为空。
+    pendingAccounts: [],
     seedMismatch: KBANK_SEED_MISMATCH
   });
   assert.deepEqual(
@@ -842,6 +899,14 @@ test('主进程：已有余额对不上时补录提示与日志写明原因；�
   assert.deepEqual(mismatchResult.manualBalancePrompt.seedMismatch, KBANK_SEED_MISMATCH);
   assert.equal(logs[0].message, '上一账单日余额与账单对不上，等待重新补录');
   assert.equal(logs[0].details.at(-1), expectedLine);
+
+  // 种子日期与首日之间缺日期时（v3.2.17 D3）日志补写缺的日期；只缺一天写该日。
+  assert.equal(formatBalanceSeedMismatchLine({
+    ...KBANK_SEED_MISMATCH, seedDate: '2026-09-25', missingFrom: '2026-09-26', missingTo: '2026-09-30', suggestedSeedDate: '2026-09-30'
+  }), expectedLine.replace('已有 2026-09-30', '已有 2026-09-25') + '；中间缺 2026-09-26 ~ 2026-09-30');
+  assert.match(formatBalanceSeedMismatchLine({
+    ...KBANK_SEED_MISMATCH, seedDate: '2026-09-29', missingFrom: '2026-09-30', missingTo: '2026-09-30', suggestedSeedDate: '2026-09-30'
+  }), /都对不上；中间缺 2026-09-30$/);
 
   const missingResult = buildManualBalanceRequiredResult(basePrompt, {});
   assert.equal(missingResult.message, '因首次导入余额，请导入上一个账单日余额用于余额校验');

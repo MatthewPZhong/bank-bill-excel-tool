@@ -7,6 +7,8 @@
 //         → 同一账单日已有人工补录且与本次余额不一致：账单里的余额与发生额计算都先提醒（列出两个值），确认后才替换
 //         → 上一账单日余额补错（首日多个余额都对不上）：补录提示写明对不上的明细，改对后覆盖种子并正常生成
 //         → 断档后的账单日多个余额都对不上：余额账单不生成，报错文件写明账号与缺的日期
+//         → 种子日期与首日之间缺日期、首日逐笔余额都对不上（v3.2.17）：补录提示写明缺的日期、收支无浮点尾差；
+//           补录首日前一天后正常生成；发生额计算同样数据输出数字单元格
 //   UI 弹窗与 IPC 由单测和 GUI 检查覆盖；本脚本验证金额与文件在整条链路上的结果。
 //
 // 用法：node scripts/integration/statement-balance-verify.js
@@ -548,7 +550,10 @@ async function verifyWrongManualSeedPrompt(dir) {
     creditAmount: 0,
     debitAmount: 201500,
     expectedBalance: -201500,
-    statementBalances: [800000, 798500]
+    statementBalances: [800000, 798500],
+    missingFrom: '',
+    missingTo: '',
+    suggestedSeedDate: '2026-09-30'
   }, 'Step8.补录提示带上已有余额、当日收支与账单当日余额');
   const formatBalanceAmount = loadMainFunction('formatBalanceAmount');
   const formatBalanceSeedMismatchLine = loadMainFunction('formatBalanceSeedMismatchLine', { formatBalanceAmount });
@@ -621,6 +626,80 @@ async function verifyGapWithMultipleBalancesMessage(dir) {
     .map((record) => [record.merchantId, record.billDate, record.endBalance, record.generationMethod]), [
     ['M901', '2026-09-30', 1000, '人工录入']
   ], 'Step9.不回写生成种子');
+}
+
+// Step 10：用户反馈 SCB-SG（v3.2.16）：种子停在 10-27，账单从 11-02 开始，首日每笔交易一个余额且都对不上；
+//          收支合计显示带长尾数的浮点尾差。v3.2.17：补录提示写明缺的日期（D3）、金额无尾差（D2）；
+//          按建议补录 11-01 的期末余额后正常生成，10-27 的种子不动；发生额计算同样数据的余额表为数字单元格。
+//          金额为合成数据（150 笔两位小数收入，旧口径累加出 5126.100000000002），只保留反馈账单的结构。
+async function verifyFirstDayGapAndAmountPrecision(dir) {
+  const storageRoot = path.join(dir, 'storage-first-day-gap');
+  const outputDir = path.join(dir, 'exports-first-day-gap');
+  fs.mkdirSync(outputDir, { recursive: true });
+  upsertBalanceSeedRecord(storageRoot, {
+    templateName: TEMPLATE_NAME, merchantId: 'M1001', currency: 'SGD',
+    billDate: '2026-10-27', endBalance: 2000000.11, generationMethod: '账单里的余额'
+  });
+  const credits = Array.from({ length: 150 }, (_, index) => (
+    [12.34, 56.78, 9.99, 0.37, 101.01, 48.6, 3.33, 77.77, 25.5, 6.05][index % 10]
+  ));
+  let running = 2003456.78;
+  const sourceRows = credits.map((credit) => {
+    running = Math.round((running + credit) * 100) / 100;
+    return ['2026-11-02', 'M1001', 'SGD', String(credit), '', String(running)];
+  });
+  sourceRows.push(['2026-11-03', 'M1001', 'SGD', '', '500.25', String(Math.round((running - 500.25) * 100) / 100)]);
+  const sourcePath = path.join(dir, 'first-day-gap.xlsx');
+  writeSource(sourcePath, sourceRows);
+  const rows = mapSource(sourcePath);
+  const generation = createGeneration(storageRoot, outputDir, new Set());
+  const generateWith = (config) => generation.generateStatementFiles({
+    config,
+    preparedBatch: generation.buildPreparedStatementBatchFromEntries({ config, fileEntries: [{ filePath: sourcePath, detailRows: rows }] })
+  });
+  const seedsOf = () => readBalanceSeedRecords(storageRoot, '中行')
+    .map((record) => [record.billDate, record.endBalance, record.generationMethod]);
+
+  const wrong = generateWith(STATEMENT_CONFIG);
+  const warning = generation.extractManualBalancePromptWarning(wrong.warnings);
+  assertEq(wrong.balance, null, 'Step10.首日对不上时不生成余额账单');
+  const seedMismatch = warning && warning.prompt.seedMismatch;
+  assertEq(seedMismatch && [seedMismatch.creditAmount, seedMismatch.debitAmount, seedMismatch.expectedBalance,
+    seedMismatch.missingFrom, seedMismatch.missingTo, seedMismatch.suggestedSeedDate, seedMismatch.statementBalances.length],
+  [5126.1, 0, 2005126.21, '2026-10-28', '2026-11-01', '2026-11-01', 150], 'Step10.补录提示：收支无尾差，写明缺的日期与建议补录日');
+  const formatBalanceAmount = loadMainFunction('formatBalanceAmount');
+  const logLine = loadMainFunction('formatBalanceSeedMismatchLine', { formatBalanceAmount })(seedMismatch);
+  assertTrue(logLine.includes('+ 收入 5,126.10 − 支出 0.00 = 预期 2,005,126.21，') && logLine.endsWith('都对不上；中间缺 2026-10-28 ~ 2026-11-01'),
+    'Step10.活动日志金额无尾差并写明缺的日期');
+
+  const planResult = buildManualBalanceSeedPlan({
+    payload: { billDate: seedMismatch.suggestedSeedDate, endBalance: '2003456.78' },
+    pendingPrompt: warning.prompt,
+    importContext: { template: { name: TEMPLATE_NAME } },
+    storageRoot
+  });
+  assertEq([planResult.stopResult, planResult.plan && planResult.plan.existingIndex], [undefined, -1], 'Step10.补录首日前一天为新增种子');
+  writeManualBalanceSeedPlan(planResult.plan);
+  const corrected = generateWith(STATEMENT_CONFIG);
+  assertEq(corrected.warnings, [], 'Step10.补录后无提示');
+  assertEq(readBalanceSheet(corrected.balance.filePath).map((row) => [row[2], row[3]]),
+    [['2026-11-02', 2008582.88], ['2026-11-03', 2008082.63]], 'Step10.回读余额：首日取账单最后一笔，次日接着校验');
+  assertEq(seedsOf(), [
+    ['2026-10-27', 2000000.11, '账单里的余额'],
+    ['2026-11-01', 2003456.78, '人工录入'],
+    ['2026-11-02', 2008582.88, '账单里的余额'],
+    ['2026-11-03', 2008082.63, '账单里的余额']
+  ], 'Step10.种子：10-27 不动，补录 11-01，生成种子回写');
+
+  // 发生额计算：同样收支从 11-01 的补录余额累加，余额表为数字单元格且无尾差。
+  const calculatedConfig = { ...STATEMENT_CONFIG, balanceMode: 'calculated', mappingByTargetField: { MerchantId: 'Account' } };
+  const calculated = generateWith(calculatedConfig);
+  const workbook = XLSX.readFile(calculated.balance.filePath);
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const header = XLSX.utils.sheet_to_json(sheet, { header: 1 })[0];
+  const column = XLSX.utils.encode_col(header.indexOf('期末余额'));
+  assertEq([2, 3].map((row) => [sheet[`${column}${row}`].t, sheet[`${column}${row}`].v]),
+    [['n', 2008582.88], ['n', 2008082.63]], 'Step10.发生额计算输出数字单元格、无尾差');
 }
 
 async function run() {
@@ -738,6 +817,7 @@ async function run() {
     await verifyWrongManualSeedPrompt(dir);
     await verifySharedSeedAcrossTemplates(dir);
     await verifyGapWithMultipleBalancesMessage(dir);
+    await verifyFirstDayGapAndAmountPrecision(dir);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

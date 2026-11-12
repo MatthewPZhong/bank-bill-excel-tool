@@ -176,5 +176,46 @@ test('B-11 结果导出初读和 runDirectTask 内二次重查都消费同一 B 
   assert.equal(writerCalls.length, 1);
   assert.equal(writerCalls[0].runId, 17);
   assert.deepEqual(writerCalls[0].outputPaths, ['/tmp/result.xlsx']);
-  assert.equal(service._taskStateForTests().taskGeneration, 1);
+  assert.equal(
+    service._taskStateForTests().taskGeneration,
+    0,
+    '结果导出是只读任务，结束后不推进 generation，已打开的预览仍有效'
+  );
+});
+
+test('归档月份列表按 generation 缓存：只读任务后命中，写任务后失效', async (t) => {
+  const readWorkers = [];
+  const writeWorkers = [];
+  const { db, service } = createService({
+    readWorkerFactory: workerFactory(readWorkers),
+    workerFactory: workerFactory(writeWorkers)
+  });
+  t.after(async () => {
+    await service.terminate();
+    db.close();
+  });
+  const archive = { targetMonth: '2026-06', runId: 17, subjects: ['PPHK'] };
+
+  const firstRead = service.listArchivedResultMonths();
+  completeRead(readWorkers[0], { months: [archive], diagnostics: [] });
+  assert.deepEqual(await firstRead, [archive]);
+  assert.deepEqual(await service.listArchivedResultMonths(), [archive]);
+  assert.equal(readWorkers.length, 1, '同 generation 命中缓存');
+
+  const preflight = service.inspectSelectedFiles(['/tmp/a.xlsx']);
+  writeWorkers[0].emit('message', { type: 'result', result: { physicalFiles: [], sources: [] } });
+  await preflight;
+  assert.deepEqual(await service.listArchivedResultMonths(), [archive]);
+  assert.equal(readWorkers.length, 1, '选文件预检是只读任务，缓存仍有效');
+
+  const calculation = service.calculate({
+    targetMonth: '2026-06',
+    expectedInputFingerprint: 'a'.repeat(64)
+  }, OPERATION_CONTEXT);
+  writeWorkers[1].emit('message', { type: 'result', result: { status: 'calculated' } });
+  await calculation;
+  const nextRead = service.listArchivedResultMonths();
+  assert.equal(readWorkers.length, 2, '写任务结束后缓存失效');
+  completeRead(readWorkers[1], { months: [], diagnostics: [] });
+  assert.deepEqual(await nextRead, []);
 });

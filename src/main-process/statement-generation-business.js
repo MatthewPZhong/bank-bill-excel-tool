@@ -18,7 +18,7 @@ const {
   normalizeCell,
   parseDateValue,
   parseNumericValue,
-  roundAmountHighPrecision,
+  sumAmounts,
   verifyStatementEndingBalance,
   writeBalanceWorkbook,
   writeWorkbookRows
@@ -29,7 +29,11 @@ const {
   mergeMappedDetailRows,
   resolveSinglePreparedFieldValue
 } = require('./statement-session');
-const { createStatementGenerationHelpers, statementOutputName } = require('./statement-generation');
+const {
+  createStatementGenerationHelpers,
+  pendingBalanceSeedAccounts,
+  statementOutputName
+} = require('./statement-generation');
 
 function pad(value) {
   return String(value).padStart(2, '0');
@@ -108,7 +112,7 @@ function statementSeedOriginalBalance(seed, balanceAdjustments, { merchantId, cu
   const seedAdjustment = resolveBalanceAdjustment(balanceAdjustments, {
     merchantId, currency, dateLabel: normalizeCell(seed.billDate)
   });
-  return seedAdjustment ? roundAmountHighPrecision(seed.endBalance - seedAdjustment) : seed.endBalance;
+  return seedAdjustment ? sumAmounts([seed.endBalance, -seedAdjustment]) : seed.endBalance;
 }
 
 function requireSeedRecord(resolver, prompt) {
@@ -123,7 +127,9 @@ const BALANCE_SEED_MISMATCH_MESSAGE = '上一账单日余额与账单对不上�
 
 // 已有种子但首日多个候选余额都对不上（v3.2.16 D7）：仍走补录提示，附上种子与当日收支、候选余额，
 // 让用户知道是已有余额填错了，而不是缺余额；补录弹窗据此说明原因并预填种子日期与金额。
+// 种子日期与首日之间缺日期时（v3.2.17 D3）写明缺的日期，建议补录首日前一天（不预填种子金额）。
 function buildBalanceSeedMismatch({ seed, anchor, dateLabel, verification }) {
+  const gap = Boolean(anchor.date) && isBalanceDateGap(anchor.date, dateLabel);
   return {
     seedDate: anchor.date,
     seedBalance: seed.endBalance,
@@ -133,7 +139,10 @@ function buildBalanceSeedMismatch({ seed, anchor, dateLabel, verification }) {
     creditAmount: verification.creditAmountSum,
     debitAmount: verification.debitAmountSum,
     expectedBalance: verification.expectedBalance,
-    statementBalances: Array.isArray(verification.candidateBalances) ? verification.candidateBalances.slice() : []
+    statementBalances: Array.isArray(verification.candidateBalances) ? verification.candidateBalances.slice() : [],
+    missingFrom: gap ? shiftDateLabel(anchor.date, 1) : '',
+    missingTo: gap ? shiftDateLabel(dateLabel, -1) : '',
+    suggestedSeedDate: gap ? shiftDateLabel(dateLabel, -1) : anchor.date
   };
 }
 
@@ -464,17 +473,17 @@ function deriveBalanceRecords({
         // 发生额计算沿用上一日已调整余额，只叠加附加值增量（跨导入口径见 backlog B32，未改）。
         const incrementalAdjustment = Math.round((cumulative - lastAdjustment) * 100) / 100;
         if (incrementalAdjustment && endBalance !== null) {
-          endBalance = roundAmountHighPrecision(endBalance + incrementalAdjustment);
+          endBalance = sumAmounts([endBalance, incrementalAdjustment]);
         }
       } else if (cumulative && endBalance !== null) {
         // 账单里的余额每天取账单原值，叠加截至当日的附加值累计额（PRD v1.4.6：当日及之后余额 = 原始余额 + 附加值）。
-        endBalance = roundAmountHighPrecision(endBalance + cumulative);
+        endBalance = sumAmounts([endBalance, cumulative]);
       }
       // 同一账单日已有人工补录种子、且与本次余额（原值，不含附加值；人工种子同口径）不一致时，回写前须确认替换（v3.2.16）。
       const manualSeed = manualSeedByDate.get([group.merchantId, group.currency, dateLabel].join('@@'));
       if (manualSeed && endBalance !== null) {
-        const originalBalance = roundAmountHighPrecision(endBalance - cumulative);
-        const difference = roundAmountHighPrecision(originalBalance - manualSeed.endBalance);
+        const originalBalance = sumAmounts([endBalance, -cumulative]);
+        const difference = sumAmounts([originalBalance, -manualSeed.endBalance]);
         if (Math.abs(Number(originalBalance.toFixed(2)) - Number(Number(manualSeed.endBalance).toFixed(2))) >= 0.005) {
           const replacement = {
             templateName,
@@ -563,15 +572,26 @@ function scanBalanceSeedStatus({ detailRows, templateName }, storageRoot) {
   }
   const bankName = splitTemplateName(templateName).bankName;
   const missingIndexByKey = new Map();
+  const missingAccounts = [];
   let missing = 0;
   for (const [key, account] of earliest) {
     if (!findPreviousBalanceSeed(storageRoot, { bankName, ...account, beforeBillDate: account.dateLabel })) {
       missing += 1;
       missingIndexByKey.set(key, missing);
+      missingAccounts.push({
+        merchantId: account.merchantId,
+        currency: account.currency,
+        targetBillDate: account.dateLabel
+      });
     }
   }
-  return { total: earliest.size, missing, missingIndexByKey };
+  // v3.2.17：补录余额「导入余额文件」按此清单匹配；顺序与 deriveBalanceRecords 的分组顺序（逐个提示补录的顺序）一致。
+  missingAccounts.sort((left, right) =>
+    left.merchantId.localeCompare(right.merchantId, 'zh-Hans-CN') ||
+    left.currency.localeCompare(right.currency, 'zh-Hans-CN'));
+  return { total: earliest.size, missing, missingIndexByKey, missingAccounts };
 }
+
 
 function createGenerationHelpers(options) {
   const storageRoot = path.resolve(options.storageRoot);
@@ -757,6 +777,7 @@ function createGenerationHelpers(options) {
             targetBillDate: normalizeCell(error.context?.targetBillDate),
             queueIndex: balanceSeedStatus.missingIndexByKey?.get(promptKey) || 1,
             queueTotal: balanceSeedStatus.missing || 1,
+            pendingAccounts: pendingBalanceSeedAccounts(balanceSeedStatus),
             ...(error.context?.seedMismatch
               ? {
                   seedMismatch: {

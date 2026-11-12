@@ -31,6 +31,14 @@
       };
     }
 
+    // 标题右侧「Tips」悬停说明：放在 .dialog-title 内，图案按标题字号取 1em 宽、0.5em 高。
+    function titleTipsHtml(text, { hidden = false } = {}) {
+      return `<span class="title-tips"${hidden ? ' hidden' : ''}>`
+        + '<svg class="title-tips-mark" viewBox="0 0 40 20" aria-hidden="true" focusable="false">'
+        + '<text x="20" y="15.5" text-anchor="middle" textLength="36" lengthAdjust="spacingAndGlyphs">Tips</text></svg>'
+        + `<span class="title-tips-bubble" role="tooltip">${escapeHtml(text)}</span></span>`;
+    }
+
 
     function looksLikeRegexLiteral(input) {
       if (typeof input !== 'string') {
@@ -307,6 +315,16 @@
       return gap.missingFrom === gap.missingTo ? gap.missingFrom : `${gap.missingFrom} ~ ${gap.missingTo}`;
     }
 
+    // 补录 / 断档 / 不一致确认的保存被准入拒绝（busy，如数据库空闲整理尚未退出）：任务未开始、
+    //   未写入任何种子，主进程待补录提示不变。调用方须在 applyStatementResult 之前拦下并保留弹窗。
+    function balanceSeedBusyMessage(result) {
+      return `余额尚未保存：${result?.message || '当前暂时不能开始新的任务'}。请稍后再试，已填写的内容已保留。`;
+    }
+
+    function alertBalanceSeedBusy(overlay, result) {
+      pushAlert(overlay, () => createAlertDialog(escapeHtml(balanceSeedBusyMessage(result)), { onConfirm: null }));
+    }
+
     // 发生额计算余额的日期断档：先确认补录或不补录，补录时转入补录弹窗。
     function createBalanceGapConfirmDialog(prompt) {
       const { applyStatementResult } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
@@ -374,6 +392,10 @@
           }
         }
 
+        if (result.status === 'busy') {
+          if (handle.isOpen()) alertBalanceSeedBusy(overlay, result);
+          return;
+        }
         applyStatementResult(result);
         if (!handle.isOpen()) return;
         if (result.manualBalancePromptReady && result.manualBalancePrompt) {
@@ -411,18 +433,37 @@
         + `，差额 ${formatBalanceAmount(mismatch.difference, true)}${missing}`;
     }
 
+    // 账单当日余额较多（每笔交易一个余额）时只列前后各 3 个并注明总数，避免说明撑满弹窗（v3.2.17 D1）。
+    const SEED_MISMATCH_BALANCE_PREVIEW_EACH_SIDE = 3;
+    // 返回「与账单当日余额」之后的部分：不超过 6 个时与 v3.2.16 相同（空格后全部列出）。
+    function formatSeedMismatchStatementBalances(values) {
+      const balances = Array.isArray(values) ? values : [];
+      if (!balances.length) return ' (空)';
+      const join = (items) => items.map((value) => formatBalanceAmount(value)).join('、');
+      if (balances.length <= SEED_MISMATCH_BALANCE_PREVIEW_EACH_SIDE * 2) return ` ${join(balances)}`;
+      return `（共 ${balances.length} 个）${join(balances.slice(0, SEED_MISMATCH_BALANCE_PREVIEW_EACH_SIDE))} … `
+        + join(balances.slice(-SEED_MISMATCH_BALANCE_PREVIEW_EACH_SIDE));
+    }
+
     // 已有种子但首日多个余额都对不上：写明已有余额、当日收支与账单当日余额，提示核对后重填（v3.2.16 D7）。
+    // 种子日期与首日之间缺日期时写明缺的日期，引导补录首日前一天的期末余额（v3.2.17 D3）。
     function formatBalanceSeedMismatchDetail(seedMismatch) {
-      const statementBalances = (Array.isArray(seedMismatch.statementBalances) ? seedMismatch.statementBalances : [])
-        .map((value) => formatBalanceAmount(value))
-        .join('、') || '(空)';
+      const statementBalances = formatSeedMismatchStatementBalances(seedMismatch.statementBalances);
       const seedAmount = formatBalanceAmount(seedMismatch.seedBalance);
       const anchorAmount = formatBalanceAmount(seedMismatch.anchorBalance);
       const anchorNote = anchorAmount === seedAmount ? '' : `（扣回余额附加值后为 ${anchorAmount}）`;
-      return `已有 ${seedMismatch.seedDate} 的余额 ${seedAmount}（${seedMismatch.seedGenerationMethod || '人工录入'}）${anchorNote}，`
+      const summary = `已有 ${seedMismatch.seedDate} 的余额 ${seedAmount}（${seedMismatch.seedGenerationMethod || '人工录入'}）${anchorNote}，`
         + `加上 ${seedMismatch.billDate} 收入 ${formatBalanceAmount(seedMismatch.creditAmount)}、`
         + `支出 ${formatBalanceAmount(seedMismatch.debitAmount)} 后应为 ${formatBalanceAmount(seedMismatch.expectedBalance)}，`
-        + `与账单当日余额 ${statementBalances} 都对不上。请核对上一账单日余额（可参考账单上的期初余额）后重新填写。`;
+        + `与账单当日余额${statementBalances} 都对不上。`;
+      if (!seedMismatch.missingFrom) {
+        return `${summary}请核对上一账单日余额（可参考账单上的期初余额）后重新填写。`;
+      }
+      const singleDay = seedMismatch.missingFrom === seedMismatch.missingTo;
+      const missing = singleDay ? seedMismatch.missingFrom : `${seedMismatch.missingFrom} ~ ${seedMismatch.missingTo}`;
+      return `${summary}${seedMismatch.seedDate} 与 ${seedMismatch.billDate} 之间缺 ${missing} 的账单，`
+        + `请先核对是否漏导了${singleDay ? '这天' : '这几天'}的账单；`
+        + `也可以直接填写 ${seedMismatch.suggestedSeedDate} 的期末余额（可参考账单上的期初余额）。`;
     }
 
     function formatSeedMismatchAmountInput(value) {
@@ -495,6 +536,10 @@
           }
         }
 
+        if (result.status === 'busy') {
+          if (handle.isOpen()) alertBalanceSeedBusy(overlay, result);
+          return;
+        }
         applyStatementResult(result);
         if (!handle.isOpen()) return;
         if (result.manualBalancePromptReady && result.manualBalancePrompt) {
@@ -586,6 +631,10 @@
           }
         }
 
+        if (result.status === 'busy') {
+          if (handle.isOpen()) alertBalanceSeedBusy(overlay, result);
+          return;
+        }
         applyStatementResult(result);
         if (!handle.isOpen()) return;
         if (result.manualBalancePromptReady && result.manualBalancePrompt) {
@@ -601,6 +650,39 @@
 
       overlay.appendChild(dialog);
       return overlay;
+    }
+
+    // v3.2.17：补录余额「导入余额文件」——待补录账号键（银行账号 + 币种），与主进程 prompt 同口径。
+    function manualBalanceAccountKey(account) {
+      return `${String(account?.merchantId ?? '').trim()}@@${String(account?.currency ?? '').trim()}`;
+    }
+
+    // 只有缺种子的普通补录 prompt 可导入余额文件、可被确认后连续保存（断档、核对、确认类都不行）。
+    function isPlainManualBalancePrompt(prompt) {
+      return Boolean(prompt) && !prompt.reason && !prompt.seedMismatch;
+    }
+
+    // 预填余额用普通小数：String 会把 1e-7 这类小额写成指数，主进程补录校验不接受指数写法。保留 12 位小数（余额链路口径）。
+    function formatImportedBalanceInput(value) {
+      if (value === null || value === undefined) return '';
+      if (typeof value !== 'number' || !Number.isFinite(value)) return String(value);
+      const text = String(value);
+      if (!/e/i.test(text)) return text;
+      return value.toFixed(12).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+    }
+
+    // 补录请求带上界面所示的账号与输出名称，主进程与当前待补录提示核对，不一致即拒绝（不写到别的账号或银行）。
+    function manualBalanceAccountBinding(prompt) {
+      if (!prompt || typeof prompt.merchantId !== 'string' || !prompt.merchantId) return {};
+      return {
+        merchantId: prompt.merchantId,
+        currency: typeof prompt.currency === 'string' ? prompt.currency : '',
+        ...(typeof prompt.templateName === 'string' && prompt.templateName ? { templateName: prompt.templateName } : {})
+      };
+    }
+
+    function manualBalanceGroupName(prompt) {
+      return String(prompt?.templateName ?? '').trim();
     }
 
     function createManualBalanceSeedDialog(prompt, draft = {}, queueState = null) {
@@ -637,61 +719,111 @@
       const seedMismatch = !isGapPrompt && prompt?.seedMismatch && typeof prompt.seedMismatch === 'object'
         ? prompt.seedMismatch
         : null;
-      const dialogTitle = isGapPrompt
+      const manualTitle = isGapPrompt
         ? '补录断档前一日余额'
         : (seedMismatch ? '核对上一账单日余额' : '补录上一账单日余额');
+      // v3.2.17：普通缺种子补录可从余额文件批量提取待补录账号的余额，转到「余额确认」视图。
+      const canImportBalanceFile = isPlainManualBalancePrompt(prompt)
+        && Array.isArray(prompt.pendingAccounts) && prompt.pendingAccounts.length > 0
+        && typeof api.files?.importBalanceSeedFile === 'function';
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">${dialogTitle}</div>
+          <div class="dialog-title">${manualTitle}</div>
           <button class="icon-close" type="button">×</button>
         </div>
-        <div class="manual-balance-context">
-          <div class="manual-balance-progress">${progressText}</div>
-          <div class="manual-balance-context-grid">
-            <div class="manual-balance-context-row">
-              <span class="manual-balance-context-label">银行账号</span>
-              <span class="manual-balance-context-value manual-balance-context-account" title="${escapeHtml(merchantId)}">${escapeHtml(merchantId)}</span>
+        <div class="manual-balance-view" data-view="manual">
+          <div class="manual-balance-context">
+            <div class="manual-balance-progress">${progressText}</div>
+            <div class="manual-balance-context-grid">
+              <div class="manual-balance-context-row">
+                <span class="manual-balance-context-label">银行账号</span>
+                <span class="manual-balance-context-value manual-balance-context-account" title="${escapeHtml(merchantId)}">${escapeHtml(merchantId)}</span>
+              </div>
+              <div class="manual-balance-context-row">
+                <span class="manual-balance-context-label">币种</span>
+                <span class="manual-balance-context-tag" title="${escapeHtml(currency)}">${escapeHtml(currency)}</span>
+              </div>
+              <div class="manual-balance-context-row">
+                <span class="manual-balance-context-label">${isGapPrompt ? '断档后首个账单日' : '当前账单日期'}</span>
+                <span class="manual-balance-context-value" title="${escapeHtml(targetBillDate)}">${escapeHtml(targetBillDate)}</span>
+              </div>
+              ${isGapPrompt ? `
+              <div class="manual-balance-context-row">
+                <span class="manual-balance-context-label">缺失日期</span>
+                <span class="manual-balance-context-value" title="${escapeHtml(gapRange)}">${escapeHtml(gapRange)}</span>
+              </div>` : ''}
             </div>
-            <div class="manual-balance-context-row">
-              <span class="manual-balance-context-label">币种</span>
-              <span class="manual-balance-context-tag" title="${escapeHtml(currency)}">${escapeHtml(currency)}</span>
-            </div>
-            <div class="manual-balance-context-row">
-              <span class="manual-balance-context-label">${isGapPrompt ? '断档后首个账单日' : '当前账单日期'}</span>
-              <span class="manual-balance-context-value" title="${escapeHtml(targetBillDate)}">${escapeHtml(targetBillDate)}</span>
-            </div>
-            ${isGapPrompt ? `
-            <div class="manual-balance-context-row">
-              <span class="manual-balance-context-label">缺失日期</span>
-              <span class="manual-balance-context-value" title="${escapeHtml(gapRange)}">${escapeHtml(gapRange)}</span>
+            ${seedMismatch ? `
+            <div class="balance-gap-warning manual-balance-seed-mismatch">
+              ${escapeHtml(formatBalanceSeedMismatchDetail(seedMismatch))}
             </div>` : ''}
           </div>
-          ${seedMismatch ? `
-          <div class="balance-gap-warning manual-balance-seed-mismatch">
-            ${escapeHtml(formatBalanceSeedMismatchDetail(seedMismatch))}
-          </div>` : ''}
+          <div class="manual-balance-form">
+            <label class="manual-balance-row">
+              <span class="manual-balance-label">${isGapPrompt ? '请选择补录日期' : '请选择上一账单日日期'}</span>
+              <input class="mapping-text-input manual-balance-input manual-balance-date-input" type="text" value="" />
+            </label>
+            <label class="manual-balance-row">
+              <span class="manual-balance-label">${isGapPrompt ? '请输入该日期期末余额' : '请输入上一账单日余额'}</span>
+              <input class="mapping-text-input manual-balance-input manual-balance-amount-input" type="text" spellcheck="false" value="" />
+            </label>
+          </div>
+          ${canImportBalanceFile ? `
+          <div class="dialog-actions left-right">
+            <div class="dialog-actions-left">
+              <button class="secondary-btn small" type="button" data-action="import-balance-file">导入余额文件</button>
+            </div>
+            <div class="dialog-actions-right">
+              <button class="primary-btn small" type="button" data-action="done">完成</button>
+            </div>
+          </div>` : `
+          <div class="dialog-actions right">
+            ${isGapPrompt ? '<button class="secondary-btn small" type="button" data-action="skip-gap">不补录此处</button>' : ''}
+            <button class="primary-btn small" type="button" data-action="done">完成</button>
+          </div>`}
         </div>
-        <div class="manual-balance-form">
-          <label class="manual-balance-row">
-            <span class="manual-balance-label">${isGapPrompt ? '请选择补录日期' : '请选择上一账单日日期'}</span>
-            <input class="mapping-text-input manual-balance-input manual-balance-date-input" type="text" value="" />
-          </label>
-          <label class="manual-balance-row">
-            <span class="manual-balance-label">${isGapPrompt ? '请输入该日期期末余额' : '请输入上一账单日余额'}</span>
-            <input class="mapping-text-input manual-balance-input manual-balance-amount-input" type="text" spellcheck="false" value="" />
-          </label>
-        </div>
-        <div class="dialog-actions right">
-          ${isGapPrompt ? '<button class="secondary-btn small" type="button" data-action="skip-gap">不补录此处</button>' : ''}
-          <button class="primary-btn small" type="button" data-action="done">完成</button>
-        </div>
+        ${canImportBalanceFile ? `
+        <div class="manual-balance-view manual-balance-confirm-view" data-view="confirm" hidden>
+          <div class="balance-gap-body manual-balance-confirm-body">
+            <p class="manual-balance-confirm-summary" data-role="confirm-summary"></p>
+            <p class="balance-gap-detail">余额按人工补录的原值保存（不含余额附加值）。标为「需手工录入」的账号请补全上一账单日日期与余额；从文件提取的余额也可修改。</p>
+            <div class="table-wrapper manual-balance-confirm-table-wrap">
+              <table class="data-table manual-balance-confirm-table">
+                <thead>
+                  <tr>
+                    <th>银行账号</th>
+                    <th>币种</th>
+                    <th>当前账单日期</th>
+                    <th>上一账单日日期</th>
+                    <th>上一账单日余额</th>
+                    <th>来源</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p class="balance-gap-warning manual-balance-confirm-message" data-role="confirm-message" hidden></p>
+          </div>
+          <div class="dialog-actions right">
+            <button class="secondary-btn small" type="button" data-action="confirm-back">返回</button>
+            <button class="primary-btn small" type="button" data-action="confirm-save">确认</button>
+          </div>
+        </div>` : ''}
       `;
 
+      const titleEl = dialog.querySelector('.dialog-title');
+      const manualView = dialog.querySelector('[data-view="manual"]');
+      const confirmView = dialog.querySelector('[data-view="confirm"]');
       const dateInput = dialog.querySelector('.manual-balance-date-input');
       const amountInput = dialog.querySelector('.manual-balance-amount-input');
-      dateInput.value = draft.billDate || (isGapPrompt ? prompt.suggestedSeedDate || '' : (seedMismatch?.seedDate || ''));
+      // 核对弹窗：不缺日期时预填已有种子的日期与金额；种子日期与首日之间缺日期时预填首日前一天、金额留空（v3.2.17 D3）。
+      const seedMismatchGap = Boolean(seedMismatch?.missingFrom);
+      dateInput.value = draft.billDate || (isGapPrompt
+        ? prompt.suggestedSeedDate || ''
+        : (seedMismatch?.suggestedSeedDate || seedMismatch?.seedDate || ''));
       dateInput.type = dateInput.value ? 'date' : 'text';
-      amountInput.value = draft.endBalance || (seedMismatch ? formatSeedMismatchAmountInput(seedMismatch.anchorBalance) : '');
+      amountInput.value = draft.endBalance
+        || (seedMismatch && !seedMismatchGap ? formatSeedMismatchAmountInput(seedMismatch.anchorBalance) : '');
 
       dateInput.addEventListener('focus', () => {
         if (dateInput.type !== 'date') {
@@ -707,8 +839,39 @@
       });
       const doneBtn = dialog.querySelector('[data-action="done"]');
       const skipGapBtn = dialog.querySelector('[data-action="skip-gap"]');
+      const importBtn = dialog.querySelector('[data-action="import-balance-file"]');
+      const confirmBackBtn = dialog.querySelector('[data-action="confirm-back"]');
+      const confirmSaveBtn = dialog.querySelector('[data-action="confirm-save"]');
+      const confirmTbody = confirmView ? confirmView.querySelector('tbody') : null;
+      const confirmSummary = confirmView ? confirmView.querySelector('[data-role="confirm-summary"]') : null;
+      const confirmMessage = confirmView ? confirmView.querySelector('[data-role="confirm-message"]') : null;
+      // 保存、导入、确认后连续保存期间统一锁定：不能关闭、不能再次点击。
       let saveInProgress = false;
       registerModal(overlay, { canClose: () => !saveInProgress });
+
+      function setControlsBusy(busy) {
+        dialog.querySelectorAll('[data-action]').forEach((button) => { button.disabled = busy; });
+        if (confirmTbody) {
+          // 已保存成功的行保持只读：不会再提交，改了也不生效。
+          confirmTbody.querySelectorAll('tr').forEach((row) => {
+            const locked = busy || row.classList.contains('is-saved');
+            row.querySelectorAll('input').forEach((input) => { input.disabled = locked; });
+          });
+        }
+      }
+
+      async function runExclusive(task) {
+        const handle = modalBridge.host.getHandle(overlay);
+        if (saveInProgress || !handle?.isOpen()) return null;
+        saveInProgress = true;
+        setControlsBusy(true);
+        try {
+          return await task();
+        } finally {
+          saveInProgress = false;
+          if (handle.isOpen()) setControlsBusy(false);
+        }
+      }
 
       function currentDraft() {
         return { billDate: dateInput.value, endBalance: amountInput.value };
@@ -716,19 +879,20 @@
 
       function showBalanceSeedSaveFailure(error) {
         const message = escapeHtml(error?.message || String(error || '未知错误'));
-        const preservedDraft = currentDraft();
 
         pushAlert(overlay, () => createAlertDialog(`余额补录失败：${message}`, {
           onConfirm: null
         }));
       }
 
-      async function saveBalanceSeedWithFeedback(request) {
+      // lockHeld：调用方已通过 runExclusive 持有锁（余额确认后的连续保存），这里不再加锁、解锁。
+      async function saveBalanceSeedWithFeedback(request, { lockHeld = false } = {}) {
         const handle = modalBridge.host.getHandle(overlay);
-        if (saveInProgress || !handle?.isOpen()) return null;
-        saveInProgress = true;
-        doneBtn.disabled = true;
-        if (skipGapBtn) skipGapBtn.disabled = true;
+        if (!lockHeld && (saveInProgress || !handle?.isOpen())) return null;
+        if (!lockHeld) {
+          saveInProgress = true;
+          setControlsBusy(true);
+        }
         try {
           const result = await api.files.saveBalanceSeed(request);
           if (!result || typeof result !== 'object') {
@@ -739,22 +903,31 @@
           showBalanceSeedSaveFailure(error);
           return null;
         } finally {
-          saveInProgress = false;
-          if (handle.isOpen()) {
-            doneBtn.disabled = false;
-            if (skipGapBtn) skipGapBtn.disabled = false;
+          if (!lockHeld) {
+            saveInProgress = false;
+            if (handle.isOpen()) setControlsBusy(false);
           }
         }
       }
 
-      function handleSaveResult(result) {
+      function handleSaveResult(result, invalidDraft = currentDraft()) {
         const handle = modalBridge.host.getHandle(overlay);
+        // 准入拒绝（busy）：任务未开始、种子未写入、主进程待补录提示未变。保留弹窗、当前视图与全部草稿，
+        //   不交给 applyStatementResult（会清掉待补录状态），提示稍后重试。
+        if (result.status === 'busy') {
+          if (!handle?.isOpen()) return;
+          setConfirmMessage(balanceSeedBusyMessage(result));
+          alertBalanceSeedBusy(overlay, result);
+          return;
+        }
         if (result.status === 'manual-balance-invalid') {
           applyManualBalancePromptStatus(result);
           if (!handle?.isOpen()) return;
+          // 待补录账号已变化：按主进程当前提示重新打开，不带入原账号的草稿。
+          const nextDraft = result.errorCode === 'BALANCE_SEED_ACCOUNT_CHANGED' ? {} : invalidDraft;
           replaceModal(handle, () => createManualBalanceSeedDialog(
             result.manualBalancePrompt,
-            { billDate: dateInput.value, endBalance: amountInput.value },
+            nextDraft,
             currentQueue
           ));
           return;
@@ -781,20 +954,8 @@
         closeModal(overlay, { status: 'submitted', value: result });
       }
 
-      dialog.querySelector('.icon-close').addEventListener('click', closeModal);
-      skipGapBtn?.addEventListener('click', async () => {
-        const result = await saveBalanceSeedWithFeedback({ skipBalanceGapKeys: [prompt.gapKey] });
-        if (!result) return;
-        handleSaveResult(result);
-      });
-      doneBtn.addEventListener('click', async () => {
-        const payload = {
-          billDate: dateInput.value,
-          endBalance: amountInput.value
-        };
-        const result = await saveBalanceSeedWithFeedback(payload);
-        if (!result) return;
-
+      // 已存在同日余额时先确认覆盖，再按原逻辑处理结果。
+      function handleSubmitResult(result, invalidDraft) {
         if (result.status === 'confirm-overwrite') {
           pushModal(overlay, () => createConfirmDialog({
               message: '该日期的余额已存在，确认覆盖吗？',
@@ -805,14 +966,218 @@
                   buildBalanceSeedConfirmationRequest(result.contextId)
                 );
                 if (!overwriteResult) return;
-                handleSaveResult(overwriteResult);
+                handleSaveResult(overwriteResult, invalidDraft);
               }
             })
           );
           return;
         }
+        handleSaveResult(result, invalidDraft);
+      }
 
+      // ---- v3.2.17 余额确认视图 ----
+      let importedFileName = '';
+      // 连续保存最近一次确认的主进程提示；中途 IPC 异常后再点【确认】从这里接着保存
+      //   （主进程若其实已前进到下一个账号，会按请求账号核对拒绝，不会写错账号）。
+      let chainPrompt = prompt;
+      // 已保存成功的账号（跨重试保留），不再自动提交；导入清单只属于本弹窗的分组（输出名称），跨分组即停。
+      const savedAccountKeys = new Set();
+      const importGroupName = manualBalanceGroupName(prompt);
+
+      function showView(view) {
+        const showConfirm = view === 'confirm';
+        manualView.hidden = showConfirm;
+        if (confirmView) confirmView.hidden = !showConfirm;
+        dialog.classList.toggle('manual-balance-card--confirm', showConfirm);
+        titleEl.textContent = showConfirm ? '余额确认' : manualTitle;
+      }
+
+      function setConfirmMessage(message) {
+        if (!confirmMessage) return;
+        confirmMessage.textContent = message || '';
+        confirmMessage.hidden = !message;
+      }
+
+      function renderConfirmRows(importResult) {
+        const accounts = Array.isArray(importResult.accounts) ? importResult.accounts : [];
+        const matchedCount = accounts.filter((account) => account.source === 'file').length;
+        const manualCount = accounts.length - matchedCount;
+        importedFileName = String(importResult.fileName || '');
+        confirmSummary.textContent = `已从 ${importedFileName || '余额文件'} 提取 ${matchedCount} 个账号的余额`
+          + (manualCount ? `，${manualCount} 个需手工录入` : '')
+          + (importResult.skippedRowCount ? `；文件中 ${importResult.skippedRowCount} 行因银行账号、账单日期或期末余额无效被跳过` : '');
+        confirmTbody.innerHTML = accounts.map((account) => {
+          const fromFile = account.source === 'file';
+          const accountText = String(account.merchantId || '');
+          const currencyText = String(account.currency || '');
+          return `
+            <tr class="manual-balance-confirm-row${fromFile ? '' : ' is-manual'}"
+              data-merchant-id="${escapeHtml(accountText)}"
+              data-currency="${escapeHtml(currencyText)}"
+              data-target-bill-date="${escapeHtml(String(account.targetBillDate || ''))}">
+              <td class="manual-balance-context-account">${escapeHtml(accountText)}</td>
+              <td>${escapeHtml(currencyText || '(空)')}</td>
+              <td>${escapeHtml(String(account.targetBillDate || ''))}</td>
+              <td><input class="mapping-text-input manual-balance-confirm-date" type="date" aria-label="上一账单日日期" value="${escapeHtml(String(account.billDate || ''))}" /></td>
+              <td><input class="mapping-text-input manual-balance-confirm-amount" type="text" spellcheck="false" aria-label="上一账单日余额" value="${escapeHtml(formatImportedBalanceInput(account.endBalance))}" /></td>
+              <td>
+                <span class="manual-balance-source-tag ${fromFile ? 'is-file' : 'is-manual'}">${fromFile ? '来自文件' : '需手工录入'}</span>
+                ${!fromFile && account.reason ? `<div class="manual-balance-source-reason">${escapeHtml(String(account.reason))}</div>` : ''}
+              </td>
+            </tr>`;
+        }).join('');
+        confirmTbody.querySelectorAll('tr').forEach((row) => {
+          if (savedAccountKeys.has(confirmRowKey(row))) markRowSaved(row);
+        });
+        setConfirmMessage('');
+      }
+
+      function confirmRowKey(row) {
+        return manualBalanceAccountKey({ merchantId: row.dataset.merchantId || '', currency: row.dataset.currency || '' });
+      }
+
+      // 保存成功的行标为「已保存」并只读；重试只提交其余账号。
+      function markRowSaved(row) {
+        if (!row) return;
+        row.classList.remove('is-manual', 'is-invalid');
+        row.classList.add('is-saved');
+        row.title = '';
+        row.querySelectorAll('input').forEach((input) => { input.disabled = true; });
+        const sourceCell = row.cells[row.cells.length - 1];
+        if (sourceCell) sourceCell.innerHTML = '<span class="manual-balance-source-tag is-saved">已保存</span>';
+      }
+
+      // 轻量校验：日期与余额必填、日期早于当前账单日期；数值合法性仍以主进程为准。
+      function collectConfirmedEntries() {
+        const entries = new Map();
+        let invalidCount = 0;
+        confirmTbody.querySelectorAll('tr').forEach((row) => {
+          if (row.classList.contains('is-saved')) return;
+          const billDate = row.querySelector('.manual-balance-confirm-date').value.trim();
+          const endBalance = row.querySelector('.manual-balance-confirm-amount').value.trim();
+          const targetDate = row.dataset.targetBillDate || '';
+          let problem = '';
+          if (!billDate || !endBalance) problem = '请填写上一账单日日期与余额';
+          else if (targetDate && billDate >= targetDate) problem = '上一账单日日期必须早于当前账单日期';
+          row.classList.toggle('is-invalid', Boolean(problem));
+          row.title = problem;
+          if (problem) {
+            invalidCount += 1;
+            return;
+          }
+          const account = { merchantId: row.dataset.merchantId || '', currency: row.dataset.currency || '' };
+          entries.set(manualBalanceAccountKey(account), { ...account, billDate, endBalance });
+        });
+        return { entries, invalidCount };
+      }
+
+      // 确认后逐个账号沿用现有补录保存：主进程每次只接受当前提示的账号并重算，返回下一个提示；
+      //   下一个仍是清单内的普通缺种子账号就继续，否则停下交给原有处理（断档、不一致、覆盖确认、报错或完成）。
+      // 本弹窗分组内、清单里、尚未保存成功的普通缺种子账号才自动保存。
+      function canAutoSave(nextPrompt, entries) {
+        if (!isPlainManualBalancePrompt(nextPrompt)) return false;
+        if (manualBalanceGroupName(nextPrompt) !== importGroupName) return false;
+        const key = manualBalanceAccountKey(nextPrompt);
+        return entries.has(key) && !savedAccountKeys.has(key);
+      }
+
+      async function saveConfirmedEntries(entries) {
+        const total = entries.size;
+        let savedThisRun = 0;
+        let activePrompt = chainPrompt;
+        let lastResult = null;
+        let lastEntry = null;
+        while (canAutoSave(activePrompt, entries)) {
+          const key = manualBalanceAccountKey(activePrompt);
+          const entry = entries.get(key);
+          setConfirmMessage(`正在保存第 ${savedThisRun + 1} / ${total} 个账号的余额…`);
+          const result = await saveBalanceSeedWithFeedback({
+            billDate: entry.billDate,
+            endBalance: entry.endBalance,
+            ...manualBalanceAccountBinding(activePrompt)
+          }, { lockHeld: true });
+          if (!result) {
+            setConfirmMessage('');
+            return null;
+          }
+          lastResult = result;
+          lastEntry = entry;
+          // busy（如数据库空闲整理尚未退出）、cancelled 时任务未开始，种子没有写入，不能标为已保存。
+          if (['manual-balance-invalid', 'confirm-overwrite', 'error', 'failed', 'busy', 'cancelled'].includes(result.status)) break;
+          savedAccountKeys.add(key);
+          savedThisRun += 1;
+          markRowSaved([...confirmTbody.querySelectorAll('tr')].find((row) => confirmRowKey(row) === key));
+          const nextPrompt = result.manualBalancePromptReady ? result.manualBalancePrompt : null;
+          if (!canAutoSave(nextPrompt, entries)) break;
+          applyStatementResult(result);
+          activePrompt = nextPrompt;
+          chainPrompt = nextPrompt;
+        }
+        setConfirmMessage('');
+        return lastResult ? { result: lastResult, entry: lastEntry } : null;
+      }
+
+      dialog.querySelector('.icon-close').addEventListener('click', closeModal);
+      skipGapBtn?.addEventListener('click', async () => {
+        const result = await saveBalanceSeedWithFeedback({ skipBalanceGapKeys: [prompt.gapKey] });
+        if (!result) return;
         handleSaveResult(result);
+      });
+      doneBtn.addEventListener('click', async () => {
+        const payload = {
+          billDate: dateInput.value,
+          endBalance: amountInput.value,
+          ...manualBalanceAccountBinding(prompt)
+        };
+        const result = await saveBalanceSeedWithFeedback(payload);
+        if (!result) return;
+        handleSubmitResult(result, currentDraft());
+      });
+      importBtn?.addEventListener('click', async () => {
+        const result = await runExclusive(async () => {
+          try {
+            return await api.files.importBalanceSeedFile();
+          } catch (error) {
+            return { status: 'error', message: error?.message || String(error || '未知错误') };
+          }
+        });
+        if (!result || result.status === 'cancelled') return;
+        if (result.status !== 'success') {
+          const detail = Array.isArray(result.detailLines) && result.detailLines.length
+            ? `<br>${result.detailLines.map((line) => escapeHtml(String(line))).join('<br>')}`
+            : '';
+          pushAlert(overlay, () => createAlertDialog(`导入余额文件失败：${escapeHtml(result.message || '未知错误')}${detail}`, {
+            onConfirm: null
+          }));
+          return;
+        }
+        renderConfirmRows(result);
+        showView('confirm');
+      });
+      confirmBackBtn?.addEventListener('click', () => {
+        if (saveInProgress) return;
+        // 已有账号保存成功、主进程提示已前进：按当前提示重建补录弹窗，不回到旧账号的表单。
+        if (chainPrompt !== prompt) {
+          const handle = modalBridge.host.getHandle(overlay);
+          if (!handle?.isOpen()) return;
+          replaceModal(handle, () => createManualBalanceSeedDialog(chainPrompt, {}, currentQueue));
+          return;
+        }
+        showView('manual');
+      });
+      confirmSaveBtn?.addEventListener('click', async () => {
+        if (saveInProgress) return;
+        const { entries, invalidCount } = collectConfirmedEntries();
+        if (invalidCount) {
+          setConfirmMessage(`有 ${invalidCount} 个账号的日期或余额需要补全或修正（已标红）`);
+          return;
+        }
+        const outcome = await runExclusive(() => saveConfirmedEntries(entries));
+        if (!outcome) return;
+        handleSubmitResult(outcome.result, {
+          billDate: outcome.entry.billDate,
+          endBalance: outcome.entry.endBalance
+        });
       });
 
       overlay.appendChild(dialog);
@@ -1065,11 +1430,10 @@
 
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">筛选特征值</div>
+          <div class="dialog-title">筛选特征值${titleTipsHtml(`按分隔符把筛选字段拆成多段，取第一个满足条件的片段；筛不出时留空。本模板所有选择「${FEATURE_FILTER_MAPPING_FIELD}」的字段共用这一套条件。`)}</div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="feature-filter-body">
-          <p class="feature-filter-hint">按分隔符把筛选字段拆成多段，取第一个满足条件的片段；筛不出时留空。本模板所有选择「${escapeHtml(FEATURE_FILTER_MAPPING_FIELD)}」的字段共用这一套条件。</p>
           <div class="feature-filter-grid">
             <label class="feature-filter-label" for="feature-filter-source">筛选字段</label>
             <select id="feature-filter-source" class="mapping-select feature-filter-source">${sourceOptions}</select>
@@ -1286,7 +1650,7 @@
       dialog.className = 'modal-card manual-balance-card';
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">重命名渠道</div>
+          <div class="dialog-title">重命名渠道${titleTipsHtml('渠道下子模板的账单按渠道名输出。改名后，Channel 列、余额账单的银行名称与所在地、导出文件名随之改变，余额种子与余额附加值改按新名称的银行段读取。已有子模板不会随之改名。')}</div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="manual-balance-form">
@@ -1298,7 +1662,6 @@
             <span class="manual-balance-label">新渠道名称</span>
             <input class="mapping-text-input manual-balance-input rename-channel-input" type="text" spellcheck="false" value="${escapeHtml(channel.name)}" />
           </label>
-          <div class="manual-balance-hint channel-rename-hint">渠道下子模板的账单按渠道名输出。改名后，Channel 列、余额账单的银行名称与所在地、导出文件名随之改变，余额种子与余额附加值改按新名称的银行段读取。已有子模板不会随之改名。</div>
         </div>
         <div class="dialog-actions right">
           <button class="primary-btn small" type="button" data-action="done">完成</button>
@@ -5984,7 +6347,7 @@
       dialog.className = 'modal-card manager-card balance-seed-card';
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">余额管理</div>
+          <div class="dialog-title">余额管理${titleTipsHtml('', { hidden: true })}</div>
           <label class="account-mapping-template-select-wrapper balance-seed-owner-wrapper">
             渠道 <select data-role="balance-seed-owner" aria-label="渠道"></select>
           </label>
@@ -5995,9 +6358,9 @@
           <table class="data-table">
             <thead>
               <tr>
+                <th>日期</th>
                 <th>账户号</th>
                 <th>币种</th>
-                <th>日期</th>
                 <th>余额</th>
                 <th>生成方式</th>
                 <th class="manager-action-header"><span class="manager-action-header-label">执行操作</span></th>
@@ -6012,12 +6375,14 @@
             <span data-role="balance-seed-page"></span>
             <button class="secondary-btn small" type="button" data-action="next-page">下一页</button>
           </div>
-          <button class="primary-btn small" type="button" data-action="done">完成</button>
+          <button class="secondary-btn small" type="button" data-action="back">返回</button>
         </div>
       `;
 
       const ownerSelect = dialog.querySelector('[data-role="balance-seed-owner"]');
       const hintEl = dialog.querySelector('[data-role="balance-seed-hint"]');
+      const tipsEl = dialog.querySelector('.dialog-title .title-tips');
+      const tipsBubbleEl = tipsEl.querySelector('.title-tips-bubble');
       const tbody = dialog.querySelector('tbody');
       const pagerEl = dialog.querySelector('[data-role="balance-seed-pager"]');
       const pageEl = dialog.querySelector('[data-role="balance-seed-page"]');
@@ -6056,6 +6421,7 @@
       }
 
       function renderHint() {
+        tipsEl.hidden = true;
         if (!state.key) {
           hintEl.textContent = '暂无渠道或模板';
           return;
@@ -6069,7 +6435,9 @@
           return;
         }
         const fileName = state.owner ? state.owner.seedFileName : '';
-        hintEl.textContent = `共 ${state.records.length} 条。种子文件 balance-seeds/${fileName} 按名称的银行段存放，生成账单时按账户号与币种读取；修改后的余额按「人工录入」处理。`;
+        hintEl.textContent = `共 ${state.records.length} 条`;
+        tipsBubbleEl.textContent = `种子文件 balance-seeds/${fileName} 按名称的银行段存放，生成账单时按账户号与币种读取；修改后的余额按「人工录入」处理。`;
+        tipsEl.hidden = false;
       }
 
       function createEmptyRow(text) {
@@ -6084,9 +6452,9 @@
         const row = document.createElement('tr');
         row.dataset.balanceSeedRow = rowKey;
         row.innerHTML = `
+          <td>${escapeHtml(record.billDate)}</td>
           <td>${escapeHtml(record.merchantId)}</td>
           <td>${escapeHtml(record.currency)}</td>
-          <td>${escapeHtml(record.billDate)}</td>
           <td class="balance-seed-balance-cell">${editing
             ? `<input class="mapping-text-input balance-seed-balance-input" type="text" spellcheck="false" aria-label="余额" value="${escapeHtml(String(record.endBalance))}" />`
             : escapeHtml(String(record.endBalance))}</td>
@@ -6263,7 +6631,7 @@
       });
       const close = () => closeModal(overlay, { status: 'cancelled', reason: 'cancel' });
       dialog.querySelector('.icon-close').addEventListener('click', close);
-      dialog.querySelector('[data-action="done"]').addEventListener('click', close);
+      dialog.querySelector('[data-action="back"]').addEventListener('click', close);
       registerModal(overlay, {
         onMount: () => { loadSeeds(); },
         onDispose: () => { state.requestId += 1; }
@@ -6343,10 +6711,9 @@
         </div>`).join('');
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">处理渠道账户映射冲突</div>
+          <div class="dialog-title">处理渠道账户映射冲突${titleTipsHtml('升级时，同一渠道下的子模板对同一账户号设置了不同的清结算账号或币种。请为每个账户号选定一条，处理前该渠道无法生成账单。')}</div>
           <button class="icon-close" type="button">×</button>
         </div>
-        <div class="channel-conflict-hint">升级时，同一渠道下的子模板对同一账户号设置了不同的清结算账号或币种。请为每个账户号选定一条，处理前该渠道无法生成账单。</div>
         <div class="table-wrapper">${sections}</div>
         <div class="dialog-actions right">
           <button class="primary-btn small" type="button" data-action="done" disabled>确认</button>

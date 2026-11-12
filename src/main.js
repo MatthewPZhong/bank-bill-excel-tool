@@ -38,7 +38,7 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 const XLSX = require('xlsx');
 const { performance } = require('node:perf_hooks');
 const { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, Notification, powerMonitor, shell } = require('electron');
-const { createDarkModeScheduler, THEME_BACKGROUND_COLORS } = require('./main-process/dark-mode-scheduler');
+const { createDarkModeScheduler, resolveWindowBackgroundColor } = require('./main-process/dark-mode-scheduler');
 const {
   parsePackagedRuntimeRequest
 } = require('./main-process/background-execution/canary/packaged-runtime-request');
@@ -684,6 +684,11 @@ const {
   resolveManualBalanceTargetAlias
 } = require('./main-process/manual-balance-seed-settlement');
 const { parseBankAccountExcel } = require('./backend/bank-account-import');
+const {
+  matchBalanceSeedImport,
+  parseBalanceSeedImportRows,
+  readBalanceSeedImportFile
+} = require('./backend/balance-seed-import');
 const { writeOwnAccounts } = require('./backend/own-account-store');
 const {
   readBalanceAdjustments,
@@ -1371,6 +1376,32 @@ const terminalRouteRegistrations = [
   createPreFundTerminalRouteRegistration({ getService: getPreFundReconciliationService })
 ];
 const businessOperationRegistry = createBusinessOperationRegistry();
+// v3.2.17 空闲时自动整理主库：用户 30 分钟无操作且无任务时在子进程中 VACUUM，用户一操作即中止。
+const { createIdleCompactionController } = require('./main-process/database-compaction/idle-compaction');
+const idleDatabaseCompaction = createIdleCompactionController({
+  getDatabase: () => (database && database.db ? {
+    db: database.db,
+    dbPath: database.dbPath,
+    getSetting: (key) => database.getSetting(key),
+    setSetting: (key, value) => database.setSetting(key, value)
+  } : null),
+  registry: businessOperationRegistry,
+  getLastUserActivityTs: () => lastUserActivityTs,
+  isOtherWorkBusy: () => idleCompactionBusyReason(),
+  beginMaintenance: async () => (archiveStorageRootManager
+    ? archiveStorageRootManager.beginDatabaseMaintenance('正在整理存储空间，请稍后重试')
+    : { acquired: true }),
+  endMaintenance: async () => {
+    if (archiveStorageRootManager) await archiveStorageRootManager.endDatabaseMaintenance();
+  },
+  log: (entry) => appendActivityLogEntry({
+    level: entry.level,
+    source: 'main',
+    domain: 'database-maintenance',
+    message: `[空闲存储整理] ${entry.message}`,
+    details: entry.details
+  })
+});
 const taskPolicyRegistry = createTaskPolicyRegistry();
 const executionTaskComposition = createExecutionTaskComposition({
   terminalRoutes: terminalRouteRegistrations,
@@ -2238,7 +2269,12 @@ function formatBalanceSeedMismatchLine(seedMismatch) {
   return `已有 ${seedMismatch.seedDate} 余额 ${formatBalanceAmount(seedMismatch.seedBalance)}（${seedMismatch.seedGenerationMethod || '人工录入'}）；`
     + `${seedMismatch.billDate}：上一日余额 ${formatBalanceAmount(seedMismatch.anchorBalance)}`
     + ` + 收入 ${formatBalanceAmount(seedMismatch.creditAmount)} − 支出 ${formatBalanceAmount(seedMismatch.debitAmount)}`
-    + ` = 预期 ${formatBalanceAmount(seedMismatch.expectedBalance)}，账单当日余额 ${statementBalances || '(空)'} 都对不上`;
+    + ` = 预期 ${formatBalanceAmount(seedMismatch.expectedBalance)}，账单当日余额 ${statementBalances || '(空)'} 都对不上`
+    + (seedMismatch.missingFrom
+      ? `；中间缺 ${seedMismatch.missingFrom === seedMismatch.missingTo
+        ? seedMismatch.missingFrom
+        : `${seedMismatch.missingFrom} ~ ${seedMismatch.missingTo}`}`
+      : '');
 }
 
 function formatBalanceMismatchLine(mismatch) {
@@ -4833,6 +4869,21 @@ async function waitForVccPreviewCaptureReady(webContents) {
   `);
 }
 
+// 主窗口关闭（含任务栏“关闭窗口”、Alt+F4 等不经渲染层的入口）：
+//   空闲存储整理持有过渡租约时，先中止整理并等其收尾，再重新关闭；升级准备期间仍阻止关闭。
+function handleMainWindowClose(event) {
+  if (quitPreparationComplete) return;
+  if (idleDatabaseCompaction.isRunning()) {
+    event.preventDefault();
+    const closingWindow = mainWindow;
+    idleDatabaseCompaction.stop('window-close').then(() => {
+      if (closingWindow && !closingWindow.isDestroyed()) closingWindow.close();
+    });
+    return;
+  }
+  if (businessOperationRegistry.isInstallTransitionActive()) event.preventDefault();
+}
+
 function createWindow(options = {}) {
   const instrumentation = createWindowInstrumentation({
     enabled: options.instrumentation === 'initial',
@@ -4862,18 +4913,21 @@ function createWindow(options = {}) {
   };
   try {
   const windowIcon = loadBundledIcon();
+  const appearance = darkModeScheduler.refresh();
   const windowOptions = {
     width: 1240,
     height: 860,
     minWidth: 1080,
     minHeight: 760,
     frame: false,
-    backgroundColor: THEME_BACKGROUND_COLORS[darkModeScheduler.refresh().effectiveTheme],
+    backgroundColor: resolveWindowBackgroundColor(appearance.effectiveTheme, appearance.darkModeLightness),
     show: false,
     icon: windowIcon,
     webPreferences: {
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.js'),
+      // v3.2.17：首帧早于 app:get-info，深浅度经 argv 交给 preload，由 head 同步脚本在 CSS 前绘制。
+      additionalArguments: [`--dark-mode-lightness=${appearance.darkModeLightness}`]
     }
   };
   if (process.env.APP_CAPTURE_PATH) {
@@ -4949,11 +5003,7 @@ function createWindow(options = {}) {
       }, Number(process.env.APP_CAPTURE_DELAY_MS || 1800));
     }
   }).catch(failWindowStartup);
-  mainWindow.on('close', (event) => {
-    if (businessOperationRegistry.isInstallTransitionActive() && !quitPreparationComplete) {
-      event.preventDefault();
-    }
-  });
+  mainWindow.on('close', handleMainWindowClose);
   mainWindow.on('maximize', sendWindowState);
   mainWindow.on('unmaximize', sendWindowState);
   } catch (error) {
@@ -5048,6 +5098,22 @@ function releaseAppUpdateTransition() {
     appUpdateTransitionToken = null;
   }
   return released;
+}
+
+// 空闲整理准入：未登记到业务操作登记表的写入方也视为忙（与升级重启前的忙检查同口径）——
+//   收单启动孤儿清理与切回模块触发的后台清理（只持收单操作锁/后台清理标记）、银行对账单操作锁、收单校验 worker。
+//   整理开始后这些入口会因过渡租约拿不到锁，这里只需挡住整理开始前已在进行的写入。
+function idleCompactionBusyReason() {
+  if (acquiringBillCurrencyOperationLock.inFlight || cleanupBackgroundInProgress) return 'acquiring-operation-busy';
+  if (bankStatementOperationLock.inFlight) return 'bank-statement-operation-busy';
+  try {
+    if (runCheckWorkerPool && typeof runCheckWorkerPool.isBusy === 'function' && runCheckWorkerPool.isBusy()) {
+      return 'acquiring-worker-busy';
+    }
+  } catch (_error) {
+    return 'acquiring-worker-status-unknown';
+  }
+  return '';
 }
 
 function listUpdateRestartBusyOperations() {
@@ -5859,6 +5925,13 @@ function registerAppHandlers() {
   ipcMain.handle('settings:set-dark-mode-schedule', (_event, config) => {
     try {
       return { status: 'ok', ...darkModeScheduler.setSchedule(config) };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  ipcMain.handle('settings:set-dark-mode-lightness', (_event, lightness) => {
+    try {
+      return { status: 'ok', ...darkModeScheduler.setLightness(lightness) };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
@@ -7881,6 +7954,7 @@ function registerAppHandlers() {
   //   - 节流由 renderer 端做（10s 一次），main 不再做防抖
   ipcMain.on('app:user-activity', () => {
     lastUserActivityTs = Date.now();
+    idleDatabaseCompaction.abort('user-activity');
   });
 
   // v2.1.9 SR-log-1 (T32g)：renderer 通用告警上报 handler（spec §15.4）
@@ -12785,6 +12859,72 @@ function registerBigAccountHandlers() {
     }
   });
 
+  // v3.2.17：补录余额「导入余额文件」——选择余额文件，按当前补录提示的待补录账号（银行账号 + 币种）提取上一账单日余额，
+  //   返回给补录弹窗的「余额确认」视图。只读预检：不写种子、不改补录 prompt 与生成缓存；确认后由渲染层逐个账号
+  //   沿用 file:save-balance-seed 写入（主进程照常只接受当前 prompt 指向的账号并校验）。
+  ipcMain.handle('file:import-balance-seed-file', async () => {
+    const pendingPrompt = lastManualBalancePrompt;
+    const pendingAccounts = pendingPrompt && !pendingPrompt.reason && !pendingPrompt.seedMismatch
+      && Array.isArray(pendingPrompt.pendingAccounts)
+      ? pendingPrompt.pendingAccounts
+      : [];
+    if (!pendingAccounts.length) {
+      return {
+        status: 'error',
+        errorCode: 'BALANCE_IMPORT_NO_PENDING_ACCOUNT',
+        message: '当前没有待补录的账号，请重新生成余额'
+      };
+    }
+    const choice = await showImportOpenDialog('balance-seed-file', {
+      title: '选择余额文件',
+      properties: ['openFile'],
+      filters: statementFileDialogFilters()
+    });
+    const filePath = !choice.canceled && Array.isArray(choice.filePaths) ? choice.filePaths[0] : '';
+    if (!filePath) return { status: 'cancelled' };
+    const fileName = path.basename(filePath);
+    try {
+      const { rows, displayRows, date1904 } = readBalanceSeedImportFile(filePath);
+      const { records, skippedRowCount } = parseBalanceSeedImportRows(rows, { displayRows, date1904 });
+      const matched = matchBalanceSeedImport(records, pendingAccounts);
+      appendActivityLogEntry({
+        level: 'info',
+        message: '导入余额文件，等待确认补录余额',
+        details: [
+          `文件：${fileName}`,
+          `模板名：${pendingPrompt.templateName || 'N/A'}`,
+          `待补录账号：${matched.accounts.length} 个`,
+          `从文件提取：${matched.matchedCount} 个`,
+          `需手工录入：${matched.manualCount} 个`,
+          ...(skippedRowCount ? [`跳过无效行：${skippedRowCount} 行`] : [])
+        ]
+      });
+      return {
+        status: 'success',
+        fileName,
+        templateName: pendingPrompt.templateName || '',
+        skippedRowCount,
+        ...matched
+      };
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        return {
+          status: 'error',
+          errorCode: error.code,
+          message: error.message,
+          detailLines: Array.isArray(error.detailLines) ? error.detailLines : []
+        };
+      }
+      const logPath = appendLog(ensureStorageRoot(), error);
+      return {
+        status: 'error',
+        errorCode: 'BALANCE_IMPORT_RUNTIME',
+        message: '余额文件读取失败',
+        detailLines: [`日志文件：${logPath}`]
+      };
+    }
+  });
+
   // v3.2.16 模板管理【余额管理】：按渠道 / 普通模板查看余额种子，修改余额、删除单条种子。
   ipcMain.handle('balance-seed:list', (_event, owner) => {
     try {
@@ -17568,8 +17708,10 @@ function registerNewAccountHandlers() {
 
   const vccImportPlans = new Map();
   const vccImportPlanOwners = new WeakSet();
-  const { publicImportPlan, resolveImportPlan, planError: vccPlanError } = require('./backend/vcc-financial-op/workbook-import-plan');
-  ipcMain.handle('vccFinancialOp:import:pick-files', async (event) => {
+  const {
+    publicImportPlan, resolveImportPlan, collectChannelCorrections, planError: vccPlanError
+  } = require('./backend/vcc-financial-op/workbook-import-plan');
+  ipcMain.handle('vccFinancialOp:import:pick-files', async (event, payload = {}) => {
     const owner = event.sender;
     const selectionToken = {};
     vccImportPlans.set(owner.id, selectionToken);
@@ -17588,9 +17730,10 @@ function registerNewAccountHandlers() {
     }
     try {
       const sourceStructures = await resolveVccSourceStructures(getTemplateResourceService());
+      const targetMonth = payload && typeof payload.targetMonth === 'string' ? payload.targetMonth : null;
       const plan = await getVccFinancialOpService().inspectSelectedFiles(choice.filePaths, (progress) => {
         if (!owner.isDestroyed()) owner.send('vccFinancialOp:import:progress', progress);
-      }, sourceStructures);
+      }, sourceStructures, targetMonth);
       if (owner.isDestroyed() || vccImportPlans.get(owner.id) !== selectionToken) throw vccPlanError('vcc-import-plan-stale', '文件选择已更新，请重新预检');
       vccImportPlans.set(owner.id, plan);
       return { status: 'success', plan: publicImportPlan(plan) };
@@ -17619,6 +17762,7 @@ function registerNewAccountHandlers() {
       return {
         proceed: true,
         fileDescriptors,
+        channelCorrections: collectChannelCorrections(inspectedFiles),
         filePlan: {
           version: 1,
           allocation: 'eager',
@@ -17675,7 +17819,11 @@ function registerNewAccountHandlers() {
             members: metadata.vccSourceMembers });
         }
         const workerHandoffFiles = { version: 2, taskRunId: batchContext.taskRunId, files: frozenFiles };
-        const businessPayload = { targetMonth: payload.targetMonth, files: frozenFiles };
+        const businessPayload = {
+          targetMonth: payload.targetMonth,
+          files: frozenFiles,
+          channelCorrections: prepared.channelCorrections || []
+        };
         const result = await service.importSelectedFiles(businessPayload, (progress) => {
           if (event && event.sender && !event.sender.isDestroyed()) {
             event.sender.send('vccFinancialOp:import:progress', progress);
@@ -17719,9 +17867,9 @@ function registerNewAccountHandlers() {
     }
   });
 
-  ipcMain.handle('vccFinancialOp:run:preflight', (_event, payload = {}) => {
+  ipcMain.handle('vccFinancialOp:run:preflight', async (_event, payload = {}) => {
     try {
-      return getVccFinancialOpService().preflightRun(payload);
+      return await getVccFinancialOpService().preflightRun(payload);
     } catch (error) {
       return { status: 'error', message: error && error.message ? error.message : String(error) };
     }
@@ -17840,8 +17988,8 @@ function registerNewAccountHandlers() {
     return await getVccFinancialOpService().listImportMonths();
   });
 
-  ipcMain.handle('vccFinancialOp:imports:list-records', (_event, payload = {}) => {
-    return getVccFinancialOpService().listImportRecords(payload.yearMonth);
+  ipcMain.handle('vccFinancialOp:imports:list-records', async (_event, payload = {}) => {
+    return await getVccFinancialOpService().listImportRecords(payload.yearMonth);
   });
 
   ipcMain.handle('vccFinancialOp:data-manager:overview', (_event, payload = {}) => {
@@ -17916,11 +18064,11 @@ function registerNewAccountHandlers() {
     }
   );
 
-  ipcMain.handle('vccFinancialOp:data-manager:export-preview', (_event, payload = {}) => {
+  ipcMain.handle('vccFinancialOp:data-manager:export-preview', async (_event, payload = {}) => {
     try {
       return {
         status: 'success',
-        ...getVccFinancialOpService().previewDatasetExport(payload)
+        ...await getVccFinancialOpService().previewDatasetExport(payload)
       };
     } catch (error) {
       return { status: 'error', message: error && error.message ? error.message : String(error) };
@@ -17930,7 +18078,7 @@ function registerNewAccountHandlers() {
   trackedIpcHandle('vccFinancialOp:data-manager:export', 'VCC财务OP校验', '导出数据', {
     prepare: async (_event, payload = {}) => {
       try {
-        const inspection = getVccFinancialOpService().previewDatasetExport(payload);
+        const inspection = await getVccFinancialOpService().previewDatasetExport(payload);
         if (!inspection.exportable) {
           return {
             proceed: false,
@@ -23618,6 +23766,8 @@ async function initializeApplication() {
     darkModeScheduler = createDarkModeScheduler({
       readSchedule: () => database.getDarkModeSchedule(),
       writeSchedule: (config) => database.setDarkModeSchedule(config),
+      readLightness: () => database.getDarkModeLightness(),
+      writeLightness: (lightness) => database.setDarkModeLightness(lightness),
       nativeTheme,
       getWindows: () => BrowserWindow.getAllWindows(),
       focusSource: app,
@@ -24303,7 +24453,8 @@ function setupIdleCleanupTimer() {
   if (idleCleanupTimer) return; // 重入保护
   // v2.1.9 N1-settings：启动期从 settings 读阈值（默认 30）
   loadIdleCleanupMsFromSettings();
-  idleCleanupTimer = setInterval(observeBackgroundMemoryActivity(async () => {
+  // 收单空闲清理有自己的阈值（设置项，可大于 30 分钟）和多处提前返回；主库整理独立判断，不受其影响。
+  const runAcquiringIdleCleanupTick = async () => {
     const operation = businessOperationRegistry.begin({
       channel: 'background:idle-cleanup',
       moduleKey: '收单单据币种校验',
@@ -24392,6 +24543,13 @@ function setupIdleCleanupTimer() {
     } finally {
       businessOperationRegistry.end(operation.token);
     }
+  };
+  idleCleanupTimer = setInterval(observeBackgroundMemoryActivity(async () => {
+    await runAcquiringIdleCleanupTick();
+    // 收单空闲清理结束（含提前返回）后，再判断是否需要空闲整理主库（自带空闲、任务与磁盘条件，失败已记日志）。
+    try {
+      await idleDatabaseCompaction.maybeRun();
+    } catch (_compactionError) { /* 下次空闲再试 */ }
   }), IDLE_CHECK_INTERVAL_MS);
   if (idleCleanupTimer.unref) idleCleanupTimer.unref(); // 不阻塞退出
 }
@@ -24688,6 +24846,12 @@ function resumeApplicationAfterFailedRestart() {
 
 if (!packagedRuntimeModeSelected) {
   app.on('before-quit', (event) => {
+    // 空闲存储整理持有过渡租约；退出时先中止整理并等其收尾，再继续退出。
+    if (idleDatabaseCompaction.isRunning() && !quitPreparationComplete) {
+      event.preventDefault();
+      idleDatabaseCompaction.stop('quit').then(() => app.quit());
+      return;
+    }
     if (businessOperationRegistry.isInstallTransitionActive() && !quitPreparationComplete) {
       event.preventDefault();
       return;

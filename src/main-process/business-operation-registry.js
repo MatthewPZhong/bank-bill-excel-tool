@@ -23,7 +23,7 @@ function createBusinessOperationRegistry() {
       return {
         accepted: false,
         status: 'busy',
-        message: INSTALL_BUSY_MESSAGE
+        message: transitionLease.busyMessage || INSTALL_BUSY_MESSAGE
       };
     }
 
@@ -64,7 +64,11 @@ function createBusinessOperationRegistry() {
 
     const token = nextTransitionToken;
     nextTransitionToken += 1;
-    transitionLease = { owner: normalizedOwner, token };
+    // busyMessage：持有租约期间拒绝新任务时的提示（默认为升级提示，如空闲存储整理会传入自己的文案）。
+    const busyMessage = typeof options.busyMessage === 'string' && options.busyMessage.trim()
+      ? options.busyMessage.trim()
+      : INSTALL_BUSY_MESSAGE;
+    transitionLease = { owner: normalizedOwner, token, busyMessage };
     return { acquired: true, owner: normalizedOwner, token, operations };
   }
 

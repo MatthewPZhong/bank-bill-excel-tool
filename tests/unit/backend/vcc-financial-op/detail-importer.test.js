@@ -340,6 +340,11 @@ test('统一导入服务预登记多种原表后仍逐类完成有效提升', as
   assert.ok(sources.every((row) => Number(row.source_size_bytes) > 0));
   assert.deepEqual(sources.map((row) => Number(row.archive_artifact_id)), [1, 2]);
   assert.ok(sources.every((row) => row.archive_state === 'ready'));
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_raw_fallback').get().n,
+    0,
+    '来源已绑定存档原件时不再写入 raw fallback'
+  );
   assert.ok(result.records.every((record) => (
     record.archiveState === 'ready'
       && record.anomalyCount === 0
@@ -1467,6 +1472,50 @@ test('异常退出恢复不会把暂存行提升为有效事实', (t) => {
   `).all(recordId).map((row) => row.category).sort(), ['file_failure', 'invalid_key']);
 });
 
+test('TEMP 暂存随 worker 连接消失后，中断恢复保留检查点已持久化的读取行数并计为回滚', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-temp-staging-recover-'));
+  const dbPath = path.join(directory, 'tool-data.sqlite');
+  const worker = new DatabaseSync(dbPath);
+  worker.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(worker);
+  repository.createImportBatch(worker, { id: 'crashed', targetMonth: '2026-06', fileCount: 1 });
+  const recordId = repository.createImportRecord(worker, {
+    batchId: 'crashed', targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE, sourceFiles: ['x.xlsx']
+  });
+  const sourceId = repository.createImportSource(worker, recordId, {
+    sourceOrdinal: 1, fileName: 'x.xlsx', sha256: 'a'.repeat(64), sizeBytes: 1
+  });
+  repository.ensureImportStagingScratch(worker);
+  const insert = worker.prepare(`
+    INSERT INTO vcc_fin_op_import_staging_rows (
+      import_record_id, import_source_id, source_type, target_month, source_file, sheet_name, source_row,
+      raw_json, disposition, validation_field, validation_message
+    ) VALUES (?, ?, ?, '2026-06', 'x.xlsx', 'sheet1', ?, '[]', NULL, NULL, NULL)
+  `);
+  for (const row of [2, 3, 4]) insert.run(recordId, sourceId, SOURCE_TYPES.RECHARGE, row);
+  // 检查点：暂存行已提交到 TEMP 表，读取行数持久化到主库导入记录。
+  worker.prepare("UPDATE vcc_fin_op_import_records SET raw_count = 3 WHERE id = ? AND status = 'importing'").run(recordId);
+  worker.close();
+
+  const main = new DatabaseSync(dbPath);
+  // node:test 按注册顺序执行 after；Windows 上打开的库文件不能删除，删目录须在关库之后注册。
+  t.after(() => main.close());
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  main.exec('PRAGMA foreign_keys = ON');
+  assert.equal(main.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows').get().n, 0);
+  assert.equal(repository.recoverInterruptedImports(main), 1);
+  const record = repository.getImportRecord(main, recordId);
+  assert.equal(record.status, 'failed_validation');
+  assert.equal(record.raw_count, 3);
+  assert.equal(record.rolled_back_count, 3);
+  assert.equal(
+    record.raw_count,
+    record.inserted_count + record.skipped_count + record.invalid_key_count
+      + record.conflict_count + record.format_error_count + record.rolled_back_count
+  );
+  assert.equal(main.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 0);
+});
+
 test('直接升级会接管 v3.1.9 importing 宽行并转换 compact anomaly 后清理', (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());
@@ -1660,4 +1709,77 @@ test('异常退出恢复会收口没有导入记录的孤立批次', (t) => {
   const batch = db.prepare('SELECT status, error_message FROM vcc_fin_op_import_batches WHERE id = ?').get('orphan-batch');
   assert.equal(batch.status, 'failed');
   assert.match(batch.error_message, /异常退出/);
+});
+
+test('导入记录可导出异常数按账期批量统计与逐条口径一致', async (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  replaceEmptyEffectiveRowsWithSlimSchema(db);
+  const dir = tempDir(t);
+  const clean = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'clean.xlsx', [
+    rechargeRow({ 订单号: 'batch-count-ok' })
+  ]);
+  const dirty = writeSourceFile(dir, SOURCE_TYPES.FEE_FX, 'dirty.xlsx', [
+    rechargeRow({ 订单号: 'batch-count-fee-ok', 业务子类型: '手续费' }),
+    rechargeRow({ 订单号: 'batch-count-bad', 业务子类型: '手续费', 我方到账金额: 'abc' }),
+    rechargeRow({ 订单号: '', 业务子类型: '手续费' })
+  ]);
+  await importDetailBatch({
+    db,
+    targetMonth: '2026-06',
+    files: [fileEntry(clean, SOURCE_TYPES.RECHARGE), fileEntry(dirty, SOURCE_TYPES.FEE_FX)]
+  });
+  const batched = repository.countExportableImportAnomaliesByMonth(db, '2026-06');
+  const recordIds = db.prepare(`
+    SELECT id FROM vcc_fin_op_import_records WHERE target_month = '2026-06' ORDER BY id
+  `).all().map((row) => Number(row.id));
+  assert.equal(recordIds.length, 2);
+  for (const recordId of recordIds) {
+    assert.equal(batched.get(recordId), repository.countExportableImportAnomalies(db, recordId));
+  }
+  assert.deepEqual(recordIds.map((recordId) => batched.get(recordId)), [0, 2]);
+});
+
+test('导入暂存区 TEMP 表与主库中转表列定义一致', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  assert.equal(repository.ensureImportStagingScratch(db), true);
+  assert.equal(repository.ensureImportStagingScratch(db), false);
+  const shape = (schema) => db.prepare(`PRAGMA ${schema}.table_info(vcc_fin_op_import_staging_rows)`).all()
+    .map((column) => [column.name, column.type, column.notnull, column.dflt_value, column.pk]);
+  assert.deepEqual(shape('temp'), shape('main'));
+  const indexes = (schema) => db.prepare(`
+    SELECT name FROM ${schema}.sqlite_master
+    WHERE type = 'index' AND tbl_name = 'vcc_fin_op_import_staging_rows' AND sql IS NOT NULL
+    ORDER BY name
+  `).all().map((row) => row.name);
+  assert.deepEqual(indexes('temp'), indexes('main'));
+});
+
+test('生产导入的中转行只写入连接级 TEMP 暂存区，不进入主库', async (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const dir = tempDir(t);
+  const recharge = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'scratch.xlsx', [
+    rechargeRow({ 订单号: 'scratch-1' }),
+    rechargeRow({ 订单号: 'scratch-2' })
+  ]);
+  const files = [fileEntry(recharge, SOURCE_TYPES.RECHARGE)];
+  const result = await importFiles({
+    db,
+    batchId: 'scratch-staging',
+    targetMonth: '2026-06',
+    files,
+    archiveHandoffFiles: await archiveHandoffForFiles(files, 'scratch-staging')
+  });
+  assert.equal(result.status, 'success');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 2);
+  const tempSequence = db.prepare(`
+    SELECT seq FROM temp.sqlite_sequence WHERE name = 'vcc_fin_op_import_staging_rows'
+  `).get();
+  assert.equal(Number(tempSequence.seq), 2, '两行中转数据写入了 TEMP 暂存区');
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM main.sqlite_sequence WHERE name = 'vcc_fin_op_import_staging_rows'
+  `).get().n, 0, '主库中转表从未写入');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM temp.vcc_fin_op_import_staging_rows').get().n, 0);
 });

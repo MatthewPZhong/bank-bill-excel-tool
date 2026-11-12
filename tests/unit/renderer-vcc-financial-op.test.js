@@ -276,7 +276,9 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     const handleImportStart = moduleRenderer.indexOf('async function handleImport()');
     const handleImportEnd = moduleRenderer.indexOf('async function handleCancelImport()', handleImportStart);
     const handleImportSource = moduleRenderer.slice(handleImportStart, handleImportEnd);
-    assert.ok(handleImportSource.indexOf('api.onImportProgress') < handleImportSource.indexOf('api.pickFiles()'), '预检之前必须订阅进度');
+    const pickIndex = handleImportSource.indexOf('api.pickFiles({ targetMonth: month })');
+    assert.ok(pickIndex > 0, '选文件时传入导入账期，供预检找出可补录的通道明细行');
+    assert.ok(handleImportSource.indexOf('api.onImportProgress') < pickIndex, '预检之前必须订阅进度');
     assert.match(
       handleImportSource,
       /subscribeImportProgress\(\(progress\) => \{\s*const progressStatus = buildImportProgressStatus\(progress, state\.cancelRequested\);\s*if \(progressStatus\) setStatus\(progressStatus\.message, progressStatus\.tone\);\s*\}\)/
@@ -323,7 +325,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       assert.equal(main.includes(removedChannel), false, `main 不应保留 ${removedChannel}`);
     }
     assert.match(main, /await vccFinancialOpService\.terminate\(\)/);
-    assert.match(vccService, /return runWorker\('inspect-plan', \{ filePaths, sourceStructures \}/);
+    assert.match(vccService, /return runWorker\('inspect-plan', \{ filePaths, sourceStructures, targetMonth \}/);
     assert.match(vccService, /return runResultWriteWorker\(VCC_MUTATION_OPERATIONS\.DELETE_DATA_TARGET/);
     for (const serviceCall of [
       'listArchivedResultMonths', 'previewUnarchive', 'listImportMonths',
@@ -531,7 +533,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.ok(elapsed < 50, `1000 次缓存切换耗时 ${elapsed.toFixed(3)}ms`);
   });
 
-  test('解归档复用年月选择器、强制降级警示，并只在 pre-critical 开放取消', () => {
+  test('解归档复用年月选择器、级联时才要求删除确认，并只在 pre-critical 开放取消', () => {
     assert.match(moduleRenderer, /function createArchivedMonthPickerDialog\(/);
     assert.match(moduleRenderer, /title: actionLabel === '导出' \? '请选择要导出的月份' : '请选择月份'/);
     assert.match(moduleRenderer, /data-field="archive-year"[\s\S]*data-field="archive-month"/);
@@ -554,8 +556,12 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       ),
       /actionLabel: '删除'/
     );
-    assert.match(moduleRenderer, /解归档后只能由 v3\.1\.9 及以上版本继续维护/);
-    assert.match(moduleRenderer, /降级前必须恢复完整数据库备份/);
+    // v3.2.17：去掉版本确认勾选框；只有级联解归档（存在后续月份）时显示删除确认勾选。
+    assert.doesNotMatch(moduleRenderer, /解归档后只能由 v3\.1\.9 及以上版本继续维护/);
+    assert.doesNotMatch(moduleRenderer, /降级前必须恢复完整数据库备份/);
+    assert.match(moduleRenderer, /previewConfirmation: cascadeConfirmationLabel/);
+    assert.match(moduleRenderer, /我已了解：将删除 \$\{cascade\.months\.join\('、'\)\} 的结果和人工调整/);
+    assert.match(moduleRenderer, /confirmCascade: Boolean\(preview && preview\.cascade && preview\.cascade\.months\.length > 0\)/);
     assert.match(moduleRenderer, /data-field="archive-picker-confirm"/);
     assert.match(moduleRenderer, /confirmationSatisfied\(\)/);
     assert.match(moduleRenderer, /allowOperationCancel: true/);
@@ -1276,4 +1282,52 @@ test.describe('VCC 正式结果提交状态未知反馈', () => {
     });
     assert.equal(unarchive, '2026-06 解归档失败：结果文件的提交状态尚未确认；月份列表已刷新并切至 2026-05，请确认后重试');
   });
+});
+
+test('通道明细补录上限按单张 Sheet 计：超限 Sheet 只提示，其他 Sheet 仍可补录', () => {
+  const start = moduleRenderer.indexOf('const CHANNEL_CORRECTION_LIMIT');
+  const end = moduleRenderer.indexOf('function confirmImportPlan', start);
+  assert.ok(start >= 0 && end > start);
+  const shared = require('../../src/shared/vcc-channel-correction');
+  const build = Function(
+    'globalThis',
+    'escapeHtml',
+    'formatInteger',
+    `'use strict'; ${moduleRenderer.slice(start, end)}; return { correctionCandidatesOf, correctionSectionHtml };`
+  );
+  const { correctionCandidatesOf, correctionSectionHtml } = build(
+    { __vccChannelCorrection: shared },
+    (value) => String(value),
+    (value) => String(value)
+  );
+  const candidate = (sourceRow) => ({
+    sourceRow,
+    idempotencyKey: `channel-${sourceRow}`,
+    fields: { 借贷方向: 'in', 通道名称: 'CITI', 交易币种: 'USD', 交易金额: '' },
+    requiredFields: ['借贷方向', '通道名称', '交易币种', '交易金额'],
+    problems: [{ field: '交易金额', message: '交易金额不能为空' }]
+  });
+  const sheet = (sheetName, total, rows, truncated = false) => ({
+    status: 'ready', fileName: '通道.xlsx', sheetName,
+    channelCorrectionCandidates: { total, truncated, candidates: rows.map(candidate) }
+  });
+  const big = sheet('超限', 2001, [2, 3], true);
+  const small = sheet('少量', 1, [5]);
+  const bothUnderLimit = [sheet('A', 1000, [2]), sheet('B', 1001, [3])];
+
+  assert.deepEqual(correctionCandidatesOf([big, small]).map((entry) => entry.source.sheetName), ['少量']);
+  const mixed = correctionSectionHtml([big, small], '2026-06');
+  assert.equal(mixed.editable, true);
+  assert.match(mixed.html, /单张上限 2000 行[\s\S]*通道\.xlsx \/ 超限/);
+  assert.match(mixed.html, /data-correction-index="0"/);
+  assert.doesNotMatch(mixed.html, /data-correction-index="1"/);
+
+  const combined = correctionSectionHtml(bothUnderLimit, '2026-06');
+  assert.equal(combined.editable, true, '两张 Sheet 各自未超限，合计超过 2000 行仍可补录');
+  assert.equal(correctionCandidatesOf(bothUnderLimit).length, 2);
+  assert.doesNotMatch(combined.html, /单张上限/);
+
+  const onlyBig = correctionSectionHtml([big], '2026-06');
+  assert.equal(onlyBig.editable, false);
+  assert.match(onlyBig.html, /单张上限 2000 行/);
 });

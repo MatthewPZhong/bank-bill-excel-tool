@@ -453,7 +453,7 @@ async function run() {
     }, createOperationContext('vccFinancialOp:opening:initialize'));
     assertEq(opening.status, 'initialized', '首月九币种期初真实初始化成功');
 
-    const m1Preflight = service.preflightRun({ targetMonth: M1 });
+    const m1Preflight = await service.preflightRun({ targetMonth: M1 });
     assertEq(m1Preflight.ok, true, 'M1 计算预检通过');
     assertTrue(/^[a-f0-9]{64}$/.test(m1Preflight.inputFingerprint), 'M1 预检生成有效输入指纹');
     const m1Calculation = await service.calculate({
@@ -668,7 +668,7 @@ async function run() {
       M2,
       fixedBalances('100', { CNY: '110', USD: '107.25', EUR: '116' })
     );
-    const m2Preflight = service.preflightRun({ targetMonth: M2 });
+    const m2Preflight = await service.preflightRun({ targetMonth: M2 });
     assertEq(m2Preflight.ok, true, 'M2 在 M1 归档后预检通过');
     assertEq(m2Preflight.openingState.source, 'previous_archive', 'M2 期初来源明确为上月归档');
     const m2Calculation = await service.calculate({

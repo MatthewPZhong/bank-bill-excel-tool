@@ -358,3 +358,54 @@ test('导入时为用户结构的原件：原表页按导入时结构输出，�
   assert.ok(rechargeSheet, '充值清退原表页按导入时结构输出');
   assert.equal(rechargeSheet.getRow(1).values.includes('fee'), false);
 });
+
+test('通道明细预检补录：待确认表按补录记录核验原件血缘，并在原表行显示补录后的值', async (t) => {
+  const f = await createReviewFixture(t, { subjects: ['甲'], correctChannelAmount: true });
+  assert.equal(f.db.prepare('SELECT COUNT(*) n FROM vcc_fin_op_channel_corrections').get().n, 1);
+  const manifestPath = path.join(f.dir, 'manifest.sqlite'), outputPath = path.join(f.dir, 'review.xlsx');
+  await prepareReviewManifest({ ...f, manifestPath, appVersion: '3.2.17' });
+  await extractReviewSources({ manifestPath });
+  await writeReviewWorkbook({ filePath: outputPath, manifestPath, assetsDir: f.assetsDir });
+  await validateReviewWorkbook({ filePath: outputPath, manifestPath });
+  const book = new ExcelJS.Workbook(); await book.xlsx.readFile(outputPath);
+  const channel = book.worksheets.find((sheet) => sheet.getRow(1).values.includes('渠道订单号'));
+  const headers = channel.getRow(1).values;
+  assert.equal(String(channel.getCell(2, headers.indexOf('交易金额')).value), '3');
+  assert.equal(channel.getCell(2, headers.indexOf('渠道订单号')).value, 'channel-甲');
+});
+
+test('通道明细预检补录：原金额为无缓存值公式时，待确认表直接写补录值，不因原公式失败', async (t) => {
+  const f = await createReviewFixture(t, { subjects: ['甲'], correctChannelAmount: 'formula' });
+  const correction = f.db.prepare('SELECT field_name, original_value, corrected_value FROM vcc_fin_op_channel_corrections').all();
+  assert.deepEqual(correction.map((row) => ({ ...row })), [{ field_name: '交易金额', original_value: '', corrected_value: '3' }]);
+  const manifestPath = path.join(f.dir, 'manifest.sqlite'), outputPath = path.join(f.dir, 'review.xlsx');
+  await prepareReviewManifest({ ...f, manifestPath, appVersion: '3.2.17' });
+  await extractReviewSources({ manifestPath });
+  await writeReviewWorkbook({ filePath: outputPath, manifestPath, assetsDir: f.assetsDir });
+  await validateReviewWorkbook({ filePath: outputPath, manifestPath });
+  const book = new ExcelJS.Workbook(); await book.xlsx.readFile(outputPath);
+  const channel = book.worksheets.find((sheet) => sheet.getRow(1).values.includes('渠道订单号'));
+  const headers = channel.getRow(1).values;
+  assert.equal(String(channel.getCell(2, headers.indexOf('交易金额')).value), '3');
+});
+
+test('通道明细预检补录：用户模板改名“交易金额”时，待确认表按导入时列映射显示补录值', async (t) => {
+  const { SOURCE_TYPES: TYPES, getSourceDefinition } = require('../../../src/backend/vcc-financial-op/definitions');
+  const channelHeaders = getSourceDefinition(TYPES.CHANNEL).headers.map((h) => (h === '交易金额' ? '新交易金额' : h));
+  const f = await createReviewFixture(t, {
+    subjects: ['甲'],
+    correctChannelAmount: true,
+    sourceStructures: { [TYPES.CHANNEL]: { headers: channelHeaders, versionLabel: 'V2' } }
+  });
+  assert.equal(f.db.prepare('SELECT COUNT(*) n FROM vcc_fin_op_channel_corrections').get().n, 1);
+  const manifestPath = path.join(f.dir, 'manifest.sqlite'), outputPath = path.join(f.dir, 'review.xlsx');
+  await prepareReviewManifest({ ...f, manifestPath, appVersion: '3.2.17' });
+  await extractReviewSources({ manifestPath });
+  await writeReviewWorkbook({ filePath: outputPath, manifestPath, assetsDir: f.assetsDir });
+  await validateReviewWorkbook({ filePath: outputPath, manifestPath });
+  const book = new ExcelJS.Workbook(); await book.xlsx.readFile(outputPath);
+  const channel = book.worksheets.find((sheet) => sheet.getRow(1).values.includes('渠道订单号'));
+  const headers = channel.getRow(1).values;
+  assert.equal(headers.includes('交易金额'), false);
+  assert.equal(String(channel.getCell(2, headers.indexOf('新交易金额')).value), '3');
+});

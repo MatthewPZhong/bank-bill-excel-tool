@@ -305,6 +305,7 @@
   - 改字段名 `conditionsLogic` → 所有 scenario 持久化 JSON 失效 + 老用户配置回退到默认
   - 改值域字符串（'AND'/'OR' → 'AND_MODE'/'OR_MODE'）→ 同上失效
   - 必跑：smoke c1 AND/OR 切换 + 新建场景 dialog 默认 AND radio 选中（preview F1 截图）+ 老 scenario 编辑 OR radio 选中（兼容性）
+  - **v3.2.17 自带提取场景 FundType 门控**：「从银行对账单的信息里提取调拨订单对账ID」（builtin-fixed + extractByFeature）在 `scenario-engines/index.js` `builtinExtractRowGate` 先过前置门控，再走 12 个 OR 条件——非 DBS 行要求 `FundType` trim 后恰好为 `FundTransfer-in` / `FundTransfer-out`（区分大小写）；`Channel` trim 后为 `DBS` 的行不受限（R3.5 DBS-Charge 靠这些行的对账ID归组）。门控不在 config 里、不经迁移；被挡掉的行不锁定，仍交给后续场景。不能把 FundType 作为第 13 个条件追加（共用 OR 会放宽而非收紧）。必跑：`scenario-dispatcher-builtin-fixed.test.js` + `scripts/integration/bank-statement-builtin-extract-fundtype-gate.js`
 
 ### `findBestAmountSubset`（v2.1.8 F5 新增 Critical ⚠️ 资金红线 — C4 manyToOne subset-sum 核心）
 - 定义：`src/main-process/scenario-engines/c4-recon-id-fix.js:298` `function findBestAmountSubset(candidates, targetCents, mainBillDate, options = {})`

@@ -288,8 +288,10 @@ function setupUserActivityReporter() {
       window.desktopApi.app.reportUserActivity();
     } catch (_e) { /* swallow，main idle 误判由 mutex 兜底 */ }
   };
+  // window 捕获阶段最先收到事件：弹窗在 document 捕获阶段对 Tab/Escape 等调用 stopPropagation，
+  // 冒泡阶段监听会漏报，导致空闲存储整理等以用户活动为准的逻辑误判为仍空闲。
   ['mousemove', 'keydown', 'click', 'wheel', 'touchstart'].forEach((evt) => {
-    window.addEventListener(evt, report, { passive: true, signal: shellAbort.signal });
+    window.addEventListener(evt, report, { passive: true, capture: true, signal: shellAbort.signal });
   });
 }
 
@@ -699,7 +701,7 @@ const { createAppUpdateSettingsDialog, createArchiveCenterPreviewApi } = window.
   modalBridge,
   modules: MODULES,
   ui: { escapeHtml, createConfirmDialog, getDarkModeController,
-    mountAppearanceSettings: (panel, controller) => window.DarkModeUI.mountSettings(panel, controller),
+    mountAppearanceSettings: (panel, controller, options) => window.DarkModeUI.mountSettings(panel, controller, options),
     mountTemplateFiles: (pane, options) => templateFilesDialogs.mountTemplateFiles(pane, options),
     mountBankAccounts: (pane, options) => bankAccountsDialogs.mountBankAccounts(pane, options),
     applyAppUpdateActionResult, applyAppUpdateStatus,
@@ -1210,9 +1212,9 @@ function pickBackgroundColorFromClientPoint(clientX, clientY) {
 function buildBackgroundStyle(backgroundSettings) {
   const normalized = cloneBackgroundSettings(backgroundSettings);
   if (document.documentElement.dataset.theme === 'dark' && !normalized.imageDataUrl) {
-    // 深色主题使用自己的底色，不在浅色渐变或自定义图片上叠加遮罩。
+    // 深色主题使用自己的底色（随深浅度变化），不在浅色渐变或自定义图片上叠加遮罩。
     return {
-      backgroundColor: '#111419',
+      backgroundColor: 'var(--bg)',
       backgroundImage: 'none',
       backgroundSize: 'auto',
       backgroundPosition: 'center',
@@ -1277,7 +1279,7 @@ function applyBackgroundSettings(backgroundSettings) {
   elements.appShell.style.backgroundPosition = style.backgroundPosition;
   elements.appShell.style.backgroundRepeat = style.backgroundRepeat;
   document.body.style.background = document.documentElement.dataset.theme === 'dark'
-    ? '#111419' : rgbToCss(mixColor(normalized.colorHex, '#ffffff', 0.74));
+    ? 'var(--bg)' : rgbToCss(mixColor(normalized.colorHex, '#ffffff', 0.74));
   updateBackgroundControls(normalized);
 }
 

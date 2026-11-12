@@ -182,6 +182,7 @@ test('unarchive/delete 公共入口复用同一 dedicated worker 与 generation 
     expectedPayload: {
       targetMonth: '2026-06',
       expectedPreviewToken: `v2:${'b'.repeat(64)}`,
+      confirmCascade: false,
       operationContext: OPERATION_CONTEXT,
       taskGeneration: 0,
       appVersion: null,

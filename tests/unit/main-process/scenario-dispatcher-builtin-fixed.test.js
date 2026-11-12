@@ -61,8 +61,16 @@ function makeBuiltinFixedScenario({ id = 100, applicableChannelIds = null } = {}
   };
 }
 
-function makeBankRow({ rowId, channel, location, customerRef, recon = '' }) {
-  return { _rowId: rowId, Channel: channel, 地区: location, CustomerRef: customerRef, ReconciliationId: recon };
+// v3.2.17：自带提取场景只处理 FundType=FundTransfer-in/out（DBS 除外）的行；既有用例默认给调拨行。
+function makeBankRow({ rowId, channel, location, customerRef, recon = '', fundType = 'FundTransfer-in' }) {
+  return {
+    _rowId: rowId,
+    Channel: channel,
+    地区: location,
+    CustomerRef: customerRef,
+    ReconciliationId: recon,
+    FundType: fundType
+  };
 }
 
 test.beforeEach(() => {
@@ -231,5 +239,84 @@ test.describe('P2-3 run 路径 builtin-fixed displayIndex 对齐 manager（端�
     const oldOrder = [...list].sort((a, b) => (b.priority - a.priority) || (a.id - b.id));
     const oldDiOfBf = oldOrder.findIndex((s) => s.id === bf.id) + 1;
     assert.ok(oldDiOfBf > 1, `旧口径 builtin-fixed displayIndex=${oldDiOfBf}（>1）→ 修复把它纠正为 1`);
+  });
+});
+
+// v3.2.17：自带提取场景的 FundType 前置门控（DBS 除外）
+test.describe('v3.2.17 builtin-fixed 提取调拨订单对账ID 限 FundType', () => {
+  const FT_ID = 'AFT123456789012';
+
+  function runBuiltin(rows) {
+    return runScenario(makeBuiltinFixedScenario(), rows);
+  }
+
+  test('FundType=FundTransfer-in / FundTransfer-out（含首尾空格）→ 提取', () => {
+    const rows = [
+      makeBankRow({ rowId: 'in', channel: '工商', location: '上海', customerRef: FT_ID, fundType: 'FundTransfer-in' }),
+      makeBankRow({ rowId: 'out', channel: '工商', location: '上海', customerRef: FT_ID, fundType: 'FundTransfer-out' }),
+      makeBankRow({ rowId: 'padded', channel: '工商', location: '上海', customerRef: FT_ID, fundType: ' FundTransfer-out ' })
+    ];
+    const result = runBuiltin(rows);
+    assert.deepStrictEqual([...result.lockedRowIds].sort(), ['in', 'out', 'padded']);
+    rows.forEach((row) => assert.strictEqual(row.ReconciliationId, FT_ID));
+  });
+
+  test('非调拨 FundType（含相近写法）→ 不提取、不锁定、不改 ReconciliationId', () => {
+    const fundTypes = ['Inbound', 'outbound', 'Charge', '', 'InternelFundTransfer-in', 'InternelFundTransfer-out',
+      'FundTransfer-in&FX', 'Fundtransfer-out&FX', 'fundtransfer-in', 'FUNDTRANSFER-OUT'];
+    const rows = fundTypes.map((fundType, index) => makeBankRow({
+      rowId: `r${index}`, channel: '工商', location: '上海', customerRef: FT_ID, recon: 'OLD', fundType
+    }));
+    rows.push({ _rowId: 'missing', Channel: '工商', CustomerRef: FT_ID, ReconciliationId: 'OLD' });
+    const result = runBuiltin(rows);
+    assert.strictEqual(result.lockedRowIds.size, 0);
+    assert.deepStrictEqual(result.modifications, []);
+    rows.forEach((row) => assert.strictEqual(row.ReconciliationId, 'OLD'));
+  });
+
+  test('Channel=DBS（trim 后精确匹配）不受 FundType 限制；dbs 小写不算 DBS', () => {
+    const rows = [
+      makeBankRow({ rowId: 'dbs-charge', channel: 'DBS', location: '新加坡', customerRef: FT_ID, fundType: 'Charge' }),
+      makeBankRow({ rowId: 'dbs-blank', channel: ' DBS ', location: '新加坡', customerRef: FT_ID, fundType: '' }),
+      makeBankRow({ rowId: 'dbs-lower', channel: 'dbs', location: '新加坡', customerRef: FT_ID, fundType: 'outbound' })
+    ];
+    const result = runBuiltin(rows);
+    assert.deepStrictEqual([...result.lockedRowIds].sort(), ['dbs-blank', 'dbs-charge']);
+    assert.strictEqual(rows[2].ReconciliationId, '');
+  });
+
+  test('被门控挡掉的行不锁定，first-match-wins 下后续场景仍可命中', () => {
+    const builtin = makeBuiltinFixedScenario({ id: 100 });
+    const later = {
+      id: 200,
+      name: '后续普通提取',
+      category: 'extract-recon-id',
+      priority: 0,
+      enabled: true,
+      channelId: 1,
+      displayIndex: 2,
+      config: {
+        conditions: [{ field: 'CustomerRef', op: '包含', value: 'FT' }],
+        extractByFeature: null,
+        extractByOtherField: { field: 'CustomerRef' }
+      }
+    };
+    const rows = [
+      makeBankRow({ rowId: 'inbound', channel: '工商', location: '上海', customerRef: FT_ID, fundType: 'Inbound' }),
+      makeBankRow({ rowId: 'transfer', channel: '工商', location: '上海', customerRef: FT_ID, fundType: 'FundTransfer-out' })
+    ];
+    const result = runAllScenarios(rows, null, [builtin, later], makeDeps());
+    const hitById = new Map(result.modifiedRows.map((row) => [row._rowId, row._hitScenarioId]));
+    assert.strictEqual(hitById.get('transfer'), 100, '调拨行由自带场景命中');
+    assert.strictEqual(hitById.get('inbound'), 200, '非调拨行留给后续场景');
+    assert.strictEqual(result.modifiedRows.length + result.unmatchedRows.length, rows.length, '行数守恒');
+  });
+
+  test('用户自建的 extract-recon-id 提取场景不受 FundType 门控影响', () => {
+    const userScenario = { ...makeBuiltinFixedScenario(), category: 'extract-recon-id' };
+    const rows = [makeBankRow({ rowId: 'inbound', channel: '工商', location: '上海', customerRef: FT_ID, fundType: 'Inbound' })];
+    const result = runScenario(userScenario, rows);
+    assert.deepStrictEqual([...result.lockedRowIds], ['inbound']);
+    assert.strictEqual(rows[0].ReconciliationId, FT_ID);
   });
 });

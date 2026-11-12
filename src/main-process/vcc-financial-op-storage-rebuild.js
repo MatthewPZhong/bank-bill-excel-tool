@@ -12,6 +12,7 @@ const {
   VCC_STORAGE_GUARD_TRIGGER_PREFIX,
   assertVccStorageContract,
   createSlimEffectiveRowsTable,
+  ensureVccChannelCorrectionsTable,
   setVccStorageContractVersion
 } = require('../backend/vcc-financial-op-db/storage-contract');
 
@@ -1611,6 +1612,9 @@ function buildVccStorageCandidate(options) {
       resetVccData ? '保留非 VCC 与 Archive 证据' : '刷新血缘状态'
     );
     createSecondarySchema(sourceDb, targetDb);
+    // v3.2.17 新增受保护表（通道补录记录）：旧 v1 源库没有，按当前结构在候选库补建空表，
+    // 写保护由下面的合同安装器随其他受保护表一并安装；源库不变。
+    ensureVccChannelCorrectionsTable(targetDb);
     // 保留旧 COW 的 v1 → v2 中间步骤，由合同安装器继续升级至 v3。
     setVccStorageContractVersion(targetDb, VCC_STORAGE_CONTRACT_VERSION);
     const userVersion = pragmaValue(sourceDb, 'user_version');

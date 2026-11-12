@@ -98,6 +98,8 @@ function createStore(value) {
 test('preload acknowledgeReleaseNotes 透传版本到确认通道', async () => {
   const calls = [];
   const api = vm.runInNewContext(`(${preloadSettingsSource()})`, {
+    // settings 组引用 preload 顶层解析出的首帧深浅度（v3.2.17）。
+    INITIAL_DARK_MODE_LIGHTNESS: 0,
     ipcRenderer: {
       invoke: (...args) => { calls.push(args); return Promise.resolve(args[0]); },
       on: () => {},

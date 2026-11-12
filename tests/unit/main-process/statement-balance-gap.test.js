@@ -1785,3 +1785,71 @@ test('主进程：导出全部余额阻断时渠道组按渠道名列出失败�
   assert.equal(result.status, 'error');
   assert.deepEqual(result.detailLines, ['中行渠道-上海：2026-11-01 未找到期末余额']);
 });
+
+// v3.2.17：补录余额「导入余额文件」所需的待补录账号清单
+test('scanBalanceSeedStatus 返回待补录账号清单：按账号、币种排序（与逐个提示顺序一致），已有更早种子的账号不在内', (t) => {
+  const root = createTempRoot(t);
+  upsertBalanceSeedRecord(root, {
+    templateName: TEMPLATE_NAME,
+    merchantId: 'M002',
+    currency: 'USD',
+    billDate: '2026-09-29',
+    endBalance: 10
+  });
+  const status = scanStatementBalanceSeedStatus({
+    templateName: TEMPLATE_NAME,
+    detailRows: detailRows([
+      ['2026-10-02', 'M003', 'USD', '1', ''],
+      ['2026-10-01', 'M002', 'USD', '1', ''],
+      ['2026-10-03', 'M001', 'USD', '1', ''],
+      ['2026-10-01', 'M001', 'EUR', '1', ''],
+      ['2026-10-02', 'M001', 'USD', '1', '']
+    ])
+  }, root);
+  assert.equal(status.missing, 3);
+  assert.deepEqual(status.missingAccounts, [
+    { merchantId: 'M001', currency: 'EUR', targetBillDate: '2026-10-01' },
+    { merchantId: 'M001', currency: 'USD', targetBillDate: '2026-10-02' },
+    { merchantId: 'M003', currency: 'USD', targetBillDate: '2026-10-02' }
+  ]);
+});
+
+// v3.2.17：导入余额文件后逐个保存时请求带目标账号，与当前待补录账号不一致即拒绝（不写到别的账号）
+test('补录请求带的账号与当前待补录账号不一致时拒绝，不生成写入计划；一致或不带账号照常', (t) => {
+  const storageRoot = createTempRoot(t);
+  const pendingPrompt = { templateName: TEMPLATE_NAME, merchantId: 'M001', currency: 'USD', targetBillDate: '2026-09-02' };
+  const prepare = (payload) => prepareManualBalanceSeedSubmission({
+    payload,
+    pendingPrompt,
+    importContext: { scope: 'current', template: { name: TEMPLATE_NAME } },
+    storageRoot,
+    session: null,
+    createContextId: () => 'unused',
+    createFreshnessGuard: () => ({ inputFilePaths: ['/tmp/source.xlsx'], assertFresh() {} })
+  }).prepared;
+
+  for (const account of [
+    { merchantId: 'M002', currency: 'USD' },
+    { merchantId: 'M001', currency: 'EUR' },
+    { merchantId: 'M001' },
+    { merchantId: 'M001', currency: 'USD', templateName: '工行-北京' },
+    { templateName: '工行-北京' }
+  ]) {
+    const rejected = prepare({ billDate: '2026-09-01', endBalance: '100', ...account });
+    assert.equal(rejected.proceed, false);
+    assert.equal(rejected.result.errorCode, 'BALANCE_SEED_ACCOUNT_CHANGED');
+    assert.equal(rejected.plan, undefined);
+    // 带回当前待补录提示，渲染层按当前账号重新打开补录
+    assert.equal(rejected.result.status, 'manual-balance-invalid');
+    assert.equal(rejected.result.manualBalancePromptReady, true);
+    assert.deepEqual(rejected.result.manualBalancePrompt, pendingPrompt);
+  }
+  const sameGroup = prepare({ billDate: '2026-09-01', endBalance: '100', merchantId: 'M001', currency: 'USD', templateName: TEMPLATE_NAME });
+  assert.equal(sameGroup.proceed, true);
+  const matched = prepare({ billDate: '2026-09-01', endBalance: '100', merchantId: ' M001 ', currency: 'USD' });
+  assert.equal(matched.proceed, true);
+  assert.deepEqual([matched.plan.record.merchantId, matched.plan.record.currency, matched.plan.record.endBalance], ['M001', 'USD', 100]);
+  const manual = prepare({ billDate: '2026-09-01', endBalance: '100' });
+  assert.equal(manual.proceed, true);
+  assert.equal(manual.plan.record.merchantId, 'M001');
+});

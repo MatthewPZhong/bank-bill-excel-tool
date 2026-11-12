@@ -415,7 +415,9 @@ async function run() {
     );
 
     const m1Blocked = await service.previewUnarchive({ targetMonth: M1 });
-    assertEq(m1Blocked.code, 'unarchive-not-tail', 'M1 preview 因 M2 依赖阻断');
+    // v3.2.17：非尾月改为级联解归档，预览可执行并列出将删除结果的后续月份。
+    assertEq(m1Blocked.canUnarchive, true, 'M1 preview 改为可级联解归档');
+    assertDeepEq(m1Blocked.cascade && m1Blocked.cascade.months, [M2], 'M1 preview 列出将删除结果的 M2');
     assertDeepEq(m1Blocked.dependentMonths, [M2], 'M1 preview 明确返回依赖月份 M2');
     const m1BlockedError = await expectCode(
       () => service.unarchiveMonth({
@@ -423,8 +425,8 @@ async function run() {
         expectedPreviewToken: m1Blocked.previewToken,
         taskGeneration: m1Blocked.taskGeneration
       }, undefined, createOperationContext('vccFinancialOp:run:unarchive')),
-      'unarchive-not-tail',
-      'M1 worker 二次门禁继续阻断非尾月'
+      'unarchive-cascade-confirmation-required',
+      'M1 未确认级联时 worker 二次门禁拒绝执行'
     );
     assertDeepEq(m1BlockedError && m1BlockedError.dependentMonths, [M2], 'worker 错误保留依赖月份');
     assertEq(
@@ -433,9 +435,9 @@ async function run() {
       'M1 阻断后 run 保持 archived'
     );
     assertEq(
-      operationAudits(db, M1, 'unarchive').filter((row) => row.status === 'rolled_back').length,
+      operationAudits(db, M1, 'unarchive_cascade').filter((row) => row.status === 'rolled_back').length,
       1,
-      'M1 非尾阻断写入 rolled_back 审计'
+      'M1 未确认级联写入 rolled_back 审计'
     );
 
     const m2Preview = await service.previewUnarchive({ targetMonth: M2 });
@@ -553,8 +555,13 @@ async function run() {
     const m1UnarchiveAudits = operationAudits(db, M1, 'unarchive');
     assertDeepEq(
       m1UnarchiveAudits.map((row) => row.status),
-      ['rolled_back', 'success'],
-      'M1 解归档审计完整记录阻断与成功'
+      ['success'],
+      'M1 手工逐月解归档成功审计'
+    );
+    assertDeepEq(
+      operationAudits(db, M1, 'unarchive_cascade').map((row) => row.status),
+      ['rolled_back'],
+      'M1 未确认的级联尝试保留 rolled_back 审计'
     );
     const m1OpeningAudits = operationAudits(db, M1, 'delete_opening_initialization');
     assertEq(m1OpeningAudits.length, 1, 'M1 期初删除仅留一条成功审计');

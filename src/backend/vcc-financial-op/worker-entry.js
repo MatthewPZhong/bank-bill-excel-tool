@@ -30,10 +30,28 @@ function openDb(dbPath) {
     PRAGMA foreign_keys = ON;
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;
+    PRAGMA cache_size = -65536;
+    PRAGMA temp_store = MEMORY;
     PRAGMA busy_timeout = 30000;
   `);
   ensureVccFinancialOpTablesSupport(db);
   return db;
+}
+
+// 大批量导入会把 WAL 撑到 GB 级；提交后截断，失败不影响导入结果（对齐 big-table-import）。
+function truncateWal(db) {
+  try {
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+  } catch (error) {
+    parentPort.postMessage({
+      type: 'diagnostic',
+      diagnostic: {
+        operation: 'vcc-import-wal-checkpoint',
+        code: error && error.code ? error.code : 'wal-checkpoint-failed',
+        message: error && error.message ? error.message : String(error)
+      }
+    });
+  }
 }
 
 async function run() {
@@ -56,7 +74,11 @@ async function run() {
   const inspectionOptions = { shouldCancel: () => cancelRequested,
     onProgress: (progress) => parentPort.postMessage({ type: 'progress', progress }) };
   if (action === 'inspect-plan') {
-    return inspectWorkbookImportPlan(payload.filePaths, { ...inspectionOptions, sourceStructures: payload.sourceStructures || null });
+    return inspectWorkbookImportPlan(payload.filePaths, {
+      ...inspectionOptions,
+      sourceStructures: payload.sourceStructures || null,
+      targetMonth: payload.targetMonth || null
+    });
   }
   if (action === 'revalidate-plan') { await revalidateImportPlan(payload.plan, inspectionOptions); return { valid: true }; }
   const db = openDb(workerData.dbPath);
@@ -65,12 +87,16 @@ async function run() {
       return await inspectFiles(payload.filePaths);
     }
     if (action === 'import') {
-      return await importFiles({
-        db,
-        ...payload,
-        shouldCancel: () => cancelRequested,
-        onProgress: (progress) => parentPort.postMessage({ type: 'progress', progress })
-      });
+      try {
+        return await importFiles({
+          db,
+          ...payload,
+          shouldCancel: () => cancelRequested,
+          onProgress: (progress) => parentPort.postMessage({ type: 'progress', progress })
+        });
+      } finally {
+        truncateWal(db);
+      }
     }
     if (action === 'calculate') {
       return calculateMonth({ db, ...payload });

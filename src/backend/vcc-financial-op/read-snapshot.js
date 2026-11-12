@@ -5,6 +5,8 @@ const {
   SOURCE_LABELS
 } = require('./definitions');
 const { normalizeYearMonth } = require('./row-mapper');
+const repository = require('../vcc-financial-op-db/repository');
+const { preflightCalculation } = require('./calculator');
 const { buildArchiveEvidenceV2 } = require('./archive-evidence');
 const {
   ARCHIVE_CONTRACTS,
@@ -12,7 +14,7 @@ const {
 } = require('./archive-contract');
 const {
   UNARCHIVE_GATE_VERSION,
-  evaluateUnarchiveGate
+  evaluateCascadeUnarchiveGate
 } = require('./unarchive-gate');
 const {
   sha256,
@@ -31,7 +33,24 @@ const ARCHIVE_CANDIDATE_SQL = `
   SELECT target_month FROM vcc_fin_op_datasets WHERE data_status = 'archived'
 `;
 
+// 有效行按月份索引逐月跳跃取月份（每月一次索引查找），不再对整张有效行表去重。
 const ACTIVE_MONTHS_SQL = `
+  WITH RECURSIVE effective_months(target_month) AS (
+    SELECT (
+      SELECT MIN(fact.target_month)
+      FROM vcc_fin_op_effective_rows AS fact
+        INDEXED BY idx_vcc_fin_op_effective_month_source
+    )
+    UNION ALL
+    SELECT (
+      SELECT MIN(fact.target_month)
+      FROM vcc_fin_op_effective_rows AS fact
+        INDEXED BY idx_vcc_fin_op_effective_month_source
+      WHERE fact.target_month > effective_months.target_month
+    )
+    FROM effective_months
+    WHERE effective_months.target_month IS NOT NULL
+  )
   SELECT target_month FROM vcc_fin_op_datasets
   UNION SELECT target_month FROM vcc_fin_op_runs
   UNION SELECT target_month FROM vcc_fin_op_archives
@@ -45,7 +64,7 @@ const ACTIVE_MONTHS_SQL = `
        status IN ('success', 'success_with_skips', 'all_skipped')
        AND dataset_deleted_at IS NULL
      )
-  UNION SELECT target_month FROM vcc_fin_op_effective_rows
+  UNION SELECT target_month FROM effective_months WHERE target_month IS NOT NULL
   UNION SELECT target_month FROM vcc_fin_op_system_snapshots
   ORDER BY target_month DESC
 `;
@@ -162,7 +181,8 @@ function loadArchiveEvidenceSet(db, { targetMonth = null, trace = null } = {}) {
            adjustment.category_major, adjustment.category_minor,
            adjustment.currency, adjustment.adjustment_amount,
            adjustment.reason, adjustment.sequence, adjustment.created_at,
-           adjustment.created_app_version, adjustment.created_build_sha
+           adjustment.created_app_version, adjustment.created_build_sha,
+           adjustment.adjustment_cycle
     FROM vcc_fin_op_run_adjustments adjustment
     JOIN vcc_fin_op_runs run ON run.id = adjustment.run_id
     JOIN candidate_months candidate ON candidate.target_month = run.target_month
@@ -184,14 +204,17 @@ function loadArchiveEvidenceSet(db, { targetMonth = null, trace = null } = {}) {
     GROUP BY run.target_month
     ORDER BY run.target_month DESC
   `), relation.params);
+  // 仅旧 v3.1.7 合同判定“是否存在” Pending 有效行；按存在性取 0/1，不再对每个归档月全量计数。
   const pendingEffectiveCounts = executeQuery(db, trace, 'archive-pending-effective-facts', withCandidates(relation, `
-    SELECT candidate.target_month, COUNT(*) AS row_count
+    SELECT candidate.target_month, 1 AS row_count
     FROM candidate_months candidate
-    CROSS JOIN vcc_fin_op_effective_rows fact
-      INDEXED BY idx_vcc_fin_op_effective_month_source
-    WHERE fact.target_month = candidate.target_month
-      AND fact.source_type = 'pending_archive_removal'
-    GROUP BY candidate.target_month
+    WHERE EXISTS (
+      SELECT 1
+      FROM vcc_fin_op_effective_rows fact
+        INDEXED BY idx_vcc_fin_op_effective_month_source
+      WHERE fact.target_month = candidate.target_month
+        AND fact.source_type = 'pending_archive_removal'
+    )
     ORDER BY candidate.target_month DESC
   `), relation.params);
 
@@ -278,7 +301,8 @@ function loadArchiveEvidenceSet(db, { targetMonth = null, trace = null } = {}) {
       sequence: Number(row.sequence),
       createdAt: row.created_at,
       createdAppVersion: row.created_app_version,
-      createdBuildSha: row.created_build_sha
+      createdBuildSha: row.created_build_sha,
+      adjustmentCycle: Number(row.adjustment_cycle) || 0
     });
   }
   for (const row of runBalances) {
@@ -341,11 +365,12 @@ function loadUnarchiveGateEvidence(db, targetMonth, {
   taskActive,
   trace = null
 }) {
+  // 只看目标月的进行中批次（spec D3）；导入运行期间全局单任务租约仍会挡住解归档。
   const activeBatches = executeQuery(db, trace, 'unarchive-active-batches', `
     SELECT id FROM vcc_fin_op_import_batches
-    WHERE status = 'importing'
+    WHERE status = 'importing' AND target_month = ?
     ORDER BY id
-  `);
+  `, [targetMonth]);
   const importRecords = executeQuery(db, trace, 'unarchive-import-gate', `
     SELECT id, status
     FROM vcc_fin_op_import_records
@@ -422,7 +447,7 @@ function previewUnarchiveSnapshot(db, {
     taskActive,
     trace
   });
-  const gate = evaluateUnarchiveGate(archiveContract, gateEvidence);
+  const gate = evaluateCascadeUnarchiveGate(archiveContract, gateEvidence);
   const token = buildOperationTokenV2({
     action: 'unarchive',
     targetMonth: month,
@@ -444,10 +469,33 @@ function previewUnarchiveSnapshot(db, {
     canEnumerate: canReadArchive,
     canExport: canReadArchive,
     canUnarchive: gate.canUnarchive,
+    cascade: gate.cascade ? loadCascadePreview(db, month, gate.dependentMonths, trace) : null,
     code: gate.code,
     message: gate.message,
     previewToken: token ? token.previewToken : null,
     taskGeneration: Number(taskGeneration)
+  });
+}
+
+// 级联解归档预览：列出将删除结果的后续月份及其人工调整条数，供确认。
+function loadCascadePreview(db, targetMonth, dependentMonths, trace = null) {
+  const runs = executeQuery(db, trace, 'unarchive-cascade-runs', `
+    SELECT run.id, run.target_month, run.status,
+           (SELECT COUNT(*) FROM vcc_fin_op_run_adjustments adjustment
+            WHERE adjustment.run_id = run.id) AS adjustment_count
+    FROM vcc_fin_op_runs run
+    WHERE run.target_month > ?
+    ORDER BY run.target_month, run.id
+  `, [targetMonth]).map((row) => Object.freeze({
+    runId: Number(row.id),
+    targetMonth: String(row.target_month),
+    status: String(row.status),
+    adjustmentCount: Number(row.adjustment_count) || 0
+  }));
+  return Object.freeze({
+    months: Object.freeze([...dependentMonths]),
+    runs: Object.freeze(runs),
+    adjustmentCount: runs.reduce((total, run) => total + run.adjustmentCount, 0)
   });
 }
 
@@ -457,6 +505,30 @@ function listActiveMonthsSnapshot(db, { taskGeneration = 0, trace = null } = {})
     months: Object.freeze(rows.map((row) => String(row.target_month))),
     taskGeneration: Number(taskGeneration)
   });
+}
+
+// 校验原表导入记录：列表与可导出异常数在只读 worker 内一次取齐，避免主进程同步与逐条计数。
+function listImportRecordsSnapshot(db, { yearMonth, trace = null } = {}) {
+  const month = normalizeMonth(yearMonth);
+  const records = executeQuery(db, trace, 'import-records', `
+    SELECT r.*, b.file_count AS batch_file_count
+    FROM vcc_fin_op_import_records r
+    JOIN vcc_fin_op_import_batches b ON b.id = r.batch_id
+    WHERE r.target_month = ?
+    ORDER BY r.started_at DESC, r.id DESC
+  `, [month]);
+  const anomalyCounts = repository.countExportableImportAnomaliesByMonth(db, month);
+  return Object.freeze({
+    records: Object.freeze(records.map((record) => Object.freeze({
+      ...record,
+      exportable_anomaly_count: anomalyCounts.get(Number(record.id)) || 0
+    })))
+  });
+}
+
+function preflightCalculationSnapshot(db, { targetMonth, taskActive = false } = {}) {
+  const month = normalizeMonth(targetMonth);
+  return Object.freeze({ preflight: preflightCalculation(db, month), taskActive: Boolean(taskActive) });
 }
 
 function loadDeleteEvidenceV2(db, {
@@ -812,6 +884,8 @@ module.exports = {
   loadUnarchiveGateEvidence,
   previewUnarchiveSnapshot,
   listActiveMonthsSnapshot,
+  listImportRecordsSnapshot,
+  preflightCalculationSnapshot,
   loadDeleteEvidenceV2,
   deletePreviewForTarget,
   listDeleteTargetsSnapshot,

@@ -440,6 +440,7 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
   'staging-preflight-only': Object.freeze([
     'bank-accounts:discard-import',
     'bank-accounts:prepare-import',
+    'file:import-balance-seed-file',
     'position-reconciliation:bank:prepare-import',
     'template-resources:discard-import',
     'template-resources:prepare-import'
@@ -488,6 +489,7 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'background:save',
     'settings:acknowledge-release-notes',
     'settings:set-current-module',
+    'settings:set-dark-mode-lightness',
     'settings:set-dark-mode-schedule',
     'settings:set-enabled-modules',
     'settings:set-recon-id-fix-bill-category',

@@ -180,6 +180,20 @@ function seedCalculatedReviewRun(db) {
   return runId;
 }
 
+
+// node:test 按注册顺序执行 after；Windows 上打开的库文件不能删除。用到 Service worker 的测试
+//   在 terminate 与关库之后再调用 removeLater 注册删目录。
+function tempDbPathRemovedLater() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-service-db-'));
+  return { dbPath: path.join(dir, 'tool-data.sqlite'), removeLater: (t) => t.after(() => fs.rmSync(dir, { recursive: true, force: true })) };
+}
+
+function tempDbPath(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-service-db-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return path.join(dir, 'tool-data.sqlite');
+}
+
 test('结果查询 token 直达 dedicated worker，调整后 refetch 并以新 token 归档', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-result-service-write-'));
   const dbPath = path.join(root, 'tool-data.sqlite');
@@ -820,8 +834,9 @@ test('数据管理校验表返回独立生成时间', (t) => {
   );
 });
 
-test('删除有效明细后导入记录列表仍保留文件级状态与归档字段', (t) => {
-  const db = new DatabaseSync(':memory:');
+test('删除有效明细后导入记录列表仍保留文件级状态与归档字段', async (t) => {
+  const { dbPath, removeLater } = tempDbPathRemovedLater();
+  const db = new DatabaseSync(dbPath);
   t.after(() => db.close());
   db.exec('PRAGMA foreign_keys = ON');
   ensureVccFinancialOpTablesSupport(db);
@@ -850,13 +865,14 @@ test('删除有效明细后导入记录列表仍保留文件级状态与归档�
     ) VALUES ('2026-06', ?, '2026-08-01 08:00:00', '2026-08-01 08:00:00')
   `).run(SOURCE_TYPES.RECHARGE);
   const service = createVccFinancialOpService({
-    database: { db, dbPath: ':memory:' },
+    database: { db, dbPath },
     assetsDir: ''
   });
-  t.after(() => service.terminate());
+  t.after(async () => { await service.terminate(); });
+  removeLater(t);
 
   deleteWithPreview(db, '2026-06', SOURCE_TYPES.RECHARGE);
-  const listed = service.listImportRecords('2026-06');
+  const listed = await service.listImportRecords('2026-06');
   assert.equal(listed[0].status, 'deleted');
   assert.equal(listed[0].statusText, '已删除');
   assert.equal(listed[0].originalStatus, 'success_with_skips');
@@ -871,8 +887,9 @@ test('删除有效明细后导入记录列表仍保留文件级状态与归档�
   }
 });
 
-test('显式重建前导入记录 DTO 仍暴露 v1 历史异常的可导出数量', (t) => {
-  const db = new DatabaseSync(':memory:');
+test('显式重建前导入记录 DTO 仍暴露 v1 历史异常的可导出数量', async (t) => {
+  const { dbPath, removeLater } = tempDbPathRemovedLater();
+  const db = new DatabaseSync(dbPath);
   t.after(() => db.close());
   db.exec('PRAGMA foreign_keys = ON');
   ensureVccFinancialOpTablesSupport(db);
@@ -899,12 +916,13 @@ test('显式重建前导入记录 DTO 仍暴露 v1 历史异常的可导出数�
     errorMessage: '历史文件导入失败'
   });
   const service = createVccFinancialOpService({
-    database: { db, dbPath: ':memory:' },
+    database: { db, dbPath },
     assetsDir: ''
   });
-  t.after(() => service.terminate());
+  t.after(async () => { await service.terminate(); });
+  removeLater(t);
 
-  const [record] = service.listImportRecords('2026-06');
+  const [record] = await service.listImportRecords('2026-06');
   assert.equal(record.anomalyCount, 2);
 });
 
@@ -1051,7 +1069,7 @@ test('数据管理有效表通过 worker 流式导出并返回工作簿元数据
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  const preview = service.previewDatasetExport({
+  const preview = await service.previewDatasetExport({
     targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE, targetKind: 'check'
   });
   assert.equal(preview.exportable, true);
@@ -1546,7 +1564,7 @@ test('无调整的历史归档仍可导出，且直接结果导出持有同一�
     (error) => error.code === 'active-vcc-task',
     '结果导出持有全局租约时必须拒绝解归档'
   );
-  const concurrentPreview = service.previewDatasetExport({
+  const concurrentPreview = await service.previewDatasetExport({
     targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE, targetKind: 'raw'
   });
   assert.equal(concurrentPreview.exportable, false);

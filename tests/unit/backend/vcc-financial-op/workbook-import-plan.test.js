@@ -30,8 +30,47 @@ test('相同字节替换文件仍使预检计划过期，不只比较 hash 与�
   const replacement = `${file}.replacement`; fs.copyFileSync(file, replacement); fs.renameSync(replacement, file);
   await assert.rejects(revalidateImportPlan(plan), { code: 'vcc-import-plan-stale' });
 });
+test('提交前复检只核对字节与文件身份，不再整本重新解析', async (t) => {
+  const file = workbookFile(t, [{ name: '业务', rows: [SOURCE_DEFINITIONS[SOURCE_TYPES.RECHARGE].headers] }]);
+  const plan = await inspectWorkbookImportPlan([file]);
+  // 计划里的 Sheet 清单被改动也不会再被重新解析覆盖，说明复检只依赖冻结的字节与身份。
+  const tampered = { ...plan, sources: plan.sources.map((source) => ({ ...source, sheetName: '未重扫' })) };
+  await revalidateImportPlan(tampered);
+});
+
 const channel = [...SOURCE_DEFINITIONS[SOURCE_TYPES.CHANNEL].headers];
 const recharge = [...SOURCE_DEFINITIONS[SOURCE_TYPES.RECHARGE].headers];
+
+// release/v3.2.17 Codex 审查 P2：提交前复核在 prepare 阶段运行，取消只能靠 shouldCancel；复核期间取消不得返回通过。
+test('提交前复核在哈希前、哈希中和返回前响应取消，抛出 vcc-import-cancelled', async (t) => {
+  const file = workbookFile(t, [{ name: '业务', rows: [SOURCE_DEFINITIONS[SOURCE_TYPES.RECHARGE].headers] }]);
+  const plan = await inspectWorkbookImportPlan([file]);
+  await revalidateImportPlan(plan, { shouldCancel: () => false });
+  for (const cancelAt of [1, 2, 3]) {
+    let calls = 0;
+    await assert.rejects(
+      revalidateImportPlan(plan, { shouldCancel: () => { calls += 1; return calls >= cancelAt; } }),
+      { code: 'vcc-import-cancelled' },
+      `第 ${cancelAt} 次检查时取消`
+    );
+  }
+  const twoFiles = await inspectWorkbookImportPlan([file, workbookFile(t, [{ name: '业务', rows: [SOURCE_DEFINITIONS[SOURCE_TYPES.RECHARGE].headers] }], 'second.xlsx')]);
+  let checks = 0;
+  await assert.rejects(revalidateImportPlan(twoFiles, { shouldCancel: () => (checks += 1) > 3 }), { code: 'vcc-import-cancelled' });
+});
+
+test('源文件哈希在读取过程中响应取消，中止读取且不当作文件变化', async (t) => {
+  const { hashSourceFile } = require('../../../../src/backend/vcc-financial-op/source-lineage');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-hash-cancel-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'large.bin');
+  fs.writeFileSync(file, Buffer.alloc(4 * 1024 * 1024, 7));
+  let chunks = 0;
+  await assert.rejects(hashSourceFile(file, { shouldCancel: () => (chunks += 1) > 1 }), { code: 'vcc-import-cancelled' });
+  assert.ok(chunks >= 2 && chunks < 64, `应在读完前中止，实际检查 ${chunks} 次`);
+  const full = await hashSourceFile(file);
+  assert.equal(full.sizeBytes, 4 * 1024 * 1024);
+});
 
 test('五类表头精确匹配优先，缺列、错序和额外列均无说明页排除资格', () => {
   for (const rule of HEADER_RULES) {

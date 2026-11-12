@@ -11,6 +11,19 @@ function statementOutputName(config) {
   return outputName || String(config && config.template && config.template.name || '');
 }
 
+// v3.2.17：缺种子补录提示附带本组全部待补录账号（scanBalanceSeedStatus 的 missingAccounts；
+//   不含“已有种子但对不上”的账号），供补录弹窗「导入余额文件」按银行账号 + 币种匹配。
+function pendingBalanceSeedAccounts(balanceSeedStatus) {
+  const accounts = balanceSeedStatus && Array.isArray(balanceSeedStatus.missingAccounts)
+    ? balanceSeedStatus.missingAccounts
+    : [];
+  return accounts.map((account) => ({
+    merchantId: account.merchantId,
+    currency: account.currency,
+    targetBillDate: account.targetBillDate
+  }));
+}
+
 function createStatementGenerationHelpers(deps) {
   const {
     appendActivityLogEntry,
@@ -285,6 +298,7 @@ function createStatementGenerationHelpers(deps) {
                 targetBillDate: normalizeCell(error.context?.targetBillDate),
                 queueIndex,
                 queueTotal,
+                pendingAccounts: pendingBalanceSeedAccounts(balanceSeedStatus),
                 // 已有种子但首日对不上时附上明细，补录弹窗据此说明原因（v3.2.16 D7）。
                 ...(error.context?.seedMismatch
                   ? {
@@ -787,5 +801,6 @@ function createStatementGenerationHelpers(deps) {
 
 module.exports = {
   createStatementGenerationHelpers,
+  pendingBalanceSeedAccounts,
   statementOutputName
 };

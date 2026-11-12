@@ -507,7 +507,7 @@ test('同一坐标由唯一事实锁定，不同币种可分别调整一次', (t
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_run_adjustments`).get().n, 2);
 });
 
-test('已归档及解归档后的已用坐标保持锁定', (t) => {
+test('已归档结果锁定调整；同一调整周期内已用坐标保持锁定，解归档推进周期后可再调整一次', (t) => {
   const db = createDb(t);
   const runId = seedBaseRun(db);
   const rowKey = buildRunRowKey(RECHARGE_ROW);
@@ -530,6 +530,31 @@ test('已归档及解归档后的已用坐标保持锁定', (t) => {
   db.prepare(`UPDATE vcc_fin_op_runs SET status = 'calculated' WHERE id = ?`).run(runId);
   assertThrowsCode(
     () => addRunAdjustment({ ...payload, expectedResultRevision: 1 }),
+    'adjustment-already-exists'
+  );
+  assert.deepEqual(
+    listAdjustmentOptions(db, runId).options.find((row) => row.rowKey === rowKey).adjustedCurrencies,
+    ['USD']
+  );
+
+  // 生产解归档会把调整周期加 1；新周期内同一坐标可再追加一次增量调整，与旧调整累加。
+  db.prepare(`UPDATE vcc_fin_op_runs SET adjustment_cycle = 1 WHERE id = ?`).run(runId);
+  const option = listAdjustmentOptions(db, runId).options.find((row) => row.rowKey === rowKey);
+  assert.ok(option.availableCurrencies.includes('USD'));
+  assert.deepEqual(option.adjustedCurrencies, []);
+  const second = addRunAdjustment({ ...payload, adjustmentAmount: '2', expectedResultRevision: 1 });
+  assert.equal(second.resultRevision, 2);
+  assert.deepEqual(
+    db.prepare(`
+      SELECT adjustment_cycle, adjustment_amount FROM vcc_fin_op_run_adjustments ORDER BY id
+    `).all().map((row) => [row.adjustment_cycle, row.adjustment_amount]),
+    [[0, '1'], [1, '2']]
+  );
+  const effective = getEffectiveRunResult(db, runId);
+  const usd = effective.effectiveRows.find((row) => row.rowKey === rowKey && row.currency === 'USD');
+  assert.equal(usd.adjustmentAmount, '3', '两个周期的调整累加生效');
+  assertThrowsCode(
+    () => addRunAdjustment({ ...payload, expectedResultRevision: 2 }),
     'adjustment-already-exists'
   );
 });

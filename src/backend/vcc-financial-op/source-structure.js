@@ -11,7 +11,7 @@ function hasSourceHeaders(sourceHeaders) {
 }
 
 // canonicalHeaders：内置原始结构（明细为 raw contract 表头，系统财务OP 为 16 列）。
-//   返回 { headers, indexOf(header), project(values, { keepTail, fill }) }；内置结构时 project 原样返回。
+//   返回 { headers, indexOf(header), sourceIndexOfCanonical(header), project(values, { keepTail, fill }) }；内置结构时 project 原样返回。
 //   keepTail：保留导入时结构宽度之外的单元格（接在内置列之后），供“模板外列”检查使用；fill：置空列的取值（默认空串）。
 function createSourceProjection(canonicalHeaders, sourceHeaders) {
   const canonical = [...canonicalHeaders];
@@ -20,6 +20,7 @@ function createSourceProjection(canonicalHeaders, sourceHeaders) {
       custom: false,
       headers: Object.freeze(canonical),
       indexOf: (header) => canonical.indexOf(header),
+      sourceIndexOfCanonical: (header) => canonical.indexOf(header),
       project: (values) => values
     });
   }
@@ -29,6 +30,11 @@ function createSourceProjection(canonicalHeaders, sourceHeaders) {
     custom: true,
     headers,
     indexOf: (header) => headers.indexOf(header),
+    // 内置列名 → 导入时结构中的列位置（改名、换序后仍能定位；该列在导入时结构中不存在时为 -1）。
+    sourceIndexOfCanonical(header) {
+      const canonicalIndex = canonical.indexOf(header);
+      return canonicalIndex < 0 ? -1 : sourceIndex[canonicalIndex];
+    },
     project(values, { keepTail = false, fill = '' } = {}) {
       const row = Array.isArray(values) ? values : [];
       const projected = sourceIndex.map((index) => (index >= 0 && row[index] !== undefined ? row[index] : fill));
