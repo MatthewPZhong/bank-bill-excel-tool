@@ -38,7 +38,7 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 const XLSX = require('xlsx');
 const { performance } = require('node:perf_hooks');
 const { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, Notification, powerMonitor, shell } = require('electron');
-const { createDarkModeScheduler, THEME_BACKGROUND_COLORS } = require('./main-process/dark-mode-scheduler');
+const { createDarkModeScheduler, resolveWindowBackgroundColor } = require('./main-process/dark-mode-scheduler');
 const {
   parsePackagedRuntimeRequest
 } = require('./main-process/background-execution/canary/packaged-runtime-request');
@@ -4913,18 +4913,21 @@ function createWindow(options = {}) {
   };
   try {
   const windowIcon = loadBundledIcon();
+  const appearance = darkModeScheduler.refresh();
   const windowOptions = {
     width: 1240,
     height: 860,
     minWidth: 1080,
     minHeight: 760,
     frame: false,
-    backgroundColor: THEME_BACKGROUND_COLORS[darkModeScheduler.refresh().effectiveTheme],
+    backgroundColor: resolveWindowBackgroundColor(appearance.effectiveTheme, appearance.darkModeLightness),
     show: false,
     icon: windowIcon,
     webPreferences: {
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.js'),
+      // v3.2.17：首帧早于 app:get-info，深浅度经 argv 交给 preload，由 head 同步脚本在 CSS 前绘制。
+      additionalArguments: [`--dark-mode-lightness=${appearance.darkModeLightness}`]
     }
   };
   if (process.env.APP_CAPTURE_PATH) {
@@ -5922,6 +5925,13 @@ function registerAppHandlers() {
   ipcMain.handle('settings:set-dark-mode-schedule', (_event, config) => {
     try {
       return { status: 'ok', ...darkModeScheduler.setSchedule(config) };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  ipcMain.handle('settings:set-dark-mode-lightness', (_event, lightness) => {
+    try {
+      return { status: 'ok', ...darkModeScheduler.setLightness(lightness) };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
@@ -23756,6 +23766,8 @@ async function initializeApplication() {
     darkModeScheduler = createDarkModeScheduler({
       readSchedule: () => database.getDarkModeSchedule(),
       writeSchedule: (config) => database.setDarkModeSchedule(config),
+      readLightness: () => database.getDarkModeLightness(),
+      writeLightness: (lightness) => database.setDarkModeLightness(lightness),
       nativeTheme,
       getWindows: () => BrowserWindow.getAllWindows(),
       focusSource: app,

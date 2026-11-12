@@ -489,6 +489,7 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'background:save',
     'settings:acknowledge-release-notes',
     'settings:set-current-module',
+    'settings:set-dark-mode-lightness',
     'settings:set-dark-mode-schedule',
     'settings:set-enabled-modules',
     'settings:set-recon-id-fix-bill-category',

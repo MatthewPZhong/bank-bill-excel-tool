@@ -251,6 +251,7 @@ test('71 file 与 63 no-file mutation 逐项显式分类且精确闭合', () => 
   assert.equal(registry.channels('exclude').length, 153);
   assert.equal(registry.list().length, 71 + 63 + 153);
   assert.ok(EXCLUDED_CHANNELS_BY_REASON['ui-navigation'].includes('settings:set-dark-mode-schedule'));
+  assert.ok(EXCLUDED_CHANNELS_BY_REASON['ui-navigation'].includes('settings:set-dark-mode-lightness'));
 });
 
 test('dialog selection 显式区分 file/directory，正常 file policy 不再消费 selection 路径', () => {

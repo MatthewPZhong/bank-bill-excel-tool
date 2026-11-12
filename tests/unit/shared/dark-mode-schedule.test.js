@@ -87,3 +87,88 @@ test('完整旧配置和用户关闭状态保留，不按旧默认值推断缺�
     assert.equal(resolveEffectiveTheme(config, at(23, 0)), config.enabled ? 'dark' : 'light');
   }
 });
+
+// v3.2.17 深浅度：0 档必须等于 CSS 深色块，各档关键文字保持可读对比度。
+const {
+  DEFAULT_DARK_MODE_LIGHTNESS,
+  MAX_DARK_MODE_LIGHTNESS,
+  DARK_MODE_LIGHTNESS_PALETTE,
+  validateDarkModeLightness,
+  normalizeDarkModeLightness,
+  resolveDarkModePalette,
+  resolveDarkBackgroundColor
+} = require('../../../src/shared/dark-mode-schedule');
+
+function readDarkCssVariables() {
+  const css = fs.readFileSync(path.join(__dirname, '../../../src/styles-dark-mode.css'), 'utf8');
+  const block = css.match(/:root\[data-theme="dark"\]\s*\{([^}]*)\}/)[1];
+  return Object.fromEntries([...block.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map((match) => [match[1], match[2].trim()]));
+}
+
+function toRgba(color) {
+  const hex = color.match(/^#([0-9a-f]{6})$/i);
+  if (hex) return [0, 2, 4].map((index) => Number.parseInt(hex[1].slice(index, index + 2), 16)).concat(1);
+  const rgba = color.match(/^rgba\(([^)]+)\)$/);
+  assert.ok(rgba, `无法解析颜色 ${color}`);
+  return rgba[1].split(',').map(Number);
+}
+
+function contrast(foreground, background) {
+  const luminance = (color) => {
+    const [r, g, b] = toRgba(color).slice(0, 3).map((channel) => {
+      const value = channel / 255;
+      return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const [light, dark] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+  return (light + 0.05) / (dark + 0.05);
+}
+
+test('深浅度只接受 0–100 整数，读取默认化为 0', () => {
+  assert.equal(DEFAULT_DARK_MODE_LIGHTNESS, 0);
+  assert.equal(MAX_DARK_MODE_LIGHTNESS, 100);
+  for (const value of [0, 1, 50, 100]) assert.equal(validateDarkModeLightness(value), value);
+  for (const value of [-1, 101, 1.5, NaN, Infinity, '50', null, undefined, true, [50]]) {
+    assert.throws(() => validateDarkModeLightness(value), /0 到 100 的整数/);
+    assert.equal(normalizeDarkModeLightness(value), 0);
+  }
+});
+
+test('0 档与 CSS 深色块逐项一致，100 档取最浅端，中间逐通道插值取整', () => {
+  const css = readDarkCssVariables();
+  const darkest = resolveDarkModePalette(0);
+  assert.equal(Object.keys(darkest).length, DARK_MODE_LIGHTNESS_PALETTE.length);
+  for (const [name, from, to, alpha] of DARK_MODE_LIGHTNESS_PALETTE) {
+    assert.ok(css[name], `CSS 深色块缺少 ${name}`);
+    assert.deepEqual(toRgba(darkest[name]), toRgba(css[name]), name);
+    assert.deepEqual(toRgba(resolveDarkModePalette(100)[name]), toRgba(to).slice(0, 3).concat(alpha ?? 1), name);
+    assert.deepEqual(toRgba(from).slice(0, 3), toRgba(css[name]).slice(0, 3), name);
+  }
+  assert.equal(resolveDarkBackgroundColor(0), '#111419');
+  assert.equal(resolveDarkBackgroundColor(100), '#383d46');
+  // (0x11 + (0x38 - 0x11) * 0.5) = 36.5 → 37 (0x25)
+  assert.equal(resolveDarkBackgroundColor(50), '#252930');
+  assert.deepEqual(resolveDarkModePalette(1.5), darkest);
+  assert.equal(resolveDarkModePalette(50)['--header'], 'rgba(37, 41, 48, 0.88)');
+});
+
+test('各档正文、次要文字、主色与状态文字在对应底色上保持可读对比度', () => {
+  const css = readDarkCssVariables();
+  const pairs = [
+    ['--text', '--bg', 4.5], ['--text', '--panel', 4.5], ['--text', '--panel-strong', 4.5],
+    ['--muted', '--panel', 4.5], ['--muted', '--bg-soft', 4.5],
+    ['--primary', '--panel', 4.5], ['--primary', '--primary-soft', 4.5],
+    ['--chip-active-text', '--chip-active-bg', 4.5],
+    ['--danger', '--danger-soft', 4.5], ['--success', '--success-soft', 4.5], ['--warning', '--warning-soft', 4.5],
+    ['--bg', '--danger', 4.5],
+    ['--dim', '--panel', 3], ['--dim', '--input', 3]
+  ];
+  for (let level = 0; level <= 100; level += 5) {
+    const palette = { ...css, ...resolveDarkModePalette(level) };
+    for (const [foreground, background, minimum] of pairs) {
+      const ratio = contrast(palette[foreground], palette[background]);
+      assert.ok(ratio >= minimum, `${level} 档 ${foreground}/${background} 对比度 ${ratio.toFixed(2)} < ${minimum}`);
+    }
+  }
+});

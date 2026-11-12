@@ -2,7 +2,9 @@
 const { appendModuleLog } = require('../logger');
 const {
   normalizeDarkModeSchedule,
-  validateDarkModeSchedule
+  validateDarkModeSchedule,
+  normalizeDarkModeLightness,
+  validateDarkModeLightness
 } = require('../../shared/dark-mode-schedule');
 
 function getSetting(db, settingKey) {
@@ -80,6 +82,20 @@ function getDarkModeSchedule(db) {
 function setDarkModeSchedule(db, config) {
   const valid = validateDarkModeSchedule(config);
   setSetting(db, DARK_MODE_SCHEDULE_KEY, JSON.stringify(valid));
+  return valid;
+}
+
+// v3.2.17：深色模式深浅度独立保存，不改动 dark_mode_schedule 的结构与校验；缺失或损坏读回 0。
+const DARK_MODE_LIGHTNESS_KEY = 'dark_mode_lightness';
+
+function getDarkModeLightness(db) {
+  const raw = getSetting(db, DARK_MODE_LIGHTNESS_KEY);
+  return normalizeDarkModeLightness(/^\d{1,3}$/.test(raw || '') ? Number(raw) : null);
+}
+
+function setDarkModeLightness(db, lightness) {
+  const valid = validateDarkModeLightness(lightness);
+  setSetting(db, DARK_MODE_LIGHTNESS_KEY, String(valid));
   return valid;
 }
 
@@ -570,6 +586,7 @@ module.exports = {
   ensureUiStyleDefault,
   getBackgroundConfig,
   getDarkModeSchedule,
+  getDarkModeLightness,
   getAutoUpdateEnabled,
   getCurrentModule,
   getEnabledModules,
@@ -584,6 +601,8 @@ module.exports = {
   setBackgroundConfig,
   setDarkModeSchedule,
   DARK_MODE_SCHEDULE_KEY,
+  setDarkModeLightness,
+  DARK_MODE_LIGHTNESS_KEY,
   setAutoUpdateEnabled,
   setCurrentModule,
   setEnabledModules,
