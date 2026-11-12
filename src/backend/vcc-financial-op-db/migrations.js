@@ -21,10 +21,12 @@ const {
   assertEmptyVccStorageForUpgrade,
   assertVccStorageContract,
   ensureVccStorageSideTables,
+  ensureVccChannelCorrectionsTable,
   getVccStorageContractVersion,
   installVccStorageWriteGuards,
   registerVccStorageWriteCapability,
-  upgradeEmptyVccStorageContract
+  upgradeEmptyVccStorageContract,
+  vccStorageGuardTriggerDefinition
 } = require('./storage-contract');
 
 const LEGACY_VCC_CURRENCY = 'CNH';
@@ -532,19 +534,7 @@ function persistFirstMonthDiagnostic(db, diagnostic) {
   return Number(result.lastInsertRowid);
 }
 
-function ensureVccFinancialOpStateModelSupport(db) {
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS vcc_fin_op_module_state (
-        singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
-        first_month TEXT,
-        currency_contract_version INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
-      );
-
-      CREATE TABLE IF NOT EXISTS vcc_fin_op_run_adjustments (
+const RUN_ADJUSTMENTS_TABLE_BODY = `
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         run_id INTEGER NOT NULL,
         row_key TEXT NOT NULL,
@@ -559,10 +549,94 @@ function ensureVccFinancialOpStateModelSupport(db) {
         created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
         created_app_version TEXT,
         created_build_sha TEXT,
+        adjustment_cycle INTEGER NOT NULL DEFAULT 0 CHECK (adjustment_cycle >= 0),
         FOREIGN KEY (run_id) REFERENCES vcc_fin_op_runs(id) ON DELETE CASCADE,
         UNIQUE (run_id, sequence),
-        UNIQUE (run_id, row_key, currency)
+        UNIQUE (run_id, row_key, currency, adjustment_cycle)
+      `;
+const RUN_ADJUSTMENT_INDEX_SQL = `
+  CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_adjustments_run_row
+    ON vcc_fin_op_run_adjustments(run_id, row_key, currency);
+  CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_adjustments_run_subject
+    ON vcc_fin_op_run_adjustments(run_id, subject, sequence, id);
+`;
+const RUN_ADJUSTMENT_LEGACY_COLUMNS = Object.freeze([
+  'id', 'run_id', 'row_key', 'subject', 'source_type', 'category_major', 'category_minor',
+  'currency', 'adjustment_amount', 'reason', 'sequence', 'created_at',
+  'created_app_version', 'created_build_sha'
+]);
+
+function uniqueIndexColumnSets(db, tableName) {
+  return db.prepare(`PRAGMA index_list(${tableName})`).all()
+    .filter((index) => Number(index.unique) === 1)
+    .map((index) => db.prepare(`PRAGMA index_info("${String(index.name).replace(/"/g, '""')}")`).all()
+      .sort((left, right) => Number(left.seqno) - Number(right.seqno))
+      .map((column) => column.name)
+      .join(','));
+}
+
+function adjustmentTableNeedsCycleRebuild(db) {
+  if (!tableColumns(db, 'vcc_fin_op_run_adjustments').has('adjustment_cycle')) return true;
+  return uniqueIndexColumnSets(db, 'vcc_fin_op_run_adjustments')
+    .includes('run_id,row_key,currency');
+}
+
+// SQLite 不能就地删除表级 UNIQUE，只能重建：新表 → 原样复制 → 换名 → 重建索引与写保护。
+// 在 ensureVccFinancialOpStateModelSupport 的事务内执行，失败整体回滚；已有调整全部归入周期 0。
+function rebuildRunAdjustmentsWithCycle(db) {
+  const tempName = 'vcc_fin_op_run_adjustments_cycle_rebuild';
+  const hadCycle = tableColumns(db, 'vcc_fin_op_run_adjustments').has('adjustment_cycle');
+  const sequenceRow = db.prepare(`
+    SELECT seq FROM sqlite_sequence WHERE name = 'vcc_fin_op_run_adjustments'
+  `).get();
+  const beforeCount = Number(db.prepare(`
+    SELECT COUNT(*) AS row_count FROM vcc_fin_op_run_adjustments
+  `).get().row_count) || 0;
+  const columns = RUN_ADJUSTMENT_LEGACY_COLUMNS.join(', ');
+  db.exec(`DROP TABLE IF EXISTS ${tempName}`);
+  db.exec(`CREATE TABLE ${tempName} (${RUN_ADJUSTMENTS_TABLE_BODY})`);
+  db.exec(`
+    INSERT INTO ${tempName} (${columns}, adjustment_cycle)
+    SELECT ${columns}, ${hadCycle ? 'adjustment_cycle' : '0'}
+    FROM vcc_fin_op_run_adjustments
+    ORDER BY id
+  `);
+  const afterCount = Number(db.prepare(`SELECT COUNT(*) AS row_count FROM ${tempName}`).get().row_count) || 0;
+  if (afterCount !== beforeCount) {
+    throw new Error(`VCC 调整表重建行数不一致（${beforeCount} → ${afterCount}）`);
+  }
+  db.exec('DROP TABLE vcc_fin_op_run_adjustments');
+  db.exec(`ALTER TABLE ${tempName} RENAME TO vcc_fin_op_run_adjustments`);
+  db.exec(RUN_ADJUSTMENT_INDEX_SQL);
+  const maxId = Number(db.prepare(`
+    SELECT COALESCE(MAX(id), 0) AS max_id FROM vcc_fin_op_run_adjustments
+  `).get().max_id) || 0;
+  const sequence = Math.max(maxId, sequenceRow ? Number(sequenceRow.seq) || 0 : 0);
+  db.prepare("DELETE FROM sqlite_sequence WHERE name IN ('vcc_fin_op_run_adjustments', ?)").run(tempName);
+  if (sequence > 0) {
+    db.prepare("INSERT INTO sqlite_sequence (name, seq) VALUES ('vcc_fin_op_run_adjustments', ?)").run(sequence);
+  }
+  const storageVersion = getVccStorageContractVersion(db);
+  if (storageVersion >= 2) {
+    for (const operation of ['insert', 'update', 'delete']) {
+      db.exec(vccStorageGuardTriggerDefinition('vcc_fin_op_run_adjustments', operation, storageVersion).createSql);
+    }
+  }
+}
+
+function ensureVccFinancialOpStateModelSupport(db) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS vcc_fin_op_module_state (
+        singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+        first_month TEXT,
+        currency_contract_version INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
       );
+
+      CREATE TABLE IF NOT EXISTS vcc_fin_op_run_adjustments (${RUN_ADJUSTMENTS_TABLE_BODY});
 
       CREATE TABLE IF NOT EXISTS vcc_fin_op_operation_audit (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -604,6 +678,11 @@ function ensureVccFinancialOpStateModelSupport(db) {
     if (!runColumns.has('input_fingerprint')) {
       db.exec('ALTER TABLE vcc_fin_op_runs ADD COLUMN input_fingerprint TEXT');
     }
+    // v3.2.17：调整周期。首次计算为 0，每次解归档加 1；同一结果行同一币种每个周期可调整一次。
+    if (!runColumns.has('adjustment_cycle')) {
+      db.exec('ALTER TABLE vcc_fin_op_runs ADD COLUMN adjustment_cycle INTEGER NOT NULL DEFAULT 0');
+    }
+    if (adjustmentTableNeedsCycleRebuild(db)) rebuildRunAdjustmentsWithCycle(db);
     db.exec(`
       UPDATE vcc_fin_op_runs
       SET updated_at = COALESCE(
@@ -653,7 +732,11 @@ function ensureVccFinancialOpTablesSupport(db, options = {}) {
       code: 'vcc-storage-upgrade-required'
     });
   }
-  if (storageContractVersion === 3) assertVccStorageContract(db);
+  if (storageContractVersion === 3) {
+    // v3.2.17 新增的补录记录表须先建好（含写保护），再做表集合严格一致的合同断言。
+    ensureVccChannelCorrectionsTable(db);
+    assertVccStorageContract(db);
+  }
   registerVccStorageWriteCapability(db);
   const shouldAutoUpgradeEmptyV1 = options.autoUpgradeEmptyV1 === true
     && hasSettings

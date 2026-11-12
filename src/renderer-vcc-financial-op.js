@@ -169,9 +169,11 @@
         details.push(`${formatInteger(completed.physicalFileCount)} 个文件 / ${formatInteger(completed.businessSheetCount)} 张业务 Sheet`);
         if (Number.isSafeInteger(completed.readRowCount)) details.push(`读取 ${formatInteger(completed.readRowCount)} 行原始数据`);
       }
+      const correctedRows = records.reduce((sum, record) => sum + (Number(record.correctedRowCount) || 0), 0);
       if (detailRecords.length > 0) {
         const prefix = systemRecords.length > 0 ? '明细' : '';
         details.push(`${prefix}新增 ${formatInteger(detailTotals.inserted)} 行`);
+        if (correctedRows > 0) details.push(`其中人工补录 ${formatInteger(correctedRows)} 行`);
         details.push(`${prefix}幂等跳过 ${formatInteger(detailTotals.skipped)} 行`);
         if (detailTotals.filtered > 0) {
           details.push(`${prefix}过滤异常 ${formatInteger(detailTotals.filtered)} 行`);
@@ -477,10 +479,88 @@
       });
     }
 
+    // v3.2.17 通道明细预检补录：列出对账字段为空或不合规的行，可修改参与计算的字段。
+    const CHANNEL_CORRECTION_LIMIT = 2000;
+    const channelCorrection = globalThis.__vccChannelCorrection;
+
+    // 补录上限按单张 Sheet 计：超限的 Sheet 只提示、按异常过滤，不影响其他 Sheet 补录。
+    function correctionSourceOverLimit(source) {
+      const info = source.channelCorrectionCandidates;
+      return Boolean(info) && (info.truncated === true || (Number(info.total) || 0) > CHANNEL_CORRECTION_LIMIT);
+    }
+
+    function correctionCandidatesOf(sources) {
+      return sources.flatMap((source) => (
+        source.status === 'ready' && source.channelCorrectionCandidates && !correctionSourceOverLimit(source)
+          ? (source.channelCorrectionCandidates.candidates || []).map((candidate) => ({ source, candidate }))
+          : []
+      ));
+    }
+
+    function correctionRequiredFields(entry, values, targetMonth) {
+      const { candidate } = entry;
+      if (values['通道名称'] === candidate.fields['通道名称'] && values.billdate === candidate.fields.billdate) {
+        return candidate.requiredFields;
+      }
+      const isoBilldate = values.billdate === candidate.fields.billdate
+        ? candidate.normalizedBilldate
+        : channelCorrection.parseIsoDate(values.billdate);
+      const group = channelCorrection.amountGroupFor(values['通道名称'], isoBilldate, targetMonth);
+      return channelCorrection.requiredFieldsFor(values['通道名称'], group);
+    }
+
+    function renderCorrectionFields(entry, index, values, targetMonth) {
+      const problemFields = new Set((entry.candidate.problems || []).map((problem) => problem.field));
+      return correctionRequiredFields(entry, values, targetMonth).map((field) => `
+        <label class="vcc-fin-op-correction-field${problemFields.has(field) ? ' is-invalid' : ''}">
+          <span>${escapeHtml(field)}</span>
+          <input class="vcc-fin-op-input" type="text" autocomplete="off" maxlength="200"
+            data-correction-index="${index}" data-correction-field="${escapeHtml(field)}" value="${escapeHtml(values[field] || '')}">
+        </label>
+      `).join('');
+    }
+
+    function correctionSectionHtml(sources, targetMonth) {
+      const total = sources.reduce((sum, source) => sum + (source.status === 'ready' && source.channelCorrectionCandidates
+        ? Number(source.channelCorrectionCandidates.total) || 0 : 0), 0);
+      if (total === 0 || !channelCorrection) return { html: '', editable: false, total };
+      const overLimit = sources.filter((source) => source.status === 'ready' && correctionSourceOverLimit(source));
+      const intro = `
+        <p class="vcc-fin-op-correction-title">需要确认的通道明细行（${formatInteger(total)} 行）</p>
+        <p class="vcc-fin-op-correction-hint">这些行的对账字段为空或格式不合规。不修改的行按异常过滤、不参与计算；修改后的行按新值导入，原值与新值记入导入记录的【导出明细】。</p>`;
+      const overLimitHint = overLimit.length ? `
+        <p class="vcc-fin-op-correction-hint">以下 Sheet 待补录超过单张上限 ${formatInteger(CHANNEL_CORRECTION_LIMIT)} 行，请在原表中修正后重新导入；本次继续导入时这些行按异常过滤：${overLimit.map((source) => escapeHtml(`${source.fileName} / ${source.sheetName}`)).join('、')}</p>` : '';
+      const entries = correctionCandidatesOf(sources);
+      if (entries.length === 0) {
+        return { html: `<section class="vcc-fin-op-correction-section">${intro}${overLimitHint}</section>`, editable: false, total };
+      }
+      const rows = entries.map((entry, index) => `
+        <div class="vcc-fin-op-correction-row">
+          <div class="vcc-fin-op-correction-meta">
+            <strong>${escapeHtml(entry.source.fileName)} / ${escapeHtml(entry.source.sheetName)} 第 ${entry.candidate.sourceRow} 行</strong>
+            <span>渠道订单号 ${escapeHtml(entry.candidate.idempotencyKey)}</span>
+            <span>${(entry.candidate.problems || []).map((problem) => escapeHtml(problem.message)).join('；')}</span>
+          </div>
+          <div class="vcc-fin-op-correction-fields" data-correction-fields="${index}">
+            ${renderCorrectionFields(entry, index, { ...entry.candidate.fields }, targetMonth)}
+          </div>
+        </div>
+      `).join('');
+      return {
+        html: `<section class="vcc-fin-op-correction-section">${intro}${overLimitHint}<div class="vcc-fin-op-correction-list">${rows}</div></section>`,
+        editable: true,
+        total
+      };
+    }
+
     function confirmImportPlan(plan) {
       return new Promise((resolve) => {
         let result = null;
         const sources = plan.sources || [];
+        const targetMonth = plan.targetMonth || '';
+        const correctionEntries = correctionCandidatesOf(sources);
+        const correctionValues = correctionEntries.map((entry) => ({ ...entry.candidate.fields }));
+        const correctionSection = correctionSectionHtml(sources, targetMonth);
         const statusText = { ready: '可导入', empty: '空白，自动跳过', unrecognized: '无法识别，需明确排除', invalid: '结构错误，不能导入' };
         const rows = sources.map((source, index) => `
         <div class="vcc-fin-op-file-row">
@@ -503,6 +583,7 @@
           onClose: () => resolve(result), bodyHtml: `
           <p>${plan.physicalFiles.length} 个文件，${sources.length} 张 Sheet；隐藏业务 Sheet 也会导入。</p>
           <div class="vcc-fin-op-file-list">${rows}</div>
+          ${correctionSection.html}
           <p class="vcc-fin-op-field-error" data-role="error" hidden></p>
           <div class="dialog-actions right">
             <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
@@ -510,6 +591,50 @@
           </div>` });
         if (!modal) return null;
         const error = modal.dialog.querySelector('[data-role="error"]');
+        if (correctionSection.editable) {
+          modal.dialog.addEventListener('input', (event) => {
+            const input = event.target;
+            if (!input || !input.dataset || input.dataset.correctionIndex === undefined) return;
+            correctionValues[Number(input.dataset.correctionIndex)][input.dataset.correctionField] = input.value;
+          });
+          // 改了通道名称或 billdate 后，本行需要填写的币种/金额字段随之切换。
+          modal.dialog.addEventListener('change', (event) => {
+            const input = event.target;
+            if (!input || !input.dataset || input.dataset.correctionIndex === undefined) return;
+            if (!['通道名称', 'billdate'].includes(input.dataset.correctionField)) return;
+            const index = Number(input.dataset.correctionIndex);
+            const container = modal.dialog.querySelector(`[data-correction-fields="${index}"]`);
+            if (container) container.innerHTML = renderCorrectionFields(correctionEntries[index], index, correctionValues[index], targetMonth);
+          });
+        }
+        const collectCorrections = () => {
+          if (!correctionSection.editable) return { corrections: [], message: '' };
+          const corrections = [];
+          for (let index = 0; index < correctionEntries.length; index += 1) {
+            const entry = correctionEntries[index];
+            const values = correctionValues[index];
+            const changed = {};
+            for (const field of channelCorrection.CORRECTABLE_FIELDS) {
+              if (String(values[field] ?? '').trim() !== String(entry.candidate.fields[field] ?? '').trim()) {
+                changed[field] = String(values[field] ?? '').trim();
+              }
+            }
+            if (Object.keys(changed).length === 0) continue;
+            const problemFields = new Set((entry.candidate.problems || []).map((problem) => problem.field));
+            for (const field of correctionRequiredFields(entry, values, targetMonth)) {
+              if (!Object.hasOwn(changed, field) && !problemFields.has(field)) continue;
+              const fieldError = channelCorrection.validateField(field, values[field]);
+              if (fieldError) {
+                return {
+                  corrections: [],
+                  message: `${entry.source.sheetName} 第 ${entry.candidate.sourceRow} 行：${fieldError}`
+                };
+              }
+            }
+            corrections.push({ sourceId: entry.source.sourceId, sourceRow: entry.candidate.sourceRow, fields: changed });
+          }
+          return { corrections, message: '' };
+        };
         modal.dialog.querySelector('[data-action="cancel"]').addEventListener('click', modal.close);
         modal.dialog.querySelector('[data-action="confirm"]').addEventListener('click', () => {
           const subjectBySourceId = {}, excludedSheetIds = [];
@@ -526,8 +651,15 @@
             }
           });
           if (!sources.some((source) => source.status === 'ready')) message ||= '没有可导入的业务 Sheet';
+          const correctionResult = collectCorrections();
+          message ||= correctionResult.message;
           if (message) { error.textContent = message; error.hidden = false; return; }
-          result = { planId: plan.planId, subjectBySourceId, excludedSheetIds };
+          result = {
+            planId: plan.planId,
+            subjectBySourceId,
+            excludedSheetIds,
+            channelCorrections: correctionResult.corrections
+          };
           modal.close({ status: 'submitted', value: result });
         });
       });
@@ -550,7 +682,7 @@
           const progressStatus = buildImportProgressStatus(progress, state.cancelRequested);
           if (progressStatus) setStatus(progressStatus.message, progressStatus.tone);
         });
-        const picked = await api.pickFiles();
+        const picked = await api.pickFiles({ targetMonth: month });
         if (!live(actionGeneration)) { needsRefresh = true; return null; }
         if (!picked || picked.status === 'cancelled') {
           setStatus('已取消导入', 'info');
@@ -912,7 +1044,7 @@
           canClose: () => !saving,
           onClose: () => resolve(outcome),
           bodyHtml: `
-          <p class="vcc-fin-op-summary-line">调整作为独立审计行保存，不覆盖基础结果；同一结果行的同一币种只能调整一次。</p>
+          <p class="vcc-fin-op-summary-line">调整作为独立审计行保存，不覆盖基础结果；同一结果行的同一币种在每次归档前只能调整一次，解归档后可再调整一次。</p>
           <div class="vcc-fin-op-adjustment-form">
             <label class="vcc-fin-op-field"><span>主体</span><select class="vcc-fin-op-input" data-field="adjustment-subject"></select></label>
             <label class="vcc-fin-op-field"><span>大类</span><select class="vcc-fin-op-input" data-field="adjustment-major" disabled></select></label>
@@ -1705,6 +1837,7 @@
       onCompleted = null,
       runningText = '正在处理…',
       confirmationLabel = '',
+      previewConfirmation = null,
       allowOperationCancel = false
     }) {
       const normalizeEntries = normalizeArchivedPickerEntries;
@@ -1745,9 +1878,9 @@
           <select class="vcc-fin-op-input" data-field="archive-month" aria-label="月份"></select>
         </div>
         <p class="vcc-fin-op-delete-state" data-role="archive-picker-state" data-tone="neutral"></p>
-        ${confirmationLabel ? `
-          <label class="vcc-fin-op-confirm-check" data-role="archive-picker-confirm-row">
-            <input type="checkbox" data-field="archive-picker-confirm">${escapeHtml(confirmationLabel)}
+        ${confirmationLabel || typeof previewConfirmation === 'function' ? `
+          <label class="vcc-fin-op-confirm-check" data-role="archive-picker-confirm-row"${confirmationLabel ? '' : ' hidden'}>
+            <input type="checkbox" data-field="archive-picker-confirm"><span data-role="archive-picker-confirm-text">${escapeHtml(confirmationLabel)}</span>
           </label>
         ` : ''}
         <div class="dialog-actions right">
@@ -1764,9 +1897,20 @@
       const closeButton = modal.dialog.querySelector('[data-action="close"]');
       const stateText = modal.dialog.querySelector('[data-role="archive-picker-state"]');
       const confirmation = modal.dialog.querySelector('[data-field="archive-picker-confirm"]');
+      const confirmationRow = modal.dialog.querySelector('[data-role="archive-picker-confirm-row"]');
+      const confirmationText = modal.dialog.querySelector('[data-role="archive-picker-confirm-text"]');
+
+      // 预览决定是否需要额外确认（如级联解归档）；行隐藏时视为无需确认。
+      function applyPreviewConfirmation(result) {
+        if (typeof previewConfirmation !== 'function' || !confirmationRow) return;
+        const label = result ? String(previewConfirmation(result) || '') : '';
+        confirmationText.textContent = label;
+        confirmationRow.hidden = !label;
+        confirmation.checked = false;
+      }
 
       function confirmationSatisfied() {
-        return !confirmation || confirmation.checked === true;
+        return !confirmation || (confirmationRow && confirmationRow.hidden) || confirmation.checked === true;
       }
 
       function setPickerState(message, tone = 'neutral', phase = 'feedback') {
@@ -1814,6 +1958,7 @@
         latestPreview = null;
         currentSelectionCanExecute = false;
         if (confirmation) confirmation.checked = false;
+        applyPreviewConfirmation(null);
         actionButton.disabled = true;
         const entry = selectedEntry();
         if (!entry) {
@@ -1868,11 +2013,12 @@
           const successMessage = result.message || (
             Object.hasOwn(result, 'canExecute')
               ? `${entry.targetMonth} 已归档，可${actionLabel}`
-              : `${entry.targetMonth} 可解归档；基础结果和调整记录将保留。`
+              : `${entry.targetMonth} 可解归档；基础结果和调整记录将保留，每个结果行的每个币种可再调整一次。`
           );
           const tone = result.tone || (Object.hasOwn(result, 'canExecute') ? 'success' : 'warning');
           const phase = Object.hasOwn(result, 'canExecute') && tone === 'success' ? 'ready' : 'feedback';
           setPickerState(successMessage, tone, phase);
+          applyPreviewConfirmation(result);
           currentSelectionCanExecute = true;
           actionButton.disabled = !confirmationSatisfied();
           return { ok: true, canExecute: true };
@@ -2056,6 +2202,26 @@
       return modal;
     }
 
+    // 级联解归档（v3.2.17）：预览列出将删除结果的后续月份与人工调整条数。
+    function describeUnarchivePreview(entry, result) {
+      const cascade = result && result.status === 'success' && result.cascade;
+      if (!cascade || !Array.isArray(cascade.months) || cascade.months.length === 0) return result;
+      const adjustments = Number(cascade.adjustmentCount) || 0;
+      return {
+        ...result,
+        tone: 'warning',
+        message: `${entry.targetMonth} 之后的 ${cascade.months.join('、')} 已有结果，`
+          + `解归档会同时删除这些月份的结果${adjustments > 0 ? `及 ${adjustments} 条人工调整（调整明细写入审计）` : ''}，`
+          + `原表数据保留；完成后请从 ${cascade.months[0]} 起按月份顺序重新运行并归档。`
+      };
+    }
+
+    function cascadeConfirmationLabel(result) {
+      const cascade = result && result.cascade;
+      if (!cascade || !Array.isArray(cascade.months) || cascade.months.length === 0) return '';
+      return `我已了解：将删除 ${cascade.months.join('、')} 的结果和人工调整`;
+    }
+
     async function openUnarchiveDialog({ archivedMonths = null, onUnarchived = null } = {}) {
       const actionGeneration = renderGeneration;
       if (!live(actionGeneration)) return null;
@@ -2068,9 +2234,12 @@
         return createArchivedMonthPickerDialog({
           months,
           actionLabel: '解归档',
-          previewSelection: (entry) => api.previewUnarchive({ targetMonth: entry.targetMonth }),
+          previewSelection: async (entry) => describeUnarchivePreview(
+            entry,
+            await api.previewUnarchive({ targetMonth: entry.targetMonth })
+          ),
+          previewConfirmation: cascadeConfirmationLabel,
           runningText: '正在解归档…',
-          confirmationLabel: '我已确认：解归档后只能由 v3.1.9 及以上版本继续维护；降级前必须恢复完整数据库备份',
           allowOperationCancel: true,
           executeSelection: async (entry, preview, controls) => {
             const actionGeneration = renderGeneration;
@@ -2089,7 +2258,8 @@
               return await api.unarchiveMonth({
                 targetMonth: entry.targetMonth,
                 expectedPreviewToken: preview && preview.previewToken,
-                taskGeneration: preview && preview.taskGeneration
+                taskGeneration: preview && preview.taskGeneration,
+                confirmCascade: Boolean(preview && preview.cascade && preview.cascade.months.length > 0)
               });
             } catch (error) {
               if (!live(actionGeneration)) { needsRefresh = true; return null; }
@@ -2108,11 +2278,24 @@
             await refreshArchivedState();
             if (!live(actionGeneration)) { needsRefresh = true; return null; }
             if (!continuation.isCurrent()) return;
-            setStatus(`${entry.targetMonth} 已解归档，结果恢复为待确认`, 'success');
+            const laterMonths = result && result.cascade && Array.isArray(result.laterMonths)
+              ? result.laterMonths
+              : [];
+            setStatus(
+              laterMonths.length > 0
+                ? `${entry.targetMonth} 已解归档，${laterMonths.join('、')} 的结果已删除`
+                : `${entry.targetMonth} 已解归档，结果恢复为待确认`,
+              'success'
+            );
             if (typeof onUnarchived === 'function') await onUnarchived(result, entry);
             if (!live(actionGeneration)) { needsRefresh = true; return null; }
             if (!continuation.isCurrent()) return;
-            showMessage('解归档完成', `${entry.targetMonth} 已恢复为待确认；基础结果和调整记录均已保留。`, 'success');
+            showMessage('解归档完成', laterMonths.length > 0
+              ? `${entry.targetMonth} 已恢复为待确认，基础结果和调整记录均已保留；`
+                + `${laterMonths.join('、')} 的结果与人工调整已删除（调整明细已写入审计），原表数据保留。`
+                + `请从 ${laterMonths[0]} 起按月份顺序重新运行并归档。`
+              : `${entry.targetMonth} 已恢复为待确认；基础结果和调整记录均已保留，每个结果行的每个币种可再调整一次。`,
+            'success');
           }
         });
       } catch (error) {
@@ -3483,17 +3666,19 @@
       return createArchivedMonthPickerDialog({
         months: PREVIEW_ARCHIVED_MONTHS,
         actionLabel: '解归档',
-        confirmationLabel: '我已确认：解归档后只能由 v3.1.9 及以上版本继续维护；降级前必须恢复完整数据库备份',
-        previewSelection: async (entry) => ({
+        previewSelection: async (entry) => describeUnarchivePreview(entry, {
           status: 'success',
-          canUnarchive: entry.targetMonth === '2026-06',
+          canUnarchive: true,
           dependentMonths: entry.targetMonth === '2026-06' ? [] : ['2026-06'],
-          message: entry.targetMonth === '2026-06'
-            ? '2026-06 可解归档；基础结果和调整记录将保留。'
-            : '该月之后仍存在已归档月份，请先从最新月份开始解归档。',
+          cascade: entry.targetMonth === '2026-06' ? null : {
+            months: ['2026-06'],
+            runs: [{ runId: 2, targetMonth: '2026-06', status: 'archived', adjustmentCount: 1 }],
+            adjustmentCount: 1
+          },
           previewToken: 'preview-token',
           taskGeneration: 0
         }),
+        previewConfirmation: cascadeConfirmationLabel,
         executeSelection: async (entry) => ({ status: 'success', targetMonth: entry.targetMonth })
       });
     }
@@ -3655,22 +3840,18 @@
         const modal = createArchivedMonthPickerDialog({
           months: PREVIEW_ARCHIVED_MONTHS,
           actionLabel: '解归档',
-          confirmationLabel: '我已确认：解归档后只能由 v3.1.9 及以上版本继续维护；降级前必须恢复完整数据库备份',
           previewSelection: async () => ({
             status: 'success', canUnarchive: true, previewToken: 'preview-token', taskGeneration: 0
           }),
           runningText: '正在解归档…',
           executeSelection: () => new Promise(() => {})
         });
+        // v3.2.17：尾月解归档不再需要版本确认勾选，预览通过后按钮直接可用。
         return waitForArchivedPickerPreview(modal, {
           expectedYear: '2026',
           expectedMonth: '2026-06',
-          expectedConfirmDisabled: true
+          expectedConfirmDisabled: false
         }).then(() => {
-          const confirmation = modal && modal.dialog.querySelector('[data-field="archive-picker-confirm"]');
-          if (!confirmation) throw new Error('解归档确认警示缺失');
-          confirmation.checked = true;
-          confirmation.dispatchEvent(new Event('change', { bubbles: true }));
           const button = modal && modal.dialog.querySelector('[data-action="archive-picker-confirm"]');
           if (!button || button.disabled) throw new Error('执行中预览无法启动解归档');
           button.click();

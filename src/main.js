@@ -17627,8 +17627,10 @@ function registerNewAccountHandlers() {
 
   const vccImportPlans = new Map();
   const vccImportPlanOwners = new WeakSet();
-  const { publicImportPlan, resolveImportPlan, planError: vccPlanError } = require('./backend/vcc-financial-op/workbook-import-plan');
-  ipcMain.handle('vccFinancialOp:import:pick-files', async (event) => {
+  const {
+    publicImportPlan, resolveImportPlan, collectChannelCorrections, planError: vccPlanError
+  } = require('./backend/vcc-financial-op/workbook-import-plan');
+  ipcMain.handle('vccFinancialOp:import:pick-files', async (event, payload = {}) => {
     const owner = event.sender;
     const selectionToken = {};
     vccImportPlans.set(owner.id, selectionToken);
@@ -17647,9 +17649,10 @@ function registerNewAccountHandlers() {
     }
     try {
       const sourceStructures = await resolveVccSourceStructures(getTemplateResourceService());
+      const targetMonth = payload && typeof payload.targetMonth === 'string' ? payload.targetMonth : null;
       const plan = await getVccFinancialOpService().inspectSelectedFiles(choice.filePaths, (progress) => {
         if (!owner.isDestroyed()) owner.send('vccFinancialOp:import:progress', progress);
-      }, sourceStructures);
+      }, sourceStructures, targetMonth);
       if (owner.isDestroyed() || vccImportPlans.get(owner.id) !== selectionToken) throw vccPlanError('vcc-import-plan-stale', '文件选择已更新，请重新预检');
       vccImportPlans.set(owner.id, plan);
       return { status: 'success', plan: publicImportPlan(plan) };
@@ -17678,6 +17681,7 @@ function registerNewAccountHandlers() {
       return {
         proceed: true,
         fileDescriptors,
+        channelCorrections: collectChannelCorrections(inspectedFiles),
         filePlan: {
           version: 1,
           allocation: 'eager',
@@ -17734,7 +17738,11 @@ function registerNewAccountHandlers() {
             members: metadata.vccSourceMembers });
         }
         const workerHandoffFiles = { version: 2, taskRunId: batchContext.taskRunId, files: frozenFiles };
-        const businessPayload = { targetMonth: payload.targetMonth, files: frozenFiles };
+        const businessPayload = {
+          targetMonth: payload.targetMonth,
+          files: frozenFiles,
+          channelCorrections: prepared.channelCorrections || []
+        };
         const result = await service.importSelectedFiles(businessPayload, (progress) => {
           if (event && event.sender && !event.sender.isDestroyed()) {
             event.sender.send('vccFinancialOp:import:progress', progress);
@@ -17778,9 +17786,9 @@ function registerNewAccountHandlers() {
     }
   });
 
-  ipcMain.handle('vccFinancialOp:run:preflight', (_event, payload = {}) => {
+  ipcMain.handle('vccFinancialOp:run:preflight', async (_event, payload = {}) => {
     try {
-      return getVccFinancialOpService().preflightRun(payload);
+      return await getVccFinancialOpService().preflightRun(payload);
     } catch (error) {
       return { status: 'error', message: error && error.message ? error.message : String(error) };
     }
@@ -17899,8 +17907,8 @@ function registerNewAccountHandlers() {
     return await getVccFinancialOpService().listImportMonths();
   });
 
-  ipcMain.handle('vccFinancialOp:imports:list-records', (_event, payload = {}) => {
-    return getVccFinancialOpService().listImportRecords(payload.yearMonth);
+  ipcMain.handle('vccFinancialOp:imports:list-records', async (_event, payload = {}) => {
+    return await getVccFinancialOpService().listImportRecords(payload.yearMonth);
   });
 
   ipcMain.handle('vccFinancialOp:data-manager:overview', (_event, payload = {}) => {
@@ -17975,11 +17983,11 @@ function registerNewAccountHandlers() {
     }
   );
 
-  ipcMain.handle('vccFinancialOp:data-manager:export-preview', (_event, payload = {}) => {
+  ipcMain.handle('vccFinancialOp:data-manager:export-preview', async (_event, payload = {}) => {
     try {
       return {
         status: 'success',
-        ...getVccFinancialOpService().previewDatasetExport(payload)
+        ...await getVccFinancialOpService().previewDatasetExport(payload)
       };
     } catch (error) {
       return { status: 'error', message: error && error.message ? error.message : String(error) };
@@ -17989,7 +17997,7 @@ function registerNewAccountHandlers() {
   trackedIpcHandle('vccFinancialOp:data-manager:export', 'VCC财务OP校验', '导出数据', {
     prepare: async (_event, payload = {}) => {
       try {
-        const inspection = getVccFinancialOpService().previewDatasetExport(payload);
+        const inspection = await getVccFinancialOpService().previewDatasetExport(payload);
         if (!inspection.exportable) {
           return {
             proceed: false,

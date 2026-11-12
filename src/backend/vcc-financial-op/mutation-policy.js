@@ -5,7 +5,9 @@ const VCC_MUTATION_OPERATIONS = Object.freeze({
   ARCHIVE_RESULT: 'archive-result',
   UNARCHIVE_MONTH: 'unarchive-month',
   DELETE_DATA_TARGET: 'delete-data-target',
-  ROLLBACK_AUDIT: 'rollback-audit'
+  ROLLBACK_AUDIT: 'rollback-audit',
+  // v3.2.17 级联解归档：目标月解归档，同时删除其后各月结果（含人工调整），原表数据不动。
+  UNARCHIVE_CASCADE: 'unarchive-cascade'
 });
 
 const LARGE_TABLE_SCOPE_PROOF_TABLES = Object.freeze([
@@ -40,15 +42,19 @@ function tablePolicy(tableName, primaryKey, category, allowedOperations = []) {
 const VCC_TABLE_POLICY_REGISTRY = Object.freeze({
   vcc_fin_op_archives: tablePolicy('vcc_fin_op_archives', ['target_month', 'subject'], 'business', [
     VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT,
-    VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH
+    VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH,
+    VCC_MUTATION_OPERATIONS.UNARCHIVE_CASCADE
   ]),
+  // 通道明细补录记录只由导入写入，解归档、删除等受保护写操作一律不得改动。
+  vcc_fin_op_channel_corrections: tablePolicy('vcc_fin_op_channel_corrections', ['id'], 'audit'),
   vcc_fin_op_dataset_deletions: tablePolicy('vcc_fin_op_dataset_deletions', ['id'], 'audit', [
     VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET
   ]),
   vcc_fin_op_datasets: tablePolicy('vcc_fin_op_datasets', ['target_month', 'dataset_type'], 'metadata', [
     VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT,
     VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH,
-    VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET
+    VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET,
+    VCC_MUTATION_OPERATIONS.UNARCHIVE_CASCADE
   ]),
   vcc_fin_op_effective_rows: tablePolicy('vcc_fin_op_effective_rows', ['id'], 'business', [
     VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET
@@ -83,38 +89,42 @@ const VCC_TABLE_POLICY_REGISTRY = Object.freeze({
     VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT,
     VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH,
     VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET,
-    VCC_MUTATION_OPERATIONS.ROLLBACK_AUDIT
+    VCC_MUTATION_OPERATIONS.ROLLBACK_AUDIT,
+    VCC_MUTATION_OPERATIONS.UNARCHIVE_CASCADE
   ]),
   vcc_fin_op_pending_currency_totals: tablePolicy(
     'vcc_fin_op_pending_currency_totals',
     ['run_id', 'subject', 'currency'],
     'business',
-    [VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET]
+    [VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET, VCC_MUTATION_OPERATIONS.UNARCHIVE_CASCADE]
   ),
   vcc_fin_op_pending_summary_rows: tablePolicy(
     'vcc_fin_op_pending_summary_rows',
     ['id'],
     'business',
-    [VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET]
+    [VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET, VCC_MUTATION_OPERATIONS.UNARCHIVE_CASCADE]
   ),
   vcc_fin_op_run_adjustments: tablePolicy('vcc_fin_op_run_adjustments', ['id'], 'business', [
     VCC_MUTATION_OPERATIONS.ADD_ADJUSTMENT,
-    VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET
+    VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET,
+    VCC_MUTATION_OPERATIONS.UNARCHIVE_CASCADE
   ]),
   vcc_fin_op_run_balances: tablePolicy(
     'vcc_fin_op_run_balances',
     ['run_id', 'subject', 'currency'],
     'business',
-    [VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET]
+    [VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET, VCC_MUTATION_OPERATIONS.UNARCHIVE_CASCADE]
   ),
   vcc_fin_op_run_rows: tablePolicy('vcc_fin_op_run_rows', ['id'], 'business', [
-    VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET
+    VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET,
+    VCC_MUTATION_OPERATIONS.UNARCHIVE_CASCADE
   ]),
   vcc_fin_op_runs: tablePolicy('vcc_fin_op_runs', ['id'], 'business', [
     VCC_MUTATION_OPERATIONS.ADD_ADJUSTMENT,
     VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT,
     VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH,
-    VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET
+    VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET,
+    VCC_MUTATION_OPERATIONS.UNARCHIVE_CASCADE
   ]),
   vcc_fin_op_system_snapshot_attempts: tablePolicy(
     'vcc_fin_op_system_snapshot_attempts',
@@ -146,8 +156,8 @@ const MUTATION_SQL_STEP_REGISTRY = Object.freeze({
       INSERT INTO vcc_fin_op_run_adjustments (
         run_id, row_key, subject, source_type, category_major, category_minor,
         currency, adjustment_amount, reason, sequence,
-        created_at, created_app_version, created_build_sha
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        created_at, created_app_version, created_build_sha, adjustment_cycle
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
   }),
   'adjustment.bump-run': step({
@@ -210,6 +220,76 @@ const MUTATION_SQL_STEP_REGISTRY = Object.freeze({
       ) VALUES (?, 'unarchive', ?, 'success', ?, ?, NULL, ?, ?, ?)
     `
   }),
+  'unarchive-cascade.audit-success': step({
+    tableName: 'vcc_fin_op_operation_audit',
+    mutation: 'insert',
+    sql: `
+      INSERT INTO vcc_fin_op_operation_audit (
+        target_month, operation_type, run_id, status, preview_token,
+        evidence_json, error_message, app_version, build_sha, created_at
+      ) VALUES (?, 'unarchive_cascade', ?, 'success', ?, ?, NULL, ?, ?, ?)
+    `
+  }),
+  'unarchive-cascade.delete-later-archives': step({
+    tableName: 'vcc_fin_op_archives',
+    mutation: 'delete',
+    sql: `DELETE FROM vcc_fin_op_archives WHERE target_month > ?`
+  }),
+  'unarchive-cascade.delete-later-adjustments': step({
+    tableName: 'vcc_fin_op_run_adjustments',
+    mutation: 'delete',
+    sql: `
+      DELETE FROM vcc_fin_op_run_adjustments
+      WHERE run_id IN (SELECT id FROM vcc_fin_op_runs WHERE target_month > ?)
+    `
+  }),
+  'unarchive-cascade.delete-later-run-rows': step({
+    tableName: 'vcc_fin_op_run_rows',
+    mutation: 'delete',
+    sql: `
+      DELETE FROM vcc_fin_op_run_rows
+      WHERE run_id IN (SELECT id FROM vcc_fin_op_runs WHERE target_month > ?)
+    `
+  }),
+  'unarchive-cascade.delete-later-run-balances': step({
+    tableName: 'vcc_fin_op_run_balances',
+    mutation: 'delete',
+    sql: `
+      DELETE FROM vcc_fin_op_run_balances
+      WHERE run_id IN (SELECT id FROM vcc_fin_op_runs WHERE target_month > ?)
+    `
+  }),
+  'unarchive-cascade.delete-later-pending-summaries': step({
+    tableName: 'vcc_fin_op_pending_summary_rows',
+    mutation: 'delete',
+    sql: `
+      DELETE FROM vcc_fin_op_pending_summary_rows
+      WHERE run_id IN (SELECT id FROM vcc_fin_op_runs WHERE target_month > ?)
+    `
+  }),
+  'unarchive-cascade.delete-later-pending-currency-totals': step({
+    tableName: 'vcc_fin_op_pending_currency_totals',
+    mutation: 'delete',
+    sql: `
+      DELETE FROM vcc_fin_op_pending_currency_totals
+      WHERE run_id IN (SELECT id FROM vcc_fin_op_runs WHERE target_month > ?)
+    `
+  }),
+  'unarchive-cascade.delete-later-runs': step({
+    tableName: 'vcc_fin_op_runs',
+    mutation: 'delete',
+    sql: `DELETE FROM vcc_fin_op_runs WHERE target_month > ?`
+  }),
+  'unarchive-cascade.restore-later-datasets': step({
+    tableName: 'vcc_fin_op_datasets',
+    mutation: 'update',
+    sql: `
+      UPDATE vcc_fin_op_datasets
+      SET data_status = 'unprocessed', archived_run_id = NULL, updated_at = ?
+      WHERE target_month > ?
+        AND (data_status = 'archived' OR archived_run_id IS NOT NULL)
+    `
+  }),
   'unarchive.delete-archives': step({
     tableName: 'vcc_fin_op_archives',
     mutation: 'delete',
@@ -220,7 +300,8 @@ const MUTATION_SQL_STEP_REGISTRY = Object.freeze({
     mutation: 'update',
     sql: `
       UPDATE vcc_fin_op_runs
-      SET status = 'calculated', archived_at = NULL, updated_at = ?
+      SET status = 'calculated', archived_at = NULL, updated_at = ?,
+          adjustment_cycle = adjustment_cycle + 1
       WHERE id = ? AND target_month = ? AND status = 'archived'
     `
   }),

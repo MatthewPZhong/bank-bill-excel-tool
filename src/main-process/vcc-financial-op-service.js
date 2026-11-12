@@ -13,7 +13,6 @@ const {
 const {
   isValidInputFingerprint,
   initializeOpeningBalances,
-  preflightCalculation,
   preflightRequiredResult
 } = require('../backend/vcc-financial-op/calculator');
 const {
@@ -39,8 +38,7 @@ const { runResultWorkbookWorker } = require('./vcc-financial-op-result-workbook-
 const { archivedResultSnapshot, assertSameArchivedResult } = require('./vcc-financial-op-result-export-contract');
 const { writeImportAuditWorkbook } = require('./vcc-financial-op-audit-writer');
 const {
-  CHECK_EXPORT_DEFINITIONS,
-  inspectDatasetExport
+  CHECK_EXPORT_DEFINITIONS
 } = require('./vcc-financial-op-dataset-writer');
 const {
   VCC_MUTATION_OPERATIONS
@@ -55,7 +53,21 @@ const RESULT_WRITE_WORKER_PATH = path.join(__dirname, 'vcc-financial-op-write-wo
 const REVIEW_WORKER_PATH = path.join(__dirname, 'vcc-financial-op-review-worker.js');
 const { validateReviewRequest, assertReviewFresh, reviewError } = require('../backend/vcc-financial-op/review-export-contract');
 const { assertTargetAllowed, captureTarget, publishReviewFile } = require('./vcc-financial-op-review-target');
-const READ_ONLY_TASKS = new Set(['inspect-plan', 'revalidate-plan', 'export-review']);
+const READ_ONLY_TASKS = new Set([
+  'inspect-plan', 'revalidate-plan', 'export-review',
+  'export-dataset', 'export-result', 'export-import-audit', 'export-read-only'
+]);
+// 只有会改变 VCC 业务数据的任务结束后才推进任务计数，使已打开的预览失效（spec D4）；
+// 选文件预检与各类导出不改数据，结束后预览仍有效。
+const WRITE_TASK_ACTIONS = new Set([
+  'import',
+  'calculate',
+  'initialize-opening',
+  VCC_MUTATION_OPERATIONS.ADD_ADJUSTMENT,
+  VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT,
+  VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH,
+  VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET
+]);
 
 const IMPORT_STATUS_TEXT = Object.freeze({
   deleted: '已删除',
@@ -132,9 +144,11 @@ function detailRecordShape(record, db) {
     conflictCount: Number(record.conflict_count) || 0,
     formatErrorCount: Number(record.format_error_count) || 0,
     rolledBackCount: Number(record.rolled_back_count) || 0,
-    anomalyCount: db
-      ? repository.countExportableImportAnomalies(db, record.id)
-      : (Number(record.anomaly_count) || 0),
+    anomalyCount: record.exportable_anomaly_count != null
+      ? Number(record.exportable_anomaly_count) || 0
+      : (db
+        ? repository.countExportableImportAnomalies(db, record.id)
+        : (Number(record.anomaly_count) || 0)),
     archiveState: record.archive_state || 'pending',
     errorMessage: record.error_message || ''
   };
@@ -189,6 +203,7 @@ function createVccFinancialOpService({
   let taskGeneration = 0;
   let closing = false;
   let activeMonthsCache = null;
+  let archivedMonthsCache = null;
   const activeReadWorkers = new Set();
   repository.recoverInterruptedImports(database.db);
 
@@ -271,8 +286,11 @@ function createVccFinancialOpService({
     task.released = true;
     if (activeTask === task) {
       activeTask = null;
-      taskGeneration += 1;
-      activeMonthsCache = null;
+      if (WRITE_TASK_ACTIONS.has(task.action)) {
+        taskGeneration += 1;
+        activeMonthsCache = null;
+        archivedMonthsCache = null;
+      }
     }
     task.complete(outcome);
   }
@@ -397,7 +415,8 @@ function createVccFinancialOpService({
     if (action === VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH) {
       return {
         targetMonth: payload.targetMonth,
-        expectedPreviewToken: payload.expectedPreviewToken
+        expectedPreviewToken: payload.expectedPreviewToken,
+        confirmCascade: payload.confirmCascade === true
       };
     }
     if (action === VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET) {
@@ -505,8 +524,9 @@ function createVccFinancialOpService({
   }
 
   // sourceStructures：设置 → 模板文件当前启用的用户结构 { [sourceType]: { headers, versionLabel } }，冻结进导入计划。
-  async function inspectSelectedFiles(filePaths, onProgress, sourceStructures = null) {
-    return runWorker('inspect-plan', { filePaths, sourceStructures }, onProgress);
+  // targetMonth：导入账期，用于预检阶段找出可补录的通道明细行（v3.2.17）。
+  async function inspectSelectedFiles(filePaths, onProgress, sourceStructures = null, targetMonth = null) {
+    return runWorker('inspect-plan', { filePaths, sourceStructures, targetMonth }, onProgress);
   }
 
   async function validateImportPlan(plan, onProgress) {
@@ -528,6 +548,7 @@ function createVccFinancialOpService({
     const targetMonth = normalizeYearMonth(payload && payload.targetMonth);
     return runWorker('import', {
       ...payload,
+      provenance: { appVersion, buildSha },
       batchId: importBatchId,
       batchContext,
       archiveHandoffFiles: frozenArchiveHandoffFiles
@@ -550,7 +571,7 @@ function createVccFinancialOpService({
     });
   }
 
-  function preflightRun(payload = {}) {
+  async function preflightRun(payload = {}) {
     const targetMonth = normalizeYearMonth(payload.targetMonth);
     if (!targetMonth) throw new Error(`计算账期格式无效：${payload.targetMonth || ''}`);
     if (activeTask) {
@@ -561,7 +582,9 @@ function createVccFinancialOpService({
         message: '已有 VCC 财务OP任务正在运行，请完成后重试。'
       };
     }
-    return { targetMonth, ...preflightCalculation(database.db, targetMonth) };
+    // 预检要对当月全部有效行计数，放到只读 worker，避免卡住主进程。
+    const result = await runReadWorker('preflight-calculation', { targetMonth });
+    return { targetMonth, ...result.preflight };
   }
 
   async function cancelActiveTask(onCancellationAccepted = null) {
@@ -693,10 +716,11 @@ function createVccFinancialOpService({
     return [...activeMonthsCache.months];
   }
 
-  function listImportRecords(yearMonth) {
-    syncImportArchiveLineage();
-    return repository.listImportRecords(database.db, yearMonth)
-      .map((record) => detailRecordShape(record, database.db));
+  // 存档状态自 v3.1.11 起不在列表展示，列表不再触发存档关联同步；
+  // 同步只在导入、删除、存档重试与导出预览时进行。
+  async function listImportRecords(yearMonth) {
+    const result = await runReadWorker('list-import-records', { yearMonth });
+    return result.records.map((record) => detailRecordShape(record, null));
   }
 
   function previewDatasetDeletion(payload = {}) {
@@ -716,12 +740,25 @@ function createVccFinancialOpService({
     }, onProgress, operationContext);
   }
 
+  // 全量归档月份枚举要加载每个归档月的结果证据；按任务计数缓存，写任务结束后失效。
   async function listArchivedResultMonths(options = {}) {
+    const cacheable = !options || Object.keys(options).length === 0;
+    if (cacheable && archivedMonthsCache && archivedMonthsCache.taskGeneration === taskGeneration) {
+      return [...archivedMonthsCache.months];
+    }
+    const generationAtStart = taskGeneration;
     const result = await runReadWorker('list-archive-months', options);
     for (const diagnostic of result.diagnostics || []) {
       if (archiveConsistencyLogger) {
         try { archiveConsistencyLogger(diagnostic); } catch (_error) { /* 诊断日志不可阻断归档枚举 */ }
       }
+    }
+    if (cacheable && generationAtStart === taskGeneration) {
+      archivedMonthsCache = Object.freeze({
+        taskGeneration: generationAtStart,
+        months: Object.freeze(result.months.map((month) => Object.freeze(month)))
+      });
+      return [...archivedMonthsCache.months];
     }
     return result.months;
   }
@@ -760,7 +797,8 @@ function createVccFinancialOpService({
     return runResultWriteWorker(VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH, {
       targetMonth: payload.targetMonth,
       expectedPreviewToken,
-      taskGeneration: payload.taskGeneration
+      taskGeneration: payload.taskGeneration,
+      confirmCascade: payload.confirmCascade === true
     }, onProgress, operationContext);
   }
 
@@ -788,18 +826,14 @@ function createVccFinancialOpService({
     }, onProgress, operationContext);
   }
 
-  function previewDatasetExport(payload = {}) {
+  async function previewDatasetExport(payload = {}) {
     syncImportArchiveLineage();
-    return {
-      ...inspectDatasetExport(
-        database.db,
-        payload.targetMonth,
-        payload.sourceType,
-        payload.targetKind,
-        { taskActive: Boolean(activeTask) }
-      ),
-      taskGeneration
-    };
+    const result = await runReadWorker('inspect-dataset-export', {
+      targetMonth: payload.targetMonth,
+      sourceType: payload.sourceType,
+      targetKind: payload.targetKind
+    });
+    return { ...result.inspection, taskGeneration: result.taskGeneration };
   }
 
   async function resolveDatasetArchiveSources(payload = {}) {

@@ -185,7 +185,8 @@ function validateEffectiveResultEvidence({
       pushViolation(violations, 'invalid-adjustment-currency');
       continue;
     }
-    const adjustmentCoordinate = coordinateKey(rowKey, currency);
+    // 同一调整周期内坐标唯一；不同周期（解归档后再调整）全部计入。
+    const adjustmentCoordinate = `${coordinateKey(rowKey, currency)}\u0000${Number(adjustment.adjustmentCycle) || 0}`;
     if (adjustmentCoordinates.has(adjustmentCoordinate)) {
       pushViolation(violations, 'adjustment-coordinate-duplicate');
       continue;

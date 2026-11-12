@@ -16,6 +16,11 @@ const { mapDetailRow, pendingCanonicalValues, monthOfDate } = require('./row-map
 const { systemAmountRead, systemOpCellValues } = require('./system-op-importer');
 const { cellValueFromBody } = require('../big-table-import/row-scanner');
 const { assertMappedLineage } = require('./mapped-lineage-contract');
+const {
+  loadChannelCorrectionIndex,
+  channelCorrectionsFor,
+  applyChannelCorrections
+} = require('./channel-correction-lineage');
 const { hashSourceFile } = require('./source-lineage');
 const { openRichWorkbook } = require('../xlsx/rich-workbook');
 const { assertReviewFresh, framedDigest, rawCell, historicCell, comparableCell, reviewError } = require('./review-export-contract');
@@ -140,6 +145,11 @@ async function prepareReviewManifest({ dbPath, manifestPath, request, archiveRoo
       JOIN vcc_fin_op_import_sources s ON s.archive_artifact_id=a.id
       JOIN vcc_fin_op_import_records r ON r.id=s.import_record_id
       WHERE r.target_month=? AND a.source_path<>''`).all(effective.run.targetMonth).map((row) => row.source_path));
+    const correctionIndexes = new Map();
+    const correctionIndexFor = (sourceId) => {
+      if (!correctionIndexes.has(sourceId)) correctionIndexes.set(sourceId, loadChannelCorrectionIndex(business, sourceId));
+      return correctionIndexes.get(sourceId);
+    };
     const sourceFor = (fact, type) => {
       const record = business.prepare('SELECT * FROM vcc_fin_op_import_records WHERE id=?').get(fact.import_record_id);
       if (!record || record.source_type !== type || record.target_month !== effective.run.targetMonth
@@ -208,7 +218,11 @@ async function prepareReviewManifest({ dbPath, manifestPath, request, archiveRoo
       }
       // 导入时为用户结构的原件：按导入时表头定位与输出原表页（按表头指纹分组），核验时对应回内置列（source-structure.js）。
       const sourceHeaders = sheet?.sourceHeaders || null;
+      const channelCorrections = type === SOURCE_TYPES.CHANNEL && descriptor.source
+        ? channelCorrectionsFor(correctionIndexFor(descriptor.source.id), fact.sheet_name, sourceRow)
+        : null;
       const payload = { ...fact, source_type: type, headers: sourceHeaders || headers, canonicalHeaders: headers, sourceHeaders, raw_contract_version: version,
+        ...(channelCorrections ? { channelCorrections } : {}),
         expectedHeaderRow: sheet?.headerRow || extra.headerRow || null, verifiedSheetIndex: sheet?.sheetIndex ?? null,
         systemAuditContract: type === SOURCE_TYPES.SYSTEM_OP ? (descriptor.member ? 'rich-v1' : 'sheetjs-v1') : null, ...extra };
       manifest.prepare('INSERT INTO facts VALUES (?,?,?,?,?,?,?,?,?)').run(identity, descriptor.sourceKey, fact.sheet_name,
@@ -331,7 +345,10 @@ function validateRawFact(fact, rawValues, rawCells) {
       } else if (String(values[index] ?? '') !== String(historical ?? '')) throw mismatch(`${fact.identity} 原始列 ${index + 1} 不符`);
     }
   } else {
-    const mappingValues = expected.source_type === SOURCE_TYPES.PENDING ? pendingCanonicalValues(values, expected.raw_contract_version) : values;
+    // 预检补录行：原件取值先还原为导入时的补录值再核验（v3.2.17）。
+    const correctedValues = applyChannelCorrections(values, expected.channelCorrections || null,
+      (field) => { throw mismatch(`${fact.identity} “${field}”与补录原值不符`); });
+    const mappingValues = expected.source_type === SOURCE_TYPES.PENDING ? pendingCanonicalValues(correctedValues, expected.raw_contract_version) : correctedValues;
     const mapped = mapDetailRow({ sourceType: expected.source_type, values: mappingValues, targetMonth: expected.target_month,
       assignedSubject: expected.subject, sourceFile: '', sheetName: fact.sheet_name, sourceRow: fact.source_row });
     assertMappedLineage(expected, mapped);
@@ -352,7 +369,23 @@ async function extractReviewSources({ manifestPath, signal, onProgress }) {
       const save = (fact, values, cells) => {
         safePoint(signal);
         const expected = validateRawFact(fact, values, cells);
-        const output = cells ? expected.headers.map((header, index) => rawCell(cells[index], header)) : values.map(historicCell);
+        // 待确认表的原表行显示补录后的值，与计算口径一致。补录字段直接取补录值，
+        // 不再转换原单元格（原值可能是无缓存值的公式，正是被补录的原因）；其余字段照常核验转换。
+        // 补录记录按内置字段名保存；用户模板改名、换序时按导入时列映射定位原表列，不能静默丢弃。
+        const corrections = Object.entries(expected.channelCorrections || {});
+        const projection = corrections.length
+          ? createSourceProjection(expected.canonicalHeaders || expected.headers, expected.sourceHeaders) : null;
+        const correctedByIndex = new Map(corrections.map(([field, correction]) => {
+          const index = projection.sourceIndexOfCanonical(field);
+          if (index < 0 || index >= expected.headers.length) {
+            throw mismatch(`${fact.identity} 补录字段“${field}”在导入时结构中没有对应列`);
+          }
+          return [index, correction.corrected];
+        }));
+        const output = cells
+          ? expected.headers.map((header, index) => (correctedByIndex.has(index)
+            ? historicCell(correctedByIndex.get(index)) : rawCell(cells[index], header)))
+          : values.map((value, index) => historicCell(correctedByIndex.has(index) ? correctedByIndex.get(index) : value));
         db.prepare('INSERT INTO actual VALUES (?,?)').run(fact.identity, JSON.stringify(output)); extracted += 1;
       };
       db.exec('BEGIN');

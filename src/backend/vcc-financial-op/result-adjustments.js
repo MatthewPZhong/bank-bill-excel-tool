@@ -330,14 +330,14 @@ function validateAdjustments(db, runId, logicalRows, subject = null) {
   const rows = normalizedSubject === null ? db.prepare(`
     SELECT id, run_id, row_key, subject, source_type, category_major, category_minor,
            currency, adjustment_amount, reason, sequence, created_at,
-           created_app_version, created_build_sha
+           created_app_version, created_build_sha, adjustment_cycle
     FROM vcc_fin_op_run_adjustments
     WHERE run_id = ?
     ORDER BY sequence, id
   `).all(runId) : db.prepare(`
     SELECT id, run_id, row_key, subject, source_type, category_major, category_minor,
            currency, adjustment_amount, reason, sequence, created_at,
-           created_app_version, created_build_sha
+           created_app_version, created_build_sha, adjustment_cycle
     FROM vcc_fin_op_run_adjustments
     WHERE run_id = ? AND subject = ?
     ORDER BY sequence, id
@@ -381,12 +381,14 @@ function validateAdjustments(db, runId, logicalRows, subject = null) {
         { adjustmentId: Number(row.id), currency }
       );
     }
-    const coord = coordinateKey(rowKey, currency);
+    const adjustmentCycle = Number(row.adjustment_cycle) || 0;
+    // 同一调整周期内坐标唯一；不同周期（解归档后）可再调整一次，全部累加生效。
+    const coord = `${coordinateKey(rowKey, currency)}\u0000${adjustmentCycle}`;
     if (coordinates.has(coord)) {
       throw resultStateError(
         'adjustment-coordinate-duplicate',
         `run ${runId} 的调整坐标重复：${rowKey} / ${currency}`,
-        { runId, rowKey, currency }
+        { runId, rowKey, currency, adjustmentCycle }
       );
     }
     coordinates.add(coord);
@@ -434,7 +436,8 @@ function validateAdjustments(db, runId, logicalRows, subject = null) {
       sequence,
       createdAt: row.created_at,
       createdAppVersion: row.created_app_version,
-      createdBuildSha: row.created_build_sha
+      createdBuildSha: row.created_build_sha,
+      adjustmentCycle
     });
   });
   for (let index = 0; index < adjustments.length; index += 1) {
@@ -825,7 +828,7 @@ function getEffectiveRunResultInternal(db, runId, subject = null) {
   }
   const run = db.prepare(`
     SELECT id, target_month, status, input_revisions_json, result_revision,
-           input_fingerprint, created_at, updated_at, archived_at
+           input_fingerprint, created_at, updated_at, archived_at, adjustment_cycle
     FROM vcc_fin_op_runs
     WHERE id = ?
   `).get(normalizedRunId);
@@ -875,7 +878,8 @@ function getEffectiveRunResultInternal(db, runId, subject = null) {
       inputFingerprint: run.input_fingerprint,
       createdAt: run.created_at,
       updatedAt: run.updated_at,
-      archivedAt: run.archived_at
+      archivedAt: run.archived_at,
+      adjustmentCycle: Number(run.adjustment_cycle) || 0
     }),
     baseRows: Object.freeze(baseState.baseRows),
     adjustments: Object.freeze(adjustmentState.adjustments),
@@ -915,8 +919,12 @@ function listAdjustmentOptions(db, runId) {
       { runId: effective.run.runId, status: effective.run.status }
     );
   }
+  // 只排除本调整周期内已用的坐标；解归档后周期加 1，旧坐标可再调整一次。
+  const currentCycle = Number(effective.run.adjustmentCycle) || 0;
   const adjusted = new Set(
-    effective.adjustments.map((row) => coordinateKey(row.rowKey, row.currency))
+    effective.adjustments
+      .filter((row) => (Number(row.adjustmentCycle) || 0) === currentCycle)
+      .map((row) => coordinateKey(row.rowKey, row.currency))
   );
   const logicalRows = new Map();
   for (const row of effective.baseRows) {
@@ -1101,8 +1109,10 @@ function addRunAdjustment({
         { runId: normalizedRunId, rowKey: normalizedRowKey }
       );
     }
+    const currentCycle = Number(before.run.adjustmentCycle) || 0;
     const existing = before.adjustments.find((row) => (
       row.rowKey === normalizedRowKey && row.currency === normalizedCurrency
+        && (Number(row.adjustmentCycle) || 0) === currentCycle
     ));
     if (existing) {
       throw resultStateError(
@@ -1128,8 +1138,8 @@ function addRunAdjustment({
         INSERT INTO vcc_fin_op_run_adjustments (
           run_id, row_key, subject, source_type, category_major, category_minor,
           currency, adjustment_amount, reason, sequence,
-          created_at, created_app_version, created_build_sha
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          created_at, created_app_version, created_build_sha, adjustment_cycle
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         normalizedRunId,
         normalizedRowKey,
@@ -1143,7 +1153,8 @@ function addRunAdjustment({
         nextSequence,
         transactionTimestamp,
         appVersion,
-        buildSha
+        buildSha,
+        currentCycle
       );
     } catch (error) {
       throw translateAdjustmentConstraint(

@@ -35,6 +35,126 @@ const STAGING_ROW_INSERT_SQL = `
   )
 `;
 
+// 导入中转行（含每行原始 JSON）只在单次导入期间存在。生产导入在本连接建同名 TEMP 表，
+// 未限定库名的中转 SQL 自动落到 TEMP 表（SQLite 名称解析 temp 优先于 main），
+// 数据写入 SQLite 临时文件、连接关闭即删除，不再撑大主库与 WAL。
+// 列与约束须与主库 vcc_fin_op_import_staging_rows 保持一致（外键除外：TEMP 表不能引用 main 表）。
+const SCRATCH_STAGING_TABLE_SQL = `
+  CREATE TEMP TABLE vcc_fin_op_import_staging_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    import_record_id INTEGER NOT NULL,
+    import_source_id INTEGER NOT NULL,
+    source_type TEXT NOT NULL,
+    target_month TEXT NOT NULL,
+    idempotency_key_raw TEXT,
+    idempotency_key TEXT,
+    content_hash TEXT,
+    hash_version INTEGER NOT NULL DEFAULT 1,
+    raw_contract_version INTEGER NOT NULL DEFAULT 1,
+    subject TEXT,
+    stat_currency TEXT,
+    signed_amount TEXT,
+    business_department TEXT,
+    counterparty_department TEXT,
+    business_sub_type TEXT,
+    channel_name TEXT,
+    mid TEXT,
+    recon_type TEXT,
+    pending_currency TEXT,
+    pending_amount TEXT,
+    flow_currency TEXT,
+    flow_amount TEXT,
+    currency_mismatch INTEGER,
+    source_file TEXT NOT NULL,
+    sheet_name TEXT NOT NULL,
+    source_row INTEGER NOT NULL,
+    raw_json TEXT NOT NULL,
+    disposition TEXT CHECK (disposition IS NULL OR disposition IN (
+      'accepted', 'idempotent_skip', 'idempotent_conflict',
+      'invalid_key', 'format_error', 'rolled_back'
+    )),
+    validation_field TEXT,
+    validation_message TEXT,
+    existing_effective_id INTEGER,
+    comparison_import_row_id INTEGER,
+    diff_fields_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  );
+  CREATE INDEX temp.idx_vcc_fin_op_staging_record_disposition
+    ON vcc_fin_op_import_staging_rows(import_record_id, disposition, id);
+  CREATE INDEX temp.idx_vcc_fin_op_staging_record_key
+    ON vcc_fin_op_import_staging_rows(import_record_id, idempotency_key, content_hash, id);
+  CREATE INDEX temp.idx_vcc_fin_op_staging_comparison
+    ON vcc_fin_op_import_staging_rows(comparison_import_row_id)
+    WHERE comparison_import_row_id IS NOT NULL;
+`;
+
+function ensureImportStagingScratch(db) {
+  const existing = db.prepare(`
+    SELECT 1 AS present FROM temp.sqlite_master
+    WHERE type = 'table' AND name = 'vcc_fin_op_import_staging_rows'
+  `).get();
+  if (existing) return false;
+  if (db.isTransaction) {
+    throw new Error('VCC 导入暂存区必须在事务外创建');
+  }
+  // TEMP 表落在 SQLite 临时文件而非内存，百万行暂存不占用 worker 内存。
+  db.exec('PRAGMA temp_store = FILE');
+  db.exec(SCRATCH_STAGING_TABLE_SQL);
+  return true;
+}
+
+// v3.2.17 通道明细补录：每个被改字段一行（原值、新值、时间、程序版本），与导入同事务写入。
+function insertChannelCorrections(db, { recordId, targetMonth, corrections, provenance = null }) {
+  const insert = db.prepare(`
+    INSERT INTO vcc_fin_op_channel_corrections (
+      import_record_id, import_source_id, target_month, sheet_name, source_row,
+      idempotency_key, field_name, original_value, corrected_value,
+      created_app_version, created_build_sha
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  let inserted = 0;
+  for (const correction of corrections) {
+    for (const [field, correctedValue] of Object.entries(correction.corrected)) {
+      insert.run(
+        Number(recordId),
+        Number(correction.importSourceId),
+        targetMonth,
+        String(correction.sheetName),
+        Number(correction.sourceRow),
+        String(correction.idempotencyKey),
+        field,
+        String(correction.original[field] ?? ''),
+        String(correctedValue),
+        provenance && provenance.appVersion != null ? String(provenance.appVersion) : null,
+        provenance && provenance.buildSha != null ? String(provenance.buildSha) : null
+      );
+      inserted += 1;
+    }
+  }
+  return inserted;
+}
+
+function countCorrectedRows(db, recordId) {
+  const exists = db.prepare(`
+    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'vcc_fin_op_channel_corrections'
+  `).get();
+  if (!exists) return 0;
+  // 只统计补录后成为本次有效数据的行；幂等跳过或冲突的补录行仍在【导出明细】中可见。
+  return Number(db.prepare(`
+    SELECT COUNT(*) AS row_count FROM (
+      SELECT DISTINCT correction.import_source_id, correction.sheet_name, correction.source_row
+      FROM vcc_fin_op_channel_corrections AS correction
+      JOIN vcc_fin_op_effective_rows AS effective
+        ON effective.import_source_id = correction.import_source_id
+       AND effective.sheet_name = correction.sheet_name
+       AND effective.source_row = correction.source_row
+       AND effective.import_record_id = correction.import_record_id
+      WHERE correction.import_record_id = ?
+    )
+  `).get(Number(recordId)).row_count) || 0;
+}
+
 function createImportBatch(db, { id, targetMonth, fileCount }) {
   db.prepare(`
     INSERT INTO vcc_fin_op_import_batches (id, target_month, file_count)
@@ -181,8 +301,9 @@ function refreshImportRecordArchiveState(db, recordId) {
   else if (Number(row.failed_count) > 0) state = 'failed';
   else if (Number(row.unavailable_count) === total) state = 'unavailable';
   db.prepare(`
-    UPDATE vcc_fin_op_import_records SET archive_state = ? WHERE id = ?
-  `).run(state, recordId);
+    UPDATE vcc_fin_op_import_records SET archive_state = ?
+    WHERE id = ? AND archive_state IS NOT ?
+  `).run(state, recordId, state);
   return state;
 }
 
@@ -465,6 +586,10 @@ function compactImportAnomalyCount(db, recordId) {
 }
 
 function countExportableImportAnomalies(db, recordId) {
+  return countImportAnomalyRows(db, recordId) + countChannelCorrectionAuditRows(db, recordId);
+}
+
+function countImportAnomalyRows(db, recordId) {
   const normalizedRecordId = Number(recordId);
   const compactCount = compactImportAnomalyCount(db, normalizedRecordId);
   if (compactCount > 0) return compactCount;
@@ -496,7 +621,109 @@ function countExportableImportAnomalies(db, recordId) {
   return legacyRowCount + (Number(legacyErrors.count) || 0) + syntheticFileFailure;
 }
 
+// 与 countExportableImportAnomalies 同一口径，按账期一次分组统计，避免列表逐条查询。
+function countExportableImportAnomaliesByMonth(db, yearMonth) {
+  const counts = new Map();
+  const compact = new Map(db.prepare(`
+    SELECT anomaly.import_record_id AS record_id, COUNT(*) AS count
+    FROM vcc_fin_op_import_anomalies AS anomaly
+    JOIN vcc_fin_op_import_records AS record ON record.id = anomaly.import_record_id
+    WHERE record.target_month = ?
+    GROUP BY anomaly.import_record_id
+  `).all(yearMonth).map((row) => [Number(row.record_id), Number(row.count) || 0]));
+  const legacyRows = new Map(db.prepare(`
+    SELECT legacy_row.import_record_id AS record_id, COUNT(*) AS count
+    FROM vcc_fin_op_import_rows AS legacy_row
+    JOIN vcc_fin_op_import_records AS record ON record.id = legacy_row.import_record_id
+    WHERE record.target_month = ?
+      AND legacy_row.disposition IN ('invalid_key', 'format_error', 'idempotent_conflict')
+    GROUP BY legacy_row.import_record_id
+  `).all(yearMonth).map((row) => [Number(row.record_id), Number(row.count) || 0]));
+  const legacyErrors = new Map(db.prepare(`
+    SELECT record_id, COUNT(*) AS count,
+           COALESCE(SUM(CASE WHEN category = 'file_failure' THEN 1 ELSE 0 END), 0)
+             AS file_failure_count
+    FROM (
+      SELECT import_error.import_record_id AS record_id,
+             ${LEGACY_ERROR_CATEGORY_SQL} AS category
+      FROM vcc_fin_op_import_errors AS import_error
+      JOIN vcc_fin_op_import_records AS record ON record.id = import_error.import_record_id
+      WHERE record.target_month = ?
+        AND ${LEGACY_ERROR_NOT_IN_ROWS_SQL}
+    )
+    GROUP BY record_id
+  `).all(yearMonth).map((row) => [Number(row.record_id), {
+    count: Number(row.count) || 0,
+    fileFailureCount: Number(row.file_failure_count) || 0
+  }]));
+  const corrections = new Map();
+  if (db.prepare(`
+    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'vcc_fin_op_channel_corrections'
+  `).get()) {
+    for (const row of db.prepare(`
+      SELECT import_record_id AS record_id, COUNT(*) AS count
+      FROM vcc_fin_op_channel_corrections WHERE target_month = ?
+      GROUP BY import_record_id
+    `).all(yearMonth)) corrections.set(Number(row.record_id), Number(row.count) || 0);
+  }
+  for (const record of db.prepare(`
+    SELECT id, status FROM vcc_fin_op_import_records WHERE target_month = ?
+  `).all(yearMonth)) {
+    const recordId = Number(record.id);
+    const compactCount = compact.get(recordId) || 0;
+    const correctionCount = corrections.get(recordId) || 0;
+    if (compactCount > 0) {
+      counts.set(recordId, compactCount + correctionCount);
+      continue;
+    }
+    const errors = legacyErrors.get(recordId) || { count: 0, fileFailureCount: 0 };
+    const syntheticFileFailure = String(record.status || '').startsWith('failed')
+      && errors.fileFailureCount === 0
+      ? 1
+      : 0;
+    counts.set(recordId, (legacyRows.get(recordId) || 0) + errors.count + syntheticFileFailure + correctionCount);
+  }
+  return counts;
+}
+
+function* iterateChannelCorrectionAuditRows(db, recordId) {
+  const exists = db.prepare(`
+    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'vcc_fin_op_channel_corrections'
+  `).get();
+  if (!exists) return;
+  yield* db.prepare(`
+    SELECT correction.idempotency_key,
+           COALESCE(source.source_file_name, '') AS source_file_name,
+           correction.source_row,
+           'channel_correction' AS category,
+           json_array(correction.field_name) AS abnormal_fields_json,
+           '[]' AS diff_fields_json,
+           '原值 ' || CASE WHEN correction.original_value = '' THEN '（空）' ELSE correction.original_value END
+             || ' → 新值 ' || correction.corrected_value AS description
+    FROM vcc_fin_op_channel_corrections AS correction
+    LEFT JOIN vcc_fin_op_import_sources AS source ON source.id = correction.import_source_id
+    WHERE correction.import_record_id = ?
+    ORDER BY correction.id
+  `).iterate(Number(recordId));
+}
+
+function countChannelCorrectionAuditRows(db, recordId) {
+  const exists = db.prepare(`
+    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'vcc_fin_op_channel_corrections'
+  `).get();
+  if (!exists) return 0;
+  return Number(db.prepare(`
+    SELECT COUNT(*) AS row_count FROM vcc_fin_op_channel_corrections WHERE import_record_id = ?
+  `).get(Number(recordId)).row_count) || 0;
+}
+
+// 导出明细：真正异常之后追加“人工补录”记录（v3.2.17，每个被修改字段一行）。
 function* iterateExportableImportAnomalies(db, recordId) {
+  yield* iterateImportAnomalyRows(db, recordId);
+  yield* iterateChannelCorrectionAuditRows(db, recordId);
+}
+
+function* iterateImportAnomalyRows(db, recordId) {
   const normalizedRecordId = Number(recordId);
   if (compactImportAnomalyCount(db, normalizedRecordId) > 0) {
     yield* db.prepare(`
@@ -703,6 +930,16 @@ function finalizeImportingRecords(db, records, {
     if (counts.accepted > 0) {
       throw new Error(`导入记录 ${record.id} 含未完成但已 accepted 的 legacy 宽行，禁止猜测恢复`);
     }
+    // v3.2.17 起导入暂存在 worker 连接的 TEMP 表中，worker 崩溃或被强制结束后暂存行随连接消失；
+    // 已在检查点持久化的读取行数（raw_count）不能被解释为 0：差额计为回滚，保持六类计数守恒。
+    const persistedRow = db.prepare(`
+      SELECT raw_count FROM vcc_fin_op_import_records WHERE id = ?
+    `).get(record.id);
+    const persistedRawCount = Number(persistedRow && persistedRow.raw_count) || 0;
+    const countedRawCount = Object.values(counts).reduce((sum, count) => sum + count, 0);
+    if (persistedRawCount > countedRawCount) {
+      counts.rolled_back = (counts.rolled_back || 0) + (persistedRawCount - countedRawCount);
+    }
     const rawCount = Object.values(counts).reduce((sum, count) => sum + count, 0);
     persistStagingAnomalies(db, record.id);
     persistLegacyImportAnomalies(db, record.id);
@@ -881,6 +1118,9 @@ function claimVccFinancialOpFirstMonth(db, targetMonth) {
 module.exports = {
   IMPORT_ROW_INSERT_SQL,
   STAGING_ROW_INSERT_SQL,
+  ensureImportStagingScratch,
+  insertChannelCorrections,
+  countCorrectedRows,
   createImportBatch,
   finishImportBatch,
   createImportRecord,
@@ -898,6 +1138,7 @@ module.exports = {
   listImportMonths,
   listImportRecords,
   countExportableImportAnomalies,
+  countExportableImportAnomaliesByMonth,
   iterateExportableImportAnomalies,
   countImportRowsByDisposition,
   failImportBatch,

@@ -73,7 +73,8 @@ function adjustmentPlan() {
         1,
         '2026-08-11 12:00:00',
         '3.1.9',
-        'build'
+        'build',
+        0
       ]
     }, {
       stepId: 'adjustment.bump-run',
@@ -103,7 +104,8 @@ test('mutation runtime probe 验证 session、trigger、total_changes 与关闭�
 
 test('table policy 与 migrated schema exact-match，四张大表不创建 session', (t) => {
   const db = createDb(t);
-  assert.equal(Object.keys(VCC_TABLE_POLICY_REGISTRY).length, 23);
+  // v3.2.17 新增 vcc_fin_op_channel_corrections（受保护审计表）。
+  assert.equal(Object.keys(VCC_TABLE_POLICY_REGISTRY).length, 24);
   assert.deepEqual(
     Object.entries(VCC_TABLE_POLICY_REGISTRY)
       .filter(([, policy]) => policy.protection === 'large-table-scope-proof')
@@ -111,7 +113,7 @@ test('table policy 与 migrated schema exact-match，四张大表不创建 sessi
       .sort(),
     [...LARGE_TABLE_SCOPE_PROOF_TABLES].sort()
   );
-  assert.deepEqual(assertVccMutationSchema(db), { ready: true, tableCount: 23 });
+  assert.deepEqual(assertVccMutationSchema(db), { ready: true, tableCount: 24 });
 
   const sessionTables = [];
   db.exec('BEGIN IMMEDIATE');
@@ -123,7 +125,7 @@ test('table policy 与 migrated schema exact-match，四张大表不创建 sessi
   });
   db.exec('ROLLBACK');
   closeMutationGuard(guard);
-  assert.equal(sessionTables.length, 17);
+  assert.equal(sessionTables.length, 18);
   for (const tableName of LARGE_TABLE_SCOPE_PROOF_TABLES) {
     assert.equal(sessionTables.includes(tableName), false);
   }

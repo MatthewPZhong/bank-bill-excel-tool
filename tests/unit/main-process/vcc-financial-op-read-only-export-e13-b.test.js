@@ -610,8 +610,9 @@ test('E13-B VCC managed read-only export 复用模块全局串行租约', async 
   );
   release();
   assert.deepEqual(await first, { status: 'done' });
+  // v3.2.17：只读导出不改 VCC 数据，结束后不推进 generation（spec D4）。
   assert.deepEqual(service._taskStateForTests(), {
-    taskGeneration: 1,
+    taskGeneration: 0,
     closing: false,
     active: false,
     action: null,

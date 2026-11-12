@@ -461,6 +461,8 @@ test('调整血缘拒绝多引用、跨表、区域引用、额外标记和大�
     ['跨 sheet', [{ name, ranges: ["'其他结果表'!$M$3"] }]],
     ['非 M 列', [{ name, ranges: [`'${RESULT_SHEET_NAME}'!$L$3`] }]],
     ['区域引用', [{ name, ranges: [`'${RESULT_SHEET_NAME}'!$M$3:$M$4`] }]],
+    ['倒序区域', [{ name, ranges: [`'${RESULT_SHEET_NAME}'!$M$3:$M$2`] }]],
+    ['跨列区域', [{ name, ranges: [`'${RESULT_SHEET_NAME}'!$M$3:$N$3`] }]],
     ['孤儿/额外标记', [
       { name, ranges: [baseRange] },
       { name: extraName, ranges: [`'${RESULT_SHEET_NAME}'!$M$4`] }

@@ -14,7 +14,8 @@ const ANOMALY_CATEGORY_TEXT = Object.freeze({
   format_error: '格式错误',
   idempotent_conflict: '幂等冲突',
   system_subject_error: '系统主体异常',
-  file_failure: '文件级失败'
+  file_failure: '文件级失败',
+  channel_correction: '人工补录'
 });
 
 function parseStringArray(value) {

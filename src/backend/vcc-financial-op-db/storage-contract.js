@@ -190,9 +190,50 @@ function createSlimEffectiveRowsTable(db, tableName = 'vcc_fin_op_effective_rows
   `);
 }
 
+// v3.2.17 通道明细补录记录：每个被修改字段一行，原件存档不改；删除原表数据时保留作审计。
+const CHANNEL_CORRECTIONS_TABLE = 'vcc_fin_op_channel_corrections';
+const CHANNEL_CORRECTIONS_SQL = `
+  CREATE TABLE IF NOT EXISTS vcc_fin_op_channel_corrections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    import_record_id INTEGER NOT NULL,
+    import_source_id INTEGER NOT NULL,
+    target_month TEXT NOT NULL,
+    sheet_name TEXT NOT NULL,
+    source_row INTEGER NOT NULL CHECK (source_row >= 1),
+    idempotency_key TEXT NOT NULL,
+    field_name TEXT NOT NULL,
+    original_value TEXT NOT NULL,
+    corrected_value TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    created_app_version TEXT,
+    created_build_sha TEXT,
+    FOREIGN KEY (import_record_id) REFERENCES vcc_fin_op_import_records(id) ON DELETE CASCADE,
+    FOREIGN KEY (import_source_id) REFERENCES vcc_fin_op_import_sources(id) ON DELETE CASCADE,
+    UNIQUE (import_source_id, sheet_name, source_row, field_name)
+  );
+  CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_channel_corrections_record
+    ON vcc_fin_op_channel_corrections(import_record_id, id);
+`;
+
+// 必须在 v3 存储合同断言之前调用：断言要求实际表集合与策略登记完全一致。
+function ensureVccChannelCorrectionsTable(db) {
+  assertDatabase(db);
+  db.exec(CHANNEL_CORRECTIONS_SQL);
+  const hasSettings = Boolean(db.prepare(`
+    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_settings'
+  `).get());
+  const version = hasSettings ? getVccStorageContractVersion(db) : 1;
+  if (version >= 2) {
+    for (const operation of ['insert', 'update', 'delete']) {
+      db.exec(vccStorageGuardTriggerDefinition(CHANNEL_CORRECTIONS_TABLE, operation, version).createSql);
+    }
+  }
+}
+
 function ensureVccStorageSideTables(db) {
   assertDatabase(db);
   const version = getVccStorageContractVersion(db);
+  ensureVccChannelCorrectionsTable(db);
   addColumnIfMissing(
     db,
     'vcc_fin_op_import_records',
@@ -660,6 +701,7 @@ module.exports = {
   createSlimEffectiveRowsTable,
   assertEmptyVccStorageForUpgrade,
   ensureVccStorageSideTables,
+  ensureVccChannelCorrectionsTable,
   getVccStorageContractVersion,
   inspectVccStorageData,
   installVccStorageWriteGuards,

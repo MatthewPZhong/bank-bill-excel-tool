@@ -133,7 +133,8 @@ function createCurrentRawEvidence() {
       sequence: 1,
       createdAt: '2026-08-01 10:03:00',
       createdAppVersion: '3.1.8',
-      createdBuildSha: 'fixture-build'
+      createdBuildSha: 'fixture-build',
+      adjustmentCycle: 0
     }],
     storedRunBalances,
     pendingEffectiveFactCount: 0,
@@ -219,7 +220,7 @@ function readLegacyRawEvidence(db) {
   const runAdjustments = runIds.length === 0 ? [] : db.prepare(`
     SELECT id, run_id, row_key, subject, source_type, category_major,
            category_minor, currency, adjustment_amount, reason, sequence,
-           created_at, created_app_version, created_build_sha
+           created_at, created_app_version, created_build_sha, adjustment_cycle
     FROM vcc_fin_op_run_adjustments
     WHERE run_id = ?
     ORDER BY sequence, id
@@ -237,7 +238,8 @@ function readLegacyRawEvidence(db) {
     sequence: Number(row.sequence),
     createdAt: row.created_at,
     createdAppVersion: row.created_app_version,
-    createdBuildSha: row.created_build_sha
+    createdBuildSha: row.created_build_sha,
+    adjustmentCycle: Number(row.adjustment_cycle) || 0
   }));
   const storedRunBalances = runIds.length === 0 ? [] : db.prepare(`
     SELECT run_id, subject, currency, opening_balance, period_amount,
@@ -279,8 +281,10 @@ function readLegacyRawEvidence(db) {
     runAdjustments,
     storedRunBalances,
     pendingEffectiveFactCount: scalarCount(`
-      SELECT COUNT(*) AS count FROM vcc_fin_op_effective_rows
-      WHERE target_month = ? AND source_type = 'pending_archive_removal'
+      SELECT EXISTS (
+        SELECT 1 FROM vcc_fin_op_effective_rows
+        WHERE target_month = ? AND source_type = 'pending_archive_removal'
+      ) AS count
     `, targetMonth),
     pendingRunRowCount: scalarCount(`
       SELECT COUNT(*) AS count FROM vcc_fin_op_run_rows

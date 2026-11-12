@@ -231,23 +231,28 @@ function buildAdjustmentPlan(db, evidence, normalizedPayload, locked, transactio
       { runId: normalizedPayload.runId, rowKey: normalizedPayload.rowKey }
     );
   }
+  const oldRun = fullRunRow(db, normalizedPayload.runId);
+  if (!oldRun) throw resultWriteError('result-not-found', '财务OP计算记录不存在。');
+  // 每个调整周期（首次计算为 0，每次解归档加 1）内，同一结果行同一币种只能调整一次。
+  const adjustmentCycle = Number(oldRun.adjustment_cycle) || 0;
   const duplicate = evidence.archiveEvidence.runAdjustments.find((adjustment) => (
     Number(adjustment.runId) === normalizedPayload.runId
     && adjustment.rowKey === normalizedPayload.rowKey
     && adjustment.currency === normalizedPayload.currency
+    && (Number(adjustment.adjustmentCycle) || 0) === adjustmentCycle
   ));
   if (duplicate) {
     throw resultWriteError(
       'adjustment-already-exists',
-      '该结果坐标已经修改过，不能再次调整。',
+      adjustmentCycle > 0
+        ? '该结果坐标在本次解归档后已经修改过，不能再次调整。'
+        : '该结果坐标已经修改过，不能再次调整。',
       { adjustmentId: duplicate.id }
     );
   }
   const boundaryRow = db.prepare(`
     SELECT COALESCE(MAX(id), 0) AS max_id FROM vcc_fin_op_run_adjustments
   `).get();
-  const oldRun = fullRunRow(db, normalizedPayload.runId);
-  if (!oldRun) throw resultWriteError('result-not-found', '财务OP计算记录不存在。');
   const expectedAdjustment = Object.freeze({
     run_id: normalizedPayload.runId,
     row_key: normalizedPayload.rowKey,
@@ -261,7 +266,8 @@ function buildAdjustmentPlan(db, evidence, normalizedPayload, locked, transactio
     sequence: Number(locked.run.resultRevision) + 1,
     created_at: transactionTimestamp,
     created_app_version: provenance.appVersion,
-    created_build_sha: provenance.buildSha
+    created_build_sha: provenance.buildSha,
+    adjustment_cycle: adjustmentCycle
   });
   return freezePlan({
     operation: VCC_MUTATION_OPERATIONS.ADD_ADJUSTMENT,
@@ -289,7 +295,8 @@ function buildAdjustmentPlan(db, evidence, normalizedPayload, locked, transactio
         expectedAdjustment.sequence,
         expectedAdjustment.created_at,
         expectedAdjustment.created_app_version,
-        expectedAdjustment.created_build_sha
+        expectedAdjustment.created_build_sha,
+        expectedAdjustment.adjustment_cycle
       ]
     }, {
       stepId: 'adjustment.bump-run',
@@ -465,7 +472,7 @@ function assertAdjustmentPostconditions(db, plan, stepResults) {
   const adjustment = Number.isSafeInteger(adjustmentId) ? db.prepare(`
     SELECT run_id, row_key, subject, source_type, category_major, category_minor,
            currency, adjustment_amount, reason, sequence, created_at,
-           created_app_version, created_build_sha
+           created_app_version, created_build_sha, adjustment_cycle
     FROM vcc_fin_op_run_adjustments WHERE id = ?
   `).get(adjustmentId) : null;
   const boundaryCount = Number(db.prepare(`
@@ -509,7 +516,8 @@ function assertAdjustmentPostconditions(db, plan, stepResults) {
       sequence: adjustment.sequence,
       createdAt: adjustment.created_at,
       createdAppVersion: adjustment.created_app_version,
-      createdBuildSha: adjustment.created_build_sha
+      createdBuildSha: adjustment.created_build_sha,
+      adjustmentCycle: Number(adjustment.adjustment_cycle) || 0
     })
   });
 }
@@ -781,7 +789,13 @@ function executeLockedResultMutation({
 function openVccWriteDatabase(dbPath, Database = DatabaseSync) {
   const db = new Database(dbPath);
   try {
-    db.exec('PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 30000;');
+    db.exec([
+      'PRAGMA foreign_keys = ON;',
+      'PRAGMA synchronous = NORMAL;',
+      'PRAGMA cache_size = -65536;',
+      'PRAGMA temp_store = MEMORY;',
+      'PRAGMA busy_timeout = 30000;'
+    ].join(' '));
     return db;
   } catch (error) {
     db.close();

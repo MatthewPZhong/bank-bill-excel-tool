@@ -7,13 +7,16 @@ const { DatabaseSync } = require('node:sqlite');
 const { ensureVccFinancialOpTablesSupport } = require('../../src/backend/vcc-financial-op-db/migrations');
 const { createArchiveRepository } = require('../../src/backend/database/archive-repository');
 const { SOURCE_TYPES: T, SUPPORTED_CURRENCIES: CURRENCIES, SYSTEM_OP_HEADERS, getSourceDefinition } = require('../../src/backend/vcc-financial-op/definitions');
-const { inspectWorkbookImportPlan, resolveImportPlan } = require('../../src/backend/vcc-financial-op/workbook-import-plan');
+const {
+  inspectWorkbookImportPlan, resolveImportPlan, collectChannelCorrections
+} = require('../../src/backend/vcc-financial-op/workbook-import-plan');
 const { buildMemberFiles, handoffMetadata } = require('../../src/backend/vcc-financial-op/import-handoff');
 const { importFiles } = require('../../src/backend/vcc-financial-op/import-service');
 const { preflightCalculation, calculateMonth } = require('../../src/backend/vcc-financial-op/calculator');
 
 async function createReviewFixture(t, { subjects = ['甲', '乙'], pendingSameCurrency = false,
-  pendingRemark = '=1+1', systemBillDate = '2026-06-30', writeOptions = {}, beforeImport, sourceStructures = null } = {}) {
+  pendingRemark = '=1+1', systemBillDate = '2026-06-30', writeOptions = {}, beforeImport, sourceStructures = null,
+  correctChannelAmount = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-review-'));
   const dbPath = path.join(dir, 'business.sqlite'), archiveRoot = path.join(dir, 'archive');
   fs.mkdirSync(path.join(archiveRoot, 'blobs'), { recursive: true });
@@ -33,7 +36,9 @@ async function createReviewFixture(t, { subjects = ['甲', '乙'], pendingSameCu
   add('费用', T.FEE_FX, subjects.map((subject) => ({ 订单号: `fee-${subject}`, BillDate: '2026-06-01', 公司主体: subject,
     业务部门: 'VCC', 对手部门: 'OPS', 业务子类型: '手续费', 出入方向: 'out', 我方币种: 'USD', 我方到账金额: '2' })));
   for (const subject of subjects) add(subject, T.CHANNEL, [{ 渠道订单号: `channel-${subject}`, 账单日期: '2026-06-01',
-    通道名称: 'CITI', MID: '000009876543210', 交易金额: '3', 交易币种: 'EUR', 借贷方向: 'in' }]);
+    通道名称: 'CITI', MID: '000009876543210',
+    // correctChannelAmount: 'formula' 时交易金额为无缓存值的公式（预检视为空、可补录）。
+    交易金额: correctChannelAmount === 'formula' ? { t: 'n', f: '1+2' } : correctChannelAmount ? '' : '3', 交易币种: 'EUR', 借贷方向: 'in' }]);
   add('Pending', T.PENDING, subjects.map((subject) => ({ PendingBizId: `pending-${subject}`, 平账账期: '2026-06', 主体: subject,
     对账类型: 'VCC_clearing_credit', 金额: '5', 币种: 'USD', 流水_币种: pendingSameCurrency ? 'USD' : 'EUR', 流水_对账金额: '5',
     channel: 'CITI', 备注: pendingRemark, merchant_id: '00000000000000001' })));
@@ -41,9 +46,15 @@ async function createReviewFixture(t, { subjects = ['甲', '乙'], pendingSameCu
     主体: subject, 业务部门: 'VCC', 币种, 财务余额: '0', 财务主体余额: '0', 创建时间: '2026-07-01 00:00:00' }))));
   const filePath = path.join(dir, '全部主体.xlsx'); XLSX.writeFile(book, filePath, writeOptions);
   if (beforeImport) await beforeImport(filePath);
-  const plan = await inspectWorkbookImportPlan([filePath], { sourceStructures });
-  const files = buildMemberFiles(resolveImportPlan(plan, { planId: plan.planId,
-    subjectBySourceId: Object.fromEntries(plan.sources.filter((s) => s.requiresSubject).map((s) => [s.sourceId, s.sheetName])), excludedSheetIds: [] }));
+  // correctChannelAmount：通道行交易金额留空，在预检中补录为 3（v3.2.17 通道明细补录）。
+  const plan = await inspectWorkbookImportPlan([filePath], { sourceStructures, targetMonth: correctChannelAmount ? '2026-06' : null });
+  const channelCorrections = correctChannelAmount ? plan.sources.flatMap((source) => (
+    source.channelCorrectionCandidates?.candidates || []
+  ).map((candidate) => ({ sourceId: source.sourceId, sourceRow: candidate.sourceRow, fields: { 交易金额: '3' } }))) : [];
+  const resolved = resolveImportPlan(plan, { planId: plan.planId,
+    subjectBySourceId: Object.fromEntries(plan.sources.filter((s) => s.requiresSubject).map((s) => [s.sourceId, s.sheetName])), excludedSheetIds: [],
+    channelCorrections });
+  const files = buildMemberFiles(resolved);
   const taskRunId = 'review-input-task';
   const batch = archive.createBatch({ moduleId: 'vcc-financial-op', moduleCode: 'VCCFINOP', moduleName: 'VCC',
     operationKey: taskRunId, taskKey: 'vccFinancialOp:import:apply', taskRunId, parentRunId: taskRunId,
@@ -59,7 +70,7 @@ async function createReviewFixture(t, { subjects = ['甲', '乙'], pendingSameCu
     file.archiveArtifactId = artifact.id;
   }
   const imported = await importFiles({ db, targetMonth: '2026-06', batchId: taskRunId, files,
-    archiveHandoffFiles: { version: 2, taskRunId, files } });
+    archiveHandoffFiles: { version: 2, taskRunId, files }, channelCorrections: collectChannelCorrections(resolved) });
   if (imported.records.some((r) => r.status !== 'success')) throw new Error(JSON.stringify(imported));
   db.prepare("UPDATE vcc_fin_op_module_state SET first_month='2026-05' WHERE singleton_id=1").run();
   const previousRun = db.prepare("INSERT INTO vcc_fin_op_runs(target_month,status,input_revisions_json) VALUES ('2026-05','archived','{}')").run().lastInsertRowid;
