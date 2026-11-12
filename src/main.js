@@ -4863,6 +4863,21 @@ async function waitForVccPreviewCaptureReady(webContents) {
   `);
 }
 
+// 主窗口关闭（含任务栏“关闭窗口”、Alt+F4 等不经渲染层的入口）：
+//   空闲存储整理持有过渡租约时，先中止整理并等其收尾，再重新关闭；升级准备期间仍阻止关闭。
+function handleMainWindowClose(event) {
+  if (quitPreparationComplete) return;
+  if (idleDatabaseCompaction.isRunning()) {
+    event.preventDefault();
+    const closingWindow = mainWindow;
+    idleDatabaseCompaction.stop('window-close').then(() => {
+      if (closingWindow && !closingWindow.isDestroyed()) closingWindow.close();
+    });
+    return;
+  }
+  if (businessOperationRegistry.isInstallTransitionActive()) event.preventDefault();
+}
+
 function createWindow(options = {}) {
   const instrumentation = createWindowInstrumentation({
     enabled: options.instrumentation === 'initial',
@@ -4979,11 +4994,7 @@ function createWindow(options = {}) {
       }, Number(process.env.APP_CAPTURE_DELAY_MS || 1800));
     }
   }).catch(failWindowStartup);
-  mainWindow.on('close', (event) => {
-    if (businessOperationRegistry.isInstallTransitionActive() && !quitPreparationComplete) {
-      event.preventDefault();
-    }
-  });
+  mainWindow.on('close', handleMainWindowClose);
   mainWindow.on('maximize', sendWindowState);
   mainWindow.on('unmaximize', sendWindowState);
   } catch (error) {
@@ -24334,7 +24345,8 @@ function setupIdleCleanupTimer() {
   if (idleCleanupTimer) return; // 重入保护
   // v2.1.9 N1-settings：启动期从 settings 读阈值（默认 30）
   loadIdleCleanupMsFromSettings();
-  idleCleanupTimer = setInterval(observeBackgroundMemoryActivity(async () => {
+  // 收单空闲清理有自己的阈值（设置项，可大于 30 分钟）和多处提前返回；主库整理独立判断，不受其影响。
+  const runAcquiringIdleCleanupTick = async () => {
     const operation = businessOperationRegistry.begin({
       channel: 'background:idle-cleanup',
       moduleKey: '收单单据币种校验',
@@ -24423,7 +24435,10 @@ function setupIdleCleanupTimer() {
     } finally {
       businessOperationRegistry.end(operation.token);
     }
-    // 收单空闲清理结束后，再判断是否需要空闲整理主库（自带空闲、任务与磁盘条件，失败已记日志）。
+  };
+  idleCleanupTimer = setInterval(observeBackgroundMemoryActivity(async () => {
+    await runAcquiringIdleCleanupTick();
+    // 收单空闲清理结束（含提前返回）后，再判断是否需要空闲整理主库（自带空闲、任务与磁盘条件，失败已记日志）。
     try {
       await idleDatabaseCompaction.maybeRun();
     } catch (_compactionError) { /* 下次空闲再试 */ }

@@ -15,7 +15,7 @@
 | `src/main-process/database-compaction/idle-compaction.js` | `evaluateCompactionNeed`（只读评估）、`createIdleCompactionController`（条件判断、过渡租约、存档维护暂停/恢复、启动与中止子进程、日志、完成时间）、`launchCompactionProcess`（Electron 用 `utilityProcess.fork`，纯 Node 用 `spawn`） |
 | `src/main-process/database-compaction/compaction-process.js` | 子进程入口：`VACUUM` → `wal_checkpoint(TRUNCATE)` → `quick_check`，结果一行 JSON 写 stdout |
 | `src/main-process/business-operation-registry.js` | `acquireTransition(owner, { busyMessage })`：持有租约时拒绝新任务的提示可自定义，默认仍为升级提示 |
-| `src/main.js` | 创建控制器；空闲清理定时器（每 2 分钟）在收单空闲清理后调用 `maybeRun()`；`app:user-activity` 调用 `abort()`；`before-quit` 在整理进行中先 `stop('quit')` 再继续退出 |
+| `src/main.js` | 创建控制器；空闲清理定时器（每 2 分钟）在收单空闲清理结束后调用 `maybeRun()`，不受收单清理阈值设置（可大于 30 分钟）和其提前返回影响；`app:user-activity` 调用 `abort()`；`before-quit` 与主窗口 `close`（`handleMainWindowClose`，覆盖任务栏关闭、Alt+F4 等不经渲染层的入口）在整理进行中先 `stop()` 收尾，再继续退出或重新关闭窗口；升级准备期间仍阻止关窗 |
 
 ## 二、为什么用子进程
 
@@ -35,5 +35,7 @@
 ## 五、验证
 
 - `tests/unit/main-process/database-idle-compaction.test.js`：8 项（评估、跳过条件、磁盘告警限频、成功、中止、退出等待、低内存任务占用时跳过、登记表提示）。
+- `tests/unit/main-idle-compaction-wiring.test.js`：6 项，执行 `main.js` 生产函数（收单阈值 60 分钟时仍检查整理、收单清理与整理的先后、整理中关窗先中止再关闭、升级准备期间仍阻止关窗）。
 - 相关既有单测 156 项通过；lint 与架构检查通过。
+- 2026-11-11 Codex 审查指出关窗入口与收单阈值两处接入缺陷，已修复并补上述回归测试。
 - 未完成：Electron 打包环境下 `utilityProcess` 路径的实际整理与中止（本机 Electron 无法开窗口），随 VCC B86 在 Windows 回归。
