@@ -57,6 +57,14 @@
 - [P1] 跨周期同坐标调整相邻时正式结果导出失败：ExcelJS 把共用血缘名的相邻单元格合并为 `$M$a:$M$b`，流式校验器与旧主体 writer 校验都只接受单个单元格。修复：两处按行展开同列区域后逐行校验（区域行数不得超过该名称的调整行数，倒序、跨列仍拒绝）。测试：`vcc-financial-op-result-workbook.test.js` 真实写出两条相邻调整并经两种写出与校验；`vcc-financial-op-writer.test.js` 增倒序、跨列区域。
 - [P2] 原金额为无缓存值公式的补录行导致待确认表导出失败：输出单元格先对原公式 `rawCell()` 抛错。修复：补录字段直接写补录值，其余字段照常转换核验。校验原表导出走取值链路，不受影响。测试：`vcc-financial-op-review-export.test.js` 公式夹具。
 
+## Codex 第二轮审查（2026-11-11）
+
+三项均已核实并修复，各补回归测试（对旧代码失败、修复后通过）：
+
+- [P1] 非空 v1 旧库迁移／重置失败：`buildVccStorageCandidate` 按旧库结构建候选库，旧 v1 库没有补录记录表，合同安装后表集合断言失败。修复：候选库在安装合同前补建该表（写保护随合同安装器一并安装），源库不变。测试：`vcc-financial-op-storage-rebuild.test.js` 迁移与重置两条路径。
+- [P2] 用户模板改名可补录字段（如“交易金额”→“新交易金额”）时，待确认表原表列丢失补录值：补录记录按内置字段名保存，原代码按导入时表头名查找。修复：`source-structure.js` 增加 `sourceIndexOfCanonical`（内置列 → 导入时结构列位置，复用 `canonicalHeaderMapping`），待确认表按此定位；导入时结构中无对应列时报错，不静默丢弃。⚠️ 资金红线（补录金额在审阅表中的可见性），已补测试，仍请随 GUI 验收用改名模板核对一次。测试：`vcc-financial-op-review-export.test.js` 改名模板。
+- [P2] TEMP 暂存随 worker 连接消失后，中断恢复把已读取行数清零：`finalizeImportingRecords` 从（已为空的）主库暂存表重新计数并覆盖检查点持久化的 `raw_count`。修复：恢复时以持久化的 `raw_count` 为下限，差额计为回滚，保持六类计数守恒。与旧行为的差别：崩溃前已读取的行不再保留逐行异常分类与异常明细（统一计为回滚）；记录仍为失败、没有数据进入有效数据集，读取行数可审计。测试：`detail-importer.test.js` 文件库关闭 worker 连接后恢复。
+
 ## Remaining unknowns
 
 - 真实 Windows 机器与真实库上的提速幅度（B86）。

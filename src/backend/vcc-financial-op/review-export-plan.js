@@ -371,9 +371,17 @@ async function extractReviewSources({ manifestPath, signal, onProgress }) {
         const expected = validateRawFact(fact, values, cells);
         // 待确认表的原表行显示补录后的值，与计算口径一致。补录字段直接取补录值，
         // 不再转换原单元格（原值可能是无缓存值的公式，正是被补录的原因）；其余字段照常核验转换。
-        const correctedByIndex = new Map(Object.entries(expected.channelCorrections || {})
-          .map(([field, correction]) => [expected.headers.indexOf(field), correction.corrected])
-          .filter(([index]) => index >= 0));
+        // 补录记录按内置字段名保存；用户模板改名、换序时按导入时列映射定位原表列，不能静默丢弃。
+        const corrections = Object.entries(expected.channelCorrections || {});
+        const projection = corrections.length
+          ? createSourceProjection(expected.canonicalHeaders || expected.headers, expected.sourceHeaders) : null;
+        const correctedByIndex = new Map(corrections.map(([field, correction]) => {
+          const index = projection.sourceIndexOfCanonical(field);
+          if (index < 0 || index >= expected.headers.length) {
+            throw mismatch(`${fact.identity} 补录字段“${field}”在导入时结构中没有对应列`);
+          }
+          return [index, correction.corrected];
+        }));
         const output = cells
           ? expected.headers.map((header, index) => (correctedByIndex.has(index)
             ? historicCell(correctedByIndex.get(index)) : rawCell(cells[index], header)))

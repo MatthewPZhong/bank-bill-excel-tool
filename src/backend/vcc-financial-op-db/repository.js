@@ -930,6 +930,16 @@ function finalizeImportingRecords(db, records, {
     if (counts.accepted > 0) {
       throw new Error(`导入记录 ${record.id} 含未完成但已 accepted 的 legacy 宽行，禁止猜测恢复`);
     }
+    // v3.2.17 起导入暂存在 worker 连接的 TEMP 表中，worker 崩溃或被强制结束后暂存行随连接消失；
+    // 已在检查点持久化的读取行数（raw_count）不能被解释为 0：差额计为回滚，保持六类计数守恒。
+    const persistedRow = db.prepare(`
+      SELECT raw_count FROM vcc_fin_op_import_records WHERE id = ?
+    `).get(record.id);
+    const persistedRawCount = Number(persistedRow && persistedRow.raw_count) || 0;
+    const countedRawCount = Object.values(counts).reduce((sum, count) => sum + count, 0);
+    if (persistedRawCount > countedRawCount) {
+      counts.rolled_back = (counts.rolled_back || 0) + (persistedRawCount - countedRawCount);
+    }
     const rawCount = Object.values(counts).reduce((sum, count) => sum + count, 0);
     persistStagingAnomalies(db, record.id);
     persistLegacyImportAnomalies(db, record.id);

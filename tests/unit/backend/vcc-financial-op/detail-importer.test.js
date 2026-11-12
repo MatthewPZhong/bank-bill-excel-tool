@@ -1472,6 +1472,49 @@ test('异常退出恢复不会把暂存行提升为有效事实', (t) => {
   `).all(recordId).map((row) => row.category).sort(), ['file_failure', 'invalid_key']);
 });
 
+test('TEMP 暂存随 worker 连接消失后，中断恢复保留检查点已持久化的读取行数并计为回滚', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-temp-staging-recover-'));
+  const dbPath = path.join(directory, 'tool-data.sqlite');
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const worker = new DatabaseSync(dbPath);
+  worker.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(worker);
+  repository.createImportBatch(worker, { id: 'crashed', targetMonth: '2026-06', fileCount: 1 });
+  const recordId = repository.createImportRecord(worker, {
+    batchId: 'crashed', targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE, sourceFiles: ['x.xlsx']
+  });
+  const sourceId = repository.createImportSource(worker, recordId, {
+    sourceOrdinal: 1, fileName: 'x.xlsx', sha256: 'a'.repeat(64), sizeBytes: 1
+  });
+  repository.ensureImportStagingScratch(worker);
+  const insert = worker.prepare(`
+    INSERT INTO vcc_fin_op_import_staging_rows (
+      import_record_id, import_source_id, source_type, target_month, source_file, sheet_name, source_row,
+      raw_json, disposition, validation_field, validation_message
+    ) VALUES (?, ?, ?, '2026-06', 'x.xlsx', 'sheet1', ?, '[]', NULL, NULL, NULL)
+  `);
+  for (const row of [2, 3, 4]) insert.run(recordId, sourceId, SOURCE_TYPES.RECHARGE, row);
+  // 检查点：暂存行已提交到 TEMP 表，读取行数持久化到主库导入记录。
+  worker.prepare("UPDATE vcc_fin_op_import_records SET raw_count = 3 WHERE id = ? AND status = 'importing'").run(recordId);
+  worker.close();
+
+  const main = new DatabaseSync(dbPath);
+  t.after(() => main.close());
+  main.exec('PRAGMA foreign_keys = ON');
+  assert.equal(main.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows').get().n, 0);
+  assert.equal(repository.recoverInterruptedImports(main), 1);
+  const record = repository.getImportRecord(main, recordId);
+  assert.equal(record.status, 'failed_validation');
+  assert.equal(record.raw_count, 3);
+  assert.equal(record.rolled_back_count, 3);
+  assert.equal(
+    record.raw_count,
+    record.inserted_count + record.skipped_count + record.invalid_key_count
+      + record.conflict_count + record.format_error_count + record.rolled_back_count
+  );
+  assert.equal(main.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 0);
+});
+
 test('直接升级会接管 v3.1.9 importing 宽行并转换 compact anomaly 后清理', (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());
