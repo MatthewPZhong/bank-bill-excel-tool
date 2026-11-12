@@ -1,5 +1,22 @@
 # 版本功能变更清单
 
+## v3.2.17（2026-11-12）
+
+本轮包含：网银补录余额「导入余额文件」与「提取调拨订单对账ID」限定 FundType、「核对上一账单日余额」弹窗与金额尾差修复、网银弹窗说明收进标题、VCC 财务OP校验提速瘦身与解归档放宽（含通道明细预检补录）、主库空闲自动整理、深色模式深浅度调节、deferred FilePlan 修复，以及 release 级 Codex 审查的两项修复。
+
+- **导入余额文件**：只读预检 IPC `files.importBalanceSeedFile`（`src/backend/balance-seed-import.js`），按表头四列精确识别，数字账号仅在显示文本与原值一致且不超过 15 位整数时采用，Excel 序列号日期按工作簿日期系统换算；待补录清单为当前分组首个账单日前无种子的全部账号。确认后仍逐个调用 `files.saveBalanceSeed`，请求带 `merchantId / currency / templateName`，与主进程当前提示不符时返回 `BALANCE_SEED_ACCOUNT_CHANGED` 且不写种子。架构边界 `renderer-statement`、`renderer-dialog-configuration` 的 `allowedApiFields` 放宽，release 历史补登 policyChanges。
+- **FundType 前置条件**：「从银行对账单的信息里提取调拨订单对账ID」（c1-extract-recon-id）先判 `Channel` 去空格等于 `DBS`（不受限），否则要求 `FundType` 去空格恰为 `FundTransfer-in` / `FundTransfer-out`（区分大小写，与 R5 同口径）；不满足时不命中、不锁定，first-match-wins 与行数守恒不变；场景配置不变、无迁移。
+- **核对余额弹窗与尾差**：补录卡片正文弹性滚动（含导入余额文件引入的 `manual-balance-view` 包裹层）；当日余额 > 6 个时摘要前后各 3 个，活动日志全量；余额计算加减结果按参与值最大小数位（上限 12 位）取整；首日断档时说明缺失日期并预填首日前一天。
+- **VCC 提速瘦身与解归档放宽**：存档关联同步按需增量、无变化零写入；校验原表列表、导出预览、运行前预检移入只读 worker；月份列表走索引、归档月份缓存；提交前复检只核对字节与文件身份；中转表移出主库、已绑定原件不写 raw fallback、导入后 `wal_checkpoint(TRUNCATE)`；级联解归档、导入只挡目标月、只有写任务使预览失效、每次解归档后每坐标可再追加一次调整；通道明细预检补录逐字段记录原值、新值、时间与程序版本，校验原表与待确认表导出套用补录后血缘校验通过。合成数据前后对比见 TechDoc。
+- **主库空闲整理**：`database-compaction/idle-compaction.js` 评估与控制，`compaction-process.js` 子进程执行 `VACUUM` → `wal_checkpoint(TRUNCATE)` → `quick_check`；准入纳入收单操作锁、后台清理与银行对账单锁及内存载体准入；以子进程真实退出为屏障释放租约，用户活动（捕获阶段上报）与关窗入口中止。
+- **深色深浅度**：0–100，0 为 v3.2.16 及以前的深色；调节页在真实主界面实时预览，保存前不写库。
+- **deferred FilePlan 修复**：`new-account:generate`、`monthly-balance:assemble` 的初始 FilePlan 取入口显式 deferred 字面量，不再要求 `prepared.filePlanResolver`（B79，自 v3.1.11 起不可用）。
+- **release 审查修复**：补录与断档 / 不一致 / 替换确认在 `applyStatementResult` 前拦截 `busy`，连续保存遇 `busy` / `cancelled` 不标已保存；`revalidateImportPlan` 在每个文件哈希前、读取中（`hashSourceFile` 可选 `shouldCancel`）、哈希后与返回前检查取消，抛 `vcc-import-cancelled`。
+
+审查修复：各模块分支按各自 spec / TechDoc 完成审查；release 级 Codex 只读审查第一轮 2×P2（上述两项），修复后第二轮无 P2 及以上。资金红线人工复核 2026-11-12 由用户确认通过。
+
+已知限制与顺延：本版新功能实机 GUI 与真实文件回归未做（B92）；VCC Windows 真实数据回归（B86）；新开账户与月度余额装配 Windows 打包版实测（B79）；旧带尾差种子不自动修正（B80）；v3.2.15 深审遗留与 v3.2.16 发布后补测项顺延至 v3.2.18（B45–B60、B70、B75、B77）。
+
 ## v3.2.16（2026-11-10）
 
 本轮包含：网银映射字段「字段筛选特征值」、MerchantId「原始账单仅有币种无账户号」、「账单里的余额」逐日余额校验（含人工补录替换确认、导出全部告警与 D13 报错文案）、模板管理【余额管理】（余额种子查看 / 修改 / 删除），以及工具箱合并 / 拆分 / 读字段提速（不改输出）。另有 Agent 指令文件清理与 backlog 登记，不改应用功能。
