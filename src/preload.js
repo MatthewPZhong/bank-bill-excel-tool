@@ -75,6 +75,16 @@ contextBridge.exposeInMainWorld('appConstants', {
   orderRepairFieldsGateway: ORDER_REPAIR_FIELDS_GATEWAY
 });
 
+// v3.2.17：Main 建窗时经 additionalArguments 传入已保存的深色深浅度，供 head 同步脚本绘制首帧。
+// sandbox 下不能 require src/shared/dark-mode-schedule.js，此处只接受 0–100 整数，其余按 0。
+const INITIAL_DARK_MODE_LIGHTNESS = (() => {
+  const prefix = '--dark-mode-lightness=';
+  const arg = (process.argv || []).find((value) => typeof value === 'string' && value.startsWith(prefix));
+  const text = arg ? arg.slice(prefix.length) : '';
+  const value = /^\d{1,3}$/.test(text) ? Number(text) : 0;
+  return value <= 100 ? value : 0;
+})();
+
 contextBridge.exposeInMainWorld('desktopApi', {
   // v2.1.13 E2：暴露平台标识，供 renderer 判断是否应用 Win 端 Noto Sans SC 字体（仅 win32 生效）
   platform: process.platform,
@@ -204,7 +214,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     reset: () => ipcRenderer.invoke('background:reset')
   },
   settings: {
+    initialDarkModeLightness: INITIAL_DARK_MODE_LIGHTNESS,
     setDarkModeSchedule: (config) => ipcRenderer.invoke('settings:set-dark-mode-schedule', config),
+    setDarkModeLightness: (lightness) => ipcRenderer.invoke('settings:set-dark-mode-lightness', lightness),
     onDarkModeScheduleChanged: (listener) => {
       if (typeof listener !== 'function') return () => {};
       const handler = (_event, snapshot) => listener(snapshot);

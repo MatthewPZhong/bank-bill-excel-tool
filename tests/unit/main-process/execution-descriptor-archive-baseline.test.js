@@ -54,6 +54,8 @@ const newPreparationPolicies = [
   { batchPolicy: 'exclude', channel: 'channel:list', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'scenarios:recon-id-fix-fields', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'settings:acknowledge-release-notes', excludeReason: 'ui-navigation', taskKind: 'exclude', workerContext: 'none' },
+  // v3.2.17 外观设置：深色模式深浅度
+  { batchPolicy: 'exclude', channel: 'settings:set-dark-mode-lightness', excludeReason: 'ui-navigation', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:discard-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:get', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:list', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },

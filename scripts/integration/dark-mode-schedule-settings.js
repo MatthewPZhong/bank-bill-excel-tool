@@ -1,6 +1,7 @@
 // 定时深色模式设置集成验证。
 // 覆盖真实 Preload → Main handler → 调度器 → AppDatabase 持久化、重启重判、
 // 失败不改主题、坏配置使用新默认，以及已有背景配置和图片文件保全。
+// v3.2.17：深浅度独立保存、广播、窗口底色、建窗 argv → Preload 首帧值与重启读回。
 // Main 的生产 handler / 初始化源码直接执行于隔离 VM，所有数据库和文件均在临时目录。
 // 用法：node scripts/integration/dark-mode-schedule-settings.js
 const assert = require('node:assert/strict');
@@ -10,7 +11,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 const { AppDatabase } = require('../../src/backend/database');
-const { createDarkModeScheduler } = require('../../src/main-process/dark-mode-scheduler');
+const { createDarkModeScheduler, resolveWindowBackgroundColor } = require('../../src/main-process/dark-mode-scheduler');
 const { DEFAULT_DARK_MODE_SCHEDULE } = require('../../src/shared/dark-mode-schedule');
 
 const repoRoot = path.resolve(__dirname, '../..');
@@ -81,7 +82,12 @@ function bootRuntime(database, storageRoot, initialTime) {
     lastOwnAccountsMigrationError: null,
     releaseNotesState: null,
     process: { env: {} },
-    fs
+    fs,
+    // 建窗选项切片所需的最小依赖；不创建真实窗口。
+    resolveWindowBackgroundColor,
+    path,
+    __dirname: '/fixture/src',
+    windowIcon: null
   });
   vm.runInContext(`let darkModeScheduler; ${sliceProductionSource(
     '    darkModeScheduler = createDarkModeScheduler({',
@@ -92,21 +98,30 @@ function bootRuntime(database, storageRoot, initialTime) {
     "  ipcMain.handle('settings:set-current-module',"
   ), context);
 
-  let desktopApi;
-  vm.runInNewContext(preloadSource, {
-    process: { env: {} },
-    require: (name) => {
-      assert.equal(name, 'electron');
-      return {
-        ipcRenderer,
-        contextBridge: {
-          exposeInMainWorld: (key, api) => { if (key === 'desktopApi') desktopApi = api; }
-        }
-      };
-    }
-  });
+  const loadPreload = (argv) => {
+    let api;
+    vm.runInNewContext(preloadSource, {
+      process: { env: {}, argv },
+      require: (name) => {
+        assert.equal(name, 'electron');
+        return {
+          ipcRenderer,
+          contextBridge: {
+            exposeInMainWorld: (key, value) => { if (key === 'desktopApi') api = value; }
+          }
+        };
+      }
+    });
+    return api;
+  };
+  const desktopApi = loadPreload(undefined);
+  const windowOptionsSource = sliceProductionSource(
+    '  const appearance = darkModeScheduler.refresh();',
+    '  if (process.env.APP_CAPTURE_PATH) {'
+  );
   return {
-    desktopApi, scheduler, nativeTheme, window, app, powerMonitor, timers,
+    desktopApi, scheduler, nativeTheme, window, app, powerMonitor, timers, loadPreload,
+    buildWindowOptions: () => vm.runInContext(`(() => {\n${windowOptionsSource}\nreturn windowOptions;\n})()`, context),
     setTime: (date) => { currentTime = date; }
   };
 }
@@ -253,6 +268,85 @@ async function run() {
         assert.equal(info.effectiveTheme, theme);
         assert.deepEqual(database.db.prepare('SELECT * FROM app_settings ORDER BY setting_key').all(), before);
       }
+    });
+
+    await check('深浅度缺省为 0；真实 Preload/Main 保存、推送、更新窗口底色，失败不改，重开读回并经 argv 交给 Preload', async () => {
+      const lightnessRow = () => database.db.prepare("SELECT setting_value FROM app_settings WHERE setting_key = 'dark_mode_lightness'").get();
+      runtime.scheduler.stop();
+      runtime = bootRuntime(database, tempDir, localTime(23, 0));
+      await runtime.desktopApi.settings.setDarkModeSchedule(enabled);
+      const initial = await runtime.desktopApi.app.getInfo();
+      assert.equal(initial.darkModeLightness, 0);
+      assert.equal(lightnessRow(), undefined);
+      assert.equal(runtime.window.color, '#111419');
+      assert.equal(runtime.desktopApi.settings.initialDarkModeLightness, 0);
+      assert.deepEqual(plain(runtime.buildWindowOptions().webPreferences.additionalArguments), ['--dark-mode-lightness=0']);
+
+      const events = [];
+      const cancel = runtime.desktopApi.settings.onDarkModeScheduleChanged((snapshot) => events.push(snapshot));
+      const saved = await runtime.desktopApi.settings.setDarkModeLightness(100);
+      cancel();
+      assert.equal(saved.status, 'ok');
+      assert.equal(saved.darkModeLightness, 100);
+      assert.equal(saved.themeRevision, initial.themeRevision + 1);
+      assert.deepEqual(plain(saved.darkModeSchedule), enabled);
+      assert.deepEqual(events.map((event) => [event.darkModeLightness, event.themeRevision]), [[100, saved.themeRevision]]);
+      assert.equal(runtime.window.color, '#383d46');
+      assert.equal(lightnessRow().setting_value, '100');
+      assert.deepEqual(database.getDarkModeSchedule(), enabled);
+
+      const before = runtime.scheduler.getSnapshot();
+      for (const value of [101, -1, 1.5, '50', null]) {
+        const invalid = await runtime.desktopApi.settings.setDarkModeLightness(value);
+        assert.equal(invalid.status, 'failed');
+        assert.match(invalid.message, /0 到 100 的整数/);
+      }
+      database.db.exec('PRAGMA query_only = ON');
+      try {
+        const failed = await runtime.desktopApi.settings.setDarkModeLightness(20);
+        assert.equal(failed.status, 'failed');
+        assert.ok(failed.message.length > 0);
+      } finally {
+        database.db.exec('PRAGMA query_only = OFF');
+      }
+      assert.deepEqual(runtime.scheduler.getSnapshot(), before);
+      assert.equal(lightnessRow().setting_value, '100');
+      assert.equal(runtime.window.color, '#383d46');
+
+      // 修改定时配置保留深浅度；浅色时窗口为浅色底色。
+      const off = await runtime.desktopApi.settings.setDarkModeSchedule({ ...enabled, enabled: false });
+      assert.equal(off.darkModeLightness, 100);
+      assert.equal(runtime.window.color, '#f9fafc');
+      await runtime.desktopApi.settings.setDarkModeSchedule(enabled);
+
+      runtime.scheduler.stop();
+      database.close();
+      database = new AppDatabase(dbPath);
+      database.init();
+      runtime = bootRuntime(database, tempDir, localTime(23, 0));
+      const reopened = await runtime.desktopApi.app.getInfo();
+      assert.equal(reopened.darkModeLightness, 100);
+      assert.equal(runtime.window.color, '#383d46');
+      const windowOptions = runtime.buildWindowOptions();
+      assert.equal(windowOptions.backgroundColor, '#383d46');
+      assert.deepEqual(plain(windowOptions.webPreferences.additionalArguments), ['--dark-mode-lightness=100']);
+      assert.equal(runtime.loadPreload(['electron', ...windowOptions.webPreferences.additionalArguments]).settings.initialDarkModeLightness, 100);
+      for (const argv of [['--dark-mode-lightness=101'], ['--dark-mode-lightness=abc'], ['--dark-mode-lightness=-1'], []]) {
+        assert.equal(runtime.loadPreload(argv).settings.initialDarkModeLightness, 0, JSON.stringify(argv));
+      }
+      runtime.setTime(localTime(12, 0));
+      runtime.app.emit('browser-window-focus');
+      assert.equal(runtime.buildWindowOptions().backgroundColor, '#f9fafc');
+    });
+
+    await check('损坏的深浅度只在读取时回退为 0，不改写原记录', () => {
+      const writeRaw = database.db.prepare("UPDATE app_settings SET setting_value = ? WHERE setting_key = 'dark_mode_lightness'");
+      for (const raw of ['abc', '101', '-1', '1.5', '', '0100']) {
+        writeRaw.run(raw);
+        assert.equal(database.getDarkModeLightness(), 0, raw);
+        assert.equal(database.db.prepare("SELECT setting_value FROM app_settings WHERE setting_key = 'dark_mode_lightness'").get().setting_value, raw);
+      }
+      writeRaw.run('100');
     });
 
     await check('停用保留自定义时段，主题保存及读取不改写 Clear、背景或图片', async () => {
