@@ -124,3 +124,28 @@ test('升级准备期间仍阻止关闭；退出准备完成或无租约时放�
   idle.context.handleMainWindowClose(idle.event);
   assert.equal(idle.event.prevented, false);
 });
+
+test('整理准入：收单操作锁、收单后台清理、银行对账单锁或收单 worker 忙时都判为忙', () => {
+  const base = {
+    acquiringBillCurrencyOperationLock: { inFlight: false },
+    cleanupBackgroundInProgress: false,
+    bankStatementOperationLock: { inFlight: false },
+    runCheckWorkerPool: { isBusy: () => false }
+  };
+  const reasonWith = (overrides) => {
+    const context = vm.createContext({ ...base, ...overrides });
+    vm.runInContext(productionFunction('idleCompactionBusyReason'), context);
+    return context.idleCompactionBusyReason();
+  };
+  assert.equal(reasonWith({}), '');
+  assert.equal(reasonWith({ acquiringBillCurrencyOperationLock: { inFlight: true } }), 'acquiring-operation-busy');
+  assert.equal(reasonWith({ cleanupBackgroundInProgress: true }), 'acquiring-operation-busy');
+  assert.equal(reasonWith({ bankStatementOperationLock: { inFlight: true } }), 'bank-statement-operation-busy');
+  assert.equal(reasonWith({ runCheckWorkerPool: { isBusy: () => true } }), 'acquiring-worker-busy');
+  assert.equal(reasonWith({ runCheckWorkerPool: { isBusy: () => { throw new Error('状态未知'); } } }), 'acquiring-worker-status-unknown');
+  assert.equal(reasonWith({ runCheckWorkerPool: null }), '');
+});
+
+test('整理控制器接入生产准入函数', () => {
+  assert.match(source, /isOtherWorkBusy: \(\) => idleCompactionBusyReason\(\)/);
+});

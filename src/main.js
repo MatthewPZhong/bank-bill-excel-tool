@@ -1382,11 +1382,7 @@ const idleDatabaseCompaction = createIdleCompactionController({
   } : null),
   registry: businessOperationRegistry,
   getLastUserActivityTs: () => lastUserActivityTs,
-  isOtherWorkBusy: () => (
-    runCheckWorkerPool && typeof runCheckWorkerPool.isBusy === 'function' && runCheckWorkerPool.isBusy()
-      ? 'acquiring-worker-busy'
-      : ''
-  ),
+  isOtherWorkBusy: () => idleCompactionBusyReason(),
   beginMaintenance: async () => (archiveStorageRootManager
     ? archiveStorageRootManager.beginDatabaseMaintenance('正在整理存储空间，请稍后重试')
     : { acquired: true }),
@@ -5089,6 +5085,22 @@ function releaseAppUpdateTransition() {
     appUpdateTransitionToken = null;
   }
   return released;
+}
+
+// 空闲整理准入：未登记到业务操作登记表的写入方也视为忙（与升级重启前的忙检查同口径）——
+//   收单启动孤儿清理与切回模块触发的后台清理（只持收单操作锁/后台清理标记）、银行对账单操作锁、收单校验 worker。
+//   整理开始后这些入口会因过渡租约拿不到锁，这里只需挡住整理开始前已在进行的写入。
+function idleCompactionBusyReason() {
+  if (acquiringBillCurrencyOperationLock.inFlight || cleanupBackgroundInProgress) return 'acquiring-operation-busy';
+  if (bankStatementOperationLock.inFlight) return 'bank-statement-operation-busy';
+  try {
+    if (runCheckWorkerPool && typeof runCheckWorkerPool.isBusy === 'function' && runCheckWorkerPool.isBusy()) {
+      return 'acquiring-worker-busy';
+    }
+  } catch (_error) {
+    return 'acquiring-worker-status-unknown';
+  }
+  return '';
 }
 
 function listUpdateRestartBusyOperations() {

@@ -30,6 +30,7 @@
 ## 三、与其他写入者的关系
 
 - 业务任务：过渡租约 `requireIdle` 保证开始时无登记任务；整理期间 `begin()` 一律拒绝。
+- 未登记到业务操作登记表的写入方：`main.js` `idleCompactionBusyReason()` 在整理开始前检查收单操作锁、收单后台清理标记、银行对账单操作锁与收单校验 worker，任一在忙则本次跳过（与升级重启前的忙检查同口径）；整理开始后这些入口因过渡租约拿不到锁。
 - 存档中心：`beginDatabaseMaintenance` 等待存档操作结束并暂停后台物化与归属扫描，结束后 `endDatabaseMaintenance`。
 - 主连接：整理开始前在主连接做一次 `wal_checkpoint(TRUNCATE)`；主连接没有 `busy_timeout`，整理期间若有未登记的主线程写入（例如定时深色模式的设置写入）会得到“数据库忙”，按各自的失败路径处理，下次再写。
 - 子进程：创建前经 `memoryCarrierAdmission` 准入（与其他原生载体一致，已登记 `changes/v3.2.11/v3.2.11-bizop-rows-low-memory/carrier-inventory.json`）；低内存任务占用资源时本次跳过，下次空闲再试。
@@ -46,4 +47,5 @@
 - 2026-11-11 Codex 审查指出关窗入口与收单阈值两处接入缺陷，已修复并补上述回归测试。
 - 2026-11-11 Codex 第二轮审查指出存档维护准备不可取消、终止失败未重试、`error` 事件提前放行三处生命周期缺口，已修复；`database-idle-compaction.test.js` 增至 13 项（新增维护准备取消、重复终止、error 后等真实退出、未启动即失败、启动前终止重试）。
 - 2026-11-11 Codex 第三轮审查指出 SQLite 临时目录所在卷未纳入余量检查、弹窗拦截键盘活动导致无法中止两处，已修复；新增临时卷余量与临时目录传递用例、`tests/unit/renderer-user-activity-reporter.test.js`。
+- 2026-11-11 Codex 第四轮审查：VCC 分支无发现；本分支指出整理准入漏掉只持收单操作锁的后台清理，已修复，`main-idle-compaction-wiring.test.js` 增至 8 项。
 - 未完成：Electron 打包环境下 `utilityProcess` 路径的实际整理与中止（本机 Electron 无法开窗口），随 VCC B86 在 Windows 回归。
