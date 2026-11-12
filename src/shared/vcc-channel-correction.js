@@ -71,8 +71,9 @@
     // 与导入金额规则一致地放宽：允许千分位逗号与正负号；小数位与有效位数的最终判定在后端。
     const plain = normalized.replace(/,/g, '');
     if (!Number.isFinite(Number(plain))) return `${field}须为数字`;
+    // 与 canonicalizeVccAmount 一致：先去掉小数尾随零再数位数（12.3400 视为 12.34）。
     const decimals = plain.match(/^[+-]?\d*\.(\d+)$/);
-    if (decimals && decimals[1].length > 2) return `${field}最多 2 位小数`;
+    if (decimals && decimals[1].replace(/0+$/, '').length > 2) return `${field}最多 2 位小数`;
     return '';
   }
 

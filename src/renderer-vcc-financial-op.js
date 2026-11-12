@@ -483,9 +483,15 @@
     const CHANNEL_CORRECTION_LIMIT = 2000;
     const channelCorrection = globalThis.__vccChannelCorrection;
 
+    // 补录上限按单张 Sheet 计：超限的 Sheet 只提示、按异常过滤，不影响其他 Sheet 补录。
+    function correctionSourceOverLimit(source) {
+      const info = source.channelCorrectionCandidates;
+      return Boolean(info) && (info.truncated === true || (Number(info.total) || 0) > CHANNEL_CORRECTION_LIMIT);
+    }
+
     function correctionCandidatesOf(sources) {
       return sources.flatMap((source) => (
-        source.status === 'ready' && source.channelCorrectionCandidates
+        source.status === 'ready' && source.channelCorrectionCandidates && !correctionSourceOverLimit(source)
           ? (source.channelCorrectionCandidates.candidates || []).map((candidate) => ({ source, candidate }))
           : []
       ));
@@ -518,21 +524,16 @@
       const total = sources.reduce((sum, source) => sum + (source.status === 'ready' && source.channelCorrectionCandidates
         ? Number(source.channelCorrectionCandidates.total) || 0 : 0), 0);
       if (total === 0 || !channelCorrection) return { html: '', editable: false, total };
-      const truncated = total > CHANNEL_CORRECTION_LIMIT
-        || sources.some((source) => source.channelCorrectionCandidates && source.channelCorrectionCandidates.truncated);
+      const overLimit = sources.filter((source) => source.status === 'ready' && correctionSourceOverLimit(source));
       const intro = `
         <p class="vcc-fin-op-correction-title">需要确认的通道明细行（${formatInteger(total)} 行）</p>
         <p class="vcc-fin-op-correction-hint">这些行的对账字段为空或格式不合规。不修改的行按异常过滤、不参与计算；修改后的行按新值导入，原值与新值记入导入记录的【导出明细】。</p>`;
-      if (truncated) {
-        return {
-          html: `<section class="vcc-fin-op-correction-section">${intro}
-            <p class="vcc-fin-op-correction-hint">超过单次补录上限 ${formatInteger(CHANNEL_CORRECTION_LIMIT)} 行，请在原表中修正后重新导入；本次继续导入时这些行按异常过滤。</p>
-          </section>`,
-          editable: false,
-          total
-        };
-      }
+      const overLimitHint = overLimit.length ? `
+        <p class="vcc-fin-op-correction-hint">以下 Sheet 待补录超过单张上限 ${formatInteger(CHANNEL_CORRECTION_LIMIT)} 行，请在原表中修正后重新导入；本次继续导入时这些行按异常过滤：${overLimit.map((source) => escapeHtml(`${source.fileName} / ${source.sheetName}`)).join('、')}</p>` : '';
       const entries = correctionCandidatesOf(sources);
+      if (entries.length === 0) {
+        return { html: `<section class="vcc-fin-op-correction-section">${intro}${overLimitHint}</section>`, editable: false, total };
+      }
       const rows = entries.map((entry, index) => `
         <div class="vcc-fin-op-correction-row">
           <div class="vcc-fin-op-correction-meta">
@@ -546,7 +547,7 @@
         </div>
       `).join('');
       return {
-        html: `<section class="vcc-fin-op-correction-section">${intro}<div class="vcc-fin-op-correction-list">${rows}</div></section>`,
+        html: `<section class="vcc-fin-op-correction-section">${intro}${overLimitHint}<div class="vcc-fin-op-correction-list">${rows}</div></section>`,
         editable: true,
         total
       };

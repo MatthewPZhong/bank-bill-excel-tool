@@ -65,6 +65,13 @@
 - [P2] 用户模板改名可补录字段（如“交易金额”→“新交易金额”）时，待确认表原表列丢失补录值：补录记录按内置字段名保存，原代码按导入时表头名查找。修复：`source-structure.js` 增加 `sourceIndexOfCanonical`（内置列 → 导入时结构列位置，复用 `canonicalHeaderMapping`），待确认表按此定位；导入时结构中无对应列时报错，不静默丢弃。⚠️ 资金红线（补录金额在审阅表中的可见性），已补测试，仍请随 GUI 验收用改名模板核对一次。测试：`vcc-financial-op-review-export.test.js` 改名模板。
 - [P2] TEMP 暂存随 worker 连接消失后，中断恢复把已读取行数清零：`finalizeImportingRecords` 从（已为空的）主库暂存表重新计数并覆盖检查点持久化的 `raw_count`。修复：恢复时以持久化的 `raw_count` 为下限，差额计为回滚，保持六类计数守恒。与旧行为的差别：崩溃前已读取的行不再保留逐行异常分类与异常明细（统一计为回滚）；记录仍为失败、没有数据进入有效数据集，读取行数可审计。测试：`detail-importer.test.js` 文件库关闭 worker 连接后恢复。
 
+## Codex 第三轮审查（2026-11-11）
+
+两项均已核实并修复，各补回归测试（对旧代码失败、修复后通过）：
+
+- [P2] 预检弹窗补录上限按全部 Sheet 合计判断，且任一 Sheet 超限即禁用整个补录区，与用户手册“单张 Sheet 超过 2000 行”不一致。修复：`renderer-vcc-financial-op.js` 按 Sheet 判断，超限 Sheet 只提示并列出文件/Sheet、按异常过滤，其余 Sheet 照常补录。测试：`renderer-vcc-financial-op.test.js` 执行生产函数（超限 + 少量混合、两张各未超限但合计超 2000、仅超限）。
+- [P2] 前端金额即时校验按原字符串数小数位，`12.3400`、`0.000` 被拒，而正式导入先去尾随零（`canonicalizeVccAmount`）后可通过。修复：`src/shared/vcc-channel-correction.js` 去掉小数尾随零后再数位数。测试：`channel-correction.test.js` 逐值比对前端与导入判定一致。
+
 ## Remaining unknowns
 
 - 真实 Windows 机器与真实库上的提速幅度（B86）。

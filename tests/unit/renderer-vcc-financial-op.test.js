@@ -1283,3 +1283,51 @@ test.describe('VCC 正式结果提交状态未知反馈', () => {
     assert.equal(unarchive, '2026-06 解归档失败：结果文件的提交状态尚未确认；月份列表已刷新并切至 2026-05，请确认后重试');
   });
 });
+
+test('通道明细补录上限按单张 Sheet 计：超限 Sheet 只提示，其他 Sheet 仍可补录', () => {
+  const start = moduleRenderer.indexOf('const CHANNEL_CORRECTION_LIMIT');
+  const end = moduleRenderer.indexOf('function confirmImportPlan', start);
+  assert.ok(start >= 0 && end > start);
+  const shared = require('../../src/shared/vcc-channel-correction');
+  const build = Function(
+    'globalThis',
+    'escapeHtml',
+    'formatInteger',
+    `'use strict'; ${moduleRenderer.slice(start, end)}; return { correctionCandidatesOf, correctionSectionHtml };`
+  );
+  const { correctionCandidatesOf, correctionSectionHtml } = build(
+    { __vccChannelCorrection: shared },
+    (value) => String(value),
+    (value) => String(value)
+  );
+  const candidate = (sourceRow) => ({
+    sourceRow,
+    idempotencyKey: `channel-${sourceRow}`,
+    fields: { 借贷方向: 'in', 通道名称: 'CITI', 交易币种: 'USD', 交易金额: '' },
+    requiredFields: ['借贷方向', '通道名称', '交易币种', '交易金额'],
+    problems: [{ field: '交易金额', message: '交易金额不能为空' }]
+  });
+  const sheet = (sheetName, total, rows, truncated = false) => ({
+    status: 'ready', fileName: '通道.xlsx', sheetName,
+    channelCorrectionCandidates: { total, truncated, candidates: rows.map(candidate) }
+  });
+  const big = sheet('超限', 2001, [2, 3], true);
+  const small = sheet('少量', 1, [5]);
+  const bothUnderLimit = [sheet('A', 1000, [2]), sheet('B', 1001, [3])];
+
+  assert.deepEqual(correctionCandidatesOf([big, small]).map((entry) => entry.source.sheetName), ['少量']);
+  const mixed = correctionSectionHtml([big, small], '2026-06');
+  assert.equal(mixed.editable, true);
+  assert.match(mixed.html, /单张上限 2000 行[\s\S]*通道\.xlsx \/ 超限/);
+  assert.match(mixed.html, /data-correction-index="0"/);
+  assert.doesNotMatch(mixed.html, /data-correction-index="1"/);
+
+  const combined = correctionSectionHtml(bothUnderLimit, '2026-06');
+  assert.equal(combined.editable, true, '两张 Sheet 各自未超限，合计超过 2000 行仍可补录');
+  assert.equal(correctionCandidatesOf(bothUnderLimit).length, 2);
+  assert.doesNotMatch(combined.html, /单张上限/);
+
+  const onlyBig = correctionSectionHtml([big], '2026-06');
+  assert.equal(onlyBig.editable, false);
+  assert.match(onlyBig.html, /单张上限 2000 行/);
+});

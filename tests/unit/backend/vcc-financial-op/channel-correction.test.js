@@ -236,3 +236,18 @@ test('导入按补录后的值计算并记录原值/新值；重导按幂等规�
     SELECT signed_amount FROM vcc_fin_op_effective_rows WHERE idempotency_key = 'CH-2'
   `).get().signed_amount, '20.5', '冲突时保留既有有效行');
 });
+
+test('补录金额：前端即时校验与正式导入的金额规则一致（尾随零不计小数位）', () => {
+  const shared = require('../../../../src/shared/vcc-channel-correction');
+  const { channelCorrectionProblems } = require('../../../../src/backend/vcc-financial-op/row-mapper');
+  const citiRow = (amount) => ({ 借贷方向: 'in', 通道名称: 'CITI', 交易币种: 'USD', 交易金额: amount });
+  for (const value of ['12.3400', '0.000', '1,000.50', '-3.10', '7', '12.345', '12.3450', 'abc']) {
+    const frontendAccepts = shared.validateField('交易金额', value) === '';
+    const row = citiRow(value);
+    const importAccepts = !channelCorrectionProblems((field) => row[field] ?? '', '2026-06')
+      .some((problem) => problem.field === '交易金额');
+    assert.equal(frontendAccepts, importAccepts, `${value}：前端${frontendAccepts ? '接受' : '拒绝'}，导入${importAccepts ? '接受' : '拒绝'}`);
+  }
+  assert.equal(shared.validateField('交易金额', '12.3400'), '');
+  assert.match(shared.validateField('交易金额', '12.3450'), /最多 2 位小数/);
+});
