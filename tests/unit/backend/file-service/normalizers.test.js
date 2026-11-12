@@ -462,3 +462,39 @@ test.describe('matchAmountSplitConditionValue — 金额拆分条件匹配', () 
     assert.equal(matchAmountSplitConditionValue(undefined, undefined), true);
   });
 });
+
+// ========================================================================
+// v3.2.17：Excel 序列号日期系统（excelDateSystem）
+// ========================================================================
+
+test.describe('normalizeDateExportValue / parseDateValue — excelDateSystem', () => {
+  const iso = (date) => (date
+    ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    : null);
+
+  test('不传时与原行为一致（1900 系统）', () => {
+    for (const value of [46297, '46297', '46297 12:30:00']) {
+      assert.equal(iso(parseDateValue(value)), '2026-10-02');
+      assert.equal(iso(parseDateValue(value, { excelDateSystem: '1900' })), '2026-10-02');
+    }
+  });
+
+  test('1904：数字单元格与去掉时间后缀后的纯数字文本都加 1462 天', () => {
+    for (const value of [44835, 44835.5, '44835', ' 44835 ', '44835 12:30:00', '44835T12:30:00', '44835,12.30 PM']) {
+      assert.equal(iso(parseDateValue(value, { excelDateSystem: '1904' })), '2026-10-02', String(value));
+    }
+  });
+
+  test('unknown：序列号形式的日期不解析；日历写法、文本序列号范围外的值与原行为一致', () => {
+    for (const value of [44835, '44835', '44835 12:30:00', '44835T12:30:00']) {
+      assert.equal(parseDateValue(value, { excelDateSystem: 'unknown' }), null, String(value));
+    }
+    for (const [value, expected] of [['2026-09-30', '2026-09-30'], ['20260930', '2026-09-30'], ['260930', '2026-09-30'], ['2026/09/30 08:00', '2026-09-30']]) {
+      assert.equal(iso(parseDateValue(value, { excelDateSystem: 'unknown' })), expected, value);
+    }
+    for (const system of ['1900', '1904', 'unknown']) {
+      assert.equal(parseDateValue('365', { excelDateSystem: system }), null, `365 / ${system}`);
+      assert.equal(parseDateValue('200000', { excelDateSystem: system }), null, `200000 / ${system}`);
+    }
+  });
+});

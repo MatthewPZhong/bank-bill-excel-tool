@@ -2604,6 +2604,43 @@ tr.add-row .text-action:hover { background: var(--primary-soft, #c2d7fa); }
 }
 .manual-balance-card .big-account-selection-item:hover { background: var(--bg-soft); }
 .manual-balance-card .dialog-actions.right { padding: 8px 28px 22px; }
+/* v3.2.17：补录余额「导入余额文件」——左侧导入、右侧完成；与 .right 同内边距，不加分隔线 */
+.manual-balance-card .dialog-actions.left-right { padding: 8px 28px 22px; border-top: none; }
+/* 余额确认视图：加宽卡片，正文（表格）滚动，按钮常驻 */
+.manual-balance-card.manual-balance-card--confirm {
+  width: min(100%, 1040px);
+  max-height: calc(100vh - 56px);
+  display: flex; flex-direction: column;
+}
+.manual-balance-confirm-view:not([hidden]) {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column;
+}
+.manual-balance-confirm-view .dialog-actions { flex: 0 0 auto; }
+.manual-balance-confirm-summary { font-weight: 600; }
+.manual-balance-confirm-table-wrap {
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  overflow: auto;
+  max-height: 46vh;
+}
+.manual-balance-confirm-table tbody td { padding: 8px 12px; }
+.manual-balance-confirm-table thead th { padding: 10px 12px 8px; white-space: nowrap; }
+.manual-balance-confirm-date { min-width: 150px; height: 36px; }
+.manual-balance-confirm-amount { min-width: 140px; height: 36px; }
+.manual-balance-confirm-row.is-manual td { background: var(--warning-soft, #fff7e6); }
+.manual-balance-confirm-row.is-invalid td { background: var(--danger-soft, #fdecea); }
+.manual-balance-confirm-row.is-invalid input { border-color: var(--danger, #d93025); }
+.manual-balance-source-tag {
+  display: inline-flex; align-items: center;
+  padding: 2px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.manual-balance-source-tag.is-file { background: var(--chip-active-bg); color: var(--primary); }
+.manual-balance-source-tag.is-manual { background: var(--warning-soft, #fff7e6); color: var(--warning, #946000); }
+.manual-balance-source-tag.is-saved { background: var(--bg-soft); color: var(--muted); }
+.manual-balance-confirm-row.is-saved td { color: var(--muted); }
+.manual-balance-source-reason { margin-top: 4px; font-size: 12px; color: var(--muted); }
 
 /* Alert card */
 .alert-card .alert-body {

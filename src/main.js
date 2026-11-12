@@ -684,6 +684,11 @@ const {
   resolveManualBalanceTargetAlias
 } = require('./main-process/manual-balance-seed-settlement');
 const { parseBankAccountExcel } = require('./backend/bank-account-import');
+const {
+  matchBalanceSeedImport,
+  parseBalanceSeedImportRows,
+  readBalanceSeedImportFile
+} = require('./backend/balance-seed-import');
 const { writeOwnAccounts } = require('./backend/own-account-store');
 const {
   readBalanceAdjustments,
@@ -12782,6 +12787,72 @@ function registerBigAccountHandlers() {
         errorType: '系统错误',
         originalError: error
       });
+    }
+  });
+
+  // v3.2.17：补录余额「导入余额文件」——选择余额文件，按当前补录提示的待补录账号（银行账号 + 币种）提取上一账单日余额，
+  //   返回给补录弹窗的「余额确认」视图。只读预检：不写种子、不改补录 prompt 与生成缓存；确认后由渲染层逐个账号
+  //   沿用 file:save-balance-seed 写入（主进程照常只接受当前 prompt 指向的账号并校验）。
+  ipcMain.handle('file:import-balance-seed-file', async () => {
+    const pendingPrompt = lastManualBalancePrompt;
+    const pendingAccounts = pendingPrompt && !pendingPrompt.reason && !pendingPrompt.seedMismatch
+      && Array.isArray(pendingPrompt.pendingAccounts)
+      ? pendingPrompt.pendingAccounts
+      : [];
+    if (!pendingAccounts.length) {
+      return {
+        status: 'error',
+        errorCode: 'BALANCE_IMPORT_NO_PENDING_ACCOUNT',
+        message: '当前没有待补录的账号，请重新生成余额'
+      };
+    }
+    const choice = await showImportOpenDialog('balance-seed-file', {
+      title: '选择余额文件',
+      properties: ['openFile'],
+      filters: statementFileDialogFilters()
+    });
+    const filePath = !choice.canceled && Array.isArray(choice.filePaths) ? choice.filePaths[0] : '';
+    if (!filePath) return { status: 'cancelled' };
+    const fileName = path.basename(filePath);
+    try {
+      const { rows, displayRows, date1904 } = readBalanceSeedImportFile(filePath);
+      const { records, skippedRowCount } = parseBalanceSeedImportRows(rows, { displayRows, date1904 });
+      const matched = matchBalanceSeedImport(records, pendingAccounts);
+      appendActivityLogEntry({
+        level: 'info',
+        message: '导入余额文件，等待确认补录余额',
+        details: [
+          `文件：${fileName}`,
+          `模板名：${pendingPrompt.templateName || 'N/A'}`,
+          `待补录账号：${matched.accounts.length} 个`,
+          `从文件提取：${matched.matchedCount} 个`,
+          `需手工录入：${matched.manualCount} 个`,
+          ...(skippedRowCount ? [`跳过无效行：${skippedRowCount} 行`] : [])
+        ]
+      });
+      return {
+        status: 'success',
+        fileName,
+        templateName: pendingPrompt.templateName || '',
+        skippedRowCount,
+        ...matched
+      };
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        return {
+          status: 'error',
+          errorCode: error.code,
+          message: error.message,
+          detailLines: Array.isArray(error.detailLines) ? error.detailLines : []
+        };
+      }
+      const logPath = appendLog(ensureStorageRoot(), error);
+      return {
+        status: 'error',
+        errorCode: 'BALANCE_IMPORT_RUNTIME',
+        message: '余额文件读取失败',
+        detailLines: [`日志文件：${logPath}`]
+      };
     }
   });
 

@@ -38,7 +38,8 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       cfg.api.balanceSeeds={list:owner=>cfg.invoke('seedList',[owner],cfg.seedList?cfg.seedList(owner):{status:'success',records:[]}),
         update:payload=>cfg.invoke('seedUpdate',[payload],{status:'success',changed:true,message:'余额种子已修改'}),
         delete:payload=>cfg.invoke('seedDelete',[payload],{status:'success',message:'余额种子已删除'})};
-      cfg.api.files={saveBalanceSeed:payload=>cfg.invoke('seed',[payload],{status:'success'}),completeBigAccountSelection:payload=>cfg.invoke('simpleSelection',[payload],{status:'success'})};
+      cfg.api.files={saveBalanceSeed:payload=>cfg.invoke('seed',[payload],{status:'success'}),completeBigAccountSelection:payload=>cfg.invoke('simpleSelection',[payload],{status:'success'}),
+        importBalanceSeedFile:()=>cfg.invoke('balanceImport',[],{status:'cancelled'})};
       cfg.rules=[{targetField:'Credit Amount',conditionField:'Currency',conditionValue:'C',mappedField:'Amount',rowIndex:0},{targetField:'Debit Amount',conditionField:'Currency',conditionValue:'D',mappedField:'Amount',rowIndex:1}];
       cfg.services=ConfigurationServices.createConfigurationServices({templatesApi:cfg.api.templates});
       cfg.services.acceptBootstrap({currencyOptions:['USD','HKD']});cfg.services.applyPreviewTemplates(cfg.templates);
@@ -420,8 +421,10 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       /已有 2026-09-30 的余额 0\.00（人工录入），加上 2026-10-01 收入 0\.00、支出 201,500\.00 后应为 -201,500\.00，与账单当日余额 800,000\.00、798,500\.00 都对不上/);
     await js(`cfg.next.seed={status:'success',message:'余额账单可导出'};cfg.top().querySelector('.manual-balance-amount-input').value='1000000';
       cfg.top().querySelector('[data-action="done"]').click();`); await tick();
+    // v3.2.17：补录请求带上界面所示的账号（与输出名称），主进程核对
     assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0])`),
-      [{billDate:'2026-09-30',endBalance:'0'},{billDate:'2026-09-30',endBalance:'1000000'}]);
+      [{billDate:'2026-09-30',endBalance:'0',merchantId:'M001',currency:'VND'},
+        {billDate:'2026-09-30',endBalance:'1000000',merchantId:'M001',currency:'VND',templateName:'模板 A'}]);
     assert.equal(await js('document.getElementById("modalRoot").children.length'), 0);
   });
   await test('缺余额的普通补录弹窗不显示对不上说明，输入为空', async () => {
@@ -431,6 +434,216 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       warning:Boolean(cfg.top().querySelector('.manual-balance-seed-mismatch')),
       date:cfg.top().querySelector('.manual-balance-date-input').value,amount:cfg.top().querySelector('.manual-balance-amount-input').value})`),
     {title:'补录上一账单日余额',warning:false,date:'',amount:''});
+  });
+
+  // v3.2.17：补录余额「导入余额文件」→ 余额确认 → 逐个账号沿用补录保存
+  const IMPORT_PROMPT_JS = `cfg.importPrompt={templateName:'模板 A',merchantId:'M001',currency:'USD',targetBillDate:'2026-10-01',queueIndex:1,queueTotal:2,
+      pendingAccounts:[{merchantId:'M001',currency:'USD',targetBillDate:'2026-10-01'},{merchantId:'M002',currency:'EUR',targetBillDate:'2026-10-02'}]};
+    cfg.secondPrompt={...cfg.importPrompt,merchantId:'M002',currency:'EUR',targetBillDate:'2026-10-02',queueIndex:2};
+    cfg.importResult={status:'success',fileName:'余额.xlsx',skippedRowCount:1,matchedCount:1,manualCount:1,accounts:[
+      {merchantId:'M001',currency:'USD',targetBillDate:'2026-10-01',billDate:'2026-09-30',endBalance:1234.5,source:'file',reason:''},
+      {merchantId:'M002',currency:'EUR',targetBillDate:'2026-10-02',billDate:'',endBalance:null,source:'manual',reason:'文件中没有该账号'}]};
+    cfg.view=()=>({title:cfg.top().querySelector('.dialog-title').textContent,
+      manualHidden:cfg.top().querySelector('[data-view="manual"]').hidden,confirmHidden:cfg.top().querySelector('[data-view="confirm"]').hidden});
+    cfg.rows=()=>[...cfg.top().querySelectorAll('.manual-balance-confirm-table tbody tr')];
+    cfg.fillRow=(index,date,amount)=>{const row=cfg.rows()[index];row.querySelector('.manual-balance-confirm-date').value=date;row.querySelector('.manual-balance-confirm-amount').value=amount;};
+    cfg.openImport=()=>{cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog(cfg.importPrompt)).handle;};
+    cfg.importFile=()=>{cfg.next.balanceImport=cfg.importResult;cfg.top().querySelector('[data-action="import-balance-file"]').click();};
+    cfg.seedQueue=[];cfg.api.files.saveBalanceSeed=payload=>cfg.invoke('seed',[payload],cfg.seedQueue.length?cfg.seedQueue.shift():{status:'success'});
+    void 0;`;
+  await test('导入余额文件只出现在带待补录清单的普通补录弹窗；断档、核对、无清单时不出现', async () => {
+    await setup();
+    await js(`${IMPORT_PROMPT_JS}cfg.openImport();void 0;`);
+    assert.deepEqual(await js(`({import:Boolean(cfg.top().querySelector('[data-action="import-balance-file"]')),
+      footer:cfg.top().querySelector('[data-view="manual"] .dialog-actions').className,confirmHidden:cfg.view().confirmHidden})`),
+    {import:true,footer:'dialog-actions left-right',confirmHidden:true});
+    for (const variant of [
+      `{...cfg.importPrompt,seedMismatch:{seedDate:'2026-09-30',anchorBalance:0,statementBalances:[]}}`,
+      `{...cfg.importPrompt,pendingAccounts:[]}`,
+      `{templateName:'模板 A',merchantId:'M001',currency:'USD',targetBillDate:'2026-10-01'}`
+    ]) {
+      await js(`cfg.host.closeTop();cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog(${variant}));void 0;`);
+      assert.equal(await js(`Boolean(cfg.top().querySelector('[data-action="import-balance-file"]'))||Boolean(cfg.top().querySelector('[data-view="confirm"]'))`), false);
+    }
+    await js(`cfg.host.closeTop();cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog({...cfg.importPrompt,reason:'gap',gapKey:'K1',gaps:[]},{}, {gapConfirmed:true}));void 0;`);
+    assert.equal(await js(`Boolean(cfg.top().querySelector('[data-action="import-balance-file"]'))`), false);
+    assert.equal(await js(`Boolean(cfg.top().querySelector('[data-action="skip-gap"]'))`), true);
+  });
+  await test('导入后转为余额确认：提取到的预填、提取不到的标为需手工录入；返回保留手工草稿；取消选择不切换', async () => {
+    await setup();
+    await js(`${IMPORT_PROMPT_JS}cfg.openImport();cfg.top().querySelector('.manual-balance-date-input').value='2026-09-29';
+      cfg.top().querySelector('.manual-balance-amount-input').value='7';cfg.top().querySelector('[data-action="import-balance-file"]').click();`); await tick();
+    assert.deepEqual(await js('cfg.view()'), {title:'补录上一账单日余额',manualHidden:false,confirmHidden:true});
+    await js('cfg.importFile();'); await tick();
+    assert.deepEqual(await js('cfg.view()'), {title:'余额确认',manualHidden:true,confirmHidden:false});
+    assert.deepEqual(await js(`cfg.rows().map(row=>({manual:row.classList.contains('is-manual'),cells:[...row.cells].slice(0,3).map(cell=>cell.textContent.trim()),
+      date:row.querySelector('.manual-balance-confirm-date').value,amount:row.querySelector('.manual-balance-confirm-amount').value,source:row.cells[5].textContent.replace(/\\s+/g,'')}))`), [
+      {manual:false,cells:['M001','USD','2026-10-01'],date:'2026-09-30',amount:'1234.5',source:'来自文件'},
+      {manual:true,cells:['M002','EUR','2026-10-02'],date:'',amount:'',source:'需手工录入文件中没有该账号'}
+    ]);
+    assert.match(await js(`cfg.top().querySelector('[data-role="confirm-summary"]').textContent`), /已从 余额\.xlsx 提取 1 个账号的余额，1 个需手工录入；文件中 1 行/);
+    assert.equal(await js(`cfg.top().querySelector('.manual-balance-card').classList.contains('manual-balance-card--confirm')`), true);
+    await js(`cfg.top().querySelector('[data-action="confirm-back"]').click();`);
+    assert.deepEqual(await js('cfg.view()'), {title:'补录上一账单日余额',manualHidden:false,confirmHidden:true});
+    assert.deepEqual(await js(`[cfg.top().querySelector('.manual-balance-date-input').value,cfg.top().querySelector('.manual-balance-amount-input').value]`), ['2026-09-29','7']);
+    assert.equal(await js(`cfg.top().querySelector('.manual-balance-card').classList.contains('manual-balance-card--confirm')`), false);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='seed').length`), 0);
+  });
+  await test('余额确认：日期或余额未填、日期不早于当前账单日期时标红不提交', async () => {
+    await setup();
+    await js(`${IMPORT_PROMPT_JS}cfg.openImport();cfg.importFile();`); await tick();
+    await js(`cfg.top().querySelector('[data-action="confirm-save"]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.rows().map(row=>row.classList.contains('is-invalid'))`), [false,true]);
+    assert.match(await js(`cfg.top().querySelector('[data-role="confirm-message"]').textContent`), /有 1 个账号/);
+    await js(`cfg.fillRow(1,'2026-10-02','88');cfg.top().querySelector('[data-action="confirm-save"]').click();`); await tick();
+    assert.equal(await js(`cfg.rows()[1].title`), '上一账单日日期必须早于当前账单日期');
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='seed').length`), 0);
+  });
+  await test('余额确认后按主进程提示逐个保存清单内账号并带上账号；保存中不能关闭；全部完成后关闭', async () => {
+    await setup();
+    await js(`${IMPORT_PROMPT_JS}cfg.openImport();cfg.importFile();`); await tick();
+    await js(`cfg.fillRow(1,'2026-10-01','88');cfg.first=cfg.defer();cfg.seedQueue=[cfg.first.promise,{status:'success',message:'余额账单可导出'}];
+      cfg.top().querySelector('[data-action="confirm-save"]').click();`); await tick();
+    assert.equal(await js('cfg.handle.close().status'), 'blocked');
+    assert.deepEqual(await js(`[...cfg.top().querySelectorAll('[data-action]')].map(button=>button.disabled)`), [true,true,true,true]);
+    assert.match(await js(`cfg.top().querySelector('[data-role="confirm-message"]').textContent`), /正在保存第 1 \/ 2 个账号/);
+    await js(`cfg.first.resolve({status:'manual-balance-required',manualBalancePromptReady:true,manualBalancePrompt:cfg.secondPrompt});`); await tick(); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0])`), [
+      {billDate:'2026-09-30',endBalance:'1234.5',merchantId:'M001',currency:'USD',templateName:'模板 A'},
+      {billDate:'2026-10-01',endBalance:'88',merchantId:'M002',currency:'EUR',templateName:'模板 A'}
+    ]);
+    assert.equal(await js('cfg.handle.isOpen()'), false);
+    assert.equal(await js('document.getElementById("modalRoot").children.length'), 0);
+    assert.equal(await js('cfg.applied'), 2);
+  });
+  await test('余额确认后遇到清单外账号、断档或校验失败即停下，交回原补录流程', async () => {
+    for (const [label, firstResult, expectedText, expectedDraft] of [
+      ['清单外账号', `{status:'manual-balance-required',manualBalancePromptReady:true,manualBalancePrompt:{...cfg.importPrompt,merchantId:'M003',currency:'JPY',queueIndex:3}}`, /M003/, ['','']],
+      ['校验失败', `{status:'manual-balance-invalid',message:'请输入有效的上一账单日余额',manualBalancePromptReady:true,manualBalancePrompt:cfg.importPrompt}`, /M001/, ['2026-09-30','1234.5']]
+    ]) {
+      await setup();
+      await js(`${IMPORT_PROMPT_JS}cfg.openImport();cfg.importFile();`); await tick();
+      await js(`cfg.fillRow(1,'2026-10-01','88');cfg.seedQueue=[${firstResult}];cfg.top().querySelector('[data-action="confirm-save"]').click();`); await tick(); await tick();
+      assert.equal(await js(`cfg.calls.filter(call=>call.name==='seed').length`), 1, label);
+      assert.equal(await js('document.getElementById("modalRoot").children.length'), 1, label);
+      assert.equal(await js(`cfg.top().querySelector('.dialog-title').textContent`), '补录上一账单日余额', label);
+      assert.match(await js(`cfg.top().querySelector('[data-view="manual"]').textContent`), expectedText, label);
+      assert.deepEqual(await js(`[cfg.top().querySelector('.manual-balance-date-input').value,cfg.top().querySelector('.manual-balance-amount-input').value]`), expectedDraft, label);
+    }
+  });
+  await test('余额确认账号较多且最小窗口放大到 150% 时，表格滚动、卡片不出窗口，返回与确认可见可点', async () => {
+    await setup({ zoom: 1.5 });
+    await js(`${IMPORT_PROMPT_JS}
+      cfg.importResult.accounts=Array.from({length:20},(_,i)=>({merchantId:'62220000000000'+String(i).padStart(2,'0'),currency:'USD',targetBillDate:'2026-10-01',
+        billDate:i%3?'2026-09-30':'',endBalance:i%3?123456789.12:null,source:i%3?'file':'manual',reason:i%3?'':'文件中 2026-09-30 有多个不同余额'}));
+      cfg.openImport();cfg.importFile();`);
+    await tick();
+    await layout.settle();
+    const geometry = await js(`(() => {
+      const card=cfg.top().querySelector('.manual-balance-card'), wrap=card.querySelector('.manual-balance-confirm-table-wrap'),
+        body=card.querySelector('.manual-balance-confirm-body'), rect=card.getBoundingClientRect();
+      return { fits: rect.bottom<=innerHeight && rect.right<=innerWidth && rect.left>=0,
+        scrolls: wrap.scrollHeight>wrap.clientHeight || body.scrollHeight>body.clientHeight,
+        buttons: [...card.querySelectorAll('[data-view="confirm"] .dialog-actions button')].map(button => {
+          const r=button.getBoundingClientRect(); return r.top>=rect.top && r.bottom<=rect.bottom && r.right<=rect.right; }) };
+    })()`);
+    assert.deepEqual(geometry, { fits: true, scrolls: true, buttons: [true, true] });
+    await layout.click('.manual-balance-card [data-action="confirm-back"]');
+    assert.equal(await js(`cfg.top().querySelector('.dialog-title').textContent`), '补录上一账单日余额');
+  });
+  await test('余额确认连续保存中途 IPC 异常：提示失败、解除锁定；再点确认从已确认的下一个账号接着保存', async () => {
+    await setup();
+    await js(`${IMPORT_PROMPT_JS}cfg.openImport();cfg.importFile();`); await tick();
+    await js(`cfg.fillRow(1,'2026-10-01','88');
+      cfg.seedQueue=[{status:'manual-balance-required',manualBalancePromptReady:true,manualBalancePrompt:cfg.secondPrompt},Promise.reject(new Error('IPC 中断'))];
+      cfg.top().querySelector('[data-action="confirm-save"]').click();`); await tick(); await tick();
+    assert.match(await js('cfg.top().textContent'), /余额补录失败：IPC 中断/);
+    await js('cfg.host.closeTop();');
+    assert.deepEqual(await js(`[...cfg.top().querySelectorAll('[data-view="confirm"] [data-action]')].map(button=>button.disabled)`), [false,false]);
+    await js(`cfg.seedQueue=[{status:'success',message:'余额账单可导出'}];cfg.top().querySelector('[data-action="confirm-save"]').click();`); await tick(); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0].merchantId)`), ['M001','M002','M002']);
+    assert.equal(await js('document.getElementById("modalRoot").children.length'), 0);
+  });
+  // Codex 审查 P1-1：部分保存成功后失败，【返回】不能回到旧账号的表单（否则旧账号的值会写到主进程当前账号）。
+  await test('余额确认部分保存成功后中途失败，返回时按主进程当前提示重建补录弹窗，完成带当前账号', async () => {
+    await setup();
+    await js(`${IMPORT_PROMPT_JS}cfg.openImport();cfg.importFile();`); await tick();
+    await js(`cfg.fillRow(1,'2026-10-01','88');
+      cfg.seedQueue=[{status:'manual-balance-required',manualBalancePromptReady:true,manualBalancePrompt:cfg.secondPrompt},Promise.reject(new Error('IPC 中断'))];
+      cfg.top().querySelector('[data-action="confirm-save"]').click();`); await tick(); await tick();
+    await js('cfg.host.closeTop();');
+    await js(`cfg.top().querySelector('[data-action="confirm-back"]').click();`); await tick();
+    assert.equal(await js('document.getElementById("modalRoot").children.length'), 1);
+    assert.equal(await js(`cfg.top().querySelector('.dialog-title').textContent`), '补录上一账单日余额');
+    assert.match(await js(`cfg.top().querySelector('.manual-balance-context-account').textContent`), /M002/);
+    assert.deepEqual(await js(`[cfg.top().querySelector('.manual-balance-date-input').value,cfg.top().querySelector('.manual-balance-amount-input').value]`), ['','']);
+    await js(`cfg.top().querySelector('.manual-balance-date-input').value='2026-10-01';cfg.top().querySelector('.manual-balance-amount-input').value='5';
+      cfg.seedQueue=[{status:'success'}];cfg.top().querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').at(-1).args[0]`),
+      {billDate:'2026-10-01',endBalance:'5',merchantId:'M002',currency:'EUR',templateName:'模板 A'});
+  });
+  // Codex 审查 P1-2：重试不重提已保存账号；下一分组（输出名称不同）的同号账号不自动保存。
+  await test('余额确认重试不重提已保存账号；下一分组同号账号停下交回手工补录', async () => {
+    await setup();
+    await js(`${IMPORT_PROMPT_JS}cfg.openImport();cfg.importFile();`); await tick();
+    await js(`cfg.fillRow(1,'2026-10-01','88');
+      cfg.seedQueue=[{status:'manual-balance-required',manualBalancePromptReady:true,manualBalancePrompt:cfg.secondPrompt},Promise.reject(new Error('IPC 中断'))];
+      cfg.top().querySelector('[data-action="confirm-save"]').click();`); await tick(); await tick();
+    await js('cfg.host.closeTop();');
+    await js(`cfg.otherGroupPrompt={...cfg.importPrompt,templateName:'模板 B',queueIndex:1,queueTotal:1,pendingAccounts:[{merchantId:'M001',currency:'USD',targetBillDate:'2026-10-01'}]};
+      cfg.seedQueue=[{status:'manual-balance-required',manualBalancePromptReady:true,manualBalancePrompt:cfg.otherGroupPrompt}];
+      cfg.top().querySelector('[data-action="confirm-save"]').click();`); await tick(); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0].merchantId+'/'+call.args[0].templateName)`),
+      ['M001/模板 A','M002/模板 A','M002/模板 A']);
+    assert.equal(await js('document.getElementById("modalRoot").children.length'), 1);
+    assert.equal(await js(`cfg.top().querySelector('.dialog-title').textContent`), '补录上一账单日余额');
+    assert.deepEqual(await js(`[cfg.top().querySelector('.manual-balance-date-input').value,cfg.top().querySelector('.manual-balance-amount-input').value]`), ['','']);
+  });
+  // Codex 审查 P2-4：主进程按账号核对拒绝时带回当前提示，按当前账号重新打开且不带入原账号草稿。
+  await test('待补录账号已变化：按主进程带回的当前提示重新打开补录，不预填原账号的值', async () => {
+    await setup();
+    await js(`${IMPORT_PROMPT_JS}cfg.openImport();cfg.importFile();`); await tick();
+    await js(`cfg.fillRow(1,'2026-10-01','88');
+      cfg.seedQueue=[{status:'manual-balance-invalid',errorCode:'BALANCE_SEED_ACCOUNT_CHANGED',message:'待补录账号已变化',manualBalancePromptReady:true,manualBalancePrompt:cfg.secondPrompt}];
+      cfg.top().querySelector('[data-action="confirm-save"]').click();`); await tick(); await tick();
+    assert.equal(await js('document.getElementById("modalRoot").children.length'), 1);
+    assert.match(await js(`cfg.top().querySelector('.manual-balance-context-account').textContent`), /M002/);
+    assert.deepEqual(await js(`[cfg.top().querySelector('.manual-balance-date-input').value,cfg.top().querySelector('.manual-balance-amount-input').value]`), ['','']);
+  });
+  // Codex 审查 P2-5：小额余额预填为普通小数，不写成指数。
+  await test('余额确认预填小额余额为普通小数', async () => {
+    await setup();
+    await js(`${IMPORT_PROMPT_JS}cfg.importResult.accounts[0].endBalance=0.0000001;cfg.importResult.accounts[1]={...cfg.importResult.accounts[1],billDate:'2026-09-30',endBalance:-2.5e-8,source:'file',reason:''};
+      cfg.openImport();cfg.importFile();`); await tick();
+    assert.deepEqual(await js(`cfg.rows().map(row=>row.querySelector('.manual-balance-confirm-amount').value)`), ['0.0000001','-0.000000025']);
+  });
+  // Codex 审查第四轮 P2：部分保存失败后，已保存行只读并标「已保存」，重试只提交其余账号。
+  await test('余额确认部分保存后失败：已保存行只读并标为已保存，未保存行可改，重试只提交未保存账号', async () => {
+    await setup();
+    await js(`${IMPORT_PROMPT_JS}cfg.openImport();cfg.importFile();`); await tick();
+    await js(`cfg.fillRow(1,'2026-10-01','88');
+      cfg.seedQueue=[{status:'manual-balance-required',manualBalancePromptReady:true,manualBalancePrompt:cfg.secondPrompt},Promise.reject(new Error('IPC 中断'))];
+      cfg.top().querySelector('[data-action="confirm-save"]').click();`); await tick(); await tick();
+    await js('cfg.host.closeTop();');
+    assert.deepEqual(await js(`cfg.rows().map(row=>({saved:row.classList.contains('is-saved'),
+      disabled:[...row.querySelectorAll('input')].map(input=>input.disabled)}))`), [
+      {saved:true,disabled:[true,true]},
+      {saved:false,disabled:[false,false]}
+    ]);
+    assert.equal(await js(`cfg.rows()[0].cells[5].textContent.trim()`), '已保存');
+    await js(`cfg.fillRow(1,'2026-10-01','99');cfg.seedQueue=[{status:'success'}];cfg.top().querySelector('[data-action="confirm-save"]').click();`); await tick(); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0].merchantId+':'+call.args[0].endBalance)`),
+      ['M001:1234.5','M002:88','M002:99']);
+    assert.equal(await js('document.getElementById("modalRoot").children.length'), 0);
+  });
+  await test('导入余额文件失败时提示原因，停留在手工补录视图', async () => {
+    await setup();
+    await js(`${IMPORT_PROMPT_JS}cfg.openImport();cfg.next.balanceImport={status:'error',message:'余额文件缺少列：期末余额',detailLines:['需要表头']};
+      cfg.top().querySelector('[data-action="import-balance-file"]').click();`); await tick();
+    assert.equal(await js('document.getElementById("modalRoot").children.length'), 2);
+    assert.match(await js('cfg.top().textContent'), /导入余额文件失败：余额文件缺少列：期末余额/);
+    await js('cfg.host.closeTop();');
+    assert.deepEqual(await js('cfg.view()'), {title:'补录上一账单日余额',manualHidden:false,confirmHidden:true});
   });
 
   const GAP_PROMPT_JS = `cfg.gapPrompt={reason:'gap',templateName:'模板 A',merchantId:'M001',currency:'USD',anchorDate:'2026-09-01',targetBillDate:'2026-09-04',

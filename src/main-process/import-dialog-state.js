@@ -25,7 +25,8 @@ const EXTRA_IMPORT_DIALOG_SCOPES = Object.freeze([
   'archive-center-storage-location',
   'bank-statement-process-bundle', // 场景包 JSON 导入，与银行对账单 xlsx 目录分开记忆
   'template-resources',            // 设置 → 模板文件导入新版本
-  'bank-accounts'                  // 设置 → 账户管理导入银行账户信息
+  'bank-accounts',                 // 设置 → 账户管理导入银行账户信息
+  'balance-seed-file'              // 网银账单补录余额「导入余额文件」，与账单目录分开记忆
 ]);
 
 const IMPORT_DIALOG_SCOPES = Object.freeze([

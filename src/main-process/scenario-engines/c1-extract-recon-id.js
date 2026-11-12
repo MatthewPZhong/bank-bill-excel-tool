@@ -13,7 +13,10 @@
 //      - 在 searchFields 各字段中 matchAll
 //      - 多字段结果"值一致"才写入；不一致 → warn + 不写入（该行不命中）
 //   3. extractByOtherField.field 时：直接复制该字段值到 ReconciliationId
-//   4. 写入前若 ReconciliationId 原值非空 → warn（仍执行覆盖）
+//   4. ReconciliationId 原值非空时直接覆盖（不告警）；新旧值相同不算修改、不锁定
+//   5. v3.2.17：options.rowGate(row) 为调用方的前置门控，返回 false 的行在条件判断前直接跳过
+//      （不命中、不锁定，first-match-wins 下后续场景仍可处理）；不传时行为不变。
+//      目前只有自带写死场景「从银行对账单的信息里提取调拨订单对账ID」使用（见 index.js）。
 
 const {
   ensureRowId,
@@ -100,7 +103,7 @@ function findReconIdValueForRow(row, scenarioConfig, warnings, scenario) {
   return null;
 }
 
-function runC1Scenario(scenario, bankRows) {
+function runC1Scenario(scenario, bankRows, { rowGate = null } = {}) {
   const warningCollector = makeWarningCollector(scenario.id, scenario.name);
   const modCollector = makeModificationCollector();
   const config = scenario.config || {};
@@ -110,6 +113,7 @@ function runC1Scenario(scenario, bankRows) {
 
   bankRows.forEach((row, index) => {
     const rowId = ensureRowId(row, index);
+    if (typeof rowGate === 'function' && !rowGate(row)) return;
     if (!rowMatchesConditions(row, conditions, conditionsLogic)) return;
 
     const reconIdValue = findReconIdValueForRow(row, config, {

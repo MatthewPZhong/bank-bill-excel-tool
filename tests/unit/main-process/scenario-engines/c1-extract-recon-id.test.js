@@ -326,3 +326,39 @@ test.describe('runC1Scenario — 边界', () => {
     assert.equal(rows[0].ReconciliationId, 'AB12345', 'feature 模式优先');
   });
 });
+
+// ========================================================================
+// v3.2.17：rowGate 前置门控（自带提取场景限 FundType 时使用）
+// ========================================================================
+
+test.describe('runC1Scenario — rowGate', () => {
+  function makeScenario() {
+    return {
+      id: 1,
+      name: 'C1',
+      config: {
+        conditions: [{ field: 'Desc', op: '包含', value: 'AB' }],
+        extractByFeature: { enabled: true, featureCode: 'AB', digitCount: 5, totalLength: 7, searchFields: ['Desc'] }
+      }
+    };
+  }
+
+  test('rowGate 返回 false 的行在条件判断前跳过：不写入、不锁定、不告警', () => {
+    const rows = [
+      { _rowId: 'pass', Desc: 'AB12345', ReconciliationId: '' },
+      { _rowId: 'block', Desc: 'AB12345 AB67890', ReconciliationId: 'OLD' }
+    ];
+    const r = runC1Scenario(makeScenario(), rows, { rowGate: (row) => row._rowId === 'pass' });
+    assert.deepEqual([...r.lockedRowIds], ['pass']);
+    assert.equal(rows[0].ReconciliationId, 'AB12345');
+    assert.equal(rows[1].ReconciliationId, 'OLD');
+    assert.equal(r.warnings.length, 0, '被挡掉的行不参与多值不一致告警');
+  });
+
+  test('不传 rowGate 时行为不变', () => {
+    const rows = [{ _rowId: 'r1', Desc: 'AB12345', ReconciliationId: '' }];
+    const r = runC1Scenario(makeScenario(), rows);
+    assert.deepEqual([...r.lockedRowIds], ['r1']);
+    assert.equal(rows[0].ReconciliationId, 'AB12345');
+  });
+});

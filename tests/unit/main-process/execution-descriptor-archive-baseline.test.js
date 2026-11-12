@@ -52,6 +52,8 @@ const newPreparationPolicies = [
   // v3.2.15：网银账单渠道只读查询
   { batchPolicy: 'exclude', channel: 'channel-account-mapping:list-conflicts', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'channel:list', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
+  // v3.2.17：补录余额「导入余额文件」只读预检
+  { batchPolicy: 'exclude', channel: 'file:import-balance-seed-file', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'scenarios:recon-id-fix-fields', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'settings:acknowledge-release-notes', excludeReason: 'ui-navigation', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:discard-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },

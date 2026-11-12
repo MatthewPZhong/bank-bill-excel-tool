@@ -29,7 +29,11 @@ const {
   mergeMappedDetailRows,
   resolveSinglePreparedFieldValue
 } = require('./statement-session');
-const { createStatementGenerationHelpers, statementOutputName } = require('./statement-generation');
+const {
+  createStatementGenerationHelpers,
+  pendingBalanceSeedAccounts,
+  statementOutputName
+} = require('./statement-generation');
 
 function pad(value) {
   return String(value).padStart(2, '0');
@@ -563,15 +567,26 @@ function scanBalanceSeedStatus({ detailRows, templateName }, storageRoot) {
   }
   const bankName = splitTemplateName(templateName).bankName;
   const missingIndexByKey = new Map();
+  const missingAccounts = [];
   let missing = 0;
   for (const [key, account] of earliest) {
     if (!findPreviousBalanceSeed(storageRoot, { bankName, ...account, beforeBillDate: account.dateLabel })) {
       missing += 1;
       missingIndexByKey.set(key, missing);
+      missingAccounts.push({
+        merchantId: account.merchantId,
+        currency: account.currency,
+        targetBillDate: account.dateLabel
+      });
     }
   }
-  return { total: earliest.size, missing, missingIndexByKey };
+  // v3.2.17：补录余额「导入余额文件」按此清单匹配；顺序与 deriveBalanceRecords 的分组顺序（逐个提示补录的顺序）一致。
+  missingAccounts.sort((left, right) =>
+    left.merchantId.localeCompare(right.merchantId, 'zh-Hans-CN') ||
+    left.currency.localeCompare(right.currency, 'zh-Hans-CN'));
+  return { total: earliest.size, missing, missingIndexByKey, missingAccounts };
 }
+
 
 function createGenerationHelpers(options) {
   const storageRoot = path.resolve(options.storageRoot);
@@ -757,6 +772,7 @@ function createGenerationHelpers(options) {
             targetBillDate: normalizeCell(error.context?.targetBillDate),
             queueIndex: balanceSeedStatus.missingIndexByKey?.get(promptKey) || 1,
             queueTotal: balanceSeedStatus.missing || 1,
+            pendingAccounts: pendingBalanceSeedAccounts(balanceSeedStatus),
             ...(error.context?.seedMismatch
               ? {
                   seedMismatch: {

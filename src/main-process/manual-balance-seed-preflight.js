@@ -38,6 +38,18 @@ function buildManualBalanceInvalidResult(message, prompt, generatedExports = {})
   };
 }
 
+function isManualBalanceAccountMismatch(payload = {}, pendingPrompt = {}) {
+  const hasAccount = payload.merchantId !== undefined || payload.currency !== undefined;
+  if (hasAccount && (
+    normalizeCell(payload.merchantId) !== normalizeCell(pendingPrompt.merchantId) ||
+    normalizeCell(payload.currency) !== normalizeCell(pendingPrompt.currency)
+  )) {
+    return true;
+  }
+  return payload.templateName !== undefined &&
+    normalizeCell(payload.templateName) !== normalizeCell(pendingPrompt.templateName);
+}
+
 function balanceSeedRecordKey(record = {}) {
   return [
     normalizeCell(record.merchantId),
@@ -480,6 +492,27 @@ function prepareManualBalanceSeedSubmission({
             : '当前是人工补录余额替换的确认，请核查或确认替换',
           kind.errorCode
         )
+      }
+    };
+  }
+
+  // v3.2.17：补录请求带上界面所示的账号（merchantId + currency，可带输出名称 templateName）。
+  //   种子账号与银行始终取自 pendingPrompt；请求所示账号与之不一致即拒绝，避免渲染层与主进程提示错位
+  //   （导入余额文件后的连续保存、中途异常后的重试或返回）时把余额写到别的账号或别的银行。
+  //   拒绝结果带回当前提示，渲染层按当前账号重新打开补录（不带旧草稿）；未带账号的旧请求不受影响。
+  if (payload && isManualBalanceAccountMismatch(payload, pendingPrompt)) {
+    return {
+      nextConfirmation: null,
+      prepared: {
+        proceed: false,
+        result: {
+          ...buildManualBalanceInvalidResult(
+            '待补录账号已变化，已切换到当前待补录账号，请核对后补录',
+            pendingPrompt,
+            generatedExports
+          ),
+          errorCode: 'BALANCE_SEED_ACCOUNT_CHANGED'
+        }
       }
     };
   }
