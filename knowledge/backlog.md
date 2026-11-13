@@ -20,6 +20,14 @@
 
 ## 未实施
 
+### B93（P3 · 已知问题）集成脚本 `publication-legacy-concurrency` 在 Windows CI 偶发 `ADMISSION_TIMEOUT`，自动错误报告未保存
+
+- **来源**：2026-11-12 [PR #252](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/252) 首轮 Windows CI（`beff47c6`，run 43268052252，`release-check-integration (1/2)`）。下一候选 `dc4cab10` 的 PR 检查、合并后 main 检查（run 43280384959）与本机两次完整集成均通过
+- **影响**：`scripts/integration/publication-legacy-concurrency.js:134` 期望自动错误报告 `saved`，实际 `BIZOP_AUTO_REPORT_SAVE_FAILED`，`runExport` 抛 `ADMISSION_TIMEOUT`（排队等合表 Publisher 释放时准入超时）；脚本耗时 31 秒，与另一脚本并发运行。失败使 `smoke-test` 汇总失败、`build` 跳过
+- **现状**：该脚本、`src/main-process/background-execution/` 与 BizOP v327 在 v3.2.17 未改；未在本机复现。推断为 CI 负载下排队超过准入期限，未确认
+- **关闭条件**：查明负载下超时的等待链。属测试时序则调整测试的等待方式或期限（产品准入超时策略不变）；属产品问题则修复并补回归。之后 Windows CI 多次运行无复现
+- **目标版本**：未定
+
 ### B92（P2 · 未做）v3.2.17 新功能实机 GUI 检查与真实文件回归
 
 - **来源**：v3.2.17 发版（[release 记录](../changes/v3.2.17/release.md)）；本机开发版 GUI 受 BizOP 资源预检阻断，界面只由渲染生命周期用例与布局截图覆盖
