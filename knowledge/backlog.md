@@ -20,6 +20,13 @@
 
 ## 未实施
 
+### B95（P3 · 已知问题）后台 Worker 获批堆上限低于阶段内存检查阈值：拆分以外的路径超限时可能直接被 V8 强杀
+
+- **来源**：分支 `fix/toolbox-split-oom-message`。工具箱拆分在 Windows 正式版报英文 `Worker terminated due to reaching memory limit: JS heap out of memory`；本分支只修了按字段值拆分的读取与导出通道（`src/main-process/toolbox-large-split-dispatch.js` 的 Worker）：Worker 内堆监控改按实际堆上限换算，V8 强杀归一为中文提示。编号跳过在途分支 `chore/backlog-b93-admission-timeout-flake` 的 B93 与 `feat/data-management-retention` 的 B94
+- **影响**：获批执行档的 Worker 堆上限 = 阶段额度 × 0.6（`src/main-process/execution-descriptors/memory-profiles.js`），共享检查 `checkExecutionMemory`（`src/main-process/background-execution/execution-memory-options.js`）却在 `heapUsed + external` 超过整个阶段额度时才报错。内存主要涨在堆里时，这个检查晚于 V8 强杀，起不到提前拦截的作用。按行拆分、BizOP 导入/运行/导出等经 `background-execution` 适配器创建的 Worker 遇到 `ERR_WORKER_OUT_OF_MEMORY` 时，界面显示什么还没核实
+- **关闭条件**：逐个核实上述路径 OOM 时的界面提示，不是中文可解释提示的补上归一；决定 `checkExecutionMemory` 是否另加按堆上限的阈值（会改变 BizOP 等的阶段语义，须评估误判和验收清单影响）
+- **目标版本**：未定
+
 ### B92（P2 · 未做）v3.2.17 新功能实机 GUI 检查与真实文件回归
 
 - **来源**：v3.2.17 发版（[release 记录](../changes/v3.2.17/release.md)）；本机开发版 GUI 受 BizOP 资源预检阻断，界面只由渲染生命周期用例与布局截图覆盖

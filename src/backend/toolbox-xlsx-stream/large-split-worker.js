@@ -31,6 +31,7 @@
 
 const { parentPort, isMainThread } = require('node:worker_threads');
 const fs = require('node:fs');
+const v8 = require('node:v8');
 const { sourceSnapshotMatchesStat } = require('../../main-process/archive-center/source-snapshot');
 const { scanSplitMetadata, scanSplitFieldValues } = require('../../main-process/toolbox-split-scan');
 const { validateExecutionMemoryConfig } = require('../../main-process/background-execution/execution-memory-config');
@@ -48,6 +49,22 @@ const SHARED_STRINGS_UNCOMPRESSED_LIMIT = 1288490188; // ~1.2 GB
 //   worker 内 heapUsed 监控阈值——解析途中 heapUsed 超此上限 → 置 OOM 标志 + 主动抛可解释错误兜底，
 //   防 sharedStrings 之外的病态数据（极宽表 / 异常累加）把 V8 堆撑爆硬崩。~3GB = 3221225472 字节。
 const HEAP_USED_LIMIT_BYTES = 3221225472; // ~3 GB
+
+//   实际阈值取 3 GB 与「本 Worker 堆上限 × 0.9」的较小值：读取阶段的获批堆上限只有几百 MB，
+//   固定 3 GB 永远等不到触发。0.9 留出采样间隔内的增长余量，又不把尚未回收的垃圾误判为超限；
+//   漏判时 V8 强杀由主侧 dispatch 归一为同一中文提示。
+const HEAP_USED_LIMIT_RATIO = 0.9;
+
+function heapUsedLimitFor(heapSizeLimitBytes) {
+  if (!Number.isFinite(heapSizeLimitBytes) || heapSizeLimitBytes <= 0) return HEAP_USED_LIMIT_BYTES;
+  return Math.min(HEAP_USED_LIMIT_BYTES, Math.floor(heapSizeLimitBytes * HEAP_USED_LIMIT_RATIO));
+}
+
+function formatMemorySize(bytes) {
+  const GiB = 1024 ** 3;
+  const value = Number(bytes);
+  return value >= GiB ? `${(value / GiB).toFixed(2)} GB` : `${Math.round(value / (1024 ** 2))} MB`;
+}
 
 //   heapUsed 采样间隔（毫秒）。
 const HEAP_MONITOR_INTERVAL_MS = 1000;
@@ -70,12 +87,11 @@ class ToolboxSharedStringsTooLargeError extends Error {
 
 // worker heapUsed 超阈值错误——同样固定 name，便于上层识别 + 文案可解释。
 class ToolboxWorkerMemoryLimitError extends Error {
-  constructor(heapUsedBytes) {
+  constructor(heapUsedBytes, limitBytes = HEAP_USED_LIMIT_BYTES) {
     super('文件数据量过大，超出处理能力');
     this.name = 'ToolboxWorkerMemoryLimitError';
-    const usedGb = (Number(heapUsedBytes) / (1024 * 1024 * 1024)).toFixed(2);
     this.detailLines = [
-      `处理过程中内存占用约 ${usedGb} GB，超出当前拆分通道的处理上限（约 3 GB）。`,
+      `处理过程中内存占用约 ${formatMemorySize(heapUsedBytes)}，超出当前拆分通道的处理上限（约 ${formatMemorySize(limitBytes)}）。`,
       '该文件数据量过大，暂不支持按字段值拆分；请拆分文件后分批重试。'
     ];
   }
@@ -146,6 +162,8 @@ if (!isMainThread && parentPort) {
   // 当前 job 的取消令牌（透传给三种作业 → T1 reader 每行检查）；cancel message 置位。
   let activeCancelToken = null;
   let activeJobId = null;
+  // 按本 Worker 实际堆上限（含 resourceLimits）换算监控阈值，见 heapUsedLimitFor。
+  const heapUsedLimitBytes = heapUsedLimitFor(v8.getHeapStatistics().heap_size_limit);
 
   // ── heapUsed 监控：解析途中超阈值 → 置标志 + 触发回调兜底（防 V8 OOM 硬崩）──────────────────────
   //   返回 { stop }：作业结束 clearInterval。
@@ -155,7 +173,7 @@ if (!isMainThread && parentPort) {
       timer = setInterval(() => {
         let heapUsed = 0;
         try { heapUsed = process.memoryUsage().heapUsed; } catch (_e) { return; }
-        if (heapUsed >= HEAP_USED_LIMIT_BYTES) {
+        if (heapUsed >= heapUsedLimitBytes) {
           try { onOverLimit(heapUsed); } catch (_e) { /* swallow */ }
         }
       }, HEAP_MONITOR_INTERVAL_MS);
@@ -243,14 +261,14 @@ if (!isMainThread && parentPort) {
 
       // 若解析期间 heapUsed 曾超阈值（导致 cancelToken 被置位提前结束）→ 报内存上限错误（兜底，不返回半成品）。
       if (heapOverLimitBytes > 0) {
-        throw new ToolboxWorkerMemoryLimitError(heapOverLimitBytes);
+        throw new ToolboxWorkerMemoryLimitError(heapOverLimitBytes, heapUsedLimitBytes);
       }
 
       parentPort.postMessage({ type: 'done', jobId, result });
     } catch (err) {
       // 若 catch 到的错误是因 heapUsed 超阈值触发的提前取消（且非可解释错误）→ 归一为内存上限错误。
       const finalErr = (heapOverLimitBytes > 0 && !isExplainedError(err))
-        ? new ToolboxWorkerMemoryLimitError(heapOverLimitBytes)
+        ? new ToolboxWorkerMemoryLimitError(heapOverLimitBytes, heapUsedLimitBytes)
         : err;
       parentPort.postMessage({ type: 'error', jobId, error: serializeError(finalErr) });
     } finally {
@@ -268,6 +286,8 @@ module.exports = {
   isExplainedError,
   SHARED_STRINGS_UNCOMPRESSED_LIMIT,
   HEAP_USED_LIMIT_BYTES,
+  HEAP_USED_LIMIT_RATIO,
+  heapUsedLimitFor,
   SHARED_STRINGS_ENTRY,
   ToolboxSharedStringsTooLargeError,
   ToolboxWorkerMemoryLimitError
