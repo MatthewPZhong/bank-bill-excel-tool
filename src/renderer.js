@@ -688,6 +688,17 @@ const bankAccountsDialogs = window.__bankAccountsDialogs.createBankAccountsDialo
   ui: { escapeHtml, createConfirmDialog }
 });
 
+// v3.2.18：设置 → 数据管理 → 链接表保留期限。
+const linkedTableRetentionDialogs = window.__linkedTableRetentionDialogs.createLinkedTableRetentionDialogs({
+  api: {
+    linkedTable: {
+      getRetentionSettings: () => window.desktopApi.linkedTable.getRetentionSettings(),
+      setRetentionDays: (payload) => window.desktopApi.linkedTable.setRetentionDays(payload)
+    }
+  },
+  ui: { escapeHtml }
+});
+
 // v3.2.14：升级后首次启动的「更新说明」，设置「版本管理」可再次查看本版说明。
 const releaseNotesDialogs = window.__releaseNotesDialogs.createReleaseNotesDialogs({
   api: { settings: { acknowledgeReleaseNotes: window.desktopApi?.settings?.acknowledgeReleaseNotes } },
@@ -704,6 +715,7 @@ const { createAppUpdateSettingsDialog, createArchiveCenterPreviewApi } = window.
     mountAppearanceSettings: (panel, controller, options) => window.DarkModeUI.mountSettings(panel, controller, options),
     mountTemplateFiles: (pane, options) => templateFilesDialogs.mountTemplateFiles(pane, options),
     mountBankAccounts: (pane, options) => bankAccountsDialogs.mountBankAccounts(pane, options),
+    mountLinkedTableRetention: (container, options) => linkedTableRetentionDialogs.mountLinkedTableRetention(container, options),
     applyAppUpdateActionResult, applyAppUpdateStatus,
     getAppUpdateStatus: () => state.appUpdateStatus,
     refreshOpenAppUpdateDialog, restartAndInstallAppUpdate,
@@ -1989,6 +2001,18 @@ async function applyFullInfo(info) {
             ?.querySelector('[data-action="open-archive-settings"]')
             ?.click();
         }, 80);
+      });
+    }, 120);
+  } else if (info.previewModal === 'data-management') {
+    setTimeout(() => {
+      openModal(() => createAppUpdateSettingsDialog({
+        archiveCenterApi: createArchiveCenterPreviewApi(),
+        linkedTablePreviewApi: linkedTableRetentionDialogs.createLinkedTableRetentionPreviewApi()
+      }));
+      requestAnimationFrame(() => {
+        elements.modalRoot
+          ?.querySelector('.app-settings-nav-item[data-tab="data"]')
+          ?.click();
       });
     }, 120);
   } else if (info.previewModal === 'archive-center-browser') {

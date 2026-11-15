@@ -137,9 +137,9 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await setup({ open: false });
     await js('tf.open(); void 0;');
     assert.deepEqual(await js(`[...tf.overlay.querySelectorAll('.app-settings-nav-item')].map((item) => item.querySelector('span:not(.app-settings-nav-icon)').textContent)`),
-      ['版本管理', '存档中心', '模板文件', '外观设置']);
+      ['版本管理', '存档中心', '数据管理', '模板文件', '外观设置']);
     assert.deepEqual(await js(`[...tf.overlay.querySelectorAll('.app-settings-nav-item')].map((item) => item.dataset.tab)`),
-      ['update', 'archive', 'templates', 'appearance']);
+      ['update', 'archive', 'data', 'templates', 'appearance']);
     assert.equal(await js('tf.count("list")'), 0);
     await js(`tf.q('[data-tab="templates"]').click(); void 0;`);
     await waitFor('tf.q(\'[data-role="template-count"]\').textContent === "40 个" && !!tf.q(".template-center-detail-heading")');

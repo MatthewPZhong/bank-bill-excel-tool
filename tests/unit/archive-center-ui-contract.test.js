@@ -198,11 +198,12 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
     assert.match(renderer, /data-pane="archive"[^>]*hidden/);
     assert.match(renderer, /id="appUpdatePaneHeading"[^>]*>版本管理<\/h3>/);
     assert.match(renderer, /data-role="auto-update-toggle" aria-label="自动更新"/);
-    assert.match(renderer, /archiveState\.activeTab = \['archive', 'templates', 'accounts', 'appearance'\]\.includes\(tab\) \? tab : 'update'/);
+    assert.match(renderer, /archiveState\.activeTab = \['archive', 'data', 'templates', 'accounts', 'appearance'\]\.includes\(tab\) \? tab : 'update'/);
     assert.match(
       renderer,
-      /data-tab="archive"[\s\S]*?<span>存档中心<\/span>[\s\S]*?data-tab="templates"[\s\S]*?<span>模板文件<\/span>[\s\S]*?data-tab="accounts"[\s\S]*?<span>账户管理<\/span>[\s\S]*?data-tab="appearance"/
+      /data-tab="archive"[\s\S]*?<span>存档中心<\/span>[\s\S]*?data-tab="data"[\s\S]*?<span>数据管理<\/span>[\s\S]*?data-tab="templates"[\s\S]*?<span>模板文件<\/span>[\s\S]*?data-tab="accounts"[\s\S]*?<span>账户管理<\/span>[\s\S]*?data-tab="appearance"/
     );
+    assert.match(renderer, /data-pane="data"[^>]*hidden/);
     assert.match(renderer, /data-pane="appearance"[^>]*hidden/);
     assert.match(renderer, /activeTab: 'update'/);
 
@@ -373,7 +374,7 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
   });
 
   test('存档设置只显示位置、迁移进度与期限，模板不存档完全退役', () => {
-    for (const value of ['30', '60', '90', '180', '365', 'permanent']) {
+    for (const value of ['15', '30', '60', '90', '180', '365', 'permanent']) {
       assert.match(renderer, new RegExp(`<option value="${value}"(?: selected)?>`), `保留期 ${value} 应存在`);
     }
     assert.match(renderer, /<option value="permanent" selected>永久<\/option>/);
@@ -396,11 +397,22 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
     assert.doesNotMatch(renderer, /data-role="archive-settings-file-total-size"/);
     assert.match(renderer, /stats\.fileTotalBytes/);
     const settingsViewStart = renderer.indexOf('class="archive-center-settings-view"');
-    const settingsViewEnd = renderer.indexOf('\n        <footer', settingsViewStart);
+    const settingsViewEnd = renderer.indexOf('id="dataManagementPane"', settingsViewStart);
     assert.ok(settingsViewStart >= 0 && settingsViewEnd > settingsViewStart, '应找到存档设置页模板');
     const settingsView = renderer.slice(settingsViewStart, settingsViewEnd);
     assert.doesNotMatch(settingsView, />存储统计</);
     assert.doesNotMatch(settingsView, />文件总大小</);
+    // v3.2.18：保留期限迁入「数据管理」，存档设置只剩存档位置。
+    assert.doesNotMatch(settingsView, /保留期限|archive-retention-/);
+    const dataPaneStart = renderer.indexOf('id="dataManagementPane"');
+    const dataPaneEnd = renderer.indexOf('\n        <footer', dataPaneStart);
+    const dataPane = renderer.slice(dataPaneStart, dataPaneEnd);
+    assert.match(dataPane, /id="dataManagementHeading"[^>]*>数据管理<\/h3>/);
+    assert.match(
+      dataPane,
+      /data-role="data-feedback"[\s\S]*?<h4>输入\/输出文件保留期限<\/h4>[\s\S]*?data-role="archive-retention-module"[\s\S]*?data-role="archive-retention-days"[\s\S]*?data-role="linked-retention-section"/
+    );
+    assert.match(dataPane, /<option value="15">15 天<\/option>/);
     assert.doesNotMatch(renderer, /data-role="archive-stat-(?:runs|latest)"/);
     assert.doesNotMatch(renderer, /querySelector\('\[data-role="archive-stat-(?:runs|latest)"\]'\)/);
     assert.doesNotMatch(styles, /archive-center-stat-grid/);

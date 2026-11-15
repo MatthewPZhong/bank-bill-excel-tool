@@ -77,6 +77,9 @@ describe('bank-statement op-lock — 源码接线 (v3.0.11 至 v3.1.0)', () => {
     //   —— 链接表是 bank-statement run（R1-R5）输入，防 run 数据准备让出窗口内并发改表撕裂快照。
     assert.ok(source.includes("tryAcquireBankStatementOpLock('linked-import')"), 'linked-table:import 应 acquire');
     assert.ok(source.includes("tryAcquireBankStatementOpLock('linked-delete')"), 'linked-table:delete-by-date-range 应 acquire');
+    // v3.2.18：链接表过期清理（空闲自动删除）同样持这把锁，由控制器在 finally 经 releaseLock 释放。
+    assert.ok(source.includes("acquireLock: () => tryAcquireBankStatementOpLock('linked-retention')"), '链接表过期清理应 acquire');
+    assert.ok(source.includes('releaseLock: () => releaseBankStatementOpLock()'), '链接表过期清理应注入释放函数');
     // v3.0.12 PR#82 codex-P2 补强：账户映射保存（改写调拨派生 big_account，同为 bank-statement run 输入）纳入同一把锁。
     assert.ok(source.includes("tryAcquireBankStatementOpLock('account-mapping-save')"), 'fund-transfer-account-mapping:save 应 acquire');
     for (const operation of PRE_FUND_OPS) {

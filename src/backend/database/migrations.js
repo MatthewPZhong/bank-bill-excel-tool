@@ -1367,6 +1367,57 @@ function ensureAcquiringBillCurrencyRawJsonRetentionSettings(db) {
   return { status: 'seeded', key: ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY };
 }
 
+// v3.2.18：存档「VCC财务OP校验」输入/输出文件保留期限默认 15 天（一次性、幂等）。
+//   模块设置中没有 VCC 项时写入 15，并写标记；已有显式 VCC 设置保留。
+//   标记写入后不再处理：用户改为“跟随默认”（删除 VCC 项）或其他期限都不会被改回。
+//   设置格式与 src/main-process/archive-center/retention-policy.js 一致；期限在创建批次时确定，不回写历史批次。
+const ARCHIVE_MODULE_RETENTION_SETTING_KEY = 'archive_center_retention_days_by_module';
+const ARCHIVE_VCC_DEFAULT_RETENTION_MARKER_KEY = 'archive_center_vcc_default_retention_seeded';
+const ARCHIVE_VCC_SCOPE_ID = 'vcc-financial-op';
+const ARCHIVE_VCC_DEFAULT_RETENTION_DAYS = 15;
+function ensureArchiveVccDefaultRetention(db) {
+  try {
+    db.prepare('SELECT 1 FROM app_settings LIMIT 1').get();
+  } catch (_e) {
+    return { status: 'skipped-no-table' };
+  }
+  const readSetting = (key) => {
+    const row = db.prepare('SELECT setting_value AS value FROM app_settings WHERE setting_key = ?').get(key);
+    return row ? row.value : null;
+  };
+  if (readSetting(ARCHIVE_VCC_DEFAULT_RETENTION_MARKER_KEY) !== null) return { status: 'already-seeded' };
+  const upsert = db.prepare(`
+    INSERT INTO app_settings (setting_key, setting_value, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(setting_key) DO UPDATE
+    SET setting_value = excluded.setting_value,
+        updated_at = excluded.updated_at
+  `);
+  db.exec('BEGIN');
+  try {
+    let overrides = {};
+    try {
+      const parsed = JSON.parse(readSetting(ARCHIVE_MODULE_RETENTION_SETTING_KEY));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) overrides = parsed;
+    } catch (_parseError) { /* 缺失或损坏按空设置处理（读取侧同样忽略） */ }
+    const hadExplicit = Object.prototype.hasOwnProperty.call(overrides, ARCHIVE_VCC_SCOPE_ID);
+    const now = new Date().toISOString();
+    if (!hadExplicit) {
+      upsert.run(
+        ARCHIVE_MODULE_RETENTION_SETTING_KEY,
+        JSON.stringify({ ...overrides, [ARCHIVE_VCC_SCOPE_ID]: ARCHIVE_VCC_DEFAULT_RETENTION_DAYS }),
+        now
+      );
+    }
+    upsert.run(ARCHIVE_VCC_DEFAULT_RETENTION_MARKER_KEY, '1', now);
+    db.exec('COMMIT');
+    return { status: hadExplicit ? 'kept-explicit' : 'seeded' };
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* 保留原错误 */ }
+    throw error;
+  }
+}
+
 // v2.1.9 N5：channels 表 + 「通用」内置渠道（id=1）
 // 幂等：CREATE TABLE IF NOT EXISTS + INSERT OR IGNORE
 // is_builtin=1 系统内置渠道，不可删不可改名（D1=a 拍板；保护在 channels-repository + UI 层）
@@ -4364,6 +4415,8 @@ module.exports = {
   ensureBizOpReconRunsSideDbPath,
   // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings（v0.2 单键）
   ensureAcquiringBillCurrencyRawJsonRetentionSettings,
+  // v3.2.18：存档 VCC财务OP校验 保留期限默认 15 天（一次性、幂等）
+  ensureArchiveVccDefaultRetention,
   ensureBillRawJsonV2Slim,
   ensureChannelsTable,
   ensureScenariosChannelIdColumn,

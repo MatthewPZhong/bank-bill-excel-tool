@@ -20,6 +20,13 @@
 
 ## 未实施
 
+### B94（P1 · 待核验）v3.2.18 链接表过期清理：资金人工复核与打包版回归
+
+- **来源**：v3.2.18 分支 `feat/data-management-retention`（[spec](../changes/v3.2.18/feat/data-management-retention/spec.md) §4、[TechDoc](../changes/v3.2.18/feat/data-management-retention/techdoc.md) §三对账盲区扫描）；编号跳过在途分支 `chore/backlog-b93-admission-timeout-flake` 的 B93
+- **影响**：链接表默认网关对账单 15 天、银行对账单表 60 天，升级后首次空闲即自动删除旧数据（不可恢复）。资金对账运行（网关核销 / 退款回填）与前置资金「缺网关账单」以链接表网关对账单为对方，跨期核对超过 15 天的数据可能出现缺网关误报；运行后未导出即空闲会清空运行结果；入金行删除后跨期重复命中标记随之消失；外汇交割表默认永久，但用户设期限后远期交易可能在到期日前被删、BOC调拨订单修复匹配不上。自动化只覆盖临时库，未覆盖 Electron 主进程 30 分钟空闲触发、用户操作中止时序和大表删除耗时
+- **关闭条件**：资金负责人确认网关 15 天、银行对账单表 60 天默认值在实际对账周期下可接受（或调整默认值）；Windows 打包版在真实库副本上走通：空闲 30 分钟触发、日志记录每表删除行数与截止日、操作鼠标后当前表完成即停、新任务提示清理中、ADM 与 BOC 派生表与手工删除同口径；记录百万行级银行对账单表的删除与派生重建耗时
+- **目标版本**：v3.2.18（暂定）
+
 ### B92（P2 · 未做）v3.2.17 新功能实机 GUI 检查与真实文件回归
 
 - **来源**：v3.2.17 发版（[release 记录](../changes/v3.2.17/release.md)）；本机开发版 GUI 受 BizOP 资源预检阻断，界面只由渲染生命周期用例与布局截图覆盖
@@ -400,7 +407,7 @@
 
 - **来源**：v3.2.12 发布（[PR #242](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/242)「已知限制」：未改动的 v3.2.11 上同样报错）；2026-10-19 在 `f83d5ee1` 上复现
 - **影响**：脚本在每个视口都以 `Error: createAppUpdateSettingsDialog is not defined` 退出，设置页布局的自动核对实际不可用。脚本在页面中直接调用全局 `createAppUpdateSettingsDialog`，而 `611af431`（Renderer 边界整理）后该函数只作为 `createAppSettingsDialogs` 工厂的返回值存在。产品界面本身不受影响，`renderer-lifecycle` 的设置页夹具仍走工厂入口
-- **现状**：`scripts/verify-dark-mode-ui.js` 也直接调用该全局函数，可能同样失效（未运行）
+- **现状**：`scripts/verify-dark-mode-ui.js` 也直接调用该全局函数，可能同样失效（未运行）；v3.2.18 起输入/输出文件保留期限移到「设置 → 数据管理」，修复脚本时保留期限相关步骤需改为进入数据管理页（存档设置只剩存档位置）。数据管理页的控件宽度、对齐与溢出暂由 `scripts/renderer-lifecycle/fixtures/app-settings.js` 的生产样式用例核对
 - **关闭条件**：两个脚本改为经工厂取得对话框，`npm run verify:app-settings-layout` 在 macOS 与 Windows 上通过
 - **目标版本**：未定
 
