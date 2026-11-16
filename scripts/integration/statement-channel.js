@@ -235,7 +235,6 @@ function createEnvironment(dir, label) {
     templateHeaderUpdateTools: createTemplateHeaderUpdateTools({
       BALANCE_DISABLED_OPTION: '无',
       BALANCE_CALCULATED_OPTION: '通过发生额计算',
-      MERCHANT_ID_CURRENCY_ONLY_OPTION: '原始账单仅有币种无账户号',
       CONCAT_FIELDS_MAPPING_FIELD: '__CONCAT__',
       FEATURE_FILTER_MAPPING_FIELD: '__FEATURE_FILTER_MAPPING__'
     }),

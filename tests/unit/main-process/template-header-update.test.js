@@ -57,12 +57,8 @@ test('collect：主映射与拼接字段为源字段引用，内部标记与开�
       mapping('BillDate', '交易日期'),
       mapping('Remark', '需要拼接字段', ['摘要', '对方户名', '__FIXED__:-']),
       mapping('Balance', '通过发生额计算'),
-      mapping('Fee', '无'),
       mapping('MerchantId', '__FIXED__:__MULTI_BIG_ACCOUNT__'),
-      mapping('Currency', MERCHANT_ID_CURRENCY_ONLY_MARKER),
       mapping('Description', '字段筛选特征值'),
-      mapping('Bank', '自己输入'),
-      mapping('Name', '原始账单仅有币种无账户号'),
       mapping('按字段区分发生额', '是'),
       mapping('是否拆分/合并明细账单', ''),
       mapping('复用模块字段的映射关系', '是'),
@@ -76,6 +72,56 @@ test('collect：主映射与拼接字段为源字段引用，内部标记与开�
     'Remark<-对方户名:true',
     '按正负号拆分的发生额<-交易金额:true'
   ]);
+  // 按币种取大账号的存储标记只在 MerchantId 上是内部值；Balance 的「无」同理只在 Balance 上是选项
+  assert.deepEqual(tools.collectTemplateFieldReferences({
+    mappings: [mapping('MerchantId', MERCHANT_ID_CURRENCY_ONLY_MARKER), mapping('Balance', '无')]
+  }), []);
+});
+
+// 回归（review P1）：与选项同名的真实列名可以合法保存，生成器按源字段读取，必须同样计入引用。
+test('collect：与选项同名的真实列名在非对应目标字段上按源字段计入，失效时拦截', () => {
+  const mappings = [
+    mapping('BillDate', '交易日期'),
+    mapping('Credit Amount', '自己输入'),
+    mapping('Debit Amount', '通过发生额计算'),
+    mapping('Fee', '无'),
+    mapping('Name', '原始账单仅有币种无账户号')
+  ];
+  assert.deepEqual(tools.collectTemplateFieldReferences({ mappings }).map((item) => `${item.target}<-${item.field}`), [
+    'BillDate<-交易日期',
+    'Credit Amount<-自己输入',
+    'Debit Amount<-通过发生额计算',
+    'Fee<-无',
+    'Name<-原始账单仅有币种无账户号'
+  ]);
+  assert.throws(
+    () => tools.assertTemplateFieldReferencesAvailable({ name: 'T', headers: ['交易日期', '通过发生额计算', '无', '原始账单仅有币种无账户号'] }, { mappings }),
+    (error) => error.code === 'TEMPLATE_MAPPING_FIELD_MISSING' && /映射字段不存在：自己输入，/.test(error.message)
+  );
+});
+
+// 回归（第二轮 review P1）：模式只由外层 mappedField 决定；拼接展开后的字段即使与模式名称同名，生成器也按源列读取。
+test('collect：拼接字段中与模式名称同名的真实列按源字段计入，失效时拦截', () => {
+  const mappings = [mapping('Credit Amount', '需要拼接字段', ['字段筛选特征值', '需要拼接字段'])];
+  assert.deepEqual(tools.collectTemplateFieldReferences({ mappings }).map((item) => item.field), ['字段筛选特征值', '需要拼接字段']);
+  assert.throws(() => tools.assertTemplateFieldReferencesAvailable({ name: 'T', headers: ['需要拼接字段'] }, { mappings }),
+    (error) => /映射字段不存在：字段筛选特征值，/.test(error.message));
+  // 外层为字段筛选特征值时不读源列（规则的筛选字段另行计入）
+  assert.deepEqual(tools.collectTemplateFieldReferences({ mappings: [mapping('Remark', '字段筛选特征值', ['附言'])] }), []);
+});
+
+// 回归（review P2）：与生成器 normalizeMappedFields 一致，单元素 mappedFields 优先于 mappedField。
+test('collect：单元素 mappedFields 优先于 mappedField（与生成器取值一致）', () => {
+  const input = {
+    mappings: [mapping('是否拆分/合并明细账单', '是'), mapping('复用模块字段的映射关系', '否')],
+    billSplitMappings: [mapping('MerchantId', '账号A', ['账号B'])]
+  };
+  assert.deepEqual(tools.collectTemplateFieldReferences(input).map((item) => `${item.area}:${item.field}:${item.active}`), ['bill-split-mapping:账号B:true']);
+  assert.throws(() => tools.assertTemplateFieldReferencesAvailable({ name: 'T', headers: ['账号A'] }, input),
+    (error) => /映射字段不存在：账号B，/.test(error.message));
+  assert.doesNotThrow(() => tools.assertTemplateFieldReferencesAvailable({ name: 'T', headers: ['账号B'] }, input));
+  // 主映射同理；mappedFields 全为空白时回退到 mappedField
+  assert.deepEqual(tools.collectTemplateFieldReferences({ mappings: [mapping('Remark', '附言', [' '])] }).map((item) => item.field), ['附言']);
 });
 
 test('collect：按字段区分发生额规则仅在开启且规则完整时启用', () => {

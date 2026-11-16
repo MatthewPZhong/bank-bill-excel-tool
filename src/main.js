@@ -1771,6 +1771,8 @@ const CLEAR_BACKGROUND_COLOR = '#ffffff';
 const BUNDLED_ENUM_FILE_NAME = 'COMMON枚举.xlsx';
 const CURRENCY_MAPPING_FILE_NAME = '币种映射表.xlsx';
 const MISSING_ENUM_MESSAGE = '内置网银账单枚举表缺失，请检查安装包';
+// v3.2.18 模板管理【更新】：旧版方向的映射须先在【修改】中保存一次再更新表头
+const LEGACY_ORIENTED_MAPPINGS_MESSAGE = '该模板的映射关系为旧版格式，请先点【修改】打开映射关系并点【完成】保存一次，再更新模板';
 const BALANCE_DISABLED_OPTION = '无';
 const BALANCE_CALCULATED_OPTION = '通过发生额计算';
 const MERCHANT_ID_SELF_INPUT_OPTION = '自己输入';
@@ -1819,8 +1821,6 @@ const BILL_SPLIT_GROUP_FIELDS = [
 const templateHeaderUpdateTools = createTemplateHeaderUpdateTools({
   BALANCE_DISABLED_OPTION,
   BALANCE_CALCULATED_OPTION,
-  MERCHANT_ID_SELF_INPUT_OPTION,
-  MERCHANT_ID_CURRENCY_ONLY_OPTION,
   CONCAT_FIELDS_MAPPING_FIELD,
   FEATURE_FILTER_MAPPING_FIELD,
   AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD,
@@ -13552,6 +13552,24 @@ function collectStaleTemplateFieldReferences(templateId, headers) {
   return templateHeaderUpdateTools.findStaleFieldReferences(references, headers);
 }
 
+// 旧版映射方向（template_field 存源字段、mapped_field 存目标字段）由 resolveCurrentMappings 按当前表头识别；
+// 表头替换后可能识别不出旧方向，映射会整体读空。这类模板先在【修改】中保存一次（按新方向写回）再更新。
+function isLegacyOrientedTemplateMappings(templateId) {
+  const templateConfig = getTemplateMappingConfig(templateId);
+  const payload = database.getTemplateMappings(templateId);
+  if (!templateConfig || !payload) {
+    return false;
+  }
+  const targetFieldSet = new Set(buildManagedMappingFields(templateConfig.enumValues));
+  const sourceFieldSet = new Set((templateConfig.template.headers || []).map((header) => normalizeCell(header)));
+  const mappings = Array.isArray(payload.mappings) ? payload.mappings : [];
+  const currentOrientationScore = mappings.filter((mapping) => targetFieldSet.has(mapping.templateField)).length;
+  const legacyOrientationScore = mappings.filter((mapping) => {
+    return sourceFieldSet.has(normalizeCell(mapping.templateField)) && targetFieldSet.has(mapping.mappedField);
+  }).length;
+  return legacyOrientationScore > currentOrientationScore;
+}
+
 // 读取所选文件表头并与模板当前表头对比；只读，不写库。
 function prepareTemplateHeaderUpdate({ templateId, filePath }) {
   const template = database.getTemplate(templateId);
@@ -13561,6 +13579,14 @@ function prepareTemplateHeaderUpdate({ templateId, filePath }) {
       message: '未找到对应模板，请刷新后重试',
       errorCode: 'TEMPLATE_NOT_FOUND',
       context: { templateId }
+    });
+  }
+  if (isLegacyOrientedTemplateMappings(template.id)) {
+    return createErrorResult({
+      step: '更新模板',
+      message: LEGACY_ORIENTED_MAPPINGS_MESSAGE,
+      errorCode: 'TEMPLATE_MAPPINGS_LEGACY_ORIENTATION',
+      context: { templateId, templateName: template.name }
     });
   }
   const headers = normalizeBundleTemplateHeaders(extractHeaders(filePath));
@@ -13621,6 +13647,9 @@ function applyTemplateHeaderUpdate(payload = {}) {
   const diff = diffTemplateHeaders(template.headers, headers);
   if (diff.identical) {
     return fail('TEMPLATE_HEADERS_UNCHANGED', '所选文件的表头与当前模板一致，无需更新', { templateName: template.name });
+  }
+  if (isLegacyOrientedTemplateMappings(templateId)) {
+    return fail('TEMPLATE_MAPPINGS_LEGACY_ORIENTATION', LEGACY_ORIENTED_MAPPINGS_MESSAGE, { templateName: template.name });
   }
   const conflict = findConflictingTemplateByHeaders(headers, templateId);
   if (conflict) {

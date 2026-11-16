@@ -6,6 +6,9 @@
 //   ④ 确认更新：只替换表头与源文件名，映射与其余配置保留；同步模板库文件、写活动日志；返回失效映射
 //   ⑤ 生成前拦截：失效映射未修改前生成报 TEMPLATE_MAPPING_FIELD_MISSING 并列出字段；未启用的失效配置不拦截
 //   ⑥ 修改映射后按新字段生成，回读导出明细金额取自新列；旧格式账单文件不再匹配该模板
+//   ⑦ 引用收集与真实生成 lookup（buildMappedFieldLookup）逐目标字段一致：拼接、单元素 mappedFields、与选项同名的列名
+//   ⑧ 与选项或模式同名的真实列名（如「自己输入」、拼接中的「字段筛选特征值」）合法保存后被更新删除，生成前同样拦截
+//   ⑨ 旧版方向的映射拒绝更新（需先在【修改】中保存一次），不写库
 //   UI 由 renderer lifecycle 覆盖；本脚本验证数据与文件在整条链路上的结果。
 //
 // 用法：node scripts/integration/statement-template-update.js
@@ -96,7 +99,8 @@ const CONSTANTS = loadMainConstants([
   'SIGNED_AMOUNT_MAPPING_FIELD', 'AMOUNT_BASED_NAME_MAPPING_FIELD', 'AMOUNT_BASED_ACCOUNT_MAPPING_FIELD',
   'AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD', 'AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION',
   'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
-  'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS', 'FILENAME_MAPPING_TEMPLATE_ID', 'MISSING_ENUM_MESSAGE'
+  'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS', 'FILENAME_MAPPING_TEMPLATE_ID', 'MISSING_ENUM_MESSAGE',
+  'LEGACY_ORIENTED_MAPPINGS_MESSAGE'
 ]);
 
 function writeWorkbook(filePath, headers, rows = []) {
@@ -149,7 +153,8 @@ function createMain(database, spies) {
     'buildTemplateFieldReferenceInput',
     'collectStaleTemplateFieldReferences',
     'prepareTemplateHeaderUpdate',
-    'applyTemplateHeaderUpdate'
+    'applyTemplateHeaderUpdate',
+    'isLegacyOrientedTemplateMappings'
   ], {
     ...CONSTANTS,
     templateHeaderUpdateTools: createTemplateHeaderUpdateTools(CONSTANTS),
@@ -369,6 +374,99 @@ async function run() {
       oldFileRejected = error instanceof FileValidationError;
     }
     assertTrue(oldFileRejected, '⑥ 旧格式账单文件不再匹配更新后的模板');
+
+    // ⑦ 引用收集与真实生成 lookup 一致（同一输入）
+    const tools = createTemplateHeaderUpdateTools(CONSTANTS);
+    const rows = [
+      { templateField: 'BillDate', mappedField: '交易日期', mappedFields: [] },
+      { templateField: 'Remark', mappedField: CONSTANTS.CONCAT_FIELDS_MAPPING_FIELD, mappedFields: ['附言', `${FIXED_FIELD_VALUE_PREFIX}-`, '流水号'] },
+      { templateField: 'Reference', mappedField: CONSTANTS.FEATURE_FILTER_MAPPING_FIELD, mappedFields: [] },
+      { templateField: 'MerchantId', mappedField: MERCHANT_ID_CURRENCY_ONLY_MARKER, mappedFields: [] },
+      { templateField: 'Currency', mappedField: `${FIXED_FIELD_VALUE_PREFIX}USD`, mappedFields: [] },
+      { templateField: 'Balance', mappedField: CONSTANTS.BALANCE_CALCULATED_OPTION, mappedFields: [] },
+      { templateField: 'Credit Amount', mappedField: CONSTANTS.MERCHANT_ID_SELF_INPUT_OPTION, mappedFields: [] },
+      { templateField: 'Debit Amount', mappedField: '账号A', mappedFields: ['账号B'] },
+      { templateField: 'Fee', mappedField: '无', mappedFields: [] },
+      { templateField: 'Name', mappedField: CONSTANTS.CONCAT_FIELDS_MAPPING_FIELD, mappedFields: [CONSTANTS.FEATURE_FILTER_MAPPING_FIELD, CONSTANTS.CONCAT_FIELDS_MAPPING_FIELD] }
+    ];
+    const lookup = main.buildMappedFieldLookup(rows);
+    // 生成器按语义单独处理、不按列读取的取值：固定值、筛选 token、Balance 计算选项、MerchantId 按币种标记
+    const generatorFields = Object.fromEntries(Object.entries(lookup).map(([target, value]) => [target,
+      (Array.isArray(value) ? value : [value]).map((token) => normalizeCell(token)).filter((token) => token
+        && !token.startsWith(FIXED_FIELD_VALUE_PREFIX)
+        && token !== FEATURE_FILTER_FIELD_TOKEN
+        && !(target === 'Balance' && token === CONSTANTS.BALANCE_CALCULATED_OPTION)
+        && !(target === 'MerchantId' && token === MERCHANT_ID_CURRENCY_ONLY_MARKER))]).filter(([, fields]) => fields.length));
+    const collectorFields = {};
+    tools.collectTemplateFieldReferences({ mappings: rows }).forEach((reference) => {
+      (collectorFields[reference.target] = collectorFields[reference.target] || []).push(reference.field);
+    });
+    assertEq(collectorFields, generatorFields, '⑦ 引用收集与生成 lookup 逐目标字段一致');
+    assertEq(collectorFields['Debit Amount'], ['账号B'], '⑦ 单元素 mappedFields 优先于 mappedField');
+    assertEq(collectorFields.Name, [CONSTANTS.FEATURE_FILTER_MAPPING_FIELD, CONSTANTS.CONCAT_FIELDS_MAPPING_FIELD], '⑦ 拼接字段中与模式名称同名的列按源字段计入');
+
+    // ⑧ 与选项同名的真实列名
+    const optionHeaders = ['交易日期', '自己输入', '支出', '账号', '币种'];
+    const optionTemplate = database.upsertTemplate({ name: '中国银行-广州', sourceFileName: 'boc.xlsx', headers: optionHeaders });
+    saveMappings(main, database, optionTemplate.id, { 'Credit Amount': '自己输入', Remark: '' });
+    const optionSourceOld = path.join(dir, 'option-old.xlsx');
+    writeWorkbook(optionSourceOld, optionHeaders, [['2026-11-05', '100', '', 'ACC2', 'USD'], ['2026-11-06', '', '5', 'ACC2', 'USD']]);
+    assertEq(pickColumns(generate(main, database, optionTemplate.id, optionSourceOld), ['Credit Amount', 'Debit Amount']), [['100', ''], ['', '5']],
+      '⑧ 列名「自己输入」合法映射并照常生成');
+    const optionNewHeaders = ['交易日期', '收入', '支出', '账号', '币种'];
+    const optionPreview = main.prepareTemplateHeaderUpdate({
+      templateId: optionTemplate.id,
+      filePath: (() => { const file = path.join(dir, 'option-new.xlsx'); writeWorkbook(file, optionNewHeaders); return file; })()
+    });
+    assertEq(optionPreview.affectedMappings, ['Credit Amount ← 自己输入'], '⑧ 预览列出与选项同名的失效映射');
+    const optionApplied = main.applyTemplateHeaderUpdate({ templateId: optionTemplate.id, expectedHeaders: optionHeaders, headers: optionNewHeaders, sourceFileName: 'option-new.xlsx' });
+    assertEq(optionApplied.status, 'success', '⑧ 更新成功');
+    const optionSourceNew = path.join(dir, 'option-new-source.xlsx');
+    writeWorkbook(optionSourceNew, optionNewHeaders, [['2026-11-07', '100', '', 'ACC2', 'USD'], ['2026-11-08', '', '5', 'ACC2', 'USD']]);
+    assertThrows(() => generate(main, database, optionTemplate.id, optionSourceNew),
+      (error) => error.code === 'TEMPLATE_MAPPING_FIELD_MISSING' && /映射字段不存在：自己输入，/.test(error.message),
+      '⑧ 更新后生成前拦截，不静默漏掉收入行');
+
+    // ⑧b 拼接字段中与模式名称同名的真实列：合法保存 → 更新删除 → 生成前拦截
+    const modeHeaders = ['交易日期', '字段筛选特征值', '支出', '账号', '币种'];
+    const modeTemplate = database.upsertTemplate({ name: '农业银行-杭州', sourceFileName: 'abc.xlsx', headers: modeHeaders });
+    {
+      const template = database.getTemplate(modeTemplate.id);
+      const rowsForSave = mappingsFor({ Remark: '' }).map((row) => (row.templateField === 'Credit Amount'
+        ? { ...row, mappedField: CONSTANTS.CONCAT_FIELDS_MAPPING_FIELD, mappedFields: [CONSTANTS.FEATURE_FILTER_MAPPING_FIELD] }
+        : row));
+      const validated = main.validateTemplateConfiguration({ template, mappings: rowsForSave, enumValues: ENUM_VALUES });
+      database.saveMappings(modeTemplate.id, validated.mappings, [], [], undefined, null, {});
+    }
+    const modeSourceOld = path.join(dir, 'mode-old.xlsx');
+    writeWorkbook(modeSourceOld, modeHeaders, [['2026-11-09', '100', '', 'ACC3', 'USD']]);
+    assertEq(pickColumns(generate(main, database, modeTemplate.id, modeSourceOld), ['Credit Amount']), [['100']], '⑧b 拼接选中名为「字段筛选特征值」的列照常生成');
+    const modeNewHeaders = ['交易日期', '收入', '支出', '账号', '币种', '备注'];
+    const modeApplied = main.applyTemplateHeaderUpdate({ templateId: modeTemplate.id, expectedHeaders: modeHeaders, headers: modeNewHeaders, sourceFileName: 'mode-new.xlsx' });
+    assertEq([modeApplied.status, modeApplied.staleMappings], ['success', ['Credit Amount ← 字段筛选特征值']], '⑧b 更新成功并列出失效映射');
+    const modeSourceNew = path.join(dir, 'mode-new-source.xlsx');
+    writeWorkbook(modeSourceNew, modeNewHeaders, [['2026-11-10', '100', '', 'ACC3', 'USD', '']]);
+    assertThrows(() => generate(main, database, modeTemplate.id, modeSourceNew),
+      (error) => error.code === 'TEMPLATE_MAPPING_FIELD_MISSING' && /映射字段不存在：字段筛选特征值，/.test(error.message),
+      '⑧b 更新删除该列后生成前拦截');
+
+    // ⑨ 旧版方向的映射拒绝更新
+    const legacyTemplate = database.upsertTemplate({ name: '建设银行-深圳', sourceFileName: 'ccb.xlsx', headers: OLD_HEADERS });
+    database.saveMappings(legacyTemplate.id, [
+      { templateField: '交易日期', mappedField: 'BillDate', mappedFields: [] },
+      { templateField: '收入', mappedField: 'Credit Amount', mappedFields: [] },
+      { templateField: '支出', mappedField: 'Debit Amount', mappedFields: [] }
+    ], [], [], undefined, null, {});
+    const legacyBefore = persistedState(database, legacyTemplate.id);
+    const legacyFile = path.join(dir, 'legacy-new.xlsx');
+    writeWorkbook(legacyFile, ['日期', '收入金额', '支出金额']);
+    const legacyPreview = main.prepareTemplateHeaderUpdate({ templateId: legacyTemplate.id, filePath: legacyFile });
+    assertEq([legacyPreview.errorCode, legacyPreview.message], ['TEMPLATE_MAPPINGS_LEGACY_ORIENTATION', CONSTANTS.LEGACY_ORIENTED_MAPPINGS_MESSAGE], '⑨ 预览：旧版方向映射被拒');
+    const legacyApply = main.applyTemplateHeaderUpdate({
+      templateId: legacyTemplate.id, expectedHeaders: OLD_HEADERS, headers: ['日期', '收入金额', '支出金额'], sourceFileName: 'legacy-new.xlsx'
+    });
+    assertEq(legacyApply.errorCode, 'TEMPLATE_MAPPINGS_LEGACY_ORIENTATION', '⑨ 确认：旧版方向映射被拒');
+    assertEq(persistedState(database, legacyTemplate.id), legacyBefore, '⑨ 拒绝时不写库');
 
     // 模板已删除
     database.deleteTemplate(other.id);

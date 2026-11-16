@@ -1714,4 +1714,57 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.equal(await js(`cfg.overlay.querySelector('tr[data-template-field="Credit Amount"] .mapping-select').classList.contains('is-stale')`), false);
   });
 
+  // 回归（review P3）：确认期间模板被删除等失败时，【返回】先重新读取模板列表，不显示已删除的模板。
+  await test('模板【更新模板】失败：【返回】重新读取模板列表后回到模板管理', async () => {
+    await setup();
+    await js(`cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;
+      cfg.next.headerPreview={status:'success',templateId:2,templateName:'模板 B',sourceFileName:'b2.xlsx',expectedHeaders:['日期'],headers:['日期','金额'],
+        diff:{identical:false,added:['金额'],removed:[],orderChanged:false},affectedMappings:[],activeStaleCount:0};
+      cfg.top().querySelectorAll('[data-action="update-headers"]')[1].click();void 0;`); await tick();
+    await js(`cfg.templates=cfg.templates.filter(template=>template.id!==2);
+      cfg.next.headerUpdate={status:'error',errorCode:'TEMPLATE_NOT_FOUND',message:'模板已被删除，请刷新后重试',errorReportReady:true};
+      cfg.top().querySelector('[data-action="submit"]').click();void 0;`); await tick();
+    assert.deepEqual(await js(`[...cfg.top().querySelectorAll('.template-header-update-result-card .dialog-actions button')].map(button=>button.textContent)`), ['返回']);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='refresh').length`), 0);
+    await js(`cfg.top().querySelector('[data-action="back"]').click();`); await tick();
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='refresh').length`), 1);
+    assert.match(await js('cfg.top().textContent'), /模板管理/);
+    assert.deepEqual(await js(`[...cfg.top().querySelectorAll('tbody tr td:first-child')].map(cell=>cell.textContent.trim())`), ['模板 A']);
+  });
+  // 回归（review P2）：以 __ 开头的普通列名失效后同样显示「（已删除）」并回传原值，不被当作内部标记静默清空。
+  await test('映射关系管理：__ 开头的普通列名失效后显示（已删除）并保留原值', async () => {
+    await setup();
+    await js(`cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:{id:1,name:'模板 A',headers:['日期']},
+      targetFields:['BillDate','Credit Amount'],
+      mappings:[{templateField:'BillDate',mappedField:'日期',mappedFields:[]},{templateField:'Credit Amount',mappedField:'__金额',mappedFields:[]}]})).handle;cfg.overlay=cfg.top();void 0;`);
+    assert.deepEqual(await js(`{const select=cfg.overlay.querySelector('tr[data-template-field="Credit Amount"] .mapping-select');[select.value,select.selectedOptions[0].textContent,select.classList.contains('is-stale')];}`),
+      ['__金额', '__金额（已删除）', true]);
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();void 0;`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='mappingSave').map(call=>call.args[0].mappings.find(item=>item.templateField==='Credit Amount').mappedField)`), ['__金额']);
+  });
+
+  // 回归（第二轮 review P2）：按币种取大账号标记只在 MerchantId 上是内部值，其他字段上同名的真实列失效后照常标出。
+  await test('映射关系管理：非 MerchantId 字段上与币种大账号标记同名的列失效后显示（已删除）并保留原值', async () => {
+    await setup();
+    await js(`cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:{id:1,name:'模板 A',headers:['日期']},
+      targetFields:['BillDate','Credit Amount'],
+      mappings:[{templateField:'BillDate',mappedField:'日期',mappedFields:[]},{templateField:'Credit Amount',mappedField:'__CURRENCY_ONLY_BIG_ACCOUNT__',mappedFields:[]}]})).handle;cfg.overlay=cfg.top();void 0;`);
+    assert.deepEqual(await js(`{const select=cfg.overlay.querySelector('tr[data-template-field="Credit Amount"] .mapping-select');[select.value,select.classList.contains('is-stale')];}`),
+      ['__CURRENCY_ONLY_BIG_ACCOUNT__', true]);
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();void 0;`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='mappingSave').map(call=>call.args[0].mappings.find(item=>item.templateField==='Credit Amount').mappedField)`), ['__CURRENCY_ONLY_BIG_ACCOUNT__']);
+  });
+  // 回归（第二轮 review P3）：结果弹窗关闭后，迟到的刷新失败不改写新会话的状态反馈，也不替换新弹窗。
+  await test('模板【更新】结果弹窗：关闭后迟到的刷新失败不反馈、不接管新窗', async () => {
+    await setup();
+    await js(`cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;
+      cfg.next.headerPreview={status:'error',message:'模板已被删除，请刷新后重试'};
+      cfg.top().querySelector('[data-action="update-headers"]').click();void 0;`); await tick();
+    await js(`cfg.read=cfg.defer();cfg.next.refresh=cfg.read;cfg.feedbackBefore=cfg.feedback.length;cfg.top().querySelector('[data-action="back"]').click();
+      cfg.host.getTop().dispose();cfg.manager.dispose();cfg.newHandle=cfg.other();cfg.read.reject(new Error('旧请求刷新失败'));void 0;`); await tick();
+    assert.equal(await js('cfg.newHandle.isTop()'), true);
+    assert.equal(await js('cfg.feedback.length===cfg.feedbackBefore'), true);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
 };

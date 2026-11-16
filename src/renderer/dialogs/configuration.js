@@ -33,9 +33,14 @@
 
     // v3.2.18 模板【更新】后映射仍引用已删除的字段：补一个「（已删除）」选项保持选中并标红，
     // 保存时由主进程校验明确拒绝（映射字段不存在），而不是在界面上显示为空、再被静默保存为空。
-    function ensureStaleFieldOption(select, value) {
+    // 与主进程引用收集同口径，只跳过内部存储值：固定值前缀（所有字段），按币种取大账号标记（仅 MerchantId）；
+    // 以 __ 开头的普通列名、其他字段上与标记同名的真实列名照常按源字段处理。
+    const INTERNAL_MAPPING_VALUE_PREFIX = '__FIXED__:';
+    const MERCHANT_ID_CURRENCY_ONLY_MARKER = '__CURRENCY_ONLY_BIG_ACCOUNT__';
+    function ensureStaleFieldOption(select, value, targetField) {
       const normalized = String(value ?? '').trim();
-      if (!select || !normalized || normalized.startsWith('__')) return false;
+      if (!select || !normalized || normalized.startsWith(INTERNAL_MAPPING_VALUE_PREFIX)) return false;
+      if (targetField === 'MerchantId' && normalized === MERCHANT_ID_CURRENCY_ONLY_MARKER) return false;
       if (Array.from(select.options).some((option) => option.value === normalized)) return false;
       const option = document.createElement('option');
       option.value = normalized;
@@ -3639,6 +3644,7 @@
 
     // 【更新】结果：成功时可直接【修改映射关系】，失败只有【返回】；返回均回到刷新后的模板管理。
     function createTemplateHeaderUpdateResultDialog(result, ctx) {
+      const { setStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       const succeeded = result?.status === 'success';
@@ -3659,7 +3665,24 @@
       `;
       // opening 只防重复点击；不能拦截关闭，否则读取映射后替换模板管理（含本弹窗）会被拦下。
       let opening = false;
-      dialog.querySelector('[data-action="back"]').addEventListener('click', () => {
+      dialog.querySelector('[data-action="back"]').addEventListener('click', async () => {
+        const self = modalBridge.host.getHandle(overlay);
+        if (opening || !self?.isTop()) return;
+        // 失败时（如确认期间模板被删除或修改）模板列表可能已过期，先重新读取再返回；成功时提交后已刷新。
+        if (!succeeded) {
+          opening = true;
+          let refreshError = null;
+          try {
+            await refreshTemplates();
+          } catch (error) {
+            refreshError = error;
+          } finally {
+            opening = false;
+          }
+          // 迟到的结果（本弹窗已关闭或不在栈顶）不再反馈，也不替换新弹窗。
+          if (!self.isOpen() || !self.isTop()) return;
+          if (refreshError) setStatus(refreshError.message || '刷新模板列表失败', 'error');
+        }
         const manager = ctx?.managerHandle;
         if (manager?.isOpen()) {
           replaceModal(manager, () => createTemplateManagerDialog({ expandChannelId: ctx.expandChannelId || null }));
@@ -3675,7 +3698,7 @@
         try {
           await openTemplateMappingEditor({ templateId: ctx.templateId, replaceTarget: manager, anchor: self });
         } catch (error) {
-          setStatus(error.message || '读取映射关系失败', 'error');
+          if (self.isOpen() && self.isTop()) setStatus(error.message || '读取映射关系失败', 'error');
         } finally {
           opening = false;
         }
@@ -4445,7 +4468,7 @@
           select.value = '';
         } else {
           select.value = savedMapping.mappedField || (isBalanceField ? BALANCE_DISABLED_OPTION : '');
-          ensureStaleFieldOption(select, savedMapping.mappedField);
+          ensureStaleFieldOption(select, savedMapping.mappedField, fieldName);
         }
 
         function updateConcatPreview() {
@@ -5316,7 +5339,7 @@
           const isConcatInitial = entry.mappedField === CONCAT_FIELDS_MAPPING_FIELD && concatSelectedFields.length > 0;
 
           select.value = isConcatInitial ? CONCAT_FIELDS_MAPPING_FIELD : (entry.mappedField || '');
-          if (!isConcatInitial) ensureStaleFieldOption(select, entry.mappedField);
+          if (!isConcatInitial) ensureStaleFieldOption(select, entry.mappedField, entry.templateField);
 
           function updateConcatPreviewText() {
             if (!concatPreview) return;

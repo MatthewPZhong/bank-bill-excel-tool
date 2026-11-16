@@ -38,8 +38,6 @@ function createTemplateHeaderUpdateTools(constants = {}) {
   const {
     BALANCE_DISABLED_OPTION,
     BALANCE_CALCULATED_OPTION,
-    MERCHANT_ID_SELF_INPUT_OPTION,
-    MERCHANT_ID_CURRENCY_ONLY_OPTION,
     CONCAT_FIELDS_MAPPING_FIELD,
     FEATURE_FILTER_MAPPING_FIELD,
     AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD,
@@ -53,22 +51,30 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     BILL_SPLIT_MERGE_MAPPING_FIELD,
     REUSE_MODULE_MAPPING_FIELD
   ].filter(Boolean));
-  // 映射值中不是源字段的内部取值：余额选项、MerchantId 选项与存储标记、拼接/筛选模式标记。
-  const nonFieldValues = new Set([
-    BALANCE_DISABLED_OPTION,
-    BALANCE_CALCULATED_OPTION,
-    MERCHANT_ID_SELF_INPUT_OPTION,
-    MERCHANT_ID_CURRENCY_ONLY_OPTION,
-    MERCHANT_ID_CURRENCY_ONLY_MARKER,
-    CONCAT_FIELDS_MAPPING_FIELD,
-    FEATURE_FILTER_MAPPING_FIELD
-  ].filter(Boolean));
-
-  function isSourceFieldValue(value) {
+  // 规则类引用（判断字段、取值字段、拆分行字段、筛选字段）：非空且不是固定值即为源字段。
+  function isRuleSourceValue(value) {
     const normalized = normalizeCell(value);
-    return normalized !== ''
-      && !normalized.startsWith(FIXED_FIELD_VALUE_PREFIX)
-      && !nonFieldValues.has(normalized);
+    return normalized !== '' && !normalized.startsWith(FIXED_FIELD_VALUE_PREFIX);
+  }
+
+  // 展开后的映射取值（token）按目标字段解释，与生成器一致：拼接 / 筛选模式只由外层 mappedField 决定（见 mappingSourceFields），
+  // 展开后的 token 即使与模式名称同名也按源列读取；「无」「通过发生额计算」只在 Balance 上是选项；
+  // 按币种取大账号的存储标记只在 MerchantId 上生效；固定值不读源列。其余取值（包括与选项同名的真实列名）都按源字段读取。
+  function isMappingSourceValue(target, value) {
+    const normalized = normalizeCell(value);
+    if (!isRuleSourceValue(normalized)) return false;
+    if (target === 'Balance' && (normalized === BALANCE_DISABLED_OPTION || normalized === BALANCE_CALCULATED_OPTION)) return false;
+    if (target === 'MerchantId' && normalized === MERCHANT_ID_CURRENCY_ONLY_MARKER) return false;
+    return true;
+  }
+
+  // 与 main.js normalizeMappedFields 一致：mappedFields 非空（去空去重后）优先，否则取 mappedField。
+  function normalizeMappedFields(mapping) {
+    const fields = uniqueNonEmpty((Array.isArray(mapping && mapping.mappedFields) ? mapping.mappedFields : [])
+      .map((value) => normalizeCell(value)));
+    if (fields.length) return fields;
+    const fallback = normalizeCell(mapping && mapping.mappedField);
+    return fallback ? [fallback] : [];
   }
 
   function findSwitchValue(mappings, targetField) {
@@ -76,18 +82,14 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     return normalizeCell(mapping && mapping.mappedField);
   }
 
-  // 一条映射实际引用的源字段：拼接或多字段取 mappedFields，否则取 mappedField。
-  function mappingSourceFields(mapping) {
+  // 一条映射实际引用的源字段，取值顺序与 main.js buildMappedFieldLookup 一致：
+  // 字段筛选特征值不读源字段；拼接取 mappedFields；其余在 mappedFields（含单个元素）非空时优先于 mappedField。
+  function mappingSourceFields(target, mapping) {
     const mappedField = normalizeCell(mapping && mapping.mappedField);
-    const mappedFields = Array.isArray(mapping && mapping.mappedFields)
-      ? mapping.mappedFields.map((value) => normalizeCell(value)).filter(Boolean)
-      : [];
     if (mappedField === FEATURE_FILTER_MAPPING_FIELD) return [];
-    if (mappedField === CONCAT_FIELDS_MAPPING_FIELD || mappedFields.length > 1) {
-      return uniqueNonEmpty(mappedFields).filter(isSourceFieldValue);
-    }
-    const primary = mappedField || mappedFields[0] || '';
-    return isSourceFieldValue(primary) ? [primary] : [];
+    const values = normalizeMappedFields(mapping);
+    const tokens = mappedField === CONCAT_FIELDS_MAPPING_FIELD || values.length > 1 ? values : values.slice(0, 1);
+    return uniqueNonEmpty(tokens).filter((token) => isMappingSourceValue(target, token));
   }
 
   function usesFeatureFilter(mappings) {
@@ -102,8 +104,9 @@ function createTemplateHeaderUpdateTools(constants = {}) {
   function collectTemplateFieldReferences(input = {}) {
     const mappings = Array.isArray(input.mappings) ? input.mappings : [];
     const references = [];
+    // 映射类引用已按目标字段过滤；规则类引用只排除空值与固定值。
     const push = (reference) => {
-      if (isSourceFieldValue(reference.field)) {
+      if (isRuleSourceValue(reference.field)) {
         references.push({ ...reference, field: normalizeCell(reference.field) });
       }
     };
@@ -118,7 +121,7 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     mappings.forEach((mapping) => {
       const target = normalizeCell(mapping && mapping.templateField);
       if (!target || switchTargetFields.has(target)) return;
-      mappingSourceFields(mapping).forEach((field) => {
+      mappingSourceFields(target, mapping).forEach((field) => {
         push({ area: 'mapping', target, role: '', field, active: true });
       });
     });
@@ -136,7 +139,7 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     billSplitMappings.forEach((mapping) => {
       const target = normalizeCell(mapping && mapping.templateField);
       if (!target) return;
-      mappingSourceFields(mapping).forEach((field) => {
+      mappingSourceFields(target, mapping).forEach((field) => {
         push({ area: 'bill-split-mapping', target, role: '', field, active: billSplitMappingActive });
       });
     });
