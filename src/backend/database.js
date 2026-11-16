@@ -1148,6 +1148,11 @@ class AppDatabase {
     return templateRepository.renameTemplate(this.db, templateId, nextName);
   }
 
+  // v3.2.18：模板管理【更新】只替换表头，其余配置保留
+  updateTemplateHeaders(templateId, { expectedHeaders, headers, sourceFileName }) {
+    return templateRepository.updateTemplateHeaders(this.db, templateId, { expectedHeaders, headers, sourceFileName });
+  }
+
   deleteTemplate(templateId) {
     return templateRepository.deleteTemplate(this.db, templateId);
   }

@@ -204,6 +204,38 @@ function renameTemplate(db, templateId, nextName) {
   return getTemplate(db, templateId);
 }
 
+// v3.2.18 模板管理【更新】：只替换表头与源文件名，映射、大账号、固定值、币种大账号、字段筛选、拆分规则等
+// 全部保留（区别于 upsertTemplate 的覆盖导入）。expectedHeaders 为用户确认变更时看到的旧表头，
+// 不一致说明期间模板已被修改，拒绝写入；UPDATE 再以读到的原串为条件，防止并发覆盖。
+function updateTemplateHeaders(db, templateId, { expectedHeaders, headers, sourceFileName }) {
+  const row = db.prepare('SELECT headers_json AS headersJson FROM templates WHERE id = ?').get(templateId);
+  if (!row) {
+    const error = new Error('模板不存在');
+    error.code = 'TEMPLATE_NOT_FOUND';
+    throw error;
+  }
+  if (JSON.stringify(parseJsonArray(row.headersJson)) !== JSON.stringify(expectedHeaders)) {
+    const error = new Error('模板表头已变化');
+    error.code = 'TEMPLATE_HEADERS_CHANGED';
+    throw error;
+  }
+  const now = new Date().toISOString();
+  const result = db
+    .prepare(`
+      UPDATE templates
+      SET headers_json = ?, source_file_name = ?, updated_at = ?
+      WHERE id = ? AND headers_json = ?
+    `)
+    .run(JSON.stringify(headers), sourceFileName, now, templateId, row.headersJson);
+  if (Number(result.changes) !== 1) {
+    const error = new Error('模板表头已变化');
+    error.code = 'TEMPLATE_HEADERS_CHANGED';
+    throw error;
+  }
+
+  return getTemplate(db, templateId);
+}
+
 function deleteTemplate(db, templateId) {
   db.prepare('DELETE FROM templates WHERE id = ?').run(templateId);
 }
@@ -1019,5 +1051,6 @@ module.exports = {
   saveBillSplitRowCount,
   saveMappings,
   saveTemplateFilenameFixedField,
+  updateTemplateHeaders,
   upsertTemplate
 };
