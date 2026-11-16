@@ -443,7 +443,9 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'file:import-balance-seed-file',
     'position-reconciliation:bank:prepare-import',
     'template-resources:discard-import',
-    'template-resources:prepare-import'
+    'template-resources:prepare-import',
+    'template:discard-import',
+    'template:prepare-import'
   ]),
   'preview-only': Object.freeze([
     'bizOpReconV327:run:preflight',

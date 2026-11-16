@@ -770,6 +770,12 @@ const {
   listOwnerSeeds,
   updateOwnerSeed
 } = require('./main-process/balance-seed-management');
+// v3.2.18【导入模板】命名
+const {
+  createPendingTemplateImportStore,
+  findTemplateImportNameConflict,
+  normalizeTemplateImportName
+} = require('./main-process/template-import-naming');
 const {
   ALL_BANKS_TEMPLATE_SCOPE,
   assembleMonthlyBalance,
@@ -830,6 +836,8 @@ if (!hasSingleInstanceLock) {
 }
 let database = null;
 let pendingDb = null;
+// v3.2.18【导入模板】：已预检、待用户命名确认的模板文件（不跨重启）。
+const pendingTemplateImports = createPendingTemplateImportStore();
 let preFundReconciliationService = null;
 let duplicateInboundMatchService = null;
 let positionReconciliationService = null;
@@ -9131,6 +9139,154 @@ function importStatementChildTemplate(channelId, selectedPath) {
   }
 }
 
+// v3.2.18【导入模板】命名（spec：changes/v3.2.18/feat/template-import-naming/spec.md）：
+//   template:prepare-import 选文件并识别为新模板 → 渲染层弹框输入银行渠道名、地区 → template:import 带 token 与名称提交。
+//   待确认文件只登记在 Main，按发送方窗口归属；渲染层不回传路径。
+function templateImportOwnerId(event) {
+  return Number(event && event.sender && event.sender.id) || 0;
+}
+
+function createTemplateImportFileErrorResult(error, selectedPath) {
+  if (error instanceof FileValidationError) {
+    return createErrorResult({
+      step: '导入模板文件',
+      message: error.message,
+      errorCode: error.code,
+      detailLines: ['模板文件无法读取或表头无效，未完成导入。'],
+      context: { selectedPath }
+    });
+  }
+  return createErrorResult({
+    step: '导入模板文件',
+    message: '模板导入失败，请导出报错文件查看详情',
+    errorCode: 'TEMPLATE_IMPORT_RUNTIME',
+    errorType: '系统错误',
+    originalError: error,
+    context: { selectedPath }
+  });
+}
+
+function createTemplateHeadersDuplicateResult(conflict) {
+  return createErrorResult({
+    step: '导入模板文件',
+    message: `该文件的表头与已有模板「${conflict.name}」完全相同，无法创建重复表头的模板。`,
+    errorCode: 'TEMPLATE_HEADERS_DUPLICATE',
+    context: { conflictTemplateName: conflict.name }
+  });
+}
+
+// 预检：表头能读出且与所有已有模板都不相同，才算新模板并登记待命名；表头重复沿用原报错，不弹命名框。
+function prepareOrdinaryTemplateImport(ownerId, selectedPath) {
+  try {
+    const headers = extractHeaders(selectedPath);
+    const conflict = findConflictingTemplateByHeaders(headers, null);
+    if (conflict) {
+      return createTemplateHeadersDuplicateResult(conflict);
+    }
+    const sourceFileName = path.basename(selectedPath);
+    const importToken = pendingTemplateImports.register({ ownerId, filePath: selectedPath, sourceFileName, headers });
+    return { status: 'ready', importToken, sourceFileName };
+  } catch (error) {
+    return createTemplateImportFileErrorResult(error, selectedPath);
+  }
+}
+
+// 名称按 D1 规范化（大写），并按 D2 与已有模板、渠道查重（忽略大小写）。
+function checkOrdinaryTemplateImportName(options = {}) {
+  const name = normalizeTemplateImportName(options || {});
+  if (!name.ok) {
+    return {
+      ok: false,
+      result: createErrorResult({ step: '导入模板文件', message: name.message, errorCode: name.errorCode })
+    };
+  }
+  const conflict = findTemplateImportNameConflict({
+    templateName: name.templateName,
+    templates: database.listTemplates(),
+    channels: database.listStatementChannels()
+  });
+  if (conflict) {
+    return {
+      ok: false,
+      result: createErrorResult({
+        step: '导入模板文件',
+        message: conflict.message,
+        errorCode: conflict.errorCode,
+        context: { templateName: name.templateName }
+      })
+    };
+  }
+  return { ok: true, name };
+}
+
+function createTemplateImportExpiredResult() {
+  return createErrorResult({
+    step: '导入模板文件',
+    message: '本次导入已失效，请重新点击【导入模板】选择文件',
+    errorCode: 'TEMPLATE_IMPORT_EXPIRED'
+  });
+}
+
+// template:import 的 prepare：核对待确认文件与名称；不通过时直接返回，不预留归档批次，token 保留供改名重试。
+function resolveOrdinaryTemplateImport(event, options = {}) {
+  const pending = pendingTemplateImports.peek(options && options.importToken, templateImportOwnerId(event));
+  if (!pending) {
+    return { ok: false, result: createTemplateImportExpiredResult() };
+  }
+  const checked = checkOrdinaryTemplateImportName(options);
+  if (!checked.ok) return checked;
+  return { ok: true, filePath: pending.filePath, templateName: checked.name.templateName };
+}
+
+// template:import 的 execute：复核名称（防并发），重读表头须与预检一致，再新建模板。
+function importOrdinaryTemplate(event, options = {}, selectedPath) {
+  const ownerId = templateImportOwnerId(event);
+  const importToken = options && options.importToken;
+  const pending = pendingTemplateImports.peek(importToken, ownerId);
+  if (!pending || pending.filePath !== selectedPath) {
+    return createTemplateImportExpiredResult();
+  }
+  const checked = checkOrdinaryTemplateImportName(options);
+  if (!checked.ok) return checked.result;
+  const { templateName, bankName, region } = checked.name;
+  pendingTemplateImports.consume(importToken, ownerId);
+  try {
+    const headers = extractHeaders(selectedPath);
+    if (JSON.stringify(headers) !== JSON.stringify(pending.headers)) {
+      return createErrorResult({
+        step: '导入模板文件',
+        message: '模板文件在确认期间已变化，请重新点击【导入模板】选择文件',
+        errorCode: 'TEMPLATE_IMPORT_FILE_CHANGED',
+        context: { selectedPath }
+      });
+    }
+    const conflict = findConflictingTemplateByHeaders(headers, null);
+    if (conflict) {
+      return createTemplateHeadersDuplicateResult(conflict);
+    }
+    // 已确认不重名（忽略大小写），upsertTemplate 只会新建，不会覆盖已有模板的映射与配置。
+    const template = database.upsertTemplate({
+      name: templateName,
+      sourceFileName: pending.sourceFileName,
+      headers
+    });
+    syncTemplateLibraryFile();
+    clearLastErrorReport();
+    appendActivityLogEntry({
+      level: 'info',
+      message: '导入模板文件成功',
+      details: [`模板名：${templateName}`, `银行渠道名：${bankName}`, `地区：${region}`, `源文件：${selectedPath}`]
+    });
+    return {
+      status: 'success',
+      message: `已导入模板「${templateName}」，请在模板管理中维护映射关系`,
+      template: buildTemplateSummary(template)
+    };
+  } catch (error) {
+    return createTemplateImportFileErrorResult(error, selectedPath);
+  }
+}
+
 // v3.2.15：template:save-mappings 的 channel 参数 → 仓储的归属指令；缺省或无法识别为不改归属。
 function normalizeTemplateChannelAssignment(channel) {
   if (!channel || typeof channel !== 'object') return { mode: 'keep' };
@@ -9370,9 +9526,29 @@ function registerTemplateHandlers() {
     }
   });
 
+  // v3.2.18【导入模板】：选文件并识别为新模板（只读预检）；确认命名后走 template:import 写入。
+  ipcMain.handle('template:prepare-import', async (event) => {
+    const choice = await showImportOpenDialog('template', {
+      properties: ['openFile'],
+      filters: templateFileDialogFilters()
+    });
+    const selectedPath = !choice.canceled && Array.isArray(choice.filePaths) ? choice.filePaths[0] : '';
+    if (!selectedPath) {
+      return { status: 'cancelled' };
+    }
+    return prepareOrdinaryTemplateImport(templateImportOwnerId(event), selectedPath);
+  });
+
+  // v3.2.18【导入模板】：命名弹框取消时丢弃待确认文件。
+  ipcMain.handle('template:discard-import', (event, importToken) => {
+    pendingTemplateImports.discard(importToken, templateImportOwnerId(event));
+    return { status: 'success' };
+  });
+
   // v3.2.15：传 { channelId } 即【导入子模板】（T7）——模板名按渠道编号生成，总是新建并归入该渠道。
+  // v3.2.18：普通导入传 { importToken, bankName, region }——文件来自 template:prepare-import，模板名 = 银行渠道名-地区。
   trackedIpcHandle('template:import', '生成网银账单', '导入模板', {
-    async prepare(_event, options = {}) {
+    async prepare(event, options = {}) {
       const childChannelId = Number(options && options.channelId || 0);
       if (childChannelId && !database.getStatementChannel(childChannelId)) {
         return {
@@ -9385,12 +9561,22 @@ function registerTemplateHandlers() {
           })
         };
       }
-      const result = await showImportOpenDialog('template', {
-        properties: ['openFile'],
-        filters: templateFileDialogFilters()
-      });
-      if (result.canceled || result.filePaths.length === 0) {
-        return { proceed: false, result: { status: 'cancelled' } };
+      let selectedPath = '';
+      if (childChannelId) {
+        const result = await showImportOpenDialog('template', {
+          properties: ['openFile'],
+          filters: templateFileDialogFilters()
+        });
+        if (result.canceled || result.filePaths.length === 0) {
+          return { proceed: false, result: { status: 'cancelled' } };
+        }
+        selectedPath = result.filePaths[0];
+      } else {
+        const resolved = resolveOrdinaryTemplateImport(event, options);
+        if (!resolved.ok) {
+          return { proceed: false, result: resolved.result };
+        }
+        selectedPath = resolved.filePath;
       }
       return {
         proceed: true,
@@ -9398,7 +9584,7 @@ function registerTemplateHandlers() {
           version: 1,
           allocation: 'eager',
           inputs: [{
-            filePath: result.filePaths[0],
+            filePath: selectedPath,
             role: 'input',
             sourceOperation: 'template:import'
           }],
@@ -9406,75 +9592,13 @@ function registerTemplateHandlers() {
         }
       };
     },
-    async execute(_event, prepared, taskContext, options = {}) {
-    const selectedPath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
-    const childChannelId = Number(options && options.channelId || 0);
-    if (childChannelId) {
-      return importStatementChildTemplate(childChannelId, selectedPath);
-    }
-    try {
-      const headers = extractHeaders(selectedPath);
-      const templateName = path.parse(selectedPath).name;
-
-      // v1.5.2：表头唯一性校验 — 检查是否和已有模板重复
-      const existingByName = database.getTemplateByName(templateName);
-      const conflict = findConflictingTemplateByHeaders(headers, existingByName ? existingByName.id : null);
-      if (conflict) {
-        return createErrorResult({
-          step: '导入模板文件',
-          message: `该文件的表头与已有模板「${conflict.name}」完全相同，无法创建重复表头的模板。`,
-          errorCode: 'TEMPLATE_HEADERS_DUPLICATE',
-          context: { conflictTemplateName: conflict.name }
-        });
+    async execute(event, prepared, taskContext, options = {}) {
+      const selectedPath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
+      const childChannelId = Number(options && options.channelId || 0);
+      if (childChannelId) {
+        return importStatementChildTemplate(childChannelId, selectedPath);
       }
-
-      // v3.2.15：新建或覆盖的是普通模板时不能与渠道同名（覆盖渠道内的同名子模板不受限）。
-      if ((!existingByName || !existingByName.channelId) && database.getStatementChannelByName(templateName)) {
-        return createErrorResult({
-          step: '导入模板文件',
-          message: `已有同名渠道「${templateName}」，普通模板与渠道同名会使两者的输出名称相同；如是该渠道的另一种格式，请在渠道行点【导入子模板】，否则请先修改文件名`,
-          errorCode: 'TEMPLATE_NAME_CHANNEL_CONFLICT',
-          context: { channelName: templateName }
-        });
-      }
-
-      const template = database.upsertTemplate({
-        name: templateName,
-        sourceFileName: path.basename(selectedPath),
-        headers
-      });
-      syncTemplateLibraryFile();
-      clearLastErrorReport();
-      appendActivityLogEntry({
-        level: 'info',
-        message: '导入模板文件成功',
-        details: [`模板名：${templateName}`, `源文件：${selectedPath}`]
-      });
-      return {
-        status: 'success',
-        message: '模板导入成功，请在模板管理中维护映射关系',
-        template: buildTemplateSummary(template)
-      };
-    } catch (error) {
-      if (error instanceof FileValidationError) {
-        return createErrorResult({
-          step: '导入模板文件',
-          message: error.message,
-          errorCode: error.code,
-          detailLines: ['模板文件无法读取或表头无效，未完成导入。'],
-          context: { selectedPath }
-        });
-      }
-
-      return createErrorResult({
-        step: '导入模板文件',
-        message: '模板导入失败，请导出报错文件查看详情',
-        errorCode: 'TEMPLATE_IMPORT_RUNTIME',
-        errorType: '系统错误',
-        originalError: error,
-        context: { selectedPath }
-      });
-    }
+      return importOrdinaryTemplate(event, options, selectedPath);
     }
   });
 

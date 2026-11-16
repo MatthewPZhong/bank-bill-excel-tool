@@ -247,6 +247,50 @@ td .muted { color: var(--muted); }
   white-space: nowrap;
 }
 .balance-seed-pager[hidden] { display: none; }
+/* v3.2.18 余额管理头部：渠道右侧依次为「账户号」（按钮 + 可搜索浮层）与短「币种」下拉，外观对齐渠道下拉。
+   窗口较窄（如 150% 缩放）时账户号 / 币种整体换到第二行，× 固定在右上角。 */
+.balance-seed-card .dialog-header {
+  position: relative;
+  flex-wrap: wrap;
+  row-gap: 10px;
+  padding-right: 76px;
+}
+.balance-seed-card .dialog-header .icon-close {
+  position: absolute;
+  top: 22px; right: 28px;
+}
+.balance-seed-filters {
+  display: inline-flex; align-items: center; gap: 10px;
+  min-width: 0;
+  font-size: 14px; color: var(--muted);
+}
+.balance-seed-filter-label { white-space: nowrap; }
+/* 宽度容纳常见 20 余位账号；箭头与渠道 / 币种下拉同款 */
+.balance-seed-card .balance-seed-account-btn {
+  flex: 0 1 260px;
+  width: 260px; min-width: 140px; height: 36px;
+  padding: 0 36px 0 14px;
+  border-radius: var(--pill);
+  border: 1px solid var(--line);
+  background: var(--panel, #fff) var(--select-arrow) no-repeat right 12px center / 12px;
+  font-size: 14px; color: var(--text);
+  cursor: pointer;
+}
+.balance-seed-card .balance-seed-account-btn::after,
+.balance-seed-card .balance-seed-account-btn.is-open::after { content: none; }
+.balance-seed-card .balance-seed-account-btn:disabled,
+.balance-seed-currency-wrapper select:disabled { opacity: 0.55; cursor: not-allowed; }
+.balance-seed-currency-wrapper select { width: 96px; }
+.balance-seed-account-panel {
+  z-index: 32;
+  max-height: 320px;
+}
+.balance-seed-account-option[aria-selected="true"] { background: var(--bg-soft); }
+.balance-seed-account-empty {
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
 /* 余额管理表格：列为 日期/账户号/币种/余额/生成方式/执行操作，列名与数据单行；
    日期、币种按内容收窄，余额/生成方式/执行操作三列等宽，账户号占剩余宽度。
    改用 auto 布局让单行内容不被截断；输入框不贡献最小宽度，编辑态切换时列宽不变。 */

@@ -137,11 +137,12 @@ function toPublicRecord(record, owner) {
   };
 }
 
-// 账户号、币种升序，同一账号的日期从新到旧。
+// v3.2.18（spec：changes/v3.2.18/feat/template-import-naming/spec.md D3）：账期由近到远，
+// 即日期从新到旧；同一天按账户号、币种升序。渲染层按收到的顺序显示，筛选不改变顺序。
 function compareForDisplay(left, right) {
-  return left.merchantId.localeCompare(right.merchantId)
-    || left.currency.localeCompare(right.currency)
-    || right.billDate.localeCompare(left.billDate);
+  return right.billDate.localeCompare(left.billDate)
+    || left.merchantId.localeCompare(right.merchantId)
+    || left.currency.localeCompare(right.currency);
 }
 
 function listOwnerSeeds({ database, storageRoot, owner }) {

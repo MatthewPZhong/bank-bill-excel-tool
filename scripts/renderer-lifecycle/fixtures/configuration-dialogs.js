@@ -289,14 +289,24 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
           for(const rect of range.getClientRects())tops.push(Math.round(rect.top));}
         return tops.length===0||Math.max(...tops)-Math.min(...tops)<=1;};
       const input=table.querySelector('.balance-seed-balance-input');
+      // v3.2.18 头部：渠道、账户号、币种不溢出卡片，× 留在右上角且不与其他控件重叠。
+      const card=cfg.overlay.querySelector('.balance-seed-card').getBoundingClientRect();
+      const header=cfg.overlay.querySelector('.dialog-header');
+      const rect=element=>element.getBoundingClientRect();
+      const close=rect(header.querySelector('.icon-close'));
+      const controls=['.dialog-title','.balance-seed-owner-wrapper','[data-role="balance-seed-account"]','.balance-seed-currency-wrapper'].map(selector=>rect(header.querySelector(selector)));
       return { overflow: wrapper.scrollWidth>wrapper.clientWidth+1,
         wrapped: [...table.querySelectorAll('th,td')].filter(cell=>!singleLine(cell)).map(cell=>cell.textContent.trim()),
         widths: [...table.rows[0].cells].map(cell=>Math.round(cell.getBoundingClientRect().width)),
-        inputFits: !input||input.scrollWidth<=input.clientWidth };
+        inputFits: !input||input.scrollWidth<=input.clientWidth,
+        headerFits: header.scrollWidth<=header.clientWidth+1&&controls.every(item=>item.right<=card.right+1),
+        closeTopRight: close.right<=card.right+1&&close.top-card.top<40&&controls.every(item=>item.right<=close.left||item.top>=close.bottom),
+        filtersOnFirstRow: Math.abs(controls[2].top-controls[1].top)<=2 };
     })()`);
     await layout.settle();
     const normal = await measure();
     assert.deepEqual([normal.overflow, normal.wrapped], [false, []]);
+    assert.deepEqual([normal.headerFits, normal.closeTopRight, normal.filtersOnFirstRow], [true, true, true], '100% 时头部一行放下');
     const [, , , balanceWidth, methodWidth, actionWidth] = normal.widths;
     assert.ok(Math.max(balanceWidth, methodWidth, actionWidth) - Math.min(balanceWidth, methodWidth, actionWidth) <= 1, JSON.stringify(normal.widths));
     await js(`cfg.overlay.querySelectorAll('[data-action="edit-seed"]')[2].click();void 0;`); await layout.settle();
@@ -304,10 +314,126 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual([editing.overflow, editing.wrapped, editing.inputFits], [false, [], true]);
     assert.ok(editing.widths.every((width, index) => Math.abs(width - normal.widths[index]) <= 1), JSON.stringify([normal.widths, editing.widths]));
     await layout.evidence('balance-seed-table-100', { normal, editing });
+    // v3.2.18：选账户号后打开浮层，浮层在卡片内可见、不超出窗口。
+    await js(`cfg.overlay.querySelector('[data-action="cancel-edit"]').click();const account=cfg.overlay.querySelector('[data-role="balance-seed-account"]');
+      account.click();cfg.overlay.querySelector('.balance-seed-account-option[data-value="622202100112345678901"]').click();account.click();void 0;`);
+    await layout.settle();
+    const panel = await js(`(()=>{const rect=cfg.overlay.querySelector('.balance-seed-account-panel').getBoundingClientRect();
+      return {visible:rect.height>0,inWindow:rect.left>=0&&rect.right<=window.innerWidth&&rect.bottom<=window.innerHeight,
+        options:cfg.overlay.querySelectorAll('.balance-seed-account-option').length,rows:cfg.overlay.querySelectorAll('tbody tr').length};})()`);
+    assert.deepEqual(panel, { visible: true, inWindow: true, options: 4, rows: 2 });
+    await layout.evidence('balance-seed-filter-panel-100', { panel });
+    await js(`cfg.overlay.querySelector('[data-role="balance-seed-account"]').click();cfg.overlay.querySelectorAll('[data-action="edit-seed"]')[0].click();void 0;`);
     await layout.resize(1080, 760, 1.5);
     const zoomed = await measure();
     assert.deepEqual([zoomed.overflow, zoomed.wrapped, zoomed.inputFits], [false, [], true]);
+    assert.deepEqual([zoomed.headerFits, zoomed.closeTopRight], [true, true], '150% 时头部可换行但不溢出，× 仍在右上角');
     await layout.evidence('balance-seed-table-150', { zoomed });
+  });
+  // v3.2.18【导入模板】命名弹框版式：右下角【取消】【确认】，【确认】为蓝色主按钮；100%/150% 均不溢出。
+  await test('导入模板命名弹框：右下角取消 / 确认，确认为蓝色主按钮，100% 与 150% 不溢出', async () => {
+    await setup({ zoom: 1 });
+    await js(`cfg.bridge.openModal(()=>cfg.dialogs.createTemplateImportNameDialog({sourceFileName:'METACOMP 新加坡 2026-11 网银明细.xlsx',onSubmit:async()=>({close:true}),onCancel:()=>{}}));void 0;`);
+    const measure = () => js(`(()=>{const card=cfg.top().querySelector('.template-import-name-card');const cardRect=card.getBoundingClientRect();
+      const buttons=[...card.querySelectorAll('.dialog-actions button')];const rects=buttons.map(button=>button.getBoundingClientRect());
+      const primary=getComputedStyle(document.documentElement).getPropertyValue('--primary').trim();
+      const toRgb=value=>{const probe=document.createElement('span');probe.style.color=value;document.body.appendChild(probe);const rgb=getComputedStyle(probe).color;probe.remove();return rgb;};
+      return {labels:buttons.map(button=>button.textContent),confirmBlue:getComputedStyle(buttons[1]).backgroundColor===toRgb(primary),
+        rightmost:rects[1].left>rects[0].right&&cardRect.right-rects[1].right<60&&cardRect.bottom-rects[1].bottom<60,
+        fits:card.scrollWidth<=card.clientWidth+1&&[...card.querySelectorAll('input')].every(input=>input.getBoundingClientRect().right<=cardRect.right)};})()`);
+    await layout.settle();
+    const normal = await measure();
+    assert.deepEqual(normal, { labels: ['取消', '确认'], confirmBlue: true, rightmost: true, fits: true });
+    await layout.evidence('template-import-name-100', { normal });
+    await layout.resize(1080, 760, 1.5);
+    const zoomed = await measure();
+    assert.deepEqual(zoomed, { labels: ['取消', '确认'], confirmBlue: true, rightmost: true, fits: true });
+    await layout.evidence('template-import-name-150', { zoomed });
+  });
+  // v3.2.18（spec：changes/v3.2.18/feat/template-import-naming/spec.md §3.2）：账户号可搜索单选 + 币种联动单选，只在渲染层筛选。
+  await test('余额管理账户号 / 币种筛选：头部顺序与默认空白，部分搜索、选「全部」复位，币种联动与禁用，按收到顺序显示', async () => {
+    await setup();
+    await js(`cfg.templates.push({id:3,name:'渠道 A',channelId:7,channelName:'渠道 A'});cfg.services.applyPreviewTemplates(cfg.templates);
+      cfg.seedRecords=[['2026-09-03','M002','USD'],['2026-09-02','M001','HKD'],['2026-09-02','M001','USD'],['2026-09-01','M001','USD'],['2026-09-01','X9','EUR']]
+        .map(([billDate,merchantId,currency],index)=>({billDate,merchantId,currency,endBalance:index+1,generationMethod:'人工录入',templateName:'渠道 A',updatedAt:'u'+index,fileIdentity:'渠道.json'}));
+      cfg.seedList=owner=>({status:'success',owner:{kind:owner.kind,id:owner.id,seedFileName:'渠道.json'},records:owner.kind==='channel'?cfg.seedRecords:[]});
+      cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;cfg.top().querySelector('[data-action="balance-seed-management"]').click();
+      cfg.overlay=cfg.top();cfg.handle=cfg.host.getHandle(cfg.overlay);cfg.account=cfg.overlay.querySelector('[data-role="balance-seed-account"]');
+      cfg.currency=cfg.overlay.querySelector('[data-role="balance-seed-currency"]');cfg.panel=cfg.overlay.querySelector('.balance-seed-account-panel');
+      cfg.rows=()=>Array.from(cfg.overlay.querySelectorAll('tbody tr')).map(row=>Array.from(row.cells).slice(0,3).map(cell=>cell.textContent.trim()).join(' '));
+      cfg.options=()=>Array.from(cfg.panel.querySelectorAll('.balance-seed-account-option')).map(option=>option.textContent.trim());
+      cfg.search=value=>{const input=cfg.panel.querySelector('[data-role="balance-seed-account-search"]');input.value=value;input.dispatchEvent(new Event('input'));};
+      cfg.pick=value=>cfg.panel.querySelector('.balance-seed-account-option[data-value="'+value+'"]').click();
+      cfg.hint=()=>cfg.overlay.querySelector('[data-role="balance-seed-hint"]').textContent;void 0;`); await tick();
+    assert.deepEqual(await js(`{const header=cfg.overlay.querySelector('.dialog-header');
+      [Array.from(header.children).map(item=>item.className.split(' ').find(name=>['dialog-title','balance-seed-owner-wrapper','balance-seed-filters','icon-close'].includes(name))),
+       Array.from(header.querySelector('.balance-seed-filters').children).map(item=>item.firstChild.textContent.trim()||item.dataset.role),
+       cfg.account.textContent.trim(),cfg.currency.value,cfg.currency.disabled,Array.from(cfg.currency.options).map(option=>option.value),cfg.panel.hidden];}`),
+      [['dialog-title', 'balance-seed-owner-wrapper', 'balance-seed-filters', 'icon-close'], ['账户号', 'balance-seed-account', '币种'], '', '', true, [''], true]);
+    assert.deepEqual(await js('cfg.rows()'), ['2026-09-03 M002 USD', '2026-09-02 M001 HKD', '2026-09-02 M001 USD', '2026-09-01 M001 USD', '2026-09-01 X9 EUR']);
+
+    await js(`cfg.account.click();`);
+    assert.deepEqual(await js(`[cfg.panel.hidden,cfg.account.getAttribute('aria-expanded'),cfg.options(),document.activeElement?.dataset.role]`),
+      [false, 'true', ['全部', 'M001', 'M002', 'X9'], 'balance-seed-account-search']);
+    await js(`cfg.search('m00');`);
+    assert.deepEqual(await js('cfg.options()'), ['全部', 'M001', 'M002']);
+    await js(`cfg.search('zzz');`);
+    assert.deepEqual(await js(`[cfg.options(),cfg.panel.textContent.includes('无匹配账户号')]`), [['全部'], true]);
+    await js(`cfg.search('001');cfg.pick('M001');`);
+    assert.deepEqual(await js(`[cfg.panel.hidden,cfg.account.textContent,cfg.rows(),cfg.hint(),cfg.currency.disabled,Array.from(cfg.currency.options).map(option=>option.value)]`),
+      [true, 'M001', ['2026-09-02 M001 HKD', '2026-09-02 M001 USD', '2026-09-01 M001 USD'], '共 3 条', false, ['', 'HKD', 'USD']]);
+    await js(`cfg.currency.value='USD';cfg.currency.dispatchEvent(new Event('change'));`);
+    assert.deepEqual(await js(`[cfg.rows(),cfg.hint()]`), [['2026-09-02 M001 USD', '2026-09-01 M001 USD'], '共 2 条']);
+    await js(`cfg.account.click();cfg.pick('M002');`);
+    assert.deepEqual(await js(`[cfg.account.textContent,cfg.currency.value,Array.from(cfg.currency.options).map(option=>option.value),cfg.rows()]`),
+      ['M002', '', ['', 'USD'], ['2026-09-03 M002 USD']], '换账户号时币种清空');
+    await js(`cfg.account.click();cfg.pick('');`);
+    assert.deepEqual(await js(`[cfg.account.textContent.trim(),cfg.currency.disabled,cfg.rows().length,cfg.hint()]`), ['', true, 5, '共 5 条'], '选「全部」回到空白');
+
+    await js(`cfg.account.click();document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));`);
+    assert.deepEqual(await js(`[cfg.panel.hidden,cfg.handle.isTop(),cfg.handle.isOpen()]`), [true, true, true], 'Esc 只关面板');
+    await js(`cfg.account.click();cfg.overlay.querySelector('tbody').dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));`);
+    assert.equal(await js('cfg.panel.hidden'), true, '点击面板外关闭');
+    await js(`cfg.account.click();cfg.search('x');cfg.panel.querySelector('[data-role="balance-seed-account-search"]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));`);
+    assert.deepEqual(await js(`[cfg.panel.hidden,cfg.account.textContent]`), [true, 'X9'], 'Enter 选第一个匹配');
+
+    await js(`cfg.select=cfg.overlay.querySelector('[data-role="balance-seed-owner"]');cfg.account.click();cfg.select.value='template:1';cfg.select.dispatchEvent(new Event('change'));`); await tick();
+    assert.deepEqual(await js(`[cfg.panel.hidden,cfg.account.textContent.trim(),cfg.currency.disabled,cfg.rows()]`), [true, '', true, ['暂无余额种子']], '切换渠道清空筛选');
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+  await test('余额管理筛选与写入、分页：重读后账户号或币种仍在则保留、消失则复位；筛选后分页与条数按筛选结果', async () => {
+    await setup();
+    await js(`cfg.templates.push({id:3,name:'渠道 A',channelId:7,channelName:'渠道 A'});cfg.services.applyPreviewTemplates(cfg.templates);
+      const seed=(billDate,merchantId,currency,endBalance)=>({billDate,merchantId,currency,endBalance,generationMethod:'通过发生额计算',templateName:'渠道 A',updatedAt:'u',fileIdentity:'渠道.json'});
+      cfg.seedRecords=[seed('2026-09-02','M001','USD',10),seed('2026-09-02','M002','HKD',20),seed('2026-09-01','M001','USD',30)];
+      cfg.seedList=owner=>({status:'success',owner:{kind:owner.kind,id:owner.id,seedFileName:'渠道.json'},records:cfg.seedRecords});
+      cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;cfg.top().querySelector('[data-action="balance-seed-management"]').click();
+      cfg.overlay=cfg.top();cfg.account=cfg.overlay.querySelector('[data-role="balance-seed-account"]');cfg.currency=cfg.overlay.querySelector('[data-role="balance-seed-currency"]');
+      cfg.panel=cfg.overlay.querySelector('.balance-seed-account-panel');
+      cfg.pick=value=>{cfg.account.click();cfg.panel.querySelector('.balance-seed-account-option[data-value="'+value+'"]').click();};
+      cfg.rows=()=>Array.from(cfg.overlay.querySelectorAll('tbody tr')).map(row=>Array.from(row.cells).slice(0,4).map(cell=>cell.textContent.trim()).join(' '));void 0;`); await tick();
+    await js(`cfg.pick('M001');cfg.currency.value='USD';cfg.currency.dispatchEvent(new Event('change'));
+      cfg.overlay.querySelector('[data-action="edit-seed"]').click();cfg.overlay.querySelector('.balance-seed-balance-input').value='11';
+      cfg.seedRecords=[{...cfg.seedRecords[0],endBalance:11,generationMethod:'人工录入'},...cfg.seedRecords.slice(1)];
+      cfg.overlay.querySelector('[data-action="save-seed"]').click();`); await tick(); await tick();
+    assert.deepEqual(await js(`[cfg.account.textContent,cfg.currency.value,cfg.rows()]`),
+      ['M001', 'USD', ['2026-09-02 M001 USD 11', '2026-09-01 M001 USD 30']], '修改后筛选保留');
+    assert.equal(await js(`cfg.calls.find(call=>call.name==='seedUpdate').args[0].key.merchantId`), 'M001');
+    await js(`cfg.pick('M002');cfg.overlay.querySelector('[data-action="delete-seed"]').click();
+      cfg.seedRecords=cfg.seedRecords.filter(record=>record.merchantId!=='M002');
+      Array.from(cfg.top().querySelectorAll('button')).find(button=>button.textContent==='确认删除').click();`); await tick(); await tick();
+    assert.deepEqual(await js(`[cfg.account.textContent.trim(),cfg.currency.disabled,cfg.rows().length]`), ['', true, 2], '删除后账户号消失则复位');
+
+    await js(`cfg.seedRecords=Array.from({length:205},(_,index)=>({billDate:'2026-08-'+String(31-index%31).padStart(2,'0'),merchantId:'BIG'+String(index).padStart(3,'0'),currency:'USD',endBalance:index,
+        generationMethod:'通过发生额计算',templateName:'渠道 A',updatedAt:'u',fileIdentity:'渠道.json'})).concat([{billDate:'2026-07-01',merchantId:'SMALL',currency:'CNY',endBalance:1,generationMethod:'人工录入',templateName:'渠道 A',updatedAt:'u',fileIdentity:'渠道.json'}]);
+      cfg.select=cfg.overlay.querySelector('[data-role="balance-seed-owner"]');cfg.select.dispatchEvent(new Event('change'));`); await tick();
+    await js(`cfg.overlay.querySelector('[data-action="next-page"]').click();`);
+    assert.deepEqual(await js(`[cfg.overlay.querySelector('[data-role="balance-seed-pager"]').hidden,cfg.overlay.querySelector('[data-role="balance-seed-page"]').textContent,cfg.overlay.querySelectorAll('tbody tr').length]`),
+      [false, '第 2 / 2 页', 6]);
+    await js(`cfg.pick('SMALL');`);
+    assert.deepEqual(await js(`[cfg.overlay.querySelector('[data-role="balance-seed-pager"]').hidden,cfg.rows(),cfg.overlay.querySelector('[data-role="balance-seed-hint"]').textContent]`),
+      [true, ['2026-07-01 SMALL CNY 1'], '共 1 条'], '筛选后回到第 1 页、分页按筛选结果');
+    assert.deepEqual(await js('cfg.errors'), []);
   });
   await test('余额管理修改只改余额并带回原值，写入中禁止关闭；非法数字不提交；conflict 提示后重读', async () => {
     await setup();

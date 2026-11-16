@@ -20,6 +20,19 @@
 
 ## 未实施
 
+> B93–B97 已由在途分支 `chore/backlog-b93-admission-timeout-flake`、`feat/data-management-retention`、`feat/statement-export-template-update` 占用，本分支（`feat/template-import-naming`）从 B98 起编号。
+
+### B98（P2 · 未做）v3.2.18【导入模板】命名弹框与余额管理筛选实机 GUI 验收
+
+- **来源**：v3.2.18 `feat/template-import-naming`（[spec](../changes/v3.2.18/feat/template-import-naming/spec.md) §6、[TechDoc](../changes/v3.2.18/feat/template-import-naming/techdoc.md)）。界面只由渲染生命周期用例与布局截图覆盖
+- **影响**：以下内容未在打包版上用真实文件走通：
+  - 用真实网银样本走完【导入模板】→ 命名 → 映射 → 生成，核对 Channel 列、余额账单银行名称 / 所在地与种子文件名取自「银行渠道名-地区」
+  - 中文输入法（拼音组合）下的字符过滤
+  - 与已有小写或中文模板名并存时的重名提示
+  - 余额管理在真实种子文件（多账号、多币种、超过 200 条）下的搜索、筛选、分页，以及 100% / 125% / 150% 缩放下头部换行
+- **关闭条件**：Windows 打包版逐项走通；抽查新模板生成的明细与余额账单名称字段正确
+- **目标版本**：v3.2.18（暂定）
+
 ### B92（P2 · 未做）v3.2.17 新功能实机 GUI 检查与真实文件回归
 
 - **来源**：v3.2.17 发版（[release 记录](../changes/v3.2.17/release.md)）；本机开发版 GUI 受 BizOP 资源预检阻断，界面只由渲染生命周期用例与布局截图覆盖

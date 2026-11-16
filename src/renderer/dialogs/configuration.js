@@ -1642,6 +1642,106 @@
       return overlay;
     }
 
+    // v3.2.18【导入模板】命名（spec：changes/v3.2.18/feat/template-import-naming/spec.md）：
+    //   选中的文件识别为新模板后输入银行渠道名、地区，模板名 = 银行渠道名-地区。输入时只保留英文字母、数字和空格
+    //   （输入法组合结束后再过滤）；转大写、重名判断以 Main 为准。onSubmit 返回 { close, message }，
+    //   close 为 false 时弹框保留并提示，供改名重试。弹框以任何方式关闭且未成功提交时调用 onCancel。
+    const TEMPLATE_IMPORT_NAME_DISALLOWED = /[^A-Za-z0-9 ]+/g;
+
+    function sanitizeTemplateImportNameInput(input) {
+      const value = input.value;
+      const next = value.replace(TEMPLATE_IMPORT_NAME_DISALLOWED, '');
+      if (next === value) return;
+      const caret = typeof input.selectionStart === 'number' ? input.selectionStart : value.length;
+      const keptBeforeCaret = value.slice(0, caret).replace(TEMPLATE_IMPORT_NAME_DISALLOWED, '').length;
+      input.value = next;
+      input.setSelectionRange(keptBeforeCaret, keptBeforeCaret);
+    }
+
+    function createTemplateImportNameDialog({ sourceFileName = '', onSubmit, onCancel } = {}) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manual-balance-card template-import-name-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">导入模板${titleTipsHtml('模板名为「银行渠道名-地区」。只能输入英文字母、数字和空格，小写字母保存时自动转为大写。同一渠道的另一种格式，请在模板管理的渠道行点【导入子模板】。')}</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="manual-balance-form">
+          <label class="manual-balance-row">
+            <span class="manual-balance-label">模板文件</span>
+            <input class="mapping-text-input manual-balance-input" type="text" data-role="template-import-file" value="${escapeHtml(sourceFileName)}" disabled />
+          </label>
+          <label class="manual-balance-row">
+            <span class="manual-balance-label">银行渠道名</span>
+            <input class="mapping-text-input manual-balance-input" type="text" data-field="bankName" spellcheck="false" autocomplete="off" maxlength="60" />
+          </label>
+          <label class="manual-balance-row">
+            <span class="manual-balance-label">地区</span>
+            <input class="mapping-text-input manual-balance-input" type="text" data-field="region" spellcheck="false" autocomplete="off" maxlength="60" />
+          </label>
+        </div>
+        <div class="dialog-actions right">
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+          <button class="primary-btn small" type="button" data-action="confirm">确认</button>
+        </div>
+      `;
+
+      const bankInput = dialog.querySelector('[data-field="bankName"]');
+      const regionInput = dialog.querySelector('[data-field="region"]');
+      const writeScope = createDialogWriteScope(overlay, dialog);
+      let submitted = false;
+
+      [bankInput, regionInput].forEach((input) => {
+        input.addEventListener('input', (event) => {
+          if (!event.isComposing) sanitizeTemplateImportNameInput(input);
+        });
+        input.addEventListener('compositionend', () => sanitizeTemplateImportNameInput(input));
+        input.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' && !event.isComposing) submit();
+        });
+      });
+
+      async function submit() {
+        const missing = [[bankInput, '银行渠道名'], [regionInput, '地区']]
+          .filter(([input]) => !input.value.trim())
+          .map(([, label]) => label);
+        if (missing.length) {
+          pushAlert(overlay, () => createAlertDialog(escapeHtml(`请填写${missing.join('和')}`), { onConfirm: null }));
+          return;
+        }
+        const handle = writeScope.begin();
+        if (!handle) return;
+        let outcome;
+        try {
+          outcome = await onSubmit({ bankName: bankInput.value, region: regionInput.value });
+        } catch (error) {
+          outcome = { close: false, message: (error && error.message) || '导入模板失败' };
+        } finally { writeScope.finish(handle); }
+        if (!handle.isOpen()) return;
+        if (outcome && outcome.close === false) {
+          if (outcome.message) pushAlert(overlay, () => createAlertDialog(escapeHtml(outcome.message), { onConfirm: null }));
+          return;
+        }
+        submitted = true;
+        closeModal(overlay, { status: 'submitted' });
+      }
+
+      const cancel = () => closeModal(overlay, { status: 'cancelled', reason: 'cancel' });
+      dialog.querySelector('.icon-close').addEventListener('click', cancel);
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', cancel);
+      dialog.querySelector('[data-action="confirm"]').addEventListener('click', submit);
+      registerModal(overlay, {
+        onMount: () => { bankInput.focus(); },
+        onDispose: () => {
+          if (!submitted && typeof onCancel === 'function') onCancel();
+        }
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     // v3.2.15（§4.6、A6）：渠道重命名；渠道名决定输出身份，改名后按新名称的银行段读取种子与余额调整。
     function createChannelRenameDialog(channel) {
       const { setStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
@@ -6351,6 +6451,13 @@
           <label class="account-mapping-template-select-wrapper balance-seed-owner-wrapper">
             渠道 <select data-role="balance-seed-owner" aria-label="渠道"></select>
           </label>
+          <div class="balance-seed-filters">
+            <span class="balance-seed-filter-label">账户号</span>
+            <button class="new-account-currency-dropdown-btn balance-seed-account-btn" type="button" data-role="balance-seed-account" aria-label="账户号" aria-haspopup="listbox" aria-expanded="false">&nbsp;</button>
+            <label class="account-mapping-template-select-wrapper balance-seed-currency-wrapper">
+              币种 <select data-role="balance-seed-currency" aria-label="币种"></select>
+            </label>
+          </div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="balance-seed-hint" data-role="balance-seed-hint"></div>
@@ -6386,6 +6493,12 @@
       const tbody = dialog.querySelector('tbody');
       const pagerEl = dialog.querySelector('[data-role="balance-seed-pager"]');
       const pageEl = dialog.querySelector('[data-role="balance-seed-page"]');
+      const accountButton = dialog.querySelector('[data-role="balance-seed-account"]');
+      const currencySelect = dialog.querySelector('[data-role="balance-seed-currency"]');
+      const accountPanel = document.createElement('div');
+      accountPanel.className = 'new-account-currency-dropdown-panel balance-seed-account-panel';
+      accountPanel.setAttribute('role', 'listbox');
+      accountPanel.hidden = true;
       const ownerOptions = buildBalanceSeedOwnerOptions();
       const optionByKey = new Map([...ownerOptions.channels, ...ownerOptions.templates].map((option) => [option.key, option]));
       const state = {
@@ -6396,7 +6509,11 @@
         loading: false,
         loadError: '',
         editingKey: '',
-        requestId: 0
+        requestId: 0,
+        // v3.2.18：账户号 / 币种筛选，空串表示不筛选；只在渲染层过滤已读取的记录，不改 Main 的可见范围与顺序。
+        accountFilter: '',
+        currencyFilter: '',
+        accountQuery: ''
       };
 
       [['渠道', ownerOptions.channels], ['普通模板', ownerOptions.templates]].forEach(([label, options]) => {
@@ -6416,8 +6533,146 @@
 
       const writeScope = createDialogWriteScope(overlay, dialog);
 
+      // v3.2.18（spec：changes/v3.2.18/feat/template-import-naming/spec.md §3.2）：账户号 / 币种筛选。
+      function visibleRecords() {
+        return state.records.filter((record) => (!state.accountFilter || record.merchantId === state.accountFilter)
+          && (!state.currencyFilter || record.currency === state.currencyFilter));
+      }
+
+      function uniqueSorted(values) {
+        return Array.from(new Set(values)).sort((left, right) => left.localeCompare(right));
+      }
+
+      function accountOptions() {
+        return uniqueSorted(state.records.map((record) => record.merchantId));
+      }
+
+      function currencyOptions() {
+        if (!state.accountFilter) return [];
+        return uniqueSorted(state.records.filter((record) => record.merchantId === state.accountFilter).map((record) => record.currency));
+      }
+
+      // 重新读取后所选账户号 / 币种已不存在时回到空白。
+      function reconcileFilters() {
+        if (state.accountFilter && !accountOptions().includes(state.accountFilter)) {
+          state.accountFilter = '';
+        }
+        if (state.currencyFilter && !currencyOptions().includes(state.currencyFilter)) {
+          state.currencyFilter = '';
+        }
+      }
+
+      function renderFilters() {
+        accountButton.textContent = state.accountFilter || '\u00A0';
+        accountButton.title = state.accountFilter;
+        accountButton.disabled = !state.key;
+        const currencies = currencyOptions();
+        currencySelect.replaceChildren(...['', ...currencies].map((currency) => {
+          const option = document.createElement('option');
+          option.value = currency;
+          option.textContent = currency;
+          return option;
+        }));
+        currencySelect.value = state.currencyFilter;
+        currencySelect.disabled = !state.accountFilter;
+      }
+
+      function closeAccountPanel() {
+        if (accountPanel.hidden) return;
+        accountPanel.hidden = true;
+        accountPanel.replaceChildren();
+        accountButton.classList.remove('is-open');
+        accountButton.setAttribute('aria-expanded', 'false');
+      }
+
+      function renderAccountOptions(listHost) {
+        const query = state.accountQuery.trim().toLowerCase();
+        const matches = accountOptions().filter((merchantId) => !query || merchantId.toLowerCase().includes(query));
+        const entries = [{ value: '', label: '全部' }, ...matches.map((merchantId) => ({ value: merchantId, label: merchantId }))];
+        listHost.replaceChildren(...entries.map((entry) => {
+          const option = document.createElement('div');
+          option.className = 'new-account-currency-option balance-seed-account-option';
+          option.setAttribute('role', 'option');
+          option.dataset.value = entry.value;
+          option.setAttribute('aria-selected', String(entry.value === state.accountFilter));
+          option.innerHTML = `<span class="new-account-currency-option-text">${escapeHtml(entry.label)}</span>`;
+          option.addEventListener('click', () => selectAccount(entry.value));
+          return option;
+        }));
+        if (!matches.length) {
+          const empty = document.createElement('div');
+          empty.className = 'balance-seed-account-empty';
+          empty.textContent = '无匹配账户号';
+          listHost.appendChild(empty);
+        }
+      }
+
+      function positionAccountPanel() {
+        const buttonRect = accountButton.getBoundingClientRect();
+        const margin = 12;
+        accountPanel.style.position = 'fixed';
+        accountPanel.style.minWidth = `${Math.max(buttonRect.width, 220)}px`;
+        accountPanel.style.maxWidth = `${Math.max(220, Math.min(360, window.innerWidth - margin * 2))}px`;
+        accountPanel.style.visibility = 'hidden';
+        accountPanel.hidden = false;
+        const panelWidth = accountPanel.offsetWidth || Math.max(buttonRect.width, 220);
+        const panelHeight = accountPanel.offsetHeight || 280;
+        const left = Math.min(Math.max(margin, buttonRect.left), Math.max(margin, window.innerWidth - panelWidth - margin));
+        const top = buttonRect.bottom + 6 + panelHeight > window.innerHeight - margin
+          ? Math.max(margin, buttonRect.top - panelHeight - 6)
+          : buttonRect.bottom + 6;
+        accountPanel.style.left = `${left}px`;
+        accountPanel.style.top = `${top}px`;
+        accountPanel.style.visibility = 'visible';
+      }
+
+      function openAccountPanel() {
+        state.accountQuery = '';
+        const searchRow = document.createElement('div');
+        searchRow.className = 'new-account-currency-search-row';
+        const searchInput = document.createElement('input');
+        searchInput.className = 'new-account-currency-search-input';
+        searchInput.type = 'text';
+        searchInput.placeholder = '搜索账户号';
+        searchInput.spellcheck = false;
+        searchInput.setAttribute('aria-label', '搜索账户号');
+        searchInput.dataset.role = 'balance-seed-account-search';
+        const listHost = document.createElement('div');
+        listHost.className = 'new-account-currency-options-list balance-seed-account-options';
+        searchInput.addEventListener('input', () => {
+          state.accountQuery = searchInput.value;
+          renderAccountOptions(listHost);
+        });
+        searchInput.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter' || event.isComposing) return;
+          const first = listHost.querySelector('.balance-seed-account-option:not([data-value=""])');
+          if (first) selectAccount(first.dataset.value);
+        });
+        searchRow.appendChild(searchInput);
+        accountPanel.replaceChildren(searchRow, listHost);
+        renderAccountOptions(listHost);
+        accountButton.classList.add('is-open');
+        accountButton.setAttribute('aria-expanded', 'true');
+        positionAccountPanel();
+        searchInput.focus();
+      }
+
+      function applyFilterChange() {
+        state.page = 0;
+        state.editingKey = '';
+        renderRows();
+      }
+
+      function selectAccount(merchantId) {
+        closeAccountPanel();
+        if (merchantId === state.accountFilter) return;
+        state.accountFilter = merchantId;
+        state.currencyFilter = '';
+        applyFilterChange();
+      }
+
       function pageCount() {
-        return Math.max(1, Math.ceil(state.records.length / BALANCE_SEED_PAGE_LIMIT));
+        return Math.max(1, Math.ceil(visibleRecords().length / BALANCE_SEED_PAGE_LIMIT));
       }
 
       function renderHint() {
@@ -6435,7 +6690,7 @@
           return;
         }
         const fileName = state.owner ? state.owner.seedFileName : '';
-        hintEl.textContent = `共 ${state.records.length} 条`;
+        hintEl.textContent = `共 ${visibleRecords().length} 条`;
         tipsBubbleEl.textContent = `种子文件 balance-seeds/${fileName} 按名称的银行段存放，生成账单时按账户号与币种读取；修改后的余额按「人工录入」处理。`;
         tipsEl.hidden = false;
       }
@@ -6490,21 +6745,23 @@
       }
 
       function renderRows() {
+        const records = visibleRecords();
+        renderFilters();
         renderHint();
         tbody.innerHTML = '';
         const totalPages = pageCount();
         state.page = Math.min(state.page, totalPages - 1);
-        pagerEl.hidden = state.records.length <= BALANCE_SEED_PAGE_LIMIT;
+        pagerEl.hidden = records.length <= BALANCE_SEED_PAGE_LIMIT;
         pageEl.textContent = `第 ${state.page + 1} / ${totalPages} 页`;
         dialog.querySelector('[data-action="previous-page"]').disabled = state.page <= 0;
         dialog.querySelector('[data-action="next-page"]').disabled = state.page >= totalPages - 1;
         if (!state.key || state.loading || state.loadError) return;
-        if (!state.records.length) {
+        if (!records.length) {
           tbody.appendChild(createEmptyRow('暂无余额种子'));
           return;
         }
         const start = state.page * BALANCE_SEED_PAGE_LIMIT;
-        state.records.slice(start, start + BALANCE_SEED_PAGE_LIMIT)
+        records.slice(start, start + BALANCE_SEED_PAGE_LIMIT)
           .forEach((record) => tbody.appendChild(createSeedRow(record)));
       }
 
@@ -6531,9 +6788,12 @@
         if (result.status === 'success') {
           state.owner = result.owner || null;
           state.records = Array.isArray(result.records) ? result.records : [];
+          reconcileFilters();
         } else {
           state.owner = null;
           state.records = [];
+          state.accountFilter = '';
+          state.currencyFilter = '';
           state.loadError = result.message || '读取余额种子失败';
           setStatus(state.loadError, 'error', { errorReportReady: Boolean(result.errorReportReady) });
         }
@@ -6617,8 +6877,36 @@
 
       ownerSelect.addEventListener('change', () => {
         state.key = ownerSelect.value;
+        closeAccountPanel();
+        state.accountFilter = '';
+        state.currencyFilter = '';
         loadSeeds();
       });
+      accountButton.addEventListener('click', () => {
+        if (!accountPanel.hidden) {
+          closeAccountPanel();
+          return;
+        }
+        openAccountPanel();
+      });
+      currencySelect.addEventListener('change', () => {
+        state.currencyFilter = currencySelect.value;
+        applyFilterChange();
+      });
+      // 点击面板与按钮以外的位置关闭面板；Esc 只关面板，不关余额管理。
+      overlay.addEventListener('mousedown', (event) => {
+        if (!accountPanel.hidden && !accountPanel.contains(event.target) && !accountButton.contains(event.target)) {
+          closeAccountPanel();
+        }
+      });
+      const handleAccountPanelKeydown = (event) => {
+        if (event.key === 'Escape' && !accountPanel.hidden) {
+          event.stopPropagation();
+          closeAccountPanel();
+          accountButton.focus();
+        }
+      };
+      dialog.querySelector('.table-wrapper').addEventListener('scroll', closeAccountPanel);
       dialog.querySelector('[data-action="previous-page"]').addEventListener('click', () => {
         state.page = Math.max(0, state.page - 1);
         state.editingKey = '';
@@ -6633,12 +6921,20 @@
       dialog.querySelector('.icon-close').addEventListener('click', close);
       dialog.querySelector('[data-action="back"]').addEventListener('click', close);
       registerModal(overlay, {
-        onMount: () => { loadSeeds(); },
-        onDispose: () => { state.requestId += 1; }
+        onMount: () => {
+          document.addEventListener('keydown', handleAccountPanelKeydown, true);
+          loadSeeds();
+        },
+        onDispose: () => {
+          state.requestId += 1;
+          document.removeEventListener('keydown', handleAccountPanelKeydown, true);
+          closeAccountPanel();
+        }
       });
 
       renderRows();
       overlay.appendChild(dialog);
+      overlay.appendChild(accountPanel);
       return overlay;
     }
 
@@ -7284,7 +7580,7 @@
     //   带「库」读着别扭，且 gateway 既有文案为「网关对账单数据」（硬约束行为不变）→ 此处用不带「库」的表名。
     //   仅含三张可删表（与后端 LINKED_DELETE_ALLOWED_TABLES 同口径）；默认 gateway-bill。
 
-    return Object.freeze({ looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, createCurrencyBigAccountMappingDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog });
+    return Object.freeze({ looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createTemplateImportNameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, createCurrencyBigAccountMappingDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog });
   }
   global.ConfigurationDialogs = Object.freeze({ createConfigurationDialogs, buildBalanceSeedConfirmationRequest });
 })(window);

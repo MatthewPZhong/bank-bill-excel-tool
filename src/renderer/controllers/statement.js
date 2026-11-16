@@ -18,7 +18,7 @@
     function openModal(factory) { return live() ? ui.modalBridge.openModal(factory,{owner}) : {status:'stale'}; }
     const {createAlertDialog,createTemplateManagerDialog,createBigAccountSelectionDialog,createRememberOrderMismatchDialog,
       createExportScopeDialog,createMonthlyBalanceExportDialog,createManualBalanceSeedDialog,createAccountMappingDialog,createAccountMappingMigrationDialog,
-      createChannelAccountMappingConflictDialog}=ui;
+      createChannelAccountMappingConflictDialog,createTemplateImportNameDialog}=ui;
     const getStatementChannels=()=>typeof config.getStatementChannels==='function'?config.getStatementChannels():[];
     // v3.2.15（D8）：升级后渠道账户映射冲突在进入网银账单时提示一次；关闭后本次运行不再自动弹出，打开账户映射时仍会提示。
     let channelConflictPromptShown=false;
@@ -181,21 +181,49 @@ function applyStatementModeSideEffects() {
   }
 }
 
+// v3.2.18【导入模板】（spec：changes/v3.2.18/feat/template-import-naming/spec.md）：先选文件识别为新模板，
+// 再弹框输入银行渠道名、地区，模板名 = 银行渠道名-地区。名称类错误保留弹框改名重试；取消或弹框被关闭时丢弃待确认文件。
+const TEMPLATE_IMPORT_NAME_ERROR_CODES = new Set(['TEMPLATE_IMPORT_NAME_INVALID', 'TEMPLATE_NAME_DUPLICATED', 'TEMPLATE_NAME_CHANNEL_CONFLICT']);
+
 async function handleImportTemplate() {
   const version = generation;
-  const result = await api.templates.importTemplate();
+  const prepared = await api.templates.prepareImport();
 
-  if (result.status === 'cancelled') {
+  if (prepared.status === 'cancelled') {
     return;
   }
 
-  if (live(version)) setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
-    errorReportReady: Boolean(result.errorReportReady)
-  });
-
-  if (result.status === 'success') {
-    await refreshTemplates();
+  if (prepared.status !== 'ready') {
+    if (live(version)) setStatus(prepared.message, 'error', { errorReportReady: Boolean(prepared.errorReportReady) });
+    return;
   }
+
+  const { importToken, sourceFileName } = prepared;
+  const discard = () => { Promise.resolve(api.templates.discardImport(importToken)).catch(reportError); };
+  if (!live(version)) {
+    discard();
+    return;
+  }
+  const opened = openModal(() => createTemplateImportNameDialog({
+    sourceFileName,
+    onCancel: discard,
+    async onSubmit({ bankName, region }) {
+      const result = await api.templates.importTemplate({ importToken, bankName, region });
+      if (result.status !== 'success' && TEMPLATE_IMPORT_NAME_ERROR_CODES.has(result.errorCode)) {
+        return { close: false, message: result.message };
+      }
+      if (live(version)) setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
+        errorReportReady: Boolean(result.errorReportReady)
+      });
+      if (result.status === 'success') {
+        await refreshTemplates();
+      } else {
+        discard();
+      }
+      return { close: true };
+    }
+  }));
+  if (opened && opened.status === 'stale') discard();
 }
 
 function openChannelConflictDialog(channels, version = generation) {
