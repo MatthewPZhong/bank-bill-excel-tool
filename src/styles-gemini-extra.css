@@ -1872,15 +1872,17 @@ td .muted { color: var(--muted); }
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+/* v3.2.18 导入/导出与翻页移到设置底栏，表格下边界延伸到底栏上方 */
 .bank-accounts-table-wrap {
   flex: 1;
   min-height: 0;
-  margin: 0 24px;
+  margin: 0 24px 16px;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
 }
 .bank-accounts-table {
+  min-width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 12px;
@@ -1905,16 +1907,18 @@ td .muted { color: var(--muted); }
   color: var(--text);
 }
 .bank-accounts-table tbody tr:hover td { background: var(--row-hover, #edf1f6); }
-.bank-accounts-table .bank-accounts-row-number {
-  color: var(--dim);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
 .bank-accounts-empty {
   padding: 40px 16px;
   color: var(--muted);
   text-align: center;
   font-size: 13px;
+}
+/* 设置底栏里的账户管理槽：左侧导入/导出，右侧翻页条紧挨【返回】 */
+.app-settings-footer-accounts {
+  flex: 1;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 12px;
 }
 .bank-accounts-actions {
   flex: 0 0 auto;
@@ -1938,6 +1942,18 @@ td .muted { color: var(--muted); }
   font-size: 12px;
 }
 .bank-accounts-pager[hidden] { display: none; }
+/* 窄宽度（如 1080 宽 150% 缩放）底栏放不下完整翻页条：按钮改为 ‹ ›，隐藏总行数 */
+@media (max-width: 900px) {
+  .app-settings-footer-accounts .bank-accounts-pager { gap: 6px; }
+  .app-settings-footer-accounts .bank-accounts-pager .small {
+    min-width: 34px;
+    padding-inline: 0;
+  }
+  .app-settings-footer-accounts .bank-accounts-pager-label,
+  .app-settings-footer-accounts .bank-accounts-pager-total { display: none; }
+  .app-settings-footer-accounts [data-action="previous-page"]::before { content: '‹'; }
+  .app-settings-footer-accounts [data-action="next-page"]::before { content: '›'; }
+}
 .bank-accounts-confirm-detail {
   margin-top: 8px;
   color: var(--muted);

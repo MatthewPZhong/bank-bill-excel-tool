@@ -5,6 +5,10 @@
   //   视图由设置弹窗挂载到自己的 pane，只管理自身的读取代次、子弹窗与订阅；数据与原文件由 Main 的账户管理服务持有。
   const PAGE_LIMIT = 200;
   const MAX_DETAIL_LINES = 12;
+  // 表格只显示这些列（按此顺序）；当前识别结构没有的列跳过。【导出】仍另存原表全部列。
+  const DISPLAY_HEADERS = Object.freeze([
+    '银行/通道简称', '开户地', '币种', '银行账号', '系统账号', '账户性质', '账户状态', '是否参与对账'
+  ]);
 
   const pageCount = (total) => Math.max(1, Math.ceil((Number(total) || 0) / PAGE_LIMIT));
 
@@ -18,7 +22,8 @@
     const { createConfirmDialog } = ui;
     const escapeHtml = (value) => ui.escapeHtml(value === null || value === undefined ? '' : value);
 
-    function mountBankAccounts(pane, { getParentHandle }) {
+    // footer：设置底栏里留给账户管理的槽（导入/导出与翻页放在这里，与【返回】同一行）；未提供时放在 pane 末尾。
+    function mountBankAccounts(pane, { getParentHandle, footer = null }) {
       const state = {
         overview: null,
         list: null,
@@ -44,29 +49,31 @@
         </header>
         <div class="template-center-feedback bank-accounts-feedback" data-role="bank-accounts-feedback" role="status" aria-live="polite" hidden></div>
         <div class="bank-accounts-summary" data-role="bank-accounts-summary">切换到账户管理后加载</div>
-        <div class="bank-accounts-table-wrap" data-role="bank-accounts-table"></div>
-        <div class="bank-accounts-actions">
-          <div class="bank-accounts-actions-main">
-            <button class="primary-btn small" type="button" data-action="import-bank-accounts">导入银行账户信息</button>
-            <button class="secondary-btn small" type="button" data-action="export-bank-accounts" disabled>导出</button>
-          </div>
-          <div class="bank-accounts-pager" data-role="bank-accounts-pager" hidden>
-            <button class="secondary-btn small" type="button" data-action="previous-page">上一页</button>
-            <span data-role="bank-accounts-page"></span>
-            <button class="secondary-btn small" type="button" data-action="next-page">下一页</button>
-          </div>
+        <div class="bank-accounts-table-wrap" data-role="bank-accounts-table"></div>`;
+
+      const actionsEl = footer || pane.appendChild(document.createElement('div'));
+      if (!footer) actionsEl.className = 'bank-accounts-actions';
+      actionsEl.innerHTML = `
+        <div class="bank-accounts-actions-main">
+          <button class="primary-btn small" type="button" data-action="import-bank-accounts">导入银行账户信息</button>
+          <button class="secondary-btn small" type="button" data-action="export-bank-accounts" disabled>导出</button>
+        </div>
+        <div class="bank-accounts-pager" data-role="bank-accounts-pager" hidden>
+          <button class="secondary-btn small" type="button" data-action="previous-page" aria-label="上一页" title="上一页"><span class="bank-accounts-pager-label">上一页</span></button>
+          <span data-role="bank-accounts-page"></span>
+          <button class="secondary-btn small" type="button" data-action="next-page" aria-label="下一页" title="下一页"><span class="bank-accounts-pager-label">下一页</span></button>
         </div>`;
 
       const channelSelect = pane.querySelector('[data-role="bank-accounts-channel"]');
       const feedbackEl = pane.querySelector('[data-role="bank-accounts-feedback"]');
       const summaryEl = pane.querySelector('[data-role="bank-accounts-summary"]');
       const tableEl = pane.querySelector('[data-role="bank-accounts-table"]');
-      const importButton = pane.querySelector('[data-action="import-bank-accounts"]');
-      const exportButton = pane.querySelector('[data-action="export-bank-accounts"]');
-      const pagerEl = pane.querySelector('[data-role="bank-accounts-pager"]');
-      const pageEl = pane.querySelector('[data-role="bank-accounts-page"]');
-      const previousButton = pane.querySelector('[data-action="previous-page"]');
-      const nextButton = pane.querySelector('[data-action="next-page"]');
+      const importButton = actionsEl.querySelector('[data-action="import-bank-accounts"]');
+      const exportButton = actionsEl.querySelector('[data-action="export-bank-accounts"]');
+      const pagerEl = actionsEl.querySelector('[data-role="bank-accounts-pager"]');
+      const pageEl = actionsEl.querySelector('[data-role="bank-accounts-page"]');
+      const previousButton = actionsEl.querySelector('[data-action="previous-page"]');
+      const nextButton = actionsEl.querySelector('[data-action="next-page"]');
 
       const alive = () => !state.destroyed && pane.isConnected;
 
@@ -143,15 +150,21 @@
           pagerEl.hidden = true;
           return;
         }
-        const head = `<tr><th class="bank-accounts-row-number">行号</th>${list.headers
-          .map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr>`;
-        const body = list.rows.map((row) => `<tr><td class="bank-accounts-row-number">${escapeHtml(row.excelRowNumber)}</td>${list.headers
-          .map((_header, index) => `<td>${escapeHtml(row.values[index] ?? '')}</td>`).join('')}</tr>`).join('');
+        const columns = DISPLAY_HEADERS
+          .map((header) => ({ header, index: list.headers.indexOf(header) }))
+          .filter((column) => column.index >= 0);
+        const head = `<tr>${columns.map((column) => `<th>${escapeHtml(column.header)}</th>`).join('')}</tr>`;
+        const body = list.rows.map((row) => `<tr>${columns
+          .map((column) => `<td>${escapeHtml(row.values[column.index] ?? '')}</td>`).join('')}</tr>`).join('');
         tableEl.innerHTML = `<table class="bank-accounts-table" aria-labelledby="bankAccountsHeading"><thead>${head}</thead><tbody>${body}</tbody></table>`;
         tableEl.scrollTop = 0;
         const pages = pageCount(list.total);
         pagerEl.hidden = pages <= 1;
-        pageEl.textContent = `第 ${state.page + 1} / ${pages} 页（共 ${list.total} 行）`;
+        // 窄宽度下底栏只显示页码（总行数藏起，完整文字见悬停提示）。
+        const pageText = `第 ${state.page + 1} / ${pages} 页`;
+        const totalText = `（共 ${list.total} 行）`;
+        pageEl.innerHTML = `${escapeHtml(pageText)}<span class="bank-accounts-pager-total">${escapeHtml(totalText)}</span>`;
+        pageEl.title = pageText + totalText;
         syncPager();
       }
 
@@ -371,6 +384,7 @@
           state.overviewRequestId += 1;
           state.listRequestId += 1;
           if (typeof unsubscribe === 'function') unsubscribe();
+          if (footer) footer.textContent = '';
         }
       });
     }

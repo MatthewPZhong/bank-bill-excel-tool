@@ -528,6 +528,7 @@ function createAppUpdateSettingsDialog(options = {}) {
         ${bankAccountsEnabled ? '<section id="bankAccountsPane" class="app-settings-pane bank-accounts-pane" data-pane="accounts" aria-labelledby="bankAccountsHeading" hidden></section>' : ''}
 
         <footer class="dialog-actions right app-settings-footer">
+          ${bankAccountsEnabled ? '<div class="app-settings-footer-group app-settings-footer-accounts" data-footer="accounts" hidden></div>' : ''}
           <div class="app-settings-footer-group" data-footer="update">
             <button class="secondary-btn small" type="button" data-action="check-update">立即检查</button>
             <button class="primary-btn small" type="button" data-action="restart-update" hidden>立即重启升级</button>
@@ -551,6 +552,7 @@ function createAppUpdateSettingsDialog(options = {}) {
   const archiveBrowser = dialog.querySelector('[data-archive-view="browser"]');
   const archiveSettingsView = dialog.querySelector('[data-archive-view="settings"]');
   const updateFooter = dialog.querySelector('[data-footer="update"]');
+  const accountsFooter = dialog.querySelector('[data-footer="accounts"]');
   const archiveFeedback = dialog.querySelector('[data-role="archive-feedback"]');
   const batchList = dialog.querySelector('[data-role="archive-batch-list"]');
   const batchCount = dialog.querySelector('[data-role="archive-batch-count"]');
@@ -1296,6 +1298,7 @@ function createAppUpdateSettingsDialog(options = {}) {
     if (templatePane) templatePane.hidden = archiveState.activeTab !== 'templates';
     if (accountsPane) accountsPane.hidden = archiveState.activeTab !== 'accounts';
     updateFooter.hidden = archiveState.activeTab !== 'update';
+    if (accountsFooter) accountsFooter.hidden = archiveState.activeTab !== 'accounts';
     if (archiveState.activeTab === 'templates') {
       if (!wasTemplates) templateFilesView?.enter();
     } else if (wasTemplates) {
@@ -1687,7 +1690,8 @@ function createAppUpdateSettingsDialog(options = {}) {
         scope.onDispose(() => templateFilesView?.destroy());
       }
       if (accountsPane) {
-        bankAccountsView = mountBankAccounts(accountsPane, { getParentHandle: () => settingsHandle });
+        // 账户管理的导入/导出与翻页放在设置底栏，与【返回】同一行；底栏槽只在账户管理页显示。
+        bankAccountsView = mountBankAccounts(accountsPane, { getParentHandle: () => settingsHandle, footer: accountsFooter });
         scope.onDispose(() => bankAccountsView?.destroy());
       }
   const archiveApi = archiveCenterApi || api.archiveCenter;
