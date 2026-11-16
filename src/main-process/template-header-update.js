@@ -44,8 +44,18 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION,
     BILL_SPLIT_MERGE_MAPPING_FIELD,
     BILL_SPLIT_MERGE_ENABLED_OPTION,
-    REUSE_MODULE_MAPPING_FIELD
+    REUSE_MODULE_MAPPING_FIELD,
+    SIGNED_AMOUNT_MAPPING_FIELD,
+    AMOUNT_BASED_NAME_MAPPING_FIELD,
+    AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
   } = constants;
+  // 生成器把这三个高级字段的映射值整体当作一个列名读取（file-service.js normalizeCell(amountMappingRules.*)），
+  // 多字段配置会被拼成「A,B」这一列名，而不是分别读取 A、B。
+  const scalarSourceTargetFields = new Set([
+    SIGNED_AMOUNT_MAPPING_FIELD,
+    AMOUNT_BASED_NAME_MAPPING_FIELD,
+    AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
+  ].filter(Boolean));
   const switchTargetFields = new Set([
     AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD,
     BILL_SPLIT_MERGE_MAPPING_FIELD,
@@ -77,12 +87,22 @@ function createTemplateHeaderUpdateTools(constants = {}) {
   //   非空时优先于 mappedField。展开后的 token 即使与模式名称、选项文字同名，也按源列读取。
   // - MerchantId 只在第一个 token 为按币种取大账号标记时整体走回填（其余 token 不读）；标记在后续位置时按源列读取。
   // - Balance 只在整条映射是单个「无」「通过发生额计算」时为选项；拼接中的同名 token 按源列读取。
+  // - 按正负号拆分的发生额、根据发生额做映射的户名 / 账户号：整体作为一个列名读取（多字段时为逗号拼接的列名）。
   // - 固定值（__FIXED__: 前缀）不读源列。
   function mappingSourceFields(target, mapping) {
     const mappedField = normalizeCell(mapping && mapping.mappedField);
     if (mappedField === FEATURE_FILTER_MAPPING_FIELD) return [];
     const values = normalizeMappedFields(mapping);
     const multi = mappedField === CONCAT_FIELDS_MAPPING_FIELD || values.length > 1;
+    if (scalarSourceTargetFields.has(target)) {
+      // 与 buildMappedFieldLookup 得到的取值一致，再按生成器的 normalizeCell(String(value)) 得到实际读取的列名。
+      const rawFields = Array.isArray(mapping && mapping.mappedFields) ? mapping.mappedFields : [];
+      const lookupValue = mappedField === CONCAT_FIELDS_MAPPING_FIELD
+        ? (rawFields.length ? rawFields : values)
+        : (values.length > 1 ? values : (values[0] || ''));
+      const field = normalizeCell(String(lookupValue));
+      return isRuleSourceValue(field) ? [field] : [];
+    }
     const tokens = multi ? values : values.slice(0, 1);
     if (target === 'MerchantId' && tokens[0] === MERCHANT_ID_CURRENCY_ONLY_MARKER) return [];
     if (target === 'Balance' && !multi

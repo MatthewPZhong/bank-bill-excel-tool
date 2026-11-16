@@ -1767,4 +1767,23 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(await js('cfg.errors'), []);
   });
 
+  // 回归（第四轮 review P2）：更新已成功、模板列表刷新失败时，结果页仍显示「已更新」、失效映射与【修改映射关系】，返回前重新读取列表。
+  await test('模板【更新模板】成功后刷新列表失败：保留成功结果，返回时重新读取', async () => {
+    await setup();
+    await js(`cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;
+      cfg.next.headerPreview={status:'success',templateId:1,templateName:'模板 A',sourceFileName:'a.xlsx',expectedHeaders:['日期'],headers:['日期','金额'],
+        diff:{identical:false,added:['金额'],removed:[],orderChanged:false},affectedMappings:[],activeStaleCount:0};
+      cfg.top().querySelector('[data-action="update-headers"]').click();void 0;`); await tick();
+    await js(`cfg.next.headerUpdate={status:'success',message:'模板「模板 A」已更新，有 1 处映射引用的字段已删除，修改映射关系前无法用该模板生成账单',staleMappings:['Credit Amount ← 金额'],activeStaleCount:1};
+      cfg.failRead=cfg.defer();cfg.next.refresh=cfg.failRead;cfg.top().querySelector('[data-action="submit"]').click();cfg.failRead.reject(new Error('列表读取失败'));void 0;`); await tick();
+    const view = await js(`(() => {const card=cfg.top().querySelector('.template-header-update-result-card');return {
+      message: card.querySelector('[data-role="message"]').textContent, note: Boolean(card.querySelector('[data-role="refresh-failed"]')),
+      stale: [...card.querySelectorAll('li')].map(item=>item.textContent), buttons: [...card.querySelectorAll('.dialog-actions button')].map(button=>button.textContent)};})()`);
+    assert.deepEqual(view, { message: '模板「模板 A」已更新，有 1 处映射引用的字段已删除，修改映射关系前无法用该模板生成账单', note: true,
+      stale: ['Credit Amount ← 金额'], buttons: ['修改映射关系', '返回'] });
+    await js(`cfg.top().querySelector('[data-action="back"]').click();`); await tick();
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='refresh').length`), 2);
+    assert.match(await js('cfg.top().textContent'), /模板管理/);
+  });
+
 };

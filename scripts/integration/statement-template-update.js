@@ -11,6 +11,8 @@
 //   ⑨ 旧版方向的映射拒绝更新（需先在【修改】中保存一次），不写库
 //   ⑩ 行为对照：逐列删除源列，用真实生成结果是否变化判定生成器实际读取的列，与引用收集逐列一致
 //      （拼接中与标记 / 选项 / 模式同名的列、单元素 mappedFields、非 Balance 的「无」）；拆分映射保存校验拒绝失效的拼接字段
+//   ⑪ 按正负号拆分的发生额多字段配置：生成器读取拼接列名「A,B」，删除该列后生成前拦截；表头写库后模板库同步失败仍报告已更新
+//   ⑫ 模板包覆盖已有模板时按包里的表头校验：更新后的模板交接到仍是旧表头的另一台电脑，新字段映射不被误判
 //   UI 由 renderer lifecycle 覆盖；本脚本验证数据与文件在整条链路上的结果。
 //
 // 用法：node scripts/integration/statement-template-update.js
@@ -102,6 +104,7 @@ const CONSTANTS = loadMainConstants([
   'AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD', 'AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION',
   'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
   'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS', 'FILENAME_MAPPING_TEMPLATE_ID', 'MISSING_ENUM_MESSAGE',
+  'SIGNED_AMOUNT_MAPPING_FIELD',
   'LEGACY_ORIENTED_MAPPINGS_MESSAGE'
 ]);
 
@@ -156,7 +159,8 @@ function createMain(database, spies) {
     'collectStaleTemplateFieldReferences',
     'prepareTemplateHeaderUpdate',
     'applyTemplateHeaderUpdate',
-    'isLegacyOrientedTemplateMappings'
+    'isLegacyOrientedTemplateMappings',
+    'buildBundleImportDraftTemplate'
   ], {
     ...CONSTANTS,
     templateHeaderUpdateTools: createTemplateHeaderUpdateTools(CONSTANTS),
@@ -185,7 +189,10 @@ function createMain(database, spies) {
     createErrorResult: ({ step, message, errorCode, context }) => ({
       status: 'error', step, message, errorCode, context, errorReportReady: true
     }),
-    syncTemplateLibraryFile: () => { spies.librarySyncs += 1; },
+    syncTemplateLibraryFile: () => {
+      spies.librarySyncs += 1;
+      if (spies.failLibrarySync) throw new Error('EACCES: 模板库文件被占用');
+    },
     clearLastErrorReport: () => {},
     appendActivityLogEntry: (entry) => { spies.activity.push(entry); },
     buildTemplateSummary: (template) => template
@@ -509,6 +516,47 @@ async function run() {
     assertEq(main.validateBillSplitMappingsPayload([{ templateField: 'Remark', ...concat([CONSTANTS.CONCAT_FIELDS_MAPPING_FIELD]) }],
       { headers: [CONSTANTS.CONCAT_FIELDS_MAPPING_FIELD] }).map((item) => item.mappedFields), [[CONSTANTS.CONCAT_FIELDS_MAPPING_FIELD]],
     '⑩ 拆分映射保存：该列存在时照常保存');
+
+    // ⑪ 按正负号拆分的发生额：多字段配置被生成器当作一个拼接列名读取
+    const signedHeaders = ['交易日期', 'A', 'B', 'A,B', '账号', '币种'];
+    const signedTemplate = database.upsertTemplate({ name: '交通银行-南京', sourceFileName: 'bocom.xlsx', headers: signedHeaders });
+    {
+      const rowsForSave = mappingsFor({ 'Credit Amount': '', 'Debit Amount': '', Remark: '' })
+        .concat([{ templateField: CONSTANTS.SIGNED_AMOUNT_MAPPING_FIELD, mappedField: 'A', mappedFields: ['A', 'B'], customValue: '' }]);
+      const validated = main.validateTemplateConfiguration({ template: database.getTemplate(signedTemplate.id), mappings: rowsForSave, enumValues: ENUM_VALUES });
+      database.saveMappings(signedTemplate.id, validated.mappings, [], [], undefined, null, {});
+    }
+    const signedSourceOld = path.join(dir, 'signed-old.xlsx');
+    writeWorkbook(signedSourceOld, signedHeaders, [['2026-11-11', '1', '2', '75', 'ACC4', 'USD']]);
+    assertEq(pickColumns(generate(main, database, signedTemplate.id, signedSourceOld), ['Credit Amount', 'Debit Amount']), [['75', '']],
+      '⑪ 多字段配置下生成器读取拼接列名「A,B」');
+    const signedNewHeaders = ['交易日期', 'A', 'B', '账号', '币种'];
+    spies.failLibrarySync = true;
+    const signedApplied = main.applyTemplateHeaderUpdate({ templateId: signedTemplate.id, expectedHeaders: signedHeaders, headers: signedNewHeaders, sourceFileName: 'signed-new.xlsx' });
+    spies.failLibrarySync = false;
+    assertEq([signedApplied.status, signedApplied.librarySyncFailed, signedApplied.staleMappings], ['success', true, [`${CONSTANTS.SIGNED_AMOUNT_MAPPING_FIELD} ← A,B`]],
+      '⑪ 模板库同步失败时仍报告已更新，并列出失效映射');
+    assertTrue(/模板库文件同步失败/.test(signedApplied.message), '⑪ 成功提示单独说明模板库同步失败');
+    assertEq(database.getTemplate(signedTemplate.id).headers, signedNewHeaders, '⑪ 表头已写入主库');
+    assertTrue(spies.activity.some((entry) => entry.level === 'warn' && entry.message === '更新模板表头后同步模板库文件失败'), '⑪ 活动日志记录同步失败');
+    const signedSourceNew = path.join(dir, 'signed-new-source.xlsx');
+    writeWorkbook(signedSourceNew, signedNewHeaders, [['2026-11-12', '1', '2', 'ACC4', 'USD']]);
+    assertThrows(() => generate(main, database, signedTemplate.id, signedSourceNew),
+      (error) => error.code === 'TEMPLATE_MAPPING_FIELD_MISSING' && /映射字段不存在：A,B，/.test(error.message),
+      '⑪ 删除拼接列名后生成前拦截，不静默丢失发生额');
+
+    // ⑫ 模板包覆盖已有模板：按包里的（更新后）表头校验
+    const handoffExisting = database.getTemplate(template.id);
+    const handoffEntry = { templateKey: handoffExisting.templateKey, name: handoffExisting.name, sourceFileName: 'x.xlsx', headers: OLD_HEADERS.concat(['新列']) };
+    const handoffDraft = main.buildBundleImportDraftTemplate(handoffEntry, { ...handoffExisting, headers: OLD_HEADERS });
+    assertEq([handoffDraft.id, handoffDraft.headers], [handoffExisting.id, handoffEntry.headers], '⑫ 覆盖已有模板时草稿沿用模板身份、采用包里的表头');
+    const handoffValidated = main.validateTemplateConfiguration({
+      template: handoffDraft,
+      mappings: main.normalizeMappingRows({ template: handoffDraft, mappings: mappingsFor({ Remark: '新列' }), enumValues: ENUM_VALUES }),
+      enumValues: ENUM_VALUES
+    });
+    assertEq(handoffValidated.mappings.find((item) => item.templateField === 'Remark').mappedField, '新列', '⑫ 引用新字段的映射按包里的表头通过校验');
+    assertEq(main.buildBundleImportDraftTemplate(handoffEntry, null).headers, handoffEntry.headers, '⑫ 新建模板时草稿采用包里的表头');
 
     // 模板已删除
     database.deleteTemplate(other.id);

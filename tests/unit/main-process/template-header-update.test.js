@@ -25,7 +25,10 @@ const CONSTANTS = Object.freeze({
   AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION: '是',
   BILL_SPLIT_MERGE_MAPPING_FIELD: '是否拆分/合并明细账单',
   BILL_SPLIT_MERGE_ENABLED_OPTION: '是',
-  REUSE_MODULE_MAPPING_FIELD: '复用模块字段的映射关系'
+  REUSE_MODULE_MAPPING_FIELD: '复用模块字段的映射关系',
+  SIGNED_AMOUNT_MAPPING_FIELD: '按正负号拆分的发生额',
+  AMOUNT_BASED_NAME_MAPPING_FIELD: '根据发生额做映射的户名',
+  AMOUNT_BASED_ACCOUNT_MAPPING_FIELD: '根据发生额做映射的账户号'
 });
 const tools = createTemplateHeaderUpdateTools(CONSTANTS);
 const mapping = (templateField, mappedField, mappedFields = []) => ({ templateField, mappedField, mappedFields });
@@ -124,6 +127,21 @@ test('collect：MerchantId 标记与 Balance 选项只在生成器视为特殊�
     mappings: [mapping('是否拆分/合并明细账单', '是'), mapping('复用模块字段的映射关系', '否')],
     billSplitMappings: [mapping('MerchantId', '需要拼接字段', ['账号前缀', MERCHANT_ID_CURRENCY_ONLY_MARKER])]
   }).map((item) => `${item.area}:${item.field}`), ['bill-split-mapping:账号前缀', `bill-split-mapping:${MERCHANT_ID_CURRENCY_ONLY_MARKER}`]);
+});
+
+// 回归（第四轮 review P1）：按正负号拆分的发生额、根据发生额做映射的户名 / 账户号被生成器整体当作一个列名读取。
+test('collect：高级金额字段的多字段配置按生成器读取的拼接列名计入', () => {
+  const fields = (mappings) => tools.collectTemplateFieldReferences({ mappings }).map((item) => `${item.target}<-${item.field}`);
+  assert.deepEqual(fields([
+    mapping('按正负号拆分的发生额', 'A', ['A', 'B']),
+    mapping('根据发生额做映射的户名', '户名'),
+    mapping('根据发生额做映射的账户号', '需要拼接字段', ['账号1', '账号2'])
+  ]), ['按正负号拆分的发生额<-A,B', '根据发生额做映射的户名<-户名', '根据发生额做映射的账户号<-账号1,账号2']);
+  assert.throws(
+    () => tools.assertTemplateFieldReferencesAvailable({ name: 'T', headers: ['A', 'B'] }, { mappings: [mapping('按正负号拆分的发生额', 'A', ['A', 'B'])] }),
+    (error) => /映射字段不存在：A,B，/.test(error.message)
+  );
+  assert.deepEqual(fields([mapping('按正负号拆分的发生额', '__FIXED__:1')]), []);
 });
 
 // 回归（review P2）：与生成器 normalizeMappedFields 一致，单元素 mappedFields 优先于 mappedField。

@@ -1827,7 +1827,10 @@ const templateHeaderUpdateTools = createTemplateHeaderUpdateTools({
   AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION,
   BILL_SPLIT_MERGE_MAPPING_FIELD,
   BILL_SPLIT_MERGE_ENABLED_OPTION,
-  REUSE_MODULE_MAPPING_FIELD
+  REUSE_MODULE_MAPPING_FIELD,
+  SIGNED_AMOUNT_MAPPING_FIELD,
+  AMOUNT_BASED_NAME_MAPPING_FIELD,
+  AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
 });
 const BACKGROUND_IMAGE_LIMITS = Object.freeze({
   maxSizeBytes: 5 * 1024 * 1024,
@@ -10095,15 +10098,7 @@ function registerTemplateHandlers() {
             return;
           }
 
-          const draftTemplate = existingTemplate || {
-            id: 0,
-            templateKey: entry.templateKey,
-            name: entry.name,
-            sourceFileName: entry.sourceFileName,
-            headers: entry.headers,
-            createdAt: '',
-            updatedAt: ''
-          };
+          const draftTemplate = buildBundleImportDraftTemplate(entry, existingTemplate);
           const validated = validateTemplateConfiguration({
             template: draftTemplate,
             mappings: normalizeMappingRows({
@@ -13524,6 +13519,23 @@ function statementImportSessionForInvocation(prepared, templateId, templateName)
 }
 
 // v1.5.2：检查表头是否与已有模板重复（排除自身 excludeId）
+// 模板包导入：校验用的模板草稿。覆盖已有模板时随后会写入包里的表头，校验也必须按包里的表头进行；
+// v3.2.18 起（模板【更新】后交接给其他电脑的场景）不再沿用本机旧表头，避免新字段映射被误判为不存在而整条跳过。
+function buildBundleImportDraftTemplate(entry, existingTemplate) {
+  if (existingTemplate) {
+    return { ...existingTemplate, headers: entry.headers };
+  }
+  return {
+    id: 0,
+    templateKey: entry.templateKey,
+    name: entry.name,
+    sourceFileName: entry.sourceFileName,
+    headers: entry.headers,
+    createdAt: '',
+    updatedAt: ''
+  };
+}
+
 // v3.2.18 模板管理【更新】：模板配置 → 引用收集输入（与 buildStatementGenerationConfig 拦截同一口径）
 function buildTemplateFieldReferenceInput(templateConfig) {
   return {
@@ -13673,7 +13685,18 @@ function applyTemplateHeaderUpdate(payload = {}) {
     }
     throw error;
   }
-  syncTemplateLibraryFile();
+  // 表头已写入主库：之后的模板库文件同步失败不影响更新结果（启动和下次修改模板时会重新同步），单独提示。
+  let librarySyncFailed = false;
+  try {
+    syncTemplateLibraryFile();
+  } catch (error) {
+    librarySyncFailed = true;
+    appendActivityLogEntry({
+      level: 'warn',
+      message: '更新模板表头后同步模板库文件失败',
+      details: [`模板名：${template.name}`, `原因：${error && error.message ? error.message : String(error)}`]
+    });
+  }
   clearLastErrorReport();
 
   const staleReferences = collectStaleTemplateFieldReferences(templateId, updatedTemplate.headers);
@@ -13692,15 +13715,17 @@ function applyTemplateHeaderUpdate(payload = {}) {
       '映射、大账号、固定值、字段筛选与拆分规则均保留'
     ]
   });
+  const baseMessage = activeStaleCount > 0
+    ? `模板「${template.name}」已更新，有 ${activeStaleCount} 处映射引用的字段已删除，修改映射关系前无法用该模板生成账单`
+    : `模板「${template.name}」已更新，映射关系已保留`;
   return {
     status: 'success',
-    message: activeStaleCount > 0
-      ? `模板「${template.name}」已更新，有 ${activeStaleCount} 处映射引用的字段已删除，修改映射关系前无法用该模板生成账单`
-      : `模板「${template.name}」已更新，映射关系已保留`,
+    message: librarySyncFailed ? `${baseMessage}；模板库文件同步失败，下次启动或修改模板时会重新同步` : baseMessage,
     template: buildTemplateSummary(updatedTemplate),
     diff,
     staleMappings,
-    activeStaleCount
+    activeStaleCount,
+    librarySyncFailed
   };
 }
 

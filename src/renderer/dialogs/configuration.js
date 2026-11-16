@@ -3630,11 +3630,19 @@
           setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
             errorReportReady: Boolean(result.errorReportReady)
           });
-          if (result.status === 'success') await refreshTemplates();
         } catch (error) {
           result = { status: 'error', message: error.message || '模板更新失败' };
           setStatus(result.message, 'error');
-        } finally { writeScope.finish(handle); }
+        }
+        // 更新已成功时，列表刷新失败不改变「已更新」的结果（失效映射与【修改映射关系】入口保留），只单独提示。
+        if (result.status === 'success') {
+          try {
+            await refreshTemplates();
+          } catch (_error) {
+            result = { ...result, refreshFailed: true };
+          }
+        }
+        writeScope.finish(handle);
         if (!writeScope.isCurrent(handle)) return;
         replaceModal(handle, () => createTemplateHeaderUpdateResultDialog(result, ctx));
       });
@@ -3649,11 +3657,14 @@
       const dialog = document.createElement('div');
       const succeeded = result?.status === 'success';
       const staleMappings = succeeded && Array.isArray(result.staleMappings) ? result.staleMappings : [];
+      // 失败或成功后列表刷新失败时，返回前需重新读取模板列表。
+      const needsRefresh = !succeeded || Boolean(result?.refreshFailed);
       dialog.className = 'modal-card alert-card template-header-update-result-card';
       dialog.innerHTML = `
         <div class="alert-body">
           <div class="alert-message">
             <div data-role="message">${escapeHtml(result?.message || (succeeded ? '模板已更新' : '模板更新失败'))}</div>
+            ${succeeded && result.refreshFailed ? '<div class="template-header-update-result-label" data-role="refresh-failed">模板列表刷新失败，返回时会重新读取。</div>' : ''}
             ${staleMappings.length ? `<div class="template-header-update-result-label">引用已删除字段的映射（${staleMappings.length}）：</div>
               <ul class="template-header-update-mappings">${staleMappings.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>` : ''}
           </div>
@@ -3669,7 +3680,7 @@
         const self = modalBridge.host.getHandle(overlay);
         if (opening || !self?.isTop()) return;
         // 失败时（如确认期间模板被删除或修改）模板列表可能已过期，先重新读取再返回；成功时提交后已刷新。
-        if (!succeeded) {
+        if (needsRefresh) {
           opening = true;
           let refreshError = null;
           try {
