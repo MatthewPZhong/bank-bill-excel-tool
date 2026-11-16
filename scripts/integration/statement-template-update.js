@@ -9,6 +9,8 @@
 //   ⑦ 引用收集与真实生成 lookup（buildMappedFieldLookup）逐目标字段一致：拼接、单元素 mappedFields、与选项同名的列名
 //   ⑧ 与选项或模式同名的真实列名（如「自己输入」、拼接中的「字段筛选特征值」）合法保存后被更新删除，生成前同样拦截
 //   ⑨ 旧版方向的映射拒绝更新（需先在【修改】中保存一次），不写库
+//   ⑩ 行为对照：逐列删除源列，用真实生成结果是否变化判定生成器实际读取的列，与引用收集逐列一致
+//      （拼接中与标记 / 选项 / 模式同名的列、单元素 mappedFields、非 Balance 的「无」）；拆分映射保存校验拒绝失效的拼接字段
 //   UI 由 renderer lifecycle 覆盖；本脚本验证数据与文件在整条链路上的结果。
 //
 // 用法：node scripts/integration/statement-template-update.js
@@ -467,6 +469,46 @@ async function run() {
     });
     assertEq(legacyApply.errorCode, 'TEMPLATE_MAPPINGS_LEGACY_ORIENTATION', '⑨ 确认：旧版方向映射被拒');
     assertEq(persistedState(database, legacyTemplate.id), legacyBefore, '⑨ 拒绝时不写库');
+
+    // ⑩ 行为对照：生成器实际读取的列 = 删除后输出会变化的列
+    const oracleHeaders = ['交易日期', '账号前缀', MERCHANT_ID_CURRENCY_ONLY_MARKER, '余额A', CONSTANTS.BALANCE_CALCULATED_OPTION,
+      CONSTANTS.FEATURE_FILTER_MAPPING_FIELD, CONSTANTS.CONCAT_FIELDS_MAPPING_FIELD, CONSTANTS.MERCHANT_ID_SELF_INPUT_OPTION, 'A', 'B', '无', '未引用列'];
+    const oracleValues = ['2026-11-01', 'ACC', '123', '1', '23', 'R1', 'R2', '100', '8', '7', 'REF', 'unused'];
+    const oracleTemplate = database.upsertTemplate({ name: '行为对照-测试', sourceFileName: 'oracle.xlsx', headers: oracleHeaders });
+    const concat = (fields) => ({ mappedField: CONSTANTS.CONCAT_FIELDS_MAPPING_FIELD, mappedFields: fields });
+    const oracleMappings = [
+      { templateField: 'BillDate', mappedField: '交易日期', mappedFields: [] },
+      { templateField: 'Currency', mappedField: `${FIXED_FIELD_VALUE_PREFIX}USD`, mappedFields: [] },
+      { templateField: 'MerchantId', ...concat(['账号前缀', MERCHANT_ID_CURRENCY_ONLY_MARKER]) },
+      { templateField: 'Balance', ...concat(['余额A', CONSTANTS.BALANCE_CALCULATED_OPTION]) },
+      { templateField: 'Remark', ...concat([CONSTANTS.FEATURE_FILTER_MAPPING_FIELD, CONSTANTS.CONCAT_FIELDS_MAPPING_FIELD]) },
+      { templateField: 'Credit Amount', mappedField: CONSTANTS.MERCHANT_ID_SELF_INPUT_OPTION, mappedFields: [] },
+      { templateField: 'Debit Amount', mappedField: 'A', mappedFields: ['B'] },
+      { templateField: 'Reference', mappedField: '无', mappedFields: [] }
+    ];
+    const oracleConfig = main.buildStatementGenerationConfig({
+      template: database.getTemplate(oracleTemplate.id), mappings: oracleMappings, orderedTargetFields: [...ORDERED_FIELDS, 'Balance'], allowManagedMerchantWithoutSelection: true
+    });
+    const runWithout = (removed) => {
+      const keep = oracleHeaders.map((header, index) => [header, index]).filter(([header]) => header !== removed);
+      const file = path.join(dir, `oracle-${keep.length}-${oracleHeaders.indexOf(removed)}.xlsx`);
+      writeWorkbook(file, keep.map(([header]) => header), [keep.map(([, index]) => oracleValues[index])]);
+      const config = { ...oracleConfig, template: { ...oracleConfig.template, headers: keep.map(([header]) => header) } };
+      return JSON.stringify(Array.from(main.buildMappedRowsForFile({ config, inputFilePath: file })));
+    };
+    const fullOutput = runWithout(null);
+    const generatorReads = oracleHeaders.filter((header) => header !== '交易日期' && runWithout(header) !== fullOutput);
+    const collected = new Set(tools.collectTemplateFieldReferences({ mappings: oracleMappings }).map((reference) => reference.field));
+    assertEq(oracleHeaders.filter((header) => header !== '交易日期' && collected.has(header)), generatorReads, '⑩ 引用收集与生成器实际读取的列逐列一致');
+    assertEq(generatorReads.includes('A') || generatorReads.includes('未引用列'), false, '⑩ 对照有效：未读取的列删除后输出不变');
+    assertThrows(
+      () => main.validateBillSplitMappingsPayload([{ templateField: 'Remark', ...concat([CONSTANTS.CONCAT_FIELDS_MAPPING_FIELD]) }], { headers: ['交易日期'] }),
+      (error) => error.message === `映射字段不存在：${CONSTANTS.CONCAT_FIELDS_MAPPING_FIELD}`,
+      '⑩ 拆分映射保存：拼接中名为「需要拼接字段」的列已删除时拒绝保存'
+    );
+    assertEq(main.validateBillSplitMappingsPayload([{ templateField: 'Remark', ...concat([CONSTANTS.CONCAT_FIELDS_MAPPING_FIELD]) }],
+      { headers: [CONSTANTS.CONCAT_FIELDS_MAPPING_FIELD] }).map((item) => item.mappedFields), [[CONSTANTS.CONCAT_FIELDS_MAPPING_FIELD]],
+    '⑩ 拆分映射保存：该列存在时照常保存');
 
     // 模板已删除
     database.deleteTemplate(other.id);

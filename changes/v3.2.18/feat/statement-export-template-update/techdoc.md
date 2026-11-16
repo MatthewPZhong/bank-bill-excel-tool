@@ -169,7 +169,8 @@
 
 **集成测试**
 
-- `scripts/integration/statement-template-update.js`（新）：预览 → 拒绝 → 确认 → 拦截 → 修改映射后生成 → 回读导出 → 旧格式文件不再匹配。
+- `scripts/integration/statement-template-update.js`（新）：预览 → 拒绝 → 确认 → 拦截 → 修改映射后生成 → 回读导出 → 旧格式文件（字段改名）不再匹配。
+  - ⑩ 行为对照：逐列删除源列，用真实生成结果是否变化判定生成器实际读取的列，与引用收集逐列比对。不再依赖测试自行过滤 token，以防收集口径与生成器分叉。
 - `statement-feature-filter.js`、`statement-channel.js`、`statement-currency-big-account.js`：harness 注入 `templateHeaderUpdateTools`。
 
 **渲染生命周期**
@@ -204,5 +205,12 @@
 - P3：结果弹窗使用页面绑定的反馈作用域；弹窗关闭后迟到的读取失败不再反馈。
 
 集成脚本 ⑦ 增加拼接同名列的一致性比对，⑧b 覆盖「合法保存 → 更新删除 → 生成前拦截」。
+
+**第三轮审查修正（2026-11-16）**：第二轮 3 项确认已修复。另修：
+
+- P1：MerchantId 只在第一个 token 为按币种标记时整体排除；Balance 只在整条映射为单个「无」「通过发生额计算」时排除。拼接中同名的 token 按源列计入，与 `file-service.js` 的 `computeMappedRow` 一致。
+- P2：`validateBillSplitMappingsPayload` 校验拼接展开后的字段时，不再跳过名为「需要拼接字段」的真实列；拼接模式只由外层 `mappedField` 决定。
+- 疑问：D8 与用户手册改为如实描述连续子序列匹配，不改变匹配规则。
+- 测试：新增集成 ⑩ 行为对照（改为第二轮的收集口径会失败），以及单测回归。
 
 **人工验收**：真机 GUI 验收登记为 backlog B95。

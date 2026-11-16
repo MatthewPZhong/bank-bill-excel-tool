@@ -110,6 +110,22 @@ test('collect：拼接字段中与模式名称同名的真实列按源字段计�
   assert.deepEqual(tools.collectTemplateFieldReferences({ mappings: [mapping('Remark', '字段筛选特征值', ['附言'])] }), []);
 });
 
+// 回归（第三轮 review P1）：MerchantId 只在首个 token 为按币种标记时走回填，Balance 只在单个选项值时为选项。
+test('collect：MerchantId 标记与 Balance 选项只在生成器视为特殊的位置排除', () => {
+  const fields = (mappings) => tools.collectTemplateFieldReferences({ mappings }).map((item) => `${item.target}<-${item.field}`);
+  assert.deepEqual(fields([mapping('MerchantId', '需要拼接字段', ['账号前缀', MERCHANT_ID_CURRENCY_ONLY_MARKER])]),
+    ['MerchantId<-账号前缀', `MerchantId<-${MERCHANT_ID_CURRENCY_ONLY_MARKER}`]);
+  assert.deepEqual(fields([mapping('MerchantId', '需要拼接字段', [MERCHANT_ID_CURRENCY_ONLY_MARKER, '账号前缀'])]), []);
+  assert.deepEqual(fields([mapping('Balance', '需要拼接字段', ['余额A', '通过发生额计算', '无'])]),
+    ['Balance<-余额A', 'Balance<-通过发生额计算', 'Balance<-无']);
+  assert.deepEqual(fields([mapping('Balance', '通过发生额计算')]), []);
+  // 拆分映射同口径
+  assert.deepEqual(tools.collectTemplateFieldReferences({
+    mappings: [mapping('是否拆分/合并明细账单', '是'), mapping('复用模块字段的映射关系', '否')],
+    billSplitMappings: [mapping('MerchantId', '需要拼接字段', ['账号前缀', MERCHANT_ID_CURRENCY_ONLY_MARKER])]
+  }).map((item) => `${item.area}:${item.field}`), ['bill-split-mapping:账号前缀', `bill-split-mapping:${MERCHANT_ID_CURRENCY_ONLY_MARKER}`]);
+});
+
 // 回归（review P2）：与生成器 normalizeMappedFields 一致，单元素 mappedFields 优先于 mappedField。
 test('collect：单元素 mappedFields 优先于 mappedField（与生成器取值一致）', () => {
   const input = {

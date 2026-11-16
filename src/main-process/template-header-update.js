@@ -57,16 +57,6 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     return normalized !== '' && !normalized.startsWith(FIXED_FIELD_VALUE_PREFIX);
   }
 
-  // 展开后的映射取值（token）按目标字段解释，与生成器一致：拼接 / 筛选模式只由外层 mappedField 决定（见 mappingSourceFields），
-  // 展开后的 token 即使与模式名称同名也按源列读取；「无」「通过发生额计算」只在 Balance 上是选项；
-  // 按币种取大账号的存储标记只在 MerchantId 上生效；固定值不读源列。其余取值（包括与选项同名的真实列名）都按源字段读取。
-  function isMappingSourceValue(target, value) {
-    const normalized = normalizeCell(value);
-    if (!isRuleSourceValue(normalized)) return false;
-    if (target === 'Balance' && (normalized === BALANCE_DISABLED_OPTION || normalized === BALANCE_CALCULATED_OPTION)) return false;
-    if (target === 'MerchantId' && normalized === MERCHANT_ID_CURRENCY_ONLY_MARKER) return false;
-    return true;
-  }
 
   // 与 main.js normalizeMappedFields 一致：mappedFields 非空（去空去重后）优先，否则取 mappedField。
   function normalizeMappedFields(mapping) {
@@ -82,14 +72,22 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     return normalizeCell(mapping && mapping.mappedField);
   }
 
-  // 一条映射实际引用的源字段，取值顺序与 main.js buildMappedFieldLookup 一致：
-  // 字段筛选特征值不读源字段；拼接取 mappedFields；其余在 mappedFields（含单个元素）非空时优先于 mappedField。
+  // 一条映射实际引用的源字段，与生成器（main.js buildMappedFieldLookup、file-service.js buildMappedRows）逐项一致：
+  // - 模式只由外层 mappedField 决定：字段筛选特征值不读源列；拼接取 mappedFields；其余在 mappedFields（含单个元素）
+  //   非空时优先于 mappedField。展开后的 token 即使与模式名称、选项文字同名，也按源列读取。
+  // - MerchantId 只在第一个 token 为按币种取大账号标记时整体走回填（其余 token 不读）；标记在后续位置时按源列读取。
+  // - Balance 只在整条映射是单个「无」「通过发生额计算」时为选项；拼接中的同名 token 按源列读取。
+  // - 固定值（__FIXED__: 前缀）不读源列。
   function mappingSourceFields(target, mapping) {
     const mappedField = normalizeCell(mapping && mapping.mappedField);
     if (mappedField === FEATURE_FILTER_MAPPING_FIELD) return [];
     const values = normalizeMappedFields(mapping);
-    const tokens = mappedField === CONCAT_FIELDS_MAPPING_FIELD || values.length > 1 ? values : values.slice(0, 1);
-    return uniqueNonEmpty(tokens).filter((token) => isMappingSourceValue(target, token));
+    const multi = mappedField === CONCAT_FIELDS_MAPPING_FIELD || values.length > 1;
+    const tokens = multi ? values : values.slice(0, 1);
+    if (target === 'MerchantId' && tokens[0] === MERCHANT_ID_CURRENCY_ONLY_MARKER) return [];
+    if (target === 'Balance' && !multi
+      && (tokens[0] === BALANCE_DISABLED_OPTION || tokens[0] === BALANCE_CALCULATED_OPTION)) return [];
+    return uniqueNonEmpty(tokens).filter(isRuleSourceValue);
   }
 
   function usesFeatureFilter(mappings) {

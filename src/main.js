@@ -10821,10 +10821,10 @@ function validateBillSplitMappingsPayload(mappings, template) {
       });
       return;
     }
-    // Header existence check (allow concat marker + custom prefix to pass)
+    // Header existence check (allow custom prefix to pass)。拼接模式只由外层 mappedField 决定（下方调用前已排除），
+    // v3.2.18：拼接展开后的字段即使名为「需要拼接字段」也是真实源列，须校验存在（模板【更新】删列后不再被放行保存）。
     const checkSourceFieldExists = (field) => {
       if (!field) return;
-      if (field === CONCAT_FIELDS_MAPPING_FIELD) return;
       if (typeof field === 'string' && field.startsWith(FIXED_FIELD_VALUE_PREFIX)) return;
       if (!sourceFieldSet.has(field)) {
         throw new FileValidationError('FILE_READ', `映射字段不存在：${field}`);
