@@ -1827,6 +1827,18 @@
 
     function collectMappingDraftFromTable(tableBody) {
       return Array.from(tableBody.querySelectorAll('tr[data-template-field]')).map((row) => {
+        // v3.2.19：是 / 否 类映射行为勾选框，按勾选状态取存储值
+        const toggle = row.querySelector('.mapping-toggle-checkbox');
+        if (toggle) {
+          return {
+            templateField: row.dataset.templateField,
+            mappedField: toggle.checked ? toggle.dataset.checkedValue : toggle.dataset.uncheckedValue,
+            mappedFields: [],
+            customValue: '',
+            isMultiBigAccount: false
+          };
+        }
+
         const select = row.querySelector('.mapping-select');
         const mappedFields = getSelectValues(select);
         const firstValue = mappedFields[0] || '';
@@ -4409,14 +4421,15 @@
 
     // v3.2.16（spec §4.2、D2）：MerchantId「原始账单仅有币种无账户号」的【映射管理】。
     // 左半边币种、右半边大账号，逐行成对编辑：每行最左侧【新增】在该行下方插入空行，行尾【删除】（只剩一行时清空），
-    // 右下角【保存】在【返回】左侧。【保存】只校验并把配置带回映射关系管理（点【完成】时写入模板）；【返回】/ × 放弃本次编辑。
+    // 右下角【保存】在【返回】左侧。【保存】只校验并把配置带回映射关系管理（在映射关系管理点【保存】时写入模板）；【返回】/ × 放弃本次编辑。
+    // v3.2.19：弹窗标题为「币种映射账号管理」，入口按钮仍为【映射管理】。
     function createCurrencyBigAccountMappingDialog({ pairs = [], onDone, onCancel }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card manager-card currency-big-account-card';
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">映射管理</div>
+          <div class="dialog-title">币种映射账号管理</div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="table-wrapper">
@@ -4594,7 +4607,7 @@
       // payload.bigAccounts 已是上次维护大账号 onDone 的内存版（含 own + 用户编辑），透传 loadedWithOwn=true 跳过 getWithOwn，
       // 避免静默覆盖用户的内存编辑（包括主动删除的 own 行）。
       let bigAccountsLoadedWithOwn = Boolean(payload.bigAccountsLoadedWithOwn);
-      // v3.2.16：MerchantId「原始账单仅有币种无账户号」的 币种 → 大账号（【映射管理】带回的草稿，点【完成】时保存）
+      // v3.2.16：MerchantId「原始账单仅有币种无账户号」的 币种 → 大账号（【映射管理】带回的草稿，点【保存】时保存）
       let currentCurrencyBigAccounts = cloneCurrencyBigAccountPairs(payload.currencyBigAccounts);
       const currentFixedAssignments = Array.isArray(payload.fixedAssignments)
         ? payload.fixedAssignments.map((item) => ({
@@ -4659,7 +4672,8 @@
           </table>
         </div>
         <div class="dialog-actions right">
-          <button class="primary-btn small" type="button" data-action="done">完成</button>
+          <button class="primary-btn small" type="button" data-action="done">保存</button>
+          <button class="secondary-btn small" type="button" data-action="back">返回</button>
         </div>
       `;
 
@@ -4733,7 +4747,7 @@
         if (fieldName === advancedMappingFields[0]) {
           const sectionRow = document.createElement('tr');
           sectionRow.className = 'mapping-section-row';
-          sectionRow.innerHTML = '<td colspan="2"><strong>映射关系设置</strong></td>';
+          sectionRow.innerHTML = '<td colspan="2"><strong>个性化映射设置</strong></td>';
           tbody.appendChild(sectionRow);
         }
 
@@ -4749,12 +4763,16 @@
           return;
         }
 
+        if (fieldName === AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD) {
+          renderAmountSplitToggleRow(fieldName);
+          return;
+        }
+
         const row = document.createElement('tr');
         row.dataset.templateField = fieldName;
         const isBalanceField = fieldName === 'Balance';
         const isMerchantIdField = fieldName === 'MerchantId';
         const isAdvancedField = advancedMappingFields.includes(fieldName);
-        const isAmountSplitByFieldField = fieldName === AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD;
         const supportsSelfInputOption = isMerchantIdField;
         const isCurrencyField = fieldName === 'Currency';
         const supportsMultiSelect = !isBalanceField && !supportsSelfInputOption && !isAdvancedField && !isCurrencyField;
@@ -4764,35 +4782,30 @@
           customValue: '',
           isMultiBigAccount: false
         };
-        let selectOptions;
-        if (isAmountSplitByFieldField) {
-          selectOptions = `<option value=""></option><option value="${AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION}">${AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION}</option>`;
-        } else {
-          selectOptions = [isBalanceField ? `<option value="${BALANCE_DISABLED_OPTION}">${BALANCE_DISABLED_OPTION}</option>` : '<option value=""></option>']
-            .concat(isBalanceField ? [`<option value="${BALANCE_CALCULATED_OPTION}">${BALANCE_CALCULATED_OPTION}</option>`] : [])
-            .concat(supportsSelfInputOption ? [`<option value="${MERCHANT_ID_SELF_INPUT_OPTION}">${MERCHANT_ID_SELF_INPUT_OPTION}</option>`] : [])
-            .concat(supportsSelfInputOption ? [`<option value="${MERCHANT_ID_CURRENCY_ONLY_OPTION}">${MERCHANT_ID_CURRENCY_ONLY_OPTION}</option>`] : [])
-            .concat(supportsMultiSelect ? [`<option value="${CONCAT_FIELDS_MAPPING_FIELD}">${CONCAT_FIELDS_MAPPING_FIELD}</option>`] : [])
-            .concat(supportsMultiSelect ? [`<option value="${FEATURE_FILTER_MAPPING_FIELD}">${FEATURE_FILTER_MAPPING_FIELD}</option>`] : [])
-            .concat(headerOptions)
-            .join('');
-        }
+        const selectOptions = [isBalanceField ? `<option value="${BALANCE_DISABLED_OPTION}">${BALANCE_DISABLED_OPTION}</option>` : '<option value=""></option>']
+          .concat(isBalanceField ? [`<option value="${BALANCE_CALCULATED_OPTION}">${BALANCE_CALCULATED_OPTION}</option>`] : [])
+          .concat(supportsSelfInputOption ? [`<option value="${MERCHANT_ID_SELF_INPUT_OPTION}">${MERCHANT_ID_SELF_INPUT_OPTION}</option>`] : [])
+          .concat(supportsSelfInputOption ? [`<option value="${MERCHANT_ID_CURRENCY_ONLY_OPTION}">${MERCHANT_ID_CURRENCY_ONLY_OPTION}</option>`] : [])
+          .concat(supportsMultiSelect ? [`<option value="${CONCAT_FIELDS_MAPPING_FIELD}">${CONCAT_FIELDS_MAPPING_FIELD}</option>`] : [])
+          .concat(supportsMultiSelect ? [`<option value="${FEATURE_FILTER_MAPPING_FIELD}">${FEATURE_FILTER_MAPPING_FIELD}</option>`] : [])
+          .concat(headerOptions)
+          .join('');
+        // v3.2.19：「选择特征值」+ 下拉框 +【特征值管理】成组，与映射字段下拉框同行；空间不足时整组换行
         row.innerHTML = `
           <td>${escapeHtml(fieldName)}</td>
           <td>
             <div class="mapping-field-editor">
               <select class="mapping-select">${selectOptions}</select>
               ${supportsMultiSelect ? `
-                <span class="mapping-feature-value-label" hidden>选择特征值</span>
-                <select class="mapping-select mapping-feature-value-select" hidden></select>
-                <button class="secondary-btn small mapping-feature-filter-btn" type="button" hidden>特征值管理</button>
+                <span class="mapping-feature-value-group" hidden>
+                  <span class="mapping-feature-value-label" hidden>选择特征值</span>
+                  <select class="mapping-select mapping-feature-value-select" hidden></select>
+                  <button class="secondary-btn small mapping-feature-filter-btn" type="button" hidden>特征值管理</button>
+                </span>
               ` : ''}
               ${isMerchantIdField ? `
                 <button class="secondary-btn small mapping-big-account-manage-btn" type="button" hidden>维护大账号</button>
                 <button class="secondary-btn small mapping-currency-big-account-manage-btn" type="button" hidden>映射管理</button>
-              ` : ''}
-              ${isAmountSplitByFieldField ? `
-                <button class="secondary-btn small mapping-amount-split-manage-btn" type="button" hidden>维护发生额映射关系</button>
               ` : ''}
               ${supportsMultiSelect ? `
                 <div class="concat-field-picker" hidden>
@@ -4811,8 +4824,8 @@
         const select = row.querySelector('.mapping-select');
         const manageBigAccountBtn = row.querySelector('.mapping-big-account-manage-btn');
         const manageCurrencyBigAccountBtn = row.querySelector('.mapping-currency-big-account-manage-btn');
-        const manageAmountSplitBtn = row.querySelector('.mapping-amount-split-manage-btn');
         const featureFilterBtn = row.querySelector('.mapping-feature-filter-btn');
+        const featureValueGroup = row.querySelector('.mapping-feature-value-group');
         const featureValueLabel = row.querySelector('.mapping-feature-value-label');
         const featureValueSelect = row.querySelector('.mapping-feature-value-select');
         const concatFieldPicker = row.querySelector('.concat-field-picker');
@@ -4912,8 +4925,6 @@
           const selectedValue = getSelectValues(select)[0];
           const isCustomInput = selectedValue === MERCHANT_ID_SELF_INPUT_OPTION;
           const isConcatMode = selectedValue === CONCAT_FIELDS_MAPPING_FIELD;
-          const isAmountSplitEnabled = isAmountSplitByFieldField
-            && selectedValue === AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION;
 
           if (manageBigAccountBtn) {
             manageBigAccountBtn.hidden = !isCustomInput;
@@ -4921,11 +4932,9 @@
           if (manageCurrencyBigAccountBtn) {
             manageCurrencyBigAccountBtn.hidden = selectedValue !== MERCHANT_ID_CURRENCY_ONLY_OPTION;
           }
-          if (manageAmountSplitBtn) {
-            manageAmountSplitBtn.hidden = !isAmountSplitEnabled;
-          }
           if (featureFilterBtn) {
             const isFeatureFilterMode = selectedValue === FEATURE_FILTER_MAPPING_FIELD;
+            featureValueGroup.hidden = !isFeatureFilterMode;
             featureFilterBtn.hidden = !isFeatureFilterMode;
             featureValueLabel.hidden = !isFeatureFilterMode;
             featureValueSelect.hidden = !isFeatureFilterMode;
@@ -4991,19 +5000,13 @@
               pairs: currentCurrencyBigAccounts,
               onDone: (nextPairs) => {
                 currentCurrencyBigAccounts = cloneCurrencyBigAccountPairs(nextPairs);
-                setStatus('币种与大账号已暂存，点击【完成】后保存到模板', 'info');
+                setStatus('币种与大账号已暂存，点击【保存】后保存到模板', 'info');
                 returnToModal(overlay);
               },
               onCancel: () => {
                 returnToModal(overlay);
               }
             }));
-          });
-        }
-
-        if (manageAmountSplitBtn) {
-          manageAmountSplitBtn.addEventListener('click', async () => {
-            await openAmountSplitRulesDialog();
           });
         }
 
@@ -5029,77 +5032,89 @@
         tbody.appendChild(row);
       });
 
-      function renderBillSplitGroupRow(fieldName) {
+      // v3.2.19：取值只有 是 / 否（空白）的行用勾选框（勾选 = 是）：文字在左、勾选框紧跟其右；
+      //   右列只放随勾选状态显示的按钮。存储值不变，取值见 data-checked-value / data-unchecked-value。
+      function renderMappingToggleRow(fieldName, {
+        label, checked, checkedValue, uncheckedValue, buttonClass, buttonLabel, showButtonWhenChecked, onToggle, onButtonClick
+      }) {
         const row = document.createElement('tr');
         row.dataset.templateField = fieldName;
-        row.dataset.billSplitGroupField = 'true';
-
-        // 默认值：BILL_SPLIT_MERGE_FIELD 默认 '否'（存为空字符串 ''），REUSE_MODULE_FIELD 默认 '是'
-        const savedMapping = savedMap.get(fieldName) || {
-          mappedField: fieldName === REUSE_MODULE_FIELD ? '是' : '',
-          mappedFields: []
-        };
-        let savedValue = String(savedMapping.mappedField || '');
-        if (fieldName === BILL_SPLIT_MERGE_FIELD) {
-          // 存为 '是' 或 ''，UI 显示为 '是' 或 '否'
-          savedValue = savedValue === '是' ? '是' : '';
-        } else if (fieldName === REUSE_MODULE_FIELD) {
-          savedValue = savedValue === '否' ? '否' : '是';
-        }
-
-        // 按钮文本始终填充（hidden 时靠 visibility:hidden 占位，避免列平移）
-        const buttonLabel = fieldName === BILL_SPLIT_MERGE_FIELD
-          ? '拆分/合并账单映射关系管理'
-          : '拆分/合并账单映射关系设置';
-        const buttonHidden = fieldName === BILL_SPLIT_MERGE_FIELD
-          ? savedValue !== '是'
-          : savedValue !== '否';
-
-        const selectOptions = fieldName === BILL_SPLIT_MERGE_FIELD
-          ? '<option value="">否</option><option value="是">是</option>'
-          : '<option value="是">是</option><option value="否">否</option>';
-
         row.innerHTML = `
-          <td>${escapeHtml(fieldName)}</td>
+          <td>
+            <label class="mapping-toggle-label">
+              <span class="mapping-toggle-text">${escapeHtml(label)}</span>
+              <input class="mapping-toggle-checkbox" type="checkbox"
+                data-checked-value="${escapeHtml(checkedValue)}" data-unchecked-value="${escapeHtml(uncheckedValue)}" />
+            </label>
+          </td>
           <td>
             <div class="mapping-field-editor">
-              <select class="mapping-select bill-split-group-select">${selectOptions}</select>
-              <button class="secondary-btn small bill-split-group-btn" type="button" ${buttonHidden ? 'hidden' : ''}>${buttonLabel}</button>
+              <button class="secondary-btn small ${buttonClass}" type="button">${escapeHtml(buttonLabel)}</button>
             </div>
           </td>
         `;
-
-        const select = row.querySelector('.mapping-select');
-        const button = row.querySelector('.bill-split-group-btn');
-        select.value = savedValue;
-
-        select.addEventListener('change', () => {
-          const newValue = select.value;
-          if (fieldName === BILL_SPLIT_MERGE_FIELD) {
-            // 入口切换撤销此前的打开意图，重新启用也须再次点击。
-            ++billSplitRowsOpenRequest;
-            if (newValue === '是') {
-              button.hidden = false;
-              applyBillSplitMergeMutualExclusion(true);
-            } else {
-              button.hidden = true;
-              applyBillSplitMergeMutualExclusion(false);
-            }
-          } else if (fieldName === REUSE_MODULE_FIELD) {
-            button.hidden = newValue !== '否';
-          }
+        const checkbox = row.querySelector('.mapping-toggle-checkbox');
+        const button = row.querySelector(`.${buttonClass}`);
+        checkbox.checked = checked;
+        const syncButton = () => { button.hidden = checkbox.checked !== showButtonWhenChecked; };
+        syncButton();
+        checkbox.addEventListener('change', () => {
+          syncButton();
+          onToggle(checkbox.checked);
         });
-
-        button.addEventListener('click', () => {
-          if (fieldName === BILL_SPLIT_MERGE_FIELD) {
-            openBillSplitRowsDialogFromMain();
-          } else if (fieldName === REUSE_MODULE_FIELD) {
-            openBillSplitMappingsDialogFromMain();
-          }
-        });
-
+        button.addEventListener('click', onButtonClick);
         rowByField.set(fieldName, row);
         tbody.appendChild(row);
+        return row;
+      }
+
+      // 按字段区分发生额：勾选 = 是，勾选后显示【维护发生额映射关系】
+      function renderAmountSplitToggleRow(fieldName) {
+        const savedValue = String(savedMap.get(fieldName)?.mappedField || '');
+        renderMappingToggleRow(fieldName, {
+          label: fieldName,
+          checked: savedValue === AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION,
+          checkedValue: AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION,
+          uncheckedValue: '',
+          buttonClass: 'mapping-amount-split-manage-btn',
+          buttonLabel: '维护发生额映射关系',
+          showButtonWhenChecked: true,
+          onToggle: () => applyAmountSplitMutualExclusion(),
+          onButtonClick: () => openAmountSplitRulesDialog()
+        });
+      }
+
+      function renderBillSplitGroupRow(fieldName) {
+        // 默认值：BILL_SPLIT_MERGE_FIELD 默认 '否'（存为空字符串 ''），REUSE_MODULE_FIELD 默认 '是'
+        const savedValue = String(savedMap.get(fieldName)?.mappedField || '');
+        const isBillSplitMergeField = fieldName === BILL_SPLIT_MERGE_FIELD;
+        const row = renderMappingToggleRow(fieldName, isBillSplitMergeField ? {
+          label: '拆分/合并明细账单',
+          checked: savedValue === '是',
+          checkedValue: '是',
+          uncheckedValue: '',
+          buttonClass: 'bill-split-group-btn',
+          buttonLabel: '拆分/合并账单映射关系管理',
+          showButtonWhenChecked: true,
+          onToggle: (checked) => {
+            // 入口切换撤销此前的打开意图，重新启用也须再次点击。
+            ++billSplitRowsOpenRequest;
+            applyBillSplitMergeMutualExclusion(checked);
+          },
+          onButtonClick: () => openBillSplitRowsDialogFromMain()
+        } : {
+          // 复用：勾选 = 是；不复用（未勾选）时才需要单独设置拆分/合并映射，按钮在未勾选时显示
+          label: fieldName,
+          checked: savedValue !== '否',
+          checkedValue: '是',
+          uncheckedValue: '否',
+          buttonClass: 'bill-split-group-btn',
+          buttonLabel: '拆分/合并账单映射关系设置',
+          showButtonWhenChecked: false,
+          onToggle: () => {},
+          onButtonClick: () => openBillSplitMappingsDialogFromMain()
+        });
+        row.dataset.billSplitGroupField = 'true';
       }
 
       async function openBillSplitRowsDialogFromMain() {
@@ -5175,10 +5190,12 @@
         }));
       }
 
+      function getRowToggle(row) {
+        return row?.querySelector('.mapping-toggle-checkbox') || null;
+      }
+
       function isBillSplitMergeEnabledInTable() {
-        const row = rowByField.get(BILL_SPLIT_MERGE_FIELD);
-        const select = row?.querySelector('.mapping-select');
-        return select && select.value === '是';
+        return Boolean(getRowToggle(rowByField.get(BILL_SPLIT_MERGE_FIELD))?.checked);
       }
 
       // v3.2.18：特征值新增、改名、删除后刷新各行「选择特征值」的选项（保留已选）
@@ -5216,9 +5233,8 @@
         }
 
         const amountSplitRow = rowByField.get(AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD);
-        const amountSplitSelect = amountSplitRow?.querySelector('.mapping-select');
-        const amountSplitEnabled = amountSplitSelect
-          && getSelectValues(amountSplitSelect)[0] === AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION;
+        const amountSplitToggle = getRowToggle(amountSplitRow);
+        const amountSplitEnabled = Boolean(amountSplitToggle?.checked);
 
         const signedAmountRow = rowByField.get('按正负号拆分的发生额');
         const signedAmountSelect = signedAmountRow?.querySelector('.mapping-select');
@@ -5241,19 +5257,19 @@
         // 按正负号拆分有值 → 禁用 Credit / Debit / 按字段区分
         // 无 → 全部启用
 
-        function setRowDisabled(row, select, disabled) {
-          if (!row || !select) return;
+        function setRowDisabled(row, control, disabled) {
+          if (!row || !control) return;
           // v3.2.16：互斥禁用时【特征值管理】按钮与「选择特征值」随下拉框一起禁用
           const featureFilterButton = row.querySelector('.mapping-feature-filter-btn');
           const featureValueSelect = row.querySelector('.mapping-feature-value-select');
           if (disabled) {
             row.classList.add('mapping-row-mutex-disabled');
-            select.disabled = true;
+            control.disabled = true;
             if (featureFilterButton) featureFilterButton.disabled = true;
             if (featureValueSelect) featureValueSelect.disabled = true;
           } else {
             row.classList.remove('mapping-row-mutex-disabled');
-            select.disabled = false;
+            control.disabled = false;
             if (featureFilterButton) featureFilterButton.disabled = false;
             if (featureValueSelect) featureValueSelect.disabled = false;
           }
@@ -5263,18 +5279,18 @@
           setRowDisabled(creditRow, creditSelect, true);
           setRowDisabled(debitRow, debitSelect, true);
           setRowDisabled(signedAmountRow, signedAmountSelect, true);
-          setRowDisabled(amountSplitRow, amountSplitSelect, false);
+          setRowDisabled(amountSplitRow, amountSplitToggle, false);
         } else if (activeMode === 'signed') {
           setRowDisabled(creditRow, creditSelect, true);
           setRowDisabled(debitRow, debitSelect, true);
           setRowDisabled(signedAmountRow, signedAmountSelect, false);
-          setRowDisabled(amountSplitRow, amountSplitSelect, true);
+          setRowDisabled(amountSplitRow, amountSplitToggle, true);
         } else {
           // none — 全部启用
           setRowDisabled(creditRow, creditSelect, false);
           setRowDisabled(debitRow, debitSelect, false);
           setRowDisabled(signedAmountRow, signedAmountSelect, false);
-          setRowDisabled(amountSplitRow, amountSplitSelect, false);
+          setRowDisabled(amountSplitRow, amountSplitToggle, false);
         }
       }
 
@@ -5291,11 +5307,21 @@
         mutexFields.forEach((targetField) => {
           const targetRow = rowByField.get(targetField);
           if (!targetRow) return;
-          const targetSelect = targetRow.querySelector('.mapping-select');
+          // v3.2.19：按字段区分发生额为勾选框，其余为下拉框
+          const targetToggle = getRowToggle(targetRow);
+          const targetSelect = targetToggle || targetRow.querySelector('.mapping-select');
           if (!targetSelect) return;
 
           if (enabled) {
-            targetSelect.value = '';
+            if (targetToggle) {
+              if (targetToggle.checked) {
+                // 取消勾选并同步隐藏【维护发生额映射关系】
+                targetToggle.checked = false;
+                targetToggle.dispatchEvent(new Event('change'));
+              }
+            } else {
+              targetSelect.value = '';
+            }
             targetSelect.disabled = true;
             targetRow.classList.add('mapping-row-mutex-disabled', 'bill-split-merge-disabled');
             targetRow.setAttribute('title', '已开启拆分/合并明细账单，本字段不可用');
@@ -5343,13 +5369,8 @@
       applyAmountSplitMutualExclusion();
 
       // 初始化：若模板当前已启用「是否拆分/合并明细账单 = 是」，立即应用 4 方互斥（disabled + 清空）
-      {
-        const billSplitMergeRow = rowByField.get(BILL_SPLIT_MERGE_FIELD);
-        const billSplitMergeSelect = billSplitMergeRow?.querySelector('.mapping-select');
-        const billSplitMergeEnabledInitial = billSplitMergeSelect && billSplitMergeSelect.value === '是';
-        if (billSplitMergeEnabledInitial) {
-          applyBillSplitMergeMutualExclusion(true);
-        }
+      if (isBillSplitMergeEnabledInTable()) {
+        applyBillSplitMergeMutualExclusion(true);
       }
 
       function syncMerchantIdDependentRows() {
@@ -5367,9 +5388,12 @@
       merchantSelect?.addEventListener('change', syncMerchantIdDependentRows);
       syncMerchantIdDependentRows();
 
-      dialog.querySelector('.icon-close').addEventListener('click', () => {
+      // v3.2.19：【返回】与 × 一致，放弃未保存的编辑并回到模板管理
+      const closeToTemplateManager = () => {
         replaceModal(overlay, () => createTemplateManagerDialog({ expandChannelId: templateChannelId }));
-      });
+      };
+      dialog.querySelector('.icon-close').addEventListener('click', closeToTemplateManager);
+      dialog.querySelector('[data-action="back"]').addEventListener('click', closeToTemplateManager);
 
       dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
         // v3.2.15（D3）：不再校验子模板名包含渠道名。
