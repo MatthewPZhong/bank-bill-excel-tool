@@ -16,6 +16,9 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
   const escapeHtmlSource = renderer.slice(escapeHtmlNode.start, escapeHtmlNode.end);
   const modulesSource = renderer.slice(modulesNode.declarations[0].init.start, modulesNode.declarations[0].init.end);
   const headers = [...SOURCE_DEFINITIONS[SOURCE_TYPES.BANK_ACCOUNT].headers];
+  // v3.2.18 表格只显示这 8 个字段（按此顺序），不再显示行号。
+  const displayHeaders = ['银行/通道简称', '开户地', '币种', '银行账号', '系统账号', '账户性质', '账户状态', '是否参与对账'];
+  assert.deepEqual(displayHeaders.filter((header) => !headers.includes(header)), [], '账户表识别结构应包含 8 个显示字段');
 
   async function setup({ snapshot = true, rows = 250, hold = [], layoutOptions = null, open = true } = {}) {
     await reset('<div id="modalRoot"></div>', layoutOptions ? { layout: layoutOptions } : undefined);
@@ -83,7 +86,10 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
           applyAppUpdateActionResult() {}, applyAppUpdateStatus() {}, getAppUpdateStatus: () => ({}),
           refreshOpenAppUpdateDialog() {}, restartAndInstallAppUpdate() {} } });
       ba.open = () => { ba.handle = ba.bridge.openModal(() => (ba.overlay = ba.settings.createAppUpdateSettingsDialog())).handle; };
-      ba.q = (selector) => ba.overlay.querySelector('[data-pane="accounts"] ' + selector);
+      // 导入/导出与翻页在设置底栏的账户管理槽里，其余在账户管理 pane 里。
+      ba.q = (selector) => ba.overlay.querySelector('[data-pane="accounts"] ' + selector) || ba.overlay.querySelector('[data-footer="accounts"] ' + selector);
+      ba.heads = () => [...ba.overlay.querySelectorAll('[data-pane="accounts"] .bank-accounts-table thead th')].map((cell) => cell.textContent);
+      ba.column = (header) => [...ba.overlay.querySelectorAll('[data-pane="accounts"] .bank-accounts-table tbody tr')].map((row) => row.cells[ba.heads().indexOf(header)]?.textContent);
       ba.top = () => document.getElementById('modalRoot').lastElementChild;
       ba.text = (selector) => (ba.q(selector)?.textContent || '').replace(/\\s+/g, ' ').trim();
       ba.bodyRows = () => ba.overlay.querySelectorAll('[data-pane="accounts"] .bank-accounts-table tbody tr').length;
@@ -121,22 +127,36 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await waitFor('ba.bodyRows() > 0');
     assert.equal(await js(`ba.overlay.querySelector('[data-pane="accounts"]').hidden`), false);
     assert.equal(await js(`ba.overlay.querySelector('[data-footer="update"]').hidden`), true);
-    await js(`ba.overlay.querySelector('[data-tab="appearance"]').click(); ba.overlay.querySelector('[data-tab="accounts"]').click(); void 0;`);
+    assert.equal(await js(`ba.overlay.querySelector('[data-footer="accounts"]').hidden`), false);
+    // 底栏的账户管理槽只在账户管理页显示。
+    for (const tab of ['appearance', 'archive', 'update']) {
+      await js(`ba.overlay.querySelector('[data-tab="${tab}"]').click(); void 0;`);
+      assert.equal(await js(`ba.overlay.querySelector('[data-footer="accounts"]').hidden`), true, `${tab} 页不显示账户管理按钮`);
+    }
+    assert.equal(await js(`ba.overlay.querySelector('[data-footer="update"]').hidden`), false);
+    await js(`ba.overlay.querySelector('[data-tab="accounts"]').click(); void 0;`);
     await settle();
+    assert.deepEqual(await js(`({ accounts: ba.overlay.querySelector('[data-footer="accounts"]').hidden, update: ba.overlay.querySelector('[data-footer="update"]').hidden })`),
+      { accounts: false, update: true });
     assert.equal(await js('ba.count("overview")'), 1);
     assert.deepEqual(await js('__testErrors'), []);
   });
 
-  await test('标题、空白默认渠道与左下按钮；空白显示全部并分页，选中渠道只显示该渠道', async () => {
+  await test('标题、空白默认渠道与底栏按钮；空白显示全部并分页，选中渠道只显示该渠道', async () => {
     await setup();
     assert.equal(await js(`ba.text('#bankAccountsHeading')`), '清结算系统账户管理');
     assert.deepEqual(await js(`[...ba.q('[data-role="bank-accounts-channel"]').options].map((option) => [option.value, option.textContent])`),
       [['', ''], ['花旗', '花旗'], ['招商银行', '招商银行']]);
     assert.equal(await js(`ba.q('[data-role="bank-accounts-channel"]').value`), '');
-    assert.deepEqual(await js(`[...ba.overlay.querySelectorAll('[data-pane="accounts"] .bank-accounts-actions-main button')].map((button) => [button.textContent, button.disabled])`),
+    assert.deepEqual(await js(`[...ba.overlay.querySelectorAll('.app-settings-footer [data-footer="accounts"] .bank-accounts-actions-main button')].map((button) => [button.textContent, button.disabled])`),
       [['导入银行账户信息', false], ['导出', false]]);
+    assert.equal(await js(`ba.overlay.querySelectorAll('[data-pane="accounts"] button[data-action$="-bank-accounts"], [data-pane="accounts"] [data-role="bank-accounts-pager"]').length`), 0,
+      'pane 内不再有导入/导出与翻页');
+    assert.equal(await js(`!!ba.q('[data-role="bank-accounts-pager"]').closest('.app-settings-footer')`), true);
     assert.equal(await js('ba.bodyRows()'), 200);
-    assert.equal(await js(`ba.overlay.querySelectorAll('[data-pane="accounts"] .bank-accounts-table thead th').length`), headers.length + 1);
+    assert.deepEqual(await js('ba.heads()'), displayHeaders);
+    assert.equal(await js(`!!ba.overlay.querySelector('[data-pane="accounts"] .bank-accounts-row-number')`), false);
+    assert.deepEqual(await js(`ba.column('银行账号').slice(0, 2)`), ['6222000000', '6222000001']);
     assert.equal(await js(`ba.text('[data-role="bank-accounts-page"]')`), '第 1 / 2 页（共 250 行）');
     assert.equal(await js(`ba.text('[data-role="bank-accounts-summary"]')`), '当前账户表：银行账户信息.xlsx · 250 行 · 2 个渠道 · 导入于 2026-11-05 21:30 · 识别结构 V1');
     await js(`ba.q('[data-action="next-page"]').click(); void 0;`);
@@ -145,10 +165,21 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await js(`ba.select('花旗'); void 0;`);
     await waitFor('ba.bodyRows() === 50 && ba.last("list").channel === "花旗"');
     assert.deepEqual(await js('ba.last("list")'), { channel: '花旗', offset: 0, limit: 200 });
-    assert.equal(await js(`[...ba.overlay.querySelectorAll('[data-pane="accounts"] .bank-accounts-table tbody tr')].every((row) => row.cells[1 + ba.headers.indexOf('银行/通道简称')].textContent === '花旗')`), true);
+    assert.equal(await js(`ba.column('银行/通道简称').every((text) => text === '花旗')`), true);
     assert.equal(await js(`ba.q('[data-role="bank-accounts-pager"]').hidden`), true);
     await js(`ba.select(''); void 0;`);
     await waitFor('ba.bodyRows() === 200');
+    assert.deepEqual(await js('__testErrors'), []);
+  });
+
+  await test('识别结构缺少某个显示字段时跳过该列，其余列不错位', async () => {
+    await setup();
+    await js(`ba.headers = ba.headers.filter((header) => header !== '开户地'); ba.setData(3, { snapshotNo: 7 });
+      for (const listener of ba.listeners) listener({ snapshotNo: 7 }); void 0;`);
+    await waitFor('ba.bodyRows() === 3');
+    assert.deepEqual(await js('ba.heads()'), displayHeaders.filter((header) => header !== '开户地'));
+    assert.deepEqual(await js(`({ account: ba.column('银行账号'), status: ba.column('账户状态') })`),
+      { account: ['6222000000', '6222000001', '6222000002'], status: ['正常', '正常', '正常'] });
     assert.deepEqual(await js('__testErrors'), []);
   });
 
@@ -262,30 +293,50 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(await js('__testErrors'), []);
   });
 
-  for (const [name, options] of [
-    ['bank-accounts-light', { width: 1080, height: 760, theme: 'light' }],
-    ['bank-accounts-dark', { width: 1080, height: 760, theme: 'dark' }],
-    ['bank-accounts-zoom-150', { width: 1080, height: 760, theme: 'light', zoom: 1.5 }]
+  // compact：可用宽度 ≤ 900px 时翻页条改为 ‹ › 并隐藏总行数。
+  for (const [name, options, compact] of [
+    ['bank-accounts-light', { width: 1080, height: 760, theme: 'light' }, false],
+    ['bank-accounts-dark', { width: 1080, height: 760, theme: 'dark' }, false],
+    ['bank-accounts-zoom-125', { width: 1240, height: 860, theme: 'light', zoom: 1.25 }, false],
+    ['bank-accounts-zoom-150', { width: 1080, height: 760, theme: 'light', zoom: 1.5 }, true]
   ]) {
-    await test(`生产样式 ${options.width}×${options.height}${options.zoom ? ` @${options.zoom * 100}%` : ''} ${options.theme}：表格内部横向滚动，标题、渠道与按钮可见`, async () => {
+    await test(`生产样式 ${options.width}×${options.height}${options.zoom ? ` @${options.zoom * 100}%` : ''} ${options.theme}：导入/导出与翻页在底栏与【返回】同一行，表格铺满并延伸到底栏`, async () => {
       await reset();
       await setup({ layoutOptions: options });
       const geometry = await js(`(() => {
         const card = ba.overlay.querySelector('.app-update-settings-card').getBoundingClientRect();
+        const rectOf = (selector) => ba.q(selector).getBoundingClientRect();
         const visible = (element) => { const rect = element.getBoundingClientRect();
           return rect.width > 0 && rect.left >= card.left - 1 && rect.right <= card.right + 1 && rect.top >= card.top - 1 && rect.bottom <= card.bottom + 1; };
+        const middle = (rect) => (rect.top + rect.bottom) / 2;
         const pane = ba.overlay.querySelector('[data-pane="accounts"]');
         const wrap = ba.q('.bank-accounts-table-wrap');
+        const table = ba.q('.bank-accounts-table');
+        const footer = ba.overlay.querySelector('.app-settings-footer').getBoundingClientRect();
+        const back = ba.overlay.querySelector('[data-role="close-update-dialog"]').getBoundingClientRect();
+        const importRect = rectOf('[data-action="import-bank-accounts"]');
+        const exportRect = rectOf('[data-action="export-bank-accounts"]');
+        const pager = rectOf('[data-role="bank-accounts-pager"]');
+        const wrapRect = wrap.getBoundingClientRect();
+        const gapToFooter = footer.top - wrapRect.bottom;
         return {
           paneOverflow: pane.scrollWidth > pane.clientWidth + 1,
-          tableScrolls: wrap.scrollWidth > wrap.clientWidth && getComputedStyle(wrap).overflowX === 'auto',
-          visible: ['#bankAccountsHeading', '[data-role="bank-accounts-channel"]', '[data-action="import-bank-accounts"]', '[data-action="export-bank-accounts"]']
+          tableFillsWidth: table.getBoundingClientRect().width >= wrap.clientWidth - 1 && getComputedStyle(wrap).overflowX === 'auto',
+          visible: ['#bankAccountsHeading', '[data-role="bank-accounts-channel"]', '[data-action="import-bank-accounts"]', '[data-action="export-bank-accounts"]', '[data-role="bank-accounts-pager"]']
             .map((selector) => visible(ba.q(selector))),
-          exportRightOfImport: ba.q('[data-action="export-bank-accounts"]').getBoundingClientRect().left > ba.q('[data-action="import-bank-accounts"]').getBoundingClientRect().right,
+          sameRowAsBack: [importRect, exportRect, pager].every((rect) => Math.abs(middle(rect) - middle(back)) <= 1),
+          importAlignedWithTable: Math.abs(importRect.left - wrapRect.left) <= 1,
+          exportRightOfImport: exportRect.left > importRect.right,
+          pagerNextToBack: pager.left > exportRect.right && pager.right <= back.left && back.left - pager.right <= 12,
+          tableReachesFooter: gapToFooter >= 0 && gapToFooter <= 20,
+          pagerCompact: getComputedStyle(ba.q('.bank-accounts-pager-total')).display === 'none',
+          pageTitle: ba.q('[data-role="bank-accounts-page"]').title,
           cardFits: card.right <= innerWidth + 1 && card.bottom <= innerHeight + 1
         };
       })()`);
-      assert.deepEqual(geometry, { paneOverflow: false, tableScrolls: true, visible: [true, true, true, true], exportRightOfImport: true, cardFits: true });
+      assert.deepEqual(geometry, { paneOverflow: false, tableFillsWidth: true, visible: [true, true, true, true, true], sameRowAsBack: true,
+        importAlignedWithTable: true, exportRightOfImport: true, pagerNextToBack: true, tableReachesFooter: true,
+        pagerCompact: compact, pageTitle: '第 1 / 2 页（共 250 行）', cardFits: true });
       await layout.settle();
       await js('new Promise((resolve) => setTimeout(resolve, 250))');
       await layout.evidence(name, { geometry });
