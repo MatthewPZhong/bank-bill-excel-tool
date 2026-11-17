@@ -19,17 +19,14 @@ function parseJsonArray(rawValue) {
   }
 }
 
-// v3.2.16：模板级「字段筛选特征值」规则；空串、非对象或解析失败时为 null（规则校验由主进程负责）。
-function parseJsonObject(rawValue) {
+// v3.2.18：特征值列表 [{ id, name, ...rule }]；非数组（含启动迁移前的旧单对象）读为 []。
+function parseFeatureFilterList(rawValue) {
   if (!normalizeText(rawValue)) {
-    return null;
+    return [];
   }
-  try {
-    const parsed = JSON.parse(rawValue);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
-  } catch (_error) {
-    return null;
-  }
+  return parseJsonArray(rawValue)
+    .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+    .map((item) => ({ ...item, id: normalizeText(item.id), name: normalizeText(item.name) }));
 }
 
 function groupBigAccountRows(rows) {
@@ -128,8 +125,8 @@ function buildTemplateSummaryFromRow(row) {
     channelName: row.channelId ? normalizeText(row.channelName) : '',
     // v1.5.2 需求 3：按文件名映射模板的固定字段（默认空串）
     filenameFixedField: normalizeText(row.filenameFixedField),
-    // v3.2.16：模板级「字段筛选特征值」规则（未设置为 null）
-    featureFilter: parseJsonObject(row.featureFilterJson)
+    // v3.2.16：模板级「字段筛选特征值」规则；v3.2.18 起为特征值数组（未设置为 []）
+    featureFilters: parseFeatureFilterList(row.featureFilterJson)
   };
 }
 
@@ -139,6 +136,6 @@ module.exports = {
   buildTemplateSummaryFromRow,
   groupBigAccountRows,
   normalizeText,
-  parseJsonArray,
-  parseJsonObject
+  parseFeatureFilterList,
+  parseJsonArray
 };

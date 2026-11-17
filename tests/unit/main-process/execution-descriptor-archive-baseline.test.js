@@ -81,7 +81,9 @@ const newSupportActions = [
   { channel: 'bank-accounts:commit-import', kind: 'support-action', reason: 'bank-account-snapshot' },
   // v3.2.16 模板管理【余额管理】：修改、删除单条余额种子
   { channel: 'balance-seed:update', kind: 'support-action', reason: 'balance-seed' },
-  { channel: 'balance-seed:delete', kind: 'support-action', reason: 'balance-seed' }
+  { channel: 'balance-seed:delete', kind: 'support-action', reason: 'balance-seed' },
+  // v3.2.18 映射关系管理【特征值管理】：保存 / 删除模板特征值
+  { channel: 'template:save-feature-filters', kind: 'support-action', reason: 'statement-template-feature-filter' }
 ];
 
 // 基线之后的行为修正，固定基线本身不改：基线把两个 deferred 动作与 acquiringBillCurrency:run 同列

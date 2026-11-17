@@ -1199,8 +1199,17 @@ class AppDatabase {
     return templateRepository.getBillSplitMappings(this.db, templateId);
   }
 
-  saveBillSplitMappings(templateId, mappings, options = {}) {
-    return templateRepository.saveBillSplitMappings(this.db, templateId, mappings, options);
+  saveBillSplitMappings(templateId, mappings) {
+    return templateRepository.saveBillSplitMappings(this.db, templateId, mappings);
+  }
+
+  // v3.2.18：【特征值管理】即时保存特征值列表；已保存映射的特征值引用（main / split）
+  saveTemplateFeatureFilters(templateId, featureFilters) {
+    return templateRepository.saveTemplateFeatureFilters(this.db, templateId, featureFilters);
+  }
+
+  listTemplateFeatureFilterReferences(templateId, featureFilterMappingValue) {
+    return templateRepository.listTemplateFeatureFilterReferences(this.db, templateId, featureFilterMappingValue);
   }
 
   getBillSplitRows(templateId) {

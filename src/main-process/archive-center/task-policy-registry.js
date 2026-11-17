@@ -86,6 +86,12 @@ const SUPPORT_ACTION_POLICIES = Object.freeze([
     channel: 'balance-seed:delete',
     kind: 'support-action',
     reason: 'balance-seed'
+  }),
+  // v3.2.18 映射关系管理【特征值管理】：保存 / 删除模板特征值（仅主库写入，不产生文件）。
+  Object.freeze({
+    channel: 'template:save-feature-filters',
+    kind: 'support-action',
+    reason: 'statement-template-feature-filter'
   })
 ]);
 
