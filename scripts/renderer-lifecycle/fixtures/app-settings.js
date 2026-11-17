@@ -5,7 +5,7 @@ const path = require('node:path');
 const acorn = require('acorn');
 
 // 真实设置/公共确认工厂；仅使用可控 API，不删除真实数据。
-module.exports = async ({ js, load, reset, assert, test }) => {
+module.exports = async ({ js, load, reset, assert, test, layout: layoutDriver }) => {
   const root = path.resolve(__dirname, '../../..');
   const renderer = fs.readFileSync(path.join(root, 'src/renderer.js'), 'utf8');
   // 只提取生产转义函数，不启动应用壳或加载用户数据。
@@ -15,11 +15,12 @@ module.exports = async ({ js, load, reset, assert, test }) => {
   const escapeHtmlSource = renderer.slice(escapeHtmlNode.start, escapeHtmlNode.end);
   const dialogStyles = ['styles-gemini.css', 'styles-gemini-extra.css', 'styles-dark-mode.css']
     .map(name => fs.readFileSync(path.join(root, 'src', name), 'utf8')).join('\n');
-  async function setup({ useOverride = false, selectBatch = true } = {}) {
-    await reset();
+  async function setup({ useOverride = false, selectBatch = true, withLinked = false, layout = null } = {}) {
+    await reset('<div id="modalRoot"></div>', layout ? { layout } : {});
     await js(escapeHtmlSource + '\n;void 0;');
     await load('src/renderer/dialogs/toolbox.js');
     await load('src/renderer-dialogs.js');
+    await load('src/renderer/dialogs/linked-table-retention.js');
     await load('src/renderer/dialogs/app-settings.js');
     await js(`
       window.__settingsTest = { subscriptions: 0, disposals: 0, prepares: [], deletes: [], lists: 0, stats: 0, settings: 0 };
@@ -28,13 +29,28 @@ module.exports = async ({ js, load, reset, assert, test }) => {
       window.fixtureHost = window.__rendererModalHost;
       window.fixtureBridge = window.__rendererModalBridge;
       window.fixtureDialogs = window.__createTestRendererDialogs({ modalBridge: fixtureBridge, state: {}, elements: {}, desktopApi: window.desktopApi, appConstants: {} });
+      window.__linkedTest = { gets: 0, writes: [], resolvers: [], deferred: false };
+      window.fixtureLinkedApi = window.__linkedTableRetentionDialogs
+        .createLinkedTableRetentionDialogs({ ui: { escapeHtml } }).createLinkedTableRetentionPreviewApi();
+      const originalLinkedGet = fixtureLinkedApi.getRetentionSettings;
+      const originalLinkedSet = fixtureLinkedApi.setRetentionDays;
+      fixtureLinkedApi.getRetentionSettings = async () => { __linkedTest.gets++; return originalLinkedGet(); };
+      fixtureLinkedApi.setRetentionDays = (payload) => {
+        __linkedTest.writes.push(payload);
+        if (!__linkedTest.deferred) return originalLinkedSet(payload);
+        return new Promise(resolve => __linkedTest.resolvers.push((result) => resolve(result || originalLinkedSet(payload))));
+      };
+      window.fixtureLinkedDialogs = window.__linkedTableRetentionDialogs.createLinkedTableRetentionDialogs({
+        api: { linkedTable: fixtureLinkedApi }, ui: { escapeHtml }
+      });
       window.fixtureSettings = window.__appSettingsDialogs.createAppSettingsDialogs({
         api: fixtureSettingsApi, modalBridge: fixtureBridge,
         modules: { bankStatementProcess: {id:'bank-statement-process',name:'资金对账'}, vccFinancialOp:{id:'vcc-financial-op',name:'VCC'} },
         ui: { escapeHtml, createConfirmDialog: fixtureDialogs.createConfirmDialog,
           getDarkModeController: () => null, mountAppearanceSettings: () => null,
           applyAppUpdateActionResult() {}, applyAppUpdateStatus() {}, getAppUpdateStatus:()=>({}),
-          refreshOpenAppUpdateDialog() {}, restartAndInstallAppUpdate() {} }
+          refreshOpenAppUpdateDialog() {}, restartAndInstallAppUpdate() {},
+          ${withLinked ? 'mountLinkedTableRetention: (container, options) => fixtureLinkedDialogs.mountLinkedTableRetention(container, options),' : ''} }
       });
       window.fixtureApi = fixtureSettings.createArchiveCenterPreviewApi();
       fixtureSettingsApi.archiveCenter = fixtureApi;
@@ -61,6 +77,12 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     await js(`new Promise(resolve => setTimeout(resolve, 10))`);
   }
 
+  // v3.2.18：保留期限在「数据管理」页；存档设置只剩存档位置。
+  async function openDataTab() {
+    await js(`settingsOverlay.querySelector('[data-tab="data"]').click()`);
+    await js('new Promise(resolve=>setTimeout(resolve,10))');
+  }
+
   await test('正式默认设置依赖无需 override 即可读取存档列表、统计和保留期', async () => {
     await setup({selectBatch:false});
     assert.equal(await js('__settingsTest.lists'),1);
@@ -69,8 +91,13 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     assert.equal(await js(`!!settingsOverlay.querySelector('[data-batch-id="902"]')`),true);
     await js(`settingsOverlay.querySelector('[data-action="open-archive-settings"]').click()`);
     await js('new Promise(resolve=>setTimeout(resolve,10))');
+    assert.match(await js(`settingsOverlay.querySelector('[data-role="archive-storage-path"]').textContent`), /存档中心/);
+    assert.equal(await js(`settingsOverlay.querySelector('[data-archive-view="settings"] [data-role="archive-retention-days"]')`), null);
+    await openDataTab();
+    assert.equal(await js(`settingsOverlay.querySelector('[data-pane="data"]').hidden`), false);
     assert.equal(await js(`settingsOverlay.querySelector('[data-role="archive-retention-days"]').disabled`),false);
     assert.equal(await js('__settingsTest.settings>0'),true);
+    assert.equal(await js(`settingsOverlay.querySelector('[data-role="linked-retention-section"]').hidden`), true);
     assert.deepEqual(await js('__testErrors'),[]);
   });
   await test('显式存档 API override 仍兼容', async () => {
@@ -219,7 +246,7 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     await js(`
       window.deferredRetention = [];
       fixtureApi.setRetentionDays = value => new Promise(resolve => deferredRetention.push(() => resolve({status:'success',settings:{retentionDays:value}})));
-      settingsOverlay.querySelector('[data-action="open-archive-settings"]').click();
+      settingsOverlay.querySelector('[data-tab="data"]').click();
     `);
     await js(`new Promise(resolve => setTimeout(resolve, 10))`);
     await js(`var select=settingsOverlay.querySelector('[data-role="archive-retention-days"]'); select.value='90'; select.dispatchEvent(new Event('change')); settingsOverlay.querySelector('[data-action="delete-archive-batch"]').click();`);
@@ -240,7 +267,7 @@ module.exports = async ({ js, load, reset, assert, test }) => {
       fixtureApi.setRetentionDays = async value => { retentionWrites.push(value); return {status:'success'}; };
       fixtureApi.setModuleRetentionDays = async value => { retentionWrites.push(value); return {status:'success'}; };
       fixtureApi.getSettings = () => new Promise(resolve => window.resolveSettings = resolve);
-      settingsOverlay.querySelector('[data-action="open-archive-settings"]').click();
+      settingsOverlay.querySelector('[data-tab="data"]').click();
     `);
     assert.deepEqual(await js(`(() => { const el=settingsOverlay.querySelector('[data-role="archive-retention-days"]'); return [el.value,el.disabled]; })()`), ['permanent', true]);
     await js(`
@@ -253,9 +280,9 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     assert.equal(await js(`settingsOverlay.querySelector('[data-role="archive-retention-days"]').value`), 'inherit');
     assert.equal(await js(`settingsOverlay.querySelector('[data-role="archive-retention-days"] [value="inherit"]').textContent`), '跟随默认（永久）');
     await js(`
-      settingsOverlay.querySelector('[data-action="back-to-archive"]').click();
+      settingsOverlay.querySelector('[data-tab="archive"]').click();
       fixtureApi.getSettings=async()=>({status:'success',settings:savedSettings});
-      settingsOverlay.querySelector('[data-action="open-archive-settings"]').click();
+      settingsOverlay.querySelector('[data-tab="data"]').click();
     `);
     await js('new Promise(resolve=>setTimeout(resolve,10))');
     assert.equal(await js(`settingsOverlay.querySelector('[data-role="archive-retention-days"]').value`), 'inherit');
@@ -270,7 +297,7 @@ module.exports = async ({ js, load, reset, assert, test }) => {
       fixtureApi.getSettings = async()=>({status:'success',settings:{retentionDays:60,retentionDaysByModule:{'vcc-financial-op':null}}});
       fixtureApi.setRetentionDays=async value=>retentionWrites.push(value);
       fixtureApi.setModuleRetentionDays=async value=>retentionWrites.push(value);
-      settingsOverlay.querySelector('[data-action="open-archive-settings"]').click();
+      settingsOverlay.querySelector('[data-tab="data"]').click();
     `);
     await js('new Promise(resolve=>setTimeout(resolve,10))');
     for (const [moduleId, expected] of [['', '60'], ['bank-statement-process', 'inherit'], ['vcc-financial-op', 'permanent'], ['', '60']]) {
@@ -290,23 +317,23 @@ module.exports = async ({ js, load, reset, assert, test }) => {
           if (${JSON.stringify(invalid)}==='rejected') throw new Error('模拟读取失败');
           return ${JSON.stringify(invalid)}==='failed' ? {status:'failed',message:'模拟读取失败'} : {status:'success',settings:null};
         };
-        settingsOverlay.querySelector('[data-action="open-archive-settings"]').click();
+        settingsOverlay.querySelector('[data-tab="data"]').click();
       `);
       await js('new Promise(resolve=>setTimeout(resolve,10))');
       assert.equal(await js(`settingsOverlay.querySelector('[data-role="archive-retention-days"]').disabled`), true);
       assert.equal(await js(`settingsOverlay.querySelector('[data-role="archive-retention-module"]').disabled`), true);
-      assert.match(await js(`settingsOverlay.querySelector('[data-role="archive-feedback"]').textContent`), /加载失败/);
+      assert.match(await js(`settingsOverlay.querySelector('[data-role="data-feedback"]').textContent`), /加载失败/);
       await js(`var el=settingsOverlay.querySelector('[data-role="archive-retention-days"]'); el.value='60'; el.dispatchEvent(new Event('change'));`);
       assert.deepEqual(await js('retentionWrites'), []);
       await js(`
-        settingsOverlay.querySelector('[data-action="back-to-archive"]').click();
+        settingsOverlay.querySelector('[data-tab="archive"]').click();
         fixtureApi.getSettings=async()=>({status:'success',settings:{retentionDays:60,retentionDaysByModule:{}}});
-        settingsOverlay.querySelector('[data-action="open-archive-settings"]').click();
+        settingsOverlay.querySelector('[data-tab="data"]').click();
       `);
       await js('new Promise(resolve=>setTimeout(resolve,10))');
       assert.deepEqual(await js(`(() => { const el=settingsOverlay.querySelector('[data-role="archive-retention-days"]'); return [el.value,el.disabled]; })()`), ['60', false]);
       assert.deepEqual(await js('retentionWrites'), []);
-      assert.doesNotMatch(await js(`settingsOverlay.querySelector('[data-role="archive-feedback"]').textContent`), /已保存/);
+      assert.doesNotMatch(await js(`settingsOverlay.querySelector('[data-role="data-feedback"]').textContent`), /已保存/);
       assert.equal(await js('settingsHandle.close().status'), 'closed');
     });
   }
@@ -318,7 +345,7 @@ module.exports = async ({ js, load, reset, assert, test }) => {
       fixtureApi.getSettings=async()=>({status:'success',settings:{retentionDays:null,retentionDaysByModule:{}}});
       fixtureApi.setRetentionDays=value=>new Promise(resolve=>{retentionWrites.push(value);retentionResolvers.push(resolve);});
       fixtureApi.setModuleRetentionDays=async value=>{retentionWrites.push(value);return {status:'success'};};
-      settingsOverlay.querySelector('[data-action="open-archive-settings"]').click();
+      settingsOverlay.querySelector('[data-tab="data"]').click();
     `);
     await js('new Promise(resolve=>setTimeout(resolve,10))');
     await js(`
@@ -337,7 +364,7 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     await js(`retentionResolvers.shift()({status:'failed',message:'模拟保存失败'});`);
     await js('new Promise(resolve=>setTimeout(resolve,10))');
     assert.equal(await js('days.value'), '90');
-    assert.match(await js(`settingsOverlay.querySelector('[data-role="archive-feedback"]').textContent`), /保存失败/);
+    assert.match(await js(`settingsOverlay.querySelector('[data-role="data-feedback"]').textContent`), /保存失败/);
     await js(`days.value='permanent';days.dispatchEvent(new Event('change'));retentionResolvers.shift()({status:'success'});`);
     await js('new Promise(resolve=>setTimeout(resolve,10))');
     assert.equal(await js('days.value'), 'permanent');
@@ -360,15 +387,136 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     ]) {
       await js(`
         fixtureApi.getSettings=async()=>({status:'success',settings:${payload}});
-        settingsOverlay.querySelector('[data-action="open-archive-settings"]').click();
+        settingsOverlay.querySelector('[data-tab="data"]').click();
       `);
       await js('new Promise(resolve=>setTimeout(resolve,10))');
       await js(`var modules=settingsOverlay.querySelector('[data-role="archive-retention-module"]');modules.value='';modules.dispatchEvent(new Event('change'));`);
       assert.equal(await js(`settingsOverlay.querySelector('[data-role="archive-retention-days"]').value`),value);
       await js(`modules.value='bank-statement-process';modules.dispatchEvent(new Event('change'));`);
       assert.equal(await js(`settingsOverlay.querySelector('[data-role="archive-retention-days"] [value="inherit"]').textContent`),`跟随默认（${label}）`);
-      await js(`settingsOverlay.querySelector('[data-action="back-to-archive"]').click();`);
+      await js(`settingsOverlay.querySelector('[data-tab="archive"]').click();`);
     }
     assert.deepEqual(await js('retentionWrites'),[]);
+  });
+
+  await test('数据管理页：链接表保留期限按表显示内置默认，切换表不保存', async () => {
+    await setup({ selectBatch: false, withLinked: true });
+    await openDataTab();
+    const view = await js(`(() => {
+      const section = settingsOverlay.querySelector('[data-role="linked-retention-section"]');
+      const table = section.querySelector('[data-role="linked-retention-table"]');
+      const days = section.querySelector('[data-role="linked-retention-days"]');
+      return { hidden: section.hidden, heading: section.querySelector('h4').textContent,
+        labels: Array.from(section.querySelectorAll('.archive-center-field > span')).map(el => el.textContent),
+        tables: Array.from(table.options).map(option => option.textContent),
+        options: Array.from(days.options).map(option => option.value),
+        table: table.value, days: days.value, disabled: [table.disabled, days.disabled] };
+    })()`);
+    assert.deepEqual(view, {
+      hidden: false, heading: '链接表保留期限', labels: ['链接表名称', '保留期限'],
+      tables: ['网关对账单表库', '外汇交割表库', '银行对账单表'],
+      options: ['15', '30', '60', '90', '180', '365', 'permanent'],
+      table: 'gateway-bill', days: '15', disabled: [false, false]
+    });
+    await js(`var linkedTable=settingsOverlay.querySelector('[data-role="linked-retention-table"]'); linkedTable.value='fx-settlement'; linkedTable.dispatchEvent(new Event('change'));`);
+    assert.equal(await js(`settingsOverlay.querySelector('[data-role="linked-retention-days"]').value`), 'permanent');
+    await js(`linkedTable.value='bank-deposit'; linkedTable.dispatchEvent(new Event('change'));`);
+    assert.equal(await js(`settingsOverlay.querySelector('[data-role="linked-retention-days"]').value`), '60');
+    assert.deepEqual(await js('__linkedTest.writes'), []);
+    assert.deepEqual(await js('__testErrors'), []);
+  });
+
+  for (const viewport of [
+    { theme: 'light', width: 1080, height: 760, zoom: 1 },
+    { theme: 'dark', width: 1080, height: 760, zoom: 1.5 },
+    { theme: 'light', width: 1240, height: 860, zoom: 1.25 }
+  ]) {
+    const label = `${viewport.theme}-${viewport.width}x${viewport.height}-${viewport.zoom * 100}`;
+    await test(`数据管理页 ${label}：两类期限控件同宽对齐、无溢出（生产样式）`, async () => {
+      await setup({ selectBatch: false, withLinked: true, layout: viewport });
+      await openDataTab();
+      const layout = await js(`(() => {
+        const pane = settingsOverlay.querySelector('[data-pane="data"]');
+        const scroll = pane.querySelector('.data-management-scroll');
+        const paneRect = pane.getBoundingClientRect();
+        const box = (selector) => {
+          const el = pane.querySelector(selector);
+          const rect = el.getBoundingClientRect();
+          const style = getComputedStyle(el);
+          return { left: Math.round(rect.left), width: Math.round(rect.width), height: Math.round(rect.height),
+            inside: rect.left >= paneRect.left - 1 && rect.right <= paneRect.right + 1,
+            visible: style.visibility === 'visible' && style.display !== 'none' };
+        };
+        return {
+          headings: Array.from(pane.querySelectorAll('h4')).map(el => el.textContent),
+          archiveModule: box('[data-role="archive-retention-module"]'),
+          archiveDays: box('[data-role="archive-retention-days"]'),
+          linkedTable: box('[data-role="linked-retention-table"]'),
+          linkedDays: box('[data-role="linked-retention-days"]'),
+          overflow: scroll.scrollWidth > scroll.clientWidth + 1
+        };
+      })()`);
+      assert.deepEqual(layout.headings, ['输入/输出文件保留期限', '链接表保留期限']);
+      for (const key of ['archiveModule', 'archiveDays', 'linkedTable', 'linkedDays']) {
+        assert.equal(layout[key].visible && layout[key].inside && layout[key].height > 0, true, key);
+      }
+      assert.equal(layout.archiveModule.width, 224);
+      assert.equal(layout.linkedTable.width, 224);
+      assert.equal(layout.archiveDays.width, 132);
+      assert.equal(layout.linkedDays.width, 132);
+      assert.equal(layout.linkedTable.left, layout.archiveModule.left);
+      assert.equal(layout.linkedDays.left, layout.archiveDays.left);
+      assert.equal(layout.linkedTable.height, layout.archiveModule.height);
+      assert.equal(layout.overflow, false);
+      assert.deepEqual(await js('__testErrors'), []);
+      await layoutDriver.evidence(`data-management-${label.replace(/\./g, '')}`, { layout });
+    });
+  }
+
+  await test('数据管理页：链接表期限串行保存，保存中禁止切表与关闭，失败回显最近成功值', async () => {
+    await setup({ selectBatch: false, withLinked: true });
+    await js('__linkedTest.deferred = true; void 0;');
+    await openDataTab();
+    await js(`
+      var linkedTable=settingsOverlay.querySelector('[data-role="linked-retention-table"]');
+      var linkedDays=settingsOverlay.querySelector('[data-role="linked-retention-days"]');
+      linkedDays.value='30'; linkedDays.dispatchEvent(new Event('change'));
+      linkedDays.value='permanent'; linkedDays.dispatchEvent(new Event('change'));
+      linkedTable.value='bank-deposit'; linkedTable.dispatchEvent(new Event('change'));
+    `);
+    assert.equal(await js('linkedTable.value'), 'gateway-bill');
+    assert.equal(await js('linkedTable.disabled'), true);
+    assert.equal(await js('settingsHandle.close().status'), 'blocked');
+    assert.deepEqual(await js('__linkedTest.writes'), [{ tableKey: 'gateway-bill', retentionDays: 30 }]);
+    await js('__linkedTest.resolvers.shift()()');
+    await js('new Promise(resolve=>setTimeout(resolve,10))');
+    assert.deepEqual(await js('__linkedTest.writes'), [
+      { tableKey: 'gateway-bill', retentionDays: 30 },
+      { tableKey: 'gateway-bill', retentionDays: null }
+    ]);
+    await js(`__linkedTest.resolvers.shift()({status:'failed',message:'模拟保存失败'})`);
+    await js('new Promise(resolve=>setTimeout(resolve,10))');
+    assert.equal(await js('linkedDays.value'), '30');
+    assert.match(await js(`settingsOverlay.querySelector('[data-role="data-feedback"]').textContent`), /链接表保留期限保存失败：模拟保存失败/);
+    assert.equal(await js('linkedTable.disabled'), false);
+    assert.equal(await js('settingsHandle.close().status'), 'closed');
+    assert.deepEqual(await js('__testErrors'), []);
+  });
+
+  await test('数据管理页：链接表期限保存中阻止存档批次删除预检，保存结算后恢复', async () => {
+    await setup({ withLinked: true });
+    await js('__linkedTest.deferred = true; void 0;');
+    await openDataTab();
+    await js(`var linkedDays=settingsOverlay.querySelector('[data-role="linked-retention-days"]'); linkedDays.value='30'; linkedDays.dispatchEvent(new Event('change'));`);
+    await js(`settingsOverlay.querySelector('[data-action="delete-archive-batch"]').click()`);
+    await js('new Promise(resolve=>setTimeout(resolve,10))');
+    assert.equal(await js('__settingsTest.prepares.length'), 0);
+    assert.match(await js(`settingsOverlay.querySelector('[data-role="archive-feedback"]').textContent`), /保留期限正在保存/);
+    await js('__linkedTest.resolvers.shift()()');
+    await js('new Promise(resolve=>setTimeout(resolve,10))');
+    await js(`settingsOverlay.querySelector('[data-action="delete-archive-batch"]').click()`);
+    await js('new Promise(resolve=>setTimeout(resolve,10))');
+    assert.deepEqual(await js('__settingsTest.prepares'), ['902']);
+    assert.deepEqual(await js('__testErrors'), []);
   });
 };

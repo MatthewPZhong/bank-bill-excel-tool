@@ -214,7 +214,8 @@ scenario('旧全局设置兼容，14 个模块设置经 SQLite 关闭/重开保�
   assert.equal(fixture.controller.getRetentionDays('statement-generator'), 180);
   const expected = {};
   for (const [index, scope] of SCOPES.entries()) {
-    const days = [30, 60, 90, 180, 365, null][index % 6];
+    // v3.2.18 起可选 15 天。
+    const days = [15, 30, 60, 90, 180, 365, null][index % 7];
     setModule(fixture, scope.id, days);
     expected[scope.id] = days;
   }
@@ -264,6 +265,7 @@ scenario('未知模块和非法期限拒绝保存，已有设置不被覆盖', a
     { moduleId: 'toolbox', retentionDays: 0 },
     { moduleId: 'toolbox', retentionDays: -30 },
     { moduleId: 'toolbox', retentionDays: 31 },
+    { moduleId: 'toolbox', retentionDays: 14 },
     { moduleId: 'toolbox', retentionDays: 90.5 },
     { moduleId: 'toolbox', retentionDays: 'not-a-period' },
     { moduleId: 'toolbox', retentionDays: {} },

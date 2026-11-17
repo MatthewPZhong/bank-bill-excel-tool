@@ -380,6 +380,17 @@ const {
 // v3.0.6 需求1（T3）：调拨对账单派生纯函数（mid-allocation 导入触发 → in/out 两行落 linked_fund_transfer_recon）。
 const { buildFundTransferReconRows } = require('./main-process/fund-transfer-recon-builder');
 const { streamLinkedRowsToInsert } = require('./main-process/linked-table-stream-source');
+// v3.2.18：链接表按数据日期统计 / 删除 + 派生联动的共享实现（手工删除与链接表过期清理共用，禁复制 = R-5）。
+const {
+  isLinkedDeleteTable,
+  countLinkedTableRowsByDateRange,
+  deleteLinkedTableRowsByDateRange
+} = require('./main-process/linked-table-delete');
+const {
+  listPublicRetentionTables,
+  readRetentionDaysByTable: readLinkedRetentionDaysByTable,
+  setTableRetentionDays: setLinkedTableRetentionDays
+} = require('./main-process/linked-table-retention/policy');
 const linkedTableReaders = require('./backend/file-service/readers');
 const {
   normalizeCell: normalizeLinkedCell,
@@ -881,6 +892,18 @@ function runReconFixJpmAdmMutationBoundary(work) {
     });
   }
   return reconFixJpmHoldGate.runSynchronousMutationBoundary(work);
+}
+
+// v3.2.18：链接表删除共享实现的主进程依赖（ADM 写边界与 run / 修复结果缓存）。
+function linkedTableDeleteDeps() {
+  return {
+    database,
+    appendActivityLogEntry,
+    assertAdmMutationAllowed: assertReconFixJpmAdmMutationAllowed,
+    admMutationBoundary: runReconFixJpmAdmMutationBoundary,
+    clearProcessingResult: () => { processingResult = null; },
+    clearReconIdFixResult: () => { reconIdFixResult = null; }
+  };
 }
 
 let archiveOperationTail = Promise.resolve();
@@ -1399,6 +1422,26 @@ const idleDatabaseCompaction = createIdleCompactionController({
     source: 'main',
     domain: 'database-maintenance',
     message: `[空闲存储整理] ${entry.message}`,
+    details: entry.details
+  })
+});
+// v3.2.18 链接表过期清理（🔴🔴 资金红线）：触发方式同空闲整理主库；持银行对账锁 + 过渡租约，
+//   按设置 → 数据管理 → 链接表保留期限逐表删除过期行（与「链接表管理 → 删除」同一删除与派生链路）。
+const { createIdleLinkedTableRetentionController } = require('./main-process/linked-table-retention/idle-retention');
+const idleLinkedTableRetention = createIdleLinkedTableRetentionController({
+  getDatabase: () => (database && database.db ? database : null),
+  registry: businessOperationRegistry,
+  getLastUserActivityTs: () => lastUserActivityTs,
+  isOtherWorkBusy: () => idleCompactionBusyReason(),
+  acquireLock: () => tryAcquireBankStatementOpLock('linked-retention'),
+  releaseLock: () => releaseBankStatementOpLock(),
+  countExpired: (range) => countLinkedTableRowsByDateRange(database, range),
+  deleteExpired: (range) => deleteLinkedTableRowsByDateRange(linkedTableDeleteDeps(), range),
+  log: (entry) => appendActivityLogEntry({
+    level: entry.level,
+    source: 'main',
+    domain: 'linked-table-retention',
+    message: `[链接表过期清理] ${entry.message}`,
     details: entry.details
   })
 });
@@ -4870,13 +4913,16 @@ async function waitForVccPreviewCaptureReady(webContents) {
 }
 
 // 主窗口关闭（含任务栏“关闭窗口”、Alt+F4 等不经渲染层的入口）：
-//   空闲存储整理持有过渡租约时，先中止整理并等其收尾，再重新关闭；升级准备期间仍阻止关闭。
+//   空闲存储整理或链接表过期清理持有过渡租约时，先中止并等其收尾，再重新关闭；升级准备期间仍阻止关闭。
 function handleMainWindowClose(event) {
   if (quitPreparationComplete) return;
-  if (idleDatabaseCompaction.isRunning()) {
+  if (idleDatabaseCompaction.isRunning() || idleLinkedTableRetention.isRunning()) {
     event.preventDefault();
     const closingWindow = mainWindow;
-    idleDatabaseCompaction.stop('window-close').then(() => {
+    Promise.all([
+      idleLinkedTableRetention.stop('window-close'),
+      idleDatabaseCompaction.stop('window-close')
+    ]).then(() => {
       if (closingWindow && !closingWindow.isDestroyed()) closingWindow.close();
     });
     return;
@@ -7954,6 +8000,7 @@ function registerAppHandlers() {
   //   - 节流由 renderer 端做（10s 一次），main 不再做防抖
   ipcMain.on('app:user-activity', () => {
     lastUserActivityTs = Date.now();
+    idleLinkedTableRetention.abort('user-activity');
     idleDatabaseCompaction.abort('user-activity');
   });
 
@@ -18681,7 +18728,7 @@ function registerNewAccountHandlers() {
   //   仅三张前端可管理的主表（gateway-bill / fx-settlement / bank-deposit）；其余（含隐藏派生表
   //   adm-bank-deposit / boc-fx-settlement / boc-bank-deposit / mid-allocation / fx-option）一律拒绝——
   //   删除不可逆 + 派生联动，绝不允许通过 tableKey 触达隐藏派生表（防误删/绕过派生重建链）。
-  const LINKED_DELETE_ALLOWED_TABLES = new Set(['gateway-bill', 'fx-settlement', 'bank-deposit']);
+  //   v3.2.18：白名单、统计与删除联动抽到 src/main-process/linked-table-delete.js（与链接表过期清理共用）。
 
   // v3.0.1 需求1（D4）：按数据日期范围统计将删行数（只读，前端删除弹框预览）。任何异常返回 failed，前端保守处理。
   //   v3.0.5 OPEN-4（T6b-2）🔴 资金红线：三表化 —— 加 tableKey 正向白名单路由（缺省 gateway-bill 向后兼容）。
@@ -18699,14 +18746,11 @@ function registerNewAccountHandlers() {
     }
     // 🔴 正向白名单：仅三张可管理主表；缺省 gateway-bill（前端未传 tableKey 时 = v3.0.1 行为）。
     const tableKey = payload && payload.tableKey != null ? String(payload.tableKey).trim() : 'gateway-bill';
-    if (!LINKED_DELETE_ALLOWED_TABLES.has(tableKey)) {
+    if (!isLinkedDeleteTable(tableKey)) {
       return { status: 'failed', message: '不支持的删除目标表' };
     }
     try {
-      let count;
-      if (tableKey === 'fx-settlement') count = database.countFxByDateRange(start, end);
-      else if (tableKey === 'bank-deposit') count = database.countBankDepositByDateRange(start, end);
-      else count = database.countGatewayBillByDateRange(start, end);
+      const count = countLinkedTableRowsByDateRange(database, { tableKey, start, end });
       return { status: 'ok', count };
     } catch (err) {
       return { status: 'failed', message: err && err.message ? err.message : String(err) };
@@ -18715,14 +18759,9 @@ function registerNewAccountHandlers() {
 
   // v3.0.1 需求1（D4）🔴 资金红线：按数据日期范围删除链接表行（不可逆，闭区间，直接删）。
   //   mutating → trackedIpcHandle 记活动日志；入参校验（起止非空 + 起≤止）；返回删除行数 + 重算后 meta。
-  //   v3.0.5 OPEN-4（T6b-2）🔴🔴 资金红线：三表化 —— tableKey 正向白名单路由（缺省 gateway-bill 向后兼容）+ 删除派生联动：
-  //     · gateway-bill → 删 + 清 processingResult（v3.0.1 行为字节不变）。
-  //     · fx-settlement → 删 fx 主表（T6a 单事务已联动删 BOC 行）→ rebuildFxBocDerivation 全量重匹配重编号（无进组步，传空 ctx）→ 清 reconIdFixResult。
-  //     · bank-deposit  → 删 bank 主表（T6a 返回 deletedBizIds）→ rebuildAdmDerivation + rebuildBankDepositBocDerivation 派生重建
-  //                      → 清 processingResult + reconIdFixResult + clearBankDepositHitMarkersByBizIds（OPEN-7 标记防悬挂）。
-  //   🔴 事务边界：T6a 删除函数各自单事务（BEGIN/COMMIT/ROLLBACK）删完即返回；rebuild* / clearBankDepositHitMarkersByBizIds
-  //     各自开独立事务——本处调用点【不在】任何外层 DB 事务内（删除事务已提交），无嵌套事务问题。
-  //   🔴 派生重建沿用导入侧语义：rebuild* 内部各自 try/catch 隔离，派生任一步抛错记 created:false 不向外抛、不阻断删除本身（行已删）。
+  //   v3.0.5 OPEN-4（T6b-2）🔴🔴 资金红线：三表化 —— tableKey 正向白名单路由（缺省 gateway-bill 向后兼容）+ 删除派生联动
+  //     （gateway 清 processingResult；fx 联动删 BOC + 重匹配 + 清 reconIdFixResult；bank-deposit ADM gate + ADM/BOC bank 重建
+  //      + 清两类缓存与命中标记）。v3.2.18 起联动实现见 src/main-process/linked-table-delete.js，返回结构不变。
   trackedIpcHandle('linked-table:delete-by-date-range', '链接表管理', '删除', (_event, payload) => {
     // v3.0.11 codex-P2 补强（🔴 资金红线）：纳入 bankStatementOperationLock —— 链接表是 bank-statement run（R1-R5）输入，
     //   run 全程持锁；本删除若在 run 数据准备让出窗口内并发执行会撕裂快照。争用即返回失败，finally 释放。
@@ -18740,77 +18779,44 @@ function registerNewAccountHandlers() {
     }
     // 🔴 正向白名单（与 count 同口径）：仅三张主表；非白名单（含隐藏派生表）一律拒绝——绝不用 LINKED_TABLE_DEFS 兜底放行。
     const tableKey = payload && payload.tableKey != null ? String(payload.tableKey).trim() : 'gateway-bill';
-    if (!LINKED_DELETE_ALLOWED_TABLES.has(tableKey)) {
+    if (!isLinkedDeleteTable(tableKey)) {
       return { status: 'failed', message: '不支持的删除目标表' };
     }
     try {
-      if (tableKey === 'fx-settlement') {
-        // 🔴🔴 资金红线：删外汇交割表（T6a 单事务已按 transaction_no 联动删 BOC 行，返回 bocDeleted/deletedTxnNos）。
-        const ret = database.deleteFxByDateRange(start, end);
-        // 🔴 删除场景【无进组步】（被删 BOC 行已由 T6a 联动删，无新行进组）→ 传空 ctx（scanLogs:[]/groupCount:0/overwriteCount:0），
-        //   rebuildFxBocDerivation 从「读全库 BOC 行重匹配」起：readBocFxLinkRowsForRematch → rematchAllBocGroups（重编号 1..N）
-        //   → 2.4 replaceBocBankDeposit → 2.5 全量回填 → 对删后全库行重算（复用 T6b-1 抽取函数，禁复制 = R-5）。
-        const { bocDerive } = rebuildFxBocDerivation(
-          { database, rematchAllBocGroups, buildBocBankRows, backfillBocReconLinkIds, appendActivityLogEntry },
-          { scanLogs: [], groupCount: 0, overwriteCount: 0 }
-        );
-        // 🔴 删 fx → BOC 派生重算 → 旧 reconIdFixResult（基于旧 BOC 调拨数据的修复结果）失效 → 清空（spec §3.3）。
-        reconIdFixResult = null;
-        return {
-          status: 'ok',
-          deleted: ret.deleted,
-          rowCount: ret.rowCount,
-          dataDateMin: ret.dataDateMin,
-          dataDateMax: ret.dataDateMax,
-          bocDeleted: ret.bocDeleted,
-          bocDerive
-        };
-      }
-      if (tableKey === 'bank-deposit') {
-        // 🔴 资金红线：删银行对账单入金表（T6a 单事务删 + 返回 deletedBizIds 供清标记/派生重建）。
-        assertReconFixJpmAdmMutationAllowed();
-        const ret = database.deleteBankDepositByDateRange(start, end);
-        // 派生重建（复用 T6b-1 抽取函数，禁复制 = R-5）：ADM（全库 Channel=ADM 候选重建）+ BOC bank（2.4 + 2.5 全量回填）。
-        const { admDerive } = rebuildAdmDerivation({
-          database,
-          buildAdmRows,
-          admMutationBoundary: runReconFixJpmAdmMutationBoundary
-        });
-        const { bocBankDerive } = rebuildBankDepositBocDerivation(
-          { database, buildBocBankRows, backfillBocReconLinkIds, appendActivityLogEntry }
-        );
-        // 🔴 删 bank-deposit → 清 processingResult（R5 场景4 中台退款回填 + 场景2b 数据源失效）
-        //   + reconIdFixResult（ADM 表重建 = JPM 修复结果失效）。
-        processingResult = null;
-        reconIdFixResult = null;
-        // 🔴 OPEN-7（spec §3.3）：清被删 BizId 的命中标记防悬挂。
-        //   注：当前载体（last_hit_run/last_hit_at 在 linked_bank_deposit 行上）下 DELETE 已隐式清掉被删行的标记，
-        //   此调用为 spec §3.3 要求的防御性双保险（口径与 T6a deletedBizIds 字节同源：normalizeKey 去空去重）。
-        database.clearBankDepositHitMarkersByBizIds(ret.deletedBizIds);
-        return {
-          status: 'ok',
-          deleted: ret.deleted,
-          rowCount: ret.rowCount,
-          dataDateMin: ret.dataDateMin,
-          dataDateMax: ret.dataDateMax,
-          admDerive,
-          bocBankDerive
-        };
-      }
-      // gateway-bill（缺省）：v3.0.1 行为字节不变。
-      const ret = database.deleteGatewayBillByDateRange(start, end);
-      // v3.0.1 PR#68 Finding1（🔴 资金红线）：gateway-bill 数据变更（按日期删除）后清银行对账缓存。
-      //   银行对账 run 数据源含 gateway-bill（C3 网关核销 / R5）+ bank-deposit（R5 场景4 中台退款回填）——
-      //   gateway-bill 或 bank-deposit 任一变更都使 processingResult 失效（bank-deposit 侧清空见上方分支 + linked-table:import handler）。
-      //   旧 processingResult 基于旧网关数据 → 不清则「先跑银行对账、再删网关对账单」仍能导出 stale 结果，强制用户重跑后才能导出。
-      processingResult = null;
-      return { status: 'ok', deleted: ret.deleted, rowCount: ret.rowCount, dataDateMin: ret.dataDateMin, dataDateMax: ret.dataDateMax };
+      const result = deleteLinkedTableRowsByDateRange(linkedTableDeleteDeps(), { tableKey, start, end });
+      return { status: 'ok', ...result };
     } catch (err) {
       return { status: 'failed', message: err && err.message ? err.message : String(err) };
     }
     } finally {
       // v3.0.11 codex-P2 补强：删表结束统一释放互斥锁（含各早返回 / ok / 异常路径）。
       releaseBankStatementOpLock();
+    }
+  });
+
+  // v3.2.18 链接表保留期限（设置 → 数据管理）：读取三张累加表当前生效期限（含内置默认）。只读，普通 handle。
+  ipcMain.handle('linked-table:get-retention-settings', () => {
+    if (!database || !database.db) return { status: 'failed', message: '数据库未初始化' };
+    try {
+      return {
+        status: 'ok',
+        tables: listPublicRetentionTables(),
+        retentionDaysByTable: readLinkedRetentionDaysByTable(database)
+      };
+    } catch (err) {
+      return { status: 'failed', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // v3.2.18：保存单张链接表的保留期限（15/30/60/90/180/365 天或 null=永久）。只写设置，不立即删除；
+  //   保存后清空上次成功清理时间，新期限在下一次空闲清理时生效。
+  ipcMain.handle('linked-table:set-retention-days', (_event, payload) => {
+    if (!database || !database.db) return { status: 'failed', message: '数据库未初始化' };
+    try {
+      const retentionDaysByTable = setLinkedTableRetentionDays(database, payload);
+      return { status: 'ok', retentionDaysByTable };
+    } catch (err) {
+      return { status: 'failed', message: err && err.message ? err.message : String(err) };
     }
   });
 
@@ -24546,6 +24552,11 @@ function setupIdleCleanupTimer() {
   };
   idleCleanupTimer = setInterval(observeBackgroundMemoryActivity(async () => {
     await runAcquiringIdleCleanupTick();
+    // v3.2.18：收单空闲清理结束后先做链接表过期清理（自带空闲、间隔、任务与锁条件，结果已记日志），
+    //   再判断是否整理主库（先删再整理，两者串行，不同时持租约）。
+    try {
+      await idleLinkedTableRetention.maybeRun();
+    } catch (_retentionError) { /* 下次空闲再试 */ }
     // 收单空闲清理结束（含提前返回）后，再判断是否需要空闲整理主库（自带空闲、任务与磁盘条件，失败已记日志）。
     try {
       await idleDatabaseCompaction.maybeRun();
@@ -24846,10 +24857,13 @@ function resumeApplicationAfterFailedRestart() {
 
 if (!packagedRuntimeModeSelected) {
   app.on('before-quit', (event) => {
-    // 空闲存储整理持有过渡租约；退出时先中止整理并等其收尾，再继续退出。
-    if (idleDatabaseCompaction.isRunning() && !quitPreparationComplete) {
+    // 空闲存储整理或链接表过期清理持有过渡租约；退出时先中止并等其收尾，再继续退出。
+    if ((idleDatabaseCompaction.isRunning() || idleLinkedTableRetention.isRunning()) && !quitPreparationComplete) {
       event.preventDefault();
-      idleDatabaseCompaction.stop('quit').then(() => app.quit());
+      Promise.all([
+        idleLinkedTableRetention.stop('quit'),
+        idleDatabaseCompaction.stop('quit')
+      ]).then(() => app.quit());
       return;
     }
     if (businessOperationRegistry.isInstallTransitionActive() && !quitPreparationComplete) {

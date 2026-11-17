@@ -4975,6 +4975,7 @@
           "getDarkModeController",
           "mountAppearanceSettings",
           "mountBankAccounts",
+          "mountLinkedTableRetention",
           "mountTemplateFiles",
           "openReleaseNotes",
           "refreshOpenAppUpdateDialog",
@@ -5152,6 +5153,67 @@
         ],
         "ui": [
           "createConfirmDialog",
+          "escapeHtml"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-dialog-linked-table-retention",
+      "governance": "G3",
+      "owner": "feat/data-management-retention",
+      "state": "active",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/dialogs/linked-table-retention.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/dialogs/linked-table-retention.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer/dialogs/linked-table-retention.js",
+          "kind": "classic-global",
+          "importedNames": [
+            "__linkedTableRetentionDialogs"
+          ]
+        }
+      ],
+      "activationEvidence": [
+        "scripts/test-renderer-lifecycle.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/dialogs/linked-table-retention.js",
+          "exportsGlobal": [
+            "__linkedTableRetentionDialogs"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer/dialogs/linked-table-retention.js",
+        "name": "createLinkedTableRetentionDialogs",
+        "parameters": [
+          "api",
+          "ui"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "linkedTable.getRetentionSettings",
+          "linkedTable.setRetentionDays"
+        ],
+        "ui": [
           "escapeHtml"
         ]
       },
@@ -19973,6 +20035,135 @@
       },
       "reason": "补录余额「导入余额文件」（feat/balance-file-import-fundtype-gate）合入 release/v3.2.17 后，release 历史中的feat/appearance-dark-lightness 的提交 40c1736a（feat(v3.2.17): 外观设置新增深色模式深浅度调节）仍持有原 api 集合，按该提交补登 files.importBalanceSeedFile 的同一放宽；这些提交未改动该边界。",
       "designDoc": "changes/v3.2.17/feat/balance-file-import-fundtype-gate/spec.md"
+    },
+    {
+      "sourceCommit": "a7f268f2e2499d67bab464ef90f20b56c9344014",
+      "sourcePolicyBlob": "1ff406df5a48413cf6e71b8447dd9c54686432e4",
+      "boundaryId": "renderer-dialog-app-settings",
+      "field": "allowedApiFields",
+      "from": {
+        "api": [
+          "appUpdate.checkNow",
+          "appUpdate.getStatus",
+          "appUpdate.onStatusChanged",
+          "appUpdate.restartAndInstall",
+          "appUpdate.setEnabled",
+          "archiveCenter.changeStorageLocation",
+          "archiveCenter.deleteBatch",
+          "archiveCenter.getBatch",
+          "archiveCenter.getSettings",
+          "archiveCenter.getStats",
+          "archiveCenter.listBatches",
+          "archiveCenter.listDeleteCleanupJobs",
+          "archiveCenter.onEntryMaintenanceCompleted",
+          "archiveCenter.onEntryMaintenanceFailed",
+          "archiveCenter.onEntryMaintenanceProgress",
+          "archiveCenter.onStorageMigrationProgress",
+          "archiveCenter.openFile",
+          "archiveCenter.prepareDeleteBatch",
+          "archiveCenter.retryBatch",
+          "archiveCenter.retryDeleteCleanupJob",
+          "archiveCenter.saveAs",
+          "archiveCenter.selectRetrySources",
+          "archiveCenter.setLocked",
+          "archiveCenter.setModuleRetentionDays",
+          "archiveCenter.setRetentionDays",
+          "archiveCenter.startEntryMaintenance"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "applyAppUpdateActionResult",
+          "applyAppUpdateStatus",
+          "createConfirmDialog",
+          "escapeHtml",
+          "getAppUpdateStatus",
+          "getDarkModeController",
+          "mountAppearanceSettings",
+          "mountBankAccounts",
+          "mountTemplateFiles",
+          "openReleaseNotes",
+          "refreshOpenAppUpdateDialog",
+          "restartAndInstallAppUpdate"
+        ]
+      },
+      "to": {
+        "api": [
+          "appUpdate.checkNow",
+          "appUpdate.getStatus",
+          "appUpdate.onStatusChanged",
+          "appUpdate.restartAndInstall",
+          "appUpdate.setEnabled",
+          "archiveCenter.changeStorageLocation",
+          "archiveCenter.deleteBatch",
+          "archiveCenter.getBatch",
+          "archiveCenter.getSettings",
+          "archiveCenter.getStats",
+          "archiveCenter.listBatches",
+          "archiveCenter.listDeleteCleanupJobs",
+          "archiveCenter.onEntryMaintenanceCompleted",
+          "archiveCenter.onEntryMaintenanceFailed",
+          "archiveCenter.onEntryMaintenanceProgress",
+          "archiveCenter.onStorageMigrationProgress",
+          "archiveCenter.openFile",
+          "archiveCenter.prepareDeleteBatch",
+          "archiveCenter.retryBatch",
+          "archiveCenter.retryDeleteCleanupJob",
+          "archiveCenter.saveAs",
+          "archiveCenter.selectRetrySources",
+          "archiveCenter.setLocked",
+          "archiveCenter.setModuleRetentionDays",
+          "archiveCenter.setRetentionDays",
+          "archiveCenter.startEntryMaintenance"
+        ],
+        "modalBridge": [
+          "closeModal",
+          "host.closeOwner",
+          "host.closeTop",
+          "host.dispose",
+          "host.getHandle",
+          "host.getTop",
+          "host.openRoot",
+          "host.push",
+          "host.replace",
+          "openModal",
+          "pushModal",
+          "registerModal",
+          "replaceModal",
+          "returnToModal"
+        ],
+        "ui": [
+          "applyAppUpdateActionResult",
+          "applyAppUpdateStatus",
+          "createConfirmDialog",
+          "escapeHtml",
+          "getAppUpdateStatus",
+          "getDarkModeController",
+          "mountAppearanceSettings",
+          "mountBankAccounts",
+          "mountLinkedTableRetention",
+          "mountTemplateFiles",
+          "openReleaseNotes",
+          "refreshOpenAppUpdateDialog",
+          "restartAndInstallAppUpdate"
+        ]
+      },
+      "reason": "设置弹窗新增「数据管理」页（v3.2.18），只接收 Renderer 装配注入的视图挂载函数 ui.mountLinkedTableRetention；链接表保留期限 API 由独立的链接表保留期限工厂持有，设置弹窗不直接访问。",
+      "designDoc": "changes/v3.2.18/feat/data-management-retention/spec.md"
     }
   ]
 }

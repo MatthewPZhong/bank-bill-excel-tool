@@ -961,6 +961,24 @@ td .muted { color: var(--muted); }
 }
 .archive-center-retention-field { width: 132px; max-width: 100%; }
 .archive-center-retention-module-field { width: 224px; max-width: 100%; }
+
+/* =================== 设置 · 数据管理（v3.2.18） =================== */
+/* 两类保留期限复用存档设置的分节、字段与反馈样式；本页只负责滚动容器与间距。 */
+.data-management-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.data-management-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 28px 28px;
+  white-space: normal;
+  user-select: text;
+}
+.data-management-scroll > .app-settings-pane-heading { margin-bottom: 18px; }
+.data-management-feedback { margin: 0 0 16px; }
 .archive-delete-confirm-error {
   width: 100%;
   margin-top: 12px;
@@ -1020,6 +1038,7 @@ td .muted { color: var(--muted); }
     padding-bottom: 11px;
   }
   .archive-center-settings-view { padding-top: 18px; }
+  .data-management-scroll { padding-top: 18px; }
 }
 
 /* =================== 设置 · 模板文件 =================== */

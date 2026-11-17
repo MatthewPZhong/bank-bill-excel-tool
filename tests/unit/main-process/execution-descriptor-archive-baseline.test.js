@@ -54,6 +54,9 @@ const newPreparationPolicies = [
   { batchPolicy: 'exclude', channel: 'channel:list', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   // v3.2.17：补录余额「导入余额文件」只读预检
   { batchPolicy: 'exclude', channel: 'file:import-balance-seed-file', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
+  // v3.2.18 设置 → 数据管理：链接表保留期限读取与保存（只写设置，清理由空闲任务执行）
+  { batchPolicy: 'exclude', channel: 'linked-table:get-retention-settings', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'linked-table:set-retention-days', excludeReason: 'ui-navigation', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'scenarios:recon-id-fix-fields', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'settings:acknowledge-release-notes', excludeReason: 'ui-navigation', taskKind: 'exclude', workerContext: 'none' },
   // v3.2.17 外观设置：深色模式深浅度

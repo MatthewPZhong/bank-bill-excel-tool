@@ -114,7 +114,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await setup({ open: false });
     await js('ba.open(); void 0;');
     assert.deepEqual(await js(`[...ba.overlay.querySelectorAll('.app-settings-nav-item')].map((item) => item.dataset.tab)`),
-      ['update', 'archive', 'accounts', 'appearance']);
+      ['update', 'archive', 'data', 'accounts', 'appearance']);
     assert.equal(await js(`ba.overlay.querySelector('[data-tab="accounts"] span:not(.app-settings-nav-icon)').textContent`), '账户管理');
     assert.equal(await js('ba.count("overview")'), 0);
     await js(`ba.overlay.querySelector('[data-tab="accounts"]').click(); void 0;`);

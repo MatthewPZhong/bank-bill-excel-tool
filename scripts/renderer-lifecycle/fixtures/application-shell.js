@@ -46,6 +46,7 @@ module.exports = async ({ js, load, reset, assert, test }) => {
         'position-reconciliation:status':{status:'ok',bank:{rowCount:0},canRun:false,canExport:false,pendingRun:null},
         'vccFinancialOp:run:archived-months':[], 'vccFinancialOp:run:latest-archived':null,
         'linked-table:list':{status:'ok',tables:[]},
+        'linked-table:get-retention-settings':{status:'ok',tables:[{tableKey:'gateway-bill',name:'网关对账单表库',defaultRetentionDays:15}],retentionDaysByTable:{'gateway-bill':15}},
         'pending:columns':['ID'], 'toolbox:merge':{status:'cancelled'},
         'toolbox:split:read':{status:'success',sourceFilePath:'/fixture/source.xlsx',splitReadToken:'fixture-token',headers:['Currency'],valuesByField:{Currency:['USD','HKD']},dataRowCount:8,maxRowSplitFiles:1000},
         'archive-center:get-settings':{status:'success',retentionDays:30},'archive-center:list-batches':{status:'success',batches:[]},

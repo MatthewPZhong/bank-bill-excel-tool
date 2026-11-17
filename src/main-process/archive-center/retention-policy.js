@@ -5,7 +5,7 @@ const { getArchiveScope, listVisibleArchiveScopes } = require('./module-scope-re
 const ARCHIVE_RETENTION_SETTING_KEY = 'archive_center_retention_days';
 const ARCHIVE_MODULE_RETENTION_SETTING_KEY = 'archive_center_retention_days_by_module';
 const DEFAULT_RETENTION_DAYS = null;
-const ALLOWED_RETENTION_DAYS = new Set([30, 60, 90, 180, 365]);
+const ALLOWED_RETENTION_DAYS = new Set([15, 30, 60, 90, 180, 365]);
 
 function parseRetentionDays(value) {
   if (value === null || value === 'permanent') return null;
@@ -53,7 +53,7 @@ function setModuleRetentionDays(database, payload = {}) {
   if (!scope) throw new TypeError('请选择有效的存档模块');
   const value = payload.retentionDays;
   if (value !== 'inherit' && value !== null && !ALLOWED_RETENTION_DAYS.has(value)) {
-    throw new TypeError('保留期限仅支持继承默认、30、60、90、180、365 天或永久');
+    throw new TypeError('保留期限仅支持继承默认、15、30、60、90、180、365 天或永久');
   }
   const overrides = readRetentionDaysByModule(database);
   if (value === 'inherit') delete overrides[scope.id];

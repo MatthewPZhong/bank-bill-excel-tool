@@ -736,6 +736,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     // v3.0.1 需求1（D4）：链接表按数据日期范围统计 / 删除（前端删除弹框预览 + 直接删）。
     //   v3.0.5 OPEN-4（T6b-2）：加第 3 参 tableKey（三表化）；前端未传 → undefined → handler 缺省 gateway-bill（向后兼容 parity）。
     countByDateRange: (start, end, tableKey) => ipcRenderer.invoke('linked-table:count-by-date-range', { start, end, tableKey }),
-    deleteByDateRange: (start, end, tableKey) => ipcRenderer.invoke('linked-table:delete-by-date-range', { start, end, tableKey })
+    deleteByDateRange: (start, end, tableKey) => ipcRenderer.invoke('linked-table:delete-by-date-range', { start, end, tableKey }),
+    // v3.2.18：设置 → 数据管理 → 链接表保留期限（payload：{ tableKey, retentionDays: 15|30|60|90|180|365|null }）。
+    getRetentionSettings: () => ipcRenderer.invoke('linked-table:get-retention-settings'),
+    setRetentionDays: (payload) => ipcRenderer.invoke('linked-table:set-retention-days', payload)
   }
 });

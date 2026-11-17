@@ -1,6 +1,6 @@
 'use strict';
 
-// 空闲存储整理在 main.js 中的接入：空闲定时器与主窗口关闭入口（执行生产函数，依赖用桩替换）。
+// 空闲存储整理与 v3.2.18 链接表过期清理在 main.js 中的接入：空闲定时器与主窗口关闭入口（执行生产函数，依赖用桩替换）。
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -41,6 +41,7 @@ function idleTimerHarness({ acquiringThresholdMinutes, idleMinutes, accepted = t
     async triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded() { events.push('acquiring-cleanup'); },
     clearStaleSuccessfulRawJson: () => ({ clearedCount: 0, elapsedMs: 0 }),
     appendActivityLogEntry() {},
+    idleLinkedTableRetention: { async maybeRun() { events.push('retention-check'); } },
     idleDatabaseCompaction: { async maybeRun() { events.push('compaction-check'); } }
   });
   vm.runInContext(productionFunction('setupIdleCleanupTimer'), context);
@@ -52,22 +53,28 @@ function idleTimerHarness({ acquiringThresholdMinutes, idleMinutes, accepted = t
 test('收单清理阈值设为 60 分钟、空闲 31 分钟：收单清理不跑，主库整理检查仍执行', async () => {
   const { tick, events } = idleTimerHarness({ acquiringThresholdMinutes: 60, idleMinutes: 31 });
   await tick();
-  assert.deepEqual(events, ['acquiring-begin', 'acquiring-end', 'compaction-check']);
+  assert.deepEqual(events, ['acquiring-begin', 'acquiring-end', 'retention-check', 'compaction-check']);
 });
 
 test('收单清理达到阈值时先完成并结束登记，再检查主库整理', async () => {
   const { tick, events } = idleTimerHarness({ acquiringThresholdMinutes: 30, idleMinutes: 31 });
   await tick();
-  assert.deepEqual(events, ['acquiring-begin', 'acquiring-cleanup', 'acquiring-end', 'compaction-check']);
+  assert.deepEqual(events, ['acquiring-begin', 'acquiring-cleanup', 'acquiring-end', 'retention-check', 'compaction-check']);
 });
 
 test('收单清理未获登记（其他任务进行中）时仍交给主库整理自行判断', async () => {
   const { tick, events } = idleTimerHarness({ acquiringThresholdMinutes: 30, idleMinutes: 31, accepted: false });
   await tick();
-  assert.deepEqual(events, ['acquiring-begin', 'compaction-check']);
+  assert.deepEqual(events, ['acquiring-begin', 'retention-check', 'compaction-check']);
 });
 
-function closeHarness({ compactionRunning = false, installTransition = false, quitPrepared = false, destroyed = false } = {}) {
+function closeHarness({
+  compactionRunning = false,
+  retentionRunning = false,
+  installTransition = false,
+  quitPrepared = false,
+  destroyed = false
+} = {}) {
   const events = [];
   let finishStop;
   const window = {
@@ -77,6 +84,13 @@ function closeHarness({ compactionRunning = false, installTransition = false, qu
   const context = vm.createContext({
     quitPreparationComplete: quitPrepared,
     mainWindow: window,
+    idleLinkedTableRetention: {
+      isRunning: () => retentionRunning,
+      stop(reason) {
+        events.push(`retention-stop:${reason}`);
+        return Promise.resolve();
+      }
+    },
     idleDatabaseCompaction: {
       isRunning: () => compactionRunning,
       stop(reason) {
@@ -84,7 +98,9 @@ function closeHarness({ compactionRunning = false, installTransition = false, qu
         return new Promise((resolve) => { finishStop = resolve; });
       }
     },
-    businessOperationRegistry: { isInstallTransitionActive: () => installTransition || compactionRunning }
+    businessOperationRegistry: {
+      isInstallTransitionActive: () => installTransition || compactionRunning || retentionRunning
+    }
   });
   vm.runInContext(productionFunction('handleMainWindowClose'), context);
   const event = { prevented: false, preventDefault() { this.prevented = true; } };
@@ -95,10 +111,20 @@ test('整理进行中关闭主窗口：先阻止关闭并中止整理，收尾�
   const harness = closeHarness({ compactionRunning: true });
   harness.context.handleMainWindowClose(harness.event);
   assert.equal(harness.event.prevented, true);
-  assert.deepEqual(harness.events, ['stop:window-close']);
+  assert.deepEqual(harness.events, ['retention-stop:window-close', 'stop:window-close']);
   harness.finish();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(harness.events, ['stop:window-close', 'window-close']);
+  assert.deepEqual(harness.events, ['retention-stop:window-close', 'stop:window-close', 'window-close']);
+});
+
+test('链接表过期清理进行中关闭主窗口：同样先中止并等两者收尾，再重新关闭窗口', async () => {
+  const harness = closeHarness({ retentionRunning: true });
+  harness.context.handleMainWindowClose(harness.event);
+  assert.equal(harness.event.prevented, true);
+  assert.deepEqual(harness.events, ['retention-stop:window-close', 'stop:window-close']);
+  harness.finish();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(harness.events, ['retention-stop:window-close', 'stop:window-close', 'window-close']);
 });
 
 test('整理收尾前窗口已销毁时不再重复关闭', async () => {
@@ -106,7 +132,7 @@ test('整理收尾前窗口已销毁时不再重复关闭', async () => {
   harness.context.handleMainWindowClose(harness.event);
   harness.finish();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(harness.events, ['stop:window-close']);
+  assert.deepEqual(harness.events, ['retention-stop:window-close', 'stop:window-close']);
 });
 
 test('升级准备期间仍阻止关闭；退出准备完成或无租约时放行', () => {
@@ -148,4 +174,17 @@ test('整理准入：收单操作锁、收单后台清理、银行对账单锁�
 
 test('整理控制器接入生产准入函数', () => {
   assert.match(source, /isOtherWorkBusy: \(\) => idleCompactionBusyReason\(\)/);
+});
+
+test('链接表过期清理控制器与整理同准入，持银行对账锁，并在用户活动时中止', () => {
+  const block = source.slice(
+    source.indexOf('const idleLinkedTableRetention = createIdleLinkedTableRetentionController({'),
+    source.indexOf('const taskPolicyRegistry = createTaskPolicyRegistry();')
+  );
+  assert.match(block, /isOtherWorkBusy: \(\) => idleCompactionBusyReason\(\)/);
+  assert.match(block, /acquireLock: \(\) => tryAcquireBankStatementOpLock\('linked-retention'\)/);
+  assert.match(block, /releaseLock: \(\) => releaseBankStatementOpLock\(\)/);
+  assert.match(block, /deleteExpired: \(range\) => deleteLinkedTableRowsByDateRange\(linkedTableDeleteDeps\(\), range\)/);
+  const activity = source.slice(source.indexOf("ipcMain.on('app:user-activity'"));
+  assert.match(activity.slice(0, 400), /idleLinkedTableRetention\.abort\('user-activity'\)/);
 });
