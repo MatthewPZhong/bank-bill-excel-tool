@@ -67,6 +67,9 @@ const newPreparationPolicies = [
   { batchPolicy: 'exclude', channel: 'template-resources:list-changes', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:pick-import-file', excludeReason: 'file-picker-only', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:prepare-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
+  // v3.2.18【导入模板】：选文件识别新模板的只读预检与取消命名时丢弃
+  { batchPolicy: 'exclude', channel: 'template:discard-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'template:prepare-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template:preview-header-update', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'toolbox:split:cancel-read', excludeReason: 'cancel-active-task', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'toolbox:split:read-values', excludeReason: 'preview-only', taskKind: 'exclude', workerContext: 'none' }

@@ -451,6 +451,8 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'position-reconciliation:bank:prepare-import',
     'template-resources:discard-import',
     'template-resources:prepare-import',
+    'template:discard-import',
+    'template:prepare-import',
     'template:preview-header-update'
   ]),
   'preview-only': Object.freeze([

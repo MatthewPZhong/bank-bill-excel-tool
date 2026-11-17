@@ -235,6 +235,9 @@ const archivePolicies = Object.freeze([
   createExcludePolicy('file:import-balance-seed-file', 'staging-preflight-only'),
   // v3.2.18 模板管理【更新】：选择文件并预览字段变更，只读；确认后走 support action template:update-headers
   createExcludePolicy('template:preview-header-update', 'staging-preflight-only'),
+  // v3.2.18【导入模板】：选文件并识别为新模板（只读预检）与取消命名时丢弃；确认后仍走 template:import 写入
+  createExcludePolicy('template:prepare-import', 'staging-preflight-only'),
+  createExcludePolicy('template:discard-import', 'staging-preflight-only'),
   createExcludePolicy('bizOpReconV327:run:preflight', 'preview-only'),
   createExcludePolicy('bizOpReconV327:delete:preview', 'preview-only'),
   createExcludePolicy('file:extract-big-account-order', 'preview-only'),

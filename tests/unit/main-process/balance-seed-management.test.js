@@ -74,7 +74,7 @@ const CMB_SEEDS = [
   seed('5001', 'CNY', '2026-07-30', 9, '汇丰-香港')
 ];
 
-test('渠道可见渠道名与全部子模板写入的种子、空写入者与遗留写入者记录，同银行段其他模板的不可见；按账号升序、日期降序', (t) => {
+test('渠道可见渠道名与全部子模板写入的种子、空写入者与遗留写入者记录，同银行段其他模板的不可见；按日期降序', (t) => {
   const storageRoot = setupStorage(t, { 招商银行: CMB_SEEDS });
   const result = listOwnerSeeds({ database: createFakeDatabase(), storageRoot, owner: { kind: 'channel', id: 7 } });
 
@@ -90,6 +90,32 @@ test('渠道可见渠道名与全部子模板写入的种子、空写入者与�
       ['3001', '2026-08-01', 1, '人工录入'],
       ['4001', '2026-07-31', 8, '通过发生额计算'],
       ['5001', '2026-07-30', 9, '通过发生额计算']
+    ]
+  );
+});
+
+// v3.2.18（D3）：账期由近到远——日期降序优先于账户号；同一天按账户号、币种升序。
+test('列表按日期从新到旧排列，跨账号交错的日期不再按账号分组；同日按账户号、币种升序', (t) => {
+  const storageRoot = setupStorage(t, {
+    招商银行: [
+      seed('1001', 'USD', '2026-10-01', 1, '招商银行-上海'),
+      seed('2002', 'CNY', '2026-10-03', 2, '招商银行-上海'),
+      seed('1001', 'CNY', '2026-10-01', 3, '招商银行-上海'),
+      seed('1001', 'CNY', '2026-10-02', 4, '招商银行-上海'),
+      seed('0999', 'HKD', '2026-10-01', 5, '招商银行-上海'),
+      seed('2002', 'CNY', '2026-09-30', 6, '招商银行-上海')
+    ]
+  });
+  const result = listOwnerSeeds({ database: createFakeDatabase(), storageRoot, owner: { kind: 'channel', id: 7 } });
+  assert.deepEqual(
+    result.records.map((record) => [record.billDate, record.merchantId, record.currency]),
+    [
+      ['2026-10-03', '2002', 'CNY'],
+      ['2026-10-02', '1001', 'CNY'],
+      ['2026-10-01', '0999', 'HKD'],
+      ['2026-10-01', '1001', 'CNY'],
+      ['2026-10-01', '1001', 'USD'],
+      ['2026-09-30', '2002', 'CNY']
     ]
   );
 });

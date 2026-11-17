@@ -120,11 +120,11 @@ test('main 与独立 V327 注册器的 IPC 加内部任务，与 policy/support 
   assert.equal(new Set(actual).size, actual.length, 'main 不应重复注册 literal IPC');
   assert.equal(new Set(expected).size, expected.length, 'policy/support 不应重复登记');
   assert.deepEqual(expected, actual);
-  assert.equal(actual.length, 306);
+  assert.equal(actual.length, 308);
   assert.equal(v327IpcInventory().length, 21);
   assert.equal(registry.channels('reserve').length, 71);
   assert.equal(registry.channels('no-file').length, 63);
-  assert.equal(registry.channels('exclude').length, 157);
+  assert.equal(registry.channels('exclude').length, 159);
   assert.equal(SUPPORT_ACTION_POLICIES.length, 15);
   // v3.2.18 模板管理【更新】：预览为只读预检（exclude），确认写入为 support action
   assert.ok(registry.channels('exclude').includes('template:preview-header-update'));
@@ -244,15 +244,15 @@ test('71 file 与 63 no-file mutation 逐项显式分类且精确闭合', () => 
   const excludeChannels = new Set(excludeInventory);
   assert.equal(fileChannels.size, 71);
   assert.equal(noFileChannels.size, 63);
-  assert.equal(excludeInventory.length, 157);
-  assert.equal(excludeChannels.size, 157);
+  assert.equal(excludeInventory.length, 159);
+  assert.equal(excludeChannels.size, 159);
   assert.deepEqual([...fileChannels].filter((channel) => noFileChannels.has(channel)), []);
   assert.deepEqual([...fileChannels].filter((channel) => excludeChannels.has(channel)), []);
   assert.deepEqual([...noFileChannels].filter((channel) => excludeChannels.has(channel)), []);
   assert.deepEqual(new Set(registry.channels('reserve')), fileChannels);
   assert.deepEqual(new Set(registry.channels('no-file')), noFileChannels);
-  assert.equal(registry.channels('exclude').length, 157);
-  assert.equal(registry.list().length, 71 + 63 + 157);
+  assert.equal(registry.channels('exclude').length, 159);
+  assert.equal(registry.list().length, 71 + 63 + 159);
   assert.ok(EXCLUDED_CHANNELS_BY_REASON['staging-preflight-only'].includes('template:preview-header-update'));
   assert.ok(EXCLUDED_CHANNELS_BY_REASON['ui-navigation'].includes('settings:set-dark-mode-schedule'));
   assert.ok(EXCLUDED_CHANNELS_BY_REASON['ui-navigation'].includes('settings:set-dark-mode-lightness'));

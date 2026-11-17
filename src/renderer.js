@@ -512,7 +512,8 @@ function initializeDomainControllers(info) {
   statementController = window.StatementController.createStatementController({
     panel: elements.statementModulePanel, initialInfo: info,
     api: { files: window.desktopApi.files, monthlyBalance: window.desktopApi.monthlyBalance,
-      templates: { importTemplate: window.desktopApi.templates.importTemplate }, accountMappings: window.desktopApi.accountMappings,
+      templates: { prepareImport: window.desktopApi.templates.prepareImport, discardImport: window.desktopApi.templates.discardImport,
+        importTemplate: window.desktopApi.templates.importTemplate }, accountMappings: window.desktopApi.accountMappings,
       errors: { exportLast: window.desktopApi.errors.exportLast } },
     config: { getTemplates: configurationServices.getTemplates, getCurrencyOptions: configurationServices.getCurrencyOptions,
       getStatementChannels: configurationServices.getStatementChannels,
@@ -521,7 +522,7 @@ function initializeDomainControllers(info) {
     ui: { modalHost, modalBridge, status: updateStatusBox, reportError: ui.reportError, alertNative: window.alert.bind(window),
       createAlertDialog, createTemplateManagerDialog, createBigAccountSelectionDialog, createRememberOrderMismatchDialog,
       createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, createAccountMappingDialog, createAccountMappingMigrationDialog,
-      createChannelAccountMappingConflictDialog }
+      createChannelAccountMappingConflictDialog, createTemplateImportNameDialog }
   });
   const domainUi = { modalHost, modalBridge, status: updateStatusBox, alert: createAlertDialog, escapeHtml, reportError: ui.reportError };
   domainControllers.preFund = window.__preFundController.createPreFundController({ api: window.desktopApi.preFundReconciliation,
@@ -574,6 +575,7 @@ const {
   createMonthlyBalanceExportDialog,
   createManualBalanceSeedDialog,
   createTemplateRenameDialog,
+  createTemplateImportNameDialog,
   createBigAccountSelectionDialog,
   createBigAccountManagerDialog,
   createRememberOrderMismatchDialog,

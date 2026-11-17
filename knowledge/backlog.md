@@ -27,6 +27,17 @@
 - **关闭条件**：逐个核实上述路径 OOM 时的界面提示，不是中文可解释提示的补上归一；决定 `checkExecutionMemory` 是否另加按堆上限的阈值（会改变 BizOP 等的阶段语义，须评估误判和验收清单影响）
 - **目标版本**：未定
 
+### B98（P2 · 未做）v3.2.18【导入模板】命名弹框与余额管理筛选实机 GUI 验收
+
+- **来源**：v3.2.18 `feat/template-import-naming`（[spec](../changes/v3.2.18/feat/template-import-naming/spec.md) §6、[TechDoc](../changes/v3.2.18/feat/template-import-naming/techdoc.md)）。界面只由渲染生命周期用例与布局截图覆盖
+- **影响**：以下内容未在打包版上用真实文件走通：
+  - 用真实网银样本走完【导入模板】→ 命名 → 映射 → 生成，核对 Channel 列、余额账单银行名称 / 所在地与种子文件名取自「银行渠道名-地区」
+  - 中文输入法（拼音组合）下的字符过滤
+  - 与已有小写或中文模板名并存时的重名提示
+  - 余额管理在真实种子文件（多账号、多币种、超过 200 条）下的搜索、筛选、分页，以及 100% / 125% / 150% 缩放下头部换行
+- **关闭条件**：Windows 打包版逐项走通；抽查新模板生成的明细与余额账单名称字段正确
+- **目标版本**：v3.2.18（暂定）
+
 ### B97（P4 · 改进）模板【更新】后的失效映射：拆分行弹窗标出失效值、导出模板文件时提示
 
 - **来源**：v3.2.18 `feat/statement-export-template-update`（[spec](../changes/v3.2.18/feat/statement-export-template-update/spec.md) §3.4、[TechDoc](../changes/v3.2.18/feat/statement-export-template-update/techdoc.md) §4）

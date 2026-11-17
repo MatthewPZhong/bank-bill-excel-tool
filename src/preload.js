@@ -469,7 +469,10 @@ contextBridge.exposeInMainWorld('desktopApi', {
     listChildren: (parentTemplateId) => ipcRenderer.invoke('template:list-children', parentTemplateId),
     setParentStatus: (templateId, isParent) => ipcRenderer.invoke('template:set-parent-status', templateId, isParent),
     setChildParent: (templateId, parentTemplateId) => ipcRenderer.invoke('template:set-child-parent', templateId, parentTemplateId),
-    importTemplate: () => ipcRenderer.invoke('template:import'),
+    // v3.2.18【导入模板】：先选文件识别为新模板，再按用户输入的银行渠道名、地区提交（payload：{ importToken, bankName, region }）
+    prepareImport: () => ipcRenderer.invoke('template:prepare-import'),
+    discardImport: (importToken) => ipcRenderer.invoke('template:discard-import', importToken),
+    importTemplate: (payload) => ipcRenderer.invoke('template:import', payload),
     // v3.2.15【导入子模板】：复用 template:import，按渠道编号命名并归入该渠道
     importChild: (channelId) => ipcRenderer.invoke('template:import', { channelId }),
     deleteTemplate: (templateId) => ipcRenderer.invoke('template:delete', templateId),
