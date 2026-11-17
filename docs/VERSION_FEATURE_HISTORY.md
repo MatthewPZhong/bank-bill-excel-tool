@@ -1,5 +1,24 @@
 # 版本功能变更清单
 
+## v3.2.18（2026-11-16）
+
+本轮包含：网银映射「字段筛选特征值」多特征值与「特征值管理」、模板管理【更新】（只替换表头并保留映射，失效映射生成前拦截）、导出明细直接另存与导出余额范围弹窗调整、【导入模板】命名弹框、余额管理账户号与币种筛选、设置「数据管理」页（链接表保留期限与空闲过期清理）、账户管理底栏布局、核对余额弹窗文字样式、工具箱拆分 Worker 内存超限中文提示，以及合入时的跨分支适配。
+
+- **多特征值**：`templates.feature_filter_json` 改存数组 `[{ id, name, sourceField, separator, length, letterPrefixCount, digitsOnly, sample }]`，映射行仍存 `mapped_field='字段筛选特征值'`、所选 id 存 `mapped_fields_json[0]`；启动迁移把单套规则幂等升级为 `{ id:'1', name:'特征值1' }` 并给空引用补 `["1"]`。新增 support-action IPC `template:save-feature-filters`（整表替换，被已保存主映射或拆分映射引用的特征值拒删）；映射保存只校验引用。生成时 lookup token 为 `__FEATURE_FILTER__:<id>`，每行按所用特征值各算一次，BillDate 合计行识别取所选特征值源单元格。模板包用到特征值写 v7，仅「币种无账户号」写 v6，否则 v5；读包按是否带 `featureFilters` 数组判断。回滚到 v3.2.17 时数组读为未设置，用到该值的模板失败关闭。
+- **模板【更新】**：`template:preview-header-update`（只读预检，exclude）与 support-action `template:update-headers`（只写 `headers_json` / `source_file_name` / `updated_at`，以原表头为条件更新）；旧版方向映射拒绝更新。`buildStatementGenerationConfig` 前调用 `assertTemplateFieldReferencesAvailable`，按生成器实际读取口径收集主映射、启用的拆分配置与生效映射所选特征值的筛选字段，表头外引用报 `TEMPLATE_MAPPING_FIELD_MISSING`。模板包覆盖已有模板时按包内表头校验。
+- **导出**：【导出明细】固定当前批次；范围弹窗只用于导出余额，导出进行中 × 不可关闭。
+- **【导入模板】命名**：`template:prepare-import` / `template:discard-import`（只读预检与丢弃，exclude）后经原 `template:import` 写入；名称按 D1 过滤并转大写，与模板（含子模板）或渠道重名（忽略大小写）拒绝；只新建、不覆盖。
+- **余额管理筛选**：渲染层按账户号（可搜索）与币种过滤，日期降序、同日按账户号与币种升序；种子读写不变。
+- **数据管理与链接表保留期限**：设置新增「数据管理」页并迁入存档保留期限；保留期限加 15 天，VCC 未显式设置时迁移写入 15 天（只执行一次）。链接表期限默认网关 15 天、银行对账单表 60 天、外汇交割表永久，空闲（≥ 30 分钟、无任务、距上次成功 ≥ 24 小时）时按数据日期 `D ≤ 今天 − N − 1` 删除，走手工删除同一链路（联动删除与派生重建），用户操作时当前表完成后停止；先于主库空闲整理执行。
+- **账户管理布局**：导入、导出与翻页条进设置底栏账户管理槽，表格只显示 8 列，窄宽度时翻页按钮缩为 ‹ ›。
+- **核对余额文字**：说明按「。」分行、金额片段用正文色，进度行与说明同为 14px。
+- **工具箱拆分 OOM**：Worker 堆监控阈值取 `min(3 GB, 实际堆上限 × 0.9)`，dispatch 把 `ERR_WORKER_OUT_OF_MEMORY` 归一为中文提示（保留 code 与 cause）。
+- **合入适配**：模板【更新】的失效引用收集改读 `featureFilters`，只有生效映射选用的特征值计为启用；`archive-task-policy-registry` 计数按合计为 IPC 309、exclude 159、support action 16；`renderer-dialog-configuration`、`renderer-statement`、`renderer-dialog-app-settings` 的 `allowedApiFields` 历史放宽补登 policyChanges。
+
+审查修复：各模块分支按各自 spec / TechDoc 完成审查（特征值分支 Codex 两轮，第二轮无发现）。
+
+已知限制与顺延：本版新功能实机 GUI 检查未做（B95、B98）；链接表过期清理资金复核与打包版回归（B94）、存量模板越界映射真实库核查（B96）待做；其他后台 Worker 的 OOM 提示与阶段内存阈值（B99）；Windows CI 偶发 `ADMISSION_TIMEOUT`（B93）。v3.2.17 及更早顺延项见 backlog。
+
 ## v3.2.17（2026-11-12）
 
 本轮包含：网银补录余额「导入余额文件」与「提取调拨订单对账ID」限定 FundType、「核对上一账单日余额」弹窗与金额尾差修复、网银弹窗说明收进标题、VCC 财务OP校验提速瘦身与解归档放宽（含通道明细预检补录）、主库空闲自动整理、深色模式深浅度调节、deferred FilePlan 修复，以及 release 级 Codex 审查的两项修复。
