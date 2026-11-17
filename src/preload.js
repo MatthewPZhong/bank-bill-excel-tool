@@ -476,6 +476,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     getMappings: (templateId) => ipcRenderer.invoke('template:get-mappings', templateId),
     saveMappings: (payload) => ipcRenderer.invoke('template:save-mappings', payload),
     rename: (payload) => ipcRenderer.invoke('template:rename', payload),
+    // v3.2.18 模板管理【更新】：选文件预览字段变更 → 确认后只替换表头，映射保留
+    previewHeaderUpdate: (templateId) => ipcRenderer.invoke('template:preview-header-update', templateId),
+    updateHeaders: (payload) => ipcRenderer.invoke('template:update-headers', payload),
     saveFilenameFixedField: (payload) => ipcRenderer.invoke('template:save-filename-fixed-field', payload),
     exportBundle: () => ipcRenderer.invoke('template:export-bundle'),
     importBundle: () => ipcRenderer.invoke('template:import-bundle'),

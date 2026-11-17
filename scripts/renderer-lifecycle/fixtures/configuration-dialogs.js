@@ -26,7 +26,9 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
           importChild:id=>cfg.invoke('importChild',[id],{status:'success',message:'已导入子模板「渠道 A-子模板-1」'}),
           saveAmountSplitRules:payload=>cfg.invoke('amount',[payload],{status:'success'}),saveBillSplitMappings:payload=>cfg.invoke('splitMapping',[payload],{status:'success'}),
           saveBillSplitAmountRules:payload=>cfg.invoke('splitAmount',[payload],{status:'success'}),
-          getMappings:id=>cfg.invoke('templateRead',[id],{status:'success',template:cfg.templates[0],targetFields:[],mappings:[]})},
+          getMappings:id=>cfg.invoke('templateRead',[id],{status:'success',template:cfg.templates[0],targetFields:[],mappings:[]}),
+          previewHeaderUpdate:id=>cfg.invoke('headerPreview',[id],{status:'cancelled'}),
+          updateHeaders:payload=>cfg.invoke('headerUpdate',[payload],{status:'success',message:'模板「模板 A」已更新，映射关系已保留',staleMappings:[],activeStaleCount:0})},
         accountMappings:{list:id=>cfg.invoke('list',[id],{status:'success',mappings:[]}),
           save:(id,mappings)=>cfg.invoke('save',[id,mappings],{status:'success',message:'保存完成'}),
           listChannelConflicts:()=>cfg.invoke('conflicts',[],{status:'success',channels:[]}),
@@ -1607,6 +1609,221 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     })()`);
     assert.deepEqual(geometry, { saveLeftOfBack: true, footerRight: true, footerBottom: true, insertFirst: true, deleteLast: true, halves: true, fits: true });
     await layout.evidence('currency-big-account-dialog', { geometry });
+  });
+
+  // v3.2.18 模板管理【更新】：首槽等宽，渠道行 / 子模板行 / 普通模板行【重命名】左缘对齐；普通模板与子模板有【更新】。
+  await test('模板管理执行操作：【更新】在【修改】右侧，各类行【重命名】左缘对齐（100%/125%/150%）', async () => {
+    await setup({ zoom: 1 });
+    await js(`cfg.templates.push({id:3,name:'渠道 A',channelId:7,channelName:'渠道 A',bigAccountSummary:'来自账单'});
+      cfg.services.applyPreviewTemplates(cfg.templates);cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog({expandChannelId:7})).handle;void 0;`);
+    assert.deepEqual(await js(`Array.from(cfg.top().querySelectorAll('tbody tr')).map(row=>[row.className,Array.from(row.querySelectorAll('.manager-row-actions button')).map(button=>button.textContent)])`), [
+      ['template-channel-row', ['导入子模板', '重命名', '删除']],
+      ['template-child-row', ['修改', '更新', '重命名', '删除']],
+      ['', ['修改', '更新', '重命名', '删除']],
+      ['', ['修改', '更新', '重命名', '删除']]
+    ]);
+    const measure = () => js(`(() => {
+      const rows=[...cfg.top().querySelectorAll('tbody tr')].filter(row=>row.style.display!=='none');
+      const wrapper=cfg.top().querySelector('.table-wrapper');
+      return { renameLefts: rows.map(row=>row.querySelector('[data-action="rename"]').getBoundingClientRect().left),
+        oneLine: rows.map(row=>{const tops=[...row.querySelectorAll('.manager-row-actions button')].map(button=>Math.round(button.getBoundingClientRect().top));return Math.max(...tops)-Math.min(...tops)<=1;}),
+        overflow: wrapper.scrollWidth>wrapper.clientWidth+1 };
+    })()`);
+    for (const zoom of [1, 1.25, 1.5]) {
+      await layout.resize(1080, 760, zoom);
+      const metrics = await measure();
+      const lefts = metrics.renameLefts;
+      assert.ok(Math.max(...lefts) - Math.min(...lefts) <= 0.5, JSON.stringify({ zoom, metrics }));
+      assert.equal(metrics.overflow, false, JSON.stringify({ zoom, metrics }));
+      if (zoom < 1.5) assert.ok(metrics.oneLine.every(Boolean), JSON.stringify({ zoom, metrics }));
+      await layout.evidence(`template-manager-actions-${Math.round(zoom * 100)}`, metrics);
+    }
+  });
+  await test('模板【更新】：取消选择不弹窗；字段变更分组汇总，返回不写入；字段无变化时禁用更新模板', async () => {
+    await setup();
+    await js(`cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;cfg.managerOverlay=cfg.top();
+      cfg.managerOverlay.querySelector('[data-action="update-headers"]').click();void 0;`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='headerPreview').map(call=>call.args)`), [[1]]);
+    assert.equal(await js('cfg.manager.isTop()&&cfg.top()===cfg.managerOverlay'), true);
+    await js(`cfg.next.headerPreview={status:'success',templateId:1,templateName:'模板 A',channelId:null,sourceFileName:'模板 A-新版.xlsx',
+      expectedHeaders:['日期','金额'],headers:['日期','金额(元)','附言'],diff:{identical:false,added:['金额(元)','附言'],removed:['金额'],orderChanged:false},
+      affectedMappings:['Credit Amount ← 金额'],activeStaleCount:1};
+      cfg.managerOverlay.querySelector('[data-action="update-headers"]').click();void 0;`); await tick();
+    const view = await js(`(() => {const card=cfg.top().querySelector('.template-header-update-card');return {
+      title: card.querySelector('.dialog-title').textContent,
+      source: card.querySelector('.template-header-update-source').textContent,
+      added: [...card.querySelectorAll('[data-role="added"] .is-added')].map(item=>item.textContent),
+      removed: [...card.querySelectorAll('[data-role="removed"] .is-removed')].map(item=>item.textContent),
+      order: card.querySelector('[data-role="order"] span:last-child').textContent,
+      affected: [...card.querySelectorAll('[data-role="affected"] li')].map(item=>item.textContent),
+      buttons: [...card.querySelectorAll('.dialog-actions button')].map(button=>[button.textContent,button.disabled])};})()`);
+    assert.deepEqual(view, {
+      title: '字段变更', source: '模板「模板 A」← 文件「模板 A-新版.xlsx」',
+      added: ['+ 金额(元)', '+ 附言'], removed: ['− 金额'], order: '无变化', affected: ['Credit Amount ← 金额'],
+      buttons: [['更新模板', false], ['返回', false]]
+    });
+    await js(`cfg.top().querySelector('[data-action="back"]').click();`);
+    assert.equal(await js('cfg.manager.isTop()&&cfg.top()===cfg.managerOverlay'), true);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='headerUpdate').length`), 0);
+    await js(`cfg.next.headerPreview={status:'success',templateId:1,templateName:'模板 A',sourceFileName:'same.xlsx',expectedHeaders:['日期'],headers:['日期'],
+      diff:{identical:true,added:[],removed:[],orderChanged:false},affectedMappings:[],activeStaleCount:0};
+      cfg.managerOverlay.querySelector('[data-action="update-headers"]').click();void 0;`); await tick();
+    assert.match(await js(`cfg.top().textContent`), /字段无变化/);
+    assert.equal(await js(`cfg.top().querySelector('[data-action="submit"]').disabled`), true);
+    await js(`cfg.top().querySelector('[data-action="close"]').click();`);
+    assert.equal(await js('cfg.manager.isTop()'), true);
+  });
+  await test('模板【更新】预览失败：结果弹窗只有【返回】，返回到刷新后的模板管理', async () => {
+    await setup();
+    await js(`cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;
+      cfg.next.headerPreview={status:'error',message:'该文件的表头与已有模板「模板 B」完全相同，无法更新为重复表头的模板。',errorReportReady:true};
+      cfg.top().querySelector('[data-action="update-headers"]').click();void 0;`); await tick();
+    assert.match(await js('cfg.top().textContent'), /模板 B/);
+    assert.deepEqual(await js(`[...cfg.top().querySelectorAll('.dialog-actions button')].map(button=>button.textContent)`), ['返回']);
+    assert.equal(await js(`cfg.feedback.at(-1)[1]`), 'error');
+    await js(`cfg.top().querySelector('[data-action="back"]').click();`);
+    assert.match(await js('cfg.top().textContent'), /模板管理/);
+    assert.equal(await js('document.getElementById("modalRoot").children.length'), 1);
+  });
+  await test('模板【更新模板】：提交表头快照，忙碌时不能关闭或重复提交；成功页【修改映射关系】在【返回】左侧并打开映射弹窗', async () => {
+    await setup();
+    await js(`cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;
+      cfg.next.headerPreview={status:'success',templateId:2,templateName:'模板 B',sourceFileName:'b2.xlsx',expectedHeaders:['日期','金额'],headers:['日期','金额(元)'],
+        diff:{identical:false,added:['金额(元)'],removed:['金额'],orderChanged:false},affectedMappings:['Credit Amount ← 金额'],activeStaleCount:1};
+      cfg.top().querySelectorAll('[data-action="update-headers"]')[1].click();void 0;`); await tick();
+    await js(`cfg.write=cfg.defer();cfg.next.headerUpdate=cfg.write;cfg.submit=cfg.top().querySelector('[data-action="submit"]');cfg.handle=cfg.host.getTop();
+      cfg.submit.click();cfg.submit.dispatchEvent(new Event('click'));void 0;`);
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='headerUpdate').map(call=>call.args[0])`), [
+      { templateId: 2, expectedHeaders: ['日期', '金额'], headers: ['日期', '金额(元)'], sourceFileName: 'b2.xlsx' }
+    ]);
+    assert.equal(await js('cfg.handle.close().status'), 'blocked');
+    await js(`cfg.write.resolve({status:'success',message:'模板「模板 B」已更新，有 1 处映射引用的字段已删除，修改映射关系前无法用该模板生成账单',
+      staleMappings:['Credit Amount ← 金额'],activeStaleCount:1});`); await tick();
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='refresh').length`), 1);
+    const result = await js(`(() => {const card=cfg.top().querySelector('.template-header-update-result-card');return {
+      message: card.querySelector('[data-role="message"]').textContent,
+      stale: [...card.querySelectorAll('li')].map(item=>item.textContent),
+      buttons: [...card.querySelectorAll('.dialog-actions button')].map(button=>button.textContent)};})()`);
+    assert.deepEqual(result, {
+      message: '模板「模板 B」已更新，有 1 处映射引用的字段已删除，修改映射关系前无法用该模板生成账单',
+      stale: ['Credit Amount ← 金额'], buttons: ['修改映射关系', '返回']
+    });
+    assert.equal(await js('cfg.manager.isOpen()'), true);
+    await js(`cfg.top().querySelector('[data-action="edit-mappings"]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='templateRead').map(call=>call.args)`), [[2]]);
+    assert.match(await js('cfg.top().textContent'), /映射关系管理/);
+    assert.equal(await js('document.getElementById("modalRoot").children.length'), 1);
+  });
+  await test('模板【更新】：管理窗关闭后迟到的预览不弹窗；提交后窗口被强制结束，迟到成功不接管新窗', async () => {
+    await setup();
+    await js(`cfg.read=cfg.defer();cfg.next.headerPreview=cfg.read;cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;
+      cfg.top().querySelector('[data-action="update-headers"]').click();cfg.manager.close();cfg.newHandle=cfg.other();
+      cfg.read.resolve({status:'success',templateId:1,templateName:'模板 A',sourceFileName:'a.xlsx',expectedHeaders:['日期'],headers:['日期','金额'],
+        diff:{identical:false,added:['金额'],removed:[],orderChanged:false},affectedMappings:[],activeStaleCount:0});`); await tick();
+    assert.equal(await js('cfg.newHandle.isTop()'), true);
+    assert.equal(await js('document.getElementById("modalRoot").children.length'), 1);
+    await setup();
+    await js(`cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;
+      cfg.next.headerPreview={status:'success',templateId:1,templateName:'模板 A',sourceFileName:'a.xlsx',expectedHeaders:['日期'],headers:['日期','金额'],
+        diff:{identical:false,added:['金额'],removed:[],orderChanged:false},affectedMappings:[],activeStaleCount:0};
+      cfg.top().querySelector('[data-action="update-headers"]').click();void 0;`); await tick();
+    await js(`cfg.write=cfg.defer();cfg.next.headerUpdate=cfg.write;cfg.top().querySelector('[data-action="submit"]').click();
+      cfg.host.getTop().dispose();cfg.manager.dispose();cfg.newHandle=cfg.other();cfg.write.resolve({status:'success',message:'后台更新完成',staleMappings:[]});`); await tick();
+    assert.equal(await js('cfg.newHandle.isTop()'), true);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='refresh').length`), 1);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+  await test('映射关系管理：引用已删除字段的映射显示「（已删除）」并保持选中，保存时原值提交由主进程校验拒绝', async () => {
+    await setup();
+    await js(`cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:{id:1,name:'模板 A',headers:['日期','金额(元)']},
+      targetFields:['BillDate','Credit Amount','Remark'],
+      mappings:[{templateField:'BillDate',mappedField:'日期',mappedFields:[]},{templateField:'Credit Amount',mappedField:'金额',mappedFields:[]},
+        {templateField:'Remark',mappedField:'需要拼接字段',mappedFields:['日期','附言']}]})).handle;cfg.overlay=cfg.top();void 0;`);
+    const state = await js(`(() => {const row=field=>cfg.overlay.querySelector('tr[data-template-field="'+field+'"]');const select=row('Credit Amount').querySelector('.mapping-select');
+      return { value: select.value, label: select.selectedOptions[0].textContent, stale: select.classList.contains('is-stale'),
+        billDateStale: row('BillDate').querySelector('.mapping-select').classList.contains('is-stale') };})()`);
+    assert.deepEqual(state, { value: '金额', label: '金额（已删除）', stale: true, billDateStale: false });
+    await js(`cfg.overlay.querySelector('tr[data-template-field="Remark"] .concat-picker-trigger').click();void 0;`);
+    assert.deepEqual(await js(`[...cfg.overlay.querySelectorAll('tr[data-template-field="Remark"] .concat-picker-option')].map(option=>[option.textContent,option.classList.contains('is-stale'),option.querySelector('input').checked])`),
+      [['1.日期', false, true], ['金额(元)', false, false], ['2.附言（已删除）', true, true]]);
+    await js(`cfg.next.mappingSave={status:'error',message:'映射字段不存在：金额'};cfg.overlay.querySelector('[data-action="done"]').click();void 0;`); await tick();
+    const saved = await js(`cfg.calls.filter(call=>call.name==='mappingSave').map(call=>call.args[0].mappings.filter(item=>['Credit Amount','Remark'].includes(item.templateField)).map(item=>[item.templateField,item.mappedField,item.mappedFields]))`);
+    assert.deepEqual(saved, [[['Credit Amount', '金额', []], ['Remark', '需要拼接字段', ['日期', '附言']]]]);
+    assert.match(await js('cfg.top().textContent'), /映射字段不存在：金额/);
+    await js(`cfg.host.closeTop();const select=cfg.overlay.querySelector('tr[data-template-field="Credit Amount"] .mapping-select');select.value='金额(元)';select.dispatchEvent(new Event('change'));void 0;`);
+    assert.equal(await js(`cfg.overlay.querySelector('tr[data-template-field="Credit Amount"] .mapping-select').classList.contains('is-stale')`), false);
+  });
+
+  // 回归（review P3）：确认期间模板被删除等失败时，【返回】先重新读取模板列表，不显示已删除的模板。
+  await test('模板【更新模板】失败：【返回】重新读取模板列表后回到模板管理', async () => {
+    await setup();
+    await js(`cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;
+      cfg.next.headerPreview={status:'success',templateId:2,templateName:'模板 B',sourceFileName:'b2.xlsx',expectedHeaders:['日期'],headers:['日期','金额'],
+        diff:{identical:false,added:['金额'],removed:[],orderChanged:false},affectedMappings:[],activeStaleCount:0};
+      cfg.top().querySelectorAll('[data-action="update-headers"]')[1].click();void 0;`); await tick();
+    await js(`cfg.templates=cfg.templates.filter(template=>template.id!==2);
+      cfg.next.headerUpdate={status:'error',errorCode:'TEMPLATE_NOT_FOUND',message:'模板已被删除，请刷新后重试',errorReportReady:true};
+      cfg.top().querySelector('[data-action="submit"]').click();void 0;`); await tick();
+    assert.deepEqual(await js(`[...cfg.top().querySelectorAll('.template-header-update-result-card .dialog-actions button')].map(button=>button.textContent)`), ['返回']);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='refresh').length`), 0);
+    await js(`cfg.top().querySelector('[data-action="back"]').click();`); await tick();
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='refresh').length`), 1);
+    assert.match(await js('cfg.top().textContent'), /模板管理/);
+    assert.deepEqual(await js(`[...cfg.top().querySelectorAll('tbody tr td:first-child')].map(cell=>cell.textContent.trim())`), ['模板 A']);
+  });
+  // 回归（review P2）：以 __ 开头的普通列名失效后同样显示「（已删除）」并回传原值，不被当作内部标记静默清空。
+  await test('映射关系管理：__ 开头的普通列名失效后显示（已删除）并保留原值', async () => {
+    await setup();
+    await js(`cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:{id:1,name:'模板 A',headers:['日期']},
+      targetFields:['BillDate','Credit Amount'],
+      mappings:[{templateField:'BillDate',mappedField:'日期',mappedFields:[]},{templateField:'Credit Amount',mappedField:'__金额',mappedFields:[]}]})).handle;cfg.overlay=cfg.top();void 0;`);
+    assert.deepEqual(await js(`{const select=cfg.overlay.querySelector('tr[data-template-field="Credit Amount"] .mapping-select');[select.value,select.selectedOptions[0].textContent,select.classList.contains('is-stale')];}`),
+      ['__金额', '__金额（已删除）', true]);
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();void 0;`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='mappingSave').map(call=>call.args[0].mappings.find(item=>item.templateField==='Credit Amount').mappedField)`), ['__金额']);
+  });
+
+  // 回归（第二轮 review P2）：按币种取大账号标记只在 MerchantId 上是内部值，其他字段上同名的真实列失效后照常标出。
+  await test('映射关系管理：非 MerchantId 字段上与币种大账号标记同名的列失效后显示（已删除）并保留原值', async () => {
+    await setup();
+    await js(`cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:{id:1,name:'模板 A',headers:['日期']},
+      targetFields:['BillDate','Credit Amount'],
+      mappings:[{templateField:'BillDate',mappedField:'日期',mappedFields:[]},{templateField:'Credit Amount',mappedField:'__CURRENCY_ONLY_BIG_ACCOUNT__',mappedFields:[]}]})).handle;cfg.overlay=cfg.top();void 0;`);
+    assert.deepEqual(await js(`{const select=cfg.overlay.querySelector('tr[data-template-field="Credit Amount"] .mapping-select');[select.value,select.classList.contains('is-stale')];}`),
+      ['__CURRENCY_ONLY_BIG_ACCOUNT__', true]);
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();void 0;`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='mappingSave').map(call=>call.args[0].mappings.find(item=>item.templateField==='Credit Amount').mappedField)`), ['__CURRENCY_ONLY_BIG_ACCOUNT__']);
+  });
+  // 回归（第二轮 review P3）：结果弹窗关闭后，迟到的刷新失败不改写新会话的状态反馈，也不替换新弹窗。
+  await test('模板【更新】结果弹窗：关闭后迟到的刷新失败不反馈、不接管新窗', async () => {
+    await setup();
+    await js(`cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;
+      cfg.next.headerPreview={status:'error',message:'模板已被删除，请刷新后重试'};
+      cfg.top().querySelector('[data-action="update-headers"]').click();void 0;`); await tick();
+    await js(`cfg.read=cfg.defer();cfg.next.refresh=cfg.read;cfg.feedbackBefore=cfg.feedback.length;cfg.top().querySelector('[data-action="back"]').click();
+      cfg.host.getTop().dispose();cfg.manager.dispose();cfg.newHandle=cfg.other();cfg.read.reject(new Error('旧请求刷新失败'));void 0;`); await tick();
+    assert.equal(await js('cfg.newHandle.isTop()'), true);
+    assert.equal(await js('cfg.feedback.length===cfg.feedbackBefore'), true);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
+  // 回归（第四轮 review P2）：更新已成功、模板列表刷新失败时，结果页仍显示「已更新」、失效映射与【修改映射关系】，返回前重新读取列表。
+  await test('模板【更新模板】成功后刷新列表失败：保留成功结果，返回时重新读取', async () => {
+    await setup();
+    await js(`cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;
+      cfg.next.headerPreview={status:'success',templateId:1,templateName:'模板 A',sourceFileName:'a.xlsx',expectedHeaders:['日期'],headers:['日期','金额'],
+        diff:{identical:false,added:['金额'],removed:[],orderChanged:false},affectedMappings:[],activeStaleCount:0};
+      cfg.top().querySelector('[data-action="update-headers"]').click();void 0;`); await tick();
+    await js(`cfg.next.headerUpdate={status:'success',message:'模板「模板 A」已更新，有 1 处映射引用的字段已删除，修改映射关系前无法用该模板生成账单',staleMappings:['Credit Amount ← 金额'],activeStaleCount:1};
+      cfg.failRead=cfg.defer();cfg.next.refresh=cfg.failRead;cfg.top().querySelector('[data-action="submit"]').click();cfg.failRead.reject(new Error('列表读取失败'));void 0;`); await tick();
+    const view = await js(`(() => {const card=cfg.top().querySelector('.template-header-update-result-card');return {
+      message: card.querySelector('[data-role="message"]').textContent, note: Boolean(card.querySelector('[data-role="refresh-failed"]')),
+      stale: [...card.querySelectorAll('li')].map(item=>item.textContent), buttons: [...card.querySelectorAll('.dialog-actions button')].map(button=>button.textContent)};})()`);
+    assert.deepEqual(view, { message: '模板「模板 A」已更新，有 1 处映射引用的字段已删除，修改映射关系前无法用该模板生成账单', note: true,
+      stale: ['Credit Amount ← 金额'], buttons: ['修改映射关系', '返回'] });
+    await js(`cfg.top().querySelector('[data-action="back"]').click();`); await tick();
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='refresh').length`), 2);
+    assert.match(await js('cfg.top().textContent'), /模板管理/);
   });
 
 };

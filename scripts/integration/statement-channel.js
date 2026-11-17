@@ -64,6 +64,7 @@ const {
 const channelIdentity = require('../../src/main-process/statement-channel-identity');
 const { ALL_BANKS_TEMPLATE_SCOPE, assembleMonthlyBalance } = require('../../src/main-process/monthly-balance');
 
+const { createTemplateHeaderUpdateTools } = require('../../src/main-process/template-header-update');
 const ROOT = path.join(__dirname, '..', '..');
 const MAIN_SOURCE = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
 const MAIN_AST = acorn.parse(MAIN_SOURCE, { ecmaVersion: 'latest', sourceType: 'script' });
@@ -230,6 +231,16 @@ function createEnvironment(dir, label) {
     CONCAT_FIELDS_MAPPING_FIELD: '__CONCAT__',
     // v3.2.16：字段筛选特征值（本脚本不使用，仅满足生成配置的依赖）
     FEATURE_FILTER_MAPPING_FIELD: '__FEATURE_FILTER_MAPPING__',
+    // v3.2.18：生成配置的失效映射拦截（与本脚本的标记常量一致）
+    templateHeaderUpdateTools: createTemplateHeaderUpdateTools({
+      BALANCE_DISABLED_OPTION: '无',
+      BALANCE_CALCULATED_OPTION: '通过发生额计算',
+      CONCAT_FIELDS_MAPPING_FIELD: '__CONCAT__',
+      FEATURE_FILTER_MAPPING_FIELD: '__FEATURE_FILTER_MAPPING__',
+      SIGNED_AMOUNT_MAPPING_FIELD: '__SIGNED_AMOUNT__',
+      AMOUNT_BASED_NAME_MAPPING_FIELD: '__AMOUNT_NAME__',
+      AMOUNT_BASED_ACCOUNT_MAPPING_FIELD: '__AMOUNT_ACCOUNT__'
+    }),
     FEATURE_FILTER_FIELD_TOKEN,
     normalizeFeatureFilterRule,
     SIGNED_AMOUNT_MAPPING_FIELD: '__SIGNED_AMOUNT__',
@@ -455,7 +466,9 @@ function verifyBalanceModeMismatch(dir) {
   const env = createEnvironment(dir, 'step2');
   const owner = env.defineTemplate('招商银行-上海', 'A');
   const channelId = env.saveWithChannel(owner, { mode: 'create' }).channelId;
-  const child = env.defineTemplate('CMB-SH', 'B', { balance: 'Balance' });
+  // 子模板取账单余额列：映射须指向模板表头中实际存在的列（v3.2.18 起表头外的映射字段在生成前即被拦截），
+  // 本步只校验余额方式不一致，不关心余额取值。
+  const child = env.defineTemplate('CMB-SH', 'B', { balance: 'Out' });
   const mismatch = env.fns.findSaveMappingsBalanceModeMismatch({
     template: env.database.getTemplate(child.id),
     channelAssignment: env.fns.normalizeTemplateChannelAssignment({ mode: 'join', channelId }),

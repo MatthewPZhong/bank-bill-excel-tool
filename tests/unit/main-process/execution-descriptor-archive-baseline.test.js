@@ -67,6 +67,7 @@ const newPreparationPolicies = [
   { batchPolicy: 'exclude', channel: 'template-resources:list-changes', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:pick-import-file', excludeReason: 'file-picker-only', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:prepare-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'template:preview-header-update', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'toolbox:split:cancel-read', excludeReason: 'cancel-active-task', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'toolbox:split:read-values', excludeReason: 'preview-only', taskKind: 'exclude', workerContext: 'none' }
 ];
@@ -84,7 +85,8 @@ const newSupportActions = [
   { channel: 'bank-accounts:commit-import', kind: 'support-action', reason: 'bank-account-snapshot' },
   // v3.2.16 模板管理【余额管理】：修改、删除单条余额种子
   { channel: 'balance-seed:update', kind: 'support-action', reason: 'balance-seed' },
-  { channel: 'balance-seed:delete', kind: 'support-action', reason: 'balance-seed' }
+  { channel: 'balance-seed:delete', kind: 'support-action', reason: 'balance-seed' },
+  { channel: 'template:update-headers', kind: 'support-action', reason: 'statement-template' }
 ];
 
 // 基线之后的行为修正，固定基线本身不改：基线把两个 deferred 动作与 acquiringBillCurrency:run 同列

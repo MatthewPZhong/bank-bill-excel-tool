@@ -20,12 +20,42 @@
 
 ## 未实施
 
-### B95（P3 · 已知问题）后台 Worker 获批堆上限低于阶段内存检查阈值：拆分以外的路径超限时可能直接被 V8 强杀
+### B99（P3 · 已知问题）后台 Worker 获批堆上限低于阶段内存检查阈值：拆分以外的路径超限时可能直接被 V8 强杀
 
-- **来源**：分支 `fix/toolbox-split-oom-message`。工具箱拆分在 Windows 正式版报英文 `Worker terminated due to reaching memory limit: JS heap out of memory`；本分支只修了按字段值拆分的读取与导出通道（`src/main-process/toolbox-large-split-dispatch.js` 的 Worker）：Worker 内堆监控改按实际堆上限换算，V8 强杀归一为中文提示。编号跳过在途分支 `chore/backlog-b93-admission-timeout-flake` 的 B93 与 `feat/data-management-retention` 的 B94
+- **来源**：分支 `fix/toolbox-split-oom-message`。工具箱拆分在 Windows 正式版报英文 `Worker terminated due to reaching memory limit: JS heap out of memory`；本分支只修了按字段值拆分的读取与导出通道（`src/main-process/toolbox-large-split-dispatch.js` 的 Worker）：Worker 内堆监控改按实际堆上限换算，V8 强杀归一为中文提示。原编号 B95，合入 `release/v3.2.18` 时与 `feat/statement-export-template-update` 的 B95 撞号，改为 B99
 - **影响**：获批执行档的 Worker 堆上限 = 阶段额度 × 0.6（`src/main-process/execution-descriptors/memory-profiles.js`），共享检查 `checkExecutionMemory`（`src/main-process/background-execution/execution-memory-options.js`）却在 `heapUsed + external` 超过整个阶段额度时才报错。内存主要涨在堆里时，这个检查晚于 V8 强杀，起不到提前拦截的作用。按行拆分、BizOP 导入/运行/导出等经 `background-execution` 适配器创建的 Worker 遇到 `ERR_WORKER_OUT_OF_MEMORY` 时，界面显示什么还没核实
 - **关闭条件**：逐个核实上述路径 OOM 时的界面提示，不是中文可解释提示的补上归一；决定 `checkExecutionMemory` 是否另加按堆上限的阈值（会改变 BizOP 等的阶段语义，须评估误判和验收清单影响）
 - **目标版本**：未定
+
+### B97（P4 · 改进）模板【更新】后的失效映射：拆分行弹窗标出失效值、导出模板文件时提示
+
+- **来源**：v3.2.18 `feat/statement-export-template-update`（[spec](../changes/v3.2.18/feat/statement-export-template-update/spec.md) §3.4、[TechDoc](../changes/v3.2.18/feat/statement-export-template-update/techdoc.md) §4）
+- **影响**：主映射、拆分映射与拼接字段已标出「（已删除）」。但以下情况还没有提示：
+  - 拆分 / 合并的拆分行弹窗里，失效字段只显示原文字，不标红。
+  - 带失效映射的模板仍可导出模板文件，导出端没有提示。在其他电脑导入时，主映射失效的模板会被跳过；拆分映射失效的模板照常导入（导入路径不校验拆分映射），生成时才被拦截。
+
+  生成前拦截已能防止输出缺数据的账单
+- **推荐**：用户反馈拆分行难以定位失效字段，或模板交接出现被跳过的情况时再做
+
+### B96（P2 · 待核验）用真实库副本只读扫描映射引用表头外字段的存量模板
+
+- **来源**：v3.2.18 `feat/statement-export-template-update` 新增生成前拦截（TechDoc §3）。集成脚本 `statement-channel.js` 曾有绕过保存校验的 fixture 被拦下
+- **影响**：保存映射时会校验字段存在，正常数据不受影响。但如果存量模板的主映射或拆分映射引用了表头外字段（来源可能是旧版本数据，或模板包导入时未校验拆分映射），过去该列静默输出空值，本版起生成会被拦截并提示修改映射
+- **关闭条件**：对真实主库副本做只读扫描，用与生成拦截相同的引用收集口径找出所有启用中的越界引用；同时统计以下两类数据：
+  - 仍为旧版方向（`template_field` 存源字段）的映射：这类模板【更新】会被拒绝，需先在【修改】中保存一次。
+  - 「按正负号拆分的发生额」「根据发生额做映射的户名 / 账户号」带多个字段的存量配置：生成器把它们拼成「A,B」这一个列名读取，过去多为静默空值，本版起会被拦截。都没有则关闭；有则在发版说明中提示受影响模板，并确认是否需要修正
+- **目标版本**：v3.2.18（发版前）
+
+### B95（P2 · 未做）v3.2.18 导出交互调整与模板【更新】实机 GUI 验收
+
+- **来源**：v3.2.18 `feat/statement-export-template-update`（[spec](../changes/v3.2.18/feat/statement-export-template-update/spec.md) §6）。界面只由渲染生命周期用例与布局截图覆盖
+- **影响**：以下内容未在打包版上用真实文件走通：
+  - 多批次【导出明细】直接另存
+  - 【导出余额】范围弹窗的版式、关闭与导出中拦截
+  - 模板管理【更新】在 100% / 125% / 150% 缩放下的对齐（150% 时【删除】换行，改动前渠道行同样换行）
+  - 用真实银行模板走通完整流程：字段变更 → 更新模板 → 修改映射关系 → 拦截提示 → 修改后生成
+- **关闭条件**：Windows 打包版逐项走通，修改映射后的明细与余额账单抽查金额取自新字段
+- **目标版本**：v3.2.18（暂定）
 
 ### B94（P1 · 待核验）v3.2.18 链接表过期清理：资金人工复核与打包版回归
 

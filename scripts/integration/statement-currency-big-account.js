@@ -59,6 +59,7 @@ const channelIdentity = require('../../src/main-process/statement-channel-identi
 const { normalizeMaintainedBigAccounts } = require('../../src/main-process/big-account-recognition');
 const { ALL_BANKS_TEMPLATE_SCOPE, assembleMonthlyBalance } = require('../../src/main-process/monthly-balance');
 
+const { createTemplateHeaderUpdateTools } = require('../../src/main-process/template-header-update');
 const ROOT = path.join(__dirname, '..', '..');
 const MAIN_SOURCE = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
 const MAIN_AST = acorn.parse(MAIN_SOURCE, { ecmaVersion: 'latest', sourceType: 'script' });
@@ -210,6 +211,8 @@ function createEnvironment(dir, label) {
 
   const mainDeps = {
     ...MAIN_CONSTANTS,
+    // v3.2.18：生成配置的失效映射拦截
+    templateHeaderUpdateTools: createTemplateHeaderUpdateTools(MAIN_CONSTANTS),
     database,
     getTemplateMappingConfig,
     getStatementSessionEntries,

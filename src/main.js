@@ -761,6 +761,10 @@ const {
   createStatementGenerationHelpers
 } = require('./main-process/statement-generation');
 const {
+  createTemplateHeaderUpdateTools,
+  diffTemplateHeaders
+} = require('./main-process/template-header-update');
+const {
   buildDateRangeLabel,
   deriveBalanceRecords,
   parseRequiredBillDates,
@@ -1810,6 +1814,8 @@ const CLEAR_BACKGROUND_COLOR = '#ffffff';
 const BUNDLED_ENUM_FILE_NAME = 'COMMON枚举.xlsx';
 const CURRENCY_MAPPING_FILE_NAME = '币种映射表.xlsx';
 const MISSING_ENUM_MESSAGE = '内置网银账单枚举表缺失，请检查安装包';
+// v3.2.18 模板管理【更新】：旧版方向的映射须先在【修改】中保存一次再更新表头
+const LEGACY_ORIENTED_MAPPINGS_MESSAGE = '该模板的映射关系为旧版格式，请先点【修改】打开映射关系并点【完成】保存一次，再更新模板';
 const BALANCE_DISABLED_OPTION = '无';
 const BALANCE_CALCULATED_OPTION = '通过发生额计算';
 const MERCHANT_ID_SELF_INPUT_OPTION = '自己输入';
@@ -1854,6 +1860,21 @@ const BILL_SPLIT_GROUP_FIELDS = [
   BILL_SPLIT_MERGE_MAPPING_FIELD,
   REUSE_MODULE_MAPPING_FIELD
 ];
+// v3.2.18 模板管理【更新】：引用源字段的位置收集与生成前失效引用拦截（与保存校验同一组标记常量）
+const templateHeaderUpdateTools = createTemplateHeaderUpdateTools({
+  BALANCE_DISABLED_OPTION,
+  BALANCE_CALCULATED_OPTION,
+  CONCAT_FIELDS_MAPPING_FIELD,
+  FEATURE_FILTER_MAPPING_FIELD,
+  AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD,
+  AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION,
+  BILL_SPLIT_MERGE_MAPPING_FIELD,
+  BILL_SPLIT_MERGE_ENABLED_OPTION,
+  REUSE_MODULE_MAPPING_FIELD,
+  SIGNED_AMOUNT_MAPPING_FIELD,
+  AMOUNT_BASED_NAME_MAPPING_FIELD,
+  AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
+});
 const BACKGROUND_IMAGE_LIMITS = Object.freeze({
   maxSizeBytes: 5 * 1024 * 1024,
   minWidth: 1200,
@@ -9844,6 +9865,64 @@ function registerTemplateHandlers() {
     }
   });
 
+  // v3.2.18 模板管理【更新】：选择新模板文件并预览字段变更（只读预检，确认后走 template:update-headers 写入）。
+  ipcMain.handle('template:preview-header-update', async (_event, rawTemplateId) => {
+    const templateId = Number(rawTemplateId);
+    if (!database.getTemplate(templateId)) {
+      return createErrorResult({
+        step: '更新模板',
+        message: '未找到对应模板，请刷新后重试',
+        errorCode: 'TEMPLATE_NOT_FOUND',
+        context: { templateId }
+      });
+    }
+    const choice = await showImportOpenDialog('template', {
+      properties: ['openFile'],
+      filters: templateFileDialogFilters()
+    });
+    const selectedPath = !choice.canceled && Array.isArray(choice.filePaths) ? choice.filePaths[0] : '';
+    if (!selectedPath) {
+      return { status: 'cancelled' };
+    }
+    try {
+      return prepareTemplateHeaderUpdate({ templateId, filePath: selectedPath });
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        return createErrorResult({
+          step: '更新模板',
+          message: error.message,
+          errorCode: error.code,
+          detailLines: ['模板文件无法读取或表头无效，未更新模板。'],
+          context: { templateId, selectedPath }
+        });
+      }
+      return createErrorResult({
+        step: '更新模板',
+        message: '读取模板文件失败，请导出报错文件查看详情',
+        errorCode: 'TEMPLATE_HEADER_UPDATE_PREVIEW_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { templateId, selectedPath }
+      });
+    }
+  });
+
+  // v3.2.18 模板管理【更新】：确认后只替换表头（仅主库写入，不产生文件）。
+  supportIpcHandle('template:update-headers', '更新模板表头', (_event, payload = {}) => {
+    try {
+      return applyTemplateHeaderUpdate(payload || {});
+    } catch (error) {
+      return createErrorResult({
+        step: '更新模板',
+        message: '模板更新失败，请导出报错文件查看详情',
+        errorCode: 'TEMPLATE_HEADER_UPDATE_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { templateId: Number(payload && payload.templateId) }
+      });
+    }
+  });
+
   // v1.5.2 需求 3：保存模板的文件名固定字段
   // payload: { templateId: number, value: string }
   businessIpcHandle('template:save-filename-fixed-field', '保存文件名固定字段', (_event, payload = {}) => {
@@ -10066,15 +10145,7 @@ function registerTemplateHandlers() {
             return;
           }
 
-          const draftTemplate = existingTemplate || {
-            id: 0,
-            templateKey: entry.templateKey,
-            name: entry.name,
-            sourceFileName: entry.sourceFileName,
-            headers: entry.headers,
-            createdAt: '',
-            updatedAt: ''
-          };
+          const draftTemplate = buildBundleImportDraftTemplate(entry, existingTemplate);
           const validated = validateTemplateConfiguration({
             template: draftTemplate,
             mappings: normalizeMappingRows({
@@ -10792,10 +10863,10 @@ function validateBillSplitMappingsPayload(mappings, template) {
       });
       return;
     }
-    // Header existence check (allow concat marker + custom prefix to pass)
+    // Header existence check (allow custom prefix to pass)。拼接模式只由外层 mappedField 决定（下方调用前已排除），
+    // v3.2.18：拼接展开后的字段即使名为「需要拼接字段」也是真实源列，须校验存在（模板【更新】删列后不再被放行保存）。
     const checkSourceFieldExists = (field) => {
       if (!field) return;
-      if (field === CONCAT_FIELDS_MAPPING_FIELD) return;
       if (typeof field === 'string' && field.startsWith(FIXED_FIELD_VALUE_PREFIX)) return;
       if (!sourceFieldSet.has(field)) {
         throw new FileValidationError('FILE_READ', `映射字段不存在：${field}`);
@@ -11059,6 +11130,16 @@ function buildStatementGenerationConfig({
 
   const amountSplitByFieldConfig = buildAmountSplitByFieldConfig(template, selectedMappings);
   const billSplitMergeConfig = buildBillSplitMergeConfig(template, selectedMappings);
+  // v3.2.18：模板【更新】后映射仍引用已删除的字段时拒绝生成（否则该列静默输出空值），在读取文件与写出之前拦截。
+  templateHeaderUpdateTools.assertTemplateFieldReferencesAvailable(template, {
+    mappings: selectedMappings,
+    amountSplitRules: amountSplitByFieldConfig.rules || [],
+    billSplitMappings: billSplitMergeConfig.billSplitMappings || [],
+    billSplitRows: billSplitMergeConfig.billSplitRows || [],
+    billSplitAmountRules: billSplitMergeConfig.billSplitAmountRules || [],
+    billSplitSignedAmountSourceField: billSplitMergeConfig.signedAmountSourceField || '',
+    featureFilter: template && template.featureFilter
+  });
   const featureFilter = resolveStatementFeatureFilter(template, mappingByTargetField, billSplitMergeConfig);
   const currencyBigAccountMapping = isCurrencyOnlyTemplate
     ? buildCurrencyBigAccountMappingConfig(template, outputName)
@@ -13485,6 +13566,216 @@ function statementImportSessionForInvocation(prepared, templateId, templateName)
 }
 
 // v1.5.2：检查表头是否与已有模板重复（排除自身 excludeId）
+// 模板包导入：校验用的模板草稿。覆盖已有模板时随后会写入包里的表头，校验也必须按包里的表头进行；
+// v3.2.18 起（模板【更新】后交接给其他电脑的场景）不再沿用本机旧表头，避免新字段映射被误判为不存在而整条跳过。
+function buildBundleImportDraftTemplate(entry, existingTemplate) {
+  if (existingTemplate) {
+    return { ...existingTemplate, headers: entry.headers };
+  }
+  return {
+    id: 0,
+    templateKey: entry.templateKey,
+    name: entry.name,
+    sourceFileName: entry.sourceFileName,
+    headers: entry.headers,
+    createdAt: '',
+    updatedAt: ''
+  };
+}
+
+// v3.2.18 模板管理【更新】：模板配置 → 引用收集输入（与 buildStatementGenerationConfig 拦截同一口径）
+function buildTemplateFieldReferenceInput(templateConfig) {
+  return {
+    mappings: Array.isArray(templateConfig && templateConfig.exportMappings) ? templateConfig.exportMappings : [],
+    amountSplitRules: Array.isArray(templateConfig && templateConfig.amountSplitRules) ? templateConfig.amountSplitRules : [],
+    billSplitMappings: Array.isArray(templateConfig && templateConfig.billSplitMappings) ? templateConfig.billSplitMappings : [],
+    billSplitRows: Array.isArray(templateConfig && templateConfig.billSplitRows) ? templateConfig.billSplitRows : [],
+    billSplitAmountRules: Array.isArray(templateConfig && templateConfig.billSplitAmountRules)
+      ? templateConfig.billSplitAmountRules
+      : [],
+    billSplitSignedAmountSourceField: normalizeCell(templateConfig && templateConfig.billSplitMeta
+      && templateConfig.billSplitMeta.signedAmountSourceField),
+    featureFilter: templateConfig && templateConfig.template ? templateConfig.template.featureFilter || null : null
+  };
+}
+
+// 按给定表头找出模板配置中失效的源字段引用（含未启用的配置，结果带 active 标记）。
+function collectStaleTemplateFieldReferences(templateId, headers) {
+  const templateConfig = getTemplateMappingConfig(templateId);
+  if (!templateConfig) {
+    return [];
+  }
+  const references = templateHeaderUpdateTools.collectTemplateFieldReferences(
+    buildTemplateFieldReferenceInput(templateConfig)
+  );
+  return templateHeaderUpdateTools.findStaleFieldReferences(references, headers);
+}
+
+// 旧版映射方向（template_field 存源字段、mapped_field 存目标字段）由 resolveCurrentMappings 按当前表头识别；
+// 表头替换后可能识别不出旧方向，映射会整体读空。这类模板先在【修改】中保存一次（按新方向写回）再更新。
+function isLegacyOrientedTemplateMappings(templateId) {
+  const templateConfig = getTemplateMappingConfig(templateId);
+  const payload = database.getTemplateMappings(templateId);
+  if (!templateConfig || !payload) {
+    return false;
+  }
+  const targetFieldSet = new Set(buildManagedMappingFields(templateConfig.enumValues));
+  const sourceFieldSet = new Set((templateConfig.template.headers || []).map((header) => normalizeCell(header)));
+  const mappings = Array.isArray(payload.mappings) ? payload.mappings : [];
+  const currentOrientationScore = mappings.filter((mapping) => targetFieldSet.has(mapping.templateField)).length;
+  const legacyOrientationScore = mappings.filter((mapping) => {
+    return sourceFieldSet.has(normalizeCell(mapping.templateField)) && targetFieldSet.has(mapping.mappedField);
+  }).length;
+  return legacyOrientationScore > currentOrientationScore;
+}
+
+// 读取所选文件表头并与模板当前表头对比；只读，不写库。
+function prepareTemplateHeaderUpdate({ templateId, filePath }) {
+  const template = database.getTemplate(templateId);
+  if (!template) {
+    return createErrorResult({
+      step: '更新模板',
+      message: '未找到对应模板，请刷新后重试',
+      errorCode: 'TEMPLATE_NOT_FOUND',
+      context: { templateId }
+    });
+  }
+  if (isLegacyOrientedTemplateMappings(template.id)) {
+    return createErrorResult({
+      step: '更新模板',
+      message: LEGACY_ORIENTED_MAPPINGS_MESSAGE,
+      errorCode: 'TEMPLATE_MAPPINGS_LEGACY_ORIENTATION',
+      context: { templateId, templateName: template.name }
+    });
+  }
+  const headers = normalizeBundleTemplateHeaders(extractHeaders(filePath));
+  if (!headers.some((header) => header !== '')) {
+    throw new FileValidationError('TEMPLATE_HEADERS_INVALID', '所选文件没有有效的表头');
+  }
+  const diff = diffTemplateHeaders(template.headers, headers);
+  if (!diff.identical) {
+    const conflict = findConflictingTemplateByHeaders(headers, templateId);
+    if (conflict) {
+      return createErrorResult({
+        step: '更新模板',
+        message: `该文件的表头与已有模板「${conflict.name}」完全相同，无法更新为重复表头的模板。`,
+        errorCode: 'TEMPLATE_HEADERS_DUPLICATE',
+        context: { templateName: template.name, conflictTemplateName: conflict.name }
+      });
+    }
+  }
+  const staleReferences = diff.identical ? [] : collectStaleTemplateFieldReferences(templateId, headers);
+  return {
+    status: 'success',
+    templateId: template.id,
+    templateName: template.name,
+    channelId: template.channelId || null,
+    sourceFileName: path.basename(filePath),
+    expectedHeaders: template.headers,
+    headers,
+    diff,
+    affectedMappings: templateHeaderUpdateTools.formatFieldReferenceLines(staleReferences),
+    activeStaleCount: staleReferences.filter((reference) => reference.active).length
+  };
+}
+
+// 确认更新：只替换表头与源文件名，映射等配置全部保留；renderer 回传的表头在此全量复核。
+function applyTemplateHeaderUpdate(payload = {}) {
+  const templateId = Number(payload.templateId);
+  const fail = (errorCode, message, extra = {}) => createErrorResult({
+    step: '更新模板',
+    message,
+    errorCode,
+    context: { templateId, ...extra }
+  });
+  if (!Array.isArray(payload.headers) || !Array.isArray(payload.expectedHeaders)) {
+    return fail('TEMPLATE_HEADERS_INVALID', '模板表头无效，请重新点击【更新】选择文件');
+  }
+  const headers = normalizeBundleTemplateHeaders(payload.headers);
+  const expectedHeaders = payload.expectedHeaders.map((value) => (value === null || value === undefined ? '' : String(value)));
+  if (!headers.some((header) => header !== '')) {
+    return fail('TEMPLATE_HEADERS_INVALID', '所选文件没有有效的表头');
+  }
+  const template = database.getTemplate(templateId);
+  if (!template) {
+    return fail('TEMPLATE_NOT_FOUND', '模板已被删除，请刷新后重试');
+  }
+  if (JSON.stringify(template.headers) !== JSON.stringify(expectedHeaders)) {
+    return fail('TEMPLATE_HEADERS_CHANGED', '模板在此期间已被修改，请重新点击【更新】', { templateName: template.name });
+  }
+  const diff = diffTemplateHeaders(template.headers, headers);
+  if (diff.identical) {
+    return fail('TEMPLATE_HEADERS_UNCHANGED', '所选文件的表头与当前模板一致，无需更新', { templateName: template.name });
+  }
+  if (isLegacyOrientedTemplateMappings(templateId)) {
+    return fail('TEMPLATE_MAPPINGS_LEGACY_ORIENTATION', LEGACY_ORIENTED_MAPPINGS_MESSAGE, { templateName: template.name });
+  }
+  const conflict = findConflictingTemplateByHeaders(headers, templateId);
+  if (conflict) {
+    return fail(
+      'TEMPLATE_HEADERS_DUPLICATE',
+      `该文件的表头与已有模板「${conflict.name}」完全相同，无法更新为重复表头的模板。`,
+      { templateName: template.name, conflictTemplateName: conflict.name }
+    );
+  }
+  const sourceFileName = path.basename(normalizeCell(payload.sourceFileName)) || template.sourceFileName || '';
+
+  let updatedTemplate;
+  try {
+    updatedTemplate = database.updateTemplateHeaders(templateId, { expectedHeaders, headers, sourceFileName });
+  } catch (error) {
+    if (error && error.code === 'TEMPLATE_NOT_FOUND') {
+      return fail('TEMPLATE_NOT_FOUND', '模板已被删除，请刷新后重试');
+    }
+    if (error && error.code === 'TEMPLATE_HEADERS_CHANGED') {
+      return fail('TEMPLATE_HEADERS_CHANGED', '模板在此期间已被修改，请重新点击【更新】', { templateName: template.name });
+    }
+    throw error;
+  }
+  // 表头已写入主库：之后的模板库文件同步失败不影响更新结果（启动和下次修改模板时会重新同步），单独提示。
+  let librarySyncFailed = false;
+  try {
+    syncTemplateLibraryFile();
+  } catch (error) {
+    librarySyncFailed = true;
+    appendActivityLogEntry({
+      level: 'warn',
+      message: '更新模板表头后同步模板库文件失败',
+      details: [`模板名：${template.name}`, `原因：${error && error.message ? error.message : String(error)}`]
+    });
+  }
+  clearLastErrorReport();
+
+  const staleReferences = collectStaleTemplateFieldReferences(templateId, updatedTemplate.headers);
+  const staleMappings = templateHeaderUpdateTools.formatFieldReferenceLines(staleReferences);
+  const activeStaleCount = staleReferences.filter((reference) => reference.active).length;
+  appendActivityLogEntry({
+    level: 'info',
+    message: '更新模板表头成功',
+    details: [
+      `模板名：${template.name}`,
+      `源文件：${sourceFileName || 'N/A'}`,
+      `新增字段：${diff.added.join('、') || '（无）'}`,
+      `删除字段：${diff.removed.join('、') || '（无）'}`,
+      `字段顺序：${diff.orderChanged ? '有调整' : '无变化'}`,
+      `失效映射：${staleMappings.length} 处（需修改后才能生成：${activeStaleCount} 处）`,
+      '映射、大账号、固定值、字段筛选与拆分规则均保留'
+    ]
+  });
+  const baseMessage = activeStaleCount > 0
+    ? `模板「${template.name}」已更新，有 ${activeStaleCount} 处映射引用的字段已删除，修改映射关系前无法用该模板生成账单`
+    : `模板「${template.name}」已更新，映射关系已保留`;
+  return {
+    status: 'success',
+    message: librarySyncFailed ? `${baseMessage}；模板库文件同步失败，下次启动或修改模板时会重新同步` : baseMessage,
+    template: buildTemplateSummary(updatedTemplate),
+    diff,
+    staleMappings,
+    activeStaleCount,
+    librarySyncFailed
+  };
+}
+
 function findConflictingTemplateByHeaders(headers, excludeId) {
   const allTemplates = database.listTemplates();
   const key = JSON.stringify(headers);

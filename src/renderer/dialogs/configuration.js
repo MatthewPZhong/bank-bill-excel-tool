@@ -31,6 +31,37 @@
       };
     }
 
+    // v3.2.18 模板【更新】后映射仍引用已删除的字段：补一个「（已删除）」选项保持选中并标红，
+    // 保存时由主进程校验明确拒绝（映射字段不存在），而不是在界面上显示为空、再被静默保存为空。
+    // 与主进程引用收集同口径，只跳过内部存储值：固定值前缀（所有字段），按币种取大账号标记（仅 MerchantId）；
+    // 以 __ 开头的普通列名、其他字段上与标记同名的真实列名照常按源字段处理。
+    const INTERNAL_MAPPING_VALUE_PREFIX = '__FIXED__:';
+    const MERCHANT_ID_CURRENCY_ONLY_MARKER = '__CURRENCY_ONLY_BIG_ACCOUNT__';
+    function ensureStaleFieldOption(select, value, targetField) {
+      const normalized = String(value ?? '').trim();
+      if (!select || !normalized || normalized.startsWith(INTERNAL_MAPPING_VALUE_PREFIX)) return false;
+      if (targetField === 'MerchantId' && normalized === MERCHANT_ID_CURRENCY_ONLY_MARKER) return false;
+      if (Array.from(select.options).some((option) => option.value === normalized)) return false;
+      const option = document.createElement('option');
+      option.value = normalized;
+      option.textContent = `${normalized}（已删除）`;
+      option.dataset.stale = 'true';
+      select.appendChild(option);
+      select.value = normalized;
+      select.classList.add('is-stale');
+      select.addEventListener('change', () => {
+        select.classList.toggle('is-stale', select.selectedOptions[0]?.dataset.stale === 'true');
+      });
+      return true;
+    }
+
+    // 拼接字段面板的可选项：当前表头 + 已选但不在表头中的字段（标为已删除，可取消勾选）。
+    function listConcatPanelFields(headers, selectedFields) {
+      const current = Array.isArray(headers) ? headers : [];
+      const stale = (selectedFields || []).filter((field) => field && !current.includes(field));
+      return current.map((field) => ({ field, stale: false })).concat(stale.map((field) => ({ field, stale: true })));
+    }
+
     // 标题右侧「Tips」悬停说明：放在 .dialog-title 内，图案按标题字号取 1em 宽、0.5em 高。
     function titleTipsHtml(text, { hidden = false } = {}) {
       return `<span class="title-tips"${hidden ? ' hidden' : ''}>`
@@ -67,21 +98,28 @@
       const dialog = document.createElement('div');
       const fieldLabel = kind === 'detail' ? '明细' : '余额';
       dialog.className = 'modal-card alert-card export-scope-card';
+      // v3.2.18：右上角关闭；提示文字与图标垂直居中；两个范围按钮并排居中（当前批次在左）。
       dialog.innerHTML = `
+        <button class="icon-close export-scope-close" type="button" data-action="close" title="关闭" aria-label="关闭">×</button>
         <div class="alert-body">
           <div class="alert-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="28" height="28"><defs><linearGradient id="exportScopeIconG" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="100%" stop-color="#9B72F2"/></linearGradient></defs><circle cx="12" cy="12" r="10" fill="none" stroke="url(#exportScopeIconG)" stroke-width="2"/><path d="M12 7v6M12 16v1" stroke="url(#exportScopeIconG)" stroke-width="2" stroke-linecap="round"/></svg>
           </div>
           <div class="alert-message">请选择要导出的范围</div>
         </div>
-        <div class="dialog-actions vertical">
-          <button class="secondary-btn small export-scope-btn" type="button" data-scope="current">导出当前批次文件的${fieldLabel}</button>
-          <button class="secondary-btn small export-scope-btn" type="button" data-scope="all">导出所有批次文件的${fieldLabel}</button>
+        <div class="dialog-actions center">
+          <button class="secondary-btn small" type="button" data-scope="current">导出当前批次文件的${fieldLabel}</button>
+          <button class="secondary-btn small" type="button" data-scope="all">导出所有批次文件的${fieldLabel}</button>
         </div>
       `;
 
       let exporting = false;
-      registerModal(overlay, { canClose: () => !exporting });
+      // 初始焦点仍在「导出当前批次」，不落在右上角关闭按钮上。
+      registerModal(overlay, { canClose: () => !exporting, initialFocus: () => dialog.querySelector('[data-scope="current"]') });
+      // 导出进行中由 canClose 拦截；关闭不导出、不改状态栏。
+      dialog.querySelector('[data-action="close"]').addEventListener('click', () => {
+        closeModal(overlay);
+      });
       async function runExport(scope) {
         const handle = modalBridge.host.getHandle(overlay);
         if (exporting || !handle?.isOpen()) return;
@@ -3562,8 +3600,183 @@
       return overlay;
     }
 
+    // 打开模板的映射关系管理：读取映射后替换 replaceTarget（及其上层）；anchor 为发起请求的弹窗，
+    // 请求返回时 anchor 已不在栈顶或 replaceTarget 已关闭（或 isCurrent 判定过期）则放弃显示。
+    async function openTemplateMappingEditor({ templateId, replaceTarget, anchor = replaceTarget, isCurrent = () => true }) {
+      const result = await api.templates.getMappings(templateId);
+      if (!anchor?.isOpen() || !anchor.isTop() || !replaceTarget?.isOpen() || !isCurrent()) return { status: 'stale' };
+      if (result.status !== 'success') {
+        setStatus(result.message, 'error', { errorReportReady: Boolean(result.errorReportReady) });
+        pushModal(anchor, () => createAlertDialog(result.message));
+        return result;
+      }
+      replaceModal(replaceTarget, () => createMappingDialog(result));
+      return result;
+    }
+
+    function headerChipsHtml(values, className, sign) {
+      return values.length
+        ? `<div class="template-import-diff">${values.map((value) => `<span class="${className}">${sign} ${escapeHtml(value)}</span>`).join('')}</div>`
+        : '<span class="template-header-update-none">无</span>';
+    }
+
+    // v3.2.18 模板管理【更新】：展示新旧模板的字段变更（分组汇总），确认后只替换表头，映射关系保留。
+    // ctx：{ managerHandle, templateId, expandChannelId }
+    function createTemplateHeaderUpdateDialog(preview, ctx) {
+      const { setStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card template-header-update-card';
+      const diff = preview.diff || {};
+      const added = Array.isArray(diff.added) ? diff.added : [];
+      const removed = Array.isArray(diff.removed) ? diff.removed : [];
+      const affected = Array.isArray(preview.affectedMappings) ? preview.affectedMappings : [];
+      const identical = Boolean(diff.identical);
+      const affectedHtml = affected.length
+        ? `<ul class="template-header-update-mappings">${affected.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>
+          <div class="template-header-update-note">更新后这些映射原样保留，请点击【修改映射关系】改为新的字段；修改前用该模板生成账单会提示映射字段不存在。</div>`
+        : '<span class="template-header-update-none">无</span>';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">字段变更</div>
+          <button class="icon-close" type="button" data-action="close" title="关闭" aria-label="关闭">×</button>
+        </div>
+        <div class="template-header-update-body">
+          <div class="template-header-update-source">模板「${escapeHtml(preview.templateName || '')}」← 文件「${escapeHtml(preview.sourceFileName || '')}」</div>
+          ${identical ? '<div class="template-header-update-identical">所选文件的表头与当前模板一致，字段无变化。</div>' : ''}
+          <div class="template-header-update-row" data-role="added">
+            <span class="template-header-update-label">新增字段（${added.length}）</span>
+            ${headerChipsHtml(added, 'is-added', '+')}
+          </div>
+          <div class="template-header-update-row" data-role="removed">
+            <span class="template-header-update-label">删除字段（${removed.length}）</span>
+            ${headerChipsHtml(removed, 'is-removed', '−')}
+          </div>
+          <div class="template-header-update-row" data-role="order">
+            <span class="template-header-update-label">字段顺序</span>
+            <span>${diff.orderChanged ? '有调整' : '无变化'}</span>
+          </div>
+          <div class="template-header-update-row" data-role="affected">
+            <span class="template-header-update-label">受影响的映射（${affected.length}）</span>
+            <div class="template-header-update-affected">${affectedHtml}</div>
+          </div>
+          <div class="template-header-update-note">更新只替换模板字段，映射关系、大账号、字段筛选与拆分规则均保留。</div>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="submit"${identical ? ' disabled' : ''}>更新模板</button>
+          <button class="secondary-btn small" type="button" data-action="back">返回</button>
+        </div>
+      `;
+      const writeScope = createDialogWriteScope(overlay, dialog);
+      const goBack = () => closeModal(overlay);
+      dialog.querySelector('[data-action="close"]').addEventListener('click', goBack);
+      dialog.querySelector('[data-action="back"]').addEventListener('click', goBack);
+      dialog.querySelector('[data-action="submit"]').addEventListener('click', async () => {
+        if (identical) return;
+        const handle = writeScope.begin();
+        if (!handle) return;
+        let result;
+        try {
+          result = await api.templates.updateHeaders({
+            templateId: preview.templateId,
+            expectedHeaders: preview.expectedHeaders,
+            headers: preview.headers,
+            sourceFileName: preview.sourceFileName
+          });
+          setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
+            errorReportReady: Boolean(result.errorReportReady)
+          });
+        } catch (error) {
+          result = { status: 'error', message: error.message || '模板更新失败' };
+          setStatus(result.message, 'error');
+        }
+        // 更新已成功时，列表刷新失败不改变「已更新」的结果（失效映射与【修改映射关系】入口保留），只单独提示。
+        if (result.status === 'success') {
+          try {
+            await refreshTemplates();
+          } catch (_error) {
+            result = { ...result, refreshFailed: true };
+          }
+        }
+        writeScope.finish(handle);
+        if (!writeScope.isCurrent(handle)) return;
+        replaceModal(handle, () => createTemplateHeaderUpdateResultDialog(result, ctx));
+      });
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // 【更新】结果：成功时可直接【修改映射关系】，失败只有【返回】；返回均回到刷新后的模板管理。
+    function createTemplateHeaderUpdateResultDialog(result, ctx) {
+      const { setStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      const succeeded = result?.status === 'success';
+      const staleMappings = succeeded && Array.isArray(result.staleMappings) ? result.staleMappings : [];
+      // 失败或成功后列表刷新失败时，返回前需重新读取模板列表。
+      const needsRefresh = !succeeded || Boolean(result?.refreshFailed);
+      dialog.className = 'modal-card alert-card template-header-update-result-card';
+      dialog.innerHTML = `
+        <div class="alert-body">
+          <div class="alert-message">
+            <div data-role="message">${escapeHtml(result?.message || (succeeded ? '模板已更新' : '模板更新失败'))}</div>
+            ${succeeded && result.refreshFailed ? '<div class="template-header-update-result-label" data-role="refresh-failed">模板列表刷新失败，返回时会重新读取。</div>' : ''}
+            ${staleMappings.length ? `<div class="template-header-update-result-label">引用已删除字段的映射（${staleMappings.length}）：</div>
+              <ul class="template-header-update-mappings">${staleMappings.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>` : ''}
+          </div>
+        </div>
+        <div class="dialog-actions right">
+          ${succeeded ? '<button class="primary-btn small" type="button" data-action="edit-mappings">修改映射关系</button>' : ''}
+          <button class="secondary-btn small" type="button" data-action="back">返回</button>
+        </div>
+      `;
+      // opening 只防重复点击；不能拦截关闭，否则读取映射后替换模板管理（含本弹窗）会被拦下。
+      let opening = false;
+      dialog.querySelector('[data-action="back"]').addEventListener('click', async () => {
+        const self = modalBridge.host.getHandle(overlay);
+        if (opening || !self?.isTop()) return;
+        // 失败时（如确认期间模板被删除或修改）模板列表可能已过期，先重新读取再返回；成功时提交后已刷新。
+        if (needsRefresh) {
+          opening = true;
+          let refreshError = null;
+          try {
+            await refreshTemplates();
+          } catch (error) {
+            refreshError = error;
+          } finally {
+            opening = false;
+          }
+          // 迟到的结果（本弹窗已关闭或不在栈顶）不再反馈，也不替换新弹窗。
+          if (!self.isOpen() || !self.isTop()) return;
+          if (refreshError) setStatus(refreshError.message || '刷新模板列表失败', 'error');
+        }
+        const manager = ctx?.managerHandle;
+        if (manager?.isOpen()) {
+          replaceModal(manager, () => createTemplateManagerDialog({ expandChannelId: ctx.expandChannelId || null }));
+        } else {
+          closeModal(overlay);
+        }
+      });
+      dialog.querySelector('[data-action="edit-mappings"]')?.addEventListener('click', async () => {
+        const self = modalBridge.host.getHandle(overlay);
+        const manager = ctx?.managerHandle;
+        if (opening || !self?.isTop() || !manager?.isOpen()) return;
+        opening = true;
+        try {
+          await openTemplateMappingEditor({ templateId: ctx.templateId, replaceTarget: manager, anchor: self });
+        } catch (error) {
+          if (self.isOpen() && self.isTop()) setStatus(error.message || '读取映射关系失败', 'error');
+        } finally {
+          opening = false;
+        }
+      });
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     function renderTemplateTableRows(tableBody, { expandChannelId = null } = {}) {
       let mappingRequest = 0;
+      let headerUpdating = false;
       tableBody.innerHTML = '';
 
       if (!services.getTemplates().length && !services.getStatementChannels().length) {
@@ -3591,8 +3804,11 @@
             <span class="manager-big-account-summary" title="${escapeHtml(bigAccountSummary)}">${escapeHtml(bigAccountSummary)}</span>
           </td>
           <td class="manager-action-cell">
-            <div class="manager-row-actions">
-              <button class="text-action" type="button" data-action="manage">修改</button>
+            <div class="manager-row-actions template-manager-row-actions">
+              <span class="manager-row-lead-actions">
+                <button class="text-action" type="button" data-action="manage">修改</button>
+                <button class="text-action" type="button" data-action="update-headers" title="选择新的模板文件更新字段，映射关系保留">更新</button>
+              </span>
               <button class="text-action" type="button" data-action="rename">重命名</button>
               <button class="text-action danger" type="button" data-action="delete">删除</button>
             </div>
@@ -3603,14 +3819,35 @@
           const handle = modalBridge.host.getHandle(tableBody.closest('.modal-overlay'));
           if (!handle?.isTop()) return;
           const request = ++mappingRequest;
-          const result = await api.templates.getMappings(template.id);
-          if (!handle.isOpen() || !handle.isTop() || request !== mappingRequest) return;
+          await openTemplateMappingEditor({
+            templateId: template.id,
+            replaceTarget: handle,
+            isCurrent: () => request === mappingRequest
+          });
+        });
+        // v3.2.18【更新】：选择新模板文件 → 字段变更弹窗（叠在模板管理上）；取消选择文件不弹窗。
+        row.querySelector('[data-action="update-headers"]').addEventListener('click', async () => {
+          const manager = modalBridge.host.getHandle(tableBody.closest('.modal-overlay'));
+          if (!manager?.isTop() || headerUpdating) return;
+          headerUpdating = true;
+          const request = ++mappingRequest;
+          let result;
+          try {
+            result = await api.templates.previewHeaderUpdate(template.id);
+          } catch (error) {
+            result = { status: 'error', message: error.message || '读取模板文件失败' };
+          } finally {
+            headerUpdating = false;
+          }
+          if (!manager.isOpen() || !manager.isTop() || request !== mappingRequest) return;
+          if (!result || result.status === 'cancelled') return;
+          const ctx = { managerHandle: manager, templateId: template.id, expandChannelId: template.channelId || null };
           if (result.status !== 'success') {
             setStatus(result.message, 'error', { errorReportReady: Boolean(result.errorReportReady) });
-            pushModal(handle, () => createAlertDialog(result.message));
+            pushModal(manager, () => createTemplateHeaderUpdateResultDialog(result, ctx));
             return;
           }
-          replaceModal(handle, () => createMappingDialog(result));
+          pushModal(manager, () => createTemplateHeaderUpdateDialog(result, ctx));
         });
         row.querySelector('[data-action="rename"]').addEventListener('click', () => {
           openModal(() => createTemplateRenameDialog(template));
@@ -3690,8 +3927,10 @@
             <span class="manager-big-account-summary" title="${escapeHtml(bigAccountSummary)}">${escapeHtml(bigAccountSummary)}</span>
           </td>
           <td class="manager-action-cell">
-            <div class="manager-row-actions">
-              <button class="text-action" type="button" data-action="import-child">导入子模板</button>
+            <div class="manager-row-actions template-manager-row-actions">
+              <span class="manager-row-lead-actions">
+                <button class="text-action" type="button" data-action="import-child">导入子模板</button>
+              </span>
               <button class="text-action" type="button" data-action="rename">重命名</button>
               <button class="text-action danger" type="button" data-action="delete">删除</button>
             </div>
@@ -4296,6 +4535,7 @@
           select.value = '';
         } else {
           select.value = savedMapping.mappedField || (isBalanceField ? BALANCE_DISABLED_OPTION : '');
+          ensureStaleFieldOption(select, savedMapping.mappedField, fieldName);
         }
 
         function updateConcatPreview() {
@@ -4309,10 +4549,9 @@
         function renderConcatPanel() {
           if (!concatPickerPanel) return;
           concatPickerPanel.replaceChildren();
-          const headers = payload.template.headers || [];
-          headers.forEach((header) => {
+          listConcatPanelFields(payload.template.headers, concatSelectedFields).forEach(({ field: header, stale }) => {
             const option = document.createElement('div');
-            option.className = 'concat-picker-option';
+            option.className = stale ? 'concat-picker-option is-stale' : 'concat-picker-option';
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
             checkbox.checked = concatSelectedFields.includes(header);
@@ -4321,7 +4560,7 @@
             const selectedIdx = concatSelectedFields.indexOf(header);
             indexSpan.textContent = selectedIdx >= 0 ? `${selectedIdx + 1}.` : '';
             const nameSpan = document.createElement('span');
-            nameSpan.textContent = header;
+            nameSpan.textContent = stale ? `${header}（已删除）` : header;
             option.append(checkbox, indexSpan, nameSpan);
             option.addEventListener('click', (event) => {
               if (event.target === checkbox) return;
@@ -5167,6 +5406,7 @@
           const isConcatInitial = entry.mappedField === CONCAT_FIELDS_MAPPING_FIELD && concatSelectedFields.length > 0;
 
           select.value = isConcatInitial ? CONCAT_FIELDS_MAPPING_FIELD : (entry.mappedField || '');
+          if (!isConcatInitial) ensureStaleFieldOption(select, entry.mappedField, entry.templateField);
 
           function updateConcatPreviewText() {
             if (!concatPreview) return;
@@ -5178,9 +5418,9 @@
           function renderConcatOptions() {
             if (!concatPanel) return;
             concatPanel.replaceChildren();
-            (headers || []).forEach((header) => {
+            listConcatPanelFields(headers, concatSelectedFields).forEach(({ field: header, stale }) => {
               const option = document.createElement('div');
-              option.className = 'concat-picker-option';
+              option.className = stale ? 'concat-picker-option is-stale' : 'concat-picker-option';
               const checkbox = document.createElement('input');
               checkbox.type = 'checkbox';
               checkbox.checked = concatSelectedFields.includes(header);
@@ -5189,7 +5429,7 @@
               const selectedIdx = concatSelectedFields.indexOf(header);
               indexSpan.textContent = selectedIdx >= 0 ? `${selectedIdx + 1}.` : '';
               const nameSpan = document.createElement('span');
-              nameSpan.textContent = header || '(空白字段)';
+              nameSpan.textContent = stale ? `${header}（已删除）` : (header || '(空白字段)');
               option.append(checkbox, indexSpan, nameSpan);
               option.addEventListener('click', (event) => {
                 if (event.target === checkbox) return;

@@ -86,6 +86,12 @@ const SUPPORT_ACTION_POLICIES = Object.freeze([
     channel: 'balance-seed:delete',
     kind: 'support-action',
     reason: 'balance-seed'
+  }),
+  // v3.2.18 模板管理【更新】：只替换模板表头（仅主库写入，不产生文件）。
+  Object.freeze({
+    channel: 'template:update-headers',
+    kind: 'support-action',
+    reason: 'statement-template'
   })
 ]);
 
@@ -444,7 +450,8 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'file:import-balance-seed-file',
     'position-reconciliation:bank:prepare-import',
     'template-resources:discard-import',
-    'template-resources:prepare-import'
+    'template-resources:prepare-import',
+    'template:preview-header-update'
   ]),
   'preview-only': Object.freeze([
     'bizOpReconV327:run:preflight',

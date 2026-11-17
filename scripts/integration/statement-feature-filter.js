@@ -36,6 +36,7 @@ const {
 const { splitTemplateName } = require('../../src/backend/balance-seed-store');
 const channelIdentity = require('../../src/main-process/statement-channel-identity');
 
+const { createTemplateHeaderUpdateTools } = require('../../src/main-process/template-header-update');
 const ROOT = path.join(__dirname, '..', '..');
 const MAIN_SOURCE = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
 const MAIN_AST = acorn.parse(MAIN_SOURCE, { ecmaVersion: 'latest', sourceType: 'script' });
@@ -166,6 +167,8 @@ function createMain(database, constantOverrides = {}) {
   ], {
     ...CONSTANTS,
     ...constantOverrides,
+    // v3.2.18：生成配置的失效映射拦截
+    templateHeaderUpdateTools: createTemplateHeaderUpdateTools({ ...CONSTANTS, ...constantOverrides }),
     database,
     fs,
     normalizeCell,

@@ -378,7 +378,8 @@ async function handleOpenAccountMappings() {
       const id=isFilenameMappingMode(state.selectedTemplateId)?state.selectedTemplateId:Number(state.selectedTemplateId);
       return perform('import',()=>api.files.importFile(id));
     }
-    const exportDetail=()=>perform('detail',()=>api.files.exportDetail());
+    // v3.2.18：导出明细只导出当前批次，直接弹出另存为框，不再弹范围选择。
+    const exportDetail=()=>perform('detail',()=>api.files.exportDetail('current'));
     function exportBalance() {
       if(state.mode!==STATEMENT_MODES.exportMonthlyBalance)return perform('balance',()=>api.files.exportBalance());
       if(!state.monthlyBalanceReady) {

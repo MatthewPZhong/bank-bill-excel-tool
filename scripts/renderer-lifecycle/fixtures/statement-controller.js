@@ -5,10 +5,11 @@ const index = fs.readFileSync(path.resolve(__dirname, '../../../index.html'), 'u
 const panelHtml = index.match(/<section id="statementModulePanel"[\s\S]*?<\/section>/)[0];
 
 // 实际 index 面板 + Statement/配置服务/公共工厂/宿主；只注入可控 API，不创建业务文件。
-module.exports = async ({ js, load, reset, assert, test }) => {
+module.exports = async ({ js, load, reset, assert, test, layout }) => {
   const tick = () => js('statementFixture.tick()');
-  async function setup() {
-    await reset(`<div id="modalRoot"></div>${panelHtml}`);
+  // layoutOptions：加载生产样式的真实窗口，用于检查布局。
+  async function setup(layoutOptions = null) {
+    await reset(`<div id="modalRoot"></div>${panelHtml}`, layoutOptions ? { layout: layoutOptions } : undefined);
     await load('src/renderer/dialogs/toolbox.js');
     await load('src/renderer-dialogs.js');
     await load('src/renderer/controllers/statement.js');
@@ -148,15 +149,10 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.balance-gap-card'))`), true);
     // 导出明细不处理余额：断档提示仍留在状态框，可再次打开。
     await js(`statementFixture.top().querySelector('.icon-close').click()`); await tick();
-    await js(`statementFixture.controller.commands.exportDetail()`); await tick();
-    assert.equal(await js('statementFixture.text()'), '明细已导出');
-    assert.equal(await js(`statementFixture.feedback.at(-1).options.manualBalancePromptTitle`), '点击处理账单日期断档');
-    await js(`document.getElementById('statusBox').click()`); await tick();
-    assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.balance-gap-card'))`), true);
-    // 多批次时导出明细先选范围：选完范围导出后同样保留断档入口。
-    await js(`statementFixture.top().querySelector('.icon-close').click()`); await tick();
-    await js(`statementFixture.next.detail={status:'select-export-scope'};statementFixture.controller.commands.exportDetail()`); await tick();
-    await js(`statementFixture.next.detail={status:'success',message:'当前批次明细已导出'};statementFixture.top().querySelector('[data-scope="current"]').click()`); await tick();
+    // v3.2.18：导出明细只导出当前批次，直接另存（不弹范围选择）。
+    await js(`statementFixture.next.detail={status:'success',message:'当前批次明细已导出'};statementFixture.controller.commands.exportDetail()`); await tick();
+    assert.deepEqual(await js(`statementFixture.calls.filter(call=>call.name==='detail').map(call=>call.args)`), [['current']]);
+    assert.equal(await js(`Boolean(document.querySelector('.export-scope-card'))`), false);
     assert.equal(await js('statementFixture.text()'), '当前批次明细已导出');
     assert.equal(await js(`statementFixture.feedback.at(-1).options.manualBalancePromptTitle`), '点击处理账单日期断档');
     await js(`document.getElementById('statusBox').click()`); await tick();
@@ -190,11 +186,17 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     await js(`document.getElementById('statusBox').click()`); await tick();
     assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.balance-seed-replace-card'))`), true);
   });
-  await test('导出范围公共工厂准确传 current/all，错误报告成功后仍可再次导出', async () => {
+  await test('导出余额范围公共工厂准确传 current/all；导出明细固定 current 不弹范围；错误报告成功后仍可再次导出', async () => {
     await setup(); await js(`statementFixture.controller.commands.importFile()`);
-    await js(`statementFixture.next.detail={status:'select-export-scope'};statementFixture.controller.commands.exportDetail()`);
+    await js(`statementFixture.next.balance={status:'select-export-scope'};statementFixture.controller.commands.exportBalance()`); await tick();
+    assert.deepEqual(await js(`Array.from(statementFixture.top().querySelectorAll('.dialog-actions [data-scope]')).map(button=>[button.dataset.scope,button.textContent])`),
+      [['current','导出当前批次文件的余额'],['all','导出所有批次文件的余额']]);
     await js(`statementFixture.top().querySelector('[data-scope="all"]').click()`); await tick();
-    assert.deepEqual(await js(`statementFixture.calls.filter(call=>call.name==='detail').map(call=>call.args[0]??null)`), [null,'all']);
+    assert.deepEqual(await js(`statementFixture.calls.filter(call=>call.name==='balance').map(call=>call.args[0]??null)`), [null,'all']);
+    assert.equal(await js('statementFixture.text()'), '余额已导出');
+    await js(`statementFixture.controller.commands.exportDetail()`); await tick();
+    assert.deepEqual(await js(`statementFixture.calls.filter(call=>call.name==='detail').map(call=>call.args[0])`), ['current']);
+    assert.equal(await js(`statementFixture.root.childElementCount`), 0);
     assert.equal(await js('statementFixture.text()'), '明细已导出');
     await js(`statementFixture.next.import={status:'error',message:'测试错误',errorReportReady:true};statementFixture.controller.commands.importFile()`);
     await js(`statementFixture.controller.commands.exportError();`); await tick();
@@ -261,14 +263,61 @@ module.exports = async ({ js, load, reset, assert, test }) => {
   });
   await test('导出范围忙碌时拒绝双击及关闭，最终销毁后的旧回应不接管新窗口', async () => {
     await setup();
-    await js(`statementFixture.next.detail={status:'select-export-scope'};statementFixture.controller.commands.exportDetail()`);
-    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.detail=statementFixture.pending;
+    await js(`statementFixture.next.balance={status:'select-export-scope'};statementFixture.controller.commands.exportBalance()`);
+    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.balance=statementFixture.pending;
       statementFixture.top().querySelector('[data-scope="all"]').click();statementFixture.top().querySelector('[data-scope="current"]').click();`);
-    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='detail').length`), 2);
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='balance').length`), 2);
     assert.equal(await js(`statementFixture.host.getTop().close().status`), 'blocked');
+    // 右上角 × 同样被导出中的 canClose 拦截
+    await js(`statementFixture.top().querySelector('.export-scope-close').click()`);
+    assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.export-scope-card'))`), true);
     await js(`statementFixture.host.getTop().dispose();statementFixture.bridge.openModal(()=>statementFixture.modal('保留新窗口'),{owner:'new'});
       statementFixture.pending.resolve({status:'select-export-scope'});`);
     await tick();
     assert.match(await js(`statementFixture.root.textContent`), /保留新窗口/);
+  });
+  // v3.2.18：导出余额范围弹窗右上角 ×：空闲时关闭不导出、不改状态栏；导出中不能关闭，结束后按结果关闭。
+  await test('导出余额范围弹窗 × 关闭：空闲关闭不导出，导出进行中不能关闭', async () => {
+    await setup(); await js(`statementFixture.controller.commands.importFile()`); await tick();
+    const before = await js('statementFixture.text()');
+    await js(`statementFixture.next.balance={status:'select-export-scope'};statementFixture.controller.commands.exportBalance()`); await tick();
+    assert.deepEqual(await js(`{const close=statementFixture.top().querySelector('.export-scope-close');[close.title,close.getAttribute('aria-label'),close.textContent];}`), ['关闭','关闭','×']);
+    assert.equal(await js(`document.activeElement?.dataset.scope`), 'current');
+    await js(`statementFixture.top().querySelector('.export-scope-close').click()`); await tick();
+    assert.equal(await js(`statementFixture.root.childElementCount`), 0);
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='balance').length`), 1);
+    assert.equal(await js('statementFixture.text()'), before);
+    await js(`statementFixture.next.balance={status:'select-export-scope'};statementFixture.controller.commands.exportBalance()`); await tick();
+    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.balance=statementFixture.pending;statementFixture.top().querySelector('[data-scope="current"]').click();
+      statementFixture.top().querySelector('.export-scope-close').click();`); await tick();
+    assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.export-scope-card'))`), true);
+    await js(`statementFixture.pending.resolve({status:'success',message:'当前批次余额已导出'})`); await tick();
+    assert.equal(await js(`statementFixture.root.childElementCount`), 0);
+    assert.equal(await js('statementFixture.text()'), '当前批次余额已导出');
+    assert.deepEqual(await js(`statementFixture.calls.filter(call=>call.name==='balance').map(call=>call.args[0]??null)`), [null,null,'current']);
+  });
+  // v3.2.18：范围弹窗版式（生产样式）：提示文字与图标中线对齐；两个按钮同行居中、按文字收紧，当前批次在左；× 在右上角。
+  for (const theme of ['light', 'dark']) await test(`导出余额范围弹窗版式（${theme}）`, async () => {
+    await setup({ width: 1080, height: 760, theme });
+    await js(`statementFixture.next.balance={status:'select-export-scope'};statementFixture.controller.commands.exportBalance()`); await tick();
+    await layout.settle();
+    const metrics = await js(`(() => {
+      const card=document.querySelector('.export-scope-card'), rect=element=>element.getBoundingClientRect();
+      const icon=rect(card.querySelector('.alert-icon')), message=rect(card.querySelector('.alert-message'));
+      const footer=rect(card.querySelector('.dialog-actions')), close=rect(card.querySelector('.export-scope-close')), box=rect(card);
+      const [current,all]=['current','all'].map(scope=>rect(card.querySelector('[data-scope="'+scope+'"]')));
+      const lineHeight=parseFloat(getComputedStyle(card.querySelector('[data-scope="current"]')).lineHeight)||20;
+      return { iconCenter: icon.top+icon.height/2, messageCenter: message.top+message.height/2,
+        sameRow: Math.abs(current.top-all.top), currentLeft: current.left<all.left,
+        pairOffset: Math.abs((current.left+all.right)/2-(footer.left+footer.width/2)),
+        narrow: current.width<footer.width/2 && all.width<footer.width/2,
+        singleLine: current.height<=lineHeight*2 && all.height<=lineHeight*2,
+        closeInset: [box.right-close.right, close.top-box.top], closeAboveMessage: close.bottom<=message.top+message.height };
+    })()`);
+    assert.ok(Math.abs(metrics.iconCenter - metrics.messageCenter) <= 1, JSON.stringify(metrics));
+    assert.ok(metrics.sameRow <= 1 && metrics.currentLeft && metrics.pairOffset <= 1, JSON.stringify(metrics));
+    assert.ok(metrics.narrow && metrics.singleLine, JSON.stringify(metrics));
+    assert.ok(metrics.closeInset.every(value => value >= 0 && value <= 16), JSON.stringify(metrics));
+    await layout.evidence(`export-scope-balance-${theme}`, metrics);
   });
 };
