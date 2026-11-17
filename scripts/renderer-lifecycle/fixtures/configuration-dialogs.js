@@ -302,7 +302,8 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       return { overflow: wrapper.scrollWidth>wrapper.clientWidth+1,
         wrapped: [...table.querySelectorAll('th,td')].filter(cell=>!singleLine(cell)).map(cell=>cell.textContent.trim()),
         widths: [...table.rows[0].cells].map(cell=>Math.round(cell.getBoundingClientRect().width)),
-        inputFits: !input||input.scrollWidth<=input.clientWidth,
+        // 与 overflow 同样留 1px：Windows 150% 下输入框宽度为小数，scrollWidth 取整后会比 clientWidth 大 1（文字 50.6px、可用约 54px 时也是 75/74）
+        inputFits: !input||input.scrollWidth<=input.clientWidth+1,
         // 失败时随断言输出，便于对照 Windows 与本机的实际宽度
         inputMetrics: input&&(()=>{const cs=getComputedStyle(input);const ctx=document.createElement('canvas').getContext('2d');ctx.font=cs.font;
           return {value:input.value,client:input.clientWidth,scroll:input.scrollWidth,padding:cs.paddingLeft,font:cs.font,
@@ -336,7 +337,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await js(`cfg.overlay.querySelector('[data-role="balance-seed-account"]').click();cfg.overlay.querySelectorAll('[data-action="edit-seed"]')[0].click();void 0;`);
     await layout.resize(1080, 760, 1.5);
     const zoomed = await measure();
-    // 150% 时编辑 7 位金额 1250000：Windows 字体下原 10px 内边距放不下（PR #253 首轮 Windows CI），窄窗口收为 4px
+    // 150% 时编辑 7 位金额 1250000（筛选后第一行）
     assert.equal(await js(`cfg.overlay.querySelector('.balance-seed-balance-input').value`), '1250000');
     assert.deepEqual([zoomed.overflow, zoomed.wrapped, zoomed.inputFits], [false, [], true], JSON.stringify(zoomed.inputMetrics));
     assert.deepEqual([zoomed.headerFits, zoomed.closeTopRight], [true, true], '150% 时头部可换行但不溢出，× 仍在右上角');

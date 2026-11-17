@@ -60,4 +60,4 @@
 - 2026-11-16 在候选 `9bd81077`（升版提交）上运行 `npm run release-check`：EXIT=0。lint 通过；架构检查通过（解析 832/832 文件，历史检查 333 个提交）；单测 10280/10284（0 失败）；集成 109 个脚本 3885/3885；smoke 通过。`rules/integration-test-policy.md` §七 由 runner 回写，单独提交。
 - 合入前各模块分支的验证见各自 TechDoc；`feat/mapping-feature-values` 末端另跑过完整 `release-check`（EXIT=0）与两轮 Codex 审查。合入后本轮未做 release 级 Codex 审查。
 - 远端 Windows CI：各模块分支未推送过，没有 Windows 证据，以 PR #253 的 Windows CI 为准。
-- PR #253 首轮 Windows CI（`f515ce40`）：`release-check-integration (2/2)` 渲染生命周期 439/440，「余额管理表格」150% 编辑态输入框放不下 `1250000`。`feat/template-import-naming` 加账户号筛选后该用例编辑的金额由 `15320.8` 变为 `1250000`，暴露出窄窗口下编辑框内边距（10px）挤占文字宽度；改为窄窗口下 4px，用例固定断言所编辑的值，本机 `configuration-dialogs` 142/142。10 个字符以上金额仍显示不全，登记 B100。
+- PR #253 Windows CI：`f515ce40`、`452291c6` 两轮 `release-check-integration (2/2)` 均为渲染生命周期 439/440，「余额管理表格」150% 编辑 `1250000` 时 `inputFits` 为 false。`452291c6` 按“放不下”收窄编辑框内边距（误判）；`d9966823` 让断言输出实测值后确认 Windows 与 macOS 尺寸相同（文字 50.6px，`scrollWidth` 75 / `clientWidth` 74，为小数宽度取整），撤回内边距改动、该判断改为与横向溢出同样留 1px 容差。`feat/template-import-naming` 加账户号筛选后该用例 150% 编辑的金额由 `15320.8` 变为 `1250000`、列宽随之变化，才暴露出该取整差。排查中确认 150% 下 8 个字符以上金额显示不全，登记 B100。

@@ -328,8 +328,6 @@ td .muted { color: var(--muted); }
   .balance-seed-card.manager-card .data-table td { padding-left: 10px; padding-right: 10px; }
   .balance-seed-card.manager-card .data-table th:nth-child(n+4),
   .balance-seed-card.manager-card .data-table td:nth-child(n+4) { width: 15%; }
-  /* 编辑态输入框收窄内边距：Windows 字体下 150% 时余额列约 15%，原 10px 内边距放不下 7 位金额（如 1250000） */
-  .balance-seed-card .balance-seed-balance-input { padding: 0 4px; }
 }
 
 /* =================== Card size presets for new dialogs =================== */
