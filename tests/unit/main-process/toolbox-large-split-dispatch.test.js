@@ -30,6 +30,7 @@ const STUB_DONE = path.join(FIXTURES, 'toolbox-split-stub-done.js');
 const STUB_ERROR = path.join(FIXTURES, 'toolbox-split-stub-error.js');
 const STUB_EXIT = path.join(FIXTURES, 'toolbox-split-stub-exit.js');
 const STUB_WRONG_JOBID = path.join(FIXTURES, 'toolbox-split-stub-wrong-jobid.js');
+const STUB_OOM = path.join(FIXTURES, 'toolbox-split-stub-oom.js');
 const BATCH_CONTEXT = Object.freeze({
   batchId: 41,
   batchNumber: '2026-08-11-001',
@@ -99,6 +100,33 @@ test.describe('T4 toolbox-large-split-dispatch（桩 worker 协议）', () => {
       assert.match(err.message, /异常退出.*code=1/, 'exit 兜底 reject 应反映非零退出码');
       return true;
     });
+  });
+
+  test('A4b. 堆到达 resourceLimits 被 V8 强杀 → 中文可解释错误，保留原 code 与 cause', async () => {
+    __test_only_set_worker_script__(STUB_OOM);
+    const MiB = 1024 ** 2;
+    const { promise, closed } = dispatchLargeSplit({
+      op: 'scanMetadata',
+      filePath: '/fake/x.xlsx',
+      executionMemoryConfig: {
+        version: 1, profileId: 'split-oom-test', policyDigest: 'a'.repeat(64), phaseKey: 'split-prepare',
+        phaseMemoryBytes: 256 * MiB, systemReserveBytes: 128 * MiB,
+        sstMemoryBytes: 4 * MiB, sstCacheBytes: MiB, styleCacheBytes: MiB,
+        sqliteAggregateCacheBytes: 8 * MiB, maxOpenConnections: 2,
+        maxInFlightBytes: 4 * MiB, maxSingleRecordBytes: MiB,
+        workerLimits: { maxOldGenerationSizeMb: 32, maxYoungGenerationSizeMb: 8 },
+        validatedEvidenceId: 'test-only'
+      }
+    });
+    await assert.rejects(promise, (err) => {
+      assert.equal(err.message, '文件数据量过大，超出处理能力');
+      assert.equal(err.code, 'ERR_WORKER_OUT_OF_MEMORY');
+      assert.ok(Array.isArray(err.detailLines) && err.detailLines.length === 2);
+      assert.match(err.detailLines[0], /约 32 MB 的内存上限/);
+      assert.equal(err.cause && err.cause.code, 'ERR_WORKER_OUT_OF_MEMORY');
+      return true;
+    });
+    assert.equal((await closed).spawned, true);
   });
 
   test('A5. jobId 过滤：错 jobId 的 done 被忽略，只认匹配 jobId 的 done', async () => {

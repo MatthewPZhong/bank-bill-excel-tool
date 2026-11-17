@@ -33,6 +33,20 @@ let workerScriptPath = DEFAULT_WORKER_ENTRY;
 // worker 堆上限（TechDoc §8.3 / R-5）：sharedStrings 全量 + 写批缓冲需显式放大 V8 老生代堆上限。
 const WORKER_MAX_OLD_GEN_MB = 4096;
 
+// V8 强杀（堆到达 resourceLimits）时 Node 只给英文 ERR_WORKER_OUT_OF_MEMORY；Worker 内监控来不及
+//   停下时在此归一为与 ToolboxWorkerMemoryLimitError 相同的中文提示。保留原 code 与 cause 供定位。
+function explainWorkerError(err, resourceLimits) {
+  if (!err || err.code !== 'ERR_WORKER_OUT_OF_MEMORY') return err;
+  const limitMb = resourceLimits && resourceLimits.maxOldGenerationSizeMb;
+  const explained = new Error('文件数据量过大，超出处理能力', { cause: err });
+  explained.code = err.code;
+  explained.detailLines = [
+    `处理过程中超出后台任务${limitMb ? `约 ${limitMb} MB 的` : '的'}内存上限，任务已停止，源文件未被修改。`,
+    '请拆分文件后分批重试。'
+  ];
+  return explained;
+}
+
 // dispatch 一次大文件拆分作业（scanFields / exportFilter / exportMultiFilters 通用）。
 //   入参（对象）：
 //     op           string                            作业类型（worker 内分派到对应 T3 纯逻辑）
@@ -73,6 +87,8 @@ function dispatchLargeSplit({
   let resolveClosed;
   let cancelTimer = null;
   let cancelAfterDeadline = null;
+  // 创建后立即记下堆上限：Worker 退出后 worker.resourceLimits 为空对象，OOM 提示无法事后读取。
+  let resourceLimits = null;
   const closed = new Promise(function captureClosed(resolve) { resolveClosed = resolve; });
 
   const promise = new Promise((resolve, reject) => {
@@ -83,6 +99,7 @@ function dispatchLargeSplit({
           ? { maxOldGenerationSizeMb: 640, maxYoungGenerationSizeMb: 32 }
           : { maxOldGenerationSizeMb: WORKER_MAX_OLD_GEN_MB })
       }));
+      resourceLimits = worker.resourceLimits;
     } catch (spawnErr) {
       settled = true;
       resolveClosed(Object.freeze({ spawned: false, exitCode: null }));
@@ -136,7 +153,7 @@ function dispatchLargeSplit({
       }
     });
 
-    worker.on('error', (err) => finish(reject, err));
+    worker.on('error', (err) => finish(reject, explainWorkerError(err, resourceLimits)));
     worker.on('exit', (code) => {
       resolveClosed(Object.freeze({ spawned: true, exitCode: code }));
       if (cancelTimer) clearTimeout(cancelTimer);
