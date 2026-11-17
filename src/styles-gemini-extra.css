@@ -2026,9 +2026,13 @@ td .muted { color: var(--muted); }
 .manual-balance-card > .manual-balance-view > .manual-balance-form,
 .manual-balance-card > .dialog-actions,
 .manual-balance-card > .manual-balance-view > .dialog-actions { flex-shrink: 0; }
-.manual-balance-seed-mismatch { overflow-wrap: anywhere; }
+/* 核对说明与「第 X 个账号」同为 14px；遇句号换行，金额用正文色标黑（v3.2.18） */
+.manual-balance-seed-mismatch { overflow-wrap: anywhere; font-size: 14px; }
+.manual-balance-seed-mismatch-line { display: block; }
+.manual-balance-seed-mismatch-amount { color: var(--text); }
 .manual-balance-progress {
   display: flex; flex-direction: column; gap: 8px;
+  font-size: 14px;
 }
 .manual-balance-progress-chip {
   font-size: 12px; color: var(--muted);
