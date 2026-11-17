@@ -26,7 +26,8 @@ const {
   FIXED_FIELD_VALUE_PREFIX,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   normalizeCell,
-  normalizeFeeAmountFormula
+  normalizeFeeAmountFormula,
+  normalizeBillSplitRowFilterRules
 } = require('../../../src/backend/file-service');
 const { normalizeMaintainedBigAccounts } = require('../../../src/main-process/big-account-recognition');
 
@@ -263,6 +264,7 @@ test('模板包：v6 读取 currencyBigAccounts，v5 读为空，高于支持版
     FileValidationError,
     normalizeCell,
     normalizeFeeAmountFormula,
+    normalizeBillSplitRowFilterRules,
     getFeatureFilterRef,
     upgradeLegacyFeatureFilter,
     LEGACY_FEATURE_FILTER_ID,

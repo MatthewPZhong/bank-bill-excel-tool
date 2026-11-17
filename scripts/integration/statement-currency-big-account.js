@@ -36,6 +36,7 @@ const {
   mapEachCollectingCurrencyBigAccountIssues,
   normalizeCell,
   normalizeFeeAmountFormula,
+  normalizeBillSplitRowFilterRules,
   writeBalanceWorkbook,
   writeWorkbookRows
 } = require('../../src/backend/file-service');
@@ -223,6 +224,7 @@ function createEnvironment(dir, label) {
     getStatementSessionEntries,
     normalizeCell,
     normalizeFeeAmountFormula,
+    normalizeBillSplitRowFilterRules,
     sanitizeFileName,
     splitTemplateName,
     FileValidationError,

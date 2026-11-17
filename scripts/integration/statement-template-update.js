@@ -41,7 +41,9 @@ const {
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   normalizeCell,
   normalizeFeeAmountFormula,
+  normalizeBillSplitRowFilterRules,
   validateFeeAmountFormula,
+  validateBillSplitRowFilterRules,
   writeWorkbookRows
 } = require('../../src/backend/file-service');
 const { splitTemplateName } = require('../../src/backend/balance-seed-store');
@@ -110,6 +112,7 @@ const CONSTANTS = loadMainConstants([
   'SIGNED_AMOUNT_MAPPING_FIELD', 'AMOUNT_BASED_NAME_MAPPING_FIELD', 'AMOUNT_BASED_ACCOUNT_MAPPING_FIELD',
   'AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD', 'AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION',
   'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
+  'BILL_SPLIT_ROW_FILTER_MAPPING_FIELD', 'BILL_SPLIT_ROW_FILTER_ENABLED_OPTION',
   'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS', 'FILENAME_MAPPING_TEMPLATE_ID', 'MISSING_ENUM_MESSAGE',
   'SIGNED_AMOUNT_MAPPING_FIELD',
   'LEGACY_ORIENTED_MAPPINGS_MESSAGE'
@@ -181,7 +184,9 @@ function createMain(database, spies) {
     normalizeCell,
     // v3.2.19：拆分配置的费用账单公式（映射配置、生成配置）
     normalizeFeeAmountFormula,
+    normalizeBillSplitRowFilterRules,
     validateFeeAmountFormula,
+    validateBillSplitRowFilterRules,
     FileValidationError,
     FIXED_FIELD_VALUE_PREFIX,
     MERCHANT_ID_CURRENCY_ONLY_MARKER,

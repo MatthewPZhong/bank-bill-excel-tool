@@ -10,6 +10,7 @@ const {
 } = require('./utils');
 const { MERCHANT_ID_CURRENCY_ONLY_MARKER } = require('../file-service/common');
 const { normalizeFeeAmountFormula } = require('../file-service/bill-split-fee-formula');
+const { normalizeBillSplitRowFilterRules } = require('../file-service/bill-split-row-filter');
 
 function listTemplates(db) {
   // v1.5.3 R2 §3.1：bigAccountCount / singleBigAccountMerchantId 不含自有账号
@@ -471,7 +472,13 @@ function saveMappings(
   fixedAssignments = [],
   dateFormat,
   amountSplitRules = null,
-  { preserveOwn = false, channelAssignment = null, featureFilters = undefined, currencyBigAccounts = null } = {}
+  {
+    preserveOwn = false,
+    channelAssignment = null,
+    featureFilters = undefined,
+    currencyBigAccounts = null,
+    billSplitRowFilterRules = null
+  } = {}
 ) {
   const now = new Date().toISOString();
   let channelAssignmentResult = null;
@@ -616,6 +623,11 @@ function saveMappings(
 
     // v3.2.18：只有模板包导入整体带入特征值；映射弹窗保存不改特征值（由【特征值管理】即时保存）
     writeTemplateFeatureFilters(db, templateId, featureFilters);
+
+    // v3.2.19：「根据字段值过滤账单」的过滤规则随映射【保存】一起落库（同一事务）；未传（null）时保持原值。
+    if (Array.isArray(billSplitRowFilterRules)) {
+      saveBillSplitMeta(db, templateId, { rowFilterRules: billSplitRowFilterRules });
+    }
 
     if (dateFormat) {
       db.prepare('UPDATE templates SET updated_at = ?, date_format = ? WHERE id = ?').run(now, dateFormat, templateId);
@@ -1002,7 +1014,8 @@ function getBillSplitMeta(db, templateId) {
         signed_amount_target_seq_nos AS signedAmountTargetSeqNos,
         by_field_amount_target_seq_nos AS byFieldAmountTargetSeqNos,
         fee_amount_formula_enabled AS feeAmountFormulaEnabled,
-        fee_amount_formula_json AS feeAmountFormulaJson
+        fee_amount_formula_json AS feeAmountFormulaJson,
+        row_filter_rules_json AS rowFilterRulesJson
       FROM template_bill_split_meta
       WHERE template_id = ?
     `)
@@ -1016,7 +1029,8 @@ function getBillSplitMeta(db, templateId) {
       ? row.byFieldAmountTargetSeqNos.split(',').filter(Boolean).map(Number)
       : [],
     feeAmountFormulaEnabled: Boolean(row) && Number(row.feeAmountFormulaEnabled) === 1,
-    feeAmountFormula: row ? normalizeFeeAmountFormula(row.feeAmountFormulaJson) : []
+    feeAmountFormula: row ? normalizeFeeAmountFormula(row.feeAmountFormulaJson) : [],
+    rowFilterRules: row ? normalizeBillSplitRowFilterRules(row.rowFilterRulesJson) : []
   };
 }
 
@@ -1041,6 +1055,10 @@ function saveBillSplitMeta(db, templateId, meta = {}) {
   if (has('feeAmountFormula')) {
     const formula = normalizeFeeAmountFormula(meta.feeAmountFormula);
     columns.push(['fee_amount_formula_json', formula.length ? JSON.stringify(formula) : '']);
+  }
+  if (has('rowFilterRules')) {
+    const rules = normalizeBillSplitRowFilterRules(meta.rowFilterRules);
+    columns.push(['row_filter_rules_json', rules.length ? JSON.stringify(rules) : '']);
   }
   const existing = db.prepare('SELECT 1 FROM template_bill_split_meta WHERE template_id = ?').get(templateId);
   if (!existing) {
@@ -1101,14 +1119,16 @@ function listTemplateBundleEntries(db) {
       billSplitAmountRules: payload && Array.isArray(payload.billSplitAmountRules)
         ? payload.billSplitAmountRules.map((r) => ({ ...r }))
         : [],
-      // v3.2.19：费用账单公式随包导出（拆分行的 isFeeBill 已在 billSplitRows 中）
+      // v3.2.19：费用账单公式、过滤规则随包导出（拆分行的 isFeeBill 已在 billSplitRows 中；
+      //   「根据字段值过滤账单」开关是映射行，已在 mappings 中）
       billSplitMeta: payload && payload.billSplitMeta
         ? {
             signedAmountSourceField: payload.billSplitMeta.signedAmountSourceField || '',
             feeAmountFormulaEnabled: Boolean(payload.billSplitMeta.feeAmountFormulaEnabled),
-            feeAmountFormula: normalizeFeeAmountFormula(payload.billSplitMeta.feeAmountFormula)
+            feeAmountFormula: normalizeFeeAmountFormula(payload.billSplitMeta.feeAmountFormula),
+            rowFilterRules: normalizeBillSplitRowFilterRules(payload.billSplitMeta.rowFilterRules)
           }
-        : { signedAmountSourceField: '', feeAmountFormulaEnabled: false, feeAmountFormula: [] },
+        : { signedAmountSourceField: '', feeAmountFormulaEnabled: false, feeAmountFormula: [], rowFilterRules: [] },
       dateFormat: template.dateFormat || 'auto',
       // v3.2.18（bundle v7）：特征值列表；映射行的特征值选择在 mappings / billSplitMappings 的 mappedFields 中
       featureFilters: Array.isArray(template.featureFilters)

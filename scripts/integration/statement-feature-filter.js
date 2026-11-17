@@ -36,7 +36,9 @@ const {
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   normalizeCell,
   normalizeFeeAmountFormula,
+  normalizeBillSplitRowFilterRules,
   validateFeeAmountFormula,
+  validateBillSplitRowFilterRules,
   normalizeFeatureFilterList,
   parseFeatureFilterToken,
   resolveUsedFeatureFilters,
@@ -109,6 +111,7 @@ const CONSTANTS = loadMainConstants([
   'SIGNED_AMOUNT_MAPPING_FIELD', 'AMOUNT_BASED_NAME_MAPPING_FIELD', 'AMOUNT_BASED_ACCOUNT_MAPPING_FIELD',
   'AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD', 'AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION',
   'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
+  'BILL_SPLIT_ROW_FILTER_MAPPING_FIELD', 'BILL_SPLIT_ROW_FILTER_ENABLED_OPTION',
   'SUPPORTED_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION', 'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS'
 ]);
 const FEATURE = CONSTANTS.FEATURE_FILTER_MAPPING_FIELD;
@@ -189,7 +192,9 @@ function createMain(database, constantOverrides = {}) {
     normalizeCell,
     // v3.2.19：拆分配置的费用账单公式（模板包读取、生成配置）
     normalizeFeeAmountFormula,
+    normalizeBillSplitRowFilterRules,
     validateFeeAmountFormula,
+    validateBillSplitRowFilterRules,
     FileValidationError,
     FIXED_FIELD_VALUE_PREFIX,
     MERCHANT_ID_CURRENCY_ONLY_MARKER,

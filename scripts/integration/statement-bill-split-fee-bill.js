@@ -31,8 +31,10 @@ const {
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   normalizeCell,
   normalizeFeeAmountFormula,
+  normalizeBillSplitRowFilterRules,
   upgradeLegacyFeatureFilter,
   validateFeeAmountFormula,
+  validateBillSplitRowFilterRules,
   writeWorkbookRows
 } = require('../../src/backend/file-service');
 const {
@@ -101,6 +103,7 @@ const CONSTANTS = loadMainConstants([
   'SIGNED_AMOUNT_MAPPING_FIELD', 'AMOUNT_BASED_NAME_MAPPING_FIELD', 'AMOUNT_BASED_ACCOUNT_MAPPING_FIELD',
   'AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD', 'AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION',
   'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
+  'BILL_SPLIT_ROW_FILTER_MAPPING_FIELD', 'BILL_SPLIT_ROW_FILTER_ENABLED_OPTION',
   'SUPPORTED_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION'
 ]);
 
@@ -126,7 +129,9 @@ function createMain(database, constantOverrides = {}) {
     fs,
     normalizeCell,
     normalizeFeeAmountFormula,
+    normalizeBillSplitRowFilterRules,
     validateFeeAmountFormula,
+    validateBillSplitRowFilterRules,
     FileValidationError,
     MERCHANT_ID_CURRENCY_ONLY_MARKER,
     buildFeatureFilterToken,
@@ -211,7 +216,8 @@ function verifyMigration(dir) {
     signedAmountTargetSeqNos: [1],
     byFieldAmountTargetSeqNos: [],
     feeAmountFormulaEnabled: false,
-    feeAmountFormula: []
+    feeAmountFormula: [],
+    rowFilterRules: []
   }, '① 原有拆分配置保留，费用账单默认未启用');
   closeDatabase(upgraded);
   const again = openDatabase(dbPath);
@@ -272,7 +278,8 @@ function verifyStorage(database) {
     signedAmountTargetSeqNos: [1],
     byFieldAmountTargetSeqNos: [],
     feeAmountFormulaEnabled: true,
-    feeAmountFormula: FEE_FORMULA
+    feeAmountFormula: FEE_FORMULA,
+    rowFilterRules: []
   }, '② 拆分配置按字段部分保存，空白组不落库');
   database.saveBillSplitMeta(template.id, { signedAmountSourceField: '', signedAmountTargetSeqNos: [], byFieldAmountTargetSeqNos: [] });
   assertEq(database.getBillSplitMeta(template.id).feeAmountFormula, FEE_FORMULA, '② 保存正负号配置不覆盖费用账单公式');
@@ -368,7 +375,7 @@ function verifyBundle(dir, database, main) {
   const entry = database.listTemplateBundleEntries().find((item) => item.name === '费用账单模板');
   assertEq(entry.billSplitRows.map((row) => row.isFeeBill), [false, true], '④ 导出条目带费用账单标记');
   assertEq(entry.billSplitMeta, {
-    signedAmountSourceField: '', feeAmountFormulaEnabled: true, feeAmountFormula: FEE_FORMULA
+    signedAmountSourceField: '', feeAmountFormulaEnabled: true, feeAmountFormula: FEE_FORMULA, rowFilterRules: []
   }, '④ 导出条目带费用账单公式');
 
   const plainEntry = { mappings: [], billSplitRows: [{ seqNo: 1, isFeeBill: false }], billSplitMeta: { feeAmountFormulaEnabled: false } };

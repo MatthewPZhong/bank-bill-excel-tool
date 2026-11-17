@@ -4597,9 +4597,10 @@
         : ADVANCED_MAPPING_FIELDS;
       const billSplitGroupFields = Array.isArray(payload.billSplitGroupFields) && payload.billSplitGroupFields.length
         ? payload.billSplitGroupFields
-        : ['是否拆分/合并明细账单', '复用模块字段的映射关系'];
+        : ['是否拆分/合并明细账单', '复用模块字段的映射关系', '根据字段值过滤账单'];
       const BILL_SPLIT_MERGE_FIELD = '是否拆分/合并明细账单';
       const REUSE_MODULE_FIELD = '复用模块字段的映射关系';
+      const BILL_SPLIT_ROW_FILTER_FIELD = '根据字段值过滤账单';
       let currentBigAccounts = cloneBigAccountItems(payload.bigAccounts || []);
       // v1.5.3 R2 round 2 修复 (Codex Finding 3)：
       // 标记 currentBigAccounts 是否已含 own。第一次从模板管理 / get-mappings 进入时不含 own（§3.1 过滤），
@@ -4642,6 +4643,8 @@
       let currentBillSplitMeta = payload.billSplitMeta && typeof payload.billSplitMeta === 'object'
         ? { signedAmountSourceField: String(payload.billSplitMeta.signedAmountSourceField || '') }
         : { signedAmountSourceField: '' };
+      // v3.2.19：根据字段值过滤账单的过滤规则（【过滤规则设置】带回的草稿，点【保存】时随映射保存）
+      let currentBillSplitRowFilterRules = cloneBillSplitRowFilterRules(payload.billSplitMeta && payload.billSplitMeta.rowFilterRules);
       // v3.2.18：模板的特征值列表（【特征值管理】保存/删除即时落库后回写）；各行在「选择特征值」中选用。
       let currentFeatureFilters = cloneFeatureFilters(payload.template && payload.template.featureFilters);
       dialog.className = 'modal-card mapping-card';
@@ -4754,7 +4757,7 @@
         if (fieldName === billSplitGroupFields[0]) {
           const sectionRow = document.createElement('tr');
           sectionRow.className = 'mapping-section-row';
-          sectionRow.innerHTML = '<td colspan="2"><strong>账单拆分合并管理</strong></td>';
+          sectionRow.innerHTML = '<td colspan="2"><strong>账单拆分合并设置</strong></td>';
           tbody.appendChild(sectionRow);
         }
 
@@ -5087,6 +5090,22 @@
       function renderBillSplitGroupRow(fieldName) {
         // 默认值：BILL_SPLIT_MERGE_FIELD 默认 '否'（存为空字符串 ''），REUSE_MODULE_FIELD 默认 '是'
         const savedValue = String(savedMap.get(fieldName)?.mappedField || '');
+        if (fieldName === BILL_SPLIT_ROW_FILTER_FIELD) {
+          // v3.2.19：根据字段值过滤账单——勾选后显示【过滤规则设置】；勾选时主映射的币种与发生额配置供未命中的行使用
+          const row = renderMappingToggleRow(fieldName, {
+            label: fieldName,
+            checked: savedValue === '是',
+            checkedValue: '是',
+            uncheckedValue: '',
+            buttonClass: 'bill-split-row-filter-btn',
+            buttonLabel: '过滤规则设置',
+            showButtonWhenChecked: true,
+            onToggle: () => applyBillSplitMainMappingMutex(),
+            onButtonClick: () => openBillSplitRowFilterDialog()
+          });
+          row.dataset.billSplitGroupField = 'true';
+          return;
+        }
         const isBillSplitMergeField = fieldName === BILL_SPLIT_MERGE_FIELD;
         const row = renderMappingToggleRow(fieldName, isBillSplitMergeField ? {
           label: '拆分/合并明细账单',
@@ -5096,10 +5115,10 @@
           buttonClass: 'bill-split-group-btn',
           buttonLabel: '拆分/合并账单映射关系管理',
           showButtonWhenChecked: true,
-          onToggle: (checked) => {
+          onToggle: () => {
             // 入口切换撤销此前的打开意图，重新启用也须再次点击。
             ++billSplitRowsOpenRequest;
-            applyBillSplitMergeMutualExclusion(checked);
+            applyBillSplitMainMappingMutex();
           },
           onButtonClick: () => openBillSplitRowsDialogFromMain()
         } : {
@@ -5160,6 +5179,22 @@
         }));
       }
 
+      function openBillSplitRowFilterDialog() {
+        const entryButton = rowByField.get(BILL_SPLIT_ROW_FILTER_FIELD)?.querySelector('.bill-split-row-filter-btn');
+        if (entryButton?.disabled || entryButton?.hidden) return;
+        pushModal(overlay, () => createBillSplitRowFilterDialog({
+          headers: payload.template.headers || [],
+          initialRules: currentBillSplitRowFilterRules,
+          onDone: (nextRules) => {
+            currentBillSplitRowFilterRules = cloneBillSplitRowFilterRules(nextRules);
+            returnToModal(overlay);
+          },
+          onCancel: () => {
+            returnToModal(overlay);
+          }
+        }));
+      }
+
       function openBillSplitMappingsDialogFromMain() {
         const draftBigAccounts = cloneBigAccountItems(currentBigAccounts);
         const draftMappings = collectMappingDraftFromTable(tbody);
@@ -5198,6 +5233,34 @@
         return Boolean(getRowToggle(rowByField.get(BILL_SPLIT_MERGE_FIELD))?.checked);
       }
 
+      // v3.2.19：开启拆分且勾选根据字段值过滤账单时，未命中的行走主映射，主映射的币种与发生额不再与拆分互斥
+      function isBillSplitRowFilterEnabledInTable() {
+        return isBillSplitMergeEnabledInTable()
+          && Boolean(getRowToggle(rowByField.get(BILL_SPLIT_ROW_FILTER_FIELD))?.checked);
+      }
+
+      function isBillSplitMainMappingMutexActive() {
+        return isBillSplitMergeEnabledInTable() && !isBillSplitRowFilterEnabledInTable();
+      }
+
+      // 根据字段值过滤账单只在开启拆分时可用；未开启时置灰，已存的勾选保留但不生效
+      function syncBillSplitRowFilterRow() {
+        const row = rowByField.get(BILL_SPLIT_ROW_FILTER_FIELD);
+        const toggle = getRowToggle(row);
+        if (!row || !toggle) return;
+        const available = isBillSplitMergeEnabledInTable();
+        toggle.disabled = !available;
+        row.querySelectorAll('.bill-split-row-filter-btn').forEach((button) => { button.disabled = !available; });
+        row.classList.toggle('mapping-row-mutex-disabled', !available);
+        if (available) row.removeAttribute('title');
+        else row.setAttribute('title', '请先勾选「拆分/合并明细账单」');
+      }
+
+      function applyBillSplitMainMappingMutex() {
+        syncBillSplitRowFilterRow();
+        applyBillSplitMergeMutualExclusion(isBillSplitMainMappingMutexActive());
+      }
+
       // v3.2.18：特征值新增、改名、删除后刷新各行「选择特征值」的选项（保留已选）
       function refreshFeatureValueSelects() {
         tbody.querySelectorAll('.mapping-feature-value-select').forEach((select) => {
@@ -5226,9 +5289,9 @@
       }
 
       function applyAmountSplitMutualExclusion() {
-        // 若 bill-split-merge 已启用，4 方互斥由 applyBillSplitMergeMutualExclusion 全权管理，
+        // 若 bill-split-merge 已启用（且未根据字段值过滤账单），4 方互斥由 applyBillSplitMergeMutualExclusion 全权管理，
         // 此处跳过，避免覆盖其设置的 disabled 状态（Fix #3）
-        if (isBillSplitMergeEnabledInTable()) {
+        if (isBillSplitMainMappingMutexActive()) {
           return;
         }
 
@@ -5368,8 +5431,9 @@
 
       applyAmountSplitMutualExclusion();
 
-      // 初始化：若模板当前已启用「是否拆分/合并明细账单 = 是」，立即应用 4 方互斥（disabled + 清空）
-      if (isBillSplitMergeEnabledInTable()) {
+      // 初始化：若模板当前已启用「是否拆分/合并明细账单 = 是」且未根据字段值过滤账单，立即应用 4 方互斥（disabled + 清空）
+      syncBillSplitRowFilterRow();
+      if (isBillSplitMainMappingMutexActive()) {
         applyBillSplitMergeMutualExclusion(true);
       }
 
@@ -5403,10 +5467,11 @@
           return;
         }
         // v3.2.16：拆分/合并且不复用模块映射时主映射不生效，主映射里残留的该值不要求选特征值（拆分映射由后端校验）
+        // v3.2.19：根据字段值过滤账单时未命中的行走主映射，主映射照常检查
         const featureFilterDraft = collectMappingDraftFromTable(tbody);
         const splitMappingsEffective = featureFilterDraft.some((m) => m.templateField === BILL_SPLIT_MERGE_FIELD && m.mappedField === '是')
           && featureFilterDraft.some((m) => m.templateField === REUSE_MODULE_FIELD && m.mappedField === '否');
-        const featureFilterMissing = splitMappingsEffective
+        const featureFilterMissing = splitMappingsEffective && !isBillSplitRowFilterEnabledInTable()
           ? ''
           : findFeatureFilterMissingMessage(featureFilterDraft, currentFeatureFilters);
         if (featureFilterMissing) {
@@ -5429,6 +5494,7 @@
             bigAccounts: draftBigAccounts,
             fixedAssignments: currentFixedAssignments,
             currencyBigAccounts: cloneCurrencyBigAccountPairs(currentCurrencyBigAccounts),
+            billSplitRowFilterRules: cloneBillSplitRowFilterRules(currentBillSplitRowFilterRules),
             preserveOwn: !bigAccountsLoadedWithOwn,
             ...(channelAssignment ? { channel: channelAssignment } : {})
           });
@@ -6128,6 +6194,198 @@
         }
       });
 
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // ==================== v3.2.19 根据字段值过滤账单：过滤规则设置 ====================
+    // 组件构成参考 场景管理 → 银行对账单赋值自身 → 账单类型（scenarios.js renderBillTypes），沿用其样式类。
+    // 规则为若干组，每组若干条件 { field, op, value }：组内全部满足、任一组满足即命中，命中的源行走拆分/合并映射。
+    // 与主进程 src/backend/file-service/bill-split-row-filter.js 的校验同口径，改规则时两边一起改。
+    const BILL_SPLIT_ROW_FILTER_OPS = ['等于', '不等于', '包含', '不包含', '空值', '非空值', '开头为'];
+    const BILL_SPLIT_ROW_FILTER_VALUELESS_OPS = new Set(['空值', '非空值']);
+
+    function createBlankRowFilterCondition() {
+      return { field: '', op: '等于', value: '' };
+    }
+
+    function cloneBillSplitRowFilterRules(rules) {
+      return (Array.isArray(rules) ? rules : [])
+        .filter((group) => group && typeof group === 'object')
+        .map((group, index) => ({
+          seq: index + 1,
+          conditions: (Array.isArray(group.conditions) ? group.conditions : [])
+            .filter((condition) => condition && typeof condition === 'object')
+            .map((condition) => ({
+              field: String(condition.field || ''),
+              op: BILL_SPLIT_ROW_FILTER_OPS.includes(condition.op) ? condition.op : '等于',
+              value: String(condition.value ?? '')
+            }))
+        }))
+        .filter((group) => group.conditions.length > 0);
+    }
+
+    // 返回 { rules, errors }：字段与值都为空的条件忽略，没有条件的规则忽略；值去首尾空白。
+    function normalizeBillSplitRowFilterDraft(groups) {
+      const rules = [];
+      const errors = [];
+      groups.forEach((group) => {
+        const conditions = group.conditions
+          .map((condition) => ({
+            field: String(condition.field || '').trim(),
+            op: String(condition.op || ''),
+            value: BILL_SPLIT_ROW_FILTER_VALUELESS_OPS.has(condition.op) ? '' : String(condition.value ?? '').trim()
+          }))
+          .filter((condition) => condition.field !== '' || condition.value !== '');
+        if (conditions.length) rules.push({ seq: rules.length + 1, conditions });
+      });
+      if (!rules.length) {
+        errors.push('请至少设置一条过滤规则');
+      }
+      rules.forEach((rule) => {
+        rule.conditions.forEach((condition, index) => {
+          const label = `规则 #${rule.seq} 第 ${index + 1} 个条件`;
+          if (!condition.field) errors.push(`${label}：请选择字段`);
+          if (!BILL_SPLIT_ROW_FILTER_OPS.includes(condition.op)) errors.push(`${label}：请选择运算符`);
+          else if (!BILL_SPLIT_ROW_FILTER_VALUELESS_OPS.has(condition.op) && !condition.value) errors.push(`${label}：请填写值`);
+        });
+      });
+      return { rules, errors };
+    }
+
+    function createBillSplitRowFilterDialog({ headers = [], initialRules = [], onDone, onCancel }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card scenario-config-card bill-split-row-filter-card';
+      const headerList = Array.isArray(headers) ? headers.map((header) => String(header ?? '')) : [];
+      const headerSet = new Set(headerList);
+      const groups = cloneBillSplitRowFilterRules(initialRules);
+      if (!groups.length) groups.push({ seq: 1, conditions: [createBlankRowFilterCondition()] });
+
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">过滤规则设置</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="dialog-body scenario-config-body">
+          <div class="scenario-config-row scenario-config-row-multi">
+            <span class="scenario-config-label">过滤规则 <span class="scenario-config-tooltip" title="同一规则内的条件需全部满足；满足任一规则的账单参与拆分/合并，其余账单按模板映射关系生成">ⓘ</span></span>
+            <div class="scenario-config-multi-wrap">
+              <div class="scenario-config-multi-rows" data-multi="rowFilterRules"></div>
+              <button class="text-action small" type="button" data-action="add-rule">+ 新增过滤规则</button>
+            </div>
+          </div>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="save">保存</button>
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+        </div>
+      `;
+
+      const container = dialog.querySelector('[data-multi="rowFilterRules"]');
+
+      function renderFieldOptions(selected) {
+        const options = ['<option value="">请选择字段</option>']
+          .concat(headerList.filter((header) => header !== '').map((header) => (
+            `<option value="${escapeHtml(header)}"${header === selected ? ' selected' : ''}>${escapeHtml(header)}</option>`
+          )));
+        // 模板【更新】后规则字段已不在表头：保留一个「（已删除）」选项，保存模板时由主进程拒绝。
+        if (selected && !headerSet.has(selected)) {
+          options.push(`<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)}（已删除）</option>`);
+        }
+        return options.join('');
+      }
+
+      function render() {
+        container.innerHTML = groups.map((group) => `
+          <div class="scenario-config-billtype-group" data-seq="${group.seq}">
+            <div class="scenario-config-billtype-group-head">
+              <span class="scenario-config-billtype-group-title">规则 #${group.seq}</span>
+              <button class="text-action small scenario-config-billtype-remove" type="button" data-multi-action="remove-rule" data-seq="${group.seq}" title="删除整条规则 #${group.seq}（含其全部条件）">删除该规则</button>
+            </div>
+            ${group.conditions.map((condition, conditionIndex) => `
+              <div class="scenario-config-multi-row" data-seq="${group.seq}" data-cond-index="${conditionIndex}">
+                <select class="scenario-config-input${condition.field && !headerSet.has(condition.field) ? ' is-stale' : ''}" data-multi-field="field">${renderFieldOptions(condition.field)}</select>
+                <select class="scenario-config-input scenario-config-input-narrow" data-multi-field="op">
+                  ${BILL_SPLIT_ROW_FILTER_OPS.map((op) => `<option value="${escapeHtml(op)}"${op === condition.op ? ' selected' : ''}>${escapeHtml(op)}</option>`).join('')}
+                </select>
+                <input class="scenario-config-input" type="text" data-multi-field="value" value="${escapeHtml(condition.value)}" placeholder="值"${BILL_SPLIT_ROW_FILTER_VALUELESS_OPS.has(condition.op) ? ' style="visibility:hidden"' : ''}>
+                <button class="icon-close-small" type="button" data-multi-action="remove-condition" title="删除条件">×</button>
+                <button class="text-action small" type="button" data-multi-action="add-condition" title="在下方新增一个条件（同一规则内的条件需全部满足）">新增</button>
+              </div>
+            `).join('')}
+          </div>
+        `).join('');
+      }
+
+      function findCondition(element) {
+        const row = element.closest('.scenario-config-multi-row');
+        if (!row) return null;
+        const group = groups.find((item) => item.seq === Number(row.dataset.seq));
+        const conditionIndex = Number(row.dataset.condIndex);
+        if (!group || !group.conditions[conditionIndex]) return null;
+        return { group, conditionIndex, condition: group.conditions[conditionIndex] };
+      }
+
+      container.addEventListener('change', (event) => {
+        const control = event.target.closest('[data-multi-field]');
+        const location = control && findCondition(control);
+        if (!location) return;
+        const key = control.dataset.multiField;
+        location.condition[key] = control.value;
+        if (key === 'op') render(); // 空值 / 非空值 隐藏值输入框
+      });
+      container.addEventListener('input', (event) => {
+        const input = event.target.closest('input[data-multi-field="value"]');
+        const location = input && findCondition(input);
+        if (location) location.condition.value = input.value;
+      });
+      container.addEventListener('click', (event) => {
+        const removeRuleButton = event.target.closest('button[data-multi-action="remove-rule"]');
+        if (removeRuleButton) {
+          const index = groups.findIndex((group) => group.seq === Number(removeRuleButton.dataset.seq));
+          if (index >= 0) {
+            groups.splice(index, 1);
+            groups.forEach((group, groupIndex) => { group.seq = groupIndex + 1; });
+            render();
+          }
+          return;
+        }
+        const removeConditionButton = event.target.closest('button[data-multi-action="remove-condition"]');
+        if (removeConditionButton) {
+          const location = findCondition(removeConditionButton);
+          if (!location) return;
+          // 删到规则的最后一个条件时保留一个空白条件；整条规则用【删除该规则】删除
+          if (location.group.conditions.length > 1) location.group.conditions.splice(location.conditionIndex, 1);
+          else location.group.conditions = [createBlankRowFilterCondition()];
+          render();
+          return;
+        }
+        const addConditionButton = event.target.closest('button[data-multi-action="add-condition"]');
+        if (addConditionButton) {
+          const location = findCondition(addConditionButton);
+          if (!location) return;
+          location.group.conditions.splice(location.conditionIndex + 1, 0, createBlankRowFilterCondition());
+          render();
+        }
+      });
+      dialog.querySelector('[data-action="add-rule"]').addEventListener('click', () => {
+        groups.push({ seq: groups.length + 1, conditions: [createBlankRowFilterCondition()] });
+        render();
+      });
+
+      dialog.querySelector('[data-action="save"]').addEventListener('click', () => {
+        const { rules, errors } = normalizeBillSplitRowFilterDraft(groups);
+        if (errors.length) {
+          pushAlert(overlay, () => createAlertDialog(errors.map((line) => escapeHtml(line)).join('<br>'), { onConfirm: null }));
+          return;
+        }
+        onDone(rules);
+      });
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => onCancel());
+      dialog.querySelector('.icon-close').addEventListener('click', () => onCancel());
+
+      render();
       overlay.appendChild(dialog);
       return overlay;
     }

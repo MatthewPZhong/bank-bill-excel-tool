@@ -244,6 +244,13 @@ function ensureBillSplitFeeBillSupport(db) {
   }
 }
 
+// v3.2.19：「根据字段值过滤账单」的过滤规则（JSON；开关存为映射行，规则随映射【保存】落库）。
+function ensureBillSplitRowFilterSupport(db) {
+  if (!hasColumn(db, 'template_bill_split_meta', 'row_filter_rules_json')) {
+    db.exec("ALTER TABLE template_bill_split_meta ADD COLUMN row_filter_rules_json TEXT NOT NULL DEFAULT '';");
+  }
+}
+
 function ensureAccountMappingTemplateSupport(db) {
   if (hasColumn(db, 'account_mappings', 'template_id')) {
     return;
@@ -4446,6 +4453,7 @@ module.exports = {
   ensureBillSplitMergeSupport,
   ensureBillSplitTargetSeqSupport,
   ensureBillSplitFeeBillSupport,
+  ensureBillSplitRowFilterSupport,
   ensureParentTemplateSupport,
   ensureStatementChannelSupport,
   hasPendingStatementChannelMigration,

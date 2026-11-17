@@ -16,6 +16,7 @@ const {
   ensureBillSplitMergeSupport,
   ensureBillSplitTargetSeqSupport,
   ensureBillSplitFeeBillSupport,
+  ensureBillSplitRowFilterSupport,
   ensureParentTemplateSupport,
   ensureStatementChannelSupport,
   hasPendingStatementChannelMigration,
@@ -260,6 +261,7 @@ class AppDatabase {
     this.ensureBillSplitMergeSupport();
     this.ensureBillSplitTargetSeqSupport();
     this.ensureBillSplitFeeBillSupport();
+    this.ensureBillSplitRowFilterSupport();
     this.ensureParentTemplateSupport();
     this.ensureTemplateFilenameFixedFieldSupport();
     this.ensureTemplateFeatureFilterSupport();
@@ -777,6 +779,10 @@ class AppDatabase {
 
   ensureBillSplitFeeBillSupport() {
     return ensureBillSplitFeeBillSupport(this.db);
+  }
+
+  ensureBillSplitRowFilterSupport() {
+    return ensureBillSplitRowFilterSupport(this.db);
   }
 
   ensureParentTemplateSupport() {

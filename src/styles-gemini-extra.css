@@ -2748,6 +2748,13 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
 
 .bill-split-rows-footer { padding: 14px 28px 18px; }
 
+/* v3.2.19 根据字段值过滤账单：过滤规则设置（沿用场景管理「账单类型」的 scenario-config-* 样式） */
+.bill-split-row-filter-card .scenario-config-multi-wrap { min-width: 0; }
+/* 场景弹窗靠「复制场景」把×推到右侧并取消了×的 auto；本弹窗没有该组，×恢复靠右 */
+.scenario-config-card.bill-split-row-filter-card .dialog-header .icon-close { margin-left: auto; }
+.bill-split-row-filter-card .scenario-config-input.is-stale { border-color: var(--danger); color: var(--danger); }
+.bill-split-row-filter-card .scenario-config-multi-row > .text-action { flex: 0 0 auto; white-space: nowrap; }
+
 /* =================== Big-account · currency dropdown (open state) =================== */
 .currency-cell { position: relative; overflow: visible; }
 .new-account-currency-row.inline { display: flex; align-items: center; gap: 12px; flex-wrap: nowrap; }

@@ -45,6 +45,8 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     BILL_SPLIT_MERGE_MAPPING_FIELD,
     BILL_SPLIT_MERGE_ENABLED_OPTION,
     REUSE_MODULE_MAPPING_FIELD,
+    BILL_SPLIT_ROW_FILTER_MAPPING_FIELD,
+    BILL_SPLIT_ROW_FILTER_ENABLED_OPTION,
     SIGNED_AMOUNT_MAPPING_FIELD,
     AMOUNT_BASED_NAME_MAPPING_FIELD,
     AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
@@ -59,7 +61,8 @@ function createTemplateHeaderUpdateTools(constants = {}) {
   const switchTargetFields = new Set([
     AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD,
     BILL_SPLIT_MERGE_MAPPING_FIELD,
-    REUSE_MODULE_MAPPING_FIELD
+    REUSE_MODULE_MAPPING_FIELD,
+    BILL_SPLIT_ROW_FILTER_MAPPING_FIELD
   ].filter(Boolean));
   // 规则类引用（判断字段、取值字段、拆分行字段、筛选字段）：非空且不是固定值即为源字段。
   function isRuleSourceValue(value) {
@@ -125,6 +128,7 @@ function createTemplateHeaderUpdateTools(constants = {}) {
   // 主映射始终读取；按字段区分发生额开启时读取完整规则；拆分/合并开启时读取拆分行（仅 completed）、
   // 拆分金额规则与按正负号拆分的字段，不复用主映射时还读取拆分映射；
   // 费用账单发生额公式（v3.2.19）在拆分开启、勾选特殊取值且有已完成的费用账单行时读取；
+  // 过滤规则（v3.2.19）在拆分开启且勾选「根据字段值过滤账单」时读取，此时未命中的行走主映射；
   // 特征值（v3.2.18 起可有多个）各自的筛选字段只在实际生效的映射选用该特征值时读取。
   function collectTemplateFieldReferences(input = {}) {
     const mappings = Array.isArray(input.mappings) ? input.mappings : [];
@@ -142,6 +146,9 @@ function createTemplateHeaderUpdateTools(constants = {}) {
       === BILL_SPLIT_MERGE_ENABLED_OPTION;
     const reuseModuleMapping = findSwitchValue(mappings, REUSE_MODULE_MAPPING_FIELD) !== '否';
     const billSplitMappingActive = billSplitEnabled && !reuseModuleMapping;
+    const rowFilterActive = billSplitEnabled
+      && Boolean(BILL_SPLIT_ROW_FILTER_MAPPING_FIELD)
+      && findSwitchValue(mappings, BILL_SPLIT_ROW_FILTER_MAPPING_FIELD) === BILL_SPLIT_ROW_FILTER_ENABLED_OPTION;
 
     mappings.forEach((mapping) => {
       const target = normalizeCell(mapping && mapping.templateField);
@@ -215,7 +222,23 @@ function createTemplateHeaderUpdateTools(constants = {}) {
       });
     });
 
-    const usedIds = usedFeatureFilterIds(billSplitMappingActive ? billSplitMappings : mappings);
+    (Array.isArray(input.billSplitRowFilterRules) ? input.billSplitRowFilterRules : []).forEach((group, groupIndex) => {
+      const seq = Number(group && group.seq) || groupIndex + 1;
+      (Array.isArray(group && group.conditions) ? group.conditions : []).forEach((condition, conditionIndex) => {
+        push({
+          area: 'bill-split-row-filter',
+          target: String(seq),
+          role: String(conditionIndex + 1),
+          field: condition && condition.field,
+          active: rowFilterActive
+        });
+      });
+    });
+
+    // 不复用时生效的是拆分映射；根据字段值过滤账单时未命中的行走主映射，两套都生效。
+    const usedIds = usedFeatureFilterIds(billSplitMappingActive
+      ? (rowFilterActive ? billSplitMappings.concat(mappings) : billSplitMappings)
+      : mappings);
     (Array.isArray(input.featureFilters) ? input.featureFilters : []).forEach((featureFilter) => {
       const id = normalizeCell(featureFilter && featureFilter.id);
       push({
@@ -267,6 +290,8 @@ function formatFieldReferenceLine(reference) {
       return `拆分账单 · 按正负号取发生额 ← ${field}${suffix}`;
     case 'bill-split-fee-formula':
       return `拆分账单 · 费用账单发生额公式第 ${reference.role} 组 ← ${field}${suffix}`;
+    case 'bill-split-row-filter':
+      return `根据字段值过滤账单 · 过滤规则 #${reference.target} 第 ${reference.role} 个条件 ← ${field}${suffix}`;
     case 'feature-filter':
       return reference.target
         ? `特征值「${reference.target}」 · 筛选字段 ← ${field}${suffix}`

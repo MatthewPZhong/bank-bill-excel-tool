@@ -555,7 +555,7 @@
           ...ADVANCED_MAPPING_FIELDS
         ],
         advancedMappingFields: ADVANCED_MAPPING_FIELDS,
-        billSplitGroupFields: ['是否拆分/合并明细账单', '复用模块字段的映射关系'],
+        billSplitGroupFields: ['是否拆分/合并明细账单', '复用模块字段的映射关系', '根据字段值过滤账单'],
         onDone: () => {},
         onCancel: () => {}
       }));
