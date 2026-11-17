@@ -5453,8 +5453,14 @@
         return true;
       }
 
-      // v3.2.18：特征值新增、改名、删除后刷新各行「选择特征值」（保留已选）
+      // v3.2.18：特征值新增、改名、删除后刷新各行「选择特征值」（保留已选）。
+      //   已删除特征值的缓存引用一并清掉：删除最大 id 后再新增会沿用该 id，残留引用切回时会指向新特征值而界面显示空白。
       function refreshFeatureValueSelects() {
+        currentDialogMappings.forEach((entry) => {
+          if (!entry.featureFilterRef || findFeatureFilterById(currentFeatureFilters, entry.featureFilterRef)) return;
+          entry.featureFilterRef = '';
+          if (entry.mappedField === FEATURE_FILTER_MAPPING_FIELD) entry.mappedFields = [];
+        });
         tbody.querySelectorAll('.mapping-feature-value-select').forEach((featureValueSelect) => {
           renderFeatureFilterOptions(featureValueSelect, currentFeatureFilters, featureValueSelect.value);
         });

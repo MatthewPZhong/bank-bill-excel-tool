@@ -1557,6 +1557,28 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(await js('cfg.errors'), []);
   });
 
+  await test('字段筛选特征值：拆分/合并映射行切走后其特征值被删，再新增沿用同一 id，切回时仍为空白且不得保存', async () => {
+    await setup();
+    await js(`${FEATURE_SETUP_JS}
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createBillSplitMappingsDialog({template:cfg.tpl,headers:cfg.tpl.headers,targetFields:['BillDate','Reference','Remark'],
+        initialMappings:[{templateField:'Remark',mappedField:'${FEATURE}',mappedFields:['1']}],featureFilters:${JSON.stringify([SERIAL, ORDER])},
+        getMainFeatureFilterUsage:()=>new Map(),onFeatureFiltersChange:()=>{},onDone:()=>{}})).handle;
+      cfg.overlay=cfg.top();void 0;`);
+    await js(`cfg.pick('Reference','${FEATURE}');cfg.choose('Reference','2');cfg.pick('Reference','附言');`);
+    // Reference 已切走，「订单号」未被使用，可删除
+    await js(`cfg.btn('Remark').click();cfg.pickFeature('2');cfg.ff().del.click();`); await tick();
+    await js(`cfg.top().querySelector('[data-action="confirm"]').click();`); await tick();
+    assert.deepEqual(await js('cfg.featureSaves().map(payload=>payload.featureFilters.map(item=>item.id))'), [['1']]);
+    await js(`cfg.ff().add.click();cfg.ff().name.value='发票号';cfg.ff().source.value='附言';cfg.ff().separator.value='comma';cfg.type(cfg.ff().sample,'INV001');cfg.ff().save.click();`); await tick();
+    assert.deepEqual(await js(`cfg.fvOptions('Reference')`), [['', ''], ['1', '流水号'], ['2', '发票号']], '新增的特征值沿用 id 2');
+    await js(`cfg.pick('Reference','${FEATURE}');`);
+    assert.equal(await js(`cfg.fv('Reference').value`), '');
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /Reference 选择了「字段筛选特征值」，请选择特征值/);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='splitMapping').length`), 0);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
   await test('特征值管理：映射行与弹窗在最小窗口内完整可见、可点保存', async () => {
     await setup({ zoom: 1 });
     await openFeatureMapping(`,featureFilters:${JSON.stringify([SERIAL])}`);

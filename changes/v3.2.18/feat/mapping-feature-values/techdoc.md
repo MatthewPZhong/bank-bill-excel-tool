@@ -28,9 +28,9 @@
 | T7 | 架构边界 `renderer-dialog-configuration.allowedApiFields.api` 增加 `templates.saveFeatureFilters`，`policyChanges` 绑定 sourceCommit `a7f268f2`、sourcePolicyBlob `1ff406df` | 增加方法不会自动获准；release 合入时如有其他分支提交仍持原集合，按 v3.2.17 先例补登 |
 | T8 | `template:save-mappings`、`template:save-bill-split-mappings` 不再携带或写入规则，按库中 `template.featureFilters` 校验生效映射的选择（`resolveUsedFeatureFilters`：未选、不存在、条件无效均拒绝）；删除 `resolveSavedFeatureFilter` | 特征值已即时落库，映射只保存引用；“只看实际生效映射”沿用 v3.2.16 T11 |
 | T9 | lookup token 改为 `__FEATURE_FILTER__:<id>`；`resolveStatementFeatureFilters` 返回 `{ id → { id, name, ...rule } }`；`buildMappedRows` 每行按用到的特征值各算一次，BillDate 合计行识别取 BillDate 所选特征值的源单元格；未命中每行一条 issue，`misses[{ featureName, sourceField, rawValue }]` | 多特征值；保留 v3.2.16 T12 资金红线修复；导入提示仍按行计 |
-| T10 | 模板包导出 `featureFilters`；用到该值写 v7（`SUPPORTED_BUNDLE_VERSION = 7`），只用到「原始账单仅有币种无账户号」写 `CURRENCY_ONLY_BUNDLE_VERSION = 6`，否则 v5；读 v≤6 包时 `upgradeLegacyFeatureFilter` + `upgradeLegacyBundleFeatureFilterRefs` 按 T4 口径升级；导入时 `normalizeFeatureFilterList`（保留包内 id）后随 `saveMappings({ featureFilters })` 同事务写入 | v3.2.16/3.2.17 读 v7 整包拒绝；旧包可直接导入 |
-| T11 | `normalizeMappingRows`、`normalizeExportMappingRows` 先识别该映射值，避免把 id 当成源字段；`validateBillSplitMappingsPayload` 只保留 mappedFields 第一项 | 这些路径原本把 mappedFields 当源字段 |
-| T12 | 渲染端：映射行新增「选择特征值」文本与下拉（class `mapping-select mapping-feature-value-select`，排在映射字段下拉之后，`querySelector('.mapping-select')` 仍取到映射字段下拉）；`createFeatureFilterManagerDialog` 取代 `createFeatureFilterDialog`，删除前用 `getUsage` 查主映射草稿与拆分映射（拆分弹窗另合并主映射草稿）；拆分弹窗经 `onFeatureFiltersChange` 回写主映射弹窗列表 | spec D1–D6；“被使用”包含未保存草稿，后端再按已保存映射兜底 |
+| T10 | 模板包导出 `featureFilters`；用到该值写 v7（`SUPPORTED_BUNDLE_VERSION = 7`），只用到「原始账单仅有币种无账户号」写 `CURRENCY_ONLY_BUNDLE_VERSION = 6`，否则 v5；读包按是否带 `featureFilters` 数组判断而非版本号（本版本导出的包都带数组，映射都未选用时仍为 v5/v6）：无数组时才是 v3.2.16/3.2.17 的单套 `featureFilter`，`upgradeLegacyFeatureFilter` + `upgradeLegacyBundleFeatureFilterRefs` 按 T4 口径升级；导入时 `normalizeFeatureFilterList`（保留包内 id）后随 `saveMappings({ featureFilters })` 同事务写入 | v3.2.16/3.2.17 读 v7 整包拒绝；旧包可直接导入 |
+| T11 | `normalizeMappingRows`、`normalizeExportMappingRows` 先识别该映射值并原样保留所选 id（生成链路用的 `exportMappings` 依赖它），避免把 id 当成源字段；`validateBillSplitMappingsPayload` 只保留 mappedFields 第一项 | 这些路径原本把 mappedFields 当源字段 |
+| T12 | 渲染端：映射行新增「选择特征值」文本与下拉（class `mapping-select mapping-feature-value-select`，排在映射字段下拉之后，`querySelector('.mapping-select')` 仍取到映射字段下拉）；`createFeatureFilterManagerDialog` 取代 `createFeatureFilterDialog`，删除前用 `getUsage` 查主映射草稿与拆分映射（拆分弹窗另合并主映射草稿）；拆分弹窗经 `onFeatureFiltersChange` 回写主映射弹窗列表；拆分弹窗行把选择缓存在 `entry.featureFilterRef`，列表变化后清掉已删除的缓存引用（删除最大 id 后再新增会沿用该 id） | spec D1–D6；“被使用”包含未保存草稿，后端再按已保存映射兜底 |
 
 ## 三、数据流
 
@@ -67,9 +67,9 @@ buildStatementGenerationConfig ─ resolveStatementFeatureFilters ─► config.
 | 单测 | `tests/unit/backend/file-service/feature-filter.test.js` | 原匹配用例；列表 id 分配/保留、名称校验、未知 id、条件错误带名称；旧规则升级；引用与 token；按生效映射取规则 |
 | 单测 | `archive-task-policy-registry.test.js`、`execution-descriptor-archive-baseline.test.js` | support-action 登记与计数 |
 | 单测 | `statement-currency-big-account.test.js` | 模板包版本常量（7 / 6）与注入依赖 |
-| 集成 | `scripts/integration/statement-feature-filter.js`（65 项） | ① 旧库补列与单套规则升级、重复启动幂等、升级后输出口径；② 两个特征值分别取值、提示与报错文件、回读导出；③ 保存载荷 id/改名/校验/删除守卫；④ 未选、不存在、非法目标、直接写库引用缺失生成被拒；⑤ 模板包 v7 往返、旧版拒绝、v6 包升级导入、覆盖表头清空；⑥ 拆分不复用路径与残留；⑦ BillDate 合计行资金红线 |
+| 集成 | `scripts/integration/statement-feature-filter.js`（68 项；`generate()` 走 `normalizeExportMappingRows` → `buildStatementGenerationConfig`，与生产同一链路） | ① 旧库补列与单套规则升级、重复启动幂等、升级后输出口径；② 两个特征值分别取值、提示与报错文件、回读导出；③ 保存载荷 id/改名/校验/删除守卫；④ 未选、不存在、非法目标、直接写库引用缺失生成被拒；⑤ 模板包 v7 往返、旧版拒绝、未选用特征值的 v5 包往返、v6 包升级导入、覆盖表头清空；⑥ 拆分不复用路径与残留；⑦ BillDate 合计行资金红线 |
 | 集成 | `statement-channel.js`、`statement-currency-big-account.js` | 脚手架注入名同步（用例不变） |
-| 渲染生命周期 | `scripts/renderer-lifecycle/fixtures/configuration-dialogs.js`（特征值相关 7 例） | 行内文本/下拉/按钮显隐与默认空白、未选不保存与载荷；弹窗工具栏与字段顺序、新增推导保存与行刷新、按钮顺序；选中回显改名、校验、保存失败、取消；删除未选/被用/确认/失败重试；拆分残留口径；拆分弹窗共用列表与回写、切换拼接不混入 id；最小窗口布局截图 |
+| 渲染生命周期 | `scripts/renderer-lifecycle/fixtures/configuration-dialogs.js`（特征值相关 8 例） | 行内文本/下拉/按钮显隐与默认空白、未选不保存与载荷；弹窗工具栏与字段顺序、新增推导保存与行刷新、按钮顺序；选中回显改名、校验、保存失败、取消；删除未选/被用/确认/失败重试；拆分残留口径；拆分弹窗共用列表与回写、切换拼接不混入 id；拆分行切走后特征值被删再新增同 id，切回仍为空白且不得保存；最小窗口布局截图 |
 
 ## 六、兼容与回滚
 
@@ -83,5 +83,10 @@ buildStatementGenerationConfig ─ resolveStatementFeatureFilters ─► config.
   - `npm run release-check` 首轮在单测中断：`statement-merged-header-summary-row.test.js` 按名加载 `readTemplateBundleFile` 的脚手架缺新依赖 `upgradeLegacyBundleFeatureFilterRefs`（ReferenceError），补注入后 11/11。
   - 复跑 `npm run release-check` 通过（EXIT=0）：lint、架构检查（对比 `a7f268f2`）、smoke 通过；单测 10225/10229（0 失败）；集成 106 个脚本 3743/3743，`rules/integration-test-policy.md` §七由 runner 回写。
   - `statement-feature-filter.js` 65/65；渲染生命周期 `configuration-dialogs` 127/127；布局证据 `feature-filter-mapping-row`、`feature-filter-dialog` 已人工查看（行内顺序为映射字段下拉 →「选择特征值」→ 特征值下拉 →【特征值管理】；弹窗工具栏在标题右侧，设置区按 D3 顺序，【保存】在【取消】左侧，最小窗口内完整可见）。
+- 2026-11-16 Codex 审查（`codex review --commit 67f06b47`）3 条，均核实属实并修复：
+  - [P1] `normalizeExportMappingRows` 清空所选 id，生产生成链路（`getTemplateMappingConfig().exportMappings`）报“请选择特征值”，已配置与迁移的模板都无法生成；原集成 `generate()` 直接用库中映射而漏测 → 保留 id，`generate()` 改走生产链路，② 断言改为保留 id。
+  - [P2] v5/v6 包只读旧 `featureFilter`，未选用的特征值往返后丢失 → 按是否带数组判断，⑤ 补往返用例。
+  - [P2] 拆分弹窗删除特征值后行内缓存引用残留，再新增同 id 后切回会静默引用新特征值 → 刷新时清除，lifecycle 补用例。
+  - 复验：`statement-feature-filter` 68/68，`statement-channel` 124/124，`statement-currency-big-account` 21/21，相关单测 33/33，lifecycle `configuration-dialogs` 128/128，lint 通过。
 - 对账专项自查：不改金额/币种/余额口径与行数；存量模板经迁移后两字段仍取同一特征值（集成 ①）；BillDate 合计行识别改为取所选特征值的源单元格，回归 ⑦ 保持“合计金额不作为交易导出”，**须人工复核**。
 - 未做：真实应用 GUI 人工检查（本机开发版启动受 BizOP 资源预检阻断，沿用 lifecycle 截图替代）。

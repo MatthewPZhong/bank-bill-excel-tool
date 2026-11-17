@@ -227,12 +227,13 @@ function featureRefs(mappings) {
   return mappings.filter((m) => m.mappedField === FEATURE).map((m) => [m.templateField, m.mappedFields]);
 }
 
+// 与生产同一链路：getTemplateMappingConfig 的 exportMappings（normalizeExportMappingRows）→ buildStatementGenerationConfig
 function generate(main, database, templateId, inputFilePath) {
   const template = database.getTemplate(templateId);
   const payload = database.getTemplateMappings(templateId);
   const config = main.buildStatementGenerationConfig({
     template,
-    mappings: payload.mappings,
+    mappings: main.normalizeExportMappingRows({ template, mappings: payload.mappings, enumValues: ENUM_VALUES }),
     orderedTargetFields: ORDERED_FIELDS,
     allowManagedMerchantWithoutSelection: true
   });
@@ -308,7 +309,7 @@ function verifySaveAndGenerate(dir) {
   const uiRows = main.normalizeMappingRows({ template, mappings: database.getTemplateMappings(template.id).mappings, enumValues: ENUM_VALUES });
   assertEq(featureRefs(uiRows), [['Remark', ['1']], ['Reference', ['2']]], '② 映射弹窗回显所选特征值');
   const exportRows = main.normalizeExportMappingRows({ template, mappings: database.getTemplateMappings(template.id).mappings, enumValues: ENUM_VALUES });
-  assertEq(featureRefs(exportRows), [['Remark', []], ['Reference', []]], '② 导出映射只保留映射值（不把 id 当源字段）');
+  assertEq(featureRefs(exportRows), [['Remark', ['1']], ['Reference', ['2']]], '② 生成用映射（exportMappings）保留所选特征值');
 
   const sourcePath = path.join(dir, 'source-a.xlsx');
   writeSource(sourcePath, [
@@ -455,6 +456,22 @@ function verifyBundleRoundTrip(dir, { database, main, template }) {
   const imported = importEntry(readEntry);
   assertEq(target.getTemplate(imported.id).featureFilters, database.getTemplate(template.id).featureFilters, '⑤ 导入后特征值一致（含 id）');
   assertEq(featureRefs(target.getTemplateMappings(imported.id).mappings), [['Remark', ['1']], ['Reference', ['2']]], '⑤ 导入后各字段选择一致');
+
+  // 映射都没选用特征值的模板仍写 v5，但须带上全部特征值（spec §3.5）
+  const unusedEntry = {
+    ...entry,
+    templateKey: 'unused-template',
+    name: 'BANKU-未选用',
+    mappings: entry.mappings.map((m) => (m.mappedField === FEATURE ? { ...m, mappedField: '附言', mappedFields: [] } : m)),
+    billSplitMappings: []
+  };
+  const unusedPath = path.join(dir, 'bundle-unused.json');
+  fs.writeFileSync(unusedPath, JSON.stringify({ bundleVersion: main.resolveTemplateBundleVersion([unusedEntry]), channels: [], templates: [unusedEntry] }), 'utf8');
+  assertEq(JSON.parse(fs.readFileSync(unusedPath, 'utf8')).bundleVersion, 5, '⑤ 未选用特征值的包仍写 v5');
+  const unusedRead = main.readTemplateBundleFile(unusedPath).templates[0];
+  assertEq(unusedRead.featureFilters, entry.featureFilters, '⑤ v5 包读回未选用的特征值');
+  const importedUnused = importEntry(unusedRead);
+  assertEq(target.getTemplate(importedUnused.id).featureFilters, database.getTemplate(template.id).featureFilters, '⑤ 导入 v5 包保留未选用的特征值');
 
   // v3.2.16/3.2.17 导出的 v6 包：单套 featureFilter，映射行不带 id
   const v6Path = path.join(dir, 'bundle-v6.json');

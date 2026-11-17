@@ -3973,10 +3973,9 @@ function readTemplateBundleFile(filePath) {
       ? { signedAmountSourceField: normalizeCell(item.billSplitMeta.signedAmountSourceField) }
       : { signedAmountSourceField: '' },
     dateFormat: normalizeCell(item.dateFormat) || 'auto',
-    // v3.2.18（v7）：特征值列表；v≤6 的单套 featureFilter 升级为「特征值1」（导入时再校验）
-    featureFilters: bundleVersion >= 7
-      ? upgradeLegacyFeatureFilter(Array.isArray(item.featureFilters) ? item.featureFilters : [])
-      : upgradeLegacyFeatureFilter(item.featureFilter),
+    // v3.2.18：特征值列表（导入时再校验）。本版本导出的包都带 featureFilters 数组——映射都没选用时仍写 v5/v6，
+    //   故按字段而非版本判断；没有数组时才是 v3.2.16/3.2.17 的单套 featureFilter，升级为「特征值1」。
+    featureFilters: upgradeLegacyFeatureFilter(Array.isArray(item.featureFilters) ? item.featureFilters : item.featureFilter),
     // v3.2.15（v5）：所属渠道；v≤4 的主/子模板字段只用于导入时转为渠道。
     channelName: bundleVersion >= 5 ? (normalizeCell(item.channelName) || null) : null,
     isParent: bundleVersion < 5 && Boolean(item.isParent),
@@ -4595,9 +4594,14 @@ function normalizeExportMappingRows({ template, mappings, enumValues }) {
     const savedValue = getPrimaryMappedField(savedMapping);
     const savedFields = getMappingFieldValues(savedMapping);
     const rawMappedField = normalizeCell(savedMapping?.mappedField);
-    // v3.2.18：特征值 id 不是源字段，导出映射只保留映射值本身
+    // v3.2.18：mappedFields[0] 是所选特征值 id，不是源字段；生成用映射须保留它（buildMappedFieldLookup 据此取特征值）
     if (rawMappedField === FEATURE_FILTER_MAPPING_FIELD) {
-      return { templateField: fieldName, mappedField: FEATURE_FILTER_MAPPING_FIELD, mappedFields: [] };
+      const featureFilterRef = getFeatureFilterRef(savedMapping);
+      return {
+        templateField: fieldName,
+        mappedField: FEATURE_FILTER_MAPPING_FIELD,
+        mappedFields: featureFilterRef ? [featureFilterRef] : []
+      };
     }
     const isConcatMode = rawMappedField === CONCAT_FIELDS_MAPPING_FIELD || savedFields.length > 1;
 
