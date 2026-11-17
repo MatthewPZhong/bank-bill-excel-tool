@@ -110,15 +110,21 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     return uniqueNonEmpty(tokens).filter(isRuleSourceValue);
   }
 
-  function usesFeatureFilter(mappings) {
-    return (mappings || []).some((mapping) => {
-      return normalizeCell(mapping && mapping.mappedField) === FEATURE_FILTER_MAPPING_FIELD;
+  // v3.2.18 多特征值：映射行所选特征值 id 存于 mappedFields[0]（与 file-service getFeatureFilterRef 一致）。
+  function usedFeatureFilterIds(mappings) {
+    const ids = new Set();
+    (mappings || []).forEach((mapping) => {
+      if (normalizeCell(mapping && mapping.mappedField) !== FEATURE_FILTER_MAPPING_FIELD) return;
+      const ref = normalizeCell(Array.isArray(mapping.mappedFields) ? mapping.mappedFields[0] : '');
+      if (ref) ids.add(ref);
     });
+    return ids;
   }
 
   // 收集模板配置中所有引用源字段的位置。active 与生成时实际读取的口径一致：
   // 主映射始终读取；按字段区分发生额开启时读取完整规则；拆分/合并开启时读取拆分行（仅 completed）、
-  // 拆分金额规则与按正负号拆分的字段，不复用主映射时还读取拆分映射；字段筛选在实际生效的映射用到时读取。
+  // 拆分金额规则与按正负号拆分的字段，不复用主映射时还读取拆分映射；
+  // 特征值（v3.2.18 起可有多个）各自的筛选字段只在实际生效的映射选用该特征值时读取。
   function collectTemplateFieldReferences(input = {}) {
     const mappings = Array.isArray(input.mappings) ? input.mappings : [];
     const references = [];
@@ -189,17 +195,17 @@ function createTemplateHeaderUpdateTools(constants = {}) {
       active: billSplitEnabled
     });
 
-    const featureFilterSourceField = normalizeCell(input.featureFilter && input.featureFilter.sourceField);
-    if (featureFilterSourceField) {
-      const effectiveMappings = billSplitMappingActive ? billSplitMappings : mappings;
+    const usedIds = usedFeatureFilterIds(billSplitMappingActive ? billSplitMappings : mappings);
+    (Array.isArray(input.featureFilters) ? input.featureFilters : []).forEach((featureFilter) => {
+      const id = normalizeCell(featureFilter && featureFilter.id);
       push({
         area: 'feature-filter',
-        target: '',
+        target: normalizeCell(featureFilter && featureFilter.name),
         role: '',
-        field: featureFilterSourceField,
-        active: usesFeatureFilter(effectiveMappings)
+        field: featureFilter && featureFilter.sourceField,
+        active: Boolean(id) && usedIds.has(id)
       });
-    }
+    });
 
     return references;
   }
@@ -240,7 +246,9 @@ function formatFieldReferenceLine(reference) {
     case 'bill-split-signed':
       return `拆分账单 · 按正负号拆分的发生额 ← ${field}${suffix}`;
     case 'feature-filter':
-      return `字段筛选特征值 · 筛选字段 ← ${field}${suffix}`;
+      return reference.target
+        ? `特征值「${reference.target}」 · 筛选字段 ← ${field}${suffix}`
+        : `字段筛选特征值 · 筛选字段 ← ${field}${suffix}`;
     default:
       return `${reference.target || ''} ← ${field}${suffix}`;
   }

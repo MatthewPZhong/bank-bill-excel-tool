@@ -28,13 +28,18 @@ const {
   buildDetailExportRows,
   buildMappedRows,
   extractHeaders,
-  FEATURE_FILTER_FIELD_TOKEN,
+  buildFeatureFilterToken,
+  getFeatureFilterRef,
+  LEGACY_FEATURE_FILTER_ID,
+  normalizeFeatureFilterList,
+  parseFeatureFilterToken,
+  resolveUsedFeatureFilters,
+  upgradeLegacyFeatureFilter,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
   loadCurrencyMappings,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   normalizeCell,
-  normalizeFeatureFilterRule,
   writeWorkbookRows
 } = require('../../src/backend/file-service');
 const { splitTemplateName } = require('../../src/backend/balance-seed-store');
@@ -128,7 +133,7 @@ function pickColumns(rows, names) {
 function createMain(database, spies) {
   return loadMainFunctions([
     'validateTemplateConfiguration',
-    'resolveSavedFeatureFilter',
+    'collectFeatureFilterRefs',
     'buildExportTargetFields',
     'buildMappingTargetFields',
     'buildManagedMappingFields',
@@ -145,7 +150,7 @@ function createMain(database, spies) {
     'buildMappedFieldLookup',
     'normalizeLookupMappingValue',
     'buildStatementGenerationConfig',
-    'resolveStatementFeatureFilter',
+    'resolveStatementFeatureFilters',
     'buildBillSplitMergeConfig',
     'buildAmountSplitByFieldConfig',
     'buildMappedRowsForFile',
@@ -172,9 +177,14 @@ function createMain(database, spies) {
     normalizeCell,
     FileValidationError,
     FIXED_FIELD_VALUE_PREFIX,
-    FEATURE_FILTER_FIELD_TOKEN,
     MERCHANT_ID_CURRENCY_ONLY_MARKER,
-    normalizeFeatureFilterRule,
+    buildFeatureFilterToken,
+    getFeatureFilterRef,
+    LEGACY_FEATURE_FILTER_ID,
+    normalizeFeatureFilterList,
+    parseFeatureFilterToken,
+    resolveUsedFeatureFilters,
+    upgradeLegacyFeatureFilter,
     buildMappedRows,
     loadCurrencyMappings,
     splitTemplateName,
@@ -403,7 +413,7 @@ async function run() {
     const generatorFields = Object.fromEntries(Object.entries(lookup).map(([target, value]) => [target,
       (Array.isArray(value) ? value : [value]).map((token) => normalizeCell(token)).filter((token) => token
         && !token.startsWith(FIXED_FIELD_VALUE_PREFIX)
-        && token !== FEATURE_FILTER_FIELD_TOKEN
+        && parseFeatureFilterToken(token) === null
         && !(target === 'Balance' && token === CONSTANTS.BALANCE_CALCULATED_OPTION)
         && !(target === 'MerchantId' && token === MERCHANT_ID_CURRENCY_ONLY_MARKER))]).filter(([, fields]) => fields.length));
     const collectorFields = {};
@@ -557,6 +567,42 @@ async function run() {
     });
     assertEq(handoffValidated.mappings.find((item) => item.templateField === 'Remark').mappedField, '新列', '⑫ 引用新字段的映射按包里的表头通过校验');
     assertEq(main.buildBundleImportDraftTemplate(handoffEntry, null).headers, handoffEntry.headers, '⑫ 新建模板时草稿采用包里的表头');
+
+    // ⑬ v3.2.18 多特征值：只有映射选用的特征值的筛选字段删除后拦截生成，未选用的标为未启用
+    const featureHeaders = ['交易日期', '附言', '币种', '收入', '支出', '账号', '摘要'];
+    const featureTemplate = database.upsertTemplate({ name: '浦发银行-上海', sourceFileName: 'spdb.xlsx', headers: featureHeaders });
+    database.saveTemplateFeatureFilters(featureTemplate.id, normalizeFeatureFilterList([
+      { name: '流水号', sourceField: '附言', separator: 'space', length: 10, letterPrefixCount: 2, digitsOnly: true, sample: 'FT24123456' },
+      { name: '订单号', sourceField: '摘要', separator: 'space', length: 6, letterPrefixCount: null, digitsOnly: true, sample: '123456' }
+    ], { headers: featureHeaders }));
+    const featureSaved = database.getTemplate(featureTemplate.id);
+    const featureValidated = main.validateTemplateConfiguration({
+      template: featureSaved,
+      mappings: mappingsFor({ Remark: '' }).concat([{ templateField: 'Reference', mappedField: CONSTANTS.FEATURE_FILTER_MAPPING_FIELD, mappedFields: ['2'], customValue: '' }]),
+      enumValues: ENUM_VALUES,
+      featureFilters: featureSaved.featureFilters
+    });
+    database.saveMappings(featureTemplate.id, featureValidated.mappings, [], [], undefined, null, {});
+    const featureNewHeaders = ['交易日期', '币种', '收入', '支出', '账号'];
+    const featureFile = path.join(dir, '浦发银行-上海-新版.xlsx');
+    writeWorkbook(featureFile, featureNewHeaders);
+    const featurePreview = main.prepareTemplateHeaderUpdate({ templateId: featureTemplate.id, filePath: featureFile });
+    assertEq([featurePreview.affectedMappings, featurePreview.activeStaleCount], [[
+      '特征值「流水号」 · 筛选字段 ← 附言（未启用）',
+      '特征值「订单号」 · 筛选字段 ← 摘要'
+    ], 1], '⑬ 预览按特征值列出筛选字段，未被映射选用的标为未启用');
+    assertEq(main.applyTemplateHeaderUpdate({
+      templateId: featureTemplate.id, expectedHeaders: featureHeaders, headers: featureNewHeaders, sourceFileName: 'spdb-new.xlsx'
+    }).status, 'success', '⑬ 确认更新');
+    assertEq(database.getTemplate(featureTemplate.id).featureFilters, featureSaved.featureFilters, '⑬ 更新只改表头，特征值保留');
+    const featureSource = path.join(dir, 'spdb-source.xlsx');
+    writeWorkbook(featureSource, featureNewHeaders, [['2026-11-05', 'USD', '10', '', 'ACC1']]);
+    assertThrows(
+      () => generate(main, database, featureTemplate.id, featureSource),
+      (error) => error.code === 'TEMPLATE_MAPPING_FIELD_MISSING'
+        && JSON.stringify(error.detailLines) === JSON.stringify(['以下映射引用的字段已不在模板表头中：', '特征值「订单号」 · 筛选字段 ← 摘要']),
+      '⑬ 所选特征值的筛选字段已删除：生成前拦截并列出特征值'
+    );
 
     // 模板已删除
     database.deleteTemplate(other.id);

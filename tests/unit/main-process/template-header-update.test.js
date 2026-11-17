@@ -179,14 +179,14 @@ test('collect：按字段区分发生额规则仅在开启且规则完整时启�
 test('collect：拆分/合并按开关、复用与行状态判定启用；字段筛选按实际生效的映射判定', () => {
   const input = (switches) => ({
     mappings: [mapping('Description', '摘要'), ...switches],
-    billSplitMappings: [mapping('Remark', '附言'), mapping('Description', '字段筛选特征值')],
+    billSplitMappings: [mapping('Remark', '附言'), mapping('Description', '字段筛选特征值', ['1'])],
     billSplitRows: [
       { seqNo: 1, currencySourceField: '__FIXED__:CNY', creditSourceField: '收入', debitSourceField: '', amountSourceField: '', rowStatus: 'completed' },
       { seqNo: 2, currencySourceField: '', creditSourceField: '', debitSourceField: '支出', amountSourceField: '', rowStatus: 'draft' }
     ],
     billSplitAmountRules: [{ targetField: 'Debit Amount', conditionField: '方向', mappedField: '金额' }],
     billSplitSignedAmountSourceField: '有符号金额',
-    featureFilter: { sourceField: '附言' }
+    featureFilters: [{ id: '1', name: '流水号', sourceField: '附言' }]
   });
   const activeOf = (references) => Object.fromEntries(references.map((item) => [`${item.area}:${item.field}`, item.active]));
 
@@ -213,11 +213,29 @@ test('collect：拆分/合并按开关、复用与行状态判定启用；字段
   assert.equal(notReused['bill-split-mapping:附言'], true);
   assert.equal(notReused['feature-filter:附言'], true);
 
-  const mainFilter = activeOf(tools.collectTemplateFieldReferences({
-    mappings: [mapping('Description', '字段筛选特征值')],
-    featureFilter: { sourceField: '附言' }
+  // v3.2.18 多特征值：只有生效映射选用的特征值读取其筛选字段；未选用的标为未启用
+  const mainFilterRefs = tools.collectTemplateFieldReferences({
+    mappings: [mapping('Description', '字段筛选特征值', ['2']), mapping('Remark', '字段筛选特征值', [])],
+    featureFilters: [
+      { id: '1', name: '流水号', sourceField: '附言' },
+      { id: '2', name: '订单号', sourceField: '摘要' }
+    ]
+  });
+  assert.deepEqual(mainFilterRefs.map((item) => `${item.target}<-${item.field}:${item.active}`), [
+    '流水号<-附言:false',
+    '订单号<-摘要:true'
+  ]);
+  assert.deepEqual(formatFieldReferenceLines(findStaleFieldReferences(mainFilterRefs, ['附言'])), [
+    '特征值「订单号」 · 筛选字段 ← 摘要'
+  ]);
+  assert.throws(() => tools.assertTemplateFieldReferencesAvailable({ name: 'T', headers: ['附言'] }, {
+    mappings: [mapping('Description', '字段筛选特征值', ['2'])],
+    featureFilters: [{ id: '2', name: '订单号', sourceField: '摘要' }]
+  }), (error) => /映射字段不存在：摘要，/.test(error.message));
+  assert.doesNotThrow(() => tools.assertTemplateFieldReferencesAvailable({ name: 'T', headers: ['附言'] }, {
+    mappings: [mapping('Description', '字段筛选特征值', ['1'])],
+    featureFilters: [{ id: '1', name: '流水号', sourceField: '附言' }, { id: '2', name: '订单号', sourceField: '摘要' }]
   }));
-  assert.equal(mainFilter['feature-filter:附言'], true);
 });
 
 test('findStale / format：按表头找出失效引用；无表头信息时不判定', () => {

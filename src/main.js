@@ -11377,7 +11377,7 @@ function buildStatementGenerationConfig({
     billSplitRows: billSplitMergeConfig.billSplitRows || [],
     billSplitAmountRules: billSplitMergeConfig.billSplitAmountRules || [],
     billSplitSignedAmountSourceField: billSplitMergeConfig.signedAmountSourceField || '',
-    featureFilter: template && template.featureFilter
+    featureFilters: template && Array.isArray(template.featureFilters) ? template.featureFilters : []
   });
   const featureFilters = resolveStatementFeatureFilters(template, mappingByTargetField, billSplitMergeConfig);
   const currencyBigAccountMapping = isCurrencyOnlyTemplate
@@ -13840,7 +13840,9 @@ function buildTemplateFieldReferenceInput(templateConfig) {
       : [],
     billSplitSignedAmountSourceField: normalizeCell(templateConfig && templateConfig.billSplitMeta
       && templateConfig.billSplitMeta.signedAmountSourceField),
-    featureFilter: templateConfig && templateConfig.template ? templateConfig.template.featureFilter || null : null
+    featureFilters: templateConfig && templateConfig.template && Array.isArray(templateConfig.template.featureFilters)
+      ? templateConfig.template.featureFilters
+      : []
   };
 }
 

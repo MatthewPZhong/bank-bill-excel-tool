@@ -59,7 +59,7 @@ function seedFullTemplate(appDb) {
     { templateField: 'BillDate', mappedField: '交易日期', mappedFields: [] },
     { templateField: 'MerchantId', mappedField: '__FIXED__:__MULTI_BIG_ACCOUNT__', mappedFields: [] },
     { templateField: 'Remark', mappedField: '需要拼接字段', mappedFields: ['摘要', '对方户名'] },
-    { templateField: 'Description', mappedField: '字段筛选特征值', mappedFields: [] },
+    { templateField: 'Description', mappedField: '字段筛选特征值', mappedFields: ['1'] },
     { templateField: '按字段区分发生额', mappedField: '是', mappedFields: [] }
   ], [
     { merchantId: 'NET001', currency: 'CNY', accountNature: 'client' },
@@ -69,7 +69,7 @@ function seedFullTemplate(appDb) {
   ], 'auto', [
     { targetField: 'Credit Amount', conditionField: '借贷标志', conditionValue: '贷', mappedField: '交易金额', rowIndex: 0 }
   ], {
-    featureFilter: { sourceField: '摘要', separator: '空格', length: 6 }
+    featureFilters: [{ id: '1', name: '特征值1', sourceField: '摘要', separator: 'space', length: 6 }]
   });
   appDb.saveBillSplitMappings(template.id, [
     { templateField: 'Remark', mappedField: '摘要', mappedFields: [], rowIndex: 0 }
@@ -118,7 +118,8 @@ test('更新表头只改 headers_json / source_file_name / updated_at，其余�
   assert.deepEqual(snapshot(appDb, template.id), before);
   assert.deepEqual(snapshot(appDb, other.id), otherBefore);
   assert.deepEqual(appDb.getTemplate(other.id).headers, ['日期', '金额']);
-  assert.deepEqual(appDb.getTemplate(template.id).featureFilter, template.featureFilter);
+  assert.equal(template.featureFilters.length, 1);
+  assert.deepEqual(appDb.getTemplate(template.id).featureFilters, template.featureFilters);
 });
 
 test('期望表头与当前不一致时拒绝写入（TEMPLATE_HEADERS_CHANGED），数据不变', (t) => {
