@@ -1642,7 +1642,12 @@
 
       function showForm(item) {
         nameInput.value = item ? String(item.name || '') : '';
-        sourceSelect.value = item ? String(item.sourceField || '') : '';
+        // 模板【更新】后筛选字段可能已不在表头：显示为「X（已删除）」并标红，保存前须重新选择
+        sourceSelect.querySelectorAll('option[data-stale="true"]').forEach((option) => option.remove());
+        sourceSelect.classList.remove('is-stale');
+        const sourceField = item ? String(item.sourceField || '').trim() : '';
+        sourceSelect.value = sourceField;
+        if (sourceField && sourceSelect.value !== sourceField) ensureStaleFieldOption(sourceSelect, sourceField, '');
         separatorSelect.value = item ? String(item.separator || '') : 'space';
         lengthInput.value = item && item.length ? String(item.length) : '';
         prefixInput.value = item && item.letterPrefixCount ? String(item.letterPrefixCount) : '';

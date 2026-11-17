@@ -133,6 +133,7 @@ function pickColumns(rows, names) {
 function createMain(database, spies) {
   return loadMainFunctions([
     'validateTemplateConfiguration',
+    'validateFeatureFiltersPayload',
     'collectFeatureFilterRefs',
     'buildExportTargetFields',
     'buildMappingTargetFields',
@@ -603,6 +604,47 @@ async function run() {
         && JSON.stringify(error.detailLines) === JSON.stringify(['以下映射引用的字段已不在模板表头中：', '特征值「订单号」 · 筛选字段 ← 摘要']),
       '⑬ 所选特征值的筛选字段已删除：生成前拦截并列出特征值'
     );
+
+    // ⑭ 两个已选用的特征值共用的筛选字段被【更新】改名：可逐个修复，修好前生成被拦截，全部修好后照常生成
+    const repairHeaders = ['记账日期', '附言', '币种', '收入', '支出', '账号'];
+    const repairTemplate = database.upsertTemplate({ name: '中信银行-上海', sourceFileName: 'citic.xlsx', headers: repairHeaders });
+    database.saveTemplateFeatureFilters(repairTemplate.id, normalizeFeatureFilterList([
+      { name: '流水号', sourceField: '附言', separator: 'space', length: 10, letterPrefixCount: 2, digitsOnly: true, sample: 'FT24123456' },
+      { name: '订单号', sourceField: '附言', separator: 'space', length: 6, letterPrefixCount: null, digitsOnly: true, sample: '123456' }
+    ], { headers: repairHeaders }));
+    const repairSaved = database.getTemplate(repairTemplate.id);
+    const repairMappings = mappingsFor({ BillDate: '记账日期' }).filter((row) => row.templateField !== 'Remark').concat([
+      { templateField: 'Remark', mappedField: CONSTANTS.FEATURE_FILTER_MAPPING_FIELD, mappedFields: ['1'], customValue: '' },
+      { templateField: 'Reference', mappedField: CONSTANTS.FEATURE_FILTER_MAPPING_FIELD, mappedFields: ['2'], customValue: '' }
+    ]);
+    database.saveMappings(repairTemplate.id, main.validateTemplateConfiguration({
+      template: repairSaved, mappings: repairMappings, enumValues: ENUM_VALUES, featureFilters: repairSaved.featureFilters
+    }).mappings, [], [], undefined, null, {});
+    const renamedHeaders = ['记账日期', '摘要', '币种', '收入', '支出', '账号'];
+    assertEq(main.applyTemplateHeaderUpdate({
+      templateId: repairTemplate.id, expectedHeaders: repairHeaders, headers: renamedHeaders, sourceFileName: 'citic-new.xlsx'
+    }).status, 'success', '⑭ 「附言」改名为「摘要」后更新成功');
+    const repairSource = path.join(dir, 'citic-source.xlsx');
+    writeWorkbook(repairSource, renamedHeaders, [['2026-11-06', 'FT24123456 123456', 'USD', '10', '', 'ACC1']]);
+    const saveFilters = (list) => {
+      const validated = main.validateFeatureFiltersPayload(list, database.getTemplate(repairTemplate.id));
+      database.saveTemplateFeatureFilters(repairTemplate.id, validated);
+      return database.getTemplate(repairTemplate.id).featureFilters;
+    };
+    const stale = database.getTemplate(repairTemplate.id).featureFilters;
+    assertThrows(() => saveFilters([stale[0], { ...stale[1], length: 7 }]), (error) => /特征值「订单号」：筛选字段不存在：附言/.test(error.message),
+      '⑭ 改了条件但仍用已删除字段的特征值照常被拒');
+    const afterFirst = saveFilters([{ ...stale[0], sourceField: '摘要' }, stale[1]]);
+    assertEq(afterFirst.map((item) => [item.id, item.sourceField]), [['1', '摘要'], ['2', '附言']], '⑭ 先修特征值 1：另一个仍用旧字段的特征值原样保留，保存成功');
+    assertThrows(
+      () => generate(main, database, repairTemplate.id, repairSource),
+      (error) => error.code === 'TEMPLATE_MAPPING_FIELD_MISSING'
+        && JSON.stringify(error.detailLines) === JSON.stringify(['以下映射引用的字段已不在模板表头中：', '特征值「订单号」 · 筛选字段 ← 附言']),
+      '⑭ 尚未修复的特征值仍在生成前拦截'
+    );
+    saveFilters([afterFirst[0], { ...afterFirst[1], sourceField: '摘要' }]);
+    assertEq(pickColumns(generate(main, database, repairTemplate.id, repairSource), ['Remark', 'Reference']), [['FT24123456', '123456']],
+      '⑭ 两个特征值都修好后照常生成');
 
     // 模板已删除
     database.deleteTemplate(other.id);

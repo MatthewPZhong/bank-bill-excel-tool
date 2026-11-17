@@ -1651,6 +1651,28 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(await js('cfg.errors'), []);
   });
 
+  await test('特征值管理：筛选字段已不在模板字段中时显示「（已删除）」并标红，重新选择后才能保存', async () => {
+    await setup();
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([{ ...SERIAL, sourceField: '摘要' }, ORDER])}`);
+    await js(`cfg.pick('Remark','${FEATURE}');cfg.btn('Remark').click();cfg.pickFeature('1');`);
+    assert.deepEqual(await js(`(()=>{const s=cfg.ff().source;return [s.value,s.selectedOptions[0].textContent,s.classList.contains('is-stale')];})()`),
+      ['摘要', '摘要（已删除）', true]);
+    await js(`cfg.ff().save.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /筛选字段不存在：摘要/);
+    assert.equal(await js('cfg.featureSaves().length'), 0);
+    await js('cfg.host.closeTop();');
+    // 切到另一个特征值不残留「（已删除）」选项与标红；回到原特征值时重新标出
+    await js(`cfg.pickFeature('2');`);
+    assert.deepEqual(await js(`[cfg.ff().source.value,[...cfg.ff().source.options].some(o=>o.dataset.stale==='true'),cfg.ff().source.classList.contains('is-stale')]`),
+      ['附言', false, false]);
+    await js(`cfg.pickFeature('1');const s=cfg.ff().source;s.value='附言';s.dispatchEvent(new Event('change'));`);
+    assert.equal(await js(`cfg.ff().source.classList.contains('is-stale')`), false);
+    await js(`cfg.ff().save.click();`); await tick();
+    assert.deepEqual(await js(`cfg.featureSaves().map(payload=>payload.featureFilters.map(item=>[item.id,item.sourceField]))`),
+      [[['1', '附言'], ['2', '附言']]]);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
   await test('特征值管理：删除须先选目标；被映射草稿或拆分映射使用时拒绝；未使用时确认后立即落库', async () => {
     await setup();
     await js(`cfg.featureMappings=[{templateField:'Remark',mappedField:'${FEATURE}',mappedFields:['1']}];void 0;`);

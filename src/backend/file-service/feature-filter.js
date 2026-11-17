@@ -187,10 +187,32 @@ function normalizeFeatureFilterName(rawName) {
 //   - 每条：名称必填、≤30 字、同模板不重复；筛选条件按 normalizeFeatureFilterRule 校验。
 //   - knownIds 为库中已有 id（Set）时，列表里带 id 的条目必须是已有的；不带 id 的分配新 id
 //     （已有与列表内最大数字 id + 1，改名不变 id）。knownIds 为 null（模板包）时保留包内 id。
-function normalizeFeatureFilterList(rawList, { headers = null, knownIds = null } = {}) {
+//   - preserved 为库中已保存的列表时，筛选条件与已保存完全相同的已有条目不按 headers 校验筛选字段：
+//     模板【更新】可能删掉多个特征值共用的筛选字段，整表提交时须能逐个修复（被映射选用时，
+//     保存映射与生成仍按表头拦截）。新增或改了条件的条目照常按 headers 校验。
+function normalizeFeatureFilterList(rawList, { headers = null, knownIds = null, preserved = null } = {}) {
   if (!Array.isArray(rawList)) {
     throw fail('特征值列表格式不正确');
   }
+  const preservedRules = new Map();
+  // 条件与已保存完全相同才豁免；条件本身不合法时不豁免，交给下面按 headers 校验以保持原有报错顺序
+  const isPreservedRule = (id, raw) => {
+    if (!id || !preservedRules.has(id)) return false;
+    try {
+      return preservedRules.get(id) === JSON.stringify(normalizeFeatureFilterRule(raw));
+    } catch {
+      return false;
+    }
+  };
+  (Array.isArray(preserved) ? preserved : []).forEach((item) => {
+    const id = isPlainObject(item) ? normalizeCell(item.id) : '';
+    if (!id) return;
+    try {
+      preservedRules.set(id, JSON.stringify(normalizeFeatureFilterRule(item)));
+    } catch {
+      // 已保存条目本身不合法时不豁免，按 headers 照常校验
+    }
+  });
   const seenIds = new Set();
   const seenNames = new Set();
   let maxNumericId = 0;
@@ -222,7 +244,7 @@ function normalizeFeatureFilterList(rawList, { headers = null, knownIds = null }
       seenIds.add(id);
       trackId(id);
     }
-    return { id, name, rule: normalizeFeatureFilterRule(raw, { headers, name }) };
+    return { id, name, rule: normalizeFeatureFilterRule(raw, { headers: isPreservedRule(id, raw) ? null : headers, name }) };
   });
   return pending.map(({ id, name, rule }) => {
     let resolvedId = id;

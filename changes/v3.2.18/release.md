@@ -39,6 +39,12 @@
 - 跨分支语义冲突（`8fbf993e`）：`statement-export-template-update` 的模板【更新】失效引用检查按 v3.2.16 单套 `template.featureFilter` 收集筛选字段，`mapping-feature-values` 改为多特征值数组后该检查读不到特征值。改为逐个特征值计入、只有生效映射选用的特征值为启用，提示行带特征值名；`statement-template-update.js` 脚手架同步注入名并新增 ⑬ 用例。
 - 架构历史检查（`policyChanges`）：合入后报 351 处 `ARCH-POLICY-HISTORY`（`renderer-dialog-configuration`、`renderer-statement`、`renderer-dialog-app-settings` 的 `allowedApiFields`）。v3.2.17 及更早快照的已有迁移链止于基线集合，各模块分支的条目只到本分支的集合；按 v3.2.17 先例，给基线之后仍持有较早集合的提交补登到合入后最终集合的放宽，来源取覆盖这些提交的分支末端或合并提交（3 个边界共 14 条，本文件为其 designDoc）。
 
+## release 级审查
+
+- 第一轮 Codex（`codex review --base main`，`a7f268f2..9d43d1fc`）：1×P2，无 P0/P1。模板【更新】删除或改名了两个已选用特征值共用的筛选字段后，【特征值管理】整表提交时按新表头校验每一项，修复任一项都因另一项的旧字段失败，删除也同样失败，模板无法修复、持续被生成拦截（本地最小输入复现属实）。
+- 修复：`validateFeatureFiltersPayload` 传入已保存列表，条件未改的已有条目不按当前表头校验，新增或改了条件的照常校验；保存映射与生成前拦截不变。同一原因下模板包导入不再按表头校验包内特征值，未被选用的失效特征值不致整条模板被跳过。【特征值管理】中失效的筛选字段显示为「（已删除）」并标红，须重新选择才能保存。回归：单测 1 例、`statement-template-update.js` ⑭、`statement-feature-filter.js` ⑤ 2 例、渲染生命周期 1 例。
+- 第二轮 Codex（`codex review --uncommitted`，上述修复）：未发现需要修复的问题。修复后完整 `npm run release-check` 通过（lint、架构检查、smoke 通过；单测 10281/10285、0 失败；集成 109/109、3893 例）。
+
 ## 升版与发布文档（清单 C1–C2）
 
 - `package.json` / `package-lock.json` 升为 3.2.18（`npm version 3.2.18 --no-git-tag-version`，保留 `package.json` 原格式）。

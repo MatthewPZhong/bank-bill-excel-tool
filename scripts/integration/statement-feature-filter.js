@@ -444,7 +444,8 @@ function verifyBundleRoundTrip(dir, { database, main, template }) {
   const targetMain = createMain(target);
   const importEntry = (readTarget) => {
     const draftTemplate = { id: null, templateKey: readTarget.templateKey, name: readTarget.name, sourceFileName: readTarget.sourceFileName, headers: readTarget.headers, createdAt: '', updatedAt: '' };
-    const bundleFeatureFilters = normalizeFeatureFilterList(readTarget.featureFilters || [], { headers: draftTemplate.headers });
+    // 与 template:import-bundle 一致：包内特征值不按表头校验，生效映射所选的由 validateTemplateConfiguration 按表头校验
+    const bundleFeatureFilters = normalizeFeatureFilterList(readTarget.featureFilters || []);
     const validated = targetMain.validateTemplateConfiguration({
       template: draftTemplate,
       mappings: targetMain.normalizeMappingRows({ template: draftTemplate, mappings: readTarget.mappings, enumValues: ENUM_VALUES }),
@@ -475,6 +476,15 @@ function verifyBundleRoundTrip(dir, { database, main, template }) {
   assertEq(unusedRead.featureFilters, entry.featureFilters, '⑤ v5 包读回未选用的特征值');
   const importedUnused = importEntry(unusedRead);
   assertEq(target.getTemplate(importedUnused.id).featureFilters, database.getTemplate(template.id).featureFilters, '⑤ 导入 v5 包保留未选用的特征值');
+
+  // 模板【更新】后带「未被选用、筛选字段已不在表头」的特征值：照常导入；主映射选用了它则被拒（该模板跳过）
+  const staleFilters = entry.featureFilters.map((item) => (item.id === '1' ? { ...item, sourceField: '已删除列' } : item));
+  const staleUnusedEntry = { ...unusedEntry, templateKey: 'stale-unused', name: 'BANKS-失效未用', featureFilters: staleFilters };
+  const importedStale = importEntry(staleUnusedEntry);
+  assertEq(target.getTemplate(importedStale.id).featureFilters.map((item) => [item.id, item.sourceField]),
+    [['1', '已删除列'], ['2', entry.featureFilters[1].sourceField]], '⑤ 未选用的失效特征值不阻止导入，原样保留');
+  assertThrows(() => importEntry({ ...entry, templateKey: 'stale-used', name: 'BANKS-失效已用', featureFilters: staleFilters }),
+    /特征值「流水号」：筛选字段不存在：已删除列/, '⑤ 主映射选用了失效特征值时导入被拒');
 
   // v3.2.16/3.2.17 导出的 v6 包：单套 featureFilter，映射行不带 id
   const v6Path = path.join(dir, 'bundle-v6.json');

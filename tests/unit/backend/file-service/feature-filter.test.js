@@ -152,6 +152,26 @@ test('特征值列表：名称必填、≤30 字、不可重复；已有 id 必�
   assert.deepEqual(normalizeFeatureFilterList([]), []);
 });
 
+test('特征值列表：模板【更新】删掉共用的筛选字段后可逐个修复——条件未改的已有条目不按表头校验', () => {
+  // 两个已保存特征值都引用已从表头删除的「备注」
+  const saved = [
+    { id: '1', name: '流水号', ...BASE_RULE, sourceField: '备注' },
+    { id: '2', name: '订单号', ...BASE_RULE, sourceField: '备注' }
+  ];
+  const options = { headers: HEADERS, knownIds: new Set(['1', '2']), preserved: saved };
+  // 只修特征值 1：特征值 2 原样提交，不因旧字段被拒
+  assert.deepEqual(normalizeFeatureFilterList([{ ...saved[0], sourceField: '附言' }, saved[1]], options)
+    .map((item) => [item.id, item.sourceField]), [['1', '附言'], ['2', '备注']]);
+  // 只改名也不改变条件
+  assert.equal(normalizeFeatureFilterList([{ ...saved[1], name: '订单编号' }], options)[0].name, '订单编号');
+  // 改了条件、或新增的条目仍按表头校验
+  assertFeatureError(() => normalizeFeatureFilterList([{ ...saved[1], length: 9 }], options), /特征值「订单号」：筛选字段不存在：备注/);
+  assertFeatureError(() => normalizeFeatureFilterList([{ name: '新', ...BASE_RULE, sourceField: '备注' }], options),
+    /特征值「新」：筛选字段不存在：备注/);
+  // 不传 preserved 时照旧整表校验
+  assertFeatureError(() => normalizeFeatureFilterList(saved, { headers: HEADERS }), /筛选字段不存在：备注/);
+});
+
 test('旧单套规则升级为「特征值1」（id 1）；数组原样复制；空值为空列表', () => {
   assert.deepEqual(upgradeLegacyFeatureFilter({ ...BASE_RULE }), [{ id: '1', name: '特征值1', ...BASE_RULE }]);
   const list = [{ id: '2', name: 'X', ...BASE_RULE }];

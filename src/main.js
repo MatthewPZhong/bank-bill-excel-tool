@@ -8686,7 +8686,8 @@ function registerFundTransferAccountMappingHandlers() {
 function validateFeatureFiltersPayload(rawList, template) {
   const existing = Array.isArray(template.featureFilters) ? template.featureFilters : [];
   const knownIds = new Set(existing.map((item) => normalizeCell(item && item.id)).filter(Boolean));
-  const featureFilters = normalizeFeatureFilterList(rawList, { headers: template.headers, knownIds });
+  // 未改动的已有特征值不按当前表头校验（模板【更新】后可逐个修复），新增与改动的照常校验
+  const featureFilters = normalizeFeatureFilterList(rawList, { headers: template.headers, knownIds, preserved: existing });
   const keptIds = new Set(featureFilters.map((item) => item.id));
   const removed = existing.filter((item) => !keptIds.has(normalizeCell(item && item.id)));
   if (removed.length) {
@@ -10344,10 +10345,10 @@ function registerTemplateHandlers() {
           }
 
           const draftTemplate = buildBundleImportDraftTemplate(entry, existingTemplate);
-          // v3.2.18：包内特征值按表头校验（保留包内 id），映射所选特征值据此校验并随映射同事务写入
-          const bundleFeatureFilters = normalizeFeatureFilterList(entry.featureFilters || [], {
-            headers: draftTemplate.headers
-          });
+          // v3.2.18：包内特征值只校验名称与条件（保留包内 id），不按表头校验筛选字段：模板【更新】后未被选用的
+          //   特征值可能引用已删除的字段，不应让整条模板被跳过；生效映射所选特征值由 validateTemplateConfiguration
+          //   按表头校验，随映射同事务写入。
+          const bundleFeatureFilters = normalizeFeatureFilterList(entry.featureFilters || []);
           const validated = validateTemplateConfiguration({
             template: draftTemplate,
             mappings: normalizeMappingRows({
