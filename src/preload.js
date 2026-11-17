@@ -469,13 +469,19 @@ contextBridge.exposeInMainWorld('desktopApi', {
     listChildren: (parentTemplateId) => ipcRenderer.invoke('template:list-children', parentTemplateId),
     setParentStatus: (templateId, isParent) => ipcRenderer.invoke('template:set-parent-status', templateId, isParent),
     setChildParent: (templateId, parentTemplateId) => ipcRenderer.invoke('template:set-child-parent', templateId, parentTemplateId),
-    importTemplate: () => ipcRenderer.invoke('template:import'),
+    // v3.2.18【导入模板】：先选文件识别为新模板，再按用户输入的银行渠道名、地区提交（payload：{ importToken, bankName, region }）
+    prepareImport: () => ipcRenderer.invoke('template:prepare-import'),
+    discardImport: (importToken) => ipcRenderer.invoke('template:discard-import', importToken),
+    importTemplate: (payload) => ipcRenderer.invoke('template:import', payload),
     // v3.2.15【导入子模板】：复用 template:import，按渠道编号命名并归入该渠道
     importChild: (channelId) => ipcRenderer.invoke('template:import', { channelId }),
     deleteTemplate: (templateId) => ipcRenderer.invoke('template:delete', templateId),
     getMappings: (templateId) => ipcRenderer.invoke('template:get-mappings', templateId),
     saveMappings: (payload) => ipcRenderer.invoke('template:save-mappings', payload),
     rename: (payload) => ipcRenderer.invoke('template:rename', payload),
+    // v3.2.18 模板管理【更新】：选文件预览字段变更 → 确认后只替换表头，映射保留
+    previewHeaderUpdate: (templateId) => ipcRenderer.invoke('template:preview-header-update', templateId),
+    updateHeaders: (payload) => ipcRenderer.invoke('template:update-headers', payload),
     saveFilenameFixedField: (payload) => ipcRenderer.invoke('template:save-filename-fixed-field', payload),
     exportBundle: () => ipcRenderer.invoke('template:export-bundle'),
     importBundle: () => ipcRenderer.invoke('template:import-bundle'),
@@ -483,6 +489,8 @@ contextBridge.exposeInMainWorld('desktopApi', {
     saveAmountSplitRules: (payload) => ipcRenderer.invoke('template:save-amount-split-rules', payload),
     getBillSplitConfig: (templateId) => ipcRenderer.invoke('template:get-bill-split-config', templateId),
     saveBillSplitMappings: (payload) => ipcRenderer.invoke('template:save-bill-split-mappings', payload),
+    // v3.2.18 映射关系管理【特征值管理】：保存 / 删除特征值（整表替换，立即落库）
+    saveFeatureFilters: (payload) => ipcRenderer.invoke('template:save-feature-filters', payload),
     saveBillSplitRowCount: (payload) => ipcRenderer.invoke('template:save-bill-split-row-count', payload),
     saveBillSplitRow: (payload) => ipcRenderer.invoke('template:save-bill-split-row', payload),
     previewDeleteBillSplitRow: (payload) => ipcRenderer.invoke('template:preview-delete-bill-split-row', payload),
@@ -736,6 +744,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     // v3.0.1 需求1（D4）：链接表按数据日期范围统计 / 删除（前端删除弹框预览 + 直接删）。
     //   v3.0.5 OPEN-4（T6b-2）：加第 3 参 tableKey（三表化）；前端未传 → undefined → handler 缺省 gateway-bill（向后兼容 parity）。
     countByDateRange: (start, end, tableKey) => ipcRenderer.invoke('linked-table:count-by-date-range', { start, end, tableKey }),
-    deleteByDateRange: (start, end, tableKey) => ipcRenderer.invoke('linked-table:delete-by-date-range', { start, end, tableKey })
+    deleteByDateRange: (start, end, tableKey) => ipcRenderer.invoke('linked-table:delete-by-date-range', { start, end, tableKey }),
+    // v3.2.18：设置 → 数据管理 → 链接表保留期限（payload：{ tableKey, retentionDays: 15|30|60|90|180|365|null }）。
+    getRetentionSettings: () => ipcRenderer.invoke('linked-table:get-retention-settings'),
+    setRetentionDays: (payload) => ipcRenderer.invoke('linked-table:set-retention-days', payload)
   }
 });

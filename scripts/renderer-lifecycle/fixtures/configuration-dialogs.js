@@ -25,8 +25,12 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
           saveMappings:payload=>cfg.invoke('mappingSave',[payload],{status:'success',message:'映射保存完成'}),
           importChild:id=>cfg.invoke('importChild',[id],{status:'success',message:'已导入子模板「渠道 A-子模板-1」'}),
           saveAmountSplitRules:payload=>cfg.invoke('amount',[payload],{status:'success'}),saveBillSplitMappings:payload=>cfg.invoke('splitMapping',[payload],{status:'success'}),
+          saveFeatureFilters:payload=>cfg.invoke('featureSave',[payload],(()=>{let max=0;payload.featureFilters.forEach(item=>{if(/^\\d+$/.test(item.id||''))max=Math.max(max,Number(item.id));});
+            return {status:'success',featureFilters:payload.featureFilters.map(item=>item.id?{...item}:{...item,id:String(++max)})};})()),
           saveBillSplitAmountRules:payload=>cfg.invoke('splitAmount',[payload],{status:'success'}),
-          getMappings:id=>cfg.invoke('templateRead',[id],{status:'success',template:cfg.templates[0],targetFields:[],mappings:[]})},
+          getMappings:id=>cfg.invoke('templateRead',[id],{status:'success',template:cfg.templates[0],targetFields:[],mappings:[]}),
+          previewHeaderUpdate:id=>cfg.invoke('headerPreview',[id],{status:'cancelled'}),
+          updateHeaders:payload=>cfg.invoke('headerUpdate',[payload],{status:'success',message:'模板「模板 A」已更新，映射关系已保留',staleMappings:[],activeStaleCount:0})},
         accountMappings:{list:id=>cfg.invoke('list',[id],{status:'success',mappings:[]}),
           save:(id,mappings)=>cfg.invoke('save',[id,mappings],{status:'success',message:'保存完成'}),
           listChannelConflicts:()=>cfg.invoke('conflicts',[],{status:'success',channels:[]}),
@@ -289,25 +293,160 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
           for(const rect of range.getClientRects())tops.push(Math.round(rect.top));}
         return tops.length===0||Math.max(...tops)-Math.min(...tops)<=1;};
       const input=table.querySelector('.balance-seed-balance-input');
+      // v3.2.18 头部：渠道、账户号、币种不溢出卡片，× 留在右上角且不与其他控件重叠。
+      const card=cfg.overlay.querySelector('.balance-seed-card').getBoundingClientRect();
+      const header=cfg.overlay.querySelector('.dialog-header');
+      const rect=element=>element.getBoundingClientRect();
+      const close=rect(header.querySelector('.icon-close'));
+      const controls=['.dialog-title','.balance-seed-owner-wrapper','[data-role="balance-seed-account"]','.balance-seed-currency-wrapper'].map(selector=>rect(header.querySelector(selector)));
       return { overflow: wrapper.scrollWidth>wrapper.clientWidth+1,
         wrapped: [...table.querySelectorAll('th,td')].filter(cell=>!singleLine(cell)).map(cell=>cell.textContent.trim()),
         widths: [...table.rows[0].cells].map(cell=>Math.round(cell.getBoundingClientRect().width)),
-        inputFits: !input||input.scrollWidth<=input.clientWidth };
+        // 与 overflow 同样留 1px：Windows 150% 下输入框宽度为小数，scrollWidth 取整后会比 clientWidth 大 1（文字 50.6px、可用约 54px 时也是 75/74）
+        inputFits: !input||input.scrollWidth<=input.clientWidth+1,
+        // 失败时随断言输出，便于对照 Windows 与本机的实际宽度
+        inputMetrics: input&&(()=>{const cs=getComputedStyle(input);const ctx=document.createElement('canvas').getContext('2d');ctx.font=cs.font;
+          return {value:input.value,client:input.clientWidth,scroll:input.scrollWidth,padding:cs.paddingLeft,font:cs.font,
+            text:Math.round(ctx.measureText(input.value).width*10)/10,cell:Math.round(input.closest('td').getBoundingClientRect().width),
+            cols:[...table.rows[0].cells].map(cell=>Math.round(cell.getBoundingClientRect().width)),table:Math.round(table.getBoundingClientRect().width),
+            wrapper:wrapper.clientWidth,viewport:window.innerWidth,dpr:window.devicePixelRatio,narrow:matchMedia('(max-width: 1021px)').matches};})(),
+        headerFits: header.scrollWidth<=header.clientWidth+1&&controls.every(item=>item.right<=card.right+1),
+        closeTopRight: close.right<=card.right+1&&close.top-card.top<40&&controls.every(item=>item.right<=close.left||item.top>=close.bottom),
+        filtersOnFirstRow: Math.abs(controls[2].top-controls[1].top)<=2 };
     })()`);
     await layout.settle();
     const normal = await measure();
     assert.deepEqual([normal.overflow, normal.wrapped], [false, []]);
+    assert.deepEqual([normal.headerFits, normal.closeTopRight, normal.filtersOnFirstRow], [true, true, true], '100% 时头部一行放下');
     const [, , , balanceWidth, methodWidth, actionWidth] = normal.widths;
     assert.ok(Math.max(balanceWidth, methodWidth, actionWidth) - Math.min(balanceWidth, methodWidth, actionWidth) <= 1, JSON.stringify(normal.widths));
     await js(`cfg.overlay.querySelectorAll('[data-action="edit-seed"]')[2].click();void 0;`); await layout.settle();
     const editing = await measure();
-    assert.deepEqual([editing.overflow, editing.wrapped, editing.inputFits], [false, [], true]);
+    assert.deepEqual([editing.overflow, editing.wrapped, editing.inputFits], [false, [], true], JSON.stringify(editing.inputMetrics));
     assert.ok(editing.widths.every((width, index) => Math.abs(width - normal.widths[index]) <= 1), JSON.stringify([normal.widths, editing.widths]));
     await layout.evidence('balance-seed-table-100', { normal, editing });
+    // v3.2.18：选账户号后打开浮层，浮层在卡片内可见、不超出窗口。
+    await js(`cfg.overlay.querySelector('[data-action="cancel-edit"]').click();const account=cfg.overlay.querySelector('[data-role="balance-seed-account"]');
+      account.click();cfg.overlay.querySelector('.balance-seed-account-option[data-value="622202100112345678901"]').click();account.click();void 0;`);
+    await layout.settle();
+    const panel = await js(`(()=>{const rect=cfg.overlay.querySelector('.balance-seed-account-panel').getBoundingClientRect();
+      return {visible:rect.height>0,inWindow:rect.left>=0&&rect.right<=window.innerWidth&&rect.bottom<=window.innerHeight,
+        options:cfg.overlay.querySelectorAll('.balance-seed-account-option').length,rows:cfg.overlay.querySelectorAll('tbody tr').length};})()`);
+    assert.deepEqual(panel, { visible: true, inWindow: true, options: 4, rows: 2 });
+    await layout.evidence('balance-seed-filter-panel-100', { panel });
+    await js(`cfg.overlay.querySelector('[data-role="balance-seed-account"]').click();cfg.overlay.querySelectorAll('[data-action="edit-seed"]')[0].click();void 0;`);
     await layout.resize(1080, 760, 1.5);
     const zoomed = await measure();
-    assert.deepEqual([zoomed.overflow, zoomed.wrapped, zoomed.inputFits], [false, [], true]);
+    // 150% 时编辑 7 位金额 1250000（筛选后第一行）
+    assert.equal(await js(`cfg.overlay.querySelector('.balance-seed-balance-input').value`), '1250000');
+    assert.deepEqual([zoomed.overflow, zoomed.wrapped, zoomed.inputFits], [false, [], true], JSON.stringify(zoomed.inputMetrics));
+    assert.deepEqual([zoomed.headerFits, zoomed.closeTopRight], [true, true], '150% 时头部可换行但不溢出，× 仍在右上角');
     await layout.evidence('balance-seed-table-150', { zoomed });
+  });
+  // v3.2.18【导入模板】命名弹框版式：右下角【取消】【确认】，【确认】为蓝色主按钮；100%/150% 均不溢出。
+  await test('导入模板命名弹框：右下角取消 / 确认，确认为蓝色主按钮，100% 与 150% 不溢出', async () => {
+    await setup({ zoom: 1 });
+    await js(`cfg.bridge.openModal(()=>cfg.dialogs.createTemplateImportNameDialog({sourceFileName:'METACOMP 新加坡 2026-11 网银明细.xlsx',onSubmit:async()=>({close:true}),onCancel:()=>{}}));void 0;`);
+    const measure = () => js(`(()=>{const card=cfg.top().querySelector('.template-import-name-card');const cardRect=card.getBoundingClientRect();
+      const buttons=[...card.querySelectorAll('.dialog-actions button')];const rects=buttons.map(button=>button.getBoundingClientRect());
+      const primary=getComputedStyle(document.documentElement).getPropertyValue('--primary').trim();
+      const toRgb=value=>{const probe=document.createElement('span');probe.style.color=value;document.body.appendChild(probe);const rgb=getComputedStyle(probe).color;probe.remove();return rgb;};
+      return {labels:buttons.map(button=>button.textContent),confirmBlue:getComputedStyle(buttons[1]).backgroundColor===toRgb(primary),
+        rightmost:rects[1].left>rects[0].right&&cardRect.right-rects[1].right<60&&cardRect.bottom-rects[1].bottom<60,
+        fits:card.scrollWidth<=card.clientWidth+1&&[...card.querySelectorAll('input')].every(input=>input.getBoundingClientRect().right<=cardRect.right)};})()`);
+    await layout.settle();
+    const normal = await measure();
+    assert.deepEqual(normal, { labels: ['取消', '确认'], confirmBlue: true, rightmost: true, fits: true });
+    await layout.evidence('template-import-name-100', { normal });
+    await layout.resize(1080, 760, 1.5);
+    const zoomed = await measure();
+    assert.deepEqual(zoomed, { labels: ['取消', '确认'], confirmBlue: true, rightmost: true, fits: true });
+    await layout.evidence('template-import-name-150', { zoomed });
+  });
+  // v3.2.18（spec：changes/v3.2.18/feat/template-import-naming/spec.md §3.2）：账户号可搜索单选 + 币种联动单选，只在渲染层筛选。
+  await test('余额管理账户号 / 币种筛选：头部顺序与默认空白，部分搜索、选「全部」复位，币种联动与禁用，按收到顺序显示', async () => {
+    await setup();
+    await js(`cfg.templates.push({id:3,name:'渠道 A',channelId:7,channelName:'渠道 A'});cfg.services.applyPreviewTemplates(cfg.templates);
+      cfg.seedRecords=[['2026-09-03','M002','USD'],['2026-09-02','M001','HKD'],['2026-09-02','M001','USD'],['2026-09-01','M001','USD'],['2026-09-01','X9','EUR']]
+        .map(([billDate,merchantId,currency],index)=>({billDate,merchantId,currency,endBalance:index+1,generationMethod:'人工录入',templateName:'渠道 A',updatedAt:'u'+index,fileIdentity:'渠道.json'}));
+      cfg.seedList=owner=>({status:'success',owner:{kind:owner.kind,id:owner.id,seedFileName:'渠道.json'},records:owner.kind==='channel'?cfg.seedRecords:[]});
+      cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;cfg.top().querySelector('[data-action="balance-seed-management"]').click();
+      cfg.overlay=cfg.top();cfg.handle=cfg.host.getHandle(cfg.overlay);cfg.account=cfg.overlay.querySelector('[data-role="balance-seed-account"]');
+      cfg.currency=cfg.overlay.querySelector('[data-role="balance-seed-currency"]');cfg.panel=cfg.overlay.querySelector('.balance-seed-account-panel');
+      cfg.rows=()=>Array.from(cfg.overlay.querySelectorAll('tbody tr')).map(row=>Array.from(row.cells).slice(0,3).map(cell=>cell.textContent.trim()).join(' '));
+      cfg.options=()=>Array.from(cfg.panel.querySelectorAll('.balance-seed-account-option')).map(option=>option.textContent.trim());
+      cfg.search=value=>{const input=cfg.panel.querySelector('[data-role="balance-seed-account-search"]');input.value=value;input.dispatchEvent(new Event('input'));};
+      cfg.pick=value=>cfg.panel.querySelector('.balance-seed-account-option[data-value="'+value+'"]').click();
+      cfg.hint=()=>cfg.overlay.querySelector('[data-role="balance-seed-hint"]').textContent;void 0;`); await tick();
+    assert.deepEqual(await js(`{const header=cfg.overlay.querySelector('.dialog-header');
+      [Array.from(header.children).map(item=>item.className.split(' ').find(name=>['dialog-title','balance-seed-owner-wrapper','balance-seed-filters','icon-close'].includes(name))),
+       Array.from(header.querySelector('.balance-seed-filters').children).map(item=>item.firstChild.textContent.trim()||item.dataset.role),
+       cfg.account.textContent.trim(),cfg.currency.value,cfg.currency.disabled,Array.from(cfg.currency.options).map(option=>option.value),cfg.panel.hidden];}`),
+      [['dialog-title', 'balance-seed-owner-wrapper', 'balance-seed-filters', 'icon-close'], ['账户号', 'balance-seed-account', '币种'], '', '', true, [''], true]);
+    assert.deepEqual(await js('cfg.rows()'), ['2026-09-03 M002 USD', '2026-09-02 M001 HKD', '2026-09-02 M001 USD', '2026-09-01 M001 USD', '2026-09-01 X9 EUR']);
+
+    await js(`cfg.account.click();`);
+    assert.deepEqual(await js(`[cfg.panel.hidden,cfg.account.getAttribute('aria-expanded'),cfg.options(),document.activeElement?.dataset.role]`),
+      [false, 'true', ['全部', 'M001', 'M002', 'X9'], 'balance-seed-account-search']);
+    await js(`cfg.search('m00');`);
+    assert.deepEqual(await js('cfg.options()'), ['全部', 'M001', 'M002']);
+    await js(`cfg.search('zzz');`);
+    assert.deepEqual(await js(`[cfg.options(),cfg.panel.textContent.includes('无匹配账户号')]`), [['全部'], true]);
+    await js(`cfg.search('001');cfg.pick('M001');`);
+    assert.deepEqual(await js(`[cfg.panel.hidden,cfg.account.textContent,cfg.rows(),cfg.hint(),cfg.currency.disabled,Array.from(cfg.currency.options).map(option=>option.value)]`),
+      [true, 'M001', ['2026-09-02 M001 HKD', '2026-09-02 M001 USD', '2026-09-01 M001 USD'], '共 3 条', false, ['', 'HKD', 'USD']]);
+    await js(`cfg.currency.value='USD';cfg.currency.dispatchEvent(new Event('change'));`);
+    assert.deepEqual(await js(`[cfg.rows(),cfg.hint()]`), [['2026-09-02 M001 USD', '2026-09-01 M001 USD'], '共 2 条']);
+    await js(`cfg.account.click();cfg.pick('M002');`);
+    assert.deepEqual(await js(`[cfg.account.textContent,cfg.currency.value,Array.from(cfg.currency.options).map(option=>option.value),cfg.rows()]`),
+      ['M002', '', ['', 'USD'], ['2026-09-03 M002 USD']], '换账户号时币种清空');
+    await js(`cfg.account.click();cfg.pick('');`);
+    assert.deepEqual(await js(`[cfg.account.textContent.trim(),cfg.currency.disabled,cfg.rows().length,cfg.hint()]`), ['', true, 5, '共 5 条'], '选「全部」回到空白');
+
+    await js(`cfg.account.click();document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));`);
+    assert.deepEqual(await js(`[cfg.panel.hidden,cfg.handle.isTop(),cfg.handle.isOpen()]`), [true, true, true], 'Esc 只关面板');
+    await js(`cfg.account.click();cfg.overlay.querySelector('tbody').dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));`);
+    assert.equal(await js('cfg.panel.hidden'), true, '点击面板外关闭');
+    await js(`cfg.account.click();cfg.search('x');cfg.panel.querySelector('[data-role="balance-seed-account-search"]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));`);
+    assert.deepEqual(await js(`[cfg.panel.hidden,cfg.account.textContent]`), [true, 'X9'], 'Enter 选第一个匹配');
+
+    await js(`cfg.select=cfg.overlay.querySelector('[data-role="balance-seed-owner"]');cfg.account.click();cfg.select.value='template:1';cfg.select.dispatchEvent(new Event('change'));`); await tick();
+    assert.deepEqual(await js(`[cfg.panel.hidden,cfg.account.textContent.trim(),cfg.currency.disabled,cfg.rows()]`), [true, '', true, ['暂无余额种子']], '切换渠道清空筛选');
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+  await test('余额管理筛选与写入、分页：重读后账户号或币种仍在则保留、消失则复位；筛选后分页与条数按筛选结果', async () => {
+    await setup();
+    await js(`cfg.templates.push({id:3,name:'渠道 A',channelId:7,channelName:'渠道 A'});cfg.services.applyPreviewTemplates(cfg.templates);
+      const seed=(billDate,merchantId,currency,endBalance)=>({billDate,merchantId,currency,endBalance,generationMethod:'通过发生额计算',templateName:'渠道 A',updatedAt:'u',fileIdentity:'渠道.json'});
+      cfg.seedRecords=[seed('2026-09-02','M001','USD',10),seed('2026-09-02','M002','HKD',20),seed('2026-09-01','M001','USD',30)];
+      cfg.seedList=owner=>({status:'success',owner:{kind:owner.kind,id:owner.id,seedFileName:'渠道.json'},records:cfg.seedRecords});
+      cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;cfg.top().querySelector('[data-action="balance-seed-management"]').click();
+      cfg.overlay=cfg.top();cfg.account=cfg.overlay.querySelector('[data-role="balance-seed-account"]');cfg.currency=cfg.overlay.querySelector('[data-role="balance-seed-currency"]');
+      cfg.panel=cfg.overlay.querySelector('.balance-seed-account-panel');
+      cfg.pick=value=>{cfg.account.click();cfg.panel.querySelector('.balance-seed-account-option[data-value="'+value+'"]').click();};
+      cfg.rows=()=>Array.from(cfg.overlay.querySelectorAll('tbody tr')).map(row=>Array.from(row.cells).slice(0,4).map(cell=>cell.textContent.trim()).join(' '));void 0;`); await tick();
+    await js(`cfg.pick('M001');cfg.currency.value='USD';cfg.currency.dispatchEvent(new Event('change'));
+      cfg.overlay.querySelector('[data-action="edit-seed"]').click();cfg.overlay.querySelector('.balance-seed-balance-input').value='11';
+      cfg.seedRecords=[{...cfg.seedRecords[0],endBalance:11,generationMethod:'人工录入'},...cfg.seedRecords.slice(1)];
+      cfg.overlay.querySelector('[data-action="save-seed"]').click();`); await tick(); await tick();
+    assert.deepEqual(await js(`[cfg.account.textContent,cfg.currency.value,cfg.rows()]`),
+      ['M001', 'USD', ['2026-09-02 M001 USD 11', '2026-09-01 M001 USD 30']], '修改后筛选保留');
+    assert.equal(await js(`cfg.calls.find(call=>call.name==='seedUpdate').args[0].key.merchantId`), 'M001');
+    await js(`cfg.pick('M002');cfg.overlay.querySelector('[data-action="delete-seed"]').click();
+      cfg.seedRecords=cfg.seedRecords.filter(record=>record.merchantId!=='M002');
+      Array.from(cfg.top().querySelectorAll('button')).find(button=>button.textContent==='确认删除').click();`); await tick(); await tick();
+    assert.deepEqual(await js(`[cfg.account.textContent.trim(),cfg.currency.disabled,cfg.rows().length]`), ['', true, 2], '删除后账户号消失则复位');
+
+    await js(`cfg.seedRecords=Array.from({length:205},(_,index)=>({billDate:'2026-08-'+String(31-index%31).padStart(2,'0'),merchantId:'BIG'+String(index).padStart(3,'0'),currency:'USD',endBalance:index,
+        generationMethod:'通过发生额计算',templateName:'渠道 A',updatedAt:'u',fileIdentity:'渠道.json'})).concat([{billDate:'2026-07-01',merchantId:'SMALL',currency:'CNY',endBalance:1,generationMethod:'人工录入',templateName:'渠道 A',updatedAt:'u',fileIdentity:'渠道.json'}]);
+      cfg.select=cfg.overlay.querySelector('[data-role="balance-seed-owner"]');cfg.select.dispatchEvent(new Event('change'));`); await tick();
+    await js(`cfg.overlay.querySelector('[data-action="next-page"]').click();`);
+    assert.deepEqual(await js(`[cfg.overlay.querySelector('[data-role="balance-seed-pager"]').hidden,cfg.overlay.querySelector('[data-role="balance-seed-page"]').textContent,cfg.overlay.querySelectorAll('tbody tr').length]`),
+      [false, '第 2 / 2 页', 6]);
+    await js(`cfg.pick('SMALL');`);
+    assert.deepEqual(await js(`[cfg.overlay.querySelector('[data-role="balance-seed-pager"]').hidden,cfg.rows(),cfg.overlay.querySelector('[data-role="balance-seed-hint"]').textContent]`),
+      [true, ['2026-07-01 SMALL CNY 1'], '共 1 条'], '筛选后回到第 1 页、分页按筛选结果');
+    assert.deepEqual(await js('cfg.errors'), []);
   });
   await test('余额管理修改只改余额并带回原值，写入中禁止关闭；非法数字不提交；conflict 提示后重读', async () => {
     await setup();
@@ -467,6 +606,10 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
   const SEED_MISMATCH_JS = `cfg.seedMismatchPrompt={templateName:'模板 A',bankName:'模板',merchantId:'M001',currency:'VND',targetBillDate:'2026-10-01',queueIndex:1,queueTotal:1,
     seedMismatch:{seedDate:'2026-09-30',seedBalance:0,seedGenerationMethod:'人工录入',anchorBalance:0,billDate:'2026-10-01',
       creditAmount:0,debitAmount:201500,expectedBalance:-201500,statementBalances:[800000,798500]}};`;
+  // v3.2.18：说明遇「。」换行、金额单独标黑；按行与金额片段取文字。
+  const SEED_MISMATCH_SHAPE_JS = `(() => { const box=cfg.top().querySelector('.manual-balance-seed-mismatch');
+    return { lines:[...box.querySelectorAll('.manual-balance-seed-mismatch-line')].map(node=>node.textContent),
+      amounts:[...box.querySelectorAll('.manual-balance-seed-mismatch-amount')].map(node=>node.textContent) }; })()`;
   await test('已有余额对不上：补录完成后转入的弹窗写明原因并预填已有种子；改对后提交修改后的值', async () => {
     await setup();
     await js(`${SEED_MISMATCH_JS}
@@ -481,6 +624,10 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     {title:'核对上一账单日余额',warning:true,date:'2026-09-30',amount:'0',count:1});
     assert.match(await js(`cfg.top().querySelector('.manual-balance-seed-mismatch').textContent`),
       /已有 2026-09-30 的余额 0\.00（人工录入），加上 2026-10-01 收入 0\.00、支出 201,500\.00 后应为 -201,500\.00，与账单当日余额 800,000\.00、798,500\.00 都对不上/);
+    assert.deepEqual(await js(SEED_MISMATCH_SHAPE_JS), {
+      lines: ['已有 2026-09-30 的余额 0.00（人工录入），加上 2026-10-01 收入 0.00、支出 201,500.00 后应为 -201,500.00，与账单当日余额 800,000.00、798,500.00 都对不上。',
+        '请核对上一账单日余额（可参考账单上的期初余额）后重新填写。'],
+      amounts: ['0.00', '0.00', '201,500.00', '-201,500.00', '800,000.00', '798,500.00'] });
     await js(`cfg.next.seed={status:'success',message:'余额账单可导出'};cfg.top().querySelector('.manual-balance-amount-input').value='1000000';
       cfg.top().querySelector('[data-action="done"]').click();`); await tick();
     // v3.2.17：补录请求带上界面所示的账号（与输出名称），主进程核对
@@ -504,6 +651,14 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       + '与账单当日余额（共 150 个）2,003,500.05、2,003,501.05、2,003,502.05 … 2,003,647.05、2,003,648.05、2,003,649.05 都对不上。'
       + '2026-10-27 与 2026-11-02 之间缺 2026-10-28 ~ 2026-11-01 的账单，请先核对是否漏导了这几天的账单；'
       + '也可以直接填写 2026-11-01 的期末余额（可参考账单上的期初余额）。');
+    // 日期、「（共 150 个）」不算金额；分号不换行。
+    assert.deepEqual(await js(SEED_MISMATCH_SHAPE_JS), {
+      lines: ['已有 2026-10-27 的余额 2,000,000.11（账单里的余额），加上 2026-11-02 收入 5,126.10、支出 0.00 后应为 2,005,126.21，'
+        + '与账单当日余额（共 150 个）2,003,500.05、2,003,501.05、2,003,502.05 … 2,003,647.05、2,003,648.05、2,003,649.05 都对不上。',
+      '2026-10-27 与 2026-11-02 之间缺 2026-10-28 ~ 2026-11-01 的账单，请先核对是否漏导了这几天的账单；'
+        + '也可以直接填写 2026-11-01 的期末余额（可参考账单上的期初余额）。'],
+      amounts: ['2,000,000.11', '5,126.10', '0.00', '2,005,126.21', '2,003,500.05', '2,003,501.05', '2,003,502.05',
+        '2,003,647.05', '2,003,648.05', '2,003,649.05'] });
     assert.deepEqual(await js(`({date:cfg.top().querySelector('.manual-balance-date-input').value,amount:cfg.top().querySelector('.manual-balance-amount-input').value})`),
       {date:'2026-11-01',amount:''});
     await js(`cfg.next.seed={status:'success',message:'余额账单可导出'};cfg.top().querySelector('.manual-balance-amount-input').value='2003456.78';
@@ -511,10 +666,16 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0])`), [{billDate:'2026-11-01',endBalance:'2003456.78',merchantId:'M001',currency:'SGD',templateName:'模板 A'}]);
 
     // 只缺一天：写该日与“这天”；不超过 6 个余额时全部列出。
+    // 扣回余额附加值后的金额同样标黑。
     await js(`${SEED_MISMATCH_GAP_JS}Object.assign(cfg.seedMismatchGapPrompt.seedMismatch,{seedDate:'2026-10-31',missingFrom:'2026-11-01',missingTo:'2026-11-01',
-      statementBalances:[1,2,3,4,5,6]});cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog(cfg.seedMismatchGapPrompt)).handle;void 0;`);
+      anchorBalance:1999990.11,statementBalances:[1,2,3,4,5,6]});cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog(cfg.seedMismatchGapPrompt)).handle;void 0;`);
     const oneDay = await js(`cfg.top().querySelector('.manual-balance-seed-mismatch').textContent`);
     assert.match(oneDay, /与账单当日余额 1\.00、2\.00、3\.00、4\.00、5\.00、6\.00 都对不上。2026-10-31 与 2026-11-02 之间缺 2026-11-01 的账单，请先核对是否漏导了这天的账单/);
+    const oneDayShape = await js(SEED_MISMATCH_SHAPE_JS);
+    assert.equal(oneDayShape.lines.length, 2);
+    assert.match(oneDayShape.lines[0], /^已有 2026-10-31 的余额 2,000,000\.11（账单里的余额）（扣回余额附加值后为 1,999,990\.11），/);
+    assert.deepEqual(oneDayShape.amounts, ['2,000,000.11', '1,999,990.11', '5,126.10', '0.00', '2,005,126.21',
+      '1.00', '2.00', '3.00', '4.00', '5.00', '6.00']);
   });
   await test('已有余额对不上、余额很多且最小窗口放大到 150% 时，说明区滚动，日期、金额与完成可见可点', async () => {
     await setup({ zoom: 1.5 });
@@ -530,9 +691,27 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
         date: visible('.manual-balance-date-input'), amount: visible('.manual-balance-amount-input'), done: visible('[data-action="done"]') };
     })()`);
     assert.deepEqual(geometry, { fits: true, contextScrolls: true, cardScrolls: false, date: true, amount: true, done: true });
+    // v3.2.18：说明与「第 X 个账号」同为 14px；每句一行；金额为正文色（与进度行同色），其余文字保持提示棕色。
+    const styleJs = `(() => { const card=cfg.top().querySelector('.manual-balance-card'), cs=(selector)=>getComputedStyle(card.querySelector(selector));
+      const progress=cs('.manual-balance-progress'), warning=cs('.manual-balance-seed-mismatch'), line=cs('.manual-balance-seed-mismatch-line'), amount=cs('.manual-balance-seed-mismatch-amount');
+      return { progressSize: progress.fontSize, warningSize: warning.fontSize, lineDisplay: line.display,
+        amountIsText: amount.color===progress.color, lineIsWarning: line.color===warning.color && line.color!==progress.color }; })()`;
+    const style = await js(styleJs);
+    assert.deepEqual(style, { progressSize: '14px', warningSize: '14px', lineDisplay: 'block', amountIsText: true, lineIsWarning: true });
+    await layout.evidence('manual-balance-seed-mismatch-150', { geometry, style });
     await js(`cfg.next.seed={status:'success',message:'余额账单可导出'};void 0;`);
     await layout.click('.manual-balance-card [data-action="done"]'); await tick();
     assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>call.args[0])`), [{billDate:'2026-10-27',endBalance:'2000000.11',merchantId:'M001',currency:'SGD',templateName:'模板 A'}]);
+
+    // 100% 浅色 / 深色：深色模式下金额随正文色变浅，仍与提示文字区分。
+    for (const theme of ['light', 'dark']) {
+      await setup({ theme });
+      await js(`${SEED_MISMATCH_GAP_JS}cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog(cfg.seedMismatchGapPrompt)).handle;void 0;`);
+      await layout.settle();
+      const themeStyle = await js(styleJs);
+      assert.deepEqual(themeStyle, { progressSize: '14px', warningSize: '14px', lineDisplay: 'block', amountIsText: true, lineIsWarning: true }, theme);
+      await layout.evidence(`manual-balance-seed-mismatch-${theme}`, { style: themeStyle });
+    }
   });
   await test('缺余额的普通补录弹窗不显示对不上说明，输入为空', async () => {
     await setup();
@@ -1337,92 +1516,201 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(await js('cfg.store'),{rules:[],meta:originalRuleMeta});
   });
 
-  // v3.2.16「字段筛选特征值」
+  // v3.2.16「字段筛选特征值」；v3.2.18 多特征值：映射行「选择特征值」+【特征值管理】
   const FEATURE = '字段筛选特征值';
+  const SERIAL = { id: '1', name: '流水号', sourceField: '附言', separator: 'space', length: 10, letterPrefixCount: 2, digitsOnly: true, sample: 'FT24123456' };
+  const ORDER = { id: '2', name: '订单号', sourceField: '附言', separator: 'slash', length: 6, letterPrefixCount: null, digitsOnly: true, sample: '123456' };
   const FEATURE_SETUP_JS = `cfg.tpl={id:9,name:'模板 F',headers:['交易日期','附言','']};
     cfg.row=field=>cfg.top().querySelector('tr[data-template-field="'+field+'"]');
     cfg.pick=(field,value)=>{const select=cfg.row(field).querySelector('select');select.value=value;select.dispatchEvent(new Event('change'));};
+    cfg.fv=field=>cfg.row(field).querySelector('.mapping-feature-value-select');
+    cfg.fvLabel=field=>cfg.row(field).querySelector('.mapping-feature-value-label');
+    cfg.choose=(field,id)=>{const select=cfg.fv(field);select.value=id;select.dispatchEvent(new Event('change'));};
+    cfg.fvOptions=field=>Array.from(cfg.fv(field).options).map(option=>[option.value,option.textContent]);
     cfg.btn=field=>cfg.row(field).querySelector('.mapping-feature-filter-btn');
-    cfg.ff=()=>{const card=cfg.top().querySelector('.feature-filter-card');return card&&{source:card.querySelector('.feature-filter-source'),separator:card.querySelector('.feature-filter-separator'),
+    cfg.ff=()=>{const card=cfg.top().querySelector('.feature-filter-card');return card&&{card,pick:card.querySelector('.feature-filter-pick'),
+      add:card.querySelector('[data-action="add"]'),del:card.querySelector('[data-action="delete"]'),body:card.querySelector('.feature-filter-body'),
+      name:card.querySelector('.feature-filter-name'),source:card.querySelector('.feature-filter-source'),separator:card.querySelector('.feature-filter-separator'),
       length:card.querySelector('.feature-filter-length'),prefix:card.querySelector('.feature-filter-prefix'),digits:card.querySelector('.feature-filter-digits'),
-      digitsLabel:card.querySelector('.feature-filter-digits-label'),sample:card.querySelector('.feature-filter-sample'),done:card.querySelector('[data-action="done"]')};};
-    cfg.type=(input,value)=>{input.value=value;input.dispatchEvent(new Event('input'));};void 0;`;
+      digitsLabel:card.querySelector('.feature-filter-digits-label'),sample:card.querySelector('.feature-filter-sample'),
+      save:card.querySelector('[data-action="save"]'),cancel:card.querySelector('[data-action="cancel"]')};};
+    cfg.pickFeature=id=>{const pick=cfg.ff().pick;pick.value=id;pick.dispatchEvent(new Event('change'));};
+    cfg.type=(input,value)=>{input.value=value;input.dispatchEvent(new Event('input'));};
+    cfg.featureSaves=()=>cfg.calls.filter(call=>call.name==='featureSave').map(call=>call.args[0]);void 0;`;
   const openFeatureMapping = (extra = '') => js(`${FEATURE_SETUP_JS}
     cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:{...cfg.tpl${extra}},targetFields:['BillDate','Remark','Reference','Currency','Balance'],mappings:cfg.featureMappings||[]})).handle;
     cfg.overlay=cfg.top();void 0;`);
 
-  await test('字段筛选特征值：紧跟拼接选项出现，选中显示【筛选条件】，无规则时不保存，样例推导后规则随映射提交', async () => {
+  await test('字段筛选特征值：选中后出现「选择特征值」（默认空白）与【特征值管理】，未选时不保存，选定后随映射提交', async () => {
     await setup();
-    await openFeatureMapping();
-    const options = await js(`['Remark','Currency','Balance'].map(field=>Array.from(cfg.row(field).querySelectorAll('option')).map(option=>option.value))`);
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([SERIAL, ORDER])}`);
+    const options = await js(`['Remark','Currency','Balance'].map(field=>Array.from(cfg.row(field).querySelector('select').options).map(option=>option.value))`);
     assert.equal(options[0].indexOf(FEATURE), options[0].indexOf('需要拼接字段') + 1);
     assert.equal(options[1].includes(FEATURE), false);
     assert.equal(options[2].includes(FEATURE), false);
-    assert.deepEqual(await js(`[cfg.btn('Remark').hidden,cfg.btn('Reference').hidden]`), [true, true]);
+    assert.deepEqual(await js(`[cfg.btn('Remark').hidden,cfg.fv('Remark').hidden,cfg.fvLabel('Remark').hidden]`), [true, true, true]);
     await js(`cfg.pick('Remark','${FEATURE}');cfg.pick('Reference','${FEATURE}');`);
-    assert.deepEqual(await js(`[cfg.btn('Remark').hidden,cfg.btn('Reference').hidden]`), [false, false]);
+    assert.deepEqual(await js(`[cfg.btn('Remark').hidden,cfg.fv('Remark').hidden,cfg.fvLabel('Remark').hidden,cfg.btn('Reference').hidden]`), [false, false, false, false]);
+    assert.deepEqual(await js(`[cfg.fvLabel('Remark').textContent,cfg.btn('Remark').textContent.trim(),cfg.fv('Remark').value]`), ['选择特征值', '特征值管理', '']);
+    assert.deepEqual(await js(`cfg.fvOptions('Remark')`), [['', ''], ['1', '流水号'], ['2', '订单号']]);
+    // 映射字段下拉框 → 文本 → 特征值下拉框 →【特征值管理】
+    assert.deepEqual(await js(`Array.from(cfg.row('Remark').querySelector('.mapping-field-editor').children).filter(el=>!el.hidden).map(el=>el.className.split(' ').pop())`),
+      ['mapping-select', 'mapping-feature-value-label', 'mapping-feature-value-select', 'mapping-feature-filter-btn']);
 
     await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
-    assert.match(await js('cfg.top().textContent'), /Remark、Reference 选择了「字段筛选特征值」，请先点击【筛选条件】设置/);
+    assert.match(await js('cfg.top().textContent'), /Remark、Reference 选择了「字段筛选特征值」，请选择特征值/);
     assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 0);
     await js('cfg.host.closeTop();');
 
-    await js(`cfg.btn('Remark').click();`);
-    assert.deepEqual(await titleTips('.feature-filter-hint'), { title: '筛选特征值', hidden: false, mark: 'Tips',
-      bubble: `按分隔符把筛选字段拆成多段，取第一个满足条件的片段；筛不出时留空。本模板所有选择「${FEATURE}」的字段共用这一套条件。`,
-      bodyHint: false });
-    assert.deepEqual(await js(`Array.from(cfg.ff().source.options).map(option=>option.value)`), ['', '交易日期', '附言']);
-    assert.equal(await js('cfg.ff().separator.value'), 'space');
-    await js(`cfg.ff().source.value='附言';cfg.type(cfg.ff().sample,'FT24123456');`);
-    assert.deepEqual(await js(`[cfg.ff().length.value,cfg.ff().prefix.value,cfg.ff().digits.checked,cfg.ff().digitsLabel.textContent]`),
-      ['10', '2', true, '前 2 位之后全是数字']);
-    await js('cfg.ff().done.click();'); await tick();
-    assert.equal(await js('cfg.top()===cfg.overlay'), true);
-    assert.match(await js(`cfg.btn('Reference').title`), /筛选字段：附言；分隔符：空格；长度 10；前 2 位英文；其余为纯数字/);
+    await js(`cfg.choose('Remark','1');cfg.choose('Reference','2');`);
+    assert.match(await js(`cfg.fv('Reference').title`), /筛选字段：附言；分隔符：\/；长度 6；纯数字/);
+    // 切走再切回保留此前的选择
+    await js(`cfg.pick('Reference','附言');`);
+    assert.deepEqual(await js(`[cfg.fv('Reference').hidden,cfg.btn('Reference').hidden]`), [true, true]);
+    await js(`cfg.pick('Reference','${FEATURE}');`);
+    assert.equal(await js(`cfg.fv('Reference').value`), '2');
 
     await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
     const payload = await js(`(()=>{const args=cfg.calls.filter(call=>call.name==='mappingSave')[0].args[0];
-      return {featureFilter:args.featureFilter,feature:args.mappings.filter(m=>m.mappedField==='${FEATURE}').map(m=>[m.templateField,m.mappedFields])};})()`);
-    assert.deepEqual(payload, {
-      featureFilter: { sourceField: '附言', separator: 'space', length: 10, letterPrefixCount: 2, digitsOnly: true, sample: 'FT24123456' },
-      feature: [['Remark', []], ['Reference', []]]
-    });
+      return {hasFeatureFilter:'featureFilter' in args||'featureFilters' in args,feature:args.mappings.filter(m=>m.mappedField==='${FEATURE}').map(m=>[m.templateField,m.mappedFields])};})()`);
+    assert.deepEqual(payload, { hasFeatureFilter: false, feature: [['Remark', ['1']], ['Reference', ['2']]] });
     assert.deepEqual(await js('cfg.errors'), []);
   });
 
-  await test('字段筛选特征值：筛选条件弹窗校验与回显，切走映射值后按钮隐藏，取消不改草稿', async () => {
+  await test('特征值管理：工具栏与设置区顺序，【新增】样例推导后保存立即落库并刷新映射行，【保存】在【取消】左侧', async () => {
     await setup();
-    await js(`cfg.featureMappings=[{templateField:'Remark',mappedField:'${FEATURE}',mappedFields:[]}];void 0;`);
-    await openFeatureMapping(`,featureFilter:{sourceField:'附言',separator:'slash',length:6,letterPrefixCount:null,digitsOnly:true,sample:'123456'}`);
-    assert.equal(await js(`cfg.btn('Remark').hidden`), false);
+    await js(`cfg.featureMappings=[{templateField:'Remark',mappedField:'${FEATURE}',mappedFields:['1']}];void 0;`);
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([SERIAL])}`);
+    assert.equal(await js(`cfg.fv('Remark').value`), '1');
     await js(`cfg.btn('Remark').click();`);
-    assert.deepEqual(await js(`[cfg.ff().source.value,cfg.ff().separator.value,cfg.ff().length.value,cfg.ff().prefix.value,cfg.ff().digits.checked,cfg.ff().sample.value,cfg.ff().digitsLabel.textContent]`),
-      ['附言', 'slash', '6', '', true, '123456', '整段都是数字']);
+    assert.deepEqual(await titleTips('.feature-filter-hint'), { title: '特征值管理', hidden: false, mark: 'Tips',
+      bubble: `每个特征值是一套筛选条件：按分隔符把筛选字段拆成多段，取第一个满足条件的片段，筛不出时留空。选择「${FEATURE}」的字段在「选择特征值」中选用；保存与删除立即生效。`,
+      bodyHint: false });
+    assert.deepEqual(await js(`Array.from(cfg.ff().card.querySelector('.feature-filter-toolbar').children).map(el=>el.tagName==='SELECT'?'SELECT':el.textContent.trim())`),
+      ['新增', '特征值', 'SELECT', '删除']);
+    assert.deepEqual(await js(`[cfg.ff().pick.value,Array.from(cfg.ff().pick.options).map(o=>o.textContent),cfg.ff().body.hidden]`), ['', ['', '流水号'], true]);
+    assert.deepEqual(await js(`Array.from(cfg.ff().card.querySelectorAll('.dialog-actions button')).map(b=>b.textContent.trim())`), ['保存', '取消']);
 
-    await js(`cfg.ff().sample.value='12/3456';cfg.ff().done.click();`); await tick();
-    assert.match(await js('cfg.top().textContent'), /特征值「12\/3456」不能包含所选分隔符/);
-    await js('cfg.host.closeTop();');
-    await js(`cfg.ff().sample.value='AB1234';cfg.ff().done.click();`); await tick();
-    assert.match(await js('cfg.top().textContent'), /特征值「AB1234」不符合当前筛选条件/);
-    await js('cfg.host.closeTop();');
-    await js(`cfg.ff().sample.value='';cfg.ff().length.value='';cfg.ff().digits.checked=false;cfg.ff().done.click();`); await tick();
-    assert.match(await js('cfg.top().textContent'), /特征长度、前几位英文、纯数字至少设置一项/);
-    await js('cfg.host.closeTop();');
-    await js(`cfg.ff().source.value='';cfg.ff().length.value='3';cfg.ff().done.click();`); await tick();
-    assert.match(await js('cfg.top().textContent'), /请选择筛选字段/);
-    await js('cfg.host.closeTop();');
-
-    await js(`cfg.top().querySelector('.feature-filter-card [data-action="cancel"]').click();`); await tick();
+    await js('cfg.ff().add.click();');
+    assert.deepEqual(await js(`[cfg.ff().body.hidden,cfg.ff().pick.value,cfg.ff().name.value,cfg.ff().separator.value]`), [false, '', '', 'space']);
+    assert.deepEqual(await js(`Array.from(cfg.ff().card.querySelectorAll('.feature-filter-grid .feature-filter-label')).map(el=>el.textContent.trim())`),
+      ['特征值名', '筛选字段', '输入特征值', '分隔符', '特征长度', '前几位是英文字母', '纯数字']);
+    assert.deepEqual(await js(`Array.from(cfg.ff().source.options).map(option=>option.value)`), ['', '交易日期', '附言']);
+    await js(`cfg.ff().name.value='订单号';cfg.ff().source.value='附言';cfg.type(cfg.ff().sample,'INV001');`);
+    assert.deepEqual(await js(`[cfg.ff().length.value,cfg.ff().prefix.value,cfg.ff().digits.checked,cfg.ff().digitsLabel.textContent]`),
+      ['6', '3', true, '前 3 位之后全是数字']);
+    await js('cfg.ff().save.click();'); await tick();
+    assert.deepEqual(await js('cfg.featureSaves()'), [{ templateId: 9, featureFilters: [SERIAL,
+      { name: '订单号', sourceField: '附言', separator: 'space', length: 6, letterPrefixCount: 3, digitsOnly: true, sample: 'INV001' }] }]);
     assert.equal(await js('cfg.top()===cfg.overlay'), true);
-
-    await js(`cfg.pick('Remark','附言');`);
-    assert.equal(await js(`cfg.btn('Remark').hidden`), true);
-    await js(`cfg.pick('Reference','${FEATURE}');cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
-    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='mappingSave')[0].args[0].featureFilter`),
-      { sourceField: '附言', separator: 'slash', length: 6, letterPrefixCount: null, digitsOnly: true, sample: '123456' });
+    assert.deepEqual(await js(`cfg.fvOptions('Remark')`), [['', ''], ['1', '流水号'], ['2', '订单号']]);
+    assert.equal(await js(`cfg.fv('Remark').value`), '1');
+    assert.deepEqual(await js('cfg.errors'), []);
   });
 
-  await test('字段筛选特征值：拆分/合并且不复用时主映射残留该值不阻止保存，复用时仍要求先设置', async () => {
+  await test('特征值管理：选中已有特征值回显并可改名保存；校验不关闭弹窗；保存失败保留；取消不写库', async () => {
+    await setup();
+    await js(`cfg.featureMappings=[{templateField:'Remark',mappedField:'${FEATURE}',mappedFields:['2']}];void 0;`);
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([SERIAL, ORDER])}`);
+    await js(`cfg.btn('Remark').click();cfg.pickFeature('2');`);
+    assert.deepEqual(await js(`[cfg.ff().body.hidden,cfg.ff().name.value,cfg.ff().source.value,cfg.ff().separator.value,cfg.ff().length.value,cfg.ff().prefix.value,cfg.ff().digits.checked,cfg.ff().sample.value,cfg.ff().digitsLabel.textContent]`),
+      [false, '订单号', '附言', 'slash', '6', '', true, '123456', '整段都是数字']);
+    await js(`cfg.pickFeature('');`);
+    assert.equal(await js('cfg.ff().body.hidden'), true);
+    await js(`cfg.pickFeature('2');`);
+
+    const expectAlert = async (script, pattern) => {
+      await js(`${script};cfg.ff().save.click();`); await tick();
+      assert.match(await js('cfg.top().textContent'), pattern);
+      await js('cfg.host.closeTop();');
+    };
+    await expectAlert(`cfg.ff().name.value='流水号'`, /特征值名「流水号」已存在/);
+    await expectAlert(`cfg.ff().name.value=' '`, /请输入特征值名/);
+    await expectAlert(`cfg.ff().name.value='订单编号';cfg.ff().sample.value='12/3456'`, /输入特征值「12\/3456」不能包含所选分隔符/);
+    await expectAlert(`cfg.ff().sample.value='AB1234'`, /输入特征值「AB1234」不符合当前筛选条件/);
+    await expectAlert(`cfg.ff().sample.value='';cfg.ff().length.value='';cfg.ff().digits.checked=false`, /特征长度、前几位英文、纯数字至少设置一项/);
+    await expectAlert(`cfg.ff().source.value='';cfg.ff().length.value='3'`, /请选择筛选字段/);
+    assert.equal(await js('cfg.featureSaves().length'), 0);
+
+    await js(`cfg.ff().source.value='附言';cfg.ff().length.value='6';cfg.ff().digits.checked=true;cfg.next.featureSave={status:'error',message:'特征值保存失败（测试）'};cfg.ff().save.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /特征值保存失败（测试）/);
+    await js('cfg.host.closeTop();');
+    assert.equal(await js('Boolean(cfg.ff())'), true);
+
+    await js('cfg.ff().save.click();'); await tick();
+    assert.deepEqual(await js('cfg.featureSaves()[1].featureFilters.map(item=>[item.id,item.name])'), [['1', '流水号'], ['2', '订单编号']]);
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    assert.deepEqual(await js(`[cfg.fv('Remark').value,cfg.fv('Remark').selectedOptions[0].textContent]`), ['2', '订单编号']);
+
+    await js(`cfg.btn('Remark').click();cfg.ff().add.click();cfg.ff().name.value='不保存';cfg.ff().cancel.click();`); await tick();
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    assert.equal(await js('cfg.featureSaves().length'), 2);
+    await js(`cfg.btn('Remark').click();cfg.ff().save.click();`); await tick();
+    assert.equal(await js('cfg.top()===cfg.overlay'), true, '设置区隐藏时【保存】直接关闭');
+    assert.equal(await js('cfg.featureSaves().length'), 2);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
+  await test('特征值管理：筛选字段已不在模板字段中时显示「（已删除）」并标红，重新选择后才能保存', async () => {
+    await setup();
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([{ ...SERIAL, sourceField: '摘要' }, ORDER])}`);
+    await js(`cfg.pick('Remark','${FEATURE}');cfg.btn('Remark').click();cfg.pickFeature('1');`);
+    assert.deepEqual(await js(`(()=>{const s=cfg.ff().source;return [s.value,s.selectedOptions[0].textContent,s.classList.contains('is-stale')];})()`),
+      ['摘要', '摘要（已删除）', true]);
+    await js(`cfg.ff().save.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /筛选字段不存在：摘要/);
+    assert.equal(await js('cfg.featureSaves().length'), 0);
+    await js('cfg.host.closeTop();');
+    // 切到另一个特征值不残留「（已删除）」选项与标红；回到原特征值时重新标出
+    await js(`cfg.pickFeature('2');`);
+    assert.deepEqual(await js(`[cfg.ff().source.value,[...cfg.ff().source.options].some(o=>o.dataset.stale==='true'),cfg.ff().source.classList.contains('is-stale')]`),
+      ['附言', false, false]);
+    await js(`cfg.pickFeature('1');const s=cfg.ff().source;s.value='附言';s.dispatchEvent(new Event('change'));`);
+    assert.equal(await js(`cfg.ff().source.classList.contains('is-stale')`), false);
+    await js(`cfg.ff().save.click();`); await tick();
+    assert.deepEqual(await js(`cfg.featureSaves().map(payload=>payload.featureFilters.map(item=>[item.id,item.sourceField]))`),
+      [[['1', '附言'], ['2', '附言']]]);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
+  await test('特征值管理：删除须先选目标；被映射草稿或拆分映射使用时拒绝；未使用时确认后立即落库', async () => {
+    await setup();
+    await js(`cfg.featureMappings=[{templateField:'Remark',mappedField:'${FEATURE}',mappedFields:['1']}];void 0;`);
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([SERIAL, ORDER, { ...ORDER, id: '3', name: '备用' }])}`);
+    await js(`cfg.btn('Remark').click();cfg.ff().del.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /请选择要删除的特征值/);
+    await js('cfg.host.closeTop();');
+
+    await js(`cfg.pickFeature('1');cfg.ff().del.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /特征值「流水号」正被 Remark 使用，请先改选其他特征值后再删除/);
+    await js('cfg.host.closeTop();');
+
+    // 映射草稿（未保存）新选用的特征值同样拒绝删除
+    await js(`cfg.ff().cancel.click();`); await tick();
+    await js(`cfg.pick('Reference','${FEATURE}');cfg.choose('Reference','2');cfg.btn('Reference').click();cfg.pickFeature('2');cfg.ff().del.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /特征值「订单号」正被 Reference 使用/);
+    await js('cfg.host.closeTop();');
+    assert.equal(await js('cfg.featureSaves().length'), 0);
+
+    await js(`cfg.pickFeature('3');cfg.ff().del.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /确定删除特征值「备用」？/);
+    await js(`cfg.top().querySelector('[data-action="cancel"]').click();`); await tick();
+    assert.equal(await js('cfg.featureSaves().length'), 0);
+    await js(`cfg.ff().del.click();`); await tick();
+    await js(`cfg.next.featureSave={status:'error',message:'特征值「备用」正被 Name 使用，请先改选其他特征值后再删除'};cfg.top().querySelector('[data-action="confirm"]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /正被 Name 使用/);
+    await js('cfg.host.closeTop();');
+    assert.match(await js('cfg.top().textContent'), /确定删除特征值「备用」？/, '失败时确认框保留');
+    await js(`cfg.top().querySelector('[data-action="confirm"]').click();`); await tick();
+    assert.deepEqual(await js('cfg.featureSaves().map(payload=>payload.featureFilters.map(item=>item.id))'), [['1', '2'], ['1', '2']]);
+    assert.deepEqual(await js(`[Boolean(cfg.ff()),cfg.ff().pick.value,cfg.ff().body.hidden,Array.from(cfg.ff().pick.options).map(o=>o.value)]`),
+      [true, '', true, ['', '1', '2']]);
+    await js('cfg.ff().cancel.click();'); await tick();
+    assert.deepEqual(await js(`cfg.fvOptions('Remark').map(option=>option[0])`), ['', '1', '2']);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
+  await test('字段筛选特征值：拆分/合并且不复用时主映射残留该值不阻止保存，复用时仍要求选特征值', async () => {
     await setup();
     const open = (reuse) => js(`${FEATURE_SETUP_JS}
       cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:cfg.tpl,targetFields:['BillDate','Remark','是否拆分/合并明细账单','复用模块字段的映射关系'],
@@ -1432,53 +1720,95 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 1);
     await js('cfg.host.closeAll?.();');
     await open('是'); await tick();
-    assert.match(await js('cfg.top().textContent'), /Remark 选择了「字段筛选特征值」，请先点击【筛选条件】设置/);
+    assert.match(await js('cfg.top().textContent'), /Remark 选择了「字段筛选特征值」，请选择特征值/);
     assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 1);
   });
 
-  await test('字段筛选特征值：拆分/合并映射弹窗共用同一套规则，保存时随拆分映射提交并回传', async () => {
+  await test('字段筛选特征值：拆分/合并映射弹窗共用特征值列表，在其中新增后回写主映射，选择随拆分映射提交', async () => {
     await setup();
-    await js(`${FEATURE_SETUP_JS}cfg.splitDone=[];
-      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createBillSplitMappingsDialog({template:cfg.tpl,headers:cfg.tpl.headers,targetFields:['BillDate','MerchantId','Reference','Balance','Currency'],
-        initialMappings:[],featureFilter:null,onDone:(mappings,featureFilter)=>cfg.splitDone.push(featureFilter)})).handle;
+    await js(`${FEATURE_SETUP_JS}cfg.splitDone=[];cfg.listChanges=[];
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createBillSplitMappingsDialog({template:cfg.tpl,headers:cfg.tpl.headers,targetFields:['BillDate','MerchantId','Reference','Remark','Balance','Currency'],
+        initialMappings:[{templateField:'Remark',mappedField:'${FEATURE}',mappedFields:['1']}],featureFilters:${JSON.stringify([SERIAL])},
+        getMainFeatureFilterUsage:()=>new Map([['1',['Remark']]]),onFeatureFiltersChange:list=>cfg.listChanges.push(list.map(item=>item.name)),
+        onDone:mappings=>cfg.splitDone.push(mappings)})).handle;
       cfg.overlay=cfg.top();void 0;`);
     assert.equal(await js(`Array.from(cfg.row('Balance').querySelectorAll('option')).some(option=>option.value==='${FEATURE}')`), false);
+    assert.deepEqual(await js(`[cfg.fv('Remark').hidden,cfg.fv('Remark').value,cfg.btn('Remark').textContent.trim()]`), [false, '1', '特征值管理']);
     await js(`cfg.pick('Reference','${FEATURE}');cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
-    assert.match(await js('cfg.top().textContent'), /Reference 选择了「字段筛选特征值」/);
+    assert.match(await js('cfg.top().textContent'), /Reference 选择了「字段筛选特征值」，请选择特征值/);
     assert.equal(await js(`cfg.calls.filter(call=>call.name==='splitMapping').length`), 0);
     await js('cfg.host.closeTop();');
-    await js(`cfg.btn('Reference').click();cfg.ff().source.value='附言';cfg.ff().separator.value='comma';cfg.type(cfg.ff().sample,'INV001');cfg.ff().done.click();`); await tick();
+
+    await js(`cfg.btn('Reference').click();cfg.pickFeature('1');cfg.ff().del.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /特征值「流水号」正被 Remark、Remark（拆分\/合并映射） 使用/);
+    await js('cfg.host.closeTop();');
+    await js(`cfg.ff().add.click();cfg.ff().name.value='发票号';cfg.ff().source.value='附言';cfg.ff().separator.value='comma';cfg.type(cfg.ff().sample,'INV001');cfg.ff().save.click();`); await tick();
+    assert.deepEqual(await js('cfg.listChanges'), [['流水号', '发票号']]);
+    assert.deepEqual(await js(`cfg.fvOptions('Reference').map(option=>option[1])`), ['', '流水号', '发票号']);
+    // 切到拼接再切回：特征值选择保留，拼接字段不混入特征值 id
+    await js(`cfg.choose('Reference','2');cfg.pick('Reference','需要拼接字段');cfg.pick('Reference','${FEATURE}');`);
+    assert.equal(await js(`cfg.fv('Reference').value`), '2');
     await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
-    const expected = { sourceField: '附言', separator: 'comma', length: 6, letterPrefixCount: 3, digitsOnly: true, sample: 'INV001' };
-    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='splitMapping')[0].args[0].featureFilter`), expected);
-    assert.deepEqual(await js('cfg.splitDone'), [expected]);
+    const saved = await js(`(()=>{const args=cfg.calls.filter(call=>call.name==='splitMapping')[0].args[0];
+      return {keys:Object.keys(args).sort(),feature:args.mappings.filter(m=>m.mappedField==='${FEATURE}').map(m=>[m.templateField,m.mappedFields,'featureFilterRef' in m])};})()`);
+    assert.deepEqual(saved, { keys: ['mappings', 'templateId'], feature: [['Reference', ['2'], false], ['Remark', ['1'], false]] });
+    assert.equal(await js('cfg.splitDone.length'), 1);
+    assert.deepEqual(await js('cfg.errors'), []);
   });
 
-  await test('字段筛选特征值：筛选条件弹窗在最小窗口内完整可见、可点确定', async () => {
+  await test('字段筛选特征值：拆分/合并映射行切走后其特征值被删，再新增沿用同一 id，切回时仍为空白且不得保存', async () => {
+    await setup();
+    await js(`${FEATURE_SETUP_JS}
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createBillSplitMappingsDialog({template:cfg.tpl,headers:cfg.tpl.headers,targetFields:['BillDate','Reference','Remark'],
+        initialMappings:[{templateField:'Remark',mappedField:'${FEATURE}',mappedFields:['1']}],featureFilters:${JSON.stringify([SERIAL, ORDER])},
+        getMainFeatureFilterUsage:()=>new Map(),onFeatureFiltersChange:()=>{},onDone:()=>{}})).handle;
+      cfg.overlay=cfg.top();void 0;`);
+    await js(`cfg.pick('Reference','${FEATURE}');cfg.choose('Reference','2');cfg.pick('Reference','附言');`);
+    // Reference 已切走，「订单号」未被使用，可删除
+    await js(`cfg.btn('Remark').click();cfg.pickFeature('2');cfg.ff().del.click();`); await tick();
+    await js(`cfg.top().querySelector('[data-action="confirm"]').click();`); await tick();
+    assert.deepEqual(await js('cfg.featureSaves().map(payload=>payload.featureFilters.map(item=>item.id))'), [['1']]);
+    await js(`cfg.ff().add.click();cfg.ff().name.value='发票号';cfg.ff().source.value='附言';cfg.ff().separator.value='comma';cfg.type(cfg.ff().sample,'INV001');cfg.ff().save.click();`); await tick();
+    assert.deepEqual(await js(`cfg.fvOptions('Reference')`), [['', ''], ['1', '流水号'], ['2', '发票号']], '新增的特征值沿用 id 2');
+    await js(`cfg.pick('Reference','${FEATURE}');`);
+    assert.equal(await js(`cfg.fv('Reference').value`), '');
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /Reference 选择了「字段筛选特征值」，请选择特征值/);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='splitMapping').length`), 0);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
+  await test('特征值管理：映射行与弹窗在最小窗口内完整可见、可点保存', async () => {
     await setup({ zoom: 1 });
-    await openFeatureMapping();
-    await js(`cfg.pick('Remark','${FEATURE}');`);
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([SERIAL])}`);
+    await js(`cfg.pick('Remark','${FEATURE}');cfg.choose('Remark','1');`);
     await layout.settle();
-    const buttonGeometry = await js(`(() => {
-      const select=cfg.row('Remark').querySelector('select').getBoundingClientRect(), button=cfg.btn('Remark').getBoundingClientRect();
-      return { rightOfSelect: button.left>=select.right, sameLine: Math.abs((button.top+button.bottom)/2-(select.top+select.bottom)/2)<4 };
+    const rowGeometry = await js(`(() => {
+      const editor=cfg.row('Remark').querySelector('.mapping-field-editor').getBoundingClientRect();
+      const [select,label,value,button]=[cfg.row('Remark').querySelector('select'),cfg.fvLabel('Remark'),cfg.fv('Remark'),cfg.btn('Remark')].map(el=>el.getBoundingClientRect());
+      const mid=r=>(r.top+r.bottom)/2;
+      return { order: select.right<=label.left&&label.right<=value.left&&value.right<=button.left,
+        sameLine: [label,value,button].every(r=>Math.abs(mid(r)-mid(select))<4), inside: button.right<=editor.right+1 };
     })()`);
-    assert.deepEqual(buttonGeometry, { rightOfSelect: true, sameLine: true });
+    assert.deepEqual(rowGeometry, { order: true, sameLine: true, inside: true });
     await js('new Promise((resolve) => setTimeout(resolve, 250))');
-    await layout.evidence('feature-filter-mapping-row', { geometry: buttonGeometry });
-    await js(`cfg.btn('Remark').click();`);
+    await layout.evidence('feature-filter-mapping-row', { geometry: rowGeometry });
+    await js(`cfg.btn('Remark').click();cfg.ff().add.click();`);
     await layout.settle();
     const geometry = await js(`(() => {
       const card=cfg.top().querySelector('.feature-filter-card'), rect=card.getBoundingClientRect();
       const inside=element=>{const r=element.getBoundingClientRect();return r.left>=rect.left&&r.right<=rect.right&&r.top>=rect.top&&r.bottom<=rect.bottom;};
+      const toolbar=[...card.querySelectorAll('.feature-filter-toolbar > *')].map(el=>el.getBoundingClientRect());
+      const title=card.querySelector('.dialog-title').getBoundingClientRect();
       return { fits: rect.top>=0&&rect.bottom<=innerHeight&&rect.left>=0&&rect.right<=innerWidth,
-        controls: [...card.querySelectorAll('.feature-filter-grid select, .feature-filter-grid input, .dialog-actions button')].map(inside) };
+        toolbarRightOfTitle: toolbar.every(r=>r.left>=title.right), toolbarOneLine: toolbar.every(r=>Math.abs((r.top+r.bottom)/2-(toolbar[0].top+toolbar[0].bottom)/2)<4),
+        controls: [...card.querySelectorAll('.feature-filter-toolbar button, .feature-filter-toolbar select, .feature-filter-grid select, .feature-filter-grid input, .dialog-actions button')].map(inside) };
     })()`);
-    assert.deepEqual(geometry, { fits: true, controls: [true, true, true, true, true, true, true, true] });
+    assert.deepEqual(geometry, { fits: true, toolbarRightOfTitle: true, toolbarOneLine: true, controls: Array(12).fill(true) });
     await js('new Promise((resolve) => setTimeout(resolve, 250))');
     await layout.evidence('feature-filter-dialog', { geometry });
-    await layout.click('.feature-filter-card [data-action="done"]');
-    assert.match(await js('cfg.top().textContent'), /请选择筛选字段/);
+    await layout.click('.feature-filter-card [data-action="save"]');
+    assert.match(await js('cfg.top().textContent'), /请输入特征值名/);
   });
 
   // v3.2.16：MerchantId「原始账单仅有币种无账户号」+【映射管理】（spec §4.1、§4.2、D2）
@@ -1567,6 +1897,221 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     })()`);
     assert.deepEqual(geometry, { saveLeftOfBack: true, footerRight: true, footerBottom: true, insertFirst: true, deleteLast: true, halves: true, fits: true });
     await layout.evidence('currency-big-account-dialog', { geometry });
+  });
+
+  // v3.2.18 模板管理【更新】：首槽等宽，渠道行 / 子模板行 / 普通模板行【重命名】左缘对齐；普通模板与子模板有【更新】。
+  await test('模板管理执行操作：【更新】在【修改】右侧，各类行【重命名】左缘对齐（100%/125%/150%）', async () => {
+    await setup({ zoom: 1 });
+    await js(`cfg.templates.push({id:3,name:'渠道 A',channelId:7,channelName:'渠道 A',bigAccountSummary:'来自账单'});
+      cfg.services.applyPreviewTemplates(cfg.templates);cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog({expandChannelId:7})).handle;void 0;`);
+    assert.deepEqual(await js(`Array.from(cfg.top().querySelectorAll('tbody tr')).map(row=>[row.className,Array.from(row.querySelectorAll('.manager-row-actions button')).map(button=>button.textContent)])`), [
+      ['template-channel-row', ['导入子模板', '重命名', '删除']],
+      ['template-child-row', ['修改', '更新', '重命名', '删除']],
+      ['', ['修改', '更新', '重命名', '删除']],
+      ['', ['修改', '更新', '重命名', '删除']]
+    ]);
+    const measure = () => js(`(() => {
+      const rows=[...cfg.top().querySelectorAll('tbody tr')].filter(row=>row.style.display!=='none');
+      const wrapper=cfg.top().querySelector('.table-wrapper');
+      return { renameLefts: rows.map(row=>row.querySelector('[data-action="rename"]').getBoundingClientRect().left),
+        oneLine: rows.map(row=>{const tops=[...row.querySelectorAll('.manager-row-actions button')].map(button=>Math.round(button.getBoundingClientRect().top));return Math.max(...tops)-Math.min(...tops)<=1;}),
+        overflow: wrapper.scrollWidth>wrapper.clientWidth+1 };
+    })()`);
+    for (const zoom of [1, 1.25, 1.5]) {
+      await layout.resize(1080, 760, zoom);
+      const metrics = await measure();
+      const lefts = metrics.renameLefts;
+      assert.ok(Math.max(...lefts) - Math.min(...lefts) <= 0.5, JSON.stringify({ zoom, metrics }));
+      assert.equal(metrics.overflow, false, JSON.stringify({ zoom, metrics }));
+      if (zoom < 1.5) assert.ok(metrics.oneLine.every(Boolean), JSON.stringify({ zoom, metrics }));
+      await layout.evidence(`template-manager-actions-${Math.round(zoom * 100)}`, metrics);
+    }
+  });
+  await test('模板【更新】：取消选择不弹窗；字段变更分组汇总，返回不写入；字段无变化时禁用更新模板', async () => {
+    await setup();
+    await js(`cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;cfg.managerOverlay=cfg.top();
+      cfg.managerOverlay.querySelector('[data-action="update-headers"]').click();void 0;`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='headerPreview').map(call=>call.args)`), [[1]]);
+    assert.equal(await js('cfg.manager.isTop()&&cfg.top()===cfg.managerOverlay'), true);
+    await js(`cfg.next.headerPreview={status:'success',templateId:1,templateName:'模板 A',channelId:null,sourceFileName:'模板 A-新版.xlsx',
+      expectedHeaders:['日期','金额'],headers:['日期','金额(元)','附言'],diff:{identical:false,added:['金额(元)','附言'],removed:['金额'],orderChanged:false},
+      affectedMappings:['Credit Amount ← 金额'],activeStaleCount:1};
+      cfg.managerOverlay.querySelector('[data-action="update-headers"]').click();void 0;`); await tick();
+    const view = await js(`(() => {const card=cfg.top().querySelector('.template-header-update-card');return {
+      title: card.querySelector('.dialog-title').textContent,
+      source: card.querySelector('.template-header-update-source').textContent,
+      added: [...card.querySelectorAll('[data-role="added"] .is-added')].map(item=>item.textContent),
+      removed: [...card.querySelectorAll('[data-role="removed"] .is-removed')].map(item=>item.textContent),
+      order: card.querySelector('[data-role="order"] span:last-child').textContent,
+      affected: [...card.querySelectorAll('[data-role="affected"] li')].map(item=>item.textContent),
+      buttons: [...card.querySelectorAll('.dialog-actions button')].map(button=>[button.textContent,button.disabled])};})()`);
+    assert.deepEqual(view, {
+      title: '字段变更', source: '模板「模板 A」← 文件「模板 A-新版.xlsx」',
+      added: ['+ 金额(元)', '+ 附言'], removed: ['− 金额'], order: '无变化', affected: ['Credit Amount ← 金额'],
+      buttons: [['更新模板', false], ['返回', false]]
+    });
+    await js(`cfg.top().querySelector('[data-action="back"]').click();`);
+    assert.equal(await js('cfg.manager.isTop()&&cfg.top()===cfg.managerOverlay'), true);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='headerUpdate').length`), 0);
+    await js(`cfg.next.headerPreview={status:'success',templateId:1,templateName:'模板 A',sourceFileName:'same.xlsx',expectedHeaders:['日期'],headers:['日期'],
+      diff:{identical:true,added:[],removed:[],orderChanged:false},affectedMappings:[],activeStaleCount:0};
+      cfg.managerOverlay.querySelector('[data-action="update-headers"]').click();void 0;`); await tick();
+    assert.match(await js(`cfg.top().textContent`), /字段无变化/);
+    assert.equal(await js(`cfg.top().querySelector('[data-action="submit"]').disabled`), true);
+    await js(`cfg.top().querySelector('[data-action="close"]').click();`);
+    assert.equal(await js('cfg.manager.isTop()'), true);
+  });
+  await test('模板【更新】预览失败：结果弹窗只有【返回】，返回到刷新后的模板管理', async () => {
+    await setup();
+    await js(`cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;
+      cfg.next.headerPreview={status:'error',message:'该文件的表头与已有模板「模板 B」完全相同，无法更新为重复表头的模板。',errorReportReady:true};
+      cfg.top().querySelector('[data-action="update-headers"]').click();void 0;`); await tick();
+    assert.match(await js('cfg.top().textContent'), /模板 B/);
+    assert.deepEqual(await js(`[...cfg.top().querySelectorAll('.dialog-actions button')].map(button=>button.textContent)`), ['返回']);
+    assert.equal(await js(`cfg.feedback.at(-1)[1]`), 'error');
+    await js(`cfg.top().querySelector('[data-action="back"]').click();`);
+    assert.match(await js('cfg.top().textContent'), /模板管理/);
+    assert.equal(await js('document.getElementById("modalRoot").children.length'), 1);
+  });
+  await test('模板【更新模板】：提交表头快照，忙碌时不能关闭或重复提交；成功页【修改映射关系】在【返回】左侧并打开映射弹窗', async () => {
+    await setup();
+    await js(`cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;
+      cfg.next.headerPreview={status:'success',templateId:2,templateName:'模板 B',sourceFileName:'b2.xlsx',expectedHeaders:['日期','金额'],headers:['日期','金额(元)'],
+        diff:{identical:false,added:['金额(元)'],removed:['金额'],orderChanged:false},affectedMappings:['Credit Amount ← 金额'],activeStaleCount:1};
+      cfg.top().querySelectorAll('[data-action="update-headers"]')[1].click();void 0;`); await tick();
+    await js(`cfg.write=cfg.defer();cfg.next.headerUpdate=cfg.write;cfg.submit=cfg.top().querySelector('[data-action="submit"]');cfg.handle=cfg.host.getTop();
+      cfg.submit.click();cfg.submit.dispatchEvent(new Event('click'));void 0;`);
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='headerUpdate').map(call=>call.args[0])`), [
+      { templateId: 2, expectedHeaders: ['日期', '金额'], headers: ['日期', '金额(元)'], sourceFileName: 'b2.xlsx' }
+    ]);
+    assert.equal(await js('cfg.handle.close().status'), 'blocked');
+    await js(`cfg.write.resolve({status:'success',message:'模板「模板 B」已更新，有 1 处映射引用的字段已删除，修改映射关系前无法用该模板生成账单',
+      staleMappings:['Credit Amount ← 金额'],activeStaleCount:1});`); await tick();
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='refresh').length`), 1);
+    const result = await js(`(() => {const card=cfg.top().querySelector('.template-header-update-result-card');return {
+      message: card.querySelector('[data-role="message"]').textContent,
+      stale: [...card.querySelectorAll('li')].map(item=>item.textContent),
+      buttons: [...card.querySelectorAll('.dialog-actions button')].map(button=>button.textContent)};})()`);
+    assert.deepEqual(result, {
+      message: '模板「模板 B」已更新，有 1 处映射引用的字段已删除，修改映射关系前无法用该模板生成账单',
+      stale: ['Credit Amount ← 金额'], buttons: ['修改映射关系', '返回']
+    });
+    assert.equal(await js('cfg.manager.isOpen()'), true);
+    await js(`cfg.top().querySelector('[data-action="edit-mappings"]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='templateRead').map(call=>call.args)`), [[2]]);
+    assert.match(await js('cfg.top().textContent'), /映射关系管理/);
+    assert.equal(await js('document.getElementById("modalRoot").children.length'), 1);
+  });
+  await test('模板【更新】：管理窗关闭后迟到的预览不弹窗；提交后窗口被强制结束，迟到成功不接管新窗', async () => {
+    await setup();
+    await js(`cfg.read=cfg.defer();cfg.next.headerPreview=cfg.read;cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;
+      cfg.top().querySelector('[data-action="update-headers"]').click();cfg.manager.close();cfg.newHandle=cfg.other();
+      cfg.read.resolve({status:'success',templateId:1,templateName:'模板 A',sourceFileName:'a.xlsx',expectedHeaders:['日期'],headers:['日期','金额'],
+        diff:{identical:false,added:['金额'],removed:[],orderChanged:false},affectedMappings:[],activeStaleCount:0});`); await tick();
+    assert.equal(await js('cfg.newHandle.isTop()'), true);
+    assert.equal(await js('document.getElementById("modalRoot").children.length'), 1);
+    await setup();
+    await js(`cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;
+      cfg.next.headerPreview={status:'success',templateId:1,templateName:'模板 A',sourceFileName:'a.xlsx',expectedHeaders:['日期'],headers:['日期','金额'],
+        diff:{identical:false,added:['金额'],removed:[],orderChanged:false},affectedMappings:[],activeStaleCount:0};
+      cfg.top().querySelector('[data-action="update-headers"]').click();void 0;`); await tick();
+    await js(`cfg.write=cfg.defer();cfg.next.headerUpdate=cfg.write;cfg.top().querySelector('[data-action="submit"]').click();
+      cfg.host.getTop().dispose();cfg.manager.dispose();cfg.newHandle=cfg.other();cfg.write.resolve({status:'success',message:'后台更新完成',staleMappings:[]});`); await tick();
+    assert.equal(await js('cfg.newHandle.isTop()'), true);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='refresh').length`), 1);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+  await test('映射关系管理：引用已删除字段的映射显示「（已删除）」并保持选中，保存时原值提交由主进程校验拒绝', async () => {
+    await setup();
+    await js(`cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:{id:1,name:'模板 A',headers:['日期','金额(元)']},
+      targetFields:['BillDate','Credit Amount','Remark'],
+      mappings:[{templateField:'BillDate',mappedField:'日期',mappedFields:[]},{templateField:'Credit Amount',mappedField:'金额',mappedFields:[]},
+        {templateField:'Remark',mappedField:'需要拼接字段',mappedFields:['日期','附言']}]})).handle;cfg.overlay=cfg.top();void 0;`);
+    const state = await js(`(() => {const row=field=>cfg.overlay.querySelector('tr[data-template-field="'+field+'"]');const select=row('Credit Amount').querySelector('.mapping-select');
+      return { value: select.value, label: select.selectedOptions[0].textContent, stale: select.classList.contains('is-stale'),
+        billDateStale: row('BillDate').querySelector('.mapping-select').classList.contains('is-stale') };})()`);
+    assert.deepEqual(state, { value: '金额', label: '金额（已删除）', stale: true, billDateStale: false });
+    await js(`cfg.overlay.querySelector('tr[data-template-field="Remark"] .concat-picker-trigger').click();void 0;`);
+    assert.deepEqual(await js(`[...cfg.overlay.querySelectorAll('tr[data-template-field="Remark"] .concat-picker-option')].map(option=>[option.textContent,option.classList.contains('is-stale'),option.querySelector('input').checked])`),
+      [['1.日期', false, true], ['金额(元)', false, false], ['2.附言（已删除）', true, true]]);
+    await js(`cfg.next.mappingSave={status:'error',message:'映射字段不存在：金额'};cfg.overlay.querySelector('[data-action="done"]').click();void 0;`); await tick();
+    const saved = await js(`cfg.calls.filter(call=>call.name==='mappingSave').map(call=>call.args[0].mappings.filter(item=>['Credit Amount','Remark'].includes(item.templateField)).map(item=>[item.templateField,item.mappedField,item.mappedFields]))`);
+    assert.deepEqual(saved, [[['Credit Amount', '金额', []], ['Remark', '需要拼接字段', ['日期', '附言']]]]);
+    assert.match(await js('cfg.top().textContent'), /映射字段不存在：金额/);
+    await js(`cfg.host.closeTop();const select=cfg.overlay.querySelector('tr[data-template-field="Credit Amount"] .mapping-select');select.value='金额(元)';select.dispatchEvent(new Event('change'));void 0;`);
+    assert.equal(await js(`cfg.overlay.querySelector('tr[data-template-field="Credit Amount"] .mapping-select').classList.contains('is-stale')`), false);
+  });
+
+  // 回归（review P3）：确认期间模板被删除等失败时，【返回】先重新读取模板列表，不显示已删除的模板。
+  await test('模板【更新模板】失败：【返回】重新读取模板列表后回到模板管理', async () => {
+    await setup();
+    await js(`cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;
+      cfg.next.headerPreview={status:'success',templateId:2,templateName:'模板 B',sourceFileName:'b2.xlsx',expectedHeaders:['日期'],headers:['日期','金额'],
+        diff:{identical:false,added:['金额'],removed:[],orderChanged:false},affectedMappings:[],activeStaleCount:0};
+      cfg.top().querySelectorAll('[data-action="update-headers"]')[1].click();void 0;`); await tick();
+    await js(`cfg.templates=cfg.templates.filter(template=>template.id!==2);
+      cfg.next.headerUpdate={status:'error',errorCode:'TEMPLATE_NOT_FOUND',message:'模板已被删除，请刷新后重试',errorReportReady:true};
+      cfg.top().querySelector('[data-action="submit"]').click();void 0;`); await tick();
+    assert.deepEqual(await js(`[...cfg.top().querySelectorAll('.template-header-update-result-card .dialog-actions button')].map(button=>button.textContent)`), ['返回']);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='refresh').length`), 0);
+    await js(`cfg.top().querySelector('[data-action="back"]').click();`); await tick();
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='refresh').length`), 1);
+    assert.match(await js('cfg.top().textContent'), /模板管理/);
+    assert.deepEqual(await js(`[...cfg.top().querySelectorAll('tbody tr td:first-child')].map(cell=>cell.textContent.trim())`), ['模板 A']);
+  });
+  // 回归（review P2）：以 __ 开头的普通列名失效后同样显示「（已删除）」并回传原值，不被当作内部标记静默清空。
+  await test('映射关系管理：__ 开头的普通列名失效后显示（已删除）并保留原值', async () => {
+    await setup();
+    await js(`cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:{id:1,name:'模板 A',headers:['日期']},
+      targetFields:['BillDate','Credit Amount'],
+      mappings:[{templateField:'BillDate',mappedField:'日期',mappedFields:[]},{templateField:'Credit Amount',mappedField:'__金额',mappedFields:[]}]})).handle;cfg.overlay=cfg.top();void 0;`);
+    assert.deepEqual(await js(`{const select=cfg.overlay.querySelector('tr[data-template-field="Credit Amount"] .mapping-select');[select.value,select.selectedOptions[0].textContent,select.classList.contains('is-stale')];}`),
+      ['__金额', '__金额（已删除）', true]);
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();void 0;`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='mappingSave').map(call=>call.args[0].mappings.find(item=>item.templateField==='Credit Amount').mappedField)`), ['__金额']);
+  });
+
+  // 回归（第二轮 review P2）：按币种取大账号标记只在 MerchantId 上是内部值，其他字段上同名的真实列失效后照常标出。
+  await test('映射关系管理：非 MerchantId 字段上与币种大账号标记同名的列失效后显示（已删除）并保留原值', async () => {
+    await setup();
+    await js(`cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:{id:1,name:'模板 A',headers:['日期']},
+      targetFields:['BillDate','Credit Amount'],
+      mappings:[{templateField:'BillDate',mappedField:'日期',mappedFields:[]},{templateField:'Credit Amount',mappedField:'__CURRENCY_ONLY_BIG_ACCOUNT__',mappedFields:[]}]})).handle;cfg.overlay=cfg.top();void 0;`);
+    assert.deepEqual(await js(`{const select=cfg.overlay.querySelector('tr[data-template-field="Credit Amount"] .mapping-select');[select.value,select.classList.contains('is-stale')];}`),
+      ['__CURRENCY_ONLY_BIG_ACCOUNT__', true]);
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();void 0;`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='mappingSave').map(call=>call.args[0].mappings.find(item=>item.templateField==='Credit Amount').mappedField)`), ['__CURRENCY_ONLY_BIG_ACCOUNT__']);
+  });
+  // 回归（第二轮 review P3）：结果弹窗关闭后，迟到的刷新失败不改写新会话的状态反馈，也不替换新弹窗。
+  await test('模板【更新】结果弹窗：关闭后迟到的刷新失败不反馈、不接管新窗', async () => {
+    await setup();
+    await js(`cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;
+      cfg.next.headerPreview={status:'error',message:'模板已被删除，请刷新后重试'};
+      cfg.top().querySelector('[data-action="update-headers"]').click();void 0;`); await tick();
+    await js(`cfg.read=cfg.defer();cfg.next.refresh=cfg.read;cfg.feedbackBefore=cfg.feedback.length;cfg.top().querySelector('[data-action="back"]').click();
+      cfg.host.getTop().dispose();cfg.manager.dispose();cfg.newHandle=cfg.other();cfg.read.reject(new Error('旧请求刷新失败'));void 0;`); await tick();
+    assert.equal(await js('cfg.newHandle.isTop()'), true);
+    assert.equal(await js('cfg.feedback.length===cfg.feedbackBefore'), true);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
+  // 回归（第四轮 review P2）：更新已成功、模板列表刷新失败时，结果页仍显示「已更新」、失效映射与【修改映射关系】，返回前重新读取列表。
+  await test('模板【更新模板】成功后刷新列表失败：保留成功结果，返回时重新读取', async () => {
+    await setup();
+    await js(`cfg.manager=cfg.bridge.openModal(()=>cfg.dialogs.createTemplateManagerDialog()).handle;
+      cfg.next.headerPreview={status:'success',templateId:1,templateName:'模板 A',sourceFileName:'a.xlsx',expectedHeaders:['日期'],headers:['日期','金额'],
+        diff:{identical:false,added:['金额'],removed:[],orderChanged:false},affectedMappings:[],activeStaleCount:0};
+      cfg.top().querySelector('[data-action="update-headers"]').click();void 0;`); await tick();
+    await js(`cfg.next.headerUpdate={status:'success',message:'模板「模板 A」已更新，有 1 处映射引用的字段已删除，修改映射关系前无法用该模板生成账单',staleMappings:['Credit Amount ← 金额'],activeStaleCount:1};
+      cfg.failRead=cfg.defer();cfg.next.refresh=cfg.failRead;cfg.top().querySelector('[data-action="submit"]').click();cfg.failRead.reject(new Error('列表读取失败'));void 0;`); await tick();
+    const view = await js(`(() => {const card=cfg.top().querySelector('.template-header-update-result-card');return {
+      message: card.querySelector('[data-role="message"]').textContent, note: Boolean(card.querySelector('[data-role="refresh-failed"]')),
+      stale: [...card.querySelectorAll('li')].map(item=>item.textContent), buttons: [...card.querySelectorAll('.dialog-actions button')].map(button=>button.textContent)};})()`);
+    assert.deepEqual(view, { message: '模板「模板 A」已更新，有 1 处映射引用的字段已删除，修改映射关系前无法用该模板生成账单', note: true,
+      stale: ['Credit Amount ← 金额'], buttons: ['修改映射关系', '返回'] });
+    await js(`cfg.top().querySelector('[data-action="back"]').click();`); await tick();
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='refresh').length`), 2);
+    assert.match(await js('cfg.top().textContent'), /模板管理/);
   });
 
 };

@@ -5,9 +5,16 @@ const assert = require('node:assert/strict');
 
 const { FileValidationError } = require('../../../../src/backend/file-service/common');
 const {
+  buildFeatureFilterToken,
+  collectFeatureFilterIds,
   extractFeatureValue,
+  getFeatureFilterRef,
+  normalizeFeatureFilterList,
   normalizeFeatureFilterRule,
-  splitFeatureTokens
+  parseFeatureFilterToken,
+  resolveUsedFeatureFilters,
+  splitFeatureTokens,
+  upgradeLegacyFeatureFilter
 } = require('../../../../src/backend/file-service/feature-filter');
 
 const HEADERS = ['交易日期', '附言', '金额'];
@@ -103,4 +110,111 @@ test('样例须符合条件且不能含所选分隔符', () => {
 test('未传表头时不校验源字段存在', () => {
   const normalized = normalizeFeatureFilterRule({ sourceField: '任意列', separator: 'comma', digitsOnly: true });
   assert.equal(normalized.sourceField, '任意列');
+});
+
+// ==================== v3.2.18 多特征值 ====================
+
+const BASE_RULE = { sourceField: '附言', separator: 'space', length: 10, letterPrefixCount: 2, digitsOnly: true, sample: '' };
+
+function assertFeatureError(fn, pattern) {
+  assert.throws(fn, (error) => {
+    assert.ok(error instanceof FileValidationError);
+    assert.match(error.message, pattern);
+    return true;
+  });
+}
+
+test('特征值列表：已有 id 保留，新条目按最大数字 id 递增分配，改名不变 id', () => {
+  const list = normalizeFeatureFilterList([
+    { id: '3', name: ' 订单号 ', ...BASE_RULE },
+    { name: '流水号', ...BASE_RULE, length: 6, letterPrefixCount: null }
+  ], { headers: HEADERS, knownIds: new Set(['1', '3']) });
+  assert.deepEqual(list.map((item) => [item.id, item.name]), [['3', '订单号'], ['4', '流水号']]);
+  assert.equal(list[1].length, 6);
+  assert.equal(list[1].letterPrefixCount, null);
+  // 删除 id 1 后再新增，不复用比已有更小的 id
+  assert.deepEqual(normalizeFeatureFilterList([{ name: '新', ...BASE_RULE }], { knownIds: new Set(['1', '2']) })
+    .map((item) => item.id), ['3']);
+});
+
+test('特征值列表：名称必填、≤30 字、不可重复；已有 id 必须存在；条件错误带特征值名', () => {
+  assertFeatureError(() => normalizeFeatureFilterList([{ name: ' ', ...BASE_RULE }]), /请输入特征值名/);
+  assertFeatureError(() => normalizeFeatureFilterList([{ name: '长'.repeat(31), ...BASE_RULE }]), /超过 30 个字/);
+  assert.equal(normalizeFeatureFilterList([{ name: '长'.repeat(30), ...BASE_RULE }])[0].name.length, 30);
+  assertFeatureError(() => normalizeFeatureFilterList([
+    { name: 'A', ...BASE_RULE }, { name: 'A', ...BASE_RULE }
+  ]), /特征值名「A」已存在/);
+  assertFeatureError(() => normalizeFeatureFilterList([{ id: '9', name: 'A', ...BASE_RULE }], { knownIds: new Set(['1']) }),
+    /特征值「A」不存在或已被删除/);
+  assertFeatureError(() => normalizeFeatureFilterList([{ name: '流水号', ...BASE_RULE, sourceField: '备注' }], { headers: HEADERS }),
+    /特征值「流水号」：筛选字段不存在：备注/);
+  assertFeatureError(() => normalizeFeatureFilterList(null), /特征值列表格式不正确/);
+  assert.deepEqual(normalizeFeatureFilterList([]), []);
+});
+
+test('特征值列表：模板【更新】删掉共用的筛选字段后可逐个修复——条件未改的已有条目不按表头校验', () => {
+  // 两个已保存特征值都引用已从表头删除的「备注」
+  const saved = [
+    { id: '1', name: '流水号', ...BASE_RULE, sourceField: '备注' },
+    { id: '2', name: '订单号', ...BASE_RULE, sourceField: '备注' }
+  ];
+  const options = { headers: HEADERS, knownIds: new Set(['1', '2']), preserved: saved };
+  // 只修特征值 1：特征值 2 原样提交，不因旧字段被拒
+  assert.deepEqual(normalizeFeatureFilterList([{ ...saved[0], sourceField: '附言' }, saved[1]], options)
+    .map((item) => [item.id, item.sourceField]), [['1', '附言'], ['2', '备注']]);
+  // 只改名也不改变条件
+  assert.equal(normalizeFeatureFilterList([{ ...saved[1], name: '订单编号' }], options)[0].name, '订单编号');
+  // 改了条件、或新增的条目仍按表头校验
+  assertFeatureError(() => normalizeFeatureFilterList([{ ...saved[1], length: 9 }], options), /特征值「订单号」：筛选字段不存在：备注/);
+  assertFeatureError(() => normalizeFeatureFilterList([{ name: '新', ...BASE_RULE, sourceField: '备注' }], options),
+    /特征值「新」：筛选字段不存在：备注/);
+  // 不传 preserved 时照旧整表校验
+  assertFeatureError(() => normalizeFeatureFilterList(saved, { headers: HEADERS }), /筛选字段不存在：备注/);
+});
+
+test('旧单套规则升级为「特征值1」（id 1）；数组原样复制；空值为空列表', () => {
+  assert.deepEqual(upgradeLegacyFeatureFilter({ ...BASE_RULE }), [{ id: '1', name: '特征值1', ...BASE_RULE }]);
+  const list = [{ id: '2', name: 'X', ...BASE_RULE }];
+  const copied = upgradeLegacyFeatureFilter(list);
+  assert.deepEqual(copied, list);
+  assert.notEqual(copied[0], list[0]);
+  assert.deepEqual(upgradeLegacyFeatureFilter(null), []);
+  assert.deepEqual(upgradeLegacyFeatureFilter(''), []);
+});
+
+test('映射引用与 token：取 mappedFields[0]，token 往返，lookup 收集去重', () => {
+  assert.equal(getFeatureFilterRef({ mappedFields: [' 2 ', '3'] }), '2');
+  assert.equal(getFeatureFilterRef({ mappedFields: [] }), '');
+  assert.equal(getFeatureFilterRef(null), '');
+  const token = buildFeatureFilterToken('2');
+  assert.equal(parseFeatureFilterToken(token), '2');
+  assert.equal(parseFeatureFilterToken('附言'), null);
+  assert.equal(parseFeatureFilterToken(['x']), null);
+  assert.deepEqual(collectFeatureFilterIds({
+    Remark: buildFeatureFilterToken('2'),
+    Reference: buildFeatureFilterToken('1'),
+    Name: buildFeatureFilterToken('2'),
+    CardNo: ['附言', '金额'],
+    BillDate: '交易日期'
+  }), ['2', '1']);
+});
+
+test('按生效映射取用到的特征值：未选、不存在、条件无效均拒绝；同一特征值只取一次', () => {
+  const list = [{ id: '1', name: '流水号', ...BASE_RULE }, { id: '2', name: '坏规则', sourceField: '附言', separator: 'space' }];
+  const resolved = resolveUsedFeatureFilters(list, [
+    { templateField: 'Remark', ref: '1' },
+    { templateField: 'Reference', ref: '1' }
+  ], { headers: HEADERS });
+  assert.deepEqual(Object.keys(resolved), ['1']);
+  assert.equal(resolved['1'].name, '流水号');
+  assert.equal(resolved['1'].length, 10);
+  assert.deepEqual(resolveUsedFeatureFilters(list, []), {});
+  assertFeatureError(() => resolveUsedFeatureFilters(list, [{ templateField: 'Remark', ref: '' }]),
+    /Remark 选择了「字段筛选特征值」，请选择特征值/);
+  assertFeatureError(() => resolveUsedFeatureFilters(list, [{ templateField: 'Remark', ref: '9' }]),
+    /Remark 选择的特征值不存在，请重新选择/);
+  assertFeatureError(() => resolveUsedFeatureFilters(list, [{ templateField: 'Remark', ref: '2' }]),
+    /特征值「坏规则」：特征长度、前几位英文、纯数字至少设置一项/);
+  assertFeatureError(() => resolveUsedFeatureFilters(null, [{ templateField: 'Remark', ref: '1' }]),
+    /选择的特征值不存在/);
 });

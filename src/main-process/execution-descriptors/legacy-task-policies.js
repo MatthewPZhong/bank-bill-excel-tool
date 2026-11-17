@@ -164,6 +164,7 @@ const archivePolicies = Object.freeze([
   createExcludePolicy('duplicate-inbound-match:session-status', 'read-only-query'),
   createExcludePolicy('fund-transfer-account-mapping:list', 'read-only-query'),
   createExcludePolicy('linked-table:count-by-date-range', 'read-only-query'),
+  createExcludePolicy('linked-table:get-retention-settings', 'read-only-query'),
   createExcludePolicy('linked-table:list', 'read-only-query'),
   createExcludePolicy('linked-table:row-count', 'read-only-query'),
   createExcludePolicy('pending:columns', 'read-only-query'),
@@ -232,6 +233,11 @@ const archivePolicies = Object.freeze([
   createExcludePolicy('bank-accounts:prepare-import', 'staging-preflight-only'),
   // v3.2.17：补录余额「导入余额文件」只读预检，确认后仍走 file:save-balance-seed 写入
   createExcludePolicy('file:import-balance-seed-file', 'staging-preflight-only'),
+  // v3.2.18 模板管理【更新】：选择文件并预览字段变更，只读；确认后走 support action template:update-headers
+  createExcludePolicy('template:preview-header-update', 'staging-preflight-only'),
+  // v3.2.18【导入模板】：选文件并识别为新模板（只读预检）与取消命名时丢弃；确认后仍走 template:import 写入
+  createExcludePolicy('template:prepare-import', 'staging-preflight-only'),
+  createExcludePolicy('template:discard-import', 'staging-preflight-only'),
   createExcludePolicy('bizOpReconV327:run:preflight', 'preview-only'),
   createExcludePolicy('bizOpReconV327:delete:preview', 'preview-only'),
   createExcludePolicy('file:extract-big-account-order', 'preview-only'),
@@ -267,6 +273,7 @@ const archivePolicies = Object.freeze([
   createExcludePolicy('app-update:set-enabled', 'ui-navigation'),
   createExcludePolicy('background:reset', 'ui-navigation'),
   createExcludePolicy('background:save', 'ui-navigation'),
+  createExcludePolicy('linked-table:set-retention-days', 'ui-navigation'),
   createExcludePolicy('settings:acknowledge-release-notes', 'ui-navigation'),
   createExcludePolicy('settings:set-current-module', 'ui-navigation'),
   createExcludePolicy('settings:set-dark-mode-lightness', 'ui-navigation'),

@@ -191,6 +191,24 @@
 }
 .text-action.danger { color: var(--danger); }
 .text-action.danger:hover { background: var(--danger-soft, #fce8e6); color: var(--danger); }
+/* v3.2.18 模板管理：首槽（修改+更新 / 导入子模板）定宽，渠道行、子模板行与普通模板行的【重命名】左缘对齐 */
+.template-manager-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 4px;
+  row-gap: 2px;
+}
+.manager-row-lead-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  width: calc(4em + 32px);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.template-manager-row-actions .text-action { white-space: nowrap; }
 
 td .muted { color: var(--muted); }
 
@@ -224,12 +242,6 @@ td .muted { color: var(--muted); }
 .dialog-actions.right { justify-content: flex-end; }
 .dialog-actions.center { justify-content: center; }
 .dialog-actions.split { justify-content: space-between; }
-.dialog-actions.vertical {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
-  padding: 8px 28px 22px;
-}
 .big-account-footer-left { display: flex; gap: 8px; }
 /* v3.2.16 模板管理【余额管理】：底栏左侧入口，右侧导入/导出；弹窗提示行与分页 */
 .template-manager-bundle-right { display: flex; gap: 10px; }
@@ -247,6 +259,50 @@ td .muted { color: var(--muted); }
   white-space: nowrap;
 }
 .balance-seed-pager[hidden] { display: none; }
+/* v3.2.18 余额管理头部：渠道右侧依次为「账户号」（按钮 + 可搜索浮层）与短「币种」下拉，外观对齐渠道下拉。
+   窗口较窄（如 150% 缩放）时账户号 / 币种整体换到第二行，× 固定在右上角。 */
+.balance-seed-card .dialog-header {
+  position: relative;
+  flex-wrap: wrap;
+  row-gap: 10px;
+  padding-right: 76px;
+}
+.balance-seed-card .dialog-header .icon-close {
+  position: absolute;
+  top: 22px; right: 28px;
+}
+.balance-seed-filters {
+  display: inline-flex; align-items: center; gap: 10px;
+  min-width: 0;
+  font-size: 14px; color: var(--muted);
+}
+.balance-seed-filter-label { white-space: nowrap; }
+/* 宽度容纳常见 20 余位账号；箭头与渠道 / 币种下拉同款 */
+.balance-seed-card .balance-seed-account-btn {
+  flex: 0 1 260px;
+  width: 260px; min-width: 140px; height: 36px;
+  padding: 0 36px 0 14px;
+  border-radius: var(--pill);
+  border: 1px solid var(--line);
+  background: var(--panel, #fff) var(--select-arrow) no-repeat right 12px center / 12px;
+  font-size: 14px; color: var(--text);
+  cursor: pointer;
+}
+.balance-seed-card .balance-seed-account-btn::after,
+.balance-seed-card .balance-seed-account-btn.is-open::after { content: none; }
+.balance-seed-card .balance-seed-account-btn:disabled,
+.balance-seed-currency-wrapper select:disabled { opacity: 0.55; cursor: not-allowed; }
+.balance-seed-currency-wrapper select { width: 96px; }
+.balance-seed-account-panel {
+  z-index: 32;
+  max-height: 320px;
+}
+.balance-seed-account-option[aria-selected="true"] { background: var(--bg-soft); }
+.balance-seed-account-empty {
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
 /* 余额管理表格：列为 日期/账户号/币种/余额/生成方式/执行操作，列名与数据单行；
    日期、币种按内容收窄，余额/生成方式/执行操作三列等宽，账户号占剩余宽度。
    改用 auto 布局让单行内容不被截断；输入框不贡献最小宽度，编辑态切换时列宽不变。 */
@@ -275,7 +331,7 @@ td .muted { color: var(--muted); }
 }
 
 /* =================== Card size presets for new dialogs =================== */
-.export-scope-card { width: min(100%, 480px); }
+.export-scope-card { width: min(100%, 480px); position: relative; }
 .monthly-balance-export-card { width: min(100%, 520px); }
 .manual-balance-card { width: min(100%, 560px); }
 .template-rename-card { width: min(100%, 520px); }
@@ -291,7 +347,7 @@ td .muted { color: var(--muted); }
 }
 .account-mapping-migration-card { width: min(100%, 900px); }
 .amount-split-rules-card { width: min(100%, 880px); }
-.feature-filter-card { width: min(100%, 640px); }
+.feature-filter-card { width: min(100%, 720px); }
 .bill-split-mappings-card { width: 80vw; max-width: 1280px; }
 .bill-split-rows-card { width: min(100%, 1180px); }
 /* v2.1.7 round 2 R6a 方案 C：弹窗 1080 → 1200（spec §8.7.3 — 给文件名 + 后缀 ' → MERCHANT USD' 多 120px 横向空间） */
@@ -961,6 +1017,24 @@ td .muted { color: var(--muted); }
 }
 .archive-center-retention-field { width: 132px; max-width: 100%; }
 .archive-center-retention-module-field { width: 224px; max-width: 100%; }
+
+/* =================== 设置 · 数据管理（v3.2.18） =================== */
+/* 两类保留期限复用存档设置的分节、字段与反馈样式；本页只负责滚动容器与间距。 */
+.data-management-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.data-management-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 28px 28px;
+  white-space: normal;
+  user-select: text;
+}
+.data-management-scroll > .app-settings-pane-heading { margin-bottom: 18px; }
+.data-management-feedback { margin: 0 0 16px; }
 .archive-delete-confirm-error {
   width: 100%;
   margin-top: 12px;
@@ -1020,6 +1094,7 @@ td .muted { color: var(--muted); }
     padding-bottom: 11px;
   }
   .archive-center-settings-view { padding-top: 18px; }
+  .data-management-scroll { padding-top: 18px; }
 }
 
 /* =================== 设置 · 模板文件 =================== */
@@ -1872,15 +1947,17 @@ td .muted { color: var(--muted); }
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+/* v3.2.18 导入/导出与翻页移到设置底栏，表格下边界延伸到底栏上方 */
 .bank-accounts-table-wrap {
   flex: 1;
   min-height: 0;
-  margin: 0 24px;
+  margin: 0 24px 16px;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
 }
 .bank-accounts-table {
+  min-width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 12px;
@@ -1905,16 +1982,18 @@ td .muted { color: var(--muted); }
   color: var(--text);
 }
 .bank-accounts-table tbody tr:hover td { background: var(--row-hover, #edf1f6); }
-.bank-accounts-table .bank-accounts-row-number {
-  color: var(--dim);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
 .bank-accounts-empty {
   padding: 40px 16px;
   color: var(--muted);
   text-align: center;
   font-size: 13px;
+}
+/* 设置底栏里的账户管理槽：左侧导入/导出，右侧翻页条紧挨【返回】 */
+.app-settings-footer-accounts {
+  flex: 1;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 12px;
 }
 .bank-accounts-actions {
   flex: 0 0 auto;
@@ -1938,6 +2017,18 @@ td .muted { color: var(--muted); }
   font-size: 12px;
 }
 .bank-accounts-pager[hidden] { display: none; }
+/* 窄宽度（如 1080 宽 150% 缩放）底栏放不下完整翻页条：按钮改为 ‹ ›，隐藏总行数 */
+@media (max-width: 900px) {
+  .app-settings-footer-accounts .bank-accounts-pager { gap: 6px; }
+  .app-settings-footer-accounts .bank-accounts-pager .small {
+    min-width: 34px;
+    padding-inline: 0;
+  }
+  .app-settings-footer-accounts .bank-accounts-pager-label,
+  .app-settings-footer-accounts .bank-accounts-pager-total { display: none; }
+  .app-settings-footer-accounts [data-action="previous-page"]::before { content: '‹'; }
+  .app-settings-footer-accounts [data-action="next-page"]::before { content: '›'; }
+}
 .bank-accounts-confirm-detail {
   margin-top: 8px;
   color: var(--muted);
@@ -1945,28 +2036,88 @@ td .muted { color: var(--muted); }
   overflow-wrap: anywhere;
 }
 
-/* =================== Export-scope vertical buttons =================== */
-.export-scope-card .dialog-actions.vertical .export-scope-btn {
-  height: auto;
-  padding: 14px 18px;
-  border-radius: 14px;
-  display: flex; flex-direction: column; align-items: flex-start;
-  gap: 4px;
-  text-align: left;
-  width: 100%;
-  background: var(--panel, #fff);
-  border: 1px solid var(--line);
-  transition: border-color .15s ease, box-shadow .15s ease;
+/* =================== Template header update (v3.2.18) =================== */
+/* 模板管理【更新】：字段变更（分组汇总）与结果弹窗；映射编辑器中引用已删除字段的值标红 */
+.template-header-update-card { width: min(100%, 640px); }
+.template-header-update-card .dialog-header,
+.template-header-update-card .dialog-actions { flex: 0 0 auto; }
+.template-header-update-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 28px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-size: 14px;
+  color: var(--text);
 }
-.export-scope-card .export-scope-btn:hover {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(11,87,208,.12);
+.template-header-update-source {
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
-.export-scope-btn-main {
-  font-size: 14px; font-weight: 500; color: var(--text);
+.template-header-update-identical {
+  border-left: 3px solid var(--primary);
+  background: var(--bg-soft);
+  padding: 8px 10px;
+  font-size: 13px;
 }
-.export-scope-btn-sub {
-  font-size: 12px; color: var(--muted);
+.template-header-update-row {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.template-header-update-label {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 22px;
+}
+.template-header-update-row > span:not(.template-header-update-label) { line-height: 22px; }
+.template-header-update-none { color: var(--dim); font-size: 13px; }
+.template-header-update-mappings {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.template-header-update-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.template-header-update-affected .template-header-update-note { margin-top: 6px; }
+.template-header-update-result-card { width: min(100%, 560px); }
+.template-header-update-result-card .alert-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 28px 28px 18px;
+}
+.template-header-update-result-card .alert-message { min-width: 0; padding-top: 0; }
+.template-header-update-result-card .dialog-actions { flex: 0 0 auto; }
+.template-header-update-result-label {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.template-header-update-result-card .template-header-update-mappings { margin-top: 4px; }
+.mapping-select.is-stale { border-color: var(--danger); color: var(--danger); }
+.concat-picker-option.is-stale { color: var(--danger); }
+
+/* =================== Export-scope dialog (v3.2.18) =================== */
+/* 提示文字与左侧图标垂直居中，右侧给关闭按钮留位；两个范围按钮在底栏并排居中。 */
+.export-scope-card .alert-body {
+  align-items: center;
+  padding: 28px 64px 24px 28px;
+}
+.export-scope-card .alert-message { padding-top: 0; }
+.export-scope-card .export-scope-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  margin-left: 0;
 }
 
 /* =================== Monthly-balance-export form =================== */
@@ -2026,9 +2177,13 @@ td .muted { color: var(--muted); }
 .manual-balance-card > .manual-balance-view > .manual-balance-form,
 .manual-balance-card > .dialog-actions,
 .manual-balance-card > .manual-balance-view > .dialog-actions { flex-shrink: 0; }
-.manual-balance-seed-mismatch { overflow-wrap: anywhere; }
+/* 核对说明与「第 X 个账号」同为 14px；遇句号换行，金额用正文色标黑（v3.2.18） */
+.manual-balance-seed-mismatch { overflow-wrap: anywhere; font-size: 14px; }
+.manual-balance-seed-mismatch-line { display: block; }
+.manual-balance-seed-mismatch-amount { color: var(--text); }
 .manual-balance-progress {
   display: flex; flex-direction: column; gap: 8px;
+  font-size: 14px;
 }
 .manual-balance-progress-chip {
   font-size: 12px; color: var(--muted);
@@ -2343,10 +2498,28 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
   height: 40px;
 }
 
-/* =================== v3.2.16 字段筛选特征值 =================== */
+/* =================== v3.2.16 字段筛选特征值 / v3.2.18 特征值管理 =================== */
+.feature-filter-toolbar {
+  display: flex; align-items: center; gap: 10px;
+  margin-right: auto;
+  min-width: 0;
+}
+.feature-filter-toolbar-label {
+  font-size: 13px; color: var(--text);
+  white-space: nowrap;
+}
+.feature-filter-toolbar .feature-filter-pick {
+  width: 180px; min-width: 0;
+}
 .feature-filter-body {
   padding: 18px 28px 16px;
 }
+/* 映射行：映射字段下拉框右侧「选择特征值」+ 下拉框 +【特征值管理】 */
+.mapping-feature-value-label {
+  font-size: 13px; color: var(--text);
+  white-space: nowrap;
+}
+.mapping-field-editor > .mapping-select.mapping-feature-value-select { flex: 0 1 180px; min-width: 120px; }
 .feature-filter-grid {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);

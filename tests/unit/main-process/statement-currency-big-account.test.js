@@ -5,7 +5,7 @@
 //     不区分大小写且不能重复，统一存大写；一个大账号可对应多个币种；不写入维护大账号的大账号表；
 //   - 选项文字与存储标记往返：存储值不带 __FIXED__: 前缀，读回时不被当成「自己输入」或固定账号；
 //   - 生成配置读取模板的 币种 → 大账号，没有配置时拒绝；
-//   - 模板包 v6 带 currencyBigAccounts，v5 读为空，v7 拒绝；
+//   - 模板包 v6 带 currencyBigAccounts，v5 读为空，高于支持版本（v3.2.18 起为 v7）拒绝；
 //   - 按文件名映射导入时识别本模式文件，用于跳过 / 阻断大账号选择。
 
 const assert = require('node:assert/strict');
@@ -16,12 +16,16 @@ const test = require('node:test');
 const acorn = require('acorn');
 
 const {
-  FEATURE_FILTER_FIELD_TOKEN,
+  buildFeatureFilterToken,
+  getFeatureFilterRef,
+  LEGACY_FEATURE_FILTER_ID,
+  parseFeatureFilterToken,
+  resolveUsedFeatureFilters,
+  upgradeLegacyFeatureFilter,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
-  normalizeCell,
-  normalizeFeatureFilterRule
+  normalizeCell
 } = require('../../../src/backend/file-service');
 const { normalizeMaintainedBigAccounts } = require('../../../src/main-process/big-account-recognition');
 
@@ -59,7 +63,7 @@ const currencyBigAccountsByTemplateId = new Map();
 const fns = loadMainFunctions([
   'validateTemplateConfiguration',
   'validateCurrencyBigAccountConfiguration',
-  'resolveSavedFeatureFilter',
+  'collectFeatureFilterRefs',
   'getPrimaryMappedField',
   'getMappingFieldValues',
   'normalizeMappedFields',
@@ -71,6 +75,7 @@ const fns = loadMainFunctions([
   'resolveCurrentMappings',
   'buildCurrencyBigAccountMappingConfig',
   'readTemplateBundleFile',
+  'upgradeLegacyBundleFeatureFilterRefs',
   'isCurrencyOnlyMerchantMapping',
   'isMultiBigAccountMapping',
   'classifyCurrencyOnlyEntries'
@@ -78,9 +83,13 @@ const fns = loadMainFunctions([
   ...CONSTANTS,
   FIXED_FIELD_VALUE_PREFIX,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
-  // 同轮合入的「字段筛选特征值」：validateTemplateConfiguration 会引用
-  FEATURE_FILTER_FIELD_TOKEN,
-  normalizeFeatureFilterRule,
+  // 「字段筛选特征值」（v3.2.18 多特征值）：校验、映射归一化与模板包读取会引用
+  buildFeatureFilterToken,
+  getFeatureFilterRef,
+  LEGACY_FEATURE_FILTER_ID,
+  parseFeatureFilterToken,
+  resolveUsedFeatureFilters,
+  upgradeLegacyFeatureFilter,
   ADVANCED_MAPPING_FIELDS: [],
   CUSTOM_INPUT_TARGET_FIELDS: new Set(['MerchantId']),
   FileValidationError,
@@ -233,8 +242,10 @@ test('生成配置读取模板的 币种 → 大账号，没有配置时拒绝',
   );
 });
 
-test('模板包：v6 读取 currencyBigAccounts，v5 读为空，高于 v6 拒绝', (t) => {
-  assert.equal(CONSTANTS.SUPPORTED_BUNDLE_VERSION, 6);
+test('模板包：v6 读取 currencyBigAccounts，v5 读为空，高于支持版本拒绝', (t) => {
+  // v3.2.18：特征值包升为 v7；只用到本模式的包仍写 v6
+  assert.equal(CONSTANTS.SUPPORTED_BUNDLE_VERSION, 7);
+  assert.equal(CONSTANTS.CURRENCY_ONLY_BUNDLE_VERSION, 6);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'currency-bundle-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const write = (bundleVersion, extra = {}) => {
@@ -245,10 +256,13 @@ test('模板包：v6 读取 currencyBigAccounts，v5 读为空，高于 v6 拒�
     }));
     return filePath;
   };
-  const readBundle = (filePath) => loadMainFunctions(['readTemplateBundleFile'], {
-    SUPPORTED_BUNDLE_VERSION: CONSTANTS.SUPPORTED_BUNDLE_VERSION,
+  const readBundle = (filePath) => loadMainFunctions(['readTemplateBundleFile', 'upgradeLegacyBundleFeatureFilterRefs'], {
+    ...CONSTANTS,
     FileValidationError,
     normalizeCell,
+    getFeatureFilterRef,
+    upgradeLegacyFeatureFilter,
+    LEGACY_FEATURE_FILTER_ID,
     normalizeBundleTemplateHeaders: (headers) => headers,
     normalizeBundleAccountMappings: () => [],
     fs
@@ -257,7 +271,7 @@ test('模板包：v6 读取 currencyBigAccounts，v5 读为空，高于 v6 拒�
   const v6 = readBundle(write(6, { currencyBigAccounts: [{ currency: ' usd ', merchantId: ' NET1 ' }] }));
   assert.deepEqual(v6.templates[0].currencyBigAccounts, [{ currency: 'usd', merchantId: 'NET1' }]);
   assert.deepEqual(readBundle(write(5)).templates[0].currencyBigAccounts, []);
-  assert.throws(() => readBundle(write(7)), /请升级应用后再导入/);
+  assert.throws(() => readBundle(write(8)), /请升级应用后再导入/);
 });
 
 test('按文件名映射导入：识别本模式文件，用于跳过或阻断大账号选择', () => {

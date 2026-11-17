@@ -1123,16 +1123,30 @@ test('ACKed JPM Intent在真实bank source mutation前fail closed且Main import/
     assert.ok(importGateIndex < bankStreamingWriteIndex);
     assert.ok(importGateIndex < midStreamingWriteIndex);
     assert.match(importBlock, /admMutationBoundary: runReconFixJpmAdmMutationBoundary/);
-    const deleteBlock = mainSource.slice(
-      mainSource.indexOf("if (tableKey === 'bank-deposit')", mainSource.indexOf("trackedIpcHandle('linked-table:delete-by-date-range'")),
-      mainSource.indexOf('// gateway-bill（缺省）', mainSource.indexOf("trackedIpcHandle('linked-table:delete-by-date-range'"))
+    // v3.2.18：手工删除与链接表过期清理共用 src/main-process/linked-table-delete.js；
+    //   Main 注入 ADM gate 与写边界，共享实现在 bank-deposit 分支先过 gate 再写入。
+    const depsBlock = mainSource.slice(
+      mainSource.indexOf('function linkedTableDeleteDeps()'),
+      mainSource.indexOf('let archiveOperationTail')
     );
-    const deleteGateIndex = deleteBlock.indexOf('assertReconFixJpmAdmMutationAllowed()');
+    assert.match(depsBlock, /assertAdmMutationAllowed: assertReconFixJpmAdmMutationAllowed/);
+    assert.match(depsBlock, /admMutationBoundary: runReconFixJpmAdmMutationBoundary/);
+    const handlerBlock = mainSource.slice(
+      mainSource.indexOf("trackedIpcHandle('linked-table:delete-by-date-range'"),
+      mainSource.indexOf("ipcMain.handle('linked-table:get-retention-settings'")
+    );
+    assert.match(handlerBlock, /deleteLinkedTableRowsByDateRange\(linkedTableDeleteDeps\(\), \{ tableKey, start, end \}\)/);
+    const sharedSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main-process/linked-table-delete.js'), 'utf8');
+    const deleteBlock = sharedSource.slice(
+      sharedSource.indexOf("if (tableKey === 'bank-deposit')"),
+      sharedSource.indexOf('// gateway-bill：', sharedSource.indexOf("if (tableKey === 'bank-deposit')"))
+    );
+    const deleteGateIndex = deleteBlock.indexOf('assertAdmMutationAllowed()');
     const deleteWriteIndex = deleteBlock.indexOf('deleteBankDepositByDateRange');
     assert.notEqual(deleteGateIndex, -1);
     assert.notEqual(deleteWriteIndex, -1);
     assert.ok(deleteGateIndex < deleteWriteIndex);
-    assert.match(deleteBlock, /admMutationBoundary: runReconFixJpmAdmMutationBoundary/);
+    assert.match(deleteBlock, /admMutationBoundary\s*\n?\s*\}\)/);
   } finally {
     await harness.runtime.shutdown();
     harness.database.close();

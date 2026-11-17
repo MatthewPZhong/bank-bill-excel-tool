@@ -124,14 +124,17 @@
 - 关联功能：字段拼接映射（如 Narrative = 摘要 + 备注）
 - 变更 review 要点：拼接顺序 / 分隔符变化会直接改动输出内容
 
-### `FEATURE_FILTER_MAPPING_FIELD` / `FEATURE_FILTER_FIELD_TOKEN` / `templates.feature_filter_json`
-- 定义：映射值 `'字段筛选特征值'` 在 `src/main.js` 与 `src/renderer.js`（两处同值）；生成 lookup 内部 token `'__FEATURE_FILTER__'` 在 `src/backend/file-service/common.js`；模板级规则列由 `ensureTemplateFeatureFilterSupport` 迁移（v3.2.16）
-- 关联功能：按模板级规则从一个源字段筛出特征值，赋给选该值的目标字段（主映射与「不复用」的拆分映射共用一套规则）
+### `FEATURE_FILTER_MAPPING_FIELD` / `FEATURE_FILTER_FIELD_TOKEN_PREFIX` / `templates.feature_filter_json`
+- 定义：映射值 `'字段筛选特征值'` 在 `src/main.js` 与 `src/renderer.js`（两处同值）；生成 lookup 内部 token 前缀 `'__FEATURE_FILTER__:'`（后接特征值 id）在 `src/backend/file-service/common.js`；列由 `ensureTemplateFeatureFilterSupport` 迁移（v3.2.16），v3.2.18 起存特征值数组 `[{ id, name, ...rule }]`，旧单对象由同一迁移升级为 id `'1'`、名「特征值1」
+- 关联功能：一个模板可有多个具名特征值；映射行（主映射与「不复用」的拆分映射）在 `mapped_fields_json[0]` 存所选特征值 id，选同一特征值的字段取同一个值；【特征值管理】经 `template:save-feature-filters`（support-action）整表替换、即时落库
 - 变更 review 要点：
-  - 匹配口径在 `src/backend/file-service/feature-filter.js`，渲染端 `configuration.js` 有同口径的样例校验与推导，改一处要同步另一处
-  - 映射行不带源字段（`mapped_fields_json = []`），旧代码会失败关闭；改存储形状须评估旧版本与模板包兼容
-  - 模板包：主映射或拆分映射用到该值时 `resolveTemplateBundleVersion` 写 v6（旧版整包拒绝），否则写 v5；“是否使用”只看实际生效的映射（拆分且不复用时为拆分映射）
-  - 必跑：`scripts/integration/statement-feature-filter.js`、`node scripts/test-renderer-lifecycle.js configuration-dialogs.js`
+  - 匹配与名称口径在 `src/backend/file-service/feature-filter.js`，渲染端 `configuration.js` 有同口径的样例、名称校验与推导，改一处要同步另一处
+  - `mapped_fields_json[0]` 是特征值 id 而非源字段：`normalizeMappingRows`、`normalizeExportMappingRows`、`validateBillSplitMappingsPayload` 等按源字段处理 mappedFields 的路径须先识别该映射值
+  - 已保存映射仍在使用的特征值不能删除（`validateFeatureFiltersPayload` 查主映射与拆分映射）；id 由后端分配，改名不变
+  - 模板包：主映射或拆分映射用到该值时 `resolveTemplateBundleVersion` 写 v7（v3.2.16/3.2.17 整包拒绝），读 v6 包时按迁移同口径升级；“是否使用”只看实际生效的映射（拆分且不复用时为拆分映射）
+  - 回滚到 v3.2.17：数组形状被旧版读为未设置规则，用到该值的模板保存与生成失败关闭
+  - BillDate 取该值时合计行识别取所选特征值的源单元格（资金红线回归在集成脚本 ⑦）
+  - 必跑：`scripts/integration/statement-feature-filter.js`、`node scripts/test-renderer-lifecycle.js configuration-dialogs`
 
 ### `MERCHANT_ID_SELF_INPUT_OPTION`
 - 定义：`src/main.js`
@@ -146,7 +149,7 @@
   - 配置与 `template_big_accounts` 分开存放：不参与大账号识别、选择窗口、渠道大账号汇总与月度余额导出；与 MULTI 标记精确比较的各处（`isMultiBigAccountMapping` 等）不会命中本模式
   - 按文件名映射导入：全部文件为本模式时跳过选择；与需要选择大账号的文件同批时阻断（`classifyCurrencyOnlyEntries`）
   - 本模式的币种识别调用 `resolveCurrencyValue(..., { allowFuzzy: false })`：只认代码与精确名称，模糊命中按未维护阻断（spec D4）；其他模式保持模糊匹配
-  - 模板包：条目带 `currencyBigAccounts`；用到本模式时 `resolveTemplateBundleVersion` 写 v6（与「字段筛选特征值」同一规则），否则写 v5；改格式须同步 `SUPPORTED_BUNDLE_VERSION`
+  - 模板包：条目带 `currencyBigAccounts`；用到本模式时 `resolveTemplateBundleVersion` 写 v6（v3.2.18 起用到「字段筛选特征值」时写 v7），否则写 v5；改格式须同步 `SUPPORTED_BUNDLE_VERSION`
   - 必跑：`tests/unit/backend/file-service/currency-big-account.test.js`、`tests/unit/main-process/statement-currency-big-account.test.js`、`scripts/integration/statement-currency-big-account.js`
 
 ### `BALANCE_CALCULATED_OPTION` / `BALANCE_DISABLED_OPTION`

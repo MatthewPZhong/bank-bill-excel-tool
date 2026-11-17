@@ -151,9 +151,10 @@ async function run() {
       database.renameStatementChannel(channelId, '招行-上海');
       const renamed = listOwnerSeeds({ database, storageRoot, owner: channelOwner });
       assert.deepEqual([renamed.owner.name, renamed.owner.seedFileName, renamed.records.length], ['招行-上海', '招行.json', 0]);
+      // v3.2.18（D3）：日期从新到旧，同一天按账户号升序。
       assert.deepEqual(summarize(listOwnerSeeds({ database, storageRoot, owner: beijingOwner }).records), [
-        ['B001', '2026-09-01', 7000, CALCULATED, '招商银行-北京'],
         ['M001', '2026-09-02', 1005.25, MANUAL, '招商银行-上海'],
+        ['B001', '2026-09-01', 7000, CALCULATED, '招商银行-北京'],
         ['M001', '2026-09-01', 1000, CALCULATED, '招商银行-上海'],
         ['M002', '2026-08-31', 500, '账单里的余额', '招商银行-上海-子模板-1']
       ]);

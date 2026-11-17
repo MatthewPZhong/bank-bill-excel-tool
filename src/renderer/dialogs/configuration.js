@@ -31,6 +31,37 @@
       };
     }
 
+    // v3.2.18 模板【更新】后映射仍引用已删除的字段：补一个「（已删除）」选项保持选中并标红，
+    // 保存时由主进程校验明确拒绝（映射字段不存在），而不是在界面上显示为空、再被静默保存为空。
+    // 与主进程引用收集同口径，只跳过内部存储值：固定值前缀（所有字段），按币种取大账号标记（仅 MerchantId）；
+    // 以 __ 开头的普通列名、其他字段上与标记同名的真实列名照常按源字段处理。
+    const INTERNAL_MAPPING_VALUE_PREFIX = '__FIXED__:';
+    const MERCHANT_ID_CURRENCY_ONLY_MARKER = '__CURRENCY_ONLY_BIG_ACCOUNT__';
+    function ensureStaleFieldOption(select, value, targetField) {
+      const normalized = String(value ?? '').trim();
+      if (!select || !normalized || normalized.startsWith(INTERNAL_MAPPING_VALUE_PREFIX)) return false;
+      if (targetField === 'MerchantId' && normalized === MERCHANT_ID_CURRENCY_ONLY_MARKER) return false;
+      if (Array.from(select.options).some((option) => option.value === normalized)) return false;
+      const option = document.createElement('option');
+      option.value = normalized;
+      option.textContent = `${normalized}（已删除）`;
+      option.dataset.stale = 'true';
+      select.appendChild(option);
+      select.value = normalized;
+      select.classList.add('is-stale');
+      select.addEventListener('change', () => {
+        select.classList.toggle('is-stale', select.selectedOptions[0]?.dataset.stale === 'true');
+      });
+      return true;
+    }
+
+    // 拼接字段面板的可选项：当前表头 + 已选但不在表头中的字段（标为已删除，可取消勾选）。
+    function listConcatPanelFields(headers, selectedFields) {
+      const current = Array.isArray(headers) ? headers : [];
+      const stale = (selectedFields || []).filter((field) => field && !current.includes(field));
+      return current.map((field) => ({ field, stale: false })).concat(stale.map((field) => ({ field, stale: true })));
+    }
+
     // 标题右侧「Tips」悬停说明：放在 .dialog-title 内，图案按标题字号取 1em 宽、0.5em 高。
     function titleTipsHtml(text, { hidden = false } = {}) {
       return `<span class="title-tips"${hidden ? ' hidden' : ''}>`
@@ -67,21 +98,28 @@
       const dialog = document.createElement('div');
       const fieldLabel = kind === 'detail' ? '明细' : '余额';
       dialog.className = 'modal-card alert-card export-scope-card';
+      // v3.2.18：右上角关闭；提示文字与图标垂直居中；两个范围按钮并排居中（当前批次在左）。
       dialog.innerHTML = `
+        <button class="icon-close export-scope-close" type="button" data-action="close" title="关闭" aria-label="关闭">×</button>
         <div class="alert-body">
           <div class="alert-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="28" height="28"><defs><linearGradient id="exportScopeIconG" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="100%" stop-color="#9B72F2"/></linearGradient></defs><circle cx="12" cy="12" r="10" fill="none" stroke="url(#exportScopeIconG)" stroke-width="2"/><path d="M12 7v6M12 16v1" stroke="url(#exportScopeIconG)" stroke-width="2" stroke-linecap="round"/></svg>
           </div>
           <div class="alert-message">请选择要导出的范围</div>
         </div>
-        <div class="dialog-actions vertical">
-          <button class="secondary-btn small export-scope-btn" type="button" data-scope="current">导出当前批次文件的${fieldLabel}</button>
-          <button class="secondary-btn small export-scope-btn" type="button" data-scope="all">导出所有批次文件的${fieldLabel}</button>
+        <div class="dialog-actions center">
+          <button class="secondary-btn small" type="button" data-scope="current">导出当前批次文件的${fieldLabel}</button>
+          <button class="secondary-btn small" type="button" data-scope="all">导出所有批次文件的${fieldLabel}</button>
         </div>
       `;
 
       let exporting = false;
-      registerModal(overlay, { canClose: () => !exporting });
+      // 初始焦点仍在「导出当前批次」，不落在右上角关闭按钮上。
+      registerModal(overlay, { canClose: () => !exporting, initialFocus: () => dialog.querySelector('[data-scope="current"]') });
+      // 导出进行中由 canClose 拦截；关闭不导出、不改状态栏。
+      dialog.querySelector('[data-action="close"]').addEventListener('click', () => {
+        closeModal(overlay);
+      });
       async function runExport(scope) {
         const handle = modalBridge.host.getHandle(overlay);
         if (exporting || !handle?.isOpen()) return;
@@ -433,37 +471,93 @@
         + `，差额 ${formatBalanceAmount(mismatch.difference, true)}${missing}`;
     }
 
+    // 核对说明里的金额片段：渲染时单独标黑（正文色），其余文字沿用提示的棕色（v3.2.18）。
+    function seedMismatchAmount(value) {
+      return { text: formatBalanceAmount(value), amount: Number.isFinite(Number(value)) };
+    }
+
+    // 标签模板：插值为片段或片段数组时原样保留（金额不与文字合并），其余按文字拼接，相邻文字合并。
+    function seedMismatchParts(strings, ...values) {
+      const parts = [];
+      const push = (item) => {
+        if (Array.isArray(item)) {
+          item.forEach(push);
+          return;
+        }
+        if (item?.amount) {
+          parts.push(item);
+          return;
+        }
+        const text = item && typeof item === 'object' ? item.text : String(item);
+        if (!text) return;
+        const last = parts[parts.length - 1];
+        if (last && !last.amount) last.text += text;
+        else parts.push({ text });
+      };
+      strings.forEach((text, index) => {
+        push(text);
+        if (index < values.length) push(values[index]);
+      });
+      return parts;
+    }
+
     // 账单当日余额较多（每笔交易一个余额）时只列前后各 3 个并注明总数，避免说明撑满弹窗（v3.2.17 D1）。
     const SEED_MISMATCH_BALANCE_PREVIEW_EACH_SIDE = 3;
     // 返回「与账单当日余额」之后的部分：不超过 6 个时与 v3.2.16 相同（空格后全部列出）。
     function formatSeedMismatchStatementBalances(values) {
       const balances = Array.isArray(values) ? values : [];
       if (!balances.length) return ' (空)';
-      const join = (items) => items.map((value) => formatBalanceAmount(value)).join('、');
-      if (balances.length <= SEED_MISMATCH_BALANCE_PREVIEW_EACH_SIDE * 2) return ` ${join(balances)}`;
-      return `（共 ${balances.length} 个）${join(balances.slice(0, SEED_MISMATCH_BALANCE_PREVIEW_EACH_SIDE))} … `
-        + join(balances.slice(-SEED_MISMATCH_BALANCE_PREVIEW_EACH_SIDE));
+      const join = (items) => items.flatMap((value, index) => (index ? ['、', seedMismatchAmount(value)] : [seedMismatchAmount(value)]));
+      if (balances.length <= SEED_MISMATCH_BALANCE_PREVIEW_EACH_SIDE * 2) return seedMismatchParts` ${join(balances)}`;
+      return seedMismatchParts`（共 ${balances.length} 个）${join(balances.slice(0, SEED_MISMATCH_BALANCE_PREVIEW_EACH_SIDE))} … ${
+        join(balances.slice(-SEED_MISMATCH_BALANCE_PREVIEW_EACH_SIDE))}`;
     }
 
     // 已有种子但首日多个余额都对不上：写明已有余额、当日收支与账单当日余额，提示核对后重填（v3.2.16 D7）。
     // 种子日期与首日之间缺日期时写明缺的日期，引导补录首日前一天的期末余额（v3.2.17 D3）。
+    // 返回片段列表（金额单独成片），由 renderBalanceSeedMismatchDetail 分行渲染。
     function formatBalanceSeedMismatchDetail(seedMismatch) {
-      const statementBalances = formatSeedMismatchStatementBalances(seedMismatch.statementBalances);
       const seedAmount = formatBalanceAmount(seedMismatch.seedBalance);
       const anchorAmount = formatBalanceAmount(seedMismatch.anchorBalance);
-      const anchorNote = anchorAmount === seedAmount ? '' : `（扣回余额附加值后为 ${anchorAmount}）`;
-      const summary = `已有 ${seedMismatch.seedDate} 的余额 ${seedAmount}（${seedMismatch.seedGenerationMethod || '人工录入'}）${anchorNote}，`
-        + `加上 ${seedMismatch.billDate} 收入 ${formatBalanceAmount(seedMismatch.creditAmount)}、`
-        + `支出 ${formatBalanceAmount(seedMismatch.debitAmount)} 后应为 ${formatBalanceAmount(seedMismatch.expectedBalance)}，`
-        + `与账单当日余额${statementBalances} 都对不上。`;
+      const anchorNote = anchorAmount === seedAmount
+        ? ''
+        : seedMismatchParts`（扣回余额附加值后为 ${seedMismatchAmount(seedMismatch.anchorBalance)}）`;
+      const summary = [
+        seedMismatchParts`已有 ${seedMismatch.seedDate} 的余额 ${seedMismatchAmount(seedMismatch.seedBalance)}（${
+          seedMismatch.seedGenerationMethod || '人工录入'}）${anchorNote}，`,
+        seedMismatchParts`加上 ${seedMismatch.billDate} 收入 ${seedMismatchAmount(seedMismatch.creditAmount)}、`,
+        seedMismatchParts`支出 ${seedMismatchAmount(seedMismatch.debitAmount)} 后应为 ${seedMismatchAmount(seedMismatch.expectedBalance)}，`,
+        seedMismatchParts`与账单当日余额${formatSeedMismatchStatementBalances(seedMismatch.statementBalances)} 都对不上。`
+      ];
       if (!seedMismatch.missingFrom) {
-        return `${summary}请核对上一账单日余额（可参考账单上的期初余额）后重新填写。`;
+        return seedMismatchParts`${summary}请核对上一账单日余额（可参考账单上的期初余额）后重新填写。`;
       }
       const singleDay = seedMismatch.missingFrom === seedMismatch.missingTo;
       const missing = singleDay ? seedMismatch.missingFrom : `${seedMismatch.missingFrom} ~ ${seedMismatch.missingTo}`;
-      return `${summary}${seedMismatch.seedDate} 与 ${seedMismatch.billDate} 之间缺 ${missing} 的账单，`
-        + `请先核对是否漏导了${singleDay ? '这天' : '这几天'}的账单；`
-        + `也可以直接填写 ${seedMismatch.suggestedSeedDate} 的期末余额（可参考账单上的期初余额）。`;
+      return seedMismatchParts`${summary}${[
+        seedMismatchParts`${seedMismatch.seedDate} 与 ${seedMismatch.billDate} 之间缺 ${missing} 的账单，`,
+        seedMismatchParts`请先核对是否漏导了${singleDay ? '这天' : '这几天'}的账单；`,
+        seedMismatchParts`也可以直接填写 ${seedMismatch.suggestedSeedDate} 的期末余额（可参考账单上的期初余额）。`
+      ]}`;
+    }
+
+    // 遇「。」换行（句号留在行尾），金额包一层标黑；行间不留空白，textContent 与整段文字一致（v3.2.18）。
+    function renderBalanceSeedMismatchDetail(seedMismatch) {
+      const lines = [[]];
+      formatBalanceSeedMismatchDetail(seedMismatch).forEach((part) => {
+        if (part.amount) {
+          lines[lines.length - 1].push(`<span class="manual-balance-seed-mismatch-amount">${escapeHtml(part.text)}</span>`);
+          return;
+        }
+        part.text.split(/(?<=。)/).forEach((piece) => {
+          if (!piece) return;
+          lines[lines.length - 1].push(escapeHtml(piece));
+          if (piece.endsWith('。')) lines.push([]);
+        });
+      });
+      return lines.filter((line) => line.length)
+        .map((line) => `<span class="manual-balance-seed-mismatch-line">${line.join('')}</span>`)
+        .join('');
     }
 
     function formatSeedMismatchAmountInput(value) {
@@ -755,7 +849,7 @@
             </div>
             ${seedMismatch ? `
             <div class="balance-gap-warning manual-balance-seed-mismatch">
-              ${escapeHtml(formatBalanceSeedMismatchDetail(seedMismatch))}
+              ${renderBalanceSeedMismatchDetail(seedMismatch)}
             </div>` : ''}
           </div>
           <div class="manual-balance-form">
@@ -1300,8 +1394,9 @@
       return matchedOption?.code || '';
     }
 
-    // ==================== v3.2.16「字段筛选特征值」 ====================
-    // 匹配口径与 src/backend/file-service/feature-filter.js 一致（后端为准，保存时再次校验）。
+    // ==================== v3.2.16「字段筛选特征值」/ v3.2.18 多特征值 ====================
+    // 匹配与名称口径与 src/backend/file-service/feature-filter.js 一致（后端为准，保存时再次校验）。
+    // v3.2.18：模板可有多个特征值 [{ id, name, ...rule }]；映射行 mappedFields[0] 为所选特征值 id。
     const FEATURE_FILTER_SEPARATOR_OPTIONS = [
       { value: '', label: '不拆分（整格匹配）' },
       { value: 'space', label: '空格' },
@@ -1311,9 +1406,24 @@
       { value: 'backslash', label: '\\' }
     ];
     const FEATURE_FILTER_MAX_LENGTH = 200;
+    const FEATURE_FILTER_NAME_MAX_LENGTH = 30;
+    const FEATURE_FILTER_SPLIT_USAGE_SUFFIX = '（拆分/合并映射）';
 
-    function cloneFeatureFilter(rule) {
-      return rule && typeof rule === 'object' && !Array.isArray(rule) ? { ...rule } : null;
+    function cloneFeatureFilters(list) {
+      return Array.isArray(list)
+        ? list
+          .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+          .map((item) => ({ ...item, id: String(item.id ?? ''), name: String(item.name ?? '') }))
+        : [];
+    }
+
+    function findFeatureFilterById(list, id) {
+      const key = String(id ?? '');
+      return key ? (list || []).find((item) => String(item.id) === key) || null : null;
+    }
+
+    function getFeatureFilterRef(mapping) {
+      return String((mapping && Array.isArray(mapping.mappedFields) ? mapping.mappedFields[0] : '') ?? '').trim();
     }
 
     function splitFeatureFilterText(text, separator) {
@@ -1354,7 +1464,7 @@
     }
 
     function describeFeatureFilter(rule) {
-      if (!rule) return '尚未设置筛选条件';
+      if (!rule) return '尚未选择特征值';
       const separator = FEATURE_FILTER_SEPARATOR_OPTIONS.find((option) => option.value === rule.separator);
       const parts = [`筛选字段：${rule.sourceField}`, `分隔符：${separator ? separator.label : '不拆分'}`];
       if (rule.length !== null && rule.length !== undefined) parts.push(`长度 ${rule.length}`);
@@ -1379,8 +1489,17 @@
       return count;
     }
 
-    // 校验弹窗草稿，返回 { errors, rule }；错误文案与后端一致。
-    function validateFeatureFilterDraft(draft, headers) {
+    // 校验弹窗草稿，返回 { errors, rule }；错误文案与后端一致。others：本模板其他特征值（名称不能重复）。
+    function validateFeatureFilterDraft(draft, headers, others = []) {
+      const nameErrors = [];
+      const name = String(draft.name || '').trim();
+      if (!name) {
+        nameErrors.push('请输入特征值名');
+      } else if (Array.from(name).length > FEATURE_FILTER_NAME_MAX_LENGTH) {
+        nameErrors.push(`特征值名「${name}」超过 ${FEATURE_FILTER_NAME_MAX_LENGTH} 个字`);
+      } else if ((others || []).some((item) => String(item.name || '').trim() === name)) {
+        nameErrors.push(`特征值名「${name}」已存在`);
+      }
       const errors = [];
       const sourceField = String(draft.sourceField || '').trim();
       const headerSet = new Set((headers || []).map((header) => String(header ?? '').trim()).filter(Boolean));
@@ -1402,23 +1521,59 @@
           errors.push('勾选纯数字时，特征长度须大于前几位英文');
         }
       }
-      const rule = { sourceField, separator, length, letterPrefixCount, digitsOnly, sample: String(draft.sample || '').trim() };
+      const rule = { name, sourceField, separator, length, letterPrefixCount, digitsOnly, sample: String(draft.sample || '').trim() };
       if (!errors.length && rule.sample) {
         const sampleTokens = splitFeatureFilterText(rule.sample, separator);
         if (sampleTokens.length !== 1 || sampleTokens[0] !== rule.sample) {
-          errors.push(`特征值「${rule.sample}」不能包含所选分隔符`);
+          errors.push(`输入特征值「${rule.sample}」不能包含所选分隔符`);
         } else if (!matchesFeatureFilterRule(rule.sample, rule)) {
-          errors.push(`特征值「${rule.sample}」不符合当前筛选条件`);
+          errors.push(`输入特征值「${rule.sample}」不符合当前筛选条件`);
         }
       }
-      return { errors, rule };
+      return { errors: nameErrors.concat(errors), rule };
     }
 
-    function createFeatureFilterDialog({ headers = [], featureFilter = null, onDone, onCancel }) {
+    // 「选择特征值」/「特征值」下拉框：空白 + 全部特征值；selectedId 不在列表中时回到空白。
+    function renderFeatureFilterOptions(selectElement, featureFilters, selectedId) {
+      if (!selectElement) return;
+      selectElement.replaceChildren();
+      const blank = document.createElement('option');
+      blank.value = '';
+      blank.textContent = '';
+      selectElement.appendChild(blank);
+      (featureFilters || []).forEach((item) => {
+        const option = document.createElement('option');
+        option.value = String(item.id);
+        option.textContent = item.name;
+        selectElement.appendChild(option);
+      });
+      selectElement.value = findFeatureFilterById(featureFilters, selectedId) ? String(selectedId) : '';
+      selectElement.title = describeFeatureFilter(findFeatureFilterById(featureFilters, selectElement.value));
+    }
+
+    // v3.2.18：草稿中选用各特征值的字段 Map(id → [字段标签])，删除前检查（已保存映射另由后端拦截）。
+    function collectFeatureFilterUsage(mappings, suffix = '', usage = new Map()) {
+      (mappings || []).forEach((mapping) => {
+        if (!mapping || mapping.mappedField !== FEATURE_FILTER_MAPPING_FIELD) return;
+        const id = getFeatureFilterRef(mapping);
+        if (!id) return;
+        const label = `${mapping.templateField}${suffix}`;
+        const labels = usage.get(id) || [];
+        if (!labels.includes(label)) labels.push(label);
+        usage.set(id, labels);
+      });
+      return usage;
+    }
+
+    // v3.2.18「特征值管理」（原「筛选特征值」）：新增、选中修改、删除特征值；【保存】与确认删除立即写入模板（spec D7）。
+    //   getUsage()：各弹窗草稿中选用各特征值的字段；onChange(list)：保存或删除成功后回传最新列表；onClose()：弹窗关闭。
+    function createFeatureFilterManagerDialog({ templateId, headers = [], featureFilters = [], getUsage, onChange, onClose }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card feature-filter-card';
-      const initial = cloneFeatureFilter(featureFilter);
+      let currentList = cloneFeatureFilters(featureFilters);
+      // null：设置区隐藏；''：新增；其他：正在修改的特征值 id
+      let editingId = null;
       const sourceOptions = ['<option value=""></option>']
         .concat((headers || [])
           .filter((header) => String(header ?? '').trim() !== '')
@@ -1430,13 +1585,23 @@
 
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">筛选特征值${titleTipsHtml(`按分隔符把筛选字段拆成多段，取第一个满足条件的片段；筛不出时留空。本模板所有选择「${FEATURE_FILTER_MAPPING_FIELD}」的字段共用这一套条件。`)}</div>
+          <div class="dialog-title">特征值管理${titleTipsHtml(`每个特征值是一套筛选条件：按分隔符把筛选字段拆成多段，取第一个满足条件的片段，筛不出时留空。选择「${FEATURE_FILTER_MAPPING_FIELD}」的字段在「选择特征值」中选用；保存与删除立即生效。`)}</div>
+          <div class="feature-filter-toolbar">
+            <button class="secondary-btn small" type="button" data-action="add">新增</button>
+            <label class="feature-filter-toolbar-label" for="feature-filter-pick">特征值</label>
+            <select id="feature-filter-pick" class="mapping-select feature-filter-pick"></select>
+            <button class="secondary-btn small" type="button" data-action="delete">删除</button>
+          </div>
           <button class="icon-close" type="button">×</button>
         </div>
-        <div class="feature-filter-body">
+        <div class="feature-filter-body" hidden>
           <div class="feature-filter-grid">
+            <label class="feature-filter-label" for="feature-filter-name">特征值名</label>
+            <input id="feature-filter-name" class="mapping-text-input feature-filter-name" type="text" maxlength="${FEATURE_FILTER_NAME_MAX_LENGTH}" placeholder="如 流水号" spellcheck="false" />
             <label class="feature-filter-label" for="feature-filter-source">筛选字段</label>
             <select id="feature-filter-source" class="mapping-select feature-filter-source">${sourceOptions}</select>
+            <label class="feature-filter-label" for="feature-filter-sample">输入特征值</label>
+            <input id="feature-filter-sample" class="mapping-text-input feature-filter-sample" type="text" placeholder="如 FT24123456，输入后自动填写下面的条件" spellcheck="false" />
             <label class="feature-filter-label" for="feature-filter-separator">分隔符</label>
             <select id="feature-filter-separator" class="mapping-select feature-filter-separator">${separatorOptions}</select>
             <label class="feature-filter-label" for="feature-filter-length">特征长度</label>
@@ -1448,16 +1613,17 @@
               <input class="feature-filter-digits" type="checkbox" />
               <span class="feature-filter-digits-label"></span>
             </label>
-            <label class="feature-filter-label" for="feature-filter-sample">输入特征值</label>
-            <input id="feature-filter-sample" class="mapping-text-input feature-filter-sample" type="text" placeholder="如 FT24123456，输入后自动填写上面的条件" spellcheck="false" />
           </div>
         </div>
         <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="save">保存</button>
           <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
-          <button class="primary-btn small" type="button" data-action="done">确定</button>
         </div>
       `;
 
+      const pickSelect = dialog.querySelector('.feature-filter-pick');
+      const body = dialog.querySelector('.feature-filter-body');
+      const nameInput = dialog.querySelector('.feature-filter-name');
       const sourceSelect = dialog.querySelector('.feature-filter-source');
       const separatorSelect = dialog.querySelector('.feature-filter-separator');
       const lengthInput = dialog.querySelector('.feature-filter-length');
@@ -1465,6 +1631,7 @@
       const digitsInput = dialog.querySelector('.feature-filter-digits');
       const digitsLabel = dialog.querySelector('.feature-filter-digits-label');
       const sampleInput = dialog.querySelector('.feature-filter-sample');
+      const writeScope = createDialogWriteScope(overlay, dialog);
 
       function syncDigitsLabel() {
         const prefixText = String(prefixInput.value || '').trim();
@@ -1473,13 +1640,52 @@
           : '整段都是数字';
       }
 
-      sourceSelect.value = initial ? String(initial.sourceField || '') : '';
-      separatorSelect.value = initial ? String(initial.separator || '') : 'space';
-      lengthInput.value = initial && initial.length ? String(initial.length) : '';
-      prefixInput.value = initial && initial.letterPrefixCount ? String(initial.letterPrefixCount) : '';
-      digitsInput.checked = Boolean(initial && initial.digitsOnly);
-      sampleInput.value = initial ? String(initial.sample || '') : '';
+      function showForm(item) {
+        nameInput.value = item ? String(item.name || '') : '';
+        // 模板【更新】后筛选字段可能已不在表头：显示为「X（已删除）」并标红，保存前须重新选择
+        sourceSelect.querySelectorAll('option[data-stale="true"]').forEach((option) => option.remove());
+        sourceSelect.classList.remove('is-stale');
+        const sourceField = item ? String(item.sourceField || '').trim() : '';
+        sourceSelect.value = sourceField;
+        if (sourceField && sourceSelect.value !== sourceField) ensureStaleFieldOption(sourceSelect, sourceField, '');
+        separatorSelect.value = item ? String(item.separator || '') : 'space';
+        lengthInput.value = item && item.length ? String(item.length) : '';
+        prefixInput.value = item && item.letterPrefixCount ? String(item.letterPrefixCount) : '';
+        digitsInput.checked = Boolean(item && item.digitsOnly);
+        sampleInput.value = item ? String(item.sample || '') : '';
+        syncDigitsLabel();
+        body.hidden = false;
+      }
+
+      function hideForm() {
+        editingId = null;
+        body.hidden = true;
+      }
+
+      function renderPick(selectedId) {
+        renderFeatureFilterOptions(pickSelect, currentList, selectedId);
+      }
+
+      renderPick('');
       syncDigitsLabel();
+
+      pickSelect.addEventListener('change', () => {
+        const item = findFeatureFilterById(currentList, pickSelect.value);
+        pickSelect.title = describeFeatureFilter(item);
+        if (!item) {
+          hideForm();
+          return;
+        }
+        editingId = String(item.id);
+        showForm(item);
+      });
+
+      dialog.querySelector('[data-action="add"]').addEventListener('click', () => {
+        renderPick('');
+        editingId = '';
+        showForm(null);
+        nameInput.focus();
+      });
 
       prefixInput.addEventListener('input', syncDigitsLabel);
       sampleInput.addEventListener('input', () => {
@@ -1491,42 +1697,118 @@
         syncDigitsLabel();
       });
 
-      function cancelFeatureFilter() {
-        const closed = closeModal(overlay, { status: 'cancelled', reason: 'cancel' });
-        if (closed.status === 'closed' && typeof onCancel === 'function') onCancel();
+      function alertOn(parent, message) {
+        pushAlert(parent, () => createAlertDialog(escapeHtml(message || '保存失败'), { onConfirm: null }));
       }
-      dialog.querySelector('.icon-close').addEventListener('click', cancelFeatureFilter);
-      dialog.querySelector('[data-action="cancel"]').addEventListener('click', cancelFeatureFilter);
-      dialog.querySelector('[data-action="done"]').addEventListener('click', () => {
+
+      dialog.querySelector('[data-action="delete"]').addEventListener('click', () => {
+        const target = findFeatureFilterById(currentList, pickSelect.value);
+        if (!target) {
+          alertOn(overlay, '请选择要删除的特征值');
+          return;
+        }
+        const usage = typeof getUsage === 'function' ? getUsage() : new Map();
+        const usedBy = (usage && usage.get(String(target.id))) || [];
+        if (usedBy.length) {
+          alertOn(overlay, `特征值「${target.name}」正被 ${usedBy.join('、')} 使用，请先改选其他特征值后再删除`);
+          return;
+        }
+        pushModal(overlay, () => {
+          let confirmScope;
+          const confirmation = createConfirmDialog({
+            message: `确定删除特征值「${escapeHtml(target.name)}」？`,
+            confirmText: '确定删除',
+            cancelText: '取消',
+            onConfirm: async () => {
+              const handle = confirmScope.begin();
+              if (!handle) return;
+              const nextList = currentList.filter((item) => String(item.id) !== String(target.id));
+              let result;
+              try {
+                result = await api.templates.saveFeatureFilters({ templateId, featureFilters: nextList });
+              } catch (error) {
+                result = { status: 'error', message: error.message || '删除特征值失败' };
+              } finally { confirmScope.finish(handle); }
+              if (!confirmScope.isCurrent(handle)) return;
+              if (result?.status !== 'success') {
+                alertOn(confirmation, result?.message || '删除特征值失败');
+                return;
+              }
+              const closed = closeModal(handle, { status: 'submitted' });
+              if (closed.status !== 'closed') return;
+              currentList = cloneFeatureFilters(result.featureFilters);
+              renderPick('');
+              hideForm();
+              if (typeof onChange === 'function') onChange(cloneFeatureFilters(currentList));
+            }
+          });
+          confirmScope = createDialogWriteScope(confirmation, confirmation);
+          return confirmation;
+        });
+      });
+
+      function closeManager(status) {
+        const closed = closeModal(overlay, status === 'cancelled' ? { status, reason: 'cancel' } : { status });
+        if (closed.status === 'closed' && typeof onClose === 'function') onClose();
+      }
+
+      dialog.querySelector('.icon-close').addEventListener('click', () => closeManager('cancelled'));
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => closeManager('cancelled'));
+      dialog.querySelector('[data-action="save"]').addEventListener('click', async () => {
+        if (editingId === null) {
+          closeManager('submitted');
+          return;
+        }
+        const others = currentList.filter((item) => String(item.id) !== editingId);
         const { errors, rule } = validateFeatureFilterDraft({
+          name: nameInput.value,
           sourceField: sourceSelect.value,
           separator: separatorSelect.value,
           length: lengthInput.value,
           letterPrefixCount: prefixInput.value,
           digitsOnly: digitsInput.checked,
           sample: sampleInput.value
-        }, headers);
+        }, headers, others);
         if (errors.length) {
           pushAlert(overlay, () => createAlertDialog(errors.map((error) => escapeHtml(error)).join('<br/>'), { onConfirm: null }));
           return;
         }
-        const closed = closeModal(overlay, { status: 'submitted', value: rule });
-        if (closed.status === 'closed' && typeof onDone === 'function') onDone(rule);
+        const nextList = editingId
+          ? currentList.map((item) => (String(item.id) === editingId ? { ...rule, id: editingId } : item))
+          : currentList.concat([{ ...rule }]);
+        const handle = writeScope.begin();
+        if (!handle) return;
+        let result;
+        try {
+          result = await api.templates.saveFeatureFilters({ templateId, featureFilters: nextList });
+        } catch (error) {
+          result = { status: 'error', message: error.message || '保存特征值失败' };
+        } finally { writeScope.finish(handle); }
+        if (!writeScope.isCurrent(handle)) return;
+        if (result?.status !== 'success') {
+          alertOn(overlay, result?.message || '保存特征值失败');
+          return;
+        }
+        currentList = cloneFeatureFilters(result.featureFilters);
+        if (typeof onChange === 'function') onChange(cloneFeatureFilters(currentList));
+        closeManager('submitted');
       });
 
       overlay.appendChild(dialog);
       return overlay;
     }
 
-    // 选了「字段筛选特征值」但模板还没有规则时，返回提示文案；否则返回 ''。
-    function findFeatureFilterMissingMessage(mappings, featureFilter) {
-      if (featureFilter) return '';
-      const fields = (mappings || [])
-        .filter((mapping) => mapping && mapping.mappedField === FEATURE_FILTER_MAPPING_FIELD)
+    // 选了「字段筛选特征值」但未选特征值、或所选特征值已不存在时，返回提示文案；否则返回 ''。
+    function findFeatureFilterMissingMessage(mappings, featureFilters) {
+      const featureRows = (mappings || []).filter((mapping) => mapping && mapping.mappedField === FEATURE_FILTER_MAPPING_FIELD);
+      const unselected = featureRows.filter((mapping) => !getFeatureFilterRef(mapping)).map((mapping) => mapping.templateField);
+      if (unselected.length) {
+        return `${unselected.join('、')} 选择了「${FEATURE_FILTER_MAPPING_FIELD}」，请选择特征值`;
+      }
+      const missing = featureRows
+        .filter((mapping) => !findFeatureFilterById(featureFilters, getFeatureFilterRef(mapping)))
         .map((mapping) => mapping.templateField);
-      return fields.length
-        ? `${fields.join('、')} 选择了「${FEATURE_FILTER_MAPPING_FIELD}」，请先点击【筛选条件】设置`
-        : '';
+      return missing.length ? `${missing.join('、')} 选择的特征值不存在，请重新选择` : '';
     }
 
     function getSelectValues(selectElement) {
@@ -1556,6 +1838,19 @@
             templateField: row.dataset.templateField,
             mappedField: CONCAT_FIELDS_MAPPING_FIELD,
             mappedFields: concatFields,
+            customValue: '',
+            isMultiBigAccount: false
+          };
+        }
+
+        // v3.2.18：字段筛选特征值带出「选择特征值」所选 id（未选为空数组，由保存前检查提示）
+        if (firstValue === FEATURE_FILTER_MAPPING_FIELD) {
+          const featureValueSelect = row.querySelector('.mapping-feature-value-select');
+          const featureFilterRef = featureValueSelect ? String(featureValueSelect.value || '') : '';
+          return {
+            templateField: row.dataset.templateField,
+            mappedField: FEATURE_FILTER_MAPPING_FIELD,
+            mappedFields: featureFilterRef ? [featureFilterRef] : [],
             customValue: '',
             isMultiBigAccount: false
           };
@@ -1636,6 +1931,106 @@
         if (!writeScope.isCurrent(handle)) return;
         if (result.status === 'success') replaceModal(handle, () => createTemplateManagerDialog(managerOptions));
         else pushAlert(overlay, () => createAlertDialog(result.message));
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // v3.2.18【导入模板】命名（spec：changes/v3.2.18/feat/template-import-naming/spec.md）：
+    //   选中的文件识别为新模板后输入银行渠道名、地区，模板名 = 银行渠道名-地区。输入时只保留英文字母、数字和空格
+    //   （输入法组合结束后再过滤）；转大写、重名判断以 Main 为准。onSubmit 返回 { close, message }，
+    //   close 为 false 时弹框保留并提示，供改名重试。弹框以任何方式关闭且未成功提交时调用 onCancel。
+    const TEMPLATE_IMPORT_NAME_DISALLOWED = /[^A-Za-z0-9 ]+/g;
+
+    function sanitizeTemplateImportNameInput(input) {
+      const value = input.value;
+      const next = value.replace(TEMPLATE_IMPORT_NAME_DISALLOWED, '');
+      if (next === value) return;
+      const caret = typeof input.selectionStart === 'number' ? input.selectionStart : value.length;
+      const keptBeforeCaret = value.slice(0, caret).replace(TEMPLATE_IMPORT_NAME_DISALLOWED, '').length;
+      input.value = next;
+      input.setSelectionRange(keptBeforeCaret, keptBeforeCaret);
+    }
+
+    function createTemplateImportNameDialog({ sourceFileName = '', onSubmit, onCancel } = {}) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manual-balance-card template-import-name-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">导入模板${titleTipsHtml('模板名为「银行渠道名-地区」。只能输入英文字母、数字和空格，小写字母保存时自动转为大写。同一渠道的另一种格式，请在模板管理的渠道行点【导入子模板】。')}</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="manual-balance-form">
+          <label class="manual-balance-row">
+            <span class="manual-balance-label">模板文件</span>
+            <input class="mapping-text-input manual-balance-input" type="text" data-role="template-import-file" value="${escapeHtml(sourceFileName)}" disabled />
+          </label>
+          <label class="manual-balance-row">
+            <span class="manual-balance-label">银行渠道名</span>
+            <input class="mapping-text-input manual-balance-input" type="text" data-field="bankName" spellcheck="false" autocomplete="off" maxlength="60" />
+          </label>
+          <label class="manual-balance-row">
+            <span class="manual-balance-label">地区</span>
+            <input class="mapping-text-input manual-balance-input" type="text" data-field="region" spellcheck="false" autocomplete="off" maxlength="60" />
+          </label>
+        </div>
+        <div class="dialog-actions right">
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+          <button class="primary-btn small" type="button" data-action="confirm">确认</button>
+        </div>
+      `;
+
+      const bankInput = dialog.querySelector('[data-field="bankName"]');
+      const regionInput = dialog.querySelector('[data-field="region"]');
+      const writeScope = createDialogWriteScope(overlay, dialog);
+      let submitted = false;
+
+      [bankInput, regionInput].forEach((input) => {
+        input.addEventListener('input', (event) => {
+          if (!event.isComposing) sanitizeTemplateImportNameInput(input);
+        });
+        input.addEventListener('compositionend', () => sanitizeTemplateImportNameInput(input));
+        input.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' && !event.isComposing) submit();
+        });
+      });
+
+      async function submit() {
+        const missing = [[bankInput, '银行渠道名'], [regionInput, '地区']]
+          .filter(([input]) => !input.value.trim())
+          .map(([, label]) => label);
+        if (missing.length) {
+          pushAlert(overlay, () => createAlertDialog(escapeHtml(`请填写${missing.join('和')}`), { onConfirm: null }));
+          return;
+        }
+        const handle = writeScope.begin();
+        if (!handle) return;
+        let outcome;
+        try {
+          outcome = await onSubmit({ bankName: bankInput.value, region: regionInput.value });
+        } catch (error) {
+          outcome = { close: false, message: (error && error.message) || '导入模板失败' };
+        } finally { writeScope.finish(handle); }
+        if (!handle.isOpen()) return;
+        if (outcome && outcome.close === false) {
+          if (outcome.message) pushAlert(overlay, () => createAlertDialog(escapeHtml(outcome.message), { onConfirm: null }));
+          return;
+        }
+        submitted = true;
+        closeModal(overlay, { status: 'submitted' });
+      }
+
+      const cancel = () => closeModal(overlay, { status: 'cancelled', reason: 'cancel' });
+      dialog.querySelector('.icon-close').addEventListener('click', cancel);
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', cancel);
+      dialog.querySelector('[data-action="confirm"]').addEventListener('click', submit);
+      registerModal(overlay, {
+        onMount: () => { bankInput.focus(); },
+        onDispose: () => {
+          if (!submitted && typeof onCancel === 'function') onCancel();
+        }
       });
 
       overlay.appendChild(dialog);
@@ -3506,8 +3901,183 @@
       return overlay;
     }
 
+    // 打开模板的映射关系管理：读取映射后替换 replaceTarget（及其上层）；anchor 为发起请求的弹窗，
+    // 请求返回时 anchor 已不在栈顶或 replaceTarget 已关闭（或 isCurrent 判定过期）则放弃显示。
+    async function openTemplateMappingEditor({ templateId, replaceTarget, anchor = replaceTarget, isCurrent = () => true }) {
+      const result = await api.templates.getMappings(templateId);
+      if (!anchor?.isOpen() || !anchor.isTop() || !replaceTarget?.isOpen() || !isCurrent()) return { status: 'stale' };
+      if (result.status !== 'success') {
+        setStatus(result.message, 'error', { errorReportReady: Boolean(result.errorReportReady) });
+        pushModal(anchor, () => createAlertDialog(result.message));
+        return result;
+      }
+      replaceModal(replaceTarget, () => createMappingDialog(result));
+      return result;
+    }
+
+    function headerChipsHtml(values, className, sign) {
+      return values.length
+        ? `<div class="template-import-diff">${values.map((value) => `<span class="${className}">${sign} ${escapeHtml(value)}</span>`).join('')}</div>`
+        : '<span class="template-header-update-none">无</span>';
+    }
+
+    // v3.2.18 模板管理【更新】：展示新旧模板的字段变更（分组汇总），确认后只替换表头，映射关系保留。
+    // ctx：{ managerHandle, templateId, expandChannelId }
+    function createTemplateHeaderUpdateDialog(preview, ctx) {
+      const { setStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card template-header-update-card';
+      const diff = preview.diff || {};
+      const added = Array.isArray(diff.added) ? diff.added : [];
+      const removed = Array.isArray(diff.removed) ? diff.removed : [];
+      const affected = Array.isArray(preview.affectedMappings) ? preview.affectedMappings : [];
+      const identical = Boolean(diff.identical);
+      const affectedHtml = affected.length
+        ? `<ul class="template-header-update-mappings">${affected.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>
+          <div class="template-header-update-note">更新后这些映射原样保留，请点击【修改映射关系】改为新的字段；修改前用该模板生成账单会提示映射字段不存在。</div>`
+        : '<span class="template-header-update-none">无</span>';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">字段变更</div>
+          <button class="icon-close" type="button" data-action="close" title="关闭" aria-label="关闭">×</button>
+        </div>
+        <div class="template-header-update-body">
+          <div class="template-header-update-source">模板「${escapeHtml(preview.templateName || '')}」← 文件「${escapeHtml(preview.sourceFileName || '')}」</div>
+          ${identical ? '<div class="template-header-update-identical">所选文件的表头与当前模板一致，字段无变化。</div>' : ''}
+          <div class="template-header-update-row" data-role="added">
+            <span class="template-header-update-label">新增字段（${added.length}）</span>
+            ${headerChipsHtml(added, 'is-added', '+')}
+          </div>
+          <div class="template-header-update-row" data-role="removed">
+            <span class="template-header-update-label">删除字段（${removed.length}）</span>
+            ${headerChipsHtml(removed, 'is-removed', '−')}
+          </div>
+          <div class="template-header-update-row" data-role="order">
+            <span class="template-header-update-label">字段顺序</span>
+            <span>${diff.orderChanged ? '有调整' : '无变化'}</span>
+          </div>
+          <div class="template-header-update-row" data-role="affected">
+            <span class="template-header-update-label">受影响的映射（${affected.length}）</span>
+            <div class="template-header-update-affected">${affectedHtml}</div>
+          </div>
+          <div class="template-header-update-note">更新只替换模板字段，映射关系、大账号、字段筛选与拆分规则均保留。</div>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="submit"${identical ? ' disabled' : ''}>更新模板</button>
+          <button class="secondary-btn small" type="button" data-action="back">返回</button>
+        </div>
+      `;
+      const writeScope = createDialogWriteScope(overlay, dialog);
+      const goBack = () => closeModal(overlay);
+      dialog.querySelector('[data-action="close"]').addEventListener('click', goBack);
+      dialog.querySelector('[data-action="back"]').addEventListener('click', goBack);
+      dialog.querySelector('[data-action="submit"]').addEventListener('click', async () => {
+        if (identical) return;
+        const handle = writeScope.begin();
+        if (!handle) return;
+        let result;
+        try {
+          result = await api.templates.updateHeaders({
+            templateId: preview.templateId,
+            expectedHeaders: preview.expectedHeaders,
+            headers: preview.headers,
+            sourceFileName: preview.sourceFileName
+          });
+          setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
+            errorReportReady: Boolean(result.errorReportReady)
+          });
+        } catch (error) {
+          result = { status: 'error', message: error.message || '模板更新失败' };
+          setStatus(result.message, 'error');
+        }
+        // 更新已成功时，列表刷新失败不改变「已更新」的结果（失效映射与【修改映射关系】入口保留），只单独提示。
+        if (result.status === 'success') {
+          try {
+            await refreshTemplates();
+          } catch (_error) {
+            result = { ...result, refreshFailed: true };
+          }
+        }
+        writeScope.finish(handle);
+        if (!writeScope.isCurrent(handle)) return;
+        replaceModal(handle, () => createTemplateHeaderUpdateResultDialog(result, ctx));
+      });
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // 【更新】结果：成功时可直接【修改映射关系】，失败只有【返回】；返回均回到刷新后的模板管理。
+    function createTemplateHeaderUpdateResultDialog(result, ctx) {
+      const { setStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      const succeeded = result?.status === 'success';
+      const staleMappings = succeeded && Array.isArray(result.staleMappings) ? result.staleMappings : [];
+      // 失败或成功后列表刷新失败时，返回前需重新读取模板列表。
+      const needsRefresh = !succeeded || Boolean(result?.refreshFailed);
+      dialog.className = 'modal-card alert-card template-header-update-result-card';
+      dialog.innerHTML = `
+        <div class="alert-body">
+          <div class="alert-message">
+            <div data-role="message">${escapeHtml(result?.message || (succeeded ? '模板已更新' : '模板更新失败'))}</div>
+            ${succeeded && result.refreshFailed ? '<div class="template-header-update-result-label" data-role="refresh-failed">模板列表刷新失败，返回时会重新读取。</div>' : ''}
+            ${staleMappings.length ? `<div class="template-header-update-result-label">引用已删除字段的映射（${staleMappings.length}）：</div>
+              <ul class="template-header-update-mappings">${staleMappings.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>` : ''}
+          </div>
+        </div>
+        <div class="dialog-actions right">
+          ${succeeded ? '<button class="primary-btn small" type="button" data-action="edit-mappings">修改映射关系</button>' : ''}
+          <button class="secondary-btn small" type="button" data-action="back">返回</button>
+        </div>
+      `;
+      // opening 只防重复点击；不能拦截关闭，否则读取映射后替换模板管理（含本弹窗）会被拦下。
+      let opening = false;
+      dialog.querySelector('[data-action="back"]').addEventListener('click', async () => {
+        const self = modalBridge.host.getHandle(overlay);
+        if (opening || !self?.isTop()) return;
+        // 失败时（如确认期间模板被删除或修改）模板列表可能已过期，先重新读取再返回；成功时提交后已刷新。
+        if (needsRefresh) {
+          opening = true;
+          let refreshError = null;
+          try {
+            await refreshTemplates();
+          } catch (error) {
+            refreshError = error;
+          } finally {
+            opening = false;
+          }
+          // 迟到的结果（本弹窗已关闭或不在栈顶）不再反馈，也不替换新弹窗。
+          if (!self.isOpen() || !self.isTop()) return;
+          if (refreshError) setStatus(refreshError.message || '刷新模板列表失败', 'error');
+        }
+        const manager = ctx?.managerHandle;
+        if (manager?.isOpen()) {
+          replaceModal(manager, () => createTemplateManagerDialog({ expandChannelId: ctx.expandChannelId || null }));
+        } else {
+          closeModal(overlay);
+        }
+      });
+      dialog.querySelector('[data-action="edit-mappings"]')?.addEventListener('click', async () => {
+        const self = modalBridge.host.getHandle(overlay);
+        const manager = ctx?.managerHandle;
+        if (opening || !self?.isTop() || !manager?.isOpen()) return;
+        opening = true;
+        try {
+          await openTemplateMappingEditor({ templateId: ctx.templateId, replaceTarget: manager, anchor: self });
+        } catch (error) {
+          if (self.isOpen() && self.isTop()) setStatus(error.message || '读取映射关系失败', 'error');
+        } finally {
+          opening = false;
+        }
+      });
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     function renderTemplateTableRows(tableBody, { expandChannelId = null } = {}) {
       let mappingRequest = 0;
+      let headerUpdating = false;
       tableBody.innerHTML = '';
 
       if (!services.getTemplates().length && !services.getStatementChannels().length) {
@@ -3535,8 +4105,11 @@
             <span class="manager-big-account-summary" title="${escapeHtml(bigAccountSummary)}">${escapeHtml(bigAccountSummary)}</span>
           </td>
           <td class="manager-action-cell">
-            <div class="manager-row-actions">
-              <button class="text-action" type="button" data-action="manage">修改</button>
+            <div class="manager-row-actions template-manager-row-actions">
+              <span class="manager-row-lead-actions">
+                <button class="text-action" type="button" data-action="manage">修改</button>
+                <button class="text-action" type="button" data-action="update-headers" title="选择新的模板文件更新字段，映射关系保留">更新</button>
+              </span>
               <button class="text-action" type="button" data-action="rename">重命名</button>
               <button class="text-action danger" type="button" data-action="delete">删除</button>
             </div>
@@ -3547,14 +4120,35 @@
           const handle = modalBridge.host.getHandle(tableBody.closest('.modal-overlay'));
           if (!handle?.isTop()) return;
           const request = ++mappingRequest;
-          const result = await api.templates.getMappings(template.id);
-          if (!handle.isOpen() || !handle.isTop() || request !== mappingRequest) return;
+          await openTemplateMappingEditor({
+            templateId: template.id,
+            replaceTarget: handle,
+            isCurrent: () => request === mappingRequest
+          });
+        });
+        // v3.2.18【更新】：选择新模板文件 → 字段变更弹窗（叠在模板管理上）；取消选择文件不弹窗。
+        row.querySelector('[data-action="update-headers"]').addEventListener('click', async () => {
+          const manager = modalBridge.host.getHandle(tableBody.closest('.modal-overlay'));
+          if (!manager?.isTop() || headerUpdating) return;
+          headerUpdating = true;
+          const request = ++mappingRequest;
+          let result;
+          try {
+            result = await api.templates.previewHeaderUpdate(template.id);
+          } catch (error) {
+            result = { status: 'error', message: error.message || '读取模板文件失败' };
+          } finally {
+            headerUpdating = false;
+          }
+          if (!manager.isOpen() || !manager.isTop() || request !== mappingRequest) return;
+          if (!result || result.status === 'cancelled') return;
+          const ctx = { managerHandle: manager, templateId: template.id, expandChannelId: template.channelId || null };
           if (result.status !== 'success') {
             setStatus(result.message, 'error', { errorReportReady: Boolean(result.errorReportReady) });
-            pushModal(handle, () => createAlertDialog(result.message));
+            pushModal(manager, () => createTemplateHeaderUpdateResultDialog(result, ctx));
             return;
           }
-          replaceModal(handle, () => createMappingDialog(result));
+          pushModal(manager, () => createTemplateHeaderUpdateDialog(result, ctx));
         });
         row.querySelector('[data-action="rename"]').addEventListener('click', () => {
           openModal(() => createTemplateRenameDialog(template));
@@ -3634,8 +4228,10 @@
             <span class="manager-big-account-summary" title="${escapeHtml(bigAccountSummary)}">${escapeHtml(bigAccountSummary)}</span>
           </td>
           <td class="manager-action-cell">
-            <div class="manager-row-actions">
-              <button class="text-action" type="button" data-action="import-child">导入子模板</button>
+            <div class="manager-row-actions template-manager-row-actions">
+              <span class="manager-row-lead-actions">
+                <button class="text-action" type="button" data-action="import-child">导入子模板</button>
+              </span>
               <button class="text-action" type="button" data-action="rename">重命名</button>
               <button class="text-action danger" type="button" data-action="delete">删除</button>
             </div>
@@ -4033,8 +4629,8 @@
       let currentBillSplitMeta = payload.billSplitMeta && typeof payload.billSplitMeta === 'object'
         ? { signedAmountSourceField: String(payload.billSplitMeta.signedAmountSourceField || '') }
         : { signedAmountSourceField: '' };
-      // v3.2.16：模板级「字段筛选特征值」规则草稿；所有选该映射值的行共用，完成时随映射保存。
-      let currentFeatureFilter = cloneFeatureFilter(payload.template && payload.template.featureFilter);
+      // v3.2.18：模板的特征值列表（【特征值管理】保存/删除即时落库后回写）；各行在「选择特征值」中选用。
+      let currentFeatureFilters = cloneFeatureFilters(payload.template && payload.template.featureFilters);
       dialog.className = 'modal-card mapping-card';
       // v3.2.15（§4.2）：【渠道存在多个子模板】新建同名渠道；【设为子模板】选择渠道；两者互斥。
       //   打开属于渠道的模板时，【设为子模板】为勾选状态并选中所属渠道。
@@ -4187,7 +4783,9 @@
             <div class="mapping-field-editor">
               <select class="mapping-select">${selectOptions}</select>
               ${supportsMultiSelect ? `
-                <button class="secondary-btn small mapping-feature-filter-btn" type="button" hidden>筛选条件</button>
+                <span class="mapping-feature-value-label" hidden>选择特征值</span>
+                <select class="mapping-select mapping-feature-value-select" hidden></select>
+                <button class="secondary-btn small mapping-feature-filter-btn" type="button" hidden>特征值管理</button>
               ` : ''}
               ${isMerchantIdField ? `
                 <button class="secondary-btn small mapping-big-account-manage-btn" type="button" hidden>维护大账号</button>
@@ -4215,6 +4813,8 @@
         const manageCurrencyBigAccountBtn = row.querySelector('.mapping-currency-big-account-manage-btn');
         const manageAmountSplitBtn = row.querySelector('.mapping-amount-split-manage-btn');
         const featureFilterBtn = row.querySelector('.mapping-feature-filter-btn');
+        const featureValueLabel = row.querySelector('.mapping-feature-value-label');
+        const featureValueSelect = row.querySelector('.mapping-feature-value-select');
         const concatFieldPicker = row.querySelector('.concat-field-picker');
         const concatPickerTrigger = row.querySelector('.concat-picker-trigger');
         const concatPickerPanel = row.querySelector('.concat-picker-panel');
@@ -4224,6 +4824,12 @@
           ? savedMapping.mappedFields
           : (savedMapping.mappedField ? [savedMapping.mappedField] : []);
         const isSavedConcatMode = savedMapping.mappedField === CONCAT_FIELDS_MAPPING_FIELD;
+        // v3.2.18：已选特征值回显；切走映射值再切回时保留该行此前的选择
+        renderFeatureFilterOptions(
+          featureValueSelect,
+          currentFeatureFilters,
+          savedMapping.mappedField === FEATURE_FILTER_MAPPING_FIELD ? getFeatureFilterRef(savedMapping) : ''
+        );
 
         if (isSavedConcatMode && supportsMultiSelect) {
           select.value = CONCAT_FIELDS_MAPPING_FIELD;
@@ -4240,6 +4846,7 @@
           select.value = '';
         } else {
           select.value = savedMapping.mappedField || (isBalanceField ? BALANCE_DISABLED_OPTION : '');
+          ensureStaleFieldOption(select, savedMapping.mappedField, fieldName);
         }
 
         function updateConcatPreview() {
@@ -4253,10 +4860,9 @@
         function renderConcatPanel() {
           if (!concatPickerPanel) return;
           concatPickerPanel.replaceChildren();
-          const headers = payload.template.headers || [];
-          headers.forEach((header) => {
+          listConcatPanelFields(payload.template.headers, concatSelectedFields).forEach(({ field: header, stale }) => {
             const option = document.createElement('div');
-            option.className = 'concat-picker-option';
+            option.className = stale ? 'concat-picker-option is-stale' : 'concat-picker-option';
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
             checkbox.checked = concatSelectedFields.includes(header);
@@ -4265,7 +4871,7 @@
             const selectedIdx = concatSelectedFields.indexOf(header);
             indexSpan.textContent = selectedIdx >= 0 ? `${selectedIdx + 1}.` : '';
             const nameSpan = document.createElement('span');
-            nameSpan.textContent = header;
+            nameSpan.textContent = stale ? `${header}（已删除）` : header;
             option.append(checkbox, indexSpan, nameSpan);
             option.addEventListener('click', (event) => {
               if (event.target === checkbox) return;
@@ -4319,8 +4925,10 @@
             manageAmountSplitBtn.hidden = !isAmountSplitEnabled;
           }
           if (featureFilterBtn) {
-            featureFilterBtn.hidden = selectedValue !== FEATURE_FILTER_MAPPING_FIELD;
-            featureFilterBtn.title = describeFeatureFilter(currentFeatureFilter);
+            const isFeatureFilterMode = selectedValue === FEATURE_FILTER_MAPPING_FIELD;
+            featureFilterBtn.hidden = !isFeatureFilterMode;
+            featureValueLabel.hidden = !isFeatureFilterMode;
+            featureValueSelect.hidden = !isFeatureFilterMode;
           }
           if (concatFieldPicker) {
             concatFieldPicker.hidden = !isConcatMode;
@@ -4400,19 +5008,11 @@
         }
 
         if (featureFilterBtn) {
+          featureValueSelect.addEventListener('change', () => {
+            featureValueSelect.title = describeFeatureFilter(findFeatureFilterById(currentFeatureFilters, featureValueSelect.value));
+          });
           featureFilterBtn.addEventListener('click', () => {
-            pushModal(overlay, () => createFeatureFilterDialog({
-              headers: payload.template.headers || [],
-              featureFilter: currentFeatureFilter,
-              onDone: (nextFeatureFilter) => {
-                currentFeatureFilter = cloneFeatureFilter(nextFeatureFilter);
-                refreshFeatureFilterButtons();
-                returnToModal(overlay);
-              },
-              onCancel: () => {
-                returnToModal(overlay);
-              }
-            }));
+            openFeatureFilterManager();
           });
         }
 
@@ -4556,14 +5156,15 @@
           targetFields: (payload.targetFields || []).slice(),
           advancedMappingFields: advancedMappingFields.slice(),
           billSplitGroupFields: billSplitGroupFields.slice(),
-          featureFilter: currentFeatureFilter,
-          onDone: (nextMappings, nextFeatureFilter) => {
+          // v3.2.18：与主映射共用特征值列表；拆分弹窗里的【特征值管理】即时落库后回写主映射
+          featureFilters: currentFeatureFilters,
+          getMainFeatureFilterUsage: () => collectFeatureFilterUsage(collectMappingDraftFromTable(tbody)),
+          onFeatureFiltersChange: (nextFeatureFilters) => {
+            currentFeatureFilters = cloneFeatureFilters(nextFeatureFilters);
+            refreshFeatureValueSelects();
+          },
+          onDone: (nextMappings) => {
             currentBillSplitMappings = nextMappings.map((m) => ({ ...m }));
-            // v3.2.16：拆分/合并弹窗编辑的是同一套筛选条件，保存后回写草稿
-            if (nextFeatureFilter) {
-              currentFeatureFilter = cloneFeatureFilter(nextFeatureFilter);
-              refreshFeatureFilterButtons();
-            }
             // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
             returnToModal(overlay);
           },
@@ -4580,10 +5181,31 @@
         return select && select.value === '是';
       }
 
-      function refreshFeatureFilterButtons() {
-        tbody.querySelectorAll('.mapping-feature-filter-btn').forEach((button) => {
-          button.title = describeFeatureFilter(currentFeatureFilter);
+      // v3.2.18：特征值新增、改名、删除后刷新各行「选择特征值」的选项（保留已选）
+      function refreshFeatureValueSelects() {
+        tbody.querySelectorAll('.mapping-feature-value-select').forEach((select) => {
+          renderFeatureFilterOptions(select, currentFeatureFilters, select.value);
         });
+      }
+
+      function openFeatureFilterManager() {
+        pushModal(overlay, () => createFeatureFilterManagerDialog({
+          templateId: payload.template.id,
+          headers: payload.template.headers || [],
+          featureFilters: currentFeatureFilters,
+          getUsage: () => collectFeatureFilterUsage(
+            currentBillSplitMappings,
+            FEATURE_FILTER_SPLIT_USAGE_SUFFIX,
+            collectFeatureFilterUsage(collectMappingDraftFromTable(tbody))
+          ),
+          onChange: (nextFeatureFilters) => {
+            currentFeatureFilters = cloneFeatureFilters(nextFeatureFilters);
+            refreshFeatureValueSelects();
+          },
+          onClose: () => {
+            returnToModal(overlay);
+          }
+        }));
       }
 
       function applyAmountSplitMutualExclusion() {
@@ -4621,16 +5243,19 @@
 
         function setRowDisabled(row, select, disabled) {
           if (!row || !select) return;
-          // v3.2.16：互斥禁用时【筛选条件】按钮随下拉框一起禁用
+          // v3.2.16：互斥禁用时【特征值管理】按钮与「选择特征值」随下拉框一起禁用
           const featureFilterButton = row.querySelector('.mapping-feature-filter-btn');
+          const featureValueSelect = row.querySelector('.mapping-feature-value-select');
           if (disabled) {
             row.classList.add('mapping-row-mutex-disabled');
             select.disabled = true;
             if (featureFilterButton) featureFilterButton.disabled = true;
+            if (featureValueSelect) featureValueSelect.disabled = true;
           } else {
             row.classList.remove('mapping-row-mutex-disabled');
             select.disabled = false;
             if (featureFilterButton) featureFilterButton.disabled = false;
+            if (featureValueSelect) featureValueSelect.disabled = false;
           }
         }
 
@@ -4753,13 +5378,13 @@
           pushAlert(overlay, () => createAlertDialog(channelAssignment.error, { onConfirm: null }));
           return;
         }
-        // v3.2.16：拆分/合并且不复用模块映射时主映射不生效，主映射里残留的该值不要求规则（拆分映射由后端校验）
+        // v3.2.16：拆分/合并且不复用模块映射时主映射不生效，主映射里残留的该值不要求选特征值（拆分映射由后端校验）
         const featureFilterDraft = collectMappingDraftFromTable(tbody);
         const splitMappingsEffective = featureFilterDraft.some((m) => m.templateField === BILL_SPLIT_MERGE_FIELD && m.mappedField === '是')
           && featureFilterDraft.some((m) => m.templateField === REUSE_MODULE_FIELD && m.mappedField === '否');
         const featureFilterMissing = splitMappingsEffective
           ? ''
-          : findFeatureFilterMissingMessage(featureFilterDraft, currentFeatureFilter);
+          : findFeatureFilterMissingMessage(featureFilterDraft, currentFeatureFilters);
         if (featureFilterMissing) {
           pushAlert(overlay, () => createAlertDialog(escapeHtml(featureFilterMissing), { onConfirm: null }));
           return;
@@ -4781,7 +5406,6 @@
             fixedAssignments: currentFixedAssignments,
             currencyBigAccounts: cloneCurrencyBigAccountPairs(currentCurrencyBigAccounts),
             preserveOwn: !bigAccountsLoadedWithOwn,
-            featureFilter: cloneFeatureFilter(currentFeatureFilter),
             ...(channelAssignment ? { channel: channelAssignment } : {})
           });
 
@@ -4990,15 +5614,17 @@
       targetFields = [],
       advancedMappingFields = [],
       billSplitGroupFields = [],
-      featureFilter = null,
+      featureFilters = [],
+      getMainFeatureFilterUsage = null,
+      onFeatureFiltersChange = null,
       onDone,
       onCancel
     }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card bill-split-mappings-card';
-      // v3.2.16：与主映射共用同一套筛选条件；保存时随拆分映射写入并回传给主映射弹窗。
-      let currentFeatureFilter = cloneFeatureFilter(featureFilter);
+      // v3.2.18：与主映射共用特征值列表；【特征值管理】即时落库后经 onFeatureFiltersChange 回写主映射弹窗。
+      let currentFeatureFilters = cloneFeatureFilters(featureFilters);
 
       // 模板字段列表 = targetFields 排除 Currency / Credit Amount / Debit Amount + 高级字段 + bill-split group 字段
       const excludeFields = new Set([
@@ -5085,7 +5711,9 @@
               <div class="mapping-field-editor">
                 <select class="mapping-select bill-split-mapping-select">${selectOptions}</select>
                 ${supportsMultiSelect ? `
-                <button class="secondary-btn small mapping-feature-filter-btn" type="button" hidden>筛选条件</button>
+                <span class="mapping-feature-value-label" hidden>选择特征值</span>
+                <select class="mapping-select mapping-feature-value-select" hidden></select>
+                <button class="secondary-btn small mapping-feature-filter-btn" type="button" hidden>特征值管理</button>
                 ` : ''}
                 ${supportsMultiSelect ? `
                 <div class="concat-field-picker" hidden>
@@ -5103,6 +5731,8 @@
 
           const select = row.querySelector('.bill-split-mapping-select');
           const featureFilterBtn = row.querySelector('.mapping-feature-filter-btn');
+          const featureValueLabel = row.querySelector('.mapping-feature-value-label');
+          const featureValueSelect = row.querySelector('.mapping-feature-value-select');
           const concatPicker = row.querySelector('.concat-field-picker');
           const concatTrigger = row.querySelector('.concat-picker-trigger');
           const concatPanel = row.querySelector('.concat-picker-panel');
@@ -5111,6 +5741,12 @@
           const isConcatInitial = entry.mappedField === CONCAT_FIELDS_MAPPING_FIELD && concatSelectedFields.length > 0;
 
           select.value = isConcatInitial ? CONCAT_FIELDS_MAPPING_FIELD : (entry.mappedField || '');
+          if (!isConcatInitial) ensureStaleFieldOption(select, entry.mappedField, entry.templateField);
+          // v3.2.18：特征值选择存于 entry.featureFilterRef，切走映射值再切回时保留；保存时写入 mappedFields
+          if (entry.featureFilterRef === undefined) {
+            entry.featureFilterRef = entry.mappedField === FEATURE_FILTER_MAPPING_FIELD ? getFeatureFilterRef(entry) : '';
+          }
+          renderFeatureFilterOptions(featureValueSelect, currentFeatureFilters, entry.featureFilterRef);
 
           function updateConcatPreviewText() {
             if (!concatPreview) return;
@@ -5122,9 +5758,9 @@
           function renderConcatOptions() {
             if (!concatPanel) return;
             concatPanel.replaceChildren();
-            (headers || []).forEach((header) => {
+            listConcatPanelFields(headers, concatSelectedFields).forEach(({ field: header, stale }) => {
               const option = document.createElement('div');
-              option.className = 'concat-picker-option';
+              option.className = stale ? 'concat-picker-option is-stale' : 'concat-picker-option';
               const checkbox = document.createElement('input');
               checkbox.type = 'checkbox';
               checkbox.checked = concatSelectedFields.includes(header);
@@ -5133,7 +5769,7 @@
               const selectedIdx = concatSelectedFields.indexOf(header);
               indexSpan.textContent = selectedIdx >= 0 ? `${selectedIdx + 1}.` : '';
               const nameSpan = document.createElement('span');
-              nameSpan.textContent = header || '(空白字段)';
+              nameSpan.textContent = stale ? `${header}（已删除）` : (header || '(空白字段)');
               option.append(checkbox, indexSpan, nameSpan);
               option.addEventListener('click', (event) => {
                 if (event.target === checkbox) return;
@@ -5163,37 +5799,41 @@
           }
 
           if (featureFilterBtn) {
-            featureFilterBtn.addEventListener('click', () => {
-              pushModal(overlay, () => createFeatureFilterDialog({
-                headers,
-                featureFilter: currentFeatureFilter,
-                onDone: (nextFeatureFilter) => {
-                  currentFeatureFilter = cloneFeatureFilter(nextFeatureFilter);
-                  tbody.querySelectorAll('.mapping-feature-filter-btn').forEach((button) => {
-                    button.title = describeFeatureFilter(currentFeatureFilter);
-                  });
-                  returnToModal(overlay);
-                },
-                onCancel: () => {
-                  returnToModal(overlay);
-                }
-              }));
+            featureValueSelect.addEventListener('change', () => {
+              entry.featureFilterRef = featureValueSelect.value;
+              syncFeatureFilterRef();
+              featureValueSelect.title = describeFeatureFilter(findFeatureFilterById(currentFeatureFilters, featureValueSelect.value));
             });
+            featureFilterBtn.addEventListener('click', () => {
+              openFeatureFilterManager();
+            });
+          }
+
+          function syncFeatureFilterRef() {
+            if (select.value === FEATURE_FILTER_MAPPING_FIELD) {
+              entry.mappedFields = entry.featureFilterRef ? [entry.featureFilterRef] : [];
+            }
           }
 
           function syncEditorState() {
             const isConcatMode = select.value === CONCAT_FIELDS_MAPPING_FIELD;
+            const isFeatureFilterMode = select.value === FEATURE_FILTER_MAPPING_FIELD;
             if (featureFilterBtn) {
-              featureFilterBtn.hidden = select.value !== FEATURE_FILTER_MAPPING_FIELD;
-              featureFilterBtn.title = describeFeatureFilter(currentFeatureFilter);
+              featureFilterBtn.hidden = !isFeatureFilterMode;
+              featureValueLabel.hidden = !isFeatureFilterMode;
+              featureValueSelect.hidden = !isFeatureFilterMode;
             }
             if (concatPicker) concatPicker.hidden = !isConcatMode;
-            if (!isConcatMode) {
+            if (isConcatMode) {
+              // v3.2.18：从「字段筛选特征值」切来时 mappedFields 里是特征值 id，按拼接选择重置
+              entry.mappedFields = concatSelectedFields.slice();
+            } else {
               concatSelectedFields = [];
               entry.mappedFields = [];
               updateConcatPreviewText();
               if (concatPanel) concatPanel.hidden = true;
             }
+            syncFeatureFilterRef();
           }
 
           select.addEventListener('change', () => {
@@ -5212,6 +5852,40 @@
       function validateLocalMappings() {
         // 校验：同字段不可重复（已通过结构保证），空字段会被后端丢弃，无需前端报错
         return true;
+      }
+
+      // v3.2.18：特征值新增、改名、删除后刷新各行「选择特征值」（保留已选）。
+      //   已删除特征值的缓存引用一并清掉：删除最大 id 后再新增会沿用该 id，残留引用切回时会指向新特征值而界面显示空白。
+      function refreshFeatureValueSelects() {
+        currentDialogMappings.forEach((entry) => {
+          if (!entry.featureFilterRef || findFeatureFilterById(currentFeatureFilters, entry.featureFilterRef)) return;
+          entry.featureFilterRef = '';
+          if (entry.mappedField === FEATURE_FILTER_MAPPING_FIELD) entry.mappedFields = [];
+        });
+        tbody.querySelectorAll('.mapping-feature-value-select').forEach((featureValueSelect) => {
+          renderFeatureFilterOptions(featureValueSelect, currentFeatureFilters, featureValueSelect.value);
+        });
+      }
+
+      function openFeatureFilterManager() {
+        pushModal(overlay, () => createFeatureFilterManagerDialog({
+          templateId: template.id,
+          headers,
+          featureFilters: currentFeatureFilters,
+          getUsage: () => collectFeatureFilterUsage(
+            currentDialogMappings,
+            FEATURE_FILTER_SPLIT_USAGE_SUFFIX,
+            typeof getMainFeatureFilterUsage === 'function' ? getMainFeatureFilterUsage() : new Map()
+          ),
+          onChange: (nextFeatureFilters) => {
+            currentFeatureFilters = cloneFeatureFilters(nextFeatureFilters);
+            refreshFeatureValueSelects();
+            if (typeof onFeatureFiltersChange === 'function') onFeatureFiltersChange(cloneFeatureFilters(currentFeatureFilters));
+          },
+          onClose: () => {
+            returnToModal(overlay);
+          }
+        }));
       }
 
       function doImportFromMain() {
@@ -5264,7 +5938,7 @@
       });
       dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
         if (!validateLocalMappings()) return;
-        const featureFilterMissing = findFeatureFilterMissingMessage(currentDialogMappings, currentFeatureFilter);
+        const featureFilterMissing = findFeatureFilterMissingMessage(currentDialogMappings, currentFeatureFilters);
         if (featureFilterMissing) {
           pushAlert(overlay, () => createAlertDialog(escapeHtml(featureFilterMissing), { onConfirm: null }));
           return;
@@ -5274,11 +5948,13 @@
         // 保存参数快照不再共享仍可编辑的行对象。
         const toSave = currentDialogMappings.filter(
           m => m.mappedField || (Array.isArray(m.mappedFields) && m.mappedFields.length > 0)
-        ).map(mapping => ({ ...mapping, mappedFields: Array.isArray(mapping.mappedFields) ? mapping.mappedFields.slice() : [] }));
-        const savedFeatureFilter = cloneFeatureFilter(currentFeatureFilter);
+        ).map(({ featureFilterRef: _featureFilterRef, ...mapping }) => ({
+          ...mapping,
+          mappedFields: Array.isArray(mapping.mappedFields) ? mapping.mappedFields.slice() : []
+        }));
         let result;
         try {
-          result = await api.templates.saveBillSplitMappings({ templateId: template.id, mappings: toSave, featureFilter: savedFeatureFilter });
+          result = await api.templates.saveBillSplitMappings({ templateId: template.id, mappings: toSave });
         } catch (error) {
           console.error(error);
           result = { status: 'error', message: '保存失败，请查看控制台' };
@@ -5286,7 +5962,7 @@
         if (!writeScope.isCurrent(handle)) return;
         if (result?.status === 'success') {
           const closed = closeModal(overlay, { status: 'submitted', value: toSave });
-          if (closed.status === 'closed' && typeof onDone === 'function') onDone(toSave, savedFeatureFilter);
+          if (closed.status === 'closed' && typeof onDone === 'function') onDone(toSave);
         } else {
           pushAlert(overlay, () => createAlertDialog(result?.message || '保存失败', { onConfirm: null }));
         }
@@ -6351,6 +7027,13 @@
           <label class="account-mapping-template-select-wrapper balance-seed-owner-wrapper">
             渠道 <select data-role="balance-seed-owner" aria-label="渠道"></select>
           </label>
+          <div class="balance-seed-filters">
+            <span class="balance-seed-filter-label">账户号</span>
+            <button class="new-account-currency-dropdown-btn balance-seed-account-btn" type="button" data-role="balance-seed-account" aria-label="账户号" aria-haspopup="listbox" aria-expanded="false">&nbsp;</button>
+            <label class="account-mapping-template-select-wrapper balance-seed-currency-wrapper">
+              币种 <select data-role="balance-seed-currency" aria-label="币种"></select>
+            </label>
+          </div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="balance-seed-hint" data-role="balance-seed-hint"></div>
@@ -6386,6 +7069,12 @@
       const tbody = dialog.querySelector('tbody');
       const pagerEl = dialog.querySelector('[data-role="balance-seed-pager"]');
       const pageEl = dialog.querySelector('[data-role="balance-seed-page"]');
+      const accountButton = dialog.querySelector('[data-role="balance-seed-account"]');
+      const currencySelect = dialog.querySelector('[data-role="balance-seed-currency"]');
+      const accountPanel = document.createElement('div');
+      accountPanel.className = 'new-account-currency-dropdown-panel balance-seed-account-panel';
+      accountPanel.setAttribute('role', 'listbox');
+      accountPanel.hidden = true;
       const ownerOptions = buildBalanceSeedOwnerOptions();
       const optionByKey = new Map([...ownerOptions.channels, ...ownerOptions.templates].map((option) => [option.key, option]));
       const state = {
@@ -6396,7 +7085,11 @@
         loading: false,
         loadError: '',
         editingKey: '',
-        requestId: 0
+        requestId: 0,
+        // v3.2.18：账户号 / 币种筛选，空串表示不筛选；只在渲染层过滤已读取的记录，不改 Main 的可见范围与顺序。
+        accountFilter: '',
+        currencyFilter: '',
+        accountQuery: ''
       };
 
       [['渠道', ownerOptions.channels], ['普通模板', ownerOptions.templates]].forEach(([label, options]) => {
@@ -6416,8 +7109,146 @@
 
       const writeScope = createDialogWriteScope(overlay, dialog);
 
+      // v3.2.18（spec：changes/v3.2.18/feat/template-import-naming/spec.md §3.2）：账户号 / 币种筛选。
+      function visibleRecords() {
+        return state.records.filter((record) => (!state.accountFilter || record.merchantId === state.accountFilter)
+          && (!state.currencyFilter || record.currency === state.currencyFilter));
+      }
+
+      function uniqueSorted(values) {
+        return Array.from(new Set(values)).sort((left, right) => left.localeCompare(right));
+      }
+
+      function accountOptions() {
+        return uniqueSorted(state.records.map((record) => record.merchantId));
+      }
+
+      function currencyOptions() {
+        if (!state.accountFilter) return [];
+        return uniqueSorted(state.records.filter((record) => record.merchantId === state.accountFilter).map((record) => record.currency));
+      }
+
+      // 重新读取后所选账户号 / 币种已不存在时回到空白。
+      function reconcileFilters() {
+        if (state.accountFilter && !accountOptions().includes(state.accountFilter)) {
+          state.accountFilter = '';
+        }
+        if (state.currencyFilter && !currencyOptions().includes(state.currencyFilter)) {
+          state.currencyFilter = '';
+        }
+      }
+
+      function renderFilters() {
+        accountButton.textContent = state.accountFilter || '\u00A0';
+        accountButton.title = state.accountFilter;
+        accountButton.disabled = !state.key;
+        const currencies = currencyOptions();
+        currencySelect.replaceChildren(...['', ...currencies].map((currency) => {
+          const option = document.createElement('option');
+          option.value = currency;
+          option.textContent = currency;
+          return option;
+        }));
+        currencySelect.value = state.currencyFilter;
+        currencySelect.disabled = !state.accountFilter;
+      }
+
+      function closeAccountPanel() {
+        if (accountPanel.hidden) return;
+        accountPanel.hidden = true;
+        accountPanel.replaceChildren();
+        accountButton.classList.remove('is-open');
+        accountButton.setAttribute('aria-expanded', 'false');
+      }
+
+      function renderAccountOptions(listHost) {
+        const query = state.accountQuery.trim().toLowerCase();
+        const matches = accountOptions().filter((merchantId) => !query || merchantId.toLowerCase().includes(query));
+        const entries = [{ value: '', label: '全部' }, ...matches.map((merchantId) => ({ value: merchantId, label: merchantId }))];
+        listHost.replaceChildren(...entries.map((entry) => {
+          const option = document.createElement('div');
+          option.className = 'new-account-currency-option balance-seed-account-option';
+          option.setAttribute('role', 'option');
+          option.dataset.value = entry.value;
+          option.setAttribute('aria-selected', String(entry.value === state.accountFilter));
+          option.innerHTML = `<span class="new-account-currency-option-text">${escapeHtml(entry.label)}</span>`;
+          option.addEventListener('click', () => selectAccount(entry.value));
+          return option;
+        }));
+        if (!matches.length) {
+          const empty = document.createElement('div');
+          empty.className = 'balance-seed-account-empty';
+          empty.textContent = '无匹配账户号';
+          listHost.appendChild(empty);
+        }
+      }
+
+      function positionAccountPanel() {
+        const buttonRect = accountButton.getBoundingClientRect();
+        const margin = 12;
+        accountPanel.style.position = 'fixed';
+        accountPanel.style.minWidth = `${Math.max(buttonRect.width, 220)}px`;
+        accountPanel.style.maxWidth = `${Math.max(220, Math.min(360, window.innerWidth - margin * 2))}px`;
+        accountPanel.style.visibility = 'hidden';
+        accountPanel.hidden = false;
+        const panelWidth = accountPanel.offsetWidth || Math.max(buttonRect.width, 220);
+        const panelHeight = accountPanel.offsetHeight || 280;
+        const left = Math.min(Math.max(margin, buttonRect.left), Math.max(margin, window.innerWidth - panelWidth - margin));
+        const top = buttonRect.bottom + 6 + panelHeight > window.innerHeight - margin
+          ? Math.max(margin, buttonRect.top - panelHeight - 6)
+          : buttonRect.bottom + 6;
+        accountPanel.style.left = `${left}px`;
+        accountPanel.style.top = `${top}px`;
+        accountPanel.style.visibility = 'visible';
+      }
+
+      function openAccountPanel() {
+        state.accountQuery = '';
+        const searchRow = document.createElement('div');
+        searchRow.className = 'new-account-currency-search-row';
+        const searchInput = document.createElement('input');
+        searchInput.className = 'new-account-currency-search-input';
+        searchInput.type = 'text';
+        searchInput.placeholder = '搜索账户号';
+        searchInput.spellcheck = false;
+        searchInput.setAttribute('aria-label', '搜索账户号');
+        searchInput.dataset.role = 'balance-seed-account-search';
+        const listHost = document.createElement('div');
+        listHost.className = 'new-account-currency-options-list balance-seed-account-options';
+        searchInput.addEventListener('input', () => {
+          state.accountQuery = searchInput.value;
+          renderAccountOptions(listHost);
+        });
+        searchInput.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter' || event.isComposing) return;
+          const first = listHost.querySelector('.balance-seed-account-option:not([data-value=""])');
+          if (first) selectAccount(first.dataset.value);
+        });
+        searchRow.appendChild(searchInput);
+        accountPanel.replaceChildren(searchRow, listHost);
+        renderAccountOptions(listHost);
+        accountButton.classList.add('is-open');
+        accountButton.setAttribute('aria-expanded', 'true');
+        positionAccountPanel();
+        searchInput.focus();
+      }
+
+      function applyFilterChange() {
+        state.page = 0;
+        state.editingKey = '';
+        renderRows();
+      }
+
+      function selectAccount(merchantId) {
+        closeAccountPanel();
+        if (merchantId === state.accountFilter) return;
+        state.accountFilter = merchantId;
+        state.currencyFilter = '';
+        applyFilterChange();
+      }
+
       function pageCount() {
-        return Math.max(1, Math.ceil(state.records.length / BALANCE_SEED_PAGE_LIMIT));
+        return Math.max(1, Math.ceil(visibleRecords().length / BALANCE_SEED_PAGE_LIMIT));
       }
 
       function renderHint() {
@@ -6435,7 +7266,7 @@
           return;
         }
         const fileName = state.owner ? state.owner.seedFileName : '';
-        hintEl.textContent = `共 ${state.records.length} 条`;
+        hintEl.textContent = `共 ${visibleRecords().length} 条`;
         tipsBubbleEl.textContent = `种子文件 balance-seeds/${fileName} 按名称的银行段存放，生成账单时按账户号与币种读取；修改后的余额按「人工录入」处理。`;
         tipsEl.hidden = false;
       }
@@ -6490,21 +7321,23 @@
       }
 
       function renderRows() {
+        const records = visibleRecords();
+        renderFilters();
         renderHint();
         tbody.innerHTML = '';
         const totalPages = pageCount();
         state.page = Math.min(state.page, totalPages - 1);
-        pagerEl.hidden = state.records.length <= BALANCE_SEED_PAGE_LIMIT;
+        pagerEl.hidden = records.length <= BALANCE_SEED_PAGE_LIMIT;
         pageEl.textContent = `第 ${state.page + 1} / ${totalPages} 页`;
         dialog.querySelector('[data-action="previous-page"]').disabled = state.page <= 0;
         dialog.querySelector('[data-action="next-page"]').disabled = state.page >= totalPages - 1;
         if (!state.key || state.loading || state.loadError) return;
-        if (!state.records.length) {
+        if (!records.length) {
           tbody.appendChild(createEmptyRow('暂无余额种子'));
           return;
         }
         const start = state.page * BALANCE_SEED_PAGE_LIMIT;
-        state.records.slice(start, start + BALANCE_SEED_PAGE_LIMIT)
+        records.slice(start, start + BALANCE_SEED_PAGE_LIMIT)
           .forEach((record) => tbody.appendChild(createSeedRow(record)));
       }
 
@@ -6531,9 +7364,12 @@
         if (result.status === 'success') {
           state.owner = result.owner || null;
           state.records = Array.isArray(result.records) ? result.records : [];
+          reconcileFilters();
         } else {
           state.owner = null;
           state.records = [];
+          state.accountFilter = '';
+          state.currencyFilter = '';
           state.loadError = result.message || '读取余额种子失败';
           setStatus(state.loadError, 'error', { errorReportReady: Boolean(result.errorReportReady) });
         }
@@ -6617,8 +7453,36 @@
 
       ownerSelect.addEventListener('change', () => {
         state.key = ownerSelect.value;
+        closeAccountPanel();
+        state.accountFilter = '';
+        state.currencyFilter = '';
         loadSeeds();
       });
+      accountButton.addEventListener('click', () => {
+        if (!accountPanel.hidden) {
+          closeAccountPanel();
+          return;
+        }
+        openAccountPanel();
+      });
+      currencySelect.addEventListener('change', () => {
+        state.currencyFilter = currencySelect.value;
+        applyFilterChange();
+      });
+      // 点击面板与按钮以外的位置关闭面板；Esc 只关面板，不关余额管理。
+      overlay.addEventListener('mousedown', (event) => {
+        if (!accountPanel.hidden && !accountPanel.contains(event.target) && !accountButton.contains(event.target)) {
+          closeAccountPanel();
+        }
+      });
+      const handleAccountPanelKeydown = (event) => {
+        if (event.key === 'Escape' && !accountPanel.hidden) {
+          event.stopPropagation();
+          closeAccountPanel();
+          accountButton.focus();
+        }
+      };
+      dialog.querySelector('.table-wrapper').addEventListener('scroll', closeAccountPanel);
       dialog.querySelector('[data-action="previous-page"]').addEventListener('click', () => {
         state.page = Math.max(0, state.page - 1);
         state.editingKey = '';
@@ -6633,12 +7497,20 @@
       dialog.querySelector('.icon-close').addEventListener('click', close);
       dialog.querySelector('[data-action="back"]').addEventListener('click', close);
       registerModal(overlay, {
-        onMount: () => { loadSeeds(); },
-        onDispose: () => { state.requestId += 1; }
+        onMount: () => {
+          document.addEventListener('keydown', handleAccountPanelKeydown, true);
+          loadSeeds();
+        },
+        onDispose: () => {
+          state.requestId += 1;
+          document.removeEventListener('keydown', handleAccountPanelKeydown, true);
+          closeAccountPanel();
+        }
       });
 
       renderRows();
       overlay.appendChild(dialog);
+      overlay.appendChild(accountPanel);
       return overlay;
     }
 
@@ -7284,7 +8156,7 @@
     //   带「库」读着别扭，且 gateway 既有文案为「网关对账单数据」（硬约束行为不变）→ 此处用不带「库」的表名。
     //   仅含三张可删表（与后端 LINKED_DELETE_ALLOWED_TABLES 同口径）；默认 gateway-bill。
 
-    return Object.freeze({ looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, createCurrencyBigAccountMappingDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog });
+    return Object.freeze({ looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createTemplateImportNameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, createCurrencyBigAccountMappingDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog });
   }
   global.ConfigurationDialogs = Object.freeze({ createConfigurationDialogs, buildBalanceSeedConfirmationRequest });
 })(window);

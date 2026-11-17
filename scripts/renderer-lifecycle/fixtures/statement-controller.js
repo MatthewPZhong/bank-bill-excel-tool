@@ -5,10 +5,11 @@ const index = fs.readFileSync(path.resolve(__dirname, '../../../index.html'), 'u
 const panelHtml = index.match(/<section id="statementModulePanel"[\s\S]*?<\/section>/)[0];
 
 // 实际 index 面板 + Statement/配置服务/公共工厂/宿主；只注入可控 API，不创建业务文件。
-module.exports = async ({ js, load, reset, assert, test }) => {
+module.exports = async ({ js, load, reset, assert, test, layout }) => {
   const tick = () => js('statementFixture.tick()');
-  async function setup() {
-    await reset(`<div id="modalRoot"></div>${panelHtml}`);
+  // layoutOptions：加载生产样式的真实窗口，用于检查布局。
+  async function setup(layoutOptions = null) {
+    await reset(`<div id="modalRoot"></div>${panelHtml}`, layoutOptions ? { layout: layoutOptions } : undefined);
     await load('src/renderer/dialogs/toolbox.js');
     await load('src/renderer-dialogs.js');
     await load('src/renderer/controllers/statement.js');
@@ -24,7 +25,9 @@ module.exports = async ({ js, load, reset, assert, test }) => {
         modal(title){const overlay=document.createElement('div');overlay.className='modal-overlay';overlay.innerHTML='<div class="modal-card"><div class="dialog-title">'+title+'</div><button>关闭</button></div>';return overlay;}
       };
       const f=statementFixture;
-      f.api={templates:{list:()=>f.invoke('templatesList',[],[{id:21,name:'测试模板',headers:['Currency']}]),importTemplate:()=>f.invoke('templateImport',[],{status:'success',message:'模板已导入'})},
+      f.api={templates:{list:()=>f.invoke('templatesList',[],[{id:21,name:'测试模板',headers:['Currency']}]),prepareImport:()=>f.invoke('prepareImport',[],{status:'ready',importToken:'tok-1',sourceFileName:'样本.xlsx'}),
+          discardImport:token=>f.invoke('discardImport',[token],{status:'success'}),
+          importTemplate:payload=>f.invoke('templateImport',[payload],{status:'success',message:'模板已导入'})},
         files:{importFile:id=>f.invoke('import',[id],{status:'success',message:'导入成功',detailReady:true,balanceReady:true}),
           exportDetail:scope=>f.invoke('detail',[scope],{status:'success',message:'明细已导出'}),exportBalance:scope=>f.invoke('balance',[scope],{status:'success',message:'余额已导出'}),
           completeBigAccountSelection:payload=>f.invoke('completeAccount',[payload],{status:'success',message:'已确认大账号',detailReady:true,balanceReady:true}),
@@ -46,7 +49,7 @@ module.exports = async ({ js, load, reset, assert, test }) => {
         applyManualBalancePromptStatus:value=>f.controller.createFeedbackScope().applyManualBalancePromptStatus(value)});
       const ui={modalHost:f.host,modalBridge:f.bridge,status(element,message,tone,options){element.querySelector('.status-box-text').textContent=message;element.dataset.tone=tone;f.feedback.push({message,tone,options});},
         alertNative:message=>f.alerts.push(message),reportError:error=>f.errors.push(String(error.message||error))};
-      for(const name of ['createAlertDialog','createTemplateManagerDialog','createBigAccountSelectionDialog','createRememberOrderMismatchDialog','createExportScopeDialog','createMonthlyBalanceExportDialog','createManualBalanceSeedDialog','createAccountMappingDialog','createAccountMappingMigrationDialog'])ui[name]=f.dialogs[name];
+      for(const name of ['createAlertDialog','createTemplateManagerDialog','createBigAccountSelectionDialog','createRememberOrderMismatchDialog','createExportScopeDialog','createMonthlyBalanceExportDialog','createManualBalanceSeedDialog','createAccountMappingDialog','createAccountMappingMigrationDialog','createTemplateImportNameDialog'])ui[name]=f.dialogs[name];
       f.controller=StatementController.createStatementController({api:f.api,panel:f.panel,config:f.config,ui,initialInfo:{hasEnum:true}});
       f.controller.enter(); void 0;
     `);
@@ -84,6 +87,83 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     await tick(); await tick();
     assert.equal(await js('statementFixture.root.children.length'), 0, '离开模块后不再弹出冲突提示');
     assert.deepEqual(await js('statementFixture.errors'), []);
+  });
+
+  // v3.2.18【导入模板】命名：预检识别新模板 → 命名弹框（只保留英文字母、数字、空格）→ 名称类错误保留弹框，其他结果关闭。
+  await test('导入模板：取消选文件与预检报错不弹框；命名弹框过滤输入、按钮顺序与蓝色确认、重名保留弹框、成功后刷新模板', async () => {
+    await setup();
+    await js(`statementFixture.next.prepareImport={status:'cancelled'};statementFixture.controller.commands.importTemplate()`);
+    await tick();
+    assert.deepEqual(await js(`({count:statementFixture.root.childElementCount,calls:statementFixture.calls.filter(call=>call.name==='templateImport').length})`), { count: 0, calls: 0 });
+    await js(`statementFixture.next.prepareImport={status:'error',message:'该文件的表头与已有模板「X」完全相同',errorReportReady:true};statementFixture.controller.commands.importTemplate()`);
+    await tick();
+    assert.deepEqual(await js(`({count:statementFixture.root.childElementCount,text:statementFixture.text(),tone:document.getElementById('statusBox').dataset.tone})`),
+      { count: 0, text: '该文件的表头与已有模板「X」完全相同', tone: 'error' });
+
+    await js(`statementFixture.controller.commands.importTemplate()`);
+    await tick();
+    assert.deepEqual(await js(`(()=>{const top=statementFixture.top();const buttons=[...top.querySelectorAll('.dialog-actions button')];
+      return {title:top.querySelector('.dialog-title').firstChild.textContent,file:top.querySelector('[data-role="template-import-file"]').value,
+        buttons:buttons.map(button=>button.textContent),primary:buttons.map(button=>button.classList.contains('primary-btn')),
+        rightAligned:top.querySelector('.dialog-actions').classList.contains('right'),focused:document.activeElement?.dataset.field||''};})()`),
+      { title: '导入模板', file: '样本.xlsx', buttons: ['取消', '确认'], primary: [false, true], rightAligned: true, focused: 'bankName' });
+    await js(`{const top=statementFixture.top();const bank=top.querySelector('[data-field="bankName"]');
+      bank.value='meta-中文comp!';bank.dispatchEvent(new InputEvent('input',{bubbles:true}));
+      const region=top.querySelector('[data-field="region"]');region.value='ＳＧ';region.dispatchEvent(new InputEvent('input',{bubbles:true}));}void 0;`);
+    assert.deepEqual(await js(`({bank:statementFixture.top().querySelector('[data-field="bankName"]').value,region:statementFixture.top().querySelector('[data-field="region"]').value})`),
+      { bank: 'metacomp', region: '' }, '中文、「-」、符号与全角字母即时去掉');
+    await js(`statementFixture.top().querySelector('[data-action="confirm"]').click()`);
+    await tick();
+    assert.match(await js(`statementFixture.top().textContent`), /请填写地区/);
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='templateImport').length`), 0);
+    await js(`statementFixture.host.closeTop();void 0;`);
+    await tick();
+
+    await js(`{const f=statementFixture;const region=f.top().querySelector('[data-field="region"]');region.value='sg';region.dispatchEvent(new InputEvent('input',{bubbles:true}));
+      f.pending=f.defer();f.next.templateImport=f.pending;f.top().querySelector('[data-action="confirm"]').click();}void 0;`);
+    assert.deepEqual(await js(`({disabled:statementFixture.top().querySelector('[data-action="confirm"]').disabled,closed:statementFixture.host.getTop().close().status})`),
+      { disabled: true, closed: 'blocked' }, '提交期间锁定');
+    await js(`statementFixture.pending.resolve({status:'error',errorCode:'TEMPLATE_NAME_DUPLICATED',message:'已有同名模板「METACOMP-SG」'});void 0;`);
+    await tick(); await tick();
+    assert.deepEqual(await js(`({count:statementFixture.root.childElementCount,alert:statementFixture.top().textContent.includes('已有同名模板「METACOMP-SG」'),
+      args:statementFixture.calls.find(call=>call.name==='templateImport').args[0]})`),
+      { count: 2, alert: true, args: { importToken: 'tok-1', bankName: 'metacomp', region: 'sg' } }, '重名时弹框保留并提示');
+    await js(`statementFixture.host.closeTop();void 0;`);
+    await tick();
+    await js(`{const f=statementFixture;const region=f.top().querySelector('[data-field="region"]');region.value='hk';region.dispatchEvent(new InputEvent('input',{bubbles:true}));
+      f.next.templateImport={status:'success',message:'已导入模板「METACOMP-HK」，请在模板管理中维护映射关系'};f.top().querySelector('[data-action="confirm"]').click();}void 0;`);
+    await tick(); await tick();
+    assert.deepEqual(await js(`({count:statementFixture.root.childElementCount,text:statementFixture.text(),
+      refreshed:statementFixture.calls.some(call=>call.name==='templatesList'),discards:statementFixture.calls.filter(call=>call.name==='discardImport').length})`),
+      { count: 0, text: '已导入模板「METACOMP-HK」，请在模板管理中维护映射关系', refreshed: true, discards: 0 });
+    assert.deepEqual(await js('statementFixture.errors'), []);
+  });
+
+  await test('导入模板：取消、× 与非名称类失败都会丢弃待确认文件，Enter 等同确认', async () => {
+    await setup();
+    await js(`statementFixture.next.prepareImport={status:'ready',importToken:'tok-cancel',sourceFileName:'a.xlsx'};statementFixture.controller.commands.importTemplate()`);
+    await tick();
+    await js(`statementFixture.top().querySelector('[data-action="cancel"]').click()`);
+    await tick();
+    await js(`statementFixture.next.prepareImport={status:'ready',importToken:'tok-x',sourceFileName:'b.xlsx'};statementFixture.controller.commands.importTemplate()`);
+    await tick();
+    await js(`statementFixture.top().querySelector('.icon-close').click()`);
+    await tick();
+    await js(`statementFixture.next.prepareImport={status:'ready',importToken:'tok-fail',sourceFileName:'c.xlsx'};statementFixture.controller.commands.importTemplate()`);
+    await tick();
+    // 输入法组合期间不过滤（否则打断拼音输入），组合结束后去掉中文。
+    assert.deepEqual(await js(`(()=>{const input=statementFixture.top().querySelector('[data-field="bankName"]');
+      input.value='db中';input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));const composing=input.value;
+      input.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'中'}));return {composing,ended:input.value};})()`),
+      { composing: 'db中', ended: 'db' });
+    await js(`{const f=statementFixture;const top=f.top();for(const [field,value] of [['bankName','dbs'],['region','sg']]){const input=top.querySelector('[data-field="'+field+'"]');input.value=value;input.dispatchEvent(new InputEvent('input',{bubbles:true}));}
+      f.next.templateImport={status:'error',message:'模板文件在确认期间已变化，请重新点击【导入模板】选择文件',errorReportReady:true};
+      top.querySelector('[data-field="region"]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));}void 0;`);
+    await tick(); await tick();
+    assert.deepEqual(await js(`({count:statementFixture.root.childElementCount,text:statementFixture.text(),
+      discards:statementFixture.calls.filter(call=>call.name==='discardImport').map(call=>call.args[0]),
+      imports:statementFixture.calls.filter(call=>call.name==='templateImport').map(call=>call.args[0].importToken)})`),
+      { count: 0, text: '模板文件在确认期间已变化，请重新点击【导入模板】选择文件', discards: ['tok-cancel', 'tok-x', 'tok-fail'], imports: ['tok-fail'] });
   });
 
   await test('Statement 使用实际模式面板，导入原样传虚拟模板ID，成功/取消保持原结果', async () => {
@@ -148,15 +228,10 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.balance-gap-card'))`), true);
     // 导出明细不处理余额：断档提示仍留在状态框，可再次打开。
     await js(`statementFixture.top().querySelector('.icon-close').click()`); await tick();
-    await js(`statementFixture.controller.commands.exportDetail()`); await tick();
-    assert.equal(await js('statementFixture.text()'), '明细已导出');
-    assert.equal(await js(`statementFixture.feedback.at(-1).options.manualBalancePromptTitle`), '点击处理账单日期断档');
-    await js(`document.getElementById('statusBox').click()`); await tick();
-    assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.balance-gap-card'))`), true);
-    // 多批次时导出明细先选范围：选完范围导出后同样保留断档入口。
-    await js(`statementFixture.top().querySelector('.icon-close').click()`); await tick();
-    await js(`statementFixture.next.detail={status:'select-export-scope'};statementFixture.controller.commands.exportDetail()`); await tick();
-    await js(`statementFixture.next.detail={status:'success',message:'当前批次明细已导出'};statementFixture.top().querySelector('[data-scope="current"]').click()`); await tick();
+    // v3.2.18：导出明细只导出当前批次，直接另存（不弹范围选择）。
+    await js(`statementFixture.next.detail={status:'success',message:'当前批次明细已导出'};statementFixture.controller.commands.exportDetail()`); await tick();
+    assert.deepEqual(await js(`statementFixture.calls.filter(call=>call.name==='detail').map(call=>call.args)`), [['current']]);
+    assert.equal(await js(`Boolean(document.querySelector('.export-scope-card'))`), false);
     assert.equal(await js('statementFixture.text()'), '当前批次明细已导出');
     assert.equal(await js(`statementFixture.feedback.at(-1).options.manualBalancePromptTitle`), '点击处理账单日期断档');
     await js(`document.getElementById('statusBox').click()`); await tick();
@@ -190,11 +265,17 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     await js(`document.getElementById('statusBox').click()`); await tick();
     assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.balance-seed-replace-card'))`), true);
   });
-  await test('导出范围公共工厂准确传 current/all，错误报告成功后仍可再次导出', async () => {
+  await test('导出余额范围公共工厂准确传 current/all；导出明细固定 current 不弹范围；错误报告成功后仍可再次导出', async () => {
     await setup(); await js(`statementFixture.controller.commands.importFile()`);
-    await js(`statementFixture.next.detail={status:'select-export-scope'};statementFixture.controller.commands.exportDetail()`);
+    await js(`statementFixture.next.balance={status:'select-export-scope'};statementFixture.controller.commands.exportBalance()`); await tick();
+    assert.deepEqual(await js(`Array.from(statementFixture.top().querySelectorAll('.dialog-actions [data-scope]')).map(button=>[button.dataset.scope,button.textContent])`),
+      [['current','导出当前批次文件的余额'],['all','导出所有批次文件的余额']]);
     await js(`statementFixture.top().querySelector('[data-scope="all"]').click()`); await tick();
-    assert.deepEqual(await js(`statementFixture.calls.filter(call=>call.name==='detail').map(call=>call.args[0]??null)`), [null,'all']);
+    assert.deepEqual(await js(`statementFixture.calls.filter(call=>call.name==='balance').map(call=>call.args[0]??null)`), [null,'all']);
+    assert.equal(await js('statementFixture.text()'), '余额已导出');
+    await js(`statementFixture.controller.commands.exportDetail()`); await tick();
+    assert.deepEqual(await js(`statementFixture.calls.filter(call=>call.name==='detail').map(call=>call.args[0])`), ['current']);
+    assert.equal(await js(`statementFixture.root.childElementCount`), 0);
     assert.equal(await js('statementFixture.text()'), '明细已导出');
     await js(`statementFixture.next.import={status:'error',message:'测试错误',errorReportReady:true};statementFixture.controller.commands.importFile()`);
     await js(`statementFixture.controller.commands.exportError();`); await tick();
@@ -261,14 +342,61 @@ module.exports = async ({ js, load, reset, assert, test }) => {
   });
   await test('导出范围忙碌时拒绝双击及关闭，最终销毁后的旧回应不接管新窗口', async () => {
     await setup();
-    await js(`statementFixture.next.detail={status:'select-export-scope'};statementFixture.controller.commands.exportDetail()`);
-    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.detail=statementFixture.pending;
+    await js(`statementFixture.next.balance={status:'select-export-scope'};statementFixture.controller.commands.exportBalance()`);
+    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.balance=statementFixture.pending;
       statementFixture.top().querySelector('[data-scope="all"]').click();statementFixture.top().querySelector('[data-scope="current"]').click();`);
-    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='detail').length`), 2);
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='balance').length`), 2);
     assert.equal(await js(`statementFixture.host.getTop().close().status`), 'blocked');
+    // 右上角 × 同样被导出中的 canClose 拦截
+    await js(`statementFixture.top().querySelector('.export-scope-close').click()`);
+    assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.export-scope-card'))`), true);
     await js(`statementFixture.host.getTop().dispose();statementFixture.bridge.openModal(()=>statementFixture.modal('保留新窗口'),{owner:'new'});
       statementFixture.pending.resolve({status:'select-export-scope'});`);
     await tick();
     assert.match(await js(`statementFixture.root.textContent`), /保留新窗口/);
+  });
+  // v3.2.18：导出余额范围弹窗右上角 ×：空闲时关闭不导出、不改状态栏；导出中不能关闭，结束后按结果关闭。
+  await test('导出余额范围弹窗 × 关闭：空闲关闭不导出，导出进行中不能关闭', async () => {
+    await setup(); await js(`statementFixture.controller.commands.importFile()`); await tick();
+    const before = await js('statementFixture.text()');
+    await js(`statementFixture.next.balance={status:'select-export-scope'};statementFixture.controller.commands.exportBalance()`); await tick();
+    assert.deepEqual(await js(`{const close=statementFixture.top().querySelector('.export-scope-close');[close.title,close.getAttribute('aria-label'),close.textContent];}`), ['关闭','关闭','×']);
+    assert.equal(await js(`document.activeElement?.dataset.scope`), 'current');
+    await js(`statementFixture.top().querySelector('.export-scope-close').click()`); await tick();
+    assert.equal(await js(`statementFixture.root.childElementCount`), 0);
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='balance').length`), 1);
+    assert.equal(await js('statementFixture.text()'), before);
+    await js(`statementFixture.next.balance={status:'select-export-scope'};statementFixture.controller.commands.exportBalance()`); await tick();
+    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.balance=statementFixture.pending;statementFixture.top().querySelector('[data-scope="current"]').click();
+      statementFixture.top().querySelector('.export-scope-close').click();`); await tick();
+    assert.equal(await js(`Boolean(statementFixture.top()?.querySelector('.export-scope-card'))`), true);
+    await js(`statementFixture.pending.resolve({status:'success',message:'当前批次余额已导出'})`); await tick();
+    assert.equal(await js(`statementFixture.root.childElementCount`), 0);
+    assert.equal(await js('statementFixture.text()'), '当前批次余额已导出');
+    assert.deepEqual(await js(`statementFixture.calls.filter(call=>call.name==='balance').map(call=>call.args[0]??null)`), [null,null,'current']);
+  });
+  // v3.2.18：范围弹窗版式（生产样式）：提示文字与图标中线对齐；两个按钮同行居中、按文字收紧，当前批次在左；× 在右上角。
+  for (const theme of ['light', 'dark']) await test(`导出余额范围弹窗版式（${theme}）`, async () => {
+    await setup({ width: 1080, height: 760, theme });
+    await js(`statementFixture.next.balance={status:'select-export-scope'};statementFixture.controller.commands.exportBalance()`); await tick();
+    await layout.settle();
+    const metrics = await js(`(() => {
+      const card=document.querySelector('.export-scope-card'), rect=element=>element.getBoundingClientRect();
+      const icon=rect(card.querySelector('.alert-icon')), message=rect(card.querySelector('.alert-message'));
+      const footer=rect(card.querySelector('.dialog-actions')), close=rect(card.querySelector('.export-scope-close')), box=rect(card);
+      const [current,all]=['current','all'].map(scope=>rect(card.querySelector('[data-scope="'+scope+'"]')));
+      const lineHeight=parseFloat(getComputedStyle(card.querySelector('[data-scope="current"]')).lineHeight)||20;
+      return { iconCenter: icon.top+icon.height/2, messageCenter: message.top+message.height/2,
+        sameRow: Math.abs(current.top-all.top), currentLeft: current.left<all.left,
+        pairOffset: Math.abs((current.left+all.right)/2-(footer.left+footer.width/2)),
+        narrow: current.width<footer.width/2 && all.width<footer.width/2,
+        singleLine: current.height<=lineHeight*2 && all.height<=lineHeight*2,
+        closeInset: [box.right-close.right, close.top-box.top], closeAboveMessage: close.bottom<=message.top+message.height };
+    })()`);
+    assert.ok(Math.abs(metrics.iconCenter - metrics.messageCenter) <= 1, JSON.stringify(metrics));
+    assert.ok(metrics.sameRow <= 1 && metrics.currentLeft && metrics.pairOffset <= 1, JSON.stringify(metrics));
+    assert.ok(metrics.narrow && metrics.singleLine, JSON.stringify(metrics));
+    assert.ok(metrics.closeInset.every(value => value >= 0 && value <= 16), JSON.stringify(metrics));
+    await layout.evidence(`export-scope-balance-${theme}`, metrics);
   });
 };

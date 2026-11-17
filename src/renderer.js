@@ -512,7 +512,8 @@ function initializeDomainControllers(info) {
   statementController = window.StatementController.createStatementController({
     panel: elements.statementModulePanel, initialInfo: info,
     api: { files: window.desktopApi.files, monthlyBalance: window.desktopApi.monthlyBalance,
-      templates: { importTemplate: window.desktopApi.templates.importTemplate }, accountMappings: window.desktopApi.accountMappings,
+      templates: { prepareImport: window.desktopApi.templates.prepareImport, discardImport: window.desktopApi.templates.discardImport,
+        importTemplate: window.desktopApi.templates.importTemplate }, accountMappings: window.desktopApi.accountMappings,
       errors: { exportLast: window.desktopApi.errors.exportLast } },
     config: { getTemplates: configurationServices.getTemplates, getCurrencyOptions: configurationServices.getCurrencyOptions,
       getStatementChannels: configurationServices.getStatementChannels,
@@ -521,7 +522,7 @@ function initializeDomainControllers(info) {
     ui: { modalHost, modalBridge, status: updateStatusBox, reportError: ui.reportError, alertNative: window.alert.bind(window),
       createAlertDialog, createTemplateManagerDialog, createBigAccountSelectionDialog, createRememberOrderMismatchDialog,
       createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, createAccountMappingDialog, createAccountMappingMigrationDialog,
-      createChannelAccountMappingConflictDialog }
+      createChannelAccountMappingConflictDialog, createTemplateImportNameDialog }
   });
   const domainUi = { modalHost, modalBridge, status: updateStatusBox, alert: createAlertDialog, escapeHtml, reportError: ui.reportError };
   domainControllers.preFund = window.__preFundController.createPreFundController({ api: window.desktopApi.preFundReconciliation,
@@ -574,6 +575,7 @@ const {
   createMonthlyBalanceExportDialog,
   createManualBalanceSeedDialog,
   createTemplateRenameDialog,
+  createTemplateImportNameDialog,
   createBigAccountSelectionDialog,
   createBigAccountManagerDialog,
   createRememberOrderMismatchDialog,
@@ -688,6 +690,17 @@ const bankAccountsDialogs = window.__bankAccountsDialogs.createBankAccountsDialo
   ui: { escapeHtml, createConfirmDialog }
 });
 
+// v3.2.18：设置 → 数据管理 → 链接表保留期限。
+const linkedTableRetentionDialogs = window.__linkedTableRetentionDialogs.createLinkedTableRetentionDialogs({
+  api: {
+    linkedTable: {
+      getRetentionSettings: () => window.desktopApi.linkedTable.getRetentionSettings(),
+      setRetentionDays: (payload) => window.desktopApi.linkedTable.setRetentionDays(payload)
+    }
+  },
+  ui: { escapeHtml }
+});
+
 // v3.2.14：升级后首次启动的「更新说明」，设置「版本管理」可再次查看本版说明。
 const releaseNotesDialogs = window.__releaseNotesDialogs.createReleaseNotesDialogs({
   api: { settings: { acknowledgeReleaseNotes: window.desktopApi?.settings?.acknowledgeReleaseNotes } },
@@ -704,6 +717,7 @@ const { createAppUpdateSettingsDialog, createArchiveCenterPreviewApi } = window.
     mountAppearanceSettings: (panel, controller, options) => window.DarkModeUI.mountSettings(panel, controller, options),
     mountTemplateFiles: (pane, options) => templateFilesDialogs.mountTemplateFiles(pane, options),
     mountBankAccounts: (pane, options) => bankAccountsDialogs.mountBankAccounts(pane, options),
+    mountLinkedTableRetention: (container, options) => linkedTableRetentionDialogs.mountLinkedTableRetention(container, options),
     applyAppUpdateActionResult, applyAppUpdateStatus,
     getAppUpdateStatus: () => state.appUpdateStatus,
     refreshOpenAppUpdateDialog, restartAndInstallAppUpdate,
@@ -1989,6 +2003,18 @@ async function applyFullInfo(info) {
             ?.querySelector('[data-action="open-archive-settings"]')
             ?.click();
         }, 80);
+      });
+    }, 120);
+  } else if (info.previewModal === 'data-management') {
+    setTimeout(() => {
+      openModal(() => createAppUpdateSettingsDialog({
+        archiveCenterApi: createArchiveCenterPreviewApi(),
+        linkedTablePreviewApi: linkedTableRetentionDialogs.createLinkedTableRetentionPreviewApi()
+      }));
+      requestAnimationFrame(() => {
+        elements.modalRoot
+          ?.querySelector('.app-settings-nav-item[data-tab="data"]')
+          ?.click();
       });
     }, 120);
   } else if (info.previewModal === 'archive-center-browser') {

@@ -23,14 +23,18 @@ const {
   buildDetailExportRows,
   buildMappedRows,
   extractHeaders,
-  FEATURE_FILTER_FIELD_TOKEN,
+  buildFeatureFilterToken,
+  getFeatureFilterRef,
+  LEGACY_FEATURE_FILTER_ID,
+  parseFeatureFilterToken,
+  resolveUsedFeatureFilters,
+  upgradeLegacyFeatureFilter,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
   loadCurrencyMappings,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   mapEachCollectingCurrencyBigAccountIssues,
   normalizeCell,
-  normalizeFeatureFilterRule,
   writeBalanceWorkbook,
   writeWorkbookRows
 } = require('../../src/backend/file-service');
@@ -59,6 +63,7 @@ const channelIdentity = require('../../src/main-process/statement-channel-identi
 const { normalizeMaintainedBigAccounts } = require('../../src/main-process/big-account-recognition');
 const { ALL_BANKS_TEMPLATE_SCOPE, assembleMonthlyBalance } = require('../../src/main-process/monthly-balance');
 
+const { createTemplateHeaderUpdateTools } = require('../../src/main-process/template-header-update');
 const ROOT = path.join(__dirname, '..', '..');
 const MAIN_SOURCE = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
 const MAIN_AST = acorn.parse(MAIN_SOURCE, { ecmaVersion: 'latest', sourceType: 'script' });
@@ -210,6 +215,8 @@ function createEnvironment(dir, label) {
 
   const mainDeps = {
     ...MAIN_CONSTANTS,
+    // v3.2.18：生成配置的失效映射拦截
+    templateHeaderUpdateTools: createTemplateHeaderUpdateTools(MAIN_CONSTANTS),
     database,
     getTemplateMappingConfig,
     getStatementSessionEntries,
@@ -220,9 +227,13 @@ function createEnvironment(dir, label) {
     FIXED_FIELD_VALUE_PREFIX,
     MERCHANT_ID_CURRENCY_ONLY_MARKER,
     mapEachCollectingCurrencyBigAccountIssues,
-    // 同轮合入的「字段筛选特征值」：校验与生成配置会引用
-    FEATURE_FILTER_FIELD_TOKEN,
-    normalizeFeatureFilterRule,
+    // 「字段筛选特征值」（v3.2.18 多特征值）：校验、映射归一化、模板包读取与生成配置会引用
+    buildFeatureFilterToken,
+    getFeatureFilterRef,
+    LEGACY_FEATURE_FILTER_ID,
+    parseFeatureFilterToken,
+    resolveUsedFeatureFilters,
+    upgradeLegacyFeatureFilter,
     ADVANCED_MAPPING_FIELDS: [],
     CUSTOM_INPUT_TARGET_FIELDS: new Set(['MerchantId']),
     getCurrencyMappingTablePath: () => CURRENCY_MAPPING_TABLE,
@@ -297,8 +308,9 @@ function createEnvironment(dir, label) {
     'buildStatementOutputPathConflictError',
     'validateTemplateConfiguration',
     'validateCurrencyBigAccountConfiguration',
-    'resolveSavedFeatureFilter',
-    'resolveStatementFeatureFilter',
+    'collectFeatureFilterRefs',
+    'resolveStatementFeatureFilters',
+    'upgradeLegacyBundleFeatureFilterRefs',
     'expandBigAccountConfigurations',
     'decodeCustomInputMappingValue',
     'extractFixedMappingValue',

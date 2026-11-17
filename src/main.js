@@ -380,6 +380,17 @@ const {
 // v3.0.6 需求1（T3）：调拨对账单派生纯函数（mid-allocation 导入触发 → in/out 两行落 linked_fund_transfer_recon）。
 const { buildFundTransferReconRows } = require('./main-process/fund-transfer-recon-builder');
 const { streamLinkedRowsToInsert } = require('./main-process/linked-table-stream-source');
+// v3.2.18：链接表按数据日期统计 / 删除 + 派生联动的共享实现（手工删除与链接表过期清理共用，禁复制 = R-5）。
+const {
+  isLinkedDeleteTable,
+  countLinkedTableRowsByDateRange,
+  deleteLinkedTableRowsByDateRange
+} = require('./main-process/linked-table-delete');
+const {
+  listPublicRetentionTables,
+  readRetentionDaysByTable: readLinkedRetentionDaysByTable,
+  setTableRetentionDays: setLinkedTableRetentionDays
+} = require('./main-process/linked-table-retention/policy');
 const linkedTableReaders = require('./backend/file-service/readers');
 const {
   normalizeCell: normalizeLinkedCell,
@@ -705,7 +716,6 @@ const {
   buildMappedRows,
   buildCurrencyBigAccountUnmappedError,
   compileRegexLiteral,
-  FEATURE_FILTER_FIELD_TOKEN,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
@@ -716,7 +726,13 @@ const {
   loadCurrencyMappings,
   loadEnumValues,
   normalizeCell,
-  normalizeFeatureFilterRule,
+  buildFeatureFilterToken,
+  getFeatureFilterRef,
+  normalizeFeatureFilterList,
+  parseFeatureFilterToken,
+  resolveUsedFeatureFilters,
+  upgradeLegacyFeatureFilter,
+  LEGACY_FEATURE_FILTER_ID,
   parseDateValue,
   parseNumericValue,
   readRows,
@@ -750,6 +766,10 @@ const {
   createStatementGenerationHelpers
 } = require('./main-process/statement-generation');
 const {
+  createTemplateHeaderUpdateTools,
+  diffTemplateHeaders
+} = require('./main-process/template-header-update');
+const {
   buildDateRangeLabel,
   deriveBalanceRecords,
   parseRequiredBillDates,
@@ -770,6 +790,12 @@ const {
   listOwnerSeeds,
   updateOwnerSeed
 } = require('./main-process/balance-seed-management');
+// v3.2.18【导入模板】命名
+const {
+  createPendingTemplateImportStore,
+  findTemplateImportNameConflict,
+  normalizeTemplateImportName
+} = require('./main-process/template-import-naming');
 const {
   ALL_BANKS_TEMPLATE_SCOPE,
   assembleMonthlyBalance,
@@ -830,6 +856,8 @@ if (!hasSingleInstanceLock) {
 }
 let database = null;
 let pendingDb = null;
+// v3.2.18【导入模板】：已预检、待用户命名确认的模板文件（不跨重启）。
+const pendingTemplateImports = createPendingTemplateImportStore();
 let preFundReconciliationService = null;
 let duplicateInboundMatchService = null;
 let positionReconciliationService = null;
@@ -881,6 +909,18 @@ function runReconFixJpmAdmMutationBoundary(work) {
     });
   }
   return reconFixJpmHoldGate.runSynchronousMutationBoundary(work);
+}
+
+// v3.2.18：链接表删除共享实现的主进程依赖（ADM 写边界与 run / 修复结果缓存）。
+function linkedTableDeleteDeps() {
+  return {
+    database,
+    appendActivityLogEntry,
+    assertAdmMutationAllowed: assertReconFixJpmAdmMutationAllowed,
+    admMutationBoundary: runReconFixJpmAdmMutationBoundary,
+    clearProcessingResult: () => { processingResult = null; },
+    clearReconIdFixResult: () => { reconIdFixResult = null; }
+  };
 }
 
 let archiveOperationTail = Promise.resolve();
@@ -1402,6 +1442,26 @@ const idleDatabaseCompaction = createIdleCompactionController({
     details: entry.details
   })
 });
+// v3.2.18 链接表过期清理（🔴🔴 资金红线）：触发方式同空闲整理主库；持银行对账锁 + 过渡租约，
+//   按设置 → 数据管理 → 链接表保留期限逐表删除过期行（与「链接表管理 → 删除」同一删除与派生链路）。
+const { createIdleLinkedTableRetentionController } = require('./main-process/linked-table-retention/idle-retention');
+const idleLinkedTableRetention = createIdleLinkedTableRetentionController({
+  getDatabase: () => (database && database.db ? database : null),
+  registry: businessOperationRegistry,
+  getLastUserActivityTs: () => lastUserActivityTs,
+  isOtherWorkBusy: () => idleCompactionBusyReason(),
+  acquireLock: () => tryAcquireBankStatementOpLock('linked-retention'),
+  releaseLock: () => releaseBankStatementOpLock(),
+  countExpired: (range) => countLinkedTableRowsByDateRange(database, range),
+  deleteExpired: (range) => deleteLinkedTableRowsByDateRange(linkedTableDeleteDeps(), range),
+  log: (entry) => appendActivityLogEntry({
+    level: entry.level,
+    source: 'main',
+    domain: 'linked-table-retention',
+    message: `[链接表过期清理] ${entry.message}`,
+    details: entry.details
+  })
+});
 const taskPolicyRegistry = createTaskPolicyRegistry();
 const executionTaskComposition = createExecutionTaskComposition({
   terminalRoutes: terminalRouteRegistrations,
@@ -1767,6 +1827,8 @@ const CLEAR_BACKGROUND_COLOR = '#ffffff';
 const BUNDLED_ENUM_FILE_NAME = 'COMMON枚举.xlsx';
 const CURRENCY_MAPPING_FILE_NAME = '币种映射表.xlsx';
 const MISSING_ENUM_MESSAGE = '内置网银账单枚举表缺失，请检查安装包';
+// v3.2.18 模板管理【更新】：旧版方向的映射须先在【修改】中保存一次再更新表头
+const LEGACY_ORIENTED_MAPPINGS_MESSAGE = '该模板的映射关系为旧版格式，请先点【修改】打开映射关系并点【完成】保存一次，再更新模板';
 const BALANCE_DISABLED_OPTION = '无';
 const BALANCE_CALCULATED_OPTION = '通过发生额计算';
 const MERCHANT_ID_SELF_INPUT_OPTION = '自己输入';
@@ -1774,7 +1836,8 @@ const MERCHANT_ID_MULTI_ACCOUNT_MARKER = '__MULTI_BIG_ACCOUNT__';
 // v3.2.16：MerchantId 按每行币种取【映射管理】中维护的大账号（存储值见 MERCHANT_ID_CURRENCY_ONLY_MARKER）
 const MERCHANT_ID_CURRENCY_ONLY_OPTION = '原始账单仅有币种无账户号';
 const CONCAT_FIELDS_MAPPING_FIELD = '需要拼接字段';
-// v3.2.16：映射值「字段筛选特征值」——从一个源字段按模板级规则筛出特征值（规则存 templates.feature_filter_json）
+// v3.2.16：映射值「字段筛选特征值」——从一个源字段按规则筛出特征值。
+// v3.2.18：模板可有多个特征值（templates.feature_filter_json 存数组），映射行的 mappedFields[0] 为所选特征值 id。
 const FEATURE_FILTER_MAPPING_FIELD = '字段筛选特征值';
 const CUSTOM_INPUT_TARGET_FIELDS = new Set(['MerchantId']);
 const SIGNED_AMOUNT_MAPPING_FIELD = '按正负号拆分的发生额';
@@ -1793,7 +1856,10 @@ const REUSE_MODULE_DEFAULT_OPTION = '是';
 // v3.2.15：v5 以渠道取代主/子模板（顶层 channels，条目 channelName），兼容读取 v≤4。
 // v3.2.16：用到「字段筛选特征值」（主映射或拆分映射）或 MerchantId「原始账单仅有币种无账户号」（条目带 currencyBigAccounts）
 //   的模板包写 v6，让旧版按版本号整包拒绝（旧版会静默输出空值，或把新存储值当成映射字段）；都未用到时仍写 v5，旧版照常可导入。
-const SUPPORTED_BUNDLE_VERSION = 6;
+// v3.2.18：用到「字段筛选特征值」时写 v7（条目带 featureFilters 数组，映射行带所选特征值 id），v3.2.16/3.2.17 读到整包拒绝；
+//   只用到「原始账单仅有币种无账户号」时仍写 v6。读取 v6 包时把单套 featureFilter 升级为特征值（同启动迁移口径）。
+const SUPPORTED_BUNDLE_VERSION = 7;
+const CURRENCY_ONLY_BUNDLE_VERSION = 6;
 const BASE_BUNDLE_VERSION = 5;
 // v1.5.2 需求 3：主页面「按文件名映射模板」的虚拟模板 ID（非 DB 记录）
 // helper 用于在接收 templateId 的调用点统一短路，避免将虚拟 ID 传入真实查询
@@ -1811,6 +1877,21 @@ const BILL_SPLIT_GROUP_FIELDS = [
   BILL_SPLIT_MERGE_MAPPING_FIELD,
   REUSE_MODULE_MAPPING_FIELD
 ];
+// v3.2.18 模板管理【更新】：引用源字段的位置收集与生成前失效引用拦截（与保存校验同一组标记常量）
+const templateHeaderUpdateTools = createTemplateHeaderUpdateTools({
+  BALANCE_DISABLED_OPTION,
+  BALANCE_CALCULATED_OPTION,
+  CONCAT_FIELDS_MAPPING_FIELD,
+  FEATURE_FILTER_MAPPING_FIELD,
+  AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD,
+  AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION,
+  BILL_SPLIT_MERGE_MAPPING_FIELD,
+  BILL_SPLIT_MERGE_ENABLED_OPTION,
+  REUSE_MODULE_MAPPING_FIELD,
+  SIGNED_AMOUNT_MAPPING_FIELD,
+  AMOUNT_BASED_NAME_MAPPING_FIELD,
+  AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
+});
 const BACKGROUND_IMAGE_LIMITS = Object.freeze({
   maxSizeBytes: 5 * 1024 * 1024,
   minWidth: 1200,
@@ -3827,7 +3908,8 @@ function buildTemplateLibraryPayload() {
   };
 }
 
-// v3.2.16：任一模板的主映射或拆分映射用到「字段筛选特征值」时写 v6，否则写 v5（见 SUPPORTED_BUNDLE_VERSION 注释）。
+// v3.2.18：任一模板的主映射或拆分映射用到「字段筛选特征值」时写 v7；只用到「原始账单仅有币种无账户号」时写 v6；
+//   都未用到时写 v5（见 SUPPORTED_BUNDLE_VERSION 注释）。
 function resolveTemplateBundleVersion(templates) {
   const entries = Array.isArray(templates) ? templates : [];
   const usesFeatureFilter = entries.some((entry) => (
@@ -3836,7 +3918,10 @@ function resolveTemplateBundleVersion(templates) {
   ));
   // v3.2.16：MerchantId「原始账单仅有币种无账户号」——旧版会把存储值当成映射字段，或丢掉 currencyBigAccounts
   const usesCurrencyOnlyMerchant = entries.some((entry) => isCurrencyOnlyMerchantMapping(entry && entry.mappings));
-  return usesFeatureFilter || usesCurrencyOnlyMerchant ? SUPPORTED_BUNDLE_VERSION : BASE_BUNDLE_VERSION;
+  if (usesFeatureFilter) {
+    return SUPPORTED_BUNDLE_VERSION;
+  }
+  return usesCurrencyOnlyMerchant ? CURRENCY_ONLY_BUNDLE_VERSION : BASE_BUNDLE_VERSION;
 }
 
 function toBundleAccountMapping(m) {
@@ -3876,6 +3961,24 @@ function normalizeBundleTemplateHeaders(headers) {
     normalized.pop();
   }
   return normalized;
+}
+
+// v3.2.18：v≤6 模板包里选「字段筛选特征值」的映射行不带特征值 id；包内有单套规则时让它们引用升级后的「特征值1」。
+function upgradeLegacyBundleFeatureFilterRefs(item) {
+  if (!item || typeof item !== 'object' || !item.featureFilter || typeof item.featureFilter !== 'object'
+    || Array.isArray(item.featureFilter)) {
+    return item;
+  }
+  const withLegacyRef = (rows) => (Array.isArray(rows) ? rows : []).map((mapping) => (
+    mapping && normalizeCell(mapping.mappedField) === FEATURE_FILTER_MAPPING_FIELD && !getFeatureFilterRef(mapping)
+      ? { ...mapping, mappedFields: [LEGACY_FEATURE_FILTER_ID] }
+      : mapping
+  ));
+  return {
+    ...item,
+    mappings: withLegacyRef(item.mappings),
+    billSplitMappings: withLegacyRef(item.billSplitMappings)
+  };
 }
 
 function readTemplateBundleFile(filePath) {
@@ -3919,7 +4022,7 @@ function readTemplateBundleFile(filePath) {
   return {
     bundleVersion,
     channels,
-    templates: templates.map((item) => ({
+    templates: templates.map((item) => (bundleVersion >= 7 ? item : upgradeLegacyBundleFeatureFilterRefs(item))).map((item) => ({
     templateKey: normalizeCell(item.templateKey),
     name: normalizeCell(item.name),
     sourceFileName: normalizeCell(item.sourceFileName) || `${normalizeCell(item.name) || 'template'}.xlsx`,
@@ -3942,10 +4045,9 @@ function readTemplateBundleFile(filePath) {
       ? { signedAmountSourceField: normalizeCell(item.billSplitMeta.signedAmountSourceField) }
       : { signedAmountSourceField: '' },
     dateFormat: normalizeCell(item.dateFormat) || 'auto',
-    // v3.2.16：模板级「字段筛选特征值」规则（旧 bundle 无此字段时为 null；导入时再校验）
-    featureFilter: item.featureFilter && typeof item.featureFilter === 'object' && !Array.isArray(item.featureFilter)
-      ? { ...item.featureFilter }
-      : null,
+    // v3.2.18：特征值列表（导入时再校验）。本版本导出的包都带 featureFilters 数组——映射都没选用时仍写 v5/v6，
+    //   故按字段而非版本判断；没有数组时才是 v3.2.16/3.2.17 的单套 featureFilter，升级为「特征值1」。
+    featureFilters: upgradeLegacyFeatureFilter(Array.isArray(item.featureFilters) ? item.featureFilters : item.featureFilter),
     // v3.2.15（v5）：所属渠道；v≤4 的主/子模板字段只用于导入时转为渠道。
     channelName: bundleVersion >= 5 ? (normalizeCell(item.channelName) || null) : null,
     isParent: bundleVersion < 5 && Boolean(item.isParent),
@@ -4225,11 +4327,15 @@ function buildImportWarningDetailLines(warnings) {
     });
   }
 
-  // v3.2.16：字段筛选特征值未命中的行（选该映射值的字段已留空）
+  // v3.2.16：字段筛选特征值未命中的行（选该映射值的字段已留空）；v3.2.18 逐个特征值列出
   if (featureValueWarnings.length) {
     detailLines.push('以下行未筛出特征值，选择「字段筛选特征值」的字段已留空：');
     featureValueWarnings.forEach((warning) => {
-      detailLines.push(`第${warning.rowNumber}行，源字段“${warning.sourceField}”，原值“${warning.rawValue || '(空)'}”`);
+      (Array.isArray(warning.misses) ? warning.misses : []).forEach((miss) => {
+        detailLines.push(
+          `第${warning.rowNumber}行，特征值“${miss.featureName}”，源字段“${miss.sourceField}”，原值“${miss.rawValue || '(空)'}”`
+        );
+      });
     });
   }
 
@@ -4487,6 +4593,17 @@ function normalizeMappingRows({ template, mappings, enumValues, bigAccounts = []
     const savedValue = getPrimaryMappedField(savedMapping);
     const savedFields = getMappingFieldValues(savedMapping);
     const rawMappedField = normalizeCell(savedMapping?.mappedField);
+    // v3.2.18：mappedFields[0] 是所选特征值 id，不是源字段
+    if (rawMappedField === FEATURE_FILTER_MAPPING_FIELD) {
+      const featureFilterRef = getFeatureFilterRef(savedMapping);
+      return {
+        templateField: fieldName,
+        mappedField: FEATURE_FILTER_MAPPING_FIELD,
+        mappedFields: featureFilterRef ? [featureFilterRef] : [],
+        customValue: '',
+        isMultiBigAccount: false
+      };
+    }
     const isConcatMode = rawMappedField === CONCAT_FIELDS_MAPPING_FIELD || savedFields.length > 1;
     const customInputMapping = CUSTOM_INPUT_TARGET_FIELDS.has(fieldName)
       ? decodeCustomInputMappingValue(savedValue)
@@ -4549,6 +4666,15 @@ function normalizeExportMappingRows({ template, mappings, enumValues }) {
     const savedValue = getPrimaryMappedField(savedMapping);
     const savedFields = getMappingFieldValues(savedMapping);
     const rawMappedField = normalizeCell(savedMapping?.mappedField);
+    // v3.2.18：mappedFields[0] 是所选特征值 id，不是源字段；生成用映射须保留它（buildMappedFieldLookup 据此取特征值）
+    if (rawMappedField === FEATURE_FILTER_MAPPING_FIELD) {
+      const featureFilterRef = getFeatureFilterRef(savedMapping);
+      return {
+        templateField: fieldName,
+        mappedField: FEATURE_FILTER_MAPPING_FIELD,
+        mappedFields: featureFilterRef ? [featureFilterRef] : []
+      };
+    }
     const isConcatMode = rawMappedField === CONCAT_FIELDS_MAPPING_FIELD || savedFields.length > 1;
 
     return {
@@ -4870,13 +4996,16 @@ async function waitForVccPreviewCaptureReady(webContents) {
 }
 
 // 主窗口关闭（含任务栏“关闭窗口”、Alt+F4 等不经渲染层的入口）：
-//   空闲存储整理持有过渡租约时，先中止整理并等其收尾，再重新关闭；升级准备期间仍阻止关闭。
+//   空闲存储整理或链接表过期清理持有过渡租约时，先中止并等其收尾，再重新关闭；升级准备期间仍阻止关闭。
 function handleMainWindowClose(event) {
   if (quitPreparationComplete) return;
-  if (idleDatabaseCompaction.isRunning()) {
+  if (idleDatabaseCompaction.isRunning() || idleLinkedTableRetention.isRunning()) {
     event.preventDefault();
     const closingWindow = mainWindow;
-    idleDatabaseCompaction.stop('window-close').then(() => {
+    Promise.all([
+      idleLinkedTableRetention.stop('window-close'),
+      idleDatabaseCompaction.stop('window-close')
+    ]).then(() => {
       if (closingWindow && !closingWindow.isDestroyed()) closingWindow.close();
     });
     return;
@@ -5030,10 +5159,10 @@ function buildTemplateSummary(template) {
     channelName: template.channelName || '',
     // v1.5.2 需求 3（G3-4）：透传「文件名里的固定字段」给映射关系对话框回显
     filenameFixedField: String(template.filenameFixedField || ''),
-    // v3.2.16：模板级「字段筛选特征值」规则，供映射关系对话框回显
-    featureFilter: template.featureFilter && typeof template.featureFilter === 'object'
-      ? { ...template.featureFilter }
-      : null
+    // v3.2.18：模板的特征值列表，供映射关系对话框的「选择特征值」与【特征值管理】回显
+    featureFilters: Array.isArray(template.featureFilters)
+      ? template.featureFilters.map((item) => ({ ...item }))
+      : []
   };
 }
 
@@ -7954,6 +8083,7 @@ function registerAppHandlers() {
   //   - 节流由 renderer 端做（10s 一次），main 不再做防抖
   ipcMain.on('app:user-activity', () => {
     lastUserActivityTs = Date.now();
+    idleLinkedTableRetention.abort('user-activity');
     idleDatabaseCompaction.abort('user-activity');
   });
 
@@ -8551,19 +8681,43 @@ function registerFundTransferAccountMappingHandlers() {
   });
 }
 
-// v3.2.16：保存时的筛选规则——实际用到时必须有效（无效即抛错）；未用到时有效草稿照存（便于再次选用），无效则不写。
-function resolveSavedFeatureFilter({ used, featureFilter, headers }) {
-  if (used) {
-    return normalizeFeatureFilterRule(featureFilter, { headers });
+// v3.2.18：【特征值管理】保存载荷校验——逐条校验名称与条件（已有 id 须存在，新条目分配 id）；
+//   被删掉的特征值若仍被已保存的主映射或拆分映射选用则拒绝，提示被哪些字段使用。
+function validateFeatureFiltersPayload(rawList, template) {
+  const existing = Array.isArray(template.featureFilters) ? template.featureFilters : [];
+  const knownIds = new Set(existing.map((item) => normalizeCell(item && item.id)).filter(Boolean));
+  // 未改动的已有特征值不按当前表头校验（模板【更新】后可逐个修复），新增与改动的照常校验
+  const featureFilters = normalizeFeatureFilterList(rawList, { headers: template.headers, knownIds, preserved: existing });
+  const keptIds = new Set(featureFilters.map((item) => item.id));
+  const removed = existing.filter((item) => !keptIds.has(normalizeCell(item && item.id)));
+  if (removed.length) {
+    const references = database.listTemplateFeatureFilterReferences(template.id, FEATURE_FILTER_MAPPING_FIELD);
+    removed.forEach((item) => {
+      const id = normalizeCell(item.id);
+      const fields = references
+        .filter((reference) => reference.ref === id)
+        .map((reference) => (reference.scope === 'split'
+          ? `${reference.templateField}（拆分/合并映射）`
+          : reference.templateField));
+      if (fields.length) {
+        throw new FileValidationError(
+          'FILE_READ',
+          `特征值「${normalizeCell(item.name)}」正被 ${fields.join('、')} 使用，请先改选其他特征值后再删除`
+        );
+      }
+    });
   }
-  if (!featureFilter) {
-    return null;
-  }
-  try {
-    return normalizeFeatureFilterRule(featureFilter, { headers });
-  } catch (_error) {
-    return null;
-  }
+  return featureFilters;
+}
+
+// v3.2.18：选「字段筛选特征值」的映射行 → [{ templateField, ref }]；label 用于拆分映射的提示前缀。
+function collectFeatureFilterRefs(mappings, label = '') {
+  return (Array.isArray(mappings) ? mappings : [])
+    .filter((mapping) => normalizeCell(mapping && mapping.mappedField) === FEATURE_FILTER_MAPPING_FIELD)
+    .map((mapping) => ({
+      templateField: `${label}${normalizeCell(mapping.templateField)}`,
+      ref: getFeatureFilterRef(mapping)
+    }));
 }
 
 function validateTemplateConfiguration({
@@ -8572,7 +8726,8 @@ function validateTemplateConfiguration({
   enumValues,
   bigAccounts = [],
   fixedAssignments = [],
-  featureFilter = null,
+  // v3.2.18：模板的特征值列表（库中已存，或模板包内已校验的列表）
+  featureFilters = [],
   billSplitMappings = [],
   // v3.2.16：MerchantId「原始账单仅有币种无账户号」的 币种 → 大账号，与币种映射表中的币种代码
   currencyBigAccounts = [],
@@ -8593,15 +8748,18 @@ function validateTemplateConfiguration({
     }
 
     const isFeatureFilterMode = rawMappedField === FEATURE_FILTER_MAPPING_FIELD;
+    const featureFilterRef = isFeatureFilterMode ? getFeatureFilterRef(mapping) : '';
     mappingByTarget.set(targetField, {
       mappedField: rawMappedField === CONCAT_FIELDS_MAPPING_FIELD || isFeatureFilterMode ? rawMappedField : sourceField,
-      mappedFields: isFeatureFilterMode ? [] : getMappingFieldValues(mapping),
+      mappedFields: isFeatureFilterMode
+        ? (featureFilterRef ? [featureFilterRef] : [])
+        : getMappingFieldValues(mapping),
       customValue: normalizeCell(mapping.customValue)
     });
   });
 
   const cleanedMappings = [];
-  const featureFilterTargetFields = [];
+  const featureFilterRefs = [];
   const merchantIdMapping = mappingByTarget.get('MerchantId') || {
     mappedField: '',
     mappedFields: [],
@@ -8818,7 +8976,7 @@ function validateTemplateConfiguration({
       return;
     }
 
-    // v3.2.16：字段筛选特征值，可用字段同「需要拼接字段」；规则模板级共用，循环后统一校验。
+    // v3.2.16：字段筛选特征值，可用字段同「需要拼接字段」；v3.2.18 各行带所选特征值 id，循环后按生效映射统一校验。
     if (normalizedSourceField === FEATURE_FILTER_MAPPING_FIELD) {
       if (
         targetField === 'Balance'
@@ -8828,11 +8986,12 @@ function validateTemplateConfiguration({
       ) {
         throw new FileValidationError('FILE_READ', `${targetField} 不支持使用"${FEATURE_FILTER_MAPPING_FIELD}"`);
       }
-      featureFilterTargetFields.push(targetField);
+      const featureFilterRef = normalizeCell(selectedSourceFields[0]);
+      featureFilterRefs.push({ templateField: targetField, ref: featureFilterRef });
       cleanedMappings.push({
         templateField: targetField,
         mappedField: FEATURE_FILTER_MAPPING_FIELD,
-        mappedFields: []
+        mappedFields: featureFilterRef ? [featureFilterRef] : []
       });
       return;
     }
@@ -8910,26 +9069,19 @@ function validateTemplateConfiguration({
     });
   }
 
-  // v3.2.16：只按实际生效的映射判断是否用到（与生成口径 resolveStatementFeatureFilter 一致）：
+  // v3.2.16：只按实际生效的映射判断是否用到（与生成口径 resolveStatementFeatureFilters 一致）：
   //   启用拆分/合并且不复用模块映射时看拆分映射（已存或模板包内），否则看主映射。
+  // v3.2.18：生效映射里每个选该值的字段都须选了特征值，且特征值存在、条件有效。
   const splitMappingsEffective = usesBillSplitMerge && cleanedMappings.some((mapping) => (
     mapping.templateField === REUSE_MODULE_MAPPING_FIELD && mapping.mappedField === '否'
   ));
-  const billSplitUsesFeatureFilter = splitMappingsEffective
-    && (Array.isArray(billSplitMappings) ? billSplitMappings : [])
-      .some((mapping) => normalizeCell(mapping && mapping.mappedField) === FEATURE_FILTER_MAPPING_FIELD);
-  const featureFilterUsed = splitMappingsEffective ? billSplitUsesFeatureFilter : featureFilterTargetFields.length > 0;
-  if (billSplitUsesFeatureFilter && !featureFilter) {
-    throw new FileValidationError(
-      'FILE_READ',
-      `拆分/合并账单映射关系设置中有字段使用了"${FEATURE_FILTER_MAPPING_FIELD}"，请先在该弹窗点击【筛选条件】设置`
-    );
-  }
-  const cleanedFeatureFilter = resolveSavedFeatureFilter({
-    used: featureFilterUsed,
-    featureFilter,
-    headers: template.headers
-  });
+  resolveUsedFeatureFilters(
+    featureFilters,
+    splitMappingsEffective
+      ? collectFeatureFilterRefs(billSplitMappings, '拆分/合并账单映射关系设置中的 ')
+      : featureFilterRefs,
+    { headers: template.headers }
+  );
   const cleanedCurrencyBigAccounts = merchantIdManagedByCurrency
     ? validateCurrencyBigAccountConfiguration({
         cleanedMappings,
@@ -8943,7 +9095,6 @@ function validateTemplateConfiguration({
     mappings: cleanedMappings,
     bigAccounts: expandBigAccountConfigurations(cleanedBigAccounts),
     fixedAssignments: cleanedFixedAssignments,
-    featureFilter: cleanedFeatureFilter,
     currencyBigAccounts: cleanedCurrencyBigAccounts
   };
 }
@@ -9128,6 +9279,154 @@ function importStatementChildTemplate(channelId, selectedPath) {
       originalError: error,
       context: { selectedPath, channelId }
     });
+  }
+}
+
+// v3.2.18【导入模板】命名（spec：changes/v3.2.18/feat/template-import-naming/spec.md）：
+//   template:prepare-import 选文件并识别为新模板 → 渲染层弹框输入银行渠道名、地区 → template:import 带 token 与名称提交。
+//   待确认文件只登记在 Main，按发送方窗口归属；渲染层不回传路径。
+function templateImportOwnerId(event) {
+  return Number(event && event.sender && event.sender.id) || 0;
+}
+
+function createTemplateImportFileErrorResult(error, selectedPath) {
+  if (error instanceof FileValidationError) {
+    return createErrorResult({
+      step: '导入模板文件',
+      message: error.message,
+      errorCode: error.code,
+      detailLines: ['模板文件无法读取或表头无效，未完成导入。'],
+      context: { selectedPath }
+    });
+  }
+  return createErrorResult({
+    step: '导入模板文件',
+    message: '模板导入失败，请导出报错文件查看详情',
+    errorCode: 'TEMPLATE_IMPORT_RUNTIME',
+    errorType: '系统错误',
+    originalError: error,
+    context: { selectedPath }
+  });
+}
+
+function createTemplateHeadersDuplicateResult(conflict) {
+  return createErrorResult({
+    step: '导入模板文件',
+    message: `该文件的表头与已有模板「${conflict.name}」完全相同，无法创建重复表头的模板。`,
+    errorCode: 'TEMPLATE_HEADERS_DUPLICATE',
+    context: { conflictTemplateName: conflict.name }
+  });
+}
+
+// 预检：表头能读出且与所有已有模板都不相同，才算新模板并登记待命名；表头重复沿用原报错，不弹命名框。
+function prepareOrdinaryTemplateImport(ownerId, selectedPath) {
+  try {
+    const headers = extractHeaders(selectedPath);
+    const conflict = findConflictingTemplateByHeaders(headers, null);
+    if (conflict) {
+      return createTemplateHeadersDuplicateResult(conflict);
+    }
+    const sourceFileName = path.basename(selectedPath);
+    const importToken = pendingTemplateImports.register({ ownerId, filePath: selectedPath, sourceFileName, headers });
+    return { status: 'ready', importToken, sourceFileName };
+  } catch (error) {
+    return createTemplateImportFileErrorResult(error, selectedPath);
+  }
+}
+
+// 名称按 D1 规范化（大写），并按 D2 与已有模板、渠道查重（忽略大小写）。
+function checkOrdinaryTemplateImportName(options = {}) {
+  const name = normalizeTemplateImportName(options || {});
+  if (!name.ok) {
+    return {
+      ok: false,
+      result: createErrorResult({ step: '导入模板文件', message: name.message, errorCode: name.errorCode })
+    };
+  }
+  const conflict = findTemplateImportNameConflict({
+    templateName: name.templateName,
+    templates: database.listTemplates(),
+    channels: database.listStatementChannels()
+  });
+  if (conflict) {
+    return {
+      ok: false,
+      result: createErrorResult({
+        step: '导入模板文件',
+        message: conflict.message,
+        errorCode: conflict.errorCode,
+        context: { templateName: name.templateName }
+      })
+    };
+  }
+  return { ok: true, name };
+}
+
+function createTemplateImportExpiredResult() {
+  return createErrorResult({
+    step: '导入模板文件',
+    message: '本次导入已失效，请重新点击【导入模板】选择文件',
+    errorCode: 'TEMPLATE_IMPORT_EXPIRED'
+  });
+}
+
+// template:import 的 prepare：核对待确认文件与名称；不通过时直接返回，不预留归档批次，token 保留供改名重试。
+function resolveOrdinaryTemplateImport(event, options = {}) {
+  const pending = pendingTemplateImports.peek(options && options.importToken, templateImportOwnerId(event));
+  if (!pending) {
+    return { ok: false, result: createTemplateImportExpiredResult() };
+  }
+  const checked = checkOrdinaryTemplateImportName(options);
+  if (!checked.ok) return checked;
+  return { ok: true, filePath: pending.filePath, templateName: checked.name.templateName };
+}
+
+// template:import 的 execute：复核名称（防并发），重读表头须与预检一致，再新建模板。
+function importOrdinaryTemplate(event, options = {}, selectedPath) {
+  const ownerId = templateImportOwnerId(event);
+  const importToken = options && options.importToken;
+  const pending = pendingTemplateImports.peek(importToken, ownerId);
+  if (!pending || pending.filePath !== selectedPath) {
+    return createTemplateImportExpiredResult();
+  }
+  const checked = checkOrdinaryTemplateImportName(options);
+  if (!checked.ok) return checked.result;
+  const { templateName, bankName, region } = checked.name;
+  pendingTemplateImports.consume(importToken, ownerId);
+  try {
+    const headers = extractHeaders(selectedPath);
+    if (JSON.stringify(headers) !== JSON.stringify(pending.headers)) {
+      return createErrorResult({
+        step: '导入模板文件',
+        message: '模板文件在确认期间已变化，请重新点击【导入模板】选择文件',
+        errorCode: 'TEMPLATE_IMPORT_FILE_CHANGED',
+        context: { selectedPath }
+      });
+    }
+    const conflict = findConflictingTemplateByHeaders(headers, null);
+    if (conflict) {
+      return createTemplateHeadersDuplicateResult(conflict);
+    }
+    // 已确认不重名（忽略大小写），upsertTemplate 只会新建，不会覆盖已有模板的映射与配置。
+    const template = database.upsertTemplate({
+      name: templateName,
+      sourceFileName: pending.sourceFileName,
+      headers
+    });
+    syncTemplateLibraryFile();
+    clearLastErrorReport();
+    appendActivityLogEntry({
+      level: 'info',
+      message: '导入模板文件成功',
+      details: [`模板名：${templateName}`, `银行渠道名：${bankName}`, `地区：${region}`, `源文件：${selectedPath}`]
+    });
+    return {
+      status: 'success',
+      message: `已导入模板「${templateName}」，请在模板管理中维护映射关系`,
+      template: buildTemplateSummary(template)
+    };
+  } catch (error) {
+    return createTemplateImportFileErrorResult(error, selectedPath);
   }
 }
 
@@ -9370,9 +9669,29 @@ function registerTemplateHandlers() {
     }
   });
 
+  // v3.2.18【导入模板】：选文件并识别为新模板（只读预检）；确认命名后走 template:import 写入。
+  ipcMain.handle('template:prepare-import', async (event) => {
+    const choice = await showImportOpenDialog('template', {
+      properties: ['openFile'],
+      filters: templateFileDialogFilters()
+    });
+    const selectedPath = !choice.canceled && Array.isArray(choice.filePaths) ? choice.filePaths[0] : '';
+    if (!selectedPath) {
+      return { status: 'cancelled' };
+    }
+    return prepareOrdinaryTemplateImport(templateImportOwnerId(event), selectedPath);
+  });
+
+  // v3.2.18【导入模板】：命名弹框取消时丢弃待确认文件。
+  ipcMain.handle('template:discard-import', (event, importToken) => {
+    pendingTemplateImports.discard(importToken, templateImportOwnerId(event));
+    return { status: 'success' };
+  });
+
   // v3.2.15：传 { channelId } 即【导入子模板】（T7）——模板名按渠道编号生成，总是新建并归入该渠道。
+  // v3.2.18：普通导入传 { importToken, bankName, region }——文件来自 template:prepare-import，模板名 = 银行渠道名-地区。
   trackedIpcHandle('template:import', '生成网银账单', '导入模板', {
-    async prepare(_event, options = {}) {
+    async prepare(event, options = {}) {
       const childChannelId = Number(options && options.channelId || 0);
       if (childChannelId && !database.getStatementChannel(childChannelId)) {
         return {
@@ -9385,12 +9704,22 @@ function registerTemplateHandlers() {
           })
         };
       }
-      const result = await showImportOpenDialog('template', {
-        properties: ['openFile'],
-        filters: templateFileDialogFilters()
-      });
-      if (result.canceled || result.filePaths.length === 0) {
-        return { proceed: false, result: { status: 'cancelled' } };
+      let selectedPath = '';
+      if (childChannelId) {
+        const result = await showImportOpenDialog('template', {
+          properties: ['openFile'],
+          filters: templateFileDialogFilters()
+        });
+        if (result.canceled || result.filePaths.length === 0) {
+          return { proceed: false, result: { status: 'cancelled' } };
+        }
+        selectedPath = result.filePaths[0];
+      } else {
+        const resolved = resolveOrdinaryTemplateImport(event, options);
+        if (!resolved.ok) {
+          return { proceed: false, result: resolved.result };
+        }
+        selectedPath = resolved.filePath;
       }
       return {
         proceed: true,
@@ -9398,7 +9727,7 @@ function registerTemplateHandlers() {
           version: 1,
           allocation: 'eager',
           inputs: [{
-            filePath: result.filePaths[0],
+            filePath: selectedPath,
             role: 'input',
             sourceOperation: 'template:import'
           }],
@@ -9406,75 +9735,13 @@ function registerTemplateHandlers() {
         }
       };
     },
-    async execute(_event, prepared, taskContext, options = {}) {
-    const selectedPath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
-    const childChannelId = Number(options && options.channelId || 0);
-    if (childChannelId) {
-      return importStatementChildTemplate(childChannelId, selectedPath);
-    }
-    try {
-      const headers = extractHeaders(selectedPath);
-      const templateName = path.parse(selectedPath).name;
-
-      // v1.5.2：表头唯一性校验 — 检查是否和已有模板重复
-      const existingByName = database.getTemplateByName(templateName);
-      const conflict = findConflictingTemplateByHeaders(headers, existingByName ? existingByName.id : null);
-      if (conflict) {
-        return createErrorResult({
-          step: '导入模板文件',
-          message: `该文件的表头与已有模板「${conflict.name}」完全相同，无法创建重复表头的模板。`,
-          errorCode: 'TEMPLATE_HEADERS_DUPLICATE',
-          context: { conflictTemplateName: conflict.name }
-        });
+    async execute(event, prepared, taskContext, options = {}) {
+      const selectedPath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
+      const childChannelId = Number(options && options.channelId || 0);
+      if (childChannelId) {
+        return importStatementChildTemplate(childChannelId, selectedPath);
       }
-
-      // v3.2.15：新建或覆盖的是普通模板时不能与渠道同名（覆盖渠道内的同名子模板不受限）。
-      if ((!existingByName || !existingByName.channelId) && database.getStatementChannelByName(templateName)) {
-        return createErrorResult({
-          step: '导入模板文件',
-          message: `已有同名渠道「${templateName}」，普通模板与渠道同名会使两者的输出名称相同；如是该渠道的另一种格式，请在渠道行点【导入子模板】，否则请先修改文件名`,
-          errorCode: 'TEMPLATE_NAME_CHANNEL_CONFLICT',
-          context: { channelName: templateName }
-        });
-      }
-
-      const template = database.upsertTemplate({
-        name: templateName,
-        sourceFileName: path.basename(selectedPath),
-        headers
-      });
-      syncTemplateLibraryFile();
-      clearLastErrorReport();
-      appendActivityLogEntry({
-        level: 'info',
-        message: '导入模板文件成功',
-        details: [`模板名：${templateName}`, `源文件：${selectedPath}`]
-      });
-      return {
-        status: 'success',
-        message: '模板导入成功，请在模板管理中维护映射关系',
-        template: buildTemplateSummary(template)
-      };
-    } catch (error) {
-      if (error instanceof FileValidationError) {
-        return createErrorResult({
-          step: '导入模板文件',
-          message: error.message,
-          errorCode: error.code,
-          detailLines: ['模板文件无法读取或表头无效，未完成导入。'],
-          context: { selectedPath }
-        });
-      }
-
-      return createErrorResult({
-        step: '导入模板文件',
-        message: '模板导入失败，请导出报错文件查看详情',
-        errorCode: 'TEMPLATE_IMPORT_RUNTIME',
-        errorType: '系统错误',
-        originalError: error,
-        context: { selectedPath }
-      });
-    }
+      return importOrdinaryTemplate(event, options, selectedPath);
     }
   });
 
@@ -9583,8 +9850,8 @@ function registerTemplateHandlers() {
         enumValues: loadEnumValues(enumConfig.filePath),
         bigAccounts: payload.bigAccounts,
         fixedAssignments: payload.fixedAssignments,
-        // v3.2.16：载荷未带规则时用已存规则；不复用的拆分映射用到该值时一并校验
-        featureFilter: payload.featureFilter || template.featureFilter || null,
+        // v3.2.18：特征值由【特征值管理】即时保存，这里按库中列表校验所选特征值；不复用的拆分映射一并校验
+        featureFilters: template.featureFilters,
         billSplitMappings: database.getBillSplitMappings(payload.templateId),
         currencyBigAccounts: payload.currencyBigAccounts,
         availableCurrencyCodes: getAvailableCurrencyCodes().map((option) => option.code)
@@ -9664,7 +9931,7 @@ function registerTemplateHandlers() {
         templateConfiguration.fixedAssignments,
         payload.dateFormat,
         null,
-        { preserveOwn, channelAssignment, featureFilter: templateConfiguration.featureFilter, currencyBigAccounts: templateConfiguration.currencyBigAccounts }
+        { preserveOwn, channelAssignment, currencyBigAccounts: templateConfiguration.currencyBigAccounts }
       );
       const assignmentResult = saveResult && saveResult.channelAssignment;
       syncTemplateLibraryFile();
@@ -9793,6 +10060,64 @@ function registerTemplateHandlers() {
           templateName: template?.name || ''
         },
         templateName: template?.name || ''
+      });
+    }
+  });
+
+  // v3.2.18 模板管理【更新】：选择新模板文件并预览字段变更（只读预检，确认后走 template:update-headers 写入）。
+  ipcMain.handle('template:preview-header-update', async (_event, rawTemplateId) => {
+    const templateId = Number(rawTemplateId);
+    if (!database.getTemplate(templateId)) {
+      return createErrorResult({
+        step: '更新模板',
+        message: '未找到对应模板，请刷新后重试',
+        errorCode: 'TEMPLATE_NOT_FOUND',
+        context: { templateId }
+      });
+    }
+    const choice = await showImportOpenDialog('template', {
+      properties: ['openFile'],
+      filters: templateFileDialogFilters()
+    });
+    const selectedPath = !choice.canceled && Array.isArray(choice.filePaths) ? choice.filePaths[0] : '';
+    if (!selectedPath) {
+      return { status: 'cancelled' };
+    }
+    try {
+      return prepareTemplateHeaderUpdate({ templateId, filePath: selectedPath });
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        return createErrorResult({
+          step: '更新模板',
+          message: error.message,
+          errorCode: error.code,
+          detailLines: ['模板文件无法读取或表头无效，未更新模板。'],
+          context: { templateId, selectedPath }
+        });
+      }
+      return createErrorResult({
+        step: '更新模板',
+        message: '读取模板文件失败，请导出报错文件查看详情',
+        errorCode: 'TEMPLATE_HEADER_UPDATE_PREVIEW_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { templateId, selectedPath }
+      });
+    }
+  });
+
+  // v3.2.18 模板管理【更新】：确认后只替换表头（仅主库写入，不产生文件）。
+  supportIpcHandle('template:update-headers', '更新模板表头', (_event, payload = {}) => {
+    try {
+      return applyTemplateHeaderUpdate(payload || {});
+    } catch (error) {
+      return createErrorResult({
+        step: '更新模板',
+        message: '模板更新失败，请导出报错文件查看详情',
+        errorCode: 'TEMPLATE_HEADER_UPDATE_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { templateId: Number(payload && payload.templateId) }
       });
     }
   });
@@ -10019,15 +10344,11 @@ function registerTemplateHandlers() {
             return;
           }
 
-          const draftTemplate = existingTemplate || {
-            id: 0,
-            templateKey: entry.templateKey,
-            name: entry.name,
-            sourceFileName: entry.sourceFileName,
-            headers: entry.headers,
-            createdAt: '',
-            updatedAt: ''
-          };
+          const draftTemplate = buildBundleImportDraftTemplate(entry, existingTemplate);
+          // v3.2.18：包内特征值只校验名称与条件（保留包内 id），不按表头校验筛选字段：模板【更新】后未被选用的
+          //   特征值可能引用已删除的字段，不应让整条模板被跳过；生效映射所选特征值由 validateTemplateConfiguration
+          //   按表头校验，随映射同事务写入。
+          const bundleFeatureFilters = normalizeFeatureFilterList(entry.featureFilters || []);
           const validated = validateTemplateConfiguration({
             template: draftTemplate,
             mappings: normalizeMappingRows({
@@ -10038,7 +10359,7 @@ function registerTemplateHandlers() {
             enumValues,
             bigAccounts: entry.bigAccounts,
             fixedAssignments: entry.fixedAssignments,
-            featureFilter: entry.featureFilter,
+            featureFilters: bundleFeatureFilters,
             billSplitMappings: entry.billSplitMappings,
             currencyBigAccounts: entry.currencyBigAccounts,
             availableCurrencyCodes: bundleCurrencyCodes
@@ -10071,7 +10392,7 @@ function registerTemplateHandlers() {
             validated.fixedAssignments,
             entry.dateFormat,
             normalizedAmountSplitRules,
-            { preserveOwn: false, featureFilter: validated.featureFilter, currencyBigAccounts: validated.currencyBigAccounts }
+            { preserveOwn: false, featureFilters: bundleFeatureFilters, currencyBigAccounts: validated.currencyBigAccounts }
           );
 
           // v1.5.2 需求 3：透传文件名固定字段（老 bundle 无此字段时落为空串）
@@ -10401,14 +10722,9 @@ function registerTemplateHandlers() {
         });
       }
       const validated = validateBillSplitMappingsPayload(payload.mappings, template);
-      // v3.2.16：用到字段筛选特征值时规则必须有效（载荷未带则用已存规则），与映射同一事务写入
-      // 未用到时有效草稿照存，避免弹窗里改过的规则被丢弃而与界面不一致
-      const featureFilter = resolveSavedFeatureFilter({
-        used: validated.some((mapping) => mapping.mappedField === FEATURE_FILTER_MAPPING_FIELD),
-        featureFilter: payload.featureFilter || template.featureFilter,
-        headers: template.headers
-      });
-      database.saveBillSplitMappings(templateId, validated, { featureFilter });
+      // v3.2.18：选「字段筛选特征值」的字段须选了库中存在的特征值（特征值由【特征值管理】即时保存）
+      resolveUsedFeatureFilters(template.featureFilters, collectFeatureFilterRefs(validated), { headers: template.headers });
+      database.saveBillSplitMappings(templateId, validated);
       syncTemplateLibraryFile();
       return { status: 'success', message: '拆分账单字段映射保存成功' };
     } catch (error) {
@@ -10426,6 +10742,48 @@ function registerTemplateHandlers() {
         step: '保存拆分账单字段映射',
         message: '拆分账单字段映射保存失败，请导出报错文件查看详情',
         errorCode: 'BILL_SPLIT_MAPPINGS_SAVE_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { templateId, templateName: template?.name || '' },
+        templateName: template?.name || ''
+      });
+    }
+  });
+
+  // v3.2.18 映射关系管理【特征值管理】：保存、删除特征值即时落库（spec D7）。整表替换；
+  //   已保存的主映射 / 拆分映射仍在使用的特征值不能被删掉（spec D5）。
+  supportIpcHandle('template:save-feature-filters', '保存特征值', (_event, payload = {}) => {
+    const templateId = Number(payload?.templateId);
+    let template = null;
+    try {
+      template = database.getTemplate(templateId);
+      if (!template) {
+        return createErrorResult({
+          step: '保存特征值',
+          message: '未找到对应模板',
+          errorCode: 'TEMPLATE_NOT_FOUND',
+          context: { templateId }
+        });
+      }
+      const featureFilters = validateFeatureFiltersPayload(payload.featureFilters, template);
+      database.saveTemplateFeatureFilters(templateId, featureFilters);
+      syncTemplateLibraryFile();
+      return { status: 'success', message: '特征值已保存', featureFilters };
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        return createErrorResult({
+          step: '保存特征值',
+          message: error.message,
+          errorCode: error.code,
+          originalError: error,
+          context: { templateId, templateName: template?.name || '' },
+          templateName: template?.name || ''
+        });
+      }
+      return createErrorResult({
+        step: '保存特征值',
+        message: '特征值保存失败，请导出报错文件查看详情',
+        errorCode: 'FEATURE_FILTERS_SAVE_RUNTIME',
         errorType: '系统错误',
         originalError: error,
         context: { templateId, templateName: template?.name || '' },
@@ -10732,7 +11090,7 @@ function validateBillSplitMappingsPayload(mappings, template) {
     // 与主表格保持一致
     const isBalanceSpecialValue = templateField === 'Balance'
       && (mappedField === BALANCE_DISABLED_OPTION || mappedField === BALANCE_CALCULATED_OPTION);
-    // v3.2.16：字段筛选特征值共用模板级规则（由保存处统一校验），不带源字段
+    // v3.2.16：字段筛选特征值不带源字段；v3.2.18 mappedFields 只保留所选特征值 id（由保存处校验存在）
     if (mappedField === FEATURE_FILTER_MAPPING_FIELD) {
       if (templateField === 'Balance') {
         throw new FileValidationError('FILE_READ', `${templateField} 不支持使用"${FEATURE_FILTER_MAPPING_FIELD}"`);
@@ -10740,15 +11098,15 @@ function validateBillSplitMappingsPayload(mappings, template) {
       normalized.push({
         templateField,
         mappedField,
-        mappedFields: [],
+        mappedFields: mappedFields.slice(0, 1),
         rowIndex: Number.isInteger(mapping?.rowIndex) ? mapping.rowIndex : index
       });
       return;
     }
-    // Header existence check (allow concat marker + custom prefix to pass)
+    // Header existence check (allow custom prefix to pass)。拼接模式只由外层 mappedField 决定（下方调用前已排除），
+    // v3.2.18：拼接展开后的字段即使名为「需要拼接字段」也是真实源列，须校验存在（模板【更新】删列后不再被放行保存）。
     const checkSourceFieldExists = (field) => {
       if (!field) return;
-      if (field === CONCAT_FIELDS_MAPPING_FIELD) return;
       if (typeof field === 'string' && field.startsWith(FIXED_FIELD_VALUE_PREFIX)) return;
       if (!sourceFieldSet.has(field)) {
         throw new FileValidationError('FILE_READ', `映射字段不存在：${field}`);
@@ -10907,9 +11265,9 @@ function buildMappedFieldLookup(mappings) {
   return mappings.reduce((accumulator, mapping) => {
     const mappedFields = getMappingFieldValues(mapping);
     const isConcatMode = normalizeCell(mapping.mappedField) === CONCAT_FIELDS_MAPPING_FIELD;
-    // v3.2.16：字段筛选特征值转为内部 token，由 buildMappedRows 按模板级规则逐行取值
+    // v3.2.16：字段筛选特征值转为内部 token，由 buildMappedRows 逐行取值；v3.2.18 token 带所选特征值 id
     if (normalizeCell(mapping.mappedField) === FEATURE_FILTER_MAPPING_FIELD) {
-      accumulator[mapping.templateField] = FEATURE_FILTER_FIELD_TOKEN;
+      accumulator[mapping.templateField] = buildFeatureFilterToken(getFeatureFilterRef(mapping));
       return accumulator;
     }
     accumulator[mapping.templateField] = isConcatMode
@@ -11012,7 +11370,17 @@ function buildStatementGenerationConfig({
 
   const amountSplitByFieldConfig = buildAmountSplitByFieldConfig(template, selectedMappings);
   const billSplitMergeConfig = buildBillSplitMergeConfig(template, selectedMappings);
-  const featureFilter = resolveStatementFeatureFilter(template, mappingByTargetField, billSplitMergeConfig);
+  // v3.2.18：模板【更新】后映射仍引用已删除的字段时拒绝生成（否则该列静默输出空值），在读取文件与写出之前拦截。
+  templateHeaderUpdateTools.assertTemplateFieldReferencesAvailable(template, {
+    mappings: selectedMappings,
+    amountSplitRules: amountSplitByFieldConfig.rules || [],
+    billSplitMappings: billSplitMergeConfig.billSplitMappings || [],
+    billSplitRows: billSplitMergeConfig.billSplitRows || [],
+    billSplitAmountRules: billSplitMergeConfig.billSplitAmountRules || [],
+    billSplitSignedAmountSourceField: billSplitMergeConfig.signedAmountSourceField || '',
+    featureFilters: template && Array.isArray(template.featureFilters) ? template.featureFilters : []
+  });
+  const featureFilters = resolveStatementFeatureFilters(template, mappingByTargetField, billSplitMergeConfig);
   const currencyBigAccountMapping = isCurrencyOnlyTemplate
     ? buildCurrencyBigAccountMappingConfig(template, outputName)
     : null;
@@ -11035,25 +11403,31 @@ function buildStatementGenerationConfig({
     },
     amountSplitByField: amountSplitByFieldConfig,
     billSplitMerge: billSplitMergeConfig,
-    featureFilter,
+    featureFilters,
     currencyBigAccountMapping,
     dateParseOrder: template.dateFormat || 'auto'
   };
 }
 
 // v3.2.16：实际生效的映射（拆分/合并且不复用时为拆分映射，否则为主映射）用到「字段筛选特征值」时，
-// 模板须有有效规则，否则拒绝生成；与 buildMappedRows 的启用口径一致。
-function resolveStatementFeatureFilter(template, mappingByTargetField, billSplitMergeConfig) {
+// 所选特征值须存在且有效，否则拒绝生成；与 buildMappedRows 的启用口径一致。
+// v3.2.18：返回用到的特征值 { [id]: { id, name, ...rule } }，未用到时为 {}。
+function resolveStatementFeatureFilters(template, mappingByTargetField, billSplitMergeConfig) {
   const effectiveLookup = billSplitMergeConfig
     && billSplitMergeConfig.enabled
     && billSplitMergeConfig.reuseModuleMapping === false
     ? billSplitMergeConfig.billSplitMappingByTargetField
     : mappingByTargetField;
-  const used = Object.values(effectiveLookup || {}).some((value) => value === FEATURE_FILTER_FIELD_TOKEN);
-  if (!used) {
-    return null;
-  }
-  return normalizeFeatureFilterRule(template && template.featureFilter, { headers: template && template.headers });
+  const refs = [];
+  Object.entries(effectiveLookup || {}).forEach(([templateField, value]) => {
+    [].concat(value).forEach((item) => {
+      const ref = parseFeatureFilterToken(item);
+      if (ref !== null) {
+        refs.push({ templateField, ref });
+      }
+    });
+  });
+  return resolveUsedFeatureFilters(template && template.featureFilters, refs, { headers: template && template.headers });
 }
 
 // v3.2.16：MerchantId「原始账单仅有币种无账户号」— 读取模板【映射管理】中的 币种 → 大账号。
@@ -11189,7 +11563,7 @@ function buildMappedRowsForFile({
     amountMappingRules: config.amountMappingRules,
     amountSplitByField: config.amountSplitByField,
     billSplitMerge: config.billSplitMerge,
-    featureFilter: config.featureFilter || null,
+    featureFilters: config.featureFilters || null,
     expectedSourceHeaders: config.template.headers,
     selectedBigAccount: {
       merchantId: config.selectedMerchantId,
@@ -13438,6 +13812,218 @@ function statementImportSessionForInvocation(prepared, templateId, templateName)
 }
 
 // v1.5.2：检查表头是否与已有模板重复（排除自身 excludeId）
+// 模板包导入：校验用的模板草稿。覆盖已有模板时随后会写入包里的表头，校验也必须按包里的表头进行；
+// v3.2.18 起（模板【更新】后交接给其他电脑的场景）不再沿用本机旧表头，避免新字段映射被误判为不存在而整条跳过。
+function buildBundleImportDraftTemplate(entry, existingTemplate) {
+  if (existingTemplate) {
+    return { ...existingTemplate, headers: entry.headers };
+  }
+  return {
+    id: 0,
+    templateKey: entry.templateKey,
+    name: entry.name,
+    sourceFileName: entry.sourceFileName,
+    headers: entry.headers,
+    createdAt: '',
+    updatedAt: ''
+  };
+}
+
+// v3.2.18 模板管理【更新】：模板配置 → 引用收集输入（与 buildStatementGenerationConfig 拦截同一口径）
+function buildTemplateFieldReferenceInput(templateConfig) {
+  return {
+    mappings: Array.isArray(templateConfig && templateConfig.exportMappings) ? templateConfig.exportMappings : [],
+    amountSplitRules: Array.isArray(templateConfig && templateConfig.amountSplitRules) ? templateConfig.amountSplitRules : [],
+    billSplitMappings: Array.isArray(templateConfig && templateConfig.billSplitMappings) ? templateConfig.billSplitMappings : [],
+    billSplitRows: Array.isArray(templateConfig && templateConfig.billSplitRows) ? templateConfig.billSplitRows : [],
+    billSplitAmountRules: Array.isArray(templateConfig && templateConfig.billSplitAmountRules)
+      ? templateConfig.billSplitAmountRules
+      : [],
+    billSplitSignedAmountSourceField: normalizeCell(templateConfig && templateConfig.billSplitMeta
+      && templateConfig.billSplitMeta.signedAmountSourceField),
+    featureFilters: templateConfig && templateConfig.template && Array.isArray(templateConfig.template.featureFilters)
+      ? templateConfig.template.featureFilters
+      : []
+  };
+}
+
+// 按给定表头找出模板配置中失效的源字段引用（含未启用的配置，结果带 active 标记）。
+function collectStaleTemplateFieldReferences(templateId, headers) {
+  const templateConfig = getTemplateMappingConfig(templateId);
+  if (!templateConfig) {
+    return [];
+  }
+  const references = templateHeaderUpdateTools.collectTemplateFieldReferences(
+    buildTemplateFieldReferenceInput(templateConfig)
+  );
+  return templateHeaderUpdateTools.findStaleFieldReferences(references, headers);
+}
+
+// 旧版映射方向（template_field 存源字段、mapped_field 存目标字段）由 resolveCurrentMappings 按当前表头识别；
+// 表头替换后可能识别不出旧方向，映射会整体读空。这类模板先在【修改】中保存一次（按新方向写回）再更新。
+function isLegacyOrientedTemplateMappings(templateId) {
+  const templateConfig = getTemplateMappingConfig(templateId);
+  const payload = database.getTemplateMappings(templateId);
+  if (!templateConfig || !payload) {
+    return false;
+  }
+  const targetFieldSet = new Set(buildManagedMappingFields(templateConfig.enumValues));
+  const sourceFieldSet = new Set((templateConfig.template.headers || []).map((header) => normalizeCell(header)));
+  const mappings = Array.isArray(payload.mappings) ? payload.mappings : [];
+  const currentOrientationScore = mappings.filter((mapping) => targetFieldSet.has(mapping.templateField)).length;
+  const legacyOrientationScore = mappings.filter((mapping) => {
+    return sourceFieldSet.has(normalizeCell(mapping.templateField)) && targetFieldSet.has(mapping.mappedField);
+  }).length;
+  return legacyOrientationScore > currentOrientationScore;
+}
+
+// 读取所选文件表头并与模板当前表头对比；只读，不写库。
+function prepareTemplateHeaderUpdate({ templateId, filePath }) {
+  const template = database.getTemplate(templateId);
+  if (!template) {
+    return createErrorResult({
+      step: '更新模板',
+      message: '未找到对应模板，请刷新后重试',
+      errorCode: 'TEMPLATE_NOT_FOUND',
+      context: { templateId }
+    });
+  }
+  if (isLegacyOrientedTemplateMappings(template.id)) {
+    return createErrorResult({
+      step: '更新模板',
+      message: LEGACY_ORIENTED_MAPPINGS_MESSAGE,
+      errorCode: 'TEMPLATE_MAPPINGS_LEGACY_ORIENTATION',
+      context: { templateId, templateName: template.name }
+    });
+  }
+  const headers = normalizeBundleTemplateHeaders(extractHeaders(filePath));
+  if (!headers.some((header) => header !== '')) {
+    throw new FileValidationError('TEMPLATE_HEADERS_INVALID', '所选文件没有有效的表头');
+  }
+  const diff = diffTemplateHeaders(template.headers, headers);
+  if (!diff.identical) {
+    const conflict = findConflictingTemplateByHeaders(headers, templateId);
+    if (conflict) {
+      return createErrorResult({
+        step: '更新模板',
+        message: `该文件的表头与已有模板「${conflict.name}」完全相同，无法更新为重复表头的模板。`,
+        errorCode: 'TEMPLATE_HEADERS_DUPLICATE',
+        context: { templateName: template.name, conflictTemplateName: conflict.name }
+      });
+    }
+  }
+  const staleReferences = diff.identical ? [] : collectStaleTemplateFieldReferences(templateId, headers);
+  return {
+    status: 'success',
+    templateId: template.id,
+    templateName: template.name,
+    channelId: template.channelId || null,
+    sourceFileName: path.basename(filePath),
+    expectedHeaders: template.headers,
+    headers,
+    diff,
+    affectedMappings: templateHeaderUpdateTools.formatFieldReferenceLines(staleReferences),
+    activeStaleCount: staleReferences.filter((reference) => reference.active).length
+  };
+}
+
+// 确认更新：只替换表头与源文件名，映射等配置全部保留；renderer 回传的表头在此全量复核。
+function applyTemplateHeaderUpdate(payload = {}) {
+  const templateId = Number(payload.templateId);
+  const fail = (errorCode, message, extra = {}) => createErrorResult({
+    step: '更新模板',
+    message,
+    errorCode,
+    context: { templateId, ...extra }
+  });
+  if (!Array.isArray(payload.headers) || !Array.isArray(payload.expectedHeaders)) {
+    return fail('TEMPLATE_HEADERS_INVALID', '模板表头无效，请重新点击【更新】选择文件');
+  }
+  const headers = normalizeBundleTemplateHeaders(payload.headers);
+  const expectedHeaders = payload.expectedHeaders.map((value) => (value === null || value === undefined ? '' : String(value)));
+  if (!headers.some((header) => header !== '')) {
+    return fail('TEMPLATE_HEADERS_INVALID', '所选文件没有有效的表头');
+  }
+  const template = database.getTemplate(templateId);
+  if (!template) {
+    return fail('TEMPLATE_NOT_FOUND', '模板已被删除，请刷新后重试');
+  }
+  if (JSON.stringify(template.headers) !== JSON.stringify(expectedHeaders)) {
+    return fail('TEMPLATE_HEADERS_CHANGED', '模板在此期间已被修改，请重新点击【更新】', { templateName: template.name });
+  }
+  const diff = diffTemplateHeaders(template.headers, headers);
+  if (diff.identical) {
+    return fail('TEMPLATE_HEADERS_UNCHANGED', '所选文件的表头与当前模板一致，无需更新', { templateName: template.name });
+  }
+  if (isLegacyOrientedTemplateMappings(templateId)) {
+    return fail('TEMPLATE_MAPPINGS_LEGACY_ORIENTATION', LEGACY_ORIENTED_MAPPINGS_MESSAGE, { templateName: template.name });
+  }
+  const conflict = findConflictingTemplateByHeaders(headers, templateId);
+  if (conflict) {
+    return fail(
+      'TEMPLATE_HEADERS_DUPLICATE',
+      `该文件的表头与已有模板「${conflict.name}」完全相同，无法更新为重复表头的模板。`,
+      { templateName: template.name, conflictTemplateName: conflict.name }
+    );
+  }
+  const sourceFileName = path.basename(normalizeCell(payload.sourceFileName)) || template.sourceFileName || '';
+
+  let updatedTemplate;
+  try {
+    updatedTemplate = database.updateTemplateHeaders(templateId, { expectedHeaders, headers, sourceFileName });
+  } catch (error) {
+    if (error && error.code === 'TEMPLATE_NOT_FOUND') {
+      return fail('TEMPLATE_NOT_FOUND', '模板已被删除，请刷新后重试');
+    }
+    if (error && error.code === 'TEMPLATE_HEADERS_CHANGED') {
+      return fail('TEMPLATE_HEADERS_CHANGED', '模板在此期间已被修改，请重新点击【更新】', { templateName: template.name });
+    }
+    throw error;
+  }
+  // 表头已写入主库：之后的模板库文件同步失败不影响更新结果（启动和下次修改模板时会重新同步），单独提示。
+  let librarySyncFailed = false;
+  try {
+    syncTemplateLibraryFile();
+  } catch (error) {
+    librarySyncFailed = true;
+    appendActivityLogEntry({
+      level: 'warn',
+      message: '更新模板表头后同步模板库文件失败',
+      details: [`模板名：${template.name}`, `原因：${error && error.message ? error.message : String(error)}`]
+    });
+  }
+  clearLastErrorReport();
+
+  const staleReferences = collectStaleTemplateFieldReferences(templateId, updatedTemplate.headers);
+  const staleMappings = templateHeaderUpdateTools.formatFieldReferenceLines(staleReferences);
+  const activeStaleCount = staleReferences.filter((reference) => reference.active).length;
+  appendActivityLogEntry({
+    level: 'info',
+    message: '更新模板表头成功',
+    details: [
+      `模板名：${template.name}`,
+      `源文件：${sourceFileName || 'N/A'}`,
+      `新增字段：${diff.added.join('、') || '（无）'}`,
+      `删除字段：${diff.removed.join('、') || '（无）'}`,
+      `字段顺序：${diff.orderChanged ? '有调整' : '无变化'}`,
+      `失效映射：${staleMappings.length} 处（需修改后才能生成：${activeStaleCount} 处）`,
+      '映射、大账号、固定值、字段筛选与拆分规则均保留'
+    ]
+  });
+  const baseMessage = activeStaleCount > 0
+    ? `模板「${template.name}」已更新，有 ${activeStaleCount} 处映射引用的字段已删除，修改映射关系前无法用该模板生成账单`
+    : `模板「${template.name}」已更新，映射关系已保留`;
+  return {
+    status: 'success',
+    message: librarySyncFailed ? `${baseMessage}；模板库文件同步失败，下次启动或修改模板时会重新同步` : baseMessage,
+    template: buildTemplateSummary(updatedTemplate),
+    diff,
+    staleMappings,
+    activeStaleCount,
+    librarySyncFailed
+  };
+}
+
 function findConflictingTemplateByHeaders(headers, excludeId) {
   const allTemplates = database.listTemplates();
   const key = JSON.stringify(headers);
@@ -18681,7 +19267,7 @@ function registerNewAccountHandlers() {
   //   仅三张前端可管理的主表（gateway-bill / fx-settlement / bank-deposit）；其余（含隐藏派生表
   //   adm-bank-deposit / boc-fx-settlement / boc-bank-deposit / mid-allocation / fx-option）一律拒绝——
   //   删除不可逆 + 派生联动，绝不允许通过 tableKey 触达隐藏派生表（防误删/绕过派生重建链）。
-  const LINKED_DELETE_ALLOWED_TABLES = new Set(['gateway-bill', 'fx-settlement', 'bank-deposit']);
+  //   v3.2.18：白名单、统计与删除联动抽到 src/main-process/linked-table-delete.js（与链接表过期清理共用）。
 
   // v3.0.1 需求1（D4）：按数据日期范围统计将删行数（只读，前端删除弹框预览）。任何异常返回 failed，前端保守处理。
   //   v3.0.5 OPEN-4（T6b-2）🔴 资金红线：三表化 —— 加 tableKey 正向白名单路由（缺省 gateway-bill 向后兼容）。
@@ -18699,14 +19285,11 @@ function registerNewAccountHandlers() {
     }
     // 🔴 正向白名单：仅三张可管理主表；缺省 gateway-bill（前端未传 tableKey 时 = v3.0.1 行为）。
     const tableKey = payload && payload.tableKey != null ? String(payload.tableKey).trim() : 'gateway-bill';
-    if (!LINKED_DELETE_ALLOWED_TABLES.has(tableKey)) {
+    if (!isLinkedDeleteTable(tableKey)) {
       return { status: 'failed', message: '不支持的删除目标表' };
     }
     try {
-      let count;
-      if (tableKey === 'fx-settlement') count = database.countFxByDateRange(start, end);
-      else if (tableKey === 'bank-deposit') count = database.countBankDepositByDateRange(start, end);
-      else count = database.countGatewayBillByDateRange(start, end);
+      const count = countLinkedTableRowsByDateRange(database, { tableKey, start, end });
       return { status: 'ok', count };
     } catch (err) {
       return { status: 'failed', message: err && err.message ? err.message : String(err) };
@@ -18715,14 +19298,9 @@ function registerNewAccountHandlers() {
 
   // v3.0.1 需求1（D4）🔴 资金红线：按数据日期范围删除链接表行（不可逆，闭区间，直接删）。
   //   mutating → trackedIpcHandle 记活动日志；入参校验（起止非空 + 起≤止）；返回删除行数 + 重算后 meta。
-  //   v3.0.5 OPEN-4（T6b-2）🔴🔴 资金红线：三表化 —— tableKey 正向白名单路由（缺省 gateway-bill 向后兼容）+ 删除派生联动：
-  //     · gateway-bill → 删 + 清 processingResult（v3.0.1 行为字节不变）。
-  //     · fx-settlement → 删 fx 主表（T6a 单事务已联动删 BOC 行）→ rebuildFxBocDerivation 全量重匹配重编号（无进组步，传空 ctx）→ 清 reconIdFixResult。
-  //     · bank-deposit  → 删 bank 主表（T6a 返回 deletedBizIds）→ rebuildAdmDerivation + rebuildBankDepositBocDerivation 派生重建
-  //                      → 清 processingResult + reconIdFixResult + clearBankDepositHitMarkersByBizIds（OPEN-7 标记防悬挂）。
-  //   🔴 事务边界：T6a 删除函数各自单事务（BEGIN/COMMIT/ROLLBACK）删完即返回；rebuild* / clearBankDepositHitMarkersByBizIds
-  //     各自开独立事务——本处调用点【不在】任何外层 DB 事务内（删除事务已提交），无嵌套事务问题。
-  //   🔴 派生重建沿用导入侧语义：rebuild* 内部各自 try/catch 隔离，派生任一步抛错记 created:false 不向外抛、不阻断删除本身（行已删）。
+  //   v3.0.5 OPEN-4（T6b-2）🔴🔴 资金红线：三表化 —— tableKey 正向白名单路由（缺省 gateway-bill 向后兼容）+ 删除派生联动
+  //     （gateway 清 processingResult；fx 联动删 BOC + 重匹配 + 清 reconIdFixResult；bank-deposit ADM gate + ADM/BOC bank 重建
+  //      + 清两类缓存与命中标记）。v3.2.18 起联动实现见 src/main-process/linked-table-delete.js，返回结构不变。
   trackedIpcHandle('linked-table:delete-by-date-range', '链接表管理', '删除', (_event, payload) => {
     // v3.0.11 codex-P2 补强（🔴 资金红线）：纳入 bankStatementOperationLock —— 链接表是 bank-statement run（R1-R5）输入，
     //   run 全程持锁；本删除若在 run 数据准备让出窗口内并发执行会撕裂快照。争用即返回失败，finally 释放。
@@ -18740,77 +19318,44 @@ function registerNewAccountHandlers() {
     }
     // 🔴 正向白名单（与 count 同口径）：仅三张主表；非白名单（含隐藏派生表）一律拒绝——绝不用 LINKED_TABLE_DEFS 兜底放行。
     const tableKey = payload && payload.tableKey != null ? String(payload.tableKey).trim() : 'gateway-bill';
-    if (!LINKED_DELETE_ALLOWED_TABLES.has(tableKey)) {
+    if (!isLinkedDeleteTable(tableKey)) {
       return { status: 'failed', message: '不支持的删除目标表' };
     }
     try {
-      if (tableKey === 'fx-settlement') {
-        // 🔴🔴 资金红线：删外汇交割表（T6a 单事务已按 transaction_no 联动删 BOC 行，返回 bocDeleted/deletedTxnNos）。
-        const ret = database.deleteFxByDateRange(start, end);
-        // 🔴 删除场景【无进组步】（被删 BOC 行已由 T6a 联动删，无新行进组）→ 传空 ctx（scanLogs:[]/groupCount:0/overwriteCount:0），
-        //   rebuildFxBocDerivation 从「读全库 BOC 行重匹配」起：readBocFxLinkRowsForRematch → rematchAllBocGroups（重编号 1..N）
-        //   → 2.4 replaceBocBankDeposit → 2.5 全量回填 → 对删后全库行重算（复用 T6b-1 抽取函数，禁复制 = R-5）。
-        const { bocDerive } = rebuildFxBocDerivation(
-          { database, rematchAllBocGroups, buildBocBankRows, backfillBocReconLinkIds, appendActivityLogEntry },
-          { scanLogs: [], groupCount: 0, overwriteCount: 0 }
-        );
-        // 🔴 删 fx → BOC 派生重算 → 旧 reconIdFixResult（基于旧 BOC 调拨数据的修复结果）失效 → 清空（spec §3.3）。
-        reconIdFixResult = null;
-        return {
-          status: 'ok',
-          deleted: ret.deleted,
-          rowCount: ret.rowCount,
-          dataDateMin: ret.dataDateMin,
-          dataDateMax: ret.dataDateMax,
-          bocDeleted: ret.bocDeleted,
-          bocDerive
-        };
-      }
-      if (tableKey === 'bank-deposit') {
-        // 🔴 资金红线：删银行对账单入金表（T6a 单事务删 + 返回 deletedBizIds 供清标记/派生重建）。
-        assertReconFixJpmAdmMutationAllowed();
-        const ret = database.deleteBankDepositByDateRange(start, end);
-        // 派生重建（复用 T6b-1 抽取函数，禁复制 = R-5）：ADM（全库 Channel=ADM 候选重建）+ BOC bank（2.4 + 2.5 全量回填）。
-        const { admDerive } = rebuildAdmDerivation({
-          database,
-          buildAdmRows,
-          admMutationBoundary: runReconFixJpmAdmMutationBoundary
-        });
-        const { bocBankDerive } = rebuildBankDepositBocDerivation(
-          { database, buildBocBankRows, backfillBocReconLinkIds, appendActivityLogEntry }
-        );
-        // 🔴 删 bank-deposit → 清 processingResult（R5 场景4 中台退款回填 + 场景2b 数据源失效）
-        //   + reconIdFixResult（ADM 表重建 = JPM 修复结果失效）。
-        processingResult = null;
-        reconIdFixResult = null;
-        // 🔴 OPEN-7（spec §3.3）：清被删 BizId 的命中标记防悬挂。
-        //   注：当前载体（last_hit_run/last_hit_at 在 linked_bank_deposit 行上）下 DELETE 已隐式清掉被删行的标记，
-        //   此调用为 spec §3.3 要求的防御性双保险（口径与 T6a deletedBizIds 字节同源：normalizeKey 去空去重）。
-        database.clearBankDepositHitMarkersByBizIds(ret.deletedBizIds);
-        return {
-          status: 'ok',
-          deleted: ret.deleted,
-          rowCount: ret.rowCount,
-          dataDateMin: ret.dataDateMin,
-          dataDateMax: ret.dataDateMax,
-          admDerive,
-          bocBankDerive
-        };
-      }
-      // gateway-bill（缺省）：v3.0.1 行为字节不变。
-      const ret = database.deleteGatewayBillByDateRange(start, end);
-      // v3.0.1 PR#68 Finding1（🔴 资金红线）：gateway-bill 数据变更（按日期删除）后清银行对账缓存。
-      //   银行对账 run 数据源含 gateway-bill（C3 网关核销 / R5）+ bank-deposit（R5 场景4 中台退款回填）——
-      //   gateway-bill 或 bank-deposit 任一变更都使 processingResult 失效（bank-deposit 侧清空见上方分支 + linked-table:import handler）。
-      //   旧 processingResult 基于旧网关数据 → 不清则「先跑银行对账、再删网关对账单」仍能导出 stale 结果，强制用户重跑后才能导出。
-      processingResult = null;
-      return { status: 'ok', deleted: ret.deleted, rowCount: ret.rowCount, dataDateMin: ret.dataDateMin, dataDateMax: ret.dataDateMax };
+      const result = deleteLinkedTableRowsByDateRange(linkedTableDeleteDeps(), { tableKey, start, end });
+      return { status: 'ok', ...result };
     } catch (err) {
       return { status: 'failed', message: err && err.message ? err.message : String(err) };
     }
     } finally {
       // v3.0.11 codex-P2 补强：删表结束统一释放互斥锁（含各早返回 / ok / 异常路径）。
       releaseBankStatementOpLock();
+    }
+  });
+
+  // v3.2.18 链接表保留期限（设置 → 数据管理）：读取三张累加表当前生效期限（含内置默认）。只读，普通 handle。
+  ipcMain.handle('linked-table:get-retention-settings', () => {
+    if (!database || !database.db) return { status: 'failed', message: '数据库未初始化' };
+    try {
+      return {
+        status: 'ok',
+        tables: listPublicRetentionTables(),
+        retentionDaysByTable: readLinkedRetentionDaysByTable(database)
+      };
+    } catch (err) {
+      return { status: 'failed', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // v3.2.18：保存单张链接表的保留期限（15/30/60/90/180/365 天或 null=永久）。只写设置，不立即删除；
+  //   保存后清空上次成功清理时间，新期限在下一次空闲清理时生效。
+  ipcMain.handle('linked-table:set-retention-days', (_event, payload) => {
+    if (!database || !database.db) return { status: 'failed', message: '数据库未初始化' };
+    try {
+      const retentionDaysByTable = setLinkedTableRetentionDays(database, payload);
+      return { status: 'ok', retentionDaysByTable };
+    } catch (err) {
+      return { status: 'failed', message: err && err.message ? err.message : String(err) };
     }
   });
 
@@ -24546,6 +25091,11 @@ function setupIdleCleanupTimer() {
   };
   idleCleanupTimer = setInterval(observeBackgroundMemoryActivity(async () => {
     await runAcquiringIdleCleanupTick();
+    // v3.2.18：收单空闲清理结束后先做链接表过期清理（自带空闲、间隔、任务与锁条件，结果已记日志），
+    //   再判断是否整理主库（先删再整理，两者串行，不同时持租约）。
+    try {
+      await idleLinkedTableRetention.maybeRun();
+    } catch (_retentionError) { /* 下次空闲再试 */ }
     // 收单空闲清理结束（含提前返回）后，再判断是否需要空闲整理主库（自带空闲、任务与磁盘条件，失败已记日志）。
     try {
       await idleDatabaseCompaction.maybeRun();
@@ -24846,10 +25396,13 @@ function resumeApplicationAfterFailedRestart() {
 
 if (!packagedRuntimeModeSelected) {
   app.on('before-quit', (event) => {
-    // 空闲存储整理持有过渡租约；退出时先中止整理并等其收尾，再继续退出。
-    if (idleDatabaseCompaction.isRunning() && !quitPreparationComplete) {
+    // 空闲存储整理或链接表过期清理持有过渡租约；退出时先中止并等其收尾，再继续退出。
+    if ((idleDatabaseCompaction.isRunning() || idleLinkedTableRetention.isRunning()) && !quitPreparationComplete) {
       event.preventDefault();
-      idleDatabaseCompaction.stop('quit').then(() => app.quit());
+      Promise.all([
+        idleLinkedTableRetention.stop('quit'),
+        idleDatabaseCompaction.stop('quit')
+      ]).then(() => app.quit());
       return;
     }
     if (businessOperationRegistry.isInstallTransitionActive() && !quitPreparationComplete) {

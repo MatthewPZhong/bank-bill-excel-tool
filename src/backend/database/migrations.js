@@ -476,10 +476,53 @@ function ensureTemplateFilenameFixedFieldSupport(db) {
 }
 
 // v3.2.16：模板级「字段筛选特征值」规则（JSON；'' 表示未设置）。幂等：列已存在则跳过。
+// v3.2.18：该列改存特征值数组 [{ id, name, ...rule }]，见 upgradeLegacyTemplateFeatureFilters。
 function ensureTemplateFeatureFilterSupport(db) {
   if (!hasColumn(db, 'templates', 'feature_filter_json')) {
     db.exec("ALTER TABLE templates ADD COLUMN feature_filter_json TEXT NOT NULL DEFAULT '';");
   }
+  upgradeLegacyTemplateFeatureFilters(db);
+}
+
+// v3.2.18：v3.2.16/3.2.17 的单套规则（JSON 对象）升级为名为「特征值1」、id 为 '1' 的特征值，
+//   并让主映射与拆分映射中选「字段筛选特征值」且尚未选特征值的行引用它，输出不变。
+//   与 file-service/feature-filter.js upgradeLegacyFeatureFilter 同口径（此处不依赖 file-service）。
+//   幂等：只处理仍是对象的模板；已是数组（含 '[]'）或空串的不动。每个模板单独一个事务。
+const FEATURE_FILTER_MAPPING_VALUE = '字段筛选特征值';
+const LEGACY_FEATURE_FILTER_ID = '1';
+const LEGACY_FEATURE_FILTER_NAME = '特征值1';
+
+function upgradeLegacyTemplateFeatureFilters(db) {
+  const rows = db.prepare(
+    "SELECT id, feature_filter_json AS featureFilterJson FROM templates WHERE TRIM(feature_filter_json) LIKE '{%'"
+  ).all();
+  rows.forEach((row) => {
+    let parsed = null;
+    try {
+      parsed = JSON.parse(row.featureFilterJson);
+    } catch (_error) {
+      parsed = null;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return;
+    }
+    const { id: _id, name: _name, ...rule } = parsed;
+    const upgraded = [{ id: LEGACY_FEATURE_FILTER_ID, name: LEGACY_FEATURE_FILTER_NAME, ...rule }];
+    db.exec('BEGIN');
+    try {
+      db.prepare('UPDATE templates SET feature_filter_json = ? WHERE id = ?').run(JSON.stringify(upgraded), row.id);
+      ['template_mappings', 'template_bill_split_mappings'].forEach((table) => {
+        db.prepare(`
+          UPDATE ${table} SET mapped_fields_json = ?
+          WHERE template_id = ? AND mapped_field = ? AND TRIM(COALESCE(mapped_fields_json, '')) IN ('', '[]')
+        `).run(JSON.stringify([LEGACY_FEATURE_FILTER_ID]), row.id, FEATURE_FILTER_MAPPING_VALUE);
+      });
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  });
 }
 
 // v1.5.3 需求 R2：自有账号合并入大账号表 — 在 template_big_accounts 表新增 account_nature 列
@@ -1365,6 +1408,57 @@ function ensureAcquiringBillCurrencyRawJsonRetentionSettings(db) {
     now
   );
   return { status: 'seeded', key: ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY };
+}
+
+// v3.2.18：存档「VCC财务OP校验」输入/输出文件保留期限默认 15 天（一次性、幂等）。
+//   模块设置中没有 VCC 项时写入 15，并写标记；已有显式 VCC 设置保留。
+//   标记写入后不再处理：用户改为“跟随默认”（删除 VCC 项）或其他期限都不会被改回。
+//   设置格式与 src/main-process/archive-center/retention-policy.js 一致；期限在创建批次时确定，不回写历史批次。
+const ARCHIVE_MODULE_RETENTION_SETTING_KEY = 'archive_center_retention_days_by_module';
+const ARCHIVE_VCC_DEFAULT_RETENTION_MARKER_KEY = 'archive_center_vcc_default_retention_seeded';
+const ARCHIVE_VCC_SCOPE_ID = 'vcc-financial-op';
+const ARCHIVE_VCC_DEFAULT_RETENTION_DAYS = 15;
+function ensureArchiveVccDefaultRetention(db) {
+  try {
+    db.prepare('SELECT 1 FROM app_settings LIMIT 1').get();
+  } catch (_e) {
+    return { status: 'skipped-no-table' };
+  }
+  const readSetting = (key) => {
+    const row = db.prepare('SELECT setting_value AS value FROM app_settings WHERE setting_key = ?').get(key);
+    return row ? row.value : null;
+  };
+  if (readSetting(ARCHIVE_VCC_DEFAULT_RETENTION_MARKER_KEY) !== null) return { status: 'already-seeded' };
+  const upsert = db.prepare(`
+    INSERT INTO app_settings (setting_key, setting_value, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(setting_key) DO UPDATE
+    SET setting_value = excluded.setting_value,
+        updated_at = excluded.updated_at
+  `);
+  db.exec('BEGIN');
+  try {
+    let overrides = {};
+    try {
+      const parsed = JSON.parse(readSetting(ARCHIVE_MODULE_RETENTION_SETTING_KEY));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) overrides = parsed;
+    } catch (_parseError) { /* 缺失或损坏按空设置处理（读取侧同样忽略） */ }
+    const hadExplicit = Object.prototype.hasOwnProperty.call(overrides, ARCHIVE_VCC_SCOPE_ID);
+    const now = new Date().toISOString();
+    if (!hadExplicit) {
+      upsert.run(
+        ARCHIVE_MODULE_RETENTION_SETTING_KEY,
+        JSON.stringify({ ...overrides, [ARCHIVE_VCC_SCOPE_ID]: ARCHIVE_VCC_DEFAULT_RETENTION_DAYS }),
+        now
+      );
+    }
+    upsert.run(ARCHIVE_VCC_DEFAULT_RETENTION_MARKER_KEY, '1', now);
+    db.exec('COMMIT');
+    return { status: hadExplicit ? 'kept-explicit' : 'seeded' };
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* 保留原错误 */ }
+    throw error;
+  }
 }
 
 // v2.1.9 N5：channels 表 + 「通用」内置渠道（id=1）
@@ -4364,6 +4458,8 @@ module.exports = {
   ensureBizOpReconRunsSideDbPath,
   // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings（v0.2 单键）
   ensureAcquiringBillCurrencyRawJsonRetentionSettings,
+  // v3.2.18：存档 VCC财务OP校验 保留期限默认 15 天（一次性、幂等）
+  ensureArchiveVccDefaultRetention,
   ensureBillRawJsonV2Slim,
   ensureChannelsTable,
   ensureScenariosChannelIdColumn,

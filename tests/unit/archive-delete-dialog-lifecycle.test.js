@@ -106,6 +106,8 @@ function harness() {
     loadArchiveStats: async () => { statsCalls += 1; return true; },
     refreshOpenAppUpdateDialog: () => { refreshCalls += 1; },
     setArchiveSettingsLoading() {},
+    // v3.2.18：数据管理页链接表保留期限保存中同样阻止关闭；本用例只验证存档删除，链接表视为空闲。
+    linkedRetentionBusy: () => false,
     requestAnimationFrame: (callback) => callback(),
     clearTimeout,
     document: { createElement: (tag) => Object.assign(dom.document.createElement(tag), { dataset: {} }) }

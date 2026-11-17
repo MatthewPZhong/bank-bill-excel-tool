@@ -40,6 +40,7 @@ const {
   ensureBizOpReconRunsSideDbPath,
   // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings
   ensureAcquiringBillCurrencyRawJsonRetentionSettings,
+  ensureArchiveVccDefaultRetention,
   ensureBillRawJsonV2Slim,
   ensureSchemaV2_1_9_N5,
   ensureScenariosNameUniqueByChannelId,
@@ -500,6 +501,8 @@ class AppDatabase {
     //   同 N1-settings + A4 T18 范式：依赖 app_settings 表 + INSERT OR IGNORE 不覆盖用户已改
     //   spec §八.3：与 N4-cont-2 顺序无关；任意顺序都不冲突（settings 与 schema 互不影响）
     this.ensureAcquiringBillCurrencyRawJsonRetentionSettings();
+    // v3.2.18：存档「VCC财务OP校验」保留期限默认 15 天（一次性 marker；已有显式设置保留）
+    ensureArchiveVccDefaultRetention(this.db);
     // v2.1.10 A4 T19：runs.chunk_progress 列（chunked 进度 JSON 序列化）
     //   必须在 ensureAcquiringBillCurrencyRunsCleanupPending 之后（依赖 runs 表 + 列扩展顺序）
     //   幂等：hasColumn 检查避免重复 ADD COLUMN
@@ -1148,6 +1151,11 @@ class AppDatabase {
     return templateRepository.renameTemplate(this.db, templateId, nextName);
   }
 
+  // v3.2.18：模板管理【更新】只替换表头，其余配置保留
+  updateTemplateHeaders(templateId, { expectedHeaders, headers, sourceFileName }) {
+    return templateRepository.updateTemplateHeaders(this.db, templateId, { expectedHeaders, headers, sourceFileName });
+  }
+
   deleteTemplate(templateId) {
     return templateRepository.deleteTemplate(this.db, templateId);
   }
@@ -1199,8 +1207,17 @@ class AppDatabase {
     return templateRepository.getBillSplitMappings(this.db, templateId);
   }
 
-  saveBillSplitMappings(templateId, mappings, options = {}) {
-    return templateRepository.saveBillSplitMappings(this.db, templateId, mappings, options);
+  saveBillSplitMappings(templateId, mappings) {
+    return templateRepository.saveBillSplitMappings(this.db, templateId, mappings);
+  }
+
+  // v3.2.18：【特征值管理】即时保存特征值列表；已保存映射的特征值引用（main / split）
+  saveTemplateFeatureFilters(templateId, featureFilters) {
+    return templateRepository.saveTemplateFeatureFilters(this.db, templateId, featureFilters);
+  }
+
+  listTemplateFeatureFilterReferences(templateId, featureFilterMappingValue) {
+    return templateRepository.listTemplateFeatureFilterReferences(this.db, templateId, featureFilterMappingValue);
   }
 
   getBillSplitRows(templateId) {

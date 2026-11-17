@@ -86,6 +86,18 @@ const SUPPORT_ACTION_POLICIES = Object.freeze([
     channel: 'balance-seed:delete',
     kind: 'support-action',
     reason: 'balance-seed'
+  }),
+  // v3.2.18 模板管理【更新】：只替换模板表头（仅主库写入，不产生文件）。
+  Object.freeze({
+    channel: 'template:update-headers',
+    kind: 'support-action',
+    reason: 'statement-template'
+  }),
+  // v3.2.18 映射关系管理【特征值管理】：保存 / 删除模板特征值（仅主库写入，不产生文件）。
+  Object.freeze({
+    channel: 'template:save-feature-filters',
+    kind: 'support-action',
+    reason: 'statement-template-feature-filter'
   })
 ]);
 
@@ -375,6 +387,7 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'duplicate-inbound-match:session-status',
     'fund-transfer-account-mapping:list',
     'linked-table:count-by-date-range',
+    'linked-table:get-retention-settings',
     'linked-table:list',
     'linked-table:row-count',
     'pending:columns',
@@ -443,7 +456,10 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'file:import-balance-seed-file',
     'position-reconciliation:bank:prepare-import',
     'template-resources:discard-import',
-    'template-resources:prepare-import'
+    'template-resources:prepare-import',
+    'template:discard-import',
+    'template:prepare-import',
+    'template:preview-header-update'
   ]),
   'preview-only': Object.freeze([
     'bizOpReconV327:run:preflight',
@@ -487,6 +503,7 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'app-update:set-enabled',
     'background:reset',
     'background:save',
+    'linked-table:set-retention-days',
     'settings:acknowledge-release-notes',
     'settings:set-current-module',
     'settings:set-dark-mode-lightness',

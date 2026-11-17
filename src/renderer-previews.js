@@ -467,10 +467,10 @@
       }));
     }
 
-    // 4. 导出范围选择对话框（v1.4.x）
+    // 4. 导出范围选择对话框（v1.4.x；v3.2.18 起仅导出余额使用）
     function applyExportScopeDialogPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
-      openModal(() => createExportScopeDialog('detail'));
+      openModal(() => createExportScopeDialog('balance'));
     }
 
     // 5. 发生额规则管理对话框（v1.4.9）

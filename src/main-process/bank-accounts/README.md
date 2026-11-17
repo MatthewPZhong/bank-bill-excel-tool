@@ -39,6 +39,8 @@ v3.2.15 起，清结算系统导出的银行账户表统一存放在这里，供
 
 `src/renderer/dialogs/bank-accounts.js` 导出 `__bankAccountsDialogs.createBankAccountsDialogs({ api, modalBridge, ui })`，由 `renderer.js` 以窄 API 装配，经 `ui.mountBankAccounts` 挂进设置弹窗；视图返回 `{ enter, leave, destroy }`，首次进入才读取。架构登记为 `renderer-dialog-bank-accounts`。
 
+v3.2.18 起（[spec](../../../changes/v3.2.18/feat/bank-accounts-layout/spec.md)）：设置弹窗挂载时传入底栏槽 `footer`（`[data-footer="accounts"]`，只在账户管理页显示），导入/导出与翻页渲染在槽里，与【返回】同一行；表格只显示 `DISPLAY_HEADERS` 的 8 列（识别结构缺少的列跳过），不显示行号。`list` 仍返回全部表头与值，【导出】仍另存原表全部列。
+
 ## 验证入口
 
 - 单测：`tests/unit/backend/database/bank-account-repository.test.js`、`tests/unit/main-process/bank-accounts-service.test.js`

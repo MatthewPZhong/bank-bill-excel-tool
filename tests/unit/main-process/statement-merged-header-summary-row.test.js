@@ -18,7 +18,10 @@ const {
   buildExpectedHeaderCandidates,
   buildMappedRows,
   FileValidationError,
-  normalizeCell
+  getFeatureFilterRef,
+  LEGACY_FEATURE_FILTER_ID,
+  normalizeCell,
+  upgradeLegacyFeatureFilter
 } = require('../../../src/backend/file-service');
 const { matchMerchantIds, resolveRecognizedBigAccount } = require('../../../src/main-process/big-account-recognition');
 
@@ -31,7 +34,12 @@ const MAIN_DEPS = {
   fs,
   FileValidationError,
   SUPPORTED_BUNDLE_VERSION: 5,
-  normalizeBundleAccountMappings: () => []
+  normalizeBundleAccountMappings: () => [],
+  // v3.2.18：readTemplateBundleFile 读 v≤6 包时升级「字段筛选特征值」的单套规则与引用
+  FEATURE_FILTER_MAPPING_FIELD: '字段筛选特征值',
+  getFeatureFilterRef,
+  LEGACY_FEATURE_FILTER_ID,
+  upgradeLegacyFeatureFilter
 };
 
 function loadMainFunction(name) {
@@ -47,6 +55,7 @@ for (const name of [
   'findBigAccountMatchInRows',
   'buildBigAccountRecognitionBasis',
   'normalizeBundleTemplateHeaders',
+  'upgradeLegacyBundleFeatureFilterRefs',
   'readTemplateBundleFile'
 ]) {
   MAIN_DEPS[name] = loadMainFunction(name);

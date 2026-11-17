@@ -2,7 +2,7 @@
   'use strict';
   function createAppSettingsDialogs({ api, modalBridge, modules: MODULES, ui }) {
     const { escapeHtml, createConfirmDialog, getDarkModeController, mountAppearanceSettings,
-      mountTemplateFiles, mountBankAccounts, applyAppUpdateActionResult, applyAppUpdateStatus, getAppUpdateStatus,
+      mountTemplateFiles, mountBankAccounts, mountLinkedTableRetention, applyAppUpdateActionResult, applyAppUpdateStatus, getAppUpdateStatus,
       refreshOpenAppUpdateDialog, restartAndInstallAppUpdate, openReleaseNotes } = ui;
 function archiveCenterBatchId(batch) {
   return String(batch?.internalId ?? batch?.batchId ?? batch?.id ?? '');
@@ -307,6 +307,7 @@ function createArchiveCenterPreviewApi() {
 
 function createAppUpdateSettingsDialog(options = {}) {
   const archiveCenterApi = options.archiveCenterApi || null;
+  const linkedTablePreviewApi = options.linkedTablePreviewApi || null;
   const templateFilesEnabled = typeof mountTemplateFiles === 'function';
   const bankAccountsEnabled = typeof mountBankAccounts === 'function';
   const releaseNotesEnabled = typeof openReleaseNotes === 'function';
@@ -378,6 +379,10 @@ function createAppUpdateSettingsDialog(options = {}) {
         <button class="app-settings-nav-item" type="button" data-tab="archive" aria-controls="archiveCenterPane" aria-current="false">
           <span class="app-settings-nav-icon" aria-hidden="true">▤</span>
           <span>存档中心</span>
+        </button>
+        <button class="app-settings-nav-item" type="button" data-tab="data" aria-controls="dataManagementPane" aria-current="false">
+          <span class="app-settings-nav-icon" aria-hidden="true">▥</span>
+          <span>数据管理</span>
         </button>
         ${templateFilesEnabled ? `<button class="app-settings-nav-item" type="button" data-tab="templates" aria-controls="templateFilesPane" aria-current="false">
           <span class="app-settings-nav-icon" aria-hidden="true">▦</span>
@@ -499,7 +504,14 @@ function createAppUpdateSettingsDialog(options = {}) {
               <p class="archive-center-settings-note" data-role="archive-storage-migration" aria-live="polite" hidden></p>
             </div>
 
-            <div class="archive-center-settings-section">
+          </section>
+        </section>
+
+        <section id="dataManagementPane" class="app-settings-pane data-management-pane" data-pane="data" aria-labelledby="dataManagementHeading" hidden>
+          <div class="data-management-scroll">
+            <h3 id="dataManagementHeading" class="app-settings-pane-heading">数据管理</h3>
+            <p class="archive-center-feedback data-management-feedback" data-role="data-feedback" role="status" aria-live="polite" hidden></p>
+            <div class="archive-center-settings-section data-management-section" data-role="archive-retention-section">
               <h4>输入/输出文件保留期限</h4>
               <div class="archive-center-retention-fields">
                 <label class="archive-center-field archive-center-retention-module-field">
@@ -512,6 +524,7 @@ function createAppUpdateSettingsDialog(options = {}) {
                   <span>保留期限</span>
                   <select data-role="archive-retention-days" aria-label="保留期限" disabled>
                     <option value="inherit" hidden disabled>跟随默认</option>
+                    <option value="15">15 天</option>
                     <option value="30">30 天</option>
                     <option value="60">60 天</option>
                     <option value="90">90 天</option>
@@ -522,12 +535,14 @@ function createAppUpdateSettingsDialog(options = {}) {
                 </label>
               </div>
             </div>
-          </section>
+            <div class="archive-center-settings-section data-management-section" data-role="linked-retention-section" hidden></div>
+          </div>
         </section>
         ${templateFilesEnabled ? '<section id="templateFilesPane" class="app-settings-pane template-center-pane" data-pane="templates" aria-labelledby="templateCenterHeading" hidden></section>' : ''}
         ${bankAccountsEnabled ? '<section id="bankAccountsPane" class="app-settings-pane bank-accounts-pane" data-pane="accounts" aria-labelledby="bankAccountsHeading" hidden></section>' : ''}
 
         <footer class="dialog-actions right app-settings-footer">
+          ${bankAccountsEnabled ? '<div class="app-settings-footer-group app-settings-footer-accounts" data-footer="accounts" hidden></div>' : ''}
           <div class="app-settings-footer-group" data-footer="update">
             <button class="secondary-btn small" type="button" data-action="check-update">立即检查</button>
             <button class="primary-btn small" type="button" data-action="restart-update" hidden>立即重启升级</button>
@@ -544,6 +559,11 @@ function createAppUpdateSettingsDialog(options = {}) {
   let appearanceView = null;
   let settingsHandle = null;
   const archivePane = dialog.querySelector('[data-pane="archive"]');
+  const dataPane = dialog.querySelector('[data-pane="data"]');
+  const dataFeedback = dialog.querySelector('[data-role="data-feedback"]');
+  const archiveRetentionSection = dialog.querySelector('[data-role="archive-retention-section"]');
+  const linkedRetentionSection = dialog.querySelector('[data-role="linked-retention-section"]');
+  let linkedRetentionView = null;
   const templatePane = dialog.querySelector('[data-pane="templates"]');
   let templateFilesView = null;
   const accountsPane = dialog.querySelector('[data-pane="accounts"]');
@@ -551,6 +571,7 @@ function createAppUpdateSettingsDialog(options = {}) {
   const archiveBrowser = dialog.querySelector('[data-archive-view="browser"]');
   const archiveSettingsView = dialog.querySelector('[data-archive-view="settings"]');
   const updateFooter = dialog.querySelector('[data-footer="update"]');
+  const accountsFooter = dialog.querySelector('[data-footer="accounts"]');
   const archiveFeedback = dialog.querySelector('[data-role="archive-feedback"]');
   const batchList = dialog.querySelector('[data-role="archive-batch-list"]');
   const batchCount = dialog.querySelector('[data-role="archive-batch-count"]');
@@ -580,6 +601,15 @@ function createAppUpdateSettingsDialog(options = {}) {
     archiveFeedback.textContent = text;
     archiveFeedback.dataset.tone = tone;
     archiveFeedback.setAttribute('role', tone === 'error' ? 'alert' : 'status');
+  }
+
+  // 数据管理页（两类保留期限）的反馈；与存档中心反馈分开显示。
+  function showDataFeedback(message, tone = 'error') {
+    const text = String(message || '').trim();
+    dataFeedback.hidden = !text;
+    dataFeedback.textContent = text;
+    dataFeedback.dataset.tone = tone;
+    dataFeedback.setAttribute('role', tone === 'error' ? 'alert' : 'status');
   }
 
   function currentArchiveFilters() {
@@ -861,7 +891,7 @@ function createAppUpdateSettingsDialog(options = {}) {
       : retentionDays === null || retentionDays === 'permanent'
       ? 'permanent'
       : String(retentionDays ?? 'permanent');
-    const allowedRetentionValues = new Set(['30', '60', '90', '180', '365', 'permanent', 'inherit']);
+    const allowedRetentionValues = new Set(['15', '30', '60', '90', '180', '365', 'permanent', 'inherit']);
     if (!archiveState.retentionSaving && !archiveState.retentionPendingIntent) {
       const modules = Array.isArray(settings.retentionModules)
         ? settings.retentionModules
@@ -1056,6 +1086,7 @@ function createAppUpdateSettingsDialog(options = {}) {
   function setArchiveSettingsLoading(loading) {
     archiveState.settingsLoading = loading === true;
     archiveSettingsView.toggleAttribute('aria-busy', archiveState.settingsLoading);
+    archiveRetentionSection.toggleAttribute('aria-busy', archiveState.settingsLoading);
     updateArchiveExitControls();
   }
 
@@ -1063,8 +1094,12 @@ function createAppUpdateSettingsDialog(options = {}) {
     return !archiveState.destroyed && overlay.isConnected;
   }
 
+  function linkedRetentionBusy() {
+    return Boolean(linkedRetentionView && linkedRetentionView.isBusy());
+  }
+
   function updateArchiveExitControls() {
-    const busy = archiveState.settingsLoading || archiveState.retentionSaving;
+    const busy = archiveState.settingsLoading || archiveState.retentionSaving || linkedRetentionBusy();
     returnButton.disabled = busy;
     closeDialogButton.disabled = busy;
     retentionModuleSelect.disabled = busy || !archiveState.settingsReady;
@@ -1089,7 +1124,7 @@ function createAppUpdateSettingsDialog(options = {}) {
         const intent = archiveState.retentionPendingIntent;
         archiveState.retentionPendingIntent = null;
         if (intent.value === archiveState.savedRetentionValue) {
-          if (archiveDialogAlive()) showArchiveFeedback('保留期限已保存', 'success');
+          if (archiveDialogAlive()) showDataFeedback('保留期限已保存', 'success');
           continue;
         }
 
@@ -1126,7 +1161,7 @@ function createAppUpdateSettingsDialog(options = {}) {
           if (!isLatestIntent) continue;
           if (archiveDialogAlive()) {
             retentionSelect.value = archiveState.savedRetentionValue;
-            showArchiveFeedback(
+            showDataFeedback(
               `保留期限保存失败：${archiveCenterErrorText(failure, '未知错误')}`
             );
           }
@@ -1134,7 +1169,7 @@ function createAppUpdateSettingsDialog(options = {}) {
         }
         if (isLatestIntent && archiveDialogAlive()) {
           retentionSelect.value = archiveState.savedRetentionValue;
-          showArchiveFeedback('保留期限已保存', 'success');
+          showDataFeedback('保留期限已保存', 'success');
         }
       }
     } finally {
@@ -1157,16 +1192,21 @@ function createAppUpdateSettingsDialog(options = {}) {
       moduleId: archiveState.selectedRetentionModuleId,
       value
     };
-    showArchiveFeedback('正在保存保留期限…', 'info');
+    showDataFeedback('正在保存保留期限…', 'info');
     if (!archiveState.retentionSavePromise) {
       archiveState.retentionSavePromise = drainRetentionIntents();
     }
   }
 
-  async function loadArchiveSettings() {
+  // 存档设置（存档位置）与数据管理（保留期限）共用：数据管理只读保留设置，不读存档统计。
+  async function loadArchiveSettings({
+    includeStats = true,
+    feedback = showArchiveFeedback,
+    failurePrefix = '部分存档设置加载失败'
+  } = {}) {
     const requestId = ++archiveState.settingsRequestId;
     archiveState.settingsReady = false;
-    showArchiveFeedback('', 'info');
+    feedback('', 'info');
     setArchiveSettingsLoading(true);
     try {
       // 重入设置页先等当前保存队列完成，避免旧设置快照覆盖刚保存的模块期限。
@@ -1175,7 +1215,7 @@ function createAppUpdateSettingsDialog(options = {}) {
       const api = getArchiveCenterApi();
       const [settingsResult, statsResult] = await Promise.allSettled([
         api.getSettings(),
-        api.getStats()
+        includeStats ? api.getStats() : Promise.resolve(null)
       ]);
       if (requestId !== archiveState.settingsRequestId) return false;
 
@@ -1200,7 +1240,9 @@ function createAppUpdateSettingsDialog(options = {}) {
         failures.push(`保留设置：${archiveCenterErrorText(settingsResult.reason, '加载失败')}`);
       }
 
-      if (statsResult.status === 'fulfilled') {
+      if (!includeStats) {
+        // 数据管理页不展示存档统计。
+      } else if (statsResult.status === 'fulfilled') {
         try {
           archiveState.stats = readArchiveCenterPayload(
             statsResult.value,
@@ -1216,9 +1258,9 @@ function createAppUpdateSettingsDialog(options = {}) {
       }
 
       renderArchiveSettings();
-      renderArchiveStats();
+      if (includeStats) renderArchiveStats();
       if (failures.length > 0) {
-        showArchiveFeedback(`部分存档设置加载失败：${failures.join('；')}`);
+        feedback(`${failurePrefix}：${failures.join('；')}`);
         return false;
       }
       return true;
@@ -1264,27 +1306,49 @@ function createAppUpdateSettingsDialog(options = {}) {
     }
   }
 
+  function cancelArchiveSettingsLoad() {
+    archiveState.settingsRequestId += 1;
+    setArchiveSettingsLoading(false);
+  }
+
   function setArchiveSettingsOpen(open) {
     const nextOpen = open === true;
-    if (!nextOpen) {
-      archiveState.settingsRequestId += 1;
-      setArchiveSettingsLoading(false);
-      if (!archiveState.retentionSaving && !archiveState.retentionPendingIntent) {
-        retentionSelect.value = archiveState.savedRetentionValue;
-      }
-    }
+    // 只在存档设置确实打开时取消其加载，避免切到数据管理后误取消数据管理的保留设置读取。
+    if (!nextOpen && archiveState.archiveSettingsOpen) cancelArchiveSettingsLoad();
     archiveState.archiveSettingsOpen = nextOpen;
     archiveBrowser.hidden = archiveState.archiveSettingsOpen;
     archiveSettingsView.hidden = !archiveState.archiveSettingsOpen;
   }
 
+  // 进入数据管理：读取输入/输出文件保留期限与链接表保留期限。
+  function enterDataManagement() {
+    loadArchiveSettings({
+      includeStats: false,
+      feedback: showDataFeedback,
+      failurePrefix: '部分保留期限加载失败'
+    }).catch((error) => {
+      showDataFeedback(`保留期限加载失败：${archiveCenterErrorText(error, '未知错误')}`);
+    });
+    linkedRetentionView?.enter();
+  }
+
+  // 离开数据管理：取消未完成的读取；保存队列继续在后台完成，未保存的显示值恢复为最近一次成功值。
+  function leaveDataManagement() {
+    cancelArchiveSettingsLoad();
+    if (!archiveState.retentionSaving && !archiveState.retentionPendingIntent) {
+      retentionSelect.value = archiveState.savedRetentionValue;
+    }
+    linkedRetentionView?.leave();
+  }
+
   function setSettingsTab(requestedTab) {
     const wasArchive = archiveState.activeTab === 'archive';
+    const wasData = archiveState.activeTab === 'data';
     const wasTemplates = archiveState.activeTab === 'templates';
     const wasAccounts = archiveState.activeTab === 'accounts';
     const unavailable = (requestedTab === 'templates' && !templatePane) || (requestedTab === 'accounts' && !accountsPane);
     const tab = unavailable ? 'update' : requestedTab;
-    archiveState.activeTab = ['archive', 'templates', 'accounts', 'appearance'].includes(tab) ? tab : 'update';
+    archiveState.activeTab = ['archive', 'data', 'templates', 'accounts', 'appearance'].includes(tab) ? tab : 'update';
     dialog.querySelectorAll('[data-tab]').forEach((button) => {
       const active = button.dataset.tab === archiveState.activeTab;
       button.classList.toggle('is-active', active);
@@ -1293,9 +1357,11 @@ function createAppUpdateSettingsDialog(options = {}) {
     updatePane.hidden = archiveState.activeTab !== 'update';
     appearancePane.hidden = archiveState.activeTab !== 'appearance';
     archivePane.hidden = archiveState.activeTab !== 'archive';
+    dataPane.hidden = archiveState.activeTab !== 'data';
     if (templatePane) templatePane.hidden = archiveState.activeTab !== 'templates';
     if (accountsPane) accountsPane.hidden = archiveState.activeTab !== 'accounts';
     updateFooter.hidden = archiveState.activeTab !== 'update';
+    if (accountsFooter) accountsFooter.hidden = archiveState.activeTab !== 'accounts';
     if (archiveState.activeTab === 'templates') {
       if (!wasTemplates) templateFilesView?.enter();
     } else if (wasTemplates) {
@@ -1306,6 +1372,7 @@ function createAppUpdateSettingsDialog(options = {}) {
     } else if (wasAccounts) {
       bankAccountsView?.leave();
     }
+    if (archiveState.activeTab !== 'data' && wasData) leaveDataManagement();
     if (archiveState.activeTab !== 'archive') {
       setArchiveSettingsOpen(false);
     } else {
@@ -1315,6 +1382,7 @@ function createAppUpdateSettingsDialog(options = {}) {
         ensureArchiveLoaded(archiveState.currentVisitId);
       }
     }
+    if (archiveState.activeTab === 'data' && !wasData) enterDataManagement();
     refreshOpenAppUpdateDialog();
   }
 
@@ -1423,7 +1491,8 @@ function createAppUpdateSettingsDialog(options = {}) {
     if (button.disabled || archiveState.destroyed || !overlay.isConnected) return;
     const settingsReadyForDelete = () => {
       // 删除确认会替换设置弹窗，先等期限保存收口，避免中断待保存的最终选择。
-      if (archiveState.settingsLoading || archiveState.retentionSaving || archiveState.retentionPendingIntent) {
+      if (archiveState.settingsLoading || archiveState.retentionSaving || archiveState.retentionPendingIntent
+        || linkedRetentionBusy()) {
         showArchiveFeedback(
           archiveState.settingsLoading
             ? '存档设置正在加载，请稍后再删除批次'
@@ -1520,7 +1589,8 @@ function createAppUpdateSettingsDialog(options = {}) {
   function canCloseSettingsDialog() {
     return !themeController?.getSnapshot().saving
       && !archiveState.settingsLoading && !archiveState.retentionSaving
-      && !archiveState.retentionPendingIntent;
+      && !archiveState.retentionPendingIntent
+      && !linkedRetentionBusy();
   }
 
   function closeSettingsDialog() {
@@ -1624,7 +1694,7 @@ function createAppUpdateSettingsDialog(options = {}) {
     }
     archiveState.selectedRetentionModuleId = retentionModuleSelect.value;
     renderArchiveSettings();
-    showArchiveFeedback('', 'info');
+    showDataFeedback('', 'info');
   });
 
   function selectArchiveBatch(batchId) {
@@ -1687,8 +1757,18 @@ function createAppUpdateSettingsDialog(options = {}) {
         scope.onDispose(() => templateFilesView?.destroy());
       }
       if (accountsPane) {
-        bankAccountsView = mountBankAccounts(accountsPane, { getParentHandle: () => settingsHandle });
+        // 账户管理的导入/导出与翻页放在设置底栏，与【返回】同一行；底栏槽只在账户管理页显示。
+        bankAccountsView = mountBankAccounts(accountsPane, { getParentHandle: () => settingsHandle, footer: accountsFooter });
         scope.onDispose(() => bankAccountsView?.destroy());
+      }
+      if (typeof mountLinkedTableRetention === 'function') {
+        linkedRetentionSection.hidden = false;
+        linkedRetentionView = mountLinkedTableRetention(linkedRetentionSection, {
+          previewApi: linkedTablePreviewApi,
+          showFeedback: showDataFeedback,
+          onBusyChange: () => { if (archiveDialogAlive()) updateArchiveExitControls(); }
+        });
+        scope.onDispose(() => linkedRetentionView?.destroy());
       }
   const archiveApi = archiveCenterApi || api.archiveCenter;
   if (archiveApi && typeof archiveApi.onStorageMigrationProgress === 'function') {

@@ -54,6 +54,9 @@ const newPreparationPolicies = [
   { batchPolicy: 'exclude', channel: 'channel:list', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   // v3.2.17：补录余额「导入余额文件」只读预检
   { batchPolicy: 'exclude', channel: 'file:import-balance-seed-file', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
+  // v3.2.18 设置 → 数据管理：链接表保留期限读取与保存（只写设置，清理由空闲任务执行）
+  { batchPolicy: 'exclude', channel: 'linked-table:get-retention-settings', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'linked-table:set-retention-days', excludeReason: 'ui-navigation', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'scenarios:recon-id-fix-fields', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'settings:acknowledge-release-notes', excludeReason: 'ui-navigation', taskKind: 'exclude', workerContext: 'none' },
   // v3.2.17 外观设置：深色模式深浅度
@@ -64,6 +67,10 @@ const newPreparationPolicies = [
   { batchPolicy: 'exclude', channel: 'template-resources:list-changes', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:pick-import-file', excludeReason: 'file-picker-only', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'template-resources:prepare-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
+  // v3.2.18【导入模板】：选文件识别新模板的只读预检与取消命名时丢弃
+  { batchPolicy: 'exclude', channel: 'template:discard-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'template:prepare-import', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
+  { batchPolicy: 'exclude', channel: 'template:preview-header-update', excludeReason: 'staging-preflight-only', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'toolbox:split:cancel-read', excludeReason: 'cancel-active-task', taskKind: 'exclude', workerContext: 'none' },
   { batchPolicy: 'exclude', channel: 'toolbox:split:read-values', excludeReason: 'preview-only', taskKind: 'exclude', workerContext: 'none' }
 ];
@@ -81,7 +88,10 @@ const newSupportActions = [
   { channel: 'bank-accounts:commit-import', kind: 'support-action', reason: 'bank-account-snapshot' },
   // v3.2.16 模板管理【余额管理】：修改、删除单条余额种子
   { channel: 'balance-seed:update', kind: 'support-action', reason: 'balance-seed' },
-  { channel: 'balance-seed:delete', kind: 'support-action', reason: 'balance-seed' }
+  { channel: 'balance-seed:delete', kind: 'support-action', reason: 'balance-seed' },
+  { channel: 'template:update-headers', kind: 'support-action', reason: 'statement-template' },
+  // v3.2.18 映射关系管理【特征值管理】：保存 / 删除模板特征值
+  { channel: 'template:save-feature-filters', kind: 'support-action', reason: 'statement-template-feature-filter' }
 ];
 
 // 基线之后的行为修正，固定基线本身不改：基线把两个 deferred 动作与 acquiringBillCurrency:run 同列

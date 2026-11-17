@@ -1886,7 +1886,7 @@ class ArchiveCenterController {
   setRetentionDays(value) {
     const retentionDays = value === null ? null : Number(value);
     if (retentionDays !== null && !ALLOWED_RETENTION_DAYS.has(retentionDays)) {
-      return publicFailure(null, '保留期限仅支持 30、60、90、180、365 天或永久');
+      return publicFailure(null, '保留期限仅支持 15、30、60、90、180、365 天或永久');
     }
     this.database.setSetting(
       ARCHIVE_RETENTION_SETTING_KEY,

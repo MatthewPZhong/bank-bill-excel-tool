@@ -59,7 +59,7 @@ npm run preview:all
 | 截图 | 说明 | render 命令 |
 |------|------|------|
 | ![monthly-balance-export](monthly-balance-export.png) | 月度余额账单导出对话框（v1.5.3 R1） | `npm run preview:monthly-balance-export` |
-| ![export-scope](export-scope.png) | 导出范围选择对话框（当前批次 / 所有批次） | `npm run preview:export-scope` |
+| ![export-scope](export-scope.png) | 导出余额范围选择对话框（当前批次 / 所有批次） | `npm run preview:export-scope` |
 
 ### 提示 / 迁移类（3 张）
 
