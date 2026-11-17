@@ -330,6 +330,8 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await js(`cfg.overlay.querySelector('[data-role="balance-seed-account"]').click();cfg.overlay.querySelectorAll('[data-action="edit-seed"]')[0].click();void 0;`);
     await layout.resize(1080, 760, 1.5);
     const zoomed = await measure();
+    // 150% 时编辑 7 位金额 1250000：Windows 字体下原 10px 内边距放不下（PR #253 首轮 Windows CI），窄窗口收为 4px
+    assert.equal(await js(`cfg.overlay.querySelector('.balance-seed-balance-input').value`), '1250000');
     assert.deepEqual([zoomed.overflow, zoomed.wrapped, zoomed.inputFits], [false, [], true]);
     assert.deepEqual([zoomed.headerFits, zoomed.closeTopRight], [true, true], '150% 时头部可换行但不溢出，× 仍在右上角');
     await layout.evidence('balance-seed-table-150', { zoomed });

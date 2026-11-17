@@ -20,6 +20,13 @@
 
 ## 未实施
 
+### B100（P4 · 已知问题）余额管理编辑余额时，150% 缩放下 10 个字符以上的金额在输入框里显示不全
+
+- **来源**：2026-11-16 [PR #253](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/253) 首轮 Windows CI（`f515ce40`，run 43997954540，`release-check-integration (2/2)`）：`feat/template-import-naming` 加了账户号筛选后，渲染生命周期「余额管理表格」用例 150% 时改为编辑 `1250000`（v3.2.17 为 `15320.8`），Windows 上输入框放不下。release 上把窄窗口（≤ 1021px）下编辑框左右内边距由 10px 收为 4px，本机 150% 可用文字宽度由约 54px 增到约 66px
+- **影响**：1080 宽窗口 150% 缩放时，余额列约 15%。`1250000`、`98765.43` 一类 7–8 个字符的金额可完整显示；`1234567.89`（本机 Arial 13px 约 69px）及更长的金额仍显示不全，需在框内左右移动光标查看，值本身完整、可编辑与保存
+- **关闭条件**：在 Windows 150% 下让编辑态输入框容纳 10 位以内的常见金额（含小数点与两位小数），不引起横向滚动、不改变三列等宽与编辑态列宽不变的约定；渲染生命周期补对应断言
+- **目标版本**：未定
+
 ### B99（P3 · 已知问题）后台 Worker 获批堆上限低于阶段内存检查阈值：拆分以外的路径超限时可能直接被 V8 强杀
 
 - **来源**：分支 `fix/toolbox-split-oom-message`。工具箱拆分在 Windows 正式版报英文 `Worker terminated due to reaching memory limit: JS heap out of memory`；本分支只修了按字段值拆分的读取与导出通道（`src/main-process/toolbox-large-split-dispatch.js` 的 Worker）：Worker 内堆监控改按实际堆上限换算，V8 强杀归一为中文提示。原编号 B95，合入 `release/v3.2.18` 时与 `feat/statement-export-template-update` 的 B95 撞号，改为 B99

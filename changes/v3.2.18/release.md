@@ -46,7 +46,7 @@
 
 ## 遗留项处置（清单 B4）
 
-本轮纳入的分支未修复 backlog 中目标为 v3.2.18 的既有条目（B45、B47、B48、B52–B58、B60、B70、B75、B77、B79、B86、B92）；是否在本版前补做或顺延，待发版前确认，届时更新各条目标版本。本轮新增 B93、B94、B95、B96、B97、B98、B99。
+本轮纳入的分支未修复 backlog 中目标为 v3.2.18 的既有条目（B45、B47、B48、B52–B58、B60、B70、B75、B77、B79、B86、B92）；是否在本版前补做或顺延，待发版前确认，届时更新各条目标版本。本轮新增 B93、B94、B95、B96、B97、B98、B99、B100。
 
 ## 待人工复核（清单 C5）
 
@@ -59,4 +59,5 @@
 
 - 2026-11-16 在候选 `9bd81077`（升版提交）上运行 `npm run release-check`：EXIT=0。lint 通过；架构检查通过（解析 832/832 文件，历史检查 333 个提交）；单测 10280/10284（0 失败）；集成 109 个脚本 3885/3885；smoke 通过。`rules/integration-test-policy.md` §七 由 runner 回写，单独提交。
 - 合入前各模块分支的验证见各自 TechDoc；`feat/mapping-feature-values` 末端另跑过完整 `release-check`（EXIT=0）与两轮 Codex 审查。合入后本轮未做 release 级 Codex 审查。
-- 远端 Windows CI：各模块分支未推送过，没有 Windows 证据；本轮 release 开 PR 后以 PR 的 Windows CI 为准（开 PR 尚未授权）。
+- 远端 Windows CI：各模块分支未推送过，没有 Windows 证据，以 PR #253 的 Windows CI 为准。
+- PR #253 首轮 Windows CI（`f515ce40`）：`release-check-integration (2/2)` 渲染生命周期 439/440，「余额管理表格」150% 编辑态输入框放不下 `1250000`。`feat/template-import-naming` 加账户号筛选后该用例编辑的金额由 `15320.8` 变为 `1250000`，暴露出窄窗口下编辑框内边距（10px）挤占文字宽度；改为窄窗口下 4px，用例固定断言所编辑的值，本机 `configuration-dialogs` 142/142。10 个字符以上金额仍显示不全，登记 B100。
