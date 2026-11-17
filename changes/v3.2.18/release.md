@@ -57,4 +57,6 @@
 
 ## 验证（清单 C4）
 
-（待 release 上 `npm run release-check` 完成后填写）
+- 2026-11-16 在候选 `9bd81077`（升版提交）上运行 `npm run release-check`：EXIT=0。lint 通过；架构检查通过（解析 832/832 文件，历史检查 333 个提交）；单测 10280/10284（0 失败）；集成 109 个脚本 3885/3885；smoke 通过。`rules/integration-test-policy.md` §七 由 runner 回写，单独提交。
+- 合入前各模块分支的验证见各自 TechDoc；`feat/mapping-feature-values` 末端另跑过完整 `release-check`（EXIT=0）与两轮 Codex 审查。合入后本轮未做 release 级 Codex 审查。
+- 远端 Windows CI：各模块分支未推送过，没有 Windows 证据；本轮 release 开 PR 后以 PR 的 Windows CI 为准（开 PR 尚未授权）。
