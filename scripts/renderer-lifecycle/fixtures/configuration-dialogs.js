@@ -303,6 +303,12 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
         wrapped: [...table.querySelectorAll('th,td')].filter(cell=>!singleLine(cell)).map(cell=>cell.textContent.trim()),
         widths: [...table.rows[0].cells].map(cell=>Math.round(cell.getBoundingClientRect().width)),
         inputFits: !input||input.scrollWidth<=input.clientWidth,
+        // 失败时随断言输出，便于对照 Windows 与本机的实际宽度
+        inputMetrics: input&&(()=>{const cs=getComputedStyle(input);const ctx=document.createElement('canvas').getContext('2d');ctx.font=cs.font;
+          return {value:input.value,client:input.clientWidth,scroll:input.scrollWidth,padding:cs.paddingLeft,font:cs.font,
+            text:Math.round(ctx.measureText(input.value).width*10)/10,cell:Math.round(input.closest('td').getBoundingClientRect().width),
+            cols:[...table.rows[0].cells].map(cell=>Math.round(cell.getBoundingClientRect().width)),table:Math.round(table.getBoundingClientRect().width),
+            wrapper:wrapper.clientWidth,viewport:window.innerWidth,dpr:window.devicePixelRatio,narrow:matchMedia('(max-width: 1021px)').matches};})(),
         headerFits: header.scrollWidth<=header.clientWidth+1&&controls.every(item=>item.right<=card.right+1),
         closeTopRight: close.right<=card.right+1&&close.top-card.top<40&&controls.every(item=>item.right<=close.left||item.top>=close.bottom),
         filtersOnFirstRow: Math.abs(controls[2].top-controls[1].top)<=2 };
@@ -315,7 +321,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.ok(Math.max(balanceWidth, methodWidth, actionWidth) - Math.min(balanceWidth, methodWidth, actionWidth) <= 1, JSON.stringify(normal.widths));
     await js(`cfg.overlay.querySelectorAll('[data-action="edit-seed"]')[2].click();void 0;`); await layout.settle();
     const editing = await measure();
-    assert.deepEqual([editing.overflow, editing.wrapped, editing.inputFits], [false, [], true]);
+    assert.deepEqual([editing.overflow, editing.wrapped, editing.inputFits], [false, [], true], JSON.stringify(editing.inputMetrics));
     assert.ok(editing.widths.every((width, index) => Math.abs(width - normal.widths[index]) <= 1), JSON.stringify([normal.widths, editing.widths]));
     await layout.evidence('balance-seed-table-100', { normal, editing });
     // v3.2.18：选账户号后打开浮层，浮层在卡片内可见、不超出窗口。
@@ -332,7 +338,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     const zoomed = await measure();
     // 150% 时编辑 7 位金额 1250000：Windows 字体下原 10px 内边距放不下（PR #253 首轮 Windows CI），窄窗口收为 4px
     assert.equal(await js(`cfg.overlay.querySelector('.balance-seed-balance-input').value`), '1250000');
-    assert.deepEqual([zoomed.overflow, zoomed.wrapped, zoomed.inputFits], [false, [], true]);
+    assert.deepEqual([zoomed.overflow, zoomed.wrapped, zoomed.inputFits], [false, [], true], JSON.stringify(zoomed.inputMetrics));
     assert.deepEqual([zoomed.headerFits, zoomed.closeTopRight], [true, true], '150% 时头部可换行但不溢出，× 仍在右上角');
     await layout.evidence('balance-seed-table-150', { zoomed });
   });
