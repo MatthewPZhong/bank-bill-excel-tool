@@ -11411,22 +11411,6 @@ function buildStatementGenerationConfig({
     throw new FileValidationError('FILE_READ', '当前模板存在多个大账号，请先选择本次使用的大账号');
   }
 
-  let currencyMappings = [];
-
-  if (
-    (Array.isArray(mappingByTargetField.Currency) ? mappingByTargetField.Currency.length > 0 : Boolean(currencyMappingValue)) &&
-    !selectedCurrency &&
-    !currencyMappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)
-  ) {
-    const currencyMappingTablePath = getCurrencyMappingTablePath();
-
-    if (!fs.existsSync(currencyMappingTablePath)) {
-      throw new FileValidationError('FILE_READ', '未找到币种映射表，请确认文件已放入 assets 目录');
-    }
-
-    currencyMappings = loadCurrencyMappings(currencyMappingTablePath);
-  }
-
   const exportTargetFields = Array.from(
     new Set(
       (orderedTargetFields || mappings.map((mapping) => mapping.templateField))
@@ -11447,6 +11431,26 @@ function buildStatementGenerationConfig({
 
   const amountSplitByFieldConfig = buildAmountSplitByFieldConfig(template, selectedMappings);
   const billSplitMergeConfig = buildBillSplitMergeConfig(template, selectedMappings);
+
+  let currencyMappings = [];
+  // v3.2.19：根据字段值过滤账单时命中行拆分出的币种也按币种映射表规范化（buildMappedRows），按实际下发的规则加载映射表
+  const usesBillSplitRowFilter = Boolean(billSplitMergeConfig.enabled
+    && Array.isArray(billSplitMergeConfig.rowFilterRules)
+    && billSplitMergeConfig.rowFilterRules.length > 0);
+
+  if (usesBillSplitRowFilter || (
+    (Array.isArray(mappingByTargetField.Currency) ? mappingByTargetField.Currency.length > 0 : Boolean(currencyMappingValue)) &&
+    !selectedCurrency &&
+    !currencyMappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)
+  )) {
+    const currencyMappingTablePath = getCurrencyMappingTablePath();
+
+    if (!fs.existsSync(currencyMappingTablePath)) {
+      throw new FileValidationError('FILE_READ', '未找到币种映射表，请确认文件已放入 assets 目录');
+    }
+
+    currencyMappings = loadCurrencyMappings(currencyMappingTablePath);
+  }
   // v3.2.18：模板【更新】后映射仍引用已删除的字段时拒绝生成（否则该列静默输出空值），在读取文件与写出之前拦截。
   templateHeaderUpdateTools.assertTemplateFieldReferencesAvailable(template, {
     mappings: selectedMappings,

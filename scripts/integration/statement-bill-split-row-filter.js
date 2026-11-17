@@ -6,6 +6,8 @@
 //      按源行顺序合并；未勾选过滤时全部走拆分；勾选了却没有有效规则时拒绝生成；
 //      模板表头删掉规则字段后，生成前的失效引用拦截列出规则位置，未勾选时标为未启用
 //   ④ 模板包：导出条目带规则 → 用到过滤时写 v8 → 读包 → 导入后规则与生成结果一致；旧版（支持到 v7）整包拒绝
+//   ⑤ 币种：main.js 真实生成配置（buildStatementGenerationConfig）在主映射未配 Currency 时也加载 assets 币种映射表，
+//      命中行拆分出的币种按映射表规范化（人民币 → CNY），无法识别的保留原值并记提示；未勾选过滤时拆分行保持原值
 //   UI 由 renderer lifecycle 覆盖；本脚本验证数据与文件在整条链路上的结果。
 //
 // 用法：node scripts/integration/statement-bill-split-row-filter.js
@@ -32,12 +34,21 @@ const {
   upgradeLegacyFeatureFilter,
   validateFeeAmountFormula,
   validateBillSplitRowFilterRules,
-  writeWorkbookRows
+  writeWorkbookRows,
+  extractHeaders,
+  FIXED_FIELD_VALUE_PREFIX,
+  loadCurrencyMappings,
+  normalizeFeatureFilterList,
+  parseFeatureFilterToken,
+  resolveUsedFeatureFilters
 } = require('../../src/backend/file-service');
 const {
   createTemplateHeaderUpdateTools,
+  diffTemplateHeaders,
   formatFieldReferenceLines
 } = require('../../src/main-process/template-header-update');
+const { splitTemplateName } = require('../../src/backend/balance-seed-store');
+const channelIdentity = require('../../src/main-process/statement-channel-identity');
 
 const ROOT = path.join(__dirname, '..', '..');
 const MAIN_SOURCE = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
@@ -134,6 +145,67 @@ function createMain(database, constantOverrides = {}) {
     LEGACY_FEATURE_FILTER_ID,
     upgradeLegacyFeatureFilter,
     normalizeBundleAccountMappings: () => []
+  });
+}
+
+// main.js 真实生成配置链路（与 statement-template-update.js 同一组函数与依赖）
+const GENERATION_CONSTANTS = loadMainConstants([
+  'BALANCE_DISABLED_OPTION', 'BALANCE_CALCULATED_OPTION', 'MERCHANT_ID_SELF_INPUT_OPTION', 'MERCHANT_ID_MULTI_ACCOUNT_MARKER',
+  'MERCHANT_ID_CURRENCY_ONLY_OPTION',
+  'CONCAT_FIELDS_MAPPING_FIELD', 'FEATURE_FILTER_MAPPING_FIELD', 'CUSTOM_INPUT_TARGET_FIELDS',
+  'SIGNED_AMOUNT_MAPPING_FIELD', 'AMOUNT_BASED_NAME_MAPPING_FIELD', 'AMOUNT_BASED_ACCOUNT_MAPPING_FIELD',
+  'AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD', 'AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION',
+  'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
+  'BILL_SPLIT_ROW_FILTER_MAPPING_FIELD', 'BILL_SPLIT_ROW_FILTER_ENABLED_OPTION',
+  'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS', 'FILENAME_MAPPING_TEMPLATE_ID', 'MISSING_ENUM_MESSAGE',
+  'LEGACY_ORIENTED_MAPPINGS_MESSAGE'
+]);
+const ENUM_VALUES = ['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount', 'Remark', 'Balance'];
+
+function createGenerationMain(database) {
+  return loadMainFunctions([
+    'validateTemplateConfiguration', 'validateFeatureFiltersPayload', 'collectFeatureFilterRefs', 'buildExportTargetFields',
+    'buildMappingTargetFields', 'buildManagedMappingFields', 'getPrimaryMappedField', 'getMappingFieldValues',
+    'normalizeMappedFields', 'resolveCurrentMappings', 'decodeCustomInputMappingValue', 'normalizeMappingRows',
+    'normalizeExportMappingRows', 'buildCompatibleBigAccounts', 'isFilenameMappingMode', 'getTemplateMappingConfig',
+    'buildMappedFieldLookup', 'normalizeLookupMappingValue', 'buildStatementGenerationConfig', 'resolveStatementFeatureFilters',
+    'buildBillSplitMergeConfig', 'buildAmountSplitByFieldConfig', 'buildMappedRowsForFile', 'validateBillSplitMappingsPayload',
+    'validateCurrencyBigAccountConfiguration', 'buildCurrencyBigAccountMappingConfig', 'isCurrencyOnlyMerchantMapping',
+    'normalizeBundleTemplateHeaders', 'normalizeBundleBillSplitMeta', 'isLegacyOrientedTemplateMappings'
+  ], {
+    ...GENERATION_CONSTANTS,
+    templateHeaderUpdateTools: createTemplateHeaderUpdateTools(GENERATION_CONSTANTS),
+    diffTemplateHeaders,
+    extractHeaders,
+    database,
+    fs,
+    path,
+    normalizeCell,
+    normalizeFeeAmountFormula,
+    normalizeBillSplitRowFilterRules,
+    validateFeeAmountFormula,
+    validateBillSplitRowFilterRules,
+    FileValidationError,
+    FIXED_FIELD_VALUE_PREFIX,
+    MERCHANT_ID_CURRENCY_ONLY_MARKER,
+    buildFeatureFilterToken,
+    getFeatureFilterRef,
+    LEGACY_FEATURE_FILTER_ID,
+    normalizeFeatureFilterList,
+    parseFeatureFilterToken,
+    resolveUsedFeatureFilters,
+    upgradeLegacyFeatureFilter,
+    buildMappedRows,
+    loadCurrencyMappings,
+    splitTemplateName,
+    resolveStatementOutputName: channelIdentity.resolveStatementOutputName,
+    getCurrencyMappingTablePath: () => path.join(ROOT, 'assets', '币种映射表.xlsx'),
+    getEnumConfig: () => ({ filePath: 'COMMON枚举.xlsx' }),
+    loadEnumValues: () => ENUM_VALUES.slice(),
+    expandBigAccountConfigurations: (items) => (Array.isArray(items) ? items : []),
+    createStatementWorkbookReadGuard: () => undefined,
+    buildBigAccountRecognitionBasis: () => null,
+    finalizeBigAccountRecognitionBasis: () => null
   });
 }
 
@@ -359,6 +431,50 @@ function verifyBundle(dir, database, main) {
   closeDatabase(target);
 }
 
+function verifyCurrencyNormalization(dir, database) {
+  const generationMain = createGenerationMain(database);
+  const sourcePath = path.join(dir, 'currency.xlsx');
+  writeSource(sourcePath, [
+    ['2026-11-01', '转账', '人民币', '100', '', '', ''],
+    ['2026-11-02', '代收', '人民币', '', '', '1000', '2.5'],
+    ['2026-11-03', '代付', '某币', '', '', '300', '']
+  ]);
+  // 主映射不配 Currency：未命中行没有币种，命中行币种只来自拆分行配置
+  const template = defineSplitTemplate(database, '币种规范化模板');
+  const noMainCurrency = mappingsWith().filter((mapping) => mapping.templateField !== 'Currency');
+  const run = (mappings) => {
+    database.saveMappings(template.id, mappings, [], [], 'auto', null, {});
+    const config = generationMain.getTemplateMappingConfig(template.id);
+    const generationConfig = generationMain.buildStatementGenerationConfig({
+      template: config.template,
+      mappings: config.exportMappings,
+      orderedTargetFields: ORDERED_FIELDS,
+      allowManagedMerchantWithoutSelection: true
+    });
+    const mapped = generationMain.buildMappedRowsForFile({ config: generationConfig, inputFilePath: sourcePath });
+    return {
+      tableLoaded: generationConfig.currencyMappings.length > 0,
+      rows: buildDetailExportRows(mapped).slice(1).map((row) => [row[1], row[2], row[3]]),
+      unmapped: mapped.issues.filter((issue) => issue.type === 'currency-unmapped').map((issue) => [issue.rowNumber, issue.rawValue])
+    };
+  };
+
+  assertEq(run(noMainCurrency), {
+    tableLoaded: true,
+    rows: [['', '100', ''], ['CNY', '1000', ''], ['CNY', '', '2.5'], ['某币', '300', '']],
+    unmapped: [[4, '某币']]
+  }, '⑤ 主映射未配 Currency 时仍加载币种表：命中行币种按映射表规范化，无法识别的保留原值并记提示');
+
+  const unfiltered = run(noMainCurrency.map((mapping) => (
+    mapping.templateField === CONSTANTS.BILL_SPLIT_ROW_FILTER_MAPPING_FIELD ? { ...mapping, mappedField: '' } : mapping
+  )).filter((mapping) => !['Credit Amount', 'Debit Amount'].includes(mapping.templateField)));
+  assertEq(unfiltered, {
+    tableLoaded: false,
+    rows: [['人民币', '1000', ''], ['人民币', '', '2.5'], ['某币', '300', '']],
+    unmapped: []
+  }, '⑤ 未勾选过滤：拆分行币种保持原值，不加载币种表');
+}
+
 async function run() {
   console.log('==== 网银账单 · 拆分/合并账单根据字段值过滤账单 集成验证 ====');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-bill-split-row-filter-'));
@@ -369,6 +485,7 @@ async function run() {
     verifyStorage(database);
     verifyGeneration(dir, database, main);
     verifyBundle(dir, database, main);
+    verifyCurrencyNormalization(dir, database);
   } finally {
     openedDatabases.splice(0).forEach((database) => {
       try { database.close(); } catch (_error) { /* 已关闭 */ }

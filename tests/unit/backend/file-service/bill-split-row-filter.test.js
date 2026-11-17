@@ -123,10 +123,11 @@ function splitRow(seqNo, overrides = {}) {
   };
 }
 
-function mapFile(filePath, { mappingByField = {}, billSplit = {}, featureFilters = {} } = {}) {
+function mapFile(filePath, { mappingByField = {}, billSplit = {}, featureFilters = {}, currencyMappings = [] } = {}) {
   return buildMappedRows({
     inputFilePath: filePath,
     orderedTargetFields: TARGETS,
+    currencyMappings,
     mappingByField: {
       BillDate: '日期',
       Currency: '币种',
@@ -228,6 +229,37 @@ test('命中行的币种只取拆分行配置：单元格为空时不回落到�
   const mapped = mapFile(filePath, { mappingByField: { Currency: '附言' } });
   assert.deepEqual(outputs(mapped).map((row) => row.slice(0, 3)), [['EUR', '100', ''], ['', '200', '']]);
   assert.deepEqual(mapped.issues.filter((issue) => issue.rowNumber === 3), []);
+});
+
+test('开启过滤时命中行的拆分币种按币种映射表规范化，与主映射行同一口径；无法识别时保留原值并记提示', (t) => {
+  const currencyMappings = [
+    { englishCode: 'CNY', aliases: ['人民币'] },
+    { englishCode: 'HKD', aliases: ['港币'] }
+  ];
+  const filePath = writeXlsx(createTempDir(t), [
+    ['2026-11-01', '普通', '人民币', '100', '', '', '', ''],
+    ['2026-11-02', '拆分', '人民币', '', '', '200', '5', ''],
+    ['2026-11-03', '拆分', '某币', '', '', '300', '', ''],
+    ['2026-11-04', '拆分', 'usd', '', '', '400', '', '']
+  ]);
+  const mapped = mapFile(filePath, { currencyMappings });
+  assert.deepEqual(outputs(mapped).map((row) => row.slice(0, 3)), [
+    ['CNY', '100', ''],
+    ['CNY', '200', ''],
+    ['CNY', '', '5'],
+    ['某币', '300', ''],
+    ['usd', '400', '']
+  ]);
+  // 同一源行两份拆分共用币种列，只记一次；未输出的拆分行（第 4、5 行手续费为空）不记
+  assert.deepEqual(
+    mapped.issues.filter((issue) => issue.type === 'currency-unmapped').map((issue) => [issue.rowNumber, issue.rawValue, issue.sourceField]),
+    [[4, '某币', '币种']]
+  );
+
+  // 未开启过滤的拆分模板保持取原值（此时界面清空主映射 Currency）
+  const unfiltered = mapFile(filePath, { currencyMappings, mappingByField: { Currency: '' }, billSplit: { rowFilterRules: null } });
+  assert.deepEqual(outputs(unfiltered).map((row) => row[0]), ['人民币', '人民币', '某币', 'usd']);
+  assert.deepEqual(unfiltered.issues.filter((issue) => issue.type === 'currency-unmapped'), []);
 });
 
 test('主映射按字段区分发生额的命中统计只计走主映射的行', (t) => {

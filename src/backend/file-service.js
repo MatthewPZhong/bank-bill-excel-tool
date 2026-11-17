@@ -493,11 +493,31 @@ function buildMappedRows({
     const hasSignedAmount = Boolean(billSplitSignedField);
     const hasAmountRules = billSplitAmountRules.length > 0;
     const useAmountSourceField = hasSignedAmount || hasAmountRules;
+    // v3.2.19：根据字段值过滤账单时同一份账单里拆分行与主映射行并存，拆分行的币种也按币种映射表规范化
+    //   （与主映射同一口径），避免同一币种输出成「人民币」与 CNY 两种写法、余额按币种分组时拆成两组。
+    //   未开启过滤的拆分模板保持取原值。同一源行内同一字段同一原值只规范化、只记提示一次。
+    const resolvedCurrencyByKey = new Map();
+    const resolveSplitRowCurrency = (rawCurrency, sourceField) => {
+      if (!compiledBillSplitRowFilter || !rawCurrency) {
+        return rawCurrency;
+      }
+      const key = `${sourceField}\u0000${rawCurrency}`;
+      if (!resolvedCurrencyByKey.has(key)) {
+        const currencyResult = resolveCurrencyValue(rawCurrency, currencyMappings, {
+          allowFuzzy: !merchantIdUsesCurrencyMapping
+        });
+        if (currencyResult.issue) {
+          issues.push({ ...currencyResult.issue, rowNumber: sourceRowNumber, sourceField });
+        }
+        resolvedCurrencyByKey.set(key, normalizeCell(currencyResult.value));
+      }
+      return resolvedCurrencyByKey.get(key);
+    };
 
     return billSplitRows
       .map((splitRow) => {
         const expandedRow = baseMappedRow.slice();
-        const currencyValue = normalizeCell(readSourceCell(originalRow, splitRow.currencySourceField));
+        const rawCurrencyValue = normalizeCell(readSourceCell(originalRow, splitRow.currencySourceField));
         let creditValue = '';
         let debitValue = '';
 
@@ -558,6 +578,8 @@ function buildMappedRows({
           return null;
         }
 
+        // 只为实际输出的拆分行规范化币种并记提示（收付均为 0 的拆分行已丢弃）
+        const currencyValue = resolveSplitRowCurrency(rawCurrencyValue, normalizeCell(splitRow.currencySourceField));
         if (currencyTargetIndex >= 0 && currencyValue) {
           expandedRow[currencyTargetIndex] = currencyValue;
         }
