@@ -120,12 +120,12 @@ test('main 与独立 V327 注册器的 IPC 加内部任务，与 policy/support 
   assert.equal(new Set(actual).size, actual.length, 'main 不应重复注册 literal IPC');
   assert.equal(new Set(expected).size, expected.length, 'policy/support 不应重复登记');
   assert.deepEqual(expected, actual);
-  assert.equal(actual.length, 308);
+  assert.equal(actual.length, 309);
   assert.equal(v327IpcInventory().length, 21);
   assert.equal(registry.channels('reserve').length, 71);
   assert.equal(registry.channels('no-file').length, 63);
   assert.equal(registry.channels('exclude').length, 159);
-  assert.equal(SUPPORT_ACTION_POLICIES.length, 15);
+  assert.equal(SUPPORT_ACTION_POLICIES.length, 16);
   // v3.2.18 模板管理【更新】：预览为只读预检（exclude），确认写入为 support action
   assert.ok(registry.channels('exclude').includes('template:preview-header-update'));
   assert.ok(SUPPORT_ACTION_POLICIES.some((policy) => policy.channel === 'template:update-headers'));

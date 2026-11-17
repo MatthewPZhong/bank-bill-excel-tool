@@ -716,7 +716,6 @@ const {
   buildMappedRows,
   buildCurrencyBigAccountUnmappedError,
   compileRegexLiteral,
-  FEATURE_FILTER_FIELD_TOKEN,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
@@ -727,7 +726,13 @@ const {
   loadCurrencyMappings,
   loadEnumValues,
   normalizeCell,
-  normalizeFeatureFilterRule,
+  buildFeatureFilterToken,
+  getFeatureFilterRef,
+  normalizeFeatureFilterList,
+  parseFeatureFilterToken,
+  resolveUsedFeatureFilters,
+  upgradeLegacyFeatureFilter,
+  LEGACY_FEATURE_FILTER_ID,
   parseDateValue,
   parseNumericValue,
   readRows,
@@ -1831,7 +1836,8 @@ const MERCHANT_ID_MULTI_ACCOUNT_MARKER = '__MULTI_BIG_ACCOUNT__';
 // v3.2.16：MerchantId 按每行币种取【映射管理】中维护的大账号（存储值见 MERCHANT_ID_CURRENCY_ONLY_MARKER）
 const MERCHANT_ID_CURRENCY_ONLY_OPTION = '原始账单仅有币种无账户号';
 const CONCAT_FIELDS_MAPPING_FIELD = '需要拼接字段';
-// v3.2.16：映射值「字段筛选特征值」——从一个源字段按模板级规则筛出特征值（规则存 templates.feature_filter_json）
+// v3.2.16：映射值「字段筛选特征值」——从一个源字段按规则筛出特征值。
+// v3.2.18：模板可有多个特征值（templates.feature_filter_json 存数组），映射行的 mappedFields[0] 为所选特征值 id。
 const FEATURE_FILTER_MAPPING_FIELD = '字段筛选特征值';
 const CUSTOM_INPUT_TARGET_FIELDS = new Set(['MerchantId']);
 const SIGNED_AMOUNT_MAPPING_FIELD = '按正负号拆分的发生额';
@@ -1850,7 +1856,10 @@ const REUSE_MODULE_DEFAULT_OPTION = '是';
 // v3.2.15：v5 以渠道取代主/子模板（顶层 channels，条目 channelName），兼容读取 v≤4。
 // v3.2.16：用到「字段筛选特征值」（主映射或拆分映射）或 MerchantId「原始账单仅有币种无账户号」（条目带 currencyBigAccounts）
 //   的模板包写 v6，让旧版按版本号整包拒绝（旧版会静默输出空值，或把新存储值当成映射字段）；都未用到时仍写 v5，旧版照常可导入。
-const SUPPORTED_BUNDLE_VERSION = 6;
+// v3.2.18：用到「字段筛选特征值」时写 v7（条目带 featureFilters 数组，映射行带所选特征值 id），v3.2.16/3.2.17 读到整包拒绝；
+//   只用到「原始账单仅有币种无账户号」时仍写 v6。读取 v6 包时把单套 featureFilter 升级为特征值（同启动迁移口径）。
+const SUPPORTED_BUNDLE_VERSION = 7;
+const CURRENCY_ONLY_BUNDLE_VERSION = 6;
 const BASE_BUNDLE_VERSION = 5;
 // v1.5.2 需求 3：主页面「按文件名映射模板」的虚拟模板 ID（非 DB 记录）
 // helper 用于在接收 templateId 的调用点统一短路，避免将虚拟 ID 传入真实查询
@@ -3899,7 +3908,8 @@ function buildTemplateLibraryPayload() {
   };
 }
 
-// v3.2.16：任一模板的主映射或拆分映射用到「字段筛选特征值」时写 v6，否则写 v5（见 SUPPORTED_BUNDLE_VERSION 注释）。
+// v3.2.18：任一模板的主映射或拆分映射用到「字段筛选特征值」时写 v7；只用到「原始账单仅有币种无账户号」时写 v6；
+//   都未用到时写 v5（见 SUPPORTED_BUNDLE_VERSION 注释）。
 function resolveTemplateBundleVersion(templates) {
   const entries = Array.isArray(templates) ? templates : [];
   const usesFeatureFilter = entries.some((entry) => (
@@ -3908,7 +3918,10 @@ function resolveTemplateBundleVersion(templates) {
   ));
   // v3.2.16：MerchantId「原始账单仅有币种无账户号」——旧版会把存储值当成映射字段，或丢掉 currencyBigAccounts
   const usesCurrencyOnlyMerchant = entries.some((entry) => isCurrencyOnlyMerchantMapping(entry && entry.mappings));
-  return usesFeatureFilter || usesCurrencyOnlyMerchant ? SUPPORTED_BUNDLE_VERSION : BASE_BUNDLE_VERSION;
+  if (usesFeatureFilter) {
+    return SUPPORTED_BUNDLE_VERSION;
+  }
+  return usesCurrencyOnlyMerchant ? CURRENCY_ONLY_BUNDLE_VERSION : BASE_BUNDLE_VERSION;
 }
 
 function toBundleAccountMapping(m) {
@@ -3948,6 +3961,24 @@ function normalizeBundleTemplateHeaders(headers) {
     normalized.pop();
   }
   return normalized;
+}
+
+// v3.2.18：v≤6 模板包里选「字段筛选特征值」的映射行不带特征值 id；包内有单套规则时让它们引用升级后的「特征值1」。
+function upgradeLegacyBundleFeatureFilterRefs(item) {
+  if (!item || typeof item !== 'object' || !item.featureFilter || typeof item.featureFilter !== 'object'
+    || Array.isArray(item.featureFilter)) {
+    return item;
+  }
+  const withLegacyRef = (rows) => (Array.isArray(rows) ? rows : []).map((mapping) => (
+    mapping && normalizeCell(mapping.mappedField) === FEATURE_FILTER_MAPPING_FIELD && !getFeatureFilterRef(mapping)
+      ? { ...mapping, mappedFields: [LEGACY_FEATURE_FILTER_ID] }
+      : mapping
+  ));
+  return {
+    ...item,
+    mappings: withLegacyRef(item.mappings),
+    billSplitMappings: withLegacyRef(item.billSplitMappings)
+  };
 }
 
 function readTemplateBundleFile(filePath) {
@@ -3991,7 +4022,7 @@ function readTemplateBundleFile(filePath) {
   return {
     bundleVersion,
     channels,
-    templates: templates.map((item) => ({
+    templates: templates.map((item) => (bundleVersion >= 7 ? item : upgradeLegacyBundleFeatureFilterRefs(item))).map((item) => ({
     templateKey: normalizeCell(item.templateKey),
     name: normalizeCell(item.name),
     sourceFileName: normalizeCell(item.sourceFileName) || `${normalizeCell(item.name) || 'template'}.xlsx`,
@@ -4014,10 +4045,9 @@ function readTemplateBundleFile(filePath) {
       ? { signedAmountSourceField: normalizeCell(item.billSplitMeta.signedAmountSourceField) }
       : { signedAmountSourceField: '' },
     dateFormat: normalizeCell(item.dateFormat) || 'auto',
-    // v3.2.16：模板级「字段筛选特征值」规则（旧 bundle 无此字段时为 null；导入时再校验）
-    featureFilter: item.featureFilter && typeof item.featureFilter === 'object' && !Array.isArray(item.featureFilter)
-      ? { ...item.featureFilter }
-      : null,
+    // v3.2.18：特征值列表（导入时再校验）。本版本导出的包都带 featureFilters 数组——映射都没选用时仍写 v5/v6，
+    //   故按字段而非版本判断；没有数组时才是 v3.2.16/3.2.17 的单套 featureFilter，升级为「特征值1」。
+    featureFilters: upgradeLegacyFeatureFilter(Array.isArray(item.featureFilters) ? item.featureFilters : item.featureFilter),
     // v3.2.15（v5）：所属渠道；v≤4 的主/子模板字段只用于导入时转为渠道。
     channelName: bundleVersion >= 5 ? (normalizeCell(item.channelName) || null) : null,
     isParent: bundleVersion < 5 && Boolean(item.isParent),
@@ -4297,11 +4327,15 @@ function buildImportWarningDetailLines(warnings) {
     });
   }
 
-  // v3.2.16：字段筛选特征值未命中的行（选该映射值的字段已留空）
+  // v3.2.16：字段筛选特征值未命中的行（选该映射值的字段已留空）；v3.2.18 逐个特征值列出
   if (featureValueWarnings.length) {
     detailLines.push('以下行未筛出特征值，选择「字段筛选特征值」的字段已留空：');
     featureValueWarnings.forEach((warning) => {
-      detailLines.push(`第${warning.rowNumber}行，源字段“${warning.sourceField}”，原值“${warning.rawValue || '(空)'}”`);
+      (Array.isArray(warning.misses) ? warning.misses : []).forEach((miss) => {
+        detailLines.push(
+          `第${warning.rowNumber}行，特征值“${miss.featureName}”，源字段“${miss.sourceField}”，原值“${miss.rawValue || '(空)'}”`
+        );
+      });
     });
   }
 
@@ -4559,6 +4593,17 @@ function normalizeMappingRows({ template, mappings, enumValues, bigAccounts = []
     const savedValue = getPrimaryMappedField(savedMapping);
     const savedFields = getMappingFieldValues(savedMapping);
     const rawMappedField = normalizeCell(savedMapping?.mappedField);
+    // v3.2.18：mappedFields[0] 是所选特征值 id，不是源字段
+    if (rawMappedField === FEATURE_FILTER_MAPPING_FIELD) {
+      const featureFilterRef = getFeatureFilterRef(savedMapping);
+      return {
+        templateField: fieldName,
+        mappedField: FEATURE_FILTER_MAPPING_FIELD,
+        mappedFields: featureFilterRef ? [featureFilterRef] : [],
+        customValue: '',
+        isMultiBigAccount: false
+      };
+    }
     const isConcatMode = rawMappedField === CONCAT_FIELDS_MAPPING_FIELD || savedFields.length > 1;
     const customInputMapping = CUSTOM_INPUT_TARGET_FIELDS.has(fieldName)
       ? decodeCustomInputMappingValue(savedValue)
@@ -4621,6 +4666,15 @@ function normalizeExportMappingRows({ template, mappings, enumValues }) {
     const savedValue = getPrimaryMappedField(savedMapping);
     const savedFields = getMappingFieldValues(savedMapping);
     const rawMappedField = normalizeCell(savedMapping?.mappedField);
+    // v3.2.18：mappedFields[0] 是所选特征值 id，不是源字段；生成用映射须保留它（buildMappedFieldLookup 据此取特征值）
+    if (rawMappedField === FEATURE_FILTER_MAPPING_FIELD) {
+      const featureFilterRef = getFeatureFilterRef(savedMapping);
+      return {
+        templateField: fieldName,
+        mappedField: FEATURE_FILTER_MAPPING_FIELD,
+        mappedFields: featureFilterRef ? [featureFilterRef] : []
+      };
+    }
     const isConcatMode = rawMappedField === CONCAT_FIELDS_MAPPING_FIELD || savedFields.length > 1;
 
     return {
@@ -5105,10 +5159,10 @@ function buildTemplateSummary(template) {
     channelName: template.channelName || '',
     // v1.5.2 需求 3（G3-4）：透传「文件名里的固定字段」给映射关系对话框回显
     filenameFixedField: String(template.filenameFixedField || ''),
-    // v3.2.16：模板级「字段筛选特征值」规则，供映射关系对话框回显
-    featureFilter: template.featureFilter && typeof template.featureFilter === 'object'
-      ? { ...template.featureFilter }
-      : null
+    // v3.2.18：模板的特征值列表，供映射关系对话框的「选择特征值」与【特征值管理】回显
+    featureFilters: Array.isArray(template.featureFilters)
+      ? template.featureFilters.map((item) => ({ ...item }))
+      : []
   };
 }
 
@@ -8627,19 +8681,42 @@ function registerFundTransferAccountMappingHandlers() {
   });
 }
 
-// v3.2.16：保存时的筛选规则——实际用到时必须有效（无效即抛错）；未用到时有效草稿照存（便于再次选用），无效则不写。
-function resolveSavedFeatureFilter({ used, featureFilter, headers }) {
-  if (used) {
-    return normalizeFeatureFilterRule(featureFilter, { headers });
+// v3.2.18：【特征值管理】保存载荷校验——逐条校验名称与条件（已有 id 须存在，新条目分配 id）；
+//   被删掉的特征值若仍被已保存的主映射或拆分映射选用则拒绝，提示被哪些字段使用。
+function validateFeatureFiltersPayload(rawList, template) {
+  const existing = Array.isArray(template.featureFilters) ? template.featureFilters : [];
+  const knownIds = new Set(existing.map((item) => normalizeCell(item && item.id)).filter(Boolean));
+  const featureFilters = normalizeFeatureFilterList(rawList, { headers: template.headers, knownIds });
+  const keptIds = new Set(featureFilters.map((item) => item.id));
+  const removed = existing.filter((item) => !keptIds.has(normalizeCell(item && item.id)));
+  if (removed.length) {
+    const references = database.listTemplateFeatureFilterReferences(template.id, FEATURE_FILTER_MAPPING_FIELD);
+    removed.forEach((item) => {
+      const id = normalizeCell(item.id);
+      const fields = references
+        .filter((reference) => reference.ref === id)
+        .map((reference) => (reference.scope === 'split'
+          ? `${reference.templateField}（拆分/合并映射）`
+          : reference.templateField));
+      if (fields.length) {
+        throw new FileValidationError(
+          'FILE_READ',
+          `特征值「${normalizeCell(item.name)}」正被 ${fields.join('、')} 使用，请先改选其他特征值后再删除`
+        );
+      }
+    });
   }
-  if (!featureFilter) {
-    return null;
-  }
-  try {
-    return normalizeFeatureFilterRule(featureFilter, { headers });
-  } catch (_error) {
-    return null;
-  }
+  return featureFilters;
+}
+
+// v3.2.18：选「字段筛选特征值」的映射行 → [{ templateField, ref }]；label 用于拆分映射的提示前缀。
+function collectFeatureFilterRefs(mappings, label = '') {
+  return (Array.isArray(mappings) ? mappings : [])
+    .filter((mapping) => normalizeCell(mapping && mapping.mappedField) === FEATURE_FILTER_MAPPING_FIELD)
+    .map((mapping) => ({
+      templateField: `${label}${normalizeCell(mapping.templateField)}`,
+      ref: getFeatureFilterRef(mapping)
+    }));
 }
 
 function validateTemplateConfiguration({
@@ -8648,7 +8725,8 @@ function validateTemplateConfiguration({
   enumValues,
   bigAccounts = [],
   fixedAssignments = [],
-  featureFilter = null,
+  // v3.2.18：模板的特征值列表（库中已存，或模板包内已校验的列表）
+  featureFilters = [],
   billSplitMappings = [],
   // v3.2.16：MerchantId「原始账单仅有币种无账户号」的 币种 → 大账号，与币种映射表中的币种代码
   currencyBigAccounts = [],
@@ -8669,15 +8747,18 @@ function validateTemplateConfiguration({
     }
 
     const isFeatureFilterMode = rawMappedField === FEATURE_FILTER_MAPPING_FIELD;
+    const featureFilterRef = isFeatureFilterMode ? getFeatureFilterRef(mapping) : '';
     mappingByTarget.set(targetField, {
       mappedField: rawMappedField === CONCAT_FIELDS_MAPPING_FIELD || isFeatureFilterMode ? rawMappedField : sourceField,
-      mappedFields: isFeatureFilterMode ? [] : getMappingFieldValues(mapping),
+      mappedFields: isFeatureFilterMode
+        ? (featureFilterRef ? [featureFilterRef] : [])
+        : getMappingFieldValues(mapping),
       customValue: normalizeCell(mapping.customValue)
     });
   });
 
   const cleanedMappings = [];
-  const featureFilterTargetFields = [];
+  const featureFilterRefs = [];
   const merchantIdMapping = mappingByTarget.get('MerchantId') || {
     mappedField: '',
     mappedFields: [],
@@ -8894,7 +8975,7 @@ function validateTemplateConfiguration({
       return;
     }
 
-    // v3.2.16：字段筛选特征值，可用字段同「需要拼接字段」；规则模板级共用，循环后统一校验。
+    // v3.2.16：字段筛选特征值，可用字段同「需要拼接字段」；v3.2.18 各行带所选特征值 id，循环后按生效映射统一校验。
     if (normalizedSourceField === FEATURE_FILTER_MAPPING_FIELD) {
       if (
         targetField === 'Balance'
@@ -8904,11 +8985,12 @@ function validateTemplateConfiguration({
       ) {
         throw new FileValidationError('FILE_READ', `${targetField} 不支持使用"${FEATURE_FILTER_MAPPING_FIELD}"`);
       }
-      featureFilterTargetFields.push(targetField);
+      const featureFilterRef = normalizeCell(selectedSourceFields[0]);
+      featureFilterRefs.push({ templateField: targetField, ref: featureFilterRef });
       cleanedMappings.push({
         templateField: targetField,
         mappedField: FEATURE_FILTER_MAPPING_FIELD,
-        mappedFields: []
+        mappedFields: featureFilterRef ? [featureFilterRef] : []
       });
       return;
     }
@@ -8986,26 +9068,19 @@ function validateTemplateConfiguration({
     });
   }
 
-  // v3.2.16：只按实际生效的映射判断是否用到（与生成口径 resolveStatementFeatureFilter 一致）：
+  // v3.2.16：只按实际生效的映射判断是否用到（与生成口径 resolveStatementFeatureFilters 一致）：
   //   启用拆分/合并且不复用模块映射时看拆分映射（已存或模板包内），否则看主映射。
+  // v3.2.18：生效映射里每个选该值的字段都须选了特征值，且特征值存在、条件有效。
   const splitMappingsEffective = usesBillSplitMerge && cleanedMappings.some((mapping) => (
     mapping.templateField === REUSE_MODULE_MAPPING_FIELD && mapping.mappedField === '否'
   ));
-  const billSplitUsesFeatureFilter = splitMappingsEffective
-    && (Array.isArray(billSplitMappings) ? billSplitMappings : [])
-      .some((mapping) => normalizeCell(mapping && mapping.mappedField) === FEATURE_FILTER_MAPPING_FIELD);
-  const featureFilterUsed = splitMappingsEffective ? billSplitUsesFeatureFilter : featureFilterTargetFields.length > 0;
-  if (billSplitUsesFeatureFilter && !featureFilter) {
-    throw new FileValidationError(
-      'FILE_READ',
-      `拆分/合并账单映射关系设置中有字段使用了"${FEATURE_FILTER_MAPPING_FIELD}"，请先在该弹窗点击【筛选条件】设置`
-    );
-  }
-  const cleanedFeatureFilter = resolveSavedFeatureFilter({
-    used: featureFilterUsed,
-    featureFilter,
-    headers: template.headers
-  });
+  resolveUsedFeatureFilters(
+    featureFilters,
+    splitMappingsEffective
+      ? collectFeatureFilterRefs(billSplitMappings, '拆分/合并账单映射关系设置中的 ')
+      : featureFilterRefs,
+    { headers: template.headers }
+  );
   const cleanedCurrencyBigAccounts = merchantIdManagedByCurrency
     ? validateCurrencyBigAccountConfiguration({
         cleanedMappings,
@@ -9019,7 +9094,6 @@ function validateTemplateConfiguration({
     mappings: cleanedMappings,
     bigAccounts: expandBigAccountConfigurations(cleanedBigAccounts),
     fixedAssignments: cleanedFixedAssignments,
-    featureFilter: cleanedFeatureFilter,
     currencyBigAccounts: cleanedCurrencyBigAccounts
   };
 }
@@ -9775,8 +9849,8 @@ function registerTemplateHandlers() {
         enumValues: loadEnumValues(enumConfig.filePath),
         bigAccounts: payload.bigAccounts,
         fixedAssignments: payload.fixedAssignments,
-        // v3.2.16：载荷未带规则时用已存规则；不复用的拆分映射用到该值时一并校验
-        featureFilter: payload.featureFilter || template.featureFilter || null,
+        // v3.2.18：特征值由【特征值管理】即时保存，这里按库中列表校验所选特征值；不复用的拆分映射一并校验
+        featureFilters: template.featureFilters,
         billSplitMappings: database.getBillSplitMappings(payload.templateId),
         currencyBigAccounts: payload.currencyBigAccounts,
         availableCurrencyCodes: getAvailableCurrencyCodes().map((option) => option.code)
@@ -9856,7 +9930,7 @@ function registerTemplateHandlers() {
         templateConfiguration.fixedAssignments,
         payload.dateFormat,
         null,
-        { preserveOwn, channelAssignment, featureFilter: templateConfiguration.featureFilter, currencyBigAccounts: templateConfiguration.currencyBigAccounts }
+        { preserveOwn, channelAssignment, currencyBigAccounts: templateConfiguration.currencyBigAccounts }
       );
       const assignmentResult = saveResult && saveResult.channelAssignment;
       syncTemplateLibraryFile();
@@ -10270,6 +10344,10 @@ function registerTemplateHandlers() {
           }
 
           const draftTemplate = buildBundleImportDraftTemplate(entry, existingTemplate);
+          // v3.2.18：包内特征值按表头校验（保留包内 id），映射所选特征值据此校验并随映射同事务写入
+          const bundleFeatureFilters = normalizeFeatureFilterList(entry.featureFilters || [], {
+            headers: draftTemplate.headers
+          });
           const validated = validateTemplateConfiguration({
             template: draftTemplate,
             mappings: normalizeMappingRows({
@@ -10280,7 +10358,7 @@ function registerTemplateHandlers() {
             enumValues,
             bigAccounts: entry.bigAccounts,
             fixedAssignments: entry.fixedAssignments,
-            featureFilter: entry.featureFilter,
+            featureFilters: bundleFeatureFilters,
             billSplitMappings: entry.billSplitMappings,
             currencyBigAccounts: entry.currencyBigAccounts,
             availableCurrencyCodes: bundleCurrencyCodes
@@ -10313,7 +10391,7 @@ function registerTemplateHandlers() {
             validated.fixedAssignments,
             entry.dateFormat,
             normalizedAmountSplitRules,
-            { preserveOwn: false, featureFilter: validated.featureFilter, currencyBigAccounts: validated.currencyBigAccounts }
+            { preserveOwn: false, featureFilters: bundleFeatureFilters, currencyBigAccounts: validated.currencyBigAccounts }
           );
 
           // v1.5.2 需求 3：透传文件名固定字段（老 bundle 无此字段时落为空串）
@@ -10643,14 +10721,9 @@ function registerTemplateHandlers() {
         });
       }
       const validated = validateBillSplitMappingsPayload(payload.mappings, template);
-      // v3.2.16：用到字段筛选特征值时规则必须有效（载荷未带则用已存规则），与映射同一事务写入
-      // 未用到时有效草稿照存，避免弹窗里改过的规则被丢弃而与界面不一致
-      const featureFilter = resolveSavedFeatureFilter({
-        used: validated.some((mapping) => mapping.mappedField === FEATURE_FILTER_MAPPING_FIELD),
-        featureFilter: payload.featureFilter || template.featureFilter,
-        headers: template.headers
-      });
-      database.saveBillSplitMappings(templateId, validated, { featureFilter });
+      // v3.2.18：选「字段筛选特征值」的字段须选了库中存在的特征值（特征值由【特征值管理】即时保存）
+      resolveUsedFeatureFilters(template.featureFilters, collectFeatureFilterRefs(validated), { headers: template.headers });
+      database.saveBillSplitMappings(templateId, validated);
       syncTemplateLibraryFile();
       return { status: 'success', message: '拆分账单字段映射保存成功' };
     } catch (error) {
@@ -10668,6 +10741,48 @@ function registerTemplateHandlers() {
         step: '保存拆分账单字段映射',
         message: '拆分账单字段映射保存失败，请导出报错文件查看详情',
         errorCode: 'BILL_SPLIT_MAPPINGS_SAVE_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { templateId, templateName: template?.name || '' },
+        templateName: template?.name || ''
+      });
+    }
+  });
+
+  // v3.2.18 映射关系管理【特征值管理】：保存、删除特征值即时落库（spec D7）。整表替换；
+  //   已保存的主映射 / 拆分映射仍在使用的特征值不能被删掉（spec D5）。
+  supportIpcHandle('template:save-feature-filters', '保存特征值', (_event, payload = {}) => {
+    const templateId = Number(payload?.templateId);
+    let template = null;
+    try {
+      template = database.getTemplate(templateId);
+      if (!template) {
+        return createErrorResult({
+          step: '保存特征值',
+          message: '未找到对应模板',
+          errorCode: 'TEMPLATE_NOT_FOUND',
+          context: { templateId }
+        });
+      }
+      const featureFilters = validateFeatureFiltersPayload(payload.featureFilters, template);
+      database.saveTemplateFeatureFilters(templateId, featureFilters);
+      syncTemplateLibraryFile();
+      return { status: 'success', message: '特征值已保存', featureFilters };
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        return createErrorResult({
+          step: '保存特征值',
+          message: error.message,
+          errorCode: error.code,
+          originalError: error,
+          context: { templateId, templateName: template?.name || '' },
+          templateName: template?.name || ''
+        });
+      }
+      return createErrorResult({
+        step: '保存特征值',
+        message: '特征值保存失败，请导出报错文件查看详情',
+        errorCode: 'FEATURE_FILTERS_SAVE_RUNTIME',
         errorType: '系统错误',
         originalError: error,
         context: { templateId, templateName: template?.name || '' },
@@ -10974,7 +11089,7 @@ function validateBillSplitMappingsPayload(mappings, template) {
     // 与主表格保持一致
     const isBalanceSpecialValue = templateField === 'Balance'
       && (mappedField === BALANCE_DISABLED_OPTION || mappedField === BALANCE_CALCULATED_OPTION);
-    // v3.2.16：字段筛选特征值共用模板级规则（由保存处统一校验），不带源字段
+    // v3.2.16：字段筛选特征值不带源字段；v3.2.18 mappedFields 只保留所选特征值 id（由保存处校验存在）
     if (mappedField === FEATURE_FILTER_MAPPING_FIELD) {
       if (templateField === 'Balance') {
         throw new FileValidationError('FILE_READ', `${templateField} 不支持使用"${FEATURE_FILTER_MAPPING_FIELD}"`);
@@ -10982,7 +11097,7 @@ function validateBillSplitMappingsPayload(mappings, template) {
       normalized.push({
         templateField,
         mappedField,
-        mappedFields: [],
+        mappedFields: mappedFields.slice(0, 1),
         rowIndex: Number.isInteger(mapping?.rowIndex) ? mapping.rowIndex : index
       });
       return;
@@ -11149,9 +11264,9 @@ function buildMappedFieldLookup(mappings) {
   return mappings.reduce((accumulator, mapping) => {
     const mappedFields = getMappingFieldValues(mapping);
     const isConcatMode = normalizeCell(mapping.mappedField) === CONCAT_FIELDS_MAPPING_FIELD;
-    // v3.2.16：字段筛选特征值转为内部 token，由 buildMappedRows 按模板级规则逐行取值
+    // v3.2.16：字段筛选特征值转为内部 token，由 buildMappedRows 逐行取值；v3.2.18 token 带所选特征值 id
     if (normalizeCell(mapping.mappedField) === FEATURE_FILTER_MAPPING_FIELD) {
-      accumulator[mapping.templateField] = FEATURE_FILTER_FIELD_TOKEN;
+      accumulator[mapping.templateField] = buildFeatureFilterToken(getFeatureFilterRef(mapping));
       return accumulator;
     }
     accumulator[mapping.templateField] = isConcatMode
@@ -11264,7 +11379,7 @@ function buildStatementGenerationConfig({
     billSplitSignedAmountSourceField: billSplitMergeConfig.signedAmountSourceField || '',
     featureFilter: template && template.featureFilter
   });
-  const featureFilter = resolveStatementFeatureFilter(template, mappingByTargetField, billSplitMergeConfig);
+  const featureFilters = resolveStatementFeatureFilters(template, mappingByTargetField, billSplitMergeConfig);
   const currencyBigAccountMapping = isCurrencyOnlyTemplate
     ? buildCurrencyBigAccountMappingConfig(template, outputName)
     : null;
@@ -11287,25 +11402,31 @@ function buildStatementGenerationConfig({
     },
     amountSplitByField: amountSplitByFieldConfig,
     billSplitMerge: billSplitMergeConfig,
-    featureFilter,
+    featureFilters,
     currencyBigAccountMapping,
     dateParseOrder: template.dateFormat || 'auto'
   };
 }
 
 // v3.2.16：实际生效的映射（拆分/合并且不复用时为拆分映射，否则为主映射）用到「字段筛选特征值」时，
-// 模板须有有效规则，否则拒绝生成；与 buildMappedRows 的启用口径一致。
-function resolveStatementFeatureFilter(template, mappingByTargetField, billSplitMergeConfig) {
+// 所选特征值须存在且有效，否则拒绝生成；与 buildMappedRows 的启用口径一致。
+// v3.2.18：返回用到的特征值 { [id]: { id, name, ...rule } }，未用到时为 {}。
+function resolveStatementFeatureFilters(template, mappingByTargetField, billSplitMergeConfig) {
   const effectiveLookup = billSplitMergeConfig
     && billSplitMergeConfig.enabled
     && billSplitMergeConfig.reuseModuleMapping === false
     ? billSplitMergeConfig.billSplitMappingByTargetField
     : mappingByTargetField;
-  const used = Object.values(effectiveLookup || {}).some((value) => value === FEATURE_FILTER_FIELD_TOKEN);
-  if (!used) {
-    return null;
-  }
-  return normalizeFeatureFilterRule(template && template.featureFilter, { headers: template && template.headers });
+  const refs = [];
+  Object.entries(effectiveLookup || {}).forEach(([templateField, value]) => {
+    [].concat(value).forEach((item) => {
+      const ref = parseFeatureFilterToken(item);
+      if (ref !== null) {
+        refs.push({ templateField, ref });
+      }
+    });
+  });
+  return resolveUsedFeatureFilters(template && template.featureFilters, refs, { headers: template && template.headers });
 }
 
 // v3.2.16：MerchantId「原始账单仅有币种无账户号」— 读取模板【映射管理】中的 币种 → 大账号。
@@ -11441,7 +11562,7 @@ function buildMappedRowsForFile({
     amountMappingRules: config.amountMappingRules,
     amountSplitByField: config.amountSplitByField,
     billSplitMerge: config.billSplitMerge,
-    featureFilter: config.featureFilter || null,
+    featureFilters: config.featureFilters || null,
     expectedSourceHeaders: config.template.headers,
     selectedBigAccount: {
       merchantId: config.selectedMerchantId,

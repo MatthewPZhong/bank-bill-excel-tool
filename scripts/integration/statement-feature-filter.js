@@ -1,14 +1,17 @@
-// 网银账单：映射值「字段筛选特征值」（v3.2.16）e2e 集成验证
-//   覆盖：真实主库（迁移、模板级规则读写）+ 真实 xlsx 读取与写出 + main.js 中的真实保存校验、生成配置与导入提示函数
-//   ① 迁移：旧库无 feature_filter_json 列 → 启动补列，已有模板规则为 null；重复启动无副作用
-//   ② 保存 → 读回 → 生成：两个目标字段共用一套规则、取第一个命中段；未命中留空，提示与报错文件列出该行；
+// 网银账单：映射值「字段筛选特征值」e2e 集成验证（v3.2.16 引入；v3.2.18 起一个模板可有多个特征值）
+//   覆盖：真实主库（迁移、特征值与映射读写）+ 真实 xlsx 读取与写出 + main.js 中的真实保存校验、生成配置与导入提示函数
+//   ① 迁移：旧库无 feature_filter_json 列 → 启动补列；v3.2.16/3.2.17 的单套规则升级为「特征值1」，
+//      主映射与拆分映射中选该值的行自动引用它，输出与升级前口径一致；重复启动幂等
+//   ② 保存 → 读回 → 生成：两个字段分别选两个特征值各取各的值；未命中留空，提示按行计、报错文件逐个特征值列出；
 //      收支均为空的行不重复提示；回读导出明细
-//   ③ 拒绝：缺规则、筛选字段不存在、Currency / MerchantId / Balance 选该值、直接写库缺规则后生成被拒
-//   ④ 模板包：导出条目带规则 → 读包 → 导入新库后规则与映射一致；覆盖表头重建模板时规则清空；
-//      用到该值（含只在拆分映射中用到）时包写 v6，旧版读包整包拒绝，未用到时仍写 v5
-//   ⑤ 拆分/合并「不复用」映射：只有拆分映射用该值时，规则随拆分映射保存并在展开行生效；
-//      规则缺失时保存主映射被拒；主映射残留该值但拆分映射未用时不要求规则、不记未命中
-//   ⑥ BillDate 取该值时，源列里的“合计”标签仍按合计行跳过，合计金额不作为交易导出（资金红线回归）
+//   ③ 【特征值管理】保存载荷：分配 id、改名不变 id、名称必填/不重复、未知 id 拒绝；
+//      已保存的主映射或拆分映射仍在使用的特征值拒绝删除，未使用的可删除且 id 不复用
+//   ④ 拒绝：未选特征值、所选特征值不存在、Currency / MerchantId / Balance 选该值、直接写库引用缺失后生成被拒
+//   ⑤ 模板包：导出条目带特征值与各字段选择 → 读包 → 导入新库一致；用到该值时写 v7、旧版整包拒绝；
+//      v6 旧包导入时单套规则升级为「特征值1」并补上引用；覆盖表头重建模板时特征值清空
+//   ⑥ 拆分/合并「不复用」映射：拆分映射所选特征值在展开行生效；拆分映射引用缺失时保存主映射被拒；
+//      主映射残留该值但不生效时不要求选特征值、不记未命中
+//   ⑦ BillDate 取该值时，所选特征值源列里的“合计”标签仍按合计行跳过，合计金额不作为交易导出（资金红线回归）
 //   UI 由 renderer lifecycle 覆盖；本脚本验证数据与文件在整条链路上的结果。
 //
 // 用法：node scripts/integration/statement-feature-filter.js
@@ -23,14 +26,19 @@ const { AppDatabase } = require('../../src/backend/database');
 const { hasColumn } = require('../../src/backend/database/migrations');
 const {
   buildDetailExportRows,
+  buildFeatureFilterToken,
   buildMappedRows,
-  FEATURE_FILTER_FIELD_TOKEN,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
+  getFeatureFilterRef,
+  LEGACY_FEATURE_FILTER_ID,
   loadCurrencyMappings,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   normalizeCell,
-  normalizeFeatureFilterRule,
+  normalizeFeatureFilterList,
+  parseFeatureFilterToken,
+  resolveUsedFeatureFilters,
+  upgradeLegacyFeatureFilter,
   writeWorkbookRows
 } = require('../../src/backend/file-service');
 const { splitTemplateName } = require('../../src/backend/balance-seed-store');
@@ -43,7 +51,9 @@ const MAIN_AST = acorn.parse(MAIN_SOURCE, { ecmaVersion: 'latest', sourceType: '
 const HEADERS = ['交易日期', '附言', '币种', '收入', '支出', '账号'];
 const ENUM_VALUES = ['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount', 'Remark', 'Reference', 'Balance'];
 const ORDERED_FIELDS = ['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount', 'Remark', 'Reference'];
-const RULE_INPUT = { sourceField: '附言', separator: 'space', length: '10', letterPrefixCount: '2', digitsOnly: true, sample: 'FT24123456' };
+const SERIAL_RULE = { sourceField: '附言', separator: 'space', length: '10', letterPrefixCount: '2', digitsOnly: true, sample: 'FT24123456' };
+const ORDER_RULE = { sourceField: '附言', separator: 'space', length: '', letterPrefixCount: '3', digitsOnly: true, sample: 'INV123456' };
+const NORMALIZED_SERIAL = { sourceField: '附言', separator: 'space', length: 10, letterPrefixCount: 2, digitsOnly: true, sample: 'FT24123456' };
 
 let passed = 0;
 let failed = 0;
@@ -97,7 +107,7 @@ const CONSTANTS = loadMainConstants([
   'SIGNED_AMOUNT_MAPPING_FIELD', 'AMOUNT_BASED_NAME_MAPPING_FIELD', 'AMOUNT_BASED_ACCOUNT_MAPPING_FIELD',
   'AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD', 'AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION',
   'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
-  'SUPPORTED_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION', 'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS'
+  'SUPPORTED_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION', 'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS'
 ]);
 const FEATURE = CONSTANTS.FEATURE_FILTER_MAPPING_FIELD;
 
@@ -136,7 +146,8 @@ function closeDatabase(database) {
 function createMain(database, constantOverrides = {}) {
   return loadMainFunctions([
     'validateTemplateConfiguration',
-    'resolveSavedFeatureFilter',
+    'validateFeatureFiltersPayload',
+    'collectFeatureFilterRefs',
     'buildExportTargetFields',
     'buildMappingTargetFields',
     'buildManagedMappingFields',
@@ -150,7 +161,7 @@ function createMain(database, constantOverrides = {}) {
     'buildMappedFieldLookup',
     'normalizeLookupMappingValue',
     'buildStatementGenerationConfig',
-    'resolveStatementFeatureFilter',
+    'resolveStatementFeatureFilters',
     'buildBillSplitMergeConfig',
     'buildAmountSplitByFieldConfig',
     'buildMappedRowsForFile',
@@ -159,6 +170,7 @@ function createMain(database, constantOverrides = {}) {
     'validateBillSplitMappingsPayload',
     'normalizeBundleTemplateHeaders',
     'readTemplateBundleFile',
+    'upgradeLegacyBundleFeatureFilterRefs',
     'resolveTemplateBundleVersion',
     // v3.2.16 同轮合入的「原始账单仅有币种无账户号」：校验、生成配置与模板包版本会引用
     'validateCurrencyBigAccountConfiguration',
@@ -174,9 +186,14 @@ function createMain(database, constantOverrides = {}) {
     normalizeCell,
     FileValidationError,
     FIXED_FIELD_VALUE_PREFIX,
-    FEATURE_FILTER_FIELD_TOKEN,
     MERCHANT_ID_CURRENCY_ONLY_MARKER,
-    normalizeFeatureFilterRule,
+    buildFeatureFilterToken,
+    getFeatureFilterRef,
+    LEGACY_FEATURE_FILTER_ID,
+    normalizeFeatureFilterList,
+    parseFeatureFilterToken,
+    resolveUsedFeatureFilters,
+    upgradeLegacyFeatureFilter,
     buildMappedRows,
     loadCurrencyMappings,
     splitTemplateName,
@@ -191,6 +208,7 @@ function createMain(database, constantOverrides = {}) {
   });
 }
 
+// overrides 的值：字符串为映射值；{ feature: id } 表示选「字段筛选特征值」并选该特征值（id 为 '' 表示未选）。
 function mappingsFor(overrides = {}) {
   const base = {
     BillDate: '交易日期',
@@ -198,93 +216,130 @@ function mappingsFor(overrides = {}) {
     Currency: '币种',
     'Credit Amount': '收入',
     'Debit Amount': '支出',
-    Remark: FEATURE,
-    Reference: FEATURE,
+    Remark: { feature: '1' },
+    Reference: { feature: '2' },
     Balance: CONSTANTS.BALANCE_DISABLED_OPTION,
     ...overrides
   };
-  return Object.entries(base).map(([templateField, mappedField]) => ({ templateField, mappedField, mappedFields: [], customValue: '' }));
+  return Object.entries(base).map(([templateField, value]) => (value && typeof value === 'object'
+    ? { templateField, mappedField: FEATURE, mappedFields: value.feature ? [value.feature] : [], customValue: '' }
+    : { templateField, mappedField: value, mappedFields: [], customValue: '' }));
 }
 
+function featureRefs(mappings) {
+  return mappings.filter((m) => m.mappedField === FEATURE).map((m) => [m.templateField, m.mappedFields]);
+}
+
+// 与生产同一链路：getTemplateMappingConfig 的 exportMappings（normalizeExportMappingRows）→ buildStatementGenerationConfig
 function generate(main, database, templateId, inputFilePath) {
   const template = database.getTemplate(templateId);
   const payload = database.getTemplateMappings(templateId);
-  const exportMappings = main.normalizeExportMappingRows({ template, mappings: payload.mappings, enumValues: ENUM_VALUES });
   const config = main.buildStatementGenerationConfig({
     template,
-    mappings: exportMappings,
+    mappings: main.normalizeExportMappingRows({ template, mappings: payload.mappings, enumValues: ENUM_VALUES }),
     orderedTargetFields: ORDERED_FIELDS,
     allowManagedMerchantWithoutSelection: true
   });
   return main.buildMappedRowsForFile({ config, inputFilePath });
 }
 
-// ① 旧库补列、重复启动幂等
+function saveFeatureFilters(main, database, templateId, list) {
+  const featureFilters = main.validateFeatureFiltersPayload(list, database.getTemplate(templateId));
+  database.saveTemplateFeatureFilters(templateId, featureFilters);
+  return featureFilters;
+}
+
+// ① 旧库补列；v3.2.16/3.2.17 单套规则升级；重复启动幂等
 function verifyMigration(dir) {
   const dbPath = path.join(dir, 'legacy.sqlite');
   let database = openDatabase(dbPath);
-  const template = database.upsertTemplate({ name: '旧模板', sourceFileName: '旧模板.xlsx', headers: HEADERS });
+  const blank = database.upsertTemplate({ name: '旧模板', sourceFileName: '旧模板.xlsx', headers: HEADERS });
+  const legacy = database.upsertTemplate({ name: 'BANKL-旧规则', sourceFileName: 'l.xlsx', headers: HEADERS });
   database.db.exec('ALTER TABLE templates DROP COLUMN feature_filter_json');
   assertEq(hasColumn(database.db, 'templates', 'feature_filter_json'), false, '① 模拟旧库：删除列');
   closeDatabase(database);
 
   database = openDatabase(dbPath);
   assertEq(hasColumn(database.db, 'templates', 'feature_filter_json'), true, '① 启动迁移补列');
-  assertEq(database.getTemplate(template.id).featureFilter, null, '① 旧模板规则为 null');
+  assertEq(database.getTemplate(blank.id).featureFilters, [], '① 无规则模板的特征值为空列表');
+
+  // 按 v3.2.16/3.2.17 的存储形状写入：模板级单对象规则，映射行不带特征值 id
+  database.db.prepare('UPDATE templates SET feature_filter_json = ? WHERE id = ?').run(JSON.stringify(NORMALIZED_SERIAL), legacy.id);
+  const legacyMappings = mappingsFor({ Remark: { feature: '' }, Reference: { feature: '' } });
+  database.saveMappings(legacy.id, legacyMappings, [], [], undefined, null, {});
+  database.saveBillSplitMappings(legacy.id, [{ templateField: 'Remark', mappedField: FEATURE, mappedFields: [] }]);
+  assertEq(featureRefs(database.getTemplateMappings(legacy.id).mappings), [['Remark', []], ['Reference', []]], '① 旧形状：映射行不带特征值');
   closeDatabase(database);
 
   database = openDatabase(dbPath);
-  assertEq(hasColumn(database.db, 'templates', 'feature_filter_json'), true, '① 重复启动后列仍在');
-  assertEq(database.getTemplate(template.id).name, '旧模板', '① 重复启动不影响已有模板');
+  const expectedList = [{ id: '1', name: '特征值1', ...NORMALIZED_SERIAL }];
+  assertEq(database.getTemplate(legacy.id).featureFilters, expectedList, '① 单套规则升级为「特征值1」');
+  assertEq(featureRefs(database.getTemplateMappings(legacy.id).mappings), [['Remark', ['1']], ['Reference', ['1']]], '① 主映射行引用「特征值1」');
+  assertEq(featureRefs(database.getBillSplitMappings(legacy.id)), [['Remark', ['1']]], '① 拆分映射行引用「特征值1」');
+
+  const main = createMain(database);
+  const sourcePath = path.join(dir, 'source-legacy.xlsx');
+  writeSource(sourcePath, [['2026-11-01', '转账 FT24123456 附言', 'USD', '100', '', 'ACC1']]);
+  assertEq(pickColumns(generate(main, database, legacy.id, sourcePath), ['Remark', 'Reference']), [['FT24123456', 'FT24123456']],
+    '① 升级后两字段仍取同一个值（与升级前口径一致）');
+  closeDatabase(database);
+
+  database = openDatabase(dbPath);
+  assertEq(database.getTemplate(legacy.id).featureFilters, expectedList, '① 重复启动：特征值不变');
+  assertEq(featureRefs(database.getTemplateMappings(legacy.id).mappings), [['Remark', ['1']], ['Reference', ['1']]], '① 重复启动：引用不变');
+  assertEq(database.getTemplate(blank.id).name, '旧模板', '① 重复启动不影响已有模板');
   closeDatabase(database);
 }
 
-// ② 保存 → 读回 → 生成 → 回读导出
+// ② 两个特征值：保存 → 读回 → 生成 → 回读导出
 function verifySaveAndGenerate(dir) {
   const database = openDatabase(path.join(dir, 'main.sqlite'));
   const main = createMain(database);
   const template = database.upsertTemplate({ name: 'BANKA-测试', sourceFileName: 'a.xlsx', headers: HEADERS });
 
-  const validated = main.validateTemplateConfiguration({
-    template, mappings: mappingsFor(), enumValues: ENUM_VALUES, featureFilter: RULE_INPUT
-  });
-  const expectedRule = { sourceField: '附言', separator: 'space', length: 10, letterPrefixCount: 2, digitsOnly: true, sample: 'FT24123456' };
-  assertEq(validated.featureFilter, expectedRule, '② 保存校验返回规范化规则');
-  assertEq(
-    validated.mappings.filter((m) => m.mappedField === FEATURE).map((m) => [m.templateField, m.mappedFields]),
-    [['Remark', []], ['Reference', []]],
-    '② 两个目标字段保存为字段筛选特征值、不带源字段'
-  );
-  database.saveMappings(template.id, validated.mappings, [], [], undefined, null, { featureFilter: validated.featureFilter });
+  const saved = saveFeatureFilters(main, database, template.id, [{ name: '流水号', ...SERIAL_RULE }, { name: '订单号', ...ORDER_RULE }]);
+  assertEq(saved.map((item) => [item.id, item.name, item.length, item.letterPrefixCount]), [['1', '流水号', 10, 2], ['2', '订单号', null, 3]],
+    '② 特征值分配 id 并规范化条件');
 
-  const saved = database.getTemplate(template.id);
-  assertEq(saved.featureFilter, expectedRule, '② 读回模板级规则');
-  const uiRows = main.normalizeMappingRows({ template: saved, mappings: database.getTemplateMappings(template.id).mappings, enumValues: ENUM_VALUES });
-  assertEq(uiRows.filter((m) => m.mappedField === FEATURE).map((m) => m.templateField), ['Remark', 'Reference'], '② 映射弹窗回显');
+  const validated = main.validateTemplateConfiguration({
+    template: database.getTemplate(template.id), mappings: mappingsFor(), enumValues: ENUM_VALUES,
+    featureFilters: database.getTemplate(template.id).featureFilters
+  });
+  assertEq(featureRefs(validated.mappings), [['Remark', ['1']], ['Reference', ['2']]], '② 保存校验保留各字段所选特征值');
+  database.saveMappings(template.id, validated.mappings, [], [], undefined, null, {});
+  assertEq(database.getTemplate(template.id).featureFilters.map((item) => item.name), ['流水号', '订单号'], '② 保存映射不改特征值');
+
+  const uiRows = main.normalizeMappingRows({ template, mappings: database.getTemplateMappings(template.id).mappings, enumValues: ENUM_VALUES });
+  assertEq(featureRefs(uiRows), [['Remark', ['1']], ['Reference', ['2']]], '② 映射弹窗回显所选特征值');
+  const exportRows = main.normalizeExportMappingRows({ template, mappings: database.getTemplateMappings(template.id).mappings, enumValues: ENUM_VALUES });
+  assertEq(featureRefs(exportRows), [['Remark', ['1']], ['Reference', ['2']]], '② 生成用映射（exportMappings）保留所选特征值');
 
   const sourcePath = path.join(dir, 'source-a.xlsx');
   writeSource(sourcePath, [
-    ['2026-11-01', '转账 FT24123456 附言', 'USD', '100', '', 'ACC1'],
-    ['2026-11-02', 'PAY/FT24999999  ZZ12345678 AB87654321', 'USD', '', '50', 'ACC1'],
+    ['2026-11-01', '转账 FT24123456 INV123456', 'USD', '100', '', 'ACC1'],
+    ['2026-11-02', 'PAY/FT24999999  ZZ12345678 ABC987', 'USD', '', '50', 'ACC1'],
     ['2026-11-03', '无编号', 'USD', '20', '', 'ACC1'],
     ['2026-11-04', '无编号 FT0', 'USD', '', '', 'ACC1']
   ]);
   const detailRows = generate(main, database, template.id, sourcePath);
   assertEq(pickColumns(detailRows, ['Remark', 'Reference']), [
-    ['FT24123456', 'FT24123456'],
-    ['ZZ12345678', 'ZZ12345678'],
+    ['FT24123456', 'INV123456'],
+    ['ZZ12345678', 'ABC987'],
     ['', ''],
     ['', '']
-  ], '② 两字段共用同一值、取第一个命中段、未命中留空');
+  ], '② 两字段按各自特征值取值、取第一个命中段、未命中留空');
 
   const missIssues = detailRows.issues.filter((issue) => issue.type === 'feature-value-unmatched');
-  assertEq(missIssues.map((issue) => [issue.rowNumber, issue.sourceField, issue.rawValue]), [[4, '附言', '无编号']], '② 只为有收支的未命中行记提示');
+  assertEq(missIssues.map((issue) => [issue.rowNumber, issue.misses.map((miss) => [miss.featureName, miss.sourceField, miss.rawValue])]),
+    [[4, [['流水号', '附言', '无编号'], ['订单号', '附言', '无编号']]]],
+    '② 只为有收支的未命中行记提示，逐个特征值列出');
   const detailLines = main.buildImportWarningDetailLines(detailRows.issues);
-  assertTrue(detailLines.includes('第4行，源字段“附言”，原值“无编号”'), '② 报错文件逐行列出未命中行');
+  assertTrue(detailLines.includes('第4行，特征值“流水号”，源字段“附言”，原值“无编号”')
+    && detailLines.includes('第4行，特征值“订单号”，源字段“附言”，原值“无编号”'), '② 报错文件逐个特征值列出');
   assertTrue(
     main.buildImportWarningMessage({ warnings: detailRows.issues, balanceReady: false, balanceRequested: false })
       .includes('1行未筛出特征值，相关字段已留空'),
-    '② 导入提示汇总未命中行数'
+    '② 导入提示按行汇总未命中'
   );
 
   const outputPath = path.join(dir, 'detail-a.xlsx');
@@ -292,115 +347,192 @@ function verifySaveAndGenerate(dir) {
   const exported = readSheet(outputPath);
   assertEq(
     exported.rows.map((row) => [row[exported.header.indexOf('Remark')], row[exported.header.indexOf('Reference')]]),
-    [['FT24123456', 'FT24123456'], ['ZZ12345678', 'ZZ12345678'], ['', '']],
+    [['FT24123456', 'INV123456'], ['ZZ12345678', 'ABC987'], ['', '']],
     '② 回读导出明细（收支均空的行已过滤）'
   );
   return { database, main, template };
 }
 
-// ③ 各类拒绝
-function verifyRejections(dir, { database, main, template }) {
-  assertThrows(() => main.validateTemplateConfiguration({
-    template, mappings: mappingsFor(), enumValues: ENUM_VALUES, featureFilter: null
-  }), /尚未设置筛选条件/, '③ 用到该值但缺规则：保存被拒');
-  assertThrows(() => main.validateTemplateConfiguration({
-    template, mappings: mappingsFor(), enumValues: ENUM_VALUES, featureFilter: { ...RULE_INPUT, sourceField: '备注' }
-  }), /筛选字段不存在：备注/, '③ 筛选字段不在模板表头：保存被拒');
-  ['Currency', 'MerchantId', 'Balance'].forEach((field) => {
-    assertThrows(() => main.validateTemplateConfiguration({
-      template, mappings: mappingsFor({ [field]: FEATURE }), enumValues: ENUM_VALUES, featureFilter: RULE_INPUT
-    }), new RegExp(`${field} 不支持使用`), `③ ${field} 选该值被拒`);
-  });
-  const unused = main.validateTemplateConfiguration({
-    template, mappings: mappingsFor({ Remark: '附言', Reference: '' }), enumValues: ENUM_VALUES, featureFilter: { sourceField: '附言' }
-  });
-  assertEq(unused.featureFilter, null, '③ 未使用时无效规则不写入');
+// ③ 【特征值管理】保存载荷：改名、校验、删除守卫
+function verifyFeatureFilterManagement(dir, { database, main, template }) {
+  const current = database.getTemplate(template.id).featureFilters;
+  const renamed = saveFeatureFilters(main, database, template.id, current.map((item) => (item.id === '2' ? { ...item, name: '订单编号' } : item)));
+  assertEq(renamed.map((item) => [item.id, item.name]), [['1', '流水号'], ['2', '订单编号']], '③ 改名不变 id');
+  const sourcePath = path.join(dir, 'source-a2.xlsx');
+  writeSource(sourcePath, [['2026-11-05', 'FT24123456 无订单', 'USD', '1', '', 'ACC1']]);
+  const rows = generate(main, database, template.id, sourcePath);
+  assertEq(rows.issues.filter((issue) => issue.type === 'feature-value-unmatched')[0].misses.map((miss) => miss.featureName), ['订单编号'],
+    '③ 改名后映射沿用、提示用新名');
 
-  const bare = database.upsertTemplate({ name: 'BANKB-缺规则', sourceFileName: 'b.xlsx', headers: HEADERS });
-  database.saveMappings(bare.id, mappingsFor().map((m) => ({ templateField: m.templateField, mappedField: m.mappedField, mappedFields: [] })), [], [], undefined, null, {});
-  const sourcePath = path.join(dir, 'source-b.xlsx');
-  writeSource(sourcePath, [['2026-11-01', 'FT24123456', 'USD', '1', '', 'ACC1']]);
-  assertThrows(() => generate(main, database, bare.id, sourcePath), /尚未设置筛选条件/, '③ 直接写库缺规则：生成被拒');
+  const latest = () => database.getTemplate(template.id);
+  assertThrows(() => main.validateFeatureFiltersPayload(renamed.concat([{ name: '流水号', ...SERIAL_RULE }]), latest()),
+    /特征值名「流水号」已存在/, '③ 名称重复被拒');
+  assertThrows(() => main.validateFeatureFiltersPayload(renamed.concat([{ name: ' ', ...SERIAL_RULE }]), latest()),
+    /请输入特征值名/, '③ 名称为空被拒');
+  assertThrows(() => main.validateFeatureFiltersPayload(renamed.concat([{ id: '99', name: '幽灵', ...SERIAL_RULE }]), latest()),
+    /特征值「幽灵」不存在或已被删除/, '③ 未知 id 被拒');
+  assertThrows(() => main.validateFeatureFiltersPayload(renamed.concat([{ name: '坏', ...SERIAL_RULE, sourceField: '备注' }]), latest()),
+    /特征值「坏」：筛选字段不存在：备注/, '③ 筛选字段不在表头被拒');
 
-  assertThrows(() => main.validateBillSplitMappingsPayload([{ templateField: 'Balance', mappedField: FEATURE }], template),
-    /Balance 不支持使用/, '③ 拆分映射 Balance 选该值被拒');
-  assertEq(
-    main.validateBillSplitMappingsPayload([{ templateField: 'Remark', mappedField: FEATURE, mappedFields: ['附言'] }], template)
-      .map((m) => [m.templateField, m.mappedField, m.mappedFields]),
-    [['Remark', FEATURE, []]],
-    '③ 拆分映射该值不带源字段、不报字段不存在'
-  );
+  assertThrows(() => main.validateFeatureFiltersPayload(renamed.filter((item) => item.id !== '1'), latest()),
+    /特征值「流水号」正被 Remark 使用，请先改选其他特征值后再删除/, '③ 已保存主映射在用：拒绝删除');
+  database.saveBillSplitMappings(template.id, [{ templateField: 'Remark', mappedField: FEATURE, mappedFields: ['2'] }]);
+  assertThrows(() => main.validateFeatureFiltersPayload(renamed.filter((item) => item.id !== '2'), latest()),
+    /特征值「订单编号」正被 Reference、Remark（拆分\/合并映射） 使用/, '③ 主映射与拆分映射在用：拒绝删除并列出字段');
+  assertEq(latest().featureFilters.length, 2, '③ 拒绝删除时库中不变');
+
+  const added = saveFeatureFilters(main, database, template.id, renamed.concat([{ name: '临时', ...SERIAL_RULE, length: '6', letterPrefixCount: '', sample: '' }]));
+  assertEq(added.map((item) => item.id), ['1', '2', '3'], '③ 新增特征值 id 递增');
+  const afterDelete = saveFeatureFilters(main, database, template.id, added.filter((item) => item.id !== '3'));
+  assertEq(afterDelete.map((item) => item.id), ['1', '2'], '③ 未被使用的特征值可删除');
+  const readded = saveFeatureFilters(main, database, template.id, afterDelete.concat([{ name: '再加', ...SERIAL_RULE }]));
+  assertEq(readded.map((item) => item.id), ['1', '2', '3'], '③ 删除后再新增按当前最大 id 递增');
+  saveFeatureFilters(main, database, template.id, readded.filter((item) => item.id !== '3'));
+  database.saveBillSplitMappings(template.id, []);
 }
 
-// ④ 模板包导出 → 读包 → 导入新库；覆盖表头重建时规则清空
+// ④ 映射保存与生成的拒绝
+function verifyRejections(dir, { database, main, template }) {
+  const featureFilters = database.getTemplate(template.id).featureFilters;
+  const validate = (mappings, extra = {}) => main.validateTemplateConfiguration({
+    template, mappings, enumValues: ENUM_VALUES, featureFilters, ...extra
+  });
+  assertThrows(() => validate(mappingsFor({ Reference: { feature: '' } })), /Reference 选择了「字段筛选特征值」，请选择特征值/, '④ 未选特征值：保存被拒');
+  assertThrows(() => validate(mappingsFor({ Reference: { feature: '9' } })), /Reference 选择的特征值不存在，请重新选择/, '④ 所选特征值不存在：保存被拒');
+  ['Currency', 'MerchantId', 'Balance'].forEach((field) => {
+    assertThrows(() => validate(mappingsFor({ [field]: { feature: '1' } })), new RegExp(`${field} 不支持使用`), `④ ${field} 选该值被拒`);
+  });
+  assertEq(featureRefs(validate(mappingsFor({ Remark: '附言', Reference: '' })).mappings), [], '④ 未使用时无需特征值');
+
+  const stale = database.upsertTemplate({ name: 'BANKB-引用缺失', sourceFileName: 'b.xlsx', headers: HEADERS });
+  database.saveMappings(stale.id, mappingsFor({ Reference: { feature: '7' } }), [], [], undefined, null, {});
+  const sourcePath = path.join(dir, 'source-b.xlsx');
+  writeSource(sourcePath, [['2026-11-01', 'FT24123456', 'USD', '1', '', 'ACC1']]);
+  assertThrows(() => generate(main, database, stale.id, sourcePath), /Remark 选择的特征值不存在/, '④ 直接写库引用缺失：生成被拒');
+
+  assertThrows(() => main.validateBillSplitMappingsPayload([{ templateField: 'Balance', mappedField: FEATURE }], template),
+    /Balance 不支持使用/, '④ 拆分映射 Balance 选该值被拒');
+  const splitValidated = main.validateBillSplitMappingsPayload([
+    { templateField: 'Remark', mappedField: FEATURE, mappedFields: ['1', '附言'] },
+    { templateField: 'Reference', mappedField: FEATURE, mappedFields: [] }
+  ], template);
+  assertEq(featureRefs(splitValidated), [['Remark', ['1']], ['Reference', []]], '④ 拆分映射只保留所选特征值 id、不报字段不存在');
+  assertThrows(() => resolveUsedFeatureFilters(featureFilters, main.collectFeatureFilterRefs(splitValidated), { headers: HEADERS }),
+    /Reference 选择了「字段筛选特征值」，请选择特征值/, '④ 拆分映射保存：未选特征值被拒');
+}
+
+// ⑤ 模板包导出 → 读包 → 导入新库；v6 旧包升级；覆盖表头重建时特征值清空
 function verifyBundleRoundTrip(dir, { database, main, template }) {
   const entry = database.listTemplateBundleEntries().find((item) => item.name === template.name);
-  assertEq(entry.featureFilter && entry.featureFilter.sourceField, '附言', '④ 导出条目带规则');
+  assertEq(entry.featureFilters.map((item) => [item.id, item.name]), [['1', '流水号'], ['2', '订单编号']], '⑤ 导出条目带特征值');
+  assertEq(featureRefs(entry.mappings), [['Remark', ['1']], ['Reference', ['2']]], '⑤ 导出条目映射带所选特征值');
   const plainEntry = { mappings: [{ templateField: 'Remark', mappedField: '附言' }], billSplitMappings: [] };
-  const splitOnlyEntry = { mappings: plainEntry.mappings, billSplitMappings: [{ templateField: 'Reference', mappedField: FEATURE }] };
+  const splitOnlyEntry = { mappings: plainEntry.mappings, billSplitMappings: [{ templateField: 'Reference', mappedField: FEATURE, mappedFields: ['1'] }] };
   assertEq(
     [main.resolveTemplateBundleVersion([plainEntry]), main.resolveTemplateBundleVersion([entry]), main.resolveTemplateBundleVersion([plainEntry, splitOnlyEntry])],
-    [5, 6, 6],
-    '④ 用到该值（含只在拆分映射中用到）时包写 v6，未用到时写 v5'
+    [5, 7, 7],
+    '⑤ 用到该值（含只在拆分映射中用到）时包写 v7，未用到时写 v5'
   );
   const bundlePath = path.join(dir, 'bundle.json');
   fs.writeFileSync(bundlePath, JSON.stringify({ bundleVersion: main.resolveTemplateBundleVersion([entry]), channels: [], templates: [entry] }), 'utf8');
   const readEntry = main.readTemplateBundleFile(bundlePath).templates[0];
-  assertEq(readEntry.featureFilter, entry.featureFilter, '④ 读包保留规则');
-  const legacyReader = createMain(database, { SUPPORTED_BUNDLE_VERSION: 5 });
-  assertThrows(() => legacyReader.readTemplateBundleFile(bundlePath), /模板文件版本（6）高于当前应用支持的版本（5）/, '④ 旧版（支持到 v5）读 v6 包整包拒绝');
+  assertEq(readEntry.featureFilters, entry.featureFilters, '⑤ 读包保留特征值');
+  const legacyReader = createMain(database, { SUPPORTED_BUNDLE_VERSION: 6 });
+  assertThrows(() => legacyReader.readTemplateBundleFile(bundlePath), /模板文件版本（7）高于当前应用支持的版本（6）/, '⑤ 旧版（支持到 v6）读 v7 包整包拒绝');
 
   const target = openDatabase(path.join(dir, 'import.sqlite'));
   const targetMain = createMain(target);
-  const draftTemplate = { id: null, templateKey: readEntry.templateKey, name: readEntry.name, sourceFileName: readEntry.sourceFileName, headers: readEntry.headers, createdAt: '', updatedAt: '' };
-  const validated = targetMain.validateTemplateConfiguration({
-    template: draftTemplate,
-    mappings: targetMain.normalizeMappingRows({ template: draftTemplate, mappings: readEntry.mappings, enumValues: ENUM_VALUES }),
-    enumValues: ENUM_VALUES,
-    featureFilter: readEntry.featureFilter
-  });
-  const imported = target.upsertTemplate({ templateKey: readEntry.templateKey, name: readEntry.name, sourceFileName: readEntry.sourceFileName, headers: readEntry.headers });
-  target.saveMappings(imported.id, validated.mappings, [], [], readEntry.dateFormat, [], { preserveOwn: false, featureFilter: validated.featureFilter });
-  assertEq(target.getTemplate(imported.id).featureFilter, database.getTemplate(template.id).featureFilter, '④ 导入后规则一致');
-  assertEq(
-    target.getTemplateMappings(imported.id).mappings.filter((m) => m.mappedField === FEATURE).map((m) => m.templateField),
-    ['Remark', 'Reference'],
-    '④ 导入后映射一致'
-  );
+  const importEntry = (readTarget) => {
+    const draftTemplate = { id: null, templateKey: readTarget.templateKey, name: readTarget.name, sourceFileName: readTarget.sourceFileName, headers: readTarget.headers, createdAt: '', updatedAt: '' };
+    const bundleFeatureFilters = normalizeFeatureFilterList(readTarget.featureFilters || [], { headers: draftTemplate.headers });
+    const validated = targetMain.validateTemplateConfiguration({
+      template: draftTemplate,
+      mappings: targetMain.normalizeMappingRows({ template: draftTemplate, mappings: readTarget.mappings, enumValues: ENUM_VALUES }),
+      enumValues: ENUM_VALUES,
+      featureFilters: bundleFeatureFilters,
+      billSplitMappings: readTarget.billSplitMappings
+    });
+    const imported = target.upsertTemplate({ templateKey: readTarget.templateKey, name: readTarget.name, sourceFileName: readTarget.sourceFileName, headers: readTarget.headers });
+    target.saveMappings(imported.id, validated.mappings, [], [], readTarget.dateFormat, [], { preserveOwn: false, featureFilters: bundleFeatureFilters });
+    return imported;
+  };
+  const imported = importEntry(readEntry);
+  assertEq(target.getTemplate(imported.id).featureFilters, database.getTemplate(template.id).featureFilters, '⑤ 导入后特征值一致（含 id）');
+  assertEq(featureRefs(target.getTemplateMappings(imported.id).mappings), [['Remark', ['1']], ['Reference', ['2']]], '⑤ 导入后各字段选择一致');
+
+  // 映射都没选用特征值的模板仍写 v5，但须带上全部特征值（spec §3.5）
+  const unusedEntry = {
+    ...entry,
+    templateKey: 'unused-template',
+    name: 'BANKU-未选用',
+    mappings: entry.mappings.map((m) => (m.mappedField === FEATURE ? { ...m, mappedField: '附言', mappedFields: [] } : m)),
+    billSplitMappings: []
+  };
+  const unusedPath = path.join(dir, 'bundle-unused.json');
+  fs.writeFileSync(unusedPath, JSON.stringify({ bundleVersion: main.resolveTemplateBundleVersion([unusedEntry]), channels: [], templates: [unusedEntry] }), 'utf8');
+  assertEq(JSON.parse(fs.readFileSync(unusedPath, 'utf8')).bundleVersion, 5, '⑤ 未选用特征值的包仍写 v5');
+  const unusedRead = main.readTemplateBundleFile(unusedPath).templates[0];
+  assertEq(unusedRead.featureFilters, entry.featureFilters, '⑤ v5 包读回未选用的特征值');
+  const importedUnused = importEntry(unusedRead);
+  assertEq(target.getTemplate(importedUnused.id).featureFilters, database.getTemplate(template.id).featureFilters, '⑤ 导入 v5 包保留未选用的特征值');
+
+  // v3.2.16/3.2.17 导出的 v6 包：单套 featureFilter，映射行不带 id
+  const v6Path = path.join(dir, 'bundle-v6.json');
+  fs.writeFileSync(v6Path, JSON.stringify({
+    bundleVersion: 6,
+    channels: [],
+    templates: [{
+      ...entry,
+      templateKey: 'v6-template',
+      name: 'BANKV6-旧包',
+      featureFilters: undefined,
+      featureFilter: NORMALIZED_SERIAL,
+      mappings: entry.mappings.map((m) => (m.mappedField === FEATURE ? { ...m, mappedFields: [] } : m)),
+      billSplitMappings: [{ templateField: 'Remark', mappedField: FEATURE, mappedFields: [] }]
+    }]
+  }), 'utf8');
+  const v6Entry = main.readTemplateBundleFile(v6Path).templates[0];
+  assertEq(v6Entry.featureFilters, [{ id: '1', name: '特征值1', ...NORMALIZED_SERIAL }], '⑤ v6 包：单套规则升级为「特征值1」');
+  assertEq([featureRefs(v6Entry.mappings), featureRefs(v6Entry.billSplitMappings)],
+    [[['Remark', ['1']], ['Reference', ['1']]], [['Remark', ['1']]]], '⑤ v6 包：主映射与拆分映射补上引用');
+  const importedV6 = importEntry(v6Entry);
+  const v6Source = path.join(dir, 'source-v6.xlsx');
+  writeSource(v6Source, [['2026-11-01', 'FT24123456 INV123456', 'USD', '9', '', 'ACC1']]);
+  assertEq(pickColumns(generate(targetMain, target, importedV6.id, v6Source), ['Remark', 'Reference']), [['FT24123456', 'FT24123456']],
+    '⑤ v6 包导入后两字段仍取同一个值');
 
   target.upsertTemplate({ templateKey: readEntry.templateKey, name: readEntry.name, sourceFileName: 'new.xlsx', headers: ['日期', '摘要'] });
-  assertEq(target.getTemplate(imported.id).featureFilter, null, '④ 覆盖表头重建模板：规则清空');
-  assertEq(target.getTemplateMappings(imported.id).mappings.length, 0, '④ 覆盖表头重建模板：映射清空');
+  assertEq(target.getTemplate(imported.id).featureFilters, [], '⑤ 覆盖表头重建模板：特征值清空');
+  assertEq(target.getTemplateMappings(imported.id).mappings.length, 0, '⑤ 覆盖表头重建模板：映射清空');
 }
 
-// ⑤ 拆分/合并「不复用」：只有拆分映射用该值
+// ⑥ 拆分/合并「不复用」：拆分映射所选特征值生效
 function verifyBillSplitNotReuse(dir, { database, main }) {
   const template = database.upsertTemplate({ name: 'BANKC-拆分', sourceFileName: 'c.xlsx', headers: HEADERS });
+  saveFeatureFilters(main, database, template.id, [{ name: '编号', sourceField: '附言', separator: 'slash', digitsOnly: true, length: '6' }]);
+  const splitMainOverrides = {
+    Currency: '',
+    'Credit Amount': '',
+    'Debit Amount': '',
+    Remark: '附言',
+    Reference: '',
+    [CONSTANTS.BILL_SPLIT_MERGE_MAPPING_FIELD]: CONSTANTS.BILL_SPLIT_MERGE_ENABLED_OPTION,
+    [CONSTANTS.REUSE_MODULE_MAPPING_FIELD]: '否'
+  };
+  const featureFilters = () => database.getTemplate(template.id).featureFilters;
   const validated = main.validateTemplateConfiguration({
-    template,
-    mappings: mappingsFor({
-      Currency: '',
-      'Credit Amount': '',
-      'Debit Amount': '',
-      Remark: '附言',
-      Reference: '',
-      [CONSTANTS.BILL_SPLIT_MERGE_MAPPING_FIELD]: CONSTANTS.BILL_SPLIT_MERGE_ENABLED_OPTION,
-      [CONSTANTS.REUSE_MODULE_MAPPING_FIELD]: '否'
-    }),
-    enumValues: ENUM_VALUES,
-    featureFilter: null
+    template, mappings: mappingsFor(splitMainOverrides), enumValues: ENUM_VALUES, featureFilters: featureFilters()
   });
-  database.saveMappings(template.id, validated.mappings, [], [], undefined, null, { featureFilter: validated.featureFilter });
-  assertEq(database.getTemplate(template.id).featureFilter, null, '⑤ 主映射未用该值：不写规则');
+  database.saveMappings(template.id, validated.mappings, [], [], undefined, null, {});
 
   const billSplitMappings = main.validateBillSplitMappingsPayload([
     { templateField: 'BillDate', mappedField: '交易日期', mappedFields: [] },
     { templateField: 'MerchantId', mappedField: '账号', mappedFields: [] },
-    { templateField: 'Reference', mappedField: FEATURE, mappedFields: [] }
+    { templateField: 'Reference', mappedField: FEATURE, mappedFields: ['1'] }
   ], template);
-  const rule = normalizeFeatureFilterRule({ sourceField: '附言', separator: 'slash', digitsOnly: true, length: 6 }, { headers: template.headers });
-  database.saveBillSplitMappings(template.id, billSplitMappings, { featureFilter: rule });
-  assertEq(database.getTemplate(template.id).featureFilter, rule, '⑤ 规则随拆分映射写入');
+  resolveUsedFeatureFilters(featureFilters(), main.collectFeatureFilterRefs(billSplitMappings), { headers: HEADERS });
+  database.saveBillSplitMappings(template.id, billSplitMappings);
+  assertEq(featureRefs(database.getBillSplitMappings(template.id)), [['Reference', ['1']]], '⑥ 拆分映射保存所选特征值');
 
   database.saveBillSplitRowCount(template.id, 1);
   database.saveBillSplitRow(template.id, { seqNo: 1, currencySourceField: '币种', creditSourceField: '收入', debitSourceField: '支出', amountSourceField: '', rowStatus: 'completed' });
@@ -414,53 +546,40 @@ function verifyBillSplitNotReuse(dir, { database, main }) {
   assertEq(pickColumns(detailRows, ['Reference', 'Remark', 'Credit Amount', 'Debit Amount']), [
     ['123456', '', '10', ''],
     ['', '', '', '5']
-  ], '⑤ 不复用时展开行按拆分映射取特征值');
+  ], '⑥ 不复用时展开行按拆分映射所选特征值取值');
   assertEq(
-    detailRows.issues.filter((issue) => issue.type === 'feature-value-unmatched').map((issue) => issue.rowNumber),
-    [3],
-    '⑤ 拆分路径未命中行记提示'
+    detailRows.issues.filter((issue) => issue.type === 'feature-value-unmatched').map((issue) => [issue.rowNumber, issue.misses[0].featureName]),
+    [[3, '编号']],
+    '⑥ 拆分路径未命中行记提示'
   );
 
-  const splitMainMappings = mappingsFor({
-    Currency: '',
-    'Credit Amount': '',
-    'Debit Amount': '',
-    Remark: '附言',
-    Reference: '',
-    [CONSTANTS.BILL_SPLIT_MERGE_MAPPING_FIELD]: CONSTANTS.BILL_SPLIT_MERGE_ENABLED_OPTION,
-    [CONSTANTS.REUSE_MODULE_MAPPING_FIELD]: '否'
-  });
-  const storedBillSplit = database.getBillSplitMappings(template.id);
+  const staleSplit = [{ templateField: 'Reference', mappedField: FEATURE, mappedFields: ['5'] }];
   assertThrows(() => main.validateTemplateConfiguration({
-    template, mappings: splitMainMappings, enumValues: ENUM_VALUES, featureFilter: null, billSplitMappings: storedBillSplit
-  }), /拆分\/合并账单映射关系设置中有字段使用了"字段筛选特征值"/, '⑤ 不复用的拆分映射用到该值而缺规则：保存主映射被拒');
-  assertThrows(() => main.validateTemplateConfiguration({
-    template, mappings: splitMainMappings, enumValues: ENUM_VALUES, featureFilter: { sourceField: '附言' }, billSplitMappings: storedBillSplit
-  }), /至少设置一项/, '⑤ 不复用的拆分映射用到该值而规则无效：保存主映射被拒');
+    template, mappings: mappingsFor(splitMainOverrides), enumValues: ENUM_VALUES, featureFilters: featureFilters(), billSplitMappings: staleSplit
+  }), /拆分\/合并账单映射关系设置中的 Reference 选择的特征值不存在/, '⑥ 不复用的拆分映射引用缺失：保存主映射被拒');
   assertEq(
-    main.validateTemplateConfiguration({
-      template, mappings: splitMainMappings, enumValues: ENUM_VALUES, featureFilter: rule, billSplitMappings: storedBillSplit
-    }).featureFilter,
-    rule,
-    '⑤ 规则有效时保存主映射通过并带回规则'
-  );
-  assertEq(
-    main.validateTemplateConfiguration({
+    featureRefs(main.validateTemplateConfiguration({
       template,
-      mappings: mappingsFor({ ...Object.fromEntries(splitMainMappings.map((m) => [m.templateField, m.mappedField])), [CONSTANTS.REUSE_MODULE_MAPPING_FIELD]: '是' }),
+      mappings: mappingsFor({ ...splitMainOverrides, [CONSTANTS.REUSE_MODULE_MAPPING_FIELD]: '是' }),
       enumValues: ENUM_VALUES,
-      featureFilter: null,
-      billSplitMappings: storedBillSplit
-    }).featureFilter,
-    null,
-    '⑤ 复用模块映射时拆分映射不生效，不要求规则'
+      featureFilters: featureFilters(),
+      billSplitMappings: staleSplit
+    }).mappings),
+    [],
+    '⑥ 复用模块映射时拆分映射不生效，不校验其特征值'
   );
 
-  // 主映射残留该值、拆分映射（不复用）未用：不要求规则、不记未命中
+  // 主映射残留该值（未选特征值）、拆分映射（不复用）未用：可保存、不记未命中
   const residual = database.upsertTemplate({ name: 'BANKD-残留', sourceFileName: 'd.xlsx', headers: HEADERS });
-  database.saveMappings(residual.id, splitMainMappings.map((m) => (
-    m.templateField === 'Remark' ? { ...m, mappedField: FEATURE } : m
-  )).map((m) => ({ templateField: m.templateField, mappedField: m.mappedField, mappedFields: [] })), [], [], undefined, null, {});
+  const residualMappings = mappingsFor({ ...splitMainOverrides, Remark: { feature: '' } });
+  assertEq(
+    featureRefs(main.validateTemplateConfiguration({
+      template: residual, mappings: residualMappings, enumValues: ENUM_VALUES, featureFilters: [], billSplitMappings: []
+    }).mappings),
+    [['Remark', []]],
+    '⑥ 主映射残留该值但不生效：未选特征值也可保存（与生成口径一致）'
+  );
+  database.saveMappings(residual.id, residualMappings, [], [], undefined, null, {});
   database.saveBillSplitMappings(residual.id, [
     { templateField: 'BillDate', mappedField: '交易日期', mappedFields: [] },
     { templateField: 'MerchantId', mappedField: '账号', mappedFields: [] },
@@ -468,53 +587,37 @@ function verifyBillSplitNotReuse(dir, { database, main }) {
   ]);
   database.saveBillSplitRowCount(residual.id, 1);
   database.saveBillSplitRow(residual.id, { seqNo: 1, currencySourceField: '币种', creditSourceField: '收入', debitSourceField: '支出', amountSourceField: '', rowStatus: 'completed' });
-  assertEq(
-    main.validateTemplateConfiguration({
-      template: residual,
-      mappings: database.getTemplateMappings(residual.id).mappings,
-      enumValues: ENUM_VALUES,
-      featureFilter: null,
-      billSplitMappings: database.getBillSplitMappings(residual.id)
-    }).featureFilter,
-    null,
-    '⑤ 主映射残留该值但不生效：缺规则也可保存（与生成口径一致）'
-  );
-  assertEq(
-    [
-      main.resolveSavedFeatureFilter({ used: false, featureFilter: { ...RULE_INPUT, length: '6', letterPrefixCount: '', sample: '' }, headers: HEADERS }),
-      main.resolveSavedFeatureFilter({ used: false, featureFilter: { sourceField: '附言' }, headers: HEADERS })
-    ],
-    [{ sourceField: '附言', separator: 'space', length: 6, letterPrefixCount: null, digitsOnly: true, sample: '' }, null],
-    '⑤ 未用到时有效草稿照存、无效草稿不写（拆分映射保存同口径）'
-  );
-  assertThrows(() => main.resolveSavedFeatureFilter({ used: true, featureFilter: { sourceField: '附言' }, headers: HEADERS }),
-    /至少设置一项/, '⑤ 用到时无效规则被拒');
   const residualRows = generate(main, database, residual.id, sourcePath);
-  assertEq(pickColumns(residualRows, ['Remark']), [['INV/123456/备注'], ['INV/12345']], '⑤ 不复用时按拆分映射直接取列');
-  assertEq(residualRows.issues.filter((issue) => issue.type === 'feature-value-unmatched').length, 0, '⑤ 主映射残留该值不记未命中提示');
+  assertEq(pickColumns(residualRows, ['Remark']), [['INV/123456/备注'], ['INV/12345']], '⑥ 不复用时按拆分映射直接取列');
+  assertEq(residualRows.issues.filter((issue) => issue.type === 'feature-value-unmatched').length, 0, '⑥ 主映射残留该值不记未命中提示');
 }
 
-// ⑥ BillDate 取该值且源列含合计标签：按合计行跳过，不导出合计金额
+// ⑦ BillDate 取该值且所选特征值源列含合计标签：按合计行跳过，不导出合计金额
 function verifySummaryRowWithFeatureBillDate(dir, { database, main }) {
   const template = database.upsertTemplate({ name: 'BANKE-合计', sourceFileName: 'e.xlsx', headers: HEADERS });
+  saveFeatureFilters(main, database, template.id, [
+    { name: '账号尾号', sourceField: '账号', separator: '', digitsOnly: true },
+    { name: '日期', sourceField: '附言', separator: 'space', length: '10' }
+  ]);
   const validated = main.validateTemplateConfiguration({
     template,
-    mappings: mappingsFor({ BillDate: FEATURE, Remark: '附言', Reference: '' }),
+    mappings: mappingsFor({ BillDate: { feature: '2' }, Remark: '附言', Reference: { feature: '1' } }),
     enumValues: ENUM_VALUES,
-    featureFilter: { sourceField: '附言', separator: 'space', length: '10' }
+    featureFilters: database.getTemplate(template.id).featureFilters
   });
-  database.saveMappings(template.id, validated.mappings, [], [], undefined, null, { featureFilter: validated.featureFilter });
+  database.saveMappings(template.id, validated.mappings, [], [], undefined, null, {});
   const sourcePath = path.join(dir, 'source-e.xlsx');
   writeSource(sourcePath, [
-    ['', '转账 2026-11-01', 'USD', '100', '', 'ACC1'],
-    ['', '合计', 'USD', '100', '', 'ACC1']
+    ['', '转账 2026-11-01', 'USD', '100', '', '6222'],
+    ['', '合计', 'USD', '100', '', '6222']
   ]);
   const detailRows = generate(main, database, template.id, sourcePath);
-  assertEq(pickColumns(detailRows, ['BillDate', 'Credit Amount', 'Remark']), [['2026-11-01', '100', '转账 2026-11-01']], '⑥ 合计行不作为交易导出');
+  assertEq(pickColumns(detailRows, ['BillDate', 'Credit Amount', 'Remark', 'Reference']), [['2026-11-01', '100', '转账 2026-11-01', '6222']],
+    '⑦ 合计行不作为交易导出（按 BillDate 所选特征值的源列识别）');
   assertEq(
     detailRows.issues.map((issue) => [issue.type, issue.rowNumber, issue.rawValue]),
     [['summary-row-skipped', 3, '合计']],
-    '⑥ 记为跳过的合计行，不记未命中'
+    '⑦ 记为跳过的合计行，不记未命中'
   );
 }
 
@@ -523,6 +626,7 @@ async function run() {
   try {
     verifyMigration(dir);
     const context = verifySaveAndGenerate(dir);
+    verifyFeatureFilterManagement(dir, context);
     verifyRejections(dir, context);
     verifyBundleRoundTrip(dir, context);
     verifyBillSplitNotReuse(dir, context);

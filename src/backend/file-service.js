@@ -1,5 +1,5 @@
 const {
-  FEATURE_FILTER_FIELD_TOKEN,
+  FEATURE_FILTER_FIELD_TOKEN_PREFIX,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
@@ -8,8 +8,16 @@ const {
   normalizeCell
 } = require('./file-service/common');
 const {
+  LEGACY_FEATURE_FILTER_ID,
+  buildFeatureFilterToken,
+  collectFeatureFilterIds,
   extractFeatureValue,
-  normalizeFeatureFilterRule
+  getFeatureFilterRef,
+  normalizeFeatureFilterList,
+  normalizeFeatureFilterRule,
+  parseFeatureFilterToken,
+  resolveUsedFeatureFilters,
+  upgradeLegacyFeatureFilter
 } = require('./file-service/feature-filter');
 const {
   ensureSupportedFile,
@@ -153,7 +161,8 @@ function buildMappedRows({
   amountMappingRules = {},
   amountSplitByField = null,
   billSplitMerge = null,
-  featureFilter = null,
+  // v3.2.18：实际生效映射用到的特征值 { [id]: { id, name, ...rule } }（main.js resolveStatementFeatureFilters）
+  featureFilters = null,
   expectedSourceHeaders = [],
   selectedBigAccount = null,
   dateParseOrder = 'auto',
@@ -231,19 +240,26 @@ function buildMappedRows({
   });
 
   // v3.2.16：字段筛选特征值——实际生效的映射（拆分且不复用时为拆分映射，否则为主映射）用到 token 时启用；
-  // 每行只计算一次，所有使用该映射值的目标字段共用同一个结果，再各自走后续规范化（日期、金额等）。
+  // v3.2.18：每个用到的特征值每行只计算一次，选同一特征值的目标字段共用同一个结果，再各自走后续规范化（日期、金额等）。
   // 不复用时主映射里残留的该值不输出，不启用、也不记未命中提示。
   const featureFilterEffectiveLookup = billSplitEnabled && !billSplitReuseModuleMapping
     ? billSplitMappingByField
     : mappingByField;
-  const featureFilterActive = Object.values(featureFilterEffectiveLookup || {})
-    .some((value) => value === FEATURE_FILTER_FIELD_TOKEN);
-  const featureFilterRule = featureFilterActive ? normalizeFeatureFilterRule(featureFilter) : null;
-  const featureFilterSourceIndex = featureFilterRule ? sourceIndexByField.get(featureFilterRule.sourceField) : undefined;
-  if (featureFilterRule && featureFilterSourceIndex === undefined) {
-    throw new FileValidationError('FILE_READ', `映射字段不存在：${featureFilterRule.sourceField}`);
-  }
-  let currentRowFeatureValue = '';
+  const activeFeatureFilters = collectFeatureFilterIds(featureFilterEffectiveLookup).map((id) => {
+    const rawRule = featureFilters && Object.prototype.hasOwnProperty.call(featureFilters, id) ? featureFilters[id] : null;
+    if (!rawRule) {
+      throw new FileValidationError('FILE_READ', '特征值：映射选择的特征值不存在，请在映射关系管理中重新选择');
+    }
+    const name = normalizeCell(rawRule.name);
+    const rule = normalizeFeatureFilterRule(rawRule, { name });
+    const sourceIndex = sourceIndexByField.get(rule.sourceField);
+    if (sourceIndex === undefined) {
+      throw new FileValidationError('FILE_READ', `映射字段不存在：${rule.sourceField}`);
+    }
+    return { id, name, rule, sourceIndex };
+  });
+  const activeFeatureFilterById = new Map(activeFeatureFilters.map((item) => [item.id, item]));
+  let currentRowFeatureValues = new Map();
 
   if (amountSplitEnabled) {
     amountSplitRules.forEach((rule) => {
@@ -308,8 +324,9 @@ function buildMappedRows({
         return token.slice(FIXED_FIELD_VALUE_PREFIX.length);
       }
 
-      if (token === FEATURE_FILTER_FIELD_TOKEN) {
-        return currentRowFeatureValue;
+      const featureFilterId = parseFeatureFilterToken(token);
+      if (featureFilterId !== null) {
+        return currentRowFeatureValues.get(featureFilterId) ?? '';
       }
 
       const sourceIndex = sourceIndexByField.get(token);
@@ -617,9 +634,9 @@ function buildMappedRows({
   }
 
   rows.slice(1).forEach((row, rowIndex) => {
-    currentRowFeatureValue = featureFilterRule
-      ? extractFeatureValue(row[featureFilterSourceIndex], featureFilterRule)
-      : '';
+    currentRowFeatureValues = new Map(activeFeatureFilters.map((item) => (
+      [item.id, extractFeatureValue(row[item.sourceIndex], item.rule)]
+    )));
     const directCreditAmountRaw = resolveRawValueByMapping(mappingByField['Credit Amount'], row);
     const directDebitAmountRaw = resolveRawValueByMapping(mappingByField['Debit Amount'], row);
     const signedAmountValue = signedAmountSourceField
@@ -697,9 +714,12 @@ function buildMappedRows({
     const rawEffectiveBillDate = resolveDateRawValueByMapping(effectiveBillDateMapping, row);
     // v3.2.16：BillDate 取「字段筛选特征值」时，合计标签会被筛成空串；改按筛选源单元格原文识别合计行，
     // 否则合计金额会作为普通交易再导出一次。
-    const featureFilterBillDateSource = featureFilterRule
-      && normalizeMappingTokens(effectiveBillDateMapping).includes(FEATURE_FILTER_FIELD_TOKEN)
-      ? normalizeCell(row[featureFilterSourceIndex])
+    // v3.2.18：取 BillDate 所选特征值的筛选源单元格。
+    const billDateFeatureFilter = normalizeMappingTokens(effectiveBillDateMapping)
+      .map((token) => activeFeatureFilterById.get(parseFeatureFilterToken(token)))
+      .find(Boolean);
+    const featureFilterBillDateSource = billDateFeatureFilter
+      ? normalizeCell(row[billDateFeatureFilter.sourceIndex])
       : '';
     const summaryDateLabel = isStatementSummaryDateLabel(rawEffectiveBillDate)
       ? normalizeCell(rawEffectiveBillDate)
@@ -861,14 +881,20 @@ function buildMappedRows({
 
     const issueCountBeforeRow = issues.length;
     // v3.2.16：只为会进入明细的行（有收入或支出）记录未筛出特征值；收支均为空的行另有过滤提示。
+    // v3.2.18：每行一条，misses 列出该行未筛出的各特征值。
     const recordFeatureValueMiss = (hasAmount) => {
-      if (featureFilterRule && currentRowFeatureValue === '' && hasAmount) {
-        issues.push({
-          type: 'feature-value-unmatched',
-          rowNumber: sourceRowNumber,
-          sourceField: featureFilterRule.sourceField,
-          rawValue: normalizeCell(row[featureFilterSourceIndex])
-        });
+      if (!hasAmount) {
+        return;
+      }
+      const misses = activeFeatureFilters
+        .filter((item) => currentRowFeatureValues.get(item.id) === '')
+        .map((item) => ({
+          featureName: item.name,
+          sourceField: item.rule.sourceField,
+          rawValue: normalizeCell(row[item.sourceIndex])
+        }));
+      if (misses.length) {
+        issues.push({ type: 'feature-value-unmatched', rowNumber: sourceRowNumber, misses });
       }
     };
     const mappedRow = computeMappedRow(mappingByField);
@@ -1111,7 +1137,7 @@ module.exports = {
   buildMappedRows,
   buildDetailExportRows,
   compileRegexLiteral,
-  FEATURE_FILTER_FIELD_TOKEN,
+  FEATURE_FILTER_FIELD_TOKEN_PREFIX,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
@@ -1128,7 +1154,14 @@ module.exports = {
   loadEnumValues,
   normalizeCell,
   normalizeDateExportValue,
+  buildFeatureFilterToken,
+  getFeatureFilterRef,
+  normalizeFeatureFilterList,
   normalizeFeatureFilterRule,
+  LEGACY_FEATURE_FILTER_ID,
+  parseFeatureFilterToken,
+  resolveUsedFeatureFilters,
+  upgradeLegacyFeatureFilter,
   parseDateValue,
   parseNumericValue,
   readRows,

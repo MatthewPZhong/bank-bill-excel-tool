@@ -1,7 +1,8 @@
 const SUPPORTED_EXTENSIONS = new Set(['.xlsx', '.xls', '.csv']);
 const FIXED_FIELD_VALUE_PREFIX = '__FIXED__:';
 // v3.2.16：映射值「字段筛选特征值」在生成 lookup 里的内部 token，避免与真实表头重名。
-const FEATURE_FILTER_FIELD_TOKEN = '__FEATURE_FILTER__';
+// v3.2.18：token 带所选特征值 id（`__FEATURE_FILTER__:<id>`），由 feature-filter.js 构造与解析。
+const FEATURE_FILTER_FIELD_TOKEN_PREFIX = '__FEATURE_FILTER__:';
 // v3.2.16：MerchantId「原始账单仅有币种无账户号」在模板映射中的存储值。
 // 刻意不带 __FIXED__: 前缀：带前缀的值会被当成「自己输入」或固定账号，漏改的路径会静默出错；
 // 不带前缀时漏改的路径会按“映射字段不存在”报错，buildMappedRows 另有拦截。
@@ -72,7 +73,7 @@ function buildExpectedHeaderCandidates(expectedHeaders) {
 }
 
 module.exports = {
-  FEATURE_FILTER_FIELD_TOKEN,
+  FEATURE_FILTER_FIELD_TOKEN_PREFIX,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,

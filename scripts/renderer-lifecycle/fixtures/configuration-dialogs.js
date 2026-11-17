@@ -25,6 +25,8 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
           saveMappings:payload=>cfg.invoke('mappingSave',[payload],{status:'success',message:'映射保存完成'}),
           importChild:id=>cfg.invoke('importChild',[id],{status:'success',message:'已导入子模板「渠道 A-子模板-1」'}),
           saveAmountSplitRules:payload=>cfg.invoke('amount',[payload],{status:'success'}),saveBillSplitMappings:payload=>cfg.invoke('splitMapping',[payload],{status:'success'}),
+          saveFeatureFilters:payload=>cfg.invoke('featureSave',[payload],(()=>{let max=0;payload.featureFilters.forEach(item=>{if(/^\\d+$/.test(item.id||''))max=Math.max(max,Number(item.id));});
+            return {status:'success',featureFilters:payload.featureFilters.map(item=>item.id?{...item}:{...item,id:String(++max)})};})()),
           saveBillSplitAmountRules:payload=>cfg.invoke('splitAmount',[payload],{status:'success'}),
           getMappings:id=>cfg.invoke('templateRead',[id],{status:'success',template:cfg.templates[0],targetFields:[],mappings:[]}),
           previewHeaderUpdate:id=>cfg.invoke('headerPreview',[id],{status:'cancelled'}),
@@ -1505,92 +1507,179 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(await js('cfg.store'),{rules:[],meta:originalRuleMeta});
   });
 
-  // v3.2.16「字段筛选特征值」
+  // v3.2.16「字段筛选特征值」；v3.2.18 多特征值：映射行「选择特征值」+【特征值管理】
   const FEATURE = '字段筛选特征值';
+  const SERIAL = { id: '1', name: '流水号', sourceField: '附言', separator: 'space', length: 10, letterPrefixCount: 2, digitsOnly: true, sample: 'FT24123456' };
+  const ORDER = { id: '2', name: '订单号', sourceField: '附言', separator: 'slash', length: 6, letterPrefixCount: null, digitsOnly: true, sample: '123456' };
   const FEATURE_SETUP_JS = `cfg.tpl={id:9,name:'模板 F',headers:['交易日期','附言','']};
     cfg.row=field=>cfg.top().querySelector('tr[data-template-field="'+field+'"]');
     cfg.pick=(field,value)=>{const select=cfg.row(field).querySelector('select');select.value=value;select.dispatchEvent(new Event('change'));};
+    cfg.fv=field=>cfg.row(field).querySelector('.mapping-feature-value-select');
+    cfg.fvLabel=field=>cfg.row(field).querySelector('.mapping-feature-value-label');
+    cfg.choose=(field,id)=>{const select=cfg.fv(field);select.value=id;select.dispatchEvent(new Event('change'));};
+    cfg.fvOptions=field=>Array.from(cfg.fv(field).options).map(option=>[option.value,option.textContent]);
     cfg.btn=field=>cfg.row(field).querySelector('.mapping-feature-filter-btn');
-    cfg.ff=()=>{const card=cfg.top().querySelector('.feature-filter-card');return card&&{source:card.querySelector('.feature-filter-source'),separator:card.querySelector('.feature-filter-separator'),
+    cfg.ff=()=>{const card=cfg.top().querySelector('.feature-filter-card');return card&&{card,pick:card.querySelector('.feature-filter-pick'),
+      add:card.querySelector('[data-action="add"]'),del:card.querySelector('[data-action="delete"]'),body:card.querySelector('.feature-filter-body'),
+      name:card.querySelector('.feature-filter-name'),source:card.querySelector('.feature-filter-source'),separator:card.querySelector('.feature-filter-separator'),
       length:card.querySelector('.feature-filter-length'),prefix:card.querySelector('.feature-filter-prefix'),digits:card.querySelector('.feature-filter-digits'),
-      digitsLabel:card.querySelector('.feature-filter-digits-label'),sample:card.querySelector('.feature-filter-sample'),done:card.querySelector('[data-action="done"]')};};
-    cfg.type=(input,value)=>{input.value=value;input.dispatchEvent(new Event('input'));};void 0;`;
+      digitsLabel:card.querySelector('.feature-filter-digits-label'),sample:card.querySelector('.feature-filter-sample'),
+      save:card.querySelector('[data-action="save"]'),cancel:card.querySelector('[data-action="cancel"]')};};
+    cfg.pickFeature=id=>{const pick=cfg.ff().pick;pick.value=id;pick.dispatchEvent(new Event('change'));};
+    cfg.type=(input,value)=>{input.value=value;input.dispatchEvent(new Event('input'));};
+    cfg.featureSaves=()=>cfg.calls.filter(call=>call.name==='featureSave').map(call=>call.args[0]);void 0;`;
   const openFeatureMapping = (extra = '') => js(`${FEATURE_SETUP_JS}
     cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:{...cfg.tpl${extra}},targetFields:['BillDate','Remark','Reference','Currency','Balance'],mappings:cfg.featureMappings||[]})).handle;
     cfg.overlay=cfg.top();void 0;`);
 
-  await test('字段筛选特征值：紧跟拼接选项出现，选中显示【筛选条件】，无规则时不保存，样例推导后规则随映射提交', async () => {
+  await test('字段筛选特征值：选中后出现「选择特征值」（默认空白）与【特征值管理】，未选时不保存，选定后随映射提交', async () => {
     await setup();
-    await openFeatureMapping();
-    const options = await js(`['Remark','Currency','Balance'].map(field=>Array.from(cfg.row(field).querySelectorAll('option')).map(option=>option.value))`);
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([SERIAL, ORDER])}`);
+    const options = await js(`['Remark','Currency','Balance'].map(field=>Array.from(cfg.row(field).querySelector('select').options).map(option=>option.value))`);
     assert.equal(options[0].indexOf(FEATURE), options[0].indexOf('需要拼接字段') + 1);
     assert.equal(options[1].includes(FEATURE), false);
     assert.equal(options[2].includes(FEATURE), false);
-    assert.deepEqual(await js(`[cfg.btn('Remark').hidden,cfg.btn('Reference').hidden]`), [true, true]);
+    assert.deepEqual(await js(`[cfg.btn('Remark').hidden,cfg.fv('Remark').hidden,cfg.fvLabel('Remark').hidden]`), [true, true, true]);
     await js(`cfg.pick('Remark','${FEATURE}');cfg.pick('Reference','${FEATURE}');`);
-    assert.deepEqual(await js(`[cfg.btn('Remark').hidden,cfg.btn('Reference').hidden]`), [false, false]);
+    assert.deepEqual(await js(`[cfg.btn('Remark').hidden,cfg.fv('Remark').hidden,cfg.fvLabel('Remark').hidden,cfg.btn('Reference').hidden]`), [false, false, false, false]);
+    assert.deepEqual(await js(`[cfg.fvLabel('Remark').textContent,cfg.btn('Remark').textContent.trim(),cfg.fv('Remark').value]`), ['选择特征值', '特征值管理', '']);
+    assert.deepEqual(await js(`cfg.fvOptions('Remark')`), [['', ''], ['1', '流水号'], ['2', '订单号']]);
+    // 映射字段下拉框 → 文本 → 特征值下拉框 →【特征值管理】
+    assert.deepEqual(await js(`Array.from(cfg.row('Remark').querySelector('.mapping-field-editor').children).filter(el=>!el.hidden).map(el=>el.className.split(' ').pop())`),
+      ['mapping-select', 'mapping-feature-value-label', 'mapping-feature-value-select', 'mapping-feature-filter-btn']);
 
     await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
-    assert.match(await js('cfg.top().textContent'), /Remark、Reference 选择了「字段筛选特征值」，请先点击【筛选条件】设置/);
+    assert.match(await js('cfg.top().textContent'), /Remark、Reference 选择了「字段筛选特征值」，请选择特征值/);
     assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 0);
     await js('cfg.host.closeTop();');
 
-    await js(`cfg.btn('Remark').click();`);
-    assert.deepEqual(await titleTips('.feature-filter-hint'), { title: '筛选特征值', hidden: false, mark: 'Tips',
-      bubble: `按分隔符把筛选字段拆成多段，取第一个满足条件的片段；筛不出时留空。本模板所有选择「${FEATURE}」的字段共用这一套条件。`,
-      bodyHint: false });
-    assert.deepEqual(await js(`Array.from(cfg.ff().source.options).map(option=>option.value)`), ['', '交易日期', '附言']);
-    assert.equal(await js('cfg.ff().separator.value'), 'space');
-    await js(`cfg.ff().source.value='附言';cfg.type(cfg.ff().sample,'FT24123456');`);
-    assert.deepEqual(await js(`[cfg.ff().length.value,cfg.ff().prefix.value,cfg.ff().digits.checked,cfg.ff().digitsLabel.textContent]`),
-      ['10', '2', true, '前 2 位之后全是数字']);
-    await js('cfg.ff().done.click();'); await tick();
-    assert.equal(await js('cfg.top()===cfg.overlay'), true);
-    assert.match(await js(`cfg.btn('Reference').title`), /筛选字段：附言；分隔符：空格；长度 10；前 2 位英文；其余为纯数字/);
+    await js(`cfg.choose('Remark','1');cfg.choose('Reference','2');`);
+    assert.match(await js(`cfg.fv('Reference').title`), /筛选字段：附言；分隔符：\/；长度 6；纯数字/);
+    // 切走再切回保留此前的选择
+    await js(`cfg.pick('Reference','附言');`);
+    assert.deepEqual(await js(`[cfg.fv('Reference').hidden,cfg.btn('Reference').hidden]`), [true, true]);
+    await js(`cfg.pick('Reference','${FEATURE}');`);
+    assert.equal(await js(`cfg.fv('Reference').value`), '2');
 
     await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
     const payload = await js(`(()=>{const args=cfg.calls.filter(call=>call.name==='mappingSave')[0].args[0];
-      return {featureFilter:args.featureFilter,feature:args.mappings.filter(m=>m.mappedField==='${FEATURE}').map(m=>[m.templateField,m.mappedFields])};})()`);
-    assert.deepEqual(payload, {
-      featureFilter: { sourceField: '附言', separator: 'space', length: 10, letterPrefixCount: 2, digitsOnly: true, sample: 'FT24123456' },
-      feature: [['Remark', []], ['Reference', []]]
-    });
+      return {hasFeatureFilter:'featureFilter' in args||'featureFilters' in args,feature:args.mappings.filter(m=>m.mappedField==='${FEATURE}').map(m=>[m.templateField,m.mappedFields])};})()`);
+    assert.deepEqual(payload, { hasFeatureFilter: false, feature: [['Remark', ['1']], ['Reference', ['2']]] });
     assert.deepEqual(await js('cfg.errors'), []);
   });
 
-  await test('字段筛选特征值：筛选条件弹窗校验与回显，切走映射值后按钮隐藏，取消不改草稿', async () => {
+  await test('特征值管理：工具栏与设置区顺序，【新增】样例推导后保存立即落库并刷新映射行，【保存】在【取消】左侧', async () => {
     await setup();
-    await js(`cfg.featureMappings=[{templateField:'Remark',mappedField:'${FEATURE}',mappedFields:[]}];void 0;`);
-    await openFeatureMapping(`,featureFilter:{sourceField:'附言',separator:'slash',length:6,letterPrefixCount:null,digitsOnly:true,sample:'123456'}`);
-    assert.equal(await js(`cfg.btn('Remark').hidden`), false);
+    await js(`cfg.featureMappings=[{templateField:'Remark',mappedField:'${FEATURE}',mappedFields:['1']}];void 0;`);
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([SERIAL])}`);
+    assert.equal(await js(`cfg.fv('Remark').value`), '1');
     await js(`cfg.btn('Remark').click();`);
-    assert.deepEqual(await js(`[cfg.ff().source.value,cfg.ff().separator.value,cfg.ff().length.value,cfg.ff().prefix.value,cfg.ff().digits.checked,cfg.ff().sample.value,cfg.ff().digitsLabel.textContent]`),
-      ['附言', 'slash', '6', '', true, '123456', '整段都是数字']);
+    assert.deepEqual(await titleTips('.feature-filter-hint'), { title: '特征值管理', hidden: false, mark: 'Tips',
+      bubble: `每个特征值是一套筛选条件：按分隔符把筛选字段拆成多段，取第一个满足条件的片段，筛不出时留空。选择「${FEATURE}」的字段在「选择特征值」中选用；保存与删除立即生效。`,
+      bodyHint: false });
+    assert.deepEqual(await js(`Array.from(cfg.ff().card.querySelector('.feature-filter-toolbar').children).map(el=>el.tagName==='SELECT'?'SELECT':el.textContent.trim())`),
+      ['新增', '特征值', 'SELECT', '删除']);
+    assert.deepEqual(await js(`[cfg.ff().pick.value,Array.from(cfg.ff().pick.options).map(o=>o.textContent),cfg.ff().body.hidden]`), ['', ['', '流水号'], true]);
+    assert.deepEqual(await js(`Array.from(cfg.ff().card.querySelectorAll('.dialog-actions button')).map(b=>b.textContent.trim())`), ['保存', '取消']);
 
-    await js(`cfg.ff().sample.value='12/3456';cfg.ff().done.click();`); await tick();
-    assert.match(await js('cfg.top().textContent'), /特征值「12\/3456」不能包含所选分隔符/);
-    await js('cfg.host.closeTop();');
-    await js(`cfg.ff().sample.value='AB1234';cfg.ff().done.click();`); await tick();
-    assert.match(await js('cfg.top().textContent'), /特征值「AB1234」不符合当前筛选条件/);
-    await js('cfg.host.closeTop();');
-    await js(`cfg.ff().sample.value='';cfg.ff().length.value='';cfg.ff().digits.checked=false;cfg.ff().done.click();`); await tick();
-    assert.match(await js('cfg.top().textContent'), /特征长度、前几位英文、纯数字至少设置一项/);
-    await js('cfg.host.closeTop();');
-    await js(`cfg.ff().source.value='';cfg.ff().length.value='3';cfg.ff().done.click();`); await tick();
-    assert.match(await js('cfg.top().textContent'), /请选择筛选字段/);
-    await js('cfg.host.closeTop();');
-
-    await js(`cfg.top().querySelector('.feature-filter-card [data-action="cancel"]').click();`); await tick();
+    await js('cfg.ff().add.click();');
+    assert.deepEqual(await js(`[cfg.ff().body.hidden,cfg.ff().pick.value,cfg.ff().name.value,cfg.ff().separator.value]`), [false, '', '', 'space']);
+    assert.deepEqual(await js(`Array.from(cfg.ff().card.querySelectorAll('.feature-filter-grid .feature-filter-label')).map(el=>el.textContent.trim())`),
+      ['特征值名', '筛选字段', '输入特征值', '分隔符', '特征长度', '前几位是英文字母', '纯数字']);
+    assert.deepEqual(await js(`Array.from(cfg.ff().source.options).map(option=>option.value)`), ['', '交易日期', '附言']);
+    await js(`cfg.ff().name.value='订单号';cfg.ff().source.value='附言';cfg.type(cfg.ff().sample,'INV001');`);
+    assert.deepEqual(await js(`[cfg.ff().length.value,cfg.ff().prefix.value,cfg.ff().digits.checked,cfg.ff().digitsLabel.textContent]`),
+      ['6', '3', true, '前 3 位之后全是数字']);
+    await js('cfg.ff().save.click();'); await tick();
+    assert.deepEqual(await js('cfg.featureSaves()'), [{ templateId: 9, featureFilters: [SERIAL,
+      { name: '订单号', sourceField: '附言', separator: 'space', length: 6, letterPrefixCount: 3, digitsOnly: true, sample: 'INV001' }] }]);
     assert.equal(await js('cfg.top()===cfg.overlay'), true);
-
-    await js(`cfg.pick('Remark','附言');`);
-    assert.equal(await js(`cfg.btn('Remark').hidden`), true);
-    await js(`cfg.pick('Reference','${FEATURE}');cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
-    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='mappingSave')[0].args[0].featureFilter`),
-      { sourceField: '附言', separator: 'slash', length: 6, letterPrefixCount: null, digitsOnly: true, sample: '123456' });
+    assert.deepEqual(await js(`cfg.fvOptions('Remark')`), [['', ''], ['1', '流水号'], ['2', '订单号']]);
+    assert.equal(await js(`cfg.fv('Remark').value`), '1');
+    assert.deepEqual(await js('cfg.errors'), []);
   });
 
-  await test('字段筛选特征值：拆分/合并且不复用时主映射残留该值不阻止保存，复用时仍要求先设置', async () => {
+  await test('特征值管理：选中已有特征值回显并可改名保存；校验不关闭弹窗；保存失败保留；取消不写库', async () => {
+    await setup();
+    await js(`cfg.featureMappings=[{templateField:'Remark',mappedField:'${FEATURE}',mappedFields:['2']}];void 0;`);
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([SERIAL, ORDER])}`);
+    await js(`cfg.btn('Remark').click();cfg.pickFeature('2');`);
+    assert.deepEqual(await js(`[cfg.ff().body.hidden,cfg.ff().name.value,cfg.ff().source.value,cfg.ff().separator.value,cfg.ff().length.value,cfg.ff().prefix.value,cfg.ff().digits.checked,cfg.ff().sample.value,cfg.ff().digitsLabel.textContent]`),
+      [false, '订单号', '附言', 'slash', '6', '', true, '123456', '整段都是数字']);
+    await js(`cfg.pickFeature('');`);
+    assert.equal(await js('cfg.ff().body.hidden'), true);
+    await js(`cfg.pickFeature('2');`);
+
+    const expectAlert = async (script, pattern) => {
+      await js(`${script};cfg.ff().save.click();`); await tick();
+      assert.match(await js('cfg.top().textContent'), pattern);
+      await js('cfg.host.closeTop();');
+    };
+    await expectAlert(`cfg.ff().name.value='流水号'`, /特征值名「流水号」已存在/);
+    await expectAlert(`cfg.ff().name.value=' '`, /请输入特征值名/);
+    await expectAlert(`cfg.ff().name.value='订单编号';cfg.ff().sample.value='12/3456'`, /输入特征值「12\/3456」不能包含所选分隔符/);
+    await expectAlert(`cfg.ff().sample.value='AB1234'`, /输入特征值「AB1234」不符合当前筛选条件/);
+    await expectAlert(`cfg.ff().sample.value='';cfg.ff().length.value='';cfg.ff().digits.checked=false`, /特征长度、前几位英文、纯数字至少设置一项/);
+    await expectAlert(`cfg.ff().source.value='';cfg.ff().length.value='3'`, /请选择筛选字段/);
+    assert.equal(await js('cfg.featureSaves().length'), 0);
+
+    await js(`cfg.ff().source.value='附言';cfg.ff().length.value='6';cfg.ff().digits.checked=true;cfg.next.featureSave={status:'error',message:'特征值保存失败（测试）'};cfg.ff().save.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /特征值保存失败（测试）/);
+    await js('cfg.host.closeTop();');
+    assert.equal(await js('Boolean(cfg.ff())'), true);
+
+    await js('cfg.ff().save.click();'); await tick();
+    assert.deepEqual(await js('cfg.featureSaves()[1].featureFilters.map(item=>[item.id,item.name])'), [['1', '流水号'], ['2', '订单编号']]);
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    assert.deepEqual(await js(`[cfg.fv('Remark').value,cfg.fv('Remark').selectedOptions[0].textContent]`), ['2', '订单编号']);
+
+    await js(`cfg.btn('Remark').click();cfg.ff().add.click();cfg.ff().name.value='不保存';cfg.ff().cancel.click();`); await tick();
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    assert.equal(await js('cfg.featureSaves().length'), 2);
+    await js(`cfg.btn('Remark').click();cfg.ff().save.click();`); await tick();
+    assert.equal(await js('cfg.top()===cfg.overlay'), true, '设置区隐藏时【保存】直接关闭');
+    assert.equal(await js('cfg.featureSaves().length'), 2);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
+  await test('特征值管理：删除须先选目标；被映射草稿或拆分映射使用时拒绝；未使用时确认后立即落库', async () => {
+    await setup();
+    await js(`cfg.featureMappings=[{templateField:'Remark',mappedField:'${FEATURE}',mappedFields:['1']}];void 0;`);
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([SERIAL, ORDER, { ...ORDER, id: '3', name: '备用' }])}`);
+    await js(`cfg.btn('Remark').click();cfg.ff().del.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /请选择要删除的特征值/);
+    await js('cfg.host.closeTop();');
+
+    await js(`cfg.pickFeature('1');cfg.ff().del.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /特征值「流水号」正被 Remark 使用，请先改选其他特征值后再删除/);
+    await js('cfg.host.closeTop();');
+
+    // 映射草稿（未保存）新选用的特征值同样拒绝删除
+    await js(`cfg.ff().cancel.click();`); await tick();
+    await js(`cfg.pick('Reference','${FEATURE}');cfg.choose('Reference','2');cfg.btn('Reference').click();cfg.pickFeature('2');cfg.ff().del.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /特征值「订单号」正被 Reference 使用/);
+    await js('cfg.host.closeTop();');
+    assert.equal(await js('cfg.featureSaves().length'), 0);
+
+    await js(`cfg.pickFeature('3');cfg.ff().del.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /确定删除特征值「备用」？/);
+    await js(`cfg.top().querySelector('[data-action="cancel"]').click();`); await tick();
+    assert.equal(await js('cfg.featureSaves().length'), 0);
+    await js(`cfg.ff().del.click();`); await tick();
+    await js(`cfg.next.featureSave={status:'error',message:'特征值「备用」正被 Name 使用，请先改选其他特征值后再删除'};cfg.top().querySelector('[data-action="confirm"]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /正被 Name 使用/);
+    await js('cfg.host.closeTop();');
+    assert.match(await js('cfg.top().textContent'), /确定删除特征值「备用」？/, '失败时确认框保留');
+    await js(`cfg.top().querySelector('[data-action="confirm"]').click();`); await tick();
+    assert.deepEqual(await js('cfg.featureSaves().map(payload=>payload.featureFilters.map(item=>item.id))'), [['1', '2'], ['1', '2']]);
+    assert.deepEqual(await js(`[Boolean(cfg.ff()),cfg.ff().pick.value,cfg.ff().body.hidden,Array.from(cfg.ff().pick.options).map(o=>o.value)]`),
+      [true, '', true, ['', '1', '2']]);
+    await js('cfg.ff().cancel.click();'); await tick();
+    assert.deepEqual(await js(`cfg.fvOptions('Remark').map(option=>option[0])`), ['', '1', '2']);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
+  await test('字段筛选特征值：拆分/合并且不复用时主映射残留该值不阻止保存，复用时仍要求选特征值', async () => {
     await setup();
     const open = (reuse) => js(`${FEATURE_SETUP_JS}
       cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:cfg.tpl,targetFields:['BillDate','Remark','是否拆分/合并明细账单','复用模块字段的映射关系'],
@@ -1600,53 +1689,95 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 1);
     await js('cfg.host.closeAll?.();');
     await open('是'); await tick();
-    assert.match(await js('cfg.top().textContent'), /Remark 选择了「字段筛选特征值」，请先点击【筛选条件】设置/);
+    assert.match(await js('cfg.top().textContent'), /Remark 选择了「字段筛选特征值」，请选择特征值/);
     assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 1);
   });
 
-  await test('字段筛选特征值：拆分/合并映射弹窗共用同一套规则，保存时随拆分映射提交并回传', async () => {
+  await test('字段筛选特征值：拆分/合并映射弹窗共用特征值列表，在其中新增后回写主映射，选择随拆分映射提交', async () => {
     await setup();
-    await js(`${FEATURE_SETUP_JS}cfg.splitDone=[];
-      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createBillSplitMappingsDialog({template:cfg.tpl,headers:cfg.tpl.headers,targetFields:['BillDate','MerchantId','Reference','Balance','Currency'],
-        initialMappings:[],featureFilter:null,onDone:(mappings,featureFilter)=>cfg.splitDone.push(featureFilter)})).handle;
+    await js(`${FEATURE_SETUP_JS}cfg.splitDone=[];cfg.listChanges=[];
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createBillSplitMappingsDialog({template:cfg.tpl,headers:cfg.tpl.headers,targetFields:['BillDate','MerchantId','Reference','Remark','Balance','Currency'],
+        initialMappings:[{templateField:'Remark',mappedField:'${FEATURE}',mappedFields:['1']}],featureFilters:${JSON.stringify([SERIAL])},
+        getMainFeatureFilterUsage:()=>new Map([['1',['Remark']]]),onFeatureFiltersChange:list=>cfg.listChanges.push(list.map(item=>item.name)),
+        onDone:mappings=>cfg.splitDone.push(mappings)})).handle;
       cfg.overlay=cfg.top();void 0;`);
     assert.equal(await js(`Array.from(cfg.row('Balance').querySelectorAll('option')).some(option=>option.value==='${FEATURE}')`), false);
+    assert.deepEqual(await js(`[cfg.fv('Remark').hidden,cfg.fv('Remark').value,cfg.btn('Remark').textContent.trim()]`), [false, '1', '特征值管理']);
     await js(`cfg.pick('Reference','${FEATURE}');cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
-    assert.match(await js('cfg.top().textContent'), /Reference 选择了「字段筛选特征值」/);
+    assert.match(await js('cfg.top().textContent'), /Reference 选择了「字段筛选特征值」，请选择特征值/);
     assert.equal(await js(`cfg.calls.filter(call=>call.name==='splitMapping').length`), 0);
     await js('cfg.host.closeTop();');
-    await js(`cfg.btn('Reference').click();cfg.ff().source.value='附言';cfg.ff().separator.value='comma';cfg.type(cfg.ff().sample,'INV001');cfg.ff().done.click();`); await tick();
+
+    await js(`cfg.btn('Reference').click();cfg.pickFeature('1');cfg.ff().del.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /特征值「流水号」正被 Remark、Remark（拆分\/合并映射） 使用/);
+    await js('cfg.host.closeTop();');
+    await js(`cfg.ff().add.click();cfg.ff().name.value='发票号';cfg.ff().source.value='附言';cfg.ff().separator.value='comma';cfg.type(cfg.ff().sample,'INV001');cfg.ff().save.click();`); await tick();
+    assert.deepEqual(await js('cfg.listChanges'), [['流水号', '发票号']]);
+    assert.deepEqual(await js(`cfg.fvOptions('Reference').map(option=>option[1])`), ['', '流水号', '发票号']);
+    // 切到拼接再切回：特征值选择保留，拼接字段不混入特征值 id
+    await js(`cfg.choose('Reference','2');cfg.pick('Reference','需要拼接字段');cfg.pick('Reference','${FEATURE}');`);
+    assert.equal(await js(`cfg.fv('Reference').value`), '2');
     await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
-    const expected = { sourceField: '附言', separator: 'comma', length: 6, letterPrefixCount: 3, digitsOnly: true, sample: 'INV001' };
-    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='splitMapping')[0].args[0].featureFilter`), expected);
-    assert.deepEqual(await js('cfg.splitDone'), [expected]);
+    const saved = await js(`(()=>{const args=cfg.calls.filter(call=>call.name==='splitMapping')[0].args[0];
+      return {keys:Object.keys(args).sort(),feature:args.mappings.filter(m=>m.mappedField==='${FEATURE}').map(m=>[m.templateField,m.mappedFields,'featureFilterRef' in m])};})()`);
+    assert.deepEqual(saved, { keys: ['mappings', 'templateId'], feature: [['Reference', ['2'], false], ['Remark', ['1'], false]] });
+    assert.equal(await js('cfg.splitDone.length'), 1);
+    assert.deepEqual(await js('cfg.errors'), []);
   });
 
-  await test('字段筛选特征值：筛选条件弹窗在最小窗口内完整可见、可点确定', async () => {
+  await test('字段筛选特征值：拆分/合并映射行切走后其特征值被删，再新增沿用同一 id，切回时仍为空白且不得保存', async () => {
+    await setup();
+    await js(`${FEATURE_SETUP_JS}
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createBillSplitMappingsDialog({template:cfg.tpl,headers:cfg.tpl.headers,targetFields:['BillDate','Reference','Remark'],
+        initialMappings:[{templateField:'Remark',mappedField:'${FEATURE}',mappedFields:['1']}],featureFilters:${JSON.stringify([SERIAL, ORDER])},
+        getMainFeatureFilterUsage:()=>new Map(),onFeatureFiltersChange:()=>{},onDone:()=>{}})).handle;
+      cfg.overlay=cfg.top();void 0;`);
+    await js(`cfg.pick('Reference','${FEATURE}');cfg.choose('Reference','2');cfg.pick('Reference','附言');`);
+    // Reference 已切走，「订单号」未被使用，可删除
+    await js(`cfg.btn('Remark').click();cfg.pickFeature('2');cfg.ff().del.click();`); await tick();
+    await js(`cfg.top().querySelector('[data-action="confirm"]').click();`); await tick();
+    assert.deepEqual(await js('cfg.featureSaves().map(payload=>payload.featureFilters.map(item=>item.id))'), [['1']]);
+    await js(`cfg.ff().add.click();cfg.ff().name.value='发票号';cfg.ff().source.value='附言';cfg.ff().separator.value='comma';cfg.type(cfg.ff().sample,'INV001');cfg.ff().save.click();`); await tick();
+    assert.deepEqual(await js(`cfg.fvOptions('Reference')`), [['', ''], ['1', '流水号'], ['2', '发票号']], '新增的特征值沿用 id 2');
+    await js(`cfg.pick('Reference','${FEATURE}');`);
+    assert.equal(await js(`cfg.fv('Reference').value`), '');
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /Reference 选择了「字段筛选特征值」，请选择特征值/);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='splitMapping').length`), 0);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
+  await test('特征值管理：映射行与弹窗在最小窗口内完整可见、可点保存', async () => {
     await setup({ zoom: 1 });
-    await openFeatureMapping();
-    await js(`cfg.pick('Remark','${FEATURE}');`);
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([SERIAL])}`);
+    await js(`cfg.pick('Remark','${FEATURE}');cfg.choose('Remark','1');`);
     await layout.settle();
-    const buttonGeometry = await js(`(() => {
-      const select=cfg.row('Remark').querySelector('select').getBoundingClientRect(), button=cfg.btn('Remark').getBoundingClientRect();
-      return { rightOfSelect: button.left>=select.right, sameLine: Math.abs((button.top+button.bottom)/2-(select.top+select.bottom)/2)<4 };
+    const rowGeometry = await js(`(() => {
+      const editor=cfg.row('Remark').querySelector('.mapping-field-editor').getBoundingClientRect();
+      const [select,label,value,button]=[cfg.row('Remark').querySelector('select'),cfg.fvLabel('Remark'),cfg.fv('Remark'),cfg.btn('Remark')].map(el=>el.getBoundingClientRect());
+      const mid=r=>(r.top+r.bottom)/2;
+      return { order: select.right<=label.left&&label.right<=value.left&&value.right<=button.left,
+        sameLine: [label,value,button].every(r=>Math.abs(mid(r)-mid(select))<4), inside: button.right<=editor.right+1 };
     })()`);
-    assert.deepEqual(buttonGeometry, { rightOfSelect: true, sameLine: true });
+    assert.deepEqual(rowGeometry, { order: true, sameLine: true, inside: true });
     await js('new Promise((resolve) => setTimeout(resolve, 250))');
-    await layout.evidence('feature-filter-mapping-row', { geometry: buttonGeometry });
-    await js(`cfg.btn('Remark').click();`);
+    await layout.evidence('feature-filter-mapping-row', { geometry: rowGeometry });
+    await js(`cfg.btn('Remark').click();cfg.ff().add.click();`);
     await layout.settle();
     const geometry = await js(`(() => {
       const card=cfg.top().querySelector('.feature-filter-card'), rect=card.getBoundingClientRect();
       const inside=element=>{const r=element.getBoundingClientRect();return r.left>=rect.left&&r.right<=rect.right&&r.top>=rect.top&&r.bottom<=rect.bottom;};
+      const toolbar=[...card.querySelectorAll('.feature-filter-toolbar > *')].map(el=>el.getBoundingClientRect());
+      const title=card.querySelector('.dialog-title').getBoundingClientRect();
       return { fits: rect.top>=0&&rect.bottom<=innerHeight&&rect.left>=0&&rect.right<=innerWidth,
-        controls: [...card.querySelectorAll('.feature-filter-grid select, .feature-filter-grid input, .dialog-actions button')].map(inside) };
+        toolbarRightOfTitle: toolbar.every(r=>r.left>=title.right), toolbarOneLine: toolbar.every(r=>Math.abs((r.top+r.bottom)/2-(toolbar[0].top+toolbar[0].bottom)/2)<4),
+        controls: [...card.querySelectorAll('.feature-filter-toolbar button, .feature-filter-toolbar select, .feature-filter-grid select, .feature-filter-grid input, .dialog-actions button')].map(inside) };
     })()`);
-    assert.deepEqual(geometry, { fits: true, controls: [true, true, true, true, true, true, true, true] });
+    assert.deepEqual(geometry, { fits: true, toolbarRightOfTitle: true, toolbarOneLine: true, controls: Array(12).fill(true) });
     await js('new Promise((resolve) => setTimeout(resolve, 250))');
     await layout.evidence('feature-filter-dialog', { geometry });
-    await layout.click('.feature-filter-card [data-action="done"]');
-    assert.match(await js('cfg.top().textContent'), /请选择筛选字段/);
+    await layout.click('.feature-filter-card [data-action="save"]');
+    assert.match(await js('cfg.top().textContent'), /请输入特征值名/);
   });
 
   // v3.2.16：MerchantId「原始账单仅有币种无账户号」+【映射管理】（spec §4.1、§4.2、D2）

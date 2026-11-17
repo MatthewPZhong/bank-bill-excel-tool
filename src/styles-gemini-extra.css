@@ -347,7 +347,7 @@ td .muted { color: var(--muted); }
 }
 .account-mapping-migration-card { width: min(100%, 900px); }
 .amount-split-rules-card { width: min(100%, 880px); }
-.feature-filter-card { width: min(100%, 640px); }
+.feature-filter-card { width: min(100%, 720px); }
 .bill-split-mappings-card { width: 80vw; max-width: 1280px; }
 .bill-split-rows-card { width: min(100%, 1180px); }
 /* v2.1.7 round 2 R6a 方案 C：弹窗 1080 → 1200（spec §8.7.3 — 给文件名 + 后缀 ' → MERCHANT USD' 多 120px 横向空间） */
@@ -2498,10 +2498,28 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
   height: 40px;
 }
 
-/* =================== v3.2.16 字段筛选特征值 =================== */
+/* =================== v3.2.16 字段筛选特征值 / v3.2.18 特征值管理 =================== */
+.feature-filter-toolbar {
+  display: flex; align-items: center; gap: 10px;
+  margin-right: auto;
+  min-width: 0;
+}
+.feature-filter-toolbar-label {
+  font-size: 13px; color: var(--text);
+  white-space: nowrap;
+}
+.feature-filter-toolbar .feature-filter-pick {
+  width: 180px; min-width: 0;
+}
 .feature-filter-body {
   padding: 18px 28px 16px;
 }
+/* 映射行：映射字段下拉框右侧「选择特征值」+ 下拉框 +【特征值管理】 */
+.mapping-feature-value-label {
+  font-size: 13px; color: var(--text);
+  white-space: nowrap;
+}
+.mapping-field-editor > .mapping-select.mapping-feature-value-select { flex: 0 1 180px; min-width: 120px; }
 .feature-filter-grid {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);

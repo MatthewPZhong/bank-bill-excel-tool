@@ -476,10 +476,53 @@ function ensureTemplateFilenameFixedFieldSupport(db) {
 }
 
 // v3.2.16：模板级「字段筛选特征值」规则（JSON；'' 表示未设置）。幂等：列已存在则跳过。
+// v3.2.18：该列改存特征值数组 [{ id, name, ...rule }]，见 upgradeLegacyTemplateFeatureFilters。
 function ensureTemplateFeatureFilterSupport(db) {
   if (!hasColumn(db, 'templates', 'feature_filter_json')) {
     db.exec("ALTER TABLE templates ADD COLUMN feature_filter_json TEXT NOT NULL DEFAULT '';");
   }
+  upgradeLegacyTemplateFeatureFilters(db);
+}
+
+// v3.2.18：v3.2.16/3.2.17 的单套规则（JSON 对象）升级为名为「特征值1」、id 为 '1' 的特征值，
+//   并让主映射与拆分映射中选「字段筛选特征值」且尚未选特征值的行引用它，输出不变。
+//   与 file-service/feature-filter.js upgradeLegacyFeatureFilter 同口径（此处不依赖 file-service）。
+//   幂等：只处理仍是对象的模板；已是数组（含 '[]'）或空串的不动。每个模板单独一个事务。
+const FEATURE_FILTER_MAPPING_VALUE = '字段筛选特征值';
+const LEGACY_FEATURE_FILTER_ID = '1';
+const LEGACY_FEATURE_FILTER_NAME = '特征值1';
+
+function upgradeLegacyTemplateFeatureFilters(db) {
+  const rows = db.prepare(
+    "SELECT id, feature_filter_json AS featureFilterJson FROM templates WHERE TRIM(feature_filter_json) LIKE '{%'"
+  ).all();
+  rows.forEach((row) => {
+    let parsed = null;
+    try {
+      parsed = JSON.parse(row.featureFilterJson);
+    } catch (_error) {
+      parsed = null;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return;
+    }
+    const { id: _id, name: _name, ...rule } = parsed;
+    const upgraded = [{ id: LEGACY_FEATURE_FILTER_ID, name: LEGACY_FEATURE_FILTER_NAME, ...rule }];
+    db.exec('BEGIN');
+    try {
+      db.prepare('UPDATE templates SET feature_filter_json = ? WHERE id = ?').run(JSON.stringify(upgraded), row.id);
+      ['template_mappings', 'template_bill_split_mappings'].forEach((table) => {
+        db.prepare(`
+          UPDATE ${table} SET mapped_fields_json = ?
+          WHERE template_id = ? AND mapped_field = ? AND TRIM(COALESCE(mapped_fields_json, '')) IN ('', '[]')
+        `).run(JSON.stringify([LEGACY_FEATURE_FILTER_ID]), row.id, FEATURE_FILTER_MAPPING_VALUE);
+      });
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  });
 }
 
 // v1.5.3 需求 R2：自有账号合并入大账号表 — 在 template_big_accounts 表新增 account_nature 列

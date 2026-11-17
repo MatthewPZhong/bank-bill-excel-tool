@@ -166,7 +166,7 @@ function upsertTemplate(db, { templateKey = '', name, sourceFileName, headers })
           WHERE id = ?
         `)
         .run(normalizedTemplateKey, name, sourceFileName, JSON.stringify(headers), now, existing.id);
-      // v3.2.16：表头被覆盖、映射清空时，筛选特征值规则（引用旧表头）一并清空
+      // v3.2.16：表头被覆盖、映射清空时，特征值（引用旧表头）一并清空
       db.prepare("UPDATE templates SET feature_filter_json = '' WHERE id = ?").run(existing.id);
       db.prepare('DELETE FROM template_mappings WHERE template_id = ?').run(existing.id);
       db.prepare('DELETE FROM template_big_accounts WHERE template_id = ?').run(existing.id);
@@ -413,13 +413,46 @@ function getTemplateMappings(db, templateId) {
   };
 }
 
-// v3.2.16：写入模板级「字段筛选特征值」规则；调用方须在事务内调用。
-// featureFilter 为对象时覆盖写入；undefined / null 不动（规则不再被使用时保留，便于再次选用）。
-function writeTemplateFeatureFilter(db, templateId, featureFilter) {
-  if (!featureFilter || typeof featureFilter !== 'object' || Array.isArray(featureFilter)) {
+// v3.2.18：写入模板的特征值列表 [{ id, name, ...rule }]；调用方须在事务内调用并已校验。
+// featureFilters 为数组时整体替换；undefined / null 不动。
+function writeTemplateFeatureFilters(db, templateId, featureFilters) {
+  if (!Array.isArray(featureFilters)) {
     return;
   }
-  db.prepare('UPDATE templates SET feature_filter_json = ? WHERE id = ?').run(JSON.stringify(featureFilter), templateId);
+  db.prepare('UPDATE templates SET feature_filter_json = ? WHERE id = ?')
+    .run(featureFilters.length ? JSON.stringify(featureFilters) : '', templateId);
+}
+
+// v3.2.18：已保存的主映射与拆分映射中选「字段筛选特征值」的行及其所选特征值 id（ref 未选为 ''）。
+function listTemplateFeatureFilterReferences(db, templateId, featureFilterMappingValue) {
+  const pick = (scope, rows) => rows
+    .filter((row) => normalizeText(row.mappedField) === featureFilterMappingValue)
+    .map((row) => ({
+      scope,
+      templateField: normalizeText(row.templateField),
+      ref: normalizeText(parseJsonArray(row.mappedFieldsJson)[0])
+    }));
+  const select = (table) => db.prepare(`
+    SELECT template_field AS templateField, mapped_field AS mappedField, mapped_fields_json AS mappedFieldsJson
+    FROM ${table}
+    WHERE template_id = ?
+    ORDER BY row_index ASC
+  `).all(templateId);
+  return pick('main', select('template_mappings')).concat(pick('split', select('template_bill_split_mappings')));
+}
+
+// v3.2.18：【特征值管理】保存或删除后整体替换特征值列表（立即落库）；调用方已校验列表与引用。
+function saveTemplateFeatureFilters(db, templateId, featureFilters) {
+  const now = new Date().toISOString();
+  db.exec('BEGIN');
+  try {
+    writeTemplateFeatureFilters(db, templateId, Array.isArray(featureFilters) ? featureFilters : []);
+    db.prepare('UPDATE templates SET updated_at = ? WHERE id = ?').run(now, templateId);
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
 
 // v1.5.3 R2 round 3 修复 (Codex Finding 5)：
@@ -437,7 +470,7 @@ function saveMappings(
   fixedAssignments = [],
   dateFormat,
   amountSplitRules = null,
-  { preserveOwn = false, channelAssignment = null, featureFilter = undefined, currencyBigAccounts = null } = {}
+  { preserveOwn = false, channelAssignment = null, featureFilters = undefined, currencyBigAccounts = null } = {}
 ) {
   const now = new Date().toISOString();
   let channelAssignmentResult = null;
@@ -580,7 +613,8 @@ function saveMappings(
       });
     }
 
-    writeTemplateFeatureFilter(db, templateId, featureFilter);
+    // v3.2.18：只有模板包导入整体带入特征值；映射弹窗保存不改特征值（由【特征值管理】即时保存）
+    writeTemplateFeatureFilters(db, templateId, featureFilters);
 
     if (dateFormat) {
       db.prepare('UPDATE templates SET updated_at = ?, date_format = ? WHERE id = ?').run(now, dateFormat, templateId);
@@ -642,7 +676,7 @@ function getBillSplitMappings(db, templateId) {
     }));
 }
 
-function saveBillSplitMappings(db, templateId, mappings = [], { featureFilter = undefined } = {}) {
+function saveBillSplitMappings(db, templateId, mappings = []) {
   const now = new Date().toISOString();
   db.exec('BEGIN');
 
@@ -678,9 +712,6 @@ function saveBillSplitMappings(db, templateId, mappings = [], { featureFilter = 
         now
       );
     });
-
-    // v3.2.16：拆分/合并映射用到「字段筛选特征值」时，规则与映射同一事务写入
-    writeTemplateFeatureFilter(db, templateId, featureFilter);
 
     db.exec('COMMIT');
   } catch (error) {
@@ -1014,8 +1045,10 @@ function listTemplateBundleEntries(db) {
         ? { signedAmountSourceField: payload.billSplitMeta.signedAmountSourceField || '' }
         : { signedAmountSourceField: '' },
       dateFormat: template.dateFormat || 'auto',
-      // v3.2.16：模板级「字段筛选特征值」规则（未设置为 null；旧版读取时忽略）
-      featureFilter: template.featureFilter ? { ...template.featureFilter } : null,
+      // v3.2.18（bundle v7）：特征值列表；映射行的特征值选择在 mappings / billSplitMappings 的 mappedFields 中
+      featureFilters: Array.isArray(template.featureFilters)
+        ? template.featureFilters.map((item) => ({ ...item }))
+        : [],
       createdAt: template.createdAt,
       updatedAt: template.updatedAt
     };
@@ -1040,6 +1073,7 @@ module.exports = {
   getTemplateMappings,
   getTemplatesByBankName,
   listTemplateBundleEntries,
+  listTemplateFeatureFilterReferences,
   listTemplates,
   renameTemplate,
   saveAmountSplitRules,
@@ -1050,6 +1084,7 @@ module.exports = {
   saveBillSplitRow,
   saveBillSplitRowCount,
   saveMappings,
+  saveTemplateFeatureFilters,
   saveTemplateFilenameFixedField,
   updateTemplateHeaders,
   upsertTemplate

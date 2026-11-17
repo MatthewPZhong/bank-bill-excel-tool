@@ -489,6 +489,8 @@ contextBridge.exposeInMainWorld('desktopApi', {
     saveAmountSplitRules: (payload) => ipcRenderer.invoke('template:save-amount-split-rules', payload),
     getBillSplitConfig: (templateId) => ipcRenderer.invoke('template:get-bill-split-config', templateId),
     saveBillSplitMappings: (payload) => ipcRenderer.invoke('template:save-bill-split-mappings', payload),
+    // v3.2.18 映射关系管理【特征值管理】：保存 / 删除特征值（整表替换，立即落库）
+    saveFeatureFilters: (payload) => ipcRenderer.invoke('template:save-feature-filters', payload),
     saveBillSplitRowCount: (payload) => ipcRenderer.invoke('template:save-bill-split-row-count', payload),
     saveBillSplitRow: (payload) => ipcRenderer.invoke('template:save-bill-split-row', payload),
     previewDeleteBillSplitRow: (payload) => ipcRenderer.invoke('template:preview-delete-bill-split-row', payload),
