@@ -35,6 +35,7 @@ const {
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   mapEachCollectingCurrencyBigAccountIssues,
   normalizeCell,
+  normalizeFeeAmountFormula,
   writeBalanceWorkbook,
   writeWorkbookRows
 } = require('../../src/backend/file-service');
@@ -221,6 +222,7 @@ function createEnvironment(dir, label) {
     getTemplateMappingConfig,
     getStatementSessionEntries,
     normalizeCell,
+    normalizeFeeAmountFormula,
     sanitizeFileName,
     splitTemplateName,
     FileValidationError,
@@ -318,6 +320,7 @@ function createEnvironment(dir, label) {
     'normalizeMappingRows',
     'resolveCurrentMappings',
     'readTemplateBundleFile',
+    'normalizeBundleBillSplitMeta',
     'resolveTemplateBundleVersion',
     'isCurrencyOnlyMerchantMapping'
   ], mainDeps));

@@ -2697,6 +2697,55 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
 .bill-split-target-seq-label input { accent-color: var(--primary); }
 .bill-split-sub-hint { font-size: 12px; }
 
+/* v3.2.19 费用账单列、费用账单发生额特殊取值与公式设置 */
+.bill-split-rows-table .bill-split-fee-bill-header,
+.bill-split-rows-table .bill-split-fee-bill-cell { text-align: center; white-space: nowrap; }
+.bill-split-fee-bill-checkbox,
+.bill-split-fee-formula-checkbox {
+  width: 16px; height: 16px; margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.bill-split-fee-bill-checkbox:disabled,
+.bill-split-fee-formula-checkbox:disabled { cursor: not-allowed; }
+.bill-split-fee-formula-hint { font-size: 12px; color: var(--muted); }
+.bill-split-fee-formula-card { width: min(100%, 960px); }
+.bill-split-fee-formula-body {
+  display: flex; align-items: center;
+  min-height: 180px;
+  padding: 24px 28px;
+}
+.bill-split-fee-formula-editor {
+  display: flex; align-items: flex-start; justify-content: center; gap: 10px;
+  width: 100%;
+}
+.bill-split-fee-formula-add-btn {
+  flex: 0 0 auto;
+  height: 40px;
+  color: var(--primary);
+  white-space: nowrap;
+}
+.bill-split-fee-formula-label {
+  flex: 0 0 auto;
+  line-height: 40px;
+  font-size: 14px; font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+}
+/* 一行 6 个下拉框，第 7 个起换行并与首个对齐；宽度固定，新增下拉框不推动「发生额=」 */
+.bill-split-fee-formula-grid {
+  flex: 0 1 744px; min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+.bill-split-fee-formula-grid .mapping-select {
+  width: 100%; min-width: 0; height: 40px;
+  padding: 0 26px 0 12px;
+  background-position: right 10px center;
+  text-overflow: ellipsis;
+}
+
 .bill-split-rows-footer { padding: 14px 28px 18px; }
 
 /* =================== Big-account · currency dropdown (open state) =================== */

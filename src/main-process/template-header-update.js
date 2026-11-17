@@ -124,6 +124,7 @@ function createTemplateHeaderUpdateTools(constants = {}) {
   // 收集模板配置中所有引用源字段的位置。active 与生成时实际读取的口径一致：
   // 主映射始终读取；按字段区分发生额开启时读取完整规则；拆分/合并开启时读取拆分行（仅 completed）、
   // 拆分金额规则与按正负号拆分的字段，不复用主映射时还读取拆分映射；
+  // 费用账单发生额公式（v3.2.19）在拆分开启、勾选特殊取值且有已完成的费用账单行时读取；
   // 特征值（v3.2.18 起可有多个）各自的筛选字段只在实际生效的映射选用该特征值时读取。
   function collectTemplateFieldReferences(input = {}) {
     const mappings = Array.isArray(input.mappings) ? input.mappings : [];
@@ -168,16 +169,25 @@ function createTemplateHeaderUpdateTools(constants = {}) {
       });
     });
 
-    (Array.isArray(input.billSplitRows) ? input.billSplitRows : []).forEach((row, index) => {
+    const billSplitRows = Array.isArray(input.billSplitRows) ? input.billSplitRows : [];
+    const feeFormulaActive = billSplitEnabled
+      && Boolean(input.billSplitFeeAmountFormulaEnabled)
+      && billSplitRows.some((row) => (
+        row && row.isFeeBill === true && normalizeCell(row.rowStatus) === 'completed'
+      ));
+
+    billSplitRows.forEach((row, index) => {
       const seqNo = Number(row && row.seqNo) || index + 1;
       const active = billSplitEnabled && normalizeCell(row && row.rowStatus) === 'completed';
+      // v3.2.19：费用账单行不读 Credit；特殊取值生效时也不读 Debit（映射保留，标为未启用）
+      const isFeeBill = Boolean(row && row.isFeeBill === true);
       [
-        ['Currency', row && row.currencySourceField],
-        ['Credit Amount', row && row.creditSourceField],
-        ['Debit Amount', row && row.debitSourceField],
-        ['Amount', row && row.amountSourceField]
-      ].forEach(([target, field]) => {
-        push({ area: 'bill-split-row', target, role: String(seqNo), field, active });
+        ['Currency', row && row.currencySourceField, active],
+        ['Credit Amount', row && row.creditSourceField, active && !isFeeBill],
+        ['Debit Amount', row && row.debitSourceField, active && !(isFeeBill && feeFormulaActive)],
+        ['Amount', row && row.amountSourceField, active]
+      ].forEach(([target, field, fieldActive]) => {
+        push({ area: 'bill-split-row', target, role: String(seqNo), field, active: fieldActive });
       });
     });
 
@@ -193,6 +203,16 @@ function createTemplateHeaderUpdateTools(constants = {}) {
       role: '',
       field: input.billSplitSignedAmountSourceField,
       active: billSplitEnabled
+    });
+
+    (Array.isArray(input.billSplitFeeAmountFormula) ? input.billSplitFeeAmountFormula : []).forEach((item, index) => {
+      push({
+        area: 'bill-split-fee-formula',
+        target: '',
+        role: String(index + 1),
+        field: item && item.field,
+        active: feeFormulaActive
+      });
     });
 
     const usedIds = usedFeatureFilterIds(billSplitMappingActive ? billSplitMappings : mappings);
@@ -244,7 +264,9 @@ function formatFieldReferenceLine(reference) {
     case 'bill-split-amount':
       return `拆分账单发生额规则 · ${reference.target || '（未设置目标字段）'} ${ROLE_LABELS[reference.role] || ''} ← ${field}${suffix}`;
     case 'bill-split-signed':
-      return `拆分账单 · 按正负号拆分的发生额 ← ${field}${suffix}`;
+      return `拆分账单 · 按正负号取发生额 ← ${field}${suffix}`;
+    case 'bill-split-fee-formula':
+      return `拆分账单 · 费用账单发生额公式第 ${reference.role} 组 ← ${field}${suffix}`;
     case 'feature-filter':
       return reference.target
         ? `特征值「${reference.target}」 · 筛选字段 ← ${field}${suffix}`

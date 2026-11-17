@@ -40,6 +40,8 @@ const {
   loadCurrencyMappings,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   normalizeCell,
+  normalizeFeeAmountFormula,
+  validateFeeAmountFormula,
   writeWorkbookRows
 } = require('../../src/backend/file-service');
 const { splitTemplateName } = require('../../src/backend/balance-seed-store');
@@ -160,6 +162,7 @@ function createMain(database, spies) {
     'buildCurrencyBigAccountMappingConfig',
     'isCurrencyOnlyMerchantMapping',
     'normalizeBundleTemplateHeaders',
+    'normalizeBundleBillSplitMeta',
     'findConflictingTemplateByHeaders',
     'buildTemplateFieldReferenceInput',
     'collectStaleTemplateFieldReferences',
@@ -176,6 +179,9 @@ function createMain(database, spies) {
     fs,
     path,
     normalizeCell,
+    // v3.2.19：拆分配置的费用账单公式（映射配置、生成配置）
+    normalizeFeeAmountFormula,
+    validateFeeAmountFormula,
     FileValidationError,
     FIXED_FIELD_VALUE_PREFIX,
     MERCHANT_ID_CURRENCY_ONLY_MARKER,

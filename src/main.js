@@ -726,6 +726,8 @@ const {
   loadCurrencyMappings,
   loadEnumValues,
   normalizeCell,
+  normalizeFeeAmountFormula,
+  validateFeeAmountFormula,
   buildFeatureFilterToken,
   getFeatureFilterRef,
   normalizeFeatureFilterList,
@@ -1858,7 +1860,10 @@ const REUSE_MODULE_DEFAULT_OPTION = '是';
 //   的模板包写 v6，让旧版按版本号整包拒绝（旧版会静默输出空值，或把新存储值当成映射字段）；都未用到时仍写 v5，旧版照常可导入。
 // v3.2.18：用到「字段筛选特征值」时写 v7（条目带 featureFilters 数组，映射行带所选特征值 id），v3.2.16/3.2.17 读到整包拒绝；
 //   只用到「原始账单仅有币种无账户号」时仍写 v6。读取 v6 包时把单套 featureFilter 升级为特征值（同启动迁移口径）。
-const SUPPORTED_BUNDLE_VERSION = 7;
+// v3.2.19：用到拆分/合并账单「费用账单」（标了费用账单行或勾选了特殊取值逻辑）时写 v8，v3.2.18 及更早版本整包拒绝
+//   （旧版会忽略费用标记与公式，静默输出不同的 Debit Amount）；未用到时按上面的规则写 v5/v6/v7。
+const SUPPORTED_BUNDLE_VERSION = 8;
+const FEATURE_FILTER_BUNDLE_VERSION = 7;
 const CURRENCY_ONLY_BUNDLE_VERSION = 6;
 const BASE_BUNDLE_VERSION = 5;
 // v1.5.2 需求 3：主页面「按文件名映射模板」的虚拟模板 ID（非 DB 记录）
@@ -3908,8 +3913,8 @@ function buildTemplateLibraryPayload() {
   };
 }
 
-// v3.2.18：任一模板的主映射或拆分映射用到「字段筛选特征值」时写 v7；只用到「原始账单仅有币种无账户号」时写 v6；
-//   都未用到时写 v5（见 SUPPORTED_BUNDLE_VERSION 注释）。
+// v3.2.19：用到拆分账单「费用账单」时写 v8；否则任一模板的主映射或拆分映射用到「字段筛选特征值」时写 v7；
+//   只用到「原始账单仅有币种无账户号」时写 v6；都未用到时写 v5（见 SUPPORTED_BUNDLE_VERSION 注释）。
 function resolveTemplateBundleVersion(templates) {
   const entries = Array.isArray(templates) ? templates : [];
   const usesFeatureFilter = entries.some((entry) => (
@@ -3918,8 +3923,15 @@ function resolveTemplateBundleVersion(templates) {
   ));
   // v3.2.16：MerchantId「原始账单仅有币种无账户号」——旧版会把存储值当成映射字段，或丢掉 currencyBigAccounts
   const usesCurrencyOnlyMerchant = entries.some((entry) => isCurrencyOnlyMerchantMapping(entry && entry.mappings));
-  if (usesFeatureFilter) {
+  const usesFeeBill = entries.some((entry) => (
+    (Array.isArray(entry && entry.billSplitRows) ? entry.billSplitRows : []).some((row) => row && row.isFeeBill === true)
+      || Boolean(entry && entry.billSplitMeta && entry.billSplitMeta.feeAmountFormulaEnabled)
+  ));
+  if (usesFeeBill) {
     return SUPPORTED_BUNDLE_VERSION;
+  }
+  if (usesFeatureFilter) {
+    return FEATURE_FILTER_BUNDLE_VERSION;
   }
   return usesCurrencyOnlyMerchant ? CURRENCY_ONLY_BUNDLE_VERSION : BASE_BUNDLE_VERSION;
 }
@@ -3955,6 +3967,16 @@ function syncTemplateLibraryFile() {
 
 // 模板包里的表头与 extractHeaders 同口径：保留空项位置（合并单元格占位的中间空列参与表头定位），
 // 只去掉末尾空项；全空视为没有表头。
+// v3.2.19：拆分配置的正负号字段与费用账单公式（读模板包与映射配置共用；指定账单序号不随包导出）。
+function normalizeBundleBillSplitMeta(meta) {
+  const source = meta && typeof meta === 'object' ? meta : {};
+  return {
+    signedAmountSourceField: normalizeCell(source.signedAmountSourceField),
+    feeAmountFormulaEnabled: source.feeAmountFormulaEnabled === true,
+    feeAmountFormula: normalizeFeeAmountFormula(source.feeAmountFormula)
+  };
+}
+
 function normalizeBundleTemplateHeaders(headers) {
   const normalized = headers.map((value) => normalizeCell(value));
   while (normalized.length && normalized[normalized.length - 1] === '') {
@@ -4041,9 +4063,7 @@ function readTemplateBundleFile(filePath) {
     billSplitMappings: Array.isArray(item.billSplitMappings) ? item.billSplitMappings : [],
     billSplitRows: Array.isArray(item.billSplitRows) ? item.billSplitRows : [],
     billSplitAmountRules: Array.isArray(item.billSplitAmountRules) ? item.billSplitAmountRules : [],
-    billSplitMeta: item.billSplitMeta && typeof item.billSplitMeta === 'object'
-      ? { signedAmountSourceField: normalizeCell(item.billSplitMeta.signedAmountSourceField) }
-      : { signedAmountSourceField: '' },
+    billSplitMeta: normalizeBundleBillSplitMeta(item.billSplitMeta),
     dateFormat: normalizeCell(item.dateFormat) || 'auto',
     // v3.2.18：特征值列表（导入时再校验）。本版本导出的包都带 featureFilters 数组——映射都没选用时仍写 v5/v6，
     //   故按字段而非版本判断；没有数组时才是 v3.2.16/3.2.17 的单套 featureFilter，升级为「特征值1」。
@@ -4772,7 +4792,8 @@ function getTemplateMappingConfig(templateId) {
           debitSourceField: normalizeCell(r.debitSourceField),
           amountSourceField: normalizeCell(r.amountSourceField),
           rowStatus: r.rowStatus === 'completed' ? 'completed' : 'draft',
-          mergedGroupSeq: r.mergedGroupSeq === null || r.mergedGroupSeq === undefined ? null : Number(r.mergedGroupSeq)
+          mergedGroupSeq: r.mergedGroupSeq === null || r.mergedGroupSeq === undefined ? null : Number(r.mergedGroupSeq),
+          isFeeBill: Boolean(r.isFeeBill)
         }))
       : [],
     billSplitAmountRules: Array.isArray(templatePayload.billSplitAmountRules)
@@ -4784,9 +4805,7 @@ function getTemplateMappingConfig(templateId) {
           rowIndex: Number(rule.rowIndex || 0)
         }))
       : [],
-    billSplitMeta: templatePayload.billSplitMeta && typeof templatePayload.billSplitMeta === 'object'
-      ? { signedAmountSourceField: normalizeCell(templatePayload.billSplitMeta.signedAmountSourceField) }
-      : { signedAmountSourceField: '' },
+    billSplitMeta: normalizeBundleBillSplitMeta(templatePayload.billSplitMeta),
     // v3.2.16：MerchantId「原始账单仅有币种无账户号」的 币种 → 大账号
     currencyBigAccounts: Array.isArray(templatePayload.currencyBigAccounts)
       ? templatePayload.currencyBigAccounts.map((item) => ({
@@ -10416,62 +10435,7 @@ function registerTemplateHandlers() {
             : [];
           database.saveBillSplitMappings(template.id, normalizedBillSplitMappings);
 
-          const normalizedBillSplitRows = Array.isArray(entry.billSplitRows)
-            ? entry.billSplitRows
-                .map((row) => ({
-                  seqNo: Number(row?.seqNo),
-                  currencySourceField: normalizeCell(row?.currencySourceField),
-                  creditSourceField: normalizeCell(row?.creditSourceField),
-                  debitSourceField: normalizeCell(row?.debitSourceField),
-                  amountSourceField: normalizeCell(row?.amountSourceField),
-                  rowStatus: row?.rowStatus === 'completed' ? 'completed' : 'draft',
-                  mergedGroupSeq: row?.mergedGroupSeq === null || row?.mergedGroupSeq === undefined
-                    ? null
-                    : Number(row.mergedGroupSeq)
-                }))
-                .filter((row) => Number.isInteger(row.seqNo) && row.seqNo >= 1)
-                .sort((a, b) => a.seqNo - b.seqNo)
-            : [];
-          database.saveBillSplitRowCount(template.id, normalizedBillSplitRows.length);
-          normalizedBillSplitRows.forEach((row) => {
-            database.saveBillSplitRow(template.id, row);
-          });
-          // Restore merge groups
-          database.clearBillSplitMergeGroups(template.id);
-          const groupsByMin = new Map();
-          normalizedBillSplitRows.forEach((row) => {
-            if (row.mergedGroupSeq === null || row.mergedGroupSeq === undefined) {
-              return;
-            }
-            const key = Number(row.mergedGroupSeq);
-            if (!groupsByMin.has(key)) {
-              groupsByMin.set(key, []);
-            }
-            groupsByMin.get(key).push(row.seqNo);
-          });
-          groupsByMin.forEach((seqNos) => {
-            if (seqNos.length >= 2) {
-              database.saveBillSplitMergeGroup(template.id, seqNos);
-            }
-          });
-
-          const normalizedBillSplitAmountRules = Array.isArray(entry.billSplitAmountRules)
-            ? entry.billSplitAmountRules
-                .map((rule, index) => ({
-                  targetField: normalizeCell(rule?.targetField),
-                  conditionField: normalizeCell(rule?.conditionField),
-                  conditionValue: normalizeCell(rule?.conditionValue),
-                  mappedField: normalizeCell(rule?.mappedField),
-                  rowIndex: Number.isInteger(rule?.rowIndex) ? rule.rowIndex : index
-                }))
-            : [];
-          database.saveBillSplitAmountRules(template.id, normalizedBillSplitAmountRules);
-
-          database.saveBillSplitMeta(template.id, {
-            signedAmountSourceField: normalizeCell(entry.billSplitMeta?.signedAmountSourceField),
-            signedAmountTargetSeqNos: entry.billSplitMeta?.signedAmountTargetSeqNos || [],
-            byFieldAmountTargetSeqNos: entry.billSplitMeta?.byFieldAmountTargetSeqNos || []
-          });
+          applyBundleBillSplitConfig(template.id, entry);
 
           if (entry.bigAccountOrderConfig && Array.isArray(entry.bigAccountOrderConfig.files)) {
             writeBigAccountOrder(ensureStorageRoot(), template.id, entry.bigAccountOrderConfig);
@@ -10827,7 +10791,14 @@ function registerTemplateHandlers() {
   businessIpcHandle('template:save-bill-split-row', '保存账单拆分行', (_event, payload = {}) => {
     const templateId = Number(payload?.templateId);
     try {
-      validateBillSplitRowPayload(payload?.row);
+      // v3.2.19：费用账单行不读 Credit（启用特殊取值时也不读 Debit），同列校验只比实际生效的映射
+      const storedRow = (database.getBillSplitRows(templateId) || [])
+        .find((row) => row.seqNo === Number(payload?.row?.seqNo));
+      const isFeeBillRow = Boolean(storedRow && storedRow.isFeeBill);
+      validateBillSplitRowPayload(payload?.row, {
+        creditIgnored: isFeeBillRow,
+        debitIgnored: isFeeBillRow && Boolean((database.getBillSplitMeta(templateId) || {}).feeAmountFormulaEnabled)
+      });
       database.saveBillSplitRow(templateId, payload.row);
       syncTemplateLibraryFile();
       return { status: 'success' };
@@ -10981,7 +10952,7 @@ function registerTemplateHandlers() {
       if (existingMeta.signedAmountSourceField && incomingRules.length > 0) {
         throw new FileValidationError(
           'FILE_READ',
-          '弹框 2 副区域的"按正负号拆分的发生额"和"按字段区分发生额"只能启用其中一种'
+          '发生额取值设置中的"按正负号取发生额"和"按字段取发生额"只能启用其中一种'
         );
       }
       const validated = incomingRules.length === 0
@@ -11013,28 +10984,69 @@ function registerTemplateHandlers() {
     }
   });
 
+  // v3.2.19：载荷只带本次要改的部分，未带的保持原值——
+  //   正负号字段与指定账单序号（三项一起）、费用账单行 feeBillSeqNo（null 为取消）、
+  //   费用账单特殊取值 feeAmountFormulaEnabled / feeAmountFormula（公式按模板表头校验）。
   businessIpcHandle('template:save-bill-split-meta', '保存账单拆分配置', (_event, payload = {}) => {
     const templateId = Number(payload?.templateId);
+    const has = (key) => Boolean(payload) && Object.prototype.hasOwnProperty.call(payload, key) && payload[key] !== undefined;
+    const savesSignedConfig = has('signedAmountSourceField')
+      || has('signedAmountTargetSeqNos')
+      || has('byFieldAmountTargetSeqNos');
+    const step = savesSignedConfig ? '保存拆分账单按正负号拆分字段' : '保存拆分账单费用账单设置';
     try {
-      const signedAmountSourceField = normalizeCell(payload?.signedAmountSourceField);
-      const existingRules = database.getBillSplitAmountRules(templateId) || [];
-      if (signedAmountSourceField && existingRules.length > 0) {
-        throw new FileValidationError(
-          'FILE_READ',
-          '弹框 2 副区域的"按正负号拆分的发生额"和"按字段区分发生额"只能启用其中一种'
-        );
+      const meta = {};
+      if (savesSignedConfig) {
+        const signedAmountSourceField = normalizeCell(payload.signedAmountSourceField);
+        const existingRules = database.getBillSplitAmountRules(templateId) || [];
+        if (signedAmountSourceField && existingRules.length > 0) {
+          throw new FileValidationError(
+            'FILE_READ',
+            '发生额取值设置中的"按正负号取发生额"和"按字段取发生额"只能启用其中一种'
+          );
+        }
+        Object.assign(meta, {
+          signedAmountSourceField,
+          signedAmountTargetSeqNos: payload.signedAmountTargetSeqNos || [],
+          byFieldAmountTargetSeqNos: payload.byFieldAmountTargetSeqNos || []
+        });
       }
-      database.saveBillSplitMeta(templateId, {
-        signedAmountSourceField,
-        signedAmountTargetSeqNos: payload.signedAmountTargetSeqNos || [],
-        byFieldAmountTargetSeqNos: payload.byFieldAmountTargetSeqNos || []
-      });
+      if (has('feeAmountFormula')) {
+        const template = database.getTemplate(templateId);
+        if (!template) {
+          throw new FileValidationError('TEMPLATE_NOT_FOUND', '未找到对应模板');
+        }
+        meta.feeAmountFormula = validateFeeAmountFormula(payload.feeAmountFormula, template.headers);
+      }
+      if (has('feeAmountFormulaEnabled')) {
+        meta.feeAmountFormulaEnabled = payload.feeAmountFormulaEnabled === true;
+      }
+      let feeBillSeqNo;
+      if (has('feeBillSeqNo')) {
+        feeBillSeqNo = payload.feeBillSeqNo === null ? null : Number(payload.feeBillSeqNo);
+        if (feeBillSeqNo !== null && (!Number.isInteger(feeBillSeqNo) || feeBillSeqNo < 1)) {
+          throw new FileValidationError('FILE_READ', '费用账单的账单序号无效');
+        }
+        try {
+          database.setBillSplitFeeBillRow(templateId, feeBillSeqNo);
+        } catch (error) {
+          if (error && error.code === 'BILL_SPLIT_ROW_NOT_FOUND') {
+            throw new FileValidationError('FILE_READ', `${error.message}，请关闭后重新打开再设置`);
+          }
+          throw error;
+        }
+      }
+      if (Object.keys(meta).length > 0) {
+        database.saveBillSplitMeta(templateId, meta);
+      }
       syncTemplateLibraryFile();
-      return { status: 'success' };
+      return feeBillSeqNo === undefined
+        ? { status: 'success' }
+        : { status: 'success', currentRows: database.getBillSplitRows(templateId) || [] };
     } catch (error) {
       if (error instanceof FileValidationError) {
         return createErrorResult({
-          step: '保存拆分账单按正负号拆分字段',
+          step,
           message: error.message,
           errorCode: error.code,
           originalError: error,
@@ -11042,8 +11054,8 @@ function registerTemplateHandlers() {
         });
       }
       return createErrorResult({
-        step: '保存拆分账单按正负号拆分字段',
-        message: '保存拆分账单按正负号拆分字段失败，请导出报错文件查看详情',
+        step,
+        message: `${step}失败，请导出报错文件查看详情`,
         errorCode: 'BILL_SPLIT_META_SAVE_RUNTIME',
         errorType: '系统错误',
         originalError: error,
@@ -11126,12 +11138,12 @@ function validateBillSplitMappingsPayload(mappings, template) {
   return normalized;
 }
 
-function validateBillSplitRowPayload(row) {
+function validateBillSplitRowPayload(row, { creditIgnored = false, debitIgnored = false } = {}) {
   if (!row || !Number.isInteger(Number(row?.seqNo)) || Number(row.seqNo) < 1) {
     throw new FileValidationError('FILE_READ', '拆分账单行数据格式错误');
   }
-  const credit = normalizeCell(row?.creditSourceField);
-  const debit = normalizeCell(row?.debitSourceField);
+  const credit = creditIgnored ? '' : normalizeCell(row?.creditSourceField);
+  const debit = debitIgnored ? '' : normalizeCell(row?.debitSourceField);
   if (credit && debit && credit === debit) {
     throw new FileValidationError(
       'FILE_READ',
@@ -11378,6 +11390,8 @@ function buildStatementGenerationConfig({
     billSplitRows: billSplitMergeConfig.billSplitRows || [],
     billSplitAmountRules: billSplitMergeConfig.billSplitAmountRules || [],
     billSplitSignedAmountSourceField: billSplitMergeConfig.signedAmountSourceField || '',
+    billSplitFeeAmountFormula: billSplitMergeConfig.feeAmountFormula || [],
+    billSplitFeeAmountFormulaEnabled: Boolean(billSplitMergeConfig.feeAmountFormula),
     featureFilters: template && Array.isArray(template.featureFilters) ? template.featureFilters : []
   });
   const featureFilters = resolveStatementFeatureFilters(template, mappingByTargetField, billSplitMergeConfig);
@@ -11448,6 +11462,73 @@ function buildCurrencyBigAccountMappingConfig(template, outputName) {
   return { templateName, pairs };
 }
 
+// 模板包导入：恢复拆分行（含费用账单标记）、合并组、拆分发生额规则与拆分配置；拆分映射由调用方先行保存。
+function applyBundleBillSplitConfig(templateId, entry) {
+  const normalizedBillSplitRows = Array.isArray(entry.billSplitRows)
+    ? entry.billSplitRows
+        .map((row) => ({
+          seqNo: Number(row?.seqNo),
+          currencySourceField: normalizeCell(row?.currencySourceField),
+          creditSourceField: normalizeCell(row?.creditSourceField),
+          debitSourceField: normalizeCell(row?.debitSourceField),
+          amountSourceField: normalizeCell(row?.amountSourceField),
+          rowStatus: row?.rowStatus === 'completed' ? 'completed' : 'draft',
+          mergedGroupSeq: row?.mergedGroupSeq === null || row?.mergedGroupSeq === undefined
+            ? null
+            : Number(row.mergedGroupSeq),
+          isFeeBill: row?.isFeeBill === true
+        }))
+        .filter((row) => Number.isInteger(row.seqNo) && row.seqNo >= 1)
+        .sort((a, b) => a.seqNo - b.seqNo)
+    : [];
+  database.saveBillSplitRowCount(templateId, normalizedBillSplitRows.length);
+  normalizedBillSplitRows.forEach((row) => {
+    database.saveBillSplitRow(templateId, row);
+  });
+  // v3.2.19：按包设置费用账单行（覆盖已有模板时同时清掉原来的标记）
+  const importedFeeBillRow = normalizedBillSplitRows.find((row) => row.isFeeBill);
+  database.setBillSplitFeeBillRow(templateId, importedFeeBillRow ? importedFeeBillRow.seqNo : null);
+  // Restore merge groups
+  database.clearBillSplitMergeGroups(templateId);
+  const groupsByMin = new Map();
+  normalizedBillSplitRows.forEach((row) => {
+    if (row.mergedGroupSeq === null || row.mergedGroupSeq === undefined) {
+      return;
+    }
+    const key = Number(row.mergedGroupSeq);
+    if (!groupsByMin.has(key)) {
+      groupsByMin.set(key, []);
+    }
+    groupsByMin.get(key).push(row.seqNo);
+  });
+  groupsByMin.forEach((seqNos) => {
+    if (seqNos.length >= 2) {
+      database.saveBillSplitMergeGroup(templateId, seqNos);
+    }
+  });
+
+  const normalizedBillSplitAmountRules = Array.isArray(entry.billSplitAmountRules)
+    ? entry.billSplitAmountRules
+        .map((rule, index) => ({
+          targetField: normalizeCell(rule?.targetField),
+          conditionField: normalizeCell(rule?.conditionField),
+          conditionValue: normalizeCell(rule?.conditionValue),
+          mappedField: normalizeCell(rule?.mappedField),
+          rowIndex: Number.isInteger(rule?.rowIndex) ? rule.rowIndex : index
+        }))
+    : [];
+  database.saveBillSplitAmountRules(templateId, normalizedBillSplitAmountRules);
+
+  database.saveBillSplitMeta(templateId, {
+    signedAmountSourceField: normalizeCell(entry.billSplitMeta?.signedAmountSourceField),
+    signedAmountTargetSeqNos: entry.billSplitMeta?.signedAmountTargetSeqNos || [],
+    byFieldAmountTargetSeqNos: entry.billSplitMeta?.byFieldAmountTargetSeqNos || [],
+    // v3.2.19：导入只规范化不阻断，生成时再校验公式
+    feeAmountFormulaEnabled: entry.billSplitMeta?.feeAmountFormulaEnabled === true,
+    feeAmountFormula: normalizeFeeAmountFormula(entry.billSplitMeta?.feeAmountFormula)
+  });
+}
+
 function buildBillSplitMergeConfig(template, selectedMappings) {
   const enabled = selectedMappings.some((mapping) => {
     return normalizeCell(mapping.templateField) === BILL_SPLIT_MERGE_MAPPING_FIELD
@@ -11494,7 +11575,8 @@ function buildBillSplitMergeConfig(template, selectedMappings) {
       rowStatus: 'completed',
       mergedGroupSeq: row.mergedGroupSeq === null || row.mergedGroupSeq === undefined
         ? null
-        : Number(row.mergedGroupSeq)
+        : Number(row.mergedGroupSeq),
+      isFeeBill: row.isFeeBill === true
     }));
 
   const billSplitAmountRules = (database.getBillSplitAmountRules(template.id) || []).map((rule) => ({
@@ -11510,6 +11592,24 @@ function buildBillSplitMergeConfig(template, selectedMappings) {
   const signedAmountTargetSeqNos = Array.isArray(meta.signedAmountTargetSeqNos) ? meta.signedAmountTargetSeqNos : [];
   const byFieldAmountTargetSeqNos = Array.isArray(meta.byFieldAmountTargetSeqNos) ? meta.byFieldAmountTargetSeqNos : [];
 
+  // v3.2.19：费用账单公式只在勾选特殊取值且有已完成的费用账单行时下发；勾选了却没有有效公式时拒绝生成。
+  // 这里只校验结构，公式字段是否仍在模板表头由生成前的失效引用拦截（列出具体位置）负责。
+  let feeAmountFormula = null;
+  if (meta.feeAmountFormulaEnabled === true && billSplitRows.some((row) => row.isFeeBill)) {
+    try {
+      feeAmountFormula = validateFeeAmountFormula(meta.feeAmountFormula, null);
+    } catch (error) {
+      if (!(error instanceof FileValidationError)) {
+        throw error;
+      }
+      throw new FileValidationError(
+        'BILL_SPLIT_FEE_FORMULA_MISSING',
+        `模板「${normalizeCell(template.name)}」已勾选「费用账单发生额特殊取值逻辑」，但发生额公式未设置完整（${error.message}），`
+          + '请在映射关系管理 → 拆分/合并账单中点击【设置】保存公式后重新导入'
+      );
+    }
+  }
+
   return {
     enabled: true,
     reuseModuleMapping,
@@ -11519,7 +11619,8 @@ function buildBillSplitMergeConfig(template, selectedMappings) {
     billSplitAmountRules,
     signedAmountSourceField,
     signedAmountTargetSeqNos,
-    byFieldAmountTargetSeqNos
+    byFieldAmountTargetSeqNos,
+    feeAmountFormula
   };
 }
 
@@ -13841,6 +13942,12 @@ function buildTemplateFieldReferenceInput(templateConfig) {
       : [],
     billSplitSignedAmountSourceField: normalizeCell(templateConfig && templateConfig.billSplitMeta
       && templateConfig.billSplitMeta.signedAmountSourceField),
+    billSplitFeeAmountFormula: templateConfig && templateConfig.billSplitMeta
+      && Array.isArray(templateConfig.billSplitMeta.feeAmountFormula)
+      ? templateConfig.billSplitMeta.feeAmountFormula
+      : [],
+    billSplitFeeAmountFormulaEnabled: Boolean(templateConfig && templateConfig.billSplitMeta
+      && templateConfig.billSplitMeta.feeAmountFormulaEnabled),
     featureFilters: templateConfig && templateConfig.template && Array.isArray(templateConfig.template.featureFilters)
       ? templateConfig.template.featureFilters
       : []

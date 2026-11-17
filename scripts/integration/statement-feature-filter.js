@@ -35,6 +35,8 @@ const {
   loadCurrencyMappings,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   normalizeCell,
+  normalizeFeeAmountFormula,
+  validateFeeAmountFormula,
   normalizeFeatureFilterList,
   parseFeatureFilterToken,
   resolveUsedFeatureFilters,
@@ -107,7 +109,7 @@ const CONSTANTS = loadMainConstants([
   'SIGNED_AMOUNT_MAPPING_FIELD', 'AMOUNT_BASED_NAME_MAPPING_FIELD', 'AMOUNT_BASED_ACCOUNT_MAPPING_FIELD',
   'AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD', 'AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION',
   'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
-  'SUPPORTED_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION', 'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS'
+  'SUPPORTED_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION', 'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS'
 ]);
 const FEATURE = CONSTANTS.FEATURE_FILTER_MAPPING_FIELD;
 
@@ -169,6 +171,7 @@ function createMain(database, constantOverrides = {}) {
     'buildImportWarningMessage',
     'validateBillSplitMappingsPayload',
     'normalizeBundleTemplateHeaders',
+    'normalizeBundleBillSplitMeta',
     'readTemplateBundleFile',
     'upgradeLegacyBundleFeatureFilterRefs',
     'resolveTemplateBundleVersion',
@@ -184,6 +187,9 @@ function createMain(database, constantOverrides = {}) {
     database,
     fs,
     normalizeCell,
+    // v3.2.19：拆分配置的费用账单公式（模板包读取、生成配置）
+    normalizeFeeAmountFormula,
+    validateFeeAmountFormula,
     FileValidationError,
     FIXED_FIELD_VALUE_PREFIX,
     MERCHANT_ID_CURRENCY_ONLY_MARKER,
@@ -437,7 +443,7 @@ function verifyBundleRoundTrip(dir, { database, main, template }) {
   fs.writeFileSync(bundlePath, JSON.stringify({ bundleVersion: main.resolveTemplateBundleVersion([entry]), channels: [], templates: [entry] }), 'utf8');
   const readEntry = main.readTemplateBundleFile(bundlePath).templates[0];
   assertEq(readEntry.featureFilters, entry.featureFilters, '⑤ 读包保留特征值');
-  const legacyReader = createMain(database, { SUPPORTED_BUNDLE_VERSION: 6 });
+  const legacyReader = createMain(database, { SUPPORTED_BUNDLE_VERSION: 6, FEATURE_FILTER_BUNDLE_VERSION: 6 });
   assertThrows(() => legacyReader.readTemplateBundleFile(bundlePath), /模板文件版本（7）高于当前应用支持的版本（6）/, '⑤ 旧版（支持到 v6）读 v7 包整包拒绝');
 
   const target = openDatabase(path.join(dir, 'import.sqlite'));

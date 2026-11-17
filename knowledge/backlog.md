@@ -20,6 +20,13 @@
 
 ## 未实施
 
+### B101（P3 · 已知问题）模板包导出与模板库文件不带拆分/合并账单「指定账单实现功能」的账单序号，导入后该限定丢失（资金口径 · 须人工复核）
+
+- **来源**：2026-11-17 分支 `feat/bill-split-fee-amount`（v3.2.19 费用账单）对账专项审查。`listTemplateBundleEntries` 的 `billSplitMeta` 只导出正负号字段与费用账单公式（`src/backend/database/template-repository.js`），读包 `normalizeBundleBillSplitMeta` 同样不保留 `signedAmountTargetSeqNos` / `byFieldAmountTargetSeqNos`（`src/main.js`）；导入应用 `applyBundleBillSplitConfig` 虽按这两项写库，但读到的总是空数组。v1.5.0 起即如此，本分支未改
+- **影响**：导出前「按正负号 / 按字段取发生额」只作用于指定的几份账单；导入后变成作用于全部拆分行，未被指定的行原本走行级 Credit / Debit 映射，导入后改按副区域规则取值，生成金额可能不同且无提示。模板库文件同步走同一序列化，换机恢复同样受影响
+- **关闭条件**：模板包与模板库文件带上两组账单序号并按旧包兼容读取（旧包没有时为空，保持现状）；评估是否需要升包版本让旧版拒绝；集成测试覆盖导出 → 读包 → 导入后生成结果一致
+- **目标版本**：未定
+
 ### B100（P4 · 已知问题）余额管理编辑余额时，150% 缩放下 8 个字符以上的金额在输入框里显示不全
 
 - **来源**：2026-11-16 [PR #253](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/253) Windows CI 排查。渲染生命周期「余额管理表格」150% 编辑 `1250000` 时 Windows 报 `inputFits` 为 false，实测输入框 `scrollWidth` 75 / `clientWidth` 74（小数宽度取整），字体 13px Arial、文字 50.6px，与 macOS 相同，并非放不下；用例改为与横向溢出同样留 1px 容差。排查中实测：1080 宽窗口 150% 时余额列约 96px，编辑框左右内边距各 10px，可用文字宽度约 54px

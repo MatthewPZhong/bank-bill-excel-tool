@@ -49,6 +49,12 @@ const {
   toExcelSerial
 } = require('./file-service/normalizers');
 const {
+  FEE_FORMULA_OPERATOR_LABELS,
+  evaluateFeeAmountFormula,
+  normalizeFeeAmountFormula,
+  validateFeeAmountFormula
+} = require('./file-service/bill-split-fee-formula');
+const {
   appendCurrencyBigAccountIssues,
   applyCurrencyBigAccountMapping,
   buildCurrencyBigAccountUnmappedError,
@@ -214,6 +220,15 @@ function buildMappedRows({
   const billSplitByFieldTargetSeqNos = billSplitEnabled && Array.isArray(billSplitMerge.byFieldAmountTargetSeqNos)
     ? billSplitMerge.byFieldAmountTargetSeqNos
     : [];
+  // v3.2.19：费用账单发生额公式。main.js 只在启用特殊取值且有已完成的费用账单行时下发（已校验）。
+  const billSplitFeeFormula = billSplitEnabled
+      && Array.isArray(billSplitMerge.feeAmountFormula)
+      && billSplitMerge.feeAmountFormula.length > 0
+    ? billSplitMerge.feeAmountFormula
+    : null;
+  // 非 0 ÷ 0 的源行号：整份读完后一次报错列出（合计行不计入）。
+  const feeFormulaDivisionByZeroRowNumbers = [];
+  let currentRowFeeFormulaDivisionByZero = false;
   // P1 Fix A (PR #16 review): reuseModuleMapping === false 时非金额字段走弹框 1 的独立 lookup
   const billSplitReuseModuleMapping = billSplitEnabled
     ? billSplitMerge.reuseModuleMapping !== false
@@ -292,8 +307,13 @@ function buildMappedRows({
 
     billSplitRows.forEach((row) => {
       ensureBillSplitFieldExists(row.currencySourceField);
-      ensureBillSplitFieldExists(row.creditSourceField);
-      ensureBillSplitFieldExists(row.debitSourceField);
+      // v3.2.19：费用账单行不读 Credit；有公式时也不读 Debit（映射保留供取消后恢复，不要求列仍存在）
+      if (!row.isFeeBill) {
+        ensureBillSplitFieldExists(row.creditSourceField);
+      }
+      if (!(row.isFeeBill && billSplitFeeFormula)) {
+        ensureBillSplitFieldExists(row.debitSourceField);
+      }
       ensureBillSplitFieldExists(row.amountSourceField);
     });
 
@@ -305,6 +325,10 @@ function buildMappedRows({
     if (billSplitSignedField) {
       ensureBillSplitFieldExists(billSplitSignedField);
     }
+
+    (billSplitFeeFormula || []).forEach((item) => {
+      ensureBillSplitFieldExists(item.field);
+    });
   }
 
   const mappedRows = [orderedTargetFields.slice()];
@@ -445,7 +469,16 @@ function buildMappedRows({
         const isTargetedBySigned = hasSignedTargets && billSplitSignedTargetSeqNos.includes(splitRow.seqNo);
         const isTargetedByField = hasByFieldTargets && billSplitByFieldTargetSeqNos.includes(splitRow.seqNo);
 
-        if (isTargetedBySigned && hasSignedAmount) {
+        // v3.2.19：费用账单行只有支出；启用特殊取值时 Debit 取公式结果，优先于副区域规则与行级映射。
+        const isFeeBillRow = Boolean(splitRow.isFeeBill);
+
+        if (isFeeBillRow && billSplitFeeFormula) {
+          const fee = evaluateFeeAmountFormula(billSplitFeeFormula, (field) => readSourceCell(originalRow, field));
+          if (fee.divisionByZero) {
+            currentRowFeeFormulaDivisionByZero = true;
+          }
+          debitValue = fee.amount;
+        } else if (isTargetedBySigned && hasSignedAmount) {
           // 该行被"按正负号拆分的发生额"指定
           const split = splitSignedAmountValue(readSourceCell(originalRow, billSplitSignedField));
           creditValue = split.creditAmount;
@@ -474,6 +507,9 @@ function buildMappedRows({
           // 未被指定的行（有指定但该行不在列表），使用行级 Credit/Debit 直接映射
           creditValue = sanitizeAmountValue(readSourceCell(originalRow, splitRow.creditSourceField));
           debitValue = sanitizeAmountValue(readSourceCell(originalRow, splitRow.debitSourceField));
+        }
+        if (isFeeBillRow) {
+          creditValue = '';
         }
 
         // 静默过滤：credit 和 debit 都为 0（或空）的拆分行直接丢弃，不输出也不报错
@@ -634,6 +670,7 @@ function buildMappedRows({
   }
 
   rows.slice(1).forEach((row, rowIndex) => {
+    currentRowFeeFormulaDivisionByZero = false;
     currentRowFeatureValues = new Map(activeFeatureFilters.map((item) => (
       [item.id, extractFeatureValue(row[item.sourceIndex], item.rule)]
     )));
@@ -919,13 +956,17 @@ function buildMappedRows({
       }
       const expanded = expandBillSplitForRow(row, billSplitBaseRow, sourceRowNumber);
       // 合计行在合并前按展开后的金额判定：合并会校验组内币种、净额为 0 时整组丢弃，放在合并后会误拒或漏记。
-      if (summaryDateLabel && expanded.some((entry) => (
+      // v3.2.19：费用账单公式非 0 ÷ 0 时被除数有金额、结果留空，同样视为带金额，合计行不计入除零报错。
+      if (summaryDateLabel && (currentRowFeeFormulaDivisionByZero || expanded.some((entry) => (
         hasEffectiveAmount(entry.creditAmount) || hasEffectiveAmount(entry.debitAmount)
-      ))) {
+      )))) {
         // 合计行不产出明细：撤回本行映射时记下的其他提示（如币种未匹配），只留合计行记录。
         issues.length = issueCountBeforeRow;
         recordSummaryRow();
         return;
+      }
+      if (currentRowFeeFormulaDivisionByZero) {
+        feeFormulaDivisionByZeroRowNumbers.push(sourceRowNumber);
       }
       const merged = applyBillSplitMergeForRow(expanded);
       recordFeatureValueMiss(merged.some((entry) => (
@@ -945,6 +986,17 @@ function buildMappedRows({
       mappedRows.push(mappedRow);
     }
   });
+
+  if (feeFormulaDivisionByZeroRowNumbers.length) {
+    const shown = feeFormulaDivisionByZeroRowNumbers.slice(0, 20).join('、');
+    const more = feeFormulaDivisionByZeroRowNumbers.length > 20
+      ? ` 等 ${feeFormulaDivisionByZeroRowNumbers.length} 行`
+      : ' 行';
+    throw new FileValidationError(
+      'BILL_SPLIT_FEE_FORMULA_DIVIDE_BY_ZERO',
+      `费用账单发生额公式的除数为 0，请检查原始账单或公式：第 ${shown}${more}`
+    );
+  }
 
   assertNoInvalidBillDateRows({
     mappedRows,
@@ -1150,9 +1202,12 @@ module.exports = {
   ensureSupportedFile,
   extractEnumValuesFromImportedFile,
   extractHeaders,
+  FEE_FORMULA_OPERATOR_LABELS,
   loadCurrencyMappings,
   loadEnumValues,
   normalizeCell,
+  normalizeFeeAmountFormula,
+  validateFeeAmountFormula,
   normalizeDateExportValue,
   buildFeatureFilterToken,
   getFeatureFilterRef,

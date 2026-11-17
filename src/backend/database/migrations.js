@@ -231,6 +231,19 @@ function ensureBillSplitTargetSeqSupport(db) {
   }
 }
 
+// v3.2.19：拆分行「费用账单」标记（存行上，删行重排序号时随行移动）与费用账单发生额公式。
+function ensureBillSplitFeeBillSupport(db) {
+  if (!hasColumn(db, 'template_bill_split_rows', 'is_fee_bill')) {
+    db.exec('ALTER TABLE template_bill_split_rows ADD COLUMN is_fee_bill INTEGER NOT NULL DEFAULT 0;');
+  }
+  if (!hasColumn(db, 'template_bill_split_meta', 'fee_amount_formula_enabled')) {
+    db.exec('ALTER TABLE template_bill_split_meta ADD COLUMN fee_amount_formula_enabled INTEGER NOT NULL DEFAULT 0;');
+  }
+  if (!hasColumn(db, 'template_bill_split_meta', 'fee_amount_formula_json')) {
+    db.exec("ALTER TABLE template_bill_split_meta ADD COLUMN fee_amount_formula_json TEXT NOT NULL DEFAULT '';");
+  }
+}
+
 function ensureAccountMappingTemplateSupport(db) {
   if (hasColumn(db, 'account_mappings', 'template_id')) {
     return;
@@ -4432,6 +4445,7 @@ module.exports = {
   ensureVccOpCalcTablesSupport,
   ensureBillSplitMergeSupport,
   ensureBillSplitTargetSeqSupport,
+  ensureBillSplitFeeBillSupport,
   ensureParentTemplateSupport,
   ensureStatementChannelSupport,
   hasPendingStatementChannelMigration,

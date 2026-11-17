@@ -15,6 +15,7 @@ const {
   ensureVccOpCalcTablesSupport,
   ensureBillSplitMergeSupport,
   ensureBillSplitTargetSeqSupport,
+  ensureBillSplitFeeBillSupport,
   ensureParentTemplateSupport,
   ensureStatementChannelSupport,
   hasPendingStatementChannelMigration,
@@ -258,6 +259,7 @@ class AppDatabase {
     this.ensureAmountSplitRulesSupport();
     this.ensureBillSplitMergeSupport();
     this.ensureBillSplitTargetSeqSupport();
+    this.ensureBillSplitFeeBillSupport();
     this.ensureParentTemplateSupport();
     this.ensureTemplateFilenameFixedFieldSupport();
     this.ensureTemplateFeatureFilterSupport();
@@ -773,6 +775,10 @@ class AppDatabase {
     return ensureBillSplitTargetSeqSupport(this.db);
   }
 
+  ensureBillSplitFeeBillSupport() {
+    return ensureBillSplitFeeBillSupport(this.db);
+  }
+
   ensureParentTemplateSupport() {
     return ensureParentTemplateSupport(this.db);
   }
@@ -1230,6 +1236,10 @@ class AppDatabase {
 
   saveBillSplitRow(templateId, row) {
     return templateRepository.saveBillSplitRow(this.db, templateId, row);
+  }
+
+  setBillSplitFeeBillRow(templateId, seqNo) {
+    return templateRepository.setBillSplitFeeBillRow(this.db, templateId, seqNo);
   }
 
   deleteBillSplitRow(templateId, seqNo) {
