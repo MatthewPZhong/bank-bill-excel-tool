@@ -2440,7 +2440,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       add:cfg.filter.querySelector('[data-action=add-rule]').textContent.trim(),remove:cfg.filter.querySelector('.scenario-config-billtype-remove').textContent.trim(),
       actions:[...cfg.filter.querySelectorAll('.dialog-actions button')].map(button=>button.textContent.trim())})`), {
       title: '过滤规则设置', label: '过滤规则', fieldOptions: ['请选择字段', '交易日期', '金额', '币种', '附言', '对手户名'],
-      ops: ['等于', '不等于', '包含', '不包含', '空值', '非空值', '开头为'], rowButtons: ['×', '新增'],
+      ops: ['等于', '不等于', '包含', '不包含', '空值', '非空值', '开头为', '等于（字段）', '不等于（字段）', '包含（字段）', '不包含（字段）'], rowButtons: ['×', '新增'],
       add: '+ 新增过滤规则', remove: '删除该规则', actions: ['保存', '取消'] });
     assert.deepEqual(await js('cfg.groups()'), [{ title: '规则 #1', conditions: [['', '等于', '', false]] }]);
     // 空白规则不能保存
@@ -2517,6 +2517,123 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await js('cfg.host.closeTop();void 0;'); await layout.settle();
     await js(`cfg.overlay.querySelector('.mapping-wrapper').scrollTop=1e6;void 0;`); await layout.settle();
     await layout.evidence(`mapping-dialog-row-filter-${theme}`, { geometry });
+  });
+
+  // v3.2.19 原始账单预处理：「个性化映射设置」上方的分组，「过滤账单」勾选框 +【规则设置】；规则随【保存】提交。
+  //   过滤规则组件新增字段运算（等于（字段）等），值位置换成模板字段单选下拉框，与「根据字段值过滤账单」共用。
+  const PREPROCESS_FIELD = '过滤账单';
+  async function openPreprocessMapping(mappings = [], preprocessRules = [], layoutOptions = null, headers = null) {
+    await openToggleMapping(mappings, layoutOptions);
+    const openError = await js(`(()=>{try{cfg.handle.close({status:'cancelled',reason:'cancel'});
+      cfg.tpl={...cfg.tpl,${headers ? `headers:${JSON.stringify(headers)},` : ''}preprocessRowFilterRules:${JSON.stringify(preprocessRules)}};
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:cfg.tpl,
+        targetFields:['BillDate','Credit Amount','Debit Amount','Balance','MerchantId','Currency','Remark','${PREPROCESS_FIELD}',...${JSON.stringify(ADVANCED_FIELDS)},...${JSON.stringify(FILTER_GROUP_FIELDS)}],
+        preprocessFields:['${PREPROCESS_FIELD}'],advancedMappingFields:${JSON.stringify(ADVANCED_FIELDS)},billSplitGroupFields:${JSON.stringify(FILTER_GROUP_FIELDS)},
+        mappings:${JSON.stringify(mappings)},billSplitMeta:{signedAmountSourceField:'',rowFilterRules:[]}})).handle;
+      cfg.overlay=cfg.top();
+      cfg.preState=()=>({checked:cfg.toggle('${PREPROCESS_FIELD}').checked,disabled:cfg.toggle('${PREPROCESS_FIELD}').disabled,
+        button:cfg.toggleBtn('${PREPROCESS_FIELD}').textContent.trim(),hidden:cfg.toggleBtn('${PREPROCESS_FIELD}').hidden,buttonDisabled:cfg.toggleBtn('${PREPROCESS_FIELD}').disabled});
+      cfg.openFilter=()=>{cfg.toggleBtn('${PREPROCESS_FIELD}').click();cfg.filter=cfg.top();};
+      cfg.groups=()=>[...cfg.filter.querySelectorAll('.scenario-config-billtype-group')].map(group=>({title:group.querySelector('.scenario-config-billtype-group-title').textContent,
+        conditions:[...group.querySelectorAll('.scenario-config-multi-row')].map(row=>{const value=row.querySelector('[data-multi-field=value]');
+          return [row.querySelector('[data-multi-field=field]').value,row.querySelector('[data-multi-field=op]').value,value.value,value.tagName==='SELECT'?'select':(value.style.visibility==='hidden'?'hidden':'input')];})}));
+      cfg.cond=(g,c)=>cfg.filter.querySelectorAll('.scenario-config-billtype-group')[g].querySelectorAll('.scenario-config-multi-row')[c];
+      cfg.setCond=(g,c,key,value)=>{const control=cfg.cond(g,c).querySelector('[data-multi-field='+key+']');control.value=value;
+        control.dispatchEvent(new Event(key==='value'&&control.tagName==='INPUT'?'input':'change',{bubbles:true}));};
+      cfg.savedPre=()=>cfg.calls.filter(call=>call.name==='mappingSave').map(call=>({rules:call.args[0].preprocessRowFilterRules,
+        toggle:call.args[0].mappings.find(m=>m.templateField==='${PREPROCESS_FIELD}').mappedField,splitRules:call.args[0].billSplitRowFilterRules}));
+      return '';}catch(error){return String(error&&error.stack||error);}})()`);
+    assert.equal(openError, '');
+  }
+
+  await test('原始账单预处理：分组在「个性化映射设置」上方，「过滤账单」勾选后显示【规则设置】，与拆分/合并无关', async () => {
+    await openPreprocessMapping();
+    assert.deepEqual(await js(`[...cfg.overlay.querySelectorAll('.mapping-section-row strong')].map(item=>item.textContent)`),
+      ['原始账单预处理', '个性化映射设置', '账单拆分合并设置']);
+    // 分组标题紧接在「过滤账单」行之前，其后是「个性化映射设置」
+    assert.deepEqual(await js(`(()=>{const rows=[...cfg.overlay.querySelectorAll('tbody tr')];const index=rows.indexOf(cfg.row('${PREPROCESS_FIELD}'));
+      return [rows[index-1].textContent.trim(),rows[index+1].textContent.trim(),rows[index-2].dataset.templateField];})()`),
+      ['原始账单预处理', '个性化映射设置', 'Remark']);
+    assert.equal(await js(`cfg.row('${PREPROCESS_FIELD}').cells[0].textContent.trim()`), PREPROCESS_FIELD);
+    assert.deepEqual(await js('cfg.preState()'), { checked: false, disabled: false, button: '规则设置', hidden: true, buttonDisabled: false });
+    await js(`cfg.setToggle('${PREPROCESS_FIELD}',true);`);
+    assert.deepEqual(await js('cfg.preState()'), { checked: true, disabled: false, button: '规则设置', hidden: false, buttonDisabled: false });
+    // 不影响拆分/合并与主映射的互斥
+    assert.deepEqual(await js(`['Currency','Credit Amount','Debit Amount'].map(field=>cfg.sel(field).disabled)`), [false, false, false]);
+    await js(`cfg.setToggle('是否拆分/合并明细账单',true);`);
+    assert.deepEqual(await js('cfg.preState()'), { checked: true, disabled: false, button: '规则设置', hidden: false, buttonDisabled: false });
+    // 拆分/合并映射关系设置弹窗不列出预处理行
+    await js(`cfg.setToggle('复用模块字段的映射关系',false);cfg.toggleBtn('复用模块字段的映射关系').click();`); await tick();
+    assert.equal(await js(`[...cfg.top().querySelectorAll('tbody tr')].some(row=>row.textContent.includes('${PREPROCESS_FIELD}'))`), false);
+  });
+
+  await test('规则设置：字段运算的值换成模板字段下拉框，校验比较字段；规则随映射【保存】提交，【返回】放弃', async () => {
+    await openPreprocessMapping([{ templateField: PREPROCESS_FIELD, mappedField: '是', mappedFields: [] }]);
+    await js('cfg.openFilter();');
+    assert.deepEqual(await js(`({title:cfg.filter.querySelector('.dialog-title').textContent,tip:cfg.filter.querySelector('.scenario-config-tooltip').title})`), {
+      title: '过滤规则设置',
+      tip: '同一规则内的条件需全部满足；满足任一规则的账单保留为原始账单加工表，用于生成明细/余额账单，其余账单不参与生成。运算带「（字段）」时与同一账单行另一字段的值比较（被比较字段为空时不算包含）'
+    });
+    await js(`cfg.setCond(0,0,'field','附言');cfg.setCond(0,0,'value','退款');cfg.setCond(0,0,'op','包含（字段）');void 0;`);
+    // 切到字段运算：值清空并换成下拉框（选项为模板字段）
+    assert.deepEqual(await js('cfg.groups()'), [{ title: '规则 #1', conditions: [['附言', '包含（字段）', '', 'select']] }]);
+    assert.deepEqual(await js(`[...cfg.cond(0,0).querySelectorAll('[data-multi-field=value] option')].map(option=>option.textContent)`),
+      ['请选择比较字段', '交易日期', '金额', '币种', '附言', '对手户名']);
+    await js(`cfg.filter.querySelector('[data-action=save]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /规则 #1 第 1 个条件：请选择比较字段/);
+    await js(`cfg.top().querySelector('button').click();`); await tick();
+    // 切回文本运算：值清空并恢复输入框；再切回字段运算
+    await js(`cfg.setCond(0,0,'value','对手户名');cfg.setCond(0,0,'op','等于');void 0;`);
+    assert.deepEqual(await js('cfg.groups()'), [{ title: '规则 #1', conditions: [['附言', '等于', '', 'input']] }]);
+    await js(`cfg.setCond(0,0,'op','不等于（字段）');cfg.setCond(0,0,'value','对手户名');
+      cfg.cond(0,0).querySelector('[data-multi-action=add-condition]').click();cfg.setCond(0,1,'field','币种');cfg.setCond(0,1,'op','非空值');void 0;`);
+    assert.deepEqual(await js('cfg.groups()'), [{ title: '规则 #1', conditions: [['附言', '不等于（字段）', '对手户名', 'select'], ['币种', '非空值', '', 'hidden']] }]);
+    await js(`cfg.filter.querySelector('[data-action=save]').click();`); await tick();
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 0);
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js('cfg.savedPre()'), [{
+      rules: [{ seq: 1, conditions: [{ field: '附言', op: '不等于（字段）', value: '对手户名' }, { field: '币种', op: '非空值', value: '' }] }],
+      toggle: '是', splitRules: [] }]);
+
+    // 回显已保存的规则；比较字段已不在模板表头时显示「（已删除）」；【返回】不提交暂存的规则
+    const saved = [{ seq: 1, conditions: [{ field: '附言', op: '包含（字段）', value: '旧户名' }] }];
+    await openPreprocessMapping([{ templateField: PREPROCESS_FIELD, mappedField: '是', mappedFields: [] }], saved);
+    await js('cfg.openFilter();');
+    assert.deepEqual(await js(`({groups:cfg.groups(),stale:cfg.cond(0,0).querySelector('[data-multi-field=value]').classList.contains('is-stale'),
+      label:cfg.cond(0,0).querySelector('[data-multi-field=value] option:checked').textContent})`),
+      { groups: [{ title: '规则 #1', conditions: [['附言', '包含（字段）', '旧户名', 'select']] }], stale: true, label: '旧户名（已删除）' });
+    await js(`cfg.setCond(0,0,'value','对手户名');cfg.filter.querySelector('[data-action=save]').click();`); await tick();
+    await js(`cfg.overlay.querySelector('[data-action="back"]').click();`); await tick();
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 0);
+    // 未勾选时照常提交已存规则（保留草稿，不生效）
+    await openPreprocessMapping([], saved);
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js('cfg.savedPre()'), [{ rules: saved, toggle: '', splitRules: [] }]);
+  });
+
+  for (const theme of ['light', 'dark']) await test(`规则设置布局（${theme}）：字段运算行控件同一行、运算符不截断，映射弹窗显示「原始账单预处理」分组`, async () => {
+    await openPreprocessMapping([{ templateField: PREPROCESS_FIELD, mappedField: '是', mappedFields: [] }],
+      [{ seq: 1, conditions: [{ field: '附言', op: '不包含（字段）', value: '对手户名' }, { field: '币种', op: '非空值', value: '' }] },
+        { seq: 2, conditions: [{ field: '对手户名', op: '开头为', value: '财付通' }] }], { width: 1440, height: 900, theme, zoom: 1 });
+    await layout.settle();
+    await layout.evidence(`mapping-dialog-preprocess-${theme}`, {});
+    await js('cfg.openFilter();'); await js('new Promise(resolve=>setTimeout(resolve,400))'); await layout.settle();
+    const geometry = await js(`(()=>{const rect=element=>element.getBoundingClientRect(),middle=item=>(item.top+item.bottom)/2;
+      const card=cfg.filter.querySelector('.modal-card'),body=card.querySelector('.scenario-config-body');
+      const rows=[...card.querySelectorAll('.scenario-config-multi-row')].map(row=>[...row.children].filter(child=>child.style.visibility!=='hidden').map(rect));
+      const op=card.querySelector('[data-multi-field=op]');
+      const probe=document.createElement('span');probe.style.cssText='position:absolute;visibility:hidden;white-space:nowrap;font:'+getComputedStyle(op).font;
+      probe.textContent='不包含（字段）';document.body.appendChild(probe);const textWidth=probe.getBoundingClientRect().width;probe.remove();
+      const style=getComputedStyle(op),contentWidth=rect(op).width-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight);
+      return {visible:rect(card).width>=600&&rows.flat().every(item=>item.width>0&&item.height>0)&&getComputedStyle(cfg.filter).opacity==='1',
+        rowsOneLine:rows.every(items=>items.every(item=>Math.abs(middle(item)-middle(items[0]))<=2)),
+        compareIsSelect:card.querySelector('.scenario-config-multi-row [data-multi-field=value]').tagName==='SELECT',
+        opTextFits:textWidth<=contentWidth,
+        insideCard:rows.flat().every(item=>item.left>=rect(card).left&&item.right<=rect(card).right),
+        noHorizontalOverflow:body.scrollWidth<=body.clientWidth};})()`);
+    assert.deepEqual(geometry, { visible: true, rowsOneLine: true, compareIsSelect: true, opTextFits: true, insideCard: true, noHorizontalOverflow: true });
+    await layout.evidence(`preprocess-row-filter-${theme}`, { geometry });
   });
 
   for (const theme of ['light', 'dark']) await test(`币种补全输入（${theme}）：维护大账号、币种映射账号管理中补全层与输入框完全重合，无底色/边框外露，补全提示可见`, async () => {

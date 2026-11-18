@@ -251,6 +251,13 @@ function ensureBillSplitRowFilterSupport(db) {
   }
 }
 
+// v3.2.19：模板级「原始账单预处理 → 过滤账单」的过滤规则（JSON；'' 表示未设置）。开关存为映射行，规则随映射【保存】落库。
+function ensureTemplatePreprocessRowFilterSupport(db) {
+  if (!hasColumn(db, 'templates', 'preprocess_row_filter_rules_json')) {
+    db.exec("ALTER TABLE templates ADD COLUMN preprocess_row_filter_rules_json TEXT NOT NULL DEFAULT '';");
+  }
+}
+
 function ensureAccountMappingTemplateSupport(db) {
   if (hasColumn(db, 'account_mappings', 'template_id')) {
     return;
@@ -4542,6 +4549,7 @@ module.exports = {
   ensureTemplateDateFormatSupport,
   ensureTemplateFilenameFixedFieldSupport,
   ensureTemplateFeatureFilterSupport,
+  ensureTemplatePreprocessRowFilterSupport,
   ensureTemplateMappingEnhancements,
   ensureTemplateKeySupport,
   hasColumn,

@@ -63,6 +63,13 @@ const {
   validateBillSplitRowFilterRules
 } = require('./file-service/bill-split-row-filter');
 const {
+  PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
+  compileRowFilterRules,
+  matchesRowFilterRules,
+  normalizeRowFilterRules,
+  validateRowFilterRules
+} = require('./file-service/row-filter-rules');
+const {
   appendCurrencyBigAccountIssues,
   applyCurrencyBigAccountMapping,
   buildCurrencyBigAccountUnmappedError,
@@ -182,7 +189,9 @@ function buildMappedRows({
   dateParseOrder = 'auto',
   readOptions = {},
   // v3.2.16：MerchantId「原始账单仅有币种无账户号」时为 { templateName, pairs: [{ currency, merchantId }] }
-  currencyBigAccountMapping = null
+  currencyBigAccountMapping = null,
+  // v3.2.19：原始账单预处理「过滤账单」的过滤规则（main.js 只在勾选且规则有效时下发，否则为 null）
+  preprocessRowFilterRules = null
 }) {
   // 拿不到 币种 → 大账号 配置时直接拒绝，避免 MerchantId 整列留空静默输出。
   const merchantIdUsesCurrencyMapping = normalizeMappingTokens(mappingByField && mappingByField.MerchantId)[0]
@@ -190,12 +199,12 @@ function buildMappedRows({
   if (merchantIdUsesCurrencyMapping && !currencyBigAccountMapping) {
     throw createCurrencyBigAccountConfigMissingError('');
   }
-  const { rows, rowNumbers, headerBreaks = [] } = readRowsWithMetadata(
+  const { rows: sourceRows, rowNumbers: sourceRowNumbers, headerBreaks = [] } = readRowsWithMetadata(
     inputFilePath,
     expectedSourceHeaders,
     readOptions
   );
-  const sourceHeaders = rows[0] || [];
+  const sourceHeaders = sourceRows[0] || [];
   const sourceIndexByField = new Map();
   const issues = [];
   const rowMetas = [];
@@ -270,6 +279,11 @@ function buildMappedRows({
     }
   });
 
+  // v3.2.19：原始账单预处理「过滤账单」——只保留命中过滤规则的源行（原始账单加工表），未命中的行不参与之后的
+  //   主映射、拆分/合并、合计行识别与各项统计；保留行的行号仍是源文件物理行号。规则字段不在源文件表头中时拒绝生成。
+  const preprocessed = applyPreprocessRowFilter(sourceRows, sourceRowNumbers, preprocessRowFilterRules, sourceIndexByField);
+  const { rows, rowNumbers } = preprocessed;
+
   const compiledBillSplitRowFilter = billSplitRowFilterRules
     ? compileBillSplitRowFilter(billSplitRowFilterRules, sourceIndexByField)
     : null;
@@ -312,6 +326,10 @@ function buildMappedRows({
     return { id, name, rule, sourceIndex };
   });
   const activeFeatureFilterById = new Map(activeFeatureFilters.map((item) => [item.id, item]));
+  // 一行源数据的特征值 { id → 值 }；主循环逐行更新 currentRowFeatureValues。
+  const extractRowFeatureValues = (row) => new Map(activeFeatureFilters.map((item) => (
+    [item.id, extractFeatureValue(row[item.sourceIndex], item.rule)]
+  )));
   let currentRowFeatureValues = new Map();
 
   if (amountSplitEnabled) {
@@ -380,7 +398,8 @@ function buildMappedRows({
     return normalizedValue ? [normalizedValue] : [];
   }
 
-  function resolveMappedPartsByTokens(mappingTokens, row) {
+  // featureValues：该行的特征值；默认取主循环当前行（currentRowFeatureValues），其他行须显式传入。
+  function resolveMappedPartsByTokens(mappingTokens, row, featureValues = currentRowFeatureValues) {
     return mappingTokens.map((token) => {
       if (token.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
         return token.slice(FIXED_FIELD_VALUE_PREFIX.length);
@@ -388,7 +407,7 @@ function buildMappedRows({
 
       const featureFilterId = parseFeatureFilterToken(token);
       if (featureFilterId !== null) {
-        return currentRowFeatureValues.get(featureFilterId) ?? '';
+        return featureValues.get(featureFilterId) ?? '';
       }
 
       const sourceIndex = sourceIndexByField.get(token);
@@ -408,14 +427,14 @@ function buildMappedRows({
       .join('');
   }
 
-  function resolveDateRawValueByMapping(mappingValue, row) {
+  function resolveDateRawValueByMapping(mappingValue, row, featureValues = currentRowFeatureValues) {
     const mappingTokens = normalizeMappingTokens(mappingValue);
 
     if (!mappingTokens.length) {
       return '';
     }
 
-    return resolveMappedPartsByTokens(mappingTokens, row)
+    return resolveMappedPartsByTokens(mappingTokens, row, featureValues)
       .map((value) => normalizeCell(value))
       .filter((value) => value !== '')
       .join(' ');
@@ -736,9 +755,7 @@ function buildMappedRows({
     if (rowUsesBillSplit) {
       billSplitPathRowCount += 1;
     }
-    currentRowFeatureValues = new Map(activeFeatureFilters.map((item) => (
-      [item.id, extractFeatureValue(row[item.sourceIndex], item.rule)]
-    )));
+    currentRowFeatureValues = extractRowFeatureValues(row);
     const directCreditAmountRaw = resolveRawValueByMapping(mappingByField['Credit Amount'], row);
     const directDebitAmountRaw = resolveRawValueByMapping(mappingByField['Debit Amount'], row);
     const signedAmountValue = signedAmountSourceField
@@ -1109,7 +1126,58 @@ function buildMappedRows({
     };
   }
 
+  if (preprocessed.enabled) {
+    // 被过滤的行未进入主循环，日期取特征值时按该行单独计算，不能沿用主循环最后一行的特征值。
+    // v3.2.19：原始账单预处理——读到的数据行数与保留（命中过滤规则）的行数，过滤后没有账单行时提示检查规则。
+    //   droppedTransactionRowNumbers：被过滤掉、但账单日期可识别（即本会作为交易行）的源行号。多账户分段文件识别
+    //   下一段表头前的账号时，以上一段最后一笔交易为界（main.js finalizeBigAccountRecognitionBasis），被过滤的交易行
+    //   仍算作上一段的交易，避免其中的账号被当成下一段的账号。
+    const billDateMappings = [mappingByField && mappingByField.BillDate]
+      .concat(billSplitEnabled && !billSplitReuseModuleMapping ? [billSplitMappingByField.BillDate] : []);
+    mappedRows.preprocessRowFilterStats = {
+      enabled: true,
+      totalRows: preprocessed.totalRows,
+      keptRows: preprocessed.keptRows,
+      droppedTransactionRowNumbers: preprocessed.droppedRows
+        .filter(({ row }) => {
+          const featureValues = extractRowFeatureValues(row);
+          return billDateMappings.some((mappingValue) => Boolean(
+            normalizeDateExportValue(resolveDateRawValueByMapping(mappingValue, row, featureValues), { dateParseOrder }).value
+          ));
+        })
+        .map(({ rowNumber }) => rowNumber)
+    };
+  }
+
   return mappedRows;
+}
+
+// v3.2.19：原始账单预处理「过滤账单」。rows[0] 为表头；rowNumbers 与 rows 平行（缺失时按 下标 + 1 回落，同主循环口径）。
+// 没有规则时原样返回。
+function applyPreprocessRowFilter(sourceRows, sourceRowNumbers, rules, sourceIndexByField) {
+  const totalRows = sourceRows.length > 0 ? sourceRows.length - 1 : 0;
+  if (!Array.isArray(rules) || rules.length === 0) {
+    return { enabled: false, rows: sourceRows, rowNumbers: sourceRowNumbers, totalRows, keptRows: totalRows, droppedRows: [] };
+  }
+  const compiled = compileRowFilterRules(rules, sourceIndexByField, {
+    missingMessage: PREPROCESS_ROW_FILTER_MISSING_MESSAGE
+  });
+  if (!sourceRows.length) {
+    return { enabled: true, rows: sourceRows, rowNumbers: sourceRowNumbers, totalRows: 0, keptRows: 0, droppedRows: [] };
+  }
+  const rows = [sourceRows[0]];
+  const rowNumbers = [sourceRowNumbers[0]];
+  const droppedRows = [];
+  for (let index = 1; index < sourceRows.length; index += 1) {
+    const rowNumber = sourceRowNumbers[index] || index + 1;
+    if (matchesRowFilterRules(sourceRows[index], compiled)) {
+      rows.push(sourceRows[index]);
+      rowNumbers.push(rowNumber);
+    } else {
+      droppedRows.push({ row: sourceRows[index], rowNumber });
+    }
+  }
+  return { enabled: true, rows, rowNumbers, totalRows, keptRows: rows.length - 1, droppedRows };
 }
 
 function buildDetailExportRows(rows) {
@@ -1285,6 +1353,9 @@ module.exports = {
   collectBillSplitRowFilterFields,
   normalizeBillSplitRowFilterRules,
   validateBillSplitRowFilterRules,
+  PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
+  normalizeRowFilterRules,
+  validateRowFilterRules,
   normalizeDateExportValue,
   buildFeatureFilterToken,
   getFeatureFilterRef,

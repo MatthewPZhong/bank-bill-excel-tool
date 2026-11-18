@@ -95,6 +95,7 @@ const {
   ensureTemplateDateFormatSupport,
   ensureTemplateFilenameFixedFieldSupport,
   ensureTemplateFeatureFilterSupport,
+  ensureTemplatePreprocessRowFilterSupport,
   ensureTemplateKeySupport,
   ensureTemplateMappingEnhancements,
   hasColumn
@@ -265,6 +266,7 @@ class AppDatabase {
     this.ensureParentTemplateSupport();
     this.ensureTemplateFilenameFixedFieldSupport();
     this.ensureTemplateFeatureFilterSupport();
+    this.ensureTemplatePreprocessRowFilterSupport();
     this.ensureAccountMappingTemplateSupport();
     this.ensureTemplateBigAccountNatureSupport();
     this.ensureTemplateCurrencyBigAccountSupport();
@@ -795,6 +797,10 @@ class AppDatabase {
 
   ensureTemplateFeatureFilterSupport() {
     return ensureTemplateFeatureFilterSupport(this.db);
+  }
+
+  ensureTemplatePreprocessRowFilterSupport() {
+    return ensureTemplatePreprocessRowFilterSupport(this.db);
   }
 
   ensureAccountMappingTemplateSupport() {

@@ -11,6 +11,7 @@ const {
 const { MERCHANT_ID_CURRENCY_ONLY_MARKER } = require('../file-service/common');
 const { normalizeFeeAmountFormula } = require('../file-service/bill-split-fee-formula');
 const { normalizeBillSplitRowFilterRules } = require('../file-service/bill-split-row-filter');
+const { normalizeRowFilterRules } = require('../file-service/row-filter-rules');
 
 function listTemplates(db) {
   // v1.5.3 R2 §3.1：bigAccountCount / singleBigAccountMerchantId 不含自有账号
@@ -29,6 +30,7 @@ function listTemplates(db) {
       sc.name AS channelName,
       t.filename_fixed_field AS filenameFixedField,
       t.feature_filter_json AS featureFilterJson,
+      t.preprocess_row_filter_rules_json AS preprocessRowFilterRulesJson,
       COUNT(DISTINCT m.id) AS mappingCount,
       COUNT(DISTINCT ba.merchant_id) AS bigAccountCount,
       merchant_mapping.mapped_field AS merchantIdMappedField,
@@ -69,6 +71,7 @@ function getTemplate(db, templateId) {
         (SELECT sc.name FROM statement_channels sc WHERE sc.id = t.channel_id) AS channelName,
         t.filename_fixed_field AS filenameFixedField,
         t.feature_filter_json AS featureFilterJson,
+        t.preprocess_row_filter_rules_json AS preprocessRowFilterRulesJson,
         (
           SELECT COUNT(1)
           FROM template_mappings m
@@ -170,6 +173,8 @@ function upsertTemplate(db, { templateKey = '', name, sourceFileName, headers })
         .run(normalizedTemplateKey, name, sourceFileName, JSON.stringify(headers), now, existing.id);
       // v3.2.16：表头被覆盖、映射清空时，特征值（引用旧表头）一并清空
       db.prepare("UPDATE templates SET feature_filter_json = '' WHERE id = ?").run(existing.id);
+      // v3.2.19：原始账单预处理的过滤规则同样引用旧表头，一并清空
+      db.prepare("UPDATE templates SET preprocess_row_filter_rules_json = '' WHERE id = ?").run(existing.id);
       db.prepare('DELETE FROM template_mappings WHERE template_id = ?').run(existing.id);
       db.prepare('DELETE FROM template_big_accounts WHERE template_id = ?').run(existing.id);
       db.prepare('DELETE FROM template_fixed_assignments WHERE template_id = ?').run(existing.id);
@@ -425,6 +430,16 @@ function writeTemplateFeatureFilters(db, templateId, featureFilters) {
     .run(featureFilters.length ? JSON.stringify(featureFilters) : '', templateId);
 }
 
+// v3.2.19：写入「原始账单预处理 → 过滤账单」的过滤规则；调用方须在事务内调用。数组时整体替换，null / undefined 不动。
+function writeTemplatePreprocessRowFilterRules(db, templateId, rules) {
+  if (!Array.isArray(rules)) {
+    return;
+  }
+  const normalized = normalizeRowFilterRules(rules);
+  db.prepare('UPDATE templates SET preprocess_row_filter_rules_json = ? WHERE id = ?')
+    .run(normalized.length ? JSON.stringify(normalized) : '', templateId);
+}
+
 // v3.2.18：已保存的主映射与拆分映射中选「字段筛选特征值」的行及其所选特征值 id（ref 未选为 ''）。
 function listTemplateFeatureFilterReferences(db, templateId, featureFilterMappingValue) {
   const pick = (scope, rows) => rows
@@ -477,7 +492,8 @@ function saveMappings(
     channelAssignment = null,
     featureFilters = undefined,
     currencyBigAccounts = null,
-    billSplitRowFilterRules = null
+    billSplitRowFilterRules = null,
+    preprocessRowFilterRules = null
   } = {}
 ) {
   const now = new Date().toISOString();
@@ -628,6 +644,8 @@ function saveMappings(
     if (Array.isArray(billSplitRowFilterRules)) {
       saveBillSplitMeta(db, templateId, { rowFilterRules: billSplitRowFilterRules });
     }
+    // v3.2.19：「原始账单预处理 → 过滤账单」的过滤规则同样随映射【保存】落库；未传（null）时保持原值。
+    writeTemplatePreprocessRowFilterRules(db, templateId, preprocessRowFilterRules);
 
     if (dateFormat) {
       db.prepare('UPDATE templates SET updated_at = ?, date_format = ? WHERE id = ?').run(now, dateFormat, templateId);
@@ -1134,6 +1152,8 @@ function listTemplateBundleEntries(db) {
       featureFilters: Array.isArray(template.featureFilters)
         ? template.featureFilters.map((item) => ({ ...item }))
         : [],
+      // v3.2.19（bundle v8）：原始账单预处理的过滤规则；「过滤账单」开关是映射行，已在 mappings 中
+      preprocessRowFilterRules: normalizeRowFilterRules(template.preprocessRowFilterRules),
       createdAt: template.createdAt,
       updatedAt: template.updatedAt
     };

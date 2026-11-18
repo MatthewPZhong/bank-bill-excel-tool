@@ -21,7 +21,9 @@ const {
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
-  normalizeCell
+  normalizeCell,
+  PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
+  validateRowFilterRules
 } = require('../../../src/backend/file-service');
 const { normalizeMaintainedBigAccounts } = require('../../../src/main-process/big-account-recognition');
 
@@ -30,9 +32,10 @@ const MAIN_AST = acorn.parse(MAIN_SOURCE, { ecmaVersion: 'latest', sourceType: '
 const SPLIT = '是否拆分/合并明细账单';
 const REUSE = '复用模块字段的映射关系';
 const ROW_FILTER = '根据字段值过滤账单';
+const PREPROCESS = '过滤账单';
 const TARGET_FIELDS = [
   'BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount', 'Payee Name', 'Balance',
-  '按正负号拆分的发生额', '按字段区分发生额', SPLIT, REUSE, ROW_FILTER
+  PREPROCESS, '按正负号拆分的发生额', '按字段区分发生额', SPLIT, REUSE, ROW_FILTER
 ];
 
 function readTopLevelLiteralConstants() {
@@ -69,8 +72,12 @@ const fns = loadMainFunctions([
   'expandBigAccountConfigurations',
   'decodeCustomInputMappingValue',
   'extractFixedMappingValue',
-  'resolveStatementFeatureFilters'
+  'resolveStatementFeatureFilters',
+  'isPreprocessRowFilterEnabled',
+  'buildPreprocessRowFilterRules'
 ], {
+  PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
+  validateRowFilterRules,
   ...CONSTANTS,
   FIXED_FIELD_VALUE_PREFIX,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
@@ -197,5 +204,30 @@ test('不复用模块映射时：勾选过滤后主映射所选特征值也须�
   assert.deepEqual(
     Object.keys(fns.resolveStatementFeatureFilters(template, { 'Payee Name': token }, splitConfig([{ seq: 1, conditions: [] }]))),
     ['f1']
+  );
+});
+
+test('原始账单预处理「过滤账单」：开关规范为 是 / 空，与拆分/合并无关', () => {
+  const on = validate({ [SPLIT]: '', 'Credit Amount': '收入', [PREPROCESS]: '是' });
+  assert.equal(on.usesPreprocessRowFilter, true);
+  assert.equal(valueOf(on, PREPROCESS), '是');
+  const off = validate({ [SPLIT]: '', 'Credit Amount': '收入', [PREPROCESS]: '否' });
+  assert.equal(off.usesPreprocessRowFilter, false);
+  assert.equal(valueOf(off, PREPROCESS), '');
+  assert.equal(validate({ [PREPROCESS]: '是' }).usesPreprocessRowFilter, true);
+});
+
+test('原始账单预处理生成配置：勾选时下发有效规则，规则缺失或无效拒绝生成，未勾选为 null', () => {
+  const template = { name: '过滤模板', preprocessRowFilterRules: [{ seq: 1, conditions: [{ field: '类型', op: '等于（字段）', value: '附言' }] }] };
+  const enabled = [{ templateField: PREPROCESS, mappedField: '是' }];
+  assert.deepEqual(fns.buildPreprocessRowFilterRules(template, enabled), template.preprocessRowFilterRules);
+  assert.equal(fns.buildPreprocessRowFilterRules(template, [{ templateField: PREPROCESS, mappedField: '' }]), null);
+  assert.throws(
+    () => fns.buildPreprocessRowFilterRules({ name: '过滤模板', preprocessRowFilterRules: [] }, enabled),
+    (error) => error.code === 'PREPROCESS_ROW_FILTER_MISSING' && /已勾选原始账单预处理「过滤账单」，但过滤规则未设置完整/.test(error.message)
+  );
+  assert.throws(
+    () => fns.buildPreprocessRowFilterRules({ name: '过滤模板', preprocessRowFilterRules: [{ conditions: [{ field: '类型', op: '包含（字段）', value: '' }] }] }, enabled),
+    /请选择比较字段/
   );
 });

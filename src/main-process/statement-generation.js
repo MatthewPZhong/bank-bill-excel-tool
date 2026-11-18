@@ -148,6 +148,9 @@ function createStatementGenerationHelpers(deps) {
         : [],
       unmatchedBillSplitFiles: Array.isArray(preparedBatch.unmatchedBillSplitFiles)
         ? preparedBatch.unmatchedBillSplitFiles.slice()
+        : [],
+      emptyPreprocessedFiles: Array.isArray(preparedBatch.emptyPreprocessedFiles)
+        ? preparedBatch.emptyPreprocessedFiles.slice()
         : []
     };
 
@@ -397,9 +400,34 @@ function createStatementGenerationHelpers(deps) {
     return unmatched;
   }
 
+  // v3.2.19：收集勾选了原始账单预处理「过滤账单」、读到数据行但没有一行命中过滤规则的文件名
+  //   （preprocessRowFilterStats.totalRows > 0 且 keptRows === 0），生成后提示检查过滤规则。
+  function collectEmptyPreprocessedFiles(fileEntries) {
+    const emptyFiles = [];
+
+    fileEntries.forEach((entry) => {
+      const stats = entry?.detailRows?.preprocessRowFilterStats;
+      if (!stats || !stats.enabled) {
+        return;
+      }
+      if (stats.totalRows > 0 && stats.keptRows === 0) {
+        const filePath = entry.filePath || '';
+        const displayName = filePath && filePath !== '__cached__'
+          ? path.basename(filePath)
+          : filePath;
+        if (displayName) {
+          emptyFiles.push(displayName);
+        }
+      }
+    });
+
+    return emptyFiles;
+  }
+
   function buildPreparedStatementBatchFromEntries({ config, fileEntries = [] }) {
     const unmatchedFiles = collectUnmatchedAmountSplitFiles(fileEntries);
     const unmatchedBillSplitFiles = collectUnmatchedBillSplitFiles(fileEntries);
+    const emptyPreprocessedFiles = collectEmptyPreprocessedFiles(fileEntries);
     const detailRows = mergeMappedDetailRows(fileEntries.map((entry) => entry.detailRows));
     const selectedMerchantId = config.selectedMerchantId || resolveSinglePreparedFieldValue(detailRows, 'MerchantId', {
       buildFieldIndexMap,
@@ -419,7 +447,8 @@ function createStatementGenerationHelpers(deps) {
       selectedCurrency,
       inputFilePaths: fileEntries.map((entry) => entry.filePath),
       unmatchedAmountSplitFiles: unmatchedFiles,
-      unmatchedBillSplitFiles
+      unmatchedBillSplitFiles,
+      emptyPreprocessedFiles
     };
   }
 
@@ -517,6 +546,10 @@ function createStatementGenerationHelpers(deps) {
     const unmatchedBillSplitFiles = Array.isArray(generatedFiles.unmatchedBillSplitFiles)
       ? generatedFiles.unmatchedBillSplitFiles.slice()
       : [];
+    // v3.2.19：原始账单预处理过滤后没有账单行的文件
+    const emptyPreprocessedFiles = Array.isArray(generatedFiles.emptyPreprocessedFiles)
+      ? generatedFiles.emptyPreprocessedFiles.slice()
+      : [];
 
     if (manualBalanceWarning) {
       const manualResult = buildManualBalanceRequiredResult(manualBalanceWarning.prompt, generatedFiles);
@@ -525,6 +558,9 @@ function createStatementGenerationHelpers(deps) {
       }
       if (unmatchedBillSplitFiles.length) {
         manualResult.unmatchedBillSplitFiles = unmatchedBillSplitFiles;
+      }
+      if (emptyPreprocessedFiles.length) {
+        manualResult.emptyPreprocessedFiles = emptyPreprocessedFiles;
       }
       return manualResult;
     }
@@ -538,6 +574,9 @@ function createStatementGenerationHelpers(deps) {
       if (unmatchedBillSplitFiles.length) {
         gapResult.unmatchedBillSplitFiles = unmatchedBillSplitFiles;
       }
+      if (emptyPreprocessedFiles.length) {
+        gapResult.emptyPreprocessedFiles = emptyPreprocessedFiles;
+      }
       return gapResult;
     }
 
@@ -550,6 +589,9 @@ function createStatementGenerationHelpers(deps) {
       if (unmatchedBillSplitFiles.length) {
         mismatchResult.unmatchedBillSplitFiles = unmatchedBillSplitFiles;
       }
+      if (emptyPreprocessedFiles.length) {
+        mismatchResult.emptyPreprocessedFiles = emptyPreprocessedFiles;
+      }
       return mismatchResult;
     }
 
@@ -561,6 +603,9 @@ function createStatementGenerationHelpers(deps) {
       }
       if (unmatchedBillSplitFiles.length) {
         replaceResult.unmatchedBillSplitFiles = unmatchedBillSplitFiles;
+      }
+      if (emptyPreprocessedFiles.length) {
+        replaceResult.emptyPreprocessedFiles = emptyPreprocessedFiles;
       }
       return replaceResult;
     }
@@ -595,6 +640,9 @@ function createStatementGenerationHelpers(deps) {
       if (unmatchedBillSplitFiles.length) {
         warningResult.unmatchedBillSplitFiles = unmatchedBillSplitFiles;
       }
+      if (emptyPreprocessedFiles.length) {
+        warningResult.emptyPreprocessedFiles = emptyPreprocessedFiles;
+      }
 
       return warningResult;
     }
@@ -617,7 +665,8 @@ function createStatementGenerationHelpers(deps) {
       detailReady: Boolean(generatedFiles.detail),
       balanceReady: Boolean(generatedFiles.balance),
       unmatchedAmountSplitFiles,
-      unmatchedBillSplitFiles
+      unmatchedBillSplitFiles,
+      emptyPreprocessedFiles
     };
   }
 

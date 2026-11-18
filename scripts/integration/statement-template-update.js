@@ -42,6 +42,9 @@ const {
   normalizeCell,
   normalizeFeeAmountFormula,
   normalizeBillSplitRowFilterRules,
+  normalizeRowFilterRules,
+  validateRowFilterRules,
+  PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
   validateFeeAmountFormula,
   validateBillSplitRowFilterRules,
   writeWorkbookRows
@@ -113,6 +116,7 @@ const CONSTANTS = loadMainConstants([
   'AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD', 'AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION',
   'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
   'BILL_SPLIT_ROW_FILTER_MAPPING_FIELD', 'BILL_SPLIT_ROW_FILTER_ENABLED_OPTION',
+  'PREPROCESS_ROW_FILTER_MAPPING_FIELD', 'PREPROCESS_ROW_FILTER_ENABLED_OPTION', 'PREPROCESS_FIELDS',
   'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS', 'FILENAME_MAPPING_TEMPLATE_ID', 'MISSING_ENUM_MESSAGE',
   'SIGNED_AMOUNT_MAPPING_FIELD',
   'LEGACY_ORIENTED_MAPPINGS_MESSAGE'
@@ -137,7 +141,7 @@ function pickColumns(rows, names) {
 
 function createMain(database, spies) {
   return loadMainFunctions([
-    'validateTemplateConfiguration',
+    'validateTemplateConfiguration', 'isPreprocessRowFilterEnabled',
     'validateFeatureFiltersPayload',
     'collectFeatureFilterRefs',
     'buildExportTargetFields',
@@ -155,7 +159,7 @@ function createMain(database, spies) {
     'getTemplateMappingConfig',
     'buildMappedFieldLookup',
     'normalizeLookupMappingValue',
-    'buildStatementGenerationConfig',
+    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'isPreprocessRowFilterEnabled',
     'resolveStatementFeatureFilters',
     'buildBillSplitMergeConfig',
     'buildAmountSplitByFieldConfig',
@@ -185,6 +189,9 @@ function createMain(database, spies) {
     // v3.2.19：拆分配置的费用账单公式（映射配置、生成配置）
     normalizeFeeAmountFormula,
     normalizeBillSplitRowFilterRules,
+    normalizeRowFilterRules,
+    validateRowFilterRules,
+    PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
     validateFeeAmountFormula,
     validateBillSplitRowFilterRules,
     FileValidationError,

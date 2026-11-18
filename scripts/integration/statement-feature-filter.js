@@ -37,6 +37,9 @@ const {
   normalizeCell,
   normalizeFeeAmountFormula,
   normalizeBillSplitRowFilterRules,
+  normalizeRowFilterRules,
+  validateRowFilterRules,
+  PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
   validateFeeAmountFormula,
   validateBillSplitRowFilterRules,
   normalizeFeatureFilterList,
@@ -112,6 +115,7 @@ const CONSTANTS = loadMainConstants([
   'AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD', 'AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION',
   'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
   'BILL_SPLIT_ROW_FILTER_MAPPING_FIELD', 'BILL_SPLIT_ROW_FILTER_ENABLED_OPTION',
+  'PREPROCESS_ROW_FILTER_MAPPING_FIELD', 'PREPROCESS_ROW_FILTER_ENABLED_OPTION', 'PREPROCESS_FIELDS',
   'SUPPORTED_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION', 'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS'
 ]);
 const FEATURE = CONSTANTS.FEATURE_FILTER_MAPPING_FIELD;
@@ -150,7 +154,7 @@ function closeDatabase(database) {
 
 function createMain(database, constantOverrides = {}) {
   return loadMainFunctions([
-    'validateTemplateConfiguration',
+    'validateTemplateConfiguration', 'isPreprocessRowFilterEnabled',
     'validateFeatureFiltersPayload',
     'collectFeatureFilterRefs',
     'buildExportTargetFields',
@@ -165,7 +169,7 @@ function createMain(database, constantOverrides = {}) {
     'normalizeExportMappingRows',
     'buildMappedFieldLookup',
     'normalizeLookupMappingValue',
-    'buildStatementGenerationConfig',
+    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'isPreprocessRowFilterEnabled',
     'resolveStatementFeatureFilters',
     'buildBillSplitMergeConfig',
     'buildAmountSplitByFieldConfig',
@@ -177,7 +181,7 @@ function createMain(database, constantOverrides = {}) {
     'normalizeBundleBillSplitMeta',
     'readTemplateBundleFile',
     'upgradeLegacyBundleFeatureFilterRefs',
-    'resolveTemplateBundleVersion',
+    'resolveTemplateBundleVersion', 'isPreprocessRowFilterEnabled',
     // v3.2.16 同轮合入的「原始账单仅有币种无账户号」：校验、生成配置与模板包版本会引用
     'validateCurrencyBigAccountConfiguration',
     'buildCurrencyBigAccountMappingConfig',
@@ -193,6 +197,9 @@ function createMain(database, constantOverrides = {}) {
     // v3.2.19：拆分配置的费用账单公式（模板包读取、生成配置）
     normalizeFeeAmountFormula,
     normalizeBillSplitRowFilterRules,
+    normalizeRowFilterRules,
+    validateRowFilterRules,
+    PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
     validateFeeAmountFormula,
     validateBillSplitRowFilterRules,
     FileValidationError,

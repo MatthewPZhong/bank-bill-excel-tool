@@ -23,6 +23,7 @@ const {
   normalizeCell,
   normalizeFeeAmountFormula,
   normalizeBillSplitRowFilterRules,
+  normalizeRowFilterRules,
   upgradeLegacyFeatureFilter
 } = require('../../../src/backend/file-service');
 const { matchMerchantIds, resolveRecognizedBigAccount } = require('../../../src/main-process/big-account-recognition');
@@ -44,7 +45,9 @@ const MAIN_DEPS = {
   upgradeLegacyFeatureFilter,
   // v3.2.19：拆分配置（含费用账单公式）规范化
   normalizeFeeAmountFormula,
-  normalizeBillSplitRowFilterRules
+  normalizeBillSplitRowFilterRules,
+  // v3.2.19：原始账单预处理的过滤规则
+  normalizeRowFilterRules
 };
 
 function loadMainFunction(name) {

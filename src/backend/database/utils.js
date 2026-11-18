@@ -1,6 +1,7 @@
 const FIXED_FIELD_VALUE_PREFIX = '__FIXED__:';
 const MERCHANT_ID_MULTI_ACCOUNT_MARKER = '__MULTI_BIG_ACCOUNT__';
 const { MERCHANT_ID_CURRENCY_ONLY_MARKER } = require('../file-service/common');
+const { normalizeRowFilterRules } = require('../file-service/row-filter-rules');
 
 function normalizeText(value) {
   if (value === null || value === undefined) {
@@ -126,7 +127,9 @@ function buildTemplateSummaryFromRow(row) {
     // v1.5.2 需求 3：按文件名映射模板的固定字段（默认空串）
     filenameFixedField: normalizeText(row.filenameFixedField),
     // v3.2.16：模板级「字段筛选特征值」规则；v3.2.18 起为特征值数组（未设置为 []）
-    featureFilters: parseFeatureFilterList(row.featureFilterJson)
+    featureFilters: parseFeatureFilterList(row.featureFilterJson),
+    // v3.2.19：「原始账单预处理 → 过滤账单」的过滤规则（未设置为 []；开关是映射行）
+    preprocessRowFilterRules: normalizeRowFilterRules(row.preprocessRowFilterRulesJson)
   };
 }
 

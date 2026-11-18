@@ -230,6 +230,9 @@ function createEnvironment(dir, label) {
     MERCHANT_ID_CURRENCY_ONLY_OPTION: '原始账单仅有币种无账户号',
     mapEachCollectingCurrencyBigAccountIssues,
     ADVANCED_MAPPING_FIELDS: [],
+    // v3.2.19：原始账单预处理「过滤账单」（本脚本不使用，仅满足生成配置的依赖）
+    PREPROCESS_ROW_FILTER_MAPPING_FIELD: '过滤账单',
+    PREPROCESS_ROW_FILTER_ENABLED_OPTION: '是',
     BALANCE_DISABLED_OPTION: '无',
     BALANCE_CALCULATED_OPTION: '通过发生额计算',
     CONCAT_FIELDS_MAPPING_FIELD: '__CONCAT__',
@@ -304,7 +307,7 @@ function createEnvironment(dir, label) {
     'normalizeMappedFields',
     'getMappingFieldValues',
     'getPrimaryMappedField',
-    'buildStatementGenerationConfig',
+    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'isPreprocessRowFilterEnabled',
     'resolveStatementFeatureFilters',
     'buildCurrencyBigAccountMappingConfig',
     'buildMappedRowsForFile',

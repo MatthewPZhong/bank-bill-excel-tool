@@ -2748,12 +2748,14 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
 
 .bill-split-rows-footer { padding: 14px 28px 18px; }
 
-/* v3.2.19 根据字段值过滤账单：过滤规则设置（沿用场景管理「账单类型」的 scenario-config-* 样式） */
-.bill-split-row-filter-card .scenario-config-multi-wrap { min-width: 0; }
+/* v3.2.19 过滤规则设置（根据字段值过滤账单 / 原始账单预处理共用；沿用场景管理「账单类型」的 scenario-config-* 样式） */
+.row-filter-rules-card .scenario-config-multi-wrap { min-width: 0; }
 /* 场景弹窗靠「复制场景」把×推到右侧并取消了×的 auto；本弹窗没有该组，×恢复靠右 */
-.scenario-config-card.bill-split-row-filter-card .dialog-header .icon-close { margin-left: auto; }
-.bill-split-row-filter-card .scenario-config-input.is-stale { border-color: var(--danger); color: var(--danger); }
-.bill-split-row-filter-card .scenario-config-multi-row > .text-action { flex: 0 0 auto; white-space: nowrap; }
+.scenario-config-card.row-filter-rules-card .dialog-header .icon-close { margin-left: auto; }
+.row-filter-rules-card .scenario-config-input.is-stale { border-color: var(--danger); color: var(--danger); }
+.row-filter-rules-card .scenario-config-multi-row > .text-action { flex: 0 0 auto; white-space: nowrap; }
+/* 运算符含「不包含（字段）」等较长选项，比场景弹窗的 100px 窄下拉框放宽，避免截断 */
+.row-filter-rules-card .scenario-config-input-narrow { flex: 0 0 136px; width: 136px; }
 
 /* =================== Big-account · currency dropdown (open state) =================== */
 .currency-cell { position: relative; overflow: visible; }

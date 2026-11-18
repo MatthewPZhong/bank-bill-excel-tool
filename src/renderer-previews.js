@@ -211,6 +211,8 @@
           'Payee Cardno',
           'Drawee Name',
           'Drawee CardNo',
+          // v3.2.19：原始账单预处理
+          '过滤账单',
           SIGNED_AMOUNT_MAPPING_FIELD,
           AMOUNT_BASED_NAME_MAPPING_FIELD,
           AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
@@ -243,6 +245,7 @@
             isMultiBigAccount: true
           }
         ],
+        preprocessFields: ['过滤账单'],
         advancedMappingFields: ADVANCED_MAPPING_FIELDS.slice()
       };
     }

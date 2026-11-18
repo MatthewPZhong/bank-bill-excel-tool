@@ -32,6 +32,9 @@ const {
   normalizeCell,
   normalizeFeeAmountFormula,
   normalizeBillSplitRowFilterRules,
+  normalizeRowFilterRules,
+  validateRowFilterRules,
+  PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
   upgradeLegacyFeatureFilter,
   validateFeeAmountFormula,
   validateBillSplitRowFilterRules,
@@ -104,6 +107,7 @@ const CONSTANTS = loadMainConstants([
   'AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD', 'AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION',
   'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
   'BILL_SPLIT_ROW_FILTER_MAPPING_FIELD', 'BILL_SPLIT_ROW_FILTER_ENABLED_OPTION',
+  'PREPROCESS_ROW_FILTER_MAPPING_FIELD', 'PREPROCESS_ROW_FILTER_ENABLED_OPTION', 'PREPROCESS_FIELDS',
   'SUPPORTED_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION'
 ]);
 
@@ -120,7 +124,7 @@ function createMain(database, constantOverrides = {}) {
     'normalizeBundleBillSplitMeta',
     'upgradeLegacyBundleFeatureFilterRefs',
     'readTemplateBundleFile',
-    'resolveTemplateBundleVersion',
+    'resolveTemplateBundleVersion', 'isPreprocessRowFilterEnabled',
     'isCurrencyOnlyMerchantMapping'
   ], {
     ...CONSTANTS,
@@ -130,6 +134,9 @@ function createMain(database, constantOverrides = {}) {
     normalizeCell,
     normalizeFeeAmountFormula,
     normalizeBillSplitRowFilterRules,
+    normalizeRowFilterRules,
+    validateRowFilterRules,
+    PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
     validateFeeAmountFormula,
     validateBillSplitRowFilterRules,
     FileValidationError,

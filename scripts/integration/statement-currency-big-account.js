@@ -37,6 +37,9 @@ const {
   normalizeCell,
   normalizeFeeAmountFormula,
   normalizeBillSplitRowFilterRules,
+  normalizeRowFilterRules,
+  validateRowFilterRules,
+  PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
   writeBalanceWorkbook,
   writeWorkbookRows
 } = require('../../src/backend/file-service');
@@ -225,6 +228,9 @@ function createEnvironment(dir, label) {
     normalizeCell,
     normalizeFeeAmountFormula,
     normalizeBillSplitRowFilterRules,
+    normalizeRowFilterRules,
+    validateRowFilterRules,
+    PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
     sanitizeFileName,
     splitTemplateName,
     FileValidationError,
@@ -293,7 +299,7 @@ function createEnvironment(dir, label) {
     'normalizeMappedFields',
     'getMappingFieldValues',
     'getPrimaryMappedField',
-    'buildStatementGenerationConfig',
+    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'isPreprocessRowFilterEnabled',
     'buildCurrencyBigAccountMappingConfig',
     'buildMappedRowsForFile',
     'getEntryTemplateConfig',
@@ -310,7 +316,7 @@ function createEnvironment(dir, label) {
     'buildStatementOutputNameConflictError',
     'findGenerationGroupOutputPathConflicts',
     'buildStatementOutputPathConflictError',
-    'validateTemplateConfiguration',
+    'validateTemplateConfiguration', 'isPreprocessRowFilterEnabled',
     'validateCurrencyBigAccountConfiguration',
     'collectFeatureFilterRefs',
     'resolveStatementFeatureFilters',
@@ -323,7 +329,7 @@ function createEnvironment(dir, label) {
     'resolveCurrentMappings',
     'readTemplateBundleFile',
     'normalizeBundleBillSplitMeta',
-    'resolveTemplateBundleVersion',
+    'resolveTemplateBundleVersion', 'isPreprocessRowFilterEnabled',
     'isCurrencyOnlyMerchantMapping'
   ], mainDeps));
 

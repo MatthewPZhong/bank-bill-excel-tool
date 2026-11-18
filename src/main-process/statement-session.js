@@ -34,6 +34,11 @@ function cloneRowsWithMetadata(rows = []) {
     clonedRows.billSplitMatchStats = { ...rows.billSplitMatchStats };
   }
 
+  // v3.2.19：原始账单预处理统计（过滤后没有账单行时提示）
+  if (rows.preprocessRowFilterStats && typeof rows.preprocessRowFilterStats === 'object') {
+    clonedRows.preprocessRowFilterStats = { ...rows.preprocessRowFilterStats };
+  }
+
   if (Array.isArray(rows.sourceRows)) {
     clonedRows.sourceRows = cloneRowsWithMetadata(rows.sourceRows);
   }

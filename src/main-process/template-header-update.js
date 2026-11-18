@@ -8,6 +8,7 @@ const {
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   normalizeCell
 } = require('../backend/file-service/common');
+const { isFieldCompareOperator } = require('../backend/file-service/row-filter-rules');
 
 function normalizeHeaderList(headers) {
   return Array.isArray(headers) ? headers.map((header) => normalizeCell(header)) : [];
@@ -47,6 +48,8 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     REUSE_MODULE_MAPPING_FIELD,
     BILL_SPLIT_ROW_FILTER_MAPPING_FIELD,
     BILL_SPLIT_ROW_FILTER_ENABLED_OPTION,
+    PREPROCESS_ROW_FILTER_MAPPING_FIELD,
+    PREPROCESS_ROW_FILTER_ENABLED_OPTION,
     SIGNED_AMOUNT_MAPPING_FIELD,
     AMOUNT_BASED_NAME_MAPPING_FIELD,
     AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
@@ -62,7 +65,8 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD,
     BILL_SPLIT_MERGE_MAPPING_FIELD,
     REUSE_MODULE_MAPPING_FIELD,
-    BILL_SPLIT_ROW_FILTER_MAPPING_FIELD
+    BILL_SPLIT_ROW_FILTER_MAPPING_FIELD,
+    PREPROCESS_ROW_FILTER_MAPPING_FIELD
   ].filter(Boolean));
   // 规则类引用（判断字段、取值字段、拆分行字段、筛选字段）：非空且不是固定值即为源字段。
   function isRuleSourceValue(value) {
@@ -129,6 +133,7 @@ function createTemplateHeaderUpdateTools(constants = {}) {
   // 拆分金额规则与按正负号拆分的字段，不复用主映射时还读取拆分映射；
   // 费用账单发生额公式（v3.2.19）在拆分开启、勾选特殊取值且有已完成的费用账单行时读取；
   // 过滤规则（v3.2.19）在拆分开启且勾选「根据字段值过滤账单」时读取，此时未命中的行走主映射；
+  // 原始账单预处理「过滤账单」的过滤规则（v3.2.19）勾选即读取，与拆分无关；两类规则的字段运算还读取比较字段；
   // 特征值（v3.2.18 起可有多个）各自的筛选字段只在实际生效的映射选用该特征值时读取。
   function collectTemplateFieldReferences(input = {}) {
     const mappings = Array.isArray(input.mappings) ? input.mappings : [];
@@ -149,6 +154,21 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     const rowFilterActive = billSplitEnabled
       && Boolean(BILL_SPLIT_ROW_FILTER_MAPPING_FIELD)
       && findSwitchValue(mappings, BILL_SPLIT_ROW_FILTER_MAPPING_FIELD) === BILL_SPLIT_ROW_FILTER_ENABLED_OPTION;
+    const preprocessRowFilterActive = Boolean(PREPROCESS_ROW_FILTER_MAPPING_FIELD)
+      && findSwitchValue(mappings, PREPROCESS_ROW_FILTER_MAPPING_FIELD) === PREPROCESS_ROW_FILTER_ENABLED_OPTION;
+    // 过滤规则：每个条件的字段；字段运算（等于（字段）等）的值也是源字段（比较字段）。
+    const pushRowFilterRules = (rules, area, active) => {
+      (Array.isArray(rules) ? rules : []).forEach((group, groupIndex) => {
+        const seq = Number(group && group.seq) || groupIndex + 1;
+        (Array.isArray(group && group.conditions) ? group.conditions : []).forEach((condition, conditionIndex) => {
+          const base = { area, target: String(seq), role: String(conditionIndex + 1), active };
+          push({ ...base, field: condition && condition.field });
+          if (isFieldCompareOperator(normalizeCell(condition && condition.op))) {
+            push({ ...base, compare: true, field: condition && condition.value });
+          }
+        });
+      });
+    };
 
     mappings.forEach((mapping) => {
       const target = normalizeCell(mapping && mapping.templateField);
@@ -222,18 +242,8 @@ function createTemplateHeaderUpdateTools(constants = {}) {
       });
     });
 
-    (Array.isArray(input.billSplitRowFilterRules) ? input.billSplitRowFilterRules : []).forEach((group, groupIndex) => {
-      const seq = Number(group && group.seq) || groupIndex + 1;
-      (Array.isArray(group && group.conditions) ? group.conditions : []).forEach((condition, conditionIndex) => {
-        push({
-          area: 'bill-split-row-filter',
-          target: String(seq),
-          role: String(conditionIndex + 1),
-          field: condition && condition.field,
-          active: rowFilterActive
-        });
-      });
-    });
+    pushRowFilterRules(input.billSplitRowFilterRules, 'bill-split-row-filter', rowFilterActive);
+    pushRowFilterRules(input.preprocessRowFilterRules, 'preprocess-row-filter', preprocessRowFilterActive);
 
     // 不复用时生效的是拆分映射；根据字段值过滤账单时未命中的行走主映射，两套都生效。
     const usedIds = usedFeatureFilterIds(billSplitMappingActive
@@ -291,7 +301,9 @@ function formatFieldReferenceLine(reference) {
     case 'bill-split-fee-formula':
       return `拆分账单 · 费用账单发生额公式第 ${reference.role} 组 ← ${field}${suffix}`;
     case 'bill-split-row-filter':
-      return `根据字段值过滤账单 · 过滤规则 #${reference.target} 第 ${reference.role} 个条件 ← ${field}${suffix}`;
+      return `根据字段值过滤账单 · 过滤规则 #${reference.target} 第 ${reference.role} 个条件${reference.compare ? '（比较字段）' : ''} ← ${field}${suffix}`;
+    case 'preprocess-row-filter':
+      return `原始账单预处理 · 过滤规则 #${reference.target} 第 ${reference.role} 个条件${reference.compare ? '（比较字段）' : ''} ← ${field}${suffix}`;
     case 'feature-filter':
       return reference.target
         ? `特征值「${reference.target}」 · 筛选字段 ← ${field}${suffix}`

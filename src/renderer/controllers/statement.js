@@ -101,6 +101,11 @@ function applyStatementResult(result, { allowAlerts = true } = {}) {
     ui.alertNative(`以下文件全部未命中拆分/合并规则，请检查规则配置：\n${result.unmatchedBillSplitFiles.join('\n')}`);
   }
 
+  // v3.2.19：原始账单预处理「过滤账单」过滤后没有账单行的文件
+  if (allowAlerts && Array.isArray(result.emptyPreprocessedFiles) && result.emptyPreprocessedFiles.length) {
+    ui.alertNative(`以下文件经原始账单预处理过滤后没有账单行，请检查过滤规则：\n${result.emptyPreprocessedFiles.join('\n')}`);
+  }
+
   if (
     result.status === 'success' ||
     result.status === 'warning' ||

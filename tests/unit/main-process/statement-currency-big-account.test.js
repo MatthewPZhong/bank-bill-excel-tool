@@ -27,7 +27,8 @@ const {
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   normalizeCell,
   normalizeFeeAmountFormula,
-  normalizeBillSplitRowFilterRules
+  normalizeBillSplitRowFilterRules,
+  normalizeRowFilterRules
 } = require('../../../src/backend/file-service');
 const { normalizeMaintainedBigAccounts } = require('../../../src/main-process/big-account-recognition');
 
@@ -80,7 +81,8 @@ const fns = loadMainFunctions([
   'upgradeLegacyBundleFeatureFilterRefs',
   'isCurrencyOnlyMerchantMapping',
   'isMultiBigAccountMapping',
-  'classifyCurrencyOnlyEntries'
+  'classifyCurrencyOnlyEntries',
+  'isPreprocessRowFilterEnabled'
 ], {
   ...CONSTANTS,
   FIXED_FIELD_VALUE_PREFIX,
@@ -265,6 +267,7 @@ test('模板包：v6 读取 currencyBigAccounts，v5 读为空，高于支持版
     normalizeCell,
     normalizeFeeAmountFormula,
     normalizeBillSplitRowFilterRules,
+    normalizeRowFilterRules,
     getFeatureFilterRef,
     upgradeLegacyFeatureFilter,
     LEGACY_FEATURE_FILTER_ID,
