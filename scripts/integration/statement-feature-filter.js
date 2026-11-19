@@ -27,6 +27,9 @@ const { hasColumn } = require('../../src/backend/database/migrations');
 const {
   buildDetailExportRows,
   buildFeatureFilterToken,
+  buildLogicValueToken,
+  normalizeLogicValueFields,
+  LOGIC_VALUE_MIN_FIELDS,
   buildMappedRows,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
@@ -35,6 +38,13 @@ const {
   loadCurrencyMappings,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   normalizeCell,
+  normalizeFeeAmountFormula,
+  normalizeBillSplitRowFilterRules,
+  normalizeRowFilterRules,
+  validateRowFilterRules,
+  PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
+  validateFeeAmountFormula,
+  validateBillSplitRowFilterRules,
   normalizeFeatureFilterList,
   parseFeatureFilterToken,
   resolveUsedFeatureFilters,
@@ -103,11 +113,14 @@ function loadMainFunctions(names, deps = {}) {
 const CONSTANTS = loadMainConstants([
   'BALANCE_DISABLED_OPTION', 'BALANCE_CALCULATED_OPTION', 'MERCHANT_ID_SELF_INPUT_OPTION', 'MERCHANT_ID_MULTI_ACCOUNT_MARKER',
   'MERCHANT_ID_CURRENCY_ONLY_OPTION',
-  'CONCAT_FIELDS_MAPPING_FIELD', 'FEATURE_FILTER_MAPPING_FIELD', 'CUSTOM_INPUT_TARGET_FIELDS',
+  'CONCAT_FIELDS_MAPPING_FIELD', 'FEATURE_FILTER_MAPPING_FIELD', 'LOGIC_VALUE_MAPPING_FIELD', 'CUSTOM_INPUT_TARGET_FIELDS',
   'SIGNED_AMOUNT_MAPPING_FIELD', 'AMOUNT_BASED_NAME_MAPPING_FIELD', 'AMOUNT_BASED_ACCOUNT_MAPPING_FIELD',
   'AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD', 'AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION',
   'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
-  'SUPPORTED_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION', 'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS'
+  'BILL_SPLIT_ROW_FILTER_MAPPING_FIELD', 'BILL_SPLIT_ROW_FILTER_ENABLED_OPTION',
+  'PREPROCESS_ROW_FILTER_MAPPING_FIELD', 'PREPROCESS_ROW_FILTER_ENABLED_OPTION', 'DUPLICATE_ROW_FILTER_MAPPING_FIELD',
+  'DUPLICATE_ROW_FILTER_ENABLED_OPTION', 'PREPROCESS_FIELDS',
+  'SUPPORTED_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION', 'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS'
 ]);
 const FEATURE = CONSTANTS.FEATURE_FILTER_MAPPING_FIELD;
 
@@ -145,7 +158,7 @@ function closeDatabase(database) {
 
 function createMain(database, constantOverrides = {}) {
   return loadMainFunctions([
-    'validateTemplateConfiguration',
+    'validateTemplateConfiguration', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     'validateFeatureFiltersPayload',
     'collectFeatureFilterRefs',
     'buildExportTargetFields',
@@ -160,7 +173,7 @@ function createMain(database, constantOverrides = {}) {
     'normalizeExportMappingRows',
     'buildMappedFieldLookup',
     'normalizeLookupMappingValue',
-    'buildStatementGenerationConfig',
+    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     'resolveStatementFeatureFilters',
     'buildBillSplitMergeConfig',
     'buildAmountSplitByFieldConfig',
@@ -169,9 +182,10 @@ function createMain(database, constantOverrides = {}) {
     'buildImportWarningMessage',
     'validateBillSplitMappingsPayload',
     'normalizeBundleTemplateHeaders',
+    'normalizeBundleBillSplitMeta',
     'readTemplateBundleFile',
     'upgradeLegacyBundleFeatureFilterRefs',
-    'resolveTemplateBundleVersion',
+    'resolveTemplateBundleVersion', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     // v3.2.16 同轮合入的「原始账单仅有币种无账户号」：校验、生成配置与模板包版本会引用
     'validateCurrencyBigAccountConfiguration',
     'buildCurrencyBigAccountMappingConfig',
@@ -184,10 +198,21 @@ function createMain(database, constantOverrides = {}) {
     database,
     fs,
     normalizeCell,
+    // v3.2.19：拆分配置的费用账单公式（模板包读取、生成配置）
+    normalizeFeeAmountFormula,
+    normalizeBillSplitRowFilterRules,
+    normalizeRowFilterRules,
+    validateRowFilterRules,
+    PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
+    validateFeeAmountFormula,
+    validateBillSplitRowFilterRules,
     FileValidationError,
     FIXED_FIELD_VALUE_PREFIX,
     MERCHANT_ID_CURRENCY_ONLY_MARKER,
     buildFeatureFilterToken,
+    buildLogicValueToken,
+    normalizeLogicValueFields,
+    LOGIC_VALUE_MIN_FIELDS,
     getFeatureFilterRef,
     LEGACY_FEATURE_FILTER_ID,
     normalizeFeatureFilterList,
@@ -437,7 +462,7 @@ function verifyBundleRoundTrip(dir, { database, main, template }) {
   fs.writeFileSync(bundlePath, JSON.stringify({ bundleVersion: main.resolveTemplateBundleVersion([entry]), channels: [], templates: [entry] }), 'utf8');
   const readEntry = main.readTemplateBundleFile(bundlePath).templates[0];
   assertEq(readEntry.featureFilters, entry.featureFilters, '⑤ 读包保留特征值');
-  const legacyReader = createMain(database, { SUPPORTED_BUNDLE_VERSION: 6 });
+  const legacyReader = createMain(database, { SUPPORTED_BUNDLE_VERSION: 6, FEATURE_FILTER_BUNDLE_VERSION: 6 });
   assertThrows(() => legacyReader.readTemplateBundleFile(bundlePath), /模板文件版本（7）高于当前应用支持的版本（6）/, '⑤ 旧版（支持到 v6）读 v7 包整包拒绝');
 
   const target = openDatabase(path.join(dir, 'import.sqlite'));

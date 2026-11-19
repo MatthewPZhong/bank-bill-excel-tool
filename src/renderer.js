@@ -41,6 +41,8 @@ const ADVANCED_MAPPING_FIELDS = [
 const CONCAT_FIELDS_MAPPING_FIELD = '需要拼接字段';
 // v3.2.16：映射值「字段筛选特征值」，与 main.js 同名常量保持一致
 const FEATURE_FILTER_MAPPING_FIELD = '字段筛选特征值';
+// v3.2.19：映射值「逻辑取值」（候补字段取值），与 main.js 同名常量保持一致
+const LOGIC_VALUE_MAPPING_FIELD = '逻辑取值';
 const MODULES = Object.freeze({
   statementGenerator: {
     id: 'statement-generator',
@@ -521,6 +523,7 @@ function initializeDomainControllers(info) {
       refreshTemplates: configurationServices.refreshTemplates },
     ui: { modalHost, modalBridge, status: updateStatusBox, reportError: ui.reportError, alertNative: window.alert.bind(window),
       createAlertDialog, createTemplateManagerDialog, createBigAccountSelectionDialog, createRememberOrderMismatchDialog,
+      createDuplicateRowsReviewDialog,
       createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, createAccountMappingDialog, createAccountMappingMigrationDialog,
       createChannelAccountMappingConflictDialog, createTemplateImportNameDialog }
   });
@@ -579,6 +582,8 @@ const {
   createBigAccountSelectionDialog,
   createBigAccountManagerDialog,
   createRememberOrderMismatchDialog,
+  // v3.2.19 重复账单提醒
+  createDuplicateRowsReviewDialog,
   createTemplateManagerDialog,
   createMappingDialog,
   createAccountMappingDialog,
@@ -662,6 +667,7 @@ const {
   ADVANCED_MAPPING_FIELDS,
   CONCAT_FIELDS_MAPPING_FIELD,
   FEATURE_FILTER_MAPPING_FIELD,
+  LOGIC_VALUE_MAPPING_FIELD,
   AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD,
   AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION,
   refreshTemplates: configurationServices.refreshTemplates,
@@ -782,6 +788,7 @@ const rendererPreviews = window.__rendererPreviews.createRendererPreviews({
   createBillSplitRowsDialog,
   createBillSplitMappingsDialog,
   createRememberOrderMismatchDialog,
+  createDuplicateRowsReviewDialog,
   createAccountMappingMigrationDialog,
   closeModal,
   openBackgroundPalette,
@@ -834,6 +841,7 @@ const {
   applyBillSplitRowsDialogPreviewState,
   applyBillSplitMappingsDialogPreviewState,
   applyRememberOrderMismatchDialogPreviewState,
+  applyDuplicateRowsReviewDialogPreviewState,
   applyAccountMappingMigrationDialogPreviewState,
   // v2.0.0 Pending 模块 preview（6 张）
   applyPendingPanelPreviewState,
@@ -2074,6 +2082,10 @@ async function applyFullInfo(info) {
   } else if (info.previewModal === 'remember-order-mismatch-dialog') {
     setTimeout(() => {
       applyRememberOrderMismatchDialogPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'duplicate-rows-review-dialog') {
+    setTimeout(() => {
+      applyDuplicateRowsReviewDialogPreviewState();
     }, 120);
   } else if (info.previewModal === 'account-mapping-migration-dialog') {
     setTimeout(() => {

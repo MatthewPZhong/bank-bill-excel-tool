@@ -21,6 +21,9 @@ const {
   getFeatureFilterRef,
   LEGACY_FEATURE_FILTER_ID,
   normalizeCell,
+  normalizeFeeAmountFormula,
+  normalizeBillSplitRowFilterRules,
+  normalizeRowFilterRules,
   upgradeLegacyFeatureFilter
 } = require('../../../src/backend/file-service');
 const { matchMerchantIds, resolveRecognizedBigAccount } = require('../../../src/main-process/big-account-recognition');
@@ -39,7 +42,12 @@ const MAIN_DEPS = {
   FEATURE_FILTER_MAPPING_FIELD: '字段筛选特征值',
   getFeatureFilterRef,
   LEGACY_FEATURE_FILTER_ID,
-  upgradeLegacyFeatureFilter
+  upgradeLegacyFeatureFilter,
+  // v3.2.19：拆分配置（含费用账单公式）规范化
+  normalizeFeeAmountFormula,
+  normalizeBillSplitRowFilterRules,
+  // v3.2.19：原始账单预处理的过滤规则
+  normalizeRowFilterRules
 };
 
 function loadMainFunction(name) {
@@ -55,6 +63,7 @@ for (const name of [
   'findBigAccountMatchInRows',
   'buildBigAccountRecognitionBasis',
   'normalizeBundleTemplateHeaders',
+  'normalizeBundleBillSplitMeta',
   'upgradeLegacyBundleFeatureFilterRefs',
   'readTemplateBundleFile'
 ]) {

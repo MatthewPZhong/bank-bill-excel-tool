@@ -865,6 +865,8 @@ test('主进程：按文件名映射全部范围补录或不补录后，按全�
       FileValidationError,
       isFilenameMappingMode: (templateId) => templateId === FILENAME_MAPPING_TEMPLATE_ID,
       ...seedSaveGroupingDeps(),
+      // v3.2.19：补录后重算的提示附去重行数，按会话条目统计（真实生成辅助函数）
+      statementGenerationHelpers: createStatementGenerationHelpers({}),
       rememberAcknowledgedBalanceGaps: () => true,
       appendActivityLogEntry: () => {},
       formatBalanceGapLine: () => '',
@@ -936,6 +938,8 @@ test('主进程：余额不一致确认继续、人工补录确认替换后登�
         FileValidationError,
         isFilenameMappingMode: (templateId) => templateId === FILENAME_MAPPING_TEMPLATE_ID,
         ...seedSaveGroupingDeps(),
+        // v3.2.19：补录后重算的提示附去重行数，按会话条目统计（真实生成辅助函数）
+        statementGenerationHelpers: createStatementGenerationHelpers({}),
         rememberAcknowledgedBalanceGaps: (input) => {
           calls.remembered.push(input.gapKeys);
           return true;
@@ -1236,6 +1240,11 @@ test('主进程：指定模板导入时模板与库里渠道的输出名称相�
       isFilenameMappingMode: () => false,
       clearPendingManualBalancePrompt: () => {},
       clearPendingBigAccountSelection: () => {},
+      // v3.2.19：执行阶段清除待确认的重复账单；业务入口的配置核对（本用例的 prepared 没有核对函数，放行）
+      statementDuplicateReview: { clear: () => {} },
+      checkImportConfigGuard: () => null,
+      IMPORT_CONFIG_CHANGED_MESSAGE: '导入期间模板、渠道或账户映射已修改，请重新导入文件',
+      DUPLICATE_REVIEW_CONFIG_CHANGED_MESSAGE: '等待确认期间模板、渠道或账户映射已修改，请重新导入文件',
       clearGeneratedExports: () => {},
       getTemplateMappingConfig: singleTemplateConfig,
       STATEMENT_SOURCE_FRESHNESS_FAILURE: { code: 'STATEMENT_SOURCE_FRESHNESS_FAILURE' },
@@ -1737,6 +1746,8 @@ test('主进程：按文件名映射全部范围补录后重算，任一模板�
     FileValidationError,
     isFilenameMappingMode: (templateId) => templateId === FILENAME_MAPPING_TEMPLATE_ID,
     ...seedSaveGroupingDeps(),
+    // v3.2.19：补录后重算的提示附去重行数，按会话条目统计（真实生成辅助函数）
+    statementGenerationHelpers: createStatementGenerationHelpers({}),
     rememberAcknowledgedBalanceGaps: () => true,
     appendActivityLogEntry: () => {},
     formatBalanceGapLine: () => '',

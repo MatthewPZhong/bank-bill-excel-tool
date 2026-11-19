@@ -8,6 +8,7 @@ const {
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   normalizeCell
 } = require('../backend/file-service/common');
+const { isFieldCompareOperator } = require('../backend/file-service/row-filter-rules');
 
 function normalizeHeaderList(headers) {
   return Array.isArray(headers) ? headers.map((header) => normalizeCell(header)) : [];
@@ -40,11 +41,17 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     BALANCE_CALCULATED_OPTION,
     CONCAT_FIELDS_MAPPING_FIELD,
     FEATURE_FILTER_MAPPING_FIELD,
+    LOGIC_VALUE_MAPPING_FIELD,
     AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD,
     AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION,
     BILL_SPLIT_MERGE_MAPPING_FIELD,
     BILL_SPLIT_MERGE_ENABLED_OPTION,
     REUSE_MODULE_MAPPING_FIELD,
+    BILL_SPLIT_ROW_FILTER_MAPPING_FIELD,
+    BILL_SPLIT_ROW_FILTER_ENABLED_OPTION,
+    PREPROCESS_ROW_FILTER_MAPPING_FIELD,
+    PREPROCESS_ROW_FILTER_ENABLED_OPTION,
+    DUPLICATE_ROW_FILTER_MAPPING_FIELD,
     SIGNED_AMOUNT_MAPPING_FIELD,
     AMOUNT_BASED_NAME_MAPPING_FIELD,
     AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
@@ -59,7 +66,10 @@ function createTemplateHeaderUpdateTools(constants = {}) {
   const switchTargetFields = new Set([
     AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD,
     BILL_SPLIT_MERGE_MAPPING_FIELD,
-    REUSE_MODULE_MAPPING_FIELD
+    REUSE_MODULE_MAPPING_FIELD,
+    BILL_SPLIT_ROW_FILTER_MAPPING_FIELD,
+    PREPROCESS_ROW_FILTER_MAPPING_FIELD,
+    DUPLICATE_ROW_FILTER_MAPPING_FIELD
   ].filter(Boolean));
   // 规则类引用（判断字段、取值字段、拆分行字段、筛选字段）：非空且不是固定值即为源字段。
   function isRuleSourceValue(value) {
@@ -89,9 +99,17 @@ function createTemplateHeaderUpdateTools(constants = {}) {
   // - Balance 只在整条映射是单个「无」「通过发生额计算」时为选项；拼接中的同名 token 按源列读取。
   // - 按正负号拆分的发生额、根据发生额做映射的户名 / 账户号：整体作为一个列名读取（多字段时为逗号拼接的列名）。
   // - 固定值（__FIXED__: 前缀）不读源列。
+  // - 逻辑取值（v3.2.19）：只读 mappedFields 中的候补字段，模式名本身不是源列。
   function mappingSourceFields(target, mapping) {
     const mappedField = normalizeCell(mapping && mapping.mappedField);
     if (mappedField === FEATURE_FILTER_MAPPING_FIELD) return [];
+    // 候补字段都是表头下拉选出的真实列，生成时一律按列名读取（不解释固定值前缀），故不按固定值过滤。
+    //   没有候补字段的旧映射（v3.2.18 及更早直接映射名为「逻辑取值」的源列）生成时按该源列读取，引用即该列。
+    if (LOGIC_VALUE_MAPPING_FIELD && mappedField === LOGIC_VALUE_MAPPING_FIELD) {
+      const candidates = uniqueNonEmpty((Array.isArray(mapping && mapping.mappedFields) ? mapping.mappedFields : [])
+        .map((value) => normalizeCell(value)));
+      return candidates.length ? candidates : [LOGIC_VALUE_MAPPING_FIELD];
+    }
     const values = normalizeMappedFields(mapping);
     const multi = mappedField === CONCAT_FIELDS_MAPPING_FIELD || values.length > 1;
     if (scalarSourceTargetFields.has(target)) {
@@ -124,6 +142,9 @@ function createTemplateHeaderUpdateTools(constants = {}) {
   // 收集模板配置中所有引用源字段的位置。active 与生成时实际读取的口径一致：
   // 主映射始终读取；按字段区分发生额开启时读取完整规则；拆分/合并开启时读取拆分行（仅 completed）、
   // 拆分金额规则与按正负号拆分的字段，不复用主映射时还读取拆分映射；
+  // 费用账单发生额公式（v3.2.19）在拆分开启、勾选特殊取值且有已完成的费用账单行时读取；
+  // 过滤规则（v3.2.19）在拆分开启且勾选「根据字段值过滤账单」时读取，此时未命中的行走主映射；
+  // 原始账单预处理「过滤账单」的过滤规则（v3.2.19）勾选即读取，与拆分无关；两类规则的字段运算还读取比较字段；
   // 特征值（v3.2.18 起可有多个）各自的筛选字段只在实际生效的映射选用该特征值时读取。
   function collectTemplateFieldReferences(input = {}) {
     const mappings = Array.isArray(input.mappings) ? input.mappings : [];
@@ -141,12 +162,35 @@ function createTemplateHeaderUpdateTools(constants = {}) {
       === BILL_SPLIT_MERGE_ENABLED_OPTION;
     const reuseModuleMapping = findSwitchValue(mappings, REUSE_MODULE_MAPPING_FIELD) !== '否';
     const billSplitMappingActive = billSplitEnabled && !reuseModuleMapping;
+    const rowFilterActive = billSplitEnabled
+      && Boolean(BILL_SPLIT_ROW_FILTER_MAPPING_FIELD)
+      && findSwitchValue(mappings, BILL_SPLIT_ROW_FILTER_MAPPING_FIELD) === BILL_SPLIT_ROW_FILTER_ENABLED_OPTION;
+    const preprocessRowFilterActive = Boolean(PREPROCESS_ROW_FILTER_MAPPING_FIELD)
+      && findSwitchValue(mappings, PREPROCESS_ROW_FILTER_MAPPING_FIELD) === PREPROCESS_ROW_FILTER_ENABLED_OPTION;
+    // 过滤规则：每个条件的字段；字段运算（等于（字段）等）的值也是源字段（比较字段）。
+    const pushRowFilterRules = (rules, area, active) => {
+      (Array.isArray(rules) ? rules : []).forEach((group, groupIndex) => {
+        const seq = Number(group && group.seq) || groupIndex + 1;
+        (Array.isArray(group && group.conditions) ? group.conditions : []).forEach((condition, conditionIndex) => {
+          const base = { area, target: String(seq), role: String(conditionIndex + 1), active };
+          push({ ...base, field: condition && condition.field });
+          if (isFieldCompareOperator(normalizeCell(condition && condition.op))) {
+            push({ ...base, compare: true, field: condition && condition.value });
+          }
+        });
+      });
+    };
 
     mappings.forEach((mapping) => {
       const target = normalizeCell(mapping && mapping.templateField);
       if (!target || switchTargetFields.has(target)) return;
+      const role = LOGIC_VALUE_MAPPING_FIELD && normalizeCell(mapping && mapping.mappedField) === LOGIC_VALUE_MAPPING_FIELD
+        && (Array.isArray(mapping && mapping.mappedFields) ? mapping.mappedFields : []).some((value) => normalizeCell(value) !== '')
+        ? 'logic-value'
+        : '';
       mappingSourceFields(target, mapping).forEach((field) => {
-        push({ area: 'mapping', target, role: '', field, active: true });
+        if (role === 'logic-value') references.push({ area: 'mapping', target, role, field, active: true });
+        else push({ area: 'mapping', target, role, field, active: true });
       });
     });
 
@@ -168,16 +212,25 @@ function createTemplateHeaderUpdateTools(constants = {}) {
       });
     });
 
-    (Array.isArray(input.billSplitRows) ? input.billSplitRows : []).forEach((row, index) => {
+    const billSplitRows = Array.isArray(input.billSplitRows) ? input.billSplitRows : [];
+    const feeFormulaActive = billSplitEnabled
+      && Boolean(input.billSplitFeeAmountFormulaEnabled)
+      && billSplitRows.some((row) => (
+        row && row.isFeeBill === true && normalizeCell(row.rowStatus) === 'completed'
+      ));
+
+    billSplitRows.forEach((row, index) => {
       const seqNo = Number(row && row.seqNo) || index + 1;
       const active = billSplitEnabled && normalizeCell(row && row.rowStatus) === 'completed';
+      // v3.2.19：费用账单行不读 Credit；特殊取值生效时也不读 Debit（映射保留，标为未启用）
+      const isFeeBill = Boolean(row && row.isFeeBill === true);
       [
-        ['Currency', row && row.currencySourceField],
-        ['Credit Amount', row && row.creditSourceField],
-        ['Debit Amount', row && row.debitSourceField],
-        ['Amount', row && row.amountSourceField]
-      ].forEach(([target, field]) => {
-        push({ area: 'bill-split-row', target, role: String(seqNo), field, active });
+        ['Currency', row && row.currencySourceField, active],
+        ['Credit Amount', row && row.creditSourceField, active && !isFeeBill],
+        ['Debit Amount', row && row.debitSourceField, active && !(isFeeBill && feeFormulaActive)],
+        ['Amount', row && row.amountSourceField, active]
+      ].forEach(([target, field, fieldActive]) => {
+        push({ area: 'bill-split-row', target, role: String(seqNo), field, active: fieldActive });
       });
     });
 
@@ -195,7 +248,23 @@ function createTemplateHeaderUpdateTools(constants = {}) {
       active: billSplitEnabled
     });
 
-    const usedIds = usedFeatureFilterIds(billSplitMappingActive ? billSplitMappings : mappings);
+    (Array.isArray(input.billSplitFeeAmountFormula) ? input.billSplitFeeAmountFormula : []).forEach((item, index) => {
+      push({
+        area: 'bill-split-fee-formula',
+        target: '',
+        role: String(index + 1),
+        field: item && item.field,
+        active: feeFormulaActive
+      });
+    });
+
+    pushRowFilterRules(input.billSplitRowFilterRules, 'bill-split-row-filter', rowFilterActive);
+    pushRowFilterRules(input.preprocessRowFilterRules, 'preprocess-row-filter', preprocessRowFilterActive);
+
+    // 不复用时生效的是拆分映射；根据字段值过滤账单时未命中的行走主映射，两套都生效。
+    const usedIds = usedFeatureFilterIds(billSplitMappingActive
+      ? (rowFilterActive ? billSplitMappings.concat(mappings) : billSplitMappings)
+      : mappings);
     (Array.isArray(input.featureFilters) ? input.featureFilters : []).forEach((featureFilter) => {
       const id = normalizeCell(featureFilter && featureFilter.id);
       push({
@@ -234,7 +303,7 @@ function formatFieldReferenceLine(reference) {
   const field = reference.field;
   switch (reference.area) {
     case 'mapping':
-      return `${reference.target} ← ${field}${suffix}`;
+      return `${reference.target}${reference.role === 'logic-value' ? '（逻辑取值 · 候补字段）' : ''} ← ${field}${suffix}`;
     case 'amount-split':
       return `按字段区分发生额 · ${reference.target || '（未设置目标字段）'} ${ROLE_LABELS[reference.role] || ''} ← ${field}${suffix}`;
     case 'bill-split-mapping':
@@ -244,7 +313,13 @@ function formatFieldReferenceLine(reference) {
     case 'bill-split-amount':
       return `拆分账单发生额规则 · ${reference.target || '（未设置目标字段）'} ${ROLE_LABELS[reference.role] || ''} ← ${field}${suffix}`;
     case 'bill-split-signed':
-      return `拆分账单 · 按正负号拆分的发生额 ← ${field}${suffix}`;
+      return `拆分账单 · 按正负号取发生额 ← ${field}${suffix}`;
+    case 'bill-split-fee-formula':
+      return `拆分账单 · 费用账单发生额公式第 ${reference.role} 组 ← ${field}${suffix}`;
+    case 'bill-split-row-filter':
+      return `根据字段值过滤账单 · 过滤规则 #${reference.target} 第 ${reference.role} 个条件${reference.compare ? '（比较字段）' : ''} ← ${field}${suffix}`;
+    case 'preprocess-row-filter':
+      return `原始账单预处理 · 过滤规则 #${reference.target} 第 ${reference.role} 个条件${reference.compare ? '（比较字段）' : ''} ← ${field}${suffix}`;
     case 'feature-filter':
       return reference.target
         ? `特征值「${reference.target}」 · 筛选字段 ← ${field}${suffix}`

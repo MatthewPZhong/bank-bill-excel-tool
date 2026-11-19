@@ -37,6 +37,13 @@ function compile(node, deps) {
   return Function(...Object.keys(deps), `return (${text(node)});`)(...Object.values(deps));
 }
 const escapeHtml = compile(fn('escapeHtml'), {});
+// v3.2.19：大账号选择完成时识别「未开始生成」的结果（真实函数与真实错误码清单）
+const NOT_STARTED_ERROR_CODES = (() => {
+  const declarator = all.find((n) => n.type === 'VariableDeclarator' && n.id && n.id.name === 'NOT_STARTED_ERROR_CODES');
+  assert.ok(declarator, 'NOT_STARTED_ERROR_CODES');
+  return Function(`return (${text(declarator.init)});`)();
+})();
+const isNotStartedImportResult = compile(fn('isNotStartedImportResult'), { NOT_STARTED_ERROR_CODES });
 
 function harness({ extraction, cancellation, completion } = {}) {
   const scope = nodes(fn('createBigAccountSelectionDialog'));
@@ -62,6 +69,7 @@ function harness({ extraction, cancellation, completion } = {}) {
       completeBigAccountSelection: async (payload) => { h.calls.push(['complete', payload]); return completion(); }
     } },
     escapeHtml,
+    isNotStartedImportResult,
     createAlertDialog: (message, options = {}) => {
       const created = dom.createDialog();
       const alert = created.overlay;
@@ -86,6 +94,8 @@ function harness({ extraction, cancellation, completion } = {}) {
     applyStatementResult: (result) => h.calls.push(['apply', result]),
     elements: { modalRoot: { contains: (overlay) => h.current === overlay } }
   };
+  // v3.2.19：完成请求 IPC 抛错时按能否释放本次选择区分未开始与无法确认（真实函数）
+  h.resolveContinuationIpcRejection = compile(fn('resolveContinuationIpcRejection'), { api: h.api });
   Object.defineProperty(h, 'current', { get: () => dom.root.lastChild });
   let actions;
   modalBridge.registerModal(h.overlay, { ...descriptor, canClose: () => actions ? actions.canClose() : true });
@@ -171,6 +181,29 @@ test('普通未识别仍能返回手动完成；完成请求期间禁止再次�
   resolveComplete({ status: 'success' });
   await pending;
   assert.deepEqual(h.calls.map((c) => c[0]), ['extract', 'complete', 'apply']);
+});
+
+test('完成请求 IPC 抛错：能释放本次选择即未开始（只提示，不改上一批状态）；释放不到时按失败处理并提示核对结果', async () => {
+  const notStarted = harness({
+    extraction: () => ({ status: 'error', failedRows: [{ index: 0, fileName: '原文件.xlsx' }] }),
+    completion: () => { throw new Error('恢复保护中，暂不能开始任务'); },
+    cancellation: () => ({ status: 'success' })
+  });
+  await notStarted.done();
+  assert.deepEqual(notStarted.h.calls.map((c) => c[0]), ['complete', 'cancel', 'cancel']);
+  assert.match(notStarted.h.current.message, /恢复保护中/);
+  assert.equal(notStarted.h.calls.some((c) => c[0] === 'apply'), false, '不按失败的导入改状态');
+  assert.equal(notStarted.h.statuses.length, 0);
+
+  const unknown = harness({
+    extraction: () => ({ status: 'error', failedRows: [{ index: 0, fileName: '原文件.xlsx' }] }),
+    completion: () => { throw new Error('File Task 终态意图未形成持久记录'); },
+    cancellation: () => ({ status: 'not-active' })
+  });
+  await unknown.done();
+  const applied = unknown.h.calls.find((c) => c[0] === 'apply');
+  assert.equal(applied && applied[1].status, 'error', '按失败的导入更新状态');
+  assert.match(unknown.h.current.message, /终态意图未形成持久记录.*无法确认本次是否已生成/);
 });
 
 test('提取 IPC 拒绝提供可见错误，保留手选窗口', async () => {

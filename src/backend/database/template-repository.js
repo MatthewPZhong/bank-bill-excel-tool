@@ -9,6 +9,9 @@ const {
   parseJsonArray
 } = require('./utils');
 const { MERCHANT_ID_CURRENCY_ONLY_MARKER } = require('../file-service/common');
+const { normalizeFeeAmountFormula } = require('../file-service/bill-split-fee-formula');
+const { normalizeBillSplitRowFilterRules } = require('../file-service/bill-split-row-filter');
+const { normalizeRowFilterRules } = require('../file-service/row-filter-rules');
 
 function listTemplates(db) {
   // v1.5.3 R2 §3.1：bigAccountCount / singleBigAccountMerchantId 不含自有账号
@@ -27,6 +30,7 @@ function listTemplates(db) {
       sc.name AS channelName,
       t.filename_fixed_field AS filenameFixedField,
       t.feature_filter_json AS featureFilterJson,
+      t.preprocess_row_filter_rules_json AS preprocessRowFilterRulesJson,
       COUNT(DISTINCT m.id) AS mappingCount,
       COUNT(DISTINCT ba.merchant_id) AS bigAccountCount,
       merchant_mapping.mapped_field AS merchantIdMappedField,
@@ -67,6 +71,7 @@ function getTemplate(db, templateId) {
         (SELECT sc.name FROM statement_channels sc WHERE sc.id = t.channel_id) AS channelName,
         t.filename_fixed_field AS filenameFixedField,
         t.feature_filter_json AS featureFilterJson,
+        t.preprocess_row_filter_rules_json AS preprocessRowFilterRulesJson,
         (
           SELECT COUNT(1)
           FROM template_mappings m
@@ -168,6 +173,8 @@ function upsertTemplate(db, { templateKey = '', name, sourceFileName, headers })
         .run(normalizedTemplateKey, name, sourceFileName, JSON.stringify(headers), now, existing.id);
       // v3.2.16：表头被覆盖、映射清空时，特征值（引用旧表头）一并清空
       db.prepare("UPDATE templates SET feature_filter_json = '' WHERE id = ?").run(existing.id);
+      // v3.2.19：原始账单预处理的过滤规则同样引用旧表头，一并清空
+      db.prepare("UPDATE templates SET preprocess_row_filter_rules_json = '' WHERE id = ?").run(existing.id);
       db.prepare('DELETE FROM template_mappings WHERE template_id = ?').run(existing.id);
       db.prepare('DELETE FROM template_big_accounts WHERE template_id = ?').run(existing.id);
       db.prepare('DELETE FROM template_fixed_assignments WHERE template_id = ?').run(existing.id);
@@ -423,6 +430,16 @@ function writeTemplateFeatureFilters(db, templateId, featureFilters) {
     .run(featureFilters.length ? JSON.stringify(featureFilters) : '', templateId);
 }
 
+// v3.2.19：写入「原始账单预处理 → 过滤账单」的过滤规则；调用方须在事务内调用。数组时整体替换，null / undefined 不动。
+function writeTemplatePreprocessRowFilterRules(db, templateId, rules) {
+  if (!Array.isArray(rules)) {
+    return;
+  }
+  const normalized = normalizeRowFilterRules(rules);
+  db.prepare('UPDATE templates SET preprocess_row_filter_rules_json = ? WHERE id = ?')
+    .run(normalized.length ? JSON.stringify(normalized) : '', templateId);
+}
+
 // v3.2.18：已保存的主映射与拆分映射中选「字段筛选特征值」的行及其所选特征值 id（ref 未选为 ''）。
 function listTemplateFeatureFilterReferences(db, templateId, featureFilterMappingValue) {
   const pick = (scope, rows) => rows
@@ -470,7 +487,14 @@ function saveMappings(
   fixedAssignments = [],
   dateFormat,
   amountSplitRules = null,
-  { preserveOwn = false, channelAssignment = null, featureFilters = undefined, currencyBigAccounts = null } = {}
+  {
+    preserveOwn = false,
+    channelAssignment = null,
+    featureFilters = undefined,
+    currencyBigAccounts = null,
+    billSplitRowFilterRules = null,
+    preprocessRowFilterRules = null
+  } = {}
 ) {
   const now = new Date().toISOString();
   let channelAssignmentResult = null;
@@ -616,6 +640,13 @@ function saveMappings(
     // v3.2.18：只有模板包导入整体带入特征值；映射弹窗保存不改特征值（由【特征值管理】即时保存）
     writeTemplateFeatureFilters(db, templateId, featureFilters);
 
+    // v3.2.19：「根据字段值过滤账单」的过滤规则随映射【保存】一起落库（同一事务）；未传（null）时保持原值。
+    if (Array.isArray(billSplitRowFilterRules)) {
+      saveBillSplitMeta(db, templateId, { rowFilterRules: billSplitRowFilterRules });
+    }
+    // v3.2.19：「原始账单预处理 → 过滤账单」的过滤规则同样随映射【保存】落库；未传（null）时保持原值。
+    writeTemplatePreprocessRowFilterRules(db, templateId, preprocessRowFilterRules);
+
     if (dateFormat) {
       db.prepare('UPDATE templates SET updated_at = ?, date_format = ? WHERE id = ?').run(now, dateFormat, templateId);
     } else {
@@ -730,7 +761,8 @@ function getBillSplitRows(db, templateId) {
         debit_source_field AS debitSourceField,
         amount_source_field AS amountSourceField,
         row_status AS rowStatus,
-        merged_group_seq AS mergedGroupSeq
+        merged_group_seq AS mergedGroupSeq,
+        is_fee_bill AS isFeeBill
       FROM template_bill_split_rows
       WHERE template_id = ?
       ORDER BY seq_no ASC
@@ -743,7 +775,8 @@ function getBillSplitRows(db, templateId) {
       debitSourceField: normalizeText(row.debitSourceField),
       amountSourceField: normalizeText(row.amountSourceField),
       rowStatus: normalizeText(row.rowStatus) || 'draft',
-      mergedGroupSeq: row.mergedGroupSeq === null || row.mergedGroupSeq === undefined ? null : Number(row.mergedGroupSeq)
+      mergedGroupSeq: row.mergedGroupSeq === null || row.mergedGroupSeq === undefined ? null : Number(row.mergedGroupSeq),
+      isFeeBill: Number(row.isFeeBill) === 1
     }));
 }
 
@@ -792,6 +825,7 @@ function saveBillSplitRowCount(db, templateId, nextN) {
   }
 }
 
+// 不改「费用账单」标记（由 setBillSplitFeeBillRow 维护）；费用账单行的 Credit / Debit 映射照存，生成时按费用规则取舍。
 function saveBillSplitRow(db, templateId, row) {
   const now = new Date().toISOString();
   db.prepare(`
@@ -813,6 +847,50 @@ function saveBillSplitRow(db, templateId, row) {
     templateId,
     Number(row.seqNo)
   );
+}
+
+// v3.2.19：一个模板最多一行费用账单。seqNo 为 null 时取消；指定行不存在时抛错且不改动。
+// 只改标记、不清该行已存的映射：生成时费用行不读 Credit，误勾后取消即可恢复原映射。
+function setBillSplitFeeBillRow(db, templateId, seqNo) {
+  const now = new Date().toISOString();
+  const targetSeqNo = seqNo === null || seqNo === undefined ? null : Number(seqNo);
+  db.exec('BEGIN');
+  try {
+    if (targetSeqNo !== null) {
+      const exists = db
+        .prepare('SELECT 1 FROM template_bill_split_rows WHERE template_id = ? AND seq_no = ?')
+        .get(templateId, targetSeqNo);
+      if (!exists) {
+        const error = new Error(`拆分账单第 ${targetSeqNo} 份不存在`);
+        error.code = 'BILL_SPLIT_ROW_NOT_FOUND';
+        throw error;
+      }
+    }
+    // 离开费用账单的行：保留的 Credit 与 Debit 同列时清空 Credit（费用期间只有 Debit 生效，
+    // 恢复后不能让同一列既记收入又记支出）。
+    db.prepare(`
+      UPDATE template_bill_split_rows
+      SET credit_source_field = '', updated_at = ?
+      WHERE template_id = ? AND is_fee_bill <> 0 AND (? IS NULL OR seq_no <> ?)
+        AND credit_source_field <> '' AND credit_source_field = debit_source_field
+    `).run(now, templateId, targetSeqNo, targetSeqNo);
+    db.prepare(`
+      UPDATE template_bill_split_rows
+      SET is_fee_bill = 0, updated_at = ?
+      WHERE template_id = ? AND is_fee_bill <> 0
+    `).run(now, templateId);
+    if (targetSeqNo !== null) {
+      db.prepare(`
+        UPDATE template_bill_split_rows
+        SET is_fee_bill = 1, updated_at = ?
+        WHERE template_id = ? AND seq_no = ?
+      `).run(now, templateId, targetSeqNo);
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
 
 function deleteBillSplitRow(db, templateId, seqNo) {
@@ -952,7 +1030,10 @@ function getBillSplitMeta(db, templateId) {
       SELECT
         signed_amount_source_field AS signedAmountSourceField,
         signed_amount_target_seq_nos AS signedAmountTargetSeqNos,
-        by_field_amount_target_seq_nos AS byFieldAmountTargetSeqNos
+        by_field_amount_target_seq_nos AS byFieldAmountTargetSeqNos,
+        fee_amount_formula_enabled AS feeAmountFormulaEnabled,
+        fee_amount_formula_json AS feeAmountFormulaJson,
+        row_filter_rules_json AS rowFilterRulesJson
       FROM template_bill_split_meta
       WHERE template_id = ?
     `)
@@ -964,37 +1045,52 @@ function getBillSplitMeta(db, templateId) {
       : [],
     byFieldAmountTargetSeqNos: row && row.byFieldAmountTargetSeqNos
       ? row.byFieldAmountTargetSeqNos.split(',').filter(Boolean).map(Number)
-      : []
+      : [],
+    feeAmountFormulaEnabled: Boolean(row) && Number(row.feeAmountFormulaEnabled) === 1,
+    feeAmountFormula: row ? normalizeFeeAmountFormula(row.feeAmountFormulaJson) : [],
+    rowFilterRules: row ? normalizeBillSplitRowFilterRules(row.rowFilterRulesJson) : []
   };
 }
 
+// 只更新载荷中出现的字段，其余保持原值（v3.2.19 起费用账单公式与正负号/指定账单分开保存）。
 function saveBillSplitMeta(db, templateId, meta = {}) {
   const now = new Date().toISOString();
-  const value = normalizeText(meta && meta.signedAmountSourceField);
-  const signedTargetSeqNos = Array.isArray(meta.signedAmountTargetSeqNos)
-    ? meta.signedAmountTargetSeqNos.join(',')
-    : '';
-  const byFieldTargetSeqNos = Array.isArray(meta.byFieldAmountTargetSeqNos)
-    ? meta.byFieldAmountTargetSeqNos.join(',')
-    : '';
-  const existing = db.prepare('SELECT 1 FROM template_bill_split_meta WHERE template_id = ?').get(templateId);
-  if (existing) {
-    db.prepare(`
-      UPDATE template_bill_split_meta
-      SET signed_amount_source_field = ?,
-          signed_amount_target_seq_nos = ?,
-          by_field_amount_target_seq_nos = ?,
-          updated_at = ?
-      WHERE template_id = ?
-    `).run(value, signedTargetSeqNos, byFieldTargetSeqNos, now, templateId);
-  } else {
-    db.prepare(`
-      INSERT INTO template_bill_split_meta (
-        template_id, signed_amount_source_field, signed_amount_target_seq_nos,
-        by_field_amount_target_seq_nos, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
-    `).run(templateId, value, signedTargetSeqNos, byFieldTargetSeqNos, now, now);
+  const has = (key) => Boolean(meta) && Object.prototype.hasOwnProperty.call(meta, key) && meta[key] !== undefined;
+  const joinSeqNos = (value) => (Array.isArray(value) ? value.join(',') : '');
+  const columns = [];
+  if (has('signedAmountSourceField')) {
+    columns.push(['signed_amount_source_field', normalizeText(meta.signedAmountSourceField)]);
   }
+  if (has('signedAmountTargetSeqNos')) {
+    columns.push(['signed_amount_target_seq_nos', joinSeqNos(meta.signedAmountTargetSeqNos)]);
+  }
+  if (has('byFieldAmountTargetSeqNos')) {
+    columns.push(['by_field_amount_target_seq_nos', joinSeqNos(meta.byFieldAmountTargetSeqNos)]);
+  }
+  if (has('feeAmountFormulaEnabled')) {
+    columns.push(['fee_amount_formula_enabled', meta.feeAmountFormulaEnabled ? 1 : 0]);
+  }
+  if (has('feeAmountFormula')) {
+    const formula = normalizeFeeAmountFormula(meta.feeAmountFormula);
+    columns.push(['fee_amount_formula_json', formula.length ? JSON.stringify(formula) : '']);
+  }
+  if (has('rowFilterRules')) {
+    const rules = normalizeBillSplitRowFilterRules(meta.rowFilterRules);
+    columns.push(['row_filter_rules_json', rules.length ? JSON.stringify(rules) : '']);
+  }
+  const existing = db.prepare('SELECT 1 FROM template_bill_split_meta WHERE template_id = ?').get(templateId);
+  if (!existing) {
+    db.prepare(`
+      INSERT INTO template_bill_split_meta (template_id, created_at, updated_at)
+      VALUES (?, ?, ?)
+    `).run(templateId, now, now);
+  }
+  const assignments = columns.map(([column]) => `${column} = ?`).concat('updated_at = ?');
+  db.prepare(`
+    UPDATE template_bill_split_meta
+    SET ${assignments.join(', ')}
+    WHERE template_id = ?
+  `).run(...columns.map(([, value]) => value), now, templateId);
 }
 
 function listTemplateBundleEntries(db) {
@@ -1041,14 +1137,23 @@ function listTemplateBundleEntries(db) {
       billSplitAmountRules: payload && Array.isArray(payload.billSplitAmountRules)
         ? payload.billSplitAmountRules.map((r) => ({ ...r }))
         : [],
+      // v3.2.19：费用账单公式、过滤规则随包导出（拆分行的 isFeeBill 已在 billSplitRows 中；
+      //   「根据字段值过滤账单」开关是映射行，已在 mappings 中）
       billSplitMeta: payload && payload.billSplitMeta
-        ? { signedAmountSourceField: payload.billSplitMeta.signedAmountSourceField || '' }
-        : { signedAmountSourceField: '' },
+        ? {
+            signedAmountSourceField: payload.billSplitMeta.signedAmountSourceField || '',
+            feeAmountFormulaEnabled: Boolean(payload.billSplitMeta.feeAmountFormulaEnabled),
+            feeAmountFormula: normalizeFeeAmountFormula(payload.billSplitMeta.feeAmountFormula),
+            rowFilterRules: normalizeBillSplitRowFilterRules(payload.billSplitMeta.rowFilterRules)
+          }
+        : { signedAmountSourceField: '', feeAmountFormulaEnabled: false, feeAmountFormula: [], rowFilterRules: [] },
       dateFormat: template.dateFormat || 'auto',
       // v3.2.18（bundle v7）：特征值列表；映射行的特征值选择在 mappings / billSplitMappings 的 mappedFields 中
       featureFilters: Array.isArray(template.featureFilters)
         ? template.featureFilters.map((item) => ({ ...item }))
         : [],
+      // v3.2.19（bundle v8）：原始账单预处理的过滤规则；「过滤账单」开关是映射行，已在 mappings 中
+      preprocessRowFilterRules: normalizeRowFilterRules(template.preprocessRowFilterRules),
       createdAt: template.createdAt,
       updatedAt: template.updatedAt
     };
@@ -1084,6 +1189,7 @@ module.exports = {
   saveBillSplitRow,
   saveBillSplitRowCount,
   saveMappings,
+  setBillSplitFeeBillRow,
   saveTemplateFeatureFilters,
   saveTemplateFilenameFixedField,
   updateTemplateHeaders,

@@ -232,6 +232,13 @@ test('真实取消接口仅清理当前上下文；已准备的完成请求失�
     const createErrorResult = (result) => result;
     const normalizePendingBigAccountSelection = () => ({ isFixedMode: false });
     const buildStatementInputFilePlanItems = () => [];
+    // v3.2.19：重复账单过滤（本用例无重复账单待确认）
+    const statementDuplicateReview = { cancel: () => null, requireContext: () => null, clear: () => {} };
+    const hasDuplicateRowKeys = () => false;
+    // 业务入口的配置核对（本用例不涉及配置变化）
+    const checkImportConfigGuard = () => null;
+    const IMPORT_CONFIG_CHANGED_MESSAGE = '';
+    const DUPLICATE_REVIEW_CONFIG_CHANGED_MESSAGE = '';
     ${declarations}
     return {
       cancel: ${source.slice(cancel.start, cancel.end)},
