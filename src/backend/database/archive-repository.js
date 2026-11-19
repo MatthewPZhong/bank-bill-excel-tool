@@ -16,6 +16,7 @@ const {
   reopenRecoveredFileTaskOwner,
   stableSerialize
 } = require('./archive-terminal-completion');
+const { isRetiredModuleId, retiredModuleExclusionSql } = require('./retired-modules');
 
 // 存档中心只在主库保存轻量元数据：
 //   archive_batches   一次业务操作对应的本地日期流水批次；
@@ -70,10 +71,13 @@ const MODULE_CODE_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ARCHIVE_INSTANCE_ID_SETTING_KEY = 'archive_center_instance_id';
 const ARCHIVE_STORAGE_ROOT_SETTING_KEY = 'archive_center_storage_root';
-const VISIBLE_BATCH_PREDICATE_SQL = `EXISTS (
+// v3.2.20：已下线模块的批次不在存档中心展示（列表、搜索、统计、打开与删除入口），也不参与启动扫尾；
+//   已结束的批次照常按生成时记录的保留期参与到期清理（用户 2026-11-18 决定），仍为 reserved/running 的旧版现场不清理。
+const RETIRED_BATCH_EXCLUSION_SQL = retiredModuleExclusionSql('b.module_id');
+const VISIBLE_BATCH_PREDICATE_SQL = `(EXISTS (
   SELECT 1 FROM archive_artifacts visible_artifact
   WHERE visible_artifact.batch_id = b.id
-)`;
+) AND ${RETIRED_BATCH_EXCLUSION_SQL})`;
 const SPLIT_DIRECTORY_REPAIR_TYPE = 'split-directory-artifact-v1';
 const SPLIT_DIRECTORY_REPAIR_BATCH_NUMBERS = Object.freeze([
   '2026-08-13-017',
@@ -1325,7 +1329,9 @@ class ArchiveRepository {
       for (const recovery of listFileTaskOwnerRecoveries(this.db)) {
         const { owner } = recovery;
         const context = owner.batchContext;
-        if (excludedBatches.has(context.batchId) || excludedTasks.has(context.taskRunId)) {
+        // v3.2.20：已下线模块的原收口责任原样保留给回退旧版，本版不确认、不删除（批次因此缺少收口凭证，到期清理会跳过）。
+        if (excludedBatches.has(context.batchId) || excludedTasks.has(context.taskRunId)
+            || isRetiredModuleId(context.moduleId)) {
           pending += 1;
           continue;
         }
@@ -2118,8 +2124,9 @@ class ArchiveRepository {
     });
   }
 
+  // v3.2.20：已下线模块的流程绑定意图原样保留给回退旧版，不在本版重放（不写流程锚点、不改失败计数）。
   replayFlowBindIntents(filters = {}) {
-    const intents = this.listFlowBindIntents(filters);
+    const intents = this.listFlowBindIntents(filters).filter((intent) => !isRetiredModuleId(intent.moduleId));
     const results = [];
     for (const intent of intents) {
       try {
@@ -2240,7 +2247,7 @@ class ArchiveRepository {
   }
 
   replayTaskFlowBindIntents(filters = {}) {
-    const intents = this.listTaskFlowBindIntents(filters);
+    const intents = this.listTaskFlowBindIntents(filters).filter((intent) => !isRetiredModuleId(intent.moduleId));
     const results = [];
     for (const intent of intents) {
       try {
@@ -4187,6 +4194,7 @@ class ArchiveRepository {
         )
         AND b.retention_until IS NOT NULL
         AND b.retention_until < ?
+        AND (${RETIRED_BATCH_EXCLUSION_SQL} OR b.task_status NOT IN ('reserved', 'running'))
       GROUP BY b.id
       ORDER BY b.retention_until ASC, b.id ASC
     `).all(date).map(mapBatch);
@@ -4490,20 +4498,25 @@ class ArchiveRepository {
   }
 
   markInterruptedArtifacts() {
+    // v3.2.20：已下线模块批次的待存档附件留给回退旧版处理，不在启动一致性检查中改为失败。
     const pending = this.db.prepare(`
-      SELECT id, batch_id FROM archive_artifacts WHERE status = 'pending' ORDER BY id
+      SELECT a.id, a.batch_id FROM archive_artifacts a
+      LEFT JOIN archive_batches b ON b.id = a.batch_id
+      WHERE a.status = 'pending' AND (b.id IS NULL OR ${RETIRED_BATCH_EXCLUSION_SQL})
+      ORDER BY a.id
     `).all();
     if (pending.length === 0) return { artifactCount: 0, batchIds: [] };
     const timestamp = this._timestamp();
     return withWriteTransaction(this.db, () => {
       const code = 'ARCHIVE_INTERRUPTED';
       const message = '应用上次退出时文件尚未完成存档，可重试该批次';
-      this.db.prepare(`
+      const markFailed = this.db.prepare(`
         UPDATE archive_artifacts
         SET status = 'failed', blob_id = NULL, last_error_code = ?,
             last_error_message = ?, archived_at = NULL, updated_at = ?
-        WHERE status = 'pending'
-      `).run(code, message, timestamp);
+        WHERE id = ? AND status = 'pending'
+      `);
+      for (const row of pending) markFailed.run(code, message, timestamp, Number(row.id));
       const counts = new Map();
       for (const row of pending) {
         const batchId = Number(row.batch_id);
@@ -4523,6 +4536,7 @@ class ArchiveRepository {
     });
   }
 
+  // v3.2.20：已下线模块仍为 reserved/running 的批次与 Task Run 属于旧版现场，不在此扫尾，留给回退旧版续跑或收口。
   markInterruptedTasks(options = {}) {
     const excludedBatchIds = new Set(
       (Array.isArray(options.excludeBatchIds) ? options.excludeBatchIds : [])
@@ -4534,6 +4548,7 @@ class ArchiveRepository {
       FROM archive_batches b
       LEFT JOIN archive_task_runs tr ON tr.task_run_id = b.task_run_id
       WHERE b.task_status IN ('reserved', 'running')
+        AND ${RETIRED_BATCH_EXCLUSION_SQL}
       ORDER BY b.id
     `).all().filter((row) => !excludedBatchIds.has(Number(row.id)));
     const excludedTaskRunIds = new Set(
@@ -4549,6 +4564,7 @@ class ArchiveRepository {
       SELECT task_run_id
       FROM archive_task_runs
       WHERE status IN ('prepared', 'running')
+        AND ${retiredModuleExclusionSql('module_id')}
       ORDER BY task_run_id
     `).all().filter((row) => !excludedTaskRunIds.has(String(row.task_run_id)));
     if (rows.length === 0 && taskRows.length === 0) {
@@ -5162,15 +5178,18 @@ class ArchiveRepository {
     };
   }
 
+  // v3.2.20：已下线模块原样保留的进行中批次、Task Run 与待存档附件属于旧版现场，不计入到期清理闸门，
+  //   否则其余模块的到期清理会被永久阻止。
   getEntryMaintenanceGateState() {
     const row = this.db.prepare(`
       SELECT
-        (SELECT COUNT(*) FROM archive_batches
-          WHERE task_status IN ('reserved', 'running')) AS active_batches,
+        (SELECT COUNT(*) FROM archive_batches b
+          WHERE b.task_status IN ('reserved', 'running') AND ${RETIRED_BATCH_EXCLUSION_SQL}) AS active_batches,
         (SELECT COUNT(*) FROM archive_task_runs
-          WHERE status IN ('prepared', 'running')) AS active_task_runs,
-        (SELECT COUNT(*) FROM archive_artifacts
-          WHERE status = 'pending') AS pending_artifacts,
+          WHERE status IN ('prepared', 'running') AND ${retiredModuleExclusionSql('module_id')}) AS active_task_runs,
+        (SELECT COUNT(*) FROM archive_artifacts a
+          LEFT JOIN archive_batches b ON b.id = a.batch_id
+          WHERE a.status = 'pending' AND (b.id IS NULL OR ${RETIRED_BATCH_EXCLUSION_SQL})) AS pending_artifacts,
         (SELECT COUNT(*) FROM archive_artifact_holds) AS hold_count
     `).get();
     return {

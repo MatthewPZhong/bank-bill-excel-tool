@@ -68,7 +68,7 @@ function registrationsFor(options) {
     for (const binding of taskRegistration.taskBindings) {
       registration(adapterModules[binding.adapterId]).taskBindings.push(binding);
     }
-    // pending-run / biz-op-run：v3.2.20 已下线模块的遗留终态 route，仅收口任务终态（archive-center/retired-terminal-routes.js）。
+    // pending-run / biz-op-run：v3.2.20 已下线模块的遗留终态 route，只保留识别，通知原样留给旧版（archive-center/retired-terminal-routes.js）。
     const routeModules = {
       'position-reconciliation': 'position', 'pending-run': 'legacy-task-policies',
       'biz-op-run': 'legacy-task-policies', 'pre-fund-run': 'pre-fund'

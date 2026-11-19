@@ -68,8 +68,12 @@ function boundary(value, at) {
     if (!value.retirement.removedPaths.length) fail(at, '退役边界必须列出已删除的源码路径');
     if (value.retirement.releasedPaths.some(p => value.retirement.removedPaths.includes(p))) fail(at, '同一路径不能既删除又释放');
     for (const key of ['entrypoints', 'allowedLocal', 'activationEvidence', 'requiredConsumers', 'protectedScopes', 'restrictedApis',
-      'allowedSites', 'compositionEntrypoints', 'globals', 'deprecatedEntrypoints']) {
+      'allowedSites', 'compositionEntrypoints', 'globals']) {
       if (Array.isArray(value[key]) && value[key].length) fail(`${at}.${key}`, '退役边界不得保留生效约束');
+    }
+    // 已退役的兼容入口是历史登记（防复活依据），退役边界可原样保留；仍为 compat 的入口不得保留。
+    if (Array.isArray(value.deprecatedEntrypoints) && value.deprecatedEntrypoints.some((entry) => !entry || entry.state !== 'retired')) {
+      fail(`${at}.deprecatedEntrypoints`, '退役边界只能保留已退役的兼容入口登记');
     }
     if (value.factory !== null || value.directory !== null || Object.keys(value.allowedApiFields || {}).length) fail(at, '退役边界不得保留工厂、目录或注入合同');
   } else if (value.retirement !== undefined && value.retirement !== null) fail(`${at}.retirement`, '仅退役边界可登记 retirement');

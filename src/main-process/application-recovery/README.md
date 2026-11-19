@@ -22,7 +22,7 @@
 
 请求包含 `reason`（startup/live-handoff/receipt-ack/business-retry）、`taskIds`、`acknowledgedCommittedTaskIds`、`deferCommittedFinalization`、私有 observation capability 与进度回调。ack 必须同时限定 taskIds，跨 owner 拒绝。返回 `recovered`、全根 `deferred`、`skippedActive` 和受信任完整 `observation`；absence 只来自本次显式请求且全根确实不存在的任务，不能用过滤空结果证明未提交或已确认。
 
-owner 接口是 `id`、只读 `identify(record)`、只读 `authorize(record, request, identity)`、`acquireObservation(request)`；借用租约另提供 `verifyObservation`。协调器不执行 SQL。v3.2.20 起业务OP数据核对下线，生产只注册 `archive-publication` owner；BizOP v327 遗留发布 journal 无对应 owner，启动按原 fail-closed 语义阻止（见 backlog B106）。当前 io capability 绑定 task、nonce、操作种类和前置 closure，任意 release 对象不能冒充。
+owner 接口是 `id`、只读 `identify(record)`、只读 `authorize(record, request, identity)`、`acquireObservation(request)`；借用租约另提供 `verifyObservation`。协调器不执行 SQL。v3.2.20 起业务OP数据核对下线，生产注册 `archive-publication` 与 `retired-module-publication` 两个 owner。后者只识别 BizOP v327 遗留发布 journal 并一律 defer：启动继续，记录与文件原样保留给旧版；按共享发布器原合同，处理前新的发布被拒绝，主消息写明处理方式（backlog B108）。旧版已标为 `manual-recovery` 的此类 journal 由共享发布器发现阶段按 `RETIRED_PUBLICATION_TASK_PREFIXES` 只读交给该 owner（不抛错），以 `PUBLICATION_RECOVERY_RETIRED_MODULE_MANUAL` defer；其他记录的 manual-recovery 门禁不变。当前 io capability 绑定 task、nonce、操作种类和前置 closure，任意 release 对象不能冒充。
 
 同一 dispatcher FIFO 内：纯读 discover worker 真实退出 → 全根身份与权限判断 → execute worker 在 lifecycle mutex 内重验 index/journal/stage/backup/target 全摘要 → 原恢复算法。未知、冲突、缺 grant 或漂移在恢复写入前拒绝并保留路径。lease 在 enqueue 前取得，相关 worker 全部真实退出后释放；publish preflight/transport 自恢复复用当前 FIFO 项和租约。
 
@@ -53,7 +53,7 @@ manifest 核验 artifact keys、方向、角色、来源、路径、摘要和大
 - [应用阶段测试](../../../tests/unit/main-process/application-recovery.test.js)：单飞、正常/deferred/activation、真实 SQLite/outbox、失败后继续 owner 及原阻断。
 - [授权材料测试](../../../tests/unit/main-process/publication-recovery-owner.test.js)：五状态未知/冲突、缺 grant、全根漂移、活动记录冲突、真实 worker preflight/transport。
 - [Archive owner 测试](../../../tests/unit/main-process/publication-recovery-archive-owner.test.js)、[producer 合同测试](../../../tests/unit/main-process/publication-recovery-producer-contracts.test.js)：持久 proof、未决聚合和实际 producer。
-- [已下线模块遗留记录](../../../tests/unit/main-process/background-execution/retired-recovery-actions.test.js)、[升级兼容集成](../../../scripts/integration/retired-modules-upgrade-compat.js)：遗留 hold 只读跳过、遗留 outbox 收口、数据不变。
+- [已下线模块遗留记录](../../../tests/unit/main-process/background-execution/retired-recovery-actions.test.js)、[升级兼容集成](../../../scripts/integration/retired-modules-upgrade-compat.js)：遗留 hold 只读跳过、遗留 outbox 与 BizOP v327 发布记录原样保留、存档记录与数据不变。
 - [应用恢复集成](../../../scripts/integration/application-recovery-governance.js)：隔离 SQLite/journal 两次重启及 startup/live/真实 worker transport 保留。
 
 G8 尚未集成，本分支不标机器规则 active。后续 G8 激活 `ARCH-BIZOP-RECOVERY-PRIVATE`、`ARCH-PUBLICATION-RECOVERY-ENTRY`：Main composition 静态装配、dispatcher/worker/core 是允许范围；测试 authority 仅用于 tests 和隔离验证脚本。业务不得引回 recoverOtherOwners、raw recovery 或 prepare 隐式恢复。尚未开放的 mature/Statement seam 保持原 production-disabled 策略，缺注入拒绝，不因接口接入擅自开放。

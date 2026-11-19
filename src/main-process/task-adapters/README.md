@@ -35,7 +35,7 @@ current file 先登记 frozen manifest intent，再记录业务结果或失败�
 
 Toolbox/VCC receipt override 仅覆盖原 scope 下的五项：`toolbox:merge`、`toolbox:split:export`、`vccFinancialOp:data-manager:export`、`vccFinancialOp:export:import-audit`、`vccFinancialOp:export:result`。`toolboxPublicationTaskIds || vccOutputPublicationTaskIds || []` 保持原优先级，空 toolbox 数组仍优先。其他任务保留 prepared hook；no-file 不套用此规则。
 
-四个历史 route `position-reconciliation`、`pending-run`、`biz-op-run`、`pre-fund-run` 是保留的数据合同。各领域 normalizer 保留 trim、必填字段、丢弃额外字段的语义；未知 route 拒绝。Main 注册各领域工厂，Controller 仅消费冻结 registry。PreFund live hook 通过 `createAfterTerminal(route)` 从生命周期实际 context 构建 exact-5 operation owner，再进入同一领域 finalizer。v3.2.20 下线月度Pending数据核对与业务OP数据核对后，`pending-run` / `biz-op-run` 不再产生新记录，只由 [retired-terminal-routes.js](../archive-center/retired-terminal-routes.js) 识别升级前遗留的 outbox：任务终态照常收口，业务侧收尾不再执行，旧数据保持原样。Position live/replay 在同一 owner 内保留原各自身份检查与恢复专用收口步骤。
+四个历史 route `position-reconciliation`、`pending-run`、`biz-op-run`、`pre-fund-run` 是保留的数据合同。各领域 normalizer 保留 trim、必填字段、丢弃额外字段的语义；未知 route 拒绝。Main 注册各领域工厂，Controller 仅消费冻结 registry。PreFund live hook 通过 `createAfterTerminal(route)` 从生命周期实际 context 构建 exact-5 operation owner，再进入同一领域 finalizer。v3.2.20 下线月度Pending数据核对与业务OP数据核对后，`pending-run` / `biz-op-run` 不再产生新记录，只由 [retired-terminal-routes.js](../archive-center/retired-terminal-routes.js) 识别升级前遗留的 outbox；这些通知由存档中心整条原样保留给回退旧版（不写 Task Run 终态、不执行业务收尾、不删除），旧数据保持原样。Position live/replay 在同一 owner 内保留原各自身份检查与恢复专用收口步骤。
 
 旧 `runWithPreparedResourceCleanup` 已移除；`executeAfterPositionAdmission` 继续作为 Position 内部准入 helper，未成为通用执行器依赖。Controller 没有旧路由 fallback；未传 registry 的无路由调用方使用冻结空 registry，任何持久 route 都必须显式注册。
 

@@ -38,7 +38,7 @@
   "productionEnablementAllowed": false,
   "sourceHashes": {
     "scripts/check-background-execution-manifest.js": "277c14eac8c4dd3d12e1beb3cbb5ef1bde12d12de4cb45ed9036173a11dd4e76",
-    "src/main.js": "3b90c8bcfd7621e0a01a5a35c91acd8e52a6daacafbcb3d61408982630134b7d",
+    "src/main.js": "b267bc7faaaf487633b039085f048834b5f2d4379a63657dbba7a06b4559ad23",
     "src/main-process/archive-center/task-policy-registry.js": "29af4fa4df95a6c09a63caf44da2869ac00ae844af0f958e0fa06ec8c73ed7b7",
     "src/main-process/background-execution/action-task-binding-registry.js": "283ab50149f4bba221c727c6fad20b784d18716ccfaba22f7463537e9d928bfd",
     "src/main-process/background-execution/action-manifest.js": "b2a1b8cc7573d991e1960928d940dd5356fcf35047cb70250172e6288218988e",
@@ -52,7 +52,7 @@
     "src/main-process/archive-center/task-policy-common.js": "307938362db9bf235c54349d49444ecd663e04d3d9ed5ccd172e800aa0f5af47",
     "src/main-process/application-recovery/composition.js": "7622afac492f5fb445643a63b1835bdebac13ef29508cc8eb5bea9b186c489a6",
     "src/main-process/task-adapter-composition.js": "eb4629a4b8387394548e574a8714a506eada318e21b2ac00f0807e3344d4bae1",
-    "src/main-process/execution-descriptors/composition.js": "f5e6fcb4144a2d9724b95ad02cbd012bb0179618a407090559727e482ad88837",
+    "src/main-process/execution-descriptors/composition.js": "995625298c26f72715f4c63de30189fc4f0c141beef083362575ce569016bef0",
     "src/main-process/execution-descriptors/contract.js": "5d05799bd4de91b2a7ed6c0674a72d4711bb9c1c77bf720787ee540e24c0751c",
     "src/main-process/execution-descriptors/descriptor-builder.js": "988ad60eb70e41f02c9a60bfdaf0186072089683b495309c6a2e83627b4a10fd",
     "src/main-process/execution-descriptors/legacy-task-policies.js": "4f1b8f310cb4d17687d0c0e671969cd3c79127d09335536983a218d251711bbc",

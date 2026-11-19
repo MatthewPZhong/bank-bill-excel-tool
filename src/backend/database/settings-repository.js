@@ -1,5 +1,6 @@
 // v2.1.9 SR-log-1 (T32h)：替换 console.warn → appendModuleLog 双写
 const { appendModuleLog } = require('../logger');
+const { RETIRED_MODULE_IDS } = require('./retired-modules');
 const {
   normalizeDarkModeSchedule,
   validateDarkModeSchedule,
@@ -254,11 +255,8 @@ const DEFAULT_ENABLED_MODULES = Object.freeze([
   'recon-id-fix'
 ]);
 
-// v3.2.20 下线的四个模块。用户数据保留不动：启用列表中的这些 id 读取时忽略，写回时原样保留在列表末尾，
-//   回退旧版后这些模块仍按原启用状态显示。
-const RETIRED_MODULE_IDS = Object.freeze([
-  'pending-reconciliation', 'bank-bu-recon', 'biz-op-recon', 'acquiring-bill-currency'
-]);
+// v3.2.20 下线的四个模块（清单见 ./retired-modules）。用户数据保留不动：启用列表中的这些 id 读取时忽略，
+//   写回时原样保留在列表末尾，回退旧版后这些模块仍按原启用状态显示。
 
 function retiredModuleIdsIn(list) {
   if (!Array.isArray(list)) return [];
@@ -310,6 +308,11 @@ function getEnabledModules(db) {
     seen.add(id);
     return true;
   });
+  // v3.2.20：旧版只启用了已下线模块（全部是旧版合法 id）时，本次只在内存中回退默认列表，不改写库值；
+  //   回退旧版后启用状态不变。用户在新版保存「功能收纳」时再按 setEnabledModules 写回（保留已下线 id）。
+  if (sanitized.length === 0 && parsed.length > 0 && parsed.every((id) => RETIRED_MODULE_IDS.includes(id))) {
+    return [...DEFAULT_ENABLED_MODULES];
+  }
   // 若 sanitize 后为空（DB 内全是非法 ID）→ 回退默认值，避免锁死 UI
   if (sanitized.length === 0) {
     // round 1 self-review M6：destructive 覆盖前打 warn

@@ -18,7 +18,7 @@
 
 Toolbox（含 rows）、NewAccount、PreFund、FundRecon、Duplicate、ReconFix、VCC、Position 在各自 `execution-descriptor.js` 绑定本域已有 policy、entry、validator、topology、Main input binding。归档规则由同域 `archive-task-policies.js` 提供。
 
-[legacy-task-policies.js](legacy-task-policies.js) 保留 Statement、Linked、VCC OP 和 exclude inventory，不伪造 runtime policy；它还登记应用恢复的 platform-scan participant，以及已下线模块遗留终态 route `pending-run` / `biz-op-run`（只收口任务终态，见 [retired-terminal-routes.js](../archive-center/retired-terminal-routes.js)）。
+[legacy-task-policies.js](legacy-task-policies.js) 保留 Statement、Linked、VCC OP 和 exclude inventory，不伪造 runtime policy；它还登记应用恢复的 platform-scan participant，以及已下线模块遗留终态 route `pending-run` / `biz-op-run`（只保留识别，遗留通知原样留给旧版，见 [retired-terminal-routes.js](../archive-center/retired-terminal-routes.js)）。
 
 v3.2.20 下线业务OP数据核对（旧版与 v327）、月度Pending数据核对、收单单据币种校验、月度银行对账单BU回填校验后，原 `mature-adapters.js`、BizOP v327 descriptor 及其 action / Archive policy 一并删除；历史数据保留不动，升级前遗留记录的处理见 [TechDoc](../../../changes/v3.2.20/feat/retire-recon-modules/techdoc.md)。
 

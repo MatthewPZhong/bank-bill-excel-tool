@@ -20,24 +20,38 @@
 
 ## 未实施
 
+### B110（P3 · 已知问题）缺少收口凭证的历史批次会使到期清理整轮停在当页
+
+- **来源**：v3.2.20 Codex 第二轮审查（分支 `feat/retire-recon-modules`）；基线既有问题，与模块下线无关
+- **影响**：v3.2.9 引入任务收口凭证前生成、带 Task Run 的批次没有收口凭证，删除闸门返回 `ARCHIVE_DELETE_OWNER_COMPLETION_REQUIRED`；`runRetentionMaintenance` 遇到失败即以 `partial` 结束本轮，排在其后的到期批次（任何模块）本轮清理不到，只能手动删除前也同样被拒。已下线模块的此类批次已在本分支跳过（spec D3），保留模块仍按原行为
+- **关闭条件**：设计历史批次的收口凭证补登或到期清理跳过策略（不能仅凭终态放行删除），配回归
+- **目标版本**：未定
+
+### B109（P3 · 已知问题）已下线模块遗留的无归属文件重试通知会使该模块的到期批次都被跳过
+
+- **来源**：v3.2.20 Codex 第二轮审查（分支 `feat/retire-recon-modules`，[TechDoc §四](../changes/v3.2.20/feat/retire-recon-modules/techdoc.md)）
+- **影响**：旧版建批失败时可能留下只有 `moduleId`、`operationKey`、没有 owner 与目标批次的 outbox 文件重试通知。新版原样保留已下线模块的通知，而删除闸门无法判断它与哪个批次有关，把同模块每个批次都视为「仍有未收口通知」，到期清理每轮跳过这些批次（保留数据、不误删、不影响其他模块）。需同时满足旧版建批失败并在重试前升级，概率很低
+- **关闭条件**：按可验证的 operation / issuance 身份区分无关批次（改所有模块共用的删除归属判定，属资金红线，须人工复核）；或确认无用户受影响后关闭
+- **目标版本**：未定
+
+### B108（P3 · 已知问题）已下线的业务OP数据核对遗留未完成导出时，新版在处理前拒绝经统一发布流程的导出
+
+- **来源**：v3.2.20 Codex 审查修复（分支 `feat/retire-recon-modules`，[TechDoc §四](../changes/v3.2.20/feat/retire-recon-modules/techdoc.md)）；用户 2026-11-18 选择「只放行启动」（spec D4），第二轮审查后扩展到需人工恢复的记录（spec D5）
+- **影响**：仅当升级前 BizOP v327 导出在发布中途退出、且未先用旧版（v3.2.19 及更早）重新打开一次就升级时出现。新版能正常启动，遗留记录原样保留；但共享发布器对未处理记录失败关闭，工具箱、VCC财务OP 等经统一发布流程保存的导出会被拒绝（其他导出不受影响），错误提示写明处理方式：普通遗留记录先用旧版打开一次完成收尾；旧版已标为需人工恢复的记录，按活动日志中的恢复路径人工处理
+- **关闭条件**：确认没有用户受影响；或评估改共享发布器（新发布预检跳过已确认属于已下线模块的记录，并补目标路径重叠检查），配对应回归
+- **目标版本**：未定
+
 ### B107（P3 · 改进）已下线模块的历史数据清理入口
 
 - **来源**：v3.2.20 下线四个对账模块（分支 `feat/retire-recon-modules`，[TechDoc](../changes/v3.2.20/feat/retire-recon-modules/techdoc.md)）；用户决策「历史数据保留不动」
-- **影响**：主库中这些模块的表与设置、`run-data/{acquiring-bill-currency,biz-op-recon,bank-bu-recon}/` 侧库、`tool-data-pending.sqlite`、存档批次和模板用户版本继续占用磁盘，新版本没有清理入口
+- **影响**：主库中这些模块的表与设置、`run-data/{acquiring-bill-currency,biz-op-recon,bank-bu-recon,biz-op-v327}/` 侧库与数据目录、`tool-data-pending.sqlite` 和模板用户版本继续占用磁盘，新版本没有清理入口（存档批次不展示，但已结束的批次到期照常清理，见 spec D3）
 - **关闭条件**：按用户反馈决定是否提供清理入口；提供时须先备份、只删已下线模块数据，并保证回退旧版的影响已告知用户
-- **目标版本**：未定
-
-### B106（P3 · 已知问题）BizOP v327 遗留发布 journal 会阻止新版启动
-
-- **来源**：v3.2.20 下线业务OP数据核对（[TechDoc §四](../changes/v3.2.20/feat/retire-recon-modules/techdoc.md)）
-- **影响**：仅当升级前 BizOP 导出在发布中崩溃、且未先用旧版（v3.2.19 及更早）重新启动一次就安装新版时出现。新版已无对应 publication owner，启动发布恢复按原 fail-closed 语义阻止启动；处理方式为先启动旧版完成恢复再升级
-- **关闭条件**：确认没有用户受影响，或为该 journal 补只读识别与收尾，并配升级兼容回归
 - **目标版本**：未定
 
 ### B105（P2 · 未做）v3.2.20 模块下线的 Windows 打包版验收与正常启动 CI 覆盖
 
 - **来源**：v3.2.20 下线四个对账模块（分支 `feat/retire-recon-modules`）。CI 中原 BizOP 打包验收步骤顺带覆盖了打包版正常启动，已随模块删除
-- **影响**：打包版的启动、模块切换（含升级前停在已下线模块的用户回到默认模块）、存档中心查看与删除已下线模块的历史批次，只由本机集成测试 `retired-modules-upgrade-compat.js` 和渲染生命周期用例覆盖；CI 不再有与业务无关的打包版正常启动检查
+- **影响**：打包版的启动、模块切换（含升级前停在已下线模块的用户回到默认模块）、存档中心不展示已下线模块的历史批次、已结束批次到期清理、遗留业务OP导出记录不阻断启动，只由本机集成测试与单测 `retired-modules-upgrade-compat.js` 和渲染生命周期用例覆盖；CI 不再有与业务无关的打包版正常启动检查
 - **关闭条件**：Windows 安装包实机走通上述流程并记录；评估并决定是否补一个与业务无关的打包版正常启动 CI 检查
 - **目标版本**：v3.2.20（暂定）
 
@@ -695,6 +709,14 @@
 - **触发实施**：下次新增场景算法（C4 / C5 等新场景类）时一并加
 
 ## 已完成
+
+### B106（P3 · 已知问题）BizOP v327 遗留发布 journal 会阻止新版启动
+
+- **来源**：v3.2.20 下线业务OP数据核对（[TechDoc §四](../changes/v3.2.20/feat/retire-recon-modules/techdoc.md)）
+- **影响**：仅当升级前 BizOP 导出在发布中崩溃、且未先用旧版（v3.2.19 及更早）重新启动一次就安装新版时出现。新版已无对应 publication owner，启动发布恢复按原 fail-closed 语义阻止启动；处理方式为先启动旧版完成恢复再升级
+- **关闭条件**：确认没有用户受影响，或为该 journal 补只读识别与收尾，并配升级兼容回归
+- **目标版本**：未定
+- **关闭**：v3.2.20（分支 `feat/retire-recon-modules`，Codex 审查修复，随本分支合入）。新增 `publication-recovery/retired-module-owner.js`：只识别 BizOP v327 导出的遗留发布记录并一律 defer，启动不再中止，journal / staging / 备份 / 目标原样保留。验证：单测 `publication-recovery-retired-owner.test.js`；集成 `retired-modules-upgrade-compat.js` 用真实应用启动通过，去掉该 owner 时以 `PUBLICATION_RECOVERY_OWNER_UNKNOWN` 失败。旧版收尾前导出被拒绝的剩余影响见 B108
 
 ### B34（P3 · 已知问题）`scripts/render-modal-preview.js` 弹窗预览启动即失败
 

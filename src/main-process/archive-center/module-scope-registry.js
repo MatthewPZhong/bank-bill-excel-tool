@@ -1,7 +1,8 @@
 'use strict';
 
-// v3.2.20：月度Pending / 月度BU回填 / 业务OP / 收单已下线，移出存档范围；其历史批次仍保留在存档库，
-//   不按模块筛选时照常可见，到期时间沿用生成时记录的保留期。
+// v3.2.20：月度Pending / 月度BU回填 / 业务OP / 收单已下线，移出存档范围；其历史批次原样保留在存档库，
+//   不在存档中心展示、不参与启动扫尾（archive-repository.js RETIRED_BATCH_EXCLUSION_SQL）；已结束的批次照常按生成时
+//   记录的保留期到期清理，仍在运行的旧版现场留给回退旧版。
 const PRIMARY_ARCHIVE_SCOPES = Object.freeze([
   Object.freeze({ id: 'statement-generator', code: 'STATEMENT', name: '网银账单生成', kind: 'primary' }),
   Object.freeze({ id: 'new-account-generator', code: 'NEWACCOUNT', name: '新开账户余额账单生成', kind: 'primary' }),

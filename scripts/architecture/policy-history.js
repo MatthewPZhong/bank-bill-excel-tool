@@ -418,6 +418,9 @@ function checkPolicyHistory({ root, config, allowlist, against = 'HEAD', scan: s
     const evidence = currentFile(designDoc);
     if (!evidence || !evidence.bytes.toString('utf8').trim() || !meaningfulReason(reason)) return false;
     if (removedPaths.some((removed) => currentFile(removed))) return false;
+    // 释放路径必须是仍在当前树中的共享文件；已删除的原入口只能登记为 removedPaths，否则会绕过防复活检查。
+    //   释放的共享文件之后若被删除，须改登记到 removedPaths（删除登记只增不减）。
+    if (releasedPaths.some((released) => !currentFile(released))) return false;
     // 至少一个原入口随功能删除；其余原入口只能是显式释放的共享文件。
     return oldBoundary.entrypoints.some((entry) => removedPaths.includes(entry))
       && oldBoundary.entrypoints.every((entry) => removedPaths.includes(entry) || releasedPaths.includes(entry));
@@ -425,14 +428,8 @@ function checkPolicyHistory({ root, config, allowlist, against = 'HEAD', scan: s
   for (const snapshot of snapshots) {
     for (const oldBoundary of snapshot.value.boundaries) {
       const current = config.boundaries.find((boundary) => boundary.id === oldBoundary.id);
-      if (oldBoundary.state === 'retired') {
-        retiredBoundaryIds.add(oldBoundary.id);
-        if (!current || current.state !== 'retired') violation(snapshot, oldBoundary.id, 'state', `已退役边界不得删除登记或复活：${oldBoundary.id}`);
-        else if (!includesAll(current.retirement.removedPaths, oldBoundary.retirement.removedPaths)) {
-          violation(snapshot, oldBoundary.id, 'retirement', `已退役边界的删除路径登记不得缩减：${oldBoundary.id}`);
-        }
-        continue;
-      }
+      // 已退役兼容入口的登记只增不减；边界本身已退役时同样适用（兼容入口可能与边界在同一提交退役，
+      //   之后不得删除登记再恢复 shim 文件）。
       for (const retired of oldBoundary.deprecatedEntrypoints || []) {
         if (retired.state !== 'retired') continue;
         retiredPaths.add(retired.path);
@@ -442,6 +439,14 @@ function checkPolicyHistory({ root, config, allowlist, against = 'HEAD', scan: s
           || !includesAll(retired.existingConsumers, now.existingConsumers) || !includesAll(now.retirementEvidence, retired.retirementEvidence)) {
           violation(snapshot, oldBoundary.id, 'deprecatedEntrypoints', `已退役入口的成员、消费者与证据约束不得放宽：${retired.path}`);
         }
+      }
+      if (oldBoundary.state === 'retired') {
+        retiredBoundaryIds.add(oldBoundary.id);
+        if (!current || current.state !== 'retired') violation(snapshot, oldBoundary.id, 'state', `已退役边界不得删除登记或复活：${oldBoundary.id}`);
+        else if (!includesAll(current.retirement.removedPaths, oldBoundary.retirement.removedPaths)) {
+          violation(snapshot, oldBoundary.id, 'retirement', `已退役边界的删除路径登记不得缩减：${oldBoundary.id}`);
+        }
+        continue;
       }
       if (oldBoundary.state !== 'active') continue;
       activeIds.add(oldBoundary.id);

@@ -53,9 +53,9 @@ G5 Q1–Q3 和 G3 控制器按独立子边界登记。G6 两个纯合同必须�
 所属功能整体下线时，边界 `state` 由 active 改为 `retired`，并登记 `retirement: { reason, designDoc, removedPaths, releasedPaths }`。规则如下：
 
 - `removedPaths` 是随功能删除的源码，必须非空；`releasedPaths` 是原入口中仍保留的共享文件，只解除本边界的治理，仍受其他边界约束。同一路径不能同时出现在两处。
-- 退役边界保留 id 和规则绑定作为登记，不得保留入口、消费者、保护范围、受限 API、工厂、目录或注入合同；`REQUIRED_BOUNDARIES` 中的退役边界不再要求入口非空。
-- 常规规则跳过退役边界，改为校验 `designDoc` 存在、`removedPaths` 在当前树中都不存在，且没有任何生产依赖边指向它们，防止源码复活。
-- 历史检查只在以下条件全部满足时接受 active → retired：`designDoc` 可读且非空，`reason` 有实际内容，`removedPaths` 都已删除，原入口至少一个已删除，其余原入口都登记在 `releasedPaths`。退役后不得删除登记、复活为其他状态或缩减 `removedPaths`。报告列出 `historicalRetiredBoundaries`。
+- 退役边界保留 id 和规则绑定作为登记，不得保留入口、消费者、保护范围、受限 API、工厂、目录或注入合同；`REQUIRED_BOUNDARIES` 中的退役边界不再要求入口非空。状态为 retired 的兼容入口登记（`deprecatedEntrypoints`）可以原样保留，作为防复活依据；仍为 compat 的入口不得保留。
+- 常规规则跳过退役边界，改为校验 `designDoc` 存在、`removedPaths` 与保留的已退役兼容入口在当前树中都不存在，且没有任何生产依赖边指向它们，防止源码复活。
+- 历史检查只在以下条件全部满足时接受 active → retired：`designDoc` 可读且非空，`reason` 有实际内容，`removedPaths` 都已删除，原入口至少一个已删除，其余原入口都登记在 `releasedPaths`，且 `releasedPaths` 都仍在当前树中（已删除的原入口只能登记为删除路径，否则会绕过防复活检查；释放的共享文件以后被删除时改登记到 `removedPaths`）。退役后不得删除登记、复活为其他状态或缩减 `removedPaths`。报告列出 `historicalRetiredBoundaries`。
 
 v3.2.20 下线四个对账模块时，`renderer-{bank-bu,acquiring,biz-op-legacy,pending,biz-op-v327}`、`bizop-recovery-private`、`bizop-query-q1`～`q3` 按此机制退役，依据见 [TechDoc](../changes/v3.2.20/feat/retire-recon-modules/techdoc.md)；负向用例见 [policy-history.test.js](../tests/unit/architecture/policy-history.test.js)。
 

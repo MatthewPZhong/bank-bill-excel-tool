@@ -1,6 +1,7 @@
 'use strict';
 
 const { getArchiveScope, listVisibleArchiveScopes } = require('./module-scope-registry');
+const { RETIRED_MODULE_IDS } = require('../../backend/database/retired-modules');
 
 const ARCHIVE_RETENTION_SETTING_KEY = 'archive_center_retention_days';
 const ARCHIVE_MODULE_RETENTION_SETTING_KEY = 'archive_center_retention_days_by_module';
@@ -22,9 +23,7 @@ function readDefaultRetentionDays(database, fallback = DEFAULT_RETENTION_DAYS) {
 }
 
 // v3.2.20 下线的四个模块：其按模块保留期设置不再展示或生效，修改其他模块时原样保留，回退旧版后仍按原值生效。
-const RETIRED_SCOPE_IDS = Object.freeze([
-  'pending-reconciliation', 'bank-bu-recon', 'biz-op-recon', 'acquiring-bill-currency'
-]);
+const RETIRED_SCOPE_IDS = RETIRED_MODULE_IDS;
 
 function retainedRetiredOverrides(database) {
   let stored;

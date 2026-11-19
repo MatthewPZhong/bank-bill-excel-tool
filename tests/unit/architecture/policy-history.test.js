@@ -625,6 +625,60 @@ test('退役：保留的共享入口须显式释放，且至少一个原入口�
   hasViolation(fixture.check(), 'state');
 });
 
+test('退役：已删除的原入口不能登记为释放路径（否则绕过防复活检查），须登记为删除路径', (t) => {
+  const fixture = createPolicyRepository(t);
+  fixture.write('src/shared.js', 'module.exports = {};\n');
+  fixture.boundary.entrypoints = ['src/entry.js', 'src/shared.js'];
+  fixture.boundary.allowedLocal = ['src/entry.js', 'src/shared.js'];
+  fixture.save();
+  fixture.commit('S1 active');
+  fixture.write('docs/retire.md', '模块下线设计依据。\n');
+  for (const file of ['src/entry.js', 'src/shared.js', 'src/consumer.js']) fs.unlinkSync(path.join(fixture.root, file));
+  retire(fixture.boundary, { releasedPaths: ['src/shared.js'] });
+  fixture.save();
+  hasViolation(fixture.check(), 'state');
+  retire(fixture.boundary, { removedPaths: ['src/entry.js', 'src/shared.js'] });
+  fixture.save();
+  assert.deepEqual(fixture.check().violations, []);
+});
+
+test('退役：边界可原样保留已退役兼容入口登记，入口复活即报错，仍为 compat 的入口不得保留', (t) => {
+  const fixture = createPolicyRepository(t);
+  fixture.boundary.deprecatedEntrypoints = [{ path: 'src/old.js', replacementPaths: ['src/entry.js'], exportNames: null,
+    existingConsumers: [], state: 'retired', retirementEvidence: ['tests/behavior.js'] }];
+  fixture.save();
+  fixture.commit('S1 active，旧兼容入口已退役');
+  fixture.write('docs/retire.md', '模块下线设计依据。\n');
+  fs.unlinkSync(path.join(fixture.root, 'src/entry.js'));
+  fs.unlinkSync(path.join(fixture.root, 'src/consumer.js'));
+  const shims = structuredClone(fixture.boundary.deprecatedEntrypoints);
+  retire(fixture.boundary);
+  fixture.boundary.deprecatedEntrypoints = structuredClone(shims);
+  fixture.save();
+  assert.deepEqual(fixture.check().violations, []);
+  fixture.write('src/old.js', 'module.exports = {};\n');
+  const revived = evaluateRules(scan(fixture.root, fixture.config), fixture.config, fixture.allowlist, { root: fixture.root })
+    .violations.filter((item) => item.boundaryId === 'fixture-core').map((item) => item.message);
+  assert.ok(revived.includes('已退役兼容入口不得复活'), JSON.stringify(revived));
+  fs.unlinkSync(path.join(fixture.root, 'src/old.js'));
+  fixture.boundary.deprecatedEntrypoints = [{ ...shims[0], state: 'compat' }];
+  fixture.save();
+  inputFailure(() => fixture.check(), /只能保留已退役的兼容入口登记/);
+});
+
+test('退役：随边界一起退役的兼容入口登记，在后续提交中也不得删除（防止删除登记后恢复 shim）', (t) => {
+  const fixture = retireFixture(t);
+  retire(fixture.boundary);
+  fixture.boundary.deprecatedEntrypoints = [{ path: 'src/old.js', replacementPaths: ['src/entry.js'], exportNames: null,
+    existingConsumers: [], state: 'retired', retirementEvidence: ['tests/behavior.js'] }];
+  fixture.save();
+  assert.deepEqual(fixture.check().violations, []);
+  fixture.commit('S2 边界与兼容入口同一提交退役');
+  fixture.boundary.deprecatedEntrypoints = [];
+  fixture.save();
+  hasViolation(fixture.check(), 'deprecatedEntrypoints');
+});
+
 test('退役：已退役边界不得复活、删除登记或缩减删除路径', (t) => {
   const fixture = retireFixture(t);
   retire(fixture.boundary, { removedPaths: ['src/entry.js', 'src/consumer.js'] });

@@ -112,29 +112,21 @@ test('PreFund live/replay 保留真实终态优先、operation owner 校验及 A
     terminalStatus: 'succeeded' }), /exact-5/);
 });
 
-// v3.2.20：月度Pending / 业务OP 已下线，遗留 route 只收口任务终态，业务侧收尾不再执行。
-test('已下线模块的遗留 route 同形规范化、缺身份不抛错，live/replay 只记录不触达业务数据', async () => {
-  const seen = [];
-  const registry = createTerminalRouteRegistry(createRetiredTerminalRouteRegistrations({
-    onRetiredFinalize: (info) => seen.push(info)
-  }));
+// v3.2.20：月度Pending / 业务OP 已下线。遗留 route 只保留同形识别（outbox 可读、不阻断存档中心初始化）；
+//   其通知由 ArchiveCenterController 原样留给旧版，finalize 仅作兜底，一旦被调用即拒绝（live/replay 都不触达业务数据）。
+test('已下线模块的遗留 route 同形规范化、缺身份不抛错，finalize 与 live 收尾一律拒绝', async () => {
+  const registry = createTerminalRouteRegistry(createRetiredTerminalRouteRegistrations());
   assert.deepEqual([...RETIRED_TERMINAL_ROUTES], ['pending-run', 'biz-op-run']);
   for (const route of RETIRED_TERMINAL_ROUTES) {
     const normalized = registry.normalize({ route: ` ${route} `, taskRunId: ' original-task ', legacyExtra: 1 });
     assert.deepEqual(normalized, { route, taskRunId: 'original-task' });
     assert.equal(Object.isFrozen(normalized), true);
     assert.deepEqual(registry.normalize({ route, taskRunId: '' }), { route });
-    const result = await registry.finalize({ route: normalized, record: operationRecord(), terminalOutcome: { taskStatus: 'succeeded' } });
-    assert.deepEqual(result, { route, retired: true });
-    await registry.createAfterTerminal(normalized)({ context: context(), terminalStatus: 'failed' });
+    await assert.rejects(registry.finalize({ route: normalized, record: operationRecord(), terminalOutcome: { taskStatus: 'succeeded' } }),
+      { code: 'ARCHIVE_RETIRED_TERMINAL_ROUTE_RETAINED' });
+    await assert.rejects(registry.createAfterTerminal(normalized)({ context: context(), terminalStatus: 'failed' }),
+      { code: 'ARCHIVE_RETIRED_TERMINAL_ROUTE_RETAINED' });
   }
-  assert.deepEqual(seen, [
-    { route: 'pending-run', taskStatus: 'succeeded', taskRunId: 'original-task' },
-    { route: 'pending-run', taskStatus: 'failed', taskRunId: 'original-task' },
-    { route: 'biz-op-run', taskStatus: 'succeeded', taskRunId: 'original-task' },
-    { route: 'biz-op-run', taskStatus: 'failed', taskRunId: 'original-task' }
-  ]);
-  assert.throws(() => createRetiredTerminalRouteRegistrations({ onRetiredFinalize: 1 }), TypeError);
 });
 
 test('Position registry 保留 token/owner 与历史无 owner 批次检查，已清 pending 重放幂等', async () => {

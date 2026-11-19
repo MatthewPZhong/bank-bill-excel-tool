@@ -1634,8 +1634,8 @@ class AppDatabase {
     return templateResourceRepository.appendChange(this.db, change);
   }
 
-  listTemplateResourceChanges(limit) {
-    return templateResourceRepository.listChanges(this.db, limit);
+  listTemplateResourceChanges(limit, resourceIds) {
+    return templateResourceRepository.listChanges(this.db, limit, resourceIds);
   }
 
   createPreFundReconciliationRunMirror(payload) {

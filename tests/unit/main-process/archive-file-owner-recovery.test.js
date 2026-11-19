@@ -40,7 +40,7 @@ async function fixture(t, allocation = 'eager', options = {}) {
   });
   service.runDeleteWithOwnerGuard = (id, operation, payload) => controller.runDeleteWithOwnerGuard(id, operation, payload);
   const channel = options.channel || (allocation === 'eager' ? 'template:import' : 'monthly-balance:assemble');
-  const policy = createTaskPolicyRegistry().require(channel);
+  const policy = options.policy || createTaskPolicyRegistry().require(channel);
   assert.equal(policy.allocation, allocation);
   const sourcePath = path.join(directory, 'input.csv');
   fs.writeFileSync(sourcePath, '日期,金额\n2026-09-12,1\n');
@@ -313,4 +313,38 @@ test('旧 completion schema 加 provenance 列幂等，旧普通证明不被标�
   f.service.repository.ensureSchema();
   assert.deepEqual(f.service.repository.getOwnerTerminalCompletion(owner), { ...proof, recoveryKind: '' });
   assert.equal(rowCount(f.db, 'archive_file_task_owner_recovery'), 0);
+});
+
+// v3.2.20 已下线模块：启动不代旧版确认其 File Task 原收口责任、不重放其流程绑定意图（原样保留给回退旧版）；
+//   该批次因此缺少收口凭证，到期清理跳过它且不算失败，不拖住其余批次。
+test('已下线模块：启动保留原收口责任与流程绑定意图，到期清理跳过缺凭证批次且整轮不失败', async (t) => {
+  const policy = { ...createTaskPolicyRegistry().require('template:import'),
+    scopeId: 'bank-bu-recon', moduleCode: 'BANKBU', moduleName: '月度银行对账单BU回填校验' };
+  const f = await fixture(t, 'eager', { policy });
+  await assert.rejects(f.run({ boundary: 'after-terminal' }), { code: 'SIMULATED_CRASH' });
+  const owner = f.owner();
+  assert.equal(owner.batchContext.moduleId, 'bank-bu-recon');
+  assert.equal(f.service.repository.getTaskRun('owner-task').status, 'succeeded');
+  const identity = { moduleId: 'bank-bu-recon', identityType: 'business-run-id', parentRunId: owner.batchContext.parentRunId };
+  f.service.repository.persistTaskFlowBindIntent({ ...identity, identityValue: 'bu-task-flow', sourceTaskRunId: 'owner-task' });
+  f.service.repository.persistFlowBindIntent({ ...identity, identityValue: 'bu-batch-flow', sourceBatchId: owner.batchContext.batchId });
+  const evidence = () => Object.fromEntries(['archive_file_task_owner_recovery', 'archive_owner_terminal_completions',
+    'archive_task_flow_bind_intents', 'archive_flow_bind_intents', 'archive_flow_anchors']
+    .map((table) => [table, f.db.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()]));
+  const before = evidence();
+  assert.equal(before.archive_file_task_owner_recovery.length, 1);
+  assert.equal(before.archive_task_flow_bind_intents.length + before.archive_flow_bind_intents.length, 2);
+
+  assert.equal((await f.controller.initialize()).ok, true);
+  assert.deepEqual(evidence(), before, '原收口责任、流程绑定意图与锚点原样保留');
+  assert.equal(f.service.repository.getOwnerTerminalCompletion(owner), null);
+
+  f.db.prepare('UPDATE archive_batches SET retention_until = ? WHERE id = ?').run('2026-01-01', owner.batchContext.batchId);
+  const retention = await f.service.runRetentionMaintenance({ asOfLocalDate: '2026-11-18' });
+  assert.equal(retention.ok, true, JSON.stringify(retention));
+  assert.equal(retention.status, 'complete');
+  assert.equal(f.outboxStore.list().length, 0);
+  assert.deepEqual(retention.results.map((item) => [item.skipped, item.code]), [[true, 'ARCHIVE_DELETE_OWNER_COMPLETION_REQUIRED']]);
+  assert.ok(f.service.repository.getBatch(owner.batchContext.batchId), '缺收口凭证的旧版批次不在新版清理');
+  assert.deepEqual(evidence(), before);
 });

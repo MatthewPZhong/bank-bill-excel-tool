@@ -435,7 +435,7 @@ test('publication owner 仅匹配 Main 登记的精确 taskKey/moduleId，不认
   assert.equal(isPublicationOnlyFileTask(), false);
 });
 
-test('VCC 与只读导出真实 policy（含已下线模块的遗留导出）的临时归档失败由原 publication 恢复，匿名通知安全 ACK 后可初始化和删除', async (t) => {
+test('VCC 与只读导出真实 policy（含已下线模块的遗留导出）的临时归档失败由原 publication 恢复，匿名通知安全 ACK 后可初始化和删除（已下线批次只能到期清理）', async (t) => {
   const crypto = require('node:crypto');
   const { createArchiveService } = require('../../../src/main-process/archive-center/archive-service');
   const { createTaskLifecycle } = require('../../../src/main-process/archive-center/task-lifecycle');
@@ -515,9 +515,24 @@ test('VCC 与只读导出真实 policy（含已下线模块的遗留导出）的
       assert.equal((await controller.flushOutbox()).remaining, 0);
       assert.equal((await controller.initialize()).ok, true);
       assert.deepEqual(JSON.parse(fs.readFileSync(path.join(userDataDir, JOURNAL_INDEX_NAME))).entries, []);
-      const preparation = await controller.prepareDeleteBatch(batchContext.batchId);
-      assert.equal(preparation.ok, true, JSON.stringify(preparation));
-      assert.equal((await controller.deleteBatch(batchContext.batchId, preparation.confirmationToken)).fullyDeleted, true);
+      if (RETIRED_PUBLICATION_EXPORTS.some(([key]) => key === channel)) {
+        // v3.2.20：已下线模块的批次不在存档中心展示，用户无法打开或手动删除。此批次的旧版终态通知原样保留在
+        //   outbox（留给回退旧版），到期清理本轮跳过它且不算失败；没有遗留通知的已结束批次到期照常删除（见下一用例）。
+        const hidden = await controller.prepareDeleteBatch(batchContext.batchId);
+        assert.notEqual(hidden.ok, true, JSON.stringify(hidden));
+        assert.ok(service.repository.getBatch(batchContext.batchId), '隐藏不等于删除');
+        assert.equal(controller.outboxStore.list().length, 1, '旧版终态通知原样保留');
+        // 旧版生成批次时已记录到期日；此夹具未配置保留期，这里直接写入已过期的到期日。
+        db.prepare('UPDATE archive_batches SET retention_until = ? WHERE id = ?').run('2026-01-01', batchContext.batchId);
+        const retention = await service.runRetentionMaintenance({ asOfLocalDate: '2026-11-18' });
+        assert.equal(retention.ok, true, JSON.stringify(retention));
+        assert.deepEqual(retention.results.map((item) => [item.skipped, item.code]), [[true, 'ARCHIVE_DELETE_OWNER_PENDING']]);
+        assert.ok(service.repository.getBatch(batchContext.batchId), '仍有保留通知的旧版现场不在新版清理');
+      } else {
+        const preparation = await controller.prepareDeleteBatch(batchContext.batchId);
+        assert.equal(preparation.ok, true, JSON.stringify(preparation));
+        assert.equal((await controller.deleteBatch(batchContext.batchId, preparation.confirmationToken)).fullyDeleted, true);
+      }
       assert.equal(fs.readFileSync(outputPath, 'utf8'), 'vcc-validated-output');
       assert.equal((await recoverToolboxPublicationsIntoArchive({ userDataDir, archiveCenter: controller, recoverPublications: publicationRecovery.recover })).recovered.length, 0);
     });

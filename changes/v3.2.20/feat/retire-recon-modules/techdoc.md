@@ -42,27 +42,35 @@
 
 ## 四、数据保留与遗留记录兼容
 
-**不删除、不改写**：主库中这些模块的表与设置键、`run-data/{acquiring-bill-currency,biz-op-recon,bank-bu-recon}/` 侧库、`tool-data-pending.sqlite`、存档、模板文件用户版本、`.usage-stats.txt` 中的历史计数（统计注册表保留四个条目以免保存时被抹去）。新装用户不再创建这些表。回退旧版安装包后由旧版迁移按原逻辑幂等补齐。
+**不删除、不改写**：主库中这些模块的表与设置键、`run-data/{acquiring-bill-currency,biz-op-recon,bank-bu-recon,biz-op-v327}/` 侧库与数据目录、`tool-data-pending.sqlite`、存档记录（批次、Task Run、附件、outbox 通知；到期清理见下）、共享发布记录、模板文件用户版本、`.usage-stats.txt` 中的历史计数（统计注册表保留四个条目以免保存时被抹去）。新装用户不再创建这些表。回退旧版安装包后由旧版迁移按原逻辑幂等补齐。已下线模块 id 的唯一清单在 `src/backend/database/retired-modules.js`（同时是主模块 id 与存档 `module_id`；设置、保留期策略、存档仓储与 controller 共用）。
 
-- `current_module` / `enabled_modules` 指向已下线 id：读取时按非法值忽略，回到默认模块（`enabled_modules` 全部非法时按原逻辑重置为默认列表）。
-- 写回保留：`setEnabledModules` 和「全部非法时重置为默认列表」写库时，把库中原有的已下线 id 追加在列表末尾原样保留；`setModuleRetentionDays` 写回按模块保留期时保留已下线模块的原有条目（`settings-repository.js` 的 `RETIRED_MODULE_IDS`、`retention-policy.js` 的 `RETIRED_SCOPE_IDS`）。这样用户在新版调整收纳或保留期后回退旧版，已下线模块的启用状态与保留期不变。`current_module` 是单值，用户在新版切换模块时按正常逻辑覆盖，回退旧版后停在新版最后所在的模块。
-- 存档：四个模块移出存档范围（模块筛选、保留期设置不再列出）；历史批次仍在存档库，不按模块筛选时可见，到期时间沿用生成时记录的保留期。
+- `current_module` / `enabled_modules` 指向已下线 id：读取时按非法值忽略，回到默认模块。`enabled_modules` 全部是已下线 id（旧版的合法配置）时，只在内存中回退默认列表、不改写库值；混有真正非法值时仍按原逻辑重置为默认列表。
+- 写回保留：`setEnabledModules` 和「全部非法时重置为默认列表」写库时，把库中原有的已下线 id 追加在列表末尾原样保留；`setModuleRetentionDays` 写回按模块保留期时保留已下线模块的原有条目（`retention-policy.js` 的 `RETIRED_SCOPE_IDS`）。这样用户在新版调整收纳或保留期后回退旧版，已下线模块的启用状态与保留期不变。`current_module` 是单值，Renderer 回退到可用模块时按 v2.1.4 起的通用逻辑写回，回退旧版后停在新版最后所在的模块（不涉及数据）。
+- 存档（spec D3，用户 2026-11-18 决定）：四个模块移出存档范围（模块筛选、保留期设置不再列出），其批次不在存档中心展示——`archive-repository.js` 的 `VISIBLE_BATCH_PREDICATE_SQL` 排除已下线 `module_id`，覆盖列表、搜索、按号打开、关联批次与统计；公共附件入口（`archive-center:open-file` / `save-as`，按附件编号）在 controller 先检查所属批次，已下线模块按「存档文件不存在」处理且不弹保存对话框。用户无法打开或手动删除。已结束的批次**照常参与到期清理**，按生成时记录的保留期删除；以下旧版现场不清理、不改写，也不阻止其余批次：
+  - 仍为 reserved/running 的批次：`listExpiredBatches` 不选入。
+  - 仍有原样保留的终态通知的批次（删除闸门返回 `ARCHIVE_DELETE_OWNER_PENDING`），或缺少收口凭证的批次（`ARCHIVE_DELETE_OWNER_COMPLETION_REQUIRED`：v3.2.9 前生成，或其原收口责任留给旧版确认）：到期清理本轮跳过、不算失败（`archive-service.js` `_deleteExpiredBatch` 的 `RETIRED_RETENTION_SKIP_CODES`；分页时排除已跳过的批次，避免同一批次重复占满一页）。保留模块遇到这两种情况仍按原行为（缺凭证的通用问题见 backlog B110）。
+  - 启动时不改写已下线模块的存档记录：扫尾（`markInterruptedTasks`、`markInterruptedArtifacts`）不改写其进行中批次、Task Run 与待存档附件；流程绑定意图重放（`replayFlowBindIntents` / `replayTaskFlowBindIntents`）跳过其意图，不写流程锚点、不累加失败次数；`recoverFileTaskOwnerCompletions` 不代旧版确认其「无后处理」收口责任（责任记录原样保留，批次因此缺凭证，到期清理跳过）。到期清理闸门（`getEntryMaintenanceGateState`、controller 的 outbox 检查）不计入这些记录。
+  - 旧版建批失败遗留的无归属文件重试通知会使同模块到期批次都被跳过（只保留、不误删），见 backlog B109。
+  - 存储层一致性维护（文件核验、附件补生成）仍覆盖全部批次，只补全存档、不改业务状态。
+- 模板中心变更记录只列当前目录中的资源；已下线资源（如 `removed-pending`）的旧记录保留在库中、不再展示为点不开的链接（`template-resource-repository.listChanges` 先筛选再限量）。
 - 遗留恢复记录（升级前异常退出可能留下）：
 
 | 记录 | 新版处理 | 实现 |
 | --- | --- | --- |
 | BizOP 的 active recovery hold | 只读跳过，不改写；保留给回退旧版继续恢复 | `background-execution/retired-recovery-actions.js` 包装恢复控制只读仓储，过滤 BizOP v327 的 12 个 action |
-| outbox / 任务终态意图中的 `pending-run`、`biz-op-run` route | 任务终态照常收口，业务侧收尾（写回 Pending 库 / BizOP 侧库血缘）不执行，记活动日志 | `archive-center/retired-terminal-routes.js` |
-| Pending / 业务OP / 收单导出的 publication-only 发布 journal | 按原 owner 证明由通用逻辑收尾 | `toolbox-archive-recovery.js` `PUBLICATION_ONLY_FILE_TASKS` 保留识别条目 |
-| BizOP v327 导出的发布 journal | **已知限制**：无对应 owner，启动发布恢复按原 fail-closed 语义阻止启动 | 仅在「BizOP 导出发布中崩溃、且未先用旧版（v3.2.19 及更早）重新启动一次就安装新版」时出现；处理方式为先启动旧版完成恢复再升级（backlog B106） |
+| 存档 outbox 中已下线模块的终态通知（operation 与 file-batch owner、无 owner 的旧格式，含 `pending-run` / `biz-op-run` route） | 整条跳过并原样保留：不写 Task Run 终态、不执行业务收尾、不删除；不计入待重试数量（不阻断存档中心初始化）与到期清理闸门；回退旧版后由旧版重放 | `archive-center/controller.js` `isRetiredOutboxRecord`；`retired-terminal-routes.js` 只保留 route 识别，`finalize` 兜底拒绝（`ARCHIVE_RETIRED_TERMINAL_ROUTE_RETAINED`） |
+| Pending / 业务OP / 收单导出的 publication-only 发布 journal | 按原 owner 证明由通用逻辑收尾（与旧版重启时的处理相同） | `toolbox-archive-recovery.js` `PUBLICATION_ONLY_FILE_TASKS` 保留识别条目 |
+| BizOP v327 导出的发布 journal（`biz-op-v327-export-<taskRunId>`） | 只识别、一律 defer：journal、staging、备份与目标原样保留，启动继续并记活动日志（含恢复路径）；共享发布器对 defer 记录的失败关闭合同不变，处理前经统一发布流程的导出被拒绝，主消息即写明处理方式：先用 v3.2.19 及更早版本打开一次（spec D4，backlog B108） | `publication-recovery/retired-module-owner.js`（前缀、exact-7 batchContext、7 个导出 taskKey 与 taskRunId 一致才认领，不一致时失败关闭）；`toolbox-output-publication-dispatch.js` 的 `RETIRED_PUBLICATION_HINTS` |
+| 上一行中旧版已标为 `manual-recovery` 的 journal（旧版回滚自身失败） | 同样 defer（代码 `PUBLICATION_RECOVERY_RETIRED_MODULE_MANUAL`），提示按恢复路径人工处理（旧版也无法自动收尾）（spec D5） | 共享发布器发现阶段（`toolbox-output-publication.js` `discoverRecoveryInternal`）只对 `RETIRED_PUBLICATION_TASK_PREFIXES` 前缀且状态为 `manual-recovery` 的记录不抛错、跳过目标父目录身份核验（常是标记原因），只读交给 owner；身份校验仍由 owner 负责。执行阶段对 defer 记录不做任何动作。其他记录（含其他模块的 `manual-recovery`、索引与 journal 锚点不符、v1 旧索引）的发现门禁不变 |
 
 ## 五、架构检查：边界退役
 
 `check:architecture` 的历史防倒退规则禁止曾 active 的边界消失或降级，因此新增退役状态：
 
 - `schema.js`：边界状态增加 `retired`，须带 `retirement: { reason, designDoc, removedPaths, releasedPaths }`。retired 边界保留 id 与规则绑定，清空全部生效约束（入口、消费者、保护范围、工厂、注入合同等）；`REQUIRED_BOUNDARIES` 对 retired 不再要求入口。
-- `rules.js`：retired 边界不参与常规规则；改为校验 `designDoc` 存在、`removedPaths` 在当前树中不存在且无依赖指向（防止复活）。
-- `policy-history.js`：active → retired 仅在依据完整（原因具体、设计文档非空）、`removedPaths` 已全部删除、且原入口要么在 `removedPaths`、要么显式登记在 `releasedPaths`（保留的共享文件，如 `archive-repository.js`）时成立；已退役边界不得删除登记、复活或缩减删除路径。
+- `rules.js`：retired 边界不参与常规规则；改为校验 `designDoc` 存在、`removedPaths` 与保留的已退役兼容入口在当前树中不存在且无依赖指向（防止复活）。
+- `policy-history.js`：active → retired 仅在依据完整（原因具体、设计文档非空）、`removedPaths` 已全部删除、且原入口要么在 `removedPaths`、要么显式登记在 `releasedPaths` 时成立；`releasedPaths` 必须是仍在当前树中的共享文件（如 `archive-repository.js`），已删除的原入口只能登记为删除路径，释放的文件以后被删除时须改登记到 `removedPaths`。已退役边界不得删除登记、复活或缩减删除路径。
+- 退役边界可原样保留状态为 retired 的兼容入口登记（`deprecatedEntrypoints`，作为防复活依据），仍为 compat 的入口不得保留。已退役兼容入口的登记只增不减，历史快照中边界本身已退役时同样核对（兼容入口与边界在同一提交退役后，不能再删登记并恢复 shim）。
 - `boundaries.json`：`renderer-{bank-bu,acquiring,biz-op-legacy,pending,biz-op-v327}`、`bizop-recovery-private`、`bizop-query-q1~q3` 改为 retired；shared-xlsx 的 `pending-import/{streaming-xlsx-reader,xlsx-size-preflight}.js` 兼容入口标为 retired（生产消费者已全部迁往 `src/backend/xlsx/legacy/*`，本次全仓清点无剩余引用），各兼容入口的 `existingConsumers` 去掉已删除文件，`requiredConsumers` 用精确 `policyChanges` 移除已删除的消费者；`compositionEntrypoints`、`dynamicLoads`、`generatedModules` 去掉已删除目标；`legacy-allowlist.json` 删除 `baseline-cycle-001`。
 
 ## 六、测试与工具
@@ -99,7 +107,7 @@
   - 后台执行 manifest 证据（`changes/v3.2.10/.../evidence/manifest-current/*`）由 `check:background-execution-manifest --write` 重算；已核对保留的 action、route、surface 逐字不变，只删除已下线条目。
 - **架构检查**：除第五节的边界退役外，`renderer-pre-fund`、`renderer-duplicate-inbound` 的 `activationEvidence` 去掉已删除的 `r4-controllers.test.js`，用两条 `policyChanges` 登记（每次迁移基线时与其余两条一并改绑到新基线提交的原 blob，当前为 `466bb6fa`，见下方「基线迁移」）。
 - **CI 探针脚本**：`windows-durability-probe.yml` 仍用的通用耐久探针从 `scripts/biz-op-v327/probe-windows-durability.{js,ps1}` 迁到 `scripts/windows-durability-probe/probe.{js,ps1}`，内容按 v3.2.17 原样恢复，只把临时目录前缀改为中性名称。
-- **升级兼容集成测试** `scripts/integration/retired-modules-upgrade-compat.js`：构造 v3.2.17 形态的数据目录（四个模块的主库表与设置、`current_module='biz-op-recon'`、已下线 id 的启用列表与保留期、遗留 BizOP recovery hold、`pending:import:start` 遗留批次及 finalize 失败的 `pending-run` outbox、三个模块的 run-data 侧库、Pending 库、BizOP 目录），用真实 Main 启动后断言：启动成功并回到默认模块、启用列表排除已下线 id、遗留批次可见、outbox 已收口、上述文件哈希与表行、设置、hold 均不变。去掉兼容处理后该测试失败。
+- **升级兼容集成测试** `scripts/integration/retired-modules-upgrade-compat.js`：构造 v3.2.17 形态的数据目录（四个模块的主库表与设置、`current_module='biz-op-recon'`、已下线 id 的启用列表与保留期、遗留 BizOP recovery hold、`pending:import:start` 遗留批次及 finalize 失败的 `pending-run` outbox、三个模块的 run-data 侧库、Pending 库、BizOP 目录），用真实 Main 启动后断言：启动成功并回到默认模块、启用列表排除已下线 id、遗留批次在存档中心不可见、存档记录与 outbox 通知逐行不变、上述文件哈希与表行、设置、hold 均不变（Codex 审查修复后的补充见下方）。去掉兼容处理后该测试失败。
 - **基线迁移（2026-11-18）**：v3.2.18 已发布（PR #253），release/v3.2.19 已进入门禁（PR #254）。本分支从 `v3.2.17` 迁到 `v3.2.18`（`41d10180`，相差 40 个提交），目标版本顺延到 v3.2.20（用户决策）。
   - 未提交的改动先 stash，分支移到 v3.2.18 后再还原。共 11 个文件冲突，都是两边在相邻位置各自增删：
     - v3.2.18 新增的内容全部保留：`pendingTemplateImports`、空闲定时器里的链接表过期清理、`ensureArchiveVccDefaultRetention` 迁移及其调用、两个模板预检 exclude 策略、渲染 fixture 的链接表保留期限响应。
@@ -115,4 +123,21 @@
     - backlog 两边新增的条目都保留，§七 由完整集成测试重新生成。
     - 后台执行 manifest 证据再次用 `--write` 重算，只有 `src/main.js` 的哈希变化。
     - v3.2.19 没有改动后台执行、存档中心、执行描述符、应用恢复和 preload 相关文件；它新增和修改的代码中没有引用已下线模块。
-- **已知缺口**：CI 不再有与业务无关的打包版正常启动检查，Windows 打包版验收未做（backlog B105）；BizOP v327 遗留发布 journal 阻止启动（B106）；是否提供历史数据清理入口待定（B107）。
+- **Codex 审查修复（2026-11-18，提交 `71b7cc24` 之后）**：Codex 审查确认的问题与本次处理，现行规则见第四、五节：
+  - 存档：已下线批次原本仍可见、可手动删除，到期时与进行中的现场一起被清理。改为不展示；按用户调整后的决定（spec D3），已结束的批次照常到期清理，进行中或仍有遗留通知的现场不清理、不阻止其余批次。
+  - 启动扫尾：删除 v3.2.19 的 BizOP / 收单保护后，进行中的已下线批次与 Task Run 会被改成失败或中断。改为在仓储层按已下线 `module_id` 排除，不必再打开业务侧库。⚠️ 资金红线（状态与血缘），需人工复核。
+  - outbox：已下线模块的终态通知原先写入 Task Run 终态并删除通知（退役 route 只记日志）。改为整条原样保留。实施中另发现两处会被保留记录拖住的闸门：启动时要求 outbox 剩余为 0、到期清理要求 outbox 为空且无进行中的批次。两处都已排除这些记录，并补了回归。⚠️ 资金红线（终态确认血缘），需人工复核。
+  - BizOP v327 遗留发布 journal（原 B106）：新增只识别、一律 defer 的 owner，启动不再中止；新的导出在旧版收尾前被拒绝并提示处理方式（用户选择「只放行启动」，不改共享发布器合同；剩余影响登记为 B108）。
+  - 启用列表全部是已下线 id 时不再写库；模板中心变更记录不再列出已下线资源；架构检查要求 `releasedPaths` 仍存在，并允许退役边界保留已退役兼容入口。
+  - 升级兼容集成测试改为在旧版真实数据目录 `run-data/biz-op-v327/` 下构造数据，补充 operation owner 通知、进行中的批次与 Task Run、BizOP 发布中途退出的遗留记录。逐行比对存档记录、outbox 与发布材料前后不变；去掉 retired-module owner 后，该测试会以 `PUBLICATION_RECOVERY_OWNER_UNKNOWN` 失败。
+  - 未采纳：Pending / 业务OP / 收单 publication-only 导出的遗留 journal 仍按原 owner 证明回滚或收尾（与旧版重启时相同）；回退到可用模块时写回 `current_module`（v2.1.4 起的通用逻辑，不涉及数据）。
+  - 修复后 `npm run release-check` 通过：单测 8929 个（8925 通过、4 跳过、0 失败），集成脚本 88 个全部通过，`retired-modules-upgrade-compat.js` 37 项断言。
+- **Codex 第二轮审查修复（2026-11-18，未提交）**：确认 10 条，用户选择修 8 条并放行第 3 条（spec D5），不采纳 2 条：
+  - 启动不改写已下线存档记录：流程绑定意图不重放、File Task「无后处理」收口责任不代为确认；缺收口凭证的已下线批次到期清理跳过（原只跳过有遗留通知的情况，缺凭证会使本轮停在当页）。⚠️ 资金红线（血缘与终态确认），需人工复核。
+  - 需人工恢复的 BizOP 发布记录放行启动（见第四节表格）；导出被拒时处理方式写进主消息（VCC「数据管理 → 导出数据」等入口只展示主消息）。
+  - 公共附件入口检查所属批次；架构历史检查补上「兼容入口随边界同一提交退役」的绕过路径。
+  - 升级兼容集成测试：列表读取须成功，并加入保留模块批次须可见的对照；流程绑定意图、锚点、收口责任与凭证纳入前后逐行比对（42 项断言）。
+  - 不采纳：无归属旧通知使同模块到期批次被跳过（只保留不误删，改删除归属判定属资金红线，登记 B109）；设置页「待完成删除」显示已下线批次号（元数据已删、文件待清理的必要提示）。缺收口凭证使到期清理停在当页的通用问题登记 B110。
+  - v3.2.19 标签已创建，指向本分支基线 `466bb6fa`，基线迁移的前提成立。
+  - 修复后 `npm run release-check` 通过：单测 8934 个（8930 通过、4 跳过、0 失败），集成脚本 88 个全部通过（`retired-modules-upgrade-compat.js` 42 项断言）；新增用例均做过变异验证（撤掉对应修复即失败）。
+- **已知缺口**：CI 不再有与业务无关的打包版正常启动检查，Windows 打包版验收未做（backlog B105）；BizOP v327 遗留发布记录在处理前会使经统一发布流程的导出被拒绝（B108）；无归属的旧文件重试通知会使同模块到期批次被跳过（B109）；缺收口凭证的历史批次使到期清理停在当页（B110，基线既有）；是否提供历史数据清理入口待定（B107）。

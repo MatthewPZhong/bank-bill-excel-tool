@@ -86,3 +86,16 @@ test('冲突与非法操作整体回滚，不留下版本行或变更记录', ()
   }), /CHECK constraint failed/);
   assert.equal(repo.listStates(db)[0].nextVersionNo, 3, 'CHECK 失败时状态回滚');
 });
+
+// v3.2.20：服务层按当前资源目录列出变更记录；已下线模块资源（如 removed-pending）的旧记录保留在库中、不再展示，
+//   且先筛选再限量，旧记录不会挤占当前资源的条数。
+test('变更记录可按资源范围先筛选再限量，旧记录不改写', () => {
+  const db = setup();
+  repo.appendChange(db, { ...change('导入并启用', 'V1', 'V2'), resourceId: 'removed-pending' });
+  repo.appendChange(db, change('导入并启用', 'V1', 'V2'));
+  repo.appendChange(db, { ...change('恢复默认', 'V2', 'V1'), resourceId: 'removed-pending' });
+  assert.deepEqual(repo.listChanges(db, 1, ['fund-type-enum']).map((row) => [row.resourceId, row.action]),
+    [['fund-type-enum', '导入并启用']]);
+  assert.deepEqual(repo.listChanges(db, 200, []), []);
+  assert.deepEqual(repo.listChanges(db).map((row) => row.resourceId), ['removed-pending', 'fund-type-enum', 'removed-pending']);
+});

@@ -318,13 +318,13 @@
   - 必跑：`vcc-op-calc-session` / `vcc-op-calc-stream` / `vcc-op-calc-parser-pipeline` / `flow-statement-structure` 单测 + 真实流水文件回放
 
 ### `ALL_MODULE_IDS` / `RETIRED_MODULE_IDS`（v2.1.4 建立；v3.0.24 扩为 12 个；v3.2.20 下线四个对账模块后为 9 个主模块 ID 全集 anchor）
-- 定义：`src/backend/database/settings-repository.js`
+- 定义：`ALL_MODULE_IDS` 在 `src/backend/database/settings-repository.js`；`RETIRED_MODULE_IDS` 在 `src/backend/database/retired-modules.js`（v3.2.20 起唯一清单，同时是存档 `module_id`，设置、保留期策略、存档仓储与 controller 共用）
 - 关联功能：单文件定义，但被 `CURRENT_MODULE_VALID`（`setCurrentModule` 校验）+ `setEnabledModules`（启用列表校验）共用；renderer 端 `MODULES` 常量必须与之一致；新增模块时两边都要加
 - 变更 review 要点：
   - 新增模块 → 必须同步加到 `ALL_MODULE_IDS` + renderer 端 `src/renderer.js` 的 `MODULES` 常量（两边定义必须完全一致）
   - 如忘了同步 → 用户切到新模块会抛 `Invalid current_module`（v2.1.2/v2.1.3 即遗留过此 bug，v2.1.4 修复）
   - 修改 ID 字符串 → DB 内已持久化的 `current_module` / `enabled_modules` 会因 sanitize 被回退到默认值
-  - **已下线 id**（v3.2.20）：`RETIRED_MODULE_IDS` = `pending-reconciliation` / `bank-bu-recon` / `biz-op-recon` / `acquiring-bill-currency`。读取时从启用列表排除、`current_module` 回退默认模块；`setEnabledModules` 与全非法回退写入时把库中原有的已下线 id 原样追加保留，保证回退旧版安装包后收纳状态不变。不得把已下线 id 重新加入 `ALL_MODULE_IDS`，也不得在写入时丢弃它们
+  - **已下线 id**（v3.2.20）：`RETIRED_MODULE_IDS` = `pending-reconciliation` / `bank-bu-recon` / `biz-op-recon` / `acquiring-bill-currency`。读取时从启用列表排除、`current_module` 回退默认模块；`setEnabledModules` 与全非法回退写入时把库中原有的已下线 id 原样追加保留；启用列表全部是已下线 id 时只在内存中回退默认列表、不写库，保证回退旧版安装包后收纳状态不变。存档中这些 `module_id` 的批次不展示（含按附件编号打开/另存）；启动时不扫尾、不重放其终态通知与流程绑定意图、不代为确认其收口责任；已结束的批次照常到期清理，仍有遗留通知或缺收口凭证的跳过且不拖住其余批次。不得把已下线 id 重新加入 `ALL_MODULE_IDS`，也不得在写入时丢弃它们
   - 必跑：`npm run smoke`（settings-repository 内部测试）+ `tests/unit/backend/database/settings-repository.test.js`（含已下线 id 保留回归）+ 集成 `retired-modules-upgrade-compat.js` + 手动验证 9 个模块逐一切换 + 收纳弹窗启用各模块后切换；新模块默认关闭时还要验证旧用户启用列表不被扩写
 
 ### `enabled_modules`（v2.1.4 — 左上角模块切换菜单的启用列表全链路）

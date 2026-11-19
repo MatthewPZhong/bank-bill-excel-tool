@@ -20,7 +20,7 @@ function createTemplateResourceStore({ filePath = ':memory:', scenarios = [] } =
     setTemplateResourceCurrentVersion: (payload) => repository.setCurrentVersion(db, payload),
     deleteTemplateResourceVersion: (payload) => repository.deleteVersion(db, payload),
     appendTemplateResourceChange: (change) => repository.appendChange(db, change),
-    listTemplateResourceChanges: (limit) => repository.listChanges(db, limit),
+    listTemplateResourceChanges: (limit, resourceIds) => repository.listChanges(db, limit, resourceIds),
     listScenarioConfigs() {
       return this.scenarios;
     },

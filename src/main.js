@@ -489,6 +489,11 @@ const {
 const { createPublicationRecoveryCoordinator } = require('./main-process/publication-recovery/coordinator');
 const { createArchivePublicationOwner } = require('./main-process/publication-recovery/archive-owner');
 const {
+  RETIRED_PUBLICATION_DEFER_CODE,
+  RETIRED_PUBLICATION_MANUAL_CODE,
+  createRetiredModulePublicationOwner
+} = require('./main-process/publication-recovery/retired-module-owner');
+const {
   JOURNAL_INDEX_NAME
 } = require('./main-process/toolbox-output-publication');
 const {
@@ -1206,14 +1211,8 @@ const positionTaskOwner = createPositionTaskOwner({
 });
 const terminalRouteRegistrations = [
   positionTaskOwner.terminalRegistration,
-  // v3.2.20：已下线模块（Pending / 业务OP）的遗留终态意图只收口任务状态，不做业务收尾。
-  ...createRetiredTerminalRouteRegistrations({
-    onRetiredFinalize: (info) => appendActivityLogEntry({
-      level: 'warning', source: 'main', domain: 'archive-center',
-      message: '已下线模块的遗留任务终态已收口，未执行业务收尾',
-      details: [JSON.stringify(info)]
-    })
-  }),
+  // v3.2.20：已下线模块（Pending / 业务OP）的遗留终态 route 只保留识别；其通知由存档中心原样留给回退旧版。
+  ...createRetiredTerminalRouteRegistrations(),
   createPreFundTerminalRouteRegistration({ getService: getPreFundReconciliationService })
 ];
 const businessOperationRegistry = createBusinessOperationRegistry();
@@ -21126,6 +21125,29 @@ async function recoverToolboxPublicationsAtStartup() {
         ))
       });
     }
+    // v3.2.20：已下线模块（业务OP数据核对）遗留的发布记录原样保留，启动继续；
+    //   共享发布器在其被处理前会拒绝新的导出，这里记录原因与恢复路径便于处理。
+    const deferredItems = Array.isArray(result.deferred) ? result.deferred : [];
+    for (const [code, message, guidance] of [
+      [RETIRED_PUBLICATION_DEFER_CODE, '已下线模块「业务OP数据核对」遗留未完成的导出，记录已原样保留',
+        '在用 v3.2.19 及更早版本打开一次完成收尾前，新的导出会被拒绝'],
+      [RETIRED_PUBLICATION_MANUAL_CODE, '已下线模块「业务OP数据核对」遗留需人工恢复的导出，记录已原样保留',
+        '旧版也无法自动收尾：请按下列恢复路径人工处理，处理完成前新的导出会被拒绝']
+    ]) {
+      const retiredDeferred = deferredItems.filter((item) => item && item.code === code);
+      if (retiredDeferred.length === 0) continue;
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'toolbox',
+        message,
+        details: [
+          guidance,
+          ...retiredDeferred.map((item) => `${item.taskId}`),
+          ...retiredDeferred.flatMap((item) => (item.recoveryPaths || []).map((filePath) => `恢复路径：${filePath}`))
+        ]
+      });
+    }
   } catch (error) {
     toolboxStartupRecoveryError = error;
     appendActivityLogEntry({
@@ -22408,7 +22430,9 @@ async function initializeBackgroundExecutionRecovery() {
     dispatcher: getDefaultToolboxPublicationDispatcher(),
     acquireMemory: createPublicationMemoryAdmission(() => backgroundExecutionRuntimeManager.get()),
     owners: [
-      createArchivePublicationOwner({ getArchiveCenter: () => archiveCenterService })
+      createArchivePublicationOwner({ getArchiveCenter: () => archiveCenterService }),
+      // v3.2.20：已下线的业务OP数据核对（BizOP v327）遗留发布记录只识别、原样保留给旧版，不阻断启动。
+      createRetiredModulePublicationOwner()
     ]
   });
   publicationRecoveryCoordinator.bindDispatcherAuthority();

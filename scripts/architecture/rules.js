@@ -84,6 +84,11 @@ function evaluateRules(scan, config, allowlist, { root = process.cwd() } = {}) {
       if (files.has(removed) || exists(removed)) emit('ARCH-STATIC-COVERAGE', boundary, { from: removed }, '已退役边界的源码不得复活');
       for (const edge of edges) if (edge.to === removed) emit('ARCH-STATIC-COVERAGE', boundary, edge, '生产代码不得依赖已退役边界的源码');
     }
+    // 退役边界保留的已退役兼容入口：同样不得复活或被生产代码依赖。
+    for (const shim of boundary.deprecatedEntrypoints || []) {
+      if (files.has(shim.path) || exists(shim.path)) emit('ARCH-STATIC-COVERAGE', boundary, { from: shim.path }, '已退役兼容入口不得复活');
+      for (const edge of edges) if (edge.to === shim.path) emit('ARCH-STATIC-COVERAGE', boundary, edge, '生产代码不得依赖已退役兼容入口');
+    }
   }
   function inspectExports(file) {
     const analysis = scan.analyses && scan.analyses.get(file); const exported = new Map(); const functions = new Map();
