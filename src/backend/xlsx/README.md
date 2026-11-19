@@ -15,13 +15,13 @@
 | `excel-text.js`、`ooxml-namespaces.js`、`number-date.js`、`model.js`、`style-registry.js`、`xlsx-sheet-scanner.js` | 文本、OOXML、日期/数字、模型、样式与 worksheet 扫描；Source/OutputStyleRegistry 均保留 | 不包含业务列映射、数据库、归档或发布策略 |
 | `strict-xml-tokenizer.js` | worksheet 扫描与 `loadToolboxSharedStrings` 的 XML 词法层；事件、命名空间、实体表与严格错误文案对齐 `sax.createStream(true, { xmlns: true })`（v3.2.16 起替换 sax 以提速），差异见文件头。可选快路径钩子让调用方整段接管能证明与逐事件处理等价的标记（工作表的 `<row …>`、简单 `<c>`，共享字符串的简单 `<si><t>`），其余一律回退逐事件路径 | 仅供上述两处热路径；改动须通过 `tests/unit/backend/xlsx/strict-xml-tokenizer.test.js` 的 sax 对照；扩大快路径接管范围须同步 `xlsx-sheet-scanner-fast-path.test.js` 的开 / 关对照（`scanXlsxSheet` 内部选项 `fastPath: false` 仅供该测试） |
 
-允许依赖本目录、Node 标准库、既有 yauzl/sax/jszip；legacy 预检额外允许 `../file-service/common.js` 的错误类。不允许依赖 Pending、Position、Toolbox 等业务目录、main-process、数据库或业务 writer/session。不要在本目录增加业务聚合 index。
+允许依赖本目录、Node 标准库、既有 yauzl/sax/jszip；legacy 预检额外允许 `../file-service/common.js` 的错误类。不允许依赖 Position、Toolbox 等业务目录、main-process、数据库或业务 writer/session。不要在本目录增加业务聚合 index。
 
 ## 预算、关闭和临时资源
 
 Position adaptive 由本域 constants 显式传 64 MiB/8192，保留 preserveSstOnClose，strictClose=false；VCC workbook adaptive 64 MiB/8192、strictClose=false。它们未设置 cacheMaxBytes，不继承 rich 的严格关闭。
 
-BizOP import、RAW 读取和输出验证分别保留 32 MiB/8192、32 MiB 字节缓存与 strictClose=true。RAW 单页、输出 validator 多页，不互换。VCC review plan 为 64 MiB/8192、64 MiB 字节缓存；workbook-import-plan、system-op-importer、dataset-writer、review-validator 四点为 64 MiB/8192，未提供 cacheMaxBytes；均由 rich 固定 strictClose=true。覆盖参数及 tempRoot 沿用各业务 adapter，精确配置合同见 [G4 Spec §4](../../../changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/spec.md)。
+VCC review plan 为 64 MiB/8192、64 MiB 字节缓存；workbook-import-plan、system-op-importer、dataset-writer、review-validator 四点为 64 MiB/8192，未提供 cacheMaxBytes；均由 rich 固定 strictClose=true。覆盖参数及 tempRoot 沿用各业务 adapter，精确配置合同见 [G4 Spec §4](../../../changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/spec.md)。
 
 未跨预算不创建 spill。需要 spill 时必须提供非空目录，目录以独占 mkdir 创建，文件以 wx+ 创建并保存 dev/inode；不能接管既存目录、符号链接或其他任务目录。close 先关句柄，再核对登记文件和目录身份，仅 unlink 自有文件、rmdir 空目录；不递归删除。preserveOnClose 和 strictClose 保持不同语义。严格关闭失败保留资源和错误；重复关闭仍返回原错误。rich close 缓存 Promise，按 SST → ZIP 尝试全部关闭并汇总失败，构建失败也沿原链收口。
 
@@ -31,7 +31,6 @@ BizOP import、RAW 读取和输出验证分别保留 32 MiB/8192、32 MiB 字节
 
 以下旧路径仅单向转发新实现：
 
-- `pending-import/streaming-xlsx-reader.js`、`pending-import/xlsx-size-preflight.js`。
 - `xlsx-rich-reader.js`、`position-reconciliation-import/shared-strings-provider.js`。
 - `big-table-import/zip-reader.js` 与前述六个 `toolbox-format` 叶子文件。
 
@@ -40,6 +39,8 @@ BizOP import、RAW 读取和输出验证分别保留 32 MiB/8192、32 MiB 字节
 旧函数、导出对象与错误 constructor 指向同一实现；PositionSharedStringsError、BigTableImportError、ToolboxXlsxFormatError 名称与 code 是历史兼容合同，不代表公共目录可以反向加载相应业务。
 
 生产调用方按 L1/L2/S1/R1–R4/T1 及全仓搜索扩展清单迁移。测试和历史 scripts 可暂留旧入口；删除任何 shim 前须全仓（含 tests/scripts）引用归零、保留兼容证据并同步 G8 退役登记。新生产消费者必须走本目录，不得为图方便新增旧入口依赖。
+
+`pending-import/streaming-xlsx-reader.js`、`pending-import/xlsx-size-preflight.js` 已在 v3.2.20 随「月度Pending数据核对」下线删除，G8 登记为 retired；全仓引用清点见 `tests/unit/backend/xlsx/legacy-compatibility.test.js`。
 
 ## 验证与当前规则
 

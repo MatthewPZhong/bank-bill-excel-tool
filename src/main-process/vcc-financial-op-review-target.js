@@ -4,8 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { targetPathAliasKey, pathsAlias } = require('./toolbox-target-identity');
-const { exportFileIdentity } = require('./biz-op-v327/export-file-identity');
-const { hashClosedFile } = require('./biz-op-v327/export-validator');
+const { exportFileIdentity, hashClosedFile } = require('./vcc-financial-op-output/file-evidence');
 const { reviewError } = require('../backend/vcc-financial-op/review-export-contract');
 
 function statIdentity(stat) {

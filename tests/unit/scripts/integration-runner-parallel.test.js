@@ -49,8 +49,8 @@ test('当前全部集成脚本按 2、3 片分配：不重不漏，耗时最长�
 
 test('独占名单：Electron、内存 / 准入 / 耗时相关脚本独占，普通业务脚本可并发', () => {
   for (const name of ['renderer-lifecycle', 'packaged-memory-identity', 'toolbox-large-file-stream', 'toolbox-low-memory-foundation',
-    'production-memory-qualification', 'toolbox-rows-csv-admission', 'big-table-import-engine', 'background-execution-pure-compute-canary',
-    'acquiring-bill-currency-idle-cleanup', 'publication-legacy-concurrency', 'biz-op-query-boundary', 'vcc-financial-op-result-workbook']) {
+    'production-memory-qualification', 'toolbox-rows-csv-admission', 'background-execution-pure-compute-canary',
+    'publication-memory-compatibility', 'vcc-financial-op-result-workbook', 'retired-modules-upgrade-compat']) {
     assert.equal(isExclusiveScript(name), true, name);
   }
   for (const name of ['release-notes-upgrade-prompt', 'statement-balance-gap', 'vcc-input-template-version', 'archive-center-permanent-delete']) {

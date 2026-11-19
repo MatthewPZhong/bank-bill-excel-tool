@@ -12,16 +12,15 @@ const {
 } = require('../../../src/main-process/execution-descriptors/composition');
 const { RECOVERY_PARTICIPANT_ORDER } = require('../../../src/main-process/application-recovery/composition');
 const { createPositionTaskOwner } = require('../../../src/main-process/position-reconciliation/task-owner');
-const { createPendingTerminalRouteRegistration } = require('../../../src/main-process/pending-archive-lineage');
 const { createPreFundTerminalRouteRegistration } = require('../../../src/main-process/pre-fund-archive-lineage');
-const { createBizOpRunTerminalRouteRegistration } = require('../../../src/main-process/biz-op-recon-run-data');
+const { createRetiredTerminalRouteRegistrations } = require('../../../src/main-process/archive-center/retired-terminal-routes');
 const toolboxDescriptor = require('../../../src/main-process/toolbox-background/execution-descriptor');
 const REPOSITORY = path.resolve(__dirname, '../../..');
 const ROUTES = ['biz-op-run', 'pending-run', 'position-reconciliation', 'pre-fund-run'];
 const ADAPTERS = ['passthrough', 'position-reconciliation', 'toolbox', 'vcc-financial-op'];
 const EXPECTED_RECOVERY_ORDER = [
-  'biz-op-v327', 'pending-runs', 'legacy-biz-op-runs', 'pre-fund-runs',
-  'position', 'toolbox-vcc-publications', 'vcc-import-terminal', 'vcc-import-lineage'
+  'platform-scan', 'pre-fund-runs', 'position', 'toolbox-vcc-publications',
+  'vcc-import-terminal', 'vcc-import-lineage'
 ];
 
 function taskContext(effects = []) {
@@ -37,49 +36,23 @@ function taskContext(effects = []) {
     reportArchiveFailure: unexpected('reportArchiveFailure'),
     terminalRoutes: [
       positionOwner.terminalRegistration,
-      createPendingTerminalRouteRegistration({ getDb: unexpected('pending.getDb') }),
-      createBizOpRunTerminalRouteRegistration({
-        getUserDataDir: unexpected('bizOp.getUserDataDir'), getMainDb: unexpected('bizOp.getMainDb'),
-        assertLegacyAvailable: unexpected('bizOp.assertLegacyAvailable'),
-        withLegacyRecovery: unexpected('bizOp.withLegacyRecovery')
-      }),
+      ...createRetiredTerminalRouteRegistrations({ onRetiredFinalize: unexpected('retired.finalize') }),
       createPreFundTerminalRouteRegistration({ getService: unexpected('preFund.getService') })
     ]
   };
 }
 
 function recoveryContext(events = [], options = {}) {
-  let facade;
   const owner = (name) => async () => { events.push(name); return { recovered: 0 }; };
   return {
     platform: {
       async scanAndRecover() {
         events.push('platform-scan');
         if (options.scanError) throw options.scanError;
-        return { recovered: 0 };
+        return { sourceCount: 0, activeHoldCount: 0 };
       },
       recoverSource: owner('recover-source')
     },
-    bizOpModule: {
-      recovery: {
-        bindPlatform(value) { events.push('bind-platform'); facade = value; },
-        async run(input = {}) {
-          if (input.initialPlatformOnly) {
-            events.push('biz-op-preflight');
-            await facade.scanAndRecover();
-            return { reason: 'ARCHIVE_OWNER_PHASE_REQUIRED' };
-          }
-          events.push('biz-op-v327');
-          return { recovered: 0 };
-        },
-        openObligations: () => true
-      },
-      activation: { needed: () => false, run: owner('unexpected-activation') },
-      retryRecovery: owner('unexpected-retry')
-    },
-    onBizOpRecovery: () => { events.push('on-biz-op-recovery'); },
-    recoverPendingRuns: owner('pending-runs'),
-    recoverLegacyBizOpRuns: owner('legacy-biz-op-runs'),
     recoverPreFundRuns: owner('pre-fund-runs'),
     recoverPosition: owner('position'),
     recoverToolboxVccPublications: owner('toolbox-vcc-publications'),
@@ -94,12 +67,12 @@ function withChangedToolbox(t, change, work) {
   try { return work(); } finally { mocked.mock.restore(); }
 }
 
-test('实际 G2 装配覆盖全部 134 个 taskKey、四 adapter 和四历史 route，装配不调用 owner', () => {
+test('实际 G2 装配覆盖全部 100 个 taskKey、四 adapter 和四历史 route（含两条已下线遗留 route），装配不调用 owner', () => {
   const effects = [];
   const compiled = createExecutionTaskComposition(taskContext(effects));
   const policies = compiled.archivePolicies.filter((policy) => policy.batchPolicy !== 'exclude');
-  assert.equal(policies.length, 134);
-  assert.equal(compiled.taskBindings.length, 134);
+  assert.equal(policies.length, 100);
+  assert.equal(compiled.taskBindings.length, 100);
   assert.deepEqual(compiled.taskBindings.map((binding) => binding.taskKey).sort(), policies.map((policy) => policy.taskKey).sort());
   assert.deepEqual(compiled.taskAdapters.map((adapter) => adapter.id).sort(), ADAPTERS);
   assert.deepEqual(compiled.terminalRoutes.map((entry) => entry.route).sort(), ROUTES);
@@ -161,7 +134,7 @@ test('G1 按固定顺序执行原 coordinator 全阶段，descriptor 枚举顺�
   assert.deepEqual([...compiled.recoveryParticipants.map((entry) => entry.id)].sort(), [...EXPECTED_RECOVERY_ORDER].sort());
   assert.deepEqual(events, []);
   const coordinator = createApplicationRecoveryComposition(context);
-  assert.deepEqual(events, ['bind-platform']);
+  assert.deepEqual(events, []);
   await Promise.all([coordinator.preflight(), coordinator.preflight()]);
   assert.equal(coordinator.snapshot().phase, 'archive');
   for (const hook of coordinator.archiveOwnerHooks()) {
@@ -172,10 +145,7 @@ test('G1 按固定顺序执行原 coordinator 全阶段，descriptor 枚举顺�
   }
   coordinator.completeArchiveInitialization();
   assert.deepEqual(coordinator.snapshot(), { phase: 'ready', platformScanCompleted: true, failureCode: null });
-  assert.deepEqual(events, [
-    'bind-platform', 'biz-op-preflight', 'platform-scan', 'biz-op-v327', 'on-biz-op-recovery',
-    ...EXPECTED_RECOVERY_ORDER.slice(1)
-  ]);
+  assert.deepEqual(events, EXPECTED_RECOVERY_ORDER);
   const before = [...events];
   await coordinator.preflight();
   for (const hook of coordinator.archiveOwnerHooks()) await hook.recover();
@@ -184,7 +154,7 @@ test('G1 按固定顺序执行原 coordinator 全阶段，descriptor 枚举顺�
   assert.deepEqual(events, before);
 });
 
-test('G1 participant 缺失/重复/额外身份在 bindPlatform 与恢复副作用前拒绝', (t) => {
+test('G1 participant 缺失/重复/额外身份在绑定平台与恢复副作用前拒绝', (t) => {
   for (const [mutate, expectedCode] of [
     [(source) => ({ ...source, recoveryParticipants: [] }), 'EXECUTION_DESCRIPTOR_REFERENCE_MISSING'],
     [(source) => ({ ...source, recoveryParticipants: [...source.recoveryParticipants, source.recoveryParticipants[0]] }), 'EXECUTION_DESCRIPTOR_DUPLICATE'],
@@ -205,7 +175,7 @@ test('G1 原失败状态和完整扫描屏障保持，编译不替代恢复', as
   const failed = createApplicationRecoveryComposition(recoveryContext(events, { scanError }));
   await assert.rejects(failed.preflight(), (error) => error === scanError);
   assert.deepEqual(failed.snapshot(), { phase: 'failed', platformScanCompleted: false, failureCode: 'RECOVERY_SCAN_TEST_FAILED' });
-  assert.deepEqual(events, ['bind-platform', 'biz-op-preflight', 'platform-scan']);
+  assert.deepEqual(events, ['platform-scan']);
   const pending = createApplicationRecoveryComposition(recoveryContext([]));
   assert.throws(() => pending.completeArchiveInitialization(), (error) => error.code === 'BACKGROUND_RECOVERY_SCAN_PENDING');
 });
@@ -228,14 +198,14 @@ test('隔离进程只读取 policy-catalog 不载入 descriptor 工厂、数据�
       return originalLoad.apply(this, arguments);
     };
     const catalog = require('./src/main-process/execution-descriptors/policy-catalog');
-    assert.equal(catalog.BACKGROUND_EXECUTION_POLICIES.length, 49);
-    assert.equal(catalog.BACKGROUND_EXECUTION_POLICIES.filter((policy) => policy.production.enabled).length, 13);
+    assert.equal(catalog.BACKGROUND_EXECUTION_POLICIES.length, 25);
+    assert.equal(catalog.BACKGROUND_EXECUTION_POLICIES.filter((policy) => policy.production.enabled).length, 1);
     assert.equal(Object.isFrozen(catalog.BACKGROUND_EXECUTION_POLICIES), true);
-    console.log(JSON.stringify({ policies: 49, productionEnabled: 13, loadedModules: loaded.length }));
+    console.log(JSON.stringify({ policies: 25, productionEnabled: 1, loadedModules: loaded.length }));
   `;
   const result = JSON.parse(execFileSync(process.execPath, ['-e', script], { cwd: REPOSITORY, encoding: 'utf8' }));
-  assert.equal(result.policies, 49);
-  assert.equal(result.productionEnabled, 13);
+  assert.equal(result.policies, 25);
+  assert.equal(result.productionEnabled, 1);
 });
 
 function visitAst(node, visit) {

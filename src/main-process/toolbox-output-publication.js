@@ -22,6 +22,10 @@ const {
 } = require('./archive-center/target-parent-identity');
 
 const JOURNAL_INDEX_NAME = 'toolbox-publish-journal-index.json';
+// v3.2.20 下线模块（业务OP数据核对 BizOP v327）导出的发布 taskId 前缀。旧版已标为 manual-recovery 的此类记录，
+//   发现阶段不再直接抛错，而是只读交给 owner 判定（retired-module-publication owner 校验身份后一律 defer）；
+//   其余记录的 manual-recovery 门禁不变。须与 publication-recovery/retired-module-owner.js 的前缀一致（单测核对）。
+const RETIRED_PUBLICATION_TASK_PREFIXES = Object.freeze(['biz-op-v327-export-']);
 const JOURNAL_VERSION = 1;
 const COPY_BUFFER_SIZE = 1024 * 1024;
 const preparedAuthorities = new WeakMap();
@@ -2033,7 +2037,8 @@ function discoverRecoveryInternal(runtime, userDataDir) {
   const records = value.entries.map((source) => {
     const entry = { ...source, userDataDir: root };
     if (entry.discoveryState === undefined) throwLegacyIndexManualRecovery(runtime, entry);
-    assertIndexTargetParentsOrManual(runtime, entry);
+    const retiredTask = RETIRED_PUBLICATION_TASK_PREFIXES.some((prefix) => String(entry.taskId || '').startsWith(prefix));
+    if (!retiredTask) assertIndexTargetParentsOrManual(runtime, entry);
     const journalStat = lstatOrNull(runtime.fsImpl, entry.journalAbsolutePath);
     const journalOptional = [INDEX_DISCOVERY_PREPARING, INDEX_DISCOVERY_CANCELLING,
       INDEX_DISCOVERY_FINALIZING, INDEX_DISCOVERY_ROLLBACK_FINALIZING].includes(entry.discoveryState);
@@ -2042,7 +2047,11 @@ function discoverRecoveryInternal(runtime, userDataDir) {
     if (journal && !discoverableAnchorsMatchJournal(runtime, entry, journal)) {
       throwDiscoverableAnchorMismatch(runtime, entry);
     }
-    if (journal) {
+    // 已下线模块的 manual-recovery 记录：跳过目标父目录身份核验（往往正是标记原因），只读交给 owner；
+    //   新版不执行任何恢复动作，defer 记录仍使共享发布器拒绝新的发布。
+    const retiredManualRecovery = retiredTask && Boolean(journal) && journal.status === 'manual-recovery';
+    if (retiredTask && !retiredManualRecovery) assertIndexTargetParentsOrManual(runtime, entry);
+    if (journal && !retiredManualRecovery) {
       assertJournalTargetParentsOrManual(runtime, journal);
       if (journal.status === 'manual-recovery') {
         throw new ToolboxPublicationManualRecoveryError(`工具箱发布任务 ${entry.taskId} 仍需人工恢复`, {
@@ -3260,6 +3269,7 @@ function disposeToolboxGeneration(generation, options = {}) {
 
 module.exports = {
   JOURNAL_INDEX_NAME,
+  RETIRED_PUBLICATION_TASK_PREFIXES,
   ToolboxPublicationCrashError,
   ToolboxPublicationError,
   ToolboxPublicationManualRecoveryError,

@@ -1,5 +1,6 @@
 // v2.1.9 SR-log-1 (T32h)：替换 console.warn → appendModuleLog 双写
 const { appendModuleLog } = require('../logger');
+const { RETIRED_MODULE_IDS } = require('./retired-modules');
 const {
   normalizeDarkModeSchedule,
   validateDarkModeSchedule,
@@ -186,18 +187,13 @@ function ensureUiStyleDefault(db) {
 }
 
 // v2.1.4：主模块 ID 全集（renderer 端 MODULES 常量必须与此一致；新增模块时两边都要加）
-//   修复历史 bug — v2.1.2 新增 bank-bu-recon、v2.1.3 新增 biz-op-recon 时忘了同步 CURRENT_MODULE_VALID 枚举，
-//   导致用户切到这两个模块时 setCurrentModule 抛 "Invalid current_module"
-//   v2.1.12 需求1 新增 vcc-op-calc 时再次踩同一坑（dev d2050b0 漏注册），前端开工前补回（spec §8.1）
+//   v3.2.20：下线 pending-reconciliation / bank-bu-recon / biz-op-recon / acquiring-bill-currency。
+//     库中残留的 current_module / enabled_modules 若指向这些 ID，读取时按非法值忽略（回到默认模块）。
 const ALL_MODULE_IDS = Object.freeze([
   'statement-generator',
   'new-account-generator',
-  'pending-reconciliation',
   'bank-statement-process',
   'recon-id-fix',            // v2.1.0-beta.1 PR-A 新增
-  'bank-bu-recon',           // v2.1.2 新增
-  'biz-op-recon',            // v2.1.3 新增
-  'acquiring-bill-currency', // v2.1.6 新增
   'vcc-op-calc',             // v2.1.12 需求1 新增
   'vcc-financial-op',        // v3.1.6 VCC财务OP校验
   'pre-fund-reconciliation', // v3.0.14 前置资金对账
@@ -259,6 +255,22 @@ const DEFAULT_ENABLED_MODULES = Object.freeze([
   'recon-id-fix'
 ]);
 
+// v3.2.20 下线的四个模块（清单见 ./retired-modules）。用户数据保留不动：启用列表中的这些 id 读取时忽略，
+//   写回时原样保留在列表末尾，回退旧版后这些模块仍按原启用状态显示。
+
+function retiredModuleIdsIn(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter((id, index) => RETIRED_MODULE_IDS.includes(id) && list.indexOf(id) === index);
+}
+
+function storedRetiredModuleIds(db) {
+  try {
+    return retiredModuleIdsIn(JSON.parse(getSetting(db, ENABLED_MODULES_KEY)));
+  } catch (_error) {
+    return [];
+  }
+}
+
 function getEnabledModules(db) {
   const raw = getSetting(db, ENABLED_MODULES_KEY);
   if (!raw) {
@@ -296,6 +308,11 @@ function getEnabledModules(db) {
     seen.add(id);
     return true;
   });
+  // v3.2.20：旧版只启用了已下线模块（全部是旧版合法 id）时，本次只在内存中回退默认列表，不改写库值；
+  //   回退旧版后启用状态不变。用户在新版保存「功能收纳」时再按 setEnabledModules 写回（保留已下线 id）。
+  if (sanitized.length === 0 && parsed.length > 0 && parsed.every((id) => RETIRED_MODULE_IDS.includes(id))) {
+    return [...DEFAULT_ENABLED_MODULES];
+  }
   // 若 sanitize 后为空（DB 内全是非法 ID）→ 回退默认值，避免锁死 UI
   if (sanitized.length === 0) {
     // round 1 self-review M6：destructive 覆盖前打 warn
@@ -307,7 +324,7 @@ function getEnabledModules(db) {
       message: '[settings-repository] enabled_modules sanitize 后为空（全是非法 ID），回退默认值',
       details: [`raw=${JSON.stringify(raw)}`]
     });
-    setSetting(db, ENABLED_MODULES_KEY, JSON.stringify(DEFAULT_ENABLED_MODULES));
+    setSetting(db, ENABLED_MODULES_KEY, JSON.stringify([...DEFAULT_ENABLED_MODULES, ...retiredModuleIdsIn(parsed)]));
     return [...DEFAULT_ENABLED_MODULES];
   }
   return sanitized;
@@ -335,150 +352,7 @@ function setEnabledModules(db, moduleList) {
   if (sanitized.length === 0) {
     throw new Error('enabled_modules must not be empty');  // PRD B1：至少保留 1 个
   }
-  setSetting(db, ENABLED_MODULES_KEY, JSON.stringify(sanitized));
-}
-
-// v2.1.9 N1-settings (T32b)：收单单据 idle 清理阈值（5-180 分钟，默认 30；硬编码 → settings 化）
-//   spec.md §13.2 / tasks.md T32b / 资金红线：范围外值会让 idle cleanup 永不触发（>180）或过于频繁（<5）
-//   migration `ensureAcquiringBillIdleCleanupMinutesSetting` 启动期 seed 默认 30；本仓暴露 get/set 接口
-const ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_KEY = 'acquiring_bill_idle_cleanup_minutes';
-const ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_DEFAULT = 30;
-const ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MIN = 5;
-const ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MAX = 180;
-
-function getAcquiringBillIdleCleanupMinutes(db) {
-  const raw = getSetting(db, ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_KEY);
-  if (raw == null || raw === '') return ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_DEFAULT;
-  const n = parseInt(raw, 10);
-  if (!Number.isFinite(n)) return ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_DEFAULT;
-  // 范围外（包括外部直接改 DB 写入非法值）→ 不报错，回退默认（资金红线兜底：never let cleanup never trigger）
-  if (n < ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MIN || n > ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MAX) {
-    return ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_DEFAULT;
-  }
-  return n;
-}
-
-function setAcquiringBillIdleCleanupMinutes(db, minutes) {
-  const n = Number(minutes);
-  if (!Number.isInteger(n)) {
-    throw new Error(`acquiring_bill_idle_cleanup_minutes 必须是整数，收到：${JSON.stringify(minutes)}`);
-  }
-  if (n < ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MIN || n > ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MAX) {
-    throw new Error(
-      `acquiring_bill_idle_cleanup_minutes 必须在 ${ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MIN}-${ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MAX} 分钟范围内，收到：${n}`
-    );
-  }
-  setSetting(db, ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_KEY, String(n));
-}
-
-// v2.1.10 A4 T18：收单单据 SQL JOIN chunked 分批 size（行/批）
-//   spec §3.2 拍板默认 100000；范围 [10000, 1000000]（1w-100w）
-//   选 10w 理由：cancel 响应 < 5s + 内存峰值 < 200MB + 进度回调粒度适中
-//   高级用户可调（sqlite3 直改 settings 表 + 重启）；UI 暂不暴露
-//   migration `ensureAcquiringBillChunkSizeSetting` 启动期 seed 默认 100000；本仓暴露 get/set
-//   getter 范围外值 → 回退默认 100000（资金红线兜底；不能让 chunked 永远跑不动 / 1 行 1 批 OOM）
-const ACQUIRING_BILL_CHUNK_SIZE_KEY = 'acquiring_bill_chunk_size';
-const ACQUIRING_BILL_CHUNK_SIZE_DEFAULT = 100000;
-const ACQUIRING_BILL_CHUNK_SIZE_MIN = 10000;
-const ACQUIRING_BILL_CHUNK_SIZE_MAX = 1000000;
-
-function getAcquiringBillChunkSize(db) {
-  const raw = getSetting(db, ACQUIRING_BILL_CHUNK_SIZE_KEY);
-  if (raw == null || raw === '') return ACQUIRING_BILL_CHUNK_SIZE_DEFAULT;
-  const n = parseInt(raw, 10);
-  if (!Number.isFinite(n)) return ACQUIRING_BILL_CHUNK_SIZE_DEFAULT;
-  // 范围外 → 不报错，回退默认（资金红线兜底）
-  if (n < ACQUIRING_BILL_CHUNK_SIZE_MIN || n > ACQUIRING_BILL_CHUNK_SIZE_MAX) {
-    return ACQUIRING_BILL_CHUNK_SIZE_DEFAULT;
-  }
-  return n;
-}
-
-function setAcquiringBillChunkSize(db, size) {
-  const n = Number(size);
-  if (!Number.isInteger(n)) {
-    throw new Error(`acquiring_bill_chunk_size 必须是整数，收到：${JSON.stringify(size)}`);
-  }
-  if (n < ACQUIRING_BILL_CHUNK_SIZE_MIN || n > ACQUIRING_BILL_CHUNK_SIZE_MAX) {
-    throw new Error(
-      `acquiring_bill_chunk_size 必须在 ${ACQUIRING_BILL_CHUNK_SIZE_MIN}-${ACQUIRING_BILL_CHUNK_SIZE_MAX} 范围内，收到：${n}`
-    );
-  }
-  setSetting(db, ACQUIRING_BILL_CHUNK_SIZE_KEY, String(n));
-}
-
-// v2.1.12 β.1-T3：收单单据多 worker write-splitting 的 worker 数（M）
-//   spec §4 D29（默认上限 4，settings 可调）+ D33（OOM 防御默认 2，高级可调 4）
-//   - 默认 2：D33 OOM 兜底（低配机器 M worker × ~800MB peak）；高级用户可上调到 4（POC 甜点）
-//   - 范围 [1, 8]：1 = 等价单 worker（彻底关闭多 worker）；8 = 上限（POC：M=8 几乎不再涨且 RSS 高）
-//   - main.js handler 读此值后还会再做 D29 CPU clamp（os.cpus-2）+ D33 内存降级；本 getter 只管 settings 持久值
-//   - migration `ensureAcquiringBillWorkerCountSetting` 启动期 seed 默认 2；本仓暴露 get/set
-//   - getter 范围外值 → 回退默认 2（资金红线兜底；不能让非法值 0/-1 让多 worker 路径崩或 OOM）
-//   - UI 暂不暴露（T-b1-4 评估 settings UI）；高级用户 sqlite3 直改 + 重启
-const ACQUIRING_BILL_WORKER_COUNT_KEY = 'acquiring_bill_worker_count';
-const ACQUIRING_BILL_WORKER_COUNT_DEFAULT = 2;
-const ACQUIRING_BILL_WORKER_COUNT_MIN = 1;
-const ACQUIRING_BILL_WORKER_COUNT_MAX = 8;
-
-function getAcquiringBillWorkerCount(db) {
-  const raw = getSetting(db, ACQUIRING_BILL_WORKER_COUNT_KEY);
-  if (raw == null || raw === '') return ACQUIRING_BILL_WORKER_COUNT_DEFAULT;
-  const n = parseInt(raw, 10);
-  if (!Number.isFinite(n)) return ACQUIRING_BILL_WORKER_COUNT_DEFAULT;
-  // 范围外（含外部直接改 DB 写入非法值，如 0 / -1 / 99 / 'abc'）→ 不报错，回退默认（资金红线兜底）
-  if (n < ACQUIRING_BILL_WORKER_COUNT_MIN || n > ACQUIRING_BILL_WORKER_COUNT_MAX) {
-    return ACQUIRING_BILL_WORKER_COUNT_DEFAULT;
-  }
-  return n;
-}
-
-function setAcquiringBillWorkerCount(db, count) {
-  const n = Number(count);
-  if (!Number.isInteger(n)) {
-    throw new Error(`acquiring_bill_worker_count 必须是整数，收到：${JSON.stringify(count)}`);
-  }
-  if (n < ACQUIRING_BILL_WORKER_COUNT_MIN || n > ACQUIRING_BILL_WORKER_COUNT_MAX) {
-    throw new Error(
-      `acquiring_bill_worker_count 必须在 ${ACQUIRING_BILL_WORKER_COUNT_MIN}-${ACQUIRING_BILL_WORKER_COUNT_MAX} 范围内，收到：${n}`
-    );
-  }
-  setSetting(db, ACQUIRING_BILL_WORKER_COUNT_KEY, String(n));
-}
-
-// v2.1.10 N4-cont-1 T22 (Phase 4)：收单单据 raw_json idle 自动清理保留窗口（默认 7 天）
-//   spec §4.1.2 单键 + 范围 [1, 30] 天 + 范围外回退 7
-//   - 仅清「对账成功」（不在 acquiring_bill_currency_diff_rows 中）且 imported_at < N 天前的 bill_imports.raw_json
-//   - 差异行 raw_json 永远保留（writer.js:184 重导差异 xlsx 依赖）
-//   - getter 范围外回退默认（资金红线兜底：clearStaleSuccessfulRawJson 永不能用非法 retention 误清正常数据）
-//   - 沿用 v2.1.9 N1-settings 范式（getAcquiringBillIdleCleanupMinutes / setAcquiringBillIdleCleanupMinutes）
-const ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY = 'acquiring_bill_raw_json_retention_days';
-const ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_DEFAULT = 7;
-const ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MIN = 1;
-const ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MAX = 30;
-
-function getAcquiringBillRawJsonRetentionDays(db) {
-  const raw = getSetting(db, ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY);
-  if (raw == null || raw === '') return ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_DEFAULT;
-  const n = parseInt(raw, 10);
-  if (!Number.isFinite(n)) return ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_DEFAULT;
-  // 范围外（含外部直接改 DB 写入非法值，如 0 / -1 / 31 / 'abc'）→ 不报错，回退默认（资金红线兜底）
-  if (n < ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MIN || n > ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MAX) {
-    return ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_DEFAULT;
-  }
-  return n;
-}
-
-function setAcquiringBillRawJsonRetentionDays(db, days) {
-  const n = Number(days);
-  if (!Number.isInteger(n)) {
-    throw new Error(`acquiring_bill_raw_json_retention_days 必须是整数，收到：${JSON.stringify(days)}`);
-  }
-  if (n < ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MIN || n > ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MAX) {
-    throw new Error(
-      `acquiring_bill_raw_json_retention_days 必须在 ${ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MIN}-${ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MAX} 天范围内，收到：${n}`
-    );
-  }
-  setSetting(db, ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY, String(n));
+  setSetting(db, ENABLED_MODULES_KEY, JSON.stringify([...sanitized, ...storedRetiredModuleIds(db)]));
 }
 
 // v3.0.3 PR-D（W5）：OneDrive 导出目录提示防重标记
@@ -613,34 +487,6 @@ module.exports = {
   RELEASE_NOTES_ACKNOWLEDGED_VERSION_KEY,
   RELEASE_NOTES_LAST_UPGRADE_KEY,
   setSetting,
-  // v2.1.9 N1-settings (T32b)：idle cleanup 阈值
-  getAcquiringBillIdleCleanupMinutes,
-  setAcquiringBillIdleCleanupMinutes,
-  ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_KEY,
-  ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_DEFAULT,
-  ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MIN,
-  ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MAX,
-  // v2.1.10 A4 T18：chunked 分批 size
-  getAcquiringBillChunkSize,
-  setAcquiringBillChunkSize,
-  ACQUIRING_BILL_CHUNK_SIZE_KEY,
-  ACQUIRING_BILL_CHUNK_SIZE_DEFAULT,
-  ACQUIRING_BILL_CHUNK_SIZE_MIN,
-  ACQUIRING_BILL_CHUNK_SIZE_MAX,
-  // v2.1.12 β.1-T3：多 worker write-splitting worker 数（D29/D33）
-  getAcquiringBillWorkerCount,
-  setAcquiringBillWorkerCount,
-  ACQUIRING_BILL_WORKER_COUNT_KEY,
-  ACQUIRING_BILL_WORKER_COUNT_DEFAULT,
-  ACQUIRING_BILL_WORKER_COUNT_MIN,
-  ACQUIRING_BILL_WORKER_COUNT_MAX,
-  // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口
-  getAcquiringBillRawJsonRetentionDays,
-  setAcquiringBillRawJsonRetentionDays,
-  ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY,
-  ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_DEFAULT,
-  ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MIN,
-  ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MAX,
   // v3.0.3 PR-D（W5）：OneDrive 导出目录提示防重标记
   hasShownWinOneDriveStorageNotice,
   markWinOneDriveStorageNoticeShown,

@@ -108,12 +108,13 @@ test.describe('v3.0.18 在线升级静态契约', () => {
     assert.match(main, /getLastCompletedCheckKind\(\)/, '并发加入检查时下载必须沿用真实触发来源');
   });
 
-  test('升级安装闸门覆盖独立月份删除入口，升级错误不向 Renderer 透传底层 message', () => {
+  test('升级安装闸门覆盖独立清空/删除入口，升级错误不向 Renderer 透传底层 message', () => {
     const main = read('src/main.js');
 
+    // v3.2.20：原示例「收单清空月份数据」随收单单据币种校验下线删除，改以保留的独立清空入口为例。
     assert.match(
       main,
-      /businessIpcHandle\('acquiringBillCurrency:clearMonth', '清空月份数据'/
+      /businessIpcHandle\('recon-id-fix:clear-session', '清空会话'/
     );
     assert.match(main, /resumeAfterFailedRestart: resumeApplicationAfterFailedRestart/);
     assert.match(main, /function resumeApplicationAfterFailedRestart\(\)/);

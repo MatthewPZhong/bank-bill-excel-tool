@@ -1,4 +1,3 @@
-let bizOpV327Controller = null;
 let darkModeController = null;
 const DEFAULT_BACKGROUND_SETTINGS = Object.freeze({
   colorHex: '#efe8da',
@@ -52,11 +51,6 @@ const MODULES = Object.freeze({
     id: 'new-account-generator',
     name: '新开账户余额账单生成'
   },
-  pendingReconciliation: {
-    id: 'pending-reconciliation',
-    // v2.1.13 B1：'月度 Pending 数据核对' → '月度Pending数据核对'（去空格；仅显示名，统计 key 不变）
-    name: '月度Pending数据核对'
-  },
   bankStatementProcess: {
     id: 'bank-statement-process',
     // v2.1.14 A2：显示名 '银行对账单处理' → '资金对账数据处理'（仅改 name；id 保留 'bank-statement-process'，
@@ -83,21 +77,6 @@ const MODULES = Object.freeze({
   reconIdFix: {
     id: 'recon-id-fix',
     name: '对账单修复'
-  },
-  // v2.1.2 T2：月度银行对账单BU回填校验
-  bankBuRecon: {
-    id: 'bank-bu-recon',
-    name: '月度银行对账单BU回填校验'
-  },
-  // v2.1.3：业务OP数据核对（独立第 5 个模块）
-  bizOpRecon: {
-    id: 'biz-op-recon',
-    name: '业务OP数据核对'
-  },
-  // v2.1.6 Module B：收单单据币种校验
-  acquiringBillCurrency: {
-    id: 'acquiring-bill-currency',
-    name: '收单单据币种校验'
   },
   // v2.1.12 需求1：VCC业务OP计算（第 6 个独立模块；id 须与 settings-repository.js ALL_MODULE_IDS 一致）
   vccOpCalc: {
@@ -331,12 +310,6 @@ const elements = {
   currentModuleName: document.getElementById('currentModuleName'),
   statementModulePanel: document.getElementById('statementModulePanel'),
   newAccountModulePanel: document.getElementById('newAccountModulePanel'),
-  pendingModulePanel: document.getElementById('pendingModulePanel'),
-  pendingRuleBtn: document.getElementById('pendingRuleBtn'),
-  pendingImportBtn: document.getElementById('pendingImportBtn'),
-  pendingRunBtn: document.getElementById('pendingRunBtn'),
-  pendingExportBtn: document.getElementById('pendingExportBtn'),
-  pendingStatusBox: document.getElementById('pendingStatusBox'),
   bankStatementModulePanel: document.getElementById('bankStatementModulePanel'),
   bankStatementScenarioBtn: document.getElementById('bankStatementScenarioBtn'),
   // v2.1.16 A5：「导入对账单」按钮即批量入口（多选 + 按表头识别路由），无独立批量按钮
@@ -357,34 +330,13 @@ const elements = {
   preFundReconciliationScenarioSelect: document.getElementById('preFundReconciliationScenarioSelect'),
   preFundReconciliationTempManagerBtn: document.getElementById('preFundReconciliationTempManagerBtn'),
   preFundReconciliationStatusBox: document.getElementById('preFundReconciliationStatusBox'),
-  // v2.1.2 T2：月度银行对账单BU回填校验模块（5 项 DOM 缓存；月份选择改为对话框，无 select）
-  bankBuReconModulePanel: document.getElementById('bankBuReconModulePanel'),
-  bankBuReconImportBtn: document.getElementById('bankBuReconImportBtn'),
-  bankBuReconRunBtn: document.getElementById('bankBuReconRunBtn'),
-  bankBuReconExportBtn: document.getElementById('bankBuReconExportBtn'),
-  bankBuReconStatusBox: document.getElementById('bankBuReconStatusBox'),
   // v3.0.15：重复入金匹配模块。
   duplicateInboundMatchModulePanel: document.getElementById('duplicateInboundMatchModulePanel'),
   duplicateInboundMatchImportBtn: document.getElementById('duplicateInboundMatchImportBtn'),
   duplicateInboundMatchRunBtn: document.getElementById('duplicateInboundMatchRunBtn'),
   duplicateInboundMatchExportBtn: document.getElementById('duplicateInboundMatchExportBtn'),
   duplicateInboundMatchStatusBox: document.getElementById('duplicateInboundMatchStatusBox'),
-  // v2.1.3：业务OP数据核对模块（spec §7.3 — 7 项 DOM 缓存）
-  bizOpReconModulePanel: document.getElementById('bizOpReconModulePanel'),
-  bizOpReconImportBtn: document.getElementById('bizOpReconImportBtn'),
-  bizOpReconRunBtn: document.getElementById('bizOpReconRunBtn'),
-  bizOpReconBuRow: document.getElementById('bizOpReconBuRow'),
-  bizOpReconBuSelect: document.getElementById('bizOpReconBuSelect'),
-  bizOpReconExportBtn: document.getElementById('bizOpReconExportBtn'),
-  bizOpReconStatusBox: document.getElementById('bizOpReconStatusBox'),
 
-  // v2.1.6 Module B：收单单据币种校验
-  acquiringBillCurrencyModulePanel: document.getElementById('acquiringBillCurrencyModulePanel'),
-  acquiringBillCurrencyImportFlowBtn: document.getElementById('acquiringBillCurrencyImportFlowBtn'),
-  acquiringBillCurrencyImportBillBtn: document.getElementById('acquiringBillCurrencyImportBillBtn'),
-  acquiringBillCurrencyRunBtn: document.getElementById('acquiringBillCurrencyRunBtn'),
-  acquiringBillCurrencyExportBtn: document.getElementById('acquiringBillCurrencyExportBtn'),
-  acquiringBillCurrencyStatusBox: document.getElementById('acquiringBillCurrencyStatusBox'),
   // v2.1.12 需求1：VCC业务OP计算模块（5 项 DOM 缓存；「导出差异」位 →「显示余额」）
   vccOpCalcModulePanel: document.getElementById('vccOpCalcModulePanel'),
   vccOpCalcImportBtn: document.getElementById('vccOpCalcImportBtn'),
@@ -450,7 +402,7 @@ function disposeApplication() {
   rendererPreviews?.dispose();
   moduleRouter?.dispose();
   for (const controller of new Set([statementController, bankStatementController, reconIdFixController,
-    rendererPending, positionReconciliationUI, bizOpV327Controller, ...Object.values(domainControllers)])) {
+    positionReconciliationUI, ...Object.values(domainControllers)])) {
     try { controller?.dispose(); } catch (error) { console.warn(error); }
   }
   scenarioChangeRouter?.dispose();
@@ -530,19 +482,10 @@ function initializeDomainControllers(info) {
   const domainUi = { modalHost, modalBridge, status: updateStatusBox, alert: createAlertDialog, escapeHtml, reportError: ui.reportError };
   domainControllers.preFund = window.__preFundController.createPreFundController({ api: window.desktopApi.preFundReconciliation,
     panel: elements.preFundReconciliationModulePanel, ui: { ...domainUi, createPreFundTempManagerDialog } });
-  domainControllers.bankBu = window.__bankBuController.createBankBuController({ api: window.desktopApi.bankBuRecon,
-    panel: elements.bankBuReconModulePanel, ui: { ...domainUi, createBankBuReconMonthPickerDialog,
-      createBankBuReconFileImportPromptDialog, createBankBuReconReconcileDialog, createBankBuReconExportDialog } });
   domainControllers.duplicateInbound = window.__duplicateInboundController.createDuplicateInboundController({ api: window.desktopApi.duplicateInboundMatch,
     panel: elements.duplicateInboundMatchModulePanel, ui: domainUi });
   domainControllers.vccOpCalc = window.__vccOpCalcController.createVccOpCalcController({ api: window.desktopApi.vccOpCalc,
     panel: elements.vccOpCalcModulePanel, ui: { ...domainUi, createVccOpCalcConfirmDialog, createVccOpCalcComputeDialog, createVccOpCalcShowBalanceDialog } });
-  domainControllers.acquiring = window.__acquiringController.createAcquiringController({ api: window.desktopApi.acquiringBillCurrency,
-    panel: elements.acquiringBillCurrencyModulePanel, ui: { ...domainUi, createAcquiringBillCurrencyMonthPickerDialog,
-      confirmNative: window.confirm.bind(window) } });
-  domainControllers.bizLegacy = window.__bizOpLegacyController.createBizOpLegacyController({ api: window.desktopApi.bizOpRecon,
-    panel: elements.bizOpReconModulePanel, ui: { ...domainUi, createAlertDialog, createBizOpReconDatePickerDialog,
-      createBizOpReconSecondImportPromptDialog, createBizOpReconReconcileDialog, createBizOpReconExportDialog, getBizOpReconDefaultDate } });
   domainControllers.newAccount = window.__newAccountController.createNewAccountController({
     api: { generate: window.desktopApi.newAccount.generate, exportFile: window.desktopApi.newAccount.exportFile,
       exportLastError: window.desktopApi.errors.exportLast }, panel: elements.newAccountModulePanel,
@@ -553,9 +496,6 @@ function initializeDomainControllers(info) {
     differenceApi: window.__vccFinancialOpDifference, reviewProjection: window.__vccReviewProjection,
     previewEnabled: window.desktopApi.previewCapture === true
   });
-  bizOpV327Controller = window.createBizOpV327Controller({ api: window.desktopApi.bizOpReconV327,
-    panel: document.getElementById('bizOpV327ModulePanel'), legacyPanel: elements.bizOpReconModulePanel,
-    legacyController: domainControllers.bizLegacy, modalHost });
   scenarioChangeRouter = window.ScenarioChangeRouter.createScenarioChangeRouter({
     bankStatement: bankStatementController, reconIdFix: reconIdFixController,
     scenarioSubscribers: [() => reconIdFixController.reloadScenarios({ updateStatus: false })],
@@ -613,31 +553,6 @@ const {
   createScenarioConfirmDetailDialog,
   // v2.1.0-beta.1 PR-A（task A7）：C4 类配置弹窗
   createScenarioConfigDialogC4,
-  // v2.1.2 T2：月份选择对话框（PRD §3.2.5 拍板修正）
-  createBankBuReconMonthPickerDialog,
-  // v2.1.6 fix5：收单单据币种校验月份选择对话框（spec v0.8 §8.1）
-  createAcquiringBillCurrencyMonthPickerDialog,
-  // v2.1.2 T2：文件导入提示对话框（Clear 风前端 modal）
-  createBankBuReconFileImportPromptDialog,
-  // v2.1.2 T2 (spec v0.5)：开始运行 / 导出差异 弹窗
-  createBankBuReconReconcileDialog,
-  createBankBuReconExportDialog,
-  // v2.1.2 T2：preview state apply 函数（v0.8 删除 anomaly preview）
-  applyBankBuReconPanelInitialPreviewState,
-  applyBankBuReconPanelImportingPreviewState,
-  applyBankBuReconPanelResultPreviewState,
-  // v2.1.3：业务OP数据核对 dialog factory（v2.1.3-fix2 删除 createBizOpReconErrorReportDialog 后剩 4 个）+ preview state apply 函数 4 个
-  createBizOpReconDatePickerDialog,
-  createBizOpReconReconcileDialog,
-  createBizOpReconExportDialog,
-  createBizOpReconSecondImportPromptDialog,
-  applyBizOpReconPanelInitialPreviewState,
-  applyBizOpReconPanelImportingPreviewState,
-  applyBizOpReconPanelResultPreviewState,
-  applyBizOpReconPanelExportDialogPreviewState,
-  // v2.1.3-fix1：状态框冒号换行 formatter + 默认日期 helper
-  formatBizOpReconStatusHtml,
-  getBizOpReconDefaultDate,
   // v2.1.4 T3：小助手功能收纳弹窗工厂
   createModuleCabinetDialog,
   // v3.0.8 需求1：工具箱🧰 主弹框（按钮 click 用）；拆表选字段弹框（preview 直接调用需在 renderer.js 取得引用）
@@ -730,11 +645,6 @@ const { createAppUpdateSettingsDialog, createArchiveCenterPreviewApi } = window.
     openReleaseNotes: (parentHandle) => releaseNotesDialogs.openReleaseNotesHistory(parentHandle) }
 });
 
-const rendererPending = window.__pendingController.createPendingController({
-  api: window.desktopApi.pending, panel: elements.pendingModulePanel,
-  ui: { modalHost, modalBridge, createAlertDialog, createConfirmDialog, reportError: error => console.warn('Pending 失败：', error) }
-});
-
 const positionReconciliationUI = window.__positionReconciliation
   ? window.__positionReconciliation.createPositionReconciliationUI({
       api: window.desktopApi && window.desktopApi.positionReconciliation,
@@ -792,8 +702,6 @@ const rendererPreviews = window.__rendererPreviews.createRendererPreviews({
   createAccountMappingMigrationDialog,
   closeModal,
   openBackgroundPalette,
-  // v2.0.0 Pending 模块 preview 所需
-  rendererPending,
   createConfirmDialog,
   // 后续 preview 扩展所需
   openModuleMenu,
@@ -843,17 +751,7 @@ const {
   applyRememberOrderMismatchDialogPreviewState,
   applyDuplicateRowsReviewDialogPreviewState,
   applyAccountMappingMigrationDialogPreviewState,
-  // v2.0.0 Pending 模块 preview（6 张）
-  applyPendingPanelPreviewState,
-  applyPendingRuleDialogPreviewState,
-  applyPendingRuleConfirmPreviewState,
-  applyPendingImportMonthPreviewState,
-  applyPendingReconcilePreviewState,
-  applyPendingExportRunsPreviewState,
-  // 2026-04-24 补：9 张历史遗漏 preview
-  applyPendingPanelInitialPreviewState,
-  applyPendingPanelImportingPreviewState,
-  applyPendingPanelErrorPreviewState,
+  // 2026-04-24 补：历史遗漏 preview
   applyModuleSwitcherOpenPreviewState,
   applyNewAccountMultiPreviewState,
   applyNewAccountCurrencyDropdownPreviewState,
@@ -938,8 +836,7 @@ function updateStatusBox(box, message, tone = 'info', options = {}) {
       : idleTitle;
 
   // v2.1.9 SR-log-1 (T32i)：wrapper hijack — tone='error'/'warning' 自动上报告警（spec §15.5）
-  //   - 集中在 updateStatusBox 出口，setStatus / setNewAccountStatus / setBankBuReconStatus / setBizOpReconStatus /
-  //     setAcquiringBillCurrencyStatus / updateReconIdFixUi 等全部走这条路径 → 一处覆盖 175+ 调用方
+  //   - 集中在 updateStatusBox 出口，setStatus / setNewAccountStatus / updateReconIdFixUi 等全部走这条路径 → 一处覆盖 175+ 调用方
   //   - try-catch graceful：desktopApi 不存在 / IPC 抛错 → 不阻塞 UI 文案显示
   //   - 仅 error / warning 上报，info / success / neutral 不打扰日志
   //   - logDomain 取自 options 或 box.dataset.logDomain（dialog 工厂可选注入）
@@ -969,7 +866,6 @@ function getModuleRouter() {
     modules: [
       entry(MODULES.statementGenerator, elements.statementModulePanel, statementController),
       entry(MODULES.newAccountGenerator, elements.newAccountModulePanel, domainControllers.newAccount),
-      entry(MODULES.pendingReconciliation, elements.pendingModulePanel, rendererPending),
       entry(MODULES.bankStatementProcess, elements.bankStatementModulePanel,
         bankStatementController),
       entry(MODULES.preFundReconciliation, elements.preFundReconciliationModulePanel,
@@ -978,16 +874,11 @@ function getModuleRouter() {
         reconIdFixController),
       entry(MODULES.positionReconciliation, elements.positionReconciliationModulePanel,
         positionReconciliationUI),
-      entry(MODULES.bankBuRecon, elements.bankBuReconModulePanel,
-        domainControllers.bankBu),
       entry(MODULES.duplicateInboundMatch, elements.duplicateInboundMatchModulePanel,
         domainControllers.duplicateInbound),
-      entry(MODULES.acquiringBillCurrency, elements.acquiringBillCurrencyModulePanel,
-        domainControllers.acquiring),
       entry(MODULES.vccOpCalc, elements.vccOpCalcModulePanel,
         domainControllers.vccOpCalc),
-      entry(MODULES.vccFinancialOp, elements.vccFinancialOpModulePanel, domainControllers.vccFinancialOp),
-      entry(MODULES.bizOpRecon, elements.bizOpReconModulePanel, bizOpV327Controller)
+      entry(MODULES.vccFinancialOp, elements.vccFinancialOpModulePanel, domainControllers.vccFinancialOp)
     ],
     onNavigate({ moduleId }) {
       state.currentModule = moduleId;
@@ -1790,13 +1681,7 @@ async function applyFullInfo(info) {
     closeModuleMenu();
   }, { signal: shellAbort.signal });
 
-  // v2.1.2 T2：月度银行对账单BU回填校验事件绑定（月份选择改为对话框，无 select change 事件）
-
   // v2.1.12 需求1：VCC业务OP计算模块事件绑定（导入 / 开始运行 / 显示余额）
-
-  // v2.1.3：业务OP数据核对模块事件绑定
-
-  // v2.1.6 Module B：收单单据币种校验事件绑定
 
   elements.backgroundPaletteBtn.addEventListener('click', () => {
     if (state.isBackgroundPaletteOpen) {
@@ -2091,42 +1976,6 @@ async function applyFullInfo(info) {
     setTimeout(() => {
       applyAccountMappingMigrationDialogPreviewState();
     }, 120);
-  } else if (info.previewModal === 'pending-panel') {
-    setTimeout(() => {
-      applyPendingPanelPreviewState();
-    }, 120);
-  } else if (info.previewModal === 'pending-rule-dialog') {
-    setTimeout(() => {
-      applyPendingRuleDialogPreviewState();
-    }, 120);
-  } else if (info.previewModal === 'pending-rule-confirm') {
-    setTimeout(() => {
-      applyPendingRuleConfirmPreviewState();
-    }, 120);
-  } else if (info.previewModal === 'pending-import-month') {
-    setTimeout(() => {
-      applyPendingImportMonthPreviewState();
-    }, 120);
-  } else if (info.previewModal === 'pending-reconcile') {
-    setTimeout(() => {
-      applyPendingReconcilePreviewState();
-    }, 120);
-  } else if (info.previewModal === 'pending-export-runs') {
-    setTimeout(() => {
-      applyPendingExportRunsPreviewState();
-    }, 120);
-  } else if (info.previewModal === 'pending-panel-initial') {
-    setTimeout(() => {
-      applyPendingPanelInitialPreviewState();
-    }, 120);
-  } else if (info.previewModal === 'pending-panel-importing') {
-    setTimeout(() => {
-      applyPendingPanelImportingPreviewState();
-    }, 120);
-  } else if (info.previewModal === 'pending-panel-error') {
-    setTimeout(() => {
-      applyPendingPanelErrorPreviewState();
-    }, 120);
   } else if (info.previewModal === 'module-switcher-open') {
     setTimeout(() => {
       applyModuleSwitcherOpenPreviewState();
@@ -2317,28 +2166,8 @@ async function applyFullInfo(info) {
     setTimeout(() => {
       applyScenarioConfigC4Gateway1vNPreviewState();
     }, 120);
-  } else if (info.previewModal === 'bank-bu-recon-panel-initial') {
-    setTimeout(() => { applyBankBuReconPanelInitialPreviewState(); }, 120);
-  } else if (info.previewModal === 'bank-bu-recon-panel-importing') {
-    setTimeout(() => { applyBankBuReconPanelImportingPreviewState(); }, 120);
-  } else if (info.previewModal === 'bank-bu-recon-panel-result') {
-    setTimeout(() => { applyBankBuReconPanelResultPreviewState(); }, 120);
   } else if (info.previewModal === 'duplicate-inbound-match-panel') {
     setTimeout(() => { applyDuplicateInboundMatchPanelPreviewState(); }, 120);
-  } else if (info.previewModal === 'biz-op-recon-panel-initial') {
-    setTimeout(() => { applyBizOpReconPanelInitialPreviewState(); }, 120);
-  } else if (info.previewModal === 'biz-op-recon-panel-importing') {
-    setTimeout(() => { applyBizOpReconPanelImportingPreviewState(); }, 120);
-  } else if (info.previewModal === 'biz-op-recon-panel-result') {
-    setTimeout(() => { applyBizOpReconPanelResultPreviewState(); }, 120);
-  } else if (info.previewModal === 'biz-op-recon-panel-export-dialog') {
-    setTimeout(() => { applyBizOpReconPanelExportDialogPreviewState(); }, 120);
-  } else if (info.previewModal === 'acquiring-bill-currency-panel-initial') {
-    setTimeout(() => { applyAcquiringBillCurrencyPanelInitialPreviewState(); }, 120);
-  } else if (info.previewModal === 'acquiring-bill-currency-panel-importing') {
-    setTimeout(() => { applyAcquiringBillCurrencyPanelImportingPreviewState(); }, 120);
-  } else if (info.previewModal === 'acquiring-bill-currency-panel-result') {
-    setTimeout(() => { applyAcquiringBillCurrencyPanelResultPreviewState(); }, 120);
   } else if (info.previewModal === 'vcc-op-calc-panel-initial') {
     setTimeout(() => { applyVccOpCalcPanelInitialPreviewState(); }, 120);
   } else if (info.previewModal === 'vcc-op-calc-panel-result') {
@@ -2391,13 +2220,6 @@ function applyDuplicateInboundMatchPanelPreviewState() {
   return route.ready.then(() => { if (moduleRouter.getCurrentModuleId() === MODULES.duplicateInboundMatch.id) domainControllers.duplicateInbound.commands.preview(); });
 }
 
-function applyAcquiringPreview(text, tone) {
-  const route = setCurrentModule(MODULES.acquiringBillCurrency.id, { persist: false });
-  return route.ready.then(() => { if (moduleRouter.getCurrentModuleId() === MODULES.acquiringBillCurrency.id) domainControllers.acquiring.applyPreviewState({ text, tone }); });
-}
-function applyAcquiringBillCurrencyPanelInitialPreviewState() { return applyAcquiringPreview('欢迎使用小助手', 'info'); }
-function applyAcquiringBillCurrencyPanelImportingPreviewState() { return applyAcquiringPreview('流水表导入成功：月份 2026-03，共 4,873,210 行', 'success'); }
-function applyAcquiringBillCurrencyPanelResultPreviewState() { return applyAcquiringPreview('对账完成：共 4,873,210 条，币种差异 1,247 条，未匹配 38 条', 'success'); }
 
 function setStatus(...args) {
   return statementController ? statementController.preview.setStatus(...args) : updateStatusBox(elements.statusBox, ...args);

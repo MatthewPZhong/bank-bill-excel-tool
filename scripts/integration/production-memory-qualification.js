@@ -1,5 +1,5 @@
 'use strict';
-// 当前人工验收清单 → 真实生产策略 → Governor → rows/BizOP 真实 Worker 与发布恢复。
+// 当前人工验收清单 → 真实生产策略 → Governor → rows 真实 Worker 与发布恢复（v3.2.20 起不含已下线的 BizOP 阶段）。
 // Windows 平台事实和可用内存是注入夹具；不冒充 Windows 实机或安装包验收。
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
@@ -17,12 +17,7 @@ const requests = {
   'split-prepare': ['toolbox:split:prepare', 'toolbox-split-read'],
   'rows-generation': ['toolbox:split-rows', 'toolbox:rows-generate:test'],
   'rows-io': ['toolbox:split-rows', 'toolbox:rows-validate:test'],
-  'publication-io': ['publication:shared-io', 'publication:test'],
-  'bizop-import': ['biz-op-v327:import-candidate', 'biz-op-v327:import:test'],
-  'bizop-compute': ['biz-op-v327:run-candidate', 'biz-op-v327:compute:test'],
-  'bizop-export': ['biz-op-v327:export-result-full', 'biz-op-v327:export:test'],
-  'bizop-io': ['biz-op-v327:run-candidate', 'biz-op-v327:raw-source:test'],
-  'bizop-maintenance': ['biz-op-v327:reclaim', 'biz-op-v327:maintenance:test']
+  'publication-io': ['publication:shared-io', 'publication:test']
 };
 const cases = [];
 const test = (name, run) => cases.push({ name, run });
@@ -46,17 +41,17 @@ async function withGovernor(options, run) {
   }
 }
 
-test('随包清单为人工确认 PASS，并列出九阶段的普通与低内存配置', async () => {
+test('随包清单为人工确认 PASS，并列出四阶段的普通与低内存配置', async () => {
   assert.equal(qualification.schemaVersion, 2); assert.equal(qualification.status, 'qualified');
   assert.equal(qualification.approval.kind, 'manual-acceptance'); assert.equal(qualification.approval.result, 'PASS');
-  assert.equal(qualification.profiles.length, 18);
+  assert.equal(qualification.profiles.length, 8);
   assert.deepEqual(Object.keys(requests).sort(), Object.keys(PHASES).sort());
 });
 test('人工确认不会绕过实际活动覆盖未闭合的保护', () => withGovernor({}, async ({ acquire }) => {
   await assert.rejects(acquire('split-prepare'), { code: 'ADMISSION_TIMEOUT' });
   sealMemoryActivityInventory();
 }));
-test('零兼容预算下生产策略按实时内存选择全部十八个获批配置', () => withGovernor({}, async ({ state, acquire }) => {
+test('零兼容预算下生产策略按实时内存选择全部八个获批配置', () => withGovernor({}, async ({ state, acquire }) => {
   for (const phase of Object.keys(requests)) for (const mode of ['normal', 'low']) {
     const config = profile(phase, mode);
     state.availableMiB = mode === 'normal' ? 4096 : (config.phaseMemoryBytes + config.systemReserveBytes) / MiB;
@@ -104,17 +99,16 @@ test('未知增长载体真退出和低档互斥仍决定何时放行', () => wi
   const normal = await acquire('rows-generation');
   try { assert.equal(normal.memoryMode, 'normal'); } finally { normal.release(); }
 }));
-test('真实生产选档贯穿完整 rows 与 BizOP 工作流，普通与低内存输出一致', async () => {
+test('真实生产选档贯穿完整 rows 工作流，普通与低内存输出一致', async () => {
   function memoryPolicyFactory({ getGovernor, sampleMemory }) {
     const { createProductionMemoryPolicy } = loadProductionMemoryProfiles({ runtime, sampleMemory });
     return createProductionMemoryPolicy({ compatibilityMemoryBytes: 0, getGovernor });
   }
   const normal = await runScenario({ rows: 1000, availableMiB: 2048, memoryPolicyFactory });
   const low = await runScenario({ rows: 1000, availableMiB: 512, memoryPolicyFactory });
-  assert.equal(low.rowsDigest, normal.rowsDigest); assert.equal(low.opDigest, normal.opDigest);
-  assert.deepEqual(low.exports, normal.exports); assert.ok(normal.grants.length > 0);
+  assert.equal(low.rowsDigest, normal.rowsDigest); assert.ok(normal.grants.length > 0);
   assert.ok(normal.grants.every((grant) => grant.mode === 'normal'));
-  for (const phase of ['split-prepare', 'rows-generation', 'bizop-import', 'bizop-compute', 'bizop-export']) {
+  for (const phase of ['split-prepare', 'rows-generation']) {
     assert.ok(low.grants.some((grant) => grant.profileId === `${phase}-low-v1`), phase);
   }
   // 512 MiB 仍足以容纳部分 IO 普通档；真实选档保持普通优先。

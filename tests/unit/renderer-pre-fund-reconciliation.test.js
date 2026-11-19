@@ -201,27 +201,19 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
 
     const ownerCalls = [];
     const application = createApplicationRecoveryComposition({
-      platform: { scanAndRecover() {}, recoverSource() {} },
-      bizOpModule: {
-        recovery: { bindPlatform() {}, run: async () => ({}), openObligations: () => false },
-        activation: { needed: () => false }
-      },
-      recoverPendingRuns: () => { ownerCalls.push('pending'); },
-      recoverLegacyBizOpRuns: () => { ownerCalls.push('legacy-biz'); },
+      platform: { scanAndRecover: async () => ({ sourceCount: 0, activeHoldCount: 0 }), recoverSource() {} },
       recoverPreFundRuns: () => { ownerCalls.push('pre-fund'); },
       recoverPosition: () => { ownerCalls.push('position'); },
       recoverToolboxVccPublications() {}, recoverVccImportTerminal() {}, reconcileVccImportLineage() {}
     });
+    // v3.2.20：BizOP / Pending / 旧版 BizOP 三个 owner 随模块下线移除，平台扫描改由 platform-scan 预检参与者执行。
     assert.deepEqual(application.archiveOwnerHooks().map((owner) => owner.ownerName), [
-      'biz-op-v327', 'Pending runs', 'Biz OP runs', 'Pre-fund runs', 'Position',
-      'Toolbox/VCC output publications', 'VCC import terminal'
+      'Pre-fund runs', 'Position', 'Toolbox/VCC output publications', 'VCC import terminal'
     ]);
     for (const owner of application.archiveOwnerHooks()) await owner.recover();
     for (const owner of application.archiveOwnerHooks()) await owner.recover();
-    assert.deepEqual(ownerCalls, ['pending', 'legacy-biz', 'pre-fund', 'position']);
+    assert.deepEqual(ownerCalls, ['pre-fund', 'position']);
     for (const [participant, recovery] of [
-      ['recoverPendingRuns', 'recoverPendingRunsBeforeInterruptedSweep'],
-      ['recoverLegacyBizOpRuns', 'recoverBizOpRunsBeforeInterruptedSweep'],
       ['recoverPreFundRuns', 'recoverPreFundRunsBeforeInterruptedSweep'],
       ['recoverPosition', 'recoverPositionPendingBeforeInterruptedSweep']
     ]) {

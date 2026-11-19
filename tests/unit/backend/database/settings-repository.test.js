@@ -38,20 +38,25 @@ test.afterEach(() => {
 // ========================================================================
 
 test.describe('ALL_MODULE_IDS / DEFAULT_ENABLED_MODULES 常量', () => {
-  test('ALL_MODULE_IDS 包含 13 个模块', () => {
-    assert.equal(settingsRepo.ALL_MODULE_IDS.length, 13);
+  test('ALL_MODULE_IDS 包含 9 个模块', () => {
+    assert.equal(settingsRepo.ALL_MODULE_IDS.length, 9);
     assert.ok(Object.isFrozen(settingsRepo.ALL_MODULE_IDS));
   });
 
   test('ALL_MODULE_IDS 包含既有模块、前置资金对账和重复入金匹配', () => {
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('statement-generator'));
-    assert.ok(settingsRepo.ALL_MODULE_IDS.includes('acquiring-bill-currency'));
     // v2.1.12 需求1：VCC业务OP计算模块注册（spec §8.1，修复 dev d2050b0 漏注册）
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('vcc-op-calc'));
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('vcc-financial-op'));
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('pre-fund-reconciliation'));
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('duplicate-inbound-match'));
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('position-reconciliation-process'));
+  });
+
+  test('v3.2.20 已下线的四个模块不再登记', () => {
+    for (const retired of ['biz-op-recon', 'pending-reconciliation', 'acquiring-bill-currency', 'bank-bu-recon']) {
+      assert.equal(settingsRepo.ALL_MODULE_IDS.includes(retired), false, retired);
+    }
   });
 
   test('前置资金对账默认不启用，由用户从功能收纳中打开', () => {
@@ -277,19 +282,26 @@ test.describe('getCurrentModule / setCurrentModule', () => {
   });
 
   test('合法 module ID set + get', () => {
-    settingsRepo.setCurrentModule(db, 'bank-bu-recon');
-    assert.equal(settingsRepo.getCurrentModule(db), 'bank-bu-recon');
+    settingsRepo.setCurrentModule(db, 'vcc-op-calc');
+    assert.equal(settingsRepo.getCurrentModule(db), 'vcc-op-calc');
   });
 
   test('非法 module ID → 抛错', () => {
     assert.throws(() => settingsRepo.setCurrentModule(db, 'invalid'), /Invalid current_module/);
   });
 
-  test('v2.1.4 bug 防护：bank-bu-recon / biz-op-recon / acquiring-bill-currency 全可 set', () => {
-    settingsRepo.setCurrentModule(db, 'bank-bu-recon');
-    settingsRepo.setCurrentModule(db, 'biz-op-recon');
-    settingsRepo.setCurrentModule(db, 'acquiring-bill-currency');
-    assert.equal(settingsRepo.getCurrentModule(db), 'acquiring-bill-currency');
+  test('全部已登记模块均可 set（v2.1.4 漏登记防护）', () => {
+    for (const id of settingsRepo.ALL_MODULE_IDS) {
+      settingsRepo.setCurrentModule(db, id);
+      assert.equal(settingsRepo.getCurrentModule(db), id);
+    }
+  });
+
+  test('v3.2.20 升级：库中遗留已下线模块 → 读取为 null 且不改写库值，set 已下线 id 抛错', () => {
+    settingsRepo.setSetting(db, 'current_module', 'biz-op-recon');
+    assert.equal(settingsRepo.getCurrentModule(db), null);
+    assert.equal(settingsRepo.getSetting(db, 'current_module'), 'biz-op-recon', '读取不改写，回退旧版仍可恢复');
+    assert.throws(() => settingsRepo.setCurrentModule(db, 'pending-reconciliation'), /Invalid current_module/);
   });
 
   test('DB 内非法值 → getCurrentModule null', () => {
@@ -396,6 +408,40 @@ test.describe('getEnabledModules / setEnabledModules', () => {
     settingsRepo.setSetting(db, 'enabled_modules', JSON.stringify(['statement-generator', 'invalid', 'bank-statement-process']));
     const r = settingsRepo.getEnabledModules(db);
     assert.deepEqual(r, ['statement-generator', 'bank-statement-process']);
+  });
+
+  test('v3.2.20 升级：启用列表中的已下线模块读取时忽略，库值不改写', () => {
+    const raw = JSON.stringify(['statement-generator', 'biz-op-recon', 'pending-reconciliation', 'acquiring-bill-currency', 'bank-bu-recon', 'vcc-op-calc']);
+    settingsRepo.setSetting(db, 'enabled_modules', raw);
+    assert.deepEqual(settingsRepo.getEnabledModules(db), ['statement-generator', 'vcc-op-calc']);
+    assert.equal(settingsRepo.getSetting(db, 'enabled_modules'), raw);
+  });
+
+  test('v3.2.20 升级：保存启用列表时原样保留已下线模块 id，回退旧版后启用状态不变', () => {
+    settingsRepo.setSetting(db, 'enabled_modules', JSON.stringify(['biz-op-recon', 'statement-generator', 'bank-bu-recon']));
+    settingsRepo.setEnabledModules(db, ['vcc-op-calc', 'statement-generator']);
+    assert.deepEqual(JSON.parse(settingsRepo.getSetting(db, 'enabled_modules')),
+      ['vcc-op-calc', 'statement-generator', 'biz-op-recon', 'bank-bu-recon']);
+    assert.deepEqual(settingsRepo.getEnabledModules(db), ['vcc-op-calc', 'statement-generator']);
+    assert.throws(() => settingsRepo.setEnabledModules(db, ['biz-op-recon']), /Invalid module id/);
+  });
+
+  test('v3.2.20 升级：只启用了已下线模块时只在内存中回退默认列表，库值不改写', () => {
+    const raw = JSON.stringify(['acquiring-bill-currency', 'pending-reconciliation']);
+    settingsRepo.setSetting(db, 'enabled_modules', raw);
+    assert.deepEqual(settingsRepo.getEnabledModules(db), [...settingsRepo.DEFAULT_ENABLED_MODULES]);
+    assert.equal(settingsRepo.getSetting(db, 'enabled_modules'), raw, '回退旧版后启用状态不变');
+    // 用户在新版保存「功能收纳」时按正常写回，已下线 id 原样保留在末尾。
+    settingsRepo.setEnabledModules(db, ['vcc-op-calc']);
+    assert.deepEqual(JSON.parse(settingsRepo.getSetting(db, 'enabled_modules')),
+      ['vcc-op-calc', 'acquiring-bill-currency', 'pending-reconciliation']);
+  });
+
+  test('已下线 id 与真正非法值混在一起时仍按原逻辑重置为默认列表（保留已下线 id）', () => {
+    settingsRepo.setSetting(db, 'enabled_modules', JSON.stringify(['acquiring-bill-currency', 'not-a-module']));
+    assert.deepEqual(settingsRepo.getEnabledModules(db), [...settingsRepo.DEFAULT_ENABLED_MODULES]);
+    assert.deepEqual(JSON.parse(settingsRepo.getSetting(db, 'enabled_modules')),
+      [...settingsRepo.DEFAULT_ENABLED_MODULES, 'acquiring-bill-currency']);
   });
 });
 

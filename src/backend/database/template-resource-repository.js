@@ -173,15 +173,20 @@ function appendChange(db, change) {
   insertChange(db, change);
 }
 
-function listChanges(db, limit = 200) {
+// resourceIds：只列出这些资源的记录（先筛选再限量）；不传时列出全部。
+//   v3.2.20 起服务层传入当前资源目录，已下线模块的旧记录保留在库中但不再展示（不会出现点不开的失效链接）。
+function listChanges(db, limit = 200, resourceIds = null) {
   const bounded = Math.max(1, Math.min(1000, Number(limit) || 200));
+  const ids = Array.isArray(resourceIds) ? [...new Set(resourceIds.map(String))] : null;
+  if (ids && ids.length === 0) return [];
   return db.prepare(`
     SELECT id, created_at AS createdAt, resource_id AS resourceId, action,
       from_label AS fromLabel, to_label AS toLabel, result, detail, app_version AS appVersion
     FROM template_resource_changes
+    ${ids ? `WHERE resource_id IN (${ids.map(() => '?').join(', ')})` : ''}
     ORDER BY id DESC
     LIMIT ?
-  `).all(bounded).map(plain);
+  `).all(...(ids || []), bounded).map(plain);
 }
 
 module.exports = {

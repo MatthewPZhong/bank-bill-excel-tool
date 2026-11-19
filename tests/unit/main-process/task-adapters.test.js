@@ -114,7 +114,7 @@ for (const channel of ['toolbox:merge', 'toolbox:split:export',
 
 test('其他 publication-only 领域仍透传 prepared hook，不扩大公共 receipt 确认范围', async () => {
   const afterTerminal = () => {};
-  const harness = createArchiveAwareOperationHarness({ channel: 'pending:error:export-report',
+  const harness = createArchiveAwareOperationHarness({ channel: 'pre-fund-reconciliation:export',
     runLifecycle: async () => ({ status: 'busy' }) });
   await harness.run({ prepare: () => ({ proceed: true, afterTerminal }), execute: () => {} });
   assert.equal(harness.lifecycleOptions[0].input.afterTerminal, afterTerminal);

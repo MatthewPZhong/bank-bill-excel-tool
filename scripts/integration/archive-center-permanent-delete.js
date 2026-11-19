@@ -26,8 +26,6 @@ const { verifyMigrationDeleteOverlap, verifyMigrationTargetIdentity } = require(
 const { createMigrationCloseMetadataFs } = require('../../tests/fixtures/archive-migration-close-metadata');
 const { verifyOrdinaryOwnerRecovery } = require('../../tests/fixtures/archive-permanent-delete-owner-recovery');
 const { verifyHardlinkRepublishRemainder } = require('../../tests/fixtures/archive-permanent-delete-hardlink-republish');
-const { verifyBizOpOwnerRecovery } = require('../../tests/fixtures/archive-permanent-delete-bizop-owner');
-const { verifyBizOpHistoricalOwnerBackfill } = require('../../tests/fixtures/archive-permanent-delete-bizop-history');
 const { verifyPositionFilePlanDeletion } = require('../../tests/fixtures/archive-permanent-delete-position-fileplan');
 const { READONLY_OWNER_REPLACEMENTS, verifyReadonlyOwnerIdentity } = require('../../tests/fixtures/archive-permanent-delete-readonly-owner');
 
@@ -485,24 +483,6 @@ async function legacyBatchWithUnfingerprintedBlob(key) {
     });
     await scenario('正常工具箱收尾在完成凭证前退出，原发布记录跨进程收口且不重发布', async () => {
       await recoverPublicationAfterRestart('crash-before-completion');
-    });
-    await scenario('BizOP 正式导出 ACK 临时失败，原 owner 恢复后 outbox 清空并完成初始化', async () => {
-      await verifyBizOpOwnerRecovery(directory, 'ack-failure');
-    });
-    await scenario('BizOP ACK 后完成凭证前进程退出，重启沿原输出身份完成收口', async () => {
-      await verifyBizOpOwnerRecovery(directory, 'after-ack-crash');
-    });
-    await scenario('BizOP 旧 binding 的业务恢复已关闭，仍可由原发布事实补齐完成凭证', async () => {
-      await verifyBizOpOwnerRecovery(directory, 'closed-legacy-binding');
-    });
-    await scenario('BizOP 未提交导出首次终态落库失败，原补偿完成后可重启及永久删除', async () => {
-      await verifyBizOpOwnerRecovery(directory, 'failed-terminal-write');
-    });
-    await scenario('BizOP 已关闭的未提交导出缺少完成凭证，沿原补偿事实恢复收口', async () => {
-      await verifyBizOpOwnerRecovery(directory, 'closed-compensated');
-    });
-    await scenario('BizOP 大量历史导出分批补齐凭证，重启续跑且真实未决任务继续受保护', async () => {
-      await verifyBizOpHistoricalOwnerBackfill(directory);
     });
     await scenario('Position 流式导入及账户确认共享来源，先保留共享副本再由最后批次清理', async () => {
       await verifyPositionFilePlanDeletion(directory, { engine: 'streaming' });

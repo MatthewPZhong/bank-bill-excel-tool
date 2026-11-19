@@ -20,6 +20,41 @@
 
 ## 未实施
 
+### B110（P3 · 已知问题）缺少收口凭证的历史批次会使到期清理整轮停在当页
+
+- **来源**：v3.2.20 Codex 第二轮审查（分支 `feat/retire-recon-modules`）；基线既有问题，与模块下线无关
+- **影响**：v3.2.9 引入任务收口凭证前生成、带 Task Run 的批次没有收口凭证，删除闸门返回 `ARCHIVE_DELETE_OWNER_COMPLETION_REQUIRED`；`runRetentionMaintenance` 遇到失败即以 `partial` 结束本轮，排在其后的到期批次（任何模块）本轮清理不到，只能手动删除前也同样被拒。已下线模块的此类批次已在本分支跳过（spec D3），保留模块仍按原行为
+- **关闭条件**：设计历史批次的收口凭证补登或到期清理跳过策略（不能仅凭终态放行删除），配回归
+- **目标版本**：未定
+
+### B109（P3 · 已知问题）已下线模块遗留的无归属文件重试通知会使该模块的到期批次都被跳过
+
+- **来源**：v3.2.20 Codex 第二轮审查（分支 `feat/retire-recon-modules`，[TechDoc §四](../changes/v3.2.20/feat/retire-recon-modules/techdoc.md)）
+- **影响**：旧版建批失败时可能留下只有 `moduleId`、`operationKey`、没有 owner 与目标批次的 outbox 文件重试通知。新版原样保留已下线模块的通知，而删除闸门无法判断它与哪个批次有关，把同模块每个批次都视为「仍有未收口通知」，到期清理每轮跳过这些批次（保留数据、不误删、不影响其他模块）。需同时满足旧版建批失败并在重试前升级，概率很低
+- **关闭条件**：按可验证的 operation / issuance 身份区分无关批次（改所有模块共用的删除归属判定，属资金红线，须人工复核）；或确认无用户受影响后关闭
+- **目标版本**：未定
+
+### B108（P3 · 已知问题）已下线的业务OP数据核对遗留未完成导出时，新版在处理前拒绝经统一发布流程的导出
+
+- **来源**：v3.2.20 Codex 审查修复（分支 `feat/retire-recon-modules`，[TechDoc §四](../changes/v3.2.20/feat/retire-recon-modules/techdoc.md)）；用户 2026-11-18 选择「只放行启动」（spec D4），第二轮审查后扩展到需人工恢复的记录（spec D5）
+- **影响**：仅当升级前 BizOP v327 导出在发布中途退出、且未先用旧版（v3.2.19 及更早）重新打开一次就升级时出现。新版能正常启动，遗留记录原样保留；但共享发布器对未处理记录失败关闭，工具箱、VCC财务OP 等经统一发布流程保存的导出会被拒绝（其他导出不受影响），错误提示写明处理方式：普通遗留记录先用旧版打开一次完成收尾；旧版已标为需人工恢复的记录，按活动日志中的恢复路径人工处理
+- **关闭条件**：确认没有用户受影响；或评估改共享发布器（新发布预检跳过已确认属于已下线模块的记录，并补目标路径重叠检查），配对应回归
+- **目标版本**：未定
+
+### B107（P3 · 改进）已下线模块的历史数据清理入口
+
+- **来源**：v3.2.20 下线四个对账模块（分支 `feat/retire-recon-modules`，[TechDoc](../changes/v3.2.20/feat/retire-recon-modules/techdoc.md)）；用户决策「历史数据保留不动」
+- **影响**：主库中这些模块的表与设置、`run-data/{acquiring-bill-currency,biz-op-recon,bank-bu-recon,biz-op-v327}/` 侧库与数据目录、`tool-data-pending.sqlite` 和模板用户版本继续占用磁盘，新版本没有清理入口（存档批次不展示，但已结束的批次到期照常清理，见 spec D3）
+- **关闭条件**：按用户反馈决定是否提供清理入口；提供时须先备份、只删已下线模块数据，并保证回退旧版的影响已告知用户
+- **目标版本**：未定
+
+### B105（P2 · 未做）v3.2.20 模块下线的 Windows 打包版验收与正常启动 CI 覆盖
+
+- **来源**：v3.2.20 下线四个对账模块（分支 `feat/retire-recon-modules`）。CI 中原 BizOP 打包验收步骤顺带覆盖了打包版正常启动，已随模块删除
+- **影响**：打包版的启动、模块切换（含升级前停在已下线模块的用户回到默认模块）、存档中心不展示已下线模块的历史批次、已结束批次到期清理、遗留业务OP导出记录不阻断启动，只由本机集成测试与单测 `retired-modules-upgrade-compat.js` 和渲染生命周期用例覆盖；CI 不再有与业务无关的打包版正常启动检查
+- **关闭条件**：Windows 安装包实机走通上述流程并记录；评估并决定是否补一个与业务无关的打包版正常启动 CI 检查
+- **目标版本**：v3.2.20（暂定）
+
 ### B103（P3 · 已知问题）回退到 v3.2.18 及更早安装包后，映射用到「逻辑取值」的模板会把候补字段当作需要拼接字段输出（资金口径 · 须人工复核）
 
 - **来源**：2026-11-17 分支 `feat/bill-split-fee-amount`（v3.2.19 迭代四）对账专项审查。映射行存 `mappedField='逻辑取值'`、`mappedFields` 为候补字段；旧版 `normalizeExportMappingRows` 把多字段映射一律当作需要拼接字段（`src/main.js`）。模板包已用 v8 让旧版整包拒绝，但同一数据库被旧安装包直接打开时没有版本闸门。「重复账单过滤」开关在旧版不生效（重复行照常输出）
@@ -65,18 +100,11 @@
   生成前拦截已能防止输出缺数据的账单
 - **推荐**：用户反馈拆分行难以定位失效字段，或模板交接出现被跳过的情况时再做
 
-### B93（P3 · 已知问题）集成脚本 `publication-legacy-concurrency` 在 Windows CI 偶发 `ADMISSION_TIMEOUT`，自动错误报告未保存
-
-- **来源**：2026-11-12 [PR #252](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/252) 首轮 Windows CI（`beff47c6`，run 43268052252，`release-check-integration (1/2)`）。下一候选 `dc4cab10` 的 PR 检查、合并后 main 检查（run 43280384959）与本机两次完整集成均通过
-- **影响**：`scripts/integration/publication-legacy-concurrency.js:134` 期望自动错误报告 `saved`，实际 `BIZOP_AUTO_REPORT_SAVE_FAILED`，`runExport` 抛 `ADMISSION_TIMEOUT`（排队等合表 Publisher 释放时准入超时）；脚本耗时 31 秒，与另一脚本并发运行。失败使 `smoke-test` 汇总失败、`build` 跳过
-- **现状**：该脚本、`src/main-process/background-execution/` 与 BizOP v327 在 v3.2.17 未改；未在本机复现。推断为 CI 负载下排队超过准入期限，未确认
-- **关闭条件**：查明负载下超时的等待链。属测试时序则调整测试的等待方式或期限（产品准入超时策略不变）；属产品问题则修复并补回归。之后 Windows CI 多次运行无复现
-- **目标版本**：未定
-
 ### B92（P2 · 未做）v3.2.17 新功能实机 GUI 检查与真实文件回归
 
 - **来源**：v3.2.17 发版（[release 记录](../changes/v3.2.17/release.md)）；本机开发版 GUI 受 BizOP 资源预检阻断，界面只由渲染生命周期用例与布局截图覆盖
 - **影响**：以下改动未在打包版界面与真实文件上走通：补录余额【导入余额文件】与余额确认（含准入拒绝时保留草稿）、「提取调拨订单对账ID」限定 FundType（含 DBS 例外）、核对上一账单日余额弹窗滚动与金额去尾差、网银账单弹窗说明收进标题、深色模式深浅度、主库空闲整理（Windows 上触发、用户操作中止、与导入互斥）
+- **现状**：v3.2.20 起 BizOP 资源预检随「业务OP数据核对」下线删除，本机开发版不再受此阻断（分支 `feat/retire-recon-modules`，见 B34 关闭记录）
 - **关闭条件**：Windows 打包版逐项走通上述界面与流程；FundType 条件用真实对账单抽查非 DBS 渠道非调拨行不再写对账ID、DBS 手续费归组不变；空闲整理在真实库副本上确认整理后主库与 WAL 大小及业务数据不变
 - **目标版本**：v3.2.20（暂定；v3.2.17 发布后补做；v3.2.18 未纳入，2026-11-16 发版时顺延；v3.2.19 未纳入，2026-11-18 发版时顺延）
 
@@ -411,14 +439,6 @@
 - **关闭条件**：确定口径并实现；或明确不支持同一账号跨模板，并在导入时提示（渠道内已由 v3.2.15 渠道合并覆盖）
 - **目标版本**：未定
 
-### B34（P3 · 已知问题）`scripts/render-modal-preview.js` 弹窗预览启动即失败
-
-- **来源**：2026-10-27 `feat/statement-balance-gap-prompt`（基线 `v3.2.12`）截图新弹窗时发现；改用现有的 `manual-balance-seed-dialog` 预览对照，同样失败
-- **影响**：预览进程在初始化阶段报“模块恢复尚未完成耐久接管，已阻止业务启动”，处理明细为 `biz-op-v327：[BIZOP_ACTIVATION_STARTUP_REQUIRED] 激活必须在持有单实例锁且业务窗口尚未开放的启动阶段执行`，弹出原生错误框后以 exit 1 退出，弹窗预览截图不可用。原生错误框需要人工点“好”，脚本在此期间一直不结束
-- **现状**：本分支没有改动启动、存档中心与业务 OP 激活路径，推断为原有问题。为避免再弹出原生错误框，未在纯 `v3.2.12` 上单独复现。`renderer-lifecycle` 集成（真实 Electron DOM + 生产工厂）不受影响
-- **关闭条件**：预览模式在隔离 userData 下能通过业务 OP 激活或安全跳过，`node scripts/render-modal-preview.js manual-balance-seed-dialog <文件名>` 正常出图
-- **目标版本**：未定
-
 ### B32（P2 · 已知问题）网银发生额计算余额：余额附加值跨导入重复叠加（非回归 · 资金口径）
 
 - **来源**：2026-10-27 v3.2.14 `feat/statement-balance-gap-prompt` 实现时按方案复现，在 `v3.2.12` 基线上同样存在
@@ -690,6 +710,23 @@
 
 ## 已完成
 
+### B106（P3 · 已知问题）BizOP v327 遗留发布 journal 会阻止新版启动
+
+- **来源**：v3.2.20 下线业务OP数据核对（[TechDoc §四](../changes/v3.2.20/feat/retire-recon-modules/techdoc.md)）
+- **影响**：仅当升级前 BizOP 导出在发布中崩溃、且未先用旧版（v3.2.19 及更早）重新启动一次就安装新版时出现。新版已无对应 publication owner，启动发布恢复按原 fail-closed 语义阻止启动；处理方式为先启动旧版完成恢复再升级
+- **关闭条件**：确认没有用户受影响，或为该 journal 补只读识别与收尾，并配升级兼容回归
+- **目标版本**：未定
+- **关闭**：v3.2.20（分支 `feat/retire-recon-modules`，Codex 审查修复，随本分支合入）。新增 `publication-recovery/retired-module-owner.js`：只识别 BizOP v327 导出的遗留发布记录并一律 defer，启动不再中止，journal / staging / 备份 / 目标原样保留。验证：单测 `publication-recovery-retired-owner.test.js`；集成 `retired-modules-upgrade-compat.js` 用真实应用启动通过，去掉该 owner 时以 `PUBLICATION_RECOVERY_OWNER_UNKNOWN` 失败。旧版收尾前导出被拒绝的剩余影响见 B108
+
+### B34（P3 · 已知问题）`scripts/render-modal-preview.js` 弹窗预览启动即失败
+
+- **来源**：2026-10-27 `feat/statement-balance-gap-prompt`（基线 `v3.2.12`）截图新弹窗时发现；改用现有的 `manual-balance-seed-dialog` 预览对照，同样失败
+- **影响**：预览进程在初始化阶段报“模块恢复尚未完成耐久接管，已阻止业务启动”，处理明细为 `biz-op-v327：[BIZOP_ACTIVATION_STARTUP_REQUIRED] 激活必须在持有单实例锁且业务窗口尚未开放的启动阶段执行`，弹出原生错误框后以 exit 1 退出，弹窗预览截图不可用。原生错误框需要人工点“好”，脚本在此期间一直不结束
+- **现状**：本分支没有改动启动、存档中心与业务 OP 激活路径，推断为原有问题。为避免再弹出原生错误框，未在纯 `v3.2.12` 上单独复现。`renderer-lifecycle` 集成（真实 Electron DOM + 生产工厂）不受影响
+- **关闭条件**：预览模式在隔离 userData 下能通过业务 OP 激活或安全跳过，`node scripts/render-modal-preview.js manual-balance-seed-dialog <文件名>` 正常出图
+- **目标版本**：未定
+- **关闭**：v3.2.20（分支 `feat/retire-recon-modules`，随本分支合入）。报错来源 BizOP v327 及其启动激活检查已随「业务OP数据核对」下线删除。2026-11-18 在本机（macOS）运行 `node scripts/render-modal-preview.js manual-balance-seed-dialog <文件名>`，退出码 0，截图正常（核对后已删除）
+
 ### B104（P4 · 已知问题）映射关系管理：表头有一列叫「逻辑取值」时，不支持逻辑取值的行（Currency、Balance、MerchantId 等）也列出这个同名选项，选中后无法保存
 
 - **来源**：2026-11-18 分支 `feat/bill-split-fee-amount`（v3.2.19 迭代四）Codex 第 18 轮审查 P3。`headerOptions` 把同名源列加入所有目标行；这些行没有【设置】，保存前检查却要求设置候补字段
@@ -888,4 +925,11 @@
 
 ## 已废弃
 
-（暂无）
+### B93（P3 · 已知问题）集成脚本 `publication-legacy-concurrency` 在 Windows CI 偶发 `ADMISSION_TIMEOUT`，自动错误报告未保存
+
+- **来源**：2026-11-12 [PR #252](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/252) 首轮 Windows CI（`beff47c6`，run 43268052252，`release-check-integration (1/2)`）。下一候选 `dc4cab10` 的 PR 检查、合并后 main 检查（run 43280384959）与本机两次完整集成均通过
+- **影响**：`scripts/integration/publication-legacy-concurrency.js:134` 期望自动错误报告 `saved`，实际 `BIZOP_AUTO_REPORT_SAVE_FAILED`，`runExport` 抛 `ADMISSION_TIMEOUT`（排队等合表 Publisher 释放时准入超时）；脚本耗时 31 秒，与另一脚本并发运行。失败使 `smoke-test` 汇总失败、`build` 跳过
+- **现状**：该脚本、`src/main-process/background-execution/` 与 BizOP v327 在 v3.2.17 未改；未在本机复现。推断为 CI 负载下排队超过准入期限，未确认
+- **关闭条件**：查明负载下超时的等待链。属测试时序则调整测试的等待方式或期限（产品准入超时策略不变）；属产品问题则修复并补回归。之后 Windows CI 多次运行无复现
+- **目标版本**：未定
+- **废弃**：v3.2.20（分支 `feat/retire-recon-modules`）。该脚本与它覆盖的 BizOP v327 导出及自动错误报告随「业务OP数据核对」下线删除，不再有复现入口。共享 Publisher 的准入超时如果在其他发布路径出现，另行登记

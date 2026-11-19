@@ -12,9 +12,7 @@ const XLSX = require('xlsx');
 const { createTemplateResourceService } = require('../../../src/main-process/template-resources/service');
 const { resolveFlowStatementStructure } = require('../../../src/main-process/flow-statement-structure');
 const { streamFlowFile } = require('../../../src/backend/vcc-op-calc-import/reader');
-const { FLOW_HEADERS, FLOW_DB_COLUMNS } = require('../../../src/backend/vcc-op-calc-db/columns');
-const { FLOW_REQUIRED_HEADERS } = require('../../../src/backend/biz-op-recon-db/columns');
-const { FLOW_COLUMNS } = require('../../../src/main-process/biz-op-v327/import-adapter');
+const { FLOW_HEADERS, FLOW_DB_COLUMNS, FLOW_REQUIRED_HEADERS } = require('../../../src/backend/vcc-op-calc-db/columns');
 const { createTemplateResourceStore } = require('../../helpers/template-resource-store');
 
 const ROOT = path.join(__dirname, '..', '..', '..');
@@ -50,10 +48,10 @@ async function prepare(service, filePath) {
 }
 const check = (prepared, label) => prepared.checks.find((item) => item.label === label);
 
-test('必用列覆盖业务 OP 新版的投影列与 VCC OP 发生额计算读取的列', () => {
-  const projected = { bill_date: '账单日期', bu_dept: '业务部门', company_entity: '公司主体', account_no: '账户编号',
-    account_type: '账户类型', currency: '币种', direction: '出入方向', recon_amount: '对账金额', flow_no: '流水单号' };
-  assert.deepEqual([...FLOW_COLUMNS].map((column) => projected[column]).sort(), [...FLOW_REQUIRED_HEADERS].sort());
+// v3.2.20：业务OP数据核对下线后，必用列清单沿用原口径（不收窄），并须覆盖 VCC OP 发生额计算读取的列。
+test('必用列沿用原 9 列口径并覆盖 VCC OP 发生额计算读取的列', () => {
+  assert.deepEqual([...FLOW_REQUIRED_HEADERS].sort(), ['业务部门', '公司主体', '出入方向', '对账金额', '币种', '流水单号',
+    '账单日期', '账户类型', '账户编号'].sort());
   for (const column of ['direction', 'recon_amount', 'bill_date_raw', 'currency']) {
     assert.ok(FLOW_REQUIRED_HEADERS.includes(FLOW_HEADERS[FLOW_DB_COLUMNS.indexOf(column)]), column);
   }
@@ -66,7 +64,7 @@ test('改名、删列、新增列：预检展示列对应，启用后解析为�
   assert.equal(prepared.verdict, 'warn', JSON.stringify(prepared.checks));
   assert.match(check(prepared, '列对应').detail, /按位置视为改名：第 13 列「拆分方式」→「拆分类型」/);
   assert.match(check(prepared, '列对应').detail, /导入后为空：操作人/);
-  assert.equal(check(prepared, '表头读取'), undefined, '业务 OP 与 VCC OP 计算的读法与模板一致');
+  assert.equal(check(prepared, '表头读取'), undefined, 'VCC OP 计算的读法与模板一致');
   assert.equal((await env.service.commitImport({ importToken: prepared.importToken, enable: true })).status, 'success');
   assert.deepEqual(await resolveFlowStatementStructure(env.service), { headers: FLOW_V2, versionLabel: 'V2' });
 
@@ -81,13 +79,13 @@ test('改名、删列、新增列：预检展示列对应，启用后解析为�
   });
 });
 
-test('必用列缺少、表头含布尔值（两种读法不一致）时预检不通过', async (t) => {
+test('必用列缺少、表头含布尔值（导入读法与模板不一致）时预检不通过', async (t) => {
   const env = setup(t);
   const missing = await prepare(env.service, env.write('流水-缺列.xlsx', [FLOW_HEADERS.filter((header) => header !== '账户类型')]));
   assert.equal(check(missing, '必用列').detail, '缺少 账户类型（程序按列名读取，区分大小写）');
   const boolean = await prepare(env.service, env.write('流水-布尔表头.xlsx', [[...FLOW_HEADERS, true]]));
   assert.equal(boolean.verdict, 'fail');
-  assert.match(check(boolean, '表头读取').detail, /^第 29 列「true」导入时读作「true \/ TRUE」/);
+  assert.match(check(boolean, '表头读取').detail, /^第 29 列「true」导入时读作「TRUE」/);
 });
 
 test('VCC OP 发生额计算按当前结构读取：行对应回内置 28 列；内置结构的文件被拒并附模板指引', async (t) => {

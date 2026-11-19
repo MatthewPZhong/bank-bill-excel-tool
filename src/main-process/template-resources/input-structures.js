@@ -32,10 +32,6 @@ const {
   RECON_RESULT_SHEET_NAME
 } = require('../../constants/recon-id-fix-fields');
 const {
-  REMOVED_PENDING_COLUMNS,
-  REMOVED_PENDING_REQUIRED_COLUMNS
-} = require('../../backend/pending-import/removed-reader');
-const {
   BANK_DEPOSIT_SIGNATURE,
   BANK_STATEMENT_SIGNATURE,
   FX_DELIVERY_SIGNATURE,
@@ -48,10 +44,9 @@ const {
 const { FT_RECON_FIELD_MAP } = require('../../constants/fund-transfer-recon-fields');
 const { BANK_STATEMENT_FIELDS, BANK_STATEMENT_REQUIRED_FIELDS } = require('../../constants/bank-statement-fields');
 const {
-  BIZ_OP_HEADERS,
-  FLOW_HEADERS: BIZ_OP_FLOW_HEADERS,
+  FLOW_HEADERS,
   FLOW_REQUIRED_HEADERS
-} = require('../../backend/biz-op-recon-db/columns');
+} = require('../../backend/vcc-op-calc-db/columns');
 const {
   PENDING_V1_HEADERS,
   REQUIRED_HEADERS: VCC_REQUIRED_HEADERS,
@@ -93,12 +88,6 @@ function positionSource(sourceType, { extraRequired = [] } = {}) {
 async function reconIdFixRuntimeHeaders(filePath) {
   const { readReconIdFixSheetHeaders } = require('../recon-id-fix-io');
   return readReconIdFixSheetHeaders(filePath, DOC_RECON_SHEETS.map((sheet) => sheet.name));
-}
-
-// 移除归档 Pending：与 removed-reader 相同的读法（第 1 个 sheet 首行，格式化文本、去首尾空格）。
-async function removedPendingRuntimeHeaders(filePath) {
-  const { readRemovedPendingHeaders } = require('../../backend/pending-import/removed-reader');
-  return [readRemovedPendingHeaders(filePath)];
 }
 
 // 银行账单处理链接表：与导入相同的两种读法——单表 .xlsx 走流式头部读取，其余走 SheetJS 全量读取。
@@ -206,30 +195,10 @@ async function bankStatementRuntimeHeaders(filePath) {
     ? sheetJs[index] ?? '' : `${sheetJs[index] ?? ''} / ${streamed[index] ?? ''}`))];
 }
 
-// 流水对账单：业务 OP 新版（单 Sheet 富工作簿，第 1 行）与 VCC OP 发生额计算（JSZip 流式解析首行）两种读法。
+// 流水对账单：与 VCC OP 发生额计算相同的读法（JSZip 流式解析首行）。
 async function flowStatementRuntimeHeaders(filePath) {
-  const { openSingleSheetRichWorkbook } = require('../../backend/xlsx/rich-workbook');
-  const { cellText } = require('../biz-op-v327/import-adapter');
   const { readFirstWorksheetHeaderRow } = require('../../backend/vcc-op-calc-import/reader');
-  let richRow = null;
-  const workbook = await openSingleSheetRichWorkbook(filePath, { memoryBudgetBytes: 32 * 1024 * 1024, lruMaxEntries: 8192 });
-  try {
-    await workbook.scan((row) => {
-      if (richRow || row.rowIndex !== 1) return;
-      const cells = new Map(row.cells.map((cell) => [cell.columnIndex, cell]));
-      const width = Math.max(0, ...row.cells.map((cell) => cell.columnIndex + 1));
-      richRow = Array.from({ length: width }, (_, index) => cellText(cells.get(index)));
-      while (richRow.length && richRow[richRow.length - 1] === '') richRow.pop();
-    });
-  } finally {
-    await workbook.close();
-  }
-  const streamed = await readFirstWorksheetHeaderRow(filePath);
-  const rich = richRow || [];
-  if (JSON.stringify(rich) === JSON.stringify(streamed)) return [rich];
-  const width = Math.max(rich.length, streamed.length);
-  return [Array.from({ length: width }, (_, index) => ((rich[index] ?? '') === (streamed[index] ?? '')
-    ? rich[index] ?? '' : `${rich[index] ?? ''} / ${streamed[index] ?? ''}`))];
+  return [await readFirstWorksheetHeaderRow(filePath)];
 }
 
 function vccSource(sourceType, builtinHeaders) {
@@ -287,17 +256,6 @@ const INPUT_STRUCTURES = Object.freeze({
   'position-transfer-orders': positionSource(SOURCE_TYPES.FUND_TRANSFER),
   // 设置 → 账户管理按「银行/通道简称」筛选渠道，该列与平盘读取的必用列一起视为必用列（平盘自身的读取口径不变）。
   'position-bank-accounts': positionSource(SOURCE_TYPES.BANK_ACCOUNT, { extraRequired: [BANK_ACCOUNT_CHANNEL_HEADER] }),
-  'removed-pending': Object.freeze({
-    group: null,
-    moduleKey: 'pending-removed',
-    storage: 'canonical',
-    sheets: Object.freeze([Object.freeze({
-      name: null,
-      builtinHeaders: () => [...REMOVED_PENDING_COLUMNS],
-      required: () => [...REMOVED_PENDING_REQUIRED_COLUMNS]
-    })]),
-    runtimeHeaders: removedPendingRuntimeHeaders
-  }),
   'doc-recon-unbalanced': Object.freeze({
     group: null,
     moduleKey: 'recon-id-fix-business',
@@ -324,17 +282,16 @@ const INPUT_STRUCTURES = Object.freeze({
     })]),
     runtimeHeaders: bankStatementRuntimeHeaders
   }),
-  // 业务 OP 新版与 VCC OP 发生额计算共用；业务 OP 账单（OP）不随版本变化，新结构不能与它相同（识别时 OP 优先）。
+  // VCC OP 发生额计算使用（v3.2.20 业务OP数据核对下线后为唯一使用方）。
   'flow-statement': Object.freeze({
     group: null,
     moduleKey: 'flow-statement',
     storage: 'canonical',
     sheets: Object.freeze([Object.freeze({
       name: null,
-      builtinHeaders: () => [...BIZ_OP_FLOW_HEADERS],
+      builtinHeaders: () => [...FLOW_HEADERS],
       required: () => [...FLOW_REQUIRED_HEADERS]
     })]),
-    fixedPeers: () => [{ name: '业务 OP 账单', headers: [...BIZ_OP_HEADERS] }],
     runtimeHeaders: flowStatementRuntimeHeaders
   })
 });

@@ -13,6 +13,9 @@ const {
   createArchiveRepository,
   normalizeLocalDate
 } = require('../../backend/database/archive-repository');
+const { isRetiredModuleId } = require('../../backend/database/retired-modules');
+
+const RETIRED_RETENTION_SKIP_CODES = new Set(['ARCHIVE_DELETE_OWNER_PENDING', 'ARCHIVE_DELETE_OWNER_COMPLETION_REQUIRED']);
 const {
   normalizeSourceSnapshot,
   sourceSnapshotFromStat,
@@ -3020,6 +3023,18 @@ class ArchiveService {
     return result;
   }
 
+  // v3.2.20：已下线模块的已结束批次照常到期清理；若该批次仍有原样保留给旧版的终态通知（ARCHIVE_DELETE_OWNER_PENDING），
+  //   或缺少收口凭证（ARCHIVE_DELETE_OWNER_COMPLETION_REQUIRED：v3.2.9 前的历史批次，或本版不代旧版确认的收口责任），
+  //   本轮跳过而不算失败，避免旧版现场让其余到期批次永远清不掉。跳过不删除任何数据。
+  async _deleteExpiredBatch(batch, options = {}) {
+    const result = await this.deleteBatch(batch.id, { origin: 'retention', ownerToken: options.ownerToken });
+    if (result && result.ok === false && RETIRED_RETENTION_SKIP_CODES.has(result.code) && isRetiredModuleId(batch.moduleId)) {
+      return { ok: true, skipped: true, status: 'retired-owner-pending', code: result.code,
+        batchId: Number(batch.id), metadataDeleted: false, fullyDeleted: false };
+    }
+    return result;
+  }
+
   async cleanupExpired(options = {}) {
     if (!this.initialized) {
       const ready = await this._run('prepareRetention', async () => ({ ok: true }));
@@ -3030,9 +3045,7 @@ class ArchiveService {
       const expired = this.repository.listExpiredBatches(asOfLocalDate);
       const results = [];
       for (const batch of expired) {
-        results.push(await this.deleteBatch(batch.id, {
-          origin: 'retention', ownerToken: options.ownerToken
-        }));
+        results.push(await this._deleteExpiredBatch(batch, options));
       }
       return {
         ok: results.every((result) => result.ok),
@@ -3761,14 +3774,16 @@ class ArchiveService {
     const asOfLocalDate = options.asOfLocalDate || localDateOf(options.now || this.now());
     const deletedBatchIds = [];
     const results = [];
+    const skippedBatchIds = new Set();
     while (true) {
       const candidates = this.repository.listExpiredBatches(asOfLocalDate)
+        .filter((batch) => !skippedBatchIds.has(Number(batch.id)))
         .slice(0, this.startupMaterializationBatchSize);
       const pageResults = [];
       for (const batch of candidates) {
-        pageResults.push(await this.deleteBatch(batch.id, {
-          origin: 'retention', ownerToken: options.ownerToken
-        }));
+        const result = await this._deleteExpiredBatch(batch, options);
+        if (result.skipped) skippedBatchIds.add(Number(batch.id));
+        pageResults.push(result);
       }
       const page = { candidates, pageResults };
       results.push(...page.pageResults);

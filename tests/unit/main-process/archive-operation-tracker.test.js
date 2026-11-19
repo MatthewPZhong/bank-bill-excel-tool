@@ -163,11 +163,9 @@ test.describe('stateless archive operation tracker', () => {
     assert.deepEqual(files[0].sourceSnapshot, snapshot);
   });
 
-  test('收单、场景与 Pending 导入从 prepared 解析已选择输入文件', () => {
+  // v3.2.20：收单与 Pending 导入随模块下线移出操作追踪，只保留场景导入。
+  test('场景导入从 prepared 解析已选择输入文件', () => {
     const cases = [
-      ['acquiringBillCurrency:importFlow', '/tmp/acquiring-flow.xlsx'],
-      ['acquiringBillCurrency:importBill', '/tmp/acquiring-bill.xlsx'],
-      ['pending:import:start', '/tmp/pending.xlsx'],
       ['scenarios:import-bundle-apply', '/tmp/scenario-bundle.json']
     ];
     for (const [channel, inputPath] of cases) {
@@ -251,24 +249,6 @@ test.describe('stateless archive operation tracker', () => {
     assert.deepEqual(calls[0].files.map((file) => [file.role, file.filePath]), [
       ['input', '/tmp/source.xlsx'],
       ['output', '/tmp/anomaly.xlsx']
-    ]);
-  });
-
-  test('Pending writer 保留 path 同时返回 filePath 后会追加真实成功输出', async () => {
-    const { calls, tracker } = createHarness();
-    await tracker.appendOperationFiles({
-      batchContext: batchContext(52),
-      channel: 'pending:diff:export-single',
-      result: {
-        status: 'success',
-        path: '/tmp/pending-diff.xlsx',
-        filePath: '/tmp/pending-diff.xlsx'
-      },
-      runtime: {}
-    });
-    assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0].files.map((file) => [file.role, file.filePath]), [
-      ['output', '/tmp/pending-diff.xlsx']
     ]);
   });
 

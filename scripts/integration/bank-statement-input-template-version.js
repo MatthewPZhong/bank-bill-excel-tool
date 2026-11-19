@@ -28,7 +28,7 @@ const { bankStatementSourceHeaders, resolveBankStatementStructure } = require('.
 const { createTemplateResourceService } = require('../../src/main-process/template-resources/service');
 const { createPositionReconciliationService } = require('../../src/main-process/position-reconciliation/service');
 const { createDuplicateInboundMatchService } = require('../../src/main-process/duplicate-inbound-match/service');
-const { BILL_HEADERS } = require('../../src/backend/acquiring-bill-currency-db/columns');
+const { BILL_HEADERS } = require('../../src/main-process/duplicate-inbound-match/document-statement-reader');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 // V2：「合并单号」按位置改名为「合并编号」，删除「分类人」，末尾新增一列；必用列与预置场景引用的列不动。

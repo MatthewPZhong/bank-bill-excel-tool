@@ -10,6 +10,8 @@ const PUBLICATION_ONLY_FILE_TASKS = new Map([
   ['vccFinancialOp:data-manager:export', 'vcc-financial-op'],
   ['vccFinancialOp:export:import-audit', 'vcc-financial-op'],
   ['vccFinancialOp:export:result', 'vcc-financial-op'],
+  // v3.2.20 已下线模块（Pending / 业务OP / 收单）的导出：不再产生新任务，仅保留识别，
+  //   供升级前异常退出遗留的发布 journal 按原 owner 证明收尾，避免启动恢复因 owner 未知而中止。
   ['pending:error:export-report', 'pending-reconciliation'],
   ['pending:diff:export-single', 'pending-reconciliation'],
   ['pending:diff:export-aggregate', 'pending-reconciliation'],

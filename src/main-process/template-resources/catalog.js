@@ -114,10 +114,6 @@ const TEMPLATE_RESOURCES = Object.freeze([
     id: 'refund-backfill', path: 'assets/中台退款订单回填模板.xlsx', type: 'output', readMode: 'generated',
     bindings: [binding('bank-statement-process', '中台退款订单回填输出')]
   }),
-  resource({
-    id: 'acquiring-diff', path: 'assets/收单币种校验导出差异表模版.xlsx', type: 'output', readMode: 'generated',
-    bindings: [binding('acquiring-bill-currency', '差异表')]
-  }),
   // 枚举
   resource({
     id: 'fund-type-enum', path: 'assets/FundType枚举值.xlsx', type: 'enum', readMode: 'cached',
@@ -177,26 +173,12 @@ const TEMPLATE_RESOURCES = Object.freeze([
     bindings: [binding('bank-statement-process', '链接表 · 导入未启用')], twin: 'fx-option-order' }),
   resource({ id: 'fx-option-order', path: 'assets/外汇期权订单.xlsx', type: 'input', readMode: 'disabled', headerRow: 2,
     bindings: [binding('bank-statement-process', '链接表 · 导入未启用')], twin: 'fx-option' }),
-  resource({ id: 'pending', path: 'assets/Pending.xlsx', type: 'input', readMode: 'sample',
-    bindings: [binding('pending-reconciliation', '导入结构参考')] }),
-  // 移除归档 Pending：导入时按当前版本表头识别，入库前对应回内置 46 列（前 28 列为必用列）。
-  resource({ id: 'removed-pending', path: 'assets/移除归档Pending账单.xlsx', type: 'input', readMode: 'runtime',
-    bindings: [binding('pending-reconciliation', '移除归档导入 · 识别结构', 'runtime')],
-    replace: REPLACEABLE, cache: '不缓存，每次导入时读取',
-    failure: '当前版本缺失、被修改或不兼容时导入中止，提示恢复默认或重新导入',
-    effect: '下次导入；只认当前版本结构，入库与导出仍按内置 46 列',
-    twin: 'vcc-removed-pending', twinNote: SAME_EXPORT_NOTE }),
-  resource({ id: 'pending-data', path: 'assets/Pending数据管理.xlsx', type: 'input', readMode: 'sample',
-    bindings: [binding('bank-bu-recon', '导入结构参考')] }),
-  resource({ id: 'biz-op-bill', path: 'assets/业务OP账单.xlsx', type: 'input', readMode: 'sample',
-    bindings: [binding('biz-op-recon', '导入结构参考')] }),
-  // 流水对账单：业务 OP 导入任务开始时按当前版本识别并冻结，数据集记录导入时结构（导出重读原件按它对应回内置列）；
-  //   VCC OP 发生额计算每次扫描时按当前版本识别。入库、计算与导出仍按内置 28 列。
+  // 流水对账单：VCC OP 发生额计算每次扫描时按当前版本识别。计算与导出仍按内置 28 列。
   resource({ id: 'flow-statement', path: 'assets/流水对账单.xlsx', type: 'input', readMode: 'runtime',
-    bindings: [binding('biz-op-recon', '导入 · 识别结构', 'runtime'), binding('vcc-op-calc', '导入扫描 · 识别结构', 'runtime')],
-    replace: REPLACEABLE, cache: '不缓存，每次导入或扫描时读取',
-    failure: '当前版本缺失、被修改或不兼容时导入 / 扫描中止，提示恢复默认或重新导入',
-    effect: '下次导入或扫描；已导入的业务 OP 数据按导入时结构重读原件，入库、计算与导出仍按内置 28 列' }),
+    bindings: [binding('vcc-op-calc', '导入扫描 · 识别结构', 'runtime')],
+    replace: REPLACEABLE, cache: '不缓存，每次扫描时读取',
+    failure: '当前版本缺失、被修改或不兼容时扫描中止，提示恢复默认或重新导入',
+    effect: '下次扫描；计算与导出仍按内置 28 列' }),
   // 单据对账（C4 单据模式）：导入时按当前版本 4 张工作表的表头识别；场景配置的主 / 从字段下拉随当前版本。
   resource({ id: 'doc-recon-unbalanced', path: 'assets/单据对账导出不平.xlsx', type: 'input', readMode: 'runtime',
     bindings: [binding('recon-id-fix', '导入识别结构 · 4 张 Sheet；场景字段下拉', 'runtime')],
@@ -211,9 +193,7 @@ const TEMPLATE_RESOURCES = Object.freeze([
   // 清结算银行账户表：平盘链接原始表与「设置 → 账户管理」共用同一份识别结构（账户管理另需「银行/通道简称」作为渠道列）。
   resource({ id: 'position-bank-accounts', path: 'assets/清结算银行账户表.xlsx', type: 'input', ...POSITION_INPUT_STRUCTURE,
     bindings: [...POSITION_INPUT_STRUCTURE.bindings, binding('bank-account-management', '账户管理 · 导入识别结构', 'runtime')] }),
-  // 与 Pending 对账「移除归档Pending账单」是同一份系统导出（46 列），各自独立版本。
-  resource({ id: 'vcc-removed-pending', path: 'assets/VCC财务OP校验/VCC_移除归档Pending账单.xlsx', type: 'input', ...VCC_INPUT_STRUCTURE,
-    twin: 'removed-pending', twinNote: SAME_EXPORT_NOTE }),
+  resource({ id: 'vcc-removed-pending', path: 'assets/VCC财务OP校验/VCC_移除归档Pending账单.xlsx', type: 'input', ...VCC_INPUT_STRUCTURE }),
   resource({ id: 'vcc-recharge-refund', path: 'assets/VCC财务OP校验/VCC充值清退明细.xlsx', type: 'input', ...VCC_INPUT_STRUCTURE }),
   resource({ id: 'vcc-fee-fx', path: 'assets/VCC财务OP校验/VCC费用及换汇明细.xlsx', type: 'input', ...VCC_INPUT_STRUCTURE }),
   resource({ id: 'vcc-channel', path: 'assets/VCC财务OP校验/VCC通道明细.xlsx', type: 'input', ...VCC_INPUT_STRUCTURE }),

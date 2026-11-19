@@ -15,9 +15,6 @@ const {
 } = require('../../../src/main-process/execution-descriptors/composition');
 const { normalizeFilePlanV1, artifactManifestFromFilePlan } = require('../../../src/main-process/archive-center/file-plan');
 const { createArchiveRepository } = require('../../../src/backend/database/archive-repository');
-const runDataStore = require('../../../src/backend/run-data-store');
-const acquiringRunRepo = require('../../../src/backend/acquiring-bill-currency-db/run-repository');
-const acquiringRunData = require('../../../src/main-process/acquiring-bill-currency-run-data');
 
 const crash = () => { throw Object.assign(new Error('模拟进程退出边界'), { code: 'SIMULATED_CRASH' }); };
 const rowCount = (db, table) => Number(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
@@ -43,7 +40,7 @@ async function fixture(t, allocation = 'eager', options = {}) {
   });
   service.runDeleteWithOwnerGuard = (id, operation, payload) => controller.runDeleteWithOwnerGuard(id, operation, payload);
   const channel = options.channel || (allocation === 'eager' ? 'template:import' : 'monthly-balance:assemble');
-  const policy = createTaskPolicyRegistry().require(channel);
+  const policy = options.policy || createTaskPolicyRegistry().require(channel);
   assert.equal(policy.allocation, allocation);
   const sourcePath = path.join(directory, 'input.csv');
   fs.writeFileSync(sourcePath, '日期,金额\n2026-09-12,1\n');
@@ -237,8 +234,9 @@ test('旧批次重新 reserve 和 schema 幂等升级均不补造无后处理责
   /终态收口凭证缺少实例或终态/);
 });
 
-async function interruptedAcquiringFixture(t) {
-  const f = await fixture(t, 'eager', { channel: 'acquiringBillCurrency:run' });
+// 通用 batch 型文件任务的原 owner 中断与恢复（v3.2.20 前借用收单对账通道，模块下线后改用平盘结果回导通道）。
+async function interruptedBatchFixture(t) {
+  const f = await fixture(t, 'eager', { channel: 'position-reconciliation:run:import-result' });
   await assert.rejects(f.run({ boundary: 'running' }), { code: 'SIMULATED_CRASH' });
   await f.controller.initialize();
   const owner = f.owner();
@@ -247,8 +245,8 @@ async function interruptedAcquiringFixture(t) {
   return { ...f, originalOwner: owner, manifestIdentity };
 }
 
-test('Acquiring 原 owner 合法 resume 原子撤销新协议 interrupted proof，再成功完成原批次', async (t) => {
-  const f = await interruptedAcquiringFixture(t);
+test('batch 文件任务原 owner 合法 resume 原子撤销新协议 interrupted proof，再成功完成原批次', async (t) => {
+  const f = await interruptedBatchFixture(t);
   const context = f.originalOwner.batchContext;
   const resumed = await f.service.beginFileTaskRecovery(context, { manifestIdentity: f.manifestIdentity });
   assert.equal(resumed.ok, true, JSON.stringify(resumed));
@@ -267,7 +265,7 @@ test('Acquiring 原 owner 合法 resume 原子撤销新协议 interrupted proof�
 
 for (const boundary of ['insert-responsibility', 'delete-proof']) {
   test(`合法 resume 在 ${boundary} 失败时回滚 Task、proof 和新责任，可原样重试`, async (t) => {
-    const f = await interruptedAcquiringFixture(t);
+    const f = await interruptedBatchFixture(t);
     const originalProof = f.service.repository.getOwnerTerminalCompletion(f.originalOwner);
     f.db.exec(boundary === 'insert-responsibility'
       ? `CREATE TRIGGER block_resume BEFORE INSERT ON archive_file_task_owner_recovery
@@ -287,7 +285,7 @@ for (const boundary of ['insert-responsibility', 'delete-proof']) {
 
 for (const mismatch of ['legacy-proof', 'different-route', 'different-instance', 'manifest', 'owner']) {
   test(`resume 不撤销 ${mismatch} 的证明、不重新登记责任`, async (t) => {
-    const f = await interruptedAcquiringFixture(t);
+    const f = await interruptedBatchFixture(t);
     let context = f.originalOwner.batchContext;
     let manifestIdentity = f.manifestIdentity;
     if (mismatch === 'legacy-proof') f.db.exec("UPDATE archive_owner_terminal_completions SET recovery_kind = ''");
@@ -317,76 +315,36 @@ test('旧 completion schema 加 provenance 列幂等，旧普通证明不被标�
   assert.equal(rowCount(f.db, 'archive_file_task_owner_recovery'), 0);
 });
 
-for (const boundary of ['running', 'after-terminal', 'recovered']) {
-  for (const failure of ['side-db', 'json', 'batch-context', 'inventory']) {
-    test(`Acquiring ${boundary} 的 ${failure} 恢复证据不可读时，启动和删除保持原 owner`, async (t) => {
-      const f = await fixture(t, 'eager', { channel: 'acquiringBillCurrency:run' });
-      await assert.rejects(f.run({ boundary: boundary === 'recovered' ? 'running' : boundary }), { code: 'SIMULATED_CRASH' });
-      if (boundary === 'recovered') await f.controller.initialize();
-      const owner = f.owner();
-      const originalProof = f.service.repository.getOwnerTerminalCompletion(owner);
-      if (boundary === 'recovered') assert.equal(originalProof.terminalStatus, 'interrupted');
-      else assert.equal(originalProof, null);
-      const originalTask = f.service.repository.getTaskRun(owner.batchContext.taskRunId);
-      const originalBatch = f.service.repository.getBatch(owner.batchContext.batchId);
-      const module = runDataStore.MODULE_ACQUIRING;
-      const monthKey = '2026-09';
-      const sidePath = runDataStore.sideDbPath(f.directory, module, monthKey);
-      const sideDb = runDataStore.openSideDb(f.directory, module, monthKey);
-      const inserted = sideDb.prepare(`INSERT INTO acquiring_bill_currency_runs
-        (month_key, total_bill_rows, matched_rows, mismatch_rows, unmatched_rows, status)
-        VALUES (?, 1, 1, 0, 0, 'failed')`).run(monthKey);
-      acquiringRunRepo.setRunChunkProgress(sideDb, {
-        runId: Number(inserted.lastInsertRowid), lastCompletedChunkIndex: 0, totalChunks: 2,
-        status: 'partial', chunkSize: 5000, batchContext: owner.batchContext
-      });
-      const originalProgress = sideDb.prepare('SELECT chunk_progress FROM acquiring_bill_currency_runs').get().chunk_progress;
-      if (failure === 'json') sideDb.exec("UPDATE acquiring_bill_currency_runs SET chunk_progress = '{'");
-      if (failure === 'batch-context') {
-        const progress = JSON.parse(originalProgress);
-        progress.batchContext.operationKey = '';
-        sideDb.prepare('UPDATE acquiring_bill_currency_runs SET chunk_progress = ?').run(JSON.stringify(progress));
-      }
-      sideDb.close();
-      if (failure === 'side-db') {
-        fs.renameSync(sidePath, `${sidePath}.preserved`);
-        fs.writeFileSync(sidePath, '模拟已发现的侧库暂时无法读取');
-      }
-      let directoryUnavailable = failure === 'inventory';
-      const readdirSync = fs.readdirSync;
-      t.mock.method(fs, 'readdirSync', (directory, ...args) => {
-        if (directoryUnavailable && directory === runDataStore.moduleDir(f.directory, module)) {
-          throw Object.assign(new Error('模拟侧库目录暂时不可读'), { code: 'EACCES' });
-        }
-        return readdirSync(directory, ...args);
-      });
-      // 与默认 Main 相同的保护提供者；调用失败必须传到 Controller，不能视作空清单。
-      f.controller.getProtectedInterruptedTaskBatchIds = () => ({
-        batchIds: acquiringRunData.listRecoverableArchiveBatchIds({ userDataDir: f.directory }), taskRunIds: []
-      });
-      await assert.rejects(f.controller.initialize(), { code: 'ARCHIVE_STARTUP_RECOVERY_EVIDENCE_UNAVAILABLE' });
-      assert.equal((await f.controller.prepareDeleteBatch(owner.batchContext.batchId)).code, 'ACQUIRING_RUN_RECOVERY_EVIDENCE_UNAVAILABLE');
-      assert.equal((await f.service.cleanupExpired({ asOfLocalDate: '2099-01-01' })).deletedBatchCount, 0);
-      assert.equal(f.service.repository.getTaskRun(owner.batchContext.taskRunId).status, originalTask.status);
-      assert.equal(f.service.repository.getBatch(owner.batchContext.batchId).taskStatus, originalBatch.taskStatus);
-      assert.equal(f.service.repository.getBatch(owner.batchContext.batchId).archiveStatus, originalBatch.archiveStatus);
-      assert.deepEqual(f.service.repository.getOwnerTerminalCompletion(owner), originalProof);
-      assert.equal(rowCount(f.db, 'archive_file_task_owner_recovery'), boundary === 'recovered' ? 0 : 1);
-      assert.equal(rowCount(f.db, 'archive_cleanup_jobs'), 0);
-      directoryUnavailable = false;
-      if (failure === 'side-db') {
-        fs.unlinkSync(sidePath);
-        fs.renameSync(`${sidePath}.preserved`, sidePath);
-      } else if (failure === 'json' || failure === 'batch-context') {
-        const restored = new DatabaseSync(sidePath);
-        restored.prepare('UPDATE acquiring_bill_currency_runs SET chunk_progress = ?').run(originalProgress);
-        restored.close();
-      }
-      assert.deepEqual(acquiringRunData.listRecoverableArchiveBatchIds({ userDataDir: f.directory }), [owner.batchContext.batchId]);
-      assert.equal((await f.controller.initialize()).ok, true);
-      assert.deepEqual(f.service.repository.getOwnerTerminalCompletion(owner), originalProof);
-      assert.equal((await f.controller.prepareDeleteBatch(owner.batchContext.batchId)).code, 'ARCHIVE_DELETE_OWNER_PENDING');
-      assert.equal(rowCount(f.db, 'archive_file_task_owner_recovery'), boundary === 'recovered' ? 0 : 1);
-    });
-  }
-}
+// v3.2.20 已下线模块：启动不代旧版确认其 File Task 原收口责任、不重放其流程绑定意图（原样保留给回退旧版）；
+//   该批次因此缺少收口凭证，到期清理跳过它且不算失败，不拖住其余批次。
+test('已下线模块：启动保留原收口责任与流程绑定意图，到期清理跳过缺凭证批次且整轮不失败', async (t) => {
+  const policy = { ...createTaskPolicyRegistry().require('template:import'),
+    scopeId: 'bank-bu-recon', moduleCode: 'BANKBU', moduleName: '月度银行对账单BU回填校验' };
+  const f = await fixture(t, 'eager', { policy });
+  await assert.rejects(f.run({ boundary: 'after-terminal' }), { code: 'SIMULATED_CRASH' });
+  const owner = f.owner();
+  assert.equal(owner.batchContext.moduleId, 'bank-bu-recon');
+  assert.equal(f.service.repository.getTaskRun('owner-task').status, 'succeeded');
+  const identity = { moduleId: 'bank-bu-recon', identityType: 'business-run-id', parentRunId: owner.batchContext.parentRunId };
+  f.service.repository.persistTaskFlowBindIntent({ ...identity, identityValue: 'bu-task-flow', sourceTaskRunId: 'owner-task' });
+  f.service.repository.persistFlowBindIntent({ ...identity, identityValue: 'bu-batch-flow', sourceBatchId: owner.batchContext.batchId });
+  const evidence = () => Object.fromEntries(['archive_file_task_owner_recovery', 'archive_owner_terminal_completions',
+    'archive_task_flow_bind_intents', 'archive_flow_bind_intents', 'archive_flow_anchors']
+    .map((table) => [table, f.db.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()]));
+  const before = evidence();
+  assert.equal(before.archive_file_task_owner_recovery.length, 1);
+  assert.equal(before.archive_task_flow_bind_intents.length + before.archive_flow_bind_intents.length, 2);
+
+  assert.equal((await f.controller.initialize()).ok, true);
+  assert.deepEqual(evidence(), before, '原收口责任、流程绑定意图与锚点原样保留');
+  assert.equal(f.service.repository.getOwnerTerminalCompletion(owner), null);
+
+  f.db.prepare('UPDATE archive_batches SET retention_until = ? WHERE id = ?').run('2026-01-01', owner.batchContext.batchId);
+  const retention = await f.service.runRetentionMaintenance({ asOfLocalDate: '2026-11-18' });
+  assert.equal(retention.ok, true, JSON.stringify(retention));
+  assert.equal(retention.status, 'complete');
+  assert.equal(f.outboxStore.list().length, 0);
+  assert.deepEqual(retention.results.map((item) => [item.skipped, item.code]), [[true, 'ARCHIVE_DELETE_OWNER_COMPLETION_REQUIRED']]);
+  assert.ok(f.service.repository.getBatch(owner.batchContext.batchId), '缺收口凭证的旧版批次不在新版清理');
+  assert.deepEqual(evidence(), before);
+});

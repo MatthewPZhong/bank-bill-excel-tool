@@ -1321,7 +1321,9 @@ test('产品 Main 真实等待 Recovery Coordinator 后才 initializeArchiveCent
   assert.match(initializeRecovery, /createApplicationRecoveryComposition\(\{\s*platform: coordinator/);
   assert.match(initializeRecovery, /await applicationRecoveryCoordinator\.preflight\(\)/);
   const composition = fs.readFileSync(path.join(ROOT, 'src/main-process/application-recovery/composition.js'), 'utf8');
-  assert.match(composition, /bizOpModule\.recovery\.bindPlatform\(coordinator\.platformFacade\)/);
+  // v3.2.20：平台扫描由 platform-scan 预检参与者执行（原由 BizOP 恢复参与者绑定平台后触发）。
+  assert.match(composition, /bindPlatform\(coordinator\.platformFacade\)/);
+  assert.match(composition, /await platformFacade\.scanAndRecover\(\)/);
   assert.match(body, /applicationRecoveryCoordinator\.completeArchiveInitialization\(initialized\)/);
 });
 

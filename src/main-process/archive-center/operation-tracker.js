@@ -17,12 +17,8 @@ function moduleDescriptor(scopeKey) {
 const MODULES = Object.freeze({
   statement: moduleDescriptor('STATEMENT'),
   newAccount: moduleDescriptor('NEWACCOUNT'),
-  pending: moduleDescriptor('PENDING'),
   bankStatement: moduleDescriptor('FUNDRECON'),
   reconIdFix: moduleDescriptor('RECONFIX'),
-  bankBu: moduleDescriptor('BANKBU'),
-  bizOp: moduleDescriptor('BIZOP'),
-  acquiring: moduleDescriptor('ACQUIRING'),
   vcc: moduleDescriptor('VCCOP'),
   vccFinancial: moduleDescriptor('VCCFINOP'),
   toolbox: moduleDescriptor('TOOLBOX'),
@@ -41,8 +37,6 @@ const FILE_CHANNELS = new Set(
 );
 
 const SELECTED_INPUT_CHANNELS = new Set([
-  'acquiringBillCurrency:importBill',
-  'acquiringBillCurrency:importFlow',
   'bank-statement:batch-import',
   'bank-statement:import',
   'big-account:import-bank-info',
@@ -50,7 +44,6 @@ const SELECTED_INPUT_CHANNELS = new Set([
   'file:import',
   'gateway-recon:import',
   'linked-table:import',
-  'pending:import:start',
   'position-reconciliation:bank:apply-import',
   'position-reconciliation:run:import-result',
   'position-reconciliation:source:apply-import',
@@ -67,40 +60,23 @@ const SELECTED_INPUT_CHANNELS = new Set([
 ]);
 
 const PAYLOAD_INPUT_CHANNELS = new Set([
-  'acquiringBillCurrency:importBill',
-  'acquiringBillCurrency:importFlow',
-  'bankBuRecon:import:run',
-  'bizOpRecon:import:run-biz-op',
-  'bizOpRecon:import:run-flow',
-  'pending:import:start',
-  'pending:removed:import',
   'scenarios:import-bundle-apply',
   'vccOpCalc:import:scan',
   'vccFinancialOp:import:apply'
 ]);
 
 const RESULT_OUTPUT_KEYS = Object.freeze({
-  'acquiringBillCurrency:export': ['filePath', 'savedPath', 'savePath'],
-  'acquiringBillCurrency:run': ['diffFilePath', 'reportFilePath'],
-  'acquiringBillCurrency:run:resume': ['diffFilePath', 'reportFilePath'],
   'bank-statement:export': [
     'mainFilePath',
     'hitRowsReportPath',
     'platformCleanupPath',
     'refundBackfillPath'
   ],
-  'bankBuRecon:export:aggregate': ['filePath', 'savedPath'],
-  'bankBuRecon:export:single': ['filePath', 'savedPath'],
-  'bizOpRecon:export:date': ['filePath', 'savedPath'],
-  'bizOpRecon:export:date-range': ['filePath', 'savedPath'],
   'duplicate-inbound-match:export': ['filePath', 'savePath'],
   'file:export-balance': ['filePath', 'savedPath'],
   'file:export-detail': ['filePath', 'savedPath'],
   'monthly-balance:export': ['filePath', 'savedPath'],
   'new-account:export': ['filePath', 'savedPath'],
-  'pending:diff:export-aggregate': ['filePath', 'savedPath'],
-  'pending:diff:export-single': ['filePath', 'savedPath'],
-  'pending:error:export-report': ['filePath', 'savedPath'],
   'position-reconciliation:bank:export': ['filePath'],
   'position-reconciliation:linked:export': ['filePath'],
   'position-reconciliation:raw:export': ['filePath'],

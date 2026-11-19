@@ -4,19 +4,26 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { FileValidationError } = require('../../backend/file-service/common');
-const { BILL_HEADERS } = require('../../backend/acquiring-bill-currency-db/columns');
 const {
   openZipWithEntries,
   loadSharedStrings,
-  SHARED_STRINGS_ENTRY_NAME
-} = require('../../backend/acquiring-bill-currency-import/reader');
+  SHARED_STRINGS_ENTRY_NAME,
+  streamSheetRowsHandRolled
+} = require('./document-xlsx-stream');
 const {
   locateSheets,
   WORKBOOK_ENTRY_NAME
 } = require('../../backend/xlsx/zip-reader');
-const {
-  streamSheetRowsHandRolled
-} = require('../../backend/acquiring-bill-currency-import/reader-handrolled');
+
+// 单据对账单标准表头（26 列）。v3.2.20 下线收单单据币种校验时由
+//   backend/acquiring-bill-currency-db/columns.js 的 BILL_HEADERS 逐字迁入。
+const BILL_HEADERS = Object.freeze([
+  '账单日期', 'originBillBizId', 'ReconBillBizId', '公司主体', '业务部门', '对手部门',
+  '订单创建来源', '财务BU', '账单类型', '单据类型', '业务子类型', '交易类型',
+  '对账子类型', '单据状态', '主对账Id', '业务订单号', '用户编号', '账户号',
+  '对账金额', '对账币种', '账户类型', 'valueDate', 'channel', 'remark',
+  '创建时间', '完成时间'
+]);
 
 const DOCUMENT_FIELDS = Object.freeze({
   businessOrderNo: '业务订单号',
@@ -181,6 +188,7 @@ async function streamDocumentStatement(filePath, { onRow, onProgress } = {}) {
 }
 
 module.exports = {
+  BILL_HEADERS,
   DOCUMENT_FIELDS,
   DOCUMENT_FIELD_INDICES,
   DOCUMENT_VALUE_COLUMN_WHITELIST,

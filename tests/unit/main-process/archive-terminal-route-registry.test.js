@@ -2,24 +2,18 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { DatabaseSync } = require('node:sqlite');
 const {
   assertTerminalRouteRegistry, createTerminalRouteRegistry
 } = require('../../../src/main-process/archive-center/terminal-route-registry');
 const { createArchiveCenterController } = require('../../../src/main-process/archive-center/controller');
 const { createTestTerminalRouteRegistry } = require('../../helpers/archive-terminal-routes');
 const {
-  createPendingTerminalRouteRegistration
-} = require('../../../src/main-process/pending-archive-lineage');
-const {
   createPreFundTerminalRouteRegistration
 } = require('../../../src/main-process/pre-fund-archive-lineage');
 const {
-  createBizOpRunTerminalRouteRegistration
-} = require('../../../src/main-process/biz-op-recon-run-data');
+  createRetiredTerminalRouteRegistrations, RETIRED_TERMINAL_ROUTES
+} = require('../../../src/main-process/archive-center/retired-terminal-routes');
 const { createPositionTaskOwner } = require('../../../src/main-process/position-reconciliation/task-owner');
-const { runMigrations } = require('../../../src/backend/pending-db/migrations');
-const diffRepository = require('../../../src/backend/pending-db/diff-repository');
 
 function context(taskRunId = 'original-task') {
   return { taskRunId, taskKey: 'test:run', moduleId: 'test', parentRunId: 'original-parent',
@@ -31,8 +25,6 @@ function operationRecord(taskRunId = 'original-task') {
 
 for (const [route, field, label] of [
   ['position-reconciliation', 'operationToken', 'Position'],
-  ['pending-run', 'taskRunId', 'Pending'],
-  ['biz-op-run', 'taskRunId', 'Biz OP'],
   ['pre-fund-run', 'taskRunId', 'Pre-fund']
 ]) {
   test(`${route} 历史 payload trim/裁剪后冻结，空身份保留 TypeError`, () => {
@@ -102,27 +94,6 @@ test('Controller 初始化拒绝未冻结/伪造 registry，无注册时不会�
     /不支持的任务终态/);
 });
 
-test('Pending live/replay 使用真实 receipt，实际 owner 错配不 ACK，重复回放幂等', async (t) => {
-  const db = new DatabaseSync(':memory:');
-  t.after(() => db.close());
-  runMigrations(db);
-  diffRepository.createRun(db, { upperMonth: '2026-07', lowerMonth: '2026-08', ruleSnapshot: {},
-    archiveReceipt: { archiveContractVersion: 1, archiveTaskRunId: 'original-task' } });
-  const registry = createTerminalRouteRegistry([createPendingTerminalRouteRegistration({ getDb: () => db })]);
-  const route = { route: 'pending-run', taskRunId: 'original-task' };
-  const hook = registry.createAfterTerminal(route);
-  await assert.rejects(hook({ context: context('wrong-task'), terminalStatus: 'succeeded' }), /owner/);
-  assert.equal(diffRepository.getRunByArchiveTaskRunId(db, 'original-task').archiveTerminalAckAt, null);
-  await hook({ context: context(), terminalStatus: 'failed' });
-  assert.equal(diffRepository.getRunByArchiveTaskRunId(db, 'original-task').archiveTerminalAckAt, null);
-  await hook({ context: context(), terminalStatus: 'succeeded' });
-  const acknowledged = diffRepository.getRunByArchiveTaskRunId(db, 'original-task').archiveTerminalAckAt;
-  assert.ok(acknowledged);
-  await registry.finalize({ route, record: operationRecord(), terminalOutcome: { taskStatus: 'succeeded' } });
-  assert.equal(diffRepository.getRunByArchiveTaskRunId(db, 'original-task').archiveTerminalAckAt, acknowledged);
-  await assert.rejects(registry.finalize({ route, record: { payload: {} }, terminalOutcome: { taskStatus: 'succeeded' } }), /owner/);
-});
-
 test('PreFund live/replay 保留真实终态优先、operation owner 校验及 ACK 路径', async () => {
   const acknowledged = [];
   const registry = createTerminalRouteRegistry([createPreFundTerminalRouteRegistration({
@@ -141,28 +112,21 @@ test('PreFund live/replay 保留真实终态优先、operation owner 校验及 A
     terminalStatus: 'succeeded' }), /exact-5/);
 });
 
-test('Biz OP registry live/replay 都通过限定 legacy 能力，retired 拒绝先于数据库访问', async () => {
-  let retired = false;
-  const calls = [];
-  const registry = createTerminalRouteRegistry([createBizOpRunTerminalRouteRegistration({
-    getUserDataDir: () => '/tmp/biz-op-terminal-registry',
-    getMainDb: () => { calls.push('db'); return null; },
-    assertLegacyAvailable: () => { calls.push('guard'); if (retired) throw Object.assign(new Error('已停用'), { code: 'BIZOP_LEGACY_RETIRED' }); },
-    withLegacyRecovery: async (directory, run) => { calls.push(['recovery', directory]); return run(); }
-  })]);
-  const route = { route: 'biz-op-run', taskRunId: 'original-task' };
-  await registry.createAfterTerminal(route)({ context: context(), terminalStatus: 'failed' });
-  assert.deepEqual(calls, ['guard', ['recovery', '/tmp/biz-op-terminal-registry'], 'db']);
-  calls.length = 0;
-  await assert.rejects(registry.finalize({ route, record: operationRecord('wrong-task'),
-    terminalOutcome: { taskStatus: 'succeeded' } }), /owner/);
-  retired = true;
-  calls.length = 0;
-  await assert.rejects(registry.createAfterTerminal(route)({ context: context(), terminalStatus: 'succeeded' }),
-    { code: 'BIZOP_LEGACY_RETIRED' });
-  await assert.rejects(registry.finalize({ route, record: operationRecord(), terminalOutcome: { taskStatus: 'succeeded' } }),
-    { code: 'BIZOP_LEGACY_RETIRED' });
-  assert.deepEqual(calls, ['guard', 'guard']);
+// v3.2.20：月度Pending / 业务OP 已下线。遗留 route 只保留同形识别（outbox 可读、不阻断存档中心初始化）；
+//   其通知由 ArchiveCenterController 原样留给旧版，finalize 仅作兜底，一旦被调用即拒绝（live/replay 都不触达业务数据）。
+test('已下线模块的遗留 route 同形规范化、缺身份不抛错，finalize 与 live 收尾一律拒绝', async () => {
+  const registry = createTerminalRouteRegistry(createRetiredTerminalRouteRegistrations());
+  assert.deepEqual([...RETIRED_TERMINAL_ROUTES], ['pending-run', 'biz-op-run']);
+  for (const route of RETIRED_TERMINAL_ROUTES) {
+    const normalized = registry.normalize({ route: ` ${route} `, taskRunId: ' original-task ', legacyExtra: 1 });
+    assert.deepEqual(normalized, { route, taskRunId: 'original-task' });
+    assert.equal(Object.isFrozen(normalized), true);
+    assert.deepEqual(registry.normalize({ route, taskRunId: '' }), { route });
+    await assert.rejects(registry.finalize({ route: normalized, record: operationRecord(), terminalOutcome: { taskStatus: 'succeeded' } }),
+      { code: 'ARCHIVE_RETIRED_TERMINAL_ROUTE_RETAINED' });
+    await assert.rejects(registry.createAfterTerminal(normalized)({ context: context(), terminalStatus: 'failed' }),
+      { code: 'ARCHIVE_RETIRED_TERMINAL_ROUTE_RETAINED' });
+  }
 });
 
 test('Position registry 保留 token/owner 与历史无 owner 批次检查，已清 pending 重放幂等', async () => {

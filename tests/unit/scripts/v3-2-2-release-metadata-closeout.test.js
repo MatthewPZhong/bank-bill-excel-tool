@@ -6,9 +6,12 @@ const path = require('node:path');
 const { resolveChangesPath } = require('../../../scripts/lib/changes-paths');
 const test = require('node:test');
 
-const {
-  isSupportedCurrentPackageVersion
-} = require('../../../scripts/validate-v3-2-2-release-evidence');
+// v3.2.20 起 scripts/validate-v3-2-2-release-evidence.js 随月度银行对账单BU回填校验下线退役（其校验对象 bank-bu-worker 已删除）；
+//   版本判定规则原样保留在此。
+function isSupportedCurrentPackageVersion(value) {
+  const match = /^3\.2\.(\d+)$/.exec(String(value || ''));
+  return Boolean(match && Number(match[1]) >= 2);
+}
 
 const REPOSITORY_ROOT = path.resolve(__dirname, '../../..');
 

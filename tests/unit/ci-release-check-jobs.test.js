@@ -103,7 +103,7 @@ test('smoke-test 依赖全部并行 job，依赖失败也运行并由汇总步�
   assert.match(smoke, /if: \$\{\{ !cancelled\(\) \}\}/);
   assert.match(jobText('build'), /needs: smoke-test/);
   const jobs = [...workflow.slice(workflow.indexOf('\njobs:\n')).matchAll(/\n {2}([a-z][a-z0-9-]*):\n/g)].map((match) => match[1]);
-  assert.deepEqual(jobs, ['bizop-durability-contract', 'release-check-static', 'release-check-unit',
+  assert.deepEqual(jobs, ['release-check-static', 'release-check-unit',
     'release-check-integration', 'smoke-test', 'build'], 'smoke-test 紧接在 build 之前（v3.2.1 证据校验按此切分）');
 });
 

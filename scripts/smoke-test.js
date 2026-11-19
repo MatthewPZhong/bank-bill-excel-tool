@@ -21,17 +21,7 @@ const { runReconIdFixIpcHandlersSmokeTests } = require('./smoke/recon-id-fix-ipc
 const { runReconIdFixEndToEndSmokeTests } = require('./smoke/recon-id-fix-end-to-end');
 // v2.1.0-beta.3 T10：网关对账子模式引擎 smoke（基线 6 用例 + PR #39 review 扩展 3 用例 + constants sanity = 10/10）
 const { runReconIdFixEngineGatewaySmokeTests } = require('./smoke/recon-id-fix-engine-gateway');
-// v2.1.2 T2：月度银行对账单BU回填校验（A-E + F-H + I 覆盖导入回归 + 5 normalize 单测）
-const { runBankBuReconSmokeTests } = require('./smoke/bank-bu-recon');
-// v2.1.3：业务OP数据核对（A-H 8 用例 + helper/validator 单测）
-const { runBizOpReconSmokeTests } = require('./smoke/biz-op-recon');
-// v2.1.6 Module B：收单单据币种校验（A-G 7 用例 + Module A A1 watermark 集成）
-const { runAcquiringBillCurrencySmokeTests } = require('./smoke/acquiring-bill-currency');
-// v2.1.7 F6：收单单据币种校验进度提示（F6-A/B/C/D 4 用例）
-const { runAcquiringBillCurrencyProgressSmokeTests } = require('./smoke/acquiring-bill-currency-progress');
-// v2.1.7 F7：收单单据币种校验 SQL 调优 + 完成系统通知（F7-A1 PRAGMA / F7-A2 索引+ANALYZE / F7-B1 Notification）
-const { runAcquiringBillCurrencyPragmaSmokeTests } = require('./smoke/acquiring-bill-currency-pragma');
-// v2.1.7 round 2 R3：状态框「：」换行全局规则 + setBizOpReconStatus hack 清理
+// v2.1.7 round 2 R3：状态框「：」换行全局规则
 const { runRenderStatusBoxSmokeTests } = require('./smoke/render-status-box');
 // v2.1.7 round 2 R5：F1 默认 AND（仅新建）+ 资金红线三层护栏
 const { runScenarioC1DefaultsSmokeTests } = require('./smoke/scenario-c1-defaults');
@@ -56,17 +46,7 @@ async function run() {
   await runScenarioEndToEndSmokeTests();
   runErrorCausesSmokeTests();
   runUsageStatsSmokeTests();
-  // v2.1.2 T2：月度银行对账单BU回填校验
-  await runBankBuReconSmokeTests();
-  // v2.1.3：业务OP数据核对
-  await runBizOpReconSmokeTests();
-  // v2.1.6 Module B：收单单据币种校验
-  await runAcquiringBillCurrencySmokeTests();
-  // v2.1.7 F6：进度事件 onProgress 链路 + 节流 + regression baseline
-  await runAcquiringBillCurrencyProgressSmokeTests();
-  // v2.1.7 F7：PRAGMA + 索引 + ANALYZE + Notification 桩
-  runAcquiringBillCurrencyPragmaSmokeTests();
-  // v2.1.7 round 2 R3：updateStatusBox 中文「：」换行规则 + setBizOpReconStatus hack 清理 + CSS pre-wrap
+  // v2.1.7 round 2 R3：updateStatusBox 中文「：」换行规则 + CSS pre-wrap
   runRenderStatusBoxSmokeTests();
   // v2.1.7 round 2 R5：F1 默认 AND（仅新建）+ pickConditionsLogicChecked + 资金红线三层护栏 + 引擎 fallback OR 回归
   runScenarioC1DefaultsSmokeTests();

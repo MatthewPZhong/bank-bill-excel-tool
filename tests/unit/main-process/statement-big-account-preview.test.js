@@ -1534,27 +1534,20 @@ test('大账号顺序提取/保存只消费预检冻结 evidence，不重读源�
   assert.doesNotMatch(functionSource('buildBigAccountOrderData'), /readRows\(|identifyAccountsFromFile\(/);
 });
 
-test('acquiring peek 探测期间源文件变更会在建立覆盖上下文前被拒绝', (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acquiring-preview-fresh-'));
+// v3.2.20：原收单导入 peek 用例随收单单据币种校验下线删除，保留通用预览源文件新鲜度守卫断言。
+test('预览源文件新鲜度守卫：探测期间源文件变更会在建立覆盖上下文前被拒绝', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preview-source-fresh-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const inputPath = path.join(dir, 'acquiring.xlsx');
+  const inputPath = path.join(dir, 'source.xlsx');
   fs.writeFileSync(inputPath, 'before', 'utf8');
   const guard = loadFunction(
     'createPreviewSourceFreshnessGuard',
     ['path', 'sourceSnapshotFromStat', 'fs', 'sourceSnapshotMatchesStat'],
     [path, sourceSnapshotFromStat, fs, sourceSnapshotMatchesStat]
-  )([inputPath], '收单导入');
+  )([inputPath], '账单导入');
+  guard();
   fs.writeFileSync(inputPath, 'after-peek-is-longer', 'utf8');
   assert.throws(guard, /源文件在确认期间已变化/);
-
-  const acquiringPrepareSource = mainSource.slice(
-    mainSource.indexOf('async function prepareAcquiringImport'),
-    mainSource.indexOf('async function executeAcquiringImport')
-  );
-  assert.match(
-    acquiringPrepareSource,
-    /peeked = await acquiringRunData\.peekImportTarget\([\s\S]*?assertSourceFresh\(\);[\s\S]*?if \(peeked\.monthKey/
-  );
 });
 
 test('顺序持久化失败只追加生成后告警，不覆盖已形成的业务结果', () => {

@@ -207,8 +207,8 @@ async function createCompletedFileTask(fixture, channel) {
   return { batch, artifact: artifacts[0], source };
 }
 
-scenario('旧全局设置兼容，14 个模块设置经 SQLite 关闭/重开保持一致', async (fixture) => {
-  assert.equal(SCOPES.length, 14, '完整模块清单包含 13 个主模块和工具箱');
+scenario('旧全局设置兼容，10 个模块设置经 SQLite 关闭/重开保持一致', async (fixture) => {
+  assert.equal(SCOPES.length, 10, '完整模块清单包含 9 个主模块和工具箱（v3.2.20 下线 4 个对账模块）');
   assert.equal(fixture.controller.getRetentionDays(), null);
   fixture.database.setSetting(ARCHIVE_RETENTION_SETTING_KEY, '180');
   assert.equal(fixture.controller.getRetentionDays('statement-generator'), 180);
@@ -288,16 +288,17 @@ scenario('全部可见模块的 createBatch 根据独立设置和默认继承固
   }
 });
 
+// v3.2.20：原样例中的 BU 回填 / 业务OP / Pending / 收单模块已下线，改用保留模块验证同一规则。
 scenario('reserveTaskBatch 使用模块设置，显式期限优先且幂等重入不改旧快照', async (fixture) => {
-  setModule(fixture, 'bank-bu-recon', 30);
-  setModule(fixture, 'biz-op-recon', null);
+  setModule(fixture, 'vcc-op-calc', 30);
+  setModule(fixture, 'duplicate-inbound-match', null);
   for (const [moduleId, override, expected] of [
-    ['bank-bu-recon', {}, 30],
-    ['biz-op-recon', {}, null],
+    ['vcc-op-calc', {}, 30],
+    ['duplicate-inbound-match', {}, null],
     ['toolbox', {}, null],
-    ['bank-bu-recon', { retentionDays: 365 }, 365],
-    ['bank-bu-recon', { retentionDays: null }, null],
-    ['biz-op-recon', { retentionDays: 90 }, 90]
+    ['vcc-op-calc', { retentionDays: 365 }, 365],
+    ['vcc-op-calc', { retentionDays: null }, null],
+    ['duplicate-inbound-match', { retentionDays: 90 }, 90]
   ]) {
     const identity = fixture.nextKey();
     const payload = payloadFor(fixture, moduleId, {
@@ -325,7 +326,7 @@ scenario('reserveFileTaskBatch 按 Task Run 模块取期限且接受显式覆盖
   for (const [moduleId, override, expected] of [
     ['statement-generator', {}, 30],
     ['toolbox', {}, null],
-    ['pending-reconciliation', {}, null],
+    ['bank-statement-process', {}, null],
     ['statement-generator', { retentionDays: null }, null],
     ['toolbox', { retentionDays: 180 }, 180]
   ]) {
@@ -381,7 +382,7 @@ scenario('真实 TaskLifecycle 文件入口继承模块规则并完成输入输�
   for (const [channel, days] of [
     ['file:import', 30],
     ['toolbox:merge', null],
-    ['pending:import:start', 180]
+    ['duplicate-inbound-match:import-files', 180]
   ]) {
     const policy = registry.require(channel);
     setModule(fixture, policy.scopeId, days);
@@ -493,10 +494,10 @@ scenario('归档位置不可用时 outbox 固化模块期限，设置变更后�
 
 scenario('cleanupExpired 按已建批快照区分到期/未到期/永久并尊重锁定与 hold', async (fixture) => {
   setModule(fixture, 'statement-generator', 30);
-  setModule(fixture, 'bank-bu-recon', 90);
+  setModule(fixture, 'recon-id-fix', 90);
   setModule(fixture, 'toolbox', null);
   const expired = await createCompletedFileTask(fixture, 'file:import');
-  const future = await createCompletedFileTask(fixture, 'bankBuRecon:import:run');
+  const future = await createCompletedFileTask(fixture, 'recon-id-fix:import');
   const permanent = await createCompletedFileTask(fixture, 'toolbox:merge');
   const locked = await createCompletedFileTask(fixture, 'file:import');
   assert.equal((await fixture.service.setLocked(locked.batch.id, true)).ok, true);
@@ -508,7 +509,7 @@ scenario('cleanupExpired 按已建批快照区分到期/未到期/永久并尊�
     reason: '正在被后续业务引用'
   });
   setModule(fixture, 'statement-generator', null);
-  setModule(fixture, 'bank-bu-recon', 30);
+  setModule(fixture, 'recon-id-fix', 30);
   setModule(fixture, 'toolbox', 30);
   const onBoundary = await fixture.service.cleanupExpired({ asOfLocalDate: expectedExpiry(30) });
   assert.equal(onBoundary.ok, true);

@@ -18,12 +18,15 @@ const {
 const {
   BASELINE_COMMIT,
   GENERATED_AT,
+  activeRuntimeBaseline,
   baselineRuntimeOptions,
   captureRuntimeBaseline,
   rebuildPolicyRegistry,
   staticReferenceClosure
 } = require('../../helpers/execution-descriptor-runtime-baseline');
-const baseline = require('../../fixtures/execution-descriptors/runtime-baseline.json');
+const fixedBaseline = require('../../fixtures/execution-descriptors/runtime-baseline.json');
+// 固定 fixture 不改；当前期望 = 扣除 v3.2.20 已下线模块 action 后的基线。
+const baseline = activeRuntimeBaseline(fixedBaseline);
 
 let runtime;
 test.before(() => {
@@ -100,10 +103,12 @@ async function observePhaseAdmission(policyRegistry, policy, input) {
   }
 }
 
-test('G7 基线保存全部 49 action 的原 policy、载体映射、冻结 binding 与生产策略', () => {
+test('G7 基线扣除已下线模块 24 action 后保存其余 25 action 的原 policy、载体映射、冻结 binding 与生产策略', () => {
   assert.equal(baseline.sourceCommit, BASELINE_COMMIT);
   assert.equal(baseline.generatedAt, GENERATED_AT);
-  assert.deepEqual(baseline.counts, { policies: 49, productionEnabled: 13, dynamicEstimators: 1 });
+  assert.deepEqual(fixedBaseline.counts, { policies: 49, productionEnabled: 13, dynamicEstimators: 1 });
+  assert.equal(fixedBaseline.actions.length - baseline.actions.length, 24);
+  assert.deepEqual(baseline.counts, { policies: 25, productionEnabled: 1, dynamicEstimators: 1 });
   assert.deepEqual(captureRuntimeBaseline(runtime.policyRegistry), baseline);
   assert.equal(runtime.policyRegistry.isFrozen(), true);
   for (const action of baseline.actions) {
@@ -148,7 +153,7 @@ test('静态 profile 必须使用 resourceProfileKeys；旧别名无法补偿缺
   }
 });
 
-test('48 个静态 action 不补造 estimator；唯一动态 profile 归 NewAccount 所有', () => {
+test('24 个静态 action 不补造 estimator；唯一动态 profile 归 NewAccount 所有', () => {
   const dynamic = baseline.actions.filter((action) => action.resource.hasEstimator);
   assert.deepEqual(dynamic.map((action) => action.actionKey), ['new-account:generate']);
   assert.deepEqual(baseline.registryKeys.resourceProfileRegistry, ['resource.new-account:generate']);
@@ -211,9 +216,6 @@ test('NewAccount estimator 的 Promise 与 topology slot 漂移在任何准入/w
 test('真实 runtime binder 逐受保护 action 拒绝缺失 authority 与 payload override，且尚未创建载体', async () => {
   let workerStarts = 0;
   const withAuthority = createBackgroundExecutionRuntime(baselineRuntimeOptions({
-    pendingDatabasePath: path.resolve('/descriptor-baseline/pending.sqlite'),
-    mainDatabasePath: path.resolve('/descriptor-baseline/main.sqlite'),
-    userDataDir: path.resolve('/descriptor-baseline/user-data'),
     vccFinancialOpDatabasePath: path.resolve('/descriptor-baseline/vcc.sqlite'),
     vccFinancialOpAssetsDir: path.resolve('/descriptor-baseline/assets'),
     reconFixJpmDatabasePath: path.resolve('/descriptor-baseline/recon.sqlite'),
@@ -234,8 +236,8 @@ test('真实 runtime binder 逐受保护 action 拒绝缺失 authority 与 paylo
         overrideChecks += 1;
       }
     }
-    assert.equal(unavailableChecks, 19);
-    assert.equal(overrideChecks, 10);
+    assert.equal(unavailableChecks, 3);
+    assert.equal(overrideChecks, 6);
     assert.equal(workerStarts, 0);
   } finally {
     await withAuthority.shutdown();

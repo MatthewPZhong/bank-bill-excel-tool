@@ -1,0 +1,72 @@
+name: Windows Durability Acceptance
+# v3.2.20：业务OP数据核对下线，原 BizOP 正常应用验收（normal-app）与 bizop 契约分组删除；
+#   recovery 分组只保留后台执行恢复合同，archive 分组与目录屏障探针保留。
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [recovery, archive]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.19.0
+      - run: npm ci
+      - name: Require real Windows directory durability
+        run: node -e "if (require('./tests/helpers/durable-directory-tests').directoryDurabilityCapability.capability !== 'supported') process.exit(1)"
+      - name: Run complete ${{ matrix.group }} contracts
+        timeout-minutes: 40
+        shell: pwsh
+        env:
+          CONTRACT_GROUP: ${{ matrix.group }}
+        run: |
+          New-Item -ItemType Directory -Force outputs/windows-durability-acceptance | Out-Null
+          switch ($env:CONTRACT_GROUP) {
+            'recovery' { $testFiles = @('tests/unit/main-process/background-execution/recovery-contract-c2.test.js') }
+            'archive' {
+              $testFiles = @('tests/unit/toolbox-output-publication.test.js',
+                'tests/unit/main-process/archive-service.test.js',
+                'tests/unit/main-process/archive-outbox-store.test.js',
+                'tests/unit/main-process/archive-storage-root-migration.test.js',
+                'tests/unit/main-process/toolbox-archive-integration.test.js')
+            }
+            default { throw 'Unknown contract group' }
+          }
+          if (!$testFiles.Count) { throw 'Contract group is empty' }
+          $testFiles | Set-Content outputs/windows-durability-acceptance/test-files.txt
+          node --test --test-reporter=tap @testFiles 2>&1 | Tee-Object outputs/windows-durability-acceptance/contracts.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $unexpectedSkips = Select-String -Path outputs/windows-durability-acceptance/contracts.log -Pattern '^\s*(?:not )?ok\s+\d+.*\s# SKIP(?:\s|$)' | Where-Object { $_.Line -notmatch 'macOS 完整 case-fold 等价目标在 prepare 前被拒绝.*# SKIP' }
+          if ($unexpectedSkips) { $unexpectedSkips; throw 'Windows contract unexpectedly skipped' }
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-durability-contracts-${{ matrix.group }}
+          path: outputs/windows-durability-acceptance/
+          if-no-files-found: error
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.19.0
+      - name: Probe Node file and directory flush access
+        run: node scripts/windows-durability-probe/probe.js
+      - name: Probe native Windows directory handle access
+        shell: pwsh
+        run: ./scripts/windows-durability-probe/probe.ps1
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-durability-probe
+          path: outputs/windows-durability-probe/
+          if-no-files-found: error

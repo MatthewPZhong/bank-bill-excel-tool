@@ -1,6 +1,7 @@
 'use strict';
-// 引擎 row-scanner 的 cell 取值/判空函数（非正则手写版）与收单 reader-handrolled（含正则 TV_RE）
+// 引擎 row-scanner 的 cell 取值/判空函数（非正则手写版）与手写 reader（含正则 TV_RE）
 //   在全形态 cell body 上 byte-for-byte 等价（🔴 资金红线 — 取值语义不得漂移）。
+//   v3.2.20 收单下线后，手写 reader 逐字迁入重复入金匹配 duplicate-inbound-match/document-xlsx-stream。
 //   覆盖：inlineStr 多 <t> 取最后 / 末尾空 run / 自闭合 <t/> / 公式 <f> / number 原文 / s 查表 /
 //         越界·NaN 索引 / XML 实体 / 带属性的 <t ...>/<v ...> / 空 body。
 
@@ -8,7 +9,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 
 const engine = require('../../../../src/backend/big-table-import/row-scanner');
-const hand = require('../../../../src/backend/acquiring-bill-currency-import/reader-handrolled');
+const hand = require('../../../../src/main-process/duplicate-inbound-match/document-xlsx-stream');
 
 // 全形态 body 样本 + type + sharedStrings 组合
 const SS = ['有内容', '', 'USD', '中文&值', '混合'];
@@ -44,7 +45,7 @@ const cases = [
   ['<is><t>S</t></is>', 'str']                          // str 型多按 inlineStr 取 t
 ];
 
-test.describe('big-table-import cell 取值/判空 与 reader-handrolled byte-for-byte 等价', () => {
+test.describe('big-table-import cell 取值/判空 与手写 reader（document-xlsx-stream）byte-for-byte 等价', () => {
   test('cellValueFromBody 全形态等价', () => {
     for (const [body, type] of cases) {
       const ev = engine.cellValueFromBody(body, type, SS);
@@ -63,7 +64,7 @@ test.describe('big-table-import cell 取值/判空 与 reader-handrolled byte-fo
     }
   });
 
-  test('xmlUnescape 与 reader-handrolled 暴露的实体解码一致（经 cellValueFromBody 数字位）', () => {
+  test('xmlUnescape 与手写 reader 的实体解码一致（经 cellValueFromBody 数字位）', () => {
     // 通过 number cell 走 xmlUnescape 路径对照
     const samples = ['a&amp;b', '&lt;&gt;', '&quot;&apos;', '&#65;&#x4a;', 'no-entity', '&amp;&amp;'];
     for (const s of samples) {

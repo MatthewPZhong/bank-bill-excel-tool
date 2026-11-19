@@ -1,14 +1,13 @@
 'use strict';
 
+// v3.2.20：月度Pending / 月度BU回填 / 业务OP / 收单已下线，移出存档范围；其历史批次原样保留在存档库，
+//   不在存档中心展示、不参与启动扫尾（archive-repository.js RETIRED_BATCH_EXCLUSION_SQL）；已结束的批次照常按生成时
+//   记录的保留期到期清理，仍在运行的旧版现场留给回退旧版。
 const PRIMARY_ARCHIVE_SCOPES = Object.freeze([
   Object.freeze({ id: 'statement-generator', code: 'STATEMENT', name: '网银账单生成', kind: 'primary' }),
   Object.freeze({ id: 'new-account-generator', code: 'NEWACCOUNT', name: '新开账户余额账单生成', kind: 'primary' }),
-  Object.freeze({ id: 'pending-reconciliation', code: 'PENDING', name: '月度Pending数据核对', kind: 'primary' }),
   Object.freeze({ id: 'bank-statement-process', code: 'FUNDRECON', name: '资金对账数据处理', kind: 'primary' }),
   Object.freeze({ id: 'recon-id-fix', code: 'RECONFIX', name: '对账单修复', kind: 'primary' }),
-  Object.freeze({ id: 'bank-bu-recon', code: 'BANKBU', name: '月度银行对账单BU回填校验', kind: 'primary' }),
-  Object.freeze({ id: 'biz-op-recon', code: 'BIZOP', name: '业务OP数据核对', kind: 'primary' }),
-  Object.freeze({ id: 'acquiring-bill-currency', code: 'ACQUIRING', name: '收单单据币种校验', kind: 'primary' }),
   Object.freeze({ id: 'vcc-op-calc', code: 'VCCOP', name: 'VCC业务OP计算', kind: 'primary' }),
   Object.freeze({ id: 'vcc-financial-op', code: 'VCCFINOP', name: 'VCC财务OP校验', kind: 'primary' }),
   Object.freeze({ id: 'pre-fund-reconciliation', code: 'PREFUND', name: '前置资金对账', kind: 'primary' }),

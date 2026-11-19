@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { randomUUID, createHash } = require('node:crypto');
+const { randomUUID } = require('node:crypto');
 const XLSX = require('xlsx');
 const JSZip = require('jszip');
 
@@ -94,16 +94,11 @@ test('消费方有效预算、覆盖规则和 R3/R4 差异保持固定基线合�
   await t.test('L2 helper 消费者保留原解析差异，T1 仍自行装配并完整加载 SST', async (t) => {
     const before = observations.length;
     const root = temporary(t, 'xlsx-consumer-l2-'), filename = path.join(root, 'flow.xlsx');
-    const { writeXlsx, flowRow } = helper('biz-op-v327-xlsx');
+    const { writeXlsx, flowRow } = helper('flow-statement-xlsx');
     await writeXlsx(filename, { rowCount: 1, row: flowRow, sharedStrings: ['原值'] });
-    const vccRows = [], bizRows = [];
+    const vccRows = [];
     const vcc = await source('backend/vcc-op-calc-import/reader').streamFlowFile(filename, { onDataRow: (row) => vccRows.push(row) });
-    const biz = await source('backend/biz-op-recon-import/reader-streamed').streamFlowFile(filename, { onDataRow: (row) => bizRows.push(row) });
-    assert.equal(vcc.dataRows, 1); assert.equal(vccRows.length, 1); assert.equal(bizRows.length, 1);
-    assert.equal(biz.sourceSheetName, '原始数据');
-    const hand = source('backend/acquiring-bill-currency-import/reader-handrolled');
-    assert.equal(hand.cellValueFromBody('<v>1000.00</v>', 'n', []), '1000.00');
-    assert.equal(hand.cellValueFromBody('<is><t>原值&amp;&lt;</t></is>', 'inlineStr', []), '原值&<');
+    assert.equal(vcc.dataRows, 1); assert.equal(vccRows.length, 1);
     const pass = await source('backend/toolbox-format/xlsx-pass').openToolboxXlsxPass(filename, { sourceRegistryId: 'consumer-registry' });
     try {
       assert.ok(Array.isArray(pass.sharedStrings));
@@ -152,89 +147,6 @@ test('消费方有效预算、覆盖规则和 R3/R4 差异保持固定基线合�
       assert.equal(fs.existsSync(tempRoot), preserves, '只有 Position 转发 preserveSstOnClose');
     });
   }
-
-  await t.test('R1 BizOP import 在真实管线保留 ?? 与 undefined 的不同覆盖优先级', async (t) => {
-    const { writeXlsx, flowRow } = helper('biz-op-v327-xlsx');
-    const { createBizOpPayloadStore } = source('main-process/biz-op-v327/payload-store');
-    const { runImportPipeline } = source('main-process/biz-op-v327/import-pipeline');
-    const variants = [
-      { options: {}, memory: 32 * MiB, cache: 32 * MiB, lru: 8192 },
-      { options: { sstMemoryBudgetBytes: undefined, sstCacheMaxBytes: undefined, sstLruMaxEntries: undefined }, memory: 32 * MiB, cache: 32 * MiB, lru: 8192 },
-      { options: { sstMemoryBudgetBytes: null, sstCacheMaxBytes: null }, memory: 32 * MiB, cache: 32 * MiB, lru: 8192 },
-      { options: { sstMemoryBudgetBytes: '512', sstCacheMaxBytes: 300, sstLruMaxEntries: '2' }, memory: 512, cache: 300, lru: 2 },
-      { options: { sstLruMaxEntries: null }, reject: true },
-      { options: { sstCacheMaxBytes: '300' }, reject: true }
-    ];
-    for (const variant of variants) {
-      const root = temporary(t, 'xlsx-consumer-r1-');
-      const filePath = path.join(root, 'flow.xlsx');
-      await writeXlsx(filePath, { rowCount: 1, row: flowRow, sharedStrings: ['原值'] });
-      const payloadStore = createBizOpPayloadStore({ userDataDir: root }); payloadStore.initialize();
-      const taskRunId = `task-${randomUUID()}`, candidateRef = `candidate-${randomUUID()}`;
-      const before = observations.length;
-      const cancelToken = { cancelled: false };
-      const output = await runImportPipeline({ payloadStore, taskRunId, candidateRef,
-        reportRef: `report-${randomUUID()}`, intentDigest: 'f'.repeat(64), cancelToken,
-        files: [{ filePath, artifactId: 1, order: 0, sha256: createHash('sha256').update(fs.readFileSync(filePath)).digest('hex') }],
-        options: variant.options });
-      const result = payloadStore.readDocument(`operations/${taskRunId}/${candidateRef}.json`, output.sha256).value;
-      assert.equal(result.batchRejected, !!variant.reject);
-      if (variant.reject) { assert.equal(result.fileErrorCount, 1); continue; }
-      assert.equal(result.acceptedRows, 1);
-      assert.equal(observations.length, before + 1);
-      const observed = observations.at(-1);
-      assertEffective(observed.effective, { memoryBudgetBytes: variant.memory, cacheMaxBytes: variant.cache,
-        lruMaxEntries: variant.lru, strictClose: true, preserveOnClose: false });
-      assert.equal(observed.options.cancelToken, cancelToken);
-      assert.equal(path.basename(path.dirname(observed.effective.tempRoot)), candidateRef);
-      assert.equal(path.basename(observed.effective.tempRoot), 'sst-0');
-      assert.equal(observed.provider.closed, true);
-    }
-  });
-
-  await t.test('R2 BizOP RAW 单页读取和输出多页验证各自保持 32 MiB 与私有临时根', async (t) => {
-    const { createExportHost } = helper('biz-op-v327-export');
-    const { writeXlsx, opRow } = helper('biz-op-v327-xlsx');
-    const { freezeExportSource } = source('main-process/biz-op-v327/export-inputs');
-    const { buildExportSource } = source('main-process/biz-op-v327/export-source');
-    const { createExportSpool } = source('main-process/biz-op-v327/export-spool');
-    const { writeExportWorkbook } = source('main-process/biz-op-v327/export-writer');
-    const { validateExportWorkbook } = source('main-process/biz-op-v327/export-validator');
-    const f = await createExportHost(t), file = path.join(f.root, 'raw.xlsx');
-    await writeXlsx(file, { kind: 'OP', rowCount: 1, row: opRow, sharedStrings: ['保留原值'] });
-    const imported = await f.run([file]);
-    assert.equal(imported.status, 'ok', JSON.stringify(imported));
-    const frozen = await freezeExportSource({ ...f.module, getArchiveService: () => f.service,
-      outputKind: 'OP_RAW', objectId: imported.receipt.outcome.datasets[0].datasetId });
-    const tempDirectory = fs.mkdtempSync(path.join(f.root, 'consumer-export-'));
-    const spool = createExportSpool({ filename: path.join(tempDirectory, 'spool.sqlite'), source: frozen });
-    const cancelToken = { cancelled: false };
-    try {
-      const before = observations.length;
-      await buildExportSource({ payloadStore: f.module.payloadStore, source: frozen, spool, tempDirectory, cancelToken, safePoint() {} });
-      const expected = await spool.finish();
-      const filePath = path.join(tempDirectory, 'output.xlsx');
-      await writeExportWorkbook({ filePath, spool, expected, safePoint() {} });
-      await addUnreferencedSst(filePath);
-      const checked = await validateExportWorkbook({ filePath, source: frozen, expected, tempDirectory, cancelToken });
-      assert.equal(checked.dataRowCount, 1);
-      const captures = observations.slice(before);
-      assert.equal(captures.length, 2);
-      for (const [index, entry] of captures.entries()) {
-        assertEffective(entry.effective, { memoryBudgetBytes: 32 * MiB, lruMaxEntries: 8192,
-          cacheMaxBytes: 32 * MiB, strictClose: true, preserveOnClose: false });
-        assert.equal(path.dirname(entry.effective.tempRoot), tempDirectory);
-        assert.match(path.basename(entry.effective.tempRoot), index ? /^sst-actual-/ : /^sst-raw-/);
-        assert.equal(entry.options.cancelToken, cancelToken);
-        assert.equal(entry.provider.closed, true);
-      }
-      const raw = richCalls.findLast((entry) => entry.caller.includes(path.join('biz-op-v327', 'export-source.js')));
-      const actual = richCalls.findLast((entry) => entry.caller.includes(path.join('biz-op-v327', 'export-validator.js')));
-      assert.equal(raw.key, 'openSingleSheetRichWorkbook');
-      assert.equal(actual.key, 'openRichWorkbook');
-      assert.equal(actual.options.maxSheets, expected.pages.length);
-    } finally { spool.close(); }
-  });
 
   await t.test('R3 和 R4 四处 VCC 真实导入、原件导出、待确认导出保留不同 cache 和取消桥接', async (t) => {
     const before = observations.length, callBefore = richCalls.length;

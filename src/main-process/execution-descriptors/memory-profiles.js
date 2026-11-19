@@ -4,37 +4,25 @@ const { createHash } = require('node:crypto');
 const { createMemoryAdmissionPolicy } = require('../background-execution/memory-admission');
 const { validateExecutionMemoryConfig } = require('../background-execution/execution-memory-config');
 const { createMemorySampler } = require('../background-execution/memory-telemetry');
-const { ACTIONS } = require('../biz-op-v327/contracts');
 const qualification = require('./memory-qualification.json');
-const { inventoryForGovernor, captureLegacyMemoryContinuation, isLegacyMemoryContinuationBlocking } = require('../memory-activity');
+const { inventoryForGovernor, isLegacyMemoryContinuationBlocking } = require('../memory-activity');
 const { sourceIdentity, qualifiedProfile } = require('./memory-evidence');
 
 const MiB = 1024 ** 2;
-const TARGET_ACTIONS = new Set(['toolbox:split:prepare', 'toolbox:split-rows', 'publication:shared-io', ...Object.keys(ACTIONS)]);
-const IO_OWNERS = ['biz-op-v327:publisher:', 'biz-op-v327:archive-output:', 'biz-op-v327:auto-report-verify:',
-  'biz-op-v327:delete-preservation:', 'biz-op-v327:raw-source:', 'biz-op-v327:shared-publication-observation'];
+// v3.2.20：业务OP数据核对（BizOP v327）下线，其 bizop-* 内存阶段随之移除。
+const TARGET_ACTIONS = new Set(['toolbox:split:prepare', 'toolbox:split-rows', 'publication:shared-io']);
 const PHASES = Object.freeze({
   'split-prepare': [768, 256, 2],
   'rows-generation': [768, 384, 2],
   'rows-io': [256, 128, 1],
-  'publication-io': [256, 128, 1],
-  'bizop-import': [768, 384, 2],
-  'bizop-compute': [768, 384, 3],
-  'bizop-export': [768, 384, 2],
-  'bizop-io': [256, 128, 2],
-  'bizop-maintenance': [384, 128, 2]
+  'publication-io': [256, 128, 1]
 });
 
 function phaseFor(request) {
   if (!TARGET_ACTIONS.has(request.actionKey)) return null;
   if (request.actionKey === 'toolbox:split:prepare') return 'split-prepare';
   if (request.actionKey === 'toolbox:split-rows') return request.ownerKey.startsWith('toolbox:rows-validate:') ? 'rows-io' : 'rows-generation';
-  if (request.actionKey === 'publication:shared-io') return 'publication-io';
-  if (IO_OWNERS.some((prefix) => request.ownerKey.startsWith(prefix))) return 'bizop-io';
-  if (request.actionKey === 'biz-op-v327:import-candidate') return 'bizop-import';
-  if (request.actionKey === 'biz-op-v327:run-candidate') return 'bizop-compute';
-  if (request.actionKey.startsWith('biz-op-v327:export-')) return 'bizop-export';
-  return 'bizop-maintenance';
+  return 'publication-io';
 }
 
 // 配置由静态 manifest 的验收确认授予生产资格；额度不是任意文件的最低配置承诺。
@@ -72,12 +60,6 @@ function createRegisteredMemoryPolicy({ compatibilityMemoryBytes, sampleMemory, 
   }
   return createMemoryAdmissionPolicy({ compatibilityMemoryBytes, sampleMemory,
     resolveRequest(request) {
-      if (request.kind === 'phase' && request.actionKey === 'publication:legacy-observation' &&
-          request.ownerKey === 'biz-op-v327:shared-publication-observation' &&
-          request.operationKey === 'biz-op-v327:shared-publication-observation') {
-        return { migrated: false, heavy: true, maxGrowthBytes: null,
-          continuation: captureLegacyMemoryContinuation() };
-      }
       const phaseKey = phaseFor(request);
       if (!phaseKey) return null;
       // 目标 job 的零资源 base 尚未创建载体，不与自己的 phase 形成重型互斥。

@@ -57,6 +57,7 @@ test('所有 IPC 默认观察，目标新路径自身准入；控制和取消不
   const callbacks = new Map(); const ipc = { handle: (name, callback) => callbacks.set(name, callback) };
   const original = ipc.handle;
   registerWithMemoryActivity(ipc, () => {
+    // v3.2.20：业务OP v327 通道随模块下线删除，不再豁免观察。
     for (const name of ['new-domain:unknown-heavy', 'toolbox:split:read', 'toolbox:split:cancel-read', 'bizOpReconV327:run']) {
       ipc.handle(name, () => memoryActivitySnapshot().blockers.length);
     }
@@ -66,7 +67,7 @@ test('所有 IPC 默认观察，目标新路径自身准入；控制和取消不
   assert.equal(await callbacks.get('toolbox:split:read')({}, { version: 2 }), 0);
   assert.equal(await callbacks.get('toolbox:split:read')({}), 1);
   assert.equal(await callbacks.get('toolbox:split:cancel-read')({}), 0);
-  assert.equal(await callbacks.get('bizOpReconV327:run')({}), 0);
+  assert.equal(await callbacks.get('bizOpReconV327:run')({}), 1, '已下线通道名不再自带准入豁免');
 });
 
 test('IPC 等待不足经异常通道反馈，不伪造数组或标量结果，释放后可直接重试', async (t) => {

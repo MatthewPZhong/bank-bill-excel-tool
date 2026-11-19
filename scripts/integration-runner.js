@@ -31,22 +31,18 @@ const POLICY_PATH = path.join(__dirname, '..', 'rules', 'integration-test-policy
 
 // 独占运行：起 Electron 窗口（焦点 / 截图）、断言内存峰值 / 耗时 / 准入阈值，或被测路径按空闲内存、CPU 数调整行为的脚本。
 //   并发时与其他脚本同时运行会改变这些条件，结果可能不稳定（B43 排查结论见 changes/v3.2.15/chore/ci-parallel-jobs/techdoc.md）。
-const EXCLUSIVE_SCRIPT_PATTERN = /^toolbox-|memory|admission|big-table-import|canary|idle-cleanup|concurrency|query-boundary|result-workbook|^renderer-lifecycle$|^packaged-/;
+const EXCLUSIVE_SCRIPT_PATTERN = /^toolbox-|memory|admission|canary|idle-cleanup|concurrency|result-workbook|^renderer-lifecycle$|^retired-modules-upgrade-compat$|^packaged-/;
 
 // 分片时先轮流分配的耗时最长脚本（按 Windows CI 实测从长到短），避免集中到同一片；未列出的按脚本名轮流分配。
 const HEAVY_SCRIPTS_FIRST = Object.freeze([
   'toolbox-large-split-multi-sheet',
   'toolbox-large-file-stream',
   'toolbox-rows-csv-admission',
-  'biz-op-auto-error-report',
   'toolbox-biff8-admission',
   'renderer-lifecycle',
   'toolbox-low-memory-complete',
   'production-memory-qualification',
-  'archive-biz-op-auto-report-retention',
-  'biz-op-query-boundary',
   'archive-center-default-retention',
-  'v2.1.10-a4-phase3',
   'toolbox-multi-sheet-merge'
 ]);
 

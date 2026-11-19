@@ -2,7 +2,7 @@
 //
 // 用于 3 个模块的 error-report 写出：
 //   - 主模块（statementGenerator）logger.js writeErrorReport (.txt)
-//   - 月度 Pending pending-session.js exportErrorReport (.xlsx)
+//   - 月度 Pending pending-session.js exportErrorReport (.xlsx)（v3.2.20 随模块下线删除；下方 Pending 兜底映射保留）
 //   - 银行对账单处理 main-process/exceljs-writer.js writeErrorReport (.xlsx)
 //
 // 文案风格：精简口语化，让用户能看懂大致问题方向。

@@ -51,7 +51,7 @@ function replacePolicyIdentity(policies, from, to) {
   policy.taskKey = to;
 }
 
-test('生产 authority 一次读取真实 TaskPolicy list 并冻结 67-action inventory digest', () => {
+test('生产 authority 一次读取真实 TaskPolicy list 并冻结 39-action inventory digest', () => {
   let listCalls = 0;
   const policies = mutableTaskPolicies();
   const registry = createActionTaskBindingRegistry({
@@ -59,11 +59,11 @@ test('生产 authority 一次读取真实 TaskPolicy list 并冻结 67-action in
   });
 
   assert.equal(listCalls, 1);
-  assert.equal(registry.summary.actionKeys.length, 67);
-  assert.equal(registry.summary.taskPolicyInventory.length, 134);
-  assert.equal(registry.summary.pairCount, 74);
-  assert.equal(registry.summary.boundTaskKeyCount, 66);
-  assert.equal(registry.summary.unboundTaskPolicyCount, 68);
+  assert.equal(registry.summary.actionKeys.length, 39);
+  assert.equal(registry.summary.taskPolicyInventory.length, 100);
+  assert.equal(registry.summary.pairCount, 45);
+  assert.equal(registry.summary.boundTaskKeyCount, 38);
+  assert.equal(registry.summary.unboundTaskPolicyCount, 62);
   assert.equal(
     registry.summary.taskPolicyInventory.filter(
       (taskKey) => !bindingSnapshotValues().has(taskKey)
@@ -72,7 +72,7 @@ test('生产 authority 一次读取真实 TaskPolicy list 并冻结 67-action in
   );
   assert.equal(
     registry.summary.taskPolicyInventorySha256,
-    '6912c045c82d260fbe554732e886f4da9fafe01e4f3e64f8dc3b0c870055a773'
+    'a7123f6c24236358aed90791baae775e2e9f6da195959bb3cf62a5200c5c08d7'
   );
   assert.equal(registry.summary.sha256, ACTION_TASK_BINDING_CONTRACT.sha256);
   assert.equal(Object.isFrozen(registry.summary), true);
@@ -239,7 +239,7 @@ test('构造后 caller object/array mutation 与 allowedTaskKeys 返回数组 mu
   const second = registry.allowedTaskKeys('statement:generate-all');
   assert.notEqual(first, second);
   assert.equal(Object.isFrozen(first), true);
-  assert.throws(() => first.push('bankBuRecon:run'), TypeError);
+  assert.throws(() => first.push('duplicate-inbound-match:run'), TypeError);
   assert.deepEqual(second, ['monthly-balance:assemble', 'monthly-balance:export']);
 
   const snapshotA = bindingSnapshot();
@@ -250,7 +250,7 @@ test('构造后 caller object/array mutation 与 allowedTaskKeys 返回数组 mu
   assert.equal(Object.isFrozen(snapshotA['statement:generate-all']), true);
 });
 
-test('assertPair 只接受 exact pair，missing/empty/mismatch 与交换 bank-bu pair fail closed', () => {
+test('assertPair 只接受 exact pair，missing/empty/mismatch 与交换 fund-recon pair fail closed', () => {
   const registry = initializeActionTaskBindingRegistry(realTaskPolicyHost());
   assert.deepEqual(
     registry.assertPair('statement:generate-all', 'monthly-balance:export'),
@@ -265,11 +265,11 @@ test('assertPair 只接受 exact pair，missing/empty/mismatch 与交换 bank-bu
     expectCode('ACTION_TASK_BINDING_TASK_KEY_REQUIRED')
   );
   assert.throws(
-    () => registry.assertPair('statement:generate-all', 'bankBuRecon:run'),
+    () => registry.assertPair('statement:generate-all', 'duplicate-inbound-match:run'),
     expectCode('ACTION_TASK_BINDING_PAIR_REJECTED')
   );
   assert.throws(
-    () => registry.assertPair('bank-bu:export-aggregate', 'bankBuRecon:export:single'),
+    () => registry.assertPair('fund-recon:import', 'bank-statement:export'),
     expectCode('ACTION_TASK_BINDING_PAIR_REJECTED')
   );
 });
@@ -337,7 +337,7 @@ test('真实 inventory taskKey/channel mismatch 与 duplicate 均给稳定结构
   );
 });
 
-test('等数量 unbound substitution 由冻结134-key digest拒绝', () => {
+test('等数量 unbound substitution 由冻结100-key digest拒绝', () => {
   const policies = mutableTaskPolicies();
   replacePolicyIdentity(
     policies,
@@ -346,7 +346,7 @@ test('等数量 unbound substitution 由冻结134-key digest拒绝', () => {
   );
   assert.equal(
     policies.filter((policy) => ['reserve', 'no-file'].includes(policy.batchPolicy)).length,
-    134
+    100
   );
   assert.throws(
     () => initializeActionTaskBindingRegistry(fakeTaskPolicyRegistry(policies)),

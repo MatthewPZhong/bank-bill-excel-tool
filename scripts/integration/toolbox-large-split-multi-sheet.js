@@ -47,7 +47,7 @@ const { exportFilter } = require('../../src/backend/toolbox-xlsx-stream/split-ex
 const { streamLogicalTableRows } = require('../../src/backend/toolbox-xlsx-stream/multi-sheet-reader');
 // 路由 + 中央目录探针（验证生成的多 sheet 夹具确实被判为大通道 + 数物理 sheet 数）。
 const { shouldUseLargeChannel } = require('../../src/main-process/toolbox-large-split-router');
-const { collectEntrySizes } = require('../../src/backend/pending-import/xlsx-size-preflight');
+const { collectEntrySizes } = require('../../src/backend/xlsx/legacy/entry-size-preflight');
 // T4 真 dispatch（B 部分：内部 new Worker，跑真 worker 拓扑）。
 const { dispatchLargeSplit } = require('../../src/main-process/toolbox-large-split-dispatch');
 

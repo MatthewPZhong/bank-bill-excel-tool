@@ -1,5 +1,5 @@
 'use strict';
-// 共用 XLSX 基础设施真实文件链路：账单预读、Toolbox 投影、Position/VCC spill、BizOP 候选输出。
+// 共用 XLSX 基础设施真实文件链路：账单预读、Toolbox 投影、Position/VCC spill（BizOP 候选输出随 v3.2.20 业务OP下线移除）。
 // fixture 与数据库均在本次独占临时目录；取消后 await close，并通过子进程自然退出检查私有 SST 目录。
 // 普通取消/正常退出不代表 worker 强制 terminate 回收或 Windows/Excel/WPS 验收。
 // 用法：node scripts/integration/shared-xlsx-boundary.js
@@ -8,12 +8,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createHash, randomUUID } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
-const { DatabaseSync } = require('node:sqlite');
 const XLSX = require('xlsx');
 const { Linter } = require('eslint');
-const { writeXlsx, flowRow } = require('../../tests/helpers/biz-op-v327-xlsx');
+const { writeXlsx } = require('../../tests/helpers/flow-statement-xlsx');
 const { readMeaningfulRowsHead } = require('../../src/backend/file-service/readers');
 const { streamToolboxXlsxTables } = require('../../src/main-process/toolbox-format-io');
 const { streamPositionXlsxRows } = require('../../src/backend/position-reconciliation-import/xlsx-reader');
@@ -22,9 +20,6 @@ const { BANK_SHEET_NAME } = require('../../src/main-process/position-reconciliat
 const { openWorkbookSheets, streamDetailRows } = require('../../src/backend/vcc-financial-op/workbook-reader');
 const { SOURCE_TYPES, PENDING_HEADERS } = require('../../src/backend/vcc-financial-op/definitions');
 const { openRichWorkbook } = require('../../src/backend/xlsx/rich-workbook');
-const { createBizOpPayloadStore, readVerifiedManifest } = require('../../src/main-process/biz-op-v327/payload-store');
-const { runImportPipeline } = require('../../src/main-process/biz-op-v327/import-pipeline');
-const { fsyncDirectory } = require('../../src/main-process/background-execution/durable-file');
 
 let passed = 0;
 const failures = [];
@@ -63,8 +58,6 @@ function createDeprecatedImportChecker() {
     ...leafNames.map((name) => `src/backend/toolbox-format/${name}.js`),
     'src/backend/big-table-import/zip-reader.js',
     'src/backend/position-reconciliation-import/shared-strings-provider.js',
-    'src/backend/pending-import/streaming-xlsx-reader.js',
-    'src/backend/pending-import/xlsx-size-preflight.js',
     'src/backend/xlsx-rich-reader.js'
   ].map((file) => path.join(repositoryRoot, file)));
   const assemblyFile = path.join(repositoryRoot, 'src/backend/toolbox-format/xlsx-pass.js');
@@ -211,38 +204,6 @@ async function run() {
       equal(fs.existsSync(tempRoot), false, 'VCC 所有者 await close 后清理');
     });
 
-    await group('BizOP 真实 rich reader→adapter→候选 SQLite 输出与资源清理', async () => {
-      const capability = fsyncDirectory(root);
-      if (capability.capability !== 'supported') {
-        skips.push(`BizOP 持久化成功链：宿主目录 fsync ${capability.errorCode}，不模拟屏障成功`);
-        return;
-      }
-      const store = createBizOpPayloadStore({ userDataDir: path.join(root, 'bizop') });
-      store.initialize();
-      const filePath = path.join(root, 'flow.xlsx');
-      await writeXlsx(filePath, { sharedStrings: ['000123'], rowCount: 2,
-        row: (index) => flowRow({ account: { t: 's', v: '0' }, amount: { t: 'n', v: precise }, number: `000${index + 1}` }) });
-      const taskRunId = `task-${randomUUID()}`;
-      const candidateRef = `candidate-${randomUUID()}`;
-      const reportRef = `report-${randomUUID()}`;
-      const output = await runImportPipeline({ payloadStore: store, taskRunId, candidateRef, reportRef,
-        intentDigest: 'f'.repeat(64), options: { sstMemoryBudgetBytes: 1 },
-        files: [{ filePath, artifactId: 1, order: 0, sha256: createHash('sha256').update(fs.readFileSync(filePath)).digest('hex') }] });
-      const result = store.readDocument(`operations/${taskRunId}/${candidateRef}.json`, output.sha256).value;
-      equal(result.batchRejected, false, 'BizOP 接收合法输入');
-      equal(result.acceptedRows, 2, 'BizOP 接收行数');
-      truth(result.metrics.sstSpillBytes > 0, 'BizOP 实际触发 spill');
-      const reference = result.references[0];
-      const manifest = readVerifiedManifest(await store.verifyManifest(`inputs/${reference.objectId}/manifest.json`, reference.digest));
-      const database = new DatabaseSync(store.resolve(`inputs/${reference.objectId}/${manifest.parts[0].name}`), { readOnly: true });
-      try {
-        const rows = database.prepare('SELECT account_no,recon_amount,flow_no,key_currency,source_row FROM flow_check_rows ORDER BY row_ordinal').all();
-        equal(rows.map((row) => ({ ...row })), [2, 3].map((sourceRow, index) => ({ account_no: '000123', recon_amount: precise,
-          flow_no: `000${index + 1}`, key_currency: 'USD', source_row: sourceRow })), 'BizOP 候选金额/身份/币种/血缘');
-      } finally { database.close(); }
-      equal(fs.existsSync(store.resolve(`staging/${taskRunId}`, { mustExist: false })), false, 'BizOP 最后资源关闭后 staging 清理');
-    });
-
     await group('rich 普通取消、await close 与真实子进程自然退出', async () => {
       const tempRoot = path.join(root, 'child-sst');
       const child = spawnSync(process.execPath, [__filename, '--close-child', fixture, tempRoot], {
@@ -273,7 +234,7 @@ async function run() {
       equal(violations, [], '生产路径弃用 API 入边');
       const probe = path.join(sourceRoot, 'backend/shared-xlsx-boundary-probe.js');
       for (const source of [
-        "const { parseRowXml } = require('./pending-import/streaming-xlsx-reader');",
+        "const { createSharedStringsProvider } = require('./position-reconciliation-import/shared-strings-provider');",
         "require('./toolbox-format/xlsx-pass').parseWorkbookXml('');",
         "const { parseWorkbookXml } = require('./toolbox-format');"
       ]) equal(check(source, probe).length, 1, '旧 shim/helper/聚合 helper 均被检查拒绝');

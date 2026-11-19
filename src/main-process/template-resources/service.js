@@ -1053,7 +1053,8 @@ function createTemplateResourceService({
     const names = new Map(TEMPLATE_RESOURCES.map((resource) => [resource.id, displayNameOf(resource)]));
     return {
       status: 'success',
-      changes: store.listTemplateResourceChanges(MAX_CHANGES).map((change) => ({
+      // v3.2.20：只列出当前目录中的资源；已下线模块资源的旧记录保留在库中，不再展示为失效链接。
+      changes: store.listTemplateResourceChanges(MAX_CHANGES, [...names.keys()]).map((change) => ({
         at: localTimeText(change.createdAt),
         resourceId: change.resourceId,
         resourceName: names.get(change.resourceId) || change.resourceId,

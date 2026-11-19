@@ -1,15 +1,11 @@
 const { initializeActionTaskBindingStartup } = require('./main-process/background-execution/action-task-binding-registry');
-const { legacyMode, withLegacyRecovery, retiredError } = require('./backend/biz-op-legacy-guard');
-const { registerWithLegacyGuard } = require('./main-process/biz-op-v327/legacy-ipc');
-const { createBizOpV327Module } = require('./main-process/biz-op-v327/module');
-const { registerBizOpV327Handlers } = require('./main-process/biz-op-v327/ipc');
-const { ACTIONS: BIZ_OP_V327_ACTIONS } = require('./main-process/biz-op-v327/contracts');
 const {
   createRecoveryControlRepository
 } = require('./main-process/background-execution/critical/recovery-control-repository');
 const {
   createRecoveryControlReadRepository
 } = require('./main-process/background-execution/critical/recovery-control-read-repository');
+const { withoutRetiredRecoveryRecords } = require('./main-process/background-execution/retired-recovery-actions');
 const {
   createRecoveryObservationAttemptRepository,
   createRecoveryRequestOwnerRepository
@@ -65,35 +61,6 @@ const {
   shouldAcceptInitialRendererMetrics,
   waitForWindowReady
 } = require('./main-process/startup-window');
-const { openPendingDb, PENDING_DB_FILENAME } = require('./backend/pending-db');
-const PENDING_COLUMNS = require('./backend/pending-db/columns');
-const pendingRuleRepo = require('./backend/pending-db/rule-repository');
-const pendingMonthRepo = require('./backend/pending-db/month-repository');
-const pendingDiffRepo = require('./backend/pending-db/diff-repository');
-const pendingReconcileEngine = require('./backend/pending-reconcile/engine');
-const pendingExportWriter = require('./backend/pending-export/writer');
-// v2.1.11 T2 移除核对：移除归档文件 reader + 入库 repo + 对账后 missing↔移除 匹配
-const pendingRemovedReader = require('./backend/pending-import/removed-reader');
-const pendingRemovedRepo = require('./backend/pending-db/removed-repository');
-const pendingRemovalMatch = require('./backend/pending-reconcile/removal-match');
-const { createPendingDatasetSeed } = require('./backend/pending-db/dataset-identity');
-const { createPendingSession } = require('./main-process/pending-session');
-const {
-  executePendingImportSubmission,
-  pendingImportError,
-  pendingMonthEvidenceValue,
-  preparePendingImportSubmission,
-  readPendingMonthEvidence
-} = require('./main-process/pending-import-preflight');
-const {
-  createPendingTerminalRouteRegistration,
-  pendingAggregateRunSelection,
-  pendingRunLineagePlan,
-  pendingRunTerminalRoute,
-  publicPendingRun,
-  recoverPendingRunReceipts,
-  runOutputLineageIntent
-} = require('./main-process/pending-archive-lineage');
 const {
   createPreFundTerminalRouteRegistration,
   preFundRunTerminalRoute,
@@ -178,23 +145,11 @@ const {
   createArchiveCenterController
 } = require('./main-process/archive-center/controller');
 const { resolveRetentionDays } = require('./main-process/archive-center/retention-policy');
+const { createRetiredTerminalRouteRegistrations } = require('./main-process/archive-center/retired-terminal-routes');
 const {
   createArchiveOutboxStore
 } = require('./main-process/archive-center/outbox-store');
 const { applyWatermark } = require('./main-process/workbook-watermark');
-// v2.1.6 Module B T9：收单单据币种校验 — session + writer
-const acquiringBillCurrencySession = require('./main-process/acquiring-bill-currency-session');
-// v2.1.8 N1：before-quit 钩子需 module-level runRepo（IPC handler 内 require 来不及）
-const runRepo = require('./backend/acquiring-bill-currency-db/run-repository');
-// v2.1.10 A3 T10：runCheck 跨进程化 — worker pool 在主进程单例
-//   - dispatchRunCheck：IPC handler 调用入口（替代 session.runCheck 直调）
-//   - cancel：acquiringBillCurrency:run:cancel handler 转发用
-//   - isBusy：N1' idle cleanup 协调用（Phase 2 T12）
-//   - shutdown：app.before-quit 时清理（Phase 2 T15）
-const runCheckWorkerPool = require('./main-process/run-check-worker-pool');
-// v3.0.5 PR-3（Part B Phase 1）：收单 per-月侧库编排层（import/run/status/listMonths/孤儿/retention 路由侧库）
-const acquiringRunData = require('./main-process/acquiring-bill-currency-run-data');
-const runDataStore = require('./backend/run-data-store');
 // v3.0.14：前置资金对账 session/service（临时 MPT + 严格1:1 + 5-sheet 导出）。
 const {
   createPreFundReconciliationService
@@ -290,32 +245,14 @@ const {
   positionPersistentStagingProtectionPaths,
   positionReconciliationFailureResult
 } = require('./main-process/position-reconciliation/operation-lifecycle');
-// v3.0.5 PR-4（Part B Phase 2）：biz-op / bank-bu per-月侧库编排层（import/run/status/导出/孤儿 路由侧库）
-const bizOpReconRunData = require('./main-process/biz-op-recon-run-data');
-const {
-  bizOpRunOutputIntent,
-  bizOpRunTerminalRoute,
-  publicBizOpRun
-} = require('./main-process/biz-op-archive-lineage');
-const bankBuReconRunData = require('./main-process/bank-bu-recon-run-data');
-// v2.1.10 N4-cont-1 T23 (Phase 4)：raw_json idle 自动清理函数
-//   - 复用 v2.1.9 N1' idle 30min cleanup 计时器（spec §4.3.1）
-//   - 仅清「对账成功」（不在 diff_rows）且 imported_at < retentionDays 天前的 bill_imports.raw_json
-//   - 差异行 raw_json 永远保留（writer.js:184 重导差异 xlsx 依赖）
-const { clearStaleSuccessfulRawJson } = require('./backend/acquiring-bill-currency-db/raw-json-retention');
 
-// v2.1.8 N1' (v0.7)：idle 30min 自动 cleanup 计时器（spec §3.2.2 N1''-D6 ~ D13）
-//   - lastActivityTs：renderer 上报的用户最后活动时间（IPC `app:user-activity`），main 也用 mutex 间接判定（D6 AND 设计）
-//   - IDLE_CLEANUP_MS：闲置阈值
-//     v2.1.8：常量硬编码 30min（D8）
-//     v2.1.9 N1-settings (T32c, D21=c)：改 settings 化（5-180 分钟可调，默认 30）；启动期从 DB 读
-//       D21=c 决议：不提供 UI 设置入口，用户需用 sqlite3 客户端 UPDATE app_settings 后重启应用生效
-//   - IDLE_CHECK_INTERVAL_MS：定时器轮询粒度（2 分钟，远小于 30min 阈值，足够及时）
-let IDLE_CLEANUP_MS = 30 * 60 * 1000; // 启动后会被 setupIdleCleanupTimer 内 settings 值覆盖（默认 30 fallback）
+// 空闲维护计时器（v3.2.17 起驱动空闲时自动整理主库）
+//   - lastUserActivityTs：renderer 上报的用户最后活动时间（IPC `app:user-activity`）
+//   - IDLE_CHECK_INTERVAL_MS：定时器轮询粒度（2 分钟）
+//   v3.2.20：原收单单据币种校验的空闲清理随模块下线移除。
 const IDLE_CHECK_INTERVAL_MS = 2 * 60 * 1000;
 let lastUserActivityTs = Date.now();
 let idleCleanupTimer = null;
-const acquiringBillCurrencyWriter = require('./main-process/acquiring-bill-currency-writer');
 // v2.1.6 Module A T3：启动 log 头注入作者 + build SHA
 const pkg = require('../package.json');
 let buildInfo = { commit: 'dev' };
@@ -397,34 +334,6 @@ const {
   trimTrailingEmptyCells: trimToolboxTrailingEmptyCells,
   FileValidationError: LinkedFileValidationError
 } = require('./backend/file-service/common');
-// v2.1.2 T2：月度银行对账单BU回填校验模块
-const { createBankBuReconSession, runReconciliation: runBankBuRecon } = require('./main-process/bank-bu-recon-session');
-const {
-  writeDiffWorkbook: writeBankBuReconDiffWorkbook,
-  writeAggregateDiffWorkbook: writeBankBuReconAggregateDiffWorkbook
-} = require('./main-process/bank-bu-recon-writer');
-const { readPendingGuanliFile, readBankFile } = require('./backend/bank-bu-recon-import/reader');
-// v2.1.3：业务OP数据核对模块
-// v2.1.3-fix7-M1：删 makeSingleDateDiffFileName / makeDateRangeDiffFileName 死 import
-// （文件名生成在 ipc handler 内部直接 require session 调用，main.js 顶层无引用）
-const {
-  addOneDay: addBizOpOneDay,
-  createBizOpReconSession,
-  // v2.1.12-beta β.2-T2：默认走 worker 化导入入口（流式 + 边读边插，解决百万行 OOM/卡主线程）
-  //   旧同步 runBizOpImportAsync/runFlowImportAsync 保留作 contract 基线 / 无 dbPath 兜底（worker 入口内部回退）
-  runBizOpImportViaWorker: runBizOpImport,
-  runFlowImportViaWorker: runFlowImport
-} = require('./main-process/biz-op-recon-session');
-const {
-  writeSingleDateDiffWorkbook: writeBizOpSingleDateDiffWorkbook,
-  writeDateRangeDiffWorkbook: writeBizOpDateRangeDiffWorkbook,
-  writeBizOpErrorReportXlsx,
-  writeFlowErrorReportXlsx
-} = require('./main-process/biz-op-recon-writer');
-const {
-  readBizOpFile,
-  readFlowFile
-} = require('./backend/biz-op-recon-import/reader');
 // v2.1.12 需求1：VCC业务OP计算模块（仅流水文件 → 按月聚合发生额出/入 → 算期末OP，资金红线 🔴）
 const { createVccOpCalcSession } = require('./main-process/vcc-op-calc-session');
 const {
@@ -526,28 +435,6 @@ const {
   createBackgroundExecutionRuntimeManager
 } = require('./main-process/execution-descriptors/composition');
 const {
-  PENDING_READ_ONLY_ACTIONS
-} = require('./main-process/read-only-exports/pending/policies');
-const {
-  assertPendingRunEvidence,
-  freezePendingRunEvidence,
-  withReadSnapshot: withPendingReadSnapshot
-} = require('./main-process/read-only-exports/pending/query');
-const {
-  generateValidateAndPublishPendingExport,
-  writePendingManagedErrorSource
-} = require('./main-process/read-only-exports/pending/managed-export');
-const {
-  BIZ_OP_READ_ONLY_ACTIONS
-} = require('./main-process/read-only-exports/biz-op/policies');
-const {
-  assertBizOpSourceSnapshot,
-  freezeBizOpSourceSnapshot
-} = require('./main-process/read-only-exports/biz-op/query');
-const {
-  generateValidateAndPublishBizOpExport
-} = require('./main-process/read-only-exports/biz-op/managed-export');
-const {
   PRE_FUND_READ_ONLY_ACTIONS
 } = require('./main-process/read-only-exports/pre-fund/policies');
 const {
@@ -582,16 +469,6 @@ const {
   generateValidateAndPublishVccFinancialOpExport
 } = require('./main-process/read-only-exports/vcc-financial-op/managed-export');
 const {
-  ACQUIRING_EXPORT_ACTIONS
-} = require('./main-process/read-only-exports/acquiring/policies');
-const {
-  assertAcquiringCopySourceFresh,
-  freezeAcquiringCopySource
-} = require('./main-process/read-only-exports/acquiring/query');
-const {
-  generateValidateAndPublishAcquiringExport
-} = require('./main-process/read-only-exports/acquiring/managed-export');
-const {
   TOOLBOX_GENERATION_ACTIONS
 } = require('./main-process/toolbox-background/generation-contract');
 const {
@@ -611,6 +488,11 @@ const {
 } = require('./main-process/toolbox-output-publication-dispatch');
 const { createPublicationRecoveryCoordinator } = require('./main-process/publication-recovery/coordinator');
 const { createArchivePublicationOwner } = require('./main-process/publication-recovery/archive-owner');
+const {
+  RETIRED_PUBLICATION_DEFER_CODE,
+  RETIRED_PUBLICATION_MANUAL_CODE,
+  createRetiredModulePublicationOwner
+} = require('./main-process/publication-recovery/retired-module-owner');
 const {
   JOURNAL_INDEX_NAME
 } = require('./main-process/toolbox-output-publication');
@@ -874,7 +756,6 @@ if (!hasSingleInstanceLock) {
   });
 }
 let database = null;
-let pendingDb = null;
 // v3.2.18【导入模板】：已预检、待用户命名确认的模板文件（不跨重启）。
 const pendingTemplateImports = createPendingTemplateImportStore();
 let preFundReconciliationService = null;
@@ -888,7 +769,6 @@ let appUpdateTransitionToken = null;
 // v3.2.14：升级后首次启动的「更新说明」，启动时判定一次，不跨重启。
 let releaseNotesState = null;
 let archiveCenterService = null;
-let bizOpV327Module = null;
 let publicationRecoveryCoordinator = null;
 
 function recoverArchivePublications(options) {
@@ -952,21 +832,8 @@ const backgroundExecutionRuntimeManager = createBackgroundExecutionRuntimeManage
         at: event.at, lease: event.leaseId || event.resourceId })
     ] });
   },
-  toolboxPublication: { recover: recoverArchivePublications },
-  bizOpV327Provider: () => bizOpV327Module && bizOpV327Module.runtimeBindings,
   workerDurableCoordinatorProvider: () => backgroundWorkerDurableCoordinator,
   reconFixJpmDatabasePathProvider: () => database && database.dbPath,
-  pendingDatabasePathProvider: () => (
-    app.isReady() ? path.join(app.getPath('userData'), PENDING_DB_FILENAME) : null
-  ),
-  mainDatabasePathProvider: () => database && database.dbPath,
-  acquiringMainDbProvider: () => database && database.db,
-  acquiringLog: (entry) => {
-    try { appendActivityLogEntry(entry || {}); } catch (_error) {}
-  },
-  userDataDirProvider: () => database && database.dbPath
-    ? path.dirname(database.dbPath)
-    : null,
   duplicateStartupGateProvider: () => Object.freeze({
     contractVersion: DUPLICATE_STARTUP_GATE_CONTRACT_VERSION,
     startupRecoveryReady: applicationRecoveryCoordinator?.snapshot().platformScanCompleted === true
@@ -1072,27 +939,6 @@ function attachReadOnlyExportReceiptAcknowledgement(prepared) {
   return prepared;
 }
 
-function assertPendingEvidenceFresh(expected) {
-  return withPendingReadSnapshot(pendingDb, () => assertPendingRunEvidence(pendingDb, expected));
-}
-
-function assertPendingErrorAuthorityFresh(authority) {
-  if (!pendingSession.isErrorReportSnapshotCurrent(authority)) {
-    const error = new Error('Pending 错误报告已变化，请重新导出');
-    error.code = 'PENDING_EXPORT_SOURCE_STALE';
-    throw error;
-  }
-}
-
-function assertBizOpEvidenceFresh(expected, selector) {
-  const current = freezeBizOpSourceSnapshot({
-    userDataDir: path.dirname(database.dbPath),
-    mainDb: database.db,
-    selector
-  });
-  return assertBizOpSourceSnapshot(current, expected);
-}
-
 function assertPreFundEvidenceFresh(expected, locator, templatePath) {
   const current = freezePreFundSourceSnapshot({
     mainDb: database.db,
@@ -1133,62 +979,6 @@ async function assertPositionEvidenceFresh(service, expected, context) {
     reportFiles: context.reportFiles
   });
   return assertPositionSourceSnapshot(current, expected);
-}
-
-async function assertAcquiringCopyEvidenceFresh(expected) {
-  return assertAcquiringCopySourceFresh(expected, {
-    userDataDir: path.dirname(database.dbPath),
-    mainDb: database.db
-  });
-}
-
-async function executeManagedAcquiringCopyExport(prepared, taskContext) {
-  const stagingRoot = createReadOnlyExportStagingDirectory(
-    taskContext.batchContext,
-    'acquiring-copy'
-  );
-  let preserveStaging = false;
-  try {
-    const generationPlan = createReadOnlyExportGenerationPlan(
-      stagingRoot,
-      taskContext,
-      ACQUIRING_EXPORT_ACTIONS.COPY
-    );
-    const assertSourceFresh = () => assertAcquiringCopyEvidenceFresh(
-      prepared.acquiringReadOnlyExportSource
-    );
-    const generated = await generateValidateAndPublishAcquiringExport({
-      runtime: backgroundExecutionRuntimeManager.get(),
-      actionKey: ACQUIRING_EXPORT_ACTIONS.COPY,
-      operationKey: taskContext.batchContext.operationKey,
-      taskRunId: taskContext.batchContext.taskRunId,
-      batchContext: taskContext.batchContext,
-      stableRunEvidence: prepared.acquiringReadOnlyExportSource.stableRunEvidence,
-      dbPathOrManagedSource: prepared.acquiringReadOnlyExportSource.dbPathOrManagedSource,
-      generationPlan,
-      context: prepared.acquiringReadOnlyExportSource.context,
-      production: true,
-      assertSourceFresh,
-      publisher: (artifacts) => publishReadOnlyExportArtifacts(
-        'acquiring-copy', artifacts, taskContext
-      )
-    });
-    prepared.readOnlyExportPublicationTaskIds = [generated.publication.taskId];
-    const published = generated.publication.files[0];
-    return {
-      status: 'success',
-      runId: generated.summary.runId,
-      source: prepared.exportPlan.source,
-      monthKey: generated.summary.monthKey,
-      savedPath: published.filePath,
-      sourceDiffPath: prepared.exportPlan.diffFilePath
-    };
-  } catch (error) {
-    preserveStaging = shouldPreserveToolboxTemporaryFiles(error);
-    throw error;
-  } finally {
-    if (!preserveStaging) cleanupReadOnlyExportStagingDirectory(stagingRoot);
-  }
 }
 
 async function executeManagedPositionReadOnlyExport(service, prepared, taskContext) {
@@ -1421,17 +1211,8 @@ const positionTaskOwner = createPositionTaskOwner({
 });
 const terminalRouteRegistrations = [
   positionTaskOwner.terminalRegistration,
-  createPendingTerminalRouteRegistration({ getDb: () => pendingDb }),
-  bizOpReconRunData.createBizOpRunTerminalRouteRegistration({
-    getUserDataDir: () => path.dirname(database.dbPath),
-    getMainDb: () => database.db,
-    assertLegacyAvailable: () => {
-      const mode = legacyMode(database.db);
-      if (mode === 'ACTIVE' || ['LEGACY_DB_CLEARED', 'LEGACY_FILES_RECLAIMED']
-        .includes(bizOpV327Module?.activation.status().phase)) throw retiredError();
-    },
-    withLegacyRecovery
-  }),
+  // v3.2.20：已下线模块（Pending / 业务OP）的遗留终态 route 只保留识别；其通知由存档中心原样留给回退旧版。
+  ...createRetiredTerminalRouteRegistrations(),
   createPreFundTerminalRouteRegistration({ getService: getPreFundReconciliationService })
 ];
 const businessOperationRegistry = createBusinessOperationRegistry();
@@ -1497,20 +1278,6 @@ const taskPolicyBindingHost = Object.freeze({
 const { actionTaskBindingRegistry, run: runActionTaskBindingStartup } = initializeActionTaskBindingStartup(taskPolicyBindingHost, Object.freeze({ initializeDatabase: initializeApplication, registerIpc: registerAllIpcHandlers }));
 const supportActionChannels = new Set(SUPPORT_ACTION_POLICIES.map((policy) => policy.channel));
 const scenarioImportContextStore = createScenarioImportContextStore();
-const pendingSession = createPendingSession({
-  getPendingDb: () => pendingDb,
-  getStorageRoot: () => ensureStorageRoot()
-});
-// v2.1.2 T2：月度银行对账单BU回填校验 session（主 DB tool-data.sqlite）
-const bankBuReconSession = createBankBuReconSession({
-  getDb: () => database && database.db,
-  getStorageRoot: () => ensureStorageRoot()
-});
-// v2.1.3：业务OP数据核对 session（主 DB tool-data.sqlite）
-const bizOpReconSession = createBizOpReconSession({
-  getDb: () => database && database.db,
-  getStorageRoot: () => ensureStorageRoot()
-});
 // v2.1.12 需求1：VCC业务OP计算 session（主 DB tool-data.sqlite，资金红线 🔴）
 const vccOpCalcSession = createVccOpCalcSession({
   getDb: () => database && database.db
@@ -1595,7 +1362,6 @@ let lastFileImportContext = null;
 let lastManualBalancePrompt = null;
 let lastPendingBalanceSeedConfirmation = null;
 let lastPendingBigAccountSelection = null;
-let lastPendingImportConfirmation = null;
 let fileImportInProgress = false;
 let statementImportSessions = new Map();
 let nextStatementBatchId = 1;
@@ -1776,53 +1542,11 @@ function buildStatementInputFilePlanItems(selections, sourceOperation) {
   })));
 }
 
-function createPendingImportFreshnessGuard({ db, yearMonth, files, evidence }) {
-  const expectedEvidence = pendingMonthEvidenceValue(evidence);
-  const assertSourceFresh = createPreviewSourceFreshnessGuard(files, 'Pending 导入');
-  return () => {
-    assertSourceFresh();
-    if (!pendingDb || pendingDb !== db) {
-      throw new Error('Pending 数据库在确认期间已变化，请重新导入');
-    }
-    const currentEvidence = readPendingMonthEvidence(db, pendingMonthRepo, yearMonth);
-    if (pendingMonthEvidenceValue(currentEvidence) !== expectedEvidence) {
-      throw new Error(`Pending 月份 ${yearMonth} 在确认期间已变化，请重新导入`);
-    }
-  };
-}
-
-// v2.1.6 fix3 → fix9 → fix10：收单单据币种校验模块的通用 operation lock
-// 提到 module-level 是为 fix10 启动钩子（app.whenReady 链中 setImmediate 调 cleanupOrphanData）
-// 也需要 acquire lock，避免和 IPC handler 并发；register 函数内部仍可访问（JS 闭包向外查找）
-const acquiringBillCurrencyOperationLock = { inFlight: false, operation: null, monthKey: null };
-function tryAcquireAcquiringBillCurrencyOpLock(operation, monthKey) {
-  if (businessOperationRegistry.isInstallTransitionActive()) {
-    return { acquired: false, message: INSTALL_BUSY_MESSAGE };
-  }
-  if (acquiringBillCurrencyOperationLock.inFlight) {
-    const lock = acquiringBillCurrencyOperationLock;
-    const opLabel = { import: '导入', run: '对账', export: '导出', cleanup: '上一次对账后清理' }[lock.operation] || lock.operation;
-    const message = lock.operation === 'cleanup'
-      ? `${opLabel} ${lock.monthKey || ''} 数据中，请稍后再操作`
-      : `当前有${opLabel}任务在执行，请等待完成后再试`;
-    return { acquired: false, message };
-  }
-  acquiringBillCurrencyOperationLock.inFlight = true;
-  acquiringBillCurrencyOperationLock.operation = operation;
-  acquiringBillCurrencyOperationLock.monthKey = monthKey || null;
-  return { acquired: true };
-}
-function releaseAcquiringBillCurrencyOpLock() {
-  acquiringBillCurrencyOperationLock.inFlight = false;
-  acquiringBillCurrencyOperationLock.operation = null;
-  acquiringBillCurrencyOperationLock.monthKey = null;
-}
-
 // v3.0.11 需求3（批1 · 🔴 资金红线）：银行对账单处理模块的统一 operation lock。
 //   三动作 import(bank-statement:batch-import) / run(bank-statement:run) / export(bank-statement:export)
 //   共享同一把互斥锁 —— 它们共享全局会话态 bankStatementSession / processingResult / refundOrderSession /
 //   gatewayReconSession，并发执行会撕裂状态（如导出读到运行中途的半截 processingResult）。
-//   争用即返回 { status:'failed', message:'正在处理中…' }；handler finally 释放（仿收单 acquiringBillCurrencyOperationLock）。
+//   争用即返回 { status:'failed', message:'正在处理中…' }；handler finally 释放。
 const bankStatementOperationLock = { inFlight: false, operation: null };
 function tryAcquireBankStatementOpLock(operation) {
   if (businessOperationRegistry.isInstallTransitionActive()) {
@@ -5428,18 +5152,9 @@ function releaseAppUpdateTransition() {
 }
 
 // 空闲整理准入：未登记到业务操作登记表的写入方也视为忙（与升级重启前的忙检查同口径）——
-//   收单启动孤儿清理与切回模块触发的后台清理（只持收单操作锁/后台清理标记）、银行对账单操作锁、收单校验 worker。
-//   整理开始后这些入口会因过渡租约拿不到锁，这里只需挡住整理开始前已在进行的写入。
+//   银行对账单操作锁。整理开始后该入口会因过渡租约拿不到锁，这里只需挡住整理开始前已在进行的写入。
 function idleCompactionBusyReason() {
-  if (acquiringBillCurrencyOperationLock.inFlight || cleanupBackgroundInProgress) return 'acquiring-operation-busy';
   if (bankStatementOperationLock.inFlight) return 'bank-statement-operation-busy';
-  try {
-    if (runCheckWorkerPool && typeof runCheckWorkerPool.isBusy === 'function' && runCheckWorkerPool.isBusy()) {
-      return 'acquiring-worker-busy';
-    }
-  } catch (_error) {
-    return 'acquiring-worker-status-unknown';
-  }
   return '';
 }
 
@@ -5455,14 +5170,6 @@ function listUpdateRestartBusyOperations() {
 
   const busy = [];
   if (bankStatementOperationLock.inFlight) busy.push('资金对账数据处理');
-  if (acquiringBillCurrencyOperationLock.inFlight) busy.push('收单单据币种校验');
-  try {
-    if (runCheckWorkerPool && typeof runCheckWorkerPool.isBusy === 'function' && runCheckWorkerPool.isBusy()) {
-      busy.push('收单校验 worker');
-    }
-  } catch (_error) {
-    busy.push('收单校验 worker 状态检查');
-  }
 
   if (busy.length > 0) releaseAppUpdateTransition();
   return busy;
@@ -5945,34 +5652,6 @@ async function recoverPositionPendingBeforeInterruptedSweep() {
   }
 }
 
-function recoverPendingRunsBeforeInterruptedSweep() {
-  if (!pendingDb || !archiveCenterService) {
-    throw new Error('Pending run Archive 恢复依赖尚未就绪');
-  }
-  return recoverPendingRunReceipts({
-    db: pendingDb,
-    archiveService: archiveCenterService.service
-  });
-}
-
-function recoverBizOpRunsBeforeInterruptedSweep({ activationOwner = false } = {}) {
-  if (!activationOwner && database?.db && legacyMode(database.db) !== 'DISABLED') return Promise.resolve({ retired: true });
-  if (!database || !database.db || !archiveCenterService) {
-    throw new Error('Biz OP run Archive 恢复依赖尚未就绪');
-  }
-  return bizOpReconRunData.recoverRunReceipts({
-    userDataDir: path.dirname(database.dbPath),
-    mainDb: database.db,
-    archiveService: archiveCenterService.service
-  }).then(async (runReceipts) => ({
-    runReceipts,
-    monthEndCopies: await bizOpReconRunData.recoverMonthEndCopyIntents({
-      userDataDir: path.dirname(database.dbPath),
-      archiveService: archiveCenterService.service
-    })
-  }));
-}
-
 function recoverPreFundRunsBeforeInterruptedSweep() {
   if (!archiveCenterService) {
     throw new Error('前置资金 run Archive 恢复依赖尚未就绪');
@@ -6011,22 +5690,12 @@ function protectedInterruptedTaskBatchIds() {
   const batchIds = new Set();
   const taskRunIds = [];
   try {
-    if (bizOpV327Module) {
-      const protection = bizOpV327Module.protectedTasks();
-      protection.batchIds.forEach((id) => batchIds.add(id));
-      taskRunIds.push(...protection.taskRunIds);
-    }
-  } catch (error) { return { batchIds: [], taskRunIds: [], sweepUnsafe: true, error }; }
-  try {
     const protection = positionTaskOwner.protectedInterruptedTasks();
     protection.batchIds.forEach((id) => batchIds.add(id));
     taskRunIds.push(...protection.taskRunIds);
   } catch (error) {
     return { batchIds: [...batchIds], taskRunIds, sweepUnsafe: true, error };
   }
-  for (const batchId of acquiringRunData.listRecoverableArchiveBatchIds({
-    userDataDir: path.dirname(database.dbPath)
-  })) batchIds.add(batchId);
   const toolboxProtection = readToolboxRecoveryBatchIds(app.getPath('userData'));
   if (toolboxProtection.sweepUnsafe === true) {
     return {
@@ -6071,9 +5740,6 @@ function initializeArchiveCenter() {
       rootDir,
       resolveRetentionDays: (moduleId) => resolveRetentionDays(database, moduleId),
       opener: (filePath) => shell.openPath(filePath),
-      onArtifactReady: (completed, repository) => {
-        if (bizOpV327Module) bizOpV327Module.readyHold(completed, repository);
-      },
       onSourceReleased: positionTaskOwner.cleanupPositionArchiveSourcePaths
     });
     service.runDeleteWithOwnerGuard = (batchId, operation, options) => (
@@ -6181,23 +5847,6 @@ function initializeArchiveCenter() {
     operationTracker: archiveOperationTracker,
     persistTerminalIntent: (payload) => archiveCenterService.persistTaskTerminalIntent(payload),
     onArchiveWarning: reportArchiveFailure
-  });
-  bizOpV327Module.activation.bindHost({
-    assertStartAllowed() {
-      if (mainWindow || businessOperationRegistry.listActive().length > 0 || !app.hasSingleInstanceLock()) {
-        throw Object.assign(new Error('激活必须在持有单实例锁且业务窗口尚未开放的启动阶段执行'), { code: 'BIZOP_ACTIVATION_STARTUP_REQUIRED' });
-      }
-    },
-    getTaskLifecycle: () => archiveTaskLifecycle,
-    getRuntime: () => backgroundExecutionRuntimeManager.get(),
-    getArchiveService: () => archiveCenterService.service,
-    recoverLegacy: () => recoverBizOpRunsBeforeInterruptedSweep({ activationOwner: true }),
-    async flushLegacyOutbox() {
-      const result = await archiveCenterService.flushOutbox();
-      if (!result || result.remaining !== 0) throw Object.assign(new Error('旧任务 outbox 未完成'), { code: 'BIZOP_LEGACY_OUTBOX_PENDING' });
-      await archiveCenterService.service.replayFlowBindIntents();
-      await archiveCenterService.service.replayTaskFlowBindIntents();
-    }
   });
   archiveCenterInitializationPromise = archiveCenterService.initialize().catch((error) => {
     appendActivityLogEntry({
@@ -7031,7 +6680,7 @@ function registerAppHandlers() {
       }
       // 新一轮运行一旦开始，上一轮结果立即失效。后续预检或引擎失败时不得继续导出旧结果。
       processingResult = null;
-      // v3.0.8 需求3：run 进度转发器（内联，仿 createRunProgressForwarder）。事件只读不写 processingResult。
+      // v3.0.8 需求3：run 进度转发器（内联）。事件只读不写 processingResult。
       //   🔴 必须内联：本 handler 与收单模块 register 函数不在同一作用域，不能引用其内定义的 forwarder（否则运行时 not defined）。
       const onProgress = (!event || !event.sender) ? null : (ev) => {
         try { event.sender.send('bank-statement:run:progress', { ...ev, phase: 'run' }); }
@@ -17687,1556 +17336,6 @@ function registerNewAccountHandlers() {
     }
   });
 
-  ipcMain.handle('pending:columns', () => PENDING_COLUMNS.slice());
-
-  ipcMain.handle('pending:rule:get', () => {
-    if (!pendingDb) return null;
-    try {
-      return pendingRuleRepo.getRule(pendingDb);
-    } catch (err) {
-      try {
-        appendActivityLogEntry({
-          level: 'error',
-          message: 'pending:rule:get 失败',
-          details: [String(err && err.stack ? err.stack : err)]
-        });
-      } catch (_logErr) {
-        // swallow
-      }
-      return null;
-    }
-  });
-
-  trackedIpcHandle('pending:rule:save', '月度 Pending', '规则管理', (_event, payload) => {
-    if (!pendingDb) {
-      throw new Error('Pending DB 未初始化，无法保存规则');
-    }
-    // PR #34 round 4 P2：包一层 status 让 trackedIpcHandle 能识别成功
-    const data = pendingRuleRepo.upsertRule(pendingDb, payload || {});
-    return { status: 'success', ...data };
-  });
-
-  ipcMain.handle('pending:months:list', () => {
-    if (!pendingDb) return [];
-    try { return pendingMonthRepo.listMonths(pendingDb); } catch (_err) { return []; }
-  });
-
-  ipcMain.handle('pending:import:pick-files', async () => {
-    const result = await showImportOpenDialog('pending-reconciliation', {
-      title: '选择 Pending 数据文件',
-      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
-      properties: ['openFile', 'multiSelections']
-    });
-    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
-      return { cancelled: true };
-    }
-    return { cancelled: false, files: result.filePaths };
-  });
-
-  trackedIpcHandle('pending:import:start', '月度 Pending', '导入文件', {
-    async prepare(_event, payload = {}) {
-      try {
-        const resolution = preparePendingImportSubmission({
-          payload,
-          confirmation: lastPendingImportConfirmation,
-          db: pendingDb,
-          monthRepository: pendingMonthRepo,
-          dbPath: path.join(app.getPath('userData'), PENDING_DB_FILENAME),
-          createContextId: randomUUID,
-          createFreshnessGuard: createPendingImportFreshnessGuard
-        });
-        lastPendingImportConfirmation = resolution.nextConfirmation;
-        return resolution.prepared;
-      } catch (error) {
-        return {
-          proceed: false,
-          result: pendingImportError(
-            error && error.message ? error.message : 'Pending 导入准备失败'
-          )
-        };
-      }
-    },
-
-    async execute(event, prepared, taskContext) {
-      if (prepared.overwriteConfirmed === true) {
-        // 真实 execute 入口只消费一次主进程确认上下文。
-        lastPendingImportConfirmation = null;
-      }
-      const webContents = event.sender;
-      return executePendingImportSubmission({
-        pendingSession,
-        prepared,
-        filePaths: taskContext.fileEvidence.filePlan.inputs
-          .map((item) => item.filePath),
-        batchContext: taskContext.batchContext,
-        datasetSeed: createPendingDatasetSeed(
-          prepared.evidence.meta,
-          taskContext.batchContext.taskRunId
-        ),
-        onProgress: (ev) => {
-          try { webContents.send('pending:import:progress', ev); } catch (_e) { /* swallow */ }
-        }
-      });
-    }
-  });
-
-  businessIpcHandle('pending:error:export-report', '导出 Pending 错误报告', {
-    async prepare() {
-      if (!pendingSession.hasPendingErrorReport()) {
-        return { proceed: false, result: { status: 'error', message: '无错误报告' } };
-      }
-      const useManagedExport = backgroundExecutionRuntimeManager.isProductionEnabled(
-        PENDING_READ_ONLY_ACTIONS.ERRORS
-      );
-      const result = await dialog.showSaveDialog({
-        title: '保存 Pending 导入报错文件',
-        defaultPath: `pending-import-errors-${Date.now()}.xlsx`,
-        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-      });
-      if (result.canceled || !result.filePath) {
-        return { proceed: false, result: { status: 'cancelled' } };
-      }
-      const errorAuthority = useManagedExport ? pendingSession.captureErrorReport() : null;
-      const prepared = {
-        proceed: true,
-        useManagedExport,
-        errorAuthority,
-        filePlan: {
-          version: 1,
-          allocation: 'eager',
-          inputs: [],
-          outputs: [{
-            filePath: result.filePath,
-            role: 'output',
-            sourceOperation: 'pending:error:export-report'
-          }]
-        },
-        beforeStart() {
-          if (!pendingSession.hasPendingErrorReport()) {
-            throw new Error('Pending 错误报告已变化，请重新导出');
-          }
-          if (useManagedExport) assertPendingErrorAuthorityFresh(errorAuthority);
-        }
-      };
-      return useManagedExport
-        ? attachReadOnlyExportReceiptAcknowledgement(prepared)
-        : prepared;
-    },
-    async execute(_event, prepared, taskContext) {
-    try {
-      if (prepared.useManagedExport) {
-        const stagingRoot = createReadOnlyExportStagingDirectory(
-          taskContext.batchContext,
-          'pending'
-        );
-        let preserveStaging = false;
-        try {
-          assertPendingErrorAuthorityFresh(prepared.errorAuthority);
-          const source = await writePendingManagedErrorSource({
-            snapshot: prepared.errorAuthority.snapshot,
-            stagingRoot
-          });
-          assertPendingErrorAuthorityFresh(prepared.errorAuthority);
-          const generationPlan = createReadOnlyExportGenerationPlan(
-            stagingRoot,
-            taskContext,
-            PENDING_READ_ONLY_ACTIONS.ERRORS
-          );
-          const assertSourceFresh = () => assertPendingErrorAuthorityFresh(
-            prepared.errorAuthority
-          );
-          const generated = await generateValidateAndPublishPendingExport({
-            runtime: backgroundExecutionRuntimeManager.get(),
-            actionKey: PENDING_READ_ONLY_ACTIONS.ERRORS,
-            operationKey: taskContext.batchContext.operationKey,
-            taskRunId: taskContext.batchContext.taskRunId,
-            batchContext: taskContext.batchContext,
-            stableRunEvidence: source.evidence,
-            dbPathOrManagedSource: source.source,
-            generationPlan,
-            context: source.context,
-            production: true,
-            assertSourceFresh,
-            publisher: (artifacts) => publishReadOnlyExportArtifacts(
-              'pending-errors', artifacts, taskContext
-            )
-          });
-          prepared.readOnlyExportPublicationTaskIds = [generated.publication.taskId];
-          const published = generated.publication.files[0];
-          return {
-            status: 'success',
-            path: published.filePath,
-            filePath: published.filePath,
-            errorCount: generated.summary.errorCount
-          };
-        } catch (error) {
-          preserveStaging = shouldPreserveToolboxTemporaryFiles(error);
-          throw error;
-        } finally {
-          if (!preserveStaging) cleanupReadOnlyExportStagingDirectory(stagingRoot);
-        }
-      }
-      const exported = pendingSession.exportErrorReport(
-        taskContext.fileEvidence.filePlan.outputs[0].filePath
-      );
-      await taskContext.settleArtifacts({
-        files: taskContext.fileEvidence.filePlan.outputs
-          .map((item) => ({ artifactKey: item.artifactKey }))
-      });
-      return exported;
-    } catch (err) {
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
-    }
-    }
-  });
-
-  trackedIpcHandle('pending:reconcile:run', '月度 Pending', '开始运行', {
-    prepare(_event, payload = {}) {
-      if (!pendingDb) throw new Error('Pending DB 未初始化');
-      const rule = pendingRuleRepo.getRule(pendingDb);
-      if (!rule || !rule.matchFields || rule.matchFields.length === 0) {
-        throw new Error('规则未设置（matchFields 为空）');
-      }
-      const taskRunId = randomUUID();
-      const lineagePlan = pendingRunLineagePlan(pendingDb, payload);
-      return {
-        proceed: true,
-        taskRunId,
-        upperMonth: payload.upperMonth,
-        lowerMonth: payload.lowerMonth,
-        rule: {
-          matchFields: rule.matchFields.slice(),
-          compareFields: rule.compareFields.slice()
-        },
-        lineageIntents: lineagePlan.lineageIntents,
-        expectedDatasets: lineagePlan.expectedDatasets,
-        afterTerminal: terminalRouteRegistry.createAfterTerminal(pendingRunTerminalRoute(taskRunId)),
-        afterTerminalIntent: pendingRunTerminalRoute(taskRunId)
-      };
-    },
-    execute(_event, prepared, taskContext) {
-    // PR #34 round 4 P2：包一层 status 让 trackedIpcHandle 能识别成功
-    const result = pendingReconcileEngine.runReconciliation(pendingDb, {
-      upperMonth: prepared.upperMonth,
-      lowerMonth: prepared.lowerMonth,
-      rule: prepared.rule,
-      archiveReceipt: {
-        archiveContractVersion: 1,
-        archiveTaskRunId: taskContext.operationContext.taskRunId
-      },
-      expectedDatasets: prepared.expectedDatasets
-    });
-
-    // v2.1.11 T2（D-T2-2 对账后自动匹配）：若该 upperMonth 有移除归档数据 → 用同一套 matchFields
-    //   把该 run 的 missing 行与移除数据配对，结果落 pending_removal_matches（供导出标记）。
-    //   matchFields 复用对账规则（资金红线：不另造规则）。匹配失败 graceful —— 对账已成功落库，
-    //   不因移除核对异常而让整个对账 IPC 报错（用户仍能拿到对账结果 + 重跑导出触发匹配）。
-    let removalMatchResult = null;
-    try {
-      if (result && result.runId
-          && pendingRemovedRepo.countByMonth(pendingDb, prepared.upperMonth) > 0) {
-        removalMatchResult = pendingRemovalMatch.matchRemoval(
-          pendingDb, result.runId, prepared.upperMonth, prepared.rule.matchFields
-        );
-      }
-    } catch (matchErr) {
-      appendActivityLogEntry({
-        level: 'warning',
-        source: 'main',
-        domain: 'pending-removal-match',
-        message: '[pending] 对账后移除核对匹配失败（对账结果不受影响）',
-        details: [matchErr && matchErr.message ? matchErr.message : String(matchErr)],
-        stack: matchErr && matchErr.stack ? matchErr.stack : undefined
-      });
-      // I-R2-1（v2.1.11 SR Round 2）：匹配抛错时返回「可区分的失败标记」，而非沿用 null。
-      //   null 语义已被「countByMonth=0 无移除归档数据，未触发核对」占用（上面 try 内 removalMatchResult
-      //   初值 null 且仅在有数据时才赋值）。若 error 也返回 null，renderer 会显示"无移除归档数据"——
-      //   与"数据确实存在但匹配崩溃"事实相反（资金/对账模块误导）。故 error 态独立标记 { error: true }，
-      //   由 buildRemovalMatchSummary 区分出"移除核对执行异常"文案。
-      removalMatchResult = { error: true };
-    }
-
-    return { status: 'success', ...result, removalMatch: removalMatchResult };
-    }
-  });
-
-  ipcMain.handle('pending:diff:runs-list', () => {
-    if (!pendingDb) return [];
-    try { return pendingDiffRepo.listAllRuns(pendingDb).map(publicPendingRun); } catch (_e) { return []; }
-  });
-
-  ipcMain.handle('pending:diff:runs-for-month-pair', (_event, payload = {}) => {
-    if (!pendingDb) return [];
-    try {
-      return pendingDiffRepo.listRunsForMonthPair(
-        pendingDb, payload.upperMonth, payload.lowerMonth
-      ).map(publicPendingRun);
-    } catch (_e) {
-      return [];
-    }
-  });
-
-  ipcMain.handle('pending:diff:latest-run-for', (_event, payload = {}) => {
-    if (!pendingDb) return null;
-    try {
-      return publicPendingRun(
-        pendingDiffRepo.getLatestRunForMonthPair(
-          pendingDb, payload.upperMonth, payload.lowerMonth
-        )
-      );
-    } catch (_e) {
-      return null;
-    }
-  });
-
-  trackedIpcHandle('pending:diff:export-single', '月度 Pending', '导出差异', {
-    async prepare(_event, payload = {}) {
-      if (!pendingDb) {
-        return { proceed: false, result: { status: 'error', message: 'Pending DB 未初始化' } };
-      }
-      const runId = Number(payload.runId);
-      if (!Number.isFinite(runId) || runId <= 0) {
-        return { proceed: false, result: { status: 'error', message: 'runId 无效' } };
-      }
-      const run = pendingDiffRepo.getRunById(pendingDb, runId);
-      if (!run) {
-        return { proceed: false, result: { status: 'error', message: `run #${runId} 不存在` } };
-      }
-      const saveResult = await dialog.showSaveDialog({
-        title: '保存 Pending 差异文件',
-        defaultPath: payload.defaultFileName || `月度Pending差异-run${runId}.xlsx`,
-        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-      });
-      if (saveResult.canceled || !saveResult.filePath) {
-        return { proceed: false, result: { status: 'cancelled' } };
-      }
-      const useManagedExport = backgroundExecutionRuntimeManager.isProductionEnabled(
-        PENDING_READ_ONLY_ACTIONS.DIFF
-      );
-      const stableRunEvidence = useManagedExport
-        ? freezePendingRunEvidence(pendingDb, [runId])
-        : null;
-      const prepared = {
-        proceed: true,
-        runId,
-        runMetadata: useManagedExport ? Object.freeze({
-          upperMonth: run.upperMonth,
-          lowerMonth: run.lowerMonth
-        }) : null,
-        useManagedExport,
-        stableRunEvidence,
-        lineageIntents: [runOutputLineageIntent(run)],
-        filePlan: {
-          version: 1,
-          allocation: 'eager',
-          inputs: [],
-          outputs: [{
-            filePath: saveResult.filePath,
-            role: 'output',
-            sourceOperation: 'pending:diff:export-single'
-          }]
-        },
-        beforeStart() {
-          if (useManagedExport) assertPendingEvidenceFresh(stableRunEvidence);
-        }
-      };
-      return useManagedExport
-        ? attachReadOnlyExportReceiptAcknowledgement(prepared)
-        : prepared;
-    },
-    async execute(_event, prepared, taskContext) {
-    try {
-      if (prepared.useManagedExport) {
-        const stagingRoot = createReadOnlyExportStagingDirectory(
-          taskContext.batchContext,
-          'pending'
-        );
-        let preserveStaging = false;
-        try {
-          const generationPlan = createReadOnlyExportGenerationPlan(
-            stagingRoot,
-            taskContext,
-            PENDING_READ_ONLY_ACTIONS.DIFF
-          );
-          const generated = await generateValidateAndPublishPendingExport({
-            runtime: backgroundExecutionRuntimeManager.get(),
-            actionKey: PENDING_READ_ONLY_ACTIONS.DIFF,
-            operationKey: taskContext.batchContext.operationKey,
-            taskRunId: taskContext.batchContext.taskRunId,
-            batchContext: taskContext.batchContext,
-            stableRunEvidence: prepared.stableRunEvidence,
-            generationPlan,
-            context: Object.freeze({ kind: 'pending-diff', runIds: [prepared.runId] }),
-            production: true,
-            assertSourceFresh: () => assertPendingEvidenceFresh(prepared.stableRunEvidence),
-            publisher: (artifacts) => publishReadOnlyExportArtifacts(
-              'pending-diff', artifacts, taskContext
-            )
-          });
-          prepared.readOnlyExportPublicationTaskIds = [generated.publication.taskId];
-          const published = generated.publication.files[0];
-          return {
-            status: 'success',
-            path: published.filePath,
-            filePath: published.filePath,
-            runId: prepared.runId,
-            upperMonth: prepared.runMetadata.upperMonth,
-            lowerMonth: prepared.runMetadata.lowerMonth,
-            ...generated.summary
-          };
-        } catch (error) {
-          preserveStaging = shouldPreserveToolboxTemporaryFiles(error);
-          throw error;
-        } finally {
-          if (!preserveStaging) cleanupReadOnlyExportStagingDirectory(stagingRoot);
-        }
-      }
-      const result = pendingExportWriter.exportSingleRun(
-        pendingDb,
-        prepared.runId,
-        taskContext.fileEvidence.filePlan.outputs[0].filePath
-      );
-      await taskContext.settleArtifacts({
-        files: taskContext.fileEvidence.filePlan.outputs
-          .map((item) => ({ artifactKey: item.artifactKey }))
-      });
-      return result;
-    } catch (err) {
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
-    }
-    }
-  });
-
-  trackedIpcHandle('pending:diff:export-aggregate', '月度 Pending', '导出差异', {
-    async prepare() {
-      if (!pendingDb) {
-        return { proceed: false, result: { status: 'error', message: 'Pending DB 未初始化' } };
-      }
-      const selection = pendingAggregateRunSelection(pendingDb);
-      if (selection.runIds.length === 0) {
-        return { proceed: false, result: { status: 'error', message: '暂无运算 record' } };
-      }
-      const saveResult = await dialog.showSaveDialog({
-        title: '保存 Pending 差异汇总文件',
-        defaultPath: `月度Pending差异-汇总-${new Date().toISOString().slice(0, 10)}.xlsx`,
-        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-      });
-      if (saveResult.canceled || !saveResult.filePath) {
-        return { proceed: false, result: { status: 'cancelled' } };
-      }
-      const useManagedExport = backgroundExecutionRuntimeManager.isProductionEnabled(
-        PENDING_READ_ONLY_ACTIONS.SUMMARY
-      );
-      const stableRunEvidence = useManagedExport
-        ? freezePendingRunEvidence(pendingDb, selection.runIds)
-        : null;
-      const prepared = {
-        proceed: true,
-        runIds: selection.runIds,
-        useManagedExport,
-        stableRunEvidence,
-        lineageIntents: selection.lineageIntents,
-        filePlan: {
-          version: 1,
-          allocation: 'eager',
-          inputs: [],
-          outputs: [{
-            filePath: saveResult.filePath,
-            role: 'output',
-            sourceOperation: 'pending:diff:export-aggregate'
-          }]
-        },
-        beforeStart() {
-          if (useManagedExport) assertPendingEvidenceFresh(stableRunEvidence);
-        }
-      };
-      return useManagedExport
-        ? attachReadOnlyExportReceiptAcknowledgement(prepared)
-        : prepared;
-    },
-    async execute(_event, prepared, taskContext) {
-    try {
-      if (prepared.useManagedExport) {
-        const stagingRoot = createReadOnlyExportStagingDirectory(
-          taskContext.batchContext,
-          'pending'
-        );
-        let preserveStaging = false;
-        try {
-          const generationPlan = createReadOnlyExportGenerationPlan(
-            stagingRoot,
-            taskContext,
-            PENDING_READ_ONLY_ACTIONS.SUMMARY
-          );
-          const generated = await generateValidateAndPublishPendingExport({
-            runtime: backgroundExecutionRuntimeManager.get(),
-            actionKey: PENDING_READ_ONLY_ACTIONS.SUMMARY,
-            operationKey: taskContext.batchContext.operationKey,
-            taskRunId: taskContext.batchContext.taskRunId,
-            batchContext: taskContext.batchContext,
-            stableRunEvidence: prepared.stableRunEvidence,
-            generationPlan,
-            context: Object.freeze({
-              kind: 'pending-summary',
-              runIds: prepared.runIds.slice()
-            }),
-            production: true,
-            assertSourceFresh: () => assertPendingEvidenceFresh(prepared.stableRunEvidence),
-            publisher: (artifacts) => publishReadOnlyExportArtifacts(
-              'pending-summary', artifacts, taskContext
-            )
-          });
-          prepared.readOnlyExportPublicationTaskIds = [generated.publication.taskId];
-          const published = generated.publication.files[0];
-          return {
-            status: 'success',
-            path: published.filePath,
-            filePath: published.filePath,
-            ...generated.summary
-          };
-        } catch (error) {
-          preserveStaging = shouldPreserveToolboxTemporaryFiles(error);
-          throw error;
-        } finally {
-          if (!preserveStaging) cleanupReadOnlyExportStagingDirectory(stagingRoot);
-        }
-      }
-      const result = pendingExportWriter.exportAggregateRuns(
-        pendingDb,
-        prepared.runIds,
-        taskContext.fileEvidence.filePlan.outputs[0].filePath
-      );
-      await taskContext.settleArtifacts({
-        files: taskContext.fileEvidence.filePlan.outputs
-          .map((item) => ({ artifactKey: item.artifactKey }))
-      });
-      return result;
-    } catch (err) {
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
-    }
-    }
-  });
-
-  // ============================================================
-  // v2.1.11 T2 移除核对：移除归档 Pending 文件 — pending:removed:* IPC handler
-  //   流程（spec §3.3 / D-T2-1）：导入某月数据成功 → renderer 弹"是否核对移除pending数据？"
-  //     → 是 → pickFiles → import（解析 + 入库 removed_pending_rows，关联导入月份 = 后续对账 upperMonth）
-  //   匹配在对账后自动触发（见 pending:reconcile:run handler 末尾，D-T2-2）。
-  // ============================================================
-
-  ipcMain.handle('pending:removed:pick-files', async () => {
-    const result = await showImportOpenDialog('pending-reconciliation', {
-      title: '选择移除归档 Pending 文件',
-      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
-      properties: ['openFile', 'multiSelections']
-    });
-    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
-      return { cancelled: true };
-    }
-    return { cancelled: false, files: result.filePaths };
-  });
-
-  trackedIpcHandle('pending:removed:import', '月度 Pending', '导入移除核对', {
-    prepare(_event, payload = {}) {
-      const { yearMonth, files } = payload || {};
-      if (!pendingDb) return { proceed: false, result: { status: 'error', message: 'Pending DB 未初始化' } };
-      if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
-        return { proceed: false, result: { status: 'error', message: 'yearMonth 格式错误（应为 YYYY-MM）' } };
-      }
-      if (!Array.isArray(files) || files.length === 0) {
-        return { proceed: false, result: { status: 'error', message: '未选择移除归档文件' } };
-      }
-      return {
-        proceed: true,
-        yearMonth,
-        expectedDatasetHead: pendingRemovedRepo.getMonthHead(pendingDb, yearMonth),
-        filePlan: {
-          version: 1,
-          allocation: 'eager',
-          inputs: files.map((filePath) => ({
-            filePath,
-            role: 'input',
-            sourceOperation: 'pending:removed:import'
-          })),
-          outputs: []
-        }
-      };
-    },
-    async execute(_event, prepared, taskContext) {
-    const { yearMonth } = prepared;
-    const files = taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath);
-    // 设置 → 模板文件：按「移除归档Pending账单」当前版本识别；入库前对应回内置 46 列。不可用时不入库。
-    const structure = await getTemplateResourceService().currentInputStructure('removed-pending');
-    if (structure.status === 'unavailable') return { status: 'error', message: structure.message };
-    // 多文件合并解析；任一文件解析失败（表头不符/空文件）→ 整体报错，不入库（资金红线：避免半写）
-    const allRows = [];
-    const sourceNames = [];
-    try {
-      for (const fp of files) {
-        const parsed = pendingRemovedReader.readRemovedPendingFile(fp, { structure });
-        for (const r of parsed.rows) allRows.push(r);
-        sourceNames.push(parsed.fileName || fp);
-      }
-    } catch (err) {
-      return {
-        status: 'error',
-        message: err && err.message ? err.message : String(err),
-        detailLines: err && Array.isArray(err.detailLines) ? err.detailLines : undefined
-      };
-    }
-    try {
-      const result = pendingRemovedRepo.replaceByMonthWithSeed(
-        pendingDb,
-        yearMonth,
-        allRows,
-        sourceNames.join(', '),
-        createPendingDatasetSeed(
-          prepared.expectedDatasetHead,
-          taskContext.batchContext.taskRunId
-        )
-      );
-      return {
-        status: 'success',
-        yearMonth,
-        inserted: result.inserted,
-        deleted: result.deleted,
-        fileCount: files.length
-      };
-    } catch (err) {
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
-    }
-    }
-  });
-
-  // ============================================================
-  // v2.1.2 T2：月度银行对账单BU回填校验 — bankBuRecon:* IPC handler
-  // PRD §三 / spec §3.5：10 个 handler；资金红线模块（OPEN ISSUE #10 v0.8 修订：1:1/1:N/N:1 视为对账成功，N:M 异常 sheet）
-  // ============================================================
-
-  // v3.0.5 PR-4：双源 listMonths（侧库目录 month + 主库旧表 month 合并；历史 run 零变化）
-  ipcMain.handle('bankBuRecon:months:list', () => {
-    if (!database || !database.db) return [];
-    try {
-      return bankBuReconRunData.listMonthsDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db });
-    } catch (_e) { return []; }
-  });
-
-  // v3.0.5 PR-4：双源 status（侧库存在 → 读侧库 meta + 主库镜像 latestRun；否则读主库旧表）
-  ipcMain.handle('bankBuRecon:status', (_event, payload = {}) => {
-    if (!database || !database.db) return null;
-    const { yearMonth } = payload || {};
-    if (!yearMonth) return null;
-    try {
-      return bankBuReconRunData.getStatusDualSource({
-        userDataDir: path.dirname(database.dbPath),
-        mainDb: database.db,
-        yearMonth
-      });
-    } catch (_e) {
-      return null;
-    }
-  });
-
-  // v2.1.2 spec v0.4 修正：拆为两个独立单选 IPC，前端用 Clear 风 modal 串联流程
-  // 旧的 bankBuRecon:import:pick-files（一次返回两个路径 + showMessageBox 提示）已删除：
-  //   - macOS dialog.showOpenDialog.title 不显示 → showMessageBox 兜底
-  //   - 但 showMessageBox 是系统对话框，与项目其他模块的前端 modal 风格割裂
-  // 现在前端用 createBankBuReconFileImportPromptDialog（Clear 风 modal）显式提示，再各调一次 pick-*-file
-  ipcMain.handle('bankBuRecon:import:pick-pending-file', async (_event, payload = {}) => {
-    const { yearMonth } = payload || {};
-    if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
-      return { status: 'error', message: 'yearMonth 格式错误（应为 YYYY-MM）' };
-    }
-    const res = await showImportOpenDialog('bank-bu-recon', {
-      title: `Pending 数据管理文件（${yearMonth}）`,
-      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
-      properties: ['openFile']
-    });
-    if (res.canceled || !res.filePaths || res.filePaths.length === 0) {
-      return { status: 'cancelled' };
-    }
-    return { status: 'success', filePath: res.filePaths[0] };
-  });
-
-  ipcMain.handle('bankBuRecon:import:pick-bank-file', async (_event, payload = {}) => {
-    const { yearMonth } = payload || {};
-    if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
-      return { status: 'error', message: 'yearMonth 格式错误（应为 YYYY-MM）' };
-    }
-    const res = await showImportOpenDialog('bank-bu-recon', {
-      title: `银行对账单文件（${yearMonth}）`,
-      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
-      properties: ['openFile']
-    });
-    if (res.canceled || !res.filePaths || res.filePaths.length === 0) {
-      return { status: 'cancelled' };
-    }
-    return { status: 'success', filePath: res.filePaths[0] };
-  });
-
-  trackedIpcHandle('bankBuRecon:import:run', '月度银行对账单BU回填校验', '导入文件', {
-    prepare(_event, payload = {}) {
-      const { yearMonth, pendingPath, bankPath } = payload || {};
-      if (!database || !database.db) {
-        return { proceed: false, result: { status: 'error', message: '数据库未初始化' } };
-      }
-      if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
-        return { proceed: false, result: { status: 'error', message: 'yearMonth 格式错误（应为 YYYY-MM）' } };
-      }
-      if (!pendingPath || !bankPath) {
-        return { proceed: false, result: { status: 'error', message: '缺少文件路径' } };
-      }
-      return {
-        proceed: true,
-        args: [payload],
-        yearMonth,
-        filePlan: {
-          version: 1,
-          allocation: 'eager',
-          inputs: [pendingPath, bankPath].map((filePath) => ({
-            filePath,
-            role: 'input',
-            sourceOperation: 'bankBuRecon:import:run'
-          })),
-          outputs: []
-        }
-      };
-    },
-    async execute(_event, prepared, taskContext) {
-    const { yearMonth } = prepared;
-    const [pendingPath, bankPath] = taskContext.fileEvidence.filePlan.inputs
-      .map((item) => item.filePath);
-    try {
-      const pendingResult = readPendingGuanliFile(pendingPath);
-      const bankResult = readBankFile(bankPath);
-      // v3.0.5 PR-4：导入落 per-月侧库（importMonthAtomic 在侧库 db 上运行 = 主库上运行，原子覆盖语义不变）
-      const counts = bankBuReconRunData.importMonth({
-        userDataDir: path.dirname(database.dbPath),
-        yearMonth,
-        pendingRows: pendingResult.rows,
-        bankRows: bankResult.rows
-      });
-      return { status: 'success', yearMonth, ...counts };
-    } catch (err) {
-      if (err && err.name === 'FileValidationError') {
-        return {
-          status: 'error',
-          code: err.code,
-          message: err.message,
-          detailLines: err.detailLines || [],
-          context: err.context || {}
-        };
-      }
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
-    }
-    }
-  });
-
-  trackedIpcHandle('bankBuRecon:run', '月度银行对账单BU回填校验', '开始运行', (_event, payload = {}) => {
-    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
-    const { yearMonth } = payload || {};
-    if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
-      return { status: 'error', message: 'yearMonth 格式错误' };
-    }
-    try {
-      // v3.0.5 PR-4：inline 侧库直跑（runReconciliation 在侧库 db 上跑，算法零改动）+ 主库 runs 镜像。
-      const result = bankBuReconRunData.runViaSideDb({
-        userDataDir: path.dirname(database.dbPath),
-        mainDb: database.db,
-        yearMonth
-      });
-      return { status: 'success', ...result };
-    } catch (err) {
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
-    }
-  });
-
-  // v0.5: 弹另存为对话框（前端→后端）
-  ipcMain.handle('bankBuRecon:export:pick-save-path', async (_event, payload = {}) => {
-    const { defaultFileName } = payload || {};
-    const result = await dialog.showSaveDialog({
-      title: '保存差异表',
-      defaultPath: defaultFileName || '月度银行对账单BU回填校验.xlsx',
-      filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-    });
-    if (result.canceled || !result.filePath) return { status: 'cancelled' };
-    return { status: 'success', savePath: result.filePath };
-  });
-
-  // v0.5: 单月导出到用户指定路径（替代旧 bankBuRecon:export）
-  trackedIpcHandle('bankBuRecon:export:single', '月度银行对账单BU回填校验', '导出差异', {
-    prepare(_event, payload = {}) {
-      const runIdNum = Number(payload && payload.runId);
-      const savePath = payload && payload.savePath;
-      if (!database || !database.db) return { proceed: false, result: { status: 'error', message: '数据库未初始化' } };
-      if (!Number.isFinite(runIdNum) || runIdNum <= 0) {
-        return { proceed: false, result: { status: 'error', message: 'runId 无效' } };
-      }
-      if (!savePath) return { proceed: false, result: { status: 'error', message: '保存路径未指定' } };
-      return {
-        proceed: true,
-        runIdNum,
-        filePlan: {
-          version: 1,
-          allocation: 'eager',
-          inputs: [],
-          outputs: [{ filePath: savePath, role: 'output', sourceOperation: 'bankBuRecon:export:single' }]
-        }
-      };
-    },
-    async execute(_event, prepared, taskContext) {
-    const { runIdNum } = prepared;
-    const savePath = taskContext.fileEvidence.filePlan.outputs[0].filePath;
-    // v3.0.5 PR-4：run 校验 + 导出数据均走主库镜像 + 侧库重跑（lastRunCache 侧库化失效 → 重跑路径）。
-    const userDataDir = path.dirname(database.dbPath);
-    const run = bankBuReconRunData.getMirrorRun({ mainDb: database.db, runId: runIdNum });
-    if (!run) return { status: 'error', message: '运行记录不存在' };
-    if (run.status !== 'success') {
-      return { status: 'error', message: '运行未成功（status=' + run.status + '），无法导出差异表' };
-    }
-    try {
-      const lastResult = bankBuReconRunData.loadExportDataByRun({ userDataDir, mainDb: database.db, runId: runIdNum });
-      if (!lastResult) {
-        return { status: 'error', message: '加载 run 数据失败（可能源数据已变）' };
-      }
-      const exp = await writeBankBuReconDiffWorkbook({
-        storageRoot: ensureStorageRoot(),
-        yearMonth: run.year_month,
-        matchedPending: lastResult.matchedPending,
-        matchedBank: lastResult.matchedBank,
-        buDiffPendingIds: lastResult.buDiffPendingIds,
-        buDiffBankIds: lastResult.buDiffBankIds,
-        nmAnomalies: lastResult.nmAnomalies,   // v0.8: N:M 异常组写入第 3 sheet
-        // v0.5：用 savePath 直接写到用户指定路径，不走 buildOutputPath
-        overrideSavePath: savePath
-      });
-      bankBuReconRunData.recordExportPath({ mainDb: database.db, runId: runIdNum, exportPath: exp.filePath });
-      await taskContext.settleArtifacts({
-        files: taskContext.fileEvidence.filePlan.outputs
-          .map((item) => ({ artifactKey: item.artifactKey }))
-      });
-      return { status: 'success', filePath: exp.filePath };
-    } catch (err) {
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
-    }
-    }
-  });
-
-  // v0.5: 跨月汇总导出到用户指定路径
-  trackedIpcHandle('bankBuRecon:export:aggregate', '月度银行对账单BU回填校验', '导出差异', {
-    prepare(_event, payload = {}) {
-      const savePath = payload && payload.savePath;
-      if (!database || !database.db) return { proceed: false, result: { status: 'error', message: '数据库未初始化' } };
-      if (!savePath) return { proceed: false, result: { status: 'error', message: '保存路径未指定' } };
-      return {
-        proceed: true,
-        filePlan: {
-          version: 1,
-          allocation: 'eager',
-          inputs: [],
-          outputs: [{ filePath: savePath, role: 'output', sourceOperation: 'bankBuRecon:export:aggregate' }]
-        }
-      };
-    },
-    async execute(_event, _prepared, taskContext) {
-    const savePath = taskContext.fileEvidence.filePlan.outputs[0].filePath;
-    try {
-      // v3.0.5 PR-4：跨月汇总逐月 open 侧库重跑（侧库 + 历史主库 run 双源）。
-      const { months, skippedMonths } = bankBuReconRunData.aggregateExportData({
-        userDataDir: path.dirname(database.dbPath),
-        mainDb: database.db
-      });
-      if (months.length === 0) {
-        return { status: 'error', message: '无可汇总的成功运行记录', skippedMonths };
-      }
-      const exp = await writeBankBuReconAggregateDiffWorkbook({
-        matchedMonths: months,
-        savePath
-      });
-      await taskContext.settleArtifacts({
-        files: taskContext.fileEvidence.filePlan.outputs
-          .map((item) => ({ artifactKey: item.artifactKey }))
-      });
-      return { status: 'success', filePath: exp.filePath, skippedMonths, includedMonths: months.map((m) => m.yearMonth) };
-    } catch (err) {
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
-    }
-    }
-  });
-
-  // v3.0.5 PR-4：run:history 走主库镜像（侧库 run 镜像 + 历史主库 run 都在主库 runs 表）。
-  ipcMain.handle('bankBuRecon:run:history', (_event, payload = {}) => {
-    if (!database || !database.db) return [];
-    const { yearMonth } = payload || {};
-    if (!yearMonth) return [];
-    try { return bankBuReconRunData.listRunsDualSource({ mainDb: database.db, yearMonth }); } catch (_e) { return []; }
-  });
-
-  // v0.5: 列出"两侧都已导入"的月份（用于「开始运行」弹窗）
-  // v3.0.5 PR-4：双源（侧库目录 + 主库旧表）。
-  ipcMain.handle('bankBuRecon:run:list-ready-months', () => {
-    if (!database || !database.db) return [];
-    try {
-      return bankBuReconRunData.listReadyMonthsDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db });
-    } catch (_e) {
-      return [];
-    }
-  });
-
-  // v0.5: 列出"有 status=success run"的月份（用于「导出差异」弹窗）
-  // v3.0.5 PR-4：主库镜像 GROUP BY（侧库 run 镜像 + 历史主库 run）。
-  ipcMain.handle('bankBuRecon:run:list-success-months', () => {
-    if (!database || !database.db) return [];
-    try { return bankBuReconRunData.listSuccessMonthsDualSource({ mainDb: database.db }); } catch (_e) { return []; }
-  });
-
-  // ==========================================================================
-  // v2.1.3：业务OP数据核对 IPC handlers（spec §三 共 17 个）
-  // 命名空间 bizOpRecon:*；与 bankBuRecon:* 完全独立
-  // ==========================================================================
-
-  // 模块状态查询
-  // v3.0.5 PR-4：双源（遍历侧库目录所有月 + 主库旧表，去重月末冗余副本）。
-  ipcMain.handle('bizOpRecon:status', () => {
-    if (!database || !database.db) return { importedDateBuPairs: [], buList: [], flowImportedDates: [] };
-    try {
-      return bizOpReconRunData.getStatusDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db });
-    } catch (_e) {
-      return { importedDateBuPairs: [], buList: [], flowImportedDates: [] };
-    }
-  });
-
-  // BU 下拉框枚举（保留原值不 normalize；#A 拍板）
-  // v3.0.5 PR-4：双源去重。
-  ipcMain.handle('bizOpRecon:bu:list', () => {
-    if (!database || !database.db) return [];
-    try {
-      return bizOpReconRunData.listBuDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db });
-    } catch (_e) {
-      return [];
-    }
-  });
-
-  // 业务OP 文件选择（弹原生文件对话框）
-  ipcMain.handle('bizOpRecon:import:pick-biz-op-file', async (_event, payload = {}) => {
-    const { date } = payload || {};
-    try {
-      const result = await showImportOpenDialog('biz-op-recon', {
-        title: `选择业务OP 文件（日期 ${date || ''}）`,
-        properties: ['openFile'],
-        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-      });
-      if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
-        return { status: 'cancelled' };
-      }
-      return { status: 'ok', filePath: result.filePaths[0] };
-    } catch (err) {
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
-    }
-  });
-
-  // 流水对账单 文件选择
-  // v3.0.2 需求1b：支持批量多选（multiSelections），返回 filePaths 数组（全部合并导入到同一日期）。
-  //   ⚠️ pick-biz-op-file 不动（业务OP 仍单文件）。
-  ipcMain.handle('bizOpRecon:import:pick-flow-file', async (_event, payload = {}) => {
-    const { date } = payload || {};
-    try {
-      const result = await showImportOpenDialog('biz-op-recon', {
-        title: `选择流水对账单 文件（日期 ${date || ''}，可多选）`,
-        properties: ['openFile', 'multiSelections'],
-        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-      });
-      if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
-        return { status: 'cancelled' };
-      }
-      // 返回 filePaths 数组（前端按数组处理）；保留 filePath=首个以兼容潜在旧调用。
-      return { status: 'ok', filePaths: result.filePaths, filePath: result.filePaths[0] };
-    } catch (err) {
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
-    }
-  });
-
-  // 业务OP 导入（#1 双重校验 + #4 替换原子事务 + #5 整批拒绝 + #15 清空旧 runs）
-  // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数（rejected/error 不计，spec D6）
-  trackedIpcHandle('bizOpRecon:import:run-biz-op', '业务OP数据核对', '导入文件', {
-    prepare(_event, payload = {}) {
-      const { date, filePath } = payload || {};
-      if (!database || !database.db) return { proceed: false, result: { status: 'error', message: '数据库未就绪' } };
-      if (!date || !filePath) return { proceed: false, result: { status: 'error', message: '入参缺失（date / filePath）' } };
-      return {
-        proceed: true,
-        date,
-        afterTerminal: ({ context, terminalStatus }) => (
-          terminalStatus === 'succeeded'
-          && bizOpReconRunData.monthOf(date)
-            !== bizOpReconRunData.monthOf(addBizOpOneDay(date))
-            ? bizOpReconRunData.acknowledgeMonthEndCopyIntent({
-                userDataDir: path.dirname(database.dbPath),
-                dataDate: date,
-                sourceTaskRunId: context.taskRunId
-              })
-            : null
-        ),
-        filePlan: {
-          version: 1,
-          allocation: 'eager',
-          inputs: [{ filePath, role: 'input', sourceOperation: 'bizOpRecon:import:run-biz-op' }],
-          outputs: []
-        }
-      };
-    },
-    async execute(event, prepared, taskContext) {
-    const { date } = prepared;
-    const filePath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
-    try {
-      const errorReportsDir = path.join(ensureStorageRoot(), 'error-reports');
-      // v3.0.5 PR-4：导入落 per-月侧库（编排层把 worker dbPath 覆盖为 month(date) 侧库路径；
-      //   worker 自开侧库连接 + 幂等建表；月末跨月由编排层补清下月侧库 + 写 T-2 冗余副本，详见 biz-op-recon-run-data.js）。
-      //   进度透传 renderer（仿 pending:import:progress 范式，swallow send 失败）。
-      const result = await bizOpReconRunData.runBizOpImport({
-        userDataDir: path.dirname(database.dbPath),
-        runBizOpImportViaWorker: runBizOpImport,
-        params: {
-          date,
-          filePath,
-          readBizOpFile,
-          writeBizOpErrorReportXlsx,
-          errorReportsDir,
-          batchContext: taskContext.batchContext,
-          onProgress: (ev) => {
-            try { event.sender.send('bizOpRecon:import:progress', { ...ev, kind: 'bizOp' }); }
-            catch (_e) { /* swallow */ }
-          }
-        }
-      });
-      return result;
-    } catch (err) {
-      if (err && err.preserveArchiveFileTask === true) {
-        try {
-          await taskContext.settleArtifacts({
-            files: taskContext.fileEvidence.filePlan.inputs
-              .map((item) => ({ artifactKey: item.artifactKey }))
-          });
-        } catch (_settleError) { /* terminal 仍必须保留为 interrupted owner */ }
-        const interrupted = await archiveCenterService.service.finishFileTask(
-          taskContext.batchContext.taskRunId,
-          taskContext.batchContext.batchId,
-          {
-            taskStatus: 'interrupted',
-            code: 'ARCHIVE_TASK_INTERRUPTED',
-            message: err.message,
-            metadata: {
-              bizOpMonthEndCopyPending: true,
-              bizOpMonthEndCopyFailureCode: err.code || 'BIZ_OP_MONTH_END_COPY_PENDING'
-            }
-          }
-        );
-        if (!interrupted || interrupted.ok === false) throw err;
-      }
-      return {
-        status: 'error',
-        message: err && err.message ? err.message : String(err),
-        detailLines: err && err.detailLines ? err.detailLines : []
-      };
-    }
-    }
-  });
-
-  // 流水对账单 导入（#3 出入方向枚举 + #5 整批拒绝）
-  // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
-  trackedIpcHandle('bizOpRecon:import:run-flow', '业务OP数据核对', '导入文件', {
-    prepare(_event, payload = {}) {
-      if (!database || !database.db) return { proceed: false, result: { status: 'error', message: '数据库未就绪' } };
-    // v3.0.2 需求1b：接收 filePaths 数组（多文件合并到同一日期）。
-    //   兼容旧入参 filePath（单数）→ 归一为 [filePath]。校验：date 必填 + 至少一个文件。
-    const { date, filePaths, filePath } = payload || {};
-    const files = Array.isArray(filePaths) && filePaths.length > 0
-      ? filePaths
-      : (filePath ? [filePath] : []);
-      if (!date || files.length === 0) return { proceed: false, result: { status: 'error', message: '入参缺失（date / filePaths）' } };
-      return {
-        proceed: true,
-        date,
-        filePlan: {
-          version: 1,
-          allocation: 'eager',
-          inputs: files.map((inputPath) => ({
-            filePath: inputPath,
-            role: 'input',
-            sourceOperation: 'bizOpRecon:import:run-flow'
-          })),
-          outputs: []
-        }
-      };
-    },
-    async execute(event, prepared, taskContext) {
-    const { date } = prepared;
-    const files = taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath);
-    try {
-      const errorReportsDir = path.join(ensureStorageRoot(), 'error-reports');
-      // v3.0.5 PR-4：导入落 per-月侧库（编排层把 worker dbPath 覆盖为 month(date) 侧库路径）。
-      //   flow 按 date 清（不跨 BU 不跨日）→ 无跨月问题（flow 落 month(date) 侧库，与对账 date 同库）。
-      // v3.0.2 需求1b：filePaths 透传 worker（单进程单事务合并、单次 clearByDate，禁止循环调用 runFlowImport）
-      const result = await bizOpReconRunData.runFlowImport({
-        userDataDir: path.dirname(database.dbPath),
-        runFlowImportViaWorker: runFlowImport,
-        params: {
-          date,
-          filePaths: files,
-          readFlowFile,
-          writeFlowErrorReportXlsx,
-          errorReportsDir,
-          batchContext: taskContext.batchContext,
-          onProgress: (ev) => {
-            try { event.sender.send('bizOpRecon:import:progress', { ...ev, kind: 'flow' }); }
-            catch (_e) { /* swallow */ }
-          }
-        }
-      });
-      return result;
-    } catch (err) {
-      return {
-        status: 'error',
-        message: err && err.message ? err.message : String(err),
-        detailLines: err && err.detailLines ? err.detailLines : []
-      };
-    }
-    }
-  });
-
-  // 打开错误报告文件夹（#5 拍板）
-  ipcMain.handle('bizOpRecon:import:open-error-report-folder', async (_event, payload = {}) => {
-    const { errorReportPath } = payload || {};
-    if (!errorReportPath) return { ok: false, message: '路径为空' };
-    try {
-      const { shell } = require('electron');
-      shell.showItemInFolder(errorReportPath);
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, message: err && err.message ? err.message : String(err) };
-    }
-  });
-
-  // 检查"库里仅有一日数据"（#11 拍板 B）
-  // v3.0.5 PR-4：双源（遍历侧库所有月 + 主库旧表所有 date，去重）。
-  ipcMain.handle('bizOpRecon:import:check-single-day', (_event, payload = {}) => {
-    if (!database || !database.db) return { onlyOneDay: false, count: 0 };
-    const { buName } = payload || {};
-    if (!buName) return { onlyOneDay: false, count: 0 };
-    try {
-      return bizOpReconRunData.checkSingleDayDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db, buName });
-    } catch (_e) {
-      return { onlyOneDay: false, count: 0 };
-    }
-  });
-
-  // 列 ready 日期（#12 + #13 拍板 A）
-  // v3.0.5 PR-4：双源（逐月侧库各跑 listReadyDates，每库 T-1/T-2 含月末冗余副本自洽，合并）。
-  ipcMain.handle('bizOpRecon:run:list-ready-dates', (_event, payload = {}) => {
-    if (!database || !database.db) return [];
-    const { buName } = payload || {};
-    if (!buName) return [];
-    try {
-      return bizOpReconRunData.listReadyDatesDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db, buName });
-    } catch (_e) {
-      return [];
-    }
-  });
-
-  // 跑对账（#3/#6/#7/#10 拍板）
-  // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
-  trackedIpcHandle('bizOpRecon:run', '业务OP数据核对', '开始运行', {
-    prepare(_event, payload = {}) {
-      if (!database || !database.db) {
-        return { proceed: false, result: { status: 'error', message: '数据库未就绪' } };
-      }
-      const { date, buName } = payload || {};
-      if (!date || !buName) {
-        return {
-          proceed: false,
-          result: { status: 'error', message: '入参缺失（date / buName）' }
-        };
-      }
-      const taskRunId = randomUUID();
-      const plan = bizOpReconRunData.prepareRunLineage({
-        userDataDir: path.dirname(database.dbPath),
-        date,
-        buName
-      });
-      return {
-        proceed: true,
-        taskRunId,
-        date,
-        buName,
-        lineageIntents: plan.lineageIntents,
-        expectedDatasets: plan.expectedDatasets,
-        afterTerminal: terminalRouteRegistry.createAfterTerminal(bizOpRunTerminalRoute(taskRunId)),
-        afterTerminalIntent: bizOpRunTerminalRoute(taskRunId)
-      };
-    },
-    async execute(_event, prepared, taskContext) {
-      try {
-        const { runId, stats } = bizOpReconRunData.runViaSideDb({
-          userDataDir: path.dirname(database.dbPath),
-          mainDb: database.db,
-          date: prepared.date,
-          buName: prepared.buName,
-          taskRunId: taskContext.operationContext.taskRunId,
-          expectedDatasets: prepared.expectedDatasets
-        });
-        return { runId, status: 'success', stats };
-      } catch (err) {
-        if (err && err.preserveArchiveTaskRun === true) {
-          // 精确补偿自身失败时保留 side receipt，并复用既有 interrupted owner 恢复；
-          // TaskLifecycle 随后的 failed terminal 会因状态冲突保持 interrupted，不开放 failed recovery。
-          const interrupted = await archiveCenterService.service.finishTaskRun(
-            taskContext.operationContext.taskRunId,
-            {
-              taskStatus: 'interrupted',
-              code: err.code,
-              message: err.message,
-              metadata: { bizOpRunReceiptPending: true }
-            }
-          );
-          if (!interrupted || interrupted.ok === false) throw err;
-        }
-        return { status: 'error', message: err && err.message ? err.message : String(err) };
-      }
-    }
-  });
-
-  // 列 success 日期（#13 拍板 A，导出指定日期下拉来源）
-  // v3.0.5 PR-4：主库镜像（侧库 run 镜像 + 历史主库 run 都在主库 runs 表）。
-  ipcMain.handle('bizOpRecon:export:list-success-dates', (_event, payload = {}) => {
-    if (!database || !database.db) return [];
-    const { buName } = payload || {};
-    if (!buName) return [];
-    try {
-      return bizOpReconRunData.listSuccessDatesDualSource({ mainDb: database.db, buName });
-    } catch (_e) {
-      return [];
-    }
-  });
-
-  // 弹另存为对话框（#9 拍板 A 默认文件名由前端拼好）
-  ipcMain.handle('bizOpRecon:export:pick-save-path', async (_event, payload = {}) => {
-    const { defaultFileName } = payload || {};
-    try {
-      const result = await dialog.showSaveDialog({
-        title: '另存为',
-        defaultPath: path.join(ensureStorageRoot(), 'exports', defaultFileName || 'export.xlsx'),
-        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-      });
-      if (result.canceled || !result.filePath) return { status: 'cancelled' };
-      return { status: 'ok', savePath: result.filePath };
-    } catch (err) {
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
-    }
-  });
-
-  // 导出指定日期（#14 拍板 A sheet 名 ISO）
-  // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
-  trackedIpcHandle('bizOpRecon:export:date', '业务OP数据核对', '导出差异', {
-    prepare(_event, payload = {}) {
-      const { runId, savePath } = payload || {};
-      if (!database || !database.db) return { proceed: false, result: { status: 'error', message: '数据库未就绪' } };
-      if (!runId || !savePath) return { proceed: false, result: { status: 'error', message: '入参缺失（runId / savePath）' } };
-      const runLocator = bizOpReconRunData.freezeRunLocator({
-        userDataDir: path.dirname(database.dbPath),
-        mainDb: database.db,
-        runId
-      });
-      const useManagedExport = backgroundExecutionRuntimeManager.isProductionEnabled(
-        BIZ_OP_READ_ONLY_ACTIONS.DAY
-      );
-      const selector = Object.freeze({
-        kind: 'biz-op-day',
-        mirrorRunId: runLocator.mirrorRunId
-      });
-      const stableSnapshot = useManagedExport
-        ? freezeBizOpSourceSnapshot({
-            userDataDir: path.dirname(database.dbPath),
-            mainDb: database.db,
-            selector
-          })
-        : null;
-      if (useManagedExport && JSON.stringify(stableSnapshot.runLocators) !==
-          JSON.stringify([runLocator])) {
-        throw new Error('BizOP 单日导出来源在准备期间发生变化，请重新导出');
-      }
-      const prepared = {
-        proceed: true,
-        runLocator,
-        useManagedExport,
-        selector,
-        stableRunEvidence: stableSnapshot && stableSnapshot.evidence,
-        lineageIntents: [bizOpRunOutputIntent(runLocator)],
-        filePlan: {
-          version: 1,
-          allocation: 'eager',
-          inputs: [],
-          outputs: [{ filePath: savePath, role: 'output', sourceOperation: 'bizOpRecon:export:date' }]
-        },
-        beforeStart() {
-          if (useManagedExport) assertBizOpEvidenceFresh(stableSnapshot.evidence, selector);
-        }
-      };
-      return useManagedExport
-        ? attachReadOnlyExportReceiptAcknowledgement(prepared)
-        : prepared;
-    },
-    async execute(_event, prepared, taskContext) {
-    const { runLocator } = prepared;
-    const savePath = taskContext.fileEvidence.filePlan.outputs[0].filePath;
-    if (prepared.useManagedExport) {
-      const stagingRoot = createReadOnlyExportStagingDirectory(
-        taskContext.batchContext,
-        'biz-op'
-      );
-      let preserveStaging = false;
-      try {
-        const generationPlan = createReadOnlyExportGenerationPlan(
-          stagingRoot,
-          taskContext,
-          BIZ_OP_READ_ONLY_ACTIONS.DAY
-        );
-        const generated = await generateValidateAndPublishBizOpExport({
-          runtime: backgroundExecutionRuntimeManager.get(),
-          actionKey: BIZ_OP_READ_ONLY_ACTIONS.DAY,
-          operationKey: taskContext.batchContext.operationKey,
-          taskRunId: taskContext.batchContext.taskRunId,
-          batchContext: taskContext.batchContext,
-          stableRunEvidence: prepared.stableRunEvidence,
-          generationPlan,
-          context: prepared.selector,
-          production: true,
-          assertSourceFresh: () => assertBizOpEvidenceFresh(
-            prepared.stableRunEvidence,
-            prepared.selector
-          ),
-          publisher: (artifacts) => publishReadOnlyExportArtifacts(
-            'biz-op-day', artifacts, taskContext
-          )
-        });
-        prepared.readOnlyExportPublicationTaskIds = [generated.publication.taskId];
-        const published = generated.publication.files[0];
-        try {
-          bizOpReconRunData.recordExportPath({
-            mainDb: database.db,
-            runId: runLocator.mirrorRunId,
-            exportPath: published.filePath
-          });
-        } catch (metadataError) {
-          appendActivityLogEntry({
-            level: 'warning',
-            source: 'main',
-            domain: 'biz-op-read-only-export',
-            message: 'BizOP 单日导出已发布，但 export_path 元数据更新失败',
-            details: [metadataError && metadataError.message
-              ? metadataError.message
-              : String(metadataError)]
-          });
-        }
-        return {
-          status: 'success',
-          filePath: published.filePath,
-          rowCount: generated.summary.rowCount
-        };
-      } catch (error) {
-        preserveStaging = shouldPreserveToolboxTemporaryFiles(error);
-        return { status: 'error', message: error && error.message ? error.message : String(error) };
-      } finally {
-        if (!preserveStaging) cleanupReadOnlyExportStagingDirectory(stagingRoot);
-      }
-    }
-    // v3.0.5 PR-4：导出走侧库——主库镜像拿 (date,BU)+side_db_rel_path → open 该月侧库给 writer
-    //   （writer 读 diff_rows + getRowById(imports) 全在侧库；月初跨月 T-2 行由冗余副本在库 → byte-for-byte）。
-    const userDataDir = path.dirname(database.dbPath);
-    let exportDb = null;
-    try {
-      exportDb = bizOpReconRunData.buildFrozenRangeExportDb({
-        userDataDir,
-        mainDb: database.db,
-        runLocators: [runLocator]
-      });
-      const result = await writeBizOpSingleDateDiffWorkbook({
-        db: exportDb,
-        date: runLocator.date,
-        buName: runLocator.buName,
-        runId: runLocator.sideRunId,
-        savePath
-      });
-      bizOpReconRunData.recordExportPath({
-        mainDb: database.db,
-        runId: runLocator.mirrorRunId,
-        exportPath: result.filePath
-      });
-      await taskContext.settleArtifacts({
-        files: taskContext.fileEvidence.filePlan.outputs
-          .map((item) => ({ artifactKey: item.artifactKey }))
-      });
-      return { status: 'success', filePath: result.filePath, rowCount: result.rowCount };
-    } catch (err) {
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
-    } finally {
-      if (exportDb) { try { exportDb.close(); } catch (_e) { /* swallow */ } }
-    }
-    }
-  });
-
-  // 导出指定日期区间（v2.1.3-fix6 拍板回滚：单 sheet 合并 + 第 1 列 Billdate 区分日期）
-  // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
-  trackedIpcHandle('bizOpRecon:export:date-range', '业务OP数据核对', '导出差异', {
-    prepare(_event, payload = {}) {
-      const { buName, startDate, endDate, savePath } = payload || {};
-      if (!database || !database.db) return { proceed: false, result: { status: 'error', message: '数据库未就绪' } };
-      if (!buName || !startDate || !endDate || !savePath) {
-        return { proceed: false, result: { status: 'error', message: '入参缺失（buName / startDate / endDate / savePath）' } };
-      }
-      const selection = bizOpReconRunData.freezeRangeRunSelection({
-        userDataDir: path.dirname(database.dbPath),
-        mainDb: database.db,
-        buName,
-        startDate,
-        endDate
-      });
-      const useManagedExport = backgroundExecutionRuntimeManager.isProductionEnabled(
-        BIZ_OP_READ_ONLY_ACTIONS.RANGE
-      );
-      const selector = Object.freeze({
-        kind: 'biz-op-range',
-        buName,
-        startDate,
-        endDate
-      });
-      const stableSnapshot = useManagedExport
-        ? freezeBizOpSourceSnapshot({
-            userDataDir: path.dirname(database.dbPath),
-            mainDb: database.db,
-            selector
-          })
-        : null;
-      if (useManagedExport && JSON.stringify(stableSnapshot.runLocators) !==
-          JSON.stringify(selection.runLocators)) {
-        throw new Error('BizOP 区间导出来源在准备期间发生变化，请重新导出');
-      }
-      const prepared = {
-        proceed: true,
-        buName,
-        startDate,
-        endDate,
-        runLocators: selection.runLocators,
-        useManagedExport,
-        selector,
-        stableRunEvidence: stableSnapshot && stableSnapshot.evidence,
-        lineageIntents: selection.lineageIntents,
-        filePlan: {
-          version: 1,
-          allocation: 'eager',
-          inputs: [],
-          outputs: [{ filePath: savePath, role: 'output', sourceOperation: 'bizOpRecon:export:date-range' }]
-        },
-        beforeStart() {
-          if (useManagedExport) assertBizOpEvidenceFresh(stableSnapshot.evidence, selector);
-        }
-      };
-      return useManagedExport
-        ? attachReadOnlyExportReceiptAcknowledgement(prepared)
-        : prepared;
-    },
-    async execute(_event, prepared, taskContext) {
-    const { buName, startDate, endDate } = prepared;
-    const savePath = taskContext.fileEvidence.filePlan.outputs[0].filePath;
-    if (prepared.useManagedExport) {
-      const stagingRoot = createReadOnlyExportStagingDirectory(
-        taskContext.batchContext,
-        'biz-op'
-      );
-      let preserveStaging = false;
-      try {
-        const generationPlan = createReadOnlyExportGenerationPlan(
-          stagingRoot,
-          taskContext,
-          BIZ_OP_READ_ONLY_ACTIONS.RANGE
-        );
-        const generated = await generateValidateAndPublishBizOpExport({
-          runtime: backgroundExecutionRuntimeManager.get(),
-          actionKey: BIZ_OP_READ_ONLY_ACTIONS.RANGE,
-          operationKey: taskContext.batchContext.operationKey,
-          taskRunId: taskContext.batchContext.taskRunId,
-          batchContext: taskContext.batchContext,
-          stableRunEvidence: prepared.stableRunEvidence,
-          generationPlan,
-          context: prepared.selector,
-          production: true,
-          assertSourceFresh: () => assertBizOpEvidenceFresh(
-            prepared.stableRunEvidence,
-            prepared.selector
-          ),
-          publisher: (artifacts) => publishReadOnlyExportArtifacts(
-            'biz-op-range', artifacts, taskContext
-          )
-        });
-        prepared.readOnlyExportPublicationTaskIds = [generated.publication.taskId];
-        const published = generated.publication.files[0];
-        return {
-          status: 'success',
-          filePath: published.filePath,
-          sheetCount: generated.summary.sheetCount,
-          skippedDates: generated.summary.skippedDates
-        };
-      } catch (error) {
-        preserveStaging = shouldPreserveToolboxTemporaryFiles(error);
-        return { status: 'error', message: error && error.message ? error.message : String(error) };
-      } finally {
-        if (!preserveStaging) cleanupReadOnlyExportStagingDirectory(stagingRoot);
-      }
-    }
-    // v3.0.5 PR-4：区间导出跨多日多月——构造临时内存合并 db（把区间内 success run 的 runs/diff_rows/imports
-    //   从各月侧库 + 主库历史合并进内存 db，保 id/source_row_id 映射），writer 在合并 db 上跑（writer 零改动）。
-    let memDb = null;
-    try {
-      memDb = bizOpReconRunData.buildFrozenRangeExportDb({
-        userDataDir: path.dirname(database.dbPath),
-        mainDb: database.db,
-        runLocators: prepared.runLocators
-      });
-      const result = await writeBizOpDateRangeDiffWorkbook({
-        db: memDb,
-        buName, startDate, endDate, savePath
-      });
-      await taskContext.settleArtifacts({
-        files: taskContext.fileEvidence.filePlan.outputs
-          .map((item) => ({ artifactKey: item.artifactKey }))
-      });
-      return {
-        status: 'success',
-        filePath: result.filePath,
-        sheetCount: result.sheetCount,
-        skippedDates: result.skippedDates
-      };
-    } catch (err) {
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
-    } finally {
-      if (memDb) { try { memDb.close(); } catch (_e) { /* swallow */ } }
-    }
-    }
-  });
-
-  // 运行历史（debug 用，可选）
-  // v3.0.5 PR-4：主库镜像（侧库 run 镜像 + 历史主库 run 都在主库 runs 表）。
-  ipcMain.handle('bizOpRecon:run:history', (_event, payload = {}) => {
-    if (!database || !database.db) return [];
-    const { date, buName } = payload || {};
-    if (!date || !buName) return [];
-    try {
-      return bizOpReconRunData.listRunsDualSource({ mainDb: database.db, date, buName })
-        .map(publicBizOpRun);
-    } catch (_e) {
-      return [];
-    }
-  });
-
   // ==========================================================================
   // v2.1.12 需求1：VCC业务OP计算 — vccOpCalc:* IPC handlers（spec §3.6，6 个）
   // 命名空间 vccOpCalc:*；与现有 5 模块完全独立。资金红线 🔴（发生额求和 / 期末OP / 整数分精度）。
@@ -19244,7 +17343,7 @@ function registerNewAccountHandlers() {
   // 中间结果（scan/compute 的原始 rows + 统计）缓存在 vccOpCalcSession（仿 lastRunCache，spec Q1）。
   // ==========================================================================
 
-  // 多选流水 xlsx（仿 bankBuRecon:import:pick-* + pending pick-files 的 multiSelections）
+  // 多选流水 xlsx（multiSelections）
   ipcMain.handle('vccOpCalc:import:pick-files', async () => {
     const res = await showImportOpenDialog('vcc-op-calc', {
       title: '选择流水对账单文件（可多选）',
@@ -20689,7 +18788,7 @@ function registerNewAccountHandlers() {
     if (!opLock.acquired) {
       return { status: 'failed', message: opLock.message };
     }
-    // v3.0.11 需求3（批1 · 导入让出+进度）：内联进度转发器（100ms 节流，仿收单 createImportProgressForwarder
+    // v3.0.11 需求3（批1 · 导入让出+进度）：内联进度转发器（100ms 节流
     //   + run 内联 onProgress）。stage==='reading' 为文件切换，必发不节流；事件只读，绝不写任何会话/对账态。
     const onImportProgress = (!event || !event.sender) ? null : (() => {
       let lastSentAt = 0;
@@ -21007,942 +19106,6 @@ function registerNewAccountHandlers() {
     } finally {
       // v3.0.11 需求3（批1）：无论 cancelled / ok / 抛错，导入结束统一释放互斥锁。
       releaseBankStatementOpLock();
-    }
-    }
-  });
-
-  // ============================================================
-  // v2.1.6 Module B T9：收单单据币种校验 — acquiringBillCurrency:* IPC handler
-  // spec §七：7 个 handler；⚠️ 资金红线模块
-  // ============================================================
-
-  ipcMain.handle('acquiringBillCurrency:listMonths', () => {
-    if (!database || !database.db) return [];
-    // v2.1.8 N1：进入模块兜底 — listMonths 是用户切到收单单据币种校验模块的第 1 个 IPC 调用
-    //   spec §三 N1-D3 兜底触发点；检测 cleanup_pending → setImmediate 后台清（不阻塞 listMonths）+ toast
-    triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded();
-    // v3.0.5 PR-3：双源 listMonths（侧库目录 month + 主库旧表 month 合并；历史 run 零变化）
-    try {
-      return acquiringRunData.listMonthsDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db });
-    } catch (_e) { return []; }
-  });
-
-  ipcMain.handle('acquiringBillCurrency:sessionStatus', (_event, payload = {}) => {
-    if (!database || !database.db) return { monthKey: null, flowReady: false, billReady: false };
-    const { monthKey } = payload || {};
-    try {
-      // v3.0.5 PR-3：双源 sessionStatus（侧库存在 → 读侧库 readiness + 主库 runs 镜像；否则读主库旧表）
-      return acquiringRunData.getSessionStatusDualSource({
-        userDataDir: path.dirname(database.dbPath),
-        mainDb: database.db,
-        monthKey
-      });
-    } catch (_e) {
-      return { monthKey: monthKey || null, flowReady: false, billReady: false };
-    }
-  });
-
-  // fix1（spec §3.4）：importFlow / importBill 改造为三段式
-  //   1. 首调（无 payload）：弹 dialog → peek → 查 existingCount → 0 直接进事务；>0 返回 overwrite-required
-  //   2. 二次调（{ preparedContextId, confirmOverwrite: true }）：复用主进程预检上下文并复核后，进"单侧清+导入"事务
-  //   3. 异常分支：cancelled / error 携带 detailLines
-  // fix3 → fix9 → fix10：通用 operation lock 提到 module-level（line 200 附近），import/run/export/cleanup
-  // 互斥；cleanup 异步后台跑也持锁；fix10 启动钩子也共享同一把锁，避免 cleanup vs 用户首次 import 并发
-  const tryAcquireOpLock = tryAcquireAcquiringBillCurrencyOpLock;
-  const releaseOpLock = releaseAcquiringBillCurrencyOpLock;
-  const acquiringImportPreviewContexts = new Map();
-
-  // v2.1.7 F6：进度事件 forwarder（spec §6.3 改动点 2）
-  //   - createImportProgressForwarder：100ms 节流；stage='reading' 切换事件必发（文件切换）
-  //   - createRunProgressForwarder：无节流（v2.1.10 SR-FIX-1 round 2 P1-9 reverse sync — 注释过时修订）
-  //     v2.1.7 时每 run 仅 6 个事件；v2.1.10 A4 chunked 后每 run 6 + chunkCount 事件
-  //     （500w 行 / chunk=10w = 50 chunks → 56 events；5000w 行 → 506 events）
-  //     当前不节流；renderer 端 IPC listener 渲染抖动风险随数据量提升 — chunkCount > 100 时考虑节流（v2.1.11+）
-  //   - try/catch swallow webContents.send 失败（参考 main.js:9520 pending:import:progress 范式）
-  function createImportProgressForwarder(event) {
-    if (!event || !event.sender) return null;
-    let lastSentAt = 0;
-    const THROTTLE_MS = 100;
-    return (ev) => {
-      const isStageSwitch = ev && ev.stage === 'reading';   // 文件切换必发，不节流
-      const now = Date.now();
-      if (!isStageSwitch && now - lastSentAt < THROTTLE_MS) return;
-      lastSentAt = now;
-      try { event.sender.send('acquiringBillCurrency:import:progress', { ...ev, phase: 'import' }); }
-      catch (_e) { /* swallow — 窗口已销毁等 */ }
-    };
-  }
-  function createRunProgressForwarder(event) {
-    if (!event || !event.sender) return null;
-    return (ev) => {
-      try { event.sender.send('acquiringBillCurrency:run:progress', { ...ev, phase: 'run' }); }
-      catch (_e) { /* swallow */ }
-    };
-  }
-
-  // v3.0.8 需求3：bank-statement run 进度转发器已内联到 bank-statement:run handler（main.js:3665 附近）——
-  //   该 handler 与本收单模块 register 函数不在同一作用域，故不在此处定义命名 helper（避免跨作用域 not defined）。
-
-  // v2.1.7 F7-B1：runCheck 完成/失败弹系统通知（spec §7.5.2 / PRD §十一-B1）
-  //   success：「收单单据币种校验」{monthKey} 对账完成（共 N 行差异）
-  //   error：  「收单单据币种校验」对账失败：{message}（body 200 字符截断兜底 macOS 通知中心）
-  //   cancelled (v2.1.10 SR-FIX-1 round 2 P1-4)：「收单单据币种校验」{monthKey} 已取消（轻量提示，不当错误）
-  //   helper 内部 try/catch swallow，通知失败不影响 IPC return
-  //   Notification.isSupported() 兜底极端环境（如无 GUI 的 CI / SSH 头）
-  function notifyAcquiringBillCurrencyResult(monthKey, kind, payload) {
-    try {
-      if (!Notification || typeof Notification.isSupported !== 'function' || !Notification.isSupported()) return;
-      const title = '「收单单据币种校验」';
-      let body;
-      if (kind === 'success') {
-        const mismatch = (payload && typeof payload.mismatchRows === 'number') ? payload.mismatchRows : 0;
-        body = `${monthKey} 对账完成（共 ${mismatch} 行差异）`;
-      } else if (kind === 'cancelled') {
-        // v2.1.10 SR-FIX-1 round 2 P1-4：用户主动取消（CancelError），轻量提示 — 不视为错误
-        //   spec §2.4 设计契约 + CancelError class 注释明确：业务语义是用户主动取消
-        const stage = payload && payload.stage ? String(payload.stage) : '';
-        body = stage ? `${monthKey} 已取消（${stage}）` : `${monthKey} 已取消`;
-      } else {
-        const msg = (payload && payload.message) ? String(payload.message) : '未知错误';
-        body = `对账失败：${msg}`.slice(0, 200);
-      }
-      new Notification({ title, body }).show();
-    } catch (_e) { /* swallow — 通知失败不影响业务 return */ }
-  }
-
-  async function prepareAcquiringImport(kind, payload = {}) {
-    const isFlow = kind === 'flow';
-    if (!database || !database.db) {
-      return { proceed: false, result: { status: 'error', message: '数据库未初始化' } };
-    }
-    const monthKey = payload.monthKey;
-    if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
-      return {
-        proceed: false,
-        result: {
-          status: 'error',
-          message: '缺少月份参数（请先在弹窗中选择对账月份）',
-          detailLines: []
-        }
-      };
-    }
-    const userDataDir = path.dirname(database.dbPath);
-    let filePaths;
-    let overwrite = false;
-    let previewContext = null;
-    if (payload.confirmOverwrite === true) {
-      previewContext = acquiringImportPreviewContexts.get(
-        String(payload.preparedContextId || '').trim()
-      );
-      if (!previewContext
-          || previewContext.kind !== kind
-          || previewContext.monthKey !== monthKey) {
-        return {
-          proceed: false,
-          result: {
-            status: 'error',
-            message: '覆盖导入预检已失效，请重新选择文件',
-            detailLines: []
-          }
-        };
-      }
-      filePaths = previewContext.filePaths;
-      overwrite = true;
-    } else {
-      const res = await showImportOpenDialog('acquiring-bill-currency', {
-        title: isFlow
-          ? `选择收单流水表（月份 ${monthKey}，可多选）`
-          : `选择收单流水单据表（月份 ${monthKey}，可多选）`,
-        filters: [{ name: 'Excel', extensions: ['xlsx'] }],
-        properties: ['openFile', 'multiSelections']
-      });
-      if (res.canceled || !res.filePaths || res.filePaths.length === 0) {
-        return { proceed: false, result: { status: 'cancelled' } };
-      }
-      filePaths = res.filePaths;
-    }
-
-    let peeked;
-    let assertSourceFresh;
-    try {
-      assertSourceFresh = previewContext
-        ? previewContext.assertSourceFresh
-        : createPreviewSourceFreshnessGuard(filePaths, '收单导入');
-      assertSourceFresh();
-      peeked = await acquiringRunData.peekImportTarget({
-        userDataDir,
-        kind,
-        filePaths
-      });
-      assertSourceFresh();
-    } catch (err) {
-      return {
-        proceed: false,
-        result: {
-          status: 'error',
-          message: err && err.message ? err.message : String(err),
-          detailLines: err && err.detailLines ? err.detailLines : []
-        }
-      };
-    }
-    if (peeked.monthKey !== monthKey) {
-      return {
-        proceed: false,
-        result: {
-          status: 'error',
-          message: `文件月份 ${peeked.monthKey} 与所选月份 ${monthKey} 不一致，请检查选择`,
-          detailLines: [`首文件解析月份：${peeked.monthKey}`, `用户选择月份：${monthKey}`]
-        }
-      };
-    }
-    if (!overwrite && peeked.existingCount > 0) {
-      const preparedContextId = randomUUID();
-      acquiringImportPreviewContexts.clear();
-      acquiringImportPreviewContexts.set(preparedContextId, {
-        kind,
-        monthKey,
-        filePaths: filePaths.slice(),
-        existingCount: peeked.existingCount,
-        assertSourceFresh
-      });
-      return {
-        proceed: false,
-        result: {
-          status: 'overwrite-required',
-          kind,
-          monthKey,
-          existingCount: peeked.existingCount,
-          fileCount: filePaths.length,
-          preparedContextId
-        }
-      };
-    }
-    if (overwrite && peeked.existingCount !== previewContext.existingCount) {
-      return {
-        proceed: false,
-        result: {
-          status: 'error',
-          message: '收单待覆盖数据在确认期间已变化，请重新导入',
-          detailLines: []
-        }
-      };
-    }
-    return {
-      proceed: true,
-      kind,
-      monthKey,
-      userDataDir,
-      filePlan: {
-        version: 1,
-        allocation: 'eager',
-        inputs: filePaths.map((filePath) => ({
-          filePath,
-          role: 'input',
-          sourceOperation: isFlow
-            ? 'acquiringBillCurrency:importFlow'
-            : 'acquiringBillCurrency:importBill'
-        })),
-        outputs: []
-      },
-      overwrite,
-      preparedContextId: previewContext ? String(payload.preparedContextId) : '',
-      async beforeStart(_batchContext, fileEvidence) {
-        const frozenPaths = fileEvidence.filePlan.inputs.map((item) => item.filePath);
-        const currentPeek = await acquiringRunData.peekImportTarget({
-          userDataDir,
-          kind,
-          filePaths: frozenPaths
-        });
-        if (currentPeek.monthKey !== monthKey || currentPeek.existingCount !== peeked.existingCount) {
-          throw new Error('收单导入预检证据在任务开始前已变化，请重新导入');
-        }
-        if (previewContext) {
-          const current = acquiringImportPreviewContexts.get(String(payload.preparedContextId));
-          if (current !== previewContext) {
-            throw new Error('覆盖导入预检已失效，请重新导入');
-          }
-        }
-      }
-    };
-  }
-
-  async function executeAcquiringImport(event, prepared, taskContext) {
-    const lock = tryAcquireOpLock('import', prepared.monthKey);
-    if (!lock.acquired) return { status: 'error', message: lock.message, detailLines: [] };
-    if (prepared.preparedContextId) {
-      acquiringImportPreviewContexts.delete(prepared.preparedContextId);
-    }
-    try {
-      try {
-        const onProgress = createImportProgressForwarder(event);
-        const filePaths = taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath);
-        const result = await acquiringRunData.importFiles({
-          userDataDir: prepared.userDataDir,
-          kind: prepared.kind,
-          monthKey: prepared.monthKey,
-          filePaths,
-          onProgress,
-          overwrite: prepared.overwrite,
-          batchContext: taskContext.batchContext
-        });
-        return {
-          status: 'success',
-          ...(prepared.overwrite ? { overwritten: true } : {}),
-          ...result
-        };
-      } catch (err) {
-        return {
-          status: 'error',
-          message: err && err.message ? err.message : String(err),
-          detailLines: err && err.detailLines ? err.detailLines : []
-        };
-      }
-    } finally {
-      releaseOpLock();
-    }
-  }
-
-  trackedIpcHandle('acquiringBillCurrency:importFlow', '收单单据币种校验', '导入流水表', {
-    prepare: (_event, payload = {}) => prepareAcquiringImport('flow', payload),
-    execute: (event, prepared, taskContext) => executeAcquiringImport(event, prepared, taskContext)
-  });
-
-  trackedIpcHandle('acquiringBillCurrency:importBill', '收单单据币种校验', '导入单据表', {
-    prepare: (_event, payload = {}) => prepareAcquiringImport('bill', payload),
-    execute: (event, prepared, taskContext) => executeAcquiringImport(event, prepared, taskContext)
-  });
-
-  // v0.8 fix5：runCheck 改 async，传 storageRoot 让 session 同步产出 diff.xlsx + report.xlsx
-  // v0.12 fix9：handler 接入 operation lock；runCheck return 后异步触发 cleanup（不阻塞 IPC return）
-  // v2.1.7 F6：透传 event → onProgress forwarder（spec §6.3 改动点 2）
-  // v2.1.10 A3 T10：runCheck 改走 worker pool dispatchRunCheck（spec §2.1 进程边界）
-  //   - 长任务在 worker 进程内执行（不阻塞主进程 event loop / IPC / 渲染）
-  //   - progress 事件通过 callback → createRunProgressForwarder forward 到 renderer（IPC 通道不变）
-  //   - log 事件通过 callback → appendActivityLogEntry forward（spec §1.2：worker 不直写 log）
-  //   - 错误透传：worker error → dispatchRunCheck reject → handler catch → 维持现有 status='error' 返回格式
-  //   - op lock + notification 现有路径保留
-  //   - N1' idle cleanup 协调（worker busy 时 skip）留 Phase 2 T12 改 setupIdleCleanupTimer
-  trackedIpcHandle('acquiringBillCurrency:run', '收单单据币种校验', '开始运行', {
-    async prepare(_event, payload = {}) {
-      if (!database || !database.db) {
-        return { proceed: false, result: { status: 'error', message: '数据库未初始化' } };
-      }
-      const { monthKey } = payload || {};
-      if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
-        return {
-          proceed: false,
-          result: { status: 'error', message: 'monthKey 格式错误（应为 YYYY-MM）' }
-        };
-      }
-      const resumable = acquiringRunData.findBoundResumableRun({
-        userDataDir: path.dirname(database.dbPath),
-        mainDb: database.db,
-        mainDbPath: database.dbPath,
-        monthKey
-      });
-      if (resumable) {
-        const repository = archiveCenterService
-          && archiveCenterService.service
-          && archiveCenterService.service.repository;
-        if (!repository) {
-          return {
-            proceed: false,
-            result: {
-              status: 'resume-required',
-              code: 'ACQUIRING_RUN_RESUME_REQUIRED',
-              message: `${monthKey} 存在未完成的可恢复运行；存档身份暂不可核验，请先恢复存档中心后续跑原任务`,
-              runId: resumable.runId
-            }
-          };
-        }
-        const batch = repository
-          ? repository.getBatch(resumable.batchContext.batchId)
-          : null;
-        const sameIdentity = batch
-          && String(batch.taskRunId || '') === resumable.batchContext.taskRunId
-          && String(batch.operationKey || '') === resumable.batchContext.operationKey
-          && String(batch.parentRunId || '') === resumable.batchContext.parentRunId
-          && String(batch.moduleId || '') === resumable.batchContext.moduleId;
-        if (!batch || !sameIdentity || ['reserved', 'running'].includes(String(batch.taskStatus || ''))) {
-          return {
-            proceed: false,
-            result: {
-              status: 'resume-required',
-              code: 'ACQUIRING_RUN_RESUME_REQUIRED',
-              message: !batch || !sameIdentity
-                ? `${monthKey} 的可恢复运行与存档身份不一致，已停止新运行以保留审计证据`
-                : `${monthKey} 存在未完成的可恢复运行，请先续跑原任务`,
-              runId: resumable.runId
-            }
-          };
-        }
-      }
-      const lock = tryAcquireOpLock('run', monthKey);
-      if (!lock.acquired) {
-        return { proceed: false, result: { status: 'busy', message: lock.message } };
-      }
-      let released = false;
-      const releaseLock = () => {
-        if (released) return;
-        released = true;
-        releaseOpLock();
-      };
-      return {
-        proceed: true,
-        monthKey,
-        userDataDir: path.dirname(database.dbPath),
-        filePlanResolver() {
-          const storageRoot = ensureStorageRoot();
-          const outputIntent = acquiringBillCurrencyWriter.planRunOutputPaths({
-            monthKey,
-            storageRoot
-          });
-          return normalizeFilePlanV1({
-            version: 1,
-            allocation: 'eager',
-            inputs: [],
-            outputs: [{
-              filePath: outputIntent.diffFilePath,
-              role: 'output',
-              sourceOperation: 'acquiringBillCurrency:run'
-            }]
-          });
-        },
-        onAbandon: releaseLock,
-        releaseLock
-      };
-    },
-    async execute(event, prepared, taskContext) {
-    const { monthKey } = prepared;
-    let result;
-    try {
-      const storageRoot = ensureStorageRoot();
-      const onProgress = createRunProgressForwarder(event);
-      // v2.1.10 A4 T18：从 settings 读 chunkSize（默认 100000；范围 1w-100w，外回退 default）
-      const chunkSize = typeof database.getAcquiringBillChunkSize === 'function'
-        ? database.getAcquiringBillChunkSize()
-        : undefined;
-      // v2.1.12 β.1-T3 — 多 worker workerCount 注入（⚠️ 资金红线 · spec §4 D29/D33）：
-      //   1. settings 取值（getAcquiringBillWorkerCount：default 2，范围 1-8，越界回退 2）
-      //   2. D29 CPU 上限：clamp 到 max(1, cpus-2)（POC：M=4 即甜点，避免过订）
-      //   3. D33 OOM 降级：可用内存 < 2GB → 强制降到 1（worker 各 ~800MB peak，低配机兜底）
-      //   ⚠️ 纯性能/资源闸——单/多 worker 结果 byte-for-byte 一致（contract 已锁）；clamp 只影响快慢与内存。
-      //   ⚠️ 最终 workerCount<=1（如单核机 / 低内存 / settings=1）→ runCheckCore gate 自然回退单 worker，零行为变化。
-      const computeWorkerCount = () => {
-        const settingsCount = typeof database.getAcquiringBillWorkerCount === 'function'
-          ? database.getAcquiringBillWorkerCount()
-          : 1;
-        let n = Number.isInteger(settingsCount) && settingsCount > 0 ? settingsCount : 1;
-        // D29：CPU 上限
-        const cpuCap = Math.max(1, (os.cpus() ? os.cpus().length : 1) - 2);
-        n = Math.min(n, cpuCap);
-        // D33：可用内存 < 2GB → 降到单 worker（OOM 兜底）
-        const OOM_FREEMEM_FLOOR_BYTES = 2 * 1024 * 1024 * 1024;
-        try {
-          if (os.freemem() < OOM_FREEMEM_FLOOR_BYTES) n = 1;
-        } catch (_e) { /* freemem 不可用 → 保守不降级（cpuCap 已兜底） */ }
-        return Math.max(1, n);
-      };
-      const workerCount = computeWorkerCount();
-      // 多 worker temp db 目录（runWriteSplitChunks 写 part-<ci>.sqlite，跑完 finally 清文件；
-      //   空目录复用，不反复 mkdir/rm）。单 worker 路径不使用此目录。
-      const mwTempDir = path.join(storageRoot, '.mw-tmp');
-      try { fs.mkdirSync(mwTempDir, { recursive: true }); } catch (_e) { /* swallow — 多 worker gate 内会再兜底建 */ }
-      // v3.0.5 PR-3（Part B Phase 1）：worker pool dispatch __dbPath 改为「该月侧库路径」
-      //   - acquiringRunData.runCheckViaSideDb 内：__dbPath = run-data/{module}/month-{monthKey}.sqlite
-      //     → worker 自开侧库连接跑 runCheckCore（5 阶段/JOIN/epsilon 零改动，三表同库自洽）
-      //     → 成功后把 summary + 路径 + side_db_rel_path 镜像写主库 runs（UI/导出读主库镜像）
-      //   - dbPath 切月：worker pool dispatchRunCheck 内检测 workerDbPath≠新侧库 → 重启 worker 重 init
-      //   - onLog：worker 内 appendModuleLog → message pipe → 主进程 appendActivityLogEntry
-      //   - chunkSize / workerCount / tempDir 透传不变（多 worker 子 worker 也用侧库 dbPath）
-      const outputPath = taskContext.fileEvidence.filePlan.outputs[0].filePath;
-      result = await acquiringRunData.runCheckViaSideDb({
-        userDataDir: prepared.userDataDir,
-        monthKey,
-        storageRoot,
-        chunkSize,
-        workerCount,
-        tempDir: mwTempDir,
-        batchContext: taskContext.batchContext,
-        outputIntent: { diffFilePath: outputPath, reportFilePath: outputPath },
-        mainDb: database.db,
-        dispatchFn: runCheckWorkerPool.dispatchRunCheck,
-        dispatchCallbacks: {
-          onProgress,
-          onLog: (entry) => {
-            try {
-              appendActivityLogEntry(entry || {});
-            } catch (_e) { /* swallow — log forwarder 失败不阻塞业务 */ }
-          },
-        },
-      });
-      await taskContext.settleArtifacts({
-        files: taskContext.fileEvidence.filePlan.outputs.map((item) => ({
-          artifactKey: item.artifactKey
-        }))
-      });
-    } catch (err) {
-      // v2.1.10 SR-FIX-1 round 2 P1-4：CancelError 走 cancelled 路径（spec §2.4 设计契约）
-      //   CancelError class 注释明确：业务语义=用户主动取消；handler 应识别，不弹错误 Notification
-      //   错误 source 失败时仍弹 error；cross-process worker → instanceof 不可靠 → 用 err.name
-      if (err && err.name === 'CancelError') {
-        notifyAcquiringBillCurrencyResult(monthKey, 'cancelled', { stage: err.stage });
-        return { status: 'cancelled', message: err.message, stage: err.stage };
-      }
-      // v2.1.7 F7-B1：error 路径弹通知（spec §7.5.2）
-      notifyAcquiringBillCurrencyResult(monthKey, 'error', { message: err && err.message });
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
-    } finally {
-      prepared.releaseLock();
-    }
-    // v0.12 fix9：release run lock，setImmediate 异步分批清理（不阻塞 handler return）
-    // v2.1.8 N1：β 方案 — cleanup 移出对账链路，runCheck 内已 markCleanupPending=1，
-    //   不再 setImmediate 立即触发；交 app.before-quit（主清）+ 进入模块时（兜底清）
-    //   保留 result.cleanupNeeded 字段（向后兼容；前端不消费此字段）
-    // v2.1.7 F7-B1：success 路径弹通知（spec §7.5.2）
-    notifyAcquiringBillCurrencyResult(monthKey, 'success', { mismatchRows: result.mismatchRows });
-    return { status: 'success', ...result };
-    }
-  });
-
-  // v2.1.10 A3 T10：cancel handler（Phase 1 提供 API；Phase 2 T13 完善 graceful cancel）
-  //   - 调 workerPool.cancel() 设 cancelToken；当前 worker 内 runCheckCore 未读 cancelToken，
-  //     所以 Phase 1 cancel 不真打断（worker 完成当前 runCheck 后自然结束）
-  //   - Phase 2 T13 在 runCheckCore 内 5 阶段间 cancelToken check + ROLLBACK
-  ipcMain.handle('acquiringBillCurrency:run:cancel', (_event, payload = {}) => {
-    const jobId = payload && payload.jobId ? payload.jobId : null;
-    try {
-      const ok = runCheckWorkerPool.cancel(jobId);
-      return { status: ok ? 'success' : 'no-active-job' };
-    } catch (err) {
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
-    }
-  });
-
-  // v2.1.10 A4 T19：resume handler — 续跑 chunk_progress.status='partial' 的 run
-  //   - renderer 暂不暴露 UI（spec §三 / PRD §四 — v2.1.11+ 评估 UI）
-  //   - IPC 通道留好供 Phase 4-6 / SR-FIX 阶段加 UI；本 handler 用作集成测试 / 高级用户调用
-  //   - payload: { monthKey, runId }
-  //     - runId 必填：只恢复 caller 显式选定的 run，不按月份/latest 猜候选
-  //   - 返回：与 run handler 一致格式 { status: 'success', runId, ... } / { status: 'error', message }
-  trackedIpcHandle('acquiringBillCurrency:run:resume', '收单单据币种校验', '续跑（chunked resume）', {
-    async prepare(_event, payload = {}) {
-      if (!database || !database.db) {
-        return { proceed: false, result: { status: 'error', message: '数据库未初始化' } };
-      }
-      const { monthKey, runId } = payload || {};
-      if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
-        return {
-          proceed: false,
-          result: { status: 'error', message: 'monthKey 格式错误（应为 YYYY-MM）' }
-        };
-      }
-      const lock = tryAcquireOpLock('run', monthKey);
-      if (!lock.acquired) {
-        return { proceed: false, result: { status: 'busy', message: lock.message } };
-      }
-      let released = false;
-      const releaseLock = () => {
-        if (released) return;
-        released = true;
-        releaseOpLock();
-      };
-      try {
-        const resumePlan = acquiringRunData.prepareRunResume({
-          userDataDir: path.dirname(database.dbPath),
-          mainDb: database.db,
-          mainDbPath: database.dbPath,
-          monthKey,
-          runId
-        });
-        const repository = archiveCenterService
-          && archiveCenterService.service
-          && archiveCenterService.service.repository;
-        const oldOwner = resumePlan.recovery.batchContext;
-        const oldBatch = oldOwner && repository && repository.getBatch(oldOwner.batchId);
-        const oldTaskRun = oldOwner && repository && repository.getTaskRun(oldOwner.taskRunId);
-        const exactBatchOwner = !oldOwner || (oldBatch
-          && String(oldBatch.batchNumber) === oldOwner.batchNumber
-          && String(oldBatch.taskRunId) === oldOwner.taskRunId
-          && String(oldBatch.taskKey) === oldOwner.taskKey
-          && String(oldBatch.moduleId) === oldOwner.moduleId
-          && String(oldBatch.parentRunId) === oldOwner.parentRunId
-          && String(oldBatch.operationKey) === oldOwner.operationKey);
-        if (!exactBatchOwner) {
-          throw new Error('恢复 run 的持久 owner 与 Archive 身份不一致');
-        }
-        const legacyExistingBatchRecovery = Boolean(oldOwner && oldBatch && !oldTaskRun);
-        const recoverOriginal = oldTaskRun
-          && ['prepared', 'running', 'interrupted'].includes(oldTaskRun.status);
-        const transferOwner = !oldOwner
-          || (oldTaskRun && ['failed', 'cancelled'].includes(oldTaskRun.status));
-        if (!recoverOriginal && !transferOwner && !legacyExistingBatchRecovery) {
-          throw new Error(`Task Run ${oldTaskRun.status} 不允许 resume`);
-        }
-        if ((recoverOriginal || (transferOwner && oldOwner)) && !resumePlan.outputIntent) {
-          throw new Error('Atomic File Task 恢复缺少持久输出意图');
-        }
-        let legacyOutputIntent = resumePlan.outputIntent;
-        const originalManifestOutput = recoverOriginal
-          ? (() => {
-              const artifacts = repository.listArtifacts(oldBatch.id);
-              if (artifacts.length !== 1
-                  || artifacts[0].direction !== 'output'
-                  || artifacts[0].sourcePath !== resumePlan.outputIntent.diffFilePath) {
-                throw new Error('恢复 run 的 Archive manifest 与持久输出意图不一致');
-              }
-              return {
-                filePath: artifacts[0].sourcePath,
-                role: artifacts[0].role,
-                sourceOperation: artifacts[0].sourceOperation,
-                artifactKey: artifacts[0].artifactKey
-              };
-            })()
-          : null;
-        return {
-          proceed: true,
-          resumePlan,
-          ...(legacyExistingBatchRecovery
-            ? {}
-            : recoverOriginal
-              ? {
-                  filePlan: {
-                    version: 1,
-                    allocation: 'eager',
-                    inputs: [],
-                    outputs: [originalManifestOutput]
-                  }
-                }
-              : resumePlan.outputIntent
-                ? {
-                    filePlan: {
-                      version: 1,
-                      allocation: 'eager',
-                      inputs: [],
-                      outputs: [{
-                        filePath: resumePlan.outputIntent.diffFilePath,
-                        role: 'output',
-                        sourceOperation: 'acquiringBillCurrency:run:resume'
-                      }]
-                    }
-                  }
-                : {
-                    filePlanResolver() {
-                      const outputIntent = acquiringBillCurrencyWriter.planRunOutputPaths({
-                        monthKey,
-                        storageRoot: ensureStorageRoot()
-                      });
-                      return normalizeFilePlanV1({
-                        version: 1,
-                        allocation: 'eager',
-                        inputs: [],
-                        outputs: [{
-                          filePath: outputIntent.diffFilePath,
-                          role: 'output',
-                          sourceOperation: 'acquiringBillCurrency:run:resume'
-                        }]
-                      });
-                    }
-                  }),
-          ...(legacyExistingBatchRecovery
-            ? {
-                legacyExistingBatchRecovery: true,
-                recovery: resumePlan.recovery,
-                taskRunId: oldOwner.taskRunId,
-                operationKey: oldOwner.operationKey,
-                legacyResumeOutputIntent: () => legacyOutputIntent,
-                beforeStart: () => {
-                  acquiringRunData.assertRunResumeFresh({
-                    userDataDir: path.dirname(database.dbPath),
-                    mainDb: database.db,
-                    mainDbPath: database.dbPath,
-                    prepared: resumePlan
-                  });
-                  if (!legacyOutputIntent) {
-                    legacyOutputIntent = resumePlan.mode === 'completed'
-                      ? {
-                          diffFilePath: resumePlan.runEvidence.diffFile.filePath,
-                          reportFilePath: resumePlan.runEvidence.diffFile.filePath
-                        }
-                      : acquiringBillCurrencyWriter.planRunOutputPaths({
-                          monthKey,
-                          storageRoot: ensureStorageRoot()
-                        });
-                    acquiringRunData.transferRunResumeOwner({
-                      mainDb: database.db,
-                      prepared: resumePlan,
-                      previousBatchContext: oldOwner,
-                      nextBatchContext: oldOwner,
-                      nextOutputIntent: legacyOutputIntent
-                    });
-                  }
-                }
-              }
-            : recoverOriginal
-            ? {
-                recovery: resumePlan.recovery,
-                taskRunId: oldOwner.taskRunId,
-                operationKey: oldOwner.operationKey,
-                assertPreRecoveryFresh: () => acquiringRunData.assertRunResumeFresh({
-                  userDataDir: path.dirname(database.dbPath),
-                  mainDb: database.db,
-                  mainDbPath: database.dbPath,
-                  prepared: resumePlan
-                })
-              }
-            : {
-                flowPlan: oldOwner
-                  ? { startsNewFlow: false, flowIdentity: null }
-                  : resumePlan.flowPlan,
-                explicitParentRunId: oldOwner ? oldOwner.parentRunId : undefined,
-                beforeStart(nextBatchContext, fileEvidence) {
-                  const outputPath = fileEvidence.filePlan.outputs[0].filePath;
-                  acquiringRunData.transferRunResumeOwner({
-                    mainDb: database.db,
-                    prepared: resumePlan,
-                    previousBatchContext: oldOwner || null,
-                    nextBatchContext,
-                    nextOutputIntent: {
-                      diffFilePath: outputPath,
-                      reportFilePath: outputPath
-                    }
-                  });
-                }
-              }),
-          onAbandon: releaseLock,
-          releaseLock
-        };
-      } catch (err) {
-        releaseLock();
-        return {
-          proceed: false,
-          result: { status: 'error', message: err && err.message ? err.message : String(err) }
-        };
-      }
-    },
-    async execute(event, prepared, taskContext) {
-      const { resumePlan } = prepared;
-      const { monthKey, runId: targetRunId, progress } = resumePlan;
-      let result;
-      try {
-        const storageRoot = ensureStorageRoot();
-        const onProgress = createRunProgressForwarder(event);
-        // v2.1.10 SR-FIX-1 Round 6 H4：resume 时 chunkSize 优先从 chunk_progress 复用
-        //   用户中途修改 settings 时仍必须沿原 chunk offset 继续；老 progress 缺值才 fallback settings。
-        const currentSettingsChunkSize = typeof database.getAcquiringBillChunkSize === 'function'
-          ? database.getAcquiringBillChunkSize()
-          : undefined;
-        let chunkSize;
-        if (Number.isInteger(progress.chunkSize) && progress.chunkSize > 0) {
-          chunkSize = progress.chunkSize;
-          if (Number.isInteger(currentSettingsChunkSize) && currentSettingsChunkSize !== progress.chunkSize) {
-            // H4：mismatch warning — 用户改 settings 后 resume；用持久化值优先（资金红线）
-            try {
-              appendActivityLogEntry({
-                level: 'warning',
-                source: 'main',
-                domain: 'acquiring-bill-currency',
-                message: '[acquiring-bill-currency:resume] chunkSize mismatch — 用持久化值（H4 资金红线护栏）',
-                details: [
-                  `runId=${targetRunId}`,
-                  `monthKey=${monthKey}`,
-                  `progress.chunkSize=${progress.chunkSize}`,
-                  `currentSettings.chunkSize=${currentSettingsChunkSize}`,
-                ],
-              });
-            } catch (_e) { /* swallow */ }
-          }
-        } else {
-          // 老 partial run（升级前的 chunk_progress 没 chunkSize 字段）→ fallback 当前 settings
-          chunkSize = currentSettingsChunkSize;
-          try {
-            appendActivityLogEntry({
-              level: 'warning',
-              source: 'main',
-              domain: 'acquiring-bill-currency',
-              message: '[acquiring-bill-currency:resume] chunk_progress 缺 chunkSize（老 partial run）— fallback settings',
-              details: [
-                `runId=${targetRunId}`,
-                `monthKey=${monthKey}`,
-                `fallback chunkSize=${chunkSize}`,
-              ],
-            });
-          } catch (_e) { /* swallow */ }
-        }
-
-        const outputIntent = prepared.legacyExistingBatchRecovery
-          ? prepared.legacyResumeOutputIntent()
-          : {
-              diffFilePath: taskContext.fileEvidence.filePlan.outputs[0].filePath,
-              reportFilePath: taskContext.fileEvidence.filePlan.outputs[0].filePath
-            };
-        result = await acquiringRunData.resumeRunCheck({
-          prepared: resumePlan,
-          storageRoot,
-          chunkSize,
-          batchContext: taskContext.batchContext,
-          outputIntent,
-          mainDb: database.db,
-          dispatchFn: runCheckWorkerPool.dispatchRunCheck,
-          dispatchCallbacks: {
-            onProgress,
-            onLog: (entry) => {
-              try { appendActivityLogEntry(entry || {}); } catch (_e) { /* swallow */ }
-            },
-          }
-        });
-        if (!prepared.legacyExistingBatchRecovery) {
-          await taskContext.settleArtifacts({
-            files: taskContext.fileEvidence.filePlan.outputs.map((item) => ({
-              artifactKey: item.artifactKey
-            }))
-          });
-        }
-      } catch (err) {
-        // v2.1.10 SR-FIX-1 round 2 P1-4：CancelError 走 cancelled 路径（同 run handler）
-        if (err && err.name === 'CancelError') {
-          notifyAcquiringBillCurrencyResult(monthKey, 'cancelled', { stage: err.stage });
-          return { status: 'cancelled', resumed: true, message: err.message, stage: err.stage };
-        }
-        notifyAcquiringBillCurrencyResult(monthKey, 'error', { message: err && err.message });
-        return { status: 'error', message: err && err.message ? err.message : String(err) };
-      } finally {
-        prepared.releaseLock();
-      }
-      notifyAcquiringBillCurrencyResult(monthKey, 'success', { mismatchRows: result.mismatchRows });
-      return { status: 'success', resumed: true, ...result };
-    }
-  });
-
-  // v0.8 fix5：export = 另存为最近 run 的 diff.xlsx（fs.copyFile）
-  // v0.12 fix9：handler 接入 operation lock
-  trackedIpcHandle('acquiringBillCurrency:export', '收单单据币种校验', '导出差异', {
-    async prepare(_event, payload = {}) {
-      if (!database || !database.db) {
-        return { proceed: false, result: { status: 'error', message: '数据库未初始化' } };
-      }
-      const { monthKey } = payload || {};
-      if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
-        return { proceed: false, result: { status: 'error', message: 'monthKey 格式错误' } };
-      }
-      let exportPlan;
-      try {
-        exportPlan = acquiringRunData.prepareRunExport({
-          userDataDir: path.dirname(database.dbPath),
-          mainDb: database.db,
-          monthKey
-        });
-      } catch (error) {
-        return {
-          proceed: false,
-          result: { status: 'error', message: error && error.message ? error.message : String(error) }
-        };
-      }
-      const res = await dialog.showSaveDialog({
-        title: '导出差异表另存为',
-        defaultPath: path.basename(exportPlan.diffFilePath),
-        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-      });
-      if (res.canceled || !res.filePath) {
-        return { proceed: false, result: { status: 'cancelled' } };
-      }
-      const useManagedExport = backgroundExecutionRuntimeManager.isProductionEnabled(
-        ACQUIRING_EXPORT_ACTIONS.COPY
-      );
-      const acquiringReadOnlyExportSource = useManagedExport
-        ? await freezeAcquiringCopySource({
-            userDataDir: path.dirname(database.dbPath),
-            mainDb: database.db,
-            monthKey,
-            exportPlan
-          })
-        : null;
-      const prepared = {
-        proceed: true,
-        monthKey,
-        exportPlan,
-        useManagedExport,
-        acquiringReadOnlyExportSource,
-        flowPlan: exportPlan.flowPlan,
-        filePlan: {
-          version: 1,
-          allocation: 'eager',
-          inputs: [],
-          outputs: [{
-            filePath: res.filePath,
-            role: 'output',
-            sourceOperation: 'acquiringBillCurrency:export'
-          }]
-        },
-        async beforeStart() {
-          acquiringRunData.assertRunExportFresh({
-            userDataDir: path.dirname(database.dbPath),
-            mainDb: database.db,
-            prepared: exportPlan
-          });
-          if (useManagedExport) {
-            await assertAcquiringCopyEvidenceFresh(acquiringReadOnlyExportSource);
-          }
-        }
-      };
-      return useManagedExport
-        ? attachReadOnlyExportReceiptAcknowledgement(prepared)
-        : prepared;
-    },
-    async execute(_event, prepared, taskContext) {
-    const { monthKey, exportPlan } = prepared;
-    const output = taskContext.fileEvidence.filePlan.outputs[0];
-    const lock = tryAcquireOpLock('export', monthKey);
-    if (!lock.acquired) return { status: 'error', message: lock.message };
-    try {
-      if (prepared.useManagedExport) {
-        return await executeManagedAcquiringCopyExport(prepared, taskContext);
-      }
-      fs.copyFileSync(exportPlan.diffFilePath, output.filePath);
-      await taskContext.settleArtifacts({ files: [{ artifactKey: output.artifactKey }] });
-      return {
-        status: 'success',
-        runId: exportPlan.runId,
-        source: exportPlan.source,
-        monthKey,
-        savedPath: output.filePath,
-        sourceDiffPath: exportPlan.diffFilePath
-      };
-    } catch (err) {
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
-    } finally {
-      releaseOpLock();
-    }
-    }
-  });
-
-  businessIpcHandle('acquiringBillCurrency:clearMonth', '清空月份数据', {
-    execute: (_event, _prepared, taskContext, payload = {}) => {
-    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
-    const { monthKey } = payload || {};
-    if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
-      return { status: 'error', message: 'monthKey 格式错误' };
-    }
-    try {
-      // v3.0.5 PR-3：clearMonth 双源——侧库存在 → 删整月侧库文件 + 主库镜像行（文件级回收）。
-      //   codex PR#73 复审修复 P3：升级过渡库同月可能主库仍有 legacy imports 行；只删侧库后
-      //   listMonthsDualSource 会回退主库 legacy 致该月 stale 重现 → 无论侧库是否存在都一并清主库
-      //   legacy（acquiringBillCurrencySession.clearMonth 幂等，无 legacy 则删 0 行）。
-      const userDataDir = path.dirname(database.dbPath);
-      if (runDataStore.sideDbExists(userDataDir, acquiringRunData.MODULE, monthKey)) {
-        acquiringRunData.deleteMonthSideDb({ userDataDir, mainDb: database.db, monthKey });
-      }
-      acquiringBillCurrencySession.clearMonth({ db: database.db, monthKey });
-      appendActivityLogEntry({
-        level: 'info',
-        source: 'main',
-        domain: 'acquiring-bill-currency',
-        message: '清空收单单据币种校验月份数据成功',
-        details: [`月份：${monthKey}`, `Task Run：${taskContext.operationContext.taskRunId}`]
-      });
-      return { status: 'success' };
-    } catch (err) {
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
     }
     }
   });
@@ -23962,6 +21125,29 @@ async function recoverToolboxPublicationsAtStartup() {
         ))
       });
     }
+    // v3.2.20：已下线模块（业务OP数据核对）遗留的发布记录原样保留，启动继续；
+    //   共享发布器在其被处理前会拒绝新的导出，这里记录原因与恢复路径便于处理。
+    const deferredItems = Array.isArray(result.deferred) ? result.deferred : [];
+    for (const [code, message, guidance] of [
+      [RETIRED_PUBLICATION_DEFER_CODE, '已下线模块「业务OP数据核对」遗留未完成的导出，记录已原样保留',
+        '在用 v3.2.19 及更早版本打开一次完成收尾前，新的导出会被拒绝'],
+      [RETIRED_PUBLICATION_MANUAL_CODE, '已下线模块「业务OP数据核对」遗留需人工恢复的导出，记录已原样保留',
+        '旧版也无法自动收尾：请按下列恢复路径人工处理，处理完成前新的导出会被拒绝']
+    ]) {
+      const retiredDeferred = deferredItems.filter((item) => item && item.code === code);
+      if (retiredDeferred.length === 0) continue;
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'toolbox',
+        message,
+        details: [
+          guidance,
+          ...retiredDeferred.map((item) => `${item.taskId}`),
+          ...retiredDeferred.flatMap((item) => (item.recoveryPaths || []).map((filePath) => `恢复路径：${filePath}`))
+        ]
+      });
+    }
   } catch (error) {
     toolboxStartupRecoveryError = error;
     appendActivityLogEntry({
@@ -24888,31 +22074,6 @@ function reportArchiveFailure(warning) {
   } catch (_error) { /* 存档告警展示失败不得影响业务 */ }
 }
 
-async function resolveArchiveFlowEvidence(kind, args) {
-  try {
-    if (kind === 'bank-bu-import-bundle') {
-      const payload = args[0] && typeof args[0] === 'object' ? args[0] : {};
-      const yearMonth = String(payload.yearMonth || '').trim();
-      if (!database || !database.db || !/^\d{4}-\d{2}$/.test(yearMonth)) return null;
-      return bankBuReconRunData.getImportFlowEvidence({
-        userDataDir: path.dirname(database.dbPath),
-        mainDb: database.db,
-        yearMonth
-      });
-    }
-  } catch (error) {
-    appendActivityLogEntry({
-      level: 'error',
-      source: 'main',
-      domain: 'archive-center-flow',
-      message: '任务流程证据读取失败，业务未开始',
-      details: [error && error.message ? error.message : String(error)]
-    });
-    throw error;
-  }
-  return null;
-}
-
 async function resolveTaskFlowPlan(policy, invocation) {
   if (typeof policy.flowPlanResolver === 'function') {
     const plan = await policy.flowPlanResolver(invocation);
@@ -24984,8 +22145,7 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
       });
       const invocation = {
         args: effectiveArgs,
-        prepared,
-        resolveFlowEvidence: (kind) => resolveArchiveFlowEvidence(kind, effectiveArgs)
+        prepared
       };
       const isFileTask = policy.batchPolicy !== 'no-file';
       const useLegacyExistingBatchRecovery = isFileTask && prepared.legacyExistingBatchRecovery === true;
@@ -25155,9 +22315,6 @@ function registerAllIpcHandlers() {
 }
 
 function registerAllIpcHandlersWithMemoryActivity() {
-  registerBizOpV327Handlers({ ipcMain, getModule: () => bizOpV327Module, businessOperationRegistry,
-    getTaskLifecycle: () => archiveTaskLifecycle, getRuntime: () => backgroundExecutionRuntimeManager.get(),
-    dialog, getWindow: () => mainWindow, getStorageRoot });
   registerWindowHandlers();
   registerAppHandlers();
   registerAppUpdateHandlers();
@@ -25172,7 +22329,7 @@ function registerAllIpcHandlersWithMemoryActivity() {
   registerTemplateHandlers();
   registerBigAccountHandlers();
   registerBigAccountOrderHandlers();
-  registerWithLegacyGuard(ipcMain, () => database?.db, registerFileHandlers);
+  registerFileHandlers();
   registerNewAccountHandlers();
   registerPreFundReconciliationHandlers();
   registerDuplicateInboundMatchHandlers();
@@ -25183,18 +22340,12 @@ function registerAllIpcHandlersWithMemoryActivity() {
 
 async function initializeBackgroundExecutionRecovery() {
   if (!database || !database.db) throw new Error('Recovery Coordinator 要求 Main control DB 已初始化');
-  recoveryControlReadRepository = createRecoveryControlReadRepository(database.db);
+  // v3.2.20：已下线模块（业务OP数据核对）留在恢复控制表中的 hold 只读跳过，不改写、不删除。
+  recoveryControlReadRepository = withoutRetiredRecoveryRecords(
+    createRecoveryControlReadRepository(database.db)
+  );
   const inspectorRegistry = createInspectorRegistry();
   const providerRegistry = createSettlementRecoveryProviderRegistry();
-  bizOpV327Module = createBizOpV327Module({ db: database.db, userDataDir: path.dirname(database.dbPath),
-    readRepository: recoveryControlReadRepository, productionRequests: true,
-    resolveSourceStructures: async () => {
-      const flow = await resolveFlowStatementStructure(getTemplateResourceService());
-      return flow ? { FLOW: flow } : null;
-    },
-    getRuntime: () => backgroundExecutionRuntimeManager.get(),
-    getArchiveService: () => archiveCenterService && archiveCenterService.service });
-  bizOpV327Module.sources.register(inspectorRegistry, providerRegistry);
   const inspectPreFundMpt = createPreFundMptOutcomeInspector({
     userDataDir: path.dirname(database.dbPath)
   });
@@ -25263,10 +22414,8 @@ async function initializeBackgroundExecutionRecovery() {
       ? manualBalanceRecoveryPolicy()
       : [...PRE_FUND_MPT_POLICIES, RECON_FIX_JPM_POLICY]
         .find((policy) => policy.actionKey === actionKey) || null,
-    resolveTaskState: (source) => BIZ_OP_V327_ACTIONS[source.actionKey]
-      ? bizOpV327Module.plan.taskState(source) : resolveReconFixJpmTaskState(source),
+    resolveTaskState: (source) => resolveReconFixJpmTaskState(source),
     planTransitions(input) {
-      if (input && input.source && BIZ_OP_V327_ACTIONS[input.source.actionKey]) return bizOpV327Module.plan.plan(input);
       if (input && input.source && input.source.actionKey === MANUAL_BALANCE_ACTION_KEY) {
         return manualBalancePlanTransitions(input);
       }
@@ -25281,30 +22430,22 @@ async function initializeBackgroundExecutionRecovery() {
     dispatcher: getDefaultToolboxPublicationDispatcher(),
     acquireMemory: createPublicationMemoryAdmission(() => backgroundExecutionRuntimeManager.get()),
     owners: [
-      bizOpV327Module.publication.publicationOwner,
-      createArchivePublicationOwner({ getArchiveCenter: () => archiveCenterService })
+      createArchivePublicationOwner({ getArchiveCenter: () => archiveCenterService }),
+      // v3.2.20：已下线的业务OP数据核对（BizOP v327）遗留发布记录只识别、原样保留给旧版，不阻断启动。
+      createRetiredModulePublicationOwner()
     ]
   });
   publicationRecoveryCoordinator.bindDispatcherAuthority();
-  bizOpV327Module.publication.bindRecovery(publicationRecoveryCoordinator.forOwner('biz-op-v327'));
   applicationRecoveryCoordinator = createApplicationRecoveryComposition({
     platform: coordinator,
-    bizOpModule: bizOpV327Module,
-    recoverPendingRuns: recoverPendingRunsBeforeInterruptedSweep,
-    recoverLegacyBizOpRuns: recoverBizOpRunsBeforeInterruptedSweep,
     recoverPreFundRuns: recoverPreFundRunsBeforeInterruptedSweep,
     recoverPosition: recoverPositionPendingBeforeInterruptedSweep,
     recoverToolboxVccPublications: recoverToolboxPublicationsAtStartup,
     recoverVccImportTerminal: recoverVccImportBeforeInterruptedSweep,
-    reconcileVccImportLineage: reconcileVccImportArchiveBeforeRetentionCleanup,
-    onBizOpRecovery(result) {
-      appendActivityLogEntry({ level: result.ready ? 'info' : 'warning', source: 'main',
-        domain: 'biz-op-v327-recovery', message: result.ready ? '业务 OP 恢复完成' : '业务 OP 保留恢复保护',
-        details: [JSON.stringify(result)] });
-    }
+    reconcileVccImportLineage: reconcileVccImportArchiveBeforeRetentionCleanup
   });
   const preflight = await applicationRecoveryCoordinator.preflight();
-  const summary = preflight.participantResults.find((entry) => entry.id === 'biz-op-v327').result;
+  const summary = preflight.participantResults.find((entry) => entry.id === 'platform-scan').result;
   for (const hold of recoveryControlReadRepository.listActiveRecoveryHolds()) {
     const taskKeys = actionTaskBindingRegistry.allowedTaskKeys(hold.actionKey);
     if (!Array.isArray(taskKeys) || taskKeys.length === 0) {
@@ -25356,7 +22497,7 @@ async function initializeBackgroundExecutionRecovery() {
     level: 'info',
     source: 'main',
     domain: 'background-execution-recovery',
-    message: summary.reason === 'ARCHIVE_OWNER_PHASE_REQUIRED' ? '启动恢复预检完成，等待存档 owner' : '启动恢复扫描完成',
+    message: '启动恢复扫描完成',
     details: [
       `sources=${summary.sourceCount}`,
       `activeHolds=${summary.activeHoldCount}`
@@ -25433,7 +22574,7 @@ async function initializeApplication() {
     darkModeScheduler.start();
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
     // Recovery Contract startup boundary：任何 Archive owner recovery、cleanup 或业务 IPC
-    // 之前冻结注册器并预检；BizOP 未决时保留同一预算，在首个 Archive owner 阶段完成全量扫描。
+    // 之前冻结注册器并预检；平台全量扫描在预检阶段完成。
     try {
       await initializeBackgroundExecutionRecovery();
     } catch (error) {
@@ -25441,21 +22582,6 @@ async function initializeApplication() {
       throw error;
     }
     initializeAppUpdaterService();
-    try {
-      pendingDb = openPendingDb(app.getPath('userData'));
-    } catch (pendingDbErr) {
-      pendingDb = null;
-      try {
-        appendActivityLogEntry({
-          level: 'error',
-          message: 'Pending DB 初始化失败（v2.0.0）',
-          details: [String(pendingDbErr && pendingDbErr.stack ? pendingDbErr.stack : pendingDbErr)]
-        });
-      } catch (_logErr) {
-        // 日志失败不覆盖真实启动错误。
-      }
-      throw pendingDbErr;
-    }
     try {
       initializeArchiveCenter();
       // 唯一 Archive 初始化 Promise 完成后，由应用层确认平台扫描事实。
@@ -25633,134 +22759,6 @@ function observeBackgroundMemoryActivity(work) {
 }
 
 function runStartupPostSetup() {
-    // v2.1.6 fix10：启动期孤儿数据 cleanup（后台异步，不阻塞窗口 ready）
-    // 触发场景：上一次 run 中途 OOM 闪退 / 异常退出 / 用户 force quit，导致 DB 残留 diff_rows + flow/bill imports
-    // 检测口径：runs.status != 'success' OR diff/report 文件丢失（spec §5.4）
-    // 复用 fix9 cleanupAfterRunBackground 分批 DELETE + setImmediate 让出 event loop
-    // 失败容忍：抛错只记 activity log，不阻塞应用使用
-    setImmediate(observeBackgroundMemoryActivity(async () => {
-      if (!database || !database.db) return;
-      const lock = tryAcquireAcquiringBillCurrencyOpLock('cleanup', null);
-      if (!lock.acquired) return;
-      try {
-        const stats = await acquiringBillCurrencySession.cleanupOrphanData({
-          db: database.db,
-          onProgress: (p) => {
-            try {
-              appendActivityLogEntry({
-                level: 'info',
-                message: `[acquiring-bill-currency] startup cleanup ${p.phase}`,
-                details: [JSON.stringify(p)]
-              });
-            } catch (_logErr) { /* swallow */ }
-          }
-        });
-        if (stats && (stats.orphanRunIds.length > 0 || stats.deletedDiff > 0 || stats.deletedFlow > 0 || stats.deletedBill > 0)) {
-          try {
-            appendActivityLogEntry({
-              level: 'info',
-              message: '[acquiring-bill-currency] 启动期 cleanup 完成（fix10）',
-              details: [
-                `孤儿 run: ${stats.orphanRunIds.length} 个 (${stats.orphanRunIds.join(', ')})`,
-                `清空 diff_rows: ${stats.deletedDiff}`,
-                `清空 flow_imports: ${stats.deletedFlow}`,
-                `清空 bill_imports: ${stats.deletedBill}`,
-                `删除 run 记录: ${stats.deletedRuns}`
-              ]
-            });
-          } catch (_logErr) { /* swallow */ }
-        }
-      } catch (err) {
-        try {
-          appendActivityLogEntry({
-            level: 'error',
-            message: '[acquiring-bill-currency] 启动期 cleanup 失败（fix10）',
-            details: [String(err && err.stack ? err.stack : err)]
-          });
-        } catch (_logErr) { /* swallow */ }
-      } finally {
-        releaseAcquiringBillCurrencyOpLock();
-      }
-    }));
-
-    // v3.0.5 PR-3（Part B Phase 1 / B.6）：侧库孤儿双向兜底（启动扫描 run-data/{module}/ vs 主库 runs 元数据）
-    //   ① 有文件无元数据「且空壳（侧库无 flow/bill imports）」→ 删文件 + log；
-    //     🔴 codex PR#73 P1：import-only（已导入未对账，有数据无 mirror）= 有效中间态，保留不删（防丢导入数据，对齐 biz-op/bank-bu）；
-    //   ② 有元数据无文件 → 标记 run 失效（UI 降级「数据已清理」不崩溃）。
-    //   一致性原则：以侧库文件存在性为准（spec §B.6）。与上面主库孤儿清理（既有行级，双源过渡保留）并存。
-    //   后台 setImmediate，不阻塞窗口 ready；持同一把 op lock 避免与用户首次 import/run 并发。
-    setImmediate(observeBackgroundMemoryActivity(() => {
-      if (!database || !database.db) return;
-      const lock = tryAcquireAcquiringBillCurrencyOpLock('cleanup', null);
-      if (!lock.acquired) return;
-      try {
-        const stats = acquiringRunData.reconcileOrphans({
-          userDataDir: path.dirname(database.dbPath),
-          mainDb: database.db
-        });
-        if (stats && (stats.deletedOrphanFiles.length > 0 || stats.invalidatedRuns.length > 0)) {
-          appendActivityLogEntry({
-            level: 'info',
-            source: 'main',
-            domain: 'acquiring-bill-currency',
-            message: '[acquiring-bill-currency] 启动期侧库孤儿双向兜底完成（PR-3）',
-            details: [
-              `删孤儿文件: ${stats.deletedOrphanFiles.length} (${stats.deletedOrphanFiles.join(', ')})`,
-              `标记失效 run: ${stats.invalidatedRuns.length} (${stats.invalidatedRuns.join(', ')})`
-            ]
-          });
-        }
-      } catch (err) {
-        try {
-          appendActivityLogEntry({
-            level: 'error',
-            source: 'main',
-            domain: 'acquiring-bill-currency',
-            message: '[acquiring-bill-currency] 启动期侧库孤儿兜底失败（PR-3）',
-            details: [String(err && err.stack ? err.stack : err)]
-          });
-        } catch (_logErr) { /* swallow */ }
-      } finally {
-        releaseAcquiringBillCurrencyOpLock();
-      }
-    }));
-
-    // v3.0.5 PR-4（Part B Phase 2 / B.6）：biz-op + bank-bu 侧库孤儿双向兜底（启动扫描各自 run-data/{module}/）。
-    //   ① 有文件无 imports/镜像（空壳/损坏）→ 删文件；② 有镜像无文件 → 标记 run 失效（UI 降级，不崩溃）。
-    //   两模块无 op lock（导入/对账非长任务、无 cleanup 计时器）→ 直接跑；后台 setImmediate 不阻塞窗口。
-    setImmediate(observeBackgroundMemoryActivity(() => {
-      if (!database || !database.db) return;
-      const userDataDir = path.dirname(database.dbPath);
-      for (const [domain, runData] of [['biz-op-recon', bizOpReconRunData], ['bank-bu-recon', bankBuReconRunData]]) {
-        if (domain === 'biz-op-recon' && legacyMode(database.db) !== 'DISABLED') continue;
-        try {
-          const stats = runData.reconcileOrphans({ userDataDir, mainDb: database.db });
-          if (stats && (stats.deletedOrphanFiles.length > 0 || stats.invalidatedRuns.length > 0)) {
-            appendActivityLogEntry({
-              level: 'info',
-              source: 'main',
-              domain,
-              message: `[${domain}] 启动期侧库孤儿双向兜底完成（PR-4）`,
-              details: [
-                `删孤儿文件: ${stats.deletedOrphanFiles.length} (${stats.deletedOrphanFiles.join(', ')})`,
-                `标记失效 run: ${stats.invalidatedRuns.length} (${stats.invalidatedRuns.join(', ')})`
-              ]
-            });
-          }
-        } catch (err) {
-          try {
-            appendActivityLogEntry({
-              level: 'error',
-              source: 'main',
-              domain,
-              message: `[${domain}] 启动期侧库孤儿兜底失败（PR-4）`,
-              details: [String(err && err.stack ? err.stack : err)]
-            });
-          } catch (_logErr) { /* swallow */ }
-        }
-      }
-    }));
-
     // v3.0.5 PR-2（Part B Phase 0 / B-D8）：旧备份保留策略 —— 合并 backups/ + 根目录旧格式为一个池子，
     //   mtime 降序保留最近 2 份，其余删除。启动后台异步（setImmediate，与上面 fix10 cleanup 同风格），
     //   不阻塞窗口 ready；逐个被删文件写一条 activity log（含文件名/大小/mtime），单文件删除失败不中断、记 error 级。
@@ -25814,17 +22812,15 @@ function runStartupPostSetup() {
       }
     }));
 
-    // v2.1.8 N1' (v0.7)：启动 idle 30min 自动 cleanup 计时器（spec §3.2.2）
-    //   database init 完后启动；setInterval 2 分钟 tick，达 30min 闲置 → 触发 cleanup
+    // 空闲维护计时器：database init 完后启动；setInterval 2 分钟 tick。
     try {
       setupIdleCleanupTimer();
     } catch (err) {
-      // v2.1.9 SR-log-1：替换 console.error → 日志上报
       appendActivityLogEntry({
         level: 'error',
         source: 'main',
-        domain: 'acquiring-bill-currency',
-        message: '[acquiring-bill-currency] setupIdleCleanupTimer failed',
+        domain: 'idle-maintenance',
+        message: 'setupIdleCleanupTimer failed',
         details: [err && err.message ? err.message : String(err)],
         stack: err && err.stack ? err.stack : undefined
       });
@@ -25832,190 +22828,11 @@ function runStartupPostSetup() {
 
     // v3.0.3 PR-D（W5）：OneDrive 导出目录提示（启动后单次 toast）
     //   spec acquiring-import-recon-perf §9.4 — 仅 Windows + 工作目录命中 OneDrive 同步路径 + 未提示过 → 弹 Notification。
-    //   setImmediate 异步不阻塞窗口 ready（与上面 fix10 startup cleanup 同风格）；失败仅静默兜底。
+    //   setImmediate 异步不阻塞窗口 ready；失败仅静默兜底。
     setImmediate(observeBackgroundMemoryActivity(() => {
       notifyOneDriveStorageIfNeeded();
     }));
 
-    // v2.1.10 A3 Phase 2 T14：注册 worker pool failure listener
-    //   - worker exit (code≠0) / error 事件 → pool 自动 reject activeJob + 调本回调
-    //   - 主进程职责：Notification 通知、activity log、hadActiveJob 时 partial 兜底；下次 dispatch 由 pool cold-start。
-    //   - operation lock 由取得该锁的 prepare 所返回的 releaseLock 在 execute finally / onAbandon 释放。
-    //   - failure listener 没有所属 prepare 身份；idle worker 失败不得释放另一轮已经取得的锁。
-    try {
-      runCheckWorkerPool.setFailureListener((info) => {
-        try {
-          appendActivityLogEntry({
-            level: 'error',
-            source: 'main',
-            domain: 'acquiring-bill-currency',
-            message: `[acquiring-bill-currency] worker ${info && info.source} 异常（A3 Phase 2 T14 recover）`,
-            details: [
-              `message=${info && info.message ? info.message : 'unknown'}`,
-              `hadActiveJob=${info && info.hadActiveJob ? 'true' : 'false'}`,
-            ],
-            stack: info && info.cause && info.cause.stack ? info.cause.stack : undefined
-          });
-        } catch (_logErr) { /* swallow */ }
-        // v2.1.10 SR-FIX-1 round 2 P1-7：worker crash 时主进程兜底设 chunk_progress='partial'
-        //   触发场景：worker 跑到 chunk M/N 突然 process.exit(1) / OOM / SIGKILL → catch 块（runCheckCore L367-394）不执行
-        //     → chunk_progress 停留在 'in-progress'（onChunkDone 写的最后一次值）
-        //     → resume handler 检查 progress.status !== 'partial' → 拒绝 resume
-        //   修复：crash 后扫所有 chunk_progress.status='in-progress' 的 runs（生产正常路径下 in-progress
-        //     只在 chunk 边界短暂存在；crash 时残留）→ 兜底改成 'partial' → resume 可用
-        //   失败容忍：try/catch + activity log（不影响其他 failure 处理路径）
-        //
-        // v2.1.10 SR-FIX-1 Round 7 I1：透传 chunkSize（Codex 5 次复审 finding — 资金红线 P2）
-        //   原 Round 2 P1-7 实现：setRunChunkProgress(partial) 没传 chunkSize 入参
-        //     → setRunChunkProgress 内部不写 chunkSize 字段 → 持久化 partial JSON 丢失原 in-progress 的 chunkSize
-        //   触发场景（Round 6 H4 漏抓的路径）：
-        //     worker 跑 chunkSize=100000 到 chunk 2 → SIGKILL → failureListener 触发 → 此处 in-progress → partial
-        //     → 重写后 chunk_progress.chunkSize 丢失（变 undefined）
-        //     → resume handler fallback 当前 settings 的 chunkSize（如 10000） → OFFSET 偏移错位 → diff_rows 行 skip/重复
-        //   修复：透传 progress.chunkSize（H1 / onChunkDone 已写入持久化值）
-        //     - 老 partial run（升级前无 chunkSize 字段）→ progress.chunkSize undefined → setRunChunkProgress 不写
-        //       → resume handler fallback settings（Round 6 H4 兜底路径仍正确）
-        //     - 新场景（Round 6 H1 / H4 之后写入的 progress 都带 chunkSize）→ 透传保留 → 资金红线护栏闭合
-        if (info && info.hadActiveJob && database && database.db) {
-          try {
-            const inProgressRuns = database.db.prepare(`
-              SELECT id, month_key, chunk_progress
-              FROM acquiring_bill_currency_runs
-              WHERE chunk_progress IS NOT NULL
-            `).all();
-            for (const row of inProgressRuns) {
-              try {
-                const progress = JSON.parse(row.chunk_progress);
-                if (progress && progress.status === 'in-progress') {
-                  runRepo.setRunChunkProgress(database.db, {
-                    runId: row.id,
-                    lastCompletedChunkIndex: progress.lastCompletedChunkIndex,
-                    totalChunks: progress.totalChunks,
-                    status: 'partial',
-                    // Round 7 I1：透传 chunkSize 保证 resume 用原始 chunk size（资金红线 — 防 OFFSET 错位）
-                    //   setRunChunkProgress 内部对 undefined / 非正整数自动跳过写入（向后兼容老 row）
-                    chunkSize: progress.chunkSize,
-                  });
-                  appendActivityLogEntry({
-                    level: 'warning',
-                    source: 'main',
-                    domain: 'acquiring-bill-currency',
-                    message: '[SR-FIX-1 P1-7] worker crash 后 chunk_progress in-progress → partial 兜底',
-                    details: [
-                      `runId=${row.id}`,
-                      `monthKey=${row.month_key}`,
-                      `lastCompletedChunkIndex=${progress.lastCompletedChunkIndex}`,
-                      `totalChunks=${progress.totalChunks}`,
-                      // Round 7 I1：日志记录 chunkSize 透传（含 undefined 老 row）
-                      `chunkSize=${progress.chunkSize == null ? '(legacy/undefined)' : progress.chunkSize}`,
-                    ]
-                  });
-                }
-              } catch (_parseErr) { /* swallow — 破坏 JSON 跳过 */ }
-            }
-          } catch (scanErr) {
-            try {
-              appendActivityLogEntry({
-                level: 'error',
-                source: 'main',
-                domain: 'acquiring-bill-currency',
-                message: '[SR-FIX-1 P1-7] worker crash chunk_progress 兜底扫描失败',
-                details: [scanErr && scanErr.message ? scanErr.message : String(scanErr)],
-                stack: scanErr && scanErr.stack ? scanErr.stack : undefined
-              });
-            } catch (_logErr) { /* swallow */ }
-          }
-        }
-        // Notification（用户提示）— 复用既有 notifyAcquiringBillCurrencyResult error 路径
-        //   ⚠️ notifyAcquiringBillCurrencyResult 在 IPC handler 闭包内；模块顶层无法访问
-        //   直接构造 Notification — 与 notifyAcquiringBillCurrencyResult 内部一致的 isSupported 兜底
-        try {
-          if (Notification && typeof Notification.isSupported === 'function' && Notification.isSupported()) {
-            const body = `worker 异常请重试：${(info && info.message) ? String(info.message).slice(0, 160) : 'worker crash'}`;
-            new Notification({ title: '「收单单据币种校验」', body }).show();
-          }
-        } catch (_notifyErr) { /* swallow — 通知失败不影响业务 */ }
-      });
-    } catch (err) {
-      appendActivityLogEntry({
-        level: 'error',
-        source: 'main',
-        domain: 'acquiring-bill-currency',
-        message: '[acquiring-bill-currency] setFailureListener 注册失败',
-        details: [err && err.message ? err.message : String(err)],
-        stack: err && err.stack ? err.stack : undefined
-      });
-    }
-}
-
-// v2.1.8 N1：进入模块兜底 cleanup
-//   spec §三 N1-D3 / D4：listMonths 入口检测 cleanup_pending → 后台串行清 + toast 通知
-//   防重入：cleanupBackgroundInProgress flag，避免短时间内多次切回模块触发重复 cleanup
-//   并发隔离：用 tryAcquireOpLock('cleanup') 防与 import/run/export 冲突
-//   失败容忍：单 run 失败仅日志，继续清下一个；启动期 cleanupOrphanData 兜底
-let cleanupBackgroundInProgress = false;
-// v2.1.10 SR-FIX-1 round 2 P0-4：返回 Promise（spec §4.3.2 顺序契约）
-//   - 早返回路径（cleanupBackgroundInProgress / 无 db / 无 pending / 锁拿不到）→ 立即 resolve（不算执行）
-//   - 实际执行路径 → 主 cleanup 全部完成后 resolve
-//   - 兼容现有 caller（启动期 + 进入模块兜底 + idle tick）— fire-and-forget 不 await 不破坏既有行为
-//   - idle tick caller 可 await 后再调 raw_json 清理，保证顺序契约
-function triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded() {
-  return runMemoryActivity(() => triggerAcquiringBillCurrencyBackgroundCleanupWithMemoryActivity()).catch((error) => {
-    appendActivityLogEntry({ level: 'warning', source: 'background-execution', message: '后台清理延后，保留待清理记录',
-      details: [error.code || 'BACKGROUND_CLEANUP_FAILED'] });
-  });
-}
-
-function triggerAcquiringBillCurrencyBackgroundCleanupWithMemoryActivity() {
-  if (cleanupBackgroundInProgress) return Promise.resolve();
-  if (!database || !database.db) return Promise.resolve();
-  let pendingRuns;
-  try {
-    pendingRuns = runRepo.listPendingCleanupRuns(database.db);
-  } catch (_e) {
-    return Promise.resolve();
-  }
-  if (!pendingRuns || pendingRuns.length === 0) return Promise.resolve();
-  const cleanupLock = tryAcquireAcquiringBillCurrencyOpLock('cleanup', null);
-  if (!cleanupLock.acquired) return Promise.resolve(); // import/run/export 进行中，放弃这次（下次入模块再试）
-  cleanupBackgroundInProgress = true;
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('acquiringBillCurrency:cleanup-background:toast', {
-      stage: 'start', pendingCount: pendingRuns.length
-    });
-  }
-  return new Promise((resolve) => {
-    setImmediate(async () => {
-      try {
-        for (const run of pendingRuns) {
-          try {
-            await acquiringBillCurrencySession.cleanupAfterRunBackground({
-              db: database.db, monthKey: run.month_key, runId: run.id
-              // v2.1.8 N1' (v0.7)：includeDiff 默认 false → 只清 flow + bill，保留 diff
-            });
-            runRepo.clearCleanupPending(database.db, { runId: run.id });
-          } catch (cleanErr) {
-            // v2.1.9 SR-log-1：替换 console.error → 日志上报
-            appendActivityLogEntry({
-              level: 'error',
-              source: 'main',
-              domain: 'acquiring-bill-currency',
-              message: `[acquiring-bill-currency] background cleanup run ${run.id} 失败`,
-              details: [cleanErr && cleanErr.message ? cleanErr.message : String(cleanErr)],
-              stack: cleanErr && cleanErr.stack ? cleanErr.stack : undefined
-            });
-          }
-        }
-      } finally {
-        releaseAcquiringBillCurrencyOpLock();
-        cleanupBackgroundInProgress = false;
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('acquiringBillCurrency:cleanup-background:toast', { stage: 'done' });
-        }
-        resolve();
-      }
-    });
-  });
 }
 
 // v3.0.3 PR-D（W5）：OneDrive 导出目录提示（spec acquiring-import-recon-perf §9.4 / §二-W5）
@@ -26024,8 +22841,7 @@ function triggerAcquiringBillCurrencyBackgroundCleanupWithMemoryActivity() {
 //     (1) 平台 win32 且 ensureStorageRoot() 路径命中 OneDrive（isStorageRootOnOneDrive 内含平台门控）
 //     (2) 未提示过（防重 key win_onedrive_storage_notice_shown != '1'）
 //   命中 → 弹 Electron Notification（OneDrive 同步会拖慢大文件导出/导入）→ 置防重 key（只提示一次）。
-//   ⚠️ Notification 直接构造：notifyAcquiringBillCurrencyResult 是 IPC handler 闭包内局部函数，模块顶层访问不到；
-//      沿用其同款 Notification.isSupported() 兜底（无 GUI 的 CI / SSH 头环境不弹）。
+//   ⚠️ Notification.isSupported() 兜底（无 GUI 的 CI / SSH 头环境不弹）。
 //   失败容忍：全程 try/catch，任何异常仅记日志，不影响启动；防重 key 仅在成功 show 后置位。
 function notifyOneDriveStorageIfNeeded() {
   try {
@@ -26054,154 +22870,16 @@ function notifyOneDriveStorageIfNeeded() {
   }
 }
 
-// v2.1.8 N1' (v0.7)：idle 30min 自动 cleanup 计时器（spec §3.2.2）
-//   - 触发条件三个 AND：
-//       (1) renderer 上报的 lastUserActivityTs 距今 ≥ 30min（D6/D8）
-//       (2) mutex 可获取（间接表达 main 进程未在跑 import/run/export，D6 AND 设计）
-//       (3) listPendingCleanupRuns 非空（有待清 run）
-//   - 触发后复用 triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded 走同一条路径
-//     （已有 cleanupBackgroundInProgress 防重入 + tryAcquireOpLock 抢锁 + toast 通知）
-//   - 失败仅 console.error（D13 静默策略）；下次 idle 再试 + 进入模块兜底 + 启动 cleanupOrphanData 三重兜底
-//   - 启动时机：app.whenReady 后调用 setupIdleCleanupTimer（database init 完之后）
-//
-// v2.1.9 N1-settings (T32c, D21=c)：阈值从硬编码改 settings 化（不提供 UI）
-//   - 启动期：调 database.getAcquiringBillIdleCleanupMinutes() 拿值（默认 30；范围外回退 30 — 资金红线兜底）
-//   - 改阈值方式：用户用 sqlite3 客户端执行
-//       UPDATE app_settings SET setting_value = '<5..180>' WHERE setting_key = 'acquiring_bill_idle_cleanup_minutes';
-//     然后重启应用生效。
-//   - 范围 5-180 分钟：后端 setAcquiringBillIdleCleanupMinutes 校验 + getter 范围外回退默认 30（settings-repository）
-function loadIdleCleanupMsFromSettings() {
-  try {
-    if (database && typeof database.getAcquiringBillIdleCleanupMinutes === 'function') {
-      const minutes = database.getAcquiringBillIdleCleanupMinutes();
-      IDLE_CLEANUP_MS = minutes * 60 * 1000;
-      return minutes;
-    }
-  } catch (err) {
-    // v2.1.9 SR-log-1：替换 console.error → 日志上报；阈值回退 30min（资金红线兜底）
-    appendActivityLogEntry({
-      level: 'error',
-      source: 'main',
-      domain: 'acquiring-bill-currency',
-      message: '[acquiring-bill-currency] loadIdleCleanupMsFromSettings failed (回退 30min)',
-      details: [err && err.message ? err.message : String(err)],
-      stack: err && err.stack ? err.stack : undefined
-    });
-  }
-  IDLE_CLEANUP_MS = 30 * 60 * 1000;
-  return 30;
-}
-
-// v2.1.10 Phase 2 T12：worker busy / grace 内 skip idle cleanup（spec §2.3.2）
-//   - workerPool.isBusy()=true：worker 正在跑 runCheck，禁止 cleanup（避免抢 DB 写锁）
-//   - Phase 1 surprise #1 mitigate：worker reject 后 isBusy() 立即翻 false，但 worker 内 DB 事务可能仍在
-//     → 30s grace（默认）内不触发 cleanup；下个 5min tick 再判
-//   - GRACE_MS 可在 unit test 中 monkey-patch；生产固定 30s
-const RUN_CHECK_WORKER_GRACE_MS = 30000;
-
 function setupIdleCleanupTimer() {
   if (idleCleanupTimer) return; // 重入保护
-  // v2.1.9 N1-settings：启动期从 settings 读阈值（默认 30）
-  loadIdleCleanupMsFromSettings();
-  // 收单空闲清理有自己的阈值（设置项，可大于 30 分钟）和多处提前返回；主库整理独立判断，不受其影响。
-  const runAcquiringIdleCleanupTick = async () => {
-    const operation = businessOperationRegistry.begin({
-      channel: 'background:idle-cleanup',
-      moduleKey: '收单单据币种校验',
-      functionKey: '后台清理'
-    });
-    if (!operation.accepted) return;
-    try {
-      const elapsed = Date.now() - lastUserActivityTs;
-      if (elapsed < IDLE_CLEANUP_MS) return;
-
-      // v2.1.10 Phase 2 T12：worker busy guard（spec §2.3.2 协调策略）
-      //   worker 正在跑 runCheck → skip 本次 idle cleanup（避免与 worker DB 写抢锁）
-      if (runCheckWorkerPool && typeof runCheckWorkerPool.isBusy === 'function' && runCheckWorkerPool.isBusy()) {
-        appendActivityLogEntry({
-          level: 'info',
-          source: 'main',
-          domain: 'acquiring-bill-currency',
-          message: '[acquiring-bill-currency] idle cleanup skip — worker busy（spec §2.3.2）',
-          details: [`activeJobId=${(runCheckWorkerPool.getStatus && runCheckWorkerPool.getStatus().activeJobId) || ''}`]
-        });
-        return;
-      }
-
-      // v2.1.10 Phase 2 T12：30s grace（Phase 1 surprise #1 mitigate）
-      //   isBusy() 已 false 但 worker 刚 reject/done — worker 内 DB 事务可能仍在
-      //   30s grace 内不触发 cleanup；下个 tick 再判
-      if (runCheckWorkerPool && typeof runCheckWorkerPool.getLastBusyEndTs === 'function') {
-        const lastBusyEndTs = runCheckWorkerPool.getLastBusyEndTs();
-        if (lastBusyEndTs > 0 && Date.now() - lastBusyEndTs < RUN_CHECK_WORKER_GRACE_MS) {
-          // grace 期内 skip — 不写 activity log（30s 内每 5min 一次 tick 至多 1 次 grace skip，
-          // 日志噪声小可忽略；如需诊断可临时打开）
-          return;
-        }
-      }
-
-      // v2.1.10 SR-FIX-1 round 2 P0-4：顺序契约（spec §4.3.2 + PRD §五.2）
-      //   修复前：trigger() setImmediate 异步立即返回 + raw_json 同步立即跑 → 两 cleanup 并发
-      //   修复后：trigger() 返 Promise → await → raw_json 后跑 → 保证顺序契约 + 日志顺序
-      //   兼容：trigger() 早返回路径（无 pending / 已 in progress）立即 resolve；await 立即返回
-      //
-      // idle 达标 → 复用进入模块兜底路径（含 mutex 抢锁 + cleanup_pending 判定 + 防重入）
-      await triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded();
-
-      // === Phase 4 N4-cont-1 raw_json 清理 ===
-      //   spec §4.3 + PRD §五.2：复用 N1' idle 30min cleanup 时序
-      //   顺序：先 v2.1.8 cleanupAfterRunBackground（清 flow + bill 整行）后 raw_json 清理（NULL 化对账成功老行）
-      //   失败不阻塞主 cleanup（独立 try/catch + activity log + 下次 idle 重试）
-      //   ⚠️ 资金红线：clearStaleSuccessfulRawJson 内 NOT IN 子查询排除差异行；retentionDays 用 settings getter 范围外回退 7
-      try {
-        const retentionDays = database.getAcquiringBillRawJsonRetentionDays();
-        const rawJsonResult = clearStaleSuccessfulRawJson(database.db, { retentionDays });
-        if (rawJsonResult.clearedCount > 0) {
-          appendActivityLogEntry({
-            level: 'info',
-            source: 'main',
-            domain: 'acquiring-bill-currency',
-            message: '[N4-cont-1] idle cleanup raw_json 清理完成',
-            details: [
-              `affected=${rawJsonResult.clearedCount}`,
-              `retentionDays=${retentionDays}`,
-              `elapsedMs=${rawJsonResult.elapsedMs}`
-            ]
-          });
-        }
-      } catch (rawJsonErr) {
-        // raw_json 清失败不阻塞主 cleanup；下次 idle（30min 后）重试
-        appendActivityLogEntry({
-          level: 'error',
-          source: 'main',
-          domain: 'acquiring-bill-currency',
-          message: '[N4-cont-1] idle cleanup raw_json 清理失败（下次 idle 重试）',
-          details: [rawJsonErr && rawJsonErr.message ? rawJsonErr.message : String(rawJsonErr)],
-          stack: rawJsonErr && rawJsonErr.stack ? rawJsonErr.stack : undefined
-        });
-      }
-    } catch (err) {
-      // v2.1.9 SR-log-1：替换 console.error → 日志上报；idle tick 失败不阻塞下次 tick
-      appendActivityLogEntry({
-        level: 'error',
-        source: 'main',
-        domain: 'acquiring-bill-currency',
-        message: '[acquiring-bill-currency] idle cleanup tick 失败',
-        details: [err && err.message ? err.message : String(err)],
-        stack: err && err.stack ? err.stack : undefined
-      });
-    } finally {
-      businessOperationRegistry.end(operation.token);
-    }
-  };
   idleCleanupTimer = setInterval(observeBackgroundMemoryActivity(async () => {
-    await runAcquiringIdleCleanupTick();
-    // v3.2.18：收单空闲清理结束后先做链接表过期清理（自带空闲、间隔、任务与锁条件，结果已记日志），
+    // v3.2.18：先做链接表过期清理（自带空闲、间隔、任务与锁条件，结果已记日志），
     //   再判断是否整理主库（先删再整理，两者串行，不同时持租约）。
+    //   v3.2.20：原收单单据币种校验的空闲清理随模块下线移除。
     try {
       await idleLinkedTableRetention.maybeRun();
     } catch (_retentionError) { /* 下次空闲再试 */ }
-    // 收单空闲清理结束（含提前返回）后，再判断是否需要空闲整理主库（自带空闲、任务与磁盘条件，失败已记日志）。
+    // 空闲整理主库自带空闲、任务与磁盘条件，失败已记日志。
     try {
       await idleDatabaseCompaction.maybeRun();
     } catch (_compactionError) { /* 下次空闲再试 */ }
@@ -26210,56 +22888,12 @@ function setupIdleCleanupTimer() {
 }
 
 // v2.0.0-beta.4：退出前 flush usage-stats（before-quit 在窗口全关后触发）
-// v2.1.8 N1' (v0.7)：β 方案降级为退出兜底（D10=c）— 简化为静默串行清，删模态框 IPC 广播
-//   spec §三 N1'：idle 30min 主触发 + before-quit 退出兜底（防没闲够就退）+ listMonths 崩溃恢复兜底
-//   设计：
-//     1. 既有 usage-stats flush 不动（同步执行，毫秒级）
-//     2. 检查 listPendingCleanupRuns 是否有待清 runs（cleanup_pending=1）
-//     3. 有 → event.preventDefault() 阻塞 → 异步静默串行清 → 完成后 app.quit()
-//     4. 无 → 直接退出（不阻塞）
-//     5. 退出失败 → console.error + 仍 quit（spec N1''-D13 静默 + 进入模块兜底 + 启动 cleanupOrphanData 三重保险）
-//     6. cleanupAfterRunBackground 默认 includeDiff=false → 只清 flow + bill，保留 diff
 let quitPreparationPromise = null;
 let quitPreparationComplete = false;
 let normalQuitInProgress = false;
 let normalQuitContinuation = false;
 let usageStatsSessionEnded = false;
 let quitPreparationPreviousLastClosedAt = null;
-
-// v2.1.10 SR-FIX-1 round 2 P0-3：worker pool shutdown 辅助（spec §2.1.3 — 主进程退出 graceful close）
-//   - workerInstance 不存在（worker 从未启动 / 已退出）→ 立即返回 / 不 preventDefault
-//   - workerInstance 存在 → 调 shutdown(5000)；timeout 后 terminate
-//   失败 swallow + activity log（不阻塞 quit）；返回 boolean：是否需要异步 shutdown（true → caller 必须 preventDefault）
-function needsWorkerShutdown() {
-  if (!runCheckWorkerPool || typeof runCheckWorkerPool.getStatus !== 'function') return false;
-  try {
-    const status = runCheckWorkerPool.getStatus();
-    return !!(status && status.workerAlive);
-  } catch (_e) {
-    return false;
-  }
-}
-
-async function shutdownWorkerPoolGracefully() {
-  try {
-    if (runCheckWorkerPool && typeof runCheckWorkerPool.shutdown === 'function') {
-      await runCheckWorkerPool.shutdown(5000);
-    }
-  } catch (shutdownErr) {
-    // v2.1.10 SR-FIX-1 round 2 P0-3：shutdown 失败 swallow + 日志（不阻塞 app.quit）
-    try {
-      appendActivityLogEntry({
-        level: 'warning',
-        source: 'main',
-        domain: 'acquiring-bill-currency',
-        message: '[SR-FIX-1 P0-3] before-quit worker shutdown 失败（worker thread 将被强 kill）',
-        details: [shutdownErr && shutdownErr.message ? shutdownErr.message : String(shutdownErr)],
-        stack: shutdownErr && shutdownErr.stack ? shutdownErr.stack : undefined
-      });
-    } catch (_e) { /* swallow — 日志失败不阻塞 quit */ }
-    throw shutdownErr;
-  }
-}
 
 async function shutdownBackgroundExecutionRuntimeGracefully() {
   const runtime = backgroundExecutionRuntimeManager.peek();
@@ -26334,26 +22968,6 @@ function flushUsageStatsForQuit() {
   if (failure) throw failure;
 }
 
-function listPendingCleanupRunsForQuit() {
-  if (!database || !database.db) return [];
-  if (database && database.db) {
-    try {
-      return runRepo.listPendingCleanupRuns(database.db) || [];
-    } catch (listErr) {
-      appendActivityLogEntry({
-        level: 'error',
-        source: 'main',
-        domain: 'acquiring-bill-currency',
-        message: '[acquiring-bill-currency] before-quit listPendingCleanupRuns 失败',
-        details: [listErr && listErr.message ? listErr.message : String(listErr)],
-        stack: listErr && listErr.stack ? listErr.stack : undefined
-      });
-      throw listErr;
-    }
-  }
-  return [];
-}
-
 async function prepareApplicationForQuit(options = {}) {
   if (quitPreparationComplete) return;
   if (quitPreparationPromise) return quitPreparationPromise;
@@ -26400,7 +23014,6 @@ async function prepareApplicationForQuit(options = {}) {
 
     await shutdownBackgroundExecutionRuntimeGracefully();
     backgroundRuntimeShutdownClean = true;
-    if (needsWorkerShutdown()) await shutdownWorkerPoolGracefully();
 
     const archiveDrainTimer = setTimeout(() => {
       appendActivityLogEntry({
@@ -26417,36 +23030,6 @@ async function prepareApplicationForQuit(options = {}) {
       clearTimeout(archiveDrainTimer);
     }
 
-    const pendingRuns = listPendingCleanupRunsForQuit();
-    const failures = [];
-    if (pendingRuns.length > 0 && database && database.db) {
-      for (const run of pendingRuns) {
-        try {
-          await acquiringBillCurrencySession.cleanupAfterRunBackground({
-            db: database.db,
-            monthKey: run.month_key,
-            runId: run.id
-            // includeDiff 默认 false → 保留 diff（spec §3.2.1 N1''-D1/D3）
-          });
-          runRepo.clearCleanupPending(database.db, { runId: run.id });
-        } catch (cleanErr) {
-          // v2.1.9 SR-log-1：替换 console.error → 日志上报；cleanup-quit 单 run 失败容忍继续清下一个
-          appendActivityLogEntry({
-            level: 'error',
-            source: 'main',
-            domain: 'acquiring-bill-currency',
-            message: `[acquiring-bill-currency] cleanup-quit run ${run.id} (${run.month_key}) 失败`,
-            details: [cleanErr && cleanErr.message ? cleanErr.message : String(cleanErr)],
-            stack: cleanErr && cleanErr.stack ? cleanErr.stack : undefined
-          });
-          failures.push(cleanErr);
-        }
-      }
-    }
-
-    if (failures.length > 0) {
-      throw new Error(`退出清理失败：${failures.length} 个运行数据未完成清理`);
-    }
     if (positionReconciliationService) {
       positionTaskOwner.syncPositionReconciliationCheckpoint();
       positionReconciliationService.close();

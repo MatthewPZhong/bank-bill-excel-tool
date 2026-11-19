@@ -113,8 +113,7 @@ function caseR3_edgeCases() {
 // R3-7：源码 wiring 防漏改断言
 //   1. renderer.js updateStatusBox 含 R3 replace 规则
 //   2. styles.css 含 .status-box-text { white-space: pre-wrap }
-//   3. setBizOpReconStatus hack 已删（不再 innerHTML = formatBizOpReconStatusHtml）
-//   4. formatBizOpReconStatusHtml 函数定义保留（preview 内仍用）
+//   v3.2.20：业务OP数据核对下线，原 3/4 两项（BizOP 状态框 hack 与 formatter）随模块删除
 // =====================================================================
 function caseR3_wiringGrep() {
   const rendererSrc = fs.readFileSync(path.join(__dirname, '../../src/renderer.js'), 'utf-8');
@@ -122,7 +121,6 @@ function caseR3_wiringGrep() {
   // index.html 加载顺序：styles.css (disabled) → styles-gemini.css → styles-gemini-extra.css
   // R3 生效路径必须在 styles-gemini-extra.css；styles.css 仅作为 spec §8.4.2 文档参考
   const styleGeminiExtraSrc = fs.readFileSync(path.join(__dirname, '../../src/styles-gemini-extra.css'), 'utf-8');
-  const dialogsSrc = fs.readFileSync(path.join(__dirname, '../../src/renderer-dialogs.js'), 'utf-8');
 
   // 1. updateStatusBox 含 replace（必须用中文「：」U+FF1A）
   assertTrue(/String\(message\)\.replace\(\/：\/g, '：\\n'\)/.test(rendererSrc),
@@ -133,14 +131,6 @@ function caseR3_wiringGrep() {
   // 2b. 实际生效路径 styles-gemini-extra.css 必须有规则（index.html 加载的是 disabled styles.css → 必走 gemini-extra）
   assertTrue(/\.status-box-text\s*\{[^}]*white-space:\s*pre-wrap/.test(styleGeminiExtraSrc),
     'R3-7-2b styles-gemini-extra.css .status-box-text { white-space: pre-wrap }（实际生效路径）');
-  // 3. setBizOpReconStatus hack 已删（不再含 innerHTML = formatBizOpReconStatusHtml）
-  //   函数内已不应有 textEl.innerHTML 调用
-  const bizRender = findFunction(readSource('renderer/controllers/biz-op-legacy.js'), 'render');
-  assertTrue(bizRender && !/innerHTML\s*=\s*formatBizOpReconStatusHtml/.test(bizRender),
-    'R3-7-3 BizOP 当前 render 内旧状态框 HTML hack 已删');
-  // 4. formatBizOpReconStatusHtml 函数定义仍在（renderer-dialogs.js preview 内部用）
-  assertTrue(/function formatBizOpReconStatusHtml\(/.test(dialogsSrc),
-    'R3-7-4 formatBizOpReconStatusHtml 函数定义保留（preview 仍用）');
 }
 
 // =====================================================================
@@ -202,8 +192,6 @@ function caseB5_wiringAudit() {
   // 5. spec §9.6.1 验证 3 个 'setXxxStatus' / 'updateXxxUi' 全部走 updateStatusBox
   //   grep 函数体内必须含 'updateStatusBox(' 调用
   const targetFns = [
-    { file: 'biz-op-legacy.js', name: 'render', call: /ui\.status\(/, label: '业务 OP 状态投影' },
-    { file: 'acquiring.js', name: 'render', call: /ui\.status\(/, label: '收单币种状态投影' },
     { file: 'bank-statement.js', name: 'updateBankStatementUi', call: /updateStatusBox\(/, label: '银行对账状态投影' },
     { file: 'recon-id-fix.js', name: 'updateReconIdFixUi', call: /updateStatusBox\(/, label: 'ReconID 状态投影' }
   ];
@@ -226,9 +214,9 @@ function caseB5_wiringAudit() {
     && /createReconIdFixController\([\s\S]*?sharedReconSession, ui/.test(rendererSrc),
   'B5-5 Bank/Recon 两域的 ui.status 注入全局 updateStatusBox');
   assertTrue(/const domainUi = \{ modalHost, modalBridge, status: updateStatusBox/.test(rendererSrc)
-    && /createBizOpLegacyController\([\s\S]*?ui: \{ \.\.\.domainUi/.test(rendererSrc)
-    && /createAcquiringController\([\s\S]*?ui: \{ \.\.\.domainUi/.test(rendererSrc),
-  'B5-6 BizOP/收单两域的 ui.status 注入全局 updateStatusBox');
+    && /createPreFundController\([\s\S]*?ui: \{ \.\.\.domainUi/.test(rendererSrc)
+    && /createVccOpCalcController\([\s\S]*?ui: \{ \.\.\.domainUi/.test(rendererSrc),
+  'B5-6 前置资金/VCC业务OP计算两域的 ui.status 注入全局 updateStatusBox');
 
 }
 
