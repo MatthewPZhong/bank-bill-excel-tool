@@ -79,7 +79,7 @@ function runParent() {
     const files = ['scripts/verify-app-settings-layout.js', 'index.html', 'src/renderer.js',
       'src/renderer-dark-mode.js', 'src/shared/dark-mode-schedule.js', 'src/styles-gemini.css',
       'src/styles-gemini-extra.css', 'src/styles-dark-mode.css', 'src/styles-dark-mode-settings.css',
-      'src/styles-biz-op-v327.css', 'src/styles-vcc-financial-op.css'];
+      'src/styles-vcc-financial-op.css'];
     fs.writeFileSync(path.join(evidenceDir, 'app-settings-verification.json'), JSON.stringify({
       generatedAt: new Date().toISOString(),
       scope: '真实 index/Renderer/CSS 和主题 controller；设置 API 为内存夹具；隔离 Electron userData',
@@ -168,7 +168,7 @@ function installDesktopApiStub({
   const retentionModules = [
     { id: 'bank-statement-process', name: '资金对账数据处理' },
     { id: 'vcc-financial-op', name: 'VCC财务OP校验' },
-    { id: 'bank-bu-recon', name: '月度银行对账单BU回填校验' },
+    { id: 'duplicate-inbound-match', name: '重复入金匹配' },
     { id: 'toolbox', name: '工具箱' }
   ];
   const getSavedSettings = () => ({
@@ -455,7 +455,7 @@ async function verifyArchiveRetentionBehavior(failures) {
 async function verifyArchiveModuleRetentionBehavior(failures) {
   const bankModule = 'bank-statement-process';
   const vccModule = 'vcc-financial-op';
-  const unusedModule = 'bank-bu-recon';
+  const unusedModule = 'duplicate-inbound-match';
   const retentionSelect = () => document.querySelector('[data-role="archive-retention-days"]');
   const moduleSelect = () => document.querySelector('[data-role="archive-retention-module"]');
   const assertSelection = (moduleId, expected, context) => {
@@ -1217,7 +1217,7 @@ async function measurePage(expectedScaleFactor, runBehavior, prepareScreenshot) 
   recordPhase('page-ready');
   let themeRetentionBehavior = null;
   const requiredStyles = ['fonts.css', 'styles-gemini.css', 'styles-gemini-extra.css',
-    'styles-vcc-financial-op.css', 'styles-biz-op-v327.css', 'styles-dark-mode.css', 'styles-dark-mode-settings.css'];
+    'styles-vcc-financial-op.css', 'styles-dark-mode.css', 'styles-dark-mode-settings.css'];
   const loadedStyles = [...document.querySelectorAll('link[rel="stylesheet"]')]
     .filter((link) => link.sheet && !link.disabled).map((link) => new URL(link.href).pathname.split('/').pop());
   for (const style of requiredStyles) {

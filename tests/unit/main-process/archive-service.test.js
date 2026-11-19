@@ -3476,3 +3476,42 @@ test('解析器非法值或抛错明确失败，显式批次期限和到期日�
     assert.equal(calls, before);
   } finally { fixture.close(); }
 });
+
+// v3.2.20 下线四个对账模块：已结束的旧批次照常按记录的保留期到期清理（用户 2026-11-18 决定）；
+//   仍为 reserved/running 的旧版现场不进入清理候选、不被启动扫尾改写，也不计入到期清理闸门。
+test('已下线模块：已结束批次到期照常清理，进行中的旧版现场不清理、不扫尾、不阻止其余模块', async () => {
+  const fixture = createFixture({ now: () => new Date(2026, 6, 1, 12, 0, 0) });
+  try {
+    await fixture.service.initialize();
+    const reserve = async (key, overrides) => {
+      const reserved = await fixture.service.reserveTaskBatch({
+        ...batchPayload(key, overrides), taskKey: `${key}:task`, taskRunId: `${key}-run`, retentionUntil: '2026-07-10'
+      });
+      assert.equal(reserved.ok, true, JSON.stringify(reserved));
+      return reserved.batchId;
+    };
+    const retiredDone = await reserve('retired-done', { moduleId: 'acquiring-bill-currency', moduleCode: 'ACQUIRING', moduleName: '收单单据币种校验' });
+    const retiredRunning = await reserve('retired-running', { moduleId: 'biz-op-recon', moduleCode: 'BIZOP', moduleName: '业务OP数据核对' });
+    const retainedDone = await reserve('retained-done', {});
+    const retainedRunning = await reserve('retained-running', {});
+    await fixture.service.completeTaskBatch(retiredDone);
+    await fixture.service.completeTaskBatch(retainedDone);
+
+    assert.deepEqual(fixture.repository.listExpiredBatches('2026-07-20').map((batch) => batch.id).sort(),
+      [retiredDone, retainedDone, retainedRunning].sort(), '进行中的已下线批次不是清理候选');
+    assert.deepEqual(fixture.repository.getEntryMaintenanceGateState().activeBatchCount, 1, '只计保留模块的进行中批次');
+
+    const interrupted = await fixture.service.markInterruptedTasks();
+    assert.equal(fixture.repository.getBatch(retainedRunning).taskStatus, 'failed', JSON.stringify(interrupted));
+    assert.equal(fixture.repository.getBatch(retiredRunning).taskStatus, 'reserved', '旧版现场不被扫尾改写');
+    assert.equal(fixture.repository.getEntryMaintenanceGateState().activeBatchCount, 0);
+
+    const cleanup = await fixture.service.runRetentionMaintenance({ asOfLocalDate: '2026-07-20' });
+    assert.equal(cleanup.ok, true, JSON.stringify(cleanup));
+    assert.deepEqual(cleanup.deletedBatchIds.sort(), [retiredDone, retainedDone, retainedRunning].sort());
+    assert.equal(fixture.repository.getBatch(retiredDone), null, '已结束的已下线批次到期清理');
+    assert.ok(fixture.repository.getBatch(retiredRunning), '进行中的已下线批次保留给旧版');
+  } finally {
+    fixture.close();
+  }
+});

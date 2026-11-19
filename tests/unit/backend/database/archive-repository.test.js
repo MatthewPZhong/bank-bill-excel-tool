@@ -278,25 +278,26 @@ test('任务恢复复用原批次身份，running/failed/cancelled 可重开而 
   }
 });
 
+// v3.2.20：样例原用收单（已下线，启动扫尾不再触碰），改用保留的平盘对账导出验证同一恢复合同。
 test('新 File Task 仅按 exact owner + manifest 将 interrupted 原子恢复，终态不复活且不发新号', () => {
   const { db, repository } = createFixture();
   try {
     const taskRun = repository.beginTaskRun({
       taskRunId: 'file-task-recovery-1',
-      moduleId: 'acquiring-bill-currency',
-      taskKey: 'acquiringBillCurrency:run:resume',
-      operationKey: 'acquiring-resume:1',
-      parentRunId: 'parent-acquiring-1'
+      moduleId: 'position-reconciliation-process',
+      taskKey: 'position-reconciliation:run:export',
+      operationKey: 'position-export:1',
+      parentRunId: 'parent-position-1'
     }).taskRun;
     const manifest = {
       version: 1,
-      identity: 'manifest-acquiring-1',
+      identity: 'manifest-position-1',
       inputs: [],
       outputs: [{
         artifactKey: 'output-key-1',
         direction: 'output',
         role: 'output',
-        sourceOperation: 'acquiringBillCurrency:run',
+        sourceOperation: 'position-reconciliation:run:export',
         originalName: 'diff.xlsx',
         filePath: '/private/diff.xlsx',
         aliasKey: '/private/diff.xlsx',
@@ -306,8 +307,8 @@ test('新 File Task 仅按 exact owner + manifest 将 interrupted 原子恢复�
     const reserved = repository.reserveFileTaskBatch({
       taskRun,
       manifest,
-      moduleCode: 'ACQUIRING',
-      moduleName: '收单单据币种校验',
+      moduleCode: 'POSITION',
+      moduleName: '平盘对账数据处理',
       metadata: {}
     });
     const context = {
@@ -1417,5 +1418,34 @@ test('缺少收口证明、共享 Task、有效 lineage 或恢复标记时保留
         assert.equal(repository.listTaskLineageForConsumer(state.task.taskRunId)[0].state, 'committed');
       }
     } finally { db.close(); }
+  }
+});
+
+// v3.2.20：已下线模块的批次不在存档中心展示（列表、搜索、按号打开、统计），启动一致性检查也不改写其待存档附件；
+//   记录本身保留在库中（内部 listBatches 仍可见）。
+test('已下线模块的批次不进入可见查询与统计，启动一致性检查不改写其待存档附件', () => {
+  const { db, repository } = createFixture();
+  try {
+    const retained = createBatch(repository).batch;
+    const retired = createBatch(repository, {
+      moduleId: 'pending-reconciliation', moduleCode: 'PENDING', moduleName: '月度Pending数据核对'
+    }).batch;
+    const retainedArtifact = addArtifact(repository, retained.id);
+    const retiredArtifact = addArtifact(repository, retired.id);
+
+    assert.deepEqual(repository.listVisibleBatches().map((batch) => batch.id), [retained.id]);
+    assert.deepEqual(repository.listVisibleBatches({ batchNumberContains: 'PENDING' }), []);
+    assert.equal(repository.getVisibleBatch(retired.id), null);
+    assert.equal(repository.getVisibleBatchByNumber(retired.batchNumber), null);
+    assert.equal(repository.getLatestVisibleBatch().id, retained.id);
+    assert.equal(repository.getVisibleStats().batchCount, 1);
+    assert.deepEqual(repository.listBatches().map((batch) => batch.id).sort(), [retained.id, retired.id].sort());
+
+    assert.equal(repository.markInterruptedArtifacts().artifactCount, 1);
+    assert.equal(repository.getArtifact(retainedArtifact.id).status, 'failed');
+    assert.equal(repository.getArtifact(retiredArtifact.id).status, 'pending');
+    assert.equal(repository.getEntryMaintenanceGateState().pendingArtifactCount, 0, '已下线批次的待存档附件不计入清理闸门');
+  } finally {
+    db.close();
   }
 });

@@ -15,8 +15,6 @@ const {
   SUPPORT_ACTION_POLICIES
 } = require('../../../src/main-process/archive-center/task-policy-registry');
 const {
-  bankBuImportResultFlowIdentities,
-  bankBuRunFlowPlan,
   statementResultClassifier
 } = require('../../../src/main-process/execution-descriptors/legacy-task-policies');
 const {
@@ -31,13 +29,6 @@ const {
 
 const MAIN_PATH = path.join(__dirname, '..', '..', '..', 'src', 'main.js');
 const PRELOAD_PATH = path.join(__dirname, '..', '..', '..', 'src', 'preload.js');
-const { registerBizOpV327Handlers } = require('../../../src/main-process/biz-op-v327/ipc');
-const V327_INTERNAL_TASKS = new Set(['bizOpReconV327:maintenance:upgrade', 'bizOpReconV327:maintenance:reclaim']);
-function v327IpcInventory() {
-  const channels = [];
-  registerBizOpV327Handlers({ ipcMain: { handle(channel) { channels.push(channel); } }, getModule: () => null });
-  return channels;
-}
 const CONTROLLED_HELPERS = new Set([
   'trackedIpcHandle',
   'businessIpcHandle',
@@ -109,10 +100,10 @@ function literalInvocations(filePath, objectName, methodName) {
   return channels.sort();
 }
 
-test('main 与独立 V327 注册器的 IPC 加内部任务，与 policy/support 精确相等', () => {
+test('main 的 IPC 与 policy/support 精确相等', () => {
   const inventory = mainIpcInventory();
   const registry = createTaskPolicyRegistry();
-  const actual = [...inventory.map((item) => item.channel), ...v327IpcInventory(), ...V327_INTERNAL_TASKS].sort();
+  const actual = inventory.map((item) => item.channel).sort();
   const expected = [
     ...registry.channels(),
     ...SUPPORT_ACTION_POLICIES.map((policy) => policy.channel)
@@ -120,23 +111,21 @@ test('main 与独立 V327 注册器的 IPC 加内部任务，与 policy/support 
   assert.equal(new Set(actual).size, actual.length, 'main 不应重复注册 literal IPC');
   assert.equal(new Set(expected).size, expected.length, 'policy/support 不应重复登记');
   assert.deepEqual(expected, actual);
-  assert.equal(actual.length, 309);
-  assert.equal(v327IpcInventory().length, 21);
-  assert.equal(registry.channels('reserve').length, 71);
-  assert.equal(registry.channels('no-file').length, 63);
-  assert.equal(registry.channels('exclude').length, 159);
+  assert.equal(actual.length, 235);
+  assert.equal(registry.channels('reserve').length, 46);
+  assert.equal(registry.channels('no-file').length, 54);
+  assert.equal(registry.channels('exclude').length, 119);
   assert.equal(SUPPORT_ACTION_POLICIES.length, 16);
   // v3.2.18 模板管理【更新】：预览为只读预检（exclude），确认写入为 support action
   assert.ok(registry.channels('exclude').includes('template:preview-header-update'));
   assert.ok(SUPPORT_ACTION_POLICIES.some((policy) => policy.channel === 'template:update-headers'));
 });
 
-test('preload 与 main 及独立 V327 注册器精确相等，新增 21 个业务和只读入口完整接通', () => {
+test('preload 与 main 的业务和只读入口精确相等', () => {
   assert.deepEqual(
     [...new Set(literalInvocations(PRELOAD_PATH, 'ipcRenderer', 'invoke'))].sort(),
-    [...new Set([...mainIpcInventory().map((item) => item.channel), ...v327IpcInventory()])].sort()
+    [...new Set(mainIpcInventory().map((item) => item.channel))].sort()
   );
-  assert.deepEqual(literalInvocations(PRELOAD_PATH, 'ipcRenderer', 'invoke').filter((channel) => channel.startsWith('bizOpReconV327:')), v327IpcInventory().sort());
 });
 
 test('非 literal direct ipcMain.handle 只存在于已知受控 helper 定义', () => {
@@ -236,23 +225,23 @@ test('exclude 只允许有限原因，所有 policy 都是 literal 且无 wildca
   }
 });
 
-test('71 file 与 63 no-file mutation 逐项显式分类且精确闭合', () => {
+test('46 file 与 54 no-file mutation 逐项显式分类且精确闭合', () => {
   const registry = createTaskPolicyRegistry();
   const fileChannels = new Set(FILE_ACTION_CHANNELS);
   const noFileChannels = new Set(NO_FILE_ACTION_CHANNELS);
   const excludeInventory = Object.values(EXCLUDED_CHANNELS_BY_REASON).flat();
   const excludeChannels = new Set(excludeInventory);
-  assert.equal(fileChannels.size, 71);
-  assert.equal(noFileChannels.size, 63);
-  assert.equal(excludeInventory.length, 159);
-  assert.equal(excludeChannels.size, 159);
+  assert.equal(fileChannels.size, 46);
+  assert.equal(noFileChannels.size, 54);
+  assert.equal(excludeInventory.length, 119);
+  assert.equal(excludeChannels.size, 119);
   assert.deepEqual([...fileChannels].filter((channel) => noFileChannels.has(channel)), []);
   assert.deepEqual([...fileChannels].filter((channel) => excludeChannels.has(channel)), []);
   assert.deepEqual([...noFileChannels].filter((channel) => excludeChannels.has(channel)), []);
   assert.deepEqual(new Set(registry.channels('reserve')), fileChannels);
   assert.deepEqual(new Set(registry.channels('no-file')), noFileChannels);
-  assert.equal(registry.channels('exclude').length, 159);
-  assert.equal(registry.list().length, 71 + 63 + 159);
+  assert.equal(registry.channels('exclude').length, 119);
+  assert.equal(registry.list().length, 46 + 54 + 119);
   assert.ok(EXCLUDED_CHANNELS_BY_REASON['staging-preflight-only'].includes('template:preview-header-update'));
   assert.ok(EXCLUDED_CHANNELS_BY_REASON['ui-navigation'].includes('settings:set-dark-mode-schedule'));
   assert.ok(EXCLUDED_CHANNELS_BY_REASON['ui-navigation'].includes('settings:set-dark-mode-lightness'));
@@ -279,10 +268,9 @@ test('dialog selection 显式区分 file/directory，正常 file policy 不再�
   assert.match(runner, /selectedPathsResolver: useLegacyExistingBatchRecovery \? \(\) => \[\] : null/);
 });
 
-test('Acquiring/VCC OP operation owner 由 object handler 实际消费 exact-5 context', () => {
+test('VCC OP operation owner 由 object handler 实际消费 exact-5 context', () => {
   const source = fs.readFileSync(MAIN_PATH, 'utf8');
   for (const channel of [
-    'acquiringBillCurrency:clearMonth',
     'vccOpCalc:run:compute-amounts',
     'vccOpCalc:run:save'
   ]) {
@@ -333,14 +321,6 @@ test('statement execute 分类器只额外接受补录余额，prepare 交互状
   }
 });
 
-test('Pending execute 分类器不接受 need-confirm，交互结果必须停在 prepare', () => {
-  const classifier = createTaskPolicyRegistry().require('pending:import:start').resultClassifier;
-  assert.throws(
-    () => classifier({ status: 'need-confirm' }),
-    /未审计的业务结果 status：need-confirm/
-  );
-});
-
 test('大账号交互只让 import/complete reserve，preview/cancel 精确 exclude', () => {
   const registry = createTaskPolicyRegistry();
   assert.equal(registry.require('file:import').batchPolicy, 'reserve');
@@ -358,12 +338,12 @@ test('大账号交互只让 import/complete reserve，preview/cancel 精确 excl
   );
 });
 
-test('13 个 primary 与 1 个 toolbox utility 均有受控 task，VCC财务独立于VCCOP', () => {
+test('9 个 primary 与 1 个 toolbox utility 均有受控 task，VCC财务独立于VCCOP', () => {
   const controlled = createTaskPolicyRegistry().list()
     .filter((policy) => ['reserve', 'no-file'].includes(policy.batchPolicy));
   const controlledScopeIds = new Set(controlled.map((policy) => policy.scopeId));
-  assert.equal(controlledScopeIds.size, 14);
-  assert.equal(new Set([...controlledScopeIds].filter((scopeId) => scopeId !== 'toolbox')).size, 13);
+  assert.equal(controlledScopeIds.size, 10);
+  assert.equal(new Set([...controlledScopeIds].filter((scopeId) => scopeId !== 'toolbox')).size, 9);
   const registry = createTaskPolicyRegistry();
   assert.equal(registry.require('vccFinancialOp:run:calculate').scopeId, 'vcc-financial-op');
   assert.equal(registry.require('vccOpCalc:run:save').scopeId, 'vcc-op-calc');
@@ -451,9 +431,6 @@ test('VCC财务 calculate/import 新建流程，run 后续动作按稳定身份�
 test('新 run 显式创建新 flow，带持久 runId 的后续动作显式续接', () => {
   const registry = createTaskPolicyRegistry();
   for (const channel of [
-    'pending:reconcile:run',
-    'bankBuRecon:run',
-    'bizOpRecon:run',
     'position-reconciliation:run'
   ]) {
     assert.equal(registry.require(channel).startsNewFlow, true, channel);
@@ -465,9 +442,6 @@ test('新 run 显式创建新 flow，带持久 runId 的后续动作显式续接
     /未审计的业务结果 status/
   );
   for (const channel of [
-    'pending:diff:export-single',
-    'bankBuRecon:export:single',
-    'bizOpRecon:export:date',
     'position-reconciliation:run:export',
     'position-reconciliation:run:import-result'
   ]) {
@@ -478,94 +452,6 @@ test('新 run 显式创建新 flow，带持久 runId 的后续动作显式续接
       value: '42'
     });
   }
-});
-
-test('Acquiring 新 run 以 taskRunId 隔离，legacy resume 仍兼容旧 identity，export 续接精确身份', () => {
-  const registry = createTaskPolicyRegistry();
-  const runPolicy = registry.require('acquiringBillCurrency:run');
-  const july = runPolicy.resultFlowIdentities(
-    { status: 'success', runId: 1 },
-    { taskRunId: 'task-july' },
-    { args: [{ monthKey: '2026-07' }], prepared: {} }
-  );
-  const august = runPolicy.resultFlowIdentities(
-    { status: 'success', runId: 1 },
-    { taskRunId: 'task-august' },
-    { args: [{ monthKey: '2026-08' }], prepared: {} }
-  );
-  assert.deepEqual(july, [{
-    type: 'business-run-id',
-    value: 'acquiring-task:task-july'
-  }]);
-  assert.deepEqual(august, [{
-    type: 'business-run-id',
-    value: 'acquiring-task:task-august'
-  }]);
-  assert.notDeepEqual(july, august);
-
-  const resumePolicy = registry.require('acquiringBillCurrency:run:resume');
-  for (const source of ['side', 'main']) {
-    const monthKey = source === 'side' ? '2026-07' : '2025-12';
-    const flowIdentity = {
-      type: 'business-run-id',
-      value: `acquiring-run:${source}:${monthKey}:1`
-    };
-    const invocation = {
-      args: [{ monthKey, runId: 1 }],
-      prepared: {
-        resumePlan: {
-          source,
-          monthKey,
-          runId: 1,
-          flowPlan: { startsNewFlow: false, flowIdentity }
-        }
-      }
-    };
-    assert.deepEqual(
-      resumePolicy.resultFlowIdentities({ status: 'success', runId: 1 }, {}, invocation),
-      [flowIdentity]
-    );
-  }
-  assert.deepEqual(
-    resumePolicy.resultFlowIdentities(
-      { status: 'success', runId: 1 },
-      {},
-      { args: [{ monthKey: '2026-07' }], prepared: {} }
-    ),
-    []
-  );
-
-  const exportPolicy = registry.require('acquiringBillCurrency:export');
-  const exportIdentity = {
-    type: 'business-run-id',
-    value: 'acquiring-task:task-july'
-  };
-  const exportInvocation = {
-    args: [{ monthKey: '2026-07' }],
-    prepared: {
-      exportPlan: {
-        source: 'side',
-        monthKey: '2026-07',
-        runId: 1,
-        flowIdentity: exportIdentity
-      }
-    }
-  };
-  assert.equal(exportPolicy.startsNewFlow, false);
-  assert.deepEqual(exportPolicy.flowPlanResolver(exportInvocation), {
-    startsNewFlow: false,
-    flowIdentity: exportIdentity
-  });
-  assert.deepEqual(exportPolicy.resultFlowIdentities(
-    { status: 'success', source: 'side', monthKey: '2026-07', runId: 1 },
-    {},
-    exportInvocation
-  ), [exportIdentity]);
-  assert.deepEqual(exportPolicy.resultFlowIdentities(
-    { status: 'success', source: 'side', monthKey: '2026-08', runId: 1 },
-    {},
-    exportInvocation
-  ), []);
 });
 
 test('无文件运行/配置使用 Task Run 但不占批次号，银行对账 export 续接当前内存 run 身份', () => {
@@ -586,7 +472,7 @@ test('无文件运行/配置使用 Task Run 但不占批次号，银行对账 ex
       .filter((policy) => policy.batchPolicy === 'no-file')
       .map((policy) => policy.channel)
       .length,
-    63
+    54
   );
   const first = createBankStatementRunFlowIdentity(() => 'ephemeral-run-1');
   const rerun = createBankStatementRunFlowIdentity(() => 'ephemeral-run-2');
@@ -647,33 +533,17 @@ test('no-file 最终 Hold gate 在无模块 evidence 时返回合法空对象', 
 
 test('首批 simple eager file action 逐项接入 literal FilePlan 与显式 settle', () => {
   const source = fs.readFileSync(MAIN_PATH, 'utf8');
-  const pendingPreflightSource = fs.readFileSync(
-    path.join(__dirname, '..', '..', '..', 'src', 'main-process', 'pending-import-preflight.js'),
-    'utf8'
-  );
   const channels = [
     'monthly-balance:export',
     'new-account:export',
     'bank-statement:import',
     'bank-statement:batch-import',
     'bank-statement:export',
-    'bankBuRecon:import:run',
-    'bankBuRecon:export:single',
-    'bankBuRecon:export:aggregate',
-    'bizOpRecon:import:run-biz-op',
-    'bizOpRecon:import:run-flow',
-    'bizOpRecon:export:date',
-    'bizOpRecon:export:date-range',
     'big-account:import-bank-info',
     'duplicate-inbound-match:export',
     'duplicate-inbound-match:import-files',
     'gateway-recon:import',
     'linked-table:import',
-    'pending:diff:export-single',
-    'pending:diff:export-aggregate',
-    'pending:error:export-report',
-    'pending:import:start',
-    'pending:removed:import',
     'pre-fund-reconciliation:mpt-errors:export',
     'pre-fund-reconciliation:mpt-errors:repair',
     'pre-fund-reconciliation:export',
@@ -691,15 +561,10 @@ test('首批 simple eager file action 逐项接入 literal FilePlan 与显式 se
   const inputChannels = new Set([
     'bank-statement:import',
     'bank-statement:batch-import',
-    'bankBuRecon:import:run',
     'big-account:import-bank-info',
-    'bizOpRecon:import:run-biz-op',
-    'bizOpRecon:import:run-flow',
     'duplicate-inbound-match:import-files',
     'gateway-recon:import',
     'linked-table:import',
-    'pending:import:start',
-    'pending:removed:import',
     'pre-fund-reconciliation:import-bank',
     'pre-fund-reconciliation:import-mpt',
     'pre-fund-reconciliation:mpt-errors:repair',
@@ -714,18 +579,10 @@ test('首批 simple eager file action 逐项接入 literal FilePlan 与显式 se
     const end = source.indexOf('\n  });', start);
     const handler = source.slice(start, end);
     assert.ok(start >= 0 && end > start, channel);
-    if (channel === 'pending:import:start') {
-      assert.match(handler, /preparePendingImportSubmission\(/, channel);
-      assert.match(pendingPreflightSource, /filePlan:\s*pendingImportFilePlan\(/, channel);
-      assert.match(pendingPreflightSource, /role:\s*'input'/, channel);
-    } else {
-      assert.match(handler, /filePlan:\s*\{/i, channel);
-    }
+    assert.match(handler, /filePlan:\s*\{/i, channel);
     assert.match(handler, /taskContext\.fileEvidence/, channel);
     const expectedRole = inputChannels.has(channel) ? 'input' : 'output';
-    if (channel !== 'pending:import:start') {
-      assert.match(handler, new RegExp(`role:\\s*'${expectedRole}'`), channel);
-    }
+    assert.match(handler, new RegExp(`role:\\s*'${expectedRole}'`), channel);
     if (expectedRole === 'output') {
       assert.match(handler, /taskContext\.settleArtifacts\(/, channel);
     }
@@ -740,27 +597,6 @@ test('首批 simple eager file action 逐项接入 literal FilePlan 与显式 se
   assert.doesNotMatch(source, /atomicFileLifecycleChannels/);
   // 生命周期分派（含 deferred/legacy）由 task-adapters.test.js 执行实际 Main 入口验证。
 });
-
-test('Bank BU 首次运行续接持久导入身份，显式重跑创建新 parent', async () => {
-  const identity = { type: 'bank-bu-import-bundle', value: 'scope=2026-08|pending=1-2-2|bank=1-3-3' };
-  const firstRun = await bankBuRunFlowPlan({
-    resolveFlowEvidence: async () => ({ identity, hasRun: false })
-  });
-  assert.deepEqual(firstRun, { startsNewFlow: false, flowIdentity: identity });
-
-  const rerun = await bankBuRunFlowPlan({
-    resolveFlowEvidence: async () => ({ identity, hasRun: true })
-  });
-  assert.deepEqual(rerun, { startsNewFlow: true, flowIdentity: null });
-  assert.deepEqual(await bankBuRunFlowPlan({}), {
-    startsNewFlow: true,
-    flowIdentity: null
-  });
-  assert.deepEqual(await bankBuImportResultFlowIdentities({}, {}, {
-    resolveFlowEvidence: async () => ({ identity, hasRun: false })
-  }), [identity]);
-});
-
 
 test('永久删除预检和待清理列表仅查询，重试走存档维护且均不产生新 Task/批次', () => {
   const registry = createTaskPolicyRegistry();

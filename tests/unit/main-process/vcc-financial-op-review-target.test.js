@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { captureTarget, publishReviewFile } = require('../../../src/main-process/vcc-financial-op-review-target');
-const { hashClosedFile } = require('../../../src/main-process/biz-op-v327/export-validator');
+const { hashClosedFile } = require('../../../src/main-process/vcc-financial-op-output/file-evidence');
 
 async function fixture(t) {
   const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-review-publication-')));

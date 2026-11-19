@@ -291,12 +291,9 @@ test('主初始化不重复执行 VCC gate，Archive post-outbox hook 是唯一�
 
   const calls = [];
   const application = createApplicationRecoveryComposition({
-    platform: { scanAndRecover() {}, recoverSource() {} },
-    bizOpModule: {
-      recovery: { bindPlatform() {}, run: async () => ({}), openObligations: () => false },
-      activation: { needed: () => false }
-    },
-    recoverPendingRuns() {}, recoverLegacyBizOpRuns() {}, recoverPreFundRuns() {},
+    // 真实 startup-recovery-coordinator.scanAndRecover 总是返回扫描摘要；平台扫描参与者据此给出启动日志字段。
+    platform: { scanAndRecover: async () => ({ sourceCount: 0, activeHoldCount: 0 }), recoverSource() {} },
+    recoverPreFundRuns() {},
     recoverPosition() {}, recoverToolboxVccPublications() {},
     recoverVccImportTerminal: () => { calls.push('vcc-terminal'); },
     reconcileVccImportLineage: () => { calls.push('vcc-lineage'); }
@@ -305,9 +302,7 @@ test('主初始化不重复执行 VCC gate，Archive post-outbox hook 是唯一�
   for (const owner of application.archiveOwnerHooks()) await owner.recover();
   assert.deepEqual(calls, ['vcc-terminal'], 'owner 阶段不能提前执行 VCC lineage gate');
   const hooks = application.postOutboxHooks();
-  assert.deepEqual(hooks.map((hook) => hook.hookName), [
-    'BizOP activation and recovery', 'VCC import lineage/hold reconcile'
-  ]);
+  assert.deepEqual(hooks.map((hook) => hook.hookName), ['VCC import lineage/hold reconcile']);
   for (const hook of hooks) await hook.run();
   for (const hook of application.postOutboxHooks()) await hook.run();
   assert.deepEqual(calls, ['vcc-terminal', 'vcc-lineage'], '成功 post-outbox gate 只执行一次');

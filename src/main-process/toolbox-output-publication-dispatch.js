@@ -11,6 +11,11 @@ const { freezeWorkerBatchContext } = require('./archive-center/worker-batch-cont
 const { validateExecutionMemoryConfig } = require('./background-execution/execution-memory-config');
 
 const DEFAULT_WORKER_ENTRY = require.resolve('./toolbox-output-publication-worker');
+// v3.2.20 已下线模块遗留发布的 defer 代码 → 用户可执行的处理方式。
+const RETIRED_PUBLICATION_HINTS = Object.freeze({
+  PUBLICATION_RECOVERY_RETIRED_MODULE: '已下线模块「业务OP数据核对」有升级前未完成的导出：请先用 v3.2.19 及更早版本打开一次完成收尾，再回到新版导出',
+  PUBLICATION_RECOVERY_RETIRED_MODULE_MANUAL: '已下线模块「业务OP数据核对」有升级前就需人工恢复的导出（旧版也无法自动收尾）：请按活动日志中列出的恢复路径人工处理后再导出'
+});
 
 function createTransportError(message, cause = null) {
   const error = new Error(message);
@@ -163,13 +168,23 @@ function createToolboxPublicationDispatcher(options = {}) {
       const pending = preflightRecovery.recovered.filter((item) =>
         ['commit-handoff-pending', 'commit-finalization-pending'].includes(item.action));
       if (pending.length || preflightRecovery.deferred.length) {
+        // v3.2.20：retired-module-owner 原样保留的已下线模块（业务OP数据核对）遗留发布，处理方式写进主消息
+        //   （多数导出入口只向用户展示 message）。代码字面量与 publication-recovery/retired-module-owner.js 一致。
+        const retiredHints = Object.entries(RETIRED_PUBLICATION_HINTS)
+          .filter(([code]) => preflightRecovery.deferred.some((item) => item.code === code))
+          .map(([, hint]) => hint);
+        const onlyRetired = retiredHints.length > 0 && pending.length === 0
+          && preflightRecovery.deferred.every((item) => Object.hasOwn(RETIRED_PUBLICATION_HINTS, item.code));
+        const baseMessage = '已有输出等待存档中心耐久接管或 owner 放行，已阻止新的发布任务';
         const error = recoveryError('TOOLBOX_PUBLICATION_MANUAL_RECOVERY', authority.root,
-          '已有输出等待存档中心耐久接管或 owner 放行，已阻止新的发布任务',
+          onlyRetired ? `已阻止新的发布任务。${retiredHints.join('；')}`
+            : [baseMessage, ...retiredHints].join('；'),
           preflightRecovery.deferred.flatMap((item) => item.recoveryPaths));
         error.deferred = preflightRecovery.deferred;
         error.skippedActive = preflightRecovery.skippedActive;
         error.detailLines = [...pending.map((item) => `待接管发布：${item.taskId}`),
-          ...preflightRecovery.deferred.map((item) => `待恢复发布：${item.taskId}（${item.code}）`)];
+          ...preflightRecovery.deferred.map((item) => `待恢复发布：${item.taskId}（${item.code}）`),
+          ...retiredHints];
         throw error;
       }
       payload.preflight = seal(workerKey, 'preflight', { root: authority.root, taskId: payload.taskId,

@@ -10,29 +10,6 @@ on:
       - '**'
 
 jobs:
-  bizop-durability-contract:
-    if: >-
-      github.event_name == 'pull_request' &&
-      (startsWith(github.head_ref, 'codex/v3.2.7-') || github.head_ref == 'codex/v327-enable-bizop-production')
-    runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-      - name: Install dependencies
-        run: npm ci
-      - name: Verify BizOP contracts with a real directory durability barrier
-        run: |
-          node -e "if (require('./tests/helpers/durable-directory-tests').directoryDurabilityCapability.capability !== 'supported') process.exit(1)"
-          node --test tests/unit/main-process/biz-op-v327*.test.js
-
   # v3.2.15 B43：release-check 拆成下面三个并行 job（lint + 架构检查 + smoke、单测 6 片、集成测试 2 片），
   #   各 job 沿用 smoke-test 的 v3.2.1 final gate 守卫、exact head checkout、一次性修复血缘与 release-check 运行条件；
   #   smoke-test 汇总各 job 结果（scripts/ci/verify-release-check-jobs.js）后再跑 Windows 专项步骤，必需检查名不变。
@@ -495,21 +472,6 @@ jobs:
       - name: Run packaged background execution canary
         shell: pwsh
         run: ./scripts/run-windows-packaged-background-canary.ps1 -DistDirectory ./dist
-
-      - name: Verify packaged normal startup and complete BizOP workflow
-        shell: pwsh
-        run: |
-          $env:BIZOP_ACCEPTANCE_APP = (Resolve-Path 'dist/win-unpacked/清结算小助手.exe').Path
-          node scripts/biz-op-v327/verify-windows-app.js
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Upload packaged BizOP acceptance evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows-bizop-packaged-acceptance
-          path: outputs/windows-bizop-packaged-acceptance/
-          if-no-files-found: warn
 
       - name: Stage updater-compatible assets
         run: npm run stage:update-artifacts

@@ -29,11 +29,8 @@ const {
   createArchiveRepository
 } = require('../../../src/backend/database/archive-repository');
 const {
-  finalizePendingTerminalIntent
-} = require('../../../src/main-process/pending-archive-lineage');
-const {
-  finalizeRunTerminalIntent: finalizeBizOpRunTerminalIntent
-} = require('../../../src/main-process/biz-op-recon-run-data');
+  createRetiredTerminalRouteRegistrations
+} = require('../../../src/main-process/archive-center/retired-terminal-routes');
 
 function createHarness(options = {}) {
   const settings = new Map(options.initialSettings || []);
@@ -375,13 +372,13 @@ test('operation owner 终态 outbox 只重放 Task Run CAS，不创建空 batch'
       kind: 'operation',
       operationContext: {
         taskRunId: 'task-operation-only-1',
-        taskKey: 'pending:query',
-        moduleId: 'pending-reconciliation',
+        taskKey: 'vccFinancialOp:query',
+        moduleId: 'vcc-financial-op',
         parentRunId: 'parent-operation-only-1',
         operationKey: 'operation-only-1'
       }
     },
-    sourceOperation: 'pending:reconcile:query',
+    sourceOperation: 'vccFinancialOp:query',
     terminalOutcome: {
       taskStatus: 'failed',
       code: 'DB_TEMPORARY',
@@ -489,12 +486,14 @@ test('Position terminal route 拒绝空 operationToken 且不写 outbox', (t) =>
   assert.deepEqual(outboxStore.list(), []);
 });
 
-test('Pending operation terminal route 以 TaskRun identity 持久并在重放后调用 finalizer', async (t) => {
+// v3.2.20：月度Pending 已下线。旧版留下的 pending-run 终态通知不再重放：不写 Task Run 终态、不调用收尾、
+//   不删除通知，也不计入待重试数量（不阻断存档中心初始化），原样留给回退旧版。
+test('已下线 Pending operation 终态通知原样保留：不写 Task Run、不收尾、不计入待重试', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-pending-finalizer-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const outboxStore = createArchiveOutboxStore(directory);
   const finalized = [];
-  const { controller } = createHarness({
+  const { controller, service } = createHarness({
     outboxStore,
     onTerminalIntentFlushed: async (payload) => finalized.push(payload)
   });
@@ -520,19 +519,13 @@ test('Pending operation terminal route 以 TaskRun identity 持久并在重放�
       }
     }
   });
-  assert.deepEqual(
-    outboxStore.list()[0].payload.terminalOutcome.afterTerminal,
-    { route: 'pending-run', taskRunId: 'pending-run-task-outbox' }
-  );
-  assert.deepEqual(await controller.flushOutbox(), {
-    flushed: 1,
-    discarded: 0,
-    remaining: 0
-  });
-  assert.deepEqual(finalized[0].route, {
-    route: 'pending-run', taskRunId: 'pending-run-task-outbox'
-  });
-  assert.equal(finalized[0].terminalOutcome.taskStatus, 'succeeded');
+  const before = JSON.stringify(outboxStore.list());
+  for (let round = 0; round < 2; round += 1) {
+    assert.deepEqual(await controller.flushOutbox(), { flushed: 0, discarded: 0, remaining: 0 });
+  }
+  assert.equal(finalized.length, 0);
+  assert.equal(service.finishTaskRunCalls.length, 0);
+  assert.equal(JSON.stringify(outboxStore.list()), before, '通知逐字保留');
 });
 
 test('Pre-fund terminal route 只规范非空 TaskRun identity', async (t) => {
@@ -615,7 +608,7 @@ test('operation/file owner cancel-wins 时迟到 success 不 finalizer、不移�
   const terminalOutcome = {
     taskStatus: 'succeeded',
     metadata: {},
-    afterTerminal: { route: 'pending-run', taskRunId: 'owner-conflict-operation' }
+    afterTerminal: { route: 'pre-fund-run', taskRunId: 'owner-conflict-operation' }
   };
   controller.persistTaskTerminalIntent({
     owner: {
@@ -623,13 +616,13 @@ test('operation/file owner cancel-wins 时迟到 success 不 finalizer、不移�
       kind: 'operation',
       operationContext: {
         taskRunId: 'owner-conflict-operation',
-        taskKey: 'pending:reconcile:run',
-        moduleId: 'pending-reconciliation',
+        taskKey: 'pre-fund-reconciliation:run',
+        moduleId: 'pre-fund-reconciliation',
         parentRunId: 'owner-conflict-parent',
         operationKey: 'owner-conflict:operation'
       }
     },
-    sourceOperation: 'pending:reconcile:run',
+    sourceOperation: 'pre-fund-reconciliation:run',
     terminalOutcome
   });
   controller.persistTaskTerminalIntent({
@@ -666,44 +659,22 @@ test('operation/file owner cancel-wins 时迟到 success 不 finalizer、不移�
   assert.equal(outboxStore.list().length, 2);
 });
 
-test('failed/no-receipt terminal outbox 重放只收口 TaskRun，Pending/Biz finalizer 均无业务副作用', async (t) => {
+// v3.2.20：月度Pending / 业务OP / 收单已下线。旧版遗留的终态通知（operation、file-batch owner）整条跳过并原样保留，
+//   不写 Task Run 终态、不调用退役 route 收尾、不删除，不计入待重试，也不阻止其余模块的到期清理；保留模块照常重放。
+test('已下线模块的遗留 terminal outbox 原样保留给旧版，保留模块照常重放，不阻止到期清理', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-failed-receipt-finalizer-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const outboxStore = createArchiveOutboxStore(directory);
   const finalized = [];
-  const forbiddenDb = new Proxy({}, {
-    get() {
-      throw new Error('failed terminal 不得读取或确认业务 receipt');
-    }
-  });
+  const retiredRoutes = createRetiredTerminalRouteRegistrations();
   const { controller, service } = createHarness({
     outboxStore,
-    onTerminalIntentFlushed: async (payload) => {
-      finalized.push(payload.route.route);
-      if (payload.route.route === 'pending-run') {
-        return finalizePendingTerminalIntent({ ...payload, db: forbiddenDb });
-      }
-      return finalizeBizOpRunTerminalIntent({
-        ...payload,
-        userDataDir: '/path/must/not/be/read',
-        mainDb: forbiddenDb
-      });
-    }
+    onTerminalIntentFlushed: async (payload) => finalized.push(payload.route.route)
   });
 
   for (const entry of [
-    {
-      taskRunId: 'pending-run-failed-no-receipt',
-      taskKey: 'pending:reconcile:run',
-      moduleId: 'pending-reconciliation',
-      route: 'pending-run'
-    },
-    {
-      taskRunId: 'biz-op-run-failed-no-receipt',
-      taskKey: 'bizOpRecon:run',
-      moduleId: 'biz-op-reconciliation',
-      route: 'biz-op-run'
-    }
+    { taskRunId: 'pending-run-failed-no-receipt', taskKey: 'pending:reconcile:run', moduleId: 'pending-reconciliation', route: 'pending-run' },
+    { taskRunId: 'biz-op-run-failed-no-receipt', taskKey: 'bizOpRecon:run', moduleId: 'biz-op-recon', route: 'biz-op-run' }
   ]) {
     controller.persistTaskTerminalIntent({
       owner: {
@@ -727,15 +698,46 @@ test('failed/no-receipt terminal outbox 重放只收口 TaskRun，Pending/Biz fi
       }
     });
   }
-
-  assert.deepEqual(await controller.flushOutbox(), {
-    flushed: 2,
-    discarded: 0,
-    remaining: 0
+  controller.persistTaskTerminalIntent({
+    owner: {
+      version: 1,
+      kind: 'file-batch',
+      batchContext: {
+        batchId: 91, batchNumber: '2026-09-01-091', taskRunId: 'acquiring-export-leftover',
+        taskKey: 'acquiringBillCurrency:export', moduleId: 'acquiring-bill-currency',
+        parentRunId: 'acquiring-parent', operationKey: 'acquiring-export-leftover:operation'
+      }
+    },
+    sourceOperation: 'acquiringBillCurrency:export',
+    terminalOutcome: { taskStatus: 'succeeded', metadata: {} }
   });
-  assert.deepEqual(finalized.sort(), ['biz-op-run', 'pending-run']);
-  assert.equal(service.finishTaskRunCalls.length, 2);
-  assert.deepEqual(outboxStore.list(), []);
+  const retiredBefore = JSON.stringify(outboxStore.list());
+  controller.persistTaskTerminalIntent({
+    owner: {
+      version: 1,
+      kind: 'operation',
+      operationContext: {
+        taskRunId: 'vcc-operation-retained', taskKey: 'vccFinancialOp:query', moduleId: 'vcc-financial-op',
+        parentRunId: 'vcc-parent', operationKey: 'vcc-operation-retained:operation'
+      }
+    },
+    sourceOperation: 'vccFinancialOp:query',
+    terminalOutcome: { taskStatus: 'failed', code: 'DB_TEMPORARY', message: 'retry', metadata: {} }
+  });
+
+  assert.deepEqual(await controller.flushOutbox(), { flushed: 1, discarded: 0, remaining: 0 });
+  assert.deepEqual(finalized, []);
+  assert.deepEqual(service.finishTaskRunCalls.map((call) => call.taskRunId), ['vcc-operation-retained']);
+  assert.equal(service.finishFileTaskCalls.length, 0);
+  assert.equal(JSON.stringify(outboxStore.list()), retiredBefore, '已下线模块的通知逐字保留');
+
+  controller.startupVccGateSucceeded = true;
+  assert.doesNotThrow(() => controller._assertRetentionGate(), '保留的已下线通知不阻止其余模块到期清理');
+
+  // 兜底：退役 route 的 finalize 若被调用即拒绝，使通知继续保留。
+  for (const entry of retiredRoutes) {
+    await assert.rejects(entry.finalize({}), { code: 'ARCHIVE_RETIRED_TERMINAL_ROUTE_RETAINED' });
+  }
 });
 
 test('控制器启动时将有效、损坏和空模板排除设置统一归一化为空数组', () => {
@@ -944,6 +946,30 @@ test('另存为取消不写文件，成功时使用原文件名作为默认名',
 
   controller.showSaveDialog = async () => ({ canceled: false, filePath: '/tmp/copy.xlsx' });
   service.saveAs = async (_id, targetPath) => ({ ok: true, filePath: targetPath });
+  assert.equal((await controller.saveAs(fileRefId)).filePath, '/tmp/copy.xlsx');
+});
+
+// v3.2.20：公共附件入口与批次可见性一致，已下线模块的附件即使持有旧编号也不能打开或另存（不弹保存对话框）。
+test('已下线模块的附件按编号打开或另存均按不存在处理', async () => {
+  const { controller, service } = createHarness();
+  const created = await controller.sink.createBatch({
+    moduleId: 'new-account', moduleCode: 'NEW', moduleName: '新开账户余额账单生成',
+    sourceOperation: 'new-account:generate', files: [{ filePath: '/tmp/result.xlsx', role: 'output' }]
+  });
+  const detail = await controller.getBatch(created.batchNumber);
+  const fileRefId = detail.batch.files[0].fileRefId;
+  service.repository.getBatch(created.batchId).moduleId = 'biz-op-recon';
+  let touched = 0;
+  controller.showSaveDialog = async () => { touched += 1; return { canceled: false, filePath: '/tmp/copy.xlsx' }; };
+  service.openReadonlyCopy = async () => { touched += 1; return { ok: true }; };
+  service.saveAs = async () => { touched += 1; return { ok: true, filePath: '/tmp/copy.xlsx' }; };
+  for (const result of [await controller.openFile(fileRefId), await controller.saveAs(fileRefId)]) {
+    assert.equal(result.status, 'failed');
+    assert.equal(result.message, '存档文件不存在');
+  }
+  assert.equal(touched, 0);
+  service.repository.getBatch(created.batchId).moduleId = 'new-account';
+  assert.equal((await controller.openFile(fileRefId)).status, 'success');
   assert.equal((await controller.saveAs(fileRefId)).filePath, '/tmp/copy.xlsx');
 });
 

@@ -8,7 +8,6 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '../..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const renderer = fs.readFileSync(path.join(root, 'src/renderer.js'), 'utf8');
-const pendingRenderer = fs.readFileSync(path.join(root, 'src/renderer-pending.js'), 'utf8');
 const clearBase = fs.readFileSync(path.join(root, 'src/styles-gemini.css'), 'utf8');
 const clearExtra = fs.readFileSync(path.join(root, 'src/styles-gemini-extra.css'), 'utf8');
 const generalStyles = fs.readFileSync(path.join(root, 'src/styles.css'), 'utf8');
@@ -19,22 +18,17 @@ const windowsReleaseWorkflow = fs.readFileSync(path.join(root, '.github/workflow
 
 const TARGET_STATUS_IDS = [
   'statusBox',
-  'pendingStatusBox',
-  'bizOpReconStatusBox',
-  'bankBuReconStatusBox',
   'duplicateInboundMatchStatusBox',
   'vccOpCalcStatusBox',
   'vccFinancialOpStatusBox',
   'bankStatementStatusBox',
   'preFundReconciliationStatusBox',
   'reconIdFixStatusBox',
-  'positionReconciliationStatusBox',
-  'acquiringBillCurrencyStatusBox'
+  'positionReconciliationStatusBox'
 ];
 
 const ALIGNED_CONTROL_IDS = [
   'templateSelect',
-  'bizOpReconBuSelect',
   'preFundReconciliationScenarioSelect',
   'reconIdFixBillCategorySelect',
   'reconIdFixScenarioSelect',
@@ -50,7 +44,8 @@ function elementSourceById(id) {
 }
 
 test.describe('v3.1.13 主页面状态框与垂直对齐契约', () => {
-  test('13 个静态状态框只保留文字，12 个目标状态框共享内容层', () => {
+  // v3.2.20：业务OP / Pending / 收单 / BU 回填四个面板下线，对应状态框与业务OP BU 下拉随之移除。
+  test('9 个静态状态框只保留文字，8 个目标状态框共享内容层', () => {
     assert.equal((html.match(/class="status-box-content"/g) || []).length, TARGET_STATUS_IDS.length);
     assert.equal((html.match(/class="[^"]*status-box(?:\s[^"]*)?"/g) || []).length, TARGET_STATUS_IDS.length + 1);
     assert.doesNotMatch(html, /status-spark|gsStatus/);
@@ -87,11 +82,10 @@ test.describe('v3.1.13 主页面状态框与垂直对齐契约', () => {
 
   test('状态更新继续使用后代选择器，不依赖直接子元素', () => {
     assert.match(renderer, /box\.querySelector\('\.status-box-text'\)/);
-    assert.match(pendingRenderer, /pendingStatusBox\.querySelector\('\.status-box-text'\)/);
     assert.doesNotMatch(renderer, /box\s*>\s*\.status-box-text/);
   });
 
-  test('六组标签和下拉框使用统一 48px 轨道类', () => {
+  test('五组标签和下拉框使用统一 48px 轨道类', () => {
     for (const selectId of ALIGNED_CONTROL_IDS) {
       const selectPattern = new RegExp(`<select[^>]*id="${selectId}"[^>]*class="[^"]*main-panel-select-control[^"]*"`);
       const labelPattern = new RegExp(`<label[^>]*class="[^"]*main-panel-select-label[^"]*"[^>]*for="${selectId}"`);
@@ -129,8 +123,7 @@ test.describe('v3.1.13 主页面状态框与垂直对齐契约', () => {
 
   test('绝对标签改按控件顶部定位，横向位置保持不变', () => {
     for (const selector of [
-      '#preFundReconciliationModulePanel .pre-fund-scenario-label',
-      '.biz-op-recon-bu-row .select-label'
+      '#preFundReconciliationModulePanel .pre-fund-scenario-label'
     ]) {
       const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const rule = new RegExp(`${escaped}\\s*\\{([\\s\\S]*?)\\}`).exec(clearExtra);
@@ -171,7 +164,8 @@ test.describe('v3.1.13 主页面状态框与垂直对齐契约', () => {
     assert.match(geometryVerifier, /const SCALE_FACTORS = \[1, 1\.25, 1\.5\]/);
     assert.match(geometryVerifier, /Emulation\.setDeviceMetricsOverride/);
     assert.match(geometryVerifier, /device scale factor: expected \$\{expectedScaleFactor\}, got \$\{window\.devicePixelRatio\}/);
-    assert.match(geometryVerifier, /statusTargets = \[[\s\S]*duplicateInboundMatchStatusBox[\s\S]*vccFinancialOpStatusBox[\s\S]*acquiringBillCurrencyStatusBox/);
+    assert.match(geometryVerifier, /statusTargets = \[[\s\S]*duplicateInboundMatchStatusBox[\s\S]*vccFinancialOpStatusBox[\s\S]*positionReconciliationStatusBox/);
+    assert.doesNotMatch(geometryVerifier, /pendingStatusBox|bizOpReconStatusBox|bankBuReconStatusBox|acquiringBillCurrencyStatusBox|bizOpReconBuSelect/);
     assert.match(geometryVerifier, /box\.querySelector\('svg'\)/);
     assert.match(geometryVerifier, /unexpected status SVG/);
     assert.doesNotMatch(geometryVerifier, /querySelector\('\.status-spark'\)/);

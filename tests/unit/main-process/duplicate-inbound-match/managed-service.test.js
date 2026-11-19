@@ -9,7 +9,7 @@ const test = require('node:test');
 const XLSX = require('xlsx');
 const { DatabaseSync } = require('node:sqlite');
 
-const { BILL_HEADERS } = require('../../../../src/backend/acquiring-bill-currency-db/columns');
+const { BILL_HEADERS } = require('../../../../src/main-process/duplicate-inbound-match/document-statement-reader');
 const {
   createPreFundReconciliationStore
 } = require('../../../../src/backend/pre-fund-reconciliation-store');

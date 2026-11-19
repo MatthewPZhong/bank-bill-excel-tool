@@ -48,8 +48,7 @@ async function main() {
     } catch (error) { failure = { mode, attempt, message: error.message }; break attempts; }
   }
   const reference = reports[0];
-  const resultsEqual = reports.length > 0 && reports.every((report) => report.rowsDigest === reference.rowsDigest &&
-    report.opDigest === reference.opDigest && JSON.stringify(report.exports) === JSON.stringify(reference.exports));
+  const resultsEqual = reports.length > 0 && reports.every((report) => report.rowsDigest === reference.rowsDigest);
   const pressureObserved = band === null ? null : reports.every((report) => report.grants.length > 0 &&
     report.grants.every((grant) => Math.abs(grant.actualAvailableBytes / 1024 ** 2 - band) <= 96));
   const passed = !failure && reports.length === modes.length * repeat && resultsEqual && pressureObserved !== false;

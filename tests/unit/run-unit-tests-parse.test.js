@@ -14,7 +14,6 @@ const {
   parseShard,
   selectShardFiles,
   planShard,
-  SERIAL_UNIT_SHARDS,
   UNIT_FILE_MINUTES,
   unitFileMinutes
 } = require('../../scripts/run-unit-tests.js');
@@ -187,7 +186,7 @@ describe('parseShard / selectShardFiles', () => {
     assert.match(text, /unit 文件数：9（第 2\/5 片）/);
   });
 
-  test('当前全部单测文件按 6 片分配：不重不漏、每片按路径排序；前 3 片依次单独运行带期限的业务OP文件，其余各片估算耗时相近', () => {
+  test('当前全部单测文件按 6 片分配：不重不漏、每片按路径排序、各片估算耗时相近', () => {
     const files = [];
     const walk = (dir) => {
       for (const entry of require('node:fs').readdirSync(path.join(REPO_ROOT, dir), { withFileTypes: true })) {
@@ -197,31 +196,16 @@ describe('parseShard / selectShardFiles', () => {
       }
     };
     walk('tests/unit');
-    for (const listed of [...SERIAL_UNIT_SHARDS.flat(), ...Object.keys(UNIT_FILE_MINUTES)]) {
+    for (const listed of Object.keys(UNIT_FILE_MINUTES)) {
       assert.ok(files.includes(listed), `分片清单中的 ${listed} 须是现有单测文件`);
     }
-    assert.equal(new Set(SERIAL_UNIT_SHARDS.flat()).size, SERIAL_UNIT_SHARDS.flat().length, '单独运行的文件只出现在一组');
-    const plans = Array.from({ length: 6 }, (_value, index) => planShard(files, { index: index + 1, total: 6 }));
-    const shards = plans.map((plan) => plan.files);
+    const shards = Array.from({ length: 6 }, (_value, index) => planShard(files, { index: index + 1, total: 6 }).files);
     assert.deepStrictEqual(shards.flat().sort(), [...files].sort());
     shards.forEach((shard) => assert.deepStrictEqual(shard, [...shard].sort()));
-    assert.deepStrictEqual(plans.map((plan) => plan.serial), [true, true, true, false, false, false]);
-    assert.deepStrictEqual(shards.slice(0, 3), SERIAL_UNIT_SHARDS.map((group) => [...group].sort()));
-    const minutes = shards.slice(3).map((shard) => shard.reduce((sum, file) => sum + unitFileMinutes(file), 0));
-    assert.ok(Math.max(...minutes) - Math.min(...minutes) <= 1, `其余各片估算分钟数相差不超过 1：${minutes.map((value) => value.toFixed(1)).join(' / ')}`);
+    const minutes = shards.map((shard) => shard.reduce((sum, file) => sum + unitFileMinutes(file), 0));
+    assert.ok(Math.max(...minutes) - Math.min(...minutes) <= 1, `各片估算分钟数相差不超过 1：${minutes.map((value) => value.toFixed(1)).join(' / ')}`);
     assert.deepStrictEqual(selectShardFiles(['b.test.js', 'a.test.js'], null), ['a.test.js', 'b.test.js']);
-    assert.deepStrictEqual(planShard(['b.test.js', 'a.test.js'], null), { files: ['a.test.js', 'b.test.js'], serial: false });
-  });
-
-  test('只有涉及现有文件的单独运行组占片；片数不够时报错，不混入其他文件', () => {
-    const [first] = SERIAL_UNIT_SHARDS[0];
-    const files = ['tests/unit/a.test.js', 'tests/unit/b.test.js', 'tests/unit/c.test.js', first];
-    assert.deepStrictEqual([1, 2, 3].map((index) => planShard(files, { index, total: 3 })), [
-      { files: [first], serial: true },
-      { files: ['tests/unit/a.test.js', 'tests/unit/c.test.js'], serial: false },
-      { files: ['tests/unit/b.test.js'], serial: false }
-    ]);
-    assert.throws(() => planShard(files, { index: 1, total: 1 }), /单独运行的文件需要 1 片，另需至少 1 片运行其余文件；当前共 1 片/);
+    assert.deepStrictEqual(planShard(['b.test.js', 'a.test.js'], null), { files: ['a.test.js', 'b.test.js'] });
     assert.deepStrictEqual(selectShardFiles(['tests/unit/x.test.js'], { index: 2, total: 2 }), [], '文件少于片数时多出的片为空');
   });
 

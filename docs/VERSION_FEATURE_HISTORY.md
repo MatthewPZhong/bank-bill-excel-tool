@@ -1,5 +1,20 @@
 # 版本功能变更清单
 
+## v3.2.20（2026-11-18）
+
+本轮包含 `feat/retire-recon-modules`（下线四个对账模块）与 `release/v3.2.19` 的发布检查修复。`v3.2.19` 标签（→ `466bb6fa`）触发的发布流程 run 44441308161 在 `release-check` 中因 `renderer-lifecycle` 超过 120 秒总时限失败，未生成 Release；正式标签受「Immutable stable release tags」规则保护，不移动、不重建，v3.2.19 的功能随本版首次发出安装包。需求与决策见 `changes/v3.2.20/feat/retire-recon-modules/spec.md` D1–D5、TechDoc 第四至九节。
+
+- **下线模块**：删除 `biz-op-recon`（旧版与 BizOP v327）、`pending-reconciliation`、`acquiring-bill-currency`、`bank-bu-recon` 的源码、界面入口、IPC、后台任务、测试、集成/冒烟/预览脚本、CI 专项任务与 release-check 接线（含发布流程的 BizOP 打包验收步骤）。架构边界 `renderer-{bank-bu,acquiring,biz-op-legacy,pending,biz-op-v327}`、`bizop-recovery-private`、`bizop-query-q1`～`q3` 按 retired 机制退役（`retirement: { reason, designDoc, removedPaths, releasedPaths }`，防复活检查与历史检查规则见 `architecture/README.md`）。
+- **历史数据**：主库表与设置键、`run-data/{acquiring-bill-currency,biz-op-recon,bank-bu-recon,biz-op-v327}/`、`tool-data-pending.sqlite`、存档记录、共享发布记录、模板用户版本、`.usage-stats.txt` 历史计数不删除、不改写。`current_module` / `enabled_modules` 指向已下线 id 时按非法值忽略并回到默认模块；`enabled_modules` 全部为已下线 id 时只在内存中回退、不写库；写回启用列表与按模块保留期时原样保留已下线条目。
+- **存档（D3）**：`archive-repository.js` 的 `VISIBLE_BATCH_PREDICATE_SQL` 排除已下线 `module_id`（列表、搜索、统计、按号打开、删除入口与公共附件入口）；到期清理照常删除已结束批次，跳过 reserved/running、仍有原样保留的终态通知（`ARCHIVE_DELETE_OWNER_PENDING`）或缺收口凭证（`ARCHIVE_DELETE_OWNER_COMPLETION_REQUIRED`）的批次且不计失败。启动扫尾、流程绑定意图重放与 File Task 收口确认均跳过已下线模块；outbox 中已下线模块的终态通知整条原样保留、不计入待重试数量。
+- **已下线模块导出的启动收尾（D6）**：升级前已提交发布、归档未收口的 Pending / 业务OP / 收单 publication-only 导出按原 owner 证明收尾；旧格式批次（无 `_fileManifest`）的 outbox 追加意图不按已下线通知保留（`isRetiredPublicationAppendIntent`，PR #256 Codex 云端审查 P1）。
+- **发布恢复（D4、D5）**：`publication-recovery/retired-module-owner.js` 只识别 BizOP v327 导出的遗留发布 journal（含旧版标为 `manual-recovery` 的记录）并一律 defer，启动不再中止；共享发布器对 defer 记录失败关闭的合同不变（B108）。
+- **发布检查**：`scripts/test-renderer-lifecycle.js` Electron 进程总时限 120 → 300 秒（v3.2.19 全量 493 个用例在 Windows 上约 110–121 秒），测试内容不变。release 侧合并提交 `305ef4b0` 补登 3 条与模块分支同值的 policyChanges（`d8a07a4b` 不在 `466bb6fa` 历史中）。
+
+审查修复：模块分支 Codex 审查两轮（第一轮修复存档展示与清理、启动扫尾、outbox、BizOP 遗留发布记录；第二轮确认 10 条，修 8 条、放行 1 条（D5）、不采纳 2 条（B109 与设置页「待完成删除」提示）），修复后模块分支 `npm run release-check` 通过（单测 8934 个：8930 通过、4 跳过；集成 88 个脚本；`retired-modules-upgrade-compat.js` 42 项断言）。第二轮修复后未再做 Codex 本地审查。
+
+已知限制与顺延：Windows 打包版验收与正常启动 CI 覆盖未做（B105）；遗留 BizOP 导出记录处理前统一发布流程的导出被拒（B108）；无归属旧通知使同模块到期批次被跳过（B109）；缺收口凭证的历史批次使到期清理整轮停在当页（B110）；已下线模块历史数据无清理入口（B107）。v3.2.19 及更早顺延的 17 项顺延至 v3.2.21。
+
 ## v3.2.19（2026-11-18）
 
 本轮包含 `feat/bill-split-fee-amount` 一个分支（基于 `feat/mapping-dialog-ux`）：网银映射关系管理改版、拆分/合并账单费用账单与「发生额取值设置」、根据字段值过滤账单、原始账单预处理（过滤账单、重复账单过滤）、映射字段「逻辑取值」。需求与决策见 `changes/v3.2.19/feat/bill-split-fee-amount/spec.md` §1–§8。

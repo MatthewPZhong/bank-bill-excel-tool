@@ -12,10 +12,14 @@ const {
   resolveArchiveScope
 } = require('../../../src/main-process/archive-center/module-scope-registry');
 
-test('PR3-Toolbox 保持 13 个 primary 并新增唯一 utility scope', () => {
-  assert.equal(PRIMARY_ARCHIVE_SCOPES.length, 13);
-  assert.equal(new Set(PRIMARY_ARCHIVE_SCOPES.map((scope) => scope.id)).size, 13);
-  assert.equal(new Set(PRIMARY_ARCHIVE_SCOPES.map((scope) => scope.code)).size, 13);
+// v3.2.20：Pending / BU 回填 / 业务OP / 收单四个 primary scope 随模块下线移除（13 → 9）；历史批次仍留在存档库。
+test('PR3-Toolbox 保持 9 个 primary 并新增唯一 utility scope', () => {
+  assert.equal(PRIMARY_ARCHIVE_SCOPES.length, 9);
+  assert.equal(new Set(PRIMARY_ARCHIVE_SCOPES.map((scope) => scope.id)).size, 9);
+  assert.equal(new Set(PRIMARY_ARCHIVE_SCOPES.map((scope) => scope.code)).size, 9);
+  for (const retired of ['pending-reconciliation', 'bank-bu-recon', 'biz-op-recon', 'acquiring-bill-currency']) {
+    assert.equal(getArchiveScope(retired), null, retired);
+  }
   assert.ok(PRIMARY_ARCHIVE_SCOPES.every((scope) => scope.kind === 'primary'));
   assert.deepEqual(getArchiveScope('vcc-financial-op'), {
     id: 'vcc-financial-op',
@@ -39,7 +43,7 @@ test('内部 alias 解析到 primary，但不增加可见筛选 scope', () => {
     'POSITIONLINK',
     'PREFUNDTEMP'
   ]);
-  assert.equal(listVisibleArchiveScopes().length, 14);
+  assert.equal(listVisibleArchiveScopes().length, 10);
   assert.equal(listVisibleArchiveScopes().filter((scope) => scope.kind === 'utility').length, 1);
   assert.equal(resolveArchiveScope('LINKED').id, 'bank-statement-process');
   assert.equal(resolveArchiveScope('LINKED').storageCode, 'LINKED');

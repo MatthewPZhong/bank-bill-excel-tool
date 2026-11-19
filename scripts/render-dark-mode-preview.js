@@ -13,7 +13,7 @@ html = html.replace(/<!--[^]*?-->/g, '');
 html = html.replace(/<meta\s+http-equiv="Content-Security-Policy"[\s\S]*?\/>/, '<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; style-src &#39;unsafe-inline&#39;; script-src &#39;unsafe-inline&#39;; img-src data: blob:; connect-src &#39;none&#39;; base-uri &#39;none&#39;; form-action &#39;none&#39;" />');
 html = html.replace('<title>清结算小助手</title>', '<title>清结算小助手 · 3.2.9 定时深色模式</title>');
 html = html.replace(/<img class="corner-gif"[^>]*>/, '<div class="corner-gif-slot" aria-hidden="true">☾</div>');
-const cssFiles = ['styles-gemini.css', 'styles-gemini-extra.css', 'styles-vcc-financial-op.css', 'styles-biz-op-v327.css', 'styles-dark-mode.css', 'styles-dark-mode-settings.css'];
+const cssFiles = ['styles-gemini.css', 'styles-gemini-extra.css', 'styles-vcc-financial-op.css', 'styles-dark-mode.css', 'styles-dark-mode-settings.css'];
 const css = cssFiles.map((file) => read(`src/${file}`)).join('\n');
 const shared = read('src/shared/dark-mode-schedule.js');
 const ui = read('src/renderer-dark-mode.js');

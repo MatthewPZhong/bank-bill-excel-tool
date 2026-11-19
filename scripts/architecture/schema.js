@@ -8,7 +8,10 @@ const RULES = Object.freeze(['ARCH-CYCLE', 'ARCH-PLATFORM-CORE', 'ARCH-PURE-LINE
 const BOUNDARY_FIELDS = Object.freeze(['id', 'governance', 'owner', 'state', 'rules', 'entrypoints',
   'allowedLocal', 'allowedExternal', 'requiredConsumers', 'activationEvidence', 'protectedScopes',
   'restrictedApis', 'allowedSites', 'compositionEntrypoints', 'globals', 'factory',
-  'allowedApiFields', 'deprecatedEntrypoints', 'directory']);
+  'allowedApiFields', 'deprecatedEntrypoints', 'directory', 'retirement']);
+// 边界退役（v3.2.20 起）：所属功能整体下线后，active 边界只能转为 retired 并保留 id 登记；
+//   retired 不参与常规规则，改由 retirement.removedPaths 防止源码复活，历史检查禁止其删除或复活。
+const BOUNDARY_STATES = Object.freeze(['pending', 'partial', 'active', 'retired']);
 function fail(at, message) { const error = new Error(`${at}: ${message}`); error.code = 'ARCHITECTURE_CONFIG_INVALID'; throw error; }
 function object(value, fields, at) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail(at, '必须是对象');
@@ -55,7 +58,25 @@ function boundary(value, at) {
   object(value, BOUNDARY_FIELDS, at);
   for (const key of ['id', 'owner', 'governance']) string(value[key], `${at}.${key}`);
   if (!/^G[1-8]$/.test(value.governance)) fail(at, '未知治理归属');
-  if (!['pending', 'partial', 'active'].includes(value.state)) fail(at, '未知边界状态');
+  if (!BOUNDARY_STATES.includes(value.state)) fail(at, '未知边界状态');
+  if (value.state === 'retired') {
+    // removedPaths：随功能删除的源码；releasedPaths：原入口中保留下来的共享文件（解除本边界治理，仍受其他边界约束）。
+    object(value.retirement, ['reason', 'designDoc', 'removedPaths', 'releasedPaths'], `${at}.retirement`);
+    string(value.retirement.reason, `${at}.retirement.reason`); path(value.retirement.designDoc, `${at}.retirement.designDoc`);
+    paths(value.retirement.removedPaths, `${at}.retirement.removedPaths`);
+    paths(value.retirement.releasedPaths, `${at}.retirement.releasedPaths`);
+    if (!value.retirement.removedPaths.length) fail(at, '退役边界必须列出已删除的源码路径');
+    if (value.retirement.releasedPaths.some(p => value.retirement.removedPaths.includes(p))) fail(at, '同一路径不能既删除又释放');
+    for (const key of ['entrypoints', 'allowedLocal', 'activationEvidence', 'requiredConsumers', 'protectedScopes', 'restrictedApis',
+      'allowedSites', 'compositionEntrypoints', 'globals']) {
+      if (Array.isArray(value[key]) && value[key].length) fail(`${at}.${key}`, '退役边界不得保留生效约束');
+    }
+    // 已退役的兼容入口是历史登记（防复活依据），退役边界可原样保留；仍为 compat 的入口不得保留。
+    if (Array.isArray(value.deprecatedEntrypoints) && value.deprecatedEntrypoints.some((entry) => !entry || entry.state !== 'retired')) {
+      fail(`${at}.deprecatedEntrypoints`, '退役边界只能保留已退役的兼容入口登记');
+    }
+    if (value.factory !== null || value.directory !== null || Object.keys(value.allowedApiFields || {}).length) fail(at, '退役边界不得保留工厂、目录或注入合同');
+  } else if (value.retirement !== undefined && value.retirement !== null) fail(`${at}.retirement`, '仅退役边界可登记 retirement');
   rules(value.rules, `${at}.rules`); if (!value.rules.length) fail(at, '边界至少绑定一条规则');
   for (const key of ['entrypoints', 'allowedLocal', 'activationEvidence']) paths(value[key], `${at}.${key}`);
   strings(value.allowedExternal, `${at}.allowedExternal`);
@@ -238,7 +259,8 @@ function validateBootstrapComplete(value) {
   for (const [id, requiredRules] of Object.entries(REQUIRED_BOUNDARIES)) {
     const boundary = value.boundaries.find(b => b.id === id);
     if (!boundary || requiredRules.some(rule => !boundary.rules.includes(rule))) fail('boundaries.bootstrap', '缺少完整计划子边界或规则绑定：' + id);
-    if (id !== 'production-graph' && !boundary.entrypoints.length) fail('boundaries.bootstrap', '计划边界不得以空入口失效：' + id);
+    // 退役边界保留 id 与规则绑定作为登记，不再要求入口。
+    if (id !== 'production-graph' && boundary.state !== 'retired' && !boundary.entrypoints.length) fail('boundaries.bootstrap', '计划边界不得以空入口失效：' + id);
   }
   for (const id of ['production-graph', 'platform-core']) if (value.boundaries.find(b => b.id === id).state !== 'active') fail('boundaries.bootstrap', '立即生效规则不得延后：' + id);
   const core = value.boundaries.find(b => b.id === 'platform-core');
@@ -248,4 +270,4 @@ function validateBootstrapComplete(value) {
   }
   return value;
 }
-module.exports = { RULES, BOUNDARY_FIELDS, REQUIRED_BOUNDARIES, validateBootstrapComplete, validateBoundaries, validateAllowlist };
+module.exports = { RULES, BOUNDARY_FIELDS, BOUNDARY_STATES, REQUIRED_BOUNDARIES, validateBootstrapComplete, validateBoundaries, validateAllowlist };

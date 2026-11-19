@@ -10,6 +10,7 @@ const test = require('node:test');
 const {
   HISTORICAL_RELEASES,
   PackageChecksumError,
+  RETIRED_EVIDENCE_REFS,
   SNAPSHOT_PATH,
   WORK_ITEM_ACTIONS,
   buildExpectedReleaseEvidence,
@@ -212,16 +213,19 @@ test('每个 action 都有九类独立证据字段和唯一 fixture', () => {
   assert.equal(fixtures.size, 54);
 });
 
-test('全部 evidence refs 指向当前树中的真实文件', () => {
+test('全部 evidence refs 指向当前树中的真实文件（v3.2.20 已下线模块的封闭清单除外，且清单内文件确已删除）', () => {
+  const referenced = new Set();
   for (const action of loadSnapshot().actions) {
     for (const relativePath of action.evidenceRefs) {
+      referenced.add(relativePath);
       assert.equal(
         fs.existsSync(resolveChangesPath(REPOSITORY_ROOT, relativePath)),
-        true,
+        !RETIRED_EVIDENCE_REFS.includes(relativePath),
         `${action.actionKey}: ${relativePath}`
       );
     }
   }
+  for (const retired of RETIRED_EVIDENCE_REFS) assert.ok(referenced.has(retired), `清单只登记快照中实际引用的文件：${retired}`);
 });
 
 test('所有 action 的 effective strategy 与 production decision 都保持 legacy/0/false', () => {

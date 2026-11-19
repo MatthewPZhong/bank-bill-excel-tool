@@ -79,7 +79,7 @@ test('生产装配的独立 authority/coverage 拒绝测试 descriptor，即便�
   const production = composeExecutionDescriptors({ availableParallelism: 4 });
   const testPolicy = extensionDescriptor('descriptor-test:unauthorized', 0).policies[0];
   const count = production.actionTaskBindingRegistry.summary.actionKeys.length;
-  assert.equal(count, 67);
+  assert.equal(count, 39);
   assert.equal(production.actionTaskBindingRegistry.allowedTaskKeys(testPolicy.actionKey), undefined);
   for (const enabled of [false, true]) {
     testPolicy.production.enabled = enabled;

@@ -36,18 +36,14 @@ module.exports = async ({ js, load, reset, assert, test }) => {
         'scenarios:list':{status:'ok',scenarios:[]}, 'channels:list':{status:'ok',channels:[]},
         'bank-statement:session-status':{status:'ok',hasFile:false,hasResult:false},
         'recon-id-fix:session-status':{status:'ok',hasFile:false,hasResult:false},
-        'pending:rule:get':{matchFields:['ID'],compareFields:[]},'pending:months:list':[], 'pending:diff:runs-list':[],
         'pre-fund-reconciliation:session-status':{status:'ok',hasBank:false,hasMpt:false,hasResult:false},
-        'bankBuRecon:run:list-ready-months':[], 'bankBuRecon:run:list-success-months':[],
         'duplicate-inbound-match:session-status':{status:'ok',hasBank:false,hasBill:false,hasResult:false},
         'vccOpCalc:balance:list-months':[],
-        'acquiringBillCurrency:listMonths':[], 'acquiringBillCurrency:sessionStatus':{monthKey:null,flowReady:false,billReady:false},
-        'bizOpReconV327:status':{mode:'DISABLED',recoveryReady:true},'bizOpRecon:bu:list':[],
         'position-reconciliation:status':{status:'ok',bank:{rowCount:0},canRun:false,canExport:false,pendingRun:null},
         'vccFinancialOp:run:archived-months':[], 'vccFinancialOp:run:latest-archived':null,
         'linked-table:list':{status:'ok',tables:[]},
         'linked-table:get-retention-settings':{status:'ok',tables:[{tableKey:'gateway-bill',name:'网关对账单表库',defaultRetentionDays:15}],retentionDaysByTable:{'gateway-bill':15}},
-        'pending:columns':['ID'], 'toolbox:merge':{status:'cancelled'},
+        'toolbox:merge':{status:'cancelled'},
         'toolbox:split:read':{status:'success',sourceFilePath:'/fixture/source.xlsx',splitReadToken:'fixture-token',headers:['Currency'],valuesByField:{Currency:['USD','HKD']},dataRowCount:8,maxRowSplitFiles:1000},
         'archive-center:get-settings':{status:'success',retentionDays:30},'archive-center:list-batches':{status:'success',batches:[]},
         'archive-center:get-stats':{status:'success',batchCount:0},'archive-center:list-delete-cleanup-jobs':[],
@@ -91,10 +87,10 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     assert.equal(await js(`shellSends.some(call=>call.channel==='app:report-startup-metrics')`), true,
       JSON.stringify(await js(`({calls:shellCalls,warnings:shellWarnings})`)));
     assert.deepEqual((await js(`getModuleRouter().moduleIds`)).slice().sort(), moduleIds.slice().sort());
-    assert.equal(moduleIds.length, 13);
+    assert.equal(moduleIds.length, 9);
     assert.equal(await js(`(()=>{try{desktopApi.notDeclared.anything();return false;}catch(error){return /未知 Preload/.test(error.message);}})()`), true);
   });
-  await test('应用壳 13 域反复导航及同模块导航不重复订阅或静态点击绑定', async () => {
+  await test('应用壳 9 域反复导航及同模块导航不重复订阅或静态点击绑定', async () => {
     const ids = await js(`getModuleRouter().moduleIds`);
     for (const id of ids) {
       const result = await js(`(async()=>{const route=setCurrentModule(${JSON.stringify(id)},{persist:false});await route.ready;return {status:route.status,current:getModuleRouter().getCurrentModuleId()};})()`);
@@ -103,10 +99,11 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     const before = await js(`Object.fromEntries([...shellSubscriptions].map(([key,value])=>[key,value.size]))`);
     for (const id of ids) await js(`(async()=>{await setCurrentModule(${JSON.stringify(id)},{persist:false}).ready;await setCurrentModule(${JSON.stringify(id)},{persist:false}).ready;})()`);
     assert.deepEqual(await js(`Object.fromEntries([...shellSubscriptions].map(([key,value])=>[key,value.size]))`), before);
-    await js(`(async()=>{await setCurrentModule('pending-reconciliation',{persist:false}).ready;})()`);
-    const columnsBefore = await js(`shellCalls.filter(call=>call.channel==='pending:columns').length`);
-    await js(`document.getElementById('pendingRuleBtn').click();`); await flush();
-    assert.equal(await js(`shellCalls.filter(call=>call.channel==='pending:columns').length`), columnsBefore + 1);
+    // v3.2.20：原用月度Pending的规则按钮，模块下线后改用资金对账的链接表管理按钮验证静态点击只绑定一次。
+    await js(`(async()=>{await setCurrentModule('bank-statement-process',{persist:false}).ready;})()`);
+    const listBefore = await js(`shellCalls.filter(call=>call.channel==='linked-table:list').length`);
+    await js(`document.getElementById('bankStatementLinkedTableBtn').click();`); await flush();
+    assert.equal(await js(`shellCalls.filter(call=>call.channel==='linked-table:list').length`), listBefore + 1);
     assert.equal(await js(`document.getElementById('modalRoot').children.length`), 1);
     await js(`modalHost.closeTop(); void 0;`);
     await clean();
@@ -241,11 +238,11 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     assert.equal(await js(`setCurrentModule('new-account-generator').status`),'blocked');
     assert.equal(await js(`getModuleRouter().getCurrentModuleId()`),'statement-generator');
     assert.equal(await js(`shellCalls.filter(call=>call.channel==='settings:set-enabled-modules').length`),1);
-    await js(`shellCabinetFinish({status:'ok',enabledModules:['new-account-generator','pending-reconciliation']});`); await flush();
+    await js(`shellCabinetFinish({status:'ok',enabledModules:['new-account-generator','vcc-op-calc']});`); await flush();
     assert.equal(await js(`getModuleRouter().getCurrentModuleId()`),'new-account-generator');
     assert.equal(await js(`document.getElementById('modalRoot').children.length`),0);
     assert.equal(await js(`document.getElementById('newAccountModulePanel').hidden`),false);
-    assert.deepEqual(await js(`state.enabledModules`),['new-account-generator','pending-reconciliation']);
+    assert.deepEqual(await js(`state.enabledModules`),['new-account-generator','vcc-op-calc']);
     assert.deepEqual(await js(`shellCalls.filter(call=>call.channel==='settings:set-current-module').at(-1).args`),['new-account-generator']);
     await clean();
   });
@@ -255,8 +252,6 @@ module.exports = async ({ js, load, reset, assert, test }) => {
       await setCurrentModule('new-account-generator',{persist:false}).ready;
       window.shellSavedUpdateListeners=[...(shellSubscriptions.get('app-update:status-changed')||[])];
       window.shellSavedMaxListeners=[...(shellSubscriptions.get('window:maximized-state')||[])];
-      window.shellSavedPendingListeners=[...(shellSubscriptions.get('pending:import:progress')||[])];
-      rendererPending.applyPreviewState({importing:true,importingText:'销毁前任务',currentYearMonth:'2026-09'});
       window.shellRowCount=document.querySelectorAll('[data-new-account-row]').length;
       window.shellDisposeCount=0;
       window.shellDisposeHandle=modalHost.openRoot(scope=>{
@@ -273,13 +268,12 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     assert.equal(await js(`shellRemoved.filter(channel=>channel==='app-update:status-changed').length`), 1);
     // Preload 所有订阅均返回清理函数；已排队的旧回调仍须通过 disposed 隔离。
     assert.deepEqual(await js(`Object.fromEntries([...shellSubscriptions].filter(([,listeners])=>listeners.size).map(([channel,listeners])=>[channel,listeners.size]))`), {});
-    const before = await js(`({calls:shellCalls.length,sends:shellSends.length,markup:document.body.innerHTML,pending:rendererPending.getSnapshot()})`);
+    const before = await js(`({calls:shellCalls.length,sends:shellSends.length,markup:document.body.innerHTML})`);
     await js(`
       for(const listener of shellSavedUpdateListeners)listener({}, {status:'downloaded',availableVersion:'99.0.0',version:'99.0.0'});
       for(const listener of shellSavedMaxListeners)listener({}, true);
-      for(const listener of shellSavedPendingListeners)listener({}, {type:'progress',file:'迟到.xlsx',rowsProcessed:999});
       document.getElementById('newAccountAddRowBtn').click();
-      document.getElementById('pendingRuleBtn').click();
+      document.getElementById('bankStatementLinkedTableBtn').click();
       document.getElementById('manageTemplateBtn').click();
       document.getElementById('toolboxBtn').click();
       document.getElementById('saveUserGuideBtn').click();
@@ -289,7 +283,7 @@ module.exports = async ({ js, load, reset, assert, test }) => {
       document.dispatchEvent(new Event('pointerdown',{bubbles:true}));
       configurationServices.acceptAccountMappingCount(999);
     `); await flush();
-    assert.deepEqual(await js(`({calls:shellCalls.length,sends:shellSends.length,markup:document.body.innerHTML,pending:rendererPending.getSnapshot()})`), before);
+    assert.deepEqual(await js(`({calls:shellCalls.length,sends:shellSends.length,markup:document.body.innerHTML})`), before);
     assert.equal(await js(`document.querySelectorAll('[data-new-account-row]').length===shellRowCount`), true);
     assert.equal(await js(`setCurrentModule('statement-generator').status`), 'disposed');
     assert.equal(await js(`document.getElementById('modalRoot').children.length`), 0);

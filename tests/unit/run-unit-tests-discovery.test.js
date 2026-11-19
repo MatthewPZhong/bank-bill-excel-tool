@@ -90,9 +90,9 @@ test('unit runner 分片参数格式不对时失败，不跑全部', t => {
   assert.match(result.stderr, /分片参数须为 i\/n/);
 });
 
-test('unit runner 单独运行的分片逐个运行文件，其余片沿用设定的并发数', t => {
+test('unit runner 各分片沿用设定的并发数', t => {
   const root = fixture(t);
-  for (const name of ['biz-op-v327-export-main', 'biz-op-v327-compute-main']) {
+  for (const name of ['shard-sample-a', 'shard-sample-b']) {
     const target = path.join(root, 'tests/unit/main-process', `${name}.test.js`);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, `require('node:test')('${name}', () => {});\n`);
@@ -105,7 +105,7 @@ test('unit runner 单独运行的分片逐个运行文件，其余片沿用设�
     return [parseTapSummary(result.stdout).tests, fs.readFileSync(logPath, 'utf8').match(/命令：(.+)/)[1]];
   });
   assert.deepEqual(commands, [
-    [2, 'node --test --test-concurrency=1 <2 个测试文件>'],
+    [2, 'node --test --test-concurrency=3 <2 个测试文件>'],
     [2, 'node --test --test-concurrency=3 <2 个测试文件>']
   ]);
 });

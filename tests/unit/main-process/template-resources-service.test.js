@@ -49,7 +49,7 @@ test('清单覆盖全部随包 Excel，且只纳管或明确未纳入一次；�
   const declared = [...new Set(TEMPLATE_RESOURCES.map((item) => item.path)), ...EXCLUDED_TEMPLATE_FILES.map((item) => item.path)].sort();
   assert.deepEqual(declared, packaged);
   assert.equal(new Set(TEMPLATE_RESOURCES.map((item) => item.id)).size, TEMPLATE_RESOURCES.length);
-  assert.equal(TEMPLATE_RESOURCES.length, 40);
+  assert.equal(TEMPLATE_RESOURCES.length, 35);
   // 银行对账单随包文件：重复入账匹配输出样式与导入识别结构（D18），各自独立版本。
   const shared = TEMPLATE_RESOURCES.filter((item) => TEMPLATE_RESOURCES.some((other) => other !== item && other.path === item.path));
   assert.deepEqual(shared.map((item) => item.id).sort(), ['bank-statement', 'bank-statement-input']);
@@ -131,11 +131,11 @@ test('合并单元格覆盖的行计入内容行数', async () => {
   assert.ok(rowsWithContent > 10);
 });
 
-test('可替换范围固定为 24 个有导入契约的模板（含平盘 5 张链接原始表、银行账单处理 4 张链接表、VCC 财务OP 5 张原表、流水对账单、银行对账单、单据对账与移除归档 Pending 的导入识别结构）', () => {
+test('可替换范围固定为 23 个有导入契约的模板（含平盘 5 张链接原始表、银行账单处理 4 张链接表、VCC 财务OP 5 张原表、流水对账单、银行对账单与单据对账的导入识别结构）', () => {
   assert.deepEqual(TEMPLATE_RESOURCES.filter((item) => item.replace.allowed).map((item) => item.id).sort(), [
     'bank-statement', 'bank-statement-input', 'doc-recon-unbalanced', 'dup-recall-mail', 'flow-statement', 'fund-type-enum', 'fx-delivery', 'gateway-recon',
     'position-bank', 'position-bank-accounts', 'position-gateway-raw-in', 'position-gateway-raw-out',
-    'position-payment-full', 'position-transfer-orders', 'prefund-unbalanced', 'refund-order', 'removed-pending',
+    'position-payment-full', 'position-transfer-orders', 'prefund-unbalanced', 'refund-order',
     'transfer-order', 'vcc-channel', 'vcc-fee-fx', 'vcc-pending-calc', 'vcc-recharge-refund', 'vcc-removed-pending',
     'vcc-system-op'
   ]);

@@ -5,7 +5,6 @@ const { runMemoryActivity, sealMemoryActivityInventory } = activity;
 // 迁移入口的重型工作分别由真实 phase 管理。控制/取消/分页查询不被重型
 // 屏障锁住；其他 IPC 默认视为增长未知，新增入口不会自动获得低内存并发资格。
 function ipcOwnsAdmission(channel, args) {
-  if (channel.startsWith('bizOpReconV327:')) return true;
   if (channel === 'toolbox:split:read') return args[0]?.version === 2;
   if (channel === 'toolbox:split:read-values' || channel === 'toolbox:split:cancel-read') return true;
   return channel === 'toolbox:split:export' && args[0]?.mode === 'rows';

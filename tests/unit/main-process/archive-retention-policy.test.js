@@ -39,10 +39,10 @@ test('模块未覆盖时默认永久，已保存旧值兼容且读取不写入',
   assert.equal(resolveRetentionDays(fixture().database, 'toolbox', 90), 90);
 });
 
-test('14 个模块独立覆盖，默认值修改不覆盖已设置模块，inherit 恢复动态继承', () => {
+test('10 个模块独立覆盖，默认值修改不覆盖已设置模块，inherit 恢复动态继承', () => {
   const { database, settings } = fixture([[ARCHIVE_RETENTION_SETTING_KEY, '90']]);
   const scopes = listVisibleArchiveScopes();
-  assert.equal(scopes.length, 14);
+  assert.equal(scopes.length, 10);
   for (const scope of scopes) {
     setModuleRetentionDays(database, { moduleId: scope.id, retentionDays: 30 });
   }
@@ -54,6 +54,16 @@ test('14 个模块独立覆盖，默认值修改不覆盖已设置模块，inher
   assert.equal(resolveRetentionDays(database, 'toolbox'), 180);
   assert.equal(Object.hasOwn(readRetentionDaysByModule(database), 'toolbox'), false);
   assert.equal(settings.get(ARCHIVE_RETENTION_SETTING_KEY), '180');
+});
+
+test('v3.2.20 已下线模块的保留期设置不展示，修改其他模块时原样保留', () => {
+  const stored = { 'biz-op-recon': 30, 'pending-reconciliation': null, toolbox: 60, 'unknown-module': 90 };
+  const { database, settings } = fixture([[ARCHIVE_MODULE_RETENTION_SETTING_KEY, JSON.stringify(stored)]]);
+  assert.deepEqual(readRetentionDaysByModule(database), { toolbox: 60 });
+  assert.throws(() => setModuleRetentionDays(database, { moduleId: 'biz-op-recon', retentionDays: 90 }), /有效的存档模块/);
+  setModuleRetentionDays(database, { moduleId: 'toolbox', retentionDays: 90 });
+  assert.deepEqual(JSON.parse(settings.get(ARCHIVE_MODULE_RETENTION_SETTING_KEY)),
+    { toolbox: 90, 'biz-op-recon': 30, 'pending-reconciliation': null });
 });
 
 test('code 和附属别名归属 canonical 模块，不生成独立设置行', () => {

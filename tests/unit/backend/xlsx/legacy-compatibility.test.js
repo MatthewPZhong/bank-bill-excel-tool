@@ -2,17 +2,32 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const JSZip = require('jszip');
 const legacy = require('../../../../src/backend/xlsx/legacy/streaming-xlsx-reader');
 const rich = require('../../../../src/backend/xlsx/rich-workbook');
 const { NS, writeFixture } = require('../../../helpers/shared-xlsx-fixture');
 
-test('legacy 兼容旧入口转发同一导出对象与函数', () => {
-  const previous = require('../../../../src/backend/pending-import/streaming-xlsx-reader');
-  assert.equal(previous, legacy);
-  for (const key of Object.keys(previous)) assert.equal(previous[key], legacy[key], key);
-  assert.equal(require('../../../../src/backend/pending-import/xlsx-size-preflight'),
-    require('../../../../src/backend/xlsx/legacy/entry-size-preflight'));
+// v3.2.20 起 pending-import 旧兼容入口随「月度Pending数据核对」下线删除（architecture/boundaries.json 标为 retired）；
+//   这里作为全仓引用清点证据：src / scripts / tests 中不得再出现指向这两个旧入口的 require。
+test('已退役的 pending-import 兼容入口已删除且全仓无 require 残留', () => {
+  const root = path.resolve(__dirname, '../../../..');
+  const retired = ['src/backend/pending-import/streaming-xlsx-reader.js', 'src/backend/pending-import/xlsx-size-preflight.js'];
+  for (const relative of retired) assert.equal(fs.existsSync(path.join(root, relative)), false, relative);
+  const pattern = /require\(\s*['"][^'"]*pending-import\/(?:streaming-xlsx-reader|xlsx-size-preflight)['"]\s*\)/;
+  const offenders = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith('.js') && pattern.test(fs.readFileSync(full, 'utf8'))) offenders.push(path.relative(root, full));
+    }
+  };
+  for (const dir of ['src', 'scripts', 'tests']) walk(path.join(root, dir));
+  assert.deepEqual(offenders, []);
+  assert.equal(typeof legacy.readXlsxStreamed, 'function');
 });
 
 test('legacy 冻结行顺序、连续一基回调行号、列宽和 inline/escape 行值', async (t) => {

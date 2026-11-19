@@ -3392,221 +3392,6 @@ tr.add-row .text-action:hover { background: var(--primary-soft, #c2d7fa); }
   max-width: 292px;
   transform: translateX(59px);
 }
-.pending-board .pending-status {
-  width: 100%;
-  max-width: 360px;
-  min-height: 110px;
-  padding: 16px 20px;
-  border-radius: 18px;
-  border: 1px solid rgba(30,142,62,.28);
-  background: var(--success-soft, #e6f4ea);
-  color: var(--success);
-  font-size: 13px; line-height: 1.6;
-  text-align: left;
-  display: flex; align-items: center;
-}
-
-/* Pending rule dialog — 两列规则 */
-.pending-rule-card { width: min(100%, 640px); }
-.pending-rule-card .dialog-header { padding-bottom: 14px; }
-.pending-rule-body {
-  padding: 18px 28px 10px;
-  display: grid; grid-template-columns: 1fr 1fr; gap: 24px 32px;
-}
-.pending-rule-col-header {
-  grid-column: span 1;
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  font-size: 13px; color: var(--muted); font-weight: 500;
-  margin-bottom: -8px;
-}
-.pending-rule-col-header .hint-icon {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 16px; height: 16px; border-radius: 50%;
-  background: var(--chip-bg); color: var(--muted);
-  font-size: 11px;
-}
-.pending-rule-row {
-  display: grid;
-  grid-template-columns: 24px 1fr auto;
-  align-items: center; gap: 10px;
-}
-.pending-rule-index {
-  font-size: 13px; color: var(--muted); text-align: right;
-}
-.pending-rule-select {
-  height: 40px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--line);
-  background: var(--panel, #fff);
-  padding: 0 34px 0 14px;
-  font-size: 14px; color: var(--text);
-  appearance: none;
-  background-image: var(--select-arrow);
-  background-size: 12px;
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-}
-.pending-rule-action {
-  font-size: 13px;
-  background: none; border: none; cursor: pointer;
-  padding: 6px 6px;
-}
-.pending-rule-action.add { color: var(--danger); }
-.pending-rule-action.remove { color: var(--danger); }
-.pending-rule-action:hover { text-decoration: underline; }
-
-/* Pending rule confirm — tight alert */
-.pending-rule-confirm-card { width: min(100%, 440px); }
-.pending-rule-confirm-card .dialog-header {
-  padding: 24px 28px 8px;
-  border-bottom: none;
-  justify-content: center;
-}
-.pending-rule-confirm-card .dialog-title {
-  font-size: 16px; font-weight: 600;
-  letter-spacing: 0;
-}
-.pending-rule-confirm-body {
-  padding: 8px 28px 18px;
-  display: flex; flex-direction: column; gap: 6px;
-  text-align: center;
-  font-size: 14px; color: var(--text);
-  line-height: 1.6;
-}
-.pending-rule-confirm-card .dialog-actions {
-  justify-content: center;
-  border-top: none;
-  background: transparent;
-  padding-top: 4px;
-  padding-bottom: 22px;
-}
-.pending-rule-confirm-card .danger-btn.small {
-  background: var(--danger, #a1382f);
-}
-.pending-rule-confirm-card .danger-btn.small:hover { background: var(--danger, #8d2e27); }
-
-/* Pending import month — tiny year/month picker */
-.pending-import-month-card { width: min(100%, 380px); }
-.pending-import-month-card .dialog-header {
-  padding: 20px 24px 8px;
-  border-bottom: none;
-}
-.pending-import-month-card .dialog-title {
-  font-size: 15px; font-weight: 600; letter-spacing: 0;
-}
-.pending-import-month-form {
-  padding: 4px 24px 12px;
-  display: flex; gap: 10px;
-}
-.pending-import-month-form .pending-rule-select { flex: 1; }
-.pending-import-month-card .dialog-actions {
-  justify-content: flex-start;
-  border-top: none;
-  background: transparent;
-  padding: 6px 24px 20px;
-  gap: 10px;
-}
-
-/* Pending reconcile — two-month selector */
-.pending-reconcile-card { width: min(100%, 680px); }
-.pending-reconcile-card .dialog-header {
-  padding: 22px 28px 6px;
-  border-bottom: none;
-}
-.pending-reconcile-card .dialog-title {
-  font-size: 15px; font-weight: 600; letter-spacing: 0;
-}
-.pending-reconcile-form {
-  padding: 12px 28px 8px;
-  display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px;
-}
-.pending-reconcile-label {
-  font-size: 13px; color: var(--muted);
-  text-align: center;
-}
-.pending-reconcile-select {
-  height: 44px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--line);
-  background: var(--panel, #fff);
-  padding: 0 34px 0 14px;
-  font-size: 14px; color: var(--text);
-  appearance: none;
-  background-image: var(--select-arrow);
-  background-size: 12px;
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-}
-.pending-reconcile-card .dialog-actions {
-  justify-content: center;
-  border-top: none;
-  background: transparent;
-  padding-top: 8px;
-}
-
-/* Pending export runs — radio + run select */
-.pending-export-runs-card { width: min(100%, 620px); }
-.pending-export-runs-card .dialog-header {
-  padding: 20px 28px 8px;
-  border-bottom: none;
-}
-.pending-export-runs-card .dialog-title {
-  font-size: 15px; font-weight: 600; letter-spacing: 0;
-}
-.pending-export-runs-body {
-  padding: 8px 28px 12px;
-  display: flex; flex-direction: column; gap: 14px;
-}
-.pending-export-runs-option {
-  display: grid;
-  grid-template-columns: 22px auto 1fr;
-  align-items: center;
-  gap: 10px;
-}
-.pending-export-runs-option input[type="radio"] {
-  accent-color: var(--primary);
-  width: 16px; height: 16px;
-}
-.pending-export-runs-option .pending-rule-select { min-width: 160px; }
-.pending-export-runs-option .run-select {
-  height: 40px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--line);
-  background: var(--panel, #fff);
-  padding: 0 34px 0 14px;
-  font-size: 13px; color: var(--text);
-  appearance: none;
-  background-image: var(--select-arrow);
-  background-size: 12px;
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  text-overflow: ellipsis; white-space: nowrap; overflow: hidden;
-}
-.pending-export-runs-option .run-label {
-  font-size: 12px; color: var(--muted);
-  font-weight: 500;
-}
-.pending-export-runs-card .dialog-actions {
-  justify-content: flex-start;
-  border-top: none;
-  background: transparent;
-  padding: 6px 28px 20px;
-  gap: 12px;
-}
-
-/* =================== Pending status tones =================== */
-.pending-board .pending-status[data-tone="neutral"] {
-  background: var(--panel, #fff);
-  border-color: var(--line);
-  color: var(--text);
-  text-align: center;
-  justify-content: center;
-}
-.pending-board .pending-status[data-tone="error"] {
-  background: var(--danger-soft, #fdecec);
-  border-color: rgba(217,48,37,.32);
-  color: var(--danger, var(--danger, #c5221f));
-}
 
 /* Disabled buttons in pending-board need to feel "muted brown" like the screenshots
  * v2.0.0-beta.3 PR #32b：bank-statement-board 同款 */
@@ -4015,10 +3800,7 @@ tr.add-row .text-action:hover { background: var(--primary-soft, #c2d7fa); }
  * 命名错位 — 设计师 .pending-rule-card/.pending-rule-body 是另一套）。
  * 此处给 src 实际渲染的 class 加 Clear 风格规则（参考 line 868-913 的设计 token）。
  */
-.pending-rule-dialog {
-  width: min(100%, 720px);
-  padding: 24px 28px;
-}
+
 .pending-dialog-title {
   text-align: left;
   font-size: 18px;
@@ -4026,103 +3808,11 @@ tr.add-row .text-action:hover { background: var(--primary-soft, #c2d7fa); }
   color: var(--text);
   margin-bottom: 20px;
 }
-.pending-rule-columns {
-  display: flex;
-  gap: 32px;
-  justify-content: center;
-  align-items: flex-start;
-  margin-bottom: 24px;
-}
-.pending-rule-column {
-  flex: 1 1 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  min-width: 280px;
-}
-.pending-rule-column-header {
-  font-size: 13px;
-  color: var(--muted);
-  font-weight: 500;
-  margin-bottom: 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.pending-rule-header-tip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--chip-bg, var(--bg-soft, #eef2f6));
-  color: var(--muted);
-  font-size: 11px;
-  cursor: help;
-  user-select: none;
-  border: none;
-}
-.pending-rule-header-tip:hover { background: var(--bg-soft); }
-.pending-rule-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: 100%;
-  align-items: center;
-}
-.pending-rule-field-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.pending-rule-field-select {
-  width: 200px;
-  min-width: 200px;
-  max-width: 200px;
-  height: 40px;
-  border-radius: var(--radius-sm, 8px);
-  border: 1px solid var(--line);
-  background: var(--panel, #fff);
-  padding: 0 34px 0 14px;
-  font-size: 14px;
-  color: var(--text);
-  appearance: none;
-  background-image: var(--select-arrow);
-  background-size: 12px;
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-}
-.pending-rule-field-serial {
-  display: inline-block;
-  width: 24px;
-  text-align: right;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--muted);
-  user-select: none;
-}
-.pending-rule-field-btn {
-  background: none;
-  border: none;
-  color: var(--danger);
-  cursor: pointer;
-  font-size: 13px;
-  padding: 4px 6px;
-  border-radius: 6px;
-}
-.pending-rule-field-btn:hover { text-decoration: underline; }
-.pending-rule-field-btn[data-role="remove"] { color: var(--danger); }
+
 /* 对账内容列：header 居中对齐到 select 中心（沿用 General 视觉约定）*/
-.pending-rule-column-aligned { align-items: flex-start; }
-.pending-rule-column-aligned .pending-rule-column-header {
-  width: 200px;
-  justify-content: center;
-}
-.pending-rule-column-aligned .pending-rule-rows { align-items: flex-start; }
 
 /* Pending 导入月份 + 对账月份选择对话框（与规则同套设计语言）*/
-.pending-import-month-dialog { width: min(100%, 420px); padding: 24px 28px; }
+
 .pending-import-month-picker { margin-bottom: 20px; }
 .pending-reconcile-month-select {
   width: 100%;
@@ -4135,22 +3825,6 @@ tr.add-row .text-action:hover { background: var(--primary-soft, #c2d7fa); }
   font-size: 14px;
   color: var(--text);
 }
-
-/* Pending 导出月份范围对话框 */
-.pending-export-cols {
-  width: 720px;
-  margin: 2px 0 20px 22px;
-  gap: 60px;
-  justify-content: flex-start;
-  align-items: flex-end;
-}
-.pending-export-cols .pending-rule-column { align-items: flex-start; }
-.pending-export-cols .pending-rule-column-header { margin-bottom: 4px; }
-.pending-export-cols .pending-export-month-column { flex: 0 0 120px; min-width: 0; }
-.pending-export-cols .pending-export-run-column { flex: 1 1 auto; min-width: 0; }
-/* 取消 min-width 以防 select 撑爆 column 容器（与 General styles.css:2531 一致）*/
-.pending-export-cols .mapping-text-input,
-.pending-export-cols .pending-reconcile-month-select { min-width: 0; }
 
 /* Pending 模块主面板 status-box（D6.1：HTML 用 status-box class 沿用阶段 2，
  * Clear 风格下让其呈现成设计稿 .pending-status 的卡片样式）
@@ -5831,36 +5505,6 @@ select.mapping-text-input {
   gap: 8px;
 }
 
-/* v2.1.3-fix1：业务OP数据核对 BU 下拉栏（row1 左侧，label + select 与"模式"下拉一致样式）
-   - 容器只负责 flex + 间距；label 用 .select-label，select 用 .template-select
-   v2.1.3-fix2.1：左右边界对齐 row2 "导出差异" 按钮（.pending-board .cell.left .secondary-btn min-width:180px）
-   - 容器固定 width=180px → 与导出差异按钮同宽
-   v2.1.3-fix3：select 本身的左右边界 = "导出差异" 按钮左右边界（像素级对齐）
-   - 容器仍 180px（在 cell.left 内 justify-content:center 居中，与按钮列起点一致）
-   - label 用 position:absolute 浮到容器左外侧（right:100% + margin-right:8px）
-   - select-shell / select 各占容器 100%（= 180px），左右边界 = 容器边界 = 按钮边界 */
-.biz-op-recon-bu-row {
-  position: relative;
-  display: flex;
-  align-items: center;
-  width: 180px;
-}
-.biz-op-recon-bu-row .select-label {
-  position: absolute;
-  right: 100%;
-  margin-right: 8px;
-  top: 0;
-  height: 48px;
-  transform: none;
-  white-space: nowrap;
-}
-.biz-op-recon-bu-row .select-shell {
-  width: 100%;
-}
-.biz-op-recon-bu-row .template-select {
-  width: 100%;
-}
-
 /* v2.1.3-fix1.3：业务OP / 流水日期选择对话框 — 年月日同行 + 年宽 + 间距
    覆盖默认 .monthly-balance-time-picker grid 布局，改 flex 行排版 */
 .biz-op-recon-date-picker {
@@ -5873,19 +5517,9 @@ select.mapping-text-input {
   flex: 0 0 110px;
   width: 110px;
 }
-.biz-op-recon-date-picker .biz-op-recon-date-month,
-.biz-op-recon-date-picker .biz-op-recon-date-day {
+.biz-op-recon-date-picker .biz-op-recon-date-month {
   flex: 0 0 80px;
   width: 80px;
-}
-
-/* v2.1.3-fix1.5：业务OP数据核对状态框 — line-height 视觉保留
-   v2.1.7 round 6 C-1 fix（self-review 阻塞）：white-space 由 normal → pre-wrap，
-   与 R3 全局规则 .status-box-text { white-space: pre-wrap } 对齐，让中文「：」后 \n 真换行
-   （原 normal ID 选择器优先级高于全局 class，导致 R3 在 bizOpRecon 视觉不生效） */
-#bizOpReconStatusBox .status-box-text {
-  white-space: pre-wrap;
-  line-height: 1.5;
 }
 
 /* v2.1.4 T3：小助手功能收纳弹窗（Clear theme，index.html 实际加载的样式） */

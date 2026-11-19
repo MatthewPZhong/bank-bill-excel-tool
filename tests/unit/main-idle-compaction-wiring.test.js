@@ -20,52 +20,42 @@ function productionFunction(name) {
 
 const MINUTE = 60 * 1000;
 
-function idleTimerHarness({ acquiringThresholdMinutes, idleMinutes, accepted = true }) {
+// v3.2.20：收单单据币种校验下线，原「收单空闲清理先于主库整理」随之删除；空闲定时器先做链接表过期清理，再交给主库整理自行判断。
+function idleTimerHarness({ compactionError = null } = {}) {
   const events = [];
   let tick = null;
   const context = vm.createContext({
     idleCleanupTimer: null,
-    IDLE_CLEANUP_MS: 30 * MINUTE,
     IDLE_CHECK_INTERVAL_MS: 2 * MINUTE,
-    RUN_CHECK_WORKER_GRACE_MS: 30000,
-    lastUserActivityTs: Date.now() - idleMinutes * MINUTE,
-    runCheckWorkerPool: null,
-    database: { getAcquiringBillRawJsonRetentionDays: () => 7, db: {} },
-    loadIdleCleanupMsFromSettings() { context.IDLE_CLEANUP_MS = acquiringThresholdMinutes * MINUTE; },
-    setInterval(callback) { tick = callback; return { unref() {} }; },
+    setInterval(callback) { tick = callback; return { unref() { events.push('unref'); } }; },
     observeBackgroundMemoryActivity: (work) => work,
-    businessOperationRegistry: {
-      begin() { events.push('acquiring-begin'); return accepted ? { accepted: true, token: 1 } : { accepted: false }; },
-      end() { events.push('acquiring-end'); }
-    },
-    async triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded() { events.push('acquiring-cleanup'); },
-    clearStaleSuccessfulRawJson: () => ({ clearedCount: 0, elapsedMs: 0 }),
-    appendActivityLogEntry() {},
     idleLinkedTableRetention: { async maybeRun() { events.push('retention-check'); } },
-    idleDatabaseCompaction: { async maybeRun() { events.push('compaction-check'); } }
+    idleDatabaseCompaction: {
+      async maybeRun() {
+        events.push('compaction-check');
+        if (compactionError) throw compactionError;
+      }
+    }
   });
   vm.runInContext(productionFunction('setupIdleCleanupTimer'), context);
+  context.setupIdleCleanupTimer();
   context.setupIdleCleanupTimer();
   assert.equal(typeof tick, 'function');
   return { tick, events };
 }
 
-test('收单清理阈值设为 60 分钟、空闲 31 分钟：收单清理不跑，主库整理检查仍执行', async () => {
-  const { tick, events } = idleTimerHarness({ acquiringThresholdMinutes: 60, idleMinutes: 31 });
+test('空闲定时器只建一次，每次触发先做链接表过期清理，再交给主库整理自行判断', async () => {
+  const { tick, events } = idleTimerHarness();
+  assert.deepEqual(events, ['unref'], '重复调用不重复建定时器');
   await tick();
-  assert.deepEqual(events, ['acquiring-begin', 'acquiring-end', 'retention-check', 'compaction-check']);
+  await tick();
+  assert.deepEqual(events, ['unref', 'retention-check', 'compaction-check', 'retention-check', 'compaction-check']);
 });
 
-test('收单清理达到阈值时先完成并结束登记，再检查主库整理', async () => {
-  const { tick, events } = idleTimerHarness({ acquiringThresholdMinutes: 30, idleMinutes: 31 });
+test('主库整理检查抛错不逃出定时器回调', async () => {
+  const { tick, events } = idleTimerHarness({ compactionError: new Error('整理失败') });
   await tick();
-  assert.deepEqual(events, ['acquiring-begin', 'acquiring-cleanup', 'acquiring-end', 'retention-check', 'compaction-check']);
-});
-
-test('收单清理未获登记（其他任务进行中）时仍交给主库整理自行判断', async () => {
-  const { tick, events } = idleTimerHarness({ acquiringThresholdMinutes: 30, idleMinutes: 31, accepted: false });
-  await tick();
-  assert.deepEqual(events, ['acquiring-begin', 'retention-check', 'compaction-check']);
+  assert.deepEqual(events, ['unref', 'retention-check', 'compaction-check']);
 });
 
 function closeHarness({
@@ -151,25 +141,14 @@ test('升级准备期间仍阻止关闭；退出准备完成或无租约时放�
   assert.equal(idle.event.prevented, false);
 });
 
-test('整理准入：收单操作锁、收单后台清理、银行对账单锁或收单 worker 忙时都判为忙', () => {
-  const base = {
-    acquiringBillCurrencyOperationLock: { inFlight: false },
-    cleanupBackgroundInProgress: false,
-    bankStatementOperationLock: { inFlight: false },
-    runCheckWorkerPool: { isBusy: () => false }
-  };
+test('整理准入：银行对账单锁忙时判为忙（收单相关忙检查随模块下线删除）', () => {
   const reasonWith = (overrides) => {
-    const context = vm.createContext({ ...base, ...overrides });
+    const context = vm.createContext({ bankStatementOperationLock: { inFlight: false }, ...overrides });
     vm.runInContext(productionFunction('idleCompactionBusyReason'), context);
     return context.idleCompactionBusyReason();
   };
   assert.equal(reasonWith({}), '');
-  assert.equal(reasonWith({ acquiringBillCurrencyOperationLock: { inFlight: true } }), 'acquiring-operation-busy');
-  assert.equal(reasonWith({ cleanupBackgroundInProgress: true }), 'acquiring-operation-busy');
   assert.equal(reasonWith({ bankStatementOperationLock: { inFlight: true } }), 'bank-statement-operation-busy');
-  assert.equal(reasonWith({ runCheckWorkerPool: { isBusy: () => true } }), 'acquiring-worker-busy');
-  assert.equal(reasonWith({ runCheckWorkerPool: { isBusy: () => { throw new Error('状态未知'); } } }), 'acquiring-worker-status-unknown');
-  assert.equal(reasonWith({ runCheckWorkerPool: null }), '');
 });
 
 test('整理控制器接入生产准入函数', () => {

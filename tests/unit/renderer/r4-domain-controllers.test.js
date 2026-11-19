@@ -6,7 +6,6 @@ const { createModalDom } = require('../../helpers/modal-dom');
 const { createModalHost } = require('../../../src/renderer/modal-host');
 const { createModalBridge } = require('../../../src/renderer/modal-bridge');
 const { createPreFundController } = require('../../../src/renderer/controllers/pre-fund');
-const { createBankBuController } = require('../../../src/renderer/controllers/bank-bu');
 const { createDuplicateInboundController } = require('../../../src/renderer/controllers/duplicate-inbound');
 const { createVccOpCalcController } = require('../../../src/renderer/controllers/vcc-op-calc');
 
@@ -20,13 +19,12 @@ function deferred() {
 const domains = [
   { key: 'preFund', factory: createPreFundController, prefix: 'preFundReconciliation', owner: 'pre-fund-reconciliation',
     statusMethod: 'sessionStatus', ready: { status: 'ok', canRun: true, canExport: true }, empty: { status: 'ok', canRun: false, canExport: false }, command: 'importBank', operation: 'importBank' },
-  { key: 'bankBu', factory: createBankBuController, prefix: 'bankBuRecon', owner: 'bank-bu-recon',
-    statusMethod: 'listReadyMonths', ready: ['2026-08'], empty: [], command: 'run', operation: 'listReadyMonths' },
   { key: 'duplicateInbound', factory: createDuplicateInboundController, prefix: 'duplicateInboundMatch', owner: 'duplicate-inbound-match',
     statusMethod: 'sessionStatus', ready: { status: 'ok', canRun: true, canExport: true }, empty: { status: 'ok', canRun: false, canExport: false }, command: 'import', operation: 'importFiles' },
   { key: 'vccOpCalc', factory: createVccOpCalcController, prefix: 'vccOpCalc', owner: 'vcc-op-calc',
     statusMethod: 'listBalanceMonths', ready: ['2026-08'], empty: [], command: 'import', operation: 'pickFiles' }
 ];
+const domainOf = (key) => domains.find((item) => item.key === key);
 
 function harness(domain, overrides = {}) {
   const dom = createModalDom();
@@ -97,8 +95,7 @@ function harness(domain, overrides = {}) {
     return view.overlay;
   }
   for (const name of [
-    'createPreFundTempManagerDialog', 'createBankBuReconMonthPickerDialog', 'createBankBuReconFileImportPromptDialog',
-    'createBankBuReconReconcileDialog', 'createBankBuReconExportDialog', 'createVccOpCalcConfirmDialog',
+    'createPreFundTempManagerDialog', 'createVccOpCalcConfirmDialog',
     'createVccOpCalcComputeDialog', 'createVccOpCalcShowBalanceDialog'
   ]) ui[name] = (options) => dialog(name, options);
   const controller = domain.factory({ api, panel, ui });
@@ -192,7 +189,7 @@ for (const domain of domains) {
 }
 
 test('前置资金导出保留文件名和提醒，完成刷新不覆盖导出反馈', async () => {
-  const h = harness(domains[0], { export: async () => ({ status: 'ok', files: [{ fileName: 'A.xlsx' }, { fileName: 'B.xlsx' }], warnings: ['待核实渠道'] }) });
+  const h = harness(domainOf('preFund'), { export: async () => ({ status: 'ok', files: [{ fileName: 'A.xlsx' }, { fileName: 'B.xlsx' }], warnings: ['待核实渠道'] }) });
   await h.controller.enter();
   await h.controller.commands.export();
   assert.equal(h.status(), '已导出 2 个文件\nA.xlsx\nB.xlsx\n提醒：待核实渠道');
@@ -203,7 +200,7 @@ test('前置资金导出保留文件名和提醒，完成刷新不覆盖导出�
 
 test('前置资金临时账单导入保留部分失败对象和文案，场景参数原样送 Main', async () => {
   const result = { status: 'ok', results: [{ status: 'failed', fileName: '<bad>.xlsx', message: '列缺失' }] };
-  const h = harness(domains[0], { importMpt: async () => result, run: async () => ({ status: 'ok' }) });
+  const h = harness(domainOf('preFund'), { importMpt: async () => result, run: async () => ({ status: 'ok' }) });
   await h.controller.enter();
   assert.equal(await h.controller.commands.importMpt(), result);
   assert.match(h.views.at(-1).options.message, /部分文件导入失败（1 个）/);
@@ -214,7 +211,7 @@ test('前置资金临时账单导入保留部分失败对象和文案，场景�
 
 test('前置资金无 modal 后台导入允许离开，释放进度并丢弃晚到错误 UI', async () => {
   const importing = deferred();
-  const h = harness(domains[0], { importMpt: () => importing.promise });
+  const h = harness(domainOf('preFund'), { importMpt: () => importing.promise });
   await h.controller.enter();
   const waiting = h.controller.commands.importMpt();
   const lateProgress = h.progress.get('onImportProgress');
@@ -231,7 +228,7 @@ test('前置资金无 modal 后台导入允许离开，释放进度并丢弃晚�
 });
 
 test('重复入金导出保留警告与失败细节，按 Main 状态更新按钮', async () => {
-  const h = harness(domains[2], { export: async () => ({ status: 'success', filePath: '/test/result.xlsx', warnings: ['匹配待复核'] }) });
+  const h = harness(domainOf('duplicateInbound'), { export: async () => ({ status: 'success', filePath: '/test/result.xlsx', warnings: ['匹配待复核'] }) });
   await h.controller.enter();
   await h.controller.commands.export();
   assert.equal(h.status(), '文件已生成：/test/result.xlsx\n警告：匹配待复核');
@@ -245,7 +242,7 @@ test('重复入金导出保留警告与失败细节，按 Main 状态更新按�
 
 test('重复入金后台任务离开后不续读、不写 UI；重新进入从 Main 刷新', async () => {
   const importing = deferred();
-  const h = harness(domains[2], { importFiles: () => importing.promise });
+  const h = harness(domainOf('duplicateInbound'), { importFiles: () => importing.promise });
   await h.controller.enter();
   const waiting = h.controller.commands.import();
   const lateProgress = h.progress.get('onImportProgress');
@@ -262,51 +259,8 @@ test('重复入金后台任务离开后不续读、不写 UI；重新进入从 M
   assert.equal(h.node('ImportBtn').disabled, false);
 });
 
-test('BankBU 两步选文件和导入保持原参数；完成摘要/异常组文案不变', async () => {
-  const h = harness(domains[1]);
-  await h.controller.enter();
-  await h.controller.commands.import();
-  await h.confirm(h.views.at(-1), '2026-08');
-  assert.equal(h.views.at(-1).options.title, '请导入 Pending 数据管理文件');
-  await h.confirm(h.views.at(-1));
-  assert.equal(h.views.at(-1).options.title, '请导入银行对账单文件');
-  await h.confirm(h.views.at(-1));
-  assert.deepEqual(h.calls.find((call) => call.name === 'runImport').args, [{ yearMonth: '2026-08', pendingPath: '/test/pending.xlsx', bankPath: '/test/bank.xlsx' }]);
-  assert.match(h.status(), /Pending 20 行 \/ 银行对账单 30 行/);
-  await h.controller.commands.run();
-  await h.confirm(h.views.at(-1), '2026-08');
-  assert.match(h.status(), /BU 差异 1 行.*N:M 异常 4 组/);
-});
-
-test('BankBU 导出 single/aggregate 保持 runId、文件名及跳过月份提示', async () => {
-  const h = harness(domains[1]);
-  await h.controller.enter();
-  await h.controller.commands.export();
-  await h.confirm(h.views.at(-1), { scope: 'single', yearMonth: '2026-08', runId: 77 });
-  assert.deepEqual(h.calls.find((call) => call.name === 'exportSingle').args, [{ runId: 77, savePath: '/test/result.xlsx' }]);
-  assert.match(h.calls.find((call) => call.name === 'pickSavePath').args[0].defaultFileName, /^月度银行对账单BU回填校验_202608_\d{8}T\d{6}\.xlsx$/);
-  await h.controller.commands.export();
-  await h.confirm(h.views.at(-1), { scope: 'aggregate' });
-  assert.match(h.views.at(-1).options.message, /1 个月份.*2026-07/);
-  assert.equal(h.status(), '差异表已生成：/test/result.xlsx');
-});
-
-test('BankBU 离开后旧文件选择不打开第二步骤或启动导入', async () => {
-  const pending = deferred();
-  const h = harness(domains[1], { pickPendingFile: () => pending.promise });
-  await h.controller.enter();
-  await h.controller.commands.import();
-  await h.confirm(h.views.at(-1), '2026-08');
-  const waiting = h.confirm(h.views.at(-1));
-  h.controller.leave();
-  pending.resolve({ status: 'success', filePath: '/test/pending.xlsx' });
-  await waiting;
-  assert.equal(h.views.length, 2);
-  assert.equal(h.calls.some((call) => call.name === 'pickBankFile' || call.name === 'runImport'), false);
-});
-
 test('VCC OP scan→F1→统计→F2 保存保持金额原样、结果文案和余额读取', async () => {
-  const h = harness(domains[3], { pickFiles: async () => ({ status: 'success', filePaths: ['/test/a.xlsx'] }) });
+  const h = harness(domainOf('vccOpCalc'), { pickFiles: async () => ({ status: 'success', filePaths: ['/test/a.xlsx'] }) });
   await h.controller.enter();
   await h.controller.commands.import();
   assert.equal(h.views.at(-1).name, 'createVccOpCalcConfirmDialog');
@@ -325,7 +279,7 @@ test('VCC OP scan→F1→统计→F2 保存保持金额原样、结果文案和�
 
 test('VCC OP 整批拒绝仍报告真实异常总数和前20条，不统计或保存', async () => {
   const errorRows = Array.from({ length: 25 }, (_, i) => ({ fileName: 'A.xlsx', rowIndex: i + 1, reason: '异常' }));
-  const h = harness(domains[3], {
+  const h = harness(domainOf('vccOpCalc'), {
     pickFiles: async () => ({ status: 'success', filePaths: ['/test/a.xlsx'] }),
     scan: async () => ({ status: 'rejected', errorCount: 350, errorRows })
   });
@@ -341,7 +295,7 @@ test('VCC OP 整批拒绝仍报告真实异常总数和前20条，不统计或�
 
 test('VCC OP scan 等待中离开立即退订，晚到不显示 F1；dispose 的忙碌视图也收尾', async () => {
   const scanning = deferred();
-  const h = harness(domains[3], { pickFiles: async () => ({ status: 'success', filePaths: ['/test/a.xlsx'] }), scan: () => scanning.promise });
+  const h = harness(domainOf('vccOpCalc'), { pickFiles: async () => ({ status: 'success', filePaths: ['/test/a.xlsx'] }), scan: () => scanning.promise });
   await h.controller.enter();
   const waiting = h.controller.commands.import();
   await Promise.resolve();
@@ -364,7 +318,7 @@ test('VCC OP scan 等待中离开立即退订，晚到不显示 F1；dispose 的
   assert.equal(h.calls.length, before);
 });
 
-for (const domain of [domains[0], domains[2]]) {
+for (const domain of [domainOf('preFund'), domainOf('duplicateInbound')]) {
   test(`${domain.key} 返回早于后台完成时通过新的 Main 读取恢复按钮，旧结果不进入新页面`, async () => {
     const background = deferred();
     let reads = 0;

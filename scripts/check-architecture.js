@@ -91,7 +91,8 @@ function check(options, env = process.env) {
     coverage: {
       ...(scanned.coverage || {}),
       pendingBoundaries: result.pendingBoundaries || [],
-      partialBoundaries: result.partialBoundaries || []
+      partialBoundaries: result.partialBoundaries || [],
+      retiredBoundaries: result.retiredBoundaries || []
     },
     violations,
     matchedExceptions: result.matchedExceptions || [],
@@ -109,7 +110,7 @@ function formatSummary(report, exitCode) {
   const count = (value) => Array.isArray(value) ? value.length : value ?? 0;
   const lines = [
     `架构检查：${exitCode === 0 ? '通过' : '失败'}；解析 ${c.parsedFiles ?? '?'}/${c.scannedFiles ?? '?'} 文件；字面量本地边 ${c.literalEdges ?? '?'}；worker 边 ${c.workerEdges ?? 0}；global 边 ${c.globalEdges ?? 0}。`,
-    `覆盖：未解析 ${count(c.unresolved)}；动态位置 ${count(c.dynamicSites)}；active ${report.activeBoundaries.length}；pending ${count(c.pendingBoundaries)}；partial ${count(c.partialBoundaries)}。`,
+    `覆盖：未解析 ${count(c.unresolved)}；动态位置 ${count(c.dynamicSites)}；active ${report.activeBoundaries.length}；pending ${count(c.pendingBoundaries)}；partial ${count(c.partialBoundaries)}；retired ${count(c.retiredBoundaries)}。`,
     `历史：对比 ${report.policyComparedWith}；检查 ${report.policyHistory?.commitsExamined ?? '?'} 个提交；修复绑定 ${report.policyHistory?.historyRepairsApplied?.length ?? 0}。`
   ];
   for (const repair of report.policyHistory?.historyRepairsApplied || []) {

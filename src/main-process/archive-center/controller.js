@@ -5,6 +5,8 @@ const { assertTerminalRouteRegistry, createTerminalRouteRegistry } = require('./
 const EMPTY_TERMINAL_ROUTE_REGISTRY = createTerminalRouteRegistry([]);
 const path = require('node:path');
 const { stableSerialize } = require('../../backend/database/archive-terminal-completion');
+const { isRetiredModuleId } = require('../../backend/database/retired-modules');
+const { isPublicationOnlyFileTask } = require('../toolbox-archive-recovery');
 const {
   outboxBatchId,
   parseOutboxBatchId
@@ -124,6 +126,25 @@ function normalizeTerminalOutcome(value, terminalRouteRegistry) {
     metadata: { ...metadata },
     ...(afterTerminal ? { afterTerminal } : {})
   };
+}
+
+// v3.2.20（spec D6）：已下线模块 publication-only 导出的恢复追加意图——启动恢复为旧版遗留的 committed 发布
+//   （无 _fileManifest 的旧格式批次）写入，随即重放并校验接管。它是同一恢复流程的一步，不是旧版现场：
+//   与 manifest 批次直接收口、旧版重启时的处理一致，照常重放；跳过会使接管校验失败并阻止启动。
+function isRetiredPublicationAppendIntent(payload, persistedOwner) {
+  const terminalMetadata = payload && payload.terminalOutcome && payload.terminalOutcome.metadata;
+  return !persistedOwner
+    && Boolean(payload.targetBatchId)
+    && isPublicationOnlyFileTask({ taskKey: payload.sourceOperation, moduleId: payload.moduleId })
+    && Boolean(terminalMetadata && terminalMetadata.recoveredToolboxPublication === true);
+}
+
+// v3.2.20：outbox 通知所属模块（operation / file-batch owner，或无 owner 的旧格式 payload.moduleId）已下线。
+function isRetiredOutboxRecord(payload, persistedOwner) {
+  if (persistedOwner && persistedOwner.kind === 'operation') return isRetiredModuleId(persistedOwner.operationContext.moduleId);
+  if (persistedOwner && persistedOwner.kind === 'file-batch') return isRetiredModuleId(persistedOwner.batchContext.moduleId);
+  return !persistedOwner && isRetiredModuleId(payload && payload.moduleId)
+    && !isRetiredPublicationAppendIntent(payload, persistedOwner);
 }
 
 class ArchiveCenterController {
@@ -486,11 +507,18 @@ class ArchiveCenterController {
     const records = this.outboxStore.list();
     let flushed = 0;
     let discarded = 0;
+    const retainedRetiredIds = new Set();
     for (const record of records) {
       const payload = record && record.payload ? record.payload : {};
       const persistedOwner = payload.owner
         ? freezePersistedTaskOwner(payload.owner, { required: true })
         : null;
+      // v3.2.20：已下线模块的终态通知是旧版现场：不写其 Task Run 终态、不执行业务收尾、不删除通知，
+      //   原样留给回退旧版重放；也不计入待重试数量，避免阻断存档中心初始化。
+      if (isRetiredOutboxRecord(payload, persistedOwner)) {
+        retainedRetiredIds.add(record.id);
+        continue;
+      }
       if (persistedOwner && persistedOwner.kind === 'operation') {
         const terminalOutcome = normalizeTerminalOutcome(payload.terminalOutcome, this.terminalRouteRegistry);
         const terminalResult = await this._replayOperationTerminal(
@@ -709,7 +737,12 @@ class ArchiveCenterController {
         }
       }
     }
-    return { flushed, discarded, remaining: this.outboxStore.list().length };
+    if (retainedRetiredIds.size && !this._retiredOutboxReported) {
+      this._retiredOutboxReported = true;
+      this._warn('已下线模块的存档 outbox 通知原样保留', `共 ${retainedRetiredIds.size} 条，留给回退旧版处理`);
+    }
+    const remaining = this.outboxStore.list().filter((item) => !retainedRetiredIds.has(item.id)).length;
+    return { flushed, discarded, remaining };
   }
 
   async _replayTaskTerminal(batchId, terminalOutcome) {
@@ -1821,9 +1854,23 @@ class ArchiveCenterController {
     };
   }
 
+  // v3.2.20：公共附件入口按附件编号访问，须与批次可见性一致：已下线模块的附件不可打开或另存（内部恢复、清理仍走原始查询）。
+  _retiredArtifactFailure(fileRefId) {
+    let batch = null;
+    try {
+      const artifact = this.service.repository.getArtifact(Number(fileRefId));
+      batch = artifact ? this.service.repository.getBatch(artifact.batchId) : null;
+    } catch (_error) {
+      return null; // 编号非法等情况交由原入口按既有方式报错。
+    }
+    return batch && isRetiredModuleId(batch.moduleId) ? publicFailure(null, '存档文件不存在') : null;
+  }
+
   async openFile(fileRefId) {
     const maintenance = this._storageMaintenanceFailure('打开存档文件');
     if (maintenance) return maintenance;
+    const retired = this._retiredArtifactFailure(fileRefId);
+    if (retired) return retired;
     const result = await this.service.openReadonlyCopy(Number(fileRefId));
     if (!result || result.ok === false) return publicFailure(result, '打开只读副本失败');
     return { status: 'success', message: '已打开只读副本' };
@@ -1832,6 +1879,8 @@ class ArchiveCenterController {
   async saveAs(fileRefId) {
     const maintenance = this._storageMaintenanceFailure('另存存档文件');
     if (maintenance) return maintenance;
+    const retired = this._retiredArtifactFailure(fileRefId);
+    if (retired) return retired;
     const artifact = this.service.repository.getArtifact(Number(fileRefId));
     if (!artifact) return publicFailure(null, '存档文件不存在');
     if (typeof this.showSaveDialog !== 'function') {
@@ -1945,7 +1994,17 @@ class ArchiveCenterController {
       throw error;
     }
     if (this.outboxStore) {
-      const records = this.outboxStore.list();
+      // v3.2.20：已下线模块原样保留的 outbox 通知留给回退旧版，不阻止其余模块的到期清理。
+      const records = this.outboxStore.list().filter((record) => {
+        const payload = record && record.payload ? record.payload : {};
+        let owner = null;
+        try {
+          owner = payload.owner ? freezePersistedTaskOwner(payload.owner, { required: true }) : null;
+        } catch (_error) {
+          return true;
+        }
+        return !isRetiredOutboxRecord(payload, owner);
+      });
       if (records.length > 0) {
         const error = new Error('存档 outbox owner intent 尚未收口');
         error.code = 'ARCHIVE_RETENTION_OUTBOX_PENDING';

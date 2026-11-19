@@ -40,62 +40,24 @@ function findTestFiles(dir) {
   return out.sort();
 }
 
-// v3.2.15 B43：依次单独运行的分片。每组占一片（第 1、2、3 片），组内文件逐个运行（--test-concurrency=1），
-//   不与其他测试文件同时运行。
-//   - 业务OP文件起真实 Main 子进程，并依赖固定期限：协作取消 5 秒、子进程 30/45 秒、DELETE_ASSOCIATED 恢复 70 秒。
-//     同机有其他测试同时运行时，曾多次超时：
-//       - Node 原生 3 片时：delete-main、compute-main；
-//       - 按耗时均衡时：compute-main CANCEL_TIMEOUT（run 42136603684）、export-main 子进程 45 秒超时（run 42139917224）。
-//     每片的测试量与能否通过没有稳定关系，单独运行才能避免。5 秒等期限是产品策略，不为测试放宽。
-//   - biz-op-v327.test.js 单文件约 14 分钟（1024/128/32 个真实 Task 来源的扫描用例约 13 分钟），是所在片的下限。
-//     node --test 按路径排序启动文件，与其他文件同片时它要等前面的文件让出位置才开始（run 42090975671 该片 36 分钟），
-//     所以单独一片。
-const SERIAL_UNIT_SHARDS = Object.freeze([
-  Object.freeze(['tests/unit/main-process/biz-op-v327.test.js']),
-  Object.freeze([
-    'tests/unit/main-process/biz-op-v327-archive-owner-backfill.test.js',
-    'tests/unit/main-process/biz-op-v327-ipc.test.js'
-  ]),
-  Object.freeze([
-    'tests/unit/main-process/biz-op-v327-export-main.test.js',
-    'tests/unit/main-process/biz-op-v327-compute-main.test.js',
-    'tests/unit/main-process/biz-op-v327-delete-main.test.js'
-  ])
-]);
 // 各文件的实测分钟数：run 42086209141（5 片全部通过）的顶层用例耗时按源文件汇总，列出不少于 1 分钟的文件。
 //   未列出的文件按 DEFAULT_UNIT_FILE_MINUTES（其余 591 个文件的平均值）计。测试增删后耗时有偏差时按新的 CI 实测更新。
 const UNIT_FILE_MINUTES = Object.freeze({
-  'tests/unit/main-process/biz-op-v327.test.js': 14.4,
-  'tests/unit/main-process/biz-op-v327-archive-owner-backfill.test.js': 11.9,
   'tests/unit/scripts/v3-2-4-release-evidence.test.js': 7.9,
-  'tests/unit/main-process/biz-op-v327-archive-owner-completion.test.js': 7.4,
-  'tests/unit/main-process/biz-op-v327-export-main.test.js': 5.0,
-  'tests/unit/main-process/biz-op-v327-compute-main.test.js': 4.7,
-  'tests/unit/main-process/biz-op-v327-delete-main.test.js': 4.1,
   'tests/unit/main-process/archive-permanent-delete.test.js': 3.7,
   'tests/unit/main-process/position-reconciliation-service.test.js': 2.9,
   'tests/unit/main-process/vcc-financial-op-result-workbook.test.js': 2.8,
-  'tests/unit/main-process/biz-op-v327-ipc.test.js': 2.8,
-  'tests/unit/scripts/v3-2-2-release-evidence.test.js': 2.7,
   'tests/unit/scripts/v3-2-3-release-evidence.test.js': 2.7,
-  'tests/unit/main-process/biz-op-v327-publication-owner.test.js': 2.7,
-  'tests/unit/main-process/biz-op-v327-upgrade.test.js': 2.6,
   'tests/unit/architecture/policy-history.test.js': 2.3,
-  'tests/unit/main-process/biz-op-v327-low-memory.test.js': 2.2,
   'tests/unit/backend/vcc-financial-op/result-write.test.js': 2.1,
   'tests/unit/main-process/template-resources-versions.test.js': 2.0,
   'tests/unit/backend/position-reconciliation-import-preflight.test.js': 1.9,
-  'tests/unit/backend/acquiring-bill-currency-db/raw-json-retention.test.js': 1.8,
   'tests/unit/backend/vcc-financial-op/destructive-write.test.js': 1.8,
   'tests/unit/main-process/duplicate-inbound-match/paired-parser-e07-c.test.js': 1.7,
-  'tests/unit/main-process/biz-op-v327-import-main.test.js': 1.6,
   'tests/unit/main-process/vcc-financial-op-review-ipc.test.js': 1.5,
-  'tests/unit/main-process/biz-op-v327-export-sst.test.js': 1.5,
   'tests/unit/main-process/vcc-financial-op-single-writer-e12-a.test.js': 1.4,
   'tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js': 1.4,
   'tests/unit/main-process/vcc-financial-op-review-export.test.js': 1.3,
-  'tests/unit/main-process/biz-op-v327-export.test.js': 1.3,
-  'tests/unit/main-process/biz-op-v327-startup-resource-recovery.test.js': 1.1,
   'tests/unit/backend/vcc-financial-op/storage-contract-v3.test.js': 1.1,
   'tests/unit/architecture/release-renderer-policy.test.js': 1.1,
   'tests/unit/main-process/archive-position-fileplan-delete.test.js': 1.0
@@ -108,28 +70,20 @@ function unitFileMinutes(file) {
   return UNIT_FILE_MINUTES[file] ?? DEFAULT_UNIT_FILE_MINUTES;
 }
 
-// files：仓库相对路径（/ 分隔）。返回本片文件（按路径排序）及是否依次单独运行；各片合起来恰好是全部文件。
-//   1. 现有文件涉及的 SERIAL_UNIT_SHARDS 各组依次占前几片，组内文件逐个运行；
-//   2. 其余文件按实测分钟数从长到短（同耗时按路径），每个放进其余片中当前估算分钟数最少的一片（同为最少时取序号小的）。
-//   片数不够时报错，不把单独运行的文件和其他文件混在一片。
+// files：仓库相对路径（/ 分隔）。返回本片文件（按路径排序）；各片合起来恰好是全部文件。
+//   文件按实测分钟数从长到短（同耗时按路径），每个放进当前估算分钟数最少的一片（同为最少时取序号小的）。
+//   v3.2.20 业务OP数据核对下线后，原「带期限的业务OP文件依次单独占片」机制随之删除。
 function planShard(files, shard) {
   const sorted = [...files].sort();
-  if (!shard) return { files: sorted, serial: false };
-  const present = new Set(sorted);
-  const groups = SERIAL_UNIT_SHARDS.map((group) => group.filter((file) => present.has(file))).filter((group) => group.length > 0);
-  if (groups.length >= shard.total) {
-    throw new RangeError(`单独运行的文件需要 ${groups.length} 片，另需至少 1 片运行其余文件；当前共 ${shard.total} 片`);
-  }
-  if (shard.index <= groups.length) return { files: [...groups[shard.index - 1]].sort(), serial: true };
-  const grouped = new Set(groups.flat());
+  if (!shard) return { files: sorted };
   const byMinutesDesc = (a, b) => unitFileMinutes(b) - unitFileMinutes(a) || (a < b ? -1 : a > b ? 1 : 0);
-  const rest = Array.from({ length: shard.total - groups.length }, () => ({ files: [], minutes: 0 }));
-  for (const file of sorted.filter((item) => !grouped.has(item)).sort(byMinutesDesc)) {
-    const target = rest.reduce((best, item) => (item.minutes < best.minutes ? item : best));
+  const shards = Array.from({ length: shard.total }, () => ({ files: [], minutes: 0 }));
+  for (const file of [...sorted].sort(byMinutesDesc)) {
+    const target = shards.reduce((best, item) => (item.minutes < best.minutes ? item : best));
     target.files.push(file);
     target.minutes += unitFileMinutes(file);
   }
-  return { files: rest[shard.index - groups.length - 1].files.sort(), serial: false };
+  return { files: shards[shard.index - 1].files.sort() };
 }
 
 function selectShardFiles(files, shard) {
@@ -234,7 +188,7 @@ function main() {
     // 分片：传本片的文件清单（仓库相对路径，不经 shell）。
     const relativeFiles = files.map((file) => path.relative(REPO_ROOT, file).split(path.sep).join('/'));
     const plan = planShard(relativeFiles, shard);
-    args = buildNodeTestArgs(plan.files.map((file) => path.join(REPO_ROOT, file)), { coverage, concurrency: plan.serial ? 1 : concurrency });
+    args = buildNodeTestArgs(plan.files.map((file) => path.join(REPO_ROOT, file)), { coverage, concurrency });
     const commandChars = args.reduce((sum, arg) => sum + arg.length + 1, process.execPath.length);
     if (commandChars > MAX_SHARD_COMMAND_CHARS) {
       throw new RangeError(`第 ${shard.index}/${shard.total} 片的命令行约 ${commandChars} 字符，超过 ${MAX_SHARD_COMMAND_CHARS}，请增加分片数`);
@@ -319,7 +273,6 @@ if (require.main === module) {
 
 // 导出可测试纯函数（unit test 用）
 module.exports = {
-  SERIAL_UNIT_SHARDS,
   UNIT_FILE_MINUTES,
   unitFileMinutes,
   parseShard,

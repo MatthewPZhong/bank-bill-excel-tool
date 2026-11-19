@@ -24,8 +24,6 @@
 
 ## 项目与架构摘要
 
-模块现行说明：[BizOP catalog 查询与命令边界](src/main-process/biz-op-v327/README.md)。
-
 清结算小助手（`package.json` 的 `productName`；数据目录仍为 `Documents/网银账单生成小助手/`，见「存储位置」）：核心为网银账单——导入 Excel/CSV 账单，按模板映射列，导出标准化明细与余额 Excel；对账、清结算等其他模块见「模块资料入口」与「模块现行说明」。技术栈：Electron 36、原生 JavaScript、SQLite（`node:sqlite` 的 `DatabaseSync`）、SheetJS/XLSX；依赖版本以 `package.json` 为准。
 
 - Renderer（`index.html`、`src/renderer.js`、`src/renderer-dialogs.js`）经 `src/preload.js` 的 `window.desktopApi` 连接 `src/main.js` 的 IPC 与业务编排。修改跨模块大文件时读相关逻辑与调用方，不强制通读全文件。
@@ -82,7 +80,6 @@
 ## 模块现行说明
 - [应用恢复与共享发布恢复](src/main-process/application-recovery/README.md)：应用阶段、平台扫描事实、participant/owner 接口、授权与调用边界。
 - [VCC 纯 hash 与映射血缘合同](src/backend/vcc-financial-op/README.md)：纯函数依赖、旧导出兼容与验证入口。
-- [Acquiring 仓储与多 worker 执行边界](src/backend/acquiring-bill-currency-db/README.md)：repository/service/executor 职责、真实退出屏障、partial/resume 与受管 part 合同。
 - [设置 → 账户管理](src/main-process/bank-accounts/README.md)：清结算银行账户表的存放、导入/导出、对外只读接口与验证入口。
 
 - G7 执行与归档静态装配：[execution-descriptors/README.md](src/main-process/execution-descriptors/README.md)。

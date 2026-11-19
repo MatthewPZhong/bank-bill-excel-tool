@@ -43,7 +43,7 @@ const {
   readXlsxStreamed,
   readSharedStrings,
   lettersToIndex
-} = require('../src/backend/pending-import/streaming-xlsx-reader');
+} = require('../src/backend/xlsx/legacy/streaming-xlsx-reader');
 const { normalizeCell, isRowMeaningful } = require('../src/backend/file-service/common');
 const { BANK_STATEMENT_FIELDS } = require('../src/constants/bank-statement-fields');
 

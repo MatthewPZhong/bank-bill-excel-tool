@@ -88,10 +88,8 @@ function boot(item, options = {}) {
   const outbox = createArchiveOutboxStore(path.join(item.directory, 'outbox'));
   const noop = async () => {};
   const application = createApplicationRecoveryComposition({
-    platform: { scanAndRecover: async () => ({}), recoverSource: noop },
-    bizOpModule: { recovery: { bindPlatform() {}, run: async () => ({}), openObligations: () => false },
-      activation: { needed: () => false } },
-    recoverPendingRuns: noop, recoverLegacyBizOpRuns: noop, recoverPreFundRuns: noop,
+    platform: { scanAndRecover: async () => ({ sourceCount: 0, activeHoldCount: 0 }), recoverSource: noop },
+    recoverPreFundRuns: noop,
     recoverPosition: main.recover,
     recoverToolboxVccPublications: noop, recoverVccImportTerminal: noop, reconcileVccImportLineage: noop
   });

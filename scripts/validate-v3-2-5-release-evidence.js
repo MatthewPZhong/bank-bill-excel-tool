@@ -123,6 +123,17 @@ function absolute(relativePath) {
   return resolveChangesPath(REPOSITORY_ROOT, relativePath);
 }
 
+// v3.2.20 下线业务OP数据核对、月度Pending数据核对、收单单据币种校验：这些单测随模块删除。
+//   历史证据快照不改写；仅这份封闭清单中的引用允许在当前树中缺失，其余引用仍须存在。
+const RETIRED_EVIDENCE_REFS = Object.freeze([
+  'tests/unit/main-process/acquiring-read-only-export-e13-c.test.js',
+  'tests/unit/main-process/background-execution/acquiring-adapters-e13-e.test.js',
+  'tests/unit/main-process/background-execution/pending-bizop-adapters-e13-d.test.js',
+  'tests/unit/main-process/biz-op-read-only-export-e13-a.test.js',
+  'tests/unit/main-process/pending-read-only-export-e13-a.test.js',
+  'tests/unit/main-process/read-only-export-main-settlement-e13-a.test.js'
+]);
+
 function readText(relativePath) {
   return fs.readFileSync(absolute(relativePath), 'utf8').replace(/\r\n?/g, '\n');
 }
@@ -633,7 +644,7 @@ function validateReleaseEvidence(candidate, options = {}) {
       addError(errors, 'OBSERVATION_GATE_FORGED', `${prefix}/externalGates/stabilityWindow`, action.actionKey);
     }
     for (const [refIndex, relativePath] of (action.evidenceRefs || []).entries()) {
-      if (!fs.existsSync(absolute(relativePath))) {
+      if (!fs.existsSync(absolute(relativePath)) && !RETIRED_EVIDENCE_REFS.includes(relativePath)) {
         addError(errors, 'EVIDENCE_REF_MISSING', `${prefix}/evidenceRefs/${refIndex}`, relativePath);
       }
     }
@@ -713,6 +724,7 @@ module.exports = {
   PACKAGE_ROOT_RELATIVE_PATH,
   PackageChecksumError,
   RELEASE,
+  RETIRED_EVIDENCE_REFS,
   SNAPSHOT_PATH,
   SNAPSHOT_RELATIVE_PATH,
   WORK_ITEM_ACTIONS,
