@@ -50,4 +50,10 @@
 
 - 合入前在模块分支：lint 通过；单测 10405/10409（0 失败）；渲染生命周期 182/182、28/28；架构检查通过（解析 838/838 文件）；11 个网银相关集成脚本通过（含新增 `statement-duplicate-row-filter.js` 31/31、`statement-logic-value.js` 26/26）。
 - 2026-11-18 在候选 `3d6ee568`（升版提交）上运行 `npm run release-check`：EXIT=0，前后 HEAD 未变。lint 通过；架构检查通过（解析 838/838 文件，历史检查 357 个提交）；smoke 通过；单测 10405/10409（0 失败）；集成 114 个脚本 4090/4090。`rules/integration-test-policy.md` §七 由 runner 回写，单独提交。
-- PR Windows CI：待填写。
+- PR #254 Windows CI：`3d6ee568`（run 44429572039）与最终 head `e2afba27`（run 44431353636）全部通过（12 项通过，`bizop-durability-contract` 按条件跳过）；合并提交 `466bb6fa` 的 main CI（run 44438275923）通过。
+
+## 发布流程失败与修复（清单 F）
+
+- 2026-11-18 首个 `v3.2.19` 标签（→ `466bb6fa`）触发的发布流程 run 44441308161 在 `npm run release-check` 失败：集成脚本 `renderer-lifecycle` 超过 `scripts/test-renderer-lifecycle.js` 给整个 Electron 进程设的 120 秒总时限，被终止（`spawnSync ... ETIMEDOUT`、`SIGTERM`）；被终止前完成的用例全部通过，单测 0 失败，其余 113 个集成脚本通过。未生成 Release，未发出安装包。
+- 原因：本版该脚本用例由 441 个增到 493 个，Windows 上耗时随之到上限（v3.2.18 发布流程 108.2 秒；本版 PR CI 109.8 秒、main CI 119.6 秒、发布流程超过 120 秒；本机 macOS 62.8 秒）。
+- 处置：用户选择修复后重打标签。总时限调为 300 秒（测试内容不变），经 PR 合入 main；删除远端 `v3.2.19` 标签，在新的 main 提交上重建并推送。
