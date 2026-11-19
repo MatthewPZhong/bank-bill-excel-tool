@@ -135,6 +135,23 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     {count:1,selectionOpen:false,parentTop:true,applied:1,assignments:[{rowIndex:0,merchantId:'TEST-ACCOUNT',currency:'USD'}],errors:[]});
   });
 
+  // v3.2.19：完成选择时任务未获准入（busy）、源文件在等待选择期间被移走（failed）、配置已修改（preservesSession）——
+  //   都没有开始生成：释放本次大账号选择、只弹提示，不按失败的导入处理（不清掉上一批的导出与补录入口）
+  for (const rejected of [
+    { status: 'busy', message: '另一项任务正在进行，请稍后' },
+    { status: 'failed', code: 'ARCHIVE_INPUT_EVIDENCE_FAILED', message: '网银明细源文件在确认期间已变化，请重新选择' },
+    { status: 'error', errorCode: 'DUPLICATE_REVIEW_CONFIG_CHANGED', preservesSession: true, message: '等待确认期间模板、渠道或账户映射已修改，请重新导入文件' }
+  ]) await test(`大账号选择完成时未开始生成（${rejected.status}）只提示并释放本次选择，不按失败的导入处理`, async () => {
+    await setup();
+    await js(`legacy.complete=legacy.deferred();legacy.cancellation=legacy.deferred();legacy.cancellation.resolve({status:'success'});legacy.openBigAccount();`); await settle();
+    await js(`legacy.overlay.querySelector('.big-account-order-checkbox').click();legacy.overlay.querySelector('[data-action="done"]').click();
+      legacy.complete.resolve(${JSON.stringify(rejected)});`); await settle();
+    assert.deepEqual(await js(`({applied:legacy.calls.applied.length,cancel:legacy.calls.cancel,selectionOpen:legacy.handle.isOpen()})`), {
+      applied: 0, cancel: ['selection-fixture-token'], selectionOpen: false
+    });
+    assert.ok((await js(`legacy.top().textContent`)).includes(rejected.message), rejected.message);
+  });
+
   // v3.2.15（release 复审）：后端判定记住的顺序不能按位置套用到本次文件（forceMode）后，
   //   首次打开和手动切回“账号顺序固定”都不能再预填旧分配，否则直接点完成会把账号 / 币种填到别的文件或块上。
   await test('后端判定记住的顺序不适用时首次打开和手动切回固定模式都不预填旧顺序', async () => {

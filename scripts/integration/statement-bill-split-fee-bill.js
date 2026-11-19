@@ -24,6 +24,9 @@ const { hasColumn } = require('../../src/backend/database/migrations');
 const {
   buildDetailExportRows,
   buildFeatureFilterToken,
+  buildLogicValueToken,
+  normalizeLogicValueFields,
+  LOGIC_VALUE_MIN_FIELDS,
   buildMappedRows,
   FileValidationError,
   getFeatureFilterRef,
@@ -102,12 +105,13 @@ function loadMainFunctions(names, deps = {}) {
 }
 
 const CONSTANTS = loadMainConstants([
-  'BALANCE_DISABLED_OPTION', 'BALANCE_CALCULATED_OPTION', 'CONCAT_FIELDS_MAPPING_FIELD', 'FEATURE_FILTER_MAPPING_FIELD',
+  'BALANCE_DISABLED_OPTION', 'BALANCE_CALCULATED_OPTION', 'CONCAT_FIELDS_MAPPING_FIELD', 'FEATURE_FILTER_MAPPING_FIELD', 'LOGIC_VALUE_MAPPING_FIELD',
   'SIGNED_AMOUNT_MAPPING_FIELD', 'AMOUNT_BASED_NAME_MAPPING_FIELD', 'AMOUNT_BASED_ACCOUNT_MAPPING_FIELD',
   'AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD', 'AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION',
   'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
   'BILL_SPLIT_ROW_FILTER_MAPPING_FIELD', 'BILL_SPLIT_ROW_FILTER_ENABLED_OPTION',
-  'PREPROCESS_ROW_FILTER_MAPPING_FIELD', 'PREPROCESS_ROW_FILTER_ENABLED_OPTION', 'PREPROCESS_FIELDS',
+  'PREPROCESS_ROW_FILTER_MAPPING_FIELD', 'PREPROCESS_ROW_FILTER_ENABLED_OPTION', 'DUPLICATE_ROW_FILTER_MAPPING_FIELD',
+  'DUPLICATE_ROW_FILTER_ENABLED_OPTION', 'PREPROCESS_FIELDS',
   'SUPPORTED_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION'
 ]);
 
@@ -124,7 +128,7 @@ function createMain(database, constantOverrides = {}) {
     'normalizeBundleBillSplitMeta',
     'upgradeLegacyBundleFeatureFilterRefs',
     'readTemplateBundleFile',
-    'resolveTemplateBundleVersion', 'isPreprocessRowFilterEnabled',
+    'resolveTemplateBundleVersion', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     'isCurrencyOnlyMerchantMapping'
   ], {
     ...CONSTANTS,
@@ -142,6 +146,9 @@ function createMain(database, constantOverrides = {}) {
     FileValidationError,
     MERCHANT_ID_CURRENCY_ONLY_MARKER,
     buildFeatureFilterToken,
+    buildLogicValueToken,
+    normalizeLogicValueFields,
+    LOGIC_VALUE_MIN_FIELDS,
     getFeatureFilterRef,
     LEGACY_FEATURE_FILTER_ID,
     upgradeLegacyFeatureFilter,

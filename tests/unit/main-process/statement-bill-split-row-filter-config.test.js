@@ -23,7 +23,9 @@ const {
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   normalizeCell,
   PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
-  validateRowFilterRules
+  validateRowFilterRules,
+  normalizeLogicValueFields,
+  LOGIC_VALUE_MIN_FIELDS
 } = require('../../../src/backend/file-service');
 const { normalizeMaintainedBigAccounts } = require('../../../src/main-process/big-account-recognition');
 
@@ -64,6 +66,7 @@ function loadMainFunctions(names, deps) {
 const CONSTANTS = readTopLevelLiteralConstants();
 const fns = loadMainFunctions([
   'validateTemplateConfiguration',
+  'isLegacyLogicValueDirectReference',
   'validateCurrencyBigAccountConfiguration',
   'collectFeatureFilterRefs',
   'getPrimaryMappedField',
@@ -74,9 +77,12 @@ const fns = loadMainFunctions([
   'extractFixedMappingValue',
   'resolveStatementFeatureFilters',
   'isPreprocessRowFilterEnabled',
+  'isDuplicateRowFilterEnabled',
   'buildPreprocessRowFilterRules'
 ], {
   PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
+  normalizeLogicValueFields,
+  LOGIC_VALUE_MIN_FIELDS,
   validateRowFilterRules,
   ...CONSTANTS,
   FIXED_FIELD_VALUE_PREFIX,

@@ -282,3 +282,44 @@ test('assert：启用的失效引用拒绝生成并列出字段；未启用或�
     mappings: [mapping('Credit Amount', '不存在')]
   }));
 });
+
+// v3.2.19：逻辑取值的候补字段计为源字段引用（模式名本身不是源列）；「重复账单过滤」开关值不是源字段。
+test('collect：逻辑取值的候补字段为源字段引用；重复账单过滤开关排除', () => {
+  const v19 = createTemplateHeaderUpdateTools({
+    ...CONSTANTS,
+    LOGIC_VALUE_MAPPING_FIELD: '逻辑取值',
+    PREPROCESS_ROW_FILTER_MAPPING_FIELD: '过滤账单',
+    PREPROCESS_ROW_FILTER_ENABLED_OPTION: '是',
+    DUPLICATE_ROW_FILTER_MAPPING_FIELD: '重复账单过滤'
+  });
+  const input = {
+    mappings: [
+      mapping('BillDate', '交易日期'),
+      mapping('Payee Name', '逻辑取值', ['对方户名', '摘要']),
+      mapping('Remark', '逻辑取值', []),
+      // 候补字段是真实列（生成时按列名读取），以固定值前缀开头的列名也计为源字段引用
+      mapping('Reference', '逻辑取值', ['__FIXED__:流水', '交易日期']),
+      mapping('重复账单过滤', '是')
+    ]
+  };
+  const references = v19.collectTemplateFieldReferences(input);
+  assert.deepEqual(references.map((item) => [item.target, item.field, item.role]), [
+    ['BillDate', '交易日期', ''],
+    ['Payee Name', '对方户名', 'logic-value'],
+    ['Payee Name', '摘要', 'logic-value'],
+    ['Remark', '逻辑取值', ''],
+    ['Reference', '__FIXED__:流水', 'logic-value'],
+    ['Reference', '交易日期', 'logic-value']
+  ]);
+  const stale = findStaleFieldReferences(references, ['交易日期', '对方户名']);
+  // 没有候补字段的旧映射（直接映射名为「逻辑取值」的源列）按该源列引用
+  assert.deepEqual(formatFieldReferenceLines(stale), [
+    'Payee Name（逻辑取值 · 候补字段） ← 摘要',
+    'Remark ← 逻辑取值',
+    'Reference（逻辑取值 · 候补字段） ← __FIXED__:流水'
+  ]);
+  assert.throws(
+    () => v19.assertTemplateFieldReferencesAvailable({ name: 'T', headers: ['交易日期', '对方户名'] }, input),
+    (error) => error.code === 'TEMPLATE_MAPPING_FIELD_MISSING' && /摘要/.test(error.message)
+  );
+});

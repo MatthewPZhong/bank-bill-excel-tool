@@ -1836,6 +1836,12 @@ test('大账号续跑沿用重复提示中确认覆盖的旧路径：跨目录�
       getOrCreateStatementImportSession: sessionHelpers.getOrCreateStatementImportSession,
       statementImportSessions,
       applyBigAccountAssignmentsToFileEntries: (entries) => entries,
+      // v3.2.19：重复账单过滤（本用例没有重复账单，原样放行）；业务入口的配置核对（prepared 没有核对函数时放行）
+      statementDuplicateReview: { clear: () => {} },
+      checkImportConfigGuard: () => null,
+      IMPORT_CONFIG_CHANGED_MESSAGE: '导入期间模板、渠道或账户映射已修改，请重新导入文件',
+      DUPLICATE_REVIEW_CONFIG_CHANGED_MESSAGE: '等待确认期间模板、渠道或账户映射已修改，请重新导入文件',
+      applyConfirmedDuplicateRowFilter: (entries) => ({ entries }),
       isFilenameMappingMode: () => false,
       resolveGenerationTemplateConfig: ({ fallbackTemplateConfig }) => fallbackTemplateConfig,
       buildStatementGenerationConfig: ({ template }) => ({ template }),
@@ -2104,6 +2110,9 @@ function loadDesignatedImportExecute({ templateConfig, mode, order, logs }) {
     // 合入渠道后，指定模板导入在大账号流程前还核对库里的输出名称；本测试的模板无同名所有者，直接放行。
     findGenerationGroupOutputNameConflicts: () => null,
     resolveGenerationGroupKey: (template) => `template:${template.id}`,
+    // v3.2.19：重复账单过滤——本测试的模板未勾选（条目没有源行指纹）
+    hasDuplicateRowKeys: require('../../../src/main-process/statement-duplicate-review').hasSourceRowKeys,
+    isDuplicateRowFilterEnabled: () => false,
     MERCHANT_ID_SELF_INPUT_OPTION: constValue('MERCHANT_ID_SELF_INPUT_OPTION'),
     STATEMENT_IMPORT_PREVIEW_READY: constValue('STATEMENT_IMPORT_PREVIEW_READY'),
     SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS: constValue('SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS')

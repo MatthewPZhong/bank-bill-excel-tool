@@ -97,6 +97,10 @@
   transition: opacity .12s ease;
 }
 .title-tips:hover .title-tips-bubble { opacity: 1; }
+/* v3.2.19：正文标签右侧的 Tips（如「候补字段取值」）：正文字号下按 1.5em 宽显示，否则看不清 */
+.title-tips.title-tips-inline { vertical-align: 0.3em; margin-left: 0.25em; }
+.title-tips-inline .title-tips-mark { width: 1.6em; height: 0.8em; }
+.title-tips-inline .title-tips-bubble { font-weight: 400; }
 .dialog-header-checkboxes {
   display: flex; align-items: center; gap: 16px;
   margin-left: 16px;
@@ -2756,6 +2760,51 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
 .row-filter-rules-card .scenario-config-multi-row > .text-action { flex: 0 0 auto; white-space: nowrap; }
 /* 运算符含「不包含（字段）」等较长选项，比场景弹窗的 100px 窄下拉框放宽，避免截断 */
 .row-filter-rules-card .scenario-config-input-narrow { flex: 0 0 136px; width: 136px; }
+
+/* v3.2.19 映射字段「逻辑取值」：映射行的候补顺序预览与【设置】弹窗（组件参考月度 pending 规则管理「对账字段」） */
+.mapping-logic-value-preview {
+  min-width: 0; max-width: 320px;
+  font-size: 13px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mapping-logic-value-preview.is-empty { color: var(--muted); }
+.mapping-logic-value-preview[hidden] { display: none; }
+.scenario-config-card.logic-value-card .dialog-header .icon-close { margin-left: auto; }
+.logic-value-card .scenario-config-label.logic-value-label { width: auto; min-width: 120px; white-space: nowrap; }
+.logic-value-rows { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.logic-value-row { display: flex; align-items: center; gap: 8px; }
+.logic-value-serial {
+  flex: 0 0 24px; text-align: right;
+  font-size: 13px; font-weight: 500; color: var(--muted);
+  user-select: none;
+}
+.logic-value-row .logic-value-select {
+  flex: 0 0 240px; width: 240px; min-width: 0; height: 40px;
+  text-overflow: ellipsis;
+}
+.logic-value-row .logic-value-select.is-stale { border-color: var(--danger); color: var(--danger); }
+.logic-value-row-btn {
+  flex: 0 0 auto;
+  background: none; border: none; cursor: pointer;
+  font-size: 13px; padding: 4px 6px; border-radius: 6px;
+  color: var(--primary);
+}
+.logic-value-row-btn[data-role="remove"] { color: var(--danger); }
+.logic-value-row-btn:hover { text-decoration: underline; }
+
+/* v3.2.19 重复账单提醒：说明 + 可滚动表格，【确认】在右下、【取消】在其右 */
+.modal-card.duplicate-rows-review-card { width: min(860px, calc(100vw - 48px)); }
+.duplicate-rows-review-card .dialog-header .icon-close { margin-left: auto; }
+.duplicate-rows-review-body { display: flex; flex-direction: column; gap: 10px; }
+.duplicate-rows-review-summary { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text); }
+.duplicate-rows-review-truncated { margin: 0; font-size: 12px; color: var(--muted); }
+.duplicate-rows-review-table-wrapper { max-height: min(52vh, 420px); overflow: auto; }
+.duplicate-rows-review-table td { vertical-align: middle; }
+.duplicate-rows-review-table tr.is-dropped .duplicate-rows-review-action { color: var(--danger); font-weight: 500; }
+.duplicate-rows-review-table tr.is-kept .duplicate-rows-review-action { color: var(--muted); }
+.duplicate-rows-review-table tr.duplicate-rows-review-hidden td:first-child { color: var(--muted); }
+.duplicate-rows-review-drop-plan { max-height: 96px; overflow: auto; font-size: 12px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
+.duplicate-rows-review-drop-plan-title { color: var(--muted); }
 
 /* =================== Big-account · currency dropdown (open state) =================== */
 .currency-cell { position: relative; overflow: visible; }

@@ -24,6 +24,9 @@ const {
   buildMappedRows,
   extractHeaders,
   buildFeatureFilterToken,
+  buildLogicValueToken,
+  normalizeLogicValueFields,
+  LOGIC_VALUE_MIN_FIELDS,
   getFeatureFilterRef,
   LEGACY_FEATURE_FILTER_ID,
   parseFeatureFilterToken,
@@ -239,6 +242,9 @@ function createEnvironment(dir, label) {
     mapEachCollectingCurrencyBigAccountIssues,
     // 「字段筛选特征值」（v3.2.18 多特征值）：校验、映射归一化、模板包读取与生成配置会引用
     buildFeatureFilterToken,
+    buildLogicValueToken,
+    normalizeLogicValueFields,
+    LOGIC_VALUE_MIN_FIELDS,
     getFeatureFilterRef,
     LEGACY_FEATURE_FILTER_ID,
     parseFeatureFilterToken,
@@ -299,7 +305,7 @@ function createEnvironment(dir, label) {
     'normalizeMappedFields',
     'getMappingFieldValues',
     'getPrimaryMappedField',
-    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'isPreprocessRowFilterEnabled',
+    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     'buildCurrencyBigAccountMappingConfig',
     'buildMappedRowsForFile',
     'getEntryTemplateConfig',
@@ -316,7 +322,7 @@ function createEnvironment(dir, label) {
     'buildStatementOutputNameConflictError',
     'findGenerationGroupOutputPathConflicts',
     'buildStatementOutputPathConflictError',
-    'validateTemplateConfiguration', 'isPreprocessRowFilterEnabled',
+    'validateTemplateConfiguration', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     'validateCurrencyBigAccountConfiguration',
     'collectFeatureFilterRefs',
     'resolveStatementFeatureFilters',
@@ -329,7 +335,7 @@ function createEnvironment(dir, label) {
     'resolveCurrentMappings',
     'readTemplateBundleFile',
     'normalizeBundleBillSplitMeta',
-    'resolveTemplateBundleVersion', 'isPreprocessRowFilterEnabled',
+    'resolveTemplateBundleVersion', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     'isCurrencyOnlyMerchantMapping'
   ], mainDeps));
 

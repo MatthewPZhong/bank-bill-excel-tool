@@ -37,6 +37,7 @@
       createBillSplitRowsDialog,
       createBillSplitMappingsDialog,
       createRememberOrderMismatchDialog,
+      createDuplicateRowsReviewDialog,
       createAccountMappingMigrationDialog,
       closeModal,
       openBackgroundPalette,
@@ -213,6 +214,7 @@
           'Drawee CardNo',
           // v3.2.19：原始账单预处理
           '过滤账单',
+          '重复账单过滤',
           SIGNED_AMOUNT_MAPPING_FIELD,
           AMOUNT_BASED_NAME_MAPPING_FIELD,
           AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
@@ -225,10 +227,12 @@
           { templateField: 'Balance', mappedField: BALANCE_CALCULATED_OPTION, customValue: '', isMultiBigAccount: false },
           { templateField: 'MerchantId', mappedField: MERCHANT_ID_SELF_INPUT_OPTION, customValue: '', isMultiBigAccount: true },
           { templateField: 'Currency', mappedField: '', customValue: '', isMultiBigAccount: false },
-          { templateField: 'Payee Name', mappedField: '', customValue: '', isMultiBigAccount: false },
+          // v3.2.19：逻辑取值预览样例
+          { templateField: 'Payee Name', mappedField: '逻辑取值', mappedFields: ['对手户名', '附言'], customValue: '', isMultiBigAccount: false },
           { templateField: 'Payee Cardno', mappedField: '', customValue: '', isMultiBigAccount: false },
           { templateField: 'Drawee Name', mappedField: '', customValue: '', isMultiBigAccount: false },
           { templateField: 'Drawee CardNo', mappedField: '', customValue: '', isMultiBigAccount: false },
+          { templateField: '重复账单过滤', mappedField: '是', customValue: '', isMultiBigAccount: false },
           { templateField: SIGNED_AMOUNT_MAPPING_FIELD, mappedField: '发生额', customValue: '', isMultiBigAccount: false },
           { templateField: AMOUNT_BASED_NAME_MAPPING_FIELD, mappedField: '对手户名', customValue: '', isMultiBigAccount: false },
           { templateField: AMOUNT_BASED_ACCOUNT_MAPPING_FIELD, mappedField: '对手账号', customValue: '', isMultiBigAccount: false }
@@ -245,7 +249,7 @@
             isMultiBigAccount: true
           }
         ],
-        preprocessFields: ['过滤账单'],
+        preprocessFields: ['过滤账单', '重复账单过滤'],
         advancedMappingFields: ADVANCED_MAPPING_FIELDS.slice()
       };
     }
@@ -575,6 +579,39 @@
             { merchantId: '9558800000000008', currency: 'HKD' }
           ]
         }
+      }));
+    }
+
+    // 8b. 重复账单提醒（v3.2.19 原始账单预处理「重复账单过滤」）
+    function applyDuplicateRowsReviewDialogPreviewState() {
+      setCurrentModule(MODULES.statementGenerator.id);
+      openModal(() => createDuplicateRowsReviewDialog({
+        status: 'duplicate-review',
+        contextId: 'preview',
+        reviewKind: 'file-import',
+        totalGroups: 2,
+        droppedRowCount: 2,
+        truncated: false,
+        groups: [
+          {
+            seq: 1,
+            accountLabel: '6222000000000001（USD）',
+            billDate: '2026-11-01',
+            rows: [
+              { fileName: '招商银行-上海-11月.xlsx', sourceRowNumber: 5, kept: true },
+              { fileName: '招商银行-上海-11月.xlsx', sourceRowNumber: 9, kept: false }
+            ]
+          },
+          {
+            seq: 2,
+            accountLabel: '6222000000000001（USD）',
+            billDate: '2026-11-02',
+            rows: [
+              { fileName: '招商银行-上海-11月.xlsx', sourceRowNumber: 12, kept: true },
+              { fileName: '招商银行-上海-11月（副本）.xlsx', sourceRowNumber: 12, kept: false }
+            ]
+          }
+        ]
       }));
     }
 
@@ -1604,6 +1641,7 @@
       applyBillSplitRowsDialogPreviewState,
       applyBillSplitMappingsDialogPreviewState,
       applyRememberOrderMismatchDialogPreviewState,
+      applyDuplicateRowsReviewDialogPreviewState,
       applyAccountMappingMigrationDialogPreviewState,
       // v2.0.0 Pending 模块 preview（6 张）
       applyPendingPanelPreviewState,

@@ -41,6 +41,7 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     BALANCE_CALCULATED_OPTION,
     CONCAT_FIELDS_MAPPING_FIELD,
     FEATURE_FILTER_MAPPING_FIELD,
+    LOGIC_VALUE_MAPPING_FIELD,
     AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD,
     AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION,
     BILL_SPLIT_MERGE_MAPPING_FIELD,
@@ -50,6 +51,7 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     BILL_SPLIT_ROW_FILTER_ENABLED_OPTION,
     PREPROCESS_ROW_FILTER_MAPPING_FIELD,
     PREPROCESS_ROW_FILTER_ENABLED_OPTION,
+    DUPLICATE_ROW_FILTER_MAPPING_FIELD,
     SIGNED_AMOUNT_MAPPING_FIELD,
     AMOUNT_BASED_NAME_MAPPING_FIELD,
     AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
@@ -66,7 +68,8 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     BILL_SPLIT_MERGE_MAPPING_FIELD,
     REUSE_MODULE_MAPPING_FIELD,
     BILL_SPLIT_ROW_FILTER_MAPPING_FIELD,
-    PREPROCESS_ROW_FILTER_MAPPING_FIELD
+    PREPROCESS_ROW_FILTER_MAPPING_FIELD,
+    DUPLICATE_ROW_FILTER_MAPPING_FIELD
   ].filter(Boolean));
   // 规则类引用（判断字段、取值字段、拆分行字段、筛选字段）：非空且不是固定值即为源字段。
   function isRuleSourceValue(value) {
@@ -96,9 +99,17 @@ function createTemplateHeaderUpdateTools(constants = {}) {
   // - Balance 只在整条映射是单个「无」「通过发生额计算」时为选项；拼接中的同名 token 按源列读取。
   // - 按正负号拆分的发生额、根据发生额做映射的户名 / 账户号：整体作为一个列名读取（多字段时为逗号拼接的列名）。
   // - 固定值（__FIXED__: 前缀）不读源列。
+  // - 逻辑取值（v3.2.19）：只读 mappedFields 中的候补字段，模式名本身不是源列。
   function mappingSourceFields(target, mapping) {
     const mappedField = normalizeCell(mapping && mapping.mappedField);
     if (mappedField === FEATURE_FILTER_MAPPING_FIELD) return [];
+    // 候补字段都是表头下拉选出的真实列，生成时一律按列名读取（不解释固定值前缀），故不按固定值过滤。
+    //   没有候补字段的旧映射（v3.2.18 及更早直接映射名为「逻辑取值」的源列）生成时按该源列读取，引用即该列。
+    if (LOGIC_VALUE_MAPPING_FIELD && mappedField === LOGIC_VALUE_MAPPING_FIELD) {
+      const candidates = uniqueNonEmpty((Array.isArray(mapping && mapping.mappedFields) ? mapping.mappedFields : [])
+        .map((value) => normalizeCell(value)));
+      return candidates.length ? candidates : [LOGIC_VALUE_MAPPING_FIELD];
+    }
     const values = normalizeMappedFields(mapping);
     const multi = mappedField === CONCAT_FIELDS_MAPPING_FIELD || values.length > 1;
     if (scalarSourceTargetFields.has(target)) {
@@ -173,8 +184,13 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     mappings.forEach((mapping) => {
       const target = normalizeCell(mapping && mapping.templateField);
       if (!target || switchTargetFields.has(target)) return;
+      const role = LOGIC_VALUE_MAPPING_FIELD && normalizeCell(mapping && mapping.mappedField) === LOGIC_VALUE_MAPPING_FIELD
+        && (Array.isArray(mapping && mapping.mappedFields) ? mapping.mappedFields : []).some((value) => normalizeCell(value) !== '')
+        ? 'logic-value'
+        : '';
       mappingSourceFields(target, mapping).forEach((field) => {
-        push({ area: 'mapping', target, role: '', field, active: true });
+        if (role === 'logic-value') references.push({ area: 'mapping', target, role, field, active: true });
+        else push({ area: 'mapping', target, role, field, active: true });
       });
     });
 
@@ -287,7 +303,7 @@ function formatFieldReferenceLine(reference) {
   const field = reference.field;
   switch (reference.area) {
     case 'mapping':
-      return `${reference.target} ← ${field}${suffix}`;
+      return `${reference.target}${reference.role === 'logic-value' ? '（逻辑取值 · 候补字段）' : ''} ← ${field}${suffix}`;
     case 'amount-split':
       return `按字段区分发生额 · ${reference.target || '（未设置目标字段）'} ${ROLE_LABELS[reference.role] || ''} ← ${field}${suffix}`;
     case 'bill-split-mapping':

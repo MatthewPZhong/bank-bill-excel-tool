@@ -1905,6 +1905,25 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(await js('cfg.errors'), []);
   });
 
+  await test('逻辑取值：从模块映射导入时只复制原本已保存的旧版直接引用（表头有同名列）；带候补字段或刚选尚未设置的都留空并提示', async () => {
+    await setup();
+    await js(`cfg.tpl={id:1,name:'招商银行-上海',headers:['交易日期','附言','对手户名','逻辑取值']};
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createBillSplitMappingsDialog({template:cfg.tpl,headers:cfg.tpl.headers,targetFields:['BillDate','Reference','Remark','Payee Name'],
+        initialMappings:[],mainTemplateMappings:[
+          {templateField:'BillDate',mappedField:'交易日期',mappedFields:[]},
+          {templateField:'Reference',mappedField:'逻辑取值',mappedFields:[]},
+          {templateField:'Remark',mappedField:'逻辑取值',mappedFields:['附言','对手户名']},
+          {templateField:'Payee Name',mappedField:'逻辑取值',mappedFields:[]}],
+        savedMainMappings:[{templateField:'Reference',mappedField:'逻辑取值',mappedFields:[]}],
+        featureFilters:[],getMainFeatureFilterUsage:()=>new Map(),onFeatureFiltersChange:()=>{},onDone:()=>{}})).handle;
+      cfg.overlay=cfg.top();cfg.overlay.querySelector('[data-action="import-main"]').click();void 0;`); await tick();
+    assert.match(await js('cfg.top().textContent'), /Remark、Payee Name 在模块映射中使用「逻辑取值」，拆分\/合并账单映射不支持，已留空/);
+    assert.doesNotMatch(await js('cfg.top().textContent'), /Reference/);
+    await js('cfg.host.closeTop();'); await tick();
+    assert.deepEqual(await js(`['BillDate','Reference','Remark','Payee Name'].map(field=>cfg.overlay.querySelector('tr[data-template-field="'+field+'"] .mapping-select').value)`),
+      ['交易日期', '逻辑取值', '', '']);
+  });
+
   await test('字段筛选特征值：拆分/合并映射行切走后其特征值被删，再新增沿用同一 id，切回时仍为空白且不得保存', async () => {
     await setup();
     await js(`${FEATURE_SETUP_JS}
@@ -2659,6 +2678,300 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await layout.settle();
     assert.deepEqual(await js(probe), expected);
     await layout.evidence(`big-account-currency-input-${theme}`, {});
+  });
+
+  // v3.2.19 原始账单预处理「重复账单过滤」：只有勾选框的行，随【保存】提交。
+  const DUPLICATE_FIELD = '重复账单过滤';
+  async function openDuplicateToggleMapping(mappings = [], layoutOptions = null) {
+    await openToggleMapping(mappings, layoutOptions);
+    const openError = await js(`(()=>{try{cfg.handle.close({status:'cancelled',reason:'cancel'});
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:cfg.tpl,
+        targetFields:['BillDate','Credit Amount','Debit Amount','Balance','MerchantId','Currency','Remark','${PREPROCESS_FIELD}','${DUPLICATE_FIELD}',...${JSON.stringify(ADVANCED_FIELDS)},...${JSON.stringify(FILTER_GROUP_FIELDS)}],
+        preprocessFields:['${PREPROCESS_FIELD}','${DUPLICATE_FIELD}'],advancedMappingFields:${JSON.stringify(ADVANCED_FIELDS)},billSplitGroupFields:${JSON.stringify(FILTER_GROUP_FIELDS)},
+        mappings:${JSON.stringify(mappings)},billSplitMeta:{signedAmountSourceField:'',rowFilterRules:[]}})).handle;
+      cfg.overlay=cfg.top();
+      cfg.savedDup=()=>cfg.calls.filter(call=>call.name==='mappingSave').map(call=>call.args[0].mappings.find(m=>m.templateField==='${DUPLICATE_FIELD}').mappedField);
+      return '';}catch(error){return String(error&&error.stack||error);}})()`);
+    assert.equal(openError, '');
+  }
+
+  await test('重复账单过滤：在「过滤账单」下方，只有勾选框没有按钮，默认不勾选；勾选随【保存】提交', async () => {
+    await openDuplicateToggleMapping();
+    assert.deepEqual(await js(`(()=>{const rows=[...cfg.overlay.querySelectorAll('tbody tr')];const index=rows.indexOf(cfg.row('${DUPLICATE_FIELD}'));
+      return {previous:rows[index-1].dataset.templateField,label:cfg.row('${DUPLICATE_FIELD}').cells[0].textContent.trim(),
+        checked:cfg.toggle('${DUPLICATE_FIELD}').checked,buttons:cfg.row('${DUPLICATE_FIELD}').querySelectorAll('button').length};})()`),
+      { previous: PREPROCESS_FIELD, label: DUPLICATE_FIELD, checked: false, buttons: 0 });
+    await js(`cfg.setToggle('${DUPLICATE_FIELD}',true);cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js('cfg.savedDup()'), ['是']);
+    await openDuplicateToggleMapping([{ templateField: DUPLICATE_FIELD, mappedField: '是', mappedFields: [] }]);
+    assert.equal(await js(`cfg.toggle('${DUPLICATE_FIELD}').checked`), true);
+    await js(`cfg.setToggle('${DUPLICATE_FIELD}',false);cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js('cfg.savedDup()'), ['']);
+  });
+
+  // v3.2.19 映射字段「逻辑取值」：位于「需要拼接字段」上方，选中后显示【设置】；候补字段弹窗参考月度 pending「对账字段」。
+  async function openLogicValueDialog() {
+    await js(`cfg.sel('Remark').value='逻辑取值';cfg.sel('Remark').dispatchEvent(new Event('change'));
+      cfg.row('Remark').querySelector('.mapping-logic-value-btn').click();cfg.logic=cfg.top();
+      cfg.logicRows=()=>[...cfg.logic.querySelectorAll('.logic-value-row')].map(row=>[row.querySelector('.logic-value-serial').textContent,
+        row.querySelector('select').value,row.querySelector('.logic-value-row-btn').textContent.trim()]);
+      cfg.setLogic=(index,value)=>{const select=cfg.logic.querySelectorAll('.logic-value-select')[index];select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));};
+      void 0;`);
+  }
+
+  await test('逻辑取值：选项在「需要拼接字段」上方，选中显示【设置】；弹窗默认两个下拉框，首行新增、其余删除，序号即优先级；【保存】暂存随映射提交', async () => {
+    await openToggleMapping();
+    const options = await js(`[...cfg.sel('Remark').options].map(option=>option.value)`);
+    assert.equal(options.indexOf('逻辑取值') + 1, options.indexOf('需要拼接字段'));
+    assert.equal(await js(`[...cfg.sel('Balance').options].some(option=>option.value==='逻辑取值')`), false);
+    assert.equal(await js(`[...cfg.sel('Currency').options].some(option=>option.value==='逻辑取值')`), false);
+    assert.equal(await js(`cfg.row('Remark').querySelector('.mapping-logic-value-btn').hidden`), true);
+    await openLogicValueDialog();
+    assert.deepEqual(await js(`({title:cfg.logic.querySelector('.dialog-title').textContent,label:cfg.logic.querySelector('.logic-value-label').childNodes[0].textContent,
+      tips:cfg.logic.querySelector('.logic-value-label .title-tips.title-tips-inline .title-tips-mark')!==null,
+      actions:[...cfg.logic.querySelectorAll('.dialog-actions button')].map(button=>button.textContent.trim())})`),
+      { title: '逻辑取值', label: '候补字段取值', tips: true, actions: ['保存', '取消'] });
+    assert.deepEqual(await js('cfg.logicRows()'), [['1.', '', '新增'], ['2.', '', '删除']]);
+    // 校验：少于 2 个、重复
+    await js(`cfg.setLogic(0,'对手户名');cfg.logic.querySelector('[data-action=save]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /请至少选择 2 个候补字段/);
+    await js(`cfg.top().querySelector('button').click();`); await tick();
+    await js(`cfg.setLogic(1,'对手户名');cfg.logic.querySelector('[data-action=save]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /候补字段不能重复：对手户名/);
+    await js(`cfg.top().querySelector('button').click();`); await tick();
+    // 新增在末尾追加，删除后序号重排
+    await js(`cfg.logic.querySelector('.logic-value-row-btn[data-role=add]').click();cfg.setLogic(1,'附言');cfg.setLogic(2,'金额');void 0;`);
+    assert.deepEqual(await js('cfg.logicRows()'), [['1.', '对手户名', '新增'], ['2.', '附言', '删除'], ['3.', '金额', '删除']]);
+    await js(`cfg.logic.querySelectorAll('.logic-value-row-btn')[2].click();`);
+    assert.deepEqual(await js('cfg.logicRows()'), [['1.', '对手户名', '新增'], ['2.', '附言', '删除']]);
+    await js(`cfg.logic.querySelector('[data-action=save]').click();`); await tick();
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    assert.equal(await js(`cfg.row('Remark').querySelector('.mapping-logic-value-preview').textContent`), '1. 对手户名 → 2. 附言');
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 0);
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='mappingSave').map(call=>call.args[0].mappings.find(m=>m.templateField==='Remark'))
+      .map(m=>[m.mappedField,m.mappedFields])`), [['逻辑取值', ['对手户名', '附言']]]);
+  });
+
+  await test('逻辑取值：回显已存候补，已删除字段标红；【取消】不改暂存；未设置候补时【保存】映射被拦下', async () => {
+    await openToggleMapping([{ templateField: 'Remark', mappedField: '逻辑取值', mappedFields: ['对手户名', '旧字段'] }]);
+    assert.equal(await js(`cfg.row('Remark').querySelector('.mapping-logic-value-btn').hidden`), false);
+    await js(`cfg.row('Remark').querySelector('.mapping-logic-value-btn').click();cfg.logic=cfg.top();void 0;`);
+    assert.deepEqual(await js(`[...cfg.logic.querySelectorAll('.logic-value-select')].map(select=>[select.value,select.classList.contains('is-stale'),select.selectedOptions[0].textContent])`),
+      [['对手户名', false, '对手户名'], ['旧字段', true, '旧字段（已删除）']]);
+    await js(`const select=cfg.logic.querySelectorAll('.logic-value-select')[1];select.value='附言';select.dispatchEvent(new Event('change',{bubbles:true}));
+      cfg.logic.querySelector('[data-action=cancel]').click();`); await tick();
+    assert.equal(await js(`cfg.row('Remark').querySelector('.mapping-logic-value-preview').textContent`), '1. 对手户名 → 2. 旧字段');
+    // 新选「逻辑取值」但未设置：保存被拦下
+    await openToggleMapping();
+    await js(`cfg.sel('Remark').value='逻辑取值';cfg.sel('Remark').dispatchEvent(new Event('change'));cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /Remark 选择了「逻辑取值」，请点击【设置】选择至少 2 个候补字段/);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 0);
+
+    // 模板表头里真有一列叫「逻辑取值」（旧版本直接映射该列）：没有候补字段时按该列保存，不拦下
+    await openToggleMapping([{ templateField: 'Remark', mappedField: '逻辑取值', mappedFields: [] }], null, ".concat(['逻辑取值'])");
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='mappingSave').map(call=>call.args[0].mappings.filter(m=>m.templateField==='Remark')
+      .map(m=>[m.mappedField,m.mappedFields]))`), [[['逻辑取值', []]]]);
+    // 不支持逻辑取值的行（如 Currency、Balance）不列出同名的表头选项（选中后无法保存）；支持的行只有一个「逻辑取值」选项
+    assert.deepEqual(await js(`({currency:[...cfg.sel('Currency').options].filter(o=>o.value==='逻辑取值').length,
+      balance:[...cfg.sel('Balance').options].filter(o=>o.value==='逻辑取值').length,
+      remark:[...cfg.sel('Remark').options].filter(o=>o.value==='逻辑取值').length})`), { currency: 0, balance: 0, remark: 1 });
+    // 表头有同名列，但该行原本没有这样保存（新选「逻辑取值」）：仍须设置候补字段，不因表头同名放行
+    await openToggleMapping([], null, ".concat(['逻辑取值'])");
+    await js(`cfg.sel('Remark').value='逻辑取值';cfg.sel('Remark').dispatchEvent(new Event('change'));cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /Remark 选择了「逻辑取值」，请点击【设置】选择至少 2 个候补字段/);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 0);
+  });
+
+  await test('逻辑取值：开启拆分/合并互斥清空映射时同步隐藏【设置】与候补预览，关闭互斥后不能打开已清空行的【设置】', async () => {
+    await openToggleMapping([{ templateField: 'Credit Amount', mappedField: '逻辑取值', mappedFields: ['对手户名', '附言'] }]);
+    const editor = () => js(`({btn:cfg.row('Credit Amount').querySelector('.mapping-logic-value-btn').hidden,preview:cfg.row('Credit Amount').querySelector('.mapping-logic-value-preview').hidden,value:cfg.sel('Credit Amount').value})`);
+    assert.deepEqual(await editor(), { btn: false, preview: false, value: '逻辑取值' });
+    await js(`cfg.setToggle('是否拆分/合并明细账单',true);void 0;`); await tick();
+    assert.deepEqual(await editor(), { btn: true, preview: true, value: '' }, '互斥清空后隐藏');
+    await js(`cfg.setToggle('是否拆分/合并明细账单',false);void 0;`); await tick();
+    assert.deepEqual(await editor(), { btn: true, preview: true, value: '' }, '解除互斥后仍按当前（已清空的）值隐藏');
+  });
+
+  for (const theme of ['light', 'dark']) await test(`逻辑取值布局（${theme}）：序号、下拉框与新增/删除同一行，Tips 可见，【保存】在【取消】左侧`, async () => {
+    await openToggleMapping([{ templateField: 'Remark', mappedField: '逻辑取值', mappedFields: ['对手户名', '附言'] }], { width: 1440, height: 900, theme, zoom: 1 });
+    await layout.settle();
+    await layout.evidence(`mapping-dialog-logic-value-${theme}`, {});
+    await js(`cfg.row('Remark').querySelector('.mapping-logic-value-btn').click();cfg.logic=cfg.top();void 0;`);
+    await js('new Promise(resolve=>setTimeout(resolve,400))'); await layout.settle();
+    const geometry = await js(`(()=>{const rect=element=>element.getBoundingClientRect(),middle=item=>(item.top+item.bottom)/2;
+      const card=cfg.logic.querySelector('.modal-card');const body=card.querySelector('.scenario-config-body');
+      const rows=[...card.querySelectorAll('.logic-value-row')].map(row=>[...row.children].map(rect));
+      const mark=card.querySelector('.title-tips-mark');const actions=[...card.querySelectorAll('.dialog-actions button')].map(rect);
+      return {visible:rows.flat().every(item=>item.width>0&&item.height>0)&&rect(mark).width>=12&&getComputedStyle(cfg.logic).opacity==='1',
+        rowsOneLine:rows.every(items=>items.every(item=>Math.abs(middle(item)-middle(items[0]))<=2)),
+        saveLeftOfCancel:actions[0].right<=actions[1].left,
+        insideCard:rows.flat().every(item=>item.left>=rect(card).left&&item.right<=rect(card).right),
+        noHorizontalOverflow:body.scrollWidth<=body.clientWidth};})()`);
+    assert.deepEqual(geometry, { visible: true, rowsOneLine: true, saveLeftOfCancel: true, insideCard: true, noHorizontalOverflow: true });
+    await layout.evidence(`logic-value-dialog-${theme}`, { geometry });
+  });
+
+  // v3.2.19 重复账单提醒：按组列出文件、行号、账户号、账期，【确认】在右下、【取消】在其右侧。
+  const REVIEW = {
+    status: 'duplicate-review', contextId: 'review-1', reviewKind: 'file-import', totalGroups: 2, droppedRowCount: 2, truncated: false,
+    groups: [
+      { seq: 1, accountLabel: 'ACC1（USD）', billDate: '2026-11-01', rows: [{ fileName: 'a.xlsx', sourceRowNumber: 2, kept: true }, { fileName: 'a.xlsx', sourceRowNumber: 4, kept: false }] },
+      { seq: 2, accountLabel: 'ACC1（USD）', billDate: '2026-11-02', rows: [{ fileName: 'a.xlsx', sourceRowNumber: 6, kept: true }, { fileName: 'b.xlsx', sourceRowNumber: 2, kept: false }] }
+    ]
+  };
+  async function openReview(review = REVIEW, layoutOptions = null) {
+    await setup(layoutOptions);
+    await js(`cfg.api.files.importFile=payload=>cfg.invoke('importFile',[payload],{status:'success',message:'明细账单可导出；已去除重复账单行 2 行'});
+      cfg.api.files.completeBigAccountSelection=payload=>cfg.invoke('complete',[payload],{status:'success',message:'ok'});
+      cfg.api.files.cancelBigAccountSelection=contextId=>cfg.invoke('cancelReview',[contextId],{status:'success'});
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createDuplicateRowsReviewDialog(${JSON.stringify(review)})).handle;cfg.review=cfg.top();void 0;`);
+  }
+
+  await test('重复账单提醒：按组列出文件、行号、账户号、账期与保留/去除；【确认】按导入通道续跑，【取消】清除待确认不生成', async () => {
+    await openReview();
+    assert.deepEqual(await js(`({title:cfg.review.querySelector('.dialog-title').textContent,
+      rows:[...cfg.review.querySelectorAll('tbody tr')].map(row=>[...row.cells].map(cell=>cell.textContent.trim())),
+      actions:[...cfg.review.querySelectorAll('.dialog-actions button')].map(button=>button.textContent.trim()),
+      summary:cfg.review.querySelector('.duplicate-rows-review-summary').textContent})`), {
+      title: '重复账单提醒',
+      rows: [
+        ['#1', 'a.xlsx', '2', 'ACC1（USD）', '2026-11-01', '保留'], ['a.xlsx', '4', '去除'],
+        ['#2', 'a.xlsx', '6', 'ACC1（USD）', '2026-11-02', '保留'], ['b.xlsx', '2', '去除']
+      ],
+      actions: ['确认', '取消'],
+      summary: '以下账单行所有字段的值都相同，且账户号、账期相同，共 2 组。点击【确认】后每组只保留第一行（标为「保留」），其余 2 行不参与生成原始账单加工表与网银账单；点击【取消】返回主页面，不生成账单。'
+    });
+    await js(`cfg.review.querySelector('[data-action=confirm]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>['importFile','complete','cancelReview'].includes(call.name)).map(call=>[call.name,call.args[0]])`),
+      [['importFile', { duplicateReviewContextId: 'review-1' }]]);
+    assert.equal(await js(`!document.querySelector('.duplicate-rows-review-card')`), true);
+    assert.equal(await js('cfg.applied'), 1);
+
+    // 大账号选择后的复核走大账号完成通道
+    await openReview({ ...REVIEW, reviewKind: 'big-account' });
+    await js(`cfg.review.querySelector('[data-action=confirm]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>['importFile','complete'].includes(call.name)).map(call=>[call.name,call.args[0]])`),
+      [['complete', { duplicateReviewContextId: 'review-1' }]]);
+
+    // 【取消】与 × 一样：清除待确认，不生成；不改状态框与会话（上一批的导出与补录入口保持可用）
+    for (const selector of ['[data-action=cancel]', '.icon-close']) {
+      await openReview();
+      await js(`cfg.review.querySelector('${selector}').click();`); await tick();
+      assert.deepEqual(await js(`cfg.calls.filter(call=>['importFile','complete','cancelReview'].includes(call.name)).map(call=>[call.name,call.args[0]])`),
+        [['cancelReview', 'review-1']], selector);
+      assert.equal(await js('cfg.applied'), 0, selector);
+      assert.equal(await js(`!document.querySelector('.duplicate-rows-review-card')`), true, selector);
+      assert.deepEqual(await js('cfg.feedback'), [], selector);
+    }
+  });
+
+  await test('重复账单提醒：【确认】提交中锁住关闭、取消、导航与替换，重复点击只续跑一次；结果只由原窗口续接', async () => {
+    await openReview();
+    await js(`cfg.write=cfg.defer();cfg.next.importFile=cfg.write;const confirm=cfg.review.querySelector('[data-action=confirm]');confirm.click();confirm.dispatchEvent(new Event('click'));`);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='importFile').length`), 1);
+    assert.equal(await js('cfg.handle.close().status'), 'blocked');
+    assert.equal(await js('cfg.host.closeTop().status'), 'blocked');
+    await js(`cfg.review.querySelector('.icon-close').click();cfg.review.querySelector('[data-action=cancel]').click();`);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='cancelReview').length`), 0);
+    assert.equal(await js('cfg.handle.isTop()&&Boolean(document.querySelector(".duplicate-rows-review-card"))'), true);
+    // 生成失败：错误替换在原窗口位置，关闭后不回到已提交的提醒
+    await js(`cfg.write.resolve({status:'error',message:'重复账单与确认时不一致，请重新导入文件'});`); await tick();
+    assert.equal(await js('cfg.applied'), 1);
+    // 确认没有成功（可能未进入执行）：按 contextId 释放主进程中的待确认数据（已执行时为空操作）
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='cancelReview').map(call=>call.args[0])`), ['review-1']);
+    assert.equal(await js('cfg.handle.isOpen()'), false);
+    assert.match(await js('cfg.top().textContent'), /重复账单与确认时不一致/);
+    assert.equal(await js(`!document.querySelector('.duplicate-rows-review-card')`), true);
+
+    // 提交前被强制结束（如卸载）：迟到的结果只接纳会话，不在新窗口上续接
+    await openReview();
+    await js(`cfg.write=cfg.defer();cfg.next.importFile=cfg.write;cfg.review.querySelector('[data-action=confirm]').click();cfg.handle.dispose();cfg.newHandle=cfg.other();
+      cfg.write.resolve({status:'error',message:'迟到的错误'});`); await tick();
+    assert.equal(await js('cfg.newHandle.isTop()'), true);
+    assert.doesNotMatch(await js('cfg.top().textContent'), /迟到的错误/);
+  });
+
+  await test('重复账单提醒：【确认】未开始生成就被拒绝（配置已修改、源文件已变化、任务未能开始）时只提示原因，不按失败的导入处理', async () => {
+    for (const rejected of [
+      { status: 'error', message: '等待确认期间模板、渠道或账户映射已修改，请重新导入文件', errorCode: 'DUPLICATE_REVIEW_CONFIG_CHANGED', preservesSession: true },
+      { status: 'error', message: '网银明细源文件在确认期间已变化，请重新选择', errorCode: 'BANK_STATEMENT_SOURCE_CHANGED_DURING_CONFIRMATION' },
+      { status: 'failed', message: '文件 evidence 采集失败', code: 'ARCHIVE_INPUT_EVIDENCE_FAILED' }
+    ]) {
+      await openReview();
+      await js(`cfg.next.importFile=${JSON.stringify(rejected)};cfg.review.querySelector('[data-action=confirm]').click();`); await tick();
+      assert.equal(await js('cfg.applied'), 0, rejected.message);
+      assert.match(await js('cfg.top().textContent'), new RegExp(rejected.message.slice(0, 8)), rejected.message);
+      assert.equal(await js(`!document.querySelector('.duplicate-rows-review-card')`), true);
+      assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='cancelReview').map(call=>call.args[0])`), ['review-1'], '释放待确认数据');
+    }
+    // IPC 本身抛错且主进程仍持有待确认数据（释放成功，任务在 prepare 前被拒绝）：没有开始生成，按未开始处理
+    await openReview();
+    await js(`cfg.write=cfg.defer();cfg.next.importFile=cfg.write;cfg.review.querySelector('[data-action=confirm]').click();cfg.write.reject(new Error('恢复保护中，暂不能开始任务'));`); await tick();
+    assert.equal(await js('cfg.applied'), 0);
+    assert.match(await js('cfg.top().textContent'), /恢复保护中/);
+    // IPC 抛错但待确认数据已被执行阶段取走（释放不到，如生成后归档终态写入失败）：无法确认是否已生成，按普通导入失败处理
+    await openReview();
+    await js(`cfg.next.cancelReview={status:'not-active'};cfg.write=cfg.defer();cfg.next.importFile=cfg.write;cfg.review.querySelector('[data-action=confirm]').click();cfg.write.reject(new Error('File Task 终态意图未形成持久记录'));`); await tick();
+    assert.equal(await js('cfg.applied'), 1, '按失败的导入更新状态（不保留上一批的导出与补录入口）');
+    assert.match(await js('cfg.top().textContent'), /终态意图未形成持久记录.*无法确认本次是否已生成/);
+    assert.equal(await js(`!document.querySelector('.duplicate-rows-review-card')`), true);
+  });
+
+  await test('重复账单提醒：超出显示上限时列出前面的行并说明总数，组内未列出的行另起一行标注，表格下方列出全部去除的行号', async () => {
+    await openReview({ ...REVIEW, totalGroups: 3, totalRowCount: 6, droppedRowCount: 3, truncated: true,
+      dropPlanLines: ['第 1 个文件 a.xlsx：第 4 行（1 行）', '第 2 个文件 b.xlsx：第 2-3 行（2 行）'],
+      groups: [REVIEW.groups[0], { ...REVIEW.groups[1], rows: REVIEW.groups[1].rows.slice(0, 1), hiddenRowCount: 1 }] });
+    assert.deepEqual(await js(`({truncated:cfg.review.querySelector('.duplicate-rows-review-truncated').textContent,
+      hidden:[...cfg.review.querySelectorAll('tr.duplicate-rows-review-hidden td')].map(cell=>cell.textContent.trim()),
+      dropPlan:[...cfg.review.querySelectorAll('.duplicate-rows-review-drop-plan > div')].map(line=>line.textContent.trim())})`), {
+      truncated: '仅列出前 3 行，共 3 组 6 行；全部去除的行号见表格下方清单。',
+      hidden: ['该组其余 1 行未列出', '去除'],
+      dropPlan: ['全部去除的行号', '第 1 个文件 a.xlsx：第 4 行（1 行）', '第 2 个文件 b.xlsx：第 2-3 行（2 行）']
+    });
+    // 未截断时不显示清单
+    await openReview();
+    assert.equal(await js(`document.querySelector('.duplicate-rows-review-drop-plan')`), null);
+  });
+
+  await test('重复账单提醒：被导航或其他根弹窗关闭时释放主进程待确认数据；【取消】只释放一次，【确认】提交后不再释放', async () => {
+    await openReview();
+    assert.equal(await js('cfg.host.closeTop().status'), 'closed');
+    await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='cancelReview').map(call=>call.args[0])`), ['review-1']);
+
+    await openReview();
+    await js(`cfg.newHandle=cfg.other();void 0;`); await tick();
+    assert.equal(await js('cfg.handle.isOpen()'), false);
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='cancelReview').map(call=>call.args[0])`), ['review-1'], '根弹窗替换时释放');
+
+    await openReview();
+    await js(`cfg.review.querySelector('[data-action=cancel]').click();`); await tick();
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='cancelReview').length`), 1, '【取消】只发一次');
+
+    await openReview();
+    await js(`cfg.review.querySelector('[data-action=confirm]').click();`); await tick();
+    assert.equal(await js('cfg.handle.isOpen()'), false);
+    assert.deepEqual(await js(`cfg.calls.filter(call=>['importFile','cancelReview'].includes(call.name)).map(call=>call.name)`), ['importFile'], '【确认】提交后关闭不释放');
+  });
+
+  for (const theme of ['light', 'dark']) await test(`重复账单提醒布局（${theme}）：表格在卡片内可滚动，【确认】在右下、【取消】在其右侧`, async () => {
+    const groups = Array.from({ length: 30 }, (_value, index) => ({ seq: index + 1, accountLabel: '6222000000000001（USD）', billDate: '2026-11-01',
+      rows: [{ fileName: '招商银行-上海-11月.xlsx', sourceRowNumber: 2 + index, kept: true }, { fileName: '招商银行-上海-11月（副本）.xlsx', sourceRowNumber: 2 + index, kept: false }] }));
+    await openReview({ ...REVIEW, groups, totalGroups: 30, droppedRowCount: 30 }, { width: 1440, height: 900, theme, zoom: 1 });
+    await js('new Promise(resolve=>setTimeout(resolve,400))'); await layout.settle();
+    const geometry = await js(`(()=>{const rect=element=>element.getBoundingClientRect();
+      const card=cfg.review.querySelector('.modal-card');const wrapper=card.querySelector('.duplicate-rows-review-table-wrapper');
+      const [confirm,cancel]=[...card.querySelectorAll('.dialog-actions button')].map(rect);
+      return {visible:rect(card).width>0&&getComputedStyle(cfg.review).opacity==='1',
+        cardInViewport:rect(card).bottom<=innerHeight&&rect(card).right<=innerWidth,
+        tableScrolls:wrapper.scrollHeight>wrapper.clientHeight,
+        confirmLeftOfCancel:confirm.right<=cancel.left,
+        actionsBottomRight:cancel.right>=rect(card).right-48&&cancel.top>=rect(wrapper).bottom,
+        noHorizontalOverflow:wrapper.scrollWidth<=wrapper.clientWidth};})()`);
+    assert.deepEqual(geometry, { visible: true, cardInViewport: true, tableScrolls: true, confirmLeftOfCancel: true, actionsBottomRight: true, noHorizontalOverflow: true });
+    await layout.evidence(`duplicate-rows-review-${theme}`, { geometry });
   });
 
 };

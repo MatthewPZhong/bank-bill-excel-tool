@@ -49,7 +49,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
         applyManualBalancePromptStatus:value=>f.controller.createFeedbackScope().applyManualBalancePromptStatus(value)});
       const ui={modalHost:f.host,modalBridge:f.bridge,status(element,message,tone,options){element.querySelector('.status-box-text').textContent=message;element.dataset.tone=tone;f.feedback.push({message,tone,options});},
         alertNative:message=>f.alerts.push(message),reportError:error=>f.errors.push(String(error.message||error))};
-      for(const name of ['createAlertDialog','createTemplateManagerDialog','createBigAccountSelectionDialog','createRememberOrderMismatchDialog','createExportScopeDialog','createMonthlyBalanceExportDialog','createManualBalanceSeedDialog','createAccountMappingDialog','createAccountMappingMigrationDialog','createTemplateImportNameDialog'])ui[name]=f.dialogs[name];
+      for(const name of ['createAlertDialog','createTemplateManagerDialog','createBigAccountSelectionDialog','createRememberOrderMismatchDialog','createDuplicateRowsReviewDialog','createExportScopeDialog','createMonthlyBalanceExportDialog','createManualBalanceSeedDialog','createAccountMappingDialog','createAccountMappingMigrationDialog','createTemplateImportNameDialog'])ui[name]=f.dialogs[name];
       f.controller=StatementController.createStatementController({api:f.api,panel:f.panel,config:f.config,ui,initialInfo:{hasEnum:true}});
       f.controller.enter(); void 0;
     `);
@@ -197,6 +197,14 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await js(`statementFixture.next.import={status:'remember-order-mismatch',failedFileNames:['fixture.xlsx'],contextId:'fixture-order',rows:[]};statementFixture.controller.commands.importFile()`); await tick();
     assert.match(await js(`statementFixture.top().textContent`), /fixture.xlsx的账户个数或账户号匹配不上/);
     await js(`statementFixture.host.dispose();`);
+    // v3.2.19：重复账单过滤发现重复 → 打开真实的重复账单提醒
+    await setup();
+    await js(`statementFixture.next.import={status:'duplicate-review',contextId:'fixture-review',reviewKind:'file-import',totalGroups:1,droppedRowCount:1,truncated:false,
+      groups:[{seq:1,accountLabel:'FIXTURE（USD）',billDate:'2026-08-01',rows:[{fileName:'fixture.xlsx',sourceRowNumber:2,kept:true},{fileName:'fixture.xlsx',sourceRowNumber:3,kept:false}]}]};
+      statementFixture.controller.commands.importFile()`); await tick();
+    assert.equal(await js(`!!document.querySelector('.duplicate-rows-review-card')`), true);
+    assert.match(await js(`statementFixture.top().textContent`), /重复账单提醒[\s\S]*fixture.xlsx[\s\S]*FIXTURE（USD）/);
+    await js(`statementFixture.host.dispose();`);
     await setup();
     await js(`statementFixture.next.import={status:'manual-balance-required',message:'需要上一账单余额',manualBalancePromptReady:true,manualBalancePrompt:{merchantId:'FIXTURE',currency:'USD',targetBillDate:'2026-08-01'},detailReady:false,balanceReady:false};statementFixture.controller.commands.importFile();`); await tick();
     await js(`document.getElementById('statusBox').click()`); await tick();
@@ -339,6 +347,195 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await js(`statementFixture.controller.commands.importFile()`);
     assert.equal(await js(`!!document.querySelector('.big-account-selection-card')`), true);
     assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='import').length`), 1);
+  });
+  await test('上一批待补录余额时，迟到的重复账单提醒不丢补录入口；继续时恢复原反馈，取消后仍可点击状态框补录', async () => {
+    await setup();
+    await js(`statementFixture.next.import={status:'manual-balance-required',message:'需要上一账单余额',manualBalancePromptReady:true,manualBalancePrompt:{merchantId:'FIXTURE',currency:'USD',targetBillDate:'2026-08-01'},detailReady:false,balanceReady:false};statementFixture.controller.commands.importFile();`); await tick();
+    await js(`statementFixture.host.closeTop();`); await tick();
+    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.import=statementFixture.pending;
+      statementFixture.controller.commands.importFile();statementFixture.controller.leave();statementFixture.controller.enter();
+      statementFixture.pending.resolve({status:'duplicate-review',contextId:'late-review',reviewKind:'file-import',totalGroups:1,droppedRowCount:1,truncated:false,
+        groups:[{seq:1,accountLabel:'FIXTURE（USD）',billDate:'2026-08-01',rows:[{fileName:'fixture.xlsx',sourceRowNumber:2,kept:true},{fileName:'fixture.xlsx',sourceRowNumber:3,kept:false}]}]});`);
+    await tick();
+    assert.match(await js('statementFixture.text()'), /导入等待确认/);
+    // 等待确认期间补录入口仍在
+    await js(`document.getElementById('statusBox').click()`); await tick();
+    assert.match(await js(`statementFixture.top().textContent`), /FIXTURE/);
+    await js(`statementFixture.host.closeTop();`); await tick();
+    // 继续：恢复上一批的反馈，再打开重复账单提醒
+    await js(`statementFixture.controller.commands.importFile()`); await tick();
+    assert.equal(await js(`!!document.querySelector('.duplicate-rows-review-card')`), true);
+    assert.equal(await js('statementFixture.text()'), '需要上一账单余额');
+    await js(`statementFixture.top().querySelector('[data-action=cancel]').click()`); await tick();
+    assert.deepEqual(await js(`statementFixture.calls.filter(call=>call.name==='cancelAccount').map(call=>call.args[0])`), ['late-review']);
+    assert.equal(await js('statementFixture.text()'), '需要上一账单余额');
+    await js(`document.getElementById('statusBox').click()`); await tick();
+    assert.match(await js(`statementFixture.top().textContent`), /FIXTURE/);
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='import').length`), 2);
+
+    // 等待期间状态框已有新反馈（如完成了补录）：继续时保留新反馈，不回放等待前的旧提示
+    await js(`statementFixture.host.closeTop();`); await tick();
+    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.import=statementFixture.pending;
+      statementFixture.controller.commands.importFile();statementFixture.controller.leave();statementFixture.controller.enter();
+      statementFixture.pending.resolve({status:'duplicate-review',contextId:'late-review-2',reviewKind:'file-import',totalGroups:1,droppedRowCount:1,truncated:false,
+        groups:[{seq:1,accountLabel:'FIXTURE（USD）',billDate:'2026-08-01',rows:[{fileName:'fixture.xlsx',sourceRowNumber:2,kept:true},{fileName:'fixture.xlsx',sourceRowNumber:3,kept:false}]}]});`);
+    await tick();
+    assert.match(await js('statementFixture.text()'), /导入等待确认/);
+    await js(`statementFixture.controller.createFeedbackScope().setStatus('上一账单日余额已补录','success');void 0;`);
+    await js(`statementFixture.controller.commands.importFile()`); await tick();
+    assert.equal(await js(`!!document.querySelector('.duplicate-rows-review-card')`), true);
+    assert.equal(await js('statementFixture.text()'), '上一账单日余额已补录');
+  });
+  await test('重复账单提醒被正在提交的弹窗阻止打开时保留结果：提示等待确认，再点「导入文件」打开原提醒且不重新导入', async () => {
+    await setup();
+    await js(`{const fx=statementFixture;fx.busy=true;const overlay=fx.modal('提交中的窗口');fx.bridge.registerModal(overlay,{canClose:()=>!fx.busy});
+      fx.bridge.openModal(()=>overlay,{owner:'statement-generator'});
+      fx.next.import={status:'duplicate-review',contextId:'blocked-review',reviewKind:'file-import',totalGroups:1,droppedRowCount:1,truncated:false,
+        groups:[{seq:1,accountLabel:'FIXTURE（USD）',billDate:'2026-08-01',rows:[{fileName:'fixture.xlsx',sourceRowNumber:2,kept:true},{fileName:'fixture.xlsx',sourceRowNumber:3,kept:false}]}]};
+      fx.controller.commands.importFile();}void 0;`); await tick();
+    assert.equal(await js(`!!document.querySelector('.duplicate-rows-review-card')`), false);
+    assert.match(await js('statementFixture.text()'), /导入等待确认/);
+    assert.deepEqual(await js(`statementFixture.calls.filter(call=>call.name==='cancelAccount').length`), 0, '不释放主进程上下文');
+    await js(`statementFixture.busy=false;statementFixture.host.closeTop();`); await tick();
+    await js(`statementFixture.controller.commands.importFile()`); await tick();
+    assert.equal(await js(`!!document.querySelector('.duplicate-rows-review-card')`), true);
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='import').length`), 1);
+  });
+  await test('大账号顺序不匹配的提示被正在提交的弹窗阻止打开时保留结果：提示等待确认，再点「导入文件」打开原提示且不重新导入', async () => {
+    await setup();
+    await js(`{const fx=statementFixture;fx.busy=true;const overlay=fx.modal('提交中的窗口');fx.bridge.registerModal(overlay,{canClose:()=>!fx.busy});
+      fx.bridge.openModal(()=>overlay,{owner:'statement-generator'});
+      fx.next.import={status:'remember-order-mismatch',contextId:'order-context',failedFileNames:['fixture.xlsx'],rows:[],rowsWithEmptyBlocks:[],expandedBigAccountOptions:[]};
+      fx.controller.commands.importFile();}void 0;`); await tick();
+    assert.match(await js('statementFixture.text()'), /导入等待确认/);
+    await js(`statementFixture.busy=false;statementFixture.host.closeTop();`); await tick();
+    await js(`statementFixture.controller.commands.importFile()`); await tick();
+    assert.match(await js('statementFixture.top().textContent'), /fixture\.xlsx的账户个数或账户号匹配不上/);
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='import').length`), 1, '不重新导入');
+  });
+  await test('待继续的导入确认与导出选择分别保存：离页期间的导出选择不覆盖待确认的重复账单提醒', async () => {
+    await setup();
+    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.import=statementFixture.pending;
+      statementFixture.controller.commands.importFile();statementFixture.controller.leave();statementFixture.controller.enter();
+      statementFixture.pending.resolve({status:'duplicate-review',contextId:'kept-review',reviewKind:'file-import',totalGroups:1,droppedRowCount:1,truncated:false,
+        groups:[{seq:1,accountLabel:'FIXTURE（USD）',billDate:'2026-08-01',rows:[{fileName:'fixture.xlsx',sourceRowNumber:2,kept:true},{fileName:'fixture.xlsx',sourceRowNumber:3,kept:false}]}]});`);
+    await tick();
+    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.balance=statementFixture.pending;
+      statementFixture.controller.commands.exportBalance();statementFixture.controller.leave();statementFixture.controller.enter();
+      statementFixture.pending.resolve({status:'select-export-scope'});`);
+    await tick();
+    await js(`statementFixture.controller.commands.importFile()`); await tick();
+    assert.equal(await js(`!!document.querySelector('.duplicate-rows-review-card')`), true);
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='import').length`), 1, '不重新导入');
+  });
+  await test('未开始导入的拒绝（只覆盖跨文件去重的一端）：只弹提示，不改状态框与导出按钮，上一批补录入口仍可用', async () => {
+    await setup();
+    await js(`statementFixture.next.import={status:'manual-balance-required',message:'需要上一账单余额',manualBalancePromptReady:true,manualBalancePrompt:{merchantId:'FIXTURE',currency:'USD',targetBillDate:'2026-08-01'},detailReady:true,balanceReady:false};statementFixture.controller.commands.importFile();`); await tick();
+    await js(`statementFixture.host.closeTop();`); await tick();
+    const before = await js(`({text:statementFixture.text(),detail:document.getElementById('exportDetailBtn').disabled})`);
+    await js(`statementFixture.next.import={status:'error',message:'上次导入时「a.xlsx」、「b.xlsx」之间去除过重复账单，只覆盖其中一部分会让交易丢失或重复入账，请把「a.xlsx」、「b.xlsx」一起重新导入',errorCode:'DUPLICATE_KEEPER_REPLACEMENT',preservesSession:true,errorReportReady:false};
+      statementFixture.controller.commands.importFile();`); await tick();
+    assert.match(await js('statementFixture.top().textContent'), /只覆盖其中一部分会让交易丢失或重复入账/);
+    assert.deepEqual(await js(`({text:statementFixture.text(),detail:document.getElementById('exportDetailBtn').disabled})`), before);
+    await js(`statementFixture.host.closeTop();`); await tick();
+    await js(`document.getElementById('statusBox').click()`); await tick();
+    assert.match(await js(`statementFixture.top().textContent`), /FIXTURE/);
+  });
+  await test('未开始导入的拒绝在弹窗宿主忙时保留：提示点击「导入文件」查看原因，再点时弹出原提示且不重新导入', async () => {
+    await setup();
+    await js(`statementFixture.controller.createFeedbackScope().setStatus('上一批已生成','success');void 0;`);
+    await js(`{const fx=statementFixture;fx.busy=true;const overlay=fx.modal('提交中的窗口');fx.bridge.registerModal(overlay,{canClose:()=>!fx.busy});
+      fx.bridge.openModal(()=>overlay,{owner:'statement-generator'});
+      fx.next.import={status:'error',message:'请把「a.xlsx」、「b.xlsx」一起重新导入',errorCode:'DUPLICATE_KEEPER_REPLACEMENT',preservesSession:true,errorReportReady:false};
+      fx.controller.commands.importFile();}void 0;`); await tick();
+    assert.doesNotMatch(await js(`statementFixture.root.textContent`), /一起重新导入/);
+    assert.match(await js('statementFixture.text()'), /本次导入未开始，请点击“导入文件”查看原因/);
+    await js(`statementFixture.busy=false;statementFixture.host.closeTop();`); await tick();
+    await js(`statementFixture.controller.commands.importFile()`); await tick();
+    assert.match(await js('statementFixture.top().textContent'), /一起重新导入/);
+    assert.equal(await js('statementFixture.text()'), '上一批已生成', '恢复原反馈');
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='import').length`), 1, '不重新导入');
+  });
+  await test('离页期间返回的未开始导入拒绝：状态框只显示不含文件名的提示（状态框写入日志），再点「导入文件」弹出原提示且不重新导入', async () => {
+    await setup();
+    await js(`statementFixture.controller.createFeedbackScope().setStatus('上一批已生成','success');void 0;`);
+    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.import=statementFixture.pending;
+      statementFixture.controller.commands.importFile();statementFixture.controller.leave();statementFixture.controller.enter();
+      statementFixture.pending.resolve({status:'error',message:'请把「a-6222.xlsx」、「b-6222.xlsx」一起重新导入',errorCode:'DUPLICATE_KEEPER_REPLACEMENT',preservesSession:true,errorReportReady:false});`);
+    await tick();
+    assert.match(await js('statementFixture.text()'), /本次导入未开始，请点击“导入文件”查看原因/);
+    assert.equal(await js(`statementFixture.feedback.some(item=>/6222/.test(item.message))`), false, '状态框（会写入日志）不含文件名');
+    await js(`statementFixture.controller.commands.importFile()`); await tick();
+    assert.match(await js('statementFixture.top().textContent'), /a-6222\.xlsx/);
+    assert.equal(await js('statementFixture.text()'), '上一批已生成');
+    assert.equal(await js(`statementFixture.calls.filter(call=>call.name==='import').length`), 1, '不重新导入');
+  });
+  await test('两项等待操作先后继续：仍有效的等待提示保留，最后恢复的是等待前的原反馈，不回放已失效的导入提示', async () => {
+    await setup();
+    await js(`statementFixture.controller.createFeedbackScope().setStatus('上一批已生成','success');void 0;`);
+    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.import=statementFixture.pending;
+      statementFixture.controller.commands.importFile();statementFixture.controller.leave();statementFixture.controller.enter();
+      statementFixture.pending.resolve({status:'duplicate-review',contextId:'two-review',reviewKind:'file-import',totalGroups:1,droppedRowCount:1,truncated:false,
+        groups:[{seq:1,accountLabel:'FIXTURE（USD）',billDate:'2026-08-01',rows:[{fileName:'fixture.xlsx',sourceRowNumber:2,kept:true},{fileName:'fixture.xlsx',sourceRowNumber:3,kept:false}]}]});`);
+    await tick();
+    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.balance=statementFixture.pending;
+      statementFixture.controller.commands.exportBalance();statementFixture.controller.leave();statementFixture.controller.enter();
+      statementFixture.pending.resolve({status:'select-export-scope'});`);
+    await tick();
+    assert.match(await js('statementFixture.text()'), /导出等待选择/);
+    // 继续并取消导入：导出仍在等待，保留导出的等待提示
+    await js(`statementFixture.controller.commands.importFile()`); await tick();
+    await js(`statementFixture.top().querySelector('[data-action=cancel]').click()`); await tick();
+    assert.match(await js('statementFixture.text()'), /导出等待选择/);
+    // 继续导出：恢复等待前的原反馈（不是「导入等待确认」）
+    await js(`statementFixture.controller.commands.exportBalance()`); await tick();
+    assert.equal(await js('statementFixture.text()'), '上一批已生成');
+  });
+  await test('两项等待操作先继续较晚的一项：状态框换成另一项仍有效的等待提示，最后才恢复原反馈', async () => {
+    await setup();
+    await js(`statementFixture.controller.createFeedbackScope().setStatus('上一批已生成','success');void 0;`);
+    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.import=statementFixture.pending;
+      statementFixture.controller.commands.importFile();statementFixture.controller.leave();statementFixture.controller.enter();
+      statementFixture.pending.resolve({status:'duplicate-review',contextId:'order-review',reviewKind:'file-import',totalGroups:1,droppedRowCount:1,truncated:false,
+        groups:[{seq:1,accountLabel:'FIXTURE（USD）',billDate:'2026-08-01',rows:[{fileName:'fixture.xlsx',sourceRowNumber:2,kept:true},{fileName:'fixture.xlsx',sourceRowNumber:3,kept:false}]}]});`);
+    await tick();
+    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.balance=statementFixture.pending;
+      statementFixture.controller.commands.exportBalance();statementFixture.controller.leave();statementFixture.controller.enter();
+      statementFixture.pending.resolve({status:'select-export-scope'});`);
+    await tick();
+    // 先继续导出并关闭选择：导入仍在等待，状态框显示导入的等待提示
+    await js(`statementFixture.controller.commands.exportBalance()`); await tick();
+    assert.match(await js('statementFixture.text()'), /导入等待确认/);
+    await js(`statementFixture.host.closeTop();`); await tick();
+    assert.match(await js('statementFixture.text()'), /导入等待确认/);
+    // 再继续导入：没有其他待办，恢复原反馈
+    await js(`statementFixture.controller.commands.importFile()`); await tick();
+    assert.equal(await js('statementFixture.text()'), '上一批已生成');
+    assert.equal(await js(`!!document.querySelector('.duplicate-rows-review-card')`), true);
+  });
+  await test('两项等待之间已有新反馈（如完成了补录）：先继续较晚的一项后，剩余一项继续时恢复的是新反馈，不回放已完成的补录提示', async () => {
+    await setup();
+    await js(`statementFixture.next.import={status:'manual-balance-required',message:'需要上一账单余额',manualBalancePromptReady:true,manualBalancePrompt:{merchantId:'FIXTURE',currency:'USD',targetBillDate:'2026-08-01'},detailReady:false,balanceReady:false};statementFixture.controller.commands.importFile();`); await tick();
+    await js(`statementFixture.host.closeTop();`); await tick();
+    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.import=statementFixture.pending;
+      statementFixture.controller.commands.importFile();statementFixture.controller.leave();statementFixture.controller.enter();
+      statementFixture.pending.resolve({status:'duplicate-review',contextId:'stale-review',reviewKind:'file-import',totalGroups:1,droppedRowCount:1,truncated:false,
+        groups:[{seq:1,accountLabel:'FIXTURE（USD）',billDate:'2026-08-01',rows:[{fileName:'fixture.xlsx',sourceRowNumber:2,kept:true},{fileName:'fixture.xlsx',sourceRowNumber:3,kept:false}]}]});`);
+    await tick();
+    assert.match(await js('statementFixture.text()'), /导入等待确认/);
+    // 等待期间完成了上一批的补录
+    await js(`statementFixture.controller.createFeedbackScope().setStatus('上一账单日余额已补录','success');void 0;`);
+    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.balance=statementFixture.pending;
+      statementFixture.controller.commands.exportBalance();statementFixture.controller.leave();statementFixture.controller.enter();
+      statementFixture.pending.resolve({status:'select-export-scope'});`);
+    await tick();
+    assert.match(await js('statementFixture.text()'), /导出等待选择/);
+    await js(`statementFixture.controller.commands.exportBalance()`); await tick();
+    assert.match(await js('statementFixture.text()'), /导入等待确认/);
+    await js(`statementFixture.host.closeTop();`); await tick();
+    await js(`statementFixture.controller.commands.importFile()`); await tick();
+    assert.equal(await js('statementFixture.text()'), '上一账单日余额已补录');
+    assert.equal(await js(`!!document.querySelector('.duplicate-rows-review-card')`), true);
   });
   await test('导出范围忙碌时拒绝双击及关闭，最终销毁后的旧回应不接管新窗口', async () => {
     await setup();

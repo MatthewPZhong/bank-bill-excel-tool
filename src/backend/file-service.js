@@ -20,6 +20,21 @@ const {
   upgradeLegacyFeatureFilter
 } = require('./file-service/feature-filter');
 const {
+  LOGIC_VALUE_MIN_FIELDS,
+  buildLogicValueToken,
+  collectLogicValueFields,
+  normalizeLogicValueFields,
+  parseLogicValueToken,
+  resolveLogicValue
+} = require('./file-service/logic-value');
+const {
+  buildSourceRowKey,
+  describeDuplicateKeeperReplacementConflicts,
+  dropDuplicateSourceRows,
+  findDuplicateKeeperReplacementConflicts,
+  scanDuplicateSourceRows
+} = require('./file-service/duplicate-source-rows');
+const {
   ensureSupportedFile,
   extractEnumValuesFromImportedFile,
   extractHeaders,
@@ -31,6 +46,7 @@ const {
   calculateEndingBalanceFromAmounts,
   compileRegexLiteral,
   hasEffectiveAmount,
+  isZeroOrBlankAmount,
   inferDateCellFormat,
   verifyStatementEndingBalance,
   isRegexLiteral,
@@ -191,7 +207,10 @@ function buildMappedRows({
   // v3.2.16：MerchantId「原始账单仅有币种无账户号」时为 { templateName, pairs: [{ currency, merchantId }] }
   currencyBigAccountMapping = null,
   // v3.2.19：原始账单预处理「过滤账单」的过滤规则（main.js 只在勾选且规则有效时下发，否则为 null）
-  preprocessRowFilterRules = null
+  preprocessRowFilterRules = null,
+  // v3.2.19：原始账单预处理「重复账单过滤」——为 true 时每个源行的内容指纹写入 rowMetas[i].sourceRowKey，
+  //   供导入时跨文件查重（duplicate-source-rows.js）；不开启时不计算。
+  duplicateRowKeys = false
 }) {
   // 拿不到 币种 → 大账号 配置时直接拒绝，避免 MerchantId 整列留空静默输出。
   const merchantIdUsesCurrencyMapping = normalizeMappingTokens(mappingByField && mappingByField.MerchantId)[0]
@@ -199,12 +218,32 @@ function buildMappedRows({
   if (merchantIdUsesCurrencyMapping && !currencyBigAccountMapping) {
     throw createCurrencyBigAccountConfigMissingError('');
   }
-  const { rows: sourceRows, rowNumbers: sourceRowNumbers, headerBreaks = [] } = readRowsWithMetadata(
+  const {
+    rows: sourceRows,
+    rowNumbers: sourceRowNumbers,
+    headerBreaks = [],
+    fullRows: sourceFullRows = null,
+    fullHeaders: sourceFullHeaders = null,
+    fullColumnOffset: sourceFullColumnOffset = 0
+  } = readRowsWithMetadata(
     inputFilePath,
     expectedSourceHeaders,
-    readOptions
+    duplicateRowKeys ? { ...readOptions, includeFullRows: true } : readOptions
   );
   const sourceHeaders = sourceRows[0] || [];
+  // v3.2.19 重复账单过滤：指纹按整行计算——源行与其所属分段的表头都含模板表头范围以外的列（模板没取的列如流水号
+  //   不同、或分段表头不同都不算重复），Excel 错误值与空白不同。
+  const fullSourceRowByNumber = new Map();
+  if (sourceFullRows) {
+    sourceRowNumbers.forEach((rowNumber, index) => {
+      if (index > 0) {
+        fullSourceRowByNumber.set(rowNumber, {
+          headers: (sourceFullHeaders && sourceFullHeaders[index]) || sourceFullRows[0] || sourceHeaders,
+          cells: sourceFullRows[index]
+        });
+      }
+    });
+  }
   const sourceIndexByField = new Map();
   const issues = [];
   const rowMetas = [];
@@ -347,6 +386,15 @@ function buildMappedRows({
     });
   }
 
+  // v3.2.19：逻辑取值的候补字段须都在源文件表头中（主映射；拆分不复用模块映射时含拆分映射）
+  collectLogicValueFields(mappingByField)
+    .concat(billSplitEnabled && !billSplitReuseModuleMapping ? collectLogicValueFields(billSplitMappingByField) : [])
+    .forEach((field) => {
+      if (!sourceIndexByField.has(field)) {
+        throw new FileValidationError('FILE_READ', `映射字段不存在：${field}`);
+      }
+    });
+
   if (billSplitEnabled) {
     function ensureBillSplitFieldExists(fieldName) {
       const normalized = normalizeCell(fieldName);
@@ -408,6 +456,15 @@ function buildMappedRows({
       const featureFilterId = parseFeatureFilterToken(token);
       if (featureFilterId !== null) {
         return featureValues.get(featureFilterId) ?? '';
+      }
+
+      // v3.2.19：逻辑取值——按顺序取第一个去首尾空白后非空的候补字段原值（token 以 NUL 开头，不会与真实列名相同）
+      const logicValueFields = parseLogicValueToken(token);
+      if (logicValueFields !== null) {
+        return resolveLogicValue(logicValueFields, (field) => {
+          const index = sourceIndexByField.get(field);
+          return index === undefined ? '' : row[index];
+        });
       }
 
       const sourceIndex = sourceIndexByField.get(token);
@@ -750,6 +807,15 @@ function buildMappedRows({
 
   rows.slice(1).forEach((row, rowIndex) => {
     currentRowFeeFormulaDivisionByZero = false;
+    // v3.2.19：重复账单过滤的源行指纹（经「过滤账单」保留的行才会进入本循环）
+    const fullSourceRow = duplicateRowKeys ? fullSourceRowByNumber.get(rowNumbers[rowIndex + 1]) : null;
+    const sourceRowKey = duplicateRowKeys
+      ? (fullSourceRow
+        ? buildSourceRowKey(fullSourceRow.headers, fullSourceRow.cells, { columnOffset: sourceFullColumnOffset })
+        : buildSourceRowKey(sourceHeaders, row))
+      : '';
+    // 开启查重但该行无法核对原文（含公式、编码有损等）时记下，生成提示据此说明有多少行未参与查重
+    const sourceRowKeyMeta = sourceRowKey ? { sourceRowKey } : (duplicateRowKeys ? { sourceRowKeyUnavailable: true } : {});
     const rowUsesBillSplit = billSplitEnabled
       && (!compiledBillSplitRowFilter || matchesBillSplitRowFilter(row, compiledBillSplitRowFilter));
     if (rowUsesBillSplit) {
@@ -866,7 +932,7 @@ function buildMappedRows({
     }
 
     if (!rowUsesBillSplit) {
-      rowMetas.push({ sourceRowNumber });
+      rowMetas.push({ sourceRowNumber, ...sourceRowKeyMeta });
     }
 
     // P1 Fix A (PR #16 review): 提取单行映射计算为可复用 helper，以便 billSplit 的
@@ -1060,7 +1126,7 @@ function buildMappedRows({
         countAmountSplitHits();
       }
       merged.forEach((entry) => {
-        rowMetas.push({ sourceRowNumber: entry.sourceRowNumber });
+        rowMetas.push({ sourceRowNumber: entry.sourceRowNumber, ...sourceRowKeyMeta });
         mappedRows.push(entry.rowArray);
       });
       if (merged.length > 0) {
@@ -1210,10 +1276,8 @@ function buildDetailExportRows(rows) {
     const exportRow = sourceRow.slice();
     const creditAmountValue = creditAmountIndex === undefined ? '' : sourceRow[creditAmountIndex];
     const debitAmountValue = debitAmountIndex === undefined ? '' : sourceRow[debitAmountIndex];
-    const creditAmountNumeric = parseNumericValue(creditAmountValue);
-    const debitAmountNumeric = parseNumericValue(debitAmountValue);
-    const isCreditAmountZeroOrBlank = normalizeCell(creditAmountValue) === '' || creditAmountNumeric === 0;
-    const isDebitAmountZeroOrBlank = normalizeCell(debitAmountValue) === '' || debitAmountNumeric === 0;
+    const isCreditAmountZeroOrBlank = isZeroOrBlankAmount(creditAmountValue);
+    const isDebitAmountZeroOrBlank = isZeroOrBlankAmount(debitAmountValue);
 
     if (
       creditAmountIndex !== undefined &&
@@ -1357,10 +1421,17 @@ module.exports = {
   normalizeRowFilterRules,
   validateRowFilterRules,
   normalizeDateExportValue,
+  describeDuplicateKeeperReplacementConflicts,
+  dropDuplicateSourceRows,
+  findDuplicateKeeperReplacementConflicts,
+  scanDuplicateSourceRows,
   buildFeatureFilterToken,
+  buildLogicValueToken,
   getFeatureFilterRef,
   normalizeFeatureFilterList,
   normalizeFeatureFilterRule,
+  normalizeLogicValueFields,
+  LOGIC_VALUE_MIN_FIELDS,
   LEGACY_FEATURE_FILTER_ID,
   parseFeatureFilterToken,
   resolveUsedFeatureFilters,

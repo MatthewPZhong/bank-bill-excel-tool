@@ -256,6 +256,61 @@ function ensureTemplatePreprocessRowFilterSupport(db) {
   if (!hasColumn(db, 'templates', 'preprocess_row_filter_rules_json')) {
     db.exec("ALTER TABLE templates ADD COLUMN preprocess_row_filter_rules_json TEXT NOT NULL DEFAULT '';");
   }
+  upgradeLegacyLogicValueConcatMappings(db);
+}
+
+// v3.2.19：映射字段新增「逻辑取值」模式（mappedField='逻辑取值'、mappedFields=有序候补字段）。升级前不存在这个模式，
+//   旧库里 mapped_field 为「逻辑取值」、mapped_fields_json 有多个字段的行，是旧式按序拼接（首个源字段恰好是名为「逻辑取值」
+//   的列），升级后会被当成取第一个非空值、改变输出（如发生额 1 与 00 拼成 100 变成 1）。首次升级时一次性还原为需要拼接字段；
+//   单字段 / 无字段的是直接映射该列，生成时照旧按该列读取，不动。以 app_settings 标记保证只执行一次（之后新建的逻辑取值不受影响）。
+const LOGIC_VALUE_MAPPING_VALUE = '逻辑取值';
+const CONCAT_FIELDS_MAPPING_VALUE = '需要拼接字段';
+const LEGACY_LOGIC_VALUE_CONCAT_MIGRATED_KEY = 'template_mappings_legacy_logic_value_concat_v3_2_19';
+
+function upgradeLegacyLogicValueConcatMappings(db) {
+  let marker = null;
+  try {
+    marker = db.prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?').get(LEGACY_LOGIC_VALUE_CONCAT_MIGRATED_KEY);
+  } catch (_error) {
+    // app_settings 表还不存在（极早期启动）：下次启动再执行
+    return { status: 'skipped' };
+  }
+  if (marker && marker.setting_value === 'true') return { status: 'done' };
+  const now = new Date().toISOString();
+  let updated = 0;
+  db.exec('BEGIN');
+  try {
+    ['template_mappings', 'template_bill_split_mappings'].forEach((table) => {
+      const rows = db.prepare(`
+        SELECT id, mapped_fields_json AS mappedFieldsJson FROM ${table} WHERE TRIM(mapped_field) = ?
+      `).all(LOGIC_VALUE_MAPPING_VALUE);
+      const update = db.prepare(`UPDATE ${table} SET mapped_field = ? WHERE id = ?`);
+      rows.forEach((row) => {
+        let fields = [];
+        try {
+          fields = JSON.parse(row.mappedFieldsJson || '[]');
+        } catch (_error) {
+          fields = [];
+        }
+        const nonEmpty = (Array.isArray(fields) ? fields : []).filter((value) => normalizeText(value) !== '');
+        if (nonEmpty.length > 1) {
+          update.run(CONCAT_FIELDS_MAPPING_VALUE, row.id);
+          updated += 1;
+        }
+      });
+    });
+    db.prepare(`
+      INSERT INTO app_settings (setting_key, setting_value, updated_at)
+      VALUES (?, 'true', ?)
+      ON CONFLICT(setting_key) DO UPDATE
+      SET setting_value = excluded.setting_value, updated_at = excluded.updated_at
+    `).run(LEGACY_LOGIC_VALUE_CONCAT_MIGRATED_KEY, now);
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  return { status: 'migrated', updated };
 }
 
 function ensureAccountMappingTemplateSupport(db) {
@@ -4550,6 +4605,7 @@ module.exports = {
   ensureTemplateFilenameFixedFieldSupport,
   ensureTemplateFeatureFilterSupport,
   ensureTemplatePreprocessRowFilterSupport,
+  upgradeLegacyLogicValueConcatMappings,
   ensureTemplateMappingEnhancements,
   ensureTemplateKeySupport,
   hasColumn,

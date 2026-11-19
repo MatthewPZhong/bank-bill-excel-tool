@@ -9,14 +9,16 @@
       monthlyBalanceReady:false,monthlyBalancePreview:null,canExportDetail:false,canExportBalance:false,
       hasEnum:!!initialInfo.hasEnum,enumFileName:initialInfo.enumFileName||'',hasErrorReport:!!initialInfo.hasErrorReport,
       manualBalancePromptReady:false,manualBalancePrompt:null };
-    let active=false, disposed=false, generation=0, actionSequence=0, busy=false, pending=null, pendingInteraction=null;
+    // pendingInteractions：按操作类型（import / balance / …）分别保存待继续的选择 / 确认，导出选择不会覆盖待确认的导入
+    let active=false, disposed=false, generation=0, actionSequence=0, busy=false, pending=null, deferSequence=0;
+    const pendingInteractions=new Map();
     let feedback={message:initialInfo.ownAccountsMigrationError || (state.hasEnum ? '欢迎使用小助手' : '内置网银账单枚举表缺失，请检查安装包'),tone:initialInfo.ownAccountsMigrationError || !state.hasEnum ? 'error' : 'info',options:{}};
     const removers=[];
     const live=(version=generation)=>active&&!disposed&&version===generation;
     const reportError=error=>ui.reportError?.(error);
     const updateStatusBox=(...args)=>{if(live())ui.status(...args);};
     function openModal(factory) { return live() ? ui.modalBridge.openModal(factory,{owner}) : {status:'stale'}; }
-    const {createAlertDialog,createTemplateManagerDialog,createBigAccountSelectionDialog,createRememberOrderMismatchDialog,
+    const {createAlertDialog,createTemplateManagerDialog,createBigAccountSelectionDialog,createRememberOrderMismatchDialog,createDuplicateRowsReviewDialog,
       createExportScopeDialog,createMonthlyBalanceExportDialog,createManualBalanceSeedDialog,createAccountMappingDialog,createAccountMappingMigrationDialog,
       createChannelAccountMappingConflictDialog,createTemplateImportNameDialog}=ui;
     const getStatementChannels=()=>typeof config.getStatementChannels==='function'?config.getStatementChannels():[];
@@ -336,10 +338,20 @@ async function handleOpenAccountMappings() {
     function present(kind,result) {
       if (!result || result.status==='cancelled' || result.status==='empty') return;
       if(kind==='import') {
-        if(result.status==='select-big-account') { openModal(()=>createBigAccountSelectionDialog(result)); return; }
+        if(result.status==='select-big-account') { openInteraction(kind,result,()=>createBigAccountSelectionDialog(result)); return; }
+        // v3.2.19：重复账单过滤发现重复，确认后才生成（取消返回主页面）
+        if(result.status==='duplicate-review') { openInteraction(kind,result,()=>createDuplicateRowsReviewDialog(result)); return; }
+        // v3.2.19：未开始导入的拒绝（如只覆盖跨文件去重的一端）：会话、导出与补录入口都没变，只弹提示，不改状态框与导出按钮
+        if(result.status==='error'&&result.preservesSession) {
+          const text=String(result.message||'').replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[ch]);
+          // 消息含文件名（可能含账户号）：只在弹窗显示，不写入活动日志。宿主拒绝打开（如另一个弹窗正在提交）时保留这条提示，
+          //   用户再点「导入文件」时弹出（不重新导入）
+          openInteraction(kind,result,()=>createAlertDialog(text,{skipLogReport:true})); return;
+        }
         if(result.status==='remember-order-mismatch') {
           const failedLines=(result.failedFileNames||[]).map(name=>name+'的账户个数或账户号匹配不上（账户个数和账户号都匹配不上），请检查。').join('<br/>');
-          openModal(()=>createRememberOrderMismatchDialog({message:failedLines,bigAccountResult:result}));return;
+          // 与大账号选择一样持有主进程待选择的上下文：宿主拒绝打开时保留结果，用户再点「导入文件」继续
+          openInteraction(kind,result,()=>createRememberOrderMismatchDialog({message:failedLines,bigAccountResult:result}));return;
         }
         applyStatementResult(result);
         // 账单日期断档、余额校验不一致、人工补录替换直接弹出确认；关闭后仍可点击状态框重新打开。
@@ -368,12 +380,39 @@ async function handleOpenAccountMappings() {
         manualBalancePrompt:keepBalancePrompt?state.manualBalancePrompt:null
       });
     }
+    // 等待用户继续的选择 / 确认：另存此前的状态框反馈（含上一批待补录余额的入口），提示期间保留补录入口；用户继续时若状态框
+    //   仍是这条等待提示则恢复原反馈，之后取消选择 / 确认也不会丢掉上一批的可用操作；期间已有新反馈（如完成了补录）则保留新反馈。
+    function deferInteraction(kind, result) {
+      // 状态框正显示另一项操作的等待提示时，沿用那一项保存的原反馈，不把等待提示当作原反馈（之后不会回放已失效的提示）
+      const waitingOwner = Array.from(pendingInteractions.values())
+        .find((item) => item.waitingFeedback && feedback && item.waitingFeedback.message === feedback.message);
+      const previousFeedbackBeforeWait = waitingOwner ? waitingOwner.previousFeedback : feedback;
+      const waitingMessage = kind !== 'import'
+        ? '导出等待选择，请点击原导出按钮继续'
+        : (result && result.status === 'error' ? '本次导入未开始，请点击“导入文件”查看原因' : '导入等待确认，请点击“导入文件”继续');
+      setStatus(waitingMessage, 'info', {
+        manualBalancePromptReady: state.manualBalancePromptReady,
+        manualBalancePrompt: state.manualBalancePrompt
+      });
+      // sequence：后保存的待办记下的原反馈更新（期间可能已有新反馈，如完成了补录）
+      pendingInteractions.set(kind, { kind, result, previousFeedback: previousFeedbackBeforeWait, waitingFeedback: feedback, sequence: ++deferSequence });
+    }
+    // 打开选择 / 确认窗口；宿主拒绝打开（如另一个弹窗正在提交）时保留结果与主进程上下文，用户再点原按钮继续
+    function openInteraction(kind, result, factory) {
+      const opened = openModal(factory);
+      if (!opened || opened.status !== 'opened') deferInteraction(kind, result);
+    }
     function acceptBackgroundOutcome({ kind, result }) {
       if (!result || result.status === 'cancelled' || result.status === 'empty') return;
       // 后台 IPC 已执行，保留返回事实；旧页面的选择窗口不在新一轮 enter 中自动复活。
-      if (['select-big-account', 'remember-order-mismatch', 'select-export-scope'].includes(result.status)) {
-        pendingInteraction = { kind, result };
-        setStatus(kind === 'import' ? '导入等待确认，请点击“导入文件”继续' : '导出等待选择，请点击原导出按钮继续', 'info');
+      if (['select-big-account', 'remember-order-mismatch', 'select-export-scope', 'duplicate-review'].includes(result.status)) {
+        deferInteraction(kind, result);
+        return;
+      }
+      if (kind === 'import' && result.status === 'error' && result.preservesSession) {
+        // 离页期间被拒绝、未开始的导入：保留这条提示与上一批的导出、补录入口。提示可能含文件名（可能含账户号），
+        //   状态框只显示不含文件名的等待文案（状态框会写入活动日志），用户再点「导入文件」时以不写日志的弹窗显示原提示
+        deferInteraction(kind, result);
         return;
       }
       if (kind === 'import') applyStatementResult(result, { allowAlerts: false });
@@ -381,9 +420,26 @@ async function handleOpenAccountMappings() {
     }
     async function perform(kind,work) {
       if(!live()||busy)return;
-      if (pendingInteraction?.kind === kind) {
-        const outcome = pendingInteraction;
-        pendingInteraction = null;
+      if (pendingInteractions.has(kind)) {
+        const outcome = pendingInteractions.get(kind);
+        pendingInteractions.delete(kind);
+        const previous = outcome.previousFeedback;
+        const remaining = Array.from(pendingInteractions.values()).at(-1);
+        if (remaining && feedback && outcome.waitingFeedback && feedback.message === outcome.waitingFeedback.message) {
+          // 另一项仍在等待：状态框换成它的等待提示（保留补录入口），不回放等待前的反馈
+          setStatus(remaining.waitingFeedback.message, 'info', {
+            manualBalancePromptReady: state.manualBalancePromptReady,
+            manualBalancePrompt: state.manualBalancePrompt
+          });
+          remaining.waitingFeedback = feedback;
+          // 一并交接最近的原反馈：继续的这一项保存得更晚时，它记下的原反馈比剩余一项的更新
+          if (outcome.sequence > remaining.sequence) {
+            remaining.previousFeedback = previous;
+            remaining.sequence = outcome.sequence;
+          }
+        } else if (previous && feedback && outcome.waitingFeedback && feedback.message === outcome.waitingFeedback.message) {
+          setStatus(previous.message, previous.tone, previous.options);
+        }
         present(kind, outcome.result);
         return outcome.result;
       }

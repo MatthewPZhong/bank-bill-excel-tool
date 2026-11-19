@@ -530,6 +530,51 @@ function createStatementGenerationHelpers(deps) {
       .flatMap((warning) => (Array.isArray(warning.replacements) ? warning.replacements : []));
   }
 
+  // v3.2.19：重复账单过滤确认后去除的源行数（各文件 duplicateRowFilterStats 合计）
+  function countDuplicateDroppedRows(fileEntries) {
+    return (Array.isArray(fileEntries) ? fileEntries : []).reduce((sum, entry) => {
+      const stats = entry && entry.detailRows && entry.detailRows.duplicateRowFilterStats;
+      return sum + (stats && Number.isInteger(stats.droppedRowCount) ? stats.droppedRowCount : 0);
+    }, 0);
+  }
+
+  // v3.2.19：开启重复账单过滤但无法核对原文、未参与查重的源行数（含公式、编码有损、格式无法核对等，保留不删）。
+  //   拆分出的多行按源行计一次。
+  function countDuplicateUncheckedRows(fileEntries) {
+    return (Array.isArray(fileEntries) ? fileEntries : []).reduce((sum, entry) => {
+      const metas = entry && entry.detailRows && Array.isArray(entry.detailRows.rowMetas) ? entry.detailRows.rowMetas : [];
+      const rowNumbers = new Set(metas.filter((meta) => meta && meta.sourceRowKeyUnavailable === true)
+        .map((meta) => meta.sourceRowNumber));
+      return sum + rowNumbers.size;
+    }, 0);
+  }
+
+  function withDuplicateDroppedMessage(message, droppedRowCount, uncheckedRowCount = 0) {
+    const parts = [];
+    if (droppedRowCount) parts.push(`已去除重复账单行 ${droppedRowCount} 行`);
+    if (uncheckedRowCount) parts.push(`${uncheckedRowCount} 行无法核对原文，未参与重复账单过滤`);
+    if (!parts.length) return message;
+    const suffix = parts.join('；');
+    return message ? `${message}；${suffix}` : suffix;
+  }
+
+  // 等待余额处理（补录、断档、不一致、替换）的结果同样带上去重行数，保留原余额操作提示
+  function attachDuplicateDropped(result, droppedRowCount, uncheckedRowCount = 0) {
+    if ((!droppedRowCount && !uncheckedRowCount) || !result || typeof result !== 'object') return result;
+    if (droppedRowCount) result.duplicateDroppedRowCount = droppedRowCount;
+    if (uncheckedRowCount) {
+      result.duplicateUncheckedRowCount = uncheckedRowCount;
+      // 等待余额处理的结果由余额结果构造时写日志，不含查重情况：另记一条，审计记录与界面提示一致
+      if (typeof appendActivityLogEntry === 'function') appendActivityLogEntry({
+        level: 'info',
+        message: '重复账单过滤：部分账单行未参与查重',
+        details: [`无法核对原文、未参与重复账单过滤：${uncheckedRowCount} 行`]
+      });
+    }
+    result.message = withDuplicateDroppedMessage(result.message, droppedRowCount, uncheckedRowCount);
+    return result;
+  }
+
   function buildImportResultFromGeneratedFiles({
     generatedFiles,
     templateId,
@@ -537,6 +582,13 @@ function createStatementGenerationHelpers(deps) {
     inputFilePath,
     inputFilePaths
   }) {
+    // 补录余额后重新生成时 generatedFiles 不带 fileEntries，由调用方按会话条目算好传入 duplicateDroppedRowCount
+    const duplicateDroppedRowCount = Number.isInteger(generatedFiles.duplicateDroppedRowCount)
+      ? generatedFiles.duplicateDroppedRowCount
+      : countDuplicateDroppedRows(generatedFiles.fileEntries);
+    const duplicateUncheckedRowCount = Number.isInteger(generatedFiles.duplicateUncheckedRowCount)
+      ? generatedFiles.duplicateUncheckedRowCount
+      : countDuplicateUncheckedRows(generatedFiles.fileEntries);
     const manualBalanceWarning = extractManualBalancePromptWarning(generatedFiles.warnings);
     const normalizedInputFilePaths = normalizeInputFilePaths(inputFilePaths || inputFilePath);
     const unmatchedAmountSplitFiles = Array.isArray(generatedFiles.unmatchedAmountSplitFiles)
@@ -562,7 +614,7 @@ function createStatementGenerationHelpers(deps) {
       if (emptyPreprocessedFiles.length) {
         manualResult.emptyPreprocessedFiles = emptyPreprocessedFiles;
       }
-      return manualResult;
+      return attachDuplicateDropped(manualResult, duplicateDroppedRowCount, duplicateUncheckedRowCount);
     }
 
     const balanceGaps = extractBalanceGapConfirmGaps(generatedFiles.warnings);
@@ -577,7 +629,7 @@ function createStatementGenerationHelpers(deps) {
       if (emptyPreprocessedFiles.length) {
         gapResult.emptyPreprocessedFiles = emptyPreprocessedFiles;
       }
-      return gapResult;
+      return attachDuplicateDropped(gapResult, duplicateDroppedRowCount, duplicateUncheckedRowCount);
     }
 
     const balanceMismatches = extractBalanceMismatchConfirmItems(generatedFiles.warnings);
@@ -592,7 +644,7 @@ function createStatementGenerationHelpers(deps) {
       if (emptyPreprocessedFiles.length) {
         mismatchResult.emptyPreprocessedFiles = emptyPreprocessedFiles;
       }
-      return mismatchResult;
+      return attachDuplicateDropped(mismatchResult, duplicateDroppedRowCount, duplicateUncheckedRowCount);
     }
 
     const balanceSeedReplacements = extractBalanceSeedReplaceConfirmItems(generatedFiles.warnings);
@@ -607,7 +659,7 @@ function createStatementGenerationHelpers(deps) {
       if (emptyPreprocessedFiles.length) {
         replaceResult.emptyPreprocessedFiles = emptyPreprocessedFiles;
       }
-      return replaceResult;
+      return attachDuplicateDropped(replaceResult, duplicateDroppedRowCount, duplicateUncheckedRowCount);
     }
 
     if (generatedFiles.warnings.length) {
@@ -621,7 +673,7 @@ function createStatementGenerationHelpers(deps) {
 
       const warningResult = createWarningResult({
         step: '导入网银明细文件',
-        message,
+        message: withDuplicateDroppedMessage(message, duplicateDroppedRowCount, duplicateUncheckedRowCount),
         detailReady,
         balanceReady,
         detailLines: buildImportWarningDetailLines(generatedFiles.warnings),
@@ -644,6 +696,7 @@ function createStatementGenerationHelpers(deps) {
         warningResult.emptyPreprocessedFiles = emptyPreprocessedFiles;
       }
 
+      if (duplicateUncheckedRowCount) warningResult.duplicateUncheckedRowCount = duplicateUncheckedRowCount;
       return warningResult;
     }
 
@@ -655,13 +708,17 @@ function createStatementGenerationHelpers(deps) {
         normalizedInputFilePaths.length > 1
           ? `源文件：${normalizedInputFilePaths.join('；')}`
           : `源文件：${normalizedInputFilePaths[0] || inputFilePath || ''}`,
-        generatedFiles.balance ? '已生成余额账单' : '仅生成明细账单'
+        generatedFiles.balance ? '已生成余额账单' : '仅生成明细账单',
+        ...(duplicateDroppedRowCount ? [`已去除重复账单行：${duplicateDroppedRowCount} 行`] : []),
+        ...(duplicateUncheckedRowCount ? [`无法核对原文、未参与重复账单过滤：${duplicateUncheckedRowCount} 行`] : [])
       ]
     });
 
     return {
       status: 'success',
-      message: generatedFiles.message,
+      message: withDuplicateDroppedMessage(generatedFiles.message, duplicateDroppedRowCount, duplicateUncheckedRowCount),
+      duplicateDroppedRowCount,
+      ...(duplicateUncheckedRowCount ? { duplicateUncheckedRowCount } : {}),
       detailReady: Boolean(generatedFiles.detail),
       balanceReady: Boolean(generatedFiles.balance),
       unmatchedAmountSplitFiles,
@@ -719,6 +776,10 @@ function createStatementGenerationHelpers(deps) {
       selectedBigAccount: context.selectedBigAccount,
       allowManagedMerchantWithoutSelection: Boolean(context.preparedDetailRows)
     });
+    // v3.2.19：重复账单过滤只在导入时经用户确认后去重；从源文件重新映射会把已去除的重复行带回来，拒绝。
+    if (!context.preparedDetailRows && config.duplicateRowFilterEnabled) {
+      throw new FileValidationError('FILE_READ', '模板已勾选「重复账单过滤」，无法从源文件重新生成，请重新导入文件');
+    }
     const preparedBatch = context.preparedDetailRows
       ? buildPreparedStatementBatchFromEntries({
           config,
@@ -827,6 +888,7 @@ function createStatementGenerationHelpers(deps) {
   }
 
   return {
+    attachDuplicateDropped,
     buildImportResultFromGeneratedFiles,
     buildPreparedBatchFromStatementSession,
     buildPreparedStatementBatchFromEntries,
@@ -835,6 +897,8 @@ function createStatementGenerationHelpers(deps) {
     buildStatementSessionGenerationContext,
     cacheAllStatementExport,
     cacheCurrentStatementExports,
+    countDuplicateDroppedRows,
+    countDuplicateUncheckedRows,
     createGenerationContext,
     extractManualBalancePromptWarning,
     extractBalanceGapConfirmGaps,

@@ -2,11 +2,13 @@
   'use strict';
   function buildBalanceSeedConfirmationRequest(contextId) { return { contextId, confirmOverwrite: true }; }
   function createConfigurationDialogs({ services, api, modalBridge, ui, constants }) {
-    const { BALANCE_DISABLED_OPTION, BALANCE_CALCULATED_OPTION, MERCHANT_ID_SELF_INPUT_OPTION, MERCHANT_ID_CURRENCY_ONLY_OPTION = '原始账单仅有币种无账户号', ADVANCED_MAPPING_FIELDS, CONCAT_FIELDS_MAPPING_FIELD, FEATURE_FILTER_MAPPING_FIELD = '字段筛选特征值', AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD, AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION } = constants;
+    const { BALANCE_DISABLED_OPTION, BALANCE_CALCULATED_OPTION, MERCHANT_ID_SELF_INPUT_OPTION, MERCHANT_ID_CURRENCY_ONLY_OPTION = '原始账单仅有币种无账户号', ADVANCED_MAPPING_FIELDS, CONCAT_FIELDS_MAPPING_FIELD, FEATURE_FILTER_MAPPING_FIELD = '字段筛选特征值', LOGIC_VALUE_MAPPING_FIELD = '逻辑取值', AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD, AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION } = constants;
     const { createOverlay, escapeHtml, createAlertDialog, createConfirmDialog, pushAlert, setStatus, applyStatementResult, applyManualBalancePromptStatus } = ui;
     const { openModal, closeModal, pushModal, replaceModal, registerModal, returnToModal } = modalBridge;
     const refreshTemplates = services.refreshTemplates;
     const REGEX_LITERAL_PATTERN_RENDERER = /^\/(.+)\/([gimsu]*)$/;
+    // v3.2.19：逻辑取值至少 2 个候补字段（与 main.js LOGIC_VALUE_MIN_FIELDS 一致）
+    const LOGIC_VALUE_MIN_FIELDS = 2;
 
     // 配置写入的共同生命周期：同步锁定一次提交，关闭后仍完成后台链，界面返回绑定原句柄。
     function createDialogWriteScope(overlay, dialog) {
@@ -63,8 +65,9 @@
     }
 
     // 标题右侧「Tips」悬停说明：放在 .dialog-title 内，图案按标题字号取 1em 宽、0.5em 高。
-    function titleTipsHtml(text, { hidden = false } = {}) {
-      return `<span class="title-tips"${hidden ? ' hidden' : ''}>`
+    // v3.2.19：inline 用于正文标签（如「候补字段取值」）右侧，图案按正文字号放大，气泡同样式。
+    function titleTipsHtml(text, { hidden = false, inline = false } = {}) {
+      return `<span class="title-tips${inline ? ' title-tips-inline' : ''}"${hidden ? ' hidden' : ''}>`
         + '<svg class="title-tips-mark" viewBox="0 0 40 20" aria-hidden="true" focusable="false">'
         + '<text x="20" y="15.5" text-anchor="middle" textLength="36" lengthAdjust="spacingAndGlyphs">Tips</text></svg>'
         + `<span class="title-tips-bubble" role="tooltip">${escapeHtml(text)}</span></span>`;
@@ -1811,6 +1814,40 @@
       return missing.length ? `${missing.join('、')} 选择的特征值不存在，请重新选择` : '';
     }
 
+    // v3.2.19：选了「逻辑取值」但候补字段不足 2 个时返回提示文案；否则返回 ''。
+    // headers：模板表头；savedMappings：打开弹窗时已保存的映射。表头里真有一列叫「逻辑取值」、且该行原本就保存为直接取该列
+    //   （旧版本的映射，没有候补字段）时，仍未设置候补字段即保持直接取该列（与主进程一致），不提示；新选「逻辑取值」须设置候补字段。
+    function findLogicValueMissingMessage(mappings, headers = [], savedMappings = []) {
+      const hasLogicValueColumn = (Array.isArray(headers) ? headers : [])
+        .some((header) => String(header ?? '').trim() === LOGIC_VALUE_MAPPING_FIELD);
+      const hasNoCandidates = (mapping) => (Array.isArray(mapping?.mappedFields) ? mapping.mappedFields : [])
+        .every((field) => !field || field === LOGIC_VALUE_MAPPING_FIELD);
+      const savedDirectFields = new Set((Array.isArray(savedMappings) ? savedMappings : [])
+        .filter((mapping) => mapping && mapping.mappedField === LOGIC_VALUE_MAPPING_FIELD && hasNoCandidates(mapping))
+        .map((mapping) => mapping.templateField));
+      const missing = (mappings || [])
+        .filter((mapping) => mapping && mapping.mappedField === LOGIC_VALUE_MAPPING_FIELD)
+        .filter((mapping) => {
+          const fields = (Array.isArray(mapping.mappedFields) ? mapping.mappedFields : []).filter(Boolean);
+          const directColumn = hasLogicValueColumn && hasNoCandidates(mapping) && savedDirectFields.has(mapping.templateField);
+          return fields.length < LOGIC_VALUE_MIN_FIELDS && !directColumn;
+        })
+        .map((mapping) => mapping.templateField);
+      return missing.length
+        ? `${missing.join('、')} 选择了「${LOGIC_VALUE_MAPPING_FIELD}」，请点击【设置】选择至少 ${LOGIC_VALUE_MIN_FIELDS} 个候补字段`
+        : '';
+    }
+
+    function parseLogicValueFieldsDataset(value) {
+      if (!value) return [];
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed.map((field) => String(field ?? '')).filter(Boolean) : [];
+      } catch (_error) {
+        return [];
+      }
+    }
+
     function getSelectValues(selectElement) {
       if (!selectElement) {
         return [];
@@ -1850,6 +1887,17 @@
             templateField: row.dataset.templateField,
             mappedField: CONCAT_FIELDS_MAPPING_FIELD,
             mappedFields: concatFields,
+            customValue: '',
+            isMultiBigAccount: false
+          };
+        }
+
+        // v3.2.19：逻辑取值带出【设置】中暂存的有序候补字段（未设置为空数组，由保存前检查提示）
+        if (firstValue === LOGIC_VALUE_MAPPING_FIELD) {
+          return {
+            templateField: row.dataset.templateField,
+            mappedField: LOGIC_VALUE_MAPPING_FIELD,
+            mappedFields: parseLogicValueFieldsDataset(row.dataset.logicValueFields),
             customValue: '',
             isMultiBigAccount: false
           };
@@ -2104,6 +2152,166 @@
       return overlay;
     }
 
+    // ==================== v3.2.19 原始账单预处理「重复账单过滤」：重复账单提醒 ====================
+    // 导入预检发现重复账单时由主进程返回 duplicate-review（spec §8.3）。【确认】用原导入通道续跑，
+    // 主进程按确认摘要只保留每组第一行再生成；【取消】/ × 清除待确认状态并返回主页面，不生成、不改导入会话。
+    // v3.2.19：没有开始生成就被拒绝的结果（续跑前核对失败、源文件确认期间变化、任务未能开始等）：主进程的会话、导出与补录入口
+    //   都没变，界面只提示原因，不按失败的导入处理（applyStatementResult 会禁用导出、清空补录入口，且没有恢复它们的 IPC）。
+    const NOT_STARTED_ERROR_CODES = new Set([
+      'DUPLICATE_REVIEW_MISSING', 'DUPLICATE_REVIEW_CONFIG_CHANGED', 'DUPLICATE_KEEPER_REPLACEMENT',
+      'BANK_STATEMENT_SOURCE_CHANGED_DURING_CONFIRMATION', 'BIG_ACCOUNT_SELECTION_MISSING', 'IMPORT_IN_PROGRESS'
+    ]);
+    function isNotStartedImportResult(result) {
+      if (!result) return false;
+      if (result.status === 'failed' || result.status === 'busy') return true;
+      return result.status === 'error' && !result.manualBalancePromptReady
+        && (Boolean(result.preservesSession) || NOT_STARTED_ERROR_CODES.has(String(result.errorCode || result.code || '')));
+    }
+
+    // 续跑请求（重复账单【确认】、完成大账号选择）IPC 本身抛错：可能是启动前被拒绝（如 Recovery Hold），也可能是已执行后
+    //   归档终态写入失败。主进程只在开始执行时取走待处理上下文，因此按 contextId 释放成功即可证明没有开始生成（按未开始处理，
+    //   保留上一批状态）；释放不到时无法确认是否已生成，按普通导入失败处理（不保留上一批的导出与补录入口），提示核对结果。
+    async function resolveContinuationIpcRejection(contextId, error, fallbackMessage) {
+      let released = null;
+      try {
+        released = await api.files.cancelBigAccountSelection(contextId);
+      } catch (_releaseError) {
+        released = null;
+      }
+      return released && released.status === 'success'
+        ? { status: 'failed', message: error?.message || '本次导入未开始，请重新导入文件' }
+        : { status: 'error', message: `${error?.message || fallbackMessage}；无法确认本次是否已生成，请核对生成结果，必要时重新导入文件` };
+    }
+
+    function createDuplicateRowsReviewDialog(result = {}) {
+      const { applyStatementResult } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card duplicate-rows-review-card';
+      const contextId = String(result.contextId || '');
+      const reviewKind = result.reviewKind === 'big-account' ? 'big-account' : 'file-import';
+      const groups = Array.isArray(result.groups) ? result.groups : [];
+      const droppedRowCount = Number(result.droppedRowCount) || 0;
+      const totalGroups = Number(result.totalGroups) || groups.length;
+      const displayedRowCount = groups.reduce((sum, group) => sum + (Array.isArray(group.rows) ? group.rows.length : 0), 0);
+      const totalRowCount = Number(result.totalRowCount) || displayedRowCount;
+      const dropPlanLines = result.truncated && Array.isArray(result.dropPlanLines) ? result.dropPlanLines.map(String) : [];
+      const bodyRows = groups.map((group) => {
+        const rows = Array.isArray(group.rows) ? group.rows : [];
+        const hiddenRowCount = Number(group.hiddenRowCount) || 0;
+        const span = rows.length + (hiddenRowCount > 0 ? 1 : 0);
+        return rows.map((row, index) => `
+          <tr class="${row.kept ? 'is-kept' : 'is-dropped'}" data-group-seq="${Number(group.seq) || ''}">
+            ${index === 0 ? `<td rowspan="${span}">#${Number(group.seq) || ''}</td>` : ''}
+            <td>${escapeHtml(row.fileName)}</td>
+            <td>${Number(row.sourceRowNumber) || ''}</td>
+            ${index === 0 ? `<td rowspan="${span}">${escapeHtml(group.accountLabel)}</td>` : ''}
+            ${index === 0 ? `<td rowspan="${span}">${escapeHtml(group.billDate || '（空）')}</td>` : ''}
+            <td class="duplicate-rows-review-action">${row.kept ? '保留' : '去除'}</td>
+          </tr>
+        `).join('') + (hiddenRowCount > 0
+          ? `<tr class="is-dropped duplicate-rows-review-hidden"><td colspan="2">该组其余 ${hiddenRowCount} 行未列出</td><td class="duplicate-rows-review-action">去除</td></tr>`
+          : '');
+      }).join('');
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">重复账单提醒</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="dialog-body duplicate-rows-review-body">
+          <p class="duplicate-rows-review-summary">以下账单行所有字段的值都相同，且账户号、账期相同，共 ${totalGroups} 组。点击【确认】后每组只保留第一行（标为「保留」），其余 ${droppedRowCount} 行不参与生成原始账单加工表与网银账单；点击【取消】返回主页面，不生成账单。</p>
+          ${result.truncated ? `<p class="duplicate-rows-review-truncated">仅列出前 ${displayedRowCount} 行，共 ${totalGroups} 组 ${totalRowCount} 行；全部去除的行号见表格下方清单。</p>` : ''}
+          <div class="table-wrapper duplicate-rows-review-table-wrapper">
+            <table class="data-table duplicate-rows-review-table">
+              <thead>
+                <tr><th>重复组</th><th>文件</th><th>行号</th><th>账户号</th><th>账期</th><th>处理</th></tr>
+              </thead>
+              <tbody>${bodyRows}</tbody>
+            </table>
+          </div>
+          ${dropPlanLines.length ? `<div class="duplicate-rows-review-drop-plan"><div class="duplicate-rows-review-drop-plan-title">全部去除的行号</div>${dropPlanLines.map((line) => `<div>${escapeHtml(line)}</div>`).join('')}</div>` : ''}
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="confirm">确认</button>
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+        </div>
+      `;
+      const confirmButton = dialog.querySelector('[data-action="confirm"]');
+      const cancelButton = dialog.querySelector('[data-action="cancel"]');
+      const closeButton = dialog.querySelector('.icon-close');
+      // 【确认】提交中整窗锁定：普通关闭、导航与替换都被拒绝；结果只由仍在顶层的原窗口续接（同大账号选择窗口）
+      const writeScope = createDialogWriteScope(overlay, dialog);
+      let closed = false;
+      // 已交给主进程处理（【确认】已提交或已发出取消）后不再释放；其余方式关闭（导航、根弹窗替换、卸载）时
+      //   同【取消】释放主进程中待确认的整批预映射数据，避免它一直占用到下一次导入。
+      let settled = false;
+      const releasePending = () => {
+        if (settled) return;
+        settled = true;
+        Promise.resolve(api.files.cancelBigAccountSelection(contextId)).catch(() => {});
+      };
+      registerModal(overlay, { onDispose: releasePending });
+
+      // 【取消】/ ×：清除待确认上下文并返回主页面。不改状态框与会话（同大账号选择窗口的 ×），上一批的导出与补录入口保持可用。
+      function cancelReview() {
+        if (closed || !modalBridge.host.getHandle(overlay)?.isTop()) return;
+        if (closeModal(overlay, { status: 'cancelled', reason: 'cancel' })?.status === 'blocked') return;
+        closed = true;
+        releasePending();
+      }
+
+      async function confirmReview() {
+        if (closed) return;
+        const handle = writeScope.begin();
+        if (!handle) return;
+        settled = true;
+        let next;
+        try {
+          next = reviewKind === 'big-account'
+            ? await api.files.completeBigAccountSelection({ duplicateReviewContextId: contextId })
+            : await api.files.importFile({ duplicateReviewContextId: contextId });
+        } catch (error) {
+          next = await resolveContinuationIpcRejection(contextId, error, '生成网银账单失败');
+        } finally {
+          writeScope.finish(handle);
+        }
+        closed = true;
+        // 确认未进入执行（如源文件在等待期间被移动、任务准入失败）时主进程仍持有待确认数据：提醒窗口随后关闭、
+        //   不能重试，按 contextId 释放（已执行或已换成新提醒时主进程里已没有这个上下文，释放为空操作）。
+        if (!next || !['success', 'warning', 'duplicate-review'].includes(next.status)) {
+          Promise.resolve(api.files.cancelBigAccountSelection(contextId)).catch(() => {});
+        }
+        if (!next || next.status === 'cancelled') {
+          if (writeScope.isCurrent(handle)) closeModal(handle, { status: 'cancelled', reason: 'cancel' });
+          return;
+        }
+        // 确认后再次需要确认（如重新扫描的重复不同）时换成新的提醒
+        if (next.status === 'duplicate-review') {
+          if (writeScope.isCurrent(handle)) replaceModal(handle, () => createDuplicateRowsReviewDialog(next));
+          return;
+        }
+        if (isNotStartedImportResult(next)) {
+          if (writeScope.isCurrent(handle)) replaceModal(handle, () => createAlertDialog(escapeHtml(next.message || '本次导入未开始，请重新导入文件')));
+          return;
+        }
+        applyStatementResult(next);
+        if (!writeScope.isCurrent(handle)) return;
+        if (next.status === 'error' && !next.manualBalancePromptReady) {
+          replaceModal(handle, () => createAlertDialog(escapeHtml(next.message || '生成网银账单失败')));
+        } else if (['gap', 'mismatch', 'seed-replace'].includes(next.manualBalancePrompt?.reason)) {
+          replaceModal(handle, () => createManualBalanceSeedDialog(next.manualBalancePrompt));
+        } else {
+          closeModal(handle, { status: 'submitted', value: next });
+        }
+      }
+
+      confirmButton.addEventListener('click', confirmReview);
+      cancelButton.addEventListener('click', cancelReview);
+      closeButton.addEventListener('click', cancelReview);
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     function createBigAccountSelectionDialog(payload) {
       const { setStatus, applyStatementResult, applyManualBalancePromptStatus } = ui.createFeedbackScope ? ui.createFeedbackScope() : ui;
       if (Array.isArray(payload)) {
@@ -2160,6 +2368,11 @@
           }); } catch (error) {
             result = { status: 'error', message: error.message || '大账号选择失败' };
           } finally { writeScope.finish(handle); }
+          // v3.2.19：重复账单过滤发现重复——换成重复账单提醒
+          if (result.status === 'duplicate-review') {
+            if (writeScope.isCurrent(handle)) replaceModal(handle, () => createDuplicateRowsReviewDialog(result));
+            return;
+          }
           applyStatementResult(result);
           if (!writeScope.isCurrent(handle)) return;
           if (result.status === 'error' && !result.manualBalancePromptReady) {
@@ -3334,12 +3547,37 @@
         selectionBusy = true;
         syncSelectionActionButtons();
         try {
-        const result = await api.files.completeBigAccountSelection({
-          contextId: payload.contextId,
-          assignments: finalAssignments,
-          mode: currentMode,
-          ...(currentMode === 'fixed' ? { rememberOrder: rememberCheckbox.checked } : {})
-        });
+        let result;
+        try {
+          result = await api.files.completeBigAccountSelection({
+            contextId: payload.contextId,
+            assignments: finalAssignments,
+            mode: currentMode,
+            ...(currentMode === 'fixed' ? { rememberOrder: rememberCheckbox.checked } : {})
+          });
+        } catch (error) {
+          // IPC 本身抛错：按能否释放本次选择区分未开始与无法确认（见 resolveContinuationIpcRejection）
+          result = await resolveContinuationIpcRejection(payload.contextId, error, '选择大账号失败');
+        }
+
+        // v3.2.19：重复账单过滤发现重复——关闭选择窗口（不取消大账号选择，确认后续用），弹出重复账单提醒
+        if (result.status === 'duplicate-review') {
+          selectionBusy = false;
+          selectionClosed = true;
+          closeModal(overlay, { status: 'submitted', value: result });
+          openModal(() => createDuplicateRowsReviewDialog(result));
+          return;
+        }
+        // v3.2.19：未开始生成（任务未获准入、源文件在等待选择期间被移走、配置已修改等）：释放本次大账号选择，只提示原因，
+        //   保留上一批的导出与补录入口
+        if (isNotStartedImportResult(result)) {
+          selectionBusy = false;
+          selectionClosed = true;
+          closeModal(overlay, { status: 'submitted', value: result });
+          Promise.resolve(api.files.cancelBigAccountSelection(payload.contextId)).catch(() => {});
+          openModal(() => createAlertDialog(escapeHtml(result.message || '本次导入未开始，请重新导入文件')));
+          return;
+        }
 
         if (result.status === 'error' && !result.manualBalancePromptReady) {
           if (result.errorCode === 'BIG_ACCOUNT_SELECTION_INVALID') {
@@ -3349,8 +3587,9 @@
           selectionBusy = false;
           selectionClosed = true;
           closeModal(overlay, { status: 'submitted', value: result });
-          applyStatementResult(result);
-          openModal(() => createAlertDialog(result.message));
+          // v3.2.19：未开始生成（如等待选择期间模板配置已修改）：只提示，保留上一批的导出与补录入口
+          if (!isNotStartedImportResult(result)) applyStatementResult(result);
+          openModal(() => createAlertDialog(escapeHtml(result.message || '')));
           return;
         }
 
@@ -4600,9 +4839,11 @@
         : ['是否拆分/合并明细账单', '复用模块字段的映射关系', '根据字段值过滤账单'];
       // v3.2.19：「原始账单预处理」分组（位于「个性化映射设置」之前）
       const PREPROCESS_ROW_FILTER_FIELD = '过滤账单';
+      // v3.2.19：「重复账单过滤」只有勾选框，没有按钮
+      const DUPLICATE_ROW_FILTER_FIELD = '重复账单过滤';
       const preprocessFields = Array.isArray(payload.preprocessFields) && payload.preprocessFields.length
         ? payload.preprocessFields
-        : [PREPROCESS_ROW_FILTER_FIELD];
+        : [PREPROCESS_ROW_FILTER_FIELD, DUPLICATE_ROW_FILTER_FIELD];
       const BILL_SPLIT_MERGE_FIELD = '是否拆分/合并明细账单';
       const REUSE_MODULE_FIELD = '复用模块字段的映射关系';
       const BILL_SPLIT_ROW_FILTER_FIELD = '根据字段值过滤账单';
@@ -4746,6 +4987,8 @@
 
       const tbody = dialog.querySelector('tbody');
       const rowByField = new Map();
+      // v3.2.19：各行按当前映射值显示 / 隐藏编辑器（【设置】、拼接选择等）的同步函数；程序清空映射值（如拆分/合并互斥）时调用
+      const editorSyncByRow = new Map();
       const savedMap = new Map(payload.mappings.map((item) => [item.templateField, item]));
       const headerOptions = payload.template.headers.map((header) => {
         const escapedHeader = escapeHtml(header || '(空白字段)');
@@ -4808,11 +5051,19 @@
           .concat(isBalanceField ? [`<option value="${BALANCE_CALCULATED_OPTION}">${BALANCE_CALCULATED_OPTION}</option>`] : [])
           .concat(supportsSelfInputOption ? [`<option value="${MERCHANT_ID_SELF_INPUT_OPTION}">${MERCHANT_ID_SELF_INPUT_OPTION}</option>`] : [])
           .concat(supportsSelfInputOption ? [`<option value="${MERCHANT_ID_CURRENCY_ONLY_OPTION}">${MERCHANT_ID_CURRENCY_ONLY_OPTION}</option>`] : [])
+          // v3.2.19：「逻辑取值」位于「需要拼接字段」上方
+          .concat(supportsMultiSelect ? [`<option value="${LOGIC_VALUE_MAPPING_FIELD}">${LOGIC_VALUE_MAPPING_FIELD}</option>`] : [])
           .concat(supportsMultiSelect ? [`<option value="${CONCAT_FIELDS_MAPPING_FIELD}">${CONCAT_FIELDS_MAPPING_FIELD}</option>`] : [])
           .concat(supportsMultiSelect ? [`<option value="${FEATURE_FILTER_MAPPING_FIELD}">${FEATURE_FILTER_MAPPING_FIELD}</option>`] : [])
-          .concat(headerOptions)
+          // 表头恰有一列叫「逻辑取值」时：支持逻辑取值的行已有同值的模式选项；不支持的行（Balance、MerchantId、Currency 等）
+          //   新选它无法保存（没有【设置】），只为已保存的旧版直接映射保留回显
+          .concat(headerOptions.filter((_option, index) => (
+            String(payload.template.headers[index] ?? '').trim() !== LOGIC_VALUE_MAPPING_FIELD
+            || (!supportsMultiSelect && savedMapping.mappedField === LOGIC_VALUE_MAPPING_FIELD)
+          )))
           .join('');
         // v3.2.19：「选择特征值」+ 下拉框 +【特征值管理】成组，与映射字段下拉框同行；空间不足时整组换行
+        // v3.2.19：「逻辑取值」时下拉框右侧显示【设置】与当前候补顺序
         row.innerHTML = `
           <td>${escapeHtml(fieldName)}</td>
           <td>
@@ -4824,6 +5075,8 @@
                   <select class="mapping-select mapping-feature-value-select" hidden></select>
                   <button class="secondary-btn small mapping-feature-filter-btn" type="button" hidden>特征值管理</button>
                 </span>
+                <button class="secondary-btn small mapping-logic-value-btn" type="button" hidden>设置</button>
+                <span class="mapping-logic-value-preview" hidden></span>
               ` : ''}
               ${isMerchantIdField ? `
                 <button class="secondary-btn small mapping-big-account-manage-btn" type="button" hidden>维护大账号</button>
@@ -4854,6 +5107,23 @@
         const concatPickerTrigger = row.querySelector('.concat-picker-trigger');
         const concatPickerPanel = row.querySelector('.concat-picker-panel');
         const concatPreview = row.querySelector('.concat-preview');
+        const logicValueBtn = row.querySelector('.mapping-logic-value-btn');
+        const logicValuePreview = row.querySelector('.mapping-logic-value-preview');
+        // v3.2.19：逻辑取值的有序候补字段（【设置】暂存；切走映射值再切回时保留）
+        let logicValueFields = savedMapping.mappedField === LOGIC_VALUE_MAPPING_FIELD && Array.isArray(savedMapping.mappedFields)
+          ? savedMapping.mappedFields.map((field) => String(field ?? '')).filter(Boolean)
+          : [];
+        function updateLogicValuePreview() {
+          row.dataset.logicValueFields = JSON.stringify(logicValueFields);
+          if (!logicValuePreview) return;
+          const text = logicValueFields.length
+            ? logicValueFields.map((field, index) => `${index + 1}. ${field}`).join(' → ')
+            : '未设置候补字段';
+          logicValuePreview.textContent = text.length > 80 ? `${text.slice(0, 80)}……` : text;
+          logicValuePreview.title = text;
+          logicValuePreview.classList.toggle('is-empty', logicValueFields.length === 0);
+        }
+        updateLogicValuePreview();
         let concatSelectedFields = [];
         const savedFields = Array.isArray(savedMapping.mappedFields) && savedMapping.mappedFields.length
           ? savedMapping.mappedFields
@@ -4948,6 +5218,11 @@
           const isCustomInput = selectedValue === MERCHANT_ID_SELF_INPUT_OPTION;
           const isConcatMode = selectedValue === CONCAT_FIELDS_MAPPING_FIELD;
 
+          if (logicValueBtn) {
+            const isLogicValueMode = selectedValue === LOGIC_VALUE_MAPPING_FIELD;
+            logicValueBtn.hidden = !isLogicValueMode;
+            logicValuePreview.hidden = !isLogicValueMode;
+          }
           if (manageBigAccountBtn) {
             manageBigAccountBtn.hidden = !isCustomInput;
           }
@@ -5032,6 +5307,22 @@
           });
         }
 
+        if (logicValueBtn) {
+          logicValueBtn.addEventListener('click', () => {
+            pushModal(overlay, () => createLogicValueDialog({
+              targetField: fieldName,
+              headers: payload.template.headers,
+              initialFields: logicValueFields,
+              onDone: (nextFields) => {
+                logicValueFields = nextFields.slice();
+                updateLogicValuePreview();
+                returnToModal(overlay);
+              },
+              onCancel: () => returnToModal(overlay)
+            }));
+          });
+        }
+
         if (featureFilterBtn) {
           featureValueSelect.addEventListener('change', () => {
             featureValueSelect.title = describeFeatureFilter(findFeatureFilterById(currentFeatureFilters, featureValueSelect.value));
@@ -5049,13 +5340,14 @@
           syncEditorState();
           applyAmountSplitMutualExclusion();
         });
+        editorSyncByRow.set(row, syncEditorState);
         syncEditorState();
         rowByField.set(fieldName, row);
         tbody.appendChild(row);
       });
 
       // v3.2.19：取值只有 是 / 否（空白）的行用勾选框（勾选 = 是）：文字在左、勾选框紧跟其右；
-      //   右列只放随勾选状态显示的按钮。存储值不变，取值见 data-checked-value / data-unchecked-value。
+      //   右列只放随勾选状态显示的按钮（不传 buttonLabel 时右列为空）。存储值不变，取值见 data-checked-value / data-unchecked-value。
       function renderMappingToggleRow(fieldName, {
         label, checked, checkedValue, uncheckedValue, buttonClass, buttonLabel, showButtonWhenChecked, onToggle, onButtonClick
       }) {
@@ -5071,20 +5363,20 @@
           </td>
           <td>
             <div class="mapping-field-editor">
-              <button class="secondary-btn small ${buttonClass}" type="button">${escapeHtml(buttonLabel)}</button>
+              ${buttonLabel ? `<button class="secondary-btn small ${buttonClass}" type="button">${escapeHtml(buttonLabel)}</button>` : ''}
             </div>
           </td>
         `;
         const checkbox = row.querySelector('.mapping-toggle-checkbox');
-        const button = row.querySelector(`.${buttonClass}`);
+        const button = buttonLabel ? row.querySelector(`.${buttonClass}`) : null;
         checkbox.checked = checked;
-        const syncButton = () => { button.hidden = checkbox.checked !== showButtonWhenChecked; };
+        const syncButton = () => { if (button) button.hidden = checkbox.checked !== showButtonWhenChecked; };
         syncButton();
         checkbox.addEventListener('change', () => {
           syncButton();
-          onToggle(checkbox.checked);
+          if (typeof onToggle === 'function') onToggle(checkbox.checked);
         });
-        button.addEventListener('click', onButtonClick);
+        if (button) button.addEventListener('click', onButtonClick);
         rowByField.set(fieldName, row);
         tbody.appendChild(row);
         return row;
@@ -5106,9 +5398,18 @@
         });
       }
 
-      // v3.2.19：原始账单预处理——「过滤账单」勾选后显示【规则设置】；与拆分/合并无关，始终可用
+      // v3.2.19：原始账单预处理——「过滤账单」勾选后显示【规则设置】；「重复账单过滤」只有勾选框；与拆分/合并无关，始终可用
       function renderPreprocessRow(fieldName) {
         const savedValue = String(savedMap.get(fieldName)?.mappedField || '');
+        if (fieldName === DUPLICATE_ROW_FILTER_FIELD) {
+          renderMappingToggleRow(fieldName, {
+            label: fieldName,
+            checked: savedValue === '是',
+            checkedValue: '是',
+            uncheckedValue: ''
+          });
+          return;
+        }
         renderMappingToggleRow(fieldName, {
           label: fieldName,
           checked: savedValue === '是',
@@ -5255,6 +5556,8 @@
           template: payload.template,
           initialMappings: currentBillSplitMappings,
           mainTemplateMappings: draftMappings,
+          // v3.2.19：打开映射弹窗时已保存的主映射（区分旧版直接引用「逻辑取值」列与刚选、尚未设置候补的逻辑取值）
+          savedMainMappings: Array.isArray(payload.mappings) ? payload.mappings : [],
           headers: payload.template.headers || [],
           targetFields: (payload.targetFields || []).slice(),
           preprocessFields: preprocessFields.slice(),
@@ -5379,16 +5682,20 @@
           // v3.2.16：互斥禁用时【特征值管理】按钮与「选择特征值」随下拉框一起禁用
           const featureFilterButton = row.querySelector('.mapping-feature-filter-btn');
           const featureValueSelect = row.querySelector('.mapping-feature-value-select');
+          // v3.2.19：逻辑取值的【设置】同样随行禁用
+          const logicValueButton = row.querySelector('.mapping-logic-value-btn');
           if (disabled) {
             row.classList.add('mapping-row-mutex-disabled');
             control.disabled = true;
             if (featureFilterButton) featureFilterButton.disabled = true;
             if (featureValueSelect) featureValueSelect.disabled = true;
+            if (logicValueButton) logicValueButton.disabled = true;
           } else {
             row.classList.remove('mapping-row-mutex-disabled');
             control.disabled = false;
             if (featureFilterButton) featureFilterButton.disabled = false;
             if (featureValueSelect) featureValueSelect.disabled = false;
+            if (logicValueButton) logicValueButton.disabled = false;
           }
         }
 
@@ -5438,6 +5745,9 @@
               }
             } else {
               targetSelect.value = '';
+              // 程序清空不触发 change：同步隐藏该行的【设置】等编辑器，保存只按当前（已清空的）映射值
+              const syncEditor = editorSyncByRow.get(targetRow);
+              if (syncEditor) syncEditor();
             }
             targetSelect.disabled = true;
             targetRow.classList.add('mapping-row-mutex-disabled', 'bill-split-merge-disabled');
@@ -5530,6 +5840,12 @@
           : findFeatureFilterMissingMessage(featureFilterDraft, currentFeatureFilters);
         if (featureFilterMissing) {
           pushAlert(overlay, () => createAlertDialog(escapeHtml(featureFilterMissing), { onConfirm: null }));
+          return;
+        }
+        // v3.2.19：逻辑取值须先在【设置】中选好候补字段（主进程同样校验）
+        const logicValueMissing = findLogicValueMissingMessage(featureFilterDraft, payload.template.headers, payload.mappings);
+        if (logicValueMissing) {
+          pushAlert(overlay, () => createAlertDialog(escapeHtml(logicValueMissing), { onConfirm: null }));
           return;
         }
 
@@ -5755,6 +6071,7 @@
       template,
       initialMappings = [],
       mainTemplateMappings = [],
+      savedMainMappings = [],
       headers = [],
       targetFields = [],
       preprocessFields = [],
@@ -6035,10 +6352,29 @@
         }));
       }
 
+      // 返回因「逻辑取值」留空的字段（拆分/合并账单映射不支持该值）。
       function doImportFromMain() {
         // 从主模板映射复制，排除 Currency/Credit/Debit/advanced/bill-split group
-        const imported = (mainTemplateMappings || [])
-          .filter((m) => !excludeFields.has(m.templateField))
+        const candidates = (mainTemplateMappings || []).filter((m) => !excludeFields.has(m.templateField));
+        // 「逻辑取值」一律留空并提示，只有旧版直接引用名为「逻辑取值」的源列照常复制：与主映射保存同一判据——
+        //   没有候补字段（空，或只有一个同名列本身）、该行原本已保存为这种直接引用、且模板表头确有这一列。
+        //   刚选「逻辑取值」尚未设置候补字段的行不是直接引用（否则会复制一个不存在或同名的源列）。
+        const hasNoCandidates = (m) => {
+          const fields = (Array.isArray(m && m.mappedFields) ? m.mappedFields : [])
+            .map((field) => String(field ?? '').trim()).filter(Boolean);
+          return fields.length === 0 || (fields.length === 1 && fields[0] === LOGIC_VALUE_MAPPING_FIELD);
+        };
+        const hasLogicValueColumn = (headers || []).some((header) => String(header ?? '').trim() === LOGIC_VALUE_MAPPING_FIELD);
+        const savedDirectFields = new Set((savedMainMappings || [])
+          .filter((m) => m && String(m.mappedField || '') === LOGIC_VALUE_MAPPING_FIELD && hasNoCandidates(m))
+          .map((m) => m.templateField));
+        const isLogicValueMode = (m) => String(m.mappedField || '') === LOGIC_VALUE_MAPPING_FIELD
+          && !(hasNoCandidates(m) && hasLogicValueColumn && savedDirectFields.has(m.templateField));
+        const skippedLogicValueFields = candidates
+          .filter(isLogicValueMode)
+          .map((m) => m.templateField);
+        const imported = candidates
+          .filter((m) => !isLogicValueMode(m))
           // v3.2.16：MerchantId 的「自己输入」「原始账单仅有币种无账户号」不是源字段，复制到拆分映射后保存会报“映射字段不存在”
           .filter((m) => !(m.templateField === 'MerchantId'
             && [MERCHANT_ID_SELF_INPUT_OPTION, MERCHANT_ID_CURRENCY_ONLY_OPTION].includes(String(m.mappedField || ''))))
@@ -6056,6 +6392,15 @@
             : { templateField: f, mappedField: defaultMappedField, mappedFields: [] };
         });
         rerenderTable();
+        return skippedLogicValueFields;
+      }
+
+      function notifySkippedLogicValueFields(skipped) {
+        if (!skipped.length) return;
+        pushAlert(overlay, () => createAlertDialog(
+          escapeHtml(`${skipped.join('、')} 在模块映射中使用「${LOGIC_VALUE_MAPPING_FIELD}」，拆分/合并账单映射不支持，已留空，请另选源字段`),
+          { onConfirm: null }
+        ));
       }
 
       dialog.querySelector('[data-action="import-main"]').addEventListener('click', () => {
@@ -6069,12 +6414,13 @@
             confirmText: '确认',
             cancelText: '取消',
             onConfirm: () => {
-              doImportFromMain();
+              const skipped = doImportFromMain();
               returnToModal(overlay);
+              notifySkippedLogicValueFields(skipped);
             }
           }));
         } else {
-          doImportFromMain();
+          notifySkippedLogicValueFields(doImportFromMain());
         }
       });
 
@@ -6466,6 +6812,96 @@
           return;
         }
         onDone(rules);
+      });
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => onCancel());
+      dialog.querySelector('.icon-close').addEventListener('click', () => onCancel());
+
+      render();
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // ==================== v3.2.19 映射字段「逻辑取值」：候补字段取值 ====================
+    // 组件参考 月度 pending 数据核对 → 规则管理 → 对账字段（renderer-pending.js buildColumn）：
+    // 序号即优先级，首行【新增】在末尾追加一行，其余行【删除】；默认两个单选下拉框。
+    // 【保存】只校验并暂存，随映射关系管理【保存】提交；【取消】/ × 不改暂存。与 main.js 保存校验同口径。
+    function createLogicValueDialog({ targetField = '', headers = [], initialFields = [], onDone, onCancel }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card scenario-config-card logic-value-card';
+      const headerList = (Array.isArray(headers) ? headers : []).map((header) => String(header ?? '')).filter((header) => header !== '');
+      const headerSet = new Set(headerList);
+      const fields = (Array.isArray(initialFields) ? initialFields : []).map((field) => String(field ?? '').trim()).filter(Boolean);
+      while (fields.length < LOGIC_VALUE_MIN_FIELDS) fields.push('');
+      const tips = `按序号从上到下取值：第 1 个字段去首尾空白后为空时取第 2 个，依此类推；全部为空时输出为空。`
+        + `取到的值再按「${targetField}」的规则规范化（如日期、金额）。`;
+
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">${escapeHtml(LOGIC_VALUE_MAPPING_FIELD)}</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="dialog-body scenario-config-body">
+          <div class="scenario-config-row scenario-config-row-multi logic-value-config-row">
+            <span class="scenario-config-label logic-value-label">候补字段取值${titleTipsHtml(tips, { inline: true })}</span>
+            <div class="logic-value-rows" data-role="logic-value-rows"></div>
+          </div>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="save">保存</button>
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+        </div>
+      `;
+
+      const container = dialog.querySelector('[data-role="logic-value-rows"]');
+
+      function renderFieldOptions(selected) {
+        const options = ['<option value="">（请选择）</option>']
+          .concat(headerList.map((header) => (
+            `<option value="${escapeHtml(header)}"${header === selected ? ' selected' : ''}>${escapeHtml(header)}</option>`
+          )));
+        // 模板【更新】后候补字段已不在表头：保留「（已删除）」选项，保存模板时由主进程拒绝。
+        if (selected && !headerSet.has(selected)) {
+          options.push(`<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)}（已删除）</option>`);
+        }
+        return options.join('');
+      }
+
+      function render() {
+        container.innerHTML = fields.map((field, index) => `
+          <div class="logic-value-row" data-index="${index}">
+            <span class="logic-value-serial">${index + 1}.</span>
+            <select class="mapping-select logic-value-select${field && !headerSet.has(field) ? ' is-stale' : ''}" data-index="${index}">${renderFieldOptions(field)}</select>
+            <button class="logic-value-row-btn" type="button" data-role="${index === 0 ? 'add' : 'remove'}" data-index="${index}">${index === 0 ? '新增' : '删除'}</button>
+          </div>
+        `).join('');
+      }
+
+      container.addEventListener('change', (event) => {
+        const select = event.target.closest('select.logic-value-select');
+        if (!select) return;
+        fields[Number(select.dataset.index)] = select.value;
+        select.classList.toggle('is-stale', Boolean(select.value) && !headerSet.has(select.value));
+      });
+      container.addEventListener('click', (event) => {
+        const button = event.target.closest('button.logic-value-row-btn');
+        if (!button) return;
+        if (button.dataset.role === 'add') fields.push('');
+        else fields.splice(Number(button.dataset.index), 1);
+        render();
+      });
+
+      dialog.querySelector('[data-action="save"]').addEventListener('click', () => {
+        const selected = fields.map((field) => String(field || '').trim()).filter(Boolean);
+        const duplicated = selected.filter((field, index) => selected.indexOf(field) !== index);
+        const errors = [];
+        if (duplicated.length) errors.push(`候补字段不能重复：${Array.from(new Set(duplicated)).join('、')}`);
+        if (selected.length < LOGIC_VALUE_MIN_FIELDS) errors.push(`请至少选择 ${LOGIC_VALUE_MIN_FIELDS} 个候补字段`);
+        if (errors.length) {
+          pushAlert(overlay, () => createAlertDialog(errors.map((line) => escapeHtml(line)).join('<br>'), { onConfirm: null }));
+          return;
+        }
+        onDone(selected);
       });
       dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => onCancel());
       dialog.querySelector('.icon-close').addEventListener('click', () => onCancel());
@@ -8802,7 +9238,7 @@
     //   带「库」读着别扭，且 gateway 既有文案为「网关对账单数据」（硬约束行为不变）→ 此处用不带「库」的表名。
     //   仅含三张可删表（与后端 LINKED_DELETE_ALLOWED_TABLES 同口径）；默认 gateway-bill。
 
-    return Object.freeze({ looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createTemplateImportNameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, createCurrencyBigAccountMappingDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog });
+    return Object.freeze({ looksLikeRegexLiteral, parseRegexLiteral, createExportScopeDialog, createMonthlyBalanceExportDialog, createManualBalanceSeedDialog, cloneBigAccountItems, formatBigAccountCurrencySummary, getBigAccountCurrencyTitle, normalizeCurrencyOptionEntry, getCurrencyOptionEntries, getCurrencyOptionLabel, getCurrencySuggestion, getSelectValues, collectMappingDraftFromTable, createTemplateRenameDialog, createTemplateImportNameDialog, createBigAccountSelectionDialog, createBigAccountManagerDialog, createCurrencyBigAccountMappingDialog, renderTemplateTableRows, createTemplateManagerDialog, createMappingDialog, createAmountSplitRulesDialog, createBillSplitMappingsDialog, createBillSplitRowsDialog, createBalanceAddonManagerDialog, createAccountMappingDialog, createRememberOrderMismatchDialog, createDuplicateRowsReviewDialog, createAccountMappingMigrationDialog, createChannelAccountMappingConflictDialog });
   }
   global.ConfigurationDialogs = Object.freeze({ createConfigurationDialogs, buildBalanceSeedConfirmationRequest });
 })(window);

@@ -3,6 +3,10 @@ const FIXED_FIELD_VALUE_PREFIX = '__FIXED__:';
 // v3.2.16：映射值「字段筛选特征值」在生成 lookup 里的内部 token，避免与真实表头重名。
 // v3.2.18：token 带所选特征值 id（`__FEATURE_FILTER__:<id>`），由 feature-filter.js 构造与解析。
 const FEATURE_FILTER_FIELD_TOKEN_PREFIX = '__FEATURE_FILTER__:';
+// v3.2.19：映射值「逻辑取值」在生成 lookup 里的内部 token（`\u0000__LOGIC_VALUE__:<JSON 候补字段数组>`），由 logic-value.js 构造与解析。
+//   以 NUL 开头：XLSX / XLS / 常规文本表头不会含 NUL，真实列名不会与 token 相同（旧模板的列名即使形如 `__LOGIC_VALUE__:[…]`
+//   也照常按源字段直接取值，新配置的逻辑取值也不会被同名列覆盖）。token 只在生成时使用，不落库。
+const LOGIC_VALUE_FIELD_TOKEN_PREFIX = '\u0000__LOGIC_VALUE__:';
 // v3.2.16：MerchantId「原始账单仅有币种无账户号」在模板映射中的存储值。
 // 刻意不带 __FIXED__: 前缀：带前缀的值会被当成「自己输入」或固定账号，漏改的路径会静默出错；
 // 不带前缀时漏改的路径会按“映射字段不存在”报错，buildMappedRows 另有拦截。
@@ -76,6 +80,7 @@ module.exports = {
   FEATURE_FILTER_FIELD_TOKEN_PREFIX,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
+  LOGIC_VALUE_FIELD_TOKEN_PREFIX,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   SUPPORTED_EXTENSIONS,
   buildExpectedHeaderCandidates,

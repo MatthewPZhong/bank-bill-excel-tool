@@ -29,6 +29,9 @@ const {
   buildMappedRows,
   extractHeaders,
   buildFeatureFilterToken,
+  buildLogicValueToken,
+  normalizeLogicValueFields,
+  LOGIC_VALUE_MIN_FIELDS,
   getFeatureFilterRef,
   LEGACY_FEATURE_FILTER_ID,
   normalizeFeatureFilterList,
@@ -111,12 +114,13 @@ function loadMainFunctions(names, deps = {}) {
 const CONSTANTS = loadMainConstants([
   'BALANCE_DISABLED_OPTION', 'BALANCE_CALCULATED_OPTION', 'MERCHANT_ID_SELF_INPUT_OPTION', 'MERCHANT_ID_MULTI_ACCOUNT_MARKER',
   'MERCHANT_ID_CURRENCY_ONLY_OPTION',
-  'CONCAT_FIELDS_MAPPING_FIELD', 'FEATURE_FILTER_MAPPING_FIELD', 'CUSTOM_INPUT_TARGET_FIELDS',
+  'CONCAT_FIELDS_MAPPING_FIELD', 'FEATURE_FILTER_MAPPING_FIELD', 'LOGIC_VALUE_MAPPING_FIELD', 'CUSTOM_INPUT_TARGET_FIELDS',
   'SIGNED_AMOUNT_MAPPING_FIELD', 'AMOUNT_BASED_NAME_MAPPING_FIELD', 'AMOUNT_BASED_ACCOUNT_MAPPING_FIELD',
   'AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD', 'AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION',
   'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
   'BILL_SPLIT_ROW_FILTER_MAPPING_FIELD', 'BILL_SPLIT_ROW_FILTER_ENABLED_OPTION',
-  'PREPROCESS_ROW_FILTER_MAPPING_FIELD', 'PREPROCESS_ROW_FILTER_ENABLED_OPTION', 'PREPROCESS_FIELDS',
+  'PREPROCESS_ROW_FILTER_MAPPING_FIELD', 'PREPROCESS_ROW_FILTER_ENABLED_OPTION', 'DUPLICATE_ROW_FILTER_MAPPING_FIELD',
+  'DUPLICATE_ROW_FILTER_ENABLED_OPTION', 'PREPROCESS_FIELDS',
   'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS', 'FILENAME_MAPPING_TEMPLATE_ID', 'MISSING_ENUM_MESSAGE',
   'SIGNED_AMOUNT_MAPPING_FIELD',
   'LEGACY_ORIENTED_MAPPINGS_MESSAGE'
@@ -141,7 +145,7 @@ function pickColumns(rows, names) {
 
 function createMain(database, spies) {
   return loadMainFunctions([
-    'validateTemplateConfiguration', 'isPreprocessRowFilterEnabled',
+    'validateTemplateConfiguration', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     'validateFeatureFiltersPayload',
     'collectFeatureFilterRefs',
     'buildExportTargetFields',
@@ -159,7 +163,7 @@ function createMain(database, spies) {
     'getTemplateMappingConfig',
     'buildMappedFieldLookup',
     'normalizeLookupMappingValue',
-    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'isPreprocessRowFilterEnabled',
+    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     'resolveStatementFeatureFilters',
     'buildBillSplitMergeConfig',
     'buildAmountSplitByFieldConfig',
@@ -198,6 +202,9 @@ function createMain(database, spies) {
     FIXED_FIELD_VALUE_PREFIX,
     MERCHANT_ID_CURRENCY_ONLY_MARKER,
     buildFeatureFilterToken,
+    buildLogicValueToken,
+    normalizeLogicValueFields,
+    LOGIC_VALUE_MIN_FIELDS,
     getFeatureFilterRef,
     LEGACY_FEATURE_FILTER_ID,
     normalizeFeatureFilterList,

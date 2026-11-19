@@ -65,6 +65,7 @@ const CONSTANTS = readTopLevelLiteralConstants();
 const currencyBigAccountsByTemplateId = new Map();
 const fns = loadMainFunctions([
   'validateTemplateConfiguration',
+  'isLegacyLogicValueDirectReference',
   'validateCurrencyBigAccountConfiguration',
   'collectFeatureFilterRefs',
   'getPrimaryMappedField',
@@ -82,9 +83,13 @@ const fns = loadMainFunctions([
   'isCurrencyOnlyMerchantMapping',
   'isMultiBigAccountMapping',
   'classifyCurrencyOnlyEntries',
-  'isPreprocessRowFilterEnabled'
+  'isPreprocessRowFilterEnabled',
+  'isDuplicateRowFilterEnabled'
 ], {
   ...CONSTANTS,
+  // v3.2.19：逻辑取值（校验与映射归一化会引用）
+  normalizeLogicValueFields: require('../../../src/backend/file-service').normalizeLogicValueFields,
+  LOGIC_VALUE_MIN_FIELDS: require('../../../src/backend/file-service').LOGIC_VALUE_MIN_FIELDS,
   FIXED_FIELD_VALUE_PREFIX,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   // 「字段筛选特征值」（v3.2.18 多特征值）：校验、映射归一化与模板包读取会引用

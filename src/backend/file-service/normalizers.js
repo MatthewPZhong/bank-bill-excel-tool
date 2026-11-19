@@ -149,6 +149,18 @@ function sanitizeAmountValue(value) {
   return sanitized.startsWith('.') ? `0${sanitized}` : sanitized;
 }
 
+// 明细导出（buildDetailExportRows）判定收 / 支「为空或为 0」的口径：去首尾空白后为空，或能解析且等于 0。
+// 不能解析的值（如 `100.`）不算空，照常导出；重复账单过滤与明细导出共用此口径。
+function isZeroOrBlankAmount(value) {
+  return normalizeCell(value) === '' || parseNumericValue(value) === 0;
+}
+
+// 一行映射结果是否会导出为明细行：Credit / Debit 两列都在时恰有一个不为空或 0；缺任一列时都导出（同 buildDetailExportRows）。
+function isDetailExportAmountRow(creditValue, debitValue, { hasCredit = true, hasDebit = true } = {}) {
+  if (!hasCredit || !hasDebit) return true;
+  return isZeroOrBlankAmount(creditValue) !== isZeroOrBlankAmount(debitValue);
+}
+
 function hasEffectiveAmount(rawValue) {
   const sanitized = sanitizeAmountValue(rawValue);
 
@@ -732,6 +744,8 @@ module.exports = {
   extractCurrencyAliases,
   hasEffectiveAmount,
   inferDateCellFormat,
+  isDetailExportAmountRow,
+  isZeroOrBlankAmount,
   verifyStatementEndingBalance,
   isRegexLiteral,
   loadCurrencyMappings,
