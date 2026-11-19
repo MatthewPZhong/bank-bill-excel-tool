@@ -46,11 +46,28 @@
 - **⚠️ 已下线模块导出的启动收尾（spec D6）**：升级前已保存文件、归档未收尾的 Pending / 业务OP / 收单导出，新版启动照常收尾（任务记为成功、附件就绪），与旧版重启时一致。
 - **BizOP 遗留发布记录（B108）**：处理前统一发布流程的导出被拒，须确认提示文案与影响范围可接受。
 - **实机**：Windows 打包版启动、模块切换回默认模块、存档中心不显示已下线模块未做（B105）。
-- **结果**：待用户确认。
+- **结果**：2026-11-18 用户确认人工复核通过（原话「人工复核已通过，继续」），覆盖以上各项（含 spec D6 与 B108）；未提供复核人与逐项明细。Windows 打包版实机验收未做（B105，目标 v3.2.21）。
 
 ## 验证（清单 C4）
 
 - 模块分支：两轮修复后 `npm run release-check` 通过（TechDoc 记录：单测 8934 个，8930 通过、4 跳过、0 失败；集成 88 个脚本全部通过）。
 - 架构策略历史：合入后 `npm run check:architecture` 报 `renderer-duplicate-inbound.activationEvidence`、`renderer-pre-fund.activationEvidence`、`shared-xlsx.requiredConsumers` 被放宽——模块分支的 policyChanges 登记在 `466bb6fa`，而 release 侧的 `d8a07a4b` / `305ef4b0` 不在其历史中。按 v3.2.19 先例，为 `305ef4b0` 补登 3 条同值 policyChanges（`architecture/boundaries.json`），复跑通过（检查 366 个提交）。
 - release 候选（升版提交）：lint 通过；架构检查通过；`release-notes`、`vcc-financial-op-release-docs`、`app-update-contract`、`windows-build-contract`、`ci-release-check-jobs`、`architecture/policy-history` 单测 108 个（106 通过、2 跳过、0 失败）；集成 `release-notes-upgrade-prompt` 6/6。本机未跑完整 `npm run release-check`（用户此前要求跳过本地 release-check），以 PR Windows CI 与发布流程内的 release-check 为准。
-- PR Windows CI：待填写。
+- PR #256 Windows CI：`f76513b0`（run 44460088446）与最终 head `50c0a88f`（run 44467549690）全部通过（11 项）。
+
+## 合并、标签与发布（清单 E–F）
+
+| 项目 | 结果 |
+| --- | --- |
+| 合并 | PR #256 以 merge commit 合并（2026-11-18 22:04 PST），`M` = `08d1fb413d71ce43f04e14a2f00047705dbe8feb`，父提交 `466bb6fa`、`50c0a88f`，tree 与 `50c0a88f` 相同；PR #255 随之标为已合并 |
+| main CI | `08d1fb41`（run 44469462981）通过，11 项 |
+| 正式标签 | 附注标签 `v3.2.20`（对象 `5082777c`）→ `08d1fb41`；推送前核对远端 main 仍为 `M`，只推该标签 |
+| 发布流程 | run 44471244870，`production-release` 由用户授权经 `gh` 审批；全部步骤成功。Windows 上 `release-check`：单测 8936 个（8932 通过、0 失败），集成 88 个脚本全部通过，其中 `renderer-lifecycle` 474/474 用时 119.5 秒（仍在原 120 秒上限边缘，300 秒时限确有必要） |
+| Release | [v3.2.20](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.2.20)，2026-11-18 23:12 PST 发布，非 draft、非 prerelease，为 Latest |
+| 产物 | `bank-bill-excel-tool-setup-3.2.20.exe`（106663238 字节）、`bank-bill-excel-tool-setup-3.2.20.exe.blockmap`（111204）、`bank-bill-excel-tool-portable-3.2.20.exe`（106166359）、`latest.yml`（372） |
+| `latest.yml` | `version: 3.2.20`，`path` 与 `files[0].url` 均为安装包，`size` 与安装包附件一致，带 sha512；workflow「Verify update artifacts」「Verify published release」通过 |
+| 未做 | 未在本机独立重算安装包哈希；Windows 实机安装、升级与业务抽查未做（B105） |
+
+## 结论
+
+v3.2.20 已发布并完成自动核验，是首个包含 v3.2.19 功能的安装包；Windows 实机验收待补（B105）。
