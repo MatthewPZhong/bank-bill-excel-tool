@@ -47,61 +47,63 @@ function actionByKey(collection, actionKey) {
   return collection.actions.find((action) => action.actionKey === actionKey);
 }
 
-test('E13-G current manifest 以独立 67 action / 74 pair authority 达到六面 100% coverage', () => {
+// v3.2.20 下线业务OP数据核对（含 v327）、月度Pending数据核对、收单单据币种校验、月度银行对账单BU回填校验：
+//   manifest 由 67 action / 74 pair 收缩为 39 / 45，其余条目不变（证据 manifest-current 已按 --write 重算）。
+test('E13-G current manifest 以独立 39 action / 45 pair authority 达到六面 100% coverage', () => {
   const current = harness();
   const result = validateActionCoverage(current.manifest, current);
-  assert.equal(CANONICAL_ACTION_KEYS.length, 67);
-  assert.equal(LEGACY_HANDLER_PAIRS.length, 74);
+  assert.equal(CANONICAL_ACTION_KEYS.length, 39);
+  assert.equal(LEGACY_HANDLER_PAIRS.length, 45);
   assert.deepEqual(current.manifest.counts, {
-    actionCount: 67,
-    legacyPairCount: 74,
-    runtimePolicyCount: 49,
-    legacyOnlyCount: 16,
+    actionCount: 39,
+    legacyPairCount: 45,
+    runtimePolicyCount: 25,
+    legacyOnlyCount: 12,
     platformCanaryCount: 2
   });
   assert.deepEqual(result, {
     valid: true,
-    actionCount: 67,
-    legacyPairCount: 74,
-    runtimePolicyCount: 49,
+    actionCount: 39,
+    legacyPairCount: 45,
+    runtimePolicyCount: 25,
     surfaceCount: 6,
-    coveredActionSurfaceCount: 402,
-    expectedActionSurfaceCount: 402,
+    coveredActionSurfaceCount: 234,
+    expectedActionSurfaceCount: 234,
     coveragePercent: 100
   });
   assert.equal(Object.isFrozen(current.manifest), true);
   assert.equal(Object.isFrozen(current.manifest.surfaces.publishers), true);
 });
 
-test('Capability Inventory 与 Effective Production Strategy 分离，新版业务 OP 十二项与 rows 显式开启', () => {
+test('Capability Inventory 与 Effective Production Strategy 分离，仅 rows 显式开启', () => {
   const current = harness();
   const snapshot = createEffectiveProductionStrategySnapshot(current);
   assert.deepEqual(current.capabilityInventory.counts, {
-    actionCount: 67,
-    implementedCount: 49,
-    legacyOnlyCount: 16,
+    actionCount: 39,
+    implementedCount: 25,
+    legacyOnlyCount: 12,
     platformCanaryCount: 2
   });
   assert.deepEqual(snapshot.counts, {
-    actionCount: 67,
-    productionEnabledCount: 13,
-    legacyEffectiveCount: 54
+    actionCount: 39,
+    productionEnabledCount: 1,
+    legacyEffectiveCount: 38
   });
   for (const action of snapshot.actions) {
-    const enabled = action.actionKey.startsWith('biz-op-v327:') || action.actionKey === 'toolbox:split-rows';
+    const enabled = action.actionKey === 'toolbox:split-rows';
     assert.equal(action.effectiveMode, enabled ? 'thread-single' : 'legacy');
     assert.equal(action.effectiveWorkerCount, enabled ? 1 : 0);
     assert.equal(action.featureFlag, enabled);
   }
 
-  const acquiring = actionByKey(current.capabilityInventory, 'acquiring:run-new-eligible');
-  const acquiringStrategy = actionByKey(snapshot, 'acquiring:run-new-eligible');
-  assert.equal(acquiring.capabilityMode, 'thread-pool');
-  assert.equal(acquiring.runtimeRegistered, true);
-  assert.equal(acquiringStrategy.effectiveMode, 'legacy');
-  assert.equal(acquiringStrategy.effectiveWorkerCount, 0);
-  assert.equal(acquiringStrategy.featureFlag, false);
-  assert.equal(acquiringStrategy.legacyAvailable, true);
+  const duplicate = actionByKey(current.capabilityInventory, 'duplicate:import');
+  const duplicateStrategy = actionByKey(snapshot, 'duplicate:import');
+  assert.equal(duplicate.capabilityMode, 'thread-pool');
+  assert.equal(duplicate.runtimeRegistered, true);
+  assert.equal(duplicateStrategy.effectiveMode, 'legacy');
+  assert.equal(duplicateStrategy.effectiveWorkerCount, 0);
+  assert.equal(duplicateStrategy.featureFlag, false);
+  assert.equal(duplicateStrategy.legacyAvailable, true);
 
   const position = actionByKey(current.capabilityInventory, 'position:import');
   const positionStrategy = actionByKey(snapshot, 'position:import');
@@ -113,15 +115,15 @@ test('Capability Inventory 与 Effective Production Strategy 分离，新版业�
   const validation = validateEffectiveProductionStrategySnapshot(snapshot, current);
   assert.deepEqual(validation, {
     valid: true,
-    actionCount: 67,
-    productionEnabledCount: 13,
-    legacyEffectiveCount: 54
+    actionCount: 39,
+    productionEnabledCount: 1,
+    legacyEffectiveCount: 38
   });
   assert.deepEqual(validateCapabilityInventory(current.capabilityInventory, current), {
     valid: true,
-    actionCount: 67,
-    implementedCount: 49,
-    legacyOnlyCount: 16,
+    actionCount: 39,
+    implementedCount: 25,
+    legacyOnlyCount: 12,
     platformCanaryCount: 2
   });
 });
@@ -161,10 +163,6 @@ test('Position import-result 只记录真实 legacy Main route，不伪造 E13-F
     routeKind: 'legacy-main',
     managedCapabilityRoute: false
   });
-  const regenerate = actionByKey(current.manifest, 'acquiring:export-diff-workbook');
-  assert.deepEqual(regenerate.legacyTaskKeys, []);
-  assert.equal(regenerate.handlerRoute, 'none');
-  assert.equal(regenerate.capabilityStatus, 'runtime-policy');
 });
 
 test('manifest action/surface/pair 与 production binding 集合 mutant 全部 fail closed', () => {
@@ -185,7 +183,7 @@ test('manifest action/surface/pair 与 production binding 集合 mutant 全部 f
   );
 
   const substitutedRoute = structuredClone(current.manifest);
-  substitutedRoute.handlerRoutes[0].legacyTaskKey = 'acquiringBillCurrency:run';
+  substitutedRoute.handlerRoutes[0].legacyTaskKey = 'duplicate-inbound-match:run';
   assert.throws(
     () => validateActionCoverage(substitutedRoute, current),
     (error) => error.code === 'ACTION_COVERAGE_MANIFEST_PAIR_SET_MISMATCH'
@@ -202,8 +200,8 @@ test('manifest action/surface/pair 与 production binding 集合 mutant 全部 f
   );
 
   const substitutedBinding = structuredClone(current.bindings);
-  substitutedBinding['pending:export-summary'] = [];
-  substitutedBinding['pending:export-diff'].push('pending:diff:export-aggregate');
+  substitutedBinding['statement:generate-current'] = ['file:export-balance'];
+  substitutedBinding['statement:generate-all'].push('file:export-detail');
   assert.throws(
     () => validateActionCoverage(current.manifest, { ...current, bindings: substitutedBinding }),
     (error) => error.code === 'ACTION_COVERAGE_BINDING_PAIR_SET_MISMATCH'
@@ -296,26 +294,26 @@ test('已发布 E13-G 清单和策略快照由独立 gate 对当前模块导出�
 
 test('外部 feature flag 不能绕过 policy disabled，策略快照 drift 与未知 action 均被拒绝', () => {
   const current = harness();
-  const flags = { 'acquiring:run-new-eligible': true };
+  const flags = { 'duplicate:import': true };
   const snapshot = createEffectiveProductionStrategySnapshot({
     ...current,
     featureFlags: flags,
-    eligibilityThresholds: { 'acquiring:run-new-eligible': 'rows>=300000' }
+    eligibilityThresholds: { 'duplicate:import': 'rows>=300000' }
   });
-  const action = actionByKey(snapshot, 'acquiring:run-new-eligible');
+  const action = actionByKey(snapshot, 'duplicate:import');
   assert.equal(action.featureFlag, true);
   assert.equal(action.effectiveMode, 'legacy');
   assert.equal(action.effectiveWorkerCount, 0);
   assert.equal(action.eligibilityThreshold, 'rows>=300000');
-  assert.equal(action.downgradeReason, 'PENDING_HUMAN_REVIEW');
+  assert.equal(action.downgradeReason, 'production gate not yet passed', '仍沿用 policy 自身的降级原因');
 
   const drifted = structuredClone(snapshot);
-  actionByKey(drifted, 'acquiring:run-new-eligible').effectiveWorkerCount = 8;
+  actionByKey(drifted, 'duplicate:import').effectiveWorkerCount = 8;
   assert.throws(
     () => validateEffectiveProductionStrategySnapshot(drifted, {
       ...current,
       featureFlags: flags,
-      eligibilityThresholds: { 'acquiring:run-new-eligible': 'rows>=300000' }
+      eligibilityThresholds: { 'duplicate:import': 'rows>=300000' }
     }),
     (error) => error.code === 'PRODUCTION_STRATEGY_SNAPSHOT_MISMATCH'
   );

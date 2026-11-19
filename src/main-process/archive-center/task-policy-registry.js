@@ -103,10 +103,6 @@ const SUPPORT_ACTION_POLICIES = Object.freeze([
 
 const FILE_ACTION_CHANNELS = Object.freeze(Object.keys(TASK_FILE_PLAN_DEFINITIONS));
 const NO_FILE_ACTION_CHANNELS = Object.freeze([
-  'bizOpReconV327:run',
-  'bizOpReconV327:delete',
-  'bizOpReconV327:maintenance:upgrade',
-  'bizOpReconV327:maintenance:reclaim',
 
   'account-mapping:distribute-migration',
   'account-mapping:save',
@@ -142,10 +138,6 @@ const NO_FILE_ACTION_CHANNELS = Object.freeze([
   'linked-table:delete-by-date-range',
   'recon-id-fix:clear-session',
   'recon-id-fix:run',
-  'pending:reconcile:run',
-  'pending:rule:save',
-  'bankBuRecon:run',
-  'bizOpRecon:run',
   'vccOpCalc:run:compute-amounts',
   'vccOpCalc:run:save',
   'vccFinancialOp:data-manager:delete',
@@ -154,7 +146,6 @@ const NO_FILE_ACTION_CHANNELS = Object.freeze([
   'vccFinancialOp:run:archive',
   'vccFinancialOp:run:calculate',
   'vccFinancialOp:run:unarchive',
-  'acquiringBillCurrency:clearMonth',
   'pre-fund-reconciliation:run',
   'pre-fund-reconciliation:temp:clear',
   'pre-fund-reconciliation:temp:delete',
@@ -237,41 +228,6 @@ const RESERVE_CHANNELS_BY_SCOPE = Object.freeze({
     'recon-id-fix:import',
     'recon-id-fix:run'
   ]),
-  PENDING: Object.freeze([
-    'pending:diff:export-aggregate',
-    'pending:diff:export-single',
-    'pending:error:export-report',
-    'pending:import:start',
-    'pending:reconcile:run',
-    'pending:removed:import',
-    'pending:rule:save'
-  ]),
-  BANKBU: Object.freeze([
-    'bankBuRecon:export:aggregate',
-    'bankBuRecon:export:single',
-    'bankBuRecon:import:run',
-    'bankBuRecon:run'
-  ]),
-  BIZOP: Object.freeze([
-    'bizOpReconV327:import',
-    'bizOpReconV327:run',
-    'bizOpReconV327:delete',
-    'bizOpReconV327:maintenance:upgrade',
-    'bizOpReconV327:maintenance:reclaim',
-    'bizOpReconV327:export:op-raw',
-    'bizOpReconV327:export:flow-raw',
-    'bizOpReconV327:export:op-check',
-    'bizOpReconV327:export:flow-check',
-    'bizOpReconV327:export:result-full',
-    'bizOpReconV327:export:result-diff',
-    'bizOpReconV327:export:errors',
-
-    'bizOpRecon:export:date',
-    'bizOpRecon:export:date-range',
-    'bizOpRecon:import:run-biz-op',
-    'bizOpRecon:import:run-flow',
-    'bizOpRecon:run'
-  ]),
   VCCOP: Object.freeze([
     'vccOpCalc:import:scan',
     'vccOpCalc:run:compute-amounts',
@@ -288,14 +244,6 @@ const RESERVE_CHANNELS_BY_SCOPE = Object.freeze({
     'vccFinancialOp:run:archive',
     'vccFinancialOp:run:calculate',
     'vccFinancialOp:run:unarchive'
-  ]),
-  ACQUIRING: Object.freeze([
-    'acquiringBillCurrency:clearMonth',
-    'acquiringBillCurrency:export',
-    'acquiringBillCurrency:importBill',
-    'acquiringBillCurrency:importFlow',
-    'acquiringBillCurrency:run',
-    'acquiringBillCurrency:run:resume'
   ]),
   PREFUND: Object.freeze([
     'pre-fund-reconciliation:export',
@@ -344,16 +292,9 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
   'read-only-query': Object.freeze([
     'channel:list',
     'channel-account-mapping:list-conflicts',
-    'bizOpReconV327:status',
-    'bizOpReconV327:metadata:months',
-    'bizOpReconV327:metadata:list',
-    'bizOpReconV327:metadata:input',
-    'bizOpReconV327:metadata:run-calendar',
     'account-mapping:check-migration-pending',
     'account-mapping:get-migration-data',
     'account-mapping:list',
-    'acquiringBillCurrency:listMonths',
-    'acquiringBillCurrency:sessionStatus',
     'app-update:get-status',
     'app:get-info',
     'archive-center:get-batch',
@@ -369,20 +310,9 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'bank-statement:c3-candidate-count',
     'bank-statement:refund-candidate-count',
     'bank-statement:session-status',
-    'bankBuRecon:months:list',
-    'bankBuRecon:run:history',
-    'bankBuRecon:run:list-ready-months',
-    'bankBuRecon:run:list-success-months',
-    'bankBuRecon:status',
     'big-account-mode:load',
     'big-account-order:load',
     'big-account:get-with-own',
-    'bizOpRecon:bu:list',
-    'bizOpRecon:export:list-success-dates',
-    'bizOpRecon:import:check-single-day',
-    'bizOpRecon:run:history',
-    'bizOpRecon:run:list-ready-dates',
-    'bizOpRecon:status',
     'channels:list',
     'duplicate-inbound-match:session-status',
     'fund-transfer-account-mapping:list',
@@ -390,12 +320,6 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'linked-table:get-retention-settings',
     'linked-table:list',
     'linked-table:row-count',
-    'pending:columns',
-    'pending:diff:latest-run-for',
-    'pending:diff:runs-for-month-pair',
-    'pending:diff:runs-list',
-    'pending:months:list',
-    'pending:rule:get',
     'position-reconciliation:data-manager',
     'position-reconciliation:linked-manager',
     'position-reconciliation:mappings:list',
@@ -432,19 +356,8 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'vccFinancialOp:run:latest-archived'
   ]),
   'file-picker-only': Object.freeze([
-    'bizOpReconV327:files:pick',
-    'bizOpReconV327:export:pick',
     'background:select-file',
     'bank-accounts:pick-import-file',
-    'bankBuRecon:export:pick-save-path',
-    'bankBuRecon:import:pick-bank-file',
-    'bankBuRecon:import:pick-pending-file',
-    'bizOpRecon:export:pick-save-path',
-    'bizOpRecon:import:open-error-report-folder',
-    'bizOpRecon:import:pick-biz-op-file',
-    'bizOpRecon:import:pick-flow-file',
-    'pending:import:pick-files',
-    'pending:removed:pick-files',
     'scenarios:import-bundle',
     'template-resources:pick-import-file',
     'vccOpCalc:import:pick-files',
@@ -462,8 +375,6 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'template:preview-header-update'
   ]),
   'preview-only': Object.freeze([
-    'bizOpReconV327:run:preflight',
-    'bizOpReconV327:delete:preview',
     'file:extract-big-account-order',
     'template:preview-delete-bill-split-row',
     'toolbox:split:read',
@@ -475,8 +386,6 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
   ]),
   'cancel-active-task': Object.freeze([
     'toolbox:split:cancel-read',
-    'bizOpReconV327:task:cancel',
-    'acquiringBillCurrency:run:cancel',
     'file:cancel-big-account-selection',
     'position-reconciliation:bank:cancel-import',
     'position-reconciliation:import:cancel',
@@ -484,7 +393,6 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'vccFinancialOp:task:cancel'
   ]),
   'archive-center-maintenance': Object.freeze([
-    'bizOpReconV327:recovery:retry',
     'archive-center:change-storage-location',
     'archive-center:delete-batch',
     'archive-center:open-file',

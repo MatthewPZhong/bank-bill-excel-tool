@@ -31,7 +31,7 @@
 //     生产每行 A 列首 cell 必非空 → 几乎只探 1 个 cell）。供 onRow 的 allEmpty 等价判定。
 //   - 表头行（rowR===1）：全列解析（动态数组，不截断，validator 检测「列多」契约）。
 //   - 自闭合 <row .../> / <c .../>：空行/空 cell（hasAnyCellText 不受影响）。
-//   - XML 转义解码（&amp; 等）：引擎自带 xmlUnescape，与 pending-import/streaming-xlsx-reader 等价。
+//   - XML 转义解码（&amp; 等）：引擎自带 xmlUnescape，与 xlsx/legacy/streaming-xlsx-reader 等价。
 //
 // 约束：本文件不得 require 任何业务模块，引擎自包含。
 

@@ -38,19 +38,18 @@ html, body { background-color: var(--bg); color: var(--text); }
 :root[data-theme="dark"] .app-shell { background-color: var(--bg); }
 .window-bar { background: var(--header); }
 .gemini-gradient { color: var(--text); }
-.modal-overlay, .vcc-fin-op-overlay, .bizop-v327-dialog::backdrop { background: var(--overlay); }
-.modal-card, .bizop-v327-dialog { box-shadow: var(--shadow-lg); }
+.modal-overlay, .vcc-fin-op-overlay { background: var(--overlay); }
+.modal-card { box-shadow: var(--shadow-lg); }
 .primary-btn, .palette-action.solid { color: var(--on-primary); }
-.danger-btn, .pending-rule-confirm-card .danger-btn.small { color: var(--on-danger); }
-.bizop-danger { color: var(--on-danger) !important; }
+.danger-btn { color: var(--on-danger); }
 :root[data-theme="dark"] .primary-btn { box-shadow: var(--shadow-sm); }
 :root[data-theme="dark"] :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), select, textarea) { background-color: var(--input); color: var(--text); border-color: var(--line); }
 :root[data-theme="dark"] :is(input, select, textarea):disabled { color: var(--dim); background-color: var(--chip-bg); }
 :root[data-theme="dark"] input::placeholder, :root[data-theme="dark"] textarea::placeholder { color: var(--dim); }
 :root[data-theme="dark"] :is(button, input, select, textarea, a):focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
 :root[data-theme="dark"] input[type="checkbox"], :root[data-theme="dark"] input[type="radio"] { accent-color: var(--primary); }
-:root[data-theme="dark"] .status-box[data-tone="success"], :root[data-theme="dark"] .pending-status[data-tone="success"] { color: var(--success); border-color: var(--success-border); background-color: var(--success-soft); }
-:root[data-theme="dark"] .status-box[data-tone="error"], :root[data-theme="dark"] .pending-status[data-tone="error"] { color: var(--danger); border-color: var(--danger-border); background-color: var(--danger-soft); }
+:root[data-theme="dark"] .status-box[data-tone="success"] { color: var(--success); border-color: var(--success-border); background-color: var(--success-soft); }
+:root[data-theme="dark"] .status-box[data-tone="error"] { color: var(--danger); border-color: var(--danger-border); background-color: var(--danger-soft); }
 :root[data-theme="dark"] .status-box[data-tone="warning"], :root[data-theme="dark"] .new-account-status-box.is-warning { color: var(--warning); border-color: var(--warning-border); background-color: var(--warning-soft); }
 :root[data-theme="dark"] .archive-center-feedback[data-tone="error"], :root[data-theme="dark"] .archive-delete-confirm-error { color: var(--danger); border-color: var(--danger-border); background: var(--danger-soft); }
 :root[data-theme="dark"] .archive-center-feedback[data-tone="success"] { color: var(--success); border-color: var(--success-border); background: var(--success-soft); }

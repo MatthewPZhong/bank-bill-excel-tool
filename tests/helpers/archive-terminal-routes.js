@@ -3,18 +3,18 @@
 const { createTerminalRouteRegistry } = require('../../src/main-process/archive-center/terminal-route-registry');
 const { createArchiveCenterController } = require('../../src/main-process/archive-center/controller');
 const { normalizePositionTerminalRoute } = require('../../src/main-process/position-reconciliation/task-owner');
-const { normalizePendingTerminalRoute } = require('../../src/main-process/pending-archive-lineage');
 const { normalizePreFundTerminalRoute } = require('../../src/main-process/pre-fund-archive-lineage');
-const { normalizeBizOpRunTerminalRoute } = require('../../src/main-process/biz-op-recon-run-data');
+const { createRetiredTerminalRouteRegistrations } = require('../../src/main-process/archive-center/retired-terminal-routes');
 
 function createTestTerminalRouteRegistry(finalize) {
   const finalizer = typeof finalize === 'function' ? finalize : () => {
     throw new Error('测试夹具未提供领域 terminal finalizer');
   };
+  // v3.2.20：pending-run / biz-op-run 为已下线模块的遗留 route，沿用生产退役登记的 normalizer。
+  const retired = createRetiredTerminalRouteRegistrations();
   return createTerminalRouteRegistry([
     { route: 'position-reconciliation', normalize: normalizePositionTerminalRoute, finalize: finalizer },
-    { route: 'pending-run', normalize: normalizePendingTerminalRoute, finalize: finalizer },
-    { route: 'biz-op-run', normalize: normalizeBizOpRunTerminalRoute, finalize: finalizer },
+    ...retired.map(({ route, normalize }) => ({ route, normalize, finalize: finalizer })),
     { route: 'pre-fund-run', normalize: normalizePreFundTerminalRoute, finalize: finalizer }
   ]);
 }

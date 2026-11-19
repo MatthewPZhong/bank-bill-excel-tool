@@ -7,8 +7,9 @@ const os = require('node:os');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const { createApplicationRecoveryCoordinator } = require('../../../src/main-process/application-recovery/coordinator');
-const { createApplicationRecoveryComposition } = require('../../../src/main-process/application-recovery/composition');
-const { createBizOpRecoveryParticipant } = require('../../../src/main-process/biz-op-v327/recovery-participant');
+const {
+  RECOVERY_PARTICIPANT_ORDER, createApplicationRecoveryComposition, createApplicationRecoveryParticipants
+} = require('../../../src/main-process/application-recovery/composition');
 const { createArchiveService } = require('../../../src/main-process/archive-center/archive-service');
 const { createArchiveCenterController } = require('../../../src/main-process/archive-center/controller');
 const { createArchiveOutboxStore } = require('../../../src/main-process/archive-center/outbox-store');
@@ -110,37 +111,26 @@ test('非法/重复 participant 在任何恢复调用前拒绝，冻结调用表
   assert.equal(calls, 1);
 });
 
-function compositionFixture(order, { deferredScan = false, activation = false, ownerFailure = null,
-  onPending = async () => {}, onLineage = async () => {} } = {}) {
-  let facade; let needsActivation = activation; let pending = deferredScan;
-  const bizOpModule = {
-    recovery: {
-      bindPlatform(value) { facade = value; },
-      openObligations() { return pending; },
-      async run(options) {
-        order.push(options?.initialPlatformOnly ? 'preflight' : 'biz-op-owner');
-        if (options?.initialPlatformOnly && pending) return { ready: false, reason: 'ARCHIVE_OWNER_PHASE_REQUIRED', fullScans: 0 };
-        await facade.scanAndRecover();
-        pending = false;
-        return { ready: !activation, reason: activation ? 'SCOPE_BLOCKED' : null, sourceCount: 0, activeHoldCount: 0 };
-      }
-    },
-    activation: { needed: () => needsActivation, async run(options) { assert.deepEqual(options, { quiesceOnly: true }); order.push('quiesce'); } },
-    async retryRecovery() { order.push('activation-post'); needsActivation = false; await facade.scanAndRecover(); }
-  };
-  const app = createApplicationRecoveryComposition({
-    platform: platform({ async scanAndRecover() { order.push('platform'); return {}; } }),
-    bizOpModule,
-    recoverPendingRuns: async () => { order.push('pending'); await onPending(); if (ownerFailure) throw ownerFailure; },
-    recoverLegacyBizOpRuns: async () => { order.push('legacy-biz'); },
-    recoverPreFundRuns: async () => { order.push('prefund'); },
+function recoveryOwners(order, { ownerFailure = null, onPreFund = async () => {}, onLineage = async () => {} } = {}) {
+  return {
+    recoverPreFundRuns: async () => { order.push('prefund'); await onPreFund(); if (ownerFailure) throw ownerFailure; },
     recoverPosition: async () => { order.push('position'); },
     recoverToolboxVccPublications: async () => { order.push('publications'); },
     recoverVccImportTerminal: async () => { order.push('vcc-terminal'); },
-    reconcileVccImportLineage: async () => { order.push('lineage'); await onLineage(); },
-    onBizOpRecovery: (result) => { order.push(result.ready ? 'biz-info' : 'biz-warning'); }
+    reconcileVccImportLineage: async () => { order.push('lineage'); await onLineage(); }
+  };
+}
+
+// v3.2.20：业务OP数据核对下线后，平台全量扫描由 platform-scan 参与者在预检阶段触发。
+function compositionFixture(order, { scanFailure = null, ...options } = {}) {
+  return createApplicationRecoveryComposition({
+    platform: platform({ async scanAndRecover() {
+      order.push('platform');
+      if (scanFailure) throw scanFailure;
+      return { sourceCount: 2, activeHoldCount: 0, decisions: [] };
+    } }),
+    ...recoveryOwners(order, options)
   });
-  return app;
 }
 
 async function archiveFixture(t, app, order) {
@@ -166,19 +156,42 @@ async function archiveFixture(t, app, order) {
   return { controller, service, outbox, db };
 }
 
-for (const deferredScan of [false, true]) test(`真实 Archive 组合保持 ${deferredScan ? 'deferred' : 'normal'} 启动相对顺序`, async (t) => {
+test('真实 Archive 组合保持启动相对顺序：预检完成平台扫描后才进入 owner 与 outbox', async (t) => {
   const order = [];
-  const app = compositionFixture(order, { deferredScan });
+  const app = compositionFixture(order);
   const f = await archiveFixture(t, app, order);
   const preflight = await app.preflight();
-  assert.equal(preflight.participantResults[0].result.reason, deferredScan ? 'ARCHIVE_OWNER_PHASE_REQUIRED' : null);
-  assert.equal(app.snapshot().platformScanCompleted, !deferredScan);
+  assert.deepEqual(RECOVERY_PARTICIPANT_ORDER, ['platform-scan', 'pre-fund-runs', 'position',
+    'toolbox-vcc-publications', 'vcc-import-terminal', 'vcc-import-lineage']);
+  assert.deepEqual(preflight.participantResults.map((entry) => entry.id), ['platform-scan']);
+  assert.deepEqual(preflight.participantResults[0].result, { ready: true, sourceCount: 2, activeHoldCount: 0 });
+  assert.equal(app.snapshot().platformScanCompleted, true);
   app.completeArchiveInitialization(await f.controller.initialize());
   assert.equal(app.snapshot().phase, 'ready');
-  assert.deepEqual(order, ['preflight', ...(deferredScan ? [] : ['platform']),
-    ...(deferredScan ? ['biz-op-owner', 'platform', 'biz-info'] : []),
-    'pending', 'legacy-biz', 'prefund', 'position', 'publications', 'vcc-terminal',
+  assert.deepEqual(order, ['platform', 'prefund', 'position', 'publications', 'vcc-terminal',
     'outbox', 'batch-flow', 'task-flow', 'sweep', 'safety', 'lineage']);
+});
+
+test('平台扫描失败时预检保留原错误且不进入 owner；显式参与者必须来自同一工厂', async () => {
+  const order = [];
+  const original = Object.assign(new Error('provider 枚举失败'), { code: 'STARTUP_RECOVERY_PROVIDER_ENUMERATION_FAILED' });
+  const app = compositionFixture(order, { scanFailure: original });
+  await assert.rejects(app.preflight(), (error) => error === original);
+  assert.deepEqual(app.snapshot(), { phase: 'failed', platformScanCompleted: false,
+    failureCode: 'STARTUP_RECOVERY_PROVIDER_ENUMERATION_FAILED' });
+  assert.deepEqual(order, ['platform']);
+  const participants = createApplicationRecoveryParticipants(recoveryOwners([]));
+  // 浅拷贝（G7 汇总、coordinator 冻结时发生）保留同一 preflight，仍可绑定；替换 preflight 的伪造参与者失败关闭。
+  const forged = [{ ...participants[0], preflight: async () => ({ ready: true }) }, ...participants.slice(1)];
+  assert.throws(() => createApplicationRecoveryComposition({ platform: platform(), participants: forged }),
+    { code: 'APPLICATION_RECOVERY_PARTICIPANT_INVALID' });
+  const copied = [{ ...participants[0] }, ...participants.slice(1)];
+  createApplicationRecoveryComposition({ platform: platform(), participants: copied });
+  // 同一组参与者只能绑定一个平台入口，第二次装配拒绝。
+  assert.throws(() => createApplicationRecoveryComposition({ platform: platform(), participants }),
+    { code: 'APPLICATION_RECOVERY_PARTICIPANT_INVALID' });
+  assert.throws(() => createApplicationRecoveryComposition({ platform: platform(), participants: participants.slice(1) }),
+    { code: 'APPLICATION_RECOVERY_PARTICIPANT_INVALID' });
 });
 
 test('owner 失败后真实 SQLite/outbox 仍收口耐久 terminal，后续 owner 已执行且不进入 post-outbox', async (t) => {
@@ -187,7 +200,7 @@ test('owner 失败后真实 SQLite/outbox 仍收口耐久 terminal，后续 owne
   let f;
   const context = { taskRunId: 'recovered-task', taskKey: 'position-reconciliation:mappings:save',
     moduleId: 'position-reconciliation-process', parentRunId: 'parent', operationKey: 'operation' };
-  const app = compositionFixture(order, { ownerFailure: original, onPending: async () => {
+  const app = compositionFixture(order, { ownerFailure: original, onPreFund: async () => {
     await f.service.beginTaskRun(context); await f.service.markTaskRunStarted(context.taskRunId);
     f.controller.persistTaskTerminalIntent({ owner: { version: 1, kind: 'operation', operationContext: context },
       sourceOperation: context.taskKey, terminalOutcome: { taskStatus: 'succeeded' } });
@@ -201,19 +214,8 @@ test('owner 失败后真实 SQLite/outbox 仍收口耐久 terminal，后续 owne
   });
   assert.equal(f.service.repository.getTaskRun(context.taskRunId).status, 'succeeded');
   assert.equal(f.outbox.list().length, 0);
-  assert.deepEqual(order, ['preflight', 'platform', 'pending', 'legacy-biz', 'prefund', 'position', 'publications', 'vcc-terminal', 'outbox']);
+  assert.deepEqual(order, ['platform', 'prefund', 'position', 'publications', 'vcc-terminal', 'outbox']);
   assert.deepEqual(app.snapshot(), { phase: 'failed', failureCode: 'ARCHIVE_STARTUP_OWNER_RECOVERY_FAILED', platformScanCompleted: true });
-});
-
-test('activation 先 quiesce，真实 outbox/sweep 收口后 retry；业务 ready=false 保留 warning 而非全局新策略', async (t) => {
-  const order = [];
-  const app = compositionFixture(order, { deferredScan: true, activation: true });
-  const f = await archiveFixture(t, app, order);
-  await app.preflight();
-  app.completeArchiveInitialization(await f.controller.initialize());
-  assert.deepEqual(order, ['preflight', 'quiesce', 'pending', 'legacy-biz', 'prefund', 'position', 'publications', 'vcc-terminal',
-    'outbox', 'batch-flow', 'task-flow', 'sweep', 'safety', 'activation-post', 'platform', 'lineage']);
-  assert.equal(app.snapshot().phase, 'ready');
 });
 
 test('post-outbox 错误由 Controller 保留原 cause 并记录失败阶段', async (t) => {
@@ -228,24 +230,6 @@ test('post-outbox 错误由 Controller 保留原 cause 并记录失败阶段', a
   assert.equal(app.snapshot().failureCode, 'ARCHIVE_STARTUP_HOOK_FAILED');
 });
 
-
-test('BizOP participant 保留 preflight reason 规则，owner ready=false 仍返回原保护诊断', async () => {
-  const blocked = { ready: false, sourceCount: 2, activeHoldCount: 1, reason: 'SCOPE_BLOCKED' };
-  let result = blocked; let logs = 0; let retries = 0;
-  const participant = createBizOpRecoveryParticipant({ module: {
-    recovery: { async run() { return result; }, openObligations: () => true },
-    activation: { needed: () => false },
-    async retryRecovery() { retries += 1; }
-  }, onRecovery(summary) { assert.equal(summary, blocked); logs += 1; } });
-  await assert.rejects(participant.preflight(), { code: 'SCOPE_BLOCKED', message: '业务 OP 恢复预检未通过，已保留启动保护' });
-  result = { ...blocked, reason: 'ARCHIVE_OWNER_PHASE_REQUIRED' };
-  assert.equal(await participant.preflight(), result);
-  result = blocked;
-  assert.equal(await participant.recoverOwner(), blocked);
-  assert.equal(logs, 1);
-  await participant.postOutbox();
-  assert.equal(retries, 0);
-});
 
 test('应用预检失败保留原错误，可显式重试且成功阶段不会重复', async () => {
   const original = Object.assign(new Error('预算不足'), { code: 'BIZOP_RECOVERY_SOURCES_LIMIT' });

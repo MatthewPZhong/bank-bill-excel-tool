@@ -3,17 +3,40 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createResourceGovernor, closeResourceGovernor } = require('../../../../src/main-process/background-execution/resource-governor');
-const { createExperimentalMemoryPolicy } = require('../../../../src/main-process/execution-descriptors/memory-profiles');
+const { createMemoryAdmissionPolicy } = require('../../../../src/main-process/background-execution/memory-admission');
+const { profile } = require('../../../../src/main-process/execution-descriptors/memory-profiles');
 const { registerMemoryGovernor, runMemoryActivity, memoryActivitySnapshot, inventoryForGovernor,
   sealMemoryActivityInventory, captureLegacyMemoryContinuation,
   isLegacyMemoryContinuationBlocking } = require('../../../../src/main-process/memory-activity');
 
 const MiB = 1024 ** 2;
 const resources = { cpuSlots: 1, workerThreadSlots: 1, utilityProcessSlots: 0, ioHeavySlots: 1, memoryBytes: 1024 * MiB };
-const target = { ownerKey: 'auto-report', actionKey: 'biz-op-v327:export-errors', operationKey: 'auto-report',
+// v3.2.20：原唯一受信任内部观察（BizOP 共享发布观察）随业务OP数据核对下线移除，生产策略不再登记 continuation。
+//   保留的通用机制（admission queue 打破「内部观察 → 等其父活动结束的获批 phase」环、能力绑定存活 Main 活动、
+//   资源检查不放宽）改用测试登记的身份验证；获批 phase 沿用与原 BizOP 导出同额度的 rows-generation 档位。
+const target = { ownerKey: 'auto-report', actionKey: 'test:approved-phase', operationKey: 'auto-report',
   resources, timeoutMs: 5000 };
-const continuation = { ...target, ownerKey: 'biz-op-v327:shared-publication-observation',
-  actionKey: 'publication:legacy-observation', operationKey: 'biz-op-v327:shared-publication-observation' };
+const continuation = { ...target, ownerKey: 'test:internal-observation',
+  actionKey: 'publication:legacy-observation', operationKey: 'test:internal-observation' };
+const TEST_EVIDENCE = 'memory-continuation-test-evidence';
+function createContinuationTestPolicy({ mode, compatibilityMemoryBytes, inventory }) {
+  const candidates = [{ mode, config: profile('rows-generation', mode, TEST_EVIDENCE) }];
+  return createMemoryAdmissionPolicy({ compatibilityMemoryBytes,
+    sampleMemory: () => ({ availableBytes: 4096 * MiB, sampledAt: Date.now() }),
+    resolveRequest(request) {
+      if (request.kind === 'phase' && request.actionKey === continuation.actionKey &&
+          request.ownerKey === continuation.ownerKey && request.operationKey === continuation.operationKey) {
+        return { migrated: false, heavy: true, maxGrowthBytes: null, continuation: captureLegacyMemoryContinuation() };
+      }
+      if (request.actionKey !== target.actionKey) return null;
+      if (request.kind === 'base') return { migrated: false, heavy: false, maxGrowthBytes: 0 };
+      return { migrated: true, heavy: true, maxGrowthBytes: candidates[0].config.phaseMemoryBytes, candidates };
+    },
+    isEvidenceValid: (config) => config.validatedEvidenceId === TEST_EVIDENCE,
+    externalPressure: inventory,
+    isContinuationBlocking: isLegacyMemoryContinuationBlocking
+  });
+}
 const tick = async () => { await Promise.resolve(); await Promise.resolve(); };
 function fixture(t, mode, compatibilityMiB = 2048) {
   let time = 0, sequence = 0;
@@ -34,8 +57,7 @@ function fixture(t, mode, compatibilityMiB = 2048) {
   sealMemoryActivityInventory();
   const governor = createResourceGovernor({ ...clock, memoryRecheckMs: 5,
     budgets: { ...resources, cpuSlots: 2, workerThreadSlots: 2, ioHeavySlots: 2, memoryBytes: 2048 * MiB },
-    memoryAdmission: createExperimentalMemoryPolicy({ modes: [mode], compatibilityMemoryBytes: compatibilityMiB * MiB,
-      sampleMemory: () => ({ availableBytes: 4096 * MiB, sampledAt: Date.now() }),
+    memoryAdmission: createContinuationTestPolicy({ mode, compatibilityMemoryBytes: compatibilityMiB * MiB,
       inventory() { const value = inventoryForGovernor(() => governor); value.blockers.push(...state.extra); return value; }
     }) });
   const unregister = registerMemoryGovernor(governor);

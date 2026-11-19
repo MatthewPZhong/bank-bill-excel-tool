@@ -138,13 +138,13 @@ function parent() {
     fs.writeFileSync(path.join(evidence, 'live-runtime.json'), JSON.stringify({ status: 'PASS', kind: '真实 Main + Preload + Renderer，临时数据库与真实单实例锁', evidenceLimit, resources, results }, null, 2));
     console.log('==== 2/2 PASS ====');
   } catch (error) {
-    const resourceBlocked = String(error).includes('BIZOP_ACTIVATION_RESOURCE_UNAVAILABLE');
+    // v3.2.20：业务OP数据核对下线，原「BizOP 首次激活资源准入失败」的 BLOCKED 分类随之移除。
     fs.writeFileSync(path.join(evidence, 'live-runtime.json'), JSON.stringify({
-      status: resourceBlocked ? 'BLOCKED' : 'FAILED',
+      status: 'FAILED',
       kind: '真实 Main + Preload + Renderer，临时数据库与真实单实例锁',
       evidenceLimit, resources, results,
-      reason: resourceBlocked ? '现有 BizOP 首次激活资源准入失败；未创建业务窗口，不能判定 GUI 冷启动通过' : String(error),
-      code: resourceBlocked ? 'BIZOP_ACTIVATION_RESOURCE_UNAVAILABLE' : null
+      reason: String(error),
+      code: null
     }, null, 2));
     throw error;
   } finally {

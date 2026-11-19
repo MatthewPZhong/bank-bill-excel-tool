@@ -1,20 +1,11 @@
 'use strict';
 
 const {
-  createBigTableImportMatureBinding
-} = require('../big-table-import-dispatch');
-const {
   createToolboxLargeSplitMatureBinding
 } = require('../toolbox-large-split-dispatch');
 const {
   createToolboxPublicationMatureBinding
 } = require('../toolbox-output-publication-dispatch');
-const {
-  ACQUIRING_ADAPTER_ACTIONS
-} = require('./acquiring-adapter-policies');
-const {
-  createAcquiringMatureBindings
-} = require('./adapters/acquiring-adapter');
 const {
   createPositionImportMatureBinding
 } = require('./adapters/position-import-adapter');
@@ -22,12 +13,8 @@ const {
   POSITION_IMPORT_ADAPTER_ACTION
 } = require('./position-import-adapter-policy');
 
+// v3.2.20：Pending / 业务OP / 收单的 mature action 随模块下线移除。
 const MATURE_ACTION_KEYS = Object.freeze({
-  pendingImport: 'pending:import',
-  bizOpImportFlow: 'biz-op:import-flow',
-  acquiringImport: ACQUIRING_ADAPTER_ACTIONS.IMPORT,
-  acquiringRunNewEligible: ACQUIRING_ADAPTER_ACTIONS.RUN_NEW_ELIGIBLE,
-  acquiringRunSingleOrResume: ACQUIRING_ADAPTER_ACTIONS.RUN_SINGLE_OR_RESUME,
   positionImport: POSITION_IMPORT_ADAPTER_ACTION,
   toolboxSplitLarge: 'toolbox:split-large',
   toolboxPublish: 'toolbox:publish'
@@ -40,16 +27,7 @@ const MATURE_ACTION_PRODUCTION = Object.freeze(Object.fromEntries(
 ));
 
 function createMatureActionAdapterBindings(options = {}) {
-  const bigTableOptions = options.bigTable || {};
-  const acquiringBindings = createAcquiringMatureBindings(options.acquiring || {});
   return Object.freeze({
-    [MATURE_ACTION_KEYS.pendingImport]: createBigTableImportMatureBinding(bigTableOptions.pending),
-    [MATURE_ACTION_KEYS.bizOpImportFlow]: createBigTableImportMatureBinding(bigTableOptions.bizOp),
-    [MATURE_ACTION_KEYS.acquiringImport]: acquiringBindings[MATURE_ACTION_KEYS.acquiringImport],
-    [MATURE_ACTION_KEYS.acquiringRunNewEligible]:
-      acquiringBindings[MATURE_ACTION_KEYS.acquiringRunNewEligible],
-    [MATURE_ACTION_KEYS.acquiringRunSingleOrResume]:
-      acquiringBindings[MATURE_ACTION_KEYS.acquiringRunSingleOrResume],
     [MATURE_ACTION_KEYS.positionImport]: createPositionImportMatureBinding(
       options.position || {}
     ),

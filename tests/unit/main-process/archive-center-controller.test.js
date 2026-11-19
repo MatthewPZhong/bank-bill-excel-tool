@@ -29,11 +29,8 @@ const {
   createArchiveRepository
 } = require('../../../src/backend/database/archive-repository');
 const {
-  finalizePendingTerminalIntent
-} = require('../../../src/main-process/pending-archive-lineage');
-const {
-  finalizeRunTerminalIntent: finalizeBizOpRunTerminalIntent
-} = require('../../../src/main-process/biz-op-recon-run-data');
+  createRetiredTerminalRouteRegistrations
+} = require('../../../src/main-process/archive-center/retired-terminal-routes');
 
 function createHarness(options = {}) {
   const settings = new Map(options.initialSettings || []);
@@ -666,29 +663,20 @@ test('operation/file owner cancel-wins 时迟到 success 不 finalizer、不移�
   assert.equal(outboxStore.list().length, 2);
 });
 
-test('failed/no-receipt terminal outbox 重放只收口 TaskRun，Pending/Biz finalizer 均无业务副作用', async (t) => {
+// v3.2.20：月度Pending / 业务OP 已下线，遗留终态意图由退役 route 收口，不再触达业务数据。
+test('已下线模块的遗留 terminal outbox 重放只收口 TaskRun，退役 finalizer 无业务副作用', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-failed-receipt-finalizer-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const outboxStore = createArchiveOutboxStore(directory);
   const finalized = [];
-  const forbiddenDb = new Proxy({}, {
-    get() {
-      throw new Error('failed terminal 不得读取或确认业务 receipt');
-    }
+  const retiredRoutes = createRetiredTerminalRouteRegistrations({
+    onRetiredFinalize: (info) => finalized.push(info.route)
   });
   const { controller, service } = createHarness({
     outboxStore,
-    onTerminalIntentFlushed: async (payload) => {
-      finalized.push(payload.route.route);
-      if (payload.route.route === 'pending-run') {
-        return finalizePendingTerminalIntent({ ...payload, db: forbiddenDb });
-      }
-      return finalizeBizOpRunTerminalIntent({
-        ...payload,
-        userDataDir: '/path/must/not/be/read',
-        mainDb: forbiddenDb
-      });
-    }
+    onTerminalIntentFlushed: async (payload) => (
+      retiredRoutes.find((entry) => entry.route === payload.route.route).finalize(payload)
+    )
   });
 
   for (const entry of [

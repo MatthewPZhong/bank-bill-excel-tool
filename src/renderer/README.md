@@ -4,7 +4,7 @@
 
 ## 应用壳与领域控制器
 
-[renderer.js](../renderer.js) 只装配依赖并持有应用窗口、模块菜单、背景与更新状态。[module-router.js](module-router.js) 冻结 13 个模块注册项，统一导航、面板显示和设置持久化；导航自身不读领域状态。所有生产控制器接收自己的 panel、窄 API 及命名 UI 服务，不能接收或反向读取应用总 state/elements/API。
+[renderer.js](../renderer.js) 只装配依赖并持有应用窗口、模块菜单、背景与更新状态。[module-router.js](module-router.js) 冻结 9 个模块注册项，统一导航、面板显示和设置持久化；导航自身不读领域状态。所有生产控制器接收自己的 panel、窄 API 及命名 UI 服务，不能接收或反向读取应用总 state/elements/API。
 
 | 所属模块 | 领域事实与实际入口 |
 | --- | --- |
@@ -12,18 +12,16 @@
 | 新开账户 | [controllers/new-account.js](controllers/new-account.js)：行 WeakMap、币种选择、表单与生成/导出状态 |
 | 资金对账 | [controllers/bank-statement.js](controllers/bank-statement.js)：银行/网关模式、进度、批量导入摘要及结果展示 |
 | 对账单修复 | [controllers/recon-id-fix.js](controllers/recon-id-fix.js)：场景选择、类别、结果与导出反馈 |
-| 前置资金 / BU / 重复入金 / VCC 业务计算 | [pre-fund](controllers/pre-fund.js)、[bank-bu](controllers/bank-bu.js)、[duplicate-inbound](controllers/duplicate-inbound.js)、[vcc-op-calc](controllers/vcc-op-calc.js)：各自会话摘要、月份、busy 与领域命令 |
-| 收单 / 旧 BizOP | [acquiring](controllers/acquiring.js)、[biz-op-legacy](controllers/biz-op-legacy.js)：各自月份/日期选择及进度；旧 BizOP 由下面的统一门面选择 |
-| Pending | [controllers/pending.js](controllers/pending.js) 转发 [renderer-pending.js](../renderer-pending.js) 的 scoped 工厂，规则/月份/导入/对账状态私有 |
-| Position / VCC 财务 OP / BizOP | [renderer-position-reconciliation.js](../renderer-position-reconciliation.js)、[renderer-vcc-financial-op.js](../renderer-vcc-financial-op.js)、[renderer-biz-op-v327.js](../renderer-biz-op-v327.js) 接入同一 host 与 enter/leave/dispose；BizOP 按真实能力状态选择 v327 或 legacy |
+| 前置资金 / 重复入金 / VCC 业务计算 | [pre-fund](controllers/pre-fund.js)、[duplicate-inbound](controllers/duplicate-inbound.js)、[vcc-op-calc](controllers/vcc-op-calc.js)：各自会话摘要、月份、busy 与领域命令 |
+| Position / VCC 财务 OP | [renderer-position-reconciliation.js](../renderer-position-reconciliation.js)、[renderer-vcc-financial-op.js](../renderer-vcc-financial-op.js) 接入同一 host 与 enter/leave/dispose |
+
+v3.2.20 起业务OP数据核对、月度Pending数据核对、收单单据币种校验、月度银行对账单BU回填校验已下线，对应控制器、面板与 Preload 命名空间均已删除。`.pending-board`、`.acquiring-bill-currency-board`、`pending-import-month-picker` 等类名仍被重复入金匹配、VCC 业务计算与 VCC 财务 OP 共用，保留不改名。
 
 各控制器实现 `enter/leave/invalidate/dispose`。同域重复导航不重绑事件；leave 先检查自己拥有的弹窗，blocked 时不改变当前模块、面板或持久化。通过后推进页面代次，旧读取不能覆盖新访问。离页不等于取消 Main 写入；已提交动作按 Main 结算并按域重读。尚未提交的 Position 导入 token 仍按原取消合同释放。
 
-现有 Preload 的 Pending 进度和窗口最大化订阅现返回只移除自身监听的清理函数，和其他订阅一致；保持原频道/参数/payload及旧忽略返回值的调用兼容。控制器/壳在 dispose 退订；旧回调还保留 disposed 屏障。
+现有 Preload 的窗口最大化订阅现返回只移除自身监听的清理函数，和其他订阅一致；保持原频道/参数/payload及旧忽略返回值的调用兼容。控制器/壳在 dispose 退订；旧回调还保留 disposed 屏障。
 
 VCC OP 每次实际 scan 前撤销旧保存资格，以独立扫描对象及跨导航操作锁绑定F1、统计与F2。未确认的后台扫描不能恢复旧F2；已确认来源在重入、打开F2及save前通过既有computeAmounts探测漂移，保存仍只传beginOp。月份/金额/逐文件核对值不充当不可变文件身份；该IPC还会产生Main Task/活动日志，真实产品验收单独记录。F2将本地提交锁与域关闭资格合并，已销毁视图不接纳迟到DOM更新。
-
-BizOP 将已提交导入／恢复检查的最终反馈保存在控制器，离页只阻止旧 DOM 和弹窗续接，重入显示真实结算；尚未提交的过期文件／保存位置选择使用单独的废弃终态，恢复此前反馈，不伪造后台失败或继续提交。
 
 Statement 没有既有的公开 `sessionStatus` IPC。本次保留本窗口已确认的 Main 命令结果；后台成功恢复按钮/反馈，等待选择的结果只保存原 context，用户再次点击原按钮继续，不自动复活旧弹窗、不再发一次导入。未新增恢复 IPC 或猜测磁盘结果。
 
@@ -59,7 +57,7 @@ service 私有维护 metadataEpoch、活动写集合、id/category 与 revision�
 
 [index.html](../../index.html) 明确加载顺序：纯模块 → 宿主/服务/控制器定义 → dialogs 领域工厂 → 公共 Dialogs/Previews 与已有独立控制器 → 应用壳。定义阶段不发业务 IPC。[renderer-dialogs.js](../renderer-dialogs.js) 保留公共提示、部分领域选择工厂及命名转发；不存在第二份配置或场景状态。`legacy-controller-adapter.js` 和生产临时 host 全局已移除。
 
-保留的兼容入口是旧 DOM 工厂返回形状、Pending/Position 工厂别名及显式预览 facade，供现有测试/预览脚本使用。移除条件是最后一个对应调用方迁移并通过原行为用例；不得仅因主页面迁出就删除这些入口。预览只接收 currentModule 只读值、复制的配置/行快照及命名方法，异步预览等待对应 route.ready、检查代次和当前句柄；不获取生产领域可变 state。
+保留的兼容入口是旧 DOM 工厂返回形状、Position 工厂别名及显式预览 facade，供现有测试/预览脚本使用。移除条件是最后一个对应调用方迁移并通过原行为用例；不得仅因主页面迁出就删除这些入口。预览只接收 currentModule 只读值、复制的配置/行快照及命名方法，异步预览等待对应 route.ready、检查代次和当前句柄；不获取生产领域可变 state。
 
 ## 当前检查与证据边界
 

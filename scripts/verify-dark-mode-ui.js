@@ -64,7 +64,6 @@ function installStub() {
     reconIdFix: { sessionStatus: status },
     positionReconciliation: { sessionStatus: status },
     scenarios: { async list() { return { status: 'ok', scenarios: [] }; } },
-    bizOpReconV327: { async status() { return { mode: 'ACTIVE', recoveryReady: true }; } },
     appUpdate: { async setEnabled() { return { status: 'success' }; } }
   };
   window.__uiErrors = [];

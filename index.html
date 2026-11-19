@@ -14,7 +14,6 @@
     <link id="cssClear" rel="stylesheet" href="./src/styles-gemini.css" />
     <link id="cssClearExtra" rel="stylesheet" href="./src/styles-gemini-extra.css" />
     <link rel="stylesheet" href="./src/styles-vcc-financial-op.css" />
-    <link rel="stylesheet" href="./src/styles-biz-op-v327.css" />
     <link rel="stylesheet" href="./src/styles-dark-mode.css" />
     <link rel="stylesheet" href="./src/styles-dark-mode-settings.css" />
   </head>
@@ -155,94 +154,7 @@
             </div>
           </section>
 
-          <section id="pendingModulePanel" class="control-board module-panel pending-board" hidden>
-            <div class="control-row">
-              <div class="cell left">
-                <button id="pendingRuleBtn" class="secondary-btn" type="button">规则管理</button>
-              </div>
-              <div class="cell right">
-                <div class="pending-action-pair">
-                  <button id="pendingImportBtn" class="primary-btn" type="button" disabled>导入文件</button>
-                  <button id="pendingRunBtn" class="primary-btn" type="button" disabled>开始运行</button>
-                </div>
-              </div>
-            </div>
-            <div class="control-row">
-              <div class="cell left">
-                <button id="pendingExportBtn" class="secondary-btn" type="button" disabled>导出差异</button>
-              </div>
-              <div class="cell right">
-                <div id="pendingStatusBox" class="status-box">
-                  <span class="status-box-content">
-                    <span class="status-box-text">初次使用请确认用来筛选的字段~</span>
-                  </span>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- v2.1.3：业务OP数据核对模块面板（PRD §3.1 / spec §7.1）
-               v2.1.3-fix1：BU 下拉框移至 row1 左侧（占据原"规则管理"位置），样式与"模式"下拉对齐 -->
-          <section id="bizOpV327ModulePanel" class="control-board module-panel acquiring-bill-currency-board bizop-v327-board" hidden></section>
-          <section id="bizOpReconModulePanel" class="control-board module-panel pending-board" hidden>
-            <div class="control-row">
-              <div class="cell left">
-                <div id="bizOpReconBuRow" class="biz-op-recon-bu-row">
-                  <label class="select-label main-panel-select-label" for="bizOpReconBuSelect">BU</label>
-                  <div class="select-shell">
-                    <select id="bizOpReconBuSelect" class="template-select main-panel-select-control">
-                      <option value=""></option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-              <div class="cell right">
-                <div class="pending-action-pair">
-                  <button id="bizOpReconImportBtn" class="primary-btn" type="button">导入文件</button>
-                  <button id="bizOpReconRunBtn" class="primary-btn" type="button" disabled>开始运行</button>
-                </div>
-              </div>
-            </div>
-            <div class="control-row">
-              <div class="cell left">
-                <button id="bizOpReconExportBtn" class="secondary-btn" type="button" disabled>导出差异</button>
-              </div>
-              <div class="cell right">
-                <div id="bizOpReconStatusBox" class="status-box">
-                  <span class="status-box-content">
-                    <span class="status-box-text">欢迎使用小助手</span>
-                  </span>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- v2.1.2 T2：月度银行对账单BU回填校验模块面板（PRD §3.2.5：导入按钮 → 月份对话框 → 文件选择）-->
-          <section id="bankBuReconModulePanel" class="control-board module-panel pending-board layout-mirrored" hidden>
-            <div class="control-row">
-              <div class="cell left"></div>
-              <div class="cell right">
-                <div class="pending-action-pair">
-                  <button id="bankBuReconImportBtn" class="primary-btn" type="button">导入文件</button>
-                  <button id="bankBuReconRunBtn" class="primary-btn" type="button" disabled>开始运行</button>
-                </div>
-              </div>
-            </div>
-            <div class="control-row">
-              <div class="cell left">
-                <button id="bankBuReconExportBtn" class="secondary-btn" type="button" disabled>导出差异</button>
-              </div>
-              <div class="cell right">
-                <div id="bankBuReconStatusBox" class="status-box">
-                  <span class="status-box-content">
-                    <span class="status-box-text">欢迎使用小助手</span>
-                  </span>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- v3.0.15：重复入金匹配模块（布局与月度银行对账单BU回填校验一致）-->
+          <!-- v3.0.15：重复入金匹配模块 -->
           <section id="duplicateInboundMatchModulePanel" class="control-board module-panel pending-board layout-mirrored" hidden>
             <div class="control-row">
               <div class="cell left"></div>
@@ -492,36 +404,6 @@
             </div>
           </section>
 
-          <!-- v2.1.6 Module B：收单单据币种校验模块面板（spec v0.8 §3.5 / §8.1，fix5 删月份下拉）
-               流程：导入流水/单据时弹「选择对账月份」弹窗 → 选文件 → 跑对账 → 跑 run 时自动生成 diff/report → 导出差异 = 另存为 -->
-          <!-- v2.1.6 fix14（spec v0.15 §8.1）：以 bankStatementModulePanel 为模板左右镜像
-               grid-template-columns 在 .acquiring-bill-currency-board 内是 1.4fr 1fr（bank-statement 原版是 1fr 1.4fr，镜像 = 调换比例）
-               按钮 ID 全部保留与 fix5 一致：ImportFlowBtn / ImportBillBtn / RunBtn / ExportBtn / StatusBox -->
-          <section id="acquiringBillCurrencyModulePanel" class="control-board module-panel acquiring-bill-currency-board" hidden>
-            <div class="control-row">
-              <div class="cell left">
-                <div class="pending-action-pair">
-                  <button id="acquiringBillCurrencyImportFlowBtn" class="primary-btn" type="button">导入流水表</button>
-                  <button id="acquiringBillCurrencyImportBillBtn" class="primary-btn" type="button">导入单据表</button>
-                </div>
-              </div>
-              <div class="cell right">
-                <button id="acquiringBillCurrencyRunBtn" class="primary-btn" type="button">开始运行</button>
-              </div>
-            </div>
-            <div class="control-row">
-              <div class="cell left">
-                <div id="acquiringBillCurrencyStatusBox" class="status-box">
-                  <span class="status-box-content">
-                    <span class="status-box-text">欢迎使用小助手</span>
-                  </span>
-                </div>
-              </div>
-              <div class="cell right">
-                <button id="acquiringBillCurrencyExportBtn" class="secondary-btn" type="button">导出差异</button>
-              </div>
-            </div>
-          </section>
         </section>
       </main>
 
@@ -622,7 +504,6 @@
     <script src="./src/renderer/controllers/bank-statement.js"></script>
     <script src="./src/renderer/controllers/recon-id-fix.js"></script>
     <script src="./src/renderer/controllers/pre-fund.js"></script>
-    <script src="./src/renderer/controllers/bank-bu.js"></script>
     <script src="./src/renderer/controllers/duplicate-inbound.js"></script>
     <script src="./src/renderer/controllers/vcc-op-calc.js"></script>
     <script src="./src/renderer/configuration-services.js"></script>
@@ -636,13 +517,8 @@
     <script src="./src/renderer/dialogs/toolbox.js"></script>
   <script src="./src/renderer-dialogs.js"></script>
     <script src="./src/renderer-previews.js"></script>
-    <script src="./src/renderer-pending.js"></script>
-    <script src="./src/renderer/controllers/pending.js"></script>
-    <script src="./src/renderer/controllers/acquiring.js"></script>
-    <script src="./src/renderer/controllers/biz-op-legacy.js"></script>
     <script src="./src/renderer-position-reconciliation.js"></script>
     <script src="./src/renderer-vcc-financial-op.js"></script>
-    <script src="./src/renderer-biz-op-v327.js"></script>
     <script src="./src/renderer.js"></script>
   </body>
 </html>

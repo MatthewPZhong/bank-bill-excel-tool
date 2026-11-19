@@ -40,7 +40,25 @@ const { createTaskPolicyRegistry: createComposedTaskPolicyRegistry } = require('
 const archivePolicies = createComposedTaskPolicyRegistry().list();
 const policies = archivePolicies;
 const policyByChannel = new Map(policies.map((policy) => [policy.channel, policy]));
-const baselineRecoverable = baseline.policies.filter((policy) => policy.taskKind !== 'exclude');
+
+// v3.2.20 下线业务OP数据核对、月度Pending数据核对、收单单据币种校验、月度银行对账单BU回填校验；固定基线本身不改，
+//   以 channel / action 前缀显式扣除这四个模块（含 BizOP v327）的条目，其余条目仍须与基线逐项相等。
+const RETIRED_CHANNEL_PREFIXES = new Set(['pending', 'bankBuRecon', 'bizOpRecon', 'bizOpReconV327', 'acquiringBillCurrency']);
+const RETIRED_ACTION_PREFIXES = new Set(['pending', 'bank-bu', 'biz-op', 'biz-op-v327', 'acquiring']);
+const isRetiredChannel = (channel) => RETIRED_CHANNEL_PREFIXES.has(channel.split(':')[0]);
+const isRetiredAction = (actionKey) => RETIRED_ACTION_PREFIXES.has(actionKey.split(':')[0]);
+const retiredBaselinePolicies = baseline.policies.filter((policy) => isRetiredChannel(policy.channel));
+const activeBaselinePolicies = baseline.policies.filter((policy) => !isRetiredChannel(policy.channel));
+const baselineRecoverable = activeBaselinePolicies.filter((policy) => policy.taskKind !== 'exclude');
+const activeBaselineGroups = Object.fromEntries(Object.entries(baseline.groups)
+  .map(([group, channels]) => [group, channels.filter((channel) => !isRetiredChannel(channel))]));
+const activeBehaviorCases = baseline.behaviorCases.filter((scenario) => activeBaselineGroups[scenario.group].length > 0);
+const retiredBehaviorCases = baseline.behaviorCases.filter((scenario) => activeBaselineGroups[scenario.group].length === 0);
+const activeAuthority = Object.freeze({
+  bindings: Object.fromEntries(Object.entries(baseline.authority.bindings).filter(([actionKey]) => !isRetiredAction(actionKey))),
+  canonicalActionKeys: baseline.authority.canonicalActionKeys.filter((actionKey) => !isRetiredAction(actionKey)),
+  legacyHandlerPairs: baseline.authority.legacyHandlerPairs.filter(([actionKey]) => !isRetiredAction(actionKey))
+});
 const newPreparationPolicies = [
   // v3.2.16 模板管理【余额管理】：余额种子只读查询
   { batchPolicy: 'exclude', channel: 'balance-seed:list', excludeReason: 'read-only-query', taskKind: 'exclude', workerContext: 'none' },
@@ -127,56 +145,89 @@ function baselineBehaviorChannels(scenario) {
   const corrected = correctedBehaviorCases.find((item) => (
     item.group === scenario.group && item.hook === scenario.hook
   ));
-  const channels = baseline.groups[scenario.group];
+  const channels = activeBaselineGroups[scenario.group];
   return corrected ? channels.filter((channel) => !corrected.channels.includes(channel)) : channels;
 }
 
 // 固定 fixture 与当前公开 API 分开读取；此测试不提供更新/重建 fixture 入口。
-test('Archive 固定基线逐 channel 保留全部 268 项、模块身份、file/no-file/exclude 和 hook 注册', () => {
+test('v3.2.20 已下线模块的 74 个基线 channel 全部移出，当前 registry 不再出现这些前缀', () => {
+  assert.equal(retiredBaselinePolicies.length, 74);
+  assert.deepEqual(
+    Object.fromEntries(['file', 'no-file', 'exclude'].map((kind) => [kind, retiredBaselinePolicies.filter((policy) => policy.taskKind === kind).length])),
+    { file: 25, 'no-file': 9, exclude: 40 }
+  );
+  assert.deepEqual(policies.filter((policy) => isRetiredChannel(policy.channel)).map((policy) => policy.channel), []);
+  assert.deepEqual(retiredBehaviorCases.map((scenario) => `${scenario.group}/${scenario.hook}`), [
+    'bankBuRecon:run/flowPlanResolver',
+    'bankBuRecon:import:run/resultFlowIdentities',
+    'acquiringBillCurrency:export/flowPlanResolver',
+    'acquiringBillCurrency:export/resultFlowIdentities',
+    'acquiringBillCurrency:run/resultFlowIdentities',
+    'acquiringBillCurrency:run:resume/resultFlowIdentities',
+    'acquiringBillCurrency:run:resume/filePlanResolver'
+  ]);
+  // workerFilePlan 基线样例的 3 个 channel：收单 run 已下线，另两个由「基线后行为修正」接管，基线样例不再适用任何 channel。
+  assert.deepEqual(activeBehaviorCases.filter((scenario) => baselineBehaviorChannels(scenario).length === 0)
+    .map((scenario) => `${scenario.group}/${scenario.hook}`), ['workerFilePlan/filePlanResolver']);
+});
+
+test('Archive 固定基线逐 channel 保留其余 194 项、模块身份、file/no-file/exclude 和 hook 注册', () => {
   assert.equal(baseline.baselineCommit, '11086a3cbf632a30adbcfa796e4cd81810c5aef9');
   assert.equal(baseline.policies.length, 268);
-  const baselineChannels = new Set(baseline.policies.map((policy) => policy.channel));
-  assert.deepEqual(snapshotArchivePolicies(policies.filter((policy) => baselineChannels.has(policy.channel))), baseline.policies);
+  assert.equal(activeBaselinePolicies.length, 194);
+  const baselineChannels = new Set(activeBaselinePolicies.map((policy) => policy.channel));
+  assert.deepEqual(snapshotArchivePolicies(policies.filter((policy) => baselineChannels.has(policy.channel))), activeBaselinePolicies);
   assert.deepEqual(snapshotArchivePolicies(policies.filter((policy) => !baselineChannels.has(policy.channel))), newPreparationPolicies);
   assert.deepEqual(SUPPORT_ACTION_POLICIES, [...baseline.supportActions, ...newSupportActions]);
   assert.deepEqual(
     sorted(FILE_ACTION_CHANNELS),
-    sorted(baseline.policies.filter((policy) => policy.taskKind === 'file').map((policy) => policy.channel))
+    sorted(activeBaselinePolicies.filter((policy) => policy.taskKind === 'file').map((policy) => policy.channel))
   );
   assert.deepEqual(
     sorted(NO_FILE_ACTION_CHANNELS),
-    sorted(baseline.policies.filter((policy) => policy.taskKind === 'no-file').map((policy) => policy.channel))
+    sorted(activeBaselinePolicies.filter((policy) => policy.taskKind === 'no-file').map((policy) => policy.channel))
   );
-  assert.equal(FILE_ACTION_CHANNELS.length, 71);
-  assert.equal(NO_FILE_ACTION_CHANNELS.length, 63);
+  assert.equal(FILE_ACTION_CHANNELS.length, 46);
+  assert.equal(NO_FILE_ACTION_CHANNELS.length, 54);
   assert.deepEqual(
     sorted(Object.values(RESERVE_CHANNELS_BY_SCOPE).flat()),
     sorted(baselineRecoverable.map((policy) => policy.channel))
   );
   assert.deepEqual(
     sorted(Object.values(EXCLUDED_CHANNELS_BY_REASON).flat()),
-    sorted([...baseline.policies.filter((policy) => policy.taskKind === 'exclude'), ...newPreparationPolicies].map((policy) => policy.channel))
+    sorted([...activeBaselinePolicies.filter((policy) => policy.taskKind === 'exclude'), ...newPreparationPolicies].map((policy) => policy.channel))
   );
 });
 
-test('私有 authority、独立 manifest 与固定 67-action/74-pair/134-task 清单双向闭合', () => {
-  assert.deepEqual(ACTION_TASK_BINDING_CONTRACT, baseline.authority.contract);
-  assert.deepEqual(bindingSnapshot(), baseline.authority.bindings);
-  assert.deepEqual(CANONICAL_ACTION_KEYS, baseline.authority.canonicalActionKeys);
-  assert.deepEqual(LEGACY_HANDLER_PAIRS, baseline.authority.legacyHandlerPairs);
+test('私有 authority、独立 manifest 与扣除已下线模块后的 39-action/45-pair/100-task 清单双向闭合', () => {
+  // 基线 67 action 中 28 个属于已下线模块；其余 action、binding、pair 与基线逐项相等且顺序不变。
+  assert.equal(baseline.authority.canonicalActionKeys.length - activeAuthority.canonicalActionKeys.length, 28);
+  assert.deepEqual(ACTION_TASK_BINDING_CONTRACT, {
+    ...baseline.authority.contract,
+    sha256: '414acda230c62605822b9151f80ae7969466c2ebf02a4e58e235b6f5b4e22469',
+    actionCount: 39,
+    taskPolicyInventoryCount: 100,
+    taskPolicyInventorySha256: 'a7123f6c24236358aed90791baae775e2e9f6da195959bb3cf62a5200c5c08d7',
+    pairCount: 45,
+    boundTaskKeyCount: 38,
+    unboundTaskPolicyCount: 62
+  });
+  assert.deepEqual(bindingSnapshot(), activeAuthority.bindings);
+  assert.deepEqual(CANONICAL_ACTION_KEYS, activeAuthority.canonicalActionKeys);
+  assert.deepEqual(LEGACY_HANDLER_PAIRS, activeAuthority.legacyHandlerPairs);
   assert.deepEqual(PLATFORM_CANARY_ACTION_KEYS, baseline.authority.platformCanaryActionKeys);
   const registry = authorityFor(policies);
-  assert.deepEqual(registry.summary.actionKeys, baseline.authority.canonicalActionKeys);
+  assert.deepEqual(registry.summary.actionKeys, activeAuthority.canonicalActionKeys);
   assert.deepEqual(registry.summary.taskPolicyInventory, sorted(baselineRecoverable.map((policy) => policy.taskKey)));
-  assert.equal(registry.summary.actionKeys.length, 67);
-  assert.equal(registry.summary.pairCount, 74);
-  assert.equal(registry.summary.taskPolicyInventory.length, 134);
-  assert.equal(registry.summary.boundTaskKeyCount, 66);
-  assert.equal(registry.summary.unboundTaskPolicyCount, 68);
-  assert.equal(registry.summary.sha256, baseline.authority.contract.sha256);
-  assert.equal(registry.summary.taskPolicyInventorySha256, baseline.authority.contract.taskPolicyInventorySha256);
+  assert.equal(registry.summary.actionKeys.length, 39);
+  assert.equal(registry.summary.pairCount, 45);
+  assert.equal(registry.summary.taskPolicyInventory.length, 100);
+  assert.equal(registry.summary.boundTaskKeyCount, 38);
+  assert.equal(registry.summary.unboundTaskPolicyCount, 62);
+  assert.equal(registry.summary.sha256, ACTION_TASK_BINDING_CONTRACT.sha256);
+  assert.equal(registry.summary.taskPolicyInventorySha256, ACTION_TASK_BINDING_CONTRACT.taskPolicyInventorySha256);
   const bindingPairs = [];
-  for (const [actionKey, taskKeys] of Object.entries(baseline.authority.bindings)) {
+  for (const [actionKey, taskKeys] of Object.entries(activeAuthority.bindings)) {
     assert.deepEqual(registry.allowedTaskKeys(actionKey), taskKeys);
     for (const taskKey of taskKeys) {
       assert.deepEqual(registry.assertPair(actionKey, taskKey), { actionKey, expectedTaskKey: taskKey });
@@ -201,7 +252,7 @@ test('保持数量但篡改 TaskPolicy 身份仍被独立 authority 拒绝', () 
 
 test('行为样例覆盖每个可恢复 channel 的分类/metadata/lineage，及全部已登记可选 hook', () => {
   const covered = new Map();
-  for (const group of Object.values(baseline.groups)) {
+  for (const group of Object.values(activeBaselineGroups)) {
     assert.equal(new Set(group).size, group.length);
     for (const channel of group) assert.ok(policyByChannel.has(channel), channel);
   }
@@ -211,7 +262,8 @@ test('行为样例覆盖每个可恢复 channel 的分类/metadata/lineage，及
     }
   }
   const effectiveCases = [
-    ...baseline.behaviorCases.map((scenario) => ({ ...scenario, channels: baselineBehaviorChannels(scenario) })),
+    ...activeBehaviorCases.map((scenario) => ({ ...scenario, channels: baselineBehaviorChannels(scenario) }))
+      .filter((scenario) => scenario.channels.length > 0),
     ...correctedBehaviorCases
   ];
   for (const scenario of effectiveCases) {
@@ -223,7 +275,7 @@ test('行为样例覆盖每个可恢复 channel 的分类/metadata/lineage，及
       covered.set(channel, hooks);
     }
   }
-  for (const policy of baseline.policies) {
+  for (const policy of activeBaselinePolicies) {
     if (policy.taskKind === 'exclude') {
       assert.equal(covered.has(policy.channel), false, policy.channel);
       continue;
@@ -237,7 +289,7 @@ test('行为样例覆盖每个可恢复 channel 的分类/metadata/lineage，及
   }
 });
 
-for (const scenario of baseline.behaviorCases) {
+for (const scenario of activeBehaviorCases) {
   test(`Archive 固定行为：${scenario.group} / ${scenario.hook}`, async () => {
     for (const channel of baselineBehaviorChannels(scenario)) {
       const policy = policyByChannel.get(channel);
@@ -322,7 +374,7 @@ test('公共 Archive registry 冻结自己的快照并隐藏可变 Map', () => {
   assert.equal(registry.policies, undefined);
   const copy = registry.list();
   copy.length = 0;
-  assert.equal(registry.list().length, baseline.policies.length + newPreparationPolicies.length);
+  assert.equal(registry.list().length, activeBaselinePolicies.length + newPreparationPolicies.length);
 });
 
 test('公共 Archive registry/common 的依赖闭包只含公共机制，没有领域或 composition 回边', () => {

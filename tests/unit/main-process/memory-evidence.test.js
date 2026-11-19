@@ -58,11 +58,12 @@ test('源码摘要支持打包后的 package 精简，任何源文件或依赖�
   assert.notEqual(sourceIdentity(root).dependencyLockSha256, first.dependencyLockSha256);
 });
 test('运行安全点不重复累加 arrayBuffers；内存超限、系统压力与连接超限可区分', () => {
-  const config = profile('bizop-compute', 'low');
+  // v3.2.20：原用 bizop-compute（3 连接）样例，业务OP下线后改用保留的 rows-generation（2 连接）档位。
+  const config = profile('rows-generation', 'low');
   const memory = { heapUsed: config.phaseMemoryBytes - 16, external: 8, arrayBuffers: 8 };
   assert.equal(checkExecutionMemory(config, memory, 512 * 1024 ** 2), memory);
   assert.throws(() => checkExecutionMemory(config, { ...memory, external: 17 }), { code: 'EXECUTION_MEMORY_LIMIT_EXCEEDED' });
   assert.throws(() => checkExecutionMemory(config, memory, 1), { code: 'EXECUTION_SYSTEM_MEMORY_PRESSURE' });
-  assert.equal(3 * sqliteCacheKiB(config, 3) * 1024, config.sqliteAggregateCacheBytes);
-  assert.throws(() => sqliteCacheKiB(config, 4), { code: 'EXECUTION_SQLITE_CONNECTION_LIMIT' });
+  assert.equal(2 * sqliteCacheKiB(config, 2) * 1024, config.sqliteAggregateCacheBytes);
+  assert.throws(() => sqliteCacheKiB(config, 3), { code: 'EXECUTION_SQLITE_CONNECTION_LIMIT' });
 });

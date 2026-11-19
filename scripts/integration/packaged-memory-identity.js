@@ -100,9 +100,11 @@ function manualApproval(root) {
     const manifest = JSON.parse(fs.readFileSync(path.join(repo, qualificationPath), 'utf8'));
     assert.equal(manifest.schemaVersion, 2);
     for (const file of [archive, missing]) {
-      assert.deepEqual(manualApproval(file), Array(18).fill(manifest.approval.reference));
+      // v3.2.20：业务OP数据核对下线，资格清单删除 10 个 bizop-* 配置，剩余 8 个；数量取自清单本身。
+      assert.equal(manifest.profiles.length, 8);
+      assert.deepEqual(manualApproval(file), Array(manifest.profiles.length).fill(manifest.approval.reference));
     }
-    pass('Electron 包内人工确认可批准 18 个配置，缺少 lock 不再阻断人工启用');
+    pass('Electron 包内人工确认可批准全部 8 个配置，缺少 lock 不再阻断人工启用');
     console.log(`==== ${passed}/7 PASS ====`);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 })().catch((error) => { console.error('FAILURES', error); process.exitCode = 1; });

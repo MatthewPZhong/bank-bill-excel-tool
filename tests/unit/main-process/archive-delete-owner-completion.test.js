@@ -395,6 +395,23 @@ test('工具箱真实发布恢复在清理完成后记录 owner 凭证，凭证�
   }
 });
 
+// v3.2.20 已下线模块（Pending / 业务OP / 收单）的 publication-only 导出：不再登记 TaskPolicy，
+//   publication owner 仍按原 taskKey/moduleId 识别，供升级前异常退出遗留的发布 journal 收尾。
+const RETIRED_PUBLICATION_EXPORTS = Object.freeze([
+  ['pending:error:export-report', 'pending-reconciliation', 'PENDING', '月度Pending数据核对'],
+  ['pending:diff:export-single', 'pending-reconciliation', 'PENDING', '月度Pending数据核对'],
+  ['pending:diff:export-aggregate', 'pending-reconciliation', 'PENDING', '月度Pending数据核对'],
+  ['bizOpRecon:export:date', 'biz-op-recon', 'BIZOP', '业务OP数据核对'],
+  ['bizOpRecon:export:date-range', 'biz-op-recon', 'BIZOP', '业务OP数据核对'],
+  ['acquiringBillCurrency:export', 'acquiring-bill-currency', 'ACQUIRING', '收单单据币种校验']
+]);
+
+// 升级前由旧版创建的任务：以保留的同类 publication-only 导出为模板，只替换为旧版的 channel/taskKey/模块身份。
+function retiredPublicationPolicy(registry, channel) {
+  const [, scopeId, moduleCode, moduleName] = RETIRED_PUBLICATION_EXPORTS.find(([key]) => key === channel);
+  return { ...registry.require('pre-fund-reconciliation:export'), channel, taskKey: channel, scopeId, moduleCode, moduleName };
+}
+
 test('publication owner 仅匹配 Main 登记的精确 taskKey/moduleId，不认未知共享 Publisher 入口', () => {
   const { isPublicationOnlyFileTask } = require('../../../src/main-process/toolbox-archive-recovery');
   const {
@@ -402,12 +419,15 @@ test('publication owner 仅匹配 Main 登记的精确 taskKey/moduleId，不认
 } = require('../../../src/main-process/execution-descriptors/composition');
   const registry = createTaskPolicyRegistry();
   for (const channel of ['toolbox:merge', 'toolbox:split:export', 'vccFinancialOp:data-manager:export',
-    'vccFinancialOp:export:import-audit', 'vccFinancialOp:export:result',
-    'pending:error:export-report', 'pending:diff:export-single', 'pending:diff:export-aggregate',
-    'bizOpRecon:export:date', 'bizOpRecon:export:date-range', 'pre-fund-reconciliation:export', 'acquiringBillCurrency:export']) {
+    'vccFinancialOp:export:import-audit', 'vccFinancialOp:export:result', 'pre-fund-reconciliation:export']) {
     const policy = registry.require(channel);
     assert.equal(isPublicationOnlyFileTask({ taskKey: policy.taskKey, moduleId: policy.scopeId }), true);
     assert.equal(isPublicationOnlyFileTask({ taskKey: policy.taskKey, moduleId: 'different-owner' }), false);
+  }
+  for (const [taskKey, moduleId] of RETIRED_PUBLICATION_EXPORTS) {
+    assert.equal(registry.list().some((policy) => policy.taskKey === taskKey), false, `${taskKey} 已不再登记 TaskPolicy`);
+    assert.equal(isPublicationOnlyFileTask({ taskKey, moduleId }), true, taskKey);
+    assert.equal(isPublicationOnlyFileTask({ taskKey, moduleId: 'different-owner' }), false, taskKey);
   }
   assert.equal(isPublicationOnlyFileTask({ taskKey: 'vccFinancialOp:export:unknown', moduleId: 'vcc-financial-op' }), false);
   assert.equal(isPublicationOnlyFileTask({ taskKey: 'position-reconciliation:source:export-anomaly',
@@ -415,7 +435,7 @@ test('publication owner 仅匹配 Main 登记的精确 taskKey/moduleId，不认
   assert.equal(isPublicationOnlyFileTask(), false);
 });
 
-test('VCC 与只读导出真实 policy 的临时归档失败由原 publication 恢复，匿名通知安全 ACK 后可初始化和删除', async (t) => {
+test('VCC 与只读导出真实 policy（含已下线模块的遗留导出）的临时归档失败由原 publication 恢复，匿名通知安全 ACK 后可初始化和删除', async (t) => {
   const crypto = require('node:crypto');
   const { createArchiveService } = require('../../../src/main-process/archive-center/archive-service');
   const { createTaskLifecycle } = require('../../../src/main-process/archive-center/task-lifecycle');
@@ -426,8 +446,7 @@ test('VCC 与只读导出真实 policy 的临时归档失败由原 publication �
   const { JOURNAL_INDEX_NAME, prepareToolboxPublication, publishPreparedToolboxPublication } = require('../../helpers/publication-authority');
   const { acknowledgeToolboxPublicationReceipts, recoverToolboxPublicationsIntoArchive } = require('../../../src/main-process/toolbox-archive-recovery');
   for (const channel of ['vccFinancialOp:data-manager:export', 'vccFinancialOp:export:import-audit', 'vccFinancialOp:export:result',
-    'pending:error:export-report', 'pending:diff:export-single', 'pending:diff:export-aggregate',
-    'bizOpRecon:export:date', 'bizOpRecon:export:date-range', 'pre-fund-reconciliation:export', 'acquiringBillCurrency:export']) {
+    'pre-fund-reconciliation:export', ...RETIRED_PUBLICATION_EXPORTS.map(([key]) => key)]) {
     await t.test(channel, async (t) => {
       const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-publication-owner-'));
       const userDataDir = path.join(directory, 'user-data');
@@ -449,7 +468,10 @@ test('VCC 与只读导出真实 policy 的临时归档失败由原 publication �
       await openArchive();
       const publicationRecovery = createTestPublicationHarness(userDataDir, { ownerOptions: { id: 'archive-publication' } }).recovery;
       t.after(() => { db.close(); fs.rmSync(directory, { recursive: true, force: true }); });
-      const policy = createTaskPolicyRegistry().require(channel);
+      const registry = createTaskPolicyRegistry();
+      const policy = RETIRED_PUBLICATION_EXPORTS.some(([key]) => key === channel)
+        ? retiredPublicationPolicy(registry, channel)
+        : registry.require(channel);
       const plan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [],
         outputs: [{ filePath: outputPath, role: 'output', sourceOperation: channel }] });
       const lifecycle = createTaskLifecycle({ archiveService: service,

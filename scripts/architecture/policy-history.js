@@ -410,9 +410,29 @@ function checkPolicyHistory({ root, config, allowlist, against = 'HEAD', scan: s
 
   const activeIds = new Set();
   const retiredPaths = new Set();
+  const retiredBoundaryIds = new Set();
+  // active → retired 只在功能整体下线时成立：原入口已全部从当前树删除，并有可读的设计依据与具体原因。
+  function retirementAccepted(oldBoundary, current) {
+    if (!current || current.state !== 'retired' || !current.retirement) return false;
+    const { reason, designDoc, removedPaths, releasedPaths } = current.retirement;
+    const evidence = currentFile(designDoc);
+    if (!evidence || !evidence.bytes.toString('utf8').trim() || !meaningfulReason(reason)) return false;
+    if (removedPaths.some((removed) => currentFile(removed))) return false;
+    // 至少一个原入口随功能删除；其余原入口只能是显式释放的共享文件。
+    return oldBoundary.entrypoints.some((entry) => removedPaths.includes(entry))
+      && oldBoundary.entrypoints.every((entry) => removedPaths.includes(entry) || releasedPaths.includes(entry));
+  }
   for (const snapshot of snapshots) {
     for (const oldBoundary of snapshot.value.boundaries) {
       const current = config.boundaries.find((boundary) => boundary.id === oldBoundary.id);
+      if (oldBoundary.state === 'retired') {
+        retiredBoundaryIds.add(oldBoundary.id);
+        if (!current || current.state !== 'retired') violation(snapshot, oldBoundary.id, 'state', `已退役边界不得删除登记或复活：${oldBoundary.id}`);
+        else if (!includesAll(current.retirement.removedPaths, oldBoundary.retirement.removedPaths)) {
+          violation(snapshot, oldBoundary.id, 'retirement', `已退役边界的删除路径登记不得缩减：${oldBoundary.id}`);
+        }
+        continue;
+      }
       for (const retired of oldBoundary.deprecatedEntrypoints || []) {
         if (retired.state !== 'retired') continue;
         retiredPaths.add(retired.path);
@@ -425,6 +445,10 @@ function checkPolicyHistory({ root, config, allowlist, against = 'HEAD', scan: s
       }
       if (oldBoundary.state !== 'active') continue;
       activeIds.add(oldBoundary.id);
+      if (current && current.state === 'retired') {
+        if (!retirementAccepted(oldBoundary, current)) violation(snapshot, oldBoundary.id, 'state', `边界退役缺少完整依据或原入口仍存在：${oldBoundary.id}`);
+        continue;
+      }
       if (!current || current.state !== 'active') {
         violation(snapshot, oldBoundary.id, 'state', `历史已激活边界不得消失或降级：${oldBoundary.id}`);
         continue;
@@ -461,6 +485,7 @@ function checkPolicyHistory({ root, config, allowlist, against = 'HEAD', scan: s
       roots, commitsExamined: commits.length, distinctPolicyBlobs: new Set(snapshots.map((snapshot) => snapshot.blob)).size,
       bootstrapCommit: snapshots.length ? snapshots[0].commit : null,
       historicalActiveIds: [...activeIds].sort(), historicalRetiredEntrypoints: [...retiredPaths].sort(),
+      historicalRetiredBoundaries: [...retiredBoundaryIds].sort(),
       appliedPolicyChanges: [...appliedPolicyChanges.values()].sort((a, b) => canonical(a).localeCompare(canonical(b))),
       historyRepairsApplied: [...historyRepairsApplied.values()].map((entry) => ({ ...entry, sourceCommits: entry.sourceCommits.sort() })).sort((a, b) => a.originalBlob.localeCompare(b.originalBlob)),
       diagnostics: diagnostics.sort((a, b) => canonical(a).localeCompare(canonical(b)))

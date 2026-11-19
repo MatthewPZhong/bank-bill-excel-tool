@@ -24,6 +24,7 @@ const STATS_FILENAME = '.usage-stats.txt';
 const STATS_TMP_FILENAME = '.usage-stats.txt.tmp';
 
 // 用户视角"功能"清单（不在此清单的 increment 静默忽略，防御性）
+// v3.2.20：月度 Pending / 月度BU回填 / 业务OP / 收单已下线，条目保留以免保存时抹去历史计数（不再递增）。
 const FUNCTION_REGISTRY = Object.freeze({
   '生成网银账单': ['导入模板', '导入文件', '导出明细', '导出余额', '模板管理', '账户映射'],
   '新开账户': ['生成余额账单', '导出余额'],

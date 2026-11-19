@@ -6,46 +6,22 @@ const { types: { isProxy } } = require('node:util');
 const ACTION_TASK_BINDING_CONTRACT = Object.freeze({
   version: 1,
   canonicalization: 'RFC8785-JCS',
-  sha256: '48747e02020f01959a37c1758adb9c337c8c69143603aa34544d2735347d073f',
-  actionCount: 67,
-  taskPolicyInventoryCount: 134,
+  // v3.2.20：随业务OP数据核对 / 月度Pending / 收单 / 月度BU回填下线重算（可恢复 TaskPolicy 134 → 100）。
+  sha256: '414acda230c62605822b9151f80ae7969466c2ebf02a4e58e235b6f5b4e22469',
+  actionCount: 39,
+  taskPolicyInventoryCount: 100,
   taskPolicyInventoryCanonicalization: 'RFC8785-JCS',
-  taskPolicyInventorySha256: '6912c045c82d260fbe554732e886f4da9fafe01e4f3e64f8dc3b0c870055a773',
-  pairCount: 74,
-  boundTaskKeyCount: 66,
-  unboundTaskPolicyCount: 68
+  taskPolicyInventorySha256: 'a7123f6c24236358aed90791baae775e2e9f6da195959bb3cf62a5200c5c08d7',
+  pairCount: 45,
+  boundTaskKeyCount: 38,
+  unboundTaskPolicyCount: 62
 });
 
 // 模块内私有 literal 是 action → legacy TaskPolicy 的唯一 authority。
 // caller 不能注入、替换或取得其中任何内部数组。
 const ACTION_TASK_BINDINGS = Object.freeze({
-  'biz-op-v327:import-candidate': Object.freeze(['bizOpReconV327:import']),
-  'biz-op-v327:run-candidate': Object.freeze(['bizOpReconV327:run']),
-  'biz-op-v327:delete-plan': Object.freeze(['bizOpReconV327:delete']),
-  'biz-op-v327:upgrade-preflight': Object.freeze(['bizOpReconV327:maintenance:upgrade']),
-  'biz-op-v327:reclaim': Object.freeze(['bizOpReconV327:maintenance:reclaim']),
-  'biz-op-v327:export-op-raw': Object.freeze(['bizOpReconV327:export:op-raw']),
-  'biz-op-v327:export-flow-raw': Object.freeze(['bizOpReconV327:export:flow-raw']),
-  'biz-op-v327:export-op-check': Object.freeze(['bizOpReconV327:export:op-check']),
-  'biz-op-v327:export-flow-check': Object.freeze(['bizOpReconV327:export:flow-check']),
-  'biz-op-v327:export-result-full': Object.freeze(['bizOpReconV327:export:result-full']),
-  'biz-op-v327:export-result-diff': Object.freeze(['bizOpReconV327:export:result-diff']),
-  'biz-op-v327:export-errors': Object.freeze(['bizOpReconV327:export:errors']),
-
-  'acquiring:copy-existing-diff': Object.freeze(['acquiringBillCurrency:export']),
-  'acquiring:export-diff-workbook': Object.freeze([]),
-  'acquiring:import': Object.freeze(['acquiringBillCurrency:importBill', 'acquiringBillCurrency:importFlow']),
-  'acquiring:run-new-eligible': Object.freeze(['acquiringBillCurrency:run']),
-  'acquiring:run-single-or-resume': Object.freeze(['acquiringBillCurrency:run', 'acquiringBillCurrency:run:resume']),
   'background-execution:canary': Object.freeze([]),
   'background-execution:pure-compute-canary': Object.freeze([]),
-  'bank-bu:export-aggregate': Object.freeze(['bankBuRecon:export:aggregate']),
-  'bank-bu:export-single': Object.freeze(['bankBuRecon:export:single']),
-  'bank-bu:import-month': Object.freeze(['bankBuRecon:import:run']),
-  'bank-bu:run': Object.freeze(['bankBuRecon:run']),
-  'biz-op:export-day': Object.freeze(['bizOpRecon:export:date']),
-  'biz-op:export-range': Object.freeze(['bizOpRecon:export:date-range']),
-  'biz-op:import-flow': Object.freeze(['bizOpRecon:import:run-flow']),
   'duplicate:export': Object.freeze(['duplicate-inbound-match:export']),
   'duplicate:import': Object.freeze(['duplicate-inbound-match:import-files']),
   'duplicate:run': Object.freeze(['duplicate-inbound-match:run']),
@@ -54,10 +30,6 @@ const ACTION_TASK_BINDINGS = Object.freeze({
   'fund-recon:run': Object.freeze(['bank-statement:run']),
   'new-account:generate': Object.freeze(['new-account:generate']),
   'new-account:save-as': Object.freeze(['new-account:export']),
-  'pending:export-diff': Object.freeze(['pending:diff:export-single']),
-  'pending:export-errors': Object.freeze(['pending:error:export-report']),
-  'pending:export-summary': Object.freeze(['pending:diff:export-aggregate']),
-  'pending:import': Object.freeze(['pending:import:start']),
   'position:export-run': Object.freeze(['position-reconciliation:run:export', 'position-reconciliation:run:export-filtered']),
   'position:import': Object.freeze([
     'position-reconciliation:bank:apply-import',

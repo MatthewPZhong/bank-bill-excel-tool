@@ -4,8 +4,7 @@ const {
   createBaseTaskPolicy,
   createExcludePolicy,
   classifyKnownStatus,
-  standardResultClassifier,
-  invocationBusinessRunIdentity
+  standardResultClassifier
 } = require('../archive-center/task-policy-common');
 
 function statementResultClassifier(result) {
@@ -21,35 +20,6 @@ function vccOpSaveRunResultClassifier(result) {
     return 'failed';
   }
   return standardResultClassifier(result);
-}
-
-async function resolveBankBuImportEvidence(invocation = {}) {
-  if (typeof invocation.resolveFlowEvidence !== 'function') return null;
-  const evidence = await invocation.resolveFlowEvidence('bank-bu-import-bundle');
-  if (!evidence || !evidence.identity) return null;
-  const type = String(evidence.identity.type || evidence.identity.identityType || '').trim();
-  const value = String(evidence.identity.value || evidence.identity.identityValue || '').trim();
-  if (type !== 'bank-bu-import-bundle' || !value) return null;
-  return {
-    identity: { type, value },
-    hasRun: evidence.hasRun === true
-  };
-}
-
-async function bankBuRunFlowPlan(invocation = {}) {
-  const evidence = await resolveBankBuImportEvidence(invocation);
-  if (!evidence || evidence.hasRun) {
-    return { startsNewFlow: true, flowIdentity: null };
-  }
-  return {
-    startsNewFlow: false,
-    flowIdentity: evidence.identity
-  };
-}
-
-async function bankBuImportResultFlowIdentities(_result, _context, invocation = {}) {
-  const evidence = await resolveBankBuImportEvidence(invocation);
-  return evidence ? [evidence.identity] : [];
 }
 
 const archivePolicies = Object.freeze([
@@ -101,17 +71,6 @@ const archivePolicies = Object.freeze([
   createBaseTaskPolicy('template:set-parent-status', 'STATEMENT'),
   createBaseTaskPolicy('linked-table:delete-by-date-range', 'LINKED'),
   createBaseTaskPolicy('linked-table:import', 'LINKED'),
-  createBaseTaskPolicy('bankBuRecon:export:aggregate', 'BANKBU'),
-  createBaseTaskPolicy('bankBuRecon:export:single', 'BANKBU', {
-    startsNewFlow: false,
-    flowIdentityResolver: invocationBusinessRunIdentity
-  }),
-  createBaseTaskPolicy('bankBuRecon:import:run', 'BANKBU', {
-    resultFlowIdentities: bankBuImportResultFlowIdentities
-  }),
-  createBaseTaskPolicy('bankBuRecon:run', 'BANKBU', {
-    flowPlanResolver: bankBuRunFlowPlan
-  }),
   createBaseTaskPolicy('vccOpCalc:import:scan', 'VCCOP'),
   createBaseTaskPolicy('vccOpCalc:run:compute-amounts', 'VCCOP', {
     workerContext: 'operation'
@@ -120,16 +79,9 @@ const archivePolicies = Object.freeze([
     workerContext: 'operation',
     resultClassifier: vccOpSaveRunResultClassifier
   }),
-  createExcludePolicy('bizOpReconV327:status', 'read-only-query'),
-  createExcludePolicy('bizOpReconV327:metadata:months', 'read-only-query'),
-  createExcludePolicy('bizOpReconV327:metadata:list', 'read-only-query'),
-  createExcludePolicy('bizOpReconV327:metadata:input', 'read-only-query'),
-  createExcludePolicy('bizOpReconV327:metadata:run-calendar', 'read-only-query'),
   createExcludePolicy('account-mapping:check-migration-pending', 'read-only-query'),
   createExcludePolicy('account-mapping:get-migration-data', 'read-only-query'),
   createExcludePolicy('account-mapping:list', 'read-only-query'),
-  createExcludePolicy('acquiringBillCurrency:listMonths', 'read-only-query'),
-  createExcludePolicy('acquiringBillCurrency:sessionStatus', 'read-only-query'),
   createExcludePolicy('app-update:get-status', 'read-only-query'),
   createExcludePolicy('app:get-info', 'read-only-query'),
   // v3.2.15：网银账单渠道只读查询
@@ -146,20 +98,9 @@ const archivePolicies = Object.freeze([
   createExcludePolicy('bank-statement:c3-candidate-count', 'read-only-query'),
   createExcludePolicy('bank-statement:refund-candidate-count', 'read-only-query'),
   createExcludePolicy('bank-statement:session-status', 'read-only-query'),
-  createExcludePolicy('bankBuRecon:months:list', 'read-only-query'),
-  createExcludePolicy('bankBuRecon:run:history', 'read-only-query'),
-  createExcludePolicy('bankBuRecon:run:list-ready-months', 'read-only-query'),
-  createExcludePolicy('bankBuRecon:run:list-success-months', 'read-only-query'),
-  createExcludePolicy('bankBuRecon:status', 'read-only-query'),
   createExcludePolicy('big-account-mode:load', 'read-only-query'),
   createExcludePolicy('big-account-order:load', 'read-only-query'),
   createExcludePolicy('big-account:get-with-own', 'read-only-query'),
-  createExcludePolicy('bizOpRecon:bu:list', 'read-only-query'),
-  createExcludePolicy('bizOpRecon:export:list-success-dates', 'read-only-query'),
-  createExcludePolicy('bizOpRecon:import:check-single-day', 'read-only-query'),
-  createExcludePolicy('bizOpRecon:run:history', 'read-only-query'),
-  createExcludePolicy('bizOpRecon:run:list-ready-dates', 'read-only-query'),
-  createExcludePolicy('bizOpRecon:status', 'read-only-query'),
   createExcludePolicy('channels:list', 'read-only-query'),
   createExcludePolicy('duplicate-inbound-match:session-status', 'read-only-query'),
   createExcludePolicy('fund-transfer-account-mapping:list', 'read-only-query'),
@@ -167,12 +108,6 @@ const archivePolicies = Object.freeze([
   createExcludePolicy('linked-table:get-retention-settings', 'read-only-query'),
   createExcludePolicy('linked-table:list', 'read-only-query'),
   createExcludePolicy('linked-table:row-count', 'read-only-query'),
-  createExcludePolicy('pending:columns', 'read-only-query'),
-  createExcludePolicy('pending:diff:latest-run-for', 'read-only-query'),
-  createExcludePolicy('pending:diff:runs-for-month-pair', 'read-only-query'),
-  createExcludePolicy('pending:diff:runs-list', 'read-only-query'),
-  createExcludePolicy('pending:months:list', 'read-only-query'),
-  createExcludePolicy('pending:rule:get', 'read-only-query'),
   createExcludePolicy('position-reconciliation:data-manager', 'read-only-query'),
   createExcludePolicy('position-reconciliation:linked-manager', 'read-only-query'),
   createExcludePolicy('position-reconciliation:mappings:list', 'read-only-query'),
@@ -209,18 +144,7 @@ const archivePolicies = Object.freeze([
   createExcludePolicy('vccFinancialOp:run:archived-months', 'read-only-query'),
   createExcludePolicy('vccFinancialOp:run:get', 'read-only-query'),
   createExcludePolicy('vccFinancialOp:run:latest-archived', 'read-only-query'),
-  createExcludePolicy('bizOpReconV327:files:pick', 'file-picker-only'),
-  createExcludePolicy('bizOpReconV327:export:pick', 'file-picker-only'),
   createExcludePolicy('background:select-file', 'file-picker-only'),
-  createExcludePolicy('bankBuRecon:export:pick-save-path', 'file-picker-only'),
-  createExcludePolicy('bankBuRecon:import:pick-bank-file', 'file-picker-only'),
-  createExcludePolicy('bankBuRecon:import:pick-pending-file', 'file-picker-only'),
-  createExcludePolicy('bizOpRecon:export:pick-save-path', 'file-picker-only'),
-  createExcludePolicy('bizOpRecon:import:open-error-report-folder', 'file-picker-only'),
-  createExcludePolicy('bizOpRecon:import:pick-biz-op-file', 'file-picker-only'),
-  createExcludePolicy('bizOpRecon:import:pick-flow-file', 'file-picker-only'),
-  createExcludePolicy('pending:import:pick-files', 'file-picker-only'),
-  createExcludePolicy('pending:removed:pick-files', 'file-picker-only'),
   createExcludePolicy('scenarios:import-bundle', 'file-picker-only'),
   createExcludePolicy('template-resources:pick-import-file', 'file-picker-only'),
   createExcludePolicy('bank-accounts:pick-import-file', 'file-picker-only'),
@@ -238,8 +162,6 @@ const archivePolicies = Object.freeze([
   // v3.2.18【导入模板】：选文件并识别为新模板（只读预检）与取消命名时丢弃；确认后仍走 template:import 写入
   createExcludePolicy('template:prepare-import', 'staging-preflight-only'),
   createExcludePolicy('template:discard-import', 'staging-preflight-only'),
-  createExcludePolicy('bizOpReconV327:run:preflight', 'preview-only'),
-  createExcludePolicy('bizOpReconV327:delete:preview', 'preview-only'),
   createExcludePolicy('file:extract-big-account-order', 'preview-only'),
   createExcludePolicy('template:preview-delete-bill-split-row', 'preview-only'),
   createExcludePolicy('toolbox:split:read', 'preview-only'),
@@ -249,14 +171,11 @@ const archivePolicies = Object.freeze([
   createExcludePolicy('vccFinancialOp:data-manager:export-preview', 'preview-only'),
   createExcludePolicy('vccFinancialOp:run:preflight', 'preview-only'),
   createExcludePolicy('vccFinancialOp:run:unarchive-preview', 'preview-only'),
-  createExcludePolicy('bizOpReconV327:task:cancel', 'cancel-active-task'),
-  createExcludePolicy('acquiringBillCurrency:run:cancel', 'cancel-active-task'),
   createExcludePolicy('file:cancel-big-account-selection', 'cancel-active-task'),
   createExcludePolicy('position-reconciliation:bank:cancel-import', 'cancel-active-task'),
   createExcludePolicy('position-reconciliation:import:cancel', 'cancel-active-task'),
   createExcludePolicy('position-reconciliation:source:cancel-import', 'cancel-active-task'),
   createExcludePolicy('vccFinancialOp:task:cancel', 'cancel-active-task'),
-  createExcludePolicy('bizOpReconV327:recovery:retry', 'archive-center-maintenance'),
   createExcludePolicy('archive-center:change-storage-location', 'archive-center-maintenance'),
   createExcludePolicy('archive-center:delete-batch', 'archive-center-maintenance'),
   createExcludePolicy('archive-center:open-file', 'archive-center-maintenance'),
@@ -288,8 +207,5 @@ const archivePolicies = Object.freeze([
 module.exports = {
   archivePolicies,
   statementResultClassifier,
-  vccOpSaveRunResultClassifier,
-  resolveBankBuImportEvidence,
-  bankBuRunFlowPlan,
-  bankBuImportResultFlowIdentities
+  vccOpSaveRunResultClassifier
 };

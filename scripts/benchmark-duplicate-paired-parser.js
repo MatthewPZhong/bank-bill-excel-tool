@@ -8,7 +8,7 @@ const { performance } = require('node:perf_hooks');
 const XLSX = require('xlsx');
 
 const { BANK_STATEMENT_FIELDS } = require('../src/constants/bank-statement-fields');
-const { BILL_HEADERS } = require('../src/backend/acquiring-bill-currency-db/columns');
+const { BILL_HEADERS } = require('../src/main-process/duplicate-inbound-match/document-statement-reader');
 const {
   isPairedParserGateApproved,
   runDuplicateParserWorker

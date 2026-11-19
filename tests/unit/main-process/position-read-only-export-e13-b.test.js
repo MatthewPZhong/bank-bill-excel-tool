@@ -571,3 +571,12 @@ test('E13-B Position 终态先收口 pending，再 ACK managed Publisher receipt
   );
   assert.deepEqual(blocked, ['position-pending']);
 });
+
+test('E13 Main 只读导出的 Publisher receipt 仅在任务终态 succeeded 后 ACK', () => {
+  // v3.2.20 起由本文件承接（原 E13-A 随 Pending / BizOP 下线删除）；PreFund、Position 导出共用该收口。
+  const mainSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main.js'), 'utf8');
+  assert.match(
+    mainSource,
+    /function attachReadOnlyExportReceiptAcknowledgement[\s\S]{0,500}?terminalStatus === 'succeeded'[\s\S]{0,500}?acknowledgeToolboxPublicationReceipts/
+  );
+});

@@ -42,12 +42,6 @@ const {
   VCC_EXPORT_SUBJECTS_POLICY
 } = require('../../../src/main-process/vcc-financial-op-output/policies');
 const {
-  PENDING_READ_ONLY_ACTIONS
-} = require('../../../src/main-process/read-only-exports/pending/policies');
-const {
-  BIZ_OP_READ_ONLY_ACTIONS
-} = require('../../../src/main-process/read-only-exports/biz-op/policies');
-const {
   PRE_FUND_READ_ONLY_ACTIONS
 } = require('../../../src/main-process/read-only-exports/pre-fund/policies');
 const {
@@ -56,15 +50,6 @@ const {
 const {
   VCC_FINANCIAL_OP_READ_ONLY_ACTION
 } = require('../../../src/main-process/read-only-exports/vcc-financial-op/policies');
-const {
-  ACQUIRING_EXPORT_ACTIONS
-} = require('../../../src/main-process/read-only-exports/acquiring/policies');
-const {
-  PENDING_BIZOP_ADAPTER_ACTIONS
-} = require('../../../src/main-process/background-execution/pending-bizop-adapter-policies');
-const {
-  ACQUIRING_ADAPTER_ACTIONS
-} = require('../../../src/main-process/background-execution/acquiring-adapter-policies');
 const {
   POSITION_IMPORT_ADAPTER_ACTION
 } = require('../../../src/main-process/background-execution/position-import-adapter-policy');
@@ -212,22 +197,14 @@ test('E04-A/B policy 与 Main source selector 保持 production false，真实�
   assert.equal(multiPolicy.resources.compound.childResource.workerThreadSlots, 1);
 
   const mainSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main.js'), 'utf8');
-  const bizOpBinding = mainSource.match(/bizOpV327Module = createBizOpV327Module\(\{[\s\S]*?\}\);/)[0];
-  assert.equal((bizOpBinding.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 1);
-  const bizOpIpcBinding = mainSource.match(/registerBizOpV327Handlers\(\{[\s\S]*?\}\);/)[0];
-  assert.equal((bizOpIpcBinding.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 1);
-  const activationStart = mainSource.indexOf('bizOpV327Module.activation.bindHost({');
-  const activationEnd = mainSource.indexOf('archiveCenterInitializationPromise = archiveCenterService.initialize()', activationStart);
-  assert.ok(activationStart > 0 && activationEnd > activationStart);
-  const activationBinding = mainSource.slice(activationStart, activationEnd);
-  assert.equal((activationBinding.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 1);
   // VCC 正式结果沿用 direct task，只向现有 Governor 申请 phase lease，不激活旧 export-subjects canary。
   const vccPhaseLeaseBinding = mainSource.match(/acquireResultExportLeaseFn:\s*\(operationKey\)\s*=>\s*acquireResultExportLease\(\s*backgroundExecutionRuntimeManager\.get\(\)\.resourceGovernor,\s*operationKey\s*\)/)?.[0];
   assert.ok(vccPhaseLeaseBinding);
-  const legacySource = mainSource.replace(bizOpBinding, '').replace(bizOpIpcBinding, '')
-    .replace(activationBinding, '').replace(vccPhaseLeaseBinding, '');
-  // 排除 VCC 独立 phase lease 后，原 15 处调用加 metadata 和共享发布 owner 两处装配。
-  assert.equal((legacySource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 17);
+  const legacySource = mainSource.replace(vccPhaseLeaseBinding, '');
+  // 排除 VCC 独立 phase lease 后，原 15 处调用加 metadata 和共享发布 owner 两处装配；
+  //   v3.2.20 随 Pending / 业务OP / 收单下线删除其中 6 处（Pending 导出 3、业务OP 导出 2、收单复制导出 1）。
+  assert.equal((legacySource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 11);
+  assert.doesNotMatch(mainSource, /bizOpV327Module|registerBizOpV327Handlers/);
   assert.equal((mainSource.match(/generateValidateAndPublishToolboxArtifact\(\{/g) || []).length, 2);
   assert.equal((mainSource.match(/generateValidateAndPublishMultiOutput\(\{/g) || []).length, 1);
   assert.equal((mainSource.match(/generateValidateAndPublishRows\(\{/g) || []).length, 1);
@@ -247,18 +224,6 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
   });
   const snapshot = runtime.resourceGovernor.snapshot();
   const expectedActionKeys = [
-    'biz-op-v327:import-candidate',
-    'biz-op-v327:run-candidate',
-    'biz-op-v327:delete-plan',
-    'biz-op-v327:upgrade-preflight',
-    'biz-op-v327:reclaim',
-    'biz-op-v327:export-op-raw',
-    'biz-op-v327:export-flow-raw',
-    'biz-op-v327:export-op-check',
-    'biz-op-v327:export-flow-check',
-    'biz-op-v327:export-result-full',
-    'biz-op-v327:export-result-diff',
-    'biz-op-v327:export-errors',
     TOOLBOX_GENERATION_ACTIONS.MERGE,
     TOOLBOX_GENERATION_ACTIONS.SPLIT_SINGLE,
     TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT,
@@ -279,22 +244,10 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
     'recon-fix:export',
     VCC_EXPORT_SINGLE_ACTION,
     VCC_EXPORT_SUBJECTS_ACTION,
-    PENDING_READ_ONLY_ACTIONS.DIFF,
-    PENDING_READ_ONLY_ACTIONS.SUMMARY,
-    PENDING_READ_ONLY_ACTIONS.ERRORS,
-    BIZ_OP_READ_ONLY_ACTIONS.DAY,
-    BIZ_OP_READ_ONLY_ACTIONS.RANGE,
     PRE_FUND_READ_ONLY_ACTIONS.CHANNEL,
     PRE_FUND_READ_ONLY_ACTIONS.AUDIT,
     POSITION_READ_ONLY_ACTION,
     VCC_FINANCIAL_OP_READ_ONLY_ACTION,
-    ACQUIRING_EXPORT_ACTIONS.COPY,
-    ACQUIRING_EXPORT_ACTIONS.REGENERATE,
-    PENDING_BIZOP_ADAPTER_ACTIONS.PENDING_IMPORT,
-    PENDING_BIZOP_ADAPTER_ACTIONS.BIZ_OP_IMPORT_FLOW,
-    ACQUIRING_ADAPTER_ACTIONS.IMPORT,
-    ACQUIRING_ADAPTER_ACTIONS.RUN_NEW_ELIGIBLE,
-    ACQUIRING_ADAPTER_ACTIONS.RUN_SINGLE_OR_RESUME,
     POSITION_IMPORT_ADAPTER_ACTION
   ];
   // catalog 保留原清单次序；registry 按领域装配，预算覆盖只依赖完整 action 集合。
@@ -302,7 +255,7 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
   assert.deepEqual(runtime.policyRegistry.list().map((policy) => policy.actionKey).sort(),
     [...expectedActionKeys].sort());
   for (const policy of runtime.policyRegistry.list()) {
-    assert.equal(policy.production.enabled, policy.actionKey.startsWith('biz-op-v327:') || policy.actionKey === 'toolbox:split-rows');
+    assert.equal(policy.production.enabled, policy.actionKey === 'toolbox:split-rows');
   }
   assert.equal(snapshot.budgets.cpuSlots, 2);
   assert.equal(snapshot.budgets.workerThreadSlots, 3);

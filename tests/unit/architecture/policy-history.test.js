@@ -556,3 +556,122 @@ test('AC22：从未有效的历史 symlink manifest 可前向替换为合法普�
   assert.deepEqual(result.violations, []);
   assert.ok(result.policyHistory.diagnostics.some((item) => /普通文件/.test(item.message)));
 });
+
+// v3.2.20 边界退役：功能整体下线后 active 边界只能转为 retired，保留 id 登记且不得复活。
+function retire(boundary, retirement) {
+  for (const key of ['entrypoints', 'allowedLocal', 'allowedExternal', 'requiredConsumers', 'activationEvidence', 'protectedScopes',
+    'restrictedApis', 'allowedSites', 'compositionEntrypoints', 'globals', 'deprecatedEntrypoints']) boundary[key] = [];
+  boundary.factory = null; boundary.directory = null; boundary.allowedApiFields = {};
+  boundary.state = 'retired';
+  boundary.retirement = { reason: '所属功能模块整体下线，源码随模块删除', designDoc: 'docs/retire.md',
+    removedPaths: ['src/entry.js'], releasedPaths: [], ...retirement };
+}
+function retireFixture(t) {
+  const fixture = createPolicyRepository(t);
+  fixture.commit('S1 active');
+  fixture.write('docs/retire.md', '模块下线设计依据：删除范围、数据保留与恢复兼容。\n');
+  fs.unlinkSync(path.join(fixture.root, 'src/entry.js'));
+  fs.unlinkSync(path.join(fixture.root, 'src/consumer.js'));
+  return fixture;
+}
+
+test('退役：原入口已删除且依据完整时 active → retired 通过，并记录历史退役 id', (t) => {
+  const fixture = retireFixture(t);
+  retire(fixture.boundary);
+  fixture.save();
+  assert.deepEqual(fixture.check().violations, []);
+  fixture.commit('S2 退役');
+  const result = fixture.check(fixture.baseline);
+  assert.deepEqual(result.violations, []);
+  assert.ok(result.policyHistory.historicalRetiredBoundaries.includes('fixture-core'));
+});
+
+test('退役：原入口仍存在、缺设计依据、原因空泛或入口未登记删除/释放均拒绝', (t) => {
+  const fixture = retireFixture(t);
+  fixture.write('src/entry.js', 'module.exports = {};\n');
+  retire(fixture.boundary);
+  fixture.save();
+  hasViolation(fixture.check(), 'state');
+  fs.unlinkSync(path.join(fixture.root, 'src/entry.js'));
+  retire(fixture.boundary, { designDoc: 'docs/missing.md' });
+  fixture.save();
+  hasViolation(fixture.check(), 'state');
+  retire(fixture.boundary, { reason: '重构' });
+  fixture.save();
+  hasViolation(fixture.check(), 'state');
+  retire(fixture.boundary, { removedPaths: ['src/other.js'] });
+  fixture.save();
+  hasViolation(fixture.check(), 'state');
+});
+
+test('退役：保留的共享入口须显式释放，且至少一个原入口随功能删除', (t) => {
+  const fixture = createPolicyRepository(t);
+  fixture.write('src/shared.js', 'module.exports = {};\n');
+  fixture.boundary.entrypoints = ['src/entry.js', 'src/shared.js'];
+  fixture.boundary.allowedLocal = ['src/entry.js', 'src/shared.js'];
+  fixture.save();
+  fixture.commit('S1 active');
+  fixture.write('docs/retire.md', '模块下线设计依据。\n');
+  fs.unlinkSync(path.join(fixture.root, 'src/entry.js'));
+  fs.unlinkSync(path.join(fixture.root, 'src/consumer.js'));
+  retire(fixture.boundary);
+  fixture.save();
+  hasViolation(fixture.check(), 'state');
+  retire(fixture.boundary, { releasedPaths: ['src/shared.js'] });
+  fixture.save();
+  assert.deepEqual(fixture.check().violations, []);
+  retire(fixture.boundary, { removedPaths: ['src/gone.js'], releasedPaths: ['src/entry.js', 'src/shared.js'] });
+  fixture.save();
+  hasViolation(fixture.check(), 'state');
+});
+
+test('退役：已退役边界不得复活、删除登记或缩减删除路径', (t) => {
+  const fixture = retireFixture(t);
+  retire(fixture.boundary, { removedPaths: ['src/entry.js', 'src/consumer.js'] });
+  fixture.save();
+  fixture.commit('S2 退役');
+  retire(fixture.boundary, { removedPaths: ['src/entry.js'] });
+  fixture.save();
+  hasViolation(fixture.check(), 'retirement');
+  const retired = structuredClone(fixture.boundary);
+  fixture.config.boundaries = fixture.config.boundaries.filter((item) => item !== fixture.boundary);
+  fixture.save();
+  hasViolation(fixture.check(), 'state');
+  fixture.config.boundaries.unshift(fixture.boundary);
+  Object.assign(fixture.boundary, { ...retired, state: 'pending', retirement: null });
+  fixture.save();
+  hasViolation(fixture.check(), 'state');
+});
+
+test('退役：retired 边界不得保留生效约束，非退役边界不得登记 retirement', (t) => {
+  const fixture = retireFixture(t);
+  retire(fixture.boundary);
+  fixture.boundary.entrypoints = ['src/entry.js'];
+  fixture.save();
+  inputFailure(() => fixture.check(), /退役边界不得保留生效约束/);
+  retire(fixture.boundary, { removedPaths: [] });
+  inputFailure(() => fixture.check(), /必须列出已删除的源码路径/);
+  retire(fixture.boundary, { releasedPaths: ['src/entry.js'] });
+  inputFailure(() => fixture.check(), /既删除又释放/);
+  retire(fixture.boundary);
+  fixture.boundary.state = 'pending';
+  inputFailure(() => fixture.check(), /仅退役边界可登记 retirement/);
+});
+
+test('退役：规则检查不评估退役边界，只拦截源码复活、依赖指向与缺失依据', (t) => {
+  const fixture = retireFixture(t);
+  retire(fixture.boundary);
+  fixture.save();
+  const evaluate = () => evaluateRules(scan(fixture.root, fixture.config), fixture.config, fixture.allowlist, { root: fixture.root });
+  const clean = evaluate();
+  assert.deepEqual(clean.violations.filter((item) => item.boundaryId === 'fixture-core'), []);
+  assert.ok(clean.retiredBoundaries.includes('fixture-core'));
+  assert.ok(!clean.activeBoundaries.includes('fixture-core'));
+  fixture.write('src/entry.js', 'module.exports = {};\n');
+  fixture.write('src/consumer.js', "require('./entry');\n");
+  const revived = evaluate().violations.filter((item) => item.boundaryId === 'fixture-core').map((item) => item.message);
+  assert.ok(revived.includes('已退役边界的源码不得复活'), JSON.stringify(revived));
+  assert.ok(revived.includes('生产代码不得依赖已退役边界的源码'), JSON.stringify(revived));
+  fs.unlinkSync(path.join(fixture.root, 'docs/retire.md'));
+  assert.ok(evaluate().violations.some((item) => item.boundaryId === 'fixture-core' && item.message === '退役边界缺少设计依据文档'));
+});

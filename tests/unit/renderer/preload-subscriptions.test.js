@@ -7,8 +7,8 @@ const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 
 for (const [group, method, channel, payload] of [
-  ['window', 'onMaximizedState', 'window:maximized-state', true],
-  ['pending', 'onImportProgress', 'pending:import:progress', { type: 'progress', rowsProcessed: 3 }]
+  // v3.2.20：月度Pending数据核对下线，pending.onImportProgress 随 preload 命名空间删除。
+  ['window', 'onMaximizedState', 'window:maximized-state', true]
 ]) {
   test(`${group}.${method} 透传原事件，释放只删除当前订阅且重复释放安全`, () => {
     const emitter = new EventEmitter();

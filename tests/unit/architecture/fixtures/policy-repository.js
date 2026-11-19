@@ -30,11 +30,18 @@ function createPolicyRepository(t) {
   write('src/consumer.js', "require('./entry');\n");
   const plannedBoundaries = structuredClone(projectPolicy.boundaries);
   for (const planned of plannedBoundaries) {
+    // 已退役兼容入口的证据在任何状态下都会被核对，fixture 一并提供。
+    for (const retired of planned.deprecatedEntrypoints.filter(entry => entry.state === 'retired')) {
+      for (const evidence of retired.retirementEvidence) write(evidence, '// 退役兼容入口的验证与全仓引用清点证据。\n');
+    }
     if (['production-graph', 'platform-core'].includes(planned.id)) {
       planned.state = 'active';
       planned.activationEvidence = [];
       planned.requiredConsumers = [];
       for (const entrypoint of planned.entrypoints) write(entrypoint, 'module.exports = {};\n');
+    } else if (planned.state === 'retired') {
+      // 退役是终态：fixture 保留原状态，并提供其设计依据文档。
+      write(planned.retirement.designDoc, '模块整体下线的退役依据。\n');
     } else planned.state = 'pending';
   }
   write('tests/behavior.js', '// 明确的公开行为验证入口。\n');

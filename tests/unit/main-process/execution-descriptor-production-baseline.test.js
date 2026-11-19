@@ -10,10 +10,10 @@ const catalog = require('../../../src/main-process/execution-descriptors/policy-
 const { bindingSnapshot } = require('../../../src/main-process/background-execution/action-task-binding-registry');
 const root = path.resolve(__dirname, '../../..');
 
-test('固定批准基线接受当前49个runtime与13个production，catalog与私有authority保持一致', () => {
+test('固定批准基线接受当前25个runtime与1个production，catalog与私有authority保持一致', () => {
   const compiled = composition.composeExecutionDescriptors({ availableParallelism: 4 });
-  assert.equal(compiled.policies.length, 49);
-  assert.equal(compiled.policies.filter(policy => policy.production.enabled).length, 13);
+  assert.equal(compiled.policies.length, 25);
+  assert.equal(compiled.policies.filter(policy => policy.production.enabled).length, 1);
   assert.deepEqual(compiled.policies.map(policy => policy.actionKey).sort(),
     catalog.BACKGROUND_EXECUTION_POLICIES.map(policy => policy.actionKey).sort());
 });

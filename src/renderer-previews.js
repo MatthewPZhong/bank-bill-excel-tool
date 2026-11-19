@@ -41,8 +41,6 @@
       createAccountMappingMigrationDialog,
       closeModal,
       openBackgroundPalette,
-      // v2.0.0 Pending 模块 preview 所需
-      rendererPending,
       createConfirmDialog,
       // 补充的 preview 所需
       openModuleMenu,
@@ -631,121 +629,6 @@
         ],
         onDone: () => {}
       }));
-    }
-
-    // ========== v2.0.0 Pending 模块 preview（6 张） ==========
-
-    const PENDING_PREVIEW_COLUMNS = [
-      '流水号', '交易日期', '交易时间', '主账户', '子账户', '币种',
-      '发生额', '借贷标志', '对方户名', '对方账号', '对方银行',
-      '摘要', '凭证号', '交易渠道'
-    ];
-    const PENDING_PREVIEW_RULE = {
-      matchFields: ['交易日期', '主账户', '发生额'],
-      compareFields: ['摘要', '对方户名']
-    };
-    const PENDING_PREVIEW_MONTHS = ['2026-03', '2026-02', '2026-01'];
-    const PENDING_PREVIEW_RUNS = [
-      {
-        id: 2, lowerMonth: '2026-03', upperMonth: '2026-02',
-        createdAt: '2026-04-18T14:32:00',
-        statNew: 5, statMissing: 3, statChanged: 2,
-        ruleSnapshot: PENDING_PREVIEW_RULE
-      },
-      {
-        id: 1, lowerMonth: '2026-02', upperMonth: '2026-01',
-        createdAt: '2026-03-15T09:10:00',
-        statNew: 8, statMissing: 1, statChanged: 4,
-        ruleSnapshot: PENDING_PREVIEW_RULE
-      }
-    ];
-
-    // 10. Pending 主面板（对账完成态）
-    async function applyPendingPanelPreviewState() {
-      if (!await navigatePreviewReady(MODULES.pendingReconciliation.id)) return;
-
-      rendererPending.applyPreviewState({ rule: PENDING_PREVIEW_RULE, months: PENDING_PREVIEW_MONTHS.slice(), latestRunId: 2, latestRunResult: '对账完成：2026-03 vs 2026-02 找出 10 条差异（5 新增 / 3 消失 / 2 变更），可点击"导出差异"另存。' });
-    }
-
-    // 11. 规则管理对话框
-    async function applyPendingRuleDialogPreviewState() {
-      if (!await navigatePreviewReady(MODULES.pendingReconciliation.id)) return;
-      openModal(() => rendererPending.buildRuleDialogNode({
-        columns: PENDING_PREVIEW_COLUMNS,
-        currentRule: PENDING_PREVIEW_RULE
-      }));
-    }
-
-    // 12. 规则确认对话框
-    async function applyPendingRuleConfirmPreviewState() {
-      if (!await navigatePreviewReady(MODULES.pendingReconciliation.id)) return;
-      const matchFields = PENDING_PREVIEW_RULE.matchFields;
-      const compareFields = PENDING_PREVIEW_RULE.compareFields;
-      const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-      const message =
-        '<strong>请确认筛选的字段：</strong><br><br>' +
-        `<div>对账字段 (${matchFields.length}): ${matchFields.map(esc).join('、')}</div>` +
-        `<div>对账内容 (${compareFields.length}): ${compareFields.map(esc).join('、')}</div>`;
-      openModal(() => createConfirmDialog({
-        message,
-        confirmText: '确认',
-        cancelText: '取消',
-        onConfirm: () => {}
-      }));
-    }
-
-    // 13. 导入月份选择
-    async function applyPendingImportMonthPreviewState() {
-      if (!await navigatePreviewReady(MODULES.pendingReconciliation.id)) return;
-      openModal(() => rendererPending.buildImportMonthDialog({
-        onConfirm: () => {},
-        onCancel: () => {}
-      }));
-    }
-
-    // 14. 对账月份选择（开始运行）
-    async function applyPendingReconcilePreviewState() {
-      if (!await navigatePreviewReady(MODULES.pendingReconciliation.id)) return;
-      openModal(() => rendererPending.buildReconcileDialog({
-        months: PENDING_PREVIEW_MONTHS,
-        defaultUpper: '2026-02',
-        defaultLower: '2026-03',
-        onConfirm: () => {},
-        onCancel: () => {}
-      }));
-    }
-
-    // 15. 导出差异 run 选择
-    async function applyPendingExportRunsPreviewState() {
-      if (!await navigatePreviewReady(MODULES.pendingReconciliation.id)) return;
-      openModal(() => rendererPending.buildExportDialog({
-        allRuns: PENDING_PREVIEW_RUNS,
-        onConfirm: () => {},
-        onCancel: () => {}
-      }));
-    }
-
-    // ========== 2026-04-24 补：9 张历史遗漏 preview ==========
-
-    // 16. Pending 主面板 · 初始态（未设规则 / 未导入）
-    async function applyPendingPanelInitialPreviewState() {
-      if (!await navigatePreviewReady(MODULES.pendingReconciliation.id)) return;
-
-      rendererPending.applyPreviewState({ rule: null, months: [], latestRunResult: null, latestRunId: null });
-    }
-
-    // 17. Pending 主面板 · 导入中
-    async function applyPendingPanelImportingPreviewState() {
-      if (!await navigatePreviewReady(MODULES.pendingReconciliation.id)) return;
-
-      rendererPending.applyPreviewState({ rule: PENDING_PREVIEW_RULE, months: ['2026-01', '2026-02'], importing: true, currentYearMonth: '2026-03', importingText: '正在导入 2026-03：pending-account-2026-03.xlsx（已处理 123456 行）' });
-    }
-
-    // 18. Pending 主面板 · 报错态（点击导出报错文件）
-    async function applyPendingPanelErrorPreviewState() {
-      if (!await navigatePreviewReady(MODULES.pendingReconciliation.id)) return;
-
-      rendererPending.applyPreviewState({ rule: PENDING_PREVIEW_RULE, errorReportAvailable: true, errorMessage: '表头字段不一致，请检查并重新导入' });
     }
 
     // 19. 顶部模块切换菜单展开态
@@ -1643,17 +1526,7 @@
       applyRememberOrderMismatchDialogPreviewState,
       applyDuplicateRowsReviewDialogPreviewState,
       applyAccountMappingMigrationDialogPreviewState,
-      // v2.0.0 Pending 模块 preview（6 张）
-      applyPendingPanelPreviewState,
-      applyPendingRuleDialogPreviewState,
-      applyPendingRuleConfirmPreviewState,
-      applyPendingImportMonthPreviewState,
-      applyPendingReconcilePreviewState,
-      applyPendingExportRunsPreviewState,
-      // 2026-04-24 补：9 张历史遗漏 preview
-      applyPendingPanelInitialPreviewState,
-      applyPendingPanelImportingPreviewState,
-      applyPendingPanelErrorPreviewState,
+      // 2026-04-24 补：历史遗漏 preview
       applyModuleSwitcherOpenPreviewState,
       applyNewAccountMultiPreviewState,
       applyNewAccountCurrencyDropdownPreviewState,

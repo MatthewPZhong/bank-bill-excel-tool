@@ -22,24 +22,8 @@ const ESTIMATOR_OWNER = 'src/main-process/new-account/resource-estimator.js';
 
 // 此清单记录原 runtime 的 Main 分派边界；行为由 runtime.execute 的独立探针验证。
 // 它不是生产 authority，不能用于授予新 action 或构造生产 descriptor。
+// v3.2.20：BizOP v327 authority、Pending / 业务OP 导出数据库三组随模块下线删除（固定 fixture 仍保留其原记录）。
 const MAIN_BINDING_GROUPS = Object.freeze([
-  {
-    kind: 'biz-op-v327-authority', prefix: 'biz-op-v327:',
-    overrideFields: [], unavailableCode: 'BIZOP_RUNTIME_AUTHORITY_REQUIRED',
-    overrideCode: null, beforeDispatch: 'bizOpV327.beforeDispatch'
-  },
-  {
-    kind: 'pending-database', actions: ['pending:export-diff', 'pending:export-summary'],
-    overrideFields: ['dbPathOrManagedSource'],
-    unavailableCode: 'PENDING_EXPORT_RUNTIME_AUTHORITY_UNAVAILABLE',
-    overrideCode: 'PENDING_EXPORT_RUNTIME_AUTHORITY_OVERRIDE_FORBIDDEN'
-  },
-  {
-    kind: 'biz-op-database', actions: ['biz-op:export-day', 'biz-op:export-range'],
-    overrideFields: ['dbPathOrManagedSource'],
-    unavailableCode: 'BIZ_OP_EXPORT_RUNTIME_AUTHORITY_UNAVAILABLE',
-    overrideCode: 'BIZ_OP_EXPORT_RUNTIME_AUTHORITY_OVERRIDE_FORBIDDEN'
-  },
   {
     kind: 'vcc-database-assets',
     actions: ['vcc-financial-op:export-single', 'vcc-financial-op:export-subjects'],
@@ -108,6 +92,35 @@ function describeBinding(value, fieldPath) {
   }
   return {
     api: 'methods', methods: Object.keys(value).filter((key) => typeof value[key] === 'function').sort()
+  };
+}
+
+// v3.2.20 下线业务OP数据核对（含 v327）、月度Pending数据核对、收单单据币种校验；固定 runtime 基线本身不改，
+//   扣除这些 action 后作为当前期望：counts / staticKeys 由剩余 policy 重算，registryKeys 只保留仍被剩余 action 引用的键。
+const RETIRED_RUNTIME_ACTION_PREFIXES = Object.freeze(['biz-op-v327:', 'biz-op:', 'pending:', 'acquiring:', 'bank-bu:']);
+function isRetiredRuntimeAction(actionKey) {
+  return RETIRED_RUNTIME_ACTION_PREFIXES.some((prefix) => actionKey.startsWith(prefix));
+}
+function activeRuntimeBaseline(baseline) {
+  const actions = baseline.actions.filter((action) => !isRetiredRuntimeAction(action.actionKey));
+  const policies = actions.map((action) => action.policy);
+  const referenced = Object.fromEntries(VALUE_REGISTRIES.map((name) => [name, new Set()]));
+  for (const action of actions) {
+    for (const binding of Object.values(action.bindings)) {
+      if (binding.runtime !== null && referenced[binding.registry]) referenced[binding.registry].add(binding.key);
+    }
+  }
+  return {
+    ...baseline,
+    counts: {
+      policies: actions.length,
+      productionEnabled: policies.filter((policy) => policy.production.enabled).length,
+      dynamicEstimators: actions.filter((action) => action.resource.hasEstimator).length
+    },
+    staticKeys: staticReferenceClosure(policies),
+    registryKeys: Object.fromEntries(Object.entries(baseline.registryKeys)
+      .map(([name, keys]) => [name, keys.filter((key) => referenced[name].has(key))])),
+    actions
   };
 }
 
@@ -213,7 +226,9 @@ module.exports = {
   BASELINE_COMMIT,
   GENERATED_AT,
   MAIN_BINDING_GROUPS,
+  RETIRED_RUNTIME_ACTION_PREFIXES,
   VALUE_REGISTRIES,
+  activeRuntimeBaseline,
   baselineRuntimeOptions,
   captureRuntimeBaseline,
   collectCurrentRuntimeBaseline,

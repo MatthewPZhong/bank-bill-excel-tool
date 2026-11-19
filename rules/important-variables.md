@@ -10,6 +10,7 @@
 | 字段 | 值 |
 |---|---|
 | 当前清单版本 | v38（app v3.1.12 — 网银源文件身份、启动 admission/VCC hold、CNY/CNH 新导入与 Archive 指纹/首次进入维护） |
+| v3.2.20 模块下线 | 2026-11-18（分支 `feat/retire-recon-modules`，基线 v3.2.19 合并提交 `466bb6fa`）：下线业务OP数据核对、月度Pending数据核对、收单单据币种校验、月度银行对账单BU回填校验，移出 31 条只属于这些模块的变量；`FLOW_HEADERS` / `VALID_DIRECTION_*` 改归 VCC业务OP计算；`ALL_MODULE_IDS` 补已下线 id 保留规则；空闲定时器、per-月侧库条目按现状更新。已下线模块的主库表、侧库与设置保留不动，见 `changes/v3.2.20/feat/retire-recon-modules/techdoc.md`。清单版本号随正式发版评估 |
 | v38 本轮 review | 2026-08-20（以 `origin/main@ccfa71ffc92bb26bbf47c05efa87740d972cf209` 为基线，覆盖 PR1—PR5 的 25 个生产文件；复核 FilePlan/reader 连续身份、启动 fail-closed、一次 VCC lineage/hold、CNH→CNY 新哈希、Archive 迁移/删除 owner 与 entry maintenance；发布负责人已确认人工验收完成并授权合并） |
 | v38 基线数据 | `docs/analysis/var-reference-stats.md`（340 个 git-tracked JS / 4516 个顶层名称；A-share 660 / A-pair 957 / A-local 2726 / B 1617；报告版本 3.1.12） |
 | v37 历史版本 | app v3.1.12 — 随包用户指南发布状态纠正；当时运行时重要变量与 v36 相同。 |
@@ -53,7 +54,7 @@
 | v3.0.24 人工资金 review | 待业务负责人使用至少两个真实或脱敏大账号，逐笔确认银行 `MerchantId` 与订单“收款账户（卡号）”一致，尤其复核同金额、币种、日期碰撞及 R3 兜底；自动化 review 不替代人工验收。 |
 | v3.0.26 人工资金 review | 待业务负责人逐笔核对 R5 默认网关来源与调拨对账单来源的正/负/空手续费、回填 ReconciliationId、严格 1:1 去向和多对多异常说明；并人工打开新 21 列前置资金结果确认 FundType 血缘。自动化 review 不替代人工验收。 |
 | v3.1.0 人工资金 review | 待业务负责人使用真实或脱敏银行账单、五类链接原始表逐笔核对十组 FundType、自有/非自有账户别名、币种、方向、日期、signed Extra Fee、严格 1:1、差异和回导确认；Windows Excel/WPS 模板打开及大文件内存也需人工验收。 |
-| v3.1.11 人工资金 review | 待业务负责人使用真实或脱敏 Biz OP、Pending、Pre-fund 样本复核 dataset tag → run receipt → 输出文件的直接血缘、行数和金额/币种守恒；并在真实 Archive 数据库副本复核 017/018、001。自动化 release-check 不替代该发布门禁。 |
+| v3.1.11 人工资金 review | 待业务负责人使用真实或脱敏 Pre-fund 样本（v3.2.20 起 Biz OP、Pending 已下线，不再复核）复核 dataset tag → run receipt → 输出文件的直接血缘、行数和金额/币种守恒；并在真实 Archive 数据库副本复核 017/018、001。自动化 release-check 不替代该发布门禁。 |
 | v3.1.12 人工资金/状态 review | 2026-08-20 发布负责人明确确认已完成网银源文件身份、VCC CNY/CNH 主体/金额/幂等/原始审计/九币种输出、Archive 迁移/未知文件/指纹/首次进入维护以及受控 Windows 启动与恢复验收，并授权 `v3.1.12 → main`；仓库只记录最终结论，不收录敏感数据库、sidecar 或 raw report。 |
 | 基线数据 | `docs/analysis/var-reference-stats.md`（218 个 JS 文件 / 2553 顶层声明；A-share 376 / A-pair 637 / A-local 1396 / B 1013；报告版本 3.1.0） |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
@@ -74,12 +75,12 @@
 ### `freezeWorkerBatchContext`（v3.1.9 新增 Critical，A-share 跨进程协议）
 - 定义：`src/main-process/archive-center/worker-batch-context.js`；由 main、TaskLifecycle、归档恢复和各业务 worker/dispatch 共用
 - 当前合同：只接受并冻结 exact-seven `batchId/batchNumber/taskRunId/taskKey/moduleId/parentRunId/operationKey`；`batchId` 必须为正安全整数，其余六项必须为非空字符串；required 调用缺失时 fail-closed
-- 关联功能：worker 跨线程消息、崩溃后恢复、批次终态回写、输入输出 artifact 登记、VCC/Acquiring/Position/Pending/工具箱等任务与原批次的唯一身份；自动统计为 21/53/5，属于真实 A-share
+- 关联功能：worker 跨线程消息、崩溃后恢复、批次终态回写、输入输出 artifact 登记、VCC/Position/工具箱等任务与原批次的唯一身份（v3.2.20 起 Acquiring/Pending 已下线）；自动统计为 21/53/5，属于真实 A-share
 - 变更 review 要点：
   - 增删/改名字段必须同步全部 producer、worker entry、持久 checkpoint/recovery 与 controller；禁止 worker 自行补批次、用月份/latest/renderer state 猜身份
   - 不得放宽正整数/非空/exact-set/frozen 约束，也不得把原始行、文件内容、可变 session 或内部路径塞入 context
   - 恢复必须沿用已持久化的同一 seven-field context；缺失/陈旧/不一致时阻断业务恢复，不能另分新批次掩盖
-  - 必跑：worker-batch-context、TaskLifecycle、Acquiring resume、Position import、VCC worker、Pending 与工具箱 worker/dispatch 聚焦测试 + `npm run smoke`
+  - 必跑：worker-batch-context、TaskLifecycle、Position import、VCC worker 与工具箱 worker/dispatch 聚焦测试 + `npm run smoke`
 
 ### `VCC_STORAGE_CONTRACT_VERSION` / `registerVccStorageWriteCapability` / `installVccStorageWriteGuards` / `setVccStorageContractVersion`（v3.1.10 新增 Critical）
 - 定义：`src/backend/vcc-financial-op-db/storage-contract.js`；当前持久合同版本为 `3`，连接能力函数为 `vcc_storage_write_capability_v3()`，guard trigger 前缀为 `vcc_storage_contract_v3_guard_`（v3.2.9：v2→v3 使用专用迁移连接，成功或失败均关闭；业务连接仅注册 v3，v1 COW 保留显式 v2 中间阶段）
@@ -181,99 +182,6 @@
   - 字段 (code / message / detail lines / context) 是对外 error-report 的 schema
   - 改字段要同步所有 catch 分支 + 错误报告 writer
 
-### `runReconciliation`（v2.1.3 业务OP数据核对）
-- 定义：`src/main-process/biz-op-recon-session.js`
-- 关联功能：业务OP 数据核对模块**资金对账总入口**；编排 4 步算法（流水累加 → 计算 T-1 OP → 1:N 逐行精准比 → 账户号差集）+ 落库 runs/diff_rows
-- ⚠️ 命名冲突：与 v1.5.x Pending 模块同名 `runReconciliation` 存在；改前必先 `grep -rn "runReconciliation" src/` 确认改的是哪个模块
-- 变更 review 要点：
-  - **资金红线**：4 步流程任一改动直接影响差异判定结果
-  - 改函数签名 / summary 字段 → IPC handler `bizOpRecon:run` 出参 schema 同步 + 前端状态栏文案同步
-  - 关联拍板点：fix4（multiOpAccountSeen Set 防重复累加） / fix5（相等多 OP 行 push diffRows） / round1 I3（T-2 NaN end_balance 加 console.warn + summary.t2AnomalyAccountCount）
-  - 必跑：smoke biz-op-recon Case A-K 全套 + 真实数据样本回放
-
-### `compareT1OpWithComputed`（v2.1.3 1:N 精准标差异核心）
-- 定义：`src/main-process/biz-op-recon-session.js`
-- 关联功能：业务OP 模块 OPEN ISSUE #6 拍板 A 1:N 逐行独立比的核心算法；同账户号 N 条 T-1 OP 行各自与计算 T-1 期末余额比较，逐行独立标"相等/不相等"
-- 变更 review 要点：
-  - **资金红线**：epsilon=1e-2 容差不可放宽；超过 → 标"不相等"，进 diff_rows 表
-  - **fix5 选项 B 关键不变量**：多 OP 账户的相等行（`t1Rows.length >= 2 && diff <= epsilon`）也必须 push diffRows，meta = `相等/空/是`；单 OP 相等行不进表
-  - `amountDiffCount` 仅累计"不相等"行（相等多 OP 不计入差异计数）；`multiOpAccountCount` 按账户号去重统计
-  - 必跑：smoke biz-op-recon Case B（多 OP 行）+ Case J（fix5 反例防回归）
-
-### `runFlowImportAsync`（v2.1.3 流水对账单导入入口，**round 3 P1 升格 ⚠️ 资金红线**）
-- 定义：`src/main-process/biz-op-recon-session.js`
-- 关联功能：业务OP 模块流水对账单导入核心入口；接收 `{date, filePath}`，事务内做 28 列表头校验 + 出入方向枚举校验 + DELETE 旧流水 + **`clearRunsAndDiffsByDate(db, date)` 清该 date 跨所有 BU 的旧 runs/diff_rows** + INSERT 新流水
-- 变更 review 要点:
-  - **资金红线**（round 3 P1 修订前曾漏清）：流水换了对账没重跑 → 用户「导出差异」拿 stale 数据 = 资金事故。事务内必须包含 `clearRunsAndDiffsByDate(db, date)` 调用
-  - **与业务OP 重导对照**：业务OP 重导只清单 BU（`clearRunsAndDiffsByDateBu`）；流水重导按 date 跨所有 BU 清（`clearRunsAndDiffsByDate`）— 两个清函数语义不可混
-  - 改事务边界 / 清函数调用顺序 → 必跑 smoke Case P 防回归（构造同 date 跨 2 BU success run + 重导流水 + 断言所有 BU 的 runs/diff_rows 均被清）
-  - 必跑：smoke biz-op-recon Case D（流水累加 + 出入方向）+ Case P（流水重导清 runs）+ 真实数据手测（同 date 跨 ≥ 2 BU 已 success run，重导流水后两 BU 的「导出差异」success 日期均消失，需重新跑对账）
-
-### `runBizOpImportAsync`（v2.1.3 业务OP 导入入口，**round 4 P1 升格 ⚠️ 资金红线**）
-- 定义：`src/main-process/biz-op-recon-session.js`
-- 关联功能：业务OP 模块业务OP 导入核心入口；接收 `{date, filePath}`，事务内做 23 列表头校验 + 双重校验 + DELETE 旧业务OP `(date, BU)` + **`clearRunsAndDiffsByDateBu(db, date, BU)` 清当天作为 T-1 的 runs/diff_rows**（#15 拍板 A 已实现）+ **`clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)` 清下一日作为 T-2 的 runs/diff_rows**（round 4 P1 新增）+ 落库前 `bu_name = String(rawBuName).trim()`（I2 round 1）+ INSERT 新业务OP
-- 变更 review 要点:
-  - **资金红线**（round 4 P1 修订前曾漏清下一日）：业务OP 某日数据**双角色** — 既是当天对账 T-1 也是下一日对账 T-2 输入（参见 PRD §3.4.1 步 4.2.a `计算 T-1 OP = T-2 期末 + 流水累加`）。漏清下一日 (date+1, BU) run → D+1 日 run 仍按"旧 T-2 期末 + 流水累加"算 = stale 差额 → 「导出 D+1 差异」拿错数据 = 资金事故
-  - **必须两次调用 `clearRunsAndDiffsByDateBu`**：一次 `(date, BU)`（当天 T-1）+ 一次 `(addOneDay(date), BU)`（下一日 T-2）；缺一不可
-  - **`addOneDay` 必须 UTC 实现**：避免本地时区抢跑/滞后导致跨日错位；时区错乱直接错日期 → 漏清下一日 run 或误清后天 run = 资金事故（详见 `addOneDay` 条目）
-  - **与 `runFlowImportAsync` 区分语义**：业务OP 单 BU 跨 2 日清（D + D+1）；流水跨 BU 单日清（D 跨所有 BU）— 不可对调
-  - 改事务边界 / 清函数调用次数 / addOneDay 实现 → 必跑 smoke Case Q 防回归（构造 BU-A 跨 D-1/D/D+1 三日业务OP + 跑 D 与 D+1 两 run 成功 + 重导 D 业务OP + 断言 D 与 D+1 两 run 均被清）
-  - 必跑：smoke biz-op-recon Case A（核心对账）+ Case M（C1 大小写归一）+ Case N（I2 BU trim 归一）+ Case Q（业务OP 重导清下一日 runs）+ 真实数据手测（同 BU 跨 ≥ 3 日业务OP + 跑 D 与 D+1 两 run，重导 D 业务OP 后两 run 「导出差异」success 日期均消失）
-
-### `acquiring_bill_currency_flow_imports.settle_amount_abs`（v2.1.6 收单流水通道清算金额绝对值入库列，v0.7 fix4 重命名自 recon_amount_abs）
-- 定义：`src/backend/database/migrations.js` 中 `ensureAcquiringBillCurrencyTablesSupport` DDL；写入路径**v3.0.3 PR-H 起默认经引擎契约** `src/backend/acquiring-bill-currency-import/contract-flow.js` 的 `mapRow`（含 `parseAmountAbs`，byte-for-byte 平移 import-repository.insertFlowRow）；`import-repository.parseAmountAbs + insertFlowRow` 仅回退路径（session `USE_BIG_TABLE_IMPORT_ENGINE=false`）使用
-- 关联功能：收单单据币种校验 — 流水侧**通道清算金额**绝对值入库列；差异表 `流水_通道清算金额` 直接取该列值（无二次 ABS）
-- v0.7 fix4 变更：取值列从 Excel 第 13 列「对账金额」(values[12]) 切换为第 29 列「通道清算金额」(values[28])
-- 变更 review 要点：
-  - **资金红线**：`parseAmountAbs` 改实现（含 `Number(...)` 解析方式 / `Math.abs` / `toString` 精度） → 差异表金额值漂移；**v3.0.3 PR-H 后须同步改 contract-flow.js 的 parseAmountAbs（它是 insertFlowRow 的 byte-for-byte 平移副本，两路必须一致 — acquiring-engine-migration.js 集成脚本锁死）**
-  - 修改 DDL 列类型（TEXT → REAL 等） → 必须同步 reader 入库 + writer 输出格式
-  - 改取值列号（values[28]） → 必须同步 spec §3.1 ★ 标列 + smoke fixture + contract-flow.js（白名单 FLOW_VALUE_WHITELIST 派生自 FLOW_KEY_COLUMN_INDICES，自动跟随）
-  - 必跑：smoke acquiring-bill-currency Case A / J（通道清算金额入库 + 输出值精度）+ 集成 acquiring-engine-migration.js（新旧两路 byte-for-byte）+ 真实数据手测（含负数金额行）
-
-### `acquiring_bill_currency_*.settle_currency` / `settle_currency_norm`（v2.1.6 收单流水/单据通道清算币种入库列，v0.7 fix4 对账核心字段）
-- 定义：`src/backend/database/migrations.js` DDL；写入路径**v3.0.3 PR-H 起默认经引擎契约** `contract-flow.js`（流水侧 values[29]）/ `contract-bill.js`（单据侧 values[19]）的 `mapRow` + `normalizeCurrency`（byte-for-byte 平移 import-repository.insertFlowRow/insertBillRow）；`import-repository.insertFlowRow/insertBillRow + normalizeCurrency` 仅回退路径使用
-- 关联功能：收单单据币种校验 — **对账核心比对字段**，SQL JOIN 时与对侧 settle_currency_norm 比较判定是否差异
-- v0.7 fix4 关键决策：流水侧取值列从 Excel 第 14 列「币种」(values[13]) 切换为第 30 列「通道清算币种」(values[29])；单据侧列号 values[19] 保持（语义本就是清算视角，仅 DB 字段重命名）。原因 = 单据「对账币种」是清算视角，订单视角的「币种」对账必然 100% match 是字段语义错位
-- 变更 review 要点：
-  - **资金红线**：流水侧取值列号改动 → 完全改变对账结果（v0.6 = 100% match / v0.7 ≈ 56% mismatch）
-  - `normalizeCurrency`（LOWER+TRIM）改实现 → 大小写/空格差异被误判为不一致；**v3.0.3 PR-H 后 contract-flow.js / contract-bill.js 各自有 normalizeCurrency 副本，须与 import-repository 同步（acquiring-engine-migration.js 锁死两路一致）**
-  - 必跑：smoke acquiring-bill-currency Case J/K/L 全套（matching / mismatch / 流水侧空）+ 集成 acquiring-engine-migration.js + 真实数据手测（混合多币种）
-
-### `acquiring_bill_currency_diff_rows.flow_currency` / `flow_amount_abs`（v2.1.6 差异表输出关键 2 列）
-- 定义：`src/backend/database/migrations.js` DDL；写入路径在 `src/backend/acquiring-bill-currency-db/run-repository.js` 的 `insertDiffRowsByJoin`（核心 SQL JOIN）
-- 关联功能：收单单据币种校验差异表输出末尾 2 列 — `流水_通道清算币种` + `流水_通道清算金额`（v0.7 fix4 输出标签修订）；财务据此判断是否需要修正单据币种
-- v0.7 fix4 变更：DB 列名保留 flow_currency/flow_amount_abs（避免 schema 二次变更），**值的语义改为通道清算视角**（SQL `SELECT f.settle_currency, f.settle_amount_abs`）
-- 变更 review 要点：
-  - **资金红线**：`insertDiffRowsByJoin` SQL JOIN 条件改动（`f.month_key = b.month_key AND f.recon_main_id = b.recon_main_id` + `COALESCE(b.settle_currency_norm, '') <> COALESCE(f.settle_currency_norm, '')`） → 直接影响差异表行选择
-  - 改 `diff_type` 判定逻辑（`bill_currency_missing` vs `currency_mismatch`）→ 用户语义混淆
-  - 改 SQL `settle_currency_norm` 比较 → 必须同步 import-repository 入库归一函数 `normalizeCurrency`
-  - 改输出列名常量 `WRITER_OUTPUT_FLOW_CURRENCY_HEADER` / `_FLOW_AMOUNT_ABS_HEADER` → 必须同步 spec §6.2 + smoke Case A 末列表头断言
-  - 必跑：smoke acquiring-bill-currency Case A/C/E/J/K/L 全套 + writer 输出 xlsx 末 3 列值断言
-
-### `USE_BIG_TABLE_IMPORT_ENGINE` + 收单导入引擎契约（v3.0.3 PR-H 升格 Critical ⚠️ 资金红线 — 收单导入链路换引擎 + 单行回退开关）
-- 定义：`src/main-process/acquiring-bill-currency-session.js` 模块顶部 `const USE_BIG_TABLE_IMPORT_ENGINE = process.env.ACQUIRING_FORCE_LEGACY_IMPORT === '1' ? false : true`（生产默认 true=引擎）；契约模块 `src/backend/acquiring-bill-currency-import/contract-flow.js` / `contract-bill.js`（引擎 `mapRow`/`insertSql`/`validateHeaders`/`monthKeyOf`/`formatBatchError`/`deleteSqlForOverwrite`）
-- 关联功能：收单 flow/bill 导入（`importFilesInTransaction` / `importFilesWithOverwrite`）默认 dispatch 大表导入引擎（`big-table-import/engine-worker-entry.js` worker，主进程零阻塞 + 多文件并行 + 字节层 row-scanner）；开关拨 false / `db.location()` 拿不到 dbPath → 回退 `runImportLegacyInTransaction` / `runImportLegacyWithOverwrite`（reader-handrolled 直调，v3.0.2 行为）
-- 跨文件度：A-pair（session 定义 dispatch + 契约模块 + 引擎 import-worker 给 mapRow 注入 ctx.sourceFile + engine formatBatchError/errorName 接线）
-- 关联引擎改动（v3.0.3 PR-H 对 PR-G1/G2 untracked 引擎文件的最小改动）：
-  1. `big-table-import/import-worker.js`：`mapRow({rowR,values,ctx})` 传 ctx（sourceFile 逐文件动态，不能走 contractOptions）；batch 元素带 `rowR`；表头错 message 加 `${sourceFile}：` 前缀
-  2. `big-table-import/engine.js`：INSERT 失败/跨月行级错误行号用真实 `rowR`（非 batch 索引）；整批拒绝调契约 `formatBatchError` 生成 message/detailLines/name；peek/表头错经契约 `errorName` 改名
-- 变更 review 要点：
-  - **🔴🔴 资金红线（放行闸）**：收单导入是对账金额/币种入库真理源。改 contract-flow/bill 的 mapRow 取值/归一/列序、改引擎 writeBatch 错误行号/formatBatchError → 必须重跑 `acquiring-engine-migration.js`（新旧两路 byte-for-byte：含 rowid 逐行 + 对账统计 + 错误 message/detailLines/name 逐字符）
-  - 错误对外契约：契约 `errorName='ImportValidationError'` + `formatBatchError` 保证引擎抛错的 name/message/detailLines 与旧 reader byte-for-byte → main.js handler 错误识别（status='error' + detailLines 透传）+ smoke caseB/F/H3/M 零改动
-  - **回退完整性**：reader.js / reader-handrolled.js / import-repository.js 一字不改且仍被回退路径引用；拨 false 即恢复 v3.0.2（含旧路径自带 wal_checkpoint）
-  - DB 连接：引擎 worker 自开 `dbPath`（`db.location()`）连接写；主进程 db 连接并存（WAL + busy_timeout 30s）；COMMIT 后引擎自带 `wal_checkpoint(TRUNCATE)`（session 引擎分支不再 checkpoint，回退分支保留）
-  - 必跑：集成 `acquiring-engine-migration.js`（45 断言；v3.0.4 块 D PR-D biz-op flow 引擎迁移扩到 45）+ `big-table-import-engine.js`（19 断言，引擎改动不回归）+ smoke acquiring-bill-currency（203）+ acquiring-bill-currency-progress（34，reading 事件契约）+ acquiring-bill-currency-pragma（27）+ 真实数据手测（W4 UI 流畅 / 取消 / 覆盖导入）
-
-### `USE_BIG_TABLE_IMPORT_ENGINE_PENDING` / `USE_BIG_TABLE_IMPORT_ENGINE_BIZOP_FLOW` + 共享 dispatch（v3.0.4 块 B/C 升格 Critical ⚠️🔴🔴 资金红线 — pending/biz-op flow 导入链路换引擎 + 单行回退开关）
-- 定义：`src/main-process/pending-session.js:49` `const USE_BIG_TABLE_IMPORT_ENGINE_PENDING = process.env.PENDING_FORCE_LEGACY_IMPORT === '1' ? false : true`；`src/main-process/biz-op-recon-session.js:598` `const USE_BIG_TABLE_IMPORT_ENGINE_BIZOP_FLOW = process.env.BIZOP_FLOW_FORCE_LEGACY_IMPORT === '1' ? false : true`（均生产默认 true=引擎）；共享 dispatch `src/main-process/big-table-import-dispatch.js`（`dispatchEngineImport`，平移收单 `dispatchEngineImport` 范式 + `resourceLimits.maxOldGenerationSizeMb=4096`，pending/biz-op flow 复用、OPEN-2 不收编收单）
-- 关联功能：pending 挂账导入（契约 `src/backend/pending-import/contract-pending.js`）/ biz-op flow 流水导入（契约 `src/backend/biz-op-recon-import/contract-flow.js`）默认走大表导入引擎（yauzl 基座、worker 拓扑统一、多文件并行）；开关拨 false / 拿不到 dbPath → 回退原 utilityProcess + `worker.js`（pending）/ `import-worker.js`（biz-op flow）全旧链路（旧 reader/repository 一字不改保留可达）
-- 关联引擎扩展（PR-B E1-E5 契约可选项，不声明=行为零变化）：E1 多语句覆盖删除（pending deleteMonth 6 表顺序敏感 🔴 Codex PR #55 Finding 1 / biz-op flow 2 条 clear）；E2 事务内 finalizeForCommit（pending upsertMonthMeta COMMIT 前原子）；E3 空文件整批拒绝；E4 `maxCollectedErrors:1000` + `captureRowValues:true`（错误报告 xlsx 需整行 cells）；E5 写侧跨文件 sha 去重 Set
-- 变更 review 要点：
-  - **🔴🔴 资金红线（放行闸）**：pending_rows / biz-op flow 流水为入库真理源 + pending 6 表覆盖删除链（removed_pending_rows 残留→reconcile 用陈旧归档错标）。改契约 mapRow/insertSql/deleteForOverwrite/dedupeKeyOf → 必跑 parity 脚本 `pending-engine-migration.js`（45 断言）/ `bizop-flow-engine-migration.js`（47 断言，legacy vs 引擎 byte-for-byte：全表 dump + 错误路径文案/计数/cells/截断标志逐字段）
-  - **行为收紧 divergence（intentional）**：旧 pending 硬编码 `sheet1.xml`（多 sheet 静默读第一个）→ 引擎 rels 正解多 sheet **报错**（防静默读错表）；错误超 1000 截断计数语义随引擎口径
-  - **回退完整性**：旧链路文件全保留；env `PENDING_FORCE_LEGACY_IMPORT=1` / `BIZOP_FLOW_FORCE_LEGACY_IMPORT=1` 即恢复 v3.0.3 行为
-  - **资源**：worker_threads 堆 vs 旧 child 8GB；dedupe Set 300w≈360MB + 写批缓冲，`resourceLimits.maxOldGenerationSizeMb=4096` 显式设置
-
 ### `runAllScenarios` / scenario-dispatcher（v2.1.7 F8 升格 Critical ⚠️ 资金红线契约锚点）
 - 定义：`src/main-process/scenario-dispatcher.js:66` `function runAllScenarios(bankRows, gwRows, scenarios)`
 - 关联功能：银行账单场景化引擎统一入口 — 编排 C1（提取reconId）/ C2（账单打标）/ C3（网关核销）三类场景；按 scenarios 顺序遍历 first-match-wins；维护 `rowLockSet` 命中集合；**v2.1.7 F8 新增反向 filter `unmatchedRows = bankRows.filter(r => !rowLockSet.has(r._rowId))` 保证 `modifiedRows + unmatchedRows = bankRows`（无遗漏 + 互斥契约）**
@@ -286,7 +194,7 @@
   - 必跑：smoke `npm run smoke`（19 suite 含 c1/c2/c3 全套）+ 真实银行账单端到端（混合 C1+C2+C3+空场景） + F8 第 2 sheet 行数 = bankRows - modifiedRows 断言
 
 ### `unmatchedRows`（v2.1.7 F8 dispatcher 反向 filter 输出字段，升格 Critical ⚠️ 资金红线）
-- 定义：`src/main-process/scenario-dispatcher.js:152` 反向 filter；引用 `src/main.js:3036/3110/3116/3270/3309-3420`（reconIdFix 模块也用同名字段，**两条流水线共享名但语义独立** — 见下方区分说明）+ `src/main-process/bank-statement-io.js:212-213` writer 第 2 sheet 输入 + `src/main-process/acquiring-bill-currency-session.js:211` 收单单据校验也用
+- 定义：`src/main-process/scenario-dispatcher.js:152` 反向 filter；引用 `src/main.js:3036/3110/3116/3270/3309-3420`（reconIdFix 模块也用同名字段，**两条流水线共享名但语义独立** — 见下方区分说明）+ `src/main-process/bank-statement-io.js:212-213` writer 第 2 sheet 输入
 - 关联功能：dispatcher first-match-wins 遍历后未命中任何场景规则的行集合；导出阶段透传给 `writeBankStatementOutput` 输出第 2 sheet "未命中场景行"
 - 跨流水线区分（两条 unmatchedRows 不可混）：
   1. **dispatcher unmatchedRows**（`scenario-dispatcher.js:152`）— 所有场景未命中的银行账单行；服务于 F8 第 2 sheet
@@ -329,85 +237,6 @@
   - F5-D3 currency 字段过滤：在候选池构造时加 currency 等值过滤
   - 改遍历顺序 → 命中行数变化（v2.1.7 实测 28 行 vs TEST2.xlsx 期望 57 行差距即源于此）
   - 必跑：smoke + F5 fixture + TEST2.xlsx 3 个关键子集验证（T54SWIC494447 16 行 / T54SWIC506630 11 行 / T54SWIC470181 4M 子池）
-
-### `WRITER_OUTPUT_HEADERS_V2`（v2.1.8 N4 新增 Critical ⚠️ 资金红线 — 收单差异表对外输出 12 列契约）
-- 定义：`src/backend/acquiring-bill-currency-db/columns.js:88` `const WRITER_OUTPUT_HEADERS_V2 = Object.freeze([...TEMPLATE_BILL_HEADERS, 单据_对账币种, 流水_通道清算币种, 流水_通道清算金额])`
-- 关联功能：收单单据币种校验差异表 xlsx 12 列输出契约（spec v0.10 §三.1 N4-D3 = 模版顺序）；用户 / 财务 / Excel 自动化下游 100% 依赖
-- 变更 review 要点：
-  - **对外输出契约**：任何修改（加/删/换列名 / 改顺序）→ 用户 Excel 自动化失效
-  - 必须同步：模版 xlsx + writer.js + smoke caseA 末 N 列断言 + USER_GUIDE
-  - 旧 `WRITER_OUTPUT_HEADERS`（29 列）标 deprecated 仅历史参照，新代码用 V2
-  - 列名常量来源：`TEMPLATE_BILL_HEADERS`（前 9）+ `WRITER_OUTPUT_BILL_COPY_HEADER`（10）+ `WRITER_OUTPUT_FLOW_CURRENCY_HEADER`（11）+ `WRITER_OUTPUT_FLOW_AMOUNT_ABS_HEADER`（12）
-  - 必跑：smoke caseA 列数 = 12 + 末 4 列表头断言 + N4 migration 用例
-
-### `TEMPLATE_BILL_HEADERS`（v2.1.8 N4 新增 Critical ⚠️ 资金红线 — 模版 9 列 truth source）
-- 定义：`src/backend/acquiring-bill-currency-db/columns.js:82` `const TEMPLATE_BILL_HEADERS = Object.freeze(['账单日期', 'originBillBizId', '单据类型', '主对账Id', '业务订单号', '对账金额', '对账币种', 'valueDate', 'channel'])`
-- 关联功能：模版（`assets/收单币种校验导出差异表模版.xlsx`）前 9 列字段；writer + migration 共用 truth；DB raw_json 瘦身后唯一保留的 9 字段
-- 变更 review 要点：
-  - **对外输出契约**：模版字段是 N4 设计的 PSU；改之 → migration 失效 + 历史数据中 raw_json 仅含旧 9 字段
-  - 必须同步：assets/收单币种校验导出差异表模版.xlsx + WRITER_OUTPUT_HEADERS_V2 + ensureBillRawJsonV2Slim N4_TEMPLATE_BILL_HEADERS 内部副本
-  - 字段顺序（D3=a）：必须与模版一致；不可按其他顺序保留
-  - 必跑：N4 caseN4_billRawJsonSlimMigration 全流程
-
-### `bill_imports.raw_json`（v2.1.8 N4 内容契约变更 ⚠️ 资金红线 — 永久删除 17 字段；v2.1.10 N4-cont-1 扩内容语义）
-- 定义：`src/backend/database/migrations.js:1023` DDL `raw_json TEXT NOT NULL`
-- 关联功能：收单单据导入数据的 JSON 序列化字段；v2.1.7 及之前存 26 字段，v2.1.8 N4 起仅存 9 模版字段；migration 通过 `ensureBillRawJsonV2Slim` 一次性 rewrite；**v2.1.10 N4-cont-1 起对账成功老行 raw_json 可被自动清空为 `''`（sentinel，非 NULL — 兼容 v2.1.8 NOT NULL schema）；差异行 raw_json 永远保留以保证差异 xlsx 完整可重导**
-- 变更 review 要点：
-  - **数据不可逆**：17 字段值（ReconBillBizId / 公司主体 / 业务部门 / 对手部门 / 订单创建来源 / 财务BU / 账单类型 / 业务子类型 / 交易类型 / 对账子类型 / 单据状态 / 用户编号 / 账户号 / 账户类型 / remark / 创建时间 / 完成时间）永久删除
-  - 历史月份差异表重导出也少这些字段 → 不能反悔
-  - 下游消费方调研（v2.1.8 commit 37299cf）：仅 writer.js + run-repository.js 4 处 SQL `json_extract '$."账单日期"'` 使用；17 字段无下游消费
-  - import-repository 写入 raw_json 时**仍按 26 字段写入**（reader 读 xlsx 全字段），migration 后续生效；下次需要时可在 import 阶段也裁字段
-  - **v2.1.10 N4-cont-1 sentinel 修订（v0.3）**：清空标记必须用 `''`（空字符串）而非 `NULL` — v2.1.8 N4 DDL 含 `NOT NULL` 约束；改用 `NULL` 会让 UPDATE 失败（CHECK 违反）。所有 idempotent guard / 查询请用 `raw_json != ''` 而非 `raw_json IS NOT NULL`
-  - **v2.1.10 N4-cont-1 差异行永不清空契约**：`clearStaleSuccessfulRawJson` 用 `NOT IN (SELECT bill_import_id FROM diff_rows)` 子查询排除；改子查询 → 资金红线（差异 xlsx 重导丢字段）
-  - 必跑：N4 migration 全流程 + caseA 末 N 列表头 + readback raw_json 仅 9 字段；v2.1.10 必跑 `v2.1.10-n4-cont-1-phase4` 集成（差异行 `raw_json != ''` 100% + 对账成功老行 `raw_json = ''` + retention 边界）
-
-### `runCheckCore`（v2.1.10 A3 新增 Critical ⚠️ 资金红线 — runCheck 核心算法 worker/main 共用入口）
-- 定义：`src/main-process/acquiring-bill-currency-session.js:runCheckCore(workerDb, payload, onProgress, cancelToken)`（Phase 1 T09 提取自原 `runCheck` 内 DB/算法部分）
-- 跨文件度：A-pair（`acquiring-bill-currency-session.js` 定义 + `run-check-worker.js` 调用；总命中 4 次 — `src/main-process/acquiring-bill-currency-session.js(3), src/main-process/run-check-worker.js(1)`）
-- 关联功能：v2.1.10 A3 跨进程化的核心 — runCheck 5 阶段 (`clearOldRuns / computeStats / insertRun / insertDiffByJoin / writeRunOutputs`) 算法主体；**worker 进程与主进程必须 byte-for-byte 一致**（contract test 锁定）
-- 变更 review 要点：
-  - **资金红线**：runCheckCore 输出（diff_rows 内容 + 行数）与 v2.1.9 旧 runCheck 必须 byte-for-byte 一致；改一个 SQL / 阶段顺序 / cancel 边界都可能影响差异表内容
-  - **cancelToken 必须在 5 阶段间检查**（T13 已实现）：cancel 触发当前事务 graceful ROLLBACK；不能跳过任何阶段间检查 → cancel 响应延迟超阈值
-  - **worker / main 双调用方**：worker 路径调用走 `dispatchRunCheck` → IPC 序列化；main 路径走 facade 直调（兼容老调用方）；任一路径改动必须双侧验证
-  - **A4 chunked 分批集成**：runCheckCore 内 `insertDiffByJoin` 阶段已透传 chunkSize 给 `insertDiffRowsByJoinChunked`；chunk 边界 cancel + idempotent / 重跑保护由本函数 + run-repository 共同维护
-  - 跨主线影响：A3 worker 跨进程化 + A4 chunked 分批 + N4-cont-2 CASCADE 删 run 时 diff_rows 自动清 — 改 runCheckCore 必须同步验证 4 主线集成路径
-  - 必跑：unit `tests/unit/main-process/run-check-worker.test.js` 12 case + 集成 `v2.1.10-a3-phase1` 40 case + `v2.1.10-a3-phase2` 33 case + `v2.1.10-a4-phase3` 25 case
-
-### `clearStaleSuccessfulRawJson`（v2.1.10 N4-cont-1 新增 Critical ⚠️ 资金红线 — NOT IN 子查询排除差异行）
-- 定义：`src/backend/acquiring-bill-currency-db/raw-json-retention.js:clearStaleSuccessfulRawJson(db, retentionDays)`
-- 跨文件度：A-pair（`raw-json-retention.js` 定义 + `main.js` idle cleanup 回调调用；总命中 3 次 — `src/backend/acquiring-bill-currency-db/raw-json-retention.js(2), src/main.js(1)`）
-- 关联功能：v2.1.10 N4-cont-1 raw_json 体积治理核心 — 单 SQL `UPDATE acquiring_bill_currency_bill_imports SET raw_json = '' WHERE id NOT IN (SELECT bill_import_id FROM acquiring_bill_currency_diff_rows) AND imported_at < datetime('now', '-N days') AND raw_json != ''`；由 N1' idle 30min cleanup 回调自动触发；返回 `{ affectedRows }`
-- 变更 review 要点：
-  - **资金红线**：`NOT IN (SELECT bill_import_id FROM diff_rows)` 子查询是差异行保留的**唯一保护**；改子查询条件 / 写错表名 / 列名 → 差异行 raw_json 被误清 → 差异 xlsx 重导丢字段 = 资金事故
-  - **sentinel = `''`**（v0.3 修订）：不能用 `NULL`（违反 v2.1.8 N4 NOT NULL 约束）；所有 idempotent guard 用 `raw_json != ''`
-  - **idempotent**：函数本身按 `raw_json != ''` 守卫；重复调用 0 行影响；不能改成 `raw_json IS NOT NULL`（无效查询，落 v2.1.8 NOT NULL schema 后没有 NULL 行）
-  - **失败 graceful**：调用方 (main.js setupIdleCleanupTimer 回调) 必须独立 try/catch + activity log + 不阻塞主 cleanup
-  - **retention_days 边界**：由 `getAcquiringBillRawJsonRetentionDays(db)` 提供（settings 单键 + 范围 1-30 + 范围外回退 7）；改函数签名要同步 setting key
-  - 必跑：unit `tests/unit/backend/acquiring-bill-currency-db/raw-json-retention.test.js` 8 case + 集成 `v2.1.10-n4-cont-1-phase4` 23 case
-
-### `ensureDiffRowsCascadeMigration_v2_1_10`（v2.1.10 N4-cont-2 新增 Critical ⚠️ DB 不可逆 schema + 8-status state machine）
-- 定义：`src/backend/database/migrations.js:ensureDiffRowsCascadeMigration_v2_1_10(db, dbPath, createBackupFn)`
-- 跨文件度：A-pair（`migrations.js` 定义 + `database.js` 启动期调用；总命中 6 次 — `src/backend/database.js(4), src/backend/database/migrations.js(2)`）
-- 关联功能：v2.1.10 N4-cont-2 FK CASCADE 改造核心 — 在 `acquiring_bill_currency_diff_rows` 的 2 个 FK（`bill_import_id` → `acquiring_bill_currency_bill_imports.id` 和 `run_id` → `acquiring_bill_currency_runs.id`）上加 `ON DELETE CASCADE`；沿用 v2.1.9 N5 8-status state machine 范式（pending / backed-up / checked / rebuilt / data-copied / fk-verified / cleaned-up / done）+ 复用 SR-backup-1 createBackupFn 注入；标志位 `n4_cont_2_diff_rows_cascade_migrated`
-- 变更 review 要点：
-  - **数据不可逆**：FK CASCADE 改造涉及 schema rebuild（CREATE TEMP TABLE + DROP + RENAME）；migration 失败必须 ROLLBACK 到 v2.1.9 状态 + 备份保留（SR-backup-1 VACUUM INTO 前置）
-  - **8-status state machine 顺序固定**：pending → backed-up → checked → rebuilt → data-copied → fk-verified → cleaned-up → done；改顺序 → 中断恢复时 status 判断错乱 → 重复 migration 或漏 backfill
-  - **跨版本迁移**：必须支持 v2.1.7 / v2.1.8 / v2.1.9 → v2.1.10 一步迁；不能假设上游 migration 已跑（启动期 migration 序列由 `database.js` 编排）
-  - **PRAGMA foreign_key_check 0 violation 是 hard requirement**：fk-verified status 若有 violation 必须 fail-fast + ROLLBACK；不能跳过
-  - **FK 范式 vs v2.1.9 N5**：N5 `channels` FK 是 `ON UPDATE CASCADE`（不带 ON DELETE — channels 禁删）；N4-cont-2 是 `ON DELETE CASCADE`（删 run → diff_rows 自动清）+ 不带 ON UPDATE；两者范式差异是设计 — 不能复用同一辅助函数
-  - **createBackupFn 注入范式**：沿用 v2.1.9 N4 重构 + SR-backup-1 范式；不能改用 `fs.copyFileSync`（v2.1.8 N4 旧方式已废弃）
-  - **幂等保护**：标志位 `n4_cont_2_diff_rows_cascade_migrated='1'` 已设 → 跳过；ROLLBACK 不写 marker → 下次重试
-  - 必跑：unit `tests/unit/backend/database/migrations-n4-cont-2.test.js` 12 case + 集成 `v2.1.10-n4-cont-2-phase5` 43 case（含跨版本 fixture + ROLLBACK + 老数据保留 + 幂等）
-
-### `acquiring_bill_currency_diff_rows` FK CASCADE schema（v2.1.10 N4-cont-2 升格 Critical ⚠️ DB schema 契约 — spec §九 拍板）
-- 定义：`src/backend/database/migrations.js:1506-1515` DDL — `bill_import_id INTEGER REFERENCES acquiring_bill_currency_bill_imports(id) ON DELETE CASCADE` + `run_id INTEGER REFERENCES acquiring_bill_currency_runs(id) ON DELETE CASCADE`（v2.1.10 N4-cont-2 改造完成后）
-- 关联功能：v2.1.10 N4-cont-2 改造目标 schema；之前（v2.1.7/v2.1.8/v2.1.9）FK 不带 CASCADE，删 run / 删 bill_import 时孤儿 diff_rows 残留；本版 ON DELETE CASCADE 后自动清；clearOldRuns + chunked 重跑 idempotent 也依赖本契约
-- 变更 review 要点：
-  - **资金红线**：改 FK schema 必须配套 migration（不能直接改 DDL 不写 migration → 老库不升级）；FK 引用错表 / 错列 / 错 action（CASCADE / SET NULL / RESTRICT）→ 资金事故
-  - **与 N4-cont-1 配合**：N4-cont-1 clearStaleSuccessfulRawJson 排除差异行；如果 N4-cont-2 CASCADE 删了 run → diff_rows 跟着删 → 这些行的 raw_json 不再受 N4-cont-1 保护 → 可被下一轮 idle cleanup 清空；这是预期行为（用户删了 run 表示不再需要差异记录）
-  - **不能加 ON UPDATE CASCADE**：v2.1.10 spec §6.2 只加 ON DELETE；ON UPDATE 与 v2.1.9 N5 channels FK 范式不同（详 `ensureDiffRowsCascadeMigration_v2_1_10` 条目）
-  - **PRAGMA foreign_keys=ON** 必须在 worker / main 双进程连接生效（v2.1.10 A3 worker DB 连接 PRAGMA 6 条清单）；FK 不开启 CASCADE 不生效
-  - 必跑：sqlite3 `PRAGMA foreign_key_list('acquiring_bill_currency_diff_rows')` 显示 ON DELETE CASCADE × 2 + 集成 `v2.1.10-n4-cont-2-phase5` 删 run / 删 bill_import case
 
 ---
 
@@ -481,50 +310,22 @@
   - 删除元数据成功但物理清理失败是部分成功，UI 必须刷新批次并保留残留清理提示
   - 必跑：archive controller/UI contract 单测 + 设置页预览 + `npm run verify:app-settings-layout` + `npm run smoke`
 
-### `normalizeBu`（v2.1.3 业务OP / v2.1.2 月度BU回填校验共用）
-- 定义：`src/main-process/biz-op-recon-session.js` + `src/backend/biz-op-recon-import/validator.js`（v2.1.3）；v2.1.2 月度BU回填校验也有同名实现
-- 实现：`String(v).trim().toLowerCase()`
-- 关联功能：BU 名归一化比较；流水 `bu_dept` vs 业务OP `bu_name` 跨表关联；OPEN ISSUE #7 拍板 C
-- 变更 review 要点：
-  - 多文件多 repository SQL 内嵌 `LOWER(TRIM(...))` 必须与函数实现保持一致（C1 round1 fix：`clearByDateBu` 已对齐 `LOWER(TRIM(?))`）
-  - 改 normalize 规则要同步 v2.1.2 + v2.1.3 两处实现 + repository 内 SQL
-  - 仅用于比较，**不改写落库原值**
-  - 必跑：smoke biz-op-recon Case G（BU 隔离 + 大小写差异容忍）
-
-### `normalizeAccountKey`（v2.1.3 账户号匹配 anchor）
-- 定义：`src/main-process/biz-op-recon-session.js` + `src/main-process/biz-op-recon-writer.js`
-- 实现：仅 `String(v).trim()`（**不**做大小写归一；账户号是资金 key）
-- 关联功能：业务OP `账户号` 与流水 `账户编号` 跨表 key 归一；区间导出 sort key（M4 round1：writer 排序 key 改用 normalizeAccountKey）
-- 变更 review 要点：
-  - 跨 session.js / writer.js 两文件使用，改实现要同步
-  - 不可加 toLowerCase（账户号大小写有业务含义）
-  - 必跑：smoke biz-op-recon Case A/B + Case K（区间排序）
-
-### `BIZ_OP_HEADERS`（v2.1.3 业务OP 23 列定义）
-- 定义：`src/backend/biz-op-recon-db/columns.js`
-- 关联功能：业务OP 表头校验 anchor + writer 输出列顺序 + reader 字段映射；模板 `assets/业务OP账单.xlsx` 23 列冻结数组
-- 变更 review 要点：
-  - 改顺序/列名 → 表头严格匹配会拒绝旧版业务OP 文件
-  - writer / reader / validator 三处必须同步引用本数组
-  - 配合 differ 的 4 列 meta（比对T-2日 / 同账户号多个OP / 比对测算金额 / 测算金额差额）→ 差异表 27 列结构
-  - 必跑：smoke biz-op-recon Case A/E + 真实业务OP 文件回放
-
-### `FLOW_HEADERS`（v2.1.3 流水对账单 28 列定义）
-- 定义：`src/backend/biz-op-recon-db/columns.js`
-- 关联功能：流水对账单表头校验 anchor + reader 字段映射；模板 `assets/流水对账单.xlsx` 28 列冻结数组
+### `FLOW_HEADERS`（v2.1.3 流水对账单 28 列定义；v3.2.20 起归 VCC业务OP计算所有）
+- 定义：`src/backend/vcc-op-calc-db/columns.js`（`FLOW_COLUMN_DEFS` / `FLOW_HEADERS` / `flowHeaderToDbColumn`；v3.2.20 业务OP数据核对下线时从 `biz-op-recon-db/columns.js` 逐字迁入）
+- 关联功能：VCC业务OP计算流水对账单表头校验 anchor + reader 字段映射；模板文件 `flow-statement` 识别结构；28 列冻结数组
 - 变更 review 要点：
   - 改顺序/列名 → 表头严格匹配会拒绝旧版流水文件
-  - 与 BIZ_OP_HEADERS 同步管理（配套常量）
-  - 必跑：smoke biz-op-recon Case D（流水累加 + 出入方向）+ 真实流水文件回放
+  - 必跑：`vcc-op-calc-session` / `vcc-op-calc-stream` / `vcc-op-calc-parser-pipeline` / `flow-statement-structure` 单测 + 真实流水文件回放
 
-### `ALL_MODULE_IDS`（v2.1.4 建立；v3.0.24 扩为 12 个主模块 ID 全集 anchor）
+### `ALL_MODULE_IDS` / `RETIRED_MODULE_IDS`（v2.1.4 建立；v3.0.24 扩为 12 个；v3.2.20 下线四个对账模块后为 9 个主模块 ID 全集 anchor）
 - 定义：`src/backend/database/settings-repository.js`
 - 关联功能：单文件定义，但被 `CURRENT_MODULE_VALID`（`setCurrentModule` 校验）+ `setEnabledModules`（启用列表校验）共用；renderer 端 `MODULES` 常量必须与之一致；新增模块时两边都要加
 - 变更 review 要点：
   - 新增模块 → 必须同步加到 `ALL_MODULE_IDS` + renderer 端 `src/renderer.js` 的 `MODULES` 常量（两边定义必须完全一致）
   - 如忘了同步 → 用户切到新模块会抛 `Invalid current_module`（v2.1.2/v2.1.3 即遗留过此 bug，v2.1.4 修复）
   - 修改 ID 字符串 → DB 内已持久化的 `current_module` / `enabled_modules` 会因 sanitize 被回退到默认值
-  - 必跑：`npm run smoke`（settings-repository 内部测试）+ 手动验证 12 个模块逐一切换 + 收纳弹窗启用各模块后切换；新模块默认关闭时还要验证旧用户启用列表不被扩写
+  - **已下线 id**（v3.2.20）：`RETIRED_MODULE_IDS` = `pending-reconciliation` / `bank-bu-recon` / `biz-op-recon` / `acquiring-bill-currency`。读取时从启用列表排除、`current_module` 回退默认模块；`setEnabledModules` 与全非法回退写入时把库中原有的已下线 id 原样追加保留，保证回退旧版安装包后收纳状态不变。不得把已下线 id 重新加入 `ALL_MODULE_IDS`，也不得在写入时丢弃它们
+  - 必跑：`npm run smoke`（settings-repository 内部测试）+ `tests/unit/backend/database/settings-repository.test.js`（含已下线 id 保留回归）+ 集成 `retired-modules-upgrade-compat.js` + 手动验证 9 个模块逐一切换 + 收纳弹窗启用各模块后切换；新模块默认关闭时还要验证旧用户启用列表不被扩写
 
 ### `enabled_modules`（v2.1.4 — 左上角模块切换菜单的启用列表全链路）
 - 定义：
@@ -553,25 +354,11 @@
   - 改正则 → 历史 BillDate 字符串可能匹配失败 → 候选池消失
   - 必跑：smoke c4 + F5 fixture + unit case（输入字符串 / 输入 number 序列号 → ISO 后输入对比）
 
-### `cleanupAfterRunBackground`（v2.1.8 N1 新增 Important-skeleton — runCheck 后置清理函数；v0.7 N1' 加 includeDiff 参数）
-- 定义：`src/main-process/acquiring-bill-currency-session.js:295` `async function cleanupAfterRunBackground({ db, monthKey, runId, onProgress, includeDiff = false })`
-- 关联功能：收单单据币种校验模块 runCheck 后清理；每批 50000 行 + setImmediate 让出 event loop
-- 变更 review 要点：
-  - N1 β 方案（spec.md §三）：触发链路改造 — runCheck → app.before-quit 主 + 进入模块兜底
-  - **N1' v0.7 改造**（spec.md v0.10 §三）：
-    - 主触发改 idle 30min（`setupIdleCleanupTimer`）；before-quit 降级静默兜底；进入模块降级崩溃恢复兜底
-    - 新增 `includeDiff=false` 参数（默认）：仅清 flow_imports；bill_imports + diff_rows 保留（**FK 约束** `diff_rows.bill_import_id REFERENCES bill_imports(id)` 无 CASCADE 强制）
-    - `includeDiff=true` 仅 cleanupOrphanData Phase 2 用（清孤儿 run 脏数据 → diff → bill → flow 顺序解 FK）
-  - **不动 cleanup 算法本身**（50000 行/批 + setImmediate）；仅触发时机 + 范围
-  - 调用方变化：v2.1.7 main.js:10307 setImmediate → v2.1.8 移除 → v0.7 新增 setupIdleCleanupTimer / before-quit / listMonths 三触发
-  - 必跑：smoke caseP（默认 includeDiff=false → bill/diff 保留 + flow 清）+ caseP2（includeDiff=true → 3 表清）+ caseQ cleanupOrphanData 不动
-
 ### `setupIdleCleanupTimer`（v2.1.8 N1' v0.7 新增 Important-skeleton — idle 30min cleanup 触发器）
-- 定义：`src/main.js:10620` `function setupIdleCleanupTimer()`；关联常量 `IDLE_CLEANUP_MS = 30 * 60 * 1000` / `IDLE_CHECK_INTERVAL_MS = 2 * 60 * 1000`；关联状态 `lastUserActivityTs`
-- 关联功能：app.whenReady 后启动定时器；每 2min tick 检查 `Date.now() - lastUserActivityTs >= 30min` → 复用 `triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded`（含 mutex 抢锁 + 防重入）
+- 定义：`src/main.js` `function setupIdleCleanupTimer()`；关联常量 `IDLE_CHECK_INTERVAL_MS = 2 * 60 * 1000`；关联状态 `lastUserActivityTs`
+- 关联功能：app.whenReady 后启动定时器；每 2min tick 调用 `idleDatabaseCompaction.maybeRun()`（主库空闲整理，自带空闲、任务与磁盘条件）。v3.2.20 收单单据币种校验下线后，原 30min 收单后台清理分支（`triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded` / `IDLE_CLEANUP_MS`）已删除，定时器只做空闲整理
 - 变更 review 要点：
   - **触发条件 AND 设计**（spec v0.10 §3.2.2 N1''-D6）：renderer 上报 user-activity + mutex 间接判定 main 未忙；改任一条件 → idle 误判风险
-  - 改 IDLE_CLEANUP_MS 常量 → 用户体验大变（短 → cleanup 频繁打扰；长 → 数据长期不清）
   - 改 tick 粒度 → 触发延迟 + CPU 开销 trade-off
   - **不能加 .unref() 删除**（避免阻塞退出，但要确保 cleanup mutex 在 before-quit 之前抢到）
   - 必跑：手测 30min 不动 → 触发 + log；smoke 中 fake timer 验证 idle 路径（v2.1.9 G1 全量铺时补 unit case）
@@ -597,7 +384,7 @@
 
 ### `serializeError` / `deserializeError`（v2.1.10 A3 新增 Important-skeleton — worker / main 跨进程错误回传契约）
 - 定义：`src/main-process/serialize-error.js`（v2.1.10 Phase 1 T08 新建）
-- 跨文件度：A-pair（`serialize-error.js` 定义 + `run-check-worker.js` worker 端 + `run-check-worker-pool.js` main 端反序列化；serializeError 总命中 10 次 / deserializeError 4 次）
+- 跨文件度：`serialize-error.js` 定义；VCC 财务 OP worker 与工具箱大文件拆分 worker 序列化，对应 main 端反序列化（原收单 `run-check-worker*` 消费方已随模块下线删除）
 - 关联功能：worker 内 throw error → 跨进程 IPC 序列化 → main 进程 deserialize → 调用方 catch；保留 stack / cause 链 / FileValidationError 专属字段（code / detailLines / context）；spec §2.4 完整契约
 - 变更 review 要点：
   - **错误堆栈完整度**：worker 内 throw 的 err.stack 必须含 worker 内文件路径 + 行号（POC §四 已验证）；改序列化逻辑漏字段 → 主进程 catch 的 err 失去定位能力
@@ -693,14 +480,14 @@
 ### `updateStatusBox`（v2.1.7 R3+B5 升格 Important-skeleton ⚠️ 全局影响）
 - 定义：`src/renderer.js:520` `function updateStatusBox(box, message, tone, options)`
 - 当前实现：`String(message).replace(/：/g, '：\n')` 中文「：」自动换行（R3 全局规则）+ `box.dataset.tone = tone` 联动 `data-tone` 属性选择器（解决历史 tone 不生效 bug）
-- 关联功能：渲染层状态栏唯一写入口；**v2.1.7 R3 加全局中文「：」换行**（配合 `src/styles-gemini-extra.css:1852` `white-space: pre-wrap`）；**B5 wiring 加固后**所有模块（acquiring / bankStatement / reconIdFix / bankBuRecon / bizOpRecon 等 6+ 模块）的状态栏全部走该入口
+- 关联功能：渲染层状态栏唯一写入口；**v2.1.7 R3 加全局中文「：」换行**（配合 `src/styles-gemini-extra.css:1852` `white-space: pre-wrap`）；**B5 wiring 加固后**所有模块（bankStatement / reconIdFix / preFund 等）的状态栏全部走该入口
 - 跨文件度：4+（`src/renderer.js`:520/552/561/3333/3686/3913/4143/4254 共 8+ 直接调用 + `src/styles-gemini-extra.css` + `src/styles.css` CSS 联动 + `src/renderer-dialogs.js` 部分模块间接调用）
 - 变更 review 要点：
   - **全局影响**：改 `replace(/：/g, '：\n')` 规则 → 全模块状态栏文案视觉变化；删除 → 所有 ":" 文案重新挤一行
   - **B5 wiring 契约**（v2.1.7 round 3）：所有 statusBox 写入必须走 `updateStatusBox(box, message, tone)` 不能直写 `box.textContent = ...`（绕过会丢 tone + 换行）；新增模块状态栏时必须走该入口
   - 改 `box.dataset.tone` 联动逻辑 → CSS `[data-tone="error"]` / `[data-tone="success"]` 选择器失效
   - 改 `options` 参数 schema → 6+ 调用方需同步
-  - **半角 `:`** 不在 R3 规则范围（仅中文「：」）；改规则覆盖半角需评估 acquiring 模块时间戳文案影响
+  - **半角 `:`** 不在 R3 规则范围（仅中文「：」）；改规则覆盖半角需评估各模块时间戳文案影响
   - 必跑：smoke 19 suite（含 R3 全局回归）+ 6+ 模块状态栏手测（每模块写入一次状态后检查换行 + tone 颜色生效）+ B5 wiring 防回归（直写 `box.textContent` 引入 → smoke 应拒绝）
 
 ### `bankStatementSession`（v2.1.16 阶段一 A5 升格 Runtime-state ⚠️ 资金对账数据处理进程级 session）
@@ -844,29 +631,17 @@
   - source/artifact/hold 重放必须幂等，禁止按月份、文件名或 latest 猜身份；SQLite 不存完整 Excel 字节
   - 必跑：archive-lineage 真实 SQLite+FS、actual worker A→B、crash双启动、hold manual/retention、dataset artifact corruption、TaskLifecycle/outbox 与 `npm run smoke`
 
-### `ensureBillRawJsonV2Slim`（v2.1.8 N4 新增 Important-skeleton + 🔴 破坏性 + 资金红线）
-- 定义：`src/backend/database/migrations.js:803` `function ensureBillRawJsonV2Slim(db, dbPath)`
-- 关联功能：v2.1.8 首次启动自动备份 DB 到 `<dbDir>/backups/tool-data-bak-pre-N4-<ts>.sqlite` → 事务包裹分批 rewrite `acquiring_bill_currency_bill_imports.raw_json` 仅保留 9 模版字段 → 写 marker `app_settings.acquiring_bill_raw_json_v2_migrated=true`
-- 变更 review 要点：
-  - **数据不可逆**：17 字段值永久删除；备份失败 → migration 不启动（数据完整性优先）
-  - 幂等保护：marker 已写 → 跳过；失败回滚不写 marker → 下次重试
-  - **不能改 N4_TEMPLATE_BILL_HEADERS 内部副本**而不同步 `TEMPLATE_BILL_HEADERS` 常量（Critical §1）
-  - 备份方式 `PRAGMA wal_checkpoint(TRUNCATE) + fs.copyFileSync` 不能改成不一致的方式
-  - 必跑：smoke caseN4_billRawJsonSlimMigration（首次 migrated + 幂等跳过 + 备份文件存在 + 9 字段保留 + 17 字段删除）
-
-### `lastUserActivityTs` + `IDLE_CLEANUP_MS` + `reportUserActivity`（v2.1.8 N1' v0.7 新增 Runtime-state）
+### `lastUserActivityTs` + `reportUserActivity`（v2.1.8 N1' v0.7 新增 Runtime-state）
 - 定义：
   - `src/main.js:25` `let lastUserActivityTs = Date.now()`（模块级）
-  - `src/main.js:23` `const IDLE_CLEANUP_MS = 30 * 60 * 1000`
   - `src/preload.js:88` `reportUserActivity: () => ipcRenderer.send('app:user-activity')`
   - `src/main.js:3550` `ipcMain.on('app:user-activity', () => { lastUserActivityTs = Date.now(); })`
   - `src/renderer.js:226` `setupUserActivityReporter()`（mousemove/keydown/click/wheel/touchstart 10s 节流）
-- 关联功能：N1' idle 30min 后台 cleanup 判定依据（spec v0.10 §3.2.2 N1''-D6/D7/D8）
+- 关联功能：原为 N1' idle 30min 收单后台 cleanup 判定依据（spec v0.10 §3.2.2 N1''-D6/D7/D8）；v3.2.20 收单下线后由主库空闲整理等空闲判定经 `getLastUserActivityTs` 读取
 - 变更 review 要点：
   - **节流间隔 10s**：renderer 10s 内必上报一次（避免长按拖动误判）；改短 → IPC 压力；改长 → 误判风险
-  - **常量 IDLE_CLEANUP_MS 改值** → 用户体验大变；建议常量集中保留，未来 v2.1.9 评估 settings 化（D8=a 锁定不做）
   - lastUserActivityTs 是模块级单例 `let`，跨 IPC handler 共享；不能改成对象属性 + 多实例
-  - 必跑：手测移鼠标 → lastUserActivityTs 更新；闲置 30min → setupIdleCleanupTimer tick 触发 cleanup
+  - 必跑：手测移鼠标 → lastUserActivityTs 更新；`main-idle-compaction-wiring` 单测
 
 ### 大账号数据迁移
 - `splitTemplateName` — `database/own-accounts-migration.js` + `database.js`
@@ -882,111 +657,15 @@
 - 关联功能：跨平台路径处理（Windows 反斜杠 / 网络路径）
 - 变更 review 要点：必跑 Windows 环境 + 中文路径
 
-### `aggregateFlowByAccount`（v2.1.3 流水按账户汇总）
-- 定义：`src/main-process/biz-op-recon-session.js`
-- 关联功能：业务OP 模块步骤 4.1 — 按 normalizeBu 过滤 + 按账户号累加 signedAmount → Map
-- 变更 review 要点：
-  - **资金红线**：累加错误直接导致计算 T-1 期末错位 → 全表差异判定失效
-  - 内部依赖 `parseSignedAmount`（Risk-sensitive 红线）+ `normalizeBu` + `normalizeAccountKey` 三个函数
-  - NaN 行 continue 跳过（导入阶段已通过 `validateFlowRow` 拦截，对账阶段二次保护）
-  - 必跑：smoke biz-op-recon Case D（流水累加）+ Case G（BU 隔离）
-
-### `parseSignedAmount`（v2.1.3 出入方向 → 正负号）
-- 定义：`src/main-process/biz-op-recon-session.js`
-- 实现：`'入' → +num` / `'出' → -num` / 其他 → `NaN`（OPEN ISSUE #3 拍板）
-- 关联功能：流水累加时把出入方向枚举转换为正负发生额；**资金红线核心**
-- 变更 review 要点：
-  - **资金红线最高级**：错一个 case 分支直接资金事故（正负号倒置）
-  - case 必须**完全枚举**（仅「入」/「出」），未知值必须返回 NaN，不可默认 +/-
-  - 与 `VALID_DIRECTION_IN` / `VALID_DIRECTION_OUT` 常量配套（Risk-sensitive）
-  - 与 `validateFlowRow` 配套：导入拦截 + 对账二次保护
-  - 必跑：smoke biz-op-recon Case D（含「DEBIT」/ 空值 / 错别字反例）
-
-### `validateBizOpRow`（v2.1.3 业务OP 双重校验）
-- 定义：`src/backend/biz-op-recon-import/validator.js`
-- 关联功能：业务OP 行级双重校验（OPEN ISSUE #1 拍板 B）：
-  - `(1) 发生额 == 发生额（入） - 发生额（出）`
-  - `(2) 期末余额 == 期初余额 + 发生额`
-  - epsilon = `AMOUNT_EPSILON` (1e-2)
-- 变更 review 要点：
-  - **资金红线**：任一行不过 → 整批拒绝 + 失败报告（OPEN ISSUE #5 拍板）
-  - 改 epsilon 阈值 → 直接影响整批拒绝判定，可能让带瑕疵数据漏入主表
-  - reason 文案变化要同步失败报告 writer 的展示
-  - 必跑：smoke biz-op-recon Case E（双重校验失败 + 整批拒绝 + 失败报告 xlsx）
-
-### `validateFlowRow`（v2.1.3 流水出入方向枚举校验）
-- 定义：`src/backend/biz-op-recon-import/validator.js`
-- 关联功能：流水行级校验：`direction ∈ {入, 出}` + `recon_amount` 可数值化 + `account_no` 非空（OPEN ISSUE #3 拍板）
-- 变更 review 要点：
-  - **资金红线**：枚举判定不严会让脏值漏到对账阶段，触发 `parseSignedAmount` NaN → 静默跳过（资金事故）
-  - 与 `VALID_DIRECTION_IN` / `VALID_DIRECTION_OUT` 共用常量；改任一处必须同步
-  - 必跑：smoke biz-op-recon Case D + 真实流水样本检查脏值
-
-### `AMOUNT_EPSILON`（v2.1.3 浮点精度门槛）
-- 定义：`src/backend/biz-op-recon-db/columns.js`（M2 round1 提取后 — 原分散在 session.js / validator.js 两处）+ `src/backend/biz-op-recon-import/validator.js` + `src/main-process/biz-op-recon-session.js` 引用
-- 当前值：`1e-2`（即 1 分钱）
-- 关联功能：业务OP 双重校验（`validateBizOpRow`）+ 测算金额对比（`compareT1OpWithComputed`）共用浮点精度门槛
-- 变更 review 要点：
-  - **资金红线**：放宽 → 带瑕疵数据漏过校验/比对；收紧 → 误判增多
-  - 必须保证多处引用同一常量（M2 round1 已提取，避免数值不一致）
-  - 必跑：smoke biz-op-recon Case A/B/E（覆盖测算 + 双重校验两种使用路径）
-
 ### `VALID_DIRECTION_IN` / `VALID_DIRECTION_OUT`（v2.1.3 出入方向枚举常量）
-- 定义：`src/backend/biz-op-recon-import/validator.js`（+ 引用 `src/main-process/biz-op-recon-session.js` `parseSignedAmount`）
+- 定义：`src/backend/vcc-op-calc-db/columns.js`（v3.2.20 起业务OP数据核对的同名副本随模块删除，仅保留 VCC业务OP计算这一份）；消费方 `vcc-op-calc-import/validator.js` 与 `vcc-op-calc-session.js`
 - 当前值：`'入'` / `'出'`（中文字符）
 - 关联功能：流水「出入方向」字段的合法值枚举（OPEN ISSUE #3 拍板）
 - 变更 review 要点：
   - **资金红线**：值变化（如改成 'IN' / 'OUT'）→ 历史数据全部不通过校验，导入全部失败
-  - 与 `validateFlowRow` + `parseSignedAmount` 三处必须同步
+  - 与 VCC业务OP计算的导入校验及出入方向取符号逻辑必须同步
   - 不能加同义词（如 'in' / '入款'），避免歧义
-  - 必跑：smoke biz-op-recon Case D（覆盖正反例）
-
-### `subOneDay`（v2.1.3 业务OP T-1 → T-2 日期减一 helper，**双源**）
-- 定义：`src/main-process/biz-op-recon-session.js:83` + `src/backend/biz-op-recon-db/run-repository.js:155`（**双源副本**，实现完全一致）
-- 实现：`UTC + setUTCDate(getUTCDate() - 1)` + `toISOString().slice(0, 10)`（避免本地时区抢跑导致跨日错日期）
-- 关联功能：业务OP 模块对账日期减一（D → D-1），即 T-1 → T-2；
-  - `runReconciliation` 在 session.js 调用本地 `subOneDay` 计算 t2Date
-  - `listReadyDates` 在 run-repository.js 调用本地 `subOneDay` 判定"三件齐"日期
-- 变更 review 要点：
-  - **资金红线**：时区错乱直接错日期 → 整批对账日期偏 1 天 → 拿错 T-2 业务OP 数据 → 计算 T-1 OP 错位 → 差异表全部失真
-  - **双源**：保留双源符合 architecture 边界（避免 backend → main-process 反向依赖）；维护时**必须双侧同步**
-  - **维护检查**：改任一处实现后，`grep -n "function subOneDay" src/` 确认两处行为一致
-  - 不能改用 `setDate(getDate() - 1)`（本地时区版）— 在 UTC+12 / UTC-12 边界时区会抢跑或滞后 1 天
-  - round 2 R2-M4 升格（spec ↔ code 对齐时发现双源；保留双源 + 加显式 review 要点）
-  - 必跑：smoke biz-op-recon Case A（核心对账，验证 T-1/T-2 取数日期正确）
-
-### `addOneDay`（v2.1.3 业务OP D → D+1 日期加一 helper，**round 4 P1 资金红线 ⚠️ 新增**）
-- 定义：`src/main-process/biz-op-recon-session.js`（**单源**，与 `subOneDay` 双源不同 — addOneDay 仅在业务OP 重导清逻辑使用，无 backend 反向依赖问题）
-- 实现：`new Date(date + 'T00:00:00Z')` + `setUTCDate(getUTCDate() + 1)` + `toISOString().slice(0, 10)`（与 `subOneDay` 对偶；UTC 处理避免本地时区抢跑/滞后导致跨日错位）
-- 关联功能：业务OP `(date, BU)` 重导时，`runBizOpImportAsync`/worker 在事务内调用 `clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)` 清下一日作为 T-2 的 run；per-month 编排层还用同一 helper 形成月末 D/D+1 下月 admission（业务OP 某日数据双角色：当天 T-1 + 下一日 T-2，参见 PRD §3.4.1 步 4.2.a）
-- 变更 review 要点：
-  - **资金红线**（round 4 P1 新增）：时区错乱直接错日期 → 漏清下一日 (date+1) run（用 setDate 在 UTC+12 滞后到 date）或误清后天 (date+2) run（在 UTC-12 抢跑到 date+2）→ stale 差异表 = 资金事故
-  - **必须 UTC 实现**：不能改用 `setDate(getDate() + 1)`（本地时区版）；与 `subOneDay` UTC 实现完全对偶
-  - **单源**：addOneDay 的实现只在 `src/main-process/biz-op-recon-session.js`；同步导入、worker 与 per-month 编排均引用该单源，无 listReadyDates 一类的第二份实现
-  - **维护检查**：改实现后 `grep -n "function addOneDay" src/` 确认仅 1 处命中（如出现 2 处 → 评估是否可合并 / 是否双源同步）
-  - **与 `subOneDay` 对照**：subOneDay 双源（session.js + run-repository.js）；addOneDay 单源（仅 session.js）— 业务边界不同
-  - round 4 P1 升格 Risk-sensitive（与 `subOneDay` round 2 R2-M4 升格 Risk-sensitive 对齐 — 时区操作类 helper 同级红线）
-  - 必跑：smoke biz-op-recon Case Q（业务OP 重导清下一日 runs；验证 addOneDay 时区安全性 + 不抢跑 / 不滞后）+ 真实数据手测（UTC+12 / UTC-12 边界时区设备跑 Case Q 不出错）
-
-### `clearRunsAndDiffsByDate`（v2.1.3 流水重导清 runs，**round 3 P1 资金红线 ⚠️ 新增**）
-- 定义：`src/backend/biz-op-recon-db/run-repository.js`
-- 实现：DELETE diff_rows WHERE run_id IN (SELECT id FROM biz_op_recon_runs WHERE data_date=?) → DELETE biz_op_recon_runs WHERE data_date=?（按 date **跨所有 BU** 清）
-- 关联功能：流水对账单 (`biz_op_recon_flow_imports`) 重导时清该 date 所有 BU 的旧 runs + diff_rows；由 `runFlowImportAsync` 在事务内调用
-- 变更 review 要点：
-  - **资金红线**（round 3 P1 新增）：流水按 date 跨 BU 共用，重导后该 date 所有 BU 旧 run 失效；漏调本函数 → 用户拿旧差异表上报 = 资金事故
-  - **与 `clearRunsAndDiffsByDateBu` 区分语义不能混**：本函数按 date 跨 BU 清；`clearRunsAndDiffsByDateBu` 按 (date, BU) 单 BU 清。流水重导专用本函数；业务OP 重导专用 `clearRunsAndDiffsByDateBu`。误用对方 → 资金红线（流水重导只清单 BU 残留其他 BU stale / 业务OP 重导清光所有 BU 数据丢失）
-  - DELETE 顺序固定：diff_rows → runs（FK 依赖；若反序 → 外键约束错）
-  - 必跑：smoke biz-op-recon Case P（构造同 date 跨 2 BU success run + 重导流水 + 断言两 BU runs/diff_rows 均被清，业务OP 主表不动）
-
-### `clearRunsAndDiffsByDateBu`（v2.1.3 业务OP 重导清 runs，**round 3 升格 Risk-sensitive ⚠️**）
-- 定义：`src/backend/biz-op-recon-db/run-repository.js`
-- 实现：DELETE diff_rows WHERE run_id IN (SELECT id FROM biz_op_recon_runs WHERE data_date=? AND LOWER(TRIM(bu_name))=LOWER(TRIM(?))) → DELETE biz_op_recon_runs WHERE data_date=? AND LOWER(TRIM(bu_name))=LOWER(TRIM(?))（按 (date, BU) **单 BU** 清；C1 round 1 修订已对齐 LOWER+TRIM）
-- 关联功能：业务OP (`biz_op_recon_imports`) 重导时清该 (date, BU) 二元组的旧 runs + diff_rows；由 `runBizOpImportAsync` 在事务内调用（OPEN ISSUE #15 拍板 A 联动清空）
-- 变更 review 要点：
-  - **资金红线**：与 `clearRunsAndDiffsByDate` 区分语义不能混（详见上一条）；业务OP 按 (date, BU) 分片，本函数只清单 BU；其他 BU 数据保留
-  - **C1 round 1 修订**：BU 比较 SQL 必须 `LOWER(TRIM(bu_name)) = LOWER(TRIM(?))`，与 `getRowsByDateBu` 完全对齐；脱口 → 大小写差异时清不掉旧数据 = 资金红线
-  - DELETE 顺序固定：diff_rows → runs（FK 依赖）
-  - 必跑：smoke biz-op-recon Case L（C1 大小写归一防回归）+ Case O（I2 BU trim 边界扩展）
+  - 必跑：`vcc-op-calc-session` / `vcc-op-calc-parser-pipeline` 单测（覆盖正反例）
 
 ### `pickConditionsLogicChecked`（v2.1.7 F1+R5 helper，升格 Risk-sensitive ⚠️ 资金红线三层护栏第 2 层）
 - 定义：`src/renderer-dialogs.js:6298-6306` 函数
@@ -1104,16 +783,6 @@
   - **既有疑点（记 backlog）**：`ADM_FUND_TYPES` 'Fundtransfer-out' 小写 t 与资产表 `FundType枚举值.xlsx` 不一致；本功能取大写 T 不顺手改 ADM
   - 必跑：引擎单测（FTA/周数/双引擎互斥/Q6 同日算晚于/三轮阶梯/matchedPairs 形状）+ writer 3 核对 sheet 单测 + orchestrator 行数守恒与 matchedPairs 透传 + config 合并不掉桶 + renderer-dialogs 源码字符串断言 + 真实数据回放基准（spec §R2.4：100 对 R1=87/R2=7/R3=6、唯一未消费订单 FTA202606021000465）+ 手测 /verify（勾选→导两表→run→标黄/3 核对 sheet/未匹配报告 + stale 拒导出）
 
-### `cleanup_pending`（v2.1.8 N1 新增 Risk-sensitive — DB 新列，cleanup 延后触发标志）
-- 定义：`acquiring_bill_currency_runs.cleanup_pending INTEGER DEFAULT 0`（v2.1.8 N1 新增列，migration 在 `src/backend/database/migrations.js`）
-- 关联功能：N1 β 方案 — runCheck 成功后 SET=1 标识"待清理"；app.before-quit 钩子检测并触发清理；cleanup 完成后 SET=0
-- 变更 review 要点：
-  - **migration 必须幂等**：`ALTER TABLE ... ADD COLUMN ... DEFAULT 0`，旧记录默认 0（已完成清理）
-  - 改默认值 → 旧记录可能被误判为"待清理"触发不必要的清理
-  - 改列类型 / 列名 → 所有 runs 表查询 / repository 方法同步
-  - 涉及 API：`run-repository.js` 新增 `markCleanupPending` / `clearCleanupPending` / `listPendingCleanupRuns`
-  - 必跑：smoke N1（migration 幂等 + 标志位 SET/CLEAR + 启动孤儿清理仍工作）
-
 ### `config_json.assign`（v2.1.8 N2 新增 Risk-sensitive ⚠️ 对账契约扩展 — v0.5 修订）
 - 定义：scenarios.config_json 字段下 `assign` 对象（v2.1.7 仅 `{gwField, bankField}`，v2.1.8 扩展为 `{gwField, bankField, mode, customValue}`）
 - 关联功能：C3「对账成立后赋值」配置；v2.1.8 N2 新增"自取值"模式 — **「自取值」加在 assign-gw（数据源），v0.5 修订 from assign-bank（写入目标）**；`mode: 'direct' | 'custom'`；`customValue` 在 mode='custom' 时使用
@@ -1164,19 +833,17 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
 - 定义：
   - `src/backend/run-data-store.js`：`KNOWN_MODULES` 新增 `MODULE_PRE_FUND_RECONCILIATION`（跨重启临时 MPT）和 `MODULE_PRE_FUND_RECONCILIATION_RESULTS`（当前 run 可回收结果）；`SIDE_DB_DDL_PRE_FUND_GATEWAY` / `SIDE_DB_DDL_PRE_FUND_RUNS` 分别是两套 DDL 唯一真相。
   - v3.0.15 新增 `MODULE_DUPLICATE_INBOUND_MATCH` / `SIDE_DB_DDL_DUPLICATE_INBOUND_MATCH`，只保存当前启动周期的银行 46 列、运行结果和组级血缘；主库 `duplicate_inbound_match_run_mirrors` 只保存轻量状态/摘要/hash/side path。
-  - 既有三模块编排层不变；前置资金对账由 `src/main-process/pre-fund-reconciliation/service.js` 统一编排 import/run/mirror/export，`pre-fund-reconciliation-run-store.js` 只操作 side DB。
+  - 前置资金对账由 `src/main-process/pre-fund-reconciliation/service.js` 统一编排 import/run/mirror/export，`pre-fund-reconciliation-run-store.js` 只操作 side DB。
   - 主库新增轻量 `pre_fund_reconciliation_run_mirrors`，保存 `side_db_rel_path + side_run_id + status + summary`；不保存任何 MPT/候选/结果 bulk 行。
 - `MODULE_PRE_FUND_RECONCILIATION` / `MODULE_PRE_FUND_RECONCILIATION_RESULTS` / `SIDE_DB_DDL_PRE_FUND_GATEWAY` / `SIDE_DB_DDL_PRE_FUND_RUNS` / `PreFundReconciliationRunStore` — 前置资金对账双生命周期侧库入口、两套 DDL 单一真相和结果游标。
-- 关联功能：五个对账模块、六个存储模块的 run 级批量数据位于 `{userData}/run-data/{module}/month-{YYYY-MM}.sqlite`；前置资金对账还把跨重启临时 MPT 批次放侧库，主库 `linked_gateway_bill` 绝不被临时导入覆盖。
+- 关联功能：前置资金对账（两个存储模块）与重复入金匹配的 run 级批量数据位于 `{userData}/run-data/{module}/month-{YYYY-MM}.sqlite`；前置资金对账还把跨重启临时 MPT 批次放侧库，主库 `linked_gateway_bill` 绝不被临时导入覆盖。
 - 🔴 变更 review 要点（资金红线，改动前必读）：
-  - **算法零改动不变量**：`runCheckCore`（acquiring）/ `runReconciliation`（biz-op/bank-bu）/ 4 步算法 / diff JOIN / epsilon **一字不改** —— 它们在「侧库 db 句柄」上跑 = 在主库上跑（同库自洽）。改动算法须重跑 `acquiring-side-db-parity` / `biz-op-recon-side-db-parity` / `bank-bu-recon-side-db-parity` 三 parity（byte-for-byte + 主库表恒 0 行 + 冻结 golden）。
-  - **DDL 单一真相**：既有三模块仍要求 side/main schema byte-for-byte；前置资金对账从未在主库建 bulk 表，side DDL 只在 `run-data-store.js` 定义，主库镜像 schema 有意不同。改 side DDL 后必须跑 store/run-store 两层测试和 parity。
+  - **DDL 单一真相**：前置资金对账从未在主库建 bulk 表，side DDL 只在 `run-data-store.js` 定义，主库镜像 schema 有意不同。改 side DDL 后必须跑 store/run-store 两层测试和 parity。
+  - **已下线模块侧库（v3.2.20）**：收单单据币种校验、业务OP数据核对、月度银行对账单BU回填校验的 `run-data/{acquiring-bill-currency,biz-op-recon,bank-bu-recon}/` 侧库及主库中这些模块的表保留不动；新版不读写、不清理、不迁移，`KNOWN_MODULES` 不再登记这三个 module，回退旧版安装包后仍可使用。
   - **runId 命名空间**：侧库自增 run id ≠ 主库镜像 id。对外 UI/IPC 一律返回主库镜像 id；前置资金对账导出必须使用内存绑定的 `sideRunId` 读 side DB。混用会跨月读错结果。
-  - **biz-op per-month 跨月边界**（单库自洽命门）：月末 D 导入时编排层补清下月侧库 (D,BU)+(D+1,BU) 旧 run + 写 D 的 T-2 冗余副本到下月侧库；月初对账 date 的 T-2(上月末) 由该冗余副本在当月侧库保证单库自洽。改 `handleMonthEndCrossMonth` / `runViaSideDb` / 双源去重逻辑须重跑 biz-op parity 的跨月用例。
-  - **双源过渡（B-D2）**：side_db_rel_path 非空读侧库、NULL 读主库旧表。双源移除 + 二次 VACUUM 顺延 v3.0.5 之后版本——届时删双源分支前确认历史主库 run 已迁清。
   - **前置资金对账生命周期**：临时批次按账单月保存在 MPT 模块，run 结果按运行月保存在 results 模块。新 run 删除旧 results 文件并标镜像 superseded；重启标 expired 并回收 results；清临时批次只删 MPT 模块，绝不能碰独立 results。启动时 running 镜像标 interrupted，镜像有而侧库无则标 missing-side-db。
   - **重复入金当前周期生命周期**：选中新银行文件立即清旧银行/结果侧库；新 run 清旧结果；重启物理删除本模块 side DB 及孤立 WAL/SHM，并将镜像标 interrupted/expired。主文件缺失或 side run 缺失/损坏分别标 missing-side-db/invalid-side-db。目录扫描、删除或校验失败必须显式阻断，不能在含姓名/卡号的文件仍存在时报告回收成功；临时 MPT 模块继续跨重启保留。
-- 必跑：`npm run release-check`（含四 parity）+ `pre-fund-reconciliation-side-db-parity.js` + 重复入金 store/service/端到端测试 + 同月 MPT/import/run/export/删除来源后 stale 回归。
+- 必跑：`npm run release-check` + `pre-fund-reconciliation-side-db-parity.js` + 重复入金 store/service/端到端测试 + 同月 MPT/import/run/export/删除来源后 stale 回归。
 
 ### `DEFERRED_WINDOW_STARTUP`（v3.0.5 Part B Phase 3 新增 Runtime-state ⚠️ 启动时序回退开关）
 - 定义：`src/main.js` 模块级 `const DEFERRED_WINDOW_STARTUP = process.env.DEFERRED_WINDOW_STARTUP === '0' ? false : true`（默认 true=新时序：窗口先行）。配套 `appInitDone`（app:get-info 两段式判定）+ `runBackgroundInitChain`/`registerAllIpcHandlers`/`markAppInitDone`/`runStartupPostSetup` + IPC `app:init-done`/`app:init-progress` + preload `app.onInitDone`/`onInitProgress` + renderer `initialize`/`applyFullInfo` 两段式。

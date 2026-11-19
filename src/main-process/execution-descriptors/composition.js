@@ -27,8 +27,6 @@ const duplicate = require('../duplicate-inbound-match/execution-descriptor');
 const reconFix = require('../recon-id-fix-service/execution-descriptor');
 const vcc = require('../vcc-financial-op-output/execution-descriptor');
 const position = require('../position-reconciliation/execution-descriptor');
-const bizOp = require('../biz-op-v327/execution-descriptor');
-const mature = require('./mature-adapters');
 const legacy = require('./legacy-task-policies');
 
 const ARCHIVE_POLICIES = Object.freeze([
@@ -40,8 +38,6 @@ const ARCHIVE_POLICIES = Object.freeze([
   ...require('../recon-id-fix-service/archive-task-policies').archivePolicies,
   ...require('../vcc-financial-op-output/archive-task-policies').archivePolicies,
   ...require('../position-reconciliation/archive-task-policies').archivePolicies,
-  ...require('../biz-op-v327/archive-task-policies').archivePolicies,
-  ...require('./mature-adapters').archivePolicies,
   ...legacy.archivePolicies
 ]);
 
@@ -72,9 +68,10 @@ function registrationsFor(options) {
     for (const binding of taskRegistration.taskBindings) {
       registration(adapterModules[binding.adapterId]).taskBindings.push(binding);
     }
+    // pending-run / biz-op-run：v3.2.20 已下线模块的遗留终态 route，仅收口任务终态（archive-center/retired-terminal-routes.js）。
     const routeModules = {
-      'position-reconciliation': 'position', 'pending-run': 'mature-adapters',
-      'biz-op-run': 'mature-adapters', 'pre-fund-run': 'pre-fund'
+      'position-reconciliation': 'position', 'pending-run': 'legacy-task-policies',
+      'biz-op-run': 'legacy-task-policies', 'pre-fund-run': 'pre-fund'
     };
     if (!Array.isArray(options.taskContext.terminalRoutes)
         || options.taskContext.terminalRoutes.length !== Object.keys(routeModules).length) {
@@ -88,8 +85,7 @@ function registrationsFor(options) {
   }
   if (options.recoveryContext) {
     const participantModules = {
-      'biz-op-v327': 'biz-op-v327', 'pending-runs': 'mature-adapters',
-      'legacy-biz-op-runs': 'mature-adapters', 'pre-fund-runs': 'pre-fund',
+      'platform-scan': 'legacy-task-policies', 'pre-fund-runs': 'pre-fund',
       position: 'position', 'toolbox-vcc-publications': 'toolbox',
       'vcc-import-terminal': 'vcc-financial-op', 'vcc-import-lineage': 'vcc-financial-op'
     };
@@ -137,25 +133,10 @@ function composeExecutionDescriptors(options = {}) {
     reconFix.createModuleExecutionDescriptor({ reconFixJpmDatabasePath: options.reconFixJpmDatabasePath, registration: registration('recon-fix') }),
     vcc.createModuleExecutionDescriptor({ availableParallelism, vccFinancialOpDatabasePath: options.vccFinancialOpDatabasePath, vccFinancialOpAssetsDir: options.vccFinancialOpAssetsDir, registration: registration('vcc-financial-op') }),
     position.createModuleExecutionDescriptor({ positionImport: options.positionImport, registration: registration('position') }),
-    bizOp.createModuleExecutionDescriptor({ bizOpV327: options.bizOpV327, registration: registration('biz-op-v327') }),
-    mature.createModuleExecutionDescriptor({
-      availableParallelism, toolboxPublication: options.toolboxPublication,
-      acquiringMainDb: options.acquiringMainDb, acquiringMainDbProvider: options.acquiringMainDbProvider,
-      acquiringLog: options.acquiringLog, mainDatabasePath: options.mainDatabasePath,
-      pendingDatabasePath: options.pendingDatabasePath, userDataDir: options.userDataDir,
-      positionImport: options.positionImport, registration: registration('mature-adapters')
-    }),
     createDescriptor({ moduleId: 'legacy-task-policies', policies: [], mainBindings: [], archivePolicies: legacy.archivePolicies, registration: registration('legacy-task-policies') })
   ];
-  // 旧 Main 注入 BizOP 授权后，其他域即使非生产也必须提供自身派发 hook。
-  // 用显式拒绝保留该门禁；完全没有 Main 派发授权时仍为 null，保留原非生产观察路径。
-  const fallbackDispatch = options.beforeCarrierDispatch == null && options.bizOpV327
-    ? function rejectMissingMainDispatch() {
-      throw Object.assign(new Error('关闭观察缺少该模块自己的 Main 派发绑定'), {
-        code: 'CARRIER_DISPATCH_BINDING_REQUIRED'
-      });
-    }
-    : options.beforeCarrierDispatch;
+  // v3.2.20：派发前 hook 仅由调用方显式提供（原 BizOP 关闭观察的缺省拒绝随业务OP下线移除）。
+  const fallbackDispatch = options.beforeCarrierDispatch;
   const withDispatch = fallbackDispatch === undefined ? descriptors : descriptors.map((descriptor) => ({
     ...descriptor,
     mainBindings: descriptor.mainBindings.map((binding) => ({
@@ -195,17 +176,15 @@ function createApplicationRecoveryComposition(recoveryContext) {
 
 function runtimeOptionsForGeneration(options) {
   const next = { ...options };
-  for (const key of ['bizOpV327', 'duplicateStartupGate', 'workerDurableCoordinator',
-    'reconFixJpmDatabasePath', 'pendingDatabasePath', 'mainDatabasePath', 'userDataDir']) {
+  for (const key of ['duplicateStartupGate', 'workerDurableCoordinator',
+    'reconFixJpmDatabasePath']) {
     if (typeof options[`${key}Provider`] === 'function') next[key] = options[`${key}Provider`]();
   }
   const executionDescriptors = composeExecutionDescriptors(next);
   return {
     ...next,
     executionDescriptors,
-    carrierClosureActionKeys: [...new Set([
-      ...(next.carrierClosureActionKeys || []), ...(next.bizOpV327 ? next.bizOpV327.actionKeys : [])
-    ])],
+    carrierClosureActionKeys: [...new Set(next.carrierClosureActionKeys || [])],
     beforeCarrierDispatch: next.beforeCarrierDispatch,
     createEvidenceSettlementAdmission: createReconFixEvidenceSettlementAdmission,
     createMemoryAdmission: createProductionMemoryPolicy

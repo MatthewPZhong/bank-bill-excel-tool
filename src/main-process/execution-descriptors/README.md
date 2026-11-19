@@ -4,11 +4,11 @@
 
 | 入口 | 职责与消费者 |
 | --- | --- |
-| `composeExecutionDescriptors(mainContext)` | 显式调用九个领域 factory、mature 与 legacy 注册，编译后无条件执行私有 action/task authority 与固定批准 capability/production strategy 基线校验，catalog 也独立接受同一基线检查；不接收 descriptor override 或动态发现目录。 |
+| `composeExecutionDescriptors(mainContext)` | 显式调用八个领域 factory 与 legacy 注册，编译后无条件执行私有 action/task authority 与固定批准 capability/production strategy 基线校验，catalog 也独立接受同一基线检查；不接收 descriptor override 或动态发现目录。 |
 | `createBackgroundExecutionRuntime` / `createNonProductionBackgroundExecutionRuntime` | 先构造本代描述与 Main authority，再交给公共 runtime。非生产隔离 governor 仍使用原受限入口。 |
 | `createBackgroundExecutionRuntimeManager` | 每代重新读取 Main providers；生产策略查询使用纯 catalog，不隐式创建 generation；原 drain/exit 屏障保持。 |
-| `createTaskPolicyRegistry` | 显式汇总所有领域与 legacy Archive policies，再交给公共 `archive-center/task-policy-registry.js`。供 Main、operation-tracker、BizOP 与测试读取。 |
-| `createExecutionTaskComposition` | 消费 G2 注册快照，在 descriptor 中汇总后交给原 task adapter / terminal route registries。134 个受控 task 必须双向闭合，exclude 不得绑定。 |
+| `createTaskPolicyRegistry` | 显式汇总所有领域与 legacy Archive policies，再交给公共 `archive-center/task-policy-registry.js`。供 Main、operation-tracker 与测试读取。 |
+| `createExecutionTaskComposition` | 消费 G2 注册快照，在 descriptor 中汇总后交给原 task adapter / terminal route registries。100 个受控 task 必须双向闭合，exclude 不得绑定。 |
 | `createApplicationRecoveryComposition` | 消费 G1 注册快照；按 G1 的固定顺序重排，传回原 G1 composition/coordinator。不会按 descriptor 枚举顺序执行恢复。 |
 | `validateProductionExecutionDescriptors` | 独立生产校验面，由正式 composition 无条件调用；非生产测试 action 即使自报 production=false 也不能进入生产 inventory。 |
 | [policy-catalog.js](policy-catalog.js) | 只读 `BACKGROUND_EXECUTION_POLICIES` 与 production 查询；只引用纯 policy 文件，不运行 descriptor 工厂。 |
@@ -16,23 +16,25 @@
 
 ## 领域归属与资源
 
-Toolbox（含 rows）、NewAccount、PreFund、FundRecon、Duplicate、ReconFix、VCC、Position、BizOP v327 在各自 `execution-descriptor.js` 绑定本域已有 policy、entry、validator、topology、Main input binding。归档规则由同域 `archive-task-policies.js` 提供。
+Toolbox（含 rows）、NewAccount、PreFund、FundRecon、Duplicate、ReconFix、VCC、Position 在各自 `execution-descriptor.js` 绑定本域已有 policy、entry、validator、topology、Main input binding。归档规则由同域 `archive-task-policies.js` 提供。
 
-[mature-adapters.js](mature-adapters.js) 只汇总原 Pending / 旧 BizOP / Acquiring 的兼容能力与 Archive hooks；Acquiring 继续调用已经集成的 G6 公开工厂。[legacy-task-policies.js](legacy-task-policies.js) 保留 Statement、Linked、BankBU、VCC OP 和 exclude inventory，不伪造 runtime policy。
+[legacy-task-policies.js](legacy-task-policies.js) 保留 Statement、Linked、VCC OP 和 exclude inventory，不伪造 runtime policy；它还登记应用恢复的 platform-scan participant，以及已下线模块遗留终态 route `pending-run` / `biz-op-run`（只收口任务终态，见 [retired-terminal-routes.js](../archive-center/retired-terminal-routes.js)）。
+
+v3.2.20 下线业务OP数据核对（旧版与 v327）、月度Pending数据核对、收单单据币种校验、月度银行对账单BU回填校验后，原 `mature-adapters.js`、BizOP v327 descriptor 及其 action / Archive policy 一并删除；历史数据保留不动，升级前遗留记录的处理见 [TechDoc](../../../changes/v3.2.20/feat/retire-recon-modules/techdoc.md)。
 
 五个真实 registry 是 entry、adapter、validator、resourceProfile、topology；精确 14 个 static bucket 与原 policy registry 的名字一致。只有 NewAccount generation 注册动态 estimator。其余 action 的 `resources.profile` binding 为 undefined，预算仍来自 `policy.resources.phase`；compound 继续消费原 planner。没有泛用 estimator、默认 worker 或缺失能力 fallback。
 
-Main input binding 必须逐 action 明确声明。无特别策略的 action 使用显式 passthrough；受保护的 database/assets/provider 来自 Main 本代上下文，原领域 override 错误码保持。通用 Main 派发回调只补充没有领域 beforeDispatch 的条目，不能覆盖 BizOP 自身 authority。compiler 的 `getBeforeCarrierDispatchForAction(actionKey)` 返回该 action 的真实函数或 null；Supervisor 在每次任务开始时固定它。完全未注入 BizOP/通用派发授权时，非生产 closure 无 hook 保持原观察路径；若已注入 BizOP 授权，composition 对其他缺自身 hook 的 action 显式保留旧拒绝函数，非生产也拒绝。production closure 无 hook 始终在载体前拒绝，其他 action 的 hook 不能代替。原单函数 Supervisor 调用方式及严格聚合 `beforeCarrierDispatch` 接口保留。
+Main input binding 必须逐 action 明确声明。无特别策略的 action 使用显式 passthrough；受保护的 database/assets/provider 来自 Main 本代上下文，原领域 override 错误码保持。通用 Main 派发回调只补充没有领域 beforeDispatch 的条目，不能覆盖领域自身 authority。compiler 的 `getBeforeCarrierDispatchForAction(actionKey)` 返回该 action 的真实函数或 null；Supervisor 在每次任务开始时固定它。未注入通用派发回调时，非生产 closure 无 hook 保持原观察路径；production closure 无 hook 始终在载体前拒绝，其他 action 的 hook 不能代替。原先"注入 BizOP 授权后其他缺 hook 的非生产 action 也拒绝"的混合门禁只服务 BizOP 关闭观察，已随业务OP下线移除。原单函数 Supervisor 调用方式及严格聚合 `beforeCarrierDispatch` 接口保留。
 
 ## 所有权与允许依赖
 
-公共 runtime、execution-policy registry、Archive registry/common 和 descriptor contract 只依赖机制模块；它们不得 import composition、policy-catalog、领域实现，也不得借公共 helper 间接回到领域。精确跨域装配入口是本目录的 composition、policy-catalog、mature-adapters、legacy-task-policies。新增域只能绑定本域实现。
+公共 runtime、execution-policy registry、Archive registry/common 和 descriptor contract 只依赖机制模块；它们不得 import composition、policy-catalog、领域实现，也不得借公共 helper 间接回到领域。精确跨域装配入口是本目录的 composition、policy-catalog、legacy-task-policies。新增域只能绑定本域实现。
 
 compiler 校验 exact shape、重复、getter/Proxy、静态引用和真实 API，再执行原五 registry 与原 policy registry 的 freeze。它复制并冻结所拥有的数据，保留函数闭包，不冻结外部 owner。compiler 可供独立测试 harness 使用，编译通过不授予生产 action 权限；生产 composition 另外执行私有 authority 与独立 inventory 检查。
 
-批准的 runtime/legacy-only/canary 能力及有效生产策略保存在 [approved-execution-baseline.json](../background-execution/approved-execution-baseline.json)，来源是固定 release `8b12a6d5` 的旧 runtime 导出，并与原 `11086a3c` fixture 逐 policy 核对。纯 [批准基线校验器](../background-execution/approved-execution-baseline.js) 私有冻结该快照，分别核验 compiled 与 catalog 的完整 67-action 投影，不允许相互自证，也不接收 baseline override。该投影检查注册状态、mode/adapter/commit/artifact/resource profile 与有效 production 策略；phase 预算、entry/validator/topology 和取消行为仍由原 registry 及固定行为测试验证，不能把投影检查称为全部业务行为验证。
+批准的 runtime/legacy-only/canary 能力及有效生产策略保存在 [approved-execution-baseline.json](../background-execution/approved-execution-baseline.json)，来源是固定 release `8b12a6d5` 的旧 runtime 导出，并与原 `11086a3c` fixture 逐 policy 核对。纯 [批准基线校验器](../background-execution/approved-execution-baseline.js) 私有冻结该快照，分别核验 compiled 与 catalog 的完整 39-action 投影（v3.2.20 起，原 67 项扣除已下线模块的 28 项，其余条目逐条不变），不允许相互自证，也不接收 baseline override。该投影检查注册状态、mode/adapter/commit/artifact/resource profile 与有效 production 策略；phase 预算、entry/validator/topology 和取消行为仍由原 registry 及固定行为测试验证，不能把投影检查称为全部业务行为验证。
 
-G1/G2 各自的注册快照接口只提取原 registrations，执行机制仍唯一归它们。详见 [应用恢复说明](../application-recovery/README.md)、[任务适配说明](../task-adapters/README.md)。publication owner 仍只有 G1 注册的 `biz-op-v327` 与 `archive-publication`；`toolbox-vcc-publications` 是 participant id，不是新的 publication owner。
+G1/G2 各自的注册快照接口只提取原 registrations，执行机制仍唯一归它们。详见 [应用恢复说明](../application-recovery/README.md)、[任务适配说明](../task-adapters/README.md)。publication owner 只有 G1 注册的 `archive-publication`（`biz-op-v327` owner 随业务OP下线移除）；`toolbox-vcc-publications` 是 participant id，不是新的 publication owner。
 
 ## 新增或迁移 action
 
@@ -47,12 +49,12 @@ runtime 旧路径的 `BACKGROUND_EXECUTION_POLICIES`/production 查询转发已�
 ## 验证与边界状态
 
 - [descriptor 合同](../../../tests/unit/main-process/execution-descriptor-contract.test.js)：exact shape、重复、缺能力、恶意输入、冻结与原 registry 消费。
-- [基线与资源](../../../tests/unit/main-process/execution-descriptor-resource-profiles.test.js)、[Main 绑定及代际](../../../tests/unit/main-process/execution-descriptor-equivalence.test.js)：49 action 映射、静态 fallback、同步 estimator、正常注入/拒绝与 provider 重读。
-- [Archive 行为](../../../tests/unit/main-process/execution-descriptor-archive-baseline.test.js)：268 channel 及固定分类/flow/metadata/lineage 样例。
+- [基线与资源](../../../tests/unit/main-process/execution-descriptor-resource-profiles.test.js)、[Main 绑定及代际](../../../tests/unit/main-process/execution-descriptor-equivalence.test.js)：固定 fixture 扣除已下线 action 后的 25 action 映射、静态 fallback、同步 estimator、正常注入/拒绝与 provider 重读。
+- [Archive 行为](../../../tests/unit/main-process/execution-descriptor-archive-baseline.test.js)：固定 268 channel 扣除已下线前缀后的 194 channel 及固定分类/flow/metadata/lineage 样例。
 - [G1/G2 装配及公共依赖](../../../tests/unit/main-process/execution-descriptor-composition.test.js)、[独立扩展与生产拒绝](../../../tests/unit/main-process/execution-descriptor-extension.test.js)。
 - [独立批准基线负例](../../../tests/unit/main-process/execution-descriptor-production-baseline.test.js)：已知 action 漏注册、未批准启用、legacy 增补、等数替换、catalog 独立/同步漂移与生成器零写入。
-- [派发兼容](../../../tests/unit/main-process/execution-descriptor-dispatch-compatibility.test.js)：非生产 null hook、实际已启用的生产缺 hook、混合列表与本域 authority。
-- [真实载体集成](../../../scripts/integration/execution-descriptor-governance.js)：隔离临时数据的 thread、inline、service、adapter；完整恢复另沿用 G1/G2 组合测试。
+- [派发兼容](../../../tests/unit/main-process/execution-descriptor-dispatch-compatibility.test.js)：非生产 null hook、实际已启用的生产缺 hook、已配置 hook 的调用顺序与真实缺授权错误。
+- [真实载体集成](../../../scripts/integration/execution-descriptor-governance.js)：隔离临时数据的 thread、inline、service；完整恢复另沿用 G1/G2 组合测试。
 
 G8 尚未纳入本 worktree，机器配置未激活、没有增加例外。上述本地传递依赖检查验证现行公共入口；G8 集成时据此登记 `ARCH-DESCRIPTOR-COMPOSITION`，不能把本地测试说成机器配置已 active。人工 Windows、Electron GUI、Excel/WPS 与安装包验收独立记录。
 

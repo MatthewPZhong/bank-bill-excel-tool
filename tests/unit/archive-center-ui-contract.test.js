@@ -210,7 +210,8 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
     const modulesStart = renderer.indexOf('const MODULES = Object.freeze({');
     const modulesEnd = renderer.indexOf('const RENDERER_STARTUP_MARKS', modulesStart);
     const modulesSource = renderer.slice(modulesStart, modulesEnd);
-    assert.equal((modulesSource.match(/\n\s+id:\s*'[^']+'/g) || []).length, 13);
+    // v3.2.20：四个对账模块下线，主模块清单 13 → 9。
+    assert.equal((modulesSource.match(/\n\s+id:\s*'[^']+'/g) || []).length, 9);
     assert.doesNotMatch(modulesSource, /id:\s*'archive-center'/);
     const archiveModulesStart = renderer.indexOf('const archiveModules = new Map(');
     const archiveModulesEnd = renderer.indexOf('const archiveState = {', archiveModulesStart);
@@ -687,7 +688,7 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
     const initStart = main.indexOf('async function initializeApplication');
     const initEnd = main.indexOf('if (hasSingleInstanceLock) app.whenReady()', initStart);
     const initFlow = main.slice(initStart, initEnd);
-    const pendingDbIndex = initFlow.indexOf("pendingDb = openPendingDb(app.getPath('userData'))");
+    // v3.2.20：月度Pending数据核对下线，启动不再打开 Pending 库（原「Pending 库迁移先于 Archive owner recovery」随之移除）。
     const createIndex = initFlow.indexOf('initializeArchiveCenter()');
     const recoveryIndex = initFlow.indexOf(
       'await archiveCenterInitializationPromise',
@@ -695,16 +696,12 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
     );
     const postSetupIndex = initFlow.indexOf('runStartupPostSetup()', recoveryIndex);
     assert.ok(
-      pendingDbIndex >= 0
-        && createIndex > pendingDbIndex
+      createIndex >= 0
         && recoveryIndex > createIndex
         && postSetupIndex > recoveryIndex,
-      'Pending DB migrations 必须先于 Archive owner recovery，且启动只保留一个 open 入口'
+      'Archive owner recovery 完成后才执行启动后置步骤'
     );
-    assert.equal(
-      (initFlow.match(/pendingDb = openPendingDb\(app\.getPath\('userData'\)\)/g) || []).length,
-      1
-    );
+    assert.doesNotMatch(main, /openPendingDb\(/);
     const ast = require('espree').parse(main, {
       ecmaVersion: 2022,
       sourceType: 'script',

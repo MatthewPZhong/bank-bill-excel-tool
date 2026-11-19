@@ -75,13 +75,13 @@ async function run() {
     }],
     ['相对路径、未知资源与未知版本不落盘', async () => {
       const before = fs.readdirSync(temporary).length;
-      assert.deepEqual(await service.exportVersion({ resourceId: 'pending', targetPath: 'Pending.xlsx' }), { status: 'failed', message: '保存位置无效' });
+      assert.deepEqual(await service.exportVersion({ resourceId: 'fund-type-enum', targetPath: 'FundType.xlsx' }), { status: 'failed', message: '保存位置无效' });
       assert.deepEqual(await service.exportVersion({ resourceId: 'missing', targetPath: path.join(temporary, 'a.xlsx') }), { status: 'failed', message: '模板不存在' });
-      assert.deepEqual(await service.exportVersion({ resourceId: 'pending', versionId: 'v9', targetPath: path.join(temporary, 'b.xlsx') }), { status: 'failed', message: '版本不存在' });
+      assert.deepEqual(await service.exportVersion({ resourceId: 'fund-type-enum', versionId: 'v9', targetPath: path.join(temporary, 'b.xlsx') }), { status: 'failed', message: '版本不存在' });
       assert.equal(fs.readdirSync(temporary).length, before);
     }],
     ['目标目录不存在时返回失败结果而不抛错', async () => {
-      const result = await service.exportVersion({ resourceId: 'pending', targetPath: path.join(temporary, 'missing-dir', 'Pending.xlsx') });
+      const result = await service.exportVersion({ resourceId: 'fund-type-enum', targetPath: path.join(temporary, 'missing-dir', 'FundType.xlsx') });
       assert.equal(result.status, 'failed');
       assert.match(result.message, /^保存失败：/);
     }]

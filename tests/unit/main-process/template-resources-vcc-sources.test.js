@@ -127,11 +127,3 @@ test('恢复默认会与同组另一张表当前结构相同时不能恢复，�
   assert.equal((await env.service.setCurrentVersion({ resourceId: 'vcc-recharge-refund', versionId: 'v1' })).status, 'success');
   assert.equal(await resolveVccSourceStructures(env.service), null);
 });
-
-test('VCC_移除归档Pending账单与 Pending 对账「移除归档Pending账单」互相标注同一系统导出', async (t) => {
-  const env = setup(t);
-  for (const [id, twin] of [['vcc-removed-pending', 'removed-pending'], ['removed-pending', 'vcc-removed-pending']]) {
-    const { resource } = await env.service.get(id);
-    assert.deepEqual([resource.twin, resource.twinNote], [twin, '版本各自独立，需分别导入']);
-  }
-});

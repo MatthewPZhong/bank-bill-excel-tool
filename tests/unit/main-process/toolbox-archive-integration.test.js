@@ -149,7 +149,7 @@ function buildToolboxRecoveryBatchIdsReader(fsImpl = fs) {
 
 function buildPositionPendingRecoveryOwner({ database, getService, recoveryPromise }) {
   const start = mainSource.indexOf('async function recoverPositionPendingBeforeInterruptedSweep()');
-  const end = mainSource.indexOf('\nfunction recoverPendingRunsBeforeInterruptedSweep()', start);
+  const end = mainSource.indexOf('\nfunction recoverPreFundRunsBeforeInterruptedSweep()', start);
   assert.ok(start >= 0 && end > start, '应定位 Position pending owner recovery');
   const source = mainSource.slice(start, end);
   return Function(

@@ -3,14 +3,14 @@
 //   覆盖 8 个 case：
 //     1. 首次 migration — channels 表 + scenarios.channel_id + backfill + 标志位 + 备份
 //     2. 重启幂等 — skipped + 数据零变化
-//     3. N5 + N4 共存路径 — 两个标志位都存在 + bill_imports raw_json 9 字段 + channels 正确
+//     3. 完整 AppDatabase.init 路径 — N5 标志位 + channels 正确；v3.2.20 起新装库不再建收单（N4）表
 //     4. 备份失败 graceful — backup-failed + schema 未变 + 标志位不写
 //     5. migration 失败回滚 — ROLLBACK + schema 回到迁移前 + 标志位不写
 //     6. 「通用」内置 INSERT OR IGNORE 幂等 — UNIQUE 约束生效
 //     7. backfill 完整性 — 5+ scenarios 全部 channel_id=1
 //     8. 跨 N5 调度依赖 — channels-repository.findByNameAndLocation('通用','通用') 命中
 //
-// 范式参考：scripts/integration/acquiring-bill-currency-n4-migration.js
+// 范式参考：原 scripts/integration/acquiring-bill-currency-n4-migration.js（v3.2.20 随收单单据币种校验下线删除）
 //
 // 用法：node scripts/integration/v2.1.9-n5-migration.js
 //      npm run test:integration
@@ -172,23 +172,23 @@ async function run() {
   }
 
   // ============================================================
-  // Case 3：N5 + N4 共存路径 — v2.1.8 已升 N4 的老库再升 N5
-  //   bootstrap v2.1.8 schema + 跑 N4 migration + 跑 N5
-  //   断言两个标志位都存在 + raw_json 9 字段 + channels 表都正确
+  // Case 3：完整 AppDatabase.init 路径
+  //   原「N5 + N4 共存」：v3.2.20 收单单据币种校验下线，N4（收单 raw_json 瘦身）迁移不再执行；
+  //   断言 N5 标志位 + channels 正确，且新装库不建收单表、不写 N4 标志位。
   // ============================================================
   {
     const tmpdir = setupTmpDir('n5-mig-c3-');
     const dbPath = path.join(tmpdir, 'tool-data.sqlite');
     try {
-      // 用 AppDatabase 跑完整 init —— 此路径走完所有 migrations（N4 + N5 共存验证最直接）
+      // 用 AppDatabase 跑完整 init —— 此路径走完所有 migrations
       const appDb = new AppDatabase(dbPath);
       appDb.init();
 
-      // 验证 N4 标志位
+      // v3.2.20：收单 N4 迁移不再执行
       const n4Marker = appDb.db.prepare(
         "SELECT setting_value FROM app_settings WHERE setting_key='acquiring_bill_raw_json_v2_migrated'"
       ).get();
-      assertEq(n4Marker && n4Marker.setting_value, 'true', 'Case3.N4 标志位 acquiring_bill_raw_json_v2_migrated=true');
+      assertEq(n4Marker, undefined, 'Case3.新装库不写收单 N4 标志位');
 
       // 验证 N5 标志位
       const n5Marker = appDb.db.prepare(
@@ -207,9 +207,9 @@ async function run() {
       assertTrue(scenarios.length >= 3, 'Case3.scenarios >= 3 行');
       assertTrue(scenarios.every((r) => r.channel_id === 1), 'Case3.所有 scenarios.channel_id=1');
 
-      // 验证 acquiring_bill_currency_bill_imports 表存在（N4 依赖）
+      // v3.2.20：新装库不再建已下线模块的表
       const billTable = appDb.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='acquiring_bill_currency_bill_imports'").get();
-      assertTrue(!!billTable, 'Case3.acquiring_bill_currency_bill_imports 表已建（N4 依赖）');
+      assertTrue(!billTable, 'Case3.新装库不建 acquiring_bill_currency_bill_imports');
 
       try { appDb.db.close(); } catch (_) {}
     } finally {

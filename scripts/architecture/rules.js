@@ -62,7 +62,10 @@ function evaluateRules(scan, config, allowlist, { root = process.cwd() } = {}) {
   validateBoundaries(config); validateAllowlist(allowlist);
   if (config.factBaseline !== allowlist.factBaseline) throw new Error('边界与历史例外的固定事实基线不一致');
   const violations = []; const files = new Set(scan.files || []); const edges = [...(scan.edges || [])];
-  const sites = (scan.sites || []).flatMap(site => site.invocations ? site.invocations.map(invocation => ({ ...site, ...invocation })) : [site]); const allBoundaries = config.boundaries;
+  const sites = (scan.sites || []).flatMap(site => site.invocations ? site.invocations.map(invocation => ({ ...site, ...invocation })) : [site]);
+  // 退役边界不参与常规规则（其源码已整体删除）；只校验已删除路径没有复活。
+  const allBoundaries = config.boundaries.filter(b => b.state !== 'retired');
+  const retiredBoundaryConfigs = config.boundaries.filter(b => b.state === 'retired');
   const byFrom = new Map();
   for (const e of edges) { if (!byFrom.has(e.from)) byFrom.set(e.from, []); byFrom.get(e.from).push(e); }
   function emit(rule, boundary, value, message, dependencyPath) {
@@ -73,7 +76,15 @@ function evaluateRules(scan, config, allowlist, { root = process.cwd() } = {}) {
       ...(value.kind ? { kind: value.kind } : {}), ...(value.importedNames ? { importedNames: value.importedNames } : {}) });
   }
   const exists = relative => { try { const st = fs.lstatSync(path.join(root, relative)); return st.isFile() && !st.isSymbolicLink(); } catch { return false; } };
-  const activeBoundaries = []; const pendingBoundaries = []; const partialBoundaries = [];
+  const activeBoundaries = []; const pendingBoundaries = []; const partialBoundaries = []; const retiredBoundaries = [];
+  for (const boundary of retiredBoundaryConfigs) {
+    retiredBoundaries.push(boundary.id);
+    if (!exists(boundary.retirement.designDoc)) emit('ARCH-STATIC-COVERAGE', boundary, { from: boundary.retirement.designDoc }, '退役边界缺少设计依据文档');
+    for (const removed of boundary.retirement.removedPaths) {
+      if (files.has(removed) || exists(removed)) emit('ARCH-STATIC-COVERAGE', boundary, { from: removed }, '已退役边界的源码不得复活');
+      for (const edge of edges) if (edge.to === removed) emit('ARCH-STATIC-COVERAGE', boundary, edge, '生产代码不得依赖已退役边界的源码');
+    }
+  }
   function inspectExports(file) {
     const analysis = scan.analyses && scan.analyses.get(file); const exported = new Map(); const functions = new Map();
     if (!analysis) return { exported, functions };
@@ -424,6 +435,7 @@ function evaluateRules(scan, config, allowlist, { root = process.cwd() } = {}) {
   const unique = values => sorted([...new Map(values.map(v => [JSON.stringify(v), v])).values()]);
   return { violations: unique(remaining), matchedExceptions: unique(matchedExceptions),
     staleExceptions: sorted(allowlist.exceptions.filter(e => !hits.has(e.id)).map(e => ({ id: e.id, rule: e.rule, from: e.from, message: '旧位置已无匹配，请在同一治理变更删除例外' }))),
-    activeBoundaries: activeBoundaries.sort(), pendingBoundaries: pendingBoundaries.sort(), partialBoundaries: partialBoundaries.sort() };
+    activeBoundaries: activeBoundaries.sort(), pendingBoundaries: pendingBoundaries.sort(), partialBoundaries: partialBoundaries.sort(),
+    retiredBoundaries: retiredBoundaries.sort() };
 }
 module.exports = { RULES, evaluateRules, cycles, validateBoundaries, validateAllowlist };

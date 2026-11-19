@@ -77,21 +77,16 @@ function runParent() {
 function measurePage(expectedScaleFactor) {
   const statusTargets = [
     ['statementModulePanel', 'statusBox'],
-    ['pendingModulePanel', 'pendingStatusBox'],
-    ['bizOpReconModulePanel', 'bizOpReconStatusBox'],
-    ['bankBuReconModulePanel', 'bankBuReconStatusBox'],
     ['duplicateInboundMatchModulePanel', 'duplicateInboundMatchStatusBox'],
     ['vccOpCalcModulePanel', 'vccOpCalcStatusBox'],
     ['vccFinancialOpModulePanel', 'vccFinancialOpStatusBox'],
     ['bankStatementModulePanel', 'bankStatementStatusBox'],
     ['preFundReconciliationModulePanel', 'preFundReconciliationStatusBox'],
     ['reconIdFixModulePanel', 'reconIdFixStatusBox'],
-    ['positionReconciliationModulePanel', 'positionReconciliationStatusBox'],
-    ['acquiringBillCurrencyModulePanel', 'acquiringBillCurrencyStatusBox']
+    ['positionReconciliationModulePanel', 'positionReconciliationStatusBox']
   ];
   const controlIds = [
     'templateSelect',
-    'bizOpReconBuSelect',
     'preFundReconciliationScenarioSelect',
     'reconIdFixBillCategorySelect',
     'reconIdFixScenarioSelect',

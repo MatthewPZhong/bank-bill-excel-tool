@@ -21,6 +21,27 @@ function readDefaultRetentionDays(database, fallback = DEFAULT_RETENTION_DAYS) {
   return ALLOWED_RETENTION_DAYS.has(parsed) ? parsed : fallback;
 }
 
+// v3.2.20 下线的四个模块：其按模块保留期设置不再展示或生效，修改其他模块时原样保留，回退旧版后仍按原值生效。
+const RETIRED_SCOPE_IDS = Object.freeze([
+  'pending-reconciliation', 'bank-bu-recon', 'biz-op-recon', 'acquiring-bill-currency'
+]);
+
+function retainedRetiredOverrides(database) {
+  let stored;
+  try {
+    stored = JSON.parse(database.getSetting(ARCHIVE_MODULE_RETENTION_SETTING_KEY));
+  } catch (_error) {
+    return {};
+  }
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return {};
+  const result = {};
+  for (const id of RETIRED_SCOPE_IDS) {
+    if (Object.prototype.hasOwnProperty.call(stored, id)
+        && (stored[id] === null || ALLOWED_RETENTION_DAYS.has(stored[id]))) result[id] = stored[id];
+  }
+  return result;
+}
+
 function readRetentionDaysByModule(database) {
   const raw = database.getSetting(ARCHIVE_MODULE_RETENTION_SETTING_KEY);
   let stored;
@@ -58,7 +79,8 @@ function setModuleRetentionDays(database, payload = {}) {
   const overrides = readRetentionDaysByModule(database);
   if (value === 'inherit') delete overrides[scope.id];
   else overrides[scope.id] = value;
-  database.setSetting(ARCHIVE_MODULE_RETENTION_SETTING_KEY, JSON.stringify(overrides));
+  database.setSetting(ARCHIVE_MODULE_RETENTION_SETTING_KEY,
+    JSON.stringify({ ...overrides, ...retainedRetiredOverrides(database) }));
   return overrides;
 }
 

@@ -8,7 +8,7 @@ const path = require('node:path');
 const JSZip = require('jszip');
 const XLSX = require('xlsx');
 
-const { BILL_HEADERS } = require('../../../../src/backend/acquiring-bill-currency-db/columns');
+const { BILL_HEADERS } = require('../../../../src/main-process/duplicate-inbound-match/document-statement-reader');
 const {
   readXlsxSheetNames,
   streamDocumentStatement

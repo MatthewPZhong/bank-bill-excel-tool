@@ -18,16 +18,6 @@ function preparedExportPlan(invocation) {
   return requiredPreparedFilePlan(invocation);
 }
 
-function preparedWorkerPlan(invocation) {
-  const resolver = invocation.prepared && invocation.prepared.filePlanResolver;
-  if (typeof resolver !== 'function') {
-    const error = new TypeError(`worker file action 缺少 TaskRun-dependent FilePlan resolver：${invocation.channel || ''}`);
-    error.code = 'ARCHIVE_FILE_PLAN_INVALID';
-    throw error;
-  }
-  return resolver({ taskRun: invocation.taskRun });
-}
-
 // deferred 动作的初始计划由入口 prepare 显式给出空的 deferred plan；
 // 真实输出在业务确认非空后经 ensureFileBatch(promotionManifest) 晋升，不依赖 Task Run。
 function preparedDeferredPlan(invocation) {
@@ -38,17 +28,6 @@ function preparedDeferredPlan(invocation) {
     throw error;
   }
   return plan;
-}
-
-function persistedResumePlan(invocation) {
-  const prepared = invocation.prepared || {};
-  if (typeof prepared.assertPreRecoveryFresh === 'function') {
-    prepared.assertPreRecoveryFresh();
-  }
-  if (typeof prepared.filePlanResolver === 'function') {
-    return prepared.filePlanResolver({ taskRun: invocation.taskRun });
-  }
-  return requiredPreparedFilePlan(invocation);
 }
 
 function preparedSessionPlan(invocation) {
@@ -73,17 +52,13 @@ const FILE_PLAN_RESOLVERS_BY_SOURCE_KIND = Object.freeze({
   'prepare-bundle-input': preparedPickerPlan,
   'prepare-retry-token-inputs': preparedPickerPlan,
   'inspected-inputs': preparedPickerPlan,
-  'normalized-submission-inputs': preparedPickerPlan,
   'prepare-inputs-and-output': preparedPickerPlan,
   'prepare-source-and-concrete-outputs': preparedPickerPlan,
   'prepare-save-target': preparedExportPlan,
   'prepare-export-plan': preparedExportPlan,
   'prepare-target-snapshot': preparedExportPlan,
   'prepare-multi-target-snapshots': preparedExportPlan,
-  'pre-worker-deterministic-outputs': preparedWorkerPlan,
-  'persisted-resume-outputs': persistedResumePlan,
   'statement-session-inputs': preparedSessionPlan,
-  'payload-pending-and-bank-inputs': preparedPayloadPlan,
   'payload-input-paths': preparedPayloadPlan,
   'prepare-selected-and-staging': preparedPayloadPlan,
   'staged-token-inputs': preparedPayloadPlan,
@@ -117,26 +92,9 @@ function deferred(sourceKind) {
 // 每个 action 都是 literal inventory；sourceKind 是 prepare 接线/测试的审计标签，
 // 不参与运行时路径猜测。
 const TASK_FILE_PLAN_DEFINITIONS = Object.freeze({
-  'bizOpReconV327:import': eager('prepare-selected-inputs', 'operation'),
-  'bizOpReconV327:export:op-raw': eager('prepare-export-plan', 'operation'),
-  'bizOpReconV327:export:flow-raw': eager('prepare-export-plan', 'operation'),
-  'bizOpReconV327:export:op-check': eager('prepare-export-plan', 'operation'),
-  'bizOpReconV327:export:flow-check': eager('prepare-export-plan', 'operation'),
-  'bizOpReconV327:export:result-full': eager('prepare-export-plan', 'operation'),
-  'bizOpReconV327:export:result-diff': eager('prepare-export-plan', 'operation'),
-  'bizOpReconV327:export:errors': eager('prepare-export-plan', 'operation'),
-
-  'acquiringBillCurrency:importBill': eager('prepare-selected-inputs', 'batch'),
-  'acquiringBillCurrency:importFlow': eager('prepare-selected-inputs', 'batch'),
-  'acquiringBillCurrency:run': eager('pre-worker-deterministic-outputs', 'batch'),
-  'acquiringBillCurrency:run:resume': eager('persisted-resume-outputs', 'batch'),
-  'acquiringBillCurrency:export': eager('prepare-save-target'),
   'bank-statement:import': eager('prepare-selected-inputs'),
   'bank-statement:batch-import': eager('prepare-selected-inputs'),
   'bank-statement:export': eager('prepare-export-plan'),
-  'bankBuRecon:import:run': eager('payload-pending-and-bank-inputs'),
-  'bankBuRecon:export:single': eager('prepare-save-target'),
-  'bankBuRecon:export:aggregate': eager('prepare-save-target'),
   'big-account:import-bank-info': eager('prepare-selected-inputs'),
   'file:import': eager('prepare-selected-inputs'),
   'file:complete-big-account-selection': eager('statement-session-inputs'),
@@ -154,17 +112,8 @@ const TASK_FILE_PLAN_DEFINITIONS = Object.freeze({
   'scenarios:export-bundle': eager('prepare-save-target'),
   'gateway-recon:import': eager('prepare-selected-inputs'),
   'linked-table:import': eager('prepare-selected-inputs'),
-  'bizOpRecon:import:run-biz-op': eager('payload-input-paths', 'batch'),
-  'bizOpRecon:import:run-flow': eager('payload-input-paths', 'batch'),
-  'bizOpRecon:export:date': eager('prepare-save-target'),
-  'bizOpRecon:export:date-range': eager('prepare-save-target'),
   'duplicate-inbound-match:import-files': eager('prepare-selected-inputs'),
   'duplicate-inbound-match:export': eager('prepare-save-target'),
-  'pending:import:start': eager('normalized-submission-inputs', 'batch'),
-  'pending:removed:import': eager('normalized-submission-inputs'),
-  'pending:diff:export-single': eager('prepare-save-target'),
-  'pending:diff:export-aggregate': eager('prepare-save-target'),
-  'pending:error:export-report': eager('prepare-save-target'),
   'position-reconciliation:bank:apply-import': eager('staged-token-inputs', 'batch'),
   'position-reconciliation:source:prepare-import': eager('prepare-selected-and-staging', 'batch'),
   'position-reconciliation:source:apply-import': eager('staged-token-inputs', 'batch'),

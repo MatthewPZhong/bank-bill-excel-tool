@@ -298,14 +298,14 @@ contextBridge.exposeInMainWorld('desktopApi', {
     c3CandidateCount: () => ipcRenderer.invoke('bank-statement:c3-candidate-count'),
     // v3.0.0 需求3：退款候选预检 — 当前导入银行对账单中 FundType=Ach Return 的候选行数
     refundCandidateCount: () => ipcRenderer.invoke('bank-statement:refund-candidate-count'),
-    // v3.0.8 需求3（运行不阻塞）：订阅 run 进度事件（仿 acquiringBillCurrency.onRunProgress）。
+    // v3.0.8 需求3（运行不阻塞）：订阅 run 进度事件。
     //   返回 unsubscribe 函数；renderer 必须在 finally 调用避免 listener 内存泄漏。
     onRunProgress: (listener) => {
       const wrapped = (_event, ev) => listener(ev);
       ipcRenderer.on('bank-statement:run:progress', wrapped);
       return () => ipcRenderer.removeListener('bank-statement:run:progress', wrapped);
     },
-    // v3.0.11 需求3（批1 · 导入不阻塞）：订阅导入进度事件（仿 acquiringBillCurrency.onImportProgress，换通道名）。
+    // v3.0.11 需求3（批1 · 导入不阻塞）：订阅导入进度事件。
     //   返回 unsubscribe 函数；renderer 必须在 finally 调用避免 listener 内存泄漏。
     onImportProgress: (listener) => {
       const wrapped = (_event, ev) => listener(ev);
@@ -545,99 +545,6 @@ contextBridge.exposeInMainWorld('desktopApi', {
     generate: (payload) => ipcRenderer.invoke('new-account:generate', payload),
     exportFile: () => ipcRenderer.invoke('new-account:export')
   },
-  pending: {
-    getColumns: () => ipcRenderer.invoke('pending:columns'),
-    getRule: () => ipcRenderer.invoke('pending:rule:get'),
-    saveRule: (payload) => ipcRenderer.invoke('pending:rule:save', payload),
-    listMonths: () => ipcRenderer.invoke('pending:months:list'),
-    pickFiles: () => ipcRenderer.invoke('pending:import:pick-files'),
-    startImport: (payload) => ipcRenderer.invoke('pending:import:start', payload),
-    exportErrorReport: () => ipcRenderer.invoke('pending:error:export-report'),
-    onImportProgress: (listener) => {
-      const wrapped = (_event, ev) => listener(ev);
-      ipcRenderer.on('pending:import:progress', wrapped);
-      return () => ipcRenderer.removeListener('pending:import:progress', wrapped);
-    },
-    reconcile: {
-      run: (payload) => ipcRenderer.invoke('pending:reconcile:run', payload)
-    },
-    diff: {
-      listAllRuns: () => ipcRenderer.invoke('pending:diff:runs-list'),
-      listRunsForMonthPair: (payload) => ipcRenderer.invoke('pending:diff:runs-for-month-pair', payload),
-      getLatestRunForMonthPair: (payload) => ipcRenderer.invoke('pending:diff:latest-run-for', payload),
-      exportSingle: (payload) => ipcRenderer.invoke('pending:diff:export-single', payload),
-      exportAggregate: () => ipcRenderer.invoke('pending:diff:export-aggregate')
-    },
-    // v2.1.11 T2 移除核对：选移除归档 xlsx + 解析入库（关联导入月份；D-T2-1 = 后续对账的 upperMonth）
-    removed: {
-      pickFiles: () => ipcRenderer.invoke('pending:removed:pick-files'),
-      import: (payload) => ipcRenderer.invoke('pending:removed:import', payload)
-    }
-  },
-  // v2.1.2 T2：月度银行对账单BU回填校验
-  // spec v0.4：pick-files 拆为 pickPendingFile / pickBankFile（前端串联 Clear 风 modal 提示）
-  bankBuRecon: {
-    listMonths: () => ipcRenderer.invoke('bankBuRecon:months:list'),
-    status: (payload) => ipcRenderer.invoke('bankBuRecon:status', payload),
-    pickPendingFile: (payload) => ipcRenderer.invoke('bankBuRecon:import:pick-pending-file', payload),
-    pickBankFile: (payload) => ipcRenderer.invoke('bankBuRecon:import:pick-bank-file', payload),
-    runImport: (payload) => ipcRenderer.invoke('bankBuRecon:import:run', payload),
-    run: (payload) => ipcRenderer.invoke('bankBuRecon:run', payload),
-    // v0.5: 拆 export → single + aggregate + 另存为 picker
-    pickSavePath: (payload) => ipcRenderer.invoke('bankBuRecon:export:pick-save-path', payload),
-    exportSingle: (payload) => ipcRenderer.invoke('bankBuRecon:export:single', payload),
-    exportAggregate: (payload) => ipcRenderer.invoke('bankBuRecon:export:aggregate', payload),
-    listRuns: (payload) => ipcRenderer.invoke('bankBuRecon:run:history', payload),
-    // v0.5: 新增 ready/success 月份列表 IPC
-    listReadyMonths: () => ipcRenderer.invoke('bankBuRecon:run:list-ready-months'),
-    listSuccessMonths: () => ipcRenderer.invoke('bankBuRecon:run:list-success-months')
-  },
-  // v2.1.3：业务OP数据核对模块
-  bizOpReconV327: {
-    status: () => ipcRenderer.invoke('bizOpReconV327:status'),
-    pickFiles: () => ipcRenderer.invoke('bizOpReconV327:files:pick'),
-    importFiles: (payload) => ipcRenderer.invoke('bizOpReconV327:import', payload),
-    preflight: (payload) => ipcRenderer.invoke('bizOpReconV327:run:preflight', payload),
-    run: (payload) => ipcRenderer.invoke('bizOpReconV327:run', payload),
-    months: (payload) => ipcRenderer.invoke('bizOpReconV327:metadata:months', payload),
-    list: (payload) => ipcRenderer.invoke('bizOpReconV327:metadata:list', payload),
-    currentInput: (payload) => ipcRenderer.invoke('bizOpReconV327:metadata:input', payload),
-    runCalendar: (payload) => ipcRenderer.invoke('bizOpReconV327:metadata:run-calendar', payload),
-    deletePreview: (payload) => ipcRenderer.invoke('bizOpReconV327:delete:preview', payload),
-    deleteData: (payload) => ipcRenderer.invoke('bizOpReconV327:delete', payload),
-    pickExport: (payload) => ipcRenderer.invoke('bizOpReconV327:export:pick', payload),
-    exportWorkbook: (kind, payload) => {
-      switch (kind) {
-        case 'OP_RAW': return ipcRenderer.invoke('bizOpReconV327:export:op-raw', payload);
-        case 'FLOW_RAW': return ipcRenderer.invoke('bizOpReconV327:export:flow-raw', payload);
-        case 'OP_CHECK': return ipcRenderer.invoke('bizOpReconV327:export:op-check', payload);
-        case 'FLOW_CHECK': return ipcRenderer.invoke('bizOpReconV327:export:flow-check', payload);
-        case 'RESULT_FULL': return ipcRenderer.invoke('bizOpReconV327:export:result-full', payload);
-        case 'RESULT_DIFF': return ipcRenderer.invoke('bizOpReconV327:export:result-diff', payload);
-        case 'ERRORS': return ipcRenderer.invoke('bizOpReconV327:export:errors', payload);
-        default: return Promise.reject(new Error('导出类别非法'));
-      }
-    },
-    cancel: (payload) => ipcRenderer.invoke('bizOpReconV327:task:cancel', payload),
-    retryRecovery: () => ipcRenderer.invoke('bizOpReconV327:recovery:retry')
-  },
-  bizOpRecon: {
-    status: () => ipcRenderer.invoke('bizOpRecon:status'),
-    listBu: () => ipcRenderer.invoke('bizOpRecon:bu:list'),
-    pickBizOpFile: (payload) => ipcRenderer.invoke('bizOpRecon:import:pick-biz-op-file', payload),
-    pickFlowFile: (payload) => ipcRenderer.invoke('bizOpRecon:import:pick-flow-file', payload),
-    runBizOpImport: (payload) => ipcRenderer.invoke('bizOpRecon:import:run-biz-op', payload),
-    runFlowImport: (payload) => ipcRenderer.invoke('bizOpRecon:import:run-flow', payload),
-    openErrorReportFolder: (payload) => ipcRenderer.invoke('bizOpRecon:import:open-error-report-folder', payload),
-    checkSingleDay: (payload) => ipcRenderer.invoke('bizOpRecon:import:check-single-day', payload),
-    listReadyDates: (payload) => ipcRenderer.invoke('bizOpRecon:run:list-ready-dates', payload),
-    run: (payload) => ipcRenderer.invoke('bizOpRecon:run', payload),
-    listSuccessDates: (payload) => ipcRenderer.invoke('bizOpRecon:export:list-success-dates', payload),
-    pickSavePath: (payload) => ipcRenderer.invoke('bizOpRecon:export:pick-save-path', payload),
-    exportDate: (payload) => ipcRenderer.invoke('bizOpRecon:export:date', payload),
-    exportDateRange: (payload) => ipcRenderer.invoke('bizOpRecon:export:date-range', payload),
-    runHistory: (payload) => ipcRenderer.invoke('bizOpRecon:run:history', payload)
-  },
   // v2.1.12 需求1：VCC业务OP计算（仅流水文件 → 按月聚合发生额出/入 → 算期末OP；资金红线 🔴）
   // 流程：pickFiles → scan(F1: 月份+条数) → computeAmounts(F2: 发生额) → save(F2: 期初OP→期末OP 落库)
   //       → listBalanceMonths / getBalance(F3: 显示余额)
@@ -694,43 +601,6 @@ contextBridge.exposeInMainWorld('desktopApi', {
       const listener = (_event, data) => { if (typeof callback === 'function') callback(data); };
       ipcRenderer.on('vccFinancialOp:operation:progress', listener);
       return () => ipcRenderer.removeListener('vccFinancialOp:operation:progress', listener);
-    }
-  },
-  // v2.1.6 Module B：收单单据币种校验
-  // v2.1.7 F6：新增 onImportProgress / onRunProgress 订阅 API（spec §6.4）
-  //   返回 unsubscribe 函数；renderer 必须在 finally 调用避免 listener 内存泄漏
-  acquiringBillCurrency: {
-    listMonths: () => ipcRenderer.invoke('acquiringBillCurrency:listMonths'),
-    sessionStatus: (payload) => ipcRenderer.invoke('acquiringBillCurrency:sessionStatus', payload),
-    importFlow: (payload) => ipcRenderer.invoke('acquiringBillCurrency:importFlow', payload),
-    importBill: (payload) => ipcRenderer.invoke('acquiringBillCurrency:importBill', payload),
-    run: (payload) => ipcRenderer.invoke('acquiringBillCurrency:run', payload),
-    // v2.1.10 A3 T10 / A4 T19：cancel 和 resume IPC（spec §三）
-    //   - cancel：worker pool cancel API；renderer 加 cancel 按钮时调（v2.1.11+ 评估 UI）
-    //   - resume：续跑 chunk_progress.status='partial' 的 run（v2.1.11+ 评估 UI）
-    //   - 当前版本 renderer 不暴露入口；IPC 通道留好供集成测试 / 高级用户
-    runCancel: (payload) => ipcRenderer.invoke('acquiringBillCurrency:run:cancel', payload),
-    runResume: (payload) => ipcRenderer.invoke('acquiringBillCurrency:run:resume', payload),
-    export: (payload) => ipcRenderer.invoke('acquiringBillCurrency:export', payload),
-    clearMonth: (payload) => ipcRenderer.invoke('acquiringBillCurrency:clearMonth', payload),
-    onImportProgress: (listener) => {
-      const wrapped = (_event, ev) => listener(ev);
-      ipcRenderer.on('acquiringBillCurrency:import:progress', wrapped);
-      return () => ipcRenderer.removeListener('acquiringBillCurrency:import:progress', wrapped);
-    },
-    onRunProgress: (listener) => {
-      const wrapped = (_event, ev) => listener(ev);
-      ipcRenderer.on('acquiringBillCurrency:run:progress', wrapped);
-      return () => ipcRenderer.removeListener('acquiringBillCurrency:run:progress', wrapped);
-    },
-    // v2.1.8 N1' (v0.7)：β 方案的 onCleanupQuitStart/Progress/Done 三 API 已移除
-    //   原因：退出兜底改静默（spec §3.2.2 N1''-D10/D13），main 不再 webContents.send 进度
-    //   若历史 renderer 仍订阅 → ipcRenderer.on 注册的 listener 不会触发任何回调（安全降级）
-    // v2.1.8 N1 β：进入模块兜底 cleanup 后台进行中 toast（保留）
-    onCleanupBackgroundToast: (listener) => {
-      const wrapped = (_event, ev) => listener(ev);
-      ipcRenderer.on('acquiringBillCurrency:cleanup-background:toast', wrapped);
-      return () => ipcRenderer.removeListener('acquiringBillCurrency:cleanup-background:toast', wrapped);
     }
   },
   // v2.1.16 阶段一 A4：链接表管理（资金对账数据处理模块「链接表管理」弹窗）
