@@ -6,6 +6,7 @@ const EMPTY_TERMINAL_ROUTE_REGISTRY = createTerminalRouteRegistry([]);
 const path = require('node:path');
 const { stableSerialize } = require('../../backend/database/archive-terminal-completion');
 const { isRetiredModuleId } = require('../../backend/database/retired-modules');
+const { isPublicationOnlyFileTask } = require('../toolbox-archive-recovery');
 const {
   outboxBatchId,
   parseOutboxBatchId
@@ -127,11 +128,23 @@ function normalizeTerminalOutcome(value, terminalRouteRegistry) {
   };
 }
 
+// v3.2.20（spec D6）：已下线模块 publication-only 导出的恢复追加意图——启动恢复为旧版遗留的 committed 发布
+//   （无 _fileManifest 的旧格式批次）写入，随即重放并校验接管。它是同一恢复流程的一步，不是旧版现场：
+//   与 manifest 批次直接收口、旧版重启时的处理一致，照常重放；跳过会使接管校验失败并阻止启动。
+function isRetiredPublicationAppendIntent(payload, persistedOwner) {
+  const terminalMetadata = payload && payload.terminalOutcome && payload.terminalOutcome.metadata;
+  return !persistedOwner
+    && Boolean(payload.targetBatchId)
+    && isPublicationOnlyFileTask({ taskKey: payload.sourceOperation, moduleId: payload.moduleId })
+    && Boolean(terminalMetadata && terminalMetadata.recoveredToolboxPublication === true);
+}
+
 // v3.2.20：outbox 通知所属模块（operation / file-batch owner，或无 owner 的旧格式 payload.moduleId）已下线。
 function isRetiredOutboxRecord(payload, persistedOwner) {
   if (persistedOwner && persistedOwner.kind === 'operation') return isRetiredModuleId(persistedOwner.operationContext.moduleId);
   if (persistedOwner && persistedOwner.kind === 'file-batch') return isRetiredModuleId(persistedOwner.batchContext.moduleId);
-  return !persistedOwner && isRetiredModuleId(payload && payload.moduleId);
+  return !persistedOwner && isRetiredModuleId(payload && payload.moduleId)
+    && !isRetiredPublicationAppendIntent(payload, persistedOwner);
 }
 
 class ArchiveCenterController {

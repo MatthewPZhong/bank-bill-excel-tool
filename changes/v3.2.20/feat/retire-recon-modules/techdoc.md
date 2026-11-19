@@ -59,7 +59,7 @@
 | --- | --- | --- |
 | BizOP 的 active recovery hold | 只读跳过，不改写；保留给回退旧版继续恢复 | `background-execution/retired-recovery-actions.js` 包装恢复控制只读仓储，过滤 BizOP v327 的 12 个 action |
 | 存档 outbox 中已下线模块的终态通知（operation 与 file-batch owner、无 owner 的旧格式，含 `pending-run` / `biz-op-run` route） | 整条跳过并原样保留：不写 Task Run 终态、不执行业务收尾、不删除；不计入待重试数量（不阻断存档中心初始化）与到期清理闸门；回退旧版后由旧版重放 | `archive-center/controller.js` `isRetiredOutboxRecord`；`retired-terminal-routes.js` 只保留 route 识别，`finalize` 兜底拒绝（`ARCHIVE_RETIRED_TERMINAL_ROUTE_RETAINED`） |
-| Pending / 业务OP / 收单导出的 publication-only 发布 journal | 按原 owner 证明由通用逻辑收尾（与旧版重启时的处理相同） | `toolbox-archive-recovery.js` `PUBLICATION_ONLY_FILE_TASKS` 保留识别条目 |
+| Pending / 业务OP / 收单导出的 publication-only 发布 journal | 按原 owner 证明由通用逻辑收尾（与旧版重启时的处理相同）。manifest 批次（v3.1.11 起）直接写 Task Run 终态与附件；旧格式批次（无 `_fileManifest`）先写 outbox 追加意图再重放，该意图（无 owner、带 `recoveredToolboxPublication` 标记、任务属 `PUBLICATION_ONLY_FILE_TASKS`）不按已下线通知保留（spec D6，`controller.js` 的 `isRetiredPublicationAppendIntent`） | `toolbox-archive-recovery.js` `PUBLICATION_ONLY_FILE_TASKS` 保留识别条目 |
 | BizOP v327 导出的发布 journal（`biz-op-v327-export-<taskRunId>`） | 只识别、一律 defer：journal、staging、备份与目标原样保留，启动继续并记活动日志（含恢复路径）；共享发布器对 defer 记录的失败关闭合同不变，处理前经统一发布流程的导出被拒绝，主消息即写明处理方式：先用 v3.2.19 及更早版本打开一次（spec D4，backlog B108） | `publication-recovery/retired-module-owner.js`（前缀、exact-7 batchContext、7 个导出 taskKey 与 taskRunId 一致才认领，不一致时失败关闭）；`toolbox-output-publication-dispatch.js` 的 `RETIRED_PUBLICATION_HINTS` |
 | 上一行中旧版已标为 `manual-recovery` 的 journal（旧版回滚自身失败） | 同样 defer（代码 `PUBLICATION_RECOVERY_RETIRED_MODULE_MANUAL`），提示按恢复路径人工处理（旧版也无法自动收尾）（spec D5） | 共享发布器发现阶段（`toolbox-output-publication.js` `discoverRecoveryInternal`）只对 `RETIRED_PUBLICATION_TASK_PREFIXES` 前缀且状态为 `manual-recovery` 的记录不抛错、跳过目标父目录身份核验（常是标记原因），只读交给 owner；身份校验仍由 owner 负责。执行阶段对 defer 记录不做任何动作。其他记录（含其他模块的 `manual-recovery`、索引与 journal 锚点不符、v1 旧索引）的发现门禁不变 |
 
@@ -132,7 +132,7 @@
   - 升级兼容集成测试改为在旧版真实数据目录 `run-data/biz-op-v327/` 下构造数据，补充 operation owner 通知、进行中的批次与 Task Run、BizOP 发布中途退出的遗留记录。逐行比对存档记录、outbox 与发布材料前后不变；去掉 retired-module owner 后，该测试会以 `PUBLICATION_RECOVERY_OWNER_UNKNOWN` 失败。
   - 未采纳：Pending / 业务OP / 收单 publication-only 导出的遗留 journal 仍按原 owner 证明回滚或收尾（与旧版重启时相同）；回退到可用模块时写回 `current_module`（v2.1.4 起的通用逻辑，不涉及数据）。
   - 修复后 `npm run release-check` 通过：单测 8929 个（8925 通过、4 跳过、0 失败），集成脚本 88 个全部通过，`retired-modules-upgrade-compat.js` 37 项断言。
-- **Codex 第二轮审查修复（2026-11-18，未提交）**：确认 10 条，用户选择修 8 条并放行第 3 条（spec D5），不采纳 2 条：
+- **Codex 第二轮审查修复（2026-11-18，提交为 `6f24b27d`）**：确认 10 条，用户选择修 8 条并放行第 3 条（spec D5），不采纳 2 条：
   - 启动不改写已下线存档记录：流程绑定意图不重放、File Task「无后处理」收口责任不代为确认；缺收口凭证的已下线批次到期清理跳过（原只跳过有遗留通知的情况，缺凭证会使本轮停在当页）。⚠️ 资金红线（血缘与终态确认），需人工复核。
   - 需人工恢复的 BizOP 发布记录放行启动（见第四节表格）；导出被拒时处理方式写进主消息（VCC「数据管理 → 导出数据」等入口只展示主消息）。
   - 公共附件入口检查所属批次；架构历史检查补上「兼容入口随边界同一提交退役」的绕过路径。
@@ -140,4 +140,5 @@
   - 不采纳：无归属旧通知使同模块到期批次被跳过（只保留不误删，改删除归属判定属资金红线，登记 B109）；设置页「待完成删除」显示已下线批次号（元数据已删、文件待清理的必要提示）。缺收口凭证使到期清理停在当页的通用问题登记 B110。
   - v3.2.19 标签已创建，指向本分支基线 `466bb6fa`，基线迁移的前提成立。
   - 修复后 `npm run release-check` 通过：单测 8934 个（8930 通过、4 跳过、0 失败），集成脚本 88 个全部通过（`retired-modules-upgrade-compat.js` 42 项断言）；新增用例均做过变异验证（撤掉对应修复即失败）。
+- **PR #256 Codex 云端审查 P1（2026-11-18，release/v3.2.20）**：已下线模块旧格式批次（无 `_fileManifest`，v3.1.10 及更早生成）的 publication-only 导出在升级前已提交发布、归档未收口时，`recoverToolboxPublicationsIntoArchive` 写入 outbox 追加意图并重放；第一轮修复把已下线模块的 outbox 记录一律原样保留，追加意图被跳过，`verifyArchiveHandoff` 失败，启动报 `ARCHIVE_STARTUP_OWNER_RECOVERY_FAILED`。v3.1.11 起的 manifest 批次直接收口，不受影响。按用户选择的方案 A（spec D6）：只放行本恢复流程写入的追加意图，其余已下线 outbox 记录（含旧版自己留下的无标记追加通知）仍原样保留。回归 `tests/unit/main-process/retired-module-publication-recovery.test.js`：三个模块的旧格式批次收尾、同模块旧版通知逐字保留、二次启动幂等（撤掉修复即失败）；manifest 批次 worker 硬退出后收尾。⚠️ 资金红线（存档状态与血缘），需人工复核。
 - **已知缺口**：CI 不再有与业务无关的打包版正常启动检查，Windows 打包版验收未做（backlog B105）；BizOP v327 遗留发布记录在处理前会使经统一发布流程的导出被拒绝（B108）；无归属的旧文件重试通知会使同模块到期批次被跳过（B109）；缺收口凭证的历史批次使到期清理停在当页（B110，基线既有）；是否提供历史数据清理入口待定（B107）。
