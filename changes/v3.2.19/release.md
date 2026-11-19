@@ -56,4 +56,5 @@
 
 - 2026-11-18 首个 `v3.2.19` 标签（→ `466bb6fa`）触发的发布流程 run 44441308161 在 `npm run release-check` 失败：集成脚本 `renderer-lifecycle` 超过 `scripts/test-renderer-lifecycle.js` 给整个 Electron 进程设的 120 秒总时限，被终止（`spawnSync ... ETIMEDOUT`、`SIGTERM`）；被终止前完成的用例全部通过，单测 0 失败，其余 113 个集成脚本通过。未生成 Release，未发出安装包。
 - 原因：本版该脚本用例由 441 个增到 493 个，Windows 上耗时随之到上限（v3.2.18 发布流程 108.2 秒；本版 PR CI 109.8 秒、main CI 119.6 秒、发布流程超过 120 秒；本机 macOS 62.8 秒）。
-- 处置：用户选择修复后重打标签。总时限调为 300 秒（测试内容不变），经 PR 合入 main；删除远端 `v3.2.19` 标签，在新的 main 提交上重建并推送。
+- 处置：总时限调为 300 秒（测试内容不变，`d8a07a4b`，PR #255）。原计划删除并重建 `v3.2.19` 标签，核实后不可行：仓库规则「Immutable stable release tags」禁止更新、删除 `v*` 标签且无人可绕过，清单 E5 也不允许删除重推。2026-11-18 用户决定改发 v3.2.20，并纳入 `feat/retire-recon-modules`。
+- **结论**：v3.2.19 未发布（标签保留，无 Release、无安装包）；其功能随 v3.2.20 发布，见 [v3.2.20 记录](../v3.2.20/release.md)。

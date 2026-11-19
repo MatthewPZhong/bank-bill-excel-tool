@@ -24138,6 +24138,1222 @@
       ],
       "reason": "业务OP数据核对 / 月度Pending数据核对 / 收单单据币种校验下线，共享的 R4 控制器测试只覆盖这三个模块的控制器并随之删除；本边界的行为验证仍由 r4-domain-controllers 与 renderer 生命周期脚本承担，未新增或放宽其他证据",
       "designDoc": "changes/v3.2.20/feat/retire-recon-modules/techdoc.md"
+    },
+    {
+      "sourceCommit": "305ef4b0e05b740bd2b5c193460ab1545de49103",
+      "sourcePolicyBlob": "0cf3adaaf38c909ddc810b152b2383a69f33ea35",
+      "boundaryId": "shared-xlsx",
+      "field": "requiredConsumers",
+      "from": [
+        {
+          "from": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "to": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "xmlUnescape"
+          ]
+        },
+        {
+          "from": "src/backend/biz-op-recon-import/reader-streamed.js",
+          "to": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "lettersToIndex",
+            "parseRowXml",
+            "readSharedStrings"
+          ]
+        },
+        {
+          "from": "src/backend/file-service/readers.js",
+          "to": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "readXlsxStreamed"
+          ]
+        },
+        {
+          "from": "src/backend/pending-import/worker.js",
+          "to": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "readXlsxStreamed"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-op-calc-import/reader.js",
+          "to": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "lettersToIndex",
+            "parseRowXml",
+            "readSharedStrings"
+          ]
+        },
+        {
+          "from": "src/main-process/linked-table-stream-source.js",
+          "to": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "readXlsxStreamed"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-stream-io.js",
+          "to": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "readXlsxStreamed"
+          ]
+        },
+        {
+          "from": "src/backend/biz-op-recon-import/reader-streamed.js",
+          "to": "src/backend/xlsx/legacy/entry-size-preflight.js",
+          "kind": "require",
+          "importedNames": [
+            "assertXlsxEntriesUnderLimit"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-xlsx-stream/large-split-worker.js",
+          "to": "src/backend/xlsx/legacy/entry-size-preflight.js",
+          "kind": "require",
+          "importedNames": [
+            "collectEntrySizes"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-op-calc-import/reader.js",
+          "to": "src/backend/xlsx/legacy/entry-size-preflight.js",
+          "kind": "require",
+          "importedNames": [
+            "assertXlsxEntriesUnderLimit"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-large-split-router.js",
+          "to": "src/backend/xlsx/legacy/entry-size-preflight.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/vcc-financial-op/review-export-plan.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/system-op-importer.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/workbook-import-plan.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/main-process/biz-op-v327/export-source.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openSingleSheetRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/main-process/biz-op-v327/export-validator.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/main-process/biz-op-v327/import-pipeline.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openSingleSheetRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-dataset-writer.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-review-validator.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+          "to": "src/backend/xlsx/shared-strings-provider.js",
+          "kind": "require",
+          "importedNames": [
+            "loadSharedStringsProvider"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/workbook-reader.js",
+          "to": "src/backend/xlsx/shared-strings-provider.js",
+          "kind": "require",
+          "importedNames": [
+            "loadSharedStringsProvider"
+          ]
+        },
+        {
+          "from": "src/backend/big-table-import/engine.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/big-table-import/import-worker.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "WORKBOOK_ENTRY_NAME",
+            "WORKBOOK_RELS_ENTRY_NAME",
+            "openZipWithEntries"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/xlsx-pass.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "WORKBOOK_ENTRY_NAME",
+            "WORKBOOK_RELS_ENTRY_NAME",
+            "openZipWithEntries"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "loadSharedStrings",
+            "locateSheets",
+            "openZipWithEntries"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/system-op-importer.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "normalizeWorksheetTarget"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/workbook-reader.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "BigTableImportError",
+            "WORKBOOK_ENTRY_NAME",
+            "locateSheets",
+            "openZipWithEntries",
+            "readEntryAsString"
+          ]
+        },
+        {
+          "from": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "WORKBOOK_ENTRY_NAME",
+            "locateSheets"
+          ]
+        },
+        {
+          "from": "src/main-process/new-account/generation-core.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "locateSheets",
+            "openZipWithEntries"
+          ]
+        },
+        {
+          "from": "src/main-process/recon-id-fix-service/artifact-evidence.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "openZipWithEntries",
+            "readEntryAsString"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-large-split-router.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "openZipWithEntries"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-output-writer.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "openZipWithEntries",
+            "readEntryAsString"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-review-validator.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "openZipWithEntries"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/index.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/xlsx/workbook-parts.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "assertExcelCellTextLength",
+            "assertExcelStXstringRawLength",
+            "decodeExcelStXstring"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/review-export-contract.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "assertExcelCellTextLength"
+          ]
+        },
+        {
+          "from": "src/main-process/biz-op-v327/export-cells.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "assertExcelCellTextLength"
+          ]
+        },
+        {
+          "from": "src/main-process/biz-op-v327/export-writer.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "encodeExcelStXstring"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-output-writer.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "ToolboxExcelTextError",
+            "assertExcelCellTextLength",
+            "encodeExcelStXstring"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-review-validator.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "decodeExcelStXstring"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-review-writer.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "encodeExcelStXstring"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-writer.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "encodeExcelStXstring"
+          ]
+        },
+        {
+          "from": "src/backend/xlsx/workbook-parts.js",
+          "to": "src/backend/xlsx/ooxml-namespaces.js",
+          "kind": "require",
+          "importedNames": [
+            "OFFICE_RELATIONSHIP_NAMESPACES",
+            "PACKAGE_RELATIONSHIP_NAMESPACES",
+            "SPREADSHEETML_NAMESPACES",
+            "exactSaxLocalName",
+            "namespaceAllowed",
+            "normalizedSaxAttributes",
+            "saxAttributeIdentity"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-output-writer.js",
+          "to": "src/backend/xlsx/ooxml-namespaces.js",
+          "kind": "require",
+          "importedNames": [
+            "OFFICE_RELATIONSHIP_NAMESPACES",
+            "PACKAGE_RELATIONSHIP_NAMESPACES",
+            "SPREADSHEETML_NAMESPACES",
+            "namespaceAllowed",
+            "saxAttributeValue"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-writer.js",
+          "to": "src/backend/xlsx/ooxml-namespaces.js",
+          "kind": "require",
+          "importedNames": [
+            "SPREADSHEETML_NAMESPACES",
+            "exactSaxLocalName",
+            "namespaceAllowed",
+            "normalizedSaxAttributes"
+          ]
+        },
+        {
+          "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": [
+            "classifyExcelNumberFormat"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/biff8-records.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": [
+            "BUILTIN_NUMBER_FORMATS"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/index.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/vcc-financial-op/review-export-contract.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": [
+            "classifyNumericOutput",
+            "decimalComparable"
+          ]
+        },
+        {
+          "from": "src/main-process/biz-op-v327/export-cells.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": [
+            "classifyNumericOutput"
+          ]
+        },
+        {
+          "from": "src/main-process/biz-op-v327/import-adapter.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": [
+            "classifyExcelNumberFormat"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-review-validator.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": [
+            "decimalComparable"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/biff8-pass.js",
+          "to": "src/backend/xlsx/model.js",
+          "kind": "require",
+          "importedNames": [
+            "createToolboxCell",
+            "createToolboxRow",
+            "createToolboxSheetMeta"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/csv-pass.js",
+          "to": "src/backend/xlsx/model.js",
+          "kind": "require",
+          "importedNames": [
+            "createToolboxCell",
+            "createToolboxRow",
+            "createToolboxSheetMeta"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/index.js",
+          "to": "src/backend/xlsx/model.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/main-process/toolbox-background/route-db-contract.js",
+          "to": "src/backend/xlsx/model.js",
+          "kind": "require",
+          "importedNames": [
+            "createToolboxCell",
+            "createToolboxRow",
+            "createToolboxSheetMeta"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-output-writer.js",
+          "to": "src/backend/xlsx/model.js",
+          "kind": "require",
+          "importedNames": [
+            "normalizeCell"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-output-writer.js",
+          "to": "src/backend/xlsx/model.js",
+          "kind": "require",
+          "importedNames": [
+            "projectOutputCell"
+          ]
+        },
+        {
+          "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "createSourceStyleRegistryFromOoxml"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/biff8-pass.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "SourceStyleRegistry"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/csv-pass.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "SourceStyleRegistry"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/index.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/toolbox-format/xlsx-pass.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "createSourceStyleRegistryFromOoxml"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-background/route-db-contract.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "normalizeStaticStyle"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-output-writer.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "OutputStyleRegistry"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-review-validator.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "normalizeStaticStyle",
+            "resolveColorSpec",
+            "stableSignature"
+          ]
+        },
+        {
+          "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+          "to": "src/backend/xlsx/xlsx-sheet-scanner.js",
+          "kind": "require",
+          "importedNames": [
+            "ToolboxXlsxFormatError",
+            "scanXlsxSheet"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/index.js",
+          "to": "src/backend/xlsx/xlsx-sheet-scanner.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/toolbox-format/xlsx-pass.js",
+          "to": "src/backend/xlsx/xlsx-sheet-scanner.js",
+          "kind": "require",
+          "importedNames": [
+            "ToolboxXlsxCancelledError",
+            "ToolboxXlsxFormatError",
+            "scanXlsxSheet"
+          ]
+        },
+        {
+          "from": "src/main-process/position-reconciliation/filtered-source-report.js",
+          "to": "src/backend/xlsx/xlsx-sheet-scanner.js",
+          "kind": "require",
+          "importedNames": [
+            "scanXlsxSheet"
+          ]
+        },
+        {
+          "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+          "to": "src/backend/xlsx/workbook-parts.js",
+          "kind": "require",
+          "importedNames": [
+            "TOOLBOX_XLSX_METADATA_LIMITS",
+            "findRelationshipEntry",
+            "parseWorkbookRelationships",
+            "parseWorkbookXml",
+            "readToolboxMetadataEntryAsString"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/index.js",
+          "to": "src/backend/xlsx/workbook-parts.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/vcc-financial-op/workbook-reader.js",
+          "to": "src/backend/xlsx/workbook-parts.js",
+          "kind": "require",
+          "importedNames": [
+            "parseWorkbookXml"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-large-split-router.js",
+          "to": "src/backend/xlsx/workbook-parts.js",
+          "kind": "require",
+          "importedNames": [
+            "findRelationshipEntry",
+            "parseWorkbookRelationships",
+            "parseWorkbookXml",
+            "readToolboxMetadataEntryAsString"
+          ]
+        }
+      ],
+      "to": [
+        {
+          "from": "src/backend/file-service/readers.js",
+          "to": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "readXlsxStreamed"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-op-calc-import/reader.js",
+          "to": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "lettersToIndex",
+            "parseRowXml",
+            "readSharedStrings"
+          ]
+        },
+        {
+          "from": "src/main-process/linked-table-stream-source.js",
+          "to": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "readXlsxStreamed"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-stream-io.js",
+          "to": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "readXlsxStreamed"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-xlsx-stream/large-split-worker.js",
+          "to": "src/backend/xlsx/legacy/entry-size-preflight.js",
+          "kind": "require",
+          "importedNames": [
+            "collectEntrySizes"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-op-calc-import/reader.js",
+          "to": "src/backend/xlsx/legacy/entry-size-preflight.js",
+          "kind": "require",
+          "importedNames": [
+            "assertXlsxEntriesUnderLimit"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-large-split-router.js",
+          "to": "src/backend/xlsx/legacy/entry-size-preflight.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/vcc-financial-op/review-export-plan.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/system-op-importer.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/workbook-import-plan.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-dataset-writer.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-review-validator.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+          "to": "src/backend/xlsx/shared-strings-provider.js",
+          "kind": "require",
+          "importedNames": [
+            "loadSharedStringsProvider"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/workbook-reader.js",
+          "to": "src/backend/xlsx/shared-strings-provider.js",
+          "kind": "require",
+          "importedNames": [
+            "loadSharedStringsProvider"
+          ]
+        },
+        {
+          "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "WORKBOOK_ENTRY_NAME",
+            "WORKBOOK_RELS_ENTRY_NAME",
+            "openZipWithEntries"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/xlsx-pass.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "WORKBOOK_ENTRY_NAME",
+            "WORKBOOK_RELS_ENTRY_NAME",
+            "openZipWithEntries"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "loadSharedStrings",
+            "locateSheets",
+            "openZipWithEntries"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/system-op-importer.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "normalizeWorksheetTarget"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/workbook-reader.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "BigTableImportError",
+            "WORKBOOK_ENTRY_NAME",
+            "locateSheets",
+            "openZipWithEntries",
+            "readEntryAsString"
+          ]
+        },
+        {
+          "from": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "WORKBOOK_ENTRY_NAME",
+            "locateSheets"
+          ]
+        },
+        {
+          "from": "src/main-process/new-account/generation-core.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "locateSheets",
+            "openZipWithEntries"
+          ]
+        },
+        {
+          "from": "src/main-process/recon-id-fix-service/artifact-evidence.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "openZipWithEntries",
+            "readEntryAsString"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-large-split-router.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "openZipWithEntries"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-output-writer.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "openZipWithEntries",
+            "readEntryAsString"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-review-validator.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "openZipWithEntries"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/index.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/xlsx/workbook-parts.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "assertExcelCellTextLength",
+            "assertExcelStXstringRawLength",
+            "decodeExcelStXstring"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/review-export-contract.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "assertExcelCellTextLength"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-output-writer.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "ToolboxExcelTextError",
+            "assertExcelCellTextLength",
+            "encodeExcelStXstring"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-review-validator.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "decodeExcelStXstring"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-review-writer.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "encodeExcelStXstring"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-writer.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "encodeExcelStXstring"
+          ]
+        },
+        {
+          "from": "src/backend/xlsx/workbook-parts.js",
+          "to": "src/backend/xlsx/ooxml-namespaces.js",
+          "kind": "require",
+          "importedNames": [
+            "OFFICE_RELATIONSHIP_NAMESPACES",
+            "PACKAGE_RELATIONSHIP_NAMESPACES",
+            "SPREADSHEETML_NAMESPACES",
+            "exactSaxLocalName",
+            "namespaceAllowed",
+            "normalizedSaxAttributes",
+            "saxAttributeIdentity"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-output-writer.js",
+          "to": "src/backend/xlsx/ooxml-namespaces.js",
+          "kind": "require",
+          "importedNames": [
+            "OFFICE_RELATIONSHIP_NAMESPACES",
+            "PACKAGE_RELATIONSHIP_NAMESPACES",
+            "SPREADSHEETML_NAMESPACES",
+            "namespaceAllowed",
+            "saxAttributeValue"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-writer.js",
+          "to": "src/backend/xlsx/ooxml-namespaces.js",
+          "kind": "require",
+          "importedNames": [
+            "SPREADSHEETML_NAMESPACES",
+            "exactSaxLocalName",
+            "namespaceAllowed",
+            "normalizedSaxAttributes"
+          ]
+        },
+        {
+          "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": [
+            "classifyExcelNumberFormat"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/biff8-records.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": [
+            "BUILTIN_NUMBER_FORMATS"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/index.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/vcc-financial-op/review-export-contract.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": [
+            "classifyNumericOutput",
+            "decimalComparable"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-review-validator.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": [
+            "decimalComparable"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/biff8-pass.js",
+          "to": "src/backend/xlsx/model.js",
+          "kind": "require",
+          "importedNames": [
+            "createToolboxCell",
+            "createToolboxRow",
+            "createToolboxSheetMeta"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/csv-pass.js",
+          "to": "src/backend/xlsx/model.js",
+          "kind": "require",
+          "importedNames": [
+            "createToolboxCell",
+            "createToolboxRow",
+            "createToolboxSheetMeta"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/index.js",
+          "to": "src/backend/xlsx/model.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/main-process/toolbox-background/route-db-contract.js",
+          "to": "src/backend/xlsx/model.js",
+          "kind": "require",
+          "importedNames": [
+            "createToolboxCell",
+            "createToolboxRow",
+            "createToolboxSheetMeta"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-output-writer.js",
+          "to": "src/backend/xlsx/model.js",
+          "kind": "require",
+          "importedNames": [
+            "normalizeCell"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-output-writer.js",
+          "to": "src/backend/xlsx/model.js",
+          "kind": "require",
+          "importedNames": [
+            "projectOutputCell"
+          ]
+        },
+        {
+          "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "createSourceStyleRegistryFromOoxml"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/biff8-pass.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "SourceStyleRegistry"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/csv-pass.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "SourceStyleRegistry"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/index.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/toolbox-format/xlsx-pass.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "createSourceStyleRegistryFromOoxml"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-background/route-db-contract.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "normalizeStaticStyle"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-output-writer.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "OutputStyleRegistry"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-review-validator.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "normalizeStaticStyle",
+            "resolveColorSpec",
+            "stableSignature"
+          ]
+        },
+        {
+          "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+          "to": "src/backend/xlsx/xlsx-sheet-scanner.js",
+          "kind": "require",
+          "importedNames": [
+            "ToolboxXlsxFormatError",
+            "scanXlsxSheet"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/index.js",
+          "to": "src/backend/xlsx/xlsx-sheet-scanner.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/toolbox-format/xlsx-pass.js",
+          "to": "src/backend/xlsx/xlsx-sheet-scanner.js",
+          "kind": "require",
+          "importedNames": [
+            "ToolboxXlsxCancelledError",
+            "ToolboxXlsxFormatError",
+            "scanXlsxSheet"
+          ]
+        },
+        {
+          "from": "src/main-process/position-reconciliation/filtered-source-report.js",
+          "to": "src/backend/xlsx/xlsx-sheet-scanner.js",
+          "kind": "require",
+          "importedNames": [
+            "scanXlsxSheet"
+          ]
+        },
+        {
+          "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+          "to": "src/backend/xlsx/workbook-parts.js",
+          "kind": "require",
+          "importedNames": [
+            "TOOLBOX_XLSX_METADATA_LIMITS",
+            "findRelationshipEntry",
+            "parseWorkbookRelationships",
+            "parseWorkbookXml",
+            "readToolboxMetadataEntryAsString"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/index.js",
+          "to": "src/backend/xlsx/workbook-parts.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/vcc-financial-op/workbook-reader.js",
+          "to": "src/backend/xlsx/workbook-parts.js",
+          "kind": "require",
+          "importedNames": [
+            "parseWorkbookXml"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-large-split-router.js",
+          "to": "src/backend/xlsx/workbook-parts.js",
+          "kind": "require",
+          "importedNames": [
+            "findRelationshipEntry",
+            "parseWorkbookRelationships",
+            "parseWorkbookXml",
+            "readToolboxMetadataEntryAsString"
+          ]
+        }
+      ],
+      "reason": "同一模块下线放宽（原登记于 466bb6fa）的 release 侧补登：release/v3.2.20 先合入 release/v3.2.19 的发布检查修复（d8a07a4b，只改渲染生命周期测试总时限，不在 466bb6fa 历史中），合并提交 305ef4b0 处的配置仍为下线前取值；业务OP数据核对 / 月度Pending数据核对 / 收单单据币种校验下线，原登记的 XLSX 基础层生产消费者源码已整体删除；其余消费者与入口不变",
+      "designDoc": "changes/v3.2.20/feat/retire-recon-modules/techdoc.md"
+    },
+    {
+      "sourceCommit": "305ef4b0e05b740bd2b5c193460ab1545de49103",
+      "sourcePolicyBlob": "0cf3adaaf38c909ddc810b152b2383a69f33ea35",
+      "boundaryId": "renderer-pre-fund",
+      "field": "activationEvidence",
+      "from": [
+        "tests/unit/renderer/r4-controllers.test.js",
+        "tests/unit/renderer/r4-domain-controllers.test.js",
+        "scripts/test-renderer-lifecycle.js"
+      ],
+      "to": [
+        "tests/unit/renderer/r4-domain-controllers.test.js",
+        "scripts/test-renderer-lifecycle.js"
+      ],
+      "reason": "同一模块下线放宽（原登记于 466bb6fa）的 release 侧补登：release/v3.2.20 先合入 release/v3.2.19 的发布检查修复（d8a07a4b，只改渲染生命周期测试总时限，不在 466bb6fa 历史中），合并提交 305ef4b0 处的配置仍为下线前取值；业务OP数据核对 / 月度Pending数据核对 / 收单单据币种校验下线，共享的 R4 控制器测试只覆盖这三个模块的控制器并随之删除；本边界的行为验证仍由 r4-domain-controllers 与 renderer 生命周期脚本承担，未新增或放宽其他证据",
+      "designDoc": "changes/v3.2.20/feat/retire-recon-modules/techdoc.md"
+    },
+    {
+      "sourceCommit": "305ef4b0e05b740bd2b5c193460ab1545de49103",
+      "sourcePolicyBlob": "0cf3adaaf38c909ddc810b152b2383a69f33ea35",
+      "boundaryId": "renderer-duplicate-inbound",
+      "field": "activationEvidence",
+      "from": [
+        "tests/unit/renderer/r4-controllers.test.js",
+        "tests/unit/renderer/r4-domain-controllers.test.js",
+        "scripts/test-renderer-lifecycle.js"
+      ],
+      "to": [
+        "tests/unit/renderer/r4-domain-controllers.test.js",
+        "scripts/test-renderer-lifecycle.js"
+      ],
+      "reason": "同一模块下线放宽（原登记于 466bb6fa）的 release 侧补登：release/v3.2.20 先合入 release/v3.2.19 的发布检查修复（d8a07a4b，只改渲染生命周期测试总时限，不在 466bb6fa 历史中），合并提交 305ef4b0 处的配置仍为下线前取值；业务OP数据核对 / 月度Pending数据核对 / 收单单据币种校验下线，共享的 R4 控制器测试只覆盖这三个模块的控制器并随之删除；本边界的行为验证仍由 r4-domain-controllers 与 renderer 生命周期脚本承担，未新增或放宽其他证据",
+      "designDoc": "changes/v3.2.20/feat/retire-recon-modules/techdoc.md"
     }
   ]
 }
