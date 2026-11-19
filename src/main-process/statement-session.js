@@ -34,6 +34,21 @@ function cloneRowsWithMetadata(rows = []) {
     clonedRows.billSplitMatchStats = { ...rows.billSplitMatchStats };
   }
 
+  // v3.2.19：原始账单预处理统计（过滤后没有账单行时提示）
+  if (rows.preprocessRowFilterStats && typeof rows.preprocessRowFilterStats === 'object') {
+    clonedRows.preprocessRowFilterStats = { ...rows.preprocessRowFilterStats };
+  }
+
+  // v3.2.19：重复账单过滤删除的源行号（确认去重后）
+  if (rows.duplicateRowFilterStats && typeof rows.duplicateRowFilterStats === 'object') {
+    clonedRows.duplicateRowFilterStats = {
+      ...rows.duplicateRowFilterStats,
+      droppedRowNumbers: Array.isArray(rows.duplicateRowFilterStats.droppedRowNumbers)
+        ? rows.duplicateRowFilterStats.droppedRowNumbers.slice()
+        : []
+    };
+  }
+
   if (Array.isArray(rows.sourceRows)) {
     clonedRows.sourceRows = cloneRowsWithMetadata(rows.sourceRows);
   }

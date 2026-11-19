@@ -1,5 +1,22 @@
 # 版本功能变更清单
 
+## v3.2.19（2026-11-18）
+
+本轮包含 `feat/bill-split-fee-amount` 一个分支（基于 `feat/mapping-dialog-ux`）：网银映射关系管理改版、拆分/合并账单费用账单与「发生额取值设置」、根据字段值过滤账单、原始账单预处理（过滤账单、重复账单过滤）、映射字段「逻辑取值」。需求与决策见 `changes/v3.2.19/feat/bill-split-fee-amount/spec.md` §1–§8。
+
+- **映射关系管理改版**：【完成】→【保存】，新增【返回】（同 ×）；按字段区分发生额、拆分/合并明细账单、复用模块字段的映射关系改为勾选框，映射行仍存 `是` / `否`（`''`），互斥规则不变。映射字段下拉框 723px → 362px、弹窗 1120px → 780px；币种补全层与输入框盒模型统一。
+- **费用账单**：`template_bill_split_rows.is_fee_bill`、`template_bill_split_meta.fee_amount_formula_enabled` / `fee_amount_formula_json` 启动补列（幂等）。费用行与特殊取值、公式勾选即写库；生成时只作用于已完成的费用行，公式按十进制精确计算（不经浮点）、先乘除后加减、取绝对值、半入保留 2 位，写入 Debit，Credit 一律为空；非 0 除以 0 报错列行号，0 ÷ 0 按 0。被置灰的 Credit / Debit 映射保留但生成时不读取、不做字段存在校验。
+- **根据字段值过滤账单**：`template_bill_split_meta.row_filter_rules_json`，开关为映射行。命中行走拆分/合并映射、其余走主映射，同一次逐行处理按源行顺序输出；开启时解除拆分对主映射 Currency / Credit / Debit / 按正负号 / 按字段区分的互斥。命中行拆分币种按币种映射表规范化（R7），无法识别时保留原值并记「币种未匹配」。
+- **原始账单预处理 · 过滤账单**：`templates.preprocess_row_filter_rules_json`，开关为映射行 `templateField='过滤账单'`。读表后、映射前只保留命中行（行号仍为物理行号），结果带 `preprocessRowFilterStats { totalRows, keptRows }`，全部过滤时提示；多账户分段识别以 `droppedTransactionRowNumbers` 保留被过滤交易行的分段边界。过滤规则新增 等于 / 不等于 / 包含 / 不包含（字段）。
+- **原始账单预处理 · 重复账单过滤**：开关为映射行 `templateField='重复账单过滤'`。`file-service/duplicate-source-rows.js` 为每个源行算原文指纹（XLSX 取单元格原始 XML / 共享字符串摘要与生效数字格式，XLS 取类型 + 值 + 格式，HTML / 分隔文本按 SheetJS 等价切行取原文，CSV 取逐行原文），无法核对的行（公式、条件格式数字格式、编码有损、行号缺失或重复、纵向合并从属行等）key 为空、`sourceRowKeyUnavailable`，不参与并计入提示。分组键 = 生成组 + 指纹 + 账户集合（MerchantId|Currency）+ 账期；收支冲突、账期为空、缺 MerchantId 的行不参与；按（文件序号, 行号）保留首行。暂停只在 prepare（`duplicate-review`，不开任务、不归档），确认复用 `file:import` / `file:complete-big-account-selection` 带 `duplicateReviewContextId`，取消复用 `file:cancel-big-account-selection`。续跑前核对配置指纹（`buildDuplicateReviewConfigStamp`，含同渠道模板、大账号模式与顺序；按文件名映射另核对模板目录快照 `buildTemplateCatalogStamp`），业务入口 `checkImportConfigGuard` 再核对并一次性消费确认上下文；未开始的拒绝带 `preservesSession`。覆盖导入按连通关系检查保留方 / 去除方冲突。活动日志写全量去除行号，账户号只留末 4 位、不写文件名。
+- **逻辑取值**：映射行 `mappedField='逻辑取值'`、`mappedFields` 为有序候补；生成 lookup 令牌前缀 `\u0000__LOGIC_VALUE__:`（不会与真实列名冲突），取第一个去空白后非空的值。仅主映射；拒绝 Balance / MerchantId / Currency / 个性化与开关行；候补 ≥ 2、不重复、须在模板表头。启动迁移 `upgradeLegacyLogicValueConcatMappings`（`app_settings` 标记只执行一次）把旧库中 `mapped_field='逻辑取值'` 的多字段旧式拼接还原为需要拼接字段；读 v7 及更早模板包同样还原。
+- **模板包 v8**：用到费用账单 / 特殊取值、根据字段值过滤账单、过滤账单、重复账单过滤或逻辑取值时写 v8，v3.2.18 及更早整包拒绝；否则沿用 v5–v7 规则。模板【更新】的失效引用收集覆盖费用公式、两类过滤规则（含比较字段）与逻辑取值候补，开关行不计为源引用。
+- **架构边界**：`renderer-statement` 的 `allowedApiFields.ui` 新增 `createDuplicateRowsReviewDialog`，补登 policyChanges。
+
+审查修复：Codex `review --uncommitted` 共 24 轮（158 条：P1 61、P2 85、P3 12），除第 10 轮同批整文件副本（spec 写明保留理由）与第 7 轮一条测试写法建议外均已修复并补回归测试；第 17 轮起查重收窄到同一生成组内（2026-11-18 用户确认），第 11–13 轮针对跨组去空的处理随之删除。对账专项审查结论见 backlog B101–B103。
+
+已知限制与顺延：跨导入批次不查重（B102）；回退到 v3.2.18 及更早时逻辑取值按拼接输出、重复过滤不生效（B103）；模板包不带「指定账单实现功能」序号（B101）。本版新功能实机 GUI 检查未做。v3.2.17 及更早顺延的 17 项（B45、B47、B48、B52–B58、B60、B70、B75、B77、B79、B86、B92）顺延至 v3.2.20。
+
 ## v3.2.18（2026-11-16）
 
 本轮包含：网银映射「字段筛选特征值」多特征值与「特征值管理」、模板管理【更新】（只替换表头并保留映射，失效映射生成前拦截）、导出明细直接另存与导出余额范围弹窗调整、【导入模板】命名弹框、余额管理账户号与币种筛选、设置「数据管理」页（链接表保留期限与空闲过期清理）、账户管理底栏布局、核对余额弹窗文字样式、工具箱拆分 Worker 内存超限中文提示，以及合入时的跨分支适配。

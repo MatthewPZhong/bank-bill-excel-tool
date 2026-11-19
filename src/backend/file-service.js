@@ -20,6 +20,21 @@ const {
   upgradeLegacyFeatureFilter
 } = require('./file-service/feature-filter');
 const {
+  LOGIC_VALUE_MIN_FIELDS,
+  buildLogicValueToken,
+  collectLogicValueFields,
+  normalizeLogicValueFields,
+  parseLogicValueToken,
+  resolveLogicValue
+} = require('./file-service/logic-value');
+const {
+  buildSourceRowKey,
+  describeDuplicateKeeperReplacementConflicts,
+  dropDuplicateSourceRows,
+  findDuplicateKeeperReplacementConflicts,
+  scanDuplicateSourceRows
+} = require('./file-service/duplicate-source-rows');
+const {
   ensureSupportedFile,
   extractEnumValuesFromImportedFile,
   extractHeaders,
@@ -31,6 +46,7 @@ const {
   calculateEndingBalanceFromAmounts,
   compileRegexLiteral,
   hasEffectiveAmount,
+  isZeroOrBlankAmount,
   inferDateCellFormat,
   verifyStatementEndingBalance,
   isRegexLiteral,
@@ -48,6 +64,27 @@ const {
   sumAmounts,
   toExcelSerial
 } = require('./file-service/normalizers');
+const {
+  FEE_FORMULA_OPERATOR_LABELS,
+  evaluateFeeAmountFormula,
+  normalizeFeeAmountFormula,
+  validateFeeAmountFormula
+} = require('./file-service/bill-split-fee-formula');
+const {
+  ROW_FILTER_OPERATORS,
+  collectBillSplitRowFilterFields,
+  compileBillSplitRowFilter,
+  matchesBillSplitRowFilter,
+  normalizeBillSplitRowFilterRules,
+  validateBillSplitRowFilterRules
+} = require('./file-service/bill-split-row-filter');
+const {
+  PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
+  compileRowFilterRules,
+  matchesRowFilterRules,
+  normalizeRowFilterRules,
+  validateRowFilterRules
+} = require('./file-service/row-filter-rules');
 const {
   appendCurrencyBigAccountIssues,
   applyCurrencyBigAccountMapping,
@@ -168,7 +205,12 @@ function buildMappedRows({
   dateParseOrder = 'auto',
   readOptions = {},
   // v3.2.16：MerchantId「原始账单仅有币种无账户号」时为 { templateName, pairs: [{ currency, merchantId }] }
-  currencyBigAccountMapping = null
+  currencyBigAccountMapping = null,
+  // v3.2.19：原始账单预处理「过滤账单」的过滤规则（main.js 只在勾选且规则有效时下发，否则为 null）
+  preprocessRowFilterRules = null,
+  // v3.2.19：原始账单预处理「重复账单过滤」——为 true 时每个源行的内容指纹写入 rowMetas[i].sourceRowKey，
+  //   供导入时跨文件查重（duplicate-source-rows.js）；不开启时不计算。
+  duplicateRowKeys = false
 }) {
   // 拿不到 币种 → 大账号 配置时直接拒绝，避免 MerchantId 整列留空静默输出。
   const merchantIdUsesCurrencyMapping = normalizeMappingTokens(mappingByField && mappingByField.MerchantId)[0]
@@ -176,12 +218,32 @@ function buildMappedRows({
   if (merchantIdUsesCurrencyMapping && !currencyBigAccountMapping) {
     throw createCurrencyBigAccountConfigMissingError('');
   }
-  const { rows, rowNumbers, headerBreaks = [] } = readRowsWithMetadata(
+  const {
+    rows: sourceRows,
+    rowNumbers: sourceRowNumbers,
+    headerBreaks = [],
+    fullRows: sourceFullRows = null,
+    fullHeaders: sourceFullHeaders = null,
+    fullColumnOffset: sourceFullColumnOffset = 0
+  } = readRowsWithMetadata(
     inputFilePath,
     expectedSourceHeaders,
-    readOptions
+    duplicateRowKeys ? { ...readOptions, includeFullRows: true } : readOptions
   );
-  const sourceHeaders = rows[0] || [];
+  const sourceHeaders = sourceRows[0] || [];
+  // v3.2.19 重复账单过滤：指纹按整行计算——源行与其所属分段的表头都含模板表头范围以外的列（模板没取的列如流水号
+  //   不同、或分段表头不同都不算重复），Excel 错误值与空白不同。
+  const fullSourceRowByNumber = new Map();
+  if (sourceFullRows) {
+    sourceRowNumbers.forEach((rowNumber, index) => {
+      if (index > 0) {
+        fullSourceRowByNumber.set(rowNumber, {
+          headers: (sourceFullHeaders && sourceFullHeaders[index]) || sourceFullRows[0] || sourceHeaders,
+          cells: sourceFullRows[index]
+        });
+      }
+    });
+  }
   const sourceIndexByField = new Map();
   const issues = [];
   const rowMetas = [];
@@ -214,6 +276,15 @@ function buildMappedRows({
   const billSplitByFieldTargetSeqNos = billSplitEnabled && Array.isArray(billSplitMerge.byFieldAmountTargetSeqNos)
     ? billSplitMerge.byFieldAmountTargetSeqNos
     : [];
+  // v3.2.19：费用账单发生额公式。main.js 只在启用特殊取值且有已完成的费用账单行时下发（已校验）。
+  const billSplitFeeFormula = billSplitEnabled
+      && Array.isArray(billSplitMerge.feeAmountFormula)
+      && billSplitMerge.feeAmountFormula.length > 0
+    ? billSplitMerge.feeAmountFormula
+    : null;
+  // 非 0 ÷ 0 的源行号：整份读完后一次报错列出（合计行不计入）。
+  const feeFormulaDivisionByZeroRowNumbers = [];
+  let currentRowFeeFormulaDivisionByZero = false;
   // P1 Fix A (PR #16 review): reuseModuleMapping === false 时非金额字段走弹框 1 的独立 lookup
   const billSplitReuseModuleMapping = billSplitEnabled
     ? billSplitMerge.reuseModuleMapping !== false
@@ -227,9 +298,17 @@ function buildMappedRows({
   // 知道"当前应该用哪套 mapping 判定"——reuseModuleMapping=true 时用主模板 mappingByField，
   // false 时用 billSplitMappingByField。每个 source row 在进入拆分前 (见外层 forEach) 更新。
   let billSplitEffectiveMappingByField = null;
+  // v3.2.19：根据字段值过滤账单——只有命中过滤规则的源行走拆分/合并，其余行走主映射；不开启时全部源行走拆分。
+  //   main.js 只在拆分与过滤都开启、规则有效时下发 rowFilterRules。
+  const billSplitRowFilterRules = billSplitEnabled
+      && Array.isArray(billSplitMerge.rowFilterRules)
+      && billSplitMerge.rowFilterRules.length > 0
+    ? billSplitMerge.rowFilterRules
+    : null;
   let matchedCreditCount = 0;
   let matchedDebitCount = 0;
   let matchedBillSplitCount = 0;
+  let billSplitPathRowCount = 0;
 
   sourceHeaders.forEach((header, index) => {
     const normalizedHeader = normalizeCell(header);
@@ -239,13 +318,40 @@ function buildMappedRows({
     }
   });
 
+  // v3.2.19：原始账单预处理「过滤账单」——只保留命中过滤规则的源行（原始账单加工表），未命中的行不参与之后的
+  //   主映射、拆分/合并、合计行识别与各项统计；保留行的行号仍是源文件物理行号。规则字段不在源文件表头中时拒绝生成。
+  const preprocessed = applyPreprocessRowFilter(sourceRows, sourceRowNumbers, preprocessRowFilterRules, sourceIndexByField);
+  const { rows, rowNumbers } = preprocessed;
+
+  const compiledBillSplitRowFilter = billSplitRowFilterRules
+    ? compileBillSplitRowFilter(billSplitRowFilterRules, sourceIndexByField)
+    : null;
+  // 主映射的币种与发生额只给未命中的行用：命中行按未开过滤时的口径计算底稿（主映射不取币种），
+  // 拆分行币种单元格为空时不回落到主映射币种，也不为命中行记主映射的币种提示。
+  const mainMappingForBillSplitRows = compiledBillSplitRowFilter
+    ? Object.fromEntries(Object.entries(mappingByField || {}).filter(([targetField]) => targetField !== 'Currency'))
+    : mappingByField;
+
   // v3.2.16：字段筛选特征值——实际生效的映射（拆分且不复用时为拆分映射，否则为主映射）用到 token 时启用；
   // v3.2.18：每个用到的特征值每行只计算一次，选同一特征值的目标字段共用同一个结果，再各自走后续规范化（日期、金额等）。
   // 不复用时主映射里残留的该值不输出，不启用、也不记未命中提示。
-  const featureFilterEffectiveLookup = billSplitEnabled && !billSplitReuseModuleMapping
-    ? billSplitMappingByField
-    : mappingByField;
-  const activeFeatureFilters = collectFeatureFilterIds(featureFilterEffectiveLookup).map((id) => {
+  // v3.2.19：根据字段值过滤账单时未命中的行走主映射，主映射与拆分映射用到的特征值都启用；未命中提示只记该行所走映射用到的。
+  const mainPathFeatureFilterIds = collectFeatureFilterIds(mappingByField);
+  const billSplitPathFeatureFilterIds = billSplitEnabled && !billSplitReuseModuleMapping
+    ? collectFeatureFilterIds(billSplitMappingByField)
+    : mainPathFeatureFilterIds;
+  const mainPathEffective = !billSplitEnabled || billSplitReuseModuleMapping || Boolean(compiledBillSplitRowFilter);
+  const activeFeatureFilterIds = (billSplitEnabled ? billSplitPathFeatureFilterIds.slice() : []);
+  if (mainPathEffective) {
+    mainPathFeatureFilterIds.forEach((id) => {
+      if (!activeFeatureFilterIds.includes(id)) {
+        activeFeatureFilterIds.push(id);
+      }
+    });
+  }
+  const mainPathFeatureFilterIdSet = new Set(mainPathFeatureFilterIds);
+  const billSplitPathFeatureFilterIdSet = new Set(billSplitPathFeatureFilterIds);
+  const activeFeatureFilters = activeFeatureFilterIds.map((id) => {
     const rawRule = featureFilters && Object.prototype.hasOwnProperty.call(featureFilters, id) ? featureFilters[id] : null;
     if (!rawRule) {
       throw new FileValidationError('FILE_READ', '特征值：映射选择的特征值不存在，请在映射关系管理中重新选择');
@@ -259,6 +365,10 @@ function buildMappedRows({
     return { id, name, rule, sourceIndex };
   });
   const activeFeatureFilterById = new Map(activeFeatureFilters.map((item) => [item.id, item]));
+  // 一行源数据的特征值 { id → 值 }；主循环逐行更新 currentRowFeatureValues。
+  const extractRowFeatureValues = (row) => new Map(activeFeatureFilters.map((item) => (
+    [item.id, extractFeatureValue(row[item.sourceIndex], item.rule)]
+  )));
   let currentRowFeatureValues = new Map();
 
   if (amountSplitEnabled) {
@@ -276,6 +386,15 @@ function buildMappedRows({
     });
   }
 
+  // v3.2.19：逻辑取值的候补字段须都在源文件表头中（主映射；拆分不复用模块映射时含拆分映射）
+  collectLogicValueFields(mappingByField)
+    .concat(billSplitEnabled && !billSplitReuseModuleMapping ? collectLogicValueFields(billSplitMappingByField) : [])
+    .forEach((field) => {
+      if (!sourceIndexByField.has(field)) {
+        throw new FileValidationError('FILE_READ', `映射字段不存在：${field}`);
+      }
+    });
+
   if (billSplitEnabled) {
     function ensureBillSplitFieldExists(fieldName) {
       const normalized = normalizeCell(fieldName);
@@ -292,8 +411,13 @@ function buildMappedRows({
 
     billSplitRows.forEach((row) => {
       ensureBillSplitFieldExists(row.currencySourceField);
-      ensureBillSplitFieldExists(row.creditSourceField);
-      ensureBillSplitFieldExists(row.debitSourceField);
+      // v3.2.19：费用账单行不读 Credit；有公式时也不读 Debit（映射保留供取消后恢复，不要求列仍存在）
+      if (!row.isFeeBill) {
+        ensureBillSplitFieldExists(row.creditSourceField);
+      }
+      if (!(row.isFeeBill && billSplitFeeFormula)) {
+        ensureBillSplitFieldExists(row.debitSourceField);
+      }
       ensureBillSplitFieldExists(row.amountSourceField);
     });
 
@@ -305,6 +429,10 @@ function buildMappedRows({
     if (billSplitSignedField) {
       ensureBillSplitFieldExists(billSplitSignedField);
     }
+
+    (billSplitFeeFormula || []).forEach((item) => {
+      ensureBillSplitFieldExists(item.field);
+    });
   }
 
   const mappedRows = [orderedTargetFields.slice()];
@@ -318,7 +446,8 @@ function buildMappedRows({
     return normalizedValue ? [normalizedValue] : [];
   }
 
-  function resolveMappedPartsByTokens(mappingTokens, row) {
+  // featureValues：该行的特征值；默认取主循环当前行（currentRowFeatureValues），其他行须显式传入。
+  function resolveMappedPartsByTokens(mappingTokens, row, featureValues = currentRowFeatureValues) {
     return mappingTokens.map((token) => {
       if (token.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
         return token.slice(FIXED_FIELD_VALUE_PREFIX.length);
@@ -326,7 +455,16 @@ function buildMappedRows({
 
       const featureFilterId = parseFeatureFilterToken(token);
       if (featureFilterId !== null) {
-        return currentRowFeatureValues.get(featureFilterId) ?? '';
+        return featureValues.get(featureFilterId) ?? '';
+      }
+
+      // v3.2.19：逻辑取值——按顺序取第一个去首尾空白后非空的候补字段原值（token 以 NUL 开头，不会与真实列名相同）
+      const logicValueFields = parseLogicValueToken(token);
+      if (logicValueFields !== null) {
+        return resolveLogicValue(logicValueFields, (field) => {
+          const index = sourceIndexByField.get(field);
+          return index === undefined ? '' : row[index];
+        });
       }
 
       const sourceIndex = sourceIndexByField.get(token);
@@ -346,14 +484,14 @@ function buildMappedRows({
       .join('');
   }
 
-  function resolveDateRawValueByMapping(mappingValue, row) {
+  function resolveDateRawValueByMapping(mappingValue, row, featureValues = currentRowFeatureValues) {
     const mappingTokens = normalizeMappingTokens(mappingValue);
 
     if (!mappingTokens.length) {
       return '';
     }
 
-    return resolveMappedPartsByTokens(mappingTokens, row)
+    return resolveMappedPartsByTokens(mappingTokens, row, featureValues)
       .map((value) => normalizeCell(value))
       .filter((value) => value !== '')
       .join(' ');
@@ -431,11 +569,31 @@ function buildMappedRows({
     const hasSignedAmount = Boolean(billSplitSignedField);
     const hasAmountRules = billSplitAmountRules.length > 0;
     const useAmountSourceField = hasSignedAmount || hasAmountRules;
+    // v3.2.19：根据字段值过滤账单时同一份账单里拆分行与主映射行并存，拆分行的币种也按币种映射表规范化
+    //   （与主映射同一口径），避免同一币种输出成「人民币」与 CNY 两种写法、余额按币种分组时拆成两组。
+    //   未开启过滤的拆分模板保持取原值。同一源行内同一字段同一原值只规范化、只记提示一次。
+    const resolvedCurrencyByKey = new Map();
+    const resolveSplitRowCurrency = (rawCurrency, sourceField) => {
+      if (!compiledBillSplitRowFilter || !rawCurrency) {
+        return rawCurrency;
+      }
+      const key = `${sourceField}\u0000${rawCurrency}`;
+      if (!resolvedCurrencyByKey.has(key)) {
+        const currencyResult = resolveCurrencyValue(rawCurrency, currencyMappings, {
+          allowFuzzy: !merchantIdUsesCurrencyMapping
+        });
+        if (currencyResult.issue) {
+          issues.push({ ...currencyResult.issue, rowNumber: sourceRowNumber, sourceField });
+        }
+        resolvedCurrencyByKey.set(key, normalizeCell(currencyResult.value));
+      }
+      return resolvedCurrencyByKey.get(key);
+    };
 
     return billSplitRows
       .map((splitRow) => {
         const expandedRow = baseMappedRow.slice();
-        const currencyValue = normalizeCell(readSourceCell(originalRow, splitRow.currencySourceField));
+        const rawCurrencyValue = normalizeCell(readSourceCell(originalRow, splitRow.currencySourceField));
         let creditValue = '';
         let debitValue = '';
 
@@ -445,7 +603,16 @@ function buildMappedRows({
         const isTargetedBySigned = hasSignedTargets && billSplitSignedTargetSeqNos.includes(splitRow.seqNo);
         const isTargetedByField = hasByFieldTargets && billSplitByFieldTargetSeqNos.includes(splitRow.seqNo);
 
-        if (isTargetedBySigned && hasSignedAmount) {
+        // v3.2.19：费用账单行只有支出；启用特殊取值时 Debit 取公式结果，优先于副区域规则与行级映射。
+        const isFeeBillRow = Boolean(splitRow.isFeeBill);
+
+        if (isFeeBillRow && billSplitFeeFormula) {
+          const fee = evaluateFeeAmountFormula(billSplitFeeFormula, (field) => readSourceCell(originalRow, field));
+          if (fee.divisionByZero) {
+            currentRowFeeFormulaDivisionByZero = true;
+          }
+          debitValue = fee.amount;
+        } else if (isTargetedBySigned && hasSignedAmount) {
           // 该行被"按正负号拆分的发生额"指定
           const split = splitSignedAmountValue(readSourceCell(originalRow, billSplitSignedField));
           creditValue = split.creditAmount;
@@ -475,6 +642,9 @@ function buildMappedRows({
           creditValue = sanitizeAmountValue(readSourceCell(originalRow, splitRow.creditSourceField));
           debitValue = sanitizeAmountValue(readSourceCell(originalRow, splitRow.debitSourceField));
         }
+        if (isFeeBillRow) {
+          creditValue = '';
+        }
 
         // 静默过滤：credit 和 debit 都为 0（或空）的拆分行直接丢弃，不输出也不报错
         const creditNum = parseNumericValue(creditValue);
@@ -484,6 +654,8 @@ function buildMappedRows({
           return null;
         }
 
+        // 只为实际输出的拆分行规范化币种并记提示（收付均为 0 的拆分行已丢弃）
+        const currencyValue = resolveSplitRowCurrency(rawCurrencyValue, normalizeCell(splitRow.currencySourceField));
         if (currencyTargetIndex >= 0 && currencyValue) {
           expandedRow[currencyTargetIndex] = currencyValue;
         }
@@ -634,9 +806,22 @@ function buildMappedRows({
   }
 
   rows.slice(1).forEach((row, rowIndex) => {
-    currentRowFeatureValues = new Map(activeFeatureFilters.map((item) => (
-      [item.id, extractFeatureValue(row[item.sourceIndex], item.rule)]
-    )));
+    currentRowFeeFormulaDivisionByZero = false;
+    // v3.2.19：重复账单过滤的源行指纹（经「过滤账单」保留的行才会进入本循环）
+    const fullSourceRow = duplicateRowKeys ? fullSourceRowByNumber.get(rowNumbers[rowIndex + 1]) : null;
+    const sourceRowKey = duplicateRowKeys
+      ? (fullSourceRow
+        ? buildSourceRowKey(fullSourceRow.headers, fullSourceRow.cells, { columnOffset: sourceFullColumnOffset })
+        : buildSourceRowKey(sourceHeaders, row))
+      : '';
+    // 开启查重但该行无法核对原文（含公式、编码有损等）时记下，生成提示据此说明有多少行未参与查重
+    const sourceRowKeyMeta = sourceRowKey ? { sourceRowKey } : (duplicateRowKeys ? { sourceRowKeyUnavailable: true } : {});
+    const rowUsesBillSplit = billSplitEnabled
+      && (!compiledBillSplitRowFilter || matchesBillSplitRowFilter(row, compiledBillSplitRowFilter));
+    if (rowUsesBillSplit) {
+      billSplitPathRowCount += 1;
+    }
+    currentRowFeatureValues = extractRowFeatureValues(row);
     const directCreditAmountRaw = resolveRawValueByMapping(mappingByField['Credit Amount'], row);
     const directDebitAmountRaw = resolveRawValueByMapping(mappingByField['Debit Amount'], row);
     const signedAmountValue = signedAmountSourceField
@@ -708,7 +893,7 @@ function buildMappedRows({
     // 不进明细、不计入拆分统计，记入 issues 供导出报错文件核查。无金额的合计标签行仍按收支为空的行过滤，行为不变。
     // 账单拆分时最终日期取自实际生效的映射（不复用主映射时为拆分映射），金额取自拆分配置，
     // 因此在展开后按拆分结果判定（见下方拆分分支），避免误删真实交易或漏判只在拆分里配金额的合计行。
-    const effectiveBillDateMapping = billSplitEnabled && !billSplitReuseModuleMapping
+    const effectiveBillDateMapping = rowUsesBillSplit && !billSplitReuseModuleMapping
       ? billSplitMappingByField.BillDate
       : mappingByField.BillDate;
     const rawEffectiveBillDate = resolveDateRawValueByMapping(effectiveBillDateMapping, row);
@@ -741,13 +926,13 @@ function buildMappedRows({
       }
     };
 
-    if (!billSplitEnabled && summaryDateLabel && (hasCreditAmount || hasDebitAmount)) {
+    if (!rowUsesBillSplit && summaryDateLabel && (hasCreditAmount || hasDebitAmount)) {
       recordSummaryRow();
       return;
     }
 
-    if (!billSplitEnabled) {
-      rowMetas.push({ sourceRowNumber });
+    if (!rowUsesBillSplit) {
+      rowMetas.push({ sourceRowNumber, ...sourceRowKeyMeta });
     }
 
     // P1 Fix A (PR #16 review): 提取单行映射计算为可复用 helper，以便 billSplit 的
@@ -882,12 +1067,13 @@ function buildMappedRows({
     const issueCountBeforeRow = issues.length;
     // v3.2.16：只为会进入明细的行（有收入或支出）记录未筛出特征值；收支均为空的行另有过滤提示。
     // v3.2.18：每行一条，misses 列出该行未筛出的各特征值。
+    const rowFeatureFilterIdSet = rowUsesBillSplit ? billSplitPathFeatureFilterIdSet : mainPathFeatureFilterIdSet;
     const recordFeatureValueMiss = (hasAmount) => {
       if (!hasAmount) {
         return;
       }
       const misses = activeFeatureFilters
-        .filter((item) => currentRowFeatureValues.get(item.id) === '')
+        .filter((item) => rowFeatureFilterIdSet.has(item.id) && currentRowFeatureValues.get(item.id) === '')
         .map((item) => ({
           featureName: item.name,
           sourceField: item.rule.sourceField,
@@ -897,9 +1083,9 @@ function buildMappedRows({
         issues.push({ type: 'feature-value-unmatched', rowNumber: sourceRowNumber, misses });
       }
     };
-    const mappedRow = computeMappedRow(mappingByField);
+    const mappedRow = computeMappedRow(rowUsesBillSplit ? mainMappingForBillSplitRows : mappingByField);
 
-    if (billSplitEnabled) {
+    if (rowUsesBillSplit) {
       // P1 Fix A (PR #16 review): 当 reuseModuleMapping === false 时用弹框 1 的独立 lookup
       // 重算非金额字段；否则沿用主模板 mappedRow（原行为）。
       //
@@ -919,21 +1105,28 @@ function buildMappedRows({
       }
       const expanded = expandBillSplitForRow(row, billSplitBaseRow, sourceRowNumber);
       // 合计行在合并前按展开后的金额判定：合并会校验组内币种、净额为 0 时整组丢弃，放在合并后会误拒或漏记。
-      if (summaryDateLabel && expanded.some((entry) => (
+      // v3.2.19：费用账单公式非 0 ÷ 0 时被除数有金额、结果留空，同样视为带金额，合计行不计入除零报错。
+      if (summaryDateLabel && (currentRowFeeFormulaDivisionByZero || expanded.some((entry) => (
         hasEffectiveAmount(entry.creditAmount) || hasEffectiveAmount(entry.debitAmount)
-      ))) {
+      )))) {
         // 合计行不产出明细：撤回本行映射时记下的其他提示（如币种未匹配），只留合计行记录。
         issues.length = issueCountBeforeRow;
         recordSummaryRow();
         return;
       }
+      if (currentRowFeeFormulaDivisionByZero) {
+        feeFormulaDivisionByZeroRowNumbers.push(sourceRowNumber);
+      }
       const merged = applyBillSplitMergeForRow(expanded);
       recordFeatureValueMiss(merged.some((entry) => (
         hasEffectiveAmount(entry.creditAmount) || hasEffectiveAmount(entry.debitAmount)
       )));
-      countAmountSplitHits();
+      // 根据字段值过滤账单时主映射的按字段区分发生额只统计走主映射的行
+      if (!compiledBillSplitRowFilter) {
+        countAmountSplitHits();
+      }
       merged.forEach((entry) => {
-        rowMetas.push({ sourceRowNumber: entry.sourceRowNumber });
+        rowMetas.push({ sourceRowNumber: entry.sourceRowNumber, ...sourceRowKeyMeta });
         mappedRows.push(entry.rowArray);
       });
       if (merged.length > 0) {
@@ -945,6 +1138,17 @@ function buildMappedRows({
       mappedRows.push(mappedRow);
     }
   });
+
+  if (feeFormulaDivisionByZeroRowNumbers.length) {
+    const shown = feeFormulaDivisionByZeroRowNumbers.slice(0, 20).join('、');
+    const more = feeFormulaDivisionByZeroRowNumbers.length > 20
+      ? ` 等 ${feeFormulaDivisionByZeroRowNumbers.length} 行`
+      : ' 行';
+    throw new FileValidationError(
+      'BILL_SPLIT_FEE_FORMULA_DIVIDE_BY_ZERO',
+      `费用账单发生额公式的除数为 0，请检查原始账单或公式：第 ${shown}${more}`
+    );
+  }
 
   assertNoInvalidBillDateRows({
     mappedRows,
@@ -967,24 +1171,79 @@ function buildMappedRows({
   mappedRows.rowMetas = rowMetas;
   mappedRows.headerBreaks = headerBreaks;
 
+  const sourceRowCount = rows.length > 0 ? rows.length - 1 : 0;
+
   if (amountSplitEnabled) {
+    // v3.2.19：根据字段值过滤账单时只统计走主映射的行
     mappedRows.amountSplitMatchStats = {
       enabled: true,
-      totalRows: rows.length > 0 ? rows.length - 1 : 0,
+      totalRows: sourceRowCount - billSplitPathRowCount,
       hitCredit: matchedCreditCount,
       hitDebit: matchedDebitCount
     };
   }
 
   if (billSplitEnabled) {
+    // v3.2.19：根据字段值过滤账单时只统计命中过滤规则（走拆分）的行；没有命中行时不提示拆分无输出
     mappedRows.billSplitMatchStats = {
       enabled: true,
-      totalRows: rows.length > 0 ? rows.length - 1 : 0,
+      totalRows: billSplitPathRowCount,
       outputRows: matchedBillSplitCount
     };
   }
 
+  if (preprocessed.enabled) {
+    // 被过滤的行未进入主循环，日期取特征值时按该行单独计算，不能沿用主循环最后一行的特征值。
+    // v3.2.19：原始账单预处理——读到的数据行数与保留（命中过滤规则）的行数，过滤后没有账单行时提示检查规则。
+    //   droppedTransactionRowNumbers：被过滤掉、但账单日期可识别（即本会作为交易行）的源行号。多账户分段文件识别
+    //   下一段表头前的账号时，以上一段最后一笔交易为界（main.js finalizeBigAccountRecognitionBasis），被过滤的交易行
+    //   仍算作上一段的交易，避免其中的账号被当成下一段的账号。
+    const billDateMappings = [mappingByField && mappingByField.BillDate]
+      .concat(billSplitEnabled && !billSplitReuseModuleMapping ? [billSplitMappingByField.BillDate] : []);
+    mappedRows.preprocessRowFilterStats = {
+      enabled: true,
+      totalRows: preprocessed.totalRows,
+      keptRows: preprocessed.keptRows,
+      droppedTransactionRowNumbers: preprocessed.droppedRows
+        .filter(({ row }) => {
+          const featureValues = extractRowFeatureValues(row);
+          return billDateMappings.some((mappingValue) => Boolean(
+            normalizeDateExportValue(resolveDateRawValueByMapping(mappingValue, row, featureValues), { dateParseOrder }).value
+          ));
+        })
+        .map(({ rowNumber }) => rowNumber)
+    };
+  }
+
   return mappedRows;
+}
+
+// v3.2.19：原始账单预处理「过滤账单」。rows[0] 为表头；rowNumbers 与 rows 平行（缺失时按 下标 + 1 回落，同主循环口径）。
+// 没有规则时原样返回。
+function applyPreprocessRowFilter(sourceRows, sourceRowNumbers, rules, sourceIndexByField) {
+  const totalRows = sourceRows.length > 0 ? sourceRows.length - 1 : 0;
+  if (!Array.isArray(rules) || rules.length === 0) {
+    return { enabled: false, rows: sourceRows, rowNumbers: sourceRowNumbers, totalRows, keptRows: totalRows, droppedRows: [] };
+  }
+  const compiled = compileRowFilterRules(rules, sourceIndexByField, {
+    missingMessage: PREPROCESS_ROW_FILTER_MISSING_MESSAGE
+  });
+  if (!sourceRows.length) {
+    return { enabled: true, rows: sourceRows, rowNumbers: sourceRowNumbers, totalRows: 0, keptRows: 0, droppedRows: [] };
+  }
+  const rows = [sourceRows[0]];
+  const rowNumbers = [sourceRowNumbers[0]];
+  const droppedRows = [];
+  for (let index = 1; index < sourceRows.length; index += 1) {
+    const rowNumber = sourceRowNumbers[index] || index + 1;
+    if (matchesRowFilterRules(sourceRows[index], compiled)) {
+      rows.push(sourceRows[index]);
+      rowNumbers.push(rowNumber);
+    } else {
+      droppedRows.push({ row: sourceRows[index], rowNumber });
+    }
+  }
+  return { enabled: true, rows, rowNumbers, totalRows, keptRows: rows.length - 1, droppedRows };
 }
 
 function buildDetailExportRows(rows) {
@@ -1017,10 +1276,8 @@ function buildDetailExportRows(rows) {
     const exportRow = sourceRow.slice();
     const creditAmountValue = creditAmountIndex === undefined ? '' : sourceRow[creditAmountIndex];
     const debitAmountValue = debitAmountIndex === undefined ? '' : sourceRow[debitAmountIndex];
-    const creditAmountNumeric = parseNumericValue(creditAmountValue);
-    const debitAmountNumeric = parseNumericValue(debitAmountValue);
-    const isCreditAmountZeroOrBlank = normalizeCell(creditAmountValue) === '' || creditAmountNumeric === 0;
-    const isDebitAmountZeroOrBlank = normalizeCell(debitAmountValue) === '' || debitAmountNumeric === 0;
+    const isCreditAmountZeroOrBlank = isZeroOrBlankAmount(creditAmountValue);
+    const isDebitAmountZeroOrBlank = isZeroOrBlankAmount(debitAmountValue);
 
     if (
       creditAmountIndex !== undefined &&
@@ -1150,14 +1407,31 @@ module.exports = {
   ensureSupportedFile,
   extractEnumValuesFromImportedFile,
   extractHeaders,
+  FEE_FORMULA_OPERATOR_LABELS,
   loadCurrencyMappings,
   loadEnumValues,
   normalizeCell,
+  normalizeFeeAmountFormula,
+  validateFeeAmountFormula,
+  ROW_FILTER_OPERATORS,
+  collectBillSplitRowFilterFields,
+  normalizeBillSplitRowFilterRules,
+  validateBillSplitRowFilterRules,
+  PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
+  normalizeRowFilterRules,
+  validateRowFilterRules,
   normalizeDateExportValue,
+  describeDuplicateKeeperReplacementConflicts,
+  dropDuplicateSourceRows,
+  findDuplicateKeeperReplacementConflicts,
+  scanDuplicateSourceRows,
   buildFeatureFilterToken,
+  buildLogicValueToken,
   getFeatureFilterRef,
   normalizeFeatureFilterList,
   normalizeFeatureFilterRule,
+  normalizeLogicValueFields,
+  LOGIC_VALUE_MIN_FIELDS,
   LEGACY_FEATURE_FILTER_ID,
   parseFeatureFilterToken,
   resolveUsedFeatureFilters,

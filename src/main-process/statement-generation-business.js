@@ -834,6 +834,9 @@ function createGenerationHelpers(options) {
       ),
       unmatchedBillSplitFiles: preparedGroups.flatMap(
         ({ baseline }) => baseline.unmatchedBillSplitFiles || []
+      ),
+      emptyPreprocessedFiles: preparedGroups.flatMap(
+        ({ baseline }) => baseline.emptyPreprocessedFiles || []
       )
     };
 

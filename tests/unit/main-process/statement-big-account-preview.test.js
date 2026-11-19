@@ -1836,6 +1836,12 @@ test('大账号续跑沿用重复提示中确认覆盖的旧路径：跨目录�
       getOrCreateStatementImportSession: sessionHelpers.getOrCreateStatementImportSession,
       statementImportSessions,
       applyBigAccountAssignmentsToFileEntries: (entries) => entries,
+      // v3.2.19：重复账单过滤（本用例没有重复账单，原样放行）；业务入口的配置核对（prepared 没有核对函数时放行）
+      statementDuplicateReview: { clear: () => {} },
+      checkImportConfigGuard: () => null,
+      IMPORT_CONFIG_CHANGED_MESSAGE: '导入期间模板、渠道或账户映射已修改，请重新导入文件',
+      DUPLICATE_REVIEW_CONFIG_CHANGED_MESSAGE: '等待确认期间模板、渠道或账户映射已修改，请重新导入文件',
+      applyConfirmedDuplicateRowFilter: (entries) => ({ entries }),
       isFilenameMappingMode: () => false,
       resolveGenerationTemplateConfig: ({ fallbackTemplateConfig }) => fallbackTemplateConfig,
       buildStatementGenerationConfig: ({ template }) => ({ template }),
@@ -2104,6 +2110,9 @@ function loadDesignatedImportExecute({ templateConfig, mode, order, logs }) {
     // 合入渠道后，指定模板导入在大账号流程前还核对库里的输出名称；本测试的模板无同名所有者，直接放行。
     findGenerationGroupOutputNameConflicts: () => null,
     resolveGenerationGroupKey: (template) => `template:${template.id}`,
+    // v3.2.19：重复账单过滤——本测试的模板未勾选（条目没有源行指纹）
+    hasDuplicateRowKeys: require('../../../src/main-process/statement-duplicate-review').hasSourceRowKeys,
+    isDuplicateRowFilterEnabled: () => false,
     MERCHANT_ID_SELF_INPUT_OPTION: constValue('MERCHANT_ID_SELF_INPUT_OPTION'),
     STATEMENT_IMPORT_PREVIEW_READY: constValue('STATEMENT_IMPORT_PREVIEW_READY'),
     SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS: constValue('SAVED_BIG_ACCOUNT_ORDER_DOWNGRADE_REASONS')
@@ -2346,4 +2355,111 @@ test('固定模式按位置预填：只有表头的单块文件记为空段，�
     'unfixed',
     '空文件变成有交易但未识别账号的文件：不能按位置套用记住的 M001/USD'
   );
+});
+
+test('v3.2.19 原始账单预处理：上一段被过滤掉的交易行不作为下一段的账号桥接候选', () => {
+  const normalize = (value) => String(value == null ? '' : value).trim();
+  const match = (cell, merchantId) => normalize(cell) === normalize(merchantId) ? 'exact' : 'none';
+  const findHeaders = loadFunction(
+    'findHeaderRowNumbersInRawRows',
+    ['normalizeCell', 'buildExpectedHeaderCandidates'],
+    [normalize, buildExpectedHeaderCandidates]
+  );
+  const buildBasis = loadFunction(
+    'buildBigAccountRecognitionBasis',
+    ['findHeaderRowNumbersInRawRows', 'normalizeCell', 'matchMerchantIds'],
+    [findHeaders, normalize, match]
+  );
+  const identifyBlocks = loadFunction('identifyAccountBlocks', ['normalizeCell'], [normalize]);
+  const finalizeBasis = loadFunction(
+    'finalizeBigAccountRecognitionBasis',
+    ['identifyAccountBlocks', 'normalizeCell'],
+    [identifyBlocks, normalize]
+  );
+  // 第二段表头前没有「银行账号」说明行；第一段最后一笔（第 4 行，本方账号 BANK1）被预处理过滤掉
+  const provisionalBasis = buildBasis({
+    rawRows: [
+      ['银行账号', 'BANK1'],
+      ['Date', 'Amount', 'Account'],
+      ['2026-08-01', '1', 'BANK1'],
+      ['2026-08-01', '9', 'BANK1'],
+      ['Date', 'Amount', 'Account'],
+      ['2026-08-02', '2', 'BANK2']
+    ],
+    expectedSourceHeaders: ['Date', 'Amount', 'Account'],
+    accountMappingByBankId: { BANK1: { clearingAccountId: 'M001' }, BANK2: { clearingAccountId: 'M002' } }
+  });
+  const mappedRows = (preprocessRowFilterStats) => {
+    const rows = [['Credit Amount', 'Debit Amount'], ['1', ''], ['2', '']];
+    rows.rowMetas = [{ sourceRowNumber: 3 }, { sourceRowNumber: 6 }];
+    rows.headerBreaks = [5];
+    if (preprocessRowFilterStats) rows.preprocessRowFilterStats = preprocessRowFilterStats;
+    return rows;
+  };
+  // 不带被过滤交易行信息时，第 4 行会被当成第二段的账号说明（M001）
+  assert.deepEqual(finalizeBasis(provisionalBasis, mappedRows(null)).bridgeClearingIdsByBlock, ['M001', 'M001']);
+  // 被过滤的交易行仍算作第一段：第二段没有可用的账号说明，不桥接
+  assert.deepEqual(finalizeBasis(provisionalBasis, mappedRows({
+    enabled: true, totalRows: 3, keptRows: 2, droppedTransactionRowNumbers: [4]
+  })).bridgeClearingIdsByBlock, ['M001', '']);
+});
+
+test('v3.2.19 原始账单预处理 + 特征值日期：真实生成后，被过滤的说明行仍可作下一段的账号桥接', (t) => {
+  const { buildFeatureFilterToken, buildMappedRows } = require('../../../src/backend/file-service');
+  const XLSX = require('xlsx');
+  const normalize = (value) => String(value == null ? '' : value).trim();
+  const match = (cell, merchantId) => normalize(cell) === normalize(merchantId) ? 'exact' : 'none';
+  const findHeaders = loadFunction(
+    'findHeaderRowNumbersInRawRows',
+    ['normalizeCell', 'buildExpectedHeaderCandidates'],
+    [normalize, buildExpectedHeaderCandidates]
+  );
+  const buildBasis = loadFunction(
+    'buildBigAccountRecognitionBasis',
+    ['findHeaderRowNumbersInRawRows', 'normalizeCell', 'matchMerchantIds'],
+    [findHeaders, normalize, match]
+  );
+  const identifyBlocks = loadFunction('identifyAccountBlocks', ['normalizeCell'], [normalize]);
+  const finalizeBasis = loadFunction(
+    'finalizeBigAccountRecognitionBasis',
+    ['identifyAccountBlocks', 'normalizeCell'],
+    [identifyBlocks, normalize]
+  );
+  const headers = ['Date', 'Type', 'Amount'];
+  // 第 4 行（冻结）是被过滤的交易行；第 5 行是第二段的账号说明（也被过滤，但不是交易行）
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preprocess-bridge-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const filePath = path.join(dir, 'two-blocks.xlsx');
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ['银行账号', 'BANK1'],
+    headers,
+    ['2026-08-01', '交易', '1'],
+    ['2026-08-01', '冻结', '9'],
+    ['银行账号', 'BANK2'],
+    headers,
+    ['2026-08-02', '交易', '2']
+  ]), 'Sheet1');
+  XLSX.writeFile(workbook, filePath);
+  let provisionalBasis = null;
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Credit Amount'],
+    mappingByField: { BillDate: buildFeatureFilterToken('1'), 'Credit Amount': 'Amount' },
+    featureFilters: { 1: { id: '1', name: '日期', sourceField: 'Date', separator: '', length: 10 } },
+    expectedSourceHeaders: headers,
+    preprocessRowFilterRules: [{ conditions: [{ field: 'Type', op: '等于', value: '交易' }] }],
+    readOptions: {
+      onWorkbookRows(rawRows) {
+        provisionalBasis = buildBasis({
+          rawRows,
+          expectedSourceHeaders: headers,
+          accountMappingByBankId: { BANK1: { clearingAccountId: 'M001' }, BANK2: { clearingAccountId: 'M002' } }
+        });
+      }
+    }
+  });
+  assert.deepEqual(mapped.rowMetas.map((meta) => meta.sourceRowNumber), [3, 7]);
+  assert.deepEqual(mapped.preprocessRowFilterStats.droppedTransactionRowNumbers, [4]);
+  assert.deepEqual(finalizeBasis(provisionalBasis, mapped).bridgeClearingIdsByBlock, ['M001', 'M002']);
 });

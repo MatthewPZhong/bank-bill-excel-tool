@@ -24,7 +24,8 @@
   max-height: calc(100vh - 56px);
 }
 .manager-card { min-height: 360px; }
-.mapping-card { width: min(100%, 1120px); }
+/* v3.2.19：映射字段下拉框减半后弹窗随之收窄（原 1120px），列宽见下方 Mapping-card 表格 */
+.mapping-card { width: min(100%, 780px); }
 .account-card { width: min(100%, 920px); }
 .big-account-card { width: min(100%, 980px); }
 .balance-addon-card { width: min(100%, 1120px); }
@@ -96,6 +97,10 @@
   transition: opacity .12s ease;
 }
 .title-tips:hover .title-tips-bubble { opacity: 1; }
+/* v3.2.19：正文标签右侧的 Tips（如「候补字段取值」）：正文字号下按 1.5em 宽显示，否则看不清 */
+.title-tips.title-tips-inline { vertical-align: 0.3em; margin-left: 0.25em; }
+.title-tips-inline .title-tips-mark { width: 1.6em; height: 0.8em; }
+.title-tips-inline .title-tips-bubble { font-weight: 400; }
 .dialog-header-checkboxes {
   display: flex; align-items: center; gap: 16px;
   margin-left: 16px;
@@ -2696,7 +2701,110 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
 .bill-split-target-seq-label input { accent-color: var(--primary); }
 .bill-split-sub-hint { font-size: 12px; }
 
+/* v3.2.19 费用账单列、费用账单发生额特殊取值与公式设置 */
+.bill-split-rows-table .bill-split-fee-bill-header,
+.bill-split-rows-table .bill-split-fee-bill-cell { text-align: center; white-space: nowrap; }
+.bill-split-fee-bill-checkbox,
+.bill-split-fee-formula-checkbox {
+  width: 16px; height: 16px; margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.bill-split-fee-bill-checkbox:disabled,
+.bill-split-fee-formula-checkbox:disabled { cursor: not-allowed; }
+.bill-split-fee-formula-hint { font-size: 12px; color: var(--muted); }
+.bill-split-fee-formula-card { width: min(100%, 960px); }
+.bill-split-fee-formula-body {
+  display: flex; align-items: center;
+  min-height: 180px;
+  padding: 24px 28px;
+}
+.bill-split-fee-formula-editor {
+  display: flex; align-items: flex-start; justify-content: center; gap: 10px;
+  width: 100%;
+}
+.bill-split-fee-formula-add-btn {
+  flex: 0 0 auto;
+  height: 40px;
+  color: var(--primary);
+  white-space: nowrap;
+}
+.bill-split-fee-formula-label {
+  flex: 0 0 auto;
+  line-height: 40px;
+  font-size: 14px; font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+}
+/* 一行 6 个下拉框，第 7 个起换行并与首个对齐；宽度固定，新增下拉框不推动「发生额=」 */
+.bill-split-fee-formula-grid {
+  flex: 0 1 744px; min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+.bill-split-fee-formula-grid .mapping-select {
+  width: 100%; min-width: 0; height: 40px;
+  padding: 0 26px 0 12px;
+  background-position: right 10px center;
+  text-overflow: ellipsis;
+}
+
 .bill-split-rows-footer { padding: 14px 28px 18px; }
+
+/* v3.2.19 过滤规则设置（根据字段值过滤账单 / 原始账单预处理共用；沿用场景管理「账单类型」的 scenario-config-* 样式） */
+.row-filter-rules-card .scenario-config-multi-wrap { min-width: 0; }
+/* 场景弹窗靠「复制场景」把×推到右侧并取消了×的 auto；本弹窗没有该组，×恢复靠右 */
+.scenario-config-card.row-filter-rules-card .dialog-header .icon-close { margin-left: auto; }
+.row-filter-rules-card .scenario-config-input.is-stale { border-color: var(--danger); color: var(--danger); }
+.row-filter-rules-card .scenario-config-multi-row > .text-action { flex: 0 0 auto; white-space: nowrap; }
+/* 运算符含「不包含（字段）」等较长选项，比场景弹窗的 100px 窄下拉框放宽，避免截断 */
+.row-filter-rules-card .scenario-config-input-narrow { flex: 0 0 136px; width: 136px; }
+
+/* v3.2.19 映射字段「逻辑取值」：映射行的候补顺序预览与【设置】弹窗（组件参考月度 pending 规则管理「对账字段」） */
+.mapping-logic-value-preview {
+  min-width: 0; max-width: 320px;
+  font-size: 13px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mapping-logic-value-preview.is-empty { color: var(--muted); }
+.mapping-logic-value-preview[hidden] { display: none; }
+.scenario-config-card.logic-value-card .dialog-header .icon-close { margin-left: auto; }
+.logic-value-card .scenario-config-label.logic-value-label { width: auto; min-width: 120px; white-space: nowrap; }
+.logic-value-rows { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.logic-value-row { display: flex; align-items: center; gap: 8px; }
+.logic-value-serial {
+  flex: 0 0 24px; text-align: right;
+  font-size: 13px; font-weight: 500; color: var(--muted);
+  user-select: none;
+}
+.logic-value-row .logic-value-select {
+  flex: 0 0 240px; width: 240px; min-width: 0; height: 40px;
+  text-overflow: ellipsis;
+}
+.logic-value-row .logic-value-select.is-stale { border-color: var(--danger); color: var(--danger); }
+.logic-value-row-btn {
+  flex: 0 0 auto;
+  background: none; border: none; cursor: pointer;
+  font-size: 13px; padding: 4px 6px; border-radius: 6px;
+  color: var(--primary);
+}
+.logic-value-row-btn[data-role="remove"] { color: var(--danger); }
+.logic-value-row-btn:hover { text-decoration: underline; }
+
+/* v3.2.19 重复账单提醒：说明 + 可滚动表格，【确认】在右下、【取消】在其右 */
+.modal-card.duplicate-rows-review-card { width: min(860px, calc(100vw - 48px)); }
+.duplicate-rows-review-card .dialog-header .icon-close { margin-left: auto; }
+.duplicate-rows-review-body { display: flex; flex-direction: column; gap: 10px; }
+.duplicate-rows-review-summary { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text); }
+.duplicate-rows-review-truncated { margin: 0; font-size: 12px; color: var(--muted); }
+.duplicate-rows-review-table-wrapper { max-height: min(52vh, 420px); overflow: auto; }
+.duplicate-rows-review-table td { vertical-align: middle; }
+.duplicate-rows-review-table tr.is-dropped .duplicate-rows-review-action { color: var(--danger); font-weight: 500; }
+.duplicate-rows-review-table tr.is-kept .duplicate-rows-review-action { color: var(--muted); }
+.duplicate-rows-review-table tr.duplicate-rows-review-hidden td:first-child { color: var(--muted); }
+.duplicate-rows-review-drop-plan { max-height: 96px; overflow: auto; font-size: 12px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
+.duplicate-rows-review-drop-plan-title { color: var(--muted); }
 
 /* =================== Big-account · currency dropdown (open state) =================== */
 .currency-cell { position: relative; overflow: visible; }
@@ -3809,31 +3917,84 @@ tr.add-row .text-action:hover { background: var(--primary-soft, #c2d7fa); }
 
 .bill-split-rows-table { table-layout: fixed; }
 
-/* Mapping-card 表格列比例对齐 General（模板字段窄 / 映射字段宽） */
+/* Mapping-card 表格：模板字段列定宽（放得下最长字段名 + 勾选框），映射字段列占余下宽度。
+   v3.2.19：映射字段下拉框由撑满改为 362px（原 1120px 弹窗下约 723px 的一半），「选择特征值」下拉框 180px → 90px。
+   映射值为「字段筛选特征值」时，特征值一组（文字 + 下拉框 + 按钮）与主下拉框同行：主下拉框右边界左移，
+   使特征值下拉框右边界与其他行下拉框右边界对齐、【特征值管理】与其他行按钮（如【维护大账号】）左对齐；
+   放大缩放等空间不足时整组换到下一行兜底。 */
+.mapping-card {
+  --mapping-select-width: 362px;
+  --mapping-editor-gap: 12px;
+  --mapping-feature-label-width: 5em; /* 「选择特征值」5 个汉字 */
+  --mapping-feature-value-width: 90px;
+}
 .mapping-card .data-table { table-layout: fixed; }
 .mapping-card .data-table th:nth-child(1),
-.mapping-card .data-table td:nth-child(1) { width: 30%; }
+.mapping-card .data-table td:nth-child(1) { width: 220px; }
 .mapping-card .data-table th:nth-child(2),
-.mapping-card .data-table td:nth-child(2) { width: 70%; }
+.mapping-card .data-table td:nth-child(2) { width: auto; }
+.mapping-card .mapping-field-editor { gap: var(--mapping-editor-gap); }
+.mapping-card .mapping-field-editor > .mapping-select { flex: 0 1 var(--mapping-select-width); width: var(--mapping-select-width); min-width: 0; }
+.mapping-card .mapping-field-editor > .mapping-select:has(+ .mapping-feature-value-group:not([hidden])) {
+  flex: 0 0 auto;
+  width: calc(var(--mapping-select-width) - 2 * var(--mapping-editor-gap) - var(--mapping-feature-label-width) - var(--mapping-feature-value-width));
+}
+.mapping-feature-value-group {
+  display: inline-flex; align-items: center; gap: 12px;
+  flex: 0 0 auto; flex-wrap: nowrap;
+}
+.mapping-card .mapping-feature-value-group { gap: var(--mapping-editor-gap); }
+.mapping-card .mapping-feature-value-label { flex: 0 0 var(--mapping-feature-label-width); width: var(--mapping-feature-label-width); }
+.mapping-card .mapping-feature-value-group > .mapping-select.mapping-feature-value-select {
+  flex: 0 0 var(--mapping-feature-value-width); width: var(--mapping-feature-value-width); min-width: 0;
+}
+/* v3.2.19：是 / 否 类映射行的勾选框，位于字段名右侧 */
+.mapping-toggle-label {
+  display: inline-flex; align-items: center; gap: 8px;
+  cursor: pointer;
+}
+.mapping-toggle-checkbox { flex: 0 0 auto; margin: 0; accent-color: var(--primary); cursor: pointer; }
+.mapping-toggle-label:has(.mapping-toggle-checkbox:disabled) { cursor: not-allowed; color: var(--dim); }
+.mapping-toggle-checkbox:disabled { cursor: not-allowed; }
 
 .big-account-currency-editor {
   display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;
   min-height: 44px;
 }
+/* 币种补全输入（维护大账号、币种映射账号管理共用）：补全层（ghost，禁用的 input）垫在输入框下方显示补全提示。
+   v3.2.19：两层盒模型、字体完全一致并完全重合；底色由外壳绘制，输入框透明（露出补全提示）且保留边框与聚焦态，
+   补全层无底色无边框。此前补全层只吃到 .new-account-input 的 44px 尺寸，比 36px 输入框高，
+   夜间模式被全局输入/禁用色补上底色和边框后露在输入框下方，形成重叠。夜间配色见 styles-dark-mode.css。 */
 .big-account-currency-input-shell {
   position: relative; width: 70px; flex: 0 0 70px; min-width: 0;
+  border-radius: 8px;
+  background: var(--panel, #fff);
 }
-.big-account-currency-ghost,
-.big-account-currency-input { width: 100%; }
-.big-account-currency-ghost {
-  position: absolute; inset: 0;
-  color: rgba(123, 106, 83, 0.48);
+.big-account-currency-input-shell > .big-account-currency-ghost,
+.big-account-currency-input-shell > .big-account-currency-input {
+  display: block; box-sizing: border-box;
+  width: 100%; height: 36px; margin: 0;
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 0 10px;
+  font-size: 13px; font-family: "Roboto Mono", ui-monospace, monospace; letter-spacing: normal;
+}
+.big-account-currency-input-shell > .big-account-currency-ghost {
+  position: absolute; inset: 0; height: 100%;
+  color: var(--dim);
   background: transparent;
   border-color: transparent;
   pointer-events: none;
 }
-.big-account-currency-input {
-  position: relative; background: transparent; z-index: 1;
+.big-account-currency-input-shell > .big-account-currency-input {
+  position: relative; z-index: 1;
+  background: transparent;
+  color: var(--text);
+  /* 输入时即显示为大写，与大写的补全提示逐字重合（失焦时值本身也会转大写） */
+  text-transform: uppercase;
+}
+.big-account-currency-input-shell > .big-account-currency-input:focus {
+  outline: none; border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(11,87,208,.15);
 }
 .big-account-currency-dropdown-wrap { position: relative; width: 160px; flex: 0 0 160px; }
 .big-account-currency-dropdown-btn { width: 100%; }
@@ -6421,4 +6582,6 @@ body[data-platform="win32"] .dialog-title .title-tips-bubble {
 .currency-big-account-delete-cell { white-space: nowrap; }
 .currency-big-account-insert-cell .text-action { padding-left: 0; }
 .currency-big-account-card .big-account-currency-input-shell { width: 100%; flex: 1 1 auto; }
+/* v3.2.19：币种框与同行大账号框（.mapping-text-input，40px）等高；补全层随外壳撑满 */
+.currency-big-account-card .big-account-currency-input-shell > .big-account-currency-input { height: 40px; }
 .currency-big-account-merchant-input { width: 100%; }

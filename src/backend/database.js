@@ -15,6 +15,8 @@ const {
   ensureVccOpCalcTablesSupport,
   ensureBillSplitMergeSupport,
   ensureBillSplitTargetSeqSupport,
+  ensureBillSplitFeeBillSupport,
+  ensureBillSplitRowFilterSupport,
   ensureParentTemplateSupport,
   ensureStatementChannelSupport,
   hasPendingStatementChannelMigration,
@@ -93,6 +95,7 @@ const {
   ensureTemplateDateFormatSupport,
   ensureTemplateFilenameFixedFieldSupport,
   ensureTemplateFeatureFilterSupport,
+  ensureTemplatePreprocessRowFilterSupport,
   ensureTemplateKeySupport,
   ensureTemplateMappingEnhancements,
   hasColumn
@@ -258,9 +261,12 @@ class AppDatabase {
     this.ensureAmountSplitRulesSupport();
     this.ensureBillSplitMergeSupport();
     this.ensureBillSplitTargetSeqSupport();
+    this.ensureBillSplitFeeBillSupport();
+    this.ensureBillSplitRowFilterSupport();
     this.ensureParentTemplateSupport();
     this.ensureTemplateFilenameFixedFieldSupport();
     this.ensureTemplateFeatureFilterSupport();
+    this.ensureTemplatePreprocessRowFilterSupport();
     this.ensureAccountMappingTemplateSupport();
     this.ensureTemplateBigAccountNatureSupport();
     this.ensureTemplateCurrencyBigAccountSupport();
@@ -773,6 +779,14 @@ class AppDatabase {
     return ensureBillSplitTargetSeqSupport(this.db);
   }
 
+  ensureBillSplitFeeBillSupport() {
+    return ensureBillSplitFeeBillSupport(this.db);
+  }
+
+  ensureBillSplitRowFilterSupport() {
+    return ensureBillSplitRowFilterSupport(this.db);
+  }
+
   ensureParentTemplateSupport() {
     return ensureParentTemplateSupport(this.db);
   }
@@ -783,6 +797,10 @@ class AppDatabase {
 
   ensureTemplateFeatureFilterSupport() {
     return ensureTemplateFeatureFilterSupport(this.db);
+  }
+
+  ensureTemplatePreprocessRowFilterSupport() {
+    return ensureTemplatePreprocessRowFilterSupport(this.db);
   }
 
   ensureAccountMappingTemplateSupport() {
@@ -1230,6 +1248,10 @@ class AppDatabase {
 
   saveBillSplitRow(templateId, row) {
     return templateRepository.saveBillSplitRow(this.db, templateId, row);
+  }
+
+  setBillSplitFeeBillRow(templateId, seqNo) {
+    return templateRepository.setBillSplitFeeBillRow(this.db, templateId, seqNo);
   }
 
   deleteBillSplitRow(templateId, seqNo) {
