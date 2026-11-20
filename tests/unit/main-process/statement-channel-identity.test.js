@@ -6,7 +6,6 @@ const assert = require('node:assert/strict');
 
 const {
   describeBalanceMode,
-  findBalanceModeMismatch,
   resolveGenerationGroupKey,
   resolveStatementOutputName,
   resolveTemplateBalanceMode
@@ -35,13 +34,4 @@ test('余额方式：未映射与“无”为不出余额，“通过发生额�
   assert.equal(resolveTemplateBalanceMode([{ templateField: 'Balance', mappedField: '通过发生额计算' }]), 'calculated');
   assert.equal(resolveTemplateBalanceMode([{ templateField: 'BillDate', mappedField: '日期' }, { templateField: 'Balance', mappedField: '余额' }]), 'statement');
   assert.equal(describeBalanceMode('statement'), '取账单余额列');
-});
-
-test('余额方式一致返回 null，不一致逐行列出子模板与方式', () => {
-  assert.equal(findBalanceModeMismatch([{ templateName: 'A', balanceMode: 'calculated' }, { templateName: 'B', balanceMode: 'calculated' }]), null);
-  assert.equal(findBalanceModeMismatch([]), null);
-  assert.deepEqual(
-    findBalanceModeMismatch([{ templateName: 'A', balanceMode: 'calculated' }, { templateName: 'B', balanceMode: 'statement' }]),
-    ['A：通过发生额计算', 'B：取账单余额列']
-  );
 });

@@ -203,8 +203,17 @@ function createStatementGenerationHelpers(deps) {
           throw new FileValidationError('FILE_READ', '余额账单模板为空或不可读，请重新确认');
         }
 
+        // v3.2.21（D2）：渠道组内子模板余额方式不同时，余额只用不是“不出余额”的条目的行（同样剔除收支都为空的行），
+        //   各账户按 balanceModeByAccount 取自己的方式；否则沿用明细的全部行与单一方式。
+        let balanceDetailRows = effectiveDetailRows;
+        if (Array.isArray(preparedBatch.balanceDetailRows)) {
+          const balanceSourceRows = cloneRowsWithMetadata(preparedBatch.balanceDetailRows);
+          const balanceExportRows = buildDetailExportRows(balanceSourceRows);
+          balanceDetailRows = Array.isArray(balanceExportRows.sourceRows) ? balanceExportRows.sourceRows : balanceSourceRows;
+        }
+
         balanceSeedStatus = scanBalanceSeedStatus({
-          detailRows: effectiveDetailRows,
+          detailRows: balanceDetailRows,
           templateName: statementOutputName(config)
         });
 
@@ -221,10 +230,11 @@ function createStatementGenerationHelpers(deps) {
         const seedStorageRoot = ensureStorageRoot();
         const seenManualBalanceSeeds = seenManualBalanceSeedsFor(seedStorageRoot, templateBankName);
         const balanceResult = deriveBalanceRecords({
-          detailRows: effectiveDetailRows,
+          detailRows: balanceDetailRows,
           templateName: statementOutputName(config),
           balanceTemplateFields,
           mode: preparedBatch.balanceMode,
+          modeByAccount: preparedBatch.balanceModeByAccount || null,
           balanceAdjustments,
           acknowledgedBalanceGapKeys: acknowledgedBalanceKeys,
           acknowledgedBalanceMismatchKeys: acknowledgedBalanceKeys,

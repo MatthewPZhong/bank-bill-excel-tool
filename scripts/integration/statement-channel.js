@@ -2,7 +2,8 @@
 //   覆盖：真实主库（渠道、归属、渠道账户映射、迁移）+ 真实 xlsx 读取与写出 + main.js 中的真实分组、生成配置与导入校验函数
 //   ① 渠道两个子模板、两个文件含同一账号：一份明细、一份余额，Channel 列与余额银行名称/所在地取渠道名，
 //      余额跨文件连续，计算种子写在渠道银行段的种子文件；文件名用渠道名
-//   ② 余额方式不一致：保存映射被拒；绕过保存（直接写库）后导入整批阻断，导出目录没有新文件
+//   ② 余额方式可不一致（v3.2.21）：不同账户各按子模板的方式出余额（计算 / 账单余额列 / 不出余额），
+//      组内第一个子模板不出余额时其他账户照常出余额；同一账户同批命中不同方式时整批阻断，导出目录没有新文件
 //   ③ 渠道组与普通模板混合导入：按渠道计一组，汇总文件名组数正确，回读两组账号齐全
 //   ④ 发生额计算：渠道首次补录只提示一次、补录种子写入渠道银行段；跨文件断档按渠道一次判定
 //   ⑤ 旧主/子数据迁移后导入，结果与 ① 相同口径
@@ -55,6 +56,7 @@ const {
   buildFieldIndexMap,
   deriveBalanceRecords,
   parseRequiredBillDates,
+  resolveAccountBalanceModes,
   scanBalanceSeedStatus
 } = require('../../src/main-process/statement-generation-business');
 const {
@@ -75,7 +77,7 @@ const { createTemplateHeaderUpdateTools } = require('../../src/main-process/temp
 const ROOT = path.join(__dirname, '..', '..');
 const MAIN_SOURCE = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
 const MAIN_AST = acorn.parse(MAIN_SOURCE, { ecmaVersion: 'latest', sourceType: 'script' });
-const ORDERED_FIELDS = ['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount', 'Channel'];
+const ORDERED_FIELDS = ['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount', 'Balance', 'Channel'];
 const TODAY = '2026-11-05';
 const FIXED = '__FIXED__:';
 const MULTI = '__MULTI_BIG_ACCOUNT__';
@@ -111,7 +113,9 @@ function loadMainFunctions(names, deps = {}) {
 const LAYOUTS = {
   A: { headers: ['Date', 'Account', 'Curr', 'Credit', 'Debit'], map: { BillDate: 'Date', MerchantId: 'Account', Currency: 'Curr', 'Credit Amount': 'Credit', 'Debit Amount': 'Debit' } },
   B: { headers: ['TxnDate', 'Acct', 'Ccy', 'In', 'Out'], map: { BillDate: 'TxnDate', MerchantId: 'Acct', Currency: 'Ccy', 'Credit Amount': 'In', 'Debit Amount': 'Out' } },
-  C: { headers: ['D', 'A', 'C', 'Cr', 'Dr'], map: { BillDate: 'D', MerchantId: 'A', Currency: 'C', 'Credit Amount': 'Cr', 'Debit Amount': 'Dr' } }
+  C: { headers: ['D', 'A', 'C', 'Cr', 'Dr'], map: { BillDate: 'D', MerchantId: 'A', Currency: 'C', 'Credit Amount': 'Cr', 'Debit Amount': 'Dr' } },
+  // 带账单余额列（取账单余额列时 Balance 映射到 Bal）
+  D: { headers: ['Dt', 'AccNo', 'Cy', 'CrAmt', 'DrAmt', 'Bal'], map: { BillDate: 'Dt', MerchantId: 'AccNo', Currency: 'Cy', 'Credit Amount': 'CrAmt', 'Debit Amount': 'DrAmt' } }
 };
 
 function exportMappingsFor(layout, { balance = '通过发生额计算', merchant = null } = {}) {
@@ -284,8 +288,9 @@ function createEnvironment(dir, label) {
     resolveGenerationGroupKey: channelIdentity.resolveGenerationGroupKey,
     resolveStatementOutputName: channelIdentity.resolveStatementOutputName,
     resolveTemplateBalanceMode: channelIdentity.resolveTemplateBalanceMode,
-    findBalanceModeMismatch: channelIdentity.findBalanceModeMismatch,
-    buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
+    describeBalanceMode: channelIdentity.describeBalanceMode,
+    resolveAccountBalanceModes,
+    mergeMappedDetailRows,
     removeStatementSessionEntriesByFilePath: (_session, filePath) => { removedSessionPaths.push(filePath); },
     generateStatementFiles: generation.generateStatementFiles,
     parseRequiredBillDates,
@@ -324,14 +329,18 @@ function createEnvironment(dir, label) {
     'getEntryTemplateConfig',
     'rebuildMatchedTemplateFileEntries',
     'groupStatementEntriesForGeneration',
-    'findGenerationGroupBalanceModeMismatch',
+    'findGenerationGroupBalanceModeConflicts',
+    'formatBalanceModeConflictLines',
+    'resolveGenerationGroupChannelName',
     'buildChannelBalanceModeMismatchError',
+    'buildPreparedStatementBatchFromEntries',
+    'resolveEntryBalanceMode',
+    'applyEntryBalanceModes',
     'generateMultiTemplateGroupFiles',
     'planVirtualTemplateBalanceRegeneration',
     'assertVirtualTemplateBalanceOutputPaths',
     'regenerateVirtualTemplateBalanceFromSession',
     'normalizeTemplateChannelAssignment',
-    'findSaveMappingsBalanceModeMismatch',
     'findGenerationGroupOutputNameConflicts',
     'buildStatementOutputNameConflictError',
     'assertGenerationOutputNameUnique',
@@ -482,31 +491,88 @@ function readRowsFromEntry(entry, names) {
   return rows.map((row) => names.map((name) => row[header.indexOf(name)]));
 }
 
-// ②
-function verifyBalanceModeMismatch(dir) {
+// ② 余额方式可不一致（v3.2.21 D2、D3）
+function verifyMixedBalanceModes(dir) {
+  // (a) 子模板 A 通过发生额计算（M001），子模板 B 取账单余额列（M002）：一份明细、一份余额，各账户按自己的方式
   const env = createEnvironment(dir, 'step2');
   const owner = env.defineTemplate('招商银行-上海', 'A');
   const channelId = env.saveWithChannel(owner, { mode: 'create' }).channelId;
-  // 子模板取账单余额列：映射须指向模板表头中实际存在的列（v3.2.18 起表头外的映射字段在生成前即被拦截），
-  // 本步只校验余额方式不一致，不关心余额取值。
-  const child = env.defineTemplate('CMB-SH', 'B', { balance: 'Out' });
-  const mismatch = env.fns.findSaveMappingsBalanceModeMismatch({
-    template: env.database.getTemplate(child.id),
-    channelAssignment: env.fns.normalizeTemplateChannelAssignment({ mode: 'join', channelId }),
-    mappings: env.exportMappingsByTemplateId.get(child.id)
-  });
-  assertEq(mismatch && mismatch.detailLines, ['CMB-SH：取账单余额列', '招商银行-上海：通过发生额计算'], 'Step2.保存映射时余额方式不一致被拒');
-  // 绕过保存：直接写库加入渠道
-  env.database.restoreTemplateBundleStatementChannels({ channels: [], legacyChannelSources: [], assignments: [{ templateId: child.id, channelName: '招商银行-上海' }] });
-  const { fileA, fileB } = prepareChannelFiles(dir, 'step2');
+  const child = env.defineTemplate('CMB-SH', 'D', { balance: 'Bal' });
+  env.saveWithChannel(child, { mode: 'join', channelId });
+  seed(env, '招商银行-上海', 'M001', 'USD', '2026-08-31', 1000);
+  seed(env, '招商银行-上海', 'M002', 'USD', '2026-08-31', 200);
+  const fileA = path.join(dir, 'step2-a.xlsx');
+  const fileB = path.join(dir, 'step2-b.xlsx');
+  writeSource(fileA, 'A', [['2026-09-01', 'M001', 'USD', '10', ''], ['2026-09-02', 'M001', 'USD', '', '1']]);
+  writeSource(fileB, 'D', [['2026-09-01', 'M002', 'USD', '10', '', '210'], ['2026-09-02', 'M002', 'USD', '', '5', '205']]);
   const entries = [env.entryFor(owner, fileA), env.entryFor(child, fileB)];
   const groups = env.fns.groupStatementEntriesForGeneration(entries);
-  assertEq(groups.length, 1, 'Step2.两个子模板同组');
-  const lines = env.fns.findGenerationGroupBalanceModeMismatch(groups[0]);
-  assertEq(lines, ['招商银行-上海：通过发生额计算', 'CMB-SH：取账单余额列'], 'Step2.导入时整批校验发现不一致');
-  const error = env.fns.buildChannelBalanceModeMismatchError(groups[0], lines);
-  assertEq([error.code, /招商银行-上海/.test(error.message)], ['CHANNEL_BALANCE_MODE_MISMATCH', true], 'Step2.阻断错误码与渠道名');
-  assertEq(env.exportFiles(), [], 'Step2.导出目录没有新文件');
+  assertEq(groups.length, 1, 'Step2a.两个子模板同组');
+  assertEq(env.fns.findGenerationGroupBalanceModeConflicts(groups[0]), null, 'Step2a.账户不同，导入预检放行');
+  const result = env.generate(entries);
+  const files = env.exportFiles();
+  assertEq([files.filter((name) => name.startsWith('detail/')).length, files.filter((name) => name.startsWith('balance/')).length], [1, 1], 'Step2a.一份明细、一份余额');
+  assertEq(readDetailColumns(result.detail.filePath, ['MerchantId', 'Credit Amount', 'Debit Amount']).length, 4, 'Step2a.明细含两个子模板的全部行');
+  assertEq(readBalanceRows(result.balance.filePath), [
+    ['招商银行', '上海', 'M001', 'USD', '2026-09-01', 1010],
+    ['招商银行', '上海', 'M001', 'USD', '2026-09-02', 1009],
+    ['招商银行', '上海', 'M002', 'USD', '2026-09-01', 210],
+    ['招商银行', '上海', 'M002', 'USD', '2026-09-02', 205]
+  ], 'Step2a.M001 按种子与发生额推算，M002 取账单余额列');
+  const seeds = readBalanceSeedRecords(env.storageRoot, '招商银行')
+    .filter((record) => record.billDate > '2026-08-31')
+    .map((record) => [record.merchantId, record.billDate, record.endBalance, record.generationMethod])
+    .sort((left, right) => `${left[0]}${left[1]}`.localeCompare(`${right[0]}${right[1]}`));
+  assertEq(seeds, [
+    ['M001', '2026-09-01', 1010, '通过发生额计算'],
+    ['M001', '2026-09-02', 1009, '通过发生额计算'],
+    ['M002', '2026-09-01', 210, '账单里的余额'],
+    ['M002', '2026-09-02', 205, '账单里的余额']
+  ], 'Step2a.种子生成方式按账户各自的余额方式');
+  assertEq(result.warnings.filter((warning) => /balance/.test(warning.type)), [], 'Step2a.无余额告警');
+
+  // (b) 组内第一个子模板不出余额（M101），另一子模板取账单余额列（M102）：只有 M102 出余额，M101 不提示补录
+  const envB = createEnvironment(dir, 'step2b');
+  const ownerB = envB.defineTemplate('招商银行-上海', 'A', { balance: '无' });
+  const channelIdB = envB.saveWithChannel(ownerB, { mode: 'create' }).channelId;
+  const childB = envB.defineTemplate('CMB-SH', 'D', { balance: 'Bal' });
+  envB.saveWithChannel(childB, { mode: 'join', channelId: channelIdB });
+  seed(envB, '招商银行-上海', 'M102', 'USD', '2026-08-31', 50);
+  const fileC = path.join(dir, 'step2b-a.xlsx');
+  const fileD = path.join(dir, 'step2b-b.xlsx');
+  writeSource(fileC, 'A', [['2026-09-01', 'M101', 'USD', '7', '']]);
+  writeSource(fileD, 'D', [['2026-09-01', 'M102', 'USD', '', '20', '30']]);
+  const resultB = envB.generate([envB.entryFor(ownerB, fileC), envB.entryFor(childB, fileD)]);
+  assertEq(readDetailColumns(resultB.detail.filePath, ['MerchantId']).map((row) => row[0]).sort(), ['M101', 'M102'], 'Step2b.明细含不出余额子模板的行');
+  assertTrue(Boolean(resultB.balance), 'Step2b.组内首个子模板不出余额时仍生成余额');
+  assertEq(resultB.balance ? readBalanceRows(resultB.balance.filePath) : null, [
+    ['招商银行', '上海', 'M102', 'USD', '2026-09-01', 30]
+  ], 'Step2b.只有取账单余额列的账户出余额');
+  assertEq(resultB.warnings.filter((warning) => /balance/.test(warning.type)), [], 'Step2b.不出余额的账户不提示补录');
+
+  // (c) 同一账户 M201 同批命中两种余额方式：整批阻断，逐账户列出，不产出文件
+  const envC = createEnvironment(dir, 'step2c');
+  const ownerC = envC.defineTemplate('招商银行-上海', 'A');
+  const channelIdC = envC.saveWithChannel(ownerC, { mode: 'create' }).channelId;
+  const childC = envC.defineTemplate('CMB-SH', 'D', { balance: 'Bal' });
+  envC.saveWithChannel(childC, { mode: 'join', channelId: channelIdC });
+  seed(envC, '招商银行-上海', 'M201', 'USD', '2026-08-31', 100);
+  const fileE = path.join(dir, 'step2c-a.xlsx');
+  const fileF = path.join(dir, 'step2c-b.xlsx');
+  writeSource(fileE, 'A', [['2026-09-01', 'M201', 'USD', '1', '']]);
+  writeSource(fileF, 'D', [['2026-09-02', 'M201', 'USD', '1', '', '102'], ['2026-09-02', 'M202', 'USD', '1', '', '1']]);
+  const entriesC = [envC.entryFor(ownerC, fileE), envC.entryFor(childC, fileF)];
+  const expectedLines = ['账户 M201（USD）：CMB-SH（取账单余额列）、招商银行-上海（通过发生额计算）'];
+  const groupsC = envC.fns.groupStatementEntriesForGeneration(entriesC);
+  assertEq(envC.fns.findGenerationGroupBalanceModeConflicts(groupsC[0]), expectedLines, 'Step2c.导入预检逐账户列出冲突');
+  let thrown = null;
+  try {
+    envC.generate(entriesC);
+  } catch (error) {
+    thrown = error;
+  }
+  assertEq(thrown && [thrown.code, /招商银行-上海/.test(thrown.message), thrown.detailLines], ['CHANNEL_BALANCE_MODE_MISMATCH', true, expectedLines], 'Step2c.生成前阻断：错误码、渠道名与逐账户明细');
+  assertEq(envC.exportFiles(), [], 'Step2c.导出目录没有新文件');
   assertTrue(importChecksPrecedeGeneration(), 'Step2.导入入口在大账号选择与生成之前完成渠道校验');
 }
 
@@ -514,7 +580,7 @@ function verifyBalanceModeMismatch(dir) {
 function importChecksPrecedeGeneration() {
   const node = MAIN_AST.body.find((item) => item.type === 'FunctionDeclaration' && item.id && item.id.name === 'handleFilenameMappingImport');
   const body = MAIN_SOURCE.slice(node.start, node.end);
-  const check = body.indexOf('findGenerationGroupBalanceModeMismatch(group)');
+  const check = body.indexOf('findGenerationGroupBalanceModeConflicts(group)');
   const conflict = body.indexOf("'CHANNEL_ACCOUNT_MAPPING_CONFLICT_PENDING'");
   const aggregate = body.indexOf('const aggregatedBigAccounts = [];');
   const generateCall = body.indexOf('executeFilenameMappingImportPlan(');
@@ -1156,7 +1222,7 @@ async function run() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stmt-channel-'));
   try {
     verifyChannelGroup(dir);
-    verifyBalanceModeMismatch(dir);
+    verifyMixedBalanceModes(dir);
     verifyMixedGroups(dir);
     verifyCalculatedSeedAndGap(dir);
     verifyLegacyMigration(dir);

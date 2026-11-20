@@ -73,12 +73,13 @@ function loadGroupingFunction(getTemplateMappingConfig) {
 }
 
 // 普通模板组不做渠道余额方式校验，使用真实函数确认其对非渠道组直接放行。
-function loadBalanceModeMismatchFunction(getTemplateMappingConfig) {
+function loadBalanceModeConflictFunction(getTemplateMappingConfig) {
   const identity = require('../../../src/main-process/statement-channel-identity');
+  const { resolveAccountBalanceModes } = require('../../../src/main-process/statement-generation-business');
   return loadMainFunction(
-    'findGenerationGroupBalanceModeMismatch',
-    ['getTemplateMappingConfig', 'resolveTemplateBalanceMode', 'findBalanceModeMismatch'],
-    [getTemplateMappingConfig, identity.resolveTemplateBalanceMode, identity.findBalanceModeMismatch]
+    'findGenerationGroupBalanceModeConflicts',
+    ['getTemplateMappingConfig', 'resolveTemplateBalanceMode', 'resolveAccountBalanceModes', 'formatBalanceModeConflictLines'],
+    [getTemplateMappingConfig, identity.resolveTemplateBalanceMode, resolveAccountBalanceModes, () => []]
   );
 }
 
@@ -775,7 +776,7 @@ function virtualExportAllDeps({ session, groups, generated }) {
   });
   const deps = {
     groupStatementEntriesForGeneration: loadGroupingFunction(exportTemplateConfig),
-    findGenerationGroupBalanceModeMismatch: loadBalanceModeMismatchFunction(exportTemplateConfig),
+    findGenerationGroupBalanceModeConflicts: loadBalanceModeConflictFunction(exportTemplateConfig),
     ...loadOutputNameConflictFunctions(),
     FILENAME_MAPPING_TEMPLATE_ID,
     getCurrentStatementSession: () => session,

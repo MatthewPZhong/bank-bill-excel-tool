@@ -674,11 +674,12 @@ const {
   buildDateRangeLabel,
   deriveBalanceRecords,
   parseRequiredBillDates,
+  resolveAccountBalanceModes,
   scanBalanceSeedStatus: scanStatementBalanceSeedStatus
 } = require('./main-process/statement-generation-business');
 // v3.2.15：网银账单渠道的输出身份、生成分组与余额方式
 const {
-  findBalanceModeMismatch,
+  describeBalanceMode,
   resolveGenerationGroupKey,
   resolveStatementOutputName,
   resolveTemplateBalanceMode
@@ -9169,7 +9170,7 @@ const STATEMENT_CHANNEL_BUSINESS_ERROR_CODES = new Set([
   'TEMPLATE_NOT_FOUND'
 ]);
 
-// v3.2.15：渠道相关业务错误需要界面逐条展示明细（冲突账户号、各子模板余额方式），
+// v3.2.15：渠道相关业务错误需要界面逐条展示明细（如冲突账户号），
 //   在通用错误结果上补充 errorCode 与 detailLines；不改变 createErrorResult 的公共返回形状。
 function createDetailedErrorResult(options) {
   return {
@@ -9410,25 +9411,6 @@ function normalizeTemplateChannelAssignment(channel) {
   return { mode: 'keep' };
 }
 
-// v3.2.15（D2、§5.2）：保存后所属渠道中，已保存过映射的其他子模板余额方式须与本次提交一致。
-function findSaveMappingsBalanceModeMismatch({ template, channelAssignment, mappings }) {
-  let channelId = null;
-  if (channelAssignment.mode === 'keep') channelId = Number(template.channelId || 0) || null;
-  if (channelAssignment.mode === 'join') channelId = Number(channelAssignment.channelId || 0) || null;
-  if (!channelId) return null;
-  const channel = database.getStatementChannel(channelId);
-  if (!channel) return null;
-  const entries = [{ templateName: template.name, balanceMode: resolveTemplateBalanceMode(mappings) }];
-  for (const sibling of database.listStatementChannelTemplates(channelId)) {
-    if (sibling.id === template.id || !sibling.mappingCount) continue;
-    const siblingConfig = getTemplateMappingConfig(sibling.id);
-    if (!siblingConfig) continue;
-    entries.push({ templateName: sibling.name, balanceMode: resolveTemplateBalanceMode(siblingConfig.exportMappings) });
-  }
-  const detailLines = findBalanceModeMismatch(entries);
-  return detailLines ? { channelName: channel.name, detailLines } : null;
-}
-
 // v3.2.15（§5.3）：v5 模板包——按名称取得或新建渠道，写入渠道映射与冲突，再按条目 channelName 归属。
 //   包内有模板归入、但这些模板第一轮全部被跳过的渠道不还原：渠道层的映射与冲突整体替换，
 //   还原它会改写被跳过模板所在同名渠道的生效映射并清掉待处理冲突（release/v3.2.15 审查）。
@@ -9552,22 +9534,6 @@ function restoreBundleFollowUpRounds({ importedTemplates, succeededEntries, impo
     : buildLegacyBundleChannelRestore(importedTemplateRecords, importedTemplates);
   const restoreResult = database.restoreTemplateBundleStatementChannels(channelRestore);
   return { importedTemplateRecords, channelRestore, restoreResult };
-}
-
-function collectChannelBalanceModeWarnings(channelNames) {
-  const warnings = [];
-  for (const name of channelNames) {
-    const channel = database.getStatementChannelByName(name);
-    if (!channel) continue;
-    const entries = database.listStatementChannelTemplates(channel.id)
-      .filter((template) => template.mappingCount > 0)
-      .map((template) => getTemplateMappingConfig(template.id))
-      .filter(Boolean)
-      .map((config) => ({ templateName: config.template.name, balanceMode: resolveTemplateBalanceMode(config.exportMappings) }));
-    const mismatch = findBalanceModeMismatch(entries);
-    if (mismatch) warnings.push(`渠道「${name}」：${mismatch.join('；')}`);
-  }
-  return warnings;
 }
 
 function registerTemplateHandlers() {
@@ -9905,22 +9871,8 @@ function registerTemplateHandlers() {
       // 仅当前端显式传 preserveOwn=true（即维护大账号没被打开过 → bigAccountsLoadedWithOwn=false → currentBigAccounts 是 client-only）才走 DELETE-client-only 保留 own 路径
       const preserveOwn = payload.preserveOwn === true;
       // v3.2.15（§4.2、T6）：渠道归属随映射一起提交；缺省为不改归属。
+      //   v3.2.21（D1）：渠道内各子模板的余额方式可以不同，保存时不再比较。
       const channelAssignment = normalizeTemplateChannelAssignment(payload.channel);
-      const balanceModeMismatch = findSaveMappingsBalanceModeMismatch({
-        template,
-        channelAssignment,
-        mappings: templateConfiguration.mappings
-      });
-      if (balanceModeMismatch) {
-        return createDetailedErrorResult({
-          step: '保存模板映射',
-          message: `渠道「${balanceModeMismatch.channelName}」下各子模板的余额方式必须一致（不出余额 / 取账单余额列 / 通过发生额计算），请统一后再保存`,
-          errorCode: 'CHANNEL_BALANCE_MODE_MISMATCH',
-          detailLines: balanceModeMismatch.detailLines,
-          context: { templateId: payload.templateId, templateName: template.name },
-          templateName: template.name
-        });
-      }
       const saveResult = database.saveMappings(
         payload.templateId,
         templateConfiguration.mappings,
@@ -10457,18 +10409,8 @@ function registerTemplateHandlers() {
       const { channelRestore, restoreResult } = restoreBundleFollowUpRounds({
         importedTemplates, succeededEntries, importedBundleVersion, importedChannels
       });
-      const balanceModeWarnings = collectChannelBalanceModeWarnings(
-        Array.from(new Set(channelRestore.assignments.map((item) => item.channelName).filter(Boolean)))
-      );
       const restoredChannelNames = new Set(channelRestore.channels.map((channel) => channel.name));
       const unrestoredChannelNames = importedChannels.map((channel) => channel.name).filter((name) => !restoredChannelNames.has(name));
-      if (balanceModeWarnings.length) {
-        appendActivityLogEntry({
-          level: 'warn',
-          message: '模板包导入后，以下渠道的子模板余额方式不一致，生成账单时会被阻断，请在映射关系管理中统一',
-          details: balanceModeWarnings
-        });
-      }
 
       syncTemplateLibraryFile();
       clearLastErrorReport();
@@ -10494,7 +10436,6 @@ function registerTemplateHandlers() {
       });
       const followUps = [];
       if (restoreResult.conflictCount > 0) followUps.push(`有 ${restoreResult.conflictCount} 个渠道账户号的映射设置不一致，请在「账户映射」中处理`);
-      if (balanceModeWarnings.length > 0) followUps.push('部分渠道的子模板余额方式不一致，请在映射关系管理中统一');
       return {
         status: 'success',
         message: `模板文件导入成功：新增${createdCount}，更新${updatedCount}，跳过${skippedCount}${followUps.length ? `。${followUps.join('；')}` : ''}`
@@ -12008,7 +11949,57 @@ const statementGenerationHelpers = createStatementGenerationHelpers({
 });
 
 function buildPreparedStatementBatchFromEntries({ config, fileEntries = [] }) {
-  return statementGenerationHelpers.buildPreparedStatementBatchFromEntries({ config, fileEntries });
+  const preparedBatch = statementGenerationHelpers.buildPreparedStatementBatchFromEntries({ config, fileEntries });
+  return applyEntryBalanceModes({ config, fileEntries, preparedBatch });
+}
+
+// v3.2.21（T7）：条目的余额方式。条目模板就是组配置模板时按组配置（可能是等待确认期间记下的配置），
+//   否则按库中该模板当前映射；模板已不存在时退回组配置。
+function resolveEntryBalanceMode(entry, config, templateConfigCache = new Map()) {
+  const configTemplate = config && config.template ? config.template : null;
+  const fallback = {
+    templateName: String(configTemplate && configTemplate.name || ''),
+    balanceMode: config && config.balanceRequested ? config.balanceMode : 'none'
+  };
+  const templateId = Number(entry && entry.matchedTemplateId || 0);
+  if (!templateId || templateId === Number(configTemplate && configTemplate.id || 0)) return fallback;
+  if (!templateConfigCache.has(templateId)) templateConfigCache.set(templateId, getTemplateMappingConfig(templateId));
+  const templateConfig = templateConfigCache.get(templateId);
+  if (!templateConfig) return fallback;
+  return {
+    templateName: templateConfig.template.name,
+    balanceMode: resolveTemplateBalanceMode(templateConfig.exportMappings)
+  };
+}
+
+// v3.2.21（D2、D3、T4）：渠道组内子模板余额方式不同时，余额按账户取各自子模板的方式。
+//   同一账户命中不同方式时整批阻断（导入多组生成时在规划阶段抛出，尚未写出文件或替换会话）；否则在批次上附加
+//   账户 → 方式表与只含需要出余额的条目的明细行，并据此决定是否生成余额（组配置模板不出余额时其他账户照常出余额）。
+//   条目来自同一模板或余额方式都相同时原样返回，行为与此前一致。
+function applyEntryBalanceModes({ config, fileEntries, preparedBatch }) {
+  const entries = (Array.isArray(fileEntries) ? fileEntries : []).filter(Boolean);
+  const templateIds = new Set(entries.map((entry) => Number(entry.matchedTemplateId || 0)));
+  if (templateIds.size < 2) return preparedBatch;
+  const templateConfigCache = new Map();
+  const entryModes = entries.map((entry) => ({
+    ...resolveEntryBalanceMode(entry, config, templateConfigCache),
+    detailRows: entry.detailRows
+  }));
+  if (new Set(entryModes.map((item) => item.balanceMode)).size < 2) return preparedBatch;
+  const { modeByAccount, conflicts } = resolveAccountBalanceModes(entryModes);
+  if (conflicts.length) {
+    const channelName = (config && config.outputName) || resolveStatementOutputName(config && config.template);
+    throw buildChannelBalanceModeMismatchError(channelName, formatBalanceModeConflictLines(conflicts));
+  }
+  const balanceDetailRows = mergeMappedDetailRows(
+    entryModes.filter((item) => item.balanceMode !== 'none').map((item) => item.detailRows)
+  );
+  return {
+    ...preparedBatch,
+    balanceModeByAccount: modeByAccount,
+    balanceDetailRows,
+    balanceRequested: balanceDetailRows.length > 1
+  };
 }
 
 function buildPreparedStatementBatchFromFilePaths({ config, inputFilePaths = [] }) {
@@ -12093,7 +12084,8 @@ function scopedMergedOutputFileName(fileName, scope) {
 }
 
 // v3.2.15（T4）：按生成分组键把文件条目分组：属于渠道的子模板合为一组（一条余额链），普通模板各自一组。
-//   组配置取组内第一个仍存在的模板（输出身份与余额方式在渠道内一致）；明细行仍是各条目按自己子模板构建的结果。
+//   组配置取组内第一个仍存在的模板（输出身份在渠道内一致；v3.2.21 起余额方式可不同，按账户取，见
+//   applyEntryBalanceModes）；明细行仍是各条目按自己子模板构建的结果。
 //   返回 [{ key, entries, templateIds, templateConfig }]；组内模板都已删除时 templateConfig 为 null。
 function groupStatementEntriesForGeneration(entries) {
   const templateCache = new Map();
@@ -12122,26 +12114,50 @@ function groupStatementEntriesForGeneration(entries) {
   });
 }
 
-// v3.2.15（D2、§5.2）：同一渠道组内各子模板的余额方式必须一致；不一致返回逐行明细，否则 null。
-function findGenerationGroupBalanceModeMismatch(group) {
+// v3.2.21（D3、T6）：渠道组内同一账户命中余额方式不同的子模板时返回逐账户明细，否则 null（取代 v3.2.15 D2 的
+//   “各子模板余额方式必须一致”）。条目的余额方式按库中该子模板当前映射；账号尚未确定的行（如多大账号模板在
+//   选择大账号之前）不参与判断，选定后生成前由 applyEntryBalanceModes 再判断一次。
+function findGenerationGroupBalanceModeConflicts(group) {
   if (!group || !String(group.key).startsWith('channel:') || group.templateIds.length < 2) return null;
-  const entries = group.templateIds
-    .map((templateId) => getTemplateMappingConfig(templateId))
-    .filter(Boolean)
-    .map((config) => ({
-      templateName: config.template.name,
-      balanceMode: resolveTemplateBalanceMode(config.exportMappings)
-    }));
-  return findBalanceModeMismatch(entries);
+  const templateConfigCache = new Map();
+  const entryModes = group.entries.map((entry) => {
+    const templateId = Number(entry && entry.matchedTemplateId || 0);
+    if (!templateConfigCache.has(templateId)) {
+      templateConfigCache.set(templateId, templateId ? getTemplateMappingConfig(templateId) : null);
+    }
+    const templateConfig = templateConfigCache.get(templateId);
+    if (!templateConfig) return null;
+    return {
+      templateName: templateConfig.template.name,
+      balanceMode: resolveTemplateBalanceMode(templateConfig.exportMappings),
+      detailRows: entry.detailRows
+    };
+  }).filter(Boolean);
+  if (new Set(entryModes.map((item) => item.balanceMode)).size < 2) return null;
+  const { conflicts } = resolveAccountBalanceModes(entryModes);
+  return conflicts.length ? formatBalanceModeConflictLines(conflicts) : null;
 }
 
-function buildChannelBalanceModeMismatchError(group, detailLines) {
-  const channelName = group.templateConfig
+function formatBalanceModeConflictLines(conflicts) {
+  return conflicts.map((conflict) => {
+    const account = conflict.currency ? `${conflict.merchantId}（${conflict.currency}）` : conflict.merchantId;
+    const templates = conflict.templates
+      .map((item) => `${item.templateName}（${describeBalanceMode(item.balanceMode)}）`)
+      .join('、');
+    return `账户 ${account}：${templates}`;
+  });
+}
+
+function resolveGenerationGroupChannelName(group) {
+  return group && group.templateConfig
     ? resolveStatementOutputName(group.templateConfig.template)
-    : group.key;
+    : String(group && group.key || '');
+}
+
+function buildChannelBalanceModeMismatchError(channelName, detailLines) {
   return new FileValidationError(
     'CHANNEL_BALANCE_MODE_MISMATCH',
-    `渠道「${channelName}」下各子模板的余额方式不一致，无法合并生成，请在映射关系管理中统一后再导入`,
+    `渠道「${channelName}」下同一账户命中了余额方式不同的子模板，无法生成余额，请分开导入或在映射关系管理中统一`,
     { detailLines, context: { channelName } }
   );
 }
@@ -13093,11 +13109,11 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
           templateName: session.templateName
         });
       }
-      // v3.2.15（D2）：导入后若经模板包等途径使渠道余额方式不一致，导出全部同样阻断。
+      // v3.2.21（D3）：同一账户命中余额方式不同的子模板时，生成任何组之前整批阻断。
       for (const group of generationGroups) {
-        const mismatch = findGenerationGroupBalanceModeMismatch(group);
+        const mismatch = findGenerationGroupBalanceModeConflicts(group);
         if (mismatch) {
-          const error = buildChannelBalanceModeMismatchError(group, mismatch);
+          const error = buildChannelBalanceModeMismatchError(resolveGenerationGroupChannelName(group), mismatch);
           return createErrorResult({
             step: kind === 'detail' ? '导出明细账单' : '导出余额账单',
             message: error.message,
@@ -14700,7 +14716,8 @@ async function handleFilenameMappingImport(prepared) {
     }
 
     // ===== 步骤 3.5（v3.2.15）：渠道组校验 =====
-    // 按渠道分组后，任一渠道组内余额方式不一致，或渠道还有未处理的账户映射冲突，整批阻断，不进入大账号选择与生成。
+    // 按渠道分组后，任一渠道组内同一账户命中余额方式不同的子模板（v3.2.21 D3），或渠道还有未处理的账户映射冲突，
+    // 整批阻断，不进入大账号选择与生成。
     const importGenerationGroups = groupStatementEntriesForGeneration(parentProvisionalEntries);
     const outputNameConflicts = findGenerationGroupOutputNameConflicts(importGenerationGroups);
     if (outputNameConflicts) {
@@ -14714,9 +14731,9 @@ async function handleFilenameMappingImport(prepared) {
       });
     }
     for (const group of importGenerationGroups) {
-      const mismatch = findGenerationGroupBalanceModeMismatch(group);
+      const mismatch = findGenerationGroupBalanceModeConflicts(group);
       if (mismatch) {
-        const error = buildChannelBalanceModeMismatchError(group, mismatch);
+        const error = buildChannelBalanceModeMismatchError(resolveGenerationGroupChannelName(group), mismatch);
         return createErrorResult({
           step: '导入网银明细文件',
           message: error.message,
