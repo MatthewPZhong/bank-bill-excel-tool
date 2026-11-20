@@ -71,3 +71,6 @@ html, body { background-color: var(--bg); color: var(--text); }
 :root[data-theme="dark"] .big-account-currency-input-shell { background-color: var(--input); }
 :root[data-theme="dark"] .big-account-currency-input-shell > .big-account-currency-input { background-color: transparent; }
 :root[data-theme="dark"] .big-account-currency-input-shell > .big-account-currency-ghost { background-color: transparent; border-color: transparent; color: var(--dim); }
+
+/* v3.2.21 映射关系管理「启用」列：夜间用可读的亮绿色（浅色为暗绿 #006400，见 styles-gemini-extra.css） */
+:root[data-theme="dark"] .mapping-card { --mapping-enable-color: #7fcf97; }

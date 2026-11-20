@@ -931,8 +931,8 @@ class AppDatabase {
     return templateRepository.saveTemplateFeatureFilters(this.db, templateId, featureFilters);
   }
 
-  listTemplateFeatureFilterReferences(templateId, featureFilterMappingValue) {
-    return templateRepository.listTemplateFeatureFilterReferences(this.db, templateId, featureFilterMappingValue);
+  listTemplateFeatureFilterReferences(templateId, featureFilterMappingValue, options = {}) {
+    return templateRepository.listTemplateFeatureFilterReferences(this.db, templateId, featureFilterMappingValue, options);
   }
 
   getBillSplitRows(templateId) {

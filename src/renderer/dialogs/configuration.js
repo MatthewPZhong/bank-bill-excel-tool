@@ -9,6 +9,10 @@
     const REGEX_LITERAL_PATTERN_RENDERER = /^\/(.+)\/([gimsu]*)$/;
     // v3.2.19：逻辑取值至少 2 个候补字段（与 main.js LOGIC_VALUE_MIN_FIELDS 一致）
     const LOGIC_VALUE_MIN_FIELDS = 2;
+    // v3.2.21：逻辑取值候补可以是特征值，存为 `\u0000__FEATURE_FILTER__:<id>`（与 file-service/common.js
+    //   LOGIC_VALUE_FEATURE_CANDIDATE_PREFIX 一致）。以 NUL 开头，旧版本形如 `__FEATURE_FILTER__:1` 的源列名候补不受影响；
+    //   NUL 经 innerHTML 解析会被替换，下拉框中特征值选项的 value 须用 DOM 属性赋值。
+    const LOGIC_VALUE_FEATURE_CANDIDATE_PREFIX = '\u0000__FEATURE_FILTER__:';
 
     // 配置写入的共同生命周期：同步锁定一次提交，关闭后仍完成后台链，界面返回绑定原句柄。
     function createDialogWriteScope(overlay, dialog) {
@@ -1554,16 +1558,45 @@
       selectElement.title = describeFeatureFilter(findFeatureFilterById(featureFilters, selectElement.value));
     }
 
+    // v3.2.21：逻辑取值候补是特征值时返回其 id，否则返回 null（源字段候补）。
+    function parseLogicValueFeatureCandidate(field) {
+      const value = String(field ?? '');
+      return value.startsWith(LOGIC_VALUE_FEATURE_CANDIDATE_PREFIX)
+        ? value.slice(LOGIC_VALUE_FEATURE_CANDIDATE_PREFIX.length).trim()
+        : null;
+    }
+
+    function buildLogicValueFeatureCandidate(id) {
+      return `${LOGIC_VALUE_FEATURE_CANDIDATE_PREFIX}${String(id ?? '').trim()}`;
+    }
+
+    // v3.2.21：候补的显示文字——源字段显示列名，特征值显示「名称（特征值）」，找不到的特征值标明已删除。
+    function describeLogicValueCandidate(field, featureFilters) {
+      const id = parseLogicValueFeatureCandidate(field);
+      if (id === null) return String(field ?? '');
+      const item = findFeatureFilterById(featureFilters, id);
+      return item ? `${item.name}（特征值）` : '特征值（已删除）';
+    }
+
     // v3.2.18：草稿中选用各特征值的字段 Map(id → [字段标签])，删除前检查（已保存映射另由后端拦截）。
+    // v3.2.21：「逻辑取值」候补里的特征值同样计入，标签为「字段（逻辑取值）」。
     function collectFeatureFilterUsage(mappings, suffix = '', usage = new Map()) {
-      (mappings || []).forEach((mapping) => {
-        if (!mapping || mapping.mappedField !== FEATURE_FILTER_MAPPING_FIELD) return;
-        const id = getFeatureFilterRef(mapping);
+      const addUsage = (id, label) => {
         if (!id) return;
-        const label = `${mapping.templateField}${suffix}`;
         const labels = usage.get(id) || [];
         if (!labels.includes(label)) labels.push(label);
         usage.set(id, labels);
+      };
+      (mappings || []).forEach((mapping) => {
+        if (!mapping) return;
+        if (mapping.mappedField === LOGIC_VALUE_MAPPING_FIELD) {
+          (Array.isArray(mapping.mappedFields) ? mapping.mappedFields : []).forEach((field) => {
+            addUsage(parseLogicValueFeatureCandidate(field), `${mapping.templateField}（${LOGIC_VALUE_MAPPING_FIELD}）${suffix}`);
+          });
+          return;
+        }
+        if (mapping.mappedField !== FEATURE_FILTER_MAPPING_FIELD) return;
+        addUsage(getFeatureFilterRef(mapping), `${mapping.templateField}${suffix}`);
       });
       return usage;
     }
@@ -4836,7 +4869,7 @@
         : ADVANCED_MAPPING_FIELDS;
       const billSplitGroupFields = Array.isArray(payload.billSplitGroupFields) && payload.billSplitGroupFields.length
         ? payload.billSplitGroupFields
-        : ['是否拆分/合并明细账单', '复用模块字段的映射关系', '根据字段值过滤账单'];
+        : ['是否拆分/合并明细账单', '根据字段值过滤账单', '复用模块字段的映射关系'];
       // v3.2.19：「原始账单预处理」分组（位于「个性化映射设置」之前）
       const PREPROCESS_ROW_FILTER_FIELD = '过滤账单';
       // v3.2.19：「重复账单过滤」只有勾选框，没有按钮
@@ -4989,6 +5022,8 @@
       const rowByField = new Map();
       // v3.2.19：各行按当前映射值显示 / 隐藏编辑器（【设置】、拼接选择等）的同步函数；程序清空映射值（如拆分/合并互斥）时调用
       const editorSyncByRow = new Map();
+      // v3.2.21：各行逻辑取值候补的同步函数（特征值增删改后去掉已不存在的特征值候补并刷新预览）
+      const logicValuePreviewUpdaters = [];
       const savedMap = new Map(payload.mappings.map((item) => [item.templateField, item]));
       const headerOptions = payload.template.headers.map((header) => {
         const escapedHeader = escapeHtml(header || '(空白字段)');
@@ -5000,7 +5035,9 @@
         if (fieldName === preprocessFields[0]) {
           const sectionRow = document.createElement('tr');
           sectionRow.className = 'mapping-section-row';
-          sectionRow.innerHTML = '<td colspan="2"><strong>原始账单预处理</strong></td>';
+          // v3.2.21：标题行右侧「启用」列头（几何见 styles-gemini-extra.css「启用」列）
+          sectionRow.dataset.enableHead = 'true';
+          sectionRow.innerHTML = '<td colspan="2"><strong>原始账单预处理</strong><span class="mapping-enable-head">启用</span></td>';
           tbody.appendChild(sectionRow);
         }
 
@@ -5116,14 +5153,35 @@
         function updateLogicValuePreview() {
           row.dataset.logicValueFields = JSON.stringify(logicValueFields);
           if (!logicValuePreview) return;
+          // v3.2.21：特征值候补显示名称（改名后经 refreshFeatureValueSelects 刷新）；含已不存在的特征值时标红，
+          //   提示放在最前，不被截断
+          const hasMissingFeature = logicValueFields.some((field) => {
+            const featureFilterRef = parseLogicValueFeatureCandidate(field);
+            return featureFilterRef !== null && !findFeatureFilterById(currentFeatureFilters, featureFilterRef);
+          });
+          const candidatesText = logicValueFields
+            .map((field, index) => `${index + 1}. ${describeLogicValueCandidate(field, currentFeatureFilters)}`).join(' → ');
           const text = logicValueFields.length
-            ? logicValueFields.map((field, index) => `${index + 1}. ${field}`).join(' → ')
+            ? `${hasMissingFeature ? '（含已删除的特征值，请重新设置）' : ''}${candidatesText}`
             : '未设置候补字段';
           logicValuePreview.textContent = text.length > 80 ? `${text.slice(0, 80)}……` : text;
           logicValuePreview.title = text;
           logicValuePreview.classList.toggle('is-empty', logicValueFields.length === 0);
+          logicValuePreview.classList.toggle('is-stale', hasMissingFeature);
         }
         updateLogicValuePreview();
+        // v3.2.21：行已切到其他映射值时，特征值增删后去掉暂存候补里已不存在的特征值（暂存不算引用、特征值可被删除，
+        //   之后新建的特征值可能复用同一 id，不能沿用旧选择）；仍选着逻辑取值的行只刷新预览（改名），
+        //   不存在的特征值候补保留并显示「（已删除）」，由保存时校验要求重选
+        logicValuePreviewUpdaters.push(() => {
+          if (select.value !== LOGIC_VALUE_MAPPING_FIELD) {
+            logicValueFields = logicValueFields.filter((field) => {
+              const featureFilterRef = parseLogicValueFeatureCandidate(field);
+              return featureFilterRef === null || Boolean(findFeatureFilterById(currentFeatureFilters, featureFilterRef));
+            });
+          }
+          updateLogicValuePreview();
+        });
         let concatSelectedFields = [];
         const savedFields = Array.isArray(savedMapping.mappedFields) && savedMapping.mappedFields.length
           ? savedMapping.mappedFields
@@ -5312,6 +5370,7 @@
             pushModal(overlay, () => createLogicValueDialog({
               targetField: fieldName,
               headers: payload.template.headers,
+              featureFilters: currentFeatureFilters,
               initialFields: logicValueFields,
               onDone: (nextFields) => {
                 logicValueFields = nextFields.slice();
@@ -5346,6 +5405,22 @@
         tbody.appendChild(row);
       });
 
+      // v3.2.21：「启用」列——从「原始账单预处理」标题行到最后一个勾选行，两侧竖线贯穿，勾选框居于竖线中间。
+      //   缺标题行或其后没有勾选行（旧载荷）时不加列，勾选框保持在文字右侧。
+      (function markEnableColumnRows() {
+        const rows = Array.from(tbody.rows);
+        const startIndex = rows.findIndex((item) => item.dataset.enableHead === 'true');
+        const toggleRows = rows.filter((item) => item.classList.contains('mapping-toggle-row'));
+        const endIndex = toggleRows.length ? rows.indexOf(toggleRows[toggleRows.length - 1]) : -1;
+        if (startIndex < 0 || endIndex <= startIndex) {
+          rows.forEach((item) => item.querySelector('.mapping-enable-head')?.remove());
+          return;
+        }
+        rows.slice(startIndex, endIndex + 1).forEach((item) => item.classList.add('mapping-enable-span'));
+        rows[startIndex].classList.add('mapping-enable-span-start');
+        rows[endIndex].classList.add('mapping-enable-span-end');
+      })();
+
       // v3.2.19：取值只有 是 / 否（空白）的行用勾选框（勾选 = 是）：文字在左、勾选框紧跟其右；
       //   右列只放随勾选状态显示的按钮（不传 buttonLabel 时右列为空）。存储值不变，取值见 data-checked-value / data-unchecked-value。
       function renderMappingToggleRow(fieldName, {
@@ -5353,6 +5428,8 @@
       }) {
         const row = document.createElement('tr');
         row.dataset.templateField = fieldName;
+        // v3.2.21：勾选行固定为显示按钮时的行高（mapping-toggle-row），勾选前后不跳动
+        row.className = 'mapping-toggle-row';
         row.innerHTML = `
           <td>
             <label class="mapping-toggle-label">
@@ -5619,10 +5696,12 @@
       }
 
       // v3.2.18：特征值新增、改名、删除后刷新各行「选择特征值」的选项（保留已选）
+      // v3.2.21：同时刷新逻辑取值的候补预览（特征值改名）
       function refreshFeatureValueSelects() {
         tbody.querySelectorAll('.mapping-feature-value-select').forEach((select) => {
           renderFeatureFilterOptions(select, currentFeatureFilters, select.value);
         });
+        logicValuePreviewUpdaters.forEach((update) => update());
       }
 
       function openFeatureFilterManager() {
@@ -6825,15 +6904,22 @@
     // 组件参考 月度 pending 数据核对 → 规则管理 → 对账字段（renderer-pending.js buildColumn）：
     // 序号即优先级，首行【新增】在末尾追加一行，其余行【删除】；默认两个单选下拉框。
     // 【保存】只校验并暂存，随映射关系管理【保存】提交；【取消】/ × 不改暂存。与 main.js 保存校验同口径。
-    function createLogicValueDialog({ targetField = '', headers = [], initialFields = [], onDone, onCancel }) {
+    // v3.2.21：候补下拉框分「源字段」「特征值」两组，特征值候补存 `__FEATURE_FILTER__:<id>`，显示名称。
+    function createLogicValueDialog({ targetField = '', headers = [], featureFilters = [], initialFields = [], onDone, onCancel }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card scenario-config-card logic-value-card';
       const headerList = (Array.isArray(headers) ? headers : []).map((header) => String(header ?? '')).filter((header) => header !== '');
       const headerSet = new Set(headerList);
+      const featureList = (Array.isArray(featureFilters) ? featureFilters : [])
+        .filter((item) => item && String(item.id ?? '').trim() !== '')
+        .map((item) => ({ value: buildLogicValueFeatureCandidate(item.id), name: String(item.name ?? '') }));
+      const featureValueSet = new Set(featureList.map((item) => item.value));
+      const isKnownCandidate = (field) => (parseLogicValueFeatureCandidate(field) === null ? headerSet.has(field) : featureValueSet.has(field));
       const fields = (Array.isArray(initialFields) ? initialFields : []).map((field) => String(field ?? '').trim()).filter(Boolean);
       while (fields.length < LOGIC_VALUE_MIN_FIELDS) fields.push('');
       const tips = `按序号从上到下取值：第 1 个字段去首尾空白后为空时取第 2 个，依此类推；全部为空时输出为空。`
+        + `候补可选特征值，未筛出特征值时视为空、取下一个。`
         + `取到的值再按「${targetField}」的规则规范化（如日期、金额）。`;
 
       dialog.innerHTML = `
@@ -6855,33 +6941,53 @@
 
       const container = dialog.querySelector('[data-role="logic-value-rows"]');
 
+      // 特征值候补以 NUL 开头，不能写进 HTML：先记下标，render() 解析后再用 DOM 属性赋值
+      let deferredOptionValues = [];
       function renderFieldOptions(selected) {
-        const options = ['<option value="">（请选择）</option>']
-          .concat(headerList.map((header) => (
-            `<option value="${escapeHtml(header)}"${header === selected ? ' selected' : ''}>${escapeHtml(header)}</option>`
-          )));
-        // 模板【更新】后候补字段已不在表头：保留「（已删除）」选项，保存模板时由主进程拒绝。
-        if (selected && !headerSet.has(selected)) {
-          options.push(`<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)}（已删除）</option>`);
+        const option = (value, text) => {
+          let valueAttribute = `value="${escapeHtml(value)}"`;
+          if (parseLogicValueFeatureCandidate(value) !== null) {
+            deferredOptionValues.push(value);
+            valueAttribute = `data-option-value="${deferredOptionValues.length - 1}"`;
+          }
+          return `<option ${valueAttribute}${value === selected ? ' selected' : ''}>${escapeHtml(text)}</option>`;
+        };
+        const options = ['<option value="">（请选择）</option>'];
+        const headerOptions = headerList.map((header) => option(header, header));
+        const featureOptions = featureList.map((item) => option(item.value, item.name));
+        if (featureOptions.length) {
+          options.push(`<optgroup label="源字段">${headerOptions.join('')}</optgroup>`);
+          options.push(`<optgroup label="特征值">${featureOptions.join('')}</optgroup>`);
+        } else {
+          options.push(...headerOptions);
+        }
+        // 模板【更新】后候补字段已不在表头、或特征值已不存在：保留「（已删除）」选项，保存模板时由主进程拒绝。
+        if (selected && !isKnownCandidate(selected)) {
+          const text = parseLogicValueFeatureCandidate(selected) === null ? `${selected}（已删除）` : '特征值（已删除）';
+          options.push(option(selected, text));
         }
         return options.join('');
       }
 
       function render() {
+        deferredOptionValues = [];
         container.innerHTML = fields.map((field, index) => `
           <div class="logic-value-row" data-index="${index}">
             <span class="logic-value-serial">${index + 1}.</span>
-            <select class="mapping-select logic-value-select${field && !headerSet.has(field) ? ' is-stale' : ''}" data-index="${index}">${renderFieldOptions(field)}</select>
+            <select class="mapping-select logic-value-select${field && !isKnownCandidate(field) ? ' is-stale' : ''}" data-index="${index}">${renderFieldOptions(field)}</select>
             <button class="logic-value-row-btn" type="button" data-role="${index === 0 ? 'add' : 'remove'}" data-index="${index}">${index === 0 ? '新增' : '删除'}</button>
           </div>
         `).join('');
+        container.querySelectorAll('option[data-option-value]').forEach((optionElement) => {
+          optionElement.value = deferredOptionValues[Number(optionElement.dataset.optionValue)];
+        });
       }
 
       container.addEventListener('change', (event) => {
         const select = event.target.closest('select.logic-value-select');
         if (!select) return;
         fields[Number(select.dataset.index)] = select.value;
-        select.classList.toggle('is-stale', Boolean(select.value) && !headerSet.has(select.value));
+        select.classList.toggle('is-stale', Boolean(select.value) && !isKnownCandidate(select.value));
       });
       container.addEventListener('click', (event) => {
         const button = event.target.closest('button.logic-value-row-btn');
@@ -6895,7 +7001,9 @@
         const selected = fields.map((field) => String(field || '').trim()).filter(Boolean);
         const duplicated = selected.filter((field, index) => selected.indexOf(field) !== index);
         const errors = [];
-        if (duplicated.length) errors.push(`候补字段不能重复：${Array.from(new Set(duplicated)).join('、')}`);
+        if (duplicated.length) {
+          errors.push(`候补字段不能重复：${Array.from(new Set(duplicated)).map((field) => describeLogicValueCandidate(field, featureFilters)).join('、')}`);
+        }
         if (selected.length < LOGIC_VALUE_MIN_FIELDS) errors.push(`请至少选择 ${LOGIC_VALUE_MIN_FIELDS} 个候补字段`);
         if (errors.length) {
           pushAlert(overlay, () => createAlertDialog(errors.map((line) => escapeHtml(line)).join('<br>'), { onConfirm: null }));

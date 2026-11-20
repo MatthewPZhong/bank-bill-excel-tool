@@ -9,6 +9,7 @@ const {
   normalizeCell
 } = require('../backend/file-service/common');
 const { isFieldCompareOperator } = require('../backend/file-service/row-filter-rules');
+const { parseLogicValueFeatureFilterRef } = require('../backend/file-service/logic-value');
 
 function normalizeHeaderList(headers) {
   return Array.isArray(headers) ? headers.map((header) => normalizeCell(header)) : [];
@@ -100,6 +101,7 @@ function createTemplateHeaderUpdateTools(constants = {}) {
   // - 按正负号拆分的发生额、根据发生额做映射的户名 / 账户号：整体作为一个列名读取（多字段时为逗号拼接的列名）。
   // - 固定值（__FIXED__: 前缀）不读源列。
   // - 逻辑取值（v3.2.19）：只读 mappedFields 中的候补字段，模式名本身不是源列。
+  //   v3.2.21：特征值候补不读源列（其筛选源字段按特征值引用收集，见 usedFeatureFilterIds）。
   function mappingSourceFields(target, mapping) {
     const mappedField = normalizeCell(mapping && mapping.mappedField);
     if (mappedField === FEATURE_FILTER_MAPPING_FIELD) return [];
@@ -108,7 +110,8 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     if (LOGIC_VALUE_MAPPING_FIELD && mappedField === LOGIC_VALUE_MAPPING_FIELD) {
       const candidates = uniqueNonEmpty((Array.isArray(mapping && mapping.mappedFields) ? mapping.mappedFields : [])
         .map((value) => normalizeCell(value)));
-      return candidates.length ? candidates : [LOGIC_VALUE_MAPPING_FIELD];
+      if (!candidates.length) return [LOGIC_VALUE_MAPPING_FIELD];
+      return candidates.filter((value) => parseLogicValueFeatureFilterRef(value) === null);
     }
     const values = normalizeMappedFields(mapping);
     const multi = mappedField === CONCAT_FIELDS_MAPPING_FIELD || values.length > 1;
@@ -129,11 +132,21 @@ function createTemplateHeaderUpdateTools(constants = {}) {
   }
 
   // v3.2.18 多特征值：映射行所选特征值 id 存于 mappedFields[0]（与 file-service getFeatureFilterRef 一致）。
+  // v3.2.21：「逻辑取值」候补里的特征值同样算使用。
   function usedFeatureFilterIds(mappings) {
     const ids = new Set();
     (mappings || []).forEach((mapping) => {
-      if (normalizeCell(mapping && mapping.mappedField) !== FEATURE_FILTER_MAPPING_FIELD) return;
-      const ref = normalizeCell(Array.isArray(mapping.mappedFields) ? mapping.mappedFields[0] : '');
+      const mappedField = normalizeCell(mapping && mapping.mappedField);
+      const values = Array.isArray(mapping && mapping.mappedFields) ? mapping.mappedFields : [];
+      if (LOGIC_VALUE_MAPPING_FIELD && mappedField === LOGIC_VALUE_MAPPING_FIELD) {
+        values.forEach((value) => {
+          const ref = normalizeCell(parseLogicValueFeatureFilterRef(normalizeCell(value)));
+          if (ref) ids.add(ref);
+        });
+        return;
+      }
+      if (mappedField !== FEATURE_FILTER_MAPPING_FIELD) return;
+      const ref = normalizeCell(values[0]);
       if (ref) ids.add(ref);
     });
     return ids;
@@ -265,13 +278,16 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     const usedIds = usedFeatureFilterIds(billSplitMappingActive
       ? (rowFilterActive ? billSplitMappings.concat(mappings) : billSplitMappings)
       : mappings);
+    // 筛选字段是列名而不是映射表达式：以固定值前缀开头的真实列名同样登记（生成时按列名读取）。
     (Array.isArray(input.featureFilters) ? input.featureFilters : []).forEach((featureFilter) => {
       const id = normalizeCell(featureFilter && featureFilter.id);
-      push({
+      const field = normalizeCell(featureFilter && featureFilter.sourceField);
+      if (!field) return;
+      references.push({
         area: 'feature-filter',
         target: normalizeCell(featureFilter && featureFilter.name),
         role: '',
-        field: featureFilter && featureFilter.sourceField,
+        field,
         active: Boolean(id) && usedIds.has(id)
       });
     });

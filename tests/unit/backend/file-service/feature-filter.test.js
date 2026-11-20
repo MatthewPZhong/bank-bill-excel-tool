@@ -218,3 +218,24 @@ test('按生效映射取用到的特征值：未选、不存在、条件无效�
   assertFeatureError(() => resolveUsedFeatureFilters(null, [{ templateField: 'Remark', ref: '1' }]),
     /选择的特征值不存在/);
 });
+
+// v3.2.21：特征值 id 是任意字符串（模板包可带入），与对象原型属性同名时也按自有属性解析；新 id 避开保留 id（含超出安全整数的数字）。
+test('resolveUsedFeatureFilters：id 为 constructor / __proto__ 时照常解析', () => {
+  const { resolveUsedFeatureFilters: resolve } = require('../../../../src/backend/file-service/feature-filter');
+  const rule = { sourceField: '附言', separator: 'space', length: 6, letterPrefixCount: null, digitsOnly: true };
+  const resolved = resolve(
+    [{ id: 'constructor', name: '甲', ...rule }, { id: '__proto__', name: '乙', ...rule }],
+    [{ templateField: 'Remark', ref: 'constructor' }, { templateField: 'Reference', ref: '__proto__' }]
+  );
+  assert.deepEqual(Object.keys(resolved), ['constructor', '__proto__']);
+  assert.equal(resolved.constructor.name, '甲');
+  assert.equal(Object.getPrototypeOf(resolved), Object.prototype);
+  assert.equal(Object.getOwnPropertyDescriptor(resolved, '__proto__').value.name, '乙');
+});
+
+test('normalizeFeatureFilterList：新特征值 id 避开 reservedIds（含超出安全整数的数字 id）', () => {
+  const { normalizeFeatureFilterList: normalizeList } = require('../../../../src/backend/file-service/feature-filter');
+  const rule = { sourceField: '附言', separator: 'space', length: 6, letterPrefixCount: null, digitsOnly: true };
+  assert.deepEqual(normalizeList([{ id: '1', name: '甲', ...rule }, { name: '乙', ...rule }], { reservedIds: ['2'] }).map((item) => item.id), ['1', '3']);
+  assert.deepEqual(normalizeList([{ name: '乙', ...rule }], { reservedIds: ['9007199254740992'] }).map((item) => item.id), ['9007199254740993']);
+});

@@ -4,7 +4,9 @@
 // 映射行存 mappedField='逻辑取值'、mappedFields=有序候补字段；生成 lookup 里转成内部 token
 // `__LOGIC_VALUE__:<JSON 候补字段数组>`，避免与真实表头重名，也不会被当成需要拼接字段。
 // 取值：按顺序取第一个去首尾空白后非空的单元格，全部为空时为 ''。
-const { LOGIC_VALUE_FIELD_TOKEN_PREFIX, normalizeCell } = require('./common');
+// v3.2.21：候补也可以是模板的特征值，存为 `\u0000__FEATURE_FILTER__:<id>`（LOGIC_VALUE_FEATURE_CANDIDATE_PREFIX，
+//   以 NUL 开头，不会与源列名相同）；取该行筛出的特征值，未筛出视为空、取下一个候补，不记「未筛出特征值」提示。
+const { LOGIC_VALUE_FEATURE_CANDIDATE_PREFIX, LOGIC_VALUE_FIELD_TOKEN_PREFIX, normalizeCell } = require('./common');
 
 const LOGIC_VALUE_MIN_FIELDS = 2;
 
@@ -48,24 +50,51 @@ function resolveLogicValue(fields, readCell) {
   return '';
 }
 
-// 收集 lookup（目标字段 → 映射值或其数组）里逻辑取值引用的候补字段，按首次出现顺序去重。
-function collectLogicValueFields(lookup) {
-  const fields = [];
+// v3.2.21：特征值候补的存储形式；id 去首尾空白，同一特征值只有一种写法（保存时据此查重）。
+function buildLogicValueFeatureCandidate(id) {
+  return `${LOGIC_VALUE_FEATURE_CANDIDATE_PREFIX}${normalizeCell(id)}`;
+}
+
+// v3.2.21：候补是特征值时返回特征值 id（去首尾空白，可能为 ''），否则返回 null（源字段候补，含形如
+//   `__FEATURE_FILTER__:1` 的旧源列名）。
+function parseLogicValueFeatureFilterRef(field) {
+  if (typeof field !== 'string' || !field.startsWith(LOGIC_VALUE_FEATURE_CANDIDATE_PREFIX)) return null;
+  return normalizeCell(field.slice(LOGIC_VALUE_FEATURE_CANDIDATE_PREFIX.length));
+}
+
+// 收集 lookup（目标字段 → 映射值或其数组）里逻辑取值的候补，按首次出现顺序去重。
+//   pick(field) 返回要收集的值（null 表示跳过）。
+function collectLogicValueCandidates(lookup, pick) {
+  const values = [];
   Object.values(lookup || {}).forEach((value) => {
     [].concat(value).forEach((item) => {
       (parseLogicValueToken(item) || []).forEach((field) => {
-        if (!fields.includes(field)) fields.push(field);
+        const picked = pick(field);
+        if (picked !== null && !values.includes(picked)) values.push(picked);
       });
     });
   });
-  return fields;
+  return values;
+}
+
+// 逻辑取值引用的源字段候补（不含特征值候补，特征值的筛选源字段由特征值启用时校验）。
+function collectLogicValueFields(lookup) {
+  return collectLogicValueCandidates(lookup, (field) => (parseLogicValueFeatureFilterRef(field) === null ? field : null));
+}
+
+// v3.2.21：逻辑取值候补引用的特征值 id。没有 id 的特征值候补收为 ''，由启用时按特征值不存在拒绝（不当作未筛出而回落）。
+function collectLogicValueFeatureFilterIds(lookup) {
+  return collectLogicValueCandidates(lookup, (field) => parseLogicValueFeatureFilterRef(field));
 }
 
 module.exports = {
   LOGIC_VALUE_MIN_FIELDS,
+  buildLogicValueFeatureCandidate,
   buildLogicValueToken,
+  collectLogicValueFeatureFilterIds,
   collectLogicValueFields,
   normalizeLogicValueFields,
+  parseLogicValueFeatureFilterRef,
   parseLogicValueToken,
   resolveLogicValue
 };

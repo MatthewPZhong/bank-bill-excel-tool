@@ -2385,7 +2385,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
         togglesRightOfText: gaps.every(gap=>gap>0&&gap<=12),
         backRightOfSave: back.left>=save.right };
     })()`);
-    assert.deepEqual(geometry, { card: 780, mainSelects: [362], featureValue: 90, channelKept: true, headerOneLine: true, noHorizontalOverflow: true,
+    assert.deepEqual(geometry, { card: 800, mainSelects: [362], featureValue: 90, channelKept: true, headerOneLine: true, noHorizontalOverflow: true,
       merchantButtonSameLine: true, featureGroupSameLine: true, featureAligned: true, togglesRightOfText: true, backRightOfSave: true });
     await layout.evidence(`mapping-dialog-compact-${theme}`, { geometry });
     await js(`cfg.overlay.querySelector('.mapping-wrapper').scrollTop=1e6;void 0;`); await layout.settle();
@@ -2394,7 +2394,8 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
 
   // v3.2.19 根据字段值过滤账单：分组第三行勾选框 +【过滤规则设置】；勾选后主映射币种与发生额解除互斥；规则随【保存】提交。
   const ROW_FILTER_FIELD = '根据字段值过滤账单';
-  const FILTER_GROUP_FIELDS = [...SPLIT_FIELDS, ROW_FILTER_FIELD];
+  // v3.2.21：与 main.js BILL_SPLIT_GROUP_FIELDS 同序——拆分/合并、根据字段值过滤账单、复用模块
+  const FILTER_GROUP_FIELDS = [SPLIT_FIELDS[0], ROW_FILTER_FIELD, SPLIT_FIELDS[1]];
   const MAIN_MUTEX_FIELDS = ['Currency', 'Credit Amount', 'Debit Amount', '按正负号拆分的发生额'];
   async function openRowFilterMapping(mappings = [], rowFilterRules = [], layoutOptions = null) {
     await openToggleMapping(mappings, layoutOptions);
@@ -2571,7 +2572,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       ['原始账单预处理', '个性化映射设置', '账单拆分合并设置']);
     // 分组标题紧接在「过滤账单」行之前，其后是「个性化映射设置」
     assert.deepEqual(await js(`(()=>{const rows=[...cfg.overlay.querySelectorAll('tbody tr')];const index=rows.indexOf(cfg.row('${PREPROCESS_FIELD}'));
-      return [rows[index-1].textContent.trim(),rows[index+1].textContent.trim(),rows[index-2].dataset.templateField];})()`),
+      return [rows[index-1].querySelector('strong').textContent.trim(),rows[index+1].textContent.trim(),rows[index-2].dataset.templateField];})()`),
       ['原始账单预处理', '个性化映射设置', 'Remark']);
     assert.equal(await js(`cfg.row('${PREPROCESS_FIELD}').cells[0].textContent.trim()`), PREPROCESS_FIELD);
     assert.deepEqual(await js('cfg.preState()'), { checked: false, disabled: false, button: '规则设置', hidden: true, buttonDisabled: false });
@@ -2709,6 +2710,103 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(await js('cfg.savedDup()'), ['']);
   });
 
+  // v3.2.21 映射关系管理：「原始账单预处理」标题行的「启用」列（暗绿、竖线贯穿到最后一个勾选行、勾选框居中）、
+  //   拆分合并分组排序、勾选行固定行高、模板字段列加宽后 Windows 字体下英文字段名不换行。
+  const ENABLE_TOGGLE_FIELDS = [PREPROCESS_FIELD, DUPLICATE_FIELD, '按字段区分发生额', ...FILTER_GROUP_FIELDS];
+  async function openEnableColumnMapping(mappings = [], layoutOptions = null, platform = '') {
+    await openToggleMapping([], layoutOptions);
+    const openError = await js(`(()=>{try{cfg.handle.close({status:'cancelled',reason:'cancel'});
+      ${platform ? `document.body.dataset.platform=${JSON.stringify(platform)};` : ''}
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:cfg.tpl,
+        targetFields:['BillDate','Credit Amount','Debit Amount','Balance','MerchantId','Currency','Transaction Description','By Order Of/Beneficiary','Remark',
+          '${PREPROCESS_FIELD}','${DUPLICATE_FIELD}',...${JSON.stringify(ADVANCED_FIELDS)},...${JSON.stringify(FILTER_GROUP_FIELDS)}],
+        preprocessFields:['${PREPROCESS_FIELD}','${DUPLICATE_FIELD}'],advancedMappingFields:${JSON.stringify(ADVANCED_FIELDS)},billSplitGroupFields:${JSON.stringify(FILTER_GROUP_FIELDS)},
+        mappings:${JSON.stringify(mappings)},billSplitMeta:{signedAmountSourceField:'',rowFilterRules:[]}})).handle;
+      cfg.overlay=cfg.top();
+      return '';}catch(error){return String(error&&error.stack||error);}})()`);
+    assert.equal(openError, '');
+  }
+  // 各勾选行高度（勾选前后不变）与「启用」列几何；line：首列单元格 ::after 的竖线范围
+  const ENABLE_GEOMETRY_JS = `(() => {
+    const rect=element=>element.getBoundingClientRect(),middle=item=>(item.top+item.bottom)/2,center=item=>(item.left+item.right)/2;
+    const near=(a,b,tolerance=1)=>Math.abs(a-b)<=tolerance;
+    const head=cfg.overlay.querySelector('.mapping-enable-head'),headRect=rect(head),headStyle=getComputedStyle(head);
+    const sectionTitle=head.parentElement.querySelector('strong'),titleStyle=getComputedStyle(sectionTitle);
+    const spanRows=[...cfg.overlay.querySelectorAll('tbody tr.mapping-enable-span')];
+    const lines=spanRows.map(row=>{const cell=row.cells[0],box=rect(cell),style=getComputedStyle(cell,'::after');
+      return {top:box.top+parseFloat(style.top),bottom:box.bottom-parseFloat(style.bottom),left:box.left+parseFloat(style.left),width:parseFloat(style.width),
+        color:style.borderLeftColor,rightColor:style.borderRightColor};});
+    const preprocessButton=rect(cfg.toggleBtn('${PREPROCESS_FIELD}'));
+    const lastRow=cfg.row(${JSON.stringify(FILTER_GROUP_FIELDS[2])}),lastText=rect(lastRow.querySelector('.mapping-toggle-text'));
+    const toggles=${JSON.stringify(ENABLE_TOGGLE_FIELDS)}.map(field=>({field,box:rect(cfg.toggle(field)),row:rect(cfg.row(field))}));
+    return {
+      head: head.textContent, headFontSize: headStyle.fontSize===titleStyle.fontSize, headColor: headStyle.color,
+      headSameLine: near(middle(headRect),middle(rect(sectionTitle)),2),
+      headRightAtRuleButton: near(headRect.right,preprocessButton.left),
+      spanFirst: spanRows[0]===head.closest('tr'), spanLast: spanRows[spanRows.length-1]===lastRow,
+      linesFromHeadTop: near(lines[0].top,headRect.top),
+      linesContinuous: lines.every((line,index)=>index===0||line.top<=lines[index-1].bottom),
+      linesAtHeadSides: lines.every(line=>near(line.left,headRect.left)&&near(line.width,headRect.width)),
+      linesColored: lines.every(line=>line.color===headStyle.color&&line.rightColor===headStyle.color),
+      linesEndBelowLastText: lines[lines.length-1].bottom-lastText.bottom,
+      togglesCentered: toggles.filter(item=>!(near(center(item.box),center(headRect))&&near(middle(item.box),middle(item.row)))).map(item=>item.field),
+      labelsClearOfColumn: toggles.every(item=>rect(cfg.row(item.field).querySelector('.mapping-toggle-text')).right<headRect.left),
+      rowHeights: [...new Set(toggles.map(item=>Math.round(item.row.height)))]
+    };
+  })()`;
+
+  for (const theme of ['light', 'dark']) await test(`映射关系管理「启用」列（${theme}）：暗绿列头对齐【规则设置】左侧，竖线贯穿到「复用模块字段的映射关系」下方，勾选框居中，勾选前后行高不变`, async () => {
+    await openEnableColumnMapping([], { width: 1440, height: 1100, theme, zoom: 1 });
+    await layout.settle();
+    // 拆分合并分组自上而下：拆分/合并、根据字段值过滤账单、复用模块
+    assert.deepEqual(await js(`(()=>{const rows=[...cfg.overlay.querySelectorAll('tbody tr')];const index=rows.findIndex(row=>row.textContent.trim()==='账单拆分合并设置');
+      return rows.slice(index+1).map(row=>row.cells[0].textContent.trim());})()`), ['拆分/合并明细账单', ROW_FILTER_FIELD, '复用模块字段的映射关系']);
+    const heightsBefore = await js(`${JSON.stringify(ENABLE_TOGGLE_FIELDS)}.map(field=>Math.round(cfg.row(field).getBoundingClientRect().height))`);
+    // 勾选「过滤账单」显示【规则设置】，量取列头对齐；其余勾选行逐个切换，行高不变
+    await js(`cfg.setToggle('${PREPROCESS_FIELD}',true);cfg.setToggle('${DUPLICATE_FIELD}',true);cfg.setToggle('按字段区分发生额',true);
+      cfg.setToggle('复用模块字段的映射关系',false);void 0;`);
+    await layout.settle();
+    const heightsAfter = await js(`${JSON.stringify(ENABLE_TOGGLE_FIELDS)}.map(field=>Math.round(cfg.row(field).getBoundingClientRect().height))`);
+    assert.deepEqual(heightsAfter, heightsBefore);
+    const geometry = await js(ENABLE_GEOMETRY_JS);
+    const { linesEndBelowLastText, ...rest } = geometry;
+    assert.ok(linesEndBelowLastText >= 2 && linesEndBelowLastText <= 6, `竖线止于最后一行文字下方 ${linesEndBelowLastText}px`);
+    assert.deepEqual(rest, { head: '启用', headFontSize: true, headColor: theme === 'light' ? 'rgb(0, 100, 0)' : 'rgb(127, 207, 151)',
+      headSameLine: true, headRightAtRuleButton: true, spanFirst: true, spanLast: true, linesFromHeadTop: true, linesContinuous: true,
+      linesAtHeadSides: true, linesColored: true, togglesCentered: [], labelsClearOfColumn: true, rowHeights: [heightsBefore[0]] });
+    // 点击居中的勾选框照常切换并随【保存】提交
+    await js(`cfg.toggle('${DUPLICATE_FIELD}').click();cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='mappingSave').map(call=>Object.fromEntries(call.args[0].mappings
+      .filter(m=>${JSON.stringify(ENABLE_TOGGLE_FIELDS)}.includes(m.templateField)).map(m=>[m.templateField,m.mappedField])))`),
+      [{ [PREPROCESS_FIELD]: '是', [DUPLICATE_FIELD]: '', '按字段区分发生额': '是', '是否拆分/合并明细账单': '', [ROW_FILTER_FIELD]: '', '复用模块字段的映射关系': '否' }]);
+    await openEnableColumnMapping([], { width: 1440, height: 1100, theme, zoom: 1 });
+    await js(`cfg.setToggle('${PREPROCESS_FIELD}',true);void 0;`);
+    await layout.settle();
+    await layout.evidence(`mapping-dialog-enable-column-${theme}`, { geometry });
+    await js(`cfg.overlay.querySelector('.mapping-wrapper').scrollTop=1e6;void 0;`); await layout.settle();
+    await layout.evidence(`mapping-dialog-enable-column-${theme}-bottom`, { geometry });
+  });
+
+  await test('映射关系管理：Windows 字体（英文 Courier New）下「Transaction Description」「By Order Of/Beneficiary」不换行，弹窗加宽到 800px', async () => {
+    await openEnableColumnMapping([], { width: 1440, height: 1100, theme: 'light', zoom: 1 }, 'win32');
+    await layout.settle();
+    const geometry = await js(`(()=>{const lines=field=>{const cell=cfg.row(field).cells[0],range=document.createRange();range.selectNodeContents(cell);
+        return new Set([...range.getClientRects()].filter(item=>item.width>0).map(item=>Math.round(item.top))).size;};
+      const card=cfg.overlay.querySelector('.mapping-card'),wrapper=card.querySelector('.mapping-wrapper');
+      return {font:getComputedStyle(cfg.row('Transaction Description').cells[0]).fontFamily.split(',')[0].replace(/"/g,'').trim(),
+        card:Math.round(card.getBoundingClientRect().width),fieldColumn:Math.round(cfg.row('Transaction Description').cells[0].getBoundingClientRect().width),
+        lines:['Transaction Description','By Order Of/Beneficiary'].map(lines),noHorizontalOverflow:wrapper.scrollWidth<=wrapper.clientWidth};})()`);
+    assert.deepEqual(geometry, { font: 'Courier New', card: 800, fieldColumn: 240, lines: [1, 1], noHorizontalOverflow: true });
+    await js(`cfg.setToggle('${PREPROCESS_FIELD}',true);void 0;`);
+    await layout.settle();
+    const enable = await js(ENABLE_GEOMETRY_JS);
+    assert.deepEqual({ headRightAtRuleButton: enable.headRightAtRuleButton, togglesCentered: enable.togglesCentered, labelsClearOfColumn: enable.labelsClearOfColumn },
+      { headRightAtRuleButton: true, togglesCentered: [], labelsClearOfColumn: true });
+    await layout.evidence('mapping-dialog-enable-column-win32-font', { geometry, enable });
+    await js(`cfg.overlay.querySelector('.mapping-wrapper').scrollTop=1e6;void 0;`); await layout.settle();
+    await layout.evidence('mapping-dialog-enable-column-win32-font-bottom', { geometry, enable });
+  });
+
   // v3.2.19 映射字段「逻辑取值」：位于「需要拼接字段」上方，选中后显示【设置】；候补字段弹窗参考月度 pending「对账字段」。
   async function openLogicValueDialog() {
     await js(`cfg.sel('Remark').value='逻辑取值';cfg.sel('Remark').dispatchEvent(new Event('change'));
@@ -2751,6 +2849,87 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
     assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='mappingSave').map(call=>call.args[0].mappings.find(m=>m.templateField==='Remark'))
       .map(m=>[m.mappedField,m.mappedFields])`), [['逻辑取值', ['对手户名', '附言']]]);
+  });
+
+  // v3.2.21：逻辑取值候补可选特征值（存 `__FEATURE_FILTER__:<id>`，显示名称）
+  await test('逻辑取值：候补下拉框分「源字段」「特征值」两组，特征值候补显示名称并随映射提交；特征值改名后预览跟着变，被候补引用时不能删除', async () => {
+    const LOGIC_FEATURE = id => `\u0000__FEATURE_FILTER__:${id}`;
+    await setup();
+    await js(`cfg.featureMappings=[{templateField:'Reference',mappedField:'逻辑取值',mappedFields:[${JSON.stringify(LOGIC_FEATURE(1))},'附言']}];void 0;`);
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([SERIAL, ORDER])}`);
+    const preview = `cfg.overlay.querySelector('tr[data-template-field="Reference"] .mapping-logic-value-preview').textContent`;
+    assert.equal(await js(preview), '1. 流水号（特征值） → 2. 附言');
+    await js(`cfg.row('Reference').querySelector('.mapping-logic-value-btn').click();cfg.logic=cfg.top();
+      cfg.setLogic=(index,value)=>{const select=cfg.logic.querySelectorAll('.logic-value-select')[index];select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));};void 0;`);
+    assert.deepEqual(await js(`(()=>{const select=cfg.logic.querySelectorAll('.logic-value-select')[0];
+      return {groups:[...select.querySelectorAll('optgroup')].map(group=>[group.label,[...group.children].map(option=>[option.value,option.textContent])]),
+        values:[...cfg.logic.querySelectorAll('.logic-value-select')].map(item=>item.value),stale:select.classList.contains('is-stale')};})()`), {
+      groups: [['源字段', [['交易日期', '交易日期'], ['附言', '附言']]], ['特征值', [[LOGIC_FEATURE(1), '流水号'], [LOGIC_FEATURE(2), '订单号']]]],
+      values: [LOGIC_FEATURE(1), '附言'], stale: false });
+    // 重复的特征值候补按名称提示
+    await js(`cfg.setLogic(1,${JSON.stringify(LOGIC_FEATURE(1))});cfg.logic.querySelector('[data-action=save]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /候补字段不能重复：流水号（特征值）/);
+    await js(`cfg.top().querySelector('button').click();`); await tick();
+    await js(`cfg.setLogic(1,${JSON.stringify(LOGIC_FEATURE(2))});cfg.logic.querySelector('.logic-value-row-btn[data-role=add]').click();cfg.setLogic(2,'交易日期');
+      cfg.logic.querySelector('[data-action=save]').click();`); await tick();
+    assert.equal(await js(preview), '1. 流水号（特征值） → 2. 订单号（特征值） → 3. 交易日期');
+    // 【特征值管理】：被逻辑取值候补引用的特征值不能删除；改名后预览跟着变
+    await js(`cfg.pick('Remark','${FEATURE}');cfg.btn('Remark').click();cfg.pickFeature('2');cfg.ff().del.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /特征值「订单号」正被 Reference（逻辑取值） 使用，请先改选其他特征值后再删除/);
+    await js('cfg.host.closeTop();');
+    await js(`cfg.pickFeature('1');cfg.type(cfg.ff().name,'流水号A');cfg.ff().save.click();`); await tick();
+    assert.equal(await js(preview), '1. 流水号A（特征值） → 2. 订单号（特征值） → 3. 交易日期');
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    await js(`cfg.pick('Remark','');cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='mappingSave').map(call=>call.args[0].mappings.find(m=>m.templateField==='Reference'))
+      .map(m=>[m.mappedField,m.mappedFields])`), [['逻辑取值', [LOGIC_FEATURE(1), LOGIC_FEATURE(2), '交易日期']]]);
+    assert.deepEqual(await js('cfg.errors'), []);
+  });
+
+  // v3.2.21：在【设置】中临时选中（未保存）的特征值候补，行切到其他映射值后不算引用、特征值可被删除；删除后去掉该候补，
+  //   之后新建的特征值复用同一 id 时不会被当成原先的选择
+  await test('逻辑取值：暂存的特征值候补在特征值被删除后去掉，复用同一 id 的新特征值不会被绑定', async () => {
+    const LOGIC_FEATURE = id => `\u0000__FEATURE_FILTER__:${id}`;
+    await setup();
+    // 已保存的映射不引用特征值（真实后端只按已保存映射拦截删除）
+    await js(`cfg.featureMappings=[{templateField:'Reference',mappedField:'逻辑取值',mappedFields:['附言','交易日期']}];void 0;`);
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([SERIAL, ORDER])}`);
+    const preview = `cfg.overlay.querySelector('tr[data-template-field="Reference"] .mapping-logic-value-preview').textContent`;
+    await js(`cfg.row('Reference').querySelector('.mapping-logic-value-btn').click();cfg.logic=cfg.top();
+      const select=cfg.logic.querySelectorAll('.logic-value-select')[0];select.value=${JSON.stringify(LOGIC_FEATURE(2))};select.dispatchEvent(new Event('change',{bubbles:true}));
+      cfg.logic.querySelector('[data-action=save]').click();`); await tick();
+    assert.equal(await js(preview), '1. 订单号（特征值） → 2. 交易日期');
+    // 切到其他映射值：暂存保留但不算引用，可以删除「订单号」（id 2）
+    await js(`cfg.pick('Reference','');cfg.pick('Remark','${FEATURE}');cfg.btn('Remark').click();cfg.pickFeature('2');cfg.ff().del.click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /确定删除特征值「订单号」？/);
+    await js(`cfg.top().querySelector('[data-action="confirm"]').click();`); await tick();
+    assert.equal(await js(preview), '1. 交易日期');
+    // 新建的特征值复用 id 2；切回逻辑取值后候补里没有它
+    await js(`cfg.ff().add.click();cfg.ff().name.value='发票号';cfg.ff().source.value='附言';cfg.ff().separator.value='comma';cfg.type(cfg.ff().sample,'INV001');cfg.ff().save.click();`); await tick();
+    assert.deepEqual(await js('cfg.featureSaves().map(payload=>payload.featureFilters.map(item=>[item.id||"",item.name]))'),
+      [[['1', '流水号']], [['1', '流水号'], ['', '发票号']]]);
+    await js(`cfg.pick('Remark','');cfg.pick('Reference','逻辑取值');`);
+    assert.deepEqual(await js(`[${preview},JSON.parse(cfg.overlay.querySelector('tr[data-template-field="Reference"]').dataset.logicValueFields)]`),
+      ['1. 交易日期', ['交易日期']]);
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /Reference 选择了「逻辑取值」，请点击【设置】选择至少 2 个候补字段/);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 0);
+  });
+
+  // v3.2.21：仍选着逻辑取值的行只刷新预览，不存在的特征值候补保留（显示「（已删除）」，由保存时校验要求重选），不被静默去掉
+  await test('逻辑取值：仍选着逻辑取值的行在特征值改名后保留不存在的特征值候补并标为已删除', async () => {
+    const LOGIC_FEATURE = id => `\u0000__FEATURE_FILTER__:${id}`;
+    await setup();
+    await js(`cfg.featureMappings=[{templateField:'Reference',mappedField:'逻辑取值',mappedFields:[${JSON.stringify(LOGIC_FEATURE(9))},'附言','交易日期']}];void 0;`);
+    await openFeatureMapping(`,featureFilters:${JSON.stringify([SERIAL, ORDER])}`);
+    const state = `[cfg.overlay.querySelector('tr[data-template-field="Reference"] .mapping-logic-value-preview').textContent,
+      JSON.parse(cfg.overlay.querySelector('tr[data-template-field="Reference"]').dataset.logicValueFields)]`;
+    const expected = ['（含已删除的特征值，请重新设置）1. 特征值（已删除） → 2. 附言 → 3. 交易日期', [LOGIC_FEATURE(9), '附言', '交易日期']];
+    assert.deepEqual(await js(state), expected);
+    assert.equal(await js(`cfg.overlay.querySelector('tr[data-template-field="Reference"] .mapping-logic-value-preview').classList.contains('is-stale')`), true);
+    await js(`cfg.pick('Remark','${FEATURE}');cfg.btn('Remark').click();cfg.pickFeature('1');cfg.type(cfg.ff().name,'流水号A');cfg.ff().save.click();`); await tick();
+    assert.equal(await js('cfg.featureSaves().length'), 1);
+    assert.deepEqual(await js(state), expected);
   });
 
   await test('逻辑取值：回显已存候补，已删除字段标红；【取消】不改暂存；未设置候补时【保存】映射被拦下', async () => {

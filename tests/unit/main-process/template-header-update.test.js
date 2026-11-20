@@ -323,3 +323,52 @@ test('collect：逻辑取值的候补字段为源字段引用；重复账单过�
     (error) => error.code === 'TEMPLATE_MAPPING_FIELD_MISSING' && /摘要/.test(error.message)
   );
 });
+
+// v3.2.21：逻辑取值的特征值候补不是源字段引用；被候补引用的特征值算启用，其筛选字段失效时生成前拦截。
+test('collect：逻辑取值的特征值候补不计为源字段，所引用的特征值筛选字段按启用计入', () => {
+  const v21 = createTemplateHeaderUpdateTools({ ...CONSTANTS, LOGIC_VALUE_MAPPING_FIELD: '逻辑取值' });
+  const input = {
+    mappings: [
+      mapping('Payee Name', '逻辑取值', ['\u0000__FEATURE_FILTER__:2', '对方户名']),
+      mapping('Remark', '逻辑取值', ['\u0000__FEATURE_FILTER__:1', '\u0000__FEATURE_FILTER__:2']),
+      // 旧版本的候补都是源列名：形如 `__FEATURE_FILTER__:3` 的列名仍是源字段引用，不算选用特征值 3
+      mapping('Reference', '逻辑取值', ['__FEATURE_FILTER__:3', '对方户名'])
+    ],
+    featureFilters: [
+      { id: '1', name: '流水号', sourceField: '附言' },
+      { id: '2', name: '订单号', sourceField: '摘要' },
+      { id: '3', name: '备用', sourceField: '用途' }
+    ]
+  };
+  const references = v21.collectTemplateFieldReferences(input);
+  assert.deepEqual(references.map((item) => `${item.area}:${item.target}<-${item.field}:${item.active}`), [
+    'mapping:Payee Name<-对方户名:true',
+    'mapping:Reference<-__FEATURE_FILTER__:3:true',
+    'mapping:Reference<-对方户名:true',
+    'feature-filter:流水号<-附言:true',
+    'feature-filter:订单号<-摘要:true',
+    'feature-filter:备用<-用途:false'
+  ]);
+  assert.throws(
+    () => v21.assertTemplateFieldReferencesAvailable({ name: 'T', headers: ['对方户名', '附言', '__FEATURE_FILTER__:3'] }, input),
+    (error) => error.code === 'TEMPLATE_MAPPING_FIELD_MISSING' && /摘要/.test(error.message) && !/__FEATURE_FILTER__/.test(error.message)
+  );
+  assert.doesNotThrow(() => v21.assertTemplateFieldReferencesAvailable({ name: 'T', headers: ['对方户名', '附言', '摘要', '__FEATURE_FILTER__:3'] }, input));
+});
+
+// 特征值的筛选字段是列名：以固定值前缀开头的真实列名同样登记，删除后【更新】预览列出、生成前拦截。
+test('collect：特征值筛选字段以 __FIXED__: 开头时仍登记为源字段引用', () => {
+  const v21 = createTemplateHeaderUpdateTools({ ...CONSTANTS, LOGIC_VALUE_MAPPING_FIELD: '逻辑取值' });
+  const input = {
+    mappings: [mapping('Remark', '逻辑取值', ['\u0000__FEATURE_FILTER__:1', '摘要'])],
+    featureFilters: [{ id: '1', name: '流水号', sourceField: '__FIXED__:流水' }]
+  };
+  const references = v21.collectTemplateFieldReferences(input);
+  assert.deepEqual(references.map((item) => `${item.area}:${item.target}<-${item.field}:${item.active}`), [
+    'mapping:Remark<-摘要:true',
+    'feature-filter:流水号<-__FIXED__:流水:true'
+  ]);
+  assert.deepEqual(formatFieldReferenceLines(findStaleFieldReferences(references, ['摘要'])), ['特征值「流水号」 · 筛选字段 ← __FIXED__:流水']);
+  assert.throws(() => v21.assertTemplateFieldReferencesAvailable({ name: 'T', headers: ['摘要'] }, input),
+    (error) => error.code === 'TEMPLATE_MAPPING_FIELD_MISSING');
+});
