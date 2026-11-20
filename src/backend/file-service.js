@@ -21,9 +21,12 @@ const {
 } = require('./file-service/feature-filter');
 const {
   LOGIC_VALUE_MIN_FIELDS,
+  buildLogicValueFeatureCandidate,
   buildLogicValueToken,
+  collectLogicValueFeatureFilterIds,
   collectLogicValueFields,
   normalizeLogicValueFields,
+  parseLogicValueFeatureFilterRef,
   parseLogicValueToken,
   resolveLogicValue
 } = require('./file-service/logic-value');
@@ -336,18 +339,31 @@ function buildMappedRows({
   // v3.2.18：每个用到的特征值每行只计算一次，选同一特征值的目标字段共用同一个结果，再各自走后续规范化（日期、金额等）。
   // 不复用时主映射里残留的该值不输出，不启用、也不记未命中提示。
   // v3.2.19：根据字段值过滤账单时未命中的行走主映射，主映射与拆分映射用到的特征值都启用；未命中提示只记该行所走映射用到的。
+  // v3.2.21：逻辑取值候补引用的特征值同样按所在映射启用，但不计入未命中提示（未筛出视为空、取下一个候补）。
   const mainPathFeatureFilterIds = collectFeatureFilterIds(mappingByField);
   const billSplitPathFeatureFilterIds = billSplitEnabled && !billSplitReuseModuleMapping
     ? collectFeatureFilterIds(billSplitMappingByField)
     : mainPathFeatureFilterIds;
+  const mainPathLogicValueFeatureFilterIds = collectLogicValueFeatureFilterIds(mappingByField);
+  const billSplitPathLogicValueFeatureFilterIds = billSplitEnabled && !billSplitReuseModuleMapping
+    ? collectLogicValueFeatureFilterIds(billSplitMappingByField)
+    : mainPathLogicValueFeatureFilterIds;
   const mainPathEffective = !billSplitEnabled || billSplitReuseModuleMapping || Boolean(compiledBillSplitRowFilter);
-  const activeFeatureFilterIds = (billSplitEnabled ? billSplitPathFeatureFilterIds.slice() : []);
-  if (mainPathEffective) {
-    mainPathFeatureFilterIds.forEach((id) => {
+  const activeFeatureFilterIds = [];
+  const activateFeatureFilterIds = (ids) => {
+    ids.forEach((id) => {
       if (!activeFeatureFilterIds.includes(id)) {
         activeFeatureFilterIds.push(id);
       }
     });
+  };
+  if (billSplitEnabled) {
+    activateFeatureFilterIds(billSplitPathFeatureFilterIds);
+    activateFeatureFilterIds(billSplitPathLogicValueFeatureFilterIds);
+  }
+  if (mainPathEffective) {
+    activateFeatureFilterIds(mainPathFeatureFilterIds);
+    activateFeatureFilterIds(mainPathLogicValueFeatureFilterIds);
   }
   const mainPathFeatureFilterIdSet = new Set(mainPathFeatureFilterIds);
   const billSplitPathFeatureFilterIdSet = new Set(billSplitPathFeatureFilterIds);
@@ -394,6 +410,23 @@ function buildMappedRows({
         throw new FileValidationError('FILE_READ', `映射字段不存在：${field}`);
       }
     });
+  // v3.2.21：特征值候补以 NUL 开头，正常表头不会与之相同；构造的表头（如 XLSX 以 `_x0000_` 转义写出的 NUL）
+  //   与之相同时无法区分源列与特征值，拒绝生成而不是任选其一（不能静默改从另一列取值）。
+  [mappingByField, billSplitEnabled && !billSplitReuseModuleMapping ? billSplitMappingByField : {}].forEach((lookup) => {
+    Object.values(lookup || {}).forEach((value) => {
+      [].concat(value).forEach((item) => {
+        (parseLogicValueToken(item) || []).forEach((field) => {
+          const featureFilterRef = parseLogicValueFeatureFilterRef(field);
+          if (featureFilterRef !== null && sourceIndexByField.has(field)) {
+            throw new FileValidationError(
+              'FILE_READ',
+              '源文件有列名与逻辑取值的特征值候补内部写法相同，无法区分源列与特征值，请修改该列名后重试'
+            );
+          }
+        });
+      });
+    });
+  });
 
   if (billSplitEnabled) {
     function ensureBillSplitFieldExists(fieldName) {
@@ -459,9 +492,14 @@ function buildMappedRows({
       }
 
       // v3.2.19：逻辑取值——按顺序取第一个去首尾空白后非空的候补字段原值（token 以 NUL 开头，不会与真实列名相同）
+      // v3.2.21：候补是特征值时取该行筛出的特征值，未筛出为 ''（取下一个候补）
       const logicValueFields = parseLogicValueToken(token);
       if (logicValueFields !== null) {
         return resolveLogicValue(logicValueFields, (field) => {
+          const featureFilterRef = parseLogicValueFeatureFilterRef(field);
+          if (featureFilterRef !== null) {
+            return featureValues.get(featureFilterRef) ?? '';
+          }
           const index = sourceIndexByField.get(field);
           return index === undefined ? '' : row[index];
         });
@@ -495,6 +533,40 @@ function buildMappedRows({
       .map((value) => normalizeCell(value))
       .filter((value) => value !== '')
       .join(' ');
+  }
+
+  // BillDate 映射中特征值筛选源单元格的合计标签（合计行识别用），没有时为 ''。
+  // - 直接选「字段筛选特征值」：沿用 v3.2.18 口径，只看第一个启用的特征值。
+  // - v3.2.21 逻辑取值：按候补顺序查看，特征值候补的源单元格是合计标签即返回；遇到取到值的候补即停止
+  //   （其后的候补没有被取用，不据此把真实交易判为合计行）。
+  function findBillDateFeatureSummaryLabel(mappingValue, row, featureValues = currentRowFeatureValues) {
+    const tokens = normalizeMappingTokens(mappingValue);
+    const sourceLabel = (item) => {
+      const value = normalizeCell(row[item.sourceIndex]);
+      return isStatementSummaryDateLabel(value) ? value : '';
+    };
+    const directFeatureFilter = tokens
+      .map((token) => activeFeatureFilterById.get(parseFeatureFilterToken(token)))
+      .find(Boolean);
+    if (directFeatureFilter && sourceLabel(directFeatureFilter)) {
+      return sourceLabel(directFeatureFilter);
+    }
+    for (const token of tokens) {
+      for (const field of parseLogicValueToken(token) || []) {
+        const featureFilterRef = parseLogicValueFeatureFilterRef(field);
+        if (featureFilterRef !== null) {
+          const item = activeFeatureFilterById.get(featureFilterRef);
+          if (item && sourceLabel(item)) {
+            return sourceLabel(item);
+          }
+          if (normalizeCell(featureValues.get(featureFilterRef) ?? '') !== '') break;
+          continue;
+        }
+        const index = sourceIndexByField.get(field);
+        if (index !== undefined && normalizeCell(row[index]) !== '') break;
+      }
+    }
+    return '';
   }
 
   function readSourceCell(row, fieldName) {
@@ -900,17 +972,12 @@ function buildMappedRows({
     // v3.2.16：BillDate 取「字段筛选特征值」时，合计标签会被筛成空串；改按筛选源单元格原文识别合计行，
     // 否则合计金额会作为普通交易再导出一次。
     // v3.2.18：取 BillDate 所选特征值的筛选源单元格。
-    const billDateFeatureFilter = normalizeMappingTokens(effectiveBillDateMapping)
-      .map((token) => activeFeatureFilterById.get(parseFeatureFilterToken(token)))
-      .find(Boolean);
-    const featureFilterBillDateSource = billDateFeatureFilter
-      ? normalizeCell(row[billDateFeatureFilter.sourceIndex])
-      : '';
+    // v3.2.21：BillDate 取「逻辑取值」且候补含特征值时，合计标签同样会被筛成空串、落到下一个候补；
+    //   按候补顺序检查实际查看过的特征值候补（到第一个取到值的候补为止）的筛选源单元格。直接选用的口径不变。
+    const featureFilterBillDateSource = findBillDateFeatureSummaryLabel(effectiveBillDateMapping, row);
     const summaryDateLabel = isStatementSummaryDateLabel(rawEffectiveBillDate)
       ? normalizeCell(rawEffectiveBillDate)
-      : isStatementSummaryDateLabel(featureFilterBillDateSource)
-        ? featureFilterBillDateSource
-        : '';
+      : featureFilterBillDateSource;
     const recordSummaryRow = () => {
       issues.push({ type: 'summary-row-skipped', rowNumber: sourceRowNumber, rawValue: summaryDateLabel });
     };
@@ -1205,6 +1272,9 @@ function buildMappedRows({
       totalRows: preprocessed.totalRows,
       keptRows: preprocessed.keptRows,
       droppedTransactionRowNumbers: preprocessed.droppedRows
+        // v3.2.21：BillDate 逻辑取值的特征值候补把合计标签筛成空、回落到有效日期的行，这里仍算作上一段的交易行（不套用
+        //   保留行的合计判定，保持 v3.2.19 口径）：它充当桥接候选的界线。直接识别不受该界线裁剪，合计行上的账号仍可能
+        //   被认作下一段的账号——与既有合计行同一问题，见 knowledge/backlog.md B113。
         .filter(({ row }) => {
           const featureValues = extractRowFeatureValues(row);
           return billDateMappings.some((mappingValue) => Boolean(
@@ -1433,7 +1503,10 @@ module.exports = {
   normalizeLogicValueFields,
   LOGIC_VALUE_MIN_FIELDS,
   LEGACY_FEATURE_FILTER_ID,
+  buildLogicValueFeatureCandidate,
   parseFeatureFilterToken,
+  parseLogicValueFeatureFilterRef,
+  parseLogicValueToken,
   resolveUsedFeatureFilters,
   upgradeLegacyFeatureFilter,
   parseDateValue,

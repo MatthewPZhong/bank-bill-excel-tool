@@ -135,7 +135,8 @@
   - 模板包：主映射或拆分映射用到该值时 `resolveTemplateBundleVersion` 写 v7（v3.2.16/3.2.17 整包拒绝），读 v6 包时按迁移同口径升级；“是否使用”只看实际生效的映射（拆分且不复用时为拆分映射）
   - 回滚到 v3.2.17：数组形状被旧版读为未设置规则，用到该值的模板保存与生成失败关闭
   - BillDate 取该值时合计行识别取所选特征值的源单元格（资金红线回归在集成脚本 ⑦）
-  - 必跑：`scripts/integration/statement-feature-filter.js`、`node scripts/test-renderer-lifecycle.js configuration-dialogs`
+  - v3.2.21：「逻辑取值」（`LOGIC_VALUE_MAPPING_FIELD`）的候补也可以是特征值，在其 `mapped_fields_json` 中存 `\u0000__FEATURE_FILTER__:<id>`（`common.js` 的 `LOGIC_VALUE_FEATURE_CANDIDATE_PREFIX`，渲染端 `configuration.js` 有同值常量；以 NUL 开头，旧版本形如 `__FEATURE_FILTER__:1` 的源列名候补仍是源列，**不要**用 `parseFeatureFilterToken` 识别候补）。按源字段处理候补的路径须先用 `parseLogicValueFeatureFilterRef` 识别，保存前用 `buildLogicValueFeatureCandidate` 统一写法；引用收集（删除保护 `listTemplateFeatureFilterReferences` 的 `logicValueMappingValue`、生成 `resolveStatementFeatureFilters` / `collectLogicValueFeatureFilterIds`、模板【更新】`usedFeatureFilterIds`）都要计入。只经候补引用的特征值不记未筛出提示；BillDate 候补含特征值时合计行识别同样检查其源单元格（回归在 `statement-logic-value.js` ⑦）；用到时模板包写 v9（`SUPPORTED_BUNDLE_VERSION`，v8 档为 `LOGIC_VALUE_BUNDLE_VERSION`）。spec `changes/v3.2.21/feat/mapping-logic-feature-layout/spec.md`
+  - 必跑：`scripts/integration/statement-feature-filter.js`、`scripts/integration/statement-logic-value.js`、`node scripts/test-renderer-lifecycle.js configuration-dialogs`
 
 ### `MERCHANT_ID_SELF_INPUT_OPTION`
 - 定义：`src/main.js`
@@ -150,7 +151,7 @@
   - 配置与 `template_big_accounts` 分开存放：不参与大账号识别、选择窗口、渠道大账号汇总与月度余额导出；与 MULTI 标记精确比较的各处（`isMultiBigAccountMapping` 等）不会命中本模式
   - 按文件名映射导入：全部文件为本模式时跳过选择；与需要选择大账号的文件同批时阻断（`classifyCurrencyOnlyEntries`）
   - 本模式的币种识别调用 `resolveCurrencyValue(..., { allowFuzzy: false })`：只认代码与精确名称，模糊命中按未维护阻断（spec D4）；其他模式保持模糊匹配
-  - 模板包：条目带 `currencyBigAccounts`；用到本模式时 `resolveTemplateBundleVersion` 写 v6（v3.2.18 起用到「字段筛选特征值」时写 v7），否则写 v5；改格式须同步 `SUPPORTED_BUNDLE_VERSION`
+  - 模板包：条目带 `currencyBigAccounts`；用到本模式时 `resolveTemplateBundleVersion` 写 v6（v3.2.18 起用到「字段筛选特征值」时写 v7，v3.2.19 起 v8 档见 `LOGIC_VALUE_BUNDLE_VERSION`，v3.2.21 逻辑取值候补含特征值写 v9），否则写 v5；改格式须同步 `SUPPORTED_BUNDLE_VERSION`
   - 必跑：`tests/unit/backend/file-service/currency-big-account.test.js`、`tests/unit/main-process/statement-currency-big-account.test.js`、`scripts/integration/statement-currency-big-account.js`
 
 ### `BALANCE_CALCULATED_OPTION` / `BALANCE_DISABLED_OPTION`

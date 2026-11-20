@@ -626,6 +626,9 @@ const {
   normalizeLogicValueFields,
   LOGIC_VALUE_MIN_FIELDS,
   parseFeatureFilterToken,
+  buildLogicValueFeatureCandidate,
+  parseLogicValueFeatureFilterRef,
+  parseLogicValueToken,
   resolveUsedFeatureFilters,
   upgradeLegacyFeatureFilter,
   LEGACY_FEATURE_FILTER_ID,
@@ -1583,6 +1586,9 @@ const CONCAT_FIELDS_MAPPING_FIELD = '需要拼接字段';
 // v3.2.18：模板可有多个特征值（templates.feature_filter_json 存数组），映射行的 mappedFields[0] 为所选特征值 id。
 const FEATURE_FILTER_MAPPING_FIELD = '字段筛选特征值';
 // v3.2.19：映射值「逻辑取值 → 候补字段取值」——mappedFields 为有序候补字段，生成时取第一个非空值（spec §8.4）。
+// v3.2.21：候补也可以是模板的特征值，存为 `\u0000__FEATURE_FILTER__:<id>`（buildLogicValueFeatureCandidate /
+//   parseLogicValueFeatureFilterRef；以 NUL 开头，旧版本的源列名候补不会被误读为特征值），取该行筛出的特征值，
+//   未筛出视为空、取下一个候补（changes/v3.2.21/feat/mapping-logic-feature-layout/spec.md）。
 const LOGIC_VALUE_MAPPING_FIELD = '逻辑取值';
 const CUSTOM_INPUT_TARGET_FIELDS = new Set(['MerchantId']);
 const SIGNED_AMOUNT_MAPPING_FIELD = '按正负号拆分的发生额';
@@ -1619,7 +1625,12 @@ const DUPLICATE_ROW_FILTER_ENABLED_OPTION = '是';
 //   用到原始账单预处理「过滤账单」（勾选或有过滤规则）时同样写 v8（旧版会忽略过滤，把非账单行也输出）；
 //   勾选「重复账单过滤」或映射用到「逻辑取值」时同样写 v8（旧版会忽略去重、把逻辑取值当作拼接，静默输出不同的结果）；
 //   未用到时按上面的规则写 v5/v6/v7。
-const SUPPORTED_BUNDLE_VERSION = 8;
+// v3.2.21：「逻辑取值」候补含特征值时写 v9，v3.2.20 及更早版本整包按版本拒绝（旧版会把特征值 token 当成源字段名，
+//   报「映射字段不存在」跳过该模板）；未用到时按上面的规则写 v5～v8。
+const SUPPORTED_BUNDLE_VERSION = 9;
+// v3.2.21：逻辑取值候补含特征值的包版本（功能首次出现的版本，固定；SUPPORTED_BUNDLE_VERSION 只表示能读取的最高版本）
+const LOGIC_VALUE_FEATURE_BUNDLE_VERSION = 9;
+const LOGIC_VALUE_BUNDLE_VERSION = 8;
 const FEATURE_FILTER_BUNDLE_VERSION = 7;
 const CURRENCY_ONLY_BUNDLE_VERSION = 6;
 const BASE_BUNDLE_VERSION = 5;
@@ -1635,10 +1646,11 @@ const ADVANCED_MAPPING_FIELDS = [
   AMOUNT_BASED_ACCOUNT_MAPPING_FIELD,
   AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD
 ];
+// v3.2.21：映射关系管理中自上而下为 拆分/合并明细账单、根据字段值过滤账单、复用模块字段的映射关系（映射按字段名读写，顺序只影响展示）
 const BILL_SPLIT_GROUP_FIELDS = [
   BILL_SPLIT_MERGE_MAPPING_FIELD,
-  REUSE_MODULE_MAPPING_FIELD,
-  BILL_SPLIT_ROW_FILTER_MAPPING_FIELD
+  BILL_SPLIT_ROW_FILTER_MAPPING_FIELD,
+  REUSE_MODULE_MAPPING_FIELD
 ];
 // v3.2.19：映射关系管理「原始账单预处理」分组（位于「个性化映射设置」之前）
 const PREPROCESS_FIELDS = [
@@ -3713,6 +3725,7 @@ function buildTemplateLibraryPayload() {
   };
 }
 
+// v3.2.21：逻辑取值候补含特征值时写 v9。
 // v3.2.19：用到拆分账单「费用账单」、两类过滤、重复账单过滤或逻辑取值时写 v8；否则任一模板的主映射或拆分映射用到「字段筛选特征值」时写 v7；
 //   只用到「原始账单仅有币种无账户号」时写 v6；都未用到时写 v5（见 SUPPORTED_BUNDLE_VERSION 注释）。
 function resolveTemplateBundleVersion(templates) {
@@ -3745,8 +3758,19 @@ function resolveTemplateBundleVersion(templates) {
   const usesLogicValue = entries.some((entry) => (
     usesLogicValueMapping(entry && entry.mappings) || usesLogicValueMapping(entry && entry.billSplitMappings)
   ));
+  // v3.2.21：逻辑取值候补含特征值（旧版会把特征值 token 当成源字段名）
+  const usesLogicValueFeatureCandidate = entries.some((entry) => (
+    [].concat(entry && entry.mappings || [], entry && entry.billSplitMappings || []).some((mapping) => (
+      normalizeCell(mapping && mapping.mappedField) === LOGIC_VALUE_MAPPING_FIELD
+        && (Array.isArray(mapping.mappedFields) ? mapping.mappedFields : [])
+          .some((field) => parseLogicValueFeatureFilterRef(normalizeCell(field)) !== null)
+    ))
+  ));
+  if (usesLogicValueFeatureCandidate) {
+    return LOGIC_VALUE_FEATURE_BUNDLE_VERSION;
+  }
   if (usesFeeBill || usesBillSplitRowFilter || usesPreprocessRowFilter || usesDuplicateRowFilter || usesLogicValue) {
-    return SUPPORTED_BUNDLE_VERSION;
+    return LOGIC_VALUE_BUNDLE_VERSION;
   }
   if (usesFeatureFilter) {
     return FEATURE_FILTER_BUNDLE_VERSION;
@@ -8533,19 +8557,34 @@ function registerFundTransferAccountMappingHandlers() {
 function validateFeatureFiltersPayload(rawList, template) {
   const existing = Array.isArray(template.featureFilters) ? template.featureFilters : [];
   const knownIds = new Set(existing.map((item) => normalizeCell(item && item.id)).filter(Boolean));
+  // v3.2.21：已保存映射仍引用、但特征值已不存在的 id 不分配给新特征值（否则悬空引用会被悄悄绑定到新规则）
+  const referencedIds = database.listTemplateFeatureFilterReferences(template.id, FEATURE_FILTER_MAPPING_FIELD, {
+    logicValueMappingValue: LOGIC_VALUE_MAPPING_FIELD,
+    parseCandidateRef: parseLogicValueFeatureFilterRef
+  }).map((reference) => reference.ref).filter(Boolean);
   // 未改动的已有特征值不按当前表头校验（模板【更新】后可逐个修复），新增与改动的照常校验
-  const featureFilters = normalizeFeatureFilterList(rawList, { headers: template.headers, knownIds, preserved: existing });
+  const featureFilters = normalizeFeatureFilterList(rawList, {
+    headers: template.headers, knownIds, preserved: existing, reservedIds: referencedIds
+  });
   const keptIds = new Set(featureFilters.map((item) => item.id));
   const removed = existing.filter((item) => !keptIds.has(normalizeCell(item && item.id)));
   if (removed.length) {
-    const references = database.listTemplateFeatureFilterReferences(template.id, FEATURE_FILTER_MAPPING_FIELD);
+    // v3.2.21：「逻辑取值」候补里的特征值同样算引用
+    const references = database.listTemplateFeatureFilterReferences(template.id, FEATURE_FILTER_MAPPING_FIELD, {
+      logicValueMappingValue: LOGIC_VALUE_MAPPING_FIELD,
+      parseCandidateRef: parseLogicValueFeatureFilterRef
+    });
     removed.forEach((item) => {
       const id = normalizeCell(item.id);
       const fields = references
         .filter((reference) => reference.ref === id)
-        .map((reference) => (reference.scope === 'split'
-          ? `${reference.templateField}（拆分/合并映射）`
-          : reference.templateField));
+        .map((reference) => {
+          const label = reference.role === 'logic-value'
+            ? `${reference.templateField}（${LOGIC_VALUE_MAPPING_FIELD}）`
+            : reference.templateField;
+          return reference.scope === 'split' ? `${label}（拆分/合并映射）` : label;
+        })
+        .filter((label, index, labels) => labels.indexOf(label) === index);
       if (fields.length) {
         throw new FileValidationError(
           'FILE_READ',
@@ -8555,6 +8594,22 @@ function validateFeatureFiltersPayload(rawList, template) {
     });
   }
   return featureFilters;
+}
+
+// v3.2.21：映射（主映射、拆分映射）引用的特征值 id：直选「字段筛选特征值」的所选 id 与「逻辑取值」的特征值候补。
+//   模板包导入时不分配给未带 id 的特征值，避免悬空引用被绑定到新规则。
+function collectReferencedFeatureFilterIds(...mappingLists) {
+  return [].concat(...mappingLists.map((list) => (Array.isArray(list) ? list : [])))
+    .flatMap((mapping) => {
+      const mappedField = normalizeCell(mapping && mapping.mappedField);
+      const values = Array.isArray(mapping && mapping.mappedFields) ? mapping.mappedFields : [];
+      if (mappedField === FEATURE_FILTER_MAPPING_FIELD) return [normalizeCell(values[0])];
+      if (mappedField === LOGIC_VALUE_MAPPING_FIELD) {
+        return values.map((value) => parseLogicValueFeatureFilterRef(normalizeCell(value))).filter((ref) => ref !== null);
+      }
+      return [];
+    })
+    .filter(Boolean);
 }
 
 // v3.2.18：选「字段筛选特征值」的映射行 → [{ templateField, ref }]；label 用于拆分映射的提示前缀。
@@ -8578,7 +8633,9 @@ function validateTemplateConfiguration({
   billSplitMappings = [],
   // v3.2.16：MerchantId「原始账单仅有币种无账户号」的 币种 → 大账号，与币种映射表中的币种代码
   currencyBigAccounts = [],
-  availableCurrencyCodes = null
+  availableCurrencyCodes = null,
+  // v3.2.21：false 时（导入 v8 及更早的模板包）逻辑取值候补都按源列名校验，形如特征值候补的值不认作特征值
+  allowLogicValueFeatureCandidates = true
 }) {
   const targetFields = buildManagedMappingFields(enumValues);
   const targetFieldSet = new Set(targetFields);
@@ -8900,9 +8957,30 @@ function validateTemplateConfiguration({
       ) {
         throw new FileValidationError('FILE_READ', `${targetField} 不支持使用"${LOGIC_VALUE_MAPPING_FIELD}"`);
       }
+      // v3.2.21：特征值候补统一为规范写法（id 去首尾空白）后再查重与计数，同一特征值的不同写法算重复。
+      //   模板表头与特征值候补写法相同（只可能是构造的含 NUL 列名）时无法区分源列与特征值，按原写法与规范写法都检查，
+      //   拒绝保存而不是任选其一。
+      //   提示不带候补原文（含 NUL，特征值 id 也可能是模板包带入的任意字符串）。
+      const ambiguousCandidateError = () => new FileValidationError(
+        'FILE_READ',
+        `${targetField} 的「${LOGIC_VALUE_MAPPING_FIELD}」有特征值候补与模板中一个列名内部写法相同，无法区分，请修改该列名`
+      );
       const rawCandidates = (Array.isArray(selectedMapping.mappedFields) ? selectedMapping.mappedFields : [])
         .map((value) => normalizeCell(value))
-        .filter((value) => value !== '');
+        .filter((value) => value !== '')
+        .map((value) => {
+          const featureFilterRef = parseLogicValueFeatureFilterRef(value);
+          if (featureFilterRef === null) return value;
+          if (sourceFieldSet.has(value)) throw ambiguousCandidateError();
+          // 旧版本模板包：这种写法只可能是源列名，表头里没有该列（失效的旧候补），拒绝而不是改认作特征值
+          if (!allowLogicValueFeatureCandidates) {
+            throw new FileValidationError(
+              'FILE_READ',
+              `${targetField} 的「${LOGIC_VALUE_MAPPING_FIELD}」有候补字段在模板表头中不存在，请在原版本中重新选择候补字段后再导出`
+            );
+          }
+          return buildLogicValueFeatureCandidate(featureFilterRef);
+        });
       if (new Set(rawCandidates).size !== rawCandidates.length) {
         throw new FileValidationError('FILE_READ', `${targetField} 的「${LOGIC_VALUE_MAPPING_FIELD}」候补字段不能重复`);
       }
@@ -8912,7 +8990,16 @@ function validateTemplateConfiguration({
           `${targetField} 使用"${LOGIC_VALUE_MAPPING_FIELD}"时请至少选择 ${LOGIC_VALUE_MIN_FIELDS} 个候补字段`
         );
       }
+      // v3.2.21：特征值候补不按表头校验，与「字段筛选特征值」一起在循环后按生效映射校验特征值存在且条件有效
       rawCandidates.forEach((fieldName) => {
+        const featureFilterRef = parseLogicValueFeatureFilterRef(fieldName);
+        if (featureFilterRef !== null && sourceFieldSet.has(fieldName)) {
+          throw ambiguousCandidateError();
+        }
+        if (featureFilterRef !== null) {
+          featureFilterRefs.push({ templateField: `${targetField}（${LOGIC_VALUE_MAPPING_FIELD}）`, ref: featureFilterRef });
+          return;
+        }
         if (!sourceFieldSet.has(fieldName)) {
           throw new FileValidationError('FILE_READ', `映射字段不存在：${fieldName}`);
         }
@@ -10351,7 +10438,10 @@ function registerTemplateHandlers() {
           // v3.2.18：包内特征值只校验名称与条件（保留包内 id），不按表头校验筛选字段：模板【更新】后未被选用的
           //   特征值可能引用已删除的字段，不应让整条模板被跳过；生效映射所选特征值由 validateTemplateConfiguration
           //   按表头校验，随映射同事务写入。
-          const bundleFeatureFilters = normalizeFeatureFilterList(entry.featureFilters || []);
+          // v3.2.21：包内映射引用的 id 不分配给未带 id 的特征值（引用了包内不存在的特征值时照常按「特征值不存在」拒绝）
+          const bundleFeatureFilters = normalizeFeatureFilterList(entry.featureFilters || [], {
+            reservedIds: collectReferencedFeatureFilterIds(entry.mappings, entry.billSplitMappings)
+          });
           const validated = validateTemplateConfiguration({
             template: draftTemplate,
             mappings: normalizeMappingRows({
@@ -10365,7 +10455,9 @@ function registerTemplateHandlers() {
             featureFilters: bundleFeatureFilters,
             billSplitMappings: entry.billSplitMappings,
             currencyBigAccounts: entry.currencyBigAccounts,
-            availableCurrencyCodes: bundleCurrencyCodes
+            availableCurrencyCodes: bundleCurrencyCodes,
+            // v3.2.21：v8 及更早的包不可能含特征值候补，形如特征值候补的值按旧语义是源列名
+            allowLogicValueFeatureCandidates: importedBundleVersion >= LOGIC_VALUE_FEATURE_BUNDLE_VERSION
           });
           const template = database.upsertTemplate({
             templateKey: entry.templateKey,
@@ -10447,6 +10539,12 @@ function registerTemplateHandlers() {
         } catch (error) {
           if (error instanceof FileValidationError) {
             skippedCount += 1;
+            // v3.2.21：记下跳过的模板与原因（如旧版本模板包里失效的逻辑取值候补），导入结果只给出跳过数量
+            appendActivityLogEntry({
+              level: 'warn',
+              message: '模板包导入时跳过模板',
+              details: [`模板名：${entry.name}`, `原因：${error.message}`]
+            });
             return;
           }
 
@@ -11503,7 +11601,15 @@ function resolveStatementFeatureFilters(template, mappingByTargetField, billSpli
         const ref = parseFeatureFilterToken(item);
         if (ref !== null) {
           refs.push({ templateField, ref });
+          return;
         }
+        // v3.2.21：逻辑取值候补里的特征值
+        (parseLogicValueToken(item) || []).forEach((field) => {
+          const candidateRef = parseLogicValueFeatureFilterRef(field);
+          if (candidateRef !== null) {
+            refs.push({ templateField: `${templateField}（${LOGIC_VALUE_MAPPING_FIELD}）`, ref: candidateRef });
+          }
+        });
       });
     });
   });
@@ -14266,6 +14372,23 @@ function isLegacyOrientedTemplateMappings(templateId) {
 }
 
 // 读取所选文件表头并与模板当前表头对比；只读，不写库。
+// v3.2.21：模板已保存的逻辑取值候补中，有特征值候补与当前或待写入表头的列名内部写法相同（只可能是构造的含 NUL 列名）。
+//   更新前后任一侧出现这种列名，更新后都无法再判断该候补是源列还是特征值（生成会拒绝或改取其他值），拒绝更新。
+function hasAmbiguousLogicValueFeatureCandidate(templateId, headerLists) {
+  const headerSet = new Set([].concat(...(headerLists || []).map((headers) => (Array.isArray(headers) ? headers : [])))
+    .map((header) => normalizeCell(header)));
+  return [].concat(
+    (database.getTemplateMappings(templateId) || {}).mappings || [],
+    database.getBillSplitMappings(templateId) || []
+  ).some((mapping) => normalizeCell(mapping && mapping.mappedField) === LOGIC_VALUE_MAPPING_FIELD
+    && (Array.isArray(mapping.mappedFields) ? mapping.mappedFields : []).some((field) => {
+      const candidate = normalizeCell(field);
+      const featureFilterRef = parseLogicValueFeatureFilterRef(candidate);
+      return featureFilterRef !== null
+        && (headerSet.has(candidate) || headerSet.has(buildLogicValueFeatureCandidate(featureFilterRef)));
+    }));
+}
+
 function prepareTemplateHeaderUpdate({ templateId, filePath }) {
   const template = database.getTemplate(templateId);
   if (!template) {
@@ -14287,6 +14410,14 @@ function prepareTemplateHeaderUpdate({ templateId, filePath }) {
   const headers = normalizeBundleTemplateHeaders(extractHeaders(filePath));
   if (!headers.some((header) => header !== '')) {
     throw new FileValidationError('TEMPLATE_HEADERS_INVALID', '所选文件没有有效的表头');
+  }
+  if (hasAmbiguousLogicValueFeatureCandidate(templateId, [template.headers, headers])) {
+    return createErrorResult({
+      step: '更新模板',
+      message: `模板「${template.name}」有列名与「${LOGIC_VALUE_MAPPING_FIELD}」的特征值候补内部写法相同，请先在映射关系管理中重新选择候补字段后再更新`,
+      errorCode: 'TEMPLATE_LOGIC_VALUE_CANDIDATE_AMBIGUOUS',
+      context: { templateId, templateName: template.name }
+    });
   }
   const diff = diffTemplateHeaders(template.headers, headers);
   if (!diff.identical) {
@@ -14345,6 +14476,13 @@ function applyTemplateHeaderUpdate(payload = {}) {
   }
   if (isLegacyOrientedTemplateMappings(templateId)) {
     return fail('TEMPLATE_MAPPINGS_LEGACY_ORIENTATION', LEGACY_ORIENTED_MAPPINGS_MESSAGE, { templateName: template.name });
+  }
+  if (hasAmbiguousLogicValueFeatureCandidate(templateId, [template.headers, headers])) {
+    return fail(
+      'TEMPLATE_LOGIC_VALUE_CANDIDATE_AMBIGUOUS',
+      `模板「${template.name}」有列名与「${LOGIC_VALUE_MAPPING_FIELD}」的特征值候补内部写法相同，请先在映射关系管理中重新选择候补字段后再更新`,
+      { templateName: template.name }
+    );
   }
   const conflict = findConflictingTemplateByHeaders(headers, templateId);
   if (conflict) {

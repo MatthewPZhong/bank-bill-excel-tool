@@ -43,6 +43,9 @@ const {
   normalizeFeeAmountFormula,
   normalizeRowFilterRules,
   parseFeatureFilterToken,
+  parseLogicValueToken,
+  parseLogicValueFeatureFilterRef,
+  buildLogicValueFeatureCandidate,
   PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
   resolveUsedFeatureFilters,
   upgradeLegacyFeatureFilter,
@@ -136,7 +139,7 @@ const CONSTANTS = loadMainConstants([
   'DUPLICATE_ROW_FILTER_ENABLED_OPTION', 'PREPROCESS_FIELDS',
   'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS', 'FILENAME_MAPPING_TEMPLATE_ID', 'MISSING_ENUM_MESSAGE',
   'LEGACY_ORIENTED_MAPPINGS_MESSAGE',
-  'SUPPORTED_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION'
+  'SUPPORTED_BUNDLE_VERSION', 'LOGIC_VALUE_FEATURE_BUNDLE_VERSION', 'LOGIC_VALUE_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION'
 ]);
 const TOGGLE = CONSTANTS.PREPROCESS_ROW_FILTER_MAPPING_FIELD;
 
@@ -179,6 +182,9 @@ function createMain(database) {
     LEGACY_FEATURE_FILTER_ID,
     normalizeFeatureFilterList,
     parseFeatureFilterToken,
+    parseLogicValueToken,
+    parseLogicValueFeatureFilterRef,
+    buildLogicValueFeatureCandidate,
     resolveUsedFeatureFilters,
     upgradeLegacyFeatureFilter,
     buildMappedRows,

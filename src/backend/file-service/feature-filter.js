@@ -190,7 +190,8 @@ function normalizeFeatureFilterName(rawName) {
 //   - preserved 为库中已保存的列表时，筛选条件与已保存完全相同的已有条目不按 headers 校验筛选字段：
 //     模板【更新】可能删掉多个特征值共用的筛选字段，整表提交时须能逐个修复（被映射选用时，
 //     保存映射与生成仍按表头拦截）。新增或改了条件的条目照常按 headers 校验。
-function normalizeFeatureFilterList(rawList, { headers = null, knownIds = null, preserved = null } = {}) {
+// reservedIds：不分配给新特征值的 id（v3.2.21：已保存映射仍引用、特征值已不存在的 id）。
+function normalizeFeatureFilterList(rawList, { headers = null, knownIds = null, preserved = null, reservedIds = null } = {}) {
   if (!Array.isArray(rawList)) {
     throw fail('特征值列表格式不正确');
   }
@@ -215,15 +216,17 @@ function normalizeFeatureFilterList(rawList, { headers = null, knownIds = null, 
   });
   const seenIds = new Set();
   const seenNames = new Set();
-  let maxNumericId = 0;
+  // v3.2.21：按 BigInt 比较与递增，超出安全整数的数字 id（模板包可带入任意字符串 id）也不会算错而复用已有或保留的 id
+  let maxNumericId = BigInt(0);
   const trackId = (id) => {
-    if (/^\d+$/.test(id)) {
-      maxNumericId = Math.max(maxNumericId, Number(id));
+    if (/^\d+$/.test(id) && BigInt(id) > maxNumericId) {
+      maxNumericId = BigInt(id);
     }
   };
   if (knownIds) {
     knownIds.forEach((id) => trackId(String(id)));
   }
+  (Array.isArray(reservedIds) ? reservedIds : []).forEach((id) => trackId(normalizeCell(id)));
   const pending = rawList.map((raw) => {
     if (!isPlainObject(raw)) {
       throw fail('特征值列表格式不正确');
@@ -249,7 +252,7 @@ function normalizeFeatureFilterList(rawList, { headers = null, knownIds = null, 
   return pending.map(({ id, name, rule }) => {
     let resolvedId = id;
     if (!resolvedId) {
-      maxNumericId += 1;
+      maxNumericId += BigInt(1);
       resolvedId = String(maxNumericId);
     }
     return { id: resolvedId, name, ...rule };
@@ -318,9 +321,15 @@ function resolveUsedFeatureFilters(featureFilters, refs, { headers = null } = {}
     if (!item) {
       throw fail(`${templateField} 选择的特征值不存在，请重新选择`);
     }
-    if (!resolved[id]) {
+    // 按自有属性判断并定义（id 可为任意字符串，如 constructor、__proto__，不能被原型属性冒充或改写原型）
+    if (!Object.prototype.hasOwnProperty.call(resolved, id)) {
       const name = normalizeCell(item.name);
-      resolved[id] = { id, name, ...normalizeFeatureFilterRule(item, { headers, name }) };
+      Object.defineProperty(resolved, id, {
+        value: { id, name, ...normalizeFeatureFilterRule(item, { headers, name }) },
+        enumerable: true,
+        writable: true,
+        configurable: true
+      });
     }
   });
   return resolved;

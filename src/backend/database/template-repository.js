@@ -441,14 +441,24 @@ function writeTemplatePreprocessRowFilterRules(db, templateId, rules) {
 }
 
 // v3.2.18：已保存的主映射与拆分映射中选「字段筛选特征值」的行及其所选特征值 id（ref 未选为 ''）。
-function listTemplateFeatureFilterReferences(db, templateId, featureFilterMappingValue) {
-  const pick = (scope, rows) => rows
-    .filter((row) => normalizeText(row.mappedField) === featureFilterMappingValue)
-    .map((row) => ({
-      scope,
-      templateField: normalizeText(row.templateField),
-      ref: normalizeText(parseJsonArray(row.mappedFieldsJson)[0])
-    }));
+// v3.2.21：传入 logicValueMappingValue 与 parseCandidateRef 时，「逻辑取值」候补里的特征值也返回（role: 'logic-value'）；
+//   parseCandidateRef(候补) 返回特征值 id，不是特征值候补时返回 null。
+function listTemplateFeatureFilterReferences(db, templateId, featureFilterMappingValue, options = {}) {
+  const { logicValueMappingValue = '', parseCandidateRef = null } = options || {};
+  const pick = (scope, rows) => rows.flatMap((row) => {
+    const mappedField = normalizeText(row.mappedField);
+    const templateField = normalizeText(row.templateField);
+    if (mappedField === featureFilterMappingValue) {
+      return [{ scope, role: '', templateField, ref: normalizeText(parseJsonArray(row.mappedFieldsJson)[0]) }];
+    }
+    if (logicValueMappingValue && mappedField === logicValueMappingValue && typeof parseCandidateRef === 'function') {
+      return parseJsonArray(row.mappedFieldsJson)
+        .map((candidate) => parseCandidateRef(normalizeText(candidate)))
+        .filter((ref) => ref !== null && ref !== undefined)
+        .map((ref) => ({ scope, role: 'logic-value', templateField, ref: normalizeText(ref) }));
+    }
+    return [];
+  });
   const select = (table) => db.prepare(`
     SELECT template_field AS templateField, mapped_field AS mappedField, mapped_fields_json AS mappedFieldsJson
     FROM ${table}
