@@ -269,6 +269,13 @@ function ensureTemplatePreprocessRowFilterSupport(db) {
   upgradeLegacyLogicValueConcatMappings(db);
 }
 
+// v3.2.21：模板级「原始账单预处理 → 跨 Sheet 回填」规则（JSON；'' 表示未设置）。开关存为映射行，规则随映射【保存】落库。
+function ensureTemplateCrossSheetBackfillSupport(db) {
+  if (!hasColumn(db, 'templates', 'cross_sheet_backfill_rule_json')) {
+    db.exec("ALTER TABLE templates ADD COLUMN cross_sheet_backfill_rule_json TEXT NOT NULL DEFAULT '';");
+  }
+}
+
 // v3.2.19：映射字段新增「逻辑取值」模式（mappedField='逻辑取值'、mappedFields=有序候补字段）。升级前不存在这个模式，
 //   旧库里 mapped_field 为「逻辑取值」、mapped_fields_json 有多个字段的行，是旧式按序拼接（首个源字段恰好是名为「逻辑取值」
 //   的列），升级后会被当成取第一个非空值、改变输出（如发生额 1 与 00 拼成 100 变成 1）。首次升级时一次性还原为需要拼接字段；
@@ -3701,6 +3708,7 @@ module.exports = {
   ensureTemplateFilenameFixedFieldSupport,
   ensureTemplateFeatureFilterSupport,
   ensureTemplatePreprocessRowFilterSupport,
+  ensureTemplateCrossSheetBackfillSupport,
   upgradeLegacyLogicValueConcatMappings,
   ensureTemplateMappingEnhancements,
   ensureTemplateKeySupport,

@@ -336,6 +336,9 @@ function createEnvironment(dir, label) {
     // v3.2.19：重复账单过滤与逻辑取值（本脚本不使用，仅满足生成配置的依赖）
     DUPLICATE_ROW_FILTER_MAPPING_FIELD: '重复账单过滤',
     DUPLICATE_ROW_FILTER_ENABLED_OPTION: '是',
+    // v3.2.21：原始账单预处理「跨 Sheet 回填」（本脚本不使用，仅满足生成配置的依赖）
+    CROSS_SHEET_BACKFILL_MAPPING_FIELD: '跨 Sheet 回填',
+    CROSS_SHEET_BACKFILL_ENABLED_OPTION: '是',
     LOGIC_VALUE_MAPPING_FIELD: '逻辑取值',
     BALANCE_DISABLED_OPTION: '无',
     BALANCE_CALCULATED_OPTION: '通过发生额计算',
@@ -419,7 +422,7 @@ function createEnvironment(dir, label) {
     'normalizeMappedFields',
     'getMappingFieldValues',
     'getPrimaryMappedField',
-    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
+    'buildStatementGenerationConfig', 'buildPreprocessRowFilterRules', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'isCrossSheetBackfillEnabled', 'buildCrossSheetBackfillRule', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     'resolveStatementFeatureFilters',
     'buildCurrencyBigAccountMappingConfig',
     'buildMappedRowsForFile',

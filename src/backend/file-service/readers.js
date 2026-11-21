@@ -1681,6 +1681,8 @@ function readRowsWithMetadata(filePath, expectedHeaders = [], options = {}) {
       rows: meaningfulRows.map((row, index) => (index > 0 && row.displayCells ? row.displayCells : row.cells)),
       rowNumbers: meaningfulRows.map((row) => row.rowNumber),
       ...(longIntegerReadValues.some(Boolean) ? { longIntegerReadValues } : {}),
+      // v3.2.21：rows[i][0] 对应的 Excel 物理列下标（A 列为 0），跨 Sheet 回填写出原始账单时定位单元格
+      columnOffset: Number(rawRows.firstColumnIndex) > 0 ? Number(rawRows.firstColumnIndex) : 0,
       // 不按表头定位时整行即全部列：查重的整行同样带错误值 / 未缓存公式标记与物理列偏移
       ...(includeFullRows ? {
         fullRows: meaningfulRows.map((row) => row.fullCells || row.cells),
@@ -1707,6 +1709,8 @@ function readRowsWithMetadata(filePath, expectedHeaders = [], options = {}) {
         normalizedExpectedHeaders,
         includeFullRows
       });
+      // v3.2.21：rows[i][0]（按表头截取后）对应的 Excel 物理列下标（A 列为 0），跨 Sheet 回填写出原始账单时定位单元格
+      matched.columnOffset = (Number(rawRows.firstColumnIndex) > 0 ? Number(rawRows.firstColumnIndex) : 0) + matchedColumnIndex;
       // 整行第 0 个单元格对应的 Excel 物理列下标（A 列为 0），查重按物理列对齐时使用
       if (includeFullRows) matched.fullColumnOffset = Number(rawRows.firstColumnIndex) > 0 ? Number(rawRows.firstColumnIndex) : 0;
       return matched;

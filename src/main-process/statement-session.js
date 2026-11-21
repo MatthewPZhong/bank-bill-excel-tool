@@ -39,6 +39,20 @@ function cloneRowsWithMetadata(rows = []) {
     clonedRows.preprocessRowFilterStats = { ...rows.preprocessRowFilterStats };
   }
 
+  // v3.2.21：原始账单预处理「跨 Sheet 回填」统计与补丁（导出明细时写出回填后的原始账单）
+  if (rows.crossSheetBackfillStats && typeof rows.crossSheetBackfillStats === 'object') {
+    clonedRows.crossSheetBackfillStats = { ...rows.crossSheetBackfillStats };
+  }
+  if (Array.isArray(rows.crossSheetBackfillPatches)) {
+    clonedRows.crossSheetBackfillPatches = rows.crossSheetBackfillPatches.map((patch) => ({
+      ...patch,
+      cells: Array.isArray(patch && patch.cells) ? patch.cells.map((cell) => ({ ...cell })) : []
+    }));
+  }
+  if (rows.crossSheetBackfillSource && typeof rows.crossSheetBackfillSource === 'object') {
+    clonedRows.crossSheetBackfillSource = { ...rows.crossSheetBackfillSource };
+  }
+
   // v3.2.19：重复账单过滤删除的源行号（确认去重后）
   if (rows.duplicateRowFilterStats && typeof rows.duplicateRowFilterStats === 'object') {
     clonedRows.duplicateRowFilterStats = {

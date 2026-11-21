@@ -43,10 +43,24 @@ const {
   ensureSupportedFile,
   extractEnumValuesFromImportedFile,
   extractHeaders,
+  listSheetNames,
   loadEnumValues,
   readRows,
   readRowsWithMetadata
 } = require('./file-service/readers');
+const {
+  CROSS_SHEET_BACKFILL_LABEL,
+  applyCrossSheetBackfill,
+  collectCrossSheetBackfillMainFields,
+  hasCrossSheetBackfillSettings,
+  normalizeCrossSheetBackfillRule,
+  validateCrossSheetBackfillRule
+} = require('./file-service/cross-sheet-backfill');
+const {
+  allocateCrossSheetBackfillOutputPaths,
+  computeFileFingerprint,
+  writeCrossSheetBackfillWorkbook
+} = require('./file-service/cross-sheet-backfill-writer');
 const {
   calculateEndingBalanceFromAmounts,
   compileRegexLiteral,
@@ -226,7 +240,9 @@ function buildMappedRows({
   preprocessRowFilterRules = null,
   // v3.2.19：原始账单预处理「重复账单过滤」——为 true 时每个源行的内容指纹写入 rowMetas[i].sourceRowKey，
   //   供导入时跨文件查重（duplicate-source-rows.js）；不开启时不计算。
-  duplicateRowKeys = false
+  duplicateRowKeys = false,
+  // v3.2.21：原始账单预处理「跨 Sheet 回填」规则（main.js 只在勾选且规则有效时下发，否则为 null）
+  crossSheetBackfillRule = null
 }) {
   // 拿不到 币种 → 大账号 配置时直接拒绝，避免 MerchantId 整列留空静默输出。
   const merchantIdUsesCurrencyMapping = normalizeMappingTokens(mappingByField && mappingByField.MerchantId)[0]
@@ -241,7 +257,8 @@ function buildMappedRows({
     fullRows: sourceFullRows = null,
     fullHeaders: sourceFullHeaders = null,
     fullColumnOffset: sourceFullColumnOffset = 0,
-    longIntegerReadValues: sourceLongIntegerReadValues = null
+    longIntegerReadValues: sourceLongIntegerReadValues = null,
+    columnOffset: sourceColumnOffset = 0
   } = readRowsWithMetadata(
     inputFilePath,
     expectedSourceHeaders,
@@ -497,11 +514,6 @@ function buildMappedRows({
     return fields;
   }
 
-  // v3.2.19：原始账单预处理「过滤账单」——只保留命中过滤规则的源行（原始账单加工表），未命中的行不参与之后的
-  //   主映射、拆分/合并、合计行识别与各项统计；保留行的行号仍是源文件物理行号。规则字段不在源文件表头中时拒绝生成。
-  const preprocessed = applyPreprocessRowFilter(sourceRows, sourceRowNumbers, preprocessRowFilterRules, sourceIndexByField);
-  const { rows, rowNumbers } = preprocessed;
-
   const compiledBillSplitRowFilter = billSplitRowFilterRules
     ? compileBillSplitRowFilter(billSplitRowFilterRules, sourceIndexByField)
     : null;
@@ -593,6 +605,91 @@ function buildMappedRows({
     [item.id, extractFeatureValue(row[item.sourceIndex], item.rule)]
   )));
   let currentRowFeatureValues = new Map();
+
+  // v3.2.21：原始账单预处理「跨 Sheet 回填」——在「过滤账单」之前，按配对值从同一工作簿的来源 sheet 回填待回填行的
+  //   空单元格；配不上的行移除（不进入之后的过滤、映射与统计）并记入 issues。查重指纹仍取读到的原始单元格
+  //   （fullSourceRowByNumber）。依赖特征值（账单日期区间提示按映射取日期），故放在特征值初始化之后。
+  const crossSheetBackfill = applyCrossSheetBackfill({
+    rows: sourceRows,
+    rowNumbers: sourceRowNumbers,
+    sourceIndexByField,
+    rule: crossSheetBackfillRule,
+    readSourceSheet(sheetName) {
+      if (!listSheetNames(inputFilePath).includes(sheetName)) {
+        throw new FileValidationError('FILE_READ', `${CROSS_SHEET_BACKFILL_LABEL}：原始账单中没有名为「${sheetName}」的 Sheet`);
+      }
+      return readRowsWithMetadata(inputFilePath, [], { sheetName, readGuard: readOptions && readOptions.readGuard });
+    },
+    ...(crossSheetBackfillRule ? resolveCrossSheetBackfillMappingContext() : {})
+  });
+  crossSheetBackfill.issues.forEach((issue) => issues.push(issue));
+
+  // v3.2.19：原始账单预处理「过滤账单」——只保留命中过滤规则的源行（原始账单加工表），未命中的行不参与之后的
+  //   主映射、拆分/合并、合计行识别与各项统计；保留行的行号仍是源文件物理行号。规则字段不在源文件表头中时拒绝生成。
+  const preprocessed = applyPreprocessRowFilter(
+    crossSheetBackfill.rows,
+    crossSheetBackfill.rowNumbers,
+    preprocessRowFilterRules,
+    sourceIndexByField
+  );
+  const { rows, rowNumbers } = preprocessed;
+
+  // 跨 Sheet 回填用到的映射口径：日期目标列（BillDate / ValueDate 所用源列，含拆分映射）、BillDate 源列、
+  //   币种列（Currency 直接取某一源列且未由所选大账号决定时），以及不能回填的发生额 / 余额 / 币种源列。
+  function resolveCrossSheetBackfillMappingContext() {
+    const mappings = [mappingByField || {}]
+      .concat(billSplitEnabled && !billSplitReuseModuleMapping ? [billSplitMappingByField] : []);
+    const collectSourceFields = (targetFields) => {
+      const fields = new Set();
+      mappings.forEach((mapping) => {
+        targetFields.forEach((targetField) => {
+          normalizeMappingTokens(mapping[targetField]).forEach((token) => {
+            if (token.startsWith(FIXED_FIELD_VALUE_PREFIX) || token === MERCHANT_ID_CURRENCY_ONLY_MARKER) return;
+            const featureFilterId = parseFeatureFilterToken(token);
+            if (featureFilterId !== null) {
+              const rawRule = featureFilters && featureFilters[featureFilterId];
+              const sourceField = rawRule ? normalizeFeatureFilterRule(rawRule, { name: normalizeCell(rawRule.name) }).sourceField : '';
+              if (sourceField) fields.add(sourceField);
+              return;
+            }
+            const logicValueFields = parseLogicValueToken(token);
+            if (logicValueFields !== null) {
+              logicValueFields.forEach((field) => fields.add(normalizeCell(field)));
+              return;
+            }
+            fields.add(token);
+          });
+        });
+      });
+      return fields;
+    };
+    // 账户（MerchantId 所用源列）与币种同理不从来源 sheet 取，避免交易被记到来源 sheet 的账户
+    const excludedTargetFields = collectSourceFields(['Credit Amount', 'Debit Amount', 'Balance', 'Currency', 'MerchantId']);
+    if (signedAmountSourceField) excludedTargetFields.add(signedAmountSourceField);
+    amountSplitRules.forEach((rule) => {
+      const mappedField = normalizeCell(rule && rule.mappedField);
+      if (mappedField) excludedTargetFields.add(mappedField);
+    });
+    const currencyTokens = normalizeMappingTokens(mappingByField && mappingByField.Currency);
+    const currencyField = !selectedCurrency
+        && currencyTokens.length === 1
+        && !currencyTokens[0].startsWith(FIXED_FIELD_VALUE_PREFIX)
+        && parseFeatureFilterToken(currencyTokens[0]) === null
+        && parseLogicValueToken(currencyTokens[0]) === null
+        && sourceIndexByField.has(currencyTokens[0])
+      ? currencyTokens[0]
+      : '';
+    return {
+      dateTargetFields: collectSourceFields(['BillDate', 'ValueDate']),
+      billDateFields: collectSourceFields(['BillDate']),
+      currencyField,
+      excludedTargetFields: Array.from(excludedTargetFields),
+      resolveRowBillDate: (row) => normalizeDateExportValue(
+        resolveDateRawValueByMapping(mappingByField && mappingByField.BillDate, row, extractRowFeatureValues(row)),
+        { dateParseOrder }
+      ).value
+    };
+  }
 
   if (amountSplitEnabled) {
     amountSplitRules.forEach((rule) => {
@@ -1810,6 +1907,30 @@ function buildMappedRows({
     };
   }
 
+  if (crossSheetBackfill.enabled) {
+    // v3.2.21：跨 Sheet 回填统计（导入提示）与补丁（导出明细时写出回填后的原始账单，见 cross-sheet-backfill-writer.js）
+    mappedRows.crossSheetBackfillStats = {
+      ...crossSheetBackfill.stats,
+      sourceSheetName: crossSheetBackfill.sourceSheetName || ''
+    };
+    mappedRows.crossSheetBackfillPatches = crossSheetBackfill.patches;
+    if (crossSheetBackfill.patches.length) {
+      // 写出回填后的原始账单所需：主表名、物理列偏移、模板日期顺序，以及源文件指纹（导出前重算，不一致时不写出）。
+      //   指纹在同一读取守卫内计算：导入确认后文件有变化时与读取一样拒绝。
+      const readGuard = readOptions && readOptions.readGuard;
+      const token = readGuard && typeof readGuard.beforeRead === 'function' ? readGuard.beforeRead(inputFilePath) : undefined;
+      const fingerprint = computeFileFingerprint(inputFilePath);
+      if (readGuard && typeof readGuard.afterRead === 'function') readGuard.afterRead(token, inputFilePath);
+      mappedRows.crossSheetBackfillSource = {
+        mainSheetName: listSheetNames(inputFilePath)[0] || '',
+        columnOffset: sourceColumnOffset,
+        dateParseOrder,
+        size: fingerprint.size,
+        sha256: fingerprint.sha256
+      };
+    }
+  }
+
   return mappedRows;
 }
 
@@ -2018,6 +2139,14 @@ module.exports = {
   PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
   normalizeRowFilterRules,
   validateRowFilterRules,
+  // v3.2.21：原始账单预处理「跨 Sheet 回填」
+  collectCrossSheetBackfillMainFields,
+  hasCrossSheetBackfillSettings,
+  normalizeCrossSheetBackfillRule,
+  validateCrossSheetBackfillRule,
+  allocateCrossSheetBackfillOutputPaths,
+  computeFileFingerprint,
+  writeCrossSheetBackfillWorkbook,
   normalizeDateExportValue,
   describeDuplicateKeeperReplacementConflicts,
   dropDuplicateSourceRows,

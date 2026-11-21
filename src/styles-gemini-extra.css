@@ -2817,6 +2817,21 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
 /* 运算符含「不包含（字段）」等较长选项，比场景弹窗的 100px 窄下拉框放宽，避免截断 */
 .row-filter-rules-card .scenario-config-input-narrow { flex: 0 0 136px; width: 136px; }
 
+/* v3.2.21 原始账单预处理「跨 Sheet 回填」规则设置（沿用 scenario-config-* 样式；待回填行条件复用上方过滤规则设置弹窗） */
+.scenario-config-card.cross-sheet-backfill-card .dialog-header .icon-close { margin-left: auto; }
+.cross-sheet-backfill-card .scenario-config-multi-wrap { min-width: 0; }
+.cross-sheet-backfill-card .scenario-config-input.is-stale { border-color: var(--danger); color: var(--danger); }
+.cross-sheet-backfill-card .scenario-config-input-narrow { flex: 0 0 136px; width: 136px; }
+.cross-sheet-backfill-card .scenario-config-input-narrow.cross-sheet-backfill-date-order { flex-basis: 200px; width: 200px; }
+.cross-sheet-backfill-condition-summary {
+  flex: 1; min-width: 0;
+  font-size: 13px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cross-sheet-backfill-condition-summary.is-empty { color: var(--muted); }
+.cross-sheet-backfill-hint { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); }
+.cross-sheet-backfill-arrow { flex: 0 0 auto; color: var(--muted); }
+
 /* v3.2.19 映射字段「逻辑取值」：映射行的候补顺序预览与【设置】弹窗（组件参考月度 pending 规则管理「对账字段」） */
 .mapping-logic-value-preview {
   min-width: 0; max-width: 320px;

@@ -620,6 +620,12 @@ const {
   PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
   normalizeRowFilterRules,
   validateRowFilterRules,
+  hasCrossSheetBackfillSettings,
+  normalizeCrossSheetBackfillRule,
+  validateCrossSheetBackfillRule,
+  allocateCrossSheetBackfillOutputPaths,
+  computeFileFingerprint,
+  writeCrossSheetBackfillWorkbook,
   buildFeatureFilterToken,
   buildLogicValueToken,
   describeDuplicateKeeperReplacementConflicts,
@@ -1618,6 +1624,10 @@ const PREPROCESS_ROW_FILTER_ENABLED_OPTION = '是';
 //   经用户确认后只保留第一行（spec §8.3）。开关存为映射行，没有规则。
 const DUPLICATE_ROW_FILTER_MAPPING_FIELD = '重复账单过滤';
 const DUPLICATE_ROW_FILTER_ENABLED_OPTION = '是';
+// v3.2.21：原始账单预处理「跨 Sheet 回填」——勾选时生成前把命中待回填行条件的源行与同一工作簿来源 sheet 的行一对一配对，
+//   回填空单元格；配不上的行跳过。开关存为映射行，规则存 templates.cross_sheet_backfill_rule_json。
+const CROSS_SHEET_BACKFILL_MAPPING_FIELD = '跨 Sheet 回填';
+const CROSS_SHEET_BACKFILL_ENABLED_OPTION = '是';
 // v1.5.2 需求 3（G3-6，决策 ③A）：保持 v4 不升 v5；新增的 `filenameFixedField` 为 v4 schema 下的透明扩展字段。
 // - `buildTemplateLibraryPayload` 通过 `listTemplateBundleEntries` 透传该字段（template-repository.js:856）
 // - `readTemplateBundleFile` 对未知字段采用显式解构式解析（:1221-1243），v1.5.1 旧应用读 v1.5.2 导出的 bundle 时自然忽略该字段
@@ -1635,10 +1645,13 @@ const DUPLICATE_ROW_FILTER_ENABLED_OPTION = '是';
 // v3.2.21：「逻辑取值」候补含特征值，或用到费用账单「字段映射特殊处理」（勾选或存有设置）时写 v9，v3.2.20 及更早版本
 //   整包按版本拒绝（旧版会把特征值 token 当成源字段名，报「映射字段不存在」跳过该模板；或忽略覆盖，费用账单行静默输出
 //   原映射的字段值）；两项同在 v3.2.21 首次出现，共用 v9。未用到时按上面的规则写 v5～v8。
-const SUPPORTED_BUNDLE_VERSION = 9;
+const SUPPORTED_BUNDLE_VERSION = 10;
 // v3.2.21 功能首次出现的包版本（固定；SUPPORTED_BUNDLE_VERSION 只表示能读取的最高版本）
 const LOGIC_VALUE_FEATURE_BUNDLE_VERSION = 9;
 const FEE_FIELD_MAPPING_BUNDLE_VERSION = 9;
+// 跨 Sheet 回填（v10）：用到原始账单预处理「跨 Sheet 回填」（勾选或存有规则）时写 v10，v3.2.21 及更早版本整包拒绝（旧版会忽略
+//   回填，换汇等行以空日期输出）；未用到时按上面的规则写 v5～v9。
+const CROSS_SHEET_BACKFILL_BUNDLE_VERSION = 10;
 // v3.2.19：拆分账单「费用账单」、两类过滤、重复账单过滤或「逻辑取值」的包版本
 const LOGIC_VALUE_BUNDLE_VERSION = 8;
 const FEATURE_FILTER_BUNDLE_VERSION = 7;
@@ -1669,7 +1682,8 @@ const BILL_SPLIT_GROUP_FIELDS = [
 // v3.2.19：映射关系管理「原始账单预处理」分组（位于「个性化映射设置」之前）
 const PREPROCESS_FIELDS = [
   PREPROCESS_ROW_FILTER_MAPPING_FIELD,
-  DUPLICATE_ROW_FILTER_MAPPING_FIELD
+  DUPLICATE_ROW_FILTER_MAPPING_FIELD,
+  CROSS_SHEET_BACKFILL_MAPPING_FIELD
 ];
 // v3.2.18 模板管理【更新】：引用源字段的位置收集与生成前失效引用拦截（与保存校验同一组标记常量）
 const templateHeaderUpdateTools = createTemplateHeaderUpdateTools({
@@ -1688,6 +1702,8 @@ const templateHeaderUpdateTools = createTemplateHeaderUpdateTools({
   PREPROCESS_ROW_FILTER_MAPPING_FIELD,
   PREPROCESS_ROW_FILTER_ENABLED_OPTION,
   DUPLICATE_ROW_FILTER_MAPPING_FIELD,
+  CROSS_SHEET_BACKFILL_MAPPING_FIELD,
+  CROSS_SHEET_BACKFILL_ENABLED_OPTION,
   SIGNED_AMOUNT_MAPPING_FIELD,
   AMOUNT_BASED_NAME_MAPPING_FIELD,
   AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
@@ -3603,6 +3619,10 @@ function applyBigAccountAssignmentsToFileEntries(fileEntries = [], assignments =
     if (Array.isArray(nextRows.headerBreaks)) filteredRows.headerBreaks = [];
     if (Array.isArray(nextRows.skippedRows)) filteredRows.skippedRows = nextRows.skippedRows;
     if (Array.isArray(nextRows.simultaneousRows)) filteredRows.simultaneousRows = nextRows.simultaneousRows;
+    // v3.2.21：跨 Sheet 回填的统计与补丁按源文件整份记录，不随大账号分段筛选变化（导出回填后的原始账单用）
+    if (nextRows.crossSheetBackfillStats) filteredRows.crossSheetBackfillStats = nextRows.crossSheetBackfillStats;
+    if (Array.isArray(nextRows.crossSheetBackfillPatches)) filteredRows.crossSheetBackfillPatches = nextRows.crossSheetBackfillPatches;
+    if (nextRows.crossSheetBackfillSource) filteredRows.crossSheetBackfillSource = nextRows.crossSheetBackfillSource;
 
     return {
       filePath: entry.filePath,
@@ -3937,11 +3957,20 @@ function buildTemplateLibraryPayload() {
   };
 }
 
-// v3.2.21：逻辑取值候补含特征值，或用到费用账单「字段映射特殊处理」时写 v9；
+// 跨 Sheet 回填：用到原始账单预处理「跨 Sheet 回填」时写 v10；
+// v3.2.21：否则逻辑取值候补含特征值，或用到费用账单「字段映射特殊处理」时写 v9；
 // v3.2.19：否则用到拆分账单「费用账单」、两类过滤、重复账单过滤或逻辑取值时写 v8；否则任一模板的主映射或拆分映射用到「字段筛选特征值」时写 v7；
 //   只用到「原始账单仅有币种无账户号」时写 v6；都未用到时写 v5（见 SUPPORTED_BUNDLE_VERSION 注释）。
 function resolveTemplateBundleVersion(templates) {
   const entries = Array.isArray(templates) ? templates : [];
+  // 跨 Sheet 回填（v10）：原始账单预处理「跨 Sheet 回填」（开关是映射行，规则在条目 crossSheetBackfillRule）
+  const usesCrossSheetBackfill = entries.some((entry) => (
+    isCrossSheetBackfillEnabled(entry && entry.mappings)
+      || hasCrossSheetBackfillSettings(entry && entry.crossSheetBackfillRule)
+  ));
+  if (usesCrossSheetBackfill) {
+    return CROSS_SHEET_BACKFILL_BUNDLE_VERSION;
+  }
   const usesFeeFieldMapping = entries.some((entry) => {
     const meta = entry && entry.billSplitMeta;
     return Boolean(meta && (meta.feeFieldMappingEnabled === true || normalizeFeeFieldMappings(meta.feeFieldMappings).length > 0));
@@ -4165,6 +4194,8 @@ function readTemplateBundleFile(filePath) {
     featureFilters: upgradeLegacyFeatureFilter(Array.isArray(item.featureFilters) ? item.featureFilters : item.featureFilter),
     // v3.2.19（v8）：原始账单预处理的过滤规则（只规范化；开关在 mappings 中，生成前再校验）
     preprocessRowFilterRules: normalizeRowFilterRules(item.preprocessRowFilterRules),
+    // v3.2.21（v9）：原始账单预处理「跨 Sheet 回填」规则（只规范化；开关在 mappings 中，生成前再校验）
+    crossSheetBackfillRule: normalizeCrossSheetBackfillRule(item.crossSheetBackfillRule),
     // v3.2.15（v5）：所属渠道；v≤4 的主/子模板字段只用于导入时转为渠道。
     channelName: bundleVersion >= 5 ? (normalizeCell(item.channelName) || null) : null,
     isParent: bundleVersion < 5 && Boolean(item.isParent),
@@ -4417,6 +4448,14 @@ function isPreprocessRowFilterEnabled(mappings) {
   ));
 }
 
+// v3.2.21：原始账单预处理「跨 Sheet 回填」是否勾选（开关是映射行）
+function isCrossSheetBackfillEnabled(mappings) {
+  return (Array.isArray(mappings) ? mappings : []).some((mapping) => (
+    normalizeCell(mapping && mapping.templateField) === CROSS_SHEET_BACKFILL_MAPPING_FIELD
+      && normalizeCell(mapping && mapping.mappedField) === CROSS_SHEET_BACKFILL_ENABLED_OPTION
+  ));
+}
+
 // v3.2.19：原始账单预处理「重复账单过滤」是否勾选（开关是映射行）
 function isDuplicateRowFilterEnabled(mappings) {
   return (Array.isArray(mappings) ? mappings : []).some((mapping) => (
@@ -4471,6 +4510,32 @@ function buildImportWarningDetailLines(warnings) {
     detailLines.push('以下行的账单日期列是账单自带的合计标签，按合计行处理，未写入导出的明细账单：');
     summaryRowWarnings.forEach((warning) => {
       detailLines.push(`第${warning.rowNumber}行，账单日期列="${warning.rawValue || '(空)'}"`);
+    });
+  }
+
+  // v3.2.21：原始账单预处理「跨 Sheet 回填」——未能回填而跳过的行、回填日期不在相邻交易日期之间的行
+  const crossSheetBackfillSkippedWarnings = warnings.filter((warning) => warning.type === 'cross-sheet-backfill-skipped');
+  const crossSheetBackfillDateWarnings = warnings.filter((warning) => warning.type === 'cross-sheet-backfill-date-out-of-range');
+  if (crossSheetBackfillSkippedWarnings.length) {
+    detailLines.push('以下行命中「跨 Sheet 回填」的待回填行条件但未能回填，已跳过，未写入导出的明细账单：');
+    crossSheetBackfillSkippedWarnings.forEach((warning) => {
+      let detail = '';
+      if (warning.reason === 'no-source-row') {
+        detail = `（来源 Sheet「${warning.sourceSheetName}」中没有「${warning.sourceMatchField}」为 ${warning.matchKey} 且未被使用的行）`;
+      } else if (warning.sourceRowNumber) {
+        detail = `（来源 Sheet「${warning.sourceSheetName}」第${warning.sourceRowNumber}行）`;
+      }
+      detailLines.push(
+        `第${warning.rowNumber}行，${warning.matchField}="${warning.matchValue || '(空)'}"，原因：${warning.reasonText || warning.reason}${detail}`
+      );
+    });
+  }
+  if (crossSheetBackfillDateWarnings.length) {
+    detailLines.push('以下行「跨 Sheet 回填」的账单日期不在前后相邻交易的日期之间，已照常输出，请人工核对配对是否正确：');
+    crossSheetBackfillDateWarnings.forEach((warning) => {
+      detailLines.push(
+        `第${warning.rowNumber}行，回填日期 ${warning.date}，前一笔 ${warning.prevDate || '(无)'}，后一笔 ${warning.nextDate || '(无)'}`
+      );
     });
   }
 
@@ -4582,6 +4647,16 @@ function buildImportWarningMessage({ warnings, balanceReady, balanceRequested })
 
   if (summaryRowCount > 0) {
     warningParts.push(`已跳过${summaryRowCount}条账单自带的合计行`);
+  }
+
+  // v3.2.21：原始账单预处理「跨 Sheet 回填」
+  const crossSheetBackfillSkippedCount = warnings.filter((warning) => warning.type === 'cross-sheet-backfill-skipped').length;
+  const crossSheetBackfillDateCount = warnings.filter((warning) => warning.type === 'cross-sheet-backfill-date-out-of-range').length;
+  if (crossSheetBackfillSkippedCount > 0) {
+    warningParts.push(`跨 Sheet 回填：${crossSheetBackfillSkippedCount}行未配上，已跳过`);
+  }
+  if (crossSheetBackfillDateCount > 0) {
+    warningParts.push(`跨 Sheet 回填：${crossSheetBackfillDateCount}行回填日期不在相邻交易日期之间，请核对`);
   }
 
   if (skippedDetailCount > 0) {
@@ -5372,7 +5447,9 @@ function buildTemplateSummary(template) {
       ? template.featureFilters.map((item) => ({ ...item }))
       : [],
     // v3.2.19：原始账单预处理「过滤账单」的过滤规则，供【规则设置】回显
-    preprocessRowFilterRules: normalizeRowFilterRules(template.preprocessRowFilterRules)
+    preprocessRowFilterRules: normalizeRowFilterRules(template.preprocessRowFilterRules),
+    // v3.2.21：原始账单预处理「跨 Sheet 回填」规则，供【规则设置】回显（未设置为 null）
+    crossSheetBackfillRule: normalizeCrossSheetBackfillRule(template.crossSheetBackfillRule)
   };
 }
 
@@ -9135,6 +9212,17 @@ function validateTemplateConfiguration({
       return;
     }
 
+    if (targetField === CROSS_SHEET_BACKFILL_MAPPING_FIELD) {
+      cleanedMappings.push({
+        templateField: targetField,
+        mappedField: normalizedSourceField === CROSS_SHEET_BACKFILL_ENABLED_OPTION
+          ? CROSS_SHEET_BACKFILL_ENABLED_OPTION
+          : '',
+        mappedFields: []
+      });
+      return;
+    }
+
     if (targetField === REUSE_MODULE_MAPPING_FIELD) {
       const value = normalizedSourceField === '否' ? '否' : REUSE_MODULE_DEFAULT_OPTION;
       cleanedMappings.push({
@@ -9417,8 +9505,26 @@ function validateTemplateConfiguration({
     // v3.2.19：原始账单预处理「过滤账单」（与拆分无关）
     usesPreprocessRowFilter: isPreprocessRowFilterEnabled(cleanedMappings),
     // v3.2.19：原始账单预处理「重复账单过滤」
-    usesDuplicateRowFilter: isDuplicateRowFilterEnabled(cleanedMappings)
+    usesDuplicateRowFilter: isDuplicateRowFilterEnabled(cleanedMappings),
+    // v3.2.21：原始账单预处理「跨 Sheet 回填」
+    usesCrossSheetBackfill: isCrossSheetBackfillEnabled(cleanedMappings)
   };
+}
+
+// v3.2.21：跨 Sheet 回填不能回填的本表字段——映射给 Credit Amount、Debit Amount、Balance、Currency、MerchantId 与「按正负号取发生额」
+//   的源列（只取模板表头中的字段，固定值与选项标记自然排除）。保存时校验用；生成时 buildMappedRows 按实际生效映射再校验。
+function collectCrossSheetBackfillExcludedTargets(mappings, headers) {
+  const headerSet = new Set((Array.isArray(headers) ? headers : []).map((header) => normalizeCell(header)).filter(Boolean));
+  const targetFields = new Set(['Credit Amount', 'Debit Amount', 'Balance', 'Currency', 'MerchantId', SIGNED_AMOUNT_MAPPING_FIELD]);
+  const excluded = new Set();
+  (Array.isArray(mappings) ? mappings : []).forEach((mapping) => {
+    if (!mapping || !targetFields.has(normalizeCell(mapping.templateField))) return;
+    [mapping.mappedField].concat(Array.isArray(mapping.mappedFields) ? mapping.mappedFields : [])
+      .map((value) => normalizeCell(value))
+      .filter((value) => headerSet.has(value))
+      .forEach((value) => excluded.add(value));
+  });
+  return Array.from(excluded);
 }
 
 // v3.2.16：MerchantId「原始账单仅有币种无账户号」的保存校验（spec §4.1、§4.2）。
@@ -10236,6 +10342,19 @@ function registerTemplateHandlers() {
       } else if (templateConfiguration.usesPreprocessRowFilter) {
         validateRowFilterRules(template.preprocessRowFilterRules, template.headers, preprocessRuleOptions);
       }
+      // v3.2.21：原始账单预处理「跨 Sheet 回填」规则同口径：勾选时须设置完整、本表字段在模板表头中、回填字段不能是
+      //   发生额 / 余额 / 币种所用的源列；未勾选时只规范化保存（保留草稿）。
+      const crossSheetBackfillOptions = {
+        excludedTargetFields: collectCrossSheetBackfillExcludedTargets(templateConfiguration.mappings, template.headers)
+      };
+      let crossSheetBackfillRule = null;
+      if (payload.crossSheetBackfillRule && typeof payload.crossSheetBackfillRule === 'object') {
+        crossSheetBackfillRule = templateConfiguration.usesCrossSheetBackfill
+          ? validateCrossSheetBackfillRule(payload.crossSheetBackfillRule, template.headers, crossSheetBackfillOptions)
+          : (normalizeCrossSheetBackfillRule(payload.crossSheetBackfillRule) || {});
+      } else if (templateConfiguration.usesCrossSheetBackfill) {
+        validateCrossSheetBackfillRule(template.crossSheetBackfillRule, template.headers, crossSheetBackfillOptions);
+      }
 
       // v1.5.3 R2 round 3 (Codex Finding 5)：透传 preserveOwn
       // 默认 false（向后兼容旧行为：DELETE all + INSERT all，caller 接管 own 全集）
@@ -10256,7 +10375,8 @@ function registerTemplateHandlers() {
           channelAssignment,
           currencyBigAccounts: templateConfiguration.currencyBigAccounts,
           billSplitRowFilterRules,
-          preprocessRowFilterRules
+          preprocessRowFilterRules,
+          crossSheetBackfillRule
         }
       );
       // v3.2.21：日期格式决定交易归属日，变化时在落库后立即留痕——不受随后模板库文件同步失败影响
@@ -10745,7 +10865,9 @@ function registerTemplateHandlers() {
               preserveOwn: false,
               featureFilters: bundleFeatureFilters,
               currencyBigAccounts: validated.currencyBigAccounts,
-              preprocessRowFilterRules: Array.isArray(entry.preprocessRowFilterRules) ? entry.preprocessRowFilterRules : []
+              preprocessRowFilterRules: Array.isArray(entry.preprocessRowFilterRules) ? entry.preprocessRowFilterRules : [],
+              // v3.2.21：包内没有回填规则时清空（覆盖导入以包为准）
+              crossSheetBackfillRule: entry.crossSheetBackfillRule || {}
             }
           );
 
@@ -12063,9 +12185,11 @@ function buildStatementGenerationConfig({
     preprocessRowFilterRules: template && Array.isArray(template.preprocessRowFilterRules)
       ? template.preprocessRowFilterRules
       : [],
+    crossSheetBackfillRule: template ? template.crossSheetBackfillRule || null : null,
     featureFilters: template && Array.isArray(template.featureFilters) ? template.featureFilters : []
   });
   const preprocessRowFilterRules = buildPreprocessRowFilterRules(template, selectedMappings);
+  const crossSheetBackfillRule = buildCrossSheetBackfillRule(template, selectedMappings);
   const featureFilters = resolveStatementFeatureFilters(template, mappingByTargetField, billSplitMergeConfig);
   const currencyBigAccountMapping = isCurrencyOnlyTemplate
     ? buildCurrencyBigAccountMappingConfig(template, outputName)
@@ -12092,6 +12216,8 @@ function buildStatementGenerationConfig({
     featureFilters,
     currencyBigAccountMapping,
     preprocessRowFilterRules,
+    // v3.2.21：原始账单预处理「跨 Sheet 回填」规则（未勾选为 null）
+    crossSheetBackfillRule,
     // v3.2.19：原始账单预处理「重复账单过滤」——映射时为源行算指纹，导入时跨文件查重（spec §8.3）
     duplicateRowFilterEnabled: isDuplicateRowFilterEnabled(selectedMappings),
     dateParseOrder: template.dateFormat || 'auto'
@@ -12115,6 +12241,26 @@ function buildPreprocessRowFilterRules(template, selectedMappings) {
     throw new FileValidationError(
       'PREPROCESS_ROW_FILTER_MISSING',
       `模板「${normalizeCell(template && template.name)}」已勾选原始账单预处理「过滤账单」，但过滤规则未设置完整（${error.message}），`
+        + '请在映射关系管理中点击【规则设置】设置并保存后重新导入'
+    );
+  }
+}
+
+// v3.2.21：原始账单预处理「跨 Sheet 回填」——勾选时下发规则（buildMappedRows 回填待回填行、跳过配不上的行）；未勾选返回 null。
+// 勾选了却没有完整规则时拒绝生成。本表字段是否仍在模板表头由失效引用拦截负责，是否在源文件表头由 buildMappedRows 校验。
+function buildCrossSheetBackfillRule(template, selectedMappings) {
+  if (!isCrossSheetBackfillEnabled(selectedMappings)) {
+    return null;
+  }
+  try {
+    return validateCrossSheetBackfillRule(template && template.crossSheetBackfillRule, null);
+  } catch (error) {
+    if (!(error instanceof FileValidationError)) {
+      throw error;
+    }
+    throw new FileValidationError(
+      'CROSS_SHEET_BACKFILL_MISSING',
+      `模板「${normalizeCell(template && template.name)}」已勾选原始账单预处理「跨 Sheet 回填」，但规则未设置完整（${error.message}），`
         + '请在映射关系管理中点击【规则设置】设置并保存后重新导入'
     );
   }
@@ -12451,6 +12597,7 @@ function buildMappedRowsForFile({
     },
     currencyBigAccountMapping: config.currencyBigAccountMapping || null,
     preprocessRowFilterRules: config.preprocessRowFilterRules || null,
+    crossSheetBackfillRule: config.crossSheetBackfillRule || null,
     duplicateRowKeys: Boolean(config.duplicateRowFilterEnabled),
     dateParseOrder: config.dateParseOrder,
     readOptions: {
@@ -14210,6 +14357,77 @@ function getGeneratedStatementExport(kind, scope = 'current') {
   return statementGenerationHelpers.getGeneratedStatementExport(lastGeneratedExports, kind, scope);
 }
 
+// v3.2.21：「跨 Sheet 回填」——【导出明细】时附带写出回填后的原始账单（spec §3.3）。导出范围内启用了回填且至少
+//   回填一行的源文件各一份（同一文件按大账号分段成多个条目时只算一份）；补丁与导入时的源文件指纹随会话条目缓存。
+function collectCrossSheetBackfillExportItems(session, scope) {
+  const byPath = new Map();
+  getStatementSessionEntries(session, scope).forEach((entry) => {
+    const rows = entry && entry.detailRows;
+    const patches = rows && Array.isArray(rows.crossSheetBackfillPatches) ? rows.crossSheetBackfillPatches : [];
+    const source = rows && rows.crossSheetBackfillSource;
+    if (!patches.length || !source || !entry.filePath || byPath.has(entry.filePath)) return;
+    byPath.set(entry.filePath, { sourceFilePath: entry.filePath, patches, source });
+  });
+  return Array.from(byPath.values());
+}
+
+// 源文件当前内容与导入时一致才写出；读不到（已删除、无权限）同样视为已变化
+function isCrossSheetBackfillSourceUnchanged(item) {
+  try {
+    const fingerprint = computeFileFingerprint(item.sourceFilePath);
+    return fingerprint.size === item.source.size && fingerprint.sha256 === item.source.sha256;
+  } catch (_error) {
+    return false;
+  }
+}
+
+// 写出各份回填后的原始账单，返回 { lines（附在导出结果提示后）, results }；单份失败不影响明细与其他文件。
+async function exportCrossSheetBackfillWorkbooks(items, outputPaths, changedItems = []) {
+  const results = [];
+  for (const [index, item] of items.entries()) {
+    const sourceName = path.basename(item.sourceFilePath);
+    const outputFilePath = outputPaths[index];
+    if (!isCrossSheetBackfillSourceUnchanged(item)) {
+      results.push({ sourceName, status: 'changed' });
+      continue;
+    }
+    try {
+      const written = await writeCrossSheetBackfillWorkbook({
+        sourceFilePath: item.sourceFilePath,
+        outputFilePath,
+        patches: item.patches,
+        source: item.source
+      });
+      results.push({ sourceName, status: 'success', filePath: outputFilePath, fileName: path.basename(outputFilePath), ...written });
+    } catch (error) {
+      results.push({ sourceName, status: 'failed', message: error && error.message ? error.message : String(error) });
+    }
+  }
+  changedItems.forEach((item) => results.push({ sourceName: path.basename(item.sourceFilePath), status: 'changed' }));
+  const exported = results.filter((item) => item.status === 'success');
+  const changed = results.filter((item) => item.status === 'changed');
+  const failed = results.filter((item) => item.status === 'failed');
+  const lines = [];
+  if (exported.length) {
+    const converted = exported.some((item) => item.converted);
+    lines.push(`回填后的原始账单已导出：${exported.map((item) => item.fileName).join('、')}${converted ? '（非 xlsx 原始账单已转为 xlsx，只保留值与数字格式）' : ''}`);
+  }
+  if (changed.length) {
+    lines.push(`原始账单在导入后已变化，请重新导入：${changed.map((item) => item.sourceName).join('、')}（未导出回填后的原始账单）`);
+  }
+  failed.forEach((item) => lines.push(`回填后的原始账单导出失败：${item.sourceName}（${item.message}）`));
+  if (results.length) {
+    appendActivityLogEntry({
+      level: changed.length || failed.length ? 'warn' : 'info',
+      message: '导出回填后的原始账单',
+      details: results.map((item) => (item.status === 'success'
+        ? `${item.sourceName} → ${item.filePath}（${item.cellCount} 个单元格）`
+        : `${item.sourceName}：${item.status === 'changed' ? '导入后已变化，未导出' : `失败：${item.message}`}`))
+    });
+  }
+  return { lines, results };
+}
+
 function buildStatementExportPlan(kind, scope = 'auto') {
   // v3.2.21（D2）：另存为默认文件名的日期范围与生成时的文件名同口径（release 审查）：先按全部明细行校验账单日期（原有检查），
   //   再按实际写出的行取日期——剔除收支都为空或 0 的行（生成时跳过）；明细没有其他行时按全部明细行；
@@ -15643,6 +15861,9 @@ function buildTemplateFieldReferenceInput(templateConfig) {
       && Array.isArray(templateConfig.template.preprocessRowFilterRules)
       ? templateConfig.template.preprocessRowFilterRules
       : [],
+    crossSheetBackfillRule: templateConfig && templateConfig.template
+      ? templateConfig.template.crossSheetBackfillRule || null
+      : null,
     featureFilters: templateConfig && templateConfig.template && Array.isArray(templateConfig.template.featureFilters)
       ? templateConfig.template.featureFilters
       : []
@@ -18340,19 +18561,33 @@ function registerFileHandlers() {
       // 其他错误交给 beforeStart 处理（与此前一致）
     }
     if (channelBalanceStop) return { proceed: false, result: channelBalanceStop };
+    // v3.2.21：导出明细附带回填后的原始账单，写在明细保存目录下；导入后已变化的源文件不登记输出，结果中提示重新导入
+    const backfillCandidates = kind === 'detail' && plan.session
+      ? collectCrossSheetBackfillExportItems(plan.session, plan.normalizedScope)
+      : [];
+    const backfillItems = backfillCandidates.filter((item) => isCrossSheetBackfillSourceUnchanged(item));
+    const backfillChangedItems = backfillCandidates.filter((item) => !backfillItems.includes(item));
+    const backfillOutputPaths = allocateCrossSheetBackfillOutputPaths({
+      directory: path.dirname(saveResult.filePath),
+      sourceFilePaths: backfillItems.map((item) => item.sourceFilePath),
+      reservedPaths: [saveResult.filePath]
+    });
+    const backfillSignature = (items) => items.map((item) => `${item.sourceFilePath}\u0000${item.source.sha256}`).join('\u0001');
     return {
       proceed: true,
       kind,
       plan,
+      backfillItems,
+      backfillChangedItems,
       filePlan: {
         version: 1,
         allocation: 'eager',
         inputs: [],
-        outputs: [{
-          filePath: saveResult.filePath,
+        outputs: [saveResult.filePath].concat(backfillOutputPaths).map((filePath) => ({
+          filePath,
           role: 'output',
           sourceOperation: kind === 'detail' ? 'file:export-detail' : 'file:export-balance'
-        }]
+        }))
       },
       beforeStart() {
         const current = buildStatementExportPlan(kind, plan.normalizedScope);
@@ -18360,7 +18595,10 @@ function registerFileHandlers() {
             || current.session !== plan.session
             || current.generatedFile !== plan.generatedFile
             || current.needsGeneration !== plan.needsGeneration
-            || current.defaultFileName !== plan.defaultFileName) {
+            || current.defaultFileName !== plan.defaultFileName
+            || (kind === 'detail'
+              && backfillSignature(collectCrossSheetBackfillExportItems(current.session, plan.normalizedScope))
+                !== backfillSignature(backfillCandidates))) {
           throw new Error('账单导出会话在保存确认期间已变化，请重新导出');
         }
       }
@@ -18370,11 +18608,25 @@ function registerFileHandlers() {
   trackedIpcHandle('file:export-detail', '生成网银账单', '导出明细', {
     prepare: (_event, scope = 'auto') => prepareStatementExport('detail', scope),
     async execute(_event, prepared, taskContext) {
-      const result = exportStatementByScope(
+      let result = await exportStatementByScope(
         'detail',
         prepared.plan.normalizedScope,
         taskContext.fileEvidence.filePlan.outputs[0].filePath
       );
+      // v3.2.21：明细导出成功后再写回填后的原始账单（明细未导出时不写）；结果提示附上各份的导出情况
+      if (result && result.status === 'success'
+          && (prepared.backfillItems.length || prepared.backfillChangedItems.length)) {
+        const backfill = await exportCrossSheetBackfillWorkbooks(
+          prepared.backfillItems,
+          taskContext.fileEvidence.filePlan.outputs.slice(1).map((item) => item.filePath),
+          prepared.backfillChangedItems
+        );
+        result = {
+          ...result,
+          message: [result.message].concat(backfill.lines).join('；'),
+          crossSheetBackfillExports: backfill.results
+        };
+      }
       await taskContext.settleArtifacts({
         files: taskContext.fileEvidence.filePlan.outputs
           .map((item) => ({ artifactKey: item.artifactKey }))

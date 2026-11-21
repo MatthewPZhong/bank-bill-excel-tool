@@ -213,6 +213,8 @@
           // v3.2.19：原始账单预处理
           '过滤账单',
           '重复账单过滤',
+          // v3.2.21：原始账单预处理「跨 Sheet 回填」
+          '跨 Sheet 回填',
           SIGNED_AMOUNT_MAPPING_FIELD,
           AMOUNT_BASED_NAME_MAPPING_FIELD,
           AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
@@ -247,7 +249,7 @@
             isMultiBigAccount: true
           }
         ],
-        preprocessFields: ['过滤账单', '重复账单过滤'],
+        preprocessFields: ['过滤账单', '重复账单过滤', '跨 Sheet 回填'],
         advancedMappingFields: ADVANCED_MAPPING_FIELDS.slice()
       };
     }

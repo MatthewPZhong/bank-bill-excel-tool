@@ -75,6 +75,7 @@ const {
   ensureTemplateFilenameFixedFieldSupport,
   ensureTemplateFeatureFilterSupport,
   ensureTemplatePreprocessRowFilterSupport,
+  ensureTemplateCrossSheetBackfillSupport,
   ensureTemplateKeySupport,
   ensureTemplateMappingEnhancements,
   hasColumn
@@ -246,6 +247,7 @@ class AppDatabase {
     this.ensureTemplateFilenameFixedFieldSupport();
     this.ensureTemplateFeatureFilterSupport();
     this.ensureTemplatePreprocessRowFilterSupport();
+    this.ensureTemplateCrossSheetBackfillSupport();
     this.ensureAccountMappingTemplateSupport();
     this.ensureTemplateBigAccountNatureSupport();
     this.ensureTemplateCurrencyBigAccountSupport();
@@ -625,6 +627,10 @@ class AppDatabase {
 
   ensureTemplatePreprocessRowFilterSupport() {
     return ensureTemplatePreprocessRowFilterSupport(this.db);
+  }
+
+  ensureTemplateCrossSheetBackfillSupport() {
+    return ensureTemplateCrossSheetBackfillSupport(this.db);
   }
 
   ensureAccountMappingTemplateSupport() {

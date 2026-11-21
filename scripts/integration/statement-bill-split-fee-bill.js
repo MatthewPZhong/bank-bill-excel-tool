@@ -54,6 +54,9 @@ const {
   normalizeRowFilterRules,
   validateRowFilterRules,
   PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
+  hasCrossSheetBackfillSettings,
+  normalizeCrossSheetBackfillRule,
+  validateCrossSheetBackfillRule,
   upgradeLegacyFeatureFilter,
   validateFeeAmountFormula,
   validateBillSplitRowFilterRules,
@@ -127,8 +130,8 @@ const CONSTANTS = loadMainConstants([
   'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
   'BILL_SPLIT_ROW_FILTER_MAPPING_FIELD', 'BILL_SPLIT_ROW_FILTER_ENABLED_OPTION',
   'PREPROCESS_ROW_FILTER_MAPPING_FIELD', 'PREPROCESS_ROW_FILTER_ENABLED_OPTION', 'DUPLICATE_ROW_FILTER_MAPPING_FIELD',
-  'DUPLICATE_ROW_FILTER_ENABLED_OPTION', 'PREPROCESS_FIELDS', 'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS',
-  'SUPPORTED_BUNDLE_VERSION', 'LOGIC_VALUE_FEATURE_BUNDLE_VERSION', 'FEE_FIELD_MAPPING_BUNDLE_VERSION', 'LOGIC_VALUE_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION'
+  'DUPLICATE_ROW_FILTER_ENABLED_OPTION', 'CROSS_SHEET_BACKFILL_MAPPING_FIELD', 'CROSS_SHEET_BACKFILL_ENABLED_OPTION', 'PREPROCESS_FIELDS', 'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS',
+  'SUPPORTED_BUNDLE_VERSION', 'LOGIC_VALUE_FEATURE_BUNDLE_VERSION', 'FEE_FIELD_MAPPING_BUNDLE_VERSION', 'CROSS_SHEET_BACKFILL_BUNDLE_VERSION', 'LOGIC_VALUE_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION'
 ]);
 
 function createMain(database, constantOverrides = {}) {
@@ -145,7 +148,7 @@ function createMain(database, constantOverrides = {}) {
     'normalizeBundleBillSplitMeta',
     'upgradeLegacyBundleFeatureFilterRefs',
     'readTemplateBundleFile',
-    'resolveTemplateBundleVersion', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
+    'resolveTemplateBundleVersion', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled', 'isCrossSheetBackfillEnabled', 'usesLogicValueMapping', 'isLegacyLogicValueDirectReference',
     'isCurrencyOnlyMerchantMapping'
   ], {
     ...CONSTANTS,
@@ -161,6 +164,9 @@ function createMain(database, constantOverrides = {}) {
     normalizeRowFilterRules,
     validateRowFilterRules,
     PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
+    hasCrossSheetBackfillSettings,
+    normalizeCrossSheetBackfillRule,
+    validateCrossSheetBackfillRule,
     validateFeeAmountFormula,
     validateBillSplitRowFilterRules,
     FileValidationError,

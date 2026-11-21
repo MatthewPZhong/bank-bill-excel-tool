@@ -3203,6 +3203,180 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await layout.evidence('mapping-dialog-enable-column-win32-font-bottom', { geometry, enable });
   });
 
+  // v3.2.21 原始账单预处理「跨 Sheet 回填」：「重复账单过滤」下方的勾选框 +【规则设置】；待回填行条件复用过滤规则设置弹窗（子弹窗）；
+  //   规则【保存】只暂存，随映射【保存】提交；校验与主进程 validateCrossSheetBackfillRule 同口径。
+  const BACKFILL_FIELD = '跨 Sheet 回填';
+  async function openBackfillMapping(mappings = [], rule = null, layoutOptions = null) {
+    await openToggleMapping(mappings, layoutOptions);
+    const openError = await js(`(()=>{try{cfg.handle.close({status:'cancelled',reason:'cancel'});
+      cfg.tpl={...cfg.tpl,crossSheetBackfillRule:${JSON.stringify(rule)}};
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:cfg.tpl,
+        targetFields:['BillDate','Credit Amount','Debit Amount','Balance','MerchantId','Currency','Remark','${PREPROCESS_FIELD}','${DUPLICATE_FIELD}','${BACKFILL_FIELD}',...${JSON.stringify(ADVANCED_FIELDS)},...${JSON.stringify(FILTER_GROUP_FIELDS)}],
+        preprocessFields:['${PREPROCESS_FIELD}','${DUPLICATE_FIELD}','${BACKFILL_FIELD}'],advancedMappingFields:${JSON.stringify(ADVANCED_FIELDS)},billSplitGroupFields:${JSON.stringify(FILTER_GROUP_FIELDS)},
+        mappings:${JSON.stringify(mappings)},billSplitMeta:{signedAmountSourceField:'',rowFilterRules:[]}})).handle;
+      cfg.overlay=cfg.top();
+      cfg.openBackfill=()=>{cfg.toggleBtn('${BACKFILL_FIELD}').click();cfg.backfill=cfg.top();};
+      cfg.bf=selector=>cfg.backfill.querySelector(selector);
+      cfg.fire=control=>control.dispatchEvent(new Event(control.tagName==='INPUT'?'input':'change',{bubbles:true}));
+      cfg.setBf=(field,value)=>{const control=cfg.bf('[data-field='+field+']');control.value=value;cfg.fire(control);};
+      cfg.bfRow=index=>cfg.backfill.querySelectorAll('[data-role=backfill-fields] .scenario-config-multi-row')[index];
+      cfg.bfRows=()=>[...cfg.backfill.querySelectorAll('[data-role=backfill-fields] .scenario-config-multi-row')]
+        .map(row=>[row.querySelector('select').value,row.querySelector('input').value]);
+      cfg.setBfRow=(index,key,value)=>{const control=cfg.bfRow(index).querySelector('[data-backfill-field='+key+']');control.value=value;cfg.fire(control);};
+      cfg.bfState=()=>({sheet:cfg.bf('[data-field=sourceSheetName]').value,summary:cfg.bf('[data-role=condition-summary]').textContent,
+        matchMode:cfg.bf('[data-field=matchMode]').value,hint:cfg.bf('[data-role=match-hint]').textContent,matchField:cfg.bf('[data-field=matchField]').value,
+        sourceMatchField:cfg.bf('[data-field=sourceMatchField]').value,dateOrder:cfg.bf('[data-field=sourceDateOrder]').value,rows:cfg.bfRows()});
+      cfg.openConditions=()=>{cfg.bf('[data-action=edit-conditions]').click();cfg.filter=cfg.top();};
+      cfg.cond=(g,c)=>cfg.filter.querySelectorAll('.scenario-config-billtype-group')[g].querySelectorAll('.scenario-config-multi-row')[c];
+      cfg.setCond=(g,c,key,value)=>{const control=cfg.cond(g,c).querySelector('[data-multi-field='+key+']');control.value=value;cfg.fire(control);};
+      cfg.savedBackfill=()=>cfg.calls.filter(call=>call.name==='mappingSave').map(call=>({rule:call.args[0].crossSheetBackfillRule,
+        toggle:call.args[0].mappings.find(m=>m.templateField==='${BACKFILL_FIELD}').mappedField}));
+      return '';}catch(error){return String(error&&error.stack||error);}})()`);
+    assert.equal(openError, '');
+  }
+  const BACKFILL_MAIN_MAPPINGS = [
+    { templateField: 'Credit Amount', mappedField: '金额', mappedFields: [] },
+    { templateField: 'Currency', mappedField: '币种', mappedFields: [] }
+  ];
+  const BACKFILL_RULE = {
+    sourceSheetName: 'USD',
+    rowRules: [{ seq: 1, conditions: [{ field: '交易日期', op: '空值', value: '' }] }],
+    matchMode: 'amount',
+    matchField: '附言',
+    sourceMatchField: 'Credit Amount',
+    sourceDateOrder: 'MDY',
+    backfillFields: [{ targetField: '交易日期', sourceField: 'ValueDate' }, { targetField: '对手户名', sourceField: 'Channel' }]
+  };
+
+  await test('跨 Sheet 回填：在「重复账单过滤」下方，勾选后显示【规则设置】；规则弹窗校验与主进程同口径，待回填行条件复用过滤规则编辑器，【保存】暂存随映射提交', async () => {
+    await openBackfillMapping(BACKFILL_MAIN_MAPPINGS);
+    assert.deepEqual(await js(`(()=>{const rows=[...cfg.overlay.querySelectorAll('tbody tr')];const index=rows.indexOf(cfg.row('${BACKFILL_FIELD}'));
+      return {previous:rows[index-1].dataset.templateField,next:rows[index+1].textContent.trim(),label:cfg.row('${BACKFILL_FIELD}').cells[0].textContent.trim(),
+        checked:cfg.toggle('${BACKFILL_FIELD}').checked,button:cfg.toggleBtn('${BACKFILL_FIELD}').textContent.trim(),hidden:cfg.toggleBtn('${BACKFILL_FIELD}').hidden};})()`),
+      { previous: DUPLICATE_FIELD, next: '个性化映射设置', label: BACKFILL_FIELD, checked: false, button: '规则设置', hidden: true });
+    await js(`cfg.setToggle('${BACKFILL_FIELD}',true);`);
+    assert.equal(await js(`cfg.toggleBtn('${BACKFILL_FIELD}').hidden`), false);
+    await js('cfg.openBackfill();');
+    assert.deepEqual(await js(`({title:cfg.bf('.dialog-title').childNodes[0].textContent,tips:cfg.bf('.dialog-title .title-tips .title-tips-mark')!==null,
+      labels:[...cfg.backfill.querySelectorAll('.scenario-config-label')].map(item=>item.textContent.trim()),
+      matchModes:[...cfg.bf('[data-field=matchMode]').options].map(option=>option.textContent),
+      dateOrders:[...cfg.bf('[data-field=sourceDateOrder]').options].map(option=>option.textContent),
+      matchFields:[...cfg.bf('[data-field=matchField]').options].map(option=>option.textContent),
+      actions:[...cfg.backfill.querySelectorAll('.dialog-actions button')].map(button=>button.textContent.trim())})`), {
+      title: BACKFILL_FIELD,
+      tips: true,
+      labels: ['来源 Sheet', '待回填行条件', '配对方式', '本表配对字段', '来源配对字段', '来源日期格式', '回填字段'],
+      matchModes: ['按金额', '按原值'],
+      dateOrders: ['自动', '日在前（dd/mm/yyyy）', '月在前（mm/dd/yyyy）'],
+      matchFields: ['（请选择）', '交易日期', '金额', '币种', '附言', '对手户名'],
+      actions: ['保存', '取消']
+    });
+    assert.deepEqual(await js('cfg.bfState()'), { sheet: '', summary: '未设置', matchMode: 'amount',
+      hint: '两边识别出金额后比较，如「Trade - $65.45」与 65.45',
+      matchField: '', sourceMatchField: '', dateOrder: 'auto', rows: [['', '']] });
+    await js(`cfg.setBf('matchMode','exact');`);
+    assert.equal(await js(`cfg.bf('[data-role=match-hint]').textContent`), '两边单元格去掉首尾空格后完全相同');
+    await js(`cfg.setBf('matchMode','amount');cfg.bf('[data-action=save]').click();`); await tick();
+    assert.deepEqual(await js(`cfg.top().querySelector('.alert-message').innerHTML.split('<br>').map(line=>line.trim())`), [
+      '跨 Sheet 回填：请填写来源 Sheet 名',
+      '跨 Sheet 回填：请至少设置一条待回填行条件',
+      '跨 Sheet 回填：请选择本表配对字段',
+      '跨 Sheet 回填：请填写来源配对字段',
+      '跨 Sheet 回填：请至少设置一个回填字段'
+    ]);
+    await js(`cfg.top().querySelector('button').click();`); await tick();
+
+    // 待回填行条件：子弹窗为过滤规则编辑器，标题与提示为本功能；不设置条件时提示本功能的文案
+    await js('cfg.openConditions();');
+    assert.deepEqual(await js(`({title:cfg.filter.querySelector('.dialog-title').textContent,label:cfg.filter.querySelector('.scenario-config-label').childNodes[0].textContent.trim(),
+      add:cfg.filter.querySelector('[data-action=add-rule]').textContent})`), { title: '待回填行条件', label: '待回填行条件', add: '+ 新增条件规则' });
+    await js(`cfg.filter.querySelector('[data-action=save]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /跨 Sheet 回填：请至少设置一条待回填行条件/);
+    await js(`cfg.top().querySelector('button').click();`); await tick();
+    await js(`cfg.setCond(0,0,'field','交易日期');cfg.setCond(0,0,'op','空值');cfg.filter.querySelector('[data-action=save]').click();`); await tick();
+    assert.equal(await js('cfg.top()===cfg.backfill'), true);
+    assert.equal(await js(`cfg.bf('[data-role=condition-summary]').textContent`), '交易日期 空值');
+
+    // 回填目标不能是发生额 / 币种所用的源列，也不能重复
+    await js(`cfg.setBf('sourceSheetName',' USD ');cfg.setBf('matchField','附言');cfg.setBf('sourceMatchField','Credit Amount');cfg.setBf('sourceDateOrder','MDY');
+      cfg.setBfRow(0,'targetField','交易日期');cfg.setBfRow(0,'sourceField','ValueDate');cfg.bf('[data-action=add-field]').click();
+      cfg.setBfRow(1,'targetField','金额');cfg.setBfRow(1,'sourceField','Channel');cfg.bf('[data-action=save]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /跨 Sheet 回填：「金额」用于发生额、余额、币种或账户映射，不能作为回填字段/);
+    await js(`cfg.top().querySelector('button').click();`); await tick();
+    await js(`cfg.setBfRow(1,'targetField','交易日期');cfg.bf('[data-action=save]').click();`); await tick();
+    assert.match(await js('cfg.top().textContent'), /跨 Sheet 回填：本表字段「交易日期」重复设置/);
+    await js(`cfg.top().querySelector('button').click();`); await tick();
+    // MerchantId 所用的源列同样不能回填（按保存时映射表的当前选择判断）
+    await js(`(()=>{const select=cfg.sel('MerchantId');select.value='对手户名';select.dispatchEvent(new Event('change',{bubbles:true}));
+      cfg.setBfRow(1,'targetField','对手户名');cfg.bf('[data-action=save]').click();})()`); await tick();
+    assert.match(await js('cfg.top().textContent'), /跨 Sheet 回填：「对手户名」用于发生额、余额、币种或账户映射，不能作为回填字段/);
+    await js(`cfg.top().querySelector('button').click();`); await tick();
+    await js(`(()=>{const select=cfg.sel('MerchantId');select.value='';select.dispatchEvent(new Event('change',{bubbles:true}));
+      cfg.setBfRow(1,'targetField','交易日期');})()`);
+    // 删除 / 新增回填行；删到最后一行保留空白行
+    await js(`cfg.bf('[data-action=add-field]').click();cfg.bfRow(2).querySelector('[data-backfill-action=remove]').click();void 0;`);
+    assert.deepEqual(await js('cfg.bfRows()'), [['交易日期', 'ValueDate'], ['交易日期', 'Channel']]);
+    await js(`cfg.setBfRow(1,'targetField','对手户名');cfg.bf('[data-action=save]').click();`); await tick();
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 0);
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js('cfg.savedBackfill()'), [{ rule: BACKFILL_RULE, toggle: '是' }]);
+  });
+
+  await test('跨 Sheet 回填：回显已保存的规则，字段已不在模板表头时显示「（已删除）」；【取消】与【返回】不提交，未勾选时保留草稿', async () => {
+    const staleRule = { ...BACKFILL_RULE, matchField: '旧描述', backfillFields: [{ targetField: '旧日期', sourceField: 'ValueDate' }] };
+    await openBackfillMapping([...BACKFILL_MAIN_MAPPINGS, { templateField: BACKFILL_FIELD, mappedField: '是', mappedFields: [] }], staleRule);
+    assert.equal(await js(`cfg.toggle('${BACKFILL_FIELD}').checked`), true);
+    await js('cfg.openBackfill();');
+    assert.deepEqual(await js(`({state:cfg.bfState(),matchStale:cfg.bf('[data-field=matchField]').classList.contains('is-stale'),
+      matchLabel:cfg.bf('[data-field=matchField] option:checked').textContent,rowStale:cfg.bfRow(0).querySelector('select').classList.contains('is-stale'),
+      rowLabel:cfg.bfRow(0).querySelector('select option:checked').textContent})`), {
+      state: { sheet: 'USD', summary: '交易日期 空值', matchMode: 'amount',
+        hint: '两边识别出金额后比较，如「Trade - $65.45」与 65.45',
+        matchField: '旧描述', sourceMatchField: 'Credit Amount', dateOrder: 'MDY', rows: [['旧日期', 'ValueDate']] },
+      matchStale: true, matchLabel: '旧描述（已删除）', rowStale: true, rowLabel: '旧日期（已删除）'
+    });
+    // 【取消】不改暂存；回填行与条件编辑都只作用于本次打开的草稿
+    await js(`cfg.setBf('sourceSheetName','EUR');cfg.bf('[data-action=cancel]').click();`); await tick();
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    await js('cfg.openBackfill();');
+    assert.equal(await js(`cfg.bf('[data-field=sourceSheetName]').value`), 'USD');
+    await js(`cfg.bf('.icon-close').click();`); await tick();
+    await js(`cfg.overlay.querySelector('[data-action="back"]').click();`); await tick();
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 0);
+    // 未勾选：照常提交已存规则（保留草稿，不生效）；从未设置时提交 {}
+    await openBackfillMapping(BACKFILL_MAIN_MAPPINGS, BACKFILL_RULE);
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js('cfg.savedBackfill()'), [{ rule: BACKFILL_RULE, toggle: '' }]);
+    await openBackfillMapping(BACKFILL_MAIN_MAPPINGS);
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js('cfg.savedBackfill()'), [{ rule: {}, toggle: '' }]);
+  });
+
+  for (const theme of ['light', 'dark']) await test(`跨 Sheet 回填规则设置布局（${theme}）：各行控件同一行、不超出弹窗，条件摘要可见`, async () => {
+    await openBackfillMapping([...BACKFILL_MAIN_MAPPINGS, { templateField: BACKFILL_FIELD, mappedField: '是', mappedFields: [] }],
+      BACKFILL_RULE, { width: 1440, height: 900, theme, zoom: 1 });
+    await layout.settle();
+    await layout.evidence(`mapping-dialog-cross-sheet-backfill-${theme}`, {});
+    await js('cfg.openBackfill();'); await js('new Promise(resolve=>setTimeout(resolve,400))'); await layout.settle();
+    const geometry = await js(`(()=>{const rect=element=>element.getBoundingClientRect(),middle=item=>(item.top+item.bottom)/2;
+      const card=cfg.backfill.querySelector('.modal-card'),body=card.querySelector('.scenario-config-body');
+      const lines=[...card.querySelectorAll('.scenario-config-row:not(.scenario-config-row-multi)')].map(row=>[...row.children].map(rect))
+        .concat([...card.querySelectorAll('[data-role=backfill-fields] .scenario-config-multi-row')].map(row=>[...row.children].map(rect)));
+      const summary=card.querySelector('[data-role=condition-summary]'),dateOrder=card.querySelector('[data-field=sourceDateOrder]');
+      const probe=document.createElement('span');probe.style.cssText='position:absolute;visibility:hidden;white-space:nowrap;font:'+getComputedStyle(dateOrder).font;
+      probe.textContent='日在前（dd/mm/yyyy）';document.body.appendChild(probe);const textWidth=probe.getBoundingClientRect().width;probe.remove();
+      const style=getComputedStyle(dateOrder),contentWidth=rect(dateOrder).width-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight);
+      return {visible:rect(card).width>=600&&lines.flat().every(item=>item.width>0&&item.height>0)&&getComputedStyle(cfg.backfill).opacity==='1',
+        rowsOneLine:lines.every(items=>items.every(item=>Math.abs(middle(item)-middle(items[0]))<=2)),
+        summaryVisible:rect(summary).width>=80&&summary.textContent==='交易日期 空值',
+        dateOrderTextFits:textWidth<=contentWidth,
+        insideCard:lines.flat().every(item=>item.left>=rect(card).left&&item.right<=rect(card).right),
+        noHorizontalOverflow:body.scrollWidth<=body.clientWidth};})()`);
+    assert.deepEqual(geometry, { visible: true, rowsOneLine: true, summaryVisible: true, dateOrderTextFits: true, insideCard: true, noHorizontalOverflow: true });
+    await layout.evidence(`cross-sheet-backfill-${theme}`, { geometry });
+  });
+
   // v3.2.19 映射字段「逻辑取值」：位于「需要拼接字段」上方，选中后显示【设置】；候补字段弹窗参考月度 pending「对账字段」。
   async function openLogicValueDialog() {
     await js(`cfg.sel('Remark').value='逻辑取值';cfg.sel('Remark').dispatchEvent(new Event('change'));

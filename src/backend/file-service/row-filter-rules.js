@@ -68,8 +68,8 @@ function normalizeRowFilterRules(raw) {
 }
 
 // 返回规范化后的规则；headers 为数组时校验字段（含字段运算的比较字段）在模板表头中。
-// missingMessage：没有有效规则时的报错（各功能入口文案不同）。
-function validateRowFilterRules(raw, headers, { missingMessage = '请至少设置一条过滤规则' } = {}) {
+// missingMessage：没有有效规则时的报错（各功能入口文案不同）；ruleLabel：条件报错的前缀（v3.2.21 跨 Sheet 回填复用）。
+function validateRowFilterRules(raw, headers, { missingMessage = '请至少设置一条过滤规则', ruleLabel = '过滤规则' } = {}) {
   const rules = normalizeRowFilterRules(raw);
   if (!rules.length) {
     fail(missingMessage);
@@ -79,7 +79,7 @@ function validateRowFilterRules(raw, headers, { missingMessage = '请至少设�
     : null;
   rules.forEach((group) => {
     group.conditions.forEach((condition, index) => {
-      const label = `过滤规则 #${group.seq} 第 ${index + 1} 个条件`;
+      const label = `${ruleLabel} #${group.seq} 第 ${index + 1} 个条件`;
       if (!condition.field) {
         fail(`${label}：请选择字段`);
       }
