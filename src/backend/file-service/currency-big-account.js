@@ -56,7 +56,9 @@ function applyCurrencyBigAccountMapping({
   rowMetas = [],
   orderedTargetFields = [],
   mapping,
-  inputFilePath = ''
+  inputFilePath = '',
+  // v3.2.21 B112：报错明细与上下文中的币种原值脱敏（按原文还原的长数字只写位数），匹配仍用原值
+  maskDiagnosticValue = (value) => value
 }) {
   if (!mapping) {
     throw createConfigMissingError('');
@@ -128,7 +130,7 @@ function applyCurrencyBigAccountMapping({
   throw buildCurrencyBigAccountUnmappedError(Array.from(groups.values()).map((group) => ({
     templateName: normalizeCell(mapping.templateName),
     fileName,
-    currency: group.currency,
+    currency: maskDiagnosticValue(group.currency),
     rowNumbers: group.rowNumbers
   })));
 }

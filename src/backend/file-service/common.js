@@ -30,6 +30,12 @@ function normalizeCell(value) {
   return String(value).trim();
 }
 
+// v3.2.21 B112：读取库读成数字、且超出安全整数范围的整数——文件里写的长卡号 / 流水号可能已丢失末几位。
+//   网银账单生成按原文还原后仍是这种数字的，说明文件里没有可核对的原值（二进制 .xls、Excel 另存的 xlsx 等）
+function isUnverifiedLongNumber(value) {
+  return typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value);
+}
+
 function isRowMeaningful(row) {
   return Array.isArray(row) && row.some((cell) => normalizeCell(cell) !== '');
 }
@@ -85,6 +91,7 @@ module.exports = {
   SUPPORTED_EXTENSIONS,
   buildExpectedHeaderCandidates,
   isRowMeaningful,
+  isUnverifiedLongNumber,
   normalizeCell,
   trimTrailingEmptyCells
 };

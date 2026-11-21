@@ -309,6 +309,7 @@ function createEnvironment(dir, label) {
     'buildCurrencyBigAccountMappingConfig',
     'buildMappedRowsForFile',
     'getEntryTemplateConfig',
+    'dropIssuesOverriddenBySelectedBigAccount',
     'rebuildMatchedTemplateFileEntries',
     'groupStatementEntriesForGeneration',
     'findGenerationGroupBalanceModeMismatch',

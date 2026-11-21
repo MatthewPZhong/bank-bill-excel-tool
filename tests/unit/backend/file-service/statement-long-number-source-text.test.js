@@ -1,0 +1,821 @@
+'use strict';
+
+// v3.2.21 B112 网银账单生成：长数字按文件原文读取（spec changes/v3.2.21/fix/statement-long-number-precision/spec.md）
+//   - 超出安全整数范围的非负整数在数据行按原文还原：XLSX 取工作表 XML 的 <v> 字面值，文本 / HTML 伪装的 .xls 按文本重读；
+//   - 文件里只有近似值（指数写法、二进制 .xls）或是负数时保持原读取结果，生成时对导出为明细的行、写进明细的取值提示
+//     long-number-unverified；发生额、余额取值的列不用原文（余额按数值计算，与明细同一个值），照常提示；
+//   - 真 CSV 的 ="…"、首尾制表符在数据行还原为 Excel 显示值，表头定位仍按原值；
+//   - 不传 exactSourceText 的读取（模板导入表头等）行为不变。
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const test = require('node:test');
+const JSZip = require('jszip');
+const XLSX = require('xlsx');
+
+const { buildMappedRows } = require('../../../../src/backend/file-service');
+const { extractHeaders, readRows, readRowsWithMetadata } = require('../../../../src/backend/file-service/readers');
+const { MERCHANT_ID_CURRENCY_ONLY_MARKER, isUnverifiedLongNumber } = require('../../../../src/backend/file-service/common');
+const { buildLogicValueToken } = require('../../../../src/backend/file-service/logic-value');
+
+const SERIAL = '9007199254740993';
+const CARD = '6222021234567890123';
+const HEADER = ['日期', '币种', '金额', '流水号', '卡号'];
+const TARGETS = ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'ChannelOrderNo', 'Payee Card No'];
+const MAPPING = { BillDate: '日期', Currency: '币种', 'Credit Amount': '金额', ChannelOrderNo: '流水号', 'Payee Card No': '卡号' };
+
+function createTempDir(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-long-number-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+function map(filePath, options = {}) {
+  return buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: TARGETS,
+    mappingByField: MAPPING,
+    expectedSourceHeaders: HEADER,
+    ...options
+  });
+}
+
+function identifiers(mapped) {
+  return mapped.slice(1).map((row) => [row[TARGETS.indexOf('ChannelOrderNo')], row[TARGETS.indexOf('Payee Card No')]]);
+}
+
+// cells 只比较源字段与位数；写进的目标列（targetFields）另有用例
+function longNumberIssues(mapped) {
+  return mapped.issues
+    .filter((issue) => issue.type === 'long-number-unverified')
+    .map((issue) => ({ ...issue, cells: issue.cells.map(({ sourceField, digitCount }) => ({ sourceField, digitCount })) }));
+}
+
+// 先用占位数字写出 XLSX，再把工作表 XML 中的 <v> 改成指定字面值（读取库写不出超出精度的数字）
+async function writeXlsxWithLiterals(filePath, rows, literals, transformXml = (xml) => xml) {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), 'Sheet1');
+  const zip = await JSZip.loadAsync(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
+  let xml = await zip.file('xl/worksheets/sheet1.xml').async('string');
+  Object.entries(literals).forEach(([placeholder, literal]) => {
+    assert.ok(xml.includes(`<v>${placeholder}</v>`), `占位 ${placeholder} 应在工作表 XML 中`);
+    xml = xml.replace(`<v>${placeholder}</v>`, `<v>${literal}</v>`);
+  });
+  zip.file('xl/worksheets/sheet1.xml', transformXml(xml));
+  fs.writeFileSync(filePath, await zip.generateAsync({ type: 'nodebuffer' }));
+  return filePath;
+}
+
+test('isUnverifiedLongNumber：只认超出安全整数范围的整数', () => {
+  assert.equal(isUnverifiedLongNumber(9007199254740992), true);
+  assert.equal(isUnverifiedLongNumber(-9007199254740992), true);
+  assert.equal(isUnverifiedLongNumber(Number(CARD)), true);
+  assert.equal(isUnverifiedLongNumber(9007199254740991), false);
+  assert.equal(isUnverifiedLongNumber(1234567890123456), false);
+  assert.equal(isUnverifiedLongNumber(0.1234567890123456789), false);
+  assert.equal(isUnverifiedLongNumber(SERIAL), false);
+  assert.equal(isUnverifiedLongNumber(Infinity), false);
+});
+
+test('XLSX：<v> 写的整数按原文输出（含开启重复账单过滤时）；安全整数与金额不变；不提示', async (t) => {
+  const dir = createTempDir(t);
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'literal.xlsx'), [
+    HEADER,
+    ['2026-11-01', 'USD', 100, 1111, 2222],
+    ['2026-11-02', 'USD', 200, 3333, 1234567890123456]
+  ], { 1111: SERIAL, 2222: CARD, 3333: '0009007199254740995' });
+
+  const mapped = map(filePath);
+  assert.deepEqual(identifiers(mapped), [[SERIAL, CARD], ['9007199254740995', '1234567890123456']]);
+  assert.deepEqual(mapped.slice(1).map((row) => row[TARGETS.indexOf('Credit Amount')]), ['100', '200']);
+  assert.deepEqual(longNumberIssues(mapped), []);
+
+  // 查重读取保留了压缩包原文，直接取其中的工作表 XML；指纹按原文计算，两次读取一致
+  const withKeys = map(filePath, { duplicateRowKeys: true });
+  assert.deepEqual(identifiers(withKeys), identifiers(mapped));
+  const again = map(filePath, { duplicateRowKeys: true });
+  assert.deepEqual(again.rowMetas.map((meta) => meta.sourceRowKey), withKeys.rowMetas.map((meta) => meta.sourceRowKey));
+  assert.ok(withKeys.rowMetas.every((meta) => meta.sourceRowKey));
+});
+
+test('XLSX：指数写法（Excel 另存）无法还原，照常生成并只为进入明细的行、已映射的列提示', async (t) => {
+  const dir = createTempDir(t);
+  const header = [...HEADER, '备用号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'exponent.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', 100, 1111, 2222, 5555],
+    ['2026-11-02', 'USD', '', 3333, 4444, 6666]
+  ], {
+    1111: '6.2220212345678899E+18',
+    2222: CARD,
+    3333: '6.2220212345678899E+18',
+    4444: '6.2220212345678899E+18',
+    5555: '6.2220212345678899E+18',
+    6666: '6.2220212345678899E+18'
+  });
+
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: TARGETS,
+    mappingByField: MAPPING,
+    expectedSourceHeaders: header
+  });
+  // 第 3 行收支均空（导出明细时过滤）：不提示；未映射的「备用号」不提示
+  assert.deepEqual(identifiers(mapped), [['6222021234567890000', CARD], ['6222021234567890000', '6222021234567890000']]);
+  assert.deepEqual(longNumberIssues(mapped), [{
+    type: 'long-number-unverified',
+    fileName: 'exponent.xlsx',
+    rowNumber: 2,
+    cells: [{ sourceField: '流水号', digitCount: 19 }]
+  }]);
+});
+
+test('负数不还原（保持读取库的数字并提示）；表头行不还原，按模板导入读到的表头照常匹配；提示口径同明细导出', async (t) => {
+  const dir = createTempDir(t);
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'negative.xlsx'), [
+    ['日期', '币种', '金额', '流水号', 7777],
+    ['2026-11-01', 'USD', 100, 1111, 'A'],
+    // 「100.」无法解析为数字，明细导出照常保留该行（isZeroOrBlankAmount），同样提示
+    ['2026-11-02', 'USD', '100.', 2222, 'B'],
+    ['2026-11-03', 'USD', 0, 3333, 'C']
+  ], { 7777: SERIAL, 1111: '-9007199254740995', 2222: '6.2220212345678899E+18', 3333: '6.2220212345678899E+18' });
+
+  // 模板导入读表头不取原文：数字表头存为读取库的值
+  const header = extractHeaders(filePath);
+  assert.equal(header[4], '9007199254740992');
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: TARGETS,
+    mappingByField: { ...MAPPING, 'Payee Card No': header[4] },
+    expectedSourceHeaders: header
+  });
+  assert.deepEqual(identifiers(mapped), [['-9007199254740996', 'A'], ['6222021234567890000', 'B'], ['6222021234567890000', 'C']]);
+  // 第 4 行收支为 0（导出明细时过滤）不提示
+  assert.deepEqual(longNumberIssues(mapped).map((issue) => [issue.rowNumber, issue.cells]), [
+    [2, [{ sourceField: '流水号', digitCount: 16 }]],
+    [3, [{ sourceField: '流水号', digitCount: 19 }]]
+  ]);
+});
+
+test('拆分 / 合并账单：只提示写进明细的取值，主映射试算、未用到的特征值不提示', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '类型', '币种', '收入', '交易金额', '卡号', '附言'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'split.xlsx'), [
+    header,
+    ['2026-11-01', '普通', 'USD', 100, '', 1111, 2222],
+    ['2026-11-02', '拆分', 'USD', '', 200, 3333, 4444]
+  ], {
+    1111: '6.2220212345678899E+18',
+    2222: '6.2220212345678899E+18',
+    3333: '6.2220212345678899E+18',
+    4444: '6.2220212345678899E+18'
+  });
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'Payee Card No', 'Remark'],
+    mappingByField: {
+      BillDate: '日期',
+      Currency: '币种',
+      'Credit Amount': '收入',
+      'Payee Card No': '卡号',
+      Remark: '__FEATURE_FILTER__:f1'
+    },
+    expectedSourceHeaders: header,
+    featureFilters: { f1: { id: 'f1', name: '单号', sourceField: '附言', separator: '', digitsOnly: true } },
+    billSplitMerge: {
+      enabled: true,
+      reuseModuleMapping: false,
+      billSplitMappingByTargetField: { BillDate: '日期', Remark: '类型' },
+      billSplitRows: [{
+        seqNo: 1,
+        rowStatus: 'completed',
+        currencySourceField: '币种',
+        creditSourceField: '交易金额',
+        debitSourceField: '',
+        amountSourceField: '',
+        mergedGroupSeq: null,
+        isFeeBill: false
+      }],
+      billSplitAmountRules: [],
+      signedAmountSourceField: '',
+      signedAmountTargetSeqNos: [],
+      byFieldAmountTargetSeqNos: [],
+      feeAmountFormula: null,
+      rowFilterRules: [{ seq: 1, conditions: [{ field: '类型', op: '等于', value: '拆分' }] }]
+    }
+  });
+  // 拆分行（第 3 行）用拆分映射，不取卡号与特征值：不提示；走主映射的第 2 行提示卡号与特征值的源字段
+  assert.deepEqual(mapped.slice(1).map((row) => row[5]), ['6222021234567890000', '拆分']);
+  assert.deepEqual(longNumberIssues(mapped).map((issue) => [issue.rowNumber, issue.cells]), [
+    [2, [{ sourceField: '卡号', digitCount: 19 }, { sourceField: '附言', digitCount: 19 }]]
+  ]);
+});
+
+test('发生额、余额取值的列保持读取库的数值并提示；「未筛出特征值」不写还原后的完整号码', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '金额', '余额', '卡号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'amount.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', 1111, 2222, 3333]
+  ], { 1111: SERIAL, 2222: SERIAL, 3333: CARD });
+  const targets = ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'Balance', 'Payee Card No', 'Remark'];
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: targets,
+    mappingByField: {
+      BillDate: '日期',
+      Currency: '币种',
+      'Credit Amount': '金额',
+      Balance: '余额',
+      'Payee Card No': '卡号',
+      Remark: '__FEATURE_FILTER__:f1'
+    },
+    expectedSourceHeaders: header,
+    // 卡号不满足 8 位特征长度：未筛出，提示里只写位数
+    featureFilters: { f1: { id: 'f1', name: '单号', sourceField: '卡号', separator: '', length: 8 } }
+  });
+  assert.deepEqual(mapped[1].slice(2), ['9007199254740992', '', '9007199254740992', CARD, '']);
+  assert.deepEqual(longNumberIssues(mapped).map((issue) => issue.cells), [[
+    { sourceField: '金额', digitCount: 16 },
+    { sourceField: '余额', digitCount: 16 }
+  ]]);
+  assert.deepEqual(mapped.issues.filter((issue) => issue.type === 'feature-value-unmatched').map((issue) => issue.misses), [[
+    { featureName: '单号', sourceField: '卡号', rawValue: '（19位数值）' }
+  ]]);
+});
+
+test('拆分行复用模块映射：主映射的发生额不写进明细，不提示', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '收入', '交易金额'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'split-reuse.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', 1111, 123]
+  ], { 1111: '9.0071992547409952E+15' });
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount'],
+    mappingByField: { BillDate: '日期', Currency: '币种', 'Credit Amount': '收入' },
+    expectedSourceHeaders: header,
+    billSplitMerge: {
+      enabled: true,
+      reuseModuleMapping: true,
+      billSplitMappingByTargetField: {},
+      billSplitRows: [{
+        seqNo: 1,
+        rowStatus: 'completed',
+        currencySourceField: '币种',
+        creditSourceField: '交易金额',
+        debitSourceField: '',
+        amountSourceField: '',
+        mergedGroupSeq: null,
+        isFeeBill: false
+      }],
+      billSplitAmountRules: [],
+      signedAmountSourceField: '',
+      signedAmountTargetSeqNos: [],
+      byFieldAmountTargetSeqNos: [],
+      feeAmountFormula: null,
+      rowFilterRules: null
+    }
+  });
+  assert.deepEqual(mapped.slice(1).map((row) => row.slice(1, 3)), [['USD', '123']]);
+  assert.deepEqual(longNumberIssues(mapped), []);
+});
+
+function splitRow(overrides = {}) {
+  return {
+    seqNo: 1,
+    rowStatus: 'completed',
+    currencySourceField: '币种',
+    creditSourceField: '',
+    debitSourceField: '',
+    amountSourceField: '',
+    mergedGroupSeq: null,
+    isFeeBill: false,
+    ...overrides
+  };
+}
+
+function billSplitMerge(overrides = {}) {
+  return {
+    enabled: true,
+    reuseModuleMapping: true,
+    billSplitMappingByTargetField: {},
+    billSplitRows: [splitRow()],
+    billSplitAmountRules: [],
+    signedAmountSourceField: '',
+    signedAmountTargetSeqNos: [],
+    byFieldAmountTargetSeqNos: [],
+    feeAmountFormula: null,
+    rowFilterRules: null,
+    ...overrides
+  };
+}
+
+test('费用账单启用公式时，仍保存在模板里的支出映射不算发生额列：同一列作标识按原文', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '手续费', '流水号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'fee.xlsx'), [header, ['2026-11-01', 'USD', 20, 1111]], { 1111: SERIAL });
+  const targets = ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'ChannelOrderNo'];
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: targets,
+    mappingByField: { BillDate: '日期', Currency: '币种', ChannelOrderNo: '流水号' },
+    expectedSourceHeaders: header,
+    billSplitMerge: billSplitMerge({
+      billSplitRows: [splitRow({ isFeeBill: true, debitSourceField: '流水号' })],
+      feeAmountFormula: [{ field: '手续费', op: 'end' }]
+    })
+  });
+  assert.deepEqual(mapped.slice(1).map((row) => row.slice(2)), [['', '20', SERIAL]]);
+  assert.deepEqual(longNumberIssues(mapped), []);
+});
+
+test('拆分按字段区分发生额：只记命中规则的发生额列；币种诊断中的还原号码只写位数', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '方向', '收入', '支出', '卡号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'split-rules.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', '支', 1111, 20, 2222]
+  ], { 1111: '9.0071992547409952E+15', 2222: CARD });
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount'],
+    // 卡号误映射到币种：未匹配币种的提示不写完整号码
+    mappingByField: { BillDate: '日期', Currency: '卡号' },
+    currencyMappings: [{ englishCode: 'USD', aliases: ['美元'] }],
+    expectedSourceHeaders: header,
+    billSplitMerge: billSplitMerge({
+      billSplitRows: [splitRow({ currencySourceField: '' })],
+      billSplitAmountRules: [
+        { conditionField: '方向', conditionValue: '收', mappedField: '收入', targetField: 'Credit Amount' },
+        { conditionField: '方向', conditionValue: '支', mappedField: '支出', targetField: 'Debit Amount' }
+      ]
+    })
+  });
+  assert.deepEqual(mapped.slice(1).map((row) => row.slice(1)), [[CARD, '', '20']]);
+  assert.deepEqual(longNumberIssues(mapped), []);
+  assert.deepEqual(mapped.issues.filter((issue) => issue.type === 'currency-unmapped').map((issue) => issue.rawValue), ['（19位数值）']);
+});
+
+test('XLSX 单元格没有位置属性时整张表不还原，按无法核对原值提示', async (t) => {
+  const dir = createTempDir(t);
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'implicit.xlsx'), [
+    HEADER,
+    ['2026-11-01', 'USD', 100, 1111, 2222]
+  ], { 1111: SERIAL, 2222: CARD }, (xml) => xml.replace(' r="E2"', ''));
+  const mapped = map(filePath);
+  assert.deepEqual(identifiers(mapped), [['9007199254740992', '6222021234567890000']]);
+  assert.deepEqual(longNumberIssues(mapped).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号', '卡号']]);
+});
+
+test('拆分行按实际的发生额分支排除金额列：被按正负号拆分指定的行，保存的收入映射列作标识时按原文', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '有符号金额', '流水号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'signed.xlsx'), [header, ['2026-11-01', 'USD', -20, 1111]], { 1111: SERIAL });
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'ChannelOrderNo'],
+    mappingByField: { BillDate: '日期', Currency: '币种', ChannelOrderNo: '流水号' },
+    expectedSourceHeaders: header,
+    billSplitMerge: billSplitMerge({
+      billSplitRows: [splitRow({ creditSourceField: '流水号' })],
+      signedAmountSourceField: '有符号金额',
+      signedAmountTargetSeqNos: [1]
+    })
+  });
+  assert.deepEqual(mapped.slice(1).map((row) => row.slice(2)), [['', '20', SERIAL]]);
+  assert.deepEqual(longNumberIssues(mapped), []);
+});
+
+test('只记实际导出的拆分子行与同一方向首条命中规则的取值', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '卡号', '收入A', '收入B', '方向', '金额1', '金额2'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'entries.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', 1111, 0, 100, '收', 30, 2222]
+  ], { 1111: '6.2220212345678899E+18', 2222: '9.0071992547409952E+15' });
+  // 第 1 个子行币种取卡号、收支为 0 被丢弃；第 2 个子行正常导出
+  const split = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount'],
+    mappingByField: { BillDate: '日期', Currency: '币种' },
+    expectedSourceHeaders: header,
+    billSplitMerge: billSplitMerge({
+      billSplitRows: [
+        splitRow({ currencySourceField: '卡号', creditSourceField: '收入A' }),
+        splitRow({ seqNo: 2, creditSourceField: '收入B' })
+      ]
+    })
+  });
+  assert.deepEqual(split.slice(1).map((row) => row.slice(1, 3)), [['USD', '100']]);
+  assert.deepEqual(longNumberIssues(split), []);
+
+  // 主映射按字段区分发生额：两条收入规则都命中，只取第一条（金额1）
+  const byField = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount'],
+    mappingByField: { BillDate: '日期', Currency: '币种' },
+    expectedSourceHeaders: header,
+    amountSplitByField: {
+      enabled: true,
+      rules: [
+        { conditionField: '方向', conditionValue: '收', mappedField: '金额1', targetField: 'Credit Amount' },
+        { conditionField: '方向', conditionValue: '收', mappedField: '金额2', targetField: 'Credit Amount' }
+      ]
+    }
+  });
+  assert.deepEqual(byField.slice(1).map((row) => row[2]), ['30']);
+  assert.deepEqual(longNumberIssues(byField), []);
+});
+
+test('按币种匹配大账号的阻断错误中，还原的长数字只写位数', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '卡号', '金额'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'currency-only.xlsx'), [header, ['2026-11-01', 1111, 100]], { 1111: CARD });
+  assert.throws(() => buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount'],
+    mappingByField: { BillDate: '日期', MerchantId: MERCHANT_ID_CURRENCY_ONLY_MARKER, Currency: '卡号', 'Credit Amount': '金额' },
+    expectedSourceHeaders: header,
+    currencyBigAccountMapping: { templateName: 'T', pairs: [{ currency: 'USD', merchantId: 'M1' }] }
+  }), (error) => {
+    const text = JSON.stringify([error.message, error.detailLines, error.context]);
+    assert.ok(text.includes('（19位数值）'), text);
+    assert.ok(!text.includes(CARD), text);
+    return true;
+  });
+});
+
+test('按收支方向取的账号：该方向不取值时不提示', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '收入', '支出', '卡号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'directional.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', '', 50, 1111],
+    ['2026-11-02', 'USD', 60, '', 2222]
+  ], { 1111: '6.2220212345678899E+18', 2222: '6.2220212345678899E+18' });
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'Drawee CardNo'],
+    mappingByField: { BillDate: '日期', Currency: '币种', 'Credit Amount': '收入', 'Debit Amount': '支出', 'Drawee CardNo': '卡号' },
+    amountMappingRules: { accountSourceField: '卡号' },
+    expectedSourceHeaders: header
+  });
+  // 支出行付款卡号留空、不提示；收入行取卡号并提示
+  assert.deepEqual(mapped.slice(1).map((row) => row[4]), ['', '6222021234567890000']);
+  assert.deepEqual(longNumberIssues(mapped).map((issue) => [issue.rowNumber, issue.cells]), [
+    [3, [{ sourceField: '卡号', digitCount: 19 }]]
+  ]);
+});
+
+test('按字段区分发生额：按规则取的发生额列同样提示', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '方向', '金额'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'by-field.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', '收', 1111]
+  ], { 1111: '9.0071992547409952E+15' });
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount'],
+    mappingByField: { BillDate: '日期', Currency: '币种' },
+    expectedSourceHeaders: header,
+    amountSplitByField: {
+      enabled: true,
+      rules: [{ conditionField: '方向', conditionValue: '收', mappedField: '金额', targetField: 'Credit Amount' }]
+    }
+  });
+  assert.deepEqual(longNumberIssues(mapped).map((issue) => [issue.rowNumber, issue.cells]), [
+    [2, [{ sourceField: '金额', digitCount: 16 }]]
+  ]);
+});
+
+test('逻辑取值的候补列名以固定值前缀开头时仍按金额列：保持读取库的数值并提示', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '__FIXED__:金额', '备用金额', '流水号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'logic-amount.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', 1111, '', 2222]
+  ], { 1111: SERIAL, 2222: SERIAL });
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'ChannelOrderNo'],
+    mappingByField: {
+      BillDate: '日期',
+      Currency: '币种',
+      'Credit Amount': buildLogicValueToken(['__FIXED__:金额', '备用金额']),
+      ChannelOrderNo: '流水号'
+    },
+    expectedSourceHeaders: header
+  });
+  // 金额与余额计算同一个值；同一原文作流水号按原文
+  assert.deepEqual(mapped.slice(1).map((row) => row.slice(2)), [['9007199254740992', '', SERIAL]]);
+  assert.deepEqual(longNumberIssues(mapped).map((issue) => issue.cells), [[{ sourceField: '__FIXED__:金额', digitCount: 16 }]]);
+});
+
+test('多列拼接的诊断值中，还原的长数字同样只写位数', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '卡号', '后缀', '金额'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'concat.xlsx'), [header, ['2026-11-01', 1111, 12, 100]], { 1111: CARD });
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount'],
+    mappingByField: { BillDate: '日期', Currency: ['卡号', '后缀'], 'Credit Amount': '金额' },
+    currencyMappings: [{ englishCode: 'USD', aliases: ['美元'] }],
+    expectedSourceHeaders: header
+  });
+  assert.deepEqual(mapped.issues.filter((issue) => issue.type === 'currency-unmapped').map((issue) => issue.rawValue), ['（19位数值）12']);
+  assert.ok(!JSON.stringify(mapped.issues).includes(CARD));
+});
+
+test('合并行：金额来源汇总组内各子行，户名 / 卡号等其余来源只跟随代表行', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '收入', '支出', '卡号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'merged.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', 40, 10, 1111],
+    ['2026-11-02', 'USD', 40, 2222, 3333]
+  ], {
+    1111: '6.2220212345678899E+18',
+    2222: '9.0071992547409952E+15',
+    3333: '6.2220212345678899E+18'
+  });
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'Payee CardNo'],
+    mappingByField: { BillDate: '日期', Currency: '币种', 'Payee CardNo': '卡号' },
+    amountMappingRules: { accountSourceField: '卡号' },
+    expectedSourceHeaders: header,
+    billSplitMerge: billSplitMerge({
+      billSplitRows: [
+        splitRow({ creditSourceField: '收入', mergedGroupSeq: 1 }),
+        splitRow({ seqNo: 2, debitSourceField: '支出', mergedGroupSeq: 1 })
+      ]
+    })
+  });
+  // 代表行（收入）不取收款卡号：合并行收款卡号为空，只由支出子行读到的卡号不提示；支出子行的金额参与净额，照常提示
+  //   （超出 9×10^15 的净额精度不在本次范围，只看方向）
+  assert.deepEqual(mapped.slice(1).map((row) => [row[2], row[3] !== '', row[4]]), [
+    ['30', false, ''],
+    ['', true, '']
+  ]);
+  assert.deepEqual(longNumberIssues(mapped).map((issue) => [issue.rowNumber, issue.cells]), [
+    [3, [{ sourceField: '支出', digitCount: 16 }]]
+  ]);
+});
+
+test('拆分子行覆盖币种时，底稿币种读到的长数字不提示；子行沿用底稿币种时提示', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '卡号', '收入'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'currency-override.xlsx'), [
+    header,
+    ['2026-11-01', 1111, 100]
+  ], { 1111: '6.2220212345678899E+18' });
+  const generate = (currencySourceField) => buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount'],
+    mappingByField: { BillDate: '日期' },
+    expectedSourceHeaders: header,
+    billSplitMerge: billSplitMerge({
+      reuseModuleMapping: false,
+      billSplitMappingByTargetField: { BillDate: '日期', Currency: '卡号' },
+      billSplitRows: [splitRow({ currencySourceField, creditSourceField: '收入' })]
+    })
+  });
+  const overridden = generate('__FIXED__:USD');
+  assert.deepEqual(overridden.slice(1).map((row) => row.slice(1, 3)), [['USD', '100']]);
+  assert.deepEqual(longNumberIssues(overridden), []);
+  const inherited = generate('');
+  assert.deepEqual(inherited.slice(1).map((row) => row.slice(1, 3)), [['6222021234567890000', '100']]);
+  assert.deepEqual(longNumberIssues(inherited).map((issue) => issue.cells), [[{ sourceField: '卡号', digitCount: 19 }]]);
+});
+
+test('特征值未筛出时字段留空：只记未筛出提示，不提示无法核对原值', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '金额', '附言'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'feature-miss.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', 100, 1111]
+  ], { 1111: '6.2220212345678899E+18' });
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'Remark'],
+    mappingByField: { BillDate: '日期', Currency: '币种', 'Credit Amount': '金额', Remark: '__FEATURE_FILTER__:f1' },
+    expectedSourceHeaders: header,
+    featureFilters: { f1: { id: 'f1', name: '单号', sourceField: '附言', separator: '', length: 4 } }
+  });
+  assert.deepEqual(mapped.slice(1).map((row) => row[4]), ['']);
+  assert.equal(mapped.issues.filter((issue) => issue.type === 'feature-value-unmatched').length, 1);
+  assert.deepEqual(longNumberIssues(mapped), []);
+});
+
+test('金额列按各取值点解读表头：按字段区分发生额的规则列、拆分按正负号拆分的列，列名以内部前缀开头时仍是金额列', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '方向', '__FIXED__:金额', '旧金额'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'rule-prefix.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', '收', 1111, 2222]
+  ], { 1111: SERIAL, 2222: '9.0071992547409952E+15' });
+  const byField = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount'],
+    // 按字段区分发生额生效时，保存在模板里的 Credit 映射不读、不提示
+    mappingByField: { BillDate: '日期', Currency: '币种', 'Credit Amount': '旧金额' },
+    expectedSourceHeaders: header,
+    amountSplitByField: {
+      enabled: true,
+      rules: [{ conditionField: '方向', conditionValue: '收', mappedField: '__FIXED__:金额', targetField: 'Credit Amount' }]
+    }
+  });
+  assert.deepEqual(byField.slice(1).map((row) => row[2]), ['9007199254740992']);
+  assert.deepEqual(longNumberIssues(byField).map((issue) => issue.cells), [[{ sourceField: '__FIXED__:金额', digitCount: 16 }]]);
+
+  const signedHeader = ['日期', '币种', '__FEATURE_FILTER__:金额'];
+  const signedPath = await writeXlsxWithLiterals(path.join(dir, 'signed-prefix.xlsx'), [
+    signedHeader,
+    ['2026-11-01', 'USD', 1111]
+  ], { 1111: SERIAL });
+  const signed = buildMappedRows({
+    inputFilePath: signedPath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount'],
+    mappingByField: { BillDate: '日期', Currency: '币种' },
+    expectedSourceHeaders: signedHeader,
+    billSplitMerge: billSplitMerge({ signedAmountSourceField: '__FEATURE_FILTER__:金额' })
+  });
+  assert.deepEqual(signed.slice(1).map((row) => row[2]), ['9007199254740992']);
+  assert.deepEqual(longNumberIssues(signed).map((issue) => issue.cells), [[{ sourceField: '__FEATURE_FILTER__:金额', digitCount: 16 }]]);
+});
+
+test('费用账单行按规则取发生额时只读支出规则：收入规则的列作流水号时按原文、不提示', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '方向', '手续费', '流水号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'fee-rules.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', '费', 5, 1111]
+  ], { 1111: SERIAL });
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'ChannelOrderNo'],
+    mappingByField: { BillDate: '日期', Currency: '币种', ChannelOrderNo: '流水号' },
+    expectedSourceHeaders: header,
+    billSplitMerge: billSplitMerge({
+      billSplitRows: [splitRow({ isFeeBill: true })],
+      billSplitAmountRules: [
+        { conditionField: '方向', conditionValue: '费', mappedField: '流水号', targetField: 'Credit Amount' },
+        { conditionField: '方向', conditionValue: '费', mappedField: '手续费', targetField: 'Debit Amount' }
+      ]
+    })
+  });
+  assert.deepEqual(mapped.slice(1).map((row) => row.slice(2)), [['', '5', SERIAL]]);
+  assert.deepEqual(longNumberIssues(mapped), []);
+});
+
+test('XLSX：注释里的 <v> 不算单元格的值；一个单元格有多个 <v> 时不还原并提示', async (t) => {
+  const dir = createTempDir(t);
+  const rows = [HEADER, ['2026-11-01', 'USD', 100, 1111, 2222]];
+  const commented = await writeXlsxWithLiterals(path.join(dir, 'commented.xlsx'), rows, { 1111: SERIAL, 2222: CARD },
+    (xml) => xml.replace(`<v>${SERIAL}</v>`, `<!-- 旧值 <v>9007199254740992</v> --><v>${SERIAL}</v>`));
+  const fromComment = map(commented);
+  assert.deepEqual(identifiers(fromComment), [[SERIAL, CARD]]);
+  assert.deepEqual(longNumberIssues(fromComment), []);
+
+  const doubled = await writeXlsxWithLiterals(path.join(dir, 'doubled.xlsx'), rows, { 1111: SERIAL, 2222: CARD },
+    (xml) => xml.replace(`<v>${SERIAL}</v>`, `<v>${SERIAL}</v><v>9007199254740992</v>`));
+  const fromDoubled = map(doubled);
+  assert.equal(identifiers(fromDoubled)[0][1], CARD);
+  assert.deepEqual(longNumberIssues(fromDoubled).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
+});
+
+test('币种 / 大账号由所选大账号决定时不读源字段、不提示；提示记下源字段写进的目标列', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '金额'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'selected.xlsx'), [
+    header,
+    ['2026-11-01', 1111, 100]
+  ], { 1111: '6.2220212345678899E+18' });
+  const generate = (selectedBigAccount) => buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount'],
+    mappingByField: { BillDate: '日期', MerchantId: '币种', Currency: '币种', 'Credit Amount': '金额' },
+    expectedSourceHeaders: header,
+    selectedBigAccount
+  });
+  const selected = generate({ merchantId: 'M1', currency: 'USD' });
+  assert.deepEqual(selected.slice(1).map((row) => row.slice(1, 3)), [['M1', 'USD']]);
+  assert.deepEqual(longNumberIssues(selected), []);
+  const unselected = generate(null);
+  assert.deepEqual(unselected.issues.filter((issue) => issue.type === 'long-number-unverified').map((issue) => issue.cells), [[
+    { sourceField: '币种', digitCount: 19, targetFields: ['MerchantId', 'Currency'] }
+  ]]);
+});
+
+test('合并行只汇总各子行发生额的来源：同一列在非代表子行作卡号时不提示', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '类型', '币种', '收入', '支出', '卡号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'merged-card.xlsx'), [
+    header,
+    ['2026-11-01', '拆分', 'USD', 20, 5, 1111]
+  ], { 1111: '6.2220212345678899E+18' });
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'Payee CardNo'],
+    // 卡号列同时是主映射（未命中过滤的行）的收入列
+    mappingByField: { BillDate: '日期', Currency: '币种', 'Credit Amount': '卡号', 'Payee CardNo': '卡号' },
+    amountMappingRules: { accountSourceField: '卡号' },
+    expectedSourceHeaders: header,
+    billSplitMerge: billSplitMerge({
+      billSplitRows: [
+        splitRow({ creditSourceField: '收入', mergedGroupSeq: 1 }),
+        splitRow({ seqNo: 2, debitSourceField: '支出', mergedGroupSeq: 1 })
+      ],
+      rowFilterRules: [{ seq: 1, conditions: [{ field: '类型', op: '等于', value: '拆分' }] }]
+    })
+  });
+  assert.deepEqual(mapped.slice(1).map((row) => row.slice(2)), [['15', '', '']]);
+  assert.deepEqual(longNumberIssues(mapped), []);
+});
+
+test('二进制 .xls：文件存的是双精度数，无法还原并提示', (t) => {
+  const dir = createTempDir(t);
+  const filePath = path.join(dir, 'biff.xls');
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    HEADER,
+    ['2026-11-01', 'USD', 100, Number(SERIAL), 'TEXT-1']
+  ]), 'Sheet1');
+  XLSX.writeFile(workbook, filePath, { bookType: 'biff8' });
+
+  const mapped = map(filePath);
+  assert.deepEqual(identifiers(mapped), [['9007199254740992', 'TEXT-1']]);
+  assert.deepEqual(longNumberIssues(mapped).map((issue) => [issue.rowNumber, issue.cells]), [
+    [2, [{ sourceField: '流水号', digitCount: 16 }]]
+  ]);
+});
+
+test('扩展名为 .xls 的 CSV / 制表符文本 / HTML，以及扩展名为 .csv 的 XLSX：长数字按原文', async (t) => {
+  const dir = createTempDir(t);
+  const files = {
+    'csv-as.xls': `\uFEFF${HEADER.join(',')}\r\n20261101,USD,100,${SERIAL},"${CARD}"\r\n`,
+    'tsv-as.xls': `\uFEFF${HEADER.join('\t')}\r\n20261101\tUSD\t100\t${SERIAL}\t${CARD}\r\n`,
+    'html-as.xls': `<html><head><meta charset="utf-8"></head><body><table>
+<tr>${HEADER.map((h) => `<td>${h}</td>`).join('')}</tr>
+<tr><td>2026年11月01日</td><td>USD</td><td>100</td><td>${SERIAL}</td><td style='mso-number-format:"\\@"'>${CARD}</td></tr>
+</table></body></html>`
+  };
+  Object.entries(files).forEach(([name, content]) => fs.writeFileSync(path.join(dir, name), content));
+  await writeXlsxWithLiterals(path.join(dir, 'xlsx-as.csv'), [HEADER, ['2026-11-01', 'USD', 100, 1111, 2222]], { 1111: SERIAL, 2222: CARD });
+
+  for (const name of [...Object.keys(files), 'xlsx-as.csv']) {
+    const mapped = map(path.join(dir, name));
+    assert.deepEqual(identifiers(mapped), [[SERIAL, CARD]], name);
+    assert.deepEqual(longNumberIssues(mapped), [], name);
+  }
+});
+
+test('真 CSV：="…"（两种写法）与首尾制表符在数据行还原；未加引号的 =公式不还原；旧模板的 ="…" 表头照常匹配', (t) => {
+  const dir = createTempDir(t);
+  const filePath = path.join(dir, 'excel-text.csv');
+  const header = ['="日期"', '币种', '金额', '流水号', '卡号'];
+  fs.writeFileSync(filePath, [
+    header.join(','),
+    `2026-11-01,USD,100,="${SERIAL}","=""${CARD}"""`,
+    `2026-11-02,USD,200,"\t${SERIAL}\t",=123`,
+    '2026-11-03,USD,300,="A""B",="="'
+  ].join('\r\n'));
+  // 旧版本从这份文件建的模板，表头按原值存为 =日期
+  const templateHeader = ['=日期', '币种', '金额', '流水号', '卡号'];
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: TARGETS,
+    mappingByField: { ...MAPPING, BillDate: '=日期' },
+    expectedSourceHeaders: templateHeader
+  });
+  assert.deepEqual(identifiers(mapped), [[SERIAL, CARD], [SERIAL, '=123'], ['A"B', '=']]);
+
+  // 不传选项的读取不变（模板导入表头、其他模块）
+  const plain = readRowsWithMetadata(filePath, templateHeader);
+  assert.deepEqual(plain.rows[1].slice(3), [`=${SERIAL}`, `="${CARD}"`]);
+  assert.deepEqual(plain.rows[2].slice(3), [`\t${SERIAL}\t`, '=123']);
+  // 表头行仍是原值
+  const exact = readRowsWithMetadata(filePath, templateHeader, { exactSourceText: true });
+  assert.deepEqual(exact.rows[0], templateHeader);
+});
+
+test('不传 exactSourceText 时读取结果不变（长数字仍为读取库的数字）；readRows 传入时只另附原文', async (t) => {
+  const dir = createTempDir(t);
+  const xlsxPath = await writeXlsxWithLiterals(path.join(dir, 'plain.xlsx'), [HEADER, ['2026-11-01', 'USD', 100, 1111, 2222]], { 1111: SERIAL, 2222: CARD });
+  const htmlPath = path.join(dir, 'plain.xls');
+  fs.writeFileSync(htmlPath, `<table><tr>${HEADER.map((h) => `<td>${h}</td>`).join('')}</tr><tr><td>20261101</td><td>USD</td><td>100</td><td>${SERIAL}</td><td>${CARD}</td></tr></table>`);
+  for (const filePath of [xlsxPath, htmlPath]) {
+    const row = readRows(filePath)[1];
+    assert.equal(typeof row[3], 'number', filePath);
+    assert.equal(isUnverifiedLongNumber(row[3]), true, filePath);
+    // 大账号识别的读取：值不变，另附原文（定位表头后由 main.js 用于账户信息行）
+    const exactRows = readRows(filePath, { blankrows: true, exactSourceText: true });
+    assert.equal(exactRows[1][3], row[3], filePath);
+    assert.deepEqual(Array.from(exactRows.sourceText.get(1)), [[3, SERIAL], [4, CARD]], filePath);
+  }
+});
