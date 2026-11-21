@@ -41,6 +41,9 @@ const {
   normalizeCell,
   normalizeFeatureFilterList,
   normalizeFeeAmountFormula,
+  normalizeFeeFieldMappings,
+  validateFeeFieldMappings,
+  isFeeFieldMappingTemplateFieldExcluded,
   normalizeRowFilterRules,
   parseFeatureFilterToken,
   PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
@@ -136,7 +139,7 @@ const CONSTANTS = loadMainConstants([
   'DUPLICATE_ROW_FILTER_ENABLED_OPTION', 'PREPROCESS_FIELDS',
   'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS', 'FILENAME_MAPPING_TEMPLATE_ID', 'MISSING_ENUM_MESSAGE',
   'LEGACY_ORIENTED_MAPPINGS_MESSAGE',
-  'SUPPORTED_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION'
+  'SUPPORTED_BUNDLE_VERSION', 'FEE_BILL_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION'
 ]);
 const TOGGLE = CONSTANTS.PREPROCESS_ROW_FILTER_MAPPING_FIELD;
 
@@ -162,6 +165,9 @@ function createMain(database) {
     path,
     normalizeCell,
     normalizeFeeAmountFormula,
+    normalizeFeeFieldMappings,
+    validateFeeFieldMappings,
+    isFeeFieldMappingTemplateFieldExcluded,
     normalizeBillSplitRowFilterRules,
     normalizeRowFilterRules,
     validateFeeAmountFormula,

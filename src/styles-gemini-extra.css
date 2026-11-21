@@ -2752,6 +2752,61 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
 
 .bill-split-rows-footer { padding: 14px 28px 18px; }
 
+/* v3.2.21 发生额取值两项并排、费用账单设置（发生额取值特殊处理 / 字段映射特殊处理） */
+.bill-split-sub-row-pair { gap: 12px 40px; }
+.bill-split-sub-item {
+  display: inline-flex; align-items: center; gap: 12px;
+  flex-wrap: nowrap; min-width: 0;
+}
+.bill-split-sub-item + .bill-split-sub-item > label:first-child,
+.bill-split-sub-row .bill-split-target-seq-label { min-width: 0; white-space: nowrap; }
+.bill-split-fee-field-mapping-checkbox {
+  width: 16px; height: 16px; margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.bill-split-fee-field-mapping-checkbox:disabled { cursor: not-allowed; }
+
+/* v3.2.21 字段映射特殊处理弹窗：「新增模板字段」在左，每行 模板字段 [下拉] 映射字段 [下拉] [自己输入时的输入框] */
+.bill-split-fee-field-mapping-card { width: min(100%, 960px); }
+/* 内容放得下时居中；超出 60vh 时从顶部开始滚动（safe），首行与「新增模板字段」始终可达 */
+.bill-split-fee-field-mapping-body {
+  display: flex; align-items: safe center;
+  min-height: 180px; max-height: 60vh; overflow-y: auto;
+  padding: 24px 28px;
+}
+.bill-split-fee-field-mapping-editor {
+  display: flex; align-items: flex-start; justify-content: safe center; gap: 12px;
+  width: 100%;
+}
+.bill-split-fee-field-mapping-add-btn {
+  flex: 0 0 auto;
+  height: 40px;
+  color: var(--primary);
+  white-space: nowrap;
+}
+.bill-split-fee-field-mapping-rows {
+  display: flex; flex-direction: column; gap: 10px;
+  min-width: 0;
+}
+.bill-split-fee-field-mapping-item {
+  display: flex; align-items: center; gap: 10px;
+}
+.bill-split-fee-field-mapping-label {
+  flex: 0 0 auto;
+  line-height: 40px;
+  font-size: 14px; font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+}
+.bill-split-fee-field-mapping-item .mapping-select {
+  width: 200px; min-width: 0; height: 40px;
+  padding: 0 26px 0 12px;
+  background-position: right 10px center;
+  text-overflow: ellipsis;
+}
+.bill-split-fee-field-mapping-item .bill-split-fee-field-mapping-input { width: 180px; }
+
 /* v3.2.19 过滤规则设置（根据字段值过滤账单 / 原始账单预处理共用；沿用场景管理「账单类型」的 scenario-config-* 样式） */
 .row-filter-rules-card .scenario-config-multi-wrap { min-width: 0; }
 /* 场景弹窗靠「复制场景」把×推到右侧并取消了×的 auto；本弹窗没有该组，×恢复靠右 */

@@ -36,6 +36,9 @@ const {
   normalizeCell,
   normalizeFeatureFilterList,
   normalizeFeeAmountFormula,
+  normalizeFeeFieldMappings,
+  validateFeeFieldMappings,
+  isFeeFieldMappingTemplateFieldExcluded,
   normalizeLogicValueFields,
   normalizeRowFilterRules,
   parseFeatureFilterToken,
@@ -113,7 +116,7 @@ const CONSTANTS = loadMainConstants([
   'DUPLICATE_ROW_FILTER_ENABLED_OPTION', 'PREPROCESS_FIELDS',
   'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS', 'FILENAME_MAPPING_TEMPLATE_ID', 'MISSING_ENUM_MESSAGE',
   'LEGACY_ORIENTED_MAPPINGS_MESSAGE',
-  'SUPPORTED_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION'
+  'SUPPORTED_BUNDLE_VERSION', 'FEE_BILL_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION'
 ]);
 const LOGIC = CONSTANTS.LOGIC_VALUE_MAPPING_FIELD;
 
@@ -140,6 +143,9 @@ function createMain(database) {
     path,
     normalizeCell,
     normalizeFeeAmountFormula,
+    normalizeFeeFieldMappings,
+    validateFeeFieldMappings,
+    isFeeFieldMappingTemplateFieldExcluded,
     normalizeBillSplitRowFilterRules,
     normalizeRowFilterRules,
     validateFeeAmountFormula,
@@ -454,7 +460,7 @@ function verifyBundle(dir, database, main, template) {
   assertEq([
     main.resolveTemplateBundleVersion([{ mappings: [] }]),
     main.resolveTemplateBundleVersion([entry])
-  ], [CONSTANTS.BASE_BUNDLE_VERSION, CONSTANTS.SUPPORTED_BUNDLE_VERSION], '⑤ 用到逻辑取值时写 v8，未用到时版本不变');
+  ], [CONSTANTS.BASE_BUNDLE_VERSION, CONSTANTS.FEE_BILL_BUNDLE_VERSION], '⑤ 用到逻辑取值时写 v8，未用到时版本不变');
 
   const bundlePath = path.join(dir, 'bundle.json');
   fs.writeFileSync(bundlePath, JSON.stringify({ bundleVersion: main.resolveTemplateBundleVersion([entry]), channels: [], templates: [entry] }), 'utf8');

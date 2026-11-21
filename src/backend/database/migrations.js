@@ -251,6 +251,16 @@ function ensureBillSplitRowFilterSupport(db) {
   }
 }
 
+// v3.2.21：费用账单「字段映射特殊处理」的勾选状态与设置（JSON；'' 表示未设置）。
+function ensureBillSplitFeeFieldMappingSupport(db) {
+  if (!hasColumn(db, 'template_bill_split_meta', 'fee_field_mapping_enabled')) {
+    db.exec('ALTER TABLE template_bill_split_meta ADD COLUMN fee_field_mapping_enabled INTEGER NOT NULL DEFAULT 0;');
+  }
+  if (!hasColumn(db, 'template_bill_split_meta', 'fee_field_mappings_json')) {
+    db.exec("ALTER TABLE template_bill_split_meta ADD COLUMN fee_field_mappings_json TEXT NOT NULL DEFAULT '';");
+  }
+}
+
 // v3.2.19：模板级「原始账单预处理 → 过滤账单」的过滤规则（JSON；'' 表示未设置）。开关存为映射行，规则随映射【保存】落库。
 function ensureTemplatePreprocessRowFilterSupport(db) {
   if (!hasColumn(db, 'templates', 'preprocess_row_filter_rules_json')) {
@@ -3618,6 +3628,7 @@ module.exports = {
   ensureBillSplitTargetSeqSupport,
   ensureBillSplitFeeBillSupport,
   ensureBillSplitRowFilterSupport,
+  ensureBillSplitFeeFieldMappingSupport,
   ensureParentTemplateSupport,
   ensureStatementChannelSupport,
   hasPendingStatementChannelMigration,

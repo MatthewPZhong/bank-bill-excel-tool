@@ -12,6 +12,7 @@ const {
   ensureBillSplitTargetSeqSupport,
   ensureBillSplitFeeBillSupport,
   ensureBillSplitRowFilterSupport,
+  ensureBillSplitFeeFieldMappingSupport,
   ensureParentTemplateSupport,
   ensureStatementChannelSupport,
   hasPendingStatementChannelMigration,
@@ -240,6 +241,7 @@ class AppDatabase {
     this.ensureBillSplitTargetSeqSupport();
     this.ensureBillSplitFeeBillSupport();
     this.ensureBillSplitRowFilterSupport();
+    this.ensureBillSplitFeeFieldMappingSupport();
     this.ensureParentTemplateSupport();
     this.ensureTemplateFilenameFixedFieldSupport();
     this.ensureTemplateFeatureFilterSupport();
@@ -603,6 +605,10 @@ class AppDatabase {
 
   ensureBillSplitRowFilterSupport() {
     return ensureBillSplitRowFilterSupport(this.db);
+  }
+
+  ensureBillSplitFeeFieldMappingSupport() {
+    return ensureBillSplitFeeFieldMappingSupport(this.db);
   }
 
   ensureParentTemplateSupport() {
@@ -977,6 +983,10 @@ class AppDatabase {
 
   saveBillSplitMeta(templateId, meta) {
     return templateRepository.saveBillSplitMeta(this.db, templateId, meta);
+  }
+
+  restoreBillSplitEditableConfig(templateId, snapshot) {
+    return templateRepository.restoreBillSplitEditableConfig(this.db, templateId, snapshot);
   }
 
   getSetting(settingKey) {
