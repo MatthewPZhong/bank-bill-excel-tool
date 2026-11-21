@@ -303,6 +303,31 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await js(`statementFixture.next.import={status:'error',message:'测试错误',errorCode:'FILE_READ',detailLines:['不弹窗'],errorReportReady:true};statementFixture.controller.commands.importFile()`); await tick();
     assert.equal(await js('statementFixture.alerts.length'), 1);
   });
+  // v3.2.21：渠道同一账户命中余额方式不同的子模板时整批阻断：导入、未开始的拒绝（完成大账号选择时发现）与「导出全部」都逐账户列出
+  await test('渠道同一账户命中不同余额方式时，导入、未开始的拒绝与导出都列出逐账户明细', async () => {
+    await setup();
+    const message = '渠道「招商银行-上海」下同一账户命中了余额方式不同的子模板，无法生成余额，请分开导入或在映射关系管理中统一';
+    const lines = ['账户 M201（USD）：CMB-SH（取账单余额列）、招商银行-上海（通过发生额计算）'];
+    const result = (extra) => JSON.stringify({ status: 'error', message, errorCode: 'CHANNEL_BALANCE_MODE_MISMATCH', detailLines: lines, errorReportReady: false, ...extra });
+    await js(`statementFixture.next.import=${result({})};statementFixture.controller.commands.importFile()`); await tick();
+    assert.deepEqual(await js('statementFixture.alerts'), [`${message}\n${lines[0]}`]);
+    await js(`statementFixture.next.import=${result({ preservesSession: true })};statementFixture.controller.commands.importFile()`); await tick();
+    assert.match(await js('statementFixture.top().textContent'), /账户 M201（USD）：CMB-SH（取账单余额列）/);
+    await js(`statementFixture.host.closeTop();`); await tick();
+    await js(`statementFixture.next.balance=${result({})};statementFixture.controller.commands.exportBalance()`); await tick();
+    assert.deepEqual(await js('statementFixture.alerts.slice(1)'), [`${message}\n${lines[0]}`]);
+    // 出余额的子模板有交易缺账单日期或 MerchantId：同样逐行列出
+    const missing = { status: 'error', errorCode: 'CHANNEL_BALANCE_ROWS_INCOMPLETE', message: '渠道「招商银行-上海」出余额的子模板有交易缺少账单日期或 MerchantId', detailLines: ['文件「b.xlsx」（子模板「CMB-SH」）第2行：缺少 MerchantId（账单日期：2026-09-01）'], errorReportReady: false };
+    await js(`statementFixture.next.balance=${JSON.stringify(missing)};statementFixture.controller.commands.exportBalance()`); await tick();
+    assert.deepEqual(await js('statementFixture.alerts.slice(2)'), [`${missing.message}\n${missing.detailLines[0]}`]);
+    // 离开账单页期间导入失败返回：回到本页时仍弹窗列出明细
+    await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.import=statementFixture.pending;
+      statementFixture.controller.commands.importFile();statementFixture.controller.leave();`); await tick();
+    await js(`statementFixture.pending.resolve(${JSON.stringify({ ...missing, errorReportReady: true })});`); await tick();
+    assert.equal(await js('statementFixture.alerts.length'), 3, '离页期间不弹窗');
+    await js(`statementFixture.controller.enter();`); await tick();
+    assert.deepEqual(await js('statementFixture.alerts.slice(3)'), [`${missing.message}\n${missing.detailLines[0]}`]);
+  });
   await test('导入双击只有一个IPC，离页期间不渲染；重进消费真实在途结果且不新增sessionStatus', async () => {
     await setup();
     await js(`statementFixture.pending=statementFixture.defer();statementFixture.next.import=statementFixture.pending;document.getElementById('importFileBtn').click();document.getElementById('importFileBtn').click();statementFixture.controller.leave();`);

@@ -35,16 +35,21 @@ v3.2.15 的决策 D2 要求同一渠道下各子模板的余额方式（不出�
 1. 分组规则不变：命中同一渠道子模板的文件合为一组，输出一份明细、一份余额，文件名、`Channel` 列、余额银行名称与所在地、种子与余额附加值仍按渠道名。
 2. 组内子模板余额方式都相同时，行为与 v3.2.20 完全一致。
 3. 余额方式不同时，按账户分别处理：
-   - 账户键为明细行的 MerchantId + 币种（与余额推导的分组口径相同）。
+   - 账户键为明细行的 MerchantId + 币种（与余额推导的分组口径相同）；判断同一账户是否命中不同方式时币种不区分大小写（`usd` 与 `USD` 视为同一账户）。
+   - 收支都为空或 0 的行不进明细也不进余额，不算命中该子模板；收支同时有值的行照常参与判断（这类行本身会让生成报错）。
    - 取账单余额列的账户：按账单余额列逐日校验，规则、提示与补录同 v3.2.20 的「取账单余额列」。
    - 通过发生额计算的账户：按种子与发生额推算，首次补录、断档提醒与“不补录”同 v3.2.20 的「通过发生额计算」。
-   - 不出余额的子模板：其行只进明细，不进余额账单，不触发补录提示；MerchantId 为空也不因余额而报错。
-   - 组内第一个子模板不出余额时，其他子模板的账户照常出余额。
-4. 同一账户在同一批里出现在余额方式不同的子模板中（含“不出余额”与另一种方式），整批阻断，不产出任何文件，提示：渠道「X」下同一账户命中了余额方式不同的子模板，请分开导入或在映射关系管理中统一。明细每个账户一行：`账户 <MerchantId>（<币种>）：<子模板>（<余额方式>）、…`。
+   - 不出余额的子模板：其行只进明细，不进余额账单，不触发补录提示；MerchantId 为空或未映射也不因余额而报错。
+   - 组内第一个子模板不出余额时，其他子模板的账户照常出余额；出余额的子模板的交易行（收支不都为空或 0）须有账单日期与 MerchantId（按各行实际取到的值核对，拆分行用独立映射时同样适用），否则生成前拦下（`CHANNEL_BALANCE_ROWS_INCOMPLETE`）、弹窗逐行列出文件、子模板、行号与缺的字段、不产出文件；余额推导会跳过这类行，放行会让交易进了明细、余额与种子却漏算。同一行缺两项时一并列出；拆分出的多笔交易来自同一原文件行（在明细中相邻）时合并为一行；只为展示的行保留诊断，总数照常累计；整批最多逐行列出 200 行（按原文件行计，多组规划时各渠道共用同一额度，额度用完后只计数、不再构造逐行明细），其余汇总为一行。错误报告与活动日志用本组第几个文件代替文件名（文件名可能含账号）；离开账单页期间返回的这类结果，回到本页时照常弹窗列出明细。
+   - 出余额的子模板只有收支都为空或 0 的行时不生成余额，明细照常。
+4. 同一账户在同一批里出现在余额方式不同的子模板中（含“不出余额”与另一种方式），整批阻断，不产出任何文件，提示：渠道「X」下同一账户命中了余额方式不同的子模板，请分开导入或在映射关系管理中统一。明细每个账户一行：`账户 <MerchantId>（<币种>）：<子模板>（<余额方式>）、…`。一批里多个渠道都有冲突时一并列出（提示列出各渠道名，明细每行前加 `渠道「X」`），不在第一个渠道处停下。界面弹窗列出明细。
 5. 阻断时机：
    - 导入网银明细：渠道组校验时（大账号选择与生成之前）。此时尚未确定账号的行（多大账号模板在选择大账号之前）不参与判断；
-   - 选择大账号后进入生成、补录后重算：生成前再判断一次，在写出文件、替换会话之前拦下；
-   - 「导出全部」：生成任何组之前。
+   - 账号注入后才确定时：完成大账号选择、直接生成（只有一个大账号时自动确定）都在预检阶段按注入后的账号再判断一次；
+   - 预检阶段拦下的（导入网银明细、完成大账号选择）按“未开始”拒绝：只弹窗提示，保留上一批的导出与补录入口，须重新导入；
+   - 补录后重算与其他生成入口：批次构建时兜底判断，汇总各渠道的冲突账户，在写种子、写出文件、替换会话之前拦下；
+   - 多组规划（导入多组生成、补录重算、「导出全部」另存为前的预检与执行）先校验全部组，再写出任何文件或种子（「导出全部」执行时只扫描校验、不复制明细，通过后逐组构建批次写出，写出时复用该组同一阶段校验得到的方案，不重复解析；其余规划与「导出全部」执行一旦确定整批失败，后面的组只校验渠道余额、不做写出检查、不构建或保留批次、不累计导出文件名用的日期；另存为框关闭后先复检渠道余额（只在仍需重新生成的按文件名映射会话中、只看多个子模板的渠道组、只扫描不复制，`recheckStatementExportChannelBalance`），不通过时在开始任务之前带逐行明细拒绝（不预留输出、不进入执行），之后到任务开始之间的变化仍由 beforeStart 按“会话已变化”拒绝；整批失败后单模板组不可能补充渠道余额诊断，不再构建生成配置；分组时各组的模板配置仍按组读取（与通过时相同，各组共用一份枚举值），不另拆分）；各渠道的余额方式冲突与缺字段的行分别汇总，冲突优先报出（冲突的渠道须分开导入或统一方式），没有冲突时各渠道缺字段的行一并列出；其他组的业务校验错误（如映射缺字段或失效、单独成组的文件没有有效账单日期）暂存，不遮住渠道余额错误，没有渠道余额错误时照常报出第一个；渠道的生成配置报错（如首个子模板映射失效）时，补录重算与「导出全部」的预检、执行仍按会话中已映射的明细与各子模板当前的余额方式校验该渠道的账户冲突与出余额交易缺字段（`collectGroupBalanceIssuesWithoutConfig`，与 `resolveEntryBalancePlan` 同口径、共用逐行诊断额度，不依赖失效的映射），与其他渠道一并列出（导入多组生成由导入预检的渠道组校验覆盖）；源文件在确认期间变化、系统异常等其他错误立即抛出，按原路径处理；导入多组生成在整批失败后，只有余额方式不同的渠道组再注入账号校验（只重建账号取自所选大账号的条目，其余沿用原条目），其余组不再重建条目。写出前会拦下的检查（收支同时有值、账单日期、出余额时须映射 MerchantId）同样在任何组写出文件、种子或移除旧会话条目之前对全部组做完（T10）；导入网银明细时逐文件映射阶段的错误（如模板未映射 BillDate）沿用 v3.2.20，在渠道组校验之前报出，不参与这里的优先级；
+   - 「导出全部」：生成任何组之前（另存为框之前）。已生成并缓存的余额文件（当前批次或补录重算后的“全部”）直接导出，不按之后修改的映射重新判断：缓存文件是生成当时按有效配置算出的，与修改其他映射后导出缓存的现有行为一致；之后再导入或重新生成时按当时的映射判断。
 6. 跨批次：同一账户在不同批次中改由另一种余额方式的子模板导入时不阻断，与普通模板改了余额方式后再导入一致（取上一条种子作锚点；工具生成的种子按其生成方式扣回附加值）。
 
 ## 4. 技术方案
@@ -52,12 +57,15 @@ v3.2.15 的决策 D2 要求同一渠道下各子模板的余额方式（不出�
 | 编号 | 方案 | 依据 |
 | --- | --- | --- |
 | T1 | 删除保存映射时的 `findSaveMappingsBalanceModeMismatch` 与模板包导入后的 `collectChannelBalanceModeWarnings`；`statement-channel-identity.js` 的 `findBalanceModeMismatch` 随之删除 | D1、D4 |
-| T2 | `statement-generation-business.js` 新增纯函数 `resolveAccountBalanceModes(entries)`，按条目（`{ templateName, balanceMode, detailRows }`）收集账户 → 余额方式；账户键与 `deriveBalanceRecords` 共用同一函数；跳过 MerchantId 为空或账单日期为空的行；返回 `{ modeByAccount, conflicts }` | D2、D3；合并后的明细行不带来源子模板，只能在合并前按条目推导 |
+| T2 | `statement-generation-business.js` 新增纯函数 `resolveAccountBalanceModes(entries)`，按条目（`{ templateName, balanceMode, detailRows }`）收集账户 → 余额方式；账户键与 `deriveBalanceRecords` 共用同一函数；跳过 MerchantId 为空、账单日期为空，以及收支都为空或 0 的行（`isZeroOrBlankAmount`，与 `buildDetailExportRows` 跳过的行同口径；收支同时有值的行照常参与）；冲突按币种不区分大小写比较，`modeByAccount` 仍按原样账户键（不改种子查找口径）；返回 `{ modeByAccount, conflicts }` | D2、D3；合并后的明细行不带来源子模板，只能在合并前按条目推导 |
 | T3 | `deriveBalanceRecords` 新增可选参数 `modeByAccount`：给出时按账户取方式（解析 Balance、走计算或校验分支、附加值叠加、`balanceSource`、种子 `generationMethod`），只有存在取账单余额列的账户时才要求 Balance 列；不给时行为不变。待确认的断档、不一致、替换仍在一次调用内汇总抛出 | D2 |
-| T4 | `main.js` 的批次构建包装层 `buildPreparedStatementBatchFromEntries` 统一接入（导入多组生成、「导出全部」、补录重算、导出预览都经过它）：条目来自多个模板且余额方式不止一种时，先按 T2 判断冲突（有则抛 `CHANNEL_BALANCE_MODE_MISMATCH`），再在批次上附加 `balanceModeByAccount`、`balanceDetailRows`（只合并不是“不出余额”的条目）并据此设置 `balanceRequested` | D2、D3；在 `generateMultiTemplateGroupFiles` 规划阶段抛出，未产生副作用 |
-| T5 | `generateStatementFiles` 在批次带 `balanceDetailRows` 时，余额相关计算（`scanBalanceSeedStatus`、`deriveBalanceRecords`）只用这部分行，经同样的 `buildDetailExportRows` 过滤；明细文件仍按全部行输出 | D2 |
-| T6 | 导入与「导出全部」的渠道组预检改为 `findGenerationGroupBalanceModeConflicts(group)`：按条目各自子模板的余额方式做 T2 判断，位置不变 | D3 |
+| T4 | `main.js` 的批次构建包装层 `buildPreparedStatementBatchFromEntries` 统一接入（导入多组生成、「导出全部」、补录重算、导出预览都经过它）：条目来自多个模板且余额方式不止一种时，先按 T2 判断冲突（有则抛 `CHANNEL_BALANCE_MODE_MISMATCH`，`generateMultiTemplateGroupFiles` 与补录重算的 `planVirtualTemplateBalanceRegeneration` 汇总各组后一并抛出），再核对出余额条目的交易行都有账单日期与 MerchantId（`inspectBalanceEntryRows`），然后在批次上附加 `balanceModeByAccount`；组内有“不出余额”的条目时另附 `balanceDetailRows`（只合并其余条目），`balanceRequested` 按出余额条目是否有交易行（收支不都为空或 0） | D2、D3；在 `generateMultiTemplateGroupFiles` 规划阶段抛出，未产生副作用 |
+| T5 | `generateStatementFiles` 在批次带 `balanceDetailRows` 时，余额相关计算（`scanBalanceSeedStatus`、`deriveBalanceRecords`）只用这部分行，经同样的 `buildDetailExportRows` 过滤；明细文件仍按全部行输出。批次带 `balanceModeByAccount` 时不再按组配置要求 MerchantId 映射（T4 已按子模板核对） | D2 |
+| T6 | 导入与「导出全部」（执行与另存为前的导出预检）的渠道组预检改为 `collectGenerationGroupBalanceModeConflicts(groups)`，汇总各渠道组的 `findGenerationGroupBalanceModeConflicts(group)`，位置不变；完成大账号选择的预检与直接生成的导入预检用 `findResolvedEntriesBalanceModeConflicts`：只把余额方式不同的渠道组的条目注入账号后判断（`applyBigAccountAssignmentsToFileEntries` 的 `onlyEntries`、按子集重建）；复核只看导入预检时记下位置的、余额方式不同的渠道组的条目（`listBalanceModeMixedEntryIndexes`，在步骤 3.5 的冲突检查时顺带记下，暂存在大账号选择上下文中，暂存时复制保留），普通模板与其他渠道不再分组、读配置，完成大账号选择时不参与复核的文件按选择窗口已识别的账号块计数（`countSelectionRowsByFile`），不再扫描；直接生成时只注入 MerchantId 取所选大账号的条目（`entryUsesSelectedBigAccount`），其余沿用原行，只复核含这类条目的渠道（同渠道未变的条目留作比对对象；直接生成时复用步骤 3.5 记下的各条目所属渠道与余额方式，只替换注入后的明细行，不再分组、读取模板配置；完成大账号选择时先按分组键筛出这些渠道再读取配置），没有这类条目时不复核；同次预检要查重时整批注入一次，两项检查共用 | D3 |
 | T7 | 条目的余额方式：条目模板就是组配置模板时按组配置（`balanceRequested ? balanceMode : 'none'`），否则按库中该模板当前映射（`resolveTemplateBalanceMode`）；模板已不存在时退回组配置 | 与 v3.2.15 校验取配置的口径一致 |
+| T8 | 界面：`CHANNEL_BALANCE_MODE_MISMATCH` 的结果带 `detailLines`（导入、选择大账号与补录的执行阶段改用 `createDetailedErrorResult`，导出预检保留 `detailLines`）；renderer 与 `CURRENCY_BIG_ACCOUNT_*` 一样弹窗列出明细（`CHANNEL_BALANCE_ROWS_INCOMPLETE` 同样）；“未开始”的拒绝（主页面与大账号选择窗口、重复账单确认窗口）弹窗同样附上明细，且不写活动日志；补录、断档“不补录”、余额不一致确认、种子替换、重复账单确认续跑与大账号选择完成后的报错不再重复弹出摘要；补录类窗口遇到这类终态错误（主进程已清除待补录提示）时关闭 | D3 |
+| T9 | 落盘：冲突明细含完整银行账号，只用于界面展示。错误对象另带 `persistedDetailLines`（每个渠道一行：冲突账户数与涉及的子模板），`createErrorResult` 写错误报告与活动日志时用它，不写账号 | D3；不在本地日志中留存账号 |
+| T10 | `statement-generation.js` 新增只读校验 `assertStatementBatchWritable`（已构建的批次）与 `assertStatementEntriesWritable`（条目加 `resolveEntryBalancePlan` 的方案）：与 `generateStatementFiles` 写出前会抛出的检查同口径、同顺序（收支同时有值、账单日期、出余额时组配置须映射 MerchantId），一次遍历只记结论，不复制明细行、不收集行引用或日期；收支同时有值的行只记生成时报错同样列出的诊断（行号、收支值），按各段起点定位合并后的行元数据，不展平；账单日期的必填口径（`requireBillDateIndex`、`parseRequiredBillDateCell`）与 `parseRequiredBillDates` 共用。导入多组生成、补录重算在规划阶段逐组调用，「导出全部」执行时在校验阶段调用 | 多组生成不在前几组已写出明细、余额与种子之后才失败；基线既有问题，与渠道余额方式无关，随多组规划一并修正 |
 
 ## 5. 验收
 

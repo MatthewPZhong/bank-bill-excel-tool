@@ -1141,7 +1141,9 @@ test('filename 多模板先完成全部稳定读取，再产生输出或 session
       'rebuildMatchedTemplateFileEntries',
       'buildPreparedStatementBatchFromEntries',
       'removeStatementSessionEntriesByFilePath',
-      'generateStatementFiles'
+      'generateStatementFiles',
+      'assertStatementBatchWritable',
+      'FileValidationError'
     ],
     [
       groupStatementEntriesForGeneration,
@@ -1166,7 +1168,9 @@ test('filename 多模板先完成全部稳定读取，再产生输出或 session
       },
       ({ fileEntries }) => ({ detailRows: fileEntries }),
       () => { sessionMutationCount += 1; },
-      () => { outputCount += 1; return {}; }
+      () => { outputCount += 1; return {}; },
+      () => {},
+      require('../../../src/backend/file-service').FileValidationError
     ]
   );
   assert.throws(() => generateGroups({

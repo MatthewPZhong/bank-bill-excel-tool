@@ -23,6 +23,7 @@ const {
   writeBalanceWorkbook,
   writeWorkbookRows
 } = require('../backend/file-service');
+const { isZeroOrBlankAmount } = require('../backend/file-service/normalizers');
 const {
   cloneRowsWithMetadata,
   getStatementSessionEntries,
@@ -31,7 +32,10 @@ const {
 } = require('./statement-session');
 const {
   createStatementGenerationHelpers,
+  noValidBillDateError,
+  parseRequiredBillDateCell,
   pendingBalanceSeedAccounts,
+  requireBillDateIndex,
   statementOutputName
 } = require('./statement-generation');
 
@@ -62,18 +66,15 @@ function buildFieldIndexMap(headerRow) {
   return result;
 }
 
+// 必填口径与写出前的只读校验共用（见 statement-generation.js 的 requireBillDateIndex、parseRequiredBillDateCell）
 function parseRequiredBillDates(detailRows) {
-  const index = buildFieldIndexMap(detailRows[0] || []).get('BillDate');
-  if (index === undefined) throw new FileValidationError('FILE_READ', '当前模板必须映射 BillDate 字段');
+  const index = requireBillDateIndex(detailRows[0] || []);
   const dates = [];
   for (const row of detailRows.slice(1)) {
-    const raw = row[index];
-    if (!normalizeCell(raw)) continue;
-    const parsed = parseDateValue(raw);
-    if (!parsed) throw new FileValidationError('FILE_READ', `账单日期存在无效值：${normalizeCell(raw)}`);
-    dates.push(formatDateLabel(parsed));
+    const parsed = parseRequiredBillDateCell(row[index]);
+    if (parsed) dates.push(formatDateLabel(parsed));
   }
-  if (!dates.length) throw new FileValidationError('FILE_READ', '导入文件中未找到有效的 BillDate');
+  if (!dates.length) throw noValidBillDateError();
   return dates;
 }
 
@@ -272,8 +273,12 @@ const BALANCE_MODE_ORDER = Object.freeze(['none', 'statement', 'calculated']);
 
 // v3.2.21（D2、D3）：渠道组内子模板余额方式不同时，按条目（各自子模板的余额方式）收集账户 → 余额方式。
 //   entries：[{ templateName, balanceMode: 'none' | 'statement' | 'calculated', detailRows }]
-//   同一账户出现在不同余额方式的条目中即为冲突；MerchantId 或账单日期为空的行无法归属账户，跳过
-//   （如多大账号模板在选择大账号之前的临时行），选定账号后生成前再判断一次。
+//   同一账户出现在不同余额方式的条目中即为冲突。不参与判断的行：
+//   - MerchantId 或账单日期为空：无法归属账户（如多大账号模板在选择大账号之前的临时行），选定账号后生成前再判断一次；
+//   - 收支都为空或 0 的行（口径同 buildDetailExportRows 跳过的行）：不进明细也不进余额。收支同时有值的行照常参与，
+//     它会让生成报错，不能因跳过它而放行冲突、让多组生成先写出前几组。
+//   判断冲突时币种不区分大小写（同一账户的 usd / USD 是同一条余额链）；modeByAccount 仍按余额分组的原样账户键
+//   （balanceAccountKey），不改变种子查找口径。
 function resolveAccountBalanceModes(entries = []) {
   const accounts = new Map();
   for (const entry of Array.isArray(entries) ? entries : []) {
@@ -283,15 +288,24 @@ function resolveAccountBalanceModes(entries = []) {
     const merchantIndex = indexes.get('MerchantId');
     const dateIndex = indexes.get('BillDate');
     const currencyIndex = indexes.get('Currency');
+    const creditIndex = indexes.get('Credit Amount');
+    const debitIndex = indexes.get('Debit Amount');
     if (merchantIndex === undefined || dateIndex === undefined) continue;
     for (const row of rows.slice(1)) {
       if (!Array.isArray(row)) continue;
       const merchantId = normalizeCell(row[merchantIndex]);
       if (!merchantId || !normalizeCell(row[dateIndex])) continue;
+      if (
+        creditIndex !== undefined && debitIndex !== undefined
+        && isZeroOrBlankAmount(row[creditIndex]) && isZeroOrBlankAmount(row[debitIndex])
+      ) continue;
       const currency = currencyIndex === undefined ? '' : normalizeCell(row[currencyIndex]);
-      const key = balanceAccountKey(merchantId, currency);
-      if (!accounts.has(key)) accounts.set(key, { merchantId, currency, modes: new Set(), templates: new Map() });
-      const account = accounts.get(key);
+      const compareKey = balanceAccountKey(merchantId, currency.toUpperCase());
+      if (!accounts.has(compareKey)) {
+        accounts.set(compareKey, { merchantId, currency, keys: new Set(), modes: new Set(), templates: new Map() });
+      }
+      const account = accounts.get(compareKey);
+      account.keys.add(balanceAccountKey(merchantId, currency));
       account.modes.add(entry.balanceMode);
       const templateKey = `${entry.templateName}@@${entry.balanceMode}`;
       if (!account.templates.has(templateKey)) {
@@ -301,9 +315,10 @@ function resolveAccountBalanceModes(entries = []) {
   }
   const modeByAccount = {};
   const conflicts = [];
-  for (const [key, account] of accounts) {
+  for (const account of accounts.values()) {
     if (account.modes.size === 1) {
-      modeByAccount[key] = [...account.modes][0];
+      const mode = [...account.modes][0];
+      account.keys.forEach((key) => { modeByAccount[key] = mode; });
       continue;
     }
     conflicts.push({

@@ -71,6 +71,42 @@ test('resolveAccountBalanceModes：MerchantId 或账单日期为空的行无法�
   assert.deepEqual(result, { modeByAccount: {}, conflicts: [] });
 });
 
+test('resolveAccountBalanceModes：判断冲突时币种不区分大小写，modeByAccount 仍按原样账户键', () => {
+  const conflict = resolveAccountBalanceModes([
+    { templateName: '费用', balanceMode: 'none', detailRows: rows([['2026-09-01', 'M1', 'usd', '1', '', '']]) },
+    { templateName: '余额', balanceMode: 'statement', detailRows: rows([['2026-09-01', 'M1', 'USD', '1', '', '9']]) }
+  ]);
+  assert.deepEqual(conflict.conflicts.map((item) => [item.merchantId, item.templates.map((template) => template.balanceMode)]), [
+    ['M1', ['none', 'statement']]
+  ]);
+  assert.deepEqual(conflict.modeByAccount, {});
+
+  const sameMode = resolveAccountBalanceModes([
+    { templateName: 'A', balanceMode: 'statement', detailRows: rows([['2026-09-01', 'M1', 'usd', '1', '', '9']]) },
+    { templateName: 'B', balanceMode: 'statement', detailRows: rows([['2026-09-02', 'M1', 'USD', '1', '', '10']]) },
+    { templateName: 'C', balanceMode: 'none', detailRows: rows([['2026-09-01', 'M9', 'CNY', '1', '', '']]) }
+  ]);
+  assert.deepEqual(sameMode.conflicts, []);
+  assert.deepEqual(sameMode.modeByAccount, { 'M1@@usd': 'statement', 'M1@@USD': 'statement', 'M9@@CNY': 'none' });
+});
+
+test('resolveAccountBalanceModes：收支都为空或 0 的行不算命中该子模板，收支同时有值的行照常参与', () => {
+  const zeroOnly = resolveAccountBalanceModes([
+    { templateName: '费用', balanceMode: 'none', detailRows: rows([
+      ['2026-09-01', 'M1', 'USD', '0', '', ''],
+      ['2026-09-01', 'M1', 'USD', '', '0.00', '']
+    ]) },
+    { templateName: '余额', balanceMode: 'statement', detailRows: rows([['2026-09-01', 'M1', 'USD', '1', '', '9']]) }
+  ]);
+  assert.deepEqual(zeroOnly, { modeByAccount: { 'M1@@USD': 'statement' }, conflicts: [] });
+
+  const simultaneous = resolveAccountBalanceModes([
+    { templateName: '费用', balanceMode: 'none', detailRows: rows([['2026-09-01', 'M1', 'USD', '2', '3', '']]) },
+    { templateName: '余额', balanceMode: 'statement', detailRows: rows([['2026-09-01', 'M1', 'USD', '1', '', '9']]) }
+  ]);
+  assert.deepEqual(simultaneous.conflicts.map((item) => item.merchantId), ['M1']);
+});
+
 test('deriveBalanceRecords：modeByAccount 下计算账户按种子推算、账单余额账户逐日校验，种子方式各自正确', () => {
   const detailRows = rows([
     ['2026-09-01', 'M002', 'USD', '10', '', '210'],
@@ -139,4 +175,42 @@ test('deriveBalanceRecords：不传 modeByAccount 时全部按 mode（与此前�
   // 计算模式不读账单余额列（999 被忽略）
   assert.deepEqual(result.records.map(balanceOf), [['M001', '2026-09-01', 110], ['M002', '2026-09-01', 6]]);
   assert.ok(result.seedRecords.every((record) => record.generationMethod === '通过发生额计算'));
+});
+
+// v3.2.21（T9）：冲突明细含账号只用于界面；错误报告与活动日志写错误对象的 persistedDetailLines。
+test('createErrorResult：错误对象带 persistedDetailLines 时，错误报告与活动日志不写展示明细', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const acorn = require('acorn');
+  const source = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'src', 'main.js'), 'utf8');
+  const ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true });
+  const node = ast.body.find((item) => item.type === 'FunctionDeclaration' && item.id && item.id.name === 'createErrorResult');
+  const reports = [];
+  const logs = [];
+  const createErrorResult = Function(
+    'archiveOperationContext', 'createPreflightErrorResult', 'createErrorReport', 'appendActivityLogEntry',
+    `let lastErrorReport = null;\nreturn (${source.slice(node.start, node.end)});`
+  )(
+    { getStore: () => null },
+    () => { throw new Error('不应走预检'); },
+    (payload) => { reports.push(payload); return { fileName: 'report.txt' }; },
+    (entry) => logs.push(entry)
+  );
+  const originalError = Object.assign(new Error('渠道「招商银行-上海」下同一账户命中了余额方式不同的子模板'), {
+    persistedDetailLines: ['渠道「招商银行-上海」：1 个账户命中余额方式不同的子模板（招商银行-上海、CMB-SH）']
+  });
+  createErrorResult({
+    step: '选择大账号',
+    message: originalError.message,
+    errorCode: 'CHANNEL_BALANCE_MODE_MISMATCH',
+    detailLines: ['账户 6222000011112222（USD）：CMB-SH（取账单余额列）、招商银行-上海（通过发生额计算）'],
+    originalError
+  });
+  assert.deepEqual(reports[0].detailLines, originalError.persistedDetailLines);
+  assert.ok(!JSON.stringify(logs).includes('6222000011112222'));
+  assert.ok(JSON.stringify(logs).includes('1 个账户命中余额方式不同的子模板'));
+
+  // 没有 persistedDetailLines 时照常写 detailLines（其他错误行为不变）
+  createErrorResult({ step: '导入', message: '其他错误', detailLines: ['第 3 行'] });
+  assert.deepEqual(reports[1].detailLines, ['第 3 行']);
 });

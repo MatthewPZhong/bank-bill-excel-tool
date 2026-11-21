@@ -270,3 +270,17 @@ test.describe('appendActivityRecord 写入新结构 JSON Lines（v2.1.12 SR-log-
     assert.strictEqual(lines[0].stack, 'Error: db locked\n  at run');
   });
 });
+
+// v3.2.21：错误报告逐行写入明细，明细很多（如逐行列出的跳过行）时不因展开成参数超出调用栈
+test('writeErrorReport：15 万行明细照常写出报告', () => {
+  const { writeErrorReport } = require('../../../src/backend/logger');
+  const root = mkTmpRoot();
+  try {
+    const detailLines = new Array(150000).fill('第 2 行：Credit Amount 与 Debit Amount 都为空，已跳过');
+    const report = writeErrorReport(root, { step: '导入网银明细文件', message: '测试', errorCode: 'TEST', detailLines });
+    const lines = fs.readFileSync(report.filePath, 'utf8').split('\n');
+    assert.equal(lines.filter((line) => line.startsWith('- 第 2 行')).length, 150000);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

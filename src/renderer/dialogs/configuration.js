@@ -444,6 +444,11 @@
           return;
         }
         if (['error', 'failed'].includes(result.status)) {
+          // 已弹窗列出明细的终态错误（主进程已清除待补录提示）：关闭这个已失效的窗口，不再弹摘要
+          if (statementErrorDetailsAlerted(result)) {
+            closeModal(overlay, { status: 'submitted', value: result });
+            return;
+          }
           pushAlert(overlay, () => createAlertDialog(result.message || '余额生成失败'));
           return;
         }
@@ -644,6 +649,11 @@
           return;
         }
         if (['error', 'failed'].includes(result.status)) {
+          // 已弹窗列出明细的终态错误（主进程已清除待补录提示）：关闭这个已失效的窗口，不再弹摘要
+          if (statementErrorDetailsAlerted(result)) {
+            closeModal(overlay, { status: 'submitted', value: result });
+            return;
+          }
           pushAlert(overlay, () => createAlertDialog(result.message || '余额生成失败'));
           return;
         }
@@ -739,6 +749,11 @@
           return;
         }
         if (['error', 'failed'].includes(result.status)) {
+          // 已弹窗列出明细的终态错误（主进程已清除待补录提示）：关闭这个已失效的窗口，不再弹摘要
+          if (statementErrorDetailsAlerted(result)) {
+            closeModal(overlay, { status: 'submitted', value: result });
+            return;
+          }
           pushAlert(overlay, () => createAlertDialog(result.message || '余额生成失败'));
           return;
         }
@@ -1045,6 +1060,11 @@
         }
 
         if (['error', 'failed'].includes(result.status) && !result.manualBalancePromptReady) {
+          // 已弹窗列出明细的终态错误（主进程已清除待补录提示）：关闭这个已失效的补录窗口，不再弹摘要
+          if (statementErrorDetailsAlerted(result)) {
+            closeModal(overlay, { status: 'submitted', value: result });
+            return;
+          }
           pushAlert(overlay, () => createAlertDialog(result.message || '余额补录失败'));
           return;
         }
@@ -2161,11 +2181,32 @@
       'DUPLICATE_REVIEW_MISSING', 'DUPLICATE_REVIEW_CONFIG_CHANGED', 'DUPLICATE_KEEPER_REPLACEMENT',
       'BANK_STATEMENT_SOURCE_CHANGED_DURING_CONFIRMATION', 'BIG_ACCOUNT_SELECTION_MISSING', 'IMPORT_IN_PROGRESS'
     ]);
+    // v3.2.21：applyStatementResult 已弹窗列出提示与明细的错误（与网银账单页 hasAlertableErrorDetails 同口径），
+    //   补录、断档、余额不一致与种子替换窗口不再重复弹出摘要，并关闭已失效的窗口（主进程已清除待补录提示）
+    function statementErrorDetailsAlerted(result) {
+      const code = String(result && result.errorCode || '');
+      return (code.startsWith('CURRENCY_BIG_ACCOUNT_') || code === 'CHANNEL_BALANCE_MODE_MISMATCH' || code === 'CHANNEL_BALANCE_ROWS_INCOMPLETE')
+        && Array.isArray(result.detailLines)
+        && result.detailLines.length > 0;
+    }
+
     function isNotStartedImportResult(result) {
       if (!result) return false;
       if (result.status === 'failed' || result.status === 'busy') return true;
       return result.status === 'error' && !result.manualBalancePromptReady
         && (Boolean(result.preservesSession) || NOT_STARTED_ERROR_CODES.has(String(result.errorCode || result.code || '')));
+    }
+
+    // 未开始的拒绝只弹提示。v3.2.21：渠道同一账户命中余额方式不同的子模板（完成大账号选择时才确定账号）时一并逐账户列出；
+    //   明细含账号，此时不写入活动日志
+    function createNotStartedImportAlert(result) {
+      const lines = result && result.errorCode === 'CHANNEL_BALANCE_MODE_MISMATCH' && Array.isArray(result.detailLines)
+        ? result.detailLines
+        : [];
+      const html = [result && result.message || '本次导入未开始，请重新导入文件', ...lines]
+        .map((line) => escapeHtml(String(line)))
+        .join('<br/>');
+      return createAlertDialog(html, lines.length ? { skipLogReport: true } : {});
     }
 
     // 续跑请求（重复账单【确认】、完成大账号选择）IPC 本身抛错：可能是启动前被拒绝（如 Recovery Hold），也可能是已执行后
@@ -2291,12 +2332,15 @@
           return;
         }
         if (isNotStartedImportResult(next)) {
-          if (writeScope.isCurrent(handle)) replaceModal(handle, () => createAlertDialog(escapeHtml(next.message || '本次导入未开始，请重新导入文件')));
+          if (writeScope.isCurrent(handle)) replaceModal(handle, () => createNotStartedImportAlert(next));
           return;
         }
         applyStatementResult(next);
         if (!writeScope.isCurrent(handle)) return;
-        if (next.status === 'error' && !next.manualBalancePromptReady) {
+        // v3.2.21：applyStatementResult 已弹窗列出提示与明细的错误，只关闭确认窗口，不再弹出摘要
+        if (next.status === 'error' && !next.manualBalancePromptReady && statementErrorDetailsAlerted(next)) {
+          closeModal(handle, { status: 'submitted', value: next });
+        } else if (next.status === 'error' && !next.manualBalancePromptReady) {
           replaceModal(handle, () => createAlertDialog(escapeHtml(next.message || '生成网银账单失败')));
         } else if (['gap', 'mismatch', 'seed-replace'].includes(next.manualBalancePrompt?.reason)) {
           replaceModal(handle, () => createManualBalanceSeedDialog(next.manualBalancePrompt));
@@ -3575,7 +3619,7 @@
           selectionClosed = true;
           closeModal(overlay, { status: 'submitted', value: result });
           Promise.resolve(api.files.cancelBigAccountSelection(payload.contextId)).catch(() => {});
-          openModal(() => createAlertDialog(escapeHtml(result.message || '本次导入未开始，请重新导入文件')));
+          openModal(() => createNotStartedImportAlert(result));
           return;
         }
 
@@ -3589,7 +3633,8 @@
           closeModal(overlay, { status: 'submitted', value: result });
           // v3.2.19：未开始生成（如等待选择期间模板配置已修改）：只提示，保留上一批的导出与补录入口
           if (!isNotStartedImportResult(result)) applyStatementResult(result);
-          openModal(() => createAlertDialog(escapeHtml(result.message || '')));
+          // v3.2.21：applyStatementResult 已弹窗列出提示与明细的错误不再弹出摘要
+          if (!statementErrorDetailsAlerted(result)) openModal(() => createAlertDialog(escapeHtml(result.message || '')));
           return;
         }
 
