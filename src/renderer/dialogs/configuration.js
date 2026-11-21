@@ -9,6 +9,19 @@
     const REGEX_LITERAL_PATTERN_RENDERER = /^\/(.+)\/([gimsu]*)$/;
     // v3.2.19：逻辑取值至少 2 个候补字段（与 main.js LOGIC_VALUE_MIN_FIELDS 一致）
     const LOGIC_VALUE_MIN_FIELDS = 2;
+    // v3.2.21：模板日期格式（templates.date_format；与 main.js TEMPLATE_DATE_FORMAT_LABELS、跨 Sheet 回填「来源日期格式」同口径）。
+    //   映射关系管理「个性化映射设置 → 日期格式」不勾选为 auto，勾选后在【日期格式】弹窗选日在前 / 月在前。
+    const TEMPLATE_DATE_FORMAT_LABEL = '日期格式';
+    const TEMPLATE_DATE_FORMAT_OPTIONS = [
+      { value: 'DMY', label: '日在前（dd/mm/yyyy）' },
+      { value: 'MDY', label: '月在前（mm/dd/yyyy）' }
+    ];
+    // 弹窗只有一行，悬停气泡会被卡片裁掉，说明直接显示在下拉框下方
+    const TEMPLATE_DATE_FORMAT_HINTS = Object.freeze([
+      '只影响写成文本的日期中日、月的先后，如 09/10/2026、09-10-26；年在前的日期（如 2026-09-10）、英文月份和 Excel 日期单元格不受影响。',
+      '日在前（不勾选时相同）：按日/月/年读取，这样读不是有效日期时（如 09/13/2026）按月/日/年读取；月在前则相反。',
+      '原始账单为 mm/dd/yyyy 时请选月在前，否则日不大于 12 的日期（如 09/10/2026）会读成 10 月 9 日。'
+    ]);
 
     // 配置写入的共同生命周期：同步锁定一次提交，关闭后仍完成后台链，界面返回绑定原句柄。
     function createDialogWriteScope(overlay, dialog) {
@@ -4895,6 +4908,12 @@
       let currentPreprocessRowFilterRules = cloneRowFilterRules(payload.template && payload.template.preprocessRowFilterRules);
       // v3.2.18：模板的特征值列表（【特征值管理】保存/删除即时落库后回写）；各行在「选择特征值」中选用。
       let currentFeatureFilters = cloneFeatureFilters(payload.template && payload.template.featureFilters);
+      // v3.2.21：模板日期格式草稿（「个性化映射设置 → 日期格式」，点【保存】时随映射提交）；不在三档内按 auto
+      let currentDateFormat = TEMPLATE_DATE_FORMAT_OPTIONS.some((option) => option.value === payload.dateFormat)
+        ? payload.dateFormat
+        : 'auto';
+      // 载荷没有「个性化映射设置」分组（旧载荷）时不渲染该行，保存时也不提交日期格式（保持原值）
+      let dateFormatRow = null;
       dialog.className = 'modal-card mapping-card';
       // v3.2.15（§4.2）：【渠道存在多个子模板】新建同名渠道；【设为子模板】选择渠道；两者互斥。
       //   打开属于渠道的模板时，【设为子模板】为勾选状态并选中所属渠道。
@@ -5014,6 +5033,7 @@
           sectionRow.className = 'mapping-section-row';
           sectionRow.innerHTML = '<td colspan="2"><strong>个性化映射设置</strong></td>';
           tbody.appendChild(sectionRow);
+          renderDateFormatRow();
         }
 
         if (fieldName === billSplitGroupFields[0]) {
@@ -5348,11 +5368,14 @@
 
       // v3.2.19：取值只有 是 / 否（空白）的行用勾选框（勾选 = 是）：文字在左、勾选框紧跟其右；
       //   右列只放随勾选状态显示的按钮（不传 buttonLabel 时右列为空）。存储值不变，取值见 data-checked-value / data-unchecked-value。
+      //   v3.2.21：mappingRow = false 的行（如「日期格式」）不是映射行：不写 data-template-field、不进 rowByField，
+      //   collectMappingDraftFromTable 不收集，取值由调用方自行保存。
       function renderMappingToggleRow(fieldName, {
-        label, checked, checkedValue, uncheckedValue, buttonClass, buttonLabel, showButtonWhenChecked, onToggle, onButtonClick
+        label, checked, checkedValue, uncheckedValue, buttonClass, buttonLabel, showButtonWhenChecked, onToggle, onButtonClick,
+        mappingRow = true
       }) {
         const row = document.createElement('tr');
-        row.dataset.templateField = fieldName;
+        if (mappingRow) row.dataset.templateField = fieldName;
         row.innerHTML = `
           <td>
             <label class="mapping-toggle-label">
@@ -5377,9 +5400,67 @@
           if (typeof onToggle === 'function') onToggle(checkbox.checked);
         });
         if (button) button.addEventListener('click', onButtonClick);
-        rowByField.set(fieldName, row);
+        if (mappingRow) rowByField.set(fieldName, row);
         tbody.appendChild(row);
         return row;
+      }
+
+      // v3.2.21：「个性化映射设置」第一行「日期格式」——勾选即弹出【日期格式】弹窗，勾选期间右侧显示【设置】与当前选择；
+      //   取消勾选回到 auto。存模板 date_format，不是映射行。
+      function renderDateFormatRow() {
+        if (dateFormatRow) return;
+        dateFormatRow = renderMappingToggleRow(TEMPLATE_DATE_FORMAT_LABEL, {
+          label: TEMPLATE_DATE_FORMAT_LABEL,
+          checked: currentDateFormat !== 'auto',
+          checkedValue: '',
+          uncheckedValue: '',
+          buttonClass: 'mapping-date-format-btn',
+          buttonLabel: '设置',
+          showButtonWhenChecked: true,
+          mappingRow: false,
+          onToggle: (checked) => {
+            if (checked) {
+              openDateFormatDialog();
+              return;
+            }
+            currentDateFormat = 'auto';
+            syncDateFormatPreview();
+          },
+          onButtonClick: () => openDateFormatDialog()
+        });
+        dateFormatRow.dataset.role = 'date-format';
+        const preview = document.createElement('span');
+        preview.className = 'mapping-date-format-preview';
+        dateFormatRow.querySelector('.mapping-field-editor').appendChild(preview);
+        syncDateFormatPreview();
+      }
+
+      function syncDateFormatPreview() {
+        const preview = dateFormatRow && dateFormatRow.querySelector('.mapping-date-format-preview');
+        if (!preview) return;
+        const option = TEMPLATE_DATE_FORMAT_OPTIONS.find((item) => item.value === currentDateFormat);
+        preview.textContent = option ? option.label : '';
+        preview.hidden = !option;
+      }
+
+      function openDateFormatDialog() {
+        const checkbox = dateFormatRow.querySelector('.mapping-toggle-checkbox');
+        pushModal(overlay, () => createDateFormatDialog({
+          initialValue: currentDateFormat === 'auto' ? 'MDY' : currentDateFormat,
+          onDone: (value) => {
+            currentDateFormat = value;
+            syncDateFormatPreview();
+            returnToModal(overlay);
+          },
+          onCancel: () => {
+            // 勾选后首次弹窗就取消（还没选过）：恢复不勾选，仍为自动
+            if (currentDateFormat === 'auto' && checkbox.checked) {
+              checkbox.checked = false;
+              checkbox.dispatchEvent(new Event('change'));
+            }
+            returnToModal(overlay);
+          }
+        }));
       }
 
       // 按字段区分发生额：勾选 = 是，勾选后显示【维护发生额映射关系】
@@ -5866,6 +5947,8 @@
             currencyBigAccounts: cloneCurrencyBigAccountPairs(currentCurrencyBigAccounts),
             billSplitRowFilterRules: cloneRowFilterRules(currentBillSplitRowFilterRules),
             preprocessRowFilterRules: cloneRowFilterRules(currentPreprocessRowFilterRules),
+            // v3.2.21：模板日期格式（没有渲染「日期格式」行时不提交，保持原值）
+            ...(dateFormatRow ? { dateFormat: currentDateFormat } : {}),
             preserveOwn: !bigAccountsLoadedWithOwn,
             ...(channelAssignment ? { channel: channelAssignment } : {})
           });
@@ -6817,6 +6900,44 @@
       dialog.querySelector('.icon-close').addEventListener('click', () => onCancel());
 
       render();
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // ==================== v3.2.21 模板「日期格式」 ====================
+    // v3.2.21：映射关系管理「日期格式」勾选后的弹窗：选日在前 / 月在前；【保存】只暂存，随映射【保存】提交。
+    function createDateFormatDialog({ initialValue = 'MDY', onDone, onCancel }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card scenario-config-card date-format-card';
+      const selected = TEMPLATE_DATE_FORMAT_OPTIONS.some((option) => option.value === initialValue) ? initialValue : 'MDY';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">${escapeHtml(TEMPLATE_DATE_FORMAT_LABEL)}</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="dialog-body scenario-config-body">
+          <div class="scenario-config-row date-format-config-row">
+            <span class="scenario-config-label date-format-label">日期顺序</span>
+            <select class="mapping-select date-format-select" data-role="date-format-select">
+              ${TEMPLATE_DATE_FORMAT_OPTIONS.map((option) => (
+                `<option value="${escapeHtml(option.value)}"${option.value === selected ? ' selected' : ''}>${escapeHtml(option.label)}</option>`
+              )).join('')}
+            </select>
+          </div>
+          <ul class="date-format-hint" data-role="date-format-hint">
+            ${TEMPLATE_DATE_FORMAT_HINTS.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}
+          </ul>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="save">保存</button>
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+        </div>
+      `;
+      const select = dialog.querySelector('[data-role="date-format-select"]');
+      dialog.querySelector('[data-action="save"]').addEventListener('click', () => onDone(select.value));
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => onCancel());
+      dialog.querySelector('.icon-close').addEventListener('click', () => onCancel());
       overlay.appendChild(dialog);
       return overlay;
     }

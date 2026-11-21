@@ -2792,6 +2792,20 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
 .logic-value-row-btn[data-role="remove"] { color: var(--danger); }
 .logic-value-row-btn:hover { text-decoration: underline; }
 
+/* v3.2.21 映射关系管理「日期格式」：勾选行的当前选择（同逻辑取值预览）与【日期格式】弹窗（组件同「逻辑取值」） */
+.mapping-date-format-preview {
+  min-width: 0; max-width: 320px;
+  font-size: 13px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mapping-date-format-preview[hidden] { display: none; }
+.modal-card.scenario-config-card.date-format-card { width: min(96vw, 560px); }
+.scenario-config-card.date-format-card .dialog-header .icon-close { margin-left: auto; }
+.date-format-card .scenario-config-label.date-format-label { width: auto; min-width: 120px; white-space: nowrap; }
+.date-format-card .date-format-select { flex: 0 0 240px; width: 240px; min-width: 0; height: 40px; }
+.date-format-card .date-format-hint { margin: 12px 0 8px; padding-left: 18px; font-size: 13px; line-height: 1.6; color: var(--muted); }
+.date-format-card .date-format-hint li + li { margin-top: 4px; }
+
 /* v3.2.19 重复账单提醒：说明 + 可滚动表格，【确认】在右下、【取消】在其右 */
 .modal-card.duplicate-rows-review-card { width: min(860px, calc(100vw - 48px)); }
 .duplicate-rows-review-card .dialog-header .icon-close { margin-left: auto; }

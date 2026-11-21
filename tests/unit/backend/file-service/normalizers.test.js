@@ -395,6 +395,49 @@ test.describe('normalizeDateExportValue — 日期解析主入口', () => {
   });
 });
 
+// v3.2.21：模板「日期格式」（templates.date_format → dateParseOrder）只决定文本日期中日、月的先后
+test.describe('normalizeDateExportValue — 日期顺序 dateParseOrder（v3.2.21 模板日期格式）', () => {
+  const parse = (value, dateParseOrder) => normalizeDateExportValue(value, { dateParseOrder }).value;
+  const isoOf = (value, dateParseOrder) => {
+    const { date } = normalizeDateExportValue(value, { dateParseOrder });
+    return date ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` : '';
+  };
+
+  test('MDY：日 ≤ 12 的 mm/dd/yyyy 读成月在前（各分隔符、两位年、时间后缀）', () => {
+    for (const value of ['09/10/2026', '09-10-26', '09.10.2026', '09/10/2026 14:30:05', '09/10/2026, 2:30 PM']) {
+      assert.equal(parse(value, 'MDY'), '2026-09-10', value);
+    }
+    assert.equal(parse('9/1/2026', 'MDY'), '2026-09-01');
+  });
+
+  test('MDY：月在前不是有效日期时改按日在前', () => {
+    assert.equal(parse('13/09/2026', 'MDY'), '2026-09-13');
+  });
+
+  test('auto 与 DMY 相同：日在前，日在前无效时改按月在前', () => {
+    for (const order of ['auto', 'DMY', undefined]) {
+      assert.equal(parse('09/10/2026', order), '2026-10-09', String(order));
+      assert.equal(parse('09-10-26', order), '2026-10-09', String(order));
+      assert.equal(parse('09/13/2026', order), '2026-09-13', String(order));
+    }
+  });
+
+  test('年在前、8 位数字、英文月份、Excel 序列号与 Date 不受日期顺序影响', () => {
+    for (const order of ['auto', 'DMY', 'MDY']) {
+      for (const value of ['2026-09-10', '2026/09/10', '20260910', '2026年09月10日', '10 Sep 2026',
+        toExcelSerial(new Date(2026, 8, 10)), new Date(2026, 8, 10)]) {
+        assert.equal(isoOf(value, order), '2026-09-10', `${order} ${value}`);
+      }
+    }
+  });
+
+  test('两种顺序都不是有效日期时为空', () => {
+    for (const order of ['auto', 'DMY', 'MDY']) {
+      assert.equal(parse('13/13/2026', order), '', order);
+    }
+  });
+});
+
 test.describe('parseDateValue — 仅返回 date 实例', () => {
   test('返回 normalizeDateExportValue 的 date 字段', () => {
     const r = parseDateValue('2026-05-22');
