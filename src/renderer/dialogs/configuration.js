@@ -18,7 +18,7 @@
     ];
     // 弹窗只有一行，悬停气泡会被卡片裁掉，说明直接显示在下拉框下方
     const TEMPLATE_DATE_FORMAT_HINTS = Object.freeze([
-      '只影响写成文本的日期中日、月的先后，如 09/10/2026、09-10-26；年在前的日期（如 2026-09-10）、英文月份和 Excel 日期单元格不受影响。',
+      '只影响带分隔符（/ - .）的文本日期中日、月的先后，如 09/10/2026、09-10-26；不带分隔符的 8 位数字（20260910 按年/月/日、09102026 按日/月/年读取）、四位年份在前的日期（如 2026-09-10）、英文月份和 Excel 日期单元格不受影响。',
       '日在前（不勾选时相同）：按日/月/年读取，这样读不是有效日期时（如 09/13/2026）按月/日/年读取；月在前则相反。',
       '原始账单为 mm/dd/yyyy 时请选月在前，否则日不大于 12 的日期（如 09/10/2026）会读成 10 月 9 日。'
     ]);
@@ -6918,8 +6918,8 @@
         </div>
         <div class="dialog-body scenario-config-body">
           <div class="scenario-config-row date-format-config-row">
-            <span class="scenario-config-label date-format-label">日期顺序</span>
-            <select class="mapping-select date-format-select" data-role="date-format-select">
+            <label class="scenario-config-label date-format-label" for="date-format-select">日期顺序</label>
+            <select class="mapping-select date-format-select" id="date-format-select" data-role="date-format-select">
               ${TEMPLATE_DATE_FORMAT_OPTIONS.map((option) => (
                 `<option value="${escapeHtml(option.value)}"${option.value === selected ? ' selected' : ''}>${escapeHtml(option.label)}</option>`
               )).join('')}

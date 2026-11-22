@@ -3800,10 +3800,18 @@ function normalizeBundleBillSplitMeta(meta) {
   };
 }
 
-// v3.2.21：合法的模板日期格式（auto / DMY / MDY）原样返回，否则返回空串，由调用方决定报错或按 auto
+// v3.2.21：合法的模板日期格式（auto / DMY / MDY）原样返回，否则返回空串，由调用方决定报错或按 auto。
+//   只接受字符串：数组等其他类型字符串化后可能恰好等于合法值（如 ['MDY']），一律视为无效。
 function normalizeTemplateDateFormat(value) {
-  const dateFormat = normalizeCell(value);
+  const dateFormat = typeof value === 'string' ? value.trim() : '';
   return Object.prototype.hasOwnProperty.call(TEMPLATE_DATE_FORMAT_LABELS, dateFormat) ? dateFormat : '';
+}
+
+// v3.2.21：活动日志中的日期格式显示名；库内三档以外的旧值（旧版导入模板包时可能原样写入）原样标出，解析时按自动
+function formatTemplateDateFormatLabel(value) {
+  return normalizeTemplateDateFormat(value)
+    ? TEMPLATE_DATE_FORMAT_LABELS[value]
+    : `无效值「${value}」（按自动解析）`;
 }
 
 function normalizeBundleTemplateHeaders(headers) {
@@ -3906,7 +3914,8 @@ function readTemplateBundleFile(filePath) {
     billSplitRows: Array.isArray(item.billSplitRows) ? item.billSplitRows : [],
     billSplitAmountRules: Array.isArray(item.billSplitAmountRules) ? item.billSplitAmountRules : [],
     billSplitMeta: normalizeBundleBillSplitMeta(item.billSplitMeta),
-    dateFormat: normalizeCell(item.dateFormat) || 'auto',
+    // v3.2.21：非字符串的日期格式按 auto（字符串化后可能恰好等于合法值）；其余取值在导入处理器按 normalizeTemplateDateFormat 规范化
+    dateFormat: (typeof item.dateFormat === 'string' ? item.dateFormat.trim() : '') || 'auto',
     // v3.2.18：特征值列表（导入时再校验）。本版本导出的包都带 featureFilters 数组——映射都没选用时仍写 v5/v6，
     //   故按字段而非版本判断；没有数组时才是 v3.2.16/3.2.17 的单套 featureFilter，升级为「特征值1」。
     featureFilters: upgradeLegacyFeatureFilter(Array.isArray(item.featureFilters) ? item.featureFilters : item.featureFilter),
@@ -9843,7 +9852,8 @@ function registerTemplateHandlers() {
           templateName: template.name
         });
       }
-      const previousDateFormat = normalizeTemplateDateFormat(template.dateFormat) || 'auto';
+      // 库内旧值：空按 auto；三档以外的旧值原样保留，用于比较与留痕（改为合法值时也记录）
+      const previousDateFormat = normalizeCell(template.dateFormat) || 'auto';
 
       const templateConfiguration = validateTemplateConfiguration({
         template,
@@ -9961,6 +9971,18 @@ function registerTemplateHandlers() {
           preprocessRowFilterRules
         }
       );
+      // v3.2.21：日期格式决定交易归属日，变化时在落库后立即留痕——不受随后模板库文件同步失败影响
+      //   （同步失败时界面提示保存失败，但库内已是新值；重试时旧值已等于新值，不会再记）
+      if (dateFormat && dateFormat !== previousDateFormat) {
+        appendActivityLogEntry({
+          level: 'info',
+          message: '模板日期格式已修改',
+          details: [
+            `模板名：${template.name}`,
+            `日期格式：${formatTemplateDateFormatLabel(previousDateFormat)} → ${formatTemplateDateFormatLabel(dateFormat)}`
+          ]
+        });
+      }
       const assignmentResult = saveResult && saveResult.channelAssignment;
       syncTemplateLibraryFile();
       clearLastErrorReport();
@@ -9972,10 +9994,6 @@ function registerTemplateHandlers() {
           `模板名：${template.name}`,
           ...(assignmentResult && assignmentResult.changed
             ? [`渠道：${savedTemplate && savedTemplate.channelName ? savedTemplate.channelName : '（不属于任何渠道）'}`]
-            : []),
-          // v3.2.21：日期格式决定交易归属日，变化时留痕
-          ...(dateFormat && dateFormat !== previousDateFormat
-            ? [`日期格式：${TEMPLATE_DATE_FORMAT_LABELS[previousDateFormat]} → ${TEMPLATE_DATE_FORMAT_LABELS[dateFormat]}`]
             : [])
         ]
       });

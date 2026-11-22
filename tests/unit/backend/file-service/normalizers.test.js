@@ -431,7 +431,9 @@ test.describe('normalizeDateExportValue — 日期顺序 dateParseOrder（v3.2.2
     }
   });
 
-  test('两种顺序都不是有效日期时为空', () => {
+  // 只验证日、月都超过 12 的情形；不代表所有非法日期都为空：如 02/30/2026 两种顺序都无效，
+  //   最后按 new Date 兜底会进位成 2026-03-02（既有语义，本次不改）
+  test('日、月都超过 12 时为空（如 13/13/2026）', () => {
     for (const order of ['auto', 'DMY', 'MDY']) {
       assert.equal(parse('13/13/2026', order), '', order);
     }

@@ -1,10 +1,13 @@
 // 网银账单：模板「日期格式」（v3.2.21，templates.date_format）e2e 集成验证
-//   覆盖：真实主库（仓储）+ main.js 中真实的取值规范化、生成配置与模板包读写函数 + 真实 xlsx / csv 读取
-//   ① 取值：auto / DMY / MDY 以外的值视为无效（界面与主进程同值域）；saveMappings 写入、未传时保持原值，新模板默认 auto
+//   覆盖：真实主库（仓储）+ main.js 中真实的 template:save-mappings / template:import-bundle 处理器（按片段加载，
+//   对话框、模板库文件与活动日志替换为桩）、取值规范化、生成配置与模板包读写函数 + 真实 xlsx / csv 读取
+//   ① 取值：auto / DMY / MDY 以外的值（含非字符串）视为无效（界面与主进程同值域）；新模板默认 auto
+//      保存处理器：写入并在变化时留痕；未传时保持原值；无效值报 TEMPLATE_DATE_FORMAT_INVALID 且不改库；
+//      落库后模板库文件同步失败时，变更仍已留痕，重试不重复记录；库内三档以外的旧值改为合法值时按原值留痕
 //   ② 模板【更新】（只换表头）后日期格式保留
 //   ③ 生成：库内配置 → buildStatementGenerationConfig → buildMappedRowsForFile：月在前模板把文本 09/10/2026 读成
 //      2026-09-10，自动 / 日在前仍读成 2026-10-09（BillDate 与 ValueDate，xlsx 文本单元格与 csv）
-//   ④ 模板包：只用到日期格式时不升版本（v5）；导出 → 读包 → 导入后日期格式与生成结果一致；包内无效值导入为 auto
+//   ④ 模板包：只用到日期格式时不升版本（v5）；导出 → 导入处理器后日期格式与生成结果一致；包内无效值（含非字符串）导入为 auto
 //   UI 由 renderer lifecycle 覆盖；本脚本验证数据在整条链路上的结果。
 //
 // 用法：node scripts/integration/statement-template-date-format.js
@@ -121,7 +124,13 @@ function createMain(database) {
     'buildMappedRowsForFile', 'validateBillSplitMappingsPayload', 'validateCurrencyBigAccountConfiguration',
     'buildCurrencyBigAccountMappingConfig', 'isCurrencyOnlyMerchantMapping', 'normalizeBundleTemplateHeaders',
     'normalizeBundleBillSplitMeta', 'isLegacyOrientedTemplateMappings', 'buildTemplateFieldReferenceInput',
-    'readTemplateBundleFile', 'resolveTemplateBundleVersion', 'upgradeLegacyBundleFeatureFilterRefs', 'normalizeTemplateDateFormat'
+    'readTemplateBundleFile', 'resolveTemplateBundleVersion', 'upgradeLegacyBundleFeatureFilterRefs', 'normalizeTemplateDateFormat',
+    'formatTemplateDateFormatLabel',
+    // 保存 / 导入处理器用到的 main.js 函数（渠道、余额方式校验在无渠道时直接返回）
+    'normalizeTemplateChannelAssignment', 'findSaveMappingsBalanceModeMismatch', 'buildTemplateSummary', 'getAvailableCurrencyCodes',
+    'findConflictingTemplateByHeaders', 'buildBundleImportDraftTemplate', 'applyBundleBillSplitConfig',
+    // 生产导出（【导出模板】与模板库文件同步共用）
+    'writeTemplateBundleFile', 'buildTemplateLibraryPayload', 'toBundleAccountMapping'
   ], {
     ...CONSTANTS,
     templateHeaderUpdateTools: createTemplateHeaderUpdateTools(CONSTANTS),
@@ -162,8 +171,85 @@ function createMain(database) {
     createStatementWorkbookReadGuard: () => undefined,
     buildBigAccountRecognitionBasis: () => null,
     finalizeBigAccountRecognitionBasis: () => null,
-    normalizeBundleAccountMappings: () => []
+    normalizeBundleAccountMappings: () => [],
+    ensureStorageRoot: () => '',
+    readBigAccountOrder: () => null,
+    readBigAccountMode: () => 'unset'
   });
+}
+
+// main.js 中真实的处理器片段（registerTemplateHandlers 内，按 trackedIpcHandle 起止截取）
+function mainSection(startText, endText) {
+  const start = MAIN_SOURCE.indexOf(startText);
+  const end = MAIN_SOURCE.indexOf(endText, start);
+  if (start < 0 || end <= start) throw new Error(`main.js 片段边界缺失：${startText}`);
+  return MAIN_SOURCE.slice(start, end);
+}
+const HANDLER_SOURCE = [
+  mainSection("  trackedIpcHandle('template:save-mappings'", "  trackedIpcHandle('template:rename'"),
+  mainSection("  trackedIpcHandle('template:import-bundle'", "  ipcMain.handle('template:get-amount-split-rules'")
+].join('\n');
+
+// 加载处理器：库、规范化与校验用真实实现；文件对话框、模板库文件、余额顺序文件、渠道还原与活动日志用桩
+function loadTemplateHandlers(database, main, { bundlePath = '', syncTemplateLibraryFile = () => {} } = {}) {
+  const handlers = new Map();
+  const activity = [];
+  // 与 main.js createErrorResult 同返回结构：界面只拿到 status / message 与报错文件信息，错误码只进报错文件与日志（从 errorResults 断言）
+  const errorResults = [];
+  const toErrorResult = (options) => {
+    errorResults.push(options);
+    return { status: 'error', message: options.message, errorReportReady: true, errorReportFileName: 'stub-error-report.xlsx' };
+  };
+  const scope = {
+    ...CONSTANTS,
+    ...main,
+    database,
+    normalizeCell,
+    normalizeFeatureFilterList,
+    normalizeBillSplitRowFilterRules,
+    normalizeRowFilterRules,
+    validateBillSplitRowFilterRules,
+    validateRowFilterRules,
+    PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
+    FileValidationError,
+    STATEMENT_CHANNEL_BUSINESS_ERROR_CODES: new Set(),
+    trackedIpcHandle: (channel, _moduleKey, _functionKey, handler) => handlers.set(channel, handler),
+    getEnumConfig: () => ({ filePath: 'COMMON枚举.xlsx' }),
+    loadEnumValues: () => ENUM_VALUES.slice(),
+    createErrorResult: toErrorResult,
+    createDetailedErrorResult: toErrorResult,
+    createPreflightErrorResult: toErrorResult,
+    createStatementChannelErrorResult: (_step, error) => toErrorResult({ errorCode: error.code, message: error.message }),
+    syncTemplateLibraryFile,
+    clearLastErrorReport: () => {},
+    appendActivityLogEntry: (entry) => activity.push(entry),
+    showImportOpenDialog: async () => ({ canceled: false, filePaths: [bundlePath] }),
+    createPreviewSourceFreshnessGuard: () => () => {},
+    dialog: { showMessageBox: async () => ({ response: 1 }) },
+    mainWindow: null,
+    ensureStorageRoot: () => '',
+    writeBigAccountOrder: () => {},
+    writeBigAccountMode: () => {},
+    restoreBundleFollowUpRounds: () => ({
+      channelRestore: { assignments: [], channels: [] },
+      restoreResult: { channelCount: 0, conflictCount: 0 }
+    }),
+    collectChannelBalanceModeWarnings: () => []
+  };
+  Function(...Object.keys(scope), `${HANDLER_SOURCE}\nreturn null;`)(...Object.values(scope));
+  return {
+    activity,
+    errorResults,
+    lastErrorCode: () => (errorResults.length ? errorResults[errorResults.length - 1].errorCode : ''),
+    saveMappings: (payload) => handlers.get('template:save-mappings')(null, payload),
+    async importBundle() {
+      const contract = handlers.get('template:import-bundle');
+      const prepared = await contract.prepare();
+      if (!prepared.proceed) return prepared.result;
+      prepared.beforeStart();
+      return contract.execute(null, prepared, { fileEvidence: { filePlan: prepared.filePlan } });
+    }
+  };
 }
 
 const openedDatabases = [];
@@ -215,16 +301,18 @@ function draftMappings() {
   }).map(([templateField, mappedField]) => ({ templateField, mappedField, mappedFields: [] }));
 }
 
-// 按界面【保存】口径：先经 validateTemplateConfiguration 校验，再写库（dateFormat 为 saveMappings 第 5 参）
-function saveTemplate(database, main, name, dateFormat) {
+// 经真实的 template:save-mappings 处理器保存（与映射关系管理【保存】同载荷）
+function saveTemplate(database, handlers, name, dateFormat) {
   const template = database.upsertTemplate({ name, sourceFileName: `${name}.xlsx`, headers: HEADERS });
-  const validated = main.validateTemplateConfiguration({
-    template: database.getTemplate(template.id),
-    mappings: draftMappings(),
-    enumValues: ENUM_VALUES
-  });
-  database.saveMappings(template.id, validated.mappings, [], [], dateFormat, null, {});
+  const result = handlers.saveMappings({ templateId: template.id, mappings: draftMappings(), dateFormat });
+  if (result.status !== 'success') throw new Error(`保存模板「${name}」失败：${handlers.lastErrorCode()} ${result.message}`);
   return database.getTemplate(template.id);
+}
+
+function dateFormatLogLines(handlers) {
+  return handlers.activity
+    .filter((entry) => entry.message === '模板日期格式已修改')
+    .map((entry) => entry.details.join('｜'));
 }
 
 function generateDates(main, templateId, sourcePath) {
@@ -243,21 +331,60 @@ function generateDates(main, templateId, sourcePath) {
 
 function verifyValues(database, main) {
   assertEq(Object.keys(CONSTANTS.TEMPLATE_DATE_FORMAT_LABELS), ['auto', 'DMY', 'MDY'], '① 主进程值域为 auto / DMY / MDY');
-  assertEq(['auto', 'DMY', 'MDY', ' MDY ', 'mdy', 'YMD', '', null, undefined, 1].map((value) => main.normalizeTemplateDateFormat(value)),
-    ['auto', 'DMY', 'MDY', 'MDY', '', '', '', '', '', ''], '① 值域外（含大小写不同、空值）视为无效');
-  // 界面下拉框只列日在前 / 月在前（不勾选为 auto），取值都在主进程值域内
-  const rendererSource = fs.readFileSync(path.join(ROOT, 'src', 'renderer', 'dialogs', 'configuration.js'), 'utf8');
-  const optionsBlock = rendererSource.match(/const TEMPLATE_DATE_FORMAT_OPTIONS = \[([\s\S]*?)\];/);
-  const rendererValues = optionsBlock ? [...optionsBlock[1].matchAll(/value: '([^']+)'/g)].map((match) => match[1]) : [];
-  assertEq(rendererValues, ['DMY', 'MDY'], '① 界面选项与主进程同值域');
+  assertEq(['auto', 'DMY', 'MDY', ' MDY ', 'mdy', 'YMD', '', null, undefined, 1, ['MDY'], { toString: () => 'MDY' }]
+    .map((value) => main.normalizeTemplateDateFormat(value)),
+  ['auto', 'DMY', 'MDY', 'MDY', '', '', '', '', '', '', '', ''], '① 值域外（含大小写不同、空值、非字符串）视为无效');
+  // 界面下拉框的实际选项（日在前 / 月在前）由 renderer lifecycle 的「日期格式」用例核对
 
   const fresh = database.upsertTemplate({ name: '新模板-日期格式', sourceFileName: 'fresh.xlsx', headers: HEADERS });
   assertEq(database.getTemplate(fresh.id).dateFormat, 'auto', '① 新模板默认 auto');
-  const template = saveTemplate(database, main, '月在前模板', 'MDY');
-  assertEq(template.dateFormat, 'MDY', '① saveMappings 写入 MDY');
-  database.saveMappings(template.id, database.getTemplateMappings(template.id).mappings, [], [], undefined, null, {});
-  assertEq(database.getTemplate(template.id).dateFormat, 'MDY', '① 未传日期格式时保持原值');
-  return template;
+}
+
+// 真实的 template:save-mappings 处理器：写入、留痕、保持原值与拒绝无效值
+function verifySaveHandler(database, main) {
+  const handlers = loadTemplateHandlers(database, main);
+  const template = saveTemplate(database, handlers, '月在前模板', 'MDY');
+  assertEq(template.dateFormat, 'MDY', '① 保存处理器写入 MDY');
+  assertEq(dateFormatLogLines(handlers), ['模板名：月在前模板｜日期格式：自动 → 月在前（mm/dd/yyyy）'], '① 取值变化时活动日志记录旧值与新值');
+
+  const kept = handlers.saveMappings({ templateId: template.id, mappings: draftMappings() });
+  assertEq([kept.status, database.getTemplate(template.id).dateFormat], ['success', 'MDY'], '① 未传日期格式时保持原值');
+  handlers.saveMappings({ templateId: template.id, mappings: draftMappings(), dateFormat: 'MDY' });
+  assertEq(dateFormatLogLines(handlers).length, 1, '① 取值未变化时不重复记录');
+
+  const invalid = handlers.saveMappings({ templateId: template.id, mappings: draftMappings(), dateFormat: 'XYZ' });
+  assertEq([invalid.status, invalid.message, handlers.lastErrorCode(), database.getTemplate(template.id).dateFormat],
+    ['error', '日期格式无效，请重新选择', 'TEMPLATE_DATE_FORMAT_INVALID', 'MDY'], '① 无效值拒绝保存且不改库');
+  const autoTemplate = database.upsertTemplate({ name: '数组日期格式', sourceFileName: 'array.xlsx', headers: [...HEADERS, '备注'] });
+  const arrayValue = handlers.saveMappings({ templateId: autoTemplate.id, mappings: draftMappings(), dateFormat: ['MDY'] });
+  assertEq([arrayValue.status, handlers.lastErrorCode(), database.getTemplate(autoTemplate.id).dateFormat], ['error', 'TEMPLATE_DATE_FORMAT_INVALID', 'auto'],
+    '① 非字符串（[\'MDY\']）拒绝保存，不会启用月在前');
+
+  // 落库后模板库文件同步失败：界面提示失败，但库内已是新值，变更须已留痕；修复后重试不重复记录
+  const failingSync = loadTemplateHandlers(database, main, {
+    syncTemplateLibraryFile: () => { throw Object.assign(new Error('EACCES: template-library.json'), { code: 'EACCES' }); }
+  });
+  const syncFailed = failingSync.saveMappings({ templateId: template.id, mappings: draftMappings(), dateFormat: 'DMY' });
+  assertEq([syncFailed.status, syncFailed.message, failingSync.lastErrorCode(), database.getTemplate(template.id).dateFormat],
+    ['error', '模板映射保存失败，请导出报错文件查看详情', 'TEMPLATE_MAPPING_SAVE_RUNTIME', 'DMY'], '① 模板库文件同步失败：提示失败，库内已是新值');
+  assertEq(dateFormatLogLines(failingSync), ['模板名：月在前模板｜日期格式：月在前（mm/dd/yyyy） → 日在前（dd/mm/yyyy）'],
+    '① 模板库文件同步失败时日期格式变更仍已留痕');
+  const retried = loadTemplateHandlers(database, main);
+  assertEq([retried.saveMappings({ templateId: template.id, mappings: draftMappings(), dateFormat: 'DMY' }).status, dateFormatLogLines(retried)],
+    ['success', []], '① 同步恢复后重试成功，不重复记录');
+
+  // 库内三档以外的旧值（旧版导入模板包时可能原样写入，解析按自动）：未传时保持；界面提交 auto 时按原值留痕
+  const legacy = database.upsertTemplate({ name: '旧值模板', sourceFileName: 'legacy.xlsx', headers: [...HEADERS, '旧值列'] });
+  database.db.prepare('UPDATE templates SET date_format = ? WHERE id = ?').run('XYZ', legacy.id);
+  const legacyHandlers = loadTemplateHandlers(database, main);
+  legacyHandlers.saveMappings({ templateId: legacy.id, mappings: draftMappings() });
+  assertEq([database.getTemplate(legacy.id).dateFormat, dateFormatLogLines(legacyHandlers)], ['XYZ', []], '① 库内旧值：未传日期格式时保持，不留痕');
+  legacyHandlers.saveMappings({ templateId: legacy.id, mappings: draftMappings(), dateFormat: 'auto' });
+  assertEq([database.getTemplate(legacy.id).dateFormat, dateFormatLogLines(legacyHandlers)],
+    ['auto', ['模板名：旧值模板｜日期格式：无效值「XYZ」（按自动解析） → 自动']], '① 库内旧值改为自动时按原值留痕');
+
+  saveTemplate(database, retried, '月在前模板', 'MDY');
+  return database.getTemplate(template.id);
 }
 
 function verifyHeaderUpdate(database, template) {
@@ -271,8 +398,9 @@ function verifyGeneration(dir, database, main, mdyTemplate) {
   const csvPath = path.join(dir, 'source.csv');
   writeXlsxSource(xlsxPath);
   writeCsvSource(csvPath);
-  const autoTemplate = saveTemplate(database, main, '自动模板', 'auto');
-  const dmyTemplate = saveTemplate(database, main, '日在前模板', 'DMY');
+  const handlers = loadTemplateHandlers(database, main);
+  const autoTemplate = saveTemplate(database, handlers, '自动模板', 'auto');
+  const dmyTemplate = saveTemplate(database, handlers, '日在前模板', 'DMY');
   for (const [label, sourcePath] of [['xlsx', xlsxPath], ['csv', csvPath]]) {
     assertEq(generateDates(main, mdyTemplate.id, sourcePath), { dateParseOrder: 'MDY', dates: EXPECTED.MDY },
       `③ 月在前（${label}）：09/10/2026 → 2026-09-10，BillDate 与 ValueDate 同口径`);
@@ -282,43 +410,45 @@ function verifyGeneration(dir, database, main, mdyTemplate) {
   }
 }
 
-function verifyBundle(dir, database, main, template) {
-  const entry = database.listTemplateBundleEntries().find((item) => item.name === template.name);
-  assertEq(entry && entry.dateFormat, 'MDY', '④ 模板包条目带 dateFormat');
-  assertEq(main.resolveTemplateBundleVersion([entry]), CONSTANTS.BASE_BUNDLE_VERSION, '④ 只用到日期格式时不升模板包版本（v5）');
-
+async function verifyBundle(dir, database, main, template) {
+  // 只含月在前模板的库经生产导出函数（writeTemplateBundleFile → buildTemplateLibraryPayload）写出模板包
+  const source = openDatabase(path.join(dir, 'export.sqlite'));
+  const sourceMain = createMain(source);
+  saveTemplate(source, loadTemplateHandlers(source, sourceMain), template.name, 'MDY');
   const bundlePath = path.join(dir, 'bundle.json');
-  fs.writeFileSync(bundlePath, JSON.stringify({ bundleVersion: main.resolveTemplateBundleVersion([entry]), channels: [], templates: [entry] }), 'utf8');
-  const readEntry = main.readTemplateBundleFile(bundlePath).templates[0];
-  assertEq(readEntry.dateFormat, 'MDY', '④ 读包保留月在前');
+  sourceMain.writeTemplateBundleFile(bundlePath);
+  const exported = JSON.parse(fs.readFileSync(bundlePath, 'utf8'));
+  const entry = exported.templates[0];
+  assertEq([exported.bundleVersion, exported.templates.map((item) => item.dateFormat)], [CONSTANTS.BASE_BUNDLE_VERSION, ['MDY']],
+    '④ 导出的模板包带 dateFormat，只用到日期格式时不升版本（v5）');
+  closeDatabase(source);
 
+  // 经真实的 template:import-bundle 处理器（prepare 读包 → execute 写库）导入另一个库
   const target = openDatabase(path.join(dir, 'import.sqlite'));
   const targetMain = createMain(target);
-  const imported = target.upsertTemplate({ templateKey: entry.templateKey, name: entry.name, sourceFileName: entry.sourceFileName, headers: entry.headers });
-  // 按导入口径：读包映射经 normalizeMappingRows → validateTemplateConfiguration 后保存，dateFormat 规范化后为第 5 参
-  const normalized = targetMain.normalizeMappingRows({ template: target.getTemplate(imported.id), mappings: readEntry.mappings, enumValues: ENUM_VALUES });
-  const validated = targetMain.validateTemplateConfiguration({ template: target.getTemplate(imported.id), mappings: normalized, enumValues: ENUM_VALUES });
-  target.saveMappings(imported.id, validated.mappings, [], [], importDateFormat(targetMain, readEntry), null, { preserveOwn: false });
-  assertEq(target.getTemplate(imported.id).dateFormat, 'MDY', '④ 导入后日期格式为月在前');
+  const imported = await loadTemplateHandlers(target, targetMain, { bundlePath }).importBundle();
+  const importedTemplate = target.getTemplateByKey(entry.templateKey);
+  assertEq([imported.status, importedTemplate && importedTemplate.dateFormat], ['success', 'MDY'], '④ 导入后日期格式为月在前');
   const sourcePath = path.join(dir, 'source.xlsx');
-  assertEq(generateDates(targetMain, imported.id, sourcePath), generateDates(main, template.id, sourcePath), '④ 模板包往返后生成结果一致');
+  assertEq(generateDates(targetMain, importedTemplate.id, sourcePath), generateDates(main, template.id, sourcePath), '④ 模板包往返后生成结果一致');
   closeDatabase(target);
 
-  const variants = ['DMY', 'auto', 'XYZ', '', undefined];
+  // 包内取值：日在前原样保留；无效值、缺省与非字符串（字符串化后等于 MDY）按 auto。各条表头不同，免被表头重复跳过
+  const variants = ['DMY', 'auto', 'XYZ', '', undefined, ['MDY'], 1];
   fs.writeFileSync(bundlePath, JSON.stringify({
     bundleVersion: CONSTANTS.BASE_BUNDLE_VERSION,
     channels: [],
-    templates: variants.map((dateFormat, index) => ({ ...entry, templateKey: `variant-${index}`, name: `变体-${index}`, dateFormat }))
+    templates: variants.map((dateFormat, index) => ({
+      ...entry, templateKey: `variant-${index}`, name: `变体-${index}`, headers: [...entry.headers, `变体列${index}`], dateFormat
+    }))
   }), 'utf8');
-  assertEq(main.readTemplateBundleFile(bundlePath).templates.map((item) => importDateFormat(main, item)), ['DMY', 'auto', 'auto', 'auto', 'auto'],
-    '④ 导入：日在前原样保留，无效值与缺省按 auto');
-  // 导入处理器（IPC，不在本脚本加载范围）须按同一口径写库
-  assertEq(MAIN_SOURCE.includes("normalizeTemplateDateFormat(entry.dateFormat) || 'auto',"), true, '④ 导入模板包时按同一口径规范化日期格式');
-}
-
-// 与 main.js 导入模板包处理器同口径
-function importDateFormat(main, entry) {
-  return main.normalizeTemplateDateFormat(entry.dateFormat) || 'auto';
+  const variantTarget = openDatabase(path.join(dir, 'variants.sqlite'));
+  const variantResult = await loadTemplateHandlers(variantTarget, createMain(variantTarget), { bundlePath }).importBundle();
+  assertEq([variantResult.status, variants.map((_value, index) => {
+    const item = variantTarget.getTemplateByKey(`variant-${index}`);
+    return item ? item.dateFormat : null;
+  })], ['success', ['DMY', 'auto', 'auto', 'auto', 'auto', 'auto', 'auto']], '④ 导入：日在前原样保留，无效值、缺省与非字符串按 auto');
+  closeDatabase(variantTarget);
 }
 
 async function run() {
@@ -327,10 +457,11 @@ async function run() {
   try {
     const database = openDatabase(path.join(dir, 'main.sqlite'));
     const main = createMain(database);
-    const template = verifyValues(database, main);
+    verifyValues(database, main);
+    const template = verifySaveHandler(database, main);
     verifyHeaderUpdate(database, template);
     verifyGeneration(dir, database, main, template);
-    verifyBundle(dir, database, main, template);
+    await verifyBundle(dir, database, main, template);
   } finally {
     openedDatabases.splice(0).forEach((database) => {
       try { database.close(); } catch (_error) { /* 已关闭 */ }
