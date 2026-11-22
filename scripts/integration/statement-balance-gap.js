@@ -164,7 +164,9 @@ function loadRegenerateFunction(deps) {
     getStatementSessionEntries: deps.getStatementSessionEntries,
     groupStatementEntriesForGeneration: deps.groupStatementEntriesForGeneration,
     buildStatementGenerationConfig: deps.buildStatementGenerationConfig,
-    buildPreparedStatementBatchFromEntries: deps.buildPreparedStatementBatchFromEntries
+    buildPreparedStatementBatchFromEntries: deps.buildPreparedStatementBatchFromEntries,
+    assertStatementBatchWritable: deps.statementGenerationHelpers.assertStatementBatchWritable,
+    FileValidationError
   });
   const assertVirtualTemplateBalanceOutputPaths = loadMainFunction('assertVirtualTemplateBalanceOutputPaths', {
     findGenerationGroupOutputPathConflicts: deps.findGenerationGroupOutputPathConflicts,
@@ -362,6 +364,8 @@ async function verifyMultiTemplateImportHoldsPartialBalance(dir) {
     buildStatementGenerationConfig: buildGenerationConfig,
     rebuildMatchedTemplateFileEntries: ({ fileEntries: entries }) => entries,
     buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
+    assertStatementBatchWritable: generation.assertStatementBatchWritable,
+    FileValidationError,
     removeStatementSessionEntriesByFilePath: () => {},
     generateStatementFiles: generation.generateStatementFiles,
     parseRequiredBillDates,

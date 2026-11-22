@@ -23,6 +23,7 @@ const {
   writeBalanceWorkbook,
   writeWorkbookRows
 } = require('../backend/file-service');
+const { isZeroOrBlankAmount } = require('../backend/file-service/normalizers');
 const {
   cloneRowsWithMetadata,
   getStatementSessionEntries,
@@ -31,7 +32,10 @@ const {
 } = require('./statement-session');
 const {
   createStatementGenerationHelpers,
+  noValidBillDateError,
+  parseRequiredBillDateCell,
   pendingBalanceSeedAccounts,
+  requireBillDateIndex,
   statementOutputName
 } = require('./statement-generation');
 
@@ -62,18 +66,15 @@ function buildFieldIndexMap(headerRow) {
   return result;
 }
 
+// 必填口径与写出前的只读校验共用（见 statement-generation.js 的 requireBillDateIndex、parseRequiredBillDateCell）
 function parseRequiredBillDates(detailRows) {
-  const index = buildFieldIndexMap(detailRows[0] || []).get('BillDate');
-  if (index === undefined) throw new FileValidationError('FILE_READ', '当前模板必须映射 BillDate 字段');
+  const index = requireBillDateIndex(detailRows[0] || []);
   const dates = [];
   for (const row of detailRows.slice(1)) {
-    const raw = row[index];
-    if (!normalizeCell(raw)) continue;
-    const parsed = parseDateValue(raw);
-    if (!parsed) throw new FileValidationError('FILE_READ', `账单日期存在无效值：${normalizeCell(raw)}`);
-    dates.push(formatDateLabel(parsed));
+    const parsed = parseRequiredBillDateCell(row[index]);
+    if (parsed) dates.push(formatDateLabel(parsed));
   }
-  if (!dates.length) throw new FileValidationError('FILE_READ', '导入文件中未找到有效的 BillDate');
+  if (!dates.length) throw noValidBillDateError();
   return dates;
 }
 
@@ -262,11 +263,86 @@ function indexManualBalanceSeeds(existingBalanceSeeds, seenManualBalanceSeeds = 
   return index;
 }
 
+// 余额链的账户键：MerchantId + 币种（均已规整）。deriveBalanceRecords、scanBalanceSeedStatus 与
+//   resolveAccountBalanceModes 共用，保证按账户取余额方式时与余额分组同口径。
+function balanceAccountKey(merchantId, currency) {
+  return `${merchantId}@@${currency}`;
+}
+
+const BALANCE_MODE_ORDER = Object.freeze(['none', 'statement', 'calculated']);
+
+// v3.2.21（D2、D3）：渠道组内子模板余额方式不同时，按条目（各自子模板的余额方式）收集账户 → 余额方式。
+//   entries：[{ templateName, balanceMode: 'none' | 'statement' | 'calculated', detailRows }]
+//   同一账户出现在不同余额方式的条目中即为冲突。不参与判断的行：
+//   - MerchantId 或账单日期为空：无法归属账户（如多大账号模板在选择大账号之前的临时行），选定账号后生成前再判断一次；
+//   - 收支都为空或 0 的行（口径同 buildDetailExportRows 跳过的行）：不进明细也不进余额。收支同时有值的行照常参与，
+//     它会让生成报错，不能因跳过它而放行冲突、让多组生成先写出前几组。
+//   判断冲突时币种不区分大小写（同一账户的 usd / USD 是同一条余额链）；modeByAccount 仍按余额分组的原样账户键
+//   （balanceAccountKey），不改变种子查找口径。
+function resolveAccountBalanceModes(entries = []) {
+  const accounts = new Map();
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const rows = entry && Array.isArray(entry.detailRows) ? entry.detailRows : [];
+    if (rows.length < 2) continue;
+    const indexes = buildFieldIndexMap(Array.isArray(rows[0]) ? rows[0] : []);
+    const merchantIndex = indexes.get('MerchantId');
+    const dateIndex = indexes.get('BillDate');
+    const currencyIndex = indexes.get('Currency');
+    const creditIndex = indexes.get('Credit Amount');
+    const debitIndex = indexes.get('Debit Amount');
+    if (merchantIndex === undefined || dateIndex === undefined) continue;
+    for (const row of rows.slice(1)) {
+      if (!Array.isArray(row)) continue;
+      const merchantId = normalizeCell(row[merchantIndex]);
+      if (!merchantId || !normalizeCell(row[dateIndex])) continue;
+      if (
+        creditIndex !== undefined && debitIndex !== undefined
+        && isZeroOrBlankAmount(row[creditIndex]) && isZeroOrBlankAmount(row[debitIndex])
+      ) continue;
+      const currency = currencyIndex === undefined ? '' : normalizeCell(row[currencyIndex]);
+      const compareKey = balanceAccountKey(merchantId, currency.toUpperCase());
+      if (!accounts.has(compareKey)) {
+        accounts.set(compareKey, { merchantId, currency, keys: new Set(), modes: new Set(), templates: new Map() });
+      }
+      const account = accounts.get(compareKey);
+      account.keys.add(balanceAccountKey(merchantId, currency));
+      account.modes.add(entry.balanceMode);
+      const templateKey = `${entry.templateName}@@${entry.balanceMode}`;
+      if (!account.templates.has(templateKey)) {
+        account.templates.set(templateKey, { templateName: entry.templateName, balanceMode: entry.balanceMode });
+      }
+    }
+  }
+  const modeByAccount = {};
+  const conflicts = [];
+  for (const account of accounts.values()) {
+    if (account.modes.size === 1) {
+      const mode = [...account.modes][0];
+      account.keys.forEach((key) => { modeByAccount[key] = mode; });
+      continue;
+    }
+    conflicts.push({
+      merchantId: account.merchantId,
+      currency: account.currency,
+      templates: [...account.templates.values()].sort((left, right) => (
+        BALANCE_MODE_ORDER.indexOf(left.balanceMode) - BALANCE_MODE_ORDER.indexOf(right.balanceMode)
+      ))
+    });
+  }
+  conflicts.sort((left, right) =>
+    left.merchantId.localeCompare(right.merchantId, 'zh-Hans-CN') ||
+    left.currency.localeCompare(right.currency, 'zh-Hans-CN'));
+  return { modeByAccount, conflicts };
+}
+
 function deriveBalanceRecords({
   detailRows,
   templateName,
   balanceTemplateFields,
   mode = 'statement',
+  // v3.2.21（D2）：账户键 → 余额方式。给出时各账户按自己的方式生成（渠道组内子模板余额方式不同）；
+  //   表中没有的账户按 mode。不给时全部按 mode，行为与此前一致。
+  modeByAccount = null,
   resolvePreviousBalanceSeed = null,
   balanceAdjustments = [],
   acknowledgedBalanceGapKeys = null,
@@ -280,8 +356,13 @@ function deriveBalanceRecords({
   const dateIndex = indexes.get('BillDate');
   const merchantIndex = indexes.get('MerchantId');
   const rowMetas = Array.isArray(detailRows.rowMetas) ? detailRows.rowMetas : [];
-  if (mode === 'statement' && balanceIndex === undefined) {
-    throw new FileValidationError('FILE_READ', '当前模板未配置 Balance 字段，无法生成余额账单');
+  const accountModes = modeByAccount && typeof modeByAccount === 'object' ? modeByAccount : null;
+  const resolveAccountMode = (key) => (
+    accountModes && Object.prototype.hasOwnProperty.call(accountModes, key) ? accountModes[key] : mode
+  );
+  const missingBalanceColumnError = () => new FileValidationError('FILE_READ', '当前模板未配置 Balance 字段，无法生成余额账单');
+  if (!accountModes && mode === 'statement' && balanceIndex === undefined) {
+    throw missingBalanceColumnError();
   }
   if (dateIndex === undefined) throw new FileValidationError('FILE_READ', '当前模板必须映射 BillDate 字段');
   if (merchantIndex === undefined) {
@@ -304,12 +385,16 @@ function deriveBalanceRecords({
     }
     const dateLabel = formatDateLabel(parsedDate);
     const currency = normalizeCell(row[indexes.get('Currency')]);
-    const key = `${merchantId}@@${currency}`;
-    if (!groups.has(key)) groups.set(key, { merchantId, currency, dates: new Map() });
+    const key = balanceAccountKey(merchantId, currency);
+    const accountMode = resolveAccountMode(key);
+    // 不出余额的账户只进明细（调用方通常已剔除，这里兜底）。
+    if (accountMode === 'none') return;
+    if (accountMode === 'statement' && balanceIndex === undefined) throw missingBalanceColumnError();
+    if (!groups.has(key)) groups.set(key, { merchantId, currency, mode: accountMode, dates: new Map() });
     const group = groups.get(key);
     if (!group.dates.has(dateLabel)) group.dates.set(dateLabel, []);
     group.dates.get(dateLabel).push({
-      balanceValue: mode === 'statement' ? numeric(row[balanceIndex], `${dateLabel} 的 Balance`, true) : null,
+      balanceValue: accountMode === 'statement' ? numeric(row[balanceIndex], `${dateLabel} 的 Balance`, true) : null,
       creditAmount: numeric(row[indexes.get('Credit Amount')], `${dateLabel} 的 Credit Amount`, false),
       debitAmount: numeric(row[indexes.get('Debit Amount')], `${dateLabel} 的 Debit Amount`, false)
     });
@@ -344,6 +429,7 @@ function deriveBalanceRecords({
   const pendingBalanceSeedReplacements = [];
   const confirmedBalanceSeedReplacements = [];
   for (const group of orderedGroups) {
+    const groupMode = group.mode;
     let previousEndBalance = null;
     let previousStatementBalance = null;
     let previousDate = null;
@@ -352,7 +438,7 @@ function deriveBalanceRecords({
       const entries = group.dates.get(dateLabel);
       const prompt = balancePrompt(templateName, bank.bankName, group.merchantId, group.currency, dateLabel);
       let endBalance;
-      if (mode === 'calculated') {
+      if (groupMode === 'calculated') {
         let anchor = null;
         if (previousDate === null) {
           const seed = requireSeedRecord(resolvePreviousBalanceSeed, prompt);
@@ -469,7 +555,7 @@ function deriveBalanceRecords({
       const cumulative = resolveBalanceAdjustment(balanceAdjustments, {
         merchantId: group.merchantId, currency: group.currency, dateLabel
       });
-      if (mode === 'calculated') {
+      if (groupMode === 'calculated') {
         // 发生额计算沿用上一日已调整余额，只叠加附加值增量（跨导入口径见 backlog B32，未改）。
         const incrementalAdjustment = Math.round((cumulative - lastAdjustment) * 100) / 100;
         if (incrementalAdjustment && endBalance !== null) {
@@ -491,7 +577,7 @@ function deriveBalanceRecords({
             merchantId: group.merchantId,
             currency: group.currency,
             billDate: dateLabel,
-            balanceSource: mode === 'calculated' ? 'calculated' : 'statement',
+            balanceSource: groupMode === 'calculated' ? 'calculated' : 'statement',
             manualBalance: manualSeed.endBalance,
             balance: originalBalance,
             difference,
@@ -517,7 +603,7 @@ function deriveBalanceRecords({
       }));
       seedRecords.push({
         merchantId: group.merchantId, currency: group.currency, billDate: dateLabel, endBalance,
-        generationMethod: mode === 'calculated'
+        generationMethod: groupMode === 'calculated'
           ? BALANCE_SEED_GENERATION_METHODS.calculated
           : BALANCE_SEED_GENERATION_METHODS.statement
       });
@@ -565,7 +651,7 @@ function scanBalanceSeedStatus({ detailRows, templateName }, storageRoot) {
     const parsed = parseDateValue(row[dateIndex]);
     if (!merchantId || !parsed) continue;
     const dateLabel = formatDateLabel(parsed);
-    const key = `${merchantId}@@${currency}`;
+    const key = balanceAccountKey(merchantId, currency);
     if (!earliest.has(key) || dateLabel < earliest.get(key).dateLabel) {
       earliest.set(key, { merchantId, currency, dateLabel });
     }
@@ -895,5 +981,6 @@ module.exports = {
   createGenerationHelpers,
   deriveBalanceRecords,
   parseRequiredBillDates,
+  resolveAccountBalanceModes,
   scanBalanceSeedStatus
 };

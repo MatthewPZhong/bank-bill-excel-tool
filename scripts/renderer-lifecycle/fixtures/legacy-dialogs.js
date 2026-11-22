@@ -152,6 +152,22 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     assert.ok((await js(`legacy.top().textContent`)).includes(rejected.message), rejected.message);
   });
 
+  // v3.2.21：完成大账号选择时才发现渠道同一账户命中余额方式不同的子模板（未开始即拒绝）：弹窗逐账户列出，不按失败的导入处理
+  await test('大账号选择完成时渠道余额方式冲突：提示列出冲突账户并释放本次选择', async () => {
+    await setup();
+    const rejected = { status: 'error', errorCode: 'CHANNEL_BALANCE_MODE_MISMATCH', preservesSession: true,
+      message: '渠道「招商银行-上海」下同一账户命中了余额方式不同的子模板，无法生成余额，请分开导入或在映射关系管理中统一',
+      detailLines: ['账户 M201（USD）：CMB-SH（取账单余额列）、招商银行-上海（通过发生额计算）'] };
+    await js(`legacy.complete=legacy.deferred();legacy.cancellation=legacy.deferred();legacy.cancellation.resolve({status:'success'});legacy.openBigAccount();`); await settle();
+    await js(`legacy.overlay.querySelector('.big-account-order-checkbox').click();legacy.overlay.querySelector('[data-action="done"]').click();
+      legacy.complete.resolve(${JSON.stringify(rejected)});`); await settle();
+    assert.deepEqual(await js(`({applied:legacy.calls.applied.length,cancel:legacy.calls.cancel,selectionOpen:legacy.handle.isOpen()})`), {
+      applied: 0, cancel: ['selection-fixture-token'], selectionOpen: false
+    });
+    const text = await js(`legacy.top().textContent`);
+    assert.ok(text.includes(rejected.message) && text.includes(rejected.detailLines[0]), text);
+  });
+
   // v3.2.15（release 复审）：后端判定记住的顺序不能按位置套用到本次文件（forceMode）后，
   //   首次打开和手动切回“账号顺序固定”都不能再预填旧分配，否则直接点完成会把账号 / 币种填到别的文件或块上。
   await test('后端判定记住的顺序不适用时首次打开和手动切回固定模式都不预填旧顺序', async () => {

@@ -947,6 +947,18 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       ['M001:1234.5','M002:88','M002:88']);
     assert.equal(await js('document.getElementById("modalRoot").children.length'), 0);
   });
+  // v3.2.21：补录后重算遇到渠道余额终态错误（主进程已清除待补录提示，明细已由 applyStatementResult 弹窗列出）：
+  //   关闭已失效的补录窗口，不再弹出摘要
+  await test('手工补录后重算遇到渠道余额错误：关闭已失效的补录窗口，不再弹摘要', async () => {
+    await setup();
+    await js(`cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog({templateName:'模板 A',merchantId:'M001',currency:'USD',targetBillDate:'2026-10-01'})).handle;
+      cfg.top().querySelector('.manual-balance-date-input').value='2026-09-30';cfg.top().querySelector('.manual-balance-amount-input').value='1000';
+      cfg.next.seed={status:'error',errorCode:'CHANNEL_BALANCE_ROWS_INCOMPLETE',message:'渠道「招商银行-上海」出余额的子模板有交易缺少账单日期或 MerchantId',
+        detailLines:['文件「b.xlsx」（子模板「CMB-SH」）第2行：缺少 MerchantId（账单日期：2026-09-01）']};
+      cfg.top().querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js(`({open:cfg.handle.isOpen(),applied:cfg.applied,count:document.getElementById('modalRoot').children.length})`),
+      {open:false,applied:1,count:0});
+  });
   await test('手工补录完成遇到 busy：保留弹窗与已填日期、余额，不清状态；重试成功后关闭', async () => {
     await setup();
     await js(`cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createManualBalanceSeedDialog({templateName:'模板 A',merchantId:'M001',currency:'VND',targetBillDate:'2026-10-01'})).handle;
