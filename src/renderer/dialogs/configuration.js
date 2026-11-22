@@ -5481,8 +5481,20 @@
         let latest;
         try { latest = await api.templates.getBillSplitConfig(payload.template.id, { openRestoreSession: true }); }
         catch (error) { latest = { status: 'error', message: error?.message || '读取拆分配置失败' }; }
+        // v3.2.21：读取时主进程已开启撤销会话并签发令牌；行管理窗口没有创建（请求失效、父层结束或开始写入等）时
+        //   不会有 onDispose 结束会话，按回包令牌在这里结束（只结束该令牌所属的会话，不影响更新的打开请求）。
+        const issuedRestoreToken = typeof latest?.restoreToken === 'string' ? latest.restoreToken : '';
+        const releaseIssuedRestoreToken = () => {
+          if (!issuedRestoreToken) return;
+          try {
+            Promise.resolve(api.templates.getBillSplitConfig(payload.template.id, { endRestoreSession: issuedRestoreToken })).catch(() => {});
+          } catch (_error) { /* ignore */ }
+        };
         if (!handle.isOpen() || !handle.isTop() || request !== billSplitRowsOpenRequest
-          || writeEpoch !== mappingWriteEpoch || entryButton?.disabled || entryButton?.hidden) return;
+          || writeEpoch !== mappingWriteEpoch || entryButton?.disabled || entryButton?.hidden) {
+          releaseIssuedRestoreToken();
+          return;
+        }
         // 公共关闭不一定经过子层按钮回调；每次进入从 Main 重读，失败不采用旧行缓存。
         if (latest?.status !== 'success') {
           pushModal(handle, () => createAlertDialog(latest?.message || '读取拆分配置失败', { onConfirm: null }));
@@ -5496,35 +5508,45 @@
         currentBillSplitRows = latest.billSplitRows || [];
         currentBillSplitAmountRules = latest.billSplitAmountRules || [];
         currentBillSplitMeta = latest.billSplitMeta || { signedAmountSourceField: '' };
-        pushModal(handle, () => createBillSplitRowsDialog({
-          template: payload.template,
-          initialRows: currentBillSplitRows,
-          initialAmountRules: currentBillSplitAmountRules,
-          initialBillSplitMeta: currentBillSplitMeta,
-          // v3.2.21：字段映射特殊处理可选的模板字段（同拆分/合并账单映射关系设置，再排除账户号、币种、发生额、余额、BillDate）
-          feeFieldMappingTemplateFields: buildFeeFieldMappingTemplateFields({
-            targetFields: payload.targetFields || [],
-            excludedFields: [...preprocessFields, ...advancedMappingFields, ...billSplitGroupFields]
-          }),
-          restoreToken: latest.restoreToken || null,
-          onClose: async (returnScope) => {
-            // Re-read the latest bill-split config from DB (行级落库保证一致)
-            try {
-              // v3.2.21：关闭行管理即结束撤销会话（旧令牌失效）
-              const latest = await api.templates.getBillSplitConfig(payload.template.id, { endRestoreSession: true });
-              if (returnScope && !returnScope.isCurrent()) return;
-              if (latest && latest.status === 'success') {
-                currentBillSplitRows = latest.billSplitRows || [];
-                currentBillSplitAmountRules = latest.billSplitAmountRules || [];
-                currentBillSplitMeta = latest.billSplitMeta || { signedAmountSourceField: '' };
+        let rowsDialogCreated = false;
+        try {
+          pushModal(handle, () => {
+            const rowsOverlay = createBillSplitRowsDialog({
+              template: payload.template,
+              initialRows: currentBillSplitRows,
+              initialAmountRules: currentBillSplitAmountRules,
+              initialBillSplitMeta: currentBillSplitMeta,
+              // v3.2.21：字段映射特殊处理可选的模板字段（同拆分/合并账单映射关系设置，再排除账户号、币种、发生额、余额、BillDate）
+              feeFieldMappingTemplateFields: buildFeeFieldMappingTemplateFields({
+                targetFields: payload.targetFields || [],
+                excludedFields: [...preprocessFields, ...advancedMappingFields, ...billSplitGroupFields]
+              }),
+              restoreToken: latest.restoreToken || null,
+              onClose: async (returnScope) => {
+                // Re-read the latest bill-split config from DB (行级落库保证一致)
+                try {
+                  // v3.2.21：撤销会话由行管理窗口释放时结束（见 createBillSplitRowsDialog），这里只重读配置
+                  const latest = await api.templates.getBillSplitConfig(payload.template.id);
+                  if (returnScope && !returnScope.isCurrent()) return;
+                  if (latest && latest.status === 'success') {
+                    currentBillSplitRows = latest.billSplitRows || [];
+                    currentBillSplitAmountRules = latest.billSplitAmountRules || [];
+                    currentBillSplitMeta = latest.billSplitMeta || { signedAmountSourceField: '' };
+                  }
+                } catch (_error) { /* ignore */ }
+                // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
+                // 虽然 ...payload spread 会自动带过来，显式声明可防未来 spread 漏写 / payload 形状重构
+                if (returnScope && !returnScope.isCurrent()) return;
+                returnToModal(overlay);
               }
-            } catch (_error) { /* ignore */ }
-            // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
-            // 虽然 ...payload spread 会自动带过来，显式声明可防未来 spread 漏写 / payload 形状重构
-            if (returnScope && !returnScope.isCurrent()) return;
-            returnToModal(overlay);
-          }
-        }));
+            });
+            // 创建后由窗口自己的 onDispose 结束会话（含挂载失败时宿主的释放）
+            rowsDialogCreated = true;
+            return rowsOverlay;
+          });
+        } finally {
+          if (!rowsDialogCreated) releaseIssuedRestoreToken();
+        }
       }
 
       function openBillSplitRowFilterDialog() {
@@ -6656,6 +6678,13 @@
         else seen.add(group.templateField);
         if (group.valueType === 'input' && !group.value) errors.push(`${label}：请输入映射值`);
         if (group.valueType === 'input' && group.value.length > 32767) errors.push(`${label}：映射值超过 32767 个字符（Excel 单元格上限）`);
+        // 同主进程 hasWorksheetEscapeLikeText：模拟写出（控制字符编码为 _xHHHH_）再读回（_xHHHH_ 还原），与原文不同即会被改写
+        if (group.valueType === 'input' && /_x/i.test(group.value)) {
+          const written = group.value.replace(/[\u0000-\u0008\u000b-\u001f]/g, (char) => `_x${char.charCodeAt(0).toString(16).padStart(4, '0')}_`);
+          if (written.replace(/_x([\da-f]{4})_/gi, (_match, code) => String.fromCharCode(parseInt(code, 16))) !== group.value) {
+            errors.push(`${label}：映射值含写入 Excel 后会被改写的文本（形如 _x0041_，或与回车等控制字符相连后构成此形式），请修改`);
+          }
+        }
         if (!BILL_SPLIT_FEE_FIELD_MAPPING_VALUE_TYPES.includes(group.valueType)) errors.push(`${label}：映射字段无效，请重新选择`);
       });
       return errors;
@@ -6720,15 +6749,18 @@
       function syncStaleMark(select) {
         select.classList.toggle('is-stale', select.selectedOptions[0]?.dataset.stale === 'true');
       }
+      let rowLabelSeq = 0;
       function appendRow(item = {}) {
         const row = document.createElement('div');
         row.className = 'bill-split-fee-field-mapping-item';
+        // 每行的两个下拉框按 id 关联各自的标签（读屏可区分模板字段与映射字段；删行后其余行的关联不变）
+        const labelId = `bill-split-fee-field-mapping-${++rowLabelSeq}`;
         row.innerHTML = `
-          <span class="bill-split-fee-field-mapping-label">模板字段</span>
-          <select class="mapping-select bill-split-fee-field-mapping-template-select"></select>
-          <span class="bill-split-fee-field-mapping-label">映射字段</span>
-          <select class="mapping-select bill-split-fee-field-mapping-value-select"></select>
-          <input type="text" class="mapping-text-input bill-split-fee-field-mapping-input" placeholder="请输入映射值" hidden />
+          <span class="bill-split-fee-field-mapping-label" id="${labelId}-template">模板字段</span>
+          <select class="mapping-select bill-split-fee-field-mapping-template-select" aria-labelledby="${labelId}-template"></select>
+          <span class="bill-split-fee-field-mapping-label" id="${labelId}-value">映射字段</span>
+          <select class="mapping-select bill-split-fee-field-mapping-value-select" aria-labelledby="${labelId}-value"></select>
+          <input type="text" class="mapping-text-input bill-split-fee-field-mapping-input" placeholder="请输入映射值" aria-label="映射值" hidden />
         `;
         const templateSelect = row.querySelector('.bill-split-fee-field-mapping-template-select');
         const valueSelect = row.querySelector('.bill-split-fee-field-mapping-value-select');
@@ -7208,18 +7240,77 @@
       const parentHandle = () => modalBridge.host.getHandle(overlay);
       const isCurrent = (target = overlay) => Boolean(parentHandle()?.isOpen() && modalBridge.host.getHandle(target)?.isTop());
       const canInteract = () => !configurationNeedsReload && !activeWrite && !closing && isCurrent();
+      // v3.2.21：挂载即激活本窗口的撤销会话（同模板其他会话作废，同一时间只有当前窗口能撤销）。激活须成功才允许写入：
+      //   本窗口的会话可能在挂载前已被迟到的旧打开请求挤掉，此时写入后【返回】无法撤销；激活失败（含 IPC 异常）即暂停
+      //   本窗口配置写入，提示关闭后重新打开（【返回】/ × 只关闭）。写入口经 runWrite 等待激活结果。
+      //   没有令牌（主入口不会这样打开，仅界面预览）时不激活、不提示，写入同样被拒。
+      const RESTORE_UNAVAILABLE_MESSAGE = '未能建立【返回】的撤销点，暂不能编辑。请关闭后重新打开';
+      const CONFIGURATION_RELOAD_MESSAGE = '当前配置未能重新读取，已暂停保存。请关闭后重新打开以确认';
+      // v3.2.21：子窗（【设置】）的保存已生效但模板库文件同步失败时，提示等子窗关闭、回到行管理后再显示（见 showPendingLibrarySyncNotice）
+      let pendingLibrarySyncNotice = '';
+      function showPendingLibrarySyncNotice() {
+        const notice = pendingLibrarySyncNotice;
+        pendingLibrarySyncNotice = '';
+        if (notice && isCurrent()) pushModal(parentHandle(), () => createAlertDialog(notice, { onConfirm: null, logLevel: 'warning' }));
+      }
+      let restoreActivation = Promise.resolve(false);
+      // pending：激活回包未到；activated / failed：已有结果（无令牌时为 failed，但不主动提示）
+      let restoreActivationState = 'failed';
+      let restoreActivationFailed = false;
+      function activateRestoreSession() {
+        if (!restoreToken) return;
+        restoreActivationState = 'pending';
+        restoreActivation = (async () => {
+          try {
+            const activated = await api.templates.getBillSplitConfig(templateId, { activateRestoreSession: restoreToken });
+            return activated?.status === 'success' && activated.restoreSessionActivated === true;
+          } catch (_error) {
+            return false;
+          }
+        })();
+        restoreActivation.then((activated) => {
+          restoreActivationState = activated ? 'activated' : 'failed';
+          if (activated || !parentHandle()?.isOpen()) return;
+          restoreActivationFailed = true;
+          configurationNeedsReload = true;
+          revertBlocked = true;
+          // 写入进行中时由 runWrite 报错并在结束后锁定；空闲时立即锁定并提示到当前栈顶——行管理本身，或已打开的
+          //   【设置】/ 规则等子窗（子窗保留取消 / 关闭，其保存会再次提示，见 runWrite）
+          if (activeWrite || closing) return;
+          lockConfigurationForReload();
+          const top = modalBridge.host.getTop();
+          if (top) pushModal(top, () => createAlertDialog(RESTORE_UNAVAILABLE_MESSAGE, { onConfirm: null }));
+        });
+      }
       registerModal(overlay, {
         canClose: () => !activeWrite && !closing,
-        onDispose() { ++deletePreviewEpoch; }
+        onMount() { activateRestoreSession(); },
+        onDispose() {
+          ++deletePreviewEpoch;
+          // v3.2.21：窗口释放（【确认】/【返回】/ ×、被替换、随父窗口关闭）即结束撤销会话，旧令牌随之失效；
+          //   带本窗口令牌，主进程只结束该令牌所属的会话，不影响此后打开的新窗口。结束失败时静默（主进程另按页面清理）。
+          if (!restoreToken) return;
+          try {
+            Promise.resolve(api.templates.getBillSplitConfig(templateId, { endRestoreSession: restoreToken })).catch(() => {});
+          } catch (_error) { /* ignore */ }
+        }
       });
 
       // 此父会话的所有写入口（含确认/规则子层）共用一次提交资格。
-      async function runWrite(write, { target = overlay, onSuccess, onSettled, showFailure = true, allowReloadPending = false } = {}) {
-        if ((configurationNeedsReload && !allowReloadPending) || activeWrite || closing || !isCurrent(target)) return { status: 'blocked' };
+      async function runWrite(write, { target = overlay, onSuccess, onSettled, showFailure = true, allowReloadPending = false, notifyLibrarySync = true } = {}) {
+        if ((configurationNeedsReload && !allowReloadPending) || activeWrite || closing || !isCurrent(target)) {
+          // 已暂停配置写入（撤销会话激活失败、保存后重读失败）时，子窗（设置 / 规则）的保存按失败返回原因（子窗对 blocked
+          //   不提示），不让仍可编辑的表单无反馈
+          if (configurationNeedsReload && !allowReloadPending && !activeWrite && !closing && isCurrent(target)) {
+            const failure = { status: 'error', message: restoreActivationFailed ? RESTORE_UNAVAILABLE_MESSAGE : CONFIGURATION_RELOAD_MESSAGE };
+            if (showFailure) pushModal(modalBridge.host.getHandle(target), () => createAlertDialog(failure.message, { onConfirm: null }));
+            return failure;
+          }
+          return { status: 'blocked' };
+        }
         const operation = { target, parent: parentHandle(), handle: modalBridge.host.getHandle(target) };
         activeWrite = operation;
-        // 发出即视为本次打开后有修改（失败也可能已部分落库），【返回】/ × 时按打开时的快照恢复。
-        touched = true;
+        pendingLibrarySyncNotice = '';
         ++deletePreviewEpoch;
         const controls = Array.from(new Set([
           ...dialog.querySelectorAll('button, input, select, textarea'),
@@ -7227,19 +7318,51 @@
         ])).map(element => [element, element.disabled]);
         controls.forEach(([element]) => { element.disabled = true; });
         let result;
-        try { result = await write(); }
+        let restoreUnavailable = false;
+        try {
+          // 写入前确认本窗口的撤销会话已激活（激活失败则不写库，见 activateRestoreSession）。已激活时同步发出写入；
+          //   激活回包未到时等待结果，并在发出首个业务写入前重新核对原父 / 子窗——等待期间被销毁或替换（会话已随释放结束）则不再发出
+          const activationPending = restoreActivationState === 'pending';
+          const activated = activationPending ? await restoreActivation : restoreActivationState === 'activated';
+          if (!activated) {
+            restoreUnavailable = true;
+            result = { status: 'error', message: RESTORE_UNAVAILABLE_MESSAGE };
+          } else if (activationPending && !isCurrent(target)) {
+            result = { status: 'blocked' };
+          } else {
+            // 发出即视为本次打开后有修改（失败也可能已部分落库），【返回】/ × 时按打开时的快照恢复。
+            touched = true;
+            result = await write();
+          }
+        }
         catch (error) { result = { status: 'error', message: error?.message || '保存失败' }; }
         finally {
           activeWrite = null;
           if (operation.parent.isOpen()) controls.forEach(([element, disabled]) => {
             if (element.isConnected) element.disabled = disabled;
           });
+          if (restoreUnavailable && operation.parent.isOpen()) lockConfigurationForReload();
         }
         // Main 已发出的写与配套写照常结算；仅撤销旧窗口的 UI 续接。
         if (!isCurrent(target)) return result;
         onSettled?.(result);
-        if (result?.status === 'success') onSuccess?.(result, operation.handle);
-        else if (showFailure) pushModal(operation.handle, () => createAlertDialog(result?.message || '保存失败', { onConfirm: null }));
+        if (restoreUnavailable) {
+          // 撤销会话激活失败、业务写入未发出：结算回调只把显示还原为已保存的配置（如金额回调按「未重读失败」清除暂停标记），
+          //   之后保持暂停并重新锁定
+          configurationNeedsReload = true;
+          lockConfigurationForReload();
+        }
+        if (result?.status === 'success') {
+          onSuccess?.(result, operation.handle);
+          // 已保存（主库已提交、本次设置已生效）但模板库文件同步失败：行管理本身的写入提示到当前栈顶；
+          //   子窗的写入由子窗关闭后提示（子窗保存成功即关闭）
+          if (result.librarySyncFailed && notifyLibrarySync) {
+            const notice = result.message || '已保存，本次设置已生效；模板库文件同步失败，下次启动或修改模板时会重新同步';
+            const top = modalBridge.host.getTop();
+            if (target !== overlay) pendingLibrarySyncNotice = notice;
+            else if (top && operation.parent.isOpen()) pushModal(top, () => createAlertDialog(notice, { onConfirm: null, logLevel: 'warning' }));
+          }
+        } else if (showFailure) pushModal(operation.handle, () => createAlertDialog(result?.message || '保存失败', { onConfirm: null }));
         return result;
       }
       function snapshotMeta(overrides = {}) {
@@ -7737,6 +7860,8 @@
           tableBody.appendChild(renderTableRow(r));
         });
         updateFeeFormulaUI();
+        // 已暂停配置写入时，重绘出的行控件同样保持锁定（只留【确认】/【返回】/ ×）
+        if (configurationNeedsReload) lockConfigurationForReload();
       }
 
       // 只同步各行的费用账单标记，保留各行尚未提交的草稿。费用行的 Credit 在界面上不可改，
@@ -7917,7 +8042,8 @@
         });
       }
 
-      // v3.2.19：费用账单配置（费用行标记、特殊取值、公式；v3.2.21 起含字段映射特殊处理）同样可能在落库后的模板文件同步阶段返回失败。
+      // v3.2.19：费用账单配置（费用行标记、特殊取值、公式；v3.2.21 起含字段映射特殊处理）保存失败时可能已部分落库。
+      // v3.2.21：主库已提交、仅模板库文件同步失败时主进程按已保存返回（librarySyncFailed），由 runWrite 单独提示，不走下方失败路径。
       // 失败时只重读已保存的配置，接纳费用标记与特殊取值/公式（保留各行草稿），不当作回滚、不重试业务写；
       // 重读失败则暂停本窗口配置写入并提示关闭重开。恢复读取与结算受原 handle 资格约束。
       async function saveFeeConfiguration(payload, { target = overlay, showFailure = true, onSuccess } = {}) {
@@ -8066,6 +8192,7 @@
               currentBillSplitMeta.feeAmountFormulaEnabled = true;
               currentBillSplitMeta.feeAmountFormula = formula.map(item => ({ ...item }));
               if (dialog.isConnected) rerenderTable();
+              showPendingLibrarySyncNotice();
             }
           });
           return child;
@@ -8101,6 +8228,7 @@
               currentBillSplitMeta.feeFieldMappingEnabled = true;
               currentBillSplitMeta.feeFieldMappings = cloneFeeFieldMappings(mappings);
               if (dialog.isConnected) rerenderTable();
+              showPendingLibrarySyncNotice();
             }
           });
           return child;
@@ -8133,10 +8261,12 @@
         });
       }
 
+      // 正常关闭后返回关闭后的栈顶（即原父窗口），未关闭或原视图已结束时返回 null（供撤销后的提示只回到原父窗口）。
       async function closeRows() {
-        if (activeWrite || closing || !isCurrent()) return;
+        if (activeWrite || closing || !isCurrent()) return null;
         const handle = parentHandle();
-        if (typeof onClose !== 'function') { closeModal(handle); return; }
+        const returnedTop = () => (handle.isOpen() ? null : modalBridge.host.getTop());
+        if (typeof onClose !== 'function') { closeModal(handle); return returnedTop(); }
         // 父调用方需要先读取最新配置；等待期间保留原子层，拒绝其他关闭和写入。
         closing = true;
         ++deletePreviewEpoch;
@@ -8149,9 +8279,13 @@
           closing = false;
           if (handle.isOpen()) controls.forEach(([element, disabled]) => { if (element.isConnected) element.disabled = disabled; });
         }
-        if (!handle.isOpen() || !handle.isTop()) return;
-        if (failure) pushModal(handle, () => createAlertDialog(failure.message || '返回配置窗口失败', { onConfirm: null }));
-        else closeModal(handle);
+        if (!handle.isOpen() || !handle.isTop()) return null;
+        if (failure) {
+          pushModal(handle, () => createAlertDialog(failure.message || '返回配置窗口失败', { onConfirm: null }));
+          return null;
+        }
+        closeModal(handle);
+        return returnedTop();
       }
       // v3.2.21：【返回】/ ×——本次打开后发出过写入时，先把本弹窗管理的配置恢复为打开时的快照再关闭。
       //   恢复失败时留在弹窗，按重读到的已保存配置显示（可能已部分恢复）；重读失败则暂停配置写入。
@@ -8200,6 +8334,8 @@
           };
         }, {
           allowReloadPending: true,
+          // 撤销的同步失败提示由下方关闭后在原父窗口显示
+          notifyLibrarySync: false,
           onSettled(settled) {
             if (settled?.status === 'success') return;
             // 已暂停配置写入的窗口保持暂停（重读成功也只更新显示），需关闭后重新打开。
@@ -8212,7 +8348,12 @@
         });
         if (result?.status === 'success') {
           touched = false;
-          await closeRows();
+          const returnedTo = await closeRows();
+          // 主库已撤销、只是模板库文件同步失败（启动和下次修改模板时会重新同步）：照常关闭后在原父窗口提示，不再重复撤销；
+          //   原视图已结束（被强制销毁、替换）时不提示到其他窗口，主进程已记活动日志
+          if (result.librarySyncFailed && returnedTo) {
+            pushModal(returnedTo, () => createAlertDialog(result.message || '已撤销本次修改；模板库文件同步失败，下次启动或修改模板时会重新同步', { onConfirm: null, logLevel: 'warning' }));
+          }
         } else if (dialog.isConnected && configurationNeedsReload) {
           lockConfigurationForReload();
         }

@@ -14,6 +14,7 @@ const XLSX = require('xlsx');
 
 const { buildMappedRows } = require('../../../../src/backend/file-service');
 const {
+  assertFeeFieldOutputWritable,
   normalizeFeeFieldMappings,
   resolveFeeFieldMappingValue,
   validateFeeFieldMappings
@@ -230,23 +231,38 @@ test('合并组取最小序号行的非金额字段：费用账单行为该行�
   assert.deepEqual(feeSecond.slice(1), [['2026-11-01', 'USD', '98.5', '', '货款', '张三', '2026-11-01']]);
 });
 
-test('normalizeFeeFieldMappings：接受数组或 JSON，去首尾空白，空白类型清空值，丢弃全空项与非法项', () => {
+test('normalizeFeeFieldMappings：接受数组或 JSON，去首尾空白，空白类型清空值，丢弃全空项，非法项记为无效', () => {
   assert.deepEqual(normalizeFeeFieldMappings(JSON.stringify([
     { templateField: ' Description ', valueType: 'input', value: ' 手续费 ' },
     { templateField: 'Payee Name', valueType: 'blank', value: '残留' },
     { templateField: '', valueType: 'blank', value: '' },
     null,
-    ['x']
+    []
   ])), [
     { templateField: 'Description', valueType: 'input', value: '手续费' },
     { templateField: 'Payee Name', valueType: 'blank', value: '' }
   ]);
+  // 不是对象的非空项（误包一层的数组、字符串、数字、布尔值）记为无效行，校验拒绝，不静默只用其余设置
+  const nested = [
+    { templateField: 'Transaction Description', valueType: 'input', value: '手续费' },
+    [{ templateField: 'Payee Name', valueType: 'blank', value: '' }],
+    'Payee Name',
+    0,
+    false
+  ];
+  const invalidEntry = { templateField: '', valueType: 'invalid', value: '' };
+  assert.deepEqual(normalizeFeeFieldMappings(nested), [
+    { templateField: 'Transaction Description', valueType: 'input', value: '手续费' },
+    invalidEntry, invalidEntry, invalidEntry, invalidEntry
+  ]);
+  assert.deepEqual(normalizeFeeFieldMappings(normalizeFeeFieldMappings(nested)), normalizeFeeFieldMappings(nested), '再次规范化不变');
+  assert.throws(() => validateFeeFieldMappings(nested), /第 2 行：请选择模板字段/);
   assert.deepEqual(normalizeFeeFieldMappings([
     { templateField: 'Description', valueType: 'input', value: { text: '手续费' } },
     { templateField: 'Payee Name', valueType: ['input'], value: 'x' }
   ]), [
-    { templateField: 'Description', valueType: '', value: '' },
-    { templateField: 'Payee Name', valueType: '', value: 'x' }
+    { templateField: 'Description', valueType: 'invalid', value: '' },
+    { templateField: 'Payee Name', valueType: 'invalid', value: 'x' }
   ], '非标量的值或类型记为无效，不按「[object Object]」使用');
   assert.throws(() => validateFeeFieldMappings([{ templateField: 'Description', valueType: 'input', value: { text: '手续费' } }]), /第 1 行：映射字段无效/);
   assert.deepEqual(normalizeFeeFieldMappings([
@@ -254,19 +270,43 @@ test('normalizeFeeFieldMappings：接受数组或 JSON，去首尾空白，空�
     { templateField: 'Description', valueType: 'input', value: 12 },
     { templateField: 'ValueDate', valueType: 'blank', value: true }
   ]), [
-    { templateField: 'Payee Name', valueType: '', value: '' },
-    { templateField: 'Description', valueType: 'input', value: '12' },
+    { templateField: 'Payee Name', valueType: 'invalid', value: '' },
+    { templateField: 'Description', valueType: 'invalid', value: '' },
     { templateField: 'ValueDate', valueType: 'blank', value: '' }
-  ], '布尔值不按文本 false 使用；数字照常；空白类型不看值');
+  ], '布尔值不按文本 false 使用；数字无法确认原文，记为无效；空白类型不看值');
   assert.deepEqual(normalizeFeeFieldMappings([
     { templateField: 'Payee CardNo', valueType: 'input', value: 9007199254740993 },
     { templateField: 'Drawee CardNo', valueType: 'input', value: '9007199254740993' },
     { templateField: 'Description', valueType: 'input', value: 0.5 }
   ]), [
-    { templateField: 'Payee CardNo', valueType: '', value: '' },
+    { templateField: 'Payee CardNo', valueType: 'invalid', value: '' },
     { templateField: 'Drawee CardNo', valueType: 'input', value: '9007199254740993' },
-    { templateField: 'Description', valueType: 'input', value: '0.5' }
-  ], '超出安全整数范围的数字已丢精度，记为无效；文本写的长卡号原样保留');
+    { templateField: 'Description', valueType: 'invalid', value: '' }
+  ], '数字（含超出安全整数范围、小数）记为无效；文本写的长卡号原样保留');
+  // 读包时 JSON 数字已被舍入：20261119.000000001 读成安全整数 20261119、1.10 读成 1.1，规范化无法察觉，故数字一律无效
+  assert.deepEqual(normalizeFeeFieldMappings('[{"templateField":"Customer Ref","valueType":"input","value":20261119.000000001},'
+    + '{"templateField":"Remark","valueType":"input","value":1.10},{"templateField":"Description","valueType":"input","value":"20261119.000000001"}]'), [
+    { templateField: 'Customer Ref', valueType: 'invalid', value: '' },
+    { templateField: 'Remark', valueType: 'invalid', value: '' },
+    { templateField: 'Description', valueType: 'input', value: '20261119.000000001' }
+  ], '原始 JSON 中的数字固定值记为无效，文本原样保留');
+  // 未配对代理项写出 XLSX 会被替换成「�」：记为无效；合法代理对（如 emoji）照常
+  assert.deepEqual(normalizeFeeFieldMappings('[{"templateField":"Customer Ref","valueType":"input","value":"ref\\ud83d"},'
+    + '{"templateField":"Remark","valueType":"input","value":"ref\\ud83d\\ude00"}]'), [
+    { templateField: 'Customer Ref', valueType: 'invalid', value: '' },
+    { templateField: 'Remark', valueType: 'input', value: 'ref\ud83d\ude00' }
+  ], '未配对代理项的固定文本记为无效，合法代理对保留');
+  assert.throws(() => validateFeeFieldMappings([{ templateField: 'Description', valueType: 'input', value: 'ref\udc00x' }]), /第 1 行：映射字段无效/);
+  // XML 1.0 禁止的 U+FFFE、U+FFFF 写出后工作表无法解析：记为无效；控制字符写出时按 _xHHHH_ 转义，照常接受
+  assert.deepEqual(normalizeFeeFieldMappings([
+    { templateField: 'Customer Ref', valueType: 'input', value: 'REF\uFFFE01' },
+    { templateField: 'Remark', valueType: 'input', value: 'REF\uFFFF' },
+    { templateField: 'Description', valueType: 'input', value: 'A\tB\u0001C' }
+  ]), [
+    { templateField: 'Customer Ref', valueType: 'invalid', value: '' },
+    { templateField: 'Remark', valueType: 'invalid', value: '' },
+    { templateField: 'Description', valueType: 'input', value: 'A\tB\u0001C' }
+  ], 'XML 禁止字符记为无效，可转义的控制字符保留');
   // 缺少模板字段、但显式选了取值方式的坏行保留下来报错，不当作空白行丢弃
   assert.deepEqual(normalizeFeeFieldMappings([
     { templateField: 'Transaction Description', valueType: 'input', value: '手续费' },
@@ -274,17 +314,41 @@ test('normalizeFeeFieldMappings：接受数组或 JSON，去首尾空白，空�
     { templateField: '', valueType: 'blank', value: '' }
   ]), [
     { templateField: 'Transaction Description', valueType: 'input', value: '手续费' },
-    { templateField: '', valueType: '', value: '' }
+    { templateField: '', valueType: 'invalid', value: '' }
   ]);
   assert.throws(() => validateFeeFieldMappings([
     { templateField: 'Transaction Description', valueType: 'input', value: '手续费' },
     { templateField: '', valueType: 'input', value: false }
   ]), /第 2 行：请选择模板字段/);
+  // 幂等：模板包导入、落库、读取会多次规范化，坏行（含模板字段不是文本、取值为空白的行）不能在第二次规范化时被当作空白行丢弃
+  const badRows = [
+    { templateField: 'Transaction Description', valueType: 'input', value: '手续费' },
+    { templateField: '', valueType: 'input', value: false },
+    { templateField: 12, valueType: 'blank', value: '' },
+    { templateField: 'Remark', valueType: 'other', value: '' }
+  ];
+  const once = normalizeFeeFieldMappings(badRows);
+  assert.deepEqual(once, [
+    { templateField: 'Transaction Description', valueType: 'input', value: '手续费' },
+    { templateField: '', valueType: 'invalid', value: '' },
+    { templateField: '', valueType: 'invalid', value: '' },
+    { templateField: 'Remark', valueType: 'invalid', value: '' }
+  ]);
+  assert.deepEqual(normalizeFeeFieldMappings(JSON.stringify(once)), once, '再次规范化（落库后读回）结果不变');
+  assert.throws(() => validateFeeFieldMappings(normalizeFeeFieldMappings(once)), /第 2 行：请选择模板字段/,
+    '规范化后的坏行照常拒绝');
+  assert.throws(() => validateFeeFieldMappings([{ templateField: 'Remark', valueType: 'invalid', value: '' }]), /第 1 行：映射字段无效/,
+    'invalid 标记不是可用的取值类型');
+  // 两个下拉框都为空白的行忽略：取值为空白时不看残留的值
+  assert.deepEqual(normalizeFeeFieldMappings([
+    { templateField: 'Description', valueType: 'input', value: '手续费' },
+    { templateField: '', valueType: 'blank', value: '残留' }
+  ]), [{ templateField: 'Description', valueType: 'input', value: '手续费' }]);
   assert.deepEqual(normalizeFeeFieldMappings('not json'), []);
   assert.deepEqual(normalizeFeeFieldMappings(''), []);
   assert.deepEqual(normalizeFeeFieldMappings({}), []);
   assert.deepEqual(normalizeFeeFieldMappings([{ templateField: 'Remark', valueType: 'unknown', value: 'x' }]),
-    [{ templateField: 'Remark', valueType: '', value: 'x' }]);
+    [{ templateField: 'Remark', valueType: 'invalid', value: 'x' }]);
 });
 
 test('validateFeeFieldMappings：至少一行、模板字段必选且可选且不重复、自己输入须填值、模板文件字段须在表头', () => {
@@ -326,4 +390,69 @@ test('resolveFeeFieldMappingValue：按类型取值', () => {
   assert.equal(resolveFeeFieldMappingValue({ valueType: 'field', value: '空白' }, () => '   '), '');
   assert.equal(resolveFeeFieldMappingValue({ valueType: 'blank', value: '' }, read), '');
   assert.equal(resolveFeeFieldMappingValue(null, read), '');
+  assert.equal(resolveFeeFieldMappingValue({ valueType: 'field', value: '参考号' }, () => 'ref\ud83d\ude00'), 'ref\ud83d\ude00');
+});
+
+test('assertFeeFieldOutputWritable：取自源列的输出值含无法写入 Excel 的字符或超过 32767 个字符时拒绝，列出源行、源列与目标字段', () => {
+  const item = { templateField: 'Customer Ref', valueType: 'field', value: '参考号' };
+  for (const bad of ['REF\uFFFE01', 'REF\uFFFF', 'ref\ud83d']) {
+    assert.throws(() => assertFeeFieldOutputWritable(item, bad, { sourceRowNumber: 5 }), /第 5 行「参考号」列的值含无法写入 Excel 的字符.*Customer Ref/);
+  }
+  assert.throws(() => assertFeeFieldOutputWritable(item, 'x'.repeat(32768), { sourceRowNumber: 6 }), /第 6 行「参考号」列的值超过 32767 个字符.*Customer Ref/);
+  assert.doesNotThrow(() => assertFeeFieldOutputWritable(item, 'x'.repeat(32767), { sourceRowNumber: 6 }));
+  assert.doesNotThrow(() => assertFeeFieldOutputWritable(item, 'ref\ud83d\ude00'));
+  assert.doesNotThrow(() => assertFeeFieldOutputWritable({ ...item, valueType: 'input' }, 'REF\uFFFE'), '固定值已在规范化时拦截，这里只校验源列取值');
+  // 形如 _xHHHH_ 的字面文本写出后会被还原成其他字符：源列取值与固定文本都拒绝（x 与十六进制不分大小写）；不构成转义的照常
+  //   与回车等控制字符相连时，控制字符写出编码（如回车为 _x000d_）会补全前面的 _xHHHH，同样被改写
+  for (const bad of ['FEE_x0041_', 'a_X00e9_b', 'REF_x0041\r\nB', 'REF_x0041\u0001']) {
+    assert.throws(() => assertFeeFieldOutputWritable(item, bad, { sourceRowNumber: 7 }), /第 7 行「参考号」列的值含写入 Excel 后会被改写的文本.*Customer Ref/);
+    assert.throws(() => validateFeeFieldMappings([{ templateField: 'Customer Ref', valueType: 'input', value: bad }]),
+      /第 1 行：「Customer Ref」的映射值含写入 Excel 后会被改写的文本/);
+  }
+  for (const ok of ['FEE_x004_', 'FEE_x00G1_', 'FEE_0041_x', 'REF\r\nB']) {
+    assert.doesNotThrow(() => assertFeeFieldOutputWritable(item, ok));
+    assert.doesNotThrow(() => validateFeeFieldMappings([{ templateField: 'Customer Ref', valueType: 'input', value: ok }]));
+  }
+});
+
+test('源列取值校验只针对实际写出的费用账单行：合计行、合并时不作代表行的费用行不因其值拒绝整份账单', (t) => {
+  const dir = createTempDir(t);
+  const writeCsv = (name, rows) => {
+    const filePath = path.join(dir, name);
+    fs.writeFileSync(filePath, [HEADER, ...rows].map((row) => row.join(',')).join('\n'), 'utf8');
+    return filePath;
+  };
+  const feeFieldMappings = [{ templateField: 'Payee Name', valueType: 'field', value: '记账日期' }];
+  // 合计行（日期列为「合计」且带金额）不产出明细：其中的非法文本不写出
+  const summaryCsv = writeCsv('summary.csv', [
+    ['2026-11-01', 'USD', '100', '1.5', '货款', '张三', 'REF01'],
+    ['合计', 'USD', '100', '1.5', '', '', 'REF\uFFFE']
+  ]);
+  const summaryRows = mapFile(summaryCsv, { feeFieldMappings });
+  assert.deepEqual(summaryRows.slice(1).map((row) => row[5]), ['张三', 'REF01'], '合计行跳过；交易行照主映射、费用行按设置输出');
+  // 合并组代表行为交易行：费用行的覆盖值不进入输出，不校验
+  const mergedCsv = writeCsv('merged.csv', [['2026-11-01', 'USD', '100', '1.5', '货款', '张三', 'REF\uFFFE']]);
+  const mergedRows = mapFile(mergedCsv, {
+    billSplitRows: [splitRow(1, { creditSourceField: '交易金额', mergedGroupSeq: 1 }), splitRow(2, { isFeeBill: true, debitSourceField: '手续费', mergedGroupSeq: 1 })],
+    feeFieldMappings
+  });
+  assert.equal(mergedRows.length, 2, '合并为一行照常生成');
+  // 单独输出的费用账单行：拒绝并列出源行与列
+  assert.throws(() => mapFile(mergedCsv, { feeFieldMappings }), /第 2 行「记账日期」列的值含无法写入 Excel 的字符.*Payee Name/);
+  const longCsv = writeCsv('long.csv', [['2026-11-01', 'USD', '100', '1.5', '货款', '张三', 'R'.repeat(32768)]]);
+  assert.throws(() => mapFile(longCsv, { feeFieldMappings }), /第 2 行「记账日期」列的值超过 32767 个字符.*Payee Name/);
+  // ValueDate 取源列：在实际写出的行上先校验原值（超长值不进入日期解析）再规范化；费用行作合并代表行时同样规范化
+  const valueDateMappings = [{ templateField: 'ValueDate', valueType: 'field', value: '记账日期' }];
+  const longDateCsv = writeCsv('long-date.csv', [['2026-11-01', 'USD', '100', '1.5', '货款', '张三', `2026-11-03${' '.repeat(32760)}`]]);
+  assert.throws(() => mapFile(longDateCsv, { feeFieldMappings: valueDateMappings }), /第 2 行「记账日期」列的值超过 32767 个字符.*ValueDate/);
+  const feeRepresentativeCsv = writeCsv('fee-representative.csv', [['2026-11-01', 'USD', '100', '1.5', '货款', '张三', '非日期']]);
+  const feeRepresentativeRows = mapFile(feeRepresentativeCsv, {
+    billSplitRows: [splitRow(1, { isFeeBill: true, debitSourceField: '手续费', mergedGroupSeq: 1 }), splitRow(2, { creditSourceField: '交易金额', mergedGroupSeq: 1 })],
+    feeFieldMappings: valueDateMappings
+  });
+  assert.deepEqual(feeRepresentativeRows.slice(1).map((row) => [row[2], row[6]]), [['98.5', '']], '合并代表行为费用行：ValueDate 无法识别时输出空（同主映射口径）');
+  // ValueDate 取源列：日期规范化会丢掉非法字符，须按规范化前的源值校验
+  const dateCsv = writeCsv('date.csv', [['2026-11-01', 'USD', '100', '1.5', '货款', '张三', '2026-11-03T10:00:00\uFFFE']]);
+  assert.throws(() => mapFile(dateCsv, { feeFieldMappings: [{ templateField: 'ValueDate', valueType: 'field', value: '记账日期' }] }),
+    /第 2 行「记账日期」列的值含无法写入 Excel 的字符.*ValueDate/);
 });

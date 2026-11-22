@@ -74,6 +74,7 @@ const {
   isFeeFieldMappingTemplateFieldExcluded,
   normalizeFeeFieldMappings,
   resolveFeeFieldMappingValue,
+  assertFeeFieldOutputWritable,
   validateFeeFieldMappings
 } = require('./file-service/bill-split-fee-field-mappings');
 const {
@@ -734,17 +735,17 @@ function buildMappedRows({
         }
 
         // v3.2.21：费用账单行按「字段映射特殊处理」覆盖（在户名 / 卡号按收支方向分配之后，设置了的字段以设置为准）。
-        //   ValueDate 与主映射同口径规范化；BillDate 不允许覆盖（已在 billSplitFeeFieldMappings 中排除）。
+        //   BillDate 不允许覆盖（已在 billSplitFeeFieldMappings 中排除）。覆盖原值（feeFieldRawValues，与 billSplitFeeFieldMappings
+        //   同序）随行保留：合计行过滤、合并选定代表行后，只对实际写出的行先校验原值、再把 ValueDate 按主映射同口径规范化
+        //   （见下方写出循环；不为不输出的行解析日期，超长或含非法字符的源值在解析前拒绝）。
+        const feeFieldRawValues = [];
         if (isFeeBillRow) {
           billSplitFeeFieldMappings.forEach((item) => {
             const rawValue = resolveFeeFieldMappingValue(item, (field) => {
               const sourceIndex = sourceIndexByField.get(field);
               return sourceIndex === undefined ? '' : originalRow[sourceIndex];
             });
-            if (item.templateField === 'ValueDate') {
-              expandedRow[item.targetIndex] = normalizeDateExportValue(normalizeCell(rawValue), { dateParseOrder }).value;
-              return;
-            }
+            feeFieldRawValues.push(rawValue);
             expandedRow[item.targetIndex] = rawValue;
           });
         }
@@ -754,6 +755,7 @@ function buildMappedRows({
           mergedGroupSeq: splitRow.mergedGroupSeq,
           // v3.2.21：费用账单行（带字段映射特殊处理的覆盖）；合并结果取代表行的值
           isFeeBill: isFeeBillRow,
+          feeFieldRawValues,
           currency: currencyValue,
           creditAmount: creditValue,
           debitAmount: debitValue,
@@ -851,6 +853,7 @@ function buildMappedRows({
         seqNo: representative.seqNo,
         mergedGroupSeq: representative.mergedGroupSeq,
         isFeeBill: Boolean(representative.isFeeBill),
+        feeFieldRawValues: representative.feeFieldRawValues,
         currency: representative.currency,
         creditAmount: net > 0 ? netString : '',
         debitAmount: net < 0 ? netString : '',
@@ -1176,23 +1179,36 @@ function buildMappedRows({
         feeFormulaDivisionByZeroRowNumbers.push(sourceRowNumber);
       }
       const merged = applyBillSplitMergeForRow(expanded);
-      // v3.2.21：按输出行实际沿用映射的字段统计特征值未命中（被覆盖的字段、拆分配置取值的发生额列不算）
-      const outputEntries = merged.filter((entry) => (
-        hasEffectiveAmount(entry.creditAmount) || hasEffectiveAmount(entry.debitAmount)
-      ));
-      const usedFeatureFilterIds = new Set();
-      if (outputEntries.some((entry) => !entry.isFeeBill)) {
-        billSplitRowFeatureFilterIdSet.forEach((id) => usedFeatureFilterIds.add(id));
+      // v3.2.21：按输出行实际沿用映射的字段统计特征值未命中（被覆盖的字段、拆分配置取值的发生额列不算）；
+      //   未启用特征值时不会有未命中提示，跳过逐行金额判断
+      if (activeFeatureFilters.length > 0) {
+        const outputEntries = merged.filter((entry) => (
+          hasEffectiveAmount(entry.creditAmount) || hasEffectiveAmount(entry.debitAmount)
+        ));
+        const usedFeatureFilterIds = new Set();
+        if (outputEntries.some((entry) => !entry.isFeeBill)) {
+          billSplitRowFeatureFilterIdSet.forEach((id) => usedFeatureFilterIds.add(id));
+        }
+        if (outputEntries.some((entry) => entry.isFeeBill)) {
+          billSplitFeeRowFeatureFilterIdSet.forEach((id) => usedFeatureFilterIds.add(id));
+        }
+        recordFeatureValueMiss(outputEntries.length > 0, usedFeatureFilterIds);
       }
-      if (outputEntries.some((entry) => entry.isFeeBill)) {
-        billSplitFeeRowFeatureFilterIdSet.forEach((id) => usedFeatureFilterIds.add(id));
-      }
-      recordFeatureValueMiss(outputEntries.length > 0, usedFeatureFilterIds);
       // 根据字段值过滤账单时主映射的按字段区分发生额只统计走主映射的行
       if (!compiledBillSplitRowFilter) {
         countAmountSplitHits();
       }
       merged.forEach((entry) => {
+        // v3.2.21：实际写出的费用账单行（合并时为代表行）先校验取自源列的覆盖原值能否原样写入工作表，再规范化 ValueDate
+        if (entry.isFeeBill) {
+          billSplitFeeFieldMappings.forEach((item, index) => {
+            const rawValue = (entry.feeFieldRawValues || [])[index];
+            assertFeeFieldOutputWritable(item, rawValue, { sourceRowNumber: entry.sourceRowNumber });
+            if (item.templateField === 'ValueDate') {
+              entry.rowArray[item.targetIndex] = normalizeDateExportValue(normalizeCell(rawValue), { dateParseOrder }).value;
+            }
+          });
+        }
         rowMetas.push({ sourceRowNumber: entry.sourceRowNumber, ...sourceRowKeyMeta });
         mappedRows.push(entry.rowArray);
       });

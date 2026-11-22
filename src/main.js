@@ -10634,8 +10634,21 @@ function registerTemplateHandlers() {
 
   // ===== v1.4.9 bill split / merge handlers =====
 
-  ipcMain.handle('template:get-bill-split-config', (_event, templateId, options = {}) => {
+  ipcMain.handle('template:get-bill-split-config', (event, templateId, options = {}) => {
     templateId = Number(templateId);
+    const restoreOptions = options && typeof options === 'object' ? options : {};
+    const restoreOwner = event && event.sender;
+    // v3.2.21：行管理窗口释放时带本窗口的恢复令牌结束撤销会话（只结束该令牌所属的会话，旧窗口迟到的释放不影响新窗口），
+    //   不读取配置；放在读取模板之前，读取失败也不会让会话残留。
+    if (Object.prototype.hasOwnProperty.call(restoreOptions, 'endRestoreSession')) {
+      endBillSplitRestoreSession(templateId, restoreOptions.endRestoreSession);
+      return { status: 'success', restoreSessionEnded: true };
+    }
+    // v3.2.21：行管理窗口挂载时激活本窗口的撤销会话，作废同模板的其他会话（被取代窗口的【返回】随之失效，
+    //   不能把其他窗口已确认的修改撤销掉）；未挂载的乱序打开请求不激活，不影响当前窗口。不读取配置。
+    if (Object.prototype.hasOwnProperty.call(restoreOptions, 'activateRestoreSession')) {
+      return { status: 'success', restoreSessionActivated: activateBillSplitRestoreSession(templateId, restoreOptions.activateRestoreSession) };
+    }
     try {
       const template = database.getTemplate(templateId);
       if (!template) {
@@ -10657,15 +10670,13 @@ function registerTemplateHandlers() {
       const reuseModule = ((fullMapping?.mappings || [])
         .find((m) => normalizeCell(m.templateField) === REUSE_MODULE_MAPPING_FIELD)?.mappedField || REUSE_MODULE_DEFAULT_OPTION)
         === REUSE_MODULE_DEFAULT_OPTION;
-      // v3.2.21：行管理打开时开启撤销会话并签发恢复令牌（取代此前的会话）；关闭时结束会话，旧令牌随之失效。
+      // v3.2.21：行管理打开时开启独立的撤销会话并签发恢复令牌（不取代其他会话）；窗口释放时结束会话（见上），旧令牌随之失效。
       //   读出的配置不满足快照结构时不签发，行管理不打开。其他读取不签发、不影响会话。
-      const restoreOptions = options && typeof options === 'object' ? options : {};
-      if (restoreOptions.endRestoreSession === true) {
-        endBillSplitRestoreSession(templateId);
+      let restoreToken = null;
+      if (restoreOptions.openRestoreSession === true) {
+        trackBillSplitRestoreOwner(restoreOwner);
+        restoreToken = issueBillSplitRestoreToken(template, { billSplitRows, billSplitAmountRules, billSplitMeta }, restoreOwner && restoreOwner.id);
       }
-      const restoreToken = restoreOptions.openRestoreSession === true
-        ? issueBillSplitRestoreToken(template, { billSplitRows, billSplitAmountRules, billSplitMeta })
-        : null;
       return {
         status: 'success',
         enabled,
@@ -11006,7 +11017,7 @@ function registerTemplateHandlers() {
   // v3.2.21：费用账单「字段映射特殊处理」feeFieldMappingEnabled / feeFieldMappings（按模板表头与可选模板字段校验）；
   //   restoreSnapshot + restoreToken：拆分/合并账单映射关系管理【返回】/ × 撤销本次修改，单独提交，其余字段忽略
   //   （复用本通道，不另增 IPC：恢复的正是本通道与同组拆分通道写入的配置）。
-  businessIpcHandle('template:save-bill-split-meta', '保存账单拆分配置', (_event, payload = {}) => {
+  businessIpcHandle('template:save-bill-split-meta', '保存账单拆分配置', (event, payload = {}) => {
     const templateId = Number(payload?.templateId);
     const has = (key) => Boolean(payload) && Object.prototype.hasOwnProperty.call(payload, key) && payload[key] !== undefined;
     const savesSignedConfig = has('signedAmountSourceField')
@@ -11018,7 +11029,7 @@ function registerTemplateHandlers() {
       : savesSignedConfig ? '保存拆分账单按正负号拆分字段' : '保存拆分账单费用账单设置';
     try {
       if (restoresSnapshot) {
-        return restoreBillSplitConfigFromPayload(templateId, payload, step);
+        return restoreBillSplitConfigFromPayload(templateId, payload, step, event && event.sender && event.sender.id);
       }
       const meta = {};
       if (savesSignedConfig) {
@@ -11077,10 +11088,14 @@ function registerTemplateHandlers() {
       if (Object.keys(meta).length > 0) {
         database.saveBillSplitMeta(templateId, meta);
       }
-      syncTemplateLibraryFile();
-      return feeBillSeqNo === undefined
+      const saved = feeBillSeqNo === undefined
         ? { status: 'success' }
         : { status: 'success', currentRows: database.getBillSplitRows(templateId) || [] };
+      // v3.2.21：主库已提交后模板库文件同步失败：按已保存返回并单独提示（本次设置已生效），不再报「保存失败」
+      if (!syncTemplateLibraryAfterBillSplitWrite(database.getTemplate(templateId), '保存拆分账单配置后同步模板库文件失败')) {
+        return { ...saved, librarySyncFailed: true, message: '已保存，本次设置已生效；模板库文件同步失败，下次启动或修改模板时会重新同步' };
+      }
+      return saved;
     } catch (error) {
       if (error instanceof FileValidationError) {
         return createErrorResult({
@@ -11103,26 +11118,86 @@ function registerTemplateHandlers() {
   });
 }
 
-// v3.2.21：字段映射特殊处理可选的模板字段——同「拆分/合并账单映射关系设置」（映射目标字段，不含预处理 / 高级 / 拆分分组字段）；
-//   账户号、币种、发生额、余额由 validateFeeFieldMappings 排除。
+// v3.2.21：字段映射特殊处理可选的模板字段——同「拆分/合并账单映射关系设置」（映射目标字段，不含 Channel 与预处理 / 高级 / 拆分分组
+//   控制项；枚举里恰有与控制项同名的字段时同样排除，与渲染端 buildFeeFieldMappingTemplateFields 一致）；
+//   账户号、币种、发生额、余额由 validateFeeFieldMappings 排除。保存与生成共用。
+function filterFeeFieldMappingTemplateFields(fields) {
+  const controlFields = new Set([...PREPROCESS_FIELDS, ...ADVANCED_MAPPING_FIELDS, ...BILL_SPLIT_GROUP_FIELDS]);
+  return (Array.isArray(fields) ? fields : []).filter((field) => field !== 'Channel' && !controlFields.has(field));
+}
+
 function getFeeFieldMappingTemplateFields() {
   const enumConfig = getEnumConfig();
   if (!enumConfig) {
     throw new FileValidationError('FILE_READ', MISSING_ENUM_MESSAGE);
   }
-  return buildMappingTargetFields(loadEnumValues(enumConfig.filePath));
+  return filterFeeFieldMappingTemplateFields(buildMappingTargetFields(loadEnumValues(enumConfig.filePath)));
 }
 
 // v3.2.21：【返回】/ × 只能恢复主进程签发的快照：template:get-bill-split-config 读出配置时按本进程随机密钥对
 //   规范化后的快照签名（restoreToken），恢复时重新规范化并核对签名。快照因此只能是本次运行中确实读出过的已保存状态
 //   （打开弹窗时的配置），渲染进程无法改写或拼接成正常保存入口不允许的配置；应用重启后旧令牌失效。
 const BILL_SPLIT_RESTORE_TOKEN_SECRET = randomBytes(32);
-// 每个模板当前的行管理撤销会话（templateId → 会话 id）：新打开取代旧会话，关闭时删除；令牌绑定会话 id，
-//   旧会话或已关闭会话的令牌即使快照与代次都对也不再被接受。
+// 行管理撤销会话（templateId → Map(sessionId → { token, ownerId, activated })）：每次打开签发独立会话，签发时不取代同模板的其他会话——
+//   打开请求可能因低内存屏障乱序执行，迟到的旧请求不能让当前窗口的令牌失效；窗口挂载时激活本会话并作废其他会话
+//   （activateBillSplitRestoreSession），同一模板同一时间只有一个窗口能撤销。会话在窗口释放、放弃打开（按令牌）、
+//   签发页面销毁或渲染进程退出时结束；令牌绑定会话 id，已结束会话的令牌即使快照与代次都对也不再被接受。
+//   ownerId 为签发时的 webContents id：只接受同一渲染页面的恢复请求，该页面销毁或渲染进程退出（崩溃、被终止）时
+//   由主进程清理其会话（渲染层来不及在 onDispose 中结束）。每个模板最多保留若干会话，防止释放失败时累积；
+//   超出时先淘汰最早签发的未激活会话，当前窗口已激活的会话不被淘汰。
 const BILL_SPLIT_RESTORE_SESSIONS = new Map();
+const BILL_SPLIT_RESTORE_OWNERS = new WeakSet();
+const BILL_SPLIT_RESTORE_SESSION_LIMIT = 8;
 
-function endBillSplitRestoreSession(templateId) {
-  BILL_SPLIT_RESTORE_SESSIONS.delete(Number(templateId));
+function endBillSplitRestoreSessionsForOwner(ownerId) {
+  for (const [templateId, sessions] of BILL_SPLIT_RESTORE_SESSIONS) {
+    for (const [sessionId, session] of sessions) {
+      if (session.ownerId === ownerId) sessions.delete(sessionId);
+    }
+    if (!sessions.size) BILL_SPLIT_RESTORE_SESSIONS.delete(templateId);
+  }
+}
+
+function findBillSplitRestoreSessionId(templateId, restoreToken) {
+  const sessions = BILL_SPLIT_RESTORE_SESSIONS.get(Number(templateId));
+  if (!sessions || typeof restoreToken !== 'string' || !restoreToken) return '';
+  for (const [sessionId, session] of sessions) {
+    if (session.token === restoreToken) return sessionId;
+  }
+  return '';
+}
+
+function trackBillSplitRestoreOwner(owner) {
+  if (!owner || typeof owner.once !== 'function' || BILL_SPLIT_RESTORE_OWNERS.has(owner)) return;
+  BILL_SPLIT_RESTORE_OWNERS.add(owner);
+  const ownerId = owner.id;
+  const release = () => endBillSplitRestoreSessionsForOwner(ownerId);
+  owner.once('destroyed', release);
+  owner.on('render-process-gone', release);
+}
+
+// 前提：应用单实例、单窗口，弹窗栈同一时间只有一个行管理窗口；拆分写入不带会话身份，支持多窗口前须让写入校验活动会话（backlog B115）。
+// 激活 restoreToken 所属的会话：同一模板同一时间只有最后挂载的行管理窗口可以撤销，其余会话全部作废。
+//   拆分写入不改模板代次、也不带会话身份，交叠的两个会话都能通过签名核对；作废被取代的会话，避免先打开的窗口
+//   撤销时把后打开窗口已确认的修改（如新增的拆分行、发生额规则）一起覆盖掉。
+function activateBillSplitRestoreSession(templateId, restoreToken) {
+  const sessionId = findBillSplitRestoreSessionId(templateId, restoreToken);
+  if (!sessionId) return false;
+  const sessions = BILL_SPLIT_RESTORE_SESSIONS.get(Number(templateId));
+  for (const id of [...sessions.keys()]) {
+    if (id !== sessionId) sessions.delete(id);
+  }
+  sessions.get(sessionId).activated = true;
+  return true;
+}
+
+// 只结束 restoreToken 所属的会话，同模板其他窗口（或其他打开请求）的会话不受影响。
+function endBillSplitRestoreSession(templateId, restoreToken) {
+  const sessionId = findBillSplitRestoreSessionId(templateId, restoreToken);
+  if (!sessionId) return;
+  const sessions = BILL_SPLIT_RESTORE_SESSIONS.get(Number(templateId));
+  sessions.delete(sessionId);
+  if (!sessions.size) BILL_SPLIT_RESTORE_SESSIONS.delete(Number(templateId));
 }
 
 // 令牌同时绑定模板代次（templates.updated_at）：本弹窗内的拆分写入不改它，模板包覆盖导入、更新表头、改名、
@@ -11133,15 +11208,19 @@ function buildBillSplitRestoreToken(normalizedSnapshot, templateUpdatedAt, sessi
     .digest('hex');
 }
 
-// 【返回】/ × 撤销：先核对令牌（快照、模板代次、当前撤销会话），通过后才在一个事务内恢复并同步模板库文件。令牌失效不能靠重试解决：结果带错误码，
+// 【返回】/ × 撤销：先核对令牌（快照、模板代次、令牌所属的撤销会话及其签发页面），通过后才在一个事务内恢复并同步模板库文件。令牌失效不能靠重试解决：结果带错误码，
 //   界面据此暂停本窗口的配置写入（createErrorResult 不回传错误码）。结构无效抛 FileValidationError，由调用方转成错误结果。
-function restoreBillSplitConfigFromPayload(templateId, payload, step) {
+function restoreBillSplitConfigFromPayload(templateId, payload, step, ownerId) {
   const template = database.getTemplate(templateId);
   if (!template) {
     throw new FileValidationError('TEMPLATE_NOT_FOUND', '未找到对应模板');
   }
   const snapshot = normalizeBillSplitRestoreSnapshot(payload && payload.restoreSnapshot, templateId);
-  const sessionId = BILL_SPLIT_RESTORE_SESSIONS.get(Number(templateId));
+  const matchedSessionId = findBillSplitRestoreSessionId(templateId, payload && payload.restoreToken);
+  const session = matchedSessionId ? BILL_SPLIT_RESTORE_SESSIONS.get(Number(templateId)).get(matchedSessionId) : null;
+  // 只接受已激活（行管理窗口已挂载）的会话：迟到的打开请求签发的会话即使属于同一页面也不能撤销，
+  //   否则未挂载的旧快照会覆盖当前窗口之后保存的拆分行或费用规则（拆分写入不改模板代次，签名无法区分）
+  const sessionId = session && session.ownerId === ownerId && session.activated === true ? matchedSessionId : '';
   if (!sessionId || typeof (payload && payload.restoreToken) !== 'string'
     || payload.restoreToken !== buildBillSplitRestoreToken(snapshot, template.updatedAt, sessionId)) {
     return {
@@ -11155,24 +11234,57 @@ function restoreBillSplitConfigFromPayload(templateId, payload, step) {
     };
   }
   database.restoreBillSplitEditableConfig(templateId, snapshot);
-  syncTemplateLibraryFile();
+  // 主库已恢复：之后的模板库文件同步失败不影响撤销结果（启动和下次修改模板时会重新同步），单独提示，不再重复撤销。
+  if (!syncTemplateLibraryAfterBillSplitWrite(template, '撤销拆分账单修改后同步模板库文件失败')) {
+    return {
+      status: 'success',
+      restored: true,
+      librarySyncFailed: true,
+      message: '已撤销本次修改；模板库文件同步失败，下次启动或修改模板时会重新同步'
+    };
+  }
   return { status: 'success', restored: true };
 }
 
+// v3.2.21：拆分配置已提交到主库后同步模板库文件。失败时记 warning 活动日志并返回 false，由调用方按「已保存 / 已撤销，
+//   文件未同步」单独提示（启动与下次修改模板时会重新同步），不把已生效的修改报成失败。
+function syncTemplateLibraryAfterBillSplitWrite(template, logMessage) {
+  try {
+    syncTemplateLibraryFile();
+    return true;
+  } catch (error) {
+    appendActivityLogEntry({
+      level: 'warning',
+      message: logMessage,
+      details: [`模板名：${template ? template.name : ''}`, `原因：${error && error.message ? error.message : String(error)}`]
+    });
+    return false;
+  }
+}
+
 // 读取拆分配置时签发恢复令牌；读出的配置不满足快照结构时不签发（返回 null，行管理不打开）。
-function issueBillSplitRestoreToken(template, { billSplitRows, billSplitAmountRules, billSplitMeta }) {
+function issueBillSplitRestoreToken(template, { billSplitRows, billSplitAmountRules, billSplitMeta }, ownerId) {
   let snapshot;
   try {
     snapshot = normalizeBillSplitRestoreSnapshot({
       templateId: template.id, billSplitRows, billSplitAmountRules, billSplitMeta
     }, template.id);
   } catch (_error) {
-    endBillSplitRestoreSession(template.id);
     return null;
   }
   const sessionId = randomUUID();
-  BILL_SPLIT_RESTORE_SESSIONS.set(Number(template.id), sessionId);
-  return buildBillSplitRestoreToken(snapshot, template.updatedAt, sessionId);
+  const token = buildBillSplitRestoreToken(snapshot, template.updatedAt, sessionId);
+  const templateKey = Number(template.id);
+  const sessions = BILL_SPLIT_RESTORE_SESSIONS.get(templateKey) || new Map();
+  sessions.set(sessionId, { token, ownerId, activated: false });
+  // 超出上限时丢弃最早签发的未激活会话（Map 按插入顺序迭代）：已激活的是当前挂载窗口的撤销点，
+  //   不能被迟到的旧打开请求挤掉；激活时其他会话已作废，同一模板最多一个已激活会话。
+  while (sessions.size > BILL_SPLIT_RESTORE_SESSION_LIMIT) {
+    const evicted = [...sessions.entries()].find(([, session]) => !session.activated);
+    sessions.delete(evicted ? evicted[0] : sessions.keys().next().value);
+  }
+  BILL_SPLIT_RESTORE_SESSIONS.set(templateKey, sessions);
+  return token;
 }
 
 // 恢复快照的结构规范化（签名与核对共用同一形状，保证确定性）：快照须属于本模板，序号须为 1..n 连续、费用账单最多一行、
@@ -11892,7 +12004,9 @@ function buildBillSplitMergeConfig(template, selectedMappings, { exportTargetFie
     try {
       feeFieldMappings = savedFeeFieldMappings.length > 0 && activeFeeFieldMappings.length === 0
         ? []
-        : validateFeeFieldMappings(activeFeeFieldMappings);
+        : validateFeeFieldMappings(activeFeeFieldMappings, {
+          allowedTemplateFields: exportedTargets ? filterFeeFieldMappingTemplateFields(exportTargetFields) : null
+        });
     } catch (error) {
       if (!(error instanceof FileValidationError)) {
         throw error;

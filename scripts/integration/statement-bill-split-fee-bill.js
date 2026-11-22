@@ -27,6 +27,7 @@ const acorn = require('acorn');
 
 const { AppDatabase } = require('../../src/backend/database');
 const { hasColumn } = require('../../src/backend/database/migrations');
+const { appendActivityRecord, getLogFilePath } = require('../../src/backend/logger');
 const {
   buildDetailExportRows,
   buildFeatureFilterToken,
@@ -122,7 +123,7 @@ const CONSTANTS = loadMainConstants([
   'BILL_SPLIT_MERGE_MAPPING_FIELD', 'BILL_SPLIT_MERGE_ENABLED_OPTION', 'REUSE_MODULE_MAPPING_FIELD', 'REUSE_MODULE_DEFAULT_OPTION',
   'BILL_SPLIT_ROW_FILTER_MAPPING_FIELD', 'BILL_SPLIT_ROW_FILTER_ENABLED_OPTION',
   'PREPROCESS_ROW_FILTER_MAPPING_FIELD', 'PREPROCESS_ROW_FILTER_ENABLED_OPTION', 'DUPLICATE_ROW_FILTER_MAPPING_FIELD',
-  'DUPLICATE_ROW_FILTER_ENABLED_OPTION', 'PREPROCESS_FIELDS',
+  'DUPLICATE_ROW_FILTER_ENABLED_OPTION', 'PREPROCESS_FIELDS', 'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS',
   'SUPPORTED_BUNDLE_VERSION', 'FEE_BILL_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION'
 ]);
 
@@ -133,6 +134,7 @@ function createMain(database, constantOverrides = {}) {
     'normalizeMappedFields',
     'buildMappedFieldLookup',
     'buildBillSplitMergeConfig',
+    'filterFeeFieldMappingTemplateFields',
     'applyBundleBillSplitConfig',
     'validateBillSplitRowPayload',
     'normalizeBundleTemplateHeaders',
@@ -558,9 +560,58 @@ function verifyFeeFieldMapping(dir, database, main) {
   database.saveBillSplitMeta(template.id, { feeFieldMappings: [{ templateField: 'Channel', valueType: 'input', value: '其他银行' }] });
   assertThrows(() => main.buildBillSplitMergeConfig(template, SPLIT_MAPPINGS, { exportTargetFields: FM_FIELDS }), /「Channel」不支持/,
     '⑤ 本次枚举表不导出的受保护字段（Channel）仍拒绝，不当作已退役字段忽略');
+  // 枚举里恰有与映射控制项同名的导出字段（如「过滤账单」）：界面不能选，模板包带入的覆盖在生成时同样拒绝，不写入该列
+  database.saveBillSplitMeta(template.id, { feeFieldMappings: [{ templateField: '过滤账单', valueType: 'input', value: 'x' }] });
+  assertThrows(() => main.buildBillSplitMergeConfig(template, SPLIT_MAPPINGS, { exportTargetFields: [...FM_FIELDS, '过滤账单'] }), /「过滤账单」不支持/,
+    '⑤ 与映射控制项同名的导出字段在生成时拒绝');
+  assertEq(main.filterFeeFieldMappingTemplateFields(['Transaction Description', 'Channel', '过滤账单', '重复账单过滤', '根据字段值过滤账单']),
+    ['Transaction Description'], '⑤ 保存与生成共用的可选范围排除 Channel 与映射控制项');
 
   const draftTemplate = defineFieldMappingTemplate(database, '字段映射草稿模板', { feeRowStatus: 'draft' });
   assertEq(main.buildBillSplitMergeConfig(draftTemplate, SPLIT_MAPPINGS).feeFieldMappings, null, '⑤ 费用账单行为草稿时不生效');
+
+  // 取源列的值含 XML 禁止字符（U+FFFE）：真实 CSV 源文件，未映射该列时照常生成；映射到费用行时拒绝并列出源行与列，
+  //   不交付工作表无法解析的明细（主映射同一写出边界见 backlog B113）
+  const xmlIllegalCsv = path.join(dir, 'field-mapping-xml-illegal.csv');
+  fs.writeFileSync(xmlIllegalCsv, [FM_HEADERS.join(','), '2026-11-01,USD,100,1.5,货款,REF\uFFFE01'].join('\n'), 'utf8');
+  database.saveBillSplitMeta(template.id, { feeFieldMappings: [{ templateField: 'Transaction Description', valueType: 'input', value: '手续费' }] });
+  assertEq(generateFieldMapping(main, template, xmlIllegalCsv, path.join(dir, 'fm-xml-unmapped.xlsx')).map((row) => row[4]), ['货款', '手续费'],
+    '⑤ 含禁止字符的列未映射到费用行时照常生成');
+  database.saveBillSplitMeta(template.id, { feeFieldMappings: [{ templateField: 'Transaction Description', valueType: 'field', value: '记账日期' }] });
+  const xmlIllegalOut = path.join(dir, 'fm-xml-illegal.xlsx');
+  assertThrows(() => generateFieldMapping(main, template, xmlIllegalCsv, xmlIllegalOut),
+    /第 2 行「记账日期」列的值含无法写入 Excel 的字符.*Transaction Description/, '⑤ 取源列的值含禁止字符时拒绝生成并列出源行与列');
+  assertTrue(!fs.existsSync(xmlIllegalOut), '⑤ 拒绝时不写出明细');
+
+  // 形如 _xHHHH_ 的字面参考号：XLSX 写出后读回会被还原成其他字符（写出器问题见 backlog B113）。真实 CSV 与写出回读：
+  //   正常参考号原样往返；含 _x0041_ 的源列值或固定文本映射到费用行时拒绝，不交付被改写的标识
+  const escapeLikeCsv = path.join(dir, 'field-mapping-escape-like.csv');
+  fs.writeFileSync(escapeLikeCsv, [FM_HEADERS.join(','), '2026-11-01,USD,100,1.5,货款,FEE_x0041_', '2026-11-02,USD,50,2,退款,FEE_0041'].join('\n'), 'utf8');
+  const escapeLikeOut = path.join(dir, 'fm-escape-like.xlsx');
+  assertThrows(() => generateFieldMapping(main, template, escapeLikeCsv, escapeLikeOut),
+    /第 2 行「记账日期」列的值含写入 Excel 后会被改写的文本.*Transaction Description/, '⑤ 源列值含 _xHHHH_ 时拒绝生成并列出源行与列');
+  assertTrue(!fs.existsSync(escapeLikeOut), '⑤ 拒绝时不写出明细');
+  // 源列值（CSV 引号内含真实 CRLF）中 _x0041 与回车的写出编码 _x000d_ 拼成转义：同样拒绝；只含 CRLF 的参考号写出回读原样保留
+  const crlfEscapeCsv = path.join(dir, 'field-mapping-crlf-escape.csv');
+  fs.writeFileSync(crlfEscapeCsv, [FM_HEADERS.join(','), '2026-11-01,USD,100,1.5,货款,"REF_x0041\r\nB"'].join('\n'), 'utf8');
+  const crlfEscapeOut = path.join(dir, 'fm-crlf-escape.xlsx');
+  assertThrows(() => generateFieldMapping(main, template, crlfEscapeCsv, crlfEscapeOut),
+    /第 2 行「记账日期」列的值含写入 Excel 后会被改写的文本.*Transaction Description/, '⑤ 与回车相连构成转义的源列值拒绝生成');
+  assertTrue(!fs.existsSync(crlfEscapeOut), '⑤ 拒绝时不写出明细');
+  const crlfPlainCsv = path.join(dir, 'field-mapping-crlf-plain.csv');
+  fs.writeFileSync(crlfPlainCsv, [FM_HEADERS.join(','), '2026-11-01,USD,100,1.5,货款,"REF\r\nB"'].join('\n'), 'utf8');
+  assertEq(generateFieldMapping(main, template, crlfPlainCsv, path.join(dir, 'fm-crlf-plain.xlsx')).map((row) => row[4]), ['货款', 'REF\r\nB'],
+    '⑤ 只含 CRLF 的参考号写出回读原样保留');
+  const plainRefCsv = path.join(dir, 'field-mapping-plain-ref.csv');
+  fs.writeFileSync(plainRefCsv, [FM_HEADERS.join(','), '2026-11-02,USD,50,2,退款,FEE_0041_x12'].join('\n'), 'utf8');
+  assertEq(generateFieldMapping(main, template, plainRefCsv, path.join(dir, 'fm-plain-ref.xlsx')).map((row) => row[4]), ['退款', 'FEE_0041_x12'],
+    '⑤ 不构成转义序列的参考号写出回读原样保留');
+  database.saveBillSplitMeta(template.id, { feeFieldMappings: [{ templateField: 'Transaction Description', valueType: 'input', value: 'FEE_X0041_' }] });
+  assertThrows(() => main.buildBillSplitMergeConfig(template, SPLIT_MAPPINGS), /映射值含写入 Excel 后会被改写的文本/,
+    '⑤ 固定文本含 _xHHHH_（不分大小写）时生成前拒绝');
+  database.saveBillSplitMeta(template.id, { feeFieldMappings: [{ templateField: 'Transaction Description', valueType: 'input', value: 'REF_x0041\r\nB' }] });
+  assertThrows(() => main.buildBillSplitMergeConfig(template, SPLIT_MAPPINGS), /映射值含写入 Excel 后会被改写的文本/,
+    '⑤ 固定文本中 _xHHHH 与回车相连时生成前拒绝');
 
   // 模板表头删掉「记账日期」：生成前拦截列出位置；未勾选时标为未启用
   database.saveBillSplitMeta(template.id, { feeFieldMappings: FEE_FIELD_MAPPINGS });
@@ -609,21 +660,69 @@ function verifyFeeFieldMapping(dir, database, main) {
     generateFieldMapping(main, template, sourcePath, path.join(dir, 'fm-out-origin.xlsx')),
     '⑤ 导入后的模板生成结果与原模板一致'
   );
+
+  // 模板包带坏行（缺模板字段且固定值为布尔值、误包一层数组的项）：读包、导入、落库多次规范化后坏行仍保留，生成时拒绝，不静默只用有效行
+  const badEntry = JSON.parse(JSON.stringify(entry));
+  badEntry.billSplitMeta.feeFieldMappings = [
+    { templateField: 'Transaction Description', valueType: 'input', value: '手续费' },
+    { valueType: 'input', value: false },
+    [{ templateField: 'Payee Name', valueType: 'blank', value: '' }]
+  ];
+  const badBundlePath = path.join(dir, 'field-mapping-bad-bundle.json');
+  fs.writeFileSync(badBundlePath, JSON.stringify({ bundleVersion: 9, channels: [], templates: [badEntry] }), 'utf8');
+  const badRead = targetMain.readTemplateBundleFile(badBundlePath).templates[0];
+  targetMain.applyBundleBillSplitConfig(imported.id, badRead);
+  assertEq(target.getBillSplitMeta(imported.id).feeFieldMappings, [
+    { templateField: 'Transaction Description', valueType: 'input', value: '手续费' },
+    { templateField: '', valueType: 'invalid', value: '' },
+    { templateField: '', valueType: 'invalid', value: '' }
+  ], '⑤ 模板包坏行导入后保留为无效行（不被当作空白行丢弃）');
+  assertThrows(() => targetMain.buildBillSplitMergeConfig(target.getTemplate(imported.id), SPLIT_MAPPINGS, { exportTargetFields: FM_FIELDS }),
+    /字段映射特殊处理.*第 2 行：请选择模板字段/, '⑤ 带坏行的模板包导入后生成时拒绝');
+
+  // 原始 JSON 中写成数字的固定值（读包时已被舍入：20261119.000000001 读成 20261119）：导入后记为无效，生成时拒绝，不按舍入后的值输出
+  const numericEntry = JSON.parse(JSON.stringify(entry));
+  numericEntry.billSplitMeta.feeFieldMappings = [{ templateField: 'Transaction Description', valueType: 'input', value: '__NUMERIC_FIXED_VALUE__' }];
+  const numericBundlePath = path.join(dir, 'field-mapping-numeric-bundle.json');
+  fs.writeFileSync(numericBundlePath, JSON.stringify({ bundleVersion: 9, channels: [], templates: [numericEntry] })
+    .replace('"__NUMERIC_FIXED_VALUE__"', '20261119.000000001'), 'utf8');
+  targetMain.applyBundleBillSplitConfig(imported.id, targetMain.readTemplateBundleFile(numericBundlePath).templates[0]);
+  assertEq(target.getBillSplitMeta(imported.id).feeFieldMappings, [{ templateField: 'Transaction Description', valueType: 'invalid', value: '' }],
+    '⑤ 模板包中数字固定值导入后记为无效（不保存舍入后的 20261119）');
+  assertThrows(() => targetMain.buildBillSplitMergeConfig(target.getTemplate(imported.id), SPLIT_MAPPINGS, { exportTargetFields: FM_FIELDS }),
+    /字段映射特殊处理.*第 1 行：映射字段无效/, '⑤ 数字固定值的模板包导入后生成时拒绝');
+
+  // 固定文本含 XML 1.0 禁止的 U+FFFE（写出后工作表无法解析）：导入后记为无效，生成时拒绝，不导出损坏的明细
+  const xmlIllegalEntry = JSON.parse(JSON.stringify(entry));
+  xmlIllegalEntry.billSplitMeta.feeFieldMappings = [{ templateField: 'Transaction Description', valueType: 'input', value: 'REF\uFFFE01' }];
+  const xmlIllegalPath = path.join(dir, 'field-mapping-xml-illegal-bundle.json');
+  fs.writeFileSync(xmlIllegalPath, JSON.stringify({ bundleVersion: 9, channels: [], templates: [xmlIllegalEntry] }), 'utf8');
+  targetMain.applyBundleBillSplitConfig(imported.id, targetMain.readTemplateBundleFile(xmlIllegalPath).templates[0]);
+  assertEq(target.getBillSplitMeta(imported.id).feeFieldMappings, [{ templateField: 'Transaction Description', valueType: 'invalid', value: '' }],
+    '⑤ 含 U+FFFE 的固定文本导入后记为无效');
+  assertThrows(() => targetMain.buildBillSplitMergeConfig(target.getTemplate(imported.id), SPLIT_MAPPINGS, { exportTargetFields: FM_FIELDS }),
+    /字段映射特殊处理.*第 1 行：映射字段无效/, '⑤ 含 XML 禁止字符的固定文本生成时拒绝');
   closeDatabase(target);
 }
 
 // ==================== ⑥ v3.2.21 【返回】按打开时的快照恢复 ====================
-function verifyRestore(database) {
-  // 主进程的撤销逻辑（读取时签发令牌、撤销时先核对令牌再写库），模板库同步与错误结果按名注入替身
+function verifyRestore(dir, database) {
+  // 主进程的撤销逻辑（读取时签发令牌、撤销时先核对令牌再写库），模板库同步与错误结果按名注入替身；
+  //   活动日志用真实结构化日志写入临时目录，验证实际落到哪个级别的日志文件
   let librarySyncs = 0;
+  let failLibrarySync = false;
+  const logRoot = path.join(dir, 'restore-logs');
+  fs.mkdirSync(logRoot, { recursive: true });
   const restoreFns = loadMainFunctions([
     'normalizeBillSplitRestoreSnapshot', 'buildBillSplitRestoreToken', 'issueBillSplitRestoreToken', 'restoreBillSplitConfigFromPayload',
-    'endBillSplitRestoreSession'
+    'endBillSplitRestoreSession', 'endBillSplitRestoreSessionsForOwner', 'findBillSplitRestoreSessionId', 'activateBillSplitRestoreSession',
+    'syncTemplateLibraryAfterBillSplitWrite'
   ], {
     database, normalizeCell, normalizeFeeAmountFormula, normalizeFeeFieldMappings, FileValidationError,
     createHmac: require('node:crypto').createHmac, BILL_SPLIT_RESTORE_TOKEN_SECRET: require('node:crypto').randomBytes(32),
-    randomUUID: require('node:crypto').randomUUID, BILL_SPLIT_RESTORE_SESSIONS: new Map(),
-    syncTemplateLibraryFile: () => { librarySyncs += 1; },
+    randomUUID: require('node:crypto').randomUUID, BILL_SPLIT_RESTORE_SESSIONS: new Map(), BILL_SPLIT_RESTORE_SESSION_LIMIT: 8,
+    syncTemplateLibraryFile: () => { librarySyncs += 1; if (failLibrarySync) throw new Error('磁盘空间不足'); },
+    appendActivityLogEntry: (entry) => appendActivityRecord(path.join(logRoot, 'app_activity_log.txt'), entry),
     createErrorResult: ({ message }) => ({ status: 'error', message })
   });
   const readStored = (id) => ({
@@ -636,6 +735,12 @@ function verifyRestore(database) {
     const config = readStored(id);
     return JSON.parse(JSON.stringify({ ...config, restoreToken: restoreFns.issueBillSplitRestoreToken(database.getTemplate(id), config) }));
   };
+  // 模拟行管理窗口打开并挂载：读取签发令牌后激活本会话（只有已激活的会话能撤销）
+  const openWindow = (id) => {
+    const opening = readConfig(id);
+    restoreFns.activateBillSplitRestoreSession(id, opening.restoreToken);
+    return opening;
+  };
   const dbState = (id) => JSON.stringify(readStored(id));
   const restore = (id, snapshot, restoreToken) => restoreFns.restoreBillSplitConfigFromPayload(id, { restoreSnapshot: snapshot, restoreToken }, '撤销拆分账单修改');
 
@@ -645,7 +750,7 @@ function verifyRestore(database) {
     signedAmountTargetSeqNos: [5], feeAmountFormulaEnabled: true, feeAmountFormula: [{ field: '手续费', op: 'end' }]
   });
   // 打开弹窗时读到的配置与令牌（同 template:get-bill-split-config），渲染进程原样带回快照（含 templateId）
-  const opening = readConfig(template.id);
+  const opening = openWindow(template.id);
   const snapshot = { templateId: template.id, billSplitRows: opening.billSplitRows, billSplitAmountRules: opening.billSplitAmountRules, billSplitMeta: opening.billSplitMeta };
   assertTrue(typeof opening.restoreToken === 'string' && opening.restoreToken.length === 64, '⑥ 读取配置时签发恢复令牌');
 
@@ -694,7 +799,7 @@ function verifyRestore(database) {
   database.saveBillSplitMergeGroup(reopened.id, [1, 3]);
   database.saveBillSplitAmountRules(reopened.id, [{ targetField: 'Credit Amount', conditionField: '摘要', conditionValue: '货款', mappedField: '交易金额', rowIndex: 0 }]);
   database.saveBillSplitMeta(reopened.id, { byFieldAmountTargetSeqNos: [1.5, 9] });
-  const reopenedOpening = readConfig(reopened.id);
+  const reopenedOpening = openWindow(reopened.id);
   const reopenedSnapshot = { templateId: reopened.id, billSplitRows: reopenedOpening.billSplitRows,
     billSplitAmountRules: reopenedOpening.billSplitAmountRules, billSplitMeta: reopenedOpening.billSplitMeta };
   assertEq(reopenedSnapshot.billSplitRows.map((row) => [row.seqNo, row.mergedGroupSeq, row.isFeeBill]), [[1, 1, false], [2, null, true], [3, 1, false]],
@@ -710,15 +815,113 @@ function verifyRestore(database) {
   assertEq(database.getBillSplitMeta(reopened.id), { ...reopenedSnapshot.billSplitMeta, rowFilterRules },
     '⑥ 拆分配置恢复为打开时（非整数、已不存在的指定序号原样保留），过滤规则保留映射关系管理保存的值');
   assertEq(restore(reopened.id, JSON.parse(JSON.stringify(reopenedSnapshot)), reopenedOpening.restoreToken), { status: 'success', restored: true },
-    '⑥ 同一会话内可重试撤销（如模板库同步失败后）');
+    '⑥ 同一会话内可重试撤销');
 
-  // 会话：新打开取代旧会话、关闭结束会话，旧令牌即使快照与代次都对也不再被接受
+  // 主库已恢复后模板库文件同步失败：按撤销成功返回并单独提示（启动和下次修改时会重新同步），不报「未能撤销」
+  database.saveBillSplitAmountRules(reopened.id, []);
+  failLibrarySync = true;
+  const syncFailed = restore(reopened.id, JSON.parse(JSON.stringify(reopenedSnapshot)), reopenedOpening.restoreToken);
+  failLibrarySync = false;
+  assertEq([syncFailed.status, syncFailed.restored, syncFailed.librarySyncFailed], ['success', true, true], '⑥ 撤销后模板库同步失败仍按撤销成功返回');
+  assertTrue(/已撤销本次修改；模板库文件同步失败/.test(syncFailed.message), '⑥ 提示配置已撤销、模板库文件未同步');
+  assertEq(database.getBillSplitAmountRules(reopened.id), reopenedSnapshot.billSplitAmountRules, '⑥ 同步失败时主库已恢复为打开时');
+  const warningLog = getLogFilePath(logRoot, 'warning');
+  assertTrue(fs.existsSync(warningLog) && /撤销拆分账单修改后同步模板库文件失败/.test(fs.readFileSync(warningLog, 'utf8')),
+    '⑥ 同步失败写入 warning 级活动日志（logs/…/warning.log）');
+  const infoLog = getLogFilePath(logRoot, 'info');
+  assertTrue(!fs.existsSync(infoLog) || !/同步模板库文件失败/.test(fs.readFileSync(infoLog, 'utf8')), '⑥ 同步失败不落到 info.log');
+  // 普通保存（save-bill-split-meta）共用同一同步处理：主库已提交后同步失败返回 false 并记 warning 日志，调用方按「已保存，文件未同步」提示
+  failLibrarySync = true;
+  assertEq(restoreFns.syncTemplateLibraryAfterBillSplitWrite(database.getTemplate(reopened.id), '保存拆分账单配置后同步模板库文件失败'), false,
+    '⑥ 保存后同步失败返回 false（不抛出）');
+  failLibrarySync = false;
+  assertTrue(/保存拆分账单配置后同步模板库文件失败/.test(fs.readFileSync(warningLog, 'utf8')), '⑥ 保存后同步失败写入 warning 级活动日志');
+  assertEq(restoreFns.syncTemplateLibraryAfterBillSplitWrite(database.getTemplate(reopened.id), '保存拆分账单配置后同步模板库文件失败'), true,
+    '⑥ 同步成功返回 true');
+
+  // 会话归属：签发给某个渲染页面的令牌只接受同一页面的恢复请求；页面销毁或渲染进程退出时主进程清理其会话
+  const ownerOpening = JSON.parse(JSON.stringify({ ...readStored(reopened.id),
+    restoreToken: restoreFns.issueBillSplitRestoreToken(database.getTemplate(reopened.id), readStored(reopened.id), 41) }));
+  const ownerSnapshot = { templateId: reopened.id, billSplitRows: ownerOpening.billSplitRows,
+    billSplitAmountRules: ownerOpening.billSplitAmountRules, billSplitMeta: ownerOpening.billSplitMeta };
+  assertEq(restoreFns.activateBillSplitRestoreSession(reopened.id, ownerOpening.restoreToken), true, '⑥ 页面 41 的窗口挂载激活');
+  const restoreAs = (ownerId) => restoreFns.restoreBillSplitConfigFromPayload(reopened.id,
+    { restoreSnapshot: JSON.parse(JSON.stringify(ownerSnapshot)), restoreToken: ownerOpening.restoreToken }, '撤销拆分账单修改', ownerId);
+  assertEq(restoreAs(42).errorCode, 'BILL_SPLIT_RESTORE_TOKEN_STALE', '⑥ 其他渲染页面带同一令牌的恢复被拒');
+  assertEq(restoreAs(41), { status: 'success', restored: true }, '⑥ 签发页面的恢复照常成功');
+  restoreFns.endBillSplitRestoreSessionsForOwner(42);
+  assertEq(restoreAs(41), { status: 'success', restored: true }, '⑥ 清理其他页面的会话不影响本页面');
+  restoreFns.endBillSplitRestoreSessionsForOwner(41);
+  assertEq(restoreAs(41).errorCode, 'BILL_SPLIT_RESTORE_TOKEN_STALE', '⑥ 页面销毁 / 渲染进程退出后其会话令牌失效');
+
+  // 会话：每次打开签发独立会话。打开请求因低内存屏障乱序执行时（当前窗口的请求先签发，迟到的旧请求后签发），
+  //   旧请求的会话不取代当前窗口的会话；渲染层识别出旧回包后按其令牌释放，当前窗口仍能撤销
+  const toSnapshot = (id, opening) => ({ templateId: id, billSplitRows: opening.billSplitRows,
+    billSplitAmountRules: opening.billSplitAmountRules, billSplitMeta: opening.billSplitMeta });
   const sessionOpening = readConfig(reopened.id);
-  const sessionSnapshot = { templateId: reopened.id, billSplitRows: sessionOpening.billSplitRows,
-    billSplitAmountRules: sessionOpening.billSplitAmountRules, billSplitMeta: sessionOpening.billSplitMeta };
-  assertEq(restore(reopened.id, reopenedSnapshot, reopenedOpening.restoreToken).errorCode, 'BILL_SPLIT_RESTORE_TOKEN_STALE', '⑥ 新会话打开后旧会话令牌失效');
+  const sessionSnapshot = toSnapshot(reopened.id, sessionOpening);
+  assertEq(restoreFns.activateBillSplitRestoreSession(reopened.id, sessionOpening.restoreToken), true, '⑥ 当前窗口挂载时激活会话');
+  const lateOpening = readConfig(reopened.id);
+  // 同一页面有已激活会话与未挂载激活的会话（迟到的旧打开请求，尚未释放）：后者撤销被拒，库不变
+  database.saveBillSplitAmountRules(reopened.id, []);
+  const beforeLateRestore = dbState(reopened.id);
+  assertEq(restore(reopened.id, toSnapshot(reopened.id, lateOpening), lateOpening.restoreToken).errorCode, 'BILL_SPLIT_RESTORE_TOKEN_STALE',
+    '⑥ 未挂载激活的会话撤销被拒');
+  assertEq(dbState(reopened.id), beforeLateRestore, '⑥ 未激活会话的撤销不改库（不覆盖当前窗口之后的修改）');
+  restoreFns.endBillSplitRestoreSession(reopened.id, lateOpening.restoreToken);
+  assertEq(restoreFns.findBillSplitRestoreSessionId(reopened.id, lateOpening.restoreToken), '', '⑥ 放弃打开的旧请求按令牌释放');
+  assertEq(restore(reopened.id, sessionSnapshot, sessionOpening.restoreToken), { status: 'success', restored: true },
+    '⑥ 迟到的旧打开请求签发并释放后，当前窗口仍能撤销');
+  assertEq(database.getBillSplitAmountRules(reopened.id), sessionSnapshot.billSplitAmountRules, '⑥ 当前窗口撤销恢复为其打开时');
+  // 窗口释放只结束本窗口令牌所属的会话：旧窗口迟到的释放（旧令牌）、缺令牌的请求都不结束当前会话
+  restoreFns.endBillSplitRestoreSession(reopened.id, reopenedOpening.restoreToken);
+  restoreFns.endBillSplitRestoreSession(reopened.id, true);
   restoreFns.endBillSplitRestoreSession(reopened.id);
-  assertEq(restore(reopened.id, sessionSnapshot, sessionOpening.restoreToken).errorCode, 'BILL_SPLIT_RESTORE_TOKEN_STALE', '⑥ 会话结束（关闭行管理）后令牌失效');
+  assertEq(restore(reopened.id, sessionSnapshot, sessionOpening.restoreToken), { status: 'success', restored: true },
+    '⑥ 旧窗口迟到的释放不结束新窗口的会话');
+  restoreFns.endBillSplitRestoreSession(reopened.id, sessionOpening.restoreToken);
+  assertEq(restore(reopened.id, sessionSnapshot, sessionOpening.restoreToken).errorCode, 'BILL_SPLIT_RESTORE_TOKEN_STALE', '⑥ 会话结束（行管理窗口释放）后令牌失效');
+
+  // 两个窗口交叠打开同一模板（A 先挂载并修改，B 后挂载并新增拆分行后确认）：B 挂载时激活本会话、作废 A 的会话，
+  //   A 再点【返回】被拒，不把 B 已确认的第三行撤销掉（拆分写入不改模板代次，仅靠签名无法区分）
+  const overlap = defineFieldMappingTemplate(database, '返回恢复交叠模板');
+  const openingA = readConfig(overlap.id);
+  restoreFns.activateBillSplitRestoreSession(overlap.id, openingA.restoreToken);
+  database.saveBillSplitMeta(overlap.id, { feeFieldMappingEnabled: false });
+  const openingB = readConfig(overlap.id);
+  restoreFns.activateBillSplitRestoreSession(overlap.id, openingB.restoreToken);
+  database.saveBillSplitRowCount(overlap.id, 3);
+  restoreFns.endBillSplitRestoreSession(overlap.id, openingB.restoreToken);
+  const afterB = dbState(overlap.id);
+  assertEq(restore(overlap.id, toSnapshot(overlap.id, openingA), openingA.restoreToken).errorCode, 'BILL_SPLIT_RESTORE_TOKEN_STALE',
+    '⑥ 被后挂载窗口取代的会话撤销被拒');
+  assertEq([dbState(overlap.id), database.getBillSplitRows(overlap.id).length], [afterB, 3], '⑥ 后挂载窗口已确认的第三行保留');
+  assertEq(restoreFns.activateBillSplitRestoreSession(overlap.id, openingA.restoreToken), false, '⑥ 已作废的会话不能再激活');
+
+  // 释放失败时会话不无限累积：每个模板最多保留最近 8 个，超出时丢弃最早签发的会话
+  const firstKept = readConfig(reopened.id);
+  const burst = Array.from({ length: 8 }, () => readConfig(reopened.id));
+  assertEq(restoreFns.findBillSplitRestoreSessionId(reopened.id, firstKept.restoreToken), '', '⑥ 超出上限时最早的会话被丢弃');
+  const latestBurst = burst[burst.length - 1];
+  assertEq(restoreFns.activateBillSplitRestoreSession(reopened.id, latestBurst.restoreToken), true, '⑥ 最近签发的会话保留，可挂载激活');
+  assertEq(restore(reopened.id, toSnapshot(reopened.id, latestBurst), latestBurst.restoreToken), { status: 'success', restored: true },
+    '⑥ 最近签发的会话保留');
+  burst.forEach((opening) => restoreFns.endBillSplitRestoreSession(reopened.id, opening.restoreToken));
+  assertEq(burst.map((opening) => restoreFns.findBillSplitRestoreSessionId(reopened.id, opening.restoreToken)), burst.map(() => ''),
+    '⑥ 按令牌释放后会话清空');
+
+  // 单窗口下重复点击入口：最后一次点击先挂载并激活，此前的 9 个读取在屏障解除后才签发令牌（尚未释放）。
+  //   超出上限时只淘汰未激活的会话，当前窗口的撤销点保留；当前窗口修改后点【返回】照常撤销
+  const activeOpening = readConfig(reopened.id);
+  assertEq(restoreFns.activateBillSplitRestoreSession(reopened.id, activeOpening.restoreToken), true, '⑥ 当前窗口挂载时激活会话');
+  const lateBurst = Array.from({ length: 9 }, () => readConfig(reopened.id));
+  assertEq(restoreFns.findBillSplitRestoreSessionId(reopened.id, lateBurst[0].restoreToken), '', '⑥ 超出上限时淘汰最早的未激活会话');
+  const beforeActiveEdit = dbState(reopened.id);
+  database.saveBillSplitRowCount(reopened.id, database.getBillSplitRows(reopened.id).length + 1);
+  assertEq(restore(reopened.id, toSnapshot(reopened.id, activeOpening), activeOpening.restoreToken), { status: 'success', restored: true },
+    '⑥ 迟到的旧请求挤满上限后，已激活的当前窗口仍可撤销');
+  assertEq(dbState(reopened.id), beforeActiveEdit, '⑥ 撤销后恢复到当前窗口打开时的状态');
+  lateBurst.forEach((opening) => restoreFns.endBillSplitRestoreSession(reopened.id, opening.restoreToken));
 }
 
 async function run() {
@@ -732,7 +935,7 @@ async function run() {
     verifyGeneration(dir, database, main);
     verifyBundle(dir, database, main);
     verifyFeeFieldMapping(dir, database, main);
-    verifyRestore(database);
+    verifyRestore(dir, database);
   } finally {
     openedDatabases.splice(0).forEach((database) => {
       try { database.close(); } catch (_error) { /* 已关闭 */ }
