@@ -28,6 +28,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
           saveFeatureFilters:payload=>cfg.invoke('featureSave',[payload],(()=>{let max=0;payload.featureFilters.forEach(item=>{if(/^\\d+$/.test(item.id||''))max=Math.max(max,Number(item.id));});
             return {status:'success',featureFilters:payload.featureFilters.map(item=>item.id?{...item}:{...item,id:String(++max)})};})()),
           saveBillSplitAmountRules:payload=>cfg.invoke('splitAmount',[payload],{status:'success'}),
+          getBillSplitConfig:(id,options)=>options&&'activateRestoreSession' in options?cfg.invoke('rowSessionActivate',[id,options.activateRestoreSession],{status:'success',restoreSessionActivated:true}):options&&'endRestoreSession' in options?cfg.invoke('rowSessionEnd',[id,options.endRestoreSession],{status:'success',restoreSessionEnded:true}):cfg.invoke('billSplitConfig',[id,options],{status:'error',message:'未模拟拆分配置读取'}),
           getMappings:id=>cfg.invoke('templateRead',[id],{status:'success',template:cfg.templates[0],targetFields:[],mappings:[]}),
           previewHeaderUpdate:id=>cfg.invoke('headerPreview',[id],{status:'cancelled'}),
           updateHeaders:payload=>cfg.invoke('headerUpdate',[payload],{status:'success',message:'模板「模板 A」已更新，映射关系已保留',staleMappings:[],activeStaleCount:0})},
@@ -563,7 +564,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
   });
   await test('拆分账单规则写入原 split 表，成功后回到原行管理父层且保持规则', async () => {
     await setup();
-    await js(`cfg.parentHandle=cfg.bridge.openModal(()=>cfg.dialogs.createBillSplitRowsDialog({template:{id:1,headers:['Currency','Amount']},initialAmountRules:cfg.rules})).handle;
+    await js(`cfg.parentHandle=cfg.bridge.openModal(()=>cfg.dialogs.createBillSplitRowsDialog({template:{id:1,headers:['Currency','Amount']},initialAmountRules:cfg.rules,restoreToken:'token-1'})).handle;
       cfg.parentOverlay=cfg.top();cfg.parentOverlay.querySelector('.bill-split-amount-rules-manage-btn').click();cfg.handle=cfg.host.getTop();cfg.overlay=cfg.top();
       cfg.write=cfg.defer();cfg.next.splitAmount=cfg.write;cfg.overlay.querySelector('[data-action="done"]').click();cfg.overlay.querySelector('[data-action="done"]').dispatchEvent(new Event('click'));`);
     assert.equal(await js(`cfg.calls.filter(call=>call.name==='splitAmount').length`), 1);
@@ -1145,7 +1146,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       cfg.rows=[{seqNo:1,rowStatus:'draft',currencySourceField:'Currency'},{seqNo:2,rowStatus:'draft',currencySourceField:'Currency'}];
       cfg.rowWrite=cfg.defer();cfg.rowSettled=0;cfg.api.templates.saveBillSplitRowCount=payload=>{cfg.calls.push({name:'rowCount',args:[payload]});return cfg.rowWrite.promise.then(result=>{cfg.rowSettled++;return result;});};
       cfg.router=ModuleRouter.createModuleRouter({defaultModuleId:'application',modules:['application','other'].map(id=>({id,controller:{enter:()=>({status:'ready'}),leave:()=>cfg.host.closeOwner('application','navigation').status==='blocked'?{status:'blocked'}:{status:'left'},dispose(){}}}))});cfg.router.navigate('application',{persist:false});
-      cfg.parent=cfg.other();cfg.handle=cfg.bridge.pushModal(cfg.parent,()=>cfg.dialogs.createBillSplitRowsDialog({template:{id:7,name:'模板',headers:['Currency']},initialRows:cfg.rows})).handle;
+      cfg.parent=cfg.other();cfg.handle=cfg.bridge.pushModal(cfg.parent,()=>cfg.dialogs.createBillSplitRowsDialog({template:{id:7,name:'模板',headers:['Currency']},initialRows:cfg.rows,restoreToken:'token-7'})).handle;
       cfg.overlay=cfg.top();cfg.input=cfg.overlay.querySelector('.bill-split-row-count-input');cfg.button=cfg.overlay.querySelector('.bill-split-row-count-done-btn');
       cfg.input.value=${JSON.stringify(String(nextN))};cfg.button.click();cfg.confirm=cfg.host.getTop();cfg.confirmOverlay=cfg.top();void 0;
     `);
@@ -1194,8 +1195,8 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       ${feeFormula===null?'':`cfg.meta.feeAmountFormulaEnabled=true;cfg.meta.feeAmountFormula=${JSON.stringify(feeFormula)};`}
       const methodNames={previewDeleteBillSplitRow:'preview',deleteBillSplitRow:'deleteRow',saveBillSplitRow:'saveRow',saveBillSplitRowCount:'rowCount',clearBillSplitMergeGroups:'clearMerge',saveBillSplitMergeGroup:'saveMerge',saveBillSplitMeta:'rowMeta',saveBillSplitAmountRules:'rowRules'};
       for(const [method,name] of Object.entries(methodNames)) cfg.api.templates[method]=payload=>cfg.invoke(name,[structuredClone(payload)],name==='preview'?{status:'success',dissolvedGroups:cfg.groups}:name==='deleteRow'||name==='rowCount'?{status:'success',currentRows:cfg.rows.slice(0,1)}:{status:'success'}).then(result=>{cfg.settled.push(name);return result;});
-      cfg.api.templates.getBillSplitConfig=id=>cfg.invoke('rowRefresh',[id],{status:'success',billSplitRows:cfg.rows,billSplitAmountRules:cfg.initialRules,billSplitMeta:cfg.meta});
-      cfg.openRows=()=>{cfg.parent=cfg.other();cfg.handle=cfg.bridge.pushModal(cfg.parent,()=>cfg.dialogs.createBillSplitRowsDialog({template:cfg.rowTemplate,initialRows:cfg.rows,initialAmountRules:cfg.initialRules,initialBillSplitMeta:cfg.meta})).handle;
+      cfg.api.templates.getBillSplitConfig=(id,options)=>options&&'activateRestoreSession' in options?cfg.invoke('rowSessionActivate',[id,options.activateRestoreSession],{status:'success',restoreSessionActivated:true}):options&&'endRestoreSession' in options?cfg.invoke('rowSessionEnd',[id,options.endRestoreSession],{status:'success',restoreSessionEnded:true}):cfg.invoke('rowRefresh',[id],{status:'success',billSplitRows:cfg.rows,billSplitAmountRules:cfg.initialRules,billSplitMeta:cfg.meta,restoreToken:'token-7'});
+      cfg.openRows=()=>{cfg.parent=cfg.other();cfg.handle=cfg.bridge.pushModal(cfg.parent,()=>cfg.dialogs.createBillSplitRowsDialog({template:cfg.rowTemplate,initialRows:cfg.rows,initialAmountRules:cfg.initialRules,initialBillSplitMeta:cfg.meta,feeFieldMappingTemplateFields:['ValueDate','Description','Payee Name'],restoreToken:'token-7'})).handle;
         cfg.overlay=cfg.top();cfg.deleteButton=cfg.overlay.querySelector('.bill-split-row-delete-btn');};
       cfg.openRows();cfg.writeCount=()=>cfg.calls.filter(call=>['deleteRow','saveRow','rowCount','clearMerge','saveMerge','rowMeta','rowRules'].includes(call.name)).length;
       cfg.beginDelete=()=>cfg.deleteButton.click();cfg.captureConfirm=()=>{cfg.confirm=cfg.host.getTop();cfg.confirmOverlay=cfg.top();cfg.confirmButton=cfg.confirmOverlay.querySelector('[data-action="confirm"]');};void 0;
@@ -1318,14 +1319,20 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     disabled:cfg.overlay.querySelector('.bill-split-fee-formula-checkbox').disabled,
     settings:!cfg.overlay.querySelector('.bill-split-fee-formula-settings-btn').hidden,
     hint:!cfg.overlay.querySelector('.bill-split-fee-formula-hint').hidden})`;
-  await test('FB01 发生额取值设置文案与费用账单列', async () => {
+  // v3.2.21：发生额取值两项并排（按字段在右）；新增「费用账单设置」分组（发生额取值特殊处理、字段映射特殊处理）；底部【确认】在【返回】左侧
+  await test('FB01 发生额取值设置与费用账单设置文案、费用账单列与底部按钮', async () => {
     await setupRowWrites();
-    assert.deepEqual(await js(`({title:cfg.overlay.querySelector('.bill-split-sub-section h3').textContent,
-      labels:[...cfg.overlay.querySelectorAll('.bill-split-sub-row > label:first-child')].map(node=>node.textContent),
+    assert.deepEqual(await js(`({titles:[...cfg.overlay.querySelectorAll('.bill-split-sub-section h3')].map(node=>node.textContent),
+      pairs:[...cfg.overlay.querySelectorAll('.bill-split-sub-row-pair')].map(row=>[...row.querySelectorAll(':scope > .bill-split-sub-item > label:first-child')].map(node=>node.textContent)),
       heads:[...cfg.overlay.querySelectorAll('.bill-split-rows-table thead th')].map(node=>node.textContent),
-      manage:cfg.overlay.querySelector('.bill-split-amount-rules-manage-btn').textContent})`),
-    {title:'发生额取值设置',labels:['按正负号取发生额','按字段取发生额','费用账单发生额特殊取值逻辑'],
-      heads:['账单序号','Currency','Credit Amount','Debit Amount','执行操作','费用账单'],manage:'发生额映射关系管理'});
+      manage:cfg.overlay.querySelector('.bill-split-amount-rules-manage-btn').textContent,
+      footer:[...cfg.overlay.querySelectorAll('.bill-split-rows-footer button')].map(node=>node.textContent),
+      fieldMapping:{disabled:cfg.overlay.querySelector('.bill-split-fee-field-mapping-checkbox').disabled,
+        settings:!cfg.overlay.querySelector('.bill-split-fee-field-mapping-settings-btn').hidden}})`),
+    {titles:['发生额取值设置','费用账单设置'],
+      pairs:[['按正负号取发生额','按字段取发生额'],['发生额取值特殊处理','字段映射特殊处理']],
+      heads:['账单序号','Currency','Credit Amount','Debit Amount','执行操作','费用账单'],manage:'发生额映射关系管理',
+      footer:['确认','返回'],fieldMapping:{disabled:true,settings:false}});
     assert.deepEqual(await js(FEE_FORMULA_UI_JS),{checked:false,disabled:true,settings:false,hint:true});
   });
   await test('FB02 费用账单勾选唯一：立即写入，勾选行 Credit 置灰，以主进程返回的标记为准；失败时按重读的已保存配置显示', async () => {
@@ -1346,15 +1353,16 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.equal(await js('cfg.calls.filter(x=>x.name==="rowRefresh").length'),1);
     assert.deepEqual(await js(FEE_ROW_STATE_JS),[{fee:false,credit:false,debit:false},{fee:false,credit:false,debit:false}]);
   });
-  await test('FB07 费用配置保存失败且重读失败：提示关闭重开，暂停本窗口配置写入，关闭与完成仍可用', async () => {
+  await test('FB07 费用配置保存失败且重读失败：提示关闭重开，暂停本窗口配置写入，关闭、确认与返回仍可用', async () => {
     await setupRowWrites({feeBill:2});
-    await js(`cfg.api.templates.getBillSplitConfig=id=>{cfg.calls.push({name:'rowRefresh',args:[id]});return Promise.reject(new Error('读不到'));};
+    await js(`cfg.api.templates.getBillSplitConfig=(id,options)=>{if(options&&'activateRestoreSession' in options){cfg.calls.push({name:'rowSessionActivate',args:[id,options.activateRestoreSession]});return Promise.resolve({status:'success',restoreSessionActivated:true});}if(options&&'endRestoreSession' in options){cfg.calls.push({name:'rowSessionEnd',args:[id,options.endRestoreSession]});return Promise.resolve({status:'success',restoreSessionEnded:true});}cfg.calls.push({name:'rowRefresh',args:[id]});return Promise.reject(new Error('读不到'));};
       cfg.next.rowMeta={status:'failed',message:'模板库同步失败'};
       cfg.select=cfg.overlay.querySelector('.bill-split-fee-formula-checkbox');cfg.select.checked=true;cfg.select.dispatchEvent(new Event('change'));`);await tick();
     assert.match(await js('cfg.top().textContent'),/模板库同步失败[\s\S]*请关闭后重新打开以确认/);
     await js('cfg.host.closeTop();void 0;');
-    assert.deepEqual(await js(`({locked:[...cfg.overlay.querySelectorAll('button, input, select')].filter(node=>!node.matches('.icon-close, .bill-split-rows-done-btn')).every(node=>node.disabled),
-      close:!cfg.overlay.querySelector('.icon-close').disabled,done:!cfg.overlay.querySelector('.bill-split-rows-done-btn').disabled})`),{locked:true,close:true,done:true});
+    assert.deepEqual(await js(`({locked:[...cfg.overlay.querySelectorAll('button, input, select')].filter(node=>!node.matches('.icon-close, .bill-split-rows-done-btn, .bill-split-rows-back-btn')).every(node=>node.disabled),
+      close:!cfg.overlay.querySelector('.icon-close').disabled,done:!cfg.overlay.querySelector('.bill-split-rows-done-btn').disabled,
+      back:!cfg.overlay.querySelector('.bill-split-rows-back-btn').disabled})`),{locked:true,close:true,done:true,back:true});
     await js(`cfg.fee=cfg.overlay.querySelectorAll('.bill-split-fee-bill-checkbox')[0];cfg.fee.disabled=false;cfg.fee.checked=true;cfg.fee.dispatchEvent(new Event('change'));`);await tick();
     assert.equal(await js('cfg.calls.filter(x=>x.name==="rowMeta").length'),1);
   });
@@ -1453,6 +1461,359 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await layout.evidence('bill-split-rows-fee-bill-100', {});
   });
 
+  // ==================== v3.2.21 费用账单设置 · 字段映射特殊处理、【确认】/【返回】 ====================
+  await test('FB09 字段映射特殊处理：勾选即写入，【设置】弹窗布局与选项顺序、自己输入的输入框、校验与保存载荷，重开回显，取消不写入', async () => {
+    await setupRowWrites({feeBill:2});
+    await js(`cfg.select=cfg.overlay.querySelector('.bill-split-fee-field-mapping-checkbox');cfg.select.checked=true;cfg.select.dispatchEvent(new Event('change'));`);await tick();
+    assert.deepEqual(await js('cfg.calls.filter(x=>x.name==="rowMeta").map(x=>x.args[0])'),[{templateId:7,feeFieldMappingEnabled:true}]);
+    assert.equal(await js(`!cfg.overlay.querySelector('.bill-split-fee-field-mapping-settings-btn').hidden&&cfg.overlay.querySelector('.bill-split-fee-formula-settings-btn').hidden`),true);
+    await js(`cfg.overlay.querySelector('.bill-split-fee-field-mapping-settings-btn').click();cfg.mapping=cfg.top();cfg.mappingHandle=cfg.host.getTop();void 0;`);
+    assert.deepEqual(await js(`({title:cfg.mapping.querySelector('.dialog-title').textContent,
+      editor:[...cfg.mapping.querySelector('.bill-split-fee-field-mapping-editor').children].map(node=>node.textContent.trim().split(/\\s+/)[0]),
+      row:[...cfg.mapping.querySelector('.bill-split-fee-field-mapping-item').children].filter(node=>!node.hidden).map(node=>node.tagName==='SPAN'?node.textContent:node.tagName),
+      templateOptions:[...cfg.mapping.querySelector('.bill-split-fee-field-mapping-template-select').options].map(node=>node.textContent),
+      valueOptions:[...cfg.mapping.querySelector('.bill-split-fee-field-mapping-value-select').options].map(node=>node.textContent),
+      actions:[...cfg.mapping.querySelectorAll('.dialog-actions button')].map(node=>node.textContent)})`),
+    {title:'字段映射特殊处理',editor:['新增模板字段','模板字段'],row:['模板字段','SELECT','映射字段','SELECT'],
+      templateOptions:['','ValueDate','Description','Payee Name'],valueOptions:['','自己输入','Currency','Amount'],actions:['保存','取消']});
+    await js(`cfg.add=()=>cfg.mapping.querySelector('.bill-split-fee-field-mapping-add-btn').click();cfg.add();
+      cfg.items=()=>[...cfg.mapping.querySelectorAll('.bill-split-fee-field-mapping-item')];
+      cfg.set=(index,field,value,text)=>{const item=cfg.items()[index];item.querySelector('.bill-split-fee-field-mapping-template-select').value=field;
+        const select=item.querySelector('.bill-split-fee-field-mapping-value-select');select.value=value;select.dispatchEvent(new Event('change'));
+        if(text!==undefined)item.querySelector('.bill-split-fee-field-mapping-input').value=text;};
+      cfg.save=()=>cfg.mapping.querySelector('[data-action="save"]').click();
+      cfg.set(1,'','input','');void 0;`);
+    assert.deepEqual(await js(`({count:cfg.items().length,input:cfg.items().map(item=>!item.querySelector('.bill-split-fee-field-mapping-input').hidden)})`),{count:2,input:[false,true]});
+    await js('cfg.save();');await tick();
+    assert.match(await js('cfg.top().textContent'),/第 2 行：请选择模板字段[\s\S]*第 2 行：请输入映射值/);
+    await js(`cfg.host.closeTop();cfg.set(0,'Description','input','手续费');cfg.set(1,'Description','field:Amount');cfg.save();`);await tick();
+    assert.match(await js('cfg.top().textContent'),/第 2 行：模板字段「Description」重复/);
+    // 自己输入的值含 _xHHHH_ 形式的文本（写入 Excel 后会被改写）：保存前拒绝，不写库
+    await js(`cfg.host.closeTop();cfg.set(0,'Description','input','FEE_X0041_');cfg.set(1,'Payee Name','field:Amount');cfg.save();`);await tick();
+    assert.match(await js('cfg.top().textContent'),/第 1 行：映射值含写入 Excel 后会被改写的文本/);
+    await js(`cfg.host.closeTop();cfg.set(0,'Description','input','手续费');cfg.set(1,'Description','field:Amount');cfg.save();`);await tick();
+    assert.match(await js('cfg.top().textContent'),/第 2 行：模板字段「Description」重复/);
+    assert.equal(await js('cfg.calls.filter(x=>x.name==="rowMeta").length'),1);
+    // 第 3 行两个下拉框都为空白：保存时忽略；自己输入的值去首尾空白
+    await js(`cfg.host.closeTop();cfg.set(0,'Description','input','  手续费 ');cfg.set(1,'Payee Name','field:Amount');cfg.add();cfg.save();`);await tick();
+    assert.deepEqual(await js('cfg.calls.filter(x=>x.name==="rowMeta").map(x=>x.args[0])[1]'),
+      {templateId:7,feeFieldMappingEnabled:true,feeFieldMappings:[{templateField:'Description',valueType:'input',value:'手续费'},{templateField:'Payee Name',valueType:'field',value:'Amount'}]});
+    assert.equal(await js('cfg.mappingHandle.isOpen()||!cfg.handle.isTop()'),false);
+    await js(`cfg.overlay.querySelector('.bill-split-fee-field-mapping-settings-btn').click();cfg.mapping=cfg.top();void 0;`);
+    assert.deepEqual(await js(`[...cfg.mapping.querySelectorAll('.bill-split-fee-field-mapping-item')].map(item=>[item.querySelector('.bill-split-fee-field-mapping-template-select').value,
+      item.querySelector('.bill-split-fee-field-mapping-value-select').value,item.querySelector('.bill-split-fee-field-mapping-input').hidden?null:item.querySelector('.bill-split-fee-field-mapping-input').value])`),
+    [['Description','input','手续费'],['Payee Name','field:Amount',null]]);
+    await js(`cfg.mapping.querySelector('.bill-split-fee-field-mapping-add-btn').click();cfg.mapping.querySelector('[data-action="cancel"]').click();`);await tick();
+    assert.deepEqual(await js('({calls:cfg.calls.filter(x=>x.name==="rowMeta").length,top:cfg.handle.isTop()})'),{calls:2,top:true});
+  });
+  await test('FB10 字段映射特殊处理：已不在可选范围的模板字段与映射字段显示「（已删除）」并标红；名为「自己输入」的表头与选项互不混淆', async () => {
+    await setupRowWrites({feeBill:2});
+    await js(`cfg.rowTemplate={id:7,name:'删行测试模板',headers:['Currency','自己输入']};cfg.handle.dispose();
+      cfg.meta.feeFieldMappingEnabled=true;cfg.meta.feeFieldMappings=[{templateField:'Remark',valueType:'field',value:'旧列'},{templateField:'Description',valueType:'field',value:'自己输入'}];
+      cfg.openRows();cfg.overlay.querySelector('.bill-split-fee-field-mapping-settings-btn').click();cfg.mapping=cfg.top();void 0;`);
+    assert.deepEqual(await js(`[...cfg.mapping.querySelectorAll('.bill-split-fee-field-mapping-item')].map(item=>{const t=item.querySelector('.bill-split-fee-field-mapping-template-select');const v=item.querySelector('.bill-split-fee-field-mapping-value-select');
+      return [t.selectedOptions[0].textContent,t.classList.contains('is-stale'),v.selectedOptions[0].textContent,v.classList.contains('is-stale'),item.querySelector('.bill-split-fee-field-mapping-input').hidden];})`),
+    [['Remark（已删除）',true,'旧列（已删除）',true,true],['Description',false,'自己输入（模板文件字段）',false,true]]);
+    assert.deepEqual(await js(`[...cfg.mapping.querySelectorAll('.bill-split-fee-field-mapping-item')[1].querySelectorAll('.bill-split-fee-field-mapping-value-select option')].map(node=>[node.value,node.textContent])`),
+      [['blank',''],['input','自己输入'],['field:Currency','Currency'],['field:自己输入','自己输入（模板文件字段）']]);
+  });
+  await test('FB13 字段映射特殊处理弹窗布局：「新增模板字段」在「模板字段」左侧，各行左对齐、控件不超出卡片，自己输入时输入框在下拉框右侧', async () => {
+    await setupRowWrites({feeBill:2,layoutOptions:{zoom:1}});
+    await js(`cfg.meta.feeFieldMappingEnabled=true;cfg.meta.feeFieldMappings=[{templateField:'Description',valueType:'input',value:'手续费'},{templateField:'Payee Name',valueType:'field',value:'Amount'},{templateField:'ValueDate',valueType:'blank',value:''}];
+      cfg.handle.dispose();cfg.openRows();cfg.overlay.querySelector('.bill-split-fee-field-mapping-settings-btn').click();cfg.mapping=cfg.top();void 0;`);
+    await layout.settle();
+    const geometry = await js(`(()=>{const rect=node=>node.getBoundingClientRect();const card=rect(cfg.mapping.querySelector('.modal-card'));
+      const add=rect(cfg.mapping.querySelector('.bill-split-fee-field-mapping-add-btn'));
+      const items=[...cfg.mapping.querySelectorAll('.bill-split-fee-field-mapping-item')];
+      const firstLabel=rect(items[0].querySelector('.bill-split-fee-field-mapping-label'));
+      const controls=items.flatMap(item=>[...item.children].filter(node=>!node.hidden).map(rect));
+      const firstValue=rect(items[0].querySelector('.bill-split-fee-field-mapping-value-select'));const input=rect(items[0].querySelector('.bill-split-fee-field-mapping-input'));
+      return {addBeforeLabel:add.right<=firstLabel.left,sameTop:Math.abs(add.top-firstLabel.top)<12,
+        alignedLeft:new Set(items.map(item=>Math.round(rect(item).left))).size,stacked:items.every((item,index)=>index===0||rect(item).top>=rect(items[index-1]).bottom),
+        inputRight:input.left>=firstValue.right&&Math.abs(input.top-firstValue.top)<1,
+        insideCard:controls.every(r=>r.right<=card.right&&r.left>=card.left)};})()`);
+    assert.deepEqual(geometry,{addBeforeLabel:true,sameTop:true,alignedLeft:1,stacked:true,inputRight:true,insideCard:true});
+    await js('new Promise(resolve=>setTimeout(resolve,400))');await layout.settle();
+    await layout.evidence('bill-split-fee-field-mapping-100', { geometry });
+  });
+  await test('FB14 字段映射特殊处理：无法识别的取值类型显示为无效并要求重选；改选有效项后取消标红；同名表头只列一次', async () => {
+    await setupRowWrites({feeBill:2});
+    await js(`cfg.rowTemplate={id:7,name:'删行测试模板',headers:['Currency','参考号','参考号','']};cfg.handle.dispose();
+      cfg.meta.feeFieldMappingEnabled=true;cfg.meta.feeFieldMappings=[{templateField:'Description',valueType:'',value:'旧值'},{templateField:'Payee Name',valueType:'field',value:'已删列'}];
+      cfg.openRows();cfg.overlay.querySelector('.bill-split-fee-field-mapping-settings-btn').click();cfg.mapping=cfg.top();
+      cfg.items=()=>[...cfg.mapping.querySelectorAll('.bill-split-fee-field-mapping-item')];
+      cfg.value=(index)=>cfg.items()[index].querySelector('.bill-split-fee-field-mapping-value-select');void 0;`);
+    assert.deepEqual(await js(`({first:[cfg.value(0).selectedOptions[0].textContent,cfg.value(0).classList.contains('is-stale')],
+      second:[cfg.value(1).selectedOptions[0].textContent,cfg.value(1).classList.contains('is-stale')],
+      options:[...cfg.value(0).options].filter(node=>!node.dataset.stale).map(node=>node.textContent)})`),
+    {first:['旧值（无效）',true],second:['已删列（已删除）',true],options:['','自己输入','Currency','参考号']});
+    await js(`cfg.mapping.querySelector('[data-action="save"]').click();`);await tick();
+    assert.match(await js('cfg.top().textContent'),/第 1 行：映射字段无效，请重新选择/);
+    assert.equal(await js('cfg.calls.filter(x=>x.name==="rowMeta").length'),0);
+    await js(`cfg.host.closeTop();cfg.value(0).value='input';cfg.value(0).dispatchEvent(new Event('change'));
+      cfg.value(1).value='field:参考号';cfg.value(1).dispatchEvent(new Event('change'));
+      cfg.items()[0].querySelector('.bill-split-fee-field-mapping-input').value='手续费';void 0;`);
+    assert.deepEqual(await js(`[cfg.value(0).classList.contains('is-stale'),cfg.value(1).classList.contains('is-stale')]`),[false,false]);
+    await js(`cfg.mapping.querySelector('[data-action="save"]').click();`);await tick();
+    assert.deepEqual(await js('cfg.calls.filter(x=>x.name==="rowMeta").map(x=>x.args[0].feeFieldMappings)[0]'),
+      [{templateField:'Description',valueType:'input',value:'手续费'},{templateField:'Payee Name',valueType:'field',value:'参考号'}]);
+  });
+  await test('FB15 指定账单序号面板打开时按下【返回】/ ×：不提交面板选择，直接按未修改关闭', async () => {
+    for (const selector of ['.bill-split-rows-back-btn', '.icon-close']) {
+      await setupRowWrites({signed:true});
+      await js(`cfg.trigger=cfg.overlay.querySelector('.bill-split-signed-target-seq-picker .bill-split-target-seq-trigger');cfg.trigger.click();
+        cfg.overlay.querySelectorAll('.bill-split-signed-target-seq-panel input').forEach(node=>{node.checked=node.value==='2';});
+        cfg.closer=cfg.overlay.querySelector(${JSON.stringify(selector)});
+        cfg.closer.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));cfg.closer.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));cfg.closer.click();`);await tick();
+      assert.deepEqual(await js('({open:cfg.handle.isOpen(),writes:cfg.writeCount()})'),{open:false,writes:0});
+    }
+  });
+  await test('FB17 打开时主进程没有签发恢复令牌：提示无法建立撤销点，不打开可写入的行管理', async () => {
+    await openMappingRows();
+    await js(`cfg.rowsHandle.close();cfg.next.rowRefresh={status:'success',billSplitRows:cfg.rows,billSplitAmountRules:[],billSplitMeta:cfg.meta,restoreToken:null};cfg.openRowsButton.click();`);await tick();
+    assert.match(await js('cfg.top().textContent'),/无法建立【返回】的撤销点/);
+    assert.equal(await js('document.querySelectorAll(".bill-split-rows-card").length'),0);
+  });
+  await test('FB18 撤销失败后清空合并账单的待提交序号，合并【完成】要求按重读后的行重新选择', async () => {
+    await setupRowWrites({completed:true,groups:[]});
+    await js(`cfg.select=cfg.overlay.querySelector('.bill-split-fee-field-mapping-checkbox');cfg.select.disabled=false;
+      cfg.overlay.querySelector('.bill-split-row-count-input').value='3';cfg.overlay.querySelector('.bill-split-row-count-done-btn').click();`);await tick();
+    await js(`cfg.merge=cfg.overlay.querySelector('.bill-split-merge-checkbox');cfg.merge.checked=true;cfg.merge.dispatchEvent(new Event('change'));
+      cfg.overlay.querySelector('.bill-split-merge-picker-trigger').click();
+      cfg.overlay.querySelectorAll('.bill-split-merge-picker-panel input').forEach(node=>{node.checked=true;node.dispatchEvent(new Event('change'));});
+      cfg.next.rowMeta={status:'failed',message:'模板库同步失败'};cfg.overlay.querySelector('.bill-split-rows-back-btn').click();`);await tick();
+    assert.match(await js('cfg.top().textContent'),/未能撤销本次修改/);
+    await js(`cfg.host.closeTop();cfg.overlay.querySelector('.bill-split-merge-done-btn').click();`);await tick();
+    assert.match(await js('cfg.top().textContent'),/合并账单至少需要选择 2 个账单序号/);
+    assert.deepEqual(await js(`({trigger:cfg.overlay.querySelector('.bill-split-merge-picker-trigger').textContent,merges:cfg.calls.filter(x=>x.name==='saveMerge').length})`),
+      {trigger:'请选择账单序号',merges:0});
+  });
+  await test('FB19 字段映射特殊处理：表头含换行时选项值保留原始 CRLF，保存的列名与表头一致', async () => {
+    await setupRowWrites({feeBill:2});
+    await js(`cfg.rowTemplate={id:7,name:'删行测试模板',headers:['Currency','参考\\r\\n号']};cfg.handle.dispose();
+      cfg.meta.feeFieldMappingEnabled=true;cfg.meta.feeFieldMappings=[{templateField:'Description',valueType:'field',value:'参考\\r\\n号'}];
+      cfg.openRows();cfg.overlay.querySelector('.bill-split-fee-field-mapping-settings-btn').click();cfg.mapping=cfg.top();
+      cfg.valueSelect=cfg.mapping.querySelector('.bill-split-fee-field-mapping-value-select');void 0;`);
+    assert.deepEqual(await js(`({selected:cfg.valueSelect.value,stale:cfg.valueSelect.classList.contains('is-stale'),count:cfg.valueSelect.options.length})`),
+      {selected:'field:参考\r\n号',stale:false,count:4});
+    await js(`cfg.mapping.querySelector('[data-action="save"]').click();`);await tick();
+    assert.deepEqual(await js('cfg.calls.filter(x=>x.name==="rowMeta").map(x=>x.args[0].feeFieldMappings)[0]'),
+      [{templateField:'Description',valueType:'field',value:'参考\r\n号'}]);
+  });
+  await test('FB20 字段映射特殊处理：未编辑的固定值原样保存（保留换行），编辑后以输入为准', async () => {
+    await setupRowWrites({feeBill:2});
+    await js(`cfg.handle.dispose();cfg.meta.feeFieldMappingEnabled=true;
+      cfg.meta.feeFieldMappings=[{templateField:'Description',valueType:'input',value:'手续费\\n第二行'},{templateField:'Payee Name',valueType:'input',value:'银行'}];
+      cfg.openRows();cfg.overlay.querySelector('.bill-split-fee-field-mapping-settings-btn').click();cfg.mapping=cfg.top();
+      cfg.inputs=[...cfg.mapping.querySelectorAll('.bill-split-fee-field-mapping-input')];
+      cfg.inputs[1].value=' 某银行 ';cfg.inputs[1].dispatchEvent(new Event('input'));
+      cfg.mapping.querySelector('[data-action="save"]').click();`);await tick();
+    assert.deepEqual(await js('cfg.calls.filter(x=>x.name==="rowMeta").map(x=>x.args[0].feeFieldMappings)[0]'),
+      [{templateField:'Description',valueType:'input',value:'手续费\n第二行'},{templateField:'Payee Name',valueType:'input',value:'某银行'}]);
+  });
+  await test('FB21 撤销令牌失效（模板在打开后被替换）：不提示重试，暂停配置写入，【返回】/ × 只关闭', async () => {
+    await setupRowWrites({feeBill:2});
+    await js(`cfg.select=cfg.overlay.querySelector('.bill-split-fee-field-mapping-checkbox');cfg.select.checked=true;cfg.select.dispatchEvent(new Event('change'));`);await tick();
+    await js(`cfg.next.rowMeta={status:'error',errorCode:'BILL_SPLIT_RESTORE_TOKEN_STALE',message:'撤销修改失败：打开时记下的配置无法核对'};cfg.overlay.querySelector('.bill-split-rows-back-btn').click();`);await tick();
+    assert.match(await js('cfg.top().textContent'),/无法核对/);
+    assert.equal(await js('/再次点击【返回】重试/.test(cfg.top().textContent)'),false);
+    await js('cfg.host.closeTop();void 0;');
+    assert.deepEqual(await js(`({reads:cfg.calls.filter(x=>x.name==="rowRefresh").length,
+      locked:[...cfg.overlay.querySelectorAll('button, input, select')].filter(node=>!node.matches('.icon-close, .bill-split-rows-done-btn, .bill-split-rows-back-btn')).every(node=>node.disabled)})`),
+    {reads:0,locked:true});
+    await js(`cfg.overlay.querySelector('.icon-close').click();`);await tick();
+    assert.deepEqual(await js('({open:cfg.handle.isOpen(),restores:cfg.calls.filter(x=>x.name==="rowMeta"&&x.args[0].restoreSnapshot).length})'),{open:false,restores:1});
+  });
+  await test('FB22 保存后重读失败暂停了配置写入：【返回】仍按打开时的快照撤销（不把已落库的修改当作确认保留）', async () => {
+    await setupRowWrites({feeBill:2});
+    await js(`cfg.select=cfg.overlay.querySelector('.bill-split-fee-field-mapping-checkbox');cfg.select.checked=true;cfg.select.dispatchEvent(new Event('change'));`);await tick();
+    await js(`cfg.api.templates.getBillSplitConfig=(id,options)=>{if(options&&'activateRestoreSession' in options){cfg.calls.push({name:'rowSessionActivate',args:[id,options.activateRestoreSession]});return Promise.resolve({status:'success',restoreSessionActivated:true});}if(options&&'endRestoreSession' in options){cfg.calls.push({name:'rowSessionEnd',args:[id,options.endRestoreSession]});return Promise.resolve({status:'success',restoreSessionEnded:true});}cfg.calls.push({name:'rowRefresh',args:[id]});return Promise.reject(new Error('读不到'));};
+      cfg.next.rowMeta={status:'failed',message:'模板库同步失败'};
+      cfg.select=cfg.overlay.querySelector('.bill-split-fee-formula-checkbox');cfg.select.checked=true;cfg.select.dispatchEvent(new Event('change'));`);await tick();
+    assert.match(await js('cfg.top().textContent'),/请关闭后重新打开以确认/);
+    await js('cfg.host.closeTop();cfg.overlay.querySelector(".bill-split-rows-back-btn").click();');await tick();
+    assert.deepEqual(await js('({open:cfg.handle.isOpen(),restores:cfg.calls.filter(x=>x.name==="rowMeta"&&x.args[0].restoreSnapshot).map(x=>x.args[0].restoreToken)})'),
+      {open:false,restores:['token-7']});
+  });
+  await test('FB23 行管理窗口释放即带本窗口令牌结束撤销会话：【确认】、所属窗口整体关闭、根弹窗替换都结束，每个窗口只结束一次', async () => {
+    const ends = 'cfg.calls.filter(x=>x.name==="rowSessionEnd").map(x=>x.args)';
+    await setupRowWrites({feeBill:2});
+    assert.deepEqual(await js(ends), [], '打开期间不结束会话');
+    assert.deepEqual(await js('cfg.calls.filter(x=>x.name==="rowSessionActivate").map(x=>x.args)'), [[7,'token-7']], '挂载时激活本窗口的撤销会话');
+    await js(`cfg.overlay.querySelector('.bill-split-rows-done-btn').click();`);await tick();
+    assert.deepEqual(await js(`({open:cfg.handle.isOpen(),ends:${ends}})`),{open:false,ends:[[7,'token-7']]});
+    await setupRowWrites({feeBill:2});
+    await js(`cfg.host.closeOwner('application','navigation');void 0;`);await tick();
+    assert.deepEqual(await js(`({open:cfg.handle.isOpen(),ends:${ends}})`),{open:false,ends:[[7,'token-7']]});
+    await setupRowWrites({feeBill:2});
+    await js(`cfg.bridge.openModal(()=>cfg.dialogs.createAlertDialog('替换'));void 0;`);await tick();
+    assert.deepEqual(await js(`({open:cfg.handle.isOpen(),ends:${ends}})`),{open:false,ends:[[7,'token-7']]});
+  });
+  await test('FB25 撤销会话激活成功前不写库：激活失败即提示并暂停配置写入，【返回】只关闭不撤销；激活在途时写入等待结果', async () => {
+    const reopen = (activation) => js(`cfg.overlay.querySelector('.bill-split-rows-done-btn').click();cfg.calls=[];cfg.next.rowSessionActivate=${activation};cfg.openRows();void 0;`);
+    const toggleMapping = 'cfg.select=cfg.overlay.querySelector(".bill-split-fee-field-mapping-checkbox");cfg.select.checked=true;cfg.select.dispatchEvent(new Event("change"));void 0;';
+    const state = `({open:cfg.handle.isOpen(),writes:cfg.writeCount(),notice:/未能建立【返回】的撤销点/.test(cfg.top().textContent),
+      locked:cfg.overlay.querySelector('.bill-split-fee-field-mapping-checkbox').disabled,back:cfg.overlay.querySelector('.bill-split-rows-back-btn').disabled})`;
+    // 挂载时激活即失败（会话已被迟到的旧打开请求挤掉）：提示并暂停写入，【返回】只关闭
+    await setupRowWrites({feeBill:2});await tick();
+    await reopen(`{status:'success',restoreSessionActivated:false}`);await tick();
+    assert.deepEqual(await js(state),{open:true,writes:0,notice:true,locked:true,back:false});
+    await js(`cfg.host.closeTop();`);await tick();
+    await js(toggleMapping);await tick();
+    assert.equal(await js('cfg.writeCount()'),0,'暂停后不写库');
+    await js(`cfg.overlay.querySelector('.bill-split-rows-back-btn').click();`);await tick();
+    assert.deepEqual(await js(`({open:cfg.handle.isOpen(),restores:cfg.calls.filter(x=>x.name==="rowMeta").length,ends:cfg.calls.filter(x=>x.name==="rowSessionEnd").map(x=>x.args)})`),
+      {open:false,restores:0,ends:[[7,'token-7']]});
+    // 激活在途时发起写入：等待激活结果；失败则不写库、提示并暂停
+    await setupRowWrites({feeBill:2});await tick();
+    await reopen('cfg.act=cfg.defer()');await js(toggleMapping);await tick();
+    assert.equal(await js('cfg.writeCount()'),0,'激活在途时写入等待');
+    await js(`cfg.act.resolve({status:'success',restoreSessionActivated:false});`);await tick();
+    assert.deepEqual(await js(state),{open:true,writes:0,notice:true,locked:true,back:false});
+    // 激活在途时更改「按正负号取发生额」、随后激活失败：金额结算回调不解除暂停，选择框还原为已保存值并保持锁定，行控件同样锁定
+    await setupRowWrites({feeBill:2});await tick();
+    await reopen('cfg.act=cfg.defer()');
+    await js(`cfg.signed=cfg.overlay.querySelector('.bill-split-signed-select');cfg.signed.value='Amount';cfg.signed.dispatchEvent(new Event('change'));void 0;`);await tick();
+    await js(`cfg.act.resolve({status:'success',restoreSessionActivated:false});`);await tick();
+    await js('cfg.host.closeTop();');await tick();
+    assert.deepEqual(await js(`({writes:cfg.writeCount(),value:cfg.signed.value,signedLocked:cfg.signed.disabled,
+      rowControls:[...cfg.overlay.querySelectorAll('.bill-split-rows-table tbody select, .bill-split-rows-table tbody button')].every(node=>node.disabled),
+      back:cfg.overlay.querySelector('.bill-split-rows-back-btn').disabled})`),{writes:0,value:'',signedLocked:true,rowControls:true,back:false});
+    // 激活 IPC 异常同样按失败处理
+    await setupRowWrites({feeBill:2});await tick();
+    await reopen(`{promise:Promise.reject(new Error('ipc'))}`);await tick();
+    assert.deepEqual(await js(state),{open:true,writes:0,notice:true,locked:true,back:false});
+    // 激活在途时发起写入、随后激活成功：写入照常发出
+    await setupRowWrites({feeBill:2});await tick();
+    await reopen('cfg.act=cfg.defer()');await js(toggleMapping);await tick();
+    assert.equal(await js('cfg.writeCount()'),0);
+    await js(`cfg.act.resolve({status:'success',restoreSessionActivated:true});`);await tick();
+    assert.deepEqual(await js(`({writes:cfg.writeCount(),notice:/未能建立【返回】的撤销点/.test(document.body.textContent)})`),{writes:1,notice:false});
+  });
+  await test('FB26 激活在途时窗口被销毁：迟到的激活成功不再发出写入；激活失败时【设置】子窗在顶也提示原因，子窗保存再次提示、不写库', async () => {
+    const reopen = (activation) => js(`cfg.overlay.querySelector('.bill-split-rows-done-btn').click();cfg.calls=[];cfg.next.rowSessionActivate=${activation};cfg.openRows();void 0;`);
+    await setupRowWrites({feeBill:2});await tick();
+    await reopen('cfg.act=cfg.defer()');
+    await js('cfg.select=cfg.overlay.querySelector(".bill-split-fee-field-mapping-checkbox");cfg.select.checked=true;cfg.select.dispatchEvent(new Event("change"));void 0;');await tick();
+    await js(`cfg.handle.dispose();cfg.act.resolve({status:'success',restoreSessionActivated:true});`);await tick();
+    assert.deepEqual(await js(`({writes:cfg.writeCount(),ends:cfg.calls.filter(x=>x.name==="rowSessionEnd").map(x=>x.args)})`),{writes:0,ends:[[7,'token-7']]});
+    // 已有字段映射设置：激活回包前打开【设置】，随后激活失败
+    await setupRowWrites({feeBill:2});await tick();
+    await js(`cfg.meta.feeFieldMappingEnabled=true;cfg.meta.feeFieldMappings=[{templateField:'Description',valueType:'input',value:'手续费'}];`);
+    await reopen('cfg.act=cfg.defer()');
+    await js(`cfg.overlay.querySelector('.bill-split-fee-field-mapping-settings-btn').click();cfg.mapping=cfg.top();cfg.mappingHandle=cfg.host.getTop();
+      cfg.act.resolve({status:'success',restoreSessionActivated:false});`);await tick();
+    assert.deepEqual(await js(`({notice:/未能建立【返回】的撤销点/.test(cfg.top().textContent),mappingOpen:cfg.mappingHandle.isOpen()})`),{notice:true,mappingOpen:true});
+    await js('cfg.host.closeTop();');await tick();
+    await js(`cfg.mapping.querySelector('[data-action="save"]').click();`);await tick();
+    assert.deepEqual(await js(`({notice:/未能建立【返回】的撤销点/.test(cfg.top().textContent),writes:cfg.writeCount()})`),{notice:true,writes:0});
+    await js('cfg.host.closeTop();');await tick();
+    await js(`[...cfg.mapping.querySelectorAll('.dialog-actions button')].find(node=>node.textContent==='取消').click();`);await tick();
+    assert.deepEqual(await js(`({mappingOpen:cfg.mappingHandle.isOpen(),rowsTop:cfg.handle.isTop(),writes:cfg.writeCount()})`),{mappingOpen:false,rowsTop:true,writes:0});
+  });
+  await test('FB27 保存已生效但模板库文件同步失败：按已保存处理并提示（设置子窗关闭后在行管理提示）；重读失败后子窗再保存提示暂停原因；两个下拉框各有可访问名称', async () => {
+    const SYNC = '已保存，本次设置已生效；模板库文件同步失败，下次启动或修改模板时会重新同步';
+    const openSettings = `cfg.overlay.querySelector('.bill-split-fee-field-mapping-settings-btn').click();cfg.mapping=cfg.top();cfg.mappingHandle=cfg.host.getTop();
+      cfg.item=cfg.mapping.querySelector('.bill-split-fee-field-mapping-item');`;
+    // 行管理上的勾选：已保存、提示同步失败
+    await setupRowWrites({feeBill:2});
+    await js(`cfg.next.rowMeta={status:'success',librarySyncFailed:true,message:${JSON.stringify(SYNC)}};
+      cfg.select=cfg.overlay.querySelector('.bill-split-fee-field-mapping-checkbox');cfg.select.checked=true;cfg.select.dispatchEvent(new Event('change'));`);await tick();
+    assert.deepEqual(await js(`({notice:cfg.top().textContent.includes(${JSON.stringify(SYNC)}),checked:cfg.select.checked,
+      settings:!cfg.overlay.querySelector('.bill-split-fee-field-mapping-settings-btn').hidden,writes:cfg.writeCount()})`),{notice:true,checked:true,settings:true,writes:1});
+    await js('cfg.host.closeTop();');await tick();
+    // 【设置】子窗保存：子窗关闭、行管理提示，设置照常接纳；两个下拉框按 id 关联各自的标签
+    await js(openSettings);
+    assert.deepEqual(await js(`[...cfg.item.querySelectorAll('select')].map(node=>document.getElementById(node.getAttribute('aria-labelledby'))?.textContent)`),['模板字段','映射字段']);
+    await js(`const selects=cfg.item.querySelectorAll('select');selects[0].value='Description';selects[1].value='input';selects[1].dispatchEvent(new Event('change'));
+      cfg.item.querySelector('.bill-split-fee-field-mapping-input').value='手续费';
+      cfg.next.rowMeta={status:'success',librarySyncFailed:true,message:${JSON.stringify(SYNC)}};cfg.mapping.querySelector('[data-action="save"]').click();`);await tick();
+    assert.deepEqual(await js(`({mappingOpen:cfg.mappingHandle.isOpen(),notice:cfg.top().textContent.includes(${JSON.stringify(SYNC)}),
+      rowsUnderNotice:!cfg.handle.isTop()&&cfg.handle.isOpen()})`),{mappingOpen:false,notice:true,rowsUnderNotice:true});
+    await js('cfg.host.closeTop();');await tick();
+    // 保存失败且重读失败后（暂停配置写入），子窗再次保存提示暂停原因、不写库
+    await js(openSettings);
+    await js(`cfg.next.rowMeta={status:'error',message:'保存失败'};cfg.next.rowRefresh={status:'error',message:'读取失败'};
+      cfg.mapping.querySelector('[data-action="save"]').click();`);await tick();
+    assert.match(await js('cfg.top().textContent'),/当前配置未能重新读取/);
+    await js('cfg.host.closeTop();');await tick();
+    const writesBefore = await js('cfg.writeCount()');
+    await js(`cfg.mapping.querySelector('[data-action="save"]').click();`);await tick();
+    assert.deepEqual(await js(`({notice:/已暂停保存/.test(cfg.top().textContent),writes:cfg.writeCount()})`),{notice:true,writes:writesBefore});
+  });
+  await test('FB24 【返回】撤销成功但模板库文件同步失败：照常关闭并提示配置已撤销、文件未同步，不重复撤销', async () => {
+    await setupRowWrites({feeBill:2});
+    await js(`cfg.select=cfg.overlay.querySelector('.bill-split-fee-field-mapping-checkbox');cfg.select.checked=true;cfg.select.dispatchEvent(new Event('change'));`);await tick();
+    await js(`cfg.next.rowMeta={status:'success',restored:true,librarySyncFailed:true,message:'已撤销本次修改；模板库文件同步失败，下次启动或修改模板时会重新同步'};
+      cfg.overlay.querySelector('.bill-split-rows-back-btn').click();`);await tick();
+    assert.deepEqual(await js(`({open:cfg.handle.isOpen(),restores:cfg.calls.filter(x=>x.name==="rowMeta"&&x.args[0].restoreSnapshot).length,
+      notice:/已撤销本次修改；模板库文件同步失败/.test(cfg.top().textContent),ends:cfg.calls.filter(x=>x.name==="rowSessionEnd").map(x=>x.args)})`),
+      {open:false,restores:1,notice:true,ends:[[7,'token-7']]});
+    // 撤销在途时原行管理被强制销毁、新窗口已打开：迟到的成功结果不把旧模板的同步提示弹到新窗口
+    await setupRowWrites({feeBill:2});
+    await js(`cfg.select=cfg.overlay.querySelector('.bill-split-fee-field-mapping-checkbox');cfg.select.checked=true;cfg.select.dispatchEvent(new Event('change'));`);await tick();
+    await js(`cfg.write=cfg.defer();cfg.next.rowMeta=cfg.write;cfg.overlay.querySelector('.bill-split-rows-back-btn').click();
+      cfg.handle.dispose();cfg.nextHandle=cfg.other();cfg.nextMarkup=cfg.top().innerHTML;
+      cfg.write.resolve({status:'success',restored:true,librarySyncFailed:true,message:'已撤销本次修改；模板库文件同步失败，下次启动或修改模板时会重新同步'});`);await tick();
+    assert.deepEqual(await js(`({newTop:cfg.nextHandle.isTop(),unchanged:cfg.nextMarkup===cfg.top().innerHTML,
+      notice:/模板库文件同步失败/.test(document.body.textContent)})`),{newTop:true,unchanged:true,notice:false});
+  });
+  await test('FB11 【返回】/ ×：未写入直接关闭；写入后按打开时的快照恢复再关闭；【确认】保留不恢复', async () => {
+    await setupRowWrites({feeBill:2});
+    await js(`cfg.overlay.querySelector('.bill-split-rows-back-btn').click();`);await tick();
+    assert.deepEqual(await js('({open:cfg.handle.isOpen(),writes:cfg.writeCount()})'),{open:false,writes:0});
+    for (const selector of ['.icon-close', '.bill-split-rows-back-btn']) {
+      await setupRowWrites({feeBill:2,feeFormula:[{field:'Amount',op:'end'}]});
+      await js(`cfg.snapshot=structuredClone({templateId:7,billSplitRows:cfg.rows,billSplitAmountRules:cfg.initialRules,billSplitMeta:cfg.meta});
+        cfg.select=cfg.overlay.querySelector('.bill-split-fee-field-mapping-checkbox');cfg.select.checked=true;cfg.select.dispatchEvent(new Event('change'));`);await tick();
+      await js(`cfg.write=cfg.defer();cfg.next.rowMeta=cfg.write;cfg.overlay.querySelector(${JSON.stringify(selector)}).click();`);
+      // 恢复进行中持父写锁：不能再次关闭或写入
+      assert.equal(await js('cfg.handle.close().status'),'blocked');
+      await js('cfg.overlay.querySelector(".bill-split-row-complete-btn").dispatchEvent(new Event("click"));cfg.write.resolve({status:"success",restored:true});');await tick();
+      assert.deepEqual(await js('cfg.calls.filter(x=>x.name==="rowMeta").map(x=>x.args[0])[1]'),{templateId:7,restoreSnapshot:await js('cfg.snapshot'),restoreToken:'token-7'});
+      assert.deepEqual(await js('({open:cfg.handle.isOpen(),writes:cfg.writeCount()})'),{open:false,writes:2});
+    }
+    await setupRowWrites({feeBill:2});
+    await js(`cfg.select=cfg.overlay.querySelector('.bill-split-fee-field-mapping-checkbox');cfg.select.checked=true;cfg.select.dispatchEvent(new Event('change'));`);await tick();
+    await js(`cfg.overlay.querySelector('.bill-split-rows-done-btn').click();`);await tick();
+    assert.deepEqual(await js('({open:cfg.handle.isOpen(),writes:cfg.writeCount()})'),{open:false,writes:1});
+  });
+  await test('FB12 【返回】恢复失败：提示并留在弹窗，按重读的已保存配置显示，可再次【返回】；重读也失败时暂停配置写入，【返回】只关闭不再写库', async () => {
+    await setupRowWrites({feeBill:2});
+    await js(`cfg.select=cfg.overlay.querySelector('.bill-split-fee-field-mapping-checkbox');cfg.select.checked=true;cfg.select.dispatchEvent(new Event('change'));`);await tick();
+    await js(`cfg.meta={...cfg.meta,feeFieldMappingEnabled:true};cfg.next.rowMeta={status:'failed',message:'模板库同步失败'};cfg.overlay.querySelector('.bill-split-rows-back-btn').click();`);await tick();
+    assert.match(await js('cfg.top().textContent'),/未能撤销本次修改：模板库同步失败[\s\S]*再次点击【返回】重试/);
+    await js('cfg.host.closeTop();void 0;');
+    assert.deepEqual(await js(`({open:cfg.handle.isTop(),reads:cfg.calls.filter(x=>x.name==="rowRefresh").length,
+      checked:cfg.overlay.querySelector('.bill-split-fee-field-mapping-checkbox').checked,
+      enabled:!cfg.overlay.querySelector('.bill-split-row-count-done-btn').disabled})`),{open:true,reads:1,checked:true,enabled:true});
+    await js(`cfg.api.templates.getBillSplitConfig=(id,options)=>{if(options&&'activateRestoreSession' in options){cfg.calls.push({name:'rowSessionActivate',args:[id,options.activateRestoreSession]});return Promise.resolve({status:'success',restoreSessionActivated:true});}if(options&&'endRestoreSession' in options){cfg.calls.push({name:'rowSessionEnd',args:[id,options.endRestoreSession]});return Promise.resolve({status:'success',restoreSessionEnded:true});}cfg.calls.push({name:'rowRefresh',args:[id]});return Promise.reject(new Error('读不到'));};
+      cfg.next.rowMeta={status:'failed',message:'撤销服务失败'};cfg.overlay.querySelector('.bill-split-rows-back-btn').click();`);await tick();
+    assert.match(await js('cfg.top().textContent'),/未能撤销本次修改：撤销服务失败[\s\S]*请关闭后重新打开以确认/);
+    await js('cfg.host.closeTop();void 0;');
+    assert.deepEqual(await js(`({locked:[...cfg.overlay.querySelectorAll('button, input, select')].filter(node=>!node.matches('.icon-close, .bill-split-rows-done-btn, .bill-split-rows-back-btn')).every(node=>node.disabled),
+      back:!cfg.overlay.querySelector('.bill-split-rows-back-btn').disabled})`),{locked:true,back:true});
+    await js(`cfg.overlay.querySelector('.bill-split-rows-back-btn').click();`);await tick();
+    assert.deepEqual(await js('({open:cfg.handle.isOpen(),restores:cfg.calls.filter(x=>x.name==="rowMeta"&&x.args[0].restoreSnapshot).length})'),{open:false,restores:2});
+  });
+  await test('FB16 撤销失败后按重读结果收起指定账单序号面板，之后点【确认】不把面板里已撤销的选择写回', async () => {
+    await setupRowWrites({signed:true});
+    await js(`cfg.select=cfg.overlay.querySelector('.bill-split-signed-target-seq-checkbox');cfg.select.checked=true;cfg.select.dispatchEvent(new Event('change'));
+      cfg.trigger=cfg.overlay.querySelector('.bill-split-signed-target-seq-picker .bill-split-target-seq-trigger');cfg.trigger.click();
+      cfg.overlay.querySelectorAll('.bill-split-signed-target-seq-panel input').forEach(node=>{node.checked=node.value==='2';});
+      cfg.overlay.querySelector('.bill-split-row-count-input').dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));`);await tick();
+    // 已写过一次（序号 2）；再打开面板改选 1，按下【返回】时撤销失败
+    await js(`cfg.trigger.click();cfg.overlay.querySelectorAll('.bill-split-signed-target-seq-panel input').forEach(node=>{node.checked=node.value==='1';});
+      cfg.next.rowMeta={status:'failed',message:'模板库同步失败'};cfg.back=cfg.overlay.querySelector('.bill-split-rows-back-btn');
+      cfg.back.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));cfg.back.click();`);await tick();
+    assert.match(await js('cfg.top().textContent'),/未能撤销本次修改/);
+    await js('cfg.host.closeTop();void 0;');
+    assert.equal(await js(`cfg.overlay.querySelector('.bill-split-signed-target-seq-panel').hidden`),true);
+    await js(`cfg.done=cfg.overlay.querySelector('.bill-split-rows-done-btn');cfg.done.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));cfg.done.click();`);await tick();
+    assert.deepEqual(await js('({open:cfg.handle.isOpen(),seqWrites:cfg.calls.filter(x=>x.name==="rowMeta"&&x.args[0].signedAmountTargetSeqNos).map(x=>x.args[0].signedAmountTargetSeqNos)})'),
+      {open:false,seqWrites:[[2]]});
+  });
+
   async function openMappingRows() {
     await setupRowWrites();
     await js(`cfg.mappingHandle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:cfg.rowTemplate,targetFields:['是否拆分/合并明细账单'],mappings:[{templateField:'是否拆分/合并明细账单',mappedField:'是'}],billSplitRows:cfg.rows})).handle;
@@ -1497,7 +1858,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
 
   await test('RR01 返回回调失败解锁并显示错误，原窗口可重试且旧忽略参数回调兼容',async()=>{
     await setupRowWrites();
-    await js(`cfg.returnCalls=0;cfg.returnWait=cfg.defer();cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createBillSplitRowsDialog({template:cfg.rowTemplate,initialRows:cfg.rows,onClose:()=>{cfg.returnCalls++;return cfg.returnWait.promise;}})).handle;
+    await js(`cfg.returnCalls=0;cfg.returnWait=cfg.defer();cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createBillSplitRowsDialog({template:cfg.rowTemplate,initialRows:cfg.rows,restoreToken:'token-7',onClose:()=>{cfg.returnCalls++;return cfg.returnWait.promise;}})).handle;
       cfg.overlay=cfg.top();cfg.closeBtn=cfg.overlay.querySelector('.icon-close');cfg.closeBtn.click();cfg.closeBtn.dispatchEvent(new Event('click'));cfg.returnWait.reject(new Error('返回读取失败'));`);await tick();
     assert.match(await js('cfg.top().textContent'),/返回读取失败/);
     await js('cfg.host.closeTop();');assert.equal(await js('cfg.handle.isTop()&&!cfg.closeBtn.disabled&&cfg.returnCalls===1'),true);
@@ -1515,16 +1876,21 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await js('cfg.host.closeTop();cfg.openRowsButton.click();');await tick();assert.equal(await js('cfg.top().querySelectorAll(".bill-split-rows-table tbody tr").length'),3);
   });
   await test('RR01 打开行管理的读取乱序/父层结束只接纳当前请求，不打开幽灵子层',async()=>{
-    await openMappingRows();await js('cfg.rowsHandle.close();cfg.first=cfg.defer();cfg.next.rowRefresh=cfg.first;cfg.openRowsButton.click();cfg.second=cfg.defer();cfg.next.rowRefresh=cfg.second;cfg.openRowsButton.click();cfg.second.resolve({status:"success",billSplitRows:[...cfg.rows,{seqNo:3,rowStatus:"draft"}]});');await tick();
-    await js('cfg.first.resolve({status:"success",billSplitRows:[]});');await tick();assert.equal(await js('cfg.top().querySelectorAll(".bill-split-rows-table tbody tr").length'),3);
-    await js('cfg.host.closeTop();cfg.late=cfg.defer();cfg.next.rowRefresh=cfg.late;cfg.openRowsButton.click();cfg.mappingHandle.close();cfg.nextHandle=cfg.other();cfg.late.resolve({status:"success",billSplitRows:[]});');await tick();
+    await openMappingRows();await js('cfg.calls=[];cfg.rowsHandle.close();cfg.first=cfg.defer();cfg.next.rowRefresh=cfg.first;cfg.openRowsButton.click();cfg.second=cfg.defer();cfg.next.rowRefresh=cfg.second;cfg.openRowsButton.click();cfg.second.resolve({status:"success",billSplitRows:[...cfg.rows,{seqNo:3,rowStatus:"draft"}],restoreToken:"token-7"});');await tick();
+    await js('cfg.first.resolve({status:"success",billSplitRows:[],restoreToken:"token-old"});');await tick();assert.equal(await js('cfg.top().querySelectorAll(".bill-split-rows-table tbody tr").length'),3);
+    await js('cfg.host.closeTop();cfg.late=cfg.defer();cfg.next.rowRefresh=cfg.late;cfg.openRowsButton.click();cfg.mappingHandle.close();cfg.nextHandle=cfg.other();cfg.late.resolve({status:"success",billSplitRows:[],restoreToken:"token-late"});');await tick();
     assert.equal(await js('cfg.nextHandle.isTop()&&document.querySelectorAll(".bill-split-rows-card").length===0'),true);
+    // v3.2.21：没有挂载行管理的读取（被更新的请求取代、父层已结束）按回包令牌结束主进程已开启的撤销会话；已挂载的窗口在释放时结束
+    assert.deepEqual(await js('cfg.calls.filter(x=>x.name==="rowSessionEnd").map(x=>x.args)'),
+      [[7,'token-7'],[7,'token-old'],[7,'token-7'],[7,'token-late']]);
   });
   await test('RR01 父映射写开始且已结束后旧打开读取仍失效，不仅检查回包时busy',async()=>{
-    await openMappingRows();await js('cfg.rowsHandle.close();cfg.late=cfg.defer();cfg.next.rowRefresh=cfg.late;cfg.openRowsButton.click();cfg.next.mappingSave={status:"failed",message:"父映射保存失败"};cfg.mappingOverlay.querySelector("[data-action=done]").click();');await tick();
+    await openMappingRows();await js('cfg.calls=[];cfg.rowsHandle.close();cfg.late=cfg.defer();cfg.next.rowRefresh=cfg.late;cfg.openRowsButton.click();cfg.next.mappingSave={status:"failed",message:"父映射保存失败"};cfg.mappingOverlay.querySelector("[data-action=done]").click();');await tick();
     assert.match(await js('cfg.top().textContent'),/父映射保存失败/);
-    await js('cfg.host.closeTop();cfg.late.resolve({status:"success",billSplitRows:[{seqNo:99,rowStatus:"draft"}]});');await tick();
+    await js('cfg.host.closeTop();cfg.late.resolve({status:"success",billSplitRows:[{seqNo:99,rowStatus:"draft"}],restoreToken:"token-late"});');await tick();
     assert.equal(await js('cfg.mappingHandle.isTop()&&document.querySelectorAll(".bill-split-rows-card").length===0'),true);
+    assert.deepEqual(await js('cfg.calls.filter(x=>x.name==="rowSessionEnd").map(x=>x.args)'),[[7,'token-7'],[7,'token-late']],
+      '父映射写入使打开读取失效时按回包令牌结束撤销会话');
     await js('cfg.openRowsButton.click();');await tick();assert.equal(await js('cfg.top().querySelectorAll(".bill-split-rows-table tbody tr").length'),2);
   });
 
@@ -1557,7 +1923,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
       };
       cfg.api.templates.saveBillSplitAmountRules=payload=>cfg.persist('rowRules',payload);
       cfg.api.templates.saveBillSplitMeta=payload=>cfg.persist('rowMeta',payload);
-      cfg.api.templates.getBillSplitConfig=async()=>{cfg.readCalls++;if(cfg.configReadGate)await cfg.configReadGate.promise;if(cfg.configReadFailure)throw new Error('配置重读连接失败');return {status:'success',billSplitRows:structuredClone(cfg.rows),billSplitAmountRules:structuredClone(cfg.store.rules),billSplitMeta:structuredClone(cfg.store.meta)};};
+      cfg.sessionEnds=[];cfg.api.templates.getBillSplitConfig=async(id,options)=>{if(options&&'activateRestoreSession' in options)return {status:'success',restoreSessionActivated:true};if(options&&'endRestoreSession' in options){cfg.sessionEnds.push([id,options.endRestoreSession]);return {status:'success',restoreSessionEnded:true};}cfg.readCalls++;if(cfg.configReadGate)await cfg.configReadGate.promise;if(cfg.configReadFailure)throw new Error('配置重读连接失败');return {status:'success',billSplitRows:structuredClone(cfg.rows),billSplitAmountRules:structuredClone(cfg.store.rules),billSplitMeta:structuredClone(cfg.store.meta)};};
       cfg.byField=cfg.overlay.querySelector('.bill-split-by-field-select');
       cfg.signed=cfg.overlay.querySelector('.bill-split-signed-select');
       cfg.manage=cfg.overlay.querySelector('.bill-split-amount-rules-manage-btn');
@@ -1622,6 +1988,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.deepEqual(await js('cfg.store'),{rules:[],meta:expectedMeta});
     assert.deepEqual(await js('cfg.commits.map(entry=>entry.name)'),['rowRules','rowMeta']);
     assert.equal(await js('cfg.readCalls'),0);
+    assert.deepEqual(await js('cfg.sessionEnds'),[[7,'token-7']],'强制销毁同样带本窗口令牌结束撤销会话');
     assert.deepEqual(await js('({unchanged:cfg.detachedMarkup===cfg.overlay.innerHTML,newTop:cfg.nextHandle.isTop(),oldOpen:cfg.handle.isOpen(),calls:cfg.calls.map(entry=>entry.name),errors:cfg.errors})'),{unchanged:true,newTop:true,oldOpen:false,calls:['rowRules','rowMeta'],errors:[]});
     assert.deepEqual(await js('({manageHidden:cfg.manage.hidden,byField:cfg.byField.value,signed:cfg.signed.value,signedDisabled:cfg.signed.disabled,byFieldDisabled:cfg.byField.disabled})'),await js('(({manageHidden,byField,signed,signedDisabled,byFieldDisabled})=>({manageHidden,byField,signed,signedDisabled,byFieldDisabled}))(cfg.detachedState)'));
   });
@@ -1657,8 +2024,8 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.equal(await js('cfg.overlay.querySelector(".bill-split-currency-select").value'),'Amount');
     assert.equal(await js('cfg.readCalls'),1);
     assert.deepEqual(await js('cfg.commits.map(entry=>entry.name)'),['rowRules']);
-    assert.equal(await js('Array.from(cfg.overlay.querySelectorAll("button,input,select,textarea")).filter(node=>!node.matches(".icon-close,.bill-split-rows-done-btn")).every(node=>node.disabled)'),true);
-    assert.equal(await js('!cfg.overlay.querySelector(".icon-close").disabled&&!cfg.overlay.querySelector(".bill-split-rows-done-btn").disabled'),true);
+    assert.equal(await js('Array.from(cfg.overlay.querySelectorAll("button,input,select,textarea")).filter(node=>!node.matches(".icon-close,.bill-split-rows-done-btn,.bill-split-rows-back-btn")).every(node=>node.disabled)'),true);
+    assert.equal(await js('!cfg.overlay.querySelector(".icon-close").disabled&&!cfg.overlay.querySelector(".bill-split-rows-done-btn").disabled&&!cfg.overlay.querySelector(".bill-split-rows-back-btn").disabled'),true);
     await js('cfg.beginChain();cfg.overlay.querySelector(".bill-split-row-complete-btn").dispatchEvent(new Event("click"));');await tick();
     assert.equal(await js('cfg.calls.length'),2);
     await js('cfg.overlay.querySelector(".bill-split-rows-done-btn").click();');

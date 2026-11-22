@@ -22,6 +22,9 @@ const {
   LEGACY_FEATURE_FILTER_ID,
   normalizeCell,
   normalizeFeeAmountFormula,
+  normalizeFeeFieldMappings,
+  validateFeeFieldMappings,
+  isFeeFieldMappingTemplateFieldExcluded,
   normalizeBillSplitRowFilterRules,
   normalizeRowFilterRules,
   upgradeLegacyFeatureFilter
@@ -45,6 +48,9 @@ const MAIN_DEPS = {
   upgradeLegacyFeatureFilter,
   // v3.2.19：拆分配置（含费用账单公式）规范化
   normalizeFeeAmountFormula,
+  normalizeFeeFieldMappings,
+  validateFeeFieldMappings,
+  isFeeFieldMappingTemplateFieldExcluded,
   normalizeBillSplitRowFilterRules,
   // v3.2.19：原始账单预处理的过滤规则
   normalizeRowFilterRules

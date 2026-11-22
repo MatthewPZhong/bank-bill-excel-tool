@@ -10,6 +10,7 @@ const {
 } = require('./utils');
 const { MERCHANT_ID_CURRENCY_ONLY_MARKER } = require('../file-service/common');
 const { normalizeFeeAmountFormula } = require('../file-service/bill-split-fee-formula');
+const { normalizeFeeFieldMappings } = require('../file-service/bill-split-fee-field-mappings');
 const { normalizeBillSplitRowFilterRules } = require('../file-service/bill-split-row-filter');
 const { normalizeRowFilterRules } = require('../file-service/row-filter-rules');
 
@@ -1043,7 +1044,9 @@ function getBillSplitMeta(db, templateId) {
         by_field_amount_target_seq_nos AS byFieldAmountTargetSeqNos,
         fee_amount_formula_enabled AS feeAmountFormulaEnabled,
         fee_amount_formula_json AS feeAmountFormulaJson,
-        row_filter_rules_json AS rowFilterRulesJson
+        row_filter_rules_json AS rowFilterRulesJson,
+        fee_field_mapping_enabled AS feeFieldMappingEnabled,
+        fee_field_mappings_json AS feeFieldMappingsJson
       FROM template_bill_split_meta
       WHERE template_id = ?
     `)
@@ -1058,7 +1061,9 @@ function getBillSplitMeta(db, templateId) {
       : [],
     feeAmountFormulaEnabled: Boolean(row) && Number(row.feeAmountFormulaEnabled) === 1,
     feeAmountFormula: row ? normalizeFeeAmountFormula(row.feeAmountFormulaJson) : [],
-    rowFilterRules: row ? normalizeBillSplitRowFilterRules(row.rowFilterRulesJson) : []
+    rowFilterRules: row ? normalizeBillSplitRowFilterRules(row.rowFilterRulesJson) : [],
+    feeFieldMappingEnabled: Boolean(row) && Number(row.feeFieldMappingEnabled) === 1,
+    feeFieldMappings: row ? normalizeFeeFieldMappings(row.feeFieldMappingsJson) : []
   };
 }
 
@@ -1088,6 +1093,13 @@ function saveBillSplitMeta(db, templateId, meta = {}) {
     const rules = normalizeBillSplitRowFilterRules(meta.rowFilterRules);
     columns.push(['row_filter_rules_json', rules.length ? JSON.stringify(rules) : '']);
   }
+  if (has('feeFieldMappingEnabled')) {
+    columns.push(['fee_field_mapping_enabled', meta.feeFieldMappingEnabled ? 1 : 0]);
+  }
+  if (has('feeFieldMappings')) {
+    const mappings = normalizeFeeFieldMappings(meta.feeFieldMappings);
+    columns.push(['fee_field_mappings_json', mappings.length ? JSON.stringify(mappings) : '']);
+  }
   const existing = db.prepare('SELECT 1 FROM template_bill_split_meta WHERE template_id = ?').get(templateId);
   if (!existing) {
     db.prepare(`
@@ -1101,6 +1113,74 @@ function saveBillSplitMeta(db, templateId, meta = {}) {
     SET ${assignments.join(', ')}
     WHERE template_id = ?
   `).run(...columns.map(([, value]) => value), now, templateId);
+}
+
+// v3.2.21：拆分/合并账单映射关系管理【返回】——在一个事务内把本弹窗管理的配置恢复为打开时的快照：
+//   拆分行（映射、完成状态、合并组、费用账单标记）、按字段取发生额规则、按正负号字段与指定账单序号、
+//   发生额取值特殊处理（勾选与公式）、字段映射特殊处理（勾选与设置）。
+//   不改主映射、拆分映射与「根据字段值过滤账单」规则（它们由映射关系管理【保存】管理）。
+//   快照形状同 getBillSplitRows / getBillSplitAmountRules / getBillSplitMeta 的返回值，调用方负责校验。
+function restoreBillSplitEditableConfig(db, templateId, snapshot = {}) {
+  const now = new Date().toISOString();
+  const rows = Array.isArray(snapshot.billSplitRows) ? snapshot.billSplitRows : [];
+  const rules = Array.isArray(snapshot.billSplitAmountRules) ? snapshot.billSplitAmountRules : [];
+  const meta = snapshot.billSplitMeta && typeof snapshot.billSplitMeta === 'object' ? snapshot.billSplitMeta : {};
+  db.exec('BEGIN');
+  try {
+    db.prepare('DELETE FROM template_bill_split_rows WHERE template_id = ?').run(templateId);
+    const insertRow = db.prepare(`
+      INSERT INTO template_bill_split_rows (
+        template_id, seq_no, currency_source_field, credit_source_field, debit_source_field,
+        amount_source_field, row_status, merged_group_seq, is_fee_bill, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    rows.forEach((row) => {
+      insertRow.run(
+        templateId,
+        Number(row.seqNo),
+        normalizeText(row.currencySourceField),
+        normalizeText(row.creditSourceField),
+        normalizeText(row.debitSourceField),
+        normalizeText(row.amountSourceField),
+        row.rowStatus === 'completed' ? 'completed' : 'draft',
+        row.mergedGroupSeq === null || row.mergedGroupSeq === undefined ? null : Number(row.mergedGroupSeq),
+        row.isFeeBill === true ? 1 : 0,
+        now,
+        now
+      );
+    });
+    db.prepare('DELETE FROM template_bill_split_amount_rules WHERE template_id = ?').run(templateId);
+    const insertRule = db.prepare(`
+      INSERT INTO template_bill_split_amount_rules (
+        template_id, target_field, condition_field, condition_value, mapped_field, row_index, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    rules.forEach((rule, index) => {
+      insertRule.run(
+        templateId,
+        normalizeText(rule.targetField),
+        normalizeText(rule.conditionField),
+        normalizeText(rule.conditionValue),
+        normalizeText(rule.mappedField),
+        Number.isInteger(rule.rowIndex) ? rule.rowIndex : index,
+        now,
+        now
+      );
+    });
+    saveBillSplitMeta(db, templateId, {
+      signedAmountSourceField: normalizeText(meta.signedAmountSourceField),
+      signedAmountTargetSeqNos: Array.isArray(meta.signedAmountTargetSeqNos) ? meta.signedAmountTargetSeqNos : [],
+      byFieldAmountTargetSeqNos: Array.isArray(meta.byFieldAmountTargetSeqNos) ? meta.byFieldAmountTargetSeqNos : [],
+      feeAmountFormulaEnabled: meta.feeAmountFormulaEnabled === true,
+      feeAmountFormula: normalizeFeeAmountFormula(meta.feeAmountFormula),
+      feeFieldMappingEnabled: meta.feeFieldMappingEnabled === true,
+      feeFieldMappings: normalizeFeeFieldMappings(meta.feeFieldMappings)
+    });
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
 
 function listTemplateBundleEntries(db) {
@@ -1154,9 +1234,19 @@ function listTemplateBundleEntries(db) {
             signedAmountSourceField: payload.billSplitMeta.signedAmountSourceField || '',
             feeAmountFormulaEnabled: Boolean(payload.billSplitMeta.feeAmountFormulaEnabled),
             feeAmountFormula: normalizeFeeAmountFormula(payload.billSplitMeta.feeAmountFormula),
-            rowFilterRules: normalizeBillSplitRowFilterRules(payload.billSplitMeta.rowFilterRules)
+            rowFilterRules: normalizeBillSplitRowFilterRules(payload.billSplitMeta.rowFilterRules),
+            // v3.2.21（bundle v9）：费用账单「字段映射特殊处理」
+            feeFieldMappingEnabled: Boolean(payload.billSplitMeta.feeFieldMappingEnabled),
+            feeFieldMappings: normalizeFeeFieldMappings(payload.billSplitMeta.feeFieldMappings)
           }
-        : { signedAmountSourceField: '', feeAmountFormulaEnabled: false, feeAmountFormula: [], rowFilterRules: [] },
+        : {
+            signedAmountSourceField: '',
+            feeAmountFormulaEnabled: false,
+            feeAmountFormula: [],
+            rowFilterRules: [],
+            feeFieldMappingEnabled: false,
+            feeFieldMappings: []
+          },
       dateFormat: template.dateFormat || 'auto',
       // v3.2.18（bundle v7）：特征值列表；映射行的特征值选择在 mappings / billSplitMappings 的 mappedFields 中
       featureFilters: Array.isArray(template.featureFilters)
@@ -1191,6 +1281,7 @@ module.exports = {
   listTemplateFeatureFilterReferences,
   listTemplates,
   renameTemplate,
+  restoreBillSplitEditableConfig,
   saveAmountSplitRules,
   saveBillSplitAmountRules,
   saveBillSplitMappings,

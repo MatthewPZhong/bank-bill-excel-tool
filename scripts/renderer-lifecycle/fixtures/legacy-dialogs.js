@@ -25,7 +25,8 @@ module.exports = async ({ js, load, reset, assert, test }) => {
         previewDeleteBillSplitRow:async()=>({status:'success',dissolvedGroups:[9]}),
         deleteBillSplitRow:async payload=>{legacy.calls.rowDeletes.push(payload);return {status:'failed',message:'账单删行测试失败'};},
         saveBillSplitRowCount:async payload=>{legacy.calls.rowCounts.push(payload);return {status:'failed',message:'账单数量测试失败'};},
-        saveBillSplitAmountRules:async payload=>{legacy.calls.rules.push(payload);return {status:'failed',message:'规则保存测试失败'};}
+        saveBillSplitAmountRules:async payload=>{legacy.calls.rules.push(payload);return {status:'failed',message:'规则保存测试失败'};},
+        getBillSplitConfig:async(id,options)=>options&&'activateRestoreSession' in options?{status:'success',restoreSessionActivated:true}:{status:'success',restoreSessionEnded:true}
       },bigAccount:{loadMode:async()=>({mode:'unfixed'}),loadOrder:async()=>({order:null})},files:{
         completeBigAccountSelection:payload=>{legacy.calls.complete.push(payload);return legacy.complete.promise;},
         extractBigAccountOrder:async payload=>{legacy.calls.extract.push(payload);return {status:'error',errorCode:'BIG_ACCOUNT_NOT_MAINTAINED',message:'未维护测试账号',unmaintainedAccounts:[{merchantId:'TEST-ACCOUNT',fileOrdinal:0,fileName:'fixture.xlsx',blockOrdinal:0,sourceRowNumber:1}]};},
@@ -41,7 +42,8 @@ module.exports = async ({ js, load, reset, assert, test }) => {
         initialRows:[{seqNo:1,rowStatus:'draft',currencySourceField:'Currency',creditSourceField:'',debitSourceField:''},
           {seqNo:2,rowStatus:'draft',currencySourceField:'Currency',creditSourceField:'',debitSourceField:''}],
         initialAmountRules:[{targetField:'Credit Amount',conditionField:'Condition',conditionValue:'入金',mappedField:'Amount',rowIndex:0},
-          {targetField:'Debit Amount',conditionField:'Condition',conditionValue:'出金',mappedField:'Amount',rowIndex:1}]
+          {targetField:'Debit Amount',conditionField:'Condition',conditionValue:'出金',mappedField:'Amount',rowIndex:1}],
+        restoreToken:'token-7'
       }));
       legacy.openBigAccount=()=>legacy.open(()=>legacy.dialogs.createBigAccountSelectionDialog({contextId:'selection-fixture-token',templateId:7,templateName:'测试模板',
         rows:[{index:0,fileIndex:0,fileName:'fixture.xlsx',sourceRowNumber:1}],

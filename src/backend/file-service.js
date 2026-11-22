@@ -77,6 +77,13 @@ const {
   validateFeeAmountFormula
 } = require('./file-service/bill-split-fee-formula');
 const {
+  isFeeFieldMappingTemplateFieldExcluded,
+  normalizeFeeFieldMappings,
+  resolveFeeFieldMappingValue,
+  assertFeeFieldOutputWritable,
+  validateFeeFieldMappings
+} = require('./file-service/bill-split-fee-field-mappings');
+const {
   ROW_FILTER_OPERATORS,
   collectBillSplitRowFilterFields,
   compileBillSplitRowFilter,
@@ -290,6 +297,21 @@ function buildMappedRows({
       && billSplitMerge.feeAmountFormula.length > 0
     ? billSplitMerge.feeAmountFormula
     : null;
+  // v3.2.21：费用账单「字段映射特殊处理」。main.js 只在勾选且有已完成的费用账单行时下发（已校验）；
+  //   这里再挡一次不允许覆盖的字段（账户号、币种、发生额、余额），不在本次导出字段中的项忽略。
+  const billSplitFeeFieldMappings = billSplitEnabled
+      && Array.isArray(billSplitMerge.feeFieldMappings)
+      && billSplitMerge.feeFieldMappings.length > 0
+    ? normalizeFeeFieldMappings(billSplitMerge.feeFieldMappings)
+      .filter((item) => item.templateField && !isFeeFieldMappingTemplateFieldExcluded(item.templateField))
+      .map((item) => ({ ...item, targetIndex: orderedTargetFields.indexOf(item.templateField) }))
+      .filter((item) => item.targetIndex >= 0)
+    : [];
+  // 费用账单行被覆盖的目标列下标：底稿中这些列读到的长数字不随费用账单行提示
+  const billSplitFeeFieldTargetIndexes = new Set(billSplitFeeFieldMappings.map((item) => item.targetIndex));
+  // 费用账单行不取自映射的字段：被覆盖的字段，以及由拆分规则取值的 Credit / Debit Amount（特征值未命中提示用）
+  const billSplitFeeRowUnmappedTargets = new Set(['Credit Amount', 'Debit Amount']
+    .concat(billSplitFeeFieldMappings.map((item) => item.templateField)));
   // 非 0 ÷ 0 的源行号：整份读完后一次报错列出（合计行不计入）。
   const feeFormulaDivisionByZeroRowNumbers = [];
   let currentRowFeeFormulaDivisionByZero = false;
@@ -464,6 +486,18 @@ function buildMappedRows({
   const mainMappingForBillSplitRows = compiledBillSplitRowFilter
     ? Object.fromEntries(Object.entries(mappingByField || {}).filter(([targetField]) => targetField !== 'Currency'))
     : mappingByField;
+  // v3.2.21：拆分输出行实际沿用映射的字段所用的特征值，按最终输出提示未命中：拆分行的 Credit / Debit 由拆分配置取值，
+  //   费用账单行另去掉被字段映射特殊处理覆盖的字段。每条源行按其输出行的种类取并集。
+  const billSplitBaseMapping = billSplitEnabled && !billSplitReuseModuleMapping ? billSplitMappingByField : mainMappingForBillSplitRows;
+  //   只看本次导出的字段（库中残留、已不导出的映射所用的特征值不参与输出）。
+  const exportedTargetFieldSet = new Set(orderedTargetFields);
+  const collectFeatureFilterIdSetExcept = (mapping, excludedTargets) => new Set(collectFeatureFilterIds(
+    Object.fromEntries(Object.entries(mapping || {}).filter(([targetField]) => (
+      exportedTargetFieldSet.has(targetField) && !excludedTargets.has(targetField)
+    )))
+  ));
+  const billSplitRowFeatureFilterIdSet = collectFeatureFilterIdSetExcept(billSplitBaseMapping, new Set(['Credit Amount', 'Debit Amount']));
+  const billSplitFeeRowFeatureFilterIdSet = collectFeatureFilterIdSetExcept(billSplitBaseMapping, billSplitFeeRowUnmappedTargets);
 
   // v3.2.16：字段筛选特征值——实际生效的映射（拆分且不复用时为拆分映射，否则为主映射）用到 token 时启用；
   // v3.2.18：每个用到的特征值每行只计算一次，选同一特征值的目标字段共用同一个结果，再各自走后续规范化（日期、金额等）。
@@ -614,6 +648,13 @@ function buildMappedRows({
 
     (billSplitFeeFormula || []).forEach((item) => {
       ensureBillSplitFieldExists(item.field);
+    });
+
+    // 模板文件字段按字面列名查找（列名即使以 __FIXED__: 开头也是真实表头，不当作固定值）
+    billSplitFeeFieldMappings.forEach((item) => {
+      if (item.valueType === 'field' && !sourceIndexByField.has(item.value)) {
+        throw new FileValidationError('FILE_READ', `映射字段不存在：${item.value}`);
+      }
     });
   }
 
@@ -964,9 +1005,29 @@ function buildMappedRows({
           expandedRow[payeeCardNoIndex] = rawAcct != null ? rawAcct : '';
         }
 
+        // v3.2.21：费用账单行按「字段映射特殊处理」覆盖（在户名 / 卡号按收支方向分配之后，设置了的字段以设置为准）。
+        //   BillDate 不允许覆盖（已在 billSplitFeeFieldMappings 中排除）。覆盖原值（feeFieldRawValues，与 billSplitFeeFieldMappings
+        //   同序）随行保留：合计行过滤、合并选定代表行后，只对实际写出的行先校验原值、再把 ValueDate 按主映射同口径规范化
+        //   （见下方写出循环；不为不输出的行解析日期，超长或含非法字符的源值在解析前拒绝）。
+        const feeFieldRawValues = [];
+        if (isFeeBillRow) {
+          billSplitFeeFieldMappings.forEach((item) => {
+            // 取自源列的覆盖值同样记无法核对原值的长数字（随该子行汇总，只在实际导出时提示）
+            const rawValue = resolveFeeFieldMappingValue(item, (field) => {
+              const sourceIndex = sourceIndexByField.get(field);
+              return sourceIndex === undefined ? '' : noteSourceCell(field, originalRow[sourceIndex]);
+            });
+            feeFieldRawValues.push(rawValue);
+            expandedRow[item.targetIndex] = rawValue;
+          });
+        }
+
         return {
           seqNo: splitRow.seqNo,
           mergedGroupSeq: splitRow.mergedGroupSeq,
+          // v3.2.21：费用账单行（带字段映射特殊处理的覆盖）；合并结果取代表行的值
+          isFeeBill: isFeeBillRow,
+          feeFieldRawValues,
           currency: currencyValue,
           creditAmount: creditValue,
           debitAmount: debitValue,
@@ -1112,6 +1173,8 @@ function buildMappedRows({
       result.push({
         seqNo: representative.seqNo,
         mergedGroupSeq: representative.mergedGroupSeq,
+        isFeeBill: Boolean(representative.isFeeBill),
+        feeFieldRawValues: representative.feeFieldRawValues,
         currency: representative.currency,
         creditAmount: net > 0 ? netString : '',
         debitAmount: net < 0 ? netString : '',
@@ -1408,12 +1471,13 @@ function buildMappedRows({
     // v3.2.16：只为会进入明细的行（有收入或支出）记录未筛出特征值；收支均为空的行另有过滤提示。
     // v3.2.18：每行一条，misses 列出该行未筛出的各特征值。
     const rowFeatureFilterIdSet = rowUsesBillSplit ? billSplitPathFeatureFilterIdSet : mainPathFeatureFilterIdSet;
-    const recordFeatureValueMiss = (hasAmount) => {
+    // featureIdSet：该行实际用到的特征值；拆分行全部被字段映射特殊处理覆盖时只含未被覆盖的字段所用的特征值（v3.2.21）
+    const recordFeatureValueMiss = (hasAmount, featureIdSet = rowFeatureFilterIdSet) => {
       if (!hasAmount) {
         return;
       }
       const misses = activeFeatureFilters
-        .filter((item) => rowFeatureFilterIdSet.has(item.id) && currentRowFeatureValues.get(item.id) === '')
+        .filter((item) => featureIdSet.has(item.id) && currentRowFeatureValues.get(item.id) === '')
         .map((item) => ({
           featureName: item.name,
           sourceField: item.rule.sourceField,
@@ -1490,17 +1554,30 @@ function buildMappedRows({
         feeFormulaDivisionByZeroRowNumbers.push(sourceRowNumber);
       }
       const merged = applyBillSplitMergeForRow(expanded);
-      const mergedHasAmount = merged.some((entry) => (
-        hasEffectiveAmount(entry.creditAmount) || hasEffectiveAmount(entry.debitAmount)
-      ));
-      recordFeatureValueMiss(mergedHasAmount);
-      // 实际导出的子行：底稿中沿用的列（子行覆盖了币种时不含底稿币种）加上子行各自的取值
+      // v3.2.21：按输出行实际沿用映射的字段统计特征值未命中（被覆盖的字段、拆分配置取值的发生额列不算）；
+      //   未启用特征值时不会有未命中提示，跳过逐行金额判断
+      if (activeFeatureFilters.length > 0) {
+        const outputEntries = merged.filter((entry) => (
+          hasEffectiveAmount(entry.creditAmount) || hasEffectiveAmount(entry.debitAmount)
+        ));
+        const usedFeatureFilterIds = new Set();
+        if (outputEntries.some((entry) => !entry.isFeeBill)) {
+          billSplitRowFeatureFilterIdSet.forEach((id) => usedFeatureFilterIds.add(id));
+        }
+        if (outputEntries.some((entry) => entry.isFeeBill)) {
+          billSplitFeeRowFeatureFilterIdSet.forEach((id) => usedFeatureFilterIds.add(id));
+        }
+        recordFeatureValueMiss(outputEntries.length > 0, usedFeatureFilterIds);
+      }
+      // 实际导出的子行：底稿中沿用的列（子行覆盖了币种时不含底稿币种；费用账单行不含被「字段映射特殊处理」覆盖的列）
+      //   加上子行各自的取值
       const exportedEntries = merged.filter((entry) => isExportedDetailRow(entry.rowArray));
       const outputCurrencyIndex = orderedTargetFields.indexOf('Currency');
       if (currentRowUnverifiedCells) {
         exportedEntries.forEach((entry) => {
           baseCellsByTarget.forEach((cells, targetIndex) => {
             if (targetIndex === outputCurrencyIndex && entry.currencyFromSplitRow) return;
+            if (entry.isFeeBill && billSplitFeeFieldTargetIndexes.has(targetIndex)) return;
             mergeCellMap(cells, currentRowUnverifiedCells);
           });
           mergeCellMap(entry.unverifiedCells, currentRowUnverifiedCells);
@@ -1512,6 +1589,16 @@ function buildMappedRows({
         countAmountSplitHits();
       }
       merged.forEach((entry) => {
+        // v3.2.21：实际写出的费用账单行（合并时为代表行）先校验取自源列的覆盖原值能否原样写入工作表，再规范化 ValueDate
+        if (entry.isFeeBill) {
+          billSplitFeeFieldMappings.forEach((item, index) => {
+            const rawValue = (entry.feeFieldRawValues || [])[index];
+            assertFeeFieldOutputWritable(item, rawValue, { sourceRowNumber: entry.sourceRowNumber });
+            if (item.templateField === 'ValueDate') {
+              entry.rowArray[item.targetIndex] = normalizeDateExportValue(normalizeCell(rawValue), { dateParseOrder }).value;
+            }
+          });
+        }
         rowMetas.push({ sourceRowNumber: entry.sourceRowNumber, ...sourceRowKeyMeta });
         mappedRows.push(entry.rowArray);
       });
@@ -1817,6 +1904,9 @@ module.exports = {
   normalizeCell,
   normalizeFeeAmountFormula,
   validateFeeAmountFormula,
+  normalizeFeeFieldMappings,
+  validateFeeFieldMappings,
+  isFeeFieldMappingTemplateFieldExcluded,
   ROW_FILTER_OPERATORS,
   collectBillSplitRowFilterFields,
   normalizeBillSplitRowFilterRules,

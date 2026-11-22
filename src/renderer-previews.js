@@ -529,11 +529,14 @@
             creditSourceField: '',
             debitSourceField: '',
             amountSourceField: '',
-            rowStatus: 'draft'
+            rowStatus: 'draft',
+            isFeeBill: true
           }
         ],
         initialAmountRules: [],
-        initialBillSplitMeta: { signedAmountSourceField: '净额' },
+        initialBillSplitMeta: { signedAmountSourceField: '净额', feeFieldMappingEnabled: true },
+        // v3.2.21：字段映射特殊处理可选的模板字段
+        feeFieldMappingTemplateFields: ['ValueDate', 'Description', 'Payee Name', 'Drawee Name'],
         onClose: () => {}
       }));
     }

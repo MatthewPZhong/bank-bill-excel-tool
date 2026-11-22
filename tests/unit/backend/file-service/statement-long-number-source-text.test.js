@@ -819,3 +819,31 @@ test('不传 exactSourceText 时读取结果不变（长数字仍为读取库的
     assert.deepEqual(Array.from(exactRows.sourceText.get(1)), [[3, SERIAL], [4, CARD]], filePath);
   }
 });
+
+// v3.2.21 发版合入（fix/statement-long-number-precision × feat/bill-split-fee-field-mapping）
+test('费用账单「字段映射特殊处理」：被覆盖的列不提示底稿读到的长数字；覆盖值取自源列时按该源列提示', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '手续费', '流水号', '备用号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'fee-override.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', 20, 1111, 2222]
+  ], { 1111: '6.2220212345678899E+18', 2222: '6.2220212345678899E+18' });
+  const generate = (feeFieldMappings) => buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'ChannelOrderNo'],
+    mappingByField: { BillDate: '日期', Currency: '币种', ChannelOrderNo: '流水号' },
+    expectedSourceHeaders: header,
+    billSplitMerge: billSplitMerge({
+      billSplitRows: [splitRow({ isFeeBill: true, debitSourceField: '手续费' })],
+      feeFieldMappings
+    })
+  });
+  const input = generate([{ templateField: 'ChannelOrderNo', valueType: 'input', value: 'FEE-01' }]);
+  assert.deepEqual(input.slice(1).map((row) => row.slice(3)), [['20', 'FEE-01']]);
+  assert.deepEqual(longNumberIssues(input), []);
+  const field = generate([{ templateField: 'ChannelOrderNo', valueType: 'field', value: '备用号' }]);
+  assert.deepEqual(field.slice(1).map((row) => row.slice(3)), [['20', '6222021234567890000']]);
+  assert.deepEqual(longNumberIssues(field).map((issue) => issue.cells), [[{ sourceField: '备用号', digitCount: 19 }]]);
+  const none = generate([]);
+  assert.deepEqual(longNumberIssues(none).map((issue) => issue.cells), [[{ sourceField: '流水号', digitCount: 19 }]]);
+});

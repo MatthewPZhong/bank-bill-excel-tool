@@ -30,6 +30,9 @@ const {
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   normalizeCell,
   normalizeFeeAmountFormula,
+  normalizeFeeFieldMappings,
+  validateFeeFieldMappings,
+  isFeeFieldMappingTemplateFieldExcluded,
   normalizeBillSplitRowFilterRules,
   normalizeRowFilterRules
 } = require('../../../src/backend/file-service');
@@ -258,7 +261,8 @@ test('生成配置读取模板的 币种 → 大账号，没有配置时拒绝',
 });
 
 test('模板包：v6 读取 currencyBigAccounts，v5 读为空，高于支持版本拒绝', (t) => {
-  // v3.2.18：特征值包升为 v7；v3.2.19：用到拆分账单费用账单的包写 v8；v3.2.21：逻辑取值候补含特征值写 v9；只用到本模式的包仍写 v6
+  // v3.2.18：特征值包升为 v7；v3.2.19：用到拆分账单费用账单的包写 v8；v3.2.21：逻辑取值候补含特征值、用到费用账单字段映射
+  //   特殊处理写 v9；只用到本模式的包仍写 v6
   assert.equal(CONSTANTS.SUPPORTED_BUNDLE_VERSION, 9);
   assert.equal(CONSTANTS.LOGIC_VALUE_BUNDLE_VERSION, 8);
   assert.equal(CONSTANTS.FEATURE_FILTER_BUNDLE_VERSION, 7);
@@ -278,6 +282,9 @@ test('模板包：v6 读取 currencyBigAccounts，v5 读为空，高于支持版
     FileValidationError,
     normalizeCell,
     normalizeFeeAmountFormula,
+    normalizeFeeFieldMappings,
+    validateFeeFieldMappings,
+    isFeeFieldMappingTemplateFieldExcluded,
     normalizeBillSplitRowFilterRules,
     normalizeRowFilterRules,
     getFeatureFilterRef,

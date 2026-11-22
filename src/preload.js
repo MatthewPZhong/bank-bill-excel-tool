@@ -487,7 +487,8 @@ contextBridge.exposeInMainWorld('desktopApi', {
     importBundle: () => ipcRenderer.invoke('template:import-bundle'),
     getAmountSplitRules: (templateId) => ipcRenderer.invoke('template:get-amount-split-rules', templateId),
     saveAmountSplitRules: (payload) => ipcRenderer.invoke('template:save-amount-split-rules', payload),
-    getBillSplitConfig: (templateId) => ipcRenderer.invoke('template:get-bill-split-config', templateId),
+    // v3.2.21：options.openRestoreSession 开启行管理的撤销会话并签发恢复令牌；options.activateRestoreSession / endRestoreSession（恢复令牌）在窗口挂载时激活、释放时结束该令牌所属的会话，不读取配置
+    getBillSplitConfig: (templateId, options) => ipcRenderer.invoke('template:get-bill-split-config', templateId, options),
     saveBillSplitMappings: (payload) => ipcRenderer.invoke('template:save-bill-split-mappings', payload),
     // v3.2.18 映射关系管理【特征值管理】：保存 / 删除特征值（整表替换，立即落库）
     saveFeatureFilters: (payload) => ipcRenderer.invoke('template:save-feature-filters', payload),

@@ -156,6 +156,7 @@ function createTemplateHeaderUpdateTools(constants = {}) {
   // 主映射始终读取；按字段区分发生额开启时读取完整规则；拆分/合并开启时读取拆分行（仅 completed）、
   // 拆分金额规则与按正负号拆分的字段，不复用主映射时还读取拆分映射；
   // 费用账单发生额公式（v3.2.19）在拆分开启、勾选特殊取值且有已完成的费用账单行时读取；
+  // 费用账单字段映射特殊处理（v3.2.21）取模板文件字段的项，同样在拆分开启、勾选且有已完成的费用账单行时读取；
   // 过滤规则（v3.2.19）在拆分开启且勾选「根据字段值过滤账单」时读取，此时未命中的行走主映射；
   // 原始账单预处理「过滤账单」的过滤规则（v3.2.19）勾选即读取，与拆分无关；两类规则的字段运算还读取比较字段；
   // 特征值（v3.2.18 起可有多个）各自的筛选字段只在实际生效的映射选用该特征值时读取。
@@ -226,11 +227,15 @@ function createTemplateHeaderUpdateTools(constants = {}) {
     });
 
     const billSplitRows = Array.isArray(input.billSplitRows) ? input.billSplitRows : [];
+    const hasCompletedFeeBillRow = billSplitRows.some((row) => (
+      row && row.isFeeBill === true && normalizeCell(row.rowStatus) === 'completed'
+    ));
     const feeFormulaActive = billSplitEnabled
       && Boolean(input.billSplitFeeAmountFormulaEnabled)
-      && billSplitRows.some((row) => (
-        row && row.isFeeBill === true && normalizeCell(row.rowStatus) === 'completed'
-      ));
+      && hasCompletedFeeBillRow;
+    const feeFieldMappingActive = billSplitEnabled
+      && Boolean(input.billSplitFeeFieldMappingEnabled)
+      && hasCompletedFeeBillRow;
 
     billSplitRows.forEach((row, index) => {
       const seqNo = Number(row && row.seqNo) || index + 1;
@@ -268,6 +273,24 @@ function createTemplateHeaderUpdateTools(constants = {}) {
         role: String(index + 1),
         field: item && item.field,
         active: feeFormulaActive
+      });
+    });
+
+    // 模板文件字段是字面列名（即使以 __FIXED__: 开头也是真实表头），不经 push 的固定值过滤。
+    // 给出导出字段时（模板【更新】），目标字段已不导出的项生成时会被忽略，标为未启用。
+    const feeFieldMappingTargets = Array.isArray(input.billSplitFeeFieldMappingTargetFields)
+      ? new Set(input.billSplitFeeFieldMappingTargetFields.map((field) => normalizeCell(field)))
+      : null;
+    (Array.isArray(input.billSplitFeeFieldMappings) ? input.billSplitFeeFieldMappings : []).forEach((item) => {
+      const field = normalizeCell(item && item.value);
+      if (!item || normalizeCell(item.valueType) !== 'field' || !field) return;
+      const target = normalizeCell(item.templateField);
+      references.push({
+        area: 'bill-split-fee-field-mapping',
+        target,
+        role: '',
+        field,
+        active: feeFieldMappingActive && (!feeFieldMappingTargets || feeFieldMappingTargets.has(target))
       });
     });
 
@@ -332,6 +355,8 @@ function formatFieldReferenceLine(reference) {
       return `拆分账单 · 按正负号取发生额 ← ${field}${suffix}`;
     case 'bill-split-fee-formula':
       return `拆分账单 · 费用账单发生额公式第 ${reference.role} 组 ← ${field}${suffix}`;
+    case 'bill-split-fee-field-mapping':
+      return `拆分账单 · 字段映射特殊处理 ${reference.target} ← ${field}${suffix}`;
     case 'bill-split-row-filter':
       return `根据字段值过滤账单 · 过滤规则 #${reference.target} 第 ${reference.role} 个条件${reference.compare ? '（比较字段）' : ''} ← ${field}${suffix}`;
     case 'preprocess-row-filter':
