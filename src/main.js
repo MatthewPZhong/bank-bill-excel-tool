@@ -2731,6 +2731,25 @@ function resolveGenerationTemplateConfig({ fileEntries = [], fallbackTemplateCon
   return getTemplateMappingConfig(templateIds[0]) || fallbackTemplateConfig;
 }
 
+// 改选大账号后复用已生成的明细：大账号 / 币种列被所选大账号覆盖（overriddenTargetFields），去掉币种未匹配提示；
+//   v3.2.21 B112：长数字提示中只写进这些列的源字段（cells[].targetFields，见 buildMappedRows）也去掉，其余提示不变
+function dropIssuesOverriddenBySelectedBigAccount(issues, overriddenTargetFields) {
+  return issues.reduce((kept, issue) => {
+    if (issue && issue.type === 'currency-unmapped') return kept;
+    if (issue && issue.type === 'long-number-unverified' && Array.isArray(issue.cells)) {
+      const cells = issue.cells.filter((cell) => !(
+        cell && Array.isArray(cell.targetFields) && cell.targetFields.length
+        && cell.targetFields.every((field) => overriddenTargetFields.has(field))
+      ));
+      if (!cells.length) return kept;
+      kept.push(cells.length === issue.cells.length ? issue : { ...issue, cells });
+      return kept;
+    }
+    kept.push(issue);
+    return kept;
+  }, []);
+}
+
 function rebuildMatchedTemplateFileEntries({
   fileEntries = [],
   fallbackTemplateConfig,
@@ -2786,9 +2805,10 @@ function rebuildMatchedTemplateFileEntries({
           if (currencyIndex !== undefined) row[currencyIndex] = currency;
         });
         if (Array.isArray(detailRows.issues)) {
-          detailRows.issues = detailRows.issues.filter(
-            (issue) => !issue || issue.type !== 'currency-unmapped'
-          );
+          detailRows.issues = dropIssuesOverriddenBySelectedBigAccount(detailRows.issues, new Set([
+            ...(merchantIdIndex !== undefined ? ['MerchantId'] : []),
+            ...(currencyIndex !== undefined ? ['Currency'] : [])
+          ]));
         }
       }
       const merchantLookupFlags = buildManagedMerchantLookupFlags(
@@ -2951,6 +2971,29 @@ function findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders) {
   return [];
 }
 
+// v3.2.21 B112：导入时识别大账号（identifyAccountsFromFile）按读取库的值定位表头（与模板表头一致），再把表头以外各行的
+//   长整数换成文件原文（readRows 的不可枚举属性 sourceText：Map<行下标, Map<列下标, 原文>>），账号按原文匹配。
+//   生成时的识别依据（buildBigAccountRecognitionBasis）在窗口内逐行取原文，口径相同。
+//   headerRowNumbers 为 findHeaderRowNumbersInRawRows 的结果（下标 + 1）。返回新数组，保留 firstRowNumber。
+function applyBigAccountRecognitionSourceText(rawRows, headerRowNumbers) {
+  const sourceText = rawRows && rawRows.sourceText instanceof Map ? rawRows.sourceText : null;
+  if (!sourceText || !sourceText.size) return rawRows;
+  const headerIndexes = new Set((headerRowNumbers || []).map((rowNumber) => rowNumber - 1));
+  const rows = rawRows.map((row, index) => {
+    const rowText = headerIndexes.has(index) ? null : sourceText.get(index);
+    if (!rowText || !Array.isArray(row)) return row;
+    const next = row.slice();
+    rowText.forEach((text, columnIndex) => {
+      if (columnIndex < next.length) next[columnIndex] = text;
+    });
+    return next;
+  });
+  if (rawRows.firstRowNumber !== undefined) {
+    Object.defineProperty(rows, 'firstRowNumber', { value: rawRows.firstRowNumber, enumerable: false });
+  }
+  return rows;
+}
+
 function buildBigAccountRecognitionBasis({
   rawRows,
   expectedSourceHeaders,
@@ -2958,6 +3001,8 @@ function buildBigAccountRecognitionBasis({
 }) {
   const rows = Array.isArray(rawRows) ? rawRows : [];
   const headerRowNumbers = findHeaderRowNumbersInRawRows(rows, expectedSourceHeaders);
+  // v3.2.21 B112：表头按读取库的值定位（同上），窗口内各行的长整数换成文件原文（rawRows.sourceText，见 readers.js）
+  const sourceText = rows.sourceText instanceof Map ? rows.sourceText : null;
   // v3.2.19：工作表有效范围不从第 1 行开始时，rows 下标与物理行号差一个偏移；记录的行号与
   //   readRowsWithMetadata 的源行号同为物理行号（finalizeBigAccountRecognitionBasis 按行号比较两者）。
   const rowNumberOffset = Number(rows.firstRowNumber) > 1 ? Number(rows.firstRowNumber) - 1 : 0;
@@ -2974,30 +3019,37 @@ function buildBigAccountRecognitionBasis({
     const endIndex = headerRowNumber - 2;
     const candidateRowsWithSource = rows
       .slice(startIndex, Math.max(startIndex, endIndex + 1))
-      .map((row, candidateIndex) => ({
-        sourceRow: startIndex + candidateIndex + 1 + rowNumberOffset,
-        cells: (Array.isArray(row) ? row : [])
-          .map((cell) => normalizeCell(cell))
-          .filter((cell) => cell !== '')
-      }));
-    const bridgeCandidates = [];
+      .map((row, candidateIndex) => {
+        const rowText = sourceText && sourceText.get(startIndex + candidateIndex);
+        return {
+          sourceRow: startIndex + candidateIndex + 1 + rowNumberOffset,
+          cells: (Array.isArray(row) ? row : [])
+            .map((cell, columnIndex) => normalizeCell(rowText && rowText.has(columnIndex) ? rowText.get(columnIndex) : cell))
+            .filter((cell) => cell !== '')
+        };
+      });
+    // v3.2.21 B112：精确命中的候选排在模糊命中之前（与 findBigAccountMatchInRows 同一口径）。长账号按原文读取后，
+    //   完整账号与其较短后缀可能同时命中，不能按账户映射的枚举顺序取。各自仍按离表头由近到远排列
+    const exactBridgeCandidates = [];
+    const fuzzyBridgeCandidates = [];
     const seenBridgeCandidates = new Set();
     for (let rowIndex = candidateRowsWithSource.length - 1; rowIndex >= 0; rowIndex -= 1) {
       const candidateRow = candidateRowsWithSource[rowIndex];
       for (const cellText of candidateRow.cells) {
         for (const mapping of bridgeMappings) {
-          if (matchMerchantIds(cellText, mapping.bankId) === 'none') continue;
-          const candidateKey = `${candidateRow.sourceRow}\u0000${mapping.clearingAccountId}`;
+          const matchType = matchMerchantIds(cellText, mapping.bankId);
+          if (matchType === 'none') continue;
+          const candidateKey = `${candidateRow.sourceRow}\u0000${mapping.clearingAccountId}\u0000${matchType}`;
           if (seenBridgeCandidates.has(candidateKey)) continue;
           seenBridgeCandidates.add(candidateKey);
-          bridgeCandidates.push(Object.freeze({
+          (matchType === 'exact' ? exactBridgeCandidates : fuzzyBridgeCandidates).push(Object.freeze({
             sourceRow: candidateRow.sourceRow,
             clearingAccountId: mapping.clearingAccountId
           }));
         }
       }
     }
-    bridgeCandidatesByBlock.push(Object.freeze(bridgeCandidates));
+    bridgeCandidatesByBlock.push(Object.freeze(exactBridgeCandidates.concat(fuzzyBridgeCandidates)));
     return Object.freeze({
       headerRowNumber: headerRowNumber + rowNumberOffset,
       candidateRows: Object.freeze(candidateRowsWithSource.map(
@@ -3105,12 +3157,15 @@ function identifyAccountsFromRecognitionBasis({
 
 const BIG_ACCOUNT_RECOGNITION_SCAN_MAX_ROWS = 64;
 
+// v3.2.21 B112：与映射读取（buildMappedRows）同样取长数字原文（exactSourceText），大账号识别与映射读到同一个值；
+//   原文在定位表头后用于账户信息行（applyBigAccountRecognitionSourceText）
 function readRowsForBigAccountRecognition(filePath) {
   try {
     return readRows(filePath, {
       blankrows: true,
       maxRows: BIG_ACCOUNT_RECOGNITION_SCAN_MAX_ROWS,
-      readGuard: createStatementWorkbookReadGuard(filePath)
+      readGuard: createStatementWorkbookReadGuard(filePath),
+      exactSourceText: true
     });
   } catch (headReadError) {
     if (headReadError && headReadError.code === STATEMENT_SOURCE_FRESHNESS_FAILURE.code) {
@@ -3118,7 +3173,8 @@ function readRowsForBigAccountRecognition(filePath) {
     }
     return readRows(filePath, {
       blankrows: true,
-      readGuard: createStatementWorkbookReadGuard(filePath)
+      readGuard: createStatementWorkbookReadGuard(filePath),
+      exactSourceText: true
     });
   }
 }
@@ -3143,10 +3199,12 @@ function identifyAccountsFromFile({
   if (!headerRowNumbers.length && rawRows.length >= BIG_ACCOUNT_RECOGNITION_SCAN_MAX_ROWS) {
     rawRows = readRows(filePath, {
       blankrows: true,
-      readGuard: createStatementWorkbookReadGuard(filePath)
+      readGuard: createStatementWorkbookReadGuard(filePath),
+      exactSourceText: true
     });
     headerRowNumbers = findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders);
   }
+  rawRows = applyBigAccountRecognitionSourceText(rawRows, headerRowNumbers);
 
   const isSingleAccount = headerRowNumbers.length <= 1;
   const identified = [];
@@ -4220,6 +4278,7 @@ function buildImportWarningDetailLines(warnings) {
     .filter((warning) => warning.type === 'balance-gap-skipped')
     .flatMap((warning) => (Array.isArray(warning.gaps) ? warning.gaps : []));
   const featureValueWarnings = warnings.filter((warning) => warning.type === 'feature-value-unmatched');
+  const longNumberWarnings = warnings.filter((warning) => warning.type === 'long-number-unverified');
   const confirmedBalanceMismatches = warnings
     .filter((warning) => warning.type === 'balance-mismatch-confirmed')
     .flatMap((warning) => (Array.isArray(warning.mismatches) ? warning.mismatches : []));
@@ -4253,6 +4312,25 @@ function buildImportWarningDetailLines(warnings) {
         );
       });
     });
+  }
+
+  // v3.2.21 B112：文件中只有近似值的长数字（二进制 .xls、Excel 另存的 xlsx 等），无法按原文还原。
+  //   只列文件、行号、源字段与位数，不写值（多是卡号、账号；本提示同时写入活动日志）。
+  //   整列都是这类数值时可能有很多行，明细最多列 100 处
+  if (longNumberWarnings.length) {
+    const LONG_NUMBER_WARNING_DETAIL_LIMIT = 100;
+    detailLines.push('以下单元格是超出精度的数值，文件中没有可核对的原值，导出值可能与银行原值不同，请向银行索取该列为文本格式的文件：');
+    let cellCount = 0;
+    longNumberWarnings.forEach((warning) => {
+      (Array.isArray(warning.cells) ? warning.cells : []).forEach((cell) => {
+        cellCount += 1;
+        if (cellCount > LONG_NUMBER_WARNING_DETAIL_LIMIT) return;
+        detailLines.push(`${warning.fileName ? `文件“${warning.fileName}”` : ''}第${warning.rowNumber}行，源字段“${cell.sourceField}”，${cell.digitCount}位数值`);
+      });
+    });
+    if (cellCount > LONG_NUMBER_WARNING_DETAIL_LIMIT) {
+      detailLines.push(`……等共${cellCount}处`);
+    }
   }
 
   if (currencyWarnings.length) {
@@ -4303,6 +4381,7 @@ function buildImportWarningMessage({ warnings, balanceReady, balanceRequested })
   const hasCurrencyWarning = warnings.some((warning) => warning.type === 'currency-unmapped');
   const hasBalanceWarning = warnings.some((warning) => warning.type === 'balance-generate-failed');
   const featureValueMissCount = warnings.filter((warning) => warning.type === 'feature-value-unmatched').length;
+  const longNumberRowCount = warnings.filter((warning) => warning.type === 'long-number-unverified').length;
   const skippedBalanceGapCount = warnings
     .filter((warning) => warning.type === 'balance-gap-skipped')
     .reduce((sum, warning) => sum + (Array.isArray(warning.gaps) ? warning.gaps.length : 0), 0);
@@ -4330,6 +4409,10 @@ function buildImportWarningMessage({ warnings, balanceReady, balanceRequested })
 
   if (featureValueMissCount > 0) {
     warningParts.push(`${featureValueMissCount}行未筛出特征值，相关字段已留空`);
+  }
+
+  if (longNumberRowCount > 0) {
+    warningParts.push(`${longNumberRowCount}行长数字无法核对原值`);
   }
 
   if (hasCurrencyWarning) {
@@ -12420,7 +12503,8 @@ function regenerateVirtualTemplateBalanceFromSession(
       includeBalance: true
     });
     if (groupGeneratedFiles.balance) balancePaths.push(groupGeneratedFiles.balance.filePath);
-    if (Array.isArray(groupGeneratedFiles.warnings)) allWarnings.push(...groupGeneratedFiles.warnings);
+    // 逐条合并：告警可能每行一条（如 v3.2.21 长数字提示），展开传参会超过函数参数上限
+    if (Array.isArray(groupGeneratedFiles.warnings)) groupGeneratedFiles.warnings.forEach((warning) => allWarnings.push(warning));
     try {
       billDates.push(...parseRequiredBillDates(groupPreparedBatch.detailRows));
     } catch (_ignored) {}
@@ -12601,7 +12685,8 @@ function generateMultiTemplateGroupFiles({
 
     if (groupGeneratedFiles.detail) allDetailPaths.push(groupGeneratedFiles.detail.filePath);
     if (groupGeneratedFiles.balance) allBalancePaths.push(groupGeneratedFiles.balance.filePath);
-    if (Array.isArray(groupGeneratedFiles.warnings)) allWarnings.push(...groupGeneratedFiles.warnings);
+    // 逐条合并：告警可能每行一条（如 v3.2.21 长数字提示），展开传参会超过函数参数上限
+    if (Array.isArray(groupGeneratedFiles.warnings)) groupGeneratedFiles.warnings.forEach((warning) => allWarnings.push(warning));
     try {
       const dates = parseRequiredBillDates(groupPreparedBatch.detailRows);
       allBillDates.push(...dates);
@@ -13877,9 +13962,9 @@ function findSelfInputBigAccountBridge(recognitionBasis, expandedOptions, blockO
   if (!Number.isInteger(blockOrdinal) || blockOrdinal < 0) return null;
   const clearingId = normalizeCell(clearingIds[blockOrdinal]);
   if (!clearingId) return null;
-  const matched = expandedOptions.find(
-    (option) => matchMerchantIds(clearingId, option.merchantId) !== 'none'
-  );
+  // v3.2.21 B112：先按完整 ID 精确匹配，再退回模糊匹配，不按维护列表的顺序取第一个模糊命中
+  const matched = expandedOptions.find((option) => matchMerchantIds(clearingId, option.merchantId) === 'exact')
+    || expandedOptions.find((option) => matchMerchantIds(clearingId, option.merchantId) !== 'none');
   if (matched) {
     return { merchantId: matched.merchantId, matchType: 'exact', viaBridge: true };
   }

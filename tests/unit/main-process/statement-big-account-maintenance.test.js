@@ -124,6 +124,17 @@ for (const [emptyBlockOrdinal, label] of ['首段', '中间段', '末尾段'].en
   });
 }
 
+test('自己输入模式的账号桥接：完整 ID 精确命中优先于维护列表中排在前面的较短后缀', () => {
+  const options = normalizeMaintainedBigAccounts([
+    { merchantId: 'ACC-1', currencies: ['USD'] },
+    { merchantId: 'ACC-100', currencies: ['EUR'] }
+  ]);
+  const bridge = deps.findSelfInputBigAccountBridge({ bridgeClearingIdsByBlock: ['ACC-100', 'ACC-10'] }, options, 0);
+  assert.equal(bridge.merchantId, 'ACC-100');
+  // 没有精确命中时仍按维护顺序取第一个模糊命中（与修改前一致）
+  assert.equal(deps.findSelfInputBigAccountBridge({ bridgeClearingIdsByBlock: ['ACC-100', 'ACC-10'] }, options, 1).merchantId, 'ACC-1');
+});
+
 test('空分段定位：缺少冻结表头时保留预览行回退', () => {
   const context = fixture(['M002']);
   delete context.fileEntries[0].detailRows.bigAccountRecognitionBasis.headerWindows[0].headerRowNumber;

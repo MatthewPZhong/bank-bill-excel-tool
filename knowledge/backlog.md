@@ -20,6 +20,34 @@
 
 ## 未实施
 
+### B117（P2 · 已知问题）大账号识别用到无法核对原值的长账号（二进制 .xls 等）时照常按近似值匹配，不提示（资金口径 · 须人工复核）
+
+- **来源**：2026-11-20 分支 `fix/statement-long-number-precision`（v3.2.21）审查发现。B112 的「长数字无法核对原值」提示只覆盖写进明细的映射取值（[spec](../changes/v3.2.21/fix/statement-long-number-precision/spec.md) §3.3）；表头上方账户信息行中的长账号文件里只有近似值时，导入识别（`identifyAccountsFromFile`）与生成时的识别依据（`buildBigAccountRecognitionBasis`）按近似值匹配，与修改前一致
+- **影响**：维护的大账号（或账户映射的银行账号）恰为该近似值时判为精确命中，自动归入该账号；相邻约 1024 以内的不同长账号读成同一个近似值，可能归错且无提示
+- **关闭条件**：识别候选携带精度状态，命中无法核对原值的长账号时提示复核或改为手动选择；配二进制 .xls 等真实文件回归，人工复核账号归属
+- **目标版本**：未定
+
+### B116（P3 · 已知问题）余额补录、断档确认等流程返回时不带导入告警，用户可在未看到告警时导出明细
+
+- **来源**：2026-11-20 分支 `fix/statement-long-number-precision`（v3.2.21）审查发现。`statement-generation.js` buildImportResultFromGeneratedFiles 遇到待补录余额（manual-balance-required）、断档、余额不一致、补录余额替换确认时，先返回对应流程结果（`detailReady` 为真、`errorReportReady` 为假），不构造导入告警摘要与报错文件明细
+- **影响**：同一次导入中的「长数字无法核对原值」（B112 新增）、「未筛出特征值」、币种未匹配、合计行跳过等告警在这一步不显示；用户此时导出明细，看不到需要核查的行
+- **关闭条件**：确定这些流程中告警的展示方式（如流程结果附带告警摘要与报错文件），覆盖告警与补录 / 确认同时出现的导入路径；核对流程完成后重新生成时告警照常显示
+- **目标版本**：未定
+
+### B115（P3 · 已知问题）导入提示与余额诊断把卡号、账号原值（含以账号命名的源文件名）写进报错文件与活动日志，未统一脱敏
+
+- **来源**：2026-11-20 分支 `fix/statement-long-number-precision`（v3.2.21）审查发现。v3.2.18 起 `feature-value-unmatched` 逐项写「原值“…”」（`file-service.js` recordFeatureValueMiss → `main.js` buildImportWarningDetailLines）；余额补录、断档、余额不一致的提示与日志按设计写「银行账号：MerchantId」（`main.js` buildManualBalanceRequiredResult 等，MerchantId 未映射到清算账号时为银行原号）；导入日志写「源文件：路径」，B112 的长数字提示逐行写「文件“名称”」以区分多文件，银行以完整账号命名文件时文件名即账号
+- **影响**：特征值的源列是卡号、账号且原值为文本（真 CSV、文本单元格），或银行原号作 MerchantId 时，完整号码进入报错文件与本机活动日志（`logs/{YYYY-MM}/{MM-DD}/{level}.log`，见 `src/backend/logger.js`）。B112 后长账号按原文读取，这类日志由近似值变为完整原号；B112 写原值的导入诊断中，按原文还原的长数字只写位数（[spec](../changes/v3.2.21/fix/statement-long-number-precision/spec.md) §3.3），余额诊断与文件名未改
+- **关闭条件**：确定导入提示、余额诊断与日志中卡号、账号、源文件名的脱敏口径（如只保留首尾几位，余额诊断是否仍需完整账号供核对，日志是否改写文件序号），统一实现；更新相关单测与集成断言
+- **目标版本**：未定
+
+### B114（P2 · 已知问题）网银账单生成以外的模块读取超出安全整数的长数字时仍会丢精度（资金口径 · 须人工复核）
+
+- **来源**：2026-11-20 分支 `fix/statement-long-number-precision`（v3.2.21）修复 B112（编号接续 `feat/bill-split-fee-field-mapping` 登记的 B111–B113）。B112 只改网银账单生成（[spec](../changes/v3.2.21/fix/statement-long-number-precision/spec.md) D4），按原文还原的读取选项 `exactSourceText` 只由生成与大账号识别传入
+- **影响**：同样走 `readers.js` 默认读取或自行 `XLSX.readFile` 的模块，XLSX 数值单元格、伪装成 .xls 的文本 / HTML 中超出安全整数的账号、流水号仍读成近似值：账户管理旧导入（`bank-account-import.js`）、余额种子导入（`balance-seed-import.js`）、关联表 / 网银账单批量导入（`table-type-detector.js`、`main.js` 关联表读取）、资金对账退款来源（`fund-recon-worker/source-readers.js`）与资金对账银行账单读取（`bank-statement-io.js`）；CSV 的 `="…"` / 首尾制表符同样未还原
+- **关闭条件**：逐个模块评估是否传入 `exactSourceText`（或等价还原），核对各自的匹配键与已保存配置的兼容，配真实文件回归；人工复核受影响的匹配结果
+- **目标版本**：未定
+
 ### B113（P2 · 已知问题）多账户分段识别中，合计行上的上一段账号可能被当成下一段的账号
 
 - **来源**：v3.2.21 分支 `feat/mapping-logic-feature-layout` 审查（v3.2.16 起合计行跳过、v3.2.19 原始账单预处理的既有口径，与逻辑取值无关）
