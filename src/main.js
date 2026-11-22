@@ -1634,6 +1634,10 @@ const LOGIC_VALUE_BUNDLE_VERSION = 8;
 const FEATURE_FILTER_BUNDLE_VERSION = 7;
 const CURRENCY_ONLY_BUNDLE_VERSION = 6;
 const BASE_BUNDLE_VERSION = 5;
+// v3.2.21：模板日期格式（templates.date_format）只决定文本日期中日、月的先后（解析见 normalizers.js 的 dateParseOrder）：
+//   auto 与 DMY 都按日在前、日在前不是有效日期时改按月在前，MDY 反之。映射关系管理「个性化映射设置 → 日期格式」不勾选为 auto。
+//   模板包 v4 起已带 dateFormat，各版本对三档的解析一致，故不升模板包版本。
+const TEMPLATE_DATE_FORMAT_LABELS = Object.freeze({ auto: '自动', DMY: '日在前（dd/mm/yyyy）', MDY: '月在前（mm/dd/yyyy）' });
 // v1.5.2 需求 3：主页面「按文件名映射模板」的虚拟模板 ID（非 DB 记录）
 // helper 用于在接收 templateId 的调用点统一短路，避免将虚拟 ID 传入真实查询
 const FILENAME_MAPPING_TEMPLATE_ID = '__FILENAME_MAPPING__';
@@ -3878,6 +3882,20 @@ function normalizeBundleBillSplitMeta(meta) {
   };
 }
 
+// v3.2.21：合法的模板日期格式（auto / DMY / MDY）原样返回，否则返回空串，由调用方决定报错或按 auto。
+//   只接受字符串：数组等其他类型字符串化后可能恰好等于合法值（如 ['MDY']），一律视为无效。
+function normalizeTemplateDateFormat(value) {
+  const dateFormat = typeof value === 'string' ? value.trim() : '';
+  return Object.prototype.hasOwnProperty.call(TEMPLATE_DATE_FORMAT_LABELS, dateFormat) ? dateFormat : '';
+}
+
+// v3.2.21：活动日志中的日期格式显示名；库内三档以外的旧值（旧版导入模板包时可能原样写入）原样标出，解析时按自动
+function formatTemplateDateFormatLabel(value) {
+  return normalizeTemplateDateFormat(value)
+    ? TEMPLATE_DATE_FORMAT_LABELS[value]
+    : `无效值「${value}」（按自动解析）`;
+}
+
 function normalizeBundleTemplateHeaders(headers) {
   const normalized = headers.map((value) => normalizeCell(value));
   while (normalized.length && normalized[normalized.length - 1] === '') {
@@ -3978,7 +3996,8 @@ function readTemplateBundleFile(filePath) {
     billSplitRows: Array.isArray(item.billSplitRows) ? item.billSplitRows : [],
     billSplitAmountRules: Array.isArray(item.billSplitAmountRules) ? item.billSplitAmountRules : [],
     billSplitMeta: normalizeBundleBillSplitMeta(item.billSplitMeta),
-    dateFormat: normalizeCell(item.dateFormat) || 'auto',
+    // v3.2.21：非字符串的日期格式按 auto（字符串化后可能恰好等于合法值）；其余取值在导入处理器按 normalizeTemplateDateFormat 规范化
+    dateFormat: (typeof item.dateFormat === 'string' ? item.dateFormat.trim() : '') || 'auto',
     // v3.2.18：特征值列表（导入时再校验）。本版本导出的包都带 featureFilters 数组——映射都没选用时仍写 v5/v6，
     //   故按字段而非版本判断；没有数组时才是 v3.2.16/3.2.17 的单套 featureFilter，升级为「特征值1」。
     featureFilters: upgradeLegacyFeatureFilter(Array.isArray(item.featureFilters) ? item.featureFilters : item.featureFilter),
@@ -9990,6 +10009,22 @@ function registerTemplateHandlers() {
         });
       }
 
+      // v3.2.21：模板日期格式随映射【保存】提交；未传时保持原值（其他调用方），取值不在 auto / DMY / MDY 内时拒绝
+      const dateFormat = payload.dateFormat === undefined || payload.dateFormat === null
+        ? undefined
+        : normalizeTemplateDateFormat(payload.dateFormat);
+      if (dateFormat === '') {
+        return createErrorResult({
+          step: '保存模板映射',
+          message: '日期格式无效，请重新选择',
+          errorCode: 'TEMPLATE_DATE_FORMAT_INVALID',
+          context: { templateId: payload.templateId, templateName: template.name },
+          templateName: template.name
+        });
+      }
+      // 库内旧值：空按 auto；三档以外的旧值原样保留，用于比较与留痕（改为合法值时也记录）
+      const previousDateFormat = normalizeCell(template.dateFormat) || 'auto';
+
       const templateConfiguration = validateTemplateConfiguration({
         template,
         mappings: payload.mappings,
@@ -10096,7 +10131,7 @@ function registerTemplateHandlers() {
         templateConfiguration.mappings,
         templateConfiguration.bigAccounts,
         templateConfiguration.fixedAssignments,
-        payload.dateFormat,
+        dateFormat,
         null,
         {
           preserveOwn,
@@ -10106,6 +10141,18 @@ function registerTemplateHandlers() {
           preprocessRowFilterRules
         }
       );
+      // v3.2.21：日期格式决定交易归属日，变化时在落库后立即留痕——不受随后模板库文件同步失败影响
+      //   （同步失败时界面提示保存失败，但库内已是新值；重试时旧值已等于新值，不会再记）
+      if (dateFormat && dateFormat !== previousDateFormat) {
+        appendActivityLogEntry({
+          level: 'info',
+          message: '模板日期格式已修改',
+          details: [
+            `模板名：${template.name}`,
+            `日期格式：${formatTemplateDateFormatLabel(previousDateFormat)} → ${formatTemplateDateFormatLabel(dateFormat)}`
+          ]
+        });
+      }
       const assignmentResult = saveResult && saveResult.channelAssignment;
       syncTemplateLibraryFile();
       clearLastErrorReport();
@@ -10568,7 +10615,8 @@ function registerTemplateHandlers() {
             validated.mappings,
             validated.bigAccounts,
             validated.fixedAssignments,
-            entry.dateFormat,
+            // v3.2.21：包内日期格式不在 auto / DMY / MDY 内时按 auto（各版本对这类值本就按 auto 解析）
+            normalizeTemplateDateFormat(entry.dateFormat) || 'auto',
             normalizedAmountSplitRules,
             {
               preserveOwn: false,

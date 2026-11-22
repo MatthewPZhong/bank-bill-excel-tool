@@ -3153,4 +3153,118 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     await layout.evidence(`duplicate-rows-review-${theme}`, { geometry });
   });
 
+  // v3.2.21 模板日期格式：「个性化映射设置」第一行「日期格式」勾选框，不勾选 = auto；勾选即弹出【日期格式】选日在前 / 月在前，
+  //   结果随映射【保存】提交 dateFormat，不是映射行。
+  async function openDateFormatMapping(dateFormat, { layoutOptions = null, withAdvanced = true } = {}) {
+    await setup(layoutOptions);
+    const advanced = withAdvanced ? ADVANCED_FIELDS : [];
+    await js(`cfg.tpl={id:9,name:'招商银行-上海',headers:['交易日期','金额','币种','附言','对手户名']};
+      cfg.handle=cfg.bridge.openModal(()=>cfg.dialogs.createMappingDialog({template:cfg.tpl,
+        targetFields:['BillDate','Credit Amount','Debit Amount','Balance','MerchantId','Currency','Remark',...${JSON.stringify(advanced)},...${JSON.stringify(SPLIT_FIELDS)}],
+        advancedMappingFields:${JSON.stringify(advanced.length ? advanced : ['__无__'])},billSplitGroupFields:${JSON.stringify(SPLIT_FIELDS)},mappings:[]
+        ${dateFormat === undefined ? '' : `,dateFormat:${JSON.stringify(dateFormat)}`}})).handle;
+      cfg.overlay=cfg.top();
+      cfg.dateRow=()=>cfg.overlay.querySelector('tr[data-role="date-format"]');
+      cfg.dateBox=()=>cfg.dateRow().querySelector('.mapping-toggle-checkbox');
+      cfg.setDate=checked=>{const box=cfg.dateBox();box.checked=checked;box.dispatchEvent(new Event('change'));};
+      cfg.dateState=()=>({checked:cfg.dateBox().checked,button:cfg.dateRow().querySelector('.mapping-date-format-btn').hidden?null:cfg.dateRow().querySelector('.mapping-date-format-btn').textContent.trim(),
+        preview:cfg.dateRow().querySelector('.mapping-date-format-preview').hidden?null:cfg.dateRow().querySelector('.mapping-date-format-preview').textContent});
+      cfg.savedDate=()=>cfg.calls.filter(call=>call.name==='mappingSave').map(call=>({has:Object.prototype.hasOwnProperty.call(call.args[0],'dateFormat'),
+        value:call.args[0].dateFormat,rows:call.args[0].mappings.filter(m=>m.templateField==='日期格式').length}));
+      void 0;`);
+  }
+
+  await test('日期格式：「个性化映射设置」第一行勾选框；勾选即弹窗选日在前 / 月在前，首次【取消】恢复不勾选；随映射【保存】提交，不是映射行', async () => {
+    await openDateFormatMapping();
+    assert.deepEqual(await js(`(()=>{const rows=[...cfg.overlay.querySelectorAll('tbody tr')];const head=rows.findIndex(row=>row.textContent.trim()==='个性化映射设置');
+      return {next:rows[head+1].dataset.role,text:rows[head+1].cells[0].textContent.trim(),after:rows[head+2].dataset.templateField};})()`),
+      { next: 'date-format', text: '日期格式', after: '按正负号拆分的发生额' });
+    assert.deepEqual(await js('cfg.dateState()'), { checked: false, button: null, preview: null });
+    // 勾选 → 立即弹窗，默认月在前；首次【取消】恢复不勾选
+    await js(`cfg.setDate(true);cfg.dateDialog=cfg.top();void 0;`);
+    assert.deepEqual(await js(`({title:cfg.dateDialog.querySelector('.dialog-title').textContent.trim(),
+      options:[...cfg.dateDialog.querySelectorAll('[data-role=date-format-select] option')].map(option=>[option.value,option.textContent]),
+      value:cfg.dateDialog.querySelector('[data-role=date-format-select]').value,
+      hints:cfg.dateDialog.querySelectorAll('[data-role=date-format-hint] li').length,
+      advice:cfg.dateDialog.querySelector('[data-role=date-format-hint]').textContent.includes('原始账单为 mm/dd/yyyy 时请选月在前')})`),
+      { title: '日期格式', options: [['DMY', '日在前（dd/mm/yyyy）'], ['MDY', '月在前（mm/dd/yyyy）']], value: 'MDY', hints: 3, advice: true });
+    await js(`cfg.dateDialog.querySelector('[data-action=cancel]').click();`); await tick();
+    assert.equal(await js('cfg.top()===cfg.overlay'), true);
+    assert.deepEqual(await js('cfg.dateState()'), { checked: false, button: null, preview: null });
+    // × 同【取消】
+    await js(`cfg.setDate(true);cfg.top().querySelector('.icon-close').click();`); await tick();
+    assert.deepEqual(await js('cfg.dateState()'), { checked: false, button: null, preview: null });
+    // 勾选 →【保存】月在前 → 显示【设置】与预览；映射【保存】提交 MDY，mappings 里没有该行
+    await js(`cfg.setDate(true);cfg.top().querySelector('[data-action=save]').click();`); await tick();
+    assert.deepEqual(await js('cfg.dateState()'), { checked: true, button: '设置', preview: '月在前（mm/dd/yyyy）' });
+    // 【设置】再次打开回显当前选择；改选日在前后【取消】不改暂存
+    await js(`cfg.dateRow().querySelector('.mapping-date-format-btn').click();cfg.dateDialog=cfg.top();
+      const select=cfg.dateDialog.querySelector('[data-role=date-format-select]');cfg.reopened=select.value;select.value='DMY';cfg.dateDialog.querySelector('[data-action=cancel]').click();`); await tick();
+    assert.equal(await js('cfg.reopened'), 'MDY');
+    assert.deepEqual(await js('cfg.dateState()'), { checked: true, button: '设置', preview: '月在前（mm/dd/yyyy）' });
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js('cfg.savedDate()'), [{ has: true, value: 'MDY', rows: 0 }]);
+
+    // 回显：MDY / DMY 勾选并显示预览；取消勾选后提交 auto
+    await openDateFormatMapping('DMY');
+    assert.deepEqual(await js('cfg.dateState()'), { checked: true, button: '设置', preview: '日在前（dd/mm/yyyy）' });
+    await js(`cfg.setDate(false);void 0;`);
+    assert.equal(await js('cfg.top()===cfg.overlay'), true, '取消勾选不弹窗');
+    assert.deepEqual(await js('cfg.dateState()'), { checked: false, button: null, preview: null });
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js('cfg.savedDate()'), [{ has: true, value: 'auto', rows: 0 }]);
+    // 缺省与未知值：不勾选，按 auto 提交
+    for (const value of [undefined, 'auto', 'XYZ']) {
+      await openDateFormatMapping(value);
+      assert.deepEqual(await js('cfg.dateState()'), { checked: false, button: null, preview: null }, String(value));
+      await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+      assert.deepEqual(await js('cfg.savedDate()'), [{ has: true, value: 'auto', rows: 0 }], String(value));
+    }
+    // 映射【返回】放弃
+    await openDateFormatMapping('auto');
+    await js(`cfg.setDate(true);cfg.top().querySelector('[data-action=save]').click();`); await tick();
+    await js(`cfg.overlay.querySelector('[data-action="back"]').click();`); await tick();
+    assert.equal(await js(`cfg.calls.filter(call=>call.name==='mappingSave').length`), 0);
+    // 没有「个性化映射设置」分组的旧载荷：不渲染该行，也不提交 dateFormat
+    await openDateFormatMapping('MDY', { withAdvanced: false });
+    assert.equal(await js(`Boolean(cfg.overlay.querySelector('tr[data-role="date-format"]'))`), false);
+    await js(`cfg.overlay.querySelector('[data-action="done"]').click();`); await tick();
+    assert.deepEqual(await js('cfg.savedDate()'), [{ has: false, value: undefined, rows: 0 }]);
+  });
+
+  for (const theme of ['light', 'dark']) await test(`日期格式布局（${theme}）：勾选框与同组勾选行对齐，【设置】与预览同一行；弹窗控件同一行、说明在下拉框下方且正文无滚动条、【保存】在【取消】左侧`, async () => {
+    await openDateFormatMapping('MDY', { layoutOptions: { width: 1440, height: 900, theme, zoom: 1 } });
+    await layout.settle();
+    const rowGeometry = await js(`(()=>{const rect=element=>element.getBoundingClientRect(),middle=item=>(item.top+item.bottom)/2;
+      const row=cfg.dateRow(),other=cfg.overlay.querySelector('tr[data-template-field="按字段区分发生额"]');
+      const box=rect(cfg.dateBox()),text=rect(row.querySelector('.mapping-toggle-text')),button=rect(row.querySelector('.mapping-date-format-btn')),
+        preview=rect(row.querySelector('.mapping-date-format-preview')),otherButton=rect(other.querySelector('.mapping-toggle-checkbox'));
+      const wrapper=cfg.overlay.querySelector('.mapping-wrapper');
+      return {boxRightOfText:box.left>text.right&&box.left-text.right<=12,
+        editorOneLine:Math.abs(middle(button)-middle(preview))<=2&&preview.left>button.right,
+        previewFull:row.querySelector('.mapping-date-format-preview').scrollWidth<=row.querySelector('.mapping-date-format-preview').clientWidth,
+        textOneLine:text.height<=24,
+        sameCellLeftAsOther:Math.abs(rect(row.cells[1]).left-rect(other.cells[1]).left)<=1,
+        noHorizontalOverflow:wrapper.scrollWidth<=wrapper.clientWidth};})()`);
+    assert.deepEqual(rowGeometry, { boxRightOfText: true, editorOneLine: true, previewFull: true, textOneLine: true, sameCellLeftAsOther: true, noHorizontalOverflow: true });
+    await layout.evidence(`mapping-dialog-date-format-${theme}`, { geometry: rowGeometry });
+    await js(`cfg.dateRow().querySelector('.mapping-date-format-btn').click();cfg.dateDialog=cfg.top();void 0;`);
+    await js('new Promise(resolve=>setTimeout(resolve,400))'); await layout.settle();
+    const geometry = await js(`(()=>{const rect=element=>element.getBoundingClientRect(),middle=item=>(item.top+item.bottom)/2;
+      const card=cfg.dateDialog.querySelector('.modal-card');const body=card.querySelector('.scenario-config-body');
+      const items=[card.querySelector('.date-format-label'),card.querySelector('[data-role=date-format-select]')].map(rect);
+      const hint=rect(card.querySelector('[data-role=date-format-hint]'));const actions=[...card.querySelectorAll('.dialog-actions button')].map(rect);
+      const select=card.querySelector('[data-role=date-format-select]');
+      return {visible:items.every(item=>item.width>0&&item.height>0)&&hint.height>0&&getComputedStyle(cfg.dateDialog).opacity==='1',
+        rowOneLine:Math.abs(middle(items[0])-middle(items[1]))<=2,
+        hintBelowRow:hint.top>=Math.max(items[0].bottom,items[1].bottom),
+        saveLeftOfCancel:actions[0].right<=actions[1].left,
+        insideCard:[...items,hint].every(item=>item.left>=rect(card).left&&item.right<=rect(card).right),
+        selectTextFits:select.scrollWidth<=select.clientWidth,
+        noHorizontalOverflow:body.scrollWidth<=body.clientWidth,
+        noVerticalScroll:body.scrollHeight<=body.clientHeight+1};})()`);
+    assert.deepEqual(geometry, { visible: true, rowOneLine: true, hintBelowRow: true, saveLeftOfCancel: true, insideCard: true, selectTextFits: true, noHorizontalOverflow: true, noVerticalScroll: true });
+    await layout.evidence(`date-format-dialog-${theme}`, { geometry });
+  });
+
 };
