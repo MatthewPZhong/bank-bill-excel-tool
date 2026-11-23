@@ -8,7 +8,7 @@ const { randomUUID } = require('node:crypto');
 const test = require('node:test');
 const ExcelJS = require('exceljs');
 const { sourceSnapshotFromStat } = require('../../../src/main-process/archive-center/source-snapshot');
-const { assertFilePlanFresh } = require('../../../src/main-process/archive-center/file-plan');
+const { assertFilePlanFresh, normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
 const { prepareIpcTaskInvocation } = require('../../../src/main-process/archive-center/ipc-task-contract');
 const { prepareRows, generateValidateAndPublishRows } = require('../../../src/main-process/toolbox-row-split/service');
 const { executeRowsGeneration } = require('../../../src/main-process/toolbox-row-split/executor');
@@ -79,7 +79,7 @@ for (const stage of ['before-generation', 'before-publication', 'unchanged']) {
       assert.throws(() => assertFilePlanFresh(filePlan), { code: 'ARCHIVE_TARGET_PARENT_CHANGED' });
     };
     const scope = {
-      fs, path, randomUUID,
+      fs, path, randomUUID, assertFilePlanFresh, normalizeFilePlanV1,
       trackedIpcHandle: (_channel, _scope, _name, value) => { contract = value; },
       requireToolboxSplitReadContext: () => readContext, prepareToolboxRows: prepareRows,
       app: { getPath: () => userDataDir }, mainWindow: null,

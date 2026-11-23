@@ -179,15 +179,23 @@ test.describe('toolbox:split:export 多文件 IPC 接线', () => {
     assert.equal(multipleSource.match(/showImportOpenDialog\('toolbox-split-export-directory'/g).length, 1);
   });
 
-  test('同名冲突确认使用“返回 / 覆盖全部”，返回仍在 FilePlan 与临时目录前整批取消', () => {
-    const conflictIndex = prepareSource.indexOf("buttons: ['返回', '覆盖全部']");
-    const responseGuardIndex = prepareSource.indexOf('overwriteChoice.response !== 1', conflictIndex);
-    const cancelledIndex = prepareSource.indexOf("status: 'cancelled'", responseGuardIndex);
-    const filePlanIndex = prepareSource.indexOf('prepared.filePlan = rows ? rows.filePlan : {', cancelledIndex);
-    assert.ok(conflictIndex >= 0);
+  // v3.2.22 B57：覆盖确认前冻结全部目标（含尚不存在的），按冻结快照列出冲突，确认后核对冻结计划；【返回】仍在临时目录前整批取消
+  test('同名冲突确认前冻结 FilePlan，确认使用“返回 / 覆盖全部”，返回在临时目录前整批取消，确认后核对冻结计划', () => {
+    const multipleSource = prepareSource.slice(prepareSource.indexOf("} else if (payload.mode === 'multiple')"));
+    const freezeIndex = multipleSource.indexOf('frozenFilePlan = freezeSplitFilePlan(outputPaths)');
+    const conflictListIndex = multipleSource.indexOf('frozenFilePlan.outputs[index].targetSnapshot.exists');
+    const conflictIndex = multipleSource.indexOf("buttons: ['返回', '覆盖全部']");
+    const responseGuardIndex = multipleSource.indexOf('overwriteChoice.response !== 1', conflictIndex);
+    const cancelledIndex = multipleSource.indexOf("status: 'cancelled'", responseGuardIndex);
+    const freshIndex = multipleSource.indexOf('assertFilePlanFresh(frozenFilePlan)', cancelledIndex);
+    assert.ok(freezeIndex >= 0);
+    assert.ok(conflictListIndex > freezeIndex);
+    assert.ok(conflictIndex > conflictListIndex);
     assert.ok(responseGuardIndex > conflictIndex);
     assert.ok(cancelledIndex > responseGuardIndex);
-    assert.ok(filePlanIndex > cancelledIndex);
+    assert.ok(freshIndex > cancelledIndex);
+    assert.ok(prepareSource.includes('prepared.filePlan = frozenFilePlan;'));
+    assert.ok(!prepareSource.includes('fs.existsSync(plan.targetPath));'), '冲突不再按确认时的现场 existsSync 列出');
     assert.ok(!prepareSource.includes("buttons: ['取消', '覆盖全部']"));
   });
 

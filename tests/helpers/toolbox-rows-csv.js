@@ -18,6 +18,7 @@ const { prepareRows, generateValidateAndPublishRows } = require('../../src/main-
 const { publicResult } = require('../../src/main-process/toolbox-row-split/contracts');
 const { prepareIpcTaskInvocation, createIpcTaskContext } = require('../../src/main-process/archive-center/ipc-task-contract');
 const { sourceSnapshotFromStat, sourceSnapshotMatchesStat } = require('../../src/main-process/archive-center/source-snapshot');
+const { assertFilePlanFresh, normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
 const { pathsAlias } = require('../../src/main-process/toolbox-target-identity');
 const { toolboxRecoveryOutputFiles } = require('../../src/main-process/toolbox-archive-recovery');
 const { createWorkerThreadAdapter } = require('../../src/main-process/background-execution/adapters/worker-thread-adapter');
@@ -87,7 +88,7 @@ async function withRowsCsv(options, run) {
       fs: { ...fs, rmSync(file, flags) {
         if (path.dirname(file) === output && path.basename(file).startsWith('.toolbox-rows-')) cleanup.push(fs.readdirSync(file).sort());
         return fs.rmSync(file, flags);
-      } }, path, randomUUID, pathsAlias, sourceSnapshotFromStat, sourceSnapshotMatchesStat, ipcMain,
+      } }, path, randomUUID, pathsAlias, sourceSnapshotFromStat, sourceSnapshotMatchesStat, assertFilePlanFresh, normalizeFilePlanV1, ipcMain,
       createToolboxSplitReadOwner(ownerOptions) {
         return createToolboxSplitReadOwner({ ...ownerOptions, dispatch(input) {
           if (options.forceScanLow) input = { ...input, executionMemoryConfig: profiles.profile('split-prepare', 'low', 'reader-guard-fixture') };

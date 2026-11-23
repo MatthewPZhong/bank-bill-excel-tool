@@ -119,6 +119,7 @@ const {
 } = require('./main-process/archive-center/source-snapshot');
 const {
   artifactManifestFromFilePlan,
+  assertFilePlanFresh,
   normalizeFilePlanV1
 } = require('./main-process/archive-center/file-plan');
 const {
@@ -22431,13 +22432,33 @@ async function publishToolboxArtifacts(
   const targetSnapshots = Array.isArray(options.targetSnapshots)
     ? options.targetSnapshots
     : [];
+  const targetList = Array.isArray(targets) ? targets : [];
+  // v3.2.22 B58：带冻结 FilePlan 的发布，目标须与计划输出一一对应；父目录身份统一取自冻结计划交给发布器复核
+  //   （目录被同路径替换即拒绝），并在发布前再核对一次输入，生成期间源文件被替换或改写时不形成正式输出。
+  //   目标文件与父目录由发布器在提交时复核，这里只补发布器不掌握的输入快照。
+  const plan = options.fileEvidence && options.fileEvidence.filePlan;
+  if (plan) {
+    if (plan.outputs.length !== targetList.length) {
+      throw new Error('工具箱发布目标与 FilePlan 输出数量不一致');
+    }
+    targetList.forEach((target, index) => {
+      const targetPath = target && typeof target === 'object' ? target.targetPath : target;
+      if (path.resolve(String(targetPath || '')) !== plan.outputs[index].filePath) {
+        throw new Error('工具箱发布目标与 FilePlan 输出不一致');
+      }
+    });
+    assertFilePlanFresh({ inputs: plan.inputs, outputs: [] });
+  }
   const publication = await publishToolboxPublicationAsync({
     taskId: `toolbox-${kind}-${Date.now()}-${randomUUID()}`,
     artifacts,
-    targets: (Array.isArray(targets) ? targets : []).map((target, index) => ({
+    targets: targetList.map((target, index) => ({
       ...(target && typeof target === 'object' ? target : { targetPath: target }),
       ...(targetSnapshots[index]
         ? { expectedTargetSnapshot: targetSnapshots[index] }
+        : {}),
+      ...(plan && plan.outputs[index].targetParentIdentity
+        ? { expectedTargetParentIdentity: plan.outputs[index].targetParentIdentity }
         : {})
     })),
     protectedSourcePaths: options.protectedSourcePaths,
@@ -22753,9 +22774,10 @@ function registerToolboxHandlers() {
           role: 'input',
           sourceOperation: 'toolbox:merge'
         })));
+        // v3.2.22 B57：保存框返回即冻结目标与输入，之后的新建 / 替换由生命周期与发布器拒绝
         const prepared = {
           proceed: true,
-          filePlan: {
+          filePlan: normalizeFilePlanV1({
             version: 1,
             allocation: 'eager',
             inputs: inputFiles,
@@ -22764,7 +22786,7 @@ function registerToolboxHandlers() {
               role: 'output',
               sourceOperation: 'toolbox:merge'
             }]
-          }
+          })
         };
         return prepared;
       } catch (error) {
@@ -22979,6 +23001,27 @@ function registerToolboxHandlers() {
         let targetPlans = null;
         let savePath = '';
         let rows = null;
+        let frozenFilePlan = null;
+        // v3.2.22 B57：选定目标后立即冻结全部目标（含尚不存在的）与源文件，覆盖确认只针对冻结时已存在的目标，
+        //   确认期间的新建 / 替换由确认后的核对拒绝；按行拆分在 prepareRows 中同样处理。
+        const freezeSplitFilePlan = (targetPaths) => {
+          assertToolboxTargetsDoNotAliasSources([readContext.sourceFilePath], targetPaths);
+          return normalizeFilePlanV1({
+            version: 1,
+            allocation: 'eager',
+            inputs: [{
+              filePath: readContext.sourceFilePath,
+              role: 'input',
+              sourceOperation: 'toolbox:split:export',
+              freshnessFailure: { code: 'TOOLBOX_SPLIT_READ_CONTEXT_STALE', message: '拆分源文件在读取后已变化，请重新选择' }
+            }],
+            outputs: targetPaths.map((filePath) => ({
+              filePath,
+              role: 'output',
+              sourceOperation: 'toolbox:split:export'
+            }))
+          });
+        };
         if (payload.mode === 'rows') {
           rows = await prepareToolboxRows(payload, readContext, {
             metadataDirectory: app.getPath('userData'),
@@ -23000,6 +23043,8 @@ function registerToolboxHandlers() {
           });
           if (!rows) return { proceed: false, result: { status: 'cancelled' } };
           outputPaths = rows.targets.map((item) => item.filePath);
+          assertToolboxTargetsDoNotAliasSources([readContext.sourceFilePath], outputPaths);
+          frozenFilePlan = rows.filePlan;
         } else if (payload.mode === 'multiple') {
           const groups = toolboxNormalizeMultiSplitGroups(payload.groups);
           const directoryChoice = await showImportOpenDialog('toolbox-split-export-directory', {
@@ -23030,7 +23075,9 @@ function registerToolboxHandlers() {
               }
             };
           }
-          const conflicts = targetPlans.filter((plan) => fs.existsSync(plan.targetPath));
+          outputPaths = targetPlans.map((plan) => plan.targetPath);
+          frozenFilePlan = freezeSplitFilePlan(outputPaths);
+          const conflicts = targetPlans.filter((_plan, index) => frozenFilePlan.outputs[index].targetSnapshot.exists);
           if (conflicts.length > 0) {
             const overwriteChoice = await dialog.showMessageBox(mainWindow, {
               type: 'warning',
@@ -23046,7 +23093,7 @@ function registerToolboxHandlers() {
               return { proceed: false, result: { status: 'cancelled' } };
             }
           }
-          outputPaths = targetPlans.map((plan) => plan.targetPath);
+          assertFilePlanFresh(frozenFilePlan);
           targetPlans = groups.map((group, index) => ({
             ...group,
             outputId: `split-${index + 1}`
@@ -23061,11 +23108,8 @@ function registerToolboxHandlers() {
           }
           savePath = saveResult.filePath;
           outputPaths = [savePath];
+          frozenFilePlan = freezeSplitFilePlan(outputPaths);
         }
-        assertToolboxTargetsDoNotAliasSources(
-          [readContext.sourceFilePath],
-          outputPaths
-        );
         const prepared = {
           proceed: true,
           payload,
@@ -23075,21 +23119,7 @@ function registerToolboxHandlers() {
           targetPlans,
           rows
         };
-        const inputFiles = Object.freeze([Object.freeze({
-          filePath: readContext.sourceFilePath,
-          role: 'input',
-          sourceOperation: 'toolbox:split:export'
-        })]);
-        prepared.filePlan = rows ? rows.filePlan : {
-          version: 1,
-          allocation: 'eager',
-          inputs: inputFiles,
-          outputs: outputPaths.map((filePath) => ({
-            filePath,
-            role: 'output',
-            sourceOperation: 'toolbox:split:export'
-          }))
-        };
+        prepared.filePlan = frozenFilePlan;
         prepared.beforeStart = (_batchContext, planEvidence) => {
           const sourceEvidence = planEvidence.inputFiles[0];
           assertToolboxSplitSourceFresh(readContext, sourceEvidence);
@@ -23125,10 +23155,7 @@ function registerToolboxHandlers() {
               metadataDirectory: app.getPath('userData'),
               publisher: (artifacts) => publishToolboxArtifacts(
                 'split-rows', artifacts,
-                taskContext.fileEvidence.filePlan.outputs.map((output) => ({
-                  targetPath: output.filePath,
-                  expectedTargetParentIdentity: output.targetParentIdentity
-                })),
+                taskContext.fileEvidence.filePlan.outputs.map((output) => ({ targetPath: output.filePath })),
                 taskContext.batchContext, {
                   protectedSourcePaths: [sourceFilePath],
                   targetSnapshots: taskContext.fileEvidence.targetSnapshots,
