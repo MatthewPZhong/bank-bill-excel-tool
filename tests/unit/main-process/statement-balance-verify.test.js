@@ -1696,3 +1696,17 @@ test('主进程装配：生成层拿到读取种子与替换确认的依赖（�
     assert.ok(names.includes(name), `缺少依赖 ${name}`);
   }
 });
+
+// release 审查：人工补录种子按无歧义的账户 + 日期索引——账号、币种含 @@ 的两个不同账户同日的人工补录互不遮住
+test('替换提醒：账号或币种含 @@ 的两个账户同日的人工补录各自比对，不因键相同被遮住', () => {
+  const error = deriveError(() => derive([
+    ['2026-09-01', 'X@@Y', 'USD', '100', '', '105'],
+    ['2026-09-01', 'X', 'Y@@USD', '100', '', '105']
+  ], [seed('X@@Y', 'USD', '2026-08-31', 5), seed('X', 'Y@@USD', '2026-08-31', 5)], {
+    existingBalanceSeeds: [manualOn('X@@Y', 'USD', '2026-09-01', 123), manualOn('X', 'Y@@USD', '2026-09-01', 105)]
+  }));
+  assert.equal(error.code, 'BALANCE_SEED_REPLACE_CONFIRM_REQUIRED');
+  assert.deepEqual(error.context.replacements.map((item) => [item.merchantId, item.currency, item.manualBalance, item.balance]), [
+    ['X@@Y', 'USD', 123, 105]
+  ]);
+});

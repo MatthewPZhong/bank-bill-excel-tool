@@ -158,7 +158,7 @@ module.exports = async ({ js, load, reset, assert, test }) => {
   await test('大账号选择完成时渠道余额方式冲突：提示列出冲突账户并释放本次选择', async () => {
     await setup();
     const rejected = { status: 'error', errorCode: 'CHANNEL_BALANCE_MODE_MISMATCH', preservesSession: true,
-      message: '渠道「招商银行-上海」下同一账户命中了余额方式不同的子模板，无法生成余额，请分开导入或在映射关系管理中统一',
+      message: '渠道「招商银行-上海」下同一账户命中了余额方式不同的子模板，无法生成余额，请在映射关系管理中统一这些子模板的余额方式后整批重新导入',
       detailLines: ['账户 M201（USD）：CMB-SH（取账单余额列）、招商银行-上海（通过发生额计算）'] };
     await js(`legacy.complete=legacy.deferred();legacy.cancellation=legacy.deferred();legacy.cancellation.resolve({status:'success'});legacy.openBigAccount();`); await settle();
     await js(`legacy.overlay.querySelector('.big-account-order-checkbox').click();legacy.overlay.querySelector('[data-action="done"]').click();

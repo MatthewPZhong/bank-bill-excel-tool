@@ -319,6 +319,8 @@ function buildMappedRows({
     : [];
   // 费用账单行被覆盖的目标列下标：底稿中这些列读到的长数字不随费用账单行提示
   const billSplitFeeFieldTargetIndexes = new Set(billSplitFeeFieldMappings.map((item) => item.targetIndex));
+  // 费用行覆盖的 ValueDate 列（写出前按主映射同口径规范化，可能为空）
+  const feeValueDateTargetIndexes = billSplitFeeFieldMappings.filter((item) => item.templateField === 'ValueDate').map((item) => item.targetIndex);
   // 费用账单行不取自映射的字段：被覆盖的字段，以及由拆分规则取值的 Credit / Debit Amount（特征值未命中提示用）
   const billSplitFeeRowUnmappedTargets = new Set(['Credit Amount', 'Debit Amount']
     .concat(billSplitFeeFieldMappings.map((item) => item.templateField)));
@@ -1610,6 +1612,18 @@ function buildMappedRows({
         feeFormulaDivisionByZeroRowNumbers.push(sourceRowNumber);
       }
       const merged = applyBillSplitMergeForRow(expanded);
+      // v3.2.21：实际写出的费用账单行（合并时为代表行）先校验取自源列的覆盖原值能否原样写入工作表，再规范化 ValueDate；
+      //   在归集长数字来源之前完成，按最终写出的值判断（release 审查）
+      merged.forEach((entry) => {
+        if (!entry.isFeeBill) return;
+        billSplitFeeFieldMappings.forEach((item, index) => {
+          const rawValue = (entry.feeFieldRawValues || [])[index];
+          assertFeeFieldOutputWritable(item, rawValue, { sourceRowNumber: entry.sourceRowNumber });
+          if (item.templateField === 'ValueDate') {
+            entry.rowArray[item.targetIndex] = normalizeDateExportValue(normalizeCell(rawValue), { dateParseOrder }).value;
+          }
+        });
+      });
       // v3.2.21：按输出行实际沿用映射的字段统计特征值未命中（被覆盖的字段、拆分配置取值的发生额列不算）；
       //   未启用特征值时不会有未命中提示，跳过逐行金额判断
       if (activeFeatureFilters.length > 0) {
@@ -1645,17 +1659,38 @@ function buildMappedRows({
             mergeCellMap(cells, currentRowUnverifiedCells);
             addTargets(cells, targetIndex);
           });
-          mergeCellMap(entry.unverifiedCells, currentRowUnverifiedCells);
+          // 费用行覆盖的 ValueDate 规范化后为空：没有近似值写进明细，只读给这类列的来源不记（同一源列还写进其他列、
+          //   或参与发生额时照常记——发生额的来源已按收入 / 支出列记在 cellsByTarget，release 审查）
+          const blankFeeTargets = entry.isFeeBill
+            ? new Set(feeValueDateTargetIndexes.filter((targetIndex) => normalizeCell(entry.rowArray[targetIndex]) === ''))
+            : null;
+          const droppedFields = new Set();
+          if (blankFeeTargets && blankFeeTargets.size && entry.cellsByTarget instanceof Map) {
+            const keptFields = new Set();
+            entry.cellsByTarget.forEach((cells, targetIndex) => {
+              if (!blankFeeTargets.has(targetIndex)) cells.forEach((_digitCount, sourceField) => keptFields.add(sourceField));
+            });
+            blankFeeTargets.forEach((targetIndex) => {
+              const cells = entry.cellsByTarget.get(targetIndex);
+              if (cells) cells.forEach((_digitCount, sourceField) => { if (!keptFields.has(sourceField)) droppedFields.add(sourceField); });
+            });
+          }
+          if (entry.unverifiedCells instanceof Map) {
+            entry.unverifiedCells.forEach((digitCount, sourceField) => {
+              if (!droppedFields.has(sourceField) && !currentRowUnverifiedCells.has(sourceField)) currentRowUnverifiedCells.set(sourceField, digitCount);
+            });
+          }
           const attributed = new Set();
           if (entry.cellsByTarget instanceof Map) {
             entry.cellsByTarget.forEach((cells, targetIndex) => {
+              if (blankFeeTargets && blankFeeTargets.has(targetIndex)) return;
               addTargets(cells, targetIndex);
               cells.forEach((_digitCount, sourceField) => attributed.add(sourceField));
             });
           }
           if (entry.unverifiedCells instanceof Map) {
             entry.unverifiedCells.forEach((_digitCount, sourceField) => {
-              if (!attributed.has(sourceField)) untargeted.add(sourceField);
+              if (!attributed.has(sourceField) && !droppedFields.has(sourceField)) untargeted.add(sourceField);
             });
           }
         });
@@ -1667,16 +1702,6 @@ function buildMappedRows({
         countAmountSplitHits();
       }
       merged.forEach((entry) => {
-        // v3.2.21：实际写出的费用账单行（合并时为代表行）先校验取自源列的覆盖原值能否原样写入工作表，再规范化 ValueDate
-        if (entry.isFeeBill) {
-          billSplitFeeFieldMappings.forEach((item, index) => {
-            const rawValue = (entry.feeFieldRawValues || [])[index];
-            assertFeeFieldOutputWritable(item, rawValue, { sourceRowNumber: entry.sourceRowNumber });
-            if (item.templateField === 'ValueDate') {
-              entry.rowArray[item.targetIndex] = normalizeDateExportValue(normalizeCell(rawValue), { dateParseOrder }).value;
-            }
-          });
-        }
         rowMetas.push({ sourceRowNumber: entry.sourceRowNumber, ...sourceRowKeyMeta });
         mappedRows.push(entry.rowArray);
       });

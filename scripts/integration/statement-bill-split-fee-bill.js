@@ -724,7 +724,7 @@ function verifyRestore(dir, database) {
   const restoreFns = loadMainFunctions([
     'normalizeBillSplitRestoreSnapshot', 'buildBillSplitRestoreToken', 'issueBillSplitRestoreToken', 'restoreBillSplitConfigFromPayload',
     'endBillSplitRestoreSession', 'endBillSplitRestoreSessionsForOwner', 'findBillSplitRestoreSessionId', 'activateBillSplitRestoreSession',
-    'syncTemplateLibraryAfterBillSplitWrite'
+    'syncTemplateLibraryAfterBillSplitWrite', 'maskAccountLikeTextForLog'
   ], {
     database, normalizeCell, normalizeFeeAmountFormula, normalizeFeeFieldMappings, FileValidationError,
     createHmac: require('node:crypto').createHmac, BILL_SPLIT_RESTORE_TOKEN_SECRET: require('node:crypto').randomBytes(32),
@@ -844,6 +844,14 @@ function verifyRestore(dir, database) {
     '⑥ 保存后同步失败返回 false（不抛出）');
   failLibrarySync = false;
   assertTrue(/保存拆分账单配置后同步模板库文件失败/.test(fs.readFileSync(warningLog, 'utf8')), '⑥ 保存后同步失败写入 warning 级活动日志');
+  // release 审查：模板名由用户填写、可能以账号命名：同步失败的 warning 日志只写编号位数，另记模板 ID
+  failLibrarySync = true;
+  const accountNamed = { ...database.getTemplate(reopened.id), name: '对公6222021234567890123' };
+  restoreFns.syncTemplateLibraryAfterBillSplitWrite(accountNamed, '保存拆分账单配置后同步模板库文件失败');
+  failLibrarySync = false;
+  const warningText = fs.readFileSync(warningLog, 'utf8');
+  assertTrue(!warningText.includes('6222021234567890123') && warningText.includes('对公（19位数字）') && warningText.includes(`模板 ID：${reopened.id}`),
+    '⑥ 同步失败日志中的模板名脱敏并记模板 ID');
   assertEq(restoreFns.syncTemplateLibraryAfterBillSplitWrite(database.getTemplate(reopened.id), '保存拆分账单配置后同步模板库文件失败'), true,
     '⑥ 同步成功返回 true');
 

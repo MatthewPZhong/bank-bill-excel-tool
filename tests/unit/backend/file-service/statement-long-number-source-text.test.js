@@ -1143,7 +1143,7 @@ test('XLSX：数组公式结果区域内只有缓存 <v> 的后续单元格同�
   assert.deepEqual(identifiers(outside).map(([serial]) => String(serial)), [String(Number('9007199254740993')), '9007199254740995']);
 });
 
-test('XLSX：公式区域引用写法异常（多区域、显式为空）或区域重叠时整张表不还原，按无法核对提示', async (t) => {
+test('XLSX：公式区域引用写法异常（多区域、显式为空）时整张表不还原；区域重叠时按并集判断', async (t) => {
   const dir = createTempDir(t);
   const rows = [HEADER, ['2026-11-01', 'USD', 100, 1111, 5], ['2026-11-02', 'USD', 200, 2222, 6]];
   const literals = { 1111: '9007199254740993', 2222: '9007199254740995' };
@@ -1156,12 +1156,21 @@ test('XLSX：公式区域引用写法异常（多区域、显式为空）或区�
     .replace(/(<c r="E2"[^>]*>)<v>/, '$1<f t="array" ref="F2:F3,D3:D8">1</f><v>'))), bothUnverified);
   assert.deepEqual(sources(await issuesOf('empty.xlsx', (xml) => xml
     .replace(/(<c r="E2"[^>]*>)<v>/, '$1<f t="array" ref="">1</f><v>'))), bothUnverified);
-  // 区域互相重叠（有效文件不会出现）：整张表不还原，区域外的 D4 同样提示
-  const overlapRows = [...rows, ['2026-11-03', 'USD', 300, 3333, 7]];
-  const overlap = map(await writeXlsxWithLiterals(path.join(dir, 'overlap.xlsx'), overlapRows, { ...literals, 3333: '9007199254740997' }, (xml) => xml
-    .replace(/(<c r="E2"[^>]*>)<v>/, '$1<f t="array" ref="C2:D2">1</f><v>')
-    .replace(/(<c r="E3"[^>]*>)<v>/, '$1<f t="array" ref="D2:D3">1</f><v>')));
-  assert.deepEqual(sources(longNumberIssues(overlap)), [['流水号'], ['流水号'], ['流水号']]);
+  // 区域互相重叠（有效文件不会出现）：按并集判断——D2:D6 与 D3 重叠时 D5 仍在区域内（只看起始行最近的区域会漏掉），
+  //   区域外的 D7 照常按原文；其他列的区域重叠不影响（release 审查）
+  const overlapRows = [HEADER, ...[1, 2, 3, 4, 5, 6].map((day) => [`2026-11-0${day}`, 'USD', day * 100, 1110 + day, day])];
+  const overlapLiterals = Object.fromEntries([1, 2, 3, 4, 5, 6].map((day) => [1110 + day, String(9007199254740992n + BigInt(day))]));
+  const overlap = map(await writeXlsxWithLiterals(path.join(dir, 'overlap.xlsx'), overlapRows, overlapLiterals, (xml) => xml
+    .replace(/(<c r="E2"[^>]*>)<v>/, '$1<f t="array" ref="C2:D6">1</f><v>')
+    .replace(/(<c r="E3"[^>]*>)<v>/, '$1<f t="array" ref="C3:D3">1</f><v>')
+    .replace(/(<c r="E4"[^>]*>)<v>/, '$1<f t="array" ref="E4:F5">1</f><v>')
+    .replace(/(<c r="E5"[^>]*>)<v>/, '$1<f t="array" ref="F4:F6">1</f><v>')));
+  assert.deepEqual(longNumberIssues(overlap).map((issue) => issue.rowNumber), [2, 3, 4, 5, 6]);
+  assert.equal(String(identifiers(overlap)[5][0]), '9007199254740998');
+  // 列名写成小写时统一大写后再解码（解码库把小写列名解成别的列）：d2:d3 即 D2:D3，区域外的 D4 起照常按原文
+  const lowercase = map(await writeXlsxWithLiterals(path.join(dir, 'lowercase.xlsx'), overlapRows, overlapLiterals, (xml) => xml
+    .replace(/(<c r="D2"[^>]*>)<v>/, '$1<f t="array" ref="d2:d3">VALUE(F2:F3)</f><v>')));
+  assert.deepEqual(longNumberIssues(lowercase).map((issue) => issue.rowNumber), [2, 3]);
   // 对照：区域不含流水号列（E2:E3）时照常按原文；共享公式首格的 ref 不按区域判断（各格自带 <f>）
   assert.deepEqual(await issuesOf('other-column.xlsx', (xml) => xml
     .replace(/(<c r="E2"[^>]*>)<v>/, '$1<f t="array" ref="E2:E3">1</f><v>')), []);
@@ -1179,4 +1188,32 @@ test('长数字映射到日期列、规范化后写出为空时不提示（没�
   assert.deepEqual(longNumberIssues(asDate), []);
   // 对照：同一列映射到普通列时照常提示
   assert.deepEqual(longNumberIssues(map(filePath)).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['卡号']]);
+});
+
+test('费用账单覆盖的 ValueDate 取自长数字源列、规范化后为空时不提示；同一源列还写进其他列时照常提示', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '手续费', '流水号', '备用号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'fee-value-date.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', 20, 1111, 2222]
+  ], { 1111: SERIAL, 2222: '1E+18' });
+  const valueDate = { templateField: 'ValueDate', valueType: 'field', value: '备用号' };
+  const generate = (feeFieldMappings, debitSourceField = '手续费') => buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'ChannelOrderNo', 'ValueDate'],
+    mappingByField: { BillDate: '日期', Currency: '币种', ChannelOrderNo: '流水号' },
+    expectedSourceHeaders: header,
+    billSplitMerge: billSplitMerge({
+      billSplitRows: [splitRow({ isFeeBill: true, debitSourceField })],
+      feeFieldMappings
+    })
+  });
+  const dateOnly = generate([valueDate]);
+  assert.deepEqual(dateOnly.slice(1).map((row) => [row[3], row[5]]), [['20', '']]);
+  assert.deepEqual(longNumberIssues(dateOnly), []);
+  // 同一源列还覆盖了另一列、或作为费用的发生额时，近似值仍写进明细：照常提示
+  const alsoOrderNo = generate([valueDate, { templateField: 'ChannelOrderNo', valueType: 'field', value: '备用号' }]);
+  assert.deepEqual(longNumberIssues(alsoOrderNo).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['备用号']]);
+  const asAmount = generate([valueDate], '备用号');
+  assert.deepEqual(longNumberIssues(asAmount).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['备用号']]);
 });

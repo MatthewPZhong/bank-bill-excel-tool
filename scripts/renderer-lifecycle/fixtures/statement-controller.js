@@ -306,7 +306,7 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
   // v3.2.21：渠道同一账户命中余额方式不同的子模板时整批阻断：导入、未开始的拒绝（完成大账号选择时发现）与「导出全部」都逐账户列出
   await test('渠道同一账户命中不同余额方式时，导入、未开始的拒绝与导出都列出逐账户明细', async () => {
     await setup();
-    const message = '渠道「招商银行-上海」下同一账户命中了余额方式不同的子模板，无法生成余额，请分开导入或在映射关系管理中统一';
+    const message = '渠道「招商银行-上海」下同一账户命中了余额方式不同的子模板，无法生成余额，请在映射关系管理中统一这些子模板的余额方式后整批重新导入';
     const lines = ['账户 M201（USD）：CMB-SH（取账单余额列）、招商银行-上海（通过发生额计算）'];
     const result = (extra) => JSON.stringify({ status: 'error', message, errorCode: 'CHANNEL_BALANCE_MODE_MISMATCH', detailLines: lines, errorReportReady: false, ...extra });
     await js(`statementFixture.next.import=${result({})};statementFixture.controller.commands.importFile()`); await tick();

@@ -234,11 +234,13 @@ function balanceSeedReplaceKey({ templateName, merchantId, currency, billDate, m
   ].map((value) => normalizeCell(value)).join('|');
 }
 
+// 账户（无歧义的 balanceAccountKey）+ 账单日期；日期为 YYYY-MM-DD，不含 @（release 审查：原样拼接时含 @@ 的不同账户同日的
+//   人工补录会互相遮住，回写不触发替换确认）
 function balanceSeedRecordKey(record) {
-  return [record.merchantId, record.currency, record.billDate].map((value) => normalizeCell(value)).join('@@');
+  return `${balanceAccountKey(normalizeCell(record.merchantId), normalizeCell(record.currency))}@@${normalizeCell(record.billDate)}`;
 }
 
-// 同一账单日的人工补录种子：按 账号@@币种@@日期 索引（未写生成方式的旧记录按人工录入读取）。
+// 同一账单日的人工补录种子：按 账户 + 日期（balanceSeedRecordKey）索引（未写生成方式的旧记录按人工录入读取）。
 // seenManualBalanceSeeds（可选，本次运行里见过的人工补录，key 同上）：先按当前种子同步——当前为人工补录的记下
 // 最新值，已没有种子的日期去掉（用户删除）；某日当前为工具生成、而这里记着人工补录时，仍按该人工补录比对。
 // 工具按同值回写把人工补录改成工具生成后，与该日余额不同的回写仍须确认替换（v3.2.16 Codex 审查 P1）。
@@ -565,7 +567,7 @@ function deriveBalanceRecords({
         endBalance = sumAmounts([endBalance, cumulative]);
       }
       // 同一账单日已有人工补录种子、且与本次余额（原值，不含附加值；人工种子同口径）不一致时，回写前须确认替换（v3.2.16）。
-      const manualSeed = manualSeedByDate.get([group.merchantId, group.currency, dateLabel].join('@@'));
+      const manualSeed = manualSeedByDate.get(balanceSeedRecordKey({ merchantId: group.merchantId, currency: group.currency, billDate: dateLabel }));
       if (manualSeed && endBalance !== null) {
         const originalBalance = sumAmounts([endBalance, -cumulative]);
         const difference = sumAmounts([originalBalance, -manualSeed.endBalance]);
@@ -632,7 +634,7 @@ function deriveBalanceRecords({
     skippedBalanceGaps,
     confirmedBalanceMismatches,
     confirmedBalanceSeedReplacements,
-    // 已确认替换的种子键（账号@@币种@@日期）：调用方写入后从“见过的人工补录”中去掉。
+    // 已确认替换的种子键（balanceSeedRecordKey）：调用方写入后从“见过的人工补录”中去掉。
     confirmedBalanceSeedReplacementKeys: confirmedBalanceSeedReplacements.map(balanceSeedRecordKey)
   };
 }

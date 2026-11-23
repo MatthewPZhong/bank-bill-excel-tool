@@ -11547,7 +11547,12 @@ function syncTemplateLibraryAfterBillSplitWrite(template, logMessage) {
     appendActivityLogEntry({
       level: 'warning',
       message: logMessage,
-      details: [`模板名：${template ? template.name : ''}`, `原因：${error && error.message ? error.message : String(error)}`]
+      // 模板名由用户填写、可能以账号命名；原因可能含模板名或路径：编号只写位数，另记模板 ID 供定位（release 审查）
+      details: [
+        `模板 ID：${template ? template.id : ''}`,
+        `模板名：${template ? maskAccountLikeTextForLog(template.name) : ''}`,
+        `原因：${maskAccountLikeTextForLog(error && error.message ? error.message : String(error))}`
+      ]
     });
     return false;
   }
@@ -13163,9 +13168,11 @@ function buildChannelBalanceModeMismatchError(conflictGroups) {
   const detailLines = groups.length > 1
     ? groups.flatMap((item) => item.lines.map((line) => `渠道「${item.channelName}」${line}`))
     : groups.flatMap((item) => item.lines);
+  // 不建议分开导入（release 审查）：同一账户同一天的交易拆成两批时，后一批只查目标日之前的种子、按前一日余额重算，
+  //   再覆盖前一批写入的当日余额，两份交易不会累加
   const error = new FileValidationError(
     'CHANNEL_BALANCE_MODE_MISMATCH',
-    `渠道${channelNames.map((name) => `「${name}」`).join('、')}下同一账户命中了余额方式不同的子模板，无法生成余额，请分开导入或在映射关系管理中统一`,
+    `渠道${channelNames.map((name) => `「${name}」`).join('、')}下同一账户命中了余额方式不同的子模板，无法生成余额，请在映射关系管理中统一这些子模板的余额方式后整批重新导入`,
     { detailLines, context: { channelName: channelNames.join('、') } }
   );
   error.conflictGroups = groups;
@@ -13207,7 +13214,7 @@ function buildChannelBalanceRowsIncompleteError(rowIssueGroups, lineLimit = 200)
 }
 
 // v3.2.21（D3）：多组规划（导入多组生成、补录重算、导出全部）收集到的渠道余额错误一并抛出。余额方式冲突优先：
-//   冲突的渠道须分开导入或统一方式，缺字段的行修好后仍会被拦下。
+//   冲突的渠道须统一余额方式后整批重新导入，缺字段的行修好后仍会被拦下。
 function buildChannelBalancePlanningError(conflictGroups, rowIssueGroups) {
   return conflictGroups.length
     ? buildChannelBalanceModeMismatchError(conflictGroups)
@@ -17571,7 +17578,7 @@ function registerFileHandlers() {
           ));
           const reviewsDuplicateRows = !confirmation && hasDuplicateRowKeys(pendingContext.fileEntries);
           // v3.2.21（D3）：按本次分配的大账号判断渠道组内同一账户是否命中不同余额方式（导入预检时多大账号模板的行还没有账号）。
-          //   有则未开始即拒绝（保留上一批的导出与补录入口），须分开导入或统一余额方式后重新导入
+          //   有则未开始即拒绝（保留上一批的导出与补录入口），须统一余额方式后整批重新导入
           const balanceModeConflicts = isFilenameMappingMode(pendingContext.templateId)
             ? findResolvedEntriesBalanceModeConflicts(
               (Array.isArray(pendingContext.balanceModeMixedEntryIndexes)
