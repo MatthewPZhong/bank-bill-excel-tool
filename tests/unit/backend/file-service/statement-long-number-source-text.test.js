@@ -995,3 +995,34 @@ test('拆分子行的长数字提示记下写进的目标列：只写进币种�
     币种码: ['Currency']
   });
 });
+
+test('余额方式为「无」或「通过发生额计算」时，拆分映射的 Balance 源列不参与计算：作标识时按原文输出', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '收入', '参考号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'split-balance-mode.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', 10, 1111]
+  ], { 1111: SERIAL });
+  const targets = ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'ChannelOrderNo'];
+  const generate = (mainBalance) => buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: targets,
+    mappingByField: { BillDate: '日期', Currency: '币种', 'Credit Amount': '收入', ...(mainBalance ? { Balance: mainBalance } : {}) },
+    expectedSourceHeaders: header,
+    billSplitMerge: billSplitMerge({
+      reuseModuleMapping: false,
+      billSplitMappingByTargetField: { BillDate: '日期', Currency: '币种', Balance: '参考号', ChannelOrderNo: '参考号' },
+      billSplitRows: [splitRow({ creditSourceField: '收入' })]
+    })
+  });
+  // 「无」：生成配置不带主映射 Balance
+  for (const [label, mainBalance] of [['无', null], ['通过发生额计算', '通过发生额计算']]) {
+    const mapped = generate(mainBalance);
+    assert.deepEqual(mapped.slice(1).map((row) => String(row[4])), [SERIAL], label);
+    assert.deepEqual(longNumberIssues(mapped), [], label);
+  }
+  // 取账单余额列：拆分映射的 Balance 是余额列，保持读取库的数值并提示
+  const statement = generate('余额');
+  assert.deepEqual(statement.slice(1).map((row) => String(row[4])), ['9007199254740992']);
+  assert.equal(longNumberIssues(statement).length, 1);
+});

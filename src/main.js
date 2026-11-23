@@ -2748,11 +2748,20 @@ function resolveGenerationTemplateConfig({ fileEntries = [], fallbackTemplateCon
   return getTemplateMappingConfig(templateIds[0]) || fallbackTemplateConfig;
 }
 
-// v3.2.21：写进活动日志的说明文字中形似账号、卡号的编号（6 位以上的字母数字串，其中至少 4 位数字）只写位数，
-//   不把完整号码持久化到日志（AGENTS.md 敏感数据边界）
-function maskAccountLikeTextForLog(text) {
-  return String(text == null ? '' : text).replace(/[0-9A-Za-z][0-9A-Za-z._-]{5,}/g, (token) => (
-    (token.match(/\d/g) || []).length >= 4 ? `（${token.length}位编号）` : token
+// v3.2.21：写进活动日志的说明文字中的账号、卡号等编号不持久化（AGENTS.md 敏感数据边界）。
+//   accountValues：调用方已知的账号（如模板包条目里的大账号），在文中原样出现时整体替换，不按写法猜边界；
+//   其余连续 4 位以上的数字（数字之间可夹空格、连字符、点，如按四位一组书写的号码；含全角数字）一律只写位数
+function maskAccountLikeTextForLog(text, accountValues = []) {
+  let masked = String(text == null ? '' : text);
+  Array.from(new Set((Array.isArray(accountValues) ? accountValues : [])
+    .map((value) => String(value == null ? '' : value).trim())
+    .filter((value) => value !== '')))
+    .sort((left, right) => right.length - left.length)
+    .forEach((value) => {
+      masked = masked.split(value).join(`（${value.length}位账号）`);
+    });
+  return masked.replace(/[0-9\uFF10-\uFF19](?:[\s._-]*[0-9\uFF10-\uFF19]){3,}/g, (digits) => (
+    `（${(digits.match(/[0-9\uFF10-\uFF19]/g) || []).length}位数字）`
   ));
 }
 
@@ -10706,11 +10715,14 @@ function registerTemplateHandlers() {
           if (error instanceof FileValidationError) {
             skippedCount += 1;
             // v3.2.21：记下跳过的模板与原因（如旧版本模板包里失效的逻辑取值候补），导入结果只给出跳过数量。
-            //   原因中的账号等编号不写进日志（maskAccountLikeTextForLog，release 审查）
+            //   原因中的账号等编号不写进日志：条目里的大账号原样出现时整体替换（不论写法），其余长数字只写位数（release 审查）
+            const entryAccountValues = ['bigAccounts', 'fixedAssignments', 'currencyBigAccounts']
+              .flatMap((key) => (Array.isArray(entry[key]) ? entry[key] : []))
+              .map((item) => normalizeCell(item && item.merchantId));
             appendActivityLogEntry({
               level: 'warning',
               message: '模板包导入时跳过模板',
-              details: [`模板名：${entry.name}`, `原因：${maskAccountLikeTextForLog(error.message)}`]
+              details: [`模板名：${entry.name}`, `原因：${maskAccountLikeTextForLog(error.message, entryAccountValues)}`]
             });
             return;
           }
@@ -13369,10 +13381,8 @@ function regenerateVirtualTemplateBalanceFromSession(
     if (groupGeneratedFiles.balance) balancePaths.push(groupGeneratedFiles.balance.filePath);
     // 逐条合并：告警可能每行一条（如 v3.2.21 长数字提示），展开传参会超过函数参数上限
     if (Array.isArray(groupGeneratedFiles.warnings)) groupGeneratedFiles.warnings.forEach((warning) => allWarnings.push(warning));
-    try {
-      // 逐个追加：每笔交易一个日期，展开成参数在大批量时会超出调用栈
-      for (const date of parseRequiredBillDates(groupPreparedBatch.detailRows)) billDates.push(date);
-    } catch (_ignored) {}
+    // v3.2.21：汇总文件按各组实际写出的余额记录日期命名（渠道组内不出余额的子模板的交易不算，与单组余额文件同口径）
+    for (const date of (groupGeneratedFiles.balance && groupGeneratedFiles.balance.billDates) || []) billDates.push(date);
   }
 
   // 如果还有 group 需要 seed → 返回 prompt
@@ -13468,6 +13478,8 @@ function generateMultiTemplateGroupFiles({
   const allBalancePaths = [];
   const allFileEntries = [];
   const allBillDates = [];
+  // v3.2.21：余额汇总文件按实际写出的余额记录日期命名（明细按全部明细日期）
+  const allBalanceDates = [];
   const allWarnings = [];
   const groupPlans = [];
   const balanceModeConflictGroups = [];
@@ -13612,6 +13624,7 @@ function generateMultiTemplateGroupFiles({
 
     if (groupGeneratedFiles.detail) allDetailPaths.push(groupGeneratedFiles.detail.filePath);
     if (groupGeneratedFiles.balance) allBalancePaths.push(groupGeneratedFiles.balance.filePath);
+    for (const date of (groupGeneratedFiles.balance && groupGeneratedFiles.balance.billDates) || []) allBalanceDates.push(date);
     // 逐条合并：告警可能每行一条（如 v3.2.21 长数字提示），展开传参会超过函数参数上限
     if (Array.isArray(groupGeneratedFiles.warnings)) groupGeneratedFiles.warnings.forEach((warning) => allWarnings.push(warning));
     try {
@@ -13647,7 +13660,7 @@ function generateMultiTemplateGroupFiles({
   const mergeableBalancePaths = balancePending ? [] : allBalancePaths;
   const mergedBalance = mergeableBalancePaths.length > 1
     ? (() => {
-        const mergedFileName = `${templateCount}-BALANCE-${dateRangeLabel || getToday()}.xlsx`;
+        const mergedFileName = `${templateCount}-BALANCE-${buildDateRangeLabel(allBalanceDates) || getToday()}.xlsx`;
         const { outputFilePath: mergedPath } = buildOutputFilePath({ kind: 'balance', outputFileName: mergedFileName });
         mergeGeneratedXlsxFiles(mergeableBalancePaths, mergedPath);
         return { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
@@ -14389,10 +14402,15 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
         // 不在循环内 return balance-seed-required；收集 warnings 后统一处理
         // （补录后重新导出时 seed 已持久化，该组能正常生成余额）
 
-        try {
-          // 逐个追加：每笔交易一个日期，展开成参数在大批量时会超出调用栈
-          for (const date of parseRequiredBillDates(groupPreparedBatch.detailRows)) exportBillDates.push(date);
-        } catch (_ignored) {}
+        if (kind === 'balance') {
+          // v3.2.21：余额汇总文件按实际写出的余额记录日期命名（与单组余额文件、另存为默认文件名同口径）
+          for (const date of (groupGeneratedFiles.balance && groupGeneratedFiles.balance.billDates) || []) exportBillDates.push(date);
+        } else {
+          try {
+            // 逐个追加：每笔交易一个日期，展开成参数在大批量时会超出调用栈
+            for (const date of parseRequiredBillDates(groupPreparedBatch.detailRows)) exportBillDates.push(date);
+          } catch (_ignored) {}
+        }
         perGroupPaths.push({
           // 渠道组按渠道名列出（与输出文件、余额银行名同口径），普通模板为模板名。
           templateName: groupGenConfig.outputName || templateConfig.template.name,

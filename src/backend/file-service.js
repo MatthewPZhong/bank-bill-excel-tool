@@ -202,6 +202,9 @@ function assertNoInvalidBillDateRows({ mappedRows, rowMetas, orderedTargetFields
   );
 }
 
+// 主映射 Balance 选「通过发生额计算」时生成配置保留的映射值（与 main.js BALANCE_CALCULATED_OPTION 相同；「无」不进入生成配置）
+const BALANCE_CALCULATED_MAPPING_VALUE = '通过发生额计算';
+
 function buildMappedRows({
   inputFilePath,
   orderedTargetFields,
@@ -440,10 +443,17 @@ function buildMappedRows({
       }
       addField(token);
     });
+    // 余额列只在余额取账单余额列时参与计算：主映射 Balance 为「无」时生成配置已去掉该映射，为「通过发生额计算」时余额按发生额
+    //   推导，两种情况下 Balance 映射的源列（含拆分映射的）都不参与计算，作标识时按原文（release 审查）
+    const mainBalanceTokens = normalizeMappingTokens((mappingByField || {}).Balance);
+    const balanceFromStatementColumn = mainBalanceTokens.length > 0
+      && !(mainBalanceTokens.length === 1 && mainBalanceTokens[0] === BALANCE_CALCULATED_MAPPING_VALUE);
     // 主映射的 Balance 只在有行用它出余额时计入：未开拆分、开了「根据字段值过滤账单」（未命中的行走主映射），或拆分行复用
     //   模块映射；拆分且不复用、不过滤时所有行的余额都取拆分映射，主映射 Balance 的源列作标识时按原文（release 审查）
-    if (!billSplitEnabled || billSplitRowFilterRules || billSplitReuseModuleMapping) addMapping((mappingByField || {}).Balance);
-    if (billSplitEnabled && !billSplitReuseModuleMapping) addMapping(billSplitMappingByField.Balance);
+    if (balanceFromStatementColumn && (!billSplitEnabled || billSplitRowFilterRules || billSplitReuseModuleMapping)) {
+      addMapping((mappingByField || {}).Balance);
+    }
+    if (balanceFromStatementColumn && billSplitEnabled && !billSplitReuseModuleMapping) addMapping(billSplitMappingByField.Balance);
     if (!billSplitEnabled || billSplitRowFilterRules) {
       if (amountSplitEnabled) {
         amountSplitRules.forEach((rule) => addSourceField(rule && rule.mappedField));

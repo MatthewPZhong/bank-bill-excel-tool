@@ -429,7 +429,9 @@ function createStatementGenerationHelpers(deps) {
         result.balance = {
           filePath: balanceOutput.outputFilePath,
           fileName: balanceOutput.outputFileName,
-          templateName: statementOutputName(config)
+          templateName: statementOutputName(config),
+          // v3.2.21：余额记录的账单日期（文件名的日期范围同此），多组汇总时按它命名余额文件
+          billDates: Array.isArray(balanceResult.billDates) ? balanceResult.billDates : []
         };
         result.message = includeDetail ? '明细账单可导出，余额账单可导出' : '余额账单可导出';
       } catch (error) {

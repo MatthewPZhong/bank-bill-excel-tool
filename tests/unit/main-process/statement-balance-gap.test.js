@@ -1336,8 +1336,9 @@ test('主进程：按文件名映射导出全部的汇总文件与当前批次�
     session,
     groups: [1, 2],
     generated: {
-      1: { balance: { filePath: '/tmp/group-1__all.xlsx' }, warnings: [] },
-      2: { balance: { filePath: '/tmp/group-2__all.xlsx' }, warnings: [] }
+      // 余额汇总文件按各组余额记录的日期命名（generateStatementFiles 的 balance.billDates）
+      1: { balance: { filePath: '/tmp/group-1__all.xlsx', billDates: ['2026-09-01'] }, warnings: [] },
+      2: { balance: { filePath: '/tmp/group-2__all.xlsx', billDates: ['2026-09-02'] }, warnings: [] }
     }
   });
   const result = await loadExportStatementByScope({
@@ -1711,7 +1712,7 @@ function findFileNames(root, pattern) {
 }
 
 test('主进程：按文件名映射多模板导入，任一模板组需补录或确认断档时不合并、不缓存部分余额', (t) => {
-  for (const scenario of ['gap', 'seed-required', 'bulk-warnings', 'invalid-date']) {
+  for (const scenario of ['gap', 'seed-required', 'bulk-warnings', 'invalid-date', 'merged-dates']) {
     const root = createTempRoot(t);
     const storageRoot = path.join(root, 'storage');
     const generation = createGenerationSeam(storageRoot);
@@ -1769,6 +1770,10 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
         if (scenario === 'bulk-warnings' && options.config.template.name === '中行-上海') {
           return { ...result, warnings: result.warnings.concat(new Array(150000).fill({ type: 'detail-row-skipped', rowNumber: 2 })) };
         }
+        // 模拟渠道组内只有不出余额的子模板在 9-01 有交易：各组余额记录都不含 9-01（明细照常含）
+        if (scenario === 'merged-dates' && result.balance) {
+          return { ...result, balance: { ...result.balance, billDates: result.balance.billDates.filter((date) => date !== '2026-09-01') } };
+        }
         return result;
       },
       parseRequiredBillDates,
@@ -1819,6 +1824,12 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
     });
 
     const [generatedFiles] = imported;
+    if (scenario === 'merged-dates') {
+      // release 审查：余额汇总文件按各组实际写出的余额记录日期命名，明细汇总按全部明细日期
+      assert.deepEqual([generatedFiles.detail.fileName, generatedFiles.balance.fileName],
+        ['3-COMMON-2026-09-01~2026-09-02.xlsx', '3-BALANCE-2026-09-02.xlsx'], scenario);
+      continue;
+    }
     if (scenario === 'bulk-warnings') {
       // v3.2.21：汇总各组告警逐个追加，15 万条跳过行告警不会在写出之后才超出调用栈
       assert.equal(generatedFiles.warnings.filter((warning) => warning.type === 'detail-row-skipped').length, 150000, scenario);
@@ -2670,4 +2681,62 @@ test('补录请求带的账号与当前待补录账号不一致时拒绝，不�
   const manual = prepare({ billDate: '2026-09-01', endBalance: '100' });
   assert.equal(manual.proceed, true);
   assert.equal(manual.plan.record.merchantId, 'M001');
+});
+
+// release 审查：补录重算与导出全部的多组余额汇总文件同样按各组实际写出的余额记录日期命名（与单组余额文件、导入多组生成同口径），
+//   不按全部明细日期：渠道组内不出余额的子模板的交易不进余额文件
+test('主进程：补录重算与导出全部的余额汇总文件按各组余额记录的日期命名，明细汇总按全部明细日期', async () => {
+  const detailDatesByGroup = { 1: ['2026-10-05', '2026-11-01'], 2: ['2026-11-02'] };
+  const balanceDatesByGroup = { 1: ['2026-11-01'], 2: ['2026-11-02'] };
+  const generatedOf = (tid) => ({
+    detail: { filePath: `/tmp/detail-${tid}.xlsx` },
+    balance: { filePath: `/tmp/balance-${tid}.xlsx`, billDates: balanceDatesByGroup[tid] },
+    warnings: []
+  });
+  const outputDeps = {
+    buildDateRangeLabel,
+    getToday: () => '2026-11-22',
+    buildOutputFilePath: ({ outputFileName }) => ({ outputFilePath: `/tmp/out/${outputFileName}` }),
+    scopedMergedOutputFileName: (name) => name,
+    mergeGeneratedXlsxFiles: () => {}
+  };
+
+  const gapGeneration = createStatementGenerationHelpers({});
+  const regenerateDeps = {
+    ...outputDeps,
+    appendActivityLogEntry: () => {},
+    assertVirtualTemplateBalanceOutputPaths: () => {},
+    generateStatementFiles: ({ preparedBatch }) => generatedOf(preparedBatch.tid),
+    parseRequiredBillDates: (rows) => rows.slice(),
+    extractManualBalancePromptWarning: gapGeneration.extractManualBalancePromptWarning,
+    statementGenerationHelpers: gapGeneration,
+    path
+  };
+  const regenerate = loadMainFunction('regenerateVirtualTemplateBalanceFromSession', Object.keys(regenerateDeps), Object.values(regenerateDeps));
+  const regenerated = regenerate({ key: 'session-1' }, 'all', {
+    scope: 'all',
+    generationGroups: [{}, {}],
+    groupPlans: [1, 2].map((tid) => ({ config: { template: { id: tid } }, preparedBatch: { tid, detailRows: detailDatesByGroup[tid] } })),
+    skippedGroups: []
+  });
+  assert.equal(regenerated.generatedFiles.balance.fileName, '2-BALANCE-2026-11-01~2026-11-02.xlsx');
+
+  const session = { key: 'session-1', templateId: FILENAME_MAPPING_TEMPLATE_ID, currentBatchId: 'batch-1', templateName: '按文件名映射模板' };
+  for (const [kind, expected] of [['balance', '2-BALANCE-2026-11-01~2026-11-02.xlsx'], ['detail', '2-COMMON-2026-10-05~2026-11-02.xlsx']]) {
+    const exported = [];
+    const { deps } = virtualExportAllDeps({ session, groups: [1, 2], generated: { 1: generatedOf(1), 2: generatedOf(2) } });
+    const result = await loadExportStatementByScope({
+      ...deps,
+      ...outputDeps,
+      buildPreparedStatementBatchFromEntries: ({ config }) => ({ detailRows: detailDatesByGroup[config.template.id], tid: config.template.id }),
+      parseRequiredBillDates: (rows) => rows.slice(),
+      createErrorResult: (payload) => ({ status: 'error', ...payload }),
+      exportGeneratedFile: async (generatedFile) => {
+        exported.push(generatedFile.fileName);
+        return { status: 'success' };
+      }
+    })(kind, 'all');
+    assert.equal(result.status, 'success', `${kind}：${JSON.stringify(result)}`);
+    assert.deepEqual(exported, [expected], kind);
+  }
 });
