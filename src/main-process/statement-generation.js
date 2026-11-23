@@ -3,6 +3,28 @@ const path = require('node:path');
 const { getBalanceSeedFileIdentity } = require('../backend/balance-seed-store');
 
 const { mapEachCollectingCurrencyBigAccountIssues } = require('../backend/file-service/currency-big-account');
+const { isZeroOrBlankAmount, parseDateValue } = require('../backend/file-service/normalizers');
+const { FileValidationError: BillDateValidationError, normalizeCell: normalizeBillDateCell } = require('../backend/file-service/common');
+
+// 账单日期的必填口径（parseRequiredBillDates 与写出前的只读校验共用）：表头须有 BillDate 列；
+//   单元格为空时跳过，有值但无法解析时报错；整批没有任何有效日期时报错。
+function requireBillDateIndex(headerRow) {
+  const index = (Array.isArray(headerRow) ? headerRow : []).findIndex((field) => normalizeBillDateCell(field) === 'BillDate');
+  if (index < 0) throw new BillDateValidationError('FILE_READ', '当前模板必须映射 BillDate 字段');
+  return index;
+}
+
+// 返回解析后的日期；空值返回 null；无效值抛错
+function parseRequiredBillDateCell(raw) {
+  if (!normalizeBillDateCell(raw)) return null;
+  const parsed = parseDateValue(raw);
+  if (!parsed) throw new BillDateValidationError('FILE_READ', `账单日期存在无效值：${normalizeBillDateCell(raw)}`);
+  return parsed;
+}
+
+function noValidBillDateError() {
+  return new BillDateValidationError('FILE_READ', '导入文件中未找到有效的 BillDate');
+}
 
 // v3.2.15（T3）：输出身份（文件名、余额银行名、种子、余额调整、补录提示）取配置上的 outputName：
 //   属于渠道的模板为渠道名，普通模板为模板名；缺省时回退模板名（兼容未带 outputName 的旧配置）。
@@ -22,6 +44,58 @@ function pendingBalanceSeedAccounts(balanceSeedStatus) {
     currency: account.currency,
     targetBillDate: account.targetBillDate
   }));
+}
+
+// 余额账户键（MerchantId + 币种原样）：余额分组、种子查找与按账户的余额方式表共用。两部分中的 @ 先转义为 @a 再用 @@ 连接
+//   （release 审查：原样拼接时 ('A@@B', 'USD') 与 ('A', 'B@@USD') 得到同一个键）；不含 @ 的账号、币种键与原来相同
+function balanceAccountKey(merchantId, currency) {
+  const escape = (value) => String(value == null ? '' : value).replace(/@/g, '@a');
+  return `${escape(merchantId)}@@${escape(currency)}`;
+}
+
+// v3.2.21（D2）：渠道组内子模板余额方式不同时，余额只用出余额账户的行：按 modeByAccount（resolveAccountBalanceModes
+//   的结果，同一账户只会有一种方式）取方式不是“不出余额”的账户的行引用与对应 rowMetas，不复制行（release 审查）。
+//   MerchantId 为空的行不属于任何账户（出余额条目的这类交易已在生成前拦下），不取
+function selectBalanceAccountRows(detailRows, modeByAccount) {
+  const rows = Array.isArray(detailRows) ? detailRows : [];
+  const header = Array.isArray(rows[0]) ? rows[0] : [];
+  const fieldIndex = (name) => {
+    const index = header.findIndex((field) => normalizeBillDateCell(field) === name);
+    return index < 0 ? undefined : index;
+  };
+  const merchantIndex = fieldIndex('MerchantId');
+  const currencyIndex = fieldIndex('Currency');
+  const rowMetas = Array.isArray(rows.rowMetas) ? rows.rowMetas : [];
+  const selected = [header];
+  const selectedMetas = [];
+  if (merchantIndex !== undefined && modeByAccount && typeof modeByAccount === 'object') {
+    for (let index = 1; index < rows.length; index += 1) {
+      const row = rows[index];
+      if (!Array.isArray(row)) continue;
+      const merchantId = normalizeBillDateCell(row[merchantIndex]);
+      if (!merchantId) continue;
+      const currency = currencyIndex === undefined ? '' : normalizeBillDateCell(row[currencyIndex]);
+      const key = balanceAccountKey(merchantId, currency);
+      if (!Object.prototype.hasOwnProperty.call(modeByAccount, key) || modeByAccount[key] === 'none') continue;
+      selected.push(row);
+      selectedMetas.push(rowMetas[index - 1] || null);
+    }
+  }
+  selected.rowMetas = selectedMetas;
+  return selected;
+}
+
+// v3.2.21：日期（YYYY-MM-DD）的首末两个边界（只有一个日期时一个），buildDateRangeLabel 得到的范围不变
+function dateRangeBounds(dates) {
+  let first = '';
+  let last = '';
+  for (const date of Array.isArray(dates) ? dates : []) {
+    if (!date) continue;
+    if (!first || date < first) first = date;
+    if (!last || date > last) last = date;
+  }
+  if (!first) return [];
+  return first === last ? [first] : [first, last];
 }
 
 function createStatementGenerationHelpers(deps) {
@@ -85,6 +159,135 @@ function createStatementGenerationHelpers(deps) {
 
   // E09-P0 现状取证接缝：production Main 委托到此同一函数；依赖注入不改变
   // 现有 storage、writer 与 balance 的所有权。
+  function buildSimultaneousAmountError(simultaneousAmountRows, { config, inputFilePaths = [] }) {
+    return new FileValidationError(
+      'FILE_READ',
+      `存在${simultaneousAmountRows.length}条明细的 Credit Amount 与 Debit Amount 同时有值`,
+      {
+        detailLines: simultaneousAmountRows.map((row) => {
+          return `第${row.sourceRowNumber}行，Credit Amount="${row.creditAmount || '(空)'}"，Debit Amount="${row.debitAmount || '(空)'}"`;
+        }),
+        context: {
+          inputFilePath: inputFilePaths.join(';'),
+          templateName: statementOutputName(config)
+        }
+      }
+    );
+  }
+
+  function balanceMerchantIdMappingError() {
+    return new FileValidationError('FILE_READ', '当前模板启用 Balance 时必须映射 MerchantId 字段');
+  }
+
+  // v3.2.21：写出前的只读校验，与 generateStatementFiles 写出任何文件之前会抛出的检查同口径、同顺序（收支同时有值，
+  //   账单日期，出余额时组配置须映射 MerchantId），只扫描、不复制明细行。多组生成（导入、补录重算、「导出全部」）在写出
+  //   任何组、移除旧会话条目之前逐组调用，避免前几组的明细、余额与当日种子已落盘，后一组才失败。
+  //   detailRowsList 按 mergeMappedDetailRows 的口径合并（首段表头为准，行号取合并后的 rowMetas）。
+  function assertStatementRowsWritable({
+    config,
+    detailRowsList = [],
+    inputFilePaths = [],
+    balanceRequested = false,
+    balanceModeByAccount = null,
+    includeBalance = null
+  }) {
+    const segments = detailRowsList.filter((rows) => Array.isArray(rows) && rows.length > 0);
+    const headerRow = segments.length && Array.isArray(segments[0][0]) ? segments[0][0] : [];
+    const fieldIndexMap = buildFieldIndexMap(headerRow);
+    const creditAmountIndex = fieldIndexMap.get('Credit Amount');
+    const debitAmountIndex = fieldIndexMap.get('Debit Amount');
+    const billDateIndex = fieldIndexMap.get('BillDate');
+    const filtersAmountRows = creditAmountIndex !== undefined && debitAmountIndex !== undefined;
+    // 一次遍历，只记结论、不收集行或日期：导出的行（收支恰有一个不为空或 0）是否存在、其中是否有有效日期及首个无效日期；
+    //   没有导出的行时生成按全部行核对日期，这里同样记下全部行的结论
+    // 收支同时有值的行只记诊断（行号与收支值，生成时报错列出的也是这些），不保留原行
+    const simultaneousAmountRows = [];
+    // 合并后的 rowMetas 是各段 rowMetas 依次拼接（mergeMappedDetailRows）：按各段起点定位，不展平
+    const metaSegments = [];
+    let metaOffset = 0;
+    for (const rows of segments) {
+      if (!Array.isArray(rows.rowMetas)) continue;
+      metaSegments.push({ start: metaOffset, metas: rows.rowMetas });
+      metaOffset += rows.rowMetas.length;
+    }
+    const mergedRowMeta = (mergedIndex) => {
+      for (const { start, metas } of metaSegments) {
+        if (mergedIndex < start + metas.length) return mergedIndex >= start ? metas[mergedIndex - start] : undefined;
+      }
+      return undefined;
+    };
+    const exported = { hasRow: false, hasValidDate: false, dateError: null };
+    const all = { hasValidDate: false, dateError: null };
+    const checkDate = (state, raw) => {
+      if (state.dateError || billDateIndex === undefined) return;
+      try {
+        if (parseRequiredBillDateCell(raw)) state.hasValidDate = true;
+      } catch (error) {
+        state.dateError = error;
+      }
+    };
+    let rowIndex = 0;
+    for (const rows of segments) {
+      for (let index = 1; index < rows.length; index += 1, rowIndex += 1) {
+        const row = Array.isArray(rows[index]) ? rows[index] : [];
+        const billDate = billDateIndex === undefined ? undefined : row[billDateIndex];
+        if (!exported.hasRow) checkDate(all, billDate);
+        if (filtersAmountRows) {
+          const creditBlank = isZeroOrBlankAmount(row[creditAmountIndex]);
+          const debitBlank = isZeroOrBlankAmount(row[debitAmountIndex]);
+          if (!creditBlank && !debitBlank) {
+            simultaneousAmountRows.push({
+              sourceRowNumber: mergedRowMeta(rowIndex)?.sourceRowNumber || rowIndex + 2,
+              creditAmount: normalizeCell(row[creditAmountIndex]),
+              debitAmount: normalizeCell(row[debitAmountIndex])
+            });
+          }
+          if (creditBlank === debitBlank) continue;
+        }
+        exported.hasRow = true;
+        checkDate(exported, billDate);
+      }
+    }
+    if (simultaneousAmountRows.length) {
+      throw buildSimultaneousAmountError(simultaneousAmountRows, { config, inputFilePaths });
+    }
+    requireBillDateIndex(headerRow);
+    const dateState = exported.hasRow ? exported : all;
+    if (dateState.dateError) throw dateState.dateError;
+    if (!dateState.hasValidDate) throw noValidBillDateError();
+    const shouldGenerateBalance = includeBalance === null
+      ? Boolean(balanceRequested)
+      : Boolean(includeBalance) && Boolean(balanceRequested);
+    if (shouldGenerateBalance && !balanceModeByAccount && !config.mappingByTargetField.MerchantId) {
+      throw balanceMerchantIdMappingError();
+    }
+  }
+
+  // 已构建的批次（导入多组生成、补录重算）
+  function assertStatementBatchWritable({ config, preparedBatch, includeBalance = null }) {
+    assertStatementRowsWritable({
+      config,
+      detailRowsList: [preparedBatch.detailRows],
+      inputFilePaths: preparedBatch.inputFilePaths || [],
+      balanceRequested: preparedBatch.balanceRequested,
+      balanceModeByAccount: preparedBatch.balanceModeByAccount || null,
+      includeBalance
+    });
+  }
+
+  // 尚未构建批次的条目（「导出全部」执行时的校验）：与 buildPreparedStatementBatchFromEntries 加
+  //   balancePlan（resolveEntryBalancePlan 的结果，null 表示不按账户分方式）构建出的批次同口径
+  function assertStatementEntriesWritable({ config, fileEntries = [], balancePlan = null, includeBalance = null }) {
+    assertStatementRowsWritable({
+      config,
+      detailRowsList: fileEntries.map((entry) => entry.detailRows),
+      inputFilePaths: fileEntries.map((entry) => entry.filePath),
+      balanceRequested: balancePlan ? balancePlan.hasEffectiveRow : config.balanceRequested,
+      balanceModeByAccount: balancePlan ? balancePlan.modeByAccount : null,
+      includeBalance
+    });
+  }
+
   function generateStatementFiles({
     config,
     preparedBatch,
@@ -106,19 +309,7 @@ function createStatementGenerationHelpers(deps) {
       : [];
 
     if (simultaneousAmountRows.length) {
-      throw new FileValidationError(
-        'FILE_READ',
-        `存在${simultaneousAmountRows.length}条明细的 Credit Amount 与 Debit Amount 同时有值`,
-        {
-          detailLines: simultaneousAmountRows.map((row) => {
-            return `第${row.sourceRowNumber}行，Credit Amount="${row.creditAmount || '(空)'}"，Debit Amount="${row.debitAmount || '(空)'}"`;
-          }),
-          context: {
-            inputFilePath: preparedBatch.inputFilePaths.join(';'),
-            templateName: statementOutputName(config)
-          }
-        }
-      );
+      throw buildSimultaneousAmountError(simultaneousAmountRows, { config, inputFilePaths: preparedBatch.inputFilePaths });
     }
 
     skippedDetailRows.forEach((row) => {
@@ -172,7 +363,10 @@ function createStatementGenerationHelpers(deps) {
       result.detail = {
         filePath: detailOutput.outputFilePath,
         fileName: detailOutput.outputFileName,
-        templateName: statementOutputName(config)
+        templateName: statementOutputName(config),
+        // v3.2.21：明细文件名日期范围的首末日期（写出的明细行；只写出表头时为全部行），多组汇总时按它命名明细文件；
+        //   只留边界，不缓存逐笔日期
+        billDates: dateRangeBounds(billDates)
       };
     }
 
@@ -181,8 +375,10 @@ function createStatementGenerationHelpers(deps) {
       : Boolean(includeBalance) && Boolean(preparedBatch.balanceRequested);
 
     if (shouldGenerateBalance) {
-      if (!config.mappingByTargetField.MerchantId) {
-        throw new FileValidationError('FILE_READ', '当前模板启用 Balance 时必须映射 MerchantId 字段');
+      // v3.2.21（D2）：渠道组内余额方式不同（带 balanceModeByAccount）时，组配置模板可能不出余额，
+      //   参与余额的各子模板是否映射 MerchantId 已在批次构建时按子模板核对
+      if (!preparedBatch.balanceModeByAccount && !config.mappingByTargetField.MerchantId) {
+        throw balanceMerchantIdMappingError();
       }
 
       let balanceSeedStatus = {
@@ -203,8 +399,16 @@ function createStatementGenerationHelpers(deps) {
           throw new FileValidationError('FILE_READ', '余额账单模板为空或不可读，请重新确认');
         }
 
+        // v3.2.21（D2）：渠道组内子模板余额方式不同、有不出余额的条目时（balanceRowsByAccountMode），余额只用出余额账户的行：
+        //   从已复制、已剔除收支都为空的行的 effectiveDetailRows 中按 balanceModeByAccount 取行引用（不复制余额子集、
+        //   不构造导出行，release 审查），各账户按 balanceModeByAccount 取自己的方式；否则沿用明细的全部行与单一方式。
+        let balanceDetailRows = effectiveDetailRows;
+        if (preparedBatch.balanceRowsByAccountMode && preparedBatch.balanceModeByAccount) {
+          balanceDetailRows = selectBalanceAccountRows(effectiveDetailRows, preparedBatch.balanceModeByAccount);
+        }
+
         balanceSeedStatus = scanBalanceSeedStatus({
-          detailRows: effectiveDetailRows,
+          detailRows: balanceDetailRows,
           templateName: statementOutputName(config)
         });
 
@@ -221,10 +425,11 @@ function createStatementGenerationHelpers(deps) {
         const seedStorageRoot = ensureStorageRoot();
         const seenManualBalanceSeeds = seenManualBalanceSeedsFor(seedStorageRoot, templateBankName);
         const balanceResult = deriveBalanceRecords({
-          detailRows: effectiveDetailRows,
+          detailRows: balanceDetailRows,
           templateName: statementOutputName(config),
           balanceTemplateFields,
           mode: preparedBatch.balanceMode,
+          modeByAccount: preparedBatch.balanceModeByAccount || null,
           balanceAdjustments,
           acknowledgedBalanceGapKeys: acknowledgedBalanceKeys,
           acknowledgedBalanceMismatchKeys: acknowledgedBalanceKeys,
@@ -278,7 +483,9 @@ function createStatementGenerationHelpers(deps) {
         result.balance = {
           filePath: balanceOutput.outputFilePath,
           fileName: balanceOutput.outputFileName,
-          templateName: statementOutputName(config)
+          templateName: statementOutputName(config),
+          // v3.2.21：余额记录账单日期的首末日期（文件名的日期范围同此），多组汇总时按它命名余额文件
+          billDates: dateRangeBounds(balanceResult.billDates)
         };
         result.message = includeDetail ? '明细账单可导出，余额账单可导出' : '余额账单可导出';
       } catch (error) {
@@ -286,7 +493,7 @@ function createStatementGenerationHelpers(deps) {
           if (error.code === 'BALANCE_SEED_REQUIRED') {
             const promptMerchantId = normalizeCell(error.context?.merchantId);
             const promptCurrency = normalizeCell(error.context?.currency);
-            const promptKey = `${promptMerchantId}@@${promptCurrency}`;
+            const promptKey = balanceAccountKey(promptMerchantId, promptCurrency);
             const queueIndex = balanceSeedStatus.missingIndexByKey?.get(promptKey) || 1;
             const queueTotal = balanceSeedStatus.missing || 1;
 
@@ -888,6 +1095,8 @@ function createStatementGenerationHelpers(deps) {
   }
 
   return {
+    assertStatementBatchWritable,
+    assertStatementEntriesWritable,
     attachDuplicateDropped,
     buildImportResultFromGeneratedFiles,
     buildPreparedBatchFromStatementSession,
@@ -913,7 +1122,12 @@ function createStatementGenerationHelpers(deps) {
 }
 
 module.exports = {
+  balanceAccountKey,
   createStatementGenerationHelpers,
+  noValidBillDateError,
+  parseRequiredBillDateCell,
   pendingBalanceSeedAccounts,
+  requireBillDateIndex,
+  selectBalanceAccountRows,
   statementOutputName
 };

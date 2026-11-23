@@ -4,7 +4,8 @@
 //   - 输出身份：属于渠道的模板按渠道名输出（明细 Channel 列、余额银行名称与所在地、种子、余额调整、文件名），
 //     普通模板按模板名，取值规则都是“银行段-所在地段”。
 //   - 生成分组：渠道内的子模板合为一组（一条余额链），普通模板各自一组。
-//   - 余额方式：同一渠道必须一致（D2）。
+//   - 余额方式：v3.2.21 起渠道内各子模板可以不同，生成时按账户取各自子模板的方式；同一账户同批混用时阻断
+//     （changes/v3.2.21/feat/channel-mixed-balance-mode/spec.md，取代 v3.2.15 D2）。
 
 const BALANCE_DISABLED_OPTION = '无';
 const BALANCE_CALCULATED_OPTION = '通过发生额计算';
@@ -49,18 +50,9 @@ function describeBalanceMode(mode) {
   return BALANCE_MODE_LABELS[mode] || String(mode || '');
 }
 
-// entries：[{ templateName, balanceMode }]；全部一致返回 null，否则返回逐行明细。
-function findBalanceModeMismatch(entries) {
-  const list = (Array.isArray(entries) ? entries : []).filter(Boolean);
-  const modes = new Set(list.map((entry) => entry.balanceMode));
-  if (modes.size <= 1) return null;
-  return list.map((entry) => `${entry.templateName}：${describeBalanceMode(entry.balanceMode)}`);
-}
-
 module.exports = {
   BALANCE_MODE_LABELS,
   describeBalanceMode,
-  findBalanceModeMismatch,
   resolveGenerationGroupKey,
   resolveStatementOutputName,
   resolveTemplateBalanceMode

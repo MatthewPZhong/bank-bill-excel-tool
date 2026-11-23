@@ -8,6 +8,9 @@
 //      逐行取第一个非空候补（日期、金额照常规范化），全部为空输出空
 //   ④ 失效引用：模板【更新】删掉候补字段后列出「（逻辑取值 · 候补字段）」并在生成前拦截
 //   ⑤ 模板包：用到逻辑取值时写 v8，读包保留，按导入口径保存后生成结果一致
+//   ⑦ v3.2.21 候补含特征值：保存存特征值 token 并校验特征值存在；生成取筛出值、未筛出取下一个候补且不记未筛出提示；
+//      BillDate 特征值候补把合计标签筛成空时仍按合计行跳过（资金红线）；被候补引用的特征值不能删除；
+//      筛选字段失效时生成前拦截；模板包写 v9、旧版（支持到 v8）整包拒绝，往返后生成结果一致
 //   UI 由 renderer lifecycle 覆盖；本脚本验证数据与文件在整条链路上的结果。
 //
 // 用法：node scripts/integration/statement-logic-value.js
@@ -36,9 +39,15 @@ const {
   normalizeCell,
   normalizeFeatureFilterList,
   normalizeFeeAmountFormula,
+  normalizeFeeFieldMappings,
+  validateFeeFieldMappings,
+  isFeeFieldMappingTemplateFieldExcluded,
   normalizeLogicValueFields,
   normalizeRowFilterRules,
   parseFeatureFilterToken,
+  parseLogicValueToken,
+  parseLogicValueFeatureFilterRef,
+  buildLogicValueFeatureCandidate,
   PREPROCESS_ROW_FILTER_MISSING_MESSAGE,
   resolveUsedFeatureFilters,
   upgradeLegacyFeatureFilter,
@@ -113,11 +122,11 @@ const CONSTANTS = loadMainConstants([
   'DUPLICATE_ROW_FILTER_ENABLED_OPTION', 'PREPROCESS_FIELDS',
   'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS', 'FILENAME_MAPPING_TEMPLATE_ID', 'MISSING_ENUM_MESSAGE',
   'LEGACY_ORIENTED_MAPPINGS_MESSAGE',
-  'SUPPORTED_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION'
+  'SUPPORTED_BUNDLE_VERSION', 'LOGIC_VALUE_FEATURE_BUNDLE_VERSION', 'FEE_FIELD_MAPPING_BUNDLE_VERSION', 'LOGIC_VALUE_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION'
 ]);
 const LOGIC = CONSTANTS.LOGIC_VALUE_MAPPING_FIELD;
 
-function createMain(database) {
+function createMain(database, constantOverrides = {}) {
   return loadMainFunctions([
     'validateTemplateConfiguration', 'validateFeatureFiltersPayload', 'collectFeatureFilterRefs', 'buildExportTargetFields',
     'buildMappingTargetFields', 'buildManagedMappingFields', 'isPreprocessRowFilterEnabled', 'isDuplicateRowFilterEnabled',
@@ -129,9 +138,10 @@ function createMain(database) {
     'buildMappedRowsForFile', 'validateBillSplitMappingsPayload', 'validateCurrencyBigAccountConfiguration',
     'buildCurrencyBigAccountMappingConfig', 'isCurrencyOnlyMerchantMapping', 'normalizeBundleTemplateHeaders',
     'normalizeBundleBillSplitMeta', 'isLegacyOrientedTemplateMappings', 'buildTemplateFieldReferenceInput',
-    'readTemplateBundleFile', 'resolveTemplateBundleVersion', 'upgradeLegacyBundleFeatureFilterRefs'
+    'readTemplateBundleFile', 'resolveTemplateBundleVersion', 'upgradeLegacyBundleFeatureFilterRefs', 'collectReferencedFeatureFilterIds'
   ], {
     ...CONSTANTS,
+    ...constantOverrides,
     templateHeaderUpdateTools: createTemplateHeaderUpdateTools(CONSTANTS),
     diffTemplateHeaders,
     extractHeaders,
@@ -140,6 +150,9 @@ function createMain(database) {
     path,
     normalizeCell,
     normalizeFeeAmountFormula,
+    normalizeFeeFieldMappings,
+    validateFeeFieldMappings,
+    isFeeFieldMappingTemplateFieldExcluded,
     normalizeBillSplitRowFilterRules,
     normalizeRowFilterRules,
     validateFeeAmountFormula,
@@ -157,6 +170,9 @@ function createMain(database) {
     LEGACY_FEATURE_FILTER_ID,
     normalizeFeatureFilterList,
     parseFeatureFilterToken,
+    parseLogicValueToken,
+    parseLogicValueFeatureFilterRef,
+    buildLogicValueFeatureCandidate,
     resolveUsedFeatureFilters,
     upgradeLegacyFeatureFilter,
     buildMappedRows,
@@ -454,7 +470,7 @@ function verifyBundle(dir, database, main, template) {
   assertEq([
     main.resolveTemplateBundleVersion([{ mappings: [] }]),
     main.resolveTemplateBundleVersion([entry])
-  ], [CONSTANTS.BASE_BUNDLE_VERSION, CONSTANTS.SUPPORTED_BUNDLE_VERSION], '⑤ 用到逻辑取值时写 v8，未用到时版本不变');
+  ], [CONSTANTS.BASE_BUNDLE_VERSION, CONSTANTS.LOGIC_VALUE_BUNDLE_VERSION], '⑤ 用到逻辑取值时写 v8，未用到时版本不变');
 
   const bundlePath = path.join(dir, 'bundle.json');
   fs.writeFileSync(bundlePath, JSON.stringify({ bundleVersion: main.resolveTemplateBundleVersion([entry]), channels: [], templates: [entry] }), 'utf8');
@@ -496,6 +512,188 @@ function verifyBundle(dir, database, main, template) {
   closeDatabase(target);
 }
 
+
+// ⑦ v3.2.21：逻辑取值候补含特征值
+const FEATURE_TOKEN = (id) => buildLogicValueFeatureCandidate(id);
+const SERIAL_FEATURE = { name: '流水号', sourceField: '摘要', separator: 'space', length: 10, letterPrefixCount: 2, digitsOnly: true, sample: '' };
+const DAY_FEATURE = { name: '交易日8位', sourceField: '交易日', separator: 'space', length: 8, letterPrefixCount: null, digitsOnly: true, sample: '' };
+
+function generateWithIssues(main, templateId, sourcePath) {
+  const config = main.getTemplateMappingConfig(templateId);
+  const generationConfig = main.buildStatementGenerationConfig({
+    template: config.template,
+    mappings: config.exportMappings,
+    orderedTargetFields: ORDERED_FIELDS,
+    allowManagedMerchantWithoutSelection: true
+  });
+  const mapped = main.buildMappedRowsForFile({ config: generationConfig, inputFilePath: sourcePath });
+  const column = (name) => mapped[0].indexOf(name);
+  return {
+    rows: mapped.slice(1).map((row) => [row[column('BillDate')], row[column('Credit Amount')], row[column('Debit Amount')], row[column('Payee Name')]]),
+    issues: (mapped.issues || []).map((issue) => [issue.type, issue.rowNumber])
+  };
+}
+
+function verifyFeatureCandidates(dir, database, main) {
+  const template = database.upsertTemplate({ name: '逻辑取值特征值模板', sourceFileName: 'feature.xlsx', headers: HEADERS });
+  const featureFilters = main.validateFeatureFiltersPayload([SERIAL_FEATURE, DAY_FEATURE], database.getTemplate(template.id));
+  database.saveTemplateFeatureFilters(template.id, featureFilters);
+  const [serialId, dayId] = featureFilters.map((item) => item.id);
+  const mappings = draftMappings({
+    BillDate: [LOGIC, FEATURE_TOKEN(dayId), '记账日'],
+    'Payee Name': [LOGIC, FEATURE_TOKEN(serialId), '对方户名']
+  });
+  const validate = (rows, list = database.getTemplate(template.id).featureFilters, headers = HEADERS) => main.validateTemplateConfiguration({
+    template: { ...database.getTemplate(template.id), headers },
+    mappings: rows,
+    enumValues: ENUM_VALUES,
+    featureFilters: list
+  });
+  const validated = validate(mappings);
+  database.saveMappings(template.id, validated.mappings, [], [], 'auto', null, {});
+  assertEq(database.getTemplateMappings(template.id).mappings.filter((item) => item.mappedField === LOGIC).map((item) => [item.templateField, item.mappedFields]),
+    [['BillDate', [FEATURE_TOKEN(dayId), '记账日']], ['Payee Name', [FEATURE_TOKEN(serialId), '对方户名']]], '⑦ 保存：候补存特征值 token 与源字段，顺序不变');
+
+  const message = (fn) => { const error = captureError(fn); return error && error.message; };
+  assertEq([
+    message(() => validate(draftMappings({ 'Payee Name': [LOGIC, FEATURE_TOKEN('99'), '对方户名'] }))),
+    message(() => validate(draftMappings({ 'Payee Name': [LOGIC, FEATURE_TOKEN(serialId), FEATURE_TOKEN(serialId)] }))),
+    // 同一特征值的不同写法（id 带空白）规范化后算重复
+    message(() => validate(draftMappings({ 'Payee Name': [LOGIC, FEATURE_TOKEN(serialId), `${FEATURE_TOKEN(serialId)} `.replace(serialId, ` ${serialId}`)] }))),
+    Boolean(message(() => validate(mappings, undefined, HEADERS.filter((header) => header !== '摘要')))),
+    // 模板列名与特征值候补内部写法相同（构造的含 NUL 列名）时无法区分，拒绝保存；按原写法检查（id 前带空白的旧列名同样拒绝）
+    message(() => validate(mappings, undefined, HEADERS.concat(FEATURE_TOKEN(serialId)))),
+    message(() => validate(draftMappings({ 'Payee Name': [LOGIC, FEATURE_TOKEN(` ${serialId}`).replace(`:${serialId}`, `: ${serialId}`), '对方户名'] }),
+      undefined, HEADERS.concat(FEATURE_TOKEN(serialId).replace(`:${serialId}`, `: ${serialId}`))))
+  ], [
+    '特征值：Payee Name（逻辑取值） 选择的特征值不存在，请重新选择',
+    'Payee Name 的「逻辑取值」候补字段不能重复',
+    'Payee Name 的「逻辑取值」候补字段不能重复',
+    true,
+    'Payee Name 的「逻辑取值」有特征值候补与模板中一个列名内部写法相同，无法区分，请修改该列名',
+    'Payee Name 的「逻辑取值」有特征值候补与模板中一个列名内部写法相同，无法区分，请修改该列名'
+  ], '⑦ 保存：特征值不存在、重复（含不同写法）、筛选字段不在表头、与列名写法相同时拒绝');
+
+  // 生成：第 2 行摘要筛出流水号；第 3 行未筛出取对方户名；第 4 行都为空输出空；第 5 行交易日是合计标签（被筛成空）→ 按合计行跳过
+  const sourcePath = path.join(dir, 'feature-source.xlsx');
+  writeSource(sourcePath, [
+    ['2026-11-05', '20261101 0930', 'ACC1', 'USD', '100', '', '甲公司', '付款 FT24123456'],
+    ['2026-11-02', '无', 'ACC1', 'USD', '', '30', '乙公司', '退款'],
+    ['2026-11-04', '', 'ACC1', 'USD', '50', '', '', ''],
+    ['2026-11-30', '合计', 'ACC1', 'USD', '150', '30', '', '']
+  ]);
+  const generated = generateWithIssues(main, template.id, sourcePath);
+  assertEq(generated.rows, [
+    ['20261101', '100', '', 'FT24123456'],
+    ['2026-11-02', '', '30', '乙公司'],
+    ['2026-11-04', '50', '', '']
+  ], '⑦ 生成：特征值候补取筛出值，未筛出取下一个候补，全部为空输出空');
+  assertEq(generated.issues, [['summary-row-skipped', 5]], '⑦ 生成：不记未筛出特征值提示；BillDate 特征值候补源单元格为合计标签时跳过合计行');
+
+  // 删除保护：被逻辑取值候补引用的特征值不能删
+  const deleteError = message(() => main.validateFeatureFiltersPayload(
+    database.getTemplate(template.id).featureFilters.filter((item) => item.id !== serialId),
+    database.getTemplate(template.id)
+  ));
+  assertEq(deleteError, '特征值「流水号」正被 Payee Name（逻辑取值） 使用，请先改选其他特征值后再删除', '⑦ 删除被逻辑取值候补引用的特征值时拒绝');
+
+  // 已保存映射仍引用、特征值已不存在的 id（如模板包带入、当前不生效的映射）不分配给新特征值，悬空引用不会被绑定到新规则
+  const danglingTemplate = database.upsertTemplate({ name: '悬空引用模板', sourceFileName: 'dangling.xlsx', headers: HEADERS });
+  database.saveTemplateFeatureFilters(danglingTemplate.id, [{ id: '1', ...SERIAL_FEATURE }]);
+  database.saveMappings(danglingTemplate.id, [
+    { templateField: 'Payee Name', mappedField: LOGIC, mappedFields: [FEATURE_TOKEN('2'), '对方户名'] }
+  ], [], [], 'auto', null, {});
+  const allocated = main.validateFeatureFiltersPayload(
+    database.getTemplate(danglingTemplate.id).featureFilters.concat({ ...DAY_FEATURE, name: '新特征值' }),
+    database.getTemplate(danglingTemplate.id)
+  );
+  assertEq(allocated.map((item) => [item.id, item.name]), [['1', '流水号'], ['3', '新特征值']], '⑦ 新特征值 id 避开已保存映射里的悬空引用');
+  // 超出安全整数的数字 id 也按精确值避开（不因精度丢失复用保留的 id）
+  const bigId = '9007199254740992';
+  const bigIdTemplate = database.upsertTemplate({ name: '悬空大数 id 模板', sourceFileName: 'dangling-big.xlsx', headers: HEADERS });
+  database.saveTemplateFeatureFilters(bigIdTemplate.id, [{ id: '1', ...SERIAL_FEATURE }]);
+  database.saveMappings(bigIdTemplate.id, [
+    { templateField: 'Payee Name', mappedField: LOGIC, mappedFields: [FEATURE_TOKEN(bigId), '对方户名'] }
+  ], [], [], 'auto', null, {});
+  const bigAllocated = main.validateFeatureFiltersPayload(
+    database.getTemplate(bigIdTemplate.id).featureFilters.concat({ ...DAY_FEATURE, name: '新特征值' }),
+    database.getTemplate(bigIdTemplate.id)
+  );
+  assertEq(bigAllocated.map((item) => item.id), ['1', '9007199254740993'], '⑦ 大数悬空 id 按精确值避开');
+
+  // 表头更新：特征值筛选字段失效时列出特征值并在生成前拦截，不把 token 当源字段
+  const tools = createTemplateHeaderUpdateTools(CONSTANTS);
+  const shrunk = HEADERS.filter((header) => header !== '摘要');
+  const input = main.buildTemplateFieldReferenceInput(main.getTemplateMappingConfig(template.id));
+  assertEq(formatFieldReferenceLines(tools.findStaleFieldReferences(tools.collectTemplateFieldReferences(input), shrunk)),
+    ['特征值「流水号」 · 筛选字段 ← 摘要'], '⑦ 表头更新：失效引用列出被候补引用的特征值筛选字段');
+  const blocked = captureError(() => tools.assertTemplateFieldReferencesAvailable({ name: '逻辑取值特征值模板', headers: shrunk }, input));
+  assertEq(blocked && blocked.code, 'TEMPLATE_MAPPING_FIELD_MISSING', '⑦ 表头更新：生成前拦截');
+
+  // 旧版本（v3.2.19/v3.2.20）的候补都是源列名：列名形如 `__FEATURE_FILTER__:<id>` 时保存、生成、模板包版本都按源列处理，
+  //   不被同 id 的特征值替换（资金红线：发生额不能改从另一列取值）
+  const legacyColumn = buildFeatureFilterToken(serialId);
+  const legacyHeaders = HEADERS.concat(legacyColumn);
+  const legacyTemplate = database.upsertTemplate({ name: '旧候补列名模板', sourceFileName: 'legacy-candidate.xlsx', headers: legacyHeaders });
+  database.saveTemplateFeatureFilters(legacyTemplate.id, database.getTemplate(template.id).featureFilters);
+  const legacyMappings = draftMappings({ 'Credit Amount': [LOGIC, legacyColumn, '收入'] });
+  const legacyValidated = main.validateTemplateConfiguration({
+    template: database.getTemplate(legacyTemplate.id), mappings: legacyMappings, enumValues: ENUM_VALUES,
+    featureFilters: database.getTemplate(legacyTemplate.id).featureFilters
+  });
+  database.saveMappings(legacyTemplate.id, legacyValidated.mappings, [], [], 'auto', null, {});
+  const legacySource = path.join(dir, 'legacy-candidate.xlsx');
+  const legacyBook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(legacyBook, XLSX.utils.aoa_to_sheet([legacyHeaders,
+    ['2026-11-01', '', 'ACC1', 'USD', '7', '', '甲公司', '付款 FT24123456', '100']]), 'Sheet1');
+  XLSX.writeFile(legacyBook, legacySource);
+  const legacyEntry = database.listTemplateBundleEntries().find((item) => item.name === '旧候补列名模板');
+  assertEq([
+    generateWithIssues(main, legacyTemplate.id, legacySource).rows.map((row) => row[1]),
+    main.resolveTemplateBundleVersion([legacyEntry]),
+    message(() => main.validateFeatureFiltersPayload([], database.getTemplate(legacyTemplate.id)))
+  ], [['100'], CONSTANTS.LOGIC_VALUE_BUNDLE_VERSION, null],
+  '⑦ 旧候补列名形如 __FEATURE_FILTER__:1：按源列取发生额、模板包仍写 v8、不算引用特征值');
+
+  // v8 及更早的模板包不可能含特征值候补：形如特征值候补、表头中又没有的值是失效的旧源列名，导入前拒绝，不改认作特征值
+  const legacyBundleError = message(() => main.validateTemplateConfiguration({
+    template: { ...database.getTemplate(template.id), headers: HEADERS },
+    mappings: mappings,
+    enumValues: ENUM_VALUES,
+    featureFilters: database.getTemplate(template.id).featureFilters,
+    allowLogicValueFeatureCandidates: false
+  }));
+  assertEq(legacyBundleError, 'BillDate 的「逻辑取值」有候补字段在模板表头中不存在，请在原版本中重新选择候补字段后再导出',
+    '⑦ v8 及更早模板包：形如特征值候补的失效源列名拒绝导入');
+  // 模板包导入时不分配给新特征值的 id：直选特征值与逻辑取值候补引用的 id（主映射与拆分映射）
+  assertEq(main.collectReferencedFeatureFilterIds(
+    [{ templateField: 'Remark', mappedField: CONSTANTS.FEATURE_FILTER_MAPPING_FIELD, mappedFields: ['5'] },
+      { templateField: 'Payee Name', mappedField: LOGIC, mappedFields: [FEATURE_TOKEN('6'), '对方户名', buildFeatureFilterToken('7')] }],
+    [{ templateField: 'Reference', mappedField: CONSTANTS.FEATURE_FILTER_MAPPING_FIELD, mappedFields: ['8'] }]
+  ), ['5', '6', '8'], '⑦ 模板包导入：收集映射引用的特征值 id（旧写法的源列名不算）');
+
+  // 模板包：写 v9；旧版（支持到 v8）整包拒绝；往返后生成结果一致
+  const entry = database.listTemplateBundleEntries().find((item) => item.name === '逻辑取值特征值模板');
+  assertEq([main.resolveTemplateBundleVersion([entry]), CONSTANTS.SUPPORTED_BUNDLE_VERSION], [9, 9], '⑦ 模板包：候补含特征值时写 v9');
+  const bundlePath = path.join(dir, 'feature-bundle.json');
+  fs.writeFileSync(bundlePath, JSON.stringify({ bundleVersion: main.resolveTemplateBundleVersion([entry]), channels: [], templates: [entry] }), 'utf8');
+  const legacyReader = createMain(database, { SUPPORTED_BUNDLE_VERSION: 8 });
+  assertEq(message(() => legacyReader.readTemplateBundleFile(bundlePath)), '模板文件版本（9）高于当前应用支持的版本（8），请升级应用后再导入',
+    '⑦ 模板包：旧版（支持到 v8）整包拒绝');
+  const readEntry = main.readTemplateBundleFile(bundlePath).templates[0];
+  const target = openDatabase(path.join(dir, 'feature-import.sqlite'));
+  const targetMain = createMain(target);
+  const imported = target.upsertTemplate({ templateKey: entry.templateKey, name: entry.name, sourceFileName: entry.sourceFileName, headers: entry.headers });
+  target.saveTemplateFeatureFilters(imported.id, readEntry.featureFilters);
+  const normalized = targetMain.normalizeMappingRows({ template: target.getTemplate(imported.id), mappings: readEntry.mappings, enumValues: ENUM_VALUES });
+  const importedMappings = targetMain.validateTemplateConfiguration({
+    template: target.getTemplate(imported.id), mappings: normalized, enumValues: ENUM_VALUES, featureFilters: readEntry.featureFilters
+  });
+  target.saveMappings(imported.id, importedMappings.mappings, [], [], 'auto', null, { preserveOwn: false });
+  assertEq(generateWithIssues(targetMain, imported.id, sourcePath), generated, '⑦ 模板包往返后生成结果一致');
+  closeDatabase(target);
+}
+
 async function run() {
   console.log('==== 网银账单 · 映射字段逻辑取值 集成验证 ====');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-logic-value-'));
@@ -508,6 +706,7 @@ async function run() {
     verifyStaleReferences(database, main, template);
     verifyLegacyEmptyCandidates(dir, main);
     verifyBundle(dir, database, main, template);
+    verifyFeatureCandidates(dir, database, main);
   } finally {
     openedDatabases.splice(0).forEach((database) => {
       try { database.close(); } catch (_error) { /* 已关闭 */ }

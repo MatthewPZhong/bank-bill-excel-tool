@@ -1141,7 +1141,9 @@ test('filename 多模板先完成全部稳定读取，再产生输出或 session
       'rebuildMatchedTemplateFileEntries',
       'buildPreparedStatementBatchFromEntries',
       'removeStatementSessionEntriesByFilePath',
-      'generateStatementFiles'
+      'generateStatementFiles',
+      'assertStatementBatchWritable',
+      'FileValidationError'
     ],
     [
       groupStatementEntriesForGeneration,
@@ -1166,7 +1168,9 @@ test('filename 多模板先完成全部稳定读取，再产生输出或 session
       },
       ({ fileEntries }) => ({ detailRows: fileEntries }),
       () => { sessionMutationCount += 1; },
-      () => { outputCount += 1; return {}; }
+      () => { outputCount += 1; return {}; },
+      () => {},
+      require('../../../src/backend/file-service').FileValidationError
     ]
   );
   assert.throws(() => generateGroups({
@@ -1287,7 +1291,8 @@ test('非 bill-split 缓存行注入大账号且移除 selectedCurrency 已短�
       'buildManagedMerchantLookupFlags',
       'buildStatementGenerationConfig',
       'buildMappedRowsForFile',
-      'mapEachCollectingCurrencyBigAccountIssues'
+      'mapEachCollectingCurrencyBigAccountIssues',
+      'dropIssuesOverriddenBySelectedBigAccount'
     ],
     [
       () => config,
@@ -1305,7 +1310,8 @@ test('非 bill-split 缓存行注入大账号且移除 selectedCurrency 已短�
       () => ({ selfInputMerchant: false, skipDirectMerchantLookup: false }),
       () => ({ billSplitMerge: { enabled: false } }),
       () => { throw new Error('reuseMappedRows 不得重新解析文件'); },
-      mapEachCollectingCurrencyBigAccountIssues
+      mapEachCollectingCurrencyBigAccountIssues,
+      loadFunction('dropIssuesOverriddenBySelectedBigAccount')
     ]
   );
   const sourceRows = [
@@ -1313,9 +1319,15 @@ test('非 bill-split 缓存行注入大账号且移除 selectedCurrency 已短�
     ['', '', 10],
     ['', '', 20]
   ];
+  // v3.2.21 B112：只写进币种列的长数字来源随币种被覆盖去掉，其余来源保留
   sourceRows.issues = [
     { type: 'currency-unmapped', rawValue: '美元' },
-    { type: 'date-invalid', rawValue: 'bad-date' }
+    { type: 'date-invalid', rawValue: 'bad-date' },
+    { type: 'long-number-unverified', rowNumber: 2, cells: [{ sourceField: '原字段', digitCount: 19, targetFields: ['Currency'] }] },
+    { type: 'long-number-unverified', rowNumber: 3, cells: [
+      { sourceField: '原字段', digitCount: 19, targetFields: ['Currency'] },
+      { sourceField: '金额', digitCount: 16 }
+    ] }
   ];
   const [entry] = rebuild({
     fileEntries: [{ filePath: '/private/A.xlsx', detailRows: sourceRows }],
@@ -1330,9 +1342,11 @@ test('非 bill-split 缓存行注入大账号且移除 selectedCurrency 已短�
   ]);
   assert.deepEqual(sourceRows[1], ['', '', 10], '不得修改 prepare 缓存原对象');
   assert.deepEqual(entry.detailRows.issues, [
-    { type: 'date-invalid', rawValue: 'bad-date' }
+    { type: 'date-invalid', rawValue: 'bad-date' },
+    { type: 'long-number-unverified', rowNumber: 3, cells: [{ sourceField: '金额', digitCount: 16 }] }
   ]);
-  assert.equal(sourceRows.issues.length, 2, '不得修改 prepare 缓存告警');
+  assert.equal(sourceRows.issues.length, 4, '不得修改 prepare 缓存告警');
+  assert.equal(sourceRows.issues[3].cells.length, 2, '不得修改 prepare 缓存告警的来源');
 });
 
 test('多大账号 + bill-split 缓存路径回退 raw rebuild，保留原币种拆分算法', () => {

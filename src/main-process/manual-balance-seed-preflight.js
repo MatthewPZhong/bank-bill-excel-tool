@@ -50,12 +50,13 @@ function isManualBalanceAccountMismatch(payload = {}, pendingPrompt = {}) {
     normalizeCell(payload.templateName) !== normalizeCell(pendingPrompt.templateName);
 }
 
+// 无歧义的账户 + 日期键（release 审查：原样以 | 拼接时含 | 的不同账户会得到同一个键）
 function balanceSeedRecordKey(record = {}) {
-  return [
+  return JSON.stringify([
     normalizeCell(record.merchantId),
     normalizeCell(record.currency),
     normalizeCell(record.billDate)
-  ].join('|');
+  ]);
 }
 
 function balanceSeedRecordsEvidence(records = []) {

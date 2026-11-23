@@ -12,6 +12,7 @@ const {
   ensureBillSplitTargetSeqSupport,
   ensureBillSplitFeeBillSupport,
   ensureBillSplitRowFilterSupport,
+  ensureBillSplitFeeFieldMappingSupport,
   ensureParentTemplateSupport,
   ensureStatementChannelSupport,
   hasPendingStatementChannelMigration,
@@ -240,6 +241,7 @@ class AppDatabase {
     this.ensureBillSplitTargetSeqSupport();
     this.ensureBillSplitFeeBillSupport();
     this.ensureBillSplitRowFilterSupport();
+    this.ensureBillSplitFeeFieldMappingSupport();
     this.ensureParentTemplateSupport();
     this.ensureTemplateFilenameFixedFieldSupport();
     this.ensureTemplateFeatureFilterSupport();
@@ -605,6 +607,10 @@ class AppDatabase {
     return ensureBillSplitRowFilterSupport(this.db);
   }
 
+  ensureBillSplitFeeFieldMappingSupport() {
+    return ensureBillSplitFeeFieldMappingSupport(this.db);
+  }
+
   ensureParentTemplateSupport() {
     return ensureParentTemplateSupport(this.db);
   }
@@ -931,8 +937,8 @@ class AppDatabase {
     return templateRepository.saveTemplateFeatureFilters(this.db, templateId, featureFilters);
   }
 
-  listTemplateFeatureFilterReferences(templateId, featureFilterMappingValue) {
-    return templateRepository.listTemplateFeatureFilterReferences(this.db, templateId, featureFilterMappingValue);
+  listTemplateFeatureFilterReferences(templateId, featureFilterMappingValue, options = {}) {
+    return templateRepository.listTemplateFeatureFilterReferences(this.db, templateId, featureFilterMappingValue, options);
   }
 
   getBillSplitRows(templateId) {
@@ -977,6 +983,10 @@ class AppDatabase {
 
   saveBillSplitMeta(templateId, meta) {
     return templateRepository.saveBillSplitMeta(this.db, templateId, meta);
+  }
+
+  restoreBillSplitEditableConfig(templateId, snapshot) {
+    return templateRepository.restoreBillSplitEditableConfig(this.db, templateId, snapshot);
   }
 
   getSetting(settingKey) {

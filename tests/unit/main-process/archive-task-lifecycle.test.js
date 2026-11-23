@@ -2081,3 +2081,67 @@ test('匿名后处理未执行的 FileTask terminal 失败保留待后处理事�
   const written = calls.find((call) => call[0] === 'finish-file-task')[3];
   assert.deepEqual(written.metadata, { visible: 1 });
 });
+
+// release 审查：业务结果给出脱敏摘要（logMessage，消息含用户填写、可能以账号命名的名称时）时，任务归档的失败终态
+//   （failure_message）写它；返回给界面的结果仍是原始 message。三个入口（预留批次、文件任务、无文件操作）同口径
+test('失败终态优先持久化业务结果的脱敏摘要 logMessage，界面结果保留原始 message', async (t) => {
+  const failed = {
+    status: 'failed',
+    message: '渠道「渠道6222021234567890123」出余额的子模板有交易缺少账单日期',
+    logMessage: '渠道「渠道（19位数字）」出余额的子模板有交易缺少账单日期'
+  };
+  {
+    const { calls, lifecycle } = createHarness();
+    const result = await lifecycle.run({ policy: POLICY, meta: { channel: POLICY.channel }, execute: () => ({ ...failed }) });
+    assert.equal(result.message, failed.message);
+    assert.equal(calls.find((call) => call[0] === 'fail')[2].message, failed.logMessage);
+  }
+  {
+    const { calls, lifecycle } = createHarness();
+    const result = await lifecycle.runOperationOnly({ policy: NO_FILE_POLICY, meta: { channel: NO_FILE_POLICY.channel }, execute: () => ({ ...failed }) });
+    assert.equal(result.message, failed.message);
+    assert.equal(calls.find((call) => call[0] === 'finish-task-run')[2].message, failed.logMessage);
+  }
+  {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-file-lifecycle-'));
+    t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+    const inputPath = path.join(tempDir, 'input.xlsx');
+    fs.writeFileSync(inputPath, 'input');
+    const { calls, lifecycle } = createHarness({
+      reserveFileTask(payload) {
+        return {
+          ok: true,
+          created: true,
+          batch: {
+            id: 31,
+            batchNumber: '2026-08-17-031',
+            taskRunId: payload.taskRun.taskRunId,
+            taskKey: payload.taskRun.taskKey,
+            moduleId: payload.taskRun.moduleId,
+            parentRunId: payload.taskRun.parentRunId,
+            operationKey: payload.taskRun.operationKey
+          }
+        };
+      }
+    });
+    const result = await lifecycle.runFileTask({
+      policy: FILE_POLICY,
+      flowPlanResolver: () => ({ startsNewFlow: true, flowIdentity: null }),
+      filePlanResolver: () => normalizeFilePlanV1({
+        version: 1,
+        allocation: 'eager',
+        inputs: [{ filePath: inputPath, role: 'input', sourceOperation: 'test:input-only' }],
+        outputs: []
+      }),
+      execute: () => ({ ...failed })
+    });
+    assert.equal(result.message, failed.message);
+    assert.equal(calls.find((call) => call[0] === 'finish-file-task')[3].message, failed.logMessage);
+  }
+  {
+    // 没有脱敏摘要时照旧写原始 message
+    const { calls, lifecycle } = createHarness();
+    await lifecycle.run({ policy: POLICY, meta: { channel: POLICY.channel }, execute: () => ({ status: 'failed', message: '普通失败' }) });
+    assert.equal(calls.find((call) => call[0] === 'fail')[2].message, '普通失败');
+  }
+});

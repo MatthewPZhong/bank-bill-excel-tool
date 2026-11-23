@@ -36,6 +36,9 @@ const {
   LEGACY_FEATURE_FILTER_ID,
   normalizeFeatureFilterList,
   parseFeatureFilterToken,
+  parseLogicValueToken,
+  parseLogicValueFeatureFilterRef,
+  buildLogicValueFeatureCandidate,
   resolveUsedFeatureFilters,
   upgradeLegacyFeatureFilter,
   FileValidationError,
@@ -44,6 +47,9 @@ const {
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   normalizeCell,
   normalizeFeeAmountFormula,
+  normalizeFeeFieldMappings,
+  validateFeeFieldMappings,
+  isFeeFieldMappingTemplateFieldExcluded,
   normalizeBillSplitRowFilterRules,
   normalizeRowFilterRules,
   validateRowFilterRules,
@@ -179,6 +185,7 @@ function createMain(database, spies) {
     'collectStaleTemplateFieldReferences',
     'prepareTemplateHeaderUpdate',
     'applyTemplateHeaderUpdate',
+    'hasAmbiguousLogicValueFeatureCandidate',
     'isLegacyOrientedTemplateMappings',
     'buildBundleImportDraftTemplate'
   ], {
@@ -192,6 +199,9 @@ function createMain(database, spies) {
     normalizeCell,
     // v3.2.19：拆分配置的费用账单公式（映射配置、生成配置）
     normalizeFeeAmountFormula,
+    normalizeFeeFieldMappings,
+    validateFeeFieldMappings,
+    isFeeFieldMappingTemplateFieldExcluded,
     normalizeBillSplitRowFilterRules,
     normalizeRowFilterRules,
     validateRowFilterRules,
@@ -209,6 +219,9 @@ function createMain(database, spies) {
     LEGACY_FEATURE_FILTER_ID,
     normalizeFeatureFilterList,
     parseFeatureFilterToken,
+    parseLogicValueToken,
+    parseLogicValueFeatureFilterRef,
+    buildLogicValueFeatureCandidate,
     resolveUsedFeatureFilters,
     upgradeLegacyFeatureFilter,
     buildMappedRows,
@@ -512,6 +525,39 @@ async function run() {
     });
     assertEq(legacyApply.errorCode, 'TEMPLATE_MAPPINGS_LEGACY_ORIENTATION', '⑨ 确认：旧版方向映射被拒');
     assertEq(persistedState(database, legacyTemplate.id), legacyBefore, '⑨ 拒绝时不写库');
+
+    // ⑨b v3.2.21：模板列名与逻辑取值的特征值候补内部写法相同（构造的含 NUL 列名，只可能来自 v3.2.19/v3.2.20 的旧映射）时，
+    //   更新表头后无法再判断该候补原是源列，拒绝更新并要求先重选候补
+    const ambiguousColumn = buildLogicValueFeatureCandidate('1');
+    const ambiguousHeaders = OLD_HEADERS.concat(ambiguousColumn);
+    const ambiguousTemplate = database.upsertTemplate({ name: '旧候补列名-更新', sourceFileName: 'ambiguous.xlsx', headers: ambiguousHeaders });
+    database.saveMappings(ambiguousTemplate.id, [
+      { templateField: 'BillDate', mappedField: '交易日期', mappedFields: [] },
+      { templateField: 'Credit Amount', mappedField: CONSTANTS.LOGIC_VALUE_MAPPING_FIELD, mappedFields: [ambiguousColumn, '收入'] }
+    ], [], [], 'auto', null, {});
+    const ambiguousBefore = persistedState(database, ambiguousTemplate.id);
+    const ambiguousApply = main.applyTemplateHeaderUpdate({
+      templateId: ambiguousTemplate.id, expectedHeaders: ambiguousHeaders, headers: OLD_HEADERS.concat('新列'), sourceFileName: 'ambiguous-new.xlsx'
+    });
+    assertEq([ambiguousApply.errorCode, /请先在映射关系管理中重新选择候补字段后再更新/.test(ambiguousApply.message)],
+      ['TEMPLATE_LOGIC_VALUE_CANDIDATE_AMBIGUOUS', true], '⑨b 确认：列名与特征值候补写法相同时拒绝更新');
+    assertEq(persistedState(database, ambiguousTemplate.id), ambiguousBefore, '⑨b 拒绝时不写库');
+    // 有效模板引用特征值 1，新表头新增了与该候补写法相同的列：预览与确认都拒绝，保留原模板
+    const featureRefTemplate = database.upsertTemplate({ name: '特征值候补-更新', sourceFileName: 'feature-ref.xlsx', headers: OLD_HEADERS });
+    database.saveMappings(featureRefTemplate.id, [
+      { templateField: 'BillDate', mappedField: '交易日期', mappedFields: [] },
+      { templateField: 'Credit Amount', mappedField: CONSTANTS.LOGIC_VALUE_MAPPING_FIELD, mappedFields: [ambiguousColumn, '收入'] }
+    ], [], [], 'auto', null, {});
+    const featureRefBefore = persistedState(database, featureRefTemplate.id);
+    const addedColumnFile = path.join(dir, 'feature-ref-new.xlsx');
+    writeWorkbook(addedColumnFile, OLD_HEADERS.concat(ambiguousColumn));
+    const addedPreview = main.prepareTemplateHeaderUpdate({ templateId: featureRefTemplate.id, filePath: addedColumnFile });
+    const addedApply = main.applyTemplateHeaderUpdate({
+      templateId: featureRefTemplate.id, expectedHeaders: OLD_HEADERS, headers: OLD_HEADERS.concat(ambiguousColumn), sourceFileName: 'feature-ref-new.xlsx'
+    });
+    assertEq([addedPreview.errorCode, addedApply.errorCode], ['TEMPLATE_LOGIC_VALUE_CANDIDATE_AMBIGUOUS', 'TEMPLATE_LOGIC_VALUE_CANDIDATE_AMBIGUOUS'],
+      '⑨b 新表头出现与特征值候补写法相同的列：预览与确认都拒绝');
+    assertEq(persistedState(database, featureRefTemplate.id), featureRefBefore, '⑨b 新表头冲突时不写库');
 
     // ⑩ 行为对照：生成器实际读取的列 = 删除后输出会变化的列
     const oracleHeaders = ['交易日期', '账号前缀', MERCHANT_ID_CURRENCY_ONLY_MARKER, '余额A', CONSTANTS.BALANCE_CALCULATED_OPTION,

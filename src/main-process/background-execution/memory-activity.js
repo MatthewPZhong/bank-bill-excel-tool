@@ -55,8 +55,9 @@ function observeMemoryCarrier(create, memoryConfig = null) {
   return memoryCarrierAdmission(memoryConfig).observe(create());
 }
 
-async function runMemoryActivity(work, { timeoutMs = 5000 } = {}) {
-  const deadline = Date.now() + timeoutMs;
+// startedAt：等待计时起点（默认现在）。调用方排队后再进入时传受理时刻，排队时间计入同一超时。
+async function runMemoryActivity(work, { timeoutMs = 5000, startedAt = Date.now() } = {}) {
+  const deadline = startedAt + timeoutMs;
   while (lowLeases().length) {
     if (Date.now() >= deadline) throw busy();
     await new Promise((resolve) => setTimeout(resolve, Math.min(100, deadline - Date.now())));

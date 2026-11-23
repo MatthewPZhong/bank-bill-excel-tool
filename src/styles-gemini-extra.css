@@ -24,8 +24,9 @@
   max-height: calc(100vh - 56px);
 }
 .manager-card { min-height: 360px; }
-/* v3.2.19：映射字段下拉框减半后弹窗随之收窄（原 1120px），列宽见下方 Mapping-card 表格 */
-.mapping-card { width: min(100%, 780px); }
+/* v3.2.19：映射字段下拉框减半后弹窗随之收窄（原 1120px），列宽见下方 Mapping-card 表格。
+   v3.2.21：模板字段列 220px → 240px，弹窗随之 780px → 800px（映射字段列宽不变），Windows 端（Courier New）英文字段名不换行 */
+.mapping-card { width: min(100%, 800px); }
 .account-card { width: min(100%, 920px); }
 .big-account-card { width: min(100%, 980px); }
 .balance-addon-card { width: min(100%, 1120px); }
@@ -2752,6 +2753,61 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
 
 .bill-split-rows-footer { padding: 14px 28px 18px; }
 
+/* v3.2.21 发生额取值两项并排、费用账单设置（发生额取值特殊处理 / 字段映射特殊处理） */
+.bill-split-sub-row-pair { gap: 12px 40px; }
+.bill-split-sub-item {
+  display: inline-flex; align-items: center; gap: 12px;
+  flex-wrap: nowrap; min-width: 0;
+}
+.bill-split-sub-item + .bill-split-sub-item > label:first-child,
+.bill-split-sub-row .bill-split-target-seq-label { min-width: 0; white-space: nowrap; }
+.bill-split-fee-field-mapping-checkbox {
+  width: 16px; height: 16px; margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.bill-split-fee-field-mapping-checkbox:disabled { cursor: not-allowed; }
+
+/* v3.2.21 字段映射特殊处理弹窗：「新增模板字段」在左，每行 模板字段 [下拉] 映射字段 [下拉] [自己输入时的输入框] */
+.bill-split-fee-field-mapping-card { width: min(100%, 960px); }
+/* 内容放得下时居中；超出 60vh 时从顶部开始滚动（safe），首行与「新增模板字段」始终可达 */
+.bill-split-fee-field-mapping-body {
+  display: flex; align-items: safe center;
+  min-height: 180px; max-height: 60vh; overflow-y: auto;
+  padding: 24px 28px;
+}
+.bill-split-fee-field-mapping-editor {
+  display: flex; align-items: flex-start; justify-content: safe center; gap: 12px;
+  width: 100%;
+}
+.bill-split-fee-field-mapping-add-btn {
+  flex: 0 0 auto;
+  height: 40px;
+  color: var(--primary);
+  white-space: nowrap;
+}
+.bill-split-fee-field-mapping-rows {
+  display: flex; flex-direction: column; gap: 10px;
+  min-width: 0;
+}
+.bill-split-fee-field-mapping-item {
+  display: flex; align-items: center; gap: 10px;
+}
+.bill-split-fee-field-mapping-label {
+  flex: 0 0 auto;
+  line-height: 40px;
+  font-size: 14px; font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+}
+.bill-split-fee-field-mapping-item .mapping-select {
+  width: 200px; min-width: 0; height: 40px;
+  padding: 0 26px 0 12px;
+  background-position: right 10px center;
+  text-overflow: ellipsis;
+}
+.bill-split-fee-field-mapping-item .bill-split-fee-field-mapping-input { width: 180px; }
+
 /* v3.2.19 过滤规则设置（根据字段值过滤账单 / 原始账单预处理共用；沿用场景管理「账单类型」的 scenario-config-* 样式） */
 .row-filter-rules-card .scenario-config-multi-wrap { min-width: 0; }
 /* 场景弹窗靠「复制场景」把×推到右侧并取消了×的 auto；本弹窗没有该组，×恢复靠右 */
@@ -2768,6 +2824,8 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .mapping-logic-value-preview.is-empty { color: var(--muted); }
+/* v3.2.21：候补含已删除的特征值 */
+.mapping-logic-value-preview.is-stale { color: var(--danger); }
 .mapping-logic-value-preview[hidden] { display: none; }
 .scenario-config-card.logic-value-card .dialog-header .icon-close { margin-left: auto; }
 .logic-value-card .scenario-config-label.logic-value-label { width: auto; min-width: 120px; white-space: nowrap; }
@@ -2791,6 +2849,20 @@ tr.migration-empty-row td .mapping-select { border-color: var(--danger-border, #
 }
 .logic-value-row-btn[data-role="remove"] { color: var(--danger); }
 .logic-value-row-btn:hover { text-decoration: underline; }
+
+/* v3.2.21 映射关系管理「日期格式」：勾选行的当前选择（同逻辑取值预览）与【日期格式】弹窗（组件同「逻辑取值」） */
+.mapping-date-format-preview {
+  min-width: 0; max-width: 320px;
+  font-size: 13px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mapping-date-format-preview[hidden] { display: none; }
+.modal-card.scenario-config-card.date-format-card { width: min(96vw, 560px); }
+.scenario-config-card.date-format-card .dialog-header .icon-close { margin-left: auto; }
+.date-format-card .scenario-config-label.date-format-label { width: auto; min-width: 120px; white-space: nowrap; }
+.date-format-card .date-format-select { flex: 0 0 240px; width: 240px; min-width: 0; height: 40px; }
+.date-format-card .date-format-hint { margin: 12px 0 8px; padding-left: 18px; font-size: 13px; line-height: 1.6; color: var(--muted); }
+.date-format-card .date-format-hint li + li { margin-top: 4px; }
 
 /* v3.2.19 重复账单提醒：说明 + 可滚动表格，【确认】在右下、【取消】在其右 */
 .modal-card.duplicate-rows-review-card { width: min(860px, calc(100vw - 48px)); }
@@ -3712,10 +3784,19 @@ tr.add-row .text-action:hover { background: var(--primary-soft, #c2d7fa); }
   --mapping-editor-gap: 12px;
   --mapping-feature-label-width: 5em; /* 「选择特征值」5 个汉字 */
   --mapping-feature-value-width: 90px;
+  /* v3.2.21：模板字段列宽（Win 端 Courier New 14px 下「Transaction Description」「By Order Of/Beneficiary」约 193px + 两侧 16px 内边距） */
+  --mapping-field-col-width: 240px;
+  --mapping-cell-pad-x: 16px;
+  /* 「启用」列：列头文字盒宽（12px 两个汉字 24px + 两侧各 3px，文字不贴线），右边缘对齐映射字段列内容左边缘（=【规则设置】左侧） */
+  --mapping-enable-width: 30px;
+  --mapping-enable-left: calc(var(--mapping-field-col-width) + var(--mapping-cell-pad-x) - var(--mapping-enable-width));
+  --mapping-enable-color: #006400;
+  /* 勾选行固定行高：编辑区不低于 .small 按钮高度 */
+  --mapping-toggle-editor-min-height: 36px;
 }
 .mapping-card .data-table { table-layout: fixed; }
 .mapping-card .data-table th:nth-child(1),
-.mapping-card .data-table td:nth-child(1) { width: 220px; }
+.mapping-card .data-table td:nth-child(1) { width: var(--mapping-field-col-width); }
 .mapping-card .data-table th:nth-child(2),
 .mapping-card .data-table td:nth-child(2) { width: auto; }
 .mapping-card .mapping-field-editor { gap: var(--mapping-editor-gap); }
@@ -3741,6 +3822,49 @@ tr.add-row .text-action:hover { background: var(--primary-soft, #c2d7fa); }
 .mapping-toggle-checkbox { flex: 0 0 auto; margin: 0; accent-color: var(--primary); cursor: pointer; }
 .mapping-toggle-label:has(.mapping-toggle-checkbox:disabled) { cursor: not-allowed; color: var(--dim); }
 .mapping-toggle-checkbox:disabled { cursor: not-allowed; }
+/* v3.2.21：勾选行固定为显示按钮时的行高（按钮隐藏为 display:none，见 styles-gemini.css [hidden]），勾选前后不跳动 */
+.mapping-card .mapping-toggle-row .mapping-field-editor { min-height: var(--mapping-toggle-editor-min-height); }
+/* v3.2.21「启用」列：「原始账单预处理」标题行的「启用」字号同标题（12px）、暗绿色；两侧竖线自文字顶部贯穿到最后一个勾选行
+   文字下方 4px，勾选框居于竖线中间、行垂直居中。各行用首列单元格（标题行为跨两列的单元格，左缘同样是表格左缘）定位，
+   竖线超出单元格上下各 1px 盖住行间分隔线，保证连续；列落在两列之间的内边距里，不挤占字段名与按钮。 */
+.mapping-card .mapping-enable-span > td:first-child { position: relative; }
+.mapping-card .mapping-enable-span > td:first-child::after {
+  content: '';
+  position: absolute;
+  left: var(--mapping-enable-left);
+  width: var(--mapping-enable-width);
+  top: -1px;
+  bottom: -1px;
+  box-sizing: border-box;
+  border-left: 1px solid var(--mapping-enable-color);
+  border-right: 1px solid var(--mapping-enable-color);
+  pointer-events: none;
+}
+.mapping-card .mapping-enable-span-start > td:first-child::after { top: calc(50% - 8px); }
+.mapping-card .mapping-enable-span-end > td:first-child::after { bottom: calc(50% - 14px); }
+.mapping-card .mapping-enable-span-start.mapping-enable-span-end > td:first-child::after { bottom: -1px; }
+.mapping-card .mapping-enable-head {
+  position: absolute;
+  left: var(--mapping-enable-left);
+  top: calc(50% - 8px);
+  width: var(--mapping-enable-width);
+  height: 16px;
+  line-height: 16px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-align: center;
+  white-space: nowrap;
+  color: var(--mapping-enable-color);
+  pointer-events: none;
+}
+.mapping-card .mapping-enable-span .mapping-toggle-checkbox {
+  position: absolute;
+  left: calc(var(--mapping-enable-left) + var(--mapping-enable-width) / 2);
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+}
 
 .big-account-currency-editor {
   display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;

@@ -7,6 +7,10 @@ const FEATURE_FILTER_FIELD_TOKEN_PREFIX = '__FEATURE_FILTER__:';
 //   以 NUL 开头：XLSX / XLS / 常规文本表头不会含 NUL，真实列名不会与 token 相同（旧模板的列名即使形如 `__LOGIC_VALUE__:[…]`
 //   也照常按源字段直接取值，新配置的逻辑取值也不会被同名列覆盖）。token 只在生成时使用，不落库。
 const LOGIC_VALUE_FIELD_TOKEN_PREFIX = '\u0000__LOGIC_VALUE__:';
+// v3.2.21：「逻辑取值」候补中的特征值，落库为 `\u0000__FEATURE_FILTER__:<id>`（由 logic-value.js 构造与解析）。
+//   以 NUL 开头：v3.2.19/v3.2.20 的候补都是源列名，表头不会含 NUL，旧候补（即使形如 `__FEATURE_FILTER__:1`）仍按源列读取。
+//   不同于生成 lookup 里直选特征值的 token（FEATURE_FILTER_FIELD_TOKEN_PREFIX，不落库）。
+const LOGIC_VALUE_FEATURE_CANDIDATE_PREFIX = '\u0000__FEATURE_FILTER__:';
 // v3.2.16：MerchantId「原始账单仅有币种无账户号」在模板映射中的存储值。
 // 刻意不带 __FIXED__: 前缀：带前缀的值会被当成「自己输入」或固定账号，漏改的路径会静默出错；
 // 不带前缀时漏改的路径会按“映射字段不存在”报错，buildMappedRows 另有拦截。
@@ -28,6 +32,12 @@ function normalizeCell(value) {
   }
 
   return String(value).trim();
+}
+
+// v3.2.21 B112：读取库读成数字、且超出安全整数范围的整数——文件里写的长卡号 / 流水号可能已丢失末几位。
+//   网银账单生成按原文还原后仍是这种数字的，说明文件里没有可核对的原值（二进制 .xls、Excel 另存的 xlsx 等）
+function isUnverifiedLongNumber(value) {
+  return typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value);
 }
 
 function isRowMeaningful(row) {
@@ -81,10 +91,12 @@ module.exports = {
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
   LOGIC_VALUE_FIELD_TOKEN_PREFIX,
+  LOGIC_VALUE_FEATURE_CANDIDATE_PREFIX,
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   SUPPORTED_EXTENSIONS,
   buildExpectedHeaderCandidates,
   isRowMeaningful,
+  isUnverifiedLongNumber,
   normalizeCell,
   trimTrailingEmptyCells
 };

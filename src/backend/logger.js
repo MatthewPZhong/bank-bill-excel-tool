@@ -74,7 +74,9 @@ function writeErrorReport(reportRoot, payload = {}) {
   ];
 
   if (detailLines.length) {
-    sections.push('', '详细说明：', ...detailLines.map((line) => `- ${line}`));
+    sections.push('', '详细说明：');
+    // 逐行追加：明细可能很多（如逐行列出的跳过行），展开成参数会超出调用栈、报告写不出来
+    for (const line of detailLines) sections.push(`- ${line}`);
   }
 
   if (payload.context && Object.keys(payload.context).length) {

@@ -25,7 +25,8 @@ module.exports = async ({ js, load, reset, assert, test }) => {
         previewDeleteBillSplitRow:async()=>({status:'success',dissolvedGroups:[9]}),
         deleteBillSplitRow:async payload=>{legacy.calls.rowDeletes.push(payload);return {status:'failed',message:'账单删行测试失败'};},
         saveBillSplitRowCount:async payload=>{legacy.calls.rowCounts.push(payload);return {status:'failed',message:'账单数量测试失败'};},
-        saveBillSplitAmountRules:async payload=>{legacy.calls.rules.push(payload);return {status:'failed',message:'规则保存测试失败'};}
+        saveBillSplitAmountRules:async payload=>{legacy.calls.rules.push(payload);return {status:'failed',message:'规则保存测试失败'};},
+        getBillSplitConfig:async(id,options)=>options&&'activateRestoreSession' in options?{status:'success',restoreSessionActivated:true}:{status:'success',restoreSessionEnded:true}
       },bigAccount:{loadMode:async()=>({mode:'unfixed'}),loadOrder:async()=>({order:null})},files:{
         completeBigAccountSelection:payload=>{legacy.calls.complete.push(payload);return legacy.complete.promise;},
         extractBigAccountOrder:async payload=>{legacy.calls.extract.push(payload);return {status:'error',errorCode:'BIG_ACCOUNT_NOT_MAINTAINED',message:'未维护测试账号',unmaintainedAccounts:[{merchantId:'TEST-ACCOUNT',fileOrdinal:0,fileName:'fixture.xlsx',blockOrdinal:0,sourceRowNumber:1}]};},
@@ -41,7 +42,8 @@ module.exports = async ({ js, load, reset, assert, test }) => {
         initialRows:[{seqNo:1,rowStatus:'draft',currencySourceField:'Currency',creditSourceField:'',debitSourceField:''},
           {seqNo:2,rowStatus:'draft',currencySourceField:'Currency',creditSourceField:'',debitSourceField:''}],
         initialAmountRules:[{targetField:'Credit Amount',conditionField:'Condition',conditionValue:'入金',mappedField:'Amount',rowIndex:0},
-          {targetField:'Debit Amount',conditionField:'Condition',conditionValue:'出金',mappedField:'Amount',rowIndex:1}]
+          {targetField:'Debit Amount',conditionField:'Condition',conditionValue:'出金',mappedField:'Amount',rowIndex:1}],
+        restoreToken:'token-7'
       }));
       legacy.openBigAccount=()=>legacy.open(()=>legacy.dialogs.createBigAccountSelectionDialog({contextId:'selection-fixture-token',templateId:7,templateName:'测试模板',
         rows:[{index:0,fileIndex:0,fileName:'fixture.xlsx',sourceRowNumber:1}],
@@ -150,6 +152,22 @@ module.exports = async ({ js, load, reset, assert, test }) => {
       applied: 0, cancel: ['selection-fixture-token'], selectionOpen: false
     });
     assert.ok((await js(`legacy.top().textContent`)).includes(rejected.message), rejected.message);
+  });
+
+  // v3.2.21：完成大账号选择时才发现渠道同一账户命中余额方式不同的子模板（未开始即拒绝）：弹窗逐账户列出，不按失败的导入处理
+  await test('大账号选择完成时渠道余额方式冲突：提示列出冲突账户并释放本次选择', async () => {
+    await setup();
+    const rejected = { status: 'error', errorCode: 'CHANNEL_BALANCE_MODE_MISMATCH', preservesSession: true,
+      message: '渠道「招商银行-上海」下同一账户命中了余额方式不同的子模板，无法生成余额，请在映射关系管理中统一这些子模板的余额方式后整批重新导入',
+      detailLines: ['账户 M201（USD）：CMB-SH（取账单余额列）、招商银行-上海（通过发生额计算）'] };
+    await js(`legacy.complete=legacy.deferred();legacy.cancellation=legacy.deferred();legacy.cancellation.resolve({status:'success'});legacy.openBigAccount();`); await settle();
+    await js(`legacy.overlay.querySelector('.big-account-order-checkbox').click();legacy.overlay.querySelector('[data-action="done"]').click();
+      legacy.complete.resolve(${JSON.stringify(rejected)});`); await settle();
+    assert.deepEqual(await js(`({applied:legacy.calls.applied.length,cancel:legacy.calls.cancel,selectionOpen:legacy.handle.isOpen()})`), {
+      applied: 0, cancel: ['selection-fixture-token'], selectionOpen: false
+    });
+    const text = await js(`legacy.top().textContent`);
+    assert.ok(text.includes(rejected.message) && text.includes(rejected.detailLines[0]), text);
   });
 
   // v3.2.15（release 复审）：后端判定记住的顺序不能按位置套用到本次文件（forceMode）后，

@@ -55,6 +55,15 @@ function createWorkerOperationContextFromTask(taskRun) {
   }, { required: true });
 }
 
+// 业务结果的失败摘要写入任务归档（failure_message）时，优先用业务给出的脱敏摘要 logMessage（消息含用户填写、
+//   可能以账号命名的名称时给出，见 main.js createErrorResult）；返回给界面的结果不变（release 审查）
+function businessResultFailureMessage(businessResult) {
+  if (!businessResult) return '';
+  return typeof businessResult.logMessage === 'string' && businessResult.logMessage
+    ? businessResult.logMessage
+    : businessResult.message;
+}
+
 function lifecycleFailure(result, fallbackCode, fallbackMessage) {
   return {
     status: 'failed',
@@ -606,7 +615,7 @@ class TaskLifecycle {
               taskStatus: 'failed',
               code: businessError && businessError.code || 'BUSINESS_TASK_FAILED',
               message: businessError && businessError.message
-                || businessResult && businessResult.message || '业务任务失败',
+                || businessResultFailureMessage(businessResult) || '业务任务失败',
               metadata: terminalMetadata
             }
           : { taskStatus: 'succeeded', code: '', message: '', metadata: terminalMetadata };
@@ -1197,7 +1206,7 @@ class TaskLifecycle {
           taskStatus: 'failed',
           code: businessError && businessError.code || 'BUSINESS_TASK_FAILED',
           message: businessError && businessError.message || (
-            businessResult && businessResult.message || '业务任务失败'
+            businessResultFailureMessage(businessResult) || '业务任务失败'
           ),
           metadata: terminalMetadata
         };
@@ -1600,7 +1609,7 @@ class TaskLifecycle {
                 || 'BUSINESS_TASK_FAILED',
               message: resultIdentityFailure && resultIdentityFailure.message
                 || businessError && businessError.message
-                || businessResult && businessResult.message
+                || businessResultFailureMessage(businessResult)
                 || '业务任务失败',
               metadata: terminalMetadata
             }

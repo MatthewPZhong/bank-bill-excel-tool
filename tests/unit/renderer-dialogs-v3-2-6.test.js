@@ -97,6 +97,13 @@ function harness({ extraction, cancellation, completion } = {}) {
   // v3.2.19：完成请求 IPC 抛错时按能否释放本次选择区分未开始与无法确认（真实函数）
   h.resolveContinuationIpcRejection = compile(fn('resolveContinuationIpcRejection'), { api: h.api });
   Object.defineProperty(h, 'current', { get: () => dom.root.lastChild });
+  // v3.2.21：未开始的拒绝提示（真实函数；渠道余额方式冲突时附逐账户明细）
+  h.createNotStartedImportAlert = compile(fn('createNotStartedImportAlert'), {
+    escapeHtml,
+    createAlertDialog: (...args) => h.createAlertDialog(...args)
+  });
+  // v3.2.21：applyStatementResult 已弹窗列出明细的错误不再弹出摘要（真实函数）
+  h.statementErrorDetailsAlerted = compile(fn('statementErrorDetailsAlerted'), {});
   let actions;
   modalBridge.registerModal(h.overlay, { ...descriptor, canClose: () => actions ? actions.canClose() : true });
   modalBridge.openModal(h.overlay);

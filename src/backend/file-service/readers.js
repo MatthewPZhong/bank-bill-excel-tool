@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const zlib = require('node:zlib');
 const XLSX = require('xlsx');
 const JSZip = require('jszip');
 const {
@@ -8,6 +9,7 @@ const {
   SUPPORTED_EXTENSIONS,
   buildExpectedHeaderCandidates,
   isRowMeaningful,
+  isUnverifiedLongNumber,
   normalizeCell,
   trimTrailingEmptyCells
 } = require('./common');
@@ -25,13 +27,18 @@ function ensureSupportedFile(filePath) {
 
 // withSources：另在返回数组上记下每行的原文（不含行尾换行，与返回的行一一对应；v3.2.19 重复账单过滤按原文比较，
 //   本解析器会吞掉未加引号字段中间的引号等，读出的值不能证明原文相同）。
-function parseCsvText(content, { blankrows = false, withSources = false } = {}) {
+// withDisplayText（v3.2.21 B112，网银账单生成）：另记下与读出值不同的「Excel 显示值」（见 resolveCsvDisplayText），
+//   返回数组的不可枚举属性 displayText 与返回的行一一对应，每项为 Map<列下标, 显示值> 或 undefined；读出的值本身不变。
+function parseCsvText(content, { blankrows = false, withSources = false, withDisplayText = false } = {}) {
   const rows = [];
   const sources = withSources ? [] : null;
+  const displays = withDisplayText ? [] : null;
   let rowStart = 0;
   let current = [];
   let parts = [];
   let start = 0;
+  let fieldStart = 0;
+  let rowDisplays;
   let inQuotes = false;
   let i = 0;
   // 保留原状态机的宽松引号规则；按连续文本片段拼接，避免每字符一个
@@ -40,7 +47,18 @@ function parseCsvText(content, { blankrows = false, withSources = false } = {}) 
     parts.push(content.slice(start, i));
     const value = parts.join('');
     parts = [];
+    if (displays) {
+      const display = resolveCsvDisplayText(content.slice(fieldStart, i), value);
+      if (display !== value) {
+        if (!rowDisplays) rowDisplays = new Map();
+        rowDisplays.set(current.length, display);
+      }
+    }
     return value;
+  };
+  const finishRow = () => {
+    if (displays) displays.push(rowDisplays);
+    rowDisplays = undefined;
   };
 
   while (i < content.length) {
@@ -68,21 +86,26 @@ function parseCsvText(content, { blankrows = false, withSources = false } = {}) 
       current.push(finishCell());
       i++;
       start = i;
+      fieldStart = i;
     } else if (ch === '\r' && content[i + 1] === '\n') {
       current.push(finishCell());
       rows.push(current);
+      finishRow();
       if (sources) sources.push(content.slice(rowStart, i));
       current = [];
       i += 2;
       start = i;
+      fieldStart = i;
       rowStart = i;
     } else if (ch === '\n' || ch === '\r') {
       current.push(finishCell());
       rows.push(current);
+      finishRow();
       if (sources) sources.push(content.slice(rowStart, i));
       current = [];
       i++;
       start = i;
+      fieldStart = i;
       rowStart = i;
     } else {
       i++;
@@ -93,23 +116,42 @@ function parseCsvText(content, { blankrows = false, withSources = false } = {}) 
   if (cell || current.length) {
     current.push(cell);
     rows.push(current);
+    finishRow();
     if (sources) sources.push(content.slice(rowStart));
   }
 
   if (blankrows) {
     if (sources) Object.defineProperty(rows, 'sources', { value: sources, enumerable: false });
+    if (displays) Object.defineProperty(rows, 'displayText', { value: displays, enumerable: false });
     return rows;
   }
 
   const kept = [];
   const keptSources = sources ? [] : null;
+  const keptDisplays = displays ? [] : null;
   rows.forEach((row, index) => {
     if (!isRowMeaningful(row)) return;
     kept.push(row);
     if (keptSources) keptSources.push(sources[index]);
+    if (keptDisplays) keptDisplays.push(displays[index]);
   });
   if (keptSources) Object.defineProperty(kept, 'sources', { value: keptSources, enumerable: false });
+  if (keptDisplays) Object.defineProperty(kept, 'displayText', { value: keptDisplays, enumerable: false });
   return kept;
+}
+
+// v3.2.21 B112：CSV 单元格在 Excel 中显示的值。银行常用两种写法让 Excel 把长数字按文本显示：
+//   - 整个字段写成 ="…"（Excel 当作返回文本的公式）：取引号内的文本，"" 还原为 "。本解析器读出的值已吞掉引号
+//     （="123" 读成 =123），按字段原文判断；带引号字段内容为 ="…"（"=""123"""）时按读出的值判断。
+//     未加引号的 =123、=A1+1 等是真公式，不还原；
+//   - 首尾加制表符：去掉首尾制表符。
+//   rawField 为该字段在文件中的原文（不含分隔符），value 为本解析器读出的值。
+const CSV_EXCEL_TEXT_FORMULA = /^="((?:[^"]|"")*)"$/;
+function resolveCsvDisplayText(rawField, value) {
+  let display = value;
+  const formula = CSV_EXCEL_TEXT_FORMULA.exec(rawField) || CSV_EXCEL_TEXT_FORMULA.exec(value);
+  if (formula) display = formula[1].replace(/""/g, '"');
+  return display.replace(/^\t+|\t+$/g, '');
 }
 
 // v2.1.16 PR#61 F4：可选 sheetName —— 缺省 = 第一个 sheet（行为与历史完全一致）。
@@ -291,19 +333,78 @@ function normalizeZipPath(baseDir, target) {
   return out.join('/');
 }
 
-function getZipEntryBuffer(files, entryPath) {
+// 条目名：先按原样（去掉开头的 /），找不到时不区分大小写
+function resolveZipEntryKey(files, entryPath) {
   if (!files || !entryPath) return null;
   const key = String(entryPath).replace(/^\/+/, '');
-  let entry = files[key];
-  if (!entry) {
-    const lower = key.toLowerCase();
-    const found = Object.keys(files).find((name) => name.replace(/^\/+/, '').toLowerCase() === lower);
-    entry = found ? files[found] : null;
-  }
+  if (files[key]) return key;
+  const lower = key.toLowerCase();
+  return Object.keys(files).find((name) => name.replace(/^\/+/, '').toLowerCase() === lower) || null;
+}
+
+function getZipEntryBuffer(files, entryPath) {
+  const key = resolveZipEntryKey(files, entryPath);
+  const entry = key ? files[key] : null;
   return entry && entry.content ? Buffer.from(entry.content) : null;
 }
 
-// 按 workbook.xml 中 <sheet> 的顺序（即 SheetNames 的顺序）与关系文件找到工作表 XML；找不到返回 null
+// 读取库（safegetzipfile）找条目的口径：名称不区分大小写、按原样比较（不规范化 . 与 ..），斜杠与反斜杠两种写法都认
+function findZipEntryKeyLikeReader(files, entryPath) {
+  const backslashed = String(entryPath).toLowerCase().replace(/[/]/g, '\\');
+  const slashed = backslashed.replace(/\\/g, '/');
+  return Object.keys(files).find((name) => {
+    const lower = name.replace(/^Root Entry[/]/, '').toLowerCase();
+    return lower === backslashed || lower === slashed;
+  }) || null;
+}
+
+// XML 注释不是内容：注释里的旧关系、旧 <sheet> 等不能当作有效标签（release 审查）
+function stripXmlComments(text) {
+  return String(text).replace(/<!--[\s\S]*?-->/g, '');
+}
+
+// OOXML 关系命名空间（过渡与严格两种写法）
+const OOXML_RELATIONSHIP_NAMESPACES = new Set([
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+  'http://purl.oclc.org/ooxml/officeDocument/relationships'
+]);
+
+// <sheet> 的关系 Id：标签上须恰好一个「前缀:id」属性，且该前缀在 workbook.xml 中只绑定到 OOXML 关系命名空间。读取库按属性的
+//   本地名取 id（有多个时取后一个），标签另带扩展属性（如 custom:id）或前缀绑定不明时无法唯一确认它读的是哪张表，返回 null
+//   （release 审查：否则可能取到另一张表的 XML，两表同一位置的数值舍入后相等时把另一张表的流水号写进当前表）
+function readSheetRelationId(sheetTag, workbookText) {
+  const idAttributes = sheetTag.match(/\s[\w.-]+:id\s*=/g) || [];
+  if (idAttributes.length !== 1) return null;
+  const prefix = idAttributes[0].trim().replace(/:id\s*=$/, '');
+  const escapedPrefix = prefix.replace(/[.-]/g, '\\$&');
+  const bindings = new Set();
+  const declarationPattern = new RegExp(`\\sxmlns:${escapedPrefix}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'g');
+  let declaration;
+  while ((declaration = declarationPattern.exec(workbookText)) !== null) {
+    bindings.add(declaration[1] !== undefined ? declaration[1] : declaration[2]);
+  }
+  if (bindings.size !== 1 || !OOXML_RELATIONSHIP_NAMESPACES.has(Array.from(bindings)[0])) return null;
+  // 读取库按属性原文（不解码字符引用）查找关系：值含字符引用（如 rId&#49;）时两边的 Id 可能不同，无法确认（release 审查）
+  if (attributeHasReference(sheetTag, `${escapedPrefix}:id`)) return null;
+  return readXmlAttribute(sheetTag, `${escapedPrefix}:id`);
+}
+
+// 属性值是否含字符引用（&…;）：读取库按原文使用的属性，含引用时与解码后的值不同
+function attributeHasReference(tag, name) {
+  return new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"[^"]*&|'[^']*&)`).test(tag);
+}
+
+// 按 workbook.xml 中 <sheet> 的顺序（即 SheetNames 的顺序）与关系文件找到工作表 XML；找不到返回 null。
+//   注释里的标签不算；同一关系 Id 有多条有效关系、或 <sheet> 的关系属性无法唯一确认时无法确认来源，同样返回 null
+//   （按无法核对原值处理）
+//   还须确认读取库实际读的就是这个条目（release 审查）：
+//   - 读取库只要有一张表的关系解析不到，就放弃整份关系表、改按物理序号（xl/worksheets/sheetN.xml）读表：每张表的关系都须
+//     唯一确认，否则返回 null；
+//   - 读取库按「xl/ + 去掉其中第一个 xl/ 前缀的 Target」定位，找不到时依次取 Target 原样、关系文件所在目录 + Target：
+//     须与按关系文件所在目录解析 Target 落到同一个条目；Target 含字符引用（读取库按原文使用）时同样无法确认；
+//   - 读取库解析 workbook.xml 与关系文件时不跳过注释（注释里的 <sheet> 也算工作表、注释里的关系也算），关系只认不带前缀的
+//     <Relationship>、同一 Id 取后一条：注释里有 <sheet> 时序号会错开，返回 null；每张表的关系按读取库的口径也须找到、
+//     且与按本模块口径（注释不算、带不带前缀都认、同一 Id 唯一）确认的那条 Target 相同
 function findXlsxSheetXml(workbook, sheetName) {
   const files = workbook && workbook.files;
   const directory = workbook && workbook.Directory;
@@ -311,18 +412,119 @@ function findXlsxSheetXml(workbook, sheetName) {
   const workbookXml = getZipEntryBuffer(files, workbookPath);
   if (!workbookXml) return null;
   const workbookDir = String(workbookPath).replace(/^\/+/, '').split('/').slice(0, -1).join('/');
-  const relsXml = getZipEntryBuffer(files, `${workbookDir ? `${workbookDir}/` : ''}_rels/${String(workbookPath).split('/').pop()}.rels`);
+  const relsDirPrefix = workbookDir ? `${workbookDir}/` : '';
+  const relsXml = getZipEntryBuffer(files, `${relsDirPrefix}_rels/${String(workbookPath).split('/').pop()}.rels`);
   if (!relsXml) return null;
-  const sheetTags = workbookXml.toString('utf8').match(/<(?:[\w.-]+:)?sheet\b[^>]*>/g) || [];
+  const rawWorkbookText = workbookXml.toString('utf8');
+  const workbookText = stripXmlComments(rawWorkbookText);
+  const sheetTagPattern = /<(?:[\w.-]+:)?sheet\b[^>]*>/g;
+  const sheetTags = workbookText.match(sheetTagPattern) || [];
+  if ((rawWorkbookText.match(sheetTagPattern) || []).length !== sheetTags.length) return null;
   const sheetIndex = Array.isArray(workbook.SheetNames) ? workbook.SheetNames.indexOf(sheetName) : -1;
   const sheetTag = sheetIndex >= 0 ? sheetTags[sheetIndex] : null;
   if (!sheetTag || readXmlAttribute(sheetTag, 'name') !== sheetName) return null;
-  const relationId = readXmlAttribute(sheetTag, '[\\w.-]+:id');
-  if (!relationId) return null;
-  const relationTag = (relsXml.toString('utf8').match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || [])
-    .find((tag) => readXmlAttribute(tag, 'Id') === relationId);
-  const target = relationTag ? readXmlAttribute(relationTag, 'Target') : null;
-  return target ? getZipEntryBuffer(files, normalizeZipPath(workbookDir, target)) : null;
+  const relsText = relsXml.toString('utf8');
+  const relationTagsById = new Map();
+  (stripXmlComments(relsText).match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || []).forEach((tag) => {
+    const id = readXmlAttribute(tag, 'Id');
+    if (!relationTagsById.has(id)) relationTagsById.set(id, []);
+    relationTagsById.get(id).push(tag);
+  });
+  const readerRelationTagById = new Map();
+  (relsText.match(/<Relationship\b[^>]*>/g) || []).forEach((tag) => readerRelationTagById.set(readXmlAttribute(tag, 'Id'), tag));
+  const uniqueRelationTag = (tag) => {
+    const id = readSheetRelationId(tag, workbookText);
+    const tags = id ? relationTagsById.get(id) : null;
+    const readerTag = id ? readerRelationTagById.get(id) : null;
+    if (!tags || tags.length !== 1 || !readerTag) return null;
+    // 关系的 Id、Target 含字符引用时，读取库按原文使用、与解码后的值不同，无法确认
+    if ([tags[0], readerTag].some((relation) => attributeHasReference(relation, 'Id') || attributeHasReference(relation, 'Target'))) return null;
+    return readXmlAttribute(readerTag, 'Target') === readXmlAttribute(tags[0], 'Target') ? tags[0] : null;
+  };
+  if (!sheetTags.every((tag) => uniqueRelationTag(tag))) return null;
+  const relationTag = uniqueRelationTag(sheetTag);
+  const target = readXmlAttribute(relationTag, 'Target');
+  if (!target) return null;
+  const entryKey = resolveZipEntryKey(files, normalizeZipPath(workbookDir, target));
+  let readerPath = `xl/${target.replace(/[/]?xl\//, '')}`;
+  if (!findZipEntryKeyLikeReader(files, readerPath)) readerPath = target;
+  if (!findZipEntryKeyLikeReader(files, readerPath)) readerPath = `${relsDirPrefix}${target}`;
+  if (!entryKey || findZipEntryKeyLikeReader(files, readerPath) !== entryKey) return null;
+  return getZipEntryBuffer(files, entryKey);
+}
+
+// 按需解压 ZIP 条目：按中央目录（与读取库同口径）登记各条目，读取 content 时才解压该条目（release 审查：核对长数字只需
+//   workbook.xml、其关系文件与目标工作表，不必把其他工作表、嵌入图片等整包再解压一次）。ZIP64、加密、条目名重复（不区分
+//   大小写）、未知压缩方式或结构异常时返回 null，由调用方退回整包读取。条目数据读不出、解压失败或长度与登记不符时 content 为 null
+//   （按无法核对原值处理）；容量类错误照常抛出
+function openZipEntriesLazily(buffer) {
+  const EOCD_SIZE = 22;
+  if (!Buffer.isBuffer(buffer) || buffer.length < EOCD_SIZE) return null;
+  let eocd = -1;
+  const lowest = Math.max(0, buffer.length - EOCD_SIZE - 0xffff);
+  for (let offset = buffer.length - EOCD_SIZE; offset >= lowest; offset -= 1) {
+    if (buffer.readUInt32LE(offset) === 0x06054b50 && offset + EOCD_SIZE + buffer.readUInt16LE(offset + 20) === buffer.length) {
+      eocd = offset;
+      break;
+    }
+  }
+  if (eocd < 0) return null;
+  const entryCount = buffer.readUInt16LE(eocd + 10);
+  const directorySize = buffer.readUInt32LE(eocd + 12);
+  const directoryOffset = buffer.readUInt32LE(eocd + 16);
+  if (entryCount === 0xffff || directorySize === 0xffffffff || directoryOffset === 0xffffffff) return null;
+  if (directoryOffset + directorySize > eocd) return null;
+  const files = {};
+  const seenNames = new Set();
+  let cursor = directoryOffset;
+  for (let index = 0; index < entryCount; index += 1) {
+    if (cursor + 46 > eocd || buffer.readUInt32LE(cursor) !== 0x02014b50) return null;
+    const flags = buffer.readUInt16LE(cursor + 8);
+    const method = buffer.readUInt16LE(cursor + 10);
+    const compressedSize = buffer.readUInt32LE(cursor + 20);
+    const uncompressedSize = buffer.readUInt32LE(cursor + 24);
+    const nameLength = buffer.readUInt16LE(cursor + 28);
+    const nameEnd = cursor + 46 + nameLength;
+    if (nameEnd > eocd) return null;
+    const name = buffer.toString(flags & 0x800 ? 'utf8' : 'latin1', cursor + 46, nameEnd);
+    const localOffset = buffer.readUInt32LE(cursor + 42);
+    cursor = nameEnd + buffer.readUInt16LE(cursor + 30) + buffer.readUInt16LE(cursor + 32);
+    if (flags & 0x1) return null;
+    if (compressedSize === 0xffffffff || uncompressedSize === 0xffffffff || localOffset === 0xffffffff) return null;
+    const key = name.replace(/^\/+/, '');
+    const lowerKey = key.toLowerCase();
+    if (seenNames.has(lowerKey)) return null;
+    seenNames.add(lowerKey);
+    if (key.endsWith('/')) continue;
+    if (method !== 0 && method !== 8) return null;
+    let loaded = false;
+    let content = null;
+    files[key] = {
+      get content() {
+        if (!loaded) {
+          loaded = true;
+          content = inflateZipEntry(buffer, { localOffset, method, compressedSize, uncompressedSize });
+        }
+        return content;
+      }
+    };
+  }
+  return files;
+}
+
+function inflateZipEntry(buffer, { localOffset, method, compressedSize, uncompressedSize }) {
+  if (localOffset + 30 > buffer.length || buffer.readUInt32LE(localOffset) !== 0x04034b50) return null;
+  const dataStart = localOffset + 30 + buffer.readUInt16LE(localOffset + 26) + buffer.readUInt16LE(localOffset + 28);
+  if (dataStart + compressedSize > buffer.length) return null;
+  const data = buffer.subarray(dataStart, dataStart + compressedSize);
+  let output;
+  try {
+    output = method === 0 ? data : zlib.inflateRawSync(data);
+  } catch (error) {
+    if (isMemoryLimitError(error)) throw error;
+    return null;
+  }
+  return output.length === uncompressedSize ? output : null;
 }
 
 function sha256Text(text) {
@@ -339,7 +541,7 @@ function readXlsxSharedStringSources(workbook) {
   if (workbookPath) {
     const workbookDir = String(workbookPath).replace(/^\/+/, '').split('/').slice(0, -1).join('/');
     const relsXml = getZipEntryBuffer(files, `${workbookDir ? `${workbookDir}/` : ''}_rels/${String(workbookPath).split('/').pop()}.rels`);
-    const relationTag = relsXml && (relsXml.toString('utf8').match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || [])
+    const relationTag = relsXml && (stripXmlComments(relsXml.toString('utf8')).match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || [])
       .find((tag) => /\/sharedStrings$/.test(readXmlAttribute(tag, 'Type') || ''));
     const target = relationTag ? readXmlAttribute(relationTag, 'Target') : null;
     if (target) sstPath = normalizeZipPath(workbookDir, target);
@@ -835,7 +1037,215 @@ function markTextSourceCells(filePath, sheetName, sheet, range, specials) {
   }
 }
 
-function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, maxRows = 0, csvMaxSourceBytes, markErrorCells = false } = {}) {
+// v3.2.21 B112（网银账单生成）：读取库把超出安全整数范围的整数读成数字时已丢失末几位（长卡号、流水号），
+//   按文件原文取这类单元格的文本。没有这类单元格时不做任何额外读取。按文件实际内容（不看扩展名）取原文：
+//   - XLSX：工作表 XML 中该单元格 <v> 的字面值；
+//   - 文本 / HTML（扩展名为 .xls 等的 CSV、制表符文本、HTML 表格）：按文本重新读取同一张表的同一位置；
+//   - 二进制 .xls 存的就是双精度数，没有原文。
+//   只取非负整数写法、且与读到的数字是同一个双精度数的原文（负数多是发生额，改成文本会改变取发生额时的正负号处理）；
+//   其余（指数写法、无法定位等）不给原文，由生成侧按 isUnverifiedLongNumber 提示无法核对原值。
+//   不改工作表本身：返回 Map<相对行下标, Map<相对列下标, 原文>>（与 blankrows 读取的行、列下标一致），
+//   由调用方决定用在哪些行（表头定位仍按读取库的值，与模板导入读表头一致）。
+function collectLongIntegerSourceText({ filePath, workbook, sheet, sheetName, range, rowLimit }) {
+  const candidates = [];
+  const visit = (r, c, cell) => {
+    if (r < range.s.r || r > range.e.r || c < range.s.c || c > range.e.c) return;
+    if (cell && cell.t === 'n' && isUnverifiedLongNumber(cell.v) && cell.v > 0) candidates.push({ r, c, cell });
+  };
+  const denseRows = Array.isArray(sheet) ? sheet : (Array.isArray(sheet['!data']) ? sheet['!data'] : null);
+  if (denseRows) {
+    denseRows.forEach((row, r) => {
+      if (Array.isArray(row)) row.forEach((cell, c) => visit(r, c, cell));
+    });
+  } else {
+    Object.keys(sheet).forEach((address) => {
+      if (address[0] === '!') return;
+      const { r, c } = XLSX.utils.decode_cell(address);
+      visit(r, c, sheet[address]);
+    });
+  }
+  if (!candidates.length) return null;
+  const container = detectWorkbookContainer(filePath);
+  let literalOf = null;
+  if (container === 'zip') literalOf = readXlsxIntegerLiterals(filePath, workbook, sheetName, candidates);
+  else if (container === 'text') literalOf = readTextIntegerLiterals(filePath, sheet, sheetName, rowLimit);
+  if (!literalOf) return null;
+  const sourceText = new Map();
+  candidates.forEach(({ r, c, cell }) => {
+    const literal = literalOf(r, c);
+    if (typeof literal !== 'string' || !/^\d+$/.test(literal) || Number(literal) !== cell.v) return;
+    const rowIndex = r - range.s.r;
+    if (!sourceText.has(rowIndex)) sourceText.set(rowIndex, new Map());
+    sourceText.get(rowIndex).set(c - range.s.c, literal);
+  });
+  return sourceText.size ? sourceText : null;
+}
+
+// XLSX 工作表 XML 中候选单元格（按 r 属性定位，且须与所在 <row> 的行号一致）的 <v> 字面值；数值单元格的前导 0 不属于原值，去掉；
+//   公式单元格的值是缓存的计算结果，不给原文。
+//   读取时没有保留压缩包（未开查重）时只解开压缩包取 XML，不再解析工作表（只在有候选单元格时多读这一次；
+//   不为所有读取保留压缩包，以免每个文件都多占一份 XML 内存）；按需解压，只解开用到的条目（openZipEntriesLazily），
+//   压缩包结构不支持按需读取时退回整包解压。扫完整张表：同一位置出现多次（含乱序声明）、
+//   类型不是数值的不给原文；有单元格没有（或无法解析）位置属性时，读取库按前一格顺推位置、可能与其他单元格重叠，
+//   整张表都不给原文。容量类错误照常抛出（按文件过大处理），其余读不到时不给原文。
+function readXlsxIntegerLiterals(filePath, workbook, sheetName, candidates) {
+  let source = workbook;
+  if (!workbook.files) {
+    try {
+      const buffer = fs.readFileSync(filePath);
+      let files = openZipEntriesLazily(buffer);
+      if (!files) {
+        const container = XLSX.CFB.read(buffer, { type: 'buffer' });
+        files = {};
+        container.FullPaths.forEach((fullPath, index) => {
+          files[String(fullPath).replace(/^Root Entry\//, '')] = container.FileIndex[index];
+        });
+      }
+      source = { files, Directory: workbook.Directory, SheetNames: workbook.SheetNames };
+    } catch (error) {
+      if (isMemoryLimitError(error)) throw error;
+      return null;
+    }
+  }
+  const xml = findXlsxSheetXml(source, sheetName);
+  if (!xml) return null;
+  const wanted = new Set(candidates.map(({ r, c }) => `${r}:${c}`));
+  const literals = new Map();
+  const duplicated = new Set();
+  // XML 注释不是内容：先去掉，避免注释里的 <c> / <v> 被当成单元格或值
+  const text = stripXmlComments(xml.toString('utf8'));
+  // 各 <row> 的起点与行号（没有 r 属性时按前一行顺推，与读取库相同）
+  const rowStarts = [];
+  const rowTagPattern = /<(?:[\w.-]+:)?row\b([^>]*?)\/?>/g;
+  let rowMatch;
+  while ((rowMatch = rowTagPattern.exec(text)) !== null) {
+    const rowRef = readXmlAttribute(rowMatch[1], 'r');
+    const previousRow = rowStarts.length ? rowStarts[rowStarts.length - 1].row : -1;
+    const row = rowRef ? Number(rowRef) - 1 : previousRow + 1;
+    if (!(Number.isInteger(row) && row >= 0)) return null;
+    rowStarts.push({ index: rowMatch.index, row });
+  }
+  // 数组公式、模拟运算表等的结果区域（<f ref="…">）：只有首格带公式，区域内其他格只有缓存的 <v>，同样不是原文
+  //   （release 审查）。共享公式的各格都自带 <f t="shared">，不按区域判断。区域须是单格或矩形引用（decode_range
+  //   不校验写法，如 "C2:C3,B3:B8" 也能解出；列名统一大写后再解码，它把小写列名解成别的列），写法异常或显式为空时
+  //   整张表不还原。单格区域就是首格本身。按区域的并集判断（区域互相重叠时不影响区域外的格）：只按候选格所在的列建索引，
+  //   列内按起始行排序并记前缀最大结束行，二分查找，大账单不必把每个候选格与整表的公式区域逐一比对
+  const candidateColumns = Array.from(new Set(candidates.map(({ c }) => c)));
+  const formulaRowsByColumn = new Map();
+  const formulaTagPattern = /<(?:[\w.-]+:)?f\b([^>]*?)\/?>/g;
+  const rangePattern = /^\$?[A-Z]{1,3}\$?[1-9]\d{0,6}(?::\$?[A-Z]{1,3}\$?[1-9]\d{0,6})?$/;
+  let formulaMatch;
+  while ((formulaMatch = formulaTagPattern.exec(text)) !== null) {
+    const formulaRef = readXmlAttribute(formulaMatch[1], 'ref');
+    if (formulaRef === null || readXmlAttribute(formulaMatch[1], 't') === 'shared') continue;
+    const normalizedRef = formulaRef.trim().toUpperCase();
+    if (!rangePattern.test(normalizedRef)) return null;
+    let range;
+    try {
+      range = XLSX.utils.decode_range(normalizedRef.replace(/\$/g, ''));
+    } catch (_error) {
+      return null;
+    }
+    const valid = range && [range.s.r, range.s.c, range.e.r, range.e.c].every((value) => Number.isInteger(value) && value >= 0)
+      && range.e.r >= range.s.r && range.e.c >= range.s.c;
+    if (!valid) return null;
+    if (range.s.r === range.e.r && range.s.c === range.e.c) continue;
+    for (const c of candidateColumns) {
+      if (c < range.s.c || c > range.e.c) continue;
+      if (!formulaRowsByColumn.has(c)) formulaRowsByColumn.set(c, []);
+      formulaRowsByColumn.get(c).push([range.s.r, range.e.r]);
+    }
+  }
+  // 各列：按起始行排序，maxEnds[i] 为前 i+1 个区域的最大结束行；某行被覆盖 ⇔ 起始行不超过它的区域中最大结束行不小于它
+  const maxEndsByColumn = new Map();
+  for (const [column, spans] of formulaRowsByColumn) {
+    spans.sort((left, right) => left[0] - right[0]);
+    const maxEnds = [];
+    spans.forEach(([, end], index) => maxEnds.push(index ? Math.max(maxEnds[index - 1], end) : end));
+    maxEndsByColumn.set(column, maxEnds);
+  }
+  const inFormulaRange = (r, c) => {
+    const spans = formulaRowsByColumn.get(c);
+    if (!spans) return false;
+    let low = 0;
+    let high = spans.length - 1;
+    let last = -1;
+    while (low <= high) {
+      const middle = (low + high) >> 1;
+      if (spans[middle][0] <= r) {
+        last = middle;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return last >= 0 && maxEndsByColumn.get(c)[last] >= r;
+  };
+  const cellPattern = /<(?:[\w.-]+:)?c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:[\w.-]+:)?c>)/g;
+  const valuePattern = /<(?:[\w.-]+:)?v\b[^>]*>([^<]*)<\/(?:[\w.-]+:)?v>/g;
+  let match;
+  let rowCursor = -1;
+  while ((match = cellPattern.exec(text)) !== null) {
+    const ref = readXmlAttribute(match[1], 'r');
+    if (!ref) return null;
+    let position;
+    try {
+      position = XLSX.utils.decode_cell(ref);
+    } catch (_error) {
+      return null;
+    }
+    if (!(position.r >= 0 && position.c >= 0)) return null;
+    // 单元格引用的行须与所在 <row> 一致（release 审查）：两层坐标不同时这一格属于哪笔交易有歧义，
+    //   数值相同也不能证明原文属于该行（如两个舍入为同一数值的流水号互换了引用），整张表不给原文
+    while (rowCursor + 1 < rowStarts.length && rowStarts[rowCursor + 1].index < match.index) rowCursor += 1;
+    if (rowCursor < 0 || rowStarts[rowCursor].row !== position.r) return null;
+    const key = `${position.r}:${position.c}`;
+    if (!wanted.has(key)) continue;
+    if (literals.has(key) || duplicated.has(key)) {
+      literals.delete(key);
+      duplicated.add(key);
+      continue;
+    }
+    const type = readXmlAttribute(match[1], 't') || 'n';
+    // 公式（含共享、数组公式及其结果区域内的格）单元格的 <v> 是计算结果的缓存，不是录入的原文：不还原，按无法核对原值提示（release 审查）
+    const hasFormula = /<(?:[\w.-]+:)?f\b/.test(match[2] || '') || inFormulaRange(position.r, position.c);
+    // 只认唯一的 <v>：有多个（自闭合的空 <v/> 也算一个）或写法异常（如 CDATA）时不还原，按无法核对原值提示
+    const valueMatches = type === 'n' && !hasFormula ? Array.from((match[2] || '').matchAll(valuePattern)) : [];
+    const valueElementCount = type === 'n' ? ((match[2] || '').match(/<(?:[\w.-]+:)?v\b[^>]*>/g) || []).length : 0;
+    const literal = valueMatches.length === 1 && valueElementCount === 1 ? valueMatches[0][1].trim() : '';
+    literals.set(key, /^\d+$/.test(literal) ? literal.replace(/^0+(?=\d)/, '') : null);
+  }
+  return (r, c) => literals.get(`${r}:${c}`);
+}
+
+// 文本 / HTML 工作簿：按文本重新读取同一张表（同样的截取行数），读取范围须与原读取一致。
+function readTextIntegerLiterals(filePath, sheet, sheetName, rowLimit) {
+  let rawSheet = null;
+  try {
+    const rawBook = XLSX.readFile(filePath, {
+      cellDates: false,
+      dense: true,
+      raw: true,
+      ...(rowLimit > 0 ? { sheetRows: rowLimit } : {})
+    });
+    rawSheet = rawBook.Sheets[sheetName] || null;
+  } catch (error) {
+    if (isMemoryLimitError(error)) throw error;
+    return null;
+  }
+  if (!rawSheet || rawSheet['!ref'] !== sheet['!ref']) return null;
+  const rawRows = Array.isArray(rawSheet) ? rawSheet : (Array.isArray(rawSheet['!data']) ? rawSheet['!data'] : null);
+  if (!rawRows) return null;
+  return (r, c) => {
+    const rawCell = Array.isArray(rawRows[r]) ? rawRows[r][c] : null;
+    return rawCell && typeof rawCell.v === 'string' ? rawCell.v.trim() : null;
+  };
+}
+
+// exactSourceText（v3.2.21 B112，只由网银账单生成传入，须同时 blankrows）：读出的值不变，另附不可枚举属性——
+//   sourceText：长整数的文件原文（collectLongIntegerSourceText）；displayText：CSV 的「Excel 显示值」（parseCsvText）。
+//   readRowsWithMetadata 只用于数据行；readRows 原样带出 sourceText，由大账号识别定位表头后用于账户信息行。
+function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, maxRows = 0, csvMaxSourceBytes, markErrorCells = false, exactSourceText = false } = {}) {
   ensureSupportedFile(filePath);
 
   if (!fs.existsSync(filePath) || (fs.statSync(filePath).size === 0 && csvMaxSourceBytes === undefined)) {
@@ -854,8 +1264,11 @@ function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, max
       if (!isOLE2 && !isZIP) {
         const body = raw[0] === 0xEF && raw[1] === 0xBB && raw[2] === 0xBF ? raw.subarray(3) : raw;
         const content = body.toString('utf-8');
-        const rows = parseCsvText(content, { blankrows, withSources: markErrorCells });
+        const rows = parseCsvText(content, { blankrows, withSources: markErrorCells, withDisplayText: exactSourceText });
         const result = rowLimit > 0 ? rows.slice(0, rowLimit) : rows;
+        if (result !== rows && Array.isArray(rows.displayText)) {
+          Object.defineProperty(result, 'displayText', { value: rows.displayText.slice(0, result.length), enumerable: false });
+        }
         // v3.2.19 重复账单过滤：每行附该行原文的摘要（列下标 -2，见 collectSpecialCells），原文完全相同的行才可能判为重复——
         //   解析器会吞掉未加引号字段中间的引号（SALE 2" X" 与 SALE 2 X 读成同一文本）等。
         //   有不能按 UTF-8 解码的字节时，不同的原文可能解出同一替换字符（如 café、cafè 都成 caf�），
@@ -940,6 +1353,16 @@ function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, max
       if (container === 'zip') markXlsxSourceEvidence(workbook, targetSheetName, sheet, sheetRange, specialCells);
       else if (container === 'text') markTextSourceCells(filePath, targetSheetName, sheet, sheetRange, specialCells);
     }
+    // 下标与 blankrows 读取的行、列一致（行从有效范围首行起、列从首列起），不保留空行时无法对应，不取原文。
+    //   取不到原文时保持读取结果（生成时按无法核对原值提示）；容量类错误照常按文件过大处理
+    let sourceText = null;
+    if (exactSourceText && blankrows && sheetRange) {
+      try {
+        sourceText = collectLongIntegerSourceText({ filePath, workbook, sheet, sheetName: targetSheetName, range: sheetRange, rowLimit });
+      } catch (sourceTextError) {
+        if (isMemoryLimitError(sourceTextError)) throw sourceTextError;
+      }
+    }
     const rows = XLSX.utils.sheet_to_json(sheet, {
       header: 1,
       blankrows,
@@ -953,6 +1376,9 @@ function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, max
     Object.defineProperty(result, 'firstColumnIndex', { value: sheetRange ? sheetRange.s.c : 0, enumerable: false });
     if (specialCells) {
       Object.defineProperty(result, 'excelErrorCells', { value: specialCells, enumerable: false });
+    }
+    if (sourceText) {
+      Object.defineProperty(result, 'sourceText', { value: sourceText, enumerable: false });
     }
     return result;
   } catch (error) {
@@ -1032,8 +1458,10 @@ function readCsvRowsWithinBudget(filePath, maxBytes) {
   return readWorkbookRows(filePath, { csvMaxSourceBytes: maxBytes });
 }
 
-function readRows(filePath, { blankrows = false, maxRows = 0, readGuard } = {}) {
-  const rows = readWorkbookRows(filePath, { blankrows, maxRows, readGuard });
+// exactSourceText（v3.2.21 B112，大账号识别）：读出的值不变，另附长整数的文件原文（不可枚举属性 sourceText，
+//   Map<行下标, Map<列下标, 原文>>）；大账号识别按读取值定位表头后，只把原文用于表头以外的行（main.js）
+function readRows(filePath, { blankrows = false, maxRows = 0, readGuard, exactSourceText = false } = {}) {
+  const rows = readWorkbookRows(filePath, { blankrows, maxRows, readGuard, exactSourceText });
 
   if (!Array.isArray(rows) || rows.length === 0 || !rows.some(isRowMeaningful)) {
     throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
@@ -1071,6 +1499,8 @@ function collectMatchedRows({
   const fullCellsOf = (row) => row.fullCells || row.cells;
   let currentFullHeader = includeFullRows ? fullCellsOf(meaningfulRows[matchedRowIndex]) : null;
   const headerBreaks = [];
+  // v3.2.21 B112：与 rows 同下标，换成长整数原文的数据单元格 → 读取库的值（Map<列下标, 值>，没有为 null）
+  const longIntegerReadValues = [];
   const summaryLabels = ['总收入笔数', '总收入金额', '总支出笔数', '总支出金额'];
 
   for (const [index, row] of meaningfulRows.slice(matchedRowIndex).entries()) {
@@ -1093,12 +1523,31 @@ function collectMatchedRows({
       continue;
     }
 
-    if (index > 0 && !isRowMeaningful(normalizedCells)) {
+    // v3.2.21 B112：数据行取长整数原文与 CSV 的 Excel 显示值（readRowsWithMetadata 的 displayCells）；表头行与上面的判定仍按读取值
+    let dataCells = normalizedCells;
+    let readValues = null;
+    if (index > 0 && row.displayCells) {
+      dataCells = row.displayCells.slice(matchedColumnIndex, matchedColumnIndex + expectedHeaderCount);
+      while (dataCells.length < expectedHeaderCount) {
+        dataCells.push('');
+      }
+    }
+    if (index > 0 && row.longIntegerReadValues) {
+      row.longIntegerReadValues.forEach((value, columnIndex) => {
+        const dataColumnIndex = columnIndex - matchedColumnIndex;
+        if (dataColumnIndex < 0 || dataColumnIndex >= expectedHeaderCount) return;
+        if (!readValues) readValues = new Map();
+        readValues.set(dataColumnIndex, value);
+      });
+    }
+
+    if (index > 0 && !isRowMeaningful(dataCells)) {
       continue;
     }
 
-    rows.push(normalizedCells);
+    rows.push(dataCells);
     rowNumbers.push(row.rowNumber);
+    longIntegerReadValues.push(readValues);
     if (fullRows) {
       fullRows.push(fullCellsOf(row));
       fullHeaders.push(currentFullHeader);
@@ -1109,6 +1558,7 @@ function collectMatchedRows({
     rows,
     rowNumbers,
     headerBreaks,
+    ...(longIntegerReadValues.some(Boolean) ? { longIntegerReadValues } : {}),
     ...(fullRows ? { fullRows, fullHeaders } : {})
   };
 }
@@ -1153,8 +1603,10 @@ function findHeaderMatchPosition(rowsCells, normalizedExpectedHeaders) {
 
 // v2.1.16 PR#61 F4：可选第三参 { sheetName } 透传给 readWorkbookRows（缺省读第一个 sheet，行为不变）。
 function readRowsWithMetadata(filePath, expectedHeaders = [], options = {}) {
-  const { sheetName, readGuard, onWorkbookRows, includeFullRows = false } = options;
-  const rawRows = readWorkbookRows(filePath, { blankrows: true, sheetName, readGuard, markErrorCells: includeFullRows });
+  const { sheetName, readGuard, onWorkbookRows, includeFullRows = false, exactSourceText = false } = options;
+  const rawRows = readWorkbookRows(filePath, { blankrows: true, sheetName, readGuard, markErrorCells: includeFullRows, exactSourceText });
+  // v3.2.21 B112：大账号识别拿到的行与 readRows 的 exactSourceText 一致：读取值另附长整数原文（sourceText），CSV 显示值不用
+  const sourceTextByRow = rawRows.sourceText instanceof Map ? rawRows.sourceText : null;
   if (typeof onWorkbookRows === 'function') onWorkbookRows(rawRows);
   const headerCandidates = buildExpectedHeaderCandidates(expectedHeaders);
   // 行号是 Excel 物理行号：有效范围不从第 1 行开始时加上起始偏移（与大账号分段识别同一口径）
@@ -1179,14 +1631,42 @@ function readRowsWithMetadata(filePath, expectedHeaders = [], options = {}) {
     rowLevelMarks.sort((left, right) => left[0] - right[0]).forEach(([, mark]) => full.push(mark));
     return full;
   };
+  // v3.2.21 B112：长整数的文件原文与 CSV 单元格的 Excel 显示值（="…"、首尾制表符，见 parseCsvText）。
+  //   表头定位与重复表头判定仍按读取库的值（与模板导入读表头一致，旧模板里存的就是这个值），
+  //   只有表头以下的数据行换成原文 / 显示值；查重的整行（fullCells）仍按读取库的值（另有原文核对）。
+  const displayTextByRow = Array.isArray(rawRows.displayText) ? rawRows.displayText : null;
+  const buildDisplayCells = (cells, rawIndex) => {
+    const overrides = [sourceTextByRow && sourceTextByRow.get(rawIndex), displayTextByRow && displayTextByRow[rawIndex]]
+      .filter(Boolean);
+    if (!overrides.length) return null;
+    const displayCells = cells.slice();
+    overrides.forEach((rowOverrides) => rowOverrides.forEach((text, columnIndex) => {
+      if (columnIndex < displayCells.length) displayCells[columnIndex] = text;
+    }));
+    return displayCells;
+  };
+  // 换成长整数原文的单元格 → 读取库的值（Map<列下标, 值>）：生成时发生额、余额列仍按读取值计算（见 buildMappedRows）
+  const buildLongIntegerReadValues = (cells, rawIndex) => {
+    const rowText = sourceTextByRow && sourceTextByRow.get(rawIndex);
+    if (!rowText) return null;
+    const readValues = new Map();
+    rowText.forEach((_text, columnIndex) => {
+      if (columnIndex < cells.length) readValues.set(columnIndex, cells[columnIndex]);
+    });
+    return readValues.size ? readValues : null;
+  };
   const meaningfulRows = rawRows
     .map((row, index) => {
       const cells = trimTrailingEmptyCells(Array.isArray(row) ? row : []);
       const fullCells = includeFullRows ? buildFullCells(cells, index) : null;
+      const displayCells = buildDisplayCells(cells, index);
+      const longIntegerReadValues = buildLongIntegerReadValues(cells, index);
       return {
         rowNumber: index + firstRowNumber,
         cells,
-        ...(fullCells ? { fullCells } : {})
+        ...(fullCells ? { fullCells } : {}),
+        ...(displayCells ? { displayCells } : {}),
+        ...(longIntegerReadValues ? { longIntegerReadValues } : {})
       };
     })
     .filter((row) => isRowMeaningful(row.cells));
@@ -1196,9 +1676,11 @@ function readRowsWithMetadata(filePath, expectedHeaders = [], options = {}) {
   }
 
   if (!headerCandidates.length) {
+    const longIntegerReadValues = meaningfulRows.map((row, index) => (index > 0 && row.longIntegerReadValues) || null);
     return {
-      rows: meaningfulRows.map((row) => row.cells),
+      rows: meaningfulRows.map((row, index) => (index > 0 && row.displayCells ? row.displayCells : row.cells)),
       rowNumbers: meaningfulRows.map((row) => row.rowNumber),
+      ...(longIntegerReadValues.some(Boolean) ? { longIntegerReadValues } : {}),
       // 不按表头定位时整行即全部列：查重的整行同样带错误值 / 未缓存公式标记与物理列偏移
       ...(includeFullRows ? {
         fullRows: meaningfulRows.map((row) => row.fullCells || row.cells),
@@ -1427,5 +1909,7 @@ module.exports = {
   readCsvRowsWithinBudget,
   readRows,
   readRowsWithMetadata,
-  readXlsxSheetMetaLite
+  readXlsxSheetMetaLite,
+  // 按需解压 ZIP 条目（导出供单测）
+  openZipEntriesLazily
 };

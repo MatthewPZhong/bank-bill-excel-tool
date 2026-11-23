@@ -20,6 +20,9 @@ const {
   getFeatureFilterRef,
   LEGACY_FEATURE_FILTER_ID,
   parseFeatureFilterToken,
+  parseLogicValueToken,
+  parseLogicValueFeatureFilterRef,
+  buildLogicValueFeatureCandidate,
   resolveUsedFeatureFilters,
   upgradeLegacyFeatureFilter,
   FileValidationError,
@@ -27,6 +30,9 @@ const {
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   normalizeCell,
   normalizeFeeAmountFormula,
+  normalizeFeeFieldMappings,
+  validateFeeFieldMappings,
+  isFeeFieldMappingTemplateFieldExcluded,
   normalizeBillSplitRowFilterRules,
   normalizeRowFilterRules
 } = require('../../../src/backend/file-service');
@@ -97,6 +103,9 @@ const fns = loadMainFunctions([
   getFeatureFilterRef,
   LEGACY_FEATURE_FILTER_ID,
   parseFeatureFilterToken,
+  parseLogicValueToken,
+  parseLogicValueFeatureFilterRef,
+  buildLogicValueFeatureCandidate,
   resolveUsedFeatureFilters,
   upgradeLegacyFeatureFilter,
   ADVANCED_MAPPING_FIELDS: [],
@@ -252,8 +261,10 @@ test('生成配置读取模板的 币种 → 大账号，没有配置时拒绝',
 });
 
 test('模板包：v6 读取 currencyBigAccounts，v5 读为空，高于支持版本拒绝', (t) => {
-  // v3.2.18：特征值包升为 v7；v3.2.19：用到拆分账单费用账单的包写 v8；只用到本模式的包仍写 v6
-  assert.equal(CONSTANTS.SUPPORTED_BUNDLE_VERSION, 8);
+  // v3.2.18：特征值包升为 v7；v3.2.19：用到拆分账单费用账单的包写 v8；v3.2.21：逻辑取值候补含特征值、用到费用账单字段映射
+  //   特殊处理写 v9；只用到本模式的包仍写 v6
+  assert.equal(CONSTANTS.SUPPORTED_BUNDLE_VERSION, 9);
+  assert.equal(CONSTANTS.LOGIC_VALUE_BUNDLE_VERSION, 8);
   assert.equal(CONSTANTS.FEATURE_FILTER_BUNDLE_VERSION, 7);
   assert.equal(CONSTANTS.CURRENCY_ONLY_BUNDLE_VERSION, 6);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'currency-bundle-'));
@@ -271,6 +282,9 @@ test('模板包：v6 读取 currencyBigAccounts，v5 读为空，高于支持版
     FileValidationError,
     normalizeCell,
     normalizeFeeAmountFormula,
+    normalizeFeeFieldMappings,
+    validateFeeFieldMappings,
+    isFeeFieldMappingTemplateFieldExcluded,
     normalizeBillSplitRowFilterRules,
     normalizeRowFilterRules,
     getFeatureFilterRef,
@@ -284,7 +298,7 @@ test('模板包：v6 读取 currencyBigAccounts，v5 读为空，高于支持版
   const v6 = readBundle(write(6, { currencyBigAccounts: [{ currency: ' usd ', merchantId: ' NET1 ' }] }));
   assert.deepEqual(v6.templates[0].currencyBigAccounts, [{ currency: 'usd', merchantId: 'NET1' }]);
   assert.deepEqual(readBundle(write(5)).templates[0].currencyBigAccounts, []);
-  assert.throws(() => readBundle(write(9)), /请升级应用后再导入/);
+  assert.throws(() => readBundle(write(CONSTANTS.SUPPORTED_BUNDLE_VERSION + 1)), /请升级应用后再导入/);
 });
 
 test('按文件名映射导入：识别本模式文件，用于跳过或阻断大账号选择', () => {

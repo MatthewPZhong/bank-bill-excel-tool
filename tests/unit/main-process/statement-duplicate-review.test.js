@@ -205,12 +205,16 @@ test('主进程：预检暂停与续跑接在导入 prepare 中，执行路径�
 
   // 按文件名映射：预检在最终条目上查重暂停（执行计划的实际行为见下方真实调用测试）
   const handleBody = source.slice(source.indexOf('async function handleFilenameMappingImport(prepared) {'));
-  assertBefore(handleBody, 'previewDuplicateRows(\n          resolveFilenameMappingFinalEntries(statementImportPlan)', 'return statementImportPreviewReady();',
+  // v3.2.21：最终条目在预检内只构建一次，余额方式冲突与重复账单两项检查共用（resolveFinalEntries）
+  assert.match(handleBody, /const resolveFinalEntries = \(\) => finalEntries \|\| \(finalEntries = resolveFilenameMappingFinalEntries\(statementImportPlan\)\);/);
+  assertBefore(handleBody, 'previewDuplicateRows(\n          resolveFinalEntries()', 'return statementImportPreviewReady();',
     '按文件名映射预检先查重再放行');
 
   // 大账号选择完成：prepare 在分配后预检，execute 在分叉前复核
   const completeBody = source.slice(source.indexOf('const completeBigAccountSelectionHandler = {'), source.indexOf("'file:complete-big-account-selection',\n    '生成账单'"));
-  assert.match(completeBody, /previewDuplicateRows\(\s*applyBigAccountAssignmentsToFileEntries\(/);
+  // v3.2.21：分配后的条目在预检内只构建一次，余额方式冲突与重复账单两项检查共用（resolveAssignedEntries）
+  assert.match(completeBody, /const resolveAssignedEntries = \(\) => assignedEntries \|\| \(assignedEntries = applyBigAccountAssignmentsToFileEntries\(/);
+  assert.match(completeBody, /previewDuplicateRows\(\s*resolveAssignedEntries\(\)/);
   const executeBody = completeBody.slice(completeBody.indexOf('async execute(_event, prepared, taskContext) {'));
   assertBefore(executeBody, 'applyConfirmedDuplicateRowFilter(', 'generateMultiTemplateGroupFiles(', '大账号完成先复核再分组生成');
   // 普通选择（不经重复账单确认）在任务开始前同样核对暂存的配置指纹

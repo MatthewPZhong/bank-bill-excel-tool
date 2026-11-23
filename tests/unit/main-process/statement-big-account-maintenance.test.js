@@ -124,6 +124,17 @@ for (const [emptyBlockOrdinal, label] of ['首段', '中间段', '末尾段'].en
   });
 }
 
+test('自己输入模式的账号桥接：完整 ID 精确命中优先于维护列表中排在前面的较短后缀', () => {
+  const options = normalizeMaintainedBigAccounts([
+    { merchantId: 'ACC-1', currencies: ['USD'] },
+    { merchantId: 'ACC-100', currencies: ['EUR'] }
+  ]);
+  const bridge = deps.findSelfInputBigAccountBridge({ bridgeClearingIdsByBlock: ['ACC-100', 'ACC-10'] }, options, 0);
+  assert.equal(bridge.merchantId, 'ACC-100');
+  // 没有精确命中时仍按维护顺序取第一个模糊命中（与修改前一致）
+  assert.equal(deps.findSelfInputBigAccountBridge({ bridgeClearingIdsByBlock: ['ACC-100', 'ACC-10'] }, options, 1).merchantId, 'ACC-1');
+});
+
 test('空分段定位：缺少冻结表头时保留预览行回退', () => {
   const context = fixture(['M002']);
   delete context.fileEntries[0].detailRows.bigAccountRecognitionBasis.headerWindows[0].headerRowNumber;
@@ -239,6 +250,9 @@ test('真实取消接口仅清理当前上下文；已准备的完成请求失�
     const checkImportConfigGuard = () => null;
     const IMPORT_CONFIG_CHANGED_MESSAGE = '';
     const DUPLICATE_REVIEW_CONFIG_CHANGED_MESSAGE = '';
+    // v3.2.21：渠道余额方式冲突预检（本用例不是按文件名映射模板）
+    const isFilenameMappingMode = () => false;
+    const findResolvedEntriesBalanceModeConflicts = () => null;
     ${declarations}
     return {
       cancel: ${source.slice(cancel.start, cancel.end)},
@@ -258,4 +272,170 @@ test('真实取消接口仅清理当前上下文；已准备的完成请求失�
   assert.equal((await h.complete.execute(null, prepared, {})).errorCode, 'BIG_ACCOUNT_SELECTION_MISSING');
   assert.deepEqual(h.getHistory(), history);
   assert.deepEqual(h.cancel(null, 'current-context'), { status: 'not-active' });
+});
+
+// v3.2.21（D3）：完成大账号选择的预检只分配余额方式不同的渠道组的条目（onlyEntries），账号块序号仍按整批累计。
+test('分配大账号可只返回指定条目：其余条目只计入账号块序号，注入结果与整批分配一致', () => {
+  const { cloneRowsWithMetadata } = require('../../../src/main-process/statement-session');
+  deps.cloneRowsWithMetadata = cloneRowsWithMetadata;
+  deps.buildFieldIndexMap = load('buildFieldIndexMap');
+  const assign = load('applyBigAccountAssignmentsToFileEntries');
+  const entry = (name) => ({
+    filePath: `/synthetic/${name}.xlsx`,
+    matchedTemplateId: 1,
+    detailRows: Object.assign([['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount'], ['2026-09-01', '', '', '1', '']], {
+      rowMetas: [{ sourceRowNumber: 2 }]
+    })
+  });
+  const entries = [entry('a'), entry('b'), entry('c')];
+  const assignments = ['M1', 'M2', 'M3'].map((merchantId, rowIndex) => ({ merchantId, currency: 'USD', rowIndex }));
+  const full = assign(entries, assignments);
+  const subset = assign(entries, assignments, { onlyEntries: new Set([entries[2], entries[0]]) });
+  assert.deepEqual(subset.map((item) => [item.filePath, item.detailRows[1][1]]), [['/synthetic/a.xlsx', 'M1'], ['/synthetic/c.xlsx', 'M3']]);
+  assert.deepEqual(subset.map((item) => item.detailRows), [full[0].detailRows, full[2].detailRows]);
+  assert.equal(entries[2].detailRows[1][1], '', '不改原条目');
+
+  // 不参与复核的文件按选择窗口已识别的账号块计数（countSelectionRowsByFile），结果与逐个识别相同
+  const countSelectionRowsByFile = load('countSelectionRowsByFile');
+  const selectionRows = deps.buildBigAccountSelectionRows(entries);
+  const blockCounts = countSelectionRowsByFile(selectionRows, entries);
+  assert.deepEqual([...blockCounts.entries()], entries.map((item) => [item.filePath, 1]));
+  const counted = assign(entries, assignments, { onlyEntries: new Set([entries[2]]), blockCounts });
+  assert.deepEqual(counted.map((item) => item.detailRows[1][1]), ['M3']);
+  // 行的文件对不上条目时不用计数（调用方退回逐个识别）
+  assert.equal(countSelectionRowsByFile([{ filePath: '/synthetic/other.xlsx' }], entries), null);
+  assert.equal(countSelectionRowsByFile(undefined, entries), null);
+});
+
+test('完成大账号选择：分配后渠道同一账户命中不同余额方式时未开始即拒绝，释放本次选择、历史结果保留', () => {
+  const { FileValidationError } = require('../../../src/backend/file-service');
+  const all = [];
+  (function visit(node) {
+    if (!node || typeof node !== 'object') return;
+    if (node.type) all.push(node);
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) value.forEach(visit);
+      else if (value && typeof value === 'object') visit(value);
+    }
+  })(ast);
+  const complete = all.find((n) => n.type === 'VariableDeclarator' && n.id.name === 'completeBigAccountSelectionHandler').init;
+  const declarations = ['clearPendingBigAccountSelection', 'requirePendingBigAccountSelection', 'buildChannelBalanceModeMismatchError', 'maskAccountLikeTextForLog', 'countSelectionRowsByFile']
+    .map((name) => {
+      const node = ast.body.find((n) => n.type === 'FunctionDeclaration' && n.id.name === name);
+      return source.slice(node.start, node.end);
+    }).join('\n');
+  const pending = {
+    contextId: 'current-context',
+    templateId: '__FILENAME_MAPPING__',
+    sourceSelections: [],
+    fileEntries: [{ id: 'plain' }, { id: 'mixed-1' }, { id: 'mixed-2' }],
+    // 导入预检时记下的余额方式不同的渠道组的条目位置
+    balanceModeMixedEntryIndexes: [1, 2]
+  };
+  const history = { exports: [{ batchId: 'previous' }], importContext: { currentBatchId: 'previous' } };
+  const conflictGroups = [{
+    channelName: '招商银行-上海',
+    lines: ['账户 M601（USD）：招商银行-上海（不出余额）、CMB-SH（取账单余额列）'],
+    accountCount: 1,
+    templateNames: ['招商银行-上海', 'CMB-SH']
+  }];
+  const resolvedSubsets = [];
+  const h = Function('normalizeCell', 'FileValidationError', 'pending', 'history', 'conflictGroups', 'resolvedSubsets', `
+    let lastPendingBigAccountSelection = pending;
+    let lastGeneratedExports = history.exports;
+    let lastFileImportContext = history.importContext;
+    const createPreflightErrorResult = (result) => ({ status: 'error', ...result });
+    const normalizePendingBigAccountSelection = () => ({ isFixedMode: false, normalizedAssignments: [] });
+    const buildStatementInputFilePlanItems = () => [];
+    const statementDuplicateReview = { cancel: () => null, requireContext: () => null, clear: () => {} };
+    const hasDuplicateRowKeys = () => false;
+    const IMPORT_CONFIG_CHANGED_MESSAGE = '';
+    const DUPLICATE_REVIEW_CONFIG_CHANGED_MESSAGE = '';
+    const isFilenameMappingMode = (templateId) => templateId === '__FILENAME_MAPPING__';
+    const applyBigAccountAssignmentsToFileEntries = (_entries, _assignments, options) => {
+      resolvedSubsets.push(options && options.onlyEntries ? options.onlyEntries.size : 'all');
+      return [];
+    };
+    const pickResolvedEntries = () => { throw new Error('未查重时不应整批分配'); };
+    const findResolvedEntriesBalanceModeConflicts = (mixedEntries, resolveEntries) => {
+      resolvedSubsets.push(mixedEntries.map((entry) => entry.id));
+      resolveEntries(mixedEntries);
+      return conflictGroups;
+    };
+    ${declarations}
+    return {
+      complete: ${source.slice(complete.start, complete.end)},
+      getPending: () => lastPendingBigAccountSelection,
+      getHistory: () => ({ exports: lastGeneratedExports, importContext: lastFileImportContext })
+    };
+  `)(normalizeCell, FileValidationError, pending, history, conflictGroups, resolvedSubsets);
+  const prepared = h.complete.prepare(null, { contextId: 'current-context' });
+  assert.equal(prepared.proceed, false);
+  assert.deepEqual([prepared.result.errorCode, prepared.result.detailLines], ['CHANNEL_BALANCE_MODE_MISMATCH', conflictGroups[0].lines]);
+  assert.match(prepared.result.message, /^渠道「招商银行-上海」下同一账户命中了余额方式不同的子模板/);
+  assert.deepEqual(resolvedSubsets, [['mixed-1', 'mixed-2'], 2], '只取导入时记下位置的条目，只分配这些条目');
+  assert.equal(h.getPending(), null, '释放本次大账号选择');
+  assert.deepEqual(h.getHistory(), history, '上一批的导出与会话不变');
+});
+
+// v3.2.21（D3）：导入预检记下的余额方式不同的渠道组的条目位置经真实的暂存→取回保留（含空数组），完成选择时按位置复核
+test('暂存大账号选择上下文时保留余额方式不同的渠道组的条目位置', () => {
+  const { cloneRowsWithMetadata } = require('../../../src/main-process/statement-session');
+  const store = Function('normalizeCell', 'randomUUID', 'normalizeInputFilePaths', 'cloneRowsWithMetadata', 'path', `
+    let lastPendingBigAccountSelection = null;
+    ${['rememberPendingBigAccountSelection', 'requirePendingBigAccountSelection']
+      .map((name) => {
+        const node = ast.body.find((n) => n.type === 'FunctionDeclaration' && n.id.name === name);
+        return source.slice(node.start, node.end);
+      }).join('\n')}
+    return { rememberPendingBigAccountSelection, requirePendingBigAccountSelection };
+  `)(normalizeCell, () => 'ctx-1', (paths) => [].concat(paths || []), cloneRowsWithMetadata, path);
+  const entry = (name) => ({ filePath: `/synthetic/${name}.xlsx`, matchedTemplateId: 1, detailRows: [['BillDate'], ['2026-09-01']] });
+  for (const indexes of [[1, 2], [], undefined]) {
+    const contextId = store.rememberPendingBigAccountSelection({
+      templateId: '__FILENAME_MAPPING__',
+      fileEntries: [entry('a'), entry('b'), entry('c')],
+      ...(indexes ? { balanceModeMixedEntryIndexes: indexes } : {})
+    });
+    const stored = store.requirePendingBigAccountSelection(contextId);
+    assert.deepEqual(stored.balanceModeMixedEntryIndexes, indexes === undefined ? null : indexes);
+    if (indexes) assert.notEqual(stored.balanceModeMixedEntryIndexes, indexes, '复制一份，不与导入时的数组共用');
+  }
+});
+
+// v3.2.21 release 审查：手动分配大账号与自动选定同一口径，长数字提示中只写进被覆盖列（MerchantId / Currency）的源字段不再提示
+test('手动分配大账号：被分配的行中只写进大账号 / 币种列的长数字提示去掉，写进其他列的与未分配行的照常保留', () => {
+  const { cloneRowsWithMetadata } = require('../../../src/main-process/statement-session');
+  deps.cloneRowsWithMetadata = cloneRowsWithMetadata;
+  deps.buildFieldIndexMap = load('buildFieldIndexMap');
+  deps.dropIssuesOverriddenBySelectedBigAccount = load('dropIssuesOverriddenBySelectedBigAccount');
+  const assign = load('applyBigAccountAssignmentsToFileEntries');
+  const longNumber = (rowNumber, cells) => ({ type: 'long-number-unverified', fileName: 'a.xlsx', rowNumber, cells });
+  const issues = [
+    longNumber(2, [{ sourceField: '币种码', digitCount: 19, targetFields: ['Currency'] }]),
+    longNumber(3, [
+      { sourceField: '币种码', digitCount: 19, targetFields: ['Currency'] },
+      { sourceField: '卡号', digitCount: 19, targetFields: ['Payee CardNo', 'Currency'] }
+    ]),
+    { type: 'currency-unmapped', fileName: 'a.xlsx', rowNumber: 2 }
+  ];
+  const entry = {
+    filePath: '/synthetic/a.xlsx',
+    matchedTemplateId: 1,
+    detailRows: Object.assign([
+      ['BillDate', 'MerchantId', 'Currency', 'Payee CardNo', 'Credit Amount', 'Debit Amount'],
+      ['2026-09-01', '', 'X', '', '1', ''],
+      ['2026-09-02', '', 'X', 'C', '2', '']
+    ], { rowMetas: [{ sourceRowNumber: 2 }, { sourceRowNumber: 3 }], issues })
+  };
+  const [assigned] = assign([entry], [{ merchantId: 'M1', currency: 'USD', rowIndex: 0 }]);
+  assert.deepEqual(assigned.detailRows.slice(1).map((row) => [row[1], row[2]]), [['M1', 'USD'], ['M1', 'USD']]);
+  assert.deepEqual(assigned.detailRows.issues, [
+    longNumber(3, [{ sourceField: '卡号', digitCount: 19, targetFields: ['Payee CardNo', 'Currency'] }]),
+    { type: 'currency-unmapped', fileName: 'a.xlsx', rowNumber: 2 }
+  ]);
+  assert.equal(entry.detailRows.issues.length, 3, '不改原条目');
+  // 没有分配的账号块：行与提示都不变
+  const [unassigned] = assign([entry], []);
+  assert.deepEqual(unassigned.detailRows.issues, issues);
 });

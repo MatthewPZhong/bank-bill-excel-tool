@@ -41,7 +41,8 @@ function setStatus(message, tone = 'info', options = {}) {
     manualBalancePromptReady: state.manualBalancePromptReady,
     manualBalancePromptTitle: ({ gap: '点击处理账单日期断档', mismatch: '点击处理余额校验不一致', 'seed-replace': '点击处理人工补录余额替换' })[state.manualBalancePrompt?.reason]
       || (state.manualBalancePrompt?.seedMismatch ? '点击核对上一账单日余额' : ''),
-    idleTitle: options.idleTitle ?? getStatusBoxTitle(config.getAccountMappingCount())
+    idleTitle: options.idleTitle ?? getStatusBoxTitle(config.getAccountMappingCount()),
+    logMessage: options.logMessage
   });
 }
 
@@ -67,6 +68,15 @@ function getStatusBoxTitle(accountMappingCount) {
   return `${mappingSummary}；应用已内置 COMMON 枚举表`;
 }
 
+// v3.2.16：「原始账单仅有币种无账户号」币种未维护大账号；v3.2.21：渠道同一账户命中余额方式不同的子模板、渠道出余额的
+//   子模板有交易缺账单日期或 MerchantId。这几类整批阻断须逐项处理，弹窗列出明细
+function hasAlertableErrorDetails(result) {
+  const code = String(result && result.errorCode || '');
+  return (code.startsWith('CURRENCY_BIG_ACCOUNT_') || code === 'CHANNEL_BALANCE_MODE_MISMATCH' || code === 'CHANNEL_BALANCE_ROWS_INCOMPLETE')
+    && Array.isArray(result.detailLines)
+    && result.detailLines.length > 0;
+}
+
 function applyStatementResult(result, { allowAlerts = true } = {}) {
   if (result.status === 'cancelled') {
     return false;
@@ -81,20 +91,18 @@ function applyStatementResult(result, { allowAlerts = true } = {}) {
   setStatus(result.message, tone, {
     errorReportReady: Boolean(result.errorReportReady),
     manualBalancePromptReady: Boolean(result.manualBalancePromptReady),
-    manualBalancePrompt: result.manualBalancePrompt || null
+    manualBalancePrompt: result.manualBalancePrompt || null,
+    // 结果另给的日志摘要（渠道名可能以账号命名，release 审查）
+    logMessage: result.logMessage
   });
 
   if (allowAlerts && Array.isArray(result.unmatchedAmountSplitFiles) && result.unmatchedAmountSplitFiles.length) {
     ui.alertNative(`以下文件全部未命中收支规则，请检查规则配置：\n${result.unmatchedAmountSplitFiles.join('\n')}`);
   }
 
-  // v3.2.16：「原始账单仅有币种无账户号」币种未维护大账号时整批阻断，弹窗列出文件、币种和行号
-  if (
-    allowAlerts
-    && String(result.errorCode || '').startsWith('CURRENCY_BIG_ACCOUNT_')
-    && Array.isArray(result.detailLines)
-    && result.detailLines.length
-  ) {
+  // v3.2.16：「原始账单仅有币种无账户号」币种未维护大账号时整批阻断，弹窗列出文件、币种和行号；
+  //   v3.2.21：渠道同一账户命中余额方式不同的子模板时同样弹窗，逐账户列出
+  if (allowAlerts && hasAlertableErrorDetails(result)) {
     ui.alertNative([result.message, ...result.detailLines].join('\n'));
   }
 
@@ -343,7 +351,9 @@ async function handleOpenAccountMappings() {
         if(result.status==='duplicate-review') { openInteraction(kind,result,()=>createDuplicateRowsReviewDialog(result)); return; }
         // v3.2.19：未开始导入的拒绝（如只覆盖跨文件去重的一端）：会话、导出与补录入口都没变，只弹提示，不改状态框与导出按钮
         if(result.status==='error'&&result.preservesSession) {
-          const text=String(result.message||'').replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[ch]);
+          // v3.2.21：完成大账号选择时才发现的余额方式冲突，弹窗一并逐账户列出
+          const lines=[result.message||''].concat(hasAlertableErrorDetails(result)?result.detailLines:[]);
+          const text=lines.map(line=>String(line).replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[ch])).join('<br/>');
           // 消息含文件名（可能含账户号）：只在弹窗显示，不写入活动日志。宿主拒绝打开（如另一个弹窗正在提交）时保留这条提示，
           //   用户再点「导入文件」时弹出（不重新导入）
           openInteraction(kind,result,()=>createAlertDialog(text,{skipLogReport:true})); return;
@@ -377,8 +387,11 @@ async function handleOpenAccountMappings() {
       setStatus(result.message || (kind==='monthly'?(result.status==='success'?'月度余额账单导出成功':'月度余额账单导出失败'):''),result.status==='success'?'success':'error',{
         errorReportReady:kind==='error'&&result.status==='success'?true:Boolean(result.errorReportReady),
         manualBalancePromptReady:Boolean(keepBalancePrompt),
-        manualBalancePrompt:keepBalancePrompt?state.manualBalancePrompt:null
+        manualBalancePrompt:keepBalancePrompt?state.manualBalancePrompt:null,
+        logMessage:result.logMessage
       });
+      // v3.2.21：「导出全部」前发现渠道同一账户命中余额方式不同的子模板，弹窗逐账户列出
+      if(hasAlertableErrorDetails(result))ui.alertNative([result.message,...result.detailLines].join('\n'));
     }
     // 等待用户继续的选择 / 确认：另存此前的状态框反馈（含上一批待补录余额的入口），提示期间保留补录入口；用户继续时若状态框
     //   仍是这条等待提示则恢复原反馈，之后取消选择 / 确认也不会丢掉上一批的可用操作；期间已有新反馈（如完成了补录）则保留新反馈。
@@ -415,8 +428,12 @@ async function handleOpenAccountMappings() {
         deferInteraction(kind, result);
         return;
       }
-      if (kind === 'import') applyStatementResult(result, { allowAlerts: false });
-      else present(kind, result);
+      if (kind === 'import') {
+        applyStatementResult(result, { allowAlerts: false });
+        // v3.2.21：离页期间失败、须逐项处理的明细（如渠道出余额的交易缺账单日期或 MerchantId）回到本页时仍弹窗列出；
+        //   错误报告与状态框不含文件名，不弹就看不到是哪份文件哪一行
+        if (hasAlertableErrorDetails(result)) ui.alertNative([result.message, ...result.detailLines].join('\n'));
+      } else present(kind, result);
     }
     async function perform(kind,work) {
       if(!live()||busy)return;

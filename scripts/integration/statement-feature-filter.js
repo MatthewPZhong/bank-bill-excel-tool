@@ -39,6 +39,9 @@ const {
   MERCHANT_ID_CURRENCY_ONLY_MARKER,
   normalizeCell,
   normalizeFeeAmountFormula,
+  normalizeFeeFieldMappings,
+  validateFeeFieldMappings,
+  isFeeFieldMappingTemplateFieldExcluded,
   normalizeBillSplitRowFilterRules,
   normalizeRowFilterRules,
   validateRowFilterRules,
@@ -47,6 +50,9 @@ const {
   validateBillSplitRowFilterRules,
   normalizeFeatureFilterList,
   parseFeatureFilterToken,
+  parseLogicValueToken,
+  parseLogicValueFeatureFilterRef,
+  buildLogicValueFeatureCandidate,
   resolveUsedFeatureFilters,
   upgradeLegacyFeatureFilter,
   writeWorkbookRows
@@ -120,7 +126,7 @@ const CONSTANTS = loadMainConstants([
   'BILL_SPLIT_ROW_FILTER_MAPPING_FIELD', 'BILL_SPLIT_ROW_FILTER_ENABLED_OPTION',
   'PREPROCESS_ROW_FILTER_MAPPING_FIELD', 'PREPROCESS_ROW_FILTER_ENABLED_OPTION', 'DUPLICATE_ROW_FILTER_MAPPING_FIELD',
   'DUPLICATE_ROW_FILTER_ENABLED_OPTION', 'PREPROCESS_FIELDS',
-  'SUPPORTED_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION', 'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS'
+  'SUPPORTED_BUNDLE_VERSION', 'LOGIC_VALUE_FEATURE_BUNDLE_VERSION', 'FEE_FIELD_MAPPING_BUNDLE_VERSION', 'LOGIC_VALUE_BUNDLE_VERSION', 'FEATURE_FILTER_BUNDLE_VERSION', 'CURRENCY_ONLY_BUNDLE_VERSION', 'BASE_BUNDLE_VERSION', 'ADVANCED_MAPPING_FIELDS', 'BILL_SPLIT_GROUP_FIELDS'
 ]);
 const FEATURE = CONSTANTS.FEATURE_FILTER_MAPPING_FIELD;
 
@@ -200,6 +206,9 @@ function createMain(database, constantOverrides = {}) {
     normalizeCell,
     // v3.2.19：拆分配置的费用账单公式（模板包读取、生成配置）
     normalizeFeeAmountFormula,
+    normalizeFeeFieldMappings,
+    validateFeeFieldMappings,
+    isFeeFieldMappingTemplateFieldExcluded,
     normalizeBillSplitRowFilterRules,
     normalizeRowFilterRules,
     validateRowFilterRules,
@@ -217,6 +226,9 @@ function createMain(database, constantOverrides = {}) {
     LEGACY_FEATURE_FILTER_ID,
     normalizeFeatureFilterList,
     parseFeatureFilterToken,
+    parseLogicValueToken,
+    parseLogicValueFeatureFilterRef,
+    buildLogicValueFeatureCandidate,
     resolveUsedFeatureFilters,
     upgradeLegacyFeatureFilter,
     buildMappedRows,
