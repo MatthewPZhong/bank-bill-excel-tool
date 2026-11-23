@@ -38,7 +38,7 @@
   "productionEnablementAllowed": false,
   "sourceHashes": {
     "scripts/check-background-execution-manifest.js": "277c14eac8c4dd3d12e1beb3cbb5ef1bde12d12de4cb45ed9036173a11dd4e76",
-    "src/main.js": "e66ed734d022e1e8c42cb4413682919f3ac7cd086cb03f350809c1491398f53f",
+    "src/main.js": "ca4e9ea65f00495ae21010f121554d96949d605b003bb0df251de2ddbebbb422",
     "src/main-process/archive-center/task-policy-registry.js": "29af4fa4df95a6c09a63caf44da2869ac00ae844af0f958e0fa06ec8c73ed7b7",
     "src/main-process/background-execution/action-task-binding-registry.js": "283ab50149f4bba221c727c6fad20b784d18716ccfaba22f7463537e9d928bfd",
     "src/main-process/background-execution/action-manifest.js": "b2a1b8cc7573d991e1960928d940dd5356fcf35047cb70250172e6288218988e",

@@ -1073,3 +1073,40 @@ test('余额方式为「无」或「通过发生额计算」时，拆分映射�
   // 取账单余额列：拆分映射的 Balance 参与余额计算，照常提示
   assert.deepEqual(issueTargets(generate('余额', { Balance: '参考号' })), [['参考号', ['Balance']]]);
 });
+
+test('XLSX：工作簿关系文件注释里的旧关系不算，不把另一张表的流水号写进当前表；同一关系 Id 有多条有效关系时不还原并提示', async (t) => {
+  const dir = createTempDir(t);
+  const WORKSHEET_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet';
+  // 两张表同一位置的流水号舍入为同一数值（9007199254740996），数值核对发现不了串表
+  const build = async (fileName, transformRels) => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([HEADER, ['2026-11-01', 'USD', 100, 1111, 5]]), 'Sheet1');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([HEADER, ['2026-11-01', 'USD', 999, 2222, 6]]), 'Sheet2');
+    const zip = await JSZip.loadAsync(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
+    for (const [sheetPath, placeholder, literal] of [
+      ['xl/worksheets/sheet1.xml', 1111, '9007199254740996'],
+      ['xl/worksheets/sheet2.xml', 2222, '9007199254740995']
+    ]) {
+      const xml = await zip.file(sheetPath).async('string');
+      assert.ok(xml.includes(`<v>${placeholder}</v>`), sheetPath);
+      zip.file(sheetPath, xml.replace(`<v>${placeholder}</v>`, `<v>${literal}</v>`));
+    }
+    const rels = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+    assert.match(rels, /<Relationship Id="rId1" [^>]*Target="worksheets\/sheet1\.xml"/);
+    zip.file('xl/_rels/workbook.xml.rels', transformRels(rels));
+    const filePath = path.join(dir, fileName);
+    fs.writeFileSync(filePath, await zip.generateAsync({ type: 'nodebuffer' }));
+    return filePath;
+  };
+  const staleRelation = `<Relationship Id="rId1" Type="${WORKSHEET_TYPE}" Target="worksheets/sheet2.xml"/>`;
+  const commented = await build('commented-rels.xlsx', (rels) => rels.replace('<Relationship ', `<!-- ${staleRelation} --><Relationship `));
+  const mapped = map(commented);
+  assert.deepEqual(mapped.slice(1).map((row) => row[TARGETS.indexOf('Credit Amount')]), ['100'], '读取库读的是第一张表');
+  assert.deepEqual(identifiers(mapped).map(([serial]) => String(serial)), ['9007199254740996']);
+  assert.deepEqual(longNumberIssues(mapped), []);
+
+  const duplicated = await build('duplicated-rels.xlsx', (rels) => rels.replace('<Relationship ', `${staleRelation}<Relationship `));
+  const unverified = map(duplicated);
+  assert.deepEqual(identifiers(unverified).map(([serial]) => String(serial)), ['9007199254740996']);
+  assert.deepEqual(longNumberIssues(unverified).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
+});

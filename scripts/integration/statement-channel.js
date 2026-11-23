@@ -441,6 +441,7 @@ function createEnvironment(dir, label) {
     'resolveGenerationGroupChannelName',
     'collectGroupBalanceIssuesWithoutConfig',
     'buildChannelBalanceModeMismatchError',
+    'maskAccountLikeTextForLog',
     'buildPreparedStatementBatchFromEntries',
     'resolveEntryBalanceMode',
     'applyEntryBalanceModes',

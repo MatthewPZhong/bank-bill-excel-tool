@@ -311,7 +311,9 @@ function createStatementGenerationHelpers(deps) {
       result.detail = {
         filePath: detailOutput.outputFilePath,
         fileName: detailOutput.outputFileName,
-        templateName: statementOutputName(config)
+        templateName: statementOutputName(config),
+        // v3.2.21：明细文件名的日期（写出的明细行；只写出表头时为全部行），多组汇总时按它命名明细文件
+        billDates
       };
     }
 

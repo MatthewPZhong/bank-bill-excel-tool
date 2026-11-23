@@ -344,7 +344,13 @@ function getZipEntryBuffer(files, entryPath) {
   return entry && entry.content ? Buffer.from(entry.content) : null;
 }
 
-// 按 workbook.xml 中 <sheet> 的顺序（即 SheetNames 的顺序）与关系文件找到工作表 XML；找不到返回 null
+// XML 注释不是内容：注释里的旧关系、旧 <sheet> 等不能当作有效标签（release 审查）
+function stripXmlComments(text) {
+  return String(text).replace(/<!--[\s\S]*?-->/g, '');
+}
+
+// 按 workbook.xml 中 <sheet> 的顺序（即 SheetNames 的顺序）与关系文件找到工作表 XML；找不到返回 null。
+//   注释里的标签不算；同一关系 Id 有多条有效关系时无法唯一确认来源，同样返回 null（按无法核对原值处理）
 function findXlsxSheetXml(workbook, sheetName) {
   const files = workbook && workbook.files;
   const directory = workbook && workbook.Directory;
@@ -354,15 +360,16 @@ function findXlsxSheetXml(workbook, sheetName) {
   const workbookDir = String(workbookPath).replace(/^\/+/, '').split('/').slice(0, -1).join('/');
   const relsXml = getZipEntryBuffer(files, `${workbookDir ? `${workbookDir}/` : ''}_rels/${String(workbookPath).split('/').pop()}.rels`);
   if (!relsXml) return null;
-  const sheetTags = workbookXml.toString('utf8').match(/<(?:[\w.-]+:)?sheet\b[^>]*>/g) || [];
+  const sheetTags = stripXmlComments(workbookXml.toString('utf8')).match(/<(?:[\w.-]+:)?sheet\b[^>]*>/g) || [];
   const sheetIndex = Array.isArray(workbook.SheetNames) ? workbook.SheetNames.indexOf(sheetName) : -1;
   const sheetTag = sheetIndex >= 0 ? sheetTags[sheetIndex] : null;
   if (!sheetTag || readXmlAttribute(sheetTag, 'name') !== sheetName) return null;
   const relationId = readXmlAttribute(sheetTag, '[\\w.-]+:id');
   if (!relationId) return null;
-  const relationTag = (relsXml.toString('utf8').match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || [])
-    .find((tag) => readXmlAttribute(tag, 'Id') === relationId);
-  const target = relationTag ? readXmlAttribute(relationTag, 'Target') : null;
+  const relationTags = (stripXmlComments(relsXml.toString('utf8')).match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || [])
+    .filter((tag) => readXmlAttribute(tag, 'Id') === relationId);
+  if (relationTags.length !== 1) return null;
+  const target = readXmlAttribute(relationTags[0], 'Target');
   return target ? getZipEntryBuffer(files, normalizeZipPath(workbookDir, target)) : null;
 }
 
@@ -380,7 +387,7 @@ function readXlsxSharedStringSources(workbook) {
   if (workbookPath) {
     const workbookDir = String(workbookPath).replace(/^\/+/, '').split('/').slice(0, -1).join('/');
     const relsXml = getZipEntryBuffer(files, `${workbookDir ? `${workbookDir}/` : ''}_rels/${String(workbookPath).split('/').pop()}.rels`);
-    const relationTag = relsXml && (relsXml.toString('utf8').match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || [])
+    const relationTag = relsXml && (stripXmlComments(relsXml.toString('utf8')).match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || [])
       .find((tag) => /\/sharedStrings$/.test(readXmlAttribute(tag, 'Type') || ''));
     const target = relationTag ? readXmlAttribute(relationTag, 'Target') : null;
     if (target) sstPath = normalizeZipPath(workbookDir, target);
@@ -946,7 +953,7 @@ function readXlsxIntegerLiterals(filePath, workbook, sheetName, candidates) {
   const literals = new Map();
   const duplicated = new Set();
   // XML 注释不是内容：先去掉，避免注释里的 <c> / <v> 被当成单元格或值
-  const text = xml.toString('utf8').replace(/<!--[\s\S]*?-->/g, '');
+  const text = stripXmlComments(xml.toString('utf8'));
   // 各 <row> 的起点与行号（没有 r 属性时按前一行顺推，与读取库相同）
   const rowStarts = [];
   const rowTagPattern = /<(?:[\w.-]+:)?row\b([^>]*?)\/?>/g;

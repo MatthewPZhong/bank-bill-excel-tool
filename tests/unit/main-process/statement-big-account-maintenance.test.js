@@ -319,7 +319,7 @@ test('完成大账号选择：分配后渠道同一账户命中不同余额方�
     }
   })(ast);
   const complete = all.find((n) => n.type === 'VariableDeclarator' && n.id.name === 'completeBigAccountSelectionHandler').init;
-  const declarations = ['clearPendingBigAccountSelection', 'requirePendingBigAccountSelection', 'buildChannelBalanceModeMismatchError', 'countSelectionRowsByFile']
+  const declarations = ['clearPendingBigAccountSelection', 'requirePendingBigAccountSelection', 'buildChannelBalanceModeMismatchError', 'maskAccountLikeTextForLog', 'countSelectionRowsByFile']
     .map((name) => {
       const node = ast.body.find((n) => n.type === 'FunctionDeclaration' && n.id.name === name);
       return source.slice(node.start, node.end);

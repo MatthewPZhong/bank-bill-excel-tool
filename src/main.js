@@ -330,7 +330,7 @@ const {
 } = require('./main-process/linked-table-retention/policy');
 const linkedTableReaders = require('./backend/file-service/readers');
 // v3.2.21：渠道余额方式不同时按明细导出的口径识别收支都为空或 0 的行
-const { isZeroOrBlankAmount } = require('./backend/file-service/normalizers');
+const { isDetailExportAmountRow, isZeroOrBlankAmount } = require('./backend/file-service/normalizers');
 const {
   normalizeCell: normalizeLinkedCell,
   trimTrailingEmptyCells: trimToolboxTrailingEmptyCells,
@@ -12742,9 +12742,9 @@ function inspectBalanceEntryRows(balanceEntries, lineLimit = 200) {
   shownIssues.forEach((issue) => {
     const missing = [issue.missingDate ? '账单日期' : '', issue.missingMerchantId ? 'MerchantId' : ''].filter(Boolean).join('、');
     const problem = issue.missingDate ? `缺少${missing}` : `缺少 ${missing}（账单日期：${issue.billDate}）`;
-    const location = `（子模板「${issue.item.templateName}」）第${issue.sourceRowNumber}行：${problem}`;
-    lines.push(`文件「${issue.item.fileName}」${location}`);
-    persistedLines.push(`本组第${issue.item.fileOrdinal}个文件${location}`);
+    lines.push(`文件「${issue.item.fileName}」（子模板「${issue.item.templateName}」）第${issue.sourceRowNumber}行：${problem}`);
+    // 落盘（错误报告、活动日志）不写文件名，子模板名（用户填写，可能以账号命名）中的编号只写位数（release 审查）
+    persistedLines.push(`本组第${issue.item.fileOrdinal}个文件（子模板「${maskAccountLikeTextForLog(issue.item.templateName)}」）第${issue.sourceRowNumber}行：${problem}`);
   });
   return { hasEffectiveRow, lines, persistedLines, issueCount };
 }
@@ -13122,8 +13122,9 @@ function buildChannelBalanceModeMismatchError(conflictGroups) {
     { detailLines, context: { channelName: channelNames.join('、') } }
   );
   error.conflictGroups = groups;
+  // 子模板名由用户填写、可能以账号命名：落盘时其中的编号只写位数（release 审查）
   error.persistedDetailLines = groups.map((item) => (
-    `渠道「${item.channelName}」：${item.accountCount} 个账户命中余额方式不同的子模板（${item.templateNames.join('、')}）`
+    `渠道「${item.channelName}」：${item.accountCount} 个账户命中余额方式不同的子模板（${item.templateNames.map((name) => maskAccountLikeTextForLog(name)).join('、')}）`
   ));
   return error;
 }
@@ -13630,10 +13631,9 @@ function generateMultiTemplateGroupFiles({
     for (const date of (groupGeneratedFiles.balance && groupGeneratedFiles.balance.billDates) || []) allBalanceDates.push(date);
     // 逐条合并：告警可能每行一条（如 v3.2.21 长数字提示），展开传参会超过函数参数上限
     if (Array.isArray(groupGeneratedFiles.warnings)) groupGeneratedFiles.warnings.forEach((warning) => allWarnings.push(warning));
-    try {
-      // 逐个追加：每笔交易一个日期，展开成参数在大批量时会超出调用栈
-      for (const date of parseRequiredBillDates(groupPreparedBatch.detailRows)) allBillDates.push(date);
-    } catch (_ignored) {}
+    // v3.2.21：明细汇总按各组写出明细时确定的日期命名（剔除跳过的零金额行，与单组明细文件、另存为默认文件名同口径）；
+    //   逐个追加，展开成参数在大批量时会超出调用栈
+    for (const date of (groupGeneratedFiles.detail && groupGeneratedFiles.detail.billDates) || []) allBillDates.push(date);
 
     lastGenerationTemplateConfig = groupTemplateConfig;
     allFileEntries.push(...effectiveEntries);
@@ -14074,7 +14074,7 @@ function getGeneratedStatementExport(kind, scope = 'current') {
 
 function buildStatementExportPlan(kind, scope = 'auto') {
   // v3.2.21（D2）：另存为默认文件名的日期范围与生成时的文件名同口径（release 审查）：先按全部明细行校验账单日期（原有检查），
-  //   再按实际写出的行取日期——剔除收支都为空或 0 的行（buildDetailExportRows，生成时跳过）；明细没有其他行时按全部明细行；
+  //   再按实际写出的行取日期——剔除收支都为空或 0 的行（生成时跳过）；明细没有其他行时按全部明细行；
   //   余额只取出余额的条目的行（preparedBatch.balanceDetailRows），组内都不出余额或没有出余额的交易时不计
   const exportNamingDatesOf = (preparedBatch) => {
     const detailDates = parseRequiredBillDates(preparedBatch.detailRows);
@@ -14083,7 +14083,17 @@ function buildStatementExportPlan(kind, scope = 'auto') {
     const sourceRows = balanceKind && Array.isArray(preparedBatch.balanceDetailRows)
       ? preparedBatch.balanceDetailRows
       : preparedBatch.detailRows;
-    const writtenRows = buildDetailExportRows(sourceRows).sourceRows;
+    // 只取写出的行的引用（isDetailExportAmountRow，与 buildDetailExportRows 同一判断），不复制行
+    const header = Array.isArray(sourceRows[0]) ? sourceRows[0] : [];
+    const creditIndex = header.findIndex((field) => normalizeCell(field) === 'Credit Amount');
+    const debitIndex = header.findIndex((field) => normalizeCell(field) === 'Debit Amount');
+    const writtenRows = [header];
+    for (let index = 1; index < sourceRows.length; index += 1) {
+      const row = Array.isArray(sourceRows[index]) ? sourceRows[index] : [];
+      if (isDetailExportAmountRow(row[creditIndex], row[debitIndex], { hasCredit: creditIndex >= 0, hasDebit: debitIndex >= 0 })) {
+        writtenRows.push(row);
+      }
+    }
     if (writtenRows.length > 1) return parseRequiredBillDates(writtenRows);
     return balanceKind ? [] : detailDates;
   };
@@ -14412,15 +14422,9 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
         // 不在循环内 return balance-seed-required；收集 warnings 后统一处理
         // （补录后重新导出时 seed 已持久化，该组能正常生成余额）
 
-        if (kind === 'balance') {
-          // v3.2.21：余额汇总文件按实际写出的余额记录日期命名（与单组余额文件、另存为默认文件名同口径）
-          for (const date of (groupGeneratedFiles.balance && groupGeneratedFiles.balance.billDates) || []) exportBillDates.push(date);
-        } else {
-          try {
-            // 逐个追加：每笔交易一个日期，展开成参数在大批量时会超出调用栈
-            for (const date of parseRequiredBillDates(groupPreparedBatch.detailRows)) exportBillDates.push(date);
-          } catch (_ignored) {}
-        }
+        // v3.2.21：汇总文件按各组实际写出的余额记录 / 明细行的日期命名（与单组文件、另存为默认文件名同口径）；逐个追加
+        const generatedFileOfKind = kind === 'balance' ? groupGeneratedFiles.balance : groupGeneratedFiles.detail;
+        for (const date of (generatedFileOfKind && generatedFileOfKind.billDates) || []) exportBillDates.push(date);
         perGroupPaths.push({
           // 渠道组按渠道名列出（与输出文件、余额银行名同口径），普通模板为模板名。
           templateName: groupGenConfig.outputName || templateConfig.template.name,

@@ -25,6 +25,7 @@ const {
 } = require('../../../src/backend/balance-seed-store');
 const { readBalanceAdjustments } = require('../../../src/backend/balance-adjustment-store');
 const { createStatementGenerationHelpers } = require('../../../src/main-process/statement-generation');
+const { isDetailExportAmountRow } = require('../../../src/backend/file-service/normalizers');
 const {
   buildDateRangeLabel,
   buildFieldIndexMap,
@@ -1733,7 +1734,9 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
       });
     }
     const fileEntries = groups.map((group) => ({
-      ...mappedSourceEntry(root, `${scenario}-${group.id}.xlsx`, group.dates.map((date) => [date, group.merchantId, 'USD', '100', ''])),
+      ...mappedSourceEntry(root, `${scenario}-${group.id}.xlsx`, group.dates.map((date) => [date, group.merchantId, 'USD', '100', ''])
+        // 只有一条零金额行的日期：生成时跳过，不进明细与余额文件，也不进汇总文件名
+        .concat(scenario === 'merged-dates' && group.id === 1 ? [['2026-08-30', group.merchantId, 'USD', '0', '']] : [])),
       matchedTemplateId: group.id
     }));
     const templateNameById = new Map(groups.map((group) => [group.id, group.templateName]));
@@ -1825,7 +1828,7 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
 
     const [generatedFiles] = imported;
     if (scenario === 'merged-dates') {
-      // release 审查：余额汇总文件按各组实际写出的余额记录日期命名，明细汇总按全部明细日期
+      // release 审查：余额汇总文件按各组实际写出的余额记录日期命名，明细汇总按各组写出的明细日期（跳过的零金额行不算）
       assert.deepEqual([generatedFiles.detail.fileName, generatedFiles.balance.fileName],
         ['3-COMMON-2026-09-01~2026-09-02.xlsx', '3-BALANCE-2026-09-02.xlsx'], scenario);
       continue;
@@ -1937,7 +1940,7 @@ test('主进程：按文件名映射全部范围补录后重算，任一模板�
 test('主进程：导出全部余额先规划全部组，后一组渠道余额校验失败时整批阻断，前一组不写出、不记上下文', async () => {
   const session = { key: 'session-1', templateId: FILENAME_MAPPING_TEMPLATE_ID, currentBatchId: 'batch-3', templateName: '按文件名映射模板' };
   const ok = (tid) => ({ balance: { filePath: `/tmp/group-${tid}__all.xlsx` }, warnings: [] });
-  const buildChannelBalanceModeMismatchError = loadMainFunction('buildChannelBalanceModeMismatchError', ['FileValidationError'], [FileValidationError]);
+  const buildChannelBalanceModeMismatchError = loadMainFunction('buildChannelBalanceModeMismatchError', ['FileValidationError', 'maskAccountLikeTextForLog'], [FileValidationError, loadMainFunction('maskAccountLikeTextForLog', [], [])]);
   const buildChannelBalanceRowsIncompleteError = loadMainFunction('buildChannelBalanceRowsIncompleteError', ['FileValidationError'], [FileValidationError]);
   const buildChannelBalancePlanningError = loadMainFunction(
     'buildChannelBalancePlanningError',
@@ -2104,7 +2107,7 @@ test('主进程：导出全部余额写出时复用同一阶段校验得到的�
 
 // v3.2.21（D3）：「导出全部」另存为之前的预检同样汇总各渠道出余额的交易缺字段，不在第一个渠道处停下
 test('主进程：导出全部预检汇总各渠道出余额的交易缺字段，不弹另存为', () => {
-  const buildChannelBalanceModeMismatchError = loadMainFunction('buildChannelBalanceModeMismatchError', ['FileValidationError'], [FileValidationError]);
+  const buildChannelBalanceModeMismatchError = loadMainFunction('buildChannelBalanceModeMismatchError', ['FileValidationError', 'maskAccountLikeTextForLog'], [FileValidationError, loadMainFunction('maskAccountLikeTextForLog', [], [])]);
   const buildChannelBalanceRowsIncompleteError = loadMainFunction('buildChannelBalanceRowsIncompleteError', ['FileValidationError'], [FileValidationError]);
   const buildChannelBalancePlanningError = loadMainFunction(
     'buildChannelBalancePlanningError',
@@ -2149,7 +2152,8 @@ test('主进程：导出全部预检汇总各渠道出余额的交易缺字段�
     parseRequiredBillDates: () => [],
     buildScopeSelectionResult: () => ({ status: 'select-export-scope' }),
     buildDateRangeLabel: () => '',
-    buildDetailExportRows,
+    normalizeCell,
+    isDetailExportAmountRow,
     getToday: () => '2026-11-20'
   };
   const parsedGroups = [];
@@ -2268,7 +2272,7 @@ test('主进程：导出全部预检汇总各渠道出余额的交易缺字段�
 //   不遮住渠道余额错误，其他错误（如源文件在确认期间变化）立即抛出；已确定整批失败后，后面的组只校验
 //   （resolveEntryBalancePlan，只扫描不复制），不再构建、保留批次；写出前的检查在任何组写出之前对全部组做完
 test('主进程：导入多组生成与补录重算中，其他组错误不遮住渠道余额错误，失败后其余组只校验不构建批次', () => {
-  const buildChannelBalanceModeMismatchError = loadMainFunction('buildChannelBalanceModeMismatchError', ['FileValidationError'], [FileValidationError]);
+  const buildChannelBalanceModeMismatchError = loadMainFunction('buildChannelBalanceModeMismatchError', ['FileValidationError', 'maskAccountLikeTextForLog'], [FileValidationError, loadMainFunction('maskAccountLikeTextForLog', [], [])]);
   const buildChannelBalanceRowsIncompleteError = loadMainFunction('buildChannelBalanceRowsIncompleteError', ['FileValidationError'], [FileValidationError]);
   const buildChannelBalancePlanningError = loadMainFunction(
     'buildChannelBalancePlanningError',
@@ -2542,7 +2546,7 @@ test('主进程：导出另存为确认后复检遇到渠道余额错误时在�
 
 // 复检只在需要重新生成的按文件名映射会话中进行，只看多个子模板的渠道组，只扫描不复制（不构建批次、不解析日期）
 test('主进程：导出另存为确认后的渠道余额复检只看可能冲突的渠道组', () => {
-  const buildChannelBalanceModeMismatchError = loadMainFunction('buildChannelBalanceModeMismatchError', ['FileValidationError'], [FileValidationError]);
+  const buildChannelBalanceModeMismatchError = loadMainFunction('buildChannelBalanceModeMismatchError', ['FileValidationError', 'maskAccountLikeTextForLog'], [FileValidationError, loadMainFunction('maskAccountLikeTextForLog', [], [])]);
   const buildChannelBalanceRowsIncompleteError = loadMainFunction('buildChannelBalanceRowsIncompleteError', ['FileValidationError'], [FileValidationError]);
   const buildChannelBalancePlanningError = loadMainFunction(
     'buildChannelBalancePlanningError',
@@ -2705,8 +2709,9 @@ test('补录请求带的账号与当前待补录账号不一致时拒绝，不�
 test('主进程：补录重算与导出全部的余额汇总文件按各组余额记录的日期命名，明细汇总按全部明细日期', async () => {
   const detailDatesByGroup = { 1: ['2026-10-05', '2026-11-01'], 2: ['2026-11-02'] };
   const balanceDatesByGroup = { 1: ['2026-11-01'], 2: ['2026-11-02'] };
+  // 生成结果带各自文件名用的日期：明细剔除了跳过的零金额行（批次明细里另有 9-30 的零金额行，不进汇总文件名）
   const generatedOf = (tid) => ({
-    detail: { filePath: `/tmp/detail-${tid}.xlsx` },
+    detail: { filePath: `/tmp/detail-${tid}.xlsx`, billDates: detailDatesByGroup[tid] },
     balance: { filePath: `/tmp/balance-${tid}.xlsx`, billDates: balanceDatesByGroup[tid] },
     warnings: []
   });
@@ -2745,7 +2750,7 @@ test('主进程：补录重算与导出全部的余额汇总文件按各组余�
     const result = await loadExportStatementByScope({
       ...deps,
       ...outputDeps,
-      buildPreparedStatementBatchFromEntries: ({ config }) => ({ detailRows: detailDatesByGroup[config.template.id], tid: config.template.id }),
+      buildPreparedStatementBatchFromEntries: ({ config }) => ({ detailRows: [...detailDatesByGroup[config.template.id], '2026-09-30'], tid: config.template.id }),
       parseRequiredBillDates: (rows) => rows.slice(),
       createErrorResult: (payload) => ({ status: 'error', ...payload }),
       exportGeneratedFile: async (generatedFile) => {
