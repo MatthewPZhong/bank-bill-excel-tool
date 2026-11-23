@@ -333,16 +333,29 @@ function normalizeZipPath(baseDir, target) {
   return out.join('/');
 }
 
-function getZipEntryBuffer(files, entryPath) {
+// 条目名：先按原样（去掉开头的 /），找不到时不区分大小写
+function resolveZipEntryKey(files, entryPath) {
   if (!files || !entryPath) return null;
   const key = String(entryPath).replace(/^\/+/, '');
-  let entry = files[key];
-  if (!entry) {
-    const lower = key.toLowerCase();
-    const found = Object.keys(files).find((name) => name.replace(/^\/+/, '').toLowerCase() === lower);
-    entry = found ? files[found] : null;
-  }
+  if (files[key]) return key;
+  const lower = key.toLowerCase();
+  return Object.keys(files).find((name) => name.replace(/^\/+/, '').toLowerCase() === lower) || null;
+}
+
+function getZipEntryBuffer(files, entryPath) {
+  const key = resolveZipEntryKey(files, entryPath);
+  const entry = key ? files[key] : null;
   return entry && entry.content ? Buffer.from(entry.content) : null;
+}
+
+// 读取库（safegetzipfile）找条目的口径：名称不区分大小写、按原样比较（不规范化 . 与 ..），斜杠与反斜杠两种写法都认
+function findZipEntryKeyLikeReader(files, entryPath) {
+  const backslashed = String(entryPath).toLowerCase().replace(/[/]/g, '\\');
+  const slashed = backslashed.replace(/\\/g, '/');
+  return Object.keys(files).find((name) => {
+    const lower = name.replace(/^Root Entry[/]/, '').toLowerCase();
+    return lower === backslashed || lower === slashed;
+  }) || null;
 }
 
 // XML 注释不是内容：注释里的旧关系、旧 <sheet> 等不能当作有效标签（release 审查）
@@ -377,6 +390,11 @@ function readSheetRelationId(sheetTag, workbookText) {
 // 按 workbook.xml 中 <sheet> 的顺序（即 SheetNames 的顺序）与关系文件找到工作表 XML；找不到返回 null。
 //   注释里的标签不算；同一关系 Id 有多条有效关系、或 <sheet> 的关系属性无法唯一确认时无法确认来源，同样返回 null
 //   （按无法核对原值处理）
+//   还须确认读取库实际读的就是这个条目（release 审查）：
+//   - 读取库只要有一张表的关系解析不到，就放弃整份关系表、改按物理序号（xl/worksheets/sheetN.xml）读表：每张表的关系都须
+//     唯一确认，否则返回 null；
+//   - 读取库按「xl/ + 去掉其中第一个 xl/ 前缀的 Target」定位，找不到时依次取 Target 原样、关系文件所在目录 + Target：
+//     须与按关系文件所在目录解析 Target 落到同一个条目；Target 含字符引用（读取库按原文使用）时同样无法确认
 function findXlsxSheetXml(workbook, sheetName) {
   const files = workbook && workbook.files;
   const directory = workbook && workbook.Directory;
@@ -384,20 +402,36 @@ function findXlsxSheetXml(workbook, sheetName) {
   const workbookXml = getZipEntryBuffer(files, workbookPath);
   if (!workbookXml) return null;
   const workbookDir = String(workbookPath).replace(/^\/+/, '').split('/').slice(0, -1).join('/');
-  const relsXml = getZipEntryBuffer(files, `${workbookDir ? `${workbookDir}/` : ''}_rels/${String(workbookPath).split('/').pop()}.rels`);
+  const relsDirPrefix = workbookDir ? `${workbookDir}/` : '';
+  const relsXml = getZipEntryBuffer(files, `${relsDirPrefix}_rels/${String(workbookPath).split('/').pop()}.rels`);
   if (!relsXml) return null;
   const workbookText = stripXmlComments(workbookXml.toString('utf8'));
   const sheetTags = workbookText.match(/<(?:[\w.-]+:)?sheet\b[^>]*>/g) || [];
   const sheetIndex = Array.isArray(workbook.SheetNames) ? workbook.SheetNames.indexOf(sheetName) : -1;
   const sheetTag = sheetIndex >= 0 ? sheetTags[sheetIndex] : null;
   if (!sheetTag || readXmlAttribute(sheetTag, 'name') !== sheetName) return null;
-  const relationId = readSheetRelationId(sheetTag, workbookText);
-  if (!relationId) return null;
-  const relationTags = (stripXmlComments(relsXml.toString('utf8')).match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || [])
-    .filter((tag) => readXmlAttribute(tag, 'Id') === relationId);
-  if (relationTags.length !== 1) return null;
-  const target = readXmlAttribute(relationTags[0], 'Target');
-  return target ? getZipEntryBuffer(files, normalizeZipPath(workbookDir, target)) : null;
+  const relationTagsById = new Map();
+  (stripXmlComments(relsXml.toString('utf8')).match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || []).forEach((tag) => {
+    const id = readXmlAttribute(tag, 'Id');
+    if (!relationTagsById.has(id)) relationTagsById.set(id, []);
+    relationTagsById.get(id).push(tag);
+  });
+  const uniqueRelationTag = (tag) => {
+    const id = readSheetRelationId(tag, workbookText);
+    const tags = id ? relationTagsById.get(id) : null;
+    return tags && tags.length === 1 ? tags[0] : null;
+  };
+  if (!sheetTags.every((tag) => uniqueRelationTag(tag))) return null;
+  const relationTag = uniqueRelationTag(sheetTag);
+  if (/\sTarget\s*=\s*(?:"[^"]*&|'[^']*&)/.test(relationTag)) return null;
+  const target = readXmlAttribute(relationTag, 'Target');
+  if (!target) return null;
+  const entryKey = resolveZipEntryKey(files, normalizeZipPath(workbookDir, target));
+  let readerPath = `xl/${target.replace(/[/]?xl\//, '')}`;
+  if (!findZipEntryKeyLikeReader(files, readerPath)) readerPath = target;
+  if (!findZipEntryKeyLikeReader(files, readerPath)) readerPath = `${relsDirPrefix}${target}`;
+  if (!entryKey || findZipEntryKeyLikeReader(files, readerPath) !== entryKey) return null;
+  return getZipEntryBuffer(files, entryKey);
 }
 
 // 按需解压 ZIP 条目：按中央目录（与读取库同口径）登记各条目，读取 content 时才解压该条目（release 审查：核对长数字只需

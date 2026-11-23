@@ -2749,12 +2749,30 @@ function resolveGenerationTemplateConfig({ fileEntries = [], fallbackTemplateCon
   return getTemplateMappingConfig(templateIds[0]) || fallbackTemplateConfig;
 }
 
-// 模板配置（大账号、固定赋值、仅有币种时的大账号）中的账号：日志里的模板名、渠道名等按它们整体脱敏（以不含连续 4 位数字的
-//   实际账号命名时，只按数字写法脱敏会漏，release 审查）
+// 模板配置（大账号、固定赋值、仅有币种时的大账号、账户映射的银行账号与清算账号）中的账号：日志里的模板名、渠道名等按它们
+//   整体脱敏（以不含连续 4 位数字的实际账号命名时，只按数字写法脱敏会漏，release 审查）
 function collectTemplateAccountValuesForLog(...configurations) {
-  return configurations.flatMap((configuration) => ['bigAccounts', 'fixedAssignments', 'currencyBigAccounts']
-    .flatMap((key) => (configuration && Array.isArray(configuration[key]) ? configuration[key] : []))
-    .map((item) => normalizeCell(item && item.merchantId)));
+  return configurations.flatMap((configuration) => [
+    ...['bigAccounts', 'fixedAssignments', 'currencyBigAccounts']
+      .flatMap((key) => (configuration && Array.isArray(configuration[key]) ? configuration[key] : []))
+      .map((item) => normalizeCell(item && item.merchantId)),
+    ...(configuration && Array.isArray(configuration.accountMappings) ? configuration.accountMappings : [])
+      .flatMap((item) => [normalizeCell(item && item.bankAccountId), normalizeCell(item && item.clearingAccountId)])
+  ]);
+}
+
+// 库里为模板维护的账号（大账号含自有账号、固定赋值、仅有币种时的大账号、生效的账户映射）：只用于日志脱敏，读不到时返回空
+//   （按数字写法脱敏兜底）
+function readTemplateAccountValuesForLog(template) {
+  if (!template || !template.id) return [];
+  try {
+    return collectTemplateAccountValuesForLog(database.getTemplateMappings(template.id), {
+      bigAccounts: database.getTemplateBigAccounts(template.id, { includeOwn: true }),
+      accountMappings: database.listEffectiveAccountMappings(template)
+    });
+  } catch (_error) {
+    return [];
+  }
 }
 
 // v3.2.21：写进活动日志的说明文字中的账号、卡号等编号不持久化（AGENTS.md 敏感数据边界）。
@@ -4027,11 +4045,12 @@ function normalizeTemplateDateFormat(value) {
 }
 
 // v3.2.21：活动日志中的日期格式显示名；库内三档以外的旧值（旧版导入模板包时可能原样写入）原样标出，解析时按自动
-function formatTemplateDateFormatLabel(value) {
+// accountValues：已知账号，旧值中原样出现时整体只写位数
+function formatTemplateDateFormatLabel(value, accountValues = []) {
   return normalizeTemplateDateFormat(value)
     ? TEMPLATE_DATE_FORMAT_LABELS[value]
     // 旧模板包可带来任意文字：编号只写位数（release 审查）
-    : `无效值「${maskAccountLikeTextForLog(value)}」（按自动解析）`;
+    : `无效值「${maskAccountLikeTextForLog(value, accountValues)}」（按自动解析）`;
 }
 
 function normalizeBundleTemplateHeaders(headers) {
@@ -10234,9 +10253,8 @@ function registerTemplateHandlers() {
       //   （同步失败时界面提示保存失败，但库内已是新值；重试时旧值已等于新值，不会再记）
       // 模板名由用户填写、可能以账号命名：本次保存的两条日志都只写编号位数；模板维护的账号（本次提交的，与只提交客户账号时
       //   库里保留的自有账号）原样出现时整体替换（release 审查）
-      const templateAccountValues = collectTemplateAccountValuesForLog(templateConfiguration, {
-        bigAccounts: database.getTemplateBigAccounts(payload.templateId, { includeOwn: true })
-      });
+      const templateAccountValues = collectTemplateAccountValuesForLog(templateConfiguration)
+        .concat(readTemplateAccountValuesForLog(database.getTemplate(payload.templateId)));
       const loggedTemplateName = maskAccountLikeTextForLog(template.name, templateAccountValues);
       if (dateFormat && dateFormat !== previousDateFormat) {
         appendActivityLogEntry({
@@ -10244,7 +10262,7 @@ function registerTemplateHandlers() {
           message: '模板日期格式已修改',
           details: [
             `模板名：${loggedTemplateName}`,
-            `日期格式：${formatTemplateDateFormatLabel(previousDateFormat)} → ${formatTemplateDateFormatLabel(dateFormat)}`
+            `日期格式：${formatTemplateDateFormatLabel(previousDateFormat, templateAccountValues)} → ${formatTemplateDateFormatLabel(dateFormat, templateAccountValues)}`
           ]
         });
       }
@@ -11557,12 +11575,16 @@ function syncTemplateLibraryAfterBillSplitWrite(template, logMessage) {
     appendActivityLogEntry({
       level: 'warning',
       message: logMessage,
-      // 模板名由用户填写、可能以账号命名；原因可能含模板名或路径：编号只写位数，另记模板 ID 供定位（release 审查）
-      details: [
-        `模板 ID：${template ? template.id : ''}`,
-        `模板名：${template ? maskAccountLikeTextForLog(template.name) : ''}`,
-        `原因：${maskAccountLikeTextForLog(error && error.message ? error.message : String(error))}`
-      ]
+      // 模板名由用户填写、可能以账号命名；原因可能含模板名或路径：模板维护的账号整体只写位数、其余编号只写位数，
+      //   另记模板 ID 供定位（release 审查）
+      details: (() => {
+        const accountValues = readTemplateAccountValuesForLog(template);
+        return [
+          `模板 ID：${template ? template.id : ''}`,
+          `模板名：${template ? maskAccountLikeTextForLog(template.name, accountValues) : ''}`,
+          `原因：${maskAccountLikeTextForLog(error && error.message ? error.message : String(error), accountValues)}`
+        ];
+      })()
     });
     return false;
   }

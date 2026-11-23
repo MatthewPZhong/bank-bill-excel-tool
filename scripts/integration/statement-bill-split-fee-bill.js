@@ -724,7 +724,7 @@ function verifyRestore(dir, database) {
   const restoreFns = loadMainFunctions([
     'normalizeBillSplitRestoreSnapshot', 'buildBillSplitRestoreToken', 'issueBillSplitRestoreToken', 'restoreBillSplitConfigFromPayload',
     'endBillSplitRestoreSession', 'endBillSplitRestoreSessionsForOwner', 'findBillSplitRestoreSessionId', 'activateBillSplitRestoreSession',
-    'syncTemplateLibraryAfterBillSplitWrite', 'maskAccountLikeTextForLog'
+    'syncTemplateLibraryAfterBillSplitWrite', 'maskAccountLikeTextForLog', 'collectTemplateAccountValuesForLog', 'readTemplateAccountValuesForLog'
   ], {
     database, normalizeCell, normalizeFeeAmountFormula, normalizeFeeFieldMappings, FileValidationError,
     createHmac: require('node:crypto').createHmac, BILL_SPLIT_RESTORE_TOKEN_SECRET: require('node:crypto').randomBytes(32),
@@ -852,6 +852,15 @@ function verifyRestore(dir, database) {
   const warningText = fs.readFileSync(warningLog, 'utf8');
   assertTrue(!warningText.includes('6222021234567890123') && warningText.includes('对公（19位数字）') && warningText.includes(`模板 ID：${reopened.id}`),
     '⑥ 同步失败日志中的模板名脱敏并记模板 ID');
+  // 模板以维护的字母数字大账号命名（AC12B34，没有连续 4 位数字）时，模板名与原因按该账号整体脱敏
+  database.db.prepare(`INSERT INTO template_big_accounts (template_id, merchant_id, currency, row_index, account_nature, created_at, updated_at)
+    VALUES (?, 'AC12B34', 'USD', 99, 'own', '2026-11-23', '2026-11-23')`).run(reopened.id);
+  failLibrarySync = true;
+  restoreFns.syncTemplateLibraryAfterBillSplitWrite({ ...database.getTemplate(reopened.id), name: 'AC12B34' }, '保存拆分账单配置后同步模板库文件失败');
+  failLibrarySync = false;
+  const letteredWarning = fs.readFileSync(warningLog, 'utf8');
+  assertTrue(!letteredWarning.includes('AC12B34') && letteredWarning.includes('模板名：（7位账号）'), '⑥ 以字母数字大账号命名时按账号整体脱敏');
+  database.db.prepare(`DELETE FROM template_big_accounts WHERE template_id = ? AND merchant_id = 'AC12B34'`).run(reopened.id);
   assertEq(restoreFns.syncTemplateLibraryAfterBillSplitWrite(database.getTemplate(reopened.id), '保存拆分账单配置后同步模板库文件失败'), true,
     '⑥ 同步成功返回 true');
 

@@ -49,9 +49,9 @@ test('模板包导入跳过模板时，活动日志的原因经 maskAccountLikeT
   const collectTemplateAccountValuesForLog = loadMainFunction('collectTemplateAccountValuesForLog', { normalizeCell });
   assert.deepEqual(collectTemplateAccountValuesForLog(
     { bigAccounts: [{ merchantId: ' AC12B34 ' }], fixedAssignments: [{ merchantId: 'M2' }], currencyBigAccounts: [{ merchantId: 'M3' }], other: [{ merchantId: 'X' }] },
-    { bigAccounts: [{ merchantId: 'OWN1' }] },
+    { bigAccounts: [{ merchantId: 'OWN1' }], accountMappings: [{ bankAccountId: 'BK12A', clearingAccountId: 'CL9' }] },
     null
-  ), ['AC12B34', 'M2', 'M3', 'OWN1']);
+  ), ['AC12B34', 'M2', 'M3', 'OWN1', 'BK12A', 'CL9']);
   assert.match(snippet, /原因：\$\{maskAccountLikeTextForLog\(error\.message, entryAccountValues\)\}/);
   // 模板名由用户填写，可能含账号：同样脱敏
   assert.match(snippet, /模板名：\$\{maskAccountLikeTextForLog\(entry\.name, entryAccountValues\)\}/);

@@ -1314,3 +1314,55 @@ test('XLSX：未开查重时核对长数字只解压用到的条目；不支持�
   assert.ok(files && files['xl/worksheets/sheet1.xml'].content.toString('utf8').includes(SERIAL));
   assert.equal(openZipEntriesLazily(Buffer.from('not a zip')), null);
 });
+
+// release 审查：须确认读取库实际读取的工作表。① 另一张表的关系解析不到时，读取库放弃整份关系表、改按物理序号读表，
+//   不能再按目标表的关系取 XML；② 读取库按「xl/ + 去掉 xl/ 前缀的 Target」定位，与按关系文件目录解析 Target 落到不同条目时
+//   同样无法确认。两种情况都不还原并提示（数值舍入后相等，数值核对发现不了）
+test('XLSX：读取库实际读取的工作表与按关系定位的不一致时不还原并提示', async (t) => {
+  const dir = createTempDir(t);
+  const build = async (fileName, transform) => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([HEADER, ['2026-11-01', 'USD', 100, 1111, 5]]), 'Sheet1');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([HEADER, ['2026-11-01', 'USD', 999, 2222, 6]]), 'Sheet2');
+    const zip = await JSZip.loadAsync(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
+    for (const [sheetPath, placeholder, literal] of [
+      ['xl/worksheets/sheet1.xml', 1111, '9007199254740992'],
+      ['xl/worksheets/sheet2.xml', 2222, '9007199254740993']
+    ]) {
+      const xml = await zip.file(sheetPath).async('string');
+      zip.file(sheetPath, xml.replace(`<v>${placeholder}</v>`, `<v>${literal}</v>`));
+    }
+    await transform(zip);
+    const filePath = path.join(dir, fileName);
+    fs.writeFileSync(filePath, await zip.generateAsync({ type: 'nodebuffer' }));
+    return filePath;
+  };
+  const replaceIn = async (zip, entry, from, to) => {
+    const text = await zip.file(entry).async('string');
+    assert.ok(text.includes(from), `${entry} 应含 ${from}`);
+    zip.file(entry, text.replace(from, to));
+  };
+  const assertUnverified = (mapped, label) => {
+    assert.deepEqual(mapped.slice(1).map((row) => row[TARGETS.indexOf('Credit Amount')]), ['100'], `${label}：读取库读的是第一张表`);
+    assert.deepEqual(identifiers(mapped).map(([serial]) => String(serial)), ['9007199254740992'], `${label}：不写进另一张表的流水号`);
+    assert.deepEqual(longNumberIssues(mapped).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']], label);
+  };
+  // ① 关系文件中两张表的目标互换，Sheet2 引用不存在的关系：读取库按物理序号读 sheet1.xml
+  assertUnverified(map(await build('fallback-order.xlsx', async (zip) => {
+    await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheet1.xml"', 'Target="worksheets/sheetX.xml"');
+    await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheet2.xml"', 'Target="worksheets/sheet1.xml"');
+    await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheetX.xml"', 'Target="worksheets/sheet2.xml"');
+    await replaceIn(zip, 'xl/workbook.xml', '<sheet name="Sheet2" sheetId="2" r:id="rId2"/>', '<sheet name="Sheet2" sheetId="2" r:id="rId9"/>');
+  })), '关系表被放弃');
+  // ② Target 写成 xl/worksheets/sheet1.xml：读取库定位到 xl/worksheets/sheet1.xml，按关系文件目录解析是 xl/xl/worksheets/sheet1.xml
+  assertUnverified(map(await build('reader-path.xlsx', async (zip) => {
+    await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheet1.xml"', 'Target="xl/worksheets/sheet1.xml"');
+    zip.file('xl/xl/worksheets/sheet1.xml', await zip.file('xl/worksheets/sheet2.xml').async('string'));
+  })), '定位口径不同');
+  // 对照：Target 写成绝对路径 /xl/worksheets/sheet1.xml 时两种口径一致，照常还原
+  const absolute = map(await build('absolute-target.xlsx', async (zip) => {
+    await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheet1.xml"', 'Target="/xl/worksheets/sheet1.xml"');
+  }));
+  assert.deepEqual(identifiers(absolute).map(([serial]) => String(serial)), ['9007199254740992']);
+  assert.deepEqual(longNumberIssues(absolute), []);
+});

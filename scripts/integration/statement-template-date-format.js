@@ -132,7 +132,7 @@ function createMain(database) {
     'buildCurrencyBigAccountMappingConfig', 'isCurrencyOnlyMerchantMapping', 'normalizeBundleTemplateHeaders',
     'normalizeBundleBillSplitMeta', 'isLegacyOrientedTemplateMappings', 'buildTemplateFieldReferenceInput',
     'readTemplateBundleFile', 'resolveTemplateBundleVersion', 'upgradeLegacyBundleFeatureFilterRefs', 'collectReferencedFeatureFilterIds',
-    'maskAccountLikeTextForLog', 'collectTemplateAccountValuesForLog',
+    'maskAccountLikeTextForLog', 'collectTemplateAccountValuesForLog', 'readTemplateAccountValuesForLog',
     'normalizeTemplateDateFormat',
     'formatTemplateDateFormatLabel',
     // 保存 / 导入处理器用到的 main.js 函数（渠道、余额方式校验在无渠道时直接返回）
@@ -426,6 +426,14 @@ function verifySaveHandler(database, main) {
   });
   assertEq([keptSave.status, dateFormatLogLines(keptHandlers)],
     ['success', ['模板名：（7位账号）｜日期格式：月在前（mm/dd/yyyy） → 日在前（dd/mm/yyyy）']], '① 库里保留的自有账号同样用于脱敏');
+  // 库内三档以外的旧值含模板维护的账号时，旧值同样按该账号整体脱敏
+  database.db.prepare('UPDATE templates SET date_format = ? WHERE id = ?').run('旧AC12B34', legacy.id);
+  const oldValueHandlers = loadTemplateHandlers(database, main);
+  oldValueHandlers.saveMappings({
+    templateId: legacy.id, mappings: managedMappings(), dateFormat: 'MDY', preserveOwn: true, bigAccounts: [{ merchantId: 'M001', currencies: ['USD'] }]
+  });
+  assertEq(dateFormatLogLines(oldValueHandlers), ['模板名：（7位账号）｜日期格式：无效值「旧（7位账号）」（按自动解析） → 月在前（mm/dd/yyyy）'],
+    '① 旧值含模板维护的账号时整体脱敏');
   database.db.prepare('UPDATE templates SET name = ? WHERE id = ?').run('旧值模板', legacy.id);
 
   saveTemplate(database, retried, '月在前模板', 'MDY');
