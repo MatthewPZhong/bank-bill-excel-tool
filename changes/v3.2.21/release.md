@@ -9,7 +9,7 @@
 | 目标版本 | 3.2.21 |
 | 操作范围 | 用户 2026-11-22 要求「将所有未合并进本地 release 的功能分支全合并进 release 里，然后执行发版流程」；2026-11-22 改为「暂停合并进 feat/cross-sheet-backfill 分支。让 codex 对 release/v3.2.21 进行 review，直到无 P2 Finding 后，开始执行发版流程」。完整发布（推送、PR、合并、正式标签、发布审批）沿用已获授权的流程 |
 | 基线 | `v3.2.20` → `08d1fb413d71ce43f04e14a2f00047705dbe8feb`（PR #256 合并提交） |
-| release 分支 | `release/v3.2.21`（本地，工作树 `.claude/worktrees/release-v3.2.21`），发版前未推送远端 |
+| release 分支 | `release/v3.2.21`（工作树 `.claude/worktrees/release-v3.2.21`），2026-11-23 候选提交后首次推送远端 |
 | 远端 main | `f217c8fd`（PR #257，v3.2.20 发布记录），已于 `bad116f3` 合入 release |
 | 未纳入 | 主签出 `CLAUDE.md` 的未提交改动（与本轮无关，未动） |
 
@@ -110,9 +110,28 @@ v3.2.3 78ddffe05701ada1709cfc871ba5fff1d495f252
 - **⚠️ 费用账单行的账单日期（F4）**：费用行沿用交易行的账单日期，不可覆盖。
 - **合计行识别（逻辑取值特征值候补）**：BillDate 候补含特征值时按查看过的候补识别合计行，须复核真实账单的合计行不进明细、真实交易不被误判。
 - **实机**：Windows 打包版验收与映射关系管理加宽、「启用」列的实机核验未做（B105、B120）。
+- **结果**：2026-11-23 合并前以上各项汇总请用户确认，用户选择「复核已通过，继续发版」；未提供复核人与逐项明细。Windows 打包版实机验收未做（B105、B120，目标 v3.2.22）。
 
 ## 验证（清单 C4）
 
 - release 整体审查各轮：修复后 lint、架构检查、E13-G 执行清单（`--write`，234/234）通过；完整单测（第 14 轮 9057 个：9053 通过、4 跳过、0 失败）与两组集成测试（各 45 个脚本）全部通过。
 - 第 15 轮修复：受影响单测 83 个通过；集成 `statement-template-date-format` 35/35、`statement-bill-split-fee-bill` 135/135、`statement-channel` 188/188、`statement-currency-big-account` 21/21；反向验证 4/4。
 - `npm run release-check`（第 15 轮修复、升版与发布文档，即候选提交的内容）通过：lint、架构检查（668 个文件）、smoke、单测 9058 个（9054 通过、4 跳过、0 失败）、集成 90 个脚本全部通过；集成回写 `rules/integration-test-policy.md`「七」章节，随候选提交纳入。
+- PR #258 Windows CI：候选 `a4da8540`（run 45208706075）全部通过（11 项）；Codex 云端审查（`a4da8540`）无发现。
+
+## 合并、标签与发布（清单 E–F）
+
+| 项目 | 结果 |
+| --- | --- |
+| 合并 | PR #258 以 merge commit 合并（2026-11-23 08:04 PST），`M` = `0e996340900916c3059a4422fbc197b2577f6c38`，父提交 `f217c8fd`、`a4da8540`，tree 与 `a4da8540` 相同；合并前再次核对远端 main 未推进 |
+| main CI | `0e996340`（run 45212428019）通过，11 项 |
+| 正式标签 | 附注标签 `v3.2.21`（对象 `d46cd297`）→ `0e996340`；推送前核对远端 main 仍为 `M`，只推该标签 |
+| 发布流程 | run 45215522398，`production-release` 由用户授权经 `gh` 审批；21 个步骤全部成功。Windows 上 `release-check`：单测 577 个文件、0 失败；集成 90 个脚本全部通过，其中 `renderer-lifecycle` 506/506 用时 85.8 秒 |
+| Release | [v3.2.21](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.2.21)，2026-11-23 08:58 PST 发布，非 draft、非 prerelease，为 Latest |
+| 产物 | `bank-bill-excel-tool-setup-3.2.21.exe`（106720315 字节）、`bank-bill-excel-tool-setup-3.2.21.exe.blockmap`（111411）、`bank-bill-excel-tool-portable-3.2.21.exe`（106223452）、`latest.yml`（372） |
+| `latest.yml` | `version: 3.2.21`，`path` 与 `files[0].url` 均为安装包，`size` 与安装包附件一致；本机下载安装包重算 SHA512（base64）与 `latest.yml` 一致 |
+| 未做 | Windows 实机安装、升级与业务抽查未做（B105、B120） |
+
+## 结论
+
+v3.2.21 已发布并完成自动核验（含本机重算安装包 SHA512）；Windows 实机验收待补（B105、B120）。`release/v3.2.21` 与 5 个模块分支已被 `v3.2.21` 标签包含，按 `AGENTS.md`「约定与分支」可在授权后删除；`feat/cross-sheet-backfill` 未被任何正式标签包含，顺延（B129），保留。
