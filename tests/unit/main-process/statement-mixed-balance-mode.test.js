@@ -62,13 +62,27 @@ test('resolveAccountBalanceModes：同一账户命中不同方式为冲突，逐
   assert.deepEqual(result.modeByAccount, { 'M002@@USD': 'calculated', 'M002@@EUR': 'none' });
 });
 
-test('resolveAccountBalanceModes：MerchantId 或账单日期为空的行无法归属账户，不参与判断', () => {
+test('resolveAccountBalanceModes：MerchantId 为空的行无法归属账户，不参与判断；账单日期为空的行按账户照常参与', () => {
   const result = resolveAccountBalanceModes([
     { templateName: 'A', balanceMode: 'calculated', detailRows: rows([['2026-09-01', '', 'USD', '1', '', '']]) },
     { templateName: 'B', balanceMode: 'statement', detailRows: rows([['2026-09-01', '', 'USD', '1', '', '3'], ['', 'M009', 'USD', '1', '', '3']]) },
     { templateName: 'C', balanceMode: 'statement', detailRows: [] }
   ]);
-  assert.deepEqual(result, { modeByAccount: {}, conflicts: [] });
+  assert.deepEqual(result, { modeByAccount: { 'M009@@USD': 'statement' }, conflicts: [] });
+});
+
+// release 审查：不出余额子模板中无日期的支出与另一子模板同账户的收入同样是冲突，不能放行（余额只计其中一部分）
+test('resolveAccountBalanceModes：同一账户在不出余额的子模板中只有缺账单日期的交易时同样判为冲突', () => {
+  const result = resolveAccountBalanceModes([
+    { templateName: '费用', balanceMode: 'none', detailRows: rows([['', 'M1', 'USD', '', '5', '']]) },
+    { templateName: '主', balanceMode: 'calculated', detailRows: rows([['2026-09-01', 'M1', 'USD', '10', '', '']]) }
+  ]);
+  assert.deepEqual(result.conflicts, [{
+    merchantId: 'M1',
+    currency: 'USD',
+    templates: [{ templateName: '费用', balanceMode: 'none' }, { templateName: '主', balanceMode: 'calculated' }]
+  }]);
+  assert.deepEqual(result.modeByAccount, {});
 });
 
 test('resolveAccountBalanceModes：判断冲突时币种不区分大小写，modeByAccount 仍按原样账户键', () => {

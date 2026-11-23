@@ -2214,6 +2214,26 @@ test('主进程：导出全部预检汇总各渠道出余额的交易缺字段�
     buildDateRangeLabel: (dates) => `${dates.length}`
   }))('balance', 'all');
   assert.deepEqual([okPlan.stopResult, okPlan.defaultFileName], [undefined, '3-BALANCE-450000.xlsx']);
+
+  // release 审查：余额文件的默认文件名按出余额的行（balanceDetailRows）取日期，明细文件按全部明细行；
+  //   渠道组没有出余额的交易（balanceRequested 为 false）时按全部明细行
+  const mixedDeps = {
+    ...deps,
+    groupStatementEntriesForGeneration: () => groups.slice(0, 1),
+    buildPreparedStatementBatchFromEntries: () => ({
+      detailRows: ['2026-02-01', '2026-03-01'],
+      balanceDetailRows: ['2026-03-01'],
+      balanceRequested: true
+    }),
+    parseRequiredBillDates: (rowsForDates) => rowsForDates.slice(),
+    buildDateRangeLabel: (dates) => dates.join('~')
+  };
+  const loadMixedPlan = (overrides = {}) => loadMainFunction('buildStatementExportPlan', Object.keys(mixedDeps), Object.values({ ...mixedDeps, ...overrides }));
+  assert.equal(loadMixedPlan()('balance', 'all').defaultFileName, '渠道1-BALANCE-2026-03-01.xlsx');
+  assert.equal(loadMixedPlan()('detail', 'all').defaultFileName, '渠道1-COMMON-2026-02-01~2026-03-01.xlsx');
+  assert.equal(loadMixedPlan({
+    buildPreparedStatementBatchFromEntries: () => ({ detailRows: ['2026-02-01'], balanceDetailRows: [], balanceRequested: false })
+  })('balance', 'all').defaultFileName, '渠道1-BALANCE-2026-02-01.xlsx');
 });
 
 // v3.2.21（D3）：导入多组生成与补录重算同样先校验全部组：其他组的业务校验错误（如映射失效、写出前的日期检查）暂存、

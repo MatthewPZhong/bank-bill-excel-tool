@@ -2748,6 +2748,14 @@ function resolveGenerationTemplateConfig({ fileEntries = [], fallbackTemplateCon
   return getTemplateMappingConfig(templateIds[0]) || fallbackTemplateConfig;
 }
 
+// v3.2.21：写进活动日志的说明文字中形似账号、卡号的编号（6 位以上的字母数字串，其中至少 4 位数字）只写位数，
+//   不把完整号码持久化到日志（AGENTS.md 敏感数据边界）
+function maskAccountLikeTextForLog(text) {
+  return String(text == null ? '' : text).replace(/[0-9A-Za-z][0-9A-Za-z._-]{5,}/g, (token) => (
+    (token.match(/\d/g) || []).length >= 4 ? `（${token.length}位编号）` : token
+  ));
+}
+
 // 改选大账号后复用已生成的明细：大账号 / 币种列被所选大账号覆盖（overriddenTargetFields），去掉币种未匹配提示；
 //   v3.2.21 B112：长数字提示中只写进这些列的源字段（cells[].targetFields，见 buildMappedRows）也去掉，其余提示不变
 //   （手动分配大账号按行复用这一口径，见 applyBigAccountAssignmentsToFileEntries）
@@ -10697,11 +10705,12 @@ function registerTemplateHandlers() {
         } catch (error) {
           if (error instanceof FileValidationError) {
             skippedCount += 1;
-            // v3.2.21：记下跳过的模板与原因（如旧版本模板包里失效的逻辑取值候补），导入结果只给出跳过数量
+            // v3.2.21：记下跳过的模板与原因（如旧版本模板包里失效的逻辑取值候补），导入结果只给出跳过数量。
+            //   原因中的账号等编号不写进日志（maskAccountLikeTextForLog，release 审查）
             appendActivityLogEntry({
               level: 'warning',
               message: '模板包导入时跳过模板',
-              details: [`模板名：${entry.name}`, `原因：${error.message}`]
+              details: [`模板名：${entry.name}`, `原因：${maskAccountLikeTextForLog(error.message)}`]
             });
             return;
           }
@@ -14048,6 +14057,13 @@ function getGeneratedStatementExport(kind, scope = 'current') {
 }
 
 function buildStatementExportPlan(kind, scope = 'auto') {
+  // v3.2.21（D2）：另存为默认文件名的日期范围取实际导出的行：余额文件在渠道组内有不出余额的子模板时只取出余额的
+  //   条目的行（preparedBatch.balanceDetailRows，与生成余额同一来源），明细文件取全部明细行（release 审查）
+  const exportDateRowsOf = (preparedBatch) => (
+    kind === 'balance' && preparedBatch.balanceRequested !== false && Array.isArray(preparedBatch.balanceDetailRows)
+      ? preparedBatch.balanceDetailRows
+      : preparedBatch.detailRows
+  );
   const session = getCurrentStatementSession();
   const normalizedScope = scope === 'all' || scope === 'current'
     ? scope
@@ -14140,7 +14156,7 @@ function buildStatementExportPlan(kind, scope = 'auto') {
       try {
         preparedBatch = buildPreparedStatementBatchFromEntries({ config, fileEntries: entries, issueLineBudget });
         // 日期解析失败（如单独成组的文件没有有效账单日期）同样暂存，不遮住后面渠道的余额错误
-        dates = parseRequiredBillDates(preparedBatch.detailRows);
+        dates = parseRequiredBillDates(exportDateRowsOf(preparedBatch));
       } catch (error) {
         if (!collectChannelBalanceError(error) && !otherError) otherError = error;
         continue;
@@ -14201,7 +14217,7 @@ function buildStatementExportPlan(kind, scope = 'auto') {
       orderedTargetFields: generationTemplateConfig.exportTargetFields,
       scope: 'all'
     });
-    defaultFileName = `${resolveStatementOutputName(generationTemplateConfig.template)}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(parseRequiredBillDates(preparedBatch.detailRows)) || getToday()}.xlsx`;
+    defaultFileName = `${resolveStatementOutputName(generationTemplateConfig.template)}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(parseRequiredBillDates(exportDateRowsOf(preparedBatch))) || getToday()}.xlsx`;
   }
   return {
     normalizedScope,

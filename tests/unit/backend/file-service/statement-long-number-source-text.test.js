@@ -942,3 +942,56 @@ test('XLSX：一个单元格有一个带内容的 <v> 和一个自闭合的空 <
   assert.equal(identifiers(mapped)[0][1], CARD);
   assert.deepEqual(longNumberIssues(mapped).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
 });
+
+test('拆分不复用模块映射、不按字段值过滤时，主映射的 Balance 不参与计算：其源列作标识时按原文输出', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '收入', '余额', '参考号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'split-balance.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', 10, 20, 1111]
+  ], { 1111: SERIAL });
+  const targets = ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'Balance', 'ChannelOrderNo'];
+  const generate = (overrides) => buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: targets,
+    mappingByField: { BillDate: '日期', Currency: '币种', 'Credit Amount': '收入', Balance: '参考号', ChannelOrderNo: '参考号' },
+    expectedSourceHeaders: header,
+    billSplitMerge: billSplitMerge({
+      reuseModuleMapping: false,
+      billSplitMappingByTargetField: { BillDate: '日期', Currency: '币种', Balance: '余额', ChannelOrderNo: '参考号' },
+      billSplitRows: [splitRow({ creditSourceField: '收入' })],
+      ...overrides
+    })
+  });
+  const notReused = generate({});
+  assert.deepEqual(notReused.slice(1).map((row) => row.slice(4).map(String)), [['20', SERIAL]]);
+  assert.deepEqual(longNumberIssues(notReused), []);
+  // 复用模块映射时拆分行的余额取主映射：该列是余额列，保持读取库的数值并提示
+  const reused = generate({ reuseModuleMapping: true });
+  assert.deepEqual(reused.slice(1).map((row) => String(row[5])), ['9007199254740992']);
+  assert.deepEqual(longNumberIssues(reused).map((issue) => issue.cells), [[{ sourceField: '参考号', digitCount: 16 }]]);
+});
+
+test('拆分子行的长数字提示记下写进的目标列：只写进币种列的来源可在改选大账号后剔除，同时写进其他列的保留全部目标列', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种码', '收入', '卡号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'split-targets.xlsx'), [
+    header,
+    ['2026-11-01', 1111, 10, 2222]
+  ], { 1111: '6.2220212345678899E+18', 2222: '6.2220212345678899E+18' });
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'Drawee CardNo', 'Remark'],
+    mappingByField: { BillDate: '日期', 'Drawee CardNo': '卡号', Remark: '卡号' },
+    amountMappingRules: { accountSourceField: '卡号' },
+    expectedSourceHeaders: header,
+    billSplitMerge: billSplitMerge({
+      billSplitRows: [splitRow({ currencySourceField: '币种码', creditSourceField: '收入' })]
+    })
+  });
+  const cells = mapped.issues.filter((issue) => issue.type === 'long-number-unverified').flatMap((issue) => issue.cells);
+  assert.deepEqual(Object.fromEntries(cells.map((cell) => [cell.sourceField, (cell.targetFields || []).slice().sort()])), {
+    卡号: ['Drawee CardNo', 'Remark'],
+    币种码: ['Currency']
+  });
+});

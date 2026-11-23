@@ -274,7 +274,9 @@ const BALANCE_MODE_ORDER = Object.freeze(['none', 'statement', 'calculated']);
 // v3.2.21（D2、D3）：渠道组内子模板余额方式不同时，按条目（各自子模板的余额方式）收集账户 → 余额方式。
 //   entries：[{ templateName, balanceMode: 'none' | 'statement' | 'calculated', detailRows }]
 //   同一账户出现在不同余额方式的条目中即为冲突。不参与判断的行：
-//   - MerchantId 或账单日期为空：无法归属账户（如多大账号模板在选择大账号之前的临时行），选定账号后生成前再判断一次；
+//   - MerchantId 为空：无法归属账户（如多大账号模板在选择大账号之前的临时行），选定账号后生成前再判断一次。
+//     账单日期为空的行照常参与：账户由 MerchantId + 币种确定，这类行同样进明细（release 审查：不出余额子模板中
+//     无日期的支出与另一子模板同账户的收入不能因此放行，否则余额只计其中一部分）；
 //   - 收支都为空或 0 的行（口径同 buildDetailExportRows 跳过的行）：不进明细也不进余额。收支同时有值的行照常参与，
 //     它会让生成报错，不能因跳过它而放行冲突、让多组生成先写出前几组。
 //   判断冲突时币种不区分大小写（同一账户的 usd / USD 是同一条余额链）；modeByAccount 仍按余额分组的原样账户键
@@ -286,15 +288,14 @@ function resolveAccountBalanceModes(entries = []) {
     if (rows.length < 2) continue;
     const indexes = buildFieldIndexMap(Array.isArray(rows[0]) ? rows[0] : []);
     const merchantIndex = indexes.get('MerchantId');
-    const dateIndex = indexes.get('BillDate');
     const currencyIndex = indexes.get('Currency');
     const creditIndex = indexes.get('Credit Amount');
     const debitIndex = indexes.get('Debit Amount');
-    if (merchantIndex === undefined || dateIndex === undefined) continue;
+    if (merchantIndex === undefined) continue;
     for (const row of rows.slice(1)) {
       if (!Array.isArray(row)) continue;
       const merchantId = normalizeCell(row[merchantIndex]);
-      if (!merchantId || !normalizeCell(row[dateIndex])) continue;
+      if (!merchantId) continue;
       if (
         creditIndex !== undefined && debitIndex !== undefined
         && isZeroOrBlankAmount(row[creditIndex]) && isZeroOrBlankAmount(row[debitIndex])
