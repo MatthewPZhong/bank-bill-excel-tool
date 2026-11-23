@@ -845,7 +845,7 @@ function createGenerationHelpers(options) {
       }
       const promptMerchantId = normalizeCell(error.context?.merchantId);
       const promptCurrency = normalizeCell(error.context?.currency);
-      const promptKey = `${promptMerchantId}@@${promptCurrency}`;
+      const promptKey = balanceAccountKey(promptMerchantId, promptCurrency);
       return {
         requested: true,
         failed: true,

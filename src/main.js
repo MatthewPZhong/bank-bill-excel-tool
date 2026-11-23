@@ -3606,6 +3606,7 @@ function createErrorReport(payload) {
 
 // persistedDetailLines：写入错误报告与活动日志的明细，默认同 detailLines。展示明细含账号等不宜落盘的内容时另给
 //   （v3.2.21：渠道余额方式冲突的错误对象带 persistedDetailLines，只记渠道、账户数与子模板）。
+// logMaskValues：落盘时须整体脱敏的已知账号（如渠道余额冲突的实际 MerchantId，含不是纯数字的账号）；不给时取 originalError 上的。
 function createErrorResult({
   step,
   message,
@@ -3613,22 +3614,34 @@ function createErrorResult({
   errorType = '业务校验错误',
   detailLines = [],
   persistedDetailLines = null,
+  logMaskValues = null,
   context = {},
   templateName = '',
   originalError = null
 }) {
-  const operationContext = archiveOperationContext.getStore();
-  if (operationContext && operationContext.phase === 'prepare') {
-    return createPreflightErrorResult({ message, errorCode, detailLines });
-  }
   const usesPersistedDetailLines = Array.isArray(persistedDetailLines)
     || Boolean(originalError && Array.isArray(originalError.persistedDetailLines));
+  const knownAccountValues = Array.isArray(logMaskValues)
+    ? logMaskValues
+    : (originalError && Array.isArray(originalError.logMaskValues) ? originalError.logMaskValues : []);
+  // v3.2.21：带落盘明细的错误（展示内容含账号）落盘时，模板名、上下文、摘要与原始异常中的已知账号与其他编号同样只写位数：
+  //   子模板名、渠道名由用户填写，可能以账号命名；报错文件名取自模板名（release 审查）。界面照常显示原文
+  const maskRecorded = (value) => (
+    usesPersistedDetailLines && typeof value === 'string' ? maskAccountLikeTextForLog(value, knownAccountValues) : value
+  );
+  const operationContext = archiveOperationContext.getStore();
+  if (operationContext && operationContext.phase === 'prepare') {
+    // 预检阶段不写报告；界面状态框转写活动日志时同样用脱敏的摘要
+    return createPreflightErrorResult({
+      message,
+      errorCode,
+      detailLines,
+      ...(usesPersistedDetailLines ? { logMessage: maskRecorded(String(message || '业务校验失败')) } : {})
+    });
+  }
   const recordedDetailLines = Array.isArray(persistedDetailLines)
     ? persistedDetailLines
     : (originalError && Array.isArray(originalError.persistedDetailLines) ? originalError.persistedDetailLines : detailLines);
-  // v3.2.21：带落盘明细的错误（展示内容含账号）落盘时，模板名、上下文、摘要与原始异常中的编号同样只写位数：
-  //   子模板名、渠道名由用户填写，可能以账号命名；报错文件名取自模板名（release 审查）。界面照常显示原文
-  const maskRecorded = (value) => (usesPersistedDetailLines && typeof value === 'string' ? maskAccountLikeTextForLog(value) : value);
   const recordedContext = usesPersistedDetailLines && context && typeof context === 'object'
     ? Object.fromEntries(Object.entries(context).map(([key, value]) => [key, maskRecorded(value)]))
     : context;
@@ -3638,7 +3651,7 @@ function createErrorResult({
     ? (() => {
         const originalMessage = String(originalError.message || '');
         const stack = String(originalError.stack || originalMessage || originalError);
-        return { stack: originalMessage ? stack.split(originalMessage).join(maskAccountLikeTextForLog(originalMessage)) : maskAccountLikeTextForLog(stack) };
+        return { stack: originalMessage ? stack.split(originalMessage).join(maskRecorded(originalMessage)) : maskRecorded(stack) };
       })()
     : originalError;
   const report = createErrorReport({
@@ -10211,12 +10224,14 @@ function registerTemplateHandlers() {
       );
       // v3.2.21：日期格式决定交易归属日，变化时在落库后立即留痕——不受随后模板库文件同步失败影响
       //   （同步失败时界面提示保存失败，但库内已是新值；重试时旧值已等于新值，不会再记）
+      // 模板名由用户填写、可能以账号命名：本次保存的两条日志都只写编号位数（release 审查）
+      const loggedTemplateName = maskAccountLikeTextForLog(template.name);
       if (dateFormat && dateFormat !== previousDateFormat) {
         appendActivityLogEntry({
           level: 'info',
           message: '模板日期格式已修改',
           details: [
-            `模板名：${template.name}`,
+            `模板名：${loggedTemplateName}`,
             `日期格式：${formatTemplateDateFormatLabel(previousDateFormat)} → ${formatTemplateDateFormatLabel(dateFormat)}`
           ]
         });
@@ -10229,9 +10244,9 @@ function registerTemplateHandlers() {
         level: 'info',
         message: '保存模板映射成功',
         details: [
-          `模板名：${template.name}`,
+          `模板名：${loggedTemplateName}`,
           ...(assignmentResult && assignmentResult.changed
-            ? [`渠道：${savedTemplate && savedTemplate.channelName ? savedTemplate.channelName : '（不属于任何渠道）'}`]
+            ? [`渠道：${savedTemplate && savedTemplate.channelName ? maskAccountLikeTextForLog(savedTemplate.channelName) : '（不属于任何渠道）'}`]
             : [])
         ]
       });
@@ -12948,13 +12963,15 @@ function collectGenerationGroupBalanceModeConflicts(groups, mixedEntries = null)
   return conflictGroups.length ? conflictGroups : null;
 }
 
-// 一个渠道的冲突：lines 逐账户列出（含账号，只用于界面展示）；accountCount、templateNames 供落盘的诊断（不含账号）。
+// 一个渠道的冲突：lines 逐账户列出（含账号，只用于界面展示）；accountCount、templateNames 供落盘的诊断（不含账号）；
+//   accountValues：冲突的实际 MerchantId，落盘时据此脱敏以账号命名的渠道、子模板（含不是纯数字的账号，release 审查）。
 function buildBalanceModeConflictGroup(channelName, conflicts) {
   return {
     channelName,
     lines: formatBalanceModeConflictLines(conflicts),
     accountCount: conflicts.length,
-    templateNames: [...new Set(conflicts.flatMap((conflict) => conflict.templates.map((item) => item.templateName)))]
+    templateNames: [...new Set(conflicts.flatMap((conflict) => conflict.templates.map((item) => item.templateName)))],
+    accountValues: [...new Set(conflicts.map((conflict) => conflict.merchantId).filter(Boolean))]
   };
 }
 
@@ -13114,7 +13131,7 @@ function recheckStatementExportChannelBalance(kind, plan) {
     message: error.message,
     errorCode: error.code,
     detailLines: error.detailLines,
-    logMessage: maskAccountLikeTextForLog(error.message)
+    logMessage: maskAccountLikeTextForLog(error.message, error.logMaskValues)
   });
 }
 
@@ -13152,9 +13169,13 @@ function buildChannelBalanceModeMismatchError(conflictGroups) {
     { detailLines, context: { channelName: channelNames.join('、') } }
   );
   error.conflictGroups = groups;
-  // 渠道名、子模板名由用户填写、可能以账号命名：落盘时其中的编号只写位数（release 审查）
+  // 渠道名、子模板名由用户填写、可能以账号命名：落盘时其中的冲突账号与其他编号只写位数（release 审查）；
+  //   logMaskValues 随错误带出，落盘的摘要、模板名与界面转写日志的摘要按同样的账号脱敏（见 createErrorResult）
+  const accountValues = [...new Set(groups.flatMap((item) => (Array.isArray(item.accountValues) ? item.accountValues : [])))];
+  const maskForLog = (text) => maskAccountLikeTextForLog(text, accountValues);
+  error.logMaskValues = accountValues;
   error.persistedDetailLines = groups.map((item) => (
-    `渠道「${maskAccountLikeTextForLog(item.channelName)}」：${item.accountCount} 个账户命中余额方式不同的子模板（${item.templateNames.map((name) => maskAccountLikeTextForLog(name)).join('、')}）`
+    `渠道「${maskForLog(item.channelName)}」：${item.accountCount} 个账户命中余额方式不同的子模板（${item.templateNames.map((name) => maskForLog(name)).join('、')}）`
   ));
   return error;
 }
@@ -13202,6 +13223,7 @@ function createChannelBalanceModeMismatchResult({ step, conflictGroups, template
     errorCode: error.code,
     detailLines: error.detailLines,
     persistedDetailLines: error.persistedDetailLines,
+    logMaskValues: error.logMaskValues,
     context: error.context,
     templateName
   });
@@ -14238,7 +14260,7 @@ function buildStatementExportPlan(kind, scope = 'auto') {
           errorCode: error.code,
           detailLines: error.detailLines,
           // 渠道名可能以账号命名：状态框转写活动日志时只写编号位数（release 审查）
-          logMessage: maskAccountLikeTextForLog(error.message)
+          logMessage: maskAccountLikeTextForLog(error.message, error.logMaskValues)
         }),
         normalizedScope,
         session
@@ -14418,6 +14440,7 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
           errorCode: error.code,
           detailLines: error.detailLines,
           persistedDetailLines: error.persistedDetailLines,
+          logMaskValues: error.logMaskValues,
           context: error.context,
           templateName: session.templateName
         });

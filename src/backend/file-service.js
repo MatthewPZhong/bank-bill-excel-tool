@@ -1107,15 +1107,14 @@ function buildMappedRows({
     }
   }
 
-  // v3.2.21 B112：按目标列分别记长数字（见 computeMappedRow 的 cellsByTarget）
+  // v3.2.21 B112：按目标列分别记长数字（见 computeMappedRow 的 cellsByTarget）。该列最终写出为空时（如长数字映射到
+  //   日期列，规范化后为空）没有近似值写进明细，不记（release 审查）
   function captureTargetCells(cellsByTarget, targetIndex, computeTarget) {
     if (!cellsByTarget || !currentRowUnverifiedCells) return computeTarget();
     const targetCells = new Map();
-    try {
-      return captureCells(targetCells, computeTarget);
-    } finally {
-      if (targetCells.size) cellsByTarget.set(targetIndex, targetCells);
-    }
+    const value = captureCells(targetCells, computeTarget);
+    if (targetCells.size && normalizeCell(value) !== '') cellsByTarget.set(targetIndex, targetCells);
+    return value;
   }
 
   // v3.2.21 B112：每个拆分子行单独记取值中的长数字（挂在子行的 unverifiedCells 上），合并、过滤后只汇总实际导出的子行
@@ -1249,7 +1248,9 @@ function buildMappedRows({
 
   rows.slice(1).forEach((row, rowIndex) => {
     currentRowFeeFormulaDivisionByZero = false;
-    currentRowUnverifiedCells = new Map();
+    // v3.2.21 B112：映射只从本行取值，行内没有无法核对原文的长数字时不跟踪来源（不为各目标列建记录，release 审查）
+    const rowHasUnverifiedLongNumber = row.some(isUnverifiedLongNumber);
+    currentRowUnverifiedCells = rowHasUnverifiedLongNumber ? new Map() : null;
     // v3.2.19：重复账单过滤的源行指纹（经「过滤账单」保留的行才会进入本循环）
     const fullSourceRow = duplicateRowKeys ? fullSourceRowByNumber.get(rowNumbers[rowIndex + 1]) : null;
     const sourceRowKey = duplicateRowKeys
@@ -1560,7 +1561,7 @@ function buildMappedRows({
       });
     };
     // 拆分行的发生额取拆分设置：此前按主映射读的发生额（含按字段区分发生额、按正负号拆分）不写进明细，不记
-    if (rowUsesBillSplit) currentRowUnverifiedCells = new Map();
+    if (rowUsesBillSplit && rowHasUnverifiedLongNumber) currentRowUnverifiedCells = new Map();
     // 按目标列分别记长数字：拆分底稿汇总时跳过被子行覆盖的列；主映射行记下各源字段写进了哪些目标列
     const preMappedFields = new Set(currentRowUnverifiedCells ? currentRowUnverifiedCells.keys() : []);
     const baseCellsByTarget = new Map();
@@ -1585,7 +1586,7 @@ function buildMappedRows({
       let billSplitBaseRow = mappedRow;
       if (!billSplitReuseModuleMapping) {
         // 不复用模块映射时主映射算出的底稿不输出（v3.2.21 B112：其中读到的长数字不提示）
-        currentRowUnverifiedCells = new Map();
+        if (rowHasUnverifiedLongNumber) currentRowUnverifiedCells = new Map();
         billSplitBaseRow = computeMappedRow(billSplitMappingByField, {
           skipTargetIndexes: billSplitDirectionalTargetIndexes(billSplitMappingByField),
           cellsByTarget: baseCellsByTarget

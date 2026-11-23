@@ -254,6 +254,20 @@ test('createErrorResult：错误对象带 persistedDetailLines 时，错误报�
   assert.ok(!JSON.stringify(logs[1]).includes('6222021234567890123'));
   assert.ok(logs[1].details.includes('模板名：对公（19位数字）'));
 
+  // 已知账号（logMaskValues，如冲突的实际 MerchantId）不是纯数字时同样整体脱敏落盘的模板名、摘要与日志摘要
+  const letteredError = Object.assign(new Error('渠道「渠道AC12B34」下同一账户命中了余额方式不同的子模板'), {
+    persistedDetailLines: ['渠道「渠道（7位账号）」：1 个账户命中余额方式不同的子模板（A、B）'],
+    logMaskValues: ['AC12B34']
+  });
+  const letteredShown = createErrorResult({
+    step: '补录余额', message: letteredError.message, errorCode: 'CHANNEL_BALANCE_MODE_MISMATCH',
+    detailLines: ['账户 AC12B34（USD）：A（不出余额）、B（取账单余额列）'], templateName: 'AC12B34', originalError: letteredError
+  });
+  assert.equal(letteredShown.logMessage, '渠道「渠道（7位账号）」下同一账户命中了余额方式不同的子模板');
+  assert.ok(!JSON.stringify([reports[2], logs[2]]).includes('AC12B34'));
+  reports.splice(2, 1);
+  logs.splice(2, 1);
+
   // 没有 persistedDetailLines 时照常写 detailLines、模板名与原始异常（其他错误行为不变）
   const plainError = new Error('其他错误 20261122');
   const plainResult = createErrorResult({ step: '导入', message: '其他错误', detailLines: ['第 3 行'], templateName: '中行2026', originalError: plainError });
@@ -277,4 +291,19 @@ test('selectBalanceAccountRows：只取方式不是“不出余额”的账户�
   assert.deepEqual(selected.rowMetas, [{ sourceRowNumber: 2 }, { sourceRowNumber: 5 }]);
   // 没有方式表时不取任何行
   assert.deepEqual(selectBalanceAccountRows(detailRows, null).length, 1);
+});
+
+// release 审查：余额账户键无歧义——账号或币种含 @@ 时，不同的两个账户不会得到同一个键（不含 @ 时键不变）
+test('resolveAccountBalanceModes：账号、币种含 @@ 的两个不同账户分别取各自的方式，不误报冲突', () => {
+  const result = resolveAccountBalanceModes([
+    { templateName: 'A', balanceMode: 'calculated', detailRows: rows([['2026-09-01', 'X@@Y', 'USD', '1', '', '']]) },
+    { templateName: 'B', balanceMode: 'none', detailRows: rows([['2026-09-01', 'X', 'Y@@USD', '2', '', '']]) }
+  ]);
+  assert.deepEqual(result.conflicts, []);
+  assert.equal(Object.keys(result.modeByAccount).length, 2);
+  const selected = selectBalanceAccountRows(rows([
+    ['2026-09-01', 'X@@Y', 'USD', '1', '', ''],
+    ['2026-09-01', 'X', 'Y@@USD', '2', '', '']
+  ]), result.modeByAccount);
+  assert.deepEqual(selected.slice(1).map((row) => row[1]), ['X@@Y']);
 });

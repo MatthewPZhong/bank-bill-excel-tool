@@ -967,27 +967,53 @@ function readXlsxIntegerLiterals(filePath, workbook, sheetName, candidates) {
     rowStarts.push({ index: rowMatch.index, row });
   }
   // 数组公式、模拟运算表等的结果区域（<f ref="…">）：只有首格带公式，区域内其他格只有缓存的 <v>，同样不是原文
-  //   （release 审查）；区域写法异常时整张表不还原。单格区域就是首格本身（自带 <f>），不另记
-  const formulaRanges = [];
+  //   （release 审查）。共享公式的各格都自带 <f t="shared">，不按区域判断。区域须是单格或矩形引用（decode_range
+  //   不校验写法，如 "C2:C3,B3:B8" 也能解出），写法异常、显式为空或区域互相重叠时整张表不还原。单格区域就是首格本身。
+  //   只按候选格所在的列建索引（列内按起始行排序、二分查找），大账单不必把每个候选格与整表的公式区域逐一比对
+  const candidateColumns = Array.from(new Set(candidates.map(({ c }) => c)));
+  const formulaRowsByColumn = new Map();
   const formulaTagPattern = /<(?:[\w.-]+:)?f\b([^>]*?)\/?>/g;
+  const rangePattern = /^\$?[A-Za-z]{1,3}\$?[1-9]\d{0,6}(?::\$?[A-Za-z]{1,3}\$?[1-9]\d{0,6})?$/;
   let formulaMatch;
   while ((formulaMatch = formulaTagPattern.exec(text)) !== null) {
     const formulaRef = readXmlAttribute(formulaMatch[1], 'ref');
-    if (!formulaRef) continue;
+    if (formulaRef === null || readXmlAttribute(formulaMatch[1], 't') === 'shared') continue;
+    if (!rangePattern.test(formulaRef.trim())) return null;
     let range;
     try {
-      range = XLSX.utils.decode_range(formulaRef);
+      range = XLSX.utils.decode_range(formulaRef.trim().replace(/\$/g, ''));
     } catch (_error) {
       return null;
     }
     const valid = range && [range.s.r, range.s.c, range.e.r, range.e.c].every((value) => Number.isInteger(value) && value >= 0)
       && range.e.r >= range.s.r && range.e.c >= range.s.c;
     if (!valid) return null;
-    if (range.s.r !== range.e.r || range.s.c !== range.e.c) formulaRanges.push(range);
+    if (range.s.r === range.e.r && range.s.c === range.e.c) continue;
+    for (const c of candidateColumns) {
+      if (c < range.s.c || c > range.e.c) continue;
+      if (!formulaRowsByColumn.has(c)) formulaRowsByColumn.set(c, []);
+      formulaRowsByColumn.get(c).push([range.s.r, range.e.r]);
+    }
   }
-  const inFormulaRange = (r, c) => formulaRanges.some((range) => (
-    r >= range.s.r && r <= range.e.r && c >= range.s.c && c <= range.e.c
-  ));
+  for (const spans of formulaRowsByColumn.values()) {
+    spans.sort((left, right) => left[0] - right[0]);
+    for (let index = 1; index < spans.length; index += 1) {
+      if (spans[index][0] <= spans[index - 1][1]) return null;
+    }
+  }
+  const inFormulaRange = (r, c) => {
+    const spans = formulaRowsByColumn.get(c);
+    if (!spans) return false;
+    let low = 0;
+    let high = spans.length - 1;
+    while (low <= high) {
+      const middle = (low + high) >> 1;
+      if (spans[middle][0] > r) high = middle - 1;
+      else if (spans[middle][1] < r) low = middle + 1;
+      else return true;
+    }
+    return false;
+  };
   const cellPattern = /<(?:[\w.-]+:)?c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:[\w.-]+:)?c>)/g;
   const valuePattern = /<(?:[\w.-]+:)?v\b[^>]*>([^<]*)<\/(?:[\w.-]+:)?v>/g;
   let match;

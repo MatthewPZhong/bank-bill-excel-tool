@@ -46,9 +46,11 @@ function pendingBalanceSeedAccounts(balanceSeedStatus) {
   }));
 }
 
-// 余额账户键（MerchantId + 币种原样）：余额分组、种子查找与按账户的余额方式表共用
+// 余额账户键（MerchantId + 币种原样）：余额分组、种子查找与按账户的余额方式表共用。两部分中的 @ 先转义为 @a 再用 @@ 连接
+//   （release 审查：原样拼接时 ('A@@B', 'USD') 与 ('A', 'B@@USD') 得到同一个键）；不含 @ 的账号、币种键与原来相同
 function balanceAccountKey(merchantId, currency) {
-  return `${merchantId}@@${currency}`;
+  const escape = (value) => String(value == null ? '' : value).replace(/@/g, '@a');
+  return `${escape(merchantId)}@@${escape(currency)}`;
 }
 
 // v3.2.21（D2）：渠道组内子模板余额方式不同时，余额只用出余额账户的行：按 modeByAccount（resolveAccountBalanceModes
@@ -491,7 +493,7 @@ function createStatementGenerationHelpers(deps) {
           if (error.code === 'BALANCE_SEED_REQUIRED') {
             const promptMerchantId = normalizeCell(error.context?.merchantId);
             const promptCurrency = normalizeCell(error.context?.currency);
-            const promptKey = `${promptMerchantId}@@${promptCurrency}`;
+            const promptKey = balanceAccountKey(promptMerchantId, promptCurrency);
             const queueIndex = balanceSeedStatus.missingIndexByKey?.get(promptKey) || 1;
             const queueTotal = balanceSeedStatus.missing || 1;
 

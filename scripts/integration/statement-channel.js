@@ -832,6 +832,7 @@ function verifyMixedBalanceModes(dir) {
     lines: ['账户 M501（CNY）：工商银行-北京（不出余额）、ICBC-BJ（取账单余额列）'],
     accountCount: 1,
     templateNames: ['工商银行-北京', 'ICBC-BJ'],
+    accountValues: ['M501'],
     groupKey: groupsE.find((group) => group.entries.includes(entriesE[2])).key
   }], 'Step2e.只有真实交易的冲突账户被列出');
   writeSource(fileI, 'A', [['2026-09-01', 'M401', 'USD', '1', '']]);

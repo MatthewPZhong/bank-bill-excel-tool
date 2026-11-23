@@ -1142,3 +1142,41 @@ test('XLSX：数组公式结果区域内只有缓存 <v> 的后续单元格同�
   assert.deepEqual(longNumberIssues(outside).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
   assert.deepEqual(identifiers(outside).map(([serial]) => String(serial)), [String(Number('9007199254740993')), '9007199254740995']);
 });
+
+test('XLSX：公式区域引用写法异常（多区域、显式为空）或区域重叠时整张表不还原，按无法核对提示', async (t) => {
+  const dir = createTempDir(t);
+  const rows = [HEADER, ['2026-11-01', 'USD', 100, 1111, 5], ['2026-11-02', 'USD', 200, 2222, 6]];
+  const literals = { 1111: '9007199254740993', 2222: '9007199254740995' };
+  const issuesOf = async (name, transform) => longNumberIssues(map(await writeXlsxWithLiterals(path.join(dir, name), rows, literals, transform)));
+  const bothUnverified = [['流水号'], ['流水号']];
+  const sources = (issues) => issues.map((issue) => issue.cells.map((cell) => cell.sourceField));
+  // decode_range 能解出 "F2:F3,D3:D8"，但它不是单个矩形；D3 不能因此当作区域外的原文
+  assert.deepEqual(sources(await issuesOf('multi.xlsx', (xml) => xml
+    .replace(/(<c r="D2"[^>]*>)<v>/, '$1<f>VALUE(F2)</f><v>')
+    .replace(/(<c r="E2"[^>]*>)<v>/, '$1<f t="array" ref="F2:F3,D3:D8">1</f><v>'))), bothUnverified);
+  assert.deepEqual(sources(await issuesOf('empty.xlsx', (xml) => xml
+    .replace(/(<c r="E2"[^>]*>)<v>/, '$1<f t="array" ref="">1</f><v>'))), bothUnverified);
+  // 区域互相重叠（有效文件不会出现）：整张表不还原，区域外的 D4 同样提示
+  const overlapRows = [...rows, ['2026-11-03', 'USD', 300, 3333, 7]];
+  const overlap = map(await writeXlsxWithLiterals(path.join(dir, 'overlap.xlsx'), overlapRows, { ...literals, 3333: '9007199254740997' }, (xml) => xml
+    .replace(/(<c r="E2"[^>]*>)<v>/, '$1<f t="array" ref="C2:D2">1</f><v>')
+    .replace(/(<c r="E3"[^>]*>)<v>/, '$1<f t="array" ref="D2:D3">1</f><v>')));
+  assert.deepEqual(sources(longNumberIssues(overlap)), [['流水号'], ['流水号'], ['流水号']]);
+  // 对照：区域不含流水号列（E2:E3）时照常按原文；共享公式首格的 ref 不按区域判断（各格自带 <f>）
+  assert.deepEqual(await issuesOf('other-column.xlsx', (xml) => xml
+    .replace(/(<c r="E2"[^>]*>)<v>/, '$1<f t="array" ref="E2:E3">1</f><v>')), []);
+  assert.deepEqual(await issuesOf('shared-master.xlsx', (xml) => xml
+    .replace(/(<c r="E2"[^>]*>)<v>/, '$1<f t="shared" ref="D2:E3" si="0">1</f><v>')), []);
+});
+
+test('长数字映射到日期列、规范化后写出为空时不提示（没有近似值写进明细）', async (t) => {
+  const dir = createTempDir(t);
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'date.xlsx'), [HEADER, ['2026-11-01', 'USD', 100, 1111, 2222]],
+    { 1111: SERIAL, 2222: '9.007199254740992E15' });
+  const targets = ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'ChannelOrderNo', 'ValueDate'];
+  const asDate = map(filePath, { orderedTargetFields: targets, mappingByField: { ...MAPPING, 'Payee Card No': undefined, ValueDate: '卡号' } });
+  assert.equal(asDate[1][targets.indexOf('ValueDate')], '');
+  assert.deepEqual(longNumberIssues(asDate), []);
+  // 对照：同一列映射到普通列时照常提示
+  assert.deepEqual(longNumberIssues(map(filePath)).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['卡号']]);
+});

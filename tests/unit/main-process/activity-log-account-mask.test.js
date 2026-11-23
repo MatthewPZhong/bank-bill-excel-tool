@@ -94,4 +94,13 @@ test('渠道余额错误的落盘明细中子模板名脱敏，弹窗明细保�
   ]);
   assert.equal(incomplete.detailLines[0], `渠道「${channelName}」文件「a.xlsx」第2行：缺少账单日期`);
   assert.deepEqual(incomplete.persistedDetailLines, ['渠道「渠道（19位数字）」本组第1个文件第2行：缺少账单日期', '渠道「招商银行」本组第1个文件第3行：缺少 MerchantId']);
+
+  // release 审查：冲突账号不是纯数字（如 AC12B34）、渠道或子模板以它命名时，按冲突的实际账号整体脱敏；错误带出 logMaskValues
+  const lettered = buildChannelBalanceModeMismatchError([{
+    channelName: '渠道AC12B34', lines: ['账户 AC12B34（USD）：AC12B34子模板（不出余额）、主（取账单余额列）'], accountCount: 1,
+    templateNames: ['AC12B34子模板', '主'], accountValues: ['AC12B34']
+  }]);
+  assert.deepEqual(lettered.persistedDetailLines, ['渠道「渠道（7位账号）」：1 个账户命中余额方式不同的子模板（（7位账号）子模板、主）']);
+  assert.deepEqual(lettered.logMaskValues, ['AC12B34']);
+  assert.ok(lettered.message.includes('AC12B34'), '界面摘要保留原文');
 });
