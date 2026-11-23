@@ -847,7 +847,8 @@ function updateStatusBox(box, message, tone = 'info', options = {}) {
           level: tone,
           source: 'renderer',
           domain: options.logDomain || (box && box.dataset && box.dataset.logDomain) || 'ui',
-          message: String(message || ''),
+          // logMessage：结果另给的日志摘要（如脱敏后的文字，release 审查），界面照常显示 message
+          message: String((typeof options.logMessage === 'string' ? options.logMessage : message) || ''),
           details: Array.isArray(options.logDetails) ? options.logDetails : []
         });
       }

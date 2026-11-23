@@ -24,7 +24,7 @@ const {
   upsertBalanceSeedRecord
 } = require('../../../src/backend/balance-seed-store');
 const { readBalanceAdjustments } = require('../../../src/backend/balance-adjustment-store');
-const { createStatementGenerationHelpers } = require('../../../src/main-process/statement-generation');
+const { createStatementGenerationHelpers, selectBalanceAccountRows } = require('../../../src/main-process/statement-generation');
 const { isDetailExportAmountRow } = require('../../../src/backend/file-service/normalizers');
 const {
   buildDateRangeLabel,
@@ -1941,7 +1941,7 @@ test('主进程：导出全部余额先规划全部组，后一组渠道余额�
   const session = { key: 'session-1', templateId: FILENAME_MAPPING_TEMPLATE_ID, currentBatchId: 'batch-3', templateName: '按文件名映射模板' };
   const ok = (tid) => ({ balance: { filePath: `/tmp/group-${tid}__all.xlsx` }, warnings: [] });
   const buildChannelBalanceModeMismatchError = loadMainFunction('buildChannelBalanceModeMismatchError', ['FileValidationError', 'maskAccountLikeTextForLog'], [FileValidationError, loadMainFunction('maskAccountLikeTextForLog', [], [])]);
-  const buildChannelBalanceRowsIncompleteError = loadMainFunction('buildChannelBalanceRowsIncompleteError', ['FileValidationError'], [FileValidationError]);
+  const buildChannelBalanceRowsIncompleteError = loadMainFunction('buildChannelBalanceRowsIncompleteError', ['FileValidationError', 'maskAccountLikeTextForLog'], [FileValidationError, loadMainFunction('maskAccountLikeTextForLog', [], [])]);
   const buildChannelBalancePlanningError = loadMainFunction(
     'buildChannelBalancePlanningError',
     ['buildChannelBalanceModeMismatchError', 'buildChannelBalanceRowsIncompleteError'],
@@ -2108,7 +2108,7 @@ test('主进程：导出全部余额写出时复用同一阶段校验得到的�
 // v3.2.21（D3）：「导出全部」另存为之前的预检同样汇总各渠道出余额的交易缺字段，不在第一个渠道处停下
 test('主进程：导出全部预检汇总各渠道出余额的交易缺字段，不弹另存为', () => {
   const buildChannelBalanceModeMismatchError = loadMainFunction('buildChannelBalanceModeMismatchError', ['FileValidationError', 'maskAccountLikeTextForLog'], [FileValidationError, loadMainFunction('maskAccountLikeTextForLog', [], [])]);
-  const buildChannelBalanceRowsIncompleteError = loadMainFunction('buildChannelBalanceRowsIncompleteError', ['FileValidationError'], [FileValidationError]);
+  const buildChannelBalanceRowsIncompleteError = loadMainFunction('buildChannelBalanceRowsIncompleteError', ['FileValidationError', 'maskAccountLikeTextForLog'], [FileValidationError, loadMainFunction('maskAccountLikeTextForLog', [], [])]);
   const buildChannelBalancePlanningError = loadMainFunction(
     'buildChannelBalancePlanningError',
     ['buildChannelBalanceModeMismatchError', 'buildChannelBalanceRowsIncompleteError'],
@@ -2154,6 +2154,7 @@ test('主进程：导出全部预检汇总各渠道出余额的交易缺字段�
     buildDateRangeLabel: () => '',
     normalizeCell,
     isDetailExportAmountRow,
+    maskAccountLikeTextForLog: loadMainFunction('maskAccountLikeTextForLog', [], []),
     getToday: () => '2026-11-20'
   };
   const parsedGroups = [];
@@ -2232,15 +2233,17 @@ test('主进程：导出全部预检汇总各渠道出余额的交易缺字段�
   assert.deepEqual([okPlan.stopResult, okPlan.defaultFileName], [undefined, '3-BALANCE-450000.xlsx']);
 
   // release 审查：另存为默认文件名的日期与生成时的文件名同口径：剔除收支都为空或 0 的行（生成时跳过）；
-  //   余额文件只取出余额的条目的行（balanceDetailRows），组内都不出余额或没有出余额的交易时不计；明细没有其他行时按全部明细行
+  //   余额文件只取出余额账户的行（balanceRowsByAccountMode 时按账户方式表取，与生成同口径），组内都不出余额或没有出余额的
+  //   交易时不计；明细没有其他行时按全部明细行
   const H = ['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount'];
   const batches = {
     mixed: {
-      detailRows: [H, ['2026-01-15', 'M1', 'USD', '0', ''], ['2026-02-01', 'M1', 'USD', '5', ''], ['2026-03-01', 'M2', 'USD', '7', '']],
-      balanceDetailRows: [H, ['2026-01-15', 'M2', 'USD', '0', ''], ['2026-03-01', 'M2', 'USD', '7', '']],
+      detailRows: [H, ['2026-01-10', 'M2', 'USD', '0', ''], ['2026-01-15', 'M1', 'USD', '0', ''], ['2026-02-01', 'M1', 'USD', '5', ''], ['2026-03-01', 'M2', 'USD', '7', '']],
+      balanceModeByAccount: { 'M1@@USD': 'none', 'M2@@USD': 'calculated' },
+      balanceRowsByAccountMode: true,
       balanceRequested: true
     },
-    // 整组模板不出余额（批次不带 balanceDetailRows，与 buildPreparedStatementBatch 按组配置得到的形态相同）
+    // 整组模板不出余额（批次不带 balanceRowsByAccountMode，与 buildPreparedStatementBatch 按组配置得到的形态相同）
     noBalance: { detailRows: [H, ['2026-02-01', 'M1', 'USD', '5', '']], balanceRequested: false },
     zeroOnly: { detailRows: [H, ['2026-01-15', 'M1', 'USD', '0', '0']] },
     single: { detailRows: [H, ['2026-01-20', 'M1', 'USD', '0', ''], ['2026-02-10', 'M1', 'USD', '', '3']] }
@@ -2251,7 +2254,8 @@ test('主进程：导出全部预检汇总各渠道出余额的交易缺字段�
       groupStatementEntriesForGeneration: () => groups.slice(0, batchKeys.length),
       buildPreparedStatementBatchFromEntries: ({ config }) => batches[batchKeys[config.template.id - 1]],
       parseRequiredBillDates,
-      buildDateRangeLabel
+      buildDateRangeLabel,
+      selectBalanceAccountRows
     };
     return loadMainFunction('buildStatementExportPlan', Object.keys(namingDeps), Object.values(namingDeps));
   };
@@ -2273,7 +2277,7 @@ test('主进程：导出全部预检汇总各渠道出余额的交易缺字段�
 //   （resolveEntryBalancePlan，只扫描不复制），不再构建、保留批次；写出前的检查在任何组写出之前对全部组做完
 test('主进程：导入多组生成与补录重算中，其他组错误不遮住渠道余额错误，失败后其余组只校验不构建批次', () => {
   const buildChannelBalanceModeMismatchError = loadMainFunction('buildChannelBalanceModeMismatchError', ['FileValidationError', 'maskAccountLikeTextForLog'], [FileValidationError, loadMainFunction('maskAccountLikeTextForLog', [], [])]);
-  const buildChannelBalanceRowsIncompleteError = loadMainFunction('buildChannelBalanceRowsIncompleteError', ['FileValidationError'], [FileValidationError]);
+  const buildChannelBalanceRowsIncompleteError = loadMainFunction('buildChannelBalanceRowsIncompleteError', ['FileValidationError', 'maskAccountLikeTextForLog'], [FileValidationError, loadMainFunction('maskAccountLikeTextForLog', [], [])]);
   const buildChannelBalancePlanningError = loadMainFunction(
     'buildChannelBalancePlanningError',
     ['buildChannelBalanceModeMismatchError', 'buildChannelBalanceRowsIncompleteError'],
@@ -2547,7 +2551,7 @@ test('主进程：导出另存为确认后复检遇到渠道余额错误时在�
 // 复检只在需要重新生成的按文件名映射会话中进行，只看多个子模板的渠道组，只扫描不复制（不构建批次、不解析日期）
 test('主进程：导出另存为确认后的渠道余额复检只看可能冲突的渠道组', () => {
   const buildChannelBalanceModeMismatchError = loadMainFunction('buildChannelBalanceModeMismatchError', ['FileValidationError', 'maskAccountLikeTextForLog'], [FileValidationError, loadMainFunction('maskAccountLikeTextForLog', [], [])]);
-  const buildChannelBalanceRowsIncompleteError = loadMainFunction('buildChannelBalanceRowsIncompleteError', ['FileValidationError'], [FileValidationError]);
+  const buildChannelBalanceRowsIncompleteError = loadMainFunction('buildChannelBalanceRowsIncompleteError', ['FileValidationError', 'maskAccountLikeTextForLog'], [FileValidationError, loadMainFunction('maskAccountLikeTextForLog', [], [])]);
   const buildChannelBalancePlanningError = loadMainFunction(
     'buildChannelBalancePlanningError',
     ['buildChannelBalanceModeMismatchError', 'buildChannelBalanceRowsIncompleteError'],
@@ -2589,6 +2593,7 @@ test('主进程：导出另存为确认后的渠道余额复检只看可能冲�
         if (fallbackConflict) conflictGroups.push({ channelName: '渠道1', lines: ['账户 M1（USD）：A1（不出余额）、B1（取账单余额列）'], accountCount: 1, templateNames: ['A1', 'B1'] });
       },
       buildChannelBalancePlanningError,
+      maskAccountLikeTextForLog: loadMainFunction('maskAccountLikeTextForLog', [], []),
       createPreflightErrorResult: (payload) => ({ status: 'error', ...payload })
     };
     const result = loadMainFunction('recheckStatementExportChannelBalance', Object.keys(deps), Object.values(deps))('balance', inputPlan);

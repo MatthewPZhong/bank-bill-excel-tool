@@ -397,11 +397,11 @@ function createStatementGenerationHelpers(deps) {
           throw new FileValidationError('FILE_READ', '余额账单模板为空或不可读，请重新确认');
         }
 
-        // v3.2.21（D2）：渠道组内子模板余额方式不同时，余额只用出余额账户的行：从已复制、已剔除收支都为空的行的
-        //   effectiveDetailRows 中按 balanceModeByAccount 取行引用（不再复制余额子集、构造导出行，release 审查），
-        //   各账户按 balanceModeByAccount 取自己的方式；否则沿用明细的全部行与单一方式。
+        // v3.2.21（D2）：渠道组内子模板余额方式不同、有不出余额的条目时（balanceRowsByAccountMode），余额只用出余额账户的行：
+        //   从已复制、已剔除收支都为空的行的 effectiveDetailRows 中按 balanceModeByAccount 取行引用（不复制余额子集、
+        //   不构造导出行，release 审查），各账户按 balanceModeByAccount 取自己的方式；否则沿用明细的全部行与单一方式。
         let balanceDetailRows = effectiveDetailRows;
-        if (Array.isArray(preparedBatch.balanceDetailRows) && preparedBatch.balanceModeByAccount) {
+        if (preparedBatch.balanceRowsByAccountMode && preparedBatch.balanceModeByAccount) {
           balanceDetailRows = selectBalanceAccountRows(effectiveDetailRows, preparedBatch.balanceModeByAccount);
         }
 

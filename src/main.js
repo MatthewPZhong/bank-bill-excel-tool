@@ -667,7 +667,8 @@ const {
   resolveSinglePreparedFieldValue
 } = require('./main-process/statement-session');
 const {
-  createStatementGenerationHelpers
+  createStatementGenerationHelpers,
+  selectBalanceAccountRows
 } = require('./main-process/statement-generation');
 const {
   DUPLICATE_REVIEW_STATUS,
@@ -3665,19 +3666,24 @@ function createErrorResult({
   return {
     status: 'error',
     message,
+    // 界面状态框会把错误摘要转写到活动日志（app:report-log）：带落盘明细的错误另给脱敏后的摘要供其使用（release 审查）
+    ...(usesPersistedDetailLines ? { logMessage: recordedMessage } : {}),
     errorReportReady: true,
     errorReportFileName: report.fileName
   };
 }
 
+// logMessage（可选）：界面状态框转写活动日志时用的摘要（消息含用户填写的名称、可能以账号命名时给脱敏后的文字）
 function createPreflightErrorResult({
   message,
   errorCode = 'BUSINESS_ERROR',
-  detailLines = []
+  detailLines = [],
+  logMessage
 }) {
   return {
     status: 'error',
     message: String(message || '业务校验失败'),
+    ...(typeof logMessage === 'string' ? { logMessage } : {}),
     errorCode: String(errorCode || 'BUSINESS_ERROR'),
     detailLines: Array.isArray(detailLines) ? detailLines.slice() : [],
     errorReportReady: false
@@ -4003,7 +4009,8 @@ function normalizeTemplateDateFormat(value) {
 function formatTemplateDateFormatLabel(value) {
   return normalizeTemplateDateFormat(value)
     ? TEMPLATE_DATE_FORMAT_LABELS[value]
-    : `无效值「${value}」（按自动解析）`;
+    // 旧模板包可带来任意文字：编号只写位数（release 审查）
+    : `无效值「${maskAccountLikeTextForLog(value)}」（按自动解析）`;
 }
 
 function normalizeBundleTemplateHeaders(headers) {
@@ -12653,20 +12660,20 @@ function resolveEntryBalanceMode(entry, config, templateConfigCache = new Map())
 //   同一账户命中不同方式时整批阻断（导入多组生成时在规划阶段抛出，尚未写出文件或替换会话）；参与余额的交易行
 //   须有账单日期与 MerchantId（按各行实际取到的值核对，拆分行用独立映射时同样适用；组配置模板可能不出余额，生成时
 //   不再只看组配置的映射）。否则在批次上附加账户 → 方式表，并按出余额条目是否有交易行决定是否生成余额（组配置模板不出余额时
-//   其他账户照常出余额；只有收支都为空或 0 的行时不生成）；组内有不出余额的条目时，另附只含需要出余额的条目的明细行。
+//   其他账户照常出余额；只有收支都为空或 0 的行时不生成）；组内有不出余额的条目时，标记余额只用出余额账户的行
+//   （balanceRowsByAccountMode：生成与另存为命名时按账户方式表从明细行中取行引用，不另复制一份，release 审查）。
 //   条目来自同一模板或余额方式都相同时原样返回，行为与此前一致。
 function applyEntryBalanceModes({ config, fileEntries, preparedBatch, balancePlan, issueLineBudget }) {
   const plan = balancePlan === undefined ? resolveEntryBalancePlan({ config, fileEntries, issueLineBudget }) : balancePlan;
   if (!plan) return preparedBatch;
-  const { modes, modeByAccount, balanceEntries, hasEffectiveRow } = plan;
+  const { modes, modeByAccount, hasEffectiveRow } = plan;
   if (!modes.has('none')) {
     return { ...preparedBatch, balanceModeByAccount: modeByAccount, balanceRequested: hasEffectiveRow };
   }
-  const balanceDetailRows = mergeMappedDetailRows(balanceEntries.map((item) => item.detailRows));
   return {
     ...preparedBatch,
     balanceModeByAccount: modeByAccount,
-    balanceDetailRows,
+    balanceRowsByAccountMode: true,
     balanceRequested: hasEffectiveRow
   };
 }
@@ -12928,7 +12935,8 @@ function findGenerationGroupBalanceModeConflictGroup(group, mixedEntries = null)
     group.entries.forEach((entry) => mixedEntries.add(entry));
   }
   const { conflicts } = resolveAccountBalanceModes(entryModes);
-  return conflicts.length ? buildBalanceModeConflictGroup(channelName, conflicts) : null;
+  // groupKey：导入预检据此找出账号由注入改写的渠道（步骤 8），不进入错误明细
+  return conflicts.length ? { ...buildBalanceModeConflictGroup(channelName, conflicts), groupKey: group.key } : null;
 }
 
 // v3.2.21（D3）：汇总本批各渠道组的冲突，整批逐账户列出（不在第一个渠道处停下）。返回冲突渠道的数组，没有时 null。
@@ -13102,7 +13110,12 @@ function recheckStatementExportChannelBalance(kind, plan) {
   }
   if (!conflictGroups.length && !rowIssueGroups.length) return null;
   const error = buildChannelBalancePlanningError(conflictGroups, rowIssueGroups);
-  return createPreflightErrorResult({ message: error.message, errorCode: error.code, detailLines: error.detailLines });
+  return createPreflightErrorResult({
+    message: error.message,
+    errorCode: error.code,
+    detailLines: error.detailLines,
+    logMessage: maskAccountLikeTextForLog(error.message)
+  });
 }
 
 function collectGroupBalanceIssuesWithoutConfig(group, { conflictGroups, rowIssueGroups, issueLineBudget }) {
@@ -13139,9 +13152,9 @@ function buildChannelBalanceModeMismatchError(conflictGroups) {
     { detailLines, context: { channelName: channelNames.join('、') } }
   );
   error.conflictGroups = groups;
-  // 子模板名由用户填写、可能以账号命名：落盘时其中的编号只写位数（release 审查）
+  // 渠道名、子模板名由用户填写、可能以账号命名：落盘时其中的编号只写位数（release 审查）
   error.persistedDetailLines = groups.map((item) => (
-    `渠道「${item.channelName}」：${item.accountCount} 个账户命中余额方式不同的子模板（${item.templateNames.map((name) => maskAccountLikeTextForLog(name)).join('、')}）`
+    `渠道「${maskAccountLikeTextForLog(item.channelName)}」：${item.accountCount} 个账户命中余额方式不同的子模板（${item.templateNames.map((name) => maskAccountLikeTextForLog(name)).join('、')}）`
   ));
   return error;
 }
@@ -13153,9 +13166,10 @@ function buildChannelBalanceRowsIncompleteError(rowIssueGroups, lineLimit = 200)
   const groups = (Array.isArray(rowIssueGroups) ? rowIssueGroups : []).filter(Boolean);
   const channelNames = groups.map((item) => item.channelName);
   const totalIssueCount = groups.reduce((sum, item) => sum + (Number(item.issueCount) || item.lines.length), 0);
-  const prefixed = (pick) => {
+  // channelLabel：落盘明细的渠道名同样只写编号位数（渠道名由用户填写、可能以账号命名，release 审查）
+  const prefixed = (pick, channelLabel = (name) => name) => {
     const lines = (groups.length > 1
-      ? groups.flatMap((item) => pick(item).map((line) => `渠道「${item.channelName}」${line}`))
+      ? groups.flatMap((item) => pick(item).map((line) => `渠道「${channelLabel(item.channelName)}」${line}`))
       : groups.flatMap((item) => pick(item))).slice(0, lineLimit);
     return totalIssueCount > lines.length
       ? lines.concat(`另有 ${totalIssueCount - lines.length} 行交易缺少账单日期或 MerchantId，未逐行列出（共 ${totalIssueCount} 行）`)
@@ -13167,7 +13181,7 @@ function buildChannelBalanceRowsIncompleteError(rowIssueGroups, lineLimit = 200)
     { detailLines: prefixed((item) => item.lines), context: { channelName: channelNames.join('、') } }
   );
   error.rowIssueGroups = groups;
-  error.persistedDetailLines = prefixed((item) => item.persistedLines);
+  error.persistedDetailLines = prefixed((item) => item.persistedLines, maskAccountLikeTextForLog);
   return error;
 }
 
@@ -14092,13 +14106,14 @@ function getGeneratedStatementExport(kind, scope = 'current') {
 function buildStatementExportPlan(kind, scope = 'auto') {
   // v3.2.21（D2）：另存为默认文件名的日期范围与生成时的文件名同口径（release 审查）：先按全部明细行校验账单日期（原有检查），
   //   再按实际写出的行取日期——剔除收支都为空或 0 的行（生成时跳过）；明细没有其他行时按全部明细行；
-  //   余额只取出余额的条目的行（preparedBatch.balanceDetailRows），组内都不出余额或没有出余额的交易时不计
+  //   余额只取出余额账户的行（balanceRowsByAccountMode 时按账户方式表取行引用，与生成同口径），组内都不出余额或没有
+  //   出余额的交易时不计
   const exportNamingDatesOf = (preparedBatch) => {
     const detailDates = parseRequiredBillDates(preparedBatch.detailRows);
     const balanceKind = kind === 'balance';
     if (balanceKind && preparedBatch.balanceRequested === false) return [];
-    const sourceRows = balanceKind && Array.isArray(preparedBatch.balanceDetailRows)
-      ? preparedBatch.balanceDetailRows
+    const sourceRows = balanceKind && preparedBatch.balanceRowsByAccountMode
+      ? selectBalanceAccountRows(preparedBatch.detailRows, preparedBatch.balanceModeByAccount)
       : preparedBatch.detailRows;
     // 只取写出的行的引用（isDetailExportAmountRow，与 buildDetailExportRows 同一判断），不复制行
     const header = Array.isArray(sourceRows[0]) ? sourceRows[0] : [];
@@ -14221,7 +14236,9 @@ function buildStatementExportPlan(kind, scope = 'auto') {
         stopResult: createPreflightErrorResult({
           message: error.message,
           errorCode: error.code,
-          detailLines: error.detailLines
+          detailLines: error.detailLines,
+          // 渠道名可能以账号命名：状态框转写活动日志时只写编号位数（release 审查）
+          logMessage: maskAccountLikeTextForLog(error.message)
         }),
         normalizedScope,
         session
@@ -16037,15 +16054,10 @@ async function handleFilenameMappingImport(prepared) {
     }
     // 余额方式不同的渠道组的条目一并记下（含所属渠道与余额方式），注入大账号后的复核按位置取用（见步骤 5、8）。
     //   按原行判断的冲突在确定不进入大账号选择后才返回（步骤 8）：进入选择时各账号块的账号、币种都由用户的选择覆盖，
-    //   原行的账号不作数，改在完成选择后按分配结果判断（completeBigAccountSelectionHandler），release 审查
+    //   原行的账号不作数，改在完成选择后按分配结果判断（completeBigAccountSelectionHandler）；自动确定唯一大账号时，
+    //   含要注入账号的条目的渠道同样只按注入后的条目判断（release 审查）
     const balanceModeMixedEntries = new Map();
     const balanceModeConflicts = collectGenerationGroupBalanceModeConflicts(importGenerationGroups, balanceModeMixedEntries);
-    const balanceModeConflictResult = () => createChannelBalanceModeMismatchResult({
-      step: '导入网银明细文件',
-      conflictGroups: balanceModeConflicts,
-      templateName: virtualTemplateName,
-      preservesSession: Boolean(prepared.previewOnly)
-    });
     const pendingConflictChannels = [];
     const checkedChannelIds = new Set();
     for (const [, matchedConfig] of perTemplateConfigCache) {
@@ -16239,8 +16251,21 @@ async function handleFilenameMappingImport(prepared) {
         selectedBigAccount = recognitionResult.selectedBigAccount;
       }
     }
-    // 不进入大账号选择：原行（未注入账号的条目）的冲突作数（步骤 3.5 已判断）
-    if (balanceModeConflicts) return balanceModeConflictResult();
+    // 不进入大账号选择：原行的冲突作数（步骤 3.5 已判断）。自动确定唯一大账号时，含要注入账号的条目的渠道，账号由注入改写
+    //   （如拆分映射暂时从源列读出的账号），按原行判断不作数，只按注入后的条目判断（见下）；其余渠道沿用原行的判断（release 审查）
+    // 复用导入时已按模板读取的配置（另起一份，不改动 perTemplateConfigCache）
+    const selectedBigAccountConfigCache = new Map(perTemplateConfigCache);
+    const usesSelectedBigAccount = (entry) => entryUsesSelectedBigAccount(entry, syntheticTemplateConfig, selectedBigAccountConfigCache);
+    const injectedBalanceModeGroupKeys = new Set();
+    if (selectedBigAccount) {
+      balanceModeMixedEntryIndexes.forEach((index) => {
+        const entry = trimmedProvisionalEntries[index];
+        const recorded = balanceModeMixedEntries.get(entry);
+        if (recorded && usesSelectedBigAccount(entry)) injectedBalanceModeGroupKeys.add(recorded.groupKey);
+      });
+    }
+    const provisionalBalanceModeConflicts = (balanceModeConflicts || [])
+      .filter((group) => !injectedBalanceModeGroupKeys.has(group.groupKey));
 
     const statementImportPlan = {
       kind: 'filename-mapping',
@@ -16256,27 +16281,26 @@ async function handleFilenameMappingImport(prepared) {
     const resolveFinalEntries = () => finalEntries || (finalEntries = resolveFilenameMappingFinalEntries(statementImportPlan));
     const previewsDuplicateRows = Boolean(prepared.previewOnly) && hasDuplicateRowKeys(trimmedProvisionalEntries);
     // v3.2.21（D3）：直接生成时大账号已确定，按注入账号后的条目再判断一次（步骤 3.5 时多大账号模板的行还没有账号），
-    //   在开始生成前拦下，不进入生成后才失败的收尾
-    if (selectedBigAccount) {
-      // 复用导入时已按模板读取的配置（另起一份，不改动 perTemplateConfigCache）
-      const selectedBigAccountConfigCache = new Map(perTemplateConfigCache);
-      const resolvedBalanceModeConflicts = findResolvedEntriesBalanceModeConflicts(
+    //   在开始生成前拦下，不进入生成后才失败的收尾。与其余渠道按原行判断出的冲突一并列出
+    const resolvedBalanceModeConflicts = selectedBigAccount
+      ? findResolvedEntriesBalanceModeConflicts(
         balanceModeMixedEntryIndexes.map((index) => trimmedProvisionalEntries[index]),
         (pendingEntries) => (previewsDuplicateRows
           ? pickResolvedEntries(trimmedProvisionalEntries, resolveFinalEntries(), pendingEntries)
           : resolveFilenameMappingFinalEntries({ ...statementImportPlan, trimmedProvisionalEntries: pendingEntries })),
-        (entry) => entryUsesSelectedBigAccount(entry, syntheticTemplateConfig, selectedBigAccountConfigCache),
+        usesSelectedBigAccount,
         // 复用步骤 3.5 记下的渠道与余额方式，只替换注入后的明细行再判断
         balanceModeMixedEntries
-      );
-      if (resolvedBalanceModeConflicts) {
-        return createChannelBalanceModeMismatchResult({
-          step: '导入网银明细文件',
-          conflictGroups: resolvedBalanceModeConflicts,
-          templateName: virtualTemplateName,
-          preservesSession: Boolean(prepared.previewOnly)
-        });
-      }
+      )
+      : null;
+    const importBalanceModeConflicts = provisionalBalanceModeConflicts.concat(resolvedBalanceModeConflicts || []);
+    if (importBalanceModeConflicts.length) {
+      return createChannelBalanceModeMismatchResult({
+        step: '导入网银明细文件',
+        conflictGroups: importBalanceModeConflicts,
+        templateName: virtualTemplateName,
+        preservesSession: Boolean(prepared.previewOnly)
+      });
     }
     if (prepared.previewOnly) {
       prepared.statementImportPlan = statementImportPlan;

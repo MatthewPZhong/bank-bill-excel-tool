@@ -824,12 +824,15 @@ function verifyMixedBalanceModes(dir) {
   const bothGroups = envE.fns.groupStatementEntriesForGeneration([envE.entryFor(ownerE, fileBoth), envE.entryFor(childE, fileJ)]);
   assertEq(conflictLinesOf(envE, bothGroups[0]), ['账户 M401（USD）：招商银行-上海（不出余额）、CMB-SH（取账单余额列）'], 'Step2e.收支同时有值的行照常参与冲突判断');
   const entriesE = [envE.entryFor(ownerE, fileI), envE.entryFor(childE, fileJ), envE.entryFor(ownerE2, fileK), envE.entryFor(childE2, fileL)];
-  const conflictGroupsE = envE.fns.collectGenerationGroupBalanceModeConflicts(envE.fns.groupStatementEntriesForGeneration(entriesE));
+  const groupsE = envE.fns.groupStatementEntriesForGeneration(entriesE);
+  const conflictGroupsE = envE.fns.collectGenerationGroupBalanceModeConflicts(groupsE);
+  // groupKey：导入预检据此找出账号由注入改写的渠道（release 审查），不进入错误明细
   assertEq(conflictGroupsE, [{
     channelName: '工商银行-北京',
     lines: ['账户 M501（CNY）：工商银行-北京（不出余额）、ICBC-BJ（取账单余额列）'],
     accountCount: 1,
-    templateNames: ['工商银行-北京', 'ICBC-BJ']
+    templateNames: ['工商银行-北京', 'ICBC-BJ'],
+    groupKey: groupsE.find((group) => group.entries.includes(entriesE[2])).key
   }], 'Step2e.只有真实交易的冲突账户被列出');
   writeSource(fileI, 'A', [['2026-09-01', 'M401', 'USD', '1', '']]);
   const entriesE2 = [envE.entryFor(ownerE, fileI), envE.entryFor(childE, fileJ), envE.entryFor(ownerE2, fileK), envE.entryFor(childE2, fileL)];
@@ -1250,6 +1253,64 @@ async function verifyBigAccountSelectionDefersProvisionalConflict(dir) {
   assertEq([single.preview && single.preview.errorCode, single.rows.length], ['CHANNEL_BALANCE_MODE_MISMATCH', 0],
     'Step2i.对照：不进入大账号选择时按原行的冲突在预检拒绝');
   assertEq(env.exportFiles(), [], 'Step2i.预检不产出文件');
+}
+
+// (j) release 审查：自动确定唯一大账号时，含要注入账号的条目的渠道，原行的账号会被注入改写（如拆分映射暂时从源列读出的账号），
+//   不按原行拒绝，只按注入后的条目判断：注入后分属不同账户时放行，同一账户时拒绝。这里以桩标出子模板的条目要注入账号、
+//   注入时把它的 MerchantId 改为所选大账号（真实的拆分映射注入见 statement-currency-big-account），其余走真实的导入预检
+async function verifyAutoBigAccountUsesInjectedRows(dir) {
+  const env = createEnvironment(dir, 'step2j');
+  const owner = env.defineTemplate('招商银行-上海', 'A', { balance: '无' });
+  const channelId = env.saveWithChannel(owner, { mode: 'create' }).channelId;
+  const child = env.defineTemplate('CMB-SH', 'D', { balance: 'Bal' });
+  env.saveWithChannel(child, { mode: 'join', channelId });
+  const fileA = path.join(dir, 'step2j-a.xlsx');
+  const fileB = path.join(dir, 'step2j-b.xlsx');
+  // 原行两边都是 M601：按原行判断是冲突
+  writeSource(fileA, 'A', [['2026-09-01', 'M601', 'USD', '1', '']]);
+  writeSource(fileB, 'D', [['2026-09-01', 'M601', 'USD', '2', '', '12']]);
+  const injectMerchant = (entry, merchantId) => {
+    const header = entry.detailRows[0];
+    const merchantIndex = header.indexOf('MerchantId');
+    const detailRows = [header, ...entry.detailRows.slice(1).map((row) => row.map((cell, index) => (index === merchantIndex ? merchantId : cell)))];
+    detailRows.rowMetas = entry.detailRows.rowMetas;
+    return { ...entry, detailRows };
+  };
+  const runPreview = async (bigAccount) => {
+    env.bigAccountsByTemplateId.set(child.id, [{ merchantId: bigAccount, currencies: ['USD'] }]);
+    const scope = createMainScope({
+      ...env.mainDeps,
+      ...env.fns,
+      fileImportInProgress: false,
+      lastPendingBigAccountSelection: null,
+      getEnumConfig: () => ({}),
+      getStatementChannelMigrationPendingMessage: () => null,
+      clearPendingManualBalancePrompt: () => {},
+      clearGeneratedExports: () => {},
+      statementDuplicateReview: { clear: () => {}, cancel: () => {} },
+      executeFilenameMappingImportPlan: () => {},
+      readBigAccountMode: () => null,
+      readBigAccountOrder: () => null,
+      ensureStorageRoot: () => env.storageRoot,
+      createErrorResult: (payload) => ({ status: 'error', ...payload }),
+      appendActivityLogEntry: () => {},
+      entryUsesSelectedBigAccount: (entry) => entry.matchedTemplateId === child.id,
+      resolveFilenameMappingFinalEntries: (plan) => plan.trimmedProvisionalEntries.map((entry) => (
+        entry.matchedTemplateId === child.id ? injectMerchant(entry, plan.selectedBigAccount.merchantId) : entry
+      ))
+    });
+    const prepared = { previewOnly: true, inputFilePaths: [fileA, fileB], selectionResult: { filePaths: [fileA, fileB] } };
+    return scope.handleFilenameMappingImport(prepared);
+  };
+  const allowed = await runPreview('M602');
+  assertEq([allowed && allowed.status, allowed && allowed.errorCode], ['statement-import-preview-ready', undefined],
+    'Step2j.原行同账户、但注入后分属不同账户时按注入后的条目判断，放行');
+  const rejected = await runPreview('M601');
+  assertEq([rejected && rejected.errorCode, rejected && rejected.detailLines], [
+    'CHANNEL_BALANCE_MODE_MISMATCH',
+    ['账户 M601（USD）：招商银行-上海（不出余额）、CMB-SH（取账单余额列）']
+  ], 'Step2j.注入后仍是同一账户时按注入后的条目拒绝（只列一次）');
+  assertEq(env.exportFiles(), [], 'Step2j.预检不产出文件');
 }
 
 // 导入入口：渠道校验（余额方式、待处理冲突）位于大账号聚合与生成之前。
@@ -1902,6 +1963,7 @@ async function run() {
     await verifyDirectImportRejectsInjectedConflict(dir);
     await verifyBigAccountCompletionRejectsInjectedConflict(dir);
     await verifyBigAccountSelectionDefersProvisionalConflict(dir);
+    await verifyAutoBigAccountUsesInjectedRows(dir);
     verifyMixedGroups(dir);
     verifyCalculatedSeedAndGap(dir);
     verifyLegacyMigration(dir);

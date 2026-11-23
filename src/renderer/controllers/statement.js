@@ -41,7 +41,8 @@ function setStatus(message, tone = 'info', options = {}) {
     manualBalancePromptReady: state.manualBalancePromptReady,
     manualBalancePromptTitle: ({ gap: '点击处理账单日期断档', mismatch: '点击处理余额校验不一致', 'seed-replace': '点击处理人工补录余额替换' })[state.manualBalancePrompt?.reason]
       || (state.manualBalancePrompt?.seedMismatch ? '点击核对上一账单日余额' : ''),
-    idleTitle: options.idleTitle ?? getStatusBoxTitle(config.getAccountMappingCount())
+    idleTitle: options.idleTitle ?? getStatusBoxTitle(config.getAccountMappingCount()),
+    logMessage: options.logMessage
   });
 }
 
@@ -90,7 +91,9 @@ function applyStatementResult(result, { allowAlerts = true } = {}) {
   setStatus(result.message, tone, {
     errorReportReady: Boolean(result.errorReportReady),
     manualBalancePromptReady: Boolean(result.manualBalancePromptReady),
-    manualBalancePrompt: result.manualBalancePrompt || null
+    manualBalancePrompt: result.manualBalancePrompt || null,
+    // 结果另给的日志摘要（渠道名可能以账号命名，release 审查）
+    logMessage: result.logMessage
   });
 
   if (allowAlerts && Array.isArray(result.unmatchedAmountSplitFiles) && result.unmatchedAmountSplitFiles.length) {
@@ -384,7 +387,8 @@ async function handleOpenAccountMappings() {
       setStatus(result.message || (kind==='monthly'?(result.status==='success'?'月度余额账单导出成功':'月度余额账单导出失败'):''),result.status==='success'?'success':'error',{
         errorReportReady:kind==='error'&&result.status==='success'?true:Boolean(result.errorReportReady),
         manualBalancePromptReady:Boolean(keepBalancePrompt),
-        manualBalancePrompt:keepBalancePrompt?state.manualBalancePrompt:null
+        manualBalancePrompt:keepBalancePrompt?state.manualBalancePrompt:null,
+        logMessage:result.logMessage
       });
       // v3.2.21：「导出全部」前发现渠道同一账户命中余额方式不同的子模板，弹窗逐账户列出
       if(hasAlertableErrorDetails(result))ui.alertNative([result.message,...result.detailLines].join('\n'));

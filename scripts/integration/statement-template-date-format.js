@@ -397,6 +397,12 @@ function verifySaveHandler(database, main) {
   legacyHandlers.saveMappings({ templateId: legacy.id, mappings: draftMappings(), dateFormat: 'auto' });
   assertEq([database.getTemplate(legacy.id).dateFormat, dateFormatLogLines(legacyHandlers)],
     ['auto', ['模板名：旧值模板｜日期格式：无效值「XYZ」（按自动解析） → 自动']], '① 库内旧值改为自动时按原值留痕');
+  // release 审查：旧值是任意文字（可能含账号），留痕时其中的编号只写位数
+  database.db.prepare('UPDATE templates SET date_format = ? WHERE id = ?').run('卡6222021234567890123', legacy.id);
+  const maskedHandlers = loadTemplateHandlers(database, main);
+  maskedHandlers.saveMappings({ templateId: legacy.id, mappings: draftMappings(), dateFormat: 'DMY' });
+  assertEq(dateFormatLogLines(maskedHandlers), ['模板名：旧值模板｜日期格式：无效值「卡（19位数字）」（按自动解析） → 日在前（dd/mm/yyyy）'],
+    '① 库内旧值含账号时留痕只写编号位数');
 
   saveTemplate(database, retried, '月在前模板', 'MDY');
   return database.getTemplate(template.id);

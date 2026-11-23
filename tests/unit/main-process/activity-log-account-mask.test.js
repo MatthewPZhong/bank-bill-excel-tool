@@ -75,4 +75,23 @@ test('渠道余额错误的落盘明细中子模板名脱敏，弹窗明细保�
   }]);
   assert.deepEqual(error.detailLines, [`账户 M1（USD）：${accountName}（不出余额）、主（取账单余额列）`]);
   assert.deepEqual(error.persistedDetailLines, ['渠道「招商银行」：1 个账户命中余额方式不同的子模板（对公（19位数字）、主）']);
+
+  // release 审查：渠道名同样由用户填写、可能以账号命名：两类错误的落盘明细中渠道名都只写编号位数，弹窗明细保留原名
+  const channelName = '渠道6222021234567890123';
+  const named = buildChannelBalanceModeMismatchError([
+    { channelName, lines: ['账户 M1（USD）：A（不出余额）、B（取账单余额列）'], accountCount: 1, templateNames: ['A', 'B'] },
+    { channelName: '招商银行', lines: ['账户 M2（USD）：C（不出余额）、D（通过发生额计算）'], accountCount: 1, templateNames: ['C', 'D'] }
+  ]);
+  assert.equal(named.detailLines[0], `渠道「${channelName}」账户 M1（USD）：A（不出余额）、B（取账单余额列）`);
+  assert.deepEqual(named.persistedDetailLines, [
+    '渠道「渠道（19位数字）」：1 个账户命中余额方式不同的子模板（A、B）',
+    '渠道「招商银行」：1 个账户命中余额方式不同的子模板（C、D）'
+  ]);
+  const buildChannelBalanceRowsIncompleteError = loadMainFunction('buildChannelBalanceRowsIncompleteError', { FileValidationError, maskAccountLikeTextForLog });
+  const incomplete = buildChannelBalanceRowsIncompleteError([
+    { channelName, lines: ['文件「a.xlsx」第2行：缺少账单日期'], persistedLines: ['本组第1个文件第2行：缺少账单日期'], issueCount: 1 },
+    { channelName: '招商银行', lines: ['文件「b.xlsx」第3行：缺少 MerchantId'], persistedLines: ['本组第1个文件第3行：缺少 MerchantId'], issueCount: 1 }
+  ]);
+  assert.equal(incomplete.detailLines[0], `渠道「${channelName}」文件「a.xlsx」第2行：缺少账单日期`);
+  assert.deepEqual(incomplete.persistedDetailLines, ['渠道「渠道（19位数字）」本组第1个文件第2行：缺少账单日期', '渠道「招商银行」本组第1个文件第3行：缺少 MerchantId']);
 });

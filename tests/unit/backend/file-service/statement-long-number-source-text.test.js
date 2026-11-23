@@ -1125,3 +1125,20 @@ test('XLSX：公式单元格的 <v> 是计算结果的缓存，不当作原文�
   const plain = map(await writeXlsxWithLiterals(path.join(dir, 'plain.xlsx'), rows, literals));
   assert.deepEqual(longNumberIssues(plain), []);
 });
+
+test('XLSX：数组公式结果区域内只有缓存 <v> 的后续单元格同样不当作原文，按无法核对提示', async (t) => {
+  const dir = createTempDir(t);
+  const rows = [HEADER, ['2026-11-01', 'USD', 100, 1111, 5], ['2026-11-02', 'USD', 200, 2222, 6]];
+  const literals = { 1111: '9007199254740993', 2222: '9007199254740995' };
+  // 首格 D2 带区域 D2:D3 的数组公式，D3 只有缓存值
+  const arrayFormula = await writeXlsxWithLiterals(path.join(dir, 'array.xlsx'), rows, literals, (xml) => xml
+    .replace(/(<c r="D2"[^>]*>)<v>/, '$1<f t="array" ref="D2:D3">VALUE(F2:F3)</f><v>'));
+  const mapped = map(arrayFormula);
+  assert.deepEqual(longNumberIssues(mapped).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号'], ['流水号']]);
+  assert.deepEqual(identifiers(mapped).map(([serial]) => String(serial)), [String(Number('9007199254740993')), String(Number('9007199254740995'))]);
+  // 区域外的格照常按原文（区域只覆盖 D2:D3 时，E 列卡号不受影响）
+  const outside = map(await writeXlsxWithLiterals(path.join(dir, 'outside.xlsx'), rows, literals, (xml) => xml
+    .replace(/(<c r="D2"[^>]*>)<v>/, '$1<f t="array" ref="D2:D2">VALUE(F2)</f><v>')));
+  assert.deepEqual(longNumberIssues(outside).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
+  assert.deepEqual(identifiers(outside).map(([serial]) => String(serial)), [String(Number('9007199254740993')), '9007199254740995']);
+});

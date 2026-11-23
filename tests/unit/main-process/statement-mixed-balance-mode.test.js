@@ -241,6 +241,8 @@ test('createErrorResult：错误对象带 persistedDetailLines 时，错误报�
     originalError: namedError
   });
   assert.equal(shown.message, namedError.message);
+  // 界面状态框转写活动日志时用的摘要同样脱敏
+  assert.equal(shown.logMessage, '渠道「对公（19位数字）」下同一账户命中了余额方式不同的子模板');
   const recorded = reports[1];
   assert.deepEqual([recorded.templateName, recorded.context, recorded.message], [
     '对公（19位数字）',
@@ -254,7 +256,8 @@ test('createErrorResult：错误对象带 persistedDetailLines 时，错误报�
 
   // 没有 persistedDetailLines 时照常写 detailLines、模板名与原始异常（其他错误行为不变）
   const plainError = new Error('其他错误 20261122');
-  createErrorResult({ step: '导入', message: '其他错误', detailLines: ['第 3 行'], templateName: '中行2026', originalError: plainError });
+  const plainResult = createErrorResult({ step: '导入', message: '其他错误', detailLines: ['第 3 行'], templateName: '中行2026', originalError: plainError });
+  assert.equal('logMessage' in plainResult, false);
   assert.deepEqual([reports[2].detailLines, reports[2].templateName, reports[2].originalError], [['第 3 行'], '中行2026', plainError]);
 });
 

@@ -966,6 +966,28 @@ function readXlsxIntegerLiterals(filePath, workbook, sheetName, candidates) {
     if (!(Number.isInteger(row) && row >= 0)) return null;
     rowStarts.push({ index: rowMatch.index, row });
   }
+  // 数组公式、模拟运算表等的结果区域（<f ref="…">）：只有首格带公式，区域内其他格只有缓存的 <v>，同样不是原文
+  //   （release 审查）；区域写法异常时整张表不还原。单格区域就是首格本身（自带 <f>），不另记
+  const formulaRanges = [];
+  const formulaTagPattern = /<(?:[\w.-]+:)?f\b([^>]*?)\/?>/g;
+  let formulaMatch;
+  while ((formulaMatch = formulaTagPattern.exec(text)) !== null) {
+    const formulaRef = readXmlAttribute(formulaMatch[1], 'ref');
+    if (!formulaRef) continue;
+    let range;
+    try {
+      range = XLSX.utils.decode_range(formulaRef);
+    } catch (_error) {
+      return null;
+    }
+    const valid = range && [range.s.r, range.s.c, range.e.r, range.e.c].every((value) => Number.isInteger(value) && value >= 0)
+      && range.e.r >= range.s.r && range.e.c >= range.s.c;
+    if (!valid) return null;
+    if (range.s.r !== range.e.r || range.s.c !== range.e.c) formulaRanges.push(range);
+  }
+  const inFormulaRange = (r, c) => formulaRanges.some((range) => (
+    r >= range.s.r && r <= range.e.r && c >= range.s.c && c <= range.e.c
+  ));
   const cellPattern = /<(?:[\w.-]+:)?c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:[\w.-]+:)?c>)/g;
   const valuePattern = /<(?:[\w.-]+:)?v\b[^>]*>([^<]*)<\/(?:[\w.-]+:)?v>/g;
   let match;
@@ -992,8 +1014,8 @@ function readXlsxIntegerLiterals(filePath, workbook, sheetName, candidates) {
       continue;
     }
     const type = readXmlAttribute(match[1], 't') || 'n';
-    // 公式（含共享、数组公式）单元格的 <v> 是计算结果的缓存，不是录入的原文：不还原，按无法核对原值提示（release 审查）
-    const hasFormula = /<(?:[\w.-]+:)?f\b/.test(match[2] || '');
+    // 公式（含共享、数组公式及其结果区域内的格）单元格的 <v> 是计算结果的缓存，不是录入的原文：不还原，按无法核对原值提示（release 审查）
+    const hasFormula = /<(?:[\w.-]+:)?f\b/.test(match[2] || '') || inFormulaRange(position.r, position.c);
     // 只认唯一的 <v>：有多个（自闭合的空 <v/> 也算一个）或写法异常（如 CDATA）时不还原，按无法核对原值提示
     const valueMatches = type === 'n' && !hasFormula ? Array.from((match[2] || '').matchAll(valuePattern)) : [];
     const valueElementCount = type === 'n' ? ((match[2] || '').match(/<(?:[\w.-]+:)?v\b[^>]*>/g) || []).length : 0;
