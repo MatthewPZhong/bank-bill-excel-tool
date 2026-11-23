@@ -103,4 +103,26 @@ test('渠道余额错误的落盘明细中子模板名脱敏，弹窗明细保�
   assert.deepEqual(lettered.persistedDetailLines, ['渠道「渠道（7位账号）」：1 个账户命中余额方式不同的子模板（（7位账号）子模板、主）']);
   assert.deepEqual(lettered.logMaskValues, ['AC12B34']);
   assert.ok(lettered.message.includes('AC12B34'), '界面摘要保留原文');
+
+  // release 审查：交易只缺账单日期、子模板或渠道以字母数字混合的实际账号（AB12CD34，没有连续 4 位数字）命名时，
+  //   按本组读到的账号整体脱敏；错误带出 logMaskValues，弹窗明细与界面摘要保留原文
+  const letteredRows = [['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount'],
+    ['', 'AB12CD34', 'USD', '5', ''], ['2026-11-01', 'XY56', 'USD', '0', '0']];
+  const letteredInspect = inspectBalanceEntryRows([{ templateName: 'AB12CD34', fileName: 'a.xlsx', fileOrdinal: 1, detailRows: letteredRows }]);
+  assert.deepEqual([letteredInspect.lines, letteredInspect.persistedLines, letteredInspect.accountValues], [
+    ['文件「a.xlsx」（子模板「AB12CD34」）第2行：缺少账单日期'],
+    ['本组第1个文件（子模板「（8位账号）」）第2行：缺少账单日期'],
+    ['AB12CD34']
+  ]);
+  const letteredIncomplete = buildChannelBalanceRowsIncompleteError([
+    { channelName: '渠道AB12CD34', lines: letteredInspect.lines, persistedLines: letteredInspect.persistedLines,
+      issueCount: letteredInspect.issueCount, accountValues: letteredInspect.accountValues },
+    { channelName: '招商银行', lines: ['文件「b.xlsx」第3行：缺少 MerchantId'], persistedLines: ['本组第1个文件第3行：缺少 MerchantId'], issueCount: 1, accountValues: [] }
+  ]);
+  assert.deepEqual(letteredIncomplete.persistedDetailLines, [
+    '渠道「渠道（8位账号）」本组第1个文件（子模板「（8位账号）」）第2行：缺少账单日期',
+    '渠道「招商银行」本组第1个文件第3行：缺少 MerchantId'
+  ]);
+  assert.deepEqual(letteredIncomplete.logMaskValues, ['AB12CD34']);
+  assert.ok(letteredIncomplete.message.includes('AB12CD34') && letteredIncomplete.detailLines[0].includes('AB12CD34'), '界面明细与摘要保留原文');
 });

@@ -12729,7 +12729,8 @@ function resolveEntryBalancePlan({ config, fileEntries, issueLineBudget = { rema
       channelName,
       lines: balanceRowCheck.lines,
       persistedLines: balanceRowCheck.persistedLines,
-      issueCount: balanceRowCheck.issueCount
+      issueCount: balanceRowCheck.issueCount,
+      accountValues: balanceRowCheck.accountValues
     }]);
   }
   return { modes, modeByAccount, balanceEntries, hasEffectiveRow: balanceRowCheck.hasEffectiveRow };
@@ -12739,12 +12740,15 @@ function resolveEntryBalancePlan({ config, fileEntries, issueLineBudget = { rema
 //   MerchantId 的交易行按原文件行列出。余额推导会跳过这类行，交易仍进明细，余额与种子却漏算，因此在写出任何文件之前拦下。
 //   拆分出的多笔交易来自同一原文件行（在明细中相邻输出）时合并为一行（合并所缺字段），按原文件行计数。
 //   lines 写明文件名（可能含账号，只用于界面）；persistedLines 用本组第几个文件代替文件名，供错误报告与活动日志。
+//   accountValues：这些出余额条目的交易行读到的 MerchantId，落盘时子模板名、渠道名按它们整体脱敏（以字母数字混合的
+//   实际账号命名时没有连续 4 位数字，只按数字写法脱敏会漏，release 审查）。
 //   只为前 lineLimit 行保留诊断对象（整列未映射时每笔交易都缺，诊断占用不随行数增长），issueCount 为总行数；
 //   超出上限的汇总行由 buildChannelBalanceRowsIncompleteError 按整批共享的上限补上。
 function inspectBalanceEntryRows(balanceEntries, lineLimit = 200) {
   let hasEffectiveRow = false;
   let issueCount = 0;
   const shownIssues = [];
+  const accountValues = new Set();
   for (const item of balanceEntries) {
     const rows = Array.isArray(item.detailRows) ? item.detailRows : [];
     const indexes = buildFieldIndexMap(Array.isArray(rows[0]) ? rows[0] : []);
@@ -12765,6 +12769,7 @@ function inspectBalanceEntryRows(balanceEntries, lineLimit = 200) {
       hasEffectiveRow = true;
       const billDate = dateIndex === undefined ? '' : normalizeCell(row[dateIndex]);
       const merchantId = merchantIndex === undefined ? '' : normalizeCell(row[merchantIndex]);
+      if (merchantId) accountValues.add(merchantId);
       if (billDate && merchantId) continue;
       const sourceRowNumber = rowMetas[rowIndex] && rowMetas[rowIndex].sourceRowNumber || rowIndex + 2;
       if (sourceRowNumber !== lastSourceRowNumber) {
@@ -12783,14 +12788,20 @@ function inspectBalanceEntryRows(balanceEntries, lineLimit = 200) {
   }
   const lines = [];
   const persistedLines = [];
+  const knownAccounts = Array.from(accountValues);
+  const maskedTemplateNames = new Map();
+  const maskTemplateName = (name) => {
+    if (!maskedTemplateNames.has(name)) maskedTemplateNames.set(name, maskAccountLikeTextForLog(name, knownAccounts));
+    return maskedTemplateNames.get(name);
+  };
   shownIssues.forEach((issue) => {
     const missing = [issue.missingDate ? '账单日期' : '', issue.missingMerchantId ? 'MerchantId' : ''].filter(Boolean).join('、');
     const problem = issue.missingDate ? `缺少${missing}` : `缺少 ${missing}（账单日期：${issue.billDate}）`;
     lines.push(`文件「${issue.item.fileName}」（子模板「${issue.item.templateName}」）第${issue.sourceRowNumber}行：${problem}`);
     // 落盘（错误报告、活动日志）不写文件名，子模板名（用户填写，可能以账号命名）中的编号只写位数（release 审查）
-    persistedLines.push(`本组第${issue.item.fileOrdinal}个文件（子模板「${maskAccountLikeTextForLog(issue.item.templateName)}」）第${issue.sourceRowNumber}行：${problem}`);
+    persistedLines.push(`本组第${issue.item.fileOrdinal}个文件（子模板「${maskTemplateName(issue.item.templateName)}」）第${issue.sourceRowNumber}行：${problem}`);
   });
-  return { hasEffectiveRow, lines, persistedLines, issueCount };
+  return { hasEffectiveRow, lines, persistedLines, issueCount, accountValues: issueCount ? knownAccounts : [] };
 }
 
 function buildPreparedStatementBatchFromFilePaths({ config, inputFilePaths = [] }) {
@@ -13187,12 +13198,14 @@ function buildChannelBalanceModeMismatchError(conflictGroups) {
   return error;
 }
 
-// v3.2.21：渠道出余额的交易缺账单日期或 MerchantId。rowIssueGroups：[{ channelName, lines, persistedLines, issueCount }]；
+// v3.2.21：渠道出余额的交易缺账单日期或 MerchantId。rowIssueGroups：[{ channelName, lines, persistedLines, issueCount, accountValues }]；
 //   多个渠道时每行前加渠道名；整批最多逐行列出 lineLimit 行，超出时补一行汇总（按原文件行去重后的总数）。
 //   rowIssueGroups 随错误带出，供多组规划汇总。
 function buildChannelBalanceRowsIncompleteError(rowIssueGroups, lineLimit = 200) {
   const groups = (Array.isArray(rowIssueGroups) ? rowIssueGroups : []).filter(Boolean);
   const channelNames = groups.map((item) => item.channelName);
+  // 各组读到的账号：落盘的渠道名、摘要与模板名按它们整体脱敏（见 inspectBalanceEntryRows、createErrorResult）
+  const accountValues = Array.from(new Set(groups.flatMap((item) => (Array.isArray(item.accountValues) ? item.accountValues : []))));
   const totalIssueCount = groups.reduce((sum, item) => sum + (Number(item.issueCount) || item.lines.length), 0);
   // channelLabel：落盘明细的渠道名同样只写编号位数（渠道名由用户填写、可能以账号命名，release 审查）
   const prefixed = (pick, channelLabel = (name) => name) => {
@@ -13209,7 +13222,8 @@ function buildChannelBalanceRowsIncompleteError(rowIssueGroups, lineLimit = 200)
     { detailLines: prefixed((item) => item.lines), context: { channelName: channelNames.join('、') } }
   );
   error.rowIssueGroups = groups;
-  error.persistedDetailLines = prefixed((item) => item.persistedLines, maskAccountLikeTextForLog);
+  error.persistedDetailLines = prefixed((item) => item.persistedLines, (name) => maskAccountLikeTextForLog(name, accountValues));
+  error.logMaskValues = accountValues;
   return error;
 }
 

@@ -781,9 +781,12 @@
       return overlay;
     }
 
-    // v3.2.17：补录余额「导入余额文件」——待补录账号键（银行账号 + 币种），与主进程 prompt 同口径。
+    // v3.2.17：补录余额「导入余额文件」——待补录账号键（银行账号 + 币种），与主进程 balanceAccountKey 同口径：
+    //   各部分的 @ 先转义再以 @@ 连接（release 审查：原样拼接时 X@@Y / USD 与 X / Y@@USD 同键，确认清单中后一行覆盖前一行，
+    //   连续补录会把后一行的余额按前一个账户提交）
     function manualBalanceAccountKey(account) {
-      return `${String(account?.merchantId ?? '').trim()}@@${String(account?.currency ?? '').trim()}`;
+      const part = (value) => String(value ?? '').trim().replace(/@/g, '@a');
+      return `${part(account?.merchantId)}@@${part(account?.currency)}`;
     }
 
     // 只有缺种子的普通补录 prompt 可导入余额文件、可被确认后连续保存（断档、核对、确认类都不行）。

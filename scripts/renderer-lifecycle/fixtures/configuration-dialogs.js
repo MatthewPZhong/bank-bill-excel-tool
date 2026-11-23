@@ -975,6 +975,23 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.equal(await js('cfg.handle.isOpen()'), false);
     assert.equal(await js(`cfg.calls.filter(call=>call.name==='seed').length`), 2);
   });
+  // release 审查：账号或币种含 @@ 的两个账户（X@@Y / USD 与 X / Y@@USD）在确认清单中各占一行，连续补录各自提交自己的余额
+  await test('余额确认：账号或币种含 @@ 的两个账户各自提交自己的余额', async () => {
+    await setup();
+    await js(`${IMPORT_PROMPT_JS}
+      cfg.importPrompt={...cfg.importPrompt,merchantId:'X@@Y',currency:'USD',pendingAccounts:[
+        {merchantId:'X@@Y',currency:'USD',targetBillDate:'2026-10-01'},{merchantId:'X',currency:'Y@@USD',targetBillDate:'2026-10-02'}]};
+      cfg.secondPrompt={...cfg.importPrompt,merchantId:'X',currency:'Y@@USD',targetBillDate:'2026-10-02',queueIndex:2};
+      cfg.importResult={status:'success',fileName:'余额.xlsx',skippedRowCount:0,matchedCount:2,manualCount:0,accounts:[
+        {merchantId:'X@@Y',currency:'USD',targetBillDate:'2026-10-01',billDate:'2026-09-30',endBalance:20,source:'file',reason:''},
+        {merchantId:'X',currency:'Y@@USD',targetBillDate:'2026-10-02',billDate:'2026-10-01',endBalance:100,source:'file',reason:''}]};
+      cfg.openImport();cfg.importFile();`); await tick();
+    assert.deepEqual(await js(`cfg.rows().map(row=>row.querySelector('.manual-balance-confirm-amount').value)`), ['20','100']);
+    await js(`cfg.seedQueue=[{status:'manual-balance-required',manualBalancePromptReady:true,manualBalancePrompt:cfg.secondPrompt},{status:'success',message:'余额账单可导出'}];
+      cfg.top().querySelector('[data-action="confirm-save"]').click();`); await tick(); await tick();
+    assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed').map(call=>[call.args[0].merchantId,call.args[0].currency,call.args[0].billDate,call.args[0].endBalance])`),
+      [['X@@Y','USD','2026-09-30','20'],['X','Y@@USD','2026-10-01','100']]);
+  });
   await test('导入余额文件失败时提示原因，停留在手工补录视图', async () => {
     await setup();
     await js(`${IMPORT_PROMPT_JS}cfg.openImport();cfg.next.balanceImport={status:'error',message:'余额文件缺少列：期末余额',detailLines:['需要表头']};
