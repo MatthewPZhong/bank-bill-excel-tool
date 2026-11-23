@@ -2766,9 +2766,13 @@ function collectTemplateAccountValuesForLog(...configurations) {
 function readTemplateAccountValuesForLog(template) {
   if (!template || !template.id) return [];
   try {
-    return collectTemplateAccountValuesForLog(database.getTemplateMappings(template.id), {
+    const templateMappings = database.getTemplateMappings(template.id);
+    return collectTemplateAccountValuesForLog(templateMappings, {
       bigAccounts: database.getTemplateBigAccounts(template.id, { includeOwn: true }),
       accountMappings: database.listEffectiveAccountMappings(template)
+    }, {
+      // 旧模板只在 MerchantId 映射行保存固定账号（不建大账号记录）时，按兼容口径解出该账号（release 审查）
+      bigAccounts: buildCompatibleBigAccounts({ mappings: templateMappings && templateMappings.mappings })
     });
   } catch (_error) {
     return [];
@@ -12759,7 +12763,8 @@ function resolveEntryBalancePlan({ config, fileEntries, issueLineBudget = { rema
     throw buildChannelBalanceModeMismatchError([buildBalanceModeConflictGroup(channelName, conflicts)]);
   }
   const balanceEntries = entryModes.filter((item) => item.balanceMode !== 'none');
-  const balanceRowCheck = inspectBalanceEntryRows(balanceEntries, Math.max(0, issueLineBudget.remaining));
+  const balanceRowCheck = inspectBalanceEntryRows(balanceEntries, Math.max(0, issueLineBudget.remaining),
+    entryModes.filter((item) => item.balanceMode === 'none'));
   issueLineBudget.remaining -= balanceRowCheck.lines.length;
   if (balanceRowCheck.issueCount) {
     throw buildChannelBalanceRowsIncompleteError([{
@@ -12778,10 +12783,11 @@ function resolveEntryBalancePlan({ config, fileEntries, issueLineBudget = { rema
 //   拆分出的多笔交易来自同一原文件行（在明细中相邻输出）时合并为一行（合并所缺字段），按原文件行计数。
 //   lines 写明文件名（可能含账号，只用于界面）；persistedLines 用本组第几个文件代替文件名，供错误报告与活动日志。
 //   accountValues：这些出余额条目的交易行读到的 MerchantId，落盘时子模板名、渠道名按它们整体脱敏（以字母数字混合的
-//   实际账号命名时没有连续 4 位数字，只按数字写法脱敏会漏，release 审查）。
+//   实际账号命名时没有连续 4 位数字，只按数字写法脱敏会漏，release 审查）。有缺字段的行时另从 otherEntries（同组不出余额的
+//   条目，不做缺字段校验）读取 MerchantId 一并用于脱敏：渠道或子模板可能以这些账号命名（只在报错时多读这一遍）。
 //   只为前 lineLimit 行保留诊断对象（整列未映射时每笔交易都缺，诊断占用不随行数增长），issueCount 为总行数；
 //   超出上限的汇总行由 buildChannelBalanceRowsIncompleteError 按整批共享的上限补上。
-function inspectBalanceEntryRows(balanceEntries, lineLimit = 200) {
+function inspectBalanceEntryRows(balanceEntries, lineLimit = 200, otherEntries = []) {
   let hasEffectiveRow = false;
   let issueCount = 0;
   const shownIssues = [];
@@ -12821,6 +12827,17 @@ function inspectBalanceEntryRows(balanceEntries, lineLimit = 200) {
       if (billDate && !currentIssue.billDate) currentIssue.billDate = billDate;
       if (!billDate) currentIssue.missingDate = true;
       if (!merchantId) currentIssue.missingMerchantId = true;
+    }
+  }
+  if (issueCount) {
+    for (const item of Array.isArray(otherEntries) ? otherEntries : []) {
+      const rows = Array.isArray(item && item.detailRows) ? item.detailRows : [];
+      const merchantIndex = buildFieldIndexMap(Array.isArray(rows[0]) ? rows[0] : []).get('MerchantId');
+      if (merchantIndex === undefined) continue;
+      for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
+        const merchantId = Array.isArray(rows[rowIndex]) ? normalizeCell(rows[rowIndex][merchantIndex]) : '';
+        if (merchantId) accountValues.add(merchantId);
+      }
     }
   }
   const lines = [];

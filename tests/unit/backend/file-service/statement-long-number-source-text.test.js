@@ -1386,6 +1386,20 @@ test('XLSX：读取库实际读取的工作表与按关系定位的不一致时�
   assert.deepEqual(identifiers(commentedSheet).map(([serial]) => String(serial)), ['9007199254740992']);
   assert.deepEqual(longNumberIssues(commentedSheet).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']],
     '注释里有 <sheet> 时不还原并提示');
+  // ⑥ 关系 Id 写成字符引用（读取库按原文查找、找不到时改按物理序号读表）：工作表的 r:id 或关系的 Id 含字符引用都无法确认
+  const swapTargets = async (zip) => {
+    await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheet1.xml"', 'Target="worksheets/sheetX.xml"');
+    await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheet2.xml"', 'Target="worksheets/sheet1.xml"');
+    await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheetX.xml"', 'Target="worksheets/sheet2.xml"');
+  };
+  assertUnverified(map(await build('sheet-id-reference.xlsx', async (zip) => {
+    await swapTargets(zip);
+    await replaceIn(zip, 'xl/workbook.xml', '<sheet name="Sheet1" sheetId="1" r:id="rId1"/>', '<sheet name="Sheet1" sheetId="1" r:id="rId&#49;"/>');
+  })), '工作表 r:id 含字符引用');
+  assertUnverified(map(await build('relation-id-reference.xlsx', async (zip) => {
+    await swapTargets(zip);
+    await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Id="rId1"', 'Id="rId&#49;"');
+  })), '关系 Id 含字符引用');
   // 对照：Target 写成绝对路径 /xl/worksheets/sheet1.xml 时两种口径一致，照常还原
   const absolute = map(await build('absolute-target.xlsx', async (zip) => {
     await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheet1.xml"', 'Target="/xl/worksheets/sheet1.xml"');

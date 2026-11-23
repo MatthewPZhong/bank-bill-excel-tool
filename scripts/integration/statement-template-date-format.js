@@ -132,7 +132,7 @@ function createMain(database) {
     'buildCurrencyBigAccountMappingConfig', 'isCurrencyOnlyMerchantMapping', 'normalizeBundleTemplateHeaders',
     'normalizeBundleBillSplitMeta', 'isLegacyOrientedTemplateMappings', 'buildTemplateFieldReferenceInput',
     'readTemplateBundleFile', 'resolveTemplateBundleVersion', 'upgradeLegacyBundleFeatureFilterRefs', 'collectReferencedFeatureFilterIds',
-    'maskAccountLikeTextForLog', 'collectTemplateAccountValuesForLog', 'readTemplateAccountValuesForLog',
+    'maskAccountLikeTextForLog', 'collectTemplateAccountValuesForLog', 'readTemplateAccountValuesForLog', 'extractFixedMappingValue',
     'normalizeTemplateDateFormat',
     'formatTemplateDateFormatLabel',
     // 保存 / 导入处理器用到的 main.js 函数（渠道、余额方式校验在无渠道时直接返回）
@@ -451,6 +451,16 @@ function verifySaveHandler(database, main) {
   assertEq([rejected.status, rejectedOptions.errorCode, rejectedOptions.persistedDetailLines, rejectedOptions.logMaskValues.includes('AC12B34')],
     ['error', 'TEMPLATE_DATE_FORMAT_INVALID', [], true], '① 日期格式无效被拒时按模板维护的账号脱敏落盘内容');
   database.db.prepare(`DELETE FROM template_big_accounts WHERE template_id = ? AND merchant_id = 'AC12B34'`).run(legacy.id);
+  // 旧模板只在 MerchantId 映射行保存固定账号（__FIXED__:AC-X7Y8Z9，没有大账号记录），同次保存改为从源列取账号并修改日期格式：
+  //   保存前从固定映射解出的账号同样用于脱敏
+  database.db.prepare('UPDATE templates SET name = ? WHERE id = ?').run('AC-X7Y8Z9', legacy.id);
+  database.saveMappings(legacy.id, draftMappings().map((item) => (item.templateField === 'MerchantId'
+    ? { ...item, mappedField: '__FIXED__:AC-X7Y8Z9' } : item)), [], [], 'DMY');
+  assertEq(database.getTemplateBigAccounts(legacy.id, { includeOwn: true }).length, 0, '① 旧模板没有大账号记录');
+  const fixedHandlers = loadTemplateHandlers(database, main);
+  fixedHandlers.saveMappings({ templateId: legacy.id, mappings: draftMappings(), dateFormat: 'MDY' });
+  assertEq(dateFormatLogLines(fixedHandlers), ['模板名：（9位账号）｜日期格式：日在前（dd/mm/yyyy） → 月在前（mm/dd/yyyy）'],
+    '① 旧模板 MerchantId 行的固定账号同样用于脱敏');
   database.db.prepare('UPDATE templates SET name = ? WHERE id = ?').run('旧值模板', legacy.id);
 
   saveTemplate(database, retried, '月在前模板', 'MDY');

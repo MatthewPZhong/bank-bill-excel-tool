@@ -133,3 +133,51 @@ test('渠道余额错误的落盘明细中子模板名脱敏，弹窗明细保�
   assert.deepEqual(letteredIncomplete.logMaskValues, ['AB12CD34']);
   assert.ok(letteredIncomplete.message.includes('AB12CD34') && letteredIncomplete.detailLines[0].includes('AB12CD34'), '界面明细与摘要保留原文');
 });
+
+// release 审查：混合渠道出余额的交易缺字段时，渠道或子模板可能以同组不出余额的账户（字母数字混合，如 AC-X7Y8Z9）命名：
+//   缺字段校验仍只查出余额的条目，脱敏另读同组不出余额条目的 MerchantId
+test('混合渠道缺字段诊断：同组不出余额条目的账号同样用于脱敏', () => {
+  const { FileValidationError, normalizeCell } = require('../../../src/backend/file-service');
+  const { buildFieldIndexMap, resolveAccountBalanceModes } = require('../../../src/main-process/statement-generation-business');
+  const { isZeroOrBlankAmount } = require('../../../src/backend/file-service/normalizers');
+  const inspectBalanceEntryRows = loadMainFunction('inspectBalanceEntryRows', {
+    buildFieldIndexMap, normalizeCell, isZeroOrBlankAmount, maskAccountLikeTextForLog
+  });
+  const buildChannelBalanceRowsIncompleteError = loadMainFunction('buildChannelBalanceRowsIncompleteError', { FileValidationError, maskAccountLikeTextForLog });
+  const resolveEntryBalancePlan = loadMainFunction('resolveEntryBalancePlan', {
+    path: require('node:path'),
+    resolveEntryBalanceMode: (entry) => ({ templateName: entry.templateName, balanceMode: entry.balanceMode }),
+    resolveStatementOutputName: () => '',
+    resolveAccountBalanceModes,
+    buildChannelBalanceModeMismatchError: () => new Error('不应出现余额方式冲突'),
+    buildBalanceModeConflictGroup: () => null,
+    inspectBalanceEntryRows,
+    buildChannelBalanceRowsIncompleteError
+  });
+  const header = ['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount', 'Balance'];
+  const rows = (dataRows) => [header, ...dataRows];
+  let error = null;
+  try {
+    resolveEntryBalancePlan({
+      config: { outputName: '渠道AC-X7Y8Z9' },
+      fileEntries: [
+        { matchedTemplateId: 1, templateName: '对公', balanceMode: 'statement', filePath: 'a.xlsx', detailRows: rows([['', 'M1', 'USD', '5', '', '10']]) },
+        { matchedTemplateId: 2, templateName: 'AC-X7Y8Z9', balanceMode: 'none', filePath: 'b.xlsx', detailRows: rows([['2026-11-01', 'AC-X7Y8Z9', 'USD', '5', '', '']]) }
+      ]
+    });
+  } catch (caught) {
+    error = caught;
+  }
+  assert.equal(error && error.code, 'CHANNEL_BALANCE_ROWS_INCOMPLETE');
+  assert.deepEqual(error.logMaskValues.slice().sort(), ['AC-X7Y8Z9', 'M1']);
+  assert.deepEqual(error.persistedDetailLines, ['本组第1个文件（子模板「对公」）第2行：缺少账单日期']);
+  assert.ok(maskAccountLikeTextForLog(error.message, error.logMaskValues).includes('渠道（9位账号）'), '摘要中的渠道名按不出余额账户脱敏');
+  // 出余额的条目没有缺字段时不额外读取（不报错）
+  assert.equal(resolveEntryBalancePlan({
+    config: { outputName: '渠道' },
+    fileEntries: [
+      { matchedTemplateId: 1, templateName: '对公', balanceMode: 'statement', filePath: 'a.xlsx', detailRows: rows([['2026-11-01', 'M1', 'USD', '5', '', '10']]) },
+      { matchedTemplateId: 2, templateName: 'B', balanceMode: 'none', filePath: 'b.xlsx', detailRows: rows([['2026-11-01', 'AC-X7Y8Z9', 'USD', '5', '', '']]) }
+    ]
+  }).balanceEntries.length, 1);
+});

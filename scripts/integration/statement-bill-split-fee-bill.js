@@ -724,9 +724,12 @@ function verifyRestore(dir, database) {
   const restoreFns = loadMainFunctions([
     'normalizeBillSplitRestoreSnapshot', 'buildBillSplitRestoreToken', 'issueBillSplitRestoreToken', 'restoreBillSplitConfigFromPayload',
     'endBillSplitRestoreSession', 'endBillSplitRestoreSessionsForOwner', 'findBillSplitRestoreSessionId', 'activateBillSplitRestoreSession',
-    'syncTemplateLibraryAfterBillSplitWrite', 'maskAccountLikeTextForLog', 'collectTemplateAccountValuesForLog', 'readTemplateAccountValuesForLog'
+    'syncTemplateLibraryAfterBillSplitWrite', 'maskAccountLikeTextForLog', 'collectTemplateAccountValuesForLog', 'readTemplateAccountValuesForLog', 'buildCompatibleBigAccounts', 'decodeCustomInputMappingValue', 'extractFixedMappingValue'
   ], {
     database, normalizeCell, normalizeFeeAmountFormula, normalizeFeeFieldMappings, FileValidationError,
+    // 日志脱敏读取模板维护的账号（含旧模板 MerchantId 行的固定账号）用到的常量
+    FIXED_FIELD_VALUE_PREFIX: require('../../src/backend/file-service/common').FIXED_FIELD_VALUE_PREFIX,
+    MERCHANT_ID_CURRENCY_ONLY_MARKER, MERCHANT_ID_CURRENCY_ONLY_OPTION: CONSTANTS.MERCHANT_ID_CURRENCY_ONLY_OPTION,
     createHmac: require('node:crypto').createHmac, BILL_SPLIT_RESTORE_TOKEN_SECRET: require('node:crypto').randomBytes(32),
     randomUUID: require('node:crypto').randomUUID, BILL_SPLIT_RESTORE_SESSIONS: new Map(), BILL_SPLIT_RESTORE_SESSION_LIMIT: 8,
     syncTemplateLibraryFile: () => { librarySyncs += 1; if (failLibrarySync) throw new Error('磁盘空间不足'); },

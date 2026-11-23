@@ -384,7 +384,14 @@ function readSheetRelationId(sheetTag, workbookText) {
     bindings.add(declaration[1] !== undefined ? declaration[1] : declaration[2]);
   }
   if (bindings.size !== 1 || !OOXML_RELATIONSHIP_NAMESPACES.has(Array.from(bindings)[0])) return null;
+  // 读取库按属性原文（不解码字符引用）查找关系：值含字符引用（如 rId&#49;）时两边的 Id 可能不同，无法确认（release 审查）
+  if (attributeHasReference(sheetTag, `${escapedPrefix}:id`)) return null;
   return readXmlAttribute(sheetTag, `${escapedPrefix}:id`);
+}
+
+// 属性值是否含字符引用（&…;）：读取库按原文使用的属性，含引用时与解码后的值不同
+function attributeHasReference(tag, name) {
+  return new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"[^"]*&|'[^']*&)`).test(tag);
 }
 
 // 按 workbook.xml 中 <sheet> 的顺序（即 SheetNames 的顺序）与关系文件找到工作表 XML；找不到返回 null。
@@ -425,13 +432,13 @@ function findXlsxSheetXml(workbook, sheetName) {
   });
   const readerRelationTagById = new Map();
   (relsText.match(/<Relationship\b[^>]*>/g) || []).forEach((tag) => readerRelationTagById.set(readXmlAttribute(tag, 'Id'), tag));
-  const targetHasReference = (tag) => /\sTarget\s*=\s*(?:"[^"]*&|'[^']*&)/.test(tag);
   const uniqueRelationTag = (tag) => {
     const id = readSheetRelationId(tag, workbookText);
     const tags = id ? relationTagsById.get(id) : null;
     const readerTag = id ? readerRelationTagById.get(id) : null;
     if (!tags || tags.length !== 1 || !readerTag) return null;
-    if (targetHasReference(tags[0]) || targetHasReference(readerTag)) return null;
+    // 关系的 Id、Target 含字符引用时，读取库按原文使用、与解码后的值不同，无法确认
+    if ([tags[0], readerTag].some((relation) => attributeHasReference(relation, 'Id') || attributeHasReference(relation, 'Target'))) return null;
     return readXmlAttribute(readerTag, 'Target') === readXmlAttribute(tags[0], 'Target') ? tags[0] : null;
   };
   if (!sheetTags.every((tag) => uniqueRelationTag(tag))) return null;
