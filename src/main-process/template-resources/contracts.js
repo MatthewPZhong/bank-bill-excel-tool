@@ -33,6 +33,7 @@ const { ALL_CELLS, sheetCells } = require('../../constants/sheetjs-sparse-cells'
 const { TEMPLATE_RESOURCES } = require('./catalog');
 const { INPUT_STRUCTURES, inputStructureOf, isSingleSheetStructure, structureLabel } = require('./input-structures');
 const { inputStructureValuesFromHeaders, sheetHeaders } = require('./workbook-structure');
+const { hasHandoffControlCharacter } = require('../../backend/vcc-financial-op/import-handoff');
 const { MAX_EXCEL_ROW_HEIGHT } = require('../vcc-financial-op-writer');
 const { probePendingTemplate } = require('../vcc-financial-op-result-workbook-writer');
 
@@ -492,8 +493,16 @@ function inputStructureContract(resourceId) {
         }
         const blankColumns = spec.allowBlank ? [] : headers.map((header, column) => (header ? 0 : column + 1)).filter(Boolean);
         const duplicates = [...new Set(headers.filter((header, column) => header && headers.indexOf(header) !== column))];
+        // v3.2.22 B60：VCC 导入交接不接受含控制字符（换行、制表符等）的表头，模板阶段按同一规则拒绝，避免启用后导入必然失败；
+        //   其他输入原表（如网关对账单）的表头含换行很常见，不受影响
+        const controlColumns = spec.group === 'vcc-sources'
+          ? headers.map((header, column) => (header && hasHandoffControlCharacter(header) ? column + 1 : 0)).filter(Boolean)
+          : [];
         if (blankColumns.length) list.add(label('表头', sheet), 'fail', `第 ${listText(blankColumns.map(String), 5)} 列表头为空`);
         else if (duplicates.length) list.add(label('表头', sheet), 'fail', `列名重复：${listText(duplicates, 5)}`);
+        else if (controlColumns.length) {
+          list.add(label('表头', sheet), 'fail', `第 ${listText(controlColumns.map(String), 5)} 列表头含换行、制表符等控制字符，请改为单行文本`);
+        }
         else list.add(label('表头', sheet), 'pass', `${headers.length} 列`);
       });
 

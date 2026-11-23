@@ -3775,7 +3775,7 @@ function createWarningResult({
     templateName
   });
   appendActivityLogEntry({
-    level: 'warn',
+    level: 'warning',
     message: `${step}告警`,
     details: [
       `模板名：${templateName || context.templateName || context.moduleName || 'N/A'}`,
@@ -6935,7 +6935,8 @@ function registerAppHandlers() {
   // snapshot key = id + name + priority + enabled + JSON.stringify(config)
   function buildScenariosSnapshot(detailedEnabled, fundTransferDatePolicySignature = '') {
     const scenarioSnapshot = detailedEnabled
-      .map((s) => `${s.id}|${s.name}|${s.priority}|${s.enabled ? 1 : 0}|${JSON.stringify(s.config || {})}`)
+      // v3.2.22 B5：与 C4 同口径按 key 排序序列化，同语义 config 在库内往返后 key 顺序不同不再误报场景已变化
+      .map((s) => `${s.id}|${s.name}|${s.priority}|${s.enabled ? 1 : 0}|${stableJsonStringify(s.config || {})}`)
       .sort()
       .join('\n');
     return [
@@ -10681,7 +10682,7 @@ function registerTemplateHandlers() {
           if (bundleConflict) {
             skippedCount += 1;
             appendActivityLogEntry({
-              level: 'warn',
+              level: 'warning',
               message: `Bundle 导入跳过模板「${entry.name}」：表头与已有模板「${bundleConflict.name}」重复`
             });
             return;
@@ -13503,7 +13504,7 @@ function regenerateVirtualTemplateBalanceFromSession(
   const skippedCount = skippedGroups.length;
   for (const { templateIds, fileCount } of skippedGroups) {
     appendActivityLogEntry({
-      level: 'warn',
+      level: 'warning',
       message: `余额重新生成时跳过模板组（templateId=${templateIds.join('、')}）：模板已被删除，${fileCount} 个文件的数据未包含`
     });
   }
@@ -14471,7 +14472,7 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
         const { entries: groupEntries, templateIds, templateConfig } = group;
         if (!templateConfig) {
           appendActivityLogEntry({
-            level: 'warn',
+            level: 'warning',
             message: `导出时跳过模板组（templateId=${templateIds.join('、')}）：模板已被删除，${groupEntries.length} 个文件的数据未包含在导出中`
           });
           skippedGroupNames.push(`模板ID=${templateIds.join('、')}（${groupEntries.length}个文件）`);
@@ -15821,7 +15822,7 @@ function applyTemplateHeaderUpdate(payload = {}) {
   } catch (error) {
     librarySyncFailed = true;
     appendActivityLogEntry({
-      level: 'warn',
+      level: 'warning',
       message: '更新模板表头后同步模板库文件失败',
       details: [`模板名：${template.name}`, `原因：${error && error.message ? error.message : String(error)}`]
     });
@@ -18148,7 +18149,7 @@ function registerFileHandlers() {
             throw new FileValidationError('BALANCE_GAP_CONTEXT_MISSING', '当前账单会话已失效，请重新导入文件');
           }
           appendActivityLogEntry({
-            level: 'warn',
+            level: 'warning',
             message: '账单日期不连续，选择不补录期末余额，余额可能不准确',
             details: [
               `模板名：${pendingPrompt.templateName || 'N/A'}`,
@@ -18165,7 +18166,7 @@ function registerFileHandlers() {
             throw new FileValidationError('BALANCE_MISMATCH_CONTEXT_MISSING', '当前账单会话已失效，请重新导入文件');
           }
           appendActivityLogEntry({
-            level: 'warn',
+            level: 'warning',
             message: '余额校验不一致，已确认按账单余额生成',
             details: [
               `模板名：${pendingPrompt.templateName || 'N/A'}`,
@@ -18182,7 +18183,7 @@ function registerFileHandlers() {
             throw new FileValidationError('BALANCE_SEED_REPLACE_CONTEXT_MISSING', '当前账单会话已失效，请重新导入文件');
           }
           appendActivityLogEntry({
-            level: 'warn',
+            level: 'warning',
             message: '人工补录的期末余额与本次余额不一致，已确认替换',
             details: [
               `模板名：${pendingPrompt.templateName || 'N/A'}`,

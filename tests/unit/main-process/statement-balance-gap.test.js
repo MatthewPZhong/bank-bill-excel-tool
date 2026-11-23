@@ -1018,7 +1018,7 @@ test('主进程：余额不一致确认继续、人工补录确认替换后登�
       }, { fileEvidence: { filePlan: { inputs: [{ filePath: '/tmp/a.xlsx' }] } } });
 
       assert.deepEqual(calls.remembered, [[kind.item.key]], label);
-      assert.equal(calls.logs[0].level, 'warn', label);
+      assert.equal(calls.logs[0].level, 'warning', label);
       assert.equal(calls.logs[0].message, kind.logMessage, label);
       assert.equal(calls.logs[0].details.length, 2, label);
       if (regenOutcome === 'success') {

@@ -387,11 +387,10 @@ test.describe('normalizeDateExportValue — 日期解析主入口', () => {
     assert.equal(r.value, '2026-05-22');
   });
 
-  test('非法日期（month=13）→ 空 / fallback 解析', () => {
+  test('非法日期（month=13）→ 空', () => {
     const r = normalizeDateExportValue('2026-13-01');
-    // 不在 yyyy-mm-dd 严格分支 → 走 fallback；fallback 用 new Date() 可能解析为下一年
-    // 仅断言不抛错（不绑死语义）
-    assert.ok(r.date === null || r.date instanceof Date);
+    // v3.2.22 B55：兜底解析不再接受与原文对不上的结果，固定为空
+    assert.deepEqual([r.value, r.date], ['', null]);
   });
 });
 
@@ -431,12 +430,32 @@ test.describe('normalizeDateExportValue — 日期顺序 dateParseOrder（v3.2.2
     }
   });
 
-  // 只验证日、月都超过 12 的情形；不代表所有非法日期都为空：如 02/30/2026 两种顺序都无效，
-  //   最后按 new Date 兜底会进位成 2026-03-02（既有语义，本次不改）
   test('日、月都超过 12 时为空（如 13/13/2026）', () => {
     for (const order of ['auto', 'DMY', 'MDY']) {
       assert.equal(parse('13/13/2026', order), '', order);
     }
+  });
+
+  // v3.2.22 B55：两种日月顺序都不是有效日期时为空，不再由 new Date 兜底滚动成下月（02/30/2026 此前读作 2026-03-02）
+  test('日历上不存在的日期为空，不滚动成下月（闰日、超出当月天数、各分隔符、两位年）', () => {
+    for (const order of ['auto', 'DMY', 'MDY']) {
+      for (const value of ['02-29-2026', '02/29/2026', '02.29.2026', '29/02/2026', '02/30/2026', '02-31-2026',
+        '04/31/2026', '31.04.2026', '2-30-26', '02/29/2026 10:00', '2026-2-31', '2026/02/29']) {
+        const result = normalizeDateExportValue(value, { dateParseOrder: order });
+        assert.deepEqual([result.value, result.date], ['', null], `${order} ${value}`);
+      }
+    }
+  });
+
+  test('闰年的 2 月 29 日照常解析；兜底写法的结果与原文一致时照常解析', () => {
+    for (const order of ['auto', 'DMY', 'MDY']) {
+      for (const value of ['02-29-2024', '29/02/2024', '2024/2/29', '2-29-24']) {
+        assert.equal(isoOf(value, order), '2024-02-29', `${order} ${value}`);
+      }
+    }
+    // 不在显式写法内、由 new Date 兜底的值：结果的年、月、日与原文三段对应时保留原行为
+    assert.equal(parse('2026-03-001'), '2026-03-01');
+    assert.equal(parse('99-1-1'), '1999-01-01');
   });
 });
 

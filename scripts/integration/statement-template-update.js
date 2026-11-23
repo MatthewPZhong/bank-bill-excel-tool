@@ -620,7 +620,7 @@ async function run() {
       '⑪ 模板库同步失败时仍报告已更新，并列出失效映射');
     assertTrue(/模板库文件同步失败/.test(signedApplied.message), '⑪ 成功提示单独说明模板库同步失败');
     assertEq(database.getTemplate(signedTemplate.id).headers, signedNewHeaders, '⑪ 表头已写入主库');
-    assertTrue(spies.activity.some((entry) => entry.level === 'warn' && entry.message === '更新模板表头后同步模板库文件失败'), '⑪ 活动日志记录同步失败');
+    assertTrue(spies.activity.some((entry) => entry.level === 'warning' && entry.message === '更新模板表头后同步模板库文件失败'), '⑪ 活动日志记录同步失败');
     const signedSourceNew = path.join(dir, 'signed-new-source.xlsx');
     writeWorkbook(signedSourceNew, signedNewHeaders, [['2026-11-12', '1', '2', 'ACC4', 'USD']]);
     assertThrows(() => generate(main, database, signedTemplate.id, signedSourceNew),

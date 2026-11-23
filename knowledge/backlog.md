@@ -148,13 +148,6 @@
 - **触发实施时机**：新增第二个可打开配置弹窗的窗口、取消单实例锁，或行管理改为非模态时
 - **目标版本**：未定
 
-### B114（P4 · 已知问题）多处活动日志以 `level: 'warn'` 写入，被归到 info.log 而不是 warning.log
-
-- **来源**：2026-11-21 `feat/bill-split-fee-field-mapping`（v3.2.21）第六轮审查。结构化日志 `getLogFilePath` 只识别 `error / warning / info`，其他值兜底 `info`；`src/main.js` 9 处、`src/backend/database.js`、`src/main-process/template-resources/service.js` 仍传 `'warn'`（如模板【更新】表头后模板库文件同步失败）。本分支新增的撤销后同步失败已改用 `'warning'`，原有调用不在本分支范围
-- **影响**：按用户指南查看 warning.log 时看不到这些告警，排障时容易漏看
-- **关闭条件**：原有调用统一改为 `'warning'`（或在 `appendActivityLogEntry` / 结构化日志入口把 `warn` 规范为 `warning`），并用实际日志文件去向的测试覆盖
-- **目标版本**：未定
-
 ### B113（P3 · 已知问题）网银账单明细写出时，文本中形如 `_xHHHH_` 的字面值被当作 OOXML 转义改写
 
 - **来源**：2026-11-19 `feat/bill-split-fee-field-mapping`（v3.2.21）审查。实测费用账单「自己输入」的 `FEE_x0041_` 经 `writeWorkbookRows` 写出再回读变成 `FEEA`；主映射取到的源单元格文本、MerchantId 等固定值同样经过这一写出边界，不是本次引入
@@ -410,13 +403,6 @@
 - **关闭条件**：业务裁定跨来源重分类的处置（拒绝、冲突提示或显式迁移）并实现；回归覆盖同 SHA / Sheet / 行坐标两次导入，以及“不同原件、不同来源、相同业务键”不被误去重。须人工复核是否有真实账期受影响
 - **目标版本**：未定（待业务裁定）
 
-### B60（P2 · 已知问题）VCC 自定义模板表头含换行可启用，正式导入交接必然失败
-
-- **来源**：深审 VCC V2
-- **影响**：模板预检（`template-resources/contracts.js`）允许含 LF / CRLF / Tab 的表头，启用与业务文件预检都通过；`import-handoff.js` `nonempty()` 拒绝 U+0000–U+001F，导入交接报“VCC 导入交接身份不符”，同版本下重试无效。失败在业务写入前，无金额影响
-- **关闭条件**：模板阶段与交接阶段对表头控制字符同一规则（统一拒绝或统一接受）；真实 XLSX 覆盖 LF / CRLF / Tab 的完整链路回归
-- **目标版本**：v3.2.22（暂定；v3.2.16、v3.2.17 均无修复纳入，2026-11-12 发版时顺延；v3.2.18 未纳入，2026-11-16 发版时顺延；v3.2.19 未纳入，2026-11-18 发版时顺延；v3.2.20 未纳入，2026-11-18 发版时顺延；v3.2.21 未纳入，2026-11-22 发版时顺延）
-
 ### B59（P3 · 已知问题）VCC 来源结构逐个读取版本，切换期间可形成从未同时生效的结构组
 
 - **来源**：深审 VCC V1；v3.2.15 B42 已让多重完全匹配改为拒绝（`vcc-sheet-header-ambiguous`），剩余部分降为 P3
@@ -443,13 +429,6 @@
 - **来源**：深审平盘 R04；真实 Worker 提交后强制退出复现
 - **影响**：普通来源已提交、账户表待确认时 Worker 退出，`import-recovery.js` 重建结果未带顶层 `accountConfirmationDescriptor`，Service 返回 token 为空的 needs-confirmation，确认必然失败（`position-source-import-token-expired`），须重新导入账户表；未见错误覆盖或数据丢失
 - **关闭条件**：恢复结果携带完整账户确认上下文，或无法继续时明确转失败；真实 Worker 故障回归（混合导入 → 普通文件提交后 hard exit → 恢复 → 确认只提交一次、取消可清理）
-- **目标版本**：v3.2.22（暂定；v3.2.16、v3.2.17 均无修复纳入，2026-11-12 发版时顺延；v3.2.18 未纳入，2026-11-16 发版时顺延；v3.2.19 未纳入，2026-11-18 发版时顺延；v3.2.20 未纳入，2026-11-18 发版时顺延；v3.2.21 未纳入，2026-11-22 发版时顺延）
-
-### B55（P2 · 已知问题）共享日期规范化把不存在的月/日/年文本自动滚动为合法日期（平盘月份替换受影响）
-
-- **来源**：深审平盘 R03
-- **影响**：`file-service/normalizers.js` `normalizeDateExportValue` 两种日/月解析都失败后落到 `new Date(candidateValue)`，`02-29-2026` → `2026-03-01`、`02-31-2026` → `2026-03-03`，而 `2026-02-31` → 空，口径不一。平盘把它当有效业务日期，参与月份替换与匹配（确认后旧三月记录被替换）
-- **关闭条件**：日历校验失败即拒绝，不用自动滚动纠正；核对共享 normalizer 其他调用方的兼容影响后再改，或在平盘侧严格校验；回归用独立 BizId 覆盖闰日、非闰日、超出月份天数与不同分隔符
 - **目标版本**：v3.2.22（暂定；v3.2.16、v3.2.17 均无修复纳入，2026-11-12 发版时顺延；v3.2.18 未纳入，2026-11-16 发版时顺延；v3.2.19 未纳入，2026-11-18 发版时顺延；v3.2.20 未纳入，2026-11-18 发版时顺延；v3.2.21 未纳入，2026-11-22 发版时顺延）
 
 ### B54（P1 · 已知问题）平盘：已禁止改配的调拨出账仍可支持另一订单的入账自动命中（资金口径）
@@ -680,14 +659,6 @@
 - **推荐**：`toolbox:merge` 成功 / 取消路径加 `finally { rmSync(path.dirname(tempPath), {recursive,force}) }`（与 v3.0.9 split:export 对齐）
 - **触发实施**：下次动 `toolbox:merge` handler 时一并收
 
-### B19（P3）`isMemoryLimitError` 把所有 RangeError 判「文件过大」→ 小型损坏文件可能误报
-
-- **来源**：2026-06-17 v3.0.8 PR #78 self-review（F2，BUG3 顺带新增的错误分类）
-- **影响**：`src/backend/file-service/readers.js:160` `isMemoryLimitError` 对**任意** `RangeError` 返回 true → `readWorkbookRows` catch 回「文件过大，超出处理能力，请拆分后再试」。小型损坏 / 畸形 xlsx 若恰好抛 `RangeError`，会被误标「文件过大」（改前统一「文件为空或不可读」，亦泛但不误导体积）
-- **现状**：取舍刻意（BUG3 改流式 + 优先给大文件真实文案引导拆分）；小型损坏文件正好抛 `RangeError`（而非其他错误类型）的概率低
-- **推荐**：收窄——裸 `instanceof RangeError` 叠加文件大小阈值（如 >50MB 才判内存类），或 message 关键字命中优先于裸类型判定
-- **触发实施**：用户报「小文件却提示文件过大」/ 下次动 readers.js 错误分支时
-
 ### B18（P3）导入 fx 交割表 rematch BOC 链接表后未清 reconIdFixResult（BOC 修复结果可能 stale）
 
 - **来源**：2026-06-15 v3.0.5 OPEN-4 删除扩展设计调研发现
@@ -695,14 +666,6 @@
 - **现状**：OPEN-4 删除 fx 已做对（联动后清 `reconIdFixResult`）；**导入 fx 既有缺口未修**（边缘场景：BOC 修复 + fx 导入交错）
 - **推荐**：导入 fx 派生块成功后清 `reconIdFixResult`（与删除 fx 对齐）；或更精确——仅当 `reconIdFixResult` 是 BOC 场景时清
 - **触发实施**：下次动导入 fx 派生 / BOC 修复链路时；或用户报「导入交割表后 BOC 修复结果没更新」
-
-### B17（P2）buildLinkedUpsertContext fx 幂等键复用泛化内核拼出重复列名（依赖 node:sqlite 未文档化行为）
-
-- **来源**：2026-06-15 v3.0.5 OPEN-7 codex 对抗审查顺带发现 + 实测验证
-- **影响**：fx-settlement 幂等键列 = 展示键列 = `transaction_no`（`LINKED_TABLE_DEFS['fx-settlement'].keyColumn` 与 `upsertLinkedFx` 传入 `idKeyColumn` 同为 `transaction_no`）；`buildLinkedUpsertContext`（`linked-table-repository.js:377`）无条件拼 `INSERT (idKeyColumn, keyColumn, dateColumn, raw_json, imported_at)` → fx 得到 `INSERT (transaction_no, transaction_no, ...)` **重复列名**（gateway/bank-deposit 因 idColumn≠keyColumn 不触发）
-- **现状**：实测 node:sqlite（DatabaseSync）**容忍**重复列名，prepare/run 均成功，且**第 1 个占位符（idKey=`normalizeTransactionNo` 归一值）生效**写入列，与 ON CONFLICT 判定 / existsStmt 查询口径一致 → fx 幂等当前**正确**（2547 单测 + 端到端真过）。但依赖两个**未文档化**实现细节：① node:sqlite 容忍重复列名；② INSERT 重复列取第 1 个值。node:sqlite 仍是 experimental API，未来版本变更可能 break fx 幂等键（🔴 资金红线：幂等失效 = 静默重复插入 / 键漂移）
-- **推荐**：`buildLinkedUpsertContext` 对 `idKeyColumn === keyColumn` 去重（只拼一次列名 + 一个占位符），或 fx def 区分 idColumn 与展示 keyColumn；全回归 gateway/bank-deposit/fx 三表 upsert 单测（资金红线核心，parity 锁）
-- **触发实施**：下次动 `buildLinkedUpsertContext` / fx upsert 时一并收敛；或 node:sqlite 升级后 fx 幂等单测报错时优先
 
 ### B16（P4）xlsx-size-preflight 复用 zip-reader 的 openZipWithEntries
 
@@ -815,14 +778,6 @@
 - **风险/回归点**：帮助页（USER_GUIDE.md 运行时读取）、win 打包冒烟、preview 脚本仍可用（devDeps 在开发机不受影响）
 - **触发实施**：下个发版窗口单独 PR（纯配置改动，低风险）
 
-### B5（P3）`buildScenariosSnapshot`（银行对账单模块）JSON.stringify key 顺序依赖
-
-- **来源**：PR #36 self-review（commit `42e0588`），dev 顺手发现
-- **影响**：`src/main.js:2898` `buildScenariosSnapshot`（银行对账单 / C1/C2/C3 资金红线 defense in depth）仍用 `JSON.stringify(s.config || {})`，与 PR #36 P3-C 已修的 C4 同名风险完全镜像 — 同语义 config 在 DB round-trip 前后 key 顺序不同 → 误报 stale-snapshot 拒导出
-- **现状**：实际可能性低（Node V8 JSON.parse + stringify round-trip 通常稳定），但 spec 不保证；C4 已用 `stableJsonStringify` 规范化，C1/C2/C3 未对齐
-- **推荐**：单独 PR 把 `stableJsonStringify` 提到共享工具（如 `src/main-process/snapshot-utils.js`），让 C1/C2/C3/C4 复用同一规范化逻辑
-- **触发实施**：发现银行对账模块出现"明明没改场景但导出被拒（stale-snapshot）"的实际事故；或下次 v2.0.x patch 时一并修
-
 ### B4（P3）`recon-id-fix-scenario-ipc` smoke simulator 与真实 main.js 漂移
 
 - **来源**：PR #35 self-review（commit `7327b43`）
@@ -861,6 +816,57 @@
 - **触发实施**：下次新增场景算法（C4 / C5 等新场景类）时一并加
 
 ## 已完成
+
+### B114（P4 · 已知问题）多处活动日志以 `level: 'warn'` 写入，被归到 info.log 而不是 warning.log
+
+- **来源**：2026-11-21 `feat/bill-split-fee-field-mapping`（v3.2.21）第六轮审查。结构化日志 `getLogFilePath` 只识别 `error / warning / info`，其他值兜底 `info`；`src/main.js` 9 处、`src/backend/database.js`、`src/main-process/template-resources/service.js` 仍传 `'warn'`（如模板【更新】表头后模板库文件同步失败）。本分支新增的撤销后同步失败已改用 `'warning'`，原有调用不在本分支范围
+- **影响**：按用户指南查看 warning.log 时看不到这些告警，排障时容易漏看
+- **关闭条件**：原有调用统一改为 `'warning'`（或在 `appendActivityLogEntry` / 结构化日志入口把 `warn` 规范为 `warning`），并用实际日志文件去向的测试覆盖
+- **目标版本**：未定
+- **关闭**：v3.2.22（暂定，分支 `fix/backlog-low-risk-batch`）。`logger.js` 新增 `normalizeLogLevel`，`appendStructuredLog` 与 `getLogFilePath` 把 `warn` 归为 `warning`，`appendActivityLogEntry` 与 `appendModuleLog` 两条入口都经过；原有 12 处 `'warn'` 调用同时改为 `'warning'`。验证：`logger.test.js` 按实际日志文件去向断言两条入口均写入 warning.log（[spec](../changes/v3.2.22/fix/backlog-low-risk-batch/spec.md) D1）
+
+### B19（P3）`isMemoryLimitError` 把所有 RangeError 判「文件过大」→ 小型损坏文件可能误报
+
+- **来源**：2026-06-17 v3.0.8 PR #78 self-review（F2，BUG3 顺带新增的错误分类）
+- **影响**：`src/backend/file-service/readers.js:160` `isMemoryLimitError` 对**任意** `RangeError` 返回 true → `readWorkbookRows` catch 回「文件过大，超出处理能力，请拆分后再试」。小型损坏 / 畸形 xlsx 若恰好抛 `RangeError`，会被误标「文件过大」（改前统一「文件为空或不可读」，亦泛但不误导体积）
+- **现状**：取舍刻意（BUG3 改流式 + 优先给大文件真实文案引导拆分）；小型损坏文件正好抛 `RangeError`（而非其他错误类型）的概率低
+- **推荐**：收窄——裸 `instanceof RangeError` 叠加文件大小阈值（如 >50MB 才判内存类），或 message 关键字命中优先于裸类型判定
+- **触发实施**：用户报「小文件却提示文件过大」/ 下次动 readers.js 错误分支时
+- **关闭**：v3.2.22（暂定，分支 `fix/backlog-low-risk-batch`）。`isMemoryLimitError` 不再把任意 RangeError 判为容量类，只认原有内存 / 长度上限关键字与 Node 容量类错误码（`ERR_FS_FILE_TOO_LARGE`、`ERR_STRING_TOO_LONG`、`ERR_BUFFER_TOO_LARGE`）。验证：`readers-memory-error.test.js` 覆盖 DataView 越界、递归过深、负长度判为 false，容量类关键字与错误码判为 true（[spec](../changes/v3.2.22/fix/backlog-low-risk-batch/spec.md) D2）
+
+### B17（P2）buildLinkedUpsertContext fx 幂等键复用泛化内核拼出重复列名（依赖 node:sqlite 未文档化行为）
+
+- **来源**：2026-06-15 v3.0.5 OPEN-7 codex 对抗审查顺带发现 + 实测验证
+- **影响**：fx-settlement 幂等键列 = 展示键列 = `transaction_no`（`LINKED_TABLE_DEFS['fx-settlement'].keyColumn` 与 `upsertLinkedFx` 传入 `idKeyColumn` 同为 `transaction_no`）；`buildLinkedUpsertContext`（`linked-table-repository.js:377`）无条件拼 `INSERT (idKeyColumn, keyColumn, dateColumn, raw_json, imported_at)` → fx 得到 `INSERT (transaction_no, transaction_no, ...)` **重复列名**（gateway/bank-deposit 因 idColumn≠keyColumn 不触发）
+- **现状**：实测 node:sqlite（DatabaseSync）**容忍**重复列名，prepare/run 均成功，且**第 1 个占位符（idKey=`normalizeTransactionNo` 归一值）生效**写入列，与 ON CONFLICT 判定 / existsStmt 查询口径一致 → fx 幂等当前**正确**（2547 单测 + 端到端真过）。但依赖两个**未文档化**实现细节：① node:sqlite 容忍重复列名；② INSERT 重复列取第 1 个值。node:sqlite 仍是 experimental API，未来版本变更可能 break fx 幂等键（🔴 资金红线：幂等失效 = 静默重复插入 / 键漂移）
+- **推荐**：`buildLinkedUpsertContext` 对 `idKeyColumn === keyColumn` 去重（只拼一次列名 + 一个占位符），或 fx def 区分 idColumn 与展示 keyColumn；全回归 gateway/bank-deposit/fx 三表 upsert 单测（资金红线核心，parity 锁）
+- **触发实施**：下次动 `buildLinkedUpsertContext` / fx upsert 时一并收敛；或 node:sqlite 升级后 fx 幂等单测报错时优先
+- **关闭**：v3.2.22（暂定，分支 `fix/backlog-low-risk-batch`）。`buildLinkedUpsertContext` 在幂等键列与展示键列相同时只写一次该列（取归一后的幂等键），不再依赖 node:sqlite 容忍重复列名；网关、入金 SQL 不变。验证：UT-FX-UPSERT-8 截获 SQL 断言无重复列名、占位符与列数一致，UT-FX-UPSERT-7 补断言交易编号列为归一键；网关 / 入金 / fx 链接表单测 128 项通过（[spec](../changes/v3.2.22/fix/backlog-low-risk-batch/spec.md) D3）
+
+### B5（P3）`buildScenariosSnapshot`（银行对账单模块）JSON.stringify key 顺序依赖
+
+- **来源**：PR #36 self-review（commit `42e0588`），dev 顺手发现
+- **影响**：`src/main.js:2898` `buildScenariosSnapshot`（银行对账单 / C1/C2/C3 资金红线 defense in depth）仍用 `JSON.stringify(s.config || {})`，与 PR #36 P3-C 已修的 C4 同名风险完全镜像 — 同语义 config 在 DB round-trip 前后 key 顺序不同 → 误报 stale-snapshot 拒导出
+- **现状**：实际可能性低（Node V8 JSON.parse + stringify round-trip 通常稳定），但 spec 不保证；C4 已用 `stableJsonStringify` 规范化，C1/C2/C3 未对齐
+- **推荐**：单独 PR 把 `stableJsonStringify` 提到共享工具（如 `src/main-process/snapshot-utils.js`），让 C1/C2/C3/C4 复用同一规范化逻辑
+- **触发实施**：发现银行对账模块出现"明明没改场景但导出被拒（stale-snapshot）"的实际事故；或下次 v2.0.x patch 时一并修
+- **关闭**：v3.2.22（暂定，分支 `fix/backlog-low-risk-batch`）。`buildScenariosSnapshot` 改用同一闭包内的 `stableJsonStringify`，与 C4 同口径；未另抽共享模块（两者同在 `registerAppHandlers` 内）。验证：新增 `bank-statement-scenarios-snapshot.test.js`（[spec](../changes/v3.2.22/fix/backlog-low-risk-batch/spec.md) D4）
+
+### B60（P2 · 已知问题）VCC 自定义模板表头含换行可启用，正式导入交接必然失败
+
+- **来源**：深审 VCC V2
+- **影响**：模板预检（`template-resources/contracts.js`）允许含 LF / CRLF / Tab 的表头，启用与业务文件预检都通过；`import-handoff.js` `nonempty()` 拒绝 U+0000–U+001F，导入交接报“VCC 导入交接身份不符”，同版本下重试无效。失败在业务写入前，无金额影响
+- **关闭条件**：模板阶段与交接阶段对表头控制字符同一规则（统一拒绝或统一接受）；真实 XLSX 覆盖 LF / CRLF / Tab 的完整链路回归
+- **目标版本**：v3.2.22（暂定；v3.2.16、v3.2.17 均无修复纳入，2026-11-12 发版时顺延；v3.2.18 未纳入，2026-11-16 发版时顺延；v3.2.19 未纳入，2026-11-18 发版时顺延；v3.2.20 未纳入，2026-11-18 发版时顺延；v3.2.21 未纳入，2026-11-22 发版时顺延）
+- **关闭**：v3.2.22（暂定，分支 `fix/backlog-low-risk-batch`）。统一拒绝：`import-handoff.js` 导出与交接同一正则的 `hasHandoffControlCharacter`，模板文件预检对 VCC 原表表头含控制字符时「表头」报 fail，不能启用；其他输入原表不受影响。验证：`template-resources-vcc-sources.test.js` 用真实 XLSX 覆盖 LF / CRLF / Tab / DEL，`template-resources-input-structures.test.js` 覆盖网关换行表头照常通过（[spec](../changes/v3.2.22/fix/backlog-low-risk-batch/spec.md) D5）
+
+### B55（P2 · 已知问题）共享日期规范化把不存在的月/日/年文本自动滚动为合法日期（平盘月份替换受影响）
+
+- **来源**：深审平盘 R03
+- **影响**：`file-service/normalizers.js` `normalizeDateExportValue` 两种日/月解析都失败后落到 `new Date(candidateValue)`，`02-29-2026` → `2026-03-01`、`02-31-2026` → `2026-03-03`，而 `2026-02-31` → 空，口径不一。平盘把它当有效业务日期，参与月份替换与匹配（确认后旧三月记录被替换）
+- **关闭条件**：日历校验失败即拒绝，不用自动滚动纠正；核对共享 normalizer 其他调用方的兼容影响后再改，或在平盘侧严格校验；回归用独立 BizId 覆盖闰日、非闰日、超出月份天数与不同分隔符
+- **目标版本**：v3.2.22（暂定；v3.2.16、v3.2.17 均无修复纳入，2026-11-12 发版时顺延；v3.2.18 未纳入，2026-11-16 发版时顺延；v3.2.19 未纳入，2026-11-18 发版时顺延；v3.2.20 未纳入，2026-11-18 发版时顺延；v3.2.21 未纳入，2026-11-22 发版时顺延）
+- **关闭**：v3.2.22（暂定，分支 `fix/backlog-low-risk-batch`）。在共享 normalizer 侧收紧：`normalizeDateExportValue` 的 `new Date` 兜底结果须能与原文三段数字一一对应，否则为空；已核对共享调用方（网银生成、平盘、工具箱 / 明细写出、余额种子导入、人工补录预检、对账场景引擎），均按无效日期处理或保留原文本。验证：`normalizers.test.js` 覆盖闰日、非闰日、超出当月天数、不同分隔符、两位年与三种日期顺序；`position-reconciliation-readers.test.js` 用独立 BizId 断言整批拒绝、闰年日期照常读取（[spec](../changes/v3.2.22/fix/backlog-low-risk-batch/spec.md) D6）。此前按滚动日期导出的结果不会自动修正
 
 ### B130（P4 · 改进）网银账单映射逐行为长数字提示分配追踪表，真 CSV 等不可能触发的输入同样分配
 

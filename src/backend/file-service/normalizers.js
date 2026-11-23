@@ -495,6 +495,21 @@ function resolveExcelSerial(serial, excelDateSystem) {
   return excelDateSystem === '1904' ? serial + EXCEL_1904_SERIAL_OFFSET : serial;
 }
 
+// v3.2.22 B55：new Date 兜底只接受年、月、日能与原文三段数字一一对应的结果。
+//   日历上不存在的日期（02-29-2026、02/31/2026、2-30-26）两种日月顺序都校验失败后，new Date 会滚动成下月，
+//   滚动后的月、日对不上原文，改为空；原文中两位或一位的年份按末两位比对（如 99-1-1 读作 1999-01-01，与此前相同）。
+//   含年月日汉字的写法不会走到这里得到有效日期（new Date 不识别汉字），拆不出三段即拒绝。
+function fallbackMatchesDateParts(candidateValue, date) {
+  const parts = String(candidateValue).split(/[-/.]/);
+  if (parts.length !== 3 || parts.some((part) => !/^\d+$/.test(part))) return false;
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const isYear = (part) => Number(part) === year || (part.length <= 2 && Number(part) === year % 100);
+  const orders = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+  return orders.some(([y, m, d]) => isYear(parts[y]) && Number(parts[m]) === month && Number(parts[d]) === day);
+}
+
 function normalizeDateExportValue(value, { dateParseOrder = 'auto', excelDateSystem = '1900' } = {}) {
   if (value === null || value === undefined || value === '') {
     return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
@@ -664,7 +679,7 @@ function normalizeDateExportValue(value, { dateParseOrder = 'auto', excelDateSys
 
   const fallback = isFallbackCandidate ? new Date(candidateValue) : new Date('invalid');
 
-  if (!Number.isNaN(fallback.getTime())) {
+  if (!Number.isNaN(fallback.getTime()) && fallbackMatchesDateParts(candidateValue, fallback)) {
     const date = new Date(fallback.getFullYear(), fallback.getMonth(), fallback.getDate());
     return buildNormalizedDateResult(
       date,

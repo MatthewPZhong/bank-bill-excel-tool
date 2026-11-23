@@ -16,8 +16,10 @@ const os = require('node:os');
 
 const {
   appendActivityRecord,
+  appendModuleLog,
   getLogFilePath,
-  appendStructuredLog
+  appendStructuredLog,
+  setActivityLogStorageRoot
 } = require('../../../src/backend/logger');
 
 function mkTmpRoot() {
@@ -272,6 +274,34 @@ test.describe('appendActivityRecord 写入新结构 JSON Lines（v2.1.12 SR-log-
 });
 
 // v3.2.21：错误报告逐行写入明细，明细很多（如逐行列出的跳过行）时不因展开成参数超出调用栈
+// v3.2.22 B114：调用方传 console 风格的 'warn' 时，主进程入口（appendActivityRecord）与模块入口（appendModuleLog）
+//   都写入 warning.log，记录里的 level 为 warning，不再落到 info.log
+test.describe("level 'warn' 归为 warning（B114）", () => {
+  test('主进程入口与模块入口传 warn 均写入 warning.log', (t) => {
+    const root = mkTmpRoot();
+    t.after(() => { setActivityLogStorageRoot(null); fs.rmSync(root, { recursive: true, force: true }); });
+    const now = new Date(2026, 10, 23, 9, 0, 0);
+    t.mock.timers.enable({ apis: ['Date'], now: now.getTime() });
+    appendActivityRecord(path.join(root, 'app_activity_log.txt'), { level: 'warn', message: '主进程告警' });
+    setActivityLogStorageRoot(root);
+    appendModuleLog({ level: 'WARN', message: '模块告警' });
+    const warnings = readJsonLines(getLogFilePath(root, 'warning', now));
+    assert.deepEqual(warnings.map((record) => [record.level, record.message]), [['warning', '主进程告警'], ['warning', '模块告警']]);
+    assert.deepEqual(readJsonLines(getLogFilePath(root, 'info', now)), []);
+  });
+
+  test('getLogFilePath：warn 落 warning.log，其他未知值仍兜底 info.log', () => {
+    const root = mkTmpRoot();
+    try {
+      assert.equal(path.basename(getLogFilePath(root, 'warn')), 'warning.log');
+      assert.equal(path.basename(getLogFilePath(root, 'debug')), 'info.log');
+      assert.equal(path.basename(getLogFilePath(root, undefined)), 'info.log');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 test('writeErrorReport：15 万行明细照常写出报告', () => {
   const { writeErrorReport } = require('../../../src/backend/logger');
   const root = mkTmpRoot();

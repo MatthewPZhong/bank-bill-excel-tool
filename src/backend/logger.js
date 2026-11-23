@@ -122,9 +122,19 @@ function appendActivityRecord(filePath, payload = {}) {
 //   - 月+日两层归档；跨年自然分组（D32 永久保留搭配）
 //   - level 取值：error / warning / info（spec §15.3 D30=a 仅 3 类）；其他值兜底 'info'
 //   - 自动 mkdirSync recursive（首次告警按需创建）
+// v3.2.22 B114：console 风格的 'warn' 归为 warning（写入 warning.log，记录里的 level 也为 warning）；
+//   其余取值原样小写，getLogFilePath 对未知值仍兜底 info。
+const LOG_LEVEL_ALIASES = Object.freeze({ warn: 'warning' });
+
+function normalizeLogLevel(level) {
+  const value = String(level || 'info').toLowerCase();
+  return LOG_LEVEL_ALIASES[value] || value;
+}
+
 function getLogFilePath(storageRoot, level, date = new Date()) {
-  const safeLevel = ['error', 'warning', 'info'].includes(String(level).toLowerCase())
-    ? String(level).toLowerCase()
+  const normalizedLevel = normalizeLogLevel(level);
+  const safeLevel = ['error', 'warning', 'info'].includes(normalizedLevel)
+    ? normalizedLevel
     : 'info';
   const yyyyMm = `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
   const mmDd = `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -151,7 +161,7 @@ function formatIsoWithLocalTz(date) {
 }
 
 function appendStructuredLog(storageRoot, payload = {}, now = new Date()) {
-  const level = String(payload.level || 'info').toLowerCase();
+  const level = normalizeLogLevel(payload.level);
   const filePath = getLogFilePath(storageRoot, level, now);
   const record = {
     ts: payload.ts || formatIsoWithLocalTz(now),
@@ -207,6 +217,7 @@ module.exports = {
   // v2.1.9 SR-log-1 (T32j)：新日志结构 API（供 main.js 直接调用或 test 验证）
   getLogFilePath,
   appendStructuredLog,
+  normalizeLogLevel,
   // v2.1.9 SR-log-1 (T32h)：main-process / backend 模块便捷写日志入口
   appendModuleLog,
   setActivityLogStorageRoot

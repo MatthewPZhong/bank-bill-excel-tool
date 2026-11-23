@@ -173,7 +173,7 @@ function createTemplateResourceService({
         try {
           await rm(path.join(directory, name), { force: true });
         } catch (error) {
-          log({ level: 'warn', message: '模板文件：清理孤儿版本文件失败', details: [path.join(directory, name), errorText(error)] });
+          log({ level: 'warning', message: '模板文件：清理孤儿版本文件失败', details: [path.join(directory, name), errorText(error)] });
         }
       }
     }
@@ -1040,7 +1040,7 @@ function createTemplateResourceService({
         await rm(versionPath(resource.id, versionId), { force: true });
       } catch (removeError) {
         // 记录已删除；残留文件由下次启动的孤儿清扫处理。
-        log({ level: 'warn', message: '模板文件：删除版本文件失败', details: [versionPath(resource.id, versionId), errorText(removeError)] });
+        log({ level: 'warning', message: '模板文件：删除版本文件失败', details: [versionPath(resource.id, versionId), errorText(removeError)] });
       }
       log({ level: 'info', message: `模板文件：${resource.id} 删除版本 ${label}` });
       notify(resource.id);

@@ -104,6 +104,19 @@ test('必用列缺少、与旧 48 列 Pending 模板相同、表头含布尔值�
   assert.equal(check(systemBoolean, '表头读取'), undefined);
 });
 
+// v3.2.22 B60：VCC 导入交接不接受含控制字符的表头，模板预检按同一规则拒绝，不再出现「启用后导入必然失败」
+test('表头含换行、制表符等控制字符时预检不通过，不能启用', async (t) => {
+  const env = setup(t);
+  for (const [name, header] of [['LF', '备注\n说明'], ['CRLF', '备注\r\n说明'], ['Tab', '备注\t说明'], ['DEL', '备注\u007f说明']]) {
+    const prepared = await prepare(env.service, 'vcc-recharge-refund', env.write(`充值-${name}.xlsx`, [...RECHARGE, header]));
+    assert.equal(prepared.verdict, 'fail', name);
+    assert.equal(check(prepared, '表头').status, 'fail', name);
+    assert.equal(check(prepared, '表头').detail, `第 ${RECHARGE.length + 1} 列表头含换行、制表符等控制字符，请改为单行文本`, name);
+    assert.equal((await env.service.commitImport({ importToken: prepared.importToken, enable: true })).status, 'failed', name);
+  }
+  assert.equal(await resolveVccSourceStructures(env.service), null, '未启用任何用户结构');
+});
+
 // v3.2.15 B42：恢复默认同样核对同组冲突。按审查发现的顺序操作：充值清退启用末尾加列的版本 →
 //   费用及换汇启用与充值清退内置表头相同的版本（此时不冲突）→ 充值清退恢复默认，须被阻止，当前版本不变。
 test('恢复默认会与同组另一张表当前结构相同时不能恢复，调整对方后可恢复', async (t) => {
