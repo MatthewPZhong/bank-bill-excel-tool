@@ -3,7 +3,7 @@ const path = require('node:path');
 // v1.5.3 R3：切换到 xlsx-js-style 以支持写入单元格样式（cell.s.font 等）
 // 仅 writers.js 内部切换，其它文件仍用 xlsx（减少打包体积）
 const XLSX = require('xlsx-js-style');
-const { FileValidationError, normalizeCell } = require('./common');
+const { FileValidationError, isWorksheetWritableText, normalizeCell } = require('./common');
 const { applyWatermark } = require('../../main-process/workbook-watermark');
 
 // v1.5.3 R3：给表头行（第 1 行）每个单元格注入 Courier New 字体
@@ -31,6 +31,50 @@ function applyHeaderRowFont(worksheet, headerRowIndex = 0) {
       font: { ...existingFont, name: 'Courier New', sz: 10 }
     };
   }
+}
+
+const WORKSHEET_LITERAL_ESCAPE_PATTERN = /_(?=[xX][0-9A-Fa-f]{4})/g;
+const UNWRITABLE_TEXT_DETAIL_LIMIT = 20;
+
+// v3.2.22 B113：写出器把控制字符编码成 _xHHHH_，却不转义文本里字面的 _xHHHH_；Excel 与读取库读取时所有 _xHHHH_ 都按转义
+//   还原（FEE_x0041_ 读成 FEEA；REF_x0041 后接回车时与回车的写出编码 _x000d_ 拼成 _x0041_），两个不同的流水号、参考号可能
+//   变成同一个值。写出前把文本中「_ 后接 x + 4 位十六进制」的下划线写成 _x005F_（OOXML 对下划线本身的转义），读回即为原文。
+//   只改即将写出的工作表对象（含表头与模板原有的文本），不改调用方的行数据；数值、日期单元格不受影响。
+//   同时核对文本能否原样写入：含 U+FFFE、U+FFFF（XML 1.0 禁止，工作表无法解析）或未配对代理项（写出后变成「�」）时整份拒绝，
+//   列出行号与列名（不写文件名：内部文件名可能含账号），不交付无法打开或被改写的文件（网银账单生成已在映射阶段按源行拒绝，
+//   这里兜底其他调用方）。
+function prepareWorkbookTextForWrite(workbook) {
+  const unwritable = [];
+  (workbook.SheetNames || []).forEach((sheetName) => {
+    const worksheet = workbook.Sheets && workbook.Sheets[sheetName];
+    if (!worksheet) return;
+    Object.keys(worksheet).forEach((address) => {
+      if (address[0] === '!') return;
+      const cell = worksheet[address];
+      if (!cell || typeof cell.v !== 'string') return;
+      if (!isWorksheetWritableText(cell.v)) {
+        const { r, c } = XLSX.utils.decode_cell(address);
+        const headerCell = worksheet[XLSX.utils.encode_cell({ r: 0, c })];
+        const header = r > 0 && headerCell && typeof headerCell.v === 'string' && isWorksheetWritableText(headerCell.v)
+          ? `「${headerCell.v}」列`
+          : `${XLSX.utils.encode_col(c)} 列`;
+        unwritable.push({ r, c, label: `第 ${r + 1} 行${header}` });
+        return;
+      }
+      if (cell.v.includes('_')) cell.v = cell.v.replace(WORKSHEET_LITERAL_ESCAPE_PATTERN, '_x005F_');
+    });
+  });
+  if (!unwritable.length) return;
+  unwritable.sort((left, right) => left.r - right.r || left.c - right.c);
+  const detailLines = unwritable.slice(0, UNWRITABLE_TEXT_DETAIL_LIMIT).map((item) => item.label);
+  if (unwritable.length > UNWRITABLE_TEXT_DETAIL_LIMIT) {
+    detailLines.push(`另有 ${unwritable.length - UNWRITABLE_TEXT_DETAIL_LIMIT} 处，共 ${unwritable.length} 处`);
+  }
+  throw new FileValidationError(
+    'FILE_READ',
+    `${unwritable[0].label}的值含无法写入 Excel 的字符（U+FFFE、U+FFFF 或不完整的 Unicode 字符）${unwritable.length > 1 ? `等 ${unwritable.length} 处` : ''}，请修正后重新生成`,
+    { detailLines }
+  );
 }
 
 function countSignificantDigitsFromString(str) {
@@ -227,6 +271,7 @@ function writeWorkbookRows({ rows, outputFilePath, sheetName = 'COMMON' }, forma
   applyHeaderRowFont(worksheet, 0);
 
   XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+  prepareWorkbookTextForWrite(workbook);
   fs.mkdirSync(path.dirname(outputFilePath), { recursive: true });
   applyWatermark(workbook);
   XLSX.writeFile(workbook, outputFilePath);
@@ -293,6 +338,7 @@ function writeBalanceWorkbook({
   applyBalanceFieldFormats(worksheet, headerFields, normalizedRecords, formatters);
   worksheet['!ref'] = `A1:${XLSX.utils.encode_col(columnCount - 1)}${Math.max(normalizedRecords.length + 1, 2)}`;
   applyHeaderRowFont(worksheet, 0);
+  prepareWorkbookTextForWrite(workbook);
 
   fs.mkdirSync(path.dirname(outputFilePath), { recursive: true });
   applyWatermark(workbook);
@@ -304,6 +350,7 @@ module.exports = {
   applyBalanceFieldFormats,
   applyExportFieldFormats,
   buildNumericCellValue,
+  prepareWorkbookTextForWrite,
   writeBalanceWorkbook,
   writeWorkbookRows
 };

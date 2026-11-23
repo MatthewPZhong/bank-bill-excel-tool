@@ -320,3 +320,16 @@ test('按文件名映射导入：识别本模式文件，用于跳过或阻断�
   assert.deepEqual(fns.classifyCurrencyOnlyEntries([multiEntry], configs), { currencyOnlyFileNames: [], allCurrencyOnly: false });
   assert.equal(fns.isMultiBigAccountMapping(configs.get(1).exportMappings), false);
 });
+
+// B132：「自己输入」大账号的重复校验按（大账号, 币种）结构化判断，账号或币种本身含 @@ 时不同账户不误判为重复
+test('保存校验（自己输入）：账号或币种含 @@ 的不同账户不判重复；同一大账号同一币种仍判重复', () => {
+  const selfInput = (bigAccounts) => validate({ mappings: { MerchantId: CONSTANTS.MERCHANT_ID_SELF_INPUT_OPTION }, bigAccounts });
+  assert.doesNotThrow(() => selfInput([
+    { merchantId: 'A@@B', currencies: ['USD'] },
+    { merchantId: 'A', currencies: ['B@@USD'] }
+  ]));
+  assert.throws(() => selfInput([
+    { merchantId: 'A', currencies: ['USD'] },
+    { merchantId: 'A', currencies: ['USD'] }
+  ]), /大账号 A 的币种 USD 重复/);
+});

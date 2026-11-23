@@ -402,15 +402,9 @@ test('assertFeeFieldOutputWritable：取自源列的输出值含无法写入 Exc
   assert.doesNotThrow(() => assertFeeFieldOutputWritable(item, 'x'.repeat(32767), { sourceRowNumber: 6 }));
   assert.doesNotThrow(() => assertFeeFieldOutputWritable(item, 'ref\ud83d\ude00'));
   assert.doesNotThrow(() => assertFeeFieldOutputWritable({ ...item, valueType: 'input' }, 'REF\uFFFE'), '固定值已在规范化时拦截，这里只校验源列取值');
-  // 形如 _xHHHH_ 的字面文本写出后会被还原成其他字符：源列取值与固定文本都拒绝（x 与十六进制不分大小写）；不构成转义的照常
-  //   与回车等控制字符相连时，控制字符写出编码（如回车为 _x000d_）会补全前面的 _xHHHH，同样被改写
-  for (const bad of ['FEE_x0041_', 'a_X00e9_b', 'REF_x0041\r\nB', 'REF_x0041\u0001']) {
-    assert.throws(() => assertFeeFieldOutputWritable(item, bad, { sourceRowNumber: 7 }), /第 7 行「参考号」列的值含写入 Excel 后会被改写的文本.*Customer Ref/);
-    assert.throws(() => validateFeeFieldMappings([{ templateField: 'Customer Ref', valueType: 'input', value: bad }]),
-      /第 1 行：「Customer Ref」的映射值含写入 Excel 后会被改写的文本/);
-  }
-  for (const ok of ['FEE_x004_', 'FEE_x00G1_', 'FEE_0041_x', 'REF\r\nB']) {
-    assert.doesNotThrow(() => assertFeeFieldOutputWritable(item, ok));
+  // v3.2.22 B113：写出边界已转义字面 _xHHHH_（writers.js），这类文本原样写出、读回，源列取值与固定文本都照常接受
+  for (const ok of ['FEE_x0041_', 'a_X00e9_b', 'REF_x0041\r\nB', 'REF_x0041\u0001', 'FEE_x004_', 'FEE_x00G1_', 'FEE_0041_x', 'REF\r\nB']) {
+    assert.doesNotThrow(() => assertFeeFieldOutputWritable(item, ok, { sourceRowNumber: 7 }));
     assert.doesNotThrow(() => validateFeeFieldMappings([{ templateField: 'Customer Ref', valueType: 'input', value: ok }]));
   }
 });

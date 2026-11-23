@@ -673,14 +673,16 @@ test('费用账单行按规则取发生额时只读支出规则：收入规则�
   assert.deepEqual(longNumberIssues(mapped), []);
 });
 
-test('XLSX：注释里的 <v> 不算单元格的值；一个单元格有多个 <v> 时不还原并提示', async (t) => {
+// B133：读取库不跳过注释（注释里的 <v>、<row> 也会解析），无法证明取到的原文与读取库读到的是同一个值，整张表不还原并提示
+test('XLSX：工作表含注释时整张表不还原并提示；一个单元格有多个 <v> 时不还原并提示', async (t) => {
   const dir = createTempDir(t);
   const rows = [HEADER, ['2026-11-01', 'USD', 100, 1111, 2222]];
   const commented = await writeXlsxWithLiterals(path.join(dir, 'commented.xlsx'), rows, { 1111: SERIAL, 2222: CARD },
     (xml) => xml.replace(`<v>${SERIAL}</v>`, `<!-- 旧值 <v>9007199254740992</v> --><v>${SERIAL}</v>`));
   const fromComment = map(commented);
-  assert.deepEqual(identifiers(fromComment), [[SERIAL, CARD]]);
-  assert.deepEqual(longNumberIssues(fromComment), []);
+  assert.notEqual(identifiers(fromComment)[0][0], SERIAL);
+  assert.notEqual(identifiers(fromComment)[0][1], CARD);
+  assert.deepEqual(longNumberIssues(fromComment).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号', '卡号']]);
 
   const doubled = await writeXlsxWithLiterals(path.join(dir, 'doubled.xlsx'), rows, { 1111: SERIAL, 2222: CARD },
     (xml) => xml.replace(`<v>${SERIAL}</v>`, `<v>${SERIAL}</v><v>9007199254740992</v>`));
@@ -1074,7 +1076,7 @@ test('余额方式为「无」或「通过发生额计算」时，拆分映射�
   assert.deepEqual(issueTargets(generate('余额', { Balance: '参考号' })), [['参考号', ['Balance']]]);
 });
 
-test('XLSX：工作簿关系文件注释里的旧关系不算，不把另一张表的流水号写进当前表；同一关系 Id 有多条有效关系时不还原并提示', async (t) => {
+test('XLSX：工作簿关系文件含注释、或同一关系 Id 有多条有效关系时不还原并提示，不把另一张表的流水号写进当前表', async (t) => {
   const dir = createTempDir(t);
   const WORKSHEET_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet';
   // 两张表同一位置的流水号舍入为同一数值（9007199254740996），数值核对发现不了串表
@@ -1099,11 +1101,12 @@ test('XLSX：工作簿关系文件注释里的旧关系不算，不把另一张�
     return filePath;
   };
   const staleRelation = `<Relationship Id="rId1" Type="${WORKSHEET_TYPE}" Target="worksheets/sheet2.xml"/>`;
+  // 关系文件含注释（B133：读取库不跳过注释，无法证明两边读的是同一张表）：不还原并提示
   const commented = await build('commented-rels.xlsx', (rels) => rels.replace('<Relationship ', `<!-- ${staleRelation} --><Relationship `));
   const mapped = map(commented);
   assert.deepEqual(mapped.slice(1).map((row) => row[TARGETS.indexOf('Credit Amount')]), ['100'], '读取库读的是第一张表');
   assert.deepEqual(identifiers(mapped).map(([serial]) => String(serial)), ['9007199254740996']);
-  assert.deepEqual(longNumberIssues(mapped), []);
+  assert.deepEqual(longNumberIssues(mapped).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
 
   const duplicated = await build('duplicated-rels.xlsx', (rels) => rels.replace('<Relationship ', `${staleRelation}<Relationship `));
   const unverified = map(duplicated);
@@ -1400,10 +1403,34 @@ test('XLSX：读取库实际读取的工作表与按关系定位的不一致时�
     await swapTargets(zip);
     await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Id="rId1"', 'Id="rId&#49;"');
   })), '关系 Id 含字符引用');
+  // ⑦ B133：关系标签用制表符分隔属性（读取库的 parsexmltag 只把空格、回车、换行当作标签名的结束，认不出这些关系，
+  //   改按物理序号读表），且两张表的关系目标互换：按关系定位会取到第二张表的原文，须不还原并提示
+  assertUnverified(map(await build('tab-separated-rels.xlsx', async (zip) => {
+    await swapTargets(zip);
+    const rels = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+    assert.match(rels, /<Relationship /);
+    zip.file('xl/_rels/workbook.xml.rels', rels.replace(/<Relationship /g, '<Relationship\t'));
+  })), '关系标签用制表符分隔');
   // 对照：Target 写成绝对路径 /xl/worksheets/sheet1.xml 时两种口径一致，照常还原
   const absolute = map(await build('absolute-target.xlsx', async (zip) => {
     await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheet1.xml"', 'Target="/xl/worksheets/sheet1.xml"');
   }));
   assert.deepEqual(identifiers(absolute).map(([serial]) => String(serial)), ['9007199254740992']);
   assert.deepEqual(longNumberIssues(absolute), []);
+});
+
+// B133：工作表 XML 同一坐标保留注释掉的旧 <row>：读取库会解析注释里的行（后出现的覆盖先出现的），金额取自注释里的行；
+//   去掉注释后取有效行的原文会让流水号与金额来自不同的行（两个流水号舍入为同一数值，数值核对发现不了），须不还原并提示
+test('XLSX：同一坐标有注释掉的旧行时不还原并提示', async (t) => {
+  const dir = createTempDir(t);
+  const rows = [HEADER, ['2026-11-01', 'USD', 100, 1111, 5]];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'commented-row.xlsx'), rows, { 1111: SERIAL }, (xml) => {
+    const staleRow = '<!-- <row r="2"><c r="C2"><v>555</v></c><c r="D2"><v>9007199254740992</v></c></row> -->';
+    assert.match(xml, /<\/row><\/sheetData>/);
+    return xml.replace('</row></sheetData>', `</row>${staleRow}</sheetData>`);
+  });
+  const mapped = map(filePath);
+  assert.deepEqual(mapped.slice(1).map((row) => row[TARGETS.indexOf('Credit Amount')]), ['555'], '读取库按注释里的行取金额');
+  assert.deepEqual(identifiers(mapped).map(([serial]) => String(serial)), ['9007199254740992'], '不写进有效行的流水号原文');
+  assert.deepEqual(longNumberIssues(mapped).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
 });

@@ -86,6 +86,12 @@ function buildExpectedHeaderCandidates(expectedHeaders) {
     : [positionalHeaders, compactHeaders];
 }
 
+// 能原样写入 XLSX 工作表的文本：未配对 UTF-16 代理项写出后变成「�」；U+FFFE、U+FFFF 是 XML 1.0 禁止的字符，写出后工作表无法解析。
+//   其他控制字符写出时按 _xHHHH_ 转义，字面的 _xHHHH_ 由写出边界转义（writers.js，B113），都可原样读回。
+function isWorksheetWritableText(value) {
+  return typeof value === 'string' && value.isWellFormed() && !/[\uFFFE\uFFFF]/.test(value);
+}
+
 module.exports = {
   FEATURE_FILTER_FIELD_TOKEN_PREFIX,
   FileValidationError,
@@ -97,6 +103,7 @@ module.exports = {
   buildExpectedHeaderCandidates,
   isRowMeaningful,
   isUnverifiedLongNumber,
+  isWorksheetWritableText,
   normalizeCell,
   trimTrailingEmptyCells
 };

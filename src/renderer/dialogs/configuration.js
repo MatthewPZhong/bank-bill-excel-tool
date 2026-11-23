@@ -2807,7 +2807,7 @@
           textSpan.textContent = label;
 
           checkbox.addEventListener('change', () => {
-            const key = `${option.merchantId}@@${option.currency}`;
+            const key = bigAccountKey(option.merchantId, option.currency);
             // v1.5.2 需求 2：编辑态下走多对一状态机，非编辑态走原 1:1 逻辑
             if (multiMode && multiEditing) {
               onRightAccountChecked({ merchantId: option.merchantId, currency: option.currency }, checkbox.checked);
@@ -2840,7 +2840,7 @@
           return;
         }
         orderListContainer.querySelectorAll('.big-account-order-item').forEach((item) => {
-          const key = `${item.dataset.merchantId}@@${item.dataset.currency}`;
+          const key = bigAccountKey(item.dataset.merchantId, item.dataset.currency);
           const orderIdx = checkedOrder.findIndex((o) => o.key === key);
           const indexSpan = item.querySelector('.big-account-order-index');
           if (!indexSpan) return;
@@ -2890,8 +2890,9 @@
       function sameAccount(a, b) {
         return a && b && a.merchantId === b.merchantId && a.currency === b.currency;
       }
-      function accountKey(acc) {
-        return `${acc.merchantId}@@${acc.currency}`;
+      // B132：大账号 + 币种的勾选 / 预填 / 顺序键用结构化键，账号或币种本身含 @@ 时不同账户不同键
+      function bigAccountKey(merchantId, currency) {
+        return JSON.stringify([String(merchantId ?? ''), String(currency ?? '')]);
       }
       // 判断某 rowIndex 是否已被 pendingGroup 或任何已闭合组覆盖（仅供 renderFileList 初始化勾选态使用）
       function isRowIndexCovered(rowIndex) {
@@ -3157,7 +3158,7 @@
       function applyPrefilledOrder(assignments) {
         checkedOrder = [];
         assignments.forEach((a) => {
-          const key = `${a.merchantId}@@${a.currency}`;
+          const key = bigAccountKey(a.merchantId, a.currency);
           const exists = expandedOptions.some((o) => o.merchantId === a.merchantId && o.currency === a.currency);
           if (exists && checkedOrder.length < currentFileRows.length) {
             checkedOrder.push({ merchantId: a.merchantId, currency: a.currency, key });
@@ -3385,7 +3386,7 @@
           orderListContainer.querySelectorAll('.big-account-order-checkbox').forEach((cb) => { cb.checked = false; });
 
           extractedAccounts.forEach((account) => {
-            const key = `${account.merchantId}@@${account.currency}`;
+            const key = bigAccountKey(account.merchantId, account.currency);
             const item = Array.from(orderListContainer.querySelectorAll('.big-account-order-item')).find(
               (el) => el.dataset.merchantId === account.merchantId && el.dataset.currency === account.currency
             );
@@ -3402,7 +3403,7 @@
           const checkedItems = [];
           const uncheckedItems = [];
           allItems.forEach((item) => {
-            const key = `${item.dataset.merchantId}@@${item.dataset.currency}`;
+            const key = bigAccountKey(item.dataset.merchantId, item.dataset.currency);
             const orderIdx = checkedOrder.findIndex((o) => o.key === key);
             if (orderIdx >= 0) {
               checkedItems.push({ item, order: orderIdx });
@@ -6888,13 +6889,6 @@
         else seen.add(group.templateField);
         if (group.valueType === 'input' && !group.value) errors.push(`${label}：请输入映射值`);
         if (group.valueType === 'input' && group.value.length > 32767) errors.push(`${label}：映射值超过 32767 个字符（Excel 单元格上限）`);
-        // 同主进程 hasWorksheetEscapeLikeText：模拟写出（控制字符编码为 _xHHHH_）再读回（_xHHHH_ 还原），与原文不同即会被改写
-        if (group.valueType === 'input' && /_x/i.test(group.value)) {
-          const written = group.value.replace(/[\u0000-\u0008\u000b-\u001f]/g, (char) => `_x${char.charCodeAt(0).toString(16).padStart(4, '0')}_`);
-          if (written.replace(/_x([\da-f]{4})_/gi, (_match, code) => String.fromCharCode(parseInt(code, 16))) !== group.value) {
-            errors.push(`${label}：映射值含写入 Excel 后会被改写的文本（形如 _x0041_，或与回车等控制字符相连后构成此形式），请修改`);
-          }
-        }
         if (!BILL_SPLIT_FEE_FIELD_MAPPING_VALUE_TYPES.includes(group.valueType)) errors.push(`${label}：映射字段无效，请重新选择`);
       });
       return errors;

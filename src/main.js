@@ -639,6 +639,7 @@ const {
   LEGACY_FEATURE_FILTER_ID,
   parseDateValue,
   parseNumericValue,
+  prepareWorkbookTextForWrite,
   readRows,
   readRowsWithMetadata,
   writeBalanceWorkbook,
@@ -8627,14 +8628,6 @@ function registerAccountMappingHandlers() {
       const allTemplates = database.listTemplates();
       const validTemplateIds = new Set(allTemplates.map((t) => t.id));
 
-      // 获取迁移源数据的行数，用于完整性校验
-      const migrationSourceRows = database.listAllAccountMappings
-        ? database.listAllAccountMappings()
-        : [];
-      const uniqueSourceKeys = new Set(
-        migrationSourceRows.map((m) => `${normalizeCell(m.bankAccountId)}@@${normalizeCell(m.clearingAccountId)}`)
-      );
-
       const droppedRows = [];
       // v3.2.15（D7）：渠道子模板不再持有模板级账户映射，迁移分配只面向普通模板。
       const channelTemplateIds = new Set(allTemplates.filter((t) => t.channelId).map((t) => t.id));
@@ -9358,7 +9351,8 @@ function validateTemplateConfiguration({
       }
 
       item.currencies.forEach((currency) => {
-        const compositeKey = `${item.merchantId}@@${currency}`;
+        // B132：结构化键，账号或币种本身含 @@ 时不同账户不同键
+        const compositeKey = JSON.stringify([item.merchantId, currency]);
 
         if (duplicateKeys.has(compositeKey)) {
           throw new FileValidationError('FILE_READ', `大账号 ${item.merchantId} 的币种 ${currency} 重复`);
@@ -12927,6 +12921,8 @@ function mergeGeneratedXlsxFiles(filePaths, mergedOutputPath) {
       font: { ...existingFont, name: 'Courier New' }
     };
   }
+  // v3.2.22 B113：读回时字面 _xHHHH_ 已还原成原文，写出前须与单组写出同样转义，否则合并文件中的流水号等被改写
+  prepareWorkbookTextForWrite(baseWb);
   fs.mkdirSync(path.dirname(mergedOutputPath), { recursive: true });
   applyWatermark(baseWb);
   XLSXStyle.writeFile(baseWb, mergedOutputPath);

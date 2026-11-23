@@ -1318,8 +1318,8 @@ function loadOutputPathHelpers(storageRoot, today) {
   );
   const mergeGeneratedXlsxFiles = loadMainFunction(
     'mergeGeneratedXlsxFiles',
-    ['require', 'fs', 'path', 'applyWatermark'],
-    [require, fs, path, () => {}]
+    ['require', 'fs', 'path', 'applyWatermark', 'prepareWorkbookTextForWrite'],
+    [require, fs, path, () => {}, require('../../../src/backend/file-service/writers').prepareWorkbookTextForWrite]
   );
   return {
     buildOutputFilePath,
@@ -2791,4 +2791,18 @@ test('generateStatementFiles：明细与余额结果的 billDates 只有首末�
   const preparedBatch = generation.buildPreparedStatementBatchFromEntries({ config, fileEntries: [entry] });
   const result = generation.generateStatementFiles({ config, preparedBatch, scope: 'current' });
   assert.deepEqual([result.detail.billDates, result.balance.billDates], [['2026-09-01', '2026-09-02'], ['2026-09-01', '2026-09-02']]);
+});
+
+// v3.2.22 B113：多组明细合并时读回的字面 _xHHHH_ 已还原成原文，合并写出须同样转义，合并文件中原样保留
+test('mergeGeneratedXlsxFiles：各组明细中的字面 _xHHHH_ 合并写出后读回原样保留', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'merge-escape-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const { writeWorkbookRows } = require('../../../src/backend/file-service');
+  const { mergeGeneratedXlsxFiles } = loadOutputPathHelpers(dir, '2026-11-23');
+  const first = writeWorkbookRows({ rows: [['Ref'], ['FEE_x0041_']], outputFilePath: path.join(dir, 'a.xlsx') });
+  const second = writeWorkbookRows({ rows: [['Ref'], ['REF_x0041\r\nB']], outputFilePath: path.join(dir, 'b.xlsx') });
+  const merged = mergeGeneratedXlsxFiles([first, second], path.join(dir, 'merged.xlsx'));
+  const workbook = XLSX.readFile(merged);
+  assert.deepEqual(XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }),
+    [['Ref'], ['FEE_x0041_'], ['REF_x0041\r\nB']]);
 });

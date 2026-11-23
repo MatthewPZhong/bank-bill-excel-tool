@@ -233,7 +233,7 @@ function createMultiTemplateHarness({ storageRoot, outputDir, templates, fileEnt
     getToday: () => today, path, ensureStorageRoot: () => storageRoot, sanitizeFileName
   });
   const mergeGeneratedXlsxFiles = loadMainFunction('mergeGeneratedXlsxFiles', {
-    require, fs, path, applyWatermark: () => {}
+    require, fs, path, applyWatermark: () => {}, prepareWorkbookTextForWrite: require('../../src/backend/file-service/writers').prepareWorkbookTextForWrite
   });
   const buildGenerationConfig = ({ template }) => ({ ...STATEMENT_CONFIG, template });
   const lastGeneratedExports = { detail: null, balance: null, allDetail: null, allBalance: null };

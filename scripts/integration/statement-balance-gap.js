@@ -276,7 +276,7 @@ async function verifyMergedScopeIsolation(dir) {
     buildDateRangeLabel,
     buildOutputFilePath,
     mergeGeneratedXlsxFiles: loadMainFunction('mergeGeneratedXlsxFiles', {
-      require, fs, path, applyWatermark: () => {}
+      require, fs, path, applyWatermark: () => {}, prepareWorkbookTextForWrite: require('../../src/backend/file-service/writers').prepareWorkbookTextForWrite
     }),
     getToday: () => today,
     path,
@@ -339,7 +339,7 @@ async function verifyMultiTemplateImportHoldsPartialBalance(dir) {
     getToday: () => today, path, ensureStorageRoot: () => storageRoot, sanitizeFileName
   });
   const mergeGeneratedXlsxFiles = loadMainFunction('mergeGeneratedXlsxFiles', {
-    require, fs, path, applyWatermark: () => {}
+    require, fs, path, applyWatermark: () => {}, prepareWorkbookTextForWrite: require('../../src/backend/file-service/writers').prepareWorkbookTextForWrite
   });
   const buildGenerationConfig = ({ template }) => ({
     template,

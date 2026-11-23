@@ -7,6 +7,7 @@ const {
   SUPPORTED_EXTENSIONS,
   buildExpectedHeaderCandidates,
   isUnverifiedLongNumber,
+  isWorksheetWritableText,
   normalizeCell
 } = require('./file-service/common');
 const {
@@ -107,6 +108,7 @@ const {
   mapEachCollectingCurrencyBigAccountIssues
 } = require('./file-service/currency-big-account');
 const {
+  prepareWorkbookTextForWrite,
   writeBalanceWorkbook: writeBalanceWorkbookInternal,
   writeWorkbookRows: writeWorkbookRowsInternal
 } = require('./file-service/writers');
@@ -198,6 +200,32 @@ function assertNoInvalidBillDateRows({ mappedRows, rowMetas, orderedTargetFields
   throw new FileValidationError(
     'FILE_READ',
     `账单日期存在无效值：第 ${firstRow.sourceRowNumber} 行「${firstRow.rawValue}」${invalidRows.length > 1 ? `等 ${invalidRows.length} 行` : ''}，请修正后重新导入`,
+    { detailLines }
+  );
+}
+
+// v3.2.22 B113：写进明细的文本须能原样写入工作表。含 U+FFFE、U+FFFF（XML 1.0 禁止，工作表无法解析）或未配对代理项
+//   （写出后变成「�」）时整份拒绝，列出源行与写进的列，不交付无法打开或被改写的明细。只看会导出为明细的行
+//   （收付金额均为空或 0 的行不写出，不因其值拒绝）。费用账单取自源列的覆盖值已按源列在展开时拒绝（assertFeeFieldOutputWritable）
+function assertExportedRowsWritable({ mappedRows, rowMetas, orderedTargetFields, isExportedRow }) {
+  const problems = [];
+  mappedRows.slice(1).forEach((mappedRow, index) => {
+    if (!Array.isArray(mappedRow) || !isExportedRow(mappedRow)) return;
+    const sourceRowNumber = rowMetas[index] ? rowMetas[index].sourceRowNumber : undefined;
+    mappedRow.forEach((value, columnIndex) => {
+      if (typeof value !== 'string' || isWorksheetWritableText(value)) return;
+      const rowLabel = sourceRowNumber === undefined ? '' : `第 ${sourceRowNumber} 行`;
+      problems.push(`${rowLabel}写进「${orderedTargetFields[columnIndex]}」列的值`);
+    });
+  });
+  if (!problems.length) return;
+  const detailLines = problems.slice(0, INVALID_BILL_DATE_DETAIL_LIMIT);
+  if (problems.length > INVALID_BILL_DATE_DETAIL_LIMIT) {
+    detailLines.push(`另有 ${problems.length - INVALID_BILL_DATE_DETAIL_LIMIT} 处，共 ${problems.length} 处`);
+  }
+  throw new FileValidationError(
+    'FILE_READ',
+    `源文件${problems[0]}含无法写入 Excel 的字符（U+FFFE、U+FFFF 或不完整的 Unicode 字符）${problems.length > 1 ? `等 ${problems.length} 处` : ''}，请修正源文件后重新生成`,
     { detailLines }
   );
 }
@@ -1748,6 +1776,13 @@ function buildMappedRows({
     invalidBillDateBySourceRow
   });
 
+  assertExportedRowsWritable({
+    mappedRows,
+    rowMetas,
+    orderedTargetFields,
+    isExportedRow: isExportedDetailRow
+  });
+
   if (merchantIdUsesCurrencyMapping) {
     applyCurrencyBigAccountMapping({
       mappedRows,
@@ -2044,6 +2079,7 @@ module.exports = {
   roundAmountHighPrecision,
   sumAmounts,
   transformFileToWorkbook,
+  prepareWorkbookTextForWrite,
   writeBalanceWorkbook,
   writeWorkbookRows
 };

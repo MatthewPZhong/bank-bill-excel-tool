@@ -363,6 +363,16 @@ function stripXmlComments(text) {
   return String(text).replace(/<!--[\s\S]*?-->/g, '');
 }
 
+// 读取库与本模块对下列写法的解析口径不同，无法证明两边读的是同一张表、同一行（B133）：
+//   - XML 注释：读取库不跳过注释（注释里的 <sheet>、关系、<row>、<c> 都会被解析），本模块按有效内容定位；
+//   - 标签内出现空格、回车、换行以外的空白（制表符等）：读取库（parsexmltag）只把这三种当作标签名的结束，
+//     认不出 <Relationship\t…> 这类标签，本模块的正则却认得出。
+//   Excel、WPS 与银行系统不会生成这些写法；出现时整张表不还原，按无法核对原值提示
+function hasUnverifiableXmlMarkup(text) {
+  const source = String(text);
+  return source.includes('<!--') || /<[^>]*[^\S \r\n]/.test(source);
+}
+
 // OOXML 关系命名空间（过渡与严格两种写法）
 const OOXML_RELATIONSHIP_NAMESPACES = new Set([
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
@@ -395,8 +405,8 @@ function attributeHasReference(tag, name) {
 }
 
 // 按 workbook.xml 中 <sheet> 的顺序（即 SheetNames 的顺序）与关系文件找到工作表 XML；找不到返回 null。
-//   注释里的标签不算；同一关系 Id 有多条有效关系、或 <sheet> 的关系属性无法唯一确认时无法确认来源，同样返回 null
-//   （按无法核对原值处理）
+//   workbook.xml 或关系文件含注释、标签内有制表符等写法时（hasUnverifiableXmlMarkup）直接返回 null（B133）；
+//   同一关系 Id 有多条有效关系、或 <sheet> 的关系属性无法唯一确认时无法确认来源，同样返回 null（按无法核对原值处理）
 //   还须确认读取库实际读的就是这个条目（release 审查）：
 //   - 读取库只要有一张表的关系解析不到，就放弃整份关系表、改按物理序号（xl/worksheets/sheetN.xml）读表：每张表的关系都须
 //     唯一确认，否则返回 null；
@@ -416,6 +426,8 @@ function findXlsxSheetXml(workbook, sheetName) {
   const relsXml = getZipEntryBuffer(files, `${relsDirPrefix}_rels/${String(workbookPath).split('/').pop()}.rels`);
   if (!relsXml) return null;
   const rawWorkbookText = workbookXml.toString('utf8');
+  const relsText = relsXml.toString('utf8');
+  if (hasUnverifiableXmlMarkup(rawWorkbookText) || hasUnverifiableXmlMarkup(relsText)) return null;
   const workbookText = stripXmlComments(rawWorkbookText);
   const sheetTagPattern = /<(?:[\w.-]+:)?sheet\b[^>]*>/g;
   const sheetTags = workbookText.match(sheetTagPattern) || [];
@@ -423,7 +435,6 @@ function findXlsxSheetXml(workbook, sheetName) {
   const sheetIndex = Array.isArray(workbook.SheetNames) ? workbook.SheetNames.indexOf(sheetName) : -1;
   const sheetTag = sheetIndex >= 0 ? sheetTags[sheetIndex] : null;
   if (!sheetTag || readXmlAttribute(sheetTag, 'name') !== sheetName) return null;
-  const relsText = relsXml.toString('utf8');
   const relationTagsById = new Map();
   (stripXmlComments(relsText).match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || []).forEach((tag) => {
     const id = readXmlAttribute(tag, 'Id');
@@ -1112,8 +1123,9 @@ function readXlsxIntegerLiterals(filePath, workbook, sheetName, candidates) {
   const wanted = new Set(candidates.map(({ r, c }) => `${r}:${c}`));
   const literals = new Map();
   const duplicated = new Set();
-  // XML 注释不是内容：先去掉，避免注释里的 <c> / <v> 被当成单元格或值
-  const text = stripXmlComments(xml.toString('utf8'));
+  // 含注释或标签内有制表符等写法时，读取库可能按注释里的行、单元格取值（与本模块取到的原文不是同一行），整张表不给原文（B133）
+  const text = xml.toString('utf8');
+  if (hasUnverifiableXmlMarkup(text)) return null;
   // 各 <row> 的起点与行号（没有 r 属性时按前一行顺推，与读取库相同）
   const rowStarts = [];
   const rowTagPattern = /<(?:[\w.-]+:)?row\b([^>]*?)\/?>/g;

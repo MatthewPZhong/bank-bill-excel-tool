@@ -1505,9 +1505,10 @@ module.exports = async ({ js, load, reset, assert, test, layout }) => {
     assert.match(await js('cfg.top().textContent'),/第 2 行：请选择模板字段[\s\S]*第 2 行：请输入映射值/);
     await js(`cfg.host.closeTop();cfg.set(0,'Description','input','手续费');cfg.set(1,'Description','field:Amount');cfg.save();`);await tick();
     assert.match(await js('cfg.top().textContent'),/第 2 行：模板字段「Description」重复/);
-    // 自己输入的值含 _xHHHH_ 形式的文本（写入 Excel 后会被改写）：保存前拒绝，不写库
-    await js(`cfg.host.closeTop();cfg.set(0,'Description','input','FEE_X0041_');cfg.set(1,'Payee Name','field:Amount');cfg.save();`);await tick();
-    assert.match(await js('cfg.top().textContent'),/第 1 行：映射值含写入 Excel 后会被改写的文本/);
+    // v3.2.22 B113：写出边界已转义字面 _xHHHH_，自己输入的这类文本不再在保存前拒绝（只报第 2 行的重复，不报第 1 行）
+    await js(`cfg.host.closeTop();cfg.set(0,'Description','input','FEE_X0041_');cfg.set(1,'Description','field:Amount');cfg.save();`);await tick();
+    assert.match(await js('cfg.top().textContent'),/第 2 行：模板字段「Description」重复/);
+    assert.doesNotMatch(await js('cfg.top().textContent'),/第 1 行|会被改写/);
     await js(`cfg.host.closeTop();cfg.set(0,'Description','input','手续费');cfg.set(1,'Description','field:Amount');cfg.save();`);await tick();
     assert.match(await js('cfg.top().textContent'),/第 2 行：模板字段「Description」重复/);
     assert.equal(await js('cfg.calls.filter(x=>x.name==="rowMeta").length'),1);

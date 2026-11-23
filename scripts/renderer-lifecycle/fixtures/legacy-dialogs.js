@@ -170,6 +170,25 @@ module.exports = async ({ js, load, reset, assert, test }) => {
     assert.ok(text.includes(rejected.message) && text.includes(rejected.detailLines[0]), text);
   });
 
+  // B132：勾选 / 顺序键按（大账号, 币种）结构化区分：A@@B / USD 与 A / B@@USD 是两个账户，序号与取消勾选互不串号
+  await test('大账号或币种含 @@ 的两个账户勾选序号与取消勾选互不串号', async () => {
+    await setup();
+    await js(`Object.assign(window.desktopApi.bigAccount,{loadMode:async()=>({mode:'fixed'}),saveMode:async()=>({status:'success'}),
+      loadOrder:async()=>({order:null})});
+      legacy.open(()=>legacy.dialogs.createBigAccountSelectionDialog({contextId:'selection-fixture-token',templateId:7,templateName:'测试模板',
+        rows:[{index:0,fileIndex:0,fileName:'a.xlsx',sourceRowNumber:1},{index:1,fileIndex:1,fileName:'b.xlsx',sourceRowNumber:1}],
+        rowsWithEmptyBlocks:[{index:0,fileIndex:0,fileName:'a.xlsx',sourceRowNumber:1},{index:1,fileIndex:1,fileName:'b.xlsx',sourceRowNumber:1}],
+        expandedBigAccountOptions:[{merchantId:'A@@B',currency:'USD'},{merchantId:'A',currency:'B@@USD'}]}));void 0;`);
+    await settle(); await settle();
+    const indices = () => js(`[...legacy.overlay.querySelectorAll('.big-account-order-item')].map((item)=>[item.dataset.merchantId,item.dataset.currency,
+      item.querySelector('.big-account-order-index').textContent])`);
+    await js(`legacy.overlay.querySelectorAll('.big-account-order-checkbox')[0].click();legacy.overlay.querySelectorAll('.big-account-order-checkbox')[1].click();`);
+    assert.deepEqual(await indices(), [['A@@B','USD','1.'],['A','B@@USD','2.']]);
+    await js(`legacy.overlay.querySelectorAll('.big-account-order-checkbox')[0].click();`);
+    assert.deepEqual(await indices(), [['A@@B','USD',''],['A','B@@USD','1.']]);
+    assert.deepEqual(await js('window.__testErrors'), []);
+  });
+
   // v3.2.15（release 复审）：后端判定记住的顺序不能按位置套用到本次文件（forceMode）后，
   //   首次打开和手动切回“账号顺序固定”都不能再预填旧分配，否则直接点完成会把账号 / 币种填到别的文件或块上。
   await test('后端判定记住的顺序不适用时首次打开和手动切回固定模式都不预填旧顺序', async () => {
