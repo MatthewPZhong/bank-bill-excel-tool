@@ -9,7 +9,8 @@ const test = require('node:test');
 
 const {
   deriveBalanceRecords,
-  resolveAccountBalanceModes
+  resolveAccountBalanceModes,
+  selectBalanceAccountRows
 } = require('../../../src/main-process/statement-generation-business');
 
 const DETAIL_HEADER = ['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount', 'Balance'];
@@ -199,11 +200,12 @@ test('createErrorResult：错误对象带 persistedDetailLines 时，错误报�
   const source = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'src', 'main.js'), 'utf8');
   const ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true });
   const node = ast.body.find((item) => item.type === 'FunctionDeclaration' && item.id && item.id.name === 'createErrorResult');
+  const maskNode = ast.body.find((item) => item.type === 'FunctionDeclaration' && item.id && item.id.name === 'maskAccountLikeTextForLog');
   const reports = [];
   const logs = [];
   const createErrorResult = Function(
     'archiveOperationContext', 'createPreflightErrorResult', 'createErrorReport', 'appendActivityLogEntry',
-    `let lastErrorReport = null;\nreturn (${source.slice(node.start, node.end)});`
+    `let lastErrorReport = null;\n${source.slice(maskNode.start, maskNode.end)}\nreturn (${source.slice(node.start, node.end)});`
   )(
     { getStore: () => null },
     () => { throw new Error('不应走预检'); },
@@ -224,7 +226,52 @@ test('createErrorResult：错误对象带 persistedDetailLines 时，错误报�
   assert.ok(!JSON.stringify(logs).includes('6222000011112222'));
   assert.ok(JSON.stringify(logs).includes('1 个账户命中余额方式不同的子模板'));
 
-  // 没有 persistedDetailLines 时照常写 detailLines（其他错误行为不变）
-  createErrorResult({ step: '导入', message: '其他错误', detailLines: ['第 3 行'] });
-  assert.deepEqual(reports[1].detailLines, ['第 3 行']);
+  // release 审查：子模板 / 渠道以账号命名时，落盘的模板名（报错文件名取自它）、上下文、摘要与原始异常同样脱敏；界面照常显示原文
+  const accountName = '对公6222021234567890123';
+  const namedError = Object.assign(new Error(`渠道「${accountName}」下同一账户命中了余额方式不同的子模板`), {
+    persistedDetailLines: ['渠道「对公（19位数字）」：1 个账户命中余额方式不同的子模板（A、B）']
+  });
+  const shown = createErrorResult({
+    step: '补录余额',
+    message: namedError.message,
+    errorCode: 'CHANNEL_BALANCE_MODE_MISMATCH',
+    detailLines: ['账户 M1（USD）：A（不出余额）、B（取账单余额列）'],
+    context: { templateName: accountName, channelName: accountName, rowCount: 2 },
+    templateName: accountName,
+    originalError: namedError
+  });
+  assert.equal(shown.message, namedError.message);
+  const recorded = reports[1];
+  assert.deepEqual([recorded.templateName, recorded.context, recorded.message], [
+    '对公（19位数字）',
+    { templateName: '对公（19位数字）', channelName: '对公（19位数字）', rowCount: 2 },
+    '渠道「对公（19位数字）」下同一账户命中了余额方式不同的子模板'
+  ]);
+  assert.ok(!JSON.stringify(recorded).includes('6222021234567890123'));
+  assert.ok(recorded.originalError.stack.includes('渠道「对公（19位数字）」'));
+  assert.ok(!JSON.stringify(logs[1]).includes('6222021234567890123'));
+  assert.ok(logs[1].details.includes('模板名：对公（19位数字）'));
+
+  // 没有 persistedDetailLines 时照常写 detailLines、模板名与原始异常（其他错误行为不变）
+  const plainError = new Error('其他错误 20261122');
+  createErrorResult({ step: '导入', message: '其他错误', detailLines: ['第 3 行'], templateName: '中行2026', originalError: plainError });
+  assert.deepEqual([reports[2].detailLines, reports[2].templateName, reports[2].originalError], [['第 3 行'], '中行2026', plainError]);
+});
+
+// release 审查：渠道组内余额方式不同时，余额从已筛选的明细行中按账户方式取行引用（不复制行），rowMetas 随行对应
+test('selectBalanceAccountRows：只取方式不是“不出余额”的账户的行引用，MerchantId 为空的行不取，rowMetas 随行', () => {
+  const detailRows = rows([
+    ['2026-09-01', 'M1', 'USD', '1', '', ''],
+    ['2026-09-01', 'M2', 'USD', '2', '', ''],
+    ['2026-09-02', '', 'USD', '3', '', ''],
+    ['2026-09-02', 'M1', 'USD', '', '4', '']
+  ]);
+  detailRows.rowMetas = [{ sourceRowNumber: 2 }, { sourceRowNumber: 3 }, { sourceRowNumber: 4 }, { sourceRowNumber: 5 }];
+  const selected = selectBalanceAccountRows(detailRows, { 'M1@@USD': 'calculated', 'M2@@USD': 'none' });
+  assert.equal(selected[0], detailRows[0]);
+  assert.deepEqual(selected.slice(1), [detailRows[1], detailRows[4]]);
+  assert.ok(selected[1] === detailRows[1] && selected[2] === detailRows[4], '取行引用，不复制');
+  assert.deepEqual(selected.rowMetas, [{ sourceRowNumber: 2 }, { sourceRowNumber: 5 }]);
+  // 没有方式表时不取任何行
+  assert.deepEqual(selectBalanceAccountRows(detailRows, null).length, 1);
 });

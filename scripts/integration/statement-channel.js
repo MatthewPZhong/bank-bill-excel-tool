@@ -1181,6 +1181,77 @@ async function verifyBigAccountCompletionRejectsInjectedConflict(dir) {
   assertEq(env.exportFiles(), [], 'Step2h.预检不产出文件');
 }
 
+// (i) release 审查：进入大账号选择时，各账号块的账号、币种都由用户的选择覆盖。原行中余额方式不同的两个子模板暂时是同一账户时，
+//   预检不按原行拒绝（进入选择），完成选择后按分配结果判断：两边分到不同账号时放行，分到同一账号时按未开始拒绝
+async function verifyBigAccountSelectionDefersProvisionalConflict(dir) {
+  const env = createEnvironment(dir, 'step2i');
+  const owner = env.defineTemplate('招商银行-上海', 'A', { balance: '无' });
+  const channelId = env.saveWithChannel(owner, { mode: 'create' }).channelId;
+  const child = env.defineTemplate('CMB-SH', 'D', { balance: 'Bal' });
+  env.saveWithChannel(child, { mode: 'join', channelId });
+  env.bigAccountsByTemplateId.set(child.id, [{ merchantId: 'M601', currencies: ['USD'] }, { merchantId: 'M602', currencies: ['USD'] }]);
+  const fileA = path.join(dir, 'step2i-a.xlsx');
+  const fileB = path.join(dir, 'step2i-b.xlsx');
+  // 原行两边都是 M601：按原行判断是冲突
+  writeSource(fileA, 'A', [['2026-09-01', 'M601', 'USD', '1', '']]);
+  writeSource(fileB, 'D', [['2026-09-01', 'M601', 'USD', '2', '', '12']]);
+  const runCompletion = async (childMerchantId) => {
+    const sideEffects = [];
+    const record = (name) => () => {
+      sideEffects.push(name);
+    };
+    const scope = createMainScope({
+      ...env.mainDeps,
+      ...env.fns,
+      fileImportInProgress: false,
+      lastPendingBigAccountSelection: null,
+      getEnumConfig: () => ({}),
+      getStatementChannelMigrationPendingMessage: () => null,
+      clearPendingManualBalancePrompt: record('clearPendingManualBalancePrompt'),
+      clearGeneratedExports: record('clearGeneratedExports'),
+      statementDuplicateReview: { clear: record('statementDuplicateReview.clear'), cancel: record('statementDuplicateReview.cancel') },
+      executeFilenameMappingImportPlan: record('executeFilenameMappingImportPlan'),
+      readBigAccountMode: () => null,
+      readBigAccountOrder: () => null,
+      ensureStorageRoot: () => env.storageRoot,
+      createErrorResult: (payload) => ({ status: 'error', ...payload }),
+      appendActivityLogEntry: () => {}
+    });
+    const prepared = { previewOnly: true, inputFilePaths: [fileA, fileB], selectionResult: { filePaths: [fileA, fileB] } };
+    const preview = await scope.handleFilenameMappingImport(prepared);
+    const contextId = prepared.pendingBigAccountSelection
+      ? scope.rememberPendingBigAccountSelection(prepared.pendingBigAccountSelection)
+      : '';
+    const rows = prepared.pendingBigAccountSelection ? prepared.pendingBigAccountSelection.rows : [];
+    if (!contextId) return { preview, rows, outcome: null };
+    const handler = scope.nested('completeBigAccountSelectionHandler');
+    const outcome = scope.markContinuationPrepareRejection(await handler.prepare(null, {
+      contextId,
+      mode: 'unfixed',
+      assignments: rows.map((row) => ({ index: row.index, merchantId: row.filePath === fileA ? 'M601' : childMerchantId, currency: 'USD' }))
+    }), { keepErrorCodes: ['BIG_ACCOUNT_SELECTION_INVALID'] });
+    return { preview, rows, outcome };
+  };
+  const allowed = await runCompletion('M602');
+  assertEq([allowed.preview && allowed.preview.status, allowed.preview && allowed.preview.errorCode, allowed.rows.length], ['select-big-account', undefined, 2],
+    'Step2i.原行同账户、余额方式不同，但会进入大账号选择：预检不按原行拒绝');
+  assertEq([allowed.outcome && allowed.outcome.proceed, allowed.outcome && allowed.outcome.result], [true, undefined],
+    'Step2i.两边分到不同账号时放行');
+  const rejected = await runCompletion('M601');
+  assertEq([
+    rejected.outcome && rejected.outcome.proceed,
+    rejected.outcome && rejected.outcome.result && rejected.outcome.result.errorCode,
+    rejected.outcome && rejected.outcome.result && rejected.outcome.result.detailLines
+  ], [false, 'CHANNEL_BALANCE_MODE_MISMATCH', ['账户 M601（USD）：招商银行-上海（不出余额）、CMB-SH（取账单余额列）']],
+  'Step2i.两边分到同一账号时按分配结果拒绝');
+  // 对照：渠道只有一个大账号、不进入选择时，按原行的冲突照常在预检拒绝
+  env.bigAccountsByTemplateId.set(child.id, [{ merchantId: 'M601', currencies: ['USD'] }]);
+  const single = await runCompletion('M601');
+  assertEq([single.preview && single.preview.errorCode, single.rows.length], ['CHANNEL_BALANCE_MODE_MISMATCH', 0],
+    'Step2i.对照：不进入大账号选择时按原行的冲突在预检拒绝');
+  assertEq(env.exportFiles(), [], 'Step2i.预检不产出文件');
+}
+
 // 导入入口：渠道校验（余额方式、待处理冲突）位于大账号聚合与生成之前。
 function importChecksPrecedeGeneration() {
   const node = MAIN_AST.body.find((item) => item.type === 'FunctionDeclaration' && item.id && item.id.name === 'handleFilenameMappingImport');
@@ -1830,6 +1901,7 @@ async function run() {
     verifyMixedBalanceModes(dir);
     await verifyDirectImportRejectsInjectedConflict(dir);
     await verifyBigAccountCompletionRejectsInjectedConflict(dir);
+    await verifyBigAccountSelectionDefersProvisionalConflict(dir);
     verifyMixedGroups(dir);
     verifyCalculatedSeedAndGap(dir);
     verifyLegacyMigration(dir);

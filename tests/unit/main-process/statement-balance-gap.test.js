@@ -2762,3 +2762,24 @@ test('主进程：补录重算与导出全部的余额汇总文件按各组余�
     assert.deepEqual(exported, [expected], kind);
   }
 });
+
+// release 审查：生成结果只带文件名用的首末日期（明细：写出的行；余额：余额记录），不缓存逐笔日期
+test('generateStatementFiles：明细与余额结果的 billDates 只有首末日期，跳过的零金额行不算', (t) => {
+  const root = createTempRoot(t);
+  const storageRoot = path.join(root, 'storage');
+  const generation = createGenerationSeam(storageRoot);
+  upsertBalanceSeedRecord(storageRoot, {
+    templateName: TEMPLATE_NAME, merchantId: 'M001', currency: 'USD',
+    billDate: '2026-08-31', endBalance: 1000, generationMethod: '人工录入'
+  });
+  const entry = mappedSourceEntry(root, 'bounds.xlsx', [
+    ['2026-09-01', 'M001', 'USD', '1', ''],
+    ['2026-09-02', 'M001', 'USD', '2', ''],
+    ['2026-09-01', 'M001', 'USD', '3', ''],
+    ['2026-09-03', 'M001', 'USD', '0', '']
+  ]);
+  const config = { template: { id: 1, name: TEMPLATE_NAME }, mappingByTargetField: { MerchantId: 'Account' }, balanceRequested: true, balanceMode: 'calculated' };
+  const preparedBatch = generation.buildPreparedStatementBatchFromEntries({ config, fileEntries: [entry] });
+  const result = generation.generateStatementFiles({ config, preparedBatch, scope: 'current' });
+  assert.deepEqual([result.detail.billDates, result.balance.billDates], [['2026-09-01', '2026-09-02'], ['2026-09-01', '2026-09-02']]);
+});

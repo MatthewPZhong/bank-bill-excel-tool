@@ -46,6 +46,56 @@ function pendingBalanceSeedAccounts(balanceSeedStatus) {
   }));
 }
 
+// 余额账户键（MerchantId + 币种原样）：余额分组、种子查找与按账户的余额方式表共用
+function balanceAccountKey(merchantId, currency) {
+  return `${merchantId}@@${currency}`;
+}
+
+// v3.2.21（D2）：渠道组内子模板余额方式不同时，余额只用出余额账户的行：按 modeByAccount（resolveAccountBalanceModes
+//   的结果，同一账户只会有一种方式）取方式不是“不出余额”的账户的行引用与对应 rowMetas，不复制行（release 审查）。
+//   MerchantId 为空的行不属于任何账户（出余额条目的这类交易已在生成前拦下），不取
+function selectBalanceAccountRows(detailRows, modeByAccount) {
+  const rows = Array.isArray(detailRows) ? detailRows : [];
+  const header = Array.isArray(rows[0]) ? rows[0] : [];
+  const fieldIndex = (name) => {
+    const index = header.findIndex((field) => normalizeBillDateCell(field) === name);
+    return index < 0 ? undefined : index;
+  };
+  const merchantIndex = fieldIndex('MerchantId');
+  const currencyIndex = fieldIndex('Currency');
+  const rowMetas = Array.isArray(rows.rowMetas) ? rows.rowMetas : [];
+  const selected = [header];
+  const selectedMetas = [];
+  if (merchantIndex !== undefined && modeByAccount && typeof modeByAccount === 'object') {
+    for (let index = 1; index < rows.length; index += 1) {
+      const row = rows[index];
+      if (!Array.isArray(row)) continue;
+      const merchantId = normalizeBillDateCell(row[merchantIndex]);
+      if (!merchantId) continue;
+      const currency = currencyIndex === undefined ? '' : normalizeBillDateCell(row[currencyIndex]);
+      const key = balanceAccountKey(merchantId, currency);
+      if (!Object.prototype.hasOwnProperty.call(modeByAccount, key) || modeByAccount[key] === 'none') continue;
+      selected.push(row);
+      selectedMetas.push(rowMetas[index - 1] || null);
+    }
+  }
+  selected.rowMetas = selectedMetas;
+  return selected;
+}
+
+// v3.2.21：日期（YYYY-MM-DD）的首末两个边界（只有一个日期时一个），buildDateRangeLabel 得到的范围不变
+function dateRangeBounds(dates) {
+  let first = '';
+  let last = '';
+  for (const date of Array.isArray(dates) ? dates : []) {
+    if (!date) continue;
+    if (!first || date < first) first = date;
+    if (!last || date > last) last = date;
+  }
+  if (!first) return [];
+  return first === last ? [first] : [first, last];
+}
+
 function createStatementGenerationHelpers(deps) {
   const {
     appendActivityLogEntry,
@@ -312,8 +362,9 @@ function createStatementGenerationHelpers(deps) {
         filePath: detailOutput.outputFilePath,
         fileName: detailOutput.outputFileName,
         templateName: statementOutputName(config),
-        // v3.2.21：明细文件名的日期（写出的明细行；只写出表头时为全部行），多组汇总时按它命名明细文件
-        billDates
+        // v3.2.21：明细文件名日期范围的首末日期（写出的明细行；只写出表头时为全部行），多组汇总时按它命名明细文件；
+        //   只留边界，不缓存逐笔日期
+        billDates: dateRangeBounds(billDates)
       };
     }
 
@@ -346,13 +397,12 @@ function createStatementGenerationHelpers(deps) {
           throw new FileValidationError('FILE_READ', '余额账单模板为空或不可读，请重新确认');
         }
 
-        // v3.2.21（D2）：渠道组内子模板余额方式不同时，余额只用不是“不出余额”的条目的行（同样剔除收支都为空的行），
+        // v3.2.21（D2）：渠道组内子模板余额方式不同时，余额只用出余额账户的行：从已复制、已剔除收支都为空的行的
+        //   effectiveDetailRows 中按 balanceModeByAccount 取行引用（不再复制余额子集、构造导出行，release 审查），
         //   各账户按 balanceModeByAccount 取自己的方式；否则沿用明细的全部行与单一方式。
         let balanceDetailRows = effectiveDetailRows;
-        if (Array.isArray(preparedBatch.balanceDetailRows)) {
-          const balanceSourceRows = cloneRowsWithMetadata(preparedBatch.balanceDetailRows);
-          const balanceExportRows = buildDetailExportRows(balanceSourceRows);
-          balanceDetailRows = Array.isArray(balanceExportRows.sourceRows) ? balanceExportRows.sourceRows : balanceSourceRows;
+        if (Array.isArray(preparedBatch.balanceDetailRows) && preparedBatch.balanceModeByAccount) {
+          balanceDetailRows = selectBalanceAccountRows(effectiveDetailRows, preparedBatch.balanceModeByAccount);
         }
 
         balanceSeedStatus = scanBalanceSeedStatus({
@@ -432,8 +482,8 @@ function createStatementGenerationHelpers(deps) {
           filePath: balanceOutput.outputFilePath,
           fileName: balanceOutput.outputFileName,
           templateName: statementOutputName(config),
-          // v3.2.21：余额记录的账单日期（文件名的日期范围同此），多组汇总时按它命名余额文件
-          billDates: Array.isArray(balanceResult.billDates) ? balanceResult.billDates : []
+          // v3.2.21：余额记录账单日期的首末日期（文件名的日期范围同此），多组汇总时按它命名余额文件
+          billDates: dateRangeBounds(balanceResult.billDates)
         };
         result.message = includeDetail ? '明细账单可导出，余额账单可导出' : '余额账单可导出';
       } catch (error) {
@@ -1070,10 +1120,12 @@ function createStatementGenerationHelpers(deps) {
 }
 
 module.exports = {
+  balanceAccountKey,
   createStatementGenerationHelpers,
   noValidBillDateError,
   parseRequiredBillDateCell,
   pendingBalanceSeedAccounts,
   requireBillDateIndex,
+  selectBalanceAccountRows,
   statementOutputName
 };

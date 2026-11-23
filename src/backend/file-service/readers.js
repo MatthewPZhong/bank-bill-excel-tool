@@ -927,7 +927,8 @@ function collectLongIntegerSourceText({ filePath, workbook, sheet, sheetName, ra
   return sourceText.size ? sourceText : null;
 }
 
-// XLSX 工作表 XML 中候选单元格（按 r 属性定位，且须与所在 <row> 的行号一致）的 <v> 字面值；数值单元格的前导 0 不属于原值，去掉。
+// XLSX 工作表 XML 中候选单元格（按 r 属性定位，且须与所在 <row> 的行号一致）的 <v> 字面值；数值单元格的前导 0 不属于原值，去掉；
+//   公式单元格的值是缓存的计算结果，不给原文。
 //   读取时没有保留压缩包（未开查重）时只解开压缩包取 XML，不再解析工作表（只在有候选单元格时多读这一次；
 //   不为所有读取保留压缩包，以免每个文件都多占一份 XML 内存）。扫完整张表：同一位置出现多次（含乱序声明）、
 //   类型不是数值的不给原文；有单元格没有（或无法解析）位置属性时，读取库按前一格顺推位置、可能与其他单元格重叠，
@@ -991,8 +992,10 @@ function readXlsxIntegerLiterals(filePath, workbook, sheetName, candidates) {
       continue;
     }
     const type = readXmlAttribute(match[1], 't') || 'n';
+    // 公式（含共享、数组公式）单元格的 <v> 是计算结果的缓存，不是录入的原文：不还原，按无法核对原值提示（release 审查）
+    const hasFormula = /<(?:[\w.-]+:)?f\b/.test(match[2] || '');
     // 只认唯一的 <v>：有多个（自闭合的空 <v/> 也算一个）或写法异常（如 CDATA）时不还原，按无法核对原值提示
-    const valueMatches = type === 'n' ? Array.from((match[2] || '').matchAll(valuePattern)) : [];
+    const valueMatches = type === 'n' && !hasFormula ? Array.from((match[2] || '').matchAll(valuePattern)) : [];
     const valueElementCount = type === 'n' ? ((match[2] || '').match(/<(?:[\w.-]+:)?v\b[^>]*>/g) || []).length : 0;
     const literal = valueMatches.length === 1 && valueElementCount === 1 ? valueMatches[0][1].trim() : '';
     literals.set(key, /^\d+$/.test(literal) ? literal.replace(/^0+(?=\d)/, '') : null);

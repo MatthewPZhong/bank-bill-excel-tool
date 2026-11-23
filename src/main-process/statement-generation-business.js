@@ -36,6 +36,8 @@ const {
   parseRequiredBillDateCell,
   pendingBalanceSeedAccounts,
   requireBillDateIndex,
+  balanceAccountKey,
+  selectBalanceAccountRows,
   statementOutputName
 } = require('./statement-generation');
 
@@ -265,10 +267,6 @@ function indexManualBalanceSeeds(existingBalanceSeeds, seenManualBalanceSeeds = 
 
 // 余额链的账户键：MerchantId + 币种（均已规整）。deriveBalanceRecords、scanBalanceSeedStatus 与
 //   resolveAccountBalanceModes 共用，保证按账户取余额方式时与余额分组同口径。
-function balanceAccountKey(merchantId, currency) {
-  return `${merchantId}@@${currency}`;
-}
-
 const BALANCE_MODE_ORDER = Object.freeze(['none', 'statement', 'calculated']);
 
 // v3.2.21（D2、D3）：渠道组内子模板余额方式不同时，按条目（各自子模板的余额方式）收集账户 → 余额方式。
@@ -983,5 +981,6 @@ module.exports = {
   deriveBalanceRecords,
   parseRequiredBillDates,
   resolveAccountBalanceModes,
+  selectBalanceAccountRows,
   scanBalanceSeedStatus
 };

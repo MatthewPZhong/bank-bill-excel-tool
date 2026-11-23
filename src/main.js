@@ -3620,26 +3620,43 @@ function createErrorResult({
   if (operationContext && operationContext.phase === 'prepare') {
     return createPreflightErrorResult({ message, errorCode, detailLines });
   }
+  const usesPersistedDetailLines = Array.isArray(persistedDetailLines)
+    || Boolean(originalError && Array.isArray(originalError.persistedDetailLines));
   const recordedDetailLines = Array.isArray(persistedDetailLines)
     ? persistedDetailLines
     : (originalError && Array.isArray(originalError.persistedDetailLines) ? originalError.persistedDetailLines : detailLines);
+  // v3.2.21：带落盘明细的错误（展示内容含账号）落盘时，模板名、上下文、摘要与原始异常中的编号同样只写位数：
+  //   子模板名、渠道名由用户填写，可能以账号命名；报错文件名取自模板名（release 审查）。界面照常显示原文
+  const maskRecorded = (value) => (usesPersistedDetailLines && typeof value === 'string' ? maskAccountLikeTextForLog(value) : value);
+  const recordedContext = usesPersistedDetailLines && context && typeof context === 'object'
+    ? Object.fromEntries(Object.entries(context).map(([key, value]) => [key, maskRecorded(value)]))
+    : context;
+  const recordedTemplateName = maskRecorded(templateName);
+  const recordedMessage = maskRecorded(message);
+  const recordedOriginalError = usesPersistedDetailLines && originalError
+    ? (() => {
+        const originalMessage = String(originalError.message || '');
+        const stack = String(originalError.stack || originalMessage || originalError);
+        return { stack: originalMessage ? stack.split(originalMessage).join(maskAccountLikeTextForLog(originalMessage)) : maskAccountLikeTextForLog(stack) };
+      })()
+    : originalError;
   const report = createErrorReport({
     step,
-    message,
+    message: recordedMessage,
     errorCode,
     errorType,
     detailLines: recordedDetailLines,
-    context,
-    templateName,
-    originalError
+    context: recordedContext,
+    templateName: recordedTemplateName,
+    originalError: recordedOriginalError
   });
   lastErrorReport = report;
   appendActivityLogEntry({
     level: 'error',
     message: `${step}失败`,
     details: [
-      `模板名：${templateName || context.templateName || context.moduleName || 'N/A'}`,
-      `错误摘要：${message}`,
+      `模板名：${recordedTemplateName || recordedContext.templateName || recordedContext.moduleName || 'N/A'}`,
+      `错误摘要：${recordedMessage}`,
       `错误代码：${errorCode}`,
       ...recordedDetailLines
     ]
@@ -16018,17 +16035,17 @@ async function handleFilenameMappingImport(prepared) {
         templateName: virtualTemplateName
       });
     }
-    // 余额方式不同的渠道组的条目一并记下（含所属渠道与余额方式），注入大账号后的复核按位置取用（见步骤 5、8）
+    // 余额方式不同的渠道组的条目一并记下（含所属渠道与余额方式），注入大账号后的复核按位置取用（见步骤 5、8）。
+    //   按原行判断的冲突在确定不进入大账号选择后才返回（步骤 8）：进入选择时各账号块的账号、币种都由用户的选择覆盖，
+    //   原行的账号不作数，改在完成选择后按分配结果判断（completeBigAccountSelectionHandler），release 审查
     const balanceModeMixedEntries = new Map();
     const balanceModeConflicts = collectGenerationGroupBalanceModeConflicts(importGenerationGroups, balanceModeMixedEntries);
-    if (balanceModeConflicts) {
-      return createChannelBalanceModeMismatchResult({
-        step: '导入网银明细文件',
-        conflictGroups: balanceModeConflicts,
-        templateName: virtualTemplateName,
-        preservesSession: Boolean(prepared.previewOnly)
-      });
-    }
+    const balanceModeConflictResult = () => createChannelBalanceModeMismatchResult({
+      step: '导入网银明细文件',
+      conflictGroups: balanceModeConflicts,
+      templateName: virtualTemplateName,
+      preservesSession: Boolean(prepared.previewOnly)
+    });
     const pendingConflictChannels = [];
     const checkedChannelIds = new Set();
     for (const [, matchedConfig] of perTemplateConfigCache) {
@@ -16222,6 +16239,8 @@ async function handleFilenameMappingImport(prepared) {
         selectedBigAccount = recognitionResult.selectedBigAccount;
       }
     }
+    // 不进入大账号选择：原行（未注入账号的条目）的冲突作数（步骤 3.5 已判断）
+    if (balanceModeConflicts) return balanceModeConflictResult();
 
     const statementImportPlan = {
       kind: 'filename-mapping',

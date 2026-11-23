@@ -1110,3 +1110,18 @@ test('XLSX：工作簿关系文件注释里的旧关系不算，不把另一张�
   assert.deepEqual(identifiers(unverified).map(([serial]) => String(serial)), ['9007199254740996']);
   assert.deepEqual(longNumberIssues(unverified).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
 });
+
+test('XLSX：公式单元格的 <v> 是计算结果的缓存，不当作原文还原，按无法核对提示（含共享公式）', async (t) => {
+  const dir = createTempDir(t);
+  const rows = [HEADER, ['2026-11-01', 'USD', 100, 1111, 5], ['2026-11-02', 'USD', 200, 2222, 6]];
+  const literals = { 1111: '9007199254740992', 2222: '9007199254740992' };
+  const withFormula = await writeXlsxWithLiterals(path.join(dir, 'formula.xlsx'), rows, literals, (xml) => xml
+    .replace(/(<c r="D2"[^>]*>)<v>/, '$1<f>VALUE(F2)</f><v>')
+    .replace(/(<c r="D3"[^>]*>)<v>/, '$1<f t="shared" si="0"/><v>'));
+  const mapped = map(withFormula);
+  assert.deepEqual(identifiers(mapped).map(([serial]) => String(serial)), ['9007199254740992', '9007199254740992']);
+  assert.deepEqual(longNumberIssues(mapped).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号'], ['流水号']]);
+  // 对照：同样的值不是公式时按原文
+  const plain = map(await writeXlsxWithLiterals(path.join(dir, 'plain.xlsx'), rows, literals));
+  assert.deepEqual(longNumberIssues(plain), []);
+});
