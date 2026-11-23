@@ -10136,16 +10136,21 @@ function registerTemplateHandlers() {
         ? undefined
         : normalizeTemplateDateFormat(payload.dateFormat);
       if (dateFormat === '') {
+        // 模板名由用户填写、可能以账号命名：错误报告（含文件名）、上下文与活动日志按模板维护的账号与数字写法脱敏（release 审查）
         return createErrorResult({
           step: '保存模板映射',
           message: '日期格式无效，请重新选择',
           errorCode: 'TEMPLATE_DATE_FORMAT_INVALID',
           context: { templateId: payload.templateId, templateName: template.name },
-          templateName: template.name
+          templateName: template.name,
+          persistedDetailLines: [],
+          logMaskValues: readTemplateAccountValuesForLog(template)
         });
       }
       // 库内旧值：空按 auto；三档以外的旧值原样保留，用于比较与留痕（改为合法值时也记录）
       const previousDateFormat = normalizeCell(template.dateFormat) || 'auto';
+      // 保存前模板维护的账号：同次保存移除的账号仍可能出现在模板名或旧值中，留痕时与保存后的一并用于脱敏（release 审查）
+      const previousTemplateAccountValues = readTemplateAccountValuesForLog(template);
 
       const templateConfiguration = validateTemplateConfiguration({
         template,
@@ -10254,7 +10259,7 @@ function registerTemplateHandlers() {
       // 模板名由用户填写、可能以账号命名：本次保存的两条日志都只写编号位数；模板维护的账号（本次提交的，与只提交客户账号时
       //   库里保留的自有账号）原样出现时整体替换（release 审查）
       const templateAccountValues = collectTemplateAccountValuesForLog(templateConfiguration)
-        .concat(readTemplateAccountValuesForLog(database.getTemplate(payload.templateId)));
+        .concat(previousTemplateAccountValues, readTemplateAccountValuesForLog(database.getTemplate(payload.templateId)));
       const loggedTemplateName = maskAccountLikeTextForLog(template.name, templateAccountValues);
       if (dateFormat && dateFormat !== previousDateFormat) {
         appendActivityLogEntry({

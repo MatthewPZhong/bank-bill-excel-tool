@@ -394,7 +394,10 @@ function readSheetRelationId(sheetTag, workbookText) {
 //   - 读取库只要有一张表的关系解析不到，就放弃整份关系表、改按物理序号（xl/worksheets/sheetN.xml）读表：每张表的关系都须
 //     唯一确认，否则返回 null；
 //   - 读取库按「xl/ + 去掉其中第一个 xl/ 前缀的 Target」定位，找不到时依次取 Target 原样、关系文件所在目录 + Target：
-//     须与按关系文件所在目录解析 Target 落到同一个条目；Target 含字符引用（读取库按原文使用）时同样无法确认
+//     须与按关系文件所在目录解析 Target 落到同一个条目；Target 含字符引用（读取库按原文使用）时同样无法确认；
+//   - 读取库解析 workbook.xml 与关系文件时不跳过注释（注释里的 <sheet> 也算工作表、注释里的关系也算），关系只认不带前缀的
+//     <Relationship>、同一 Id 取后一条：注释里有 <sheet> 时序号会错开，返回 null；每张表的关系按读取库的口径也须找到、
+//     且与按本模块口径（注释不算、带不带前缀都认、同一 Id 唯一）确认的那条 Target 相同
 function findXlsxSheetXml(workbook, sheetName) {
   const files = workbook && workbook.files;
   const directory = workbook && workbook.Directory;
@@ -405,25 +408,34 @@ function findXlsxSheetXml(workbook, sheetName) {
   const relsDirPrefix = workbookDir ? `${workbookDir}/` : '';
   const relsXml = getZipEntryBuffer(files, `${relsDirPrefix}_rels/${String(workbookPath).split('/').pop()}.rels`);
   if (!relsXml) return null;
-  const workbookText = stripXmlComments(workbookXml.toString('utf8'));
-  const sheetTags = workbookText.match(/<(?:[\w.-]+:)?sheet\b[^>]*>/g) || [];
+  const rawWorkbookText = workbookXml.toString('utf8');
+  const workbookText = stripXmlComments(rawWorkbookText);
+  const sheetTagPattern = /<(?:[\w.-]+:)?sheet\b[^>]*>/g;
+  const sheetTags = workbookText.match(sheetTagPattern) || [];
+  if ((rawWorkbookText.match(sheetTagPattern) || []).length !== sheetTags.length) return null;
   const sheetIndex = Array.isArray(workbook.SheetNames) ? workbook.SheetNames.indexOf(sheetName) : -1;
   const sheetTag = sheetIndex >= 0 ? sheetTags[sheetIndex] : null;
   if (!sheetTag || readXmlAttribute(sheetTag, 'name') !== sheetName) return null;
+  const relsText = relsXml.toString('utf8');
   const relationTagsById = new Map();
-  (stripXmlComments(relsXml.toString('utf8')).match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || []).forEach((tag) => {
+  (stripXmlComments(relsText).match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || []).forEach((tag) => {
     const id = readXmlAttribute(tag, 'Id');
     if (!relationTagsById.has(id)) relationTagsById.set(id, []);
     relationTagsById.get(id).push(tag);
   });
+  const readerRelationTagById = new Map();
+  (relsText.match(/<Relationship\b[^>]*>/g) || []).forEach((tag) => readerRelationTagById.set(readXmlAttribute(tag, 'Id'), tag));
+  const targetHasReference = (tag) => /\sTarget\s*=\s*(?:"[^"]*&|'[^']*&)/.test(tag);
   const uniqueRelationTag = (tag) => {
     const id = readSheetRelationId(tag, workbookText);
     const tags = id ? relationTagsById.get(id) : null;
-    return tags && tags.length === 1 ? tags[0] : null;
+    const readerTag = id ? readerRelationTagById.get(id) : null;
+    if (!tags || tags.length !== 1 || !readerTag) return null;
+    if (targetHasReference(tags[0]) || targetHasReference(readerTag)) return null;
+    return readXmlAttribute(readerTag, 'Target') === readXmlAttribute(tags[0], 'Target') ? tags[0] : null;
   };
   if (!sheetTags.every((tag) => uniqueRelationTag(tag))) return null;
   const relationTag = uniqueRelationTag(sheetTag);
-  if (/\sTarget\s*=\s*(?:"[^"]*&|'[^']*&)/.test(relationTag)) return null;
   const target = readXmlAttribute(relationTag, 'Target');
   if (!target) return null;
   const entryKey = resolveZipEntryKey(files, normalizeZipPath(workbookDir, target));

@@ -434,6 +434,23 @@ function verifySaveHandler(database, main) {
   });
   assertEq(dateFormatLogLines(oldValueHandlers), ['模板名：（7位账号）｜日期格式：无效值「旧（7位账号）」（按自动解析） → 月在前（mm/dd/yyyy）'],
     '① 旧值含模板维护的账号时整体脱敏');
+  // 同次保存移除该账号（不保留自有账号，只提交 M001）：保存前的账号集合同样用于脱敏
+  const removalHandlers = loadTemplateHandlers(database, main);
+  const removalSave = removalHandlers.saveMappings({
+    templateId: legacy.id, mappings: managedMappings(), dateFormat: 'DMY', bigAccounts: [{ merchantId: 'M001', currencies: ['USD'] }]
+  });
+  assertEq([removalSave.status, database.getTemplateBigAccounts(legacy.id, { includeOwn: true }).map((row) => row.merchantId),
+    dateFormatLogLines(removalHandlers)],
+  ['success', ['M001'], ['模板名：（7位账号）｜日期格式：月在前（mm/dd/yyyy） → 日在前（dd/mm/yyyy）']], '① 同次保存移除的账号仍用于脱敏');
+  // 日期格式无效被拒：落盘的模板名等按模板维护的账号脱敏（createErrorResult 带落盘明细与已知账号）
+  database.db.prepare(`INSERT INTO template_big_accounts (template_id, merchant_id, currency, row_index, account_nature, created_at, updated_at)
+    VALUES (?, 'AC12B34', 'USD', 99, 'own', '2026-11-23', '2026-11-23')`).run(legacy.id);
+  const rejectedHandlers = loadTemplateHandlers(database, main);
+  const rejected = rejectedHandlers.saveMappings({ templateId: legacy.id, mappings: managedMappings(), dateFormat: 'XYZ' });
+  const rejectedOptions = rejectedHandlers.errorResults[rejectedHandlers.errorResults.length - 1];
+  assertEq([rejected.status, rejectedOptions.errorCode, rejectedOptions.persistedDetailLines, rejectedOptions.logMaskValues.includes('AC12B34')],
+    ['error', 'TEMPLATE_DATE_FORMAT_INVALID', [], true], '① 日期格式无效被拒时按模板维护的账号脱敏落盘内容');
+  database.db.prepare(`DELETE FROM template_big_accounts WHERE template_id = ? AND merchant_id = 'AC12B34'`).run(legacy.id);
   database.db.prepare('UPDATE templates SET name = ? WHERE id = ?').run('旧值模板', legacy.id);
 
   saveTemplate(database, retried, '月在前模板', 'MDY');

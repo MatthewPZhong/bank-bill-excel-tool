@@ -1359,6 +1359,33 @@ test('XLSX：读取库实际读取的工作表与按关系定位的不一致时�
     await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheet1.xml"', 'Target="xl/worksheets/sheet1.xml"');
     zip.file('xl/xl/worksheets/sheet1.xml', await zip.file('xl/worksheets/sheet2.xml').async('string'));
   })), '定位口径不同');
+  // ③ 关系标签带命名空间前缀（<pr:Relationship>）、关系顺序与物理顺序相反：读取库不认带前缀的关系，改按物理序号读表
+  assertUnverified(map(await build('prefixed-rels.xlsx', async (zip) => {
+    const rels = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+    zip.file('xl/_rels/workbook.xml.rels', rels
+      .replace('<Relationships xmlns=', '<pr:Relationships xmlns:pr=')
+      .replace('</Relationships>', '</pr:Relationships>')
+      .replace(/<Relationship /g, '<pr:Relationship ')
+      .replace('Target="worksheets/sheet1.xml"', 'Target="worksheets/sheetX.xml"')
+      .replace('Target="worksheets/sheet2.xml"', 'Target="worksheets/sheet1.xml"')
+      .replace('Target="worksheets/sheetX.xml"', 'Target="worksheets/sheet2.xml"'));
+  })), '关系带前缀');
+  // ④ 注释里的旧关系在有效关系之后：读取库不跳过注释、同一 Id 取后一条，读的是第二张表；按本模块口径是第一张表，不一致
+  const staleAfter = map(await build('stale-after.xlsx', async (zip) => {
+    const rels = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+    const stale = '<!-- <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/> -->';
+    zip.file('xl/_rels/workbook.xml.rels', rels.replace('</Relationships>', `${stale}</Relationships>`));
+  }));
+  assert.deepEqual(staleAfter.slice(1).map((row) => row[TARGETS.indexOf('Credit Amount')]), ['999'], '读取库按注释里的关系读了第二张表');
+  assert.deepEqual(identifiers(staleAfter).map(([serial]) => String(serial)), ['9007199254740992'], '不写进第一张表的流水号');
+  assert.deepEqual(longNumberIssues(staleAfter).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
+  // ⑤ workbook.xml 的注释里有同名的旧 <sheet>（指向第二张表）：读取库把它也算作工作表，序号错开，无法确认读的是哪张表
+  const commentedSheet = map(await build('commented-sheet.xlsx', async (zip) => {
+    await replaceIn(zip, 'xl/workbook.xml', '<sheets>', '<sheets><!-- <sheet name="Sheet1" sheetId="9" r:id="rId2"/> -->');
+  }));
+  assert.deepEqual(identifiers(commentedSheet).map(([serial]) => String(serial)), ['9007199254740992']);
+  assert.deepEqual(longNumberIssues(commentedSheet).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']],
+    '注释里有 <sheet> 时不还原并提示');
   // 对照：Target 写成绝对路径 /xl/worksheets/sheet1.xml 时两种口径一致，照常还原
   const absolute = map(await build('absolute-target.xlsx', async (zip) => {
     await replaceIn(zip, 'xl/_rels/workbook.xml.rels', 'Target="worksheets/sheet1.xml"', 'Target="/xl/worksheets/sheet1.xml"');
