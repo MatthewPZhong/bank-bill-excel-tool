@@ -2749,15 +2749,20 @@ function resolveGenerationTemplateConfig({ fileEntries = [], fallbackTemplateCon
   return getTemplateMappingConfig(templateIds[0]) || fallbackTemplateConfig;
 }
 
-// 模板配置（大账号、固定赋值、仅有币种时的大账号、账户映射的银行账号与清算账号）中的账号：日志里的模板名、渠道名等按它们
-//   整体脱敏（以不含连续 4 位数字的实际账号命名时，只按数字写法脱敏会漏，release 审查）
+// 模板配置（大账号、固定赋值、仅有币种时的大账号、账户映射的银行账号与清算账号，以及旧模板只在 MerchantId 映射行保存的
+//   固定账号）中的账号：日志里的模板名、渠道名等按它们整体脱敏（以不含连续 4 位数字的实际账号命名时，只按数字写法脱敏会漏，
+//   release 审查）
 function collectTemplateAccountValuesForLog(...configurations) {
   return configurations.flatMap((configuration) => [
     ...['bigAccounts', 'fixedAssignments', 'currencyBigAccounts']
       .flatMap((key) => (configuration && Array.isArray(configuration[key]) ? configuration[key] : []))
       .map((item) => normalizeCell(item && item.merchantId)),
     ...(configuration && Array.isArray(configuration.accountMappings) ? configuration.accountMappings : [])
-      .flatMap((item) => [normalizeCell(item && item.bankAccountId), normalizeCell(item && item.clearingAccountId)])
+      .flatMap((item) => [normalizeCell(item && item.bankAccountId), normalizeCell(item && item.clearingAccountId)]),
+    // 旧模板（含旧模板包条目）只在 MerchantId 映射行保存固定账号、不建大账号记录时，按兼容口径解出该账号
+    ...(configuration && Array.isArray(configuration.mappings)
+      ? buildCompatibleBigAccounts({ mappings: configuration.mappings }).map((item) => normalizeCell(item.merchantId))
+      : [])
   ]);
 }
 
@@ -2766,13 +2771,9 @@ function collectTemplateAccountValuesForLog(...configurations) {
 function readTemplateAccountValuesForLog(template) {
   if (!template || !template.id) return [];
   try {
-    const templateMappings = database.getTemplateMappings(template.id);
-    return collectTemplateAccountValuesForLog(templateMappings, {
+    return collectTemplateAccountValuesForLog(database.getTemplateMappings(template.id), {
       bigAccounts: database.getTemplateBigAccounts(template.id, { includeOwn: true }),
       accountMappings: database.listEffectiveAccountMappings(template)
-    }, {
-      // 旧模板只在 MerchantId 映射行保存固定账号（不建大账号记录）时，按兼容口径解出该账号（release 审查）
-      bigAccounts: buildCompatibleBigAccounts({ mappings: templateMappings && templateMappings.mappings })
     });
   } catch (_error) {
     return [];
@@ -12760,7 +12761,7 @@ function resolveEntryBalancePlan({ config, fileEntries, issueLineBudget = { rema
   const channelName = (config && config.outputName) || resolveStatementOutputName(config && config.template);
   const { modeByAccount, conflicts } = resolveAccountBalanceModes(entryModes);
   if (conflicts.length) {
-    throw buildChannelBalanceModeMismatchError([buildBalanceModeConflictGroup(channelName, conflicts)]);
+    throw buildChannelBalanceModeMismatchError([buildBalanceModeConflictGroup(channelName, conflicts, entryModes)]);
   }
   const balanceEntries = entryModes.filter((item) => item.balanceMode !== 'none');
   const balanceRowCheck = inspectBalanceEntryRows(balanceEntries, Math.max(0, issueLineBudget.remaining),
@@ -12784,7 +12785,7 @@ function resolveEntryBalancePlan({ config, fileEntries, issueLineBudget = { rema
 //   lines 写明文件名（可能含账号，只用于界面）；persistedLines 用本组第几个文件代替文件名，供错误报告与活动日志。
 //   accountValues：这些出余额条目的交易行读到的 MerchantId，落盘时子模板名、渠道名按它们整体脱敏（以字母数字混合的
 //   实际账号命名时没有连续 4 位数字，只按数字写法脱敏会漏，release 审查）。有缺字段的行时另从 otherEntries（同组不出余额的
-//   条目，不做缺字段校验）读取 MerchantId 一并用于脱敏：渠道或子模板可能以这些账号命名（只在报错时多读这一遍）。
+//   条目，不做缺字段校验）读取 MerchantId 一并用于脱敏（collectEntryMerchantIdsForLog，只在报错时多读这一遍）。
 //   只为前 lineLimit 行保留诊断对象（整列未映射时每笔交易都缺，诊断占用不随行数增长），issueCount 为总行数；
 //   超出上限的汇总行由 buildChannelBalanceRowsIncompleteError 按整批共享的上限补上。
 function inspectBalanceEntryRows(balanceEntries, lineLimit = 200, otherEntries = []) {
@@ -12829,17 +12830,7 @@ function inspectBalanceEntryRows(balanceEntries, lineLimit = 200, otherEntries =
       if (!merchantId) currentIssue.missingMerchantId = true;
     }
   }
-  if (issueCount) {
-    for (const item of Array.isArray(otherEntries) ? otherEntries : []) {
-      const rows = Array.isArray(item && item.detailRows) ? item.detailRows : [];
-      const merchantIndex = buildFieldIndexMap(Array.isArray(rows[0]) ? rows[0] : []).get('MerchantId');
-      if (merchantIndex === undefined) continue;
-      for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
-        const merchantId = Array.isArray(rows[rowIndex]) ? normalizeCell(rows[rowIndex][merchantIndex]) : '';
-        if (merchantId) accountValues.add(merchantId);
-      }
-    }
-  }
+  if (issueCount) collectEntryMerchantIdsForLog(otherEntries).forEach((merchantId) => accountValues.add(merchantId));
   const lines = [];
   const persistedLines = [];
   const knownAccounts = Array.from(accountValues);
@@ -13021,7 +13012,7 @@ function findGenerationGroupBalanceModeConflictGroup(group, mixedEntries = null)
   }
   const { conflicts } = resolveAccountBalanceModes(entryModes);
   // groupKey：导入预检据此找出账号由注入改写的渠道（步骤 8），不进入错误明细
-  return conflicts.length ? { ...buildBalanceModeConflictGroup(channelName, conflicts), groupKey: group.key } : null;
+  return conflicts.length ? { ...buildBalanceModeConflictGroup(channelName, conflicts, entryModes), groupKey: group.key } : null;
 }
 
 // v3.2.21（D3）：汇总本批各渠道组的冲突，整批逐账户列出（不在第一个渠道处停下）。返回冲突渠道的数组，没有时 null。
@@ -13034,15 +13025,34 @@ function collectGenerationGroupBalanceModeConflicts(groups, mixedEntries = null)
 }
 
 // 一个渠道的冲突：lines 逐账户列出（含账号，只用于界面展示）；accountCount、templateNames 供落盘的诊断（不含账号）；
-//   accountValues：冲突的实际 MerchantId，落盘时据此脱敏以账号命名的渠道、子模板（含不是纯数字的账号，release 审查）。
-function buildBalanceModeConflictGroup(channelName, conflicts) {
+//   accountValues：冲突的实际 MerchantId 与本组条目（entries，可选）交易行读到的全部 MerchantId，落盘时据此脱敏以账号命名的
+//   渠道、子模板（含不是纯数字的账号；渠道可能以本组未冲突的账号命名，release 审查）。
+function buildBalanceModeConflictGroup(channelName, conflicts, entries = []) {
   return {
     channelName,
     lines: formatBalanceModeConflictLines(conflicts),
     accountCount: conflicts.length,
     templateNames: [...new Set(conflicts.flatMap((conflict) => conflict.templates.map((item) => item.templateName)))],
-    accountValues: [...new Set(conflicts.map((conflict) => conflict.merchantId).filter(Boolean))]
+    accountValues: [...new Set([
+      ...conflicts.map((conflict) => conflict.merchantId).filter(Boolean),
+      ...collectEntryMerchantIdsForLog(entries)
+    ])]
   };
+}
+
+// 条目交易行读到的 MerchantId：只用于报错时的日志脱敏（渠道、子模板可能以这些账号命名，release 审查）
+function collectEntryMerchantIdsForLog(entries) {
+  const values = new Set();
+  for (const item of Array.isArray(entries) ? entries : []) {
+    const rows = Array.isArray(item && item.detailRows) ? item.detailRows : [];
+    const merchantIndex = buildFieldIndexMap(Array.isArray(rows[0]) ? rows[0] : []).get('MerchantId');
+    if (merchantIndex === undefined) continue;
+    for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
+      const merchantId = Array.isArray(rows[rowIndex]) ? normalizeCell(rows[rowIndex][merchantIndex]) : '';
+      if (merchantId) values.add(merchantId);
+    }
+  }
+  return values;
 }
 
 
@@ -13079,7 +13089,7 @@ function findResolvedEntriesBalanceModeConflicts(mixedEntries, resolveEntries, n
         })
         .filter(Boolean);
       const { conflicts } = resolveAccountBalanceModes(entryModes);
-      return conflicts.length ? buildBalanceModeConflictGroup(group.channelName, conflicts) : null;
+      return conflicts.length ? buildBalanceModeConflictGroup(group.channelName, conflicts, entryModes) : null;
     }).filter(Boolean);
     return conflictGroups.length ? conflictGroups : null;
   }

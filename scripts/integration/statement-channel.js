@@ -437,6 +437,7 @@ function createEnvironment(dir, label) {
     'buildChannelBalanceRowsIncompleteError',
     'buildChannelBalancePlanningError',
     'buildBalanceModeConflictGroup',
+    'collectEntryMerchantIdsForLog',
     'formatBalanceModeConflictLines',
     'resolveGenerationGroupChannelName',
     'collectGroupBalanceIssuesWithoutConfig',

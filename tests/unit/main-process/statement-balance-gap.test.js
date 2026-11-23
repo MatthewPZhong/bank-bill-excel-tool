@@ -2486,7 +2486,11 @@ test('主进程：注入大账号后的复核只涉及含待注入条目的渠�
   const identity = require('../../../src/main-process/statement-channel-identity');
   const { resolveAccountBalanceModes } = require('../../../src/main-process/statement-generation-business');
   const formatBalanceModeConflictLines = loadMainFunction('formatBalanceModeConflictLines', ['describeBalanceMode'], [identity.describeBalanceMode]);
-  const buildBalanceModeConflictGroup = loadMainFunction('buildBalanceModeConflictGroup', ['formatBalanceModeConflictLines'], [formatBalanceModeConflictLines]);
+  const { buildFieldIndexMap } = require('../../../src/main-process/statement-generation-business');
+  const { normalizeCell } = require('../../../src/backend/file-service');
+  const collectEntryMerchantIdsForLog = loadMainFunction('collectEntryMerchantIdsForLog', ['buildFieldIndexMap', 'normalizeCell'], [buildFieldIndexMap, normalizeCell]);
+  const buildBalanceModeConflictGroup = loadMainFunction('buildBalanceModeConflictGroup', ['formatBalanceModeConflictLines', 'collectEntryMerchantIdsForLog'],
+    [formatBalanceModeConflictLines, collectEntryMerchantIdsForLog]);
   const recordedDeps = {
     groupStatementEntriesForGeneration: () => {
       throw new Error('不应重新分组');

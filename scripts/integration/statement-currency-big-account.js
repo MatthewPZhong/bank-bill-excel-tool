@@ -330,6 +330,7 @@ function createEnvironment(dir, label) {
     'findGenerationGroupBalanceModeConflictGroup',
     'collectGenerationGroupBalanceModeConflicts',
     'buildBalanceModeConflictGroup',
+    'collectEntryMerchantIdsForLog',
     'buildChannelBalanceRowsIncompleteError',
     'buildChannelBalancePlanningError',
     'formatBalanceModeConflictLines',

@@ -1,5 +1,21 @@
 # 版本功能变更清单
 
+## v3.2.21（2026-11-23）
+
+本轮包含 5 个模块分支：`feat/mapping-logic-feature-layout`、`fix/statement-long-number-precision`、`feat/template-date-format`、`feat/channel-mixed-balance-mode`、`feat/bill-split-fee-field-mapping`，另同步 `origin/main`（v3.2.20 发布记录）。`feat/cross-sheet-backfill`「跨 Sheet 回填」顺延（B129）。需求与决策见 `changes/v3.2.21/` 下各 spec，发布记录见 `changes/v3.2.21/release.md`。
+
+- **费用账单设置**（[spec](../changes/v3.2.21/feat/bill-split-fee-field-mapping/spec.md) D1–D6、F1–F4）：`template_bill_split_meta.fee_field_mapping_enabled` / `fee_field_mappings_json` 启动补列（幂等），形状 `[{ templateField, valueType: 'blank' | 'input' | 'field' | 'invalid', value }]`。只作用于已完成的费用行：空白 → 空、自己输入 → 固定值、模板文件字段 → 该行源单元格；MerchantId、Currency、发生额、Balance、BillDate 与系统 Channel 不可覆盖（保存拒绝，模板包带入时生成拒绝）。ValueDate 在原值校验通过后规范化；写出后读回会被改写的覆盖值（`_xHHHH_`，B113）、Excel 无法写入的字符或超过 32767 字符时拒绝。【返回】/ × 按主进程签发、窗口挂载时激活的撤销会话，在一个事务内恢复打开时的拆分配置（单实例单窗口前提，B115）；主库已提交、仅模板库文件同步失败时按已保存处理并记 warning。
+- **逻辑取值特征值候补与布局**（[spec](../changes/v3.2.21/feat/mapping-logic-feature-layout/spec.md) D1–D7）：候补存为 `\u0000__FEATURE_FILTER__:<id>`（NUL 前缀区分旧版源列名，构造的同写法表头保存、生成与【更新】都拒绝）；未筛出视为空、不记未筛出提示；BillDate 候补含特征值时按实际查看过的特征值源单元格识别合计行。`BILL_SPLIT_GROUP_FIELDS` 调整顺序；「启用」列、勾选行固定 36px 行高，模板字段列 220 → 240px、弹窗 780 → 800px。
+- **模板日期格式**（[spec](../changes/v3.2.21/feat/template-date-format/spec.md)）：映射关系管理「日期格式」入口（`auto` / `DMY` / `MDY`），`normalizeTemplateDateFormat` 校验；`template:save-mappings` 校验后写入，模板包导入按 `normalizeTemplateDateFormat(entry.dateFormat) || 'auto'` 规范化，`resolveTemplateBundleVersion` 不变。改格式不回改已生成的余额与种子（B128）。
+- **渠道子模板余额方式可不同**（[spec](../changes/v3.2.21/feat/channel-mixed-balance-mode/spec.md) D1–D4、T1–T10）：删除保存映射与模板包导入时的余额方式一致性校验；`resolveAccountBalanceModes` 按条目推导账户 → 余额方式，同一账户命中不同方式时抛 `CHANNEL_BALANCE_MODE_MISMATCH`，出余额条目缺账单日期或 MerchantId 时抛 `CHANNEL_BALANCE_ROWS_INCOMPLETE`；`deriveBalanceRecords` 接收 `modeByAccount`，余额只取出余额账户的行引用（`balanceRowsByAccountMode`），明细照常全量输出。新增只读预检 `assertStatementBatchWritable` / `assertStatementEntriesWritable`，多组生成在写出前逐组校验。落盘明细不写账号（`persistedDetailLines`），以账号命名的子模板名、渠道名按 `logMaskValues` 只写位数。
+- **长数字按原文读取**（[spec](../changes/v3.2.21/fix/statement-long-number-precision/spec.md) D1–D3，关闭 B112）：网银账单生成的映射读取与大账号识别对超出安全整数的非负整数还原原文——xlsx 取工作表 XML `<v>` 字面值（按需解压 ZIP 条目；工作表须按 workbook.xml 与关系文件唯一确认，且与读取库实际读取的口径一致，否则不还原），扩展名 .xls 的 CSV / 制表符文本 / HTML 按文本重读；公式缓存值、二进制 .xls、负数不还原并提示 `N行长数字无法核对原值`（报错文件只写位数）。发生额、余额列保持数值。真 CSV 的 `="…"` 取引号内文本、去首尾制表符。
+- **人工补录余额种子键**：`balanceSeedRecordKey`、补录预检与补录弹窗的账户键改为无歧义编码（`@` 转义、JSON 元组），含 `@@` 的账户不再与其他账户同键（release 审查）。
+- **模板包 v9**：逻辑取值候补含特征值，或任一模板勾选 / 保存了费用账单字段映射特殊处理时写 v9（`SUPPORTED_BUNDLE_VERSION` 8 → 9），v3.2.20 及更早整包拒绝；其余沿用 v5–v8 规则。
+
+审查修复：各模块分支均经 Codex 循环审查并修复（见各 spec）。合入后对 `release/v3.2.21` 整体做 Codex `review --base main` 共 15 轮，各轮条数与处置见 `changes/v3.2.21/release.md`；第 9 轮起按用户确认的放宽标准收口（修 P1 与真实文件、正常操作可触发的 P2，手工构造 XML / 极端命名类登记 backlog），第 14 轮后用户确认「再审一轮就发版」。
+
+已知限制与顺延：回退旧安装包后费用账单字段映射特殊处理不生效（B111）；`_xHHHH_` 字面值写出改写（B113）；单窗口前提（B115）；其他模块长数字（B116）；日志统一脱敏（B117）；补录 / 断档流程不带导入告警（B118）；大账号识别近似值（B119）；Windows 实机核验（B105、B120）；含 NUL 旧候补（B121）；合计行跨段账号（B122）；缺账单日期漏算余额（B123）；导出未写出仍结算（B124）；伪 xls 文本日期（B125、B126）；审计补记（B127）；改日期格式后的历史余额恢复（B128）；命名日期重复解析（B131）；大账号配置 `@@` 键（B132）；手工改写结构的 XLSX 中长数字原文可能取自读取库实际读取之外的工作表或行（B133，第 15 轮审查 P1，用户确认顺延，须人工复核）。`feat/cross-sheet-backfill` 顺延（B129）。
+
 ## v3.2.20（2026-11-18）
 
 本轮包含 `feat/retire-recon-modules`（下线四个对账模块）与 `release/v3.2.19` 的发布检查修复。`v3.2.19` 标签（→ `466bb6fa`）触发的发布流程 run 44441308161 在 `release-check` 中因 `renderer-lifecycle` 超过 120 秒总时限失败，未生成 Release；正式标签受「Immutable stable release tags」规则保护，不移动、不重建，v3.2.19 的功能随本版首次发出安装包。需求与决策见 `changes/v3.2.20/feat/retire-recon-modules/spec.md` D1–D5、TechDoc 第四至九节。

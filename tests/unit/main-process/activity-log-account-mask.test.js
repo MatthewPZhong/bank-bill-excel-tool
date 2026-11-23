@@ -52,6 +52,19 @@ test('模板包导入跳过模板时，活动日志的原因经 maskAccountLikeT
     { bigAccounts: [{ merchantId: 'OWN1' }], accountMappings: [{ bankAccountId: 'BK12A', clearingAccountId: 'CL9' }] },
     null
   ), ['AC12B34', 'M2', 'M3', 'OWN1', 'BK12A', 'CL9']);
+  // 旧模板包条目只在 MerchantId 映射行保存固定账号（__FIXED__:AC-X7Y8Z9）、没有大账号记录时，按兼容口径解出（release 审查）
+  const legacyDeps = { normalizeCell, FIXED_FIELD_VALUE_PREFIX: '__FIXED__:', MERCHANT_ID_SELF_INPUT_OPTION: '自己输入',
+    MERCHANT_ID_MULTI_ACCOUNT_MARKER: '__MULTI_BIG_ACCOUNT__', MERCHANT_ID_CURRENCY_ONLY_MARKER: '__CURRENCY_ONLY__',
+    MERCHANT_ID_CURRENCY_ONLY_OPTION: '原始账单仅有币种无账户号' };
+  legacyDeps.decodeCustomInputMappingValue = loadMainFunction('decodeCustomInputMappingValue', legacyDeps);
+  legacyDeps.extractFixedMappingValue = loadMainFunction('extractFixedMappingValue', legacyDeps);
+  const buildCompatibleBigAccounts = loadMainFunction('buildCompatibleBigAccounts', legacyDeps);
+  const collectWithLegacy = loadMainFunction('collectTemplateAccountValuesForLog', { normalizeCell, buildCompatibleBigAccounts });
+  assert.deepEqual(collectWithLegacy({
+    name: 'AC-X7Y8Z9 旧模板',
+    mappings: [{ templateField: 'MerchantId', mappedField: '__FIXED__:AC-X7Y8Z9' }, { templateField: 'Currency', mappedField: '币种' }]
+  }), ['AC-X7Y8Z9']);
+  assert.deepEqual(collectWithLegacy({ mappings: [{ templateField: 'MerchantId', mappedField: '账号' }] }), []);
   assert.match(snippet, /原因：\$\{maskAccountLikeTextForLog\(error\.message, entryAccountValues\)\}/);
   // 模板名由用户填写，可能含账号：同样脱敏
   assert.match(snippet, /模板名：\$\{maskAccountLikeTextForLog\(entry\.name, entryAccountValues\)\}/);
@@ -65,8 +78,9 @@ test('渠道余额错误的落盘明细中子模板名脱敏，弹窗明细保�
   const { FileValidationError, normalizeCell } = require('../../../src/backend/file-service');
   const { buildFieldIndexMap } = require('../../../src/main-process/statement-generation-business');
   const { isZeroOrBlankAmount } = require('../../../src/backend/file-service/normalizers');
+  const collectEntryMerchantIdsForLog = loadMainFunction('collectEntryMerchantIdsForLog', { buildFieldIndexMap, normalizeCell });
   const inspectBalanceEntryRows = loadMainFunction('inspectBalanceEntryRows', {
-    buildFieldIndexMap, normalizeCell, isZeroOrBlankAmount, maskAccountLikeTextForLog
+    buildFieldIndexMap, normalizeCell, isZeroOrBlankAmount, maskAccountLikeTextForLog, collectEntryMerchantIdsForLog
   });
   const accountName = '对公6222021234567890123';
   const rows = [['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount'], ['', 'M1', 'USD', '5', '']];
@@ -140,8 +154,9 @@ test('混合渠道缺字段诊断：同组不出余额条目的账号同样用�
   const { FileValidationError, normalizeCell } = require('../../../src/backend/file-service');
   const { buildFieldIndexMap, resolveAccountBalanceModes } = require('../../../src/main-process/statement-generation-business');
   const { isZeroOrBlankAmount } = require('../../../src/backend/file-service/normalizers');
+  const collectEntryMerchantIdsForLog = loadMainFunction('collectEntryMerchantIdsForLog', { buildFieldIndexMap, normalizeCell });
   const inspectBalanceEntryRows = loadMainFunction('inspectBalanceEntryRows', {
-    buildFieldIndexMap, normalizeCell, isZeroOrBlankAmount, maskAccountLikeTextForLog
+    buildFieldIndexMap, normalizeCell, isZeroOrBlankAmount, maskAccountLikeTextForLog, collectEntryMerchantIdsForLog
   });
   const buildChannelBalanceRowsIncompleteError = loadMainFunction('buildChannelBalanceRowsIncompleteError', { FileValidationError, maskAccountLikeTextForLog });
   const resolveEntryBalancePlan = loadMainFunction('resolveEntryBalancePlan', {
@@ -180,4 +195,27 @@ test('混合渠道缺字段诊断：同组不出余额条目的账号同样用�
       { matchedTemplateId: 2, templateName: 'B', balanceMode: 'none', filePath: 'b.xlsx', detailRows: rows([['2026-11-01', 'AC-X7Y8Z9', 'USD', '5', '', '']]) }
     ]
   }).balanceEntries.length, 1);
+});
+
+// release 审查：余额方式冲突的落盘诊断写出渠道名与子模板名，渠道可能以本组未冲突的实际账号（AC12B34）命名：
+//   脱敏用冲突账号与本组交易读到的全部账号
+test('余额方式冲突诊断：本组未冲突的账号同样用于脱敏', () => {
+  const { normalizeCell } = require('../../../src/backend/file-service');
+  const { buildFieldIndexMap, resolveAccountBalanceModes } = require('../../../src/main-process/statement-generation-business');
+  const identity = require('../../../src/main-process/statement-channel-identity');
+  const formatBalanceModeConflictLines = loadMainFunction('formatBalanceModeConflictLines', { describeBalanceMode: identity.describeBalanceMode });
+  const collectEntryMerchantIdsForLog = loadMainFunction('collectEntryMerchantIdsForLog', { buildFieldIndexMap, normalizeCell });
+  const buildBalanceModeConflictGroup = loadMainFunction('buildBalanceModeConflictGroup', { formatBalanceModeConflictLines, collectEntryMerchantIdsForLog });
+  const header = ['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount', 'Balance'];
+  const entryModes = [
+    { templateName: '对公', balanceMode: 'statement', detailRows: [header, ['2026-11-01', 'M1', 'USD', '5', '', '10'], ['2026-11-01', 'AC12B34', 'USD', '5', '', '10']] },
+    { templateName: '对私', balanceMode: 'none', detailRows: [header, ['2026-11-01', 'M1', 'USD', '5', '', '']] }
+  ];
+  const { conflicts } = resolveAccountBalanceModes(entryModes);
+  assert.deepEqual(conflicts.map((conflict) => conflict.merchantId), ['M1']);
+  const group = buildBalanceModeConflictGroup('渠道AC12B34', conflicts, entryModes);
+  assert.deepEqual(group.accountValues.slice().sort(), ['AC12B34', 'M1']);
+  assert.equal(maskAccountLikeTextForLog(group.channelName, group.accountValues), '渠道（7位账号）');
+  // 不给条目时只用冲突账号（兼容原调用）
+  assert.deepEqual(buildBalanceModeConflictGroup('渠道', conflicts).accountValues, ['M1']);
 });
