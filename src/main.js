@@ -670,6 +670,7 @@ const {
   createStatementGenerationHelpers,
   selectBalanceAccountRows
 } = require('./main-process/statement-generation');
+const { createStatementOutputJournal } = require('./main-process/statement-output-rollback');
 const {
   DUPLICATE_REVIEW_STATUS,
   createStatementDuplicateReview,
@@ -13745,70 +13746,105 @@ function generateMultiTemplateGroupFiles({
     groupPlans.map((plan) => ({ config: plan.groupConfig, preparedBatch: plan.groupPreparedBatch }))
   );
   if (outputPathConflicts) throw buildStatementOutputPathConflictError(outputPathConflicts);
+
+  // v3.2.22 B45：逐组写出与合并期间任一步失败（如文件被占用、合并失败）时，按写出记录还原本批已写的明细 / 余额 /
+  //   合并文件与余额种子，再原样抛出；旧会话条目在全部组与合并成功后才替换。后组仍可读取前组刚写的种子（同批语义不变）。
+  const outputJournal = createStatementOutputJournal();
+  let mergedDetail = null;
+  let mergedBalance = null;
+  let balancePending = false;
+  const templateCount = generationGroups.length;
+  try {
+    for (const {
+      groupTemplateConfig,
+      groupConfig,
+      effectiveEntries,
+      groupPreparedBatch
+    } of groupPlans) {
+
+      const groupGeneratedFiles = {
+        ...generateStatementFiles({
+          config: groupConfig,
+          preparedBatch: groupPreparedBatch,
+          scope: 'current',
+          beforeOutputWrite: outputJournal.record
+        }),
+        fileEntries: effectiveEntries,
+        preparedBatch: groupPreparedBatch
+      };
+
+      if (groupGeneratedFiles.detail) allDetailPaths.push(groupGeneratedFiles.detail.filePath);
+      if (groupGeneratedFiles.balance) allBalancePaths.push(groupGeneratedFiles.balance.filePath);
+      for (const date of (groupGeneratedFiles.balance && groupGeneratedFiles.balance.billDates) || []) allBalanceDates.push(date);
+      // 逐条合并：告警可能每行一条（如 v3.2.21 长数字提示），展开传参会超过函数参数上限
+      if (Array.isArray(groupGeneratedFiles.warnings)) groupGeneratedFiles.warnings.forEach((warning) => allWarnings.push(warning));
+      // v3.2.21：明细汇总按各组写出明细时确定的日期命名（剔除跳过的零金额行，与单组明细文件、另存为默认文件名同口径）；
+      //   逐个追加，展开成参数在大批量时会超出调用栈
+      for (const date of (groupGeneratedFiles.detail && groupGeneratedFiles.detail.billDates) || []) allBillDates.push(date);
+
+      lastGenerationTemplateConfig = groupTemplateConfig;
+      allFileEntries.push(...effectiveEntries);
+    }
+
+    // 合并多组文件为汇总文件，命名：组数-COMMON/BALANCE-日期范围.xlsx（渠道按一组计）
+    const dateRangeLabel = buildDateRangeLabel(allBillDates);
+
+    mergedDetail = allDetailPaths.length > 1
+      ? (() => {
+          const mergedFileName = `${templateCount}-COMMON-${dateRangeLabel || getToday()}.xlsx`;
+          const { outputFilePath: mergedPath } = buildOutputFilePath({ kind: 'detail', outputFileName: mergedFileName });
+          outputJournal.record(mergedPath);
+          mergeGeneratedXlsxFiles(allDetailPaths, mergedPath);
+          return { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
+        })()
+      : allDetailPaths.length === 1
+        ? { filePath: allDetailPaths[0], fileName: path.basename(allDetailPaths[0]), templateName: '按文件名映射模板' }
+        : null;
+
+    // 任一模板组还需补录或确认断档时不合并、不缓存余额：汇总只含已算出的组，文件名却按全部模板计数。
+    // 已算出的组照常写出各自的余额文件和计算种子，补录或不补录后按全部模板组重算（断档 spec §4.2 第 1 条）。
+    balancePending = allWarnings.some(
+      (w) => w.type === 'balance-seed-required' || w.type === 'balance-gap-confirm'
+        || w.type === 'balance-mismatch-confirm' || w.type === 'balance-seed-replace-confirm'
+    );
+    const mergeableBalancePaths = balancePending ? [] : allBalancePaths;
+    mergedBalance = mergeableBalancePaths.length > 1
+      ? (() => {
+          const mergedFileName = `${templateCount}-BALANCE-${buildDateRangeLabel(allBalanceDates) || getToday()}.xlsx`;
+          const { outputFilePath: mergedPath } = buildOutputFilePath({ kind: 'balance', outputFileName: mergedFileName });
+          outputJournal.record(mergedPath);
+          mergeGeneratedXlsxFiles(mergeableBalancePaths, mergedPath);
+          return { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
+        })()
+      : mergeableBalancePaths.length === 1
+        ? { filePath: mergeableBalancePaths[0], fileName: path.basename(mergeableBalancePaths[0]), templateName: '按文件名映射模板' }
+        : null;
+  } catch (error) {
+    const { failures, backupDirectory } = outputJournal.rollback();
+    if (failures.length) {
+      // 还原失败不覆盖原错误：附在原错误的明细后，并记日志保留备份位置便于人工恢复
+      const lines = failures.map((item) => `未能还原：${item.filePath}（${item.message}）`);
+      if (error && typeof error === 'object') {
+        error.detailLines = [...(Array.isArray(error.detailLines) ? error.detailLines : []), ...lines];
+      }
+      appendActivityLogEntry({
+        level: 'error',
+        source: 'main',
+        domain: 'statement',
+        message: '多模板生成失败后部分输出未能还原',
+        details: [...lines, ...(backupDirectory ? [`原内容备份：${backupDirectory}`] : [])]
+      });
+    }
+    throw error;
+  }
+  outputJournal.commit();
+
+  // 全部组与合并成功后才替换旧会话条目（v3.2.22 B45）
   if (Array.isArray(replacePaths)) {
     replacePaths.forEach((filePath) => {
       removeStatementSessionEntriesByFilePath(session, filePath);
     });
   }
-
-  for (const {
-    groupTemplateConfig,
-    groupConfig,
-    effectiveEntries,
-    groupPreparedBatch
-  } of groupPlans) {
-
-    const groupGeneratedFiles = {
-      ...generateStatementFiles({ config: groupConfig, preparedBatch: groupPreparedBatch, scope: 'current' }),
-      fileEntries: effectiveEntries,
-      preparedBatch: groupPreparedBatch
-    };
-
-    if (groupGeneratedFiles.detail) allDetailPaths.push(groupGeneratedFiles.detail.filePath);
-    if (groupGeneratedFiles.balance) allBalancePaths.push(groupGeneratedFiles.balance.filePath);
-    for (const date of (groupGeneratedFiles.balance && groupGeneratedFiles.balance.billDates) || []) allBalanceDates.push(date);
-    // 逐条合并：告警可能每行一条（如 v3.2.21 长数字提示），展开传参会超过函数参数上限
-    if (Array.isArray(groupGeneratedFiles.warnings)) groupGeneratedFiles.warnings.forEach((warning) => allWarnings.push(warning));
-    // v3.2.21：明细汇总按各组写出明细时确定的日期命名（剔除跳过的零金额行，与单组明细文件、另存为默认文件名同口径）；
-    //   逐个追加，展开成参数在大批量时会超出调用栈
-    for (const date of (groupGeneratedFiles.detail && groupGeneratedFiles.detail.billDates) || []) allBillDates.push(date);
-
-    lastGenerationTemplateConfig = groupTemplateConfig;
-    allFileEntries.push(...effectiveEntries);
-  }
-
-  // 合并多组文件为汇总文件，命名：组数-COMMON/BALANCE-日期范围.xlsx（渠道按一组计）
-  const templateCount = generationGroups.length;
-  const dateRangeLabel = buildDateRangeLabel(allBillDates);
-
-  const mergedDetail = allDetailPaths.length > 1
-    ? (() => {
-        const mergedFileName = `${templateCount}-COMMON-${dateRangeLabel || getToday()}.xlsx`;
-        const { outputFilePath: mergedPath } = buildOutputFilePath({ kind: 'detail', outputFileName: mergedFileName });
-        mergeGeneratedXlsxFiles(allDetailPaths, mergedPath);
-        return { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
-      })()
-    : allDetailPaths.length === 1
-      ? { filePath: allDetailPaths[0], fileName: path.basename(allDetailPaths[0]), templateName: '按文件名映射模板' }
-      : null;
-
-  // 任一模板组还需补录或确认断档时不合并、不缓存余额：汇总只含已算出的组，文件名却按全部模板计数。
-  // 已算出的组照常写出各自的余额文件和计算种子，补录或不补录后按全部模板组重算（断档 spec §4.2 第 1 条）。
-  const balancePending = allWarnings.some(
-    (w) => w.type === 'balance-seed-required' || w.type === 'balance-gap-confirm'
-      || w.type === 'balance-mismatch-confirm' || w.type === 'balance-seed-replace-confirm'
-  );
-  const mergeableBalancePaths = balancePending ? [] : allBalancePaths;
-  const mergedBalance = mergeableBalancePaths.length > 1
-    ? (() => {
-        const mergedFileName = `${templateCount}-BALANCE-${buildDateRangeLabel(allBalanceDates) || getToday()}.xlsx`;
-        const { outputFilePath: mergedPath } = buildOutputFilePath({ kind: 'balance', outputFileName: mergedFileName });
-        mergeGeneratedXlsxFiles(mergeableBalancePaths, mergedPath);
-        return { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
-      })()
-    : mergeableBalancePaths.length === 1
-      ? { filePath: mergeableBalancePaths[0], fileName: path.basename(mergeableBalancePaths[0]), templateName: '按文件名映射模板' }
-      : null;
 
   // session 只 append 一次（避免 importCount 膨胀导致首次导入就弹 scope 选择）
   const mergedSessionEntries = allFileEntries.map((entry) => buildStatementFileEntry({

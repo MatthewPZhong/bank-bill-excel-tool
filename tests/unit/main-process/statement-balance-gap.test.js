@@ -1766,6 +1766,7 @@ test('主进程：按文件名映射多模板导入，任一模板组需补录�
       buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
       assertStatementBatchWritable: generation.assertStatementBatchWritable,
       FileValidationError,
+      createStatementOutputJournal: require('../../../src/main-process/statement-output-rollback').createStatementOutputJournal,
       removeStatementSessionEntriesByFilePath: () => {},
       generateStatementFiles: (options) => {
         const result = generation.generateStatementFiles(options);
@@ -2382,6 +2383,7 @@ test('主进程：导入多组生成与补录重算中，其他组错误不遮�
       buildChannelBalancePlanningError,
       assertGenerationOutputNameUnique: () => {},
       findGenerationGroupOutputPathConflicts: () => null,
+      createStatementOutputJournal: require('../../../src/main-process/statement-output-rollback').createStatementOutputJournal,
       removeStatementSessionEntriesByFilePath: () => {},
       generateStatementFiles: ({ preparedBatch }) => {
         calls.generated.push(preparedBatch.tid);

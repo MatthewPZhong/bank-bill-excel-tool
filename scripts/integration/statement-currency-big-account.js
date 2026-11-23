@@ -285,6 +285,7 @@ function createEnvironment(dir, label) {
     describeBalanceMode: channelIdentity.describeBalanceMode,
     resolveAccountBalanceModes: require('../../src/main-process/statement-generation-business').resolveAccountBalanceModes,
     buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
+    createStatementOutputJournal: require('../../src/main-process/statement-output-rollback').createStatementOutputJournal,
     removeStatementSessionEntriesByFilePath: () => {},
     generateStatementFiles: generation.generateStatementFiles,
     parseRequiredBillDates,

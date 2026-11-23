@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { getBalanceSeedFileIdentity } = require('../backend/balance-seed-store');
+const { getBalanceSeedFileIdentity, getBalanceSeedFilePath } = require('../backend/balance-seed-store');
 
 const { mapEachCollectingCurrencyBigAccountIssues } = require('../backend/file-service/currency-big-account');
 const { isZeroOrBlankAmount, parseDateValue } = require('../backend/file-service/normalizers');
@@ -288,13 +288,19 @@ function createStatementGenerationHelpers(deps) {
     });
   }
 
+  // beforeOutputWrite(filePath)：v3.2.22 B45，每次写出明细 / 余额文件、写余额种子文件之前调用（多模板分组生成据此
+  //   记下原状态，失败时回滚）
   function generateStatementFiles({
     config,
     preparedBatch,
     scope = 'current',
     includeDetail = true,
-    includeBalance = null
+    includeBalance = null,
+    beforeOutputWrite = null
   }) {
+    const noteOutputWrite = (filePath) => {
+      if (typeof beforeOutputWrite === 'function') beforeOutputWrite(filePath);
+    };
     const warnings = Array.isArray(preparedBatch.warnings) ? preparedBatch.warnings.slice() : [];
     const detailRows = cloneRowsWithMetadata(preparedBatch.detailRows);
     const detailExportRows = buildDetailExportRows(detailRows);
@@ -355,6 +361,7 @@ function createStatementGenerationHelpers(deps) {
         internalSuffix
       });
 
+      noteOutputWrite(detailOutput.outputFilePath);
       writeWorkbookRows({
         rows: detailExportRows,
         outputFilePath: detailOutput.outputFilePath
@@ -467,12 +474,16 @@ function createStatementGenerationHelpers(deps) {
           internalSuffix
         });
 
+        noteOutputWrite(balanceOutput.outputFilePath);
         writeBalanceWorkbook({
           templateFilePath: balanceTemplatePath,
           records: balanceResult.records,
           templateFields: balanceTemplateFields,
           outputFilePath: balanceOutput.outputFilePath
         });
+        if (Array.isArray(balanceResult.seedRecords) && balanceResult.seedRecords.length) {
+          noteOutputWrite(getBalanceSeedFilePath(seedStorageRoot, templateBankName));
+        }
         storeGeneratedBalanceSeeds({
           templateName: statementOutputName(config),
           seedRecords: balanceResult.seedRecords

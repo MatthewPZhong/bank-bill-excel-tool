@@ -255,7 +255,8 @@ function readDetailColumns(filePath, names) {
 // 每步打开的主库须在删除临时目录前关闭（Windows 不允许删除仍被打开的 SQLite 文件）。
 const openedDatabases = [];
 
-function createEnvironment(dir, label) {
+// overrides（v3.2.22 B45 故障注入）：writeWorkbookRows(options, realWrite)、mergeGeneratedXlsxFiles(paths, out, realMerge)
+function createEnvironment(dir, label, overrides = {}) {
   const storageRoot = path.join(dir, `storage-${label}`);
   fs.mkdirSync(storageRoot, { recursive: true });
   const database = new AppDatabase(path.join(dir, `${label}.sqlite`));
@@ -311,10 +312,13 @@ function createEnvironment(dir, label) {
       seedRecords.forEach((record) => upsertBalanceSeedRecord(storageRoot, { templateName, ...record, overwrite: true }));
     },
     writeBalanceWorkbook,
-    writeWorkbookRows
+    writeWorkbookRows: overrides.writeWorkbookRows
+      ? (options) => overrides.writeWorkbookRows(options, writeWorkbookRows)
+      : writeWorkbookRows
   });
 
   const removedSessionPaths = [];
+  const realMergeGeneratedXlsxFiles = loadMainFunctions(['mergeGeneratedXlsxFiles'], { require, fs, path, applyWatermark: () => {} }).mergeGeneratedXlsxFiles;
   const mainDeps = {
     database,
     getTemplateMappingConfig,
@@ -388,13 +392,16 @@ function createEnvironment(dir, label) {
     resolveAccountBalanceModes,
     isZeroOrBlankAmount: require('../../src/backend/file-service/normalizers').isZeroOrBlankAmount,
     mergeMappedDetailRows,
+    createStatementOutputJournal: require('../../src/main-process/statement-output-rollback').createStatementOutputJournal,
     removeStatementSessionEntriesByFilePath: (_session, filePath) => { removedSessionPaths.push(filePath); },
     generateStatementFiles: generation.generateStatementFiles,
     parseRequiredBillDates,
     buildDateRangeLabel,
     getToday: () => TODAY,
     buildOutputFilePath: fns.buildOutputFilePath,
-    mergeGeneratedXlsxFiles: loadMainFunctions(['mergeGeneratedXlsxFiles'], { require, fs, path, applyWatermark: () => {} }).mergeGeneratedXlsxFiles,
+    mergeGeneratedXlsxFiles: overrides.mergeGeneratedXlsxFiles
+      ? (paths, outputPath) => overrides.mergeGeneratedXlsxFiles(paths, outputPath, realMergeGeneratedXlsxFiles)
+      : realMergeGeneratedXlsxFiles,
     buildStatementFileEntry: (entry) => entry,
     buildStatementFileEntryId: () => 'entry',
     appendStatementSessionImport: () => 'batch',
@@ -1869,6 +1876,110 @@ function verifyOutputPathConcatenationConflict(dir) {
   assertEq(writtenFiles(), [], 'Step17.补录重算拦下前没有写出文件');
 }
 
+// ⑳ v3.2.22 B45：按文件名映射多模板导入写出期间失败（第二组明细写出被占用、汇总余额合并失败）时，还原本批已写的
+//    明细 / 余额 / 汇总文件与余额种子，旧会话条目不替换；业务校验失败仍在写出前拦下。重试成功后文件与会话各替换一次。
+function verifyMultiTemplateGenerationRollback(dir) {
+  const faults = { writeCalls: 0, failWriteAt: 0, mergeCalls: 0, failMergeAt: 0 };
+  const env = createEnvironment(dir, 'step20', {
+    writeWorkbookRows: (options, write) => {
+      faults.writeCalls += 1;
+      if (faults.failWriteAt && faults.writeCalls === faults.failWriteAt) {
+        throw Object.assign(new Error('EBUSY: resource busy or locked（注入：明细文件被占用）'), { code: 'EBUSY' });
+      }
+      return write(options);
+    },
+    mergeGeneratedXlsxFiles: (paths, outputPath, merge) => {
+      faults.mergeCalls += 1;
+      if (faults.failMergeAt && faults.mergeCalls === faults.failMergeAt) throw new Error('合并失败（注入）');
+      return merge(paths, outputPath);
+    }
+  });
+  const templateA = env.defineTemplate('回滚-A', 'A');
+  const templateB = env.defineTemplate('回滚-B', 'B');
+  // 两个模板同属银行段「回滚」，共用一份种子文件：前组写入的种子须随后组失败一并还原
+  seed(env, '回滚-A', 'M001', 'USD', '2026-08-31', '100');
+  seed(env, '回滚-B', 'M002', 'USD', '2026-08-31', '200');
+  const seedFile = path.join(env.storageRoot, 'balance-seeds', '回滚.json');
+  const fileA = path.join(dir, 'step20-a.xlsx');
+  const fileB = path.join(dir, 'step20-b.xlsx');
+  const writeSources = (amountA, amountB, debitB = '') => {
+    writeSource(fileA, 'A', [['2026-09-01', 'M001', 'USD', amountA, '']]);
+    writeSource(fileB, 'B', [['2026-09-01', 'M002', 'USD', amountB, debitB]]);
+    return [env.entryFor(templateA, fileA), env.entryFor(templateB, fileB)];
+  };
+  const snapshot = () => {
+    const files = {};
+    for (const base of [path.join(env.storageRoot, 'exports'), path.join(env.storageRoot, 'balance-seeds')]) {
+      if (!fs.existsSync(base)) continue;
+      for (const name of fs.readdirSync(base, { recursive: true })) {
+        const full = path.join(base, String(name));
+        if (fs.statSync(full).isFile()) files[path.relative(env.storageRoot, full)] = fs.readFileSync(full).toString('base64');
+      }
+    }
+    return files;
+  };
+  const run = (entries) => {
+    faults.writeCalls = 0;
+    faults.mergeCalls = 0;
+    try {
+      env.fns.generateMultiTemplateGroupFiles({
+        fileEntries: entries,
+        fallbackTemplateConfig: env.getTemplateMappingConfig(templateA.id),
+        selectedBigAccount: null,
+        reuseMappedRows: true,
+        session: { key: 'session' },
+        replacePaths: ['/old/replaced.xlsx'],
+        inputFilePaths: [fileA, fileB]
+      });
+      return null;
+    } catch (error) {
+      return error;
+    }
+  };
+
+  // （1）首次导入，第二组明细写出时被占用：第一组新写的明细、余额删除，种子文件还原（同一文件身份）
+  const initial = snapshot();
+  const seedIno = fs.statSync(seedFile).ino;
+  faults.failWriteAt = 2;
+  const writeError = run(writeSources('10', '20'));
+  faults.failWriteAt = 0;
+  assertEq(writeError && writeError.code, 'EBUSY', 'Step20.写出失败原样抛出');
+  assertEq(snapshot(), initial, 'Step20.首次导入写出失败：新写的明细、余额删除，种子文件内容还原');
+  assertEq(fs.statSync(seedFile).ino, seedIno, 'Step20.种子文件原地还原，文件身份不变');
+  assertEq(env.removedSessionPaths, [], 'Step20.写出失败时不替换旧会话条目');
+
+  // （2）重试成功：写出两组与汇总，旧会话条目替换一次
+  const firstError = run(writeSources('10', '20'));
+  assertEq(firstError, null, 'Step20.重试成功');
+  const baseline = snapshot();
+  const baselineExports = Object.keys(baseline).filter((name) => name.endsWith('.xlsx')).sort();
+  assertEq(baselineExports.length, 6, `Step20.两组明细、余额与两份汇总：${baselineExports.join(',')}`);
+  assertEq(env.removedSessionPaths, ['/old/replaced.xlsx'], 'Step20.成功后替换一次旧会话条目');
+
+  // （3）覆盖导入（金额变化、文件名相同），余额汇总合并失败：已覆盖的明细、余额、明细汇总全部还原为上次内容，种子还原
+  faults.failMergeAt = 2;
+  const mergeError = run(writeSources('11', '21'));
+  faults.failMergeAt = 0;
+  assertEq(mergeError && mergeError.message, '合并失败（注入）', 'Step20.合并失败原样抛出');
+  assertEq(snapshot(), baseline, 'Step20.合并失败：已覆盖的同名输出与种子还原为上次内容');
+  assertEq(env.removedSessionPaths, ['/old/replaced.xlsx'], 'Step20.合并失败时不再替换旧会话条目');
+
+  // （4）第二组业务校验失败（收支同时有值）：写出前拦下，输出与种子不变
+  const validationError = run(writeSources('11', '21', '5'));
+  assertTrue(Boolean(validationError) && /同时有值/.test(validationError.message), `Step20.业务校验失败被拦下：${validationError && validationError.message}`);
+  assertEq(snapshot(), baseline, 'Step20.业务校验失败：输出与种子不变');
+  assertEq(env.removedSessionPaths, ['/old/replaced.xlsx'], 'Step20.业务校验失败时不替换旧会话条目');
+
+  // （5）再次重试成功：同名文件替换为新内容，不多出文件，旧会话条目再替换一次
+  const retryError = run(writeSources('11', '21'));
+  assertEq(retryError, null, 'Step20.再次重试成功');
+  const retried = snapshot();
+  const retriedExports = Object.keys(retried).filter((name) => name.endsWith('.xlsx')).sort();
+  assertEq(retriedExports, baselineExports, 'Step20.重试后输出文件与上次同名同数，不重复');
+  assertTrue(retriedExports.some((name) => retried[name] !== baseline[name]), 'Step20.重试后输出为新内容');
+  assertEq(env.removedSessionPaths, ['/old/replaced.xlsx', '/old/replaced.xlsx'], 'Step20.每次成功各替换一次旧会话条目');
+}
+
 // ⑱ PR #246 审查：目标渠道账户号有待处理冲突（候选 OLD1 / OLD2）、待加入模板维护该账户号为 NEW。只比较生效映射会放行加入，
 //    NEW 写入渠道而不在候选里，之后处理冲突被所选候选覆盖、账户血缘丢失。加入前一并核对待处理冲突。
 function verifyJoinChecksPendingConflicts(dir) {
@@ -1980,6 +2091,7 @@ async function run() {
     verifyLegacyBundleMultiLevelSkippedParent(dir);
     verifyMultiTemplateGenerationStaleState(dir);
     verifyOutputPathConcatenationConflict(dir);
+    verifyMultiTemplateGenerationRollback(dir);
     verifyJoinChecksPendingConflicts(dir);
     verifyMigrationFailureBlocksStatementOperations(dir);
   } finally {
