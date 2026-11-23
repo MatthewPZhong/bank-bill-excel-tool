@@ -299,7 +299,7 @@ test('buildMappedRows：预处理过滤掉、BillDate 特征值候补源单元�
     preprocessRowFilterRules,
     expectedSourceHeaders: header
   });
-  // 被过滤：第 4 行仍计入（保持 v3.2.19 口径，作为桥接候选的界线；直接识别不受界线裁剪，见 backlog B113）
+  // 被过滤：第 4 行仍计入（保持 v3.2.19 口径，作为桥接候选的界线；直接识别不受界线裁剪，见 backlog B122）
   const filtered = buildMappedRows(options([{ seq: 1, conditions: [{ field: '类型', op: '等于', value: '交易' }] }]));
   assert.deepEqual(filtered.preprocessRowFilterStats.droppedTransactionRowNumbers, [3, 4]);
   // 保留：第 4 行按合计行跳过，不进明细

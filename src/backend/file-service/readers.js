@@ -968,9 +968,10 @@ function readXlsxIntegerLiterals(filePath, workbook, sheetName, candidates) {
       continue;
     }
     const type = readXmlAttribute(match[1], 't') || 'n';
-    // 只认唯一的 <v>：有多个或写法异常（如 CDATA）时不还原，按无法核对原值提示
+    // 只认唯一的 <v>：有多个（自闭合的空 <v/> 也算一个）或写法异常（如 CDATA）时不还原，按无法核对原值提示
     const valueMatches = type === 'n' ? Array.from((match[2] || '').matchAll(valuePattern)) : [];
-    const literal = valueMatches.length === 1 ? valueMatches[0][1].trim() : '';
+    const valueElementCount = type === 'n' ? ((match[2] || '').match(/<(?:[\w.-]+:)?v\b[^>]*>/g) || []).length : 0;
+    const literal = valueMatches.length === 1 && valueElementCount === 1 ? valueMatches[0][1].trim() : '';
     literals.set(key, /^\d+$/.test(literal) ? literal.replace(/^0+(?=\d)/, '') : null);
   }
   return (r, c) => literals.get(`${r}:${c}`);

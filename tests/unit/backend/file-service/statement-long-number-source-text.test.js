@@ -18,7 +18,7 @@ const XLSX = require('xlsx');
 const { buildMappedRows } = require('../../../../src/backend/file-service');
 const { extractHeaders, readRows, readRowsWithMetadata } = require('../../../../src/backend/file-service/readers');
 const { MERCHANT_ID_CURRENCY_ONLY_MARKER, isUnverifiedLongNumber } = require('../../../../src/backend/file-service/common');
-const { buildLogicValueToken } = require('../../../../src/backend/file-service/logic-value');
+const { buildLogicValueFeatureCandidate, buildLogicValueToken } = require('../../../../src/backend/file-service/logic-value');
 
 const SERIAL = '9007199254740993';
 const CARD = '6222021234567890123';
@@ -846,4 +846,99 @@ test('费用账单「字段映射特殊处理」：被覆盖的列不提示底�
   assert.deepEqual(longNumberIssues(field).map((issue) => issue.cells), [[{ sourceField: '备用号', digitCount: 19 }]]);
   const none = generate([]);
   assert.deepEqual(longNumberIssues(none).map((issue) => issue.cells), [[{ sourceField: '流水号', digitCount: 19 }]]);
+});
+
+// ---- v3.2.21 release 审查回归（逻辑取值的特征值候补 × 长数字、费用字段覆盖 × 收支方向卡号）----
+
+test('逻辑取值的特征值候补：发生额按特征值的源列保持读取库的数值（明细与余额同一个值）；采用的候补提示其源列', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '金额', '备用金额', '附言', '备用号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'logic-feature.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', 1111, '', 2222, '']
+  ], { 1111: SERIAL, 2222: '6.2220212345678899E+18' });
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'ChannelOrderNo'],
+    mappingByField: {
+      BillDate: '日期',
+      Currency: '币种',
+      'Credit Amount': buildLogicValueToken([buildLogicValueFeatureCandidate('amount'), '备用金额']),
+      ChannelOrderNo: buildLogicValueToken([buildLogicValueFeatureCandidate('serial'), '备用号'])
+    },
+    expectedSourceHeaders: header,
+    featureFilters: {
+      amount: { id: 'amount', name: '金额', sourceField: '金额', separator: '', length: 16 },
+      serial: { id: 'serial', name: '流水号', sourceField: '附言', separator: '', length: 19 }
+    }
+  });
+  // 金额列不按原文还原：特征值取到读取库的数值，与余额计算用的是同一个值
+  assert.deepEqual(mapped.slice(1).map((row) => [row[2], row[4]]), [['9007199254740992', '6222021234567890000']]);
+  assert.deepEqual(longNumberIssues(mapped).map((issue) => issue.cells), [[
+    { sourceField: '金额', digitCount: 16 },
+    { sourceField: '附言', digitCount: 19 }
+  ]]);
+});
+
+test('逻辑取值的特征值候补未筛出时取下一个候补，不提示该特征值的源列', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '金额', '附言', '备用号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'logic-feature-miss.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', 100, 1111, 'B-01']
+  ], { 1111: '6.2220212345678899E+18' });
+  const mapped = buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'ChannelOrderNo'],
+    mappingByField: {
+      BillDate: '日期',
+      Currency: '币种',
+      'Credit Amount': '金额',
+      ChannelOrderNo: buildLogicValueToken([buildLogicValueFeatureCandidate('serial'), '备用号'])
+    },
+    expectedSourceHeaders: header,
+    // 19 位数字不满足 8 位特征长度：未筛出，取「备用号」
+    featureFilters: { serial: { id: 'serial', name: '流水号', sourceField: '附言', separator: '', length: 8 } }
+  });
+  assert.deepEqual(mapped.slice(1).map((row) => row[4]), ['B-01']);
+  assert.deepEqual(longNumberIssues(mapped), []);
+});
+
+test('费用账单行由「字段映射特殊处理」覆盖按收支方向取值的卡号列时，不提示未写出的源卡号；同一源列写进其他列时照常提示', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '手续费', '卡号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'fee-directional.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', 20, 1111]
+  ], { 1111: '6.2220212345678899E+18' });
+  const generate = (mappingByField, feeFieldMappings) => buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'Payee CardNo', 'Remark'],
+    mappingByField: { BillDate: '日期', Currency: '币种', 'Payee CardNo': '卡号', ...mappingByField },
+    amountMappingRules: { accountSourceField: '卡号' },
+    expectedSourceHeaders: header,
+    billSplitMerge: billSplitMerge({
+      billSplitRows: [splitRow({ isFeeBill: true, debitSourceField: '手续费' })],
+      feeFieldMappings
+    })
+  });
+  const overridden = generate({}, [{ templateField: 'Payee CardNo', valueType: 'input', value: 'FEE' }]);
+  assert.deepEqual(overridden.slice(1).map((row) => row.slice(3, 5)), [['20', 'FEE']]);
+  assert.deepEqual(longNumberIssues(overridden), []);
+  const directional = generate({}, []);
+  assert.deepEqual(directional.slice(1).map((row) => String(row[4])), ['6222021234567890000']);
+  assert.deepEqual(longNumberIssues(directional).map((issue) => issue.cells), [[{ sourceField: '卡号', digitCount: 19 }]]);
+  const alsoRemark = generate({ Remark: '卡号' }, [{ templateField: 'Payee CardNo', valueType: 'input', value: 'FEE' }]);
+  assert.deepEqual(alsoRemark.slice(1).map((row) => row.slice(4).map(String)), [['FEE', '6222021234567890000']]);
+  assert.deepEqual(longNumberIssues(alsoRemark).map((issue) => issue.cells), [[{ sourceField: '卡号', digitCount: 19 }]]);
+});
+
+test('XLSX：一个单元格有一个带内容的 <v> 和一个自闭合的空 <v/> 时同样不还原并提示', async (t) => {
+  const dir = createTempDir(t);
+  const rows = [HEADER, ['2026-11-01', 'USD', 100, 1111, 2222]];
+  const selfClosing = await writeXlsxWithLiterals(path.join(dir, 'self-closing-v.xlsx'), rows, { 1111: SERIAL, 2222: CARD },
+    (xml) => xml.replace(`<v>${SERIAL}</v>`, `<v>${SERIAL}</v><v/>`));
+  const mapped = map(selfClosing);
+  assert.equal(identifiers(mapped)[0][1], CARD);
+  assert.deepEqual(longNumberIssues(mapped).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
 });

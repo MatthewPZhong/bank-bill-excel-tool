@@ -418,16 +418,24 @@ function buildMappedRows({
       const normalized = normalizeCell(field);
       if (normalized) fields.add(normalized);
     };
+    // 特征值（直接映射或逻辑取值的候补）按其规则读取的源列
+    const addFeatureFilterSourceField = (featureFilterId) => {
+      const featureFilter = featureFilters && featureFilters[featureFilterId];
+      if (featureFilter) addSourceField(featureFilter.sourceField);
+    };
     const addMapping = (mappingValue) => normalizeMappingTokens(mappingValue).forEach((token) => {
       const logicValueFields = parseLogicValueToken(token);
       if (logicValueFields !== null) {
-        logicValueFields.forEach(addSourceField);
+        logicValueFields.forEach((field) => {
+          const featureFilterRef = parseLogicValueFeatureFilterRef(field);
+          if (featureFilterRef !== null) addFeatureFilterSourceField(featureFilterRef);
+          else addSourceField(field);
+        });
         return;
       }
       const featureFilterId = parseFeatureFilterToken(token);
       if (featureFilterId !== null) {
-        const featureFilter = featureFilters && featureFilters[featureFilterId];
-        if (featureFilter) addSourceField(featureFilter.sourceField);
+        addFeatureFilterSourceField(featureFilterId);
         return;
       }
       addField(token);
@@ -692,7 +700,13 @@ function buildMappedRows({
         return resolveLogicValue(logicValueFields, (field) => {
           const featureFilterRef = parseLogicValueFeatureFilterRef(field);
           if (featureFilterRef !== null) {
-            return featureValues.get(featureFilterRef) ?? '';
+            const featureValue = featureValues.get(featureFilterRef) ?? '';
+            // 取到值即被采用（resolveLogicValue 取第一个非空候补）：与直接映射特征值一样记其源单元格
+            const featureFilter = activeFeatureFilterById.get(featureFilterRef);
+            if (featureFilter && normalizeCell(featureValue) !== '') {
+              noteSourceCell(featureFilter.rule.sourceField, row[featureFilter.sourceIndex]);
+            }
+            return featureValue;
           }
           const index = sourceIndexByField.get(field);
           return index === undefined ? '' : noteSourceCell(field, row[index]);
@@ -982,25 +996,27 @@ function buildMappedRows({
         // hasCreditAmount/hasDebitAmount closure 变量）。
         const hasCreditInRow = hasEffectiveAmount(creditValue);
         const hasDebitInRow = hasEffectiveAmount(debitValue);
+        // v3.2.21：费用账单行中由「字段映射特殊处理」覆盖的列（见下方）不按收支方向取值：读到的值不写出，其中的长数字也不提示
+        const overriddenByFeeField = (targetIndex) => isFeeBillRow && billSplitFeeFieldTargetIndexes.has(targetIndex);
 
         // Drawee Name: 只有 credit-only 拆分行填值，其它情况置空（与 v1.4.8 的 source-row 级语义对齐，
         // 只是判定维度从 source row 变成拆分行）
-        if (draweeNameIndex >= 0 && nameSourceField && draweeNameMappingValue === nameSourceField) {
+        if (draweeNameIndex >= 0 && !overriddenByFeeField(draweeNameIndex) && nameSourceField && draweeNameMappingValue === nameSourceField) {
           const rawName = hasCreditInRow && !hasDebitInRow ? readSourceCell(originalRow, nameSourceField) : '';
           expandedRow[draweeNameIndex] = rawName != null ? rawName : '';
         }
         // Payee Name: 只有 debit-only 拆分行填值
-        if (payeeNameIndex >= 0 && nameSourceField && payeeNameMappingValue === nameSourceField) {
+        if (payeeNameIndex >= 0 && !overriddenByFeeField(payeeNameIndex) && nameSourceField && payeeNameMappingValue === nameSourceField) {
           const rawName = hasDebitInRow && !hasCreditInRow ? readSourceCell(originalRow, nameSourceField) : '';
           expandedRow[payeeNameIndex] = rawName != null ? rawName : '';
         }
         // Drawee CardNo: 只有 credit-only 拆分行填值
-        if (draweeCardNoIndex >= 0 && accountSourceField && draweeCardNoMappingValue === accountSourceField) {
+        if (draweeCardNoIndex >= 0 && !overriddenByFeeField(draweeCardNoIndex) && accountSourceField && draweeCardNoMappingValue === accountSourceField) {
           const rawAcct = hasCreditInRow && !hasDebitInRow ? readSourceCell(originalRow, accountSourceField) : '';
           expandedRow[draweeCardNoIndex] = rawAcct != null ? rawAcct : '';
         }
         // Payee CardNo: 只有 debit-only 拆分行填值
-        if (payeeCardNoIndex >= 0 && accountSourceField && payeeCardNoMappingValue === accountSourceField) {
+        if (payeeCardNoIndex >= 0 && !overriddenByFeeField(payeeCardNoIndex) && accountSourceField && payeeCardNoMappingValue === accountSourceField) {
           const rawAcct = hasDebitInRow && !hasCreditInRow ? readSourceCell(originalRow, accountSourceField) : '';
           expandedRow[payeeCardNoIndex] = rawAcct != null ? rawAcct : '';
         }
@@ -1695,7 +1711,7 @@ function buildMappedRows({
       droppedTransactionRowNumbers: preprocessed.droppedRows
         // v3.2.21：BillDate 逻辑取值的特征值候补把合计标签筛成空、回落到有效日期的行，这里仍算作上一段的交易行（不套用
         //   保留行的合计判定，保持 v3.2.19 口径）：它充当桥接候选的界线。直接识别不受该界线裁剪，合计行上的账号仍可能
-        //   被认作下一段的账号——与既有合计行同一问题，见 knowledge/backlog.md B113。
+        //   被认作下一段的账号——与既有合计行同一问题，见 knowledge/backlog.md B122。
         .filter(({ row }) => {
           const featureValues = extractRowFeatureValues(row);
           return billDateMappings.some((mappingValue) => Boolean(

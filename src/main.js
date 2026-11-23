@@ -2750,6 +2750,7 @@ function resolveGenerationTemplateConfig({ fileEntries = [], fallbackTemplateCon
 
 // 改选大账号后复用已生成的明细：大账号 / 币种列被所选大账号覆盖（overriddenTargetFields），去掉币种未匹配提示；
 //   v3.2.21 B112：长数字提示中只写进这些列的源字段（cells[].targetFields，见 buildMappedRows）也去掉，其余提示不变
+//   （手动分配大账号按行复用这一口径，见 applyBigAccountAssignmentsToFileEntries）
 function dropIssuesOverriddenBySelectedBigAccount(issues, overriddenTargetFields) {
   return issues.reduce((kept, issue) => {
     if (issue && issue.type === 'currency-unmapped') return kept;
@@ -3494,12 +3495,20 @@ function applyBigAccountAssignmentsToFileEntries(fileEntries = [], assignments =
     const dataRows = nextRows.slice(1);
 
     const keepIndices = new Set();
+    // v3.2.21 B112：各源行（rowMetas 的 sourceRowNumber）导出的明细行是否都被分配的大账号覆盖了 MerchantId / Currency
+    const sourceRowNumberOf = (i) => (Array.isArray(nextRows.rowMetas) && nextRows.rowMetas[i]
+      ? nextRows.rowMetas[i].sourceRowNumber
+      : undefined);
+    const assignedSourceRows = new Set();
+    const unassignedSourceRows = new Set();
 
     blocks.forEach((block) => {
       const assignment = assignmentByRowIndex.get(globalBlockIndex);
 
       for (let i = block.startIndex; i <= block.endIndex && i < dataRows.length; i++) {
         keepIndices.add(i);
+        const sourceRowNumber = sourceRowNumberOf(i);
+        if (sourceRowNumber !== undefined) (assignment ? assignedSourceRows : unassignedSourceRows).add(sourceRowNumber);
         if (assignment) {
           const row = dataRows[i];
           if (merchantIdIndex !== undefined) {
@@ -3525,7 +3534,23 @@ function applyBigAccountAssignmentsToFileEntries(fileEntries = [], assignments =
       }
     });
     filteredRows.rowMetas = filteredRowMetas;
-    if (Array.isArray(nextRows.issues)) filteredRows.issues = nextRows.issues;
+    if (Array.isArray(nextRows.issues)) {
+      // 与自动选定大账号复用明细同一口径（dropIssuesOverriddenBySelectedBigAccount）：长数字提示中只写进被分配的大账号
+      //   覆盖的列的源字段不再提示；只处理导出行全部被覆盖的源行，其余提示不变
+      const overriddenTargetFields = new Set([
+        ...(merchantIdIndex !== undefined ? ['MerchantId'] : []),
+        ...(currencyIndex !== undefined ? ['Currency'] : [])
+      ]);
+      filteredRows.issues = nextRows.issues.reduce((kept, issue) => {
+        if (issue && issue.type === 'long-number-unverified'
+          && assignedSourceRows.has(issue.rowNumber) && !unassignedSourceRows.has(issue.rowNumber)) {
+          kept.push(...dropIssuesOverriddenBySelectedBigAccount([issue], overriddenTargetFields));
+          return kept;
+        }
+        kept.push(issue);
+        return kept;
+      }, []);
+    }
     if (Array.isArray(nextRows.headerBreaks)) filteredRows.headerBreaks = [];
     if (Array.isArray(nextRows.skippedRows)) filteredRows.skippedRows = nextRows.skippedRows;
     if (Array.isArray(nextRows.simultaneousRows)) filteredRows.simultaneousRows = nextRows.simultaneousRows;
@@ -10674,7 +10699,7 @@ function registerTemplateHandlers() {
             skippedCount += 1;
             // v3.2.21：记下跳过的模板与原因（如旧版本模板包里失效的逻辑取值候补），导入结果只给出跳过数量
             appendActivityLogEntry({
-              level: 'warn',
+              level: 'warning',
               message: '模板包导入时跳过模板',
               details: [`模板名：${entry.name}`, `原因：${error.message}`]
             });

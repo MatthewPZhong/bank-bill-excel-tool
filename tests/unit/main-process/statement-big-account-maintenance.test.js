@@ -402,3 +402,40 @@ test('暂存大账号选择上下文时保留余额方式不同的渠道组的�
     if (indexes) assert.notEqual(stored.balanceModeMixedEntryIndexes, indexes, '复制一份，不与导入时的数组共用');
   }
 });
+
+// v3.2.21 release 审查：手动分配大账号与自动选定同一口径，长数字提示中只写进被覆盖列（MerchantId / Currency）的源字段不再提示
+test('手动分配大账号：被分配的行中只写进大账号 / 币种列的长数字提示去掉，写进其他列的与未分配行的照常保留', () => {
+  const { cloneRowsWithMetadata } = require('../../../src/main-process/statement-session');
+  deps.cloneRowsWithMetadata = cloneRowsWithMetadata;
+  deps.buildFieldIndexMap = load('buildFieldIndexMap');
+  deps.dropIssuesOverriddenBySelectedBigAccount = load('dropIssuesOverriddenBySelectedBigAccount');
+  const assign = load('applyBigAccountAssignmentsToFileEntries');
+  const longNumber = (rowNumber, cells) => ({ type: 'long-number-unverified', fileName: 'a.xlsx', rowNumber, cells });
+  const issues = [
+    longNumber(2, [{ sourceField: '币种码', digitCount: 19, targetFields: ['Currency'] }]),
+    longNumber(3, [
+      { sourceField: '币种码', digitCount: 19, targetFields: ['Currency'] },
+      { sourceField: '卡号', digitCount: 19, targetFields: ['Payee CardNo', 'Currency'] }
+    ]),
+    { type: 'currency-unmapped', fileName: 'a.xlsx', rowNumber: 2 }
+  ];
+  const entry = {
+    filePath: '/synthetic/a.xlsx',
+    matchedTemplateId: 1,
+    detailRows: Object.assign([
+      ['BillDate', 'MerchantId', 'Currency', 'Payee CardNo', 'Credit Amount', 'Debit Amount'],
+      ['2026-09-01', '', 'X', '', '1', ''],
+      ['2026-09-02', '', 'X', 'C', '2', '']
+    ], { rowMetas: [{ sourceRowNumber: 2 }, { sourceRowNumber: 3 }], issues })
+  };
+  const [assigned] = assign([entry], [{ merchantId: 'M1', currency: 'USD', rowIndex: 0 }]);
+  assert.deepEqual(assigned.detailRows.slice(1).map((row) => [row[1], row[2]]), [['M1', 'USD'], ['M1', 'USD']]);
+  assert.deepEqual(assigned.detailRows.issues, [
+    longNumber(3, [{ sourceField: '卡号', digitCount: 19, targetFields: ['Payee CardNo', 'Currency'] }]),
+    { type: 'currency-unmapped', fileName: 'a.xlsx', rowNumber: 2 }
+  ]);
+  assert.equal(entry.detailRows.issues.length, 3, '不改原条目');
+  // 没有分配的账号块：行与提示都不变
+  const [unassigned] = assign([entry], []);
+  assert.deepEqual(unassigned.detailRows.issues, issues);
+});
