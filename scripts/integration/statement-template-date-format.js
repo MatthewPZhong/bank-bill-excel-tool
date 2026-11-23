@@ -132,7 +132,7 @@ function createMain(database) {
     'buildCurrencyBigAccountMappingConfig', 'isCurrencyOnlyMerchantMapping', 'normalizeBundleTemplateHeaders',
     'normalizeBundleBillSplitMeta', 'isLegacyOrientedTemplateMappings', 'buildTemplateFieldReferenceInput',
     'readTemplateBundleFile', 'resolveTemplateBundleVersion', 'upgradeLegacyBundleFeatureFilterRefs', 'collectReferencedFeatureFilterIds',
-    'maskAccountLikeTextForLog',
+    'maskAccountLikeTextForLog', 'collectTemplateAccountValuesForLog',
     'normalizeTemplateDateFormat',
     'formatTemplateDateFormatLabel',
     // 保存 / 导入处理器用到的 main.js 函数（渠道、余额方式校验在无渠道时直接返回）
@@ -182,7 +182,8 @@ function createMain(database) {
     getCurrencyMappingTablePath: () => path.join(ROOT, 'assets', '币种映射表.xlsx'),
     getEnumConfig: () => ({ filePath: 'COMMON枚举.xlsx' }),
     loadEnumValues: () => ENUM_VALUES.slice(),
-    expandBigAccountConfigurations: (items) => (Array.isArray(items) ? items : []),
+    // 生产实现（按币种展开为逐行大账号）：用例带大账号保存时须与库的行格式一致
+    expandBigAccountConfigurations: require('../../src/main-process/big-account-recognition').normalizeMaintainedBigAccounts,
     createStatementWorkbookReadGuard: () => undefined,
     buildBigAccountRecognitionBasis: () => null,
     finalizeBigAccountRecognitionBasis: () => null,
@@ -406,6 +407,25 @@ function verifySaveHandler(database, main) {
     '① 库内旧值、模板名含账号时留痕只写编号位数');
   assertEq(maskedHandlers.activity.filter((entry) => entry.message === '保存模板映射成功').map((entry) => entry.details[0]),
     ['模板名：旧值模板（16位数字）'], '① 同次保存的成功日志同样写脱敏的模板名');
+  // release 审查：模板以维护的大账号命名（字母数字混合、没有连续 4 位数字，如 AC12B34）时按该账号整体脱敏
+  database.db.prepare('UPDATE templates SET name = ? WHERE id = ?').run('AC12B34', legacy.id);
+  const letteredHandlers = loadTemplateHandlers(database, main);
+  const managedMappings = () => draftMappings().map((item) => (item.templateField === 'MerchantId'
+    ? { ...item, mappedField: CONSTANTS.MERCHANT_ID_SELF_INPUT_OPTION } : item));
+  const letteredSave = letteredHandlers.saveMappings({
+    templateId: legacy.id, mappings: managedMappings(), dateFormat: 'MDY',
+    bigAccounts: [{ merchantId: 'AC12B34', currencies: ['USD'], accountNature: 'own' }, { merchantId: 'M001', currencies: ['USD'] }]
+  });
+  assertEq(letteredSave.status, 'success', '① 带大账号保存成功');
+  assertEq(dateFormatLogLines(letteredHandlers), ['模板名：（7位账号）｜日期格式：日在前（dd/mm/yyyy） → 月在前（mm/dd/yyyy）'],
+    '① 模板以字母数字大账号命名时日期格式留痕按账号整体脱敏');
+  // 本次只提交客户账号（自有账号 AC12B34 保留在库里，preserveOwn）时同样按库里维护的账号脱敏
+  const keptHandlers = loadTemplateHandlers(database, main);
+  const keptSave = keptHandlers.saveMappings({
+    templateId: legacy.id, mappings: managedMappings(), dateFormat: 'DMY', preserveOwn: true, bigAccounts: [{ merchantId: 'M001', currencies: ['USD'] }]
+  });
+  assertEq([keptSave.status, dateFormatLogLines(keptHandlers)],
+    ['success', ['模板名：（7位账号）｜日期格式：月在前（mm/dd/yyyy） → 日在前（dd/mm/yyyy）']], '① 库里保留的自有账号同样用于脱敏');
   database.db.prepare('UPDATE templates SET name = ? WHERE id = ?').run('旧值模板', legacy.id);
 
   saveTemplate(database, retried, '月在前模板', 'MDY');

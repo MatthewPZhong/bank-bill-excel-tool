@@ -44,7 +44,14 @@ test('模板包导入跳过模板时，活动日志的原因经 maskAccountLikeT
   assert.ok(start > 0);
   const snippet = MAIN_SOURCE.slice(start - 400, start + 400);
   // 条目里三类大账号配置的账号都传入，按原样整体替换
-  assert.match(snippet, /\['bigAccounts', 'fixedAssignments', 'currencyBigAccounts'\]/);
+  assert.match(snippet, /const entryAccountValues = collectTemplateAccountValuesForLog\(entry\);/);
+  const { normalizeCell } = require('../../../src/backend/file-service');
+  const collectTemplateAccountValuesForLog = loadMainFunction('collectTemplateAccountValuesForLog', { normalizeCell });
+  assert.deepEqual(collectTemplateAccountValuesForLog(
+    { bigAccounts: [{ merchantId: ' AC12B34 ' }], fixedAssignments: [{ merchantId: 'M2' }], currencyBigAccounts: [{ merchantId: 'M3' }], other: [{ merchantId: 'X' }] },
+    { bigAccounts: [{ merchantId: 'OWN1' }] },
+    null
+  ), ['AC12B34', 'M2', 'M3', 'OWN1']);
   assert.match(snippet, /原因：\$\{maskAccountLikeTextForLog\(error\.message, entryAccountValues\)\}/);
   // 模板名由用户填写，可能含账号：同样脱敏
   assert.match(snippet, /模板名：\$\{maskAccountLikeTextForLog\(entry\.name, entryAccountValues\)\}/);

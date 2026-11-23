@@ -2749,6 +2749,14 @@ function resolveGenerationTemplateConfig({ fileEntries = [], fallbackTemplateCon
   return getTemplateMappingConfig(templateIds[0]) || fallbackTemplateConfig;
 }
 
+// 模板配置（大账号、固定赋值、仅有币种时的大账号）中的账号：日志里的模板名、渠道名等按它们整体脱敏（以不含连续 4 位数字的
+//   实际账号命名时，只按数字写法脱敏会漏，release 审查）
+function collectTemplateAccountValuesForLog(...configurations) {
+  return configurations.flatMap((configuration) => ['bigAccounts', 'fixedAssignments', 'currencyBigAccounts']
+    .flatMap((key) => (configuration && Array.isArray(configuration[key]) ? configuration[key] : []))
+    .map((item) => normalizeCell(item && item.merchantId)));
+}
+
 // v3.2.21：写进活动日志的说明文字中的账号、卡号等编号不持久化（AGENTS.md 敏感数据边界）。
 //   accountValues：调用方已知的账号（如模板包条目里的大账号），在文中原样出现时整体替换，不按写法猜边界；
 //   其余连续 4 位以上的数字（数字之间可夹空格、连字符、点，如按四位一组书写的号码；含全角数字）一律只写位数
@@ -10224,8 +10232,12 @@ function registerTemplateHandlers() {
       );
       // v3.2.21：日期格式决定交易归属日，变化时在落库后立即留痕——不受随后模板库文件同步失败影响
       //   （同步失败时界面提示保存失败，但库内已是新值；重试时旧值已等于新值，不会再记）
-      // 模板名由用户填写、可能以账号命名：本次保存的两条日志都只写编号位数（release 审查）
-      const loggedTemplateName = maskAccountLikeTextForLog(template.name);
+      // 模板名由用户填写、可能以账号命名：本次保存的两条日志都只写编号位数；模板维护的账号（本次提交的，与只提交客户账号时
+      //   库里保留的自有账号）原样出现时整体替换（release 审查）
+      const templateAccountValues = collectTemplateAccountValuesForLog(templateConfiguration, {
+        bigAccounts: database.getTemplateBigAccounts(payload.templateId, { includeOwn: true })
+      });
+      const loggedTemplateName = maskAccountLikeTextForLog(template.name, templateAccountValues);
       if (dateFormat && dateFormat !== previousDateFormat) {
         appendActivityLogEntry({
           level: 'info',
@@ -10246,7 +10258,7 @@ function registerTemplateHandlers() {
         details: [
           `模板名：${loggedTemplateName}`,
           ...(assignmentResult && assignmentResult.changed
-            ? [`渠道：${savedTemplate && savedTemplate.channelName ? maskAccountLikeTextForLog(savedTemplate.channelName) : '（不属于任何渠道）'}`]
+            ? [`渠道：${savedTemplate && savedTemplate.channelName ? maskAccountLikeTextForLog(savedTemplate.channelName, templateAccountValues) : '（不属于任何渠道）'}`]
             : [])
         ]
       });
@@ -10755,9 +10767,7 @@ function registerTemplateHandlers() {
             skippedCount += 1;
             // v3.2.21：记下跳过的模板与原因（如旧版本模板包里失效的逻辑取值候补），导入结果只给出跳过数量。
             //   模板名（用户填写）与原因中的账号等编号不写进日志：条目里的大账号原样出现时整体替换（不论写法），其余长数字只写位数（release 审查）
-            const entryAccountValues = ['bigAccounts', 'fixedAssignments', 'currencyBigAccounts']
-              .flatMap((key) => (Array.isArray(entry[key]) ? entry[key] : []))
-              .map((item) => normalizeCell(item && item.merchantId));
+            const entryAccountValues = collectTemplateAccountValuesForLog(entry);
             appendActivityLogEntry({
               level: 'warning',
               message: '模板包导入时跳过模板',

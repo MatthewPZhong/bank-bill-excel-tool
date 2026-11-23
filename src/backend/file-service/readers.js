@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const zlib = require('node:zlib');
 const XLSX = require('xlsx');
 const JSZip = require('jszip');
 const {
@@ -349,8 +350,33 @@ function stripXmlComments(text) {
   return String(text).replace(/<!--[\s\S]*?-->/g, '');
 }
 
+// OOXML 关系命名空间（过渡与严格两种写法）
+const OOXML_RELATIONSHIP_NAMESPACES = new Set([
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+  'http://purl.oclc.org/ooxml/officeDocument/relationships'
+]);
+
+// <sheet> 的关系 Id：标签上须恰好一个「前缀:id」属性，且该前缀在 workbook.xml 中只绑定到 OOXML 关系命名空间。读取库按属性的
+//   本地名取 id（有多个时取后一个），标签另带扩展属性（如 custom:id）或前缀绑定不明时无法唯一确认它读的是哪张表，返回 null
+//   （release 审查：否则可能取到另一张表的 XML，两表同一位置的数值舍入后相等时把另一张表的流水号写进当前表）
+function readSheetRelationId(sheetTag, workbookText) {
+  const idAttributes = sheetTag.match(/\s[\w.-]+:id\s*=/g) || [];
+  if (idAttributes.length !== 1) return null;
+  const prefix = idAttributes[0].trim().replace(/:id\s*=$/, '');
+  const escapedPrefix = prefix.replace(/[.-]/g, '\\$&');
+  const bindings = new Set();
+  const declarationPattern = new RegExp(`\\sxmlns:${escapedPrefix}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'g');
+  let declaration;
+  while ((declaration = declarationPattern.exec(workbookText)) !== null) {
+    bindings.add(declaration[1] !== undefined ? declaration[1] : declaration[2]);
+  }
+  if (bindings.size !== 1 || !OOXML_RELATIONSHIP_NAMESPACES.has(Array.from(bindings)[0])) return null;
+  return readXmlAttribute(sheetTag, `${escapedPrefix}:id`);
+}
+
 // 按 workbook.xml 中 <sheet> 的顺序（即 SheetNames 的顺序）与关系文件找到工作表 XML；找不到返回 null。
-//   注释里的标签不算；同一关系 Id 有多条有效关系时无法唯一确认来源，同样返回 null（按无法核对原值处理）
+//   注释里的标签不算；同一关系 Id 有多条有效关系、或 <sheet> 的关系属性无法唯一确认时无法确认来源，同样返回 null
+//   （按无法核对原值处理）
 function findXlsxSheetXml(workbook, sheetName) {
   const files = workbook && workbook.files;
   const directory = workbook && workbook.Directory;
@@ -360,17 +386,92 @@ function findXlsxSheetXml(workbook, sheetName) {
   const workbookDir = String(workbookPath).replace(/^\/+/, '').split('/').slice(0, -1).join('/');
   const relsXml = getZipEntryBuffer(files, `${workbookDir ? `${workbookDir}/` : ''}_rels/${String(workbookPath).split('/').pop()}.rels`);
   if (!relsXml) return null;
-  const sheetTags = stripXmlComments(workbookXml.toString('utf8')).match(/<(?:[\w.-]+:)?sheet\b[^>]*>/g) || [];
+  const workbookText = stripXmlComments(workbookXml.toString('utf8'));
+  const sheetTags = workbookText.match(/<(?:[\w.-]+:)?sheet\b[^>]*>/g) || [];
   const sheetIndex = Array.isArray(workbook.SheetNames) ? workbook.SheetNames.indexOf(sheetName) : -1;
   const sheetTag = sheetIndex >= 0 ? sheetTags[sheetIndex] : null;
   if (!sheetTag || readXmlAttribute(sheetTag, 'name') !== sheetName) return null;
-  const relationId = readXmlAttribute(sheetTag, '[\\w.-]+:id');
+  const relationId = readSheetRelationId(sheetTag, workbookText);
   if (!relationId) return null;
   const relationTags = (stripXmlComments(relsXml.toString('utf8')).match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || [])
     .filter((tag) => readXmlAttribute(tag, 'Id') === relationId);
   if (relationTags.length !== 1) return null;
   const target = readXmlAttribute(relationTags[0], 'Target');
   return target ? getZipEntryBuffer(files, normalizeZipPath(workbookDir, target)) : null;
+}
+
+// 按需解压 ZIP 条目：按中央目录（与读取库同口径）登记各条目，读取 content 时才解压该条目（release 审查：核对长数字只需
+//   workbook.xml、其关系文件与目标工作表，不必把其他工作表、嵌入图片等整包再解压一次）。ZIP64、加密、条目名重复（不区分
+//   大小写）、未知压缩方式或结构异常时返回 null，由调用方退回整包读取。条目数据读不出、解压失败或长度与登记不符时 content 为 null
+//   （按无法核对原值处理）；容量类错误照常抛出
+function openZipEntriesLazily(buffer) {
+  const EOCD_SIZE = 22;
+  if (!Buffer.isBuffer(buffer) || buffer.length < EOCD_SIZE) return null;
+  let eocd = -1;
+  const lowest = Math.max(0, buffer.length - EOCD_SIZE - 0xffff);
+  for (let offset = buffer.length - EOCD_SIZE; offset >= lowest; offset -= 1) {
+    if (buffer.readUInt32LE(offset) === 0x06054b50 && offset + EOCD_SIZE + buffer.readUInt16LE(offset + 20) === buffer.length) {
+      eocd = offset;
+      break;
+    }
+  }
+  if (eocd < 0) return null;
+  const entryCount = buffer.readUInt16LE(eocd + 10);
+  const directorySize = buffer.readUInt32LE(eocd + 12);
+  const directoryOffset = buffer.readUInt32LE(eocd + 16);
+  if (entryCount === 0xffff || directorySize === 0xffffffff || directoryOffset === 0xffffffff) return null;
+  if (directoryOffset + directorySize > eocd) return null;
+  const files = {};
+  const seenNames = new Set();
+  let cursor = directoryOffset;
+  for (let index = 0; index < entryCount; index += 1) {
+    if (cursor + 46 > eocd || buffer.readUInt32LE(cursor) !== 0x02014b50) return null;
+    const flags = buffer.readUInt16LE(cursor + 8);
+    const method = buffer.readUInt16LE(cursor + 10);
+    const compressedSize = buffer.readUInt32LE(cursor + 20);
+    const uncompressedSize = buffer.readUInt32LE(cursor + 24);
+    const nameLength = buffer.readUInt16LE(cursor + 28);
+    const nameEnd = cursor + 46 + nameLength;
+    if (nameEnd > eocd) return null;
+    const name = buffer.toString(flags & 0x800 ? 'utf8' : 'latin1', cursor + 46, nameEnd);
+    const localOffset = buffer.readUInt32LE(cursor + 42);
+    cursor = nameEnd + buffer.readUInt16LE(cursor + 30) + buffer.readUInt16LE(cursor + 32);
+    if (flags & 0x1) return null;
+    if (compressedSize === 0xffffffff || uncompressedSize === 0xffffffff || localOffset === 0xffffffff) return null;
+    const key = name.replace(/^\/+/, '');
+    const lowerKey = key.toLowerCase();
+    if (seenNames.has(lowerKey)) return null;
+    seenNames.add(lowerKey);
+    if (key.endsWith('/')) continue;
+    if (method !== 0 && method !== 8) return null;
+    let loaded = false;
+    let content = null;
+    files[key] = {
+      get content() {
+        if (!loaded) {
+          loaded = true;
+          content = inflateZipEntry(buffer, { localOffset, method, compressedSize, uncompressedSize });
+        }
+        return content;
+      }
+    };
+  }
+  return files;
+}
+
+function inflateZipEntry(buffer, { localOffset, method, compressedSize, uncompressedSize }) {
+  if (localOffset + 30 > buffer.length || buffer.readUInt32LE(localOffset) !== 0x04034b50) return null;
+  const dataStart = localOffset + 30 + buffer.readUInt16LE(localOffset + 26) + buffer.readUInt16LE(localOffset + 28);
+  if (dataStart + compressedSize > buffer.length) return null;
+  const data = buffer.subarray(dataStart, dataStart + compressedSize);
+  let output;
+  try {
+    output = method === 0 ? data : zlib.inflateRawSync(data);
+  } catch (error) {
+    if (isMemoryLimitError(error)) throw error;
+    return null;
+  }
+  return output.length === uncompressedSize ? output : null;
 }
 
 function sha256Text(text) {
@@ -930,18 +1031,23 @@ function collectLongIntegerSourceText({ filePath, workbook, sheet, sheetName, ra
 // XLSX 工作表 XML 中候选单元格（按 r 属性定位，且须与所在 <row> 的行号一致）的 <v> 字面值；数值单元格的前导 0 不属于原值，去掉；
 //   公式单元格的值是缓存的计算结果，不给原文。
 //   读取时没有保留压缩包（未开查重）时只解开压缩包取 XML，不再解析工作表（只在有候选单元格时多读这一次；
-//   不为所有读取保留压缩包，以免每个文件都多占一份 XML 内存）。扫完整张表：同一位置出现多次（含乱序声明）、
+//   不为所有读取保留压缩包，以免每个文件都多占一份 XML 内存）；按需解压，只解开用到的条目（openZipEntriesLazily），
+//   压缩包结构不支持按需读取时退回整包解压。扫完整张表：同一位置出现多次（含乱序声明）、
 //   类型不是数值的不给原文；有单元格没有（或无法解析）位置属性时，读取库按前一格顺推位置、可能与其他单元格重叠，
 //   整张表都不给原文。容量类错误照常抛出（按文件过大处理），其余读不到时不给原文。
 function readXlsxIntegerLiterals(filePath, workbook, sheetName, candidates) {
   let source = workbook;
   if (!workbook.files) {
     try {
-      const container = XLSX.CFB.read(fs.readFileSync(filePath), { type: 'buffer' });
-      const files = {};
-      container.FullPaths.forEach((fullPath, index) => {
-        files[String(fullPath).replace(/^Root Entry\//, '')] = container.FileIndex[index];
-      });
+      const buffer = fs.readFileSync(filePath);
+      let files = openZipEntriesLazily(buffer);
+      if (!files) {
+        const container = XLSX.CFB.read(buffer, { type: 'buffer' });
+        files = {};
+        container.FullPaths.forEach((fullPath, index) => {
+          files[String(fullPath).replace(/^Root Entry\//, '')] = container.FileIndex[index];
+        });
+      }
       source = { files, Directory: workbook.Directory, SheetNames: workbook.SheetNames };
     } catch (error) {
       if (isMemoryLimitError(error)) throw error;
@@ -1750,5 +1856,7 @@ module.exports = {
   readCsvRowsWithinBudget,
   readRows,
   readRowsWithMetadata,
-  readXlsxSheetMetaLite
+  readXlsxSheetMetaLite,
+  // 按需解压 ZIP 条目（导出供单测）
+  openZipEntriesLazily
 };

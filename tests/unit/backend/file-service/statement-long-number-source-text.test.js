@@ -16,7 +16,7 @@ const JSZip = require('jszip');
 const XLSX = require('xlsx');
 
 const { buildMappedRows } = require('../../../../src/backend/file-service');
-const { extractHeaders, readRows, readRowsWithMetadata } = require('../../../../src/backend/file-service/readers');
+const { extractHeaders, openZipEntriesLazily, readRows, readRowsWithMetadata } = require('../../../../src/backend/file-service/readers');
 const { MERCHANT_ID_CURRENCY_ONLY_MARKER, isUnverifiedLongNumber } = require('../../../../src/backend/file-service/common');
 const { buildLogicValueFeatureCandidate, buildLogicValueToken } = require('../../../../src/backend/file-service/logic-value');
 
@@ -1216,4 +1216,101 @@ test('费用账单覆盖的 ValueDate 取自长数字源列、规范化后为空
   assert.deepEqual(longNumberIssues(alsoOrderNo).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['备用号']]);
   const asAmount = generate([valueDate], '备用号');
   assert.deepEqual(longNumberIssues(asAmount).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['备用号']]);
+});
+
+// release 审查：<sheet> 上另带扩展属性（如 custom:id）时，读取库按属性本地名取后一个 id，无法唯一确认读的是哪张表：
+//   不还原并提示（两表同一位置的数值舍入后相等，数值核对发现不了串表）；关系属性换用其他前缀、但绑定到关系命名空间时照常还原
+test('XLSX：<sheet> 的关系属性无法唯一确认（另带扩展 :id 属性）时不还原并提示；其他前缀绑定到关系命名空间时照常还原', async (t) => {
+  const dir = createTempDir(t);
+  const build = async (fileName, transformWorkbook) => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([HEADER, ['2026-11-01', 'USD', 100, 1111, 5]]), 'Sheet1');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([HEADER, ['2026-11-01', 'USD', 999, 2222, 6]]), 'Sheet2');
+    const zip = await JSZip.loadAsync(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
+    for (const [sheetPath, placeholder, literal] of [
+      ['xl/worksheets/sheet1.xml', 1111, '9007199254740992'],
+      ['xl/worksheets/sheet2.xml', 2222, '9007199254740993']
+    ]) {
+      const xml = await zip.file(sheetPath).async('string');
+      zip.file(sheetPath, xml.replace(`<v>${placeholder}</v>`, `<v>${literal}</v>`));
+    }
+    const workbookXml = await zip.file('xl/workbook.xml').async('string');
+    assert.match(workbookXml, /<sheet name="Sheet1" sheetId="1" r:id="rId1"\/>/);
+    zip.file('xl/workbook.xml', transformWorkbook(workbookXml));
+    const filePath = path.join(dir, fileName);
+    fs.writeFileSync(filePath, await zip.generateAsync({ type: 'nodebuffer' }));
+    return filePath;
+  };
+  const extended = map(await build('extension-id.xlsx', (xml) => xml
+    .replace('<workbook ', '<workbook xmlns:custom="urn:example:custom" ')
+    .replace('<sheet name="Sheet1" sheetId="1" r:id="rId1"/>', '<sheet name="Sheet1" sheetId="1" custom:id="rId2" r:id="rId1"/>')));
+  assert.deepEqual(extended.slice(1).map((row) => row[TARGETS.indexOf('Credit Amount')]), ['100'], '读取库读的是第一张表');
+  assert.deepEqual(identifiers(extended).map(([serial]) => String(serial)), ['9007199254740992'], '不写进第二张表的流水号');
+  assert.deepEqual(longNumberIssues(extended).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
+
+  const otherPrefix = map(await build('other-prefix.xlsx', (xml) => xml
+    .replace('<workbook ', '<workbook xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ')
+    .replace('<sheet name="Sheet1" sheetId="1" r:id="rId1"/>', '<sheet name="Sheet1" sheetId="1" rel:id="rId1"/>')));
+  assert.deepEqual(identifiers(otherPrefix).map(([serial]) => String(serial)), ['9007199254740992']);
+  assert.deepEqual(longNumberIssues(otherPrefix), []);
+  // 前缀没有绑定到关系命名空间：无法确认，按无法核对提示
+  const unbound = map(await build('unbound-prefix.xlsx', (xml) => xml
+    .replace('<workbook ', '<workbook xmlns:x9="urn:example:other" ')
+    .replace('<sheet name="Sheet1" sheetId="1" r:id="rId1"/>', '<sheet name="Sheet1" sheetId="1" x9:id="rId1"/>')));
+  assert.deepEqual(longNumberIssues(unbound).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号']]);
+});
+
+// release 审查：未开查重时核对长数字只解压 workbook.xml、其关系文件与目标工作表，其他工作表与嵌入文件不再解压；
+//   压缩包结构不支持按需读取（如条目名重复）时退回整包读取，结果不变
+test('XLSX：未开查重时核对长数字只解压用到的条目；不支持按需读取时退回整包读取', async (t) => {
+  const zlib = require('node:zlib');
+  const dir = createTempDir(t);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([HEADER, ['2026-11-01', 'USD', 100, 1111, 5]]), 'Sheet1');
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([HEADER, ['2026-11-01', 'USD', 999, 987654321, 6]]), 'Sheet2');
+  const zip = await JSZip.loadAsync(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
+  const sheetXml = await zip.file('xl/worksheets/sheet1.xml').async('string');
+  zip.file('xl/worksheets/sheet1.xml', sheetXml.replace('<v>1111</v>', `<v>${SERIAL}</v>`));
+  zip.file('xl/media/attachment.bin', 'MEDIA-MARKER'.repeat(1000));
+  zip.file('extra/a.txt', 'a');
+  zip.file('extra/b.txt', 'b');
+  const deflated = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+
+  const inflated = [];
+  const original = zlib.inflateRawSync;
+  t.after(() => { zlib.inflateRawSync = original; });
+  zlib.inflateRawSync = (...args) => {
+    const output = original(...args);
+    inflated.push(output.toString('utf8'));
+    return output;
+  };
+  const lazyPath = path.join(dir, 'lazy.xlsx');
+  fs.writeFileSync(lazyPath, deflated);
+  const mapped = map(lazyPath);
+  zlib.inflateRawSync = original;
+  assert.deepEqual(identifiers(mapped).map(([serial]) => String(serial)), [SERIAL]);
+  assert.deepEqual(longNumberIssues(mapped), []);
+  assert.equal(inflated.length, 3, '只解压 workbook.xml、关系文件与目标工作表');
+  assert.ok(inflated.some((text) => text.includes(SERIAL)), '解压了目标工作表');
+  assert.ok(!inflated.some((text) => text.includes('987654321') || text.includes('MEDIA-MARKER')), '其他工作表与嵌入文件不解压');
+
+  // 条目名重复（不区分大小写）：不支持按需读取，退回整包读取，结果不变
+  const duplicated = Buffer.from(deflated);
+  let position = duplicated.indexOf('extra/b.txt');
+  assert.ok(position > 0);
+  while (position >= 0) {
+    duplicated.write('EXTRA/A.TXT', position, 'latin1');
+    position = duplicated.indexOf('extra/b.txt', position + 1);
+  }
+  assert.equal(openZipEntriesLazily(duplicated), null);
+  const fallbackPath = path.join(dir, 'fallback.xlsx');
+  fs.writeFileSync(fallbackPath, duplicated);
+  const fallback = map(fallbackPath);
+  assert.deepEqual(identifiers(fallback).map(([serial]) => String(serial)), [SERIAL]);
+  assert.deepEqual(longNumberIssues(fallback), []);
+
+  // 条目数据损坏：只影响该条目（content 为 null），其他条目照常读出
+  const files = openZipEntriesLazily(deflated);
+  assert.ok(files && files['xl/worksheets/sheet1.xml'].content.toString('utf8').includes(SERIAL));
+  assert.equal(openZipEntriesLazily(Buffer.from('not a zip')), null);
 });
