@@ -2149,6 +2149,7 @@ test('主进程：导出全部预检汇总各渠道出余额的交易缺字段�
     parseRequiredBillDates: () => [],
     buildScopeSelectionResult: () => ({ status: 'select-export-scope' }),
     buildDateRangeLabel: () => '',
+    buildDetailExportRows,
     getToday: () => '2026-11-20'
   };
   const parsedGroups = [];
@@ -2220,31 +2221,47 @@ test('主进程：导出全部预检汇总各渠道出余额的交易缺字段�
   const bulkDates = new Array(150000).fill('2026-11-01');
   const okPlan = loadMainFunction('buildStatementExportPlan', Object.keys(deps), Object.values({
     ...deps,
-    buildPreparedStatementBatchFromEntries: () => ({ detailRows: [] }),
+    buildPreparedStatementBatchFromEntries: () => ({ detailRows: [['BillDate', 'Credit Amount', 'Debit Amount'], ['2026-11-01', '1', '']] }),
     parseRequiredBillDates: () => bulkDates,
     buildDateRangeLabel: (dates) => `${dates.length}`
   }))('balance', 'all');
   assert.deepEqual([okPlan.stopResult, okPlan.defaultFileName], [undefined, '3-BALANCE-450000.xlsx']);
 
-  // release 审查：余额文件的默认文件名按出余额的行（balanceDetailRows）取日期，明细文件按全部明细行；
-  //   渠道组没有出余额的交易（balanceRequested 为 false）时按全部明细行
-  const mixedDeps = {
-    ...deps,
-    groupStatementEntriesForGeneration: () => groups.slice(0, 1),
-    buildPreparedStatementBatchFromEntries: () => ({
-      detailRows: ['2026-02-01', '2026-03-01'],
-      balanceDetailRows: ['2026-03-01'],
+  // release 审查：另存为默认文件名的日期与生成时的文件名同口径：剔除收支都为空或 0 的行（生成时跳过）；
+  //   余额文件只取出余额的条目的行（balanceDetailRows），组内都不出余额或没有出余额的交易时不计；明细没有其他行时按全部明细行
+  const H = ['BillDate', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount'];
+  const batches = {
+    mixed: {
+      detailRows: [H, ['2026-01-15', 'M1', 'USD', '0', ''], ['2026-02-01', 'M1', 'USD', '5', ''], ['2026-03-01', 'M2', 'USD', '7', '']],
+      balanceDetailRows: [H, ['2026-01-15', 'M2', 'USD', '0', ''], ['2026-03-01', 'M2', 'USD', '7', '']],
       balanceRequested: true
-    }),
-    parseRequiredBillDates: (rowsForDates) => rowsForDates.slice(),
-    buildDateRangeLabel: (dates) => dates.join('~')
+    },
+    // 整组模板不出余额（批次不带 balanceDetailRows，与 buildPreparedStatementBatch 按组配置得到的形态相同）
+    noBalance: { detailRows: [H, ['2026-02-01', 'M1', 'USD', '5', '']], balanceRequested: false },
+    zeroOnly: { detailRows: [H, ['2026-01-15', 'M1', 'USD', '0', '0']] },
+    single: { detailRows: [H, ['2026-01-20', 'M1', 'USD', '0', ''], ['2026-02-10', 'M1', 'USD', '', '3']] }
   };
-  const loadMixedPlan = (overrides = {}) => loadMainFunction('buildStatementExportPlan', Object.keys(mixedDeps), Object.values({ ...mixedDeps, ...overrides }));
-  assert.equal(loadMixedPlan()('balance', 'all').defaultFileName, '渠道1-BALANCE-2026-03-01.xlsx');
-  assert.equal(loadMixedPlan()('detail', 'all').defaultFileName, '渠道1-COMMON-2026-02-01~2026-03-01.xlsx');
-  assert.equal(loadMixedPlan({
-    buildPreparedStatementBatchFromEntries: () => ({ detailRows: ['2026-02-01'], balanceDetailRows: [], balanceRequested: false })
-  })('balance', 'all').defaultFileName, '渠道1-BALANCE-2026-02-01.xlsx');
+  const namingPlan = (batchKeys) => {
+    const namingDeps = {
+      ...deps,
+      groupStatementEntriesForGeneration: () => groups.slice(0, batchKeys.length),
+      buildPreparedStatementBatchFromEntries: ({ config }) => batches[batchKeys[config.template.id - 1]],
+      parseRequiredBillDates,
+      buildDateRangeLabel
+    };
+    return loadMainFunction('buildStatementExportPlan', Object.keys(namingDeps), Object.values(namingDeps));
+  };
+  const names = (batchKeys) => ['balance', 'detail'].map((kind) => namingPlan(batchKeys)(kind, 'all').defaultFileName);
+  assert.deepEqual(names(['mixed']), ['渠道1-BALANCE-2026-03-01.xlsx', '渠道1-COMMON-2026-02-01~2026-03-01.xlsx']);
+  assert.deepEqual(names(['noBalance']), ['渠道1-BALANCE-2026-11-20.xlsx', '渠道1-COMMON-2026-02-01.xlsx']);
+  assert.deepEqual(names(['zeroOnly']), ['渠道1-BALANCE-2026-11-20.xlsx', '渠道1-COMMON-2026-01-15.xlsx']);
+  assert.deepEqual(names(['single']), ['渠道1-BALANCE-2026-02-10.xlsx', '渠道1-COMMON-2026-02-10.xlsx']);
+  assert.deepEqual(names(['mixed', 'noBalance', 'single']),
+    ['3-BALANCE-2026-02-10~2026-03-01.xlsx', '3-COMMON-2026-02-01~2026-03-01.xlsx']);
+  // 原有校验不变：明细没有有效账单日期时照常报错
+  const noDate = { detailRows: [H, ['', 'M1', 'USD', '5', '']], balanceRequested: false };
+  const noDateDeps = { ...deps, groupStatementEntriesForGeneration: () => groups.slice(0, 1), buildPreparedStatementBatchFromEntries: () => noDate, parseRequiredBillDates, buildDateRangeLabel };
+  assert.throws(() => loadMainFunction('buildStatementExportPlan', Object.keys(noDateDeps), Object.values(noDateDeps))('balance', 'all'), /BillDate/);
 });
 
 // v3.2.21（D3）：导入多组生成与补录重算同样先校验全部组：其他组的业务校验错误（如映射失效、写出前的日期检查）暂存、

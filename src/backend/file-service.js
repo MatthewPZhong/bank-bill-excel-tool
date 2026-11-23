@@ -277,6 +277,13 @@ function buildMappedRows({
     ? amountSplitByField.rules
     : [];
   const billSplitEnabled = Boolean(billSplitMerge && billSplitMerge.enabled);
+  // 余额只在取账单余额列时用到 Balance 映射：主映射 Balance 为「无」时生成配置已去掉该映射，为「通过发生额计算」时余额按发生额
+  //   推导，两种情况下 Balance 映射的源列（含拆分映射的）都不参与计算、作标识时按原文；Balance 列也不写进明细，
+  //   这一列读到的长数字不提示（release 审查）
+  const mainBalanceTokens = normalizeMappingTokens((mappingByField || {}).Balance);
+  const balanceFromStatementColumn = mainBalanceTokens.length > 0
+    && !(mainBalanceTokens.length === 1 && mainBalanceTokens[0] === BALANCE_CALCULATED_MAPPING_VALUE);
+  const unusedBalanceTargetIndex = balanceFromStatementColumn ? -1 : orderedTargetFields.indexOf('Balance');
   // P1 Fix B (PR #16 review): 双保险，只接受 rowStatus === 'completed' 的拆分行；
   // main.js buildBillSplitMergeConfig 已 filter 过一次，这里再过滤防止未来某个路径绕过。
   const billSplitRows = billSplitEnabled && Array.isArray(billSplitMerge.billSplitRows)
@@ -443,11 +450,6 @@ function buildMappedRows({
       }
       addField(token);
     });
-    // 余额列只在余额取账单余额列时参与计算：主映射 Balance 为「无」时生成配置已去掉该映射，为「通过发生额计算」时余额按发生额
-    //   推导，两种情况下 Balance 映射的源列（含拆分映射的）都不参与计算，作标识时按原文（release 审查）
-    const mainBalanceTokens = normalizeMappingTokens((mappingByField || {}).Balance);
-    const balanceFromStatementColumn = mainBalanceTokens.length > 0
-      && !(mainBalanceTokens.length === 1 && mainBalanceTokens[0] === BALANCE_CALCULATED_MAPPING_VALUE);
     // 主映射的 Balance 只在有行用它出余额时计入：未开拆分、开了「根据字段值过滤账单」（未命中的行走主映射），或拆分行复用
     //   模块映射；拆分且不复用、不过滤时所有行的余额都取拆分映射，主映射 Balance 的源列作标识时按原文（release 审查）
     if (balanceFromStatementColumn && (!billSplitEnabled || billSplitRowFilterRules || billSplitReuseModuleMapping)) {
@@ -1636,6 +1638,7 @@ function buildMappedRows({
         });
         exportedEntries.forEach((entry) => {
           baseCellsByTarget.forEach((cells, targetIndex) => {
+            if (targetIndex === unusedBalanceTargetIndex) return;
             if (targetIndex === outputCurrencyIndex && entry.currencyFromSplitRow) return;
             if (entry.isFeeBill && billSplitFeeFieldTargetIndexes.has(targetIndex)) return;
             mergeCellMap(cells, currentRowUnverifiedCells);
@@ -1685,6 +1688,7 @@ function buildMappedRows({
       const targetFieldsBySource = new Map();
       if (currentRowUnverifiedCells) {
         baseCellsByTarget.forEach((cells, targetIndex) => {
+          if (targetIndex === unusedBalanceTargetIndex) return;
           mergeCellMap(cells, currentRowUnverifiedCells);
           cells.forEach((_digitCount, sourceField) => {
             if (preMappedFields.has(sourceField)) return;

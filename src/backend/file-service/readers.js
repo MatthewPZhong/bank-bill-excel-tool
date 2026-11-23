@@ -920,7 +920,7 @@ function collectLongIntegerSourceText({ filePath, workbook, sheet, sheetName, ra
   return sourceText.size ? sourceText : null;
 }
 
-// XLSX 工作表 XML 中候选单元格（按 r 属性定位）的 <v> 字面值；数值单元格的前导 0 不属于原值，去掉。
+// XLSX 工作表 XML 中候选单元格（按 r 属性定位，且须与所在 <row> 的行号一致）的 <v> 字面值；数值单元格的前导 0 不属于原值，去掉。
 //   读取时没有保留压缩包（未开查重）时只解开压缩包取 XML，不再解析工作表（只在有候选单元格时多读这一次；
 //   不为所有读取保留压缩包，以免每个文件都多占一份 XML 内存）。扫完整张表：同一位置出现多次（含乱序声明）、
 //   类型不是数值的不给原文；有单元格没有（或无法解析）位置属性时，读取库按前一格顺推位置、可能与其他单元格重叠，
@@ -947,9 +947,21 @@ function readXlsxIntegerLiterals(filePath, workbook, sheetName, candidates) {
   const duplicated = new Set();
   // XML 注释不是内容：先去掉，避免注释里的 <c> / <v> 被当成单元格或值
   const text = xml.toString('utf8').replace(/<!--[\s\S]*?-->/g, '');
+  // 各 <row> 的起点与行号（没有 r 属性时按前一行顺推，与读取库相同）
+  const rowStarts = [];
+  const rowTagPattern = /<(?:[\w.-]+:)?row\b([^>]*?)\/?>/g;
+  let rowMatch;
+  while ((rowMatch = rowTagPattern.exec(text)) !== null) {
+    const rowRef = readXmlAttribute(rowMatch[1], 'r');
+    const previousRow = rowStarts.length ? rowStarts[rowStarts.length - 1].row : -1;
+    const row = rowRef ? Number(rowRef) - 1 : previousRow + 1;
+    if (!(Number.isInteger(row) && row >= 0)) return null;
+    rowStarts.push({ index: rowMatch.index, row });
+  }
   const cellPattern = /<(?:[\w.-]+:)?c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:[\w.-]+:)?c>)/g;
   const valuePattern = /<(?:[\w.-]+:)?v\b[^>]*>([^<]*)<\/(?:[\w.-]+:)?v>/g;
   let match;
+  let rowCursor = -1;
   while ((match = cellPattern.exec(text)) !== null) {
     const ref = readXmlAttribute(match[1], 'r');
     if (!ref) return null;
@@ -960,6 +972,10 @@ function readXlsxIntegerLiterals(filePath, workbook, sheetName, candidates) {
       return null;
     }
     if (!(position.r >= 0 && position.c >= 0)) return null;
+    // 单元格引用的行须与所在 <row> 一致（release 审查）：两层坐标不同时这一格属于哪笔交易有歧义，
+    //   数值相同也不能证明原文属于该行（如两个舍入为同一数值的流水号互换了引用），整张表不给原文
+    while (rowCursor + 1 < rowStarts.length && rowStarts[rowCursor + 1].index < match.index) rowCursor += 1;
+    if (rowCursor < 0 || rowStarts[rowCursor].row !== position.r) return null;
     const key = `${position.r}:${position.c}`;
     if (!wanted.has(key)) continue;
     if (literals.has(key) || duplicated.has(key)) {

@@ -1026,3 +1026,50 @@ test('余额方式为「无」或「通过发生额计算」时，拆分映射�
   assert.deepEqual(statement.slice(1).map((row) => String(row[4])), ['9007199254740992']);
   assert.equal(longNumberIssues(statement).length, 1);
 });
+
+test('XLSX：单元格引用的行与所在 <row> 不一致时整张表不还原并提示，不把一笔交易的流水号写到另一笔上', async (t) => {
+  const dir = createTempDir(t);
+  // 两个流水号舍入为同一数值：数值相同不能证明原文属于该行
+  const rows = [HEADER, ['2026-11-01', 'USD', 100, 1111, 5], ['2026-11-02', 'USD', 200, 2222, 6]];
+  const literals = { 1111: '9007199254740993', 2222: '9007199254740992' };
+  const swapped = await writeXlsxWithLiterals(path.join(dir, 'swapped-ref.xlsx'), rows, literals,
+    (xml) => xml.replace('r="D2"', 'r="__TMP__"').replace('r="D3"', 'r="D2"').replace('r="__TMP__"', 'r="D3"'));
+  const mapped = map(swapped);
+  assert.deepEqual(identifiers(mapped).map(([serial]) => String(serial)), ['9007199254740992', '9007199254740992']);
+  assert.deepEqual(longNumberIssues(mapped).map((issue) => issue.cells.map((cell) => cell.sourceField)), [['流水号'], ['流水号']]);
+  // 对照：<row> 不写 r（按前一行顺推）时两层坐标一致，照常按原文
+  const implicitRows = await writeXlsxWithLiterals(path.join(dir, 'implicit-row.xlsx'), rows, literals,
+    (xml) => xml.replace(/<row r="\d+"/g, '<row'));
+  const restored = map(implicitRows);
+  assert.deepEqual(identifiers(restored).map(([serial]) => String(serial)), ['9007199254740993', '9007199254740992']);
+  assert.deepEqual(longNumberIssues(restored), []);
+});
+
+test('余额方式为「无」或「通过发生额计算」时，拆分映射的 Balance 列既不写进明细也不参与计算：只映射到这一列的长数字不提示', async (t) => {
+  const dir = createTempDir(t);
+  const header = ['日期', '币种', '收入', '参考号'];
+  const filePath = await writeXlsxWithLiterals(path.join(dir, 'unused-balance.xlsx'), [
+    header,
+    ['2026-11-01', 'USD', 10, 1111]
+  ], { 1111: '6.2220212345678899E+18' });
+  const generate = (mainBalance, splitMapping) => buildMappedRows({
+    inputFilePath: filePath,
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount', 'Balance', 'ChannelOrderNo'],
+    mappingByField: { BillDate: '日期', Currency: '币种', 'Credit Amount': '收入', ...(mainBalance ? { Balance: mainBalance } : {}) },
+    expectedSourceHeaders: header,
+    billSplitMerge: billSplitMerge({
+      reuseModuleMapping: false,
+      billSplitMappingByTargetField: { BillDate: '日期', Currency: '币种', ...splitMapping },
+      billSplitRows: [splitRow({ creditSourceField: '收入' })]
+    })
+  });
+  const issueTargets = (mapped) => mapped.issues.filter((issue) => issue.type === 'long-number-unverified')
+    .flatMap((issue) => issue.cells.map((cell) => [cell.sourceField, (cell.targetFields || []).slice().sort()]));
+  for (const [label, mainBalance] of [['无', null], ['通过发生额计算', '通过发生额计算']]) {
+    assert.deepEqual(issueTargets(generate(mainBalance, { Balance: '参考号' })), [], label);
+    // 同一源列还写进流水号时照常提示，只记实际写进的列
+    assert.deepEqual(issueTargets(generate(mainBalance, { Balance: '参考号', ChannelOrderNo: '参考号' })), [['参考号', ['ChannelOrderNo']]], label);
+  }
+  // 取账单余额列：拆分映射的 Balance 参与余额计算，照常提示
+  assert.deepEqual(issueTargets(generate('余额', { Balance: '参考号' })), [['参考号', ['Balance']]]);
+});

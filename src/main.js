@@ -10715,14 +10715,17 @@ function registerTemplateHandlers() {
           if (error instanceof FileValidationError) {
             skippedCount += 1;
             // v3.2.21：记下跳过的模板与原因（如旧版本模板包里失效的逻辑取值候补），导入结果只给出跳过数量。
-            //   原因中的账号等编号不写进日志：条目里的大账号原样出现时整体替换（不论写法），其余长数字只写位数（release 审查）
+            //   模板名（用户填写）与原因中的账号等编号不写进日志：条目里的大账号原样出现时整体替换（不论写法），其余长数字只写位数（release 审查）
             const entryAccountValues = ['bigAccounts', 'fixedAssignments', 'currencyBigAccounts']
               .flatMap((key) => (Array.isArray(entry[key]) ? entry[key] : []))
               .map((item) => normalizeCell(item && item.merchantId));
             appendActivityLogEntry({
               level: 'warning',
               message: '模板包导入时跳过模板',
-              details: [`模板名：${entry.name}`, `原因：${maskAccountLikeTextForLog(error.message, entryAccountValues)}`]
+              details: [
+                `模板名：${maskAccountLikeTextForLog(entry.name, entryAccountValues)}`,
+                `原因：${maskAccountLikeTextForLog(error.message, entryAccountValues)}`
+              ]
             });
             return;
           }
@@ -14070,13 +14073,20 @@ function getGeneratedStatementExport(kind, scope = 'current') {
 }
 
 function buildStatementExportPlan(kind, scope = 'auto') {
-  // v3.2.21（D2）：另存为默认文件名的日期范围取实际导出的行：余额文件在渠道组内有不出余额的子模板时只取出余额的
-  //   条目的行（preparedBatch.balanceDetailRows，与生成余额同一来源），明细文件取全部明细行（release 审查）
-  const exportDateRowsOf = (preparedBatch) => (
-    kind === 'balance' && preparedBatch.balanceRequested !== false && Array.isArray(preparedBatch.balanceDetailRows)
+  // v3.2.21（D2）：另存为默认文件名的日期范围与生成时的文件名同口径（release 审查）：先按全部明细行校验账单日期（原有检查），
+  //   再按实际写出的行取日期——剔除收支都为空或 0 的行（buildDetailExportRows，生成时跳过）；明细没有其他行时按全部明细行；
+  //   余额只取出余额的条目的行（preparedBatch.balanceDetailRows），组内都不出余额或没有出余额的交易时不计
+  const exportNamingDatesOf = (preparedBatch) => {
+    const detailDates = parseRequiredBillDates(preparedBatch.detailRows);
+    const balanceKind = kind === 'balance';
+    if (balanceKind && preparedBatch.balanceRequested === false) return [];
+    const sourceRows = balanceKind && Array.isArray(preparedBatch.balanceDetailRows)
       ? preparedBatch.balanceDetailRows
-      : preparedBatch.detailRows
-  );
+      : preparedBatch.detailRows;
+    const writtenRows = buildDetailExportRows(sourceRows).sourceRows;
+    if (writtenRows.length > 1) return parseRequiredBillDates(writtenRows);
+    return balanceKind ? [] : detailDates;
+  };
   const session = getCurrentStatementSession();
   const normalizedScope = scope === 'all' || scope === 'current'
     ? scope
@@ -14169,7 +14179,7 @@ function buildStatementExportPlan(kind, scope = 'auto') {
       try {
         preparedBatch = buildPreparedStatementBatchFromEntries({ config, fileEntries: entries, issueLineBudget });
         // 日期解析失败（如单独成组的文件没有有效账单日期）同样暂存，不遮住后面渠道的余额错误
-        dates = parseRequiredBillDates(exportDateRowsOf(preparedBatch));
+        dates = exportNamingDatesOf(preparedBatch);
       } catch (error) {
         if (!collectChannelBalanceError(error) && !otherError) otherError = error;
         continue;
@@ -14230,7 +14240,7 @@ function buildStatementExportPlan(kind, scope = 'auto') {
       orderedTargetFields: generationTemplateConfig.exportTargetFields,
       scope: 'all'
     });
-    defaultFileName = `${resolveStatementOutputName(generationTemplateConfig.template)}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(parseRequiredBillDates(exportDateRowsOf(preparedBatch))) || getToday()}.xlsx`;
+    defaultFileName = `${resolveStatementOutputName(generationTemplateConfig.template)}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(exportNamingDatesOf(preparedBatch)) || getToday()}.xlsx`;
   }
   return {
     normalizedScope,

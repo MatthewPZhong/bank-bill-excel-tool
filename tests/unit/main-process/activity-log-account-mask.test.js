@@ -42,9 +42,12 @@ test('maskAccountLikeTextForLog：已知账号不论写法整体替换；其余�
 test('模板包导入跳过模板时，活动日志的原因经 maskAccountLikeTextForLog 脱敏', () => {
   const start = MAIN_SOURCE.indexOf("message: '模板包导入时跳过模板'");
   assert.ok(start > 0);
-  const snippet = MAIN_SOURCE.slice(start - 400, start + 200);
+  const snippet = MAIN_SOURCE.slice(start - 400, start + 400);
   // 条目里三类大账号配置的账号都传入，按原样整体替换
   assert.match(snippet, /\['bigAccounts', 'fixedAssignments', 'currencyBigAccounts'\]/);
   assert.match(snippet, /原因：\$\{maskAccountLikeTextForLog\(error\.message, entryAccountValues\)\}/);
+  // 模板名由用户填写，可能含账号：同样脱敏
+  assert.match(snippet, /模板名：\$\{maskAccountLikeTextForLog\(entry\.name, entryAccountValues\)\}/);
+  assert.doesNotMatch(snippet, /模板名：\$\{entry\.name\}/);
   assert.doesNotMatch(snippet, /原因：\$\{error\.message\}/);
 });
