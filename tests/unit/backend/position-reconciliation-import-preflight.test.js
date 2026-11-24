@@ -13,6 +13,7 @@ const XLSX = require('xlsx');
 const {
   BANK_SHEET_NAME,
   POSITION_BANK_HEADERS,
+  POSITION_BANK_INTERACTION_FIELDS,
   SOURCE_DEFINITIONS,
   SOURCE_DISPLAY_ORDER,
   SOURCE_TYPES
@@ -35,12 +36,11 @@ const {
   normalizePositionStreamingSourceTypes
 } = require('../../../src/backend/position-reconciliation-import/constants');
 const {
-  PositionImportLedger,
-  verifySealedLedger
-} = require('../../../src/backend/position-reconciliation-import/ledger');
+  runPositionSourceImport
+} = require('../../../src/backend/position-reconciliation-import/source-import');
 const {
-  runPositionImportPreflight
-} = require('../../../src/backend/position-reconciliation-import/preflight');
+  pickSourceFields
+} = require('../../../src/main-process/position-reconciliation/source-row-storage');
 const {
   openPositionWorkbook,
   streamPositionXlsxRows
@@ -51,7 +51,6 @@ const {
 const {
   cleanupUncommittedImportArtifacts,
   dispatchPositionImportPreflight,
-  dispatchPositionLargeImportSchemaMigration,
   uncommittedJobRoot
 } = require('../../../src/main-process/position-reconciliation/import-dispatch');
 const {
@@ -61,15 +60,10 @@ const {
   createPositionReconciliationStore
 } = require('../../../src/main-process/position-reconciliation/store');
 const {
-  assertPositionLargeImportSchema,
-  positionLargeImportSchemaFingerprint
-} = require('../../../src/main-process/position-reconciliation/large-import-schema');
-const {
   readPositionDatabaseCheckpoint
 } = require('../../../src/main-process/position-reconciliation/side-db-mutation');
 const {
   STAGING_RELATIVE_PATH,
-  hashFileSha256Async,
   stageInputFilesAsync
 } = require('../../../src/main-process/position-reconciliation/input-staging');
 
@@ -93,9 +87,6 @@ const {
   assertPositionImportDiskSpace,
   estimatePositionImportDiskBytes
 } = require('../../../src/backend/position-reconciliation-import/disk-space-gate');
-const {
-  initializeIncomingBankTables
-} = require('../../../src/backend/position-reconciliation-import/bank-writer');
 
 const tempDirs = [];
 test.after(() => {
@@ -216,7 +207,81 @@ function bankRow(overrides = {}) {
   };
 }
 
-test.describe('v3.1.3 position streaming preflight', () => {
+function createSideDb(dir, name = 'side') {
+  const checkpoint = { identity: `${name}-identity`, generation: 0, token: `${name}-token` };
+  const store = createPositionReconciliationStore(dir, { initialCheckpoint: checkpoint });
+  const sideDbPath = store.dbPath;
+  store.close();
+  return { checkpoint, sideDbPath };
+}
+
+// 进程内执行链接原始表单遍导入：读取并写入未提交的事务，发出 ready 后按 grant 提交。
+// grant 缺省为与本次导入一致的写入授权；传函数可构造不一致或拒绝的授权。
+async function importSources({
+  dir, files, sideDbPath, checkpoint, jobId,
+  operationToken = 'source-import-operation', grant = null, ...rest
+}) {
+  let ready = null;
+  const result = await runPositionSourceImport({
+    jobId,
+    files,
+    userDataDir: path.join(dir, 'worker-user-data'),
+    sideDbPath,
+    expectedCheckpoint: checkpoint,
+    allowedSourceTypes: [...POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST],
+    awaitApplyGrant: async (value) => {
+      ready = value;
+      if (typeof grant === 'function') return grant(value);
+      return {
+        jobId,
+        archiveManifestHash: value.archiveManifestHash,
+        operationToken,
+        baseCheckpoint: checkpoint,
+        batchContext: MUTATING_BATCH_CONTEXT
+      };
+    },
+    ...rest
+  });
+  return { ready, result };
+}
+
+function sourceWorkerInput(dir, { sideDbPath, checkpoint }, files, extra = {}) {
+  return {
+    engine: 'streaming',
+    command: POSITION_IMPORT_COMMANDS.SOURCE_IMPORT,
+    files,
+    userDataDir: path.join(dir, 'worker-user-data'),
+    sideDbPath,
+    expectedCheckpoint: checkpoint,
+    featureFlags: {
+      sourceImport: true,
+      streamingSourceTypes: [...POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST]
+    },
+    ...extra
+  };
+}
+
+function countRows(sideDbPath, table) {
+  const db = new DatabaseSync(sideDbPath, { readOnly: true });
+  try {
+    return Number(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
+  } finally {
+    db.close();
+  }
+}
+
+// v3.2.14：表头结构不一致时的差异明细。
+const renamedHeaders = () => SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_INBOUND].headers
+  .map((header) => (header === 'fieldId' ? 'fileId' : header));
+const expectedLines = [
+  '工作表「网关」最接近：中台网关原始入账订单（41 列；文件 41 列）',
+  '第 20 列（T）：应为「fieldId」，实际为「fileId」',
+  '缺少列：fieldId',
+  '多出列：fileId',
+  '如系统导出结构已变更，请在「设置 → 模板文件」导入新版本'
+];
+
+test.describe('平盘导入：读取器、调度器与单遍导入', () => {
   test('PR-D 流式来源门禁固定开放四类普通来源', () => {
     assert.deepEqual(POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST, [
       SOURCE_TYPES.FUND_TRANSFER,
@@ -257,7 +322,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
     );
   });
 
-  test('五类来源的新 XLSX reader 与旧 SheetJS row/type/hash 等价', async (t) => {
+  test('五类来源的新 XLSX reader 取出的必用列与旧 SheetJS 读取的值、类型、摘要等价', async (t) => {
     const dir = tempDir(t, 'position-prb-parity-');
     const rows = sourceRows();
     for (const sourceType of SOURCE_DISPLAY_ORDER) {
@@ -273,7 +338,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
       const summary = await streamPositionXlsxRows(filePath, {
         kind: 'source',
         sstTempRoot: path.join(dir, `sst-${sourceType}`),
-        onRow: ({ row }) => streamed.push(row)
+        onRow: ({ row }) => streamed.push(pickSourceFields(sourceType, row))
       });
       assert.equal(summary.sourceType, sourceType);
       assert.equal(summary.sheetName, `${SOURCE_DEFINITIONS[sourceType].sourceName}-数据`);
@@ -297,15 +362,15 @@ test.describe('v3.1.3 position streaming preflight', () => {
     await streamPositionXlsxRows(filePath, {
       kind: 'source',
       sstTempRoot: path.join(dir, 'sst-date1904'),
-      onRow: ({ row }) => streamed.push(row)
+      onRow: ({ row }) => streamed.push(pickSourceFields(sourceType, row))
     });
     assert.equal(stableJson(streamed), stableJson(legacy.records.map((record) => record.row)));
     assert.equal(stableHash(streamed), stableHash(legacy.records.map((record) => record.row)));
   });
 
-  test('银行 49 列逐行读取后投影出的 46 列与旧 reader 等价', async (t) => {
+  test('银行结果导出格式逐行读取后取出的交互字段与旧 reader 等价', async (t) => {
     const dir = tempDir(t, 'position-prb-bank-');
-    const filePath = path.join(dir, 'bank-49.xlsx');
+    const filePath = path.join(dir, 'bank-result-format.xlsx');
     const row = {
       命中明细: '旧审计',
       命中类型: '旧命中',
@@ -323,7 +388,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
       sstTempRoot: path.join(dir, 'sst-bank'),
       onRow: ({ row: raw }) => {
         streamed.push(Object.fromEntries(
-          BANK_STATEMENT_FIELDS.map((header) => [header, raw[header] ?? ''])
+          POSITION_BANK_INTERACTION_FIELDS.map((header) => [header, raw[header] ?? ''])
         ));
       }
     });
@@ -365,7 +430,11 @@ test.describe('v3.1.3 position streaming preflight', () => {
       sstTempRoot: path.join(dir, 'sst'),
       onRow: ({ row }) => { streamed = row; }
     });
-    assert.equal(stableJson(streamed), stableJson(legacy));
+    // 入库只取必用列：与旧读取路径比对的是这些列的值与类型。
+    assert.equal(
+      stableJson(pickSourceFields(SOURCE_TYPES.GATEWAY_OUTBOUND, streamed)),
+      stableJson(legacy)
+    );
     assert.equal(typeof streamed['金额'], 'number');
     assert.equal(streamed['清算网络'], true);
     assert.equal(streamed['客户编号'], '');
@@ -398,326 +467,16 @@ test.describe('v3.1.3 position streaming preflight', () => {
     assert.equal(fs.existsSync(sstRoot), false);
   });
 
-  test('ledger 文件 savepoint 回滚后不污染后序记录身份，并可封存和检出篡改', async (t) => {
-    const dir = tempDir(t, 'position-prb-ledger-');
-    const inputA = path.join(dir, 'a.xlsx');
-    const inputB = path.join(dir, 'b.xlsx');
-    fs.writeFileSync(inputA, 'a');
-    fs.writeFileSync(inputB, 'b');
-    const staged = await stageInputFilesAsync(dir, [inputA, inputB], 'ledger-job');
-    const ledgerPath = path.join(dir, 'ledger.sqlite');
-    const ledger = new PositionImportLedger({
-      ledgerPath,
-      jobId: 'ledger-job',
-      kind: 'source'
-    });
-    staged.forEach((descriptor) => ledger.addFile(descriptor));
-
-    ledger.beginFile(0);
-    assert.equal(ledger.claimSourceRecord({
-      sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND,
-      businessKey: 'KEY-1',
-      rowHash: 'HASH-1',
-      rowGuardHash: 'GUARD-1',
-      fileIndex: 0,
-      rowNumber: 2
-    }).status, 'accepted');
-    ledger.rejectFile(0, Object.assign(new Error('invalid row'), {
-      code: 'position-source-row-invalid'
-    }));
-
-    ledger.beginFile(1);
-    assert.equal(ledger.claimSourceRecord({
-      sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND,
-      businessKey: 'KEY-1',
-      rowHash: 'HASH-1',
-      rowGuardHash: 'GUARD-1',
-      fileIndex: 1,
-      rowNumber: 2
-    }).status, 'accepted');
-    assert.equal(ledger.claimSourceRecord({
-      sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND,
-      businessKey: 'KEY-1',
-      rowHash: 'HASH-2',
-      rowGuardHash: 'GUARD-2',
-      fileIndex: 1,
-      rowNumber: 3
-    }).status, 'accepted');
-    assert.equal(ledger.claimSourceRecord({
-      sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND,
-      businessKey: 'KEY-1',
-      rowHash: 'HASH-1',
-      rowGuardHash: 'GUARD-COLLISION',
-      fileIndex: 1,
-      rowNumber: 4
-    }).status, 'hash-collision');
-    ledger.acceptFile(1, {
-      sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND,
-      sheetName: 'Sheet1',
-      scannedNonBlankRows: 2,
-      persistedCandidateRows: 2,
-      visibleLinkRows: 2,
-      contentHash: stableHash([{ key: 1 }, { key: 2 }])
-    });
-
-    const evidence = await ledger.seal();
-    const verified = await verifySealedLedger(evidence);
-    assert.equal(verified.manifest.files[0].preflightStatus, 'failed');
-    assert.equal(verified.manifest.files[1].preflightStatus, 'accepted');
-    verified.db.close();
-
-    fs.appendFileSync(ledgerPath, 'x');
-    await assert.rejects(
-      () => verifySealedLedger(evidence),
-      (error) => error.code === 'position-import-job-ledger-invalid'
-    );
-  });
-
-  test('ledger 声明行数与身份表不一致时拒绝封存', async (t) => {
-    const dir = tempDir(t, 'position-prb-count-mismatch-');
-    const input = path.join(dir, 'source.xlsx');
-    fs.writeFileSync(input, 'source');
-    const [descriptor] = await stageInputFilesAsync(dir, [input], 'count-mismatch-job');
-    const ledger = new PositionImportLedger({
-      ledgerPath: path.join(dir, 'count-mismatch.sqlite'),
-      jobId: 'count-mismatch-job',
-      kind: 'source'
-    });
-    ledger.addFile(descriptor);
-    ledger.beginFile(0);
-    ledger.acceptFile(0, {
-      sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND,
-      sheetName: 'Sheet1',
-      scannedNonBlankRows: 1,
-      persistedCandidateRows: 1
-    });
-    await assert.rejects(
-      () => ledger.seal(),
-      (error) => (
-        error &&
-        error.code === 'position-import-job-ledger-invalid' &&
-        /来源记录计数不一致/.test(error.message)
-      )
-    );
-    ledger.close();
-  });
-
-  test('source preflight 折叠完全重复行并保留同业务主键的不同内容', async (t) => {
-    const dir = tempDir(t, 'position-prb-partial-');
-    const row = sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND];
-    const first = sourceFile(dir, SOURCE_TYPES.GATEWAY_OUTBOUND, [row], 'first.xlsx');
-    const second = sourceFile(dir, SOURCE_TYPES.GATEWAY_OUTBOUND, [row], 'second.xlsx');
-    const third = sourceFile(dir, SOURCE_TYPES.GATEWAY_OUTBOUND, [{
-      ...row,
-      渠道名称: `${row.渠道名称}-OTHER`
-    }], 'third.xlsx');
-    const userDataDir = path.join(dir, 'user-data');
-    const result = await runPositionImportPreflight({
-      jobId: 'partial-job',
-      kind: 'source',
-      files: [first, second, third],
-      userDataDir
-    });
-    assert.deepEqual(
-      result.orderedFileResults.map((item) => [item.status, item.code || null]),
-      [
-        ['ok', null],
-        ['ok', null],
-        ['ok', null]
-      ]
-    );
-    assert.equal(result.acceptedOrdinaryInputFiles.length, 3);
-    assert.equal(result.ledgerEvidence.manifest.files[0].persistedCandidateRows, 1);
-    assert.equal(result.ledgerEvidence.manifest.files[1].persistedCandidateRows, 0);
-    assert.equal(result.ledgerEvidence.manifest.files[1].collapsedDuplicateRows, 1);
-    assert.equal(result.ledgerEvidence.manifest.files[2].persistedCandidateRows, 1);
-  });
-
-  test('bank preflight 任一文件失败时整批回滚，scope 和已接受文件均不残留', async (t) => {
-    const dir = tempDir(t, 'position-prb-bank-atomic-');
-    const first = path.join(dir, 'bank-first.xlsx');
-    const second = path.join(dir, 'bank-second.xlsx');
-    writeWorkbook(first, [{
-      name: BANK_SHEET_NAME,
-      headers: BANK_STATEMENT_FIELDS,
-      rows: [bankRow({ BizId: 'BANK-ATOMIC-1' })]
-    }]);
-    writeWorkbook(second, [{
-      name: BANK_SHEET_NAME,
-      headers: BANK_STATEMENT_FIELDS,
-      rows: [bankRow({ BizId: 'BANK-ATOMIC-1' })]
-    }]);
-    const result = await runPositionImportPreflight({
-      jobId: 'bank-atomic-job',
-      kind: 'bank',
-      files: [first, second],
-      userDataDir: path.join(dir, 'user-data')
-    });
-    assert.equal(result.acceptedBankFiles.length, 0);
-    assert.deepEqual(
-      result.orderedFileResults.map((item) => item.status),
-      ['failed', 'failed']
-    );
-    assert.deepEqual(
-      result.ledgerEvidence.manifest.files.map((item) => item.preflightStatus),
-      ['failed', 'failed']
-    );
-    assert.deepEqual(
-      result.ledgerEvidence.manifest.files.map((item) => [
-        item.scannedNonBlankRows,
-        item.invalidRows
-      ]),
-      [[1, 0], [1, 1]]
-    );
-    assert.deepEqual(result.ledgerEvidence.manifest.bankScopes, []);
-  });
-
-  test('child utility dispatcher 只返回 manifest，不传完整行', async (t) => {
-    const dir = tempDir(t, 'position-prb-dispatch-');
-    const filePath = sourceFile(
-      dir,
-      SOURCE_TYPES.GATEWAY_OUTBOUND,
-      [sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND]],
-      'dispatch.xlsx'
-    );
-    const progress = [];
-    const job = dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files: [filePath],
-      userDataDir: path.join(dir, 'user-data'),
-      onProgress: (event) => progress.push(event)
-    });
-    const result = await job.promise;
-    assert.equal(result.orderedFileResults[0].status, 'ok');
-    assert.equal(result.orderedFileResults[0].rowCount, 1);
-    assert.ok(result.preflightReady);
-    assert.equal(Object.prototype.hasOwnProperty.call(result.preflightReady, 'records'), false);
-    assert.equal(Object.prototype.hasOwnProperty.call(result, 'records'), false);
-    assert.ok(progress.some((event) => event.stage === 'staging'));
-  });
-
-  test('普通来源等待授权时取消会清理已预检 staging 和 ledger', async (t) => {
-    const dir = tempDir(t, 'position-prb-awaiting-cancel-');
-    const userDataDir = path.join(dir, 'user-data');
-    const filePath = sourceFile(
-      dir,
-      SOURCE_TYPES.GATEWAY_OUTBOUND,
-      [sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND]],
-      'awaiting-cancel.xlsx'
-    );
-    let resolvePreflight;
-    const preflightReady = new Promise((resolve) => {
-      resolvePreflight = resolve;
-    });
-    const job = dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files: [filePath],
-      userDataDir,
-      sideDbPath: path.join(dir, 'unused.sqlite'),
-      authorizeApply: () => new Promise(() => {}),
-      onPreflightReady: resolvePreflight
-    });
-    await preflightReady;
-    assert.equal(job.cancel(), true);
-    await assert.rejects(
-      job.promise,
-      (error) => error && error.code === 'position-import-cancelled'
-    );
-    assert.equal(
-      fs.existsSync(path.join(userDataDir, STAGING_RELATIVE_PATH, job.jobId)),
-      false
-    );
-  });
-
-  test('普通来源 apply 授权失败会由 worker 清理预检产物', async (t) => {
-    const dir = tempDir(t, 'position-prb-auth-reject-');
-    const userDataDir = path.join(dir, 'user-data');
-    const filePath = sourceFile(
-      dir,
-      SOURCE_TYPES.GATEWAY_OUTBOUND,
-      [sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND]],
-      'auth-reject.xlsx'
-    );
-    const job = dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files: [filePath],
-      userDataDir,
-      sideDbPath: path.join(dir, 'unused.sqlite'),
-      authorizeApply: () => {
-        const error = new Error('测试授权失败');
-        error.code = 'position-import-intent-not-durable';
-        throw error;
-      }
-    });
-    await assert.rejects(
-      job.promise,
-      (error) => error
-        && error.code === 'position-import-intent-not-durable'
-        && error.message === '测试授权失败'
-    );
-    assert.equal(
-      fs.existsSync(path.join(userDataDir, STAGING_RELATIVE_PATH, job.jobId)),
-      false
-    );
-  });
-
-  test('worker 在零提交时被强制终止会由 dispatcher 清理暂存批次', async (t) => {
-    const dir = tempDir(t, 'position-prb-worker-kill-cleanup-');
-    const userDataDir = path.join(dir, 'user-data');
-    const filePath = sourceFile(
-      dir,
-      SOURCE_TYPES.GATEWAY_OUTBOUND,
-      Array.from({ length: 5000 }, (_, index) => ({
-        ...sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND],
-        主对账id: `KILL-RID-${index}`,
-        业务单号: `KILL-ORDER-${index}`
-      })),
-      'worker-kill.xlsx'
-    );
-    let terminated = false;
-    let job;
-    job = dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files: [filePath],
-      userDataDir,
-      sideDbPath: path.join(dir, 'unused.sqlite'),
-      onProgress: (event) => {
-        if (!terminated
-            && event.stage === 'preflight'
-            && Number(event.scannedRows) >= 4000) {
-          terminated = true;
-          job.terminate();
-        }
-      }
-    });
-    await assert.rejects(
-      job.promise,
-      (error) => error && error.code === 'position-import-worker-exited'
-    );
-    assert.equal(
-      fs.existsSync(path.join(userDataDir, STAGING_RELATIVE_PATH, job.jobId)),
-      false
-    );
-  });
-
   test('dispatcher 只接受 staging 根目录直属批次作为零提交清理目标', () => {
     const userDataDir = path.resolve('/tmp', 'position-cleanup-root');
     const jobRoot = path.join(userDataDir, STAGING_RELATIVE_PATH, 'safe-job');
     assert.equal(
-      uncommittedJobRoot({ userDataDir }, 'other-job', {
-        ledgerEvidence: { ledgerPath: path.join(jobRoot, 'job-ledger.sqlite') }
-      }),
+      uncommittedJobRoot({ userDataDir }, 'other-job', { jobRoot }),
       jobRoot
     );
     assert.equal(
       uncommittedJobRoot({ userDataDir }, 'safe-job', {
-        ledgerEvidence: {
-          ledgerPath: path.join(userDataDir, 'outside', 'job-ledger.sqlite')
-        }
+        jobRoot: path.join(userDataDir, 'outside')
       }),
       ''
     );
@@ -745,10 +504,9 @@ test.describe('v3.1.3 position streaming preflight', () => {
     assert.equal(fs.existsSync(jobRoot), false);
   });
 
-  test('五个业务写命令缺持久 owner 时在启动 worker 前拒绝', () => {
+  test('四个启动即写库的命令缺持久 owner 时在启动 worker 前拒绝', () => {
     let forkCount = 0;
     for (const command of [
-      POSITION_IMPORT_COMMANDS.BANK_APPLY,
       POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY,
       POSITION_IMPORT_COMMANDS.DELETE_BANK,
       POSITION_IMPORT_COMMANDS.DELETE_SOURCE,
@@ -828,7 +586,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
 
     const job = dispatchPositionImportPreflight({
       engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      command: POSITION_IMPORT_COMMANDS.SOURCE_IMPORT,
       files: [],
       userDataDir: '',
       sideDbPath: '',
@@ -869,7 +627,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
     worker.kill = () => true;
     const job = dispatchPositionImportPreflight({
       engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      command: POSITION_IMPORT_COMMANDS.SOURCE_IMPORT,
       files: [],
       userDataDir: '',
       sideDbPath: '',
@@ -889,14 +647,13 @@ test.describe('v3.1.3 position streaming preflight', () => {
       sentTypes.push(message.type);
       if (message.type !== POSITION_IMPORT_MESSAGE_TYPES.START_JOB) return;
       const jobRoot = path.join(userDataDir, STAGING_RELATIVE_PATH, message.jobId);
-      const ledgerPath = path.join(jobRoot, 'job-ledger.sqlite');
       fs.mkdirSync(jobRoot, { recursive: true });
-      fs.writeFileSync(ledgerPath, 'sealed');
+      fs.writeFileSync(path.join(jobRoot, 'staged.xlsx'), 'staged');
       const ready = {
         type: POSITION_IMPORT_MESSAGE_TYPES.PREFLIGHT_READY,
         jobId: message.jobId,
         archiveManifestHash: 'duplicate-manifest',
-        ledgerEvidence: { ledgerPath }
+        jobRoot
       };
       setImmediate(() => {
         worker.emit('message', ready);
@@ -906,7 +663,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
     worker.kill = () => true;
     const job = dispatchPositionImportPreflight({
       engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      command: POSITION_IMPORT_COMMANDS.SOURCE_IMPORT,
       files: [],
       userDataDir,
       sideDbPath: path.join(dir, 'unused.sqlite'),
@@ -944,7 +701,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
     };
     const job = dispatchPositionImportPreflight({
       engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.BANK_PREPARE,
+      command: POSITION_IMPORT_COMMANDS.BANK_IMPORT,
       jobId,
       files: [],
       userDataDir,
@@ -986,7 +743,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
     const progress = [];
     const job = dispatchPositionImportPreflight({
       engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.BANK_APPLY,
+      command: POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY,
       batchContext: MUTATING_BATCH_CONTEXT,
       files: [],
       userDataDir: '',
@@ -1055,7 +812,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
     const cancelAcks = [];
     const job = dispatchPositionImportPreflight({
       engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.BANK_APPLY,
+      command: POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY,
       batchContext: MUTATING_BATCH_CONTEXT,
       files: [],
       userDataDir: '',
@@ -1076,439 +833,19 @@ test.describe('v3.1.3 position streaming preflight', () => {
     assert.equal(cancelAcks[0].accepted, false);
   });
 
-  test('schema-only utility job 原子建立现代来源身份且不推进 checkpoint', async (t) => {
-    const dir = tempDir(t, 'position-prc1-schema-dispatch-');
+  test('银行单遍导入：结果导出格式可作输入且审计列不入库，登记原始版本号，提交凭证可供恢复，磁盘门禁在写库前生效', async (t) => {
+    const dir = tempDir(t, 'position-bank-single-pass-');
     const checkpoint = {
-      identity: 'schema-dispatch-identity',
+      identity: 'bank-import-identity',
       generation: 0,
-      token: 'schema-dispatch-token'
-    };
-    let store = createPositionReconciliationStore(dir, {
-      initialCheckpoint: checkpoint
-    });
-    const sideDbPath = store.dbPath;
-    store.close();
-
-    const job = dispatchPositionLargeImportSchemaMigration({
-      engine: 'streaming',
-      userDataDir: dir,
-      sideDbPath,
-      expectedCheckpoint: checkpoint
-    });
-    const result = await job.promise;
-    assert.equal(result.migrated, true);
-    assert.deepEqual(result.checkpoint, checkpoint);
-
-    store = createPositionReconciliationStore(dir, {
-      expectedCheckpoint: checkpoint
-    });
-    t.after(() => store.close());
-    assertPositionLargeImportSchema(store.db);
-    assert.deepEqual(store.persistenceCheckpoint(), checkpoint);
-  });
-
-  test('worker 在 PREFLIGHT_READY 后验证 grant 的 manifest、schema 和 checkpoint', async (t) => {
-    const dir = tempDir(t, 'position-prc1-apply-grant-');
-    const checkpoint = {
-      identity: 'apply-grant-identity',
-      generation: 0,
-      token: 'apply-grant-token'
+      token: 'bank-import-token'
     };
     const store = createPositionReconciliationStore(dir, {
       initialCheckpoint: checkpoint
     });
     const sideDbPath = store.dbPath;
     store.close();
-    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
-      engine: 'streaming',
-      userDataDir: dir,
-      sideDbPath,
-      expectedCheckpoint: checkpoint
-    }).promise;
-    const filePath = sourceFile(
-      dir,
-      SOURCE_TYPES.GATEWAY_OUTBOUND,
-      [sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND]],
-      'apply-grant.xlsx'
-    );
-    let authorizedManifest = '';
-    const result = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files: [filePath],
-      userDataDir: path.join(dir, 'worker-user-data'),
-      sideDbPath,
-      authorizeApply: (ready) => {
-        authorizedManifest = ready.archiveManifestHash;
-        return {
-          batchContext: MUTATING_BATCH_CONTEXT,
-          operationToken: 'apply-grant-operation',
-          archiveManifestHash: ready.archiveManifestHash,
-          schemaFingerprint: schemaResult.fingerprint,
-          baseCheckpoint: checkpoint
-        };
-      }
-    }).promise;
-    assert.equal(result.status, undefined);
-    assert.equal(result.orderedFileResults[0].status, 'ok');
-    assert.equal(result.archiveManifestHash, authorizedManifest);
-  });
-
-  test('gateway-outbound 生产 writer 保留同主键不同内容并折叠完全重复', async (t) => {
-    const dir = tempDir(t, 'position-prc2-source-writer-');
-    const checkpoint = {
-      identity: 'source-writer-identity',
-      generation: 0,
-      token: 'source-writer-token'
-    };
-    let store = createPositionReconciliationStore(dir, {
-      initialCheckpoint: checkpoint
-    });
-    const sideDbPath = store.dbPath;
-    store.close();
-    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
-      engine: 'streaming',
-      userDataDir: dir,
-      sideDbPath,
-      expectedCheckpoint: checkpoint
-    }).promise;
-
-    const row = sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND];
-    const changed = {
-      ...row,
-      渠道名称: 'Yeepay'
-    };
-    const first = sourceFile(
-      dir,
-      SOURCE_TYPES.GATEWAY_OUTBOUND,
-      [row, changed],
-      'writer-first.xlsx'
-    );
-    const duplicate = sourceFile(
-      dir,
-      SOURCE_TYPES.GATEWAY_OUTBOUND,
-      [row],
-      'writer-duplicate.xlsx'
-    );
-    const committedFiles = [];
-    const result = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files: [first, duplicate],
-      userDataDir: path.join(dir, 'worker-user-data'),
-      sideDbPath,
-      featureFlags: {
-        preflightOnly: false,
-        streamingSourceTypes: [SOURCE_TYPES.GATEWAY_OUTBOUND]
-      },
-      authorizeApply: (ready) => ({
-        batchContext: MUTATING_BATCH_CONTEXT,
-        operationToken: 'source-writer-operation',
-        archiveManifestHash: ready.archiveManifestHash,
-        schemaFingerprint: schemaResult.fingerprint,
-        baseCheckpoint: checkpoint
-      }),
-      onFileCommitted: (event) => committedFiles.push(event)
-    }).promise;
-    assert.equal(result.status, 'ok');
-    assert.equal(result.successCount, 2);
-    assert.equal(result.failedCount, 0);
-    assert.deepEqual(
-      result.results.map((item) => [
-        item.rowCount,
-        item.collapsedDuplicateCount
-      ]),
-      [[2, 0], [0, 1]]
-    );
-    assert.deepEqual(
-      committedFiles.map((item) => item.committedRows),
-      [2, 0]
-    );
-
-    let db = new DatabaseSync(sideDbPath, { readOnly: true });
-    assertPositionLargeImportSchema(db);
-    assert.equal(positionLargeImportSchemaFingerprint(db), schemaResult.fingerprint);
-    assert.equal(
-      db.prepare('SELECT COUNT(*) AS count FROM position_source_rows').get().count,
-      2
-    );
-    assert.equal(
-      db.prepare(`
-        SELECT COUNT(DISTINCT business_key) AS count
-        FROM position_source_rows
-      `).get().count,
-      1
-    );
-    assert.equal(
-      db.prepare('SELECT COUNT(DISTINCT row_hash) AS count FROM position_source_rows').get().count,
-      2
-    );
-    assert.equal(
-      db.prepare(`
-        SELECT COUNT(DISTINCT source_record_key) AS count
-        FROM position_link_rows
-      `).get().count,
-      2
-    );
-    assert.equal(
-      db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM position_operation_inputs
-        WHERE operation_token = 'source-writer-operation'
-      `).get().count,
-      2
-    );
-    const currentCheckpoint = readPositionDatabaseCheckpoint(db);
-    assert.equal(currentCheckpoint.generation, 2);
-    db.close();
-
-    const repeated = sourceFile(
-      dir,
-      SOURCE_TYPES.GATEWAY_OUTBOUND,
-      [row],
-      'writer-independent-repeat.xlsx'
-    );
-    const repeatedResult = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files: [repeated],
-      userDataDir: path.join(dir, 'worker-user-data-repeat'),
-      sideDbPath,
-      featureFlags: {
-        preflightOnly: false,
-        streamingSourceTypes: [SOURCE_TYPES.GATEWAY_OUTBOUND]
-      },
-      authorizeApply: (ready) => ({
-        batchContext: MUTATING_BATCH_CONTEXT,
-        operationToken: 'source-writer-repeat-operation',
-        archiveManifestHash: ready.archiveManifestHash,
-        schemaFingerprint: schemaResult.fingerprint,
-        baseCheckpoint: currentCheckpoint
-      })
-    }).promise;
-    assert.equal(repeatedResult.successCount, 1);
-    assert.equal(repeatedResult.results[0].rowCount, 1);
-
-    db = new DatabaseSync(sideDbPath, { readOnly: true });
-    t.after(() => db.close());
-    assert.equal(
-      db.prepare('SELECT COUNT(*) AS count FROM position_source_rows').get().count,
-      2
-    );
-    assert.equal(
-      db.prepare('SELECT COUNT(*) AS count FROM position_link_rows').get().count,
-      2
-    );
-    assert.equal(
-      db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM position_source_rows
-        WHERE source_file_name = 'writer-independent-repeat.xlsx'
-      `).get().count,
-      1
-    );
-    assert.equal(readPositionDatabaseCheckpoint(db).generation, 3);
-  });
-
-  test('四类普通来源流式 writer 保持 0/hidden/visible/双腿派生语义', async (t) => {
-    const dir = tempDir(t, 'position-prd-source-writers-');
-    const checkpoint = {
-      identity: 'source-writers-identity',
-      generation: 0,
-      token: 'source-writers-token'
-    };
-    const store = createPositionReconciliationStore(dir, {
-      initialCheckpoint: checkpoint
-    });
-    const sideDbPath = store.dbPath;
-    store.close();
-    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
-      engine: 'streaming',
-      userDataDir: dir,
-      sideDbPath,
-      expectedCheckpoint: checkpoint
-    }).promise;
-    const base = sourceRows();
-    const files = [
-      sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [
-        base[SOURCE_TYPES.FUND_TRANSFER],
-        {
-          ...base[SOURCE_TYPES.FUND_TRANSFER],
-          调拨单号: 'FT-PRD-HIDDEN',
-          渠道流水号: 'FT-RID-HIDDEN',
-          收款金额: 100,
-          收款币种: 'USD'
-        }
-      ], 'prd-fund-transfer.xlsx'),
-      sourceFile(dir, SOURCE_TYPES.TEST_PAYMENT, [
-        base[SOURCE_TYPES.TEST_PAYMENT],
-        {
-          ...base[SOURCE_TYPES.TEST_PAYMENT],
-          付款单号: 'TEST-PRD-ZERO',
-          渠道流水号: 'TEST-RID-ZERO',
-          源金额: 0
-        }
-      ], 'prd-test-payment.xlsx'),
-      sourceFile(dir, SOURCE_TYPES.GATEWAY_INBOUND, [
-        base[SOURCE_TYPES.GATEWAY_INBOUND],
-        {
-          ...base[SOURCE_TYPES.GATEWAY_INBOUND],
-          bizId: 'IN-PRD-HIDDEN',
-          reconId: 'IN-RID-HIDDEN',
-          originOutboundCurrency: 'USD'
-        },
-        {
-          ...base[SOURCE_TYPES.GATEWAY_INBOUND],
-          bizId: 'IN-PRD-ZERO',
-          reconId: 'IN-RID-ZERO',
-          tradeType: 'Unsupported'
-        }
-      ], 'prd-gateway-inbound.xlsx'),
-      sourceFile(
-        dir,
-        SOURCE_TYPES.GATEWAY_OUTBOUND,
-        [base[SOURCE_TYPES.GATEWAY_OUTBOUND]],
-        'prd-gateway-outbound.xlsx'
-      )
-    ];
-
-    const result = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files,
-      userDataDir: path.join(dir, 'worker-user-data'),
-      sideDbPath,
-      featureFlags: {
-        preflightOnly: false,
-        streamingSourceTypes: [...POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST]
-      },
-      authorizeApply: (ready) => ({
-        batchContext: MUTATING_BATCH_CONTEXT,
-        operationToken: 'source-writers-operation',
-        archiveManifestHash: ready.archiveManifestHash,
-        schemaFingerprint: schemaResult.fingerprint,
-        baseCheckpoint: checkpoint
-      })
-    }).promise;
-    assert.equal(result.status, 'ok');
-    assert.equal(result.successCount, 4);
-    assert.deepEqual(result.cleanupPaths, [
-      path.dirname(result.ledgerEvidence.ledgerPath)
-    ]);
-    assert.deepEqual(
-      result.results.map((item) => [item.sourceType, item.rowCount]),
-      [
-        [SOURCE_TYPES.FUND_TRANSFER, 2],
-        [SOURCE_TYPES.TEST_PAYMENT, 2],
-        [SOURCE_TYPES.GATEWAY_INBOUND, 3],
-        [SOURCE_TYPES.GATEWAY_OUTBOUND, 1]
-      ]
-    );
-
-    const db = new DatabaseSync(sideDbPath, { readOnly: true });
-    t.after(() => db.close());
-    assert.deepEqual(
-      db.prepare(`
-        SELECT source_type AS sourceType, COUNT(*) AS rowCount
-        FROM position_source_rows
-        GROUP BY source_type
-        ORDER BY source_type
-      `).all().map((row) => ({ ...row })),
-      [
-        { sourceType: SOURCE_TYPES.FUND_TRANSFER, rowCount: 2 },
-        { sourceType: SOURCE_TYPES.GATEWAY_INBOUND, rowCount: 3 },
-        { sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND, rowCount: 1 },
-        { sourceType: SOURCE_TYPES.TEST_PAYMENT, rowCount: 2 }
-      ]
-    );
-    assert.deepEqual(
-      db.prepare(`
-        SELECT source_type AS sourceType,
-               SUM(CASE WHEN visible = 1 THEN 1 ELSE 0 END) AS visibleCount,
-               SUM(CASE WHEN visible = 0 THEN 1 ELSE 0 END) AS hiddenCount
-        FROM position_link_rows
-        GROUP BY source_type
-        ORDER BY source_type
-      `).all().map((row) => ({ ...row })),
-      [
-        { sourceType: SOURCE_TYPES.FUND_TRANSFER, visibleCount: 2, hiddenCount: 2 },
-        { sourceType: SOURCE_TYPES.GATEWAY_INBOUND, visibleCount: 1, hiddenCount: 1 },
-        { sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND, visibleCount: 1, hiddenCount: 0 },
-        { sourceType: SOURCE_TYPES.TEST_PAYMENT, visibleCount: 1, hiddenCount: 0 }
-      ]
-    );
-    assert.equal(readPositionDatabaseCheckpoint(db).generation, 4);
-  });
-
-  test('账户快照单独预检只生成确认 descriptor，不在 prepare 阶段写库', async (t) => {
-    const dir = tempDir(t, 'position-prc2-source-allowlist-');
-    const checkpoint = {
-      identity: 'source-allowlist-identity',
-      generation: 0,
-      token: 'source-allowlist-token'
-    };
-    const store = createPositionReconciliationStore(dir, {
-      initialCheckpoint: checkpoint
-    });
-    const sideDbPath = store.dbPath;
-    store.close();
-    const account = sourceFile(
-      dir,
-      SOURCE_TYPES.BANK_ACCOUNT,
-      [sourceRows()[SOURCE_TYPES.BANK_ACCOUNT]],
-      'blocked-account.xlsx'
-    );
-
-    const result = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files: [account],
-      userDataDir: path.join(dir, 'worker-user-data'),
-      sideDbPath,
-      featureFlags: {
-        preflightOnly: false,
-        streamingSourceTypes: [...POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST]
-      },
-      authorizeApply: (ready) => ({
-        preflightOnly: true,
-        archiveManifestHash: ready.archiveManifestHash
-      })
-    }).promise;
-    assert.equal(result.accountConfirmationDescriptor.status, 'needs-confirmation');
-    assert.equal(result.accountConfirmationDescriptor.rowCount, 1);
-
-    const db = new DatabaseSync(sideDbPath, { readOnly: true });
-    t.after(() => db.close());
-    assert.equal(
-      db.prepare('SELECT COUNT(*) AS count FROM position_source_rows').get().count,
-      0
-    );
-    assert.equal(
-      db.prepare('SELECT COUNT(*) AS count FROM position_operation_inputs').get().count,
-      0
-    );
-    assert.deepEqual(readPositionDatabaseCheckpoint(db), checkpoint);
-  });
-
-  test('银行 prepare 不写库，确认后整批单事务替换并忽略 49 列审计字段', async (t) => {
-    const dir = tempDir(t, 'position-pre-bank-writer-');
-    const checkpoint = {
-      identity: 'bank-writer-identity',
-      generation: 0,
-      token: 'bank-writer-token'
-    };
-    const store = createPositionReconciliationStore(dir, {
-      initialCheckpoint: checkpoint
-    });
-    const sideDbPath = store.dbPath;
-    store.close();
-    const schema = await dispatchPositionLargeImportSchemaMigration({
-      engine: 'streaming',
-      userDataDir: dir,
-      sideDbPath,
-      expectedCheckpoint: checkpoint
-    }).promise;
-    const bankPath = path.join(dir, 'bank-49.xlsx');
+    const bankPath = path.join(dir, 'bank-result-format.xlsx');
     writeWorkbook(bankPath, [{
       name: BANK_SHEET_NAME,
       headers: POSITION_BANK_HEADERS,
@@ -1521,81 +858,97 @@ test.describe('v3.1.3 position streaming preflight', () => {
         },
         bankRow({
           BizId: 'BANK-PRB-2',
-          // 本用例验证银行批次原子替换，不验证 SheetJS 在部分历史时区下写 Date
-          // 产生的 Excel 纪元秒级余数；使用业务等价的纯日期文本避免月份边界受宿主时区影响。
+          // 使用纯日期文本，避免月份边界受宿主时区下 Excel 纪元秒级余数影响。
           BillDate: '2026-08-01',
           Channel: 'JPM',
           Currency: 'EUR'
         })
       ]
     }]);
-    const prepared = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.BANK_PREPARE,
-      files: [bankPath],
-      userDataDir: path.join(dir, 'bank-prepare'),
-      sideDbPath
-    }).promise;
-    assert.equal(prepared.acceptedBankFiles.length, 1);
-    let db = new DatabaseSync(sideDbPath, { readOnly: true });
-    assert.equal(
-      db.prepare('SELECT COUNT(*) AS count FROM position_bank_rows').get().count,
-      0
-    );
-    db.close();
+    const importBank = (files, { operationToken, baseCheckpoint, contractOptions } = {}) => {
+      const state = { ready: null };
+      const job = dispatchPositionImportPreflight({
+        engine: 'streaming',
+        command: POSITION_IMPORT_COMMANDS.BANK_IMPORT,
+        files,
+        userDataDir: dir,
+        sideDbPath,
+        expectedCheckpoint: baseCheckpoint,
+        featureFlags: { bankImport: true },
+        ...(contractOptions ? { contractOptions } : {}),
+        onPreflightReady: (ready) => { state.ready = ready; },
+        authorizeApply: () => ({
+          preflightOnly: false,
+          operationToken,
+          baseCheckpoint,
+          batchContext: MUTATING_BATCH_CONTEXT
+        })
+      });
+      return { state, promise: job.promise };
+    };
 
-    const applied = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.BANK_APPLY,
-      batchContext: MUTATING_BATCH_CONTEXT,
-      files: [],
-      userDataDir: dir,
-      sideDbPath,
-      expectedCheckpoint: checkpoint,
-      operationToken: 'bank-writer-operation',
-      payload: {
-        schemaFingerprint: schema.fingerprint,
-        preflightReady: prepared
-      },
-      featureFlags: { importApply: true }
-    }).promise;
+    const first = importBank([bankPath], {
+      operationToken: 'bank-import-operation',
+      baseCheckpoint: checkpoint
+    });
+    const applied = await first.promise;
     assert.equal(applied.rowCount, 2);
     assert.equal(applied.scopes.length, 2);
     assert.equal(applied.nextCheckpoint.generation, 1);
+    assert.deepEqual(applied.rawVersions, [{ fileIndex: 0, fileName: 'bank-result-format.xlsx', version: 1 }]);
 
-    db = new DatabaseSync(sideDbPath, { readOnly: true });
+    const db = new DatabaseSync(sideDbPath, { readOnly: true });
     t.after(() => db.close());
     const rows = db.prepare(`
       SELECT biz_id AS bizId, import_order AS importOrder,
-             hit_summary AS hitSummary, hit_type AS hitType,
-             match_detail AS matchDetail, original_json AS originalJson
+             hit_summary AS hitSummary, hit_type AS hitType, match_detail AS matchDetail,
+             raw_version AS rawVersion, raw_row_number AS rawRowNumber,
+             merchant_id AS merchantId, currency
       FROM position_bank_rows
       ORDER BY import_order
     `).all();
     assert.deepEqual(
-      rows.map((row) => [row.bizId, row.importOrder]),
-      [['BANK-PRB-1', 0], ['BANK-PRB-2', 1]]
+      rows.map((row) => [row.bizId, row.importOrder, row.rawVersion, row.rawRowNumber]),
+      [['BANK-PRB-1', 0, 1, 2], ['BANK-PRB-2', 1, 1, 3]]
     );
-    assert.equal(rows[0].hitSummary, '');
-    assert.equal(rows[0].hitType, '');
-    assert.equal(rows[0].matchDetail, '');
-    assert.equal(Object.keys(JSON.parse(rows[0].originalJson)).length, 46);
+    assert.deepEqual(
+      [rows[0].hitSummary, rows[0].hitType, rows[0].matchDetail],
+      ['', '', ''],
+      '结果文件里的审计列不入库'
+    );
+    assert.equal(rows[0].merchantId, 'M001');
+    assert.equal(rows[1].currency, 'EUR');
+    const columns = db.prepare('PRAGMA table_info(position_bank_rows)').all().map((column) => column.name);
+    assert.equal(columns.some((name) => /json/.test(name)), false, '银行行不再保存整行 JSON');
+    const rawFile = db.prepare('SELECT * FROM position_raw_files').all();
+    assert.equal(rawFile.length, 1);
+    assert.equal(rawFile[0].kind, 'bank');
+    assert.equal(rawFile[0].original_name, 'bank-result-format.xlsx');
+    assert.equal(rawFile[0].sheet_name, BANK_SHEET_NAME);
+    assert.equal(Number(rawFile[0].row_count), 2);
+    assert.equal(rawFile[0].status, 'active');
+    assert.equal(Number(rawFile[0].size_bytes), fs.statSync(bankPath).size);
+    assert.match(rawFile[0].sha256, /^[a-f0-9]{64}$/);
+    assert.equal(rawFile[0].operation_token, 'bank-import-operation');
+    assert.equal(rawFile[0].archive_batch_number, MUTATING_BATCH_CONTEXT.batchNumber);
     assert.equal(
       db.prepare(`
         SELECT COUNT(*) AS count
         FROM position_operation_inputs
-        WHERE operation_token = 'bank-writer-operation'
+        WHERE operation_token = 'bank-import-operation'
       `).get().count,
       1
     );
     assert.equal(readPositionDatabaseCheckpoint(db).generation, 1);
+
+    // 导入进程在提交后、回报前退出：凭提交链与 ready 消息重建同一结果。
     const recovered = recoverPositionImportWorkerExit({
       sideDbPath,
       baseCheckpoint: checkpoint,
-      operationToken: 'bank-writer-operation',
-      preflightReady: prepared,
+      operationToken: 'bank-import-operation',
+      preflightReady: first.state.ready,
       workerError: new Error('worker exited after commit'),
-      command: POSITION_IMPORT_COMMANDS.BANK_APPLY
+      command: POSITION_IMPORT_COMMANDS.BANK_IMPORT
     });
     assert.equal(recovered.recoveredFromWorkerExit, true);
     assert.equal(recovered.rowCount, 2);
@@ -1603,52 +956,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
       { fileIndex: 0, channel: 'DBS', monthKey: '2026-07' },
       { fileIndex: 0, channel: 'JPM', monthKey: '2026-08' }
     ]);
-
-    const conflictPath = path.join(dir, 'bank-conflict.xlsx');
-    writeWorkbook(conflictPath, [{
-      name: BANK_SHEET_NAME,
-      headers: BANK_STATEMENT_FIELDS,
-      rows: [bankRow({
-        BizId: 'BANK-PRB-1',
-        Channel: 'CITI',
-        BillDate: '2026-09-01'
-      })]
-    }]);
-    const conflict = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.BANK_PREPARE,
-      files: [conflictPath],
-      userDataDir: path.join(dir, 'bank-conflict-prepare'),
-      sideDbPath
-    }).promise;
-    await assert.rejects(
-      dispatchPositionImportPreflight({
-        engine: 'streaming',
-        command: POSITION_IMPORT_COMMANDS.BANK_APPLY,
-        batchContext: MUTATING_BATCH_CONTEXT,
-        files: [],
-        userDataDir: dir,
-        sideDbPath,
-        expectedCheckpoint: applied.nextCheckpoint,
-        operationToken: 'bank-conflict-operation',
-        payload: {
-          schemaFingerprint: schema.fingerprint,
-          preflightReady: conflict
-        },
-        featureFlags: { importApply: true }
-      }).promise,
-      (error) => (
-        error
-        && error.code === 'position-bank-existing-bizid-conflict'
-        && error.detailLines.some((line) => line.includes('BANK-PRB-1'))
-      )
-    );
-    assert.equal(
-      db.prepare('SELECT COUNT(*) AS count FROM position_bank_rows').get().count,
-      2,
-      '跨范围 BizId 冲突必须回滚整批银行替换'
-    );
-    assert.equal(readPositionDatabaseCheckpoint(db).generation, 1);
+    assert.deepEqual(recovered.cleanupPaths, [first.state.ready.jobRoot]);
 
     const replacementPath = path.join(dir, 'bank-replacement.xlsx');
     writeWorkbook(replacementPath, [{
@@ -1656,28 +964,10 @@ test.describe('v3.1.3 position streaming preflight', () => {
       headers: BANK_STATEMENT_FIELDS,
       rows: [bankRow({ BizId: 'BANK-REPLACEMENT' })]
     }]);
-    const replacement = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.BANK_PREPARE,
-      files: [replacementPath],
-      userDataDir: path.join(dir, 'bank-replacement-prepare'),
-      sideDbPath
-    }).promise;
     await assert.rejects(
-      dispatchPositionImportPreflight({
-        engine: 'streaming',
-        command: POSITION_IMPORT_COMMANDS.BANK_APPLY,
-        batchContext: MUTATING_BATCH_CONTEXT,
-        files: [],
-        userDataDir: dir,
-        sideDbPath,
-        expectedCheckpoint: applied.nextCheckpoint,
+      importBank([replacementPath], {
         operationToken: 'bank-low-disk-operation',
-        payload: {
-          schemaFingerprint: schema.fingerprint,
-          preflightReady: replacement
-        },
-        featureFlags: { importApply: true },
+        baseCheckpoint: applied.nextCheckpoint,
         contractOptions: { availableBytes: 0 }
       }).promise,
       (error) => error && error.code === 'position-import-disk-space-insufficient'
@@ -1687,717 +977,19 @@ test.describe('v3.1.3 position streaming preflight', () => {
       2,
       '磁盘门禁必须在删除旧 scope 前生效'
     );
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM position_raw_files').get().count, 1);
     assert.equal(readPositionDatabaseCheckpoint(db).generation, 1);
-  });
 
-  test('银行 apply 只复制 scope 聚合，不再复制全量 BizId 临时键表', () => {
-    const db = new DatabaseSync(':memory:');
-    const ledgerDb = new DatabaseSync(':memory:');
-    try {
-      ledgerDb.exec(`
-        CREATE TABLE bank_seen_biz_ids(
-          biz_id TEXT PRIMARY KEY,
-          channel TEXT NOT NULL,
-          month_key TEXT NOT NULL,
-          first_file_index INTEGER NOT NULL,
-          first_row_number INTEGER NOT NULL
-        );
-        CREATE TABLE bank_scopes(
-          channel TEXT NOT NULL,
-          month_key TEXT NOT NULL,
-          row_count INTEGER NOT NULL,
-          PRIMARY KEY(channel, month_key)
-        );
-        INSERT INTO bank_seen_biz_ids VALUES
-          ('B-1', 'DBS', '2026-07', 0, 2),
-          ('B-2', 'DBS', '2026-07', 0, 3),
-          ('B-3', 'DBS', '2026-07', 0, 4);
-        INSERT INTO bank_scopes VALUES ('DBS', '2026-07', 3);
-      `);
-      initializeIncomingBankTables(db, ledgerDb);
-      assert.deepEqual(
-        db.prepare(`
-          SELECT channel, month_key AS monthKey, row_count AS rowCount
-          FROM incoming_bank_scopes
-        `).all().map((row) => ({ ...row })),
-        [{ channel: 'DBS', monthKey: '2026-07', rowCount: 3 }]
-      );
-      assert.equal(
-        db.prepare(`
-          SELECT COUNT(*) AS count
-          FROM sqlite_temp_master
-          WHERE type = 'table' AND name = 'incoming_bank_keys'
-        `).get().count,
-        0
-      );
-    } finally {
-      ledgerDb.close();
-      db.close();
-    }
-  });
-
-  test('普通来源与账户混选时普通来源先提交，账户确认后整表替换', async (t) => {
-    const dir = tempDir(t, 'position-pre-account-writer-');
-    const checkpoint = {
-      identity: 'account-writer-identity',
-      generation: 0,
-      token: 'account-writer-token'
-    };
-    const store = createPositionReconciliationStore(dir, {
-      initialCheckpoint: checkpoint
-    });
-    const sideDbPath = store.dbPath;
-    store.close();
-    const schema = await dispatchPositionLargeImportSchemaMigration({
-      engine: 'streaming',
-      userDataDir: dir,
-      sideDbPath,
-      expectedCheckpoint: checkpoint
-    }).promise;
-    const ordinary = sourceFile(
-      dir,
-      SOURCE_TYPES.GATEWAY_OUTBOUND,
-      [sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND]],
-      'mixed-outbound.xlsx'
-    );
-    const normal = sourceRows()[SOURCE_TYPES.BANK_ACCOUNT];
-    const account = sourceFile(
-      dir,
-      SOURCE_TYPES.BANK_ACCOUNT,
-      [
-        normal,
-        { ...normal },
-        { ...normal, 账户状态: '注销', 银行账号: 'CLOSED-ACCOUNT' }
-      ],
-      'mixed-account.xlsx'
-    );
-    const prepared = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files: [ordinary, account],
-      userDataDir: path.join(dir, 'mixed-prepare'),
-      sideDbPath,
-      featureFlags: {
-        preflightOnly: false,
-        streamingSourceTypes: [...POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST]
-      },
-      authorizeApply: (ready) => ({
-        batchContext: MUTATING_BATCH_CONTEXT,
-        operationToken: 'mixed-ordinary-operation',
-        archiveManifestHash: ready.archiveManifestHash,
-        schemaFingerprint: schema.fingerprint,
-        baseCheckpoint: checkpoint
-      })
-    }).promise;
-    assert.equal(prepared.successCount, 1);
-    assert.equal(prepared.confirmationCount, 1);
-    assert.deepEqual(
-      prepared.results.map((item) => item.status),
-      ['ok', 'needs-confirmation']
-    );
-    assert.equal(prepared.accountConfirmationDescriptor.rowCount, 2);
-    assert.equal(
-      prepared.cleanupPaths.includes(path.dirname(prepared.ledgerEvidence.ledgerPath)),
-      false
-    );
-    assert.equal(fs.existsSync(prepared.ledgerEvidence.ledgerPath), true);
-
-    let db = new DatabaseSync(sideDbPath, { readOnly: true });
-    assert.equal(
-      db.prepare(`
-        SELECT COUNT(*) AS count FROM position_source_rows
-        WHERE source_type = ?
-      `).get(SOURCE_TYPES.GATEWAY_OUTBOUND).count,
-      1
-    );
-    assert.equal(
-      db.prepare(`
-        SELECT COUNT(*) AS count FROM position_source_rows
-        WHERE source_type = ?
-      `).get(SOURCE_TYPES.BANK_ACCOUNT).count,
-      0
-    );
-    const afterOrdinary = readPositionDatabaseCheckpoint(db);
-    assert.equal(afterOrdinary.generation, 1);
-    db.close();
-
-    const applied = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY,
-      batchContext: MUTATING_BATCH_CONTEXT,
-      files: [],
-      userDataDir: dir,
-      sideDbPath,
-      expectedCheckpoint: afterOrdinary,
-      operationToken: 'mixed-account-operation',
-      payload: {
-        schemaFingerprint: schema.fingerprint,
-        preflightReady: prepared
-      },
-      featureFlags: { importApply: true }
-    }).promise;
-    assert.equal(applied.rowCount, 2);
-    assert.equal(applied.linkedRowCount, 2);
-    assert.equal(applied.nextCheckpoint.generation, 2);
-
-    db = new DatabaseSync(sideDbPath, { readOnly: true });
-    t.after(() => db.close());
-    assert.equal(
-      db.prepare(`
-        SELECT COUNT(*) AS count FROM position_source_rows
-        WHERE source_type = ?
-      `).get(SOURCE_TYPES.BANK_ACCOUNT).count,
-      2
-    );
-    assert.equal(
-      db.prepare(`
-        SELECT COUNT(DISTINCT row_hash) AS count FROM position_source_rows
-        WHERE source_type = ?
-      `).get(SOURCE_TYPES.BANK_ACCOUNT).count,
-      2
-    );
-    assert.equal(
-      db.prepare(`
-        SELECT COUNT(*) AS count FROM position_link_rows
-        WHERE source_type = ?
-      `).get(SOURCE_TYPES.BANK_ACCOUNT).count,
-      2
-    );
-    assert.equal(
-      db.prepare(`
-        SELECT COUNT(*) AS count FROM position_operation_inputs
-        WHERE operation_token = 'mixed-account-operation'
-      `).get().count,
-      1
-    );
-    assert.equal(readPositionDatabaseCheckpoint(db).generation, 2);
-    const recovered = recoverPositionImportWorkerExit({
-      sideDbPath,
-      baseCheckpoint: afterOrdinary,
-      operationToken: 'mixed-account-operation',
-      preflightReady: prepared,
-      workerError: new Error('worker exited after account commit'),
-      command: POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY
-    });
-    assert.equal(recovered.recoveredFromWorkerExit, true);
-    assert.equal(recovered.rowCount, 2);
-    assert.equal(recovered.linkedRowCount, 2);
-
-    const replacementAccount = sourceFile(
-      dir,
-      SOURCE_TYPES.BANK_ACCOUNT,
-      [{ ...normal, 银行账号: 'REPLACEMENT-ACCOUNT', 币种: 'EUR' }],
-      'replacement-account.xlsx'
-    );
-    const replacement = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files: [replacementAccount],
-      userDataDir: path.join(dir, 'replacement-account-prepare'),
-      sideDbPath,
-      featureFlags: {
-        preflightOnly: false,
-        streamingSourceTypes: [...POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST]
-      },
-      authorizeApply: (ready) => ({
-        preflightOnly: true,
-        archiveManifestHash: ready.archiveManifestHash
-      })
-    }).promise;
+    // 旧的两段式银行命令已停用。
     await assert.rejects(
       dispatchPositionImportPreflight({
         engine: 'streaming',
-        command: POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY,
-        batchContext: MUTATING_BATCH_CONTEXT,
-        files: [],
-        userDataDir: dir,
-        sideDbPath,
-        expectedCheckpoint: applied.nextCheckpoint,
-        operationToken: 'account-low-disk-operation',
-        payload: {
-          schemaFingerprint: schema.fingerprint,
-          preflightReady: replacement
-        },
-        featureFlags: { importApply: true },
-        contractOptions: { availableBytes: 0 }
+        command: POSITION_IMPORT_COMMANDS.BANK_PREPARE,
+        files: [replacementPath],
+        userDataDir: path.join(dir, 'bank-prepare'),
+        sideDbPath
       }).promise,
-      (error) => error && error.code === 'position-import-disk-space-insufficient'
-    );
-    assert.equal(
-      db.prepare(`
-        SELECT COUNT(*) AS count FROM position_source_rows
-        WHERE source_type = ?
-      `).get(SOURCE_TYPES.BANK_ACCOUNT).count,
-      2,
-      '磁盘门禁必须在删除旧账户快照前生效'
-    );
-    assert.equal(readPositionDatabaseCheckpoint(db).generation, 2);
-  });
-
-  test('gateway-outbound 后序文件失效时保留前序已提交文件并可恢复', async (t) => {
-    const dir = tempDir(t, 'position-prc2-source-recovery-');
-    const checkpoint = {
-      identity: 'source-recovery-identity',
-      generation: 0,
-      token: 'source-recovery-token'
-    };
-    const store = createPositionReconciliationStore(dir, {
-      initialCheckpoint: checkpoint
-    });
-    const sideDbPath = store.dbPath;
-    store.close();
-    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
-      engine: 'streaming',
-      userDataDir: dir,
-      sideDbPath,
-      expectedCheckpoint: checkpoint
-    }).promise;
-    const row = sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND];
-    const first = sourceFile(
-      dir,
-      SOURCE_TYPES.GATEWAY_OUTBOUND,
-      [{ ...row, 业务单号: 'RECOVERY-A' }],
-      'recovery-a.xlsx'
-    );
-    const second = sourceFile(
-      dir,
-      SOURCE_TYPES.GATEWAY_OUTBOUND,
-      [{ ...row, 业务单号: 'RECOVERY-B' }],
-      'recovery-b.xlsx'
-    );
-
-    const result = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files: [first, second],
-      userDataDir: path.join(dir, 'worker-user-data'),
-      sideDbPath,
-      featureFlags: {
-        preflightOnly: false,
-        streamingSourceTypes: [SOURCE_TYPES.GATEWAY_OUTBOUND]
-      },
-      authorizeApply: (ready) => {
-        fs.appendFileSync(ready.acceptedOrdinaryInputFiles[1].archivePath, 'changed');
-        return {
-          batchContext: MUTATING_BATCH_CONTEXT,
-          operationToken: 'source-recovery-operation',
-          archiveManifestHash: ready.archiveManifestHash,
-          schemaFingerprint: schemaResult.fingerprint,
-          baseCheckpoint: checkpoint
-        };
-      }
-    }).promise;
-    assert.equal(result.status, 'ok');
-    assert.equal(result.successCount, 1);
-    assert.equal(result.failedCount, 1);
-    assert.deepEqual(
-      result.results.map((item) => item.status),
-      ['ok', 'failed']
-    );
-
-    const db = new DatabaseSync(sideDbPath, { readOnly: true });
-    t.after(() => db.close());
-    assert.equal(
-      db.prepare('SELECT COUNT(*) AS count FROM position_source_rows').get().count,
-      1
-    );
-    assert.equal(
-      db.prepare(`
-        SELECT business_key AS businessKey
-        FROM position_source_rows
-      `).get().businessKey,
-      'RECOVERY-A'
-    );
-    assert.equal(
-      db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM position_operation_inputs
-        WHERE operation_token = 'source-recovery-operation'
-      `).get().count,
-      1
-    );
-    assert.equal(readPositionDatabaseCheckpoint(db).generation, 1);
-  });
-
-  test('含过滤行的多文件部分提交只恢复已提交文件的独立异常报告', async (t) => {
-    const dir = tempDir(t, 'position-filter-report-recovery-');
-    const checkpoint = {
-      identity: 'filter-report-recovery-identity',
-      generation: 0,
-      token: 'filter-report-recovery-token'
-    };
-    const store = createPositionReconciliationStore(dir, {
-      initialCheckpoint: checkpoint
-    });
-    const sideDbPath = store.dbPath;
-    store.close();
-    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
-      engine: 'streaming',
-      userDataDir: dir,
-      sideDbPath,
-      expectedCheckpoint: checkpoint
-    }).promise;
-    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
-    const first = sourceFile(
-      dir,
-      SOURCE_TYPES.FUND_TRANSFER,
-      [{
-        ...base,
-        调拨单号: 'FILTER-RECOVERY-A',
-        渠道流水号: 'FILTER-RID-A',
-        调拨状态: '付款失败',
-        付款金额: ''
-      }],
-      'filter-recovery-a.xlsx'
-    );
-    const second = sourceFile(
-      dir,
-      SOURCE_TYPES.FUND_TRANSFER,
-      [{
-        ...base,
-        调拨单号: 'FILTER-RECOVERY-B',
-        渠道流水号: 'FILTER-RID-B',
-        调拨状态: '付款失败',
-        付款金额: ''
-      }],
-      'filter-recovery-b.xlsx'
-    );
-
-    const result = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files: [first, second],
-      userDataDir: path.join(dir, 'worker-user-data'),
-      sideDbPath,
-      featureFlags: {
-        preflightOnly: false,
-        streamingSourceTypes: [SOURCE_TYPES.FUND_TRANSFER]
-      },
-      authorizeApply: (ready) => {
-        assert.equal(ready.anomalyReports.length, 3);
-        assert.deepEqual(
-          ready.outputFiles.map((file) => file.requiredInputPaths.length),
-          [1, 1, 2]
-        );
-        fs.appendFileSync(ready.acceptedOrdinaryInputFiles[1].archivePath, 'changed');
-        return {
-          batchContext: MUTATING_BATCH_CONTEXT,
-          operationToken: 'filter-report-recovery-operation',
-          archiveManifestHash: ready.archiveManifestHash,
-          schemaFingerprint: schemaResult.fingerprint,
-          baseCheckpoint: checkpoint
-        };
-      }
-    }).promise;
-
-    assert.equal(result.status, 'ok');
-    assert.equal(result.successCount, 1);
-    assert.equal(result.failedCount, 1);
-    assert.equal(result.outputFiles.length, 1);
-    assert.equal(result.anomalyReports.length, 1);
-    assert.equal(result.anomalyReport.reportKey, result.anomalyReports[0].reportKey);
-    assert.equal(result.results[0].anomalyReport.reportKey, result.anomalyReport.reportKey);
-    assert.equal(result.results[1].anomalyReport, undefined);
-    assert.deepEqual(
-      result.outputFiles[0].requiredInputPaths,
-      [path.resolve(result.results[0].archivePath)]
-    );
-
-    const workbook = XLSX.readFile(result.anomalyReport.filePath, { raw: true });
-    const detailRows = XLSX.utils.sheet_to_json(
-      workbook.Sheets['调拨异常明细'],
-      { defval: '', raw: true }
-    );
-    assert.deepEqual(detailRows.map((row) => row.调拨单号), ['FILTER-RECOVERY-A']);
-
-    const db = new DatabaseSync(sideDbPath, { readOnly: true });
-    t.after(() => db.close());
-    const tombstones = db.prepare(`
-      SELECT business_key AS businessKey, report_key AS reportKey
-      FROM position_filtered_source_rows
-      ORDER BY business_key
-    `).all();
-    assert.deepEqual(tombstones.map((row) => ({ ...row })), [{
-      businessKey: 'FILTER-RECOVERY-A',
-      reportKey: result.anomalyReport.reportKey
-    }]);
-    assert.equal(readPositionDatabaseCheckpoint(db).generation, 1);
-  });
-
-  test('含过滤行的多文件全部提交时保留文件级审计分片和完整批次报告', async (t) => {
-    const dir = tempDir(t, 'position-filter-report-complete-');
-    const checkpoint = {
-      identity: 'filter-report-complete-identity',
-      generation: 0,
-      token: 'filter-report-complete-token'
-    };
-    const store = createPositionReconciliationStore(dir, {
-      initialCheckpoint: checkpoint
-    });
-    const sideDbPath = store.dbPath;
-    store.close();
-    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
-      engine: 'streaming',
-      userDataDir: dir,
-      sideDbPath,
-      expectedCheckpoint: checkpoint
-    }).promise;
-    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
-    const files = ['A', 'B'].map((suffix) => sourceFile(
-      dir,
-      SOURCE_TYPES.FUND_TRANSFER,
-      [{
-        ...base,
-        调拨单号: `FILTER-COMPLETE-${suffix}`,
-        渠道流水号: `FILTER-COMPLETE-RID-${suffix}`,
-        调拨状态: '付款失败',
-        付款金额: ''
-      }],
-      `filter-complete-${suffix}.xlsx`
-    ));
-
-    const result = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files,
-      userDataDir: path.join(dir, 'worker-user-data'),
-      sideDbPath,
-      featureFlags: {
-        preflightOnly: false,
-        streamingSourceTypes: [SOURCE_TYPES.FUND_TRANSFER]
-      },
-      authorizeApply: (ready) => ({
-        batchContext: MUTATING_BATCH_CONTEXT,
-        operationToken: 'filter-report-complete-operation',
-        archiveManifestHash: ready.archiveManifestHash,
-        schemaFingerprint: schemaResult.fingerprint,
-        baseCheckpoint: checkpoint
-      })
-    }).promise;
-
-    assert.equal(result.successCount, 2);
-    assert.equal(result.failedCount, 0);
-    assert.equal(result.anomalyReports.length, 2);
-    assert.equal(result.outputFiles.length, 2);
-    assert.equal(result.anomalyReport.filteredRowCount, 2);
-    assert.equal(result.results[0].anomalyReport.filteredRowCount, 1);
-    assert.equal(
-      result.results[1].anomalyReport.reportKey,
-      result.anomalyReport.reportKey
-    );
-    const workbook = XLSX.readFile(result.anomalyReport.filePath, { raw: true });
-    const detailRows = XLSX.utils.sheet_to_json(
-      workbook.Sheets['调拨异常明细'],
-      { defval: '', raw: true }
-    );
-    assert.deepEqual(
-      detailRows.map((row) => row.调拨单号),
-      ['FILTER-COMPLETE-A', 'FILTER-COMPLETE-B']
-    );
-
-    const db = new DatabaseSync(sideDbPath, { readOnly: true });
-    t.after(() => db.close());
-    const tombstones = db.prepare(`
-      SELECT business_key AS businessKey, report_key AS reportKey,
-             report_row_count AS reportRowCount
-      FROM position_filtered_source_rows
-      ORDER BY business_key
-    `).all().map((row) => ({ ...row }));
-    assert.deepEqual(tombstones, [
-      {
-        businessKey: 'FILTER-COMPLETE-A',
-        reportKey: result.results[0].anomalyReport.reportKey,
-        reportRowCount: 1
-      },
-      {
-        businessKey: 'FILTER-COMPLETE-B',
-        reportKey: result.anomalyReport.reportKey,
-        reportRowCount: 2
-      }
-    ]);
-    const reopened = createPositionReconciliationStore(dir, {
-      expectedCheckpoint: result.checkpoint
-    });
-    t.after(() => reopened.close());
-    assert.equal(
-      reopened.findFilteredReport(result.anomalyReport.reportKey).filteredRowCount,
-      2
-    );
-    assert.equal(readPositionDatabaseCheckpoint(db).generation, 2);
-  });
-
-  test('普通来源部分成功只返回已提交文件依赖闭合的异常报告', async (t) => {
-    const dir = tempDir(t, 'position-filter-report-normal-partial-');
-    const checkpoint = {
-      identity: 'filter-report-normal-partial-identity',
-      generation: 0,
-      token: 'filter-report-normal-partial-token'
-    };
-    const store = createPositionReconciliationStore(dir, {
-      initialCheckpoint: checkpoint
-    });
-    const sideDbPath = store.dbPath;
-    store.close();
-    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
-      engine: 'streaming',
-      userDataDir: dir,
-      sideDbPath,
-      expectedCheckpoint: checkpoint
-    }).promise;
-    const transfer = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
-    const payment = sourceRows()[SOURCE_TYPES.TEST_PAYMENT];
-    const first = sourceFile(
-      dir,
-      SOURCE_TYPES.FUND_TRANSFER,
-      [{
-        ...transfer,
-        调拨单号: 'FILTER-NORMAL-PARTIAL-TRANSFER',
-        渠道流水号: 'FILTER-NORMAL-PARTIAL-RID',
-        调拨状态: '付款失败',
-        付款金额: ''
-      }],
-      'filter-normal-partial-transfer.xlsx'
-    );
-    const second = sourceFile(
-      dir,
-      SOURCE_TYPES.TEST_PAYMENT,
-      [{
-        ...payment,
-        付款单号: 'FILTER-NORMAL-PARTIAL-PAYMENT',
-        源金额: ''
-      }],
-      'filter-normal-partial-payment.xlsx'
-    );
-
-    const result = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files: [first, second],
-      userDataDir: path.join(dir, 'worker-user-data'),
-      sideDbPath,
-      featureFlags: {
-        preflightOnly: false,
-        streamingSourceTypes: [SOURCE_TYPES.FUND_TRANSFER]
-      },
-      authorizeApply: (ready) => {
-        assert.equal(ready.anomalyReports.length, 3);
-        assert.deepEqual(
-          ready.outputFiles.map((file) => file.requiredInputPaths.length),
-          [1, 1, 2]
-        );
-        return {
-          batchContext: MUTATING_BATCH_CONTEXT,
-          operationToken: 'filter-report-normal-partial-operation',
-          archiveManifestHash: ready.archiveManifestHash,
-          schemaFingerprint: schemaResult.fingerprint,
-          baseCheckpoint: checkpoint
-        };
-      }
-    }).promise;
-
-    assert.equal(result.status, 'ok');
-    assert.equal(result.successCount, 1);
-    assert.equal(result.failedCount, 1);
-    assert.deepEqual(result.results.map((item) => item.status), ['ok', 'failed']);
-    assert.equal(result.results[1].anomalyReport, undefined);
-    assert.equal(result.anomalyReports.length, 1);
-    assert.equal(result.outputFiles.length, 1);
-    assert.equal(result.anomalyReport.reportKey, result.results[0].anomalyReport.reportKey);
-    assert.deepEqual(
-      result.outputFiles[0].requiredInputPaths,
-      [path.resolve(result.results[0].archivePath)]
-    );
-    const workbook = XLSX.readFile(result.anomalyReport.filePath, { raw: true });
-    assert.deepEqual(workbook.SheetNames, ['异常汇总', '调拨异常明细']);
-    assert.equal(
-      XLSX.utils.sheet_to_json(workbook.Sheets['调拨异常明细']).length,
-      1
-    );
-
-    const db = new DatabaseSync(sideDbPath, { readOnly: true });
-    t.after(() => db.close());
-    const tombstones = db.prepare(`
-      SELECT business_key AS businessKey, report_key AS reportKey
-      FROM position_filtered_source_rows
-    `).all().map((row) => ({ ...row }));
-    assert.deepEqual(tombstones, [{
-      businessKey: 'FILTER-NORMAL-PARTIAL-TRANSFER',
-      reportKey: result.anomalyReport.reportKey
-    }]);
-  });
-
-  test('仅含重复过滤行的后续文件不产生报告依赖', async (t) => {
-    const dir = tempDir(t, 'position-filter-report-duplicate-only-');
-    const checkpoint = {
-      identity: 'filter-report-duplicate-only-identity',
-      generation: 0,
-      token: 'filter-report-duplicate-only-token'
-    };
-    const store = createPositionReconciliationStore(dir, {
-      initialCheckpoint: checkpoint
-    });
-    const sideDbPath = store.dbPath;
-    store.close();
-    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
-      engine: 'streaming',
-      userDataDir: dir,
-      sideDbPath,
-      expectedCheckpoint: checkpoint
-    }).promise;
-    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
-    const filtered = {
-      ...base,
-      调拨单号: 'FILTER-DUPLICATE-ONLY',
-      渠道流水号: 'FILTER-DUPLICATE-ONLY-RID',
-      调拨状态: '付款失败',
-      付款金额: ''
-    };
-    const files = [
-      sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [filtered], 'filter-owner.xlsx'),
-      sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [filtered], 'filter-duplicate.xlsx')
-    ];
-
-    const result = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files,
-      userDataDir: path.join(dir, 'worker-user-data'),
-      sideDbPath,
-      featureFlags: {
-        preflightOnly: false,
-        streamingSourceTypes: [SOURCE_TYPES.FUND_TRANSFER]
-      },
-      authorizeApply: (ready) => {
-        assert.equal(ready.anomalyReports.length, 1);
-        assert.deepEqual(ready.anomalyReports[0].sourceFileIndexes, [0]);
-        assert.equal(ready.outputFiles.length, 1);
-        assert.deepEqual(
-          ready.outputFiles[0].requiredInputPaths,
-          [path.resolve(ready.acceptedOrdinaryInputFiles[0].archivePath)]
-        );
-        return {
-          batchContext: MUTATING_BATCH_CONTEXT,
-          operationToken: 'filter-report-duplicate-only-operation',
-          archiveManifestHash: ready.archiveManifestHash,
-          schemaFingerprint: schemaResult.fingerprint,
-          baseCheckpoint: checkpoint
-        };
-      }
-    }).promise;
-
-    assert.equal(result.successCount, 2);
-    assert.equal(result.failedCount, 0);
-    assert.deepEqual(
-      result.results.map((item) => [item.filteredRowCount, item.collapsedDuplicateCount]),
-      [[1, 0], [0, 1]]
-    );
-    assert.equal(result.anomalyReports.length, 1);
-    assert.deepEqual(result.anomalyReport.sourceFileIndexes, [0]);
-    const db = new DatabaseSync(sideDbPath, { readOnly: true });
-    t.after(() => db.close());
-    assert.equal(
-      db.prepare('SELECT COUNT(*) AS count FROM position_filtered_source_rows').get().count,
-      1
+      (error) => error && error.code === 'position-import-disabled'
     );
   });
 
@@ -2410,21 +1002,19 @@ test.describe('v3.1.3 position streaming preflight', () => {
       sideDbPath,
       rowCount: 2,
       stagedBytes: 1024,
-      ledgerBytes: 2048,
       safetyMarginBytes: 4096
     });
     assert.equal(estimate.existingBytes, 4096n);
     assert.equal(estimate.rowBytes, 16384n);
-    assert.equal(estimate.requiredBytes, 27648n);
+    assert.equal(estimate.requiredBytes, 25600n);
     assert.throws(
       () => assertPositionImportDiskSpace({
         kind: 'bank',
         sideDbPath,
         rowCount: 2,
         stagedBytes: 1024,
-        ledgerBytes: 2048,
         safetyMarginBytes: 4096,
-        availableBytes: 27647
+        availableBytes: 25599
       }),
       (error) => error && error.code === 'position-import-disk-space-insufficient'
     );
@@ -2434,18 +1024,17 @@ test.describe('v3.1.3 position streaming preflight', () => {
         sideDbPath,
         rowCount: 2,
         stagedBytes: 1024,
-        ledgerBytes: 2048,
         safetyMarginBytes: 4096,
-        availableBytes: 27648
+        availableBytes: 25600
       }).availableBytes,
-      27648n
+      25600n
     );
   });
 
   test('默认 disabled 不启动 worker，.xls 主进程调用被拒绝', async () => {
     assert.throws(
       () => dispatchPositionImportPreflight({
-        command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+        command: POSITION_IMPORT_COMMANDS.SOURCE_IMPORT,
         files: ['/tmp/noop.xls'],
         userDataDir: os.tmpdir()
       }),
@@ -2454,38 +1043,6 @@ test.describe('v3.1.3 position streaming preflight', () => {
     await assert.rejects(
       () => streamPositionXlsRows('/tmp/noop.xls', { kind: 'source' }),
       (error) => error.code === 'position-import-parser-parity-unproven'
-    );
-  });
-
-  test('预置取消标记时 staging 前终止，不生成 sealed ledger', async (t) => {
-    const dir = tempDir(t, 'position-prb-cancel-');
-    const filePath = sourceFile(
-      dir,
-      SOURCE_TYPES.GATEWAY_OUTBOUND,
-      [sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND]],
-      'cancel.xlsx'
-    );
-    await assert.rejects(
-      () => runPositionImportPreflight({
-        jobId: 'cancel-job',
-        kind: 'source',
-        files: [filePath],
-        userDataDir: path.join(dir, 'user-data'),
-        cancelToken: { cancelled: true }
-      }),
-      (error) => error.code === 'position-import-cancelled'
-    );
-    assert.equal(
-      fs.existsSync(path.join(
-        dir,
-        'user-data',
-        'run-data',
-        'position-reconciliation',
-        'import-staging',
-        'cancel-job',
-        'job-ledger.sqlite'
-      )),
-      false
     );
   });
 
@@ -2548,442 +1105,6 @@ test.describe('v3.1.3 position streaming preflight', () => {
     );
   });
 
-  test('封存前后 ledger SHA 与 size 可重复验证', async (t) => {
-    const dir = tempDir(t, 'position-prb-hash-');
-    const filePath = sourceFile(
-      dir,
-      SOURCE_TYPES.GATEWAY_OUTBOUND,
-      [sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND]],
-      'hash.xlsx'
-    );
-    const result = await runPositionImportPreflight({
-      jobId: 'hash-job',
-      kind: 'source',
-      files: [filePath],
-      userDataDir: path.join(dir, 'user-data')
-    });
-    const actual = await hashFileSha256Async(result.ledgerEvidence.ledgerPath);
-    assert.equal(actual.sha256, result.ledgerEvidence.ledgerSha256);
-    assert.equal(actual.sizeBytes, result.ledgerEvidence.ledgerSizeBytes);
-  });
-
-  test('3.1.4 白名单异常完整扫描、生成同字节报告并与正常行同文件事务提交', async (t) => {
-    const dir = tempDir(t, 'position-v314-filter-apply-');
-    const checkpoint = {
-      identity: 'v314-filter-identity',
-      generation: 0,
-      token: 'v314-filter-token'
-    };
-    let store = createPositionReconciliationStore(dir, {
-      initialCheckpoint: checkpoint
-    });
-    const sideDbPath = store.dbPath;
-    store.close();
-    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
-      engine: 'streaming',
-      userDataDir: dir,
-      sideDbPath,
-      expectedCheckpoint: checkpoint
-    }).promise;
-
-    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
-    const filtered = {
-      ...base,
-      调拨单号: 'FT-FILTERED-1',
-      调拨状态: '付款失败',
-      渠道流水号: 'RID-FILTERED-1',
-      付款金额: ''
-    };
-    const filePath = sourceFile(
-      dir,
-      SOURCE_TYPES.FUND_TRANSFER,
-      [
-        { ...base, 调拨单号: 'FT-VALID-1' },
-        filtered,
-        filtered,
-        { ...base, 调拨单号: 'FT-VALID-2', 渠道流水号: 'RID-VALID-2' }
-      ],
-      'v314-filter.xlsx'
-    );
-    const result = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files: [filePath],
-      userDataDir: path.join(dir, 'worker-user-data'),
-      sideDbPath,
-      featureFlags: {
-        preflightOnly: false,
-        streamingSourceTypes: [SOURCE_TYPES.FUND_TRANSFER]
-      },
-      authorizeApply: (ready) => ({
-        batchContext: MUTATING_BATCH_CONTEXT,
-        operationToken: 'v314-filter-operation',
-        archiveManifestHash: ready.archiveManifestHash,
-        schemaFingerprint: schemaResult.fingerprint,
-        baseCheckpoint: checkpoint
-      })
-    }).promise;
-
-    assert.equal(result.status, 'ok');
-    assert.equal(result.results[0].physicalRowCount, 4);
-    assert.equal(result.results[0].rowCount, 2);
-    assert.equal(result.results[0].filteredRowCount, 1);
-    assert.equal(result.results[0].collapsedDuplicateCount, 1);
-    assert.equal(result.results[0].generatedLinkRowCount, 4);
-    assert.equal(result.results[0].sourceRevision, 1);
-    assert.equal(result.results[0].linkedRevision, 1);
-    assert.equal(result.anomalyReport.filteredRowCount, 1);
-    assert.ok(fs.existsSync(result.anomalyReport.filePath));
-    const reportHash = await hashFileSha256Async(result.anomalyReport.filePath);
-    assert.equal(reportHash.sha256, result.anomalyReport.sha256);
-    assert.equal(reportHash.sizeBytes, result.anomalyReport.sizeBytes);
-
-    const reportWorkbook = XLSX.readFile(result.anomalyReport.filePath, { raw: true });
-    assert.deepEqual(reportWorkbook.SheetNames, ['异常汇总', '调拨异常明细']);
-    const detailRows = XLSX.utils.sheet_to_json(
-      reportWorkbook.Sheets['调拨异常明细'],
-      { defval: '', raw: true }
-    );
-    assert.equal(detailRows.length, 1);
-    assert.equal(detailRows[0].调拨单号, 'FT-FILTERED-1');
-    assert.equal(detailRows[0].Excel行号, 3);
-
-    const styledReport = new ExcelJS.Workbook();
-    await styledReport.xlsx.readFile(result.anomalyReport.filePath);
-    const summarySheet = styledReport.getWorksheet('异常汇总');
-    const detailSheet = styledReport.getWorksheet('调拨异常明细');
-    assert.equal(summarySheet.getRow(1).height, 30);
-    assert.equal(summarySheet.getRow(1).getCell(1).alignment.wrapText, true);
-    assert.equal(summarySheet.getColumn(1).width, 44);
-    assert.equal(summarySheet.getColumn(8).width, 48);
-    assert.equal(summarySheet.getRow(2).getCell(8).alignment.wrapText, true);
-    assert.equal(detailSheet.getColumn(9).width, 48);
-    assert.equal(detailSheet.getRow(2).getCell(9).alignment.wrapText, true);
-    assert.equal(detailSheet.getColumn(12).numFmt, '@');
-    assert.deepEqual(detailSheet.getCell('L2').value, {
-      richText: [{ text: 'FT-FILTERED-1' }]
-    });
-
-    const db = new DatabaseSync(sideDbPath, { readOnly: true });
-    assert.equal(
-      db.prepare('SELECT COUNT(*) AS count FROM position_source_rows').get().count,
-      2
-    );
-    assert.equal(
-      db.prepare('SELECT COUNT(*) AS count FROM position_link_rows').get().count,
-      4
-    );
-    const tombstone = db.prepare(`
-      SELECT business_key AS businessKey, error_code AS errorCode,
-             report_sha256 AS reportSha256, resolved_at AS resolvedAt
-      FROM position_filtered_source_rows
-    `).get();
-    assert.equal(tombstone.businessKey, 'FT-FILTERED-1');
-    assert.equal(tombstone.errorCode, 'FT_NON_SUCCESS_EVIDENCE_INCOMPLETE');
-    assert.equal(tombstone.reportSha256, result.anomalyReport.sha256);
-    assert.equal(tombstone.resolvedAt, null);
-    db.close();
-  });
-
-  test('3.1.4 全量过滤文件仍提交墓碑但不生成来源与链接候选', async (t) => {
-    const dir = tempDir(t, 'position-v314-all-filtered-');
-    const checkpoint = {
-      identity: 'v314-all-filtered-identity',
-      generation: 0,
-      token: 'v314-all-filtered-token'
-    };
-    const store = createPositionReconciliationStore(dir, {
-      initialCheckpoint: checkpoint
-    });
-    const sideDbPath = store.dbPath;
-    store.close();
-    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
-      engine: 'streaming',
-      userDataDir: dir,
-      sideDbPath,
-      expectedCheckpoint: checkpoint
-    }).promise;
-    const base = sourceRows()[SOURCE_TYPES.TEST_PAYMENT];
-    const filePath = sourceFile(
-      dir,
-      SOURCE_TYPES.TEST_PAYMENT,
-      [
-        { ...base, 付款单号: 'TEST-ALL-FILTERED-1', 源金额: '' },
-        { ...base, 付款单号: 'TEST-ALL-FILTERED-2', 源币种: '' }
-      ],
-      'all-filtered.xlsx'
-    );
-    const result = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files: [filePath],
-      userDataDir: path.join(dir, 'worker-user-data'),
-      sideDbPath,
-      featureFlags: {
-        preflightOnly: false,
-        streamingSourceTypes: [SOURCE_TYPES.TEST_PAYMENT]
-      },
-      authorizeApply: (ready) => ({
-        batchContext: MUTATING_BATCH_CONTEXT,
-        operationToken: 'v314-all-filtered-operation',
-        archiveManifestHash: ready.archiveManifestHash,
-        schemaFingerprint: schemaResult.fingerprint,
-        baseCheckpoint: checkpoint
-      })
-    }).promise;
-
-    assert.equal(result.status, 'ok');
-    assert.equal(result.results[0].physicalRowCount, 2);
-    assert.equal(result.results[0].rowCount, 0);
-    assert.equal(result.results[0].filteredRowCount, 2);
-    assert.equal(result.results[0].generatedLinkRowCount, 0);
-    assert.equal(result.results[0].sourceRevision, 1);
-    assert.equal(result.results[0].linkedRevision, 1);
-    const db = new DatabaseSync(sideDbPath, { readOnly: true });
-    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM position_source_rows').get().count, 0);
-    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM position_link_rows').get().count, 0);
-    assert.equal(
-      db.prepare('SELECT COUNT(*) AS count FROM position_filtered_source_rows').get().count,
-      2
-    );
-    db.close();
-
-    const reimport = await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files: [filePath],
-      userDataDir: path.join(dir, 'worker-reimport'),
-      sideDbPath,
-      featureFlags: {
-        preflightOnly: false,
-        streamingSourceTypes: [SOURCE_TYPES.TEST_PAYMENT]
-      },
-      authorizeApply: (ready) => ({
-        batchContext: MUTATING_BATCH_CONTEXT,
-        operationToken: 'v314-all-filtered-reimport',
-        archiveManifestHash: ready.archiveManifestHash,
-        schemaFingerprint: schemaResult.fingerprint,
-        baseCheckpoint: result.checkpoint
-      })
-    }).promise;
-    const afterReimport = new DatabaseSync(sideDbPath, { readOnly: true });
-    assert.equal(
-      afterReimport.prepare('SELECT COUNT(*) AS count FROM position_filtered_source_rows').get().count,
-      4
-    );
-    assert.equal(
-      afterReimport.prepare(`
-        SELECT COUNT(*) AS count
-        FROM position_filtered_source_rows
-        WHERE resolved_at IS NULL
-      `).get().count,
-      2,
-      '完全相同异常重导后每个精确异常仍只能有一条活动墓碑'
-    );
-    afterReimport.close();
-
-    const validPath = sourceFile(
-      dir,
-      SOURCE_TYPES.TEST_PAYMENT,
-      [
-        { ...base, 付款单号: 'TEST-ALL-FILTERED-1' },
-        { ...base, 付款单号: 'TEST-ALL-FILTERED-2' }
-      ],
-      'all-filtered-corrected.xlsx'
-    );
-    await dispatchPositionImportPreflight({
-      engine: 'streaming',
-      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-      files: [validPath],
-      userDataDir: path.join(dir, 'worker-corrected'),
-      sideDbPath,
-      featureFlags: {
-        preflightOnly: false,
-        streamingSourceTypes: [SOURCE_TYPES.TEST_PAYMENT]
-      },
-      authorizeApply: (ready) => ({
-        batchContext: MUTATING_BATCH_CONTEXT,
-        operationToken: 'v314-all-filtered-corrected',
-        archiveManifestHash: ready.archiveManifestHash,
-        schemaFingerprint: schemaResult.fingerprint,
-        baseCheckpoint: reimport.checkpoint
-      })
-    }).promise;
-    const afterCorrected = new DatabaseSync(sideDbPath, { readOnly: true });
-    assert.equal(
-      afterCorrected.prepare(`
-        SELECT COUNT(*) AS count
-        FROM position_filtered_source_rows
-        WHERE resolved_at IS NULL
-      `).get().count,
-      0
-    );
-    assert.equal(
-      afterCorrected.prepare(`
-        SELECT COUNT(*) AS count
-        FROM position_filtered_source_rows
-        WHERE resolution_reason = 'normal-source-imported'
-      `).get().count,
-      2
-    );
-    assert.equal(afterCorrected.prepare('SELECT COUNT(*) AS count FROM position_source_rows').get().count, 2);
-    afterCorrected.close();
-  });
-
-  test('3.1.4 正常行与过滤行业务键碰撞时结果不受文件选择顺序影响', async (t) => {
-    const dir = tempDir(t, 'position-v314-filter-collision-');
-    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
-    const businessKey = 'FT-COLLISION-1';
-    const validPath = sourceFile(
-      dir,
-      SOURCE_TYPES.FUND_TRANSFER,
-      [{ ...base, 调拨单号: businessKey }],
-      'valid.xlsx'
-    );
-    const filteredPath = sourceFile(
-      dir,
-      SOURCE_TYPES.FUND_TRANSFER,
-      [{
-        ...base,
-        调拨单号: businessKey,
-        调拨状态: '付款失败',
-        付款金额: ''
-      }],
-      'filtered.xlsx'
-    );
-
-    for (const [index, files] of [
-      [1, [filteredPath, validPath]],
-      [2, [validPath, filteredPath]]
-    ]) {
-      const result = await runPositionImportPreflight({
-        jobId: `v314-collision-order-${index}`,
-        kind: 'source',
-        files,
-        userDataDir: path.join(dir, `worker-${index}`)
-      });
-      const byName = new Map(result.orderedFileResults.map((item) => [item.fileName, item]));
-      assert.equal(byName.get('valid.xlsx').status, 'ok');
-      assert.equal(byName.get('valid.xlsx').rowCount, 1);
-      assert.equal(byName.get('filtered.xlsx').status, 'failed');
-      assert.equal(byName.get('filtered.xlsx').code, 'position-filtered-key-collision');
-      assert.equal(result.anomalyReport, null);
-    }
-  });
-
-  test('3.1.4 异常报告失败只拒绝含过滤行文件，普通文件继续预检提交', async (t) => {
-    const dir = tempDir(t, 'position-v314-report-failure-');
-    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
-    const filteredPath = sourceFile(
-      dir,
-      SOURCE_TYPES.FUND_TRANSFER,
-      [{
-        ...base,
-        调拨单号: 'FT-REPORT-FAIL-FILTERED',
-        调拨状态: '付款失败',
-        付款金额: ''
-      }],
-      'filtered-report-failure.xlsx'
-    );
-    const validPath = sourceFile(
-      dir,
-      SOURCE_TYPES.FUND_TRANSFER,
-      [{ ...base, 调拨单号: 'FT-REPORT-FAIL-VALID' }],
-      'valid-after-report-failure.xlsx'
-    );
-    const result = await runPositionImportPreflight({
-      jobId: 'v314-report-failure',
-      kind: 'source',
-      files: [filteredPath, validPath],
-      userDataDir: path.join(dir, 'worker'),
-      writeAnomalyReport: async () => {
-        throw new Error('injected anomaly writer failure');
-      }
-    });
-    const byName = new Map(result.orderedFileResults.map((item) => [item.fileName, item]));
-    assert.equal(byName.get('filtered-report-failure.xlsx').status, 'failed');
-    assert.equal(
-      byName.get('filtered-report-failure.xlsx').code,
-      'position-anomaly-report-failed'
-    );
-    assert.equal(byName.get('valid-after-report-failure.xlsx').status, 'ok');
-    assert.equal(result.acceptedOrdinaryInputFiles.length, 1);
-    assert.equal(result.acceptedOrdinaryInputFiles[0].fileName, 'valid-after-report-failure.xlsx');
-    assert.equal(result.anomalyReport, null);
-  });
-
-  test('3.1.4 过滤行业务键已存在正常记录时整文件拒绝且不删除旧记录', async (t) => {
-    const dir = tempDir(t, 'position-v314-existing-collision-');
-    const checkpoint = {
-      identity: 'v314-existing-collision-identity',
-      generation: 0,
-      token: 'v314-existing-collision-token'
-    };
-    const store = createPositionReconciliationStore(dir, {
-      initialCheckpoint: checkpoint
-    });
-    const sideDbPath = store.dbPath;
-    store.db.prepare(`
-      INSERT INTO position_source_rows(
-        source_type, business_key, event_date, month_key,
-        source_file_path, source_file_name, source_sheet, source_row_number,
-        row_hash, raw_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      SOURCE_TYPES.FUND_TRANSFER,
-      'FT-EXISTING-COLLISION',
-      '2026-07-20',
-      '2026-07',
-      '/tmp/existing.xlsx',
-      'existing.xlsx',
-      'Sheet1',
-      2,
-      'existing-row-hash',
-      '{}'
-    );
-    store.close();
-    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
-    const filteredPath = sourceFile(
-      dir,
-      SOURCE_TYPES.FUND_TRANSFER,
-      [{
-        ...base,
-        调拨单号: 'FT-EXISTING-COLLISION',
-        调拨状态: '付款失败',
-        付款金额: ''
-      }],
-      'filtered-existing-collision.xlsx'
-    );
-    const result = await runPositionImportPreflight({
-      jobId: 'v314-existing-collision',
-      kind: 'source',
-      files: [filteredPath],
-      userDataDir: path.join(dir, 'worker'),
-      sideDbPath
-    });
-    assert.equal(result.orderedFileResults[0].status, 'failed');
-    assert.equal(result.orderedFileResults[0].code, 'position-filtered-key-collision');
-    const db = new DatabaseSync(sideDbPath, { readOnly: true });
-    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM position_source_rows').get().count, 1);
-    assert.equal(
-      db.prepare('SELECT COUNT(*) AS count FROM position_filtered_source_rows').get().count,
-      0
-    );
-    db.close();
-  });
-});
-
-test.describe('v3.2.14 表头结构不一致的差异明细', () => {
-  const renamedHeaders = () => SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_INBOUND].headers
-    .map((header) => (header === 'fieldId' ? 'fileId' : header));
-  const expectedLines = [
-    '工作表「网关」最接近：中台网关原始入账订单（41 列；文件 41 列）',
-    '第 20 列（T）：应为「fieldId」，实际为「fileId」',
-    '缺少列：fieldId',
-    '多出列：fileId',
-    '如系统导出结构已变更，请在「设置 → 模板文件」导入新版本'
-  ];
-
   test('xlsx / xls / legacy 读取未识别的链接原始表时给出同一组差异明细', async (t) => {
     const dir = tempDir(t, 'position-header-diff-');
     const sheets = [
@@ -3015,28 +1136,6 @@ test.describe('v3.2.14 表头结构不一致的差异明细', () => {
     });
   });
 
-  test('预检把未识别文件的差异明细放进逐文件失败结果', async (t) => {
-    const dir = tempDir(t, 'position-header-diff-preflight-');
-    const filePath = path.join(dir, 'gateway.xlsx');
-    writeWorkbook(filePath, [
-      { name: '网关', headers: renamedHeaders(), rows: [sourceRows()[SOURCE_TYPES.GATEWAY_INBOUND]] }
-    ]);
-    const result = await runPositionImportPreflight({
-      jobId: 'v3214-header-diff',
-      kind: 'source',
-      files: [filePath],
-      userDataDir: path.join(dir, 'worker'),
-      sideDbPath: path.join(dir, 'side.sqlite')
-    });
-    assert.equal(result.acceptedOrdinaryInputFiles.length, 0);
-    assert.equal(result.orderedFileResults[0].code, 'position-source-unrecognized');
-    assert.deepEqual(result.orderedFileResults[0].detailLines, [
-      '最接近：中台网关原始入账订单（41 列；文件 41 列）',
-      ...expectedLines.slice(1)
-    ]);
-  });
-
-  // v3.2.14 D18：46 列银行对账单可在设置 → 模板文件「银行对账单（导入识别结构）」导入新版本，差异末行附指引。
   test('银行对账单表头不符时列出与 46 列契约的差异，并提示在模板文件导入新版本', async (t) => {
     const dir = tempDir(t, 'position-bank-header-diff-');
     const headers = BANK_STATEMENT_FIELDS.map((header) => (header === 'Channel' ? 'channel' : header));
@@ -3061,4 +1160,458 @@ test.describe('v3.2.14 表头结构不一致的差异明细', () => {
       return true;
     });
   });
+  // ── 链接原始表单遍导入（v3.2.22）：经真实导入进程 ──────────────────────────────
+
+  test('链接原始表等待写入授权时取消：事务回滚，暂存清理，ready 只带清单不带数据行', async (t) => {
+    const dir = tempDir(t, 'position-source-awaiting-cancel-');
+    const side = createSideDb(dir);
+    const filePath = sourceFile(
+      dir,
+      SOURCE_TYPES.GATEWAY_OUTBOUND,
+      [sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND]],
+      'awaiting-cancel.xlsx'
+    );
+    let resolveReady;
+    const readyPromise = new Promise((resolve) => { resolveReady = resolve; });
+    const progress = [];
+    const job = dispatchPositionImportPreflight(sourceWorkerInput(dir, side, [filePath], {
+      authorizeApply: () => new Promise(() => {}),
+      onPreflightReady: resolveReady,
+      onProgress: (event) => progress.push(event)
+    }));
+    const ready = await readyPromise;
+    assert.equal(ready.orderedFileResults[0].status, 'ok');
+    assert.equal(ready.orderedFileResults[0].rowCount, 1);
+    assert.equal(Object.hasOwn(ready, 'records'), false);
+    assert.ok(progress.some((event) => event.stage === 'staging'));
+    assert.ok(progress.some((event) => event.stage === 'importing'));
+    // 等待授权期间事务未提交：其他连接看不到新行。
+    assert.equal(countRows(side.sideDbPath, 'position_source_rows'), 0);
+
+    assert.equal(job.cancel(), true);
+    await assert.rejects(
+      job.promise,
+      (error) => error && error.code === 'position-import-cancelled'
+    );
+    assert.equal(countRows(side.sideDbPath, 'position_source_rows'), 0);
+    assert.equal(countRows(side.sideDbPath, 'position_raw_files'), 0);
+    assert.equal(
+      fs.existsSync(path.join(dir, 'worker-user-data', STAGING_RELATIVE_PATH, job.jobId)),
+      false
+    );
+  });
+
+  test('链接原始表写入授权失败：导入进程回滚并清理暂存', async (t) => {
+    const dir = tempDir(t, 'position-source-auth-reject-');
+    const side = createSideDb(dir);
+    const filePath = sourceFile(
+      dir,
+      SOURCE_TYPES.GATEWAY_OUTBOUND,
+      [sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND]],
+      'auth-reject.xlsx'
+    );
+    const job = dispatchPositionImportPreflight(sourceWorkerInput(dir, side, [filePath], {
+      authorizeApply: () => {
+        const error = new Error('测试授权失败');
+        error.code = 'position-import-intent-not-durable';
+        throw error;
+      }
+    }));
+    await assert.rejects(
+      job.promise,
+      (error) => error
+        && error.code === 'position-import-intent-not-durable'
+        && error.message === '测试授权失败'
+    );
+    assert.equal(countRows(side.sideDbPath, 'position_source_rows'), 0);
+    assert.equal(
+      fs.existsSync(path.join(dir, 'worker-user-data', STAGING_RELATIVE_PATH, job.jobId)),
+      false
+    );
+  });
+
+  test('导入进程在读取写入途中被强制终止：库内数据不变，暂存由调度器清理', async (t) => {
+    const dir = tempDir(t, 'position-source-worker-kill-');
+    const side = createSideDb(dir);
+    const filePath = sourceFile(
+      dir,
+      SOURCE_TYPES.GATEWAY_OUTBOUND,
+      Array.from({ length: 5000 }, (_, index) => ({
+        ...sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND],
+        主对账id: `KILL-RID-${index}`,
+        业务单号: `KILL-ORDER-${index}`
+      })),
+      'worker-kill.xlsx'
+    );
+    let terminated = false;
+    let job;
+    job = dispatchPositionImportPreflight(sourceWorkerInput(dir, side, [filePath], {
+      onProgress: (event) => {
+        if (!terminated
+            && event.stage === 'importing'
+            && Number(event.scannedRows) >= 4000) {
+          terminated = true;
+          job.terminate();
+        }
+      }
+    }));
+    await assert.rejects(
+      job.promise,
+      (error) => error && error.code === 'position-import-worker-exited'
+    );
+    assert.equal(terminated, true);
+    assert.equal(countRows(side.sideDbPath, 'position_source_rows'), 0);
+    assert.equal(countRows(side.sideDbPath, 'position_raw_files'), 0);
+    const db = new DatabaseSync(side.sideDbPath, { readOnly: true });
+    try {
+      assert.deepEqual(readPositionDatabaseCheckpoint(db), side.checkpoint);
+    } finally {
+      db.close();
+    }
+    assert.equal(
+      fs.existsSync(path.join(dir, 'worker-user-data', STAGING_RELATIVE_PATH, job.jobId)),
+      false
+    );
+  });
+
+  test('四类普通来源单遍导入保持 0/hidden/visible/双腿派生语义，整批只推进一次 checkpoint', async (t) => {
+    const dir = tempDir(t, 'position-source-derivation-');
+    const side = createSideDb(dir);
+    const base = sourceRows();
+    const files = [
+      sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [
+        base[SOURCE_TYPES.FUND_TRANSFER],
+        {
+          ...base[SOURCE_TYPES.FUND_TRANSFER],
+          调拨单号: 'FT-PRD-HIDDEN',
+          渠道流水号: 'FT-RID-HIDDEN',
+          收款金额: 100,
+          收款币种: 'USD'
+        }
+      ], 'prd-fund-transfer.xlsx'),
+      sourceFile(dir, SOURCE_TYPES.TEST_PAYMENT, [
+        base[SOURCE_TYPES.TEST_PAYMENT],
+        {
+          ...base[SOURCE_TYPES.TEST_PAYMENT],
+          付款单号: 'TEST-PRD-ZERO',
+          渠道流水号: 'TEST-RID-ZERO',
+          源金额: 0
+        }
+      ], 'prd-test-payment.xlsx'),
+      sourceFile(dir, SOURCE_TYPES.GATEWAY_INBOUND, [
+        base[SOURCE_TYPES.GATEWAY_INBOUND],
+        {
+          ...base[SOURCE_TYPES.GATEWAY_INBOUND],
+          bizId: 'IN-PRD-HIDDEN',
+          reconId: 'IN-RID-HIDDEN',
+          originOutboundCurrency: 'USD'
+        },
+        {
+          ...base[SOURCE_TYPES.GATEWAY_INBOUND],
+          bizId: 'IN-PRD-ZERO',
+          reconId: 'IN-RID-ZERO',
+          tradeType: 'Unsupported'
+        }
+      ], 'prd-gateway-inbound.xlsx'),
+      sourceFile(
+        dir,
+        SOURCE_TYPES.GATEWAY_OUTBOUND,
+        [base[SOURCE_TYPES.GATEWAY_OUTBOUND]],
+        'prd-gateway-outbound.xlsx'
+      )
+    ];
+
+    const result = await dispatchPositionImportPreflight(sourceWorkerInput(dir, side, files, {
+      authorizeApply: (ready) => ({
+        batchContext: MUTATING_BATCH_CONTEXT,
+        operationToken: 'source-derivation-operation',
+        archiveManifestHash: ready.archiveManifestHash,
+        baseCheckpoint: side.checkpoint
+      })
+    })).promise;
+    assert.equal(result.status, 'ok');
+    assert.equal(result.successCount, 4);
+    assert.deepEqual(result.cleanupPaths, [result.jobRoot]);
+    assert.deepEqual(
+      result.results.map((item) => [item.sourceType, item.rowCount]),
+      [
+        [SOURCE_TYPES.FUND_TRANSFER, 2],
+        [SOURCE_TYPES.TEST_PAYMENT, 2],
+        [SOURCE_TYPES.GATEWAY_INBOUND, 3],
+        [SOURCE_TYPES.GATEWAY_OUTBOUND, 1]
+      ]
+    );
+
+    const db = new DatabaseSync(side.sideDbPath, { readOnly: true });
+    t.after(() => db.close());
+    assert.deepEqual(
+      db.prepare(`
+        SELECT source_type AS sourceType, COUNT(*) AS rowCount
+        FROM position_source_rows
+        GROUP BY source_type
+        ORDER BY source_type
+      `).all().map((row) => ({ ...row })),
+      [
+        { sourceType: SOURCE_TYPES.FUND_TRANSFER, rowCount: 2 },
+        { sourceType: SOURCE_TYPES.GATEWAY_INBOUND, rowCount: 3 },
+        { sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND, rowCount: 1 },
+        { sourceType: SOURCE_TYPES.TEST_PAYMENT, rowCount: 2 }
+      ]
+    );
+    assert.deepEqual(
+      db.prepare(`
+        SELECT source_type AS sourceType,
+               SUM(CASE WHEN visible = 1 THEN 1 ELSE 0 END) AS visibleCount,
+               SUM(CASE WHEN visible = 0 THEN 1 ELSE 0 END) AS hiddenCount
+        FROM position_link_rows
+        GROUP BY source_type
+        ORDER BY source_type
+      `).all().map((row) => ({ ...row })),
+      [
+        { sourceType: SOURCE_TYPES.FUND_TRANSFER, visibleCount: 2, hiddenCount: 2 },
+        { sourceType: SOURCE_TYPES.GATEWAY_INBOUND, visibleCount: 1, hiddenCount: 1 },
+        { sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND, visibleCount: 1, hiddenCount: 0 },
+        { sourceType: SOURCE_TYPES.TEST_PAYMENT, visibleCount: 1, hiddenCount: 0 }
+      ]
+    );
+    // 四份文件在一个事务里提交：checkpoint 只推进一次，四份文件凭证记在同一个操作下。
+    assert.equal(readPositionDatabaseCheckpoint(db).generation, 1);
+    assert.equal(
+      Number(db.prepare(
+        'SELECT COUNT(*) AS count FROM position_operation_inputs WHERE operation_token = ?'
+      ).get('source-derivation-operation').count),
+      4
+    );
+  });
+
+  // ── 链接原始表单遍导入：进程内执行，覆盖授权、过滤与恢复 ────────────────────────
+
+  test('写入授权与本次导入不一致（清单摘要或基准 checkpoint）时拒绝提交并回滚', async (t) => {
+    const dir = tempDir(t, 'position-source-grant-mismatch-');
+    const side = createSideDb(dir);
+    const filePath = sourceFile(
+      dir,
+      SOURCE_TYPES.GATEWAY_OUTBOUND,
+      [sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND]],
+      'grant.xlsx'
+    );
+    const attempt = (jobId, mutate) => importSources({
+      dir, files: [filePath], ...side, jobId,
+      grant: (ready) => mutate({
+        jobId,
+        archiveManifestHash: ready.archiveManifestHash,
+        operationToken: 'grant-operation',
+        baseCheckpoint: side.checkpoint,
+        batchContext: MUTATING_BATCH_CONTEXT
+      })
+    });
+    const notDurable = (error) => error && error.code === 'position-import-intent-not-durable';
+    await assert.rejects(attempt('grant-manifest', (grant) => ({ ...grant, archiveManifestHash: 'f'.repeat(64) })), notDurable);
+    await assert.rejects(attempt('grant-checkpoint', (grant) => ({
+      ...grant, baseCheckpoint: { ...side.checkpoint, token: 'other-token' }
+    })), notDurable);
+    await assert.rejects(attempt('grant-token', (grant) => ({ ...grant, operationToken: '' })), notDurable);
+    await assert.rejects(attempt('grant-batch', (grant) => ({ ...grant, batchContext: null })), notDurable);
+    // 有可提交文件时不接受「仅预检」授权。
+    await assert.rejects(attempt('grant-preflight-only', (grant) => ({ ...grant, preflightOnly: true })), notDurable);
+    assert.equal(countRows(side.sideDbPath, 'position_source_rows'), 0);
+    assert.equal(countRows(side.sideDbPath, 'position_raw_files'), 0);
+    assert.deepEqual(fs.readdirSync(path.join(dir, 'worker-user-data', STAGING_RELATIVE_PATH)), []);
+
+    const { result } = await attempt('grant-ok', (grant) => grant);
+    assert.equal(result.successCount, 1);
+    assert.equal(result.nextCheckpoint.generation, 1);
+  });
+
+  test('预置取消标记时在复制暂存前终止，不留暂存目录', async (t) => {
+    const dir = tempDir(t, 'position-source-cancel-');
+    const side = createSideDb(dir);
+    const filePath = sourceFile(
+      dir,
+      SOURCE_TYPES.GATEWAY_OUTBOUND,
+      [sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND]],
+      'cancel.xlsx'
+    );
+    await assert.rejects(
+      importSources({ dir, files: [filePath], ...side, jobId: 'cancel-job', cancelToken: { cancelled: true } }),
+      (error) => error.code === 'position-import-cancelled'
+    );
+    assert.equal(
+      fs.existsSync(path.join(dir, 'worker-user-data', STAGING_RELATIVE_PATH, 'cancel-job')),
+      false
+    );
+  });
+
+  test('整份文件都是过滤行：文件仍被接受并登记过滤记录与版本，不产生来源行与链接行', async (t) => {
+    const dir = tempDir(t, 'position-source-all-filtered-');
+    const side = createSideDb(dir);
+    const filePath = sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [{
+      ...sourceRows()[SOURCE_TYPES.FUND_TRANSFER],
+      调拨单号: 'FT-ALL-FILTERED',
+      调拨状态: '处理中',
+      付款金额: ''
+    }], 'all-filtered.xlsx');
+
+    const { result } = await importSources({ dir, files: [filePath], ...side, jobId: 'all-filtered-job' });
+    assert.equal(result.successCount, 1);
+    assert.equal(result.results[0].rowCount, 0);
+    assert.equal(result.results[0].filteredRowCount, 1);
+    assert.ok(fs.existsSync(result.anomalyReport.filePath));
+    assert.equal(result.outputFiles.length, 1);
+    assert.deepEqual(result.outputFiles[0].requiredInputPaths, [path.resolve(result.results[0].archivePath)]);
+    assert.equal(countRows(side.sideDbPath, 'position_source_rows'), 0);
+    assert.equal(countRows(side.sideDbPath, 'position_link_rows'), 0);
+    const db = new DatabaseSync(side.sideDbPath, { readOnly: true });
+    t.after(() => db.close());
+    assert.deepEqual(
+      db.prepare(`
+        SELECT filtered.business_key AS businessKey, filtered.archive_operation_key AS archiveKey,
+               raw.original_name AS fileName, raw.status, raw.row_count AS rowCount
+        FROM position_filtered_source_rows filtered
+        JOIN position_raw_files raw ON raw.version = filtered.raw_version
+      `).all().map((row) => ({ ...row })),
+      [{
+        businessKey: 'FT-ALL-FILTERED',
+        archiveKey: 'position:source-import-operation:position-reconciliation:source:prepare-import',
+        fileName: 'all-filtered.xlsx',
+        // 仍有未处理的过滤记录引用该版本：保持当前。
+        status: 'active',
+        rowCount: 1
+      }]
+    );
+  });
+
+  test('过滤行与正常记录同单号：不论先后与是否同批，含过滤行的文件整份拒绝且不动已有记录', async (t) => {
+    const dir = tempDir(t, 'position-source-filter-collision-');
+    const side = createSideDb(dir);
+    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
+    const normal = sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [{ ...base, 调拨单号: 'FT-SAME' }], 'normal.xlsx');
+    const filtered = sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [{
+      ...base, 调拨单号: 'FT-SAME', 调拨状态: '处理中', 付款金额: ''
+    }], 'filtered.xlsx');
+
+    // 同批：正常记录在前。
+    const first = await importSources({ dir, files: [normal, filtered], ...side, jobId: 'collision-batch' });
+    assert.deepEqual(first.result.results.map((item) => item.status), ['ok', 'failed']);
+    assert.equal(first.result.results[1].code, 'position-filtered-key-collision');
+    assert.deepEqual(first.result.results[1].detailLines, ['FT-SAME：同批正常记录位于第 1 个文件第 2 行']);
+    assert.equal(countRows(side.sideDbPath, 'position_source_rows'), 1);
+    assert.equal(countRows(side.sideDbPath, 'position_filtered_source_rows'), 0);
+
+    // 另一次导入：库里已有正常记录。全部文件被拒时不推进 checkpoint。
+    const second = await importSources({
+      dir, files: [filtered], sideDbPath: side.sideDbPath, checkpoint: first.result.nextCheckpoint,
+      jobId: 'collision-existing',
+      grant: (ready) => ({ jobId: 'collision-existing', archiveManifestHash: ready.archiveManifestHash, preflightOnly: true })
+    });
+    assert.equal(second.result.status, 'failed');
+    assert.equal(second.result.results[0].code, 'position-filtered-key-collision');
+    assert.deepEqual(second.result.results[0].detailLines, ['FT-SAME：当前数据库已存在正常记录']);
+    assert.equal(countRows(side.sideDbPath, 'position_source_rows'), 1);
+    assert.equal(countRows(side.sideDbPath, 'position_filtered_source_rows'), 0);
+    const db = new DatabaseSync(side.sideDbPath, { readOnly: true });
+    t.after(() => db.close());
+    assert.deepEqual(readPositionDatabaseCheckpoint(db), first.result.nextCheckpoint);
+    assert.equal(
+      fs.existsSync(path.join(dir, 'worker-user-data', STAGING_RELATIVE_PATH, 'collision-existing')),
+      false
+    );
+  });
+
+  test('异常报告写不出来时只拒绝含过滤行的文件，其余文件照常提交', async (t) => {
+    const dir = tempDir(t, 'position-source-report-failure-');
+    const side = createSideDb(dir);
+    const base = sourceRows();
+    const withFiltered = sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [
+      base[SOURCE_TYPES.FUND_TRANSFER],
+      { ...base[SOURCE_TYPES.FUND_TRANSFER], 调拨单号: 'FT-FILTERED', 调拨状态: '处理中', 付款金额: '' }
+    ], 'with-filtered.xlsx');
+    const plain = sourceFile(dir, SOURCE_TYPES.GATEWAY_OUTBOUND, [base[SOURCE_TYPES.GATEWAY_OUTBOUND]], 'plain.xlsx');
+
+    const { result } = await importSources({
+      dir, files: [withFiltered, plain], ...side, jobId: 'report-failure-job',
+      writeAnomalyReport: async () => { throw new Error('磁盘写入失败'); }
+    });
+    assert.deepEqual(result.results.map((item) => item.status), ['failed', 'ok']);
+    assert.equal(result.results[0].code, 'position-anomaly-report-failed');
+    assert.deepEqual(result.results[0].detailLines, ['磁盘写入失败']);
+    assert.equal(result.anomalyReport, null);
+    assert.deepEqual(result.outputFiles, []);
+    const db = new DatabaseSync(side.sideDbPath, { readOnly: true });
+    t.after(() => db.close());
+    assert.deepEqual(
+      db.prepare('SELECT source_type AS sourceType FROM position_source_rows').all().map((row) => row.sourceType),
+      [SOURCE_TYPES.GATEWAY_OUTBOUND]
+    );
+    assert.equal(Number(db.prepare('SELECT COUNT(*) AS count FROM position_filtered_source_rows').get().count), 0);
+    assert.deepEqual(
+      db.prepare('SELECT original_name AS name FROM position_raw_files').all().map((row) => row.name),
+      ['plain.xlsx']
+    );
+  });
+
+  test('未识别文件的差异明细放进逐文件失败结果', async (t) => {
+    const dir = tempDir(t, 'position-header-diff-import-');
+    const side = createSideDb(dir);
+    const filePath = path.join(dir, 'gateway.xlsx');
+    writeWorkbook(filePath, [
+      { name: '网关', headers: renamedHeaders(), rows: [sourceRows()[SOURCE_TYPES.GATEWAY_INBOUND]] }
+    ]);
+    const { ready, result } = await importSources({
+      dir, files: [filePath], ...side, jobId: 'v3214-header-diff',
+      grant: (value) => ({ jobId: 'v3214-header-diff', archiveManifestHash: value.archiveManifestHash, preflightOnly: true })
+    });
+    assert.equal(ready.acceptedOrdinaryInputFiles.length, 0);
+    assert.equal(result.status, 'failed');
+    assert.equal(result.orderedFileResults[0].code, 'position-source-unrecognized');
+    assert.deepEqual(result.orderedFileResults[0].detailLines, [
+      '最接近：中台网关原始入账订单（41 列；文件 41 列）',
+      ...expectedLines.slice(1)
+    ]);
+  });
+
+  test('提交后导入进程退出：按提交链、文件凭证与版本记录重建结果；未提交时不恢复', async (t) => {
+    const dir = tempDir(t, 'position-source-recovery-');
+    const side = createSideDb(dir);
+    const base = sourceRows();
+    const files = [
+      sourceFile(dir, SOURCE_TYPES.GATEWAY_OUTBOUND, [base[SOURCE_TYPES.GATEWAY_OUTBOUND]], 'outbound.xlsx'),
+      sourceFile(dir, SOURCE_TYPES.GATEWAY_INBOUND, [base[SOURCE_TYPES.GATEWAY_INBOUND]], 'inbound.xlsx'),
+      sourceFile(dir, SOURCE_TYPES.GATEWAY_OUTBOUND, [{ ...base[SOURCE_TYPES.GATEWAY_OUTBOUND], 业务单号: '' }], 'invalid.xlsx')
+    ];
+    const recover = (preflightReady, operationToken = 'recovery-operation') => recoverPositionImportWorkerExit({
+      sideDbPath: side.sideDbPath,
+      baseCheckpoint: side.checkpoint,
+      operationToken,
+      preflightReady,
+      command: POSITION_IMPORT_COMMANDS.SOURCE_IMPORT
+    });
+
+    // 未提交（授权被拒）：没有提交凭证，不恢复。
+    let rejectedReady = null;
+    await assert.rejects(importSources({
+      dir, files, ...side, jobId: 'recovery-rejected', operationToken: 'recovery-operation',
+      grant: (ready) => { rejectedReady = ready; throw Object.assign(new Error('拒绝'), { code: 'position-import-intent-not-durable' }); }
+    }));
+    assert.equal(recover(rejectedReady), null);
+
+    const { ready, result } = await importSources({
+      dir, files, ...side, jobId: 'recovery-committed', operationToken: 'recovery-operation'
+    });
+    assert.deepEqual(result.results.map((item) => item.status), ['ok', 'ok', 'failed']);
+    const recovered = recover(ready);
+    assert.equal(recovered.status, 'ok');
+    assert.equal(recovered.recoveredFromWorkerExit, true);
+    assert.equal(recovered.committedMutations, 1);
+    assert.deepEqual(recovered.results.map((item) => item.status), ['ok', 'ok', 'failed']);
+    assert.deepEqual(recovered.inputPaths, result.inputPaths.map((item) => path.resolve(item)));
+    assert.deepEqual(recovered.nextCheckpoint, result.nextCheckpoint);
+    assert.deepEqual(recovered.cleanupPaths, [ready.jobRoot]);
+
+    // ready 与库内版本记录对不上（行数被改）时停止恢复，交给重启恢复处理。
+    const tampered = structuredClone(ready);
+    tampered.acceptedOrdinaryInputFiles[0].rowCount = 99;
+    assert.throws(() => recover(tampered), (error) => error && error.code === 'position-recovery-required');
+  });
+
 });

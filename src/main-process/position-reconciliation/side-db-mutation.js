@@ -407,14 +407,18 @@ function runPositionSideDbMutation({
       '平盘侧库 mutation 缺少预期 checkpoint'
     );
   }
-  const suppliedOperationToken = text(operationToken);
-  if (requireExternalOperationToken && !suppliedOperationToken) {
+  // operationToken / inputEvidence 可传函数：单遍导入在数据写完、等到确认授权后才拿到
+  // operation token 与最终存档路径，提交前再取值；事务与 checkpoint 推进方式不变。
+  const lazyOperationToken = typeof operationToken === 'function';
+  const lazyInputEvidence = typeof inputEvidence === 'function';
+  const suppliedOperationToken = lazyOperationToken ? '' : text(operationToken);
+  if (requireExternalOperationToken && !lazyOperationToken && !suppliedOperationToken) {
     throw new PositionReconciliationError(
       'position-import-intent-not-durable',
       '平盘导入写入缺少外部 operation token'
     );
   }
-  const token = suppliedOperationToken || crypto.randomUUID();
+  let token = lazyOperationToken ? '' : (suppliedOperationToken || crypto.randomUUID());
 
   db.exec('BEGIN IMMEDIATE');
   let currentCheckpoint;
@@ -428,10 +432,22 @@ function runPositionSideDbMutation({
   };
   const commit = (result) => {
     try {
+      if (lazyOperationToken) {
+        token = text(operationToken());
+        if (!token) {
+          if (requireExternalOperationToken) {
+            throw new PositionReconciliationError(
+              'position-import-intent-not-durable',
+              '平盘导入写入缺少外部 operation token'
+            );
+          }
+          token = crypto.randomUUID();
+        }
+      }
       recordPositionOperationInputs(
         db,
         token,
-        inputEvidence,
+        lazyInputEvidence ? inputEvidence() : inputEvidence,
         fallbackSourceType
       );
 

@@ -78,35 +78,48 @@ async function buildTemplate({ outputName, sheetName, headers }) {
   await workbook.xlsx.writeFile(path.join(ASSETS, outputName));
 }
 
-async function updateExistingTemplateTextFormats({ outputName, sheetName, headers }) {
-  const outputPath = path.join(ASSETS, outputName);
+// 结果模板「平盘银行对账单.xlsx」：表头即导出 / 回导契约（审计列 + 交互字段 + 原始版本号 / 行号）。
+// 样式沿用原模板：首行加粗、编号类列为文本格式、不带数据行。
+async function buildResultTemplate({ outputName, sheetName, headers }) {
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(outputPath);
-  const sheet = workbook.getWorksheet(sheetName);
-  if (!sheet) throw new Error(`${outputName} 缺少 sheet「${sheetName}」`);
-  headers.forEach((header, index) => {
-    if (requiresTextFormat(header)) sheet.getColumn(index + 1).numFmt = '@';
+  workbook.creator = '网银账单生成小助手';
+  workbook.created = new Date(0);
+  workbook.modified = new Date(0);
+  const sheet = workbook.addWorksheet(sheetName.slice(0, 31));
+  const headerRow = sheet.addRow(headers);
+  headerRow.eachCell((cell, columnNumber) => {
+    cell.font = { name: 'Calibri', size: 10, bold: true };
+    const column = sheet.getColumn(columnNumber);
+    column.width = columnWidth(headers[columnNumber - 1]);
+    if (requiresTextFormat(headers[columnNumber - 1])) column.numFmt = '@';
   });
-  await workbook.xlsx.writeFile(outputPath);
+  await workbook.xlsx.writeFile(path.join(ASSETS, outputName));
 }
 
 async function main() {
   fs.mkdirSync(ASSETS, { recursive: true });
-  for (const [sourceType, outputName] of LINK_TEMPLATE_OUTPUTS) {
-    await buildTemplate({
-      outputName,
-      sheetName: SOURCE_DEFINITIONS[sourceType].linkedName,
-      headers: LINK_HEADERS[sourceType]
-    });
+  const resultOnly = process.argv.includes('--result-only');
+  if (!resultOnly) {
+    for (const [sourceType, outputName] of LINK_TEMPLATE_OUTPUTS) {
+      await buildTemplate({
+        outputName,
+        sheetName: SOURCE_DEFINITIONS[sourceType].linkedName,
+        // 账户表的这份模板同时是导入识别结构（设置 → 模板文件），保持完整的原始表头；
+        // 入库与导出只含必用列（LINK_HEADERS）。
+        headers: sourceType === SOURCE_TYPES.BANK_ACCOUNT
+          ? SOURCE_DEFINITIONS[sourceType].headers
+          : LINK_HEADERS[sourceType]
+      });
+    }
+    for (const [sourceType, outputName] of SOURCE_TEMPLATE_OUTPUTS) {
+      await buildTemplate({
+        outputName,
+        sheetName: SOURCE_DEFINITIONS[sourceType].sourceName,
+        headers: SOURCE_DEFINITIONS[sourceType].headers
+      });
+    }
   }
-  for (const [sourceType, outputName] of SOURCE_TEMPLATE_OUTPUTS) {
-    await buildTemplate({
-      outputName,
-      sheetName: SOURCE_DEFINITIONS[sourceType].sourceName,
-      headers: SOURCE_DEFINITIONS[sourceType].headers
-    });
-  }
-  await updateExistingTemplateTextFormats({
+  await buildResultTemplate({
     outputName: '平盘银行对账单.xlsx',
     sheetName: BANK_SHEET_NAME,
     headers: POSITION_BANK_HEADERS

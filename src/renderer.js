@@ -2149,7 +2149,7 @@ async function applyFullInfo(info) {
     }, 120);
   } else if (info.previewModal === 'position-reconciliation-import-progress') {
     setTimeout(() => {
-      positionReconciliationUI?.previewImportProgress('preflight');
+      positionReconciliationUI?.previewImportProgress('importing');
     }, 120);
   } else if (info.previewModal === 'position-reconciliation-import-stopping') {
     setTimeout(() => {

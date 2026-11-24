@@ -336,7 +336,7 @@ const positionContract = {
     const unexpected = workbook.worksheets.map((item) => item.name).filter((name) => !allowed.has(name));
     if (unexpected.length) list.add('Sheet 结构', 'fail', `多出 ${listText(unexpected)}，会被一并写入结果`);
     else list.add('Sheet 结构', 'pass', `包含「${BANK_SHEET_NAME}」`);
-    // 结果回读要求恰好 49 列，多余表头会让导出的结果无法再导入。
+    // 结果回读要求列数与契约完全一致，多余表头会让导出的结果无法再导入。
     const extras = extraHeaders(sheet, POSITION_BANK_HEADERS.length);
     if (extras.length) list.add('表头', 'fail', `存在多余表头：${listText(extras)}；要求固定 ${POSITION_BANK_HEADERS.length} 列`);
     else list.add('表头', 'pass', `${POSITION_BANK_HEADERS.length} 列一致`);

@@ -19,11 +19,12 @@ const {
   normalizeDate,
   monthOf,
   canonicalDecimal,
-  stableHash,
-  stableJson
+  stableHash
 } = require('./common');
 const { BANK_STATEMENT_FIELDS } = require('../../constants/bank-statement-fields');
 const { bankHeaderMismatchLines, sourceHeaderMismatchLines } = require('./header-mismatch');
+const { pickInteractionFields } = require('./bank-row-storage');
+const { pickSourceFields, sourceRecordKeyOf } = require('./source-row-storage');
 
 const POSITION_SUPPORTED_EXTENSIONS = new Set(['.xlsx', '.xls']);
 
@@ -148,7 +149,7 @@ function readBankFiles(filePaths) {
     } else {
       throw new PositionReconciliationError(
         'position-bank-headers-invalid',
-        `银行对账单表头不符合 46/49 列契约：${path.basename(filePath)}`,
+        `银行对账单表头不符合 46/20 列契约：${path.basename(filePath)}`,
         bankHeaderMismatchLines(actualHeaders)
       );
     }
@@ -164,10 +165,8 @@ function readBankFiles(filePaths) {
     const scopes = new Set();
     for (const parsed of parsedRows) {
       const input = parsed.row;
-      const bankRow = {};
-      BANK_STATEMENT_FIELDS.forEach((header) => {
-        bankRow[header] = input[header] ?? '';
-      });
+      // 只取交互字段；其余列留在存档的原始文件里。
+      const bankRow = pickInteractionFields(input);
       const bizId = text(bankRow.BizId);
       const channel = text(bankRow.Channel);
       const billDate = normalizeDate(bankRow.BillDate);
@@ -372,8 +371,9 @@ function classifySourceRow(sourceType, row) {
   return { disposition: 'invalid', validation, filter: null };
 }
 
-// sourceDefinitions：本次导入的链接原始表结构（设置 → 模板文件的当前版本），缺省为内置结构。
-function readSourceFile(input, { identityMode = 'business-key', sourceDefinitions = SOURCE_DEFINITIONS } = {}) {
+// 进程内读取路径（非流式引擎，仅测试使用）。sourceDefinitions：本次导入的链接原始表结构，缺省为内置结构。
+// 行只取必用列；来源记录标识按这些列的内容计算，业务单号相同但内容不同的行各自成为独立记录。
+function readSourceFile(input, { sourceDefinitions = SOURCE_DEFINITIONS } = {}) {
   const descriptor = normalizeFileInput(input);
   const filePath = descriptor.filePath;
   const workbook = ensureReadableWorkbook(filePath);
@@ -386,18 +386,19 @@ function readSourceFile(input, { identityMode = 'business-key', sourceDefinition
       `链接原始表没有数据行：${fileName} / ${detected.sheetName}`
     );
   }
-  const seen = new Map();
+  const seen = new Set();
   const records = [];
   let collapsedDuplicateCount = 0;
 
   for (const parsed of parsedRows) {
+    const row = pickSourceFields(detected.sourceType, parsed.row);
     if (
       detected.sourceType === SOURCE_TYPES.BANK_ACCOUNT
-      && text(parsed.row['账户状态']) !== '正常'
+      && text(row['账户状态']) !== '正常'
     ) {
       continue;
     }
-    const validation = validateSourceRow(detected.sourceType, parsed.row);
+    const validation = validateSourceRow(detected.sourceType, row);
     if (validation.errors.length > 0) {
       throw new PositionReconciliationError(
         'position-source-row-invalid',
@@ -405,40 +406,13 @@ function readSourceFile(input, { identityMode = 'business-key', sourceDefinition
         validation.errors
       );
     }
-    const rowHash = stableHash(parsed.row);
+    const rowHash = sourceRecordKeyOf(row);
     if (detected.definition.keyField) {
-      const identityKey = identityMode === 'row-hash'
-        ? rowHash
-        : validation.businessKey;
-      const previous = seen.get(identityKey);
-      if (previous) {
-        if (previous.rowHash === rowHash) {
-          if (previous.businessKey !== validation.businessKey
-              || stableJson(previous.row) !== stableJson(parsed.row)) {
-            throw new PositionReconciliationError(
-              'position-source-record-hash-collision',
-              `来源记录内容摘要冲突：${fileName}`,
-              ['无法证明两条来源记录完全相同，已停止导入']
-            );
-          }
-          collapsedDuplicateCount += 1;
-          continue;
-        }
-        throw new PositionReconciliationError(
-          'position-source-key-conflict',
-          `同一文件存在业务主键冲突：${fileName}`,
-          [
-            `${detected.definition.keyField}=${validation.businessKey}`,
-            `第 ${previous.excelRowNumber} 行与第 ${parsed.excelRowNumber} 行内容不同`
-          ]
-        );
+      if (seen.has(rowHash)) {
+        collapsedDuplicateCount += 1;
+        continue;
       }
-      seen.set(identityKey, {
-        rowHash,
-        businessKey: validation.businessKey,
-        row: parsed.row,
-        excelRowNumber: parsed.excelRowNumber
-      });
+      seen.add(rowHash);
     }
     records.push({
       sourceType: detected.sourceType,
@@ -450,7 +424,7 @@ function readSourceFile(input, { identityMode = 'business-key', sourceDefinition
       sourceSheet: detected.sheetName,
       sourceRowNumber: parsed.excelRowNumber,
       rowHash,
-      row: parsed.row
+      row
     });
   }
 
@@ -478,24 +452,22 @@ function readSourceFile(input, { identityMode = 'business-key', sourceDefinition
     sheetName: detected.sheetName,
     records,
     rowCount: records.length,
-    collapsedDuplicateCount,
-    contentHash: stableHash(records.map((record) => record.row))
+    collapsedDuplicateCount
   };
 }
 
-function readSourceFiles(filePaths, { identityMode = 'business-key', sourceDefinitions = SOURCE_DEFINITIONS } = {}) {
+function readSourceFiles(filePaths, { sourceDefinitions = SOURCE_DEFINITIONS } = {}) {
   const paths = Array.isArray(filePaths) ? filePaths : [];
   if (paths.length === 0) {
     throw new PositionReconciliationError('position-source-files-empty', '请选择至少一份链接原始表');
   }
-  const acceptedKeys = new Map();
+  const acceptedKeys = new Set();
   const acceptedAccountSnapshots = [];
   const results = [];
   for (const input of paths) {
     const descriptor = normalizeFileInput(input);
     try {
-      const parsed = readSourceFile(descriptor, { identityMode, sourceDefinitions });
-      const conflicting = [];
+      const parsed = readSourceFile(descriptor, { sourceDefinitions });
       if (
         parsed.sourceType === SOURCE_TYPES.BANK_ACCOUNT
         && acceptedAccountSnapshots.length > 0
@@ -506,56 +478,22 @@ function readSourceFiles(filePaths, { identityMode = 'business-key', sourceDefin
           [`已选择：${acceptedAccountSnapshots[0]}`]
         );
       }
-      const retainedRecords = [];
       if (SOURCE_DEFINITIONS[parsed.sourceType].keyField) {
+        // 前面文件里已出现过的完全相同的行折叠，保留第一次出现的那一行。
+        const retainedRecords = [];
         for (const record of parsed.records) {
-          const identity = identityMode === 'row-hash'
-            ? record.rowHash
-            : record.businessKey;
-          const batchKey = `${parsed.sourceType}\u0000${identity}`;
-          const previous = acceptedKeys.get(batchKey);
-          if (!previous) {
-            retainedRecords.push(record);
-            continue;
-          }
-          if (identityMode === 'row-hash'
-              && previous.businessKey === record.businessKey
-              && stableJson(previous.row) === stableJson(record.row)) {
+          const batchKey = `${parsed.sourceType}\u0000${record.rowHash}`;
+          if (acceptedKeys.has(batchKey)) {
             parsed.collapsedDuplicateCount += 1;
             continue;
           }
-          conflicting.push(
-            `${record.businessKey} 已在 ${previous.fileName} 第 ${previous.sourceRowNumber} 行出现`
-          );
+          retainedRecords.push(record);
         }
-      } else {
-        retainedRecords.push(...parsed.records);
-      }
-      if (conflicting.length > 0) {
-        throw new PositionReconciliationError(
-          identityMode === 'row-hash'
-            ? 'position-source-record-hash-collision'
-            : 'position-source-cross-file-conflict',
-          identityMode === 'row-hash'
-            ? `后续文件存在来源记录摘要冲突，整份文件已拒绝：${parsed.fileName}`
-            : `后续文件存在跨文件业务主键冲突，整份文件已拒绝：${parsed.fileName}`,
-          conflicting
-        );
-      }
-      parsed.records = retainedRecords;
-      parsed.rowCount = retainedRecords.length;
-      parsed.contentHash = stableHash(retainedRecords.map((record) => record.row));
-      for (const record of retainedRecords) {
-        const identity = identityMode === 'row-hash'
-          ? record.rowHash
-          : record.businessKey;
-        acceptedKeys.set(`${parsed.sourceType}\u0000${identity}`, {
-          rowHash: record.rowHash,
-          businessKey: record.businessKey,
-          row: record.row,
-          fileName: parsed.fileName,
-          sourceRowNumber: record.sourceRowNumber
-        });
+        parsed.records = retainedRecords;
+        parsed.rowCount = retainedRecords.length;
+        for (const record of retainedRecords) {
+          acceptedKeys.add(`${parsed.sourceType}\u0000${record.rowHash}`);
+        }
       }
       if (parsed.sourceType === SOURCE_TYPES.BANK_ACCOUNT) {
         acceptedAccountSnapshots.push(parsed.fileName);

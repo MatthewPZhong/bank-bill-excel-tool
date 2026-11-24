@@ -3,7 +3,7 @@
 //         同时接受新结构与内置 46 列；按新结构导出的入金渠道银行对账单读出后对应回内置 46 列，二次分流入金表时
 //         按同一结构的入金表签名流式入库（14 个字段）；「链接表管理」识别为入金表并标明按当前版本读取；
 //         预置场景引用的银行字段不阻止启用；平盘银行导入（真实流式 Worker 预检与写入）与重复入账匹配导入按同一装配接受新结构、
-//         入库为内置 46 列；恢复默认后新结构文件被拒并附指引，内置结构文件照常。
+//         按内置列名取交互字段入库；恢复默认后新结构文件被拒并附指引，内置结构文件照常。
 //
 // 导入入口是 IPC + 对话框绑定，本脚本镜像其识别 / 读取 / 落库调用（与 linked-input-template-version.js 同范式）。
 // 用法：node scripts/integration/bank-statement-input-template-version.js
@@ -19,6 +19,7 @@ const XLSX = require('xlsx');
 const { AppDatabase } = require('../../src/backend/database');
 const linkedRepo = require('../../src/backend/database/linked-table-repository');
 const { BANK_STATEMENT_FIELDS } = require('../../src/constants/bank-statement-fields');
+const { POSITION_BANK_ROW_FIELDS } = require('../../src/main-process/position-reconciliation/constants');
 const { ALL_TABLE_SIGNATURES, BANK_DEPOSIT_SIGNATURE, LINKED_IMPORT_SIGNATURES } = require('../../src/constants/table-signatures');
 const { detectTableType } = require('../../src/main-process/table-type-detector');
 const { streamLinkedRowsToInsert } = require('../../src/main-process/linked-table-stream-source');
@@ -100,7 +101,7 @@ async function run() {
       const detected = await detectTableType(v2File, signatures);
       assert.deepEqual([detected.status, detected.tableKey, detected.matchedVersion], ['matched', 'bank-deposit', true]);
     }],
-    ['平盘银行导入按同一装配接受新结构：真实 Worker 预检与写入，入库为内置 46 列', async () => {
+    ['平盘银行导入按同一装配接受新结构：真实 Worker 单遍导入，按内置列名取交互字段入库', async () => {
       let sequence = 0;
       const position = createPositionReconciliationService({ userDataDir: path.join(temporary, 'position'),
         templatePath: path.join(ROOT, 'assets', '平盘银行对账单.xlsx'), positionImportEngine: 'streaming',
@@ -114,7 +115,9 @@ async function run() {
           position.bankImportArchiveIntent(prepared.token).map((item) => item.filePath));
         assert.equal(applied.status, 'ok', JSON.stringify(applied));
         const [{ originalRow }] = position.store.getBankRows({ channels: ['DBS'], months: ['2026-10'] });
-        assert.deepEqual([originalRow.BizId, originalRow['合并单号'], originalRow['分类人']], ['IT-POS-1', '合并-1', '']);
+        // v3.2.22 起平盘只保存交互字段：改名列 / 已删除列不是交互字段，不入库。
+        assert.deepEqual(Object.keys(originalRow), [...POSITION_BANK_ROW_FIELDS]);
+        assert.deepEqual([originalRow.BizId, originalRow.Channel, originalRow['地区'], originalRow['原始行号']], ['IT-POS-1', 'DBS', 'HK', 2]);
       } finally {
         position.close();
       }

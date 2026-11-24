@@ -231,15 +231,16 @@ const {
   createPositionSourceImportTaskContract
 } = require('./main-process/position-reconciliation/interactive-task-preflight');
 const {
-  dispatchPositionLargeImportSchemaMigration
-} = require('./main-process/position-reconciliation/import-dispatch');
-const {
   hashFileSha256Async
 } = require('./main-process/position-reconciliation/input-staging');
 const {
   POSITION_SIDE_DB_CHECKPOINT_SETTING,
-  POSITION_SIDE_DB_BOOTSTRAP_SETTING
+  POSITION_SIDE_DB_BOOTSTRAP_SETTING,
+  POSITION_SIDE_DB_PENDING_SETTING
 } = require('./main-process/position-reconciliation/constants');
+const {
+  discardOutdatedPositionSideDb
+} = require('./main-process/position-reconciliation/store');
 const {
   authorizePositionImportApply,
   positionPersistentStagingProtectionPaths,
@@ -21529,6 +21530,31 @@ async function resolvePositionAnomalyReportReference(report = {}) {
   return { filePath: readonly.filePath };
 }
 
+// v3.2.22：平盘侧库换新结构（银行行只存交互字段），旧结构的库不迁移，启动时整体丢弃并解除主库绑定，
+// 之后按全新侧库初始化。必须早于任何读取侧库的入口（service、存档删除保护、启动恢复）。
+function discardOutdatedPositionSideDbAtStartup() {
+  try {
+    if (!discardOutdatedPositionSideDb(path.dirname(database.dbPath))) return;
+    database.setSetting(POSITION_SIDE_DB_CHECKPOINT_SETTING, '');
+    database.setSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, '');
+    database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
+    appendActivityLogEntry({
+      level: 'info',
+      source: 'main',
+      domain: 'position-reconciliation-side-db-init',
+      message: '平盘侧库为旧版本结构，已丢弃并将按新结构重建'
+    });
+  } catch (error) {
+    appendActivityLogEntry({
+      level: 'error',
+      source: 'main',
+      domain: 'position-reconciliation-side-db-init',
+      message: '平盘旧版本侧库清理失败',
+      details: [`code=${String(error && error.code ? error.code : 'unknown')}`]
+    });
+  }
+}
+
 function getPositionReconciliationService() {
   if (!database || !database.db) {
     throw new Error('数据库尚未初始化，请稍后重试');
@@ -21583,23 +21609,14 @@ function getPositionReconciliationService() {
             // Renderer may be closing while the utility process settles.
           }
         },
-        authorizeStreamingSourceApply: async (preflightReady) => {
-          const migration = dispatchPositionLargeImportSchemaMigration({
-            engine: 'streaming',
-            userDataDir: path.dirname(database.dbPath),
-            sideDbPath: service.store.dbPath,
-            expectedCheckpoint: service.persistenceCheckpoint()
-          });
-          const schema = await migration.promise;
-          return authorizePositionImportApply({
-            preflightReady,
-            currentCheckpoint: service.persistenceCheckpoint(),
-            schemaFingerprint: schema.fingerprint,
-            readPending: positionTaskOwner.readPositionPendingOperation,
-            writePending: positionTaskOwner.writePositionPendingOperation,
-            recordArchiveIntentFiles: positionTaskOwner.recordPositionArchiveIntentFiles
-          });
-        }
+        // 链接原始表单遍导入：数据已写在未提交的事务里，这里只登记存档意图并给出提交凭证。
+        authorizeStreamingSourceApply: async (preflightReady) => authorizePositionImportApply({
+          preflightReady,
+          currentCheckpoint: service.persistenceCheckpoint(),
+          readPending: positionTaskOwner.readPositionPendingOperation,
+          writePending: positionTaskOwner.writePositionPendingOperation,
+          recordArchiveIntentFiles: positionTaskOwner.recordPositionArchiveIntentFiles
+        })
       });
       const checkpoint = service.persistenceCheckpoint();
       const recovery = positionTaskOwner.recoverPositionArchiveIntent(
@@ -24109,6 +24126,7 @@ async function initializeApplication() {
     recoverVccStorageMigration({ journalPath: vccStorageMigrationJournalPath() });
     database = new AppDatabase(dataPath);
     database.init({ onStartupPhase: recordStartupPhase });
+    discardOutdatedPositionSideDbAtStartup();
     darkModeScheduler = createDarkModeScheduler({
       readSchedule: () => database.getDarkModeSchedule(),
       writeSchedule: (config) => database.setDarkModeSchedule(config),

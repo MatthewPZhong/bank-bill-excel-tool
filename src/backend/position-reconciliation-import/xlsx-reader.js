@@ -287,7 +287,7 @@ async function readPhysicalHeader(workbook, sheet, cancelToken = null) {
 }
 
 // definitions：本次导入使用的来源表结构（当前启用版本），缺省为内置结构。
-// bankSourceHeaders：银行对账单导入识别结构的当前用户版本（D17，与内置 46 / 49 列同时接受）。
+// bankSourceHeaders：银行对账单导入识别结构的当前用户版本（D17，与内置 46 列、平盘结果 20 列同时接受）。
 async function locatePositionBusinessSheet(workbook, kind, cancelToken = null, definitions = SOURCE_DEFINITIONS, bankSourceHeaders = null) {
   if (kind === 'bank') {
     const sheet = workbook.sheets.find((candidate) => candidate.name === BANK_SHEET_NAME);
@@ -303,7 +303,7 @@ async function locatePositionBusinessSheet(workbook, kind, cancelToken = null, d
     if (!structure) {
       throw new PositionReconciliationError(
         'position-bank-headers-invalid',
-        `银行对账单表头不符合 46/49 列契约${bankSourceHeaders ? '或当前版本' : ''}：${workbook.sourceFile}`,
+        `银行对账单表头不符合 46/20 列契约${bankSourceHeaders ? '或当前版本' : ''}：${workbook.sourceFile}`,
         bankHeaderMismatchLines(headers, bankSourceHeaders)
       );
     }

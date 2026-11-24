@@ -222,7 +222,6 @@ function assertSameArchiveOutputEvidence(actualFiles, expectedFiles) {
 function authorizePositionImportApply({
   preflightReady,
   currentCheckpoint,
-  schemaFingerprint,
   readPending,
   writePending,
   recordArchiveIntentFiles
@@ -230,13 +229,11 @@ function authorizePositionImportApply({
   const manifestHash = String(
     preflightReady && preflightReady.archiveManifestHash || ''
   ).trim().toLowerCase();
-  const fingerprint = String(schemaFingerprint || '').trim().toLowerCase();
   const checkpoint = normalizePositionCheckpoint(
     currentCheckpoint,
     '导入 apply 基准 checkpoint'
   );
   if (!SHA256_RE.test(manifestHash)
-      || !SHA256_RE.test(fingerprint)
       || !checkpoint
       || typeof readPending !== 'function'
       || typeof writePending !== 'function'
@@ -287,7 +284,6 @@ function authorizePositionImportApply({
   return {
     operationToken,
     archiveManifestHash: manifestHash,
-    schemaFingerprint: fingerprint,
     baseCheckpoint: checkpoint
   };
 }

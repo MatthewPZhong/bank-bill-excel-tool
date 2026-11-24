@@ -70,18 +70,22 @@ test('五个链接模板严格使用正式字段、冻结首行和筛选范围',
     assert.equal(workbook.worksheets.length, 1, `${fileName} 只应有一个 sheet`);
     const sheet = workbook.worksheets[0];
     assert.equal(sheet.name, SOURCE_DEFINITIONS[sourceType].linkedName);
+    // 账户表的模板同时是导入识别结构，保持完整的原始表头；入库与导出只含必用列。
+    const headers = sourceType === SOURCE_TYPES.BANK_ACCOUNT
+      ? SOURCE_DEFINITIONS[sourceType].headers
+      : LINK_HEADERS[sourceType];
     assert.deepEqual(
-      sheet.getRow(1).values.slice(1, LINK_HEADERS[sourceType].length + 1),
-      [...LINK_HEADERS[sourceType]]
+      sheet.getRow(1).values.slice(1, headers.length + 1),
+      [...headers]
     );
     assert.equal(sheet.rowCount, 1, `${fileName} 模板不得夹带样例数据`);
     assert.equal(sheet.views[0].state, 'frozen');
     assert.equal(sheet.views[0].ySplit, 1);
     assert.equal(
       sheet.autoFilter,
-      `A1:${sheet.getColumn(LINK_HEADERS[sourceType].length).letter}1`
+      `A1:${sheet.getColumn(headers.length).letter}1`
     );
-    LINK_HEADERS[sourceType].forEach((header, index) => {
+    headers.forEach((header, index) => {
       if (requiresTextFormat(header)) {
         assert.equal(sheet.getColumn(index + 1).numFmt, '@', `${fileName}/${header} 必须为文本列`);
       }

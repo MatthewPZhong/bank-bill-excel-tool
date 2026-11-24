@@ -15,8 +15,7 @@ const {
   SHARED_STRINGS_ENTRY_NAME
 } = require('../src/backend/big-table-import/zip-reader');
 const {
-  dispatchPositionImportPreflight,
-  dispatchPositionLargeImportSchemaMigration
+  dispatchPositionImportPreflight
 } = require('../src/main-process/position-reconciliation/import-dispatch');
 const {
   createPositionReconciliationStore
@@ -24,6 +23,16 @@ const {
 const {
   readPositionDatabaseCheckpoint
 } = require('../src/main-process/position-reconciliation/side-db-mutation');
+
+const BENCHMARK_BATCH_CONTEXT = Object.freeze({
+  batchId: 1,
+  batchNumber: 'BENCH-1',
+  taskRunId: 'benchmark-run',
+  taskKey: 'benchmark',
+  moduleId: 'position-reconciliation-process',
+  parentRunId: 'benchmark-parent',
+  operationKey: 'benchmark-operation'
+});
 
 function monotonicNowMs() {
   return Number(process.hrtime.bigint() / 1000000n);
@@ -213,13 +222,13 @@ async function main() {
   const baselineMemory = process.memoryUsage();
   let sideDbPath = '';
   let initialCheckpoint = null;
-  let schemaFingerprint = '';
   let operationToken = '';
   const streamingSourceTypes = [...normalizePositionStreamingSourceTypes(
     options.streamingSourceTypes,
     { engine: 'streaming' }
   )];
-  if (options.apply) {
+  // 单遍导入直接写入侧库的未提交事务，不带 --apply 时也需要一份侧库（读完后回滚）。
+  {
     initialCheckpoint = {
       identity: crypto.randomUUID(),
       generation: 0,
@@ -230,13 +239,6 @@ async function main() {
     });
     sideDbPath = store.dbPath;
     store.close();
-    const schema = await dispatchPositionLargeImportSchemaMigration({
-      engine: 'streaming',
-      userDataDir,
-      sideDbPath,
-      expectedCheckpoint: initialCheckpoint
-    }).promise;
-    schemaFingerprint = schema.fingerprint;
     operationToken = crypto.randomUUID();
   }
 
@@ -341,61 +343,41 @@ async function main() {
   try {
     let preflightResult;
     let result;
-    if (options.kind === 'bank') {
-      const preparedJob = dispatchPositionImportPreflight({
-        engine: 'streaming',
-        command: POSITION_IMPORT_COMMANDS.BANK_PREPARE,
-        files: options.files,
-        userDataDir,
-        sideDbPath,
-        onProgress
-      });
-      preflightResult = await preparedJob.promise;
-      if (options.apply) {
-        result = await dispatchPositionImportPreflight({
-          engine: 'streaming',
-          command: POSITION_IMPORT_COMMANDS.BANK_APPLY,
-          files: [],
-          userDataDir,
-          sideDbPath,
-          expectedCheckpoint: initialCheckpoint,
+    // 银行对账单与链接原始表都走单遍导入：一次解析直接写库，--apply 时立即授权提交，
+    // 否则拒绝授权（回滚）。
+    const bank = options.kind === 'bank';
+    const job = dispatchPositionImportPreflight({
+      engine: 'streaming',
+      command: bank ? POSITION_IMPORT_COMMANDS.BANK_IMPORT : POSITION_IMPORT_COMMANDS.SOURCE_IMPORT,
+      files: options.files,
+      userDataDir,
+      sideDbPath,
+      expectedCheckpoint: initialCheckpoint,
+      featureFlags: bank ? { bankImport: true } : { sourceImport: true, streamingSourceTypes },
+      onPreflightReady: (ready) => { preflightResult = ready; },
+      authorizeApply: (ready) => {
+        if (!options.apply) {
+          const error = new Error('基准测试未指定 --apply，回滚本次导入');
+          error.code = 'position-import-cancelled';
+          throw error;
+        }
+        return {
+          preflightOnly: false,
           operationToken,
-          payload: {
-            schemaFingerprint,
-            preflightReady: preflightResult
-          },
-          featureFlags: { importApply: true },
-          onProgress
-        }).promise;
-      } else {
-        result = preflightResult;
-      }
-    } else {
-      const job = dispatchPositionImportPreflight({
-        engine: 'streaming',
-        command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-        files: options.files,
-        userDataDir,
-        sideDbPath,
-        featureFlags: options.apply
-          ? {
-              preflightOnly: false,
-              streamingSourceTypes
-            }
-          : undefined,
-        authorizeApply: options.apply
-          ? (ready) => ({
-              operationToken,
-              archiveManifestHash: ready.archiveManifestHash,
-              schemaFingerprint,
-              baseCheckpoint: initialCheckpoint
-            })
-          : undefined,
-        onProgress
-      });
+          archiveManifestHash: ready.archiveManifestHash,
+          baseCheckpoint: initialCheckpoint,
+          batchContext: BENCHMARK_BATCH_CONTEXT
+        };
+      },
+      onProgress
+    });
+    try {
       result = await job.promise;
-      preflightResult = result.preflightReady || result;
+    } catch (error) {
+      if (options.apply || !preflightResult || error.code !== 'position-import-cancelled') throw error;
+      result = preflightResult;
     }
+    preflightResult = preflightResult || result;
 
     workerPeakRssBytes = Math.max(
       workerPeakRssBytes,
@@ -482,11 +464,6 @@ async function main() {
         workerPeakRssBytes,
         workerPeakHeapUsedBytes,
         peakRunDataBytes,
-        ledgerSizeBytes: Number(
-          preflightResult.ledgerEvidence
-          && preflightResult.ledgerEvidence.ledgerSizeBytes
-          || 0
-        ),
         maxProgressSilenceMs,
         maxProgressGap
       },

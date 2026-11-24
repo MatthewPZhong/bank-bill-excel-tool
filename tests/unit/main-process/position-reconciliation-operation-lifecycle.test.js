@@ -913,7 +913,6 @@ test('恢复前暂存输入字节变化时 fail closed，不允许继续登记�
 test('普通来源 apply 只有在 manifest 文件证据持久化后才签发 grant', () => {
   const operationToken = 'operation-authorized';
   const archiveManifestHash = 'b'.repeat(64);
-  const schemaFingerprint = 'c'.repeat(64);
   const archivePath = path.resolve('/tmp/position-authorized.xlsx');
   let pending = {
     operationToken,
@@ -934,7 +933,6 @@ test('普通来源 apply 只有在 manifest 文件证据持久化后才签发 gr
   const grant = authorizePositionImportApply({
     preflightReady,
     currentCheckpoint: checkpoint(4),
-    schemaFingerprint,
     readPending: () => structuredClone(pending),
     writePending: (value, ownerToken) => {
       assert.equal(ownerToken, operationToken);
@@ -954,7 +952,6 @@ test('普通来源 apply 只有在 manifest 文件证据持久化后才签发 gr
   assert.deepEqual(grant, {
     operationToken,
     archiveManifestHash,
-    schemaFingerprint,
     baseCheckpoint: checkpoint(4)
   });
   assert.equal(pending.archiveManifestHash, archiveManifestHash);

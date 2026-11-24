@@ -3,9 +3,6 @@
 
 process.env.POSITION_IMPORT_UTILITY_PROCESS = '1';
 
-const fs = require('node:fs');
-const path = require('node:path');
-
 const {
   isPositionImportCancellationLocked,
   isPositionImportMutatingCommand,
@@ -14,27 +11,18 @@ const {
   POSITION_IMPORT_PROTOCOL_VERSION
 } = require('./constants');
 const {
-  runPositionImportPreflight
-} = require('./preflight');
+  runPositionSourceImport
+} = require('./source-import');
 const {
-  verifyPositionImportApplyGrant
-} = require('./apply-grant');
-const {
-  applyPositionOrdinarySourceFiles
-} = require('./source-writer');
-const {
-  applyPositionBankBatch
-} = require('./bank-writer');
+  runPositionBankImport
+} = require('./bank-import');
 const {
   applyPositionAccountSnapshot
-} = require('./account-writer');
+} = require('./account-import');
 const {
   MAINTENANCE_COMMANDS,
   runPositionMaintenanceJob
 } = require('./maintenance-writer');
-const {
-  ensurePositionLargeImportSchemaAtPath
-} = require('../../main-process/position-reconciliation/large-import-schema');
 const {
   freezeWorkerBatchContext
 } = require('../../main-process/archive-center/worker-batch-context');
@@ -92,20 +80,118 @@ function serializedError(error, input = {}) {
 const channel = createChannel();
 let active = null;
 
-async function cleanupPreApplyArtifacts(preflightResult) {
-  const ledgerPath = String(
-    preflightResult
-    && preflightResult.ledgerEvidence
-    && preflightResult.ledgerEvidence.ledgerPath
-    || ''
-  ).trim();
-  if (!ledgerPath) return;
-  await fs.promises.rm(path.dirname(path.resolve(ledgerPath)), {
-    recursive: true,
-    force: true,
-    maxRetries: 5,
-    retryDelay: 100
+// 已停用的命令：导入进程收到即拒绝。
+const DISABLED_COMMANDS = new Set([
+  POSITION_IMPORT_COMMANDS.BANK_PREPARE,
+  POSITION_IMPORT_COMMANDS.BANK_APPLY,
+  POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+  POSITION_IMPORT_COMMANDS.ENSURE_LARGE_IMPORT_INDEXES
+]);
+
+function trackMemory() {
+  const memory = process.memoryUsage();
+  active.peakRssBytes = Math.max(active.peakRssBytes, memory.rss);
+  active.peakHeapUsedBytes = Math.max(active.peakHeapUsedBytes, memory.heapUsed);
+  return memory;
+}
+
+function sendProgress(progress, totalFiles = 0) {
+  active.stage = progress.stage || active.stage;
+  const memory = trackMemory();
+  channel.send({
+    type: POSITION_IMPORT_MESSAGE_TYPES.PROGRESS,
+    jobId: active.jobId,
+    currentFile: progress.currentFile || null,
+    totalFiles: progress.totalFiles || totalFiles,
+    fileName: progress.fileName || '',
+    scannedRows: Number(progress.scannedRows || 0),
+    acceptedRows: Number(progress.acceptedRows || 0),
+    committedRows: Number(progress.committedRows || 0),
+    copiedBytes: Number(progress.copiedBytes || 0),
+    totalBytes: Number(progress.totalBytes || 0),
+    workerRssBytes: memory.rss,
+    workerHeapUsedBytes: memory.heapUsed,
+    elapsedMs: Number(progress.elapsedMs || 0),
+    stage: active.stage
   });
+}
+
+function sendComplete(result) {
+  trackMemory();
+  channel.send({
+    type: POSITION_IMPORT_MESSAGE_TYPES.COMPLETE,
+    jobId: active.jobId,
+    result: {
+      ...result,
+      resourceMetrics: {
+        workerPeakRssBytes: active.peakRssBytes,
+        workerPeakHeapUsedBytes: active.peakHeapUsedBytes
+      }
+    }
+  });
+  active = null;
+}
+
+function beginJob(message, stage, extra = {}) {
+  active = {
+    jobId: String(message.jobId || ''),
+    cancelToken: { cancelled: false },
+    stage,
+    peakRssBytes: process.memoryUsage().rss,
+    peakHeapUsedBytes: process.memoryUsage().heapUsed,
+    ...extra
+  };
+  return active;
+}
+
+function requireFlag(message, flag, label) {
+  if (!message.featureFlags || message.featureFlags[flag] !== true) {
+    const error = new Error(`${label}缺少 utilityProcess 授权`);
+    error.code = 'position-import-intent-not-durable';
+    throw error;
+  }
+}
+
+// 单遍导入（银行对账单、链接原始表）：解析并写入未提交的事务，发 ready 后等 Main 的写入授权。
+async function runGrantedImport(message, run) {
+  let resolveApplyGrant;
+  let rejectApplyGrant;
+  const applyGrant = new Promise((resolve, reject) => {
+    resolveApplyGrant = resolve;
+    rejectApplyGrant = reject;
+  });
+  // 取消可能早于等待授权：先挂空处理，避免未被等待的拒绝触发进程级异常。
+  applyGrant.catch(() => undefined);
+  beginJob(message, 'staging', {
+    batchContext: null,
+    resolveApplyGrant,
+    rejectApplyGrant
+  });
+  const totalFiles = Array.isArray(message.files) ? message.files.length : 0;
+  const contractOptions = message.contractOptions || {};
+  const result = await run({
+    jobId: active.jobId,
+    files: message.files,
+    userDataDir: message.userDataDir,
+    sideDbPath: message.sideDbPath,
+    expectedCheckpoint: message.expectedCheckpoint,
+    cancelToken: active.cancelToken,
+    sstOptions: contractOptions.sstOptions,
+    sourceStructures: contractOptions.sourceStructures,
+    bankSourceHeaders: contractOptions.bankSourceHeaders,
+    availableBytes: contractOptions.availableBytes,
+    allowedSourceTypes: message.featureFlags && message.featureFlags.streamingSourceTypes,
+    onProgress: (progress) => sendProgress(progress, totalFiles),
+    awaitApplyGrant(ready) {
+      active.stage = 'awaiting-apply-grant';
+      channel.send({
+        type: POSITION_IMPORT_MESSAGE_TYPES.PREFLIGHT_READY,
+        ...ready
+      });
+      return applyGrant;
+    }
+  });
+  sendComplete(result);
 }
 
 async function runJob(message) {
@@ -116,9 +202,14 @@ async function runJob(message) {
     throw error;
   }
   const command = String(message.command || '');
-  const batchContext = command === POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY
-    ? null
-    : freezeWorkerBatchContext(message.batchContext, { required: false });
+  if (DISABLED_COMMANDS.has(command)) {
+    // v3.2.22 起银行对账单与链接原始表只走单遍导入，侧库结构由 Main 建好：
+    // 旧的「预检 + 再次解析写入」两段式和独立的结构迁移命令已移除。
+    const error = new Error(`平盘导入命令已停用：${command}`);
+    error.code = 'position-import-disabled';
+    throw error;
+  }
+  const batchContext = freezeWorkerBatchContext(message.batchContext, { required: false });
   const operationContext = freezeWorkerOperationContext(message.operationContext, {
     required: false
   });
@@ -128,55 +219,10 @@ async function runJob(message) {
   if (isPositionImportMutatingCommand(command) && !batchContext && !operationContext) {
     throw new TypeError('平盘 mutating worker 缺少持久 owner context');
   }
-  if (command === POSITION_IMPORT_COMMANDS.ENSURE_LARGE_IMPORT_INDEXES) {
-    if (!message.featureFlags || message.featureFlags.schemaOnly !== true) {
-      const error = new Error('平盘 schema 迁移缺少 schemaOnly 授权');
-      error.code = 'position-import-intent-not-durable';
-      throw error;
-    }
-    active = {
-      jobId: String(message.jobId || ''),
-      cancelToken: { cancelled: false },
-      stage: 'schema-migration',
-      batchContext,
-      operationContext,
-      peakRssBytes: process.memoryUsage().rss,
-      peakHeapUsedBytes: process.memoryUsage().heapUsed
-    };
-    const result = ensurePositionLargeImportSchemaAtPath({
-      sideDbPath: message.sideDbPath,
-      expectedCheckpoint: message.expectedCheckpoint
-    });
-    const memory = process.memoryUsage();
-    channel.send({
-      type: POSITION_IMPORT_MESSAGE_TYPES.COMPLETE,
-      jobId: active.jobId,
-      result: {
-        ...result,
-        resourceMetrics: {
-          workerPeakRssBytes: Math.max(active.peakRssBytes, memory.rss),
-          workerPeakHeapUsedBytes: Math.max(active.peakHeapUsedBytes, memory.heapUsed)
-        }
-      }
-    });
-    active = null;
-    return;
-  }
+  const contractOptions = message.contractOptions || {};
   if (MAINTENANCE_COMMANDS.has(command)) {
-    if (!message.featureFlags || message.featureFlags.maintenance !== true) {
-      const error = new Error('平盘维护命令缺少 utilityProcess 授权');
-      error.code = 'position-import-intent-not-durable';
-      throw error;
-    }
-    active = {
-      jobId: String(message.jobId || ''),
-      cancelToken: { cancelled: false },
-      stage: 'maintenance',
-      batchContext,
-      operationContext,
-      peakRssBytes: process.memoryUsage().rss,
-      peakHeapUsedBytes: process.memoryUsage().heapUsed
-    };
+    requireFlag(message, 'maintenance', '平盘维护命令');
+    beginJob(message, 'maintenance', { batchContext, operationContext });
     const result = await runPositionMaintenanceJob({
       command,
       sideDbPath: message.sideDbPath,
@@ -184,295 +230,44 @@ async function runJob(message) {
       operationToken: message.operationToken,
       payload: message.payload,
       cancelToken: active.cancelToken,
-      batchSize: message.contractOptions && message.contractOptions.batchSize,
-      availableBytes: message.contractOptions && message.contractOptions.availableBytes,
-      onProgress(progress) {
-        active.stage = progress.stage || active.stage;
-        const memory = process.memoryUsage();
-        active.peakRssBytes = Math.max(active.peakRssBytes, memory.rss);
-        active.peakHeapUsedBytes = Math.max(
-          active.peakHeapUsedBytes,
-          memory.heapUsed
-        );
-        channel.send({
-          type: POSITION_IMPORT_MESSAGE_TYPES.PROGRESS,
-          jobId: active.jobId,
-          currentFile: null,
-          totalFiles: 0,
-          fileName: '',
-          scannedRows: Number(progress.scannedRows || 0),
-          acceptedRows: Number(progress.acceptedRows || 0),
-          committedRows: Number(progress.committedRows || 0),
-          copiedBytes: 0,
-          totalBytes: 0,
-          workerRssBytes: memory.rss,
-          workerHeapUsedBytes: memory.heapUsed,
-          elapsedMs: Number(progress.elapsedMs || 0),
-          stage: active.stage
-        });
-      }
+      batchSize: contractOptions.batchSize,
+      availableBytes: contractOptions.availableBytes,
+      onProgress: (progress) => sendProgress({ ...progress, currentFile: null, fileName: '' })
     });
-    const memory = process.memoryUsage();
-    active.peakRssBytes = Math.max(active.peakRssBytes, memory.rss);
-    active.peakHeapUsedBytes = Math.max(
-      active.peakHeapUsedBytes,
-      memory.heapUsed
-    );
-    channel.send({
-      type: POSITION_IMPORT_MESSAGE_TYPES.COMPLETE,
-      jobId: active.jobId,
-      result: {
-        ...result,
-        resourceMetrics: {
-          workerPeakRssBytes: active.peakRssBytes,
-          workerPeakHeapUsedBytes: active.peakHeapUsedBytes
-        }
-      }
-    });
-    active = null;
+    sendComplete(result);
     return;
   }
-  if (command === POSITION_IMPORT_COMMANDS.BANK_APPLY
-      || command === POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY) {
-    if (!message.featureFlags || message.featureFlags.importApply !== true) {
-      const error = new Error('平盘确认导入缺少 utilityProcess apply 授权');
-      error.code = 'position-import-intent-not-durable';
-      throw error;
-    }
-    active = {
-      jobId: String(message.jobId || ''),
-      cancelToken: { cancelled: false },
-      stage: 'applying',
-      batchContext,
-      peakRssBytes: process.memoryUsage().rss,
-      peakHeapUsedBytes: process.memoryUsage().heapUsed
-    };
-    const writer = command === POSITION_IMPORT_COMMANDS.BANK_APPLY
-      ? applyPositionBankBatch
-      : applyPositionAccountSnapshot;
-    const result = await writer({
+  if (command === POSITION_IMPORT_COMMANDS.BANK_IMPORT) {
+    requireFlag(message, 'bankImport', '平盘银行单遍导入');
+    await runGrantedImport(message, runPositionBankImport);
+    return;
+  }
+  if (command === POSITION_IMPORT_COMMANDS.SOURCE_IMPORT) {
+    requireFlag(message, 'sourceImport', '平盘链接原始表单遍导入');
+    await runGrantedImport(message, runPositionSourceImport);
+    return;
+  }
+  if (command === POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY) {
+    requireFlag(message, 'importApply', '平盘确认导入');
+    beginJob(message, 'applying', { batchContext });
+    const result = await applyPositionAccountSnapshot({
       sideDbPath: message.sideDbPath,
       expectedCheckpoint: message.expectedCheckpoint,
       operationToken: message.operationToken,
-      schemaFingerprint: message.payload && message.payload.schemaFingerprint,
+      batchContext,
       preflightReady: message.payload && message.payload.preflightReady,
       cancelToken: active.cancelToken,
-      sstOptions: message.contractOptions && message.contractOptions.sstOptions,
-      sourceStructures: message.contractOptions && message.contractOptions.sourceStructures,
-      bankSourceHeaders: message.contractOptions && message.contractOptions.bankSourceHeaders,
-      availableBytes: message.contractOptions && message.contractOptions.availableBytes,
-      onProgress(progress) {
-        active.stage = progress.stage || active.stage;
-        const memory = process.memoryUsage();
-        active.peakRssBytes = Math.max(active.peakRssBytes, memory.rss);
-        active.peakHeapUsedBytes = Math.max(
-          active.peakHeapUsedBytes,
-          memory.heapUsed
-        );
-        channel.send({
-          type: POSITION_IMPORT_MESSAGE_TYPES.PROGRESS,
-          jobId: active.jobId,
-          currentFile: progress.currentFile || null,
-          totalFiles: progress.totalFiles || 0,
-          fileName: progress.fileName || '',
-          scannedRows: Number(progress.scannedRows || 0),
-          acceptedRows: Number(progress.acceptedRows || 0),
-          committedRows: Number(progress.committedRows || 0),
-          copiedBytes: 0,
-          totalBytes: 0,
-          workerRssBytes: memory.rss,
-          workerHeapUsedBytes: memory.heapUsed,
-          elapsedMs: Number(progress.elapsedMs || 0),
-          stage: active.stage
-        });
-      }
+      sstOptions: contractOptions.sstOptions,
+      sourceStructures: contractOptions.sourceStructures,
+      availableBytes: contractOptions.availableBytes,
+      onProgress: (progress) => sendProgress(progress)
     });
-    const memory = process.memoryUsage();
-    active.peakRssBytes = Math.max(active.peakRssBytes, memory.rss);
-    active.peakHeapUsedBytes = Math.max(
-      active.peakHeapUsedBytes,
-      memory.heapUsed
-    );
-    channel.send({
-      type: POSITION_IMPORT_MESSAGE_TYPES.COMPLETE,
-      jobId: active.jobId,
-      result: {
-        ...result,
-        resourceMetrics: {
-          workerPeakRssBytes: active.peakRssBytes,
-          workerPeakHeapUsedBytes: active.peakHeapUsedBytes
-        }
-      }
-    });
-    active = null;
+    sendComplete(result);
     return;
   }
-  const preflightOnly = !message.featureFlags
-    || message.featureFlags.preflightOnly !== false;
-  if (!preflightOnly
-      && command !== POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY) {
-    const error = new Error('当前生产 writer 只允许普通链接原始表导入');
-    error.code = 'position-import-intent-not-durable';
-    throw error;
-  }
-  const kind = command === POSITION_IMPORT_COMMANDS.BANK_PREPARE
-    ? 'bank'
-    : command === POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY
-      ? 'source'
-      : null;
-  if (!kind) {
-    const error = new Error(`PR-B 尚未启用命令：${command}`);
-    error.code = 'position-import-intent-not-durable';
-    throw error;
-  }
-
-  const cancelToken = { cancelled: false };
-  let resolveApplyGrant;
-  let rejectApplyGrant;
-  const applyGrant = new Promise((resolve, reject) => {
-    resolveApplyGrant = resolve;
-    rejectApplyGrant = reject;
-  });
-  active = {
-    jobId: String(message.jobId || ''),
-    cancelToken,
-    stage: 'staging',
-    batchContext: null,
-    resolveApplyGrant,
-    rejectApplyGrant,
-    peakRssBytes: process.memoryUsage().rss,
-    peakHeapUsedBytes: process.memoryUsage().heapUsed
-  };
-  const result = await runPositionImportPreflight({
-    jobId: active.jobId,
-    kind,
-    files: message.files,
-    userDataDir: message.userDataDir,
-    sideDbPath: message.sideDbPath,
-    cancelToken,
-    sstOptions: message.contractOptions && message.contractOptions.sstOptions,
-    sourceStructures: message.contractOptions && message.contractOptions.sourceStructures,
-    bankSourceHeaders: message.contractOptions && message.contractOptions.bankSourceHeaders,
-    onProgress(progress) {
-      active.stage = progress.stage || active.stage;
-      const memory = process.memoryUsage();
-      active.peakRssBytes = Math.max(active.peakRssBytes, memory.rss);
-      active.peakHeapUsedBytes = Math.max(active.peakHeapUsedBytes, memory.heapUsed);
-      channel.send({
-        type: POSITION_IMPORT_MESSAGE_TYPES.PROGRESS,
-        jobId: active.jobId,
-        currentFile: progress.currentFile || null,
-        totalFiles: progress.totalFiles || (Array.isArray(message.files) ? message.files.length : 0),
-        fileName: progress.fileName || '',
-        scannedRows: Number(progress.scannedRows || 0),
-        acceptedRows: Number(progress.acceptedRows || 0),
-        committedRows: 0,
-        copiedBytes: Number(progress.copiedBytes || 0),
-        totalBytes: Number(progress.totalBytes || 0),
-        workerRssBytes: memory.rss,
-        workerHeapUsedBytes: memory.heapUsed,
-        elapsedMs: Number(progress.elapsedMs || 0),
-        stage: active.stage
-      });
-    }
-  });
-  const finalMemory = process.memoryUsage();
-  active.peakRssBytes = Math.max(active.peakRssBytes, finalMemory.rss);
-  active.peakHeapUsedBytes = Math.max(
-    active.peakHeapUsedBytes,
-    finalMemory.heapUsed
-  );
-  channel.send({
-    type: POSITION_IMPORT_MESSAGE_TYPES.PREFLIGHT_READY,
-    jobId: active.jobId,
-    kind,
-    archiveManifestHash: result.archiveManifestHash,
-    acceptedOrdinaryInputFiles: result.acceptedOrdinaryInputFiles,
-    acceptedBankFiles: result.acceptedBankFiles,
-    accountConfirmationDescriptor: result.accountConfirmationDescriptor,
-    orderedFileResults: result.orderedFileResults,
-    anomalyReport: result.anomalyReport,
-    anomalyReports: result.anomalyReports,
-    outputPaths: result.outputPaths,
-    outputFiles: result.outputFiles,
-    ledgerEvidence: result.ledgerEvidence
-  });
-  active.stage = 'awaiting-apply-grant';
-  let verifiedGrant;
-  try {
-    const grant = await applyGrant;
-    const accountOnly = Boolean(
-      result.accountConfirmationDescriptor
-      && (!Array.isArray(result.acceptedOrdinaryInputFiles)
-        || result.acceptedOrdinaryInputFiles.length === 0)
-    );
-    verifiedGrant = verifyPositionImportApplyGrant({
-      grant,
-      jobId: active.jobId,
-      archiveManifestHash: result.archiveManifestHash,
-      sideDbPath: message.sideDbPath,
-      allowPreflightOnly: preflightOnly || accountOnly
-    });
-  } catch (error) {
-    await cleanupPreApplyArtifacts(result);
-    throw error;
-  }
-  let finalResult = result;
-  if (!preflightOnly && !verifiedGrant.preflightOnly) {
-    active.stage = 'applying';
-    finalResult = await applyPositionOrdinarySourceFiles({
-      sideDbPath: message.sideDbPath,
-      grant: verifiedGrant,
-      preflightReady: result,
-      cancelToken,
-      allowedSourceTypes: message.featureFlags.streamingSourceTypes,
-      sstOptions: message.contractOptions && message.contractOptions.sstOptions,
-      sourceStructures: message.contractOptions && message.contractOptions.sourceStructures,
-      bankSourceHeaders: message.contractOptions && message.contractOptions.bankSourceHeaders,
-      availableBytes: message.contractOptions && message.contractOptions.availableBytes,
-      onProgress(progress) {
-        active.stage = progress.stage || active.stage;
-        const memory = process.memoryUsage();
-        active.peakRssBytes = Math.max(active.peakRssBytes, memory.rss);
-        active.peakHeapUsedBytes = Math.max(active.peakHeapUsedBytes, memory.heapUsed);
-        channel.send({
-          type: POSITION_IMPORT_MESSAGE_TYPES.PROGRESS,
-          jobId: active.jobId,
-          currentFile: progress.currentFile || null,
-          totalFiles: Array.isArray(message.files) ? message.files.length : 0,
-          fileName: progress.fileName || '',
-          scannedRows: Number(progress.scannedRows || 0),
-          acceptedRows: Number(progress.acceptedRows || 0),
-          committedRows: Number(progress.committedRows || 0),
-          copiedBytes: 0,
-          totalBytes: 0,
-          workerRssBytes: memory.rss,
-          workerHeapUsedBytes: memory.heapUsed,
-          elapsedMs: Number(progress.elapsedMs || 0),
-          stage: active.stage
-        });
-      },
-      onFileCommitted(file) {
-        channel.send({
-          type: POSITION_IMPORT_MESSAGE_TYPES.FILE_COMMITTED,
-          jobId: active.jobId,
-          ...file
-        });
-      }
-    });
-  }
-  channel.send({
-    type: POSITION_IMPORT_MESSAGE_TYPES.COMPLETE,
-    jobId: active.jobId,
-    result: {
-      ...finalResult,
-      resourceMetrics: {
-        workerPeakRssBytes: active.peakRssBytes,
-        workerPeakHeapUsedBytes: active.peakHeapUsedBytes
-      }
-    }
-  });
-  active = null;
+  const error = new Error(`未知的平盘导入命令：${command}`);
+  error.code = 'position-import-intent-not-durable';
+  throw error;
 }
 
 channel.onMessage((message) => {
@@ -544,7 +339,6 @@ channel.onMessage((message) => {
 });
 
 module.exports = {
-  cleanupPreApplyArtifacts,
   createChannel,
   serializedError
 };

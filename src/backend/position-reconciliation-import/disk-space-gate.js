@@ -45,7 +45,6 @@ function estimatePositionImportDiskBytes({
   sideDbPath,
   rowCount = 0,
   stagedBytes = 0,
-  ledgerBytes = 0,
   safetyMarginBytes = POSITION_IMPORT_DISK_SAFETY_MARGIN_BYTES
 }) {
   const normalizedKind = Object.prototype.hasOwnProperty.call(
@@ -55,7 +54,6 @@ function estimatePositionImportDiskBytes({
   const perRow = BigInt(POSITION_IMPORT_ESTIMATED_BYTES_PER_ROW[normalizedKind]);
   const rows = BigInt(normalizeNonNegativeInteger(rowCount));
   const staged = BigInt(normalizeNonNegativeInteger(stagedBytes));
-  const ledger = BigInt(normalizeNonNegativeInteger(ledgerBytes));
   const existing = existingStorageBytes(sideDbPath);
   const safety = BigInt(normalizeNonNegativeInteger(safetyMarginBytes));
 
@@ -66,10 +64,9 @@ function estimatePositionImportDiskBytes({
     kind: normalizedKind,
     existingBytes: existing,
     stagedBytes: staged,
-    ledgerBytes: ledger,
     rowBytes: rows * perRow,
     safetyMarginBytes: safety,
-    requiredBytes: existing + staged + ledger + (rows * perRow) + safety
+    requiredBytes: existing + staged + (rows * perRow) + safety
   };
 }
 

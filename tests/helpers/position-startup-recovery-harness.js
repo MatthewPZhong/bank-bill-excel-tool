@@ -7,7 +7,6 @@ const { randomUUID } = require('node:crypto');
 const acorn = require('acorn');
 const { bankStatementSourceHeaders, resolveBankStatementStructure } = require('../../src/main-process/bank-statement-structure');
 const { createPositionReconciliationService } = require('../../src/main-process/position-reconciliation/service');
-const { dispatchPositionLargeImportSchemaMigration } = require('../../src/main-process/position-reconciliation/import-dispatch');
 const { authorizePositionImportApply } = require('../../src/main-process/position-reconciliation/operation-lifecycle');
 const constants = require('../../src/main-process/position-reconciliation/constants');
 
@@ -27,7 +26,7 @@ function createPositionStartupRecoveryHarness({ database, diagnostics, tracked }
   const build = Function('dependencies', `
     'use strict';
     const { database, path, randomUUID, __dirname, createPositionReconciliationService,
-      dispatchPositionLargeImportSchemaMigration, authorizePositionImportApply,
+      authorizePositionImportApply,
       POSITION_SIDE_DB_CHECKPOINT_SETTING, POSITION_SIDE_DB_BOOTSTRAP_SETTING,
       appendActivityLogEntry, trackArchiveOperationPromise, getTemplateResourceService,
       resolvePositionSourceStructures, bankStatementSourceHeaders, resolveBankStatementStructure } = dependencies;
@@ -49,7 +48,7 @@ function createPositionStartupRecoveryHarness({ database, diagnostics, tracked }
     };
   `);
   return build({ database, path, randomUUID, __dirname: path.dirname(mainPath),
-    createPositionReconciliationService, dispatchPositionLargeImportSchemaMigration,
+    createPositionReconciliationService,
     authorizePositionImportApply, ...constants,
     // 恢复测试不涉及模板版本：来源为空时服务沿用固定的内置模板路径。
     getTemplateResourceService: () => ({ source: () => null }),

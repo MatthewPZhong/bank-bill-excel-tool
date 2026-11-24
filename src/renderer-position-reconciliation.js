@@ -357,14 +357,12 @@
       return {
         starting: '正在启动导入任务',
         staging: '正在复制并校验文件',
-        preflight: '正在识别和校验数据',
+        importing: '正在读取并写入数据',
         'awaiting-apply-grant': '正在确认存档与写入凭证',
-        'preparing-apply': '正在准备写入索引',
         applying: '正在写入数据',
         deriving: '正在生成链接对账数据',
         summarizing: '正在汇总并提交，无法取消',
         committing: '正在提交，无法取消',
-        committed: '当前文件已提交',
         stopping: '正在停止…',
         'force-terminating': '正在终止并核对已提交数据'
       }[String(stage || '')] || '正在处理';
@@ -490,6 +488,27 @@
       return `${dateMin || '—'} ~ ${dateMax || '—'}`;
     }
 
+    // 原始文件版本号：只列当前仍有数据的版本，新的在前；鼠标悬停看文件名。
+    //   kind 为空时不按类型筛（银行对账单的清单只有一种类型）。
+    function activeRawFiles(files, kind = '') {
+      return (Array.isArray(files) ? files : [])
+        .filter((file) => file && file.status === 'active' && (!kind || file.kind === kind))
+        .sort((left, right) => Number(right.version) - Number(left.version));
+    }
+
+    function formatRawVersions(files, kind = '') {
+      const active = activeRawFiles(files, kind);
+      if (active.length === 0) return '-';
+      const labels = active.slice(0, 3).map((file) => `V${Number(file.version)}`).join('、');
+      return active.length > 3 ? `${labels} 等 ${active.length} 个` : labels;
+    }
+
+    function rawVersionsTitle(files, kind = '') {
+      return activeRawFiles(files, kind)
+        .map((file) => `V${Number(file.version)} ${String(file.fileName || '')}（${Number(file.rowCount) || 0} 行）`)
+        .join('\n');
+    }
+
     function formatStatuses(statuses) {
       const rows = Array.isArray(statuses) ? statuses : [];
       const labels = rows
@@ -599,12 +618,11 @@
         showAlert(failureDetailsHtml(result, '平盘银行对账单导入失败'), { html: true });
         return;
       }
+      // 数据已一次读完并写入待生效区：只有会替换已有渠道 + 月份时才需要确认，否则直接生效。
       const existing = Array.isArray(result.existing) ? result.existing : [];
-      const replacement = existing.length
-        ? `，并替换 ${existing.map((row) => `${row.channel}/${row.monthKey}（${row.rowCount}行）`).join('、')}`
-        : '';
-      const confirmed = await confirmAction(
-        `确认导入 ${result.fileCount} 个文件、${result.rowCount} 行${replacement}？`,
+      const confirmed = existing.length === 0 || await confirmAction(
+        `确认导入 ${result.fileCount} 个文件、${result.rowCount} 行，并替换 ` +
+        `${existing.map((row) => `${row.channel}/${row.monthKey}（${row.rowCount}行）`).join('、')}？`,
         '确认导入'
       );
       // 确认被导航关闭时，清理仍属于旧业务请求；不能被 UI 代次守卫跳过。
@@ -614,9 +632,9 @@
         return;
       }
       const applied = await withInflight(
-        '正在写入平盘银行对账单…',
+        '正在提交平盘银行对账单…',
         () => withImportProgress(
-          '写入平盘银行对账单',
+          '提交平盘银行对账单',
           () => guardImportCall(() => api.applyBankImport(result.token), '平盘银行对账单写入失败')
         )
       );
@@ -1126,12 +1144,13 @@
           pane.innerHTML = `
             <div class="table-wrapper position-manager-table">
               <table class="data-table">
-                <thead><tr><th>表库名</th><th>数据日期范围</th><th>状态</th><th>操作</th></tr></thead>
+                <thead><tr><th>表库名</th><th>数据日期范围</th><th>原始版本</th><th>状态</th><th>操作</th></tr></thead>
                 <tbody>
                   ${(result.unarchived || []).map((row, index) => `
                     <tr>
                       <td>${escapeHtml(row.tableName)}</td>
                       <td>${escapeHtml(formatDateRange(row))}</td>
+                      <td title="${row.disabled ? '' : escapeHtml(rawVersionsTitle(result.rawFiles))}">${row.disabled ? '-' : escapeHtml(formatRawVersions(result.rawFiles))}</td>
                       <td>${row.disabled ? escapeHtml(row.message || '-') : escapeHtml(formatStatuses(row.statuses))}</td>
                       <td class="row-actions">
                         ${row.disabled ? '<span class="muted">-</span>' : `<button class="text-action" data-bank-action="export" data-index="${index}">导出</button><button class="text-action danger" data-bank-action="delete" data-index="${index}">删除</button>`}
@@ -1538,15 +1557,17 @@
           <div class="table-wrapper position-manager-table">
             <table class="data-table">
               <thead><tr>
-                <th style="width: 45%;">原始表名</th>
-                <th style="width: 30%;">日期范围</th>
-                <th style="width: 25%;">更新时间</th>
+                <th style="width: 34%;">原始表名</th>
+                <th style="width: 26%;">日期范围</th>
+                <th style="width: 18%;">原始版本</th>
+                <th style="width: 22%;">更新时间</th>
               </tr></thead>
               <tbody>
                 ${(result.raw || []).map((row) => `
                   <tr>
                     <td>${escapeHtml(row.tableName)}</td>
                     <td>${escapeHtml(formatDateRange(row))}</td>
+                    <td title="${escapeHtml(rawVersionsTitle(result.rawFiles, row.sourceType))}">${escapeHtml(formatRawVersions(result.rawFiles, row.sourceType))}</td>
                     <td>${escapeHtml(row.updatedAt || '-')}</td>
                   </tr>
                 `).join('')}
@@ -1867,6 +1888,11 @@
         scopes: [
           { channel: 'DBS', monthKey: '2026-07', status: '未处理', rowCount: 960 },
           { channel: 'BOC', monthKey: '2026-06', status: '已校验性质', rowCount: 320 }
+        ],
+        rawFiles: [
+          { version: 3, kind: 'bank', fileName: '渠道账单_2026-07.xlsx', rowCount: 960, status: 'active' },
+          { version: 2, kind: 'bank', fileName: '渠道账单_2026-06.xlsx', rowCount: 320, status: 'active' },
+          { version: 1, kind: 'bank', fileName: '渠道账单_2026-06_旧.xlsx', rowCount: 318, status: 'superseded' }
         ]
       }, initialTab);
     }
@@ -1906,7 +1932,14 @@
           'gateway-inbound': ['2026-06', '2026-07'],
           'gateway-outbound': ['2026-06', '2026-07'],
           'bank-account': []
-        }
+        },
+        rawFiles: linked.map((row, index) => ({
+          version: index + 4,
+          kind: row.sourceType,
+          fileName: `${row.tableName}.xlsx`,
+          rowCount: row.rowCount,
+          status: 'active'
+        }))
       };
     }
 
@@ -1968,7 +2001,7 @@
       }));
     }
 
-    function previewImportProgress(stage = 'preflight') {
+    function previewImportProgress(stage = 'importing') {
       return withImportProgress(
         '导入平盘银行对账单',
         () => new Promise(() => {}),

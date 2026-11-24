@@ -1046,31 +1046,31 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
 
 ---
 
-### `POSITION_BANK_HEADERS` / `POSITION_RULESET_VERSION` / `POSITION_SIDE_DB_CHECKPOINT_SETTING` / `POSITION_SIDE_DB_PENDING_SETTING` / `SOURCE_TYPES` / `SOURCE_DISPLAY_ORDER` / `PositionReconciliationStore` / `runPositionSideDbMutation` / `ensurePositionLargeImportSchema` / `runPositionFundNatureCheck`（v3.1.0 新增；v3.1.3 扩展百万级导入基础设施 Risk-sensitive ⚠️🔴🔴 资金红线）
+### `POSITION_BANK_HEADERS` / `POSITION_RULESET_VERSION` / `POSITION_SIDE_DB_CHECKPOINT_SETTING` / `POSITION_SIDE_DB_PENDING_SETTING` / `SOURCE_TYPES` / `SOURCE_DISPLAY_ORDER` / `PositionReconciliationStore` / `runPositionSideDbMutation` / `POSITION_SCHEMA_VERSION` / `POSITION_BANK_ROW_FIELDS` / `SOURCE_REQUIRED_FIELDS` / `runPositionFundNatureCheck`（v3.1.0 新增；v3.1.3 扩展百万级导入基础设施；v3.2.22 改为单遍导入、只存交互字段、原始账单版本号 Risk-sensitive ⚠️🔴🔴 资金红线）
 - 定义：
-  - `src/main-process/position-reconciliation/constants.js`：49 列银行结果契约、side DB 跨库 checkpoint、五类来源、十组基础/FX配对和状态枚举。
-  - `store.js` / `service.js` / `input-staging.js`：独立持久 side DB、原始/工作值、revision+规则版本 snapshot、不可变输入暂存、单一待确认草稿、回导和确认事务。
-  - `side-db-mutation.js` / `large-import-schema.js` / `import-dispatch.js` / `import-recovery.js` / `source-summary-cache.js`：唯一 checkpoint mutation helper、`row_hash` 来源身份迁移、现代索引/schema fingerprint、事务内来源摘要缓存、`PREFLIGHT_READY → APPLY_GRANTED` 和来源/银行/账户专用 worker exit 证据恢复。
-  - `position-reconciliation-import/bank-writer.js` / `account-writer.js` / `source-writer.js` / `maintenance-writer.js` / `disk-space-gate.js`：银行整批、账户整表、普通来源逐文件和维护作业的流式事务、磁盘门禁、进度与取消。
+  - `src/main-process/position-reconciliation/constants.js`：20 列银行结果契约（3 个审计列 + 15 个交互字段 + 原始版本号 / 行号）、各来源必用列、侧库结构版本、side DB 跨库 checkpoint、五类来源、十组基础/FX配对和状态枚举。
+  - `store.js` / `service.js` / `input-staging.js` / `bank-row-storage.js` / `source-row-storage.js`：独立持久 side DB（主进程直接建最终结构）、`position_raw_files` 原始账单版本记录、银行行列式存储与来源行必用列存储、原始/工作值、revision+规则版本 snapshot、不可变输入暂存、单一待确认草稿、回导和确认事务。
+  - `side-db-mutation.js` / `import-dispatch.js` / `import-recovery.js` / `source-summary-cache.js`：唯一 checkpoint mutation helper、事务内来源摘要缓存、`PREFLIGHT_READY → APPLY_GRANTED` 和来源/银行/账户专用 worker exit 证据恢复。
+  - `position-reconciliation-import/bank-import.js` / `source-import.js` / `account-import.js` / `import-common.js` / `maintenance-writer.js` / `disk-space-gate.js`：银行整批、普通来源整批、账户整表和维护作业的单遍流式事务、磁盘门禁、进度与取消。两段式命令、导入账本、预检与结构迁移进程已在 v3.2.22 删除。
   - `matching-engine.js` / `logical-accounts.js` / `decimal.js`：ReconID 候选图、全局严格 1:1、方向/日期/手续费、账户别名归并和 FundType 判定。
-- 关联功能：「平盘对账数据处理 → 平盘资金性质校验」的银行/链接导入、十组性质判断、差异、49 列结果、人工回导和确认。
+- 关联功能：「平盘对账数据处理 → 平盘资金性质校验」的银行/链接导入、十组性质判断、差异、20 列结果、人工回导和确认。
 - 🔴 变更 review 要点（资金红线）：
-  - **主库隔离与原始值不变**：银行、订单、账户和运行结果只能进入 `{userData}/run-data/position-reconciliation/position-data.sqlite`；主库不得出现批量明细。`original_json/original_fund_type` 永不改写，确认只更新工作值、审计和状态。
-  - **导入原子与血缘**：银行按 Channel+月份整批替换，BizId 全选择唯一；普通来源 `business_key` 仅作业务展示且允许重复，完整规范行 `row_hash` 是稳定 `sourceRecordKey`。同 `sourceType + row_hash` 的完全重复行折叠并更新文件血缘，同业务主键不同内容全部保留、独立派生和消费。错误必须保留文件/sheet/行号/字段。
+  - **主库隔离与原始值不变**：银行、订单、账户和运行结果只能进入 `{userData}/run-data/position-reconciliation/position-data.sqlite`；主库不得出现批量明细。银行行的交互字段值与 `original_fund_type` 永不改写，确认只更新工作值、审计和状态；侧库只保存交互字段（银行 15 个、来源各自的必用列），其余列只在存档中心的原件里。
+  - **导入原子与血缘**：银行按 Channel+月份整批替换，BizId 全选择唯一；普通来源 `business_key` 仅作业务展示且允许重复，`row_hash`（v3.2.22 起只按保存下来的必用列计算，入库时算一次）是稳定 `sourceRecordKey`。同 `sourceType + row_hash` 的重复行折叠并更新文件血缘——两行只在非必用列上不同也会折叠；同业务主键不同必用列内容全部保留、独立派生和消费；`row_hash` 相同但必用列内容不同必须报 `position-source-record-hash-collision` 中止。每行带 `raw_version` + 原始行号，对应 `position_raw_files` 的版本记录与存档批次；版本号在导入事务内分配，取消 / 失败不留记录。错误必须保留文件/sheet/行号/字段。
   - **候选和去向守恒**：三种银行标识只 trim、大小写敏感；不同标识命中不同记录、多候选、链接复用均转人工。所有订单类场景先建立全局关系再裁决，禁止 first-wins；每条目标银行行必须恰有一个结果去向。
   - **跨运行双向消费**：已确认订单来源的 `source_type + source_record_key + leg_index` 与 `bank_biz_id` 均为全局唯一；`business_key` 只保留为审计字段。跨月份和来源重建后不得复用。同 BizId+同来源只允许幂等复核，同 BizId 改配必须转人工。
   - **金额/方向/日期**：调拨固定使用 `abs(方向金额)+signed Extra Fee`，空手续费按 0，非法或负合计 fail closed；入出账方向、Test 只校验 Debit、FundTransfer-in/out 日期门禁不可互相套用。
   - **币种和账户**：Inbound 仅在银行/订单/原始出金币种三者明确相同时移除 `&FX`；仅当银行币种=订单币种且不同于原始出金币种时增加 `&FX`，三币种互异必须转人工。三类账户场景先唯一识别自有账户，再从剩余银行字段唯一识别非自有逻辑账户。别名、多币种、多性质或多候选不得按表序取第一条。
   - **草稿与确认**：银行/来源/映射 revision 或 `POSITION_RULESET_VERSION` 变化后旧草稿禁止导出、回导和确认，范围外 FundTransfer-out 变化也必须通过银行全局 revision 失效；第一期全局只能有一个待确认草稿。回导只允许原 FundType 基础/FX二元组变化，禁止缺行、加行、仅改详情或其它字段篡改；Excel 日期时间只豁免已知时区往返；未成功导出/合法回导前不得确认。未解决人工差异不得消费来源，唯一成功匹配被人工修改时仍须保留原来源血缘。
-  - **输出与存档**：49 列名称和顺序固定，只有实际改变的 FundType 标黄，同值匹配不伪造修改；标识符列使用列级文本格式，`客户号/accountReference` 与零数据文件也必须保留。银行导入、账户快照和结果回导必须从私有不可变副本完成解析、写库与存档；每次成功输入、导出和回导独立即时存档，业务返回成功前须完成存档或形成可重试失败记录。
+  - **输出与存档**：20 列名称和顺序固定（旧 49 列结果不能回导）；来源原始表导出为必用列 + 原始版本号 / 行号，账户链接表为 5 个必用列；只有实际改变的 FundType 标黄，同值匹配不伪造修改；标识符列使用列级文本格式，`客户号/accountReference` 与零数据文件也必须保留。银行导入、账户快照和结果回导必须从私有不可变副本完成解析、写库与存档；每次成功输入、导出和回导独立即时存档，业务返回成功前须完成存档或形成可重试失败记录。暂存副本只在任务收尾清除待完成记录后回收，仍未存档、待确认（账户表）或正在导入的文件必须受保护。
   - **侧库结构完整性**：主库必须在侧库写入前持久登记基准 checkpoint 与 operation token；side DB 的实例身份、generation、事务 token、父 token 和 operation token 历史必须同时满足契约。缺失、旧主库单独恢复、旧库回滚、同代或更高代次分叉必须阻断，旧 initialized 标记只能迁移真实旧库；备份恢复必须同时包含主库和 `run-data/`。银行、来源、链接、运行结果与血缘 JSON 不仅要求语法合法，还必须包含契约字段；运行来源由原始行推导，消费冲突由血缘重算，scope/snapshot/summary 共同篡改也必须 fail closed。
-  - **百万级来源身份迁移**：旧 `(source_type,business_key)` 唯一库只能在磁盘空间门禁通过后，用单笔 `BEGIN IMMEDIATE` 重建来源/链接/消费三表；旧消费和运行血缘必须唯一解析并回填 `sourceRecordKey`，重复来源腿、哈希碰撞、缺失来源或未知 schema 一律回滚阻断。schema-only 迁移不得推进业务 checkpoint。
-  - **apply 存档握手与崩溃恢复**：普通来源 worker 发出 `PREFLIGHT_READY` 后必须暂停；main 将全部接受文件证据和 manifest hash 持久化到 pending，才可连同当前 checkpoint/schema fingerprint 发 `APPLY_GRANTED`。worker exit/fatal 后只按 checkpoint history 和 `position_operation_inputs` 恢复已提交文件，禁止凭最后 IPC、扫描进度或 ledger 声明成功。
-  - **银行/账户流式确认**：银行确认后只能在一个事务内删除 manifest scope、按文件/物理行序插入并推进一次 checkpoint；跨 scope BizId 必须由正式唯一约束阻断且回滚旧 scope。账户只保留状态正常行，但内容相同的 Excel 物理行不得折叠。两类 COMMIT 后 worker exit 只能通过精确文件 proof、checkpoint 次数、scope/source/link SQL 聚合恢复。
+  - **侧库结构版本（v3.2.22）**：`position_meta.position_schema_version` 与 `POSITION_SCHEMA_VERSION` 不一致的侧库不迁移，启动时整库丢弃并清空主库的 checkpoint / bootstrap / pending 绑定后重建；导入进程只核对结构版本，不再迁移。改动表结构必须同步升版本号，并确认使用者没有需要保留的平盘数据。
+  - **apply 存档握手与崩溃恢复**：导入进程在未提交的事务里完成读取与写入后发 `PREFLIGHT_READY` 并暂停；main 将全部接受文件凭证和清单摘要持久化到 pending，才可连同 operation token、基准 checkpoint 与 batch owner 发 `APPLY_GRANTED`，授权任何一项不符即回滚。普通来源整批一个事务、checkpoint 只推进一次；文件级错误只拒绝该文件，数据库错误 / 取消 / 侧库状态异常整批回滚。worker exit/fatal 后只按 checkpoint history、`position_operation_inputs` 与版本记录行数恢复已提交结果，禁止凭最后 IPC 或扫描进度声明成功。
+  - **银行/账户流式确认**：银行在一个事务内按「读到哪个 Channel+月份先删哪个范围的旧行」替换并推进一次 checkpoint，与旧行冲突的 BizId 挂起到末尾补写，仍冲突才整批拒绝；仅在会覆盖已有数据时等待用户确认，等待期间其他写操作直接报 `position-bank-import-awaiting-confirmation` / `position-import-in-progress`，不排队。账户确认前只统计、确认后重读同一份暂存文件整表替换，文件身份或行数变化即拒绝；只保留状态正常行，内容相同的 Excel 物理行不得折叠。COMMIT 后 worker exit 只能通过精确文件 proof、checkpoint 次数、scope/source/link SQL 聚合恢复。
   - **百万级管理与磁盘**：状态页和管理页不得通过 `getBankRows()` 物化明细，bank scope/date/status 聚合必须命中覆盖索引；普通来源/链接摘要缓存必须与导入、删除、账户替换和映射重建同事务刷新，缺失或损坏时回退事实表。删除、映射重建和导入在改动旧数据前执行保守磁盘门禁，磁盘空间未知不得降级放行。
-  - **进度与取消真实性**：预检、写入和派生必须持续上报有界进度；dispatcher 只能用 monotonic clock 每 750ms 重复最后真实阶段/计数，禁止虚增。提交前取消后由 SQLite 回滚，超时可终止 worker 并恢复证据。`summarizing/committing` 阶段 service、worker 和 renderer 都必须拒绝取消；竞态 ACK 必须返回 `accepted=false` 并清除强制终止计时器。
+  - **进度与取消真实性**：读取、写入和派生必须持续上报有界进度；dispatcher 只能用 monotonic clock 每 750ms 重复最后真实阶段/计数，禁止虚增。提交前取消后由 SQLite 回滚，超时可终止 worker 并恢复证据。`summarizing/committing` 阶段 service、worker 和 renderer 都必须拒绝取消；竞态 ACK 必须返回 `accepted=false` 并清除强制终止计时器。
   - **顺序与退出**：`SOURCE_DISPLAY_ORDER` 固定五张链接表的业务展示顺序；普通退出和更新重启都必须先阻止新业务并等待活动业务、worker 与存档队列排空，再关闭 side DB。
-  - 必跑：position reconciliation unit、`position-reconciliation-large-import-schema.test.js`、`position-reconciliation-import-preflight.test.js`、`position-reconciliation-side-db-parity.js`、archive operation tracker、12 张 preview、release-check、启动性能；⚠️ 来源身份迁移、真实账号别名、币种、正负手续费、日期和 1:1 冲突必须逐笔人工复核。
+  - 必跑：position reconciliation unit、`position-bank-single-pass-import.test.js`、`position-source-single-pass-import.test.js`、`position-reconciliation-import-preflight.test.js`、`position-reconciliation-side-db-parity.js`、archive operation tracker、12 张 preview、release-check、启动性能；⚠️ 侧库结构版本变更、来源判重范围、真实账号别名、币种、正负手续费、日期和 1:1 冲突必须逐笔人工复核。
 
 ## 5. Minor — 提示性（次要）
 

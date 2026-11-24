@@ -1,7 +1,7 @@
 'use strict';
 
 // v3.2.14：平盘银行对账单导入接受「银行对账单（导入识别结构）」当前用户版本（D17–D19）。预检开始时冻结到确认令牌，
-//   真实流式 Worker 的预检与写入按同一结构读取，行对应回内置 46 列入库；内置 46 列同时接受；都不符时差异列出当前版本。
+//   真实流式 Worker 按冻结的结构读取，行对应回内置列名后取交互字段入库（v3.2.22 起只存交互字段）；内置 46 列同时接受；都不符时差异列出当前版本。
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -10,7 +10,7 @@ const path = require('node:path');
 const XLSX = require('xlsx');
 
 const { createPositionReconciliationService } = require('../../../src/main-process/position-reconciliation/service');
-const { BANK_SHEET_NAME } = require('../../../src/main-process/position-reconciliation/constants');
+const { BANK_SHEET_NAME, POSITION_BANK_ROW_FIELDS } = require('../../../src/main-process/position-reconciliation/constants');
 const { BANK_STATEMENT_FIELDS } = require('../../../src/constants/bank-statement-fields');
 const { bankSourceStructure } = require('../../../src/main-process/position-reconciliation/source-structures');
 const { bankHeaderMismatchLines } = require('../../../src/main-process/position-reconciliation/header-mismatch');
@@ -47,21 +47,24 @@ function setup(t, resolveBankSourceHeaders) {
 }
 const apply = (service, token) => service.applyBankImport(token, BATCH_CONTEXT, service.bankImportArchiveIntent(token).map((file) => file.filePath));
 
-test('按当前版本的银行对账单经真实 Worker 预检与写入：入库为内置 46 列，改名列取新列值，删除列为空', async (t) => {
+test('按当前版本的银行对账单经真实 Worker 导入：按内置列名取交互字段入库，其余列不入库', async (t) => {
   const state = { headers: BANK_V2 };
   const { service, userDataDir } = setup(t, async () => state.headers);
   const v2File = writeBank(path.join(userDataDir, 'bank-v2.xlsx'), BANK_V2, [bankRow({ 合并编号: '合并-1', 分类人: '不在新结构中', 新增列: '不导入' })]);
   const prepared = await service.prepareBankImport([v2File]);
   assert.equal(prepared.status, 'needs-confirmation', JSON.stringify(prepared));
-  // 预检后切换结构不影响本次写入（确认令牌冻结结构）。
+  // 读取后切换结构不影响本次提交（导入开始时已冻结结构）。
   state.headers = null;
   const applied = await apply(service, prepared.token);
   assert.equal(applied.status, 'ok', JSON.stringify(applied));
   const [{ originalRow: stored }] = service.store.getBankRows({ channels: ['DBS'], months: ['2026-07'] });
+  assert.deepEqual(Object.keys(stored), [...POSITION_BANK_ROW_FIELDS]);
   assert.equal(stored.BizId, 'POSITION-BIZ-1');
-  assert.equal(stored['合并单号'], '合并-1');
-  assert.equal(stored['分类人'], '');
-  assert.equal(Object.hasOwn(stored, '合并编号'), false);
+  assert.equal(stored.MerchantId, 'M001');
+  assert.equal(stored.FundType, 'Inbound&FX');
+  assert.equal(stored['原始行号'], 2);
+  // 改名列、已删除列都不是交互字段：不入库，只留在存档的原始文件里。
+  for (const header of ['合并单号', '合并编号', '分类人', '新增列']) assert.equal(Object.hasOwn(stored, header), false);
 });
 
 test('启用新结构时内置 46 列同时接受；都不符时差异列出当前版本并附模板指引', async (t) => {
@@ -76,7 +79,7 @@ test('启用新结构时内置 46 列同时接受；都不符时差异列出当�
   const rejected = await service.prepareBankImport([otherFile]);
   assert.equal(rejected.status, 'failed');
   assert.equal(rejected.code, 'position-bank-headers-invalid');
-  assert.match(rejected.message, /不符合 46\/49 列契约或当前版本/);
+  assert.match(rejected.message, /不符合 46\/20 列契约或当前版本/);
   assert.equal(rejected.detailLines[0], '最接近：银行对账单（导入识别结构）（当前版本 用户版本，46 列；文件 46 列）');
   assert.equal(rejected.detailLines.at(-1), '如系统导出结构已变更，请在「设置 → 模板文件」导入新版本');
 });
