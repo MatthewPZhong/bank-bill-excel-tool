@@ -73,14 +73,26 @@ class UnverifiableCellText {
 //     （Excel 写出时不把非 ASCII 字符写成转义，只有手工生成的文件会这样）；
 //   - 还原后含未配对的代理项：写入数据库时被替换为同一个字符，不同的值落成同一个键；
 //   - 大写 X 的转义（_XHHHH_）：SheetJS 与此处还原，XlsxWriter、openpyxl 等按字面保存与读取，「TX_X0041_」与「TXA」
-//     会读成同一个键（Codex 第十四轮 P1）。按从左到右的还原顺序判断，被 _x005F_ 保护的字面「_X0041_」不受影响。
+//     会读成同一个键（Codex 第十四轮 P1）；
+//   - 表示可打印字符的转义（如 _x004a_）：Excel 写出端只把控制字符写成转义、只在字面「_xHHHH」前把下划线写成 _x005F_，
+//     不会这样写；ExcelJS 等不转义的写出端会把字面「TX_x004a_」原样写出，Excel 与 SheetJS 读成「TXJ」，ExcelJS 读回原文，
+//     与另一笔「TXJ」会落成同一个键（Codex 第十五轮 P1）。只还原控制字符，以及后接「x + 4 位十六进制」、起保护作用的 _x005F_。
+//   按从左到右的还原顺序判断，被 _x005F_ 保护的字面「_X0041_」「_x0041_」不受影响。
+const ESCAPE_PROTECTED_TAIL_RE = /^[xX][0-9A-Fa-f]{4}/;
+function isExcelWrittenEscape(match, joined) {
+  if (match[0][1] !== 'x') return false;
+  const code = parseInt(match[1], 16);
+  if (code < 0x20) return true;
+  return code === 0x5F && ESCAPE_PROTECTED_TAIL_RE.test(joined.slice(match.index + match[0].length));
+}
+
 function decodeCellTextRuns(runs) {
   const joined = runs.join('');
   const value = decodeOoxmlTextEscapes(joined);
   const escapes = Array.from(joined.matchAll(TEXT_ESCAPE_RE));
   const consistent = value.isWellFormed() && (escapes.length === 0 || (
     runs.map(decodeOoxmlTextEscapes).join('') === value
-    && escapes.every((match) => match[0][1] === 'x' && parseInt(match[1], 16) < 0x80)
+    && escapes.every((match) => isExcelWrittenEscape(match, joined))
   ));
   return consistent ? value : new UnverifiableCellText(value);
 }

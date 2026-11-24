@@ -21,6 +21,7 @@ const { streamLinkedRowsToInsert } = require('../../src/main-process/linked-tabl
 const { writeWorkbookRows } = require('../../src/backend/file-service');
 const { CHANNEL_VALUE, ADM_FUND_TYPES } = require('../../src/constants/adm-bank-deposit-fields');
 const JSZip = require('jszip');
+const ExcelJS = require('exceljs');
 
 let passed = 0;
 let failed = 0;
@@ -210,6 +211,28 @@ async function run() {
       `Step8.大写转义拒绝并报物理行与列：${upperError && upperError.message}`);
     assertEq(depositAmount('TXA'), '9.9', 'Step8.TXA 金额未被覆盖');
     assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit'), rowsBeforeUpper, 'Step8.全部记录与行数不变');
+
+    // Step9（v3.2.22 B113，Codex 第十五轮 P1 ⚠️ 资金口径）：ExcelJS（不转义的真实写出端）原样写出字面「TX_x004a_」，
+    //   Excel 与 SheetJS 口径读成「TXJ」，与另一笔「TXJ」合并、覆盖其金额。流式导入按无法确认原值整批拒绝，数据库不变
+    await upsertDepositFile('lower-base.xlsx', [{ ...DATA[0], BizId: 'TXJ', 'Credit Amount': '9.9' }]);
+    const lowerFile = path.join(tmpDir, 'exceljs-lower-escape.xlsx');
+    const lowerBook = new ExcelJS.Workbook();
+    const lowerSheet = lowerBook.addWorksheet('Sheet1');
+    lowerSheet.addRow(HEADERS);
+    lowerSheet.addRow(rowAoa({ ...DATA[0], BizId: 'TXJ', 'Credit Amount': '9.9' }));
+    lowerSheet.addRow(rowAoa({ ...DATA[1], BizId: 'TX_x004a_', 'Credit Amount': '1.2' }));
+    await lowerBook.xlsx.writeFile(lowerFile);
+    const rowsBeforeLower = linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit');
+    let lowerError = null;
+    try {
+      await importDepositFile(lowerFile);
+    } catch (error) {
+      lowerError = error;
+    }
+    assertEq(Boolean(lowerError) && lowerError.message.startsWith('源文件第 3 行「BizId」列的文本含无法确认原值的 Excel 文本转义'), true,
+      `Step9.可打印字符的转义拒绝并报物理行与列：${lowerError && lowerError.message}`);
+    assertEq(depositAmount('TXJ'), '9.9', 'Step9.TXJ 金额未被覆盖');
+    assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit'), rowsBeforeLower, 'Step9.全部记录与行数不变');
   } finally {
     try { if (appDb && appDb.close) appDb.close(); } catch (_e) { /* ignore */ }
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_e) { /* ignore */ }

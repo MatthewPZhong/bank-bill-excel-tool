@@ -332,7 +332,11 @@ test('链接表：表头识别与流式导入同样还原转义；无法确认�
     ['字符引用的未配对代理项', '<row r="5"><c r="A5" t="str"><v>ID&#xD800;</v></c></row>', ''],
     // XlsxWriter、openpyxl 按字面保存的大写 X（Codex 第十四轮 P1）
     ['共享字符串里大写 X 的转义', '<row r="5"><c r="A5" t="s"><v>2</v></c></row>', '<si><t>ID_X0041_</t></si>'],
-    ['内联字符串里大写 X 的转义', '<row r="5"><c r="A5" t="inlineStr"><is><t>ID_X0041_</t></is></c></row>', '']
+    ['内联字符串里大写 X 的转义', '<row r="5"><c r="A5" t="inlineStr"><is><t>ID_X0041_</t></is></c></row>', ''],
+    // ExcelJS 等不转义的写出端原样写出的可打印字符转义、不起保护作用的 _x005F_（Codex 第十五轮 P1）
+    ['表示可打印字符的转义', '<row r="5"><c r="A5" t="s"><v>2</v></c></row>', '<si><t>ID_x004a_</t></si>'],
+    ['公式字符串里表示可打印字符的转义', '<row r="5"><c r="A5" t="str"><v>ID_x0041_</v></c></row>', ''],
+    ['不起保护作用的 _x005F_', '<row r="5"><c r="A5" t="s"><v>2</v></c></row>', '<si><t>ID_x005F_</t></si>']
   ];
   for (const [label, rowXml, sharedStrings] of rejected) {
     const filePath = await build(label, rowXml, sharedStrings);
@@ -361,6 +365,13 @@ test('链接表：表头识别与流式导入同样还原转义；无法确认�
   const writtenRows = [];
   await streamLinkedRowsToInsert(writtenUpper, linked, (row) => writtenRows.push(row));
   assert.deepEqual(writtenRows.map((row) => row.BizId), ['TX_X0041_', 'TXA'], '本应用写出的字面大写转义读回原文，不与 TXA 合并');
+  // 本应用写出的字面「_x004a_」「_x005F_」与控制字符读回原文（Codex 第十五轮）
+  const writtenLower = path.join(dir, 'written-lower.xlsx');
+  writeWorkbookRows({ rows: [['BizId', '备注'], ['TX_x004a_', 'a_x005F_'], ['TXJ', 'b\u0001c']], outputFilePath: writtenLower });
+  const lowerRows = [];
+  await streamLinkedRowsToInsert(writtenLower, linked, (row) => lowerRows.push(row));
+  assert.deepEqual(lowerRows.map((row) => [row.BizId, row['备注']]), [['TX_x004a_', 'a_x005F_'], ['TXJ', 'b\u0001c']]);
+  assert.deepEqual(readRows(writtenLower).slice(1, 3), [['TX_x004a_', 'a_x005F_'], ['TXJ', 'b\u0001c']], '与非流式读取一致');
 });
 
 // v3.2.22 B113（Codex 第八轮）：注音不计入正文；CDATA、多段纯文本、带前缀的元素等非规范结构拒绝；表头格无法确认时不认作表头
