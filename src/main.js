@@ -22424,6 +22424,17 @@ function buildToolboxAuditDetailLines(files, warningSummary = null) {
   return details;
 }
 
+// v3.2.22 B58（spec D3，Codex 第十轮）：前台生成器失败时先核对冻结的输入：源文件在生成期间被替换（如换成缺少所选字段的版本）时
+//   按计划的失效口径报源文件已变化，不把另一版本引起的错误（「找不到字段」等）报给用户；输入未变或已取消时保留原错误
+async function generateToolboxCheckingInputs(filePlan, generate) {
+  try {
+    return await generate();
+  } catch (error) {
+    if (filePlan && !/_CANCELLED$/.test(String(error && error.code || ''))) await assertFilePlanInputsFreshAsync(filePlan);
+    throw error;
+  }
+}
+
 async function publishToolboxArtifacts(
   kind,
   artifacts,
@@ -22904,11 +22915,11 @@ function registerToolboxHandlers() {
             };
             publishResult = generated.publication;
           } else {
-            writeRes = await toolboxMergeFilesToXlsx({
+            writeRes = await generateToolboxCheckingInputs(taskContext.fileEvidence.filePlan, () => toolboxMergeFilesToXlsx({
               filePaths,
               savePath: tempPath,
               sheetBaseName: 'COMMON'
-            });
+            }));
             publishResult = await publishMergeArtifacts([{
               sourcePath: tempPath,
               outputId: 'merge-1',
@@ -23255,7 +23266,7 @@ function registerToolboxHandlers() {
           let generationResult;
           let publishResult = null;
           if (await shouldUseLargeChannel(sourceFilePath)) {
-            generationResult = await dispatchLargeSplit({
+            generationResult = await generateToolboxCheckingInputs(taskContext.fileEvidence.filePlan, () => dispatchLargeSplit({
               op: 'exportMultiFilters',
               filePath: sourceFilePath,
               groups: preparedPlans.map((plan) => ({
@@ -23266,7 +23277,7 @@ function registerToolboxHandlers() {
                 savePath: plan.temporaryPath
               })),
               batchContext: taskContext.batchContext
-            }).promise;
+            }).promise);
           } else if (backgroundExecutionRuntimeManager.isProductionEnabled(
             TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
           )) {
@@ -23314,7 +23325,7 @@ function registerToolboxHandlers() {
               inputDataRowCount: generated.summary.inputDataRowCount
             };
           } else {
-            generationResult = await exportToolboxMultiFilters({
+            generationResult = await generateToolboxCheckingInputs(taskContext.fileEvidence.filePlan, () => exportToolboxMultiFilters({
               filePath: sourceFilePath,
               groups: preparedPlans.map((plan) => ({
                 outputId: plan.outputId,
@@ -23323,7 +23334,7 @@ function registerToolboxHandlers() {
                 values: plan.values,
                 savePath: plan.temporaryPath
               }))
-            });
+            }));
           }
 
           const generationFiles = generationResult && Array.isArray(generationResult.files)
@@ -23427,14 +23438,14 @@ function registerToolboxHandlers() {
         const tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
         let preserveTempDir = false;
         try {
-          const generationResult = await dispatchLargeSplit({
+          const generationResult = await generateToolboxCheckingInputs(taskContext.fileEvidence.filePlan, () => dispatchLargeSplit({
             op: 'exportFilter',
             filePath: sourceFilePath,
             field,
             values,
             savePath: tempPath,
             batchContext: taskContext.batchContext
-          }).promise;
+          }).promise);
           const matchedCount = Number(generationResult && generationResult.matchedCount) || 0;
           const inputDataRowCount = Number(
             generationResult && generationResult.inputDataRowCount
@@ -23563,13 +23574,13 @@ function registerToolboxHandlers() {
           inputDataRowCount = generated.summary.inputDataRowCount;
           publishResult = generated.publication;
         } else {
-          const generationResult = await exportToolboxFilter({
+          const generationResult = await generateToolboxCheckingInputs(taskContext.fileEvidence.filePlan, () => exportToolboxFilter({
             filePath: sourceFilePath,
             field,
             values,
             savePath: tempPath,
             outputId: 'split-1'
-          });
+          }));
           matchedCount = Number(generationResult.matchedCount) || 0;
           inputDataRowCount = Number(generationResult.inputDataRowCount) || 0;
           if (matchedCount === 0) {

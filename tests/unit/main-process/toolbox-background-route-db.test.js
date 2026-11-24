@@ -706,3 +706,36 @@ test('Route DB codec在BIFF8/CSV真实Scanner与Writer路径保持行序和长�
   assert.deepEqual(shutdown.leakedTransports, []);
   assert.deepEqual(shutdown.errors, []);
 });
+
+// v3.2.22 B58（Codex 第十轮）：后台多文件拆分生成失败（如找不到所选字段）时先核对源文件：生成期间被替换时报输入已变化，
+//   源文件未变时保留原错误；不调用发布器
+test('多文件拆分后台生成失败：源文件被替换时报输入已变化，未变时保留原错误，均不发布', async () => {
+  const groups = [{ outputId: 'split-1', fileName: 'A.xlsx', field: 'Group', values: ['A'] }];
+  for (const replaced of [true, false]) {
+    const dir = tempDir();
+    const sourcePath = path.join(dir, 'source.xlsx');
+    await writeStyledFixture(sourcePath);
+    const filePlan = multiFilePlan(sourcePath, [path.join(dir, 'final-A.xlsx')]);
+    let publisherCalls = 0;
+    await assert.rejects(generateValidateAndPublishMultiOutput({
+      runtime: {
+        async execute() {
+          if (replaced) {
+            fs.writeFileSync(`${sourcePath}.tmp`, fs.readFileSync(sourcePath));
+            fs.renameSync(`${sourcePath}.tmp`, sourcePath);
+          }
+          return { outcome: 'failed', terminalSource: 'job:error' };
+        }
+      },
+      filePlan,
+      batchContext: operationContext(`toolbox-route-failed-${replaced}`),
+      groups,
+      generationPaths: [path.join(dir, `route-${replaced}.xlsx`)],
+      routeDbPath: path.join(dir, `route-${replaced}.sqlite`),
+      routeManifestPath: path.join(dir, `route-${replaced}.sealed.json`),
+      production: false,
+      publisher: async () => { publisherCalls += 1; }
+    }), { code: replaced ? 'ARCHIVE_INPUT_CHANGED' : 'TOOLBOX_GENERATION_FAILED' });
+    assert.equal(publisherCalls, 0);
+  }
+});

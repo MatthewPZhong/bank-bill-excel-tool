@@ -104,6 +104,8 @@ async function executeMergeGeneration(rawInput, signal) {
     });
   } catch (error) {
     if (signal && signal.aborted) throw generationError('TOOLBOX_GENERATION_CANCELLED', '工具箱生成已取消');
+    // 生成失败时先核对源文件：生成期间源文件被替换时报输入已变化，不把另一版本引起的错误报给用户（v3.2.22 B58，Codex 第十轮）
+    assertSourcesFresh(input.sources);
     throw error;
   }
   assertNotCancelled(signal);
@@ -140,6 +142,8 @@ async function executeSplitGeneration(rawInput, signal) {
     });
   } catch (error) {
     if (signal && signal.aborted) throw generationError('TOOLBOX_GENERATION_CANCELLED', '工具箱生成已取消');
+    // 同合表：生成失败（如找不到所选字段）时先核对源文件（v3.2.22 B58，Codex 第十轮）
+    assertSourcesFresh(input.sources);
     throw error;
   }
   assertNotCancelled(signal);

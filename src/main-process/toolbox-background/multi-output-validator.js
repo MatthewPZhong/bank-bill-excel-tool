@@ -16,6 +16,7 @@ const {
   normalizeMultiSplitInput,
   validateToolboxMultiGenerationResult
 } = require('./generation-contract');
+const { assertSourcesFresh } = require('./generation-core');
 const { operationContextFromBatch } = require('./generation-validator');
 const { inspectSealedRouteDb, outputPlanHash } = require('./route-db-contract');
 
@@ -230,6 +231,8 @@ async function generateValidateAndPublishMultiOutput(options = {}) {
     input: generationInput
   });
   if (!execution || execution.outcome !== 'completed' || execution.terminalSource !== 'job:done') {
+    // 生成失败（如找不到所选字段）时先核对源文件：生成期间被替换时报输入已变化（v3.2.22 B58，Codex 第十轮）
+    if (!(execution && execution.outcome === 'cancelled')) assertSourcesFresh(generationInput.sources);
     if (execution && execution.error) throw fromProtocolError(execution.error);
     throw validationError('TOOLBOX_GENERATION_FAILED', '多文件拆分后台生成失败');
   }

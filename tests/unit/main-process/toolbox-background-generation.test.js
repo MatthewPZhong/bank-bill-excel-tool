@@ -886,3 +886,41 @@ test('Main runtime manager no-runtime clean shutdown 允许 rollback 并在首�
   assert.equal(manager.get(), runtime);
   assert.equal(factoryCalls, 1);
 });
+
+// v3.2.22 B58（Codex 第十轮）：后台单值拆分生成失败（找不到所选字段）时先核对源文件：生成期间源文件被替换为缺少该字段的版本时
+//   报输入已变化，不报「找不到字段」；源文件未变时保留原错误
+test('单值拆分后台生成找不到字段：源文件已被替换时报输入已变化，未变时保留原错误', async () => {
+  const dir = makeTempDir('toolbox-background-field-missing-');
+  const sourcePath = await writeWorkbook(path.join(dir, 'source.xlsx'), [['Group', 'Amount'], ['A', '1']]);
+  const filePlan = createFilePlan([sourcePath], path.join(dir, 'final.xlsx'), TOOLBOX_GENERATION_ACTIONS.SPLIT_SINGLE);
+  const replacedInput = createGenerationInput({
+    actionKey: TOOLBOX_GENERATION_ACTIONS.SPLIT_SINGLE,
+    filePlan,
+    generationPath: path.join(dir, 'replaced.xlsx'),
+    operationConfig: { field: 'Group', values: ['A'] }
+  });
+  await writeWorkbook(`${sourcePath}.next.xlsx`, [['Other', 'Amount'], ['A', '1']]);
+  // 源文件未变、字段确实不存在：保留生成器的原错误
+  const missingFieldPlan = createGenerationInput({
+    actionKey: TOOLBOX_GENERATION_ACTIONS.SPLIT_SINGLE,
+    filePlan,
+    generationPath: path.join(dir, 'missing.xlsx'),
+    operationConfig: { field: 'Missing', values: ['A'] }
+  });
+  await assert.rejects(executeSplitGeneration(missingFieldPlan, new AbortController().signal),
+    (error) => error.code !== 'ARCHIVE_INPUT_CHANGED');
+  // 生成前的核对看到的是替换前的源文件（第一次 lstat 返回替换前的状态），生成器读到的是缺少所选字段的新版本
+  const statBefore = fs.lstatSync(sourcePath, { bigint: true });
+  fs.renameSync(`${sourcePath}.next.xlsx`, sourcePath);
+  const lstatSync = fs.lstatSync;
+  let sourceLstats = 0;
+  fs.lstatSync = (filePath, ...rest) => {
+    if (path.resolve(String(filePath)) === path.resolve(sourcePath) && (sourceLstats += 1) === 1) return statBefore;
+    return lstatSync(filePath, ...rest);
+  };
+  try {
+    await assert.rejects(executeSplitGeneration(replacedInput, new AbortController().signal), { code: 'ARCHIVE_INPUT_CHANGED' });
+  } finally {
+    fs.lstatSync = lstatSync;
+  }
+});

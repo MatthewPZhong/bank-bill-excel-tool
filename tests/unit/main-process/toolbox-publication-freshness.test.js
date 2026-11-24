@@ -664,3 +664,59 @@ test('publishToolboxArtifacts：发布目标少一个或顺序调换时在调用
     /工具箱发布目标与 FilePlan 输出不一致/);
   assert.deepEqual(calls, { publication: 0, settle: 0, inputs: 0 });
 });
+
+// 生成器报错：生成期间源文件被替换（拆分换成缺少所选字段的表头）时报源文件已变化，不报「找不到字段」；源文件未变时保留原错误
+//   （Codex 第十轮）
+const GENERATION_FAILURE_CASES = [
+  { kind: 'single', channel: 'small' },
+  { kind: 'single', channel: 'large' },
+  { kind: 'multiple', channel: 'small' },
+  { kind: 'multiple', channel: 'large' },
+  { kind: 'merge', channel: 'small' }
+];
+for (const { kind, channel } of GENERATION_FAILURE_CASES) {
+  for (const replaced of [true, false]) {
+    test(`${kind}（${channel === 'large' ? '大文件通道' : '普通'}）：生成器报错${replaced ? '、生成期间源文件被替换：报源文件已变化' : '、源文件未变：保留原错误'}（B58-T3）`, async (t) => {
+      const env = setup(t);
+      const replaceSource = () => {
+        if (!replaced) return;
+        fs.writeFileSync(`${env.source}.tmp`, 'Other,Price\n1,2\n');
+        fs.renameSync(`${env.source}.tmp`, env.source);
+      };
+      const injected = () => Object.assign(new Error('注入的生成失败'), { code: 'TOOLBOX_INJECTED_GENERATION_FAILURE' });
+      // 普通拆分用真实生成器（表头换掉后报找不到字段），合表与大文件通道注入失败
+      const realThenReplaced = (generate) => async (...args) => {
+        replaceSource();
+        if (!replaced) throw injected();
+        return generate(...args);
+      };
+      const overrides = channel === 'large' ? {
+        shouldUseLargeChannel: async () => true,
+        dispatchLargeSplit: () => {
+          replaceSource();
+          return { promise: Promise.reject(injected()) };
+        }
+      } : {
+        exportToolboxFilter: realThenReplaced(exportToolboxFilter),
+        exportToolboxMultiFilters: realThenReplaced(exportToolboxMultiFilters),
+        toolboxMergeFilesToXlsx: async () => {
+          replaceSource();
+          throw injected();
+        }
+      };
+      const { calls, contracts, execute } = loadHandlers(env, caseOverrides(env, kind, overrides));
+      const contract = contracts.get(CASES[kind].channel);
+      const prepared = await prepareIpcTaskInvocation(contract, {}, casePayload(env, kind) ? [casePayload(env, kind)] : []);
+      assert.equal(prepared.proceed, true);
+      const result = await execute(contract, prepared);
+      assert.equal(result.status, 'failed');
+      if (replaced) {
+        assert.equal(result.code, kind === 'merge' ? 'ARCHIVE_INPUT_CHANGED' : 'TOOLBOX_SPLIT_READ_CONTEXT_STALE', JSON.stringify(result));
+        assert.doesNotMatch(String(result.message), /找不到字段/);
+      } else {
+        assert.notEqual(result.code, kind === 'merge' ? 'ARCHIVE_INPUT_CHANGED' : 'TOOLBOX_SPLIT_READ_CONTEXT_STALE', JSON.stringify(result));
+      }
+      assert.equal(calls.publication, 0);
+    });
+  }
+}
