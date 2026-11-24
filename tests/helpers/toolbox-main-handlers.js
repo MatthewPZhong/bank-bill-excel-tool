@@ -85,7 +85,7 @@ function waitForReadStreamsClosed(root) {
 function loadHandlers(env, overrides = {}) {
   const contracts = new Map();
   const { dispatcher } = createTestPublicationHarness(env.userDataDir);
-  const calls = { publication: 0, settle: 0, dialogs: [] };
+  const calls = { publication: 0, settle: 0, dialogs: [], clearedReadContexts: [] };
   const readContext = { sourceFilePath: env.source, dataRowCount: 2,
     snapshot: sourceSnapshotFromStat(fs.statSync(env.source, { bigint: true })) };
   const scope = {
@@ -109,7 +109,7 @@ function loadHandlers(env, overrides = {}) {
     sanitizeFileName: (value) => String(value),
     toolboxNormalizeMultiSplitGroups: normalizeMultiSplitGroups,
     requireToolboxSplitReadContext: () => readContext,
-    clearToolboxSplitReadContext: () => {},
+    clearToolboxSplitReadContext: (context) => { calls.clearedReadContexts.push(context); },
     backgroundExecutionRuntimeManager: { isProductionEnabled: () => false, get: () => null },
     shouldUseLargeChannel: overrides.shouldUseLargeChannel || (async () => false),
     dispatchLargeSplit: overrides.dispatchLargeSplit || (() => { throw new Error('夹具未提供大文件通道'); }),

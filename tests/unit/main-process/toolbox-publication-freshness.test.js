@@ -46,8 +46,28 @@ for (const change of ['created', 'replaced']) {
     assert.equal(fs.readFileSync(existing, 'utf8'), change === 'created' ? 'old-A' : 'foreign-A');
     if (change === 'created') assert.equal(fs.readFileSync(fresh, 'utf8'), 'foreign-B');
     else assert.equal(fs.existsSync(fresh), false);
+    assert.deepEqual(calls.clearedReadContexts, [], '目标变化时保留拆分读取会话，可直接重试');
   });
 }
+
+// 覆盖确认期间源文件被改写：报源文件已变化并清除拆分读取会话（预取值与字段缓存），不等到下次读取（Codex 第十二轮）
+test('多文件拆分：覆盖确认期间源文件被改写时报源文件已变化，并清除拆分读取会话（B58-T3）', async (t) => {
+  const env = setup(t);
+  fs.writeFileSync(path.join(env.output, 'A.xlsx'), 'old-A');
+  const { calls, run } = loadHandlers(env, {
+    showMessageBox: () => {
+      fs.writeFileSync(`${env.source}.tmp`, 'Name,Amount\nA,999\n');
+      fs.renameSync(`${env.source}.tmp`, env.source);
+      return { response: 1 };
+    }
+  });
+  const { prepared, result } = await run('toolbox:split:export', { ...MULTI_PAYLOAD, sourceFilePath: env.source });
+  assert.equal(prepared.proceed, false);
+  assert.equal(result.code, 'TOOLBOX_SPLIT_READ_CONTEXT_STALE', JSON.stringify(result));
+  assert.equal(calls.clearedReadContexts.length, 1);
+  assert.equal(calls.clearedReadContexts[0].sourceFilePath, env.source);
+  assert.equal(calls.publication, 0);
+});
 
 test('多文件拆分：确认后沿用确认前冻结的同一 FilePlan，prepare 之后新建目标由生命周期核对拒绝（B57）', async (t) => {
   const env = setup(t);

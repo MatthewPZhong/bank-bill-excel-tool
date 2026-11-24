@@ -711,6 +711,9 @@ test('Route DB codec在BIFF8/CSV真实Scanner与Writer路径保持行序和长�
 //   源文件未变时保留原错误；不调用发布器
 test('多文件拆分后台生成失败：源文件被替换时报输入已变化，未变时保留原错误，均不发布', async () => {
   const groups = [{ outputId: 'split-1', fileName: 'A.xlsx', field: 'Group', values: ['A'] }];
+  // Worker 经协议回传的错误（真实编码器）：源文件未变时原样还原为该错误（Codex 第十二轮）
+  const { toProtocolError } = require('../../../src/main-process/background-execution/error-codec');
+  const workerError = toProtocolError(Object.assign(new Error('源文件中找不到字段「Group」'), { code: 'TOOLBOX_SPLIT_FIELD_MISSING' }));
   for (const replaced of [true, false]) {
     const dir = tempDir();
     const sourcePath = path.join(dir, 'source.xlsx');
@@ -731,7 +734,9 @@ test('多文件拆分后台生成失败：源文件被替换时报输入已变�
             fs.writeFileSync(`${sourcePath}.tmp`, fs.readFileSync(sourcePath));
             fs.renameSync(`${sourcePath}.tmp`, sourcePath);
           }
-          return { outcome: 'failed', terminalSource: 'job:error' };
+          return replaced
+            ? { outcome: 'failed', terminalSource: 'job:error' }
+            : { outcome: 'failed', terminalSource: 'job:error', error: workerError };
         }
       },
       filePlan,
@@ -742,7 +747,8 @@ test('多文件拆分后台生成失败：源文件被替换时报输入已变�
       routeManifestPath: path.join(dir, `route-${replaced}.sealed.json`),
       production: false,
       publisher: async () => { publisherCalls += 1; }
-    }), { code: replaced ? 'ARCHIVE_INPUT_CHANGED' : 'TOOLBOX_GENERATION_FAILED' }).finally(() => { fs.lstatSync = lstatSync; });
+    }), replaced ? { code: 'ARCHIVE_INPUT_CHANGED' } : { code: 'TOOLBOX_SPLIT_FIELD_MISSING', message: '源文件中找不到字段「Group」' })
+      .finally(() => { fs.lstatSync = lstatSync; });
     assert.equal(publisherCalls, 0);
     assert.equal(syncSourceLstats, 0, '不同步访问源文件');
   }

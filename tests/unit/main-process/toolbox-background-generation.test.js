@@ -907,8 +907,9 @@ test('单值拆分后台生成找不到字段：源文件已被替换时报输�
     generationPath: path.join(dir, 'missing.xlsx'),
     operationConfig: { field: 'Missing', values: ['A'] }
   });
+  // 源文件未变：保留生成器的原错误（具体消息，Codex 第十二轮）
   await assert.rejects(executeSplitGeneration(missingFieldPlan, new AbortController().signal),
-    (error) => error.code !== 'ARCHIVE_INPUT_CHANGED');
+    (error) => error.code !== 'ARCHIVE_INPUT_CHANGED' && /Missing/.test(String(error.message)));
   // 生成前的核对看到的是替换前的源文件（第一次 lstat 返回替换前的状态），生成器读到的是缺少所选字段的新版本
   const statBefore = fs.lstatSync(sourcePath, { bigint: true });
   fs.renameSync(`${sourcePath}.next.xlsx`, sourcePath);

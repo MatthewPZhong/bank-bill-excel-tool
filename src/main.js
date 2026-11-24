@@ -23163,7 +23163,14 @@ function registerToolboxHandlers() {
             }
             // 覆盖确认期间目标可能被新建或替换：确认后再核对整份计划。没有弹窗时冻结刚核对过全部目标、其后没有等待，
             //   不再重复同步核对（执行前 TaskLifecycle 仍会核对），避免高延迟网络盘上阻塞其他 IPC（Codex 第七轮）
-            assertFilePlanFresh(frozenFilePlan);
+            try {
+              assertFilePlanFresh(frozenFilePlan);
+            } catch (error) {
+              // 源文件已变化：清除本次拆分读取会话（预取值与字段缓存），与执行前核对到源文件变化时一致；目标变化等其他失败
+              //   保留会话，用户可直接重试（Codex 第十二轮）
+              if (error && error.code === 'TOOLBOX_SPLIT_READ_CONTEXT_STALE') clearToolboxSplitReadContext(readContext);
+              throw error;
+            }
           }
           targetPlans = groups.map((group, index) => ({
             ...group,
