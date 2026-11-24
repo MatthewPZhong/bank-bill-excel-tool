@@ -41,6 +41,11 @@ const FAILURE_REASONS = Object.freeze({
   BACKUP_MISSING: '原内容备份已不可用（被删除、移走或大小与备份时不符），路径上仍是本批写出的内容，未自动处理'
 });
 
+const BACKUP_REMOVE_ATTEMPTS = 4;
+const BACKUP_REMOVE_RETRY_DELAY_MS = 100;
+// 同步等待用（回滚在主进程同步执行）
+const RETRY_WAIT_CELL = new Int32Array(new SharedArrayBuffer(4));
+
 function lstatOrNull(fsImpl, filePath) {
   try {
     return fsImpl.lstatSync(filePath, { bigint: true });
@@ -95,8 +100,10 @@ function readChunk(fsImpl, fd, buffer, position) {
 }
 
 // 分块比较（left 为已打开的文件描述符），不把整份文件读入内存；两边按同一逻辑分块读满再比较（Codex 第七轮）
-function sameContent(fsImpl, left, rightPath) {
+// expectedRightSize：右侧（备份）登记时的大小（bigint）；已打开的备份与之不符（被截短等）时不认作内容一致（Codex 第十二轮）
+function sameContent(fsImpl, left, rightPath, expectedRightSize) {
   return withOpenFile(fsImpl, rightPath, 'r', (right) => {
+    if (expectedRightSize !== undefined && fsImpl.fstatSync(right, { bigint: true }).size !== expectedRightSize) return false;
     if (fsImpl.fstatSync(left).size !== fsImpl.fstatSync(right).size) return false;
     const leftBuffer = Buffer.allocUnsafe(COPY_CHUNK_BYTES);
     const rightBuffer = Buffer.allocUnsafe(COPY_CHUNK_BYTES);
@@ -338,13 +345,21 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
     return result;
   }
 
+  // 非递归的 rmSync 不按 maxRetries 重试（Node 只在 recursive 时生效），单个备份文件显式有限重试（Codex 第十二轮）
   function removeBackup(entry) {
     if (!entry.backupName) return;
-    try {
-      fsImpl.rmSync(path.join(backupDirectory, entry.backupName), { force: true, maxRetries: 3, retryDelay: 100 });
-    } catch (_error) {
-      // 备份清理失败不影响还原结果；记下，部分回滚时在恢复清单中单列
-      leftoverBackups.push(entry.backupName);
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        fsImpl.rmSync(path.join(backupDirectory, entry.backupName), { force: true });
+        return;
+      } catch (_error) {
+        if (attempt >= BACKUP_REMOVE_ATTEMPTS) {
+          // 备份清理失败不影响还原结果；记下，部分回滚时在恢复清单中单列
+          leftoverBackups.push(entry.backupName);
+          return;
+        }
+        Atomics.wait(RETRY_WAIT_CELL, 0, 0, BACKUP_REMOVE_RETRY_DELAY_MS);
+      }
     }
   }
 
@@ -379,7 +394,7 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
       if (!current || !current.isFile() || fileKeyOf(current, filePath, fsImpl) !== entry.ownedFileKey) return false;
       return withOpenFile(fsImpl, filePath, 'r', (fd) => (
         fileKeyOf(fsImpl.fstatSync(fd, { bigint: true }), filePath, fsImpl) === entry.ownedFileKey
-          && sameContent(fsImpl, fd, path.join(backupDirectory, entry.backupName))
+          && sameContent(fsImpl, fd, path.join(backupDirectory, entry.backupName), entry.backupSize)
       ));
     } catch (_error) {
       return false;
@@ -391,13 +406,15 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
   //   写回后再核对路径仍指向写回的文件（写回期间被另存替换时，备份写进了已脱离路径的旧文件，不算还原）。
   //   targetPath 为经哪个路径写回（主路径被替换时经仍指向原文件的别名写回）
   function restoreExisting(entry, targetPath = entry.filePath) {
+    // 主路径与别名路径都先核对备份：备份已不可用（被删除、移走或截短）时不写回，也不按内容一致认作已还原（Codex 第十一、十二轮）
+    if (!backupIntact(entry)) return FAILURE_REASONS.BACKUP_MISSING;
     const backupPath = path.join(backupDirectory, entry.backupName);
     const readProblem = withOpenFile(fsImpl, targetPath, 'r', (fd) => {
       const current = fsImpl.fstatSync(fd, { bigint: true });
       if (!current.isFile()) return { reason: FAILURE_REASONS.NOT_REGULAR_FILE };
       const problem = ownershipProblem(entry, current);
       if (problem) return { reason: problem };
-      return sameContent(fsImpl, fd, backupPath) ? { done: true } : { key: fileKeyOf(current, targetPath, fsImpl) };
+      return sameContent(fsImpl, fd, backupPath, entry.backupSize) ? { done: true } : { key: fileKeyOf(current, targetPath, fsImpl) };
     });
     if (readProblem.reason || readProblem.done) return readProblem.reason || null;
     return withOpenFile(fsImpl, targetPath, 'r+', (fd) => {
@@ -440,10 +457,9 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
       const current = lstatOrNull(fsImpl, entry.filePath);
       if (current && !current.isFile()) {
         failures.push(failure(FAILURE_REASONS.NOT_REGULAR_FILE));
-      } else if (entry.existed && current && !backupIntact(entry)) {
-        // 备份不可用（被删除、移走或被截短）：目标仍是本批写出的内容，与原文件被移走区分（Codex 第十、十一轮）
-        failures.push(failure(FAILURE_REASONS.BACKUP_MISSING));
       } else if (entry.existed && current) {
+        // 备份不可用（被删除、移走或被截短）时 restoreExisting 报 BACKUP_MISSING：目标仍是本批写出的内容，与原文件被移走区分
+        //   （Codex 第十、十一轮）
         const reason = restoreExisting(entry);
         if (reason) failures.push(failure(reason));
         else originalRestored = true;

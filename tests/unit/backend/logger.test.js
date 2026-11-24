@@ -365,10 +365,28 @@ test('writeErrorReport：正式名恰在文件名长度上限（255 字节）时
     };
   }
   t.after(() => Object.assign(fs, originals));
-  const report = writeErrorReport(root, { step: '导入网银明细文件', templateName: '账'.repeat(70), message: '报告', errorCode: 'TEST' });
+  const RealDate = Date;
+  const fixed = new RealDate(2026, 10, 24, 9, 30, 0).getTime();
+  global.Date = class extends RealDate {
+    constructor(...args) {
+      super(...(args.length ? args : [fixed]));
+    }
+    static now() {
+      return fixed;
+    }
+  };
+  t.after(() => { global.Date = RealDate; });
+  const payload = { step: '导入网银明细文件', templateName: '账'.repeat(70), errorCode: 'TEST' };
+  const report = writeErrorReport(root, { ...payload, message: '第一份' });
+  // 同一秒同名的第二份：追加 -2 后基本名按字节缩短，仍可写出、不覆盖第一份（Codex 第十二轮）
+  const second = writeErrorReport(root, { ...payload, message: '第二份' });
   Object.assign(fs, originals);
+  global.Date = RealDate;
   assert.equal(Buffer.byteLength(report.fileName), 255);
-  assert.deepEqual(fs.readdirSync(path.dirname(report.filePath)), [report.fileName]);
+  assert.ok(Buffer.byteLength(second.fileName) <= 255 && /-2\.txt$/.test(second.fileName), second.fileName);
+  assert.deepEqual(fs.readdirSync(path.dirname(report.filePath)).sort(), [report.fileName, second.fileName].sort());
+  assert.match(fs.readFileSync(report.filePath, 'utf8'), /第一份/);
+  assert.match(fs.readFileSync(second.filePath, 'utf8'), /第二份/);
 });
 
 // v3.2.22 B45（Codex 第十轮）：写到一半失败、删除又因占用失败时，留下的只是不带 .txt 的临时文件，不是外观正常的残缺报告

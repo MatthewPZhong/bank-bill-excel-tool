@@ -73,6 +73,15 @@ function publishReportFile(sourceFile, targetFile) {
   return true;
 }
 
+// 正式名不超过 255 个 UTF-8 字节（按字节限制文件名的卷）：同名报告追加序号后缀时从基本名末尾按字符缩短（Codex 第十二轮）
+const MAX_REPORT_FILE_NAME_BYTES = 255;
+function fitReportFileName(baseName, suffix) {
+  const tail = `${suffix}.txt`;
+  const chars = Array.from(baseName);
+  while (chars.length > 1 && Buffer.byteLength(chars.join('') + tail) > MAX_REPORT_FILE_NAME_BYTES) chars.pop();
+  return chars.join('') + tail;
+}
+
 // v3.2.22 B45：同一秒、同一模板与步骤的报告不覆盖已有的那份（覆盖写到一半失败时，上一份报告会变成半份新报告）：
 //   重名时依次加 -2、-3……（Codex 第五轮）。先写不带 .txt 的临时文件，写入与关闭都成功后才以正式名称发布：写到一半失败、
 //   临时文件又删不掉（如 Windows 上被占用）时，不留下外观正常的残缺报告（Codex 第六、十轮）
@@ -110,7 +119,7 @@ function writeNewReportFile(targetDir, baseName, content) {
   }
   try {
     for (let attempt = 1; ; attempt += 1) {
-      const targetFile = path.join(targetDir, `${baseName}${attempt > 1 ? `-${attempt}` : ''}.txt`);
+      const targetFile = path.join(targetDir, fitReportFileName(baseName, attempt > 1 ? `-${attempt}` : ''));
       if (publishReportFile(partialFile, targetFile)) return targetFile;
       if (attempt >= 1000) throw Object.assign(new Error(`EEXIST: file already exists, ${targetFile}`), { code: 'EEXIST' });
     }

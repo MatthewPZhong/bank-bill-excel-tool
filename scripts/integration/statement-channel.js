@@ -1921,9 +1921,14 @@ function verifyMultiTemplateGenerationRollback(dir) {
   };
   const { createStatementOutputJournal: realJournal } = require('../../src/main-process/statement-output-rollback');
   const busy = (what) => Object.assign(new Error(`EBUSY: resource busy or locked（注入：${what}被占用）`), { code: 'EBUSY' });
+  // 写进诊断日志的异常（核对不含种子文件路径等内部文件名）
+  const loggedErrors = [];
   const env = createEnvironment(dir, 'step20', {
     realSession: true,
-    appendLog: () => 'logs/step20.log',
+    appendLog: (_root, error) => {
+      loggedErrors.push(error);
+      return 'logs/step20.log';
+    },
     // 写出记录的 write 返回后（本笔已核对、已记下写后身份）、下一笔开始前的注入点
     // 备份放进测试自有目录（随 dir 统一清理），不依赖提示文案反解析备份位置（Codex 第十轮）
     createStatementOutputJournal: (options = {}) => {
@@ -2213,7 +2218,7 @@ function verifyMultiTemplateGenerationRollback(dir) {
   //   按「余额生成失败」处理本组余额、保留明细（spec D3，Codex 第十一轮）
   const sessionsBeforeCheckFault = env.removedSessionPaths.length;
   faults.checkTargetError = (filePath) => (path.basename(filePath) === '目录种子.json'
-    ? Object.assign(new Error('EACCES: permission denied, lstat'), { code: 'EACCES' })
+    ? Object.assign(new Error(`ENOTDIR: not a directory, lstat '${filePath}'`), { code: 'ENOTDIR', path: filePath })
     : null);
   writeSource(fileE, 'B', [['2026-09-01', 'M005', 'USD', '7', '']]);
   const checkFaultError = run([env.entryFor(templateA, fileA), env.entryFor(templateE, fileE)]);
@@ -2224,6 +2229,10 @@ function verifyMultiTemplateGenerationRollback(dir) {
     .filter((warning) => warning.type === 'balance-generate-failed').map((warning) => warning.message),
   ['余额账单生成失败，系统异常已写入日志文件'], 'Step20.种子路径检查失败：按「余额生成失败」告警');
   assertEq(fs.existsSync(directorySeed), false, 'Step20.种子路径检查失败：本组不写种子');
+  // 系统错误的消息带种子文件路径（文件名可能是完整账号）：写进日志前只保留错误码（Codex 第十二轮）
+  const checkFaultLog = loggedErrors[loggedErrors.length - 1];
+  assertEq([checkFaultLog && checkFaultLog.code, /目录种子|balance-seeds/.test(String(checkFaultLog && checkFaultLog.stack))],
+    ['ENOTDIR', false], 'Step20.种子路径检查失败：日志只记错误码、不含种子文件路径');
 
   // （6）同一账户跨组的余额链：C 组 09-01、D 组 09-02 同为 M009/USD，D 组的上期余额取 C 组本批写入的种子。
   //   D 组余额写出失败后整批还原（种子只剩期初），重试后两天余额与种子按链计算

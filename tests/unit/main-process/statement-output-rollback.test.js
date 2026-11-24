@@ -803,8 +803,10 @@ test('部分回滚时已还原文件的备份重试后仍未能删除：恢复�
   fs.writeFileSync(restoredTarget, 'before-a');
   fs.writeFileSync(keptTarget, 'before-b');
   let busyBackup = null;
+  let busyAttempts = 0;
   const fsImpl = { ...fs, rmSync(filePath, options) {
-    if (busyBackup && path.basename(String(filePath)) === busyBackup && !(options && options.maxRetries > 0)) {
+    // 短暂占用：第一次删除报 EBUSY，之后成功（Codex 第十二轮：须确实重试）
+    if (busyBackup && path.basename(String(filePath)) === busyBackup && (busyAttempts += 1) === 1) {
       throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
     }
     if (busyBackup === 'always' && /\.bak$/.test(String(filePath))) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
@@ -814,6 +816,7 @@ test('部分回滚时已还原文件的备份重试后仍未能删除：恢复�
     fs.writeFileSync(restoredTarget, 'before-a');
     fs.writeFileSync(keptTarget, 'before-b');
     busyBackup = mode;
+    busyAttempts = 0;
     const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
     journal.write(restoredTarget, writeText(restoredTarget, 'after-a'));
     journal.write(keptTarget, writeText(keptTarget, 'after-b'));
@@ -914,4 +917,28 @@ test('备份被截短后与目标内容恰好相同：不按内容一致报已�
   t.after(() => outcome.backupDirectory && fs.rmSync(outcome.backupDirectory, { recursive: true, force: true }));
   assert.equal(outcome.restored, false);
   assert.deepEqual(outcome.failures.map((item) => item.reason), ['原内容备份已不可用（被删除、移走或大小与备份时不符），路径上仍是本批写出的内容，未自动处理']);
+});
+
+// v3.2.22 B45（Codex 第十二轮）：同一文件经两个硬链接写入，主路径与别名都先核对备份：备份截短后与别名上的空文件内容恰好相同，
+//   也不经别名认作已还原、不撤销主路径的失败记录
+test('经硬链接别名写过的文件、备份被截短：别名路径同样不认作已还原', (t) => {
+  const { root, staging } = setup(t);
+  const target = path.join(root, 'seed.json');
+  const alias = path.join(root, 'seed-alias.json');
+  fs.writeFileSync(target, 'before-seed');
+  fs.linkSync(target, alias);
+  const journal = createStatementOutputJournal({ stagingRoot: staging });
+  journal.write(target, writeText(target, 'after-seed'));
+  assert.throws(() => journal.write(alias, () => {
+    fs.truncateSync(alias, 0);
+    throw Object.assign(new Error('EIO'), { code: 'EIO' });
+  }), { code: 'EIO' });
+  fs.truncateSync(path.join(staging, fs.readdirSync(staging)[0], '001.bak'), 0);
+  const outcome = journal.rollback();
+  t.after(() => outcome.backupDirectory && fs.rmSync(outcome.backupDirectory, { recursive: true, force: true }));
+  assert.equal(outcome.restored, false);
+  assert.equal(fs.existsSync(outcome.backupDirectory), true, '保留备份目录');
+  assert.ok(outcome.failures.length >= 1);
+  assert.ok(outcome.failures.every((item) => item.reason === '原内容备份已不可用（被删除、移走或大小与备份时不符），路径上仍是本批写出的内容，未自动处理'),
+    JSON.stringify(outcome.failures));
 });
