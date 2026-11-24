@@ -154,7 +154,12 @@ function buildRollbackIncompleteError(error, { failures, backupDirectory, manife
   const restore = failures.filter((item) => item.existed).length;
   const changed = failures.filter((item) => item.reason === FAILURE_REASONS.CHANGED_EXTERNALLY).length;
   const summary = `未能自动还原 ${failures.length} 个文件（原有文件 ${restore} 个、本次新建 ${failures.length - restore} 个；其中写出后被其他程序改动 ${changed} 个）`;
-  const location = manifestPath ? `恢复清单：${manifestPath}` : `原内容备份目录：${backupDirectory || '（未能创建）'}`;
+  // 恢复清单写不出时退回写出记录：它列出本批全部写入尝试（含已还原的），不是失败清单（Codex 第八轮）
+  const location = !manifestPath
+    ? `原内容备份目录：${backupDirectory || '（未能创建）'}`
+    : (path.basename(manifestPath) === RECORD_FILE_NAME
+      ? `恢复清单未能写出，请按写出记录逐个核对（记录列出本批全部写入尝试，不是失败清单）：${manifestPath}`
+      : `恢复清单：${manifestPath}`);
   const business = error instanceof FileValidationError;
   // 数量与清单位置同时放进消息：界面状态框只显示消息（清单在系统临时目录，路径不含账号）
   return new FileValidationError(
@@ -177,13 +182,16 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
   const byPath = new Map();
   const byFile = new Map();
   let backupDirectory = null;
+  // 写出记录的条目序号与备份文件名（撤销登记后不复用，Codex 第八轮）
+  let sequence = 0;
 
   function ensureBackupDirectory() {
     if (!backupDirectory) {
       backupDirectory = fsImpl.mkdtempSync(path.join(stagingRoot, 'statement-rollback-'));
       fsImpl.writeFileSync(path.join(backupDirectory, RECORD_FILE_NAME), [
         `网银多模板生成的写出记录（${now().toISOString()}）`,
-        '本批首次写入每个文件前记下：原有文件的原内容备份、本次新建的文件。',
+        '本文件不是失败清单：本批首次写入每个文件前记下原状态（含之后已自动还原的文件），只在恢复清单写不出时供逐个核对。',
+        '「写前不存在」只表示导入前该路径没有文件，不代表路径上现在的文件由本批创建；删除或覆盖前先核对内容与修改时间。',
         ''
       ].join('\n') + '\n', 'utf8');
     }
@@ -214,8 +222,9 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
       }
       // 本批上次写完后被其他程序替换或修改：不再写入，回滚时按写完后被改动处理
       if (known.writtenIdentity && identityOf(stat) !== known.writtenIdentity) throw changedExternallyError(resolved);
-      return { entry: known, resolved, stat };
+      return { entry: known, resolved, stat, created: false };
     }
+    sequence += 1;
     const entry = {
       filePath: resolved,
       // 写过这个文件的全部路径（硬链接等别名）
@@ -230,12 +239,12 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
     };
     const directory = ensureBackupDirectory();
     if (stat) {
-      entry.backupName = `${String(entries.length + 1).padStart(3, '0')}.bak`;
+      entry.backupName = `${String(sequence).padStart(3, '0')}.bak`;
       fsImpl.copyFileSync(resolved, path.join(directory, entry.backupName));
     }
     try {
-      fsImpl.appendFileSync(path.join(directory, RECORD_FILE_NAME), `${entries.length + 1}. ${resolved}\n${
-        entry.existed ? `   原有文件，原内容备份：${entry.backupName}` : '   本次新建的文件（导入前不存在）'}\n`, 'utf8');
+      fsImpl.appendFileSync(path.join(directory, RECORD_FILE_NAME), `${sequence}. ${resolved}\n${
+        entry.existed ? `   写前已有文件，原内容备份：${entry.backupName}` : '   写前不存在（不代表路径上现在的文件由本批创建）'}\n`, 'utf8');
     } catch (error) {
       // 登记失败时该文件还没被改写、也不归写出记录管理：清掉刚做的备份，不在批次目录里留下无关账单
       if (entry.backupName) {
@@ -250,7 +259,25 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
     entries.push(entry);
     byPath.set(resolved, entry);
     if (stat) byFile.set(fileKeyOf(stat, resolved, fsImpl), entry);
-    return { entry, resolved, stat };
+    return { entry, resolved, stat, created: true };
+  }
+
+  // 撤销本次首次登记（写出回调在改动目标之前失败）：之后同一路径再写时重新记下原状态与备份
+  function untrack(entry) {
+    entries.splice(entries.indexOf(entry), 1);
+    entry.paths.forEach((filePath) => byPath.delete(filePath));
+    if (entry.ownedFileKey && byFile.get(entry.ownedFileKey) === entry) byFile.delete(entry.ownedFileKey);
+    removeBackup(entry);
+    try {
+      fsImpl.appendFileSync(path.join(backupDirectory, RECORD_FILE_NAME), `   ${entry.filePath}：本次未写入（写出前读取失败），不归本批处理\n`, 'utf8');
+    } catch (_error) {
+      // 尽力而为：回滚不再处理该路径
+    }
+  }
+
+  // 写出回调在改动目标之前失败：FILE_READ（读余额模板、逐笔写种子前重读种子失败）按「余额生成失败」告警，本批继续（spec D3）
+  function isReadBeforeWriteError(error) {
+    return error instanceof FileValidationError && error.code === 'FILE_READ';
   }
 
   // 写出入口：记下首次写入前的原状态后执行 writeFn，写完记下文件身份；writeFn 抛错时原样抛出。
@@ -258,10 +285,28 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
   //   其他程序替换：不认作本批文件，停止生成，回滚时留给人工。本批新建的文件首次写成后按路径记下（极短的写完与记下之间
   //   被替换无法识别，见 spec §3）
   function write(filePath, writeFn) {
-    const { entry, resolved, stat } = track(filePath);
+    const { entry, resolved, stat, created } = track(filePath);
     const keyBefore = fileKeyOf(stat, resolved, fsImpl);
+    const pendingBefore = entry.writePending;
     entry.writePending = true;
-    const result = writeFn();
+    let result;
+    try {
+      result = writeFn();
+    } catch (error) {
+      // 写出前读取失败且路径上的文件与写前一致：本次确定未写入，撤销本次的写入登记（首次登记的撤销登记，此前写成过的
+      //   回到上次写后的状态），回滚时不把它当作写到一半的文件（Codex 第八轮 P1）
+      let unchanged = false;
+      try {
+        unchanged = isReadBeforeWriteError(error) && identityOf(lstatOrNull(fsImpl, resolved)) === identityOf(stat);
+      } catch (_statError) {
+        // 状态不明：保持写入中，回滚时按写出回调抛错处理
+      }
+      if (unchanged) {
+        if (created) untrack(entry);
+        else entry.writePending = pendingBefore;
+      }
+      throw error;
+    }
     const written = lstatOrNull(fsImpl, resolved);
     if (keyBefore && fileKeyOf(written, resolved, fsImpl) !== keyBefore) {
       entry.replacedWhileWriting = true;
@@ -452,14 +497,18 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
     }
   }
 
+  // 删除批次目录（含账单原内容备份与列出完整路径的写出记录）：被扫描程序等短暂占用时有限重试（Codex 第八轮）；
+  //   仍失败时不影响结果，返回目录位置交调用方留痕（目录名不含业务信息）
   function cleanup() {
-    if (!backupDirectory) return;
-    try {
-      fsImpl.rmSync(backupDirectory, { recursive: true, force: true });
-    } catch (_error) {
-      // 临时目录清理失败不影响结果；系统临时目录由操作系统回收
-    }
+    if (!backupDirectory) return null;
+    const directory = backupDirectory;
     backupDirectory = null;
+    try {
+      fsImpl.rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      return null;
+    } catch (_error) {
+      return directory;
+    }
   }
 
   function reset() {
@@ -477,8 +526,8 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
     }
     reset();
     if (!failures.length) {
-      cleanup();
-      return { restored: true, failures, backupDirectory: null, manifestPath: null };
+      const cleanupFailedDirectory = cleanup();
+      return { restored: true, failures, backupDirectory: null, manifestPath: null, cleanupFailedDirectory };
     }
     const manifestPath = writeManifest(failures.reverse());
     const keptDirectory = backupDirectory;
@@ -488,7 +537,7 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
 
   function commit() {
     reset();
-    cleanup();
+    return { cleanupFailedDirectory: cleanup() };
   }
 
   // 批次失败：回滚后返回要抛出的错误。全部还原时为打了标记的原错误；还原不完整时为列出恢复清单的业务错误

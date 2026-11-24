@@ -26,6 +26,16 @@ function setup(t) {
 }
 
 const writeText = (filePath, text) => () => fs.writeFileSync(filePath, text);
+// 未启用开发者模式、也没有建链权限的 Windows 上创建符号链接报 EPERM：返回 false，由用例改用文件夹等其他非普通文件
+function trySymlink(target, linkPath) {
+  try {
+    fs.symlinkSync(target, linkPath);
+    return true;
+  } catch (error) {
+    if (process.platform === 'win32' && error && error.code === 'EPERM') return false;
+    throw error;
+  }
+}
 
 test('回滚：原有文件按首次写入前的内容原地还原，新建文件删除，备份目录清理', (t) => {
   const { root, staging } = setup(t);
@@ -191,7 +201,7 @@ test('恢复清单写不出时以首次写入时记下的写出记录代替', (t
   fs.renameSync(`${replaced}.tmp`, replaced);
   const outcome = journal.rollback();
   assert.equal(outcome.manifestPath, path.join(outcome.backupDirectory, RECORD_FILE_NAME));
-  assert.match(fs.readFileSync(outcome.manifestPath, 'utf8'), /1\. .*replaced\.xlsx\n {3}原有文件，原内容备份：001\.bak/);
+  assert.match(fs.readFileSync(outcome.manifestPath, 'utf8'), /1\. .*replaced\.xlsx\n {3}写前已有文件，原内容备份：001\.bak/);
   assert.equal(fs.readFileSync(path.join(outcome.backupDirectory, '001.bak'), 'utf8'), 'before');
 });
 
@@ -201,10 +211,10 @@ test('路径上是符号链接或文件夹时在写出前拒绝，不跟随链�
   const link = path.join(root, 'seed.json');
   const folder = path.join(root, 'folder.xlsx');
   fs.writeFileSync(realTarget, 'outside');
-  fs.symlinkSync(realTarget, link);
+  const linked = trySymlink(realTarget, link);
   fs.mkdirSync(folder);
   const journal = createStatementOutputJournal({ stagingRoot: staging });
-  for (const target of [link, folder]) {
+  for (const target of linked ? [link, folder] : [folder]) {
     let wrote = false;
     assert.throws(() => journal.write(target, () => { wrote = true; }), (error) => (
       error instanceof FileValidationError && error.code === 'STATEMENT_OUTPUT_TARGET_UNSAFE'
@@ -596,7 +606,7 @@ test('恢复清单按原因给出处理方式：路径已被替换或已是符�
   fs.writeFileSync(`${replaced}.tmp`, 'sync-client');
   fs.renameSync(`${replaced}.tmp`, replaced);
   fs.rmSync(linked);
-  fs.symlinkSync(elsewhere, linked);
+  if (!trySymlink(elsewhere, linked)) fs.mkdirSync(linked);
   const outcome = journal.rollback();
   t.after(() => fs.rmSync(outcome.backupDirectory, { recursive: true, force: true }));
   const manifest = fs.readFileSync(outcome.manifestPath, 'utf8');
@@ -604,4 +614,113 @@ test('恢复清单按原因给出处理方式：路径已被替换或已是符�
   assert.match(manifest, /replaced\.xlsx\n[^\n]*\n   原因：写出后已被其他程序修改或替换，未自动处理\n   处理方式：路径上的文件已被其他程序改动或替换，先保留现状/);
   assert.match(manifest, /linked\.xlsx\n[^\n]*\n   原因：路径上已不是普通文件，未自动处理\n   处理方式：路径上已是快捷方式（符号链接）或文件夹，不要直接覆盖或删除/);
   assert.equal(fs.readFileSync(elsewhere, 'utf8'), 'unrelated', '不经链接改写别处的文件');
+});
+
+// ---------- 第八轮审查 ----------
+
+const readFailure = () => () => { throw new FileValidationError('FILE_READ', '余额账单模板不可读，请重新确认'); };
+
+test('写出前读取失败（FILE_READ）且文件未变：撤销本次写入登记，回滚不读取也不改写该文件', (t) => {
+  const { root, staging } = setup(t);
+  const balance = path.join(root, 'balance.xlsx');
+  const fresh = path.join(root, 'fresh.xlsx');
+  const detail = path.join(root, 'detail.xlsx');
+  fs.writeFileSync(balance, 'before');
+  fs.writeFileSync(detail, 'detail-before');
+  let balanceReadable = true;
+  const fsImpl = { ...fs, openSync(filePath, ...rest) {
+    if (!balanceReadable && path.resolve(String(filePath)) === balance) throw Object.assign(new Error('EIO'), { code: 'EIO' });
+    return fs.openSync(filePath, ...rest);
+  } };
+  const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+  assert.throws(() => journal.write(balance, readFailure()), { code: 'FILE_READ' });
+  assert.throws(() => journal.write(fresh, readFailure()), { code: 'FILE_READ' });
+  journal.write(detail, writeText(detail, 'detail-after'));
+  const [batchDir] = fs.readdirSync(staging);
+  assert.deepEqual(fs.readdirSync(path.join(staging, batchDir)).filter((name) => name.endsWith('.bak')), ['003.bak'], '撤销登记的备份已删除，序号不复用');
+  // 回滚前：原有文件被其他程序原地更新、新路径上出现其他程序的文件；回滚时该原有文件读取报 EIO
+  fs.writeFileSync(balance, 'external-update');
+  fs.writeFileSync(fresh, 'external-new');
+  balanceReadable = false;
+  const outcome = journal.rollback();
+  balanceReadable = true;
+  assert.deepEqual([outcome.restored, outcome.failures], [true, []]);
+  assert.deepEqual([balance, fresh, detail].map((filePath) => fs.readFileSync(filePath, 'utf8')), ['external-update', 'external-new', 'detail-before']);
+});
+
+test('此前写成过的文件再次写出前读取失败：回到上次写后的状态，之后被原地更新时按写后被改动留给人工', (t) => {
+  const { root, staging } = setup(t);
+  const seed = path.join(root, 'HSBC.json');
+  fs.writeFileSync(seed, 'before');
+  const journal = createStatementOutputJournal({ stagingRoot: staging });
+  journal.write(seed, writeText(seed, 'record-1'));
+  assert.throws(() => journal.write(seed, readFailure()), { code: 'FILE_READ' });
+  fs.writeFileSync(seed, 'external-update-xx');
+  const outcome = journal.rollback();
+  t.after(() => fs.rmSync(outcome.backupDirectory, { recursive: true, force: true }));
+  assert.equal(outcome.restored, false);
+  assert.deepEqual(outcome.failures.map((item) => item.reason), ['写出后已被其他程序修改或替换，未自动处理']);
+  assert.equal(fs.readFileSync(seed, 'utf8'), 'external-update-xx', '不覆盖其他程序的更新');
+});
+
+test('写出回调改动了文件后才报 FILE_READ：仍按写到一半处理并还原', (t) => {
+  const { root, staging } = setup(t);
+  const target = path.join(root, 'balance.xlsx');
+  fs.writeFileSync(target, 'before');
+  const journal = createStatementOutputJournal({ stagingRoot: staging });
+  assert.throws(() => journal.write(target, () => {
+    fs.writeFileSync(target, 'partial-content');
+    return readFailure()();
+  }), { code: 'FILE_READ' });
+  assert.equal(journal.rollback().restored, true);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'before');
+});
+
+test('恢复清单写不出时：写出记录说明不是失败清单、「写前不存在」不代表由本批创建，报错消息与正式清单区分', (t) => {
+  const { root, staging } = setup(t);
+  const first = path.join(root, 'first.xlsx');
+  const second = path.join(root, 'second.xlsx');
+  const fullFs = { ...fs, writeFileSync(filePath, ...rest) {
+    if (path.basename(String(filePath)) === MANIFEST_FILE_NAME) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
+    return fs.writeFileSync(filePath, ...rest);
+  } };
+  const journal = createStatementOutputJournal({ fsImpl: fullFs, stagingRoot: staging });
+  journal.write(first, writeText(first, 'one'));
+  assert.throws(() => journal.write(second, () => {
+    fs.writeFileSync(second, 'partial');
+    throw Object.assign(new Error('EIO'), { code: 'EIO' });
+  }), { code: 'EIO' });
+  const { error, outcome } = journal.failBatch(Object.assign(new Error('EIO'), { code: 'EIO' }));
+  t.after(() => fs.rmSync(outcome.backupDirectory, { recursive: true, force: true }));
+  const record = fs.readFileSync(outcome.manifestPath, 'utf8');
+  assert.match(record, /本文件不是失败清单/);
+  assert.match(record, /first\.xlsx\n {3}写前不存在（不代表路径上现在的文件由本批创建）/);
+  assert.match(error.message, /恢复清单未能写出，请按写出记录逐个核对（记录列出本批全部写入尝试，不是失败清单）：/);
+});
+
+test('提交或全部还原后删除批次目录：短暂占用时重试，仍失败时返回目录位置留痕', (t) => {
+  const { root, staging } = setup(t);
+  const target = path.join(root, 'detail.xlsx');
+  fs.writeFileSync(target, 'before');
+  // 模拟被扫描程序短暂占用：不重试时报 EBUSY
+  const transientFs = { ...fs, rmSync(filePath, options) {
+    if (!(options && options.maxRetries > 0)) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+    return fs.rmSync(filePath, options);
+  } };
+  const committed = createStatementOutputJournal({ fsImpl: transientFs, stagingRoot: staging });
+  committed.write(target, writeText(target, 'after'));
+  assert.deepEqual(committed.commit(), { cleanupFailedDirectory: null });
+  assert.deepEqual(fs.readdirSync(staging), [], '备份与写出记录已删除');
+  const busyFs = { ...fs, rmSync(filePath, options) {
+    if (options && options.recursive) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+    return fs.rmSync(filePath, options);
+  } };
+  for (const finish of ['commit', 'rollback']) {
+    const journal = createStatementOutputJournal({ fsImpl: busyFs, stagingRoot: staging });
+    journal.write(target, writeText(target, 'again'));
+    const [directory] = fs.readdirSync(staging);
+    const result = journal[finish]();
+    assert.equal(result.cleanupFailedDirectory, path.join(staging, directory), finish);
+    fs.rmSync(path.join(staging, directory), { recursive: true, force: true });
+  }
 });

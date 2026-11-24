@@ -429,7 +429,7 @@ function createEnvironment(dir, label, overrides = {}) {
       return { status: 'captured' };
     },
     FILENAME_MAPPING_TEMPLATE_ID: '__FILENAME_MAPPING__',
-    appendActivityLogEntry: () => {},
+    appendActivityLogEntry: overrides.appendActivityLogEntry || (() => {}),
     extractManualBalancePromptWarning: generation.extractManualBalancePromptWarning,
     statementGenerationHelpers: generation,
     scopedMergedOutputFileName: fns.scopedMergedOutputFileName
@@ -1906,7 +1906,8 @@ function verifyOutputPathConcatenationConflict(dir) {
 function verifyMultiTemplateGenerationRollback(dir) {
   const faults = { writeCalls: 0, failWriteAt: 0, balanceCalls: 0, failBalanceAt: 0, mergeCalls: 0, failMergeAt: 0,
     seedCalls: 0, failSeedAt: 0, failSeedReadAt: 0, partialSeedWrites: 0, seedRecordsStored: 0, afterJournalWrite: null,
-    failTemplateReadAt: 0 };
+    failTemplateReadAt: 0, cleanupFailedDirectory: null };
+  const activityLog = [];
   // 在真实的种子读写处注入（balance-seed-store 经 fs.readFileSync / fs.writeFileSync 读写种子 JSON）：只拦截余额种子文件
   const isSeedFile = (target) => typeof target === 'string' && /[\\/]balance-seeds[\\/][^\\/]+\.json$/.test(target);
   const withPatchedFs = (method, replacement, use) => {
@@ -1932,9 +1933,15 @@ function verifyMultiTemplateGenerationRollback(dir) {
           const result = journal.write(filePath, writeFn);
           if (faults.afterJournalWrite) faults.afterJournalWrite(path.resolve(filePath));
           return result;
+        },
+        // 批次目录重试后仍未能删除（如被扫描程序长时间占用）
+        commit: () => {
+          const result = journal.commit();
+          return faults.cleanupFailedDirectory ? { cleanupFailedDirectory: faults.cleanupFailedDirectory } : result;
         }
       };
     },
+    appendActivityLogEntry: (entry) => activityLog.push(entry),
     storeGeneratedBalanceSeeds: (input, realStore) => {
       faults.seedCalls += 1;
       if (faults.failSeedAt && faults.seedCalls === faults.failSeedAt) {
@@ -2170,6 +2177,19 @@ function verifyMultiTemplateGenerationRollback(dir) {
   assertEq((env.imported[env.imported.length - 1].warnings || []).filter((warning) => warning.type === 'balance-generate-failed')
     .map((warning) => warning.message), ['余额账单模板不可读，请重新确认'], 'Step20.读余额模板失败：按「余额生成失败」告警');
 
+  // （5g）本批成功、批次临时备份重试后仍未能删除：照常提交，活动日志留痕只记目录位置（Codex 第八轮）
+  const sessionsBeforeCleanupFault = env.removedSessionPaths.length;
+  const logsBeforeCleanupFault = activityLog.length;
+  faults.cleanupFailedDirectory = path.join(dir, 'statement-rollback-step20');
+  writeSource(fileA, 'A', [['2026-09-01', 'M001', 'USD', '22', '']]);
+  writeSource(fileB, 'B', [['2026-09-01', 'M002', 'USD', '32', '']]);
+  const cleanupFaultError = run([env.entryFor(templateA, fileA), env.entryFor(templateB, fileB)]);
+  faults.cleanupFailedDirectory = null;
+  assertEq([cleanupFaultError, env.removedSessionPaths.length], [null, sessionsBeforeCleanupFault + 1], 'Step20.临时备份未能删除：本批照常提交');
+  assertEq(activityLog.slice(logsBeforeCleanupFault).filter((entry) => /临时备份未能删除/.test(entry.message))
+    .map((entry) => [entry.level, entry.details]), [['warning', [`目录：${path.join(dir, 'statement-rollback-step20')}`]]],
+  'Step20.临时备份未能删除：活动日志留痕只记目录位置');
+
   // （5c）第二组的余额种子路径是文件夹：首次读取种子前拦下、整批回滚，不转成「余额生成失败」告警提交第一组的新种子与缺组的余额
   const templateE = env.defineTemplate('目录种子-E', 'B');
   const directorySeed = path.join(env.storageRoot, 'balance-seeds', '目录种子.json');
@@ -2181,7 +2201,7 @@ function verifyMultiTemplateGenerationRollback(dir) {
   const directoryError = run([env.entryFor(templateA, fileA), env.entryFor(templateE, fileE)]);
   assertEq(directoryError && directoryError.code, 'STATEMENT_OUTPUT_TARGET_UNSAFE', 'Step20.种子路径是文件夹：整批拦下');
   assertEq(snapshot(), beforeDirectorySeed, 'Step20.种子路径是文件夹：第一组的输出与新种子还原');
-  assertEq(env.removedSessionPaths.length, sessionsBeforeTemplateFault + 1, 'Step20.种子路径是文件夹时不替换旧会话条目');
+  assertEq(env.removedSessionPaths.length, sessionsBeforeCleanupFault + 1, 'Step20.种子路径是文件夹时不替换旧会话条目');
   fs.rmSync(directorySeed, { recursive: true, force: true });
 
   // （6）同一账户跨组的余额链：C 组 09-01、D 组 09-02 同为 M009/USD，D 组的上期余额取 C 组本批写入的种子。
@@ -2297,7 +2317,8 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
     return { result, cleared: sideEffects.includes('clearGeneratedExports'), report: scope.lastErrorReport };
   };
   // 完成大账号选择后的执行入口：生成前后的同一处理（在会话准备处注入写出期间的失败）
-  const runSelectionExecute = async (thrown, { templateName = '按文件名映射', ...options } = {}) => {
+  //   multiTemplate：两份文件匹配到不同模板，在多模板分组生成处注入失败（与真实入口相同的分支）
+  const runSelectionExecute = async (thrown, { templateName = '按文件名映射', multiTemplate = false, ...options } = {}) => {
     const sideEffects = [];
     const scope = createScope(sideEffects, thrown, { ...options, extra: {
       checkImportConfigGuard: () => null,
@@ -2305,7 +2326,17 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
       requirePendingBigAccountSelection: () => ({
         templateId: 1, template: { name: templateName }, mappings: [], orderedTargetFields: [], fileEntries: []
       }),
-      getOrCreateStatementImportSession: () => { throw thrown; }
+      getOrCreateStatementImportSession: () => {
+        if (multiTemplate) return { key: 'step20b' };
+        throw thrown;
+      },
+      ...(multiTemplate ? {
+        applyBigAccountAssignmentsToFileEntries: (entries) => entries,
+        applyConfirmedDuplicateRowFilter: () => ({ entries: [{ matchedTemplateId: 1 }, { matchedTemplateId: 2 }] }),
+        isFilenameMappingMode: () => true,
+        resolvePendingReplacePaths: () => [],
+        generateMultiTemplateGroupFiles: () => { throw thrown; }
+      } : {})
     } });
     const handler = scope.nested('completeBigAccountSelectionHandler');
     const result = await handler.execute(null, {
@@ -2348,13 +2379,18 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
     assertTrue(unreported.result.message.includes(`恢复清单：${outcome.manifestPath}`),
       `Step20b.${label}：报错文件写不出时消息仍给出恢复清单位置：${unreported.result.message}`);
   }
-  // 完成大账号选择后还原不完整：首个匹配模板的真实名称（可能含完整账号）不写入报错文件与活动日志（Codex 第七轮）
-  const captured = [];
-  const named = await runSelectionExecute(incompleteError, { templateName: '中行-6222020200012345678', captured });
-  assertTrue(named.result.message.includes('未能自动还原'), `Step20b.前置：完成大账号选择后还原不完整：${named.result.message}`);
-  assertTrue(captured.length >= 1 && !JSON.stringify(captured).includes('6222020200012345678')
-    && JSON.stringify(captured).includes('按文件名映射模板'),
-  `Step20b.还原不完整时报错文件与活动日志用固定名称，不含真实模板名：${JSON.stringify(captured).slice(0, 300)}`);
+  // 完成大账号选择后多模板生成失败（还原不完整、导出位置不安全且已完整还原）：首个匹配模板的真实名称（可能含完整账号）
+  //   不写入报错文件与活动日志（Codex 第七、八轮）
+  const unsafeError = failedError(new FileValidationError('STATEMENT_OUTPUT_TARGET_UNSAFE',
+    '导出位置有同名的快捷方式（符号链接）或文件夹，无法安全覆盖，请移走后重新导入', { detailLines: [`所在目录：${dir}`] })).error;
+  for (const [label, thrown, expected] of [['还原不完整', incompleteError, '未能自动还原'], ['导出位置不安全', unsafeError, '无法安全覆盖']]) {
+    const captured = [];
+    const named = await runSelectionExecute(thrown, { templateName: '中行-6222020200012345678', multiTemplate: true, captured });
+    assertTrue(named.result.message.includes(expected), `Step20b.前置：完成大账号选择后${label}：${named.result.message}`);
+    assertTrue(captured.length >= 1 && !JSON.stringify(captured).includes('6222020200012345678')
+      && JSON.stringify(captured).includes('按文件名映射模板'),
+    `Step20b.${label}时报错文件与活动日志用固定名称，不含真实模板名：${JSON.stringify(captured).slice(0, 300)}`);
+  }
   fs.rmSync(outcome.backupDirectory, { recursive: true, force: true });
 }
 

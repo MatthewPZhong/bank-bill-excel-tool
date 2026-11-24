@@ -13834,6 +13834,21 @@ function generateMultiTemplateGroupFiles({
   // v3.2.22 B45：逐组写出与合并期间任一步失败（如文件被占用、合并失败）时，按写出记录还原本批已写的明细 / 余额 /
   //   合并文件与余额种子，再原样抛出；旧会话条目在全部组与合并成功后才替换。后组仍可读取前组刚写的种子（同批语义不变）。
   const outputJournal = createStatementOutputJournal();
+  // 批次临时备份（含账单原内容）重试后仍未能删除时留痕，只记目录位置（目录名不含业务信息，Codex 第八轮）
+  const noteStatementBackupCleanupFailure = (directory) => {
+    if (!directory) return;
+    try {
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'statement',
+        message: '网银多模板生成的临时备份未能删除，含账单原内容，请手动删除该目录',
+        details: [`目录：${directory}`]
+      });
+    } catch (_logError) {
+      // 留痕尽力而为，不影响本批结果
+    }
+  };
   let mergedDetail = null;
   let mergedBalance = null;
   let balancePending = false;
@@ -13926,9 +13941,10 @@ function generateMultiTemplateGroupFiles({
         // 同上
       }
     }
+    noteStatementBackupCleanupFailure(outcome.cleanupFailedDirectory);
     throw failure;
   }
-  outputJournal.commit();
+  noteStatementBackupCleanupFailure(outputJournal.commit().cleanupFailedDirectory);
 
   // 全部组与合并成功后才替换旧会话条目（v3.2.22 B45）
   if (Array.isArray(replacePaths)) {
@@ -17972,6 +17988,8 @@ function registerFileHandlers() {
     clearPendingBigAccountSelection(prepared.contextId);
     statementDuplicateReview.clear();
     const { isFixedMode, normalizedAssignments, rememberOrder } = prepared;
+    // 按文件名映射的多模板分组生成：报错文件名、上下文与活动日志用固定名称（见下方错误处理）
+    let multiTemplateGeneration = false;
     try {
       const session = getOrCreateStatementImportSession({
         statementImportSessions,
@@ -18002,6 +18020,7 @@ function registerFileHandlers() {
         resolvedFileEntries.map((entry) => entry.matchedTemplateId || 0)
       );
       if (isFilenameMappingMode(pendingContext.templateId) && distinctTemplateIds.size > 1) {
+        multiTemplateGeneration = true;
         const { lastResult, lastBatchId, lastGenerationTemplateConfig } = generateMultiTemplateGroupFiles({
           fileEntries: resolvedFileEntries,
           fallbackTemplateConfig,
@@ -18114,9 +18133,9 @@ function registerFileHandlers() {
           || error.code === 'CHANNEL_BALANCE_ROWS_INCOMPLETE'
           ? createDetailedErrorResult
           : (error.code === 'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE' ? createRollbackIncompleteErrorResult : createErrorResult);
-        // v3.2.22 B45（Codex 第七轮）：还原不完整只出现在按文件名映射的多模板生成，报错文件名、上下文与活动日志用固定名称
-        //   （与直接导入入口相同），不写入首个匹配模板的真实名称（可能含完整账号）
-        const reportTemplateName = error.code === 'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE' ? '按文件名映射模板' : pendingContext.template.name;
+        // v3.2.22 B45（Codex 第七、八轮）：多模板分组生成的错误（还原不完整、导出位置不安全、写出期间被改动等）报错文件名、
+        //   上下文与活动日志用固定名称（与直接导入入口相同），不写入首个匹配模板的真实名称（可能含完整账号）
+        const reportTemplateName = multiTemplateGeneration ? '按文件名映射模板' : pendingContext.template.name;
         return buildResult({
           step: '选择大账号',
           message: error.message,
