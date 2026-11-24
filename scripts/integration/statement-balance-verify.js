@@ -177,6 +177,7 @@ function loadRegenerateFunction(deps) {
     buildStatementGenerationConfig: deps.buildStatementGenerationConfig,
     buildPreparedStatementBatchFromEntries: deps.buildPreparedStatementBatchFromEntries,
     assertStatementBatchWritable: deps.statementGenerationHelpers.assertStatementBatchWritable,
+    assertNoCollectedUnwritableText: deps.statementGenerationHelpers.assertNoUnwritableRowText,
     FileValidationError
   });
   const assertVirtualTemplateBalanceOutputPaths = loadMainFunction('assertVirtualTemplateBalanceOutputPaths', {
@@ -254,6 +255,7 @@ function createMultiTemplateHarness({ storageRoot, outputDir, templates, fileEnt
     rebuildMatchedTemplateFileEntries: ({ fileEntries: entries }) => entries,
     buildPreparedStatementBatchFromEntries: generation.buildPreparedStatementBatchFromEntries,
     assertStatementBatchWritable: generation.assertStatementBatchWritable,
+    assertNoCollectedUnwritableText: generation.assertNoUnwritableRowText,
     FileValidationError,
     removeStatementSessionEntriesByFilePath: () => {},
     generateStatementFiles: generation.generateStatementFiles,

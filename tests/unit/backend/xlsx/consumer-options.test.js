@@ -80,7 +80,8 @@ test('消费方有效预算、覆盖规则和 R3/R4 差异保持固定基线合�
     const rows = [];
     assert.deepEqual(await streamLinkedRowsToInsert(filename, { expectedHeaders: ['列A', '列B'] }, (row) => rows.push(row)), { matched: true });
     assert.deepEqual(rows, [{ 列A: '0001', 列B: '1000.00' }]);
-    assert.deepEqual(calls.at(-1), { colCount: 2 });
+    // v3.2.22 B113：链接表流式导入还原 OOXML 文本转义（与非流式读取一致）；工具箱入口不还原
+    assert.deepEqual(calls.at(-1), { colCount: 2, decodeTextEscapes: true });
     const toolbox = source('main-process/toolbox-stream-io');
     const data = [];
     assert.equal((await toolbox.streamDataRows(filename, (row) => data.push(row))).dataRowCount, 1);

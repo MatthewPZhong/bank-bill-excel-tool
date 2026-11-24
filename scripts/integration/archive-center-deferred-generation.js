@@ -97,8 +97,9 @@ function loadMainHandlers({ storageRoot, database }) {
       return { status: 'error', message: options.message, errorReportReady: true, errorReportFileName: 'report.txt' };
     }
   };
-  Function(...Object.keys(scope), `${MAIN_FRAGMENT}\nreturn null;`)(...Object.values(scope));
-  return { contracts, activity, errorResults };
+  // 导出缓存经 getter 取：新开账户成功时会整体替换 lastGeneratedExports
+  const getExports = Function(...Object.keys(scope), `${MAIN_FRAGMENT}\nreturn () => lastGeneratedExports;`)(...Object.values(scope));
+  return { contracts, activity, errorResults, getExports };
 }
 
 function createLifecycle(service, controller) {
@@ -210,7 +211,7 @@ async function run() {
         ? [{ merchantId: '6222000011112222', currency: 'USD' }, ...extraBigAccounts]
         : [])
     };
-    const { contracts, activity, errorResults } = loadMainHandlers({ storageRoot, database });
+    const { contracts, activity, errorResults, getExports } = loadMainHandlers({ storageRoot, database });
     const balanceHeaders = extractHeaders(path.resolve(__dirname, '../../assets/余额账单模版.xlsx'));
     const accountColumn = balanceHeaders.indexOf('银行账号');
     const balanceColumn = balanceHeaders.indexOf('期末余额');
@@ -323,6 +324,7 @@ async function run() {
     //   不改报「装配月度余额账单失败」系统错误；不留下输出文件
     {
       const label = 'Step3b.月度余额含无法写入的字符';
+      assertTrue(Boolean(getExports().monthlyBalance), `${label}.前置：Step3 装配成功后有待导出的月度余额`);
       extraBigAccounts.push({ merchantId: '62220000\uFFFF', currency: 'USD' });
       writeBalanceSeedRecords(storageRoot, '测试银行', [
         { merchantId: '6222000011112222', currency: 'USD', billDate: '2026-09-30', endBalance: 1234.56,
@@ -350,6 +352,7 @@ async function run() {
       const leftovers = fs.existsSync(exportsDir) ? fs.readdirSync(exportsDir).filter((name) => /2026-10|202610/.test(name)) : [];
       assertEq(leftovers, [], `${label}.不留下输出文件`);
       assertNoBatch(service, { label, taskRunId, batchContext: run.batchContext, initialPlan: run.initialPlan });
+      assertEq(getExports().monthlyBalance, null, `${label}.装配失败后不再保留上一期的待导出文件`);
       extraBigAccounts.length = 0;
     }
 

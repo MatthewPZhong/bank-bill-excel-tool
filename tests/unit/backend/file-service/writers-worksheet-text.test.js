@@ -195,9 +195,28 @@ test('余额账单预检 assertBalanceRecordsWritable：不构造工作表，报
   }
   assert.equal(captured(() => assertBalanceRecordsWritable({ records: [['ok', 'USD', 'n']], templateFields })), null);
   assert.equal(captured(() => assertBalanceRecordsWritable({ records: [], templateFields })), null, '显式空数组可写出');
-  for (const records of [null, undefined, { length: 0 }]) {
+  for (const records of [null, undefined, { length: 0 }, new Uint8Array([1])]) {
     assert.throws(() => assertBalanceRecordsWritable({ records, templateFields }), TypeError);
     assert.throws(() => writeBalanceWorkbook({ templateFilePath, records, templateFields, outputFilePath }), TypeError);
     assert.equal(fs.existsSync(outputFilePath), false, '无效记录不当作空账单写出');
   }
+});
+
+// v3.2.22 B113（Codex 第六轮）：本应用写出的明细交给链接表流式导入（BizId 幂等键）时，读回原文，与非流式读取一致
+test('writeWorkbookRows 写出后经链接表流式导入：字面 _xHHHH_ 与回车读回原文，与非流式读取一致；默认不还原（工具箱通道不变）', async (t) => {
+  const { streamLinkedRowsToInsert } = require('../../../../src/main-process/linked-table-stream-source');
+  const { readXlsxStreamed } = require('../../../../src/backend/xlsx/legacy/streaming-xlsx-reader');
+  const dir = createTempDir(t);
+  const outputFilePath = path.join(dir, 'linked.xlsx');
+  const rows = [['BizId', '备注'], ['TX_x0041_', 'REF_x0041\r\nB'], ['_x005F_', 'plain']];
+  writeWorkbookRows({ rows, outputFilePath });
+  const streamed = [];
+  assert.deepEqual(await streamLinkedRowsToInsert(outputFilePath, { expectedHeaders: ['BizId', '备注'] }, (row) => streamed.push(row)),
+    { matched: true });
+  const values = streamed.map((row) => (Array.isArray(row) ? row : [row.BizId, row['备注']]));
+  assert.deepEqual(values, rows.slice(1), '流式导入读回原文');
+  assert.deepEqual(readRows(outputFilePath).slice(1), rows.slice(1), '非流式读取同样读回原文');
+  const raw = [];
+  await readXlsxStreamed(outputFilePath, (cells) => raw.push(cells), { colCount: 2 });
+  assert.equal(raw[1][0], 'TX_x005F_x0041_', '默认不还原（既有调用方行为不变）');
 });

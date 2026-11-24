@@ -189,13 +189,16 @@ function createStatementGenerationHelpers(deps) {
   //   账单日期，出余额时组配置须映射 MerchantId），只扫描、不复制明细行。多组生成（导入、补录重算、「导出全部」）在写出
   //   任何组、移除旧会话条目之前逐组调用，避免前几组的明细、余额与当日种子已落盘，后一组才失败。
   //   detailRowsList 按 mergeMappedDetailRows 的口径合并（首段表头为准，行号取合并后的 rowMetas）。
+  //   unwritableText 可选（v3.2.22 B113，Codex 第六轮）：多组校验共用的计数，传入时只记下无法写入的字符、不在本组抛出，
+  //   由调用方在各组校验完后一并拒绝（列出全批前 20 处与总数，修完一组才看到下一组的问题）
   function assertStatementRowsWritable({
     config,
     detailRowsList = [],
     inputFilePaths = [],
     balanceRequested = false,
     balanceModeByAccount = null,
-    includeBalance = null
+    includeBalance = null,
+    unwritableText: sharedUnwritableText = null
   }) {
     const segments = detailRowsList.filter((rows) => Array.isArray(rows) && rows.length > 0);
     const headerRow = segments.length && Array.isArray(segments[0][0]) ? segments[0][0] : [];
@@ -226,7 +229,7 @@ function createStatementGenerationHelpers(deps) {
     };
     const exported = { hasRow: false, hasValidDate: false, dateError: null };
     // v3.2.22 B113：导出行里无法原样写入工作表的文本（按最终明细，含回填的大账号），与 generateStatementFiles 写出前同口径
-    const unwritableText = { total: 0, labels: [] };
+    const unwritableText = sharedUnwritableText || { total: 0, labels: [] };
     const all = { hasValidDate: false, dateError: null };
     const checkDate = (state, raw) => {
       if (state.dateError || billDateIndex === undefined) return;
@@ -266,7 +269,7 @@ function createStatementGenerationHelpers(deps) {
     const dateState = exported.hasRow ? exported : all;
     if (dateState.dateError) throw dateState.dateError;
     if (!dateState.hasValidDate) throw noValidBillDateError();
-    assertNoUnwritableRowText(unwritableText);
+    if (!sharedUnwritableText) assertNoUnwritableRowText(unwritableText);
     const shouldGenerateBalance = includeBalance === null
       ? Boolean(balanceRequested)
       : Boolean(includeBalance) && Boolean(balanceRequested);
@@ -276,27 +279,29 @@ function createStatementGenerationHelpers(deps) {
   }
 
   // 已构建的批次（导入多组生成、补录重算）
-  function assertStatementBatchWritable({ config, preparedBatch, includeBalance = null }) {
+  function assertStatementBatchWritable({ config, preparedBatch, includeBalance = null, unwritableText = null }) {
     assertStatementRowsWritable({
       config,
       detailRowsList: [preparedBatch.detailRows],
       inputFilePaths: preparedBatch.inputFilePaths || [],
       balanceRequested: preparedBatch.balanceRequested,
       balanceModeByAccount: preparedBatch.balanceModeByAccount || null,
-      includeBalance
+      includeBalance,
+      unwritableText
     });
   }
 
   // 尚未构建批次的条目（「导出全部」执行时的校验）：与 buildPreparedStatementBatchFromEntries 加
   //   balancePlan（resolveEntryBalancePlan 的结果，null 表示不按账户分方式）构建出的批次同口径
-  function assertStatementEntriesWritable({ config, fileEntries = [], balancePlan = null, includeBalance = null }) {
+  function assertStatementEntriesWritable({ config, fileEntries = [], balancePlan = null, includeBalance = null, unwritableText = null }) {
     assertStatementRowsWritable({
       config,
       detailRowsList: fileEntries.map((entry) => entry.detailRows),
       inputFilePaths: fileEntries.map((entry) => entry.filePath),
       balanceRequested: balancePlan ? balancePlan.hasEffectiveRow : config.balanceRequested,
       balanceModeByAccount: balancePlan ? balancePlan.modeByAccount : null,
-      includeBalance
+      includeBalance,
+      unwritableText
     });
   }
 
@@ -1113,6 +1118,7 @@ function createStatementGenerationHelpers(deps) {
   return {
     assertStatementBatchWritable,
     assertStatementEntriesWritable,
+    assertNoUnwritableRowText,
     attachDuplicateDropped,
     buildImportResultFromGeneratedFiles,
     buildPreparedBatchFromStatementSession,

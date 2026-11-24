@@ -49,6 +49,14 @@ function xmlUnescape(s) {
 //   若漏的是「对账金额」列 → 后续按空值计 0 → 少算发生额 + 错期末 OP（不报错的静默资金事故）。
 //   改为：先匹配整个 <c> 标签取 attrs（分支1 自闭合 / 分支2 带 body），再用 CELL_R_RE/extractTypeFromAttrs
 //   从 attrs 任意位置提取 r、t，不依赖属性顺序。
+// OOXML 文本转义 _xHHHH_ 还原为对应字符（Excel 与 SheetJS 读取时的口径；字面下划线写成 _x005F_）。
+//   只在调用方要求时（decodeTextEscapes）用：工具箱大文件通道的写出端（excel-text.js，B134）尚未转义字面 _xHHHH_，
+//   其读写目前按原文往返，单独还原会使字面 _xHHHH_ 写出后被 Excel 读成别的字符
+function decodeOoxmlTextEscapes(value) {
+  if (typeof value !== 'string' || value.indexOf('_x') < 0 && value.indexOf('_X') < 0) return value;
+  return value.replace(/_[xX]([0-9A-Fa-f]{4})_/g, (_match, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
 const CELL_OPEN_RE = /<c\b([^>]*?)\/>|<c\b([^>]*?)>([\s\S]*?)<\/c>/g;
 const CELL_R_RE = /\br="([A-Z]+)\d+"/;   // 从 attrs 提取列字母（r 可在任意位置）
 const T_CONTENT_RE = /<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g;
@@ -216,7 +224,12 @@ function siInnerToText(inner) {
 //            在开始扫描前仍须完整读取 ZIP 和 SST，整体内存/耗时不受 maxRows 有界约束。
 //            缺省（undefined/0/负数）= 不设上限，全量扫描（既有调用方行为 100% 不变）。
 //   返回值新增 truncated：true 表示因 maxRows 提前终止（文件可能还有更多行），全量读时为 false。
-async function readXlsxStreamed(filePath, onRow, { colCount = 31, maxRows = 0 } = {}) {
+//   decodeTextEscapes 可选（v3.2.22 B113）：为 true 时把单元格文本中的 OOXML 转义 _xHHHH_ 还原（与 SheetJS / Excel 读取
+//            同一口径；本应用的 XLSX 写出端已把字面 _xHHHH_ 写成 _x005F_xHHHH_）。缺省不还原（既有调用方行为不变）。
+async function readXlsxStreamed(filePath, onRowCallback, { colCount = 31, maxRows = 0, decodeTextEscapes = false } = {}) {
+  const onRow = decodeTextEscapes
+    ? (cells, rowIdx) => onRowCallback(cells.map(decodeOoxmlTextEscapes), rowIdx)
+    : onRowCallback;
   // v3.0.4 块 A · A1：在 JSZip.loadAsync 之前预检 entry 解压尺寸（≥2^31 → 抛明确中文错误，
   //   不再让 JSZip 抛 `uncompressed data size mismatch` 天书）；预检自身失败时 fail-open 放行。
   //   PR#71 二轮 codex review（P2）：本 reader 硬编码只 inflate xl/worksheets/sheet1.xml（下方第一句）
@@ -336,6 +349,7 @@ module.exports = {
   parseRowXml,
   parseCellBody,
   lettersToIndex,
+  decodeOoxmlTextEscapes,
   xmlUnescape,
   // v2.1.12 需求1：vcc-op-calc reader 复用（JSZip + central directory 解析，支持 data descriptor）
   readSharedStrings

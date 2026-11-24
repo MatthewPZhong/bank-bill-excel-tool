@@ -12914,6 +12914,11 @@ function assertStatementEntriesWritable(options) {
   return statementGenerationHelpers.assertStatementEntriesWritable(options);
 }
 
+// v3.2.22 B113：多组校验共用计数记下的无法写入的字符，各组校验完后一并拒绝（列出全批前 20 处与总数）
+function assertNoCollectedUnwritableText(found) {
+  return statementGenerationHelpers.assertNoUnwritableRowText(found);
+}
+
 // v1.5.2 #9 修复：按文件名映射模板导入多个文件匹配不同模板时，按 matchedTemplateId 分组，
 // 每组独立生成明细+余额文件，确保余额账单的银行名称/所在地使用各自模板的值。
 // v1.5.2：合并多组生成的 xlsx 文件（直接操作单元格，保留日期/数字格式）
@@ -13478,6 +13483,8 @@ function planVirtualTemplateBalanceRegeneration(session, scope = 'all') {
   const balanceModeConflictGroups = [];
   const balanceRowIssueGroups = [];
   const issueLineBudget = { remaining: 200 };
+  // 各组无法写入的字符共用计数，校验完一并拒绝
+  const unwritableText = { total: 0, labels: [] };
   // 其他组的错误（如映射失效）暂存，先完成各渠道的余额校验；有渠道余额错误时优先报出，否则照常抛出
   let otherError = null;
   for (const group of generationGroups) {
@@ -13508,7 +13515,7 @@ function planVirtualTemplateBalanceRegeneration(session, scope = 'all') {
         issueLineBudget
       });
       // 写出前的检查（收支同时有值、账单日期等）在任何组写出余额与种子之前做完
-      assertStatementBatchWritable({ config: groupGenConfig, preparedBatch: groupPreparedBatch, includeBalance: true });
+      assertStatementBatchWritable({ config: groupGenConfig, preparedBatch: groupPreparedBatch, includeBalance: true, unwritableText });
       groupPlans.push({ config: groupGenConfig, preparedBatch: groupPreparedBatch });
     } catch (error) {
       // v3.2.21（D3）：补录重算同样汇总各渠道的冲突账户与缺字段的行，在写种子、生成之前一并阻断
@@ -13531,6 +13538,7 @@ function planVirtualTemplateBalanceRegeneration(session, scope = 'all') {
     throw buildChannelBalancePlanningError(balanceModeConflictGroups, balanceRowIssueGroups);
   }
   if (otherError) throw otherError;
+  assertNoCollectedUnwritableText(unwritableText);
   return { scope, generationGroups, groupPlans, skippedGroups };
 }
 
@@ -13681,6 +13689,8 @@ function generateMultiTemplateGroupFiles({
   const isMultiBigAccountConfig = (config) => normalizeCell((config.exportMappings || []).find(
     (m) => normalizeCell(m.templateField) === 'MerchantId'
   )?.mappedField) === multiBigAccountMarker;
+  // 各组无法写入的字符共用计数，校验完一并拒绝（Codex 第六轮）
+  const unwritableText = { total: 0, labels: [] };
   // 其他组的错误（如映射失效）暂存，先完成各渠道的余额校验；有渠道余额错误时优先报出，否则照常抛出
   let otherError = null;
   for (const group of generationGroups) {
@@ -13756,7 +13766,7 @@ function generateMultiTemplateGroupFiles({
         issueLineBudget
       });
       // 写出前的检查（收支同时有值、账单日期等）在任何组写出、移除旧会话条目之前做完
-      assertStatementBatchWritable({ config: groupConfig, preparedBatch: groupPreparedBatch });
+      assertStatementBatchWritable({ config: groupConfig, preparedBatch: groupPreparedBatch, unwritableText });
 
       groupPlans.push({
         groupTemplateConfig,
@@ -13784,6 +13794,7 @@ function generateMultiTemplateGroupFiles({
     throw buildChannelBalancePlanningError(balanceModeConflictGroups, balanceRowIssueGroups);
   }
   if (otherError) throw otherError;
+  assertNoCollectedUnwritableText(unwritableText);
 
   // 所有组先完成 source-stable 解析，再进入 session/输出副作用。
   // v3.2.15（release 复审）：进入副作用前，按各组实际生成用的配置整批核对输出名称。等待确认期间配置可能已变化，
@@ -14514,6 +14525,8 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
       const balanceModeConflictGroups = [];
       const balanceRowIssueGroups = [];
       const issueLineBudget = { remaining: 200 };
+      // 各组无法写入的字符共用计数，校验完一并拒绝（Codex 第六轮）
+      const unwritableText = { total: 0, labels: [] };
       // 其他组的错误（如映射缺字段）暂存，先完成各渠道的余额校验；有渠道余额错误时优先返回，否则照常抛出
       let otherError = null;
       for (const group of generationGroups) {
@@ -14545,7 +14558,8 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
             config: groupGenConfig,
             fileEntries: groupEntries,
             balancePlan,
-            includeBalance: kind === 'balance'
+            includeBalance: kind === 'balance',
+            unwritableText
           });
         } catch (error) {
           if (error && error.code === 'CHANNEL_BALANCE_MODE_MISMATCH' && Array.isArray(error.conflictGroups)) {
@@ -14580,6 +14594,7 @@ async function exportStatementByScope(kind, scope = 'auto', savePath) {
         });
       }
       if (otherError) throw otherError;
+      assertNoCollectedUnwritableText(unwritableText);
       for (const { templateConfig, groupGenConfig, groupEntries, balancePlan } of exportGroupPlans) {
         lastGroupTemplateConfig = templateConfig;
         const tid = templateConfig.template.id;
@@ -18617,6 +18632,9 @@ function registerFileHandlers() {
         }
       };
     } catch (error) {
+      // 装配失败：与装配结果为空时一样清除待导出引用（不删除已归档的上一份文件），之后的「导出」不再拿到上一期的文件
+      //   （Codex 第六轮；rules/important-variables.md 导出缓存生命周期）
+      lastGeneratedExports.monthlyBalance = null;
       // v3.2.22 B113：业务校验错误（如余额记录含无法写入 Excel 的字符）把消息与逐处位置交给弹窗和报错文件，不改报系统错误
       if (error instanceof FileValidationError) {
         return createDetailedErrorResult({

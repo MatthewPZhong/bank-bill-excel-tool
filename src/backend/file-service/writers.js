@@ -310,6 +310,8 @@ function writeWorkbookRows({ rows, outputFilePath, sheetName = 'COMMON' }, forma
 
 // 余额记录按表头列数截断 / 补齐（写出与预检同一口径）。records 须为数组：null 等无效输入照旧在落盘前失败，不当作空账单写出
 function normalizeBalanceRecords(records, columnCount) {
+  // 显式要求数组：带 map 的非数组（如类型化数组）不当作记录写出（Codex 第六轮）
+  if (!Array.isArray(records)) throw new TypeError('余额记录必须是数组');
   return records.map((row) => {
     const normalizedRow = Array.isArray(row) ? row.slice(0, columnCount) : [];
     while (normalizedRow.length < columnCount) normalizedRow.push('');

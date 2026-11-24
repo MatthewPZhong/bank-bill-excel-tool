@@ -201,7 +201,8 @@
     //
     // 参数：
     //   onAssembleReady(summary) —— 装配成功后由调用方（handleExportBalance 分流）接收 summary 更新 state
-    function createMonthlyBalanceExportDialog({ onAssembleReady } = {}) {
+    //   onAssembleFailed(result) —— 装配失败（status === 'error'）时调用，调用方据此更新状态框（如报错文件可导出）
+    function createMonthlyBalanceExportDialog({ onAssembleReady, onAssembleFailed } = {}) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card alert-card monthly-balance-export-card';
@@ -358,7 +359,9 @@
           }));
           return;
         }
-        // status === 'error' 或其它失败；业务校验错误（如记录含无法写入 Excel 的字符）一并列出逐处位置（v3.2.22 B113）
+        // status === 'error' 或其它失败；业务校验错误（如记录含无法写入 Excel 的字符）一并列出逐处位置（v3.2.22 B113）。
+        //   状态框同步失败结果：主进程已生成报错文件时，关掉弹窗后点击状态框可导出（Codex 第六轮）
+        if (result && result.status === 'error' && typeof onAssembleFailed === 'function') onAssembleFailed(result);
         const lines = [result?.message || '装配月度余额账单失败']
           .concat(Array.isArray(result?.detailLines) ? result.detailLines : []);
         const text = lines.map((line) => String(line).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch])).join('<br/>');

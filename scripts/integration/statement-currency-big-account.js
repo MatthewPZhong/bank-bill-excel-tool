@@ -339,6 +339,7 @@ function createEnvironment(dir, label) {
     'generateMultiTemplateGroupFiles',
     'assertStatementBatchWritable',
     'assertStatementEntriesWritable',
+    'assertNoCollectedUnwritableText',
     'planVirtualTemplateBalanceRegeneration',
     'assertVirtualTemplateBalanceOutputPaths',
     'regenerateVirtualTemplateBalanceFromSession',

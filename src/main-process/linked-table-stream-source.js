@@ -51,7 +51,8 @@ async function streamLinkedRowsToInsert(filePath, signature, insertOne, transfor
       obj[headerName] = normalizeCell(cell === undefined ? '' : cell);
     }
     insertOne(xform(obj));
-  }, { colCount: expected.length });
+    // v3.2.22 B113：与非流式读取（SheetJS）同样还原 OOXML 文本转义，同一笔交易两条路径导入得到同一个 BizId
+  }, { colCount: expected.length, decodeTextEscapes: true });
 
   return { matched: colOffset >= 0 };
 }
