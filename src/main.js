@@ -122,6 +122,7 @@ const {
   assertFilePlanFresh,
   normalizeFilePlanV1
 } = require('./main-process/archive-center/file-plan');
+const { targetParentIdentitiesMatch } = require('./main-process/archive-center/target-parent-identity');
 const {
   createArchiveService
 } = require('./main-process/archive-center/archive-service');
@@ -22602,28 +22603,39 @@ function assertToolboxTargetsDoNotAliasSources(sourcePaths, targetPaths) {
   }
 }
 
-// v3.2.22 B57：保存框 / 目录选择返回后先只冻结目标（目标快照与父目录身份），再访问输入（别名检查、输入快照）；
-//   完整计划规范化之后再按先冻结的证据核对当前目标（父目录身份按首次冻结的可靠性比较：首次不可靠时只核对路径）：
-//   核对通过即说明完整计划采到的目标与先冻结的一致。返回完整计划本身（契约层只沿用 Main 登记过的冻结计划）。
-//   输入多或在网络盘上时，遍历输入期间外部新建、替换（含建成文件夹）的目标不被当作用户已确认覆盖的版本，报目标变化。
+// v3.2.22 B57：保存框 / 目录选择返回后先只冻结目标（目标快照与父目录身份），再访问输入（别名检查、输入快照）。
+//   完整计划规范化时会重新采样目标，之后要求完整计划里的每个目标证据与先冻结的一致：目标快照相同，父目录身份按首次冻结的
+//   可靠性比较（首次可靠时须仍可靠且 dev/ino 相同；首次不可靠时只核对路径），再按先冻结的证据核对当前磁盘。
+//   这样返回的完整计划（契约层只沿用 Main 登记过的冻结计划）携带的就是用户确认时的目标证据：重新采样时目标目录被临时
+//   换成另一处、之后又换回，或第二次采样身份暂时不可靠，都报目标变化，不让执行阶段按第二次采到的版本覆盖未确认的文件。
+//   输入多或在网络盘上时，遍历输入期间外部新建、替换（含建成文件夹）的目标同样报目标变化。
 function freezeToolboxFilePlanTargetsFirst(inputs, outputs) {
   const targetsOnly = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [], outputs });
+  const targetChanged = () => Object.assign(new TypeError('输出目标在任务确认后已变化'), { code: 'ARCHIVE_TARGET_CHANGED' });
   const assertTargetsUnchanged = () => {
     try {
       assertFilePlanFresh(targetsOnly);
     } catch (_error) {
-      throw Object.assign(new TypeError('输出目标在任务确认后已变化'), { code: 'ARCHIVE_TARGET_CHANGED' });
+      throw targetChanged();
     }
   };
-  assertToolboxTargetsDoNotAliasSources(inputs.map((item) => item.filePath), outputs.map((item) => item.filePath));
   let plan;
   try {
+    assertToolboxTargetsDoNotAliasSources(inputs.map((item) => item.filePath), outputs.map((item) => item.filePath));
     plan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs, outputs });
   } catch (error) {
-    // 先冻结时目标合法、现在规范化失败：目标变了报目标变化，否则是输入本身的问题，原样抛出
+    // 先冻结时目标合法、现在别名检查或规范化失败：目标变了报目标变化，否则是输入本身的问题（或真的别名到输入），原样抛出
     assertTargetsUnchanged();
     throw error;
   }
+  const sameEvidence = plan.outputs.length === targetsOnly.outputs.length
+    && targetsOnly.outputs.every((frozen, index) => {
+      const sampled = plan.outputs[index];
+      return sampled.filePath === frozen.filePath
+        && JSON.stringify(sampled.targetSnapshot) === JSON.stringify(frozen.targetSnapshot)
+        && targetParentIdentitiesMatch(frozen.targetParentIdentity, sampled.targetParentIdentity);
+    });
+  if (!sameEvidence) throw targetChanged();
   assertTargetsUnchanged();
   return plan;
 }

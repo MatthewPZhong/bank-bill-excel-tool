@@ -12,6 +12,7 @@ const { randomUUID } = require('node:crypto');
 const ExcelJS = require('exceljs');
 const { sourceSnapshotFromStat, sourceSnapshotMatchesStat } = require('../../src/main-process/archive-center/source-snapshot');
 const { assertFilePlanFresh, normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
+const { targetParentIdentitiesMatch } = require('../../src/main-process/archive-center/target-parent-identity');
 const { prepareIpcTaskInvocation } = require('../../src/main-process/archive-center/ipc-task-contract');
 const { mergeToolboxFilesToXlsx } = require('../../src/main-process/toolbox-merge-io');
 const { exportToolboxFilter, exportToolboxMultiFilters } = require('../../src/main-process/toolbox-format-operations');
@@ -89,7 +90,8 @@ function loadHandlers(env, overrides = {}) {
   const readContext = { sourceFilePath: env.source, dataRowCount: 2,
     snapshot: sourceSnapshotFromStat(fs.statSync(env.source, { bigint: true })) };
   const scope = {
-    fs, os, path, randomUUID, pathsAlias: overrides.pathsAlias || pathsAlias, assertFilePlanFresh, normalizeFilePlanV1,
+    fs, os, path, randomUUID, pathsAlias: overrides.pathsAlias || pathsAlias, assertFilePlanFresh,
+    normalizeFilePlanV1: overrides.normalizeFilePlanV1 || normalizeFilePlanV1, targetParentIdentitiesMatch,
     sourceSnapshotMatchesStat,
     TOOLBOX_GENERATION_ACTIONS,
     trackedIpcHandle: (channel, _scope, _name, contract) => { contracts.set(channel, contract); },
@@ -190,7 +192,27 @@ function simulateUnreliableParentIdentity(directory, times = Infinity) {
   return { state, restore: () => { fs.statSync = statSync; } };
 }
 
+// 包装真实的 normalizeFilePlanV1：只在含输入的完整计划采样（先冻结目标之后的第二次采样）期间执行 during，返回真实结果
+//   （仍是 Main 登记过的冻结计划）。用来模拟「只有第二次采样看到不同的目标」
+function duringFullPlanSampling(during) {
+  const state = { calls: 0 };
+  const wrapped = (value, ...rest) => {
+    if (!value || !Array.isArray(value.inputs) || !value.inputs.length || !value.outputs.length) {
+      return normalizeFilePlanV1(value, ...rest);
+    }
+    state.calls += 1;
+    const after = during();
+    try {
+      return normalizeFilePlanV1(value, ...rest);
+    } finally {
+      if (typeof after === 'function') after();
+    }
+  };
+  return { state, normalizeFilePlanV1: wrapped };
+}
+
 module.exports = {
-  CASES, MULTI_PAYLOAD, caseOverrides, casePayload, firstColumn, loadHandlers, setup, simulateUnreliableParentIdentity,
+  CASES, MULTI_PAYLOAD, caseOverrides, casePayload, duringFullPlanSampling, firstColumn, loadHandlers, setup,
+  simulateUnreliableParentIdentity,
   generators: { mergeToolboxFilesToXlsx, exportToolboxFilter, exportToolboxMultiFilters }
 };

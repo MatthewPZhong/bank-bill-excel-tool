@@ -59,8 +59,7 @@ for (const kind of Object.keys(CASES)) {
     const { prepared, result } = await run(CASES[kind].channel, casePayload(env, kind));
     // 前提：冻结时拿到可靠的目录身份；拿不到时按 spec D3 只核对路径（单测用受控夹具验证），不在此断言拒绝
     if (!prepared.filePlan.outputs.every((output) => output.targetParentIdentity.identityReliable)) {
-      console.log(`  SKIP 前提不满足：临时卷给不出可靠的目录身份（${kind}）`);
-      return;
+      return { skipped: `前提不满足：临时卷给不出可靠的目录身份（${kind}）` };
     }
     assert.equal(result.code, 'TOOLBOX_PUBLICATION_TARGET_PARENT_CHANGED', JSON.stringify(result));
     assert.equal(calls.settle, 0);
@@ -147,10 +146,17 @@ for (const kind of Object.keys(CASES)) {
   console.log('==== 工具箱发布前核对（确认前冻结 / 父目录身份 / 源文件变化） ====');
   let passed = 0;
   const failures = [];
+  const skips = [];
   try {
     for (const { name, fn } of checks) {
       try {
-        await fn();
+        const outcome = await fn();
+        if (outcome && outcome.skipped) {
+          // 未执行断言的用例不计入通过数（与 shared-xlsx-boundary.js 同一口径）
+          skips.push(`${name}：${outcome.skipped}`);
+          console.log(`SKIP ${name}：${outcome.skipped}`);
+          continue;
+        }
         passed += 1;
         console.log(`PASS ${name}`);
       } catch (error) {
@@ -161,7 +167,7 @@ for (const kind of Object.keys(CASES)) {
   } finally {
     for (const cleanup of cleanups.splice(0)) await cleanup();
   }
-  console.log(`==== ${passed}/${checks.length} ${failures.length ? 'FAIL' : 'PASS'} ====`);
+  console.log(`==== ${passed}/${checks.length - skips.length} ${failures.length ? 'FAIL' : 'PASS'} ====${skips.length ? `（跳过 ${skips.length} 项）` : ''}`);
   if (failures.length) {
     console.error('FAILURES', failures);
     process.exitCode = 1;
