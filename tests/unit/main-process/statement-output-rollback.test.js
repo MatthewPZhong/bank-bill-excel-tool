@@ -545,3 +545,63 @@ test('文件系统不提供文件编号且原有文件另有硬链接：首次�
   assert.throws(() => journal.checkTarget(alias), { code: 'STATEMENT_OUTPUT_TARGET_UNSAFE' }, '首次读取种子前的检查同样拒绝');
   assert.equal(fs.readFileSync(seed, 'utf8'), 'before');
 });
+
+// ---------- 第七轮审查 ----------
+
+test('比较备份时按同一逻辑分块读满：目标短读不误判内容不同，被占用的原文件照常报完整还原', (t) => {
+  const { root, staging } = setup(t);
+  const target = path.join(root, 'detail.xlsx');
+  const content = Buffer.alloc(130000, 7);
+  fs.writeFileSync(target, content);
+  const targetFds = new Set();
+  let shortReads = 0;
+  const fsImpl = { ...fs,
+    openSync(filePath, flags, ...rest) {
+      if (path.resolve(String(filePath)) === target && flags === 'r+') throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+      const fd = fs.openSync(filePath, flags, ...rest);
+      if (path.resolve(String(filePath)) === target) targetFds.add(fd);
+      return fd;
+    },
+    closeSync(fd) {
+      targetFds.delete(fd);
+      return fs.closeSync(fd);
+    },
+    readSync(fd, buffer, offset, length, position) {
+      if (targetFds.has(fd) && length > 65536) {
+        shortReads += 1;
+        return fs.readSync(fd, buffer, offset, 65536, position);
+      }
+      return fs.readSync(fd, buffer, offset, length, position);
+    }
+  };
+  const journal = createStatementOutputJournal({ fsImpl, stagingRoot: staging });
+  assert.throws(() => journal.write(target, () => { throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }); }), { code: 'EBUSY' });
+  const outcome = journal.rollback();
+  assert.ok(shortReads >= 1, '前置：目标文件每次最多读 64 KiB');
+  assert.deepEqual([outcome.restored, outcome.failures], [true, []]);
+  assert.deepEqual(fs.readFileSync(target), content);
+});
+
+test('恢复清单按原因给出处理方式：路径已被替换或已是符号链接时不提示直接覆盖', (t) => {
+  const { root, staging } = setup(t);
+  const replaced = path.join(root, 'replaced.xlsx');
+  const linked = path.join(root, 'linked.xlsx');
+  const elsewhere = path.join(root, 'elsewhere.txt');
+  fs.writeFileSync(replaced, 'before-1');
+  fs.writeFileSync(linked, 'before-2');
+  fs.writeFileSync(elsewhere, 'unrelated');
+  const journal = createStatementOutputJournal({ stagingRoot: staging });
+  journal.write(replaced, writeText(replaced, 'batch-1'));
+  journal.write(linked, writeText(linked, 'batch-2'));
+  fs.writeFileSync(`${replaced}.tmp`, 'sync-client');
+  fs.renameSync(`${replaced}.tmp`, replaced);
+  fs.rmSync(linked);
+  fs.symlinkSync(elsewhere, linked);
+  const outcome = journal.rollback();
+  t.after(() => fs.rmSync(outcome.backupDirectory, { recursive: true, force: true }));
+  const manifest = fs.readFileSync(outcome.manifestPath, 'utf8');
+  assert.doesNotMatch(manifest, /覆盖原路径即可还原/);
+  assert.match(manifest, /replaced\.xlsx\n[^\n]*\n   原因：写出后已被其他程序修改或替换，未自动处理\n   处理方式：路径上的文件已被其他程序改动或替换，先保留现状/);
+  assert.match(manifest, /linked\.xlsx\n[^\n]*\n   原因：路径上已不是普通文件，未自动处理\n   处理方式：路径上已是快捷方式（符号链接）或文件夹，不要直接覆盖或删除/);
+  assert.equal(fs.readFileSync(elsewhere, 'utf8'), 'unrelated', '不经链接改写别处的文件');
+});

@@ -1905,7 +1905,8 @@ function verifyOutputPathConcatenationConflict(dir) {
 //    会话条目、批次与导出缓存用真实实现（realSession）。
 function verifyMultiTemplateGenerationRollback(dir) {
   const faults = { writeCalls: 0, failWriteAt: 0, balanceCalls: 0, failBalanceAt: 0, mergeCalls: 0, failMergeAt: 0,
-    seedCalls: 0, failSeedAt: 0, failSeedReadAt: 0, partialSeedWrites: 0, seedRecordsStored: 0, afterJournalWrite: null };
+    seedCalls: 0, failSeedAt: 0, failSeedReadAt: 0, partialSeedWrites: 0, seedRecordsStored: 0, afterJournalWrite: null,
+    failTemplateReadAt: 0 };
   // 在真实的种子读写处注入（balance-seed-store 经 fs.readFileSync / fs.writeFileSync 读写种子 JSON）：只拦截余额种子文件
   const isSeedFile = (target) => typeof target === 'string' && /[\\/]balance-seeds[\\/][^\\/]+\.json$/.test(target);
   const withPatchedFs = (method, replacement, use) => {
@@ -1965,6 +1966,22 @@ function verifyMultiTemplateGenerationRollback(dir) {
     writeBalanceWorkbook: (options, write) => {
       faults.balanceCalls += 1;
       if (faults.failBalanceAt && faults.balanceCalls === faults.failBalanceAt) throw busy('余额文件');
+      if (faults.failTemplateReadAt && faults.balanceCalls === faults.failTemplateReadAt) {
+        // 写出器读余额模板时读取失败（发生在写目标文件之前，原生异常）
+        const xlsxStyle = require('xlsx-js-style');
+        const readFile = xlsxStyle.readFile;
+        xlsxStyle.readFile = (target, ...rest) => {
+          if (path.resolve(String(target)) === path.resolve(options.templateFilePath)) {
+            throw Object.assign(new Error('EIO: i/o error, read（注入：余额模板）'), { code: 'EIO' });
+          }
+          return readFile(target, ...rest);
+        };
+        try {
+          return write(options);
+        } finally {
+          xlsxStyle.readFile = readFile;
+        }
+      }
       return write(options);
     },
     mergeGeneratedXlsxFiles: (paths, outputPath, merge) => {
@@ -2140,6 +2157,19 @@ function verifyMultiTemplateGenerationRollback(dir) {
     [['M001', '2026-08-31', '100'], ['M001', '2026-09-01', '119'], ['M002', '2026-08-31', '200'], ['M002', '2026-09-01', '223'],
       ['M002', '2026-09-02', '228']], 'Step20.重读种子失败：第一组种子照常更新，第二组种子未写入');
 
+  // （5f）第二组写出器读余额模板失败（原生 EIO，发生在写目标文件之前）：按模板不可读的「余额生成失败」告警提交，
+  //   不整批回滚（spec D3，Codex 第七轮）
+  const sessionsBeforeTemplateFault = env.removedSessionPaths.length;
+  faults.failTemplateReadAt = 2;
+  writeSource(fileA, 'A', [['2026-09-01', 'M001', 'USD', '21', '']]);
+  writeSource(fileB, 'B', [['2026-09-01', 'M002', 'USD', '31', '']]);
+  const templateFaultError = run([env.entryFor(templateA, fileA), env.entryFor(templateB, fileB)]);
+  faults.failTemplateReadAt = 0;
+  assertEq(templateFaultError, null, 'Step20.读余额模板失败：不整批回滚');
+  assertEq(env.removedSessionPaths.length, sessionsBeforeTemplateFault + 1, 'Step20.读余额模板失败：本批照常提交');
+  assertEq((env.imported[env.imported.length - 1].warnings || []).filter((warning) => warning.type === 'balance-generate-failed')
+    .map((warning) => warning.message), ['余额账单模板不可读，请重新确认'], 'Step20.读余额模板失败：按「余额生成失败」告警');
+
   // （5c）第二组的余额种子路径是文件夹：首次读取种子前拦下、整批回滚，不转成「余额生成失败」告警提交第一组的新种子与缺组的余额
   const templateE = env.defineTemplate('目录种子-E', 'B');
   const directorySeed = path.join(env.storageRoot, 'balance-seeds', '目录种子.json');
@@ -2151,7 +2181,7 @@ function verifyMultiTemplateGenerationRollback(dir) {
   const directoryError = run([env.entryFor(templateA, fileA), env.entryFor(templateE, fileE)]);
   assertEq(directoryError && directoryError.code, 'STATEMENT_OUTPUT_TARGET_UNSAFE', 'Step20.种子路径是文件夹：整批拦下');
   assertEq(snapshot(), beforeDirectorySeed, 'Step20.种子路径是文件夹：第一组的输出与新种子还原');
-  assertEq(env.removedSessionPaths.length, sessionsBeforeReadFault + 1, 'Step20.种子路径是文件夹时不替换旧会话条目');
+  assertEq(env.removedSessionPaths.length, sessionsBeforeTemplateFault + 1, 'Step20.种子路径是文件夹时不替换旧会话条目');
   fs.rmSync(directorySeed, { recursive: true, force: true });
 
   // （6）同一账户跨组的余额链：C 组 09-01、D 组 09-02 同为 M009/USD，D 组的上期余额取 C 组本批写入的种子。
@@ -2226,7 +2256,7 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
     return journal.failBatch(error);
   };
   const previousReport = { fileName: '上一批的报错文件.txt' };
-  const createScope = (sideEffects, thrown, { logFails = false, reportFails = false, extra = {} } = {}) => {
+  const createScope = (sideEffects, thrown, { logFails = false, reportFails = false, captured = null, extra = {} } = {}) => {
     const record = (name) => () => { sideEffects.push(name); };
     return createMainScope({
       ...env.mainDeps,
@@ -2244,11 +2274,14 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
         if (logFails) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
         return 'logs/step20b.log';
       },
-      appendActivityLogEntry: () => {
+      appendActivityLogEntry: (entry) => {
         if (logFails) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
+        if (captured) captured.push(entry);
       },
       archiveOperationContext: { getStore: () => null },
-      createErrorReport: ({ message }) => {
+      createErrorReport: (payload) => {
+        if (captured) captured.push(payload);
+        const { message } = payload;
         // 导出所在的数据目录已满：报错文件也写不出
         if (reportFails) throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
         return { fileName: `本次-${message.length}.txt` };
@@ -2264,13 +2297,13 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
     return { result, cleared: sideEffects.includes('clearGeneratedExports'), report: scope.lastErrorReport };
   };
   // 完成大账号选择后的执行入口：生成前后的同一处理（在会话准备处注入写出期间的失败）
-  const runSelectionExecute = async (thrown, options = {}) => {
+  const runSelectionExecute = async (thrown, { templateName = '按文件名映射', ...options } = {}) => {
     const sideEffects = [];
     const scope = createScope(sideEffects, thrown, { ...options, extra: {
       checkImportConfigGuard: () => null,
       statementImportSessions: new Map(),
       requirePendingBigAccountSelection: () => ({
-        templateId: 1, template: { name: '按文件名映射' }, mappings: [], orderedTargetFields: [], fileEntries: []
+        templateId: 1, template: { name: templateName }, mappings: [], orderedTargetFields: [], fileEntries: []
       }),
       getOrCreateStatementImportSession: () => { throw thrown; }
     } });
@@ -2315,6 +2348,13 @@ async function verifyRestoredImportFailureKeepsPreviousBatch(dir) {
     assertTrue(unreported.result.message.includes(`恢复清单：${outcome.manifestPath}`),
       `Step20b.${label}：报错文件写不出时消息仍给出恢复清单位置：${unreported.result.message}`);
   }
+  // 完成大账号选择后还原不完整：首个匹配模板的真实名称（可能含完整账号）不写入报错文件与活动日志（Codex 第七轮）
+  const captured = [];
+  const named = await runSelectionExecute(incompleteError, { templateName: '中行-6222020200012345678', captured });
+  assertTrue(named.result.message.includes('未能自动还原'), `Step20b.前置：完成大账号选择后还原不完整：${named.result.message}`);
+  assertTrue(captured.length >= 1 && !JSON.stringify(captured).includes('6222020200012345678')
+    && JSON.stringify(captured).includes('按文件名映射模板'),
+  `Step20b.还原不完整时报错文件与活动日志用固定名称，不含真实模板名：${JSON.stringify(captured).slice(0, 300)}`);
   fs.rmSync(outcome.backupDirectory, { recursive: true, force: true });
 }
 

@@ -18114,6 +18114,9 @@ function registerFileHandlers() {
           || error.code === 'CHANNEL_BALANCE_ROWS_INCOMPLETE'
           ? createDetailedErrorResult
           : (error.code === 'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE' ? createRollbackIncompleteErrorResult : createErrorResult);
+        // v3.2.22 B45（Codex 第七轮）：还原不完整只出现在按文件名映射的多模板生成，报错文件名、上下文与活动日志用固定名称
+        //   （与直接导入入口相同），不写入首个匹配模板的真实名称（可能含完整账号）
+        const reportTemplateName = error.code === 'STATEMENT_OUTPUT_ROLLBACK_INCOMPLETE' ? '按文件名映射模板' : pendingContext.template.name;
         return buildResult({
           step: '选择大账号',
           message: error.message,
@@ -18122,10 +18125,10 @@ function registerFileHandlers() {
           detailLines: Array.isArray(error.detailLines) ? error.detailLines : [],
           context: {
             templateId: pendingContext.templateId,
-            templateName: pendingContext.template.name,
+            templateName: reportTemplateName,
             ...(error.context || {})
           },
-          templateName: pendingContext.template.name
+          templateName: reportTemplateName
         });
       }
 

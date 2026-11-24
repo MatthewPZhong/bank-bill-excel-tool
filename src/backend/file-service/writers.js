@@ -240,11 +240,20 @@ function writeBalanceWorkbook({
   templateFields = [],
   outputFilePath
 }, formatters) {
-  const workbook = XLSX.readFile(templateFilePath, {
-    cellNF: true,
-    cellStyles: true,
-    raw: true
-  });
+  // 读余额模板失败（发生在写出目标文件之前）按模板不可读报出：多模板批次据此按「余额生成失败」告警，不当作写出失败整批回滚
+  //   （v3.2.22 B45 D3，Codex 第七轮）
+  let workbook;
+  try {
+    workbook = XLSX.readFile(templateFilePath, {
+      cellNF: true,
+      cellStyles: true,
+      raw: true
+    });
+  } catch (error) {
+    throw new FileValidationError('FILE_READ', '余额账单模板不可读，请重新确认', {
+      context: { systemErrorCode: error && error.code ? String(error.code) : '' }
+    });
+  }
   const sheetName = workbook.SheetNames[0];
 
   if (!sheetName) {

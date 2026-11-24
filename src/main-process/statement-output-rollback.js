@@ -82,7 +82,18 @@ function withOpenFile(fsImpl, filePath, flags, use) {
   }
 }
 
-// 分块比较（left 为已打开的文件描述符），不把整份文件读入内存
+// 从 position 起读满 buffer（readSync 可能未到文件末尾就返回较少字节），返回实际读到的字节数（不足说明已到末尾）
+function readChunk(fsImpl, fd, buffer, position) {
+  let filled = 0;
+  while (filled < buffer.length) {
+    const read = fsImpl.readSync(fd, buffer, filled, buffer.length - filled, position + filled);
+    if (!read) break;
+    filled += read;
+  }
+  return filled;
+}
+
+// 分块比较（left 为已打开的文件描述符），不把整份文件读入内存；两边按同一逻辑分块读满再比较（Codex 第七轮）
 function sameContent(fsImpl, left, rightPath) {
   return withOpenFile(fsImpl, rightPath, 'r', (right) => {
     if (fsImpl.fstatSync(left).size !== fsImpl.fstatSync(right).size) return false;
@@ -90,8 +101,8 @@ function sameContent(fsImpl, left, rightPath) {
     const rightBuffer = Buffer.allocUnsafe(COPY_CHUNK_BYTES);
     let position = 0;
     for (;;) {
-      const leftRead = fsImpl.readSync(left, leftBuffer, 0, COPY_CHUNK_BYTES, position);
-      const rightRead = fsImpl.readSync(right, rightBuffer, 0, COPY_CHUNK_BYTES, position);
+      const leftRead = readChunk(fsImpl, left, leftBuffer, position);
+      const rightRead = readChunk(fsImpl, right, rightBuffer, position);
       if (leftRead !== rightRead) return false;
       if (!leftRead) return true;
       if (!leftBuffer.subarray(0, leftRead).equals(rightBuffer.subarray(0, rightRead))) return false;
@@ -398,17 +409,38 @@ function createStatementOutputJournal({ fsImpl = fs, stagingRoot = os.tmpdir(), 
     return failures;
   }
 
+  // 恢复清单逐条的处理方式（Codex 第七轮）：只有确认路径上仍是本批写过的文件时才可直接覆盖或删除；路径已指向其他文件、
+  //   已不是普通文件或无法确认归属时，覆盖或删除会改掉其他程序的文件（或经快捷方式改写别处），须先人工核对
+  function manualActionOf(item) {
+    const backup = item.existed ? `本目录的备份 ${item.backupName}` : '';
+    switch (item.reason) {
+      case FAILURE_REASONS.CHANGED_EXTERNALLY:
+        return item.existed
+          ? `路径上的文件已被其他程序改动或替换，先保留现状、另存一份，再与${backup}核对，确认后人工合并或覆盖`
+          : '路径上的文件已被其他程序改动或替换，先保留现状，核对后再决定是否删除';
+      case FAILURE_REASONS.NOT_REGULAR_FILE:
+        return `路径上已是快捷方式（符号链接）或文件夹，不要直接覆盖或删除（会改写或删掉别处的内容）；移走后再${item.existed ? `用${backup}放回原路径` : '确认是否需要处理'}`;
+      case FAILURE_REASONS.MISSING:
+        return `原有文件已被其他程序移走或删除，确认去向后再决定是否用${backup}在原路径重建`;
+      case FAILURE_REASONS.UNCERTAIN_OWNER:
+        return '无法确认是否本批写出，核对内容后再决定是否删除';
+      default:
+        return item.existed ? `确认路径上仍是原文件后，用${backup}覆盖原路径` : '确认路径上仍是本次写出的文件后删除';
+    }
+  }
+
   function writeManifest(failures) {
     try {
       const lines = [
         `网银多模板生成失败后未能自动还原的文件（${now().toISOString()}）`,
-        '原有文件：用本目录中对应的备份文件覆盖原路径即可还原；本次新建的文件：确认后删除原路径的文件。',
+        '每个文件的处理方式见各条说明；路径上已是其他程序的文件或快捷方式、文件夹时，先保留现状，不要直接覆盖或删除。',
         ''
       ];
       failures.forEach((item, index) => {
         lines.push(`${index + 1}. ${item.filePath}`);
         lines.push(item.existed ? `   原有文件，原内容备份：${item.backupName}` : '   本次新建的文件（导入前不存在）');
         lines.push(`   原因：${item.reason}`);
+        lines.push(`   处理方式：${manualActionOf(item)}`);
       });
       const manifestPath = path.join(backupDirectory, MANIFEST_FILE_NAME);
       fsImpl.writeFileSync(manifestPath, `${lines.join('\n')}\n`, 'utf8');
