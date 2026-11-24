@@ -9,6 +9,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { assertFilePlanFresh } = require('../../../src/main-process/archive-center/file-plan');
 const { prepareIpcTaskInvocation } = require('../../../src/main-process/archive-center/ipc-task-contract');
+const { pathsAlias } = require('../../../src/main-process/toolbox-target-identity');
 const {
   CASES, MULTI_PAYLOAD, caseOverrides, casePayload, firstColumn, loadHandlers, setup: setupFixture, generators
 } = require('../../helpers/toolbox-main-handlers');
@@ -79,7 +80,33 @@ test('合表与单值拆分：保存框返回即冻结 FilePlan（B57）', async
   }
 });
 
-// ---------- B58-T4：父目录身份统一由包装层从冻结 FilePlan 传给发布器 ----------
+// 先冻结目标、再访问输入：别名检查（pathsAlias）逐个访问输入期间，外部新建 / 替换目标即拒绝，不覆盖对方文件
+for (const kind of Object.keys(CASES)) {
+  for (const change of ['created', 'replaced']) {
+    test(`${kind}：访问输入期间目标被${change === 'created' ? '新建' : '替换'}时拒绝，不覆盖对方文件（B57）`, async (t) => {
+      const env = setup(t);
+      const target = path.join(env.output, CASES[kind].targets[0]);
+      if (change === 'replaced') fs.writeFileSync(target, 'confirmed-old');
+      let touched = false;
+      const { calls, run } = loadHandlers(env, caseOverrides(env, kind, {
+        pathsAlias: (fsImpl, left, right) => {
+          if (!touched) {
+            touched = true;
+            fs.writeFileSync(`${target}.tmp`, 'foreign');
+            fs.renameSync(`${target}.tmp`, target);
+          }
+          return pathsAlias(fsImpl, left, right);
+        }
+      }));
+      const { prepared, result } = await run(CASES[kind].channel, casePayload(env, kind));
+      assert.equal(touched, true, '前置：别名检查访问了输入');
+      assert.equal(prepared.proceed, false);
+      assert.equal(result.code, 'ARCHIVE_TARGET_CHANGED', JSON.stringify(result));
+      assert.equal(calls.publication, 0);
+      assert.equal(fs.readFileSync(target, 'utf8'), 'foreign');
+    });
+  }
+}
 
 // ---------- B58-T4：父目录身份统一由包装层从冻结 FilePlan 传给发布器 ----------
 

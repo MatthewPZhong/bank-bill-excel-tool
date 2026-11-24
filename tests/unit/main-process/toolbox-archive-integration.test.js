@@ -195,7 +195,11 @@ test('split read 只走裸 preview IPC，merge/export 的全部 dialog 在 execu
   assert.ok(mergePrepareSource.includes('showSaveDialog'));
   assert.ok(mergePrepareSource.match(/proceed: false/g).length >= 2);
   assert.ok(!mergePrepareSource.includes('toolboxMergeFilesToXlsx'));
-  assert.ok(mergePrepareSource.includes('assertToolboxTargetsDoNotAliasSources'));
+  // v3.2.22 B57：合表的别名检查在 freezeToolboxFilePlanTargetsFirst 内（先冻结目标、再访问输入）
+  assert.ok(mergePrepareSource.includes('freezeToolboxFilePlanTargetsFirst'));
+  const freezeStart = mainSource.indexOf('function freezeToolboxFilePlanTargetsFirst(');
+  const freezeSource = mainSource.slice(freezeStart, mainSource.indexOf('\n}\n', freezeStart));
+  assert.ok(freezeSource.indexOf('inputs: []') < freezeSource.indexOf('assertToolboxTargetsDoNotAliasSources'));
   assert.ok(mergePrepareSource.includes('filePlan'));
   assert.ok(!mergePrepareSource.includes('assertToolboxTargetSnapshotsFresh'));
   assert.ok(mergeSource.indexOf('toolboxMergeFilesToXlsx') > mergeExecute);

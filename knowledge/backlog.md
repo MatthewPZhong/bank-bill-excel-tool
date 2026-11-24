@@ -854,7 +854,7 @@
 - **影响**：“覆盖全部”弹窗等待期间，外部新建原本不存在的目标或替换已列出的目标，仍被采集为合法目标并被覆盖（`main.js` 多输出拆分确认后才构造 FilePlan，`archive-center/ipc-task-contract.js` 才捕获快照）。按行拆分在确认前已冻结全部目标
 - **关闭条件**：确认前冻结全部目标（含不存在的），沿用同一 FilePlan；确认期间与 prepare 后的新建 / 替换均拒绝，原有内容不被覆盖
 - **目标版本**：v3.2.22（暂定；v3.2.16、v3.2.17 均无修复纳入，2026-11-12 发版时顺延；v3.2.18 未纳入，2026-11-16 发版时顺延；v3.2.19 未纳入，2026-11-18 发版时顺延；v3.2.20 未纳入，2026-11-18 发版时顺延；v3.2.21 未纳入，2026-11-22 发版时顺延）
-- **关闭**：v3.2.22（暂定，分支 `fix/toolbox-publication-freshness`）。多文件拆分在目录选定后立即冻结全部目标（含不存在的），按冻结快照列冲突，确认后核对冻结计划，确认期间的新建 / 替换报 `ARCHIVE_TARGET_CHANGED` 并取消；合表、单值拆分在保存框返回即冻结；同一计划经契约层与生命周期沿用（[spec](../changes/v3.2.22/fix/toolbox-publication-freshness/spec.md) D1–D2）。验证：单测 `toolbox-publication-freshness.test.js`（修复前失败）、集成 `toolbox-publication-freshness.js`
+- **关闭**：v3.2.22（暂定，分支 `fix/toolbox-publication-freshness`）。多文件拆分在目录选定后立即冻结全部目标（含不存在的），按冻结快照列冲突，确认后核对冻结计划，确认期间的新建 / 替换报 `ARCHIVE_TARGET_CHANGED` 并取消；合表、单值拆分在保存框返回即冻结；三种都先冻结目标再访问输入，遍历输入期间目标被新建 / 替换同样拒绝；同一计划经契约层与生命周期沿用（[spec](../changes/v3.2.22/fix/toolbox-publication-freshness/spec.md) D1–D2）。验证：单测 `toolbox-publication-freshness.test.js`（修复前失败）、集成 `toolbox-publication-freshness.js`
 
 ### B58（P2 · 已知问题）工具箱合表等非按行输出：输入快照失效后仍发布，父目录身份未传到发布器
 
@@ -862,7 +862,7 @@
 - **影响**：T3：FilePlan 冻结后源文件被替换，当前生产合表分支（`main.js` 合表执行）从原路径读新内容并正式发布，输入归档随后 `ARCHIVE_SOURCE_CHANGED`，产物缺少相符的输入归档。T4：包装层只补目标文件快照，合表 / 单输出等未把冻结的父目录身份传给 `toolbox-output-publication.js`，目标目录被同路径替换后仍发布成功。按行拆分已有保护
 - **关闭条件**：各读取 / 发布边界输入变化都不形成正式输出，归档、终态与 receipt 一致；统一由包装层从冻结 FilePlan 传入父目录身份，合表、单输出、多输出的目录替换均拒绝发布
 - **目标版本**：v3.2.22（暂定；v3.2.16、v3.2.17 均无修复纳入，2026-11-12 发版时顺延；v3.2.18 未纳入，2026-11-16 发版时顺延；v3.2.19 未纳入，2026-11-18 发版时顺延；v3.2.20 未纳入，2026-11-18 发版时顺延；v3.2.21 未纳入，2026-11-22 发版时顺延）
-- **关闭**：v3.2.22（暂定，分支 `fix/toolbox-publication-freshness`）。发布包装层 `publishToolboxArtifacts` 带冻结 FilePlan 时逐一核对目标、从计划取父目录身份交给发布器（合表、单值、多文件、只读导出统一），并在发布前核对计划输入，源文件在生成前后被替换均不发布（[spec](../changes/v3.2.22/fix/toolbox-publication-freshness/spec.md) D3–D4）。验证：单测 `toolbox-publication-freshness.test.js` 覆盖三种输出的父目录替换与生成前 / 后源文件替换（修复前失败）、集成 `toolbox-publication-freshness.js`。核对输入到发布器提交之间的极短窗口与按行拆分相同，见 spec §3
+- **关闭**：v3.2.22（暂定，分支 `fix/toolbox-publication-freshness`）。发布包装层 `publishToolboxArtifacts` 带冻结 FilePlan 时逐一核对目标、从计划取父目录身份交给发布器（合表、单值、多文件、只读导出统一），并在发布前核对计划输入，源文件在生成前后被替换均不发布，真实任务生命周期下任务终态为失败、替换后的输入不归档、无发布 receipt；目标所在文件系统给不出可靠目录身份时按 v3.2.3 契约退回路径核对（[spec](../changes/v3.2.22/fix/toolbox-publication-freshness/spec.md) D3–D4）。验证：单测 `toolbox-publication-freshness.test.js` 覆盖三种输出的父目录替换与生成前 / 后源文件替换（修复前失败）、集成 `toolbox-publication-freshness.js`。核对输入到发布器提交之间的极短窗口与按行拆分相同，见 spec §3
 
 ### B130（P4 · 改进）网银账单映射逐行为长数字提示分配追踪表，真 CSV 等不可能触发的输入同样分配
 

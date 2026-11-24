@@ -8,6 +8,13 @@ const path = require('node:path');
 const {
   CASES, MULTI_PAYLOAD, caseOverrides, casePayload, firstColumn, loadHandlers, setup, generators
 } = require('../../tests/helpers/toolbox-main-handlers');
+const { DatabaseSync } = require('node:sqlite');
+const { createArchiveService } = require('../../src/main-process/archive-center/archive-service');
+const { createArchiveCenterController } = require('../../src/main-process/archive-center/controller');
+const { createArchiveOutboxStore } = require('../../src/main-process/archive-center/outbox-store');
+const { createTaskLifecycle } = require('../../src/main-process/archive-center/task-lifecycle');
+const { createTaskPolicyRegistry } = require('../../src/main-process/execution-descriptors/composition');
+const { prepareIpcTaskInvocation, createIpcTaskContext } = require('../../src/main-process/archive-center/ipc-task-contract');
 
 const cleanups = [];
 const checks = [];
@@ -75,6 +82,62 @@ for (const kind of Object.keys(CASES)) {
   });
 }
 
+// 真实 TaskLifecycle 与临时归档库：生成后源文件被替换时任务终态为失败，替换后的输入不归入本批，没有发布 receipt
+const LIFECYCLE_CODES = { merge: 'ARCHIVE_INPUT_CHANGED', single: 'TOOLBOX_SPLIT_READ_CONTEXT_STALE', multiple: 'TOOLBOX_SPLIT_READ_CONTEXT_STALE' };
+for (const kind of Object.keys(CASES)) {
+  check(`${kind}：真实任务生命周期下生成后源文件被替换，任务失败、输入不归档、无发布 receipt`, async () => {
+    const env = setup((fn) => cleanups.push(fn));
+    const db = new DatabaseSync(path.join(env.root, 'archive.sqlite'));
+    const service = createArchiveService({ database: db, rootDir: path.join(env.root, 'archive') });
+    cleanups.unshift(async () => { await service.pauseBackgroundMaterialization(); db.close(); });
+    assert.equal((await service.initialize({ deferStartupRecovery: true, startBackgroundMaterialization: false })).ok, true);
+    const outboxStore = createArchiveOutboxStore(path.join(env.root, 'outbox'));
+    const controller = createArchiveCenterController({ service, outboxStore, database: { getSetting: () => null, setSetting() {} } });
+    const wrap = (generate) => async (...args) => {
+      const generated = await generate(...args);
+      fs.writeFileSync(`${env.source}.tmp`, 'Name,Amount\nA,999\nB,2\n');
+      fs.renameSync(`${env.source}.tmp`, env.source);
+      return generated;
+    };
+    const { contracts, calls } = loadHandlers(env, caseOverrides(env, kind, {
+      toolboxMergeFilesToXlsx: wrap(generators.mergeToolboxFilesToXlsx),
+      exportToolboxFilter: wrap(generators.exportToolboxFilter),
+      exportToolboxMultiFilters: wrap(generators.exportToolboxMultiFilters)
+    }));
+    const contract = contracts.get(CASES[kind].channel);
+    const payload = casePayload(env, kind);
+    const prepared = await prepareIpcTaskInvocation(contract, {}, payload === undefined ? [] : [payload]);
+    assert.equal(prepared.proceed, true, JSON.stringify(prepared.result));
+    const policy = createTaskPolicyRegistry().require(CASES[kind].channel);
+    const lifecycle = createTaskLifecycle({ archiveService: service,
+      businessOperationRegistry: { begin: () => ({ accepted: true, token: 'fresh-lifecycle' }), end() {} },
+      flowResolver: { resolve: async () => ({ parentRunId: 'fresh-parent', source: 'new', identity: null }),
+        bind: async () => [], persistBindIntent: async () => ({ ok: true }) },
+      operationTracker: { appendOperationFiles: async () => ({ ok: true }) },
+      persistTerminalIntent: (intent) => controller.persistTaskTerminalIntent(intent) });
+    let batchContext = null;
+    const result = await lifecycle.runFileTask({ policy, meta: { channel: policy.channel },
+      taskRunId: `fresh-${kind}`, operationKey: `fresh-${kind}-operation`,
+      filePlanResolver: () => prepared.filePlan, beforeStart: prepared.beforeStart,
+      execute: async (context, controls) => {
+        batchContext = context;
+        return contract.execute({}, prepared, createIpcTaskContext(context, controls));
+      } });
+    assert.deepEqual([result.status, result.code], ['failed', LIFECYCLE_CODES[kind]], JSON.stringify(result));
+    assert.deepEqual([calls.publication, calls.settle], [0, 0]);
+    const task = service.repository.getTaskRun(`fresh-${kind}`);
+    assert.deepEqual([task.status, task.failureCode], ['failed', 'BUSINESS_TASK_FAILED']);
+    const batch = service.repository.getBatch(batchContext.batchId);
+    assert.deepEqual([batch.taskStatus, batch.archiveStatus], ['failed', 'incomplete']);
+    const artifacts = service.repository.listArtifacts(batchContext.batchId);
+    assert.deepEqual(artifacts.map((item) => [item.direction, item.status]),
+      [['input', 'failed'], ...CASES[kind].targets.map(() => ['output', 'failed'])], '替换后的输入与未发布的输出都不归档');
+    assert.equal(outboxStore.list().length, 0);
+    assert.deepEqual(fs.readdirSync(env.userDataDir), [], '没有发布 journal / receipt');
+    assert.deepEqual(fs.readdirSync(env.output).filter((name) => !name.startsWith('.')), []);
+  });
+}
+
 (async () => {
   console.log('==== 工具箱发布前核对（确认前冻结 / 父目录身份 / 源文件变化） ====');
   let passed = 0;
@@ -91,7 +154,7 @@ for (const kind of Object.keys(CASES)) {
       }
     }
   } finally {
-    for (const cleanup of cleanups.splice(0)) cleanup();
+    for (const cleanup of cleanups.splice(0)) await cleanup();
   }
   console.log(`==== ${passed}/${checks.length} ${failures.length ? 'FAIL' : 'PASS'} ====`);
   if (failures.length) {

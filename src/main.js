@@ -22602,6 +22602,22 @@ function assertToolboxTargetsDoNotAliasSources(sourcePaths, targetPaths) {
   }
 }
 
+// v3.2.22 B57：保存框 / 目录选择返回后先只冻结目标（目标快照与父目录身份），再访问输入（别名检查、输入快照）；
+//   完整计划的目标须与先冻结的一致。输入多或在网络盘上时，遍历输入期间外部新建或替换的目标不被当作用户已确认覆盖的版本。
+function freezeToolboxFilePlanTargetsFirst(inputs, outputs) {
+  const targetsOnly = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [], outputs });
+  assertToolboxTargetsDoNotAliasSources(inputs.map((item) => item.filePath), outputs.map((item) => item.filePath));
+  const plan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs, outputs });
+  plan.outputs.forEach((output, index) => {
+    const frozen = targetsOnly.outputs[index];
+    if (JSON.stringify(output.targetSnapshot) !== JSON.stringify(frozen.targetSnapshot)
+        || JSON.stringify(output.targetParentIdentity) !== JSON.stringify(frozen.targetParentIdentity)) {
+      throw Object.assign(new TypeError('输出目标在任务确认后已变化'), { code: 'ARCHIVE_TARGET_CHANGED' });
+    }
+  });
+  return plan;
+}
+
 let toolboxSplitReadContext = null;
 const toolboxSplitReadOwners = new WeakMap();
 
@@ -22768,25 +22784,19 @@ function registerToolboxHandlers() {
         if (saveResult.canceled || !saveResult.filePath) {
           return { proceed: false, result: { status: 'cancelled' } };
         }
-        assertToolboxTargetsDoNotAliasSources(choice.filePaths, [saveResult.filePath]);
         const inputFiles = Object.freeze(choice.filePaths.map((filePath) => Object.freeze({
           filePath,
           role: 'input',
           sourceOperation: 'toolbox:merge'
         })));
-        // v3.2.22 B57：保存框返回即冻结目标与输入，之后的新建 / 替换由生命周期与发布器拒绝
+        // v3.2.22 B57：保存框返回即先冻结目标、再冻结输入，之后的新建 / 替换由生命周期与发布器拒绝
         const prepared = {
           proceed: true,
-          filePlan: normalizeFilePlanV1({
-            version: 1,
-            allocation: 'eager',
-            inputs: inputFiles,
-            outputs: [{
-              filePath: saveResult.filePath,
-              role: 'output',
-              sourceOperation: 'toolbox:merge'
-            }]
-          })
+          filePlan: freezeToolboxFilePlanTargetsFirst(inputFiles, [{
+            filePath: saveResult.filePath,
+            role: 'output',
+            sourceOperation: 'toolbox:merge'
+          }])
         };
         return prepared;
       } catch (error) {
@@ -23004,24 +23014,16 @@ function registerToolboxHandlers() {
         let frozenFilePlan = null;
         // v3.2.22 B57：选定目标后立即冻结全部目标（含尚不存在的）与源文件，覆盖确认只针对冻结时已存在的目标，
         //   确认期间的新建 / 替换由确认后的核对拒绝；按行拆分在 prepareRows 中同样处理。
-        const freezeSplitFilePlan = (targetPaths) => {
-          assertToolboxTargetsDoNotAliasSources([readContext.sourceFilePath], targetPaths);
-          return normalizeFilePlanV1({
-            version: 1,
-            allocation: 'eager',
-            inputs: [{
-              filePath: readContext.sourceFilePath,
-              role: 'input',
-              sourceOperation: 'toolbox:split:export',
-              freshnessFailure: { code: 'TOOLBOX_SPLIT_READ_CONTEXT_STALE', message: '拆分源文件在读取后已变化，请重新选择' }
-            }],
-            outputs: targetPaths.map((filePath) => ({
-              filePath,
-              role: 'output',
-              sourceOperation: 'toolbox:split:export'
-            }))
-          });
-        };
+        const freezeSplitFilePlan = (targetPaths) => freezeToolboxFilePlanTargetsFirst([{
+          filePath: readContext.sourceFilePath,
+          role: 'input',
+          sourceOperation: 'toolbox:split:export',
+          freshnessFailure: { code: 'TOOLBOX_SPLIT_READ_CONTEXT_STALE', message: '拆分源文件在读取后已变化，请重新选择' }
+        }], targetPaths.map((filePath) => ({
+          filePath,
+          role: 'output',
+          sourceOperation: 'toolbox:split:export'
+        })));
         if (payload.mode === 'rows') {
           rows = await prepareToolboxRows(payload, readContext, {
             metadataDirectory: app.getPath('userData'),

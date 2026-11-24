@@ -10,7 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const ExcelJS = require('exceljs');
-const { sourceSnapshotFromStat } = require('../../src/main-process/archive-center/source-snapshot');
+const { sourceSnapshotFromStat, sourceSnapshotMatchesStat } = require('../../src/main-process/archive-center/source-snapshot');
 const { assertFilePlanFresh, normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
 const { prepareIpcTaskInvocation } = require('../../src/main-process/archive-center/ipc-task-contract');
 const { mergeToolboxFilesToXlsx } = require('../../src/main-process/toolbox-merge-io');
@@ -31,6 +31,7 @@ function section(startText, endText) {
 const mainFunctions = [
   section('function toolboxFailureResult(', 'async function acknowledgeToolboxPublicationReceipts'),
   section('function assertToolboxTargetsDoNotAliasSources(', 'let toolboxSplitReadContext'),
+  section('function assertToolboxSplitSourceFresh(', 'async function recoverToolboxPublicationsAtStartup('),
   section("trackedIpcHandle('toolbox:merge'", '  // IPC 2 ——'),
   section("trackedIpcHandle('toolbox:split:export'", '\n}\n\n// v2.0.0-beta.4')
 ].join('\n');
@@ -52,6 +53,35 @@ function setup(registerCleanup) {
   return { root, source, output, userDataDir };
 }
 
+// 产物校验读取的 end 早于文件句柄 close。替换目录前先等真实关闭：Windows 上未关闭的读取句柄会使重命名提前失败，
+//   尚未到达发布器的父目录核对（与 toolbox-row-split-parent-identity.test.js 同一做法）。只在 run / execute 期间跟踪。
+const openReadStreams = new Set();
+async function withReadStreamTracking(fn) {
+  const createReadStream = fs.createReadStream;
+  fs.createReadStream = function trackedCreateReadStream(...args) {
+    const stream = createReadStream.apply(this, args);
+    openReadStreams.add(stream);
+    stream.once('close', () => openReadStreams.delete(stream));
+    return stream;
+  };
+  try {
+    return await fn();
+  } finally {
+    fs.createReadStream = createReadStream;
+  }
+}
+function waitForReadStreamsClosed(root) {
+  const reads = [...openReadStreams].filter((stream) => !stream.closed && String(stream.path).startsWith(root + path.sep));
+  return Promise.all(reads.map((stream) => new Promise((resolve, reject) => {
+    const onClose = () => { clearTimeout(timeout); resolve(); };
+    const timeout = setTimeout(() => {
+      stream.removeListener('close', onClose);
+      reject(new Error(`产物读取句柄未及时关闭：${path.basename(String(stream.path))}`));
+    }, 5000);
+    stream.once('close', onClose);
+  })));
+}
+
 function loadHandlers(env, overrides = {}) {
   const contracts = new Map();
   const { dispatcher } = createTestPublicationHarness(env.userDataDir);
@@ -59,7 +89,9 @@ function loadHandlers(env, overrides = {}) {
   const readContext = { sourceFilePath: env.source, dataRowCount: 2,
     snapshot: sourceSnapshotFromStat(fs.statSync(env.source, { bigint: true })) };
   const scope = {
-    fs, os, path, randomUUID, pathsAlias, assertFilePlanFresh, normalizeFilePlanV1, TOOLBOX_GENERATION_ACTIONS,
+    fs, os, path, randomUUID, pathsAlias: overrides.pathsAlias || pathsAlias, assertFilePlanFresh, normalizeFilePlanV1,
+    sourceSnapshotMatchesStat,
+    TOOLBOX_GENERATION_ACTIONS,
     trackedIpcHandle: (channel, _scope, _name, contract) => { contracts.set(channel, contract); },
     app: { getPath: () => env.userDataDir }, mainWindow: null,
     showImportOpenDialog: overrides.showImportOpenDialog || (async () => ({ canceled: false, filePaths: [env.output] })),
@@ -84,20 +116,24 @@ function loadHandlers(env, overrides = {}) {
     publishToolboxPublicationAsync: async (options) => {
       calls.publication += 1;
       calls.publicationOptions = options;
-      if (overrides.beforePublish) await overrides.beforePublish(options);
+      if (overrides.beforePublish) {
+        await waitForReadStreamsClosed(env.root);
+        await overrides.beforePublish(options);
+      }
       return dispatcher.publish({ ...options, requireArchiveHandoff: true });
     },
     appendActivityLogEntry: () => {},
     toolboxFinalOutputFiles: (files) => files
   };
   Function(...Object.keys(scope), mainFunctions)(...Object.values(scope));
-  const run = async (channel, payload) => {
+  const run = (channel, payload) => withReadStreamTracking(async () => {
     const contract = contracts.get(channel);
     const prepared = await prepareIpcTaskInvocation(contract, {}, payload === undefined ? [] : [payload]);
     if (!prepared.proceed) return { prepared, result: prepared.result };
     return { prepared, result: await executePrepared(contract, prepared, calls) };
-  };
-  return { contracts, calls, run, execute: (contract, prepared) => executePrepared(contract, prepared, calls) };
+  });
+  return { contracts, calls, run,
+    execute: (contract, prepared) => withReadStreamTracking(() => executePrepared(contract, prepared, calls)) };
 }
 
 function executePrepared(contract, prepared, calls) {
