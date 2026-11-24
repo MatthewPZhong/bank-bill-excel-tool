@@ -3451,7 +3451,7 @@ function resolveDirectBigAccountRecognition({
       return {
         ...unrecognized,
         message: '账单表头上方的账号超出精度范围（超过 15 位且存成了数字），无法核对原值，未自动识别大账号。'
-          + '请在原系统把账号导出为文本，或把账单另存为 xlsx 并将账号设为文本后重新导入。',
+          + '文件里存的已可能是近似值，另存或改单元格格式都无法恢复：请从银行原系统按文本重新导出账单后重新导入。',
         detailLines: Array.isArray(unrecognized.detailLines) ? unrecognized.detailLines.slice() : []
       };
     }
@@ -3786,6 +3786,15 @@ function markContinuationPrepareRejection(outcome, { keepErrorCodes = [] } = {})
   if (!outcome || outcome.proceed !== false || !outcome.result || outcome.result.status !== 'error') return outcome;
   if (keepErrorCodes.includes(String(outcome.result.errorCode || ''))) return outcome;
   return { ...outcome, result: { ...outcome.result, preservesSession: true } };
+}
+
+// 指定模板按记住的固定顺序自动套用大账号时，生成失败是否照常按导入失败报错（而不是降级为重新选择大账号）：
+//   - v3.2.19：重复账单【确认】后的续跑：条目已按记住的顺序分配并经用户确认，生成失败（如收支同时有值）照常报错
+//     （复核窗口会把它当作最终结果）；
+//   - v3.2.22 B113：明细含无法写入 Excel 的字符（带行列位置的拒绝）改选大账号也修不好，照常报错并列出位置（Codex 第五轮）
+function shouldPropagateAutoMatchError(error, prepared) {
+  if (prepared && prepared.duplicateReviewConfirmation && !prepared.previewOnly) return true;
+  return Boolean(error && error.positionsOnly);
 }
 
 function createBigAccountRecognitionErrorResult(resolution, context = {}) {
@@ -17176,9 +17185,7 @@ function registerFileHandlers() {
                     return directResult;
                   }
                 } catch (autoMatchError) {
-                  // v3.2.19：重复账单【确认】后的续跑：条目已按记住的顺序分配并经用户确认，生成失败（如收支同时有值）
-                  //   照常按导入失败报错，不降级为重新选择大账号（复核窗口会把它当作最终结果）
-                  if (prepared && prepared.duplicateReviewConfirmation && !prepared.previewOnly) throw autoMatchError;
+                  if (shouldPropagateAutoMatchError(autoMatchError, prepared)) throw autoMatchError;
                   // Fall through to manual selection
                 }
               }

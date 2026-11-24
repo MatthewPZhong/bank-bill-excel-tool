@@ -296,17 +296,17 @@ async function verifyBigAccountRecognitionRead(dir) {
 
   // v3.2.22（B133 审查）：工作表原文无法核对（如含注释掉的标签）时不还原，表头上方的长账号只剩近似值（9007199254740993 读成
   //   9007199254740992）。该段无法排除它就是本段的账号：不精确命中近似值相同的另一个账号，也不改用同窗口其他单元格
-  //   （分行号 2222）模糊命中别的账号、不按账户映射桥接，整段不自动识别；只维护一个选项时也交给用户选择，不按未识别报错。
+  //   （分行号 2222）模糊命中别的账号、不按账户映射桥接，整段不自动识别；只维护一个选项时与普通未识别一样报错。
   //   普通注释（不含尖括号）两边读到的结构相同，照常按原文识别（对照）
   const UNVERIFIED_ACCOUNT = '9007199254740993';
   const ROUNDED_ACCOUNT = String(Number(UNVERIFIED_ACCOUNT));
-  const writeCommented = async (name, comment) => {
-    const filePath = await writeXlsxWithLiterals(path.join(dir, name), [
-      ['账号', 1111, '分行', '2222'],
-      [],
-      HEADER,
-      ['2026-11-01', 'USD', 100, 'R1', 'C1']
-    ], { 1111: UNVERIFIED_ACCOUNT });
+  const writeCommented = async (name, comment, rows = [
+    ['账号', 1111, '分行', '2222'],
+    [],
+    HEADER,
+    ['2026-11-01', 'USD', 100, 'R1', 'C1']
+  ]) => {
+    const filePath = await writeXlsxWithLiterals(path.join(dir, name), rows, { 1111: UNVERIFIED_ACCOUNT });
     const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
     const sheetXml = await zip.file('xl/worksheets/sheet1.xml').async('string');
     zip.file('xl/worksheets/sheet1.xml', sheetXml.replace('<sheetData>', `${comment}<sheetData>`));
@@ -391,6 +391,19 @@ async function verifyBigAccountRecognitionRead(dir) {
     ['failed', 'BIG_ACCOUNT_NOT_RECOGNIZED', true], '⑤ 无法核对原值的长账号：按未识别报错并说明原因，不套用唯一的维护选项');
   assertEq([directFor(commented, plainUnrecognized).status, directFor(plainUnrecognized, commented).status], ['failed', 'failed'],
     '⑤ 与普通未识别的文件同批：两种文件顺序结果相同');
+  // 同一文件两段：一段精确命中唯一维护的账号，另一段的长账号无法核对——整份按未识别报错，不把未核对段的交易归给唯一账号
+  const multiBlock = await writeCommented('account-multi-block.xlsx', '<!-- 旧版本：<legacy/> -->', [
+    ['账号', '22221111'], [], HEADER, ['2026-11-01', 'USD', 100, 'R1', 'C1'], [],
+    ['账号', 1111], [], HEADER, ['2026-11-02', 'USD', 200, 'R2', 'C2']
+  ]);
+  const multiIdentified = identifyAccountsFromFile({
+    filePath: multiBlock, expectedSourceHeaders: HEADER, allMerchantIds: ['22221111'], allowSubstringMatch: false
+  });
+  assertEq([multiIdentified.accounts.map((account) => account.merchantId), multiIdentified.hasUnverifiedLongNumber], [['22221111'], true],
+    '⑤ 前置：一段已识别、另一段长账号无法核对');
+  const multiDecision = directFor(multiBlock);
+  assertEq([multiDecision.status, multiDecision.code, multiDecision.selectedBigAccount], ['failed', 'BIG_ACCOUNT_NOT_RECOGNIZED', undefined],
+    '⑤ 同一文件一段已识别、另一段无法核对：整份按未识别报错，不选中唯一账号');
 }
 
 async function main() {

@@ -163,3 +163,41 @@ test('随程序发布的余额账单模板：文字可原样写出读回，没�
     assert.deepEqual(rows[0], XLSX.utils.sheet_to_json(template.Sheets[name], { header: 1, defval: '' })[0], name);
   });
 });
+
+test('余额账单预检 assertBalanceRecordsWritable：不构造工作表，报错与写出边界一致；记录不是数组时预检与写出都拒绝', (t) => {
+  const { assertBalanceRecordsWritable } = require('../../../../src/backend/file-service');
+  const dir = createTempDir(t);
+  const templateFilePath = path.join(dir, 'template.xlsx');
+  const templateFields = ['银行账号', '币种', '备注'];
+  const template = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(template, XLSX.utils.aoa_to_sheet([templateFields]), 'Sheet1');
+  XLSX.writeFile(template, templateFilePath);
+  const outputFilePath = path.join(dir, 'balance.xlsx');
+  const captured = (fn) => {
+    try {
+      fn();
+    } catch (error) {
+      return { code: error.code, message: error.message, detailLines: error.detailLines, positionsOnly: error.positionsOnly };
+    }
+    return null;
+  };
+  const cases = [
+    // 超出表头列数的值不写出、不报
+    [['ok', 'USD', 'n', 'extra￿'], ['a￿', 'USD'], 'short-row', ['b', 'U￾', 'c\ud83d']],
+    Array.from({ length: 30 }, (_value, index) => [`acc${index}￿`, 'USD', index % 2 ? 'x￾' : 'ok'])
+  ];
+  for (const records of cases) {
+    const preflight = captured(() => assertBalanceRecordsWritable({ records, templateFields }));
+    const written = captured(() => writeBalanceWorkbook({ templateFilePath, records, templateFields, outputFilePath }));
+    assert.ok(preflight && preflight.positionsOnly, '预检拒绝并只带位置');
+    assert.deepEqual(preflight, written, '预检与写出边界的报错一致');
+    assert.equal(fs.existsSync(outputFilePath), false);
+  }
+  assert.equal(captured(() => assertBalanceRecordsWritable({ records: [['ok', 'USD', 'n']], templateFields })), null);
+  assert.equal(captured(() => assertBalanceRecordsWritable({ records: [], templateFields })), null, '显式空数组可写出');
+  for (const records of [null, undefined, { length: 0 }]) {
+    assert.throws(() => assertBalanceRecordsWritable({ records, templateFields }), TypeError);
+    assert.throws(() => writeBalanceWorkbook({ templateFilePath, records, templateFields, outputFilePath }), TypeError);
+    assert.equal(fs.existsSync(outputFilePath), false, '无效记录不当作空账单写出');
+  }
+});

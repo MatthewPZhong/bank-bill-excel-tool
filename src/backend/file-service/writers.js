@@ -308,22 +308,43 @@ function writeWorkbookRows({ rows, outputFilePath, sheetName = 'COMMON' }, forma
   return outputFilePath;
 }
 
-// 余额记录按表头列数截断 / 补齐（写出与预检同一口径）
+// 余额记录按表头列数截断 / 补齐（写出与预检同一口径）。records 须为数组：null 等无效输入照旧在落盘前失败，不当作空账单写出
 function normalizeBalanceRecords(records, columnCount) {
-  return (Array.isArray(records) ? records : []).map((row) => {
+  return records.map((row) => {
     const normalizedRow = Array.isArray(row) ? row.slice(0, columnCount) : [];
     while (normalizedRow.length < columnCount) normalizedRow.push('');
     return normalizedRow;
   });
 }
 
-// v3.2.22 B113（Codex 第四轮）：余额账单写出前的预检，不读模板：按写出时的位置（表头在第 1 行、记录从第 2 行起，按表头
-//   列数截断 / 补齐）核对无法写入 Excel 的字符，报错与写出边界同一口径。新开账户、月度余额在预留归档批次之前调用
-//   （校验失败不建批、不占号）；表头取自随程序发布的模板（单测确认），写出边界仍兜底
+// v3.2.22 B113（Codex 第四、五轮）：余额账单写出前的预检，不读模板、不构造工作表：按写出时的位置（表头在第 1 行、记录从
+//   第 2 行起，只看表头列数以内的值）逐值核对无法写入 Excel 的字符，位置说明与写出边界同一口径（行优先、只留前 N 处并计
+//   总数）。新开账户、月度余额在预留归档批次之前调用（校验失败不建批、不占号）；表头取自随程序发布的模板（单测确认），
+//   写出边界仍兜底
 function assertBalanceRecordsWritable({ records, templateFields = [] }) {
+  if (!Array.isArray(records)) throw new TypeError('余额记录必须是数组');
   const columnCount = templateFields.length;
-  const worksheet = XLSX.utils.aoa_to_sheet([templateFields.slice(), ...normalizeBalanceRecords(records, columnCount)]);
-  assertWorkbookTextWritable(collectUnwritableWorkbookText({ SheetNames: ['Sheet1'], Sheets: { Sheet1: worksheet } }));
+  const labels = [];
+  let total = 0;
+  const textOf = (value) => (value && typeof value === 'object' && !(value instanceof Date) ? value.v : value);
+  const headerLabel = (columnIndex) => {
+    const header = templateFields[columnIndex];
+    return typeof header === 'string' && isWorksheetWritableText(header) ? `「${header}」列` : `${XLSX.utils.encode_col(columnIndex)} 列`;
+  };
+  const note = (rowIndex, columnIndex, value) => {
+    const text = textOf(value);
+    if (typeof text !== 'string' || isWorksheetWritableText(text)) return;
+    total += 1;
+    if (labels.length < UNWRITABLE_TEXT_DETAIL_LIMIT) {
+      labels.push(`第 ${rowIndex + 1} 行${rowIndex > 0 ? headerLabel(columnIndex) : `${XLSX.utils.encode_col(columnIndex)} 列`}`);
+    }
+  };
+  for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) note(0, columnIndex, templateFields[columnIndex]);
+  records.forEach((row, index) => {
+    if (!Array.isArray(row)) return;
+    for (let columnIndex = 0; columnIndex < Math.min(row.length, columnCount); columnIndex += 1) note(index + 1, columnIndex, row[columnIndex]);
+  });
+  assertWorkbookTextWritable({ total, labels });
 }
 
 function writeBalanceWorkbook({
